@@ -1,9 +1,10 @@
 /**
- * 代理分发器构造（供 fetch-wrapper 在规则命中时按请求注入）。
+ * 分发器构造（供 fetch-wrapper 按请求注入）。
  *
  * 拦截点已从 undici 全局分发器改为 `globalThis.fetch` 包装（见 fetch-wrapper.ts 头注：
  * 打包版 pi 内置 undici 与扩展 bundle 内联的 undici 是两套副本，全局槽互不相通）。本模块
- * 只负责按协议构造代理分发器，规则判定 / 计数 / 直连委托都在 fetch-wrapper 完成。
+ * 负责构造两类分发器——代理分发器（rules 命中时）与 IPv4 锁定分发器（ipv4Only 命中时），
+ * 规则判定 / 计数 / 直连委托都在 fetch-wrapper 完成。
  *
  * 两协议构造契约（undici 7.28.0 源码读码核实，单测冒烟防回归）：
  * - http/https 走 ProxyAgent，调优经 `proxyTls: { autoSelectFamilyAttemptTimeout: 2000 }`
@@ -20,10 +21,11 @@
 
 import { EventEmitter } from "node:events";
 
-import { buildConnector, ProxyAgent, Socks5ProxyAgent } from "undici";
+import { Agent, buildConnector, ProxyAgent, Socks5ProxyAgent } from "undici";
 import type { Dispatcher as IDispatcher } from "undici";
 
 import type { NetworkProxyConfig, NetworkProxyServer } from "./config.js";
+import { createIpv4Lookup } from "./ipv4.js";
 
 /** 到代理服务器连接的 autoSelectFamilyAttemptTimeout（对齐 pi 原生调优同值）。 */
 export const PROXY_CONNECT_ATTEMPT_TIMEOUT_MS = 2000;
@@ -75,5 +77,20 @@ export function buildProxyDispatcher(config: NetworkProxyConfig): IDispatcher {
 			uri,
 			proxyTls: PROXY_TLS_TUNING,
 		}),
+	);
+}
+
+/**
+ * IPv4 锁定分发器（`ipv4Only` 规则的执行体装配）：唯一干预 = `connect.lookup` 把 DNS
+ * 解析强制到 A 记录（选型依据见 ipv4.ts 头注——改 URL 会因 SNI/Host 不一致被 Cloudflare
+ * 拒为 403，只有改 DNS 族在 Node 与 Bun 下都正确）。URL / Host 头 / TLS 全部保持原样。
+ *
+ * 刻意不设 `connect.timeout`：保持 undici 默认语义（pi 原生 dispatcher 亦未设）——锁 v4
+ * 后 happy-eyeballs 没有坏路径可耗预算，不需要也不应该改连接预算（调大 timeout 只是把
+ * 失败推迟，2026-10-22 用户裁决）。
+ */
+export function buildIpv4Dispatcher(): IDispatcher {
+	return withUndiciErrorListener(
+		new Agent({ connect: { lookup: createIpv4Lookup() } }),
 	);
 }

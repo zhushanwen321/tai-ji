@@ -201,9 +201,10 @@ export class ModelMessageHandler {
   }
 
   /**
-   * test 模式编排：凭据经 resolver → modelService 发 per-协议真实最小请求 → reply results。
+   * test 模式编排：凭据经 resolver → modelService 发真实最小请求 → reply results。
    * 行级失败（协议不支持 / 无 baseUrl / 无启用模型 / HTTP / 网络）不改变顶层 success，
    * 顶层 success:false 仅承载 provider 级失败 code（见 PROVIDER_CONNECTION_TEST_ERRORS）。
+   * modelId 存在 = 单模型测试（per-model 行内入口）：只测该模型一行，跳过代表模型分组。
    */
   private handleTestConnections(
     msg: Extract<ClientMessage, { type: 'config.discoverModels' }>,
@@ -214,14 +215,22 @@ export class ModelMessageHandler {
       this.replyTestResult(ws, msg.id, { success: false, error: PROVIDER_CONNECTION_TEST_ERRORS.providerNotFound })
       return true
     }
-    // 交集类型的可选方法：解构后判函数（运行时检查，替代对 IModelService 的强制断言）
-    const testProviderConnections = this.ctx.modelService.testProviderConnections
-    if (typeof testProviderConnections !== 'function') {
+    // ctx.modelService 声明即 IModelService & Partial<ProviderConnectionTestService>，
+    // 单模型（modelId 命中）与 provider 级分组测试同一可选方法交集判定
+    const { modelService } = this.ctx
+    const method = msg.payload.modelId ? modelService.testProviderModel : modelService.testProviderConnections
+    if (typeof method !== 'function') {
       this.replyTestResult(ws, msg.id, { success: false, error: PROVIDER_CONNECTION_TEST_ERRORS.testUnavailable })
       return true
     }
     this.resolveProviderApiKey(providerId)
-      .then(apiKey => testProviderConnections.call(this.ctx.modelService, providerId, apiKey, this.ctx.connectionTester))
+      .then(apiKey => {
+        // 两方法第二参语义不同（modelId vs apiKey），显式分支转发而非统一签名
+        const modelId = msg.payload.modelId
+        return modelId
+          ? modelService.testProviderModel!(providerId, modelId, apiKey, this.ctx.connectionTester)
+          : modelService.testProviderConnections!(providerId, apiKey, this.ctx.connectionTester)
+      })
       .then(outcome => { this.replyTestResult(ws, msg.id, outcome) })
       .catch((e: unknown) => {
         this.replyTestResult(ws, msg.id, { success: false, error: toErrorMessage(e) })

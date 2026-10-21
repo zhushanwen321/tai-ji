@@ -16,7 +16,8 @@
  * 见 core quota-configure-module.ts 文件头注释）。
  */
 import { inject } from 'vue'
-import type { ComputedRef, InjectionKey } from 'vue'
+import type { ComputedRef, InjectionKey, Ref } from 'vue'
+import type { ConnectionTestResultRow } from '@taiji/shared'
 import type { ProviderEditModelsModule, QuotaConfigureFactory, QuotaConfigureModule } from '@taiji/core'
 
 // 契约 SSOT re-export（消费方 CodingPlanSection / ModelListSection / settings barrel 经本模块取类型）
@@ -97,13 +98,22 @@ export function useChooseDirectory(): ChooseDirectoryFn | undefined {
 // ── ④ 模型清单 CRUD module（C4：原 provide('modelListDeps') 字符串 key + 非空断言的无型缝）──
 /**
  * ModelListSection 的注入点 = core 模型 CRUD module（ProviderEditModelsModule）+ providerApi
- * 派生（compat 字段集判定的 provider 级回退，ProviderEditBody 按当前编辑体装配）。
- * 原 11 成员逐名 provide 收编为「整 module 实例 + 1 个派生位」——与 ② QuotaConfigure seam
+ * 派生（compat 字段集判定的 provider 级回退，ProviderEditBody 按当前编辑体装配）+ per-model
+ * 行内测试编排（discover module 状态切片，2026-10-21 测试入口下沉到模型行）。
+ * 原 11 成员逐名 provide 收编为「整 module 实例 + 派生位」——与 ② QuotaConfigure seam
  * 同范式（跨 seam 直接持有 module 实例）。
  */
 export interface ModelListDeps extends ProviderEditModelsModule {
   /** provider 级 api（model 级 api 缺失时的回退，用于 compat 字段集判断） */
   providerApi: ComputedRef<string | undefined>
+  /** per-model 行内测试（discover module 状态切片：结果表 / 进行中 id / 发起入口 / 可用性） */
+  modelTest: {
+    results: Ref<Record<string, ConnectionTestResultRow>>
+    testingIds: Ref<string[]>
+    /** 新增态（provider 未保存）无 providerId 可测——按钮据此禁用 + tooltip 提示先保存 */
+    canTest: Ref<boolean>
+    test(modelId: string): Promise<void>
+  }
 }
 
 export const MODEL_LIST_DEPS_KEY: InjectionKey<ModelListDeps> = Symbol('modelListDeps')

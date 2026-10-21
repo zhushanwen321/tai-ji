@@ -21,7 +21,7 @@ import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import { getConfigPath } from "@zhushanwen/pi-llm-shared";
 
 import { loadNetworkProxyConfig } from "./config.js";
-import { buildProxyDispatcher } from "./dispatcher.js";
+import { buildIpv4Dispatcher, buildProxyDispatcher } from "./dispatcher.js";
 import {
 	applyNetworkProxyConfig,
 	detachResidualFetchWrapper,
@@ -57,6 +57,7 @@ const deps: FetchWrapperDeps = {
 		globalThis.fetch = fetch;
 	},
 	buildProxy: buildProxyDispatcher,
+	buildIpv4: buildIpv4Dispatcher,
 	proxyFetch,
 	onError: (message) => logger.error(`${message} ${recoveryHint()}`),
 };

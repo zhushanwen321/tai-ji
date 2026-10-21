@@ -281,12 +281,12 @@ export default {
     unavailableTitle: 'Git 不可用，无法读取仓库状态',
   },
   quotaFloat: {
-    // 对话流左侧套餐浮层（plan-quota-float）：全部 quota.enabled provider 的三窗口用量
+    // 对话流左侧套餐浮层（plan-quota-float）：全部 quota.enabled provider 的窗口用量
+    //（pct=null 的窗口整格不渲染）
     title: '套餐额度',
     current: '当前',
     expand: '展开套餐面板',
     collapse: '折叠套餐面板',
-    noWindowData: '无该窗口数据',
     usedPct: '已用 {pct}%',
     fetchFailed: '额度查询失败',
   },

@@ -120,6 +120,7 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
         proxy: { protocol: 'http' as const, host: '127.0.0.1', port: 7890, username: '', password: '' },
         noProxy: ['localhost', '127.0.0.1'],
         rules: [],
+        ipv4Only: [],
       },
     })),
     getNetworkProxyStats: vi.fn(async () => ({ stats: [] })),

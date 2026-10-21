@@ -1,9 +1,11 @@
 /**
  * fetch 包装状态机单测（fake 依赖注入，不触真实网络）：
- * 命中/未命中分流、计数、noProxy 优先、禁用恢复、外部覆盖重装、构造失败锁定、
- * reload 残留摘除、入参形态覆盖。转移表见 fetch-wrapper.ts 文件头。
+ * 命中/未命中分流、计数、noProxy/ipv4Only 优先级、ipv4 与代理构造的差异化降级
+ * （ipv4 失败只丢 v4 锁定、proxy 失败锁整层；rules 为空不构造代理）、禁用恢复、
+ * 外部覆盖重装、构造失败锁定、reload 残留摘除、入参形态覆盖。
+ * 转移表见 fetch-wrapper.ts 文件头。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { Dispatcher } from "undici";
 
 import type { NetworkProxyConfig } from "../config.ts";
@@ -34,6 +36,7 @@ function config(overrides?: Partial<NetworkProxyConfig>): NetworkProxyConfig {
 		proxy: { protocol: "http", host: "127.0.0.1", port: 7890, username: "", password: "" },
 		noProxy: ["localhost"],
 		rules: ["api.anthropic.com"],
+		ipv4Only: [],
 		...overrides,
 	};
 }
@@ -42,7 +45,7 @@ function withProxy(patch: Partial<NetworkProxyConfig["proxy"]>): Partial<Network
 	return { proxy: { ...config().proxy, ...patch } };
 }
 
-/** fake 依赖装配：original fetch / 代理 fetch / 构造器全部可观测、可注入失败。 */
+/** fake 依赖装配：original fetch / 代理 fetch / 两个构造器全部可观测、可注入失败。 */
 function createHarness() {
 	const originalCalls: FetchCall[] = [];
 	const originalFetch: FetchLike = async (input, init) => {
@@ -53,13 +56,16 @@ function createHarness() {
 
 	const proxyCalls: ProxyCall[] = [];
 	const proxy = new FakeDispatcher();
+	const ipv4 = new FakeDispatcher();
 	const proxyFetch = async (input: string | URL | Request, init: ProxyFetchInit): Promise<Response> => {
 		proxyCalls.push({ input, init });
 		return new Response("proxy");
 	};
 
 	let buildProxy = (_config: NetworkProxyConfig): Dispatcher => proxy;
+	let buildIpv4 = (): Dispatcher => ipv4;
 	const buildCalls: NetworkProxyConfig[] = [];
+	const buildIpv4Calls: number[] = [];
 	const errors: string[] = [];
 
 	const deps: FetchWrapperDeps = {
@@ -71,6 +77,10 @@ function createHarness() {
 			buildCalls.push(next);
 			return buildProxy(next);
 		},
+		buildIpv4: () => {
+			buildIpv4Calls.push(1);
+			return buildIpv4();
+		},
 		proxyFetch,
 		onError: (message) => errors.push(message),
 	};
@@ -81,7 +91,9 @@ function createHarness() {
 		originalCalls,
 		proxyCalls,
 		proxy,
+		ipv4,
 		buildCalls,
+		buildIpv4Calls,
 		errors,
 		getCurrent: () => currentFetch,
 		setCurrent: (fetch: FetchLike) => {
@@ -89,6 +101,9 @@ function createHarness() {
 		},
 		setBuildProxy: (next: (config: NetworkProxyConfig) => Dispatcher) => {
 			buildProxy = next;
+		},
+		setBuildIpv4: (next: () => Dispatcher) => {
+			buildIpv4 = next;
 		},
 	};
 }
@@ -148,6 +163,91 @@ describe("applyNetworkProxyConfig 包装状态机", () => {
 		expect(h.proxyCalls).toHaveLength(0);
 		expect(h.originalCalls).toHaveLength(1);
 		expect(snapshotCounters().get("api.anthropic.com")).toEqual({ proxied: 0, direct: 1 });
+	});
+
+	it("ipv4Only 命中：URL 原样、经 ipv4 分发器直连（不走代理，DNS 锁定交给 connect.lookup）", async () => {
+		const h = createHarness();
+		applyNetworkProxyConfig(
+			config({ ipv4Only: ["open-design.ai"], rules: ["open-design.ai"] }),
+			null,
+			h.deps,
+		);
+		const response = await h.getCurrent()("https://amr-link.open-design.ai/v1/chat", {
+			method: "POST",
+			headers: { "x-test": "1" },
+		});
+		expect(await response.text()).toBe("proxy"); // 经 proxyFetch 通道（注入 ipv4 分发器）
+		expect(h.originalCalls).toHaveLength(0);
+		expect(h.proxyCalls).toHaveLength(1);
+		const call = h.proxyCalls[0];
+		// URL 不改写：域名保持原样（改 URL 会被 Cloudflare 按 SNI/Host 不一致拒 403，见 ipv4.ts 选型）
+		expect(call.input).toBe("https://amr-link.open-design.ai/v1/chat");
+		expect(call.init.dispatcher).toBe(h.ipv4); // 注入 ipv4 分发器而非代理
+		expect(call.init.method).toBe("POST");
+		expect(call.init.headers).toEqual({ "x-test": "1" });
+		expect(snapshotCounters().get("amr-link.open-design.ai")).toEqual({ proxied: 0, direct: 1 });
+	});
+
+	it("noProxy 优先于 ipv4Only：同时命中时不做任何干预（原样直连）", async () => {
+		const h = createHarness();
+		applyNetworkProxyConfig(
+			config({ noProxy: ["open-design.ai"], ipv4Only: ["open-design.ai"] }),
+			null,
+			h.deps,
+		);
+		await h.getCurrent()("https://amr-link.open-design.ai/v1/chat");
+		expect(h.proxyCalls).toHaveLength(0);
+		expect(h.originalCalls).toHaveLength(1);
+		expect(h.originalCalls[0].input).toBe("https://amr-link.open-design.ai/v1/chat");
+	});
+
+	it("rules 为空：不构造代理分发器（代理配置不可用不锁死整层，ipv4Only 照常生效）", () => {
+		const h = createHarness();
+		h.setBuildProxy(() => {
+			throw new Error("rules 为空不应构造代理分发器");
+		});
+		const state = applyNetworkProxyConfig(
+			config({ rules: [], ipv4Only: ["open-design.ai"] }),
+			null,
+			h.deps,
+		);
+		expect(state?.wrapper).not.toBeNull();
+		expect(h.buildCalls).toHaveLength(0);
+		expect(h.buildIpv4Calls).toHaveLength(1);
+		expect(h.errors).toHaveLength(0);
+	});
+
+	it("ipv4Only 为空：不构造 IPv4 分发器", () => {
+		const h = createHarness();
+		h.setBuildIpv4(() => {
+			throw new Error("ipv4Only 为空不应构造 IPv4 分发器");
+		});
+		applyNetworkProxyConfig(config(), null, h.deps);
+		expect(h.buildIpv4Calls).toHaveLength(0);
+		expect(h.errors).toHaveLength(0);
+	});
+
+	it("ipv4 构造失败：仅降级 v4 锁定为普通直连，不撤整层包装（代理分流不受影响）", async () => {
+		const h = createHarness();
+		h.setBuildIpv4(() => {
+			throw new Error("ipv4 boom");
+		});
+		const state = applyNetworkProxyConfig(
+			config({ ipv4Only: ["open-design.ai"] }),
+			null,
+			h.deps,
+		);
+		expect(state?.wrapper).not.toBeNull();
+		expect(h.errors).toHaveLength(1);
+		expect(h.errors[0]).toContain("IPv4 锁定分发器构造失败");
+
+		await h.getCurrent()("https://amr-link.open-design.ai/v1/chat");
+		expect(h.originalCalls).toHaveLength(1); // 降级为普通直连（原样 URL）
+		expect(h.proxyCalls).toHaveLength(0);
+
+		// 代理分流不受 ipv4 失败影响（同一包装下 rules 命中仍走代理）
+		await h.getCurrent()("https://api.anthropic.com/v1/messages");
+		expect(h.proxyCalls).toHaveLength(1);
 	});
 
 	it("子域命中 + 点边界：子域走代理，前缀拼接不命中", async () => {

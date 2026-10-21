@@ -25,18 +25,13 @@ import PanelHeader from '@/components/panel/PanelHeader.vue'
 import { useSidebarStore } from '@/stores/sidebar'
 import { ViewHost } from '@taiji/ui/extension-host'
 import type { DerivedStatus } from '@/types'
-
-/** usePlatformChrome mock：可控 isFullscreen（全屏态 chrome 回退测试）。
- *  真实模块 isFullscreen 是模块级单例 ref 未导出，测试无法直接改值，故 mock 模块。 */
-const platformChromeMock = vi.hoisted(() => ({ isFullscreen: { value: false } as { value: boolean } }))
+// usePlatformChrome mock（可控 isFullscreen，全屏态 chrome 回退测试）：helper 持单例态
+// （beforeEach 经 platformChromeMock 复位；TrafficLight.test.ts 同范式）。工厂内动态
+// import——vi.mock 调用被提升到 import 初始化前，工厂必须自包含（无 TDZ 引用）
+import { platformChromeMock } from '@/__tests__/helpers/platform-chrome-mock'
 vi.mock('@/composables/effects/usePlatformChrome', async () => {
-  const { ref } = await import('vue')
-  const isFullscreen = ref(false)
-  platformChromeMock.isFullscreen = isFullscreen
-  return {
-    usePlatformChrome: () => ({ isFullscreen }),
-    detectPlatform: () => 'mac',
-  }
+  const { installPlatformChromeMock } = await import('@/__tests__/helpers/platform-chrome-mock')
+  return installPlatformChromeMock('mac')
 })
 
 /** session JSONL 磁盘绝对路径 fixture（短名 = id 前 8 位 + .jsonl，与 formatShortSessionFile 同源） */

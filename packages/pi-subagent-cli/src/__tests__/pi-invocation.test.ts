@@ -23,15 +23,19 @@ describe("getPiInvocation", () => {
     tmpDir = undefined;
   });
 
+  /** 用例共用装配：stub argv/execPath → 调 getPiInvocation（断言由用例自持）。 */
+  function invocationOf(argv: string[], execPath: string, userArgs: string[]) {
+    Object.defineProperty(process, "argv", { value: argv, configurable: true });
+    Object.defineProperty(process, "execPath", { value: execPath, configurable: true });
+    return getPiInvocation(userArgs);
+  }
+
   it("本进程从 pi 入口（cli.js）启动 → node <入口> <userArgs>", () => {
     // 创建真实临时脚本文件（避免 ESM spy 限制）；basename 必须精确命中 pi 入口白名单
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-entry-"));
     tmpScript = path.join(tmpDir, "cli.js");
     fs.writeFileSync(tmpScript, "// test");
-    Object.defineProperty(process, "argv", { value: ["node", tmpScript], configurable: true });
-    Object.defineProperty(process, "execPath", { value: "/usr/bin/node", configurable: true });
-
-    const result = getPiInvocation(["--mode", "json", "Task: x"]);
+    const result = invocationOf(["node", tmpScript], "/usr/bin/node", ["--mode", "json", "Task: x"]);
     expect(result.command).toBe("/usr/bin/node");
     expect(result.args).toEqual([tmpScript, "--mode", "json", "Task: x"]);
   });
@@ -40,10 +44,7 @@ describe("getPiInvocation", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-bin-"));
     tmpScript = path.join(tmpDir, "pi");
     fs.writeFileSync(tmpScript, "#!/usr/bin/env node");
-    Object.defineProperty(process, "argv", { value: ["node", tmpScript], configurable: true });
-    Object.defineProperty(process, "execPath", { value: "/usr/bin/node", configurable: true });
-
-    const result = getPiInvocation(["--mode", "json"]);
+    const result = invocationOf(["node", tmpScript], "/usr/bin/node", ["--mode", "json"]);
     expect(result.command).toBe("/usr/bin/node");
     expect(result.args).toEqual([tmpScript, "--mode", "json"]);
   });
@@ -55,10 +56,7 @@ describe("getPiInvocation", () => {
     tmpDir = stagedDir;
     tmpScript = path.join(stagedDir, "index.js");
     fs.writeFileSync(tmpScript, "// staged engine bundle");
-    Object.defineProperty(process, "argv", { value: ["node", tmpScript], configurable: true });
-    Object.defineProperty(process, "execPath", { value: "/usr/bin/node", configurable: true });
-
-    const result = getPiInvocation(["--mode", "rpc"]);
+    const result = invocationOf(["node", tmpScript], "/usr/bin/node", ["--mode", "rpc"]);
     expect(result.command).toBe("pi");
     expect(result.args).toEqual(["--mode", "rpc"]);
     expect(result.args[0]).not.toBe(tmpScript);
@@ -68,10 +66,7 @@ describe("getPiInvocation", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "engine-bin-"));
     tmpScript = path.join(tmpDir, "pi-subagent-cli.mjs");
     fs.writeFileSync(tmpScript, "// engine bin");
-    Object.defineProperty(process, "argv", { value: ["node", tmpScript], configurable: true });
-    Object.defineProperty(process, "execPath", { value: "/usr/bin/node", configurable: true });
-
-    const result = getPiInvocation(["--mode", "rpc"]);
+    const result = invocationOf(["node", tmpScript], "/usr/bin/node", ["--mode", "rpc"]);
     expect(result.command).toBe("pi");
     expect(result.args).toEqual(["--mode", "rpc"]);
   });
@@ -79,40 +74,55 @@ describe("getPiInvocation", () => {
   it("bun 虚拟脚本（/$bunfs/root/）→ 退化到 pi-in-PATH", () => {
     tmpScript = "";
     const virtualScript = "/$bunfs/root/pi";
-    Object.defineProperty(process, "argv", { value: ["bun", virtualScript], configurable: true });
-    Object.defineProperty(process, "execPath", { value: "/usr/bin/bun", configurable: true });
-
-    const result = getPiInvocation(["--mode", "json"]);
+    const result = invocationOf(["bun", virtualScript], "/usr/bin/bun", ["--mode", "json"]);
     expect(result.command).toBe("pi");
     expect(result.args).toEqual(["--mode", "json"]);
   });
 
-  it("非通用 runtime（pi standalone binary）→ 直接 execPath", () => {
+  it("非通用 runtime + pi standalone binary 命名（pi-darwin-arm64）→ 直接 execPath", () => {
     tmpScript = "";
-    Object.defineProperty(process, "argv", { value: ["/usr/bin/pi", "/nonexistent"], configurable: true });
-    Object.defineProperty(process, "execPath", { value: "/usr/local/bin/pi-binary", configurable: true });
-
-    const result = getPiInvocation(["--mode", "json"]);
-    expect(result.command).toBe("/usr/local/bin/pi-binary");
+    const result = invocationOf(
+      ["/opt/pi/pi-darwin-arm64", "/nonexistent"],
+      "/opt/pi/pi-darwin-arm64",
+      ["--mode", "json"],
+    );
+    expect(result.command).toBe("/opt/pi/pi-darwin-arm64");
     expect(result.args).toEqual(["--mode", "json"]);
+  });
+
+  it("非通用 runtime + npm bin 命名（pi）→ 直接 execPath", () => {
+    tmpScript = "";
+    const result = invocationOf(["/opt/pi/pi", "/nonexistent"], "/opt/pi/pi", ["--mode", "json"]);
+    expect(result.command).toBe("/opt/pi/pi");
+    expect(result.args).toEqual(["--mode", "json"]);
+  });
+
+  it("打包态 Electron 执行器形态（execPath = TaiJi.app 二进制）→ 不得直接 spawn，落 PATH", () => {
+    // 回归锚点（2026-10 实测事故）：runtime 以宿主 Electron 二进制作 node 执行器
+    // spawn 引擎 CLI（ELECTRON_RUN_AS_NODE=1），引擎进程 execPath 是 Electron 而非
+    // pi 二进制——原「非 node/bun 即 pi binary」假设把它当 pi 直接 spawn，node 选项
+    // 解析器拒掉 --mode（"bad option: --mode"，exit 9，subagent/workflow 派发全灭）。
+    // 正确通路 = 分支 3（pi 走 PATH；runtime 引擎 env 注入 pi 目录作 PATH 前缀）。
+    tmpScript = "";
+    const result = invocationOf(
+      ["/Applications/TaiJi.app/Contents/MacOS/TaiJi", "/opt/engines/pi/index.js"],
+      "/Applications/TaiJi.app/Contents/MacOS/TaiJi",
+      ["--mode", "rpc"],
+    );
+    expect(result.command).toBe("pi");
+    expect(result.args).toEqual(["--mode", "rpc"]);
   });
 
   it("node 通用 runtime + 脚本不存在 → pi-in-PATH", () => {
     tmpScript = "";
-    Object.defineProperty(process, "argv", { value: ["node", "/nonexistent"], configurable: true });
-    Object.defineProperty(process, "execPath", { value: "/usr/bin/node", configurable: true });
-
-    const result = getPiInvocation(["--mode", "json"]);
+    const result = invocationOf(["node", "/nonexistent"], "/usr/bin/node", ["--mode", "json"]);
     expect(result.command).toBe("pi");
     expect(result.args).toEqual(["--mode", "json"]);
   });
 
   it("空 userArgs 合法（仅 command + 空 args）", () => {
     tmpScript = "";
-    Object.defineProperty(process, "argv", { value: ["node"], configurable: true });
-    Object.defineProperty(process, "execPath", { value: "/usr/bin/node", configurable: true });
-
-    const result = getPiInvocation([]);
+    const result = invocationOf(["node"], "/usr/bin/node", []);
     expect(result.command).toBe("pi");
     expect(result.args).toEqual([]);
   });

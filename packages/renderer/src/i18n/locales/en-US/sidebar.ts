@@ -34,7 +34,9 @@ export default {
     restarting: 'Restarting',
     error: 'Update failed',
     goToDownload: 'Go to download',
+    // downloaded = full semantics (title / confirm dialog context); restart = inline short label in sidebar (single-line width contract)
     downloaded: 'Downloaded, restart to install',
+    restart: 'Restart',
     restartInstall: 'Restart and install update',
     confirmInstall: 'Version v{version} is downloaded. Restarting now will interrupt all current tasks (including AI sessions). Continue?',
     installLater: 'Later',

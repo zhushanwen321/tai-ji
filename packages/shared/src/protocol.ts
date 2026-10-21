@@ -114,6 +114,8 @@ export interface ConnectionTestResultRow {
   ok: boolean
   /** 失败时的真实原因（HTTP 状态码与响应截断） */
   error?: string
+  /** 请求往返耗时（毫秒，tester 实测；行内展示「200 · 0.8s」用）。缺省 = 未计时。 */
+  durationMs?: number
 }
 
 // ── Client → Runtime message types
@@ -847,7 +849,8 @@ export interface ClientMessageMap {
   // 模型发现 / 测试连接共享入口（design catalog-provider-field-authority §3.5 D4）。
   // discover 模式：拉 GET /v1/models（baseUrl 必填），只对 custom provider 有意义；
   // test 模式：按模型协议分组发真实最小请求（providerId 必填，baseUrl/apiKey 忽略，
-  // 凭据经 runtime 唯一的 provider 凭据解析通道取）。
+  // 凭据经 runtime 唯一的 provider 凭据解析通道取）；test + modelId = 单模型测试
+  // （per-model 行内入口，只测该模型一行，不做代表模型分组）。
   'config.discoverModels': {
     baseUrl: string
     apiKey?: string
@@ -855,6 +858,8 @@ export interface ClientMessageMap {
     providerId?: string
     /** 缺省 'discover'，向后兼容旧调用方（runtime CLI 等）。 */
     mode?: 'test' | 'discover'
+    /** test 模式的单模型测试目标（省略 = 按协议分组选代表模型，旧行为）。 */
+    modelId?: string
   }
   // W3 默认模型持久化：前端设置全局默认模型，runtime 调 configService.setDefaultModel 写 settings.json。
   'config.setDefaultModel': { provider: ProviderId; modelId: string }

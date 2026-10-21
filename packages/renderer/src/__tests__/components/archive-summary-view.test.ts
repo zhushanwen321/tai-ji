@@ -2,22 +2,35 @@
  * ArchiveSummaryView 组件测试（session-archive 设计 D11，u-renderer-summary）。
  *
  * 覆盖（验收条款逐项）：
+ * - 卡头（40px，PanelHeader 同档）：已归档 pill + 会话名 + 双 tab + 恢复钮（与分段项同高）
+ * - 折叠态让位（DESIGN.md §11，与 PanelHeader 同构）：侧栏折叠且非全屏 → pl-[88px] 让位
+ *   mac 红黄绿；全屏态回落 pl-3.5；展开态恒 pl-3.5
  * - 双 tab 切换：默认用户摘要流 → 点 agent 引用视图切 mono 预检视图（tablist a11y 范式）
  * - turn 无文本占位：agent null → 「（此 turn 以工具调用结束……」占位，非 null turn 正常渲染
  * - 纯图片占位：user 空串 → 气泡内「[图片/附件消息]」
- * - staging 全占位：全区「摘要生成中」，tab/摘要流不渲染；banner 压缩信息显示「压缩中」
- * - 已归档 pill 与压缩信息渲染：pill 文案 + `12.4 MB → 2.5 MB · -80%` meta
+ * - staging 全占位：全区「摘要生成中」，tab/摘要流不渲染
  * - 恢复钮 emit restore；agent 引用视图正文 = session_read 返回形态（D7 字面）
  *
- * 挂载为纯展示组件（无 pinia / 无 ChatViewDeps 依赖）；i18n 经全局 setup mock
- * （vitest-i18n-setup.ts，zh-CN 直读）。
+ * 挂载为纯展示组件（无 ChatViewDeps 依赖）；卡头折叠态让位读 sidebar store 折叠态与
+ * usePlatformChrome 全屏态，故挂载前建 pinia（与 archive-list-view / PanelHeader 测试同范式）；
+ * i18n 经全局 setup mock（vitest-i18n-setup.ts，zh-CN 直读）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/archive-summary-view.test.ts
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import type { ArchiveSummary } from '@taiji/shared'
 import ArchiveSummaryView from '@/components/archive/ArchiveSummaryView.vue'
+import { useSidebarStore } from '@/stores/sidebar'
+// usePlatformChrome mock（可控 isFullscreen，全屏态让位回退测试）：helper 持单例态
+// （beforeEach 经 platformChromeMock 复位）。工厂内动态 import——vi.mock 调用被提升到
+// import 初始化前，工厂必须自包含（无 TDZ 引用）
+import { platformChromeMock } from '@/__tests__/helpers/platform-chrome-mock'
+vi.mock('@/composables/effects/usePlatformChrome', async () => {
+  const { installPlatformChromeMock } = await import('@/__tests__/helpers/platform-chrome-mock')
+  return installPlatformChromeMock('mac')
+})
 
 /** 构造 archived 态归档条目（rawBytes/compressedBytes 取 MB 换算干净值）。 */
 function makeArchived(overrides: Partial<Extract<ArchiveSummary, { status: 'archived' }>> = {}): ArchiveSummary {
@@ -58,40 +71,69 @@ function makeStaging(): ArchiveSummary {
   }
 }
 
-function mountView(archive: ArchiveSummary, projectName?: string) {
-  return mount(ArchiveSummaryView, {
-    props: projectName === undefined ? { archive } : { archive, projectName },
-  })
+function mountView(archive: ArchiveSummary) {
+  return mount(ArchiveSummaryView, { props: { archive } })
 }
 
-describe('ArchiveSummaryView · banner（已归档 pill 与压缩信息）', () => {
-  it('已归档 pill + 会话名 + 原项目/压缩信息 meta 渲染（12.4 MB → 2.5 MB · -80%）', () => {
-    const wrapper = mountView(makeArchived(), 'taiji')
+/** 挂载已归档视图并返回卡头 banner（折叠/全屏让位类断言共用装配）。 */
+function mountArchivedBanner() {
+  return mountView(makeArchived()).find('[data-testid="archive-summary-banner"]')
+}
+
+/** 卡头回落断言：全屏（或侧栏展开）态应为 pl-3.5 且无让位类。 */
+function expectBannerFallback() {
+  const banner = mountArchivedBanner()
+  expect(banner.classes()).toContain('pl-3.5')
+  expect(banner.classes()).not.toContain('pl-[88px]')
+}
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+  platformChromeMock.isFullscreen.value = false
+  // 折叠态持久化跨测试隔离：上一用例写入的折叠态不得泄漏进下一用例的 store 初始化
+  localStorage.removeItem('taiji:side-collapsed')
+})
+
+describe('ArchiveSummaryView · 卡头（已归档 pill 与恢复钮）', () => {
+  it('已归档 pill + 会话名渲染；卡头 40px（PanelHeader 同档）；meta 不再出现在卡头', () => {
+    const wrapper = mountView(makeArchived())
+
+    const banner = wrapper.find('[data-testid="archive-summary-banner"]')
+    expect(banner.classes()).toContain('h-[40px]')
 
     const pill = wrapper.find('[data-testid="archive-archived-pill"]')
     expect(pill.exists()).toBe(true)
     expect(pill.text()).toBe('已归档')
 
     expect(wrapper.find('[data-testid="archive-summary-name"]').text()).toBe('v0.10 renderer 重构')
-
-    // 压缩信息：rawBytes=12.4MB compressedBytes=2.5MB → (1 - 2.5/12.4) ≈ 79.8% → -80%
-    const meta = wrapper.find('[data-testid="archive-summary-meta"]').text()
-    expect(meta).toContain('原项目：taiji')
-    expect(meta).toContain('12.4 MB → 2.5 MB')
-    expect(meta).toMatch(/-\d+%$/)
-  })
-
-  it('projectName 缺省时 banner 省略原项目段（仅压缩信息）', () => {
-    const wrapper = mountView(makeArchived())
-    const meta = wrapper.find('[data-testid="archive-summary-meta"]').text()
-    expect(meta).not.toContain('原项目')
-    expect(meta).toContain('12.4 MB → 2.5 MB')
+    // 截断名 hover 读全名（title）——身份区 no-drag（PanelHeader 同款）的用户可见侧
+    expect(wrapper.find('[data-testid="archive-summary-name"]').attributes('title')).toBe('v0.10 renderer 重构')
+    expect(wrapper.find('[data-testid="archive-summary-meta"]').exists()).toBe(false)
   })
 
   it('name 空串（提取失败合法形态）→ 未命名会话占位', () => {
     const wrapper = mountView(makeArchived({ name: '' }))
     expect(wrapper.find('[data-testid="archive-summary-name"]').text()).toBe('未命名会话')
     // agent 引用视图头行回退 sessionId（D7 同款回退）
+  })
+
+  it('侧栏折叠 + 非全屏 → 卡头 pl-[88px] 让位 mac 红黄绿（DESIGN.md §11，PanelHeader 同构）', () => {
+    useSidebarStore().toggleCollapsed()
+    const banner = mountArchivedBanner()
+    // 让位类：非全屏留 pl-[88px]（红黄绿原生 x8~68，卡头左缘即窗口左缘）
+    expect(banner.classes()).toContain('pl-[88px]')
+    expect(banner.classes()).not.toContain('pl-3.5')
+  })
+
+  it('侧栏折叠 + 全屏 → 卡头回落 pl-3.5（全屏红黄绿 OS 隐藏不占位）', () => {
+    useSidebarStore().toggleCollapsed()
+    platformChromeMock.isFullscreen.value = true
+    expectBannerFallback()
+  })
+
+  it('侧栏展开 → 卡头恒 pl-3.5（全屏与否都不让位）', () => {
+    platformChromeMock.isFullscreen.value = true
+    expectBannerFallback()
   })
 
   it('[恢复完整会话] accent 钮点击 emit restore', async () => {
@@ -205,12 +247,11 @@ describe('ArchiveSummaryView · staging 全占位', () => {
     expect(wrapper.find('[data-testid="archive-agent-reference"]').exists()).toBe(false)
   })
 
-  it('banner 保留（pill + 名称）且压缩信息显示「压缩中」；恢复钮仍在（staging 恢复合法，V6）', async () => {
+  it('卡头保留（pill + 名称 + 恢复钮，staging 恢复合法 V6）', async () => {
     const wrapper = mountView(makeStaging())
 
     expect(wrapper.find('[data-testid="archive-archived-pill"]').text()).toBe('已归档')
     expect(wrapper.find('[data-testid="archive-summary-name"]').text()).toBe('压缩中的会话')
-    expect(wrapper.find('[data-testid="archive-summary-meta"]').text()).toContain('压缩中')
 
     await wrapper.find('[data-testid="archive-restore-button"]').trigger('click')
     expect(wrapper.emitted('restore')).toHaveLength(1)

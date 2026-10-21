@@ -642,21 +642,21 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
 
   it("spawn 失败（execPath 指向不存在路径，真实 ENOENT）→ 失败终态 + 可诊断 error，不伪成功（F4）", async () => {
     const h = await makeHarness("success");
-    // 执行器不存在（真实绝对路径）：argv[1] 指向不存在脚本 + execPath 非通用运行时
-    // → getPiInvocation 分支 2：command = execPath。不经任何 mock——Node spawn 的
-    // 'error' 事件（ENOENT）+ 迟到 close(code=-2) 全真实时序，锁「从未启动的子进程
-    // 不得判成功」。
-    const ghostNode = join(h.rootDir, "nonexistent-node-bin");
+    // 执行器不存在（真实绝对路径）：argv[1] 指向不存在脚本（basename 非 pi 发行入口
+    // → 分支 1 不命中）+ execPath basename 命中 pi 二进制命名白名单 → getPiInvocation
+    // 分支 2：command = execPath。不经任何 mock——Node spawn 的 'error' 事件（ENOENT）
+    // + 迟到 close(code=-2) 全真实时序，锁「从未启动的子进程不得判成功」。
+    const ghostPi = join(h.rootDir, "pi");
     const originalExecPath = process.execPath;
     process.argv[1] = join(h.rootDir, "nonexistent-pi-entry.mjs");
-    Object.defineProperty(process, "execPath", { value: ghostNode, configurable: true });
+    Object.defineProperty(process, "execPath", { value: ghostPi, configurable: true });
     try {
       const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
 
       expect(result.success).toBe(false); // 从未启动 → 失败，不得 success=true 空内容
       expect(result.error).toContain("pi child error:");
       expect(result.error).toContain("ENOENT"); // 原始 errno code 可诊断
-      expect(result.error).toContain(ghostNode); // 失败的命令路径可诊断
+      expect(result.error).toContain(ghostPi); // 失败的命令路径可诊断
       expect(result.error).toContain("127"); // 失败折算退出码
       expect(result.failureKind).toBe("unknown"); // 不命中 stale 词表（可重试口径）
       expect(result.content).toBe("");

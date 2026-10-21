@@ -1,13 +1,19 @@
 <!--
   ArchiveSummaryView —— 归档摘要视图（session-archive 设计 D11，主区 B2）。
 
-  挂载方（归档列表视图，u-renderer-entry）点击归档行后以本组件呈现：props 收
-  config.archives 元素（ArchiveSummary DTO，staging/archived 两态）+ projectName
-  （按 projectId 解析的原项目名）；[恢复完整会话] 钮只 emit restore，恢复编排
-  （RPC 调用 / 侧栏切回 / 主区回 chat / 列表刷新）在挂载方。
+  挂载方（ArchiveMainView 卡壳内，u-renderer-entry）点击归档行后以本组件呈现：
+  props 收 config.archives 元素（ArchiveSummary DTO，staging/archived 两态）；
+  [恢复完整会话] 钮只 emit restore，恢复编排（RPC 调用 / 侧栏切回 / 主区回 chat /
+  列表刷新）在挂载方。
 
-  结构（D11）：
-  - banner：[已归档] pill + 会话名 + 原项目/压缩信息 meta + 双 tab + accent 恢复钮
+  结构（D11 + 对话流卡头对齐）：
+  - 卡头（40px，PanelHeader 同档：h-[40px] / px-3.5 / gap-2 / 字 base / border-b hairline，
+    空白区 -webkit-app-region:drag、交互组 no-drag）：[已归档] pill + 会话名 +
+    双 tab + accent 恢复钮（恢复钮与分段 tab 项同高 24px）
+    折叠态让位（DESIGN.md §11，与 PanelHeader 同构）：侧栏折叠且非全屏时左内边距
+    pl-[88px] 让位 mac 红黄绿（OS 绘制占 x=8..68）；全屏态红黄绿 OS 隐藏，回落 pl-3.5。
+    本视图不迁入 chrome 按钮组（收起/前进后退/新建任务仍在侧栏与 PanelHeader），
+    只承接安全区内边距——归档视图可独立于侧栏展开态显示（MainPanel view 路由）。
   - 摘要流（用户摘要 tab）：右浮用户气泡 + 左侧 agent 文本块，720px 居中
     （content-col 原语，同对话流规范）。气泡/正文为静态纯文本渲染（摘要数据无
     segments/消息 id，不复用 live 会话的 UserBubble/MarkdownRenderer——两者硬耦合
@@ -18,58 +24,61 @@
 -->
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="archive-summary-view">
-    <!-- banner：pill + 名称 + 原项目/压缩信息 + 双 tab（staging 隐藏——无内容可切）+ 恢复钮 -->
-    <header class="shrink-0 border-b border-hairline bg-surface" data-testid="archive-summary-banner">
-      <div class="content-col flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-3">
+    <!-- 卡头：pill + 名称 + 双 tab（staging 隐藏——无内容可切）+ 恢复钮 -->
+    <header
+      class="flex h-[40px] shrink-0 items-center gap-2 border-b border-hairline bg-surface px-3.5 text-[length:var(--text-base)] text-neutral-mid [-webkit-app-region:drag]"
+      :class="showChrome && !isFullscreen ? 'pl-[88px]' : 'pl-3.5'"
+      data-testid="archive-summary-banner"
+    >
+      <!-- 身份区（pill + 名称）no-drag：PanelHeader 会话名区同款——文本可选中、截断名
+           hover 读全名（title），不落入窗口拖拽区（-webkit-app-region:drag 吞点击/hover） -->
+      <div class="flex min-w-0 shrink items-center gap-2 [-webkit-app-region:no-drag]">
         <span
           class="shrink-0 rounded-sm border border-hairline px-1.5 py-0.5 font-mono text-[length:var(--text-2xs)] leading-none text-neutral-dim"
           data-testid="archive-archived-pill"
         >{{ t('archive.summary.archivedPill') }}</span>
         <h2
           class="min-w-0 shrink truncate text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-fg"
+          :title="displayName"
           data-testid="archive-summary-name"
         >{{ displayName }}</h2>
-        <span
-          class="min-w-0 shrink truncate font-mono text-[length:var(--text-xs)] text-neutral-dim"
-          data-testid="archive-summary-meta"
-        >{{ bannerMeta }}</span>
-        <div class="ml-auto flex shrink-0 items-center gap-2">
-          <div
-            v-if="isArchived"
-            class="flex gap-[2px] rounded-sm border border-hairline bg-bg-input p-[2px]"
-            role="tablist"
-            :aria-label="t('archive.summary.tablistLabel')"
-            data-testid="archive-summary-tablist"
-          >
-            <Button
-              v-for="tab in tabs"
-              :key="tab.value"
-              variant="ghost"
-              role="tab"
-              :aria-selected="activeTab === tab.value"
-              :title="tab.label"
-              :class="cn(
-                'h-[24px] justify-center rounded-[var(--radius-xs)] px-2 text-[length:var(--text-xs)]',
-                activeTab === tab.value
-                  ? 'bg-[var(--sel-bg)] text-neutral-fg [font-weight:var(--fw-mid)] shadow-[inset_0_0_0_1px_var(--sel-edge)] hover:bg-[var(--sel-bg)] hover:text-neutral-fg'
-                  : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg',
-              )"
-              :data-testid="`archive-summary-tab-${tab.value}`"
-              @click="activeTab = tab.value"
-            >
-              {{ tab.label }}
-            </Button>
-          </div>
+      </div>
+      <div class="ml-auto flex shrink-0 items-center gap-2 [-webkit-app-region:no-drag]">
+        <div
+          v-if="isArchived"
+          class="flex gap-[2px] rounded-sm border border-hairline bg-bg-input p-[2px]"
+          role="tablist"
+          :aria-label="t('archive.summary.tablistLabel')"
+          data-testid="archive-summary-tablist"
+        >
           <Button
-            size="sm"
-            class="h-8 gap-1.5"
-            data-testid="archive-restore-button"
-            @click="emit('restore')"
+            v-for="tab in tabs"
+            :key="tab.value"
+            variant="ghost"
+            role="tab"
+            :aria-selected="activeTab === tab.value"
+            :title="tab.label"
+            :class="cn(
+              'h-[24px] justify-center rounded-[var(--radius-xs)] px-2 text-[length:var(--text-xs)]',
+              activeTab === tab.value
+                ? 'bg-[var(--sel-bg)] text-neutral-fg [font-weight:var(--fw-mid)] shadow-[inset_0_0_0_1px_var(--sel-edge)] hover:bg-[var(--sel-bg)] hover:text-neutral-fg'
+                : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg',
+            )"
+            :data-testid="`archive-summary-tab-${tab.value}`"
+            @click="activeTab = tab.value"
           >
-            <RotateCcw class="size-3.5" />
-            {{ t('archive.summary.restore') }}
+            {{ tab.label }}
           </Button>
         </div>
+        <Button
+          size="sm"
+          class="h-6 gap-1.5 px-2.5 text-[length:var(--text-xs)]"
+          data-testid="archive-restore-button"
+          @click="emit('restore')"
+        >
+          <RotateCcw class="size-3" />
+          {{ t('archive.summary.restore') }}
+        </Button>
       </div>
     </header>
 
@@ -144,16 +153,13 @@ import { RotateCcw } from '@lucide/vue'
 import type { ArchiveSummary } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useSidebarStore } from '@/stores/sidebar'
+import { usePlatformChrome } from '@/composables/effects/usePlatformChrome'
 import { formatArchiveAgentReference } from './agent-reference-format'
 
 const props = defineProps<{
   /** 归档条目（config.archives 元素；status 判别 staging/archived 两态） */
   archive: ArchiveSummary
-  /**
-   * 原项目显示名：挂载方按 archive.projectId 经 project store 解析后传入
-   * （未解析 / 无归属 / 未命名默认项目传 undefined——banner 省略该段）。
-   */
-  projectName?: string
 }>()
 
 const emit = defineEmits<{
@@ -162,6 +168,16 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+const sidebar = useSidebarStore()
+const { isFullscreen } = usePlatformChrome()
+
+/**
+ * 折叠态让位判据（DESIGN.md §11，与 PanelHeader.vue:207 同构）：侧栏折叠 → 主区左缘归零
+ * （AsideRegion flexBasis 0），卡头左缘即窗口左缘，须让位 mac 红黄绿（OS 绘制 x=8..68）。
+ * 全屏态红黄绿由 OS 隐藏，不让位。
+ */
+const showChrome = computed(() => sidebar.collapsed)
 
 /** banner 双 tab 定义（D11：用户摘要 / agent 引用视图）。 */
 type SummaryTab = 'user' | 'agent'
@@ -187,40 +203,4 @@ const displayName = computed(() =>
 const agentReference = computed(() =>
   props.archive.status === 'archived' ? formatArchiveAgentReference(props.archive) : '',
 )
-
-/** banner 原项目/压缩信息 meta（archived：`原项目：X · 12.4 MB → 2.5 MB · -80%`；staging：`… · 压缩中`）。 */
-const bannerMeta = computed(() => {
-  const parts: string[] = []
-  if (props.projectName && props.projectName.length > 0) {
-    parts.push(t('archive.summary.originalProject', { name: props.projectName }))
-  }
-  parts.push(
-    props.archive.status === 'archived'
-      ? formatCompression(props.archive)
-      : t('archive.summary.compressing'),
-  )
-  return parts.join(' · ')
-})
-
-/** 文件大小人类可读（B/KB/MB 一位小数——ImportSessionDialog.formatSize 同款口径，组件域内复制）。 */
-const BYTES_PER_KB = 1024
-const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB
-
-function formatSize(bytes: number): string {
-  if (bytes < BYTES_PER_KB) return `${bytes} B`
-  if (bytes < BYTES_PER_MB) return `${(bytes / BYTES_PER_KB).toFixed(1)} KB`
-  return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`
-}
-
-/** 百分比换算基数（no-magic-numbers：命名常量承载） */
-const PCT_SCALE = 100
-
-/** 压缩信息（D10 行结构同款格式 `12.4 MB → 2.5 MB · -80%`；rawBytes 0 防除零省略百分比段）。 */
-function formatCompression(archive: Extract<ArchiveSummary, { status: 'archived' }>): string {
-  const base = `${formatSize(archive.rawBytes)} → ${formatSize(archive.compressedBytes)}`
-  if (archive.rawBytes <= 0) return base
-  const pct = Math.round((1 - archive.compressedBytes / archive.rawBytes) * PCT_SCALE)
-  if (pct <= 0) return base
-  return `${base} · -${pct}%`
-}
 </script>

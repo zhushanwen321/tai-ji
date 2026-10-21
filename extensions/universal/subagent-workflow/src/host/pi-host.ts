@@ -270,41 +270,54 @@ export function createPiHostServices(): HostServices {
   };
 }
 
-// ── [D2 扩展加载显式化] 孙进程扩展白名单注入源（双形态） ──
+// ── [D2 扩展加载显式化] 孙进程扩展注入源（双形态） ──
 
 /**
- * 孙进程（subagent 任务子进程）schema 强制所需的最小扩展集（P-C5 起步裁决：
- * 仅 structured-output）。全量 staged 下发会让孙进程加载全部无关扩展——每包都
- * 可能注册工具/注入提示词，孙进程的工具范围与 system prompt 行为不可控。
+ * 孙进程（subagent 任务子进程）扩展集 = 主进程扩展集**减去排除名单**。
  *
- * 白名单组成唯一登记处（runtime 侧 getExtensionPaths 全量下发、本常量收窄，
- * 无第二份判据副本——扩白名单只改此处并同步 pi-host.test.ts 用例，以及
- * spawn-runner.ts 断言②的 SCHEMA_ENFORCEMENT_EXTENSION_SEGS 同判据两端）。
+ * 演进：原设计是白名单（只放行 structured-output），理由是「每包都可能注册工具 /
+ * 注入提示词，孙进程的工具范围与 system prompt 行为不可控」。实战暴露两个问题：
+ * ① 网络可达性扩展（如当时外挂的 opendesign-ipv4）被剥后孙进程 LLM 请求走坏路径，
+ *   表现为大批 `Request timed out.` / `Connection error.`（2026-10-21 事故）；
+ * ② 孙进程是完整 agent，没有 bash/read/todo 之外的常用工具（session_read、
+ *   collect_results、compact_context…）会让它做事残废。
  *
- * 每条 = 路径段序列（`/`|`\` 分段后连续匹配）。两形态别名：
- *   - `@zhushanwen/pi-structured-output`：npm staged 布局
- *     `.../node_modules/@zhushanwen/pi-structured-output[/index.js]`。
- *   - `universal/structured-output`：dev 源码布局 `.../extensions/universal/structured-output`
- *     （dev 下 runtime 下发的 --extension 是源码目录，无 @zhushanwen scope 段——
- *     只认 npm 布局时孙进程扩展集恒空，schema 拦截链静默失效）。
- *     选型：两段连续匹配（分组目录名 + 包目录名）而非尾段单匹配 `structured-output`
- *     ——尾段会撞任意同名无关目录（如其他包内的同名子目录）；两段含本仓 extensions
- *     固定分组名 `universal`，且 --extension 值来源可控（runtime extension-service
- *     下发 / pi CLI flags），实际碰撞风险可忽略。
+ * 现改为**排除式**：默认继承主进程全部扩展，只剔除确知在孙进程无意义或有害的包。
+ * 排除项登记原则——只列「孙进程里必然无害或必然无用」的：
+ * - 交互决策类（plan / canvas / goal）：需要人类在 GUI 裁决，孙进程无人可问，
+ *   加载后只会多出挂起等待的工具入口；
+ * - 定时调度类（scheduler）：定时任务是会话级能力，孙进程生命周期短且一次性。
+ *
+ * 组成唯一登记处（runtime 侧 getExtensionPaths 全量下发、本常量收窄，无第二份判据
+ * 副本——改排除项只改此处并同步 pi-host.test.ts 用例，以及 spawn-runner.ts 断言②
+ * 的 SCHEMA_ENFORCEMENT_EXTENSION_SEGS 同判据两端）。
+ *
+ * 每条 = 路径段序列（`/`|`\` 分段后连续匹配）。两形态别名（npm staged 布局
+ * `@zhushanwen/pi-xxx` 与 dev 源码布局 `extensions/<group>/<pkg>`）都要登记，否则
+ * 两条装配路径行为不一致。
  */
-const GRANDCHILD_EXTENSION_PKG_SEGMENTS: readonly (readonly string[])[] = [
-  ["@zhushanwen", "pi-structured-output"],
-  ["universal", "structured-output"],
+const GRANDCHILD_EXCLUDED_PKG_SEGMENTS: readonly (readonly string[])[] = [
+  // plan：计划模式需人在审阅条裁决（submit-review 挂起等用户）
+  ["@zhushanwen", "pi-plan"],
+  ["universal", "plan"],
+  // canvas：问题解决画布需人在 overlay 裁决
+  ["@zhushanwen", "pi-canvas"],
+  ["taiji", "canvas"],
+  // goal：目标循环需用户确认
+  ["@zhushanwen", "pi-goal"],
+  ["universal", "goal"],
+  // scheduler：定时任务属主会话能力，孙进程无生命周期承载
+  ["@zhushanwen", "pi-scheduler"],
+  ["universal", "scheduler"],
 ];
 
-/** npm 布局包名（peerDep 解析锚点与诊断文案用；匹配判据见上段集）。 */
+/** structured-output 包名（包组 peerDep 解析锚点与诊断文案用；匹配判据见排除名单）。 */
 const GRANDCHILD_EXTENSION_NPM_PKG = "@zhushanwen/pi-structured-output";
 
 /**
- * 孙进程扩展路径集解析（设计 D2 双形态；argv 与 peerDep 解析器经参数注入，纯函数
- * 可测——HostServices 方法闭包传 process.argv）：
+ * 孙进程扩展路径集解析（双形态；argv 与 peerDep 解析器经参数注入，纯函数可测）：
  *   1. taiji 宿主形态：主 pi 进程 argv 的 `--extension` 全量值 = runtime
- *      extension-service 经 spawn argv 下发的 staged 集——按白名单收窄。该形态
+ *      extension-service 经 spawn argv 下发的 staged 集——**减去排除名单**。该形态
  *      判据 = argv 有 `--extension`（taiji spawn 恒带）。
  *   2. 独立 pi 形态（npm 安装、无 taiji runtime）：从包自身 optional peerDep 解析
  *      structured-output sibling 路径（安装了即解析、未安装则空）。
@@ -318,10 +331,12 @@ export function resolveGrandchildExtensionPaths(
   resolveE2eFaux: () => string | undefined = resolveE2eFauxExtensionPath,
 ): string[] {
   const stagedAll = collectExtensionFlagValues(argv);
-  const whitelisted = stagedAll.filter(isGrandchildExtensionPath);
+  // builtin: 旗标（codemode / mcp / tool-search）由 spawn-args 的上游模板单独追加，
+  // 不经本函数——这里只处理文件/目录路径。
+  const inherited = stagedAll.filter((p) => !isGrandchildExcludedPath(p));
   const e2eFaux = resolveE2eFaux();
-  if (whitelisted.length > 0 || e2eFaux !== undefined) {
-    return e2eFaux !== undefined ? [...whitelisted, e2eFaux] : whitelisted;
+  if (inherited.length > 0 || e2eFaux !== undefined) {
+    return e2eFaux !== undefined ? [...inherited, e2eFaux] : inherited;
   }
   const peer = resolvePeer();
   return peer !== undefined ? [peer] : [];
@@ -346,12 +361,12 @@ function resolveE2eFauxExtensionPath(): string | undefined {
   return existsSync(fauxExtPath) ? fauxExtPath : undefined;
 }
 
-/** 路径是否命中孙进程扩展白名单：路径段序列包含白名单任一段集的连续匹配
+/** 路径是否命中孙进程扩展排除名单：路径段序列包含任一段集的连续匹配
  *  （目录形态与入口文件形态都命中——末尾越界段取 undefined 不等，天然界内；
- *  前缀相似目录如 `pi-structured-output-lookalike` 因段值不等不误判）。 */
-function isGrandchildExtensionPath(p: string): boolean {
+ *  前缀相似目录如 `pi-plan-lookalike` 因段值不等不误判）。 */
+function isGrandchildExcludedPath(p: string): boolean {
   const segs = p.split(/[\\/]/).filter((s) => s.length > 0);
-  return GRANDCHILD_EXTENSION_PKG_SEGMENTS.some((wanted) =>
+  return GRANDCHILD_EXCLUDED_PKG_SEGMENTS.some((wanted) =>
     segs.some((_, i) => wanted.every((w, j) => segs[i + j] === w)),
   );
 }

@@ -42,7 +42,7 @@
     <Button
       variant="ghost"
       size="icon"
-      class="hidden flex-none grid size-[20px] place-items-center rounded-[5px] p-0 text-neutral-dim after:absolute after:inset-[-2px] after:content-[''] hover:bg-surface-hover hover:text-neutral-fg group-hover/dph:grid group-focus-within/dph:grid [&_svg]:size-[12px]"
+      class="relative hidden flex-none grid size-[20px] place-items-center rounded-[5px] p-0 text-neutral-dim after:absolute after:inset-[-2px] after:content-[''] hover:bg-surface-hover hover:text-neutral-fg group-hover/dph:grid group-focus-within/dph:grid [&_svg]:size-[12px]"
       :title="t('sidebar.sessionList.newSessionInDefault')"
       :aria-label="t('sidebar.sessionList.newSessionInDefault')"
       data-testid="default-project-new-task"

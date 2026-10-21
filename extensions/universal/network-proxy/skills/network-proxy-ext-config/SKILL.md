@@ -30,10 +30,12 @@ interface NetworkProxyConfig {
   };
   noProxy: string[];     // 直连排除清单（主机名条目），优先级高于 rules——本地网关地址必须加在这里
   rules: string[];       // 代理规则（主机名条目），命中即经代理
+  ipv4Only: string[];    // 直连 + 强制 IPv4 清单（主机名条目）：命中不走代理，DNS 解析锁定 A 记录直连
+                         // （URL / Host 头 / TLS SNI 保持原样，只干预「选哪个 IP」）；用于「IPv6 可达但握手抖动」的服务商
 }
 ```
 
-校验规则（违反即回落禁用态并报错，错误文案含修复动作）：协议白名单、端口 1-65535 整数、凭据成对（同空或同非空）、noProxy/rules 每条非空且不含空白字符（含空白的条目对真实主机名恒不匹配，校验层显式拒绝，错误文案提示删除空白）。
+校验规则（违反即回落禁用态并报错，错误文案含修复动作）：协议白名单、端口 1-65535 整数、凭据成对（同空或同非空）、noProxy/rules/ipv4Only 每条非空且不含空白字符（含空白的条目对真实主机名恒不匹配，校验层显式拒绝，错误文案提示删除空白）。`ipv4Only` 是后加字段，旧配置文件缺省 = 空清单。
 
 ## 匹配语义
 
@@ -41,12 +43,14 @@ interface NetworkProxyConfig {
   - 条目 `api.anthropic.com` 命中 `api.anthropic.com` 与 `eu.api.anthropic.com`
   - `xapi.anthropic.com` 不命中（无点前缀拼接）；`api-anthropic.com.evil.com` 不命中（恶意后缀）
 - 匹配对象 = 请求目标 URL 的主机名（服务商 baseURL 的主机名；端口不参与匹配）
-- noProxy 先于 rules 判定（先排除再匹配）；`localhost` 条目同时覆盖 `localhost` 与 `*.localhost`
+- 分流优先级：**noProxy > ipv4Only > rules**（noProxy 命中即原样直连，连 IPv4 锁定都不做）
+- ipv4Only 命中：不走代理，请求 URL 原样保留，经 `connect.lookup` 把 DNS 解析强制到 A 记录（family:4）后直连——URL / Host 头 / TLS SNI 全部不动（把 URL 换成 IP 字面量的做法会被 Cloudflare 按 SNI/Host 不一致拒 403，实测证伪）；无 A 记录时解析报错上抛，**不回退 IPv6**（避免「要求锁 v4」的意图被静默丢弃）
+- `localhost` 条目同时覆盖 `localhost` 与 `*.localhost`
 - 不支持 `*` 通配（无已发生需求）；分流覆盖经 `globalThis.fetch` 发出的请求（pi LLM 调用与 OAuth/目录请求）；直接使用 `undici.request` / `Client` 的调用不经过本包装
 
 ## 生效时机（turn 粒度热重载）
 
-- 每个 turn 开始重读配置，指纹（enabled+proxy+noProxy+rules）变化才重建包装——**运行中会话自下一轮对话起生效，无需重启**；turn 进行中（工具循环连续请求）保存的配置对该 turn 内后续请求不生效
+- 每个 turn 开始重读配置，指纹（enabled+proxy+noProxy+rules+ipv4Only）变化才重建包装——**运行中会话自下一轮对话起生效，无需重启**；turn 进行中（工具循环连续请求）保存的配置对该 turn 内后续请求不生效
 - `enabled` 从 true → false：立即恢复包装前的 fetch（全部直连/env 代理路由）
 - 未命中规则的流量委托包装前的 fetch——独立 pi 用户设了 `HTTPS_PROXY` 环境变量时，未命中流量仍走 env 代理，语义不丢失
 - pi 的 `configureHttpDispatcher` 带 shouldInstallGlobals 守卫（pi dist/core/http-dispatcher.js:88-99）：检测到 `globalThis.fetch` 已被第三方覆盖即保留不重装，本扩展的包装在同进程内持续生效；槽位被其他第三方整体覆盖时，下一 turn 开始自动以覆盖者为新 original 重新包装（防御路径）

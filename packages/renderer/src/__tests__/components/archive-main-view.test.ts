@@ -2,12 +2,12 @@
  * ArchiveMainView 容器组件测试（session-archive 设计 D11 挂载编排，u-renderer-entry）。
  *
  * 覆盖：
- * - selected 在档 → ArchiveSummaryView 渲染 + archive/projectName 注入（projectId 解析）
- * - projectId 未命中项目表 → projectName undefined（banner 省略原项目段）
- * - selected 为 null（恢复/彻底删除后编排清空、或异常直达）→ archive-main-empty 占位
+ * - selected 在档 → ArchiveSummaryView 渲染 + archive 注入
+ * - 卡壳形态：根节点 = 对话流卡片同规格（rounded-card + hairline 边 + bg-surface）
+ * - selected 为 null（恢复/彻底删除后编排清空、或异常直达）→ archive-main-empty 占位（卡内）
  * - restore 事件接 useArchiveView.restoreArchive（载荷 = 当前 selected）
  *
- * pinia 真实 store（archive/project）；useArchiveView 只替换 restoreArchive 出口
+ * pinia 真实 store（archive）；useArchiveView 只替换 restoreArchive 出口
  * （编排内含 RPC，容器测试只锁接线），其余导出保留原实现。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/archive-main-view.test.ts
@@ -19,7 +19,6 @@ import type { ArchiveSummary } from '@taiji/shared'
 import ArchiveMainView from '@/components/archive/ArchiveMainView.vue'
 import ArchiveSummaryView from '@/components/archive/ArchiveSummaryView.vue'
 import { useArchiveStore } from '@/stores/archive'
-import { useProjectStore } from '@/stores/project'
 
 const { mockRestoreArchive } = vi.hoisted(() => ({ mockRestoreArchive: vi.fn() }))
 
@@ -53,27 +52,27 @@ beforeEach(() => {
 })
 
 describe('ArchiveMainView · 摘要视图挂载（D11）', () => {
-  it('selected 在档 → ArchiveSummaryView 渲染 + projectName 按 projectId 解析注入', () => {
+  it('selected 在档 → ArchiveSummaryView 渲染 + archive 注入', () => {
     useArchiveStore().selectArchive(makeArchived())
-    useProjectStore().projects = [{ id: 'proj-1', name: 'taiji 项目', lastUsedAt: 0 }]
 
     const wrapper = mount(ArchiveMainView)
 
     const summary = wrapper.findComponent(ArchiveSummaryView)
     expect(summary.exists()).toBe(true)
     expect(summary.props('archive')).toMatchObject({ sessionId: 'arc-main-1' })
-    expect(summary.props('projectName')).toBe('taiji 项目')
     // 空态占位不渲染（互斥分支）
     expect(wrapper.find('[data-testid="archive-main-empty"]').exists()).toBe(false)
   })
 
-  it('projectId 未命中项目表 → projectName undefined（banner 省略原项目段，D11）', () => {
-    useArchiveStore().selectArchive(makeArchived({ projectId: 'proj-gone' }))
-    useProjectStore().projects = [{ id: 'proj-1', name: 'taiji 项目', lastUsedAt: 0 }]
+  it('卡壳与对话流卡片同规格（rounded-card + hairline 边 + bg-surface）', () => {
+    useArchiveStore().selectArchive(makeArchived())
 
     const wrapper = mount(ArchiveMainView)
 
-    expect(wrapper.findComponent(ArchiveSummaryView).props('projectName')).toBeUndefined()
+    const root = wrapper.find('[data-testid="archive-main-view"]')
+    expect(root.classes()).toContain('rounded-[var(--radius-card)]')
+    expect(root.classes()).toContain('border-hairline')
+    expect(root.classes()).toContain('bg-surface')
   })
 
   it('selected 为 null → archive-main-empty 占位（不自动回跳，用户经侧栏重新选择）', () => {

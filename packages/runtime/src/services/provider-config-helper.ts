@@ -420,6 +420,10 @@ function buildCatalogProviderInfo(
     models: buildCatalogProviderModels(id, builtinP, overrideModels, extras?.modelStates),
     // DM3：enabled 从 enabledModels 派生，不读 models.json provider.enabled（F2）
     enabled: deriveEnabled(id, enabledModels),
+    // provider 级 headers/authHeader 读侧透传（与 SetProviderData 写路径对称）：缺失会导致
+    // 编辑界面无法回显已存值，且保存「空=不动」语义使用户从界面永远删不掉（幽灵数据）
+    headers: override?.headers,
+    authHeader: override?.authHeader,
     kind: 'catalog' as const,
     hasOverride: !!override,
     quota: extras?.quota,
@@ -458,6 +462,9 @@ function buildCustomProviderInfo(
       : (builtinProvidersById.get(id)?.models.map(m => toProviderModel(m, extras?.modelStates)) ?? userModels),
     // DM3：enabled 从 enabledModels 派生，不读 models.json provider.enabled（F2）
     enabled: deriveEnabled(id, enabledModels),
+    // provider 级 headers/authHeader 读侧透传（与 buildCatalogProviderInfo 同批修复）
+    headers: config.headers,
+    authHeader: config.authHeader,
     kind: 'custom' as const,
     quota: extras?.quota,
   }

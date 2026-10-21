@@ -62,6 +62,7 @@ const config: NetworkProxyConfig = {
   proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' },
   noProxy: ['localhost'],
   rules: ['api.anthropic.com'],
+  ipv4Only: [],
 }
 
 describe('network-proxy 五条路由（经 SettingsMessageHandler 全链路）', () => {

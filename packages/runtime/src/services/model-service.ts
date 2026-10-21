@@ -65,7 +65,8 @@ export class ModelDiscoveryError extends Error {
 /**
  * test 模式 provider 级错误码（`config.discoveredModels` reply 顶层 error）。
  * 行级错误码见 `ConnectionTestPlanEntry.error`（`<code>|<params>` 语法在 infra 实现内定义）。
- * 前端按 code 选 i18n key（settings.providerEdit.testNoApiKey / testNoModels 等），未知 code 走通用失败文案。
+ * 前端对顶层 error 原样透传展示（core discover module 写 actionError），不按 code 映射
+ * i18n；行级 code 的解析展示在 ui ModelTestButton（行内结果条）。
  */
 export const PROVIDER_CONNECTION_TEST_ERRORS = {
   /** providerId 不在聚合列表（前端传错 / provider 已删）。 */
@@ -88,6 +89,7 @@ export type ConnectionTestRowErrorCode =
   | 'unsupported'      // 协议不在首版支持集
   | 'no_base_url'      // 该协议组代表模型无可用 baseUrl（含空串，azure 类 host 型目录）
   | 'no_enabled_model' // 该协议组全部模型被禁用
+  | 'model_not_found'  // 单模型测试（per-model 入口）目标不在 provider.models
   | 'http_error'       // 非 2xx（error = `http_error|<status>|<响应体截断>`）
   | 'network_error'    // fetch 层失败（error = `network_error|<message>`）
 
@@ -95,6 +97,13 @@ export type ConnectionTestRowErrorCode =
 export interface ProviderConnectionTestService {
   testProviderConnections(
     providerId: string,
+    apiKey: string | undefined,
+    tester: IModelConnectionTester,
+  ): Promise<ProviderConnectionTestOutcome>
+  /** 单模型测试（per-model 行内入口）：只测指定模型，不做协议分组与代表模型选择。 */
+  testProviderModel(
+    providerId: string,
+    modelId: string,
     apiKey: string | undefined,
     tester: IModelConnectionTester,
   ): Promise<ProviderConnectionTestOutcome>
@@ -171,7 +180,7 @@ export function planConnectionTests(
       if (model.enabled === false) continue
       const baseUrl = resolveModelBaseUrl(providerId, model, providerBaseUrl)
       if (baseUrl === undefined) continue
-      target = { api, modelId: model.id, baseUrl }
+      target = { api, modelId: model.id, baseUrl, providerId }
       break
     }
     if (target) entries.push({ api, modelId: target.modelId, target })
@@ -330,6 +339,15 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
   }
 
   /**
+   * 连接测试入口共用前置：初始化守卫 + 按 id 取 provider；不存在 = null
+   * （调用方转 providerNotFound 行）。
+   */
+  private requireConnectionTestProvider(providerId: string): ProviderInfo | null {
+    this.ensureInitialized()
+    return this.configService.listProviders().find(p => p.id === providerId) ?? null
+  }
+
+  /**
    * 测试连接编排（test 模式）：读聚合 provider → 计划（分组 + 双过滤 + baseUrl 回落链）→
    * 逐协议并发发真实最小请求（HTTP 归 infra 的 IModelConnectionTester，由调用方注入）。
    *
@@ -341,8 +359,7 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
     apiKey: string | undefined,
     tester: IModelConnectionTester,
   ): Promise<ProviderConnectionTestOutcome> {
-    this.ensureInitialized()
-    const provider = this.configService.listProviders().find(p => p.id === providerId)
+    const provider = this.requireConnectionTestProvider(providerId)
     if (!provider) return { success: false, error: PROVIDER_CONNECTION_TEST_ERRORS.providerNotFound }
     if (provider.models.length === 0) return { success: false, error: PROVIDER_CONNECTION_TEST_ERRORS.noModels }
     if (!apiKey) return { success: false, error: PROVIDER_CONNECTION_TEST_ERRORS.noApiKey }
@@ -363,6 +380,39 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
       // 防御分支：tester 约定内部归类不抛（infra 实现如此），抛出即按网络层失败成行
       : { api: entries[index].api, modelId: entries[index].modelId, ok: false, error: `network_error|${toErrorMessage(outcome.reason)}` })
     return { success: true, results }
+  }
+
+  /**
+   * 单模型测试（per-model 行内入口，2026-10-21）：只测指定模型——直接复用 provider 级
+   * 同一套 baseUrl 回落链与凭据硬停语义，但不做协议分组 / 代表模型选择 / enabled 过滤
+   * （显式点了某个模型就测它，禁用态照样可测——测试不改配置，只探连通）。
+   * 已定论行（model_not_found / unsupported / no_base_url）与真实发包行同形，顶层恒 success:true。
+   */
+  async testProviderModel(
+    providerId: string,
+    modelId: string,
+    apiKey: string | undefined,
+    tester: IModelConnectionTester,
+  ): Promise<ProviderConnectionTestOutcome> {
+    const provider = this.requireConnectionTestProvider(providerId)
+    if (!provider) return { success: false, error: PROVIDER_CONNECTION_TEST_ERRORS.providerNotFound }
+    if (!apiKey) return { success: false, error: PROVIDER_CONNECTION_TEST_ERRORS.noApiKey }
+    const model = provider.models.find(m => m.id === modelId)
+    if (!model) {
+      return { success: true, results: [{ api: '', modelId, ok: false, error: 'model_not_found' }] }
+    }
+    const api = nonEmpty(model.api) ?? nonEmpty(provider.api)
+    if (!api || !tester.supports(api)) {
+      return { success: true, results: [{ api: api ?? '', modelId, ok: false, error: 'unsupported' }] }
+    }
+    // 原始 models.json provider 级 baseUrl（catalog = 网关 override；custom = provider 级定义），
+    // 与 testProviderConnections 同源（不取 ProviderInfo.baseUrl——含构建期 artifact）。
+    const providerBaseUrl = this.configService.getProvider(providerId)?.baseUrl
+    const baseUrl = resolveModelBaseUrl(providerId, model, providerBaseUrl)
+    if (baseUrl === undefined) {
+      return { success: true, results: [{ api, modelId, ok: false, error: 'no_base_url' }] }
+    }
+    return { success: true, results: [await tester.test({ api, modelId, baseUrl, apiKey, providerId })] }
   }
 
   // ── 能力注册表服务侧（U5，pi-boundary-reliability design D2）──────────

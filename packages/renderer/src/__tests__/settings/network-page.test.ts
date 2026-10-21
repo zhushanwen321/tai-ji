@@ -58,6 +58,7 @@ function fixtureConfig(): NetworkProxyConfig {
     proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' },
     noProxy: ['localhost', '127.0.0.1'],
     rules: ['api.anthropic.com'],
+    ipv4Only: [],
   }
 }
 
@@ -218,6 +219,7 @@ describe('NetworkPage（llm-network-proxy U4 网络代理页）', () => {
       proxy: { protocol: 'http', host: '10.0.0.1', port: 7890, username: '', password: '' },
       noProxy: ['localhost', '127.0.0.1'],
       rules: ['api.anthropic.com'],
+      ipv4Only: [],
     })
     expect(toastMock.info).toHaveBeenCalledWith('已保存，自下一轮对话起生效')
     expect(toastMock.error).not.toHaveBeenCalled()

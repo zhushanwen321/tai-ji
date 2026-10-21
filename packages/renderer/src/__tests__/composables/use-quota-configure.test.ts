@@ -50,6 +50,7 @@ const quotaApi = vi.hoisted(() => ({
 }))
 
 import { useQuotaConfigure } from '@/composables/features/settings/useQuotaConfigure'
+import { useQuotaStore } from '@/stores/quota'
 
 const P = (fetcher: string): QuotaPreset | undefined => QUOTA_PRESETS.find((p) => p.fetcher === fetcher)
 
@@ -568,6 +569,24 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
     expect(quotaApi.refreshQuota).toHaveBeenCalledWith('kimi-p')
     expect(module.test.value.status).toBe('success')
     expect(module.test.value.row).toEqual(mockRow)
+  })
+
+  it('测试查询结果同步写回全局 quota store（套餐浮层 / 容量卡单源镜像跟随）', async () => {
+    const { module } = await mountBaseline('kimi-coding')
+
+    // 成功：setCache 写 data 清 error
+    vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: mockRow, lastFetchAt: 2000 })
+    await module.saveAndTest()
+    const store = useQuotaStore()
+    expect(store.getEntry('kimi-p')?.data).toEqual(mockRow)
+    expect(store.getEntry('kimi-p')?.lastFetchAt).toBe(2000)
+    expect(store.getEntry('kimi-p')?.error).toBeNull()
+
+    // 失败态（A2-4）：保留旧 data、写 error（与 useQuotaQuery 失败路径同口径）
+    vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: 2000, reason: 'unauthorized' })
+    await module.saveAndTest()
+    expect(store.getEntry('kimi-p')?.data).toEqual(mockRow)
+    expect(store.getEntry('kimi-p')?.error).not.toBeNull()
   })
 
   it('落盘失败 → 不触发查询，失败态走 i18n', async () => {

@@ -32,7 +32,9 @@ export default {
     restarting: '即将重启',
     error: '升级失败',
     goToDownload: '前往下载',
+    // downloaded = 完整语义（title / 确认弹窗语境）；restart = 侧边栏行内短文案（单行宽度契约）
     downloaded: '已下载，重启安装',
+    restart: '重启',
     restartInstall: '重启并安装更新',
     confirmInstall: '新版本 v{version} 已下载完成。立即重启将中断当前所有任务（包括正在进行的 AI 会话），确定继续吗？',
     installLater: '稍后再说',

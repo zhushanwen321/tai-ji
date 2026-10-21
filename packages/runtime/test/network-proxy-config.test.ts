@@ -51,6 +51,7 @@ function validConfig(overrides: Partial<NetworkProxyConfig> = {}): NetworkProxyC
     proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' },
     noProxy: ['localhost'],
     rules: ['api.anthropic.com'],
+    ipv4Only: [],
     ...overrides,
   }
 }

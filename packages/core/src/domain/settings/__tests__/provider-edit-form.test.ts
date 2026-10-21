@@ -460,11 +460,55 @@ describe('save：校验与 apiKey 合并协议（D15b / D18）', () => {
     expect(savePayload().apiKey).toBe('sk-foo')
   })
 
-  it('headers 空对象 → 不传 headers（undefined，避免覆盖 runtime 既有值）', async () => {
+  it('初始有 headers + 删空后保存 → 发送 {}（清空语义；不发键=runtime「不变」会让幽灵 header 复活）', async () => {
+    // makeProvider 默认 headers {'X-Test': 'v1'}：读侧回显把该行送进编辑表单，用户删行后
+    // 草稿为空。旧实现把空草稿映射为 undefined → runtime provider-config-helper.ts:974
+    // 的 `if (data.headers !== undefined)` 不写盘，磁盘上的 header 原样保留。
     const { form } = mountForm()
-    form.draft.headers = {}
+    form.removeHeader(0)
+    expect(form.draft.headers).toEqual({})
+    expect(form.isDirty.value).toBe(true)
+    await form.save()
+    const arg = savePayload()
+    // 显式空对象带键（不是不传键）——「删空清空」与「空=不变」必须可区分
+    expect('headers' in arg).toBe(true)
+    expect(arg.headers).toEqual({})
+  })
+
+  it('初始无 headers + 保存 → 不传 headers（undefined，避免覆盖 runtime 既有值）', async () => {
+    const { form } = mountForm(makeProvider({ headers: undefined }))
+    expect(form.draft.headers).toEqual({})
     await form.save()
     expect(savePayload().headers).toBeUndefined()
+  })
+
+  it('初始无 headers + 新增行后保存 → 发送草稿值（增路径不受清空语义影响）', async () => {
+    const { form } = mountForm(makeProvider({ headers: undefined }))
+    form.addHeader()
+    form.headerRows.value[0] = { key: 'X-New', value: 'v2' }
+    form.syncHeadersFromRows()
+    await form.save()
+    expect(savePayload().headers).toEqual({ 'X-New': 'v2' })
+  })
+
+  it('用户 dirty 期间外部广播新增 headers → 保存不回传 headers（快照基线，广播竞态修复）', async () => {
+    // 竞态场景：表单打开（快照基线 = 无 headers）→ 用户改 name（dirty → D8 分支③表单
+    // 不随广播重拍）→ 外部广播给同 provider 新增 headers → 保存（用户未触碰 headers）。
+    // 实时基线把「草稿空 + 基线非空」误判为删空 → 发 {} 清掉外部新增；快照基线判
+    // 「初始无 + 草稿空」→ undefined（不变，外部新增保留在磁盘）。
+    const { form, providerRef } = mountForm(makeProvider({ headers: undefined }))
+    form.draft.name = 'P-edited'
+    providerRef.value = makeProvider({ headers: { 'X-Ext': 'ext' } })
+    await form.save()
+    expect(savePayload().headers).toBeUndefined()
+  })
+
+  it('快照未捕获（snapshot=null）→ 回退实时基线，删空仍发 {}（清空语义保留）', async () => {
+    const { form } = mountForm(makeProvider(), { captureSnapshot: false })
+    form.removeHeader(0)
+    expect(form.draft.headers).toEqual({})
+    await form.save()
+    expect(savePayload().headers).toEqual({})
   })
 
   it('失败：setProvider reject → false + actionError + saving 收尾', async () => {
@@ -606,6 +650,16 @@ describe('headers 行编辑 CRUD（W3 D7）', () => {
     // 用户修正重复 key → syncHeadersFromRows（经 removeHeader 触发，与真实 UI 路径一致）
     form.removeHeader(1)
     expect(form.actionError.value).toBe('')
+  })
+
+  it('空 value 行不落盘（与空 key 同规格过滤）——堵幽灵 header 入口', () => {
+    const { form } = mountForm(null)
+    form.addHeader()
+    // 只填 key 未填 value 的事故形态：{"x-opencode-session": ""} 落盘后压制 pi 的同名头
+    // 自动注入（guard 见键即跳过），网关 400 且读链断时界面无法回显删除
+    form.headerRows.value[0] = { key: 'x-opencode-session', value: '' }
+    form.syncHeadersFromRows()
+    expect(form.draft.headers).toEqual({})
   })
 })
 

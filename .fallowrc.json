@@ -46,6 +46,14 @@
       "exports": [
         "*"
       ]
+    },
+    {
+      "file": "scripts/quality-gates.mjs",
+      "exports": [
+        "gateLockPath",
+        "captureProcessStartTime",
+        "acquireGateLock"
+      ]
     }
   ],
   "ignoreDependencies": [
