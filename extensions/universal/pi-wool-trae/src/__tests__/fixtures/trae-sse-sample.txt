@@ -1,0 +1,48 @@
+id:1
+event:metadata
+data:{"model":"","session_id":"00000000-0000-4000-8000-000000000000","prompt_completion_id":0,"ab_versions":null,"app_version":"","ide_version":null,"ide_version_type":null,"prompt_cache_pool_record":null}
+
+id:2
+event:timing_cost
+data:{"name":"llm_raw_chat_v2","preprocess_timing":92,"postprocess_timing":0,"queue_timing":23,"platform_first_token_timing":718,"account_type":"","is_retry":false,"middleware_processing_time":112,"server_processing_time":924,"first_sse_event_time":923,"preprocessing_detail":{"check_risk":19,"build_llm_prompt":0,"chat_completion_prepare":0,"other":73},"platform_detail":{"preprocess_timing":0,"first_token_timing":0,"network_latency":0,"provider_first_token":0,"provider_network_latency":0,"other":0},"post_processing_detail":{"post_security_check":0,"other":0},"provider_model_name":"ep-INTERNAL-REDACTED"}
+
+id:3
+event:output
+data:{"response":"","reasoning_content":"The","tool_calls":null,"multimodal_contents":null,"phase":null}
+
+id:4
+event:output
+data:{"response":"","reasoning_content":" user just wants","tool_calls":null,"multimodal_contents":null,"phase":null}
+
+id:5
+event:output
+data:{"response":"","reasoning_content":" a","tool_calls":null,"multimodal_contents":null,"phase":null}
+
+id:6
+event:output
+data:{"response":"","reasoning_content":" two-character reply: ","tool_calls":null,"multimodal_contents":null,"phase":null}
+
+id:7
+event:output
+data:{"response":"","reasoning_content":"收到","tool_calls":null,"multimodal_contents":null,"phase":null}
+
+id:8
+event:output
+data:{"response":"","reasoning_content":".","tool_calls":null,"multimodal_contents":null,"phase":null}
+
+id:9
+event:output
+data:{"response":"收到","reasoning_content":null,"tool_calls":null,"multimodal_contents":null,"phase":null}
+
+id:10
+event:extra_info
+data:{"model":"ep-INTERNAL-REDACTED","version":1,"content":"{\"reasoning_content\":\"The user just wants a two-character reply: 收到.\"}","input_token":12,"expire_time":2738671264214}
+
+id:11
+event:token_usage
+data:{"name":"","prompt_tokens":34,"completion_tokens":14,"total_tokens":48,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"reasoning_tokens":12,"prompt_tokens_total":0,"completion_tokens_total":0,"total_tokens_total":0,"cache_creation_input_tokens_total":0,"cache_read_input_tokens_total":0,"reasoning_tokens_total":0,"cluster":"normal_context"}
+
+id:12
+event:done
+data:{"finish_reason":"stop"}
+
