@@ -41,7 +41,10 @@ withDefaults(defineProps<Props>(), {
         <span v-if="isDevMode()" data-testid="brand-dev-badge"
           class="shrink-0 rounded-sm bg-info-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] font-semibold text-info">DEV</span>
       </div>
-      <span v-if="versionLabel" class="mt-px font-mono leading-[1.55] tabular-nums text-[length:var(--text-2xs)] text-neutral-dim">{{ versionLabel }}</span>
+      <!-- truncate：版本号单行契约——侧栏可拖到 200px，升级指示器（shrink-0）出现时挤压量
+           全部由本行吸收，空间不足显示省略号；折行会撑高品牌区（2026-10-21 用户裁决）。
+           本 span 是 flex-col 子项，宽度 = 容器宽（stretch），truncate 单独声明即生效。 -->
+      <span v-if="versionLabel" class="truncate mt-px font-mono leading-[1.55] tabular-nums text-[length:var(--text-2xs)] text-neutral-dim">{{ versionLabel }}</span>
     </div>
     <!-- trailing slot：Sidebar 注入 UpdateButton（ml-auto 推到右侧） -->
     <slot name="trailing" />
