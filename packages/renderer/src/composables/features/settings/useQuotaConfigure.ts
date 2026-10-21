@@ -38,6 +38,7 @@ import type {
 import { API_KEY_CLEAR_SENTINEL, QUOTA_SECRET_MASK, getSettingsTransport } from '@taiji/core'
 import { optimisticUpdate, refCell } from '@taiji/core/foundation/optimistic-update'
 import { useQuotaStore } from '@/stores/quota'
+import { quotaFailReasonText } from '@/composables/features/model/useQuotaQuery'
 
 /**
  * Workspace 草稿的保存前归一化（模块级辅助）。
@@ -579,7 +580,13 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     }
   }
 
-  /** 测试查询（触发 quota.refresh，绕过 throttle） */
+  /**
+   * 测试查询（触发 quota.refresh，绕过 throttle）。
+   * 结果同步写回全局 quota store（quotaStore 是套餐浮层 / 容量卡的单源镜像）——
+   * 浮层常驻不重新挂载，若结果只留在本 composable 本地 ref，用户在设置页「保存并测试」
+   * 成功后浮层仍显示旧的失败态/旧数据（实际缺陷）。成功 setCache 清 error；失败 setError
+   * 保留旧 data（与 useQuotaQuery 失败路径同口径）。
+   */
   async function testQuery(): Promise<void> {
     const p = providerRef.value
     if (!p) return
@@ -594,6 +601,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
       if (result.data) {
         quotaData.value = result.data
         lastFetchAt.value = result.lastFetchAt
+        quotaStore.setCache(p.id, result.data, result.lastFetchAt)
         testStatus.value = 'success'
       } else {
         // 失败态（A2-4）：reason 归一给 UI（恢复指引文案按分档渲染）；旧缓存保留在
@@ -602,10 +610,12 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
         testFailReason.value = result.reason ?? null
         lastFetchAt.value = result.lastFetchAt
         testError.value = t('settings.providerEdit.quotaTestFail')
+        if (result.reason) quotaStore.setError(p.id, quotaFailReasonText(result.reason))
       }
     } catch (e) {
       testStatus.value = 'error'
       testError.value = e instanceof Error ? e.message : t('settings.providerEdit.quotaTestFail')
+      quotaStore.setError(p.id, e instanceof Error ? e.message : String(e))
     }
   }
 

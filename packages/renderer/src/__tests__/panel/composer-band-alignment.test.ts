@@ -36,7 +36,11 @@ import { bindDrawerSessionId, _resetDrawerForTest } from '@taiji/core/domain/dra
 import { COMPOSER_BAND_CLASS } from '@/components/panel/composer-band'
 import Panel from '@/components/panel/Panel.vue'
 import BtwPanel from '@/components/panel/BtwPanel.vue'
-import { MessageStreamStub } from '@/__tests__/helpers/panel-mount-mocks'
+import {
+  MessageStreamStub,
+  panelChatMock,
+  panelSessionMock,
+} from '@/__tests__/helpers/panel-mount-mocks'
 
 // ── 共享：从 MessageStream.vue 源码提取滚动容器水平内距 token ──
 
@@ -83,26 +87,12 @@ const coreMock = vi.hoisted(() => ({
   retryInboundDroppedSession: vi.fn(),
   subscribeSession: vi.fn(),
 }))
-const chatMock = vi.hoisted(() => ({
-  getMessages: vi.fn(() => [] as unknown[]),
-  isActive: vi.fn(() => false),
-  isCompacting: vi.fn(() => false),
-  isRespawnPending: vi.fn(() => false),
-  getOccupancy: vi.fn(() => ({ turn: 'idle', compacting: false, bash: false })),
-  failedHistory: new Map<string, boolean>(),
-}))
-const sessionMock = vi.hoisted(() => ({ list: [] as Array<{ id: string; status: string }> }))
 
 vi.mock('@taiji/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@taiji/core')>()),
   onInboundFrameDropped: coreMock.onInboundFrameDropped,
   retryInboundDroppedSession: coreMock.retryInboundDroppedSession,
   subscribeSession: coreMock.subscribeSession,
-}))
-vi.mock('@/stores/chat', () => ({ useChatStore: () => chatMock }))
-vi.mock('@/stores/session', () => ({ useSessionStore: () => sessionMock }))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ state: ref('idle'), isActive: ref(false) }),
 }))
 
 /** Panel 挂载（空会话态 → band 渲染 composer；子组件全 stub，本文件只看结构位）。 */
@@ -127,9 +117,9 @@ describe('主面板：composer 渲染在 band 带壳内（使用者黑盒 + 观�
     coreMock.onInboundFrameDropped.mockReset()
     coreMock.retryInboundDroppedSession.mockReset().mockReturnValue(false)
     coreMock.subscribeSession.mockReset().mockResolvedValue(undefined)
-    chatMock.getMessages.mockReturnValue([])
-    chatMock.failedHistory.clear()
-    sessionMock.list = []
+    panelChatMock.getMessages.mockReturnValue([])
+    panelChatMock.failedHistory.clear()
+    panelSessionMock.list = []
   })
 
   it('band 是 section 直子级、持有同缘 token、composer 渲染在带内', async () => {

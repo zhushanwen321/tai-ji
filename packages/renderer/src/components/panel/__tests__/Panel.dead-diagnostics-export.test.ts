@@ -14,11 +14,11 @@
  *  - exported → 成功 toast 含保存路径；
  *  - 非 dead 视图不渲染该入口（dead 分支专属，不连坐 conversation/empty）。
  *
- * Mock 策略（Panel.inbound-frame-notice.test.ts 同款最小完备集）：mock core/chat/session/
- * useNewTaskFlow/useSidebar/useToast/useExtensionUI + lib/ipc（exportDiagnosticBundle 与
- * reportRendererLog；不触 window.electronAPI——B1 IPC 门面）；Panel 与 DiagnosticsExportAction、
- * domain → lib/ipc 链路真实；ConfirmDialog stub（teleport 免处理，先例
- * ProviderPage.test.ts）；真实 Pinia。
+ * Mock 策略：壳依赖六连（useSidebar/useToast/useExtensionUI/useNewTaskFlow/chat/session）
+ * 由 helpers/panel-mount-mocks 导入即注册（session 状态经 panelSessionMock 单例注入）；
+ * 本文件只保留 lib/ipc 拦截（exportDiagnosticBundle 与 reportRendererLog；不触
+ * window.electronAPI——B1 IPC 门面）；Panel 与 DiagnosticsExportAction、domain → lib/ipc
+ * 链路真实；ConfirmDialog stub（teleport 免处理，先例 ProviderPage.test.ts）；真实 Pinia。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/__tests__/Panel.dead-diagnostics-export.test.ts
  */
@@ -27,11 +27,11 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { DIAGNOSTIC_EXPORT_PRIVACY_NOTICE } from '@taiji/shared'
-// useToast 断言经 toastSpyMock 单例取；Panel 挂载壳 mock 三连（useSidebar/useToast/
-// useExtensionUI）由 panel-mount-mocks 导入即注册——置于 Panel import 之前，注册早于
-// 其导入链加载（useToast 工厂绑定 TDZ 坑，见 helpers/i18n-toast-mock.ts）
+// useToast 断言经 toastSpyMock 单例取；Panel 挂载壳 mock 六连（useSidebar/useToast/
+// useExtensionUI/useNewTaskFlow/chat/session）由 panel-mount-mocks 导入即注册——置于
+// Panel import 之前，注册早于其导入链加载（useToast 工厂绑定 TDZ 坑，见 helpers/i18n-toast-mock.ts）
 import { toastSpyMock } from '@/__tests__/helpers/i18n-toast-mock'
-import { MessageStreamStub } from '@/__tests__/helpers/panel-mount-mocks'
+import { MessageStreamStub, panelSessionMock } from '@/__tests__/helpers/panel-mount-mocks'
 import Panel from '../Panel.vue'
 
 // ── mock 面 ────────────────────────────────────────────────────────
@@ -45,28 +45,6 @@ vi.mock('@/lib/ipc', async (importOriginal) => ({
   reportRendererLog: reportMock,
   // B1 IPC 门面：导出动作走 domain → lib/ipc，mock 在此拦截（不触 window.electronAPI）
   exportDiagnosticBundle: exportBundleMock,
-}))
-
-/** chat store mock：Panel 只消费 readers 面（含 isRespawnPending 过渡条） */
-const chatMock = vi.hoisted(() => ({
-  getMessages: vi.fn(() => [] as unknown[]),
-  isActive: vi.fn(() => false),
-  isCompacting: vi.fn(() => false),
-  isRespawnPending: vi.fn(() => false),
-  // occupancy 派生视图读口（缺省全 idle，对齐 store.getOccupancy 无记录缺省）
-  getOccupancy: vi.fn(() => ({ turn: 'idle', compacting: false, bash: false })),
-  failedHistory: new Map<string, boolean>(),
-}))
-vi.mock('@/stores/chat', () => ({ useChatStore: () => chatMock }))
-
-/** session store mock：dead 判据源 = list 内 status==='dead'（usePanelView isSessionDead） */
-const sessionMock = vi.hoisted(() => ({
-  list: [] as Array<{ id: string; status: string }>,
-}))
-vi.mock('@/stores/session', () => ({ useSessionStore: () => sessionMock }))
-
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ state: { value: 'idle' }, isActive: { value: false } }),
 }))
 
 /** ConfirmDialog stub：open 受控 + description/confirm 同构渲染（teleport 免处理） */
@@ -96,14 +74,14 @@ function exportedFixture(path: string) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  sessionMock.list = []
+  panelSessionMock.list = []
   setActivePinia(createPinia())
 })
 
 describe('Panel 死态块诊断导出入口（D6 / u3b 断言 ⑤）', () => {
   it('dead 态：占位内导出按钮可见（panel 命名空间文案），点击 → 知情文案 → 确认后 IPC 恰好一次', async () => {
     exportBundleMock.mockResolvedValue(exportedFixture('/tmp/taiji-diag-dead.zip'))
-    sessionMock.list = [{ id: 's1', status: 'dead' }]
+    panelSessionMock.list = [{ id: 's1', status: 'dead' }]
 
     const wrapper = mountPanel('s1')
     await nextTick()
@@ -130,7 +108,7 @@ describe('Panel 死态块诊断导出入口（D6 / u3b 断言 ⑤）', () => {
   })
 
   it('非 dead 视图（empty）不渲染导出入口（dead 分支专属）', async () => {
-    sessionMock.list = [] // s1 不在 list → 非 dead → empty-with-session 分支
+    panelSessionMock.list = [] // s1 不在 list → 非 dead → empty-with-session 分支
 
     const wrapper = mountPanel('s1')
     await nextTick()
