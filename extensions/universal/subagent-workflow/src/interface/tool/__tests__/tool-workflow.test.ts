@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ArgsValidationError,
   Budget,
   SLUG_MAX_LENGTH,
   Trace,
@@ -42,8 +43,13 @@ import {
   noteRebuiltSettlement,
   parseResourceMeta,
   setModelConfigService,
+  setSubagentService,
 } from "@zhushanwen/subagent-core";
-import type { DoneReason } from "@zhushanwen/subagent-core";
+import type {
+  DoneReason,
+  ExecutionTraceNode,
+  RunMemberRecordView,
+} from "@zhushanwen/subagent-core";
 import {
   argKeysFromMeta,
   findFlattenedArgKeys,
@@ -58,6 +64,8 @@ import { setRunEventJournalDirForTest } from "@zhushanwen/subagent-core/orchestr
 import { actionRun, registerWorkflowTool, TOOL_TOP_LEVEL } from "../tool-workflow.ts";
 import { REENTRY_BUSY_MESSAGE, type ReentryGuardRef } from "../reentry-guard.ts";
 import { captureTool, type CapturedTool } from "./capture-tool.ts";
+// status {runId} 成员查询的 record 拉取上限（生产消费点与 TUI run 视图同源口径）
+import { LIST_LIMIT } from "../../tui/list-shared.ts";
 
 /** 桩化 lifecycle——runWorkflow/abortRun 为 vi.fn（不起真 Worker，只测启动面/入口校验）。 */
 vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", () => ({
@@ -213,11 +221,12 @@ describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
     vi.useRealTimers();
   });
 
-  it("runs 为空 → 固定空态文案 + 空 runs details", async () => {
+  it("runs 为空 → 固定空态文案 + 空 runs details（mode:\"list\" 变体）", async () => {
     const tool = captureRegisteredTool<StatusToolView>(new Map(), "workflow_control");
     const r = await tool.execute("id", { action: "status" }, undefined, undefined, {});
     expect(r.content).toEqual([{ type: "text", text: "No workflows in current session." }]);
-    expect(r.details).toMatchObject({ action: "status", runs: [] });
+    // mode 判别字段（双变体 additive 改造后 list 变体的精确形状）
+    expect(r.details).toEqual({ action: "status", mode: "list", runs: [] });
   });
 
   it("running + done 混合 → 每 run 一行：status/reason 后缀、id 前 8 位、elapsed（done 冻结）、error 尾缀", async () => {
@@ -261,9 +270,11 @@ describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
           "[done] ok-wf (wf-17197) (2s)",
       },
     ]);
-    // details.runs = core runSummary 派生视图 + 宿主 stateFile 扩展（GUI 消费方）
+    // details.runs = core runSummary 派生视图 + 宿主 stateFile 扩展（GUI 消费方）；
+    // mode:"list" = 双变体判别字段（无 runId 路径）
     expect(r.details).toMatchObject({
       action: "status",
+      mode: "list",
       runs: [
         {
           runId: "wf-1719500000000-a1b2c3",
@@ -289,6 +300,247 @@ describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
         },
       ],
     });
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// status {runId} 单 run 视图（subagent-tool-interface-refactor §3.1.3/§3.4）：
+// run 摘要行（failed N/M）+ 成员表（record 优先 / trace 兜底）+ details mode:"run"
+// 变体 + 两种查无文案 + service 缺席降级。
+//
+// fake timers 固定 Date.now（actionStatus 的成员视图 now 参数）；service 单例槽是
+// Symbol.for 全局（跨测试文件共享），beforeEach/afterEach 双侧清零防污染。
+// ══════════════════════════════════════════════════════════════
+
+describe("status {runId} 单 run 视图（成员表 + failed N/M + 查无两种文案）", () => {
+  const FAKE_NOW = new Date("2026-01-01T00:00:30.000Z").getTime();
+
+  /** statusSingleRun 专用 capture：store.stateFilePath 落在自建 tmp 目录（查无判定 = 文件存在性）。 */
+  function captureStatusTool(runs: Map<string, WorkflowRun>, journalDir: string): StatusToolView {
+    const deps = {
+      runs,
+      store: { stateFilePath: (runId: string) => join(journalDir, `${runId}.record.jsonl`) },
+      registry: { get: vi.fn(), getPath: vi.fn(), loadAll: vi.fn(), invalidate: vi.fn() },
+    };
+    const guard: ReentryGuardRef = { isProcessing: false };
+    return captureTool<StatusToolView>(
+      (pi) => registerWorkflowTool(pi as never, deps as never, guard),
+      "workflow_control",
+    );
+  }
+
+  /** trace 节点 fixture（成员表兜底行来源；model 空串 = 请求缺省 → 渲染 "default"）。 */
+  function traceNode(
+    stepIndex: number,
+    status: ExecutionTraceNode["status"],
+    overrides: Partial<ExecutionTraceNode> = {},
+  ): ExecutionTraceNode {
+    return {
+      stepIndex,
+      agent: `fan-out-${stepIndex}`,
+      task: `task ${stepIndex}`,
+      model: "",
+      status,
+      startedAt: new Date(FAKE_NOW - 10_000).toISOString(),
+      ...overrides,
+    };
+  }
+
+  function makeRunWithTrace(runId: string, nodes: ExecutionTraceNode[]): WorkflowRun {
+    const run = makeRun({
+      runId,
+      scriptName: "fan-out",
+      status: "running",
+      startedAt: "2026-01-01T00:00:00.000Z", // fakeNow - 30s → 头行 (30s)
+    });
+    for (const node of nodes) run.state.trace.append(node);
+    return run;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ now: FAKE_NOW });
+    setSubagentService(null as never);
+  });
+
+  afterEach(() => {
+    setSubagentService(null as never);
+    vi.useRealTimers();
+  });
+
+  it("runId 命中（service 缺席）→ run 头行 failed N/M + trace 兜底成员行，降级不抛错，details mode:\"run\"", async () => {
+    const runId = "wf-1000-aaaa0001";
+    const run = makeRunWithTrace(runId, [
+      traceNode(0, "completed"),
+      traceNode(1, "failed", { error: "Request timed out." }),
+      traceNode(2, "running"),
+    ]);
+    const tool = captureStatusTool(new Map([[runId, run]]), mkdtempSync(join(tmpdir(), "wf-status-run-")));
+    const r = await tool.execute("id", { action: "status", runId }, undefined, undefined, {});
+
+    // 头行对照设计 §3.1.3：Run <runId> [<status>] <name> · <M> members · <elapsed> · failed <N>/<M>
+    const text = r.content[0]?.text ?? "";
+    expect(text.split("\n")[0]).toBe(`Run ${runId} [running] fan-out · 3 members · 30s · failed 1/3`);
+    // 成员行（stepIndex 序；failed 行带 error 尾缀）
+    expect(text).toContain("[0] completed");
+    expect(text).toContain("[1] failed");
+    expect(text).toContain("error: Request timed out.");
+    expect(text).toContain("[2] running");
+    // details run 变体（成员行全保留 → truncated:false，total = 去重后行数）
+    const details = r.details as Record<string, unknown>;
+    expect(details.action).toBe("status");
+    expect(details.mode).toBe("run");
+    expect(details.truncated).toBe(false);
+    expect(details.total).toBe(3);
+    expect((details.members as Array<Record<string, unknown>>).map((m) => m.stepIndex)).toEqual([0, 1, 2]);
+    expect(details.run).toMatchObject({ runId, name: "fan-out", status: "running" });
+  });
+
+  it("record 行优先（service 在场）→ running 行带 turns/currentActivity，record 覆盖同 stepIndex 的 trace 终局", async () => {
+    const runId = "wf-1000-bbbb0002";
+    const run = makeRunWithTrace(runId, [
+      traceNode(0, "completed"), // trace 侧旧终局——record 侧 running（当前尝试）应覆盖
+      traceNode(1, "running"),
+    ]);
+    const records: RunMemberRecordView[] = [
+      {
+        stepIndex: 0,
+        status: "running",
+        startedAt: FAKE_NOW - 6_000,
+        agent: "writer",
+        model: "prov/m1",
+        turns: 4,
+        eventLog: [],
+        currentActivity: { type: "tool", label: "bash" },
+      },
+    ];
+    const collect = vi.fn(() => records);
+    setSubagentService({ queries: { collectRecordsByParentRunId: collect } } as never);
+    const tool = captureStatusTool(new Map([[runId, run]]), mkdtempSync(join(tmpdir(), "wf-status-rec-")));
+    const r = await tool.execute("id", { action: "status", runId }, undefined, undefined, {});
+
+    const text = r.content[0]?.text ?? "";
+    expect(text).toContain("[0] running");
+    expect(text).toContain("writer");
+    expect(text).toContain("prov/m1");
+    expect(text).toContain("turns: 4");
+    expect(text).toContain("tool: bash");
+    // 无 record 的 stepIndex 走 trace 兜底（model 空串 → "default"）
+    expect(text).toContain("[1] running");
+    expect(text).toContain("default");
+    // record 查询带 runId 与同源 limit 口径
+    expect(collect).toHaveBeenCalledWith(runId, LIST_LIMIT);
+  });
+
+  it("超预算截断 → 失败行优先保留 + 省略行 + details truncated/total", async () => {
+    const runId = "wf-1000-dddd0004";
+    const nodes: ExecutionTraceNode[] = [];
+    for (let i = 0; i < 200; i++) {
+      nodes.push(traceNode(i, i === 199 ? "failed" : "completed"));
+    }
+    const run = makeRunWithTrace(runId, nodes);
+    const tool = captureStatusTool(new Map([[runId, run]]), mkdtempSync(join(tmpdir(), "wf-status-trunc-")));
+    const r = await tool.execute("id", { action: "status", runId }, undefined, undefined, {});
+
+    const text = r.content[0]?.text ?? "";
+    expect(text).toContain("more members omitted (failed rows kept)");
+    const details = r.details as Record<string, unknown>;
+    expect(details.truncated).toBe(true);
+    expect(details.total).toBe(200);
+    const members = details.members as Array<Record<string, unknown>>;
+    // 文本行数 = 头行 + 保留成员行 + 省略行；total 与保留行数差 = 省略数
+    const bodyLines = text.split("\n").length;
+    expect(bodyLines).toBe(1 + members.length + 1);
+    expect(text).toContain(`… ${200 - members.length} more members omitted (failed rows kept)`);
+    // failed 行（stepIndex 199）优先保留
+    const failedKept = members.some((m) => m.stepIndex === 199);
+    expect(failedKept).toBe(true);
+    expect(text).toContain("[199] failed");
+  });
+
+  it("查无 runId（磁盘无记录）→ throw 未知 id 文案（核对 id + 列表指引）", async () => {
+    const tool = captureStatusTool(new Map(), mkdtempSync(join(tmpdir(), "wf-status-miss-")));
+    await expect(
+      tool.execute("id", { action: "status", runId: "wf-9999-zzzz9999" }, undefined, undefined, {}),
+    ).rejects.toThrow(
+      /Workflow run 'wf-9999-zzzz9999' not found\. Double-check the runId .*without runId lists the runs still in the retention window\./s,
+    );
+  });
+
+  it("查无 runId（磁盘 record 流在、不在内存）→ throw 超窗口文案（从完成通知恢复；不指向列表）", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wf-status-evict-"));
+    const runId = "wf-1000-cccc0003";
+    writeFileSync(join(dir, `${runId}.record.jsonl`), "{}\n", "utf-8");
+    const tool = captureStatusTool(new Map(), dir);
+    const err = await tool
+      .execute("id", { action: "status", runId }, undefined, undefined, {})
+      .catch((e: unknown) => e as Error);
+    expect(err.message).toContain("settled and no longer in the in-memory retention window");
+    expect(err.message).toContain("the most recent 20 settled runs are kept");
+    expect(err.message).toContain("completion notification");
+    // 省略 runId 列全部不是超窗口的恢复动作（列表同样不含已逐出 run）
+    expect(err.message).not.toContain("without runId");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// workflow_run 保留键同名缺参双通道解释（§3.3.7）：catch ArgsValidationError，
+// 缺失 required 键与 RESERVED_OVERRIDE_KEYS 相交时补 Channel note。
+// ══════════════════════════════════════════════════════════════
+
+/** ajv required 错误形态的 ArgsValidationError（errors[0].params.missingProperty 与真 ajv 同构）。 */
+function argsValidationError(missing: string): ArgsValidationError {
+  return new ArgsValidationError(
+    "demo-wf",
+    `Invalid args for workflow 'demo-wf': 1 error(s)\n` +
+      `- : must have required property '${missing}'\n` +
+      `Read the workflow script file (location from <available_workflows>) for the parameter schema and usage.`,
+    [
+      {
+        instancePath: "",
+        message: `must have required property '${missing}'`,
+        params: { missingProperty: missing },
+      },
+    ],
+  );
+}
+
+describe("workflow_run 保留键同名缺参双通道解释（§3.3.7）", () => {
+  it("缺失 model（保留键）→ 原错误 + Channel note（run 级覆盖 / 参数进 args / 正确形状）", async () => {
+    const deps = makeDeps(scriptRegistry());
+    const tool = captureWorkflowTool(deps, { isProcessing: false }, "workflow_run");
+    vi.mocked(runWorkflow).mockRejectedValueOnce(argsValidationError("model"));
+    const err = await tool
+      .execute("id", { name: "/abs/demo-wf.js", model: "prov/m1" }, undefined, undefined, {})
+      .catch((e: unknown) => e as Error);
+
+    expect(err.message).toContain("Invalid args for workflow 'demo-wf'"); // 原文案保留在前
+    expect(err.message).toContain("Channel note");
+    expect(err.message).toContain('top-level "model" on workflow_run is a run-level override');
+    expect(err.message).toContain(
+      '{"name":"<script>","model":"<run-level override>","args":{"model":"<script argument>"}}',
+    );
+    expect(err.message).toContain('omit the top-level "model"');
+  });
+
+  it("缺失非保留键（task）→ 原错误原样透出，无 Channel note", async () => {
+    const deps = makeDeps(scriptRegistry());
+    const tool = captureWorkflowTool(deps, { isProcessing: false }, "workflow_run");
+    vi.mocked(runWorkflow).mockRejectedValueOnce(argsValidationError("task"));
+    const err = await tool
+      .execute("id", { name: "/abs/demo-wf.js" }, undefined, undefined, {})
+      .catch((e: unknown) => e as Error);
+
+    expect(err.message).toContain("Invalid args for workflow 'demo-wf'");
+    expect(err.message).not.toContain("Channel note");
+  });
+
+  it("非 ArgsValidationError 的 runWorkflow 失败 → 原样传播（catch 不吞）", async () => {
+    const deps = makeDeps(scriptRegistry());
+    const tool = captureWorkflowTool(deps, { isProcessing: false }, "workflow_run");
+    vi.mocked(runWorkflow).mockRejectedValueOnce(new Error("boom from lifecycle"));
+    await expect(
+      tool.execute("id", { name: "/abs/demo-wf.js" }, undefined, undefined, {}),
+    ).rejects.toThrow("boom from lifecycle");
   });
 });
 
