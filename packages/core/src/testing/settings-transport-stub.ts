@@ -37,7 +37,7 @@ export type SettingsSubscriptionStubs = Pick<
   | 'onProviders' | 'onModels' | 'onSkills' | 'onAgents' | 'onExtensions'
   | 'onSkillDirs' | 'onAgentDirs' | 'onExtensionDirs' | 'onDefaults' | 'onDefaultsWithSource'
   | 'onSkillCacheInvalidated' | 'onSystemPrompt' | 'onTerminalConfig' | 'onRetryConfig'
-  | 'onNetworkProxyConfig'
+  | 'onNetworkProxyConfig' | 'onWoolState'
   | 'onAuthDeviceCode' | 'onAuthAuthUrl' | 'onAuthSuccess' | 'onAuthError'
 >
 
@@ -66,6 +66,7 @@ export function makeSettingsSubscriptionStubs(): SettingsSubscriptionStubs {
     onTerminalConfig: makeUnsubscribeStub(),
     onRetryConfig: makeUnsubscribeStub(),
     onNetworkProxyConfig: makeUnsubscribeStub(),
+    onWoolState: makeUnsubscribeStub(),
     onAuthDeviceCode: makeUnsubscribeStub(),
     onAuthAuthUrl: makeUnsubscribeStub(),
     onAuthSuccess: makeUnsubscribeStub(),
@@ -142,6 +143,9 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     getSubagentEngineConfig: vi.fn(async () => ({ engines: ['pi'], defaultEngine: 'pi', engineModels: {}, engineDefaults: {} })),
     getCachedQuota: vi.fn(async () => ({ data: null, lastFetchAt: null })),
     refreshQuota: vi.fn(async () => ({ data: null, lastFetchAt: null })),
+    // wool 中性桩：空快照（三家族未接入基线）+ ok ack（动作语义由 wool 域单测锚定）。
+    getWoolState: vi.fn(async () => ({ families: [], fetchedAt: 0 })),
+    runWoolAction: vi.fn(async () => ({ ok: true as const })),
     listPresets: vi.fn(async () => []),
     getDefaultPreset: vi.fn(async () => 'builtin:full'),
     fetchRecommendedExtensions: vi.fn(async () => []),

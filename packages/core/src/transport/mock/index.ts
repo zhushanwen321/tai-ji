@@ -52,6 +52,9 @@ import type {
   UsageStatsResult,
   UiLocale,
   Segment,
+  WoolActionReply,
+  WoolActionRequest,
+  WoolRuntimeSnapshot,
 } from '@taiji/shared'
 import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS, DELIVERY_PREVIEW_MAX_CHARS } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
@@ -100,6 +103,7 @@ import type * as realBtwDomain from '../api/domains/btw'
 import type * as realUsageDomain from '../api/domains/usage'
 import type * as realTtsDomain from '../api/domains/tts'
 import type * as realSubagentDomain from '../api/domains/subagent'
+import type * as realWoolDomain from '../api/domains/wool'
 
 
 /** real 域形状单点（mock 锚定源；散函数模块的 namespace 类型即域接口） */
@@ -118,6 +122,7 @@ export type BtwDomain = typeof realBtwDomain
 export type UsageDomain = typeof realUsageDomain
 export type TtsDomain = typeof realTtsDomain
 export type SubagentDomain = typeof realSubagentDomain
+export type WoolDomain = typeof realWoolDomain
 
 
 /** 去 tuple 标签（Parameters 产 labeled tuple；参数名是修饰不是类型身份，归一后再比对）。导出：被导出的 SameTuple / DomainParamsExact 引用 */
@@ -2275,3 +2280,41 @@ const subagentImpl = {
 // [G4] 参数全等断言：mock subagent 任一方法少参/多参/错型在此行编译失败
 export type SubagentDomainParamsExact = AssertExact<DomainParamsExact<SubagentDomain, typeof subagentImpl>>
 export const subagent: SubagentDomain = subagentImpl
+
+// ── wool 域 mock（wool-provider D6 renderer 侧）──────────────────────────────
+// 与 real 域同接口（门面三元要求两侧同构）。行为：getState 回三家族未接入快照
+//（displayName 用家族名兜底——manifest 在 mock 语境不可达，与 runtime 未拉清单时同形态）；
+// action 恒回 ok（无编排链，动作语义由 real 轨单测锚定）；onWoolState no-op 取消。
+const woolImpl = {
+  async getState(): Promise<WoolRuntimeSnapshot> {
+    await sleep(TIMING.ack)
+    const now = Date.now()
+    return {
+      families: (['qoder', 'trae', 'workbuddy'] as const).map((family) => ({
+        family,
+        displayName: family,
+        vendor: '',
+        credentialsSource: family === 'workbuddy' ? ('oauth' as const) : ('ide-extract' as const),
+        riskNotice: '',
+        installed: false,
+        adopted: false,
+        autoCheckin: false,
+        account: null,
+        detect: null,
+        catalog: null,
+      })),
+      fetchedAt: now,
+    }
+  },
+  async action(_req: WoolActionRequest): Promise<WoolActionReply> {
+    await sleep(TIMING.ack)
+    return { ok: true }
+  },
+  onWoolState(_h: (snapshot: WoolRuntimeSnapshot) => void): () => void {
+    return () => {}
+  },
+}
+
+// [G4] 参数全等断言：mock wool 任一方法少参/多参/错型在此行编译失败
+export type WoolDomainParamsExact = AssertExact<DomainParamsExact<WoolDomain, typeof woolImpl>>
+export const wool: WoolDomain = woolImpl

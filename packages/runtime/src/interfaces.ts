@@ -398,6 +398,16 @@ export interface ISessionService {
   getRpcClient(sessionId: string): IPiEngine | undefined
 
   /**
+   * 系统信令入口公开委托（MessageDispatcher.sendSystemCommand 同一实现；旁路契约
+   * 见该方法的分流 D1 文档——不经 hook / 不经内核，fail-closed 探测）。
+   * 消费方 = revoke-orchestrator（deps 注入形态）与羊毛管理编排 wool-manager（本公开面）。
+   */
+  sendSystemCommand(sessionId: string, commandLine: string, requireCommand?: string): Promise<{
+    kind: 'sent' | 'extension-missing' | 'pi-reclaimed' | 'error'
+    message?: string
+  }>
+
+  /**
    * Ensure a session is active (has a running pi process). If not, auto-restore it.
    * @returns The active pi engine handle
    * @throws if restore fails or session not found
@@ -749,6 +759,12 @@ export interface IModelService {
    * aggregateModels 公开单参签名，故独立命名。
    */
   aggregateModelsWithScoped(providers: ProviderInfo[], scopedModels: string[]): ModelInfo[]
+  /**
+   * 羊毛 provider 聚合源注入（wool-provider D6 ③）：组合根在 WoolManager 构造后
+   * 接线，aggregateModelsWithScoped 消费其 listWoolProviderInfos 并入输出。可选
+   * 方法——测试替身不实现即「无羊毛并入」基线形态（S9 零回归对照锚）。
+   */
+  setWoolProviderSource?(source: { listWoolProviderInfos(): ProviderInfo[] }): void
   discoverModelsFromApi(
     baseUrl: string,
     apiKey?: string,

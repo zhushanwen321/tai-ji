@@ -34,6 +34,7 @@ import * as realUsage from '@taiji/core/transport/api/domains/usage'
 
 import * as realTts from '@taiji/core/transport/api/domains/tts'
 import * as realSubagent from '@taiji/core/transport/api/domains/subagent'
+import * as realWool from '@taiji/core/transport/api/domains/wool'
 
 import * as mockApi from '@taiji/core/transport/mock'
 
@@ -78,6 +79,9 @@ export const usage = isMock ? mockApi.usage : realUsage
 export const tts = isMock ? mockApi.tts : realTts
 // subagent 域（subagent-model-switch §7.1 入口层）：setModel（chat 域 / run 级全切共用）。
 export const subagent = isMock ? mockApi.subagent : realSubagent
+// wool 域（wool-provider D6）：羊毛 provider 宿主编排（getState/action/onWoolState）。
+// mock 轨走 mockApi.wool（未接入快照 + ok ack，G4 类型锚定签名全等）；real 轨走真实 RPC。
+export const wool = isMock ? mockApi.wool : realWool
 
 // search（⌘K 全局搜索）编排归 useSearchModalDeps（packages/renderer/src/composables/features/search/useSearchModalDeps.ts，D-026，#5）：
 // 该处判 VITE_MOCK 决定 mock 轨走 mockApi.search fixture / real 轨走真实 3 源聚合（命令/file/session domain）。

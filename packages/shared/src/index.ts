@@ -485,3 +485,36 @@ export {
 export { RUNTIME_INSTANCE_FILE } from './runtime-instance'
 export type { RuntimeInstanceRecord } from './runtime-instance'
 export { displayAgentName, displayWorkflowName } from './display-name'
+// 羊毛 provider 域（wool-provider 设计 D2/D6/D7：资产清单 schema + WS 帧 payload 形状 +
+// 向导状态机类型，SSOT；与羊毛扩展侧 wool-shared 管理协议的字段对齐注释见 ./wool 文件头）
+export type {
+  WoolAccountStatusView,
+  WoolActionErrorCode,
+  WoolActionReply,
+  WoolActionRequest,
+  WoolActionType,
+  WoolAssetManifest,
+  WoolCatalogModelView,
+  WoolCatalogView,
+  WoolCredentialsSource,
+  WoolDetectResultView,
+  WoolExtractStep,
+  WoolFamilyId,
+  WoolFamilyState,
+  WoolManifestErrorCode,
+  WoolManifestFamily,
+  WoolManifestFetchResult,
+  WoolOauthStep,
+  WoolRuntimeSnapshot,
+  WoolStepFailureCode,
+  WoolStepStatus,
+  WoolWizardTemplate,
+} from './wool'
+export {
+  isWoolAccountStatusView,
+  isWoolAssetManifest,
+  isWoolDetectData,
+  isWoolFamilyId,
+  WOOL_ACTION_TYPES,
+  WOOL_FAMILY_IDS,
+} from './wool'

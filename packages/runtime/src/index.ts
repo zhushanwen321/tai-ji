@@ -118,6 +118,10 @@ import { TerminalService } from './services/terminal/terminal-service.js'
 import { disposeTerminalPtysStep } from './services/terminal/dispose-terminal-ptys-step.js'
 import { QuotaService } from './services/quota-service.js'
 import { TtsService } from './services/tts-service.js'
+// wool-provider D6：羊毛宿主编排（清单/安装/管理专用会话/缓存/聚合源）；settings 羊毛域
+// 读写闭包消费 pi-settings-store（组合根 import infra 合法——services 层经 port 注入）。
+import { WoolManager, isWoolSettingsDomain, type WoolSettingsDomain } from './services/wool-manager.js'
+import { readSettings, updateSettingsFields } from './infra/pi/pi-settings-store.js'
 // 三家 TTS driver 工厂与表单派生视图（ai-voice-tts u2，infra/tts 唯一装配出口）——组合根 import
 // infra 装配是 C-comm-03 的合法例外（services 层禁 infra，组合根不在此列）。
 import { createTtsDriver, getTtsFormModels } from './infra/tts/index.js'
@@ -1469,6 +1473,34 @@ async function main(): Promise<void> {
     return scanned ? { cwd: scanned.cwd, mainTurnActive: false } : undefined
   }
 
+  // ── wool-provider D6（宿主编排装配）──────────────────────────────────────
+  // WoolManager：羊毛域唯一编排入口（wool.getState/wool.action 两帧路由 + model.list
+  // 聚合源 + wool.state 广播）。settings 羊毛域读写经 pi-settings-store 'wool' scope 闭包
+  // （读侧坏形状回空域——接入态是辅助状态，损坏不阻断启动）；wool.state 是 payload 无
+  // sessionId 的纯全局帧（设置域全局状态，rollingRestart.status 同款），走
+  // broadcastServerMessage 通用全局通道。initialize = 启动恢复（目录缓存读盘 + 安装态扫描），
+  // fire-and-forget：两步失败均内部 warn 降级（不阻塞启动主链）。
+  const woolSettingsPort = {
+    read: (): WoolSettingsDomain => {
+      const raw: unknown = readSettings().wool
+      return isWoolSettingsDomain(raw) ? raw : {}
+    },
+    write: (data: WoolSettingsDomain): void => {
+      updateSettingsFields('wool', (settings) => {
+        settings.wool = data
+      })
+    },
+  }
+  const woolManager = new WoolManager({
+    sessionService,
+    extensionService,
+    settings: woolSettingsPort,
+    dataDir: getDataDir(),
+    broadcast: (msg) => server.broadcastServerMessage(msg),
+  })
+  modelService.setWoolProviderSource(woolManager)
+  void woolManager.initialize()
+
   const tServicesReady = performance.now()
   // [subagent-model-switch U6] 模型切换网关生产适配器（§7.1.1 通道）：出站点 prompt +
   // 结果文件回收 + wire 应答映射。依赖同源派生——getClient 照 workflowAction 的
@@ -1530,6 +1562,8 @@ async function main(): Promise<void> {
     // btw 线三帧路由（btw-question M2-b，B1/B2 授权接线）：BtwService 窄接口 + 主会话解析
     // 注入 BtwMessageHandler（assembleOptionalHandlers 装配 → buildRoutes 展开 handles）。
     btw: { service: btwService, resolveMain: resolveBtwMain },
+    // wool 两帧路由（wool-provider D6）：WoolMessageHandler 装配 + buildRoutes 展开 handles。
+    wool: woolManager,
     // [subagent-model-switch U6] subagent.setModel 路由依赖（§7.1.1 通道生产适配器，
     // 上方构造；缺席时 handler 恒回 unwired 可操作错误的兜底自此不可达）。
     subagentModelSwitchGateway,

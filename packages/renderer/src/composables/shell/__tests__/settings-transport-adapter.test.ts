@@ -33,6 +33,7 @@ import type {
   SkillDirConfig,
   SystemPromptConfig,
   TerminalConfig,
+  WoolActionRequest,
 } from '@taiji/shared'
 import { apiConfigDomainMock } from '@/__tests__/helpers/api-facade-mock'
 
@@ -56,6 +57,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
   // ── 探针参数哨兵（值任意，只需类型合法；同一常量同时喂 call 与透传断言，防脱节）──
   const PROBE_PID = 'probe-provider' as ProviderId
   const PROBE_SOURCE: ProviderSource = 'pi'
+  const PROBE_WOOL_ACTION: WoolActionRequest = { action: 'detect', family: 'qoder' }
   const PROBE_RENAME_MODE: RenameMode = 'first-stop'
   const PROBE_RENAME_STYLE: RenameStyle = 'slug'
   const PROBE_DIRS: SkillDirConfig[] = [{ path: 'probe/dir', enabled: true, scope: 'project' }]
@@ -101,6 +103,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     | 'preset'
     | 'usage'
     | 'session'
+    | 'wool'
 
   interface ForwardEntry {
     domain: FacadeDomain
@@ -173,6 +176,8 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     getSubagentEngineConfig: fwd('session', 'getSubagentEngineConfig', [], (t) => t.getSubagentEngineConfig()),
     getCachedQuota: fwd('quota', 'getCached', [PROBE_PID], (t, providerId) => t.getCachedQuota(providerId)),
     refreshQuota: fwd('quota', 'refreshQuota', [PROBE_PID], (t, providerId) => t.refreshQuota(providerId)),
+    getWoolState: fwd('wool', 'getState', [], (t) => t.getWoolState()),
+    runWoolAction: fwd('wool', 'action', [PROBE_WOOL_ACTION], (t, req) => t.runWoolAction(req)),
     listPresets: fwd('preset', 'list', [], (t) => t.listPresets()),
     getDefaultPreset: fwd('preset', 'getDefault', [], (t) => t.getDefaultPreset()),
     fetchRecommendedExtensions: fwd('extension', 'fetchRecommended', [], (t) => t.fetchRecommendedExtensions()),
@@ -288,6 +293,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     onSkillCacheInvalidated: fwd('config', 'onSkillCacheInvalidated', [probeHandler], (t, h) =>
       t.onSkillCacheInvalidated(h),
     ),
+    onWoolState: fwd('wool', 'onWoolState', [probeHandler], (t, h) => t.onWoolState(h)),
     onSystemPrompt: fwd('config', 'onSystemPrompt', [probeHandler], (t, h) => t.onSystemPrompt(h)),
     onTerminalConfig: fwd('config', 'onTerminalConfig', [probeHandler], (t, h) => t.onTerminalConfig(h)),
     onRetryConfig: fwd('config', 'onRetryConfig', [probeHandler], (t, h) => t.onRetryConfig(h)),
@@ -328,6 +334,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
       preset: domainProxy('preset'),
       usage: domainProxy('usage'),
       session: domainProxy('session'),
+      wool: domainProxy('wool'),
     }))
     const { createSettingsTransport } = await import('../settings-transport-adapter')
     const transport = createSettingsTransport()

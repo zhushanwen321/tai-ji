@@ -87,6 +87,8 @@ import type {
   TtsFormModel,
   TtsProviderId,
 } from './tts-types'
+// wool.* 域载荷形状 SSOT 引用（wool-provider 设计：域形状归属 ./wool，本文件仅登记 type→payload 映射）
+import type { WoolActionReply, WoolActionRequest, WoolRuntimeSnapshot } from './wool'
 
 
 /**
@@ -340,6 +342,12 @@ export type ClientMessageType =
   // 全量状态经 canvas.get 拉取 + canvas.updated 广播失效收敛（拉为主，ADR-0097），
   // mutate reply 只回事件回执（eventId/evType/summary）或结构化错误，不进 MUTATION_DOMAINS。
   | 'canvas.list' | 'canvas.get' | 'canvas.mutate'
+  // wool.*（wool-provider 设计 D6，宿主编排 RPC）：getState 拉羊毛域全量运行态快照
+  //（family 安装/接入/账号/目录缓存视图）；action 触发宿主编排动作（安装/检测/状态
+  // 拉取/签到/目录刷新/授权/签到开关），reply 与 request 同名（canvas.mutate 同款
+  // payload 消费型同名模式）。状态变化经 wool.state 广播推回（无 sessionId——设置域
+  // 全局状态，rollingRestart.status 先例）。
+  | 'wool.getState' | 'wool.action'
 
 // ── Payload 类型定义 ────────────────────────────────────────────
 
@@ -1112,6 +1120,10 @@ export interface ClientMessageMap {
   'canvas.list': { sessionId: string }
   'canvas.get': { canvasId: string; sessionId: string }
   'canvas.mutate': { actor: CanvasActor; sessionId: string } & CanvasMutateRequest
+  // ── wool.*（wool-provider 设计 D6）请求 payload：形状 SSOT 在 ./wool。getState 无参；
+  // action = 编排动作信封（payload 单对象；设置域全局状态，无 sessionId 字段）。
+  'wool.getState': Record<string, never>
+  'wool.action': WoolActionRequest
 }
 
 // ClientMessage 由 ClientMessageMap 直接派生：每个 type 字面量映射到
@@ -1449,6 +1461,12 @@ export type ServerMessageType =
   | 'canvas.updated'
   // canvas.* 三 RPC 的 reply（与 request 同名——session.subscribe 同名模式）。
   | 'canvas.list' | 'canvas.get' | 'canvas.mutate'
+  // wool.state：wool.getState 的 reply + 状态变化广播（同名同形，canvas.list + canvas.updated
+  // 收敛为单帧的形态——羊毛域快照小，全量推免逐字段 diff）。无 sessionId（设置域全局状态，
+  // broker 纯全局通道）。
+  | 'wool.state'
+  // wool.action：动作 RPC 的 reply（与 request 同名——canvas.mutate 同款）。
+  | 'wool.action'
 
 /** skill 缓存失效广播的作用域：global=全局 skill 变动，project=某项目 cwd 的 skill 变动。 */
 export type SkillCacheScope = 'global' | 'project'
@@ -3102,6 +3120,12 @@ export interface ServerMessageMapBase {
   // renderer 侧经 ROUTE_TABLE crossSession 声明进跨会话通道，消费方 use-canvas-sync
   // 模块级单订阅按归属过滤）；收到后重新拉取。
   'canvas.updated': { canvasId: string; sessionId: string; evType: CanvasEventType; eventId: string; summary: string }
+
+  // ── wool 域（wool-provider 设计 D6；payload 形状 SSOT 在 ./wool）──
+  // wool.state：运行态快照（getState reply 与状态变化广播同名同形；无 sessionId）。
+  'wool.state': { snapshot: WoolRuntimeSnapshot }
+  // wool.action：动作结果两态信封；状态变化另行 wool.state 广播（reply 不捎快照，单一数据源）。
+  'wool.action': WoolActionReply
 }
 
 /**
@@ -3511,6 +3535,12 @@ export interface ReplyPayloadMap {
   'canvas.list': ServerMessageMap['canvas.list']
   'canvas.get': ServerMessageMap['canvas.get']
   'canvas.mutate': ServerMessageMap['canvas.mutate']
+
+  // ── wool.*（wool-provider D6 宿主编排 RPC）：getState 的 reply 是 wool.state
+  //（同名同形广播 + reply 单帧复用，见 ServerMessageType 注释）；action reply 与
+  // request 同名（canvas.mutate 同款 payload 消费型）。
+  'wool.getState': ServerMessageMap['wool.state']
+  'wool.action': ServerMessageMap['wool.action']
 }
 
 /**

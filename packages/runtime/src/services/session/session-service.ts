@@ -94,7 +94,7 @@ import { SessionEntryRemovalOrchestrator, runDestroyStepIsolated } from './sessi
 // 空闲回收占座原语与等待观测超时（idle-pi-reclamation D6-2，u2）。type-only import：
 // Seat 实例由 u3 组合根创建后 setter 注入，本模块不持有创建权（不引入运行时依赖环）。
 import { RespawnOrchestrator } from './pi-respawn.js'
-import { MessageDispatcher } from './message-dispatcher.js'
+import { MessageDispatcher, type SystemCommandOutcome } from './message-dispatcher.js'
 // [A1 接线] skill 注入映射源（skill-reload-nondestructive D7）：records/dispatcher 的
 // SkillInjector 共享同一晚绑定占位，组合根在 SkillRegistry 构造后 bind 真源（构造顺序环
 // 见 LateBoundSkillSource 注释）。
@@ -921,6 +921,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async create(cwd?: string, label?: string, options?: SessionCreateOptions): Promise<SessionSummary> { return this.lifecycle.create(cwd, label, options) }
   async delete(sessionId: string): Promise<void> { return this.lifecycle.delete(sessionId) }
   async deleteByCwd(cwd: string): Promise<BatchDeleteResult> { return this.lifecycle.deleteByCwd(cwd) }
+  /**
+   * 系统信令入口公开委托（羊毛管理编排 wool-manager 消费；revoke-orchestrator 走
+   * dispatcher deps 同一实现）。旁路契约（不经 hook / 不经内核）见 MessageDispatcher.sendSystemCommand。
+   */
+  async sendSystemCommand(sessionId: string, commandLine: string, requireCommand?: string): Promise<SystemCommandOutcome> {
+    return this.dispatcher.sendSystemCommand(sessionId, commandLine, requireCommand)
+  }
   async renameSession(sessionId: string, newName: string): Promise<void> { return this.lifecycle.renameSession(sessionId, newName) }
   async restoreSession(sessionId: string): Promise<SessionSummary> {
     const summary = await this.lifecycle.restoreSession(sessionId)

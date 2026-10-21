@@ -19,7 +19,7 @@
  */
 import type { SettingsTransport, DiscoverModelsRequest, DiscoverModelsResponse } from '@taiji/core/domain/settings'
 import type { ExtensionInfo, ProviderId } from '@taiji/shared'
-import { config, model, extension, settings, quota, preset, usage, session } from '@/api'
+import { config, model, extension, settings, quota, preset, usage, session, wool } from '@/api'
 
 /**
  * 构造 SettingsTransport 实现：逐方法转发 @/api 门面八元（VITE_MOCK 感知）。
@@ -73,6 +73,9 @@ export function createSettingsTransport(): SettingsTransport {
     getSubagentEngineConfig: () => session.getSubagentEngineConfig(),
     getCachedQuota: (providerId) => quota.getCached(providerId),
     refreshQuota: (providerId) => quota.refreshQuota(providerId),
+    // wool（wool-provider D6）：羊毛向导与条目徽标数据源（wool 门面 = core wool domain）。
+    getWoolState: () => wool.getState(),
+    runWoolAction: (req) => wool.action(req),
     listPresets: () => preset.list(),
     getDefaultPreset: () => preset.getDefault(),
     fetchRecommendedExtensions: () => extension.fetchRecommended(),
@@ -143,6 +146,7 @@ export function createSettingsTransport(): SettingsTransport {
     onDefaults: (h) => config.onDefaults(h),
     onDefaultsWithSource: (h) => config.onDefaultsWithSource(h),
     onSkillCacheInvalidated: (h) => config.onSkillCacheInvalidated(h),
+    onWoolState: (h) => wool.onWoolState(h),
     onSystemPrompt: (h) => config.onSystemPrompt(h),
     onTerminalConfig: (h) => config.onTerminalConfig(h),
     onRetryConfig: (h) => config.onRetryConfig(h),

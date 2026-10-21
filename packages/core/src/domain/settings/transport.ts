@@ -63,6 +63,9 @@ import type {
   QuotaFetchFailureReason,
   ExtensionDiscoveredPayload,
   RecommendedExtension,
+  WoolRuntimeSnapshot,
+  WoolActionRequest,
+  WoolActionReply,
 } from '@taiji/shared'
 
 /**
@@ -214,6 +217,15 @@ export interface SettingsTransport {
   /** 强制刷新额度（绕过 throttle，Settings 测试查询按钮专用；失败态不抛错） */
   refreshQuota(providerId: string): Promise<QuotaSnapshot>
 
+  // ── 羊毛 provider（wool-provider D6：向导与条目徽标数据源）──
+  /** 拉羊毛域全量运行态快照（family 安装/接入/账号/目录缓存视图；纯内存读） */
+  getWoolState(): Promise<WoolRuntimeSnapshot>
+  /**
+   * 触发宿主编排动作（install/detect/status/checkin/refresh/setAutoCheckin/authorize）。
+   * 两态信封不 reject——ok=false 是设计内领域回执（error.code 分流恢复指引）。
+   */
+  runWoolAction(req: WoolActionRequest): Promise<WoolActionReply>
+
   // ── pi 启动预设 ──
   /** 全部预设（内置 + 自定义） */
   listPresets(): Promise<PiLaunchPreset[]>
@@ -358,6 +370,9 @@ export interface SettingsTransport {
   onDefaultsWithSource(h: (payload: { defaultModel: string; source?: string }) => void): () => void
   /** skill 缓存失效信号（scope='global' 全局重新拉取 / 'project' 按 cwd 路由） */
   onSkillCacheInvalidated(h: (payload: SkillCacheInvalidatedPayload) => void): () => void
+
+  // ── 羊毛 provider（wool-provider D6：状态变化广播，与 getState reply 同名同形）──
+  onWoolState(h: (snapshot: WoolRuntimeSnapshot) => void): () => void
 
   // ── system 设置项 ──
   onSystemPrompt(h: (cfg: SystemPromptConfig, corrupted: boolean) => void): () => void

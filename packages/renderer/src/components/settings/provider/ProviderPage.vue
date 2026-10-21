@@ -11,33 +11,16 @@
        空状态 / 列表 section）各自 mt-[16px]（rem gap 类在 14px html 基准下收缩为 demo 值
        的 87.5%，本页全部槽位走绝对 px）。 -->
   <div class="flex flex-col">
-    <!-- 页头 = SettingsModal 共享 .page-head 形态（demo .pg-set .page-head：title 20px/600、desc mt-8 13px mid、actions gap-8px） -->
-    <header class="page-head">
-      <div class="head-text">
-        <h1 class="title">{{ t('settings.menu.provider') }}</h1>
-        <p class="desc">{{ t('settings.menu.providerDesc') }}</p>
-      </div>
-      <div class="flex shrink-0 flex-col items-end gap-1.5">
-        <div class="head-actions">
-          <ProviderImportMenu :disabled="importState !== 'idle'" @select="onImportSelect" />
-          <!-- F2：入口聚合为「+ 添加供应商 ▾」菜单（内置模板（推荐）/ 自定义），自定义走 createAndExpand 原流程 -->
-          <ProviderTemplatePicker
-            :providers="builtinProviders"
-            @select="onTemplateSelect"
-            @custom="createAndExpand"
-          />
-        </div>
-        <!-- RD-4#10：远程模型目录刷新失败/部分失败 → 「目录可能过期」（离线时列表陈旧无痕迹） -->
-        <span
-          v-if="catalogsStale"
-          data-testid="provider-catalogs-stale"
-          class="flex items-center gap-1 text-[length:var(--text-2xs)] text-warn"
-        >
-          <AlertTriangle class="size-3.5 shrink-0" />
-          {{ t('settings.provider.catalogsStale') }}
-        </span>
-      </div>
-    </header>
+    <!-- 页头（.page-head 形态与入口细节见 ProviderPageHeader.vue）：标题 + 导入/模板/羊毛三入口 + 目录过期提示 -->
+    <ProviderPageHeader
+      :import-disabled="importState !== 'idle'"
+      :builtin-providers="builtinProviders"
+      :catalogs-stale="catalogsStale"
+      @import-select="onImportSelect"
+      @template-select="onTemplateSelect"
+      @custom="createAndExpand"
+      @open-wool="woolEntries.wizardOpen.value = true"
+    />
 
     <!-- Scoped Model 配置区（模型白名单 + 有序列表）。容器 = GroupCard（demo .gcard 卡底
          --bg-card #2d2d30 / r-card / overflow: clip，与下方供应商列表卡同原语）。注意 clip 是
@@ -91,118 +74,58 @@
           <span class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[length:var(--text-3xs)] font-bold text-[color:var(--neutral-fg-2)]">{{ providers.length }}</span>
         </template>
         <div class="flex flex-col gap-[8px] p-[12px_16px]">
-      <div
-        v-for="p in renderList"
-        :key="p.id"
-        data-testid="provider-card"
-        class="rounded-md bg-surface p-[12px_14px] hover:bg-surface-hover"
-      >
-      <!-- 行头（demo .prow：状态点/开关/名称/徽标/计数/删除/chevron，gap 12px） -->
-      <div class="flex min-w-0 items-center gap-3">
-        <span
-          v-if="p.id !== NEW_ID"
-          class="size-[7px] shrink-0 rounded-full"
-          :class="statusDot(p.status)"
-        />
-
-        <!-- 启用开关（名称左侧）。新建态无开关 -->
-        <Switch
-          v-if="p.id !== NEW_ID"
-          :model-value="p.enabled"
-          class="shrink-0"
-          :disabled="toggling.has(p.id)"
-          :aria-label="`${p.name} ${t('settings.provider.colEnabled')}`"
-          @click.stop
-          @update:model-value="onToggleEnabled(p, $event)"
-        />
-
-        <!-- 供应商名称（点击展开/收起就地编辑；demo .pname = 14px / fw-mid / neutral-fg） -->
-        <span
-          class="flex-1 cursor-pointer truncate text-[length:var(--text-base)] font-semibold text-neutral-fg"
-          role="button"
-          :aria-expanded="expandedId === p.id"
-          @click="toggleExpand(p.id)"
-        >{{ p.id === NEW_ID ? t('settings.provider.newProvider') : p.name }}</span>
-
-        <!-- 认证方式徽章（demo .tag 形态：h18 / px7 / 圆角 999 / text-2xs / fw-mid；配色读 provider-badge） -->
-        <span
-          v-if="p.id !== NEW_ID"
-          data-testid="provider-auth-badge"
-          class="inline-flex h-[18px] shrink-0 items-center rounded-full px-[7px] text-[length:var(--text-2xs)] font-semibold"
-          :class="authBadgeClass(p)"
-        >{{ t(`settings.provider.builtinTemplate.authBadge.${authBadgeTextKey(p)}`) }}</span>
-
-        <!-- 默认供应商 pill（P2：可点击 → 弹模型选择，选中后 config.setDefaultModel；demo .tag.ok 形态） -->
-        <ModelSelectPopover
-          v-if="p.id !== NEW_ID && p.id === defaultProviderId"
-          :selected="settingsStore.defaultModel.value"
-          :provider-filter="[p.id]"
-          @select="onSetDefaultModel"
-        >
-          <template #trigger>
-            <PopoverTrigger as-child>
-              <Button
-                variant="ghost"
-                class="h-[18px] shrink-0 rounded-full bg-accent-soft px-[7px] py-0 text-[length:var(--text-2xs)] font-semibold text-accent hover:bg-accent-soft"
-                :title="t('panel.modelSelect.switchModel')"
-                data-testid="provider-default-pill"
-              >{{ t('settings.provider.defaultPill') }}</Button>
-            </PopoverTrigger>
-          </template>
-        </ModelSelectPopover>
-
-        <span v-if="p.id !== NEW_ID" class="shrink-0 text-[length:var(--text-xs)] text-neutral-fg-2">{{ t('settings.provider.modelsCount', { count: p.models.length }) }}</span>
-
-        <!-- dirty 徽章（展开编辑且有未保存改动时） -->
-        <span
-          v-if="expandedId === p.id && currentBodyDirty"
-          data-testid="provider-dirty-badge"
-          class="flex shrink-0 items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 text-[length:var(--text-3xs)] font-semibold text-warn"
-        >
-          <span class="size-1.5 rounded-full bg-warn" />
-          {{ t('settings.provider.unsavedBadge') }}
-        </span>
-
-        <span class="flex-1" />
-
-        <!-- 删除按钮（demo .btn.icon.danger-hover：28px 方钮 / neutral-mid / hover danger；
-             wave4 TC5：title 按差异收窄——catalog=移除/custom=删除） -->
-        <Button
-          v-if="p.id !== NEW_ID"
-          variant="ghost"
-          class="h-[28px] w-[28px] shrink-0 rounded-md p-0 text-neutral-mid hover:bg-surface-hover hover:text-danger [&_svg]:size-[14px]"
-          :title="p.kind === 'catalog' ? t('settings.provider.removeTitle') : t('settings.provider.deleteTitle')"
-          :data-testid="p.kind === 'catalog' ? 'provider-remove-btn' : 'provider-delete-btn'"
-          @click.stop="deleteTarget = p"
-        >
-          <Trash2 />
-        </Button>
-
-        <!-- 展开指示（demo：chevron-down 14px mid，收窄 -90°，展开归位） -->
-        <ChevronDown
-          class="size-[14px] shrink-0 text-neutral-mid transition-transform duration-[var(--duration-fast)]"
-          :class="expandedId === p.id ? '' : '-rotate-90'"
-        />
-      </div>
-
-      <!-- 展开就地编辑体（R4；demo 展开体 = 行内 border-top hairline + pt 12px）。
-           B-1：OAuth 态经 props/事件接线（composable 内共享单实例 useProviderOAuth，无双 listener） -->
-      <div v-if="expandedId === p.id" class="mt-[4px] border-t border-hairline pt-[12px]" data-testid="provider-expand-body">
-        <ProviderEditBody
-          :provider="p.id === NEW_ID ? null : p"
+        <!-- 行卡（demo .prow 形态与展开体细节见 ProviderRowCard.vue）：父侧下发每行受控态，
+             动作经事件上抛回本页编排（乐观更新 / 手风琴 guard / OAuth 状态机均在本页单实例） -->
+        <ProviderRowCard
+          v-for="p in renderList"
+          :key="p.id"
+          :provider="p"
+          :is-new="p.id === NEW_ID"
+          :expanded="expandedId === p.id"
+          :dirty="currentBodyDirty"
+          :is-default="p.id === defaultProviderId"
+          :default-model="settingsStore.defaultModel.value"
+          :toggling="toggling.has(p.id)"
           :oauth-present="oauthPresenceStatus(p.id)"
           :oauth-supported="isOauthSupported(p.id)"
+          @toggle="toggleExpand"
+          @toggle-enabled="onToggleEnabled(p, $event)"
+          @set-default="onSetDefaultModel"
+          @remove="deleteTarget = $event"
           @dirty-change="onBodyDirtyChange"
           @saved="onEditSaved"
           @cancel="onBodyCancel"
           @oauth-login="onEditOauthLogin(p)"
           @oauth-logout="onEditOauthLogout(p)"
         />
-      </div>
-    </div>
         </div>
       </GroupCard>
     </section>
+
+    <!-- 羊毛条目区（wool-provider D6 ③：已接入家族；数据 = wool 快照，不进 config.providers——S9 零回归） -->
+    <section v-if="woolEntries.adoptedFamilies.value.length" class="mt-[16px]">
+      <GroupCard>
+        <template #head>
+          <div data-testid="wool-entries-header" class="gc-head-text">
+            <h3 class="gc-title">{{ t('wool.listTitle') }}</h3>
+          </div>
+        </template>
+        <div class="flex flex-col gap-[8px] p-[12px_16px]">
+          <WoolEntryCard
+            v-for="f in woolEntries.adoptedFamilies.value"
+            :key="f.family"
+            :family="f"
+            :refreshing="woolEntries.runningActions.value.has(f.family)"
+            :checkin-running="woolEntries.runningActions.value.has(f.family)"
+            @refresh="woolEntries.refreshEntry(f.family)"
+            @checkin="woolEntries.checkin(f.family)"
+          />
+        </div>
+      </GroupCard>
+    </section>
+
+    <!-- 羊毛接入向导（D6 ①/D7 两族模板） -->
+    <WoolWizard v-model:open="woolEntries.wizardOpen.value" />
 
     <!-- dirty 检查确认弹窗（切换/收起/新建时拦截未保存改动） -->
     <ConfirmDialog
@@ -278,24 +201,17 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, AlertTriangle, ChevronDown, Settings, Trash2 } from '@lucide/vue'
+import { AlertCircle, Settings } from '@lucide/vue'
 import { useProviderCatalogsStale } from '@/composables/features/settings/useProviderCatalogsStale'
 import { ConfirmDialog } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Switch } from '@/components/ui/switch'
-import { PopoverTrigger } from '@/components/ui/popover'
-import ModelSelectPopover from '@/components/panel/ModelSelectPopover.vue'
-import type { BuiltinProviderTemplate, ProviderInfo, ProviderStatus, SetProviderData, ProviderId } from '@taiji/shared'
+import type { BuiltinProviderTemplate, ProviderInfo, SetProviderData, ProviderId } from '@taiji/shared'
 import { getSettingsStore, getSettingsTransport } from '@taiji/core'
 import { useQuotaStore } from '@/stores/quota'
 import { useProviderImport } from '@/composables/features/settings/useProviderImport'
 import { useToast } from '@/composables/useToast'
 import {
   GroupCard,
-  ProviderEditBody,
-  ProviderImportMenu,
   ProviderImportPreviewDialog,
-  ProviderTemplatePicker,
   ProviderQuickSetup,
   OAuthDialog,
   ScopedModelSection,
@@ -305,7 +221,10 @@ import { useApiKeyAutoEnable } from '@/composables/features/settings/useApiKeyAu
 import { useQuotaAutoEnableNotice } from '@/composables/features/settings/useQuotaAutoEnableNotice'
 import { useAccordionGuard } from '@/composables/features/settings/useAccordionGuard'
 import { useScopedModels } from '@/composables/features/settings/useScopedModels'
-import { authBadgeClass, authBadgeTextKey } from './provider-badge'
+import { useWoolEntries } from '@/composables/features/settings/useWoolEntries'
+import { WoolEntryCard, WoolWizard } from './WoolWizard'
+import ProviderPageHeader from './ProviderPageHeader.vue'
+import ProviderRowCard from './ProviderRowCard.vue'
 
 // ui 包组件 renderer 侧依赖由 AppShell 级 useSettingsShell 统一 provide（SETTINGS_TOAST_KEY /
 // QUOTA_CONFIGURE_FACTORY_KEY 已在壳层注入 SettingsModal 全子树，此处不再组件级重复 provide）
@@ -316,6 +235,7 @@ const transport = getSettingsTransport()
 // Scoped Models 白名单（乐观更新 + 失败回滚；RPC 失败 rethrow 由下方包装 handler 统一反馈）
 const { scopedRenderItems, selectableModels, addScopedModels, removeScopedModel, moveScopedModel } = useScopedModels()
 
+const woolEntries = useWoolEntries() // 羊毛条目区编排（D6 ③；快照数据在 useWool 单例）
 const props = defineProps<{ providers: ProviderInfo[] }>()
 
 const { t } = useI18n()
@@ -565,11 +485,6 @@ async function confirmDelete() {
   } finally {
     deleting.value = false
   }
-}
-
-function statusDot(status: ProviderStatus): string {
-  const map = { connected: 'bg-success', not_configured: 'bg-neutral-dim', error: 'bg-danger' }
-  return map[status]
 }
 </script>
 
