@@ -259,6 +259,25 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
 fi
 
 # ============================================================================
+# 0.8 EdgeFade 渐焦遮罩消费范围门禁（2026-10-21 用户裁决）
+#     EdgeFade（顶缘渐焦：blur+沉色+容器 mask）仅对话流及同族场景可用——唯一挂载点
+#     MessageStream.vue（drawer subagent / 旁路提问 / workflow agent 经其复用）；
+#     列表 / 面板 / 文件树等一律禁止。判定唯一源 =
+#     .githooks/check_edge_fade_scope.mjs（白名单 ALLOWLIST 同文件）。
+#     按 R1 惯例不设独立 SKIP 开关，走 SKIP_ALL_CHECKS。
+# ============================================================================
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    EDGE_FADE_STAGED=$(echo "$STAGED_FILES" | grep -E "^packages/.*\.(vue|tsx?)$" || true)
+    if [ -n "$EDGE_FADE_STAGED" ]; then
+        echo -e "${BLUE}[INFO] 运行 EdgeFade 消费范围检查...${NC}"
+        if ! node .githooks/check_edge_fade_scope.mjs $EDGE_FADE_STAGED; then
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    fi
+fi
+
+# ============================================================================
 # 1. 前端 ESLint 检查
 # ============================================================================
 

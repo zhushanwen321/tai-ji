@@ -13,7 +13,7 @@
   -->
   <div
     data-fs-scope="sidebar"
-    class="sidebar h-full [--edge-fade-sink:var(--bg)] data-[collapsed=true]:invisible motion-reduce:data-[collapsed=true]:hidden"
+    class="sidebar h-full data-[collapsed=true]:invisible motion-reduce:data-[collapsed=true]:hidden"
     :class="{ 'w-0 opacity-0 overflow-hidden': sidebar.collapsed }"
     :data-collapsed="sidebar.collapsed ? 'true' : undefined"
   >

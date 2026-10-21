@@ -180,22 +180,3 @@ describe('N8 hover 详情卡（demo .sess-pop：行首图标 + 立即开 + 末�
     wrapper.unmount()
   })
 })
-
-// ── 顶缘渐焦（spec sidebar §3.1：三视图滚动容器接 EdgeFade，滚动离顶才启用）──
-describe('N8 EdgeFade 顶缘渐焦接线', () => {
-  it('EdgeFade 在滚动视口内且 scroller 解析命中真滚动元素（reka 内部 wrapper 之下仍可达；离顶渐焦激活）', async () => {
-    const wrapper = mountList()
-    const fade = wrapper.find('[data-testid="edge-fade"]')
-    expect(fade.exists()).toBe(true)
-    // 渐焦带必须挂在滚动视口内部（sticky 钉顶 + scroller 解析的前提；挪出滚动容器即红）
-    const viewport = fade.element.closest('[data-reka-scroll-area-viewport]') as HTMLElement | null
-    expect(viewport).not.toBeNull()
-    // 滚动事件驱动显隐 + 容器 mask：滚动宿主（scrollerEl prop）经 SessionList onMounted
-    // → EdgeFade watch 补绑，先 flush 再派发
-    await nextTick()
-    viewport!.scrollTop = 20
-    viewport!.dispatchEvent(new Event('scroll'))
-    expect(viewport!.style.maskImage).toContain('linear-gradient')
-    wrapper.unmount()
-  })
-})

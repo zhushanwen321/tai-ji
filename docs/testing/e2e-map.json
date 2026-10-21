@@ -2975,6 +2975,27 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#异步等待写法防-cpu-并发时序偶发",
       "note": "判定唯一源 = .githooks/check-test-blind-wait.mjs（豁免登记表 BLIND_WAIT_EXEMPT 同文件，逐条附理由）；对 staged 测试文件的强制拦截不经本对账（pre-commit 0.7 段直接跑检查本体），本 rule 只看护判定语义自身的回归。仓根 e2e/ Playwright real 轨域显式排除（其存量盲等登记 docs/todo/e2e-spec-blind-wait-cleanup.md）。2026-10-20 随盲等全仓清理批落地（改动测试文件即被 pre-commit 检查本体拦截，无需本 rule 触发）。"
+    },
+    {
+      "id": "E2E-EDGEFADE-01",
+      "summary": "EdgeFade 渐焦遮罩消费范围门禁：仅对话流及同族场景可用（唯一挂载点 MessageStream.vue，drawer subagent / 旁路提问 / workflow agent 流经其复用），列表 / 面板 / 文件树等一律禁止（2026-10-21 用户裁决）",
+      "scope": [
+        ".githooks/check_edge_fade_scope.mjs",
+        ".githooks/install-hooks.sh"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": ".githooks/check_edge_fade_scope.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node .githooks/check_edge_fade_scope.mjs",
+      "owner": "packages/renderer",
+      "authority": ".githooks/check_edge_fade_scope.mjs",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（0.8 段，触发范围 = packages/**/*.{vue,ts} staged 文件，不设独立 SKIP 开关；接线 SSOT = .githooks/install-hooks.sh）。判定唯一源 = check_edge_fade_scope.mjs（白名单 ALLOWLIST 同文件，新增条目须附裁决理由；登记于 AGENTS.md 豁免标记盘点）。对 staged renderer 文件的强制拦截不经本对账（pre-commit 直接跑检查本体），本 rule run 面 = 脚本自身或 hook 模板变更时的全仓自含冒烟（git ls-files 扫描 + 两行正则，毫秒级）。无 vitest 测试资产——判定逻辑为两行正则匹配白名单差集，复杂度不配独立语义测试。2026-10-21 随消费范围收敛批落地（同批撤 SessionList/FileView/GitPanel/DetailPane/BackgroundTaskDetailPanel 五处接线）。"
     }
   ]
 }

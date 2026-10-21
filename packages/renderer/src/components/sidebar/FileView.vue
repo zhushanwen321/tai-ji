@@ -48,12 +48,8 @@
 
     <!-- 滚动区：仅承载树（加载/错误/空态）。virtua Virtualizer 必须是其 parentElement
          （ScrollAreaViewport）的直接子节点——滚动容器由 virtua 从 parentElement 探测，
-         中间不能有包装 div（探针实证，MessageStream 同结构）。三态与树互为 v-if/v-else 链。
-         顶缘渐焦（侧栏 spec（demo）§3.1）：滚动宿主显式传入（reka 封装在挂载点与真滚动
-         viewport 之间有内部 wrapper，parentElement 探测不成立），显隐/mask 自驱动，
-         与 Virtualizer 互为兄弟节点，不破坏「直接子节点」探测前提。 -->
+         中间不能有包装 div（探针实证，MessageStream 同结构）。三态与树互为 v-if/v-else 链。 -->
     <ScrollArea ref="treeScrollArea" class="min-h-0 flex-1">
-      <EdgeFade :scroller-el="treeScrollerEl" />
       <!-- 加载态（loadTree 在途） -->
       <div
         v-if="rootState.status === 'loading'"
@@ -141,7 +137,6 @@ import { Virtualizer } from 'virtua/vue'
 import { FolderOpen, Search, Loader2, AlertCircle } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { EdgeFade } from '@/components/ui/edge-fade'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import FileTreeRow from './FileTreeRow.vue'
@@ -169,7 +164,7 @@ const selectedPath = computed(() => store.getSelectedPath(props.sessionId))
 const { loadTree, setFilter, setupInvalidation, expandNode, collapseNode, selectFile } = useFileTree()
 const drawer = useSideDrawer()
 
-// 滚动宿主（EdgeFade scrollerEl）：同 SessionList——reka ScrollArea 内部 wrapper 使
+// 滚动宿主（Virtualizer scroll-ref）：reka ScrollArea 内部 wrapper 使
 // parentElement 探测不成立，从 ScrollArea expose 显式取 viewport 元素
 //（expose 链两层解包：ScrollArea.viewportEl（自动解包的 ref）→ Viewport 实例.viewportElement）
 const treeScrollerEl = ref<HTMLElement | undefined>(undefined)

@@ -9,23 +9,20 @@
 // 容器 mask 用多 stop 近似 smoothstep 的平滑剖面（线性渐变人眼感知中段偏快，多 stop
 // 消台阶感）。
 // z-[3] 为容器内局部层级刻意值，不取 style.css z 档（对照 z 表：--z-sticky 1 / --z-popover 10）：
-// 须高于滚动容器内 sticky 内容（SessionList 组标题走 --z-sticky 档，同 z 值时按 DOM 序会盖住
-// 渐焦带、滚入带内逃逸失焦+沉色），又须低于容器内交互控件（MessageStream 回到底部按钮、
-// DetailPane 选区 bubble 走 --z-popover 同值 10 档）——装饰渐焦带夹两档之间。
+// 须高于滚动容器内 sticky 内容（同 z 值时按 DOM 序 sticky 项会盖住渐焦带、滚入带内逃逸
+// 失焦+沉色），又须低于容器内交互控件（MessageStream 回到底部按钮走 --z-popover 同值
+// 10 档）——装饰渐焦带夹两档之间。
 // [贴顶前提] 消费方滚动容器禁设顶部 padding——sticky 带的正常流位置会被压到 padding 之下，
 // 滚过 padding 前带悬浮于视口中部（顶缘露出未处理区）；顶部留白放滚动内容内（spacer）。
 // 降级：prefers-reduced-motion 关过渡（motion-reduce 变体）；prefers-reduced-transparency
 // 关整个渐焦效果（遮罩层隐藏 + 容器 mask 摘除）。
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+// [消费范围门禁] 仅对话流及其同族场景（经 MessageStream 复用：drawer subagent / 旁路提问 /
+// workflow agent）可用；.githooks/check_edge_fade_scope.mjs 强制。
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 
 const on = ref(false)
 const reducedTransparency = ref(false)
 const root = ref<HTMLElement | null>(null)
-/** 显式指定滚动宿主：ScrollArea 封装类消费方传入（其挂载点与真滚动元素之间有内部
- *  wrapper，scroll 不冒泡、mask 须作用于滚动盒，parentElement 解析不成立）；缺省回退
- *  parentElement（原生滚动容器直接子元素的经典接线，行为不变）。prop 到位晚于挂载时
- *  经 watch 补绑。 */
-const props = defineProps<{ scrollerEl?: HTMLElement | null }>()
 
 let scroller: HTMLElement | null = null
 let transparencyMedia: MediaQueryList | null = null
@@ -82,14 +79,8 @@ onMounted(() => {
     transparencyMedia = window.matchMedia('(prefers-reduced-transparency: reduce)')
     transparencyMedia.addEventListener('change', onTransparencyChange)
   }
-  bind(props.scrollerEl ?? root.value?.parentElement ?? null)
+  bind(root.value?.parentElement ?? null)
 })
-
-// scrollerEl 到位晚于挂载（父组件 onMounted 才能拿到 ScrollArea viewport 引用）时补绑
-watch(
-  () => props.scrollerEl,
-  (el) => bind(el ?? root.value?.parentElement ?? null),
-)
 
 onBeforeUnmount(() => {
   transparencyMedia?.removeEventListener('change', onTransparencyChange)
