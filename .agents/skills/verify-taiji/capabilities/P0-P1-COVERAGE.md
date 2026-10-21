@@ -8,10 +8,11 @@
 > - `reuse-e2e` = 复用机器 e2e / 验证脚本资产（写路径），不另写剧本
 > - `unreachable` = 不可达（**必须写理由**，并尽量写清「要什么前置才可达」）
 >
-> **本表依据的三条实测事实**（2026-10-21）：
+> **本表依据的三条实测事实**（2026-10-21；第 4 条为同日后半场补测）：
 > 1. faux LLM 演员在 subagent/workflow 的**孙进程不可达**（`--no-extensions` + 白名单无 faux provider + `TAIJI_E2E=1` 门）→ 证据 `capabilities/env.md` Gotchas + `scripts/probes/faux-grandchild.mjs`
 > 2. 孙进程**读同一个 `PI_CODING_AGENT_DIR`**（`packages/runtime/src/infra/subagent-control/engine-launch-env.ts`）→ **本地 mock-http provider 通道可覆盖孙进程**（先例 `scripts/verify-provider-live-sync.mjs`）
 > 3. 已实跑通过的 scenario：`p0-env-smoke`（15 断言）、`p0-session-chat`（28 断言），均 verdict pass
+> 4. **mock-http 通道已实测打通孙进程**（2026-10-21）：subagent 派发 → 结论 `mock-grandchild-reachable`（探针 `scripts/probes/mock-llm-grandchild.mjs`，7 条断言全绿：record 终态 `idle` + canary 落盘 + mock 收到 `model=mock-sub-a` 请求）；workflow fan-out 两成员 → 结论 `mock-workflow-reachable`（探针 `scripts/probes/mock-llm-workflow.mjs`：run status=done，两成员 outcome=done，6 条成员模型请求）
 
 ## 一、P0（17 行）
 
@@ -28,7 +29,7 @@
 | 9 | 中断/取消 | `chat.abort` `subagent.cancel` `workflow.abort` | — | **`capability-only`** | 主会话中断（faux + 低 TPS）可验；执行域取消需 mock-http 通道 → `p0-interrupt-cancel` |
 | 10 | Markdown 渲染 | `render.markdown` `render.shiki` `render.html-preview` | — | **`reuse-e2e`** | `e2e/markdown-table-layout.spec.ts`（@p0-smoke）+ E2E-VISUAL-01 像素轨 + 渲染采样管道 `docs/testing/render-sampling.md`。本技能补 `render.markdown` 的 faux `markdown-kitchen-sink.json` 一轮即可 |
 | 11 | 扩展装载框架 | `extension.load` + `env.doctor` 第三判据 | `p0-env-smoke`（仅 N≥8） | **`capability-only`** | N = resolver 去重目录数，**不是装载成功数**。要验「某扩展真的可用」需行为证据（命令注册 / tool 可用 / 日志）→ `p0-extension-load` |
-| 12 | subagent/workflow 面板与派发 | `subagent.dispatch` `list` `stream` `cancel` `model` + `workflow.dispatch` `runs` `overlay` `abort` `reconnect` + `subagent.session-observation` | — | **`capability-only`** | **结构层**（run 登记 / 列表 / overlay / abort 通道）可验；**执行层**需 mock-http 通道（faux 不可达，见事实 1/2）。机器资产：`e2e/workflow-viz-overlay.spec.ts`、`workflow-sidebar-sync.spec.ts`（mock 轨）；`batch-s1..s4`（L3 真 LLM） |
+| 12 | subagent/workflow 面板与派发 | `subagent.dispatch` `list` `stream` `cancel` `model` + `workflow.dispatch` `runs` `overlay` `abort` `reconnect` + `subagent.session-observation` | — | **`capability-only`**（结构层）+ **mock-http 可验**（执行层） | **结构层**（run/record 登记、列表、overlay、abort 通道）只有原子能力文档，无完整剧本 → 仍 `capability-only`；**执行层**已由 mock-http 通道实测打通并可零 token 验（事实 4）：subagent 探针 `scripts/probes/mock-llm-grandchild.mjs` → `mock-grandchild-reachable`（record 终态 + canary 落盘 + mock 收到成员模型请求），workflow 探针 `scripts/probes/mock-llm-workflow.mjs` → `mock-workflow-reachable`（run done + 两成员 outcome=done），夹具 `fixtures/mock-http/*.json` + `fixtures/workflows/fanout-canary.workflow.js`。机器资产：`e2e/workflow-viz-overlay.spec.ts`、`workflow-sidebar-sync.spec.ts`（mock 轨）；`batch-s1..s4`（L3 真 LLM）。下一战：把两个探针合成 `p0-subagent-workflow-dispatch` 剧本 |
 | 13 | 设置页 | `settings.provider` `system-prompt` `preset` `mcp` `network-proxy` `theme` | — | **`capability-only`** | 六面文档齐；仅 provider 一面有旧故事。建议拆两个剧本：`p0-settings-provider`（写侧 + provider-live-sync 联动）+ `p0-settings-others`（提示词/预设/主题/MCP/代理抽样） |
 | 14 | 插件系统 | `plugin.list` `toggle` `statusbar` `mountpoints` | — | **`reuse-e2e`** | `bash scripts/verify-plugin-contract.sh`（E2E-PLUGINCONTRACT-01）+ `bash scripts/verify-plugin-e2e.sh`（E2E-PLUGINCONTRACT-02）。注意 `plugin.statusbar` 已退役（ADR-0141），现役点位 = headerAction / tray widget / modal |
 | 15 | 统一提问表单 FormOverlay | `interaction.askuser` | — | **`capability-only`** | `features/ask-user-form.md` 有故事但**示例脚本违反 schema**（options 需 ≥2）；正确夹具 = `fixtures/faux-responses/ask-user-two-questions.json` → `p0-form-overlay` |
@@ -55,12 +56,17 @@
 
 **说明**：P0/P1 无 `unreachable` 行——所有功能面都有至少一条可达路径。真正的 `unreachable` 在**子能力**层面（例：插件 sandbox 权限审批无夹具、`render.image` 无夹具、OS 原生对话框），逐条登记在各 capability 的「证不了 / Gotchas」。
 
+**关于执行域（subagent / workflow）的范式变化**：此前「执行层必须真 LLM」的结论只对 **faux 通道**成立。
+2026-10-21 实测确认存在第二条零 token 通道（本地 mock OpenAI provider，孙进程经 `PI_CODING_AGENT_DIR`
+读到同一份 models.json），因此执行域的可验性口径是 **`requires: mock-http | live`**，不再强制真 LLM
+（见 `capabilities/env.md` Gotchas 与 `capabilities/API-CONTRACT.md` §2 的 `requires` 枚举）。
+
 **补剧本优先级**（按「P0 未覆盖 × 成本」排序）：
 
 | 序 | 剧本 | 覆盖行 | 理由 |
 |---|---|---|---|
 | 1 | `p0-model-switch` | P0-8 模型与 thinking | 纯协议可验、成本最低、P0 缺口最大面 |
-| 2 | `p0-subagent-workflow-dispatch` | P0-12 | 结构层 + 执行层（mock-http）双覆盖，价值最高 |
+| 2 | `p0-subagent-workflow-dispatch` | P0-12 | 结构层 + 执行层（mock-http）双覆盖，价值最高。**执行层两个探针已就绪**（`scripts/probes/mock-llm-grandchild.mjs` / `mock-llm-workflow.mjs`，均实测 pass），剩余工作 = 把探针步骤搬进 scenario 并接 `createInstance({ llm })` |
 | 3 | `p0-chat-stream-ui` | P0-3 对话流式 + P1-2 工具块 | faux 夹具已备，UI 断言补齐第一条 A 通道 |
 | 4 | `p0-session-persistence` | P0-5 持久化 | live≡reload 是 P0 核心不变量 |
 | 5 | `p0-form-overlay` | P0-15 | 夹具已修对，旧故事锚点风险已登记 |
@@ -84,3 +90,10 @@
 3. **键盘栈序（Esc 路由）无 capability 锚点**：`ui.container` 已补 id，但缺可观测信号（需要产品侧暴露当前栈顶或提供日志）。
 4. **`workflow.reconnect` 的 WS 断连驱动未实测**：`context.setOffline` 是否稳定关闭 WS 未验证；当前复用 `e2e/workflow-disconnect-recovery.spec.ts`。
 5. **`subagent.stream` 内容帧是 transient**（不分配 seq）→ 无法用序号回放断言。
+6. **mock-http 通道的语义空洞（已实测，必须登记）**：mock 回复无模型语义——因此「成员/子代理的任务质量、
+   工具选择、真实 token 成本、真实耗时」仍然不可断言；可断言面只到「进程真的跑到 LLM 并收敛」。
+   另两个已踩到的坑（写在 `capabilities/env.md` Gotchas）：① 成员必须在终局调 `structured-output`
+   （workflow 模式单参数合成工具，不做 = `schema_deterministic` 失败）；② 想让成员落「成员演员」队列
+   需在 `workflow_run` 传 run 级 `model`（否则继承主 agent 模型、与主队共享游标）。
+7. **mock-http 的 abort / reconnect 未覆盖**：两个探针只走「正常完成」路径（workflow abort、session 断连收敛
+   仍需真 LLM 或拉长剧本的低 TPS 手段）。

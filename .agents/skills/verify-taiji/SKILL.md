@@ -77,8 +77,36 @@ node apps/electron/scripts/dev-instance.mjs --data-dir ~/.taiji-dev/verify-faux-
 ```
 
 - 想拉长流式窗口观察中途态（呼吸环 / 停止按钮 / steer）：env 加 `TAIJI_FAUX_TPS=<每秒 token 数>`。
-- 不设 `TAIJI_E2E`（那是 e2e fixture 的产物加载形态，dev 路径下设它会破坏 vite 加载）。副作用：workflow/subagent 的 pi 孙进程不加载 faux 扩展，faux 只覆盖主会话 agent 轮次——孙进程域的验收用真实引擎或登记为不可达。
+- 不设 `TAIJI_E2E`（那是 e2e fixture 的产物加载形态，dev 路径下设它会破坏 vite 加载）。副作用：workflow/subagent 的 pi 孙进程不加载 faux 扩展，faux 只覆盖主会话 agent 轮次——**孙进程域用下面的 mock-http 通道**（实测可达）。
 - 常用工作目录选真实 git 仓库（如 `<repo>` 自身或 e2e/fixtures/sample-project），文件树 / git 角标才有内容。
+
+### 1.1b mock-http LLM 装配（孙进程可达的零 token 通道）
+
+faux 在 subagent / workflow 的**孙进程不可达**（孙进程 `--no-extensions` spawn，只说宿主的扩展白名单）。
+第二条零 token 通道不走 extension：孙进程继承 `PI_CODING_AGENT_DIR`，读同一份 `<dataDir>/agent/models.json`，
+因此只要里面有个 `openai-completions` 自定义 provider 且 `baseUrl` 指向本机 mock 服务即可。
+
+```js
+import { createInstance, resolveRepo } from '<skill>/scripts/lib/instance.mjs'
+
+const instance = createInstance({
+  repo: resolveRepo('/abs/path/to/worktree'),
+  name: `verify-mock-${Date.now().toString(36)}`,
+  llm: { responses: { 'mockllm/mock-1': [...], 'mockllm/mock-sub-a': [...] } },  // 与 faux 互斥
+  background: true,
+})
+await instance.launch()
+// instance.llm → { baseUrl, mainRef: 'mockllm/mock-1', subRef: 'mockllm/mock-sub-a', ... }
+// instance.mockLlm.requests → 每次请求的 model / messages（「孙进程真的打到 mock」的铁证面）
+await instance.dispose()   // 同时关 mock server + 删自建数据目录
+```
+
+- 剧本形态与 faux 完全同构（`fixtures/faux-responses/*.json` 可直接搬）；**model-keyed** 才能分主/成员演员。
+- 磁盘落盘：`models.json`（provider `mockllm`）、`settings.json`（默认模型 + `enabledModels`）、
+  `agent/subagents/config.json`（`engineDefaults.pi = mockllm/mock-sub-a`）；不写 faux 扩展。
+- 剧本库与踩坑清单：[fixtures/mock-http/README.md](fixtures/mock-http/README.md)。
+- 实测探针：`scripts/probes/mock-llm-grandchild.mjs`（subagent，`mock-grandchild-reachable`）/
+  `scripts/probes/mock-llm-workflow.mjs`（workflow fan-out，`mock-workflow-reachable`）。
 
 ### 1.2 普通实例建 session 的凭证前提
 
@@ -164,6 +192,8 @@ node .agents/skills/verify-taiji/scripts/run.mjs scenarios/<id>.mjs --artifacts-
 
 # 探针：孙进程 LLM 可达性（faux 不可达 / mock-http 可达）
 node .agents/skills/verify-taiji/scripts/probes/faux-grandchild.mjs [--repo <repo>]
+node .agents/skills/verify-taiji/scripts/probes/mock-llm-grandchild.mjs [--repo <repo>]   # subagent 派发
+node .agents/skills/verify-taiji/scripts/probes/mock-llm-workflow.mjs [--repo <repo>]    # workflow fan-out
 ```
 
 ## 7. 能力原语层与验收剧本

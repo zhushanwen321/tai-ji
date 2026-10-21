@@ -1,0 +1,38 @@
+{
+  "_note": "mock-http 通道剧本（model-keyed）。主演员 mockllm/mock-1 派发 fanout-canary；成员演员 mockllm/mock-sub-a 每个成员两轮：第一轮调 structured-output（workflow 模式下它是单参数合成工具，parameters 即权威 schema），第二轮收尾文本。用法见 fixtures/mock-http/README.md。",
+  "mockllm/mock-1": [
+    {
+      "text": "跑一个两路 fan-out 的 workflow：",
+      "toolCalls": [
+        {
+          "name": "workflow_run",
+          "args": {
+            "name": "<REPLACE_WITH_ABSOLUTE_PATH>/fanout-canary.workflow.js",
+            "model": "mockllm/mock-sub-a",
+            "args": { "tasks": ["第一路：报出你剧本里的 canary", "第二路：报出你剧本里的 canary"] }
+          }
+        }
+      ],
+      "stopReason": "toolUse"
+    },
+    { "text": "workflow 已派发，等待两路结果汇总（WORKFLOW-DISPATCHED）。", "stopReason": "stop" },
+    { "text": "parent-notified", "stopReason": "stop" },
+    { "text": "parent-idle-1", "stopReason": "stop" },
+    { "text": "parent-idle-2", "stopReason": "stop" },
+    { "text": "parent-idle-3", "stopReason": "stop" }
+  ],
+  "mockllm/mock-sub-a": [
+    {
+      "toolCalls": [{ "name": "structured-output", "args": { "summary": "FANOUT-BRANCH-A-MOCKCANARY" } }],
+      "stopReason": "toolUse"
+    },
+    { "text": "branch-a-done", "stopReason": "stop" },
+    {
+      "toolCalls": [{ "name": "structured-output", "args": { "summary": "FANOUT-BRANCH-B-MOCKCANARY" } }],
+      "stopReason": "toolUse"
+    },
+    { "text": "branch-b-done", "stopReason": "stop" },
+    { "text": "spare-1", "stopReason": "stop" },
+    { "text": "spare-2", "stopReason": "stop" }
+  ]
+}

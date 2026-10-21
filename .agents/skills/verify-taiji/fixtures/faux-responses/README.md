@@ -40,8 +40,8 @@ node apps/electron/scripts/dev-instance.mjs --data-dir ~/.taiji-dev/verify-faux-
 | `tool-edit.json` | write + edit → 变更集卡（A 态） | 数组 2 步 | cwd 必须是 **git 仓库**；会写 `.faux-changeset.txt` | 仅未跟踪文件（A）；`partially-reviewed`/`resolved` 无 UI 锚点 |
 | `ask-user-two-questions.json` | 统一表单：两题 tab / 选项 / 提交后继续 | 数组 2 步 | — | 每题 options 必须 ≥2（schema `minItems:2`）；不改 footer 文案 |
 | `permission-tool.json` | 权限审批浮层（strict/approve 模式） | 数组 2 步 | **必须先切非 yolo 模式**：`<dataDir>/agent/config/permission-ext-config.json` 写 `{"mode":"strict",...}`，或会话里发 `/permission strict` | 只验 `strict` 确定性分支；`auto` 的 AI classifier 未验 |
-| `subagent-dispatch.json` | 子代理派发（model-keyed 双演员） | **对象**（`faux/faux-1` + `faux/faux-1-b`） | 无（当前**跑不通**，见下节） | 孙进程 faux 不可达 → 子代理模型无法解析 |
-| `workflow-fanout.json` | workflow 派发 + 两路 fan-out（model-keyed 三演员） | **对象**（`faux/faux-1` + `-b` + `-c`） | 需要真实 workflow 脚本绝对路径替换 `name`；当前**跑不通** | 同孙进程不可达 + 脚本路径必须先存在 |
+| `subagent-dispatch.json` | 子代理派发（model-keyed 双演员） | **对象**（`faux/faux-1` + `faux/faux-1-b`） | 无（faux 通道**跑不通**，见下节） | 孙进程 faux 不可达 → 子代理模型无法解析。**同一剧本结构可用 mock-http 通道跑**（faux 通道不可达；mock 版见 `fixtures/mock-http/subagent-dispatch-mock.json`） |
+| `workflow-fanout.json` | workflow 派发 + 两路 fan-out（model-keyed 三演员） | **对象**（`faux/faux-1` + `-b` + `-c`） | 需要真实 workflow 脚本绝对路径替换 `name`；faux 通道**跑不通** | 同孙进程 faux 不可达 + 脚本路径必须先存在。**同一剧本结构可用 mock-http 通道跑**（faux 通道不可达；mock 版见 `fixtures/mock-http/workflow-fanout-mock.json`，脚本用 `fixtures/workflows/fanout-canary.workflow.js`） |
 | `markdown-kitchen-sink.json` | 表格 / ts 代码块 / 行内+块级 KaTeX / 相对图片 / html-preview / 链接 | 数组 2 步 | cwd 可写（会写 `.faux-pic.svg` / `.faux-artifact.html`） | shiki 只支持 12 种白名单语言；html-preview 用相对路径（基准 = session cwd） |
 | `canvas-enter.json` | 画布：`tool_search` 激活 deferred 工具 → `canvas_enter` → 自动开画布 | 数组 3 步 | 必须在 **taiji GUI 宿主**（裸 pi CLI 会返回「非 taiji 宿主」错误） | deferred 激活链**未实测**（见下节）；`tool_search` 的 query 命中率依赖 BM25 |
 | `split-multi.json` | 多轮出队（3 轮各消费一步） | 数组 3 步 | — | 第 4 轮会命中队列耗尽错误（预期） |
@@ -66,7 +66,12 @@ node apps/electron/scripts/dev-instance.mjs --data-dir ~/.taiji-dev/verify-faux-
   subagent record `stopReason: failed / error: pi child exited with code 1`；
   探针 = `scripts/probes/faux-grandchild.mjs`。
 - 因此这两个剧本**保留为形态参考**（model-keyed 的写法、参数形状），
-  **不作为可执行验收资产**。真机验证子代理/工作流请用真实引擎（`requires: live`）或 mock pi。
+  **不作为 faux 通道的可执行验收资产**。
+  **但有第二条通道**：mock-http（本机 mock OpenAI provider，零 token / 零外网 / 零 extension）
+  已实测打通孙进程 —— 同一份 step 数据结构直接喂 `createInstance({ llm: { responses } })` 即可跑，
+  mock 版剧本在 `fixtures/mock-http/`（`subagent-dispatch-mock.json` / `workflow-fanout-mock.json`），
+  自检剧本 `fixtures/workflows/fanout-canary.workflow.js`。真机验证子代理/工作流的执行层
+  请用 **`requires: mock-http | live`**（见 `capabilities/env.md` Gotchas）。
 
 ### 2. `canvas-enter.json` — deferred 激活链未实测
 

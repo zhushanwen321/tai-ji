@@ -11,6 +11,12 @@
  * - 只 kill 自己起的 PID（禁 pkill / 进程组宽匹配）；
  * - dispose 幂等，失败也留原始输出（实例启动日志 + 日志尾）。
  *
+ * 两条零 token LLM 通道（API-CONTRACT §1.1）：
+ * - `faux`    ：pi extension 注册 `api: 'faux'` provider（主会话可用；**孙进程不可达**）；
+ * - `llm`     ：本机 mock HTTP 服务 + models.json 里的 `openai-completions` 自定义 provider
+ *               （`lib/mock-llm.mjs`；**孙进程可达**，因为它只依赖 PI_CODING_AGENT_DIR 下的
+ *               models.json，不依赖任何 extension）。
+ *
  * 零第三方依赖：仅 node:*。
  */
 import { spawn, spawnSync } from 'node:child_process'
@@ -241,7 +247,17 @@ export function createInstance(options = {}) {
   let instanceName = options.name ?? `verify-${Date.now().toString(36)}`
   const background = options.background !== false
   const faux = options.faux
+  const llm = options.llm
+  if (faux && llm) {
+    throw new InstanceError('faux 与 llm 是两条互斥的 LLM 通道，只能选一个', {
+      hint: '主会话用 faux（extension 通道）或 mock-http（llm 通道）；需孙进程可用 → 用 llm',
+    })
+  }
   const extraEnv = options.env ?? {}
+  /** mock-http 服务的句柄（launch 时起、dispose 时关）。 */
+  let mockLlm = null
+  /** llm 通道装配出的 provider id / 模型清单（供探针断言与记录）。 */
+  let llmTopology = null
 
   let state = 'idle' // idle | launched | stopped | disposed
   let parsed = null
@@ -315,14 +331,130 @@ export function createInstance(options = {}) {
       env.TAIJI_FAUX_SCRIPT = path.join(dir, 'agent', 'faux-responses.json')
       env.TAIJI_EXTENSION_PATHS = path.join(repo, 'e2e', 'fixtures', 'faux-provider-ext')
     }
+    // llm 通道不需要任何 env：provider 定义全在 <dataDir>/agent/models.json 里，
+    // 主 pi 与孙进程都按 PI_CODING_AGENT_DIR 读同一份。
     // 子进程不允许继承「另一个实例」的残留标记
     delete env.TAIJI_E2E
     return env
   }
 
+  /**
+   * llm（mock-http）通道装配：起 mock server → 写 models.json / settings.json /
+   * subagents/config.json → 删 auto-rename 标志。返回拓扑供探针断言。
+   *
+   * 关键事实（源码核对，勿凭示例硬写）：
+   * - models.json schema = `packages/runtime/src/infra/pi/pi-provider-store.ts` 的
+   *   `PiProviderConfig`：provider 级 name/baseUrl/apiKey/api/models[]，模型级
+   *   id/name/api/baseUrl/reasoning/input/contextWindow/maxTokens；
+   * - apiKey 用**字面量**（pi 的 resolve-config-value 把 `$VAR` 当 env 模板、`!cmd` 当命令，
+   *   纯字面量才是静态 key）；
+   * - 孙进程模型默认走 `<agentDir>/subagents/config.json` 的 `engineDefaults.pi`
+   *   （`packages/subagent-core/src/execution/assembly/types.ts` 的
+   *   `SubagentsGlobalConfig.engineDefaults`，无 per-engine defaultModel 字段）。
+   */
+  async function ensureLlm(dir) {
+    if (!llm) return
+    const { createMockLlm } = await import('./mock-llm.mjs')
+    const providerId = llm.providerId ?? 'mockllm'
+    const mainModel = llm.mainModel ?? 'mock-1'
+    const subModel = llm.subModel ?? 'mock-sub-a'
+    const actors = Array.isArray(llm.models) && llm.models.length > 0
+      ? llm.models
+      : [mainModel, 'mock-sub-a', 'mock-sub-b']
+    mockLlm = await createMockLlm({
+      port: llm.port ?? 0,
+      script: llm.responses ?? llm.script ?? [],
+      name: `verify-${instanceName}`,
+      ...(llm.tps ? { tps: llm.tps } : {}),
+    })
+    llmTopology = {
+      providerId,
+      mainRef: `${providerId}/${mainModel}`,
+      subRef: `${providerId}/${subModel}`,
+      models: actors,
+      baseUrl: mockLlm.baseUrl,
+      port: mockLlm.port,
+      mock: mockLlm,
+    }
+
+    const agentDir = path.join(dir, 'agent')
+    fs.mkdirSync(path.join(agentDir, 'subagents'), { recursive: true })
+    // 1) models.json：只写本 provider（模板里用户自己的 provider 保留不动）
+    const modelsPath = path.join(agentDir, 'models.json')
+    let models = { providers: {} }
+    try {
+      const parsed = JSON.parse(fs.readFileSync(modelsPath, 'utf8'))
+      if (parsed && typeof parsed === 'object' && parsed.providers && typeof parsed.providers === 'object') {
+        models = parsed
+      }
+    } catch {
+      /* 不存在 / 坏 JSON：以最小骨架起（验收实例不承担配置迁移职责） */
+    }
+    models.providers[providerId] = {
+      name: 'Mock LLM (verify-taiji local mock-http)',
+      api: 'openai-completions',
+      baseUrl: mockLlm.baseUrl,
+      apiKey: 'mock-key-not-needed',
+      models: actors.map((id) => ({
+        id,
+        name: id,
+        reasoning: false,
+        input: ['text'],
+        contextWindow: 128_000,
+        maxTokens: 16_384,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      })),
+    }
+    fs.writeFileSync(modelsPath, `${JSON.stringify(models, null, 2)}\n`)
+
+    // 2) settings.json：defaultProvider/defaultModel + enabledModels（pi 的 model scope）
+    const settingsPath = path.join(agentDir, 'settings.json')
+    let settings = {}
+    try {
+      const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
+      if (parsed && typeof parsed === 'object') settings = parsed
+    } catch {
+      /* 模板种子理论上已写入；缺失时以空对象起 */
+    }
+    settings.defaultProvider = providerId
+    settings.defaultModel = mainModel
+    const enabled = new Set(Array.isArray(settings.enabledModels) ? settings.enabledModels : [])
+    for (const id of actors) enabled.add(`${providerId}/${id}`)
+    settings.enabledModels = [...enabled]
+    // 重试会让「剧本耗尽」变成慢速重放，验收实例显式关掉
+    settings.retry = { ...(settings.retry ?? {}), enabled: false }
+    fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`)
+
+    // 3) subagents/config.json：engineDefaults.pi = 孙进程缺省模型（pi 引擎无 config 时
+    //    会继承主 agent 模型；显式写死让「子演员」与主 agent 区分开，且不依赖派发参数）
+    const subagentsPath = path.join(agentDir, 'subagents', 'config.json')
+    let subCfg = {}
+    try {
+      const parsed = JSON.parse(fs.readFileSync(subagentsPath, 'utf8'))
+      if (parsed && typeof parsed === 'object') subCfg = parsed
+    } catch {
+      /* 无文件：以最小骨架起 */
+    }
+    subCfg.defaultEngine = subCfg.defaultEngine ?? 'pi'
+    subCfg.engineDefaults = { ...(subCfg.engineDefaults ?? {}), pi: `${providerId}/${subModel}` }
+    fs.writeFileSync(subagentsPath, `${JSON.stringify(subCfg, null, 2)}\n`)
+
+    // 4) auto-rename 关掉（标题生成会经 llm-shared 打 mock，消耗剧本 step 并污染断言）
+    fs.rmSync(path.join(agentDir, 'auto-rename-enabled'), { force: true })
+    return llmTopology
+  }
+
   const api = {
     get repo() {
       return repo
+    },
+    /** mock-http 服务句柄（launch 后可用；faux 通道为 null）。 */
+    get mockLlm() {
+      return mockLlm
+    },
+    /** llm 通道拓扑（providerId / mainRef / subRef / models / baseUrl）；faux 通道为 null。 */
+    get llm() {
+      return llmTopology
     },
     get name() {
       return instanceName
@@ -351,16 +483,25 @@ export function createInstance(options = {}) {
         parsed = { ...(parsed ?? {}), dataDir: explicitDataDir }
       }
       const dir = dataDir()
-      // 1) faux 预置必须先于 --print：--print 会从只读模板种子实例目录（settings.json 等），
-      //    seed-faux 遇已存在的 settings.json 会拒绝覆盖。seed 先写，模板种子不覆盖已有文件。
-      ensureFaux(dir)
-      // 2) --print 拿权威端口（同时完成模板种子，幂等副作用）
-      const printed = printInstance({ repo, name: instanceName, dataDir: dir })
-      parsed = printed
-      if (faux) {
-        // faux 确定性：模板默认开启 auto-rename（agent/auto-rename-enabled），自动标题生成
-        // 会经 llm-shared 消耗 faux 响应队列的 step，导致主 turn 拿错脚本。验收实例显式关闭。
-        fs.rmSync(path.join(dir, 'agent', 'auto-rename-enabled'), { force: true })
+      if (llm) {
+        // llm 通道：先让 --print 完成模板种子（models.json / settings.json 骨架来自模板，
+        // 我们只在骨架之上覆写本 provider 相关字段），再起 mock 并写盘。
+        // 顺序与 faux 相反，是因为 mock-http 装配是「合并式」而非「整文件预置」。
+        const printed = printInstance({ repo, name: instanceName, dataDir: dir })
+        parsed = printed
+        await ensureLlm(dir)
+      } else {
+        // 1) faux 预置必须先于 --print：--print 会从只读模板种子实例目录（settings.json 等），
+        //    seed-faux 遇已存在的 settings.json 会拒绝覆盖。seed 先写，模板种子不覆盖已有文件。
+        ensureFaux(dir)
+        // 2) --print 拿权威端口（同时完成模板种子，幂等副作用）
+        const printed = printInstance({ repo, name: instanceName, dataDir: dir })
+        parsed = printed
+        if (faux) {
+          // faux 确定性：模板默认开启 auto-rename（agent/auto-rename-enabled），自动标题生成
+          // 会经 llm-shared 消耗 faux 响应队列的 step，导致主 turn 拿错脚本。验收实例显式关闭。
+          fs.rmSync(path.join(dir, 'agent', 'auto-rename-enabled'), { force: true })
+        }
       }
       fs.mkdirSync(dir, { recursive: true })
       logFile = path.join(dir, 'verify-launch.log')
@@ -578,6 +719,16 @@ export function createInstance(options = {}) {
       const dir = parsed?.dataDir ?? ''
       const runtimePort = readRuntimePort(dir)
       const ports = [parsed?.vitePort, parsed?.cdpPort, runtimePort].filter((p) => p > 0)
+      // mock server 属于本实例的生命周期：stop 也要关（否则调用方只 stop 不 dispose 时
+      // 会留一个 listen 中的 HTTP server 吊住进程）；幂等（已关 = no-op）。
+      if (mockLlm) {
+        try {
+          await mockLlm.close()
+        } catch {
+          /* 关闭失败不阻断 stop */
+        }
+        mockLlm = null
+      }
       if (pid === null) {
         state = 'stopped'
         return
@@ -632,6 +783,7 @@ export function createInstance(options = {}) {
         await proto.close().catch(() => {})
         proto = null
       }
+      // mock server 在 stop() 里已关闭（dispose 幂等）；此处不重复 close。
       if (!stopError && selfCreatedDataDir) {
         const dir = parsed?.dataDir ?? ''
         if (path.basename(dir).startsWith('verify-')) {

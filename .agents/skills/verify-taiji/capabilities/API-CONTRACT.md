@@ -23,6 +23,7 @@
 ```js
 // scripts/lib/index.mjs
 export { resolveRepo, createInstance } from './instance.mjs'
+export { createMockLlm } from './mock-llm.mjs'
 export { createProtocol } from './protocol.mjs'
 export { createUI } from './ui.mjs'
 export { createEvidence } from './evidence.mjs'
@@ -44,6 +45,14 @@ const inst = createInstance({
     tps,                   // 可选：TAIJI_FAUX_TPS
     force,                 // 可选：覆盖已有预置
   },
+  llm: {                   // 可选：mock-http 装配（与 faux 互斥，两条通道同时给会抛错）
+    responses,             // FauxStep[] 或 { [modelRef]: FauxStep[] }（与 faux 同一 step 形态）
+    tps,                   // 可选：内容按字符切块节流（对齐 TAIJI_FAUX_TPS 语义）
+    providerId: 'mockllm', // 可选：models.json 里的 provider id
+    mainModel: 'mock-1',   // 可选：主会话模型（settings.json defaultModel）
+    subModel: 'mock-sub-a',// 可选：孙进程缺省模型（subagents/config.json engineDefaults.pi）
+    models: ['mock-1', 'mock-sub-a', 'mock-sub-b'], // 可选：写进 models.json 的模型清单
+  },
   env: {},                 // 可选：额外 env
   background: true,        // 默认 true（TAIJI_DEV_BACKGROUND=1）
 })
@@ -56,11 +65,30 @@ const inst = createInstance({
 | `doctor()` | `async () => { ok, checks: [{name,status,detail,action?}] }` | 委托 `scripts/doctor.mjs --json`（**不重复实现**） |
 | `page()` | `async () => Page` | CDP 连接，幂等；用 `chromium.connectOverCDP`，**核对页面 URL 属于本实例 vitePort**，否则抛「连错实例」 |
 | `protocol()` | `async () => Protocol` | 见 1.2 |
-| `stop()` | `async () => void` | `kill <pid>`（SIGTERM），等端口释放，超时给残留 PID 明细。**禁 pkill 宽匹配** |
+| `mockLlm` | `{ port, baseUrl, requests, close } | null` | **llm 通道专用**：mock HTTP 服务句柄（`lib/mock-llm.mjs` 实例）；`requests` 里带每次请求的 `model` / `messages`——这是「孙进程真的打到 mock」的铁证面。faux 通道为 `null` |
+| `llm` | `{ providerId, mainRef, subRef, models, baseUrl, port, mock } | null` | **llm 通道专用**：装配拓扑（探针断言用）；faux 通道为 `null` |
+| `stop()` | `async () => void` | `kill <pid>`（SIGTERM），等端口释放，超时给残留 PID 明细。**禁 pkill 宽匹配**。llm 通道同时 `close()` mock 服务 |
 | `dispose()` | `async () => void` | `stop()` + 删除**自建** dataDir（`verify-*` 前缀才删；传入的 dataDir 不删） |
 | `screenshot(name)` | `async (name) => path` | 便捷法，内部转 `ui.screenshot` |
 
 **生命周期纪律**：`launch` 失败也必须能 `dispose`；`dispose` 幂等；不吞错（失败留原始输出）。
+
+### 1.1b `createMockLlm({ port?, script, tps?, name? })`
+
+本地 OpenAI chat-completions 兼容 mock 服务（零第三方依赖）。语义移植自 `dev-0.11.11/scripts/verify-provider-live-sync.mjs`
+的 createServer 段（**不 import** 那个仓库脚本，因为技能要能从任意 cwd 用）。
+
+| 成员 | 说明 |
+|------|------|
+| `port` / `host` / `baseUrl` | 实际监听值（`port:0` = OS 分配）；`baseUrl` 已含 `/v1`，可直接写进 models.json |
+| `requests` | 每次请求的请求体记录（`model` / `messages` / `summary` / `status` / `stepIndex`） |
+| `pending()` | 各 model-keyed 队列已消费的步数 |
+| `reset()` | 游标与 requests 归零（同实例复用剧本） |
+| `close()` | 真正关掉 server + 所有 keep-alive 连接（否则进程不退出） |
+
+> **剧本 `model` 匹配的硬事实**：pi-ai 发到 HTTP 的 `model` 字段是**裸 id**（`mock-1`），
+> 不是 `provider/model`。`createMockLlm` 同时兼容两种 key 写法（`'mock-1'` 与 `'mockllm/mock-1'`）。
+> 未知模型 / 剧本耗尽 → HTTP 404 + 结构化 body（pi 侧报错可读），不伪造回复。
 
 ### 1.2 `createProtocol(options)`
 
@@ -154,19 +182,27 @@ export const meta = {
   priority: 'P0',                    // P0|P1|P2|P3
   title: '...',
   covers: ['chat.send', 'chat.wait'],// capability id 数组（必须都能在 capabilities/ 找到）
-  requires: ['faux'],                // faux | live | custom-provider | none
+  requires: ['faux'],                // faux | mock-http | live | custom-provider | none
   parallelGroup: 'chat',             // 同组 = 需互斥（独立实例名）
   estimateSec: 90,
   provable: ['...'],
   notProvable: ['...'],
   // 可选：faux 装配（runner 不读 global，只认这里；等价于 createInstance 的 faux 选项）
   faux: { responses: [...], tps: 20, force: true },
+  // 可选：mock-http 装配（零 token、零外网、不需 extension；**孙进程可达**的唯一零 token 通道）
+  // 与 faux 互斥（同时给会抛错）。responses 支持数组或 model-keyed 对象。
+  // llm: { responses: { 'mockllm/mock-1': [...], 'mockllm/mock-sub-a': [...] }, tps: 20 },
 }
 export async function run(ctx) { /* ctx = { repo, instance, protocol, ui, ev, dataDir, log } */ }
 ```
 
 > `meta.faux` 是 v1 的既定扩展位（`scripts/run.mjs` 已实装：`meta.faux ?? scenario.faux`）；
-> 未声明则不启用 faux 装配。
+> 未声明则不启用 faux 装配。`meta.llm` 为同批新增的同位扩展位（同一条 `createInstance({ llm })` 装配链）。
+>
+> **`requires` 枚举语义（本批唯一改动）**：`faux` = pi extension 注册 `api:'faux'` provider，**主会话可用、孙进程不可达**；
+> `mock-http` = 本机 mock OpenAI chat-completions 服务 + `models.json` 的 `openai-completions` 自定义 provider，
+> **主会话与孙进程（subagent / workflow 成员）都可达**，零 token / 零外网 / 零 extension；
+> `live` = 真实 LLM（有 token 成本）；`custom-provider` = 用户已配置的 provider；`none` = 不需要 LLM。
 
 runner 职责（scenario 只写业务步骤）：
 1. 分配 runId + runDir + 独立实例名（默认识 `meta.id`）；2. `instance.launch/waitReady/doctor`；
@@ -180,7 +216,7 @@ runner 职责（scenario 只写业务步骤）：
 # <capability-id> · <中文名>
 
 - **通道**：A / B / C（列全）
-- **前置**：`requires`（faux|live|custom-provider|none）+ 依赖的其他 capability id
+- **前置**：`requires`（faux|mock-http|live|custom-provider|none）+ 依赖的其他 capability id
 - **用于**：哪些 scenario 消费（covers 反向引用）
 
 ## 入口（用户 POV / 协议 / 副作用点）

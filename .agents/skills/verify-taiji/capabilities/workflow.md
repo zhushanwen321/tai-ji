@@ -20,9 +20,14 @@
   文本精确定位，行 testid 恒定）+ 对话流 `workflow-block` → 全屏 overlay `wfvz-overlay`。
 - 托盘 builtin 按钮 **`total === 0` 时不渲染**（`ComposerTray` `builtinItems`）——「没有 workflow 行」
   通常等于「本会话还没有 run」。
-- 孙进程（workflow 成员的 agent()）LLM 可达性：**faux 不可达（已实测）**——SSOT = `capabilities/env.md`
-  + 探针 `scripts/probes/faux-grandchild.mjs`。结构层（run 登记 / 列表 / overlay / abort 通道）可验；
-  执行层（成员真的跑完）需真实引擎/模型，否则登记 `verified-unreachable`。
+- 孙进程（workflow 成员的 agent()）LLM 可达性：**faux 通道不可达（已实测），mock-http 通道可达（已实测）**
+  —— SSOT = `capabilities/env.md` + 探针 `scripts/probes/faux-grandchild.mjs`（`verified-unreachable`）/
+  `scripts/probes/mock-llm-workflow.mjs`（`mock-workflow-reachable`，两成员 outcome=done）。结构层
+  （run 登记 / 列表 / overlay / abort 通道）与执行层（成员真的跑完）**都可零 token 验**：
+  执行层用 `createInstance({ llm })` 的 mock-http 通道。
+  - 成员剧本硬要求：workflow 模式下 `structured-output` 是单参数合成工具（parameters 即权威 schema），
+    成员必须在终局调用它，否则 `schema_deterministic` 失败。
+  - 想让成员落「成员演员」队列，需在 `workflow_run` 传 run 级 `model`（否则成员继承主 agent 模型）。
 
 ---
 
@@ -30,7 +35,7 @@
 
 - **通道**：A（对话流 workflow 块 + 托盘行）+ B（工具受理 → `session.workflowUpdate` 信号 →
   `session.getWorkflows` 列表）+ C（`ext-sessions/<rootSid>/workflow/runs/<runId>.record.jsonl`）
-- **前置**：`requires` = faux（结构层）| live/custom-provider（执行层）；依赖 `session.create`
+- **前置**：`requires` = faux（结构层）| **mock-http | live**（执行层）；依赖 `session.create`
   `chat.send` `chat.wait` `subagent.dispatch`（批量为 fan-out）`workflow.runs`
 - **用于**：`p0-workflow-run`（主）、`p0-subagent-dispatch`（批量形态）、`p0-workflow-abort`
 
@@ -89,7 +94,8 @@ const { workflows } = await p.call('session.getWorkflows', { sessionId: rootSid 
   - 派发后 `session.workflows` 空且随后出现 `running 信号后 workflow 列表为空` 的 warn →
     record 未落盘/读不到（`workflow-store` 的诊断日志），托盘永久无量；
   - `workflow-block` 出现但托盘无行 → 列表拉取链断（信号丢失 / RPC 失败）；
-  - 行一直 running 无进度、成员无子进程 → 执行层未跑（faux 下预期如此 / 真实引擎装配问题）。
+  - 行一直 running 无进度、成员无子进程 → 执行层未跑（真实引擎装配问题；faux 通道下预期如此，
+    mock-http 通道下则应看到 members 逐步 settled——没 settled 先查成员剧本是否调了 structured-output）。
 
 ### 证据（A/B/C 各抓什么）
 
@@ -100,7 +106,8 @@ const { workflows } = await p.call('session.getWorkflows', { sessionId: rootSid 
 
 ### 证不了
 
-- 孙进程 LLM 可达性（faux 不可达，见通用前置）。
+- 孙进程 LLM 可达性：faux 通道不可达（见通用前置）；mock-http 通道可验（探针
+  `scripts/probes/mock-llm-workflow.mjs`）。mock 回复无语义，所以「编排质量 / 真实耗时/成本」仍证不了。
 - 「脚本语义正确性」（跑出来的业务结果对不对）：那是 workflow 脚本自身的验收，不是 harness 能力。
 
 ### Gotchas
@@ -173,7 +180,7 @@ expect testid=tray-workflow-slug text=<slug>
 
 ### 证不了
 
-- run 的「真实耗时/成本」在真实模型下的量级（faux 无真实 token 消耗）。
+- run 的「真实耗时/成本」在真实模型下的量级（faux / mock-http 恒零 token，无真实消耗）。
 
 ### Gotchas
 
@@ -311,7 +318,7 @@ expect testid=composer-box visible         # 焦点回 composer
 
 - **通道**：A（托盘行两段式 abort / overlay 标题栏 pill 转中断态）+ B（`session.workflowAction`
   回执 + `session.workflowUpdate` 信号）+ C（record 终态帧 / 成员进程消失）
-- **前置**：`requires` = faux|live（要有 running run）；依赖 `workflow.dispatch` `workflow.runs`
+- **前置**：`requires` = faux | mock-http（要有 running run）；依赖 `workflow.dispatch` `workflow.runs`
   `workflow.overlay`
 - **用于**：`p0-workflow-abort`（主）、`p0-interrupt-cancel`（执行域子项）
 
@@ -366,7 +373,7 @@ await p.call('session.workflowAction',
 
 ### 证不了
 
-- 「中止是否立刻停止 token 消耗」（真实 provider 行为；faux 无成本）。
+- 「中止是否立刻停止 token 消耗」（真实 provider 行为；faux / mock-http 均无成本）。
 
 ### Gotchas
 
@@ -385,7 +392,7 @@ await p.call('session.workflowAction',
 - **通道**：B（`session.subscribe` 的 `stateSnapshot` 回放 + `session.workflowUpdate` 触发重拉
   + `session.getWorkflows` / `getWorkflowRunEvents` 拉取）+ A（overlay 行/面板内容收敛）
   + C（record 文件是最终事实）
-- **前置**：`requires` = faux|live（要有 run）；依赖 `workflow.runs` `workflow.overlay`
+- **前置**：`requires` = faux | mock-http（要有 run）；依赖 `workflow.runs` `workflow.overlay`
   `protocol.subscribe` `session.subscription`
 - **用于**：`p0-workflow-reconnect`（主）、`p0-session-persistence`（恢复面）
 

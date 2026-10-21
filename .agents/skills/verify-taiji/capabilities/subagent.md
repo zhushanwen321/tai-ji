@@ -15,12 +15,14 @@
 - **派发是 agent 驱动的**：没有「用户直接派发子代理」的按钮。用户路径 = 在 composer 里让 agent
   去委派（或直接说「用 subagent 做 X」），agent 调工具。因此 `subagent.dispatch` 的
   A 通道证据 = 对话流里出现 subagent 工具块。
-- 孙进程模型/LLM 可达性：**faux 不可达（已实测）**，SSOT = `capabilities/env.md` 的 Gotchas
-  （探针 `scripts/probes/faux-grandchild.mjs`，结论 `verified-unreachable`）。因此本节断言分两层：
-  - **结构层（可验）**：工具调用被受理、record 出现、列表/详情/流通道/取消通道工作；
-  - **执行层（faux 下不可达）**：子代理进程真的用某模型跑完一轮并回结果 → 需真实引擎/模型，
-    否则登记 `verified-unreachable`（实测失败形态：`Model "faux/..." not found` +
-    record `stopReason: failed`）。
+- 孙进程模型/LLM 可达性：**faux 通道不可达（已实测），mock-http 通道可达（已实测）**——SSOT = `capabilities/env.md` 的 Gotchas。
+  探针：`scripts/probes/faux-grandchild.mjs`（结论 `verified-unreachable`）/
+  `scripts/probes/mock-llm-grandchild.mjs`（结论 `mock-grandchild-reachable`）。因此本节断言分两层：
+  - **结构层（faux / mock-http 均可验）**：工具调用被受理、record 出现、列表/详情/流通道/取消通道工作；
+  - **执行层（`requires: mock-http | live`）**：子代理进程真的用某模型跑完一轮并回结果——
+    **mock-http 通道可零 token 验**（本机 mock OpenAI provider，`createInstance({ llm })` 装配；
+    孙进程只依赖 `PI_CODING_AGENT_DIR` 下的 models.json，不需要任何 extension）；
+    faux 通道下不可达（实测失败形态：`Model "faux/..." not found` + record `stopReason: failed`）。
 
 ---
 
@@ -29,7 +31,7 @@
 - **通道**：A（对话流 subagent 工具块 + 托盘计数）+ B（`session.getSubagents` /
   `session.subagents` 帧、`subagent.stream_*`、完成通知）+ C（`ext-sessions/<rootSid>/subagents/`
   记录树 + 子代理 pi 进程）
-- **前置**：`requires` = faux（结构层）/ live 或 custom-provider（执行层）；依赖 `session.create`
+- **前置**：`requires` = faux（结构层）/ **mock-http | live**（执行层）；依赖 `session.create`
   `chat.send` `chat.wait` `extension.load` `subagent.list`
 - **用于**：`p0-subagent-dispatch`（主）、`p0-chat-stream`（工具块子项）、
   `p0-model-switch`（dispatch 时模型参数）
@@ -78,9 +80,12 @@ expect testid=drawer-tab-subagent visible                  # 抽屉已切到 sub
   - 对话流出现 `subagent-block`，header 含 agent 名与 slug；`(model · thinking)` 括注与解析结果一致；
   - `session.getSubagents` 返回的 `subagents[]` 含该 `subagentId`（`agent/slug/task/status/model?/turns?`）；
   - 托盘出现计数；drawer subagent tab 可打开并渲染；`body 圆点/spinner` 与 `status` 一致。
-- 期望（执行层，**faux 下不可达** → 用真实 provider 或登记不可达）：子代理进程完成 →
+- 期望（执行层，**`requires: mock-http | live`**）：子代理进程完成 →
   父会话收到完成通知（一条 assistant/tool 结果）→ record `status` 收敛（`idle`）+
   `turns/totalTokens/elapsedSeconds` 有值。
+  **mock-http 通道断言要点**：① record 终态 `status ∈ {done, idle}`；② `instance.mockLlm.requests`
+  里出现 `model === '<subModel>'` 的请求（铁证：孙进程真的打到 mock）；③ 成员剧本里的 canary 文本
+  出现在 record / 子会话 JSONL。三件齐才判可达（探针 `scripts/probes/mock-llm-grandchild.mjs` 即此形态）。
 - **失败信号（具体形态）**：
   - `subagent_start` 直接报错：`subagents runtime not initialized (session_start assembly failed)`
     （扩展装配失败——`assertServiceAvailable` 的文案含恢复动作）；
@@ -103,9 +108,11 @@ expect testid=drawer-tab-subagent visible                  # 抽屉已切到 sub
 
 ### 证不了
 
-- **孙进程 faux 不可达**（已实测）：`capabilities/env.md` + 探针 `scripts/probes/faux-grandchild.mjs`
+- **孙进程 faux 通道不可达**（已实测）：`capabilities/env.md` + 探针 `scripts/probes/faux-grandchild.mjs`
   （`--no-extensions` + 白名单仅 structured-output；`TAIJI_E2E=1` 门）。所以「子代理用 faux 回话」
-  不可断言；能断言的是工具受理 + record 结构 + 通道工作。执行层需真实引擎/模型。
+  不可断言；能断言的是工具受理 + record 结构 + 通道工作。
+  **执行层请走 mock-http 通道**（`createInstance({ llm })`，探针 `scripts/probes/mock-llm-grandchild.mjs`
+  结论 `mock-grandchild-reachable`）；mock 回复本身无语义，模型行为/成本仍不可断言。
 - 真实模型下的任务质量/工具选择。
 
 ### Gotchas
@@ -194,7 +201,7 @@ expect testid=tray-subagent-slug (行内 slug)
 
 - **通道**：A（drawer 详情里的对话流逐字增长）+ B（`subagent.stream_chunk` 增量 + 清除帧 +
   `session.getSubagentStreamState` 拉取 + `session.subagentEntriesAppended` 增量 entry）+ C（子代理 JSONL）
-- **前置**：`requires` = faux|live（要有真实子进程产出）；依赖 `subagent.dispatch` `subagent.list`
+- **前置**：`requires` = faux | mock-http（要有真实子进程产出）；依赖 `subagent.dispatch` `subagent.list`
   `protocol.events` `protocol.subscribe`
 - **用于**：`p0-subagent-dispatch`（流式子项）、`p0-subagent-stream`（独立 scenario）
 
@@ -259,7 +266,8 @@ const st = await p.call('session.getSubagentStreamState', { sessionId: rootSid, 
 ### 证不了
 
 - 实时流的「低延迟」体验指标（本技能不做性能基线；采样管道见 `docs/testing/render-sampling.md`）。
-- 孙进程是否真的产出了流（同上：faux 不可达）。
+- 孙进程是否真的产出了流：faux 通道不可达；**mock-http 通道可验**（成员/子代理模型落 `mockllm/mock-sub-a`
+  时 mock 请求记录 + record 产物双向可证），见 `capabilities/env.md` Gotchas 与探针 `scripts/probes/mock-llm-grandchild.mjs`。
 
 ### Gotchas
 
@@ -281,7 +289,7 @@ const st = await p.call('session.getSubagentStreamState', { sessionId: rootSid, 
 
 - **通道**：A（托盘行两段式取消钮 + 行消失/停止转圈）+ B（`session.subagentAction` 回执）
   + C（子进程消失 / record 收敛）
-- **前置**：`requires` = faux|live（要有 running 记录）；依赖 `subagent.dispatch` `subagent.list`
+- **前置**：`requires` = faux | mock-http（要有 running 记录）；依赖 `subagent.dispatch` `subagent.list`
 - **用于**：`p0-subagent-cancel`（主）、`p0-interrupt-cancel`（执行域子项）
 
 ### 入口（用户 POV / 协议 / 副作用点）
@@ -347,7 +355,7 @@ await p.call('session.subagentAction',
 
 - **通道**：A（详情头行模型标签 + 来源 badge）+ B（`SubagentRecord.model` / `modelSource`）
   + C（record 事件文件 / 子进程 `--model` argv）
-- **前置**：`requires` = faux|live；依赖 `subagent.dispatch` `subagent.list` `model.list`
+- **前置**：`requires` = faux | mock-http；依赖 `subagent.dispatch` `subagent.list` `model.list`
 - **用于**：`p0-model-switch`（执行域子项）、`p0-subagent-dispatch`（模型括注）
 
 ### 入口（用户 POV / 协议 / 副作用点）

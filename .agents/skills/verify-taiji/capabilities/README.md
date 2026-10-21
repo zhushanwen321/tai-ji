@@ -54,10 +54,16 @@ SKILL.md                 环境侧总流程（Launch / Doctor / Drive / Evidence
 | 通道 | 装配 | 主会话 | 孙进程（subagent / workflow 成员） | 何时用 |
 |------|------|--------|-----------------------------------|--------|
 | **faux** | `seed-faux.mjs` + `TAIJI_FAUX_SCRIPT` + `TAIJI_EXTENSION_PATHS` | ✅ | ❌ **实测不可达**（`--no-extensions` + 白名单不含 faux provider；`TAIJI_E2E=1` 门 dev 不设） | 主会话对话类场景的默认通道（零 token、可编排 thinking/toolCalls） |
-| **mock-http** | 本地 OpenAI 兼容 mock server + `<dataDir>/agent/models.json` 自定义 provider | ✅ | ✅ **可零 token 验**（孙进程读同一个 `PI_CODING_AGENT_DIR`） | subagent / workflow 执行层；provider / 模型切换类场景 |
+| **mock-http** | `createInstance({ llm })` → `lib/mock-llm.mjs`（本地 OpenAI 兼容 mock server）+ 自动写 `<dataDir>/agent/models.json` 自定义 provider | ✅ | ✅ **可零 token 验**（孙进程读同一个 `PI_CODING_AGENT_DIR`） | subagent / workflow 执行层；provider / 模型切换类场景 |
 | **live** | 真实 provider 凭证 | ✅ | ✅ | 只有「真实模型智能 / 真实鉴权 / 真实计费」才能证明的场景；**不进 CI、不进 PR 门禁** |
 
 依据：faux 不可达的实测证据 = `env.md` 的 Gotchas + `scripts/probes/faux-grandchild.mjs`；mock-http 通道先例 = 仓库 `scripts/verify-provider-live-sync.mjs`（本地 mock server + models.json，零外网）。
+
+**mock-http 通道用法（实测已打通孙进程）**：`createInstance({ llm: { responses } })` → `lib/mock-llm.mjs` 起 HTTP 服务并写好
+`models.json` / `settings.json` / `subagents/config.json`；`instance.mockLlm.requests` 记录每次请求的 `model`（判「孙进程是否真的
+打到 mock」的铁证）。实测探针：`scripts/probes/mock-llm-grandchild.mjs`（`mock-grandchild-reachable`）与
+`scripts/probes/mock-llm-workflow.mjs`（`mock-workflow-reachable`，两成员 outcome=done）。
+剧本库与踩坑清单：[fixtures/mock-http/README.md](../fixtures/mock-http/README.md)。
 
 ## 4. 三种使用形态
 

@@ -1,0 +1,25 @@
+{
+  "_note": "mock-http 通道剧本（model-keyed）。主演员 mockllm/mock-1：step0 派发 subagent_start（显式 model=mockllm/mock-sub-a），step1 收尾；额外几步是完成通知触发的主 agent 后续轮。成员演员 mockllm/mock-sub-a：step0 吐 canary。用法见 fixtures/mock-http/README.md。",
+  "mockllm/mock-1": [
+    {
+      "text": "派一个子任务去核对：",
+      "toolCalls": [
+        {
+          "name": "subagent_start",
+          "args": {
+            "task": "Echo the canary word your scripted response contains, nothing else.",
+            "slug": "mock-sub",
+            "model": "mockllm/mock-sub-a",
+            "fork": false
+          }
+        }
+      ],
+      "stopReason": "toolUse"
+    },
+    { "text": "子任务已派发，等待完成通知（SUBAGENT-DISPATCHED）。", "stopReason": "stop" },
+    { "text": "parent-notified", "stopReason": "stop" },
+    { "text": "parent-idle-1", "stopReason": "stop" },
+    { "text": "parent-idle-2", "stopReason": "stop" }
+  ],
+  "mockllm/mock-sub-a": [{ "text": "GRANDCHILD_MOCK_CANARY_9c1d", "stopReason": "stop" }]
+}
