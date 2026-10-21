@@ -94,6 +94,7 @@ function networkProxyDefaultBase(): Record<string, unknown> {
     proxy: { ...DEFAULT_NETWORK_PROXY_CONFIG.proxy },
     noProxy: [...DEFAULT_NETWORK_PROXY_CONFIG.noProxy],
     rules: [...DEFAULT_NETWORK_PROXY_CONFIG.rules],
+    ipv4Only: [...DEFAULT_NETWORK_PROXY_CONFIG.ipv4Only],
   }
 }
 
@@ -158,6 +159,8 @@ export function getNetworkProxyConfig(): NetworkProxyConfig {
       proxy: normalizeProxyServer(r['proxy']),
       noProxy: normalizeHostList(r['noProxy']),
       rules: normalizeHostList(r['rules']),
+      // 后加字段：旧配置文件无此键（undefined 非数组）→ normalizeHostList 回空数组
+      ipv4Only: normalizeHostList(r['ipv4Only']),
     }
   } catch {
     return networkProxyDefaultBase() as unknown as NetworkProxyConfig
@@ -165,8 +168,8 @@ export function getNetworkProxyConfig(): NetworkProxyConfig {
 }
 
 /**
- * 写入网络代理配置（整份配置的 RMW：只覆盖 enabled/proxy/noProxy/rules 四字段，保留
- * 文件内其他字段——extension 侧未来扩展字段不丢）。校验失败返回错误清单不落盘（错误信封
+ * 写入网络代理配置（整份配置的 RMW：只覆盖 enabled/proxy/noProxy/rules/ipv4Only 五字段，
+ * 保留文件内其他字段——extension 侧未来扩展字段不丢）。校验失败返回错误清单不落盘（错误信封
  * 由 handler 转发）；成功经 rmwExtConfigField 持跨进程锁写入，mode 0o600，序列化与
  * extension llm-shared saveConfig 逐字一致（2 空格缩进 + 尾换行）。
  */
@@ -178,6 +181,8 @@ export function setNetworkProxyConfig(next: NetworkProxyConfig): NetworkProxyVal
     base['proxy'] = next.proxy
     base['noProxy'] = dedupeHostList(next.noProxy)
     base['rules'] = dedupeHostList(next.rules)
+    // ipv4Only：直连 + 强制 IPv4 清单（后加字段；缺省空数组写回，保证配置文件形态稳定）
+    base['ipv4Only'] = dedupeHostList(next.ipv4Only ?? [])
   }, NETWORK_PROXY_CONFIG_FILE_MODE)
   return { ok: true }
 }

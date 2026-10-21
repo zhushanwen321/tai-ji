@@ -8,9 +8,10 @@ import type { NetworkProxyConfig, NetworkProxyProtocol, ProviderInfo } from '@ta
 import { normalizeHostname } from '@taiji/shared'
 
 /**
- * 页面级草稿编辑态。port / noProxy 与 config 形态不同：port 用字符串承载（number input
- * 空值 = ''，保存时 Number 化交由 shared 校验拦截）；noProxy 用逗号分隔串承载（输入形态，
- * 保存时拆分 trim）。rules 条目与 config 同形态（主机名字符串数组，行内直接编辑）。
+ * 页面级草稿编辑态。port / noProxy / ipv4Only 与 config 形态不同：port 用字符串承载
+ * （number input 空值 = ''，保存时 Number 化交由 shared 校验拦截）；noProxy 与 ipv4Only
+ * 用逗号分隔串承载（输入形态，保存时拆分 trim）。rules 条目与 config 同形态
+ * （主机名字符串数组，行内直接编辑——它需要逐条开关 chip 的交互）。
  */
 export interface NetworkProxyDraft { // oe-exempt:20261019:framework:页面视图模型契约形状（draftFromConfig/buildConfigFromDraft 双向映射锚点）
   enabled: boolean
@@ -21,6 +22,7 @@ export interface NetworkProxyDraft { // oe-exempt:20261019:framework:页面视�
   password: string
   noProxyInput: string
   rules: string[]
+  ipv4OnlyInput: string
 }
 
 /** config → 草稿（加载回填与保存失败回滚共用；数组条目独立副本）。 */
@@ -34,11 +36,13 @@ export function draftFromConfig(config: NetworkProxyConfig): NetworkProxyDraft {
     password: config.proxy.password,
     noProxyInput: config.noProxy.join(', '),
     rules: [...config.rules],
+    // 旧配置文件无此字段（normalize 已补空数组，这里再防御一次 undefined）
+    ipv4OnlyInput: (config.ipv4Only ?? []).join(', '),
   }
 }
 
 /**
- * 草稿 → config（保存载荷组装）：noProxy 按逗号拆分 + trim + 去空条目；host trim；
+ * 草稿 → config（保存载荷组装）：noProxy / ipv4Only 按逗号拆分 + trim + 去空条目；host trim；
  * port Number 化（空/非法产 0/NaN，由 shared validateNetworkProxyConfig 拦截并给可操作文案）。
  */
 export function buildConfigFromDraft(draft: NetworkProxyDraft): NetworkProxyConfig {
@@ -56,6 +60,10 @@ export function buildConfigFromDraft(draft: NetworkProxyDraft): NetworkProxyConf
       .map((entry) => entry.trim())
       .filter((entry) => entry !== ''),
     rules: draft.rules.map((rule) => rule.trim()),
+    ipv4Only: draft.ipv4OnlyInput
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== ''),
   }
 }
 

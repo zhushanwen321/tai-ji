@@ -20,6 +20,7 @@ function proxyConfig(overrides: Partial<NetworkProxyConfig['proxy']> = {}, rules
     proxy: { protocol: 'http', host: '127.0.0.1', port: 1, username: '', password: '', ...overrides },
     noProxy: [],
     rules,
+    ipv4Only: [],
   }
 }
 

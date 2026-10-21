@@ -1718,6 +1718,7 @@ let mockNetworkProxyConfig: NetworkProxyConfig = {
   proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' },
   noProxy: ['localhost', '127.0.0.1'],
   rules: [],
+  ipv4Only: [],
 }
 // 统计演示行（非零双通道示例，mock 轨统计卡可演示计数条；reset 清空）
 let mockNetworkProxyStats: NetworkProxyStats[] = [
@@ -1733,6 +1734,7 @@ function cloneNetworkProxyConfig(config: NetworkProxyConfig): NetworkProxyConfig
     proxy: { ...config.proxy },
     noProxy: [...config.noProxy],
     rules: [...config.rules],
+    ipv4Only: [...(config.ipv4Only ?? [])],
   }
 }
 function cloneMockNetworkProxyConfig(): NetworkProxyConfig {

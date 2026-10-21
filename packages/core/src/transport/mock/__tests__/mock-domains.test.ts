@@ -194,7 +194,12 @@ describe('mock session domain', () => {
     const archives = await session.listArchives()
     const entry = archives.find((a) => a.sessionId === created.id)
     expect(entry).toMatchObject({ sessionId: created.id, name: 'arc-src', status: 'archived', codec: 'zstd-3' })
-    expect(entry!.sha256).toHaveLength(64)
+    // ArchiveSummary 是 staging|archived 可辨识联合（列表可含压缩未完成的 staging 条目，
+    // real listArchiveEntries 只滤 restoring）——sha256 只在 archived 分支，先按判别字段收窄
+    if (!entry || entry.status !== 'archived') {
+      throw new Error(`expected archived ledger entry, got ${JSON.stringify(entry)}`)
+    }
+    expect(entry.sha256).toHaveLength(64)
     // 列表快照隔离：调用方突变不污染源数组
     archives[0]!.name = 'mutated'
     expect((await session.listArchives()).find((a) => a.sessionId === created.id)!.name).toBe('arc-src')
@@ -581,6 +586,7 @@ describe('mock config domain', () => {
       proxy: { protocol: 'http' as const, host: '127.0.0.1', port: 7891, username: '', password: '' },
       noProxy: ['localhost'],
       rules: ['api.anthropic.com'],
+      ipv4Only: [],
     }
     const npSeen: unknown[] = []
     const unNp = config.onNetworkProxyConfig((c) => npSeen.push(c))

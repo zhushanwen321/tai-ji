@@ -944,6 +944,7 @@ describe('config 域 请求-响应', () => {
       proxy: { protocol: 'http' as const, host: '127.0.0.1', port: 7890, username: '', password: '' },
       noProxy: ['localhost'],
       rules: ['api.anthropic.com'],
+      ipv4Only: [],
     }
     mockCommand.mockResolvedValueOnce({ config: cfg })
     await expect(config.getNetworkProxyConfig()).resolves.toEqual({ config: cfg })
@@ -1093,7 +1094,7 @@ describe('config 域 订阅（onGlobalType 通道）', () => {
     const hNp = vi.fn()
     config.onNetworkProxyConfig(hNp)
     const byType = Object.fromEntries(subs)
-    const cfg = { enabled: true, proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' }, noProxy: [], rules: [] }
+    const cfg = { enabled: true, proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' }, noProxy: [], rules: [], ipv4Only: [] }
     byType['config.networkProxy']({ payload: { config: cfg } })
     expect(hNp).toHaveBeenCalledWith(cfg)
   })
