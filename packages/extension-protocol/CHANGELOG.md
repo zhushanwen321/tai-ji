@@ -1,5 +1,13 @@
 # @zhushanwen/extension-protocol
 
+## 0.23.0
+
+### Minor Changes
+
+- df839883b: The session-manager protocol gains two new actions, `delete` and `archive` (`SESSION_MANAGER_ACTIONS` grows from 7 to 9 entries), together with their `SessionManagerDeleteParams` / `SessionManagerArchiveParams` / `SessionManagerDeleteResult` / `SessionManagerArchiveResult` types and the `isSessionManagerDeleteParams` / `isSessionManagerArchiveParams` guards, all exported from the package entry. `ChannelErrorResult` gains an optional `code` field carrying a structured error code; the change is additive (older runtimes never emit it, older extensions ignore it): `isChannelErrorResult` accepts `code` when absent or a string, and `formatChannelErrorText` emits an extra `error_code: <code>` line only when it is present.
+
+- df839883b: Added a runtime dependency on the new `@zhushanwen/state-machine` package; the plan lifecycle state machine is now declared with it. The public transition API is unchanged — same legal transitions and the same `{ ok: true, next } | { ok: false }` return shape as before, so no consumer changes are required.
+
 ## 0.22.0
 
 ### Minor Changes

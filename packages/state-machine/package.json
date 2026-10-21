@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/state-machine",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Declarative finite state machine infrastructure: literal-typed vocabularies and transition tables, definition-time self-checks, pure transition kernel, coerceState whitelist mapping, and exhaustive table test generator",
   "type": "module",
   "main": "src/index.ts",

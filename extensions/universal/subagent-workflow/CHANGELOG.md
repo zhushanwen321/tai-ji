@@ -1,5 +1,11 @@
 # @zhushanwen/pi-subagent-workflow
 
+## 9.7.1
+
+### Patch Changes
+
+- df839883b: pi 1.0.0 agent-loop 锚点注释修正（catch 位置 :581-588）与 return-isError 语义补记，无运行时行为改动
+
 ## 9.7.0
 
 ### Minor Changes

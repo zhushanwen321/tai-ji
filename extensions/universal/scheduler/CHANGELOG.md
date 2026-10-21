@@ -1,5 +1,11 @@
 # @zhushanwen/pi-scheduler
 
+## 0.11.1
+
+### Patch Changes
+
+- df839883b: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.22.0 → @zhushanwen/extension-protocol@0.23.0, @zhushanwen/pi-llm-shared@0.11.3 → @zhushanwen/pi-llm-shared@0.12.0)
+
 ## 0.11.0
 
 ### Minor Changes

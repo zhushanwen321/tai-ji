@@ -1,5 +1,11 @@
 # @zhushanwen/pi-session-reader
 
+## 0.13.0
+
+### Minor Changes
+
+- df839883b: session_read now recognizes archived sessions: referencing an archived session by name or id fragment returns a summary-only view marked as archived (built from its plain-text ledger without decompression) instead of "no match", with archive hints added to find/doctor output; environments without an archive directory behave exactly as before.
+
 ## 0.12.0
 
 ### Minor Changes
