@@ -6,6 +6,10 @@
  *  - TC4：跨 ext workspace value import 自动 inline —— 验 goal 产物含 countActiveFromEntries
  *  - TC7：fail-fast 拦截残缺产物 —— 验 verify-staged 对缺 wasm 的产物 exit 1
  *
+ * 另覆盖 C-ext-31 门禁（pi-env admission guard）：verify-staged postbuild 挂点的
+ * spawn 级红灯/正向用例（含 --engines-dir 引擎根扫描）+ bundle-extensions.mjs
+ * 构建期接线锁定（见文件尾部两个 describe）。
+ *
  * 依赖前置：testCommand 先跑 prepare-builtin-extensions.sh 产出 staged 产物，本测试只读校验。
  * TC1/TC2/TC5/TC6（dev/packaged 发会话、permission 解析 bash、source map）是 integration/e2e/manual，留 T7/T8。
  */
@@ -14,20 +18,27 @@ import { existsSync, readFileSync, rmSync, mkdirSync, copyFileSync, readdirSync,
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+// C-ext-31 禁入标记登记表（门禁单一实现导出）——fixture 植入的标记取自本表，
+// 不硬编码字面量：标记形态调整时红灯用例自动跟随
+import { PI_ENV_ADMISSION_GUARD_MARKERS } from "../lib/pi-env-admission-gate.mjs";
 
 const REPO = process.cwd();
 const STAGED = join(REPO, "apps/electron/resources/extensions/@zhushanwen");
 const VERIFY_SRC = join(REPO, "scripts/verify-staged-extensions.mjs");
 const ASSET_DIR_LIB_SRC = join(REPO, "scripts/lib/staged-asset-dirs.mjs");
+const GATE_LIB_SRC = join(REPO, "scripts/lib/pi-env-admission-gate.mjs");
 
 /**
- * mirror 复制检查脚本进 <tmp>/scripts/ 时同步带 scripts/lib/ 共享登记表——
- * verify-staged import 该登记表（MF-1-17 单一来源），mirror 缺文件 = MODULE_NOT_FOUND。
+ * mirror 复制检查脚本进 <tmp>/scripts/ 时同步带 scripts/lib/ 下两个被 import 的
+ * 共享模块——staged-asset-dirs.mjs（MF-1-17 单一来源）与
+ * pi-env-admission-gate.mjs（C-ext-31 门禁单一实现）。mirror 缺任一文件即
+ * MODULE_NOT_FOUND，全部 spawn 用例假红（C-ext-31 接线引入时的回归形态）。
  */
 function stageVerifyGuardInto(root) {
 	mkdirSync(join(root, "scripts/lib"), { recursive: true });
 	copyFileSync(VERIFY_SRC, join(root, "scripts/verify-staged-extensions.mjs"));
 	copyFileSync(ASSET_DIR_LIB_SRC, join(root, "scripts/lib/staged-asset-dirs.mjs"));
+	copyFileSync(GATE_LIB_SRC, join(root, "scripts/lib/pi-env-admission-gate.mjs"));
 }
 
 describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
@@ -382,6 +393,163 @@ describe("verify-staged per-package asset dirs (MF-1-6)", () => {
 		} finally {
 			fx.cleanup();
 		}
+	});
+});
+
+/**
+ * C-ext-31 门禁的 verify-staged 接线测试（pi-env admission gate）。
+ *
+ * 门禁单一实现在 scripts/lib/pi-env-admission-gate.mjs，两个挂点：
+ * bundle-extensions.mjs（构建期，接线锁定见下方 describe）与
+ * verify-staged-extensions.mjs（postbuild，本组用例）。完整包集 mirror
+ * （SSOT 与 staged 同集，集合断言恒过）中植入禁入标记 → spawn 真
+ * verify-staged → 断言 exit 1 且 stderr 定位包名与 C-ext-31 恢复动作；
+ * --engines-dir 传入时引擎 staged 根同扫（与构建期覆盖对齐），目录不存在
+ * 静默跳过。无标记 fixture 正向对照 exit 0（门禁不误拦合法产物）。
+ */
+describe("verify-staged C-ext-31 pi-env admission gate", () => {
+	/**
+	 * 组装 tmp mirror。marker = pi-ask-user 的 index.js 植入禁入标记；
+	 * engines = 建 <root>/engines/zcode 引擎产物，enginesMarker = 其 index.js 植入标记。
+	 */
+	function makeGateMirror({ marker = false, engines = false, enginesMarker = false } = {}) {
+		const root = mkdtempSync(join(tmpdir(), "verify-staged-gate-"));
+		stageVerifyGuardInto(root);
+		mkdirSync(join(root, "packages/shared/src"), { recursive: true });
+		writeFileSync(
+			join(root, "packages/shared/src/mandatory-extensions.json"),
+			JSON.stringify([
+				{ name: "@zhushanwen/pi-plan", description: "fixture", tier: "feature" },
+				{ name: "@zhushanwen/pi-ask-user", description: "fixture", tier: "feature" },
+			]),
+			"utf8",
+		);
+		/**
+		 * 植入形态：登记表内每个禁入标记各造一条 throw（标记是 bundle 源码的子串匹配，
+		 * 任一条命中即红灯）。标记形态调整（函数名 ↔ 错误文案段）时 fixture 自动跟随；
+		 * 登记表被清空则植入代码退化为合法 bundle、红灯用例失败——「门禁恒绿」形态
+		 * 必须被测试抓到，不做宽容。
+		 */
+		const planted = (tag) =>
+			`export default {};\n${PI_ENV_ADMISSION_GUARD_MARKERS.map((m) => `throw new Error(${JSON.stringify(`${m}: ${tag}`)});`).join("\n")}\n`;
+		const scoped = join(root, "staged/@zhushanwen");
+		for (const pkgDirName of ["pi-plan", "pi-ask-user"]) {
+			const pkgDir = join(scoped, pkgDirName);
+			mkdirSync(pkgDir, { recursive: true });
+			writeFileSync(
+				join(pkgDir, "index.js"),
+				marker && pkgDirName === "pi-ask-user" ? planted("planted") : "export default {};\n",
+				"utf8",
+			);
+			writeFileSync(
+				join(pkgDir, "package.json"),
+				JSON.stringify({ name: `@zhushanwen/${pkgDirName}`, pi: { extensions: ["./index.js"] } }),
+				"utf8",
+			);
+		}
+		// plan 的 templates/ 是 verify 侧专项校验项，正向对照（exit 0）须齐备；
+		// 红灯用例门禁先行（main 内早于逐包校验），与此无关。
+		mkdirSync(join(scoped, "pi-plan/templates"), { recursive: true });
+		writeFileSync(join(scoped, "pi-plan/templates/feature-plan.md"), "# plan\n", "utf8");
+		const enginesDir = join(root, "engines");
+		if (engines) {
+			const engineDir = join(enginesDir, "zcode");
+			mkdirSync(engineDir, { recursive: true });
+			writeFileSync(
+				join(engineDir, "index.js"),
+				enginesMarker ? planted("planted engine") : "export default {};\n",
+				"utf8",
+			);
+			writeFileSync(
+				join(engineDir, "package.json"),
+				JSON.stringify({ name: "fixture-engine", type: "module" }),
+				"utf8",
+			);
+		}
+		const run = (extraArgs = []) =>
+			spawnSync(
+				process.execPath,
+				[join(root, "scripts/verify-staged-extensions.mjs"), "--staged-dir", scoped, ...extraArgs],
+				{ encoding: "utf8" },
+			);
+		return {
+			run,
+			enginesDir,
+			cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }),
+		};
+	}
+
+	it("扩展 bundle 植入禁入标记 → exit 1 + stderr 定位包名与 C-ext-31 恢复动作", () => {
+		const fx = makeGateMirror({ marker: true });
+		try {
+			const r = fx.run();
+			expect(r.status, "C-ext-31 门禁必须 fail-fast（打包态 subagent 全灭事故形态）").toBe(1);
+			expect(r.stderr, "违规 bundle 定位到植入包").toContain("pi-ask-user");
+			expect(r.stderr, "错误消息含约束编号 C-ext-31").toContain("C-ext-31");
+			expect(r.stderr, "错误消息含恢复动作锚点（resolveSessionStoreBase）").toContain(
+				"resolveSessionStoreBase",
+			);
+		} finally {
+			fx.cleanup();
+		}
+	});
+
+	it("干净 bundle → exit 0（正向对照：门禁不误拦合法产物）", () => {
+		const fx = makeGateMirror();
+		try {
+			const r = fx.run();
+			expect(r.status, "无标记应通过").toBe(0);
+		} finally {
+			fx.cleanup();
+		}
+	});
+
+	it("引擎 bundle 植入标记 + --engines-dir → exit 1 + stderr 定位引擎产物（postbuild 覆盖对齐构建期）", () => {
+		const fx = makeGateMirror({ engines: true, enginesMarker: true });
+		try {
+			const r = fx.run(["--engines-dir", fx.enginesDir]);
+			expect(r.status, "引擎产物禁入标记必须被 postbuild 拦截").toBe(1);
+			expect(r.stderr, "违规 bundle 定位到引擎产物").toContain("zcode");
+			expect(r.stderr, "错误消息含约束编号 C-ext-31").toContain("C-ext-31");
+		} finally {
+			fx.cleanup();
+		}
+	});
+
+	it("--engines-dir 指向不存在目录 → 静默跳过（宽容形态，不影响扩展侧校验）", () => {
+		const fx = makeGateMirror();
+		try {
+			const r = fx.run(["--engines-dir", join(fx.enginesDir, "nonexistent")]);
+			expect(r.status, "engines 目录不存在时应静默跳过并正常通过").toBe(0);
+		} finally {
+			fx.cleanup();
+		}
+	});
+});
+
+/**
+ * C-ext-31 门禁在 bundle-extensions.mjs 的接线锁定（源码文本级）。
+ *
+ * 断言曾藏在 bundleEngines() 函数体末尾、main() 仅间接触发——引擎 staging
+ * 逻辑重构可无声吞掉门禁。现断言固定在 main() 内 staging 全部完成之后执行；
+ * 本用例锁死「await bundleEngines() 之后存在 assertNoPiEnvAdmissionGuard
+ * 调用」的源码顺序，并反向锁定 bundleEngines() 函数体不再持断言。
+ */
+describe("C-ext-31 gate wiring lock (bundle-extensions.mjs)", () => {
+	it("门禁断言位于 main() 内 staging 完成后（await bundleEngines() 之后）", () => {
+		const bundleSrc = readFileSync(join(REPO, "scripts/bundle-extensions.mjs"), "utf8");
+		expect(bundleSrc, "bundle 侧 import 门禁单一实现").toContain(
+			'from "./lib/pi-env-admission-gate.mjs"',
+		);
+		expect(bundleSrc, "门禁调用在 await bundleEngines() 之后（main 内，与 staging 解耦）").toMatch(
+			/await bundleEngines\(\);[\s\S]*assertNoPiEnvAdmissionGuard\(/,
+		);
+		const enginesFnStart = bundleSrc.indexOf("async function bundleEngines()");
+		expect(enginesFnStart, "bundleEngines() 函数在场").toBeGreaterThan(-1);
+		const enginesFnBody = bundleSrc.slice(enginesFnStart, bundleSrc.lastIndexOf("main();"));
+		expect(enginesFnBody, "bundleEngines() 函数体内不得再持门禁断言").not.toContain(
+			"assertNoPiEnvAdmissionGuard",
+		);
 	});
 });
 

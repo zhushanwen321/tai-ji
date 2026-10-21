@@ -93,6 +93,9 @@ function renderDoctor(
       // 仅 subagents:'stat' 的 subagent 根（doctor 默认形态）——其余根恒有计数（实扫）；
       // 被去重根已在上方提前返回
       facts.push('未扫描（subagent 根默认不扫，includeSubagents:true 开启）')
+    } else if (r.kind === 'archive') {
+      // [session-archive D7] 归档根计数 = 簿记数（非 .jsonl 文件数，措辞按实名）
+      facts.push(`${r.fileCount} 归档单元`, `扫 ${Math.round(r.scanMs ?? 0)}ms`)
     } else {
       facts.push(`${r.fileCount} 文件`, `扫 ${Math.round(r.scanMs ?? 0)}ms`)
     }

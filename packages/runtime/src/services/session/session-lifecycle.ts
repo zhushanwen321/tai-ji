@@ -94,7 +94,7 @@ export function subscribeSessionDeathDisposition(
   return () => { deathDispositionSubscribers.delete(cb) }
 }
 
-function fireDeathDisposition(sessionId: string, disposition: SessionDeathDisposition, detail: SessionDeathDispositionDetail): void {
+export function fireDeathDisposition(sessionId: string, disposition: SessionDeathDisposition, detail: SessionDeathDispositionDetail): void {
   for (const cb of [...deathDispositionSubscribers]) {
     try {
       cb(sessionId, disposition, detail)
@@ -137,6 +137,9 @@ import { assertPiSessionFile } from '../../infra/pi/session-attach-assert.js'
 // 删主会话的下挂内容级联（2026-10-12 裁决；D5 收敛后 = 收殓 + 引用并集/fork 回退 +
 // 整树软删 + pi 树内本体清理的单一清单入口——旧逐域段随整树软删退役）。
 import { cascadeDeleteSessionContent } from './session-content-cascade.js'
+// 六类旁挂后缀词表 SSOT（archive-paths 单点常量）：归档搬移面 = delete 清理面，两侧
+// 消费同一常量消除手抄漂移（漂移后果 = 归档漏迁新 sidecar 或 delete 漏删）。
+import { SESSION_SIDECAR_EXTS } from '../archive/archive-paths.js'
 // A23 级联前置收殓（幂等双跑收口在途收殓；removeSessionEntry 汇聚点的 fire-and-forget
 // 挂点不动——本 import 只是级联内的 await 形态复用同一原语）。
 import { reapSessionBackgroundTasks } from './background-task-reaper.js'
@@ -980,16 +983,11 @@ export class SessionLifecycle implements ISessionRegistry {
    * 强失败会掩盖删除本身的成功）。
    */
   private purgeSessionSidecars(filePath: string): void {
-    // 清理 sidecar（删除失败不阻塞主流程）
-    try { unlinkSync(filePath + '.meta.json') } catch { void 0 }
-    // 清理 preset 绑定 sidecar（设计文档 §4，delete 是唯一清理点）
-    try { unlinkSync(filePath + '.preset.json') } catch { void 0 }
-    try { unlinkSync(filePath + '.project.json') } catch { void 0 }
-    try { unlinkSync(filePath + '.handoff.json') } catch { void 0 }
-    // 清理 agent binding sidecar（agent-managed-session；delete 是唯一清理点，防孤儿 sidecar）
-    try { unlinkSync(filePath + '.agent.json') } catch { void 0 }
-    // 清理 model binding sidecar（model binding；delete 是唯一清理点，防孤儿 sidecar）
-    try { unlinkSync(filePath + '.model.json') } catch { void 0 }
+    // 清理 sidecar 六后缀（词表 SSOT = SESSION_SIDECAR_EXTS，与归档搬移同源；删除失败
+    // 不阻塞主流程——best-effort 同族语义）
+    for (const ext of SESSION_SIDECAR_EXTS) {
+      try { unlinkSync(filePath + ext) } catch { void 0 }
+    }
     // 清理归一化残留 .tmp-migrate-*.jsonl（差距复审 suggestion 6，与 sidecar 同点 best-effort）
     cleanupMigrateResidues(filePath)
     // W-Runtime4：清理 session 文件头解析缓存（infra session-file-utils 的 filePath 键

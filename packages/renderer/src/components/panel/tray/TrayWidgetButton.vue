@@ -38,7 +38,9 @@
 
   ── badge fallback 链（D4）──
   `meta.badge` → `meta.progress.label ?? String(meta.progress.current)` → 无
-  超长 truncate 至 BADGE_MAX_CHARS 字符，全文进 badge 的 title（§3.5）
+  超长 truncate 至 BADGE_MAX_CHARS 字符，全文进按钮 aria-label（§3.5；2026-10-19 左簇
+  浮层优化：原生 title 退役——badge 全文从 badge 的 title 移到按钮 aria-label 括注，
+  hover 面板承载视觉说明，屏幕阅读器保留全文）
 
   ── status 视觉（D4：running=accent+呼吸点 / done=success / failed=danger / idle=dim）──
   视觉序列 = `[icon][呼吸点（仅 running，size-[6px] + animate-pulse，与统一表单 overlay
@@ -54,8 +56,7 @@
     variant="ghost"
     data-testid="tray-widget-button"
     :data-widget-key="viewId"
-    :title="displayTitle"
-    :aria-label="displayTitle"
+    :aria-label="badgeFull ? `${displayTitle}（${badgeFull}）` : displayTitle"
     :aria-expanded="expanded ? 'true' : 'false'"
     :aria-pressed="pinned ? 'true' : 'false'"
     :class="trayItemButtonClass(pinned || expanded)"
@@ -107,7 +108,6 @@
         v-if="badgeText"
         data-testid="tray-widget-badge"
         :class="[TRAY_ITEM_COUNT_CLASS, toneClass]"
-        :title="badgeFull"
       >
         {{ badgeText }}
       </span>

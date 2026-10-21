@@ -66,18 +66,20 @@
         >{{ matchedPresetLabel }}</span>
       </div>
 
-      <!-- 查询失败提示（B2：区分「从未查询」vs「查询失败」） -->
+      <!-- 查询失败提示（B2：区分「从未查询」vs「查询失败」）。与余量行并存而非整体替换：
+           最后成功余量恒保留在 quota store（provider 隔离），失败时兜底继续展示，
+           失败原因降级为数据上方的一行提示 -->
       <div v-if="error" class="py-1.5 text-center text-[10.5px] text-danger">
         {{ t('panel.context.queryFailed', { error }) }}
       </div>
 
-      <!-- 3 窗口行（4 列 grid） -->
-      <template v-else-if="quotaRow">
+      <!-- 3 窗口行（4 列 grid；有数据即渲染，含失败态兜底） -->
+      <template v-if="quotaRow">
         <div
           v-for="(win, idx) in visibleWindows"
           :key="idx"
           class="grid items-center py-0.5"
-          style="grid-template-columns: 32px 1fr 32px 52px; column-gap: 8px; font-size: 11px; line-height: 1.4;"
+          style="grid-template-columns: 32px 1fr 44px 52px; column-gap: 8px; font-size: 11px; line-height: 1.4;"
         >
           <span class="font-sans text-[10.5px] text-neutral-mid">{{ windowLabels[win.idx] }}</span>
           <div class="relative h-1 overflow-hidden rounded-full bg-surface-2">
@@ -91,15 +93,15 @@
               'text-right font-semibold tabular-nums',
               win.pct >= DANGER_THRESHOLD ? 'text-danger' : win.pct >= HIGH_THRESHOLD ? 'text-warn' : 'text-neutral-fg',
             )"
-          >{{ win.pct }}%</span>
+          >{{ formatQuotaPct(win.pct) }}%</span>
           <span class="truncate text-right font-mono text-[9.5px] tabular-nums text-neutral-dim">
             {{ formatReset(win.resetSec) }}
           </span>
         </div>
       </template>
 
-      <!-- 无数据时的占位 -->
-      <div v-else class="py-1.5 text-center text-[10.5px] text-neutral-dim">
+      <!-- 无数据且无失败时的占位 -->
+      <div v-else-if="!error" class="py-1.5 text-center text-[10.5px] text-neutral-dim">
         {{ isPending ? t('panel.context.quotaQuerying') : t('panel.context.noQuotaData') }}
       </div>
     </div>
@@ -166,6 +168,7 @@ import { useContextUsage } from '@/composables/features/model/useContextUsage'
 import { useQuotaStore } from '@/stores/quota'
 import { useQuotaDisplay } from '@/composables/features/model/useQuotaDisplay'
 import { quotaFailReasonText } from '@/composables/features/model/useQuotaQuery'
+import { formatQuotaPct } from '@taiji/shared'
 import { formatTokens, usageBarClass } from './context-usage-display'
 import * as quotaApi from '@taiji/core/transport/api/domains/quota'
 

@@ -1,7 +1,7 @@
 export default {
   title: '搜索',
-  description: '搜索命令、文件、符号与会话',
-  placeholder: '搜索命令、文件、符号、会话…',
+  description: '搜索命令、文件、符号、会话与归档',
+  placeholder: '搜索命令、文件、符号、会话、归档…',
   searching: '搜索中…',
   startHint: '输入关键词开始搜索',
   noResult: '未找到「{query}」的相关结果',
@@ -11,6 +11,7 @@ export default {
   sectionFile: '文件',
   sectionSymbol: '符号',
   sectionSession: '会话',
+  sectionArchive: '归档',
   recent: '最近',
   suggestedCommand: '建议命令',
   dirLabel: '目录',
@@ -20,4 +21,5 @@ export default {
   fileOpenFailed: '文件打开失败',
   sessionNotFound: '未找到会话: {title}',
   sessionSwitchFailed: '会话切换失败',
+  archiveOpenFailed: '归档条目打开失败，请重新搜索',
 }

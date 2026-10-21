@@ -7,7 +7,7 @@
  * 注：ServerMessage(id) → pending.resolve 的回灌由 features 层 dispatcher 串联（Wave 3）。
  *      mock 模式下不走本域（api/index 切到 mock 门面）。
  */
-import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ServerMessageMap, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply, SessionRevokeMessageReply, WorkflowRunEventsReply, WorkflowDagReply, SubagentEngineDefaultModelMutationReply } from '@taiji/shared'
+import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ServerMessageMap, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply, SessionRevokeMessageReply, WorkflowRunEventsReply, WorkflowDagReply, SubagentEngineDefaultModelMutationReply, ArchiveSummary, SessionArchiveReply } from '@taiji/shared'
 import { PI_THINKING_LEVELS } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command } from '../request'
@@ -191,6 +191,38 @@ export function remove(sessionId: string): Promise<void> {
 /** 删除指定 cwd（folder）下所有 session（folder 维度批量删除，reply 含 deleted/failed 列表） */
 export function removeByCwd(cwd: string): Promise<BatchDeleteResult> {
   return command('session.deleteByCwd', { cwd }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+// ── session 归档域（session-archive 设计 D5 三 RPC + config.archives 列表拉取；
+//    payload/reply 形状 SSOT = @taiji/shared archive.ts，runtime 分发表属 u-rpc-wiring）──
+
+/** 归档 session：同步段完成搬移 + 簿记骨架（reply ack 型 { sessionId }；压缩在后台异步进行，文案不宣称已压缩） */
+export function archive(sessionId: string): Promise<SessionArchiveReply> {
+  return command('session.archive', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
+ * 恢复归档 session：解压回原路径、原 project 分组随旁挂自动还原。reply 解包 .session
+ * （恢复后的 SessionSummary，前端原项目组顶部高亮置顶，D5 步骤 7）。
+ */
+export async function unarchive(sessionId: string): Promise<SessionSummary> {
+  const reply = await command('session.unarchive', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
+  return reply.session
+}
+
+/**
+ * 彻底删除归档 session（= delete 的归档态版本；全部步骤幂等）。reply 的 keptSubagentsDir
+ * 在 keep-all 保守分支触发时携带（referenceScan='failed' 判据）——消费方 toast 保守保留
+ * 说明 + 残留目录指引（D5 步骤 7 失败显式上报）。
+ */
+export function purgeArchive(sessionId: string): Promise<{ sessionId: string; keptSubagentsDir?: string }> {
+  return command('session.purgeArchive', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 拉取归档列表（config.archives；拉为主——打开归档视图时调用，列表 = 归档目录扫描派生） */
+export async function listArchives(): Promise<ArchiveSummary[]> {
+  const reply = await command('config.archives', {}, RPC_BACKSTOP_TIMEOUT_MS)
+  return reply.archives
 }
 
 /**

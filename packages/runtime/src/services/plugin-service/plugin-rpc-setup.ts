@@ -26,6 +26,7 @@ import { registerWorkspaceRpcHandlers } from './api/workspace-api.js'
 import { registerCommandRpcHandlers } from './api/commands-api.js'
 import type { CommandRegistration } from './api/commands-api.js'
 import { registerViewRpcHandlers } from './api/views-api.js'
+import type { PluginUiSnapshotStore } from './plugin-ui-snapshot-store.js'
 import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import type { ToolEntry } from './plugin-types.js'
 
@@ -99,6 +100,12 @@ export interface RpcSetupContext {
   entryInvalidation: EntryInvalidationDispatch
   /** 挂载点集合（renderer 经 plugin.mountPoints.sync 上报的副本，AC10） */
   mountPoints: string[]
+  /**
+   * 插件 UI 快照存储（ADR-0097 拉为主）：headerAction 广播出线与 handleViewUpdate 的
+   * 校验出口处写入最新值，plugin.ui.snapshot 拉取 handler 读出。写入先于广播——广播
+   * 丢弃（broadcastFn 缺失）时快照仍反映插件最新声明，下次拉取可收敛。
+   */
+  uiSnapshotStore: PluginUiSnapshotStore
   /** Worker invoke.result 回传的 pending resolve/reject（S3-W1，PluginService 私有）；sourceWorkerId 为回传来源通道（D2 回传归属校验） */
   deliverInvokeResult: (handlerId: string, payload: { result?: unknown; error?: unknown }, sourceWorkerId: string) => void
   /**
@@ -135,6 +142,9 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
     // ui-api 据此拒绝「假成功」回执（B-F2：updateHeaderAction 回 {updated:false}），
     // 装配缺陷不再被包装成插件侧的成功。
     broadcastHeaderActionUpdate: (payload) => {
+      // 快照写入先于广播且无条件（ADR-0097）：广播被丢弃（broadcastFn 缺失）时快照
+      // 仍反映插件最新声明，renderer 下次 plugin.ui.snapshot 拉取可收敛
+      ctx.uiSnapshotStore.setHeaderAction(payload)
       if (deps.broadcastFn) {
         deps.broadcastFn('plugin:headerActionUpdate', payload)
         return true
@@ -333,6 +343,9 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
   registerViewRpcHandlers(rpcServer, {
     mountPoints: ctx.mountPoints,
     handleViewUpdate: (pluginId: string, viewId: string, guiTree: GuiComponent[], sessionId: string) => {
+      // 快照写入与广播同源（ADR-0097）：[null] 树 = 清除分区（渲染端 ViewHostStore
+      // consumeWidget 清除语义的同构镜像，见 PluginUiSnapshotStore.setView）
+      ctx.uiSnapshotStore.setView({ sessionId, viewId, pluginId, guiTree, updatedAt: Date.now() })
       ctx.publishViewUpdate({
         sessionId,
         viewId,

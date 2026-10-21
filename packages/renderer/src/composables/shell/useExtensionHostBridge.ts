@@ -67,7 +67,8 @@ import {
 } from '@taiji/ui/extension-host'
 import { ACTION_EXECUTOR_KEY } from '@taiji/ui/rendering-protocol'
 import { SLASH_COMMAND_SOURCE_KEY } from '@/components/panel/command-popover-source'
-import { onPlugins } from '@taiji/core/transport/api/domains/plugin'
+import { onPlugins, getPluginUiSnapshot } from '@taiji/core/transport/api/domains/plugin'
+import type { PluginUiSnapshotPayload } from '@taiji/shared'
 import { createNotifyToastHandler } from './notify-toast'
 import { notifyUiResponseNotDelivered } from './ui-response-feedback'
 import { useChatStore } from '@/stores/chat'
@@ -150,6 +151,39 @@ function ensureCommandDeclarationsSync(
 }
 
 /**
+ * 插件 UI 快照条目 → bus 帧回放（ADR-0097 拉为主的三路同函数原则：快照回放与实时推送
+ * 喂同一 store 订阅路径——条目按实时帧形状逐条 emit，窄化 / (sessionId, id) 分区写入 /
+ * `[null]` 清除语义全部由既有订阅端承担，零新写入口、零语义复制）。
+ */
+export function applyUiSnapshot(bus: InternalEventBus, snap: PluginUiSnapshotPayload): void {
+  for (const payload of snap.headerActions) {
+    bus.emit({ kind: 'plugin:headerActionUpdate', headerAction: payload })
+  }
+  for (const item of snap.views) {
+    bus.emit({ kind: 'extension-widget', sessionId: item.sessionId, widget: { viewId: item.viewId, pluginId: item.pluginId, guiTree: item.guiTree } })
+  }
+}
+
+/**
+ * 插件 UI 快照 connected 重放器（ADR-0097「拉为主、推补充」收敛通道；模式对齐
+ * ensureMountPointsSync 同款 connected watcher）。
+ *
+ * plugin:headerActionUpdate / plugin:viewUpdate 是 transient 推送（不入 ring、无重放），
+ * renderer 首屏 / 重载 / runtime 重启重连后状态由本重放器经 plugin.ui.snapshot 全量拉取
+ * 恢复——「按钮显隐与 badge 与刷新前一致」（验收基准 3）。拉取失败（断连瞬间 reject）不
+ * 中断：warn 后等下一次 connected 边沿重试（watch 对每次进入 connected 都触发）。
+ */
+function ensurePluginUiSnapshot(bus: InternalEventBus): () => void {
+  return watch(getWsState(), (s) => {
+    if (s !== 'connected') return
+    getPluginUiSnapshot().then(
+      (snap) => applyUiSnapshot(bus, snap),
+      (e) => console.warn('[extension-host] plugin.ui.snapshot fetch failed:', e),
+    )
+  }, { immediate: true })
+}
+
+/**
  * 挂载点注册态 → ContributionInfo 映射（M16，PluginSettingsPage 数据源）。
  *
  * available = 挂载点已注册（MountPointRegistry SSOT）；未注册 → available=false + reason
@@ -197,8 +231,15 @@ export type VisibleHeaderActionRecord = ContributionRecord & {
 }
 
 /**
- * headerAction 可见性谓词（单点）：声明缺省 / 运行时 hidden=true / （非 overlay 直开且）
- * 无 commandId 三者皆不可见；E13/E3 簿记只影响 disabled/tooltip 不影响可见性。
+ * headerAction 可见性谓词（单点）：声明缺省 / 插件未推送过运行时状态 / 运行时 hidden=true /
+ * （非 overlay 直开且）无 commandId 四者皆不可见；E13/E3 簿记只影响 disabled/tooltip 不影响可见性。
+ *
+ * 缺省语义反转（ADR-0097 拉为主改造，2026-10-21 用户裁决）：runtimeState === undefined
+ * （插件从未对该会话推送）= 不可见——「无任务不显示」契约的 fail-safe 形态。旧语义
+ * 「未推送 = 显示」把未知态乐观渲染成有入口，是「无任务会话按钮常驻 + 空面板」缺陷的
+ * 根因之一；反转后按钮只在插件明确声明存在（有推送记录且非 hidden）时渲染。数据到达
+ * 由 connected 边沿的 plugin.ui.snapshot 快照拉取保证（ensurePluginUiSnapshot），推送
+ * 丢失不再导致该反转产生「有任务也漏显示」的常态。
  *
  * 消费点：HeaderActionsHost 的按钮渲染过滤（toHeaderActionButton 返回 null 的唯一判定源，
  * 用户直接可见的正确性权威侧）与 hasVisibleHeaderActions（托盘聚合面板段「有可见按钮才
@@ -210,7 +251,9 @@ export function isVisibleHeaderAction(
 ): decl is VisibleHeaderActionRecord {
   const ha = decl.headerAction
   if (!ha) return false
-  if (runtimeState?.hidden === true) return false
+  // 插件从未推送过运行时状态 = 该入口未被插件声明存在（fail-safe：未知态不渲染）
+  if (runtimeState === undefined) return false
+  if (runtimeState.hidden === true) return false
   return ha.activation === 'scheduler-overlay' || !!ha.commandId
 }
 
@@ -343,12 +386,24 @@ export function initExtensionHostBridge(app: App): void {
   // 不上报则恒返回 []（registerMountPoints 内部同步注册，list() 已含全部挂载点）。
   // MF-1（R2）：发送时点见 ensureMountPointsSync——init 时 WS 未建连，send 必被静默丢弃。
   const stopMountPointsSync = ensureMountPointsSync(mountPoints)
+  // 插件 UI 快照 connected 重放器（ADR-0097）：headerAction/视图状态在首屏/重载/重连后
+  // 由全量拉取恢复；实时推送仍承担运行中的即时性（失效提示）。
+  const stopPluginUiSnapshotSync = ensurePluginUiSnapshot(bus)
 
   // ui 组件数据源（ViewHost 经 inject 取，壳 provide 真实实现；形状对齐 IF10）
   app.provide(VIEW_HOST_SOURCE_KEY, {
     getView: (sessionId, viewId) => viewHostStore.getView(sessionId, viewId),
     // widget 视图消费方（Composer 托盘 widget 区）：枚举该 session 全部缓存 viewId（纯透传 core store）
     getViewIds: (sessionId: string) => viewHostStore.getViewIds(sessionId),
+    // 分区缺失自举补拉（ADR-0097 事件边沿拉）：ViewHost 挂载发现分区无内容时按
+    // (sessionId, viewId) 过滤拉取（幂等读，无节流；断连 reject 静默 warn，实时帧或
+    // 下次 connected 全量拉取收敛）
+    refreshView: (sessionId: string, viewId: string) => {
+      getPluginUiSnapshot({ sessionId, viewId }).then(
+        (snap) => applyUiSnapshot(bus, snap),
+        (e) => console.warn('[extension-host] plugin.ui.snapshot refreshView failed:', e),
+      )
+    },
   })
   // L2 二级 tab 数据源（PluginViewContainer 经 inject 取；纯静态声明——sidebar.tab 视图贡献清单，
   // widget 推送经 Composer 托盘 widget 区承接、不进 sidebar，M17 wave2 D5）。
@@ -506,6 +561,7 @@ export function initExtensionHostBridge(app: App): void {
       stopMountPointsSync()
       stopCommandDeclarationsSync()
       stopHeaderActionsSync()
+      stopPluginUiSnapshotSync()
       bridge.dispose()
     },
   }

@@ -164,7 +164,8 @@ function makeHeaderActionSource(overrides: { hidden?: boolean } = {}): object {
         headerAction: { activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' },
       },
     ],
-    getRuntimeState: () => (overrides.hidden ? { hidden: true } : undefined),
+    // 缺省反转后「可见」用例一律已推送形态（hidden=true 显式停用 / false 已推送在场）
+    getRuntimeState: () => ({ headerActionId: 'scheduler-manager.open', pluginId: 'scheduler-manager', updatedAt: 1, hidden: overrides.hidden === true }),
     resolveCommandAvailability: () => 'registered',
     executeCommand: () => true,
   }
@@ -405,8 +406,7 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
       expect(button.attributes('data-state')).toBe('idle')
       expect(button.find('[data-testid="tray-builtin-count"]').exists()).toBe(false)
       expect(button.find('[data-testid="tray-builtin-pulse"]').exists()).toBe(false)
-      // 标题/aria 复用 panel.tray.title.*（icon 可识别性不依赖计数）
-      expect(button.attributes('title')).toBe(zhTray.tray.title[kind])
+      // aria 复用 panel.tray.title.*（icon 可识别性不依赖计数；原生 title 已退役，说明由 hover 面板承载）
       expect(button.attributes('aria-label')).toBe(zhTray.tray.title[kind])
     }
   })
@@ -995,8 +995,7 @@ describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
     expect(aggregate.exists()).toBe(true)
     // 单图标硬约束（W3a 禁多 icon 重叠）：入口内只有一个 svg（layers），运行数走数字角标
     expect(aggregate.findAll('svg')).toHaveLength(1)
-    // title = 「全部工具」（运行数不进 title，只在角标）
-    expect(aggregate.attributes('title')).toBe(zhTray.tray.aggregate.allTools)
+    // aria = 「全部工具」（运行数不进 aria-label，只在角标；原生 title 已退役）
     expect(aggregate.attributes('aria-label')).toBe(zhTray.tray.aggregate.allTools)
     // 运行数 = 进行中合计（仅历史件不计入）
     expect(aggregate.find('[data-testid="tray-aggregate-count"]').text()).toBe('2')
@@ -1133,7 +1132,7 @@ describe('ComposerTray 第 4 件「子会话」（u7）', () => {
 
     const button = builtinButton('session')
     expect(button.exists()).toBe(true)
-    expect(button.attributes('title')).toBe(zhTray.tray.title.session)
+    expect(button.attributes('aria-label')).toBe(zhTray.tray.title.session)
     expect(button.attributes('data-state')).toBe('running')
     expect(button.find('[data-testid="tray-builtin-pulse"]').exists()).toBe(true)
     // 计数徽标 = 子会话总数（设计 §6.7：`● 3`；运行中信号由呼吸点承载）

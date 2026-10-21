@@ -20,9 +20,15 @@ import { buildBtwThreadListPayload } from './transport/btw-message-handler.js'
 // btw-line-spawn-options 工厂——getMigrationGate 经下方 createBtwLineSpawnOptionsFactory 接线）。
 // [M4-a] setBtwCascadeOps：deleteSession/deleteByCwd 的 btw 级联支线注入点（session-lifecycle）；
 // subscribeSessionDeathDisposition：notify-once D5 死亡处置登记（delete/suppress 汇聚点）。
-import { getMigrationGate, setBtwCascadeOps, subscribeSessionDeathDisposition } from './services/session/session-lifecycle.js'
+import { getMigrationGate, setBtwCascadeOps, subscribeSessionDeathDisposition, fireDeathDisposition } from './services/session/session-lifecycle.js'
 // [M4-a] 线终结的插件 sessionData 真删清理（onLineTerminated 扇出，与主会话 delete B5 段同源）。
 import { clearRemovedSessionData } from './services/plugin-service/session-data-store.js'
+// 归档域（session-archive 设计 D5，u-rpc-wiring 组合根接线）：ArchiveService 构造 deps 逐项
+// 对齐 delete 活跃分支原语（见下方装配注释）。
+import { ArchiveService } from './services/archive/archive-service.js'
+import { userStoppedGate } from './services/session/event-interpreter.js'
+import { reapSessionBackgroundTasks } from './services/session/background-task-reaper.js'
+import { unbindCanvasOnSessionDeleted } from './services/canvas/canvas-service.js'
 import { findPiExecutable } from './infra/pi/find-pi-executable.js'
 import { GenStatsService } from './services/session/gen-stats-service.js'
 import { createSessionDeliveryRegistry, createDiskDeliveryStoreForSession } from './services/session/session-delivery-registry.js'
@@ -30,10 +36,15 @@ import { createSessionDeliveryRegistry, createDiskDeliveryStoreForSession } from
 import { createResumeDecision } from './services/session/resume-decision.js'
 // u4 追加项（A5/V5）：reattach restore 包装——先建投递运行时再触发对账（reconcile 无运行时即 no-op）。
 import { createReattachRestore } from './services/session/reattach-delivery-trigger.js'
-// notify-once U3（组合根接线，实施计划偏差 D-1）：ClaimLedger 构造 + settle/死亡/清扫路径；
-// 词形映射与 respond 回执助手自 session-manager-handler 模块复用（映射单点）。
+// notify-once U3（组合根接线，实施计划偏差 D-1）：ClaimLedger 构造 + settle/死亡路径；
+// 词形映射、respond 回执与死亡收尾序列助手自 session-manager-handler 模块复用（各自单点）。
 import { createClaimLedger, type DeathCause } from './services/session/notify-claims.js'
-import { collectStderrTail, deliverRespondTargets } from './transport/session-manager-handler.js'
+import {
+  collectStderrTail,
+  deliverRespondTargets,
+  settleClaimsOnDeath,
+  type WatchRespondExtra,
+} from './transport/session-manager-handler.js'
 // notify-once D5：respawn 终态命运（熔断发声 / 恢复静默）——pi-respawn 模块级订阅。
 import { onRespawnFate } from './services/session/pi-respawn.js'
 import type { SessionManagerWatchRespondPayload } from '@zhushanwen/extension-protocol'
@@ -718,9 +729,14 @@ async function main(): Promise<void> {
   const agentSettledListeners = new Set<(sessionId: string) => void>()
 
   // ── notify-once（设计 U3 + 偏差 D-1：ClaimLedger 组合根接线）─────────────
-  // 职责面：respond 写回通道 / settle 兑现路径（agentSettledListeners）/ 终局死亡发声
-  //（delete·forceQuit·非 respawn 链 exit·熔断四汇聚点）/ 父死亡批量 orphan（触发器②）/
-  // TTL 清扫消费 / shutdown 非零 warn（D7b）。
+  // 职责范围：respond 写回通道 / settle 兑现路径（agentSettledListeners）/ 终局死亡发声
+  //（五汇聚点：delete·forceQuit·非 respawn 链 exit·熔断四点经本组合根 speakSessionDeath，
+  // 第五点 archive（session-manager 工具路径）由 SessionManagerHandler.handleArchive 发声——
+  // 五点共用 settleClaimsOnDeath 同一收尾实装）/ 父死亡批量 orphan（触发器②）/
+  // shutdown 非零 warn（D7b）。（TTL 清扫已随 ADR-0122 防御机制清查退役——claimLedger
+  // 消费点全集仅：组合根直调 settle/orphanByParent/markInjected/disarmDeliveryFailed/count/
+  // dispose 六方法 + 经 settleClaimsOnDeath 的 onSessionDeath/clearSession + 经
+  // deliverRespondTargets 的 onRespond，无定时回收路径。）
   // 订阅顺序硬约束：pm.onSessionExit 订阅须先于下方
   // `new SessionService` 的 exit 清理路径（按订阅序分发，本路径排前才能读到 session 内存态）。
   // 前向引用（sessionService/sessionStore）为 createAdapter 同款「声明在后、调用在运行期」模式。
@@ -758,25 +774,12 @@ async function main(): Promise<void> {
   const claimLedger = createClaimLedger()
 
   /**
-   * 终局死亡发声（D5 汇聚点共用）：onSessionDeath 同 deathSeq 批终结（即时删除）→
-   * 逐 target respond（携 sessionFilePath/exitCode/stderrTail）→ clearSession 立 latch
-   *（清残留记录 + seq/undelivered 计数器——迟到 exit 路径查无记录自然静默）。
-   * 幂等：重复调用空批空转（不占 deathSeq、无二次 respond）。
+   * 终局死亡发声（D5 汇聚点共用）：收尾序列整体委托 settleClaimsOnDeath（onSessionDeath 同
+   * deathSeq 批终结 → 逐 target respond（携 sessionFilePath/exitCode/stderrTail）→ clearSession
+   * 立 latch；幂等语义见该助手 JSDoc），再消费本组合根私有的 pendingExitDeaths 退出现场 stash。
    */
-  const speakSessionDeath = (
-    sessionId: string,
-    cause: DeathCause,
-    extra: { exitCode?: number | null; stderrTail?: string; sessionFilePath?: string } = {},
-  ): void => {
-    const batch = claimLedger.onSessionDeath(sessionId, cause)
-    if (batch.terminated.length > 0) {
-      deliverRespondTargets(claimLedger, batch.targets, respondWatch, {
-        sessionFilePath: extra.sessionFilePath ?? resolveSessionFile(sessionId),
-        ...(extra.exitCode !== undefined ? { exitCode: extra.exitCode } : {}),
-        ...(extra.stderrTail !== undefined ? { stderrTail: extra.stderrTail } : {}),
-      })
-    }
-    claimLedger.clearSession(sessionId)
+  const speakSessionDeath = (sessionId: string, cause: DeathCause, extra: WatchRespondExtra = {}): void => {
+    settleClaimsOnDeath(claimLedger, sessionId, cause, respondWatch, resolveSessionFile, extra)
     pendingExitDeaths.delete(sessionId)
   }
 
@@ -1458,6 +1461,48 @@ async function main(): Promise<void> {
   if (btwLinesRebuilt > 0) {
     console.log(`[btw] startup rebuild: lines rebuilt=${btwLinesRebuilt}`)
   }
+
+  // ── ArchiveService（session-archive 设计 D5，u-rpc-wiring 组合根接线）──────────
+  // deps 逐项对齐 delete 活跃分支原语（session-lifecycle.ts delete 方法体）：归档的杀 pi
+  // 编排与删除同链（userStopped 清理 → suppress 处置登记先于杀进程 → btw 级联 → detach/
+  // destroy/摘除 → 收殓在途后台任务）；purge 的残树处置 / 插件 KV tombstone / 画布解绑
+  // 复用 delete 同名原语；trash 经 sessionStore（与 cascade 生产装配同源，G4 语义——失败
+  // 原样上抛保持可恢复形态）。getActiveSession 映射 getSession（IManagedSessionView 含
+  // cwd/sessionFilePath/isGenerating，ArchiveService 消费的最小字段集）。
+  const archiveService = new ArchiveService({
+    isGenerating: (sid) => sessionService.getSession(sid)?.isGenerating ?? false,
+    getActiveSession: (sid) => sessionService.getSession(sid),
+    findScannedSession: (sid) => sessionService.findScannedSession(sid),
+    disposeUserStopped: (sid) => userStoppedGate.disposeForDelete(sid),
+    fireSuppressDisposition: (sid, hasDestroySink) => fireDeathDisposition(sid, 'suppress', { hasDestroySink }),
+    closeAllBtwLines: (mainSid, cwd) => btwService.closeAllForMain(mainSid, cwd),
+    detachSession: (sid) => sessionService.detachSession(sid),
+    destroyPiSession: (sid) => pm.destroySession(sid),
+    removeSessionEntry: (sid) => sessionService.removeSessionEntry(sid),
+    reapBackgroundTasks: (agentDir, sid) => reapSessionBackgroundTasks(agentDir, sid),
+    clearRemovedSessionData,
+    unbindCanvas: unbindCanvasOnSessionDeleted,
+    trash: (path) => sessionStore.trash(path),
+    trashDirectory: (dirPath) => sessionStore.trashDirectory(dirPath),
+    invalidateScanCache: () => sessionStore.invalidateScanCache(),
+    broadcastSessionList: () => server.broadcastSessionList(),
+    // unarchive reply 的 SessionSummary 读回：活跃 Map（getSummary）优先；恢复态
+    // （非活跃）session 走持久化扫描侧构造——unarchive 不 spawn pi、不进 lifecycle
+    // Map（Map 装载唯一入口 = create/restore/fork），只接 getSummary 时恢复后必然
+    // 读不到，unarchive 恒以「恢复完成但读回失败」失败。扫描腿复用
+    // listPersistedSessions 的合并链（活跃优先 + 磁盘扫描），runUnarchive 步骤 7
+    // invalidateScanCache 后扫描即含刚回场的恢复文件。
+    getSessionSummary: (sid) =>
+      sessionService.getSummary(sid) ??
+      sessionService.listPersistedSessions().flatMap((g) => g.sessions).find((s) => s.id === sid),
+    warn: (message) => console.warn(message),
+  })
+  // 启动自愈（D5 七行表）：listen 前完成——归位先于任何归档域 RPC 到达（.restoring 回滚 /
+  // 孤儿补簿记等同步段无 RPC 竞态窗口）；重做压缩经 service 在途任务表串行化，即便慢也
+  // 不影响后续同 session RPC 的正确性。staging 重压缩在大文件上可达秒级，仅崩溃残留场景
+  // 出现，正常启动为纯归档根扫描。
+  await archiveService.healOnStartup()
+
   /**
    * btw.create 主会话解析（handler ctx，BtwRoutingDeps.resolveMain）：活跃路径携带主 turn
    * 活跃信号（分支③ pill 增强）；扫盘路径（冷主会话）无可读占用态恒 false。
@@ -1517,13 +1562,16 @@ async function main(): Promise<void> {
     // 缺席时 server 构造退化实例并 warn（违反单例约束，仅测试装配遗漏场景）。
     delivery: sessionDelivery,
     // notify-once U3（偏差 D-1）：通知债权状态机透传 server → SessionManagerHandler
-    //（settle/死亡/清扫路径在上方组合根直接消费同一实例）。
+    //（settle/死亡路径在上方组合根直接消费同一实例）。
     claims: claimLedger,
     // 导入会话（import-session D5/U2 + 多源 §3.7）：session.importCandidates / session.import
     // 路由，payload.source（缺省 'pi'）在 ImportService 内按注册表分发。
     importService,
     // composer-gen-stats（D4）：session.getGenStats 恢复路径 RPC（降级链 + 写 3 回填在 service 内部）。
     genStats: genStatsService,
+    // 归档域（session-archive D5）：三 RPC + config.archives + config.sessions 帧 archiveCount
+    // 角标（上方组合根构造，deps 对齐 delete 活跃分支原语）。
+    archive: archiveService,
     // u8（reply 通路对称接线）：reply 超限错误 envelope 的恢复指引携带 session 文件实路径，
     // 与上方 MessageBus（push 通路）共用同一 resolveSessionFilePath resolver 实例。
     replyGuardResolver: resolveSessionFilePath,
@@ -1797,6 +1845,23 @@ async function main(): Promise<void> {
     // 加固轮：spawn 清单 tmp 残片清扫（infra 实现经 port 注入，同上闭包形态）
     sweepSpawnMarkerTmpResidue: () => sweepStaleSpawnMarkerTmpFiles(getDataDir()),
   })
+
+  // ── remote-config 启动拉取（延迟 30s 单次）────────────────────────
+  // taiji 远程配置两域（provider 清单域 + quota-fetchers 域，checkedAt 4h 节流在 fetch 层
+  // 内建）。延迟避开启动网络竞争；有 provider 模型合并写盘时广播新列表（无变化/失败 =
+  // 零动作，fail-safe 链内建在 fetch/sync 层）。unref：不阻塞进程退出。
+  const REMOTE_CONFIG_STARTUP_DELAY_MS = 30_000
+  const remoteConfigStartupTimer = setTimeout(() => {
+    void configService
+      .refreshRemoteProviders()
+      .then((r) => {
+        if (r.updatedProviders.length > 0) server.broadcastProviderList()
+      })
+      .catch((e: unknown) => {
+        console.warn('[remote-config] startup refresh failed:', e instanceof Error ? e.message : String(e))
+      })
+  }, REMOTE_CONFIG_STARTUP_DELAY_MS)
+  remoteConfigStartupTimer.unref?.()
 
   // ── u5（crash-forensics-and-watchdog D3）：reattach 编排 ─────────────────────
   // WS listen 后独立并行任务（D3 编排挂点：与 startup-background-init 串行链解耦，不违背

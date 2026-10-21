@@ -121,7 +121,7 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
 
   it('panel 焦点 session 的 drawer 正在查看 subagent tab → 该 vid 计入豁免集', () => {
     focusSession('A')
-    openSubagent({ virtualId: 'agentcall:acs-1', enteredFrom: 'workflow' })
+    openSubagent({ virtualId: 'agentcall:acs-1' })
     panels.value = ['A']
 
     expect(getViewedVids()).toEqual(new Set(['agentcall:acs-1']))
@@ -129,7 +129,7 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
 
   it('关闭 drawer 后不豁免（A6：关闭 drawer 后再切走，分区应可释放）', () => {
     focusSession('A')
-    openSubagent({ virtualId: 'agentcall:acs-1', enteredFrom: 'workflow' })
+    openSubagent({ virtualId: 'agentcall:acs-1' })
     closeDrawer()
     panels.value = ['A']
 
@@ -138,7 +138,7 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
 
   it('drawer 开在其他 tab（非 subagent）→ 不算正在查看，不豁免', () => {
     focusSession('A')
-    openSubagent({ virtualId: 'agentcall:acs-1', enteredFrom: 'workflow' })
+    openSubagent({ virtualId: 'agentcall:acs-1' })
     setDrawerTab('git')
     panels.value = ['A']
 
@@ -147,9 +147,9 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
 
   it('多 panel 全查（split 模式）：各 panel 焦点分区的选中 vid 都计入；null panel 跳过', () => {
     focusSession('A')
-    openSubagent({ virtualId: 'agentcall:acs-a', enteredFrom: 'workflow' })
+    openSubagent({ virtualId: 'agentcall:acs-a' })
     focusSession('B')
-    openSubagent({ virtualId: 'subagent:B:s1', enteredFrom: 'chat' })
+    openSubagent({ virtualId: 'subagent:B:s1' })
     panels.value = ['A', null, 'B']
 
     expect(getViewedVids()).toEqual(new Set(['agentcall:acs-a', 'subagent:B:s1']))
@@ -159,9 +159,9 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
     // B 曾开过 drawer 选中 acs-b，焦点切走后 B 分区保留——但 panel 枚举只含 A，
     // B 的选中 vid 不得进入豁免集（否则永久过度豁免）
     focusSession('B')
-    openSubagent({ virtualId: 'agentcall:acs-b', enteredFrom: 'workflow' })
+    openSubagent({ virtualId: 'agentcall:acs-b' })
     focusSession('A')
-    openSubagent({ virtualId: 'agentcall:acs-a', enteredFrom: 'workflow' })
+    openSubagent({ virtualId: 'agentcall:acs-a' })
     panels.value = ['A']
 
     expect(getViewedVids()).toEqual(new Set(['agentcall:acs-a']))
@@ -170,7 +170,7 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
   it('panel 枚举为空列表（无 panel 或全 null）→ 空集（安全默认：驱逐无豁免）', () => {
     panels.value = [] // beforeEach 绑定后即空列表
     focusSession('A')
-    openSubagent({ virtualId: 'agentcall:acs-1', enteredFrom: 'workflow' })
+    openSubagent({ virtualId: 'agentcall:acs-1' })
 
     expect(getViewedVids()).toEqual(new Set())
   })
@@ -228,7 +228,7 @@ describe('D5 getViewedVids：btw 线查看豁免（btw-question，M3-a）', () =
     openDrawerTab('btw')
     setBtwView('btw:pi-a')
     focusSession('B')
-    openSubagent({ virtualId: 'agentcall:acs-b', enteredFrom: 'workflow' })
+    openSubagent({ virtualId: 'agentcall:acs-b' })
     panels.value = ['A', 'B']
 
     expect(getViewedVids()).toEqual(new Set(['btw:pi-a', 'agentcall:acs-b']))

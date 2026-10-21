@@ -285,17 +285,17 @@ describe('TrayWidgetButton icon fallback 链（D4）', () => {
 // ── ② badge fallback 链 + truncate（D4/§3.5）──
 
 describe('TrayWidgetButton badge fallback 链与 truncate（D4/§3.5）', () => {
-  it('meta.badge 直用；超长 truncate 至 6 字符且 title 保留全文', () => {
+  it('meta.badge 直用；超长 truncate 至 6 字符，全文进按钮 aria-label 括注（原生 title 退役）', () => {
     const short = mountButton({ viewId: 'todo', meta: makeMeta({ badge: '42%' }) })
     const shortBadge = short.find('[data-testid="tray-widget-badge"]')
     expect(shortBadge.text()).toBe('42%')
-    expect(shortBadge.attributes('title')).toBe('42%')
+    expect(short.find('[data-testid="tray-widget-button"]').attributes('aria-label')).toBe('Todo（42%）')
 
     const long = mountButton({ viewId: 'todo', meta: makeMeta({ badge: '1234567890' }) })
     const longBadge = long.find('[data-testid="tray-widget-badge"]')
     expect(longBadge.text()).toBe('123456')
     expect(longBadge.text().length).toBe(6)
-    expect(longBadge.attributes('title')).toBe('1234567890')
+    expect(long.find('[data-testid="tray-widget-button"]').attributes('aria-label')).toBe('Todo（1234567890）')
   })
 
   it('badge 缺省 → progress.label；无 label → String(progress.current)', () => {
@@ -349,7 +349,6 @@ describe('TrayWidgetButton status 视觉（D4：running=accent+呼吸点 / done 
   it('无 meta（v1 旧 extension）→ 标题回退 viewId、无状态色类、无呼吸点无 badge', () => {
     const wrapper = mountButton({ viewId: 'legacy-widget' })
     const button = wrapper.find('[data-testid="tray-widget-button"]')
-    expect(button.attributes('title')).toBe('legacy-widget')
     expect(button.attributes('aria-label')).toBe('legacy-widget')
     // 无 status → icon 不挂状态色类（继承按钮中性色：常态 dim、hover 提亮）
     expect(iconSpan(wrapper).classes()).not.toContain('text-accent')
@@ -393,10 +392,9 @@ describe('TrayWidgetButton 外壳契约（hover/pin 状态由外壳持有）', (
     expect(button.classes()).toContain('bg-surface-hover')
   })
 
-  it('title/aria-label 取 meta.title（面板标题同源），viewId 落 data-widget-key', () => {
+  it('aria-label 取 meta.title（面板标题同源；原生 title 退役），viewId 落 data-widget-key', () => {
     const wrapper = mountButton({ viewId: 'todo', meta: makeMeta({ title: '待办清单' }) })
     const button = wrapper.find('[data-testid="tray-widget-button"]')
-    expect(button.attributes('title')).toBe('待办清单')
     expect(button.attributes('aria-label')).toBe('待办清单')
     expect(button.attributes('data-widget-key')).toBe('todo')
   })

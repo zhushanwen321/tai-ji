@@ -33,6 +33,13 @@ export interface ViewHostSource {
    * （view-host-store.ts getViewIds），壳侧 provide 纯透传。
    */
   getViewIds(sessionId: string): string[]
+
+  /**
+   * 分区缺失自举补拉（ADR-0097「拉为主、推补充」事件边沿拉，可选）：ViewHost 挂载发现
+   * 该 (sessionId, viewId) 分区无内容时调用——壳实现按同键过滤拉取插件 UI 快照并写回
+   * store（幂等读）。推送型数据丢失（transient 帧不入 ring）后的组件级收敛通道。
+   */
+  refreshView?(sessionId: string, viewId: string): void
 }
 
 /** provide/inject key——壳 provide，组件 inject，单测 global.provide mock。 */

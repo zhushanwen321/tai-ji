@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发范围的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写侧唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布范围一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域：cw 剧本族 mock 探针轨 + 真 pi 全链路真机冒烟轨 + managed session 死亡通知真机轨） / REMOTE（远程访问域：手机浏览器 LAN 直连真机/仿真验收） / TERMINAL（终端多实例真实 app 轨：切换条多实例 / 实例级生命周期 / 编号不复用 / 世代重置与对账） / MCP（MCP 服务器管理域真机子集） / BTASK（bash 后台任务域：完成通知入账全链真机轨） / DELIVERY（统一消息投递域：文本车道磁盘 outbox 崩溃恢复，mock 单测轨 + kill -9 runtime 真进程轨双层口径；真机 collect 挂起收取链） / CTRL（subagent control 通道集成轨：server × 真实引擎 × 假 pi） / NETPROXY（LLM 网络代理分流域：mock 代理/SOCKS5 工具自测 + 分流前提漂移探针 + extension 三连）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写侧唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布范围一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域：cw 剧本族 mock 探针轨 + 真 pi 全链路真机冒烟轨 + managed session 死亡通知真机轨） / REMOTE（远程访问域：手机浏览器 LAN 直连真机/仿真验收） / TERMINAL（终端多实例真实 app 轨：切换条多实例 / 实例级生命周期 / 编号不复用 / 世代重置与对账） / MCP（MCP 服务器管理域真机子集） / BTASK（bash 后台任务域：完成通知入账全链真机轨） / DELIVERY（统一消息投递域：文本车道磁盘 outbox 崩溃恢复，mock 单测轨 + kill -9 runtime 真进程轨双层口径；真机 collect 挂起收取链） / CTRL（subagent control 通道集成轨：server × 真实引擎 × 假 pi） / NETPROXY（LLM 网络代理分流域：mock 代理/SOCKS5 工具自测 + 分流前提漂移探针 + extension 三连） / ARCHIVE（session 归档域：归档/恢复/彻底删除 mock 轨行为用例）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发范围）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -456,7 +456,7 @@
       "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime test:equivalence",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#等价性测试双轨真实-llm-turn-基线开发阶段按改动范围跑",
-      "note": "收录清单记 13 文件为 TEST-STRATEGY 历史快照，磁盘实际为 18 个 .test.ts（2026-09-16 盘点），按目录现状全量收录；目录内增删文件由 scope glob 覆盖、不要求改本表。同目录真实 LLM 子集（skip 机制 SSOT = pi-fixture.ts REAL_PI_READY）属开发阶段按改动范围空载串行执行，无 CI/门禁触发范围，不在本表登记独立 rule。[2026-09-22 btw-question M4-b 评估结论更新] 设计 §4 登记对账段：btw 不新增 entry 类型，重载链复用 applyEntry 全量回放 → **btw 分区纳入等价性覆盖范围（live≡reload 构造性成立）**；btw 回放/驱逐语义的承接单测 = packages/renderer/src/__tests__/stores/btw-replay.test.ts（回放接线 + live≡reload 等价口径 describe）+ packages/core/src/domain/chat/__tests__/chat-lru-btw.test.ts（主驱逐不联动 btw 分区 + btw 驱逐同驱派生键）。scope 核对：btw 改动范围（services/session/**、core/domain/chat/**）已在本 rule scope 内，无需扩；本 rule 保持不跑真实 LLM 面（equivalence real-pi 池按改动范围开发期另行执行）。[2026-09-24 notify-once scope 扩展] completion-backflow / send-queue / session-manager-full 三资产（均属本 rule）的 watch/ClaimLedger 路径纳入触发范围：watch 路由与 respond 传导（transport/session-manager-handler.ts + transport/server.ts）、watch 协议范围（extension-protocol session-manager dir）、watch extension 侧（extensions/universal/session-manager/src/**——full-e2e 真加载该扩展源）、ClaimLedger envelope meta（packages/session-delivery/**，notifyId 穿 envelope）；ClaimLedger 本体 notify-claims.ts 落 services/session/** 已在原 scope 内。[2026-10-03 pi 1.0.0 升级补登记] scripts/prepare-pi-resources.sh 纳入 scope：pi binary 版本/下载源变化 = 真实 pi 子进程基线变化，等价性轨（faux 轨 + real-pi 按改动范围）为对应回归测试。"
+      "note": "收录清单记 13 文件为 TEST-STRATEGY 历史快照，磁盘实际为 18 个 .test.ts（2026-09-16 盘点），按目录现状全量收录；目录内增删文件由 scope glob 覆盖、不要求改本表。同目录真实 LLM 子集（skip 机制 SSOT = real-pi-gate.ts REAL_PI_READY——2026-09-27 自 pi-fixture.ts 拆出，凭证探测独立模块）属开发阶段按改动范围空载串行执行，无 CI/门禁触发范围，不在本表登记独立 rule。[2026-09-22 btw-question M4-b 评估结论更新] 设计 §4 登记对账段：btw 不新增 entry 类型，重载链复用 applyEntry 全量回放 → **btw 分区纳入等价性覆盖范围（live≡reload 构造性成立）**；btw 回放/驱逐语义的承接单测 = packages/renderer/src/__tests__/stores/btw-replay.test.ts（回放接线 + live≡reload 等价口径 describe）+ packages/core/src/domain/chat/__tests__/chat-lru-btw.test.ts（主驱逐不联动 btw 分区 + btw 驱逐同驱派生键）。scope 核对：btw 改动范围（services/session/**、core/domain/chat/**）已在本 rule scope 内，无需扩；本 rule 保持不跑真实 LLM 面（equivalence real-pi 池按改动范围开发期另行执行）。[2026-09-24 notify-once scope 扩展] completion-backflow / send-queue / session-manager-full 三资产（均属本 rule）的 watch/ClaimLedger 路径纳入触发范围：watch 路由与 respond 传导（transport/session-manager-handler.ts + transport/server.ts）、watch 协议范围（extension-protocol session-manager dir）、watch extension 侧（extensions/universal/session-manager/src/**——full-e2e 真加载该扩展源）、ClaimLedger envelope meta（packages/session-delivery/**，notifyId 穿 envelope）；ClaimLedger 本体 notify-claims.ts 落 services/session/** 已在原 scope 内。[2026-10-03 pi 1.0.0 升级补登记] scripts/prepare-pi-resources.sh 纳入 scope：pi binary 版本/下载源变化 = 真实 pi 子进程基线变化，等价性轨（faux 轨 + real-pi 按改动范围）为对应回归测试。"
     },
     {
       "id": "E2E-EQUIV-02",
@@ -1716,7 +1716,7 @@
     },
     {
       "id": "E2E-SESSMGR-02",
-      "summary": "session-manager 全链路真机冒烟剧本（U9-S1/S2：真 pi 进程 + 真 LLM spawn create_managed_session → marker UI 请求回写 → scanPiSessions 重启恢复）",
+      "summary": "session-manager 全链路真机冒烟剧本（U9-S1/S2：真 pi 进程 spawn create_managed_session → marker UI 请求回写 → scanPiSessions 重启恢复；U9-S3/S4/S5：真 LLM 轮次 archive_session/delete_session 全链路——归档/删除回包 archived/deleted:true + fake 服务侧调用与 claims 收尾断言 + 人身约束取样（tidy up 语料 → archive 调用、零 delete 调用））",
       "scope": [
         "scripts/cw/session-manager-full-e2e.sh"
       ],
@@ -2544,15 +2544,25 @@
     },
     {
       "id": "E2E-PIPE-15",
-      "summary": "verify-staged-extensions：打包 staged 资产完整性检查脚本轨（bundle 清单 + staged 扩展/引擎存在性，缺失即 fail-fast）",
+      "summary": "verify-staged-extensions：打包 staged 资产完整性检查脚本轨（bundle 清单 + staged 扩展/引擎存在性 + pi-env admission 门禁（C-ext-31：staged bundle 禁含 C-proc-26 准入检查代码），缺失即 fail-fast）",
       "scope": [
-        "scripts/verify-staged-extensions.mjs"
+        "scripts/verify-staged-extensions.mjs",
+        "scripts/lib/pi-env-admission-gate.mjs",
+        "scripts/__tests__/pi-env-admission-gate.test.mjs"
       ],
       "layer": "L1",
       "assets": [
         {
           "kind": "script",
           "ref": "scripts/verify-staged-extensions.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/lib/pi-env-admission-gate.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/__tests__/pi-env-admission-gate.test.mjs"
         }
       ],
       "trigger": "on-diff",
@@ -2560,7 +2570,7 @@
       "run": "node scripts/verify-staged-extensions.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态：真实运行形态 = apps/electron build:pre 与 scripts/postbuild-validate.sh 自动调用（打包前置门）；改动本脚本须本地跑通——无 staged 产物时报错属预期失败形态，先跑 node scripts/bundle-extensions.mjs 再验"
+      "note": "R2 态：真实运行形态 = apps/electron build:pre 与 scripts/postbuild-validate.sh 自动调用（打包前置门）；改动本脚本须本地跑通——无 staged 产物时报错属预期失败形态，先跑 node scripts/bundle-extensions.mjs 再验；C-ext-31 门禁单一实现 = scripts/lib/pi-env-admission-gate.mjs（bundle-extensions.mjs 构建期同拦，该脚本已由 E2E-PLUGINCONTRACT-01/E2E-PKG-01 scope 覆盖），改动门禁须本地跑 bundle + verify-staged 双验"
     },
     {
       "id": "E2E-PIPE-16",
@@ -2596,6 +2606,31 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态：check-unsafe-stream-writes 真实运行形态 = pre-commit 按路径触发（2026-09-04 事故防线的机器门，扫描全仓裸流写）；staged-asset-dirs 是 bundle/verify 脚本共享的目录单一来源（被其消费者间接验证）；smoke-core-dist 为 core dist barrel 冒烟。补登原因（2026-10-18 u-m3-delete）：relay 路径清理触及三者，暴露零登记被 e2e-map --staged 门禁拦截"
+    },
+    {
+      "id": "E2E-PIPE-17",
+      "summary": "pi 子树源码级 shared import 边界检查脚本轨（C-ext-31 源码层拦截：bundle 门禁只匹配准入检查标记，import '@taiji/shared/paths' 纯符号不带守卫码、暂未调用 getDataDir 时门禁恒绿；扫 packages/subagent-core/src 与 extensions/ 源码的 import/from 语句，命中 '@taiji/shared/paths' 或裸根 '@taiji/shared' 即红灯并列行号）",
+      "scope": [
+        "scripts/check-pi-subtree-shared-imports.mjs",
+        "scripts/__tests__/check-pi-subtree-shared-imports.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-pi-subtree-shared-imports.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-pi-subtree-shared-imports.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-pi-subtree-shared-imports.mjs && pnpm exec vitest run scripts/__tests__/check-pi-subtree-shared-imports.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发范围 = packages/subagent-core/src/ 或 extensions/ 或本脚本自身 staged，见 .githooks/install-hooks.sh pi 边界可靠性护栏段）+ ci.yml scripts guards 步骤跑其单测；无 staged 产物依赖。改动本脚本须本地双验（本表 run 两条）；非恒绿证明（静态/动态/多行 import 三类违规各一例红 + 注释与 __tests__ 排除不误拦）由同 scope 单测覆盖。补登原因（dmg-r1-4）：新脚本落入 scripts/ 看护目录，零登记被 e2e-map --staged 门禁拦截，随修复同批补登"
     },
     {
       "id": "E2E-BOUNDARY-01",
@@ -2942,6 +2977,99 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#异步等待写法防-cpu-并发时序偶发",
       "note": "判定唯一源 = .githooks/check-test-blind-wait.mjs（豁免登记表 BLIND_WAIT_EXEMPT 同文件，逐条附理由）；对 staged 测试文件的强制拦截不经本对账（pre-commit 0.7 段直接跑检查本体），本 rule 只看护判定语义自身的回归。仓根 e2e/ Playwright real 轨域显式排除（其存量盲等登记 docs/todo/e2e-spec-blind-wait-cleanup.md）。2026-10-20 随盲等全仓清理批落地（改动测试文件即被 pre-commit 检查本体拦截，无需本 rule 触发）。"
+    },
+    {
+      "id": "E2E-ARCHIVE-01",
+      "summary": "session 归档域 mock 轨行为用例（session-archive 设计 §8 V1/V2/V4/V5①/V8 交互行为子集）：归档两段确认 + 行消失 + 角标（V1）/ 归档列表与摘要免解压查看（V2）/ 恢复切回会话列表回场（V4）/ 彻底删除两段确认 + 空态（V8）/ 生成中归档钮禁用 renderer 门（V5①）——VITE_MOCK 内存 mockArchives 派生视图，零磁盘搬移",
+      "scope": [
+        "packages/renderer/src/components/archive/**",
+        "packages/renderer/src/components/sidebar/session-item/SessionItemActions.vue",
+        "packages/renderer/src/components/sidebar/SessionList.vue",
+        "packages/renderer/src/components/sidebar/ArchiveListView.vue",
+        "packages/renderer/src/components/sidebar/SessionItem.vue",
+        "packages/renderer/src/composables/features/sidebar/useArchiveView.ts",
+        "packages/renderer/src/stores/archive.ts",
+        "packages/core/src/transport/mock/index.ts",
+        "packages/shared/src/archive.ts",
+        "e2e/session-archive.spec.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "e2e/session-archive.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/launch-app.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "npx playwright test --project=electron e2e/session-archive.spec.ts",
+      "owner": "packages/renderer",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（session-archive 设计 §8 e2e 影响面评估表登记建议：V1-V4 按改动范围触发的行为类资产）。mock 轨可达范围 = 交互行为（V1/V2/V4/V8/V5①）；仅 L3 可验场景（V3 agent session_read 引用真 extension 链路 / V5② wscat 直发生成中门 / V6 恢复冲突 / V7 崩溃自愈全中间态 / V9 后台任务收殓 / V10 staging 过渡态三处可见性 + V1/V4/V8 的磁盘断言）归 D3 验收实例化按验收计划 A1-A10 执行（L3 磁盘 fixture 构造 = packages/runtime/src/services/archive/archive-fixture.ts）；可持续回归防线由 runtime archive 单测族（不变量 1-4 / 状态机穷举 / 自愈七行 / cascade 三组 / 串行化 / 簿记门）+ renderer 组件测试 + session-reader 三连承担（Gate A 全量）。scope 圈定 = spec 自身触发声明（改归档组件/入口/状态/mock 归档域跑本 spec）；packages/renderer/src/** 与 packages/core/src/** 整体已由 E2E-MOCK-01 覆盖（mock 全量轨不含本 spec——本 rule 是归档域的精确选中侧）；SessionItemActions/SessionList/SessionItem 为归档钮与入口所在组件（悬停钮语义 D6/D12）"
+    },
+    {
+      "id": "E2E-PISEM-01",
+      "summary": "pi 语义断言守卫（check-pi-semantics）：docs/pi-semantics.json 结构校验 + 探针存在性 + 版本门禁（verifiedWith 比对）——pi bump 后语义断言漂移在提交期红；恢复消息含三侧重验命令（runtime / ext-guards / extensions 契约测试）",
+      "scope": [
+        "scripts/check-pi-semantics.mjs"
+      ],
+      "trigger": "on-diff",
+      "run": "node scripts/check-pi-semantics.mjs",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-pi-semantics.mjs"
+        }
+      ],
+      "authority": "scripts/check-pi-semantics.mjs",
+      "owner": "packages/runtime",
+      "serial": false,
+      "layer": "L2"
+    },
+    {
+      "id": "E2E-REGALLOW-01",
+      "summary": "模型可见性投喂单点调用点白名单检查脚本轨（约束 C-ext-32）：extensions/ 下 registerProvider|registerNativeProvider|registerVirtualModel 调用点只许出现在 provider-live-sync（目录投喂写入单点）与 scheduler（ack 合成轮临时覆写 + backend 转发）两包——防新开常驻注入点绕过单点制造第二写入方",
+      "scope": [
+        ".githooks/check_register_allowlist.py"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": ".githooks/check_register_allowlist.py"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "python3 .githooks/check_register_allowlist.py",
+      "owner": "extensions/universal/provider-live-sync",
+      "authority": "docs/constraints.json",
+      "note": "R2 态：真实运行形态 = pre-commit 2i 段按路径触发（extensions/**/*.{ts,mts,cts,js,mjs} / 本脚本 / install-hooks.sh 任一 staged，复用 SKIP_EXTENSION_LINT 开关）；判定唯一源 = 脚本内两包白名单常量，新增合法注入点须同 commit 改白名单并同步 C-ext-32 登记；零第三方依赖、全量扫描 ~0.1s"
+    },
+    {
+      "id": "E2E-EDGEFADE-01",
+      "summary": "EdgeFade 渐焦遮罩消费范围门禁：仅对话流及同族场景可用（唯一挂载点 MessageStream.vue，drawer subagent / 旁路提问 / workflow agent 流经其复用），列表 / 面板 / 文件树等一律禁止（2026-10-21 用户裁决）",
+      "scope": [
+        ".githooks/check_edge_fade_scope.mjs",
+        ".githooks/install-hooks.sh"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": ".githooks/check_edge_fade_scope.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node .githooks/check_edge_fade_scope.mjs",
+      "owner": "packages/renderer",
+      "authority": ".githooks/check_edge_fade_scope.mjs",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（0.8 段，触发范围 = packages/**/*.{vue,ts} staged 文件，不设独立 SKIP 开关；接线 SSOT = .githooks/install-hooks.sh）。判定唯一源 = check_edge_fade_scope.mjs（白名单 ALLOWLIST 同文件，新增条目须附裁决理由；登记于 AGENTS.md 豁免标记盘点）。对 staged renderer 文件的强制拦截不经本对账（pre-commit 直接跑检查本体），本 rule run 面 = 脚本自身或 hook 模板变更时的全仓自含冒烟（git ls-files 扫描 + 两行正则，毫秒级）。无 vitest 测试资产——判定逻辑为两行正则匹配白名单差集，复杂度不配独立语义测试。2026-10-21 随消费范围收敛批落地（同批撤 SessionList/FileView/GitPanel/DetailPane/BackgroundTaskDetailPanel 五处接线）。"
     }
   ]
 }

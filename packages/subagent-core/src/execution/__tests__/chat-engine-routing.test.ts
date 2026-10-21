@@ -579,12 +579,19 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
   let agentDir: string;
 
   beforeEach(() => {
+    // 与 U0 describe 同款端口/env 态：WorktreeManager 构造期经 store-base 通道解析
+    // 存储树根（C-ext-31 后缺省 = getEngineDataDir：env → HostServices.dataRoot），
+    // 未配置 env 且未 configureCore 即构造会 core_host_not_configured。
+    configureCore({ dataRoot: () => agentDir, log: () => {} });
     agentDir = makeTmpAgentDir();
     writeGlobalConfig(agentDir);
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
   });
 
   afterEach(() => {
     clearEngines();
+    resetCoreForTests();
+    vi.unstubAllEnvs();
     delete process.env.TAIJI_AGENT_DATA_DIR;
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     vi.clearAllMocks();

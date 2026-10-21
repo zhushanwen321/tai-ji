@@ -351,8 +351,8 @@ describe("normalizeRenameConfig", () => {
 
 	// ── style + customInstruction（rename-prompt-config 设计）──
 
-	it("style 四个合法值（slug/sentence/emoji/custom）→ 原样保留", () => {
-		for (const style of ["slug", "sentence", "emoji", "custom"] as const) {
+	it("style 五个合法值（slug/sentence/emoji/topic/custom）→ 原样保留", () => {
+		for (const style of ["slug", "sentence", "emoji", "topic", "custom"] as const) {
 			expect(normalizeRenameConfig({ style }).style).toBe(style);
 		}
 	});

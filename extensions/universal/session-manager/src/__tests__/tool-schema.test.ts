@@ -3,16 +3,22 @@
 import { describe, it, expect } from "vitest";
 import registerExtension from "../index.ts";
 
-function getRegisteredSchemas() {
-	const registered: Array<{ name: string; parameters: Record<string, unknown> }> = [];
+function getRegisteredTools() {
+	const registered: Array<Record<string, unknown>> = [];
 	const pi = {
-		registerTool: (tool: { name: string; parameters: Record<string, unknown> }) => registered.push(tool),
+		registerTool: (tool: Record<string, unknown>) => registered.push(tool),
 		on: () => {},
 		getAllTools: () => [],
 		setActiveTools: () => {},
 	};
 	registerExtension(pi as never);
-	return Object.fromEntries(registered.map((t) => [t.name, t.parameters]));
+	return registered;
+}
+
+function getRegisteredSchemas() {
+	return Object.fromEntries(
+		getRegisteredTools().map((t) => [t.name, t.parameters]),
+	) as Record<string, Record<string, unknown>>;
 }
 
 describe("U5-A3 tool-schema", () => {
@@ -106,6 +112,45 @@ describe("U5-A3 tool-schema", () => {
 	describe("abort_session", () => {
 		it("requires sessionId (string)", () => {
 			const s = schemas.abort_session;
+			const props = s.properties as Record<string, unknown>;
+			expect(props.sessionId).toBeDefined();
+			expect((props.sessionId as Record<string, unknown>).type).toBe("string");
+			const required = s.required as string[];
+			expect(required).toContain("sessionId");
+		});
+	});
+
+	// session-manager-archive-delete U4：两终局工具注册存在 + exposure deferred + schema 必填性
+	describe("delete_session", () => {
+		it("is registered with exposure deferred", () => {
+			const tool = getRegisteredTools().find((t) => t.name === "delete_session");
+			expect(tool).toBeDefined();
+			expect(tool?.exposure).toBe("deferred");
+		});
+
+		it("requires sessionId (string)", () => {
+			const s = schemas.delete_session;
+			expect(s).toBeDefined();
+			expect(s.type).toBe("object");
+			const props = s.properties as Record<string, unknown>;
+			expect(props.sessionId).toBeDefined();
+			expect((props.sessionId as Record<string, unknown>).type).toBe("string");
+			const required = s.required as string[];
+			expect(required).toContain("sessionId");
+		});
+	});
+
+	describe("archive_session", () => {
+		it("is registered with exposure deferred", () => {
+			const tool = getRegisteredTools().find((t) => t.name === "archive_session");
+			expect(tool).toBeDefined();
+			expect(tool?.exposure).toBe("deferred");
+		});
+
+		it("requires sessionId (string)", () => {
+			const s = schemas.archive_session;
+			expect(s).toBeDefined();
+			expect(s.type).toBe("object");
 			const props = s.properties as Record<string, unknown>;
 			expect(props.sessionId).toBeDefined();
 			expect((props.sessionId as Record<string, unknown>).type).toBe("string");

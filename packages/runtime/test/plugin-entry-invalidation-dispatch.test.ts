@@ -315,8 +315,9 @@ describe('Entry 失效订阅四路清理接线', () => {
     expect(source.match(/this\.entryInvalidationDispatch\.clearForPlugin\(pluginId\)/g)).toHaveLength(3)
     // disable 路：togglePlugin(false) 分支内（紧随 sessionEventDispatch 清理）
     expect(source).toMatch(/this\.sessionEventDispatch\.clearForPlugin\(pluginId\)\n\s+this\.entryInvalidationDispatch\.clearForPlugin\(pluginId\)/)
-    // uninstall 路：uninstallPlugin 体内（紧随 sessionEventDispatch 清理、broadcastPluginList 之前）
-    expect(source).toMatch(/this\.sessionEventDispatch\.clearForPlugin\(pluginId\)\n\s+this\.entryInvalidationDispatch\.clearForPlugin\(pluginId\)\n\n\s+this\.broadcastPluginList\(\)/)
+    // uninstall 路：uninstallPlugin 体内（紧随 sessionEventDispatch 清理、UI 快照清理之后、
+    // broadcastPluginList 之前——三路清理集同形：session 事件 → entry 失效 → UI 快照）
+    expect(source).toMatch(/this\.sessionEventDispatch\.clearForPlugin\(pluginId\)\n\s+this\.entryInvalidationDispatch\.clearForPlugin\(pluginId\)\n\s+this\.uiSnapshotStore\.clearForPlugin\(pluginId\)\n\n\s+this\.broadcastPluginList\(\)/)
     // session-destroyed 路：与 didDestroy 同址（追加式回调体内）
     expect(source).toMatch(/didDestroy\(sessionInfoFromSummary\(summary\)\)\n\s+[\s\S]*?clearForSession\(summary\.id\)/)
   })

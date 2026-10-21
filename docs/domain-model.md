@@ -1,10 +1,33 @@
 # taiji 领域模型登记
 
-> **本文件定位**：领域聚合、不变量与状态机的登记处（统一语言词条在 [CONTEXT.md](CONTEXT.md)）。当前登记域：**画布（problem-solve canvas，2026-10）**。
+> **本文件定位**：领域聚合、不变量与状态机的登记处（统一语言词条在 [CONTEXT.md](CONTEXT.md)）。当前登记域：**画布（problem-solve canvas，聚合与不变量，2026-10）**；**状态机基建与五域状态机（run / 画布节点 / plan / goal / permanent-session + 归档单元，2026-10，见下「状态机基建」节）**；**session 存储归档域（归档单元聚合 + 不变量 + 转移表，2026-10，见下「session 存储归档域」节）**。
 >
-> 机制纪律：不变量与状态机转移表的实现单点在 runtime CanvasService（`packages/runtime/src/services/canvas/`）——renderer / extension 侧不复制领域规则，全部写操作经唯一入口 `mutate`（契约 = `packages/extension-protocol/src/extensions/canvas/`，agent 工具面 = `extensions/taiji/canvas/`，GUI 写通道 = WS RPC `canvas.mutate`）。
+## 状态机基建（@zhushanwen/state-machine）
+
+「领域状态必须显式状态机」裁决（2026-09-21）的共享实现载体（[ADR-0152](adr/decisions.md)）：`packages/state-machine`，零运行时依赖，npm 发布（`@zhushanwen` 命名空间，pi 扩展侧可依赖）。新领域立状态机 = 一份声明（状态词表含 terminal 位 + 事件词表 + 行式转移表含 guard 与动作引用 + 每实体错误策略），机器机制由基建统一提供：合法性判定（`transition` 纯函数内核——guard 按行序求值、多命中 = 转移表不变量破坏恒 throw、planned 只计划不执行）、定义期自检（词表外行 / 多行混入无 guard 行即 throw）、转移动作执行（`runTransition` 事务性编排外壳——宿主按名注入实现，全部成功次态才应用，单态 fail-fast）、穷举单测生成（`generateTableTests`）、词表外运行时输入映射（`coerceState`——枚举 includes 白名单，拒原型链键）。
+
+纪律：
+
+- 新状态机一律声明即用，不再手写转移表 + transition 函数 + 穷举单测；穷举由生成器承载，行为级/契约级断言（错误类型、错误码、降级行为）保留域内
+- 表外 fail-fast 不静默吞：throw 族错误信息含当前态合法事件清单（`errorFactory` 保形既有错误类型，消费方 instanceof 分类分支不受迁移影响）；result 族返回 `{ok:false}`，调用方义务 = 不落盘、不执行副作用
+- 事务外壳边界外域：run 与 canvas 的域内编排（「内存权威先推进 + 动作失败分级容忍」/「权威事件流先行 + 快照与广播失败容忍」）不经外壳事务化，编排上收须按已接受变更单独登记（ADR-0152）
+
+五域迁移登记（2026-10 迁入，只迁表与判定，域内编排留域内）：
+
+| 域 | 状态词表 | 机器声明（实现载体 = 本基建） | 错误策略 / 表外处置 |
+|----|---------|------------------------------|---------------------|
+| workflow run 生命周期（outcome 四值正交，仅 terminal 产生） | created / running / settling / terminal + interrupted 暂停态（resume 流回 running） | `RUN_MACHINE`（packages/subagent-core/src/orchestration/run-events.ts） | throw——`IllegalTransitionError` 保形（errorFactory 构造既有类实例，消息含合法事件清单） |
+| 画布节点生命周期 | draft / under-review / passed（terminal）/ rejected / shelved | `canvasLifecycleMachine`（packages/runtime/src/services/canvas/canvas-foundation.ts） | throw——`CanvasDomainError` 保形（`lifecycle_transition_illegal` 错误码 + recover 指引） |
+| plan 计划生命周期 | idle / planning / reviewing / revising / approved / dispatching / completed / exited（终态 + enter 重启出边并存） | `PLAN_MACHINE`（packages/extension-protocol/src/extensions/plan/state-machine.ts） | result——表外 `{ok:false}` 不炸 turn |
+| goal 目标状态 | active / paused / blocked / complete / budget_limited / cancelled（后三 terminal） | `GOAL_MACHINE`（extensions/universal/goal/src/engine/goal.ts；`transitionStatus` 保形包装对外） | throw |
+| permanent-session 两态 | running / idle（词表与 ExecutionStatus satisfies 双向锁定） | `permanentSessionStatusMachine`（packages/subagent-core/src/execution/domain/record-status-machine.ts） | result——表外拒绝经域内原语转 return false（两态 CAS 语义保形） |
+| 归档单元（session 归档子域，基建首个新消费者） | staging / archived / restoring | `archiveEntryMachine`（packages/runtime/src/services/archive/archive-entry-machine.ts） | throw——对外错误码由服务层承载 |
+
+边界登记：session / background-task 两个域尚无转移表（显式化各自独立立项，ADR-0152）；core 的 streaming-state-machine.ts 是消费顺序 factory 深模块、非转移表状态机，不属本基建范畴；归档子域的聚合与不变量登记见下「session 存储归档域」节（本节只登记其状态机实现载体）。
 
 ## 画布域
+> 机制纪律：不变量与状态机转移表的实现单点在 runtime CanvasService（`packages/runtime/src/services/canvas/`）——renderer / extension 侧不复制领域规则，全部写操作经唯一入口 `mutate`（契约 = `packages/extension-protocol/src/extensions/canvas/`，agent 工具面 = `extensions/taiji/canvas/`，GUI 写通道 = WS RPC `canvas.mutate`）。
+
 
 问题解决画布是 tech-design-wf 之前的方向规划层，一个独立限界上下文：与会话上下文经回推 prompt（文本防腐）交互、与 workflow 上下文无直接依赖（审查 subagent 只复用派发基建）、与计划上下文（plan）互不感知；对下游 tech-design-wf 经需求卡（requirement card）防腐对接。状态权威 = runtime CanvasService；持久化 = session 存储树域 8 `<dataDir>/ext-sessions/<ownerSessionId>/canvases/<canvasId>/` 下 `events.jsonl`（append-only 领域事件流，唯一权威）+ `canvas.json`（可由事件流全量重放推导的加速快照，写入顺序恒「先事件后快照」——快照允许滞后、永不超前）。归属即路径：一张画布恒归属创建它的 session（ownerSessionId），一个 session 可有多个画布（1:N）。
 
@@ -31,7 +54,7 @@
 
 **节点状态机**（生命周期 × 派发二维正交，禁止直写状态字段）：
 
-- 生命周期维（根节点除外——根不可搁置 / 否决）：`draft（草案）→ under-review（审查中）→ passed（通过）| rejected（否决，灰显保留）`；draft/under-review 均可 `→ shelved（搁置）`；`rejected → draft`（复活须新证据或用户裁决，留理由）；`shelved → draft`。合法转移表之外的写入一律 fail-fast；每次转移记录触发者（agent 提案 / 用户裁决 / 审查结论）。
+- 生命周期维（根节点除外——根不可搁置 / 否决）：`draft（草案）→ under-review（审查中）→ passed（通过）| rejected（否决，灰显保留）`；draft/under-review 均可 `→ shelved（搁置）`；`rejected → draft`（复活须新证据或用户裁决，留理由）；`shelved → draft`。合法转移表之外的写入一律 fail-fast（判定载体 = `canvasLifecycleMachine`，@zhushanwen/state-machine 声明，见「状态机基建」节）；每次转移记录触发者（agent 提案 / 用户裁决 / 审查结论）。
 - 派发维（仅执行叶子，与生命周期正交）：`passed 的执行叶子 →（用户拍板）→ dispatched（已派发，登记下游产物指针）`。dispatched 后仍可编辑（patch 无 dispatched 门槛），编辑使该叶子进待重审、门禁红、导出锁定，复审通过后解锁重新导出。
 - 状态机不作用于边——边的缺陷经支撑度（有缺口 / 不成立）+ 关联 must-fix 表达，不另建边状态机。
 
@@ -59,3 +82,35 @@
 ### 领域事件
 
 节点历史 = 事件流回放（who / when / why / what）。每个 mutation action 至少产出一个事件（read / list 为查询类不产事件）；事件词表 18 值（全量 SSOT = 契约 `CANVAS_EVENT_TYPES`，`packages/extension-protocol/src/extensions/canvas/state.ts`）：主事件族（14 mutation action 各一，映射 = 契约 `ACTION_EVENT_MAP`）CanvasCreated / GrowthDirectionDecided / NodeCreated / NodeModified / StateTransitioned / OptionSelected / NodeDispatched / CommentAdded / CommentResponded / ReviewRequested / ReviewEntryAppended / ReviewEntryResolved / ConvergenceChecked / CanvasExported，附属事件（不独立对应 action）DirtiedPathMarked（待重审标记）与审查终态族 ReviewConverged / ReviewMaxRoundsReached / ReviewEscalated。`events.jsonl` 是唯一持久权威，`canvas.json` 快照损坏或不一致时从事件流头全量重放重建。
+
+## session 存储归档域
+> 机制纪律：领域规则的实现单点在 runtime ArchiveService（`packages/runtime/src/services/archive/`）——renderer（归档列表/摘要视图）、transport（三 RPC 分发）、extension（session-reader 归档根感知）不复制领域规则，全部经共享契约（`packages/shared/src/archive.ts`）消费。统一语言词条（归档 / 归档单元 / 簿记文件）见 [CONTEXT.md](CONTEXT.md)；存储布局与「归档态不进 SessionStatus」决策登记 [ADR-0153](adr/decisions.md)。
+
+session 存储域（SessionLifecycle 写、SessionScanner 读、文件系统为唯一持久化）的归档存储子域：输入是「在场 session 的全部磁盘构成」，输出是「归档目录内的归档单元」，与运行时对话状态（pi 进程、内存 Map）解耦。归档态与 session 的「在场」状态空间正交（归档 = 不在场，条目不进列表响应），**不进 SessionStatus 词表**——一等载体是簿记 status 字段与 ArchiveSummary。
+
+### 聚合：归档单元（ArchiveEntry，聚合根 = 簿记文件）
+
+成员：主文件压缩体（`<原主文件名>.jsonl.zst`，staging 期为明文 `.jsonl`）+ 六类旁挂文件（project / 终态 / 预设 / agent 绑定等，原样明文随迁）+ 附件三目录（`assets/<sessionId>/{attachments,artifacts,image-cache}`——源为 session 存储树三域，恢复时反向搬回）+ 簿记文件（`.archive.json`，聚合根——簿记在即单元在，簿记消失即单元消亡）。物理落位镜像 sessions 布局（`<agentDir>/archive/<encodeCwd>/`）。留置域（btw 线 / subagents / canvases / workflow / plugin-data / logs 等）不随档、原位未动（随档范围逐域裁决见 ADR-0153）。
+
+不变量（全部可核对：单测 + e2e 可断言，运行时校验 fail-fast）：
+
+1. **互斥存在**：同一 session 的主文件（sessions/ 树内 `.jsonl`）与归档单元（archive/ 树内 `.archive.json` / `.restoring` 簿记）不得同时存在于稳定态——恢复前冲突检测（`archive_restore_conflict`）与启动自愈（双存在归位）保证
+2. **压缩体消费前校验**：恢复与 purge 引用枚举两条路径消费压缩体前 sha256 校验必须通过（agent 引用只读簿记明文，不消费压缩体，不涉校验；purge 侧校验不过 = 引用状态不可知 → 级联 keep-all 保守保留，宁保留不误删）
+3. **列表派生**：归档列表条目恒等于 `archive/**/*.archive.json` 扫描结果——不允许存在独立登记渠道（`.restoring` 标记不在列表，恢复中条目对用户不可见）
+4. **扫描范围互斥**：归档目录永不进 SessionScanner 的 sessions 扫描范围（物理隔离，构造性保证——两根互不为对方子树）
+
+**归档单元状态机**（`@zhushanwen/state-machine` 声明，实现载体登记见上「状态机基建」节；表外转移一律 fail-fast）：
+
+| from | on | to | 说明 |
+|------|----|----|------|
+| （initial） | — | staging | archive 动作创建实体（同步段完成搬移 + 簿记骨架），由机器 `initial: 'staging'` 承载 |
+| staging | compress_done | archived | 后台压缩任务提交簿记终态 |
+| staging \| archived | unarchive | restoring | 簿记 rename 为 `.restoring` 后缀 |
+| restoring | restore_done | （消亡） | 恢复完成，归档单元清除——`to: null` 实体消亡形态 |
+| restoring | restore_rollback_to_staging | staging | 冲突/校验失败回滚（原态 = staging 支） |
+| restoring | restore_rollback_to_archived | archived | 冲突/校验失败回滚（原态 = archived 支） |
+| staging \| archived | purge | （消亡） | 彻底删除——`to: null` |
+
+状态判定唯一权威 = 读磁盘（无簿记 = 无单元；status 字段 = staging / archived；`.restoring` 后缀 = restoring）。同 session 的归档域操作（后台压缩任务 / unarchive / purgeArchive）按到达顺序串行执行，后到者对已消失归档单元按簿记存在性门 fail-fast（`archive_not_found`，拒绝时零副作用）；操作中途崩溃由启动自愈归位（七行表覆盖全部中间态，含压缩收尾窗口〔明文已删 + 压缩体在场 + 簿记仍 staging〕：archive / unarchive 态自动归位，purge 态簿记保持可见、重试幂等达终态）。
+
+**唯一入口**：领域规则单实现 = `ArchiveService`（archive / unarchive / purgeArchive 三操作 + 启动自愈，`packages/runtime/src/services/archive/`）；transport 入口两条，均只调该服务、不各自持有归档规则——① 三条 WS RPC（`session.archive` / `session.unarchive` / `session.purgeArchive`，分发表挂 session 域，命名避开已承载「重开 dead session」语义的 `session.restore`；GUI 侧栏 / 归档视图的调用通道）② session-manager select 通道 `archive` action（agent 工具 `archive_session` → `SessionManagerHandler.handleArchive`：归属校验〔仅限该 agent 管理的子会话〕后调 `archiveService.archive(sessionId)`；仅开放 archive 一操作，unarchive / purgeArchive 不开放给 agent）；彻底删除复用 session 删除级联原语（cascadeDeleteSessionContent + 引用枚举源入参扩展），不自建删除清单。

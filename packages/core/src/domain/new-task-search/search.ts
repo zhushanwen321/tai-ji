@@ -8,7 +8,7 @@
  * （SessionListPort）。i18n.global.t 经 deps.ports.t（TranslatePort）。
  *
  * 数据流：SearchModal.watch(query) → debounce 120ms → query(q, ctx) →
- *   allSettled 并行查 3 源（命令内存 / file WS 直查 / session WS）→
+ *   allSettled 并行查 4 源（命令内存 / file WS 直查 / session WS / 归档 WS）→
  *   合并候选 → matchFilter 过滤 → DTO 映射 → 按类型分组（符号占位 D-001）→ Section[]
  *
  * 失败路径：
@@ -33,7 +33,7 @@ import { useRecents } from './recents'
 import type { SearchDeps } from './search-ports'
 import type { AppCommand } from './types'
 import type { SessionCommand } from './command-store'
-import type { SessionGroup, SessionSummary } from '@taiji/shared'
+import type { SessionGroup, SessionSummary, ArchiveSummary } from '@taiji/shared'
 
 /**
  * 文件候选结果上限（D-021 校正值）。
@@ -41,6 +41,8 @@ import type { SessionGroup, SessionSummary } from '@taiji/shared'
  * UI 层基于 items.length===MAX_SEARCH_RESULTS 判断是否显示截断提示。
  */
 const MAX_SEARCH_RESULTS = 5000
+/** 归档条目 sub 的用户消息预览截断长度（超过加省略号）。 */
+const ARCHIVE_SUMMARY_PREVIEW_LIMIT = 80
 /** 空查询时显示的建议命令数量（对齐 mock SEARCH_SUGGESTED_COUNT） */
 const SUGGESTED_COMMAND_COUNT = 3
 
@@ -109,25 +111,27 @@ export function useSearch(
       return sections.filter((s) => s.items.length > 0)
     }
 
-    // 非空查询：allSettled 并行查 3 源
+    // 非空查询：allSettled 并行查 4 源
     // file 源在源内用 filterAndSortFileCandidates 过滤+排序（与 composer # 同管线，复用同一套文件匹配算法），
-    // 故 file 结果不再进 matchFilter 二次过滤；command/session 仍走 matchFilter（纯子串，与 composer slash 同款）。
-    const [commandRes, fileRes, sessionRes] = await Promise.allSettled([
+    // 故 file 结果不再进 matchFilter 二次过滤；command/session/archive 仍走各自过滤（纯子串，与 composer slash 同款）。
+    const [commandRes, fileRes, sessionRes, archiveRes] = await Promise.allSettled([
       queryCommandSource(), // 内存，无 WS
       queryFileSource(ctx.activeSessionId, q), // WS 缓存优先 + #17 超时 race + 源内分级匹配
       querySessionSource(q), // WS + #17 超时 race + 源内子串过滤
+      queryArchiveSource(q), // WS + #17 超时 race + 名称/摘要全文子串过滤
     ])
 
     // BC-9 检查：旧响应丢弃（seq !== loadSeq 说明有更新查询）
     if (seq !== loadSeq) return []
 
-    // MR-4.2：单源 rejected 取空，不阻断其他源。file/session 源内已过滤，直接合并
+    // MR-4.2：单源 rejected 取空，不阻断其他源。file/session/archive 源内已过滤，直接合并
     const commands = commandRes.status === 'fulfilled' ? commandRes.value : []
     const files = fileRes.status === 'fulfilled' ? fileRes.value : []
     const sessions = sessionRes.status === 'fulfilled' ? sessionRes.value : []
-    // command 源返回全量（未过滤），此处统一 matchFilter；file/session 已在源内过滤
+    const archives = archiveRes.status === 'fulfilled' ? archiveRes.value : []
+    // command 源返回全量（未过滤），此处统一 matchFilter；file/session/archive 已在源内过滤
     const filteredCommands = matchFilter(commands, q)
-    const allCandidates = [...filteredCommands, ...files, ...sessions]
+    const allCandidates = [...filteredCommands, ...files, ...sessions, ...archives]
 
     // 按类型分组 + 符号占位（D-001，GAP-E1）
     return groupByType(allCandidates)
@@ -163,6 +167,58 @@ export function useSearch(
     const items = mapSessionsToItems(groups)
     // session 源内子串过滤（与 matchFilter 同款，避免后续重复过滤）
     return matchFilter(items, q)
+  }
+
+  /**
+   * 归档源（WS + #17 超时 race + 名称/摘要全文子串过滤）：archiveList 按需拉取
+   * （config.archives 簿记扫描派生，D9 不变量 3——拉为主，ADR-0097）。
+   *
+   * 匹配面 = 名称 + 摘要全文（archived 态全部 turn 的 user/agent 文本；staging 态
+   * summary 为 null 只匹配名称）——「归档的搜索把摘要放进去」的落点：按会话内容
+   * 也能找到已归档会话。展示 sub = 摘要首段（前 80 字符）或状态标注，命中摘要
+   * 深处时不展示命中段（v1 取舍：项仍出现，点击进摘要视图看全文）。
+   */
+  async function queryArchiveSource(q: string): Promise<SearchItem[]> {
+    // #17：WS 超时 race
+    const archives = await withWsTimeout(ports.archiveList())
+    const needle = q.toLowerCase()
+    return archives
+      .filter((a) => archiveMatchText(a).toLowerCase().includes(needle))
+      .map((a) => toArchiveItem(a))
+  }
+
+  /** 归档匹配文本（名称 + 摘要全文；staging 态只有名称）。 */
+  function archiveMatchText(a: ArchiveSummary): string {
+    const parts = [a.name]
+    if (a.status === 'archived') {
+      for (const turn of a.summary.turns) {
+        parts.push(turn.user)
+        if (turn.agent !== null) parts.push(turn.agent)
+      }
+    }
+    return parts.join(' ')
+  }
+
+  /**
+   * 归档条目 → SearchItem（载荷透传供跳转；sub = 摘要首段或状态标注）。
+   * 状态标注经 TranslatePort 复用 renderer archive 域词条（archive.summary.*，双语在册，
+   * 与 ArchiveListView/摘要视图同源单份），不硬编码中文——en-US 用户搜索归档项 sub 须随 locale。
+   */
+  function toArchiveItem(a: ArchiveSummary): SearchItem {
+    let sub: string
+    if (a.status === 'staging') {
+      sub = ports.t('archive.summary.compressing')
+    } else {
+      const first = a.summary.turns[0]?.user ?? ''
+      if (first.length === 0) {
+        sub = ports.t('archive.summary.empty')
+      } else if (first.length > ARCHIVE_SUMMARY_PREVIEW_LIMIT) {
+        sub = `${first.slice(0, ARCHIVE_SUMMARY_PREVIEW_LIMIT)}…`
+      } else {
+        sub = first
+      }
+    }
+    return { type: 'archive', title: a.name.length > 0 ? a.name : a.sessionId, sub, archive: a }
   }
 
   /**
@@ -263,9 +319,10 @@ export function useSearch(
       file: ports.t('search.sectionFile'),
       symbol: ports.t('search.sectionSymbol'),
       session: ports.t('search.sectionSession'),
+      archive: ports.t('search.sectionArchive'),
     }
     const sections: Section[] = []
-    for (const t of ['command', 'file', 'symbol', 'session'] as const) {
+    for (const t of ['command', 'file', 'symbol', 'session', 'archive'] as const) {
       if (t === 'symbol') {
         // D-001 符号占位：恒占位 section（始终加入，不被空组过滤，不随查询变化，不参与匹配）
         // 调用方（SearchModal）决定如何渲染空符号分组

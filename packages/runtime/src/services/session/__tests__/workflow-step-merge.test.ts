@@ -232,7 +232,7 @@ describe('合并矩阵全形态（D2 R2/R3）', () => {
     expect(row.startedAt).toBe(new Date(1000).toISOString())
   })
 
-  it('双有：trace 行被 record 覆盖——状态/时间/错误/sessionId 取 record，phase/model/token 拆分保留 trace', () => {
+  it('双有：trace 行被 record 覆盖——状态/时间/错误/sessionId/model 取 record，phase/token 拆分保留 trace', () => {
     const record = wf([
       traceCall(0, {
         status: 'running',
@@ -242,6 +242,7 @@ describe('合并矩阵全形态（D2 R2/R3）', () => {
         outputTokens: 5,
         lastProgressAt: 900,
       }),
+      traceCall(1, { status: 'running', model: 'trace-m2' }),
     ])
     const candidates = [
       rec({
@@ -254,13 +255,21 @@ describe('合并矩阵全形态（D2 R2/R3）', () => {
         endedAt: 61000,
         elapsedSeconds: 60,
         turns: 8,
+        model: 'xiaomi-token-plan-cn/mimo-v2.6-flash',
+      }),
+      // 存量 record 未指定 model（record-created 帧 / settled 条目双缺）——保持 trace 原值
+      rec({
+        subagentId: 'sa-2',
+        parentRunId: 'run-1',
+        stepIndex: 1,
+        status: 'running',
       }),
     ]
     const merged = mergeWorkflowStepRecords([record], candidates)[0]!
     const row = merged.agentCalls[0]!
     expect(row.status).toBe('done')
     expect(row.phase).toBe('R1') // 编排结构来自 trace（P7）
-    expect(row.model).toBe('m1')
+    expect(row.model).toBe('xiaomi-token-plan-cn/mimo-v2.6-flash') // 执行模型权威 = record（trace 骨架 v2 恒无值）
     expect(row.sessionId).toBe('sa-1')
     expect(row.startedAt).toBe(new Date(1000).toISOString())
     expect(row.completedAt).toBe(new Date(61000).toISOString())
@@ -269,6 +278,7 @@ describe('合并矩阵全形态（D2 R2/R3）', () => {
     expect(row.inputTokens).toBe(10) // record 只有 totalTokens 总量，input/output 拆分保留 trace
     expect(row.outputTokens).toBe(5)
     expect(row.lastProgressAt).toBe(900) // calls[] 派生视图保留 trace
+    expect(merged.agentCalls[1]!.model).toBe('trace-m2')
   })
 
   it('一键多 record 收敛——多条 running 取 startedAt 最新（rebuildRuntime 瞬态 tiebreak）', () => {

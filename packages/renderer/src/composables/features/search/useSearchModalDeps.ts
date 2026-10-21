@@ -6,7 +6,9 @@
  * - ports：isMock（VITE_MOCK）/ isMac（navigator.platform，D8 收编）/ searchMock
  *   （mockApi.search.query）/ fileRead（@/api 门面 file.read，mock/real 构建期切换；AC-6.9 不经吞错层）/
  *   fileCandidates（api/domains/composer.getFileCandidates）/ sessionList（api/domains/session.list）/
- *   selectSession（壳传入 useSidebar().selectSession，C-W3-2）/ t（i18n）
+ *   selectSession（壳传入 useSidebar().selectSession，C-W3-2）/ archiveList（api/domains/
+ *   session.listArchives——归档搜索源）/ archiveJump（useArchiveView().openSummary——
+ *   归档跳转）/ t（i18n）
  *   （C-W3-3 的 watchFileChanges 端口已随 fileSearchStore 缓存退役删除——缓存治理 U1 1-3）
  * - commandStore：壳单例 useCommandStore()（core createCommandStore 实例，须在
  *   providePlatform 之后——AppShell 时序保证）
@@ -32,6 +34,7 @@ import { useFileTreeStore } from '@/stores/fileTree'
 import { usePanelStore } from '@/stores/panel'
 import { useSidebarStore } from '@/stores/sidebar'
 import { usePresetStore } from '@/stores/preset'
+import { useArchiveView } from '@/composables/features/sidebar/useArchiveView'
 import i18n from '@/i18n'
 
 export interface SearchModalShellDeps { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
@@ -60,6 +63,9 @@ export function useSearchModalDeps(shell: SearchModalShellDeps): SearchDeps {
       sessionList: sessionApi.list,
       // C-W3-2：SessionSelectPort 接收点归实现域（useSidebar().selectSession）
       selectSession: shell.selectSession,
+      // 归档搜索源（config.archives 按需拉取）+ 归档跳转（openSummary = 归档列表行点击同路径）
+      archiveList: sessionApi.listArchives,
+      archiveJump: (archive) => useArchiveView().openSummary(archive),
       t: i18n.global.t,
     },
     commandStore,

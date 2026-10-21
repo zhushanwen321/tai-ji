@@ -7,6 +7,9 @@ import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView, Se
 // hook 否决类分类码值常量（词表 SSOT = shared MessageBlockedCode）：message.send /
 // message.bash / delivery.submit 三落码点统一引用，不手抄字面量。
 import { MESSAGE_BLOCKED_CODE } from '@taiji/shared'
+// 归档域错误码闭集（session-archive 设计 D5，u-rpc-wiring）：envelope code 词表成员判定
+// 用（词表外 string code 不透传），值引用——不手抄字面量。
+import { ARCHIVE_ERROR_CODES } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import type { ISessionService } from '../interfaces.js'
 import type { HandoffService } from '../services/handoff-service.js'
@@ -27,6 +30,10 @@ import type { IMessageBus } from '../services/message-bus/message-bus.js'
 // + 快照构造（写 3 回填在 getSnapshotForSession 内部完成）。可选注入：未注入时该 case 报
 // unsupported（组合根保证注入；importService 同款模式）。
 import type { GenStatsService } from '../services/session/gen-stats-service.js'
+// ArchiveService（session-archive 设计 D5，u-rpc-wiring）：归档域三 RPC + config.archives 的
+// 服务核心。type-only：实例由组合根构造（deps 全量注入 delete 活跃分支原语），经
+// server.setServices optional.archive 注入——与 importService 同款可选形态。
+import type { ArchiveService } from '../services/archive/archive-service.js'
 // BusClient（wave:bus-core）：ws 适配为 bus 订阅者的最小契约 { readyState, send }。
 // ws 库的 WebSocket 天然满足，但类型不完全一致，用 as unknown as BusClient 显式标记边界（R2）。
 import type { BusClient } from '../services/message-bus/types.js'
@@ -52,6 +59,16 @@ export type BackgroundTaskRpcPort = Pick<
  * 与 MAX_FILE_SIZE（file.read 1MB 截断）同量级；导出供测试断言 clamp 行为。
  */
 export const OUTPUT_TAIL_MAX_REQUEST_BYTES = 1_048_576
+
+/**
+ * archive 域 WS 消费端口（session-archive 设计 D5，u-rpc-wiring）：ArchiveService 的
+ * handler 消费方窄视图（Pick 收窄——在途任务表 / 自愈 / 簿记写入等编排不对传输层暴露；
+ * BackgroundTaskRpcPort 同款形态）。archiveCount 的角标数据源同经本端口的 listArchiveEntries。
+ */
+export type ArchiveRpcPort = Pick<
+  ArchiveService,
+  'archive' | 'unarchive' | 'purgeArchive' | 'listArchiveEntries'
+>
 
 /** Interface for server methods needed by this handler */
 export interface SessionHandlerContext extends MessageHandlerContext {
@@ -121,6 +138,13 @@ export interface SessionHandlerContext extends MessageHandlerContext {
    * 缺省仅出现在测试最小 mock 中，对齐 backgroundTasks 惯例）。
    */
   deliveryRegistry?: SessionDeliveryRegistry
+  /**
+   * 归档服务核心（session-archive 设计 D5，u-rpc-wiring）：session.archive / unarchive /
+   * purgeArchive 三 RPC + config.archives 列表拉取 + config.sessions 响应的 archiveCount
+   * 角标数据源。可选：未注入时四 case 报 archive_unsupported 防御分支（组合根保证注入；
+   * 缺省仅出现在测试最小 mock 中，对齐 backgroundTasks / importService 惯例）。
+   */
+  archiveService?: ArchiveRpcPort
   nextPushId(): string
   broadcastSessionList(): void
   /** 广播一条 ServerMessage 给所有连接（FR-12：fork 后广播 session.forkNotice）。 */
@@ -215,6 +239,10 @@ export class SessionMessageHandler {
     // reply 与 request 同名（payload 消费型），领域回执（revoked/error 六码，D8 SSOT）
     // 不走 error envelope——六码是设计内回执非传输错误。
     'session.revokeMessage': (msg, ws) => this.handleSessionRevokeMessage(msg, ws),
+    'session.archive': (msg, ws) => this.handleSessionArchive(msg, ws),
+    'session.unarchive': (msg, ws) => this.handleSessionUnarchive(msg, ws),
+    'session.purgeArchive': (msg, ws) => this.handleSessionPurgeArchive(msg, ws),
+    'config.archives': (msg, ws) => this.handleConfigArchives(msg, ws),
     'message.send': (msg, ws) => this.handleMessageSend(msg, ws),
     'message.abort': (msg, ws) => this.handleMessageAbort(msg, ws),
     'message.bash': (msg, ws) => this.handleMessageBash(msg, ws),
@@ -303,6 +331,19 @@ export class SessionMessageHandler {
     const port = this.ctx.sessionService.backgroundTasks
     if (!port) {
       this.ctx.sendError(ws, 'background_task_unsupported', 'background task service not available', msg.id, { sessionId })
+      return undefined
+    }
+    return port
+  }
+
+  /**
+   * archive 域可选服务检查（四 RPC 共用）：缺省时回 archive_unsupported error envelope
+   * 并返回 undefined（调用方早退）；命中返回服务消费方窄视图。
+   */
+  private requireArchiveService(ws: WsType, msg: { id?: string }, sessionId?: string): ArchiveRpcPort | undefined {
+    const port = this.ctx.archiveService
+    if (!port) {
+      this.ctx.sendError(ws, 'archive_unsupported', 'archive service not available', msg.id, sessionId !== undefined ? { sessionId } : undefined)
       return undefined
     }
     return port
@@ -464,7 +505,100 @@ export class SessionMessageHandler {
   }
 
   private async handleConfigSessions(msg: Extract<ClientMessage, { type: 'config.sessions' }>, ws: WsType): Promise<void> {
-    return this.ctx.reply(ws, msg.id, 'config.sessions', { groups: this.ctx.sessionService.listPersistedSessions() })
+    // archiveCount（session-archive 设计 D5 协议变更点）：reply 帧与广播帧同源同语义——
+    // 角标数 = 归档列表条目数（listArchiveEntries 过滤 .restoring 后的长度，与归档列表
+    // 「已归档 (N)」头同数据源，角标与列表恒一致）。archiveService 未注入（旧装配）时字段
+    // 缺省，消费方按 0 隐藏角标（协议 optional 字段语义）。
+    const archive = this.ctx.archiveService
+    const archiveCount = archive !== undefined ? archive.listArchiveEntries().length : undefined
+    return this.ctx.reply(ws, msg.id, 'config.sessions', {
+      groups: this.ctx.sessionService.listPersistedSessions(),
+      ...(archiveCount !== undefined ? { archiveCount } : {}),
+    })
+  }
+
+  // ── 归档域（session-archive 设计 D5，u-rpc-wiring）─────────────────────────
+  //
+  // handler 只做「payload 校验 → 委托 → reply」；搬移/压缩/校验/级联/在途任务表串行化全在
+  // ArchiveService（transport 编排与核心分离）。广播由 service 步骤内经 deps.broadcastSessionList
+  // 自理（archive 步骤 5 / unarchive 步骤 7 / purge 步骤 7——角标随广播即时，D5 协议变更点），
+  // handler 不重复广播（双发 = 同一状态两帧的消费者歧义）。领域错误（ArchiveError，code ∈
+  // shared ARCHIVE_ERROR_CODES 六值闭集）转统一 error envelope（sessionId 随 envelope 携带，
+  // ImportErrorCode 先例）；非领域码的意外 throw 归 archive_failed（不透传任意 string code——
+  // fs ENOENT 等系统码不属于本域词表，泄漏即 renderer 按未知码回退，恢复指引无从谈起）。
+
+  /**
+   * 归档域错误收尾：词表内 code 透传，词表外（含无 code 的意外 throw）归 archive_failed。
+   * 日志嵌 resolved code（reportFailure 形状之外，import 域同款保留内联）。
+   */
+  private reportArchiveFailure(ws: WsType, msgId: string | undefined, scope: string, sessionId: string, e: unknown): void {
+    const resolved = errorCodeOf(e)
+    const code = resolved !== undefined && (ARCHIVE_ERROR_CODES as readonly string[]).includes(resolved) ? resolved : 'archive_failed'
+    console.error(`[runtime] ${scope} failed (code=${code}):`, toErrorMessage(e))
+    return this.ctx.sendError(ws, code, toErrorMessage(e), msgId, { sessionId })
+  }
+
+  /** wire 预检：sessionId 非空 string（JSON 层可写任意形态，delivery 域同款防线）。 */
+  private requireArchiveSessionId(ws: WsType, msgId: string | undefined, type: string, sessionId: unknown): string | undefined {
+    if (typeof sessionId !== 'string' || sessionId === '') {
+      this.ctx.sendError(ws, 'invalid_payload', `${type} requires a non-empty "sessionId" string`, msgId)
+      return undefined
+    }
+    return sessionId
+  }
+
+  private async handleSessionArchive(msg: Extract<ClientMessage, { type: 'session.archive' }>, ws: WsType): Promise<void> {
+    const sessionId = this.requireArchiveSessionId(ws, msg.id, 'session.archive', msg.payload.sessionId)
+    if (sessionId === undefined) return
+    const archive = this.requireArchiveService(ws, msg, sessionId)
+    if (!archive) return
+    try {
+      // 同步段（搬移 + 簿记骨架）在 reply 前完成；压缩在后台异步（service 内部派发）。
+      // 广播（archiveCount 角标）由 service 步骤 5 发出，先于本 reply。
+      const result = await archive.archive(sessionId)
+      return this.ctx.reply(ws, msg.id, 'session.archive', { sessionId: result.sessionId })
+    } catch (e) {
+      return this.reportArchiveFailure(ws, msg.id, 'session.archive', sessionId, e)
+    }
+  }
+
+  private async handleSessionUnarchive(msg: Extract<ClientMessage, { type: 'session.unarchive' }>, ws: WsType): Promise<void> {
+    const sessionId = this.requireArchiveSessionId(ws, msg.id, 'session.unarchive', msg.payload.sessionId)
+    if (sessionId === undefined) return
+    const archive = this.requireArchiveService(ws, msg, sessionId)
+    if (!archive) return
+    try {
+      // reply 携带恢复后的 SessionSummary（前端原项目组顶部高亮置顶，D5 步骤 7）。
+      const result = await archive.unarchive(sessionId)
+      return this.ctx.reply(ws, msg.id, 'session.unarchive', { sessionId: result.sessionId, session: result.session })
+    } catch (e) {
+      return this.reportArchiveFailure(ws, msg.id, 'session.unarchive', sessionId, e)
+    }
+  }
+
+  private async handleSessionPurgeArchive(msg: Extract<ClientMessage, { type: 'session.purgeArchive' }>, ws: WsType): Promise<void> {
+    const sessionId = this.requireArchiveSessionId(ws, msg.id, 'session.purgeArchive', msg.payload.sessionId)
+    if (sessionId === undefined) return
+    const archive = this.requireArchiveService(ws, msg, sessionId)
+    if (!archive) return
+    try {
+      const result = await archive.purgeArchive(sessionId)
+      return this.ctx.reply(ws, msg.id, 'session.purgeArchive', {
+        sessionId: result.sessionId,
+        ...(result.keptSubagentsDir !== undefined ? { keptSubagentsDir: result.keptSubagentsDir } : {}),
+      })
+    } catch (e) {
+      return this.reportArchiveFailure(ws, msg.id, 'session.purgeArchive', sessionId, e)
+    }
+  }
+
+  private async handleConfigArchives(msg: Extract<ClientMessage, { type: 'config.archives' }>, ws: WsType): Promise<void> {
+    // 归档列表拉取（拉为主；打开归档视图时调用，D5）。列表 = 归档根扫描全量派生
+    //（.restoring 不在列表——恢复中条目对用户不可见，D9 不变量 3），扫描与 projectId 旁挂
+    // 回填全在 service，handler 只透传。无请求参数，无 invalid_payload 面。
+    const archive = this.requireArchiveService(ws, msg)
+    if (!archive) return
+    return this.ctx.reply(ws, msg.id, 'config.archives', { archives: archive.listArchiveEntries() })
   }
 
   private async handleSessionSwitch(msg: Extract<ClientMessage, { type: 'session.switch' }>, ws: WsType): Promise<void> {

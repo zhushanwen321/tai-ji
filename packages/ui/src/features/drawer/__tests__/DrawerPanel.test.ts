@@ -36,13 +36,14 @@ function baseProps<T extends object>(overrides: T = {} as T) {
 }
 
 describe('DrawerPanel (AC9/AC12 首屏冒烟)', () => {
-  it('展开态：注册表派生视图的 8 个 L1 tab 按钮（terminal 迁底抽屉、browser 走浮层）+ 展开态内容区 DOM 存在', () => {
+  it('展开态：注册表派生视图的 8 个 L1 tab 按钮（terminal 迁底抽屉、browser 走浮层、workflow 走浮层主入口）+ 展开态内容区 DOM 存在', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps() })
-    for (const key of ['git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask', 'plan', 'btw']) {
+    for (const key of ['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'trace']) {
       expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
     }
     expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="drawer-tab-browser"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="drawer-tab-workflow"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(8)
     expect(wrapper.find('[data-testid="drawer-content"]').exists()).toBe(true)
   })
@@ -179,7 +180,7 @@ describe('DrawerPanel (bashTask tab，background-task-sidebar-view D5②)', () =
     const wrapper = mount(DrawerPanel, { props: baseProps() })
     expect(wrapper.find('[data-testid="drawer-tab-bashTask"]').exists()).toBe(true)
     // 既有 tab 不回退（浏览器/Git/文档/详情/子代理/工作流 + 后台命令）
-    for (const key of ['git', 'doc', 'detail', 'subagent', 'workflow']) {
+    for (const key of ['git', 'doc', 'detail', 'subagent']) {
       expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
     }
   })
@@ -212,7 +213,7 @@ describe('DrawerPanel (plan tab，plan 模式重设计 u1-drawer-tab)', () => {
   it('plan tab 按钮 DOM 存在（既有 tab 无回归）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps() })
     expect(wrapper.find('[data-testid="drawer-tab-plan"]').exists()).toBe(true)
-    for (const key of ['git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask']) {
+    for (const key of ['git', 'doc', 'detail', 'subagent', 'bashTask']) {
       expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
     }
   })
@@ -258,7 +259,7 @@ describe('DrawerPanel (btw tab，btw-question D7 M3-a)', () => {
   it('btw tab 按钮 DOM 存在（既有 tab 无回归）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps() })
     expect(wrapper.find('[data-testid="drawer-tab-btw"]').exists()).toBe(true)
-    for (const key of ['git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask', 'plan']) {
+    for (const key of ['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan']) {
       expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
     }
   })

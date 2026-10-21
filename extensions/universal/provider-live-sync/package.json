@@ -29,9 +29,11 @@
     "skills/"
   ],
   "dependencies": {
-    "@zhushanwen/pi-extension-logger": "workspace:*"
+    "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-llm-shared": "workspace:*"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "1.0.0",
     "@vitest/coverage-v8": "^4.1.9",
     "vitest": "^4.1.8"
   },

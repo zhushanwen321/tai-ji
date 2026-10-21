@@ -138,6 +138,10 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     refreshProviderCatalogs: fwd('config', 'refreshProviderCatalogs', [], (t) => t.refreshProviderCatalogs()),
     scanSkills: fwd('config', 'scanSkills', ['probe-skill-src'], (t, sources) => t.scanSkills(sources)),
     scanAgents: fwd('config', 'scanAgents', ['probe-agent-src'], (t, sources) => t.scanAgents(sources)),
+    listQuotaPresets: fwd('config', 'listQuotaPresets', [], (t) => t.listQuotaPresets()),
+    setProviderCatalogWatch: fwd('config', 'setProviderCatalogWatch', [true], (t, enable) =>
+      t.setProviderCatalogWatch(enable),
+    ),
     getGlobalSkills: fwd('config', 'getGlobalSkills', [], (t) => t.getGlobalSkills()),
     getProjectSkills: fwd('config', 'getProjectSkills', ['probe-cwd'], (t, cwd) => t.getProjectSkills(cwd)),
     previewImportProviders: fwd('config', 'previewImportProviders', [PROBE_SOURCE], (t, source) =>

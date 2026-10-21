@@ -8,7 +8,7 @@
     "start": "tsx src/index.ts",
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "node scripts/vitest-run.mjs",
     "test:equivalence": "vitest run src/__tests__/equivalence/"
   },
   "dependencies": {
@@ -24,6 +24,7 @@
     "@zhushanwen/pi-rpc": "workspace:*",
     "@zhushanwen/subagent-core": "workspace:*",
     "@zhushanwen/subagent-engine-sdk": "workspace:*",
+    "@zhushanwen/state-machine": "workspace:*",
     "taiji-plugin-sdk": "workspace:*",
     "chokidar": "^4.0.1",
     "fast-glob": "^3.3.3",

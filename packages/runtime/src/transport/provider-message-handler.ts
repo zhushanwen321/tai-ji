@@ -17,6 +17,8 @@ import type { ClientMessage, DefaultModelSource, ProviderSource, ProviderId } fr
 import type { IConfigService } from '../interfaces.js'
 import type { SettingsHandlerContext } from './settings-message-handler.js'
 import { attachSupportedLevelsSafe } from './message-broker.js'
+import { startModelsStoreMtimeWatch } from '../services/provider-catalog-refresh.js'
+import { listQuotaPresets } from '../services/quota-providers/index.js'
 
 /**
  * provider 增删后统一维护 defaultModel（design provider-arch-hardening §3.3 D3 / Phase 3）。
@@ -51,12 +53,19 @@ type ProviderCaseHandler = (ws: WsType, msg: ClientMessage) => boolean | Promise
 
 export class ProviderMessageHandler {
   private readonly routes: ReadonlyMap<string, ProviderCaseHandler>
+  /**
+   * models-store.json 变化感知的启停状态（单布尔，最后写者赢——多窗口同时开页签时后到
+   * 的 disable 会停掉先到者的 watch，重新进页签即恢复，单用户桌面可接受）。handler 是
+   * runtime 级单例，watch 跨连接共享；stop 句柄持有态 = enabled。
+   */
+  private stopModelsStoreWatch: (() => void) | null = null
 
   /** type → case 体路由表（构造器内绑定 this；键与方法内 Extract 断言同行对应） */
   constructor(private ctx: SettingsHandlerContext) {
     this.routes = new Map<string, ProviderCaseHandler>([
       ['config.getProviders', (ws, msg) => this.handleGetProviders(ws, msg as Extract<ClientMessage, { type: 'config.getProviders' }>)],
       ['config.refreshProviderCatalogs', (ws, msg) => this.handleRefreshProviderCatalogs(ws, msg as Extract<ClientMessage, { type: 'config.refreshProviderCatalogs' }>)],
+      ['config.setProviderCatalogWatch', (ws, msg) => this.handleSetProviderCatalogWatch(ws, msg as Extract<ClientMessage, { type: 'config.setProviderCatalogWatch' }>)],
       ['config.setProvider', (ws, msg) => this.handleSetProvider(ws, msg as Extract<ClientMessage, { type: 'config.setProvider' }>)],
       ['config.deleteProvider', (ws, msg) => this.handleDeleteProvider(ws, msg as Extract<ClientMessage, { type: 'config.deleteProvider' }>)],
       ['config.toggleProviderEnabled', (ws, msg) => this.handleToggleProviderEnabled(ws, msg as Extract<ClientMessage, { type: 'config.toggleProviderEnabled' }>)],
@@ -65,6 +74,7 @@ export class ProviderMessageHandler {
       ['config.revealProviderApiKey', (ws, msg) => this.handleRevealProviderApiKey(ws, msg as Extract<ClientMessage, { type: 'config.revealProviderApiKey' }>)],
       ['config.detectSources', (ws, msg) => this.handleDetectSources(ws, msg as Extract<ClientMessage, { type: 'config.detectSources' }>)],
       ['config.listBuiltinProviders', (ws, msg) => this.handleListBuiltinProviders(ws, msg as Extract<ClientMessage, { type: 'config.listBuiltinProviders' }>)],
+      ['config.listQuotaPresets', (ws, msg) => this.handleListQuotaPresets(ws, msg as Extract<ClientMessage, { type: 'config.listQuotaPresets' }>)],
       ['config.previewImportProviders', (ws, msg) => this.handlePreviewImportProviders(ws, msg as Extract<ClientMessage, { type: 'config.previewImportProviders' }>)],
       ['config.applyImportProviders', (ws, msg) => this.handleApplyImportProviders(ws, msg as Extract<ClientMessage, { type: 'config.applyImportProviders' }>)],
     ])
@@ -111,6 +121,12 @@ export class ProviderMessageHandler {
 
   // settings-provider 页进入时触发：远程模型目录 ETag 协商刷新（单请求 4s 超时，
   // 全部 fail-safe），完成后广播新列表（store 常驻订阅自动更新，renderer 零状态管理）。
+  // 顺带触发 taiji 远程配置同步（remote-config 域 1 provider 清单 + 域 2 quota-fetchers，
+  // checkedAt 4h 节流在 fetch 层）：有 provider 模型合并写盘时再广播一次（无变化不重复广播）。
+  // 该同步是 reply 之后的旁路动作，失败必须降级为 warn 留痕、不得上抛——reply 已对同一
+  // msg.id 发出成功 envelope，异常冒泡到 server.ts handleMessage 的 catch 会对同一 id 补发
+  // error envelope（成功 + 失败双回复）。降级形态与启动路径 index.ts 的 startup refresh
+  // 同构（warn 留痕、不阻断、不影响已发 reply 与广播语义）。
   private async handleRefreshProviderCatalogs(
     ws: WsType,
     msg: Extract<ClientMessage, { type: 'config.refreshProviderCatalogs' }>,
@@ -119,6 +135,40 @@ export class ProviderMessageHandler {
     this.ctx.reply(ws, msg.id, 'config.providerCatalogsRefreshed', result)
     this.ctx.broadcastProviderList()
     this.mirrorAfterMutation()
+    try {
+      const remote = await this.ctx.configService.refreshRemoteProviders()
+      if (remote.updatedProviders.length > 0) this.ctx.broadcastProviderList()
+    } catch (e) {
+      // best-effort 降级：远程同步失败不阻断本 handler（reply 与 catalog 广播已发出，
+      // 下次进页面或启动路径会重试），仅 warn 留痕供排查。
+      console.warn('[remote-config] refresh remote providers failed:', e instanceof Error ? e.message : String(e))
+    }
+    return true
+  }
+
+  // quota presets 合并视图（基线 ⊕ 远程；前端缓存 + 聊天面板/设置页消费）
+  private handleListQuotaPresets(
+    ws: WsType,
+    msg: Extract<ClientMessage, { type: 'config.listQuotaPresets' }>,
+  ): boolean {
+    this.ctx.reply(ws, msg.id, 'config.quotaPresets', { presets: listQuotaPresets() })
+    return true
+  }
+
+  // W1 缝隙 A：页签可见期间轮询 pi models-store.json mtime，变化即广播新列表（读侧
+  // loadOverlay 自带 mtime 失效检测自动重读，这里只触发广播）。ack 型 reply。
+  private handleSetProviderCatalogWatch(
+    ws: WsType,
+    msg: Extract<ClientMessage, { type: 'config.setProviderCatalogWatch' }>,
+  ): boolean {
+    const { enable } = msg.payload
+    if (enable && !this.stopModelsStoreWatch) {
+      this.stopModelsStoreWatch = startModelsStoreMtimeWatch(() => this.ctx.broadcastProviderList())
+    } else if (!enable && this.stopModelsStoreWatch) {
+      this.stopModelsStoreWatch()
+      this.stopModelsStoreWatch = null
+    }
+    this.ctx.reply(ws, msg.id, 'message.status', { status: enable ? 'watch-enabled' : 'watch-disabled' })
     return true
   }
 

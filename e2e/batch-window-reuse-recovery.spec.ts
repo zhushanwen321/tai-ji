@@ -193,7 +193,7 @@ interface JournalView { // oe-exempt:20260927:test:e2e 剧本内视图形状声�
 }
 
 function readJournal(agentDir: string): JournalView[] {
-  // run 域 record 事件流后缀（<runId>.record.jsonl，core RUN_EVENT_JOURNAL_SUFFIX 同源；D1 起唯一 journal 介质）
+  // run 域 record 事件流后缀（<runId>.record.jsonl，core RUN_EVENTS_SUFFIX 同源；D1 起唯一 journal 介质）
   return listFilesRecursive(agentDir, '.record.jsonl').map((f) => ({
     file: f,
     runId: path.basename(f).replace(/\.record\.jsonl$/, ''),

@@ -46,6 +46,9 @@ export default {
     pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
     pluginActionRestoring: 'Session restoring, availability unknown',
     pluginActionTemporarilyUnavailable: 'Temporarily unavailable',
+    // Scheduler quick card (SchedulerQuickCard, left-cluster popover pass 2026-10-19):
+    schedulerPanelTitle: 'Scheduled tasks',
+    schedulerQuickOpen: 'Open scheduled tasks panel',
   },
   composer: {
     send: 'Send',
@@ -285,6 +288,16 @@ export default {
     pillConflict: 'Conflict',
     unavailableTitle: 'Git unavailable, repository status cannot be read',
   },
+  quotaFloat: {
+    // Conversation-left plan quota float (plan-quota-float): three-window usage for every quota.enabled provider
+    title: 'Plan quotas',
+    current: 'Current',
+    expand: 'Expand plan panel',
+    collapse: 'Collapse plan panel',
+    noWindowData: 'No data for this window',
+    usedPct: 'Used {pct}%',
+    fetchFailed: 'Quota query failed',
+  },
   context: {
     // Metrics aggregate entry (W3a single-icon button; resident at all fit levels since ui-optimize decision 6; hover opens the capacity/TTFT/speed/cache four-card aggregate page) title
     metricsAggregateTitle: 'Metrics',
@@ -392,7 +405,6 @@ export default {
     subagentNoOutcome: '(no outcome recorded)',
     engineBadgeTitle: 'Engine: {engine}',
     subagentStopReason: 'Why the last round stopped (display only)',
-    backToWorkflow: 'Back to workflow',
     subagentLoadFailed: 'Load failed',
     subagentRetry: 'Retry',
     workflowRunning: 'Running',
@@ -452,6 +464,11 @@ export default {
     bashTaskAlreadyExited: 'Task already finished',
     bashTaskIdentityUnverifiable: 'Cannot verify process identity — termination refused (safety first)',
     bashTaskWriteFailed: 'Operation did not take effect (failed to write data); please retry',
+    // trace tab (session-trace top-level tab: detail page of the selected trace entry;
+    // empty-state fallback when nothing is selected)
+    tabTrace: 'Trace',
+    noTraceEntry: 'No entry selected',
+    traceHint: 'Switch to the Trace view and click an entry to inspect it',
   },
   browserPane: {
     overlayTitle: 'Browser',

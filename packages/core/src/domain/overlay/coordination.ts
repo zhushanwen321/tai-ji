@@ -8,8 +8,8 @@
  * （不改开合态——无效内容不进浮层，调用方（renderer controller）已有同口径检查）。
  *
  * W2 扩展位（u-w2-browser-mount）：openBrowser(url, sessionId) 协调函数落本文件（URL 注入链）。
- * 入口语义分立（§6.4）：openWorkflow（drawer/coordination，改向开浮层）与
- * openWorkflowInDrawer（显式 drawer 回落语义）不并入本层。
+ * 入口语义分立（§6.4）：openWorkflow（drawer/coordination，改向开浮层）不并入本层。
+ * （openWorkflowInDrawer 显式 drawer 回落语义 2026-10-19 随 drawer workflow tab 删除移除。）
  */
 import { overlayControl, getOverlayControlState } from './state'
 import type { OverlayContent } from './types'

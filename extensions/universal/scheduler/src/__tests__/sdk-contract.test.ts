@@ -5,9 +5,10 @@
 //   1. tool 注册名为 schedule / schedule_control
 //   2. tool 有 execute 函数字段（不是 handler/fn）
 //   3. execute 是 async function（SDK 期望返回 Promise）
-//   4. 错误路径 throw（W4：pi-agent-core 只对 execute throw 置 isError:true，
-//      返回值里的 isError 字段被 agent-loop 丢弃——错误轮曾被标成功；
-//      锚点 agent-loop.js:453-483/525-547）
+//   4. 错误路径 throw（W4：execute throw → pi-agent-core agent-loop catch 置 isError:true
+//      ——pi-agent-core dist/agent-loop.js executePreparedToolCall，1.0.0 实读 catch :581-588；
+//      1.0.0 起正常 return 的 isError 也被尊重——:579 isError: result.isError === true，
+//      0.84.4 才硬编码 false、return 的错误轮曾被标成功——本包失败恒走 throw，行为不变）
 //
 // 不导入 SchedulerRuntime 的内部：只通过 index.ts 的 default export 测，
 // 保证 tool 注册逻辑的入口契约。

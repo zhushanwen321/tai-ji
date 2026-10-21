@@ -10,7 +10,7 @@
  * §7.7 双形态契约：注册表条目即唯一权威，ui 壳组件与 core 协调函数都读它，禁止各自文字化。
  *
  * [HISTORICAL] W0 行为不变锚（u-foundation）：数据源切换当刻条目数与显示序与旧硬编码一致（旧 10 条）。
- * 终态容器归属 = CONTAINER_REGISTRY（右 8/底 1/浮 2，§7.2）。
+ * 终态容器归属 = CONTAINER_REGISTRY（右 8/底 1/浮 2，§7.2；drawer workflow 条目 2026-10-19 删除）。
  *
  * 状态：纯数据注册表，无行为实装（类型契约不实装行为）。终态容器归属 = CONTAINER_REGISTRY
  * （右 8/底 1/浮 2，§7.2）；右抽屉数组以 ContainerRegistryEntry<RightDrawerTab> 实例化——
@@ -19,9 +19,10 @@
  */
 import type { RightDrawerTab } from './types'
 
-/** 三容器内容类型全集（display-containers §7.2）：右抽屉 8 员（RightDrawerTab）+ 底抽屉 terminal + 浮层 browser；
- * workflow 双承接（右抽屉回落载体 + 浮层主形态，§7.6）。仅注册表层使用——右抽屉控制态/tab 位一律用 RightDrawerTab。 */
-export type ContainerContentType = RightDrawerTab | 'terminal' | 'browser'
+/** 三容器内容类型全集（display-containers §7.2）：右抽屉 8 员（RightDrawerTab）+ 底抽屉 terminal + 浮层 browser/workflow。
+ * workflow 仅浮层承接（[2026-10-19 用户裁决] drawer workflow tab 删除，浮层是唯一形态）。
+ * 仅注册表层使用——右抽屉控制态/tab 位一律用 RightDrawerTab。 */
+export type ContainerContentType = RightDrawerTab | 'terminal' | 'browser' | 'workflow'
 
 /** 容器标识（§7.2 三个容器） */
 export type ContainerId = 'right-drawer' | 'bottom-drawer' | 'overlay'
@@ -129,17 +130,17 @@ const BTW_ENTRY: ContainerRegistryEntry<RightDrawerTab> = {
   emptyHintKey: 'btw.drawer.threadHint',
 }
 
-/** 右抽屉 workflow 条目（§7.2：workflow（回落载体，L1 常驻，主入口浮层）） */
-const WORKFLOW_DRAWER_ENTRY: ContainerRegistryEntry<RightDrawerTab> = {
-  content: 'workflow',
-  text: 'workflow（回落载体，L1 常驻，主入口浮层）',
-  icon: 'workflow',
-  labelKey: 'panel.sideDrawer.tabWorkflow',
-  emptyTextKey: 'panel.sideDrawer.noWorkflow',
-  emptyHintKey: 'panel.sideDrawer.workflowHint',
+const TRACE_ENTRY: ContainerRegistryEntry<RightDrawerTab> = {
+  content: 'trace',
+  text: 'trace（条目详情）',
+  icon: 'list-tree',
+  labelKey: 'panel.sideDrawer.tabTrace',
+  emptyTextKey: 'panel.sideDrawer.noTraceEntry',
+  emptyHintKey: 'panel.sideDrawer.traceHint',
 }
 
-/** 浮层 workflow 条目（§7.2：workflow（工作流图）——同一内容类型在浮层的条目文本不同，故条目按 (容器, 内容) 成对） */
+/** 浮层 workflow 条目（§7.2：workflow（工作流图）——[2026-10-19 用户裁决] drawer 侧条目
+ * 已随 workflow tab 删除，浮层是 workflow 唯一容器） */
 const WORKFLOW_OVERLAY_ENTRY: ContainerRegistryEntry = {
   content: 'workflow',
   text: 'workflow（工作流图）',
@@ -160,7 +161,7 @@ export const RIGHT_DRAWER_REGISTRY: readonly ContainerRegistryEntry<RightDrawerT
   BASHTASK_ENTRY,
   PLAN_ENTRY,
   BTW_ENTRY,
-  WORKFLOW_DRAWER_ENTRY,
+  TRACE_ENTRY,
 ]
 
 /** 底抽屉（bottom-drawer）承接的内容类型列表（1 条——本期只有 terminal 一种内容，不预设 tab 枚举，§7.1 YAGNI） */

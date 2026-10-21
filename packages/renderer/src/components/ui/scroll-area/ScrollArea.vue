@@ -22,8 +22,8 @@ const props = defineProps<ScrollAreaRootProps & {
 const delegatedProps = reactiveOmit(props, "class", "horizontal")
 
 // reka ScrollAreaViewport 实例 expose { viewportElement }（真滚动 DOM 元素）。slot 内容与
-// viewport 之间还有 reka 的内部 content wrapper——需要滚动宿主引用的消费方（EdgeFade 的
-// scrollerEl 等）经此获取，不得用 parentElement 探测
+// viewport 之间还有 reka 的内部 content wrapper——需要滚动宿主引用的消费方（FileView 的
+// Virtualizer scroll-ref 等）经此获取，不得用 parentElement 探测
 const viewportRef = ref<{ viewportElement: HTMLElement } | null>(null)
 defineExpose({ viewportEl: viewportRef })
 </script>

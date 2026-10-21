@@ -4,9 +4,11 @@
  * 覆盖（ui-replica M2：demo Workbench.vue .app 为窗口 frame 视觉权威）：
  *  - 三个拓扑 testid 存在：app-shell / app-shell-aside / app-shell-main
  *  - 关键类：AppShell py-1 pr-1（demo .app padding 4px 4px 4px 0：上/右/下 4、左 0 透明融合）、
- *    gap-1（2026-10-11 用户裁决：侧栏-main 缝 4px，与窗口右缘 pr-1 同节奏）、aside pt-11（44px traffic-light 安全区，恒定）、
+ *    根容器无 gap（侧栏-main 缝由 SidebarResizeHandle 元素承载，缝宽恒 4px，
+ *    2026-10-11 用户裁决「侧栏-main 缝 4px」的现行承载形态）、aside pt-11（44px traffic-light 安全区，恒定）、
  *    MainPanel 为透明布局容器（三卡化 2026-10-04：float-panel 壳下沉到三块内容卡）
- *  - 折叠态 !gap-0（强制覆盖 gap-2），展开态无
+ *  - 侧栏-main 卡缝 handle 两态成对：展开态渲染 sidebar-resize-handle（可拖动调侧栏宽度）、
+ *    折叠态消失（main 贴左无缝）
  *  - TrafficLight 挂载在 AsideRegion 内（ui-replica M2：AppShell 左边距 0 后 aside 左缘 = 窗口 x0，
  *    left-2/top-[12px] = 窗口 (8,16)，x/y 与 mac trafficLightPosition {8,16} 完全同位）
  *  - 平台两态成对（跨平台窗口外壳 u-shell-chrome）：非 mac 根节点无 rounded-[10px]（修复证明面：方形窗口下
@@ -17,7 +19,7 @@
  *  - useSettingsShell 置空（AppShell 壳副作用，非拓扑被测对象）
  *  - SettingsModal / Workspace / Sidebar stub（重组件依赖树，非拓扑被测对象）
  *  - useSidebar stub（AppShell 仅消费 syncSessionToPanel）
- *  - 其余（AsideRegion / AppNavControls / TrafficLight / MainPanel + stores）走真实实现
+ *  - 其余（AsideRegion / AppNavControls / TrafficLight / MainPanel / SidebarResizeHandle + stores）走真实实现
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/shell/app-shell-topology.test.ts
  */
@@ -57,12 +59,13 @@ beforeEach(() => {
   setActivePinia(createPinia())
   platformChromeMock.isFullscreen.value = false
   platformChromeMock.detectPlatform.mockReturnValue('mac')
-  // 折叠态持久化跨测试隔离：上一用例写入的折叠态不得泄漏进下一用例的 store 初始化
+  // 折叠态/宽度持久化跨测试隔离：上一用例写入的持久化值不得泄漏进下一用例的 store 初始化
   localStorage.removeItem('taiji:side-collapsed')
+  localStorage.removeItem('taiji:side-width')
 })
 
 describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () => {
-  it('展开态：三个拓扑 testid 存在 + 关键类（py-1 pr-1 / gap-1 / aside pt-11 / main 透明布局容器）', () => {
+  it('展开态：三个拓扑 testid 存在 + 关键类（py-1 pr-1 / 根无 gap / 卡缝 handle / aside pt-11 / main 透明布局容器）', () => {
     const wrapper = mount(AppShell)
 
     // ① app-shell 根容器：demo .app padding 4px 4px 4px 0（py-1 pr-1，左 0 侧栏透明融合贴边）+ relative 定位基准
@@ -70,33 +73,41 @@ describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () =>
     expect(shell.exists()).toBe(true)
     expect(shell.classes()).toContain('py-1')
     expect(shell.classes()).toContain('pr-1')
-    expect(shell.classes()).toContain('gap-1')
     expect(shell.classes()).toContain('relative')
+    // 根容器无 gap 类：侧栏-main 缝由 SidebarResizeHandle 元素承载（可拖动调宽），不走 flex gap
+    expect(shell.classes().some((c) => c.startsWith('gap-'))).toBe(false)
 
-    // ② aside：pt-11(44px) traffic-light 安全区恒定
+    // ② 卡缝 handle（展开态渲染）：4px 缝本体（w-1）+ separator 语义
+    const handle = wrapper.find('[data-testid="sidebar-resize-handle"]')
+    expect(handle.exists()).toBe(true)
+    expect(handle.classes()).toContain('w-1')
+    expect(handle.attributes('role')).toBe('separator')
+
+    // ③ aside：pt-11(44px) traffic-light 安全区恒定
     const aside = wrapper.find('[data-testid="app-shell-aside"]')
     expect(aside.exists()).toBe(true)
     expect(aside.classes()).toContain('pt-11')
 
-    // ③ main 布局容器：三卡化后壳样式（rounded/border/bg）下沉到内容卡，本体透明
+    // ④ main 布局容器：三卡化后壳样式（rounded/border/bg）下沉到内容卡，本体透明
     const main = wrapper.find('[data-testid="app-shell-main"]')
     expect(main.exists()).toBe(true)
     expect(main.classes()).not.toContain('rounded-[10px]')
     expect(main.classes()).not.toContain('border')
     expect(main.classes()).not.toContain('bg-surface')
-
-    // 展开态无 !gap-0（gap-1 生效）
-    expect(shell.classes()).not.toContain('!gap-0')
   })
 
-  it('折叠态：AppShell 根容器加 !gap-0（强制覆盖 gap-2，aside 归零）', async () => {
+  it('折叠态：卡缝 handle 消失（main 贴左无缝），展开恢复', async () => {
     const sidebar = useSidebarStore()
     const wrapper = mount(AppShell)
-    expect(wrapper.find('[data-testid="app-shell"]').classes()).not.toContain('!gap-0')
+    expect(wrapper.find('[data-testid="sidebar-resize-handle"]').exists()).toBe(true)
 
     sidebar.userCollapsed = true
     await nextTick()
-    expect(wrapper.find('[data-testid="app-shell"]').classes()).toContain('!gap-0')
+    expect(wrapper.find('[data-testid="sidebar-resize-handle"]').exists()).toBe(false)
+
+    sidebar.userCollapsed = false
+    await nextTick()
+    expect(wrapper.find('[data-testid="sidebar-resize-handle"]').exists()).toBe(true)
   })
 
   it('TrafficLight 挂载在 AsideRegion 内：left-2/top-[12px] 相对 aside 左缘 x0/顶 y4 = 窗口 (8,16)，x/y 与 mac 同位（ui-replica M2）', () => {

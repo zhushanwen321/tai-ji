@@ -1,5 +1,5 @@
 /**
- * 状态机穷举（problem-solve-canvas U2 验收条款）。
+ * 状态机穷举（problem-solve-canvas U2 验收条款；判定权威 = canvasLifecycleMachine）。
  *
  * 权威 = 概念文档 §2.4：生命周期维度 5 态 × 5 态全组合穷举（含自转移与逆行）+
  * 根节点豁免（根不可搁置 / 否决）+ 派发维度正交性。
@@ -8,7 +8,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { CanvasNodeLifecycle } from '@zhushanwen/extension-protocol'
-import { isTransitionAllowed, LIFECYCLE_TRANSITIONS } from '../canvas-domain.js'
+import { generateTableTests } from '@zhushanwen/state-machine/testing'
+import { canvasLifecycleMachine, isCanvasDomainError } from '../canvas-domain.js'
 import type { CanvasService } from '../canvas-service.js'
 import { createCanvas, growCanvas, makeService, SID, SID_B } from './canvas-helpers.js'
 
@@ -23,6 +24,17 @@ const LEGAL: ReadonlyArray<readonly [CanvasNodeLifecycle, CanvasNodeLifecycle]> 
   ['rejected', 'draft'],
   ['shelved', 'draft'],
 ]
+
+/**
+ * 合法边查询（期望源 = 机器声明的表行静态派生，独立于 transition 判定路径——
+ * 两侧不同源，穷举对拍才设防）。
+ */
+function isLegalTransition(from: CanvasNodeLifecycle, to: CanvasNodeLifecycle): boolean {
+  return canvasLifecycleMachine.definition.transitions.some((row) => {
+    const froms = Array.isArray(row.from) ? row.from : [row.from]
+    return froms.includes(from) && row.to === to
+  })
+}
 
 interface Scenario { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
   canvasId: string
@@ -52,22 +64,43 @@ function buildScenario(svc: CanvasService): Scenario {
   return { canvasId: c.canvasId, nodeIdByLifecycle: byLifecycle }
 }
 
-describe('转移表（LIFECYCLE_TRANSITIONS）与合法集合一致', () => {
+describe('机器声明（canvasLifecycleMachine）与合法集合一致', () => {
   it('表内恰 7 条合法转移，表外全部禁止（含 5 条自转移）', () => {
     const legalPairs = new Set(LEGAL.map(([f, t]) => `${f}->${t}`))
     let legalCount = 0
     for (const from of ALL_LIFECYCLES) {
       for (const to of ALL_LIFECYCLES) {
-        const allowed = isTransitionAllowed(from, to)
+        const allowed = isLegalTransition(from, to)
         expect(allowed).toBe(legalPairs.has(`${from}->${to}`))
         if (allowed) legalCount += 1
       }
     }
     expect(legalCount).toBe(7)
-    // 表形状完整：5 态全部有行
-    for (const s of ALL_LIFECYCLES) expect(LIFECYCLE_TRANSITIONS[s]).toBeDefined()
+    // 词表形状完整：5 态全在状态词表；passed 是唯一终态（无出边吸收）
+    expect([...canvasLifecycleMachine.states].sort()).toEqual([...ALL_LIFECYCLES].sort())
+    expect(canvasLifecycleMachine.terminalStates).toEqual(['passed'])
+  })
+
+  it('表外转移抛既有 CanvasDomainError（类型保形：isCanvasDomainError 命中 + 错误码 + recover 指引）', () => {
+    let caught: unknown
+    try {
+      canvasLifecycleMachine.transition('rejected', 'passed')
+    } catch (e) {
+      caught = e
+    }
+    expect(isCanvasDomainError(caught), 'errorFactory 须构造 CanvasDomainError 实例（消费方 instanceof 分类依赖）').toBe(true)
+    if (isCanvasDomainError(caught)) {
+      expect(caught.detail.code).toBe('lifecycle_transition_illegal')
+      expect(caught.detail.recover.length).toBeGreaterThan(0)
+      expect(caught.detail.message).toContain('rejected')
+      expect(caught.detail.message).toContain('passed')
+    }
   })
 })
+
+// 基建穷举生成组（@zhushanwen/state-machine/testing）——5 态 × 5 事件全组合：
+// 7 组合断言次态、18 组合断言表外 throw（含 passed 终态吸收）。
+generateTableTests(canvasLifecycleMachine)
 
 describe('经 mutate 的行为级穷举（25 组合全表，每组合独立画布）', () => {
   it('合法 7 条转移成功，落地 lifecycle 与 StateTransitioned 事件', () => {
@@ -100,7 +133,7 @@ describe('经 mutate 的行为级穷举（25 组合全表，每组合独立画�
   it('非法 18 条组合（含 5 条自转移）全部 lifecycle_transition_illegal 且带恢复动作', () => {
     for (const from of ALL_LIFECYCLES) {
       for (const to of ALL_LIFECYCLES) {
-        if (isTransitionAllowed(from, to)) continue
+        if (isLegalTransition(from, to)) continue
         const h = makeService()
         try {
           const s = buildScenario(h.svc)

@@ -93,7 +93,7 @@ const events = computed(() => entry.value?.events)
 /** 规则③头卡派生（本 phase 行）。 */
 const card = computed(() => deriveWorkflowGanttSegments(events.value ?? []).phaseCards.find((c) => c.phase === props.phase))
 
-/** phase 内 trace = 本 phase 归属实例（WorkflowTab 同款 phase 分组判据）。 */
+/** phase 内 trace = 本 phase 归属实例（与 run 级 trace 子页同口径：agentCalls 按 phase 字段分组）。 */
 const phaseCalls = computed(() => props.run.agentCalls.filter((c) => c.phase === props.phase))
 
 /** 事件流过滤：phase-started/settled（本 phase）+ 本 phase agent 事件；run 级与 worker-log 不进。 */

@@ -884,7 +884,7 @@ export class SubagentService {
         // `model-override` 记账帧（事件类型/词表/fold 均为 U4a 产物，本接线复用既有
         // journal 写入口——非新持久化载体）。写侧说明（[F1-17] 裁决修正）：不走
         // dispatchRunTrigger 的真因是 model-override 为非转移记账事件（不占
-        // RUN_TRANSITIONS 表行），appendTransition 首行 transition() 对无转移表行
+        // RUN_MACHINE 表行），appendTransition 首行 transition() 对无转移表行
         // 事件必抛 IllegalTransitionError——结构上进不了转移裁决链；RunDispatchSource
         // = { runId, journalDir? } 对 interrupted 态 run（中断后补切的合法场景，验收
         // 场景 3）本可达，不可达的是转移通道而非 run 本身。同款直写先例 =

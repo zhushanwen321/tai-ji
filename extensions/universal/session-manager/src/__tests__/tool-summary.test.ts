@@ -1,4 +1,4 @@
-// tool-summary.test.ts — details.summary 产出（六工具文案断言，走 execute 骨架）+
+// tool-summary.test.ts — details.summary 产出（八工具文案断言，走 execute 骨架）+
 // renderSessionManagerResult 两态（折叠态一行摘要 / 展开态原始 content 文本）。
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
@@ -36,7 +36,7 @@ function renderedText(result: unknown, expanded: boolean): string {
 	return renderSessionManagerResult(result, { expanded }, mockTheme).render(400).join("\n");
 }
 
-describe("execute 组装 details.summary（六工具文案）", () => {
+describe("execute 组装 details.summary（八工具文案）", () => {
 	let harness: ReturnType<typeof createHarness>;
 
 	beforeEach(() => {
@@ -87,6 +87,14 @@ describe("execute 组装 details.summary（六工具文案）", () => {
 
 	it("abort_session：Aborted <sessionId>", async () => {
 		expect(await summaryOf("abort_session", { sessionId: "s1" }, { success: true })).toBe("Aborted s1");
+	});
+
+	it("delete_session：Deleted <sessionId>", async () => {
+		expect(await summaryOf("delete_session", { sessionId: "s1" }, { sessionId: "s1", deleted: true })).toBe("Deleted s1");
+	});
+
+	it("archive_session：Archived <sessionId>", async () => {
+		expect(await summaryOf("archive_session", { sessionId: "s1" }, { sessionId: "s1", archived: true })).toBe("Archived s1");
 	});
 });
 
@@ -149,10 +157,10 @@ describe("renderSessionManagerResult 两态", () => {
 		expect(renderedText({ content: [{ type: "text", text: "raw" }], details: { summary: 7 } }, false)).toContain("raw");
 	});
 
-	it("六工具注册的 renderResult 均存在且折叠态行为一致（共用渲染内核）", () => {
+	it("八工具注册的 renderResult 均存在且折叠态行为一致（共用渲染内核）", () => {
 		const harness = createHarness();
 		const renderFns = harness.registered.map((t) => t.renderResult);
-		expect(renderFns).toHaveLength(6);
+		expect(renderFns).toHaveLength(8);
 		for (const fn of renderFns) expect(typeof fn).toBe("function");
 		// 抽查一个 handler：折叠态出摘要、不出原始 JSON（handler 是各 registerTool
 		// 的方法包装，内核同为 renderSessionManagerResult）

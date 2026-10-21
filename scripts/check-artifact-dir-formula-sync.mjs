@@ -62,6 +62,20 @@
  * （subagent-core 经 shared 函数族落盘）错位——subagent 会话/记录发现为空（agent 面
  * family/find/result 静默丢数据）。
  *
+ * 【第八组断言（域 10 扩展，dmg-r1-9）】归档镜像对拍扩为字段级 + D7 四字面：①簿记
+ * schema 双解析器（shared parseArchiveLedger 两态完备校验 ↔ extension
+ * parseArchiveLedgerText 消费子集）的字段级对拍——status 词表（shared
+ * ARCHIVE_LEDGER_STATUSES 元组 ↔ extension 守卫字面量）与 summary.turns 成员名
+ * （shared ArchiveSummaryTurn ↔ extension ArchiveLedgerTurn interface 逐字比对 + 两端
+ * parse 块消费同名校验），词表/成员漂移时 extension 静默拒收全部簿记且无红灯；
+ * ②D7 归档态返回正文四字面（ARCHIVED_HEADER / RESTORE_NOTE /
+ * USER_ATTACHMENT_PLACEHOLDER / AGENT_NO_TEXT_PLACEHOLDER）的 renderer 预检正文
+ * （agent-reference-format.ts）↔ extension 真实返回正文（archive-ledger.ts）逐字比对——
+ * 漂移 = 用户预检与 agent 实见正文不一致且无红灯；③簿记 sessionId 同域正则（shared
+ * session-store-paths.ts PI_SESSION_ID_PATTERN 权威〔paths.ts 经转发暴露〕↔ shared
+ * archive.ts bundle 隔离镜像，dmg-r2-1 防线）逐字比对——镜像漂移 = 归档簿记解析侧与 pi
+ * 会话 id 权威域收窄口径分裂，穿越形态 id 一经簿记固化即流向 assets/ 分区与 purge 删除原语。
+ *
  * 形态照搬 scripts/check-capability-allowlist-sync.mjs（读源文件文本、零散文解析、
  * 提取失败一律 fail、`--self-test` 纯函数自检）。
  *
@@ -86,6 +100,9 @@ import {
 
 const ROOT = repoRootFrom(import.meta.url)
 const SHARED_PATHS_SRC = join(ROOT, 'packages', 'shared', 'src', 'paths.ts')
+/** shared 存储树纯公式模块（SESSION_STORE_DIR_SEGMENT / PI_SESSION_ID_PATTERN 与
+ *  存储树函数族 join 域段的提取源——公式本体自 C-ext-31 拆分起在此文件）。 */
+const SHARED_STORE_SRC = join(ROOT, 'packages', 'shared', 'src', 'session-store-paths.ts')
 const SYSTEM_PROMPT_SRC = join(ROOT, 'extensions', 'taiji', 'system-prompt', 'src', 'index.ts')
 const RUNTIME_PI_PATHS_SRC = join(ROOT, 'packages', 'runtime', 'src', 'infra', 'pi', 'pi-paths.ts')
 const BASE_TOOL_ENHANCE_REGISTRY_SRC = join(
@@ -93,6 +110,18 @@ const BASE_TOOL_ENHANCE_REGISTRY_SRC = join(
 )
 const SESSION_READER_TOOL_HANDLER_SRC = join(
   ROOT, 'extensions', 'universal', 'session-reader', 'src', 'tool-handler.ts',
+)
+const SESSION_READER_ARCHIVE_LEDGER_SRC = join(
+  ROOT, 'extensions', 'universal', 'session-reader', 'src', 'discovery', 'archive-ledger.ts',
+)
+const RUNTIME_ARCHIVE_PATHS_SRC = join(
+  ROOT, 'packages', 'runtime', 'src', 'services', 'archive', 'archive-paths.ts',
+)
+/** shared 归档簿记 schema 源文件（域 10 字段级对拍 shared 端：status 词表元组 + turn 成员名）。 */
+export const SHARED_ARCHIVE_SCHEMA_SRC = join(ROOT, 'packages', 'shared', 'src', 'archive.ts')
+/** renderer 归档态预检正文源文件（D7 四字面镜像的 renderer 端，bundle 隔离对侧）。 */
+export const RENDERER_ARCHIVE_REFERENCE_SRC = join(
+  ROOT, 'packages', 'renderer', 'src', 'components', 'archive', 'agent-reference-format.ts',
 )
 
 /** 权威侧函数名（shared）。 */
@@ -105,8 +134,20 @@ export const MIRROR_SEGMENT_CONST = 'SESSION_ARTIFACTS_DIR_SEGMENT'
 export const RUNTIME_PATTERN_CONST = 'PI_SESSION_ID_PATTERN'
 /** 第四组对拍：shared pi 会话树段 SSOT 常量名。 */
 export const SHARED_TREE_CONST = 'PI_SESSION_TREE_SEGMENTS'
-/** runtime 侧三棵树布局权威函数（数组位 ↔ shared 常量元素位，pi 宿主段）。 */
-export const RUNTIME_TREE_FNS = ['getSessionsDir', 'getSubagentSessionDir', 'getBtwSessionsRoot']
+/** runtime 侧四棵树布局权威函数（数组位 ↔ shared 常量元素位，pi 宿主段）。 */
+export const RUNTIME_TREE_FNS = ['getSessionsDir', 'getSubagentSessionDir', 'getBtwSessionsRoot', 'getArchiveDir']
+/** 归档根布局函数名（runtime 侧，shared 树段 'archive' 的对位函数）。 */
+export const RUNTIME_ARCHIVE_DIR_FN = 'getArchiveDir'
+/** session-reader 归档目录名常量（不 import shared 的镜像字面量）。 */
+export const SR_ARCHIVE_DIRNAME_CONST = 'ARCHIVE_DIRNAME'
+/** shared 侧 status 词表元组常量名（域 10 字段级对拍第一轴）。 */
+export const SHARED_ARCHIVE_STATUS_CONST = 'ARCHIVE_LEDGER_STATUSES'
+/** shared 侧摘要 turn 接口锚（域 10 字段级对拍第二轴的 shared 端）。 */
+export const SHARED_TURN_INTERFACE = 'interface ArchiveSummaryTurn'
+/** extension 侧摘要 turn 接口锚（同上，extension 端）。 */
+export const MIRROR_TURN_INTERFACE = 'interface ArchiveLedgerTurn'
+/** D7 归档态返回正文四字面常量名（renderer ↔ extension 同名镜像，dmg-r1-9 对拍轴 ③）。 */
+export const D7_LITERAL_CONSTS = ['ARCHIVED_HEADER', 'RESTORE_NOTE', 'USER_ATTACHMENT_PLACEHOLDER', 'AGENT_NO_TEXT_PLACEHOLDER']
 /** session 存储树根段常量名（shared 与镜像侧同名，三方对拍：shared ↔ 镜像 ↔ 树段常量末位）。 */
 export const STORE_SEGMENT_CONST = 'SESSION_STORE_DIR_SEGMENT'
 /** shared 侧 sessionId 校验正则常量名（assertPiSessionId 消费，与 runtime 同名）。 */
@@ -210,6 +251,28 @@ export function extractTreeRootSegment(blockText) {
   return { value: m[1] }
 }
 
+/**
+ * 从 extension parseArchiveLedgerText 守卫行提取 status 词表字面量（域 10 字段级对拍：
+ * `obj.status !== 'a' && obj.status !== 'b'` 形态，与 shared ARCHIVE_LEDGER_STATUSES
+ * 元组逐字比对）。守卫改写（switch / includes 数组等）时提取失败一律 fail。
+ */
+export function extractMirrorStatusLiterals(text) {
+  const m = text.match(/obj\.status !== '([^']+)' && obj\.status !== '([^']+)'/)
+  if (!m) return { error: `未找到 obj.status !== '<词表值>' && obj.status !== '<词表值>' 守卫形态（status 词表判定改写？）` }
+  return { value: [m[1], m[2]] }
+}
+
+/**
+ * 从 TS interface 块提取两空格缩进成员名序列（域 10 字段级对拍：summary.turns 成员名
+ * 在 shared 与 extension 两端逐字比对）。doc 注释行（` * ` 前缀）不匹配成员形态；
+ * 成员零提取 = 形态变化报 error。
+ */
+export function extractInterfaceMembers(blockText) {
+  const names = [...blockText.matchAll(/^\s{2}(\w+)\s*:/gm)].map((m) => m[1])
+  if (names.length === 0) return { error: 'interface 块内未提取到成员声明（形态变化？）' }
+  return { value: names }
+}
+
 /** 镜像侧函数块是否经两个段常量（根段 + 域段，而非重写字面量）拼路径。 */
 export function mirrorUsesSegmentConst(blockText) {
   return /join\([^,]+,\s*SESSION_STORE_DIR_SEGMENT\s*,\s*sessionId\s*,\s*SESSION_ARTIFACTS_DIR_SEGMENT\)/.test(blockText)
@@ -305,7 +368,7 @@ const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/`
 }
 
 function selfTestTreePairing(assert) {
-  const treeSharedText = `export const PI_SESSION_TREE_SEGMENTS = ['sessions', 'subagents', 'btw', 'ext-sessions'] as const
+  const treeSharedText = `export const PI_SESSION_TREE_SEGMENTS = ['sessions', 'subagents', 'btw', 'archive', 'ext-sessions'] as const
 export const SESSION_STORE_DIR_SEGMENT = 'ext-sessions'`
   const treeRuntimeText = `export function getSessionsDir(): string {
   return join(getPiAgentDir(), 'sessions')
@@ -317,9 +380,13 @@ export function getSubagentSessionDir(mainCwd: string): string {
 
 export function getBtwSessionsRoot(): string {
   return join(getPiAgentDir(), 'btw')
+}
+
+export function getArchiveDir(): string {
+  return join(getPiAgentDir(), 'archive')
 }`
   const treeSegs = extractConstStringArray(treeSharedText, SHARED_TREE_CONST)
-  assert(treeSegs.value && treeSegs.value.join(',') === 'sessions,subagents,btw,ext-sessions', '树段常量数组元素提取（含存储树末位段）')
+  assert(treeSegs.value && treeSegs.value.join(',') === 'sessions,subagents,btw,archive,ext-sessions', '树段常量数组元素提取（含存储树末位段）')
   assert(
     compareTreeSegmentsShape(treeSegs.value, RUNTIME_TREE_FNS.length, 'ext-sessions').error === undefined,
     '树段形态断言（宿主段数 + 存储树末位段）通过（样例）',
@@ -457,6 +524,85 @@ const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/`
   assert(extractConstLiteral(rootsText, 'MISSING_CONST').error !== undefined, '镜像 discovery 常量缺失报 error')
 }
 
+/** 域 10 扩展（dmg-r1-9）纯函数自检：status 词表 / turn 成员名 / D7 四字面三对拍轴的提取。 */
+function selfTestArchiveMirrorFields(assert) {
+  const sharedSchemaText = `export const ARCHIVE_LEDGER_STATUSES = [
+  'staging',
+  'archived',
+] as const satisfies readonly ArchiveLedgerStatus[]
+
+export interface ArchiveSummaryTurn { // oe-exempt 注释不干扰成员提取
+  /**
+   * doc 注释行（asterisk 前缀）不匹配成员形态。
+   */
+  user: string
+  agent: string | null
+}
+
+function parseSummaryTurn(raw: unknown, index: number): ArchiveSummaryTurn | string {
+  const user = (raw as Record<string, unknown>).user
+  const agent = (raw as Record<string, unknown>).agent
+  return { user, agent }
+}
+const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
+function other() {}`
+
+  const ledgerText = `export interface ArchiveLedgerTurn {
+  user: string
+  agent: string | null
+}
+
+const ARCHIVED_HEADER = '状态: 已归档 (archived) — 完整内容已压缩离线，以下仅为摘要'
+const RESTORE_NOTE = '注: 如需完整历史，请让用户在归档列表中恢复该会话。'
+const USER_ATTACHMENT_PLACEHOLDER = '[图片/附件消息]'
+const AGENT_NO_TEXT_PLACEHOLDER = '（此 turn 以工具调用结束，无文本回复）'
+
+function parseArchiveLedgerText(text: string) {
+  if (obj.status !== 'staging' && obj.status !== 'archived') return undefined
+}
+function parseSummary(raw: unknown) {
+  if (typeof obj.user !== 'string') return undefined
+  if (obj.agent !== null && typeof obj.agent !== 'string') return undefined
+}
+function other() {}`
+
+  const rendererText = `const ARCHIVED_HEADER = '状态: 已归档 (archived) — 完整内容已压缩离线，以下仅为摘要'
+const RESTORE_NOTE = '注: 如需完整历史，请让用户在归档列表中恢复该会话。'
+const USER_ATTACHMENT_PLACEHOLDER = '[图片/附件消息]'
+const AGENT_NO_TEXT_PLACEHOLDER = '（此 turn 以工具调用结束，无文本回复）'`
+
+  assert(
+    JSON.stringify(extractConstStringArray(sharedSchemaText, SHARED_ARCHIVE_STATUS_CONST).value) === '["staging","archived"]',
+    'shared status 词表元组提取（as const satisfies 形态）',
+  )
+  assert(
+    JSON.stringify(extractMirrorStatusLiterals(ledgerText).value) === '["staging","archived"]',
+    '镜像 status 守卫字面量提取',
+  )
+  assert(extractMirrorStatusLiterals("if (obj.status === 'staging') return").error !== undefined, '镜像 status 守卫形态不符报 error')
+  assert(
+    JSON.stringify(extractInterfaceMembers(extractFunctionBlock(sharedSchemaText, SHARED_TURN_INTERFACE).text).value) === '["user","agent"]',
+    'shared turn 接口成员提取（doc 注释不误提取）',
+  )
+  assert(
+    JSON.stringify(extractInterfaceMembers(extractFunctionBlock(ledgerText, MIRROR_TURN_INTERFACE).text).value) ===
+      JSON.stringify(extractInterfaceMembers(extractFunctionBlock(sharedSchemaText, SHARED_TURN_INTERFACE).text).value),
+    '两侧 turn 成员名一致（样例）',
+  )
+  assert(extractInterfaceMembers('interface X {\n  member\n}').error !== undefined, 'interface 成员零提取报 error')
+  const sharedPatternText = `const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/`
+  assert(
+    extractConstRegex(sharedSchemaText, SHARED_PATTERN_CONST).value === extractConstRegex(sharedPatternText, SHARED_PATTERN_CONST).value,
+    '域 10 簿记 sessionId 正则两侧一致（shared paths 权威 ↔ archive 镜像，样例）',
+  )
+  for (const name of D7_LITERAL_CONSTS) {
+    assert(
+      extractConstLiteral(ledgerText, name).value === extractConstLiteral(rendererText, name).value,
+      `D7 字面 ${name} 两侧一致（样例）`,
+    )
+  }
+}
+
 function selfTestCases(assert) {
   selfTestFormulaPairing(assert)
   selfTestTreePairing(assert)
@@ -464,6 +610,7 @@ function selfTestCases(assert) {
   selfTestBaseToolEnhanceRegistry(assert)
   selfTestSessionReaderView(assert)
   selfTestSessionReaderDiscovery(assert)
+  selfTestArchiveMirrorFields(assert)
 }
 
 if (process.argv.includes('--self-test')) runSelfTest('artifact-dir-formula-sync', selfTestCases)
@@ -484,11 +631,11 @@ function extractFormulaBlocksOrFail(sharedText, mirrorText) {
 }
 
 /** 提取阶段②：公式对拍全部字面量（域段 ×2 / 树根段 ×2 / sessionId 正则 ×3 源）。失败 → ✗ + fail-fast。 */
-function extractFormulaLiteralsOrFail(sharedText, sharedBlock, mirrorBlock, mirrorText, runtimeText) {
+function extractFormulaLiteralsOrFail(storeText, sharedBlock, mirrorBlock, mirrorText, runtimeText) {
   const extracted = {
     sharedSegment: extractJoinSegment(sharedBlock.text),
-    sharedStoreSegment: extractConstLiteral(sharedText, STORE_SEGMENT_CONST),
-    sharedRegex: extractConstRegex(sharedText, SHARED_PATTERN_CONST),
+    sharedStoreSegment: extractConstLiteral(storeText, STORE_SEGMENT_CONST),
+    sharedRegex: extractConstRegex(storeText, SHARED_PATTERN_CONST),
     mirrorStoreSegment: extractConstLiteral(mirrorText, STORE_SEGMENT_CONST),
     mirrorSegment: extractConstLiteral(mirrorText, MIRROR_SEGMENT_CONST),
     mirrorRegex: extractSessionIdRegex(mirrorBlock.text),
@@ -528,7 +675,7 @@ function compareStoreSegmentLiteral(sharedStoreSegment, mirrorStoreSegment) {
   } else {
     fail(
       `存储树根段字面量漂移: shared='${sharedStoreSegment}' vs 镜像='${mirrorStoreSegment}'` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 与 ${SYSTEM_PROMPT_SRC} 的 ${STORE_SEGMENT_CONST}`,
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 与 ${SYSTEM_PROMPT_SRC} 的 ${STORE_SEGMENT_CONST}`,
     )
   }
 }
@@ -550,7 +697,7 @@ function compareSessionIdRegexes(sharedRegex, mirrorRegex, runtimeRegex) {
   } else {
     fail(
       `sessionId 校验正则漂移: shared=${sharedRegex} vs runtime ${RUNTIME_PATTERN_CONST}=${runtimeRegex}` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${RUNTIME_PI_PATHS_SRC} 的 ${RUNTIME_PATTERN_CONST}` +
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${RUNTIME_PI_PATHS_SRC} 的 ${RUNTIME_PATTERN_CONST}` +
         `（同域规则：首尾字母数字，中间允许 [A-Za-z0-9._-]，禁 :）`,
     )
   }
@@ -633,10 +780,10 @@ function compareTreeSegments(sharedText, runtimeText, sharedStoreSegment) {
  * 域段 / sessionId 校验正则三字面量逐字一致——runtime 读侧经 shared 函数推导，镜像漂移
  * 即收殓读不到、任务清单空转。
  */
-function compareBaseToolEnhanceRegistry(sharedText, registryText, sharedStoreSegment, sharedRegex) {
+function compareBaseToolEnhanceRegistry(storeText, registryText, sharedStoreSegment, sharedRegex) {
   const registryBlock = extractFunctionBlock(registryText, BTE_REGISTRY_FN_ANCHOR)
   const assertBlock = extractFunctionBlock(registryText, BTE_ASSERT_FN_ANCHOR)
-  const sharedBgTasksBlock = extractFunctionBlock(sharedText, `export function ${SHARED_BG_TASKS_FN}`)
+  const sharedBgTasksBlock = extractFunctionBlock(storeText, `export function ${SHARED_BG_TASKS_FN}`)
   if (registryBlock.error) fail(`镜像 ${BTE_REGISTRY_FN_ANCHOR} 提取失败: ${registryBlock.error}`)
   if (assertBlock.error) fail(`镜像 ${BTE_ASSERT_FN_ANCHOR} 提取失败: ${assertBlock.error}`)
   if (sharedBgTasksBlock.error) fail(`shared ${SHARED_BG_TASKS_FN} 提取失败: ${sharedBgTasksBlock.error}`)
@@ -663,7 +810,7 @@ function compareBaseToolEnhanceRegistry(sharedText, registryText, sharedStoreSeg
   } else {
     fail(
       `域 5 存储树根段漂移: shared='${sharedStoreSegment}' vs 镜像='${extracted.bteStoreSegment.value}'` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${STORE_SEGMENT_CONST} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_STORE_SEGMENT_CONST}`,
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 的 ${STORE_SEGMENT_CONST} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_STORE_SEGMENT_CONST}`,
     )
   }
   if (extracted.bteDomainSegment.value === extracted.sharedDomainSegment.value) {
@@ -671,7 +818,7 @@ function compareBaseToolEnhanceRegistry(sharedText, registryText, sharedStoreSeg
   } else {
     fail(
       `域 5 域段漂移: shared='${extracted.sharedDomainSegment.value}' vs 镜像='${extracted.bteDomainSegment.value}'` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_BG_TASKS_FN} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_DOMAIN_SEGMENT_CONST}`,
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 的 ${SHARED_BG_TASKS_FN} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_DOMAIN_SEGMENT_CONST}`,
     )
   }
   if (extracted.bteRegex.value === sharedRegex) {
@@ -679,7 +826,7 @@ function compareBaseToolEnhanceRegistry(sharedText, registryText, sharedStoreSeg
   } else {
     fail(
       `域 5 sessionId 校验正则漂移: shared=${sharedRegex} vs 镜像=${extracted.bteRegex.value}` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_ASSERT_FN_ANCHOR}`,
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_ASSERT_FN_ANCHOR}`,
     )
   }
 }
@@ -690,9 +837,9 @@ function compareBaseToolEnhanceRegistry(sharedText, registryText, sharedStoreSeg
  * 供 runtime/测试消费，镜像侧供 extension 写入），漂移即导出 md 落到树外错误位置
  * （随会话删除不回收、布局规约破坏）。
  */
-function compareSessionReaderView(sharedText, handlerText, sharedStoreSegment, sharedRegex) {
+function compareSessionReaderView(storeText, handlerText, sharedStoreSegment, sharedRegex) {
   const viewBlock = extractFunctionBlock(handlerText, SR_VIEW_FN_ANCHOR)
-  const sharedViewBlock = extractFunctionBlock(sharedText, `export function ${SHARED_VIEW_FN}`)
+  const sharedViewBlock = extractFunctionBlock(storeText, `export function ${SHARED_VIEW_FN}`)
   if (viewBlock.error) fail(`镜像 ${SR_VIEW_FN_ANCHOR} 提取失败: ${viewBlock.error}`)
   if (sharedViewBlock.error) fail(`shared ${SHARED_VIEW_FN} 提取失败: ${sharedViewBlock.error}`)
   exitIfFailed('域 6 session-view 公式对拍：函数块提取失败，按上方 ✗ 修复后重跑')
@@ -718,7 +865,7 @@ function compareSessionReaderView(sharedText, handlerText, sharedStoreSegment, s
   } else {
     fail(
       `域 6 存储树根段漂移: shared='${sharedStoreSegment}' vs 镜像='${extracted.srTreeSegment.value}'` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${STORE_SEGMENT_CONST} 与 ${SR_TOOL_HANDLER_SRC} 的 doExport 落盘段`,
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 的 ${STORE_SEGMENT_CONST} 与 ${SR_TOOL_HANDLER_SRC} 的 doExport 落盘段`,
     )
   }
   if (extracted.srFileSegment.value === extracted.sharedFileSegment.value) {
@@ -726,7 +873,7 @@ function compareSessionReaderView(sharedText, handlerText, sharedStoreSegment, s
   } else {
     fail(
       `域 6 导出文件段漂移: shared='${extracted.sharedFileSegment.value}' vs 镜像='${extracted.srFileSegment.value}'` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_VIEW_FN} 与 ${SR_TOOL_HANDLER_SRC} 的 doExport 落盘段`,
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 的 ${SHARED_VIEW_FN} 与 ${SR_TOOL_HANDLER_SRC} 的 doExport 落盘段`,
     )
   }
   if (extracted.srRegex.value === sharedRegex) {
@@ -744,8 +891,8 @@ function compareSessionReaderView(sharedText, handlerText, sharedStoreSegment, s
  * 分区名校验正则三字面量与 shared 逐字一致——session-reader 读侧与写侧（subagent-core
  * 经 shared 函数族落盘）两侧各有一份推导，漂移即 subagent 会话/记录发现为空。
  */
-function compareSessionReaderDiscovery(sharedText, rootsText, sharedStoreSegment, sharedRegex) {
-  const sharedSubagentsBlock = extractFunctionBlock(sharedText, `export function ${SHARED_SUBAGENTS_FN}`)
+function compareSessionReaderDiscovery(storeText, rootsText, sharedStoreSegment, sharedRegex) {
+  const sharedSubagentsBlock = extractFunctionBlock(storeText, `export function ${SHARED_SUBAGENTS_FN}`)
   if (sharedSubagentsBlock.error) fail(`shared ${SHARED_SUBAGENTS_FN} 提取失败: ${sharedSubagentsBlock.error}`)
   exitIfFailed('域 9 discovery 公式对拍：函数块提取失败，按上方 ✗ 修复后重跑')
 
@@ -791,30 +938,204 @@ function compareSessionReaderDiscovery(sharedText, rootsText, sharedStoreSegment
   }
 }
 
+/**
+ * ⑧ 归档域镜像字面量对拍（域 10）：session-reader 不 import shared，归档目录名 / 簿记
+ * 后缀 / 簿记 schema（status 词表 + summary.turns 成员名）/ D7 归档态返回正文四字面
+ * 都是 runtime/shared 侧的镜像字面量。目录名与后缀漂移时 session-reader 静默扫不到任何
+ * 簿记；schema 字段漂移时 extension 逐条拒收全部簿记（agent 对归档 session 的引用全部
+ * 退化为无匹配）——漂移均无任何红灯，故对拍扩为字段级（dmg-r1-9）。
+ */
+function compareArchiveMirror(sharedText, storeText, ledgerText, runtimePathsText, runtimePiPathsText, sharedSchemaText, rendererText) {
+  const treeSegments = extractConstStringArray(sharedText, SHARED_TREE_CONST)
+  const srDirname = extractConstLiteral(ledgerText, SR_ARCHIVE_DIRNAME_CONST)
+  const archiveFnBlock = extractFunctionBlock(runtimePiPathsText, `export function ${RUNTIME_ARCHIVE_DIR_FN}`)
+  if (treeSegments.error) fail(`shared ${SHARED_TREE_CONST} 提取失败: ${treeSegments.error}`)
+  if (srDirname.error) fail(`镜像 ${SR_ARCHIVE_DIRNAME_CONST} 提取失败: ${srDirname.error}`)
+  if (archiveFnBlock.error) fail(`${RUNTIME_ARCHIVE_DIR_FN} 函数块提取失败: ${archiveFnBlock.error}`)
+  exitIfFailed('域 10 归档镜像对拍：字面量提取失败，按上方 ✗ 修复后重跑')
+
+  const runtimeSegment = extractTreeRootSegment(archiveFnBlock.text)
+  if (runtimeSegment.error) fail(`runtime ${RUNTIME_ARCHIVE_DIR_FN} 树根段提取失败: ${runtimeSegment.error}`)
+  exitIfFailed('域 10 归档镜像对拍：runtime 归档根段提取失败')
+
+  if (treeSegments.value.includes(srDirname.value) && srDirname.value === runtimeSegment.value) {
+    ok(`域 10 归档目录名一致（'${srDirname.value}'，shared 树段 ↔ runtime ${RUNTIME_ARCHIVE_DIR_FN} ↔ 镜像 ${SR_ARCHIVE_DIRNAME_CONST}）`)
+  } else {
+    fail(
+      `域 10 归档目录名漂移: shared 树段=[${treeSegments.value.join(', ')}] vs runtime='${runtimeSegment.value}' vs 镜像='${srDirname.value}'` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_TREE_CONST}、${RUNTIME_PI_PATHS_SRC} 的 ${RUNTIME_ARCHIVE_DIR_FN}、${SESSION_READER_ARCHIVE_LEDGER_SRC} 的 ${SR_ARCHIVE_DIRNAME_CONST}`,
+    )
+  }
+
+  // 簿记后缀：extension 侧 endsWith('.archive.json') ↔ runtime archiveLedgerPath 的
+  // `${originalFile}.archive.json`（两端字面量形态不同，各按调用形态锚定）。
+  const srSuffix = ledgerText.match(/\.endsWith\('([^']*\.archive\.json)'\)/)
+  // 按函数块锚定（文件内另有 `${originalFile}.zst` 压缩体路径，裸全文匹配会取错）。
+  const ledgerPathBlock = extractFunctionBlock(runtimePathsText, 'export function archiveLedgerPath')
+  if (ledgerPathBlock.error) fail(`runtime archiveLedgerPath 提取失败: ${ledgerPathBlock.error}`)
+  exitIfFailed('域 10 归档镜像对拍：archiveLedgerPath 提取失败')
+  const runtimeSuffix = ledgerPathBlock.text.match(/\$\{originalFile\}(\.[A-Za-z0-9.]+)`/)
+  if (!srSuffix) fail(`镜像簿记后缀提取失败（${SESSION_READER_ARCHIVE_LEDGER_SRC} 的 endsWith 调用形态变更）`)
+  if (!runtimeSuffix) fail(`runtime 簿记后缀提取失败（${RUNTIME_ARCHIVE_PATHS_SRC} 的 archiveLedgerPath 形态变更）`)
+  if (srSuffix && runtimeSuffix) {
+    if (srSuffix[1] === runtimeSuffix[1]) {
+      ok(`域 10 簿记后缀一致（'${srSuffix[1]}'，runtime archiveLedgerPath ↔ 镜像扫描后缀）`)
+    } else {
+      fail(
+        `域 10 簿记后缀漂移: runtime='${runtimeSuffix[1]}' vs 镜像='${srSuffix[1]}'` +
+          `——恢复动作：人工核对 ${RUNTIME_ARCHIVE_PATHS_SRC} 的 archiveLedgerPath 与 ${SESSION_READER_ARCHIVE_LEDGER_SRC} 的扫描后缀`,
+      )
+    }
+  }
+
+  // 簿记 sessionId 同域正则：shared archive.ts（renderer barrel 出口，bundle 隔离镜像）
+  // ↔ shared paths.ts（isPiSessionId 权威实现）。镜像漂移 = 归档簿记解析侧与 pi 会话
+  // id 权威域对同一 sessionId 的收窄口径分裂——簿记侧放行的穿越形态 id 会流向 assets/
+  // 分区键与 purge 的 rmSync 破坏性原语（dmg-r2-1 防线）。
+  const ledgerSessionIdRegex = extractConstRegex(sharedSchemaText, SHARED_PATTERN_CONST)
+  if (ledgerSessionIdRegex.error) fail(`shared ${SHARED_ARCHIVE_SCHEMA_SRC} 的 ${SHARED_PATTERN_CONST} 提取失败: ${ledgerSessionIdRegex.error}`)
+  exitIfFailed('域 10 归档镜像对拍：簿记 sessionId 正则提取失败')
+  // 正则权威 = session-store-paths.ts（isPiSessionId 现居地，paths.ts 经转发暴露——
+  // C-ext-31 纯公式符号收敛后的物理位置，提取须跟随）。
+  const sessionIdRegex = extractConstRegex(storeText, SHARED_PATTERN_CONST)
+  if (sessionIdRegex.value === ledgerSessionIdRegex.value) {
+    ok(`域 10 簿记 sessionId 正则一致（${ledgerSessionIdRegex.value}，shared session-store-paths isPiSessionId ↔ shared archive parse 镜像）`)
+  } else {
+    fail(
+      `域 10 簿记 sessionId 正则漂移: shared paths='${sessionIdRegex.value}' vs shared archive='${ledgerSessionIdRegex.value}'` +
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${SHARED_ARCHIVE_SCHEMA_SRC} 的 ${SHARED_PATTERN_CONST}（bundle 隔离镜像逐字同步）`,
+    )
+  }
+
+  compareArchiveSchemaFields(sharedSchemaText, ledgerText)
+  compareD7LiteralMirror(ledgerText, rendererText)
+}
+
+/**
+ * ⑧b 域 10 字段级对拍（dmg-r1-9）：簿记 D3 schema 双解析器（shared parseArchiveLedger
+ * 两态完备校验 ↔ extension parseArchiveLedgerText 消费子集）的两条漂移轴——
+ * ① status 词表：shared ARCHIVE_LEDGER_STATUSES 元组 ↔ extension 守卫字面量（集合相等，
+ *   词表漂移 = extension 静默拒收整条簿记）；
+ * ② summary.turns 成员名：shared ArchiveSummaryTurn ↔ extension ArchiveLedgerTurn
+ *   interface 成员逐字比对 + 两端 parse 块实际消费同名成员（防只改接口不改解析器）。
+ */
+function compareArchiveSchemaFields(sharedSchemaText, ledgerText) {
+  const sharedStatuses = extractConstStringArray(sharedSchemaText, SHARED_ARCHIVE_STATUS_CONST)
+  const mirrorStatuses = extractMirrorStatusLiterals(ledgerText)
+  if (sharedStatuses.error) fail(`shared ${SHARED_ARCHIVE_STATUS_CONST} 提取失败: ${sharedStatuses.error}`)
+  if (mirrorStatuses.error) fail(`镜像 status 词表守卫提取失败: ${mirrorStatuses.error}`)
+  exitIfFailed('域 10 簿记 schema 字段级对拍：status 词表提取失败，按上方 ✗ 修复后重跑')
+
+  const sharedSet = [...sharedStatuses.value].sort().join(',')
+  const mirrorSet = [...mirrorStatuses.value].sort().join(',')
+  if (sharedSet === mirrorSet) {
+    ok(`域 10 status 词表一致（[${sharedStatuses.value.join(', ')}]，shared ${SHARED_ARCHIVE_STATUS_CONST} ↔ 镜像守卫字面量）`)
+  } else {
+    fail(
+      `域 10 status 词表漂移: shared=[${sharedStatuses.value.join(', ')}] vs 镜像=[${mirrorStatuses.value.join(', ')}]` +
+        `——恢复动作：人工核对 ${SHARED_ARCHIVE_SCHEMA_SRC} 的 ${SHARED_ARCHIVE_STATUS_CONST} 与 ${SESSION_READER_ARCHIVE_LEDGER_SRC} 的 parseArchiveLedgerText 守卫（词表漂移 = extension 逐条拒收全部簿记）`,
+    )
+  }
+
+  const sharedTurnBlock = extractFunctionBlock(sharedSchemaText, SHARED_TURN_INTERFACE)
+  const mirrorTurnBlock = extractFunctionBlock(ledgerText, MIRROR_TURN_INTERFACE)
+  if (sharedTurnBlock.error) fail(`shared ${SHARED_TURN_INTERFACE} 块提取失败: ${sharedTurnBlock.error}`)
+  if (mirrorTurnBlock.error) fail(`镜像 ${MIRROR_TURN_INTERFACE} 块提取失败: ${mirrorTurnBlock.error}`)
+  exitIfFailed('域 10 簿记 schema 字段级对拍：turn 接口块提取失败，按上方 ✗ 修复后重跑')
+
+  const sharedMembers = extractInterfaceMembers(sharedTurnBlock.text)
+  const mirrorMembers = extractInterfaceMembers(mirrorTurnBlock.text)
+  if (sharedMembers.error) fail(`shared turn 成员名提取失败: ${sharedMembers.error}`)
+  if (mirrorMembers.error) fail(`镜像 turn 成员名提取失败: ${mirrorMembers.error}`)
+  exitIfFailed('域 10 簿记 schema 字段级对拍：turn 成员名提取失败，按上方 ✗ 修复后重跑')
+
+  const sharedMemberList = sharedMembers.value.join(',')
+  const mirrorMemberList = mirrorMembers.value.join(',')
+  if (sharedMemberList !== mirrorMemberList) {
+    fail(
+      `域 10 summary.turns 成员名漂移: shared=[${sharedMemberList}] vs 镜像=[${mirrorMemberList}]` +
+        `——恢复动作：人工核对 ${SHARED_ARCHIVE_SCHEMA_SRC} 的 ArchiveSummaryTurn 与 ${SESSION_READER_ARCHIVE_LEDGER_SRC} 的 ArchiveLedgerTurn（成员漂移 = 摘要渲染字段错位）`,
+    )
+    return
+  }
+  // 两端 parse 块实际消费同名成员（接口改了名、解析器还读旧名 = 静默 undefined 字段）。
+  const sharedParseBlock = extractFunctionBlock(sharedSchemaText, 'function parseSummaryTurn')
+  const mirrorParseBlock = extractFunctionBlock(ledgerText, 'function parseSummary')
+  if (sharedParseBlock.error) fail(`shared parseSummaryTurn 块提取失败: ${sharedParseBlock.error}`)
+  if (mirrorParseBlock.error) fail(`镜像 parseSummary 块提取失败: ${mirrorParseBlock.error}`)
+  exitIfFailed('域 10 簿记 schema 字段级对拍：parse 块提取失败，按上方 ✗ 修复后重跑')
+  const unconsumed = sharedMembers.value.filter(
+    (name) => !sharedParseBlock.text.includes(`.${name}`) || !mirrorParseBlock.text.includes(`.${name}`),
+  )
+  if (unconsumed.length === 0) {
+    ok(`域 10 summary.turns 成员名一致（[${sharedMemberList}]，shared ArchiveSummaryTurn ↔ 镜像 ArchiveLedgerTurn，两端 parse 块消费同名校验通过）`)
+  } else {
+    fail(
+      `域 10 summary.turns 成员消费漂移: [${unconsumed.join(', ')}] 未在两端 parse 块同时按名消费` +
+        `——恢复动作：人工核对 ${SHARED_ARCHIVE_SCHEMA_SRC} 的 parseSummaryTurn 与 ${SESSION_READER_ARCHIVE_LEDGER_SRC} 的 parseSummary`,
+    )
+  }
+}
+
+/**
+ * ⑧c D7 归档态返回正文四字面镜像对拍（dmg-r1-9）：renderer 预检正文
+ * （agent-reference-format.ts）与 extension 真实返回正文（archive-ledger.ts）是同一
+ * D7 契约的两份实现，四字面漂移 = 用户预检与 agent 实见正文不一致且无红灯。
+ */
+function compareD7LiteralMirror(ledgerText, rendererText) {
+  const extracted = D7_LITERAL_CONSTS.map((name) => ({
+    name,
+    mirror: extractConstLiteral(ledgerText, name),
+    renderer: extractConstLiteral(rendererText, name),
+  }))
+  for (const { name, mirror, renderer } of extracted) {
+    if (mirror.error) fail(`extension D7 字面 ${name} 提取失败: ${mirror.error}`)
+    if (renderer.error) fail(`renderer D7 字面 ${name} 提取失败: ${renderer.error}`)
+  }
+  exitIfFailed('域 10 D7 四字面镜像对拍：字面量提取失败，按上方 ✗ 修复后重跑')
+
+  for (const { name, mirror, renderer } of extracted) {
+    if (mirror.value === renderer.value) {
+      ok(`域 10 D7 字面一致（${name}，renderer 预检 ↔ extension 返回正文逐字相同）`)
+    } else {
+      fail(
+        `域 10 D7 字面漂移（${name}）: renderer='${renderer.value}' vs extension='${mirror.value}'` +
+          `——恢复动作：人工核对 ${RENDERER_ARCHIVE_REFERENCE_SRC} 与 ${SESSION_READER_ARCHIVE_LEDGER_SRC} 的 ${name}（D7 字面契约两侧同步）`,
+      )
+    }
+  }
+}
+
 function main() {
-  const [sharedText, mirrorText, runtimeText, registryText, handlerText, rootsText] = readSourcesOrFail([
+  const [sharedText, storeText, mirrorText, runtimeText, registryText, handlerText, rootsText, ledgerText, runtimePathsText, sharedSchemaText, rendererText] = readSourcesOrFail([
     [SHARED_PATHS_SRC, 'shared paths 源文件'],
+    [SHARED_STORE_SRC, 'shared session-store-paths 源文件'],
     [SYSTEM_PROMPT_SRC, 'system-prompt 源文件'],
     [RUNTIME_PI_PATHS_SRC, 'runtime pi-paths 源文件'],
     [BTE_REGISTRY_SRC, 'base-tool-enhance registry 源文件'],
     [SR_TOOL_HANDLER_SRC, 'session-reader tool-handler 源文件'],
     [SR_DISCOVERY_ROOTS_SRC, 'session-reader discovery roots 源文件'],
+    [SESSION_READER_ARCHIVE_LEDGER_SRC, 'session-reader archive-ledger 源文件'],
+    [RUNTIME_ARCHIVE_PATHS_SRC, 'runtime archive-paths 源文件'],
+    [SHARED_ARCHIVE_SCHEMA_SRC, 'shared archive schema 源文件'],
+    [RENDERER_ARCHIVE_REFERENCE_SRC, 'renderer 归档预检正文源文件'],
   ])
 
   const { sharedBlock, mirrorBlock } = extractFormulaBlocksOrFail(sharedText, mirrorText)
-  const lits = extractFormulaLiteralsOrFail(sharedText, sharedBlock, mirrorBlock, mirrorText, runtimeText)
+  const lits = extractFormulaLiteralsOrFail(storeText, sharedBlock, mirrorBlock, mirrorText, runtimeText)
 
   compareSegmentLiteral(lits.sharedSegment.value, lits.mirrorSegment.value)
   compareStoreSegmentLiteral(lits.sharedStoreSegment.value, lits.mirrorStoreSegment.value)
   compareSessionIdRegexes(lits.sharedRegex.value, lits.mirrorRegex.value, lits.runtimeRegex.value)
   checkMirrorConstUsage(mirrorBlock)
   compareTreeSegments(sharedText, runtimeText, lits.sharedStoreSegment.value)
-  compareBaseToolEnhanceRegistry(sharedText, registryText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
-  compareSessionReaderView(sharedText, handlerText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
-  compareSessionReaderDiscovery(sharedText, rootsText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
+  compareBaseToolEnhanceRegistry(storeText, registryText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
+  compareSessionReaderView(storeText, handlerText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
+  compareSessionReaderDiscovery(storeText, rootsText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
+  compareArchiveMirror(sharedText, storeText, ledgerText, runtimePathsText, runtimeText, sharedSchemaText, rendererText)
 
   guardExit(
-    '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段 + 域 5 registry 镜像 + 域 6 session-view 镜像 + 域 9 discovery 镜像逐字一致）',
+    '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段 + 域 5 registry 镜像 + 域 6 session-view 镜像 + 域 9 discovery 镜像 + 域 10 归档镜像〔目录名/后缀/sessionId 正则/schema 字段级/D7 四字面〕逐字一致）',
     '产物目录公式对拍未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
   )
 }

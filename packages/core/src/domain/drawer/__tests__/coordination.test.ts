@@ -21,13 +21,13 @@ import {
   bindWorkflowOverlayOpener,
   bindWorkflowRunLookup,
   closeDrawer,
+  closeDrawerIfTabsEmpty,
   clearSubagentSelection,
   lookupWorkflowRun,
   openDrawerTab,
   openSubagent,
   selectBackgroundTask,
   openWorkflow,
-  openWorkflowInDrawer,
   setDrawerTab,
   toggleDrawer,
   _resetDrawerForTest,
@@ -37,7 +37,6 @@ import {
   detailFilePath,
   useBashTaskSelection,
   useSubagentSelection,
-  useWorkflowSelection,
 } from '../selection'
 
 /** 当前测试分区键（每用例新建绑定） */
@@ -134,6 +133,28 @@ describe('公开 API 薄封装（close/toggle/setTab）', () => {
   })
 })
 
+describe('二级 tab 关空收敛（closeDrawerIfTabsEmpty，规则单一落点）', () => {
+  it('empty=true 关当前分区抽屉；empty=false 不动开合', () => {
+    focusSession('A')
+    const { isOpen } = useDrawerControl()
+
+    openDrawerTab('detail')
+    expect(isOpen.value).toBe(true)
+
+    // 关闭动作后仍有剩余 → 不关抽屉
+    closeDrawerIfTabsEmpty(false)
+    expect(isOpen.value).toBe(true)
+
+    // 关闭动作后无剩余 → 整个抽屉关闭（不回空态停留）
+    closeDrawerIfTabsEmpty(true)
+    expect(isOpen.value).toBe(false)
+
+    // 抽屉已关时空参数 no-op（幂等，不自动打开）
+    closeDrawerIfTabsEmpty(false)
+    expect(isOpen.value).toBe(false)
+  })
+})
+
 describe('_resetDrawerForTest 测试隔离', () => {
   it('_resetDrawerForTest 清瞬时参数（测试隔离钩子）', () => {
     focusSession('A')
@@ -149,33 +170,29 @@ describe('_resetDrawerForTest 测试隔离', () => {
 })
 
 describe('subagent / bashTask 编排入口（选中态落内容域分区 + 切 tab 开 drawer 落控制态）', () => {
-  it('openSubagent = setSubagentView + 切 subagent tab + 开 drawer（D4 enteredFrom 透传）', () => {
+  it('openSubagent = setSubagentView + 切 subagent tab + 开 drawer（[2026-10-19] enteredFrom 已随 workflow tab 删除）', () => {
     focusSession('A')
     const { isOpen, activeTab } = useDrawerControl()
-    const { selectedSubagentId, enteredFrom } = useSubagentSelection()
+    const { selectedSubagentId } = useSubagentSelection()
 
-    openSubagent({ virtualId: 'subagent:A:s1', enteredFrom: 'workflow' })
+    openSubagent({ virtualId: 'subagent:A:s1' })
     expect(isOpen.value).toBe(true)
     expect(activeTab.value).toBe('subagent')
     expect(selectedSubagentId.value).toBe('subagent:A:s1')
-    expect(enteredFrom.value).toBe('workflow')
 
-    // chat 来源：同编排链，enteredFrom='chat'（SubagentTab 返回按钮显隐依据）
-    openSubagent({ virtualId: 'agentcall:acs-1', enteredFrom: 'chat' })
+    openSubagent({ virtualId: 'agentcall:acs-1' })
     expect(selectedSubagentId.value).toBe('agentcall:acs-1')
-    expect(enteredFrom.value).toBe('chat')
   })
 
   it('clearSubagentSelection 只清选中态、不动 drawer 开合与 activeTab', () => {
     focusSession('A')
     const { isOpen, activeTab } = useDrawerControl()
-    const { selectedSubagentId, enteredFrom } = useSubagentSelection()
-    openSubagent({ virtualId: 'subagent:A:s1', enteredFrom: 'chat' })
+    const { selectedSubagentId } = useSubagentSelection()
+    openSubagent({ virtualId: 'subagent:A:s1' })
 
     clearSubagentSelection()
 
     expect(selectedSubagentId.value).toBe(null)
-    expect(enteredFrom.value).toBe(null)
     expect(isOpen.value).toBe(true) // 不开合 drawer
     expect(activeTab.value).toBe('subagent') // 不切 tab
   })
@@ -220,36 +237,6 @@ describe('workflow 入口语义分立（workflow-visualization U6/D1）', () => 
     expect(() => openWorkflow('wf-run-1')).not.toThrow()
     // drawer 未被误开（改向后 openWorkflow 不再触达 drawerControl）
     expect(useDrawerControl().isOpen.value).toBe(false)
-  })
-
-  it('openWorkflowInDrawer = setWorkflowView 三步（切 workflow tab + 记录选中名 + 开 drawer）', () => {
-    focusSession('A')
-    const { isOpen, activeTab } = useDrawerControl()
-    const { selectedWorkflowName } = useWorkflowSelection()
-
-    // runId 形参（D10 回落链传 runId，精确命中）
-    openWorkflowInDrawer('wf-run-1')
-    expect(isOpen.value).toBe(true)
-    expect(activeTab.value).toBe('workflow')
-    expect(selectedWorkflowName.value).toBe('wf-run-1')
-
-    // 空串（SubagentTab 返回按钮）：仅切 tab，不记录选中名
-    openWorkflowInDrawer('')
-    expect(selectedWorkflowName.value).toBe('')
-    expect(activeTab.value).toBe('workflow')
-
-    // 缺省同空串
-    openWorkflowInDrawer()
-    expect(selectedWorkflowName.value).toBe('')
-  })
-
-  it('openWorkflowInDrawer 不经 overlay opener（两条通道类型/运行时双分立，回落不重入 overlay 入口）', () => {
-    focusSession('A')
-    const opener = vi.fn()
-    bindWorkflowOverlayOpener(opener)
-
-    openWorkflowInDrawer('wf-run-1')
-    expect(opener).not.toHaveBeenCalled()
   })
 
   it('lookupWorkflowRun 转发绑定 lookup；未绑定返回 undefined（安全默认）', () => {

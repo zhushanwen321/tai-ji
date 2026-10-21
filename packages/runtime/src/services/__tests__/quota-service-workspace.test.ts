@@ -20,7 +20,16 @@ import type { ProviderQuotaFetcher, QuotaFetcherConfig, QuotaFetchOutcome } from
 import type { IProviderCredentialResolver } from '../ports/provider-credential-resolver.js'
 import { QuotaService } from '../quota-service.js'
 import { TaijiProviderStore } from '../provider-extras-store.js'
-import { QUOTA_FETCHERS } from '../quota-providers/index.js'
+// W3 迁移：QUOTA_FETCHERS 可变注册表退役（基线 ⊕ 远程合并视图只读）——fake fetcher
+// 注入改走模块 mock（getQuotaFetcher 按注册表返回，测试用例动态 put/delete）
+import { getQuotaFetcher } from '../quota-providers/index.js'
+
+vi.mock('../quota-providers/index.js', () => ({
+  getQuotaFetcher: vi.fn((id: string) => fakeFetchers.get(id) ?? null),
+  listQuotaPresets: vi.fn(() => []),
+}))
+
+const fakeFetchers = new Map<string, ProviderQuotaFetcher>()
 
 vi.mock('../../infra/pi/pi-provider-store.js', () => ({
   getProviderConfig: vi.fn(() => undefined),
@@ -81,13 +90,13 @@ beforeEach(() => {
   mkdirSync(join(agentDir, 'config'), { recursive: true })
   process.env.TAIJI_AGENT_DATA_DIR = dir
   extrasStore = new TaijiProviderStore(join(agentDir, 'config', 'providers.json'))
-  QUOTA_FETCHERS.set(fakeFetcher.id, fakeFetcher)
+  fakeFetchers.set(fakeFetcher.id, fakeFetcher)
   lastConfig = undefined
   nextOutcome = { ok: false, reason: 'not_configured' }
 })
 
 afterEach(() => {
-  QUOTA_FETCHERS.delete(fakeFetcher.id)
+  fakeFetchers.delete(fakeFetcher.id)
   delete process.env.TAIJI_AGENT_DATA_DIR
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })

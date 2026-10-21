@@ -1,13 +1,13 @@
 /**
  * session-manager extension 的类型定义。
  *
- * 7 个 action 的请求 params 和结果类型，供 handler 和 extension 共用。
+ * 9 个 action 的请求 params 和结果类型，供 handler 和 extension 共用。
  * marker 检测后按 action 分发到对应 handler 分支。
  */
 import type { SESSION_MANAGER_ACTIONS } from './marker.js'
 import type { ChannelErrorResult } from '../../core/select-rpc.js'
 
-/** session-manager 支持的 7 个 action（从 SESSION_MANAGER_ACTIONS 集合派生，值与类型同源） */
+/** session-manager 支持的 9 个 action（从 SESSION_MANAGER_ACTIONS 集合派生，值与类型同源） */
 export type SessionManagerAction = (typeof SESSION_MANAGER_ACTIONS)[number]
 
 /** 各 action 的请求参数映射 */
@@ -18,6 +18,8 @@ export interface SessionManagerParams {
   status: SessionManagerStatusParams
   list: SessionManagerListParams
   abort: SessionManagerAbortParams
+  delete: SessionManagerDeleteParams
+  archive: SessionManagerArchiveParams
   watch: SessionManagerWatchParams
 }
 
@@ -64,6 +66,25 @@ export type SessionManagerListParams = Record<string, never>
 
 /** abort action 参数 */
 export interface SessionManagerAbortParams {
+  sessionId: string
+}
+
+/**
+ * delete action 参数（session-manager-archive-delete U2）：彻底删除目标会话
+ * （进程 + 历史 + 衍生数据整树废纸篓，不可恢复）。人身约束（USER-INITIATED ONLY）
+ * 承载在 extension 工具文案层，协议层只定契约。归属校验用扩展归属校验
+ * （含磁盘回退）在 runtime handler 侧执行。
+ */
+export interface SessionManagerDeleteParams {
+  sessionId: string
+}
+
+/**
+ * archive action 参数（session-manager-archive-delete U2）：归档目标会话——
+ * 退场进归档区、文件压缩搬移、可由用户恢复。生成中会话拒绝（错误码
+ * archive_generating 经 ChannelErrorResult.code 透传）。
+ */
+export interface SessionManagerArchiveParams {
   sessionId: string
 }
 
@@ -159,12 +180,20 @@ export function isSessionManagerHistoryParams(v: unknown): v is SessionManagerHi
   )
 }
 
-/** status / abort：sessionId 必填 */
+/** status / abort / delete / archive：sessionId 必填 */
 export function isSessionManagerStatusParams(v: unknown): v is SessionManagerStatusParams {
   return isSessionIdParams(v)
 }
 
 export function isSessionManagerAbortParams(v: unknown): v is SessionManagerAbortParams {
+  return isSessionIdParams(v)
+}
+
+export function isSessionManagerDeleteParams(v: unknown): v is SessionManagerDeleteParams {
+  return isSessionIdParams(v)
+}
+
+export function isSessionManagerArchiveParams(v: unknown): v is SessionManagerArchiveParams {
   return isSessionIdParams(v)
 }
 
@@ -253,6 +282,26 @@ export interface SessionManagerSessionSummary {
 /** abort 结果 */
 export interface SessionManagerAbortResult {
   success: boolean
+}
+
+/**
+ * delete 结果（session-manager-archive-delete U2）：字段名以设计 §3.1 交互样例为权威
+ * ——成功回包 `{sessionId, deleted:true}`。侧栏消失 + 整树废纸篓由 runtime delete 链
+ * 内建，协议回包只做完成陈述。
+ */
+export interface SessionManagerDeleteResult {
+  deleted: true
+  sessionId: string
+}
+
+/**
+ * archive 结果（session-manager-archive-delete U2）：字段名以设计 §3.1 交互样例为权威
+ * ——成功回包 `{sessionId, archived:true}`。归档成功后该会话全部通知债权由 runtime
+ * handler 三步收尾统一应答 'exited'（协议范围外，契约属 handler 编排）。
+ */
+export interface SessionManagerArchiveResult {
+  archived: true
+  sessionId: string
 }
 
 // ── watch respond 契约（notify-once D2/D3/D6） ──

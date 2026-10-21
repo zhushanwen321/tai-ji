@@ -1,9 +1,14 @@
 /**
- * Sidebar store —— tab 切换 + 折叠态（UC-3 / P2）。
+ * Sidebar store —— tab 切换 + 折叠态 + 展开宽度（UC-3 / P2）。
  *
  * 依赖方向：无（stores 间禁止互相 import）。
  * activeTab 不持久化：每次应用/页面加载默认锚定到「会话」（启动入口最常用）。
  * 用户会话内切换 tab 不记忆——桌面应用冷启动少，换默认入口的稳定预期优先于个性化恢复。
+ *
+ * 展开宽度（widthPx）：唯一写手 = SidebarResizeHandle（拖动 move 实时 setWidth +
+ * 拖动结束/键盘微调 persistWidth，拖动中不逐帧写 localStorage——对齐 useDrawerSplitWidth
+ * 的持久化时点）。clamp [200, 480]，localStorage 持久化；AsideRegion flexBasis 与
+ * Sidebar 内容列宽同源消费此单值。
  *
  * 折叠态 = 两个正交事实源的合成（任一为真即折叠）：
  * - userCollapsed：用户显式意图（点过收起钮 = true，点过展开钮 = false）。持久化
@@ -23,6 +28,20 @@ import { computed, ref, watch } from 'vue'
 /** 折叠态持久化 key（demo tj:sideCollapsed 同语义；real localStorage 前缀约定 = taiji:，同 useDrawerSplitWidth 的 taiji:drawer-width） */
 const SIDE_COLLAPSED_KEY = 'taiji:side-collapsed'
 
+/** 侧栏展开宽度持久化 key（前缀约定同上） */
+const SIDE_WIDTH_KEY = 'taiji:side-width'
+/** 侧栏默认宽度（px）：demo 权威值 252 + 30（2026-10-21 用户裁决：默认偏窄，放宽到 282；
+ *  用户可经 SidebarResizeHandle 拖动/键盘微调覆盖） */
+export const SIDE_WIDTH_DEFAULT_PX = 282
+/** 侧栏宽度下限（px）：再窄则 footer 三钮行与列表 truncate 挤压不可用 */
+export const SIDE_WIDTH_MIN_PX = 200
+/** 侧栏宽度上限（px）：常规窗口下不至于把 main 区压到半宽以下 */
+export const SIDE_WIDTH_MAX_PX = 480
+
+function clampSideWidth(v: number): number {
+  return Math.min(SIDE_WIDTH_MAX_PX, Math.max(SIDE_WIDTH_MIN_PX, v))
+}
+
 /** 读持久化用户意图：解析异常/缺失静默回落 false（隐私模式不崩，demo spec §3.8 同语义） */
 function loadCollapsed(): boolean {
   try {
@@ -39,6 +58,27 @@ function persistCollapsed(v: boolean): void {
   } catch (e) {
     // 隐私模式等写入失败：折叠态是 UI 偏好，丢持久化不损功能，warn 留痕即可
     console.warn('[sidebar] 写入折叠态持久化失败（本会话内折叠仍生效）', e)
+  }
+}
+
+/** 读持久化宽度：缺失/解析异常/越界回落（缺失 key 判 null 走默认——Number(null)=0 会被误 clamp 成下限） */
+function loadSideWidth(): number {
+  try {
+    const raw = localStorage.getItem(SIDE_WIDTH_KEY)
+    const n = raw === null ? NaN : Number(raw)
+    return Number.isFinite(n) ? clampSideWidth(n) : SIDE_WIDTH_DEFAULT_PX
+  } catch (e) {
+    console.warn('[sidebar] 读取宽度持久化失败，回落默认宽度', e)
+    return SIDE_WIDTH_DEFAULT_PX
+  }
+}
+
+function persistSideWidth(v: number): void {
+  try {
+    localStorage.setItem(SIDE_WIDTH_KEY, String(v))
+  } catch (e) {
+    // 隐私模式等写入失败：宽度是 UI 偏好，丢持久化不损功能，warn 留痕即可
+    console.warn('[sidebar] 写入宽度持久化失败（本会话内宽度仍生效）', e)
   }
 }
 
@@ -60,9 +100,21 @@ export const useSidebarStore = defineStore('sidebar', () => {
   const viewportNarrow = ref(false)
   /** 最终折叠态（只读派生）：用户意图收起 OR 视口强制收起。 */
   const collapsed = computed(() => userCollapsed.value || viewportNarrow.value)
+  /** 展开宽度（px）：唯一写手 = SidebarResizeHandle 的 setWidth。持久化时点归写手（拖动结束/键盘）。 */
+  const widthPx = ref(loadSideWidth())
 
   /** 用户意图持久化：watch 单点挂（toggleCollapsed 是 userCollapsed 唯一写入口） */
   watch(userCollapsed, persistCollapsed)
+
+  /** 宽度写入口（clamp 后写状态，不落盘——持久化由 persistWidth 在拖动结束/键盘微调时点调用） */
+  function setWidth(v: number): void {
+    widthPx.value = clampSideWidth(v)
+  }
+
+  /** 宽度持久化（SidebarResizeHandle 在拖动结束/键盘微调后调用） */
+  function persistWidth(): void {
+    persistSideWidth(widthPx.value)
+  }
 
   /** 用户意图切换（收起/展开按钮 + ⌘B）：对当前可见形态取反写意图位，不直接写最终 collapsed——
    *  窄窗强制收起态下点开 → 意图=展开（放宽后弹回）；点合 → 意图=收起（放宽后保持收起）。 */
@@ -70,5 +122,5 @@ export const useSidebarStore = defineStore('sidebar', () => {
     userCollapsed.value = !collapsed.value
   }
 
-  return { activeTab, userCollapsed, viewportNarrow, collapsed, toggleCollapsed }
+  return { activeTab, userCollapsed, viewportNarrow, collapsed, widthPx, setWidth, persistWidth, toggleCollapsed }
 })

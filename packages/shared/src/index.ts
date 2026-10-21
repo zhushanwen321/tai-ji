@@ -23,6 +23,9 @@ export type {
   SessionViewSnapshot,
   // plugin headerAction 帧载荷（plugin-header-action-modal-points AP-1）
   HeaderActionUpdatePayload,
+  // 插件 UI 快照（plugin.ui.snapshot 拉取 reply，ADR-0097 拉为主）——runtime store /
+  // renderer bridge 跨包具名消费
+  ViewSnapshotItem, PluginUiSnapshotPayload,
   WatchdogMemoryLevel, WatchdogMemoryPressurePayload,
   RollingRestartState, RollingRestartReason, RollingRestartInflightSummary,
   RollingRestartDeferredPayload, RollingRestartCountdownPayload, RollingRestartForcedPayload,
@@ -64,6 +67,9 @@ export type { SubagentSetModelKnownFailureReason } from './protocol'
 // hook 否决类分类码值常量（msg-pipeline-debloat D4-2 同族）：runtime 落码点 +
 // core useChat 判别点统一引用，跨包禁止手抄字面量。
 export { MESSAGE_BLOCKED_CODE } from './protocol'
+// worktree 默认基线哨兵 'auto'（C-comm-22）：renderer Settings 缺省值 + runtime
+// DefaultBaseResolver 判别点统一引用，跨包禁止手抄字面量。
+export { WORKTREE_AUTO_BASE_BRANCH } from './protocol'
 // 消息撤回（U5，设计 D7）：撤回草稿还原纯函数族（剥标记 / 整批两层切条）——
 // core useChat reply 消费侧跨包取用，同 allowlist 纪律。
 export { stripDeliveryMarkers, restoreRevokedDraft } from './revoke-restore'
@@ -92,6 +98,32 @@ export type { SegmentsMetadataFile, SegmentsMetadataEntry } from './message-meta
 export type {
   SessionStatus, SessionSummary, SessionGroup,
 } from './session'
+// session 归档域共享契约（session-archive 设计 §7 D3 簿记 schema + D5 RPC 消息，
+// 实施计划 u-foundation：ArchiveSummary / 簿记 schema 与解析校验 / 三 RPC payload /
+// 错误码词表——runtime ArchiveService、renderer 归档视图、session-reader 三端共同
+// import 防止裁量漂移；纯类型/常量/纯函数无 node 依赖，barrel 安全）。
+export type {
+  ArchiveLedgerStatus,
+  ArchiveSummaryTurn,
+  ArchiveConversationSummary,
+  ArchiveLedgerStaging,
+  ArchiveLedgerArchived,
+  ArchiveLedger,
+  ArchiveLedgerParseResult,
+  ArchiveSummary,
+  ArchiveErrorCode,
+  SessionArchiveRequest, SessionArchiveReply,
+  SessionUnarchiveRequest, SessionUnarchiveReply,
+  SessionPurgeArchiveRequest, SessionPurgeArchiveReply,
+  ConfigArchivesReply,
+} from './archive'
+export {
+  ARCHIVE_LEDGER_STATUSES,
+  ARCHIVE_LEDGER_STATUS_COVERAGE_LOCK,
+  ARCHIVE_ERROR_CODES,
+  ARCHIVE_ERROR_CODE_COVERAGE_LOCK,
+  parseArchiveLedger,
+} from './archive'
 export type {
   ProviderStatus, ProviderInfo, BuiltinProviderTemplate, BuiltinOAuthConfig, ModelInfo,
   SkillInfo, AgentInfo,
@@ -335,9 +367,9 @@ export type {
   QuotaCredentialSource,
   QuotaConfigurePayload,
 } from './quota-types'
-export { normalizeQuotaWorkspaceUrl, normalizeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential } from './quota-types'
+export { extractQuotaWorkspaceId, normalizeQuotaWorkspaceUrl, normalizeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential, formatQuotaPct, QUOTA_PCT_DECIMALS } from './quota-types'
 export type { QuotaPreset } from './quota-presets'
-export { QUOTA_PRESETS, matchQuotaPreset } from './quota-presets'
+export { QUOTA_PRESETS, isQuotaPreset, matchQuotaPreset, resolveQuotaPresets } from './quota-presets'
 // 语音合成朗读（TTS）契约类型（ai-voice-tts 设计 §7.1/§7.3；协议载荷形状 SSOT，纯类型无 node 依赖）
 export type {
   TtsProviderId,

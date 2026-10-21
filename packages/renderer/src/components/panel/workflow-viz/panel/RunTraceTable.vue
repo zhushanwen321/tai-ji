@@ -4,7 +4,8 @@
     taskIndex/agentName/phase/attempt/状态/起止/耗时/token/结果；workflow tab 与 phase tab
     共用，D9 派生状态在本表消费——「DAG 与 trace 逐行一致」S2 构造性一致的数据范围）。
     表格形态 = div 网格行列表（仓内表格先例；taste/no-native-html-elements 禁原生 table）。
-    行点击上抛 openAgent（pending / sessionId 缺失行 no-op——对齐 WorkflowTab 现状行为）。
+    行点击上抛 openAgent（pending / sessionId 缺失行 no-op——宿主 AgentStreamDrawer.openAgent
+    同款守卫）。
   -->
   <div class="min-w-0 flex-1 overflow-y-auto" data-testid="wf-viz-trace-table">
     <!-- 列头行 -->
@@ -187,7 +188,7 @@ function formatCallTokens(call: WorkflowAgentCall): string {
   return total > 0 ? formatTokens(total, 'tokens') : '—'
 }
 
-/** 行点击 → openAgent；pending / sessionId 缺失行 no-op（对齐 WorkflowTab 现状行为）。 */
+/** 行点击 → openAgent；pending / sessionId 缺失行 no-op（宿主 AgentStreamDrawer.openAgent 同款守卫）。 */
 function onRowClick(call: WorkflowAgentCall): void {
   if (call.status === 'pending' || !call.sessionId) return
   emit('openAgent', call)

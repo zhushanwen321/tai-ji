@@ -21,6 +21,7 @@ import type { IPluginServiceDeps } from '../plugin-types.js'
 import { SessionEventDispatch, ActiveSessionResolver } from '../api/session-api.js'
 import { EntryInvalidationDispatch } from '../plugin-entry-invalidation-dispatch.js'
 import { PluginStorage } from '../plugin-storage.js'
+import { PluginUiSnapshotStore } from '../plugin-ui-snapshot-store.js'
 
 /** Worker 侧出站帧（RpcRequest & { type: 'rpc' }）。 */
 interface OutboundRpcFrame {
@@ -109,6 +110,9 @@ function assemble(deps: IPluginServiceDeps): {
     mountPoints: [],
     deliverInvokeResult: vi.fn(),
     publishViewUpdate: vi.fn(),
+    // broadcastHeaderActionUpdate 出线先写快照再广播（ADR-0097）——缺此字段 handler 抛
+    // TypeError 走 error 回包，result 永为 undefined
+    uiSnapshotStore: new PluginUiSnapshotStore(),
   } as unknown as RpcSetupContext
   registerAllRpcMethods(ctx)
   return { server, frames, broadcastCalls }

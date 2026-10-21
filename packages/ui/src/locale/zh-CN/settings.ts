@@ -131,6 +131,7 @@ export default {
     styleSlug: 'Slug 词组（默认）',
     styleSentence: '完整短句',
     styleEmoji: 'Emoji 点缀',
+    styleTopic: '主题标签',
     styleCustom: '自定义…',
     exampleLabel: '标题示例',
     instructionLabel: '标题提示词（追加在对话末尾的用户指令）',
@@ -945,8 +946,8 @@ export default {
     timeoutHint: 'worktree 创建操作的超时时间',
     timeoutPlaceholder: '60',
     defaultBaseBranch: '默认基分支',
-    defaultBaseBranchHint: '创建 worktree 时的默认基础分支',
-    defaultBaseBranchPlaceholder: 'origin/main',
+    defaultBaseBranchHint: '创建 worktree 时的默认基线。auto = 按仓库远端实况推导；也可填具体分支（如 github/main）或 current',
+    defaultBaseBranchPlaceholder: 'auto',
     saved: 'Worktree 配置已保存',
     saveFailed: '保存失败：{reason}',
     // RD-4#7：前端范围/非空校验（命中即 inline error 不发 RPC，避免无谓往返 + 后端才炸）

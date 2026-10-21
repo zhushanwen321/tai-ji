@@ -43,6 +43,27 @@
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 
+// session 存储树公式本体在纯公式模块（零 env 读写）：本文件只保留 env 缺省形态
+// （dataDir? 缺省 getDataDir()）供 runtime/main 消费；pi 子树只允许 import
+// '@taiji/shared/session-store-paths'（dataDir 必传），见该模块头注释与 C-ext-31。
+import {
+  assertPiSessionId,
+  getSessionBackgroundTasksDir as pureGetSessionBackgroundTasksDir,
+  getSessionBtwDir as pureGetSessionBtwDir,
+  getSessionCanvasesDir as pureGetSessionCanvasesDir,
+  getSessionLogsDir as pureGetSessionLogsDir,
+  getSessionPluginDataPath as pureGetSessionPluginDataPath,
+  getSessionStoreDir as pureGetSessionStoreDir,
+  getSessionSubagentMessageDir as pureGetSessionSubagentMessageDir,
+  getSessionSubagentModelSwitchDir as pureGetSessionSubagentModelSwitchDir,
+  getSessionSubagentRecordsDir as pureGetSessionSubagentRecordsDir,
+  getSessionSubagentSessionsDir as pureGetSessionSubagentSessionsDir,
+  getSessionSubagentsDir as pureGetSessionSubagentsDir,
+  getSessionViewPath as pureGetSessionViewPath,
+  getSessionWorkflowDir as pureGetSessionWorkflowDir,
+  getSessionWorkflowRunsDir as pureGetSessionWorkflowRunsDir,
+} from './session-store-paths'
+
 /**
  * taiji 数据目录根名 SSOT（dev / prod 两形态）。
  *
@@ -89,8 +110,12 @@ export function isPathWithinTree(resolved: string, root: string, opts?: { casefo
  * 任何 runner / 任何代码路径第一个 getDataDir() 调用即拦截。
  *
  * 合法 prod 消费链（全部带 PACKAGED=1，不受影响）：runtime 由 process-control 成对注入
- * （C-proc-26 入口断言保证）；打包 main 进程在 packaged 分支自置位。pi 子树内的 taiji
- * 代码不 import 本模块（extension 包不依赖 @taiji/shared，import 即包边界越界）。
+ * （C-proc-26 入口断言保证）；打包 main 进程在 packaged 分支自置位。pi 子树（extension
+ * bundle / 引擎子进程）不消费本函数——session 存储树公式经 '@taiji/shared/
+ * session-store-paths' 纯函数族 + subagent-core resolveSessionStoreBase（env → 宿主
+ * dataRoot 通道），本模块的 env 缺省形态进 pi bundle 会被机器门禁拦截（C-ext-31，
+ * 2026-10-19 打包版 subagent 全灭事故：C-proc-09 剥 PACKAGED × 本检查组合在打包态
+ * pi 进程内必抛）。
  *
  * 判定纯词法（path.resolve 消解 ../ 后经 isPathWithinTree 判定 + sep 边界），不触磁盘。
  * 树内包含判定双侧 casefold：大小写不敏感卷（macOS/Windows 默认）上 `~/.TAIJI`
@@ -174,30 +199,24 @@ export function getPiSessionsDir(dataDir?: string): string {
   return join(dataDir ?? getDataDir(), 'agent', 'sessions')
 }
 
-/**
- * 编码 cwd 为 pi session 目录名（pi 布局 SSOT；runtime pi-paths.ts 同名函数已收敛为本实现）。
- *
- * 规则：'--' + cwd 去掉首斜杠 + 所有 / \\ : 替换为 - + '--'
- * 例：/Users/x/proj → --Users-x-proj--
- *     C:\\Users\\x\\proj → --C--Users-x-proj--（盘符冒号与反斜杠各替换为一个 -）
- *
- * 归并是有损的（目录名里的字面 `-` 与分隔符归并产物无法区分），因此**只保证正向单射**：
- * 已知 cwd 可唯一得目录名，反向解码有歧义——需要「目录名 → cwd」的场景必须走正向对拍
- * （候选 cwd 只能取自被验路径的结构性前缀，逐候选 encode 后与目录名比对，如 main 侧
- * local-file 白名单的会话项目 `.tmp/` 子树准入）。
- */
-export function encodeCwd(cwd: string): string {
-  return '--' + cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-') + '--'
-}
+// 纯公式符号转发（公式本体在 session-store-paths.ts）：保持既有 import 路径
+// （'@taiji/shared/paths'）的消费方零改动；pi 子树新消费请直接 import 纯模块。
+export {
+  encodeCwd,
+  isPiSessionId,
+  SESSION_STORE_DIR_SEGMENT,
+} from './session-store-paths'
 
 /**
- * 会话文件树段全集（pi 宿主三棵树段 + taiji session 存储树根段）。
+ * 会话文件树段全集（pi 宿主四棵树段 + taiji session 存储树根段）。
  *
- * 前三位是 pi 宿主树段（`<piAgentDir>/sessions|subagents|btw`，布局权威 = runtime
- * pi-paths.ts 的 getSessionsDir / getSubagentSessionDir / getBtwSessionsRoot，对拍
- * 机检逐位核对，改树名时同批更新）：
+ * 除末位外是 pi 宿主树段（`<piAgentDir>/sessions|subagents|btw|archive`，布局权威 =
+ * runtime pi-paths.ts 的 getSessionsDir / getSubagentSessionDir / getBtwSessionsRoot /
+ * getArchiveDir，前三位对拍由机检逐位核对，改树名时同批更新）：
  *   sessions = 主会话树 / subagents = 子代理会话树（`<agentDir>/subagents/<encodeCwd>/sessions/`）
- *   / btw = btw 线会话树（`<agentDir>/btw/<encodeCwd>/<mainSid>/`）。
+ *   / btw = btw 线会话树（`<agentDir>/btw/<encodeCwd>/<mainSid>/`）
+ *   / archive = 归档根（session-archive D1——镜像 sessions 布局的压缩归档单元，
+ *   staging 期含明文 .jsonl，消费方 isInsideSessionTrees 据此放行导出）。
  *
  * [session-store-layout-inversion] 终态口径：subagents / btw 两段现指旧布局残余读取面
  * （存量静置；新写入走 getSessionSubagentsDir / getSessionBtwDir 存储树函数族，见
@@ -207,14 +226,14 @@ export function encodeCwd(cwd: string): string {
  * piAgentDir），与 getSessionStoreDir / SESSION_STORE_DIR_SEGMENT 同源，对拍机检核对
  * 两者字面量一致。**消费注意**：本数组混两种基址，逐段 join(piAgentDir, segment) 的
  * 消费方（如 main 侧 isInsideSessionTrees）对末位段会 join 出不存在的基址——按
- * 「pi 宿主树段」语义消费前三位；需要存储树根时用 getSessionStoreDir 推导。
+ * 「pi 宿主树段」语义消费除末位外各段；需要存储树根时用 getSessionStoreDir 推导。
  *
  * main 进程不能 import runtime（包边界），树内包含判定（如会话 JSONL 导出的路径安全
  * 校验）等跨进程消费经本 SSOT 推导，禁止各进程自带树段字面量——与 getPiSessionsDir
  * 同款收敛（曾因手拼层级致跨进程判据漂移），runtime 改树名时唯一改点在本常量 +
  * 权威源两处，消费方零改。
  */
-export const PI_SESSION_TREE_SEGMENTS = ['sessions', 'subagents', 'btw', 'ext-sessions'] as const
+export const PI_SESSION_TREE_SEGMENTS = ['sessions', 'subagents', 'btw', 'archive', 'ext-sessions'] as const
 
 // ── session 存储树（`<dataDir>/ext-sessions/`）────────────────────────────────
 //
@@ -231,50 +250,16 @@ export const PI_SESSION_TREE_SEGMENTS = ['sessions', 'subagents', 'btw', 'ext-se
 //     subagents/{sessions/, records/, model-switch/}
 //     workflow/runs/<runId>.record.jsonl
 //
-// 新域接入规约（两步）：① 树内新增 domain 目录；② 本文件新增一个具名推导函数
-// （join(getSessionStoreDir(dataDir), sessionId, '<domain>')）——删除随整树回收
-// 自动覆盖，无需登记任何删除链清单。
+// 新域接入规约（两步）：① 树内新增 domain 目录；② session-store-paths.ts 新增一个
+// 具名纯推导函数（join(getSessionStoreDir(dataDir), sessionId, '<domain>')）+ 本文件
+// env 缺省包装——删除随整树回收自动覆盖，无需登记任何删除链清单。
+//
+// 公式本体（纯、dataDir 必传）在 './session-store-paths'；本节以下各函数是 env 缺省
+// 形态包装（dataDir? 缺省 getDataDir()），仅 runtime/main 进程合法消费（pi 子树消费
+// 纯模块，见 './session-store-paths' 头注释与 C-ext-31）。
 //
 // pi 宿主树（agent/sessions 等，会话 jsonl 本体与紧贴 sidecar）不在本树内——
 // 见 PI_SESSION_TREE_SEGMENTS 与设计豁免清单。
-
-/** session 存储树根段名（`<dataDir>/<本段>/`）。 */
-export const SESSION_STORE_DIR_SEGMENT = 'ext-sessions'
-
-/**
- * pi 会话 id 同域校验正则（镜像 runtime pi-paths.ts 的 `PI_SESSION_ID_PATTERN` /
- * isPiSessionId：首尾字母数字，中间允许 `[A-Za-z0-9._-]`；真 sid 永不含 `:`，
- * btw 虚拟 id `btw:<sid>` 含冒号必拒）。shared 不 import runtime（包边界），
- * 字面量一致性由 scripts/check-artifact-dir-formula-sync.mjs 三方对拍守护。
- */
-const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
-
-/**
- * pi 会话 id 同域校验（布尔判定，不 throw）。
- *
- * 与 assertPiSessionId 共用同一正则（本文件是跨进程唯一权威实现）：main 进程树内
- * 遍历点（image-cache 孤儿扫描 / local-file 读通道产物前缀枚举）不能 import runtime
- * 的 isPiSessionId（包边界），经本 SSOT 消费；runtime pi-paths.ts 同名函数为 pi 宿主
- * 侧权威源，字面量一致性由 scripts/check-artifact-dir-formula-sync.mjs 三方对拍守护。
- */
-export function isPiSessionId(sessionId: string): boolean {
-  return PI_SESSION_ID_PATTERN.test(sessionId)
-}
-
-/**
- * sessionId 入参同域校验（session 存储树全部推导函数的路径穿越防线）。
- *
- * 目录名即 sessionId，非法 id（含 `/` `\` `..` 空格冒号等）会在 join 后逃逸出
- * `<root>/<sessionId>/` 分区写到任意位置——统一在此 throw（fail-fast），各推导函数
- * 不再各自内联正则。
- *
- * @throws Error 当 sessionId 为空串、含路径分隔符/冒号或首尾非字母数字
- */
-function assertPiSessionId(sessionId: string): void {
-  if (!isPiSessionId(sessionId)) {
-    throw new Error(`invalid sessionId (path traversal blocked): ${sessionId}`)
-  }
-}
 
 /**
  * session 存储树根目录（`<dataDir>/ext-sessions/`）。
@@ -282,149 +267,122 @@ function assertPiSessionId(sessionId: string): void {
  * 全部 session 维度衍生数据的统一落点（布局、新域接入规约见文件头「session 存储
  * 树」节注释）；与 pi 宿主树（`<dataDir>/agent/`）层级分离、语义可区分。
  *
- * @param dataDir 可选数据根目录（测试注入）；缺省读 getDataDir()
+ * @param dataDir 可选数据根目录（runtime/main 缺省读 getDataDir()；pi 子树禁止
+ *   走本形态——import '@taiji/shared/session-store-paths' 并显式传 base）
  */
 export function getSessionStoreDir(dataDir?: string): string {
-  return join(dataDir ?? getDataDir(), SESSION_STORE_DIR_SEGMENT)
+  return pureGetSessionStoreDir(dataDir ?? getDataDir())
 }
 
 /**
  * 插件 KV 文件（`<root>/<sessionId>/plugin-data.json`，域 4）。
  *
- * 插件 per-session KV 的持久化落点（原旧布局 `<dataDir>/session-data/<sid>.json`）。
- *
  * @param sessionId 会话 id（同域校验，非法 throw）
- * @param dataDir   可选数据根目录（测试注入）；缺省读 getDataDir()
+ * @param dataDir   可选数据根目录（缺省读 getDataDir()，仅 runtime/main 合法）
  */
 export function getSessionPluginDataPath(sessionId: string, dataDir?: string): string {
-  assertPiSessionId(sessionId)
-  return join(getSessionStoreDir(dataDir), sessionId, 'plugin-data.json')
+  return pureGetSessionPluginDataPath(sessionId, dataDir ?? getDataDir())
 }
 
 /**
  * 画布目录（`<root>/<sessionId>/canvases/`，域 8，画布 id 1:N 子分区）。
  *
- * 每张画布落 `<root>/<sessionId>/canvases/<canvasId>/`（events.jsonl + canvas.json +
- * exports/）；画布归属创建它的 session，跨会话访问按归属拒绝。
- *
  * @param sessionId 会话 id（同域校验，非法 throw）
- * @param dataDir   可选数据根目录（测试注入）；缺省读 getDataDir()
+ * @param dataDir   可选数据根目录（缺省读 getDataDir()，仅 runtime/main 合法）
  */
 export function getSessionCanvasesDir(sessionId: string, dataDir?: string): string {
-  assertPiSessionId(sessionId)
-  return join(getSessionStoreDir(dataDir), sessionId, 'canvases')
+  return pureGetSessionCanvasesDir(sessionId, dataDir ?? getDataDir())
 }
 
 /**
  * 后台任务登记目录（`<root>/<sessionId>/background-tasks/`，域 5）。
  *
- * base-tool-enhance 后台任务的 registry.json 与任务日志落点（原旧布局
- * `<dataDir>/base-tool-enhance/<sid>/`；extension 侧公式镜像与 shared 的一致性由
- * 对拍机检守护，镜像换根归 u-ext-tasks-views）。
+ * base-tool-enhance 后台任务的 registry.json 与任务日志落点；extension 侧公式镜像
+ * 与 shared 的一致性由对拍机检守护，镜像换根归 u-ext-tasks-views。
  *
  * @param sessionId 会话 id（同域校验，非法 throw）
- * @param dataDir   可选数据根目录（测试注入）；缺省读 getDataDir()
+ * @param dataDir   可选数据根目录（缺省读 getDataDir()，仅 runtime/main 合法）
  */
 export function getSessionBackgroundTasksDir(sessionId: string, dataDir?: string): string {
-  assertPiSessionId(sessionId)
-  return join(getSessionStoreDir(dataDir), sessionId, 'background-tasks')
+  return pureGetSessionBackgroundTasksDir(sessionId, dataDir ?? getDataDir())
 }
 
 /**
  * 会话导出文件（`<root>/<sessionId>/session-view.md`，域 6）。
  *
- * session-reader 导出 md 的落点（原旧布局 `<dataDir>/agent/tmp/session-view-<sid>.md`）。
- *
  * @param sessionId 会话 id（同域校验，非法 throw）
- * @param dataDir   可选数据根目录（测试注入）；缺省读 getDataDir()
+ * @param dataDir   可选数据根目录（缺省读 getDataDir()，仅 runtime/main 合法）
  */
 export function getSessionViewPath(sessionId: string, dataDir?: string): string {
-  assertPiSessionId(sessionId)
-  return join(getSessionStoreDir(dataDir), sessionId, 'session-view.md')
+  return pureGetSessionViewPath(sessionId, dataDir ?? getDataDir())
 }
 
 /**
  * btw 线会话目录（`<root>/<mainSid>/btw/`，域 7）。
  *
- * 主会话 mainSid 分区（分区键即入参 sessionId，无 encodeCwd 层）；线 jsonl 与
- * .meta.json sidecar 由 pi 写入，文件名保持 pi 命名约定（`<ts>_<线sid>.jsonl`）。
- * 线树随主会话删除整树回收。
- *
  * @param sessionId 主会话 id（同域校验，非法 throw）
- * @param dataDir   可选数据根目录（测试注入）；缺省读 getDataDir()
+ * @param dataDir   可选数据根目录（缺省读 getDataDir()，仅 runtime/main 合法）
  */
 export function getSessionBtwDir(sessionId: string, dataDir?: string): string {
-  assertPiSessionId(sessionId)
-  return join(getSessionStoreDir(dataDir), sessionId, 'btw')
+  return pureGetSessionBtwDir(sessionId, dataDir ?? getDataDir())
 }
 
 /**
  * 会话日志目录（`<root>/<sessionId>/logs/`，域 11）。
  *
- * 带 sessionId 的日志（pi stdout tee `pi-<date>.jsonl(.N.gz)` / crash
- * `pi-crash-<date>.log` / signal-forensics-<date>.jsonl）落点；文件名不再内嵌 sid
- * （sid 已在路径）。全局日志（无 sessionId）仍在 `<dataDir>/logs/`，不入树。
+ * 带 sessionId 的日志（pi stdout tee / crash / signal-forensics）落点；全局日志
+ * （无 sessionId）仍在 `<dataDir>/logs/`，不入树。
  *
  * @param sessionId 会话 id（同域校验，非法 throw）
- * @param dataDir   可选数据根目录（测试注入）；缺省读 getDataDir()
+ * @param dataDir   可选数据根目录（缺省读 getDataDir()，仅 runtime/main 合法）
  */
 export function getSessionLogsDir(sessionId: string, dataDir?: string): string {
-  assertPiSessionId(sessionId)
-  return join(getSessionStoreDir(dataDir), sessionId, 'logs')
+  return pureGetSessionLogsDir(sessionId, dataDir ?? getDataDir())
 }
 
 /**
  * subagent 记录目录（`<root>/<sessionId>/subagents/`，域 9）。
  *
- * 分区键 = rootSessionId（record 字段是既有关联权威）；子结构
- * sessions/（子代理会话 jsonl）· records/（ExecutionRecord）· model-switch/（模型
- * 切换交接信箱）见三个具名子函数。
- *
  * @param sessionId 根会话 id（同域校验，非法 throw）
- * @param dataDir   可选数据根目录（测试注入）；缺省读 getDataDir()
+ * @param dataDir   可选数据根目录（缺省读 getDataDir()，仅 runtime/main 合法）
  */
 export function getSessionSubagentsDir(sessionId: string, dataDir?: string): string {
-  assertPiSessionId(sessionId)
-  return join(getSessionStoreDir(dataDir), sessionId, 'subagents')
+  return pureGetSessionSubagentsDir(sessionId, dataDir ?? getDataDir())
 }
 
 /** 子代理会话 jsonl 目录（`<root>/<sessionId>/subagents/sessions/`）。 */
 export function getSessionSubagentSessionsDir(sessionId: string, dataDir?: string): string {
-  return join(getSessionSubagentsDir(sessionId, dataDir), 'sessions')
+  return pureGetSessionSubagentSessionsDir(sessionId, dataDir ?? getDataDir())
 }
 
 /** ExecutionRecord 目录（`<root>/<sessionId>/subagents/records/`）。 */
 export function getSessionSubagentRecordsDir(sessionId: string, dataDir?: string): string {
-  return join(getSessionSubagentsDir(sessionId, dataDir), 'records')
+  return pureGetSessionSubagentRecordsDir(sessionId, dataDir ?? getDataDir())
 }
 
 /** 模型切换交接信箱目录（`<root>/<sessionId>/subagents/model-switch/`）。 */
 export function getSessionSubagentModelSwitchDir(sessionId: string, dataDir?: string): string {
-  return join(getSessionSubagentsDir(sessionId, dataDir), 'model-switch')
+  return pureGetSessionSubagentModelSwitchDir(sessionId, dataDir ?? getDataDir())
 }
 
 /** 定向消息请求结果信箱目录（`<root>/<sessionId>/subagents/message/`，写后读、读后即删）。 */
 export function getSessionSubagentMessageDir(sessionId: string, dataDir?: string): string {
-  return join(getSessionSubagentsDir(sessionId, dataDir), 'message')
+  return pureGetSessionSubagentMessageDir(sessionId, dataDir ?? getDataDir())
 }
 
 /**
  * workflow 运行状态目录（`<root>/<sessionId>/workflow/`，域 10）。
  *
- * run 状态记录落 `<root>/<sessionId>/workflow/runs/<runId>.record.jsonl`；分区键 =
- * rootSessionId（run 创建记录字段）。
- *
  * @param sessionId 根会话 id（同域校验，非法 throw）
- * @param dataDir   可选数据根目录（测试注入）；缺省读 getDataDir()
+ * @param dataDir   可选数据根目录（缺省读 getDataDir()，仅 runtime/main 合法）
  */
 export function getSessionWorkflowDir(sessionId: string, dataDir?: string): string {
-  assertPiSessionId(sessionId)
-  return join(getSessionStoreDir(dataDir), sessionId, 'workflow')
+  return pureGetSessionWorkflowDir(sessionId, dataDir ?? getDataDir())
 }
 
 /** workflow run 状态记录目录（`<root>/<sessionId>/workflow/runs/`）。 */
 export function getSessionWorkflowRunsDir(sessionId: string, dataDir?: string): string {
-  return join(getSessionWorkflowDir(sessionId, dataDir), 'runs')
+  return pureGetSessionWorkflowRunsDir(sessionId, dataDir ?? getDataDir())
 }
 
 /**

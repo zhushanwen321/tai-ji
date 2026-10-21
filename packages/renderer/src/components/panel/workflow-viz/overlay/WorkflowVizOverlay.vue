@@ -34,8 +34,8 @@
 
   D10 回落：本壳**不内置** Guard——Guard（WorkflowVizOverlayGuard）由挂载方包在
   壳外（errorCaptured 只捕获后代错误，壳自身 render 帧的错误只有父层能捕）；
-  壳经 emits 暴露回落链所需语义（close / select / retry-dag），回落 drawer 的
-  openDrawerTab + openWorkflowInDrawer 接线归 U6。
+  壳经 emits 暴露回落链所需语义（close / select / retry-dag），fallback 动作序列
+  （关 overlay；重开即重试，Guard :key 重挂复位）的接线归 U6（WorkflowVizOverlayHost）。
 
   数据边界（u4 与 u5 的派生单处分工）：节点六态映射（nodeStates）与已用时长
   （elapsedMs，含 D9 中断停走口径）为已派生输入——单点实现在 renderer 侧
@@ -105,6 +105,34 @@
           class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-mid"
           data-testid="wfvz-overlay-elapsed"
         >{{ formatDuration(elapsedMs) }}</span>
+        <!-- run 级执行模型全切入口（demo 裁决归宿 = 标题栏 runs 态，与 run 元素同进退：
+             scheduler/canvas 态 run 元素让位时入口随之消失；run 为 null（数据未就绪）不渲染。
+             展示态/切换动作由宿主注入与承接（壳纯展示分工）。 -->
+        <ModelSelectPopover
+          v-if="run !== null && modelDisplay !== undefined"
+          :selected="modelDisplay.label ?? ''"
+          :switching="modelSwitching"
+          @select="(payload) => emit('select-model', payload)"
+        >
+          <template #trigger>
+            <PopoverTrigger as-child>
+              <Button
+                variant="ghost"
+                class="flex shrink-0 items-center gap-1 rounded-sm px-1 font-mono text-[length:var(--text-3xs)] text-neutral-dim transition-colors hover:text-neutral-fg"
+                :title="t('panel.modelSelect.switchModel')"
+                data-testid="wfvz-overlay-model-trigger"
+              >
+                <span v-if="modelDisplay.label" class="max-w-[140px] truncate">{{ modelDisplay.label }}</span>
+                <span
+                  v-if="modelDisplay.overridden"
+                  class="shrink-0 rounded-sm border border-[color-mix(in_oklch,var(--accent)_40%,transparent)] px-1 text-[length:var(--text-3xs)] text-accent"
+                  data-testid="wfvz-overlay-model-override-badge"
+                >{{ t('panel.sideDrawer.subagentOverrideBadge') }}</span>
+                <ChevronDown class="size-3 shrink-0 opacity-60" />
+              </Button>
+            </PopoverTrigger>
+          </template>
+        </ModelSelectPopover>
       </template>
     </template>
 
@@ -238,7 +266,7 @@
             >
               {{ t('panel.workflowViz.dagRetryParse') }}
             </Button>
-            <!-- 降级列表：按 phase 分组的调用点只读形态（等价 WorkflowTab 内容的最小形态） -->
+            <!-- 降级列表：按 phase 分组的调用点只读形态 -->
             <div
               v-for="group in fallbackGroups"
               :key="group.phase"
@@ -303,9 +331,11 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Clock, Network, Workflow } from '@lucide/vue'
-import { WORKFLOW_RUN_OUTCOME_LABELS, type WorkflowAgentCall, type WorkflowDag, type WorkflowRunRecord } from '@taiji/shared'
+import { ChevronDown, Clock, Network, Workflow } from '@lucide/vue'
+import { WORKFLOW_RUN_OUTCOME_LABELS, type ProviderId, type WorkflowAgentCall, type WorkflowDag, type WorkflowRunRecord } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
+import { PopoverTrigger } from '@/components/ui/popover'
+import ModelSelectPopover from '@/components/panel/ModelSelectPopover.vue'
 import { ViewHost } from '@taiji/ui/extension-host'
 import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import { useOverlayControl } from '@taiji/core/domain/overlay'
@@ -352,6 +382,13 @@ const props = withDefaults(
      * 缺省不渲染时长槽，本壳不做计时派生）。
      */
     elapsedMs?: number
+    /**
+     * run 级执行模型展示态（[2026-10-19] 标题栏全切入口，宿主派生注入——四分支合成
+     * 单处在宿主，本壳纯展示；undefined = 不渲染入口）。
+     */
+    modelDisplay?: { label?: string; overridden: boolean }
+    /** 模型切换中（宿主持有——触发器转圈 + 禁开合，回执写状态禁乐观写）。 */
+    modelSwitching?: boolean
   }>(),
   { tab: 'runs', schedulerSessionId: undefined },
 )
@@ -365,6 +402,8 @@ const emit = defineEmits<{
   'retry-dag': []
   /** 一级 tab 切换上抛（受控模式：tab SSOT 在控制器，Host 写回 setOverlayTab）。 */
   'update:tab': [tab: OverlayTab]
+  /** run 级执行模型全切上抛（标题栏入口；切换动作/回执/switching 门在宿主）。 */
+  'select-model': [payload: { modelId: string; provider: ProviderId }]
 }>()
 
 const { t } = useI18n()
@@ -485,7 +524,7 @@ const fallbackGroups = computed<FallbackGroup[]>(() => {
   return [...groups.entries()].map(([phase, calls]) => ({ phase, calls }))
 })
 
-/** 存在显式 phase 才显示分组 header（WorkflowTab 同款判据：线性脚本无 phase 不分组）。 */
+/** 存在显式 phase 才显示分组 header（线性脚本无 phase 不分组）。 */
 const hasExplicitPhases = computed(() =>
   fallbackGroups.value.some((g) => g.phase !== ''),
 )
@@ -531,7 +570,7 @@ const dagErrorLabel = computed(() => {
 
 // ── 展示工具 ──
 
-/** ms → 耗时（WorkflowTab 口径：无小时档；换算单点在 lib/duration-format）。 */
+/** ms → 耗时（无小时档口径；换算单点在 lib/duration-format）。 */
 function formatDuration(ms: number): string {
   return formatCompactDuration(Math.floor(ms / MS_PER_SECOND), { hours: false })
 }

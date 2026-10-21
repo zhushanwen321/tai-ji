@@ -37,9 +37,9 @@
  * selectSession 亦经 switch）+ activate 时 sessions.list() 取 lastActiveAt 最大者
  * 兜底冷启动竞态（显式 list API，不用 getActive()——其语义是"正在生成的会话"）。
  *
- * 生命周期：订阅挂点 = 会话首次需要徽标/列表时（ensureMirror 唯一入口）；会话销毁
- * 由 onDidDestroySession 拆订阅清镜像；Worker 侧资源（timer/订阅）全部入 Disposable
- * 由 runtime 清理族兜底。
+ * 生命周期：订阅挂点 = 会话首次需要徽标/列表时（ensureMirror 唯一入口；didCreate /
+ * didActivate / 冷启动 list() 三来源汇聚于此）；会话销毁由 onDidDestroySession 拆订阅
+ * 清镜像；Worker 侧资源（timer/订阅）全部入 Disposable 由 runtime 清理族兜底。
  */
 import type { PluginContext } from '../../../packages/runtime/src/services/plugin-service/plugin-types.js'
 // 共享折叠器/格式化器导入形态：**相对路径直指包源码 barrel**，不用裸包名。
@@ -658,6 +658,15 @@ export async function activate(context: PluginContext): Promise<void> {
       // 进程就绪后的新证据（didActivate 在会话激活完成后投递），重置预算重新拉取自愈；
       // 新建镜像的首次拉取已由 ensureMirror 武装，此处不重复
       if (mirror.readFailure !== null) scheduleRefresh(api, session.id)
+    }),
+  )
+  // 新建会话补挂点（ADR-0097 拉为主改造配套）：session.create 不触发 didActivate
+  //（runtime handleSessionCreate 只 reply + 广播会话列表），无镜像则收不到 entry 失效
+  // 事件——新会话首轮 /schedule 创建任务后按钮与面板将不出现（漏显示），直到用户切走
+  // 再切回。didCreate 即建镜像，首拉推 hidden=true（新会话零任务）+ 失效订阅就位。
+  sink.push(
+    api.sessions.onDidCreateSession((session) => {
+      ensureMirror(api, session.id, sink)
     }),
   )
   sink.push(api.sessions.onDidDestroySession((session) => teardownMirror(session.id)))

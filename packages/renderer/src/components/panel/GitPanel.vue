@@ -53,11 +53,8 @@
 
     <!-- 文件列表（点击跳转 detail tab 查看 diff：selectFile 选中 + 注入 detail tab + drawer 切 detail）。
          行形态对齐 demo .frow：padding 6px 8px、路径 mono 2xs neutral-fg；行真实可点（跳 detail）
-         故保留 hover 反馈，hover 底用 demo hover 词汇 surface-hover。
-         顶缘 EdgeFade（spec §3.5 五个可滚动面板）：外层 div 承滚动（EdgeFade 须作滚动容器
-         首子元素），内层 ul 承列表语义——div 内嵌 ul 替代 ul 自滚，避免 div 直插 ul 的非法嵌套。 -->
+         故保留 hover 反馈，hover 底用 demo hover 词汇 surface-hover。 -->
     <div v-if="result.files.length" class="flex min-h-0 flex-1 flex-col overflow-y-auto" data-testid="git-file-scroll">
-      <EdgeFade />
       <ul class="flex flex-col gap-0.5">
       <li
         v-for="f in result.files"
@@ -145,7 +142,6 @@ import { useI18n } from 'vue-i18n'
 import { GitBranch, RefreshCw, Quote, CircleAlert } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { EdgeFade } from '@/components/ui/edge-fade'
 import { useGitStatusOrFail, type GitState } from '@/composables/features/file-tree/useGitStatus'
 import { useFileTreeStore } from '@/stores/fileTree'
 import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'

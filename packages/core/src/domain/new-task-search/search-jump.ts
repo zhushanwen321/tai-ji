@@ -44,6 +44,8 @@ export function useSearchJump(deps: SearchDeps) {
         return confirmFile(item, ctx)
       case 'session':
         return confirmSession(item)
+      case 'archive':
+        return confirmArchive(item)
       case 'symbol':
         // D-001 占位不跳转（不调任何 domain/store）
         return { ok: false, error: ports.t('search.symbolUnavailable') }
@@ -133,6 +135,24 @@ export function useSearchJump(deps: SearchDeps) {
     } catch (e) {
       // AC-6.6：session.switch reject → {ok:false,error}
       return { ok: false, error: (e as Error)?.message ?? ports.t('search.sessionSwitchFailed') }
+    }
+  }
+
+  /**
+   * 归档分支：选中归档项 → 主区摘要视图（openArchive 端口 = useArchiveView.openSummary，
+   * 与归档列表行点击同路径）。载荷缺失（recents 回填项只存 title/sub）→ {ok:false}
+   * archiveOpenFailed（浮层保持打开，用户可重新搜索带载荷的项）。
+   */
+  async function confirmArchive(item: SearchItem): Promise<JumpResult> {
+    if (!item.archive) {
+      return { ok: false, error: ports.t('search.archiveOpenFailed') }
+    }
+    try {
+      ports.archiveJump(item.archive)
+      writeRecent(item)
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: (e as Error)?.message ?? ports.t('search.archiveOpenFailed') }
     }
   }
 

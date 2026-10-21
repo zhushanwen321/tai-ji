@@ -15,7 +15,7 @@
  * ② D1（§6.2）单按钮置灰矩阵 + 字段级提示白名单（§7.4：'type' 结构性不进提示渲染）
  * ③ D3（§6.4）凭证来源分段控件：provider 项按 providerAvailable 置 disabled，切换写草稿
  * ④ §7.4 跨区块时序两套 provider 凭据文案（providerWarning 分档）
- * ⑤ D7（§6.8）去掩码：输入框只放草稿，不回填掩码；「已配置 / 必填」为独立标记
+ * ⑤ D7（§6.8）掩码哨兵：已保存密文显示 QUOTA_SECRET_MASK（聚焦全选，粘贴即覆盖）；「已配置 / 必填」为独立标记
  * ⑤b §7.4 徽标取值规则：徽标与字段级提示同源（readiness.missing），磁盘原始标记不能越权点亮
  * ⑤d §7 残留 11 专属 Key 适用性：exclusiveApplicable=false → 不渲染凭证来源控件
  * ⑤c 定向复审三条探针（真实 DOM 回归检查）
@@ -34,6 +34,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import type { NormalizedQuotaRow } from '@taiji/shared'
 import type { QuotaConfigureModule, QuotaFailureKind, QuotaTestStatus, ReadinessMissing } from '@taiji/core'
+import { QUOTA_SECRET_MASK } from '@taiji/core'
 import CodingPlanSection from '../coding-plan/CodingPlanSection.vue'
 import { QUOTA_CONFIGURE_MODULE_KEY } from '../injection-keys'
 import { makeQuotaModuleStub } from '@taiji/core/testing'
@@ -440,24 +441,22 @@ describe('④ §7.4 跨区块时序：provider 凭据不可用的两套文案', 
   })
 })
 
-// ══ ⑤ D7：去掩码（cookie / 专属 Key 不回填） ════════════════════════════════
+// ══ ⑤ D7：掩码哨兵（已保存密文显示 QUOTA_SECRET_MASK） ══════════════════════
 
-describe('⑤ D7 去掩码：输入框只放草稿，「已配置」是独立标记', () => {
-  it('cookie 已配置但草稿为空 → 输入框为空（不回填掩码），旁边标 quotaConfiguredBadge', async () => {
+describe('⑤ D7 掩码哨兵：已保存密文显示 QUOTA_SECRET_MASK，「已配置」是独立标记', () => {
+  it('cookie 已配置 → 输入框显示掩码哨兵（非空非密文），旁边标 quotaConfiguredBadge', async () => {
     quota.view.value.credential.form = 'cookie'
     quota.view.value.type.selected = 'mimo'
-    quota.draft.value.cookie = ''
+    quota.draft.value.cookie = QUOTA_SECRET_MASK
     wrapper = mountSection()
     await flushPromises()
 
     const input = wrapper.find<HTMLTextAreaElement>('[data-testid="quota-cookie-input"]')
-    expect(input.element.value).toBe('')
+    expect(input.element.value).toBe(QUOTA_SECRET_MASK)
     // 独立标记：「已配置」（不靠输入框内容表达）
     expect(wrapper.find('[data-testid="quota-cookie-block"]').text()).toContain(
       'settings.providerEdit.quotaConfiguredBadge',
     )
-    // 占位符是「在此粘贴 cookie 字符串」，不是掩码
-    expect(input.attributes('placeholder')).toBe('settings.providerEdit.quotaCookiePlaceholder')
   })
 
   it('cookie 未配置 → 标 quotaRequiredBadge（必填），与「已配置」互斥', async () => {
@@ -470,18 +469,56 @@ describe('⑤ D7 去掩码：输入框只放草稿，「已配置」是独立标
     expect(block).not.toContain('settings.providerEdit.quotaConfiguredBadge')
   })
 
-  it('专属 Key 已配置但草稿为空 → 输入框为空 + quotaApiKeySetPlaceholder（不回填密文）', async () => {
+  it('专属 Key 已配置 → 输入框显示掩码哨兵（非空非密文）', async () => {
     quota.draft.value.credentialSource = 'exclusive'
-    quota.draft.value.apiKey = ''
+    quota.draft.value.apiKey = QUOTA_SECRET_MASK
     wrapper = mountSection()
     await flushPromises()
 
     const input = wrapper.find<HTMLInputElement>('[data-testid="quota-apikey-input"]')
-    expect(input.element.value).toBe('')
-    expect(input.attributes('placeholder')).toBe('settings.providerEdit.quotaApiKeySetPlaceholder')
+    expect(input.element.value).toBe(QUOTA_SECRET_MASK)
     expect(wrapper.find('[data-testid="quota-exclusive-key-block"]').text()).toContain(
       'settings.providerEdit.quotaConfiguredBadge',
     )
+  })
+
+  it('专属 Key 掩码哨兵聚焦 → 全选（粘贴即覆盖）；真实输入聚焦不劫持选区', async () => {
+    quota.draft.value.credentialSource = 'exclusive'
+    quota.draft.value.apiKey = QUOTA_SECRET_MASK
+    wrapper = mountSection()
+    await flushPromises()
+
+    const input = wrapper.find<HTMLInputElement>('[data-testid="quota-apikey-input"]')
+    await input.trigger('focus')
+    expect(input.element.selectionStart).toBe(0)
+    expect(input.element.selectionEnd).toBe(QUOTA_SECRET_MASK.length)
+
+    quota.draft.value.apiKey = 'user-input'
+    await flushPromises()
+    // 先清选区再聚焦：断言 handler 未触发全选（若误触发，selectionEnd 会变成掩码长度）
+    input.element.setSelectionRange(0, 0)
+    await input.trigger('focus')
+    expect(input.element.selectionEnd).toBe(0)
+  })
+
+  it('掩码哨兵聚焦 → 全选（粘贴即覆盖）；真实输入聚焦不劫持选区', async () => {
+    quota.view.value.credential.form = 'cookie'
+    quota.view.value.type.selected = 'mimo'
+    quota.draft.value.cookie = QUOTA_SECRET_MASK
+    wrapper = mountSection()
+    await flushPromises()
+
+    const input = wrapper.find<HTMLTextAreaElement>('[data-testid="quota-cookie-input"]')
+    await input.trigger('focus')
+    expect(input.element.selectionStart).toBe(0)
+    expect(input.element.selectionEnd).toBe(QUOTA_SECRET_MASK.length)
+
+    quota.draft.value.cookie = 'user-input'
+    await flushPromises()
+    // 先清选区再聚焦：断言 handler 未触发全选（若误触发，selectionEnd 会变成掩码长度）
+    input.element.setSelectionRange(0, 0)
+    await input.trigger('focus')
+    expect(input.element.selectionEnd).toBe(0)
   })
 
   it('用户输入草稿 → 渲染的 value 即草稿原文（屏幕即真相）', async () => {
@@ -760,6 +797,28 @@ describe('B-3 额度显示双轨（used/limit + pct）', () => {
     const windows = wrapper.find('[data-testid="quota-result-windows"]')
     expect(windows.text()).toContain('55%')
     expect(windows.text()).not.toContain('quotaUsedOf')
+  })
+
+  it('pct 展示口径 = 2 位小数，与指标聚合页同一 SSOT（formatQuotaPct）', async () => {
+    // [HISTORICAL] 回归锚：本组件原用 `Math.round(win.pct)`（0 位小数），与 ContextCapacityCard
+    // 的原样插值不同口径——同一窗口在设置页显 3%、指标页显 2.9499999999999997%。
+    quota.test.value.status = 'success'
+    quota.test.value.row = {
+      label: 'OpenDesign Plan',
+      wins: [
+        { pct: 0.148, resetSec: 10680 },
+        { pct: 2.9499999999999997, resetSec: 10680 },
+        { pct: null, resetSec: null },
+      ],
+    }
+    wrapper = mountSection()
+    await flushPromises()
+
+    const text = wrapper.find('[data-testid="quota-result-windows"]').text()
+    expect(text).toContain('0.15%')
+    expect(text).toContain('2.95%')
+    // 浮点尾数不得泄漏到用户可见文本
+    expect(text).not.toContain('2.949999')
   })
 
   it('计费单位三分支：tokens / credits 渲染各自 i18n 标签', async () => {

@@ -462,6 +462,12 @@ export interface IConfigService {
   listProviders(): ProviderInfo[]
   /** 远程模型目录按需刷新（settings-provider 页进入时触发，fail-safe）。 */
   refreshProviderCatalogs(): Promise<CatalogRefreshResult>
+  /**
+   * taiji 远程配置拉取 + 两域同步（remote-config 域 1 provider 清单 + 域 2 quota-fetchers；
+   * 进设置页与启动延迟触发，checkedAt 4h 节流在 fetch 层内建）。
+   * 返回实际发生模型合并写盘的 provider 列表（空 = 失败/无变化/无同步对象）。
+   */
+  refreshRemoteProviders(): Promise<{ updatedProviders: string[] }>
   /** 列出内置 provider 模板（wave 2，import generated JSON，无参只读）。 */
   listBuiltinProviders(): BuiltinProviderTemplate[]
   /**
@@ -634,7 +640,7 @@ export interface IConfigService {
   getTimeout(): number
   /** 写入 worktree 创建超时时间到 config.json.worktreeTimeout。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
   setTimeout(timeout: number): SaveAppConfigResult
-  /** 读取默认基分支（config.json.defaultBaseBranch），默认 'origin/main'。 */
+  /** 读取默认基分支（config.json.defaultBaseBranch），默认 'auto'（按仓库远端实况动态推导）。 */
   getDefaultBaseBranch(): string
   /** 写入默认基分支到 config.json.defaultBaseBranch。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
   setDefaultBaseBranch(baseBranch: string): SaveAppConfigResult
@@ -831,6 +837,8 @@ export interface IPluginService {
   setPluginConfig(pluginId: string, key: string, value: unknown): Promise<void>
   /** 覆盖式写入挂载点集合（renderer 经 plugin.mountPoints.sync 上报，DM3 全量镜像） */
   syncMountPoints(mountPoints: string[]): void
+  /** 读插件 UI 快照（plugin.ui.snapshot：headerAction 状态 + 视图树最新值，ADR-0097 拉为主） */
+  getUiSnapshot(filter?: import('./services/plugin-service/plugin-ui-snapshot-store.js').UiSnapshotFilter): import('@taiji/shared').PluginUiSnapshotPayload
   // [B5 触发点收窄 2026-09-15] 原 clearSessionData(sessionId) 条目已删：实装 facade 零调用点
   // （真删除链经模块级 clearRemovedSessionData 分发，见 session-lifecycle.ts delete），
   // 且原签名 sync void 与实现 async 不符（陈旧契约，组 A 顺手修 low 项）。

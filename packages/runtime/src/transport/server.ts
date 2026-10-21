@@ -69,6 +69,11 @@ import type { HandoffService } from '../services/handoff-service.js'
 import type { ImportService } from '../services/session/import-service.js'
 // GenStatsService（composer-gen-stats u3）：session.getGenStats 恢复路径 RPC 路由依赖。
 import type { GenStatsService } from '../services/session/gen-stats-service.js'
+// ArchiveService（session-archive 设计 D5，u-rpc-wiring）：归档域三 RPC + config.archives +
+// config.sessions 帧 archiveCount 的服务核心。type-only：实例由组合根构造（deps 注入 delete
+// 活跃分支原语），经 setServices optional.archive 注入三处消费点：broker（archiveCount 角标）、
+// sessionHandler ctx（三 RPC）、sessionManagerHandler（archive action 执行体，session-manager-archive-delete U3）。
+import type { ArchiveService } from '../services/archive/archive-service.js'
 import type { ITerminalService } from '../services/ports/terminal-service.js'
 import type { QuotaService } from '../services/quota-service.js'
 import type { TtsService } from '../services/tts-service.js'
@@ -139,6 +144,12 @@ export interface RuntimeServerOptionalServices {
   /** 生成指标服务（composer-gen-stats D4）：session.getGenStats 恢复路径路由依赖。可选：未注入时该 case 报 unsupported。 */
   genStats?: GenStatsService
   /**
+   * 归档服务（session-archive 设计 D5，u-rpc-wiring）：session.archive / unarchive /
+   * purgeArchive 三 RPC + config.archives + config.sessions 帧 archiveCount 角标路由依赖。
+   * 可选：未注入时四 case 报 archive_unsupported（组合根恒注入；缺省服务存量测试装配）。
+   */
+  archive?: ArchiveService
+  /**
    * reply 通路出站检查的 session 文件路径解析器（u8 与 push 通路对称接线：push 经
    * MessageBus 构造注入，reply 经 broker 构造注入，组合根两处共用同一 resolver 实例）。
    * 可选：未注入时 reply 超限占位文案退化为「（见 runtime 日志）」，阈值仍用默认常量。
@@ -197,6 +208,10 @@ export class RuntimeServer implements IMessageBroker {
   private importService?: ImportService
   /** 生成指标服务（composer-gen-stats u3）：可选，setServices 注入后经 sessionHandler ctx 触达。 */
   private genStatsService?: GenStatsService
+  /** 归档服务（session-archive u-rpc-wiring）：setServices 注入后经三处消费点触达——broker
+   * （archiveCount 角标）、sessionHandler ctx（三 RPC）、sessionManagerHandler（archive action
+   * 执行体，session-manager-archive-delete U3）。 */
+  private archiveService?: ArchiveService
   /**
    * MessageBus 单例（wave:runtime-wiring）：注入到 SessionMessageHandler ctx，
    * 供 session.subscribe/unsubscribe RPC 注册/取消订阅。ws 断开时 onDisconnect 回调调
@@ -303,12 +318,13 @@ export class RuntimeServer implements IMessageBroker {
   private assignServices(session: ISessionService, config: IConfigService, model: IModelService, optional: RuntimeServerOptionalServices): void {
     // genStats（composer-gen-stats D4）：恢复路径 RPC 路由依赖（sessionHandler ctx 读
     // this.genStatsService）；其余可选服务由 assembleOptionalHandlers 按域自行解构。
-    const { extension, plugin, git, file, skillRegistry, handoff, importService, genStats, zcodeProviderMirrorSync } = optional
+    const { extension, plugin, git, file, skillRegistry, handoff, importService, genStats, zcodeProviderMirrorSync, archive } = optional
     this.zcodeProviderMirrorSync = zcodeProviderMirrorSync
     this.gitService = git
     this.fileService = file
     this.handoffService = handoff
     this.genStatsService = genStats
+    this.archiveService = archive
     this.sessionService = session
     // D6a（integrity-hardening §3.6）：挂起 UI 请求的汇聚清理。extensionTimeoutMgr 的
     // per-session 残留（pendingRequests / session 跟踪）此前只在
@@ -357,6 +373,8 @@ export class RuntimeServer implements IMessageBroker {
       extensionService: this.extensionService,
       projectRoot: this.projectRoot,
       appInfo: appInfo ?? { appVersion: 'unknown', piVersion: 'unknown' },
+      // archiveCount 角标数据源（session-archive u-rpc-wiring）：未注入时帧内字段缺省。
+      archiveService: this.archiveService,
     // u8 对称接线：resolver 存在时传第三参（阈值仍用默认常量）；缺省时不传（broker 构造
     // 默认值——阈值同为默认常量、resolver 为 undefined），测试默认行为不变。
     }, replyGuardResolver !== undefined ? {
@@ -439,6 +457,9 @@ export class RuntimeServer implements IMessageBroker {
       // 投递所有权内核（u3a）：delivery.* 四 RPC + session.delivery state topic 装配。
       // 与 SessionManagerHandler 同一注册表实例（sessionId 单例约束，见 assembleSessionManagerHandler）。
       deliveryRegistry: optional.delivery,
+      // 归档域（session-archive u-rpc-wiring）：三 RPC + config.archives + config.sessions
+      // 响应 archiveCount 路由依赖；未注入时四 case 走 archive_unsupported 防御分支。
+      archiveService: this.archiveService,
       // wave:runtime-wiring：注入 MessageBus 供 session.subscribe/unsubscribe RPC 用。
       messageBus: this.messageBus,
       nextPushId: () => this.broker.nextPushId(),
@@ -500,6 +521,9 @@ export class RuntimeServer implements IMessageBroker {
       this.workspaceMessageHandler = new WorkspaceMessageHandler({
         ...messaging,
         workspaceService: workspace,
+        // 打开仓库预热（workspace.record → prefetch 默认远端）：worktree 未注入时跳过，
+        // record 主流程不受影响（对齐 worktree/git handler 的可选注入防御形态）
+        worktreeService: worktree ?? null,
       })
     }
     if (project) {
@@ -564,7 +588,7 @@ export class RuntimeServer implements IMessageBroker {
 
   /** SessionManagerHandler：agent-managed session 请求处理（select 通道 + SESSION_MANAGER_MARKER）。 */
   private assembleSessionManagerHandler(optional: RuntimeServerOptionalServices): void {
-    const { delivery, workspace, claims } = optional
+    const { delivery, workspace, claims, archive } = optional
     // 不走 WS 路由表——由 EventInterpreter.onSessionManagerRequest fire-and-forget 调用。
     // sd-u5：delivery（send 排队投递 + create 直投）必注入——组合根装配 sessionId 单例注册表；
     // 缺省时现场构造无 settled 订阅的退化实例（内核自动退化为退避轮询，D8 兜底），仅兜测试装配遗漏。
@@ -599,6 +623,9 @@ export class RuntimeServer implements IMessageBroker {
       },
       // notify-once U3：债权状态机透传（缺席 = 停用象限，见 SessionManagerHandlerOptions.claims）
       claims,
+      // session-manager-archive-delete U3：归档服务透传（archive action 执行体；缺席 =
+      // 停用象限报可操作错误，见 SessionManagerHandlerOptions.archiveService）
+      archiveService: archive,
     })
   }
 
@@ -678,6 +705,8 @@ export class RuntimeServer implements IMessageBroker {
    * 供 index.ts 注入到 HandoffService（与 session-message-handler 的 create/fork/delete/rename 一致）。
    */
   broadcastSessionList(): void { this.broker.broadcastSessionList() }
+  /** remote-config 域 1（provider 模型合并写盘）变化广播，组合根启动拉取消费。 */
+  broadcastProviderList(): void { this.broker.broadcastProviderList() }
   /**
    * D8-2：暴露 broker 的 app.info 广播，供 index.ts 在 piVersion 探测完成后补发
    * （版本标签先显示应用版本，探测完成后自动更新）。

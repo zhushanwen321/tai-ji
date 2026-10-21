@@ -5,10 +5,8 @@
  *
  * 锁的分工（锁本体在源码，本文件是全集锚 + 行为锚）：
  * - **编译层锁**：WORKFLOW_TONE_BY_OUTCOME / SUBAGENT_DOT_RULES 的 `satisfies
- *   Record<词表, …>`（词表扩值漏配 = 源码行编译红）；WorkflowTab.vue 内
- *   aggregatePhaseStatus / phaseDotClass / callDotClass 的 default-never 穷尽
- *   switch（.vue 由 vue-tsc 全量 typecheck 承载，`pnpm -C packages/renderer
- *   run typecheck`）。本文件下方 @ts-expect-error 锚为「锁存在」的活性证明：
+ *   Record<词表, …>`（词表扩值漏配 = 源码行编译红）。本文件下方 @ts-expect-error
+ *   锚为「锁存在」的活性证明：
  *   词表外键索引必须编译红，映射锁被拆（键型放宽成索引签名）后该行变为
  *   「未使用的 @ts-expect-error」→ 类型检查红。
  * - **运行层锚（本文件，普通 vitest run 即验证）**：映射键域 ⊆ 词表快照（下方

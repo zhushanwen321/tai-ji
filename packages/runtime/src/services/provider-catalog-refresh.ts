@@ -127,6 +127,9 @@ type OverlaySnapshot = {
   pi: OverlaySourceSnapshot
 }
 
+// @data-owner #70（data-source-registry.md）：provider-catalog-overlay 落盘缓存的读侧内存
+// 快照（own + pi 两份源，mtime 失效检测），持久权威是磁盘 overlay 文件与 pi models-store
+// ——persistOwnCache 落盘后置 null 失效本快照，非第二写方。
 let overlaySnapshot: OverlaySnapshot | null = null
 
 /**
@@ -342,4 +345,30 @@ export async function refreshProviderCatalogs(providerIds: string[]): Promise<Ca
     overlaySnapshot = null // 失效内存缓存，合并展示立即读到新数据
   }
   return { refreshed, failed, corrupt, persistFailed }
+}
+
+// ── models-store.json 变化感知（W1 缝隙 A）────────────────────────
+
+/** 设置页 Provider 页签可见期间的轮询间隔（pi 启动刷落盘后页签开着也能看到的感知粒度）。 */
+export const MODELS_STORE_WATCH_INTERVAL_MS = 30_000
+
+/**
+ * 轮询 pi models-store.json 的 mtime，变化时触发 onChange。返回 stop 函数。
+ *
+ * 不用 fs.watch（跨平台行为不一）；检测到变化后**无需失效任何缓存**——读链 loadOverlay()
+ * 自带 mtime 失效检测会自动重读，onChange 只负责触发上游广播。mtime 相同 = 零文件内容 IO。
+ * intervalMs 参数供测试注入（fake timers 下配合短间隔）。
+ */
+export function startModelsStoreMtimeWatch(
+  onChange: () => void,
+  intervalMs: number = MODELS_STORE_WATCH_INTERVAL_MS,
+): () => void {
+  let lastMtime = mtimeOf(piModelsStorePath())
+  const timer = setInterval(() => {
+    const mtime = mtimeOf(piModelsStorePath())
+    if (mtime === -1 || mtime === lastMtime) return
+    lastMtime = mtime
+    onChange()
+  }, intervalMs)
+  return () => clearInterval(timer)
 }

@@ -21,10 +21,13 @@ import type { TaijiProviderStore, ProviderExtras } from './provider-extras-store
 import { readAllExtrasWithFallback, type ProviderExtrasReader } from './migration/provider-extras-migration.js'
 import { pickModelCapabilityFields } from './model-mapper.js'
 import type { IProviderCredentialResolver } from './ports/provider-credential-resolver.js'
+import { listRemoteProviderTemplates } from './remote-config/remote-provider-templates.js'
 
 /** auth.json 存储能力（ConfigService 注入，与 ConfigService 构造函数 authStorage 同构）。
- * 不含 'set'——写入唯一经 credentialWriter（A1-4 收尾，AuthService.saveCredential）。 */
-type AuthStorageAccessors = Pick<AuthStorage, 'remove' | 'hasOAuth' | 'hasOAuthSync' | 'hasCredentialSync' | 'listCredentialIds'>
+ * 不含 'set'——写入唯一经 credentialWriter（A1-4 收尾，AuthService.saveCredential）。
+ * export：remote-provider-sync 的 deps 面复用同一形状（防漂移）。
+ */
+export type AuthStorageAccessors = Pick<AuthStorage, 'remove' | 'hasOAuth' | 'hasOAuthSync' | 'hasCredentialSync' | 'listCredentialIds'>
 
 /**
  * providers.json 存储能力（ConfigService 注入，A1-5 写侧切换）。
@@ -64,6 +67,8 @@ export type SetProviderInput = {
   type?: string
   apiKey?: string
   authMethod?: 'api_key' | 'oauth' | 'env_var' | 'ambient'
+  /** taiji 远程清单来源标记（remote-config 域 1；QuickSetup 从 taiji 模板创建时回传）。 */
+  remoteSource?: string
   baseUrl?: string
   /** provider 级自定义请求头（B-4a，pi ProviderConfigSchema 内字段）。 */
   headers?: Record<string, string>
@@ -527,8 +532,25 @@ export function listBuiltinProviders(): BuiltinProviderTemplate[] {
       return []
     }
   }
-  // JSON import 的推断类型与 BuiltinProviderTemplate 有 optional 字段差异，浅校验后断言
-  return raw as unknown as BuiltinProviderTemplate[]
+  // JSON import 的推断类型与 BuiltinProviderTemplate 有 optional 字段差异，浅校验后断言。
+  // 尾部拼接 taiji 远程清单模板（remote-config 域 1；纯缓存读侧，拉取失败/损坏 = 空段，
+  // 不影响 pi catalog 快照段）。拼接判据 = 返回列表 id 唯一：远程条目复用 pi catalog id
+  // （或远程清单内部自重复）时跳过并逐条 warn——远程条目带 remoteSource 标记，重复 id 会让
+  // 该 catalog provider 被误标 remoteSource 参与热更新（模型被远程清单覆盖），且模板选择器
+  // 渲染出同 id 两张卡片（data-testid 撞名）。远程清单 id 与 catalog 撞名属配置错误，须可见。
+  const remote = listRemoteProviderTemplates()
+  if (remote.length === 0) return raw as unknown as BuiltinProviderTemplate[]
+  const seen = new Set((raw as unknown as BuiltinProviderTemplate[]).map((p) => p.id))
+  const appended: BuiltinProviderTemplate[] = []
+  for (const p of remote) {
+    if (seen.has(p.id)) {
+      console.warn(`[config-service] remote provider template id "${p.id}" collides with an already-listed builtin provider id, skipping the remote entry`)
+      continue
+    }
+    seen.add(p.id)
+    appended.push(p)
+  }
+  return [...(raw as unknown as BuiltinProviderTemplate[]), ...appended]
 }
 
 export function checkEnvVars(names: string[]): Record<string, boolean> {
@@ -1144,6 +1166,24 @@ function persistAuthMethod(
 }
 
 /**
+ * taiji 远程清单来源标记落 providers.json（remote-config 域 1，从 taiji 清单模板创建时
+ * 由 QuickSetup 随 payload 回传）。语义同 persistAuthMethod：未回传 = 不动（既有标记保留，
+ * 重保存不丢标记）；extrasStore 未注入时丢弃 + warn（宁丢不写错位，生产恒注入）。
+ */
+function persistRemoteSource(
+  extrasStore: ProviderExtrasAccessors | undefined,
+  providerId: string,
+  remoteSource: SetProviderInput['remoteSource'],
+): Promise<unknown> | undefined {
+  if (remoteSource === undefined) return undefined
+  if (!extrasStore) {
+    console.warn(`[config-service] remoteSource dropped for ${providerId}: providerExtrasStore not injected`)
+    return undefined
+  }
+  return extrasStore.modify(providerId, current => ({ ...current, remoteSource }))
+}
+
+/**
  * model 级 enabled 状态落 providers.json（G3 写侧切换，从 setProvider 提取）：extrasStore 注入
  * 时委托 persistModelStates（保留集合计算与写入检查见该函数），未注入 + 有显式启停更新时丢弃 +
  * warn（宁丢不写错位——生产恒注入）。
@@ -1287,6 +1327,8 @@ export async function setProvider(
   // 「条件 await」时序契约与丢弃语义见 persistAuthMethod。
   const authMethodFlush = persistAuthMethod(extrasStore, providerId, data.authMethod)
   if (authMethodFlush) await authMethodFlush
+  const remoteSourceFlush = persistRemoteSource(extrasStore, providerId, data.remoteSource)
+  if (remoteSourceFlush) await remoteSourceFlush
   // headers/authHeader 白名单写入。baseUrl/name/apiKey/api 的空串转译与 catalog 分体系
   // 语义委托防线载体（下方 models 装配后统一调用一次，见 applyProviderWritePolicy）。
   applyProviderHeaderFields(merged, providerId, data)

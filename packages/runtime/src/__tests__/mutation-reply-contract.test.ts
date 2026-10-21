@@ -527,6 +527,12 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     rationale: '动作类（终止运行中的 plan 审批流，非配置状态改值）：reply void ack，plan 状态经 session.planState 广播推回（派生视图链唯一承载，abort 前后无 mutation 生效值概念）',
   },
   {
+    type: 'config.setProviderCatalogWatch',
+    branch: 'non-mutation',
+    contract: 'excluded',
+    rationale: '动作类（页签可见期 models-store.json 轮询开关，runtime 会话内状态不持久化、renderer 无 store 副本）：reply message.status ack，变化结果经 config.providers 广播推回',
+  },
+  {
     type: 'session.forceQuit',
     branch: 'non-mutation',
     contract: 'excluded',

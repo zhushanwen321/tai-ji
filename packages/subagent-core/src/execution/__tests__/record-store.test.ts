@@ -410,8 +410,10 @@ describe("RecordStore", () => {
   });
 
   // ============================================================
-  // [U3 / §3.2.4] 重建单规则：重建一律得 idle，stopReason 取自 .state
-  //（无则 interrupted-by-restart）；四输入 = 新格式 / 旧 finalized / 旧 cancelled / 无 sidecar
+  // [U3 / §3.2.4] 重建单规则：重建一律得 idle——收条自事件流折叠派生（无收条
+  // 则 interrupted-by-restart 兜底）；`.state` sidecar 读侧已退场（写面族随事件
+  // 流改造不再产出），下列历史 sidecar 输入形态构造的文件读侧零消费，用例锁定
+  // 「其存在不干扰折叠判定」
   // ============================================================
   describe("重建单规则（§3.2.4）", () => {
     const SESSION_ID = "bg-1";
@@ -425,7 +427,8 @@ describe("RecordStore", () => {
       return sessionFile;
     }
 
-    // ── 输入 1: 新格式收条 {status:"idle", stopReason, endedAt}（writeSettledState 写面）──
+    // ── 输入 1: 历史 `.state` 新格式收条 {status:"idle", reason} 文件（写面已随
+    //    事件流改造退场——读侧零消费，锁定其存在不干扰折叠判定）──
     it(".state 新格式 stopReason 非法值（外部损坏）→ idle + interrupted-by-restart 兜底", () => {
       const sessionFile = writeBaseSession();
       fs.writeFileSync(`${sessionFile}.state`, JSON.stringify({ status: "idle", reason: "garbage-reason" }), "utf-8");
@@ -435,10 +438,9 @@ describe("RecordStore", () => {
       expect(found?.stopReason).toBe("interrupted-by-restart");
     });
 
-    // ── 输入 2: 旧 finalized → idle + closedReason/stopReason=reason（上行映射）──
-    // ── 输入 2b: 旧 finalized 空 reason（死因不可考）→ disconnected 兜底 ──
-    // ── 输入 3: 旧 cancelled → idle + closedReason=cancelled（legacy 投影判据）
-    //    + stopReason=interrupted（§3.2.4 上行映射）──
+    // ── 输入 2/2b/3: 旧 finalized / 旧 cancelled sidecar——读侧零消费，「上行
+    //    映射 / legacy 投影判据」分支已随 `.state` 读侧退场（无对应用例；此类文件
+    //    与输入 1 同落「无有效收条 → 兜底 idle + interrupted-by-restart」一支）──
     // ── 输入 4: 无 sidecar → idle + interrupted-by-restart（崩溃在途 / 尚未收口）──
     it("无任何 sidecar → idle + interrupted-by-restart（§3.2.4「文件不存在」行；.alive 不影响判定）", () => {
       const sessionFile = writeBaseSession();

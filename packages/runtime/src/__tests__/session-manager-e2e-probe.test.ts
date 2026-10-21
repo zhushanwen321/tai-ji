@@ -4,7 +4,10 @@
  * 与 scripts/cw/session-manager-e2e.sh 内嵌 mock 探针的区别：本探针驱动仓库**真实实现**
  * 的完整事件链——event-adapter marker 翻译（translate 的 SESSION_MANAGER_MARKER 检测分支）
  * → EventInterpreter session-manager 路由（onSessionManagerRequest）→ SessionManagerHandler
- * 6 action 分发 → extension_ui_response 回写 pi stdin。mock 只保留两层：
+ * action 分发（handler routes 表现 9 键：create/send/history/status/list/abort/delete/
+ * archive/watch；本探针驱动其中 6 个——create/send/history/status/list/abort 的旧断言面，
+ * delete/archive 全链由 equivalence/session-manager-full-e2e.test.ts 真 LLM 轨覆盖，
+ * watch 不对 LLM 暴露）→ extension_ui_response 回写 pi stdin。mock 只保留两层：
  *   1. pi 子进程 IO 层（JSONL stdout → runtime / runtime → stdin 的 wire 映射）
  *   2. SessionService 数据层（ISessionService fake）
  *
@@ -85,7 +88,8 @@ function makeFakeSessionView(overrides: Record<string, unknown> = {}): Record<st
   }
 }
 
-/** SessionService 数据层 fake：5 个管理 action 的默认返回值（形状对齐 ISessionService 契约） */
+/** SessionService 数据层 fake：管理 action 服务方法的默认返回值（形状对齐
+ * ISessionService 契约；create 为裸 vi.fn() 无默认返回，由用例侧 mockReturnValue 提供） */
 function makeFakeSessionService(overrides: Partial<ISessionService> = {}): ISessionService {
   return {
     create: vi.fn(),

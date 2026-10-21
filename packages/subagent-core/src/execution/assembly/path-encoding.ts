@@ -1,6 +1,6 @@
 // src/core/path-encoding.ts
 //
-// subagent 文件族（sessions / records / model-switch）的目录推导。
+// subagent 文件族（sessions / records / model-switch / message）的目录推导。
 //
 // [session-store-layout-inversion D2/D3] 分区键 = rootSessionId（ExecutionRecord 自带
 // 字段，record-model.ts；嵌套派发全层同值——子进程经 PI_SUBAGENT_ROOT_SESSION_ID env
@@ -9,9 +9,11 @@
 // session 生命周期，删除随整树回收。旧布局 `<agentDir>/subagents/<encodeCwd>/`
 // （cwd 分区）已退役，存量不迁移（设计裁决 11）。
 //
-// 公式消费 shared 新函数族（subagent-core 直接 import @taiji/shared，非镜像场景；
-// shared getDataDir 读 TAIJI_AGENT_DATA_DIR，taiji 生产链经 ENV_WHITELIST_PREFIXES
-// 注入 pi/引擎进程，裸跑落缺省 dev 树）。encodeCwd 分区键随 D3 消除，本文件不再
+// 公式本体 import 自 shared 纯公式模块 '@taiji/shared/session-store-paths'（零 env
+// 读写，dataDir 必传）；base 缺省经 store-base resolveSessionStoreBase（显式 dataDir
+// → env TAIJI_AGENT_DATA_DIR → 宿主 dataRoot）。禁止改回 '@taiji/shared/paths' 的
+// env 缺省形态——其 C-proc-26 准入检查在打包态 pi/引擎进程内必抛（C-ext-31，
+// 2026-10-19 打包版 subagent 全灭事故根因）。encodeCwd 分区键随 D3 消除，本文件不再
 // 持有编码逻辑（runtime pi-paths 的 encodeCwd re-export 源头在 shared）。
 
 import {
@@ -19,7 +21,9 @@ import {
   getSessionSubagentModelSwitchDir,
   getSessionSubagentRecordsDir,
   getSessionSubagentSessionsDir,
-} from "@taiji/shared/paths";
+} from "@taiji/shared/session-store-paths";
+
+import { resolveSessionStoreBase } from "./store-base.ts";
 
 /**
  * 获取 subagent session 持久化目录路径。
@@ -35,11 +39,11 @@ import {
  * docs/constraints.json C-ext-21。
  *
  * @param rootSessionId 根会话 id（分区键；同域校验由 shared 层承担，非法 throw）
- * @param dataDir 可选数据根目录（测试注入）；缺省读 shared getDataDir()
+ * @param dataDir 可选数据根目录（测试注入）；缺省经 resolveSessionStoreBase（见 store-base.ts）
  * @returns session 持久化目录绝对路径
  */
 export function getSubagentSessionDir(rootSessionId: string, dataDir?: string): string {
-  return getSessionSubagentSessionsDir(rootSessionId, dataDir);
+  return getSessionSubagentSessionsDir(rootSessionId, resolveSessionStoreBase(dataDir));
 }
 
 /**
@@ -50,11 +54,11 @@ export function getSubagentSessionDir(rootSessionId: string, dataDir?: string): 
  *
  * @param rootSessionId 根会话 id（与 getSubagentSessionDir 同一取值——record 的
  *   rootSessionId 字段 / env 贯穿值；两目录必须同树，否则 GC/重建互相找不到）
- * @param dataDir 可选数据根目录（测试注入）；缺省读 shared getDataDir()
+ * @param dataDir 可选数据根目录（测试注入）；缺省经 resolveSessionStoreBase（见 store-base.ts）
  * @returns records 持久化目录绝对路径
  */
 export function getSubagentRecordsDir(rootSessionId: string, dataDir?: string): string {
-  return getSessionSubagentRecordsDir(rootSessionId, dataDir);
+  return getSessionSubagentRecordsDir(rootSessionId, resolveSessionStoreBase(dataDir));
 }
 
 /**
@@ -67,11 +71,11 @@ export function getSubagentRecordsDir(rootSessionId: string, dataDir?: string): 
  * （写后读、读后即删，§7.1.1 要素 4）。
  *
  * @param rootSessionId 根会话 id（写侧 = 宿主进程当前 session id；读侧 = 目标会话 id）
- * @param dataDir 可选数据根目录（测试注入）；缺省读 shared getDataDir()
+ * @param dataDir 可选数据根目录（测试注入）；缺省经 resolveSessionStoreBase（见 store-base.ts）
  * @returns 模型切换结果目录绝对路径
  */
 export function getSubagentModelSwitchResultsDir(rootSessionId: string, dataDir?: string): string {
-  return getSessionSubagentModelSwitchDir(rootSessionId, dataDir);
+  return getSessionSubagentModelSwitchDir(rootSessionId, resolveSessionStoreBase(dataDir));
 }
 
 /**
@@ -86,9 +90,9 @@ export function getSubagentModelSwitchResultsDir(rootSessionId: string, dataDir?
  * 文件形态 = `<requestId>.json`，请求作用域生命周期（写后读、读后即删）。
  *
  * @param rootSessionId 根会话 id（写侧 = 宿主进程 resolveRootSessionId；读侧 = 当前会话 id）
- * @param dataDir 可选数据根目录（测试注入）；缺省读 shared getDataDir()
+ * @param dataDir 可选数据根目录（测试注入）；缺省经 resolveSessionStoreBase（见 store-base.ts）
  * @returns 定向消息结果目录绝对路径
  */
 export function getSubagentMessageResultsDir(rootSessionId: string, dataDir?: string): string {
-  return getSessionSubagentMessageDir(rootSessionId, dataDir);
+  return getSessionSubagentMessageDir(rootSessionId, resolveSessionStoreBase(dataDir));
 }

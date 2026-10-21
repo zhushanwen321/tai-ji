@@ -8,7 +8,7 @@
  * 契约边界：getHistory 不在此端口（属 chat 域）——selectSession 的 hydrate
  * 经 ChatApiPort（w3 use-session 的 ChatHydratePort 注入回调）承接。
  */
-import type { PanelLeaf, SessionGroup, SessionSummary, BatchDeleteResult, ThinkingLevel } from '@taiji/shared'
+import type { PanelLeaf, SessionGroup, SessionSummary, BatchDeleteResult, ThinkingLevel, SessionArchiveReply } from '@taiji/shared'
 
 /**
  * session 后端操作端口。
@@ -39,6 +39,13 @@ export interface SessionApiPort {
   rename(id: string, label: string): Promise<void>
   /** 删除单个 session（deleteSession 用） */
   remove(id: string): Promise<void>
+  /**
+   * 归档单个 session（archiveSession 用，session-archive 设计 D5 同步段：搬移 + 簿记骨架；
+   * 压缩在 runtime 后台异步）。reply 为 ack 形态（{ sessionId }，编排不消费）。
+   * 生成中/已归档/IO 失败走 error envelope（ARCHIVE_ERROR_CODES，renderer 按 code 分流
+   * 指引文案）。
+   */
+  archive(id: string): Promise<SessionArchiveReply>
   /**
    * 显式重开 dead session（重新 spawn pi；session.restore RPC）。
    * remote-use A3/U12：恢复三步编排（restore RPC → selectSession → revive）落壳层、
