@@ -9,7 +9,7 @@
   <aside
     class="relative flex flex-col overflow-hidden pt-11"
     :style="{
-      flexBasis: sidebar.collapsed ? '0px' : '252px',
+      flexBasis: sidebar.collapsed ? '0px' : `${sidebar.widthPx}px`,
       flexGrow: '0',
       flexShrink: '0',
       minWidth: '0px',
@@ -37,6 +37,7 @@
 
 <script setup lang="ts">
 // aside flex-basis 联动 sidebar.collapsed（spec §收起态：折叠 width→0，main 占满全宽；
+// 展开宽度 = sidebar store widthPx（SidebarResizeHandle 拖写，SSOT 归 store）；
 // pt-11(44px) traffic light 安全区：AppShell py-1 使 aside 顶在窗口 y=4，红黄绿原生 y=8~20，安全区让出；
 // position:relative 为 traffic-light 的 offset parent；
 // app-nav-controls 已提升至 AppShell 层（避免折叠态 overflow:hidden 裁剪）。

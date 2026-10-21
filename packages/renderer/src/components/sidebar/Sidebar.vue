@@ -17,7 +17,9 @@
     :class="{ 'w-0 opacity-0 overflow-hidden': sidebar.collapsed }"
     :data-collapsed="sidebar.collapsed ? 'true' : undefined"
   >
-    <div class="sidebar__inner flex h-full w-[252px] flex-col">
+    <!-- 内容列固定宽 = sidebar store widthPx（与 AsideRegion flexBasis 同源单值；保持固定宽 +
+         overflow clip 的折叠动画形态，不用 w-full——百分比宽会在折叠动画中挤压重排内容） -->
+    <div class="sidebar__inner flex h-full flex-col" :style="{ width: `${sidebar.widthPx}px` }">
       <!-- Brand（太极 logo + 产品名 + 版本号 + 升级指示器，v6 §6.2） -->
       <Brand :version-label="versionLabel">
         <template #trailing>

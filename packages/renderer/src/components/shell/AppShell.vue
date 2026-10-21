@@ -5,17 +5,18 @@
     padding 对齐 demo .app { padding: 4px 4px 4px 0 }：上/右/下 4px，左 0（aside 透明融合直接贴窗口左缘，
     侧栏内容边距由 Sidebar 自持）。traffic light 安全区在 AsideRegion 内（padding-top:44px 恒定）。
   -->
-  <!-- gap 对齐 demo .app { gap: 8px }：aside 与主面板卡间 8px（折叠态 aside 归零，主面板左缘 = gap 8px，与 demo 折叠态同值）。
-       折叠态 !gap-0 的 !important 必须：gap-0 与 gap-2 同特异性，Tailwind 源码顺序 gap-0 先于 gap-2 生成，不加 ! 会被 gap-2 永久覆盖（死代码 bug）。
+  <!-- 侧栏-main 卡缝 = SidebarResizeHandle 本体（4px，侧栏-main 缝 4px 节奏不变）：根容器无 gap——
+       缝由 handle 元素承载（可拖动调侧栏宽度），折叠态 handle 与 aside 一起消失，main 自然贴左。
        圆角：rounded-[10px] 仅 mac（三平台圆角策略，跨平台窗口外壳设计 §6.2）——mac 系统圆角 + 应用内圆角共线保留；
        win/linux 是不透明方形窗口，应用内圆角只会产生四角色差小方块，故非 mac 不渲染该类（类绑定，拓扑测试两态断言）。
        窗口侧不加任何圆角配置键（roundedCorners 默认即 true 是 no-op，已否决）。 -->
   <div
-    class="app-shell relative flex h-screen w-screen gap-1 overflow-hidden bg-bg py-1 pr-1"
-    :class="[isMac ? 'rounded-[10px]' : '', sidebar.collapsed ? '!gap-0' : '']"
+    class="app-shell relative flex h-screen w-screen overflow-hidden bg-bg py-1 pr-1"
+    :class="[isMac ? 'rounded-[10px]' : '']"
     data-testid="app-shell"
   >
     <AsideRegion />
+    <SidebarResizeHandle v-if="!sidebar.collapsed" />
     <AppNavControls />
     <MainPanel />
     <!-- 滚动重启四态横幅 + reattach 高压延迟轻态（crash-forensics D5/D3，u7d + #27）：
@@ -45,6 +46,7 @@ import { useNarrowWindowCollapse } from '@/composables/shell/useNarrowWindowColl
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import AppNavControls from './AppNavControls.vue'
 import AsideRegion from './AsideRegion.vue'
+import SidebarResizeHandle from './SidebarResizeHandle.vue'
 import MainPanel from './MainPanel.vue'
 import WorkflowVizOverlayHost from '@/components/panel/workflow-viz/overlay/WorkflowVizOverlayHost.vue'
 import RollingRestartBanner from '@/components/ui/RollingRestartBanner.vue'

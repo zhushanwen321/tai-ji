@@ -74,7 +74,7 @@ test.describe('sidebar 折叠/展开 + session 切换', () => {
     await activateSession(page, 'API 性能优化')
 
     const aside = page.getByTestId('app-shell-aside')
-    // 初始展开（flex-basis 300px → width > 200）
+    // 初始展开（flex-basis = 持久化宽度，默认 282px → width > 200）
     await expect.poll(async () => (await aside.boundingBox())?.width ?? 0).toBeGreaterThan(200)
 
     // 折叠（AppNavControls 浮层按钮）
