@@ -71,6 +71,12 @@ jobs:
       - name: Build session-delivery
         run: pnpm --filter @zhushanwen/session-delivery build
 
+      # state-machine 是 extension-protocol / subagent-core 的 runtime dependency
+      # （发布闭包最上游），构建顺序必须在前——surface guard 的 files↔dist 双向
+      # 检查要求 tarball 打包前 dist 已存在（与 ci.yml Build dist packages 段同款）。
+      - name: Build state-machine
+        run: pnpm --filter @zhushanwen/state-machine build
+
       # session 读取共享基座两包（session-reader-shared-core 实施，impl-plan U5）：
       # session-core 是 zcode-session-source 的 workspace 依赖（converter 消费 Entry 类型），
       # 构建顺序必须在前；两者都是 @zhushanwen/pi-session-reader 的 value dep，reader

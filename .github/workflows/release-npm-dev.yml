@@ -109,6 +109,13 @@ jobs:
       # 被 Publish surface guard 拦截，连坐整批 pi-session-reader 发布）。与 Smoke /
       # Publish 同条件挂载——skip 分支不发布即不构建，维持该 job「warning + skip、
       # 整体绿」既有语义。
+      # state-machine 是 extension-protocol / subagent-core 的 runtime dependency
+      # （发布闭包最上游），构建顺序必须在前；与 Smoke / Publish 同条件挂载
+      # （与 ci.yml Build dist packages 段同款，files↔dist 双向检查要求 dist 先在）。
+      - name: Build state-machine
+        if: steps.check_pre.outputs.should_publish == 'true'
+        run: pnpm --filter @zhushanwen/state-machine build
+
       - name: Build session-core
         if: steps.check_pre.outputs.should_publish == 'true'
         run: pnpm --filter @zhushanwen/session-core build
