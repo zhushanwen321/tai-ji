@@ -634,6 +634,28 @@ function foldRecordStreamToRun(
   return reconstructSettledRun(runId, spec, aggregate, parts, settledEvent);
 }
 
+// ── runId 形态白名单（recordPathFor 路径穿越防线）──────────────
+
+/**
+ * runId 形态白名单（与 session 域 isPiSessionId 同域校验成文惯例同族）：首尾字母
+ * 数字，中间允许 `[A-Za-z0-9_-]`。生产 runId 唯一来源 = core generateRunId
+ * （`wf-<毫秒>-<base36>`，字符集 ⊆ 白名单）。
+ *
+ * 为什么必须校验：runId 是 LLM 工具参数面的自由字符串（workflow_control 的
+ * status/resume 直传入参），会拼进 record 流路径（recordPathFor）——含路径分隔符
+ * 或 `..` 的入参在 join 后逃逸出 runs 目录（读任意文件 + 借「settled-evicted vs
+ * not found」两文案分叉做文件存在性探测）。非法形态在构造路径前拒绝。
+ */
+const WORKFLOW_RUN_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$/;
+
+/**
+ * runId 形态白名单（布尔判定，不 throw）。tool 层 LLM 入参面的准入判据——
+ * status/resume 入口先过本判定，非法形态按「run 不存在」语义处置，不触达磁盘。
+ */
+export function isWorkflowRunId(runId: string): boolean {
+  return WORKFLOW_RUN_ID_PATTERN.test(runId);
+}
+
 // ── JsonlRunStore ────────────────────────────────────────────
 
 const logger = getLogger("subagents");
@@ -680,8 +702,18 @@ export class JsonlRunStore implements RunStore {
     this.ctx = opts.ctx;
   }
 
-  /** record 流路径 for a given runId（唯一持久件）。 */
+  /**
+   * record 流路径 for a given runId（唯一持久件）。runId 先过形态白名单（路径穿越
+   * 防线；tool 层 LLM 入参已前置准入，非法 id 到达此处 = 越过准入面的缺陷/篡改）
+   * ——fail-fast 拒绝构造逃逸路径，不产出 runs 目录外的路径。
+   */
   private recordPathFor(runId: string): string {
+    if (!isWorkflowRunId(runId)) {
+      throw new Error(
+        `invalid runId (path traversal blocked): ${runId} — runIds only allow [A-Za-z0-9_-] ` +
+          "(core generateRunId output). Recovery: copy the runId verbatim from the tool result that started the run.",
+      );
+    }
     return path.join(this.runsDir, `${runId}${RUN_EVENTS_SUFFIX}`);
   }
 
