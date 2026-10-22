@@ -52,12 +52,27 @@ export const meta = {
     'C：kitchen-sink 的 write 工具把 .faux-pic.svg / .faux-artifact.html 写进会话 cwd',
   ],
   notProvable: [
-    'thinking 块的独立稳定锚点（现行 UI 无独立 testid，矩阵空洞 #1；文本断言走容器 textContent）',
+    'thinking 块的独立稳定锚点（现行 UI 无独立 testid，矩阵空洞 #1）：thinking 全文默认折叠不进 DOM，UI 只断折叠 chip，全文核对走 B 通道 history',
     'shiki 高亮的视觉正确性（像素级归 e2e-visual 像素轨；本剧本只证代码块文本渲染）',
     'html-preview 抽屉交互（`html-preview` 代码围栏的预览浮层无稳定 testid；C 通道证 .faux-artifact.html 落盘即 its 数据面）',
     'composer 输入三态（slash/mention/file portal）——portal 浮层锚点未稳定，归后续补锚',
     '流式中途活动条（activity-strip）的抓拍：TPS=6 窗口与活动条渲染时机在 faux 下不稳定（2026-10-22 三次实测未命中，截图显示进行中信息由 turn-meta 计时行承载）——流式中途态的视觉验收归 e2e-visual 像素轨',
   ],
+}
+
+/**
+ * 条件轮询整页 innerHTML 直到出现哨兵（B 通道 complete 帧先于 renderer 渲染完成，
+ * 必须等 UI 侧信号而非直接读）。超时返回最后内容（断言按 contains 判定并给出 len）。
+ */
+async function pollBodyHtml(ui, needle, { timeoutMs = 30_000, intervalMs = 500 } = {}) {
+  const deadline = Date.now() + timeoutMs
+  let html = ''
+  while (Date.now() < deadline) {
+    html = await ui.html('css=body')
+    if (html.includes(needle)) return html
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+  return html
 }
 
 export async function run(ctx) {
@@ -120,13 +135,15 @@ export async function run(ctx) {
     })
     ev.step({ step: 'chat.stream.turn1', channel: 'B', exitCode: end1.ok ? 0 : 1, stats: { stopReason: end1.payload?.stopReason ?? null } })
 
-    // 虚拟列表可视窗口会回收滚出视口的轮次：用 innerHTML（全量 DOM）而非 innerText
-    const pageText = await ui.html('css=body')
-    // 中文哨兵会被 markdown 渲染切进不同 inline 元素（innerHTML 含标签分隔），用 ASCII 子串断言
-    ev.assert('A: 消息区含 thinking 段（TAIJI_FAUX_TPS 哨兵）', pageText.includes('TAIJI_FAUX_TPS'), {
+    // 虚拟列表可视窗口会回收滚出视口的轮次：用 innerHTML（全量 DOM）而非 innerText；
+    // complete 帧 ≠ 渲染完成，等 UI 侧哨兵出现
+    const pageText = await pollBodyHtml(ui, 'THINKING-STREAM-END')
+    // thinking 全文默认折叠（ThinkingRow 折叠态，展开锚点 = block-thinking-<运行时 id>，空洞 #1）：
+    // UI 断言用 turn-meta 的思考 chip（「思考」计数），全文核对走 B 通道 history
+    ev.assert('A: 消息区含 thinking 折叠 chip（思考 ×N）', pageText.includes('思考'), {
       channel: 'A',
-      expected: 'HTML 含 TAIJI_FAUX_TPS（thinking 段渲染产物）',
-      actual: `len=${pageText.length} hit=${pageText.includes('TAIJI_FAUX_TPS')}`,
+      expected: 'HTML 含思考折叠 chip（turn-meta）',
+      actual: `len=${pageText.length} hit=${pageText.includes('思考')}`,
     })
     ev.assert('A: 消息区含正文哨兵（THINKING-STREAM-END）', pageText.includes('THINKING-STREAM-END'), {
       channel: 'A',
@@ -153,7 +170,7 @@ export async function run(ctx) {
       actual: `${end2.type} stop=${end2.payload?.stopReason ?? 'n/a'}`,
     })
 
-    const pageText2 = await ui.html('css=body')
+    const pageText2 = await pollBodyHtml(ui, 'MARKDOWN-KITCHEN-SINK-END')
     for (const [name, needle] of [
       ['表格哨兵（列A）', '列A'],
       ['ts 代码哨兵（const answer）', 'const answer'],
