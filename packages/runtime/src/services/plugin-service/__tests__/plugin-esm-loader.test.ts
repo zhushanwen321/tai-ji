@@ -1,23 +1,268 @@
-import { describe, it, expect, afterEach } from 'vitest'
+/**
+ * plugin-esm-loader.cjs 测试（拆分层，判据与处置通道见 docs/todo/test-single-layer-cleanup.md）。
+ *
+ * 默认组（本文件主体）= loader 本体的 in-process 单测：用 node:vm 装载 loader 源码、
+ * 把 self-register 的 `register` 打成桩（不在 vitest 进程注册 ESM hook——原 TC7 注释
+ * 登记的污染约束），随后对 initialize / resolve hook 的拦截决策逐条断言。被测逻辑 =
+ * 黑名单 / 路径边界 / scheme 封堵 / 非插件代码放行，全是纯决策函数；nextResolve 是
+ * Node 原生 resolver 的替身（隔离外部依赖，决策本身不被 mock）。
+ *
+ * 门控组（文件尾部，TAIJI_TEST_INTEGRATION）= 真实 fork + --import 注入 + 真实 ESM
+ * import 的端到端冒烟一条：Node 真调 hook、PERMISSION_DENIED 真冒泡成 import 失败。
+ * 这属「代码 + OS 组合行为」，没有完成信号可等，本地默认跳过、CI 或按改动范围触发。
+ *
+ * 运行：cd packages/runtime && npx vitest run src/services/plugin-service/__tests__/plugin-esm-loader.test.ts
+ */
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { fork, type ChildProcess } from 'node:child_process'
-import { readFileSync } from 'node:fs'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { fileURLToPath } from 'node:url'
-
-/**
- * plugin-esm-loader.cjs 集成测试：真实 fork 子进程 + --import 注入 loader，
- * 断言 node: 前缀/裸内置名/路径边界三类拦截（TC1-TC6）。
- * loader 用源文件（纯 cjs，无构建依赖）；插件测试文件写到 tmp pluginDir（.mjs 强制 ESM）。
- */
+import { pathToFileURL, fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+import vm from 'node:vm'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../../test-guard/integration-gate.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOADER_PATH = join(__dirname, '..', 'plugin-esm-loader.cjs')
 const FIXTURE_PATH = join(__dirname, 'fixtures', 'esm-loader-fixture.cjs')
 
+/** 门控组真 fork 冒烟的内部超时（fork + --import + 真实 import 链的 CI 负载余量）。 */
 const TIMEOUT_MS = 15_000
+
+const nodeRequire = createRequire(import.meta.url)
+/** 黑名单 SSOT（loader 与 plugin-sandbox.ts 共消费同一份，此处经真实 require 读取）。 */
+const BLOCKED_BUILTINS = (
+  nodeRequire(join(__dirname, '..', 'plugin-blocked-builtins.cjs')) as { BLOCKED_BUILTINS: string[] }
+).BLOCKED_BUILTINS
+
+// ── in-process 装载 loader 本体 ────────────────────────────────────
+
+type LoaderNextResolve = (
+  specifier: string,
+  context: { parentURL?: string },
+) => Promise<{ url: string }>
+
+interface LoaderHooks {
+  initialize(): void
+  resolve(
+    specifier: string,
+    context: { parentURL?: string },
+    nextResolve: LoaderNextResolve,
+  ): Promise<{ url: string }>
+}
+
+/** CJS 模块工厂签名（vm.compileFunction 的返回值按调用形状定型，避免落到 Function/any）。 */
+type CjsModuleFactory = (
+  module: { exports: unknown },
+  exports: unknown,
+  require: (id: string) => unknown,
+  filename: string,
+  dirname: string,
+) => void
+
+/**
+ * 装载 loader 源码并返回其 hooks（initialize / resolve）。
+ *
+ * node:vm + 桩 require：`register` 打成 no-op——直接 require 本模块会在 vitest 进程
+ * 注册 ESM hook（self-register 污染 vitest 的 ESM loader）；其余 require
+ * （node:url / node:path / node:fs / 黑名单 SSOT）走真实实现，loader 源码零改动执行。
+ */
+function loadLoaderHooks(): LoaderHooks {
+  const src = readFileSync(LOADER_PATH, 'utf-8')
+  const stubRequire = (id: string): unknown => {
+    switch (id) {
+      case 'node:module':
+        return { register: () => ({}) }
+      case 'node:url':
+        return { pathToFileURL, fileURLToPath }
+      case 'node:path':
+        return nodeRequire('node:path')
+      case 'node:fs':
+        return { realpathSync }
+      case './plugin-blocked-builtins.cjs':
+        return { BLOCKED_BUILTINS }
+      default:
+        throw new Error(`plugin-esm-loader.cjs 出现未预期的 require('${id}')（依赖面变化须同步本桩）`)
+    }
+  }
+  const moduleObj: { exports: unknown } = { exports: undefined }
+  const factory = vm.compileFunction(
+    src,
+    ['module', 'exports', 'require', '__filename', '__dirname'],
+    { filename: LOADER_PATH },
+  ) as unknown as CjsModuleFactory
+  factory(moduleObj, moduleObj.exports, stubRequire, LOADER_PATH, dirname(LOADER_PATH))
+  const hooks = moduleObj.exports as { initialize?: unknown; resolve?: unknown }
+  if (typeof hooks.initialize !== 'function' || typeof hooks.resolve !== 'function') {
+    throw new Error('plugin-esm-loader.cjs 未导出 initialize/resolve hooks（先赋值后 self-register 契约被破坏）')
+  }
+  return moduleObj.exports as unknown as LoaderHooks
+}
+
+interface RejectedError {
+  code?: string
+  message: string
+}
+
+/** 捕获 resolve 的拒绝原因（带 code 字段的 Error）；未拒绝即失败。 */
+async function rejectReason(run: () => Promise<unknown>): Promise<RejectedError> {
+  try {
+    await run()
+  } catch (e: unknown) {
+    const err = e as { code?: unknown; message?: unknown }
+    return {
+      code: typeof err.code === 'string' ? err.code : undefined,
+      message: String(err.message),
+    }
+  }
+  throw new Error('expected resolve to reject, but it resolved')
+}
+
+describe('plugin-esm-loader 拦截逻辑（in-process：loader 本体）', () => {
+  let pluginDir: string
+  let loader: LoaderHooks
+  let outsideUrl: string
+
+  /** 插件目录内文件的 file URL（initialize 已把 sandboxDir 规范化到 realpath，两侧同源）。 */
+  function insideUrl(name: string): string {
+    return pathToFileURL(join(pluginDir, name)).href
+  }
+
+  /** Node 原生 resolver 替身：按预定 url 返回（被测物是 hook 决策，不是 Node 的解析）。 */
+  function nextResolveTo(url: string): LoaderNextResolve {
+    return async () => ({ url })
+  }
+
+  /** 计数型 resolver 替身（断言某分支是否真的走了 nextResolve）。 */
+  function countingNextResolve(url: string): { next: LoaderNextResolve; calls: () => number } {
+    let calls = 0
+    return {
+      next: async () => {
+        calls++
+        return { url }
+      },
+      calls: () => calls,
+    }
+  }
+
+  beforeEach(() => {
+    // realpath：macOS tmpdir 是 /var → /private/var symlink，initialize 内部会规范化，
+    // 测试侧不同源则 isInsideSandbox 的 startsWith 恒失配
+    pluginDir = realpathSync(mkdtempSync(join(tmpdir(), 'esm-loader-unit-')))
+    outsideUrl = pathToFileURL(join(dirname(pluginDir), 'outside.mjs')).href
+    loader = loadLoaderHooks()
+    process.env.TAIJI_PLUGIN_SANDBOX_DIR = pluginDir
+    loader.initialize()
+  })
+
+  afterEach(() => {
+    delete process.env.TAIJI_PLUGIN_SANDBOX_DIR
+    rmSync(pluginDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('initialize: env 缺失 → fail-closed throw（沙箱进程启动即失败，显式暴露 wiring 配置问题）', () => {
+    delete process.env.TAIJI_PLUGIN_SANDBOX_DIR
+    expect(() => loadLoaderHooks().initialize()).toThrow(/TAIJI_PLUGIN_SANDBOX_DIR/)
+  })
+
+  it('TC1: node: 前缀黑名单内置被拦截（逐条遍历 SSOT 黑名单 → PERMISSION_DENIED，且不触达 resolver）', async () => {
+    for (const name of BLOCKED_BUILTINS) {
+      const specifier = `node:${name}`
+      const counter = countingNextResolve(specifier)
+      const err = await rejectReason(() => loader.resolve(specifier, { parentURL: insideUrl('a.mjs') }, counter.next))
+      expect(err.code, specifier).toBe('PERMISSION_DENIED')
+      expect(err.message, specifier).toContain(`import('${specifier}') is blocked`)
+      // 黑名单先于解析短路：被拦的 import 根本不应走到 Node resolver
+      expect(counter.calls(), specifier).toBe(0)
+    }
+  })
+
+  it('TC5: 裸内置名被拦截（无 node: 前缀，ESM 中 "fs" 等形态）', async () => {
+    for (const name of ['fs', 'child_process', 'worker_threads', 'module']) {
+      const err = await rejectReason(() => loader.resolve(name, { parentURL: insideUrl('a.mjs') }, nextResolveTo(name)))
+      expect(err.code, name).toBe('PERMISSION_DENIED')
+      expect(err.message, name).toContain(`import('${name}') is blocked`)
+    }
+  })
+
+  it('TC2: 安全内置模块放行（node:path / node:util 过黑名单后按 node: scheme 解析结果放行）', async () => {
+    for (const specifier of ['node:path', 'node:util']) {
+      const result = await loader.resolve(specifier, { parentURL: insideUrl('a.mjs') }, nextResolveTo(specifier))
+      expect(result.url).toBe(specifier)
+    }
+  })
+
+  it('TC3: 相对路径出界被拦截（解析结果不在 pluginDir 内 → PERMISSION_DENIED）', async () => {
+    const err = await rejectReason(() =>
+      loader.resolve('../outside.mjs', { parentURL: insideUrl('a.mjs') }, nextResolveTo(outsideUrl)),
+    )
+    expect(err.code).toBe('PERMISSION_DENIED')
+    expect(err.message).toContain("import('../outside.mjs') resolves outside plugin directory")
+  })
+
+  it('TC4: pluginDir 内相对 import 放行', async () => {
+    const target = insideUrl('good.mjs')
+    const result = await loader.resolve('./good.mjs', { parentURL: insideUrl('a.mjs') }, nextResolveTo(target))
+    expect(result.url).toBe(target)
+  })
+
+  it('TC4b: pluginDir 内绝对路径 import 放行（路径类分支的绝对形态）', async () => {
+    const target = insideUrl('abs.mjs')
+    const result = await loader.resolve(join(pluginDir, 'abs.mjs'), { parentURL: insideUrl('a.mjs') }, nextResolveTo(target))
+    expect(result.url).toBe(target)
+  })
+
+  it('TC9: 非 file:// 非 npm 裸名的 scheme 一律拦截（data: / blob: / http: 逃逸向量，MF-1）', async () => {
+    const specifiers = [
+      'data:text/javascript,export const x=1',
+      'blob:https://example.com/uuid',
+      'http://evil.example.com/mod.mjs',
+    ]
+    for (const specifier of specifiers) {
+      const err = await rejectReason(() => loader.resolve(specifier, { parentURL: insideUrl('a.mjs') }, nextResolveTo(specifier)))
+      expect(err.code, specifier).toBe('PERMISSION_DENIED')
+      expect(err.message, specifier).toContain('blocked scheme')
+    }
+  })
+
+  it('S1-W3: 裸 npm 名解析出界被拦截（node_modules 向上遍历命中沙箱外副本）', async () => {
+    const err = await rejectReason(() =>
+      loader.resolve('evil-dep', { parentURL: insideUrl('a.mjs') }, nextResolveTo(outsideUrl)),
+    )
+    expect(err.code).toBe('PERMISSION_DENIED')
+    expect(err.message).toContain('resolves outside plugin directory')
+  })
+
+  it('S1-W3 正例: 裸 npm 名解析落在 pluginDir 内放行', async () => {
+    const target = insideUrl('node_modules/dep/index.js')
+    const result = await loader.resolve('dep', { parentURL: insideUrl('a.mjs') }, nextResolveTo(target))
+    expect(result.url).toBe(target)
+  })
+
+  it('非插件代码一律放行（parentURL 在沙箱外：bootstrap / loader 自身不经拦截）', async () => {
+    const counter = countingNextResolve('node:fs')
+    const result = await loader.resolve('node:fs', { parentURL: outsideUrl }, counter.next)
+    expect(result.url).toBe('node:fs')
+    expect(counter.calls()).toBe(1)
+  })
+})
+
+describe('plugin-esm-loader 源文件结构（打包验证的源层检查）', () => {
+  it('TC7: hooks 导出 + self-register + realpath 规范化', () => {
+    // 对应 TC7（打包验证的源文件层检查）：hooks 先赋值后 self-register 是
+    // resolve 生效的前提，realpath 规范化修复 macOS /var→/private/var 失配。
+    // 不 require 该模块（self-register 会污染 vitest 的 ESM loader），读源断言。
+    const src = readFileSync(LOADER_PATH, 'utf-8')
+    expect(src).toContain('module.exports = { initialize, resolve }')
+    expect(src).toContain('register(pathToFileURL(__filename).href)')
+    expect(src).toContain('realpathSync')
+  })
+})
+
+// ── 门控组：真实 fork + --import + 真实 ESM import 的端到端冒烟 ──────
+// 「代码 + OS 组合行为」（Node 真调 hook、错误真冒泡成 import 失败）无完成信号可等，
+// 本地默认跳过；拦截决策本身已由上方 in-process 组逐条覆盖。
 
 interface ImportResult {
   label: string
@@ -69,122 +314,24 @@ async function runImports(
   return resultsPromise
 }
 
-describe('plugin-esm-loader sandbox interception', () => {
-  let pluginDir = ''
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `plugin-esm-loader 端到端冒烟（真实 fork + --import + 真实 ESM import）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
+    let pluginDir = ''
 
-  afterEach(() => {
-    if (pluginDir) rmSync(pluginDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-  })
-
-  function setupSandbox(): void {
-    pluginDir = mkdtempSync(join(tmpdir(), 'esm-loader-plugin-'))
-    // 插件测试文件（pluginDir 内）：内部 import 触发 loader 拦截
-    writeFileSync(join(pluginDir, 'good.mjs'), 'export const value = 42\n')
-    writeFileSync(join(pluginDir, 'inner-import.mjs'), "import './good.mjs'\nexport const ok = true\n")
-    writeFileSync(join(pluginDir, 'bad-builtin.mjs'), "import 'node:fs'\n")
-    writeFileSync(join(pluginDir, 'bad-module.mjs'), "import 'node:module'\n")
-    writeFileSync(join(pluginDir, 'bad-bare.mjs'), "import 'fs'\n")
-    writeFileSync(join(pluginDir, 'bad-outside.mjs'), "import '../outside.mjs'\n")
-    // 出界目标放 pluginDir 父目录（../outside.mjs 解析目标），保证拦截因边界而非文件缺失
-    writeFileSync(join(dirname(pluginDir), 'outside.mjs'), 'export const value = 1\n')
-  }
-
-  function pluginFile(name: string): string {
-    return pathToFileURL(join(pluginDir, name)).href
-  }
-
-  it('TC1: node: 前缀内置模块被拦截（node:fs → PERMISSION_DENIED）', async () => {
-    setupSandbox()
-    const results = await runImports({ TAIJI_PLUGIN_SANDBOX_DIR: pluginDir }, [
-      { label: 'bad-builtin', url: pluginFile('bad-builtin.mjs') },
-    ])
-    expect(results[0].ok).toBe(false)
-    expect(results[0].error).toContain('PERMISSION_DENIED')
-  }, TIMEOUT_MS)
-
-  it('TC2: 安全内置模块放行（node:path / node:util）', async () => {
-    setupSandbox()
-    // node:path 等安全模块不被拦：插件文件内部 import 验证
-    writeFileSync(join(pluginDir, 'safe-builtin.mjs'), "import 'node:path'\nimport 'node:util'\nexport const ok = true\n")
-    const results = await runImports({ TAIJI_PLUGIN_SANDBOX_DIR: pluginDir }, [
-      { label: 'safe-builtin', url: pluginFile('safe-builtin.mjs') },
-    ])
-    expect(results[0].ok).toBe(true)
-  }, TIMEOUT_MS)
-
-  it('TC3: 相对路径出界被拦截（resolve 后不在 pluginDir 内）', async () => {
-    setupSandbox()
-    const results = await runImports({ TAIJI_PLUGIN_SANDBOX_DIR: pluginDir }, [
-      { label: 'bad-outside', url: pluginFile('bad-outside.mjs') },
-    ])
-    expect(results[0].ok).toBe(false)
-    expect(results[0].error).toContain('PERMISSION_DENIED')
-  }, TIMEOUT_MS)
-
-  it('TC4: pluginDir 内相对 import 放行', async () => {
-    setupSandbox()
-    const results = await runImports({ TAIJI_PLUGIN_SANDBOX_DIR: pluginDir }, [
-      { label: 'inner-import', url: pluginFile('inner-import.mjs') },
-    ])
-    expect(results[0].ok).toBe(true)
-  }, TIMEOUT_MS)
-
-  it('TC5: 裸内置名被拦截（import("fs") 无 node: 前缀）', async () => {
-    setupSandbox()
-    const results = await runImports({ TAIJI_PLUGIN_SANDBOX_DIR: pluginDir }, [
-      { label: 'bad-bare', url: pluginFile('bad-bare.mjs') },
-    ])
-    expect(results[0].ok).toBe(false)
-    expect(results[0].error).toContain('PERMISSION_DENIED')
-  }, TIMEOUT_MS)
-
-  it('TC6: env 缺失 fail-closed（loader initialize throw → 子进程启动失败）', async () => {
-    const child = fork(FIXTURE_PATH, [], {
-      execArgv: ['--import', LOADER_PATH],
-      env: { ...process.env },
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    afterEach(() => {
+      if (pluginDir) rmSync(pluginDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     })
-    const exitPromise = new Promise<number | null>((resolve) => {
-      child.on('exit', (code) => resolve(code))
-      child.on('error', () => resolve(null))
-    })
-    // 不给 run 消息——loader initialize 阶段即失败，进程不会进入消息循环
-    const code = await exitPromise
-    expect(code).not.toBe(0)
-  }, TIMEOUT_MS)
 
-  it('TC8: node:module 被拦截（createRequire 绕过链第一环，M6a-01）', async () => {
-    setupSandbox()
-    const results = await runImports({ TAIJI_PLUGIN_SANDBOX_DIR: pluginDir }, [
-      { label: 'bad-module', url: pluginFile('bad-module.mjs') },
-    ])
-    expect(results[0].ok).toBe(false)
-    expect(results[0].error).toContain('PERMISSION_DENIED')
-  }, TIMEOUT_MS)
-
-  it('TC9: data:/blob: URL 沙箱逃逸被拦截（MF-1：插件代码 import 非 file:// 非 npm 裸名 scheme 一律拒绝）', async () => {
-    setupSandbox()
-    // 插件代码 import data: URL —— MF-1 逃逸向量：
-    // data: 模块内的 node: import，parentURL 为 data: URL（非 file://）→ isInsideSandbox 短路 → 黑名单绕过。
-    // 修复后插件代码发起的 data:/blob:/http: 等 import 在 resolve 阶段即被拒绝。
-    writeFileSync(
-      join(pluginDir, 'bad-data.mjs'),
-      "import 'data:text/javascript,export const x=1'\n",
-    )
-    const results = await runImports({ TAIJI_PLUGIN_SANDBOX_DIR: pluginDir }, [
-      { label: 'bad-data', url: pluginFile('bad-data.mjs') },
-    ])
-    expect(results[0].ok).toBe(false)
-    expect(results[0].error).toContain('PERMISSION_DENIED')
-  }, TIMEOUT_MS)
-
-  it('TC7: loader 源文件结构正确（hooks 导出 + self-register + realpath 规范化）', () => {
-    // 对应 TC7（打包验证的源文件层检查）：hooks 先赋值后 self-register 是
-    // resolve 生效的前提，realpath 规范化修复 macOS /var→/private/var 失配。
-    // 不 require 该模块（self-register 会污染 vitest 的 ESM loader），读源断言。
-    const src = readFileSync(LOADER_PATH, 'utf-8')
-    expect(src).toContain('module.exports = { initialize, resolve }')
-    expect(src).toContain('register(pathToFileURL(__filename).href)')
-    expect(src).toContain('realpathSync')
-  })
-})
+    it('TC1-e2e: 真实 ESM import node:fs 被 loader 拦截（PERMISSION_DENIED 冒泡为 import 失败）', async () => {
+      pluginDir = mkdtempSync(join(tmpdir(), 'esm-loader-plugin-'))
+      // 插件测试文件（pluginDir 内）：内部 import 触发 loader 拦截
+      writeFileSync(join(pluginDir, 'bad-builtin.mjs'), "import 'node:fs'\n")
+      const results = await runImports({ TAIJI_PLUGIN_SANDBOX_DIR: pluginDir }, [
+        { label: 'bad-builtin', url: pathToFileURL(join(pluginDir, 'bad-builtin.mjs')).href },
+      ])
+      expect(results[0].ok).toBe(false)
+      expect(results[0].error).toContain('PERMISSION_DENIED')
+    }, TIMEOUT_MS)
+  },
+)

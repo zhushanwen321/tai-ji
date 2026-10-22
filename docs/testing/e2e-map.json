@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发范围的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写侧唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布范围一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域：cw 剧本族 mock 探针轨 + 真 pi 全链路真机冒烟轨 + managed session 死亡通知真机轨） / REMOTE（远程访问域：手机浏览器 LAN 直连真机/仿真验收） / TERMINAL（终端多实例真实 app 轨：切换条多实例 / 实例级生命周期 / 编号不复用 / 世代重置与对账） / MCP（MCP 服务器管理域真机子集） / BTASK（bash 后台任务域：完成通知入账全链真机轨） / DELIVERY（统一消息投递域：文本车道磁盘 outbox 崩溃恢复，mock 单测轨 + kill -9 runtime 真进程轨双层口径；真机 collect 挂起收取链） / CTRL（subagent control 通道集成轨：server × 真实引擎 × 假 pi） / NETPROXY（LLM 网络代理分流域：mock 代理/SOCKS5 工具自测 + 分流前提漂移探针 + extension 三连） / ARCHIVE（session 归档域：归档/恢复/彻底删除 mock 轨行为用例）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写侧唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布范围一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域：cw 剧本族 mock 探针轨 + 真 pi 全链路真机冒烟轨 + managed session 死亡通知真机轨） / REMOTE（远程访问域：手机浏览器 LAN 直连真机/仿真验收） / TERMINAL（终端多实例真实 app 轨：切换条多实例 / 实例级生命周期 / 编号不复用 / 世代重置与对账） / MCP（MCP 服务器管理域真机子集） / BTASK（bash 后台任务域：完成通知入账全链真机轨） / DELIVERY（统一消息投递域：文本车道磁盘 outbox 崩溃恢复，mock 单测轨 + kill -9 runtime 真进程轨双层口径；真机 collect 挂起收取链） / CTRL（subagent control 通道集成轨：server × 真实引擎 × 假 pi） / NETPROXY（LLM 网络代理分流域：mock 代理/SOCKS5 工具自测 + 分流前提漂移探针 + extension 三连） / ARCHIVE（session 归档域：归档/恢复/彻底删除 mock 轨行为用例） / INTEG（集成测试门控轨：真进程 / 真实 IO 用例，门控 = TAIJI_TEST_INTEGRATION，本地默认跳过、CI 或按改动范围启用；id 序号按包顺序分配）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发范围）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -3070,6 +3070,242 @@
       "owner": "packages/renderer",
       "authority": ".githooks/check_edge_fade_scope.mjs",
       "note": "R2 态：真实运行形态 = pre-commit 按路径触发（0.8 段，触发范围 = packages/**/*.{vue,ts} staged 文件，不设独立 SKIP 开关；接线 SSOT = .githooks/install-hooks.sh）。判定唯一源 = check_edge_fade_scope.mjs（白名单 ALLOWLIST 同文件，新增条目须附裁决理由；登记于 AGENTS.md 豁免标记盘点）。对 staged renderer 文件的强制拦截不经本对账（pre-commit 直接跑检查本体），本 rule run 面 = 脚本自身或 hook 模板变更时的全仓自含冒烟（git ls-files 扫描 + 两行正则，毫秒级）。无 vitest 测试资产——判定逻辑为两行正则匹配白名单差集，复杂度不配独立语义测试。2026-10-21 随消费范围收敛批落地（同批撤 SessionList/FileView/GitPanel/DetailPane/BackgroundTaskDetailPanel 五处接线）。"
+    },
+    {
+      "id": "E2E-INTEG-01",
+      "summary": "usage 队列失效收敛集成轨：事件风暴后 usage 实例值收敛 get_session（真 pi 子进程 + 真 extension jiti 冷编译，TAIJI_TEST_INTEGRATION 门控）",
+      "scope": [
+        "packages/runtime/src/services/session/session-service.ts",
+        "packages/runtime/src/services/session/replicated-state.ts",
+        "packages/runtime/src/services/session/replicated-states.config.ts",
+        "packages/runtime/src/infra/pi/event-adapter.ts",
+        "packages/runtime/src/infra/pi/pi-protocol.ts",
+        "packages/runtime/src/interfaces.ts",
+        "packages/runtime/src/services/ports/pi-engine.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/usage-queue-commands-invalidation.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/usage-queue-commands-invalidation.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态 + 文件级集成轨成员：路径登记在 packages/runtime/vitest.config.ts 的 integration project（include 登记 + main 的 exclude 同步加入，串行尾组），门控 = TAIJI_TEST_INTEGRATION（SSOT = test-guard/integration-gate.ts），本地不设 env 时组内用例经 describe.skipIf 跳过、CI test-runtime job 设 env=1 真跑。触发条件 = scope 内 usage 实例快照与失效收敛链（session-service / replicated-state / replicated-states.config / event-adapter / pi-protocol / interfaces / ports.pi-engine）任一 diff 命中时，开发阶段空载串行跑本文件。断言本质 = 实例快照 ≡ 权威 RPC 派生视图收敛；serial=真 的理由 = spawn 真 pi 进程 + 真 extension jiti 冷编译，CPU 满载下无稳定上界（整治判据见 docs/todo/test-single-layer-cleanup.md）。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
+    },
+    {
+      "id": "E2E-INTEG-02",
+      "summary": "attach 生命周期集成轨：attach/detach 广播链协议等价（真 pi 子进程 + 会话文件落盘断言，TAIJI_TEST_INTEGRATION 门控）",
+      "scope": [
+        "packages/runtime/src/infra/pi/session-attach-assert.ts",
+        "packages/runtime/src/services/session/session-fork.ts",
+        "packages/runtime/src/services/session/restore-seeding.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/attach-lifecycle.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/attach-lifecycle.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态 + 文件级集成轨成员（同 E2E-INTEG-01 的登记形态与门控口径）。触发条件 = scope 内 attach 断言辅助 / 会话 fork / 恢复播种三处 diff 命中。断言本质 = attach/detach 广播链协议等价 + pi session 文件落盘形态；serial=真 的理由同 E2E-INTEG-01（真 pi 子进程 + jiti 冷编译）。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
+    },
+    {
+      "id": "E2E-INTEG-03",
+      "summary": "broadcast ≡ get_state 集成轨：推送与拉取终态等价（真 pi 子进程 + core reducer 回放比对，TAIJI_TEST_INTEGRATION 门控）",
+      "scope": [
+        "packages/runtime/src/infra/pi/event-adapter.ts",
+        "packages/runtime/src/infra/pi/pi-protocol.ts",
+        "packages/runtime/src/services/session/event-interpreter.ts",
+        "packages/runtime/src/services/message-bus/message-bus.ts",
+        "packages/runtime/src/services/message-bus/types.ts",
+        "packages/runtime/src/services/session/replicated-state.ts",
+        "packages/runtime/src/services/session/replicated-states.config.ts",
+        "packages/runtime/src/services/ports/pi-engine.ts",
+        "packages/core/src/domain/chat/store.ts",
+        "packages/core/src/domain/chat/apply-entry.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/broadcast-getstate.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/broadcast-getstate.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态 + 文件级集成轨成员（同 E2E-INTEG-01 的登记形态与门控口径）。触发条件 = scope 内事件翻译 / 事件解释器 / message-bus / replicated-state 收敛 / core chat store 与 apply-entry reducer 任一 diff 命中（ADR-0097 推管即时拉管正确的不变量面）。断言本质 = 推送 ≡ 拉取；serial=真 的理由同 E2E-INTEG-01。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
+    },
+    {
+      "id": "E2E-INTEG-04",
+      "summary": "混沌注入收敛集成轨：乱序 / 丢失 / 重放三类消息扰动后权威拉取自愈（真 pi 子进程 + core reducer 回放比对，TAIJI_TEST_INTEGRATION 门控）",
+      "scope": [
+        "packages/runtime/src/infra/pi/event-adapter.ts",
+        "packages/runtime/src/infra/pi/pi-protocol.ts",
+        "packages/runtime/src/services/session/event-interpreter.ts",
+        "packages/core/src/domain/chat/store.ts",
+        "packages/core/src/domain/chat/apply-entry.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/chaos.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/chaos.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态 + 文件级集成轨成员（同 E2E-INTEG-01 的登记形态与门控口径）。触发条件 = scope 内事件翻译 / 事件解释器 / core chat store 与 apply-entry reducer 任一 diff 命中。断言本质 = 事件乱序自愈（乱序可检测脏化 + 丢失留孤儿可检测 + 重放双通道收敛无冗余，权威拉取恒得同一快照）；serial=真 的理由同 E2E-INTEG-01。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
+    },
+    {
+      "id": "E2E-INTEG-05",
+      "summary": "出站队列 turn 边界注入集成轨：streaming 期间提交第二条的排队与投递语义（真 pi 子进程，TAIJI_TEST_INTEGRATION 门控）",
+      "scope": [
+        "packages/runtime/src/services/session/session-delivery-registry.ts",
+        "packages/runtime/src/services/session/event-interpreter.ts",
+        "packages/runtime/src/services/session/types.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/send-queue-e2e.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/send-queue-e2e.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态 + 文件级集成轨成员（同 E2E-INTEG-01 的登记形态与门控口径）。触发条件 = scope 内投递注册表 / 事件解释器占用转移 / session 视图类型任一 diff 命中。断言本质 = 出站队列在 turn 边界的注入与投递序；serial=真 的理由同 E2E-INTEG-01。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
+    },
+    {
+      "id": "E2E-INTEG-06",
+      "summary": "压缩窗口投递集成轨：压缩中提交两条 → 窗口内零投递 → 压缩结束按序逐条到达并标记确认（真 pi 子进程，TAIJI_TEST_INTEGRATION 门控）",
+      "scope": [
+        "packages/runtime/src/services/session/session-delivery-registry.ts",
+        "packages/runtime/src/services/session/event-interpreter.ts",
+        "packages/runtime/src/services/session/types.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态 + 文件级集成轨成员（同 E2E-INTEG-01 的登记形态与门控口径）。触发条件同 E2E-INTEG-05（投递注册表 / 占用转移 / session 视图类型），另含 smart-context 通知与续跑通路变更（该面由 E2E-EQUIV-05 同资产登记，两 rule 的 run 命令不同：本轨带 TAIJI_TEST_INTEGRATION=1 走 integration project，E2E-EQUIV-05 直跑该文件（不经本门控 env，落 integration 串行尾组））。断言本质 = 压缩窗口零投递 + 按序到达 + 标记确认 + delivered；serial=真 的理由同 E2E-INTEG-01。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
+    },
+    {
+      "id": "E2E-INTEG-07",
+      "summary": "完成回灌链集成轨：子 session settle → ClaimLedger 兑现 → respond 目标投递（真 pi 子进程 + session-manager watch 协议，TAIJI_TEST_INTEGRATION 门控）",
+      "scope": [
+        "packages/runtime/src/services/session/session-delivery-registry.ts",
+        "packages/runtime/src/services/session/notify-claims.ts",
+        "packages/runtime/src/transport/session-manager-handler.ts",
+        "packages/runtime/src/services/session/event-interpreter.ts",
+        "packages/runtime/src/services/session/types.ts",
+        "packages/runtime/src/infra/pi/session-store.ts",
+        "packages/extension-protocol/src/extensions/session-manager/**"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/completion-backflow-e2e.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/completion-backflow-e2e.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态 + 文件级集成轨成员（同 E2E-INTEG-01 的登记形态与门控口径）。触发条件 = scope 内 ClaimLedger 账本 / respond 传导 / watch 协议范围 / 投递注册表 / pi session 存储任一 diff 命中。断言本质 = 完成回灌链兑现与投递；serial=真 的理由同 E2E-INTEG-01。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
+    },
+    {
+      "id": "E2E-INTEG-08",
+      "summary": "思考等级生效链集成轨：reasoning 门控钳回 off 的回执 ≡ get_state 端到端检查（真 pi 子进程，TAIJI_TEST_INTEGRATION 门控）",
+      "scope": [
+        "packages/runtime/src/services/session/session-service.ts",
+        "packages/runtime/src/services/ports/pi-engine.ts",
+        "packages/runtime/src/interfaces.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/thinking-level-effective-e2e.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/thinking-level-effective-e2e.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态 + 文件级集成轨成员（同 E2E-INTEG-01 的登记形态与门控口径）。触发条件 = scope 内 session 服务 / pi 引擎端口 / 运行时接口任一 diff 命中（另：pi 版本 bump 时属本资产的重验时机，由 E2E-EQUIV-02/03/04 同族 on-pi-bump 规则承接触发信号）。断言本质 = pi 边界回执保险丝（reasoning:false 模型 set high → 回执=get_state=off；正常模型回执=请求值）；serial=真 的理由同 E2E-INTEG-01。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
+    },
+    {
+      "id": "E2E-INTEG-09",
+      "summary": "skill 展开 golden diff 集成轨：pi 注入器展开 ≡ 会话 JSONL 落盘逐字对照（真 pi 子进程，TAIJI_TEST_INTEGRATION 门控）",
+      "scope": [
+        "packages/runtime/src/services/session/skill-injector.ts",
+        "packages/runtime/src/services/ports/pi-engine.ts",
+        "packages/shared/src/skill-marker.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态 + 文件级集成轨成员（同 E2E-INTEG-01 的登记形态与门控口径）。触发条件 = scope 内 skill 注入器 / pi 引擎端口 / skill 标记构造任一 diff 命中；pi 版本 bump 的重验时机另由 E2E-EQUIV-04（on-pi-bump）承接——两条 rule 同一 asset 的触发范围拆分（trigger 单值纪律）。断言本质 = 注入器展开文本 ≡ JSONL 落盘逐字一致（golden diff 属集成回归，本地默认跳过）；serial=真 的理由同 E2E-INTEG-01。"
+    },
+    {
+      "id": "E2E-INTEG-10",
+      "summary": "SkillRegistry watcher 真实 fs 集成轨：已 watch 目录下新建 skill 子目录必触发 rescan 与通知（真实 chokidar + 跨进程 spawn，TAIJI_TEST_INTEGRATION 门控）",
+      "scope": [
+        "packages/runtime/src/services/skill-registry.ts",
+        "packages/shared/src/provider.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/skill-registry-watcher-real.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run test/skill-registry-watcher-real.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态 + 文件级集成轨成员（同 E2E-INTEG-01 的登记形态与门控口径）。触发条件 = scope 内 SkillRegistry（watcher 建立 / rescan / onChange 通知）diff 命中。断言本质 = 真实 fs.watch 事件 → rescan → global/project scope 通知到达；serial=真 的理由 = 真实磁盘 + 跨进程 spawn + 12s 检测 deadline，macOS fs.watch 事件到达无稳定上界，逻辑面另有假 watcher 桩的同文件兄弟用例覆盖。"
     }
   ]
 }

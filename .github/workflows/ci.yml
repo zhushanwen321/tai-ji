@@ -162,8 +162,14 @@ jobs:
         # 等价性基线双轨（TEST-STRATEGY.md §4）：CI 无 pi 凭证（属用户基础设施，不注入
         # secrets），显式声明本环境只跑凭证无关子集——真实 LLM turn 用例 skip 且理由
         # 注入 describe 名（探测机制 SSOT = equivalence/pi-fixture.ts REAL_PI_READY）。
+        # 集成测试门控（SSOT = test-guard/integration-gate.ts，约定见 TEST-STRATEGY.md
+        # 「集成测试门控约定」）：本地默认跳过的真进程 / 真 IO 用例在此显式启用——CI 是
+        # 它们的常驻执行环境。登记清单 = docs/testing/e2e-map.json 的 E2E-INTEG-* 规则
+        # （on-diff / L2 / serial）；执行形态 = packages/runtime vitest.config.ts 的
+        # integration project（串行尾组，主组完整结束后才开跑）。
         env:
           TAIJI_SKIP_REAL_PI: '1'
+          TAIJI_TEST_INTEGRATION: '1'
         # [HISTORICAL] 勿改回 `run test -- --flags` 形态：pnpm@10 恢复 npm 式 `--` 透传后，
         # flag 落在 `--` 之后被 cac 当作文件过滤器，reporter/outputFile 全部静默失效
         # （2026-09-14 排查：junit 实际写 config 定义的 test-results/vitest-junit.xml，

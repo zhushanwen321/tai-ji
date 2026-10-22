@@ -24,12 +24,17 @@
  *
  * faux LLM 轨（L2.5 翻轨）：验证对象是帧链编排与投递层混沌收敛，非模型智能——语料 turn 的
  * 响应由 fauxResponses 脚本固定（bash toolCall + 文本回复，--approve 真实执行），断言语义与
- * 翻轨前一致。门控 FAUX_PI_READY（只判 binary，凭证无关、CI 可跑，约定见 pi-fixture.ts 文件头）。
+ * 翻轨前一致。门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（SSOT = test-guard/integration-gate.ts：
+ * 本地默认跳过、CI 或按改动范围触发时真跑）。
  */
 import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest'
 import { effectScope } from 'vue'
 import type { ServerMessage } from '@taiji/shared'
-import { spawnPiFixture, FAUX_PI_READY, FAUX_PI_SKIP_REASON, type PiFixture } from './pi-fixture.js'
+import { spawnPiFixture, type PiFixture } from './pi-fixture.js'
+import {
+  INTEGRATION_TESTS_ENABLED,
+  INTEGRATION_TESTS_SKIP_REASON,
+} from '../../../../../test-guard/integration-gate.ts'
 import { translate } from '../../infra/pi/event-adapter.js'
 import type { PiEvent } from '../../infra/pi/pi-protocol.js'
 import { EventInterpreter } from '../../services/session/event-interpreter.js'
@@ -67,8 +72,8 @@ function hasToolUse(entry: PiEntry): boolean {
   )
 }
 
-describe.skipIf(!FAUX_PI_READY)(
-  `W22 equivalence: 混沌注入 → 收敛权威快照（faux-pi 子进程${FAUX_PI_SKIP_REASON ? `｜skip：${FAUX_PI_SKIP_REASON}` : ''}）`,
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `W22 equivalence: 混沌注入 → 收敛权威快照（faux-pi 子进程，集成测试门控${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}）`,
   () => {
   let fixture: PiFixture | null = null
 

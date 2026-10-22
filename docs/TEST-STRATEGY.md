@@ -68,6 +68,42 @@ node scripts/verify-scheduler-e2e.cjs
 - **写删目标约束**：新测试的写删目标必须 `mkdtempSync(join(tmpdir(), ...))` 自建自删，禁止删除 `getSessionsDir()` 等共享推导路径；禁止绕过 guard（restore 原始 fs / 子进程删真实目录）
 - **运行边界 [HISTORICAL]**（2026-09-16 事故）：禁止从包目录外触发 vitest 扫描式跑测——根目录是唯一合法全仓入口（防线齐备）；单包测试固定 `cd <包目录> && npx vitest run`（见上「运行命令（cwd 敏感）」）。根目录入口指 test-guard 防线覆盖位置，不是可执行全量跑法——根级兜底 config 无各包 environment，DOM 测试从根跑全挂（document is not defined）；全量回归 = 改动范围 + 依赖闭包，逐个子包目录跑 `vitest run`
 
+### 集成测试门控约定（TAIJI_TEST_INTEGRATION）
+
+> 门控唯一入口 = `test-guard/integration-gate.ts`（env 名不许在别处重复定义）。定位：把依赖真实进程 / 真实 IO / 真实挂钟窗口的用例（spawn 真子进程、真磁盘吞吐、真实 fs.watch 事件、跨进程互斥）移出默认单测组——这类用例没有确定性完成信号可等，负载下拉长无稳定上界，不满足单测层「只测逻辑、高负载下也极快」的定位（判据与整治清单见 [docs/todo/test-single-layer-cleanup.md](todo/test-single-layer-cleanup.md)）。
+
+**方向，与既有四种门控的分工**：REAL_PI_READY / TAIJI_SKIP_REAL_PI / TAIJI_SKIP_REAL_ENGINE_E2E / ENGINE_CONFORMANCE_LIVE 按「凭证 / binary 是否在位」判定可用性，方向是「本地跑、CI 跳过」；本门控方向相反——**本地默认跳过、CI 或按改动范围启用**，只按「是否显式要求跑集成组」判定。两轴正交：集成组用例可同时受 REAL_PI_READY 约束（无凭证环境仍 skip）。
+
+**env 语义**：`TAIJI_TEST_INTEGRATION` 取值 `1` / `true` 生效，其余（含未设置）为关闭。关闭 = 门控用例本地跳过；开启 = CI 或按改动范围触发时真跑。
+
+**helper 与 import 写法**（skip 理由注入 describe 名，显式可见、不静默消失）：
+
+```ts
+// 相对深度按文件位置上跳：packages/runtime/src/__tests__/equivalence/ → 5 层；
+// packages/runtime/test/ → 3 层。其余包按同一公式上跳到仓库根的 test-guard/。
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../test-guard/integration-gate.ts'
+
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `<describe 名>${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => { /* 真进程 / 真 IO 用例 */ },
+)
+```
+
+**两种形态与选型**：
+
+| 形态 | 写法 | 何时用 |
+|------|------|--------|
+| 用例级门控 | 文件留在默认组（main project），只把需门控的 describe 用 `describe.skipIf(!INTEGRATION_TESTS_ENABLED)` 包裹 | 文件内既有快用例又有真进程 / 真 IO 用例——快用例继续占默认组 |
+| 文件级集成组 | 整文件迁出默认组：路径登记进所在包 `vitest.config.ts` 的 integration project（`include`），并加进 main project 的 `exclude`（漏加 = 同一文件双执行）；该 project `fileParallelism: false`（串行尾组）且经 `guardProjectSetup` 挂双防线 | 整文件都是门控用例，没有快用例值得留在默认组 |
+
+文件级集成组的维护契约写在各包 config 文件头（现行范例 = `packages/runtime/vitest.config.ts`：main 满并行组 / real-pi 串行尾组 / integration 串行尾组三池分工）。新建 integration project 漏挂双防线由 `scripts/check-vitest-guard.mjs` 第 5 条拦截。
+
+**引擎包特例**：`packages/pi-subagent-cli` 与 `packages/zcode-subagent-cli` 受引擎包边界检查（`scripts/check-engine-package-boundary.mjs`）约束——src 内相对说明符不得逃出包根，测试文件**不** import 仓库根的 `test-guard/integration-gate.ts`，改 import 包内副本（`packages/pi-subagent-cli/src/__tests__/integration-gate.local.ts` 与 `packages/zcode-subagent-cli/src/__tests__/integration-gate.local.ts`，同语义读同名 env、注释指回本节；改语义时与 SSOT 同步）。env 名的语义权威仍在 `test-guard/integration-gate.ts`，包内副本只是边界约束下的投影。
+
+**e2e-map 登记要求**：两种形态的资产都要在 [docs/testing/e2e-map.json](testing/e2e-map.json) 登记 R2 规则——`trigger: on-diff`、`layer: L2`、`serial: true`、`run` 命令形如 `TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run <文件>`；`scope` 取该测试 import 的被测源文件（宁全勿缺）；`id` 取 `E2E-INTEG-两位序号`（域段只允许一段——`scripts/validate-e2e-map.mjs` 的 id 正则 `E2E-<域>-<两位序号>` 不接受 `INTEG-RT` 式两段域，包归属落 `owner` 字段；域段已登记在 `_meta.fields.id`）。现行 10 条 = runtime 集成组全体成员。防漏登记门禁 = `scripts/select-affected-e2e.mjs --check`，结构校验 = `scripts/validate-e2e-map.mjs`。
+
+**CI 接线**：覆盖「有门控文件的包」的既有 test job 在测试步骤设 `TAIJI_TEST_INTEGRATION: '1'`（现行 = ci.yml 的 `test-runtime`）；不为此新建 job。某包新增集成组时，同 commit 给覆盖它的 test job 补同一 env。
+
 ## 3. 三视角模型 + 渲染 gate DoD [HISTORICAL — 2026-06-27「新建任务」事故]
 
 > **事故**：「新建任务」77 单测 + 24 集成全绿、tsc EXIT 0、verdict pass，用户手动打开却发现 Landing 态根本没有 composer 输入区——阻塞级 bug。根因：测试只做了构建者（白盒）视角，缺使用者/观察者两个视角。
