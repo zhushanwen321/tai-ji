@@ -27,8 +27,8 @@
  * 实底前景令牌（--accent-fg / --danger-fg / --success-fg 对各自实底）对比断言
  * （六主题统一 ≥4.5:1 WCAG AA 正文线）：六主题令牌契约的「实底必有前景令牌」规则的
  * 数值面固化。暗色族 -fg 为 color-mix(in oklch, 基色 12%, #160b0b) 公式（OKLab 混合，
- * 基色 var 以当前主题实值代入），亮色族为 #ffffff 白字覆盖；实测最低 = 朱印 accent
- * 4.57:1。warn 不设 -fg（无实底用法，见 docs/DESIGN.md §4.4），不在断言范围。
+ * 基色 var 以当前主题实值代入），亮色族为 #ffffff 白字覆盖；实测最低 = 皓 success
+ * 4.84:1（accent 最低 = 皓 4.86:1）。warn 不设 -fg（无实底用法，见 docs/DESIGN.md §4.4），不在断言范围。
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -316,7 +316,7 @@ describe('行内 code 对比（场景 2③，六主题；demo R4 弱化终态 = 
     }
   })
 
-  it('实底 -fg 对各自底色对比 ≥4.5:1（六主题 × accent/danger/success 三组；2026-10-22 实测补录：暗族 4.60–7.47 / 亮族 4.57–5.85，最低朱印 accent 4.57）', () => {
+  it('实底 -fg 对各自底色对比 ≥4.5:1（六主题 × accent/danger/success 三组；2026-10-22 名义出彩改版后实测补录：暗族 4.60–8.87 / 亮族 4.84–5.86，最低 = 皓 success 4.84:1）', () => {
     for (const theme of THEMES) {
       const raw = parseThemeRawVars(theme, ['--accent', '--accent-fg', '--danger', '--danger-fg', '--success', '--success-fg'])
       for (const name of ['accent', 'danger', 'success'] as const) {

@@ -347,11 +347,14 @@
    store.setSystem({themePreset}) 同步 <html data-theme-preset>。
    暗色族：玄 = :root 默认（无 preset）；黛蓝/暖墨 用 :root[data-theme-preset]。
    亮色族：皓 = [data-theme=light] 默认（无 preset）；青墨/朱印 用 light + preset。
-   真
+   2026-10-22 名义出彩裁决：preset 主题的 accent 按主题名义色相取值（黛蓝=蓝 /
+   暖墨=暖 / 青墨=花青 / 朱印=朱砂），不再六主题全家青玉；两族默认（玄/皓）
+   承担产品主行动色青玉，其名义（玄=青玉 / 皓=宣纸墨黑）本就如此，保持不变。
    ============================================================ */
 
 /* 黛蓝（暗 · 依稀蓝相）
-   阶梯与文字档带依稀蓝相；2026-10-17 六主题 v2 整梯上移，--bg-stage 自玄青分落
+   阶梯与文字档带依稀蓝相，accent 同取黛蓝（依稀蓝相提亮档，暗底可读）；
+   2026-10-17 六主题 v2 整梯上移，--bg-stage 自玄青分落
    （不再共享 #111114，取蓝相深底 #0e0f15）。
    --bg-sunken 不重声明：继承 :root var(--bg) 随本块自动跟随；
    --md-code-bg/fg 不重声明：继承 :root code-c 派生公式，随下方 --code-c 自动解析。 */
@@ -371,9 +374,9 @@
   --neutral-faint: #54555f;
   --neutral-ico: #8f909b;
   --neutral-ico-hover: #e9eaef;
-  --accent: #7db2a9;
-  --accent-hover: #90c4bb;
-  --accent-fg: #14211e;
+  --accent: #8b9cc8;
+  --accent-hover: #9dafdc;
+  --accent-fg: #151b28;
   --link-c: #6196f0;
   --code-c: #c99e80;
   --chart-ink: var(--neutral-fg);
@@ -398,7 +401,8 @@
 }
 
 /* 暖墨（暗 · 宣纸暖相）
-   阶梯与文字档带宣纸暖相；2026-10-17 六主题 v2 整梯上移，--bg-stage 自玄青分落
+   阶梯与文字档带宣纸暖相，accent 同取暖沙（暖相提亮档，暗底可读）；
+   2026-10-17 六主题 v2 整梯上移，--bg-stage 自玄青分落
    （取暖相深底 #100e0c，缝隙不再发蓝）。
    --bg-sunken / --md-code-bg/fg 不重声明，理由同黛蓝块。 */
 :root[data-theme-preset="nuanmo"] {
@@ -417,9 +421,9 @@
   --neutral-faint: #57534c;
   --neutral-ico: #97928a;
   --neutral-ico-hover: #e9e7e2;
-  --accent: #a2b48b;
-  --accent-hover: #b5c69e;
-  --accent-fg: #1b2013;
+  --accent: #cbbc93;
+  --accent-hover: #dfcfa6;
+  --accent-fg: #201e15;
   --link-c: #5b8fdd;
   --code-c: #d4a684;
   --chart-ink: var(--neutral-fg);
@@ -443,12 +447,12 @@
   --heat-outline: color-mix(in oklch, var(--neutral-fg) 45%, transparent);
 }
 
-/* 青墨（亮 · 宣纸花青）：共用宣纸阶梯与 [data-theme=light] 派生公式，只换 accent/link-c/code-c 颜料 + 图表墨掺花青；
+/* 青墨（亮 · 宣纸花青）：共用宣纸阶梯与 [data-theme=light] 派生公式，只换 accent（花青）/link-c/code-c 颜料 + 图表墨掺花青；
    --md-code-bg/fg 不重声明：继承 light 块 code-c 派生公式，随下方 --code-c 自动解析 */
 [data-theme="light"][data-theme-preset="qingmo"] {
-  --accent: #40775f;
-  --accent-hover: #356a52;
-  --accent-fg: #f2f7f5;
+  --accent: #356b7a;
+  --accent-hover: #265d6b;
+  --accent-fg: #f0f6f8;
   --link-c: #2d6cd4;
   --code-c: #92663a;
   --chart-ink: color-mix(in oklch, var(--accent) 45%, var(--neutral-fg));
@@ -472,15 +476,15 @@
   --heat-outline: color-mix(in oklch, var(--neutral-fg) 45%, transparent);
 }
 
-/* 朱印（亮 · 宣纸朱砂）：accent 换青玉系颜料，danger 错开为玫红防撞色 + 图表墨掺朱砂；
+/* 朱印（亮 · 宣纸朱砂）：accent 换朱砂系颜料（压暗压灰档，宣纸底可读），danger 错开为玫红防撞色 + 图表墨掺朱砂；
    --md-code-bg/fg 不重声明：继承 light 块/:root 派生公式，随本块 --code-c 自动解析；
    --danger-fg 不重声明：继承 light 块白字覆盖（demo light 族同构）；
    其余状态色（success/warn/info/reasoning）与 --*-soft 不重声明：与 light 块默认同值/公式继承，
    demo tokens.css 朱印块即只覆盖 accent 族 + danger（spec §8：preset 只覆盖实际不同的令牌） */
 [data-theme="light"][data-theme-preset="zhuyin"] {
-  --accent: #4d7a63;
-  --accent-hover: #416e56;
-  --accent-fg: #f4f8f2;
+  --accent: #9c4335;
+  --accent-hover: #8b3427;
+  --accent-fg: #faf3f0;
   --link-c: #3163c8;
   --code-c: #9a6b40;
   --chart-ink: color-mix(in oklch, var(--accent) 45%, var(--neutral-fg));
