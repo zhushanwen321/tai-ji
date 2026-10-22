@@ -1,7 +1,7 @@
 // 容器解密提取器单测：合成加密样本（同算法正向构造）+ mock key（随机 seed）。
 // 真实凭据样本绝不入库（红线）——本文件全部样本为测试运行时合成。
 
-import { createCipheriv, createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,47 +15,7 @@ import {
 	detectTraeLoginState,
 	extractTraeLogin,
 } from "../byte-crypto.ts";
-
-/** 与 IDE byteCrypto 加密方向同构的正向构造（AES 版）：明文 → 合法容器 base64。 */
-function encryptFixture(plaintext: string, seed: Uint8Array): string {
-	const derived = new Uint8Array(64);
-	for (let i = 0; i < 64; i++) {
-		derived[i] = FIXTURE_TABLE_A[i] ^ FIXTURE_TABLE_B[i];
-	}
-	const buffer = new Uint8Array(128);
-	buffer.set(new Uint8Array(createHash("sha512").update(seed).digest()), 0);
-	buffer.set(derived, 64);
-	buffer.set(new Uint8Array(createHash("sha512").update(buffer).digest()), 0);
-	const aesKey = buffer.slice(0, 16);
-	const iv = buffer.slice(16, 32);
-	const checksum = new Uint8Array(createHash("sha512").update(Buffer.from(plaintext, "utf8")).digest());
-	const plain = Buffer.concat([Buffer.from(checksum), Buffer.from(plaintext, "utf8")]);
-	const cipher = createCipheriv("aes-128-cbc", Buffer.from(aesKey), Buffer.from(iv));
-	const ciphertext = Buffer.concat([cipher.update(plain), cipher.final()]);
-	const container = Buffer.concat([Buffer.from([116, 99, 5, 16, 0, 0]), Buffer.from(seed), ciphertext]);
-	return container.toString("base64");
-}
-
-/** 与 byte-crypto.ts 抄录常量一致的 fixture 侧表（正向构造用；改动需双向同步）。 */
-const FIXTURE_TABLE_A = Uint8Array.from([
-	82, 9, 106, 213, 48, 54, 165, 56, 191, 64, 163, 158, 129, 243, 215, 251, 124, 227, 57, 130, 155, 47, 255, 135, 52,
-	142, 67, 68, 196, 222, 233, 203, 84, 123, 148, 50, 166, 194, 35, 61, 238, 76, 149, 11, 66, 250, 195, 78, 8, 46, 161,
-	102, 40, 217, 36, 178, 118, 91, 162, 73, 109, 139, 209, 37,
-]);
-const FIXTURE_TABLE_B = Uint8Array.from([
-	31, 221, 168, 51, 136, 7, 199, 49, 177, 18, 16, 89, 39, 128, 236, 95, 96, 81, 127, 169, 25, 181, 74, 13, 45, 229,
-	122, 159, 147, 201, 156, 239, 160, 224, 59, 77, 174, 42, 245, 176, 200, 235, 187, 60, 131, 83, 153, 97, 23, 43, 4,
-	126, 186, 119, 214, 38, 225, 105, 20, 99, 85, 33, 12, 125,
-]);
-
-const FIXTURE_LOGIN = {
-	token: "fixture-jwt-token-not-a-real-credential",
-	refreshToken: "fixture-refresh-token",
-	expiredAt: "2026-10-26T01:58:45.107Z",
-	refreshExpiredAt: "2027-04-10T01:58:45.107Z",
-	userId: "fixture-user-id",
-	host: "https://api.trae.cn",
-};
+import { TRAE_FIXTURE_LOGIN as FIXTURE_LOGIN, encryptTraeFixture as encryptFixture } from "./helpers/trae-container-fixture.ts";
 
 describe("decryptContainer（AES 版容器）", () => {
 	it("合法容器往返解密（校验头通过）", () => {

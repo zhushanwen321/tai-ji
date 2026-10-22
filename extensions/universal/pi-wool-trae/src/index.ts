@@ -7,20 +7,31 @@
 // - oauth 三钩子（D3）：login = storage.json 容器解密提取（用户向导显式触发时
 //   由 pi 调用一次）；refreshToken = ExchangeToken 刷新；getApiKey = 复合凭据串。
 //
-// 凭据通道说明：pi oauth 钩子的 getApiKey 只返回 string（pi-ai OAuthCredentials
-// 契约），而 SOLO 头族除 JWT 外还需 userId/machineId/soloDeviceId 三个要素——
-// 三要素与 JWT 一起编码进 apiKey 复合串（JSON），family stream 请求时解析组装。
-// 复合串不落盘（pi auth.json 只存它作为 opaque key），解开只发生在请求时刻。
+// 凭据通道说明（D2 双通道）：主通道 = models.json 羊毛 provider 条目 apiKey（taiji
+// 向导 extract 回传、宿主写入，pi 请求管线在请求时经 options.apiKey 传入）——形态为
+// 裸 JWT，设备三要素（userId/machineId/soloDeviceId）请求时从本机 storage.json 现读
+//（resolveTraeAuth）。次通道 = pi oauth 钩子（独立 pi 用户 TUI /login 形态）：
+// getApiKey 只返回 string（pi-ai OAuthCredentials 契约），三要素与 JWT 一起编码进
+// apiKey 复合串（JSON），family stream 请求时解析组装。复合串只存 pi auth.json
+//（作为 opaque key），解开只发生在请求时刻。
 
 import {
 	defineWoolExtension,
+	WOOL_CREDENTIALS_MISSING_MESSAGE,
+	type WoolCredentialAcquireData,
 	type WoolResolvedAuth,
 	type WoolStreamRequest,
 } from "@zhushanwen/pi-wool-shared";
 import type { Credential, OAuthCredentials } from "@earendil-works/pi-ai";
 import { join } from "node:path";
 
-import { extractTraeLogin, detectTraeLoginState, TRAE_EXTRACT_RECOVERY_HINT, TraeContainerError } from "./byte-crypto.ts";
+import {
+	extractTraeLogin,
+	detectTraeLoginState,
+	TRAE_EXTRACT_RECOVERY_HINT,
+	TraeContainerError,
+	type TraeStoredLogin,
+} from "./byte-crypto.ts";
 import { fetchTraeCatalog, type TraeModel } from "./catalog.ts";
 import { REFRESH_ENDPOINT, TRAE_GATEWAY_CN, buildCommonHeaders, type TraeAuthInputs } from "./protocol.ts";
 import { TRAE_CODE_RELOGIN, driveTraeStream } from "./stream.ts";
@@ -51,8 +62,9 @@ function encodeKeyBundle(auth: TraeAuthInputs): string {
 	return JSON.stringify(auth);
 }
 
-/** 运行时守卫：复合串解析（读侧不信任存储内容）。 */
-function decodeKeyBundle(raw: string | undefined): TraeAuthInputs {
+/** 运行时守卫：复合串解析（读侧不信任存储内容）。非复合串形态（如裸 JWT）返回
+ * undefined——裸令牌形态由 resolveTraeAuth 走 storage.json 设备要素通道。 */
+function parseKeyBundle(raw: string | undefined): TraeAuthInputs | undefined {
 	let parsed: unknown;
 	try {
 		parsed = raw !== undefined && raw.length > 0 ? JSON.parse(raw) : undefined;
@@ -60,9 +72,7 @@ function decodeKeyBundle(raw: string | undefined): TraeAuthInputs {
 		parsed = undefined;
 	}
 	if (typeof parsed !== "object" || parsed === null) {
-		throw new Error(
-			"Trae credential bundle is missing or malformed — re-run the extraction (provider entry → 重新提取)",
-		);
+		return undefined;
 	}
 	const record = parsed as Record<string, unknown>;
 	if (
@@ -72,7 +82,7 @@ function decodeKeyBundle(raw: string | undefined): TraeAuthInputs {
 		typeof record.machineId !== "string" ||
 		typeof record.soloDeviceId !== "string"
 	) {
-		throw new Error("Trae credential bundle fields are incomplete — re-run the extraction");
+		return undefined;
 	}
 	return {
 		token: record.token,
@@ -80,6 +90,51 @@ function decodeKeyBundle(raw: string | undefined): TraeAuthInputs {
 		machineId: record.machineId,
 		soloDeviceId: record.soloDeviceId,
 	};
+}
+
+/** 复合串缺失/形态不符 → 可操作错误（oauth 钩子凭据通道：auth.json 里的 traeBundle）。 */
+function decodeKeyBundle(raw: string | undefined): TraeAuthInputs {
+	const parsed = parseKeyBundle(raw);
+	if (parsed === undefined) {
+		throw new Error(
+			"Trae credential bundle is missing or malformed — re-run the extraction (provider entry → 重新提取)",
+		);
+	}
+	return parsed;
+}
+
+/**
+ * 请求时凭据解析（D2 双通道）：
+ * ① 复合串（oauth 钩子通道：getApiKey 返回 traeBundle，JWT + 设备三要素齐备）；
+ * ② 裸 JWT（models.json 羊毛条目 apiKey 通道：宿主经向导 extract 写入，只有令牌本体）
+ *    ——userId/machineId/soloDeviceId 从本机 storage.json 现读（同机假设：设备要素与
+ *    账号 id 对同一安装稳定；IDE 换号/卸载后读取失败或上游拒绝，恢复 = 重跑向导提取）。
+ * 每请求一次文件读 + AES 解密（微秒级，无缓存无状态）。
+ */
+export function resolveTraeAuth(apiKey: string | undefined, deps?: { storagePath?: string }): TraeAuthInputs {
+	const bundle = parseKeyBundle(apiKey);
+	if (bundle !== undefined) {
+		return bundle;
+	}
+	if (apiKey === undefined || apiKey.length === 0) {
+		throw new Error(
+			`Trae credentials unavailable: ${WOOL_CREDENTIALS_MISSING_MESSAGE}`,
+		);
+	}
+	try {
+		const { login, device } = extractTraeLogin(deps?.storagePath ?? undefined);
+		return {
+			token: apiKey,
+			userId: login.userId,
+			machineId: device.machineId,
+			soloDeviceId: device.soloDeviceId,
+		};
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			`Trae request token has no device facts available (${reason}). Re-run the taiji wizard extraction or pi /login. ${TRAE_EXTRACT_RECOVERY_HINT}`,
+		);
+	}
 }
 
 /** 从凭据读复合串附加键（Credential union 与 OAuthCredentials 都允许附加键）。 */
@@ -96,9 +151,9 @@ function authFromCredential(credential: Credential | OAuthCredentials | undefine
 	return decodeKeyBundle(readTraeBundle(credential));
 }
 
-/** family stream 的凭据入口：resolvedAuth.apiKey 即复合串。 */
+/** family stream 的凭据入口：resolvedAuth.apiKey = 复合串（oauth 钩子）或裸 JWT（models.json 条目）。 */
 function authFromResolved(resolved: Extract<WoolResolvedAuth, { ok: true }>): TraeAuthInputs {
-	return decodeKeyBundle(resolved.apiKey);
+	return resolveTraeAuth(resolved.apiKey);
 }
 
 /** expiredAt（ISO）→ epoch ms；不可解析时回退 0（= 立即触发 pi 的刷新链）。 */
@@ -121,6 +176,22 @@ async function loginByExtraction(): Promise<OAuthCredentials> {
 		access: login.token,
 		expires: expiresEpochMs(login.expiredAt),
 		traeBundle: encodeKeyBundle(auth),
+	};
+}
+
+/**
+ * extract 管理动作的响应组装（wool-shared WoolCredentialAcquireData 契约）：
+ * apiKey = 容器解密所得 JWT（裸令牌——设备要素不进契约，请求时从本机 storage.json
+ * 现读）；容器无展示名字段，account 缺席；expiredAt（ISO）转 Unix ms，不可解析缺省。
+ */
+export function traeExtractToAcquireData(login: TraeStoredLogin): WoolCredentialAcquireData {
+	const expiresAt = expiresEpochMs(login.expiredAt);
+	return {
+		credentials: {
+			apiKey: login.token,
+			...(login.refreshToken.length > 0 ? { refreshToken: login.refreshToken } : {}),
+		},
+		...(expiresAt > 0 ? { expiresAt } : {}),
 	};
 }
 
@@ -214,6 +285,10 @@ export default defineWoolExtension({
 		}),
 		// 回包字段 = 宿主守卫 isWoolDetectData 契约的 detected（wool-manage 协议 data 形状）。
 		detect: async () => ({ detected: detectTraeLoginState() }),
+		// 凭据提取（D2 改道主通道）：storage.json 容器解密一次执行 → JWT 作 apiKey 按
+		// WoolCredentialAcquireData 契约回传（宿主写 models.json apiKey 条目）。提取失败
+		// throw → envelope internal（消息内嵌 IDE 重登恢复指引）。
+		extract: async () => traeExtractToAcquireData(extractTraeLogin().login),
 		// 签到不属于 Trae 首版范围（设计 D5 自动签到是 WorkBuddy 域；Trae 无独立签到端点实装）。
 		checkin: async () => ({ supported: false }),
 		// 扩展无自治存储：凭据权威在 pi auth.json；pi 扩展 API 无凭据删除通道（宿主同样

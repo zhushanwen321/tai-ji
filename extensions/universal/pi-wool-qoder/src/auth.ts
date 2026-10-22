@@ -7,9 +7,11 @@
 // token（同时是进程内 credential 学习通道，见 credentials.ts）。
 
 import type { OAuthCredentials } from "@earendil-works/pi-ai";
+import type { WoolCredentialAcquireData } from "@zhushanwen/pi-wool-shared";
 
+import { DEFAULT_USER_TYPE } from "./cosy.ts";
 import { fetchUserinfo, refreshDeviceToken } from "./openapi.ts";
-import { extractCredentials, type KeychainReader } from "./keychain-extract.ts";
+import { extractCredentials, type KeychainReader, type QoderAuthPayload } from "./keychain-extract.ts";
 import { toOAuthCredential, type QoderAuthStore, type QoderCredentialState } from "./credentials.ts";
 
 /** PAT 形态有效期 = 10 年（10 × 365d = 315_360_000_000 ms）：官方个人访问令牌为
@@ -58,6 +60,74 @@ export async function patToCredentialState(pat: string): Promise<QoderCredential
 		organizationName: userinfo.organizationName ?? "",
 		source: "pat",
 	};
+}
+
+/**
+ * extract 管理动作的响应组装（wool-shared WoolCredentialAcquireData 契约）：
+ * 钥匙串提取链执行 → apiKey = dt- 访问令牌 / refreshToken = drt-；displayName 以
+ * userinfo 拉取为准（容器内 user.name 为降级值——上游拉取失败不阻断提取，令牌本身
+ * 已可用）。D3 语义：仅在用户向导显式触发时执行一次。
+ */
+export async function extractToAcquireData(deps?: {
+	keychainRead?: KeychainReader;
+	authFilePath?: string;
+	fetchUserinfoImpl?: typeof fetchUserinfo;
+}): Promise<WoolCredentialAcquireData> {
+	const payload: QoderAuthPayload = extractCredentials(deps);
+	const fetchImpl = deps?.fetchUserinfoImpl ?? fetchUserinfo;
+	const displayName = (await fetchUpstreamDisplayName(payload.token, payload.user.id, fetchImpl)) ?? payload.user.name;
+	return {
+		credentials: {
+			apiKey: payload.token,
+			...(payload.refreshToken.length > 0 ? { refreshToken: payload.refreshToken } : {}),
+		},
+		...(displayName.length > 0 ? { account: { displayName } } : {}),
+		...(payload.expiresAt > 0 ? { expiresAt: payload.expiresAt } : {}),
+	};
+}
+
+/** userinfo 拉昵称（展示增值字段）：失败降级 undefined——提取本体不因昵称拉取失败而失败。 */
+async function fetchUpstreamDisplayName(
+	token: string,
+	uid: string,
+	fetchImpl: typeof fetchUserinfo,
+): Promise<string | undefined> {
+	try {
+		const userinfo = await fetchImpl(token, uid);
+		return userinfo.name.length > 0 ? userinfo.name : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * 请求时 apiKey 通道的凭据采纳（D2 主通道：scaffold resolvedAuth.apiKey）：
+ * oauth 钩子已学习同 token = 缓存命中零网络；新 token（models.json 羊毛条目 apiKey，
+ * 只有裸令牌无 uid/昵称）经 userinfo 一次拉取补全身份（PAT 形态同款路径，PAT 按
+ * pt- 前缀识别）。拉取失败上抛（调用方转 error 终态——令牌本身不可用时不静默发请求）。
+ */
+export async function adoptRequestApiKey(
+	store: QoderAuthStore,
+	apiKey: string | undefined,
+	deps?: { fetchUserinfoImpl?: typeof fetchUserinfo },
+): Promise<void> {
+	if (apiKey === undefined || apiKey.length === 0 || store.current()?.accessToken === apiKey) {
+		return;
+	}
+	const fetchImpl = deps?.fetchUserinfoImpl ?? fetchUserinfo;
+	const userinfo = await fetchImpl(apiKey, "");
+	store.learn({
+		type: "oauth",
+		access: apiKey,
+		refresh: "",
+		expires: 0,
+		uid: userinfo.id,
+		nickname: userinfo.name,
+		userType: userinfo.userType ?? DEFAULT_USER_TYPE,
+		organizationId: userinfo.organizationId ?? "",
+		organizationName: userinfo.organizationName ?? "",
+		source: apiKey.startsWith("pt-") ? "pat" : "ide-extract",
+	});
 }
 
 /** oauth.login 实装：先提取，失败则转 PAT 输入（同屏次级入口）。 */

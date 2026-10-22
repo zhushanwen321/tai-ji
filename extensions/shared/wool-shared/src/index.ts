@@ -15,7 +15,9 @@ export {
 	WOOL_MANAGE_PROTOCOL_VERSION,
 	WoolManageRequestError,
 	type WoolManageAction,
+	type WoolManageActionContext,
 	type WoolManageActionHandler,
+	type WoolCredentialAcquireData,
 	type WoolManageErrorCode,
 	type WoolManageHandlers,
 	type WoolManageRequest,
@@ -51,6 +53,7 @@ export {
 
 export {
 	defineWoolExtension,
+	WOOL_CREDENTIALS_MISSING_MESSAGE,
 	type WoolFamilyExtensionDefinition,
 	type WoolFetchModelsContext,
 	type WoolResolvedAuth,

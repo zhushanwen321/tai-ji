@@ -8,8 +8,11 @@
 //   入口（onPrompt 交互通道）；refreshToken = drt- 换新 dt-；getApiKey = access
 //   token 返回 + 进程内 credential 学习。
 //
-// 凭据通道：请求链路经 getApiKey 钩子学习（每请求鉴权时 pi 传入 credential 全量，
-// 含重启后恢复）；管理专用会话（无 LLM 请求，getApiKey 不被调）经
+// 凭据通道（D2 双通道）：主通道 = 请求时 options.apiKey（taiji 向导 extract 回传、
+// 宿主写 models.json 羊毛 provider 条目，pi 请求管线解析传入——scaffold 优先采信），
+// 经 adoptRequestApiKey 采纳进 authStore（新 token userinfo 一次补全 uid/昵称）；
+// 次通道 = oauth 钩子（独立 pi 用户 TUI /login 形态，getApiKey 每请求学习 credential
+// 全量，含重启后恢复）。管理专用会话（无 LLM 请求，getApiKey 不被调）经
 // ModelRegistry.getApiKeyForProvider 补习——同样走 pi 凭据解析链（过期先自动刷新）。
 
 import type { ExtensionAPI, ModelRegistry } from "@earendil-works/pi-coding-agent";
@@ -18,10 +21,11 @@ import { join } from "node:path";
 
 import {
 	defineWoolExtension,
+	type WoolStreamImplementation,
 	woolLoggedOutStatus,
 } from "@zhushanwen/pi-wool-shared";
 
-import { login, makeGetApiKey, refreshToken } from "./auth.ts";
+import { adoptRequestApiKey, extractToAcquireData, login, makeGetApiKey, refreshToken } from "./auth.ts";
 import { QoderAuthStore } from "./credentials.ts";
 import { createQoderDrive } from "./chat-stream.ts";
 import { fetchModelCatalog, lookupModelMeta, QODER_API_ID } from "./models-fetch.ts";
@@ -48,9 +52,24 @@ export default function piWoolQoder(pi: ExtensionAPI): void {
 		registry = ctx.modelRegistry;
 	});
 
-	// drive 参数形态是 WoolStreamRequest 的结构子集（凭据从 authStore 取——
-	// getApiKey 钩子已学习），直接作为 family stream 装配。
-	const stream = createQoderDrive({ authStore, lookupModelMeta });
+	// drive 参数形态是 WoolStreamRequest 的结构子集（凭据从 authStore 取）。请求时
+	// 凭据双通道（D2）经 adoptRequestApiKey 采纳进 authStore：options.apiKey
+	// （models.json 羊毛条目）在场即学习（新 token 经 userinfo 一次补全，同 token 缓存
+	// 命中零网络）；oauth 钩子通道的 token 由 getApiKey 学习——同 token 直接过。
+	const drive = createQoderDrive({ authStore, lookupModelMeta });
+	const stream: WoolStreamImplementation = async (request) => {
+		if (!request.resolvedAuth.ok) {
+			throw new Error(request.resolvedAuth.error);
+		}
+		await adoptRequestApiKey(authStore, request.resolvedAuth.apiKey);
+		return drive({
+			model: request.model,
+			systemPrompt: request.systemPrompt,
+			tools: request.tools,
+			messages: request.messages,
+			driver: request.driver,
+		});
+	};
 
 	defineWoolExtension({
 		familyId: FAMILY_ID,
@@ -83,6 +102,10 @@ export default function piWoolQoder(pi: ExtensionAPI): void {
 			// 登录态检测语义（D3）：凭据文件存在性一次 stat，不读内容、不解密、不轮询。
 			// 回包字段 = 宿主守卫 isWoolDetectData 契约的 detected（wool-manage 协议 data 形状）。
 			detect: async () => ({ detected: detectCredentialFile() }),
+			// 凭据提取（D2 改道主通道）：钥匙串提取链一次执行 → dt-/drt- + displayName 按
+			// wool-shared WoolCredentialAcquireData 契约回传（宿主写 models.json apiKey 条目）。
+			// 提取失败 throw → envelope internal（消息内嵌恢复动作：确认桌面端已登录/改用 PAT）。
+			extract: async () => extractToAcquireData(),
 			// 账号状态拉取（D6 ③：taiji 主动问，无后台推送）。凭据解析失败/无凭据
 			// = 未登录态；上游拉取失败 throw → envelope upstream_error（宿主可重试）。
 			status: async () => {

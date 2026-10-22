@@ -6,7 +6,7 @@ import type { ModelsPublication, RefreshModelsContext } from "@earendil-works/pi
 import { describe, expect, it } from "vitest";
 
 import { defineWoolExtension, type WoolFamilyExtensionDefinition } from "../scaffold.ts";
-import { collectAssistantEvents, expectTextOutcome, assertConformantSequence } from "../testing/harness.ts";
+import { collectAssistantEvents, expectErrorOutcome, expectTextOutcome, assertConformantSequence } from "../testing/harness.ts";
 
 type SessionStartHandler = (event: unknown, ctx: ExtensionContext) => void;
 
@@ -312,6 +312,98 @@ describe("defineWoolExtension 接线", () => {
 			const model = { id: "m", api: "wool-qoder", provider: "wool-qoder" } as unknown as Parameters<NonNullable<ProviderConfig["streamSimple"]>>[0];
 			const context = { messages: [] } as unknown as Parameters<NonNullable<ProviderConfig["streamSimple"]>>[1];
 			expect(() => config?.streamSimple?.(model, context, undefined)).toThrow(/before session_start/);
+		});
+
+		describe("凭据优先级（D2 双通道：options.apiKey > oauth 钩子 > 皆无报错）", () => {
+			/** 组装一个记录 resolvedAuth 的家族 stream + 已捕获 registry 的 streamSimple 环境。
+			 * model 带 cost 零费率（done 路径 calculateCost 不因缺 cost 抛错）；家族 stream
+			 * 对 ok:false 直抛（三家族 stream 的真实行为形态）。 */
+			async function setupStream(
+				registryResolve: () => Promise<{ ok: boolean; apiKey?: string; headers?: Record<string, string>; error?: string }>,
+			) {
+				const { pi, providers, sessionStartHandlers } = mockPi();
+				let seenAuth: unknown;
+				let registryCalls = 0;
+				defineWoolExtension(
+					echoDefinition({
+						stream: async (request) => {
+							seenAuth = request.resolvedAuth;
+							if (!request.resolvedAuth.ok) {
+								throw new Error(request.resolvedAuth.error);
+							}
+							request.driver.open();
+							request.driver.text("echo");
+							return { usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } };
+						},
+					}),
+				)(pi);
+				for (const handler of sessionStartHandlers) {
+					handler({}, {
+						modelRegistry: {
+							getApiKeyAndHeaders: async () => {
+								registryCalls += 1;
+								return registryResolve();
+							},
+						},
+					} as unknown as ExtensionContext);
+				}
+				const config = providers.get("wool-qoder");
+				const model = {
+					id: "m",
+					api: "wool-qoder",
+					provider: "wool-qoder",
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				} as unknown as Parameters<NonNullable<ProviderConfig["streamSimple"]>>[0];
+				const context = { messages: [{ role: "user", content: "hi", timestamp: Date.now() }] } as unknown as Parameters<NonNullable<ProviderConfig["streamSimple"]>>[1];
+				return {
+					run: (options?: { apiKey?: string }) => {
+						const stream = config?.streamSimple?.(model, context, options);
+						if (stream === undefined) {
+							throw new Error("streamSimple returned undefined");
+						}
+						return collectAssistantEvents(stream);
+					},
+					get seenAuth(): unknown {
+						return seenAuth;
+					},
+					get registryCalls(): number {
+						return registryCalls;
+					},
+				};
+			}
+
+			it("options.apiKey 在场即采信（registry 不被调，不做 oauth 刷新尝试）", async () => {
+				const env = await setupStream(async () => ({ ok: true, apiKey: "registry-key" }));
+				const events = await env.run({ apiKey: "models-json-key" });
+				assertConformantSequence(events);
+				expectTextOutcome(events, "echo");
+				expect(env.seenAuth).toEqual({ ok: true, apiKey: "models-json-key" });
+				expect(env.registryCalls).toBe(0);
+			});
+
+			it("options.apiKey 缺席 → registry oauth 凭据（apiKey 透传家族）", async () => {
+				const env = await setupStream(async () => ({ ok: true, apiKey: "oauth-hook-key" }));
+				const events = await env.run(undefined);
+				assertConformantSequence(events);
+				expectTextOutcome(events, "echo");
+				expect(env.seenAuth).toEqual({ ok: true, apiKey: "oauth-hook-key" });
+				expect(env.registryCalls).toBe(1);
+			});
+
+			it("双通道皆无（registry ok 但无 apiKey）→ error 终态带统一「凭据未配置」", async () => {
+				const env = await setupStream(async () => ({ ok: true, headers: {} }));
+				const events = await env.run(undefined);
+				expectErrorOutcome(events, "凭据未配置：经 taiji 向导接入或在 pi 内 /login");
+				const seen = env.seenAuth as { ok: boolean; error: string };
+				expect(seen.ok).toBe(false);
+				expect(seen.error).toContain("凭据未配置");
+			});
+
+			it("registry 解析失败（ok:false，如刷新链失败）→ 保留原错误（比统一消息可诊断）", async () => {
+				const env = await setupStream(async () => ({ ok: false, error: "oauth refresh failed: 502" }));
+				const events = await env.run(undefined);
+				expectErrorOutcome(events, "oauth refresh failed: 502");
+			});
 		});
 	});
 });

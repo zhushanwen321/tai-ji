@@ -3,7 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { workbuddyLogin, workbuddyRefresh, exchangeToken, startAuthState, toWorkbuddyCredentials } from "../oauth.ts";
+import { workbuddyLogin, workbuddyRefresh, exchangeToken, startAuthState, toWorkbuddyCredentials, toWoolAcquireData, buildWoolAuthorizeNotice, runWorkbuddyAuthorization } from "../oauth.ts";
 import { startWoolAuthCallbackServer } from "../callback-server.ts";
 
 /** 按 URL 分发的 fetch mock。未命中 route 的请求委托 stub 前的真实 fetch
@@ -216,6 +216,72 @@ describe("login 编排（onAuth 通道 + done 信号驱动令牌交换）", () =
 				},
 			});
 			await expect(promise).rejects.toThrow("cancelled");
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});
+
+describe("authorize 管理动作面（凭据获取契约 + 宿主通知）", () => {
+	it("toWoolAcquireData：apiKey=access / refreshToken 轮换令牌 / 昵称与 expires 随行", () => {
+		const credentials = toWorkbuddyCredentials("cn", { accessToken: ACCESS_1, refreshToken: "rt-1" }, "wool-user");
+		expect(toWoolAcquireData(credentials)).toEqual({
+			credentials: { apiKey: ACCESS_1, refreshToken: "rt-1" },
+			account: { displayName: "wool-user" },
+			expiresAt: 9999999999_000,
+		});
+	});
+
+	it("toWoolAcquireData：昵称缺席省略 account；空 refreshToken 省略", () => {
+		const credentials = toWorkbuddyCredentials("cn", { accessToken: ACCESS_1, refreshToken: "" }, undefined);
+		expect(toWoolAcquireData(credentials)).toEqual({
+			credentials: { apiKey: ACCESS_1 },
+			expiresAt: 9999999999_000,
+		});
+	});
+
+	it("buildWoolAuthorizeNotice：单行 JSON（type/family 标记 + authUrl/callbackUrl/state）", () => {
+		const notice = JSON.parse(
+			buildWoolAuthorizeNotice({ authUrl: "https://auth.example/login", callbackUrl: "http://127.0.0.1:9/wool-auth/callback", state: "st1" }),
+		);
+		expect(notice).toEqual({
+			type: "wool-authorize",
+			family: "workbuddy",
+			authUrl: "https://auth.example/login",
+			callbackUrl: "http://127.0.0.1:9/wool-auth/callback",
+			state: "st1",
+		});
+	});
+
+	it("runWorkbuddyAuthorization：deliverAuthInfo 收结构化三元组（authorize 通道同骨架）", async () => {
+		const { impl } = routerFetch([
+			{
+				match: (url) => url.includes("/auth/state"),
+				respond: () => ({ body: { code: 0, data: { state: "st-notify", authUrl: "https://auth.example/login" } } }),
+			},
+			{
+				match: (url) => url.includes("/auth/token?"),
+				respond: () => ({ body: { code: 0, data: { accessToken: ACCESS_1, refreshToken: "rt-1", domain: "copilot.tencent.com" } } }),
+			},
+			{
+				match: (url) => url.includes("/login/account"),
+				respond: () => ({ body: { code: 0, data: { nickname: "wool-user" } } }),
+			},
+		]);
+		vi.stubGlobal("fetch", impl);
+		try {
+			const credentialsPromise = runWorkbuddyAuthorization({
+				deliverAuthInfo: (info) => {
+					// 浮层（或 pi onAuth）完成后向回调端点发 done 信号（真实 HTTP）。
+					expect(info.authUrl).toBe("https://auth.example/login");
+					expect(info.state).toBe("st-notify");
+					expect(info.callbackUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/wool-auth\/callback$/);
+					void fetch(`${info.callbackUrl}?state=${info.state}&status=done`);
+				},
+			});
+			const credentials = await credentialsPromise;
+			expect(credentials.access).toBe(ACCESS_1);
+			expect(credentials.nickname).toBe("wool-user");
 		} finally {
 			vi.unstubAllGlobals();
 		}

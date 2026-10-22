@@ -53,6 +53,38 @@ export type WoolResolvedAuth =
 	| { ok: true; apiKey?: string; headers?: Record<string, string | null>; baseUrl?: string }
 	| { ok: false; error: string };
 
+/** 凭据双通道（D2 改道：请求时 options.apiKey + oauth 钩子）皆缺时的统一错误
+ * （错误 → 权威源 → 重试闭环：taiji 向导接入，或独立 pi 用户在 pi 内 /login）。 */
+export const WOOL_CREDENTIALS_MISSING_MESSAGE = "凭据未配置：经 taiji 向导接入或在 pi 内 /login";
+
+/**
+ * 请求时凭据解析（D2 双通道优先级，请求管线事实锚：pi model-runtime prepareRequest
+ * 把 models.json 羊毛 provider 条目 apiKey 经 `providerOptions.apiKey ?? resolution.auth.apiKey`
+ * 合并进 streamSimple options）：
+ * ① options.apiKey —— taiji 向导写入 models.json 的主通道，在场即采信（跳过 registry
+ *    解析，不做 oauth 刷新尝试）；
+ * ② registry oauth 钩子凭据 —— 独立 pi 用户 TUI /login 形态（D8 承诺），过期自动刷新。
+ * ② 解析 ok:false（刷新链失败等）保留原错误（比统一消息更可诊断）；ok 但无 apiKey
+ * （wool 家族 authHeader 缺省下 pi 对未配置 provider 的回包形态）→ 统一「凭据未配置」。
+ */
+async function resolveRequestAuth(
+	resolveViaRegistry: (model: Model<Api>) => Promise<WoolResolvedAuth>,
+	model: Model<Api>,
+	requestApiKey: string | undefined,
+): Promise<WoolResolvedAuth> {
+	if (typeof requestApiKey === "string" && requestApiKey.length > 0) {
+		return { ok: true, apiKey: requestApiKey };
+	}
+	const resolved = await resolveViaRegistry(model);
+	if (!resolved.ok) {
+		return resolved;
+	}
+	if (typeof resolved.apiKey === "string" && resolved.apiKey.length > 0) {
+		return resolved;
+	}
+	return { ok: false, error: WOOL_CREDENTIALS_MISSING_MESSAGE };
+}
+
 /** 家族协议翻译的输入：pi 标准请求要素 + 发射上下文。 */
 export interface WoolStreamRequest { // oe-exempt:20261022:framework:家族 stream 入参契约——pi-wool-trae / pi-wool-workbuddy index.ts 按名导入，pi-wool-qoder index.ts 结构子集消费
 	model: Model<Api>;
@@ -62,7 +94,8 @@ export interface WoolStreamRequest { // oe-exempt:20261022:framework:家族 stre
 	tools: Tool[];
 	/** 完整 transcript（家族自行取末条 user 消息等）。 */
 	messages: Message[];
-	/** 请求时凭据（modelRegistry.getApiKeyAndHeaders 的结果）。 */
+	/** 请求时凭据（D2 优先级：options.apiKey（models.json 羊毛条目）> registry oauth 钩子；
+	 * 双缺 = ok:false + 统一「凭据未配置」错误——家族直抛给用户）。 */
 	resolvedAuth: WoolResolvedAuth;
 	/** 事件发射与仪表钩子透传上下文（骨架提供）。 */
 	driver: WoolStreamDriverContext;
@@ -223,7 +256,7 @@ export function defineWoolExtension(definition: WoolFamilyExtensionDefinition): 
 					signal,
 					options,
 					drive: (driver) =>
-						resolveAuth(model).then((resolvedAuth) =>
+						resolveRequestAuth(resolveAuth, model, options?.apiKey).then((resolvedAuth) =>
 							definition.stream({
 								model,
 								systemPrompt: getCurrentSystemPrompt(context.messages),
@@ -246,8 +279,8 @@ export function defineWoolExtension(definition: WoolFamilyExtensionDefinition): 
 					// clear 编排 = 家族 clear（进程内凭据面）+ D3 卸载编排②：publish({persist:null})
 					// 删除 pi persist 的持久化模型目录 + 进程内清单清空。persistCleared 如实
 					// 报告删除结果（false = 无通道〔静态清单/refreshModels 未跑〕或世代过期未生效）。
-					clear: async (params) => {
-						const familyResult = await familyHandlers.clear(params);
+					clear: async (params, ctx) => {
+						const familyResult = await familyHandlers.clear(params, ctx);
 						const persistCleared = publishPersistClear !== undefined && (await publishPersistClear());
 						store.replace([], "empty");
 						const base =

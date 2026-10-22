@@ -1,11 +1,12 @@
 // auth.test.ts — oauth 钩子族 + 凭据状态 + openapi 域客户端的单测（PAT 次级入口 =
 // 设计 D3 残留风险的恢复路径；全部 mock fetch / mock 钥匙串，零真实上游）。
 
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { extractToCredentialState, login, makeGetApiKey, patToCredentialState, refreshToken, type LoginInteraction } from "../auth.ts";
+import { adoptRequestApiKey, extractToAcquireData, extractToCredentialState, login, makeGetApiKey, patToCredentialState, refreshToken, type LoginInteraction } from "../auth.ts";
 import { QoderAuthStore, readCredentialState, toCosyIdentity, toOAuthCredential } from "../credentials.ts";
 import { fetchQuotaUsage, fetchUserinfo, openapiHeaders, refreshDeviceToken } from "../openapi.ts";
 import { PATH_DEVICE_TOKEN_REFRESH } from "../constants.ts";
@@ -131,6 +132,100 @@ describe("oauth.login（D3：提取即登录 + PAT 次级入口）", () => {
 				}, authFilePath: "/nonexistent" },
 			),
 		).rejects.toThrow(/PAT entry cancelled|userinfo/);
+	});
+});
+
+describe("extract 管理动作 + 请求时 apiKey 采纳（D2 凭据通道）", () => {
+	/** 临时 fixture 密文文件路径（afterEach 清理）。 */
+	const tempDirs: string[] = [];
+
+	afterEach(() => {
+		for (const dir of tempDirs.splice(0)) {
+			rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+		}
+	});
+
+	function writeTempBlob(): string {
+		const dir = mkdtempSync(join(tmpdir(), "wool-qoder-acquire-"));
+		tempDirs.push(dir);
+		const filePath = join(dir, "auth.v1.dat");
+		writeFileSync(filePath, fixtureBlob());
+		return filePath;
+	}
+
+	it("extractToAcquireData：契约字段齐备（apiKey=dt- / refreshToken=drt- / displayName 取 userinfo / expiresAt 透传）", async () => {
+		const data = await extractToAcquireData({
+			keychainRead: fixtureKeychain,
+			authFilePath: writeTempBlob(),
+			fetchUserinfoImpl: async () => ({ id: "fixture-user-id", name: "上游昵称" }),
+		});
+		expect(data).toEqual({
+			credentials: { apiKey: "dt-fixture-access-token-000", refreshToken: "drt-fixture-refresh-token-00" },
+			account: { displayName: "上游昵称" },
+			expiresAt: 1763624866000,
+		});
+	});
+
+	it("userinfo 拉取失败 → 降级容器内 user.name（提取本体不失败）", async () => {
+		const data = await extractToAcquireData({
+			keychainRead: fixtureKeychain,
+			authFilePath: writeTempBlob(),
+			fetchUserinfoImpl: async () => {
+				throw new Error("HTTP 503");
+			},
+		});
+		expect(data.credentials.apiKey).toBe("dt-fixture-access-token-000");
+		expect(data.account).toEqual({ displayName: "fixture@example.com" });
+	});
+
+	it("提取链失败 → 上抛（envelope internal，消息带恢复动作）", async () => {
+		await expect(
+			extractToAcquireData({
+				keychainRead: () => {
+					throw new Error("keychain unavailable");
+				},
+				authFilePath: "/nonexistent",
+			}),
+		).rejects.toThrow(/keychain read failed/);
+	});
+
+	it("adoptRequestApiKey：新 token 经 userinfo 一次补全（uid/昵称入 store，pt- 前缀识别 PAT）", async () => {
+		const store = new QoderAuthStore();
+		let fetched = 0;
+		await adoptRequestApiKey(store, "pt-fixture-pat", {
+			fetchUserinfoImpl: async () => {
+				fetched += 1;
+				return { id: "pat-uid", name: "PAT 用户", userType: "personal", organizationId: "o1", organizationName: "on" };
+			},
+		});
+		expect(store.current()).toMatchObject({
+			accessToken: "pt-fixture-pat",
+			uid: "pat-uid",
+			nickname: "PAT 用户",
+			organizationId: "o1",
+			source: "pat",
+		});
+		expect(store.session()).toBeDefined();
+		// 同 token 二次采纳 = 缓存命中零网络（oauth 钩子已学习的形态）。
+		await adoptRequestApiKey(store, "pt-fixture-pat", {
+			fetchUserinfoImpl: async () => {
+				fetched += 1;
+				return { id: "x", name: "x" };
+			},
+		});
+		expect(fetched).toBe(1);
+		// 空值直过（scaffold 双通道皆缺时家族不进采纳分支）。
+		await adoptRequestApiKey(store, undefined, { fetchUserinfoImpl: async () => ({ id: "x", name: "x" }) });
+		expect(fetched).toBe(1);
+	});
+
+	it("adoptRequestApiKey：dt- 前缀识别 ide-extract 来源", async () => {
+		const store = new QoderAuthStore();
+		await adoptRequestApiKey(store, "dt-fixture-models-json", {
+			fetchUserinfoImpl: async () => ({ id: "u9", name: "wool" }),
+		});
+		expect(store.current()?.source).toBe("ide-extract");
+		expect(store.current()?.refreshToken).toBe("");
 	});
 });
 

@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import {
 	defineWoolExtension,
 	readSnapshotFile,
+	WoolManageRequestError,
 	type WoolFetchModelsContext,
 	type WoolStreamOutcome,
 	type WoolStreamRequest,
@@ -21,7 +22,15 @@ import { workbuddyAccountStatus, authContextFromToken } from "./account.ts";
 import { executeCheckin } from "./checkin.ts";
 import { isWorkbuddyRealm } from "./constants.ts";
 import { fetchWorkbuddyModels, indexSnapshot } from "./models.ts";
-import { asWorkbuddyCredential, workbuddyApiKey, workbuddyLogin, workbuddyRefresh } from "./oauth.ts";
+import {
+	asWorkbuddyCredential,
+	buildWoolAuthorizeNotice,
+	runWorkbuddyAuthorization,
+	toWoolAcquireData,
+	workbuddyApiKey,
+	workbuddyLogin,
+	workbuddyRefresh,
+} from "./oauth.ts";
 import { workbuddyStream } from "./stream.ts";
 
 export const FAMILY_ID = "workbuddy" as const;
@@ -116,6 +125,26 @@ const definitionFactory: ExtensionFactory = defineWoolExtension({
 			// isWoolDetectData 契约的 detected，wool-manage 协议 data 形状）。
 			const accessToken = await resolveAccessToken();
 			return { detected: accessToken !== undefined };
+		},
+		// OAuth 家族不走本机提取（凭据来自浏览器授权）——明确报不支持，不静默假成功。
+		extract: async () => {
+			throw new WoolManageRequestError(
+				'WorkBuddy is an OAuth family: run the authorize action (browser sign-in), not local extraction',
+				"invalid_request",
+			);
+		},
+		// 凭据授权（D2 改道主通道）：state 起始 + 本机回调监听（现成模块）→ 授权页 URL
+		// 经扩展 UI 通知（ctx.ui.notify，P6 验证通道）以单行 JSON 投递 taiji 浮层（加载
+		// authUrl、完成后向 callbackUrl 发 done/cancel）→ 回调驱动令牌交换 → 按
+		// WoolCredentialAcquireData 契约回传（宿主写 models.json apiKey 条目）。全程事件
+		// 驱动（时间平抑红线：无轮询无定时器），仅在用户向导显式触发时执行一次（D3）。
+		authorize: async (_params, ctx) => {
+			const credentials = await runWorkbuddyAuthorization({
+				deliverAuthInfo: (info) => {
+					ctx.notify(buildWoolAuthorizeNotice(info));
+				},
+			});
+			return toWoolAcquireData(credentials);
 		},
 		checkin: async () => {
 			const accessToken = await resolveAccessToken();

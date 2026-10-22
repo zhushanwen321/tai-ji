@@ -21,8 +21,10 @@ export function woolManageCommandName(family: string): string {
 	return `wool-${family}`;
 }
 
-/** 管理动作词表。 */
-export const WOOL_MANAGE_ACTIONS = ["status", "detect", "checkin", "clear"] as const;
+/** 管理动作词表。extract/authorize = 凭据获取动作（D2 改道后的向导触发点：
+ * taiji 向导经管理会话让扩展执行一次提取/授权，凭据随响应回传宿主写入
+ * models.json 羊毛 provider 条目 apiKey）。 */
+export const WOOL_MANAGE_ACTIONS = ["status", "detect", "checkin", "clear", "extract", "authorize"] as const;
 
 export type WoolManageAction = (typeof WOOL_MANAGE_ACTIONS)[number];
 
@@ -48,6 +50,24 @@ export interface WoolManageRequest { // oe-exempt:20261022:framework:taiji↔扩
 	action: WoolManageAction;
 	/** 动作参数（status 无参；checkin 可带 { day?: string } 等）。 */
 	params?: Record<string, unknown>;
+}
+
+/**
+ * extract/authorize 成功响应 data 契约（两组共享同形，宿主侧按此消费——apiKey 回写
+ * models.json 羊毛 provider 条目，其余字段为展示/到期提示增值）：
+ * - extract：apiKey = 本机提取的访问令牌（Qoder dt- / Trae Cloud-IDE-JWT），refreshToken 随提取链带出时给出；
+ * - authorize：apiKey = OAuth access token，refreshToken = 轮换刷新令牌。
+ */
+export interface WoolCredentialAcquireData { // oe-exempt:20261022:framework:凭据获取动作响应契约——qoder/trae(workbuddy) 家族 index.ts handler 构造 + taiji 宿主侧（packages/ wool-manager）形状对齐消费
+	credentials: {
+		apiKey: string;
+		refreshToken?: string;
+	};
+	account?: {
+		displayName?: string;
+	};
+	/** 访问令牌到期时点（Unix ms；未知缺省）。 */
+	expiresAt?: number;
 }
 
 /** 响应 envelope：成功带 data，失败带错误码与消息。 */
@@ -149,14 +169,29 @@ export function isWoolManageResponse(value: unknown): value is WoolManageRespons
 /** 管理响应落盘的 custom entry 类型（appendEntry customType）。 */
 export const WOOL_MANAGE_ENTRY_TYPE = "wool-manage-response";
 
-/** 家族侧管理动作 handler：执行一个管理动作，返回响应 envelope 的 data 部分。 */
-export type WoolManageActionHandler = (params: Record<string, unknown> | undefined) => Promise<unknown>;
+/** 家族侧管理动作 handler 的执行上下文：动作执行期需要主动触达宿主/用户的通道
+ * （ authorize 的授权页 URL 投递等）。窄面投影而非透传完整 ctx——家族只见协议内能力。 */
+export interface WoolManageActionContext { // oe-exempt:20261022:framework:管理动作执行上下文契约——wool-shared registerWoolManageCommand 构造（ctx.ui.notify 投影）+ 三家族 handler 消费（workbuddy authorize 投递授权页 URL）
+	/** 扩展 UI 通知通道（pi ctx.ui.notify 形态；P6 验证的扩展→宿主投递面）。 */
+	notify(message: string, type?: "info" | "warning" | "error"): void;
+}
+
+/** 家族侧管理动作 handler：执行一个管理动作，返回响应 envelope 的 data 部分。
+ * 第二参数为执行上下文（仅 authorize 等需宿主交互的动作消费；单参 handler 兼容）。 */
+export type WoolManageActionHandler = (
+	params: Record<string, unknown> | undefined,
+	ctx: WoolManageActionContext,
+) => Promise<unknown>;
 
 export interface WoolManageHandlers { // oe-exempt:20261022:framework:管理动作 handler 族契约——qoder/trae/workbuddy 三家 index.ts 的 manageHandlers 定义项构造 + registerWoolManageCommand 动作分发消费
 	status: WoolManageActionHandler;
 	detect: WoolManageActionHandler;
 	checkin: WoolManageActionHandler;
 	clear: WoolManageActionHandler;
+	/** 本机凭据提取（ide-extract 家族：qoder/trae）；oauth 家族不实现 → 动作分发回 invalid_request。 */
+	extract?: WoolManageActionHandler;
+	/** OAuth 浏览器授权（oauth 家族：workbuddy）；ide-extract 家族不实现 → 动作分发回 invalid_request。 */
+	authorize?: WoolManageActionHandler;
 }
 
 /**
@@ -176,13 +211,24 @@ export function registerWoolManageCommand(
 	const commandName = woolManageCommandName(options.family);
 	pi.registerCommand(commandName, {
 		description: `Wool provider management for ${options.family} (taiji manage-session channel)`,
-		handler: async (args) => {
+		handler: async (args, ctx) => {
 			let response: WoolManageResponse;
 			try {
 				const request = parseWoolManageRequest(args, options.family);
-				const data = await options.handlers[request.action](request.params);
-				response = woolManageOk(data);
-				options.onAction?.(request.action);
+				const handler = options.handlers[request.action];
+				if (handler === undefined) {
+					// 家族未实现该动作（如 oauth 家族的 extract）：明确报不支持，不静默假成功。
+					response = woolManageFail(
+						"invalid_request",
+						`Action "${request.action}" is not supported by the wool-${options.family} extension`,
+					);
+				} else {
+					const data = await handler(request.params, {
+						notify: (message, type) => ctx.ui.notify(message, type),
+					});
+					response = woolManageOk(data);
+					options.onAction?.(request.action);
+				}
 			} catch (error) {
 				if (error instanceof WoolManageRequestError) {
 					response = woolManageFail(error.code, error.message);

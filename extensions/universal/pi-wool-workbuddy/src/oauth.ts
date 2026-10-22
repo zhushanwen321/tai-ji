@@ -11,7 +11,8 @@
 // taiji（浮层加载授权页）→ 浮层在用户完成授权后发 done 信号 → 扩展执行令牌交换 →
 // 回调送达即完成。全程事件驱动（授权期临时监听，完成/取消/失败/abort 即回收）。
 
-import type { Credential, OAuthAuthInfo, OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works/pi-ai";
+import type { Credential, OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works/pi-ai";
+import type { WoolCredentialAcquireData } from "@zhushanwen/pi-wool-shared";
 
 import { startWoolAuthCallbackServer } from "./callback-server.ts";
 import {
@@ -199,12 +200,20 @@ export function toWorkbuddyCredentials(
 }
 
 /**
- * login 钩子实装（pi /login 调起）。onAuth 的 url = 上游授权页；instructions 携带
- * 回调端点约定（JSON：{ callbackUrl, state }）——taiji 浮层侧接口契约，加载授权页、
- * 完成后向 callbackUrl 发 done/cancel 信号。
+ * OAuth 授权编排（login 钩子与 authorize 管理动作共用骨架）：
+ * state 起始 → 本机回调监听 → deliverAuthInfo 把授权页 URL + 回调端点交给调用方
+ * （login = pi onAuth 通道；authorize = 扩展 UI 通知 taiji 浮层）→ 回调 done 驱动
+ * 令牌交换 → 昵称拉取（失败降级）→ 凭据组装。全程事件驱动，无轮询无定时器
+ * （时间平抑红线）；回调监听在完成/取消/失败/投递异常时即回收。
  */
-export async function workbuddyLogin(callbacks: OAuthLoginCallbacks, realm: WorkbuddyRealm = "cn"): Promise<OAuthCredentials> {
-	const signal = callbacks.signal;
+export async function runWorkbuddyAuthorization(options: {
+	realm?: WorkbuddyRealm;
+	signal?: AbortSignal;
+	/** 授权页投递（调用方决定通道：pi onAuth / 扩展 UI notify）。 */
+	deliverAuthInfo: (info: { authUrl: string; callbackUrl: string; state: string }) => void;
+}): Promise<WorkbuddyCredentials> {
+	const realm = options.realm ?? "cn";
+	const signal = options.signal;
 	if (signal?.aborted) {
 		throw new DOMException("Login cancelled", "AbortError");
 	}
@@ -227,11 +236,12 @@ export async function workbuddyLogin(callbacks: OAuthLoginCallbacks, realm: Work
 		},
 	});
 
-	const authInfo: OAuthAuthInfo = {
-		url: authUrl,
-		instructions: JSON.stringify({ callbackUrl: callbackServer.callbackUrl, state }),
-	};
-	callbacks.onAuth(authInfo);
+	try {
+		options.deliverAuthInfo({ authUrl, callbackUrl: callbackServer.callbackUrl, state });
+	} catch (error) {
+		callbackServer.close();
+		throw error;
+	}
 
 	const outcome = await callbackServer.wait();
 	if (outcome.type === "cancelled" || exchanged === undefined) {
@@ -239,6 +249,47 @@ export async function workbuddyLogin(callbacks: OAuthLoginCallbacks, realm: Work
 	}
 	const nickname = await fetchNickname(realm, state, exchanged.accessToken);
 	return toWorkbuddyCredentials(realm, exchanged, nickname);
+}
+
+/**
+ * login 钩子实装（pi /login 调起）。onAuth 的 url = 上游授权页；instructions 携带
+ * 回调端点约定（JSON：{ callbackUrl, state }）——taiji 浮层侧接口契约，加载授权页、
+ * 完成后向 callbackUrl 发 done/cancel 信号。
+ */
+export async function workbuddyLogin(callbacks: OAuthLoginCallbacks, realm: WorkbuddyRealm = "cn"): Promise<OAuthCredentials> {
+	return runWorkbuddyAuthorization({
+		realm,
+		signal: callbacks.signal,
+		deliverAuthInfo: (info) => {
+			callbacks.onAuth({
+				url: info.authUrl,
+				instructions: JSON.stringify({ callbackUrl: info.callbackUrl, state: info.state }),
+			});
+		},
+	});
+}
+
+/** authorize 管理动作的宿主通知消息（单行 JSON——taiji 浮层按 type 识别并加载 authUrl，
+ * 完成后向 callbackUrl 发 done/cancel 信号；经扩展 UI 通知通道（ctx.ui.notify 形态，
+ * P6 验证）投递）。 */
+export function buildWoolAuthorizeNotice(info: { authUrl: string; callbackUrl: string; state: string }): string {
+	return JSON.stringify({ type: "wool-authorize", family: "workbuddy", ...info });
+}
+
+/** authorize 管理动作成功响应 data 组装（wool-shared WoolCredentialAcquireData 契约）：
+ * apiKey = access token（宿主写 models.json 羊毛条目）；refreshToken 轮换令牌随行；
+ * 昵称/expires 为展示与到期提示增值。 */
+export function toWoolAcquireData(credentials: WorkbuddyCredentials): WoolCredentialAcquireData {
+	return {
+		credentials: {
+			apiKey: credentials.access,
+			...(credentials.refresh.length > 0 ? { refreshToken: credentials.refresh } : {}),
+		},
+		...(credentials.nickname !== undefined && credentials.nickname.length > 0
+			? { account: { displayName: credentials.nickname } }
+			: {}),
+		expiresAt: credentials.expires,
+	};
 }
 
 /** refreshToken 钩子实装（上游 refreshToken 轮换；expires 从新 JWT exp 解）。 */
