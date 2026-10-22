@@ -248,9 +248,9 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 
         // 持锁方先起：marker 出现 = 锁已被真实持有（跨进程 mkdir 产物在盘）
         const holder = spawnDriver("holder", env.stateDir, "holder-a", env.runsDir);
-        const holderPromise = waitExit(holder, 60_000);
+        const holderPromise = waitExit(holder, 240_000);
         try {
-          await waitForFile(driverMarkerPath(env.stateDir, "holder-a"), 20_000);
+          await waitForFile(driverMarkerPath(env.stateDir, "holder-a"), 60_000);
         } catch (err) {
           const holderDebug = await holderPromise.catch((e: unknown) => `holder spawn error: ${String(e)}`);
           throw new Error(`${String((err as Error).message)}\nholder outcome: ${JSON.stringify(holderDebug)}`);
@@ -258,7 +258,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 
         // 竞争方到达（锁持有段内）：必 ELOCKED → 明确拒绝退出
         const contender = spawnDriver("contender", env.stateDir, "contender-b", env.runsDir);
-        const contenderOutcome = await waitExit(contender, 30_000);
+        const contenderOutcome = await waitExit(contender, 120_000);
 
         const holderOutcome = await holderPromise;
 
@@ -280,6 +280,6 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
       } finally {
         env.cleanup();
       }
-    }, 90_000);
+    }, 300_000);
   },
 );

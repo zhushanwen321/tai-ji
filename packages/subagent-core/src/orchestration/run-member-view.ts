@@ -283,13 +283,18 @@ export interface MemberViewsBudget { // oe-exempt:20261022:framework:设计 §3.
  * 终局行带 error 时缀 `error: <lastError>`（failed / cancelled 的取消文案均走此位）。
  */
 export function memberViewLine(view: RunMemberView): string {
+  // 终端成员表列宽（`[idx] state agent model …` 对齐，与 tool 端 README 示例同形态）
+  const STATE_COL = 11;
+  const AGENT_COL = 16;
+  const MODEL_COL = 30;
+  const MS_PER_SECOND = 1000;
   const parts: string[] = [
     `[${view.stepIndex}]`,
-    view.state.padEnd(11),
-    view.agent.padEnd(16),
-    view.model.padEnd(30),
+    view.state.padEnd(STATE_COL),
+    view.agent.padEnd(AGENT_COL),
+    view.model.padEnd(MODEL_COL),
   ];
-  if (view.durationMs !== undefined) parts.push(`${(view.durationMs / 1000).toFixed(1)}s`);
+  if (view.durationMs !== undefined) parts.push(`${(view.durationMs / MS_PER_SECOND).toFixed(1)}s`);
   if (view.state === "running") {
     if (view.turns !== undefined) parts.push(`turns: ${view.turns}`);
     if (view.currentActivity !== undefined) parts.push(`· ${view.currentActivity}`);

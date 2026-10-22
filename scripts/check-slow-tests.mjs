@@ -13,7 +13,7 @@
  *     job 的工作区只有自己包的 junit，天然按 job 范围判定）
  *   - 本地：任意时点对账当前已跑套件（junit 每次运行覆盖式重写）
  */
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { relative, join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -95,7 +95,7 @@ function main() {
     process.exit(1)
   }
   const exemptFiles = exempt.size
-  console.log(`[check-slow-tests] OK（${junitFiles.length} 份 junit，超阈值 ${cases} 条全部为门控资产豁免，默认组零慢用例；豁免清单 = e2e-map E2E-INTEG-* ${exemptFiles} 个文件）`)
+  console.log(`[check-slow-tests] OK（${junitFiles.length} 份 junit，超阈值 ${cases} 条中 ${exemptedCases} 条为门控资产豁免、默认组零慢用例；豁免清单 = e2e-map E2E-INTEG-* ${exemptFiles} 个文件）`)
 }
 
 main()
