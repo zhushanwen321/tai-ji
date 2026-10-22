@@ -1,6 +1,6 @@
 # 断连窗口 dialog 请求丢失残留（remote-use D3 已接受代价）
 
-状态：已接受代价，低频残留——不修；用户报告或 W5 立项时复审。设计依据：`.tmp/tech-design/remote-use-shell-unification.md` §3.3 D3 不采用①后的残留四要素。
+状态：已接受代价，低频残留——不修；用户报告或 W5 立项时复审。设计依据：remote-use-shell-unification 设计 §3.3 D3（设计档案已随 .tmp 清理）不采用①后的残留四要素。
 
 ## 现象
 

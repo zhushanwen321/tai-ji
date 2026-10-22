@@ -15,10 +15,12 @@
  * fulfillsN/sessionFilePath 精确断言。
  *
  * 环境约定照抄 equivalence 族（pi-fixture.ts）。faux LLM 轨：子任务只需 settle
- *（bash ls 真实执行 + 文本定局，脚本固定）。
- * 门控 FAUX_PI_READY（只判 binary，凭证无关、CI 可跑）。
+ * （bash ls 真实执行 + 文本定局，脚本固定）。
+ * 门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（本地默认跳过，CI 与按改动范围触发时
+ * 真跑；SSOT = test-guard/integration-gate.ts）。
  *
- * 运行：cd packages/runtime && npx vitest run src/__tests__/equivalence/completion-backflow-e2e.test.ts
+ * 运行：TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/completion-backflow-e2e.test.ts（不设 env 时本地默认跳过）
+ * 登记：docs/testing/e2e-map.json E2E-INTEG-07（集成门控轨，R2 按改动范围触发）；文件级集成轨成员登记在 packages/runtime/vitest.config.ts 的 INTEGRATION_TESTS
  */
 
 import { describe, it, expect } from 'vitest'
@@ -32,7 +34,8 @@ import { applySessionOccupancyTransition } from '../../services/session/event-in
 import type { IManagedSessionView } from '../../services/session/types.js'
 import type { SessionManagerWatchRespondPayload } from '@zhushanwen/extension-protocol'
 import { PiSessionStore } from '../../infra/pi/session-store.js'
-import { spawnPiFixture, FAUX_PI_READY, FAUX_PI_SKIP_REASON, type PiFixture } from './pi-fixture.js'
+import { spawnPiFixture, type PiFixture } from './pi-fixture.js'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../test-guard/integration-gate.ts'
 
 /** 单步等待上限（任务护栏：每步最多 60s，真实 LLM 轮次余量） */
 const STEP_TIMEOUT_MS = 60_000
@@ -68,7 +71,7 @@ function makeView(id: string, cwd: string, sessionFilePath?: string): DriverView
   }
 }
 
-describe.skipIf(!FAUX_PI_READY)(`notify-once settle 链 e2e faux pi${FAUX_PI_READY ? '' : `（skip：${FAUX_PI_SKIP_REASON}）`}`, () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`notify-once settle 链 e2e faux pi${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
   it('U6-S2 迁移：子 session 短任务 settle → ClaimLedger 兑现 → respond 携 completed/settleSeq/fulfillsN/真实 transcript', { timeout: 150_000 }, async () => {
     const dataRoot = mkdtempSync(join(tmpdir(), 'u6-notify-'))
     let childFx: PiFixture | undefined

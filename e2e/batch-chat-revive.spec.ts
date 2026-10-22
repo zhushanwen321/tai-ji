@@ -16,25 +16,29 @@
  * 执行侧约定与 batch-window-lifecycle.spec.ts 同款（双凭证门 skip、空载串行、失败
  * writeDiag 归因禁盲重试）。
  */
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import {
   launchRealApp,
-  waitForRuntime,
   wsRoundTrip,
-  openListenWs,
   readRuntimeLogs,
   readPiLogs,
-  waitForExtensionsReady,
   type WsFrame,
 } from './fixtures/launch-app-real'
-import { execFileSync, execSync } from 'node:child_process'
+import {
+  applyRealTrackGate,
+  cleanupRealTrackApp,
+  engineShellProcessSnapshot,
+  openMainListenWs,
+  SAMPLE_PROJECT,
+  seedRealCredentials,
+  tmpDiag,
+  waitRealAppReady,
+} from './fixtures/batch-real-helpers'
+import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-project')
 const WORKER_SLUG = 'wl-chat-worker'
 
 const FIRST_TASK = '[WL-CHAT-7777] First run `sleep 15` using the bash tool, wait for it to finish, then reply with a one-word summary.'
@@ -56,67 +60,19 @@ description: D3 A5 chat revive acceptance worker (e2e seeded)
 You are a deterministic test worker. Follow the task text literally, using the bash tool when it says so.
 `
 
-// ── 凭证门与播种 / 诊断 helpers（batch-window-lifecycle 同款） ─────────────
+// ── 凭证门与播种 / 诊断 helpers（共享实现 = fixtures/batch-real-helpers.ts；
+//    本文件只留 tag 绑定、chat 特有的 worker agent 播种与泛型 waitUntil） ──────────
 
-function sourceAgentDir(): string {
-  const override = process.env['TAIJI_BATCH_CREDENTIAL_SOURCE']
-  if (override && override.trim() !== '') return override
-  return path.join(os.homedir(), '.taiji', 'agent')
-}
-
-function realCredentialSkipReason(): string | null {
-  const src = sourceAgentDir()
-  try {
-    const auth = JSON.parse(fs.readFileSync(path.join(src, 'auth.json'), 'utf8')) as Record<string, { key?: unknown }>
-    if (Object.values(auth).some((c) => typeof c?.key === 'string' && c.key.trim() !== '')) return null
-  } catch {
-    console.warn(`[batch-cr] auth.json 不可读，继续探测 models.json：${src}`)
-  }
-  try {
-    const models = JSON.parse(fs.readFileSync(path.join(src, 'models.json'), 'utf8')) as {
-      providers?: Record<string, { apiKey?: unknown }>
-    }
-    if (Object.values(models.providers ?? {}).some((p) => typeof p?.apiKey === 'string' && p.apiKey.trim() !== '')) {
-      return null
-    }
-  } catch {
-    console.warn(`[batch-cr] models.json 不可读：${src}`)
-  }
-  return `${src} 的 auth.json / models.json 均无非空 key（本机 provider 凭证缺失）`
-}
+const writeDiag = tmpDiag('batch-cr')
 
 function seedDataDir(dataDir: string): void {
-  const src = sourceAgentDir()
-  const dst = path.join(dataDir, 'agent')
-  fs.mkdirSync(dst, { recursive: true })
-  for (const f of ['models.json', 'auth.json']) {
-    const p = path.join(src, f)
-    if (fs.existsSync(p)) fs.copyFileSync(p, path.join(dst, f))
-  }
-  let source: Record<string, unknown> = {}
-  try {
-    source = JSON.parse(fs.readFileSync(path.join(src, 'settings.json'), 'utf8')) as Record<string, unknown>
-  } catch {
-    console.warn(`[batch-cr] settings.json 不可读，defaultProvider/defaultModel 缺失将由门禁拦截：${src}`)
-  }
-  const defaultProvider = source['defaultProvider']
-  const defaultModel = source['defaultModel']
-  if (typeof defaultProvider !== 'string' || !defaultProvider
-    || typeof defaultModel !== 'string' || !defaultModel) {
-    throw new Error(`[batch-cr] ${src}/settings.json 缺 defaultProvider/defaultModel——先在太极设置页完成 provider 配置`)
-  }
-  fs.writeFileSync(
-    path.join(dst, 'settings.json'),
-    JSON.stringify({ defaultProvider, defaultModel, retry: source['retry'] ?? { enabled: false } }, null, 2),
-  )
-  // chat subagent 定义播种（resource-discovery user 级源 <agentDir>/agents/）
-  fs.mkdirSync(path.join(dst, 'agents'), { recursive: true })
-  fs.writeFileSync(path.join(dst, 'agents', `${WORKER_SLUG}.md`), WORKER_AGENT_MD)
-}
-
-function writeDiag(name: string, data: Record<string, unknown>): void {
-  fs.writeFileSync(`/tmp/${name}`, JSON.stringify(data, null, 2))
-  console.log(`[batch-cr] diag → /tmp/${name}`)
+  seedRealCredentials(dataDir, 'batch-cr', {
+    // chat subagent 定义播种（resource-discovery user 级源 <agentDir>/agents/）
+    extraSeed: (dst) => {
+      fs.mkdirSync(path.join(dst, 'agents'), { recursive: true })
+      fs.writeFileSync(path.join(dst, 'agents', `${WORKER_SLUG}.md`), WORKER_AGENT_MD)
+    },
+  })
 }
 
 /** 诊断采集：薄壳进程命令行现场——子进程 spawn 参数（session-dir/agent-dir/model）
@@ -180,15 +136,9 @@ async function waitUntil<T>(
   return poll()
 }
 
-/** 引擎宿主薄壳 pid 快照（特征并集权威单源）。 */
+/** 引擎宿主薄壳 pid 快照（JSON 原语 = 共享 engineShellProcessSnapshot）。 */
 function shellPids(): Set<number> {
-  const out = execFileSync(
-    process.execPath,
-    [path.join(REPO_ROOT, 'scripts', 'count-engine-shell-processes.mjs')],
-    { encoding: 'utf8', timeout: 10_000 },
-  )
-  const parsed = JSON.parse(out) as { processes: { pid: number }[] }
-  return new Set(parsed.processes.map((p) => p.pid))
+  return new Set(engineShellProcessSnapshot().processes.map((p) => p.pid))
 }
 
 interface SubagentListItem { // oe-exempt:20260927:test:e2e 剧本内视图形状声明（DOM mock 类型，非架构契约范围）
@@ -212,20 +162,14 @@ async function getSubagents(port: number, sid: string): Promise<SubagentListItem
 }
 
 test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写新薄壳 ≤5s 历史完整（V5②③④）', async ({ }, testInfo) => {
-  test.setTimeout(420_000)
-  test.skip(process.env['TAIJI_PI_LIVE'] !== '1', '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行')
-  const credSkip = realCredentialSkipReason()
-  test.skip(credSkip !== null, credSkip ?? '')
+  applyRealTrackGate(test, { timeoutMs: 420_000, tag: 'batch-cr' })
 
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-batch-cr-'))
   seedDataDir(dataDir)
   const { page, cleanup } = await launchRealApp({ dataDir })
   let listen: { ws: { close: () => void }; events: WsFrame[] } | undefined
   try {
-    await expect(page).toHaveTitle(/太极/)
-    const port = await waitForRuntime(dataDir, 30_000)
-    expect(port).toBeGreaterThan(0)
-    await waitForExtensionsReady(dataDir)
+    const port = await waitRealAppReady(page, dataDir, 'batch-cr')
     await page.screenshot({ path: testInfo.outputPath('cr-ready.png'), fullPage: true })
 
     const createReply = await wsRoundTrip(port, {
@@ -233,10 +177,7 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
       id: 'cr-create',
       payload: { cwd: SAMPLE_PROJECT, label: 'batch-cr-chat-revive' },
     }, 'cr-create')
-    expect(createReply.type).toBe('session.created')
-    const sid = ((createReply.payload ?? {}) as { session?: { id?: string } }).session?.id
-    if (typeof sid !== 'string' || sid === '') throw new Error('session.created reply 应携带非空 session.id')
-    const sub = await openListenWs(port, sid)
+    const { sid, sub } = await openMainListenWs(port, createReply)
     listen = sub
 
     const shellBase = shellPids()
@@ -362,13 +303,6 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
     await page.screenshot({ path: testInfo.outputPath('cr-done.png'), fullPage: true })
     console.log(`[batch-cr] PASS：idle 退出 → revive respawn ${respawnMs}ms → turns=2 历史完整 → 再 idle 再退出`)
   } finally {
-    try {
-      listen?.ws.close()
-    } finally {
-      await cleanup()
-      if (!process.env['PLAYWRIGHT_DEBUG_KEEP_DATA']) {
-        fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
-    }
+    await cleanupRealTrackApp({ closeListeners: () => listen?.ws.close(), cleanup, dataDir })
   }
 })

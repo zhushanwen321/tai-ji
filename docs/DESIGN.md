@@ -919,7 +919,7 @@ style.css（packages/renderer/src/style.css :root，值真值，运行时唯一�
 | v6-master-spec.md（§1-§9 + 附录 A/B） | 并入本文件 |
 | traffic-light-layout.md | 并入本文件 §11 |
 | v6-tokens.css / v6-spec-*.html / v6-spec-base.css / page-design 各 demo html / 过程文档（review/fix-plan 等） | 已删除（2026-09-13 退役，git 可追溯；裁决收敛进 §9，UI 演变叙事见 design-evolution.md） |
-| `.tmp/v6/` demo | gitignored 原型临时产物，不入库不保留；组件实装权威 = @taiji/ui |
+| v6 demo（原型临时产物） | gitignored，已随 .tmp 清理，不入库不保留；组件实装权威 = @taiji/ui |
 
 ---
 

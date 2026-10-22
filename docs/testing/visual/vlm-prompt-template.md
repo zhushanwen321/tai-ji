@@ -113,5 +113,5 @@ interface VlmVerificationResult {
 ## 注意事项
 
 - minimax-m3 是 VLM，输出非确定性。若返回严重偏离 schema（漏字段 / 叙述性文字），主 agent 人工修正后归档——这是 ERR3「降级人工肉眼对照」的体现
-- demo（`.tmp/v6`）是 v6 视觉参考实现（gitignored 独立项目），devapp（CDP 9222）是重构后的真实 renderer。F4（token 反写）后对照对象从 demo 切换为 devapp
+- demo（`.tmp/v6`，易失工作产物目录，缺失时先重建）是 v6 视觉参考实现（gitignored 独立项目），devapp（CDP 9222）是重构后的真实 renderer。F4（token 反写）后对照对象从 demo 切换为 devapp
 - 本模板适用于任意 v6-master-spec 章节的视觉验证，不限于 sidebar / shell

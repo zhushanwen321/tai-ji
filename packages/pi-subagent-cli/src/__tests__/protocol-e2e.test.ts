@@ -20,6 +20,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { ENGINE_PROTOCOL_VERSION } from "@zhushanwen/subagent-engine-sdk";
 
 import { assertDistFresh } from "./dist-fresh.ts";
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "./integration-gate.local.ts";
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const BIN = path.join(PKG_ROOT, "bin", "pi-subagent-cli.mjs");
@@ -136,7 +137,11 @@ class FakeHost {
   }
 }
 
-describe("pi-subagent-cli 协议 e2e（bin 真机 NDJSON 往返）", () => {
+// bin CLI + fake pi 双真进程协议往返 = 代码 × OS 组合行为（无完成信号可等，窗口随
+// 负载拉长）——移出默认单测轨，集成门控（TAIJI_TEST_INTEGRATION）启用时真跑。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `pi-subagent-cli 协议 e2e（bin 真机 NDJSON 往返）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   // bin 加载 dist-first：stale dist 会让本套件验证旧引擎代码（假红），先过时效门
   beforeAll(assertDistFresh);
 
@@ -245,13 +250,17 @@ describe("pi-subagent-cli 协议 e2e（bin 真机 NDJSON 往返）", () => {
   }, 60_000);
 });
 
-// fake pi 可执行性自检（spawnSync 探针失败时给出可操作报错）
-describe("fake pi fixture 自检", () => {
-  it("fake-pi.mjs 可执行且应答 --version", () => {
-    const probe = spawnSync(process.execPath, [FAKE_PI, "--version"], { encoding: "utf8", timeout: 5000 });
-    expect(propeOk(probe.status)).toBe(true);
-  });
-});
+// fake pi 可执行性自检（spawnSync 探针失败时给出可操作报错）——fixture 自检属集成
+// 轨（真进程），同受门控。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `fake pi fixture 自检${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
+    it("fake-pi.mjs 可执行且应答 --version", () => {
+      const probe = spawnSync(process.execPath, [FAKE_PI, "--version"], { encoding: "utf8", timeout: 5000 });
+      expect(propeOk(probe.status)).toBe(true);
+    });
+  },
+);
 
 function propeOk(status: number | null): boolean {
   return status === 0;

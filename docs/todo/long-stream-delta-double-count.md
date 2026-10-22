@@ -1,6 +1,6 @@
 # 长流 delta 双计观察项（remote-use D1 不采用②）
 
-状态：观察登记，不实施——触发条件未在真机复现前不投入；真机复现即重启方案复审。设计依据：`.tmp/tech-design/remote-use-shell-unification.md` §3.3 D1 不采用②。
+状态：观察登记，不实施——触发条件未在真机复现前不投入；真机复现即重启方案复审。设计依据：remote-use-shell-unification 设计 §3.3 D1（设计档案已随 .tmp 清理）不采用②。
 
 ## 机制
 

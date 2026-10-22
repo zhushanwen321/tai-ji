@@ -24,8 +24,9 @@ const FAST_TIMING: Timing = {
   toolGap: 1, fileChangesGap: 1, retryGap: 1, bashDelay: 1,
 }
 
-/** 轮询等待条件成立（mock 异步推送节奏用，超时 fail） */
-async function waitFor(cond: () => boolean, timeoutMs = 10_000, stepMs = 20): Promise<void> {
+/** 轮询等待条件成立（mock 异步推送节奏用，超时 fail）。默认预算 2s：FAST_TIMING 全键
+ *  1ms 下绿路 <0.2s，2s 已是 10 倍余量——超时是失败信号（回归/卡死），不用更长预算掩盖 */
+async function waitFor(cond: () => boolean, timeoutMs = 2_000, stepMs = 20): Promise<void> {
   const start = Date.now()
   while (!cond()) {
     if (Date.now() - start > timeoutMs) throw new Error('waitFor timeout')
@@ -360,7 +361,7 @@ describe('mock chat domain', () => {
     const frames: ServerMessageUnion[] = []
     const un = chat.streamSubscribe('s-send', (m) => frames.push(m))
     await chat.submitDelivery('s-send', 'hello', 'u-send-1')
-    await waitFor(() => frames.some((m) => m.type === 'message.complete'), 20_000)
+    await waitFor(() => frames.some((m) => m.type === 'message.complete'))
     un()
     const types = frames.filter((m) => m.type !== 'session.delivery').map((m) => m.type)
     expect(types[0]).toBe('message.message_start')
@@ -374,7 +375,7 @@ describe('mock chat domain', () => {
     const frames: ServerMessageUnion[] = []
     const un = chat.streamSubscribe('s-bash', (m) => frames.push(m))
     await chat.bash('s-bash', 'ls')
-    await waitFor(() => frames.some((m) => m.type === 'message.bashResult'), 10_000)
+    await waitFor(() => frames.some((m) => m.type === 'message.bashResult'))
     const result = frames.find((m) => m.type === 'message.bashResult')?.payload as { output: string; exitCode: number }
     expect(result.output).toBe('(mock) ls')
     expect(result.exitCode).toBe(0)
@@ -406,7 +407,7 @@ describe('mock chat domain', () => {
     expect(snapshot, 'submitDelivery 应广播 session.delivery 快照帧').toBeTruthy()
     const entries = (snapshot!.payload as { entries: Array<{ clientUuid: string; preview: string; state: string; lane: string }> }).entries
     expect(entries).toEqual([{ clientUuid: 'u-queue-1', preview: 'queue-text', state: 'in-flight', lane: 'direct' }])
-    await waitFor(() => frames.some((m) => m.type === 'message.complete'), 20_000)
+    await waitFor(() => frames.some((m) => m.type === 'message.complete'))
     un()
   })
 

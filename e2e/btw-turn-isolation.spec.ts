@@ -46,21 +46,26 @@
 import { test, expect } from '@playwright/test'
 import {
   launchRealApp,
-  waitForRuntime,
   wsRoundTrip,
   openListenWs,
   readRuntimeLogs,
   readPiLogs,
-  waitForExtensionsReady,
   type WsFrame,
 } from './fixtures/launch-app-real'
+import {
+  applyRealTrackGate,
+  cleanupRealTrackApp,
+  listFilesRecursive,
+  SAMPLE_PROJECT,
+  seedRealCredentials,
+  tmpDiag,
+  waitRealAppReady,
+  waitUntil,
+} from './fixtures/batch-real-helpers'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-project')
 const SESSION_LABEL = 's7-btw-isolation'
 
 /** 哨兵三件套：主流不含 Q 哨兵 = S7 ③；Q 哨兵在 btw 线文件 = 正面对照。 */
@@ -82,84 +87,12 @@ const EVT_TIMEOUT_MS = 60_000
 const MAIN_COMPLETE_TIMEOUT_MS = 90_000
 const JSONL_FLUSH_TIMEOUT_MS = 20_000
 
-// ── 凭证门与播种（只读源 = 本机真实数据目录；写 = 临时 dataDir） ─────────────
+// ── 凭证门与播种 / 诊断 helpers（共享实现 = fixtures/batch-real-helpers.ts；
+//    凭证源覆盖键 = TAIJI_S7_CREDENTIAL_SOURCE——真实安装的凭证文件形态因版本/安装方式
+//    而异（auth.json/models.json 不必然在默认 agent 子树，如 dev 实例目录），覆盖值指向
+//    含同名文件的 agent 目录即可，spec 只读该目录、写侧仍恒为临时 dataDir） ─────────────
 
-/** 本机 provider 凭证源目录（taiji 数据目录的 agent 子树，运行时动态推导）。
- * TAIJI_S7_CREDENTIAL_SOURCE 可覆盖：真实安装的凭证文件形态因版本/安装方式而异
- * （auth.json/models.json 不必然在默认 agent 子树，如 dev 实例目录），覆盖值指向
- * 含同名文件的 agent 目录即可，spec 只读该目录、写侧仍恒为临时 dataDir。 */
-function sourceAgentDir(): string {
-  const override = process.env['TAIJI_S7_CREDENTIAL_SOURCE']
-  if (override && override.trim() !== '') return override
-  return path.join(os.homedir(), '.taiji', 'agent')
-}
-
-/** 凭证 + 默认模型门：任一 source 在位且有非空 key 才可跑（缺 → skip 理由，不 fail）。 */
-function realCredentialSkipReason(): string | null {
-  const src = sourceAgentDir()
-  try {
-    const auth = JSON.parse(fs.readFileSync(path.join(src, 'auth.json'), 'utf8')) as Record<string, { key?: unknown }>
-    if (Object.values(auth).some((c) => typeof c?.key === 'string' && c.key.trim() !== '')) return null
-  } catch {
-    console.warn(`[s7] auth.json 不可读，继续探测 models.json：${src}`)
-  }
-  try {
-    const models = JSON.parse(fs.readFileSync(path.join(src, 'models.json'), 'utf8')) as {
-      providers?: Record<string, { apiKey?: unknown }>
-    }
-    if (Object.values(models.providers ?? {}).some((p) => typeof p?.apiKey === 'string' && p.apiKey.trim() !== '')) {
-      return null
-    }
-  } catch {
-    console.warn(`[s7] models.json 不可读：${src}`)
-  }
-  return `${src} 的 auth.json / models.json 均无非空 key（本机 provider 凭证缺失）`
-}
-
-/**
- * 播种临时 dataDir 的 agent 子树：拷 models.json/auth.json（存在才拷）+ 写 settings 最小子集
- * （defaultProvider/defaultModel——过 runtime getDefaultModel 门禁；retry 关闭保预算确定性）。
- * 刻意剥 packages/skills：用户扩展/skill 清单不进 e2e（pi-fixture 同款防漂移理由）。
- */
-function seedRealCredentials(dataDir: string): void {
-  const src = sourceAgentDir()
-  const dst = path.join(dataDir, 'agent')
-  fs.mkdirSync(dst, { recursive: true })
-  for (const f of ['models.json', 'auth.json']) {
-    const p = path.join(src, f)
-    if (fs.existsSync(p)) fs.copyFileSync(p, path.join(dst, f))
-  }
-  let source: Record<string, unknown> = {}
-  try {
-    source = JSON.parse(fs.readFileSync(path.join(src, 'settings.json'), 'utf8')) as Record<string, unknown>
-  } catch {
-    console.warn(`[s7] settings.json 不可读，defaultProvider/defaultModel 缺失将由门禁拦截：${src}`)
-  }
-  const defaultProvider = source['defaultProvider']
-  const defaultModel = source['defaultModel']
-  if (typeof defaultProvider !== 'string' || !defaultProvider
-    || typeof defaultModel !== 'string' || !defaultModel) {
-    throw new Error(
-      `[s7] ${src}/settings.json 缺 defaultProvider/defaultModel——先在太极设置页完成 provider 配置`,
-    )
-  }
-  fs.writeFileSync(
-    path.join(dst, 'settings.json'),
-    JSON.stringify(
-      { defaultProvider, defaultModel, retry: source['retry'] ?? { enabled: false } },
-      null,
-      2,
-    ),
-  )
-}
-
-// ── 诊断与轮询 helpers（失败归档 = 六要素 ⑤） ─────────────────────────────
-
-/** 失败诊断落盘（ask-user-real 同款范式）：事件类型序 + seen types + 日志尾。 */
-function writeDiag(name: string, data: Record<string, unknown>): void {
-  fs.writeFileSync(`/tmp/${name}`, JSON.stringify(data, null, 2))
-  console.log(`[s7] diag → /tmp/${name}`)
-}
+const writeDiag = tmpDiag('s7')
 
 function countOf(events: WsFrame[], type: string): number {
   return events.filter((e) => e.type === type).length
@@ -169,17 +102,7 @@ function seenTypes(events: WsFrame[]): string[] {
   return [...new Set(events.map((e) => String(e.type)))]
 }
 
-/** 轮询等待（规范 2：真实外部事件必须轮询 + deadline，禁固定 sleep 硬等）。 */
-async function waitUntil(pred: () => boolean, deadlineMs: number, intervalMs = 200): Promise<boolean> {
-  const end = Date.now() + deadlineMs
-  while (Date.now() < end) {
-    if (pred()) return true
-    await new Promise((r) => setTimeout(r, intervalMs))
-  }
-  return pred()
-}
-
-/** 递归找含哨兵的 .jsonl（主会话 / btw 线会话同款；depth 防失控）。 */
+/** 递归找含哨兵的 .jsonl（主会话 / btw 线会话同款；递归清单 = 共享 listFilesRecursive）。 */
 function findJsonlWithMarker(root: string, marker: string, depth = 0): string | undefined {
   if (depth > 6 || !fs.existsSync(root)) return undefined
   for (const name of fs.readdirSync(root)) {
@@ -199,16 +122,6 @@ function findJsonlWithMarker(root: string, marker: string, depth = 0): string | 
   return undefined
 }
 
-function listJsonlUnder(root: string, depth = 0, acc: string[] = []): string[] {
-  if (depth > 6 || !fs.existsSync(root)) return acc
-  for (const name of fs.readdirSync(root)) {
-    const p = path.join(root, name)
-    if (fs.statSync(p).isDirectory()) listJsonlUnder(p, depth + 1, acc)
-    else if (name.endsWith('.jsonl')) acc.push(p)
-  }
-  return acc
-}
-
 function countOccurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1
 }
@@ -216,30 +129,17 @@ function countOccurrences(haystack: string, needle: string): number {
 // ── S7 主用例 ────────────────────────────────────────────────────────────
 
 test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort / 无 steer / 主流历史不含 btw 内容', async () => {
-  test.setTimeout(300_000)
-
   // 凭证双门（六要素「触发」）：真实 LLM 轨只在显式授权 + 本机凭证齐备时执行
-  test.skip(
-    process.env['TAIJI_PI_LIVE'] !== '1',
-    '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则——开发期按改动范围手动触发，CI/门禁不跑）',
-  )
-  const credSkip = realCredentialSkipReason()
-  test.skip(credSkip !== null, credSkip ?? '')
+  applyRealTrackGate(test, { timeoutMs: 300_000, tag: 's7', envVar: 'TAIJI_S7_CREDENTIAL_SOURCE' })
 
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-s7-btw-'))
-  seedRealCredentials(dataDir)
+  seedRealCredentials(dataDir, 's7', { envVar: 'TAIJI_S7_CREDENTIAL_SOURCE' })
 
   const { page, cleanup } = await launchRealApp({ dataDir })
   let mainListen: { ws: { close: () => void }; events: WsFrame[] } | undefined
   let vidListen: { ws: { close: () => void }; events: WsFrame[] } | undefined
   try {
-    await expect(page).toHaveTitle(/太极/)
-    const port = await waitForRuntime(dataDir, 30_000)
-    expect(port).toBeGreaterThan(0)
-
-    // extension resolver 就绪信号（防 session.create 过早；0 = 超时继续，best-effort）
-    const resolved = await waitForExtensionsReady(dataDir)
-    if (resolved === 0) console.warn('[s7] extensions not ready within timeout, continue anyway')
+    const port = await waitRealAppReady(page, dataDir, 's7')
 
     const createReply = await wsRoundTrip(port, {
       type: 'session.create',
@@ -356,7 +256,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     // 会话文件落 sessions/<encodeCwd>/<sid>.jsonl 子目录（与 btw/<encodeCwd>/ 同构布局），
     // 递归扫描——首版扁平 readdir 假设是该 spec 首次真执行（阶段 5 A7）暴露的资产 bug。
     const found = await waitUntil(
-      () => listJsonlUnder(path.join(agentDir, 'sessions')).length > 0,
+      () => listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl').length > 0,
       JSONL_FLUSH_TIMEOUT_MS,
     )
     expect(found, `主会话 JSONL 应已落盘（${path.join(agentDir, 'sessions')}）`).toBe(true)
@@ -370,8 +270,8 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     })()
     if (!mainFile) {
       writeDiag('s7-main-file-missing.json', {
-        sessionsDir: listJsonlUnder(path.join(agentDir, 'sessions')),
-        btwTree: listJsonlUnder(path.join(dataDir, 'ext-sessions', mainSid, 'btw')),
+        sessionsDir: listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl'),
+        btwTree: listFilesRecursive(path.join(dataDir, 'ext-sessions', mainSid, 'btw'), '.jsonl'),
       })
     }
     expect(mainFile, '含 MAIN 哨兵的主会话 JSONL 应可定位（零直写约束下由 pi 自己落盘）').toBeDefined()
@@ -394,7 +294,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     const btwTree = path.join(dataDir, 'ext-sessions', mainSid, 'btw')
     const btwFile = findJsonlWithMarker(btwTree, BTW_MARKERS[0])
     if (!btwFile) {
-      writeDiag('s7-btw-file-missing.json', { btwDir: listJsonlUnder(btwTree) })
+      writeDiag('s7-btw-file-missing.json', { btwDir: listFilesRecursive(btwTree, '.jsonl') })
     }
     expect(btwFile, 'btw 线会话文件（<dataDir>/ext-sessions/<mainSid>/btw/）应含三问哨兵').toBeDefined()
     const btwText = fs.readFileSync(btwFile!, 'utf8')
@@ -404,14 +304,13 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
 
     console.log(`[s7] PASS：主 turn 无 abort/无 steer、主流历史不含 btw 内容（mainFile=${mainFile}）`)
   } finally {
-    try {
-      mainListen?.ws.close()
-      vidListen?.ws.close()
-    } finally {
-      await cleanup()
-      if (!process.env['PLAYWRIGHT_DEBUG_KEEP_DATA']) {
-        fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
-    }
+    await cleanupRealTrackApp({
+      closeListeners: () => {
+        mainListen?.ws.close()
+        vidListen?.ws.close()
+      },
+      cleanup,
+      dataDir,
+    })
   }
 })

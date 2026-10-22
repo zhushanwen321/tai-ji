@@ -20,17 +20,18 @@
  *
  * faux LLM 轨（L2.5 翻轨）：验证对象是协议双通路（message_end 流 vs get_entries 重放）与
  * reducer 同构，非模型智能——turn 响应由 fauxResponses 脚本固定（bash toolCall + 文本回复，
- * 经 --approve 真实执行），断言语义与翻轨前一致。门控 FAUX_PI_READY（只判 binary，凭证无关、
- * CI 可跑，约定见 pi-fixture.ts 文件头）。
+ * 经 --approve 真实执行），断言语义与翻轨前一致。spawn 真 pi 的三个用例经集成测试门控
+ * TAIJI_TEST_INTEGRATION 包裹（本地默认跳过，CI 与按改动范围触发时真跑；SSOT =
+ * test-guard/integration-gate.ts）；文件末尾 plan-state 静态 fixture 组不 spawn 进程、
+ * 任何环境可跑，留默认组。
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { existsSync } from 'node:fs'
 import {
   spawnPiFixture,
-  FAUX_PI_READY,
-  FAUX_PI_SKIP_REASON,
   type PiFixture,
 } from './pi-fixture.js'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../test-guard/integration-gate.ts'
 import { translate } from '../../infra/pi/event-adapter.js'
 import type { PiEvent } from '../../infra/pi/pi-protocol.js'
 import {
@@ -85,8 +86,8 @@ function normalizeBashTimestamps(state: ChatViewState): ChatViewState {
   }
 }
 
-describe.skipIf(!FAUX_PI_READY)(
-  `equivalence: live ≡ reload（faux-pi 子进程${FAUX_PI_SKIP_REASON ? `｜skip：${FAUX_PI_SKIP_REASON}` : ''}）`,
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `equivalence: live ≡ reload（faux-pi 子进程${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}）`,
   () => {
   let fixture: PiFixture | null = null
 

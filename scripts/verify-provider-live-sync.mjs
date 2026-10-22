@@ -20,7 +20,7 @@
  *   4. 断言：成功，且 `get_state.model.id === 'lt-1'`（pi 侧真生效）；
  *   5. 反向：删除该 provider → 等 ≤3s → `set_model` 对**另一个仍存在的**模型仍成功（无塌陷）。
  *
- * 用法：node .tmp/verification/pi-live-provider-e2e.mjs
+ * 用法见头部「运行」行（历史工作产物路径已随 .tmp 清理，本脚本现居 scripts/）。
  */
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'

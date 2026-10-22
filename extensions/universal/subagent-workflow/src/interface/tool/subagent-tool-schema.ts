@@ -8,6 +8,8 @@
 //   - `subagent_manage` → SubagentManageParams（action: list/cancel/close）
 //   - `subagent_message`→ SubagentMessageParams（action: message/fork-from）
 // manage/message 内部保留小 action 枚举是 D3 范围裁决（参数同构、条件必填失真可忽略）。
+// 另含批量派发 `subagents` → SubagentsParams（成员对象形状，自 tool-subagents.ts 移入；
+// 设计 §3.4：schema 类型与 start/manage/message 同文件，供跨包契约测试直接 import）。
 //
 // 抽取自 subagent-tool.ts（跨包契约另一半）：subagent-tool 依赖树沉重（pi SDK /
 // handler / render 链），structured-output 侧的跨包契约测试若从它 import schema
@@ -20,14 +22,14 @@
 // 把 typebox alias 到 mock（丢 options），SO 侧测试以真实构造为对照基准。
 //
 // 层归属：Interface（工具 schema 的家）。SLUG_MAX_LENGTH 权威定义在 core 侧
-// orchestration/models/types.ts（[D6 合流迁址] 原 execution/execute-options-mapper.ts
-// 已随 mapper 删除，常量迁至 AgentCallOpts.description 字段同文件；core 切面不得
-// 反向 import 壳侧 interface 的约束不变）——此处 re-export 保持既有 import 路径。
+// shared/run-vocabulary.ts（= 35），经 orchestration/models/types.ts re-export
+// 保持既有 import 路径（core 切面不得反向 import 壳侧 interface 的约束不变）——
+// 此处 re-export 同理。
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
-import { THINKING_ORDER } from "@zhushanwen/subagent-core";
+import { MAX_TIMER_DELAY_MS, THINKING_ORDER } from "@zhushanwen/subagent-core";
 
 import { SLUG_MAX_LENGTH } from "@zhushanwen/subagent-core";
 
@@ -95,6 +97,87 @@ export const SubagentStartParams = Type.Object({
   // 管道），单数 start 不再有通知路由选项。旧调用形态（显式带 collect）不会被 pi 参数校验
   // 拒绝（typebox Object 不产 additionalProperties → 未知字段静默放行），通知路由不再生效；
   // 声明层无迁移期提示（原 description 的退役说明已随声明压缩删除，未在其他层重新承载）。
+});
+
+// ── subagents：批量派发（成员对象形状，subagent-tool-interface-refactor §3.1.2 终态）──
+//
+// 与 fan-out 模板共用同一形状（§3.1.2）：tasks 元素 = 成员对象（task/agent/model/
+// thinkingLevel），不再接受字符串元素；tasks 的 minItems/maxItems 与 fan-out 模板
+// @pi-meta 的 tasks 块同键同值（执行侧声明 = packages/subagent-core/workflows/fan-out.js
+// parameters 块）——声明与执行同源，双源同步由 tool-subagents.test.ts 源码对拍 +
+// structured-output cross-package-contract.test.ts 真实 typebox 断言锁定。旧 `agents`（逗号串位置映射）与 `aggregate`
+// 从工具 schema 移除——「一个执行者用于全员」用运行级 agent 表达、「每个成员不同」
+// 用成员级 agent 表达、归约由主 agent 自行完成。成员未指定 model/thinkingLevel 时
+// 留空给 $MODEL/$THINKING_LEVEL 继承（运行级值经 workerData 流动，handler 不复制
+// 进成员）；成员未指定 agent 时由 handler 填入运行级 agent。
+// 迁移检查在 tool-subagents.ts 适配器（typebox Object 不产 additionalProperties，
+// 未知字段静默放行——schema 拒不了旧字段，见文件尾 [collect 退役] 同款先例）。
+
+/** 批量成员对象（SubagentsParams.tasks 元素）：task 必填非空白 + 成员级覆盖三件。
+ *  仅文件内消费（SubagentsParams 的 Array 元素），非导出 API——fallow unused_exports 门禁锚。 */
+const SubagentsMember = Type.Object({
+  task: Type.String({
+    description:
+      "REQUIRED. The member's complete self-contained task prompt. One-shot members do NOT see your " +
+      "conversation — each task must carry its own context and acceptance criteria. Whitespace-only throws.",
+    minLength: 1,
+  }),
+  agent: Type.Optional(Type.String({
+    description:
+      "Member-level executor: absolute path to an agent .md file (usually a <location> value from " +
+      "<available_subagents>). Omit to use the run-level 'agent' (or the default general-purpose executor).",
+    pattern: "^/",
+  })),
+  model: Type.Optional(Type.String({
+    description:
+      "Member-level model in 'provider/modelId' format. Overrides the run-level 'model' — set it to " +
+      "isolate this member from a failing provider. Omit to inherit.",
+  })),
+  thinkingLevel: Type.Optional(StringEnum(THINKING_ORDER, {
+    description:
+      "Member-level thinking depth; overrides the run-level 'thinkingLevel'. Omit to inherit.",
+  })),
+});
+
+export const SubagentsParams = Type.Object({
+  tasks: Type.Array(SubagentsMember, {
+    description:
+      "One or more batch members; each element = one dispatch (object: {task, agent?, model?, thinkingLevel?}). " +
+      "All members run in parallel as independent one-shot subagents.",
+    minItems: 1,
+    // 与 fan-out 模板 @pi-meta 的 tasks.maxItems 同值（上限本源在执行侧模板）
+    maxItems: 20,
+  }),
+  agent: Type.Optional(Type.String({
+    description:
+      "Run-level default executor: absolute path to an agent .md file (usually a <location> value from " +
+      "<available_subagents>). Fills members that do not set their own 'agent'. Omit for the default general-purpose executor.",
+    pattern: "^/",
+  })),
+  model: Type.Optional(Type.String({
+    // 缺省继承主 agent 的纪律句已删（tool-declaration-slimming D1 单源化→注入段，
+    // 见 subagent-list-injector.ts SUBAGENT_DISPATCH_SHARED_RULES）；成员未指定时
+    // 批内继承 run 级值（$MODEL）是本参数的功能语义，保留。
+    description:
+      "Run-level default model in 'provider/modelId' format — members WITHOUT their own 'model' inherit it. " +
+      "To isolate a member from a failing provider, set that member's own 'model' instead.",
+  })),
+  thinkingLevel: Type.Optional(StringEnum(THINKING_ORDER, {
+    description:
+      "Run-level default thinking depth — members WITHOUT their own 'thinkingLevel' inherit it. " +
+      "Omit to default each agent to its model's highest available level.",
+  })),
+  slug: Type.Optional(Type.String({
+    description: "Batch label (max 35 chars, kebab-case) shown on the conversation block and run list. Omit to auto-generate.",
+    maxLength: SLUG_MAX_LENGTH,
+  })),
+  tokens: Type.Optional(Type.Number({
+    // 预算纪律句已删（tool-declaration-slimming D1 单源化→注入段）：跨工具预算纪律说一次，原文见 git 历史。
+    description: "Max token budget for the whole batch.",
+  })),
+  time: Type.Optional(Type.Number({
+    description: `Max time budget in ms for the whole batch (hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast at entry).`,
+  })),
 });
 
 // ── subagent_manage：list / cancel / close 三管理动作 ──

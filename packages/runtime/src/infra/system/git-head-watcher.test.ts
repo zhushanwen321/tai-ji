@@ -15,6 +15,14 @@
  *   rename 形态，watch 目标选目录的核心理由）。
  * - 测试全部落在 os.tmpdir() 白名单（fs-guard 红线）；teardown rmSync 带 maxRetries。
  *
+ * 分层（2026-10-22 单测层极端测试整治）：
+ * - 默认组 = 纯逻辑用例（observe 幂等 / forget 收缩）+ debounce 语义用例——后者经
+ *   watcherForTests 拿真实 FSWatcher 后 emit('change', ...) 注入事件（文件内已有先例：
+ *   error 事件注入同款测试钩子），确定性同步驱动合并/过滤/放行断言，零真实 IO 等待。
+ * - 集成门控组（TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts）= 真实
+ *   rename/写文件 → fs.watch 事件到达链（「目录 watch 覆盖换 inode 的 rename」这一
+ *   代码 + OS 组合事实无确定性完成信号，判据第三档），本地默认跳过。
+ *
  * 测试框架 vitest，运行命令：cd packages/runtime && npx vitest run src/infra/system/git-head-watcher.test.ts
  */
 import { mkdtempSync, mkdirSync, writeFileSync, renameSync, rmSync, existsSync } from 'node:fs'
@@ -24,6 +32,7 @@ import { setTimeout as sleepReal } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GitHeadWatcher } from './git-head-watcher.js'
 import type { RepoObservation } from '../../services/ports/git-info.js'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../test-guard/integration-gate.ts'
 
 const NON_REPO: RepoObservation = { branch: undefined, isWorktree: false, isBare: false, gitDir: undefined, headPath: undefined }
 
@@ -115,6 +124,64 @@ function repoObs(fx: Fixture): RepoObservation {
 }
 
 describe('GitHeadWatcher watch 事件链（HEAD 目录 + 500ms debounce）', () => {
+  // 事件注入确定性驱动（真实 fs.watch 事件到达链在下方集成门控组覆盖）：经
+  // watcherForTests 拿真实 FSWatcher 后 emit('change', ...)，与生产回调同一入口。
+  it('debounce 窗口内连发合并为一次放行（事件注入确定性驱动：过滤 / 排窗 / 合并 / 到点放行）', () => {
+    const fx = makeRepo()
+    const onGitEvent = vi.fn()
+    const watcher = new GitHeadWatcher({ onGitEvent })
+    watcher.observe(fx.repoCwd, repoObs(fx))
+
+    const headWatcher = watcher.watcherForTests(fx.gitDir)
+    expect(headWatcher).toBeDefined()
+
+    headWatcher!.emit('change', 'rename', 'index') // head 目录只认 HEAD 事件（其余 filename 过滤）
+    expect(watcher.hasPendingGitEventsForTests()).toBe(false) // 被过滤，未入批次
+    headWatcher!.emit('change', 'rename', 'HEAD') // 首个有效事件：排 500ms debounce timer
+    expect(watcher.hasPendingGitEventsForTests()).toBe(true)
+    headWatcher!.emit('change', 'rename', 'HEAD') // 窗口内第二事件（timer 已排，只合并不重置）
+    expect(onGitEvent).not.toHaveBeenCalled() // debounce 窗口内未放行（fake timer 未推进，结构性成立）
+
+    vi.advanceTimersByTime(499)
+    expect(onGitEvent).not.toHaveBeenCalled() // 到点前不放行
+    vi.advanceTimersByTime(1)
+    expect(onGitEvent).toHaveBeenCalledTimes(1) // 连发合并为一次放行
+    expect(onGitEvent).toHaveBeenCalledWith(new Set([fx.repoCwd]))
+    expect(watcher.hasPendingGitEventsForTests()).toBe(false) // 放行后批次清空
+    watcher.dispose()
+  })
+
+  it('observe 幂等：同一 cwd 重复登记不叠加 watcher', () => {
+    const fx = makeRepo()
+    const watcher = new GitHeadWatcher({ onGitEvent: vi.fn() })
+    watcher.observe(fx.repoCwd, repoObs(fx))
+    watcher.observe(fx.repoCwd, repoObs(fx))
+    expect(watcher.watchedDirsForTests()).toEqual([fx.gitDir])
+    watcher.dispose()
+  })
+
+  it('非 repo 观测（headPath/gitDir undefined）不挂载；forget 收缩孤儿 dir 的 watcher', () => {
+    const fx = makeRepo()
+    const watcher = new GitHeadWatcher({ onGitEvent: vi.fn() })
+
+    watcher.observe('/not-a-repo', NON_REPO)
+    expect(watcher.watchedDirsForTests()).toEqual([])
+
+    const fxB = makeRepo('repo-b')
+    watcher.observe(fx.repoCwd, repoObs(fx))
+    watcher.observe(fxB.repoCwd, repoObs(fxB))
+    expect(watcher.watchedDirsForTests()).toEqual([fx.gitDir, fxB.gitDir])
+
+    watcher.forget(new Set([fx.repoCwd]))
+    expect(watcher.watchedDirsForTests()).toEqual([fxB.gitDir])
+    watcher.dispose()
+  })
+})
+
+// ── 真实 fs.watch 事件到达链（集成门控组，见文件头分层说明） ────────────────────
+describe.skipIf(
+  !INTEGRATION_TESTS_ENABLED,
+)(`GitHeadWatcher 真实 fs.watch 事件链（集成轨：真实 rename/写文件 → 事件到达）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
   it('HEAD rename（原子写换 inode）触发 → 事件入 debounce 批次 → 500ms 到点放行受影响 cwd', { timeout: 30_000 }, async () => {
     const fx = makeRepo()
     const onGitEvent = vi.fn()
@@ -127,22 +194,6 @@ describe('GitHeadWatcher watch 事件链（HEAD 目录 + 500ms debounce）', () 
     expect(onGitEvent).not.toHaveBeenCalled() // debounce 窗口内未放行（fake timer 未推进，结构性成立）
 
     vi.advanceTimersByTime(500)
-    expect(onGitEvent).toHaveBeenCalledTimes(1)
-    expect(onGitEvent).toHaveBeenCalledWith(new Set([fx.repoCwd]))
-    watcher.dispose()
-  })
-
-  it('debounce 窗口内连发（多次 rename）合并为一次放行', { timeout: 30_000 }, async () => {
-    const fx = makeRepo()
-    const onGitEvent = vi.fn()
-    const watcher = new GitHeadWatcher({ onGitEvent })
-    watcher.observe(fx.repoCwd, repoObs(fx))
-
-    await injectUntilPending(() => atomicWriteHead(fx.gitDir), () => watcher.hasPendingGitEventsForTests())
-    atomicWriteHead(fx.gitDir) // 窗口内第二次事件（timer 已排，只合并不重置）
-    await yieldReal(100) // 让出真实事件循环，确保第二事件已派发
-    vi.advanceTimersByTime(500)
-
     expect(onGitEvent).toHaveBeenCalledTimes(1)
     expect(onGitEvent).toHaveBeenCalledWith(new Set([fx.repoCwd]))
     watcher.dispose()
@@ -172,32 +223,6 @@ describe('GitHeadWatcher watch 事件链（HEAD 目录 + 500ms debounce）', () 
     vi.advanceTimersByTime(500)
 
     expect(onGitEvent).toHaveBeenCalledWith(new Set([fx.repoCwd]))
-    watcher.dispose()
-  })
-
-  it('observe 幂等：同一 cwd 重复登记不叠加 watcher', () => {
-    const fx = makeRepo()
-    const watcher = new GitHeadWatcher({ onGitEvent: vi.fn() })
-    watcher.observe(fx.repoCwd, repoObs(fx))
-    watcher.observe(fx.repoCwd, repoObs(fx))
-    expect(watcher.watchedDirsForTests()).toEqual([fx.gitDir])
-    watcher.dispose()
-  })
-
-  it('非 repo 观测（headPath/gitDir undefined）不挂载；forget 收缩孤儿 dir 的 watcher', () => {
-    const fx = makeRepo()
-    const watcher = new GitHeadWatcher({ onGitEvent: vi.fn() })
-
-    watcher.observe('/not-a-repo', NON_REPO)
-    expect(watcher.watchedDirsForTests()).toEqual([])
-
-    const fxB = makeRepo('repo-b')
-    watcher.observe(fx.repoCwd, repoObs(fx))
-    watcher.observe(fxB.repoCwd, repoObs(fxB))
-    expect(watcher.watchedDirsForTests()).toEqual([fx.gitDir, fxB.gitDir])
-
-    watcher.forget(new Set([fx.repoCwd]))
-    expect(watcher.watchedDirsForTests()).toEqual([fxB.gitDir])
     watcher.dispose()
   })
 })

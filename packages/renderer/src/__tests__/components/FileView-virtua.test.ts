@@ -9,7 +9,7 @@
  * - 滚动容器 = 真 reka ScrollArea 的 viewport（不 stub——曾用无 wrapper 的 stub 替身，
  *   parentElement 探测在替身下成立、生产 reka wrapper 下断裂，测试全绿但虚拟化静默失效；
  *   Virtualizer 现经 scrollRef 显式接滚动宿主，替身必须保持生产 DOM 形态防假绿回归）
- * - 断言：DOM 行数远小于总可见行数（10000 文件目录 → < 200 行）
+ * - 断言：DOM 行数远小于总可见行数（1000 文件目录 → < 200 行；万级缩量后窗口逻辑等价可证）
  *
  * 运行：npx vitest run src/__tests__/components/FileView-virtua.test.ts
  */
@@ -83,14 +83,15 @@ Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
   configurable: true,
 })
 
-/** 万级文件目录 fixture：big/ 下 10000 个文件（与 e2e「展开 5000 文件目录」同量级） */
+/** 大文件目录 fixture：big/ 下 1000 个文件（万级缩量：1000 行下窗口化逻辑等价可证，
+ *  test-single-layer-cleanup 判据 d——fixture 缩量，断言强度不变） */
 function buildBigTree(): FileNode[] {
   return [
     {
       path: 'big',
       name: 'big',
       type: 'dir',
-      children: Array.from({ length: 10000 }, (_, i) => ({
+      children: Array.from({ length: 1000 }, (_, i) => ({
         path: `big/f${i}.ts`,
         name: `f${i}.ts`,
         type: 'file' as const,
@@ -141,7 +142,7 @@ afterEach(() => {
 })
 
 
-/** big/ 万行目录 mount + 展开单源（loaded 置位 → addExpanded → flush virtua）。 */
+/** big/ 千行目录 mount + 展开单源（loaded 置位 → addExpanded → flush virtua）。 */
 async function mountExpandedBigTree() {
   const wrapper = await mountView(buildBigTree())
   const store = useFileTreeStore()
@@ -151,10 +152,10 @@ async function mountExpandedBigTree() {
   return { wrapper, store }
 }
 
-describe('FileView 真实 virtua 虚拟滚动（P-D7-1：万级可见行 DOM 行数远小于总行数）', () => {
-  it('展开 10000 文件目录 → DOM 只挂载视口 ± 缓冲的行（< 200），远小于 10001 总行', async () => {
+describe('FileView 真实 virtua 虚拟滚动（P-D7-1：千级可见行 DOM 行数远小于总行数）', () => {
+  it('展开 1000 文件目录 → DOM 只挂载视口 ± 缓冲的行（< 200），远小于 1001 总行', async () => {
     const wrapper = await mountView(buildBigTree())
-    // 展开 big/（useFileTree.expandNode：loaded 早退 → addExpanded → 派生视图产出 10001 行）
+    // 展开 big/（useFileTree.expandNode：loaded 早退 → addExpanded → 派生视图产出 1001 行）
     const store = useFileTreeStore()
     store.setNodeState('s1', 'big', { status: 'loaded' })
     store.addExpanded('s1', 'big')
@@ -168,9 +169,9 @@ describe('FileView 真实 virtua 虚拟滚动（P-D7-1：万级可见行 DOM 行
     expect(dirRows.length).toBe(1) // big 目录行在 DOM
     expect(wrapper.findAll('[data-testid="file-tree-dir-badge-big"]').length).toBe(1) // 徽章恒渲染
     expect(fileRows.length).toBeGreaterThan(0) // 视口内至少渲染了若干文件行
-    // P-D7-1 量化 bound：DOM 行数 < 200（总可见行 10001）
+    // P-D7-1 量化 bound：DOM 行数 < 200（总可见行 1001）
     expect(fileRows.length + dirRows.length).toBeLessThan(200)
-    expect(fileRows.length + dirRows.length).toBeLessThan(10001)
+    expect(fileRows.length + dirRows.length).toBeLessThan(1001)
 
     wrapper.unmount()
   })

@@ -2,8 +2,8 @@
 /**
  * check-artifact-dir-formula-sync.mjs —— 会话产物目录公式对拍守卫（公式双实现 +
  * sessionId 校验正则三方 + session 存储树段）。
- * （设计：.tmp/tech-design/chat-html-support.md §6.7 D7 / §11 检查点 8 / §10 u-artifacts；
- *   session 存储树扩展：.tmp/tech-design/session-store-layout-inversion.md §3.3 D1/D8）
+ * （设计：chat-html-support 设计 §6.7 D7 / §11 检查点 8 / §10 u-artifacts（设计档案已随 .tmp
+ *   清理，git 可追溯）；session 存储树扩展：session-store-layout-inversion 设计 §3.3 D1/D8）
  *
  * 背景：产物目录公式 `<dataDir>/ext-sessions/<sessionId>/artifacts` 有两份实现，跨包
  * 不可 import（extensions 包不依赖 @taiji/shared，且 shared getDataDir 对打包态 pi 进程

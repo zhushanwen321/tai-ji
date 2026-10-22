@@ -65,7 +65,7 @@ export interface TraceSessionPartition {
    *  （增量 add）；纯内部去重状态，无消费方（不进模板/computed）。 */
   seenIds: Set<string>
   /** 登记清单截断标记（B11：正交字段，不新增 status 值——参照 source:'oversize' 先例）：
-   *  entries 达 TRACE_ENTRIES_SOFT_CAP 停止追加后置 true；消费方 = TraceView 现有
+   *  entries 达软上限（TRACE_ENTRIES_SOFT_CAP_DEFAULT，测试可注入缩小）停止追加后置 true；消费方 = TraceView 现有
    *  降级渲染分支（banner）。全量快照重新拉取时按新快照重置。 */
   truncated: boolean
   malformed: SessionTraceMalformedLine[]
@@ -188,7 +188,17 @@ const pendingAppends = new Map<string, Array<{ entries: unknown[]; leafId?: stri
  *  无界」结构；5000 条后停止追加，完整性降级由 truncated 标记 + TraceView 降级 banner
  *  承载。软上限而非环形缓冲：entry.id 去重依赖全量 seen 集，滚动丢弃会失效致重复追加
  *  （设计 B11 不采用项）。 */
-const TRACE_ENTRIES_SOFT_CAP = 5000
+const TRACE_ENTRIES_SOFT_CAP_DEFAULT = 5000
+/** 软上限当前值（生产恒默认；测试经 _setTraceEntriesSoftCapForTest 注入小 cap 构造同边界语义，用毕恢复）。 */
+let traceEntriesSoftCap = TRACE_ENTRIES_SOFT_CAP_DEFAULT
+
+/**
+ * 测试钩子：注入登记清单软上限（null 恢复默认）。软上限边界族用例以小 cap（如 50）
+ * 覆盖停采/保尾/复位/flush 同四边界，免万条 fixture。生产代码禁止调用。
+ */
+export function _setTraceEntriesSoftCapForTest(cap: number | null): void {
+  traceEntriesSoftCap = cap ?? TRACE_ENTRIES_SOFT_CAP_DEFAULT
+}
 
 /** 从 entries 构建 id 去重集（全量快照替换后重建 seenIds；增量路径不走此函数）。 */
 function buildSeenIds(entries: unknown[]): Set<string> {
@@ -211,7 +221,7 @@ function mergeAppendedEntries(
   for (const entry of payload.entries) {
     const id = (entry as { id?: unknown } | null)?.id
     if (typeof id === 'string' && s.seenIds.has(id)) continue
-    if (s.entries.length >= TRACE_ENTRIES_SOFT_CAP) {
+    if (s.entries.length >= traceEntriesSoftCap) {
       // 软上限：停止追加（超限 entry 丢弃），置位正交截断标记供降级 UI 提示
       s.truncated = true
       break
@@ -267,8 +277,8 @@ async function loadTrace(sid: string): Promise<void> {
       s.header = snap.header as TraceSessionHeader | undefined
       // B11：快照超软上限时保尾部（最新 entry 靠尾，context 边界/leafId 在尾部）+ 置
       // truncated；seenIds 随截断后集合重建（快照替换是 seenIds 唯一重建点）
-      const overCap = snap.entries.length > TRACE_ENTRIES_SOFT_CAP
-      const kept = overCap ? snap.entries.slice(-TRACE_ENTRIES_SOFT_CAP) : snap.entries
+      const overCap = snap.entries.length > traceEntriesSoftCap
+      const kept = overCap ? snap.entries.slice(-traceEntriesSoftCap) : snap.entries
       s.entries = [...kept]
       s.truncated = overCap
       s.seenIds = buildSeenIds(kept)

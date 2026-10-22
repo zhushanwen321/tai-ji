@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * check-capability-allowlist-sync.mjs —— capability 清单 ↔ 渲染管线白名单对拍检查。
- * （设计：.tmp/tech-design/chat-html-support.md §6.1 D1 / §10 u1-prompt / §11 检查点 8 同型）
+ * （设计：chat-html-support 设计 §6.1 D1 / §10 u1-prompt / §11 检查点 8 同型；设计档案已随 .tmp 清理，git 可追溯）
  *
  * 背景：system prompt 的 capability 段把「对话流渲染管线的 HTML 能力边界」告知 AI。这段
  * 文案的成员集合以结构化常量承载在 extensions/taiji/system-prompt/src/index.ts

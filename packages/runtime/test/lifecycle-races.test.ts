@@ -23,10 +23,19 @@
  * 现有 fixtures 不提供该分支，故在 tmpdir 运行时生成一次性 mock 子进程脚本
  * （不触碰仓库文件）。
  *
+ * fork 宿主用例的双层拆分（docs/todo/test-single-layer-cleanup.md 判据三档）：
+ * - 默认组：fork 桩（假子进程）+ 消息注入——LC-U1-ENTRY / LC-C1 的逻辑本质是宿主
+ *   侧的 message 入口防御与 loadPlugin 回复归属匹配，与「消息经真实 OS IPC 到达」
+ *   无关，注入即确定性同步验证（判据二档）；
+ * - 门控组（TAIJI_TEST_INTEGRATION）：真实 fork + 真实 IPC 的原用例整组迁入，本地
+ *   默认跳过、CI 或按改动范围触发时真跑（「代码 + OS 组合行为」无完成信号可等）。
+ *
  * 运行命令: cd packages/runtime && npx vitest run test/lifecycle-races.test.ts
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { EventEmitter } from 'node:events'
+import type { ChildProcess } from 'node:child_process'
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -42,6 +51,7 @@ import { handleMessage, setPostMessage, workerRpcClient } from '../src/services/
 import { PluginService } from '../src/services/plugin-service/plugin-service.js'
 import { PluginRegistry } from '../src/services/plugin-service/plugin-registry.js'
 import type { IMessageBroker } from '../src/interfaces.js'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../test-guard/integration-gate.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -62,6 +72,77 @@ process.on('message', (msg) => {
   }
 })
 `
+
+// ── fork 桩：假子进程 + 消息注入 seam（默认组，零真进程）───────────
+// LC-U1-ENTRY / LC-C1 的逻辑本质在宿主持有的 message 入口（child.on('message') →
+// safeDispatchHostMessage）与 loadPlugin 的回复归属匹配，「消息经真实 OS IPC 到达」
+// 只是投递方式。故默认组把 fork 换成假子进程，按 MALFORMED_CHILD_SCRIPT 的同语义
+// 应答注入消息——同步断言，无轮询、无超时预算。真实 fork + 真实 IPC 的原用例整组
+// 保留在文件尾部门控组（TAIJI_TEST_INTEGRATION 开启才跑）。
+// 模式对齐 src/__tests__/infra/subagent-control/control-server.test.ts 的 spawnGate。
+const forkGate = vi.hoisted(() => ({ real: false, child: null as unknown }))
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return {
+    ...actual,
+    fork: (...args: Parameters<typeof actual.fork>): ChildProcess => {
+      if (forkGate.real) return actual.fork(...args)
+      if (forkGate.child) return forkGate.child as ChildProcess
+      throw new Error('fork stub: 未装入假子进程（默认组用例须先 installFakeChild）')
+    },
+  }
+})
+
+/** 假 fork 子进程：只实现 PluginHostProcess 消费的成员面，行为对齐 MALFORMED_CHILD_SCRIPT。 */
+class FakeForkChild extends EventEmitter {
+  readonly pid = 4321
+  exitCode: number | null = null
+  signalCode: string | null = null
+  readonly stdout = new EventEmitter()
+  readonly stderr = new EventEmitter()
+  readonly sent: unknown[] = []
+
+  /** 模拟 SIGKILL 生效：同步产出 exit 事件（killChildGracefully 先挂 once('exit') 再 kill）。 */
+  kill(): void {
+    this.emitExit(null, 'SIGKILL')
+  }
+
+  send(message: unknown): boolean {
+    this.sent.push(message)
+    const m = message as { type?: string; pluginId?: string } | null
+    if (m && typeof m === 'object') {
+      if (m.type === 'load') {
+        if (m.pluginId === 'lc-fail') this.emitMessage({ type: 'error', pluginId: m.pluginId, error: 'load failed (lc-fail)' })
+        else this.emitMessage({ type: 'loaded', pluginId: m.pluginId })
+      } else if (m.type === 'send-null') {
+        this.emitMessage(null)
+      } else if (m.type === 'send-big') {
+        this.emitMessage('x'.repeat(2 * 1024 * 1024))
+      }
+    }
+    return true
+  }
+
+  /** 注入一条「子进程发往宿主」的消息（真实场景由 OS IPC 投递）。 */
+  emitMessage(msg: unknown): void {
+    this.emit('message', msg)
+  }
+
+  /** 注入 exit 事件（真实场景由 OS 进程退出触发）。 */
+  emitExit(code: number | null, signal: string | null): void {
+    this.exitCode = code
+    this.signalCode = signal
+    this.emit('exit', code, signal)
+  }
+}
+
+/** 装入假子进程并返回（后续该 host 的 fork 调用拿到此实例）。 */
+function installFakeChild(): FakeForkChild {
+  const child = new FakeForkChild()
+  forkGate.child = child as unknown
+  return child
+}
 
 function makeDescriptor(overrides: Partial<PluginDescriptor> = {}): PluginDescriptor {
   return {
@@ -457,21 +538,86 @@ describe('生命周期竞态（lifecycle races）', () => {
     }
   })
 
+  // ── fork 宿主（PluginHostProcess）：fork 桩消息注入（默认组，确定性）──
+  // 与文件尾部门控组（真实 fork IPC）覆盖同一逻辑本质，差异只在消息投递方式：
+  // 此处经 fork 桩直接注入，无 OS IPC 往返 → 同步断言、无轮询无超时预算。
+  describe('PluginHostProcess（fork 桩：消息注入，确定性）', () => {
+    afterEach(() => {
+      forkGate.child = null
+    })
+
+    it('LC-U1-ENTRY: 注入 null 与超大字符串消息不炸 fork 宿主（warning 丢弃 + 截断），宿主继续工作', async () => {
+      const rpc = new PluginRpcServer()
+      const host = new PluginHostProcess(rpc)
+      installFakeChild()
+      try {
+        const processId = await host.assignProcess('lc-entry', 'trusted')
+        const handle = host.getProcessHandle('lc-entry')!
+        expect(handle).toBeDefined()
+
+        // 触发子进程在 IPC 通道上回 null / 2MB 字符串（假子进程按 MALFORMED_CHILD_SCRIPT 同语义应答）
+        handle.postMessage({ type: 'send-null' })
+        handle.postMessage({ type: 'send-big' })
+
+        const warns = warnCalls.map(c => String(c[0]))
+        expect(warns.some(w => w.includes('discarding malformed message from'))).toBe(true)
+        const big = warns.find(w => w.includes('chars)'))
+        expect(big).toBeDefined()
+        expect(big!.length).toBeLessThan(1000)
+
+        // 宿主继续正常工作：loadPlugin 完整往返
+        await expect(host.loadPlugin(processId, 'lc-entry', '/tmp/lc-entry')).resolves.toBeUndefined()
+      } finally {
+        await host.shutdown()
+      }
+    })
+
+    it('LC-C1: 并发 loadPlugin 两个插件到同一 trusted 子进程——error/loaded 回复按 pluginId 匹配（注入消息 FIFO）', async () => {
+      const rpc = new PluginRpcServer()
+      const host = new PluginHostProcess(rpc)
+      installFakeChild()
+      try {
+        const processId = await host.assignProcess('lc-fail', 'trusted')
+        const reusedId = await host.assignProcess('lc-ok', 'trusted')
+        expect(reusedId).toBe(processId)
+
+        // IPC FIFO：先发的 lc-fail 的 error 回复先到。旧实现只匹配 m.type，
+        // 第一条 error 同时命中两个 listener，lc-ok 被错误 reject
+        const failP = host.loadPlugin(processId, 'lc-fail', '/tmp/lc-fail')
+        const okP = host.loadPlugin(processId, 'lc-ok', '/tmp/lc-ok')
+
+        await expect(failP).rejects.toThrow('load failed (lc-fail)')
+        await expect(okP).resolves.toBeUndefined()
+      } finally {
+        await host.shutdown()
+      }
+    })
+  })
+
   // ── fork 宿主（PluginHostProcess）：真实 IPC 上的入口防御与 loadPlugin 过滤 ──
   // [HISTORICAL] 2026-08-20 PR #185：真实 fork 子进程用例显式超时（满并行 + 系统余载
   // 下子进程 spawn/IPC 往返超 vitest 默认 5s testTimeout，对齐 plugin-host.test.ts 口径）。
-  describe('PluginHostProcess（真实 fork IPC）', { timeout: 30_000 }, () => {
+  // 层级归属（docs/todo/test-single-layer-cleanup.md）：真实 fork + 真实 IPC 往返属
+  // 「代码 + OS 组合行为」，负载下拉长无稳定上界——整组经集成测试门控
+  // （TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts）移出默认单测轨，
+  // 本地默认跳过、CI 或按改动范围触发时真跑；逻辑面已由上方 fork 桩组确定性地覆盖。
+  describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+    `PluginHostProcess（真实 fork IPC）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+    { timeout: 30_000 },
+    () => {
     let tmpDir: string
     let scriptPath: string
     const procs: PluginHostProcess[] = []
 
     beforeEach(async () => {
+      forkGate.real = true
       tmpDir = await mkdtemp(join(tmpdir(), 'lc-races-'))
       scriptPath = join(tmpDir, 'malformed-child.cjs')
       await writeFile(scriptPath, MALFORMED_CHILD_SCRIPT)
     })
 
     afterEach(async () => {
+      forkGate.real = false
       await Promise.allSettled(procs.map(h => h.shutdown()))
       procs.length = 0
       await rm(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
@@ -517,5 +663,6 @@ describe('生命周期竞态（lifecycle races）', () => {
       await expect(failP).rejects.toThrow('load failed (lc-fail)')
       await expect(okP).resolves.toBeUndefined()
     })
-  })
+    },
+  )
 })

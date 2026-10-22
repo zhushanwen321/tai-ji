@@ -2,25 +2,22 @@
  * rfl.mjs 深度输出断言（W2 移交 CRAP 13 条：printStats* / listRuns / cmdList /
  * cmdTrends / summarizeCalls / addUsageSums / validTimingPairs / arrow / expired / cmdClean）。
  *
- * rfl-cli.test.ts（8 用例）覆盖 smoke 面；本文件补输出内容级断言：
+ * rfl-cli.test.ts（进程内 6 条 + 真进程冒烟 2 条）覆盖 smoke 面；本文件补输出内容级断言：
  *   - stats 各段渲染（tokens 格式化 / cachePct null / per-role 汇总 / wall 派生 / origins 聚合 / scores 空态 / mustFix null / 畸形 phaseTimings）
  *   - trends/listRuns 时间窗（startedAt 排序、latest 语义、损坏 state 跳过、startedAt 缺失 ?）
  *   - clean 边界（非法 spec、h 规格、startedAt 不可解析回退 mtime）
  *   - import-execute：rfl.mjs 作为 ES module 加载（main 在 import 时执行）——
  *     该 import 语句同时是静态依赖边，使依赖分析把 scripts/rfl.mjs 纳入测试可达域。
  *
- * 驱动方式与 rfl-cli.test.ts 一致：node 子进程 + HOME 隔离 + fixture state.json。
+ * 驱动方式（单测层拆分层，docs/todo/test-single-layer-cleanup.md 第二波）：全部用例
+ * 进程内加载 rfl.mjs（vi.resetModules + 动态 import，HOME 指向 fixture 临时目录），
+ * 零子进程——真 execFile 冒烟由 rfl-cli.test.ts 承担（每包真进程缩到 1-2 条）。
  */
-import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-const RFL_PATH = join(__dirname, "..", "..", "scripts", "rfl.mjs");
-const run = promisify(execFile);
 
 function fixtureState(opts: {
   startedAt?: string;
@@ -62,9 +59,43 @@ function writeRun(repoSlug: string, runId: string, state: Record<string, unknown
   return dir;
 }
 
-async function rfl(args: string[]): Promise<{ stdout: string }> {
-  // SKILL_DATA_DIR 显式置空：防宿主环境残留值把 ROOT 重定向出 HOME 隔离树
-  return run(process.execPath, [RFL_PATH, ...args], { env: { ...process.env, HOME: home, SKILL_DATA_DIR: "" } });
+/**
+ * 进程内驱动 rfl.mjs：rfl.mjs 的 main 在 import 时执行（读 process.argv），
+ * SKILL_DATA_ROOT 在模块加载期求值——HOME/SKILL_DATA_DIR 须先指向 fixture。
+ * process.exit 拦截为 no-op 记录（switch 分支 break 后模块正常完成，不杀 worker），
+ * console.log/error 捕获为行数组 = execFile stdout 的进程内等价物；exitCodes 即
+ * execFile 版的 exit status（含非零分支，免 promisify reject 取 err.stdout 的形态）。
+ */
+async function rflInProcess(args: string[]): Promise<{ out: string; lines: string[]; exitCodes: number[] }> {
+  const lines: string[] = [];
+  const exitCodes: number[] = [];
+  const realLog = console.log;
+  const realErr = console.error;
+  const realExit = process.exit;
+  const realArgv = process.argv;
+  const realHome = process.env.HOME;
+  const realSkillDataDir = process.env.SKILL_DATA_DIR;
+  process.env.HOME = home;
+  // SKILL_DATA_DIR 显式清空：ROOT 在 import 时求值，防宿主残留值重定向出 HOME 隔离树
+  delete process.env.SKILL_DATA_DIR;
+  process.argv = ["node", "rfl.mjs", ...args];
+  console.log = ((...a: unknown[]) => { lines.push(a.map(String).join(" ")); }) as typeof console.log;
+  console.error = ((...a: unknown[]) => { lines.push(a.map(String).join(" ")); }) as typeof console.error;
+  // exit 拦截为 no-op 记录：switch 分支 break 后模块正常完成，不杀 vitest worker
+  process.exit = ((code?: number) => { exitCodes.push(code ?? 0); }) as unknown as typeof process.exit;
+  try {
+    vi.resetModules();
+    await import("../../scripts/rfl.mjs");
+  } finally {
+    console.log = realLog;
+    console.error = realErr;
+    process.exit = realExit;
+    process.argv = realArgv;
+    process.env.HOME = realHome;
+    if (realSkillDataDir === undefined) delete process.env.SKILL_DATA_DIR;
+    else process.env.SKILL_DATA_DIR = realSkillDataDir;
+  }
+  return { out: lines.join("\n"), lines, exitCodes };
 }
 
 describe("rfl stats 深度渲染", () => {
@@ -80,14 +111,14 @@ describe("rfl stats 深度渲染", () => {
         { round: 2, phaseTimings: { review: [121000, 141000], aggregate: [141000, 151000], fix: null } },
       ],
     }));
-    const { stdout } = await rfl(["stats", "wf-fmt", "repo-deep"]);
+    const { out } = await rflInProcess(["stats", "wf-fmt", "repo-deep"]);
     // wall = 151_000 - 1_000 = 150_000ms = 2m30s（跨轮取全局 min/max，非单轮求和）
-    expect(stdout).toContain("wall 2m30s");
-    expect(stdout).toContain("input 1.7M");
-    expect(stdout).toContain("output 950");
-    expect(stdout).toContain("cost $0.0050");
+    expect(out).toContain("wall 2m30s");
+    expect(out).toContain("input 1.7M");
+    expect(out).toContain("output 950");
+    expect(out).toContain("cost $0.0050");
     // cachePct = 300_000 / (1_700_000 + 300_000) = 15%
-    expect(stdout).toContain("(cacheRead 15%)");
+    expect(out).toContain("(cacheRead 15%)");
   });
 
   it("calls 全无 usage → cachePct null 显示 \"-\"；per-role 仍计 count（addUsageSums 跳过无 usage call）", async () => {
@@ -97,21 +128,21 @@ describe("rfl stats 深度渲染", () => {
         { batch: 1, round: 1, role: "fixer", name: "f", usage: null },
       ],
     }));
-    const { stdout } = await rfl(["stats", "wf-nousage", "repo-deep"]);
-    expect(stdout).toContain("(cacheRead -)");
-    expect(stdout).toContain("cost $0.00"); // 0 → "$0.0000"（<0.01 档）
+    const { out } = await rflInProcess(["stats", "wf-nousage", "repo-deep"]);
+    expect(out).toContain("(cacheRead -)");
+    expect(out).toContain("cost $0.00"); // 0 → "$0.0000"（<0.01 档）
     // byRole count 不依赖 usage：两角色各 ×1
-    expect(stdout).toContain("reviewer ×1");
-    expect(stdout).toContain("fixer ×1");
+    expect(out).toContain("reviewer ×1");
+    expect(out).toContain("fixer ×1");
   });
 
   it("calls 空 → per-role \"(no calls)\" + wall \"-\"（无合法时序对）", async () => {
     writeRun("repo-deep", "wf-nocalls", fixtureState({ calls: [], rounds: [] }));
-    const { stdout } = await rfl(["stats", "wf-nocalls", "repo-deep"]);
-    expect(stdout).toContain("per-role: (no calls)");
-    expect(stdout).toContain("wall -");
+    const { out } = await rflInProcess(["stats", "wf-nocalls", "repo-deep"]);
+    expect(out).toContain("per-role: (no calls)");
+    expect(out).toContain("wall -");
     // printStatsScores 空态
-    expect(stdout).toContain("scores: (none)");
+    expect(out).toContain("scores: (none)");
   });
 
   it("per-role 汇总 = input+cacheRead 合计（summarizeCalls byRole 口径）", async () => {
@@ -122,9 +153,9 @@ describe("rfl stats 深度渲染", () => {
         { batch: 1, round: 1, role: "aggregator", name: "agg", usage: { input: 250, output: 10, cacheRead: 250, cacheWrite: 0, cost: 0 } },
       ],
     }));
-    const { stdout } = await rfl(["stats", "wf-roles", "repo-deep"]);
-    expect(stdout).toContain("reviewer ×2 4k");
-    expect(stdout).toContain("aggregator ×1 500");
+    const { out } = await rflInProcess(["stats", "wf-roles", "repo-deep"]);
+    expect(out).toContain("reviewer ×2 4k");
+    expect(out).toContain("aggregator ×1 500");
   });
 
   it("issues 段：origins 聚合（regression/new/缺省 -）+ regressed-ever 计数", async () => {
@@ -135,10 +166,10 @@ describe("rfl stats 深度渲染", () => {
         "MF-3": { status: "open", history: [{ round: 1, status: "open" }] }, // 无 origin → "-"
       },
     }));
-    const { stdout } = await rfl(["stats", "wf-origins", "repo-deep"]);
-    expect(stdout).toContain("issues (last batch): total 3 → fixed 2  regressed-ever 1");
-    expect(stdout).toContain("origins regression 1/new 1/- 1");
-    expect(stdout).toContain("dormant (last batch) 0");
+    const { out } = await rflInProcess(["stats", "wf-origins", "repo-deep"]);
+    expect(out).toContain("issues (last batch): total 3 → fixed 2  regressed-ever 1");
+    expect(out).toContain("origins regression 1/new 1/- 1");
+    expect(out).toContain("dormant (last batch) 0");
   });
 
   it("时间线：mustFix null → \"-\"（F3 消费侧兜底）+ 畸形 phaseTimings 段显示 \"-\"", async () => {
@@ -152,9 +183,9 @@ describe("rfl stats 深度渲染", () => {
         { round: 2, mustFix: 3, phaseTimings: { review: [10, 2010], aggregate: [2010, 3010], fix: [3010, 61010] } },
       ],
     }));
-    const { stdout } = await rfl(["stats", "wf-timeline", "repo-deep"]);
-    expect(stdout).toContain("R1 (batch 1): review - │ aggregate 1ms │ fix -  mustFix -");
-    expect(stdout).toContain("R2 (batch 1): review 2s │ aggregate 1s │ fix 58s  mustFix 3");
+    const { out } = await rflInProcess(["stats", "wf-timeline", "repo-deep"]);
+    expect(out).toContain("R1 (batch 1): review - │ aggregate 1ms │ fix -  mustFix -");
+    expect(out).toContain("R2 (batch 1): review 2s │ aggregate 1s │ fix 58s  mustFix 3");
   });
 });
 
@@ -167,22 +198,22 @@ describe("rfl list/trends 时间窗", () => {
     const noCalls = fixtureState({ startedAt: "2026-08-14T10:00:00.000Z" });
     delete noCalls.calls;
     writeRun("repo-win", "wf-z", noCalls);
-    const { stdout } = await rfl(["list", "repo-win"]);
-    const lines = stdout.split("\n").filter((l) => l.startsWith("wf-"));
-    expect(lines.map((l) => /^wf-\S+/.exec(l)?.[0])).toEqual(["wf-z", "wf-m", "wf-a"]);
-    expect(stdout).toMatch(/wf-a[^\n]*calls: 2/);
-    expect(stdout).toMatch(/wf-m[^\n]*calls: 1/);
+    const { out, lines } = await rflInProcess(["list", "repo-win"]);
+    const runLines = lines.filter((l) => l.startsWith("wf-"));
+    expect(runLines.map((l) => /^wf-\S+/.exec(l)?.[0])).toEqual(["wf-z", "wf-m", "wf-a"]);
+    expect(out).toMatch(/wf-a[^\n]*calls: 2/);
+    expect(out).toMatch(/wf-m[^\n]*calls: 1/);
     // 无 calls 键的旧 state：不显示 calls 段（而非 calls: 0）
-    expect(stdout).toMatch(/wf-z[^\n]*rounds: 1\s*$/m);
+    expect(out).toMatch(/wf-z[^\n]*rounds: 1\s*$/m);
   });
 
   it("stats latest 取时间序末位（最新 run），非字母序", async () => {
     writeRun("repo-win", "wf-a", fixtureState({ startedAt: "2026-08-18T10:00:00.000Z" }));
     writeRun("repo-win", "wf-z", fixtureState({ startedAt: "2026-08-20T10:00:00.000Z", terminated: "converged" }));
-    const { stdout } = await rfl(["stats", "latest", "repo-win"]);
-    expect(stdout).toContain("wf-z");
-    expect(stdout).toContain("converged");
-    expect(stdout).not.toContain("terminated: clean"); // wf-a（clean）不是 latest
+    const { out } = await rflInProcess(["stats", "latest", "repo-win"]);
+    expect(out).toContain("wf-z");
+    expect(out).toContain("converged");
+    expect(out).not.toContain("terminated: clean"); // wf-a（clean）不是 latest
   });
 
   it("损坏 state.json（半写入）被 listRuns 跳过不崩；startedAt 缺失显示 ?", async () => {
@@ -190,45 +221,42 @@ describe("rfl list/trends 时间窗", () => {
     const bare = fixtureState({ terminated: "stuck" });
     delete (bare.meta as Record<string, unknown>).startedAt;
     writeRun("repo-win", "wf-bare", bare);
-    const { stdout } = await rfl(["list", "repo-win"]);
-    expect(stdout).not.toContain("wf-corrupt");
-    expect(stdout).toContain("wf-bare");
-    expect(stdout).toMatch(/wf-bare\s+\?\s+stuck/);
+    const { out } = await rflInProcess(["list", "repo-win"]);
+    expect(out).not.toContain("wf-corrupt");
+    expect(out).toContain("wf-bare");
+    expect(out).toMatch(/wf-bare\s+\?\s+stuck/);
     // trends 同样跳过损坏 run
-    const trends = await rfl(["trends", "repo-win"]);
-    expect(trends.stdout).not.toContain("wf-corrupt");
-    expect(trends.stdout).toContain("wf-bare");
+    const trends = await rflInProcess(["trends", "repo-win"]);
+    expect(trends.out).not.toContain("wf-corrupt");
+    expect(trends.out).toContain("wf-bare");
   });
 
   it("trends tokens 列 = input+cacheRead+output 合计（run 级口径）", async () => {
     writeRun("repo-win", "wf-tok", fixtureState({
       calls: [{ batch: 1, round: 1, role: "reviewer", name: "r", usage: { input: 4_000, output: 1_000, cacheRead: 5_000, cacheWrite: 0, cost: 0 } }],
     }));
-    const { stdout } = await rfl(["trends", "repo-win"]);
+    const { out } = await rflInProcess(["trends", "repo-win"]);
     // 4_000 + 5_000 + 1_000 = 10_000 → "10k"；cachePct = 5000/9000 = 56%
-    expect(stdout).toMatch(/wf-tok[^\n]*\s10k\s+56%/);
+    expect(out).toMatch(/wf-tok[^\n]*\s10k\s+56%/);
   });
 });
 
 describe("rfl clean 边界", () => {
   it("非法 --older-than 规格 → exit 1 + invalid 提示", async () => {
-    // exit 1 → promisify(execFile) reject，错误对象携带 stdout
-    const err = await rfl(["clean", "--older-than", "30x"]).then(
-      (r) => { throw new Error("expected non-zero exit, got: " + r.stdout); },
-      (e: Error & { stdout?: string }) => e,
-    );
-    expect(err.stdout ?? "").toContain("invalid --older-than");
-    expect(err.stdout ?? "").toContain("expect <N>d or <N>h");
+    const { out, exitCodes } = await rflInProcess(["clean", "--older-than", "30x"]);
+    expect(exitCodes[0]).toBe(1);
+    expect(out).toContain("invalid --older-than");
+    expect(out).toContain("expect <N>d or <N>h");
   });
 
   it("h 规格：2h 前过期、30m 前保留（cmdClean expired 判定）", async () => {
     const now = Date.now();
     writeRun("repo-cl", "wf-2h-ago", fixtureState({ startedAt: new Date(now - 2 * 3_600_000).toISOString() }));
     writeRun("repo-cl", "wf-30m-ago", fixtureState({ startedAt: new Date(now - 30 * 60_000).toISOString() }));
-    const dry = await rfl(["clean", "--older-than", "1h"]);
-    expect(dry.stdout).toContain("would delete");
-    expect(dry.stdout).toContain("wf-2h-ago");
-    expect(dry.stdout).not.toContain("wf-30m-ago");
+    const { out } = await rflInProcess(["clean", "--older-than", "1h"]);
+    expect(out).toContain("would delete");
+    expect(out).toContain("wf-2h-ago");
+    expect(out).not.toContain("wf-30m-ago");
   });
 
   it("startedAt 不可解析 → 回退 state.json mtime 判定（utimes 置旧）", async () => {
@@ -236,47 +264,23 @@ describe("rfl clean 边界", () => {
     // mtime 置为 40 天前（startedAt 无效 → basis 回退 mtime → 过期）
     const old = new Date(Date.now() - 40 * 86_400_000);
     utimesSync(join(dir, "state.json"), old, old);
-    const dry = await rfl(["clean", "--older-than", "30d"]);
-    expect(dry.stdout).toContain("wf-badtime");
+    const { out } = await rflInProcess(["clean", "--older-than", "30d"]);
+    expect(out).toContain("wf-badtime");
   });
 
   it("无过期 run → \"nothing older than\"", async () => {
     writeRun("repo-cl", "wf-fresh", fixtureState({ startedAt: new Date().toISOString() }));
-    const { stdout } = await rfl(["clean", "--older-than", "30d"]);
-    expect(stdout).toContain("nothing older than 30d");
+    const { out } = await rflInProcess(["clean", "--older-than", "30d"]);
+    expect(out).toContain("nothing older than 30d");
   });
 });
 
 describe("rfl import-execute（静态依赖边 + main 即时执行）", () => {
   it("rfl.mjs 可作为 ES module 加载：main 在 import 时执行 list（exit 拦截 + console 捕获）", async () => {
     writeRun("repo-imp", "wf-import-1", fixtureState({ startedAt: "2026-08-19T10:00:00.000Z" }));
-    const lines: string[] = [];
-    const exitCodes: number[] = [];
-    const realLog = console.log;
-    const realExit = process.exit;
-    const realArgv = process.argv;
-    const realHome = process.env.HOME;
-    const realSkillDataDir = process.env.SKILL_DATA_DIR;
-    process.env.HOME = home;
-    // SKILL_DATA_DIR 显式清空：ROOT 在 import 时求值，防宿主残留值重定向出 HOME 隔离树
-    delete process.env.SKILL_DATA_DIR;
-    process.argv = ["node", "rfl.mjs", "list", "repo-imp"];
-    console.log = ((...args: unknown[]) => { lines.push(args.map(String).join(" ")); }) as typeof console.log;
-    // exit 拦截为 no-op 记录：switch 分支 break 后模块正常完成，不杀 vitest worker
-    process.exit = ((code?: number) => { exitCodes.push(code ?? 0); }) as unknown as typeof process.exit;
-    try {
-      vi.resetModules();
-      await import("../../scripts/rfl.mjs");
-    } finally {
-      console.log = realLog;
-      process.exit = realExit;
-      process.argv = realArgv;
-      process.env.HOME = realHome;
-      if (realSkillDataDir === undefined) delete process.env.SKILL_DATA_DIR;
-      else process.env.SKILL_DATA_DIR = realSkillDataDir;
-    }
+    const { out, exitCodes } = await rflInProcess(["list", "repo-imp"]);
     expect(exitCodes[0]).toBe(0);
-    expect(lines.join("\n")).toContain("wf-import-1");
-    expect(lines.join("\n")).toContain("rounds: 1");
+    expect(out).toContain("wf-import-1");
+    expect(out).toContain("rounds: 1");
   });
 });
