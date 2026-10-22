@@ -21,8 +21,11 @@
  */
 import { createConnection } from 'node:net'
 
-/** 健康检查重试次数（默认） */
-export const HEALTH_RETRY_COUNT = 30
+/** 健康检查重试次数（默认）：总窗 = 150×200ms = 30s——被保护对象是 runtime 冷启动
+ *  （tsx 转译 + migrations + 依赖校验后首个 boot 可达十秒级，D3 验收实测 pnpm install
+ *  后首个实例 6s 窗必超时 → supervisor 误判死循环清理，占满端口段）。按 AGENTS.md
+ *  超时量级红线「按被保护对象粒度校准」：启动是任务级（十秒级），窗口必须覆盖它。 */
+export const HEALTH_RETRY_COUNT = 150
 
 /** 健康检查重试间隔（默认） */
 export const HEALTH_INTERVAL_MS = 200
