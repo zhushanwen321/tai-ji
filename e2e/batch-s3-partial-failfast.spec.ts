@@ -11,7 +11,7 @@
  *   "To get these results, re-dispatch via the subagents tool."）/ 非法成员 agent 入口拒绝
  *   （subagent-tool-interface-refactor §4.3：S3c 随 `agents` 参数删除退役，改测成员对象
  *   非法 agent——非 `^/` 绝对路径——在 subagents 工具入口被拒）。
- * - 持久介质断言 = W1 设计 .tmp/tech-design/w1-run-record-journal-authority.md §4.2 场景 1
+ * - 持久介质断言 = W1 设计（w1-run-record-journal-authority，历史设计档案已随 .tmp 清理，git 可追溯）§4.2 场景 1
  *   （介质归位）+ D7 终态双维度语义：
  *   ① S3a partial：fan-out 脚本返回 status=partial（脚本层失败），但 run 自身正常完成——
  *      journal run-settled outcome=completed（「脚本层失败 = outcome:completed + 脚本返回失败
@@ -253,7 +253,7 @@ let shared: {
   s3aRecordId: string | undefined
 } | undefined
 
-test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', () => {
+test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent entry rejection', () => {
   test.beforeAll(async ({ }, testInfo) => {
     test.skip(gateSkip !== null, gateSkip ?? '')
     if (gateSkip !== null) return
@@ -464,7 +464,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
       `Then reply with the exact tool output verbatim. Do not use any other tool.`
     const retryPrompt =
       `You did not call the \`subagent_message\` tool in your previous turn. Call it NOW with ` +
-      `to="${recordId}" and text="ping". This is a tool-calling test: you MUST invoke the ` +
+      `subagentId="${recordId}" and text="ping". This is a tool-calling test: you MUST invoke the ` +
       `\`subagent_message\` tool before replying. Do not summarize, do not simulate the result.`
     let rejectArrived = false
     for (let round = 1; round <= 2 && !rejectArrived; round += 1) {

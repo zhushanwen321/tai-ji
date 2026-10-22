@@ -215,10 +215,10 @@ test('ZSL (batch real): zcode 双任务同 pid（V4 懒加载单例回归）+ ta
 
     const zcBase = zcodeProcessSnapshot()
 
-    // 派发（主 LLM 调 workflow tool run action；zcode 引擎任务经模板 agent engine 显式指定）
+    // 派发（主 LLM 调 workflow_run 工具；zcode 引擎任务经模板 agent engine 显式指定）
     const argsJson = JSON.stringify({ firstTask: FIRST_TASK, secondTask: SECOND_TASK })
     const prompt =
-      `Use the \`workflow\` tool with action "run", name "${ZC_TEMPLATE}", args ${argsJson}. ` +
+      `Use the \`workflow_run\` tool with name "${ZC_TEMPLATE}", args ${argsJson}. ` +
       `Pass the args exactly as given (they belong inside args, not at the top level). ` +
       `Do not use any other tool. After the tool returns, reply with only the word DISPATCHED. [zsl-dispatch]`
     const sendReply = await wsRoundTrip(port, {

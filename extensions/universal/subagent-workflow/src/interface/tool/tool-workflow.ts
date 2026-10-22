@@ -174,7 +174,7 @@ type WorkflowControlToolParams = Static<typeof WorkflowControlParams>;
  *
  * D9 下沉后作为 core args-meta 的 reservedKeys 注入（ArgMetaOptions）——core 缺省
  * 空集，不注入则撞名保护失效（run 调用顶层必有 name，会被误判平铺）。
- * export 供 detectors.test 复用同一集合防漂移。
+ * export 供 __tests__/tool-workflow.test.ts（TC3i 宿主 reservedKeys 接线锚）复用同一集合防漂移。
  */
 export const TOOL_TOP_LEVEL = new Set([
   "action",

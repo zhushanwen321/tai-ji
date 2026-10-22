@@ -8,7 +8,9 @@
  * - W4b 错误路径 throw 语义（原 tool-workflow-throw-paths.test.ts）——pi 只对
  *   execute throw 置 isError:true（返回值里的 isError 被 agent-loop 丢弃），故
  *   错误路径必须 throw。其中 4 条 entry-guard 用例（slug 上限 / time 上限 /
- *   tokens·time 负值）是 core shared/entry-guards.ts 当前唯一行为证明。
+ *   tokens·time 负值）：core shared/entry-guards.ts 无 core 包内自有测试，行为证明
+ *   散在宿主工具入口测试（本文件 4 条 + tool-workflow-resume.test.ts /
+ *   tool-subagents.test.ts 同源用例）。
  * - D8 创建期模型拒单（原 tool-workflow-model-rejection.test.ts）。
  * - D4-1 按名解析退役 + run/abort 文案全文锚定（原 tool-workflow-run-builtin-name.test.ts）。
  * - TC3i 宿主 reservedKeys 接线锚（原 detectors.test.ts——TC3a-h 的行为等值断言

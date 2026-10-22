@@ -686,7 +686,7 @@
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-s1-basic-chain.spec.ts（双凭证门 = env + 本机 provider 凭证，缺一 skip 不 fail；空载串行）。剧本化包装：bash .tmp/dev-flow/w1-run-record-journal-authority.acceptance/batch-rerun.sh（W1 D3 verify 载体，含 build 前置 + 三 spec 串行 + 产物落 batch/，.tmp 不入 git）",
+      "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-s1-basic-chain.spec.ts（双凭证门 = env + 本机 provider 凭证，缺一 skip 不 fail；空载串行）。历史验收剧本（W1 batch-rerun.sh）已随 .tmp 清理（.tmp 不入 git），主命令即执行口径",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "剧本重建完成（2026-09-26 W1 介质归位触发义务收敛）：spec 落 git 跟踪路径防丢失复发；断言口径 = 原始场景 S1 通知收齐 + W1 新介质锚（journal 首帧/恰一 run-settled/seq 递增、v2 条目各恰两/实体、journal 胜出、死字节零命中、wf-done 幂等键）。 R2 态：触发范围 = subagent-workflow shell / fan-out 模板 / core 执行链（orchestration + execution/service）改动。asset 锚 = 被验能力本体（非验证剧本——validate 强校验 asset 磁盘存在，剧本未落建前以能力本体登记，落建后同 commit 回填）。验收敛径（设计 S1）：一条 notifyDone，status=ok 且 results.length=2、summary 计数正确、Agent Trace 2 条均 ok； 真机已过：status=ok/results=2/taskIndex 0,1/计数正确/wf-done 登记。"
@@ -736,7 +736,7 @@
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-s3-partial-failfast.spec.ts（双凭证门 = env + 本机 provider 凭证，缺一 skip 不 fail；空载串行）。剧本化包装：bash .tmp/dev-flow/w1-run-record-journal-authority.acceptance/batch-rerun.sh（W1 D3 verify 载体，含 build 前置 + 三 spec 串行 + 产物落 batch/，.tmp 不入 git）",
+      "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-s3-partial-failfast.spec.ts（双凭证门 = env + 本机 provider 凭证，缺一 skip 不 fail；空载串行）。历史验收剧本（W1 batch-rerun.sh）已随 .tmp 清理（.tmp 不入 git），主命令即执行口径",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "剧本重建完成（2026-09-26 W1 介质归位触发义务收敛）：S3 部分失败 + 反向断言三用例；mock 轨单测已随 u4/u5 记录在案（见下方既有 note），真机轨验端到端行为。 R2 态，触发条件同 E2E-BATCH-01。mock 轨单测已随 u4/u5 记录在案（partial 语义、subagent_message 批量成员拒绝文案 = workflow-origin 域边界拒绝 + list inspect 指引——core 侧恢复新句 \"To get these results, re-dispatch via the subagents tool.\"（已随修复组 1 落地，断言锁定于 subagent-actions-core.test.ts）；④冷复活绕过检查为双缺陷：①origin/parentRunId 透传缺失 ②冷查兜底全扫吃 origin 展示过滤（原 A3 通过系 list 预热索引的无关副作用），两修复均有红绿回归用例；非法成员 agent（非 ^/ 绝对路径）入口拒绝 = subagents 工具 schema 成员对象 pattern 校验）——真机轨验「模型能按恢复指引只重派失败条」的端到端行为（设计 S3）；S3c 真机形态（subagent-tool-interface-refactor §4.3）：非法成员 agent 在 subagents 工具入口被拒——零 run journal、零成员派发（调用发起以 session JSONL 中非法路径字面为证据；断言锚 session JSONL 中的非法路径字面，不锚拒绝文案，文案措辞可演化）"
@@ -771,7 +771,7 @@
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-s4-abort-no-orphan.spec.ts（双凭证门 = env + 本机 provider 凭证，缺一 skip 不 fail；空载串行）。剧本化包装：bash .tmp/dev-flow/w1-run-record-journal-authority.acceptance/batch-rerun.sh（W1 D3 verify 载体，含 build 前置 + 三 spec 串行 + 产物落 batch/，.tmp 不入 git）",
+      "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-s4-abort-no-orphan.spec.ts（双凭证门 = env + 本机 provider 凭证，缺一 skip 不 fail；空载串行）。历史验收剧本（W1 batch-rerun.sh）已随 .tmp 清理（.tmp 不入 git），主命令即执行口径",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "剧本重建完成（2026-09-26 W1 介质归位触发义务收敛）：S4 中途停止 → cancelled + 通知照达 + 无孤儿成员任务子进程；W1 新介质锚 = 收编幂等与死字节断言。 R2 态，触发条件同 E2E-BATCH-01。abort 走 workflow tool 既有 action（runId 同体系，subagents 侧无独立实现侧），成员任务子进程 ps 核对为通过条件之一（设计 S4）。断言锚（双特征集）：① 成员保活 sleep 进程；② 引擎宿主 pi-subagent-cli 薄壳——pi-workflow-run-resource-model per-window 形态下薄壳随派发窗口生灭（run 收尾 dispose），abort 收敛后计数回落基线（2026-09-27 断言升级，原「连接级常驻不数孤儿」裁决随形态切换退役，git 可追溯），计数复用 count-engine-shell-processes.mjs（特征串权威单源，基线差分吸收 zcode 常驻单例与测试进程 cmdline 噪声）。真机已过（2026-09-27 D3 A2 升级断言形态）：TAIJI_PI_LIVE=1 空载串行绿（2.6m）——run-settled(cancelled) 恰 1 + 通知照达 + 成员保活进程与引擎宿主薄壳均进行中观测到并回落基线（升级断言特征集首跑命中零校准）；真机首跑暴露 workflow 成员 pi 派发未携窗口键（engine_window_scoped 拒答），修复 = routeWorkflowEngine 的 piEngine 注入携带 parentRunId（e51bfed9c），回归锁 = workflow-agent-dispatch 窗口键断言。"
@@ -1337,7 +1337,8 @@
         "packages/subagent-core/src/execution/engine/**",
         "packages/subagent-core/src/execution/service/workflow-dispatch.ts",
         "packages/pi-subagent-cli/src/**",
-        "packages/subagent-core/src/execution/service/member-reuse-pool.ts"
+        "packages/subagent-core/src/execution/service/member-reuse-pool.ts",
+        "packages/subagent-core/workflows/fan-out.js"
       ],
       "layer": "L3",
       "assets": [
@@ -1637,7 +1638,7 @@
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "cd extensions/universal/subagent-workflow && npx vitest run src/__tests__/scenario- src/__tests__/record-mode/ src/interface/__tests__/tool-workflow-resume.test.ts src/interface/command/__tests__/commands-resume.test.ts && cd ../../../packages/subagent-core && npx vitest run src/orchestration/__tests__/resume-orchestration.test.ts src/orchestration/__tests__/resume-replay-validation.test.ts src/orchestration/__tests__/resume-tier-budget.test.ts src/orchestration/__tests__/review-fix-loop-scriptpath-failfast.test.ts",
+      "run": "cd extensions/universal/subagent-workflow && npx vitest run src/__tests__/scenario- src/__tests__/record-mode/ src/interface/tool/__tests__/tool-workflow-resume.test.ts src/interface/command/__tests__/commands-resume.test.ts && cd ../../../packages/subagent-core && npx vitest run src/orchestration/__tests__/resume-orchestration.test.ts src/orchestration/__tests__/resume-replay-validation.test.ts src/orchestration/__tests__/resume-tier-budget.test.ts src/orchestration/__tests__/review-fix-loop-scriptpath-failfast.test.ts",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态（来源设计 workflow-run-resume-revision §4 e2e 影响面「场景 1-25 新族」行——设计档案在 .tmp 不入库，authority 回退 TEST-STRATEGY 三态锚点，E2E-MODELREF-01 同款先例；登记零实现依赖复审 F3 的校验由 u4b 完成收尾）。触发范围 = resume/record 链路（壳 interface/jsonl-run-store + core orchestration/resume-run/run-events）改动时按改动范围跑。分层形态：进程内真 resumeRun + 真 WorkerHost + 真 record IO，LLM 层 = faux runner（AgentRunner 协议替身，派发捕获 + 行为队列），崩溃前置态经生产 journal 写入器 seed——写侧载荷完整：dispatchRunCreated 写 scriptSource 全文、dispatchAgentSettled 写 result 全文（全文写入随 terminal-actions 闭环，真跑 runWorkflow 产生的流与夹具构造的流同构可换，夹具构造形态是可控性选择——scenario-kit.ts 头注现行措辞）。场景 24（D14 args 不一致拒绝）驱动壳层入口 actionResume（D14 校验唯一所在层），其余场景直驱 core resumeScenarioRun。scenario-22/25 各含环境门段（节点级默认 skip），门段触发范围拆分至 E2E-RESUME-02/03（同 asset 重复引用，E2E-EQUIV-01/02 拆分先例）；record-mode 两 spec（损坏拒绝/重建保真）与夹具四件（helpers/scenario-kit/driver-resume/driver-session-reader）随族登记——driver-* 为 tsx 子进程 driver（D16 ③ 跨包断言载体）。core 三件 = resumeRun 编排原语 / replay 校验增强 / 恢复计划计数与预算算式。[ADR-0099] 修订：resume 只复用已提交结果（档 1 补收通道删除，恢复链不读取子代理会话文件），原 E2E-RESUME-02（真实会话文件档位门段）随之退役——scenario-22 现锁「已提交调用零 token 回放 + 未完成调用真实重派 + 不合成补收帧」；interface 两件 = workflow tool resume action（D14 单元层）+ /workflows 命令 resume verb 契约"

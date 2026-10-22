@@ -214,7 +214,7 @@ async function dispatchTemplateRun(
 ): Promise<void> {
   const argsJson = JSON.stringify(args)
   const prompt =
-    `Use the \`workflow\` tool with action "run", name "${templatePath}", args ${argsJson}. ` +
+    `Use the \`workflow_run\` tool with name "${templatePath}", args ${argsJson}. ` +
     `Pass the args exactly as given (they belong inside args, not at the top level). ` +
     `Do not use any other tool. After the tool returns, reply with only the word DISPATCHED. [${wsId}]`
   const sendReply = await wsRoundTrip(port, {

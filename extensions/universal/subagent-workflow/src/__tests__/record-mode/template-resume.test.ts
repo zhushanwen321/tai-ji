@@ -1,7 +1,9 @@
 // src/__tests__/record-mode/template-resume.test.ts
 //
-// 场景 A2/A4（scriptPath 锚定恢复——设计 .tmp/tech-design/workflow-resume-scriptpath-recovery.md
-// §4 验收表）：内置模板脚本（fan-out 真文件）的 resume 真链路。
+// 场景 A2/A4（scriptPath 锚定恢复。机制自包含：run-created 帧携带 scriptPath 才能
+// 锚定重建，缺席/空串 fail-fast——被验行为见下文与断言本体；原引用的设计档案
+// workflow-resume-scriptpath-recovery.md §4 验收表随 .tmp 产物清理已不存在，git 可追溯）：
+// 内置模板脚本（fan-out 真文件）的 resume 真链路。
 //
 // 回归测试 = a1a4 真机终判 BLOCKED 的缺陷①：修复前 resume 重建 spec.scriptPath 恒空串，
 // worker 加载 fan-out 即因 scriptPath 锚定检查 fail-fast（cwd 相对解析的依赖加载收紧后

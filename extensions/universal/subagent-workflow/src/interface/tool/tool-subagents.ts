@@ -206,8 +206,8 @@ export async function runSubagentsBatch(
     );
   }
 
-  // 成员 task 非空白（schema minLength:1 拦不住纯空白串——trim 检查带成员下标，
-  // 模型可直接定位修正；fan-out 模板入口的同款 trim 检查是第二道，本层先行 fail-fast）。
+  // 成员 task 非空白（三道防线：schema minLength:1 拦空串 → 本层 trim 检查拦纯空白串
+  // （带成员下标，模型可直接定位修正，先行 fail-fast）→ fan-out 模板入口 trim（run 侧兜底））。
   for (const [index, member] of tasks.entries()) {
     if (typeof member.task !== "string" || member.task.trim() === "") {
       throw new Error(
@@ -309,7 +309,7 @@ export function registerSubagentsTool(
     // 常驻（subagent-tool-interface-refactor §3.3.4）：成员对象形状与成员级模型是
     // 首调正确性的关键，schema 必须第一轮可见（deferred 不进声明集，guidelines 不
     // 注入——ADR-0136 的 defer 名单据此移出 `subagents`）。不写 exposure 字段 =
-    // SDK 默认 "direct"，与 start/manage/message/run/control 四个常驻工具同惯例。
+    // SDK 默认 "direct"，与 start/manage/message/run/control 五个常驻工具同惯例。
     description:
       "Spawn multiple subagents in ONE call, collect all results together — for N INDEPENDENT tasks.\n" +
       "Each member is a one-shot batch member: you cannot message or continue it (re-dispatch instead). Results arrive as ONE notification when the whole batch settles (not per member).\n" +

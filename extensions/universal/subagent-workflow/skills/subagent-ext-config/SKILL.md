@@ -93,6 +93,6 @@ config.json 位于 pi agent 目录下的 `subagents/config.json`，随环境不�
 | `engine_not_found` | engine id 未注册（含 `defaultEngine` 指向已卸载引擎）。检查拼写，合法值仅 `pi` / `zcode`；不回落其它引擎 |
 | `engine_probe_failed` | 引擎探针失败（CLI 缺失/版本不符）。引擎路由不换目标——修好引擎后重试；换引擎由调用方显式指定（`subagent_start` 改传 `engine` 字段，批量派发改 agent frontmatter 或 `defaultEngine`） |
 | `engine_config_unreadable` | 全局 config.json 存在但读不出来（坏 JSON / 权限）——修复或删除该文件后重试（不按内置缺省 pi 执行） |
-| zcode 任务传 `conversation` / `fork` / `worktree` 被预检拒绝 | 这些是 pi 专属能力，zcode 不支持。改用 `engine: pi`（`subagent_start` 字段；批量派发改 agent frontmatter 或 `defaultEngine`）或不传该参数重试（预检在 record 创建前同步拒绝，可立即换引擎） |
+| zcode 任务传了引擎不支持的能力参数被预检拒绝（`engine_capability_unsupported`） | 预检以引擎 manifest 能力位为准：start 场景当前 zcode 仅拒 `maxTurns`（capabilities.maxTurns=false）；`fork` / `worktree` 对 zcode 放行（fork 借 conversation='cold' 通道族判定、worktree 借 sandbox='emulated' 判定）。`conversation` 显式参数已随 modeless 重构从 start schema 删除，传入被静默忽略、不存在拒绝。被拒时去掉对应参数重派，或改用 `engine: pi`（`subagent_start` 字段；批量派发改 agent frontmatter 或 `defaultEngine`）——预检在 record 创建前同步拒绝，可立即换引擎 |
 | 改了 `defaultEngine` 没生效 | 两种可能：① 当前 session 不重读配置——新建 session；② 值非法被静默忽略回 pi——核对 JSON 值 |
 | probe 结果与 CLI 实际状态不符 | 探针进程存活期内缓存——CLI 刚装好/刚损坏，需新建 session 重置缓存 |

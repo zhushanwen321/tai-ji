@@ -1,4 +1,6 @@
-// fan-out.js workflow 脚本行为契约直测（u-fanout-template，设计 D4/D5/D9 + 成员对象化）。
+// fan-out.js workflow 脚本行为契约直测（u-fanout-template 单元：成员对象化 + 通知
+// 截断 + 全员失败收尾语义，各用例自述为准。原引用「设计 D4/D5/D9」为历史设计稿
+// 决策编号，现行设计文档与 impl-plan 均无对应——git 可追溯）。
 //
 // 测试方法（同 review-fix-loop-script.test.ts 先例）：fan-out.js 是 pi worker 模板
 // 脚本——顶层执行 + 顶层 return，不可作为 ES module import。用 node -e「AsyncFunction
@@ -389,11 +391,15 @@ describe("fan-out.js 模块形态与参数侧契约", () => {
     expect(FANOUT_SOURCE).not.toContain("itemsJson");
   });
 
-  it("@pi-meta tasks schema 对象-only：items additionalProperties:false + task minLength + agent pattern ^/ + maxItems（验收②）", () => {
+  it("@pi-meta tasks schema 对象-only：顶层与 items 均 additionalProperties:false + task minLength + agent pattern ^/ + maxItems（验收②）", () => {
     const metaStart = FANOUT_SOURCE.indexOf("/* @pi-meta");
     const metaEnd = FANOUT_SOURCE.indexOf("*/", metaStart);
     const metaBlock = FANOUT_SOURCE.slice(metaStart, metaEnd);
     expect(metaBlock).toContain("additionalProperties: false");
+    // 顶层 additionalProperties:false（设计 §3.4 参数契约）——旧 CLI 混合形态（对象 tasks
+    // + 顶层 agents 残留）在 validateRunArgs 层即拒绝，不静默放行（仅 items 层有
+    // additionalProperties 时顶层未知键穿透）
+    expect(metaBlock).toMatch(/parameters:\n  type: object\n  additionalProperties: false/);
     expect(metaBlock).toContain("minLength: 1");
     expect(metaBlock).toContain('pattern: "^/"');
     expect(metaBlock).toContain("maxItems: 20");

@@ -22,9 +22,9 @@
 // 把 typebox alias 到 mock（丢 options），SO 侧测试以真实构造为对照基准。
 //
 // 层归属：Interface（工具 schema 的家）。SLUG_MAX_LENGTH 权威定义在 core 侧
-// orchestration/models/types.ts（[D6 合流迁址] 原 execution/execute-options-mapper.ts
-// 已随 mapper 删除，常量迁至 AgentCallOpts.description 字段同文件；core 切面不得
-// 反向 import 壳侧 interface 的约束不变）——此处 re-export 保持既有 import 路径。
+// shared/run-vocabulary.ts（= 35），经 orchestration/models/types.ts re-export
+// 保持既有 import 路径（core 切面不得反向 import 壳侧 interface 的约束不变）——
+// 此处 re-export 同理。
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";

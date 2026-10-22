@@ -1,4 +1,6 @@
-// 内置 workflow 脚本 scriptPath 锚定 fail-fast（u0-failfast / D1 附带加固，计划偏差 #6 扩展）。
+// 内置 workflow 脚本 scriptPath 锚定 fail-fast（前序波次 workflow-resume scriptpath
+// 锚定修复交付。原头注「u0-failfast / D1 附带加固，计划偏差 #6 扩展」的登记与编号
+// 已随 impl-plan 现行版收敛不再存在——机制行为自包含见下文验证目标）。
 //
 // 验证目标：worker 依赖加载从「cwd 静默回退」收紧为 fail-fast——scriptPath 缺席时
 // 必须报 core_module_load_failed 且不加载用户目录下的同名依赖文件

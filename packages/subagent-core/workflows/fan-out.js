@@ -38,6 +38,7 @@ phases: ["fan-out", "aggregate"]
 # meta 块的 enum 值集与 THINKING_ORDER 动态对拍，漂移即红）
 parameters:
   type: object
+  additionalProperties: false
   properties:
     tasks:
       type: array

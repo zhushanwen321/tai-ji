@@ -9,7 +9,7 @@
  * 断言语义来源（两段叠加，以 W1 新介质为准）：
  * - 场景编排与通知口径 = 原始场景 S1（e2e-map E2E-BATCH-01.note 验收口径）：
  *   一条 notifyDone，status=ok 且 results.length=2、summary 计数正确、Agent Trace 2 条均 ok。
- * - 持久介质断言 = W1 设计 .tmp/tech-design/w1-run-record-journal-authority.md §4.2 场景 1
+ * - 持久介质断言 = W1 设计（w1-run-record-journal-authority，历史设计档案已随 .tmp 清理，git 可追溯）§4.2 场景 1
  *   （介质归位）：run/record 运行态落 journal 事件流 + 主 session 每实体两条 v2 小条目，
  *   条目不带 eventLog/displayItems 死字节——run 结束后按新介质锚定断言：
  *   ① journal `wf-<runId>.record.jsonl` 存在（首帧 run-created、恰一帧 run-settled、seq 严格递增）；

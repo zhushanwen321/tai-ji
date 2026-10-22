@@ -7,7 +7,7 @@
  * 断言语义来源（两段叠加，以 W1 新介质为准）：
  * - 场景编排 = 原始场景 S4（e2e-map E2E-BATCH-04.note）：派发后 workflow abort →
  *   run 终态 aborted + 通知到达 + 无孤儿 pi 子进程（ps 核对为通过条件之一）。
- * - 持久介质断言 = W1 设计 .tmp/tech-design/w1-run-record-journal-authority.md §4.2 场景 1
+ * - 持久介质断言 = W1 设计（w1-run-record-journal-authority，历史设计档案已随 .tmp 清理，git 可追溯）§4.2 场景 1
  *   （介质归位）+ D1 终态条目契约：abort 终局同样按新介质写入 journal 记录——
  *   ① journal run-settled 恰 1 帧、outcome=cancelled（abort → cancelled，run-events
  *      DoneReason→RunOutcome 单点映射；「aborted」在 W1 事件词表命名为 cancelled）；
@@ -38,14 +38,16 @@
  *     收尾后复测」差分，zcode 常驻单例与测试进程 cmdline 噪声被基线吸收——脚本头注
  *     口径）。真机首跑若特征不命中（pi bash 工具 spawn 形态变化），校准特征集而非
  *   删除断言。
- * - 失败归因：writeDiag 落 /tmp/batch-s4-*.json（journal 帧序 + 进程快照 + 日志尾）
+ * - 失败归因：writeDiag 落 testInfo.outputPath（batch-s4-*.json，journal 帧序 + 进程
+ *   快照 + 日志尾 + 会话尾；载荷可含 session entry 正文，不落 /tmp——ADR-0063 I2，
+ *   s1/s3 同族同款）
  *   + console 抓取 + 全页截图 + <dataDir>/logs/。重试禁令：失败先归因。
  *
  * 形态说明：真实 Electron app 自启动（launchRealApp），WS 直连驱动两 turn
  * （派发 turn → abort turn）；断言原始证据文档 = journal 文件 + 主 session JSONL +
  * 进程表（磁盘与系统事实，不依赖 DOM）。
  */
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import {
   launchRealApp,
   waitForRuntime,
@@ -151,9 +153,13 @@ function seedRealCredentials(dataDir: string): void {
 
 // ── 诊断与扫描 helpers ──────────────────────────────────────────────────
 
-function writeDiag(name: string, data: Record<string, unknown>): void {
-  fs.writeFileSync(`/tmp/${name}`, JSON.stringify(data, null, 2))
-  console.log(`[batch-s4] diag → /tmp/${name}`)
+/** 诊断落 Playwright 托管产物位（testInfo.outputPath，随 output 目录管理）——
+ *  载荷可含 session entry 正文，/tmp 不是其合法落盘位置（ADR-0063 I2；s1/s3 同族同款）。 */
+function writeDiag(testInfo: TestInfo, name: string, data: Record<string, unknown>): void {
+  const target = testInfo.outputPath(name)
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, JSON.stringify(data, null, 2))
+  console.log(`[batch-s4] diag → ${target}`)
 }
 
 async function waitUntil(pred: () => boolean, deadlineMs: number, intervalMs = 200): Promise<boolean> {
@@ -266,6 +272,7 @@ function countEngineShellProcesses(): { count: number; lines: string[] } {
  * （孤儿断言的前提是派发后确实有任务进程可回收）。失败路径 diag 与拆出前同构。
  */
 async function awaitS4InFlightEvidence(
+  testInfo: TestInfo,
   dataDir: string,
   baseline: { count: number; lines: string[] },
   shellBaseline: { count: number; lines: string[] },
@@ -273,7 +280,7 @@ async function awaitS4InFlightEvidence(
   const agentDir = path.join(dataDir, 'agent')
   const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.record.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
   if (!journalFound) {
-    writeDiag('batch-s4-journal-missing.json', {
+    writeDiag(testInfo, 'batch-s4-journal-missing.json', {
       runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
       piLogsTail: readPiLogs(dataDir).slice(-3000),
     })
@@ -286,7 +293,7 @@ async function awaitS4InFlightEvidence(
     JOURNAL_TIMEOUT_MS,
   )
   if (!dispatched) {
-    writeDiag('batch-s4-not-dispatched.json', {
+    writeDiag(testInfo, 'batch-s4-not-dispatched.json', {
       journalEventTypes: readJournalFrames(journalFile).map((f) => f['type']),
       piLogsTail: readPiLogs(dataDir).slice(-3000),
     })
@@ -296,7 +303,7 @@ async function awaitS4InFlightEvidence(
   // 成员保活进程在跑（正面对照：孤儿断言的前提是派发后确实有任务进程可回收）
   const inFlight = await waitUntil(() => countMemberSleeperProcesses().count > baseline.count, JOURNAL_TIMEOUT_MS)
   if (!inFlight) {
-    writeDiag('batch-s4-engine-process-not-seen.json', {
+    writeDiag(testInfo, 'batch-s4-engine-process-not-seen.json', {
       baseline: baseline.lines,
       current: countMemberSleeperProcesses().lines,
       hint: '特征集不命中——按头注「进程核对锚」校准特征集，不删孤儿断言',
@@ -307,7 +314,7 @@ async function awaitS4InFlightEvidence(
   // 引擎宿主薄壳在跑（per-window 在途证据：窗口内薄壳存活，是收尾后可回收的前提）
   const shellInFlight = await waitUntil(() => countEngineShellProcesses().count > shellBaseline.count, JOURNAL_TIMEOUT_MS)
   if (!shellInFlight) {
-    writeDiag('batch-s4-engine-shell-not-seen.json', {
+    writeDiag(testInfo, 'batch-s4-engine-shell-not-seen.json', {
       shellBaseline: shellBaseline.lines,
       shellCurrent: countEngineShellProcesses().lines,
       hint: '薄壳特征不命中（pi-subagent-cli / /engines/）——按 count-engine-shell-processes.mjs 头注校准特征集，不删宿主断言',
@@ -323,6 +330,7 @@ async function awaitS4InFlightEvidence(
  * + notifyDone 送达等待。返回主会话文件路径（后续三通道计数与孤儿断言消费）。
  */
 async function awaitS4SettlementAndNotifyBase(
+  testInfo: TestInfo,
   dataDir: string,
   agentDir: string,
   journalFile: string,
@@ -336,7 +344,7 @@ async function awaitS4SettlementAndNotifyBase(
   )
   const frames = readJournalFrames(journalFile)
   if (!settled) {
-    writeDiag('batch-s4-not-settled.json', {
+    writeDiag(testInfo, 'batch-s4-not-settled.json', {
       journalEventTypes: frames.map((f) => f['type']),
       engineProcesses: countMemberSleeperProcesses().lines,
       piLogsTail: readPiLogs(dataDir).slice(-3000),
@@ -363,7 +371,7 @@ async function awaitS4SettlementAndNotifyBase(
   const notifyId = `wf-done:${runId}`
   const notifyArrived = await waitUntil(() => fs.readFileSync(sessionFile, 'utf8').includes(notifyId), NOTIFY_TIMEOUT_MS)
   if (!notifyArrived) {
-    writeDiag('batch-s4-notify-missing.json', {
+    writeDiag(testInfo, 'batch-s4-notify-missing.json', {
       journalEventTypes: frames.map((f) => f['type']),
       piLogsTail: readPiLogs(dataDir).slice(-3000),
     })
@@ -390,6 +398,7 @@ async function awaitS4SettlementAndNotifyBase(
  * 报错使 diag 自身炸掉））。
  */
 async function assertS4SettledEntryAndOrphanFree(
+  testInfo: TestInfo,
   sessionFile: string,
   runId: string,
   baseline: { count: number; lines: string[] },
@@ -427,7 +436,7 @@ async function assertS4SettledEntryAndOrphanFree(
     } catch (err) {
       psDetail = `(ps 采样失败：${String(err)})`
     }
-    writeDiag('batch-s4-orphans.json', {
+    writeDiag(testInfo, 'batch-s4-orphans.json', {
       baseline: baseline.lines,
       current: countMemberSleeperProcesses().lines,
       psDetail,
@@ -490,7 +499,7 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     expect(sendReply.type, '派发 prompt 应被接受').not.toBe('error')
     const dispatchDone = await waitUntil(() => sub.events.filter((e) => e.type === 'message.complete').length > 0, MAIN_TURN_TIMEOUT_MS)
     if (!dispatchDone) {
-      writeDiag('batch-s4-dispatch-turn.json', {
+      writeDiag(testInfo, 'batch-s4-dispatch-turn.json', {
         seen: [...new Set(sub.events.map((e) => String(e.type)))],
         runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
         consoleErrors: consoleCap.errors,
@@ -500,7 +509,7 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     sub.events.length = 0
 
     // ── 在途证据（journal + agent-started + 双进程正面对照；拆出 awaitS4InFlightEvidence）──
-    const { journalFile, runId } = await awaitS4InFlightEvidence(dataDir, baseline, shellBaseline)
+    const { journalFile, runId } = await awaitS4InFlightEvidence(testInfo, dataDir, baseline, shellBaseline)
     await page.screenshot({ path: testInfo.outputPath('s4-in-flight.png'), fullPage: true })
 
     // ── turn 2：abort ──
@@ -512,14 +521,14 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     expect(abortReply.type, 'abort prompt 应被接受').not.toBe('error')
     const abortTurnDone = await waitUntil(() => sub.events.filter((e) => e.type === 'message.complete').length > 0, MAIN_TURN_TIMEOUT_MS)
     if (!abortTurnDone) {
-      writeDiag('batch-s4-abort-turn.json', {
+      writeDiag(testInfo, 'batch-s4-abort-turn.json', {
         seen: [...new Set(sub.events.map((e) => String(e.type)))],
         runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
       })
     }
     expect(abortTurnDone, `abort turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成`).toBe(true)
 
-    const sessionFile = await awaitS4SettlementAndNotifyBase(dataDir, agentDir, journalFile, runId, consoleCap)
+    const sessionFile = await awaitS4SettlementAndNotifyBase(testInfo, dataDir, agentDir, journalFile, runId, consoleCap)
     const notifyId = `wf-done:${runId}`
     const deliveredWorkflowResults = extractCustomMessageEntries(sessionFile, 'workflow-result').filter(
       (e) => ((e['details'] ?? {}) as Record<string, unknown>)['notifyId'] === notifyId,
@@ -542,7 +551,7 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
       ACK_TIMEOUT_MS,
     )
     if (!ackArrived) {
-      writeDiag('batch-s4-ack-missing.json', {
+      writeDiag(testInfo, 'batch-s4-ack-missing.json', {
         sessionTail: fs.readFileSync(sessionFile, 'utf8').slice(-4000),
         runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
       })
@@ -554,13 +563,13 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     ).toBe(1)
 
     const frames = readJournalFrames(journalFile)
-    await assertS4SettledEntryAndOrphanFree(sessionFile, runId, baseline, frames)
+    await assertS4SettledEntryAndOrphanFree(testInfo, sessionFile, runId, baseline, frames)
 
     // 断言 A4b：引擎宿主薄壳回落基线（per-window 收尾 dispose——abort 收尾杀薄壳，
     // 头注断言 ④ 的升级；同窗等待吸收成员任务收尾与薄壳退出的时序差）
     const shellOrphanFree = await waitUntil(() => countEngineShellProcesses().count <= shellBaseline.count, ORPHAN_GRACE_MS, 1000)
     if (!shellOrphanFree) {
-      writeDiag('batch-s4-engine-shell-orphans.json', {
+      writeDiag(testInfo, 'batch-s4-engine-shell-orphans.json', {
         shellBaseline: shellBaseline.lines,
         shellCurrent: countEngineShellProcesses().lines,
         journalEventTypes: frames.map((f) => f['type']),
@@ -570,7 +579,7 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
 
     await page.screenshot({ path: testInfo.outputPath('s4-aborted.png'), fullPage: true })
     if (consoleCap.errors.length > 0) {
-      writeDiag('batch-s4-console-errors.json', { errors: consoleCap.errors.slice(-50) })
+      writeDiag(testInfo, 'batch-s4-console-errors.json', { errors: consoleCap.errors.slice(-50) })
       console.warn(`[batch-s4] renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言范围）`)
     }
     console.log(`[batch-s4] PASS：runId=${runId} cancelled 收尾、通知照达、零成员任务残留、引擎宿主薄壳已退出`)
