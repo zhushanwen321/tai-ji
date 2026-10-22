@@ -64,8 +64,8 @@
   --success: #78a87e;
   --warn: #b79c54;
   --danger: #bf6b6b;
-  --danger-fg: #f0f0f2;         /* danger 实色上的文字 */
-  --success-fg: #f0f0f2;        /* success 实色上的文字（与 --danger-fg 同档镜像，renderer style.css 新增 token 同步） */
+  --danger-fg: color-mix(in oklch, var(--danger) 12%, #160b0b); /* danger 实色上的文字（暗档深字公式，与 renderer style.css :root 同构；亮色族由下方 light 块覆盖为白字） */
+  --success-fg: color-mix(in oklch, var(--success) 12%, #160b0b); /* success 实色上的文字（与 --danger-fg 同公式同浓度；亮色族由下方 light 块覆盖为白字） */
   --info: #6d99a5;
   /* reasoning 紫：思考块色相（draft-message-stream §4 + composer 思考等级） */
   --reasoning: #8e85ab;
@@ -220,8 +220,8 @@
   --warn: #977629;
   --warn-soft: color-mix(in oklch, var(--warn) 14%, transparent);
   --danger: #b24c4a;
-  --danger-fg: #faf5f5;
-  --success-fg: #faf5f5;        /* success 实色上的文字（亮色族白字，与 --danger-fg 同档镜像） */
+  --danger-fg: #ffffff;
+  --success-fg: #ffffff;        /* success 实色上的文字（亮色族白字，与 --danger-fg 同档镜像，renderer style.css light 块同构） */
   --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
   --info: #3a7688;
   --reasoning: #71659c;

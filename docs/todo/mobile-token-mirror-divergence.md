@@ -20,7 +20,7 @@
 
 增量（2026-10-10 demo 复刻波）：桌面侧六主题 accent 换青玉系 + 新增 `--link-c`/`--code-c`/`--md-code-*` 改 code-c 派生，parity 断言强制下 accent 族已机械同步到 mobile 镜像（:root + light 块）；其余分叉项如上表维持待裁决。
 
-增量（2026-10-22）：桌面侧新增 `--success-fg`（:root 暗档公式 + light 块白字覆盖），mobile tokens.css 已按镜像纪律同步两处（暗 `#f0f0f2` / 亮 `#faf5f5` 硬编码档）；其余分叉项维持待裁决。
+增量（2026-10-22）：桌面侧新增 `--success-fg`（:root 暗档公式 + light 块白字覆盖）；mobile tokens.css 同步 `--danger-fg`/`--success-fg` 四处——暗档 = 桌面同款 `color-mix(in oklch, 基色 12%, #160b0b)` 深字公式、亮档 = `#ffffff` 白字（首次同步曾把亮色白字值误抄进暗档致语义极性反转，同日复审修正，并以桌面公式为镜像基准）。其余分叉项维持待裁决；2026-10-22 五分片主题扫描另发现登记外新分叉（亮色阴影组缺失 / 暗亮两组 surface/elevated/input/card 分叉 / shadcn 别名映射目标分叉等 20+ 项），待并入本登记统一裁决。
 
 ## 裁决选项
 
