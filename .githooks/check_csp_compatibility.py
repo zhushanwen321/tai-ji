@@ -29,6 +29,7 @@ CSP meta，组内源码对照该组 index.html 的 script-src 判定。ui 是两
 退出码：0 通过 / 2 违规
 """
 
+from __future__ import annotations
 import re
 import sys
 from pathlib import Path

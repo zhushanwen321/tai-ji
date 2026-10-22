@@ -37,6 +37,7 @@ custom 消息注入点唯一性检查（C-ext-19，pi-boundary-reliability §3.3
 退出码: 0 通过 / 2 违规
 """
 
+from __future__ import annotations
 import re
 import subprocess
 import sys

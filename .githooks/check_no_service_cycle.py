@@ -16,6 +16,7 @@ import type（接口依赖不造成运行时耦合）；types.ts/plugin-types.ts
 退出码：0 通过 / 2 发现循环
 """
 
+from __future__ import annotations
 import collections
 import re
 from pathlib import Path

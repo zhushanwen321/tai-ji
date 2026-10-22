@@ -19,6 +19,7 @@ BASELINE_MODULES（基线债）不在对账面——它们本就不在 §3 表�
 退出码：0 = 一致；1 = 漂移。
 """
 
+from __future__ import annotations
 import importlib.util
 import re
 import sys

@@ -25,6 +25,7 @@ ESLint 检查失败 exit 2 零输出，排查无从下手）。正确形态是
 退出码：0 通过 / 2 违规
 """
 
+from __future__ import annotations
 import re
 import sys
 from pathlib import Path
