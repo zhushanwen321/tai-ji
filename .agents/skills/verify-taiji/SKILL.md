@@ -209,6 +209,8 @@ node .agents/skills/verify-taiji/scripts/probes/mock-llm-workflow.mjs [--repo <r
 
 LLM 通道三选一（决定能否零 token）：**faux**（主会话默认）/ **mock-http**（孙进程即 subagent·workflow 执行层）/ **live**（真模型智能或真鉴权）。判定依据与装配要点见 [capabilities/README.md §3](capabilities/README.md)。
 
+**被 dev-flow-wf D3 消费的节点契约**：dev-flow 引擎与剧本进程之间只有 script 路径一个通道（`node <script>` 直跑，无参数、无 per-node env），所以 workflow 内 verify 节点的 script = dev-flow D0 生成的 wrapper（spawnSync 本 runner + scenario 绝对路径 + `--artifacts-dir <节点 artifactsDir>`），不是剧本本体。本 runner 侧已满足的对齐契约：退出码 fail=1 / degraded=0（`--strict` 时 2）；`verdict.json` 与 `summary.jsonl` 镜像落 artifactsDir 根（引擎事实锚读此根）；`summary.jsonl` 每步一行。手工 / 主 agent 直跑仍用 §6 的 run.mjs 命令形态。T3 验收计划表对本技能的引用入口 = [capabilities/P0-P1-COVERAGE.md](capabilities/P0-P1-COVERAGE.md)（矩阵行四态即「验收项 ↔ 现成剧本」对账）。
+
 ## 8. 人工剧本（features/）
 
 `features/` 保留用户视角的端到端故事（四段式：Sub-features / 用户入口 / 驱动剧本 / Gotchas），适合「要看某个界面怎么点」的场景；它是 capability 层的**人读摘要**，新增功能面以 capability 为准。当前五个 P0 剧本：
@@ -223,4 +225,7 @@ LLM 通道三选一（决定能否零 token）：**faux**（主会话默认）/ 
 
 ## 9. 维护
 
-功能变化后剧本会漂移。定期或大改动后用 `/maintain-verification-skill` 跑一轮维护（逐功能源码核对 + 实跑驱动 + 最多一个 PR 的修正）。
+功能变化后剧本会漂移，维护分两轨：
+
+- **随交付增量同步（dev-flow-wf D4 第 5 步承接）**：交付触达覆盖矩阵登记的功能行时，由 dev-flow-wf 收尾流程增量回写能力文档/场景剧本/矩阵行，并只重跑本次被修改过的剧本（未改的引用 D3 verdict 证据）。维护单元 = [capabilities/P0-P1-COVERAGE.md](capabilities/P0-P1-COVERAGE.md) 的矩阵行，不是 features/ 的人读摘要。
+- **定期全量体检（人工触发）**：定期或大改动后用 `/maintain-verification-skill` 跑一轮（逐功能源码核对 + 实跑驱动 + 最多一个 PR 的修正）。该技能按「项目技能目录下 `verify-*` 前缀 + SKILL.md 含 Launch 与 Drive 驱动节」发现本技能；其 source wave / live pass 的「每个 feature」对应上述覆盖矩阵的矩阵行。
