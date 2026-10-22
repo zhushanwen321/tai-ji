@@ -140,6 +140,8 @@ let dataDir: string
 
 function assemble(opts: {
   fetchFn?: typeof fetch
+  /** 清单拉取地址覆盖（显式注入 = 单源语义，不进双通道）。 */
+  manifestUrl?: string
   extScan?: Array<{ name: string; version: string; enabled: boolean }>
   installed?: string[]
   sessionOverrides?: Partial<WoolSessionPort>
@@ -167,6 +169,7 @@ function assemble(opts: {
     dataDir,
     broadcast: (msg) => broadcasts.push(msg),
     ...(opts.reclaimSink ? { reclaimSessionTree: opts.reclaimSink } : {}),
+    ...(opts.manifestUrl !== undefined ? { manifestUrl: opts.manifestUrl } : {}),
     fetchFn: opts.fetchFn ?? (async () => jsonResponse(manifestBody())),
     now: (() => 1_700_000_000_000) as () => number,
     ...(opts.manageResponseWaitMs !== undefined ? { manageResponseWaitMs: opts.manageResponseWaitMs } : {}),
@@ -221,6 +224,113 @@ describe('清单拉取与安装编排', () => {
     expect(reply.ok).toBe(false)
     if (!reply.ok) expect(reply.error.code).toBe('install_failed')
     expect(ext.installs).toHaveLength(1)
+  })
+})
+
+// ── 清单双通道（github 权威源 + gitcode 国内备源）──────────────────────
+
+describe('清单双通道拉取（github 权威 + gitcode 备源）', () => {
+  /** gitcode 备源通道桩的资产直链（stub 自造 URL，fetch 分流锚点）。 */
+  const GITCODE_ASSET_URL = 'https://gitcode.test/releases/download/v9.9.9/wool-manifest.json'
+  const GITCODE_PRERELEASE_ASSET_URL = 'https://gitcode.test/releases/download/v0.0.1-pre/wool-manifest.json'
+
+  /** gitcode releases API 响应体（首元素为 prerelease 发布——选择器必须跳过它）。 */
+  function gitcodeReleasesBody(): unknown {
+    return [
+      {
+        tag_name: 'v0.0.1-pre',
+        prerelease: true,
+        assets: [{ name: 'wool-manifest.json', browser_download_url: GITCODE_PRERELEASE_ASSET_URL }],
+      },
+      {
+        tag_name: 'v9.9.9',
+        prerelease: false,
+        assets: [
+          { name: 'other.zip', browser_download_url: 'https://gitcode.test/other.zip' },
+          { name: 'wool-manifest.json', browser_download_url: GITCODE_ASSET_URL },
+        ],
+      },
+    ]
+  }
+
+  /** 备源清单（qoder 钉 0.9.9——与权威源 manifestBody 的 0.2.0 可区分）。 */
+  function gitcodeManifestBody(): unknown {
+    return manifestBody({
+      qoder: { pkg: '@zhushanwen/pi-wool-qoder', version: '0.9.9', displayName: 'Qoder', vendor: '阿里', credentialsSource: 'ide-extract', riskNotice: 'r' },
+    })
+  }
+
+  /**
+   * 按 URL 分流的 fetch 桩：api.gitcode.com → releases 响应；GITCODE_ASSET_URL →
+   * 备源清单；prerelease 资产 URL → 503（选择器若误选 prerelease 条目，备源通道随即
+   * 失败、用例红灯——跳过逻辑的隐性断言）；其余（github 权威源）→ github 响应。
+   */
+  function makeDualFetch(overrides: { github?: () => Response; gitcodeApi?: () => Response; asset?: () => Response } = {}): typeof fetch {
+    const github = overrides.github ?? (() => jsonResponse(manifestBody()))
+    const gitcodeApi = overrides.gitcodeApi ?? (() => jsonResponse(gitcodeReleasesBody()))
+    const asset = overrides.asset ?? (() => jsonResponse(gitcodeManifestBody()))
+    return (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input)
+      if (url.includes('api.gitcode.com')) return gitcodeApi()
+      if (url === GITCODE_ASSET_URL) return asset()
+      if (url === GITCODE_PRERELEASE_ASSET_URL) return new Response('nope', { status: 503 })
+      return github()
+    }) as typeof fetch
+  }
+
+  it('github 503 + gitcode 两跳成功（跳过 prerelease 条目）→ 备源清单胜出安装', async () => {
+    const { manager, ext } = assemble({
+      fetchFn: makeDualFetch({ github: () => new Response('nope', { status: 503 }) }),
+      // 安装回执 installedVersion 取扫描结果——扫描桩版本须与备源清单钉定版本一致。
+      extScan: [{ name: '@zhushanwen/pi-wool-qoder', version: '0.9.9', enabled: true }],
+    })
+    const reply = await manager.runAction({ action: 'install', family: 'qoder' })
+    expect(reply).toEqual({ ok: true, data: { installedVersion: '0.9.9' } })
+    expect(ext.installs).toEqual(['npm:@zhushanwen/pi-wool-qoder@0.9.9'])
+  })
+
+  it('两通道都成功且清单不同 → github 权威优先（镜像滞后窗口下不装旧版扩展）', async () => {
+    const { manager, ext } = assemble({ fetchFn: makeDualFetch() })
+    const reply = await manager.runAction({ action: 'install', family: 'qoder' })
+    expect(reply).toEqual({ ok: true, data: { installedVersion: '0.2.0' } })
+    expect(ext.installs).toEqual(['npm:@zhushanwen/pi-wool-qoder@0.2.0'])
+  })
+
+  it('显式 manifestUrl 注入 → 单源语义：fetchFn 只收到该 URL（gitcode API 零访问）', async () => {
+    const seenUrls: string[] = []
+    const fetchFn: typeof fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      seenUrls.push(String(input))
+      return jsonResponse(manifestBody())
+    }) as typeof fetch
+    const { manager } = assemble({ manifestUrl: 'https://manifest.test/wool-manifest.json', fetchFn })
+    const reply = await manager.runAction({ action: 'install', family: 'qoder' })
+    expect(reply).toEqual({ ok: true, data: { installedVersion: '0.2.0' } })
+    expect(seenUrls).toEqual(['https://manifest.test/wool-manifest.json'])
+  })
+
+  it('两通道全失败 → unreachable 聚合双方原因（github 503 + gitcode 500）', async () => {
+    const { manager, ext } = assemble({
+      fetchFn: makeDualFetch({
+        github: () => new Response('github down', { status: 503 }),
+        gitcodeApi: () => new Response('gitcode down', { status: 500 }),
+      }),
+    })
+    const reply = await manager.runAction({ action: 'install', family: 'qoder' })
+    expect(reply.ok).toBe(false)
+    if (!reply.ok) {
+      expect(reply.error.code).toBe('unreachable')
+      expect(reply.error.message).toContain('HTTP 503')
+      expect(reply.error.message).toContain('HTTP 500')
+    }
+    expect(ext.installs).toEqual([])
+  })
+
+  it('gitcode releases 响应非数组（结构漂移）→ 备源通道失败不炸，github 成功则整体成功', async () => {
+    const { manager } = assemble({
+      fetchFn: makeDualFetch({ gitcodeApi: () => jsonResponse({ message: 'unexpected payload' }) }),
+    })
+    const reply = await manager.runAction({ action: 'install', family: 'qoder' })
+    expect(reply).toEqual({ ok: true, data: { installedVersion: '0.2.0' } })
   })
 })
 

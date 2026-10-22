@@ -68,10 +68,21 @@ function woolManageCommandName(family: string): string {
   return `wool-${family}`
 }
 
-/** 资产清单缺省挂点（M5 实施期裁决，deviations 登记 = 设计目录 wool-provider/deviations.md DEV-1）：taiji GitHub release 最新版资产。 */
+/**
+ * 资产清单缺省挂点：发布权威源 = 羊毛扩展发布仓（tai-ji-plugin）的 GitHub release
+ * 最新版资产（releases/latest/download 302 → 最新版资产直链）。
+ */
 export const DEFAULT_WOOL_MANIFEST_URL =
-  'https://github.com/zhushanwen321/tai-ji/releases/latest/download/wool-manifest.json'
-/** 清单拉取超时（控制范围单请求粒度，红线 19：秒级）。 */
+  'https://github.com/zhushanwen321/tai-ji-plugin/releases/latest/download/wool-manifest.json'
+/**
+ * gitcode 镜像仓 releases 匿名 API（国内备源通道第一跳）：匿名可读，返回 JSON 数组，
+ * 元素含 tag_name/prerelease/assets，assets 元素含 name 与 browser_download_url。
+ */
+const GITCODE_RELEASES_API_URL =
+  'https://api.gitcode.com/api/v5/repos/qq_18433817/tai-ji-plugin/releases?per_page=5'
+/** gitcode release assets 中承载清单的文件名（发布流程契约）。 */
+const GITCODE_MANIFEST_ASSET_NAME = 'wool-manifest.json'
+/** 清单拉取超时（控制范围单请求粒度，红线 19：秒级；双通道下每个请求独立计时）。 */
 const MANIFEST_FETCH_TIMEOUT_MS = 10_000
 /**
  * 管理编排回收上界（回收层统一有界兜底，crash-forensics 附录 E：dispose/kill 允许默认有界）。
@@ -232,7 +243,10 @@ export interface WoolManagerDeps {  // oe-exempt:20261022:framework:依赖注入
    * 泄漏累积，与 ADR-0141「删除会话 = 整树回收」相悖；羊毛域自回收（D3 验收发现）。
    */
   reclaimSessionTree?: (sessionId: string) => void
-  /** 清单拉取地址（可配置；缺省 = DEFAULT_WOOL_MANIFEST_URL）。 */
+  /**
+   * 清单拉取地址（高级覆盖 / 测试 fixture）。显式注入 = 单源语义：只拉该 URL，不并发
+   * 备源；缺省 = 双通道（DEFAULT_WOOL_MANIFEST_URL 权威源 + gitcode 国内备源）。
+   */
   manifestUrl?: string
   /** 网络出口（测试注入；缺省 globalThis.fetch）。 */
   fetchFn?: typeof fetch
@@ -270,6 +284,39 @@ function isWoolManageResponseShape(value: unknown): value is { v: 1; ok: true; d
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * 清单拉取通道内部结果：通道内任何一步失败（网络/超时/HTTP 非 2xx/结构不符/资产缺失）
+ * 都折算为 detail 文案，通道函数不抛出——双通道并发消费面无 unhandled rejection。
+ */
+type ManifestChannelOutcome =
+  | { ok: true; raw: unknown }
+  | { ok: false; detail: string }
+
+/**
+ * gitcode releases API 响应 → 清单资产直链。取数组中首个 `prerelease !== true` 的发布
+ * （prerelease = 预发布，稳定版用户不消费；releases 按时间倒序，首个即最新稳定版），
+ * 在其 assets 中找清单资产的 browser_download_url。响应非数组 / 选中发布结构不符 /
+ * 清单资产缺失 = undefined（通道失败素材，不猜其余条目——镜像结构漂移应显式失败）。
+ */
+function pickGitcodeManifestAssetUrl(raw: unknown): string | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const release = (raw as unknown[]).find((entry) => isRecord(entry) && entry.prerelease !== true)
+  if (!isRecord(release) || !Array.isArray(release.assets)) return undefined
+  const asset = (release.assets as unknown[]).find(
+    (entry) => isRecord(entry) && entry.name === GITCODE_MANIFEST_ASSET_NAME,
+  )
+  const url = isRecord(asset) ? asset.browser_download_url : undefined
+  return typeof url === 'string' && url.length > 0 ? url : undefined
+}
+
+/**
+ * allSettled 结果 → 通道结果。rejected 理论不可达（通道函数全捕获不抛出），仍折算为
+ * 通道失败 detail——结构性保证 fetchManifest 消费面无异常路径。
+ */
+function settledChannelOutcome(result: PromiseSettledResult<ManifestChannelOutcome>): ManifestChannelOutcome {
+  return result.status === 'fulfilled' ? result.value : { ok: false, detail: toErrorMessage(result.reason) }
 }
 
 /** get_entries 响应域内收窄（history-rebuild-cache GetEntriesResult 同款先例）。 */
@@ -652,23 +699,82 @@ export class WoolManager {
       return { ok: true, manifest: this.manifestCache.manifest, fetchedAt: this.manifestCache.fetchedAt }
     }
     const fetchFn = this.deps.fetchFn ?? ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => fetch(input, init))
-    let raw: unknown
-    try {
-      const response = await fetchFn(this.deps.manifestUrl ?? DEFAULT_WOOL_MANIFEST_URL, {
-        signal: AbortSignal.timeout(MANIFEST_FETCH_TIMEOUT_MS),
-      })
-      if (!response.ok) {
-        return { ok: false, error: { code: 'unreachable', message: `资产清单拉取失败（HTTP ${response.status}）。请检查网络后重试；清单恢复前不执行安装` } }
+    let selected: ManifestChannelOutcome
+    if (this.deps.manifestUrl !== undefined) {
+      // 显式 manifestUrl（高级覆盖 / 测试 fixture）= 单源语义：指哪打哪，不进双通道
+      // 并发——覆盖者对清单来源有明确意图，备源并发是噪音。
+      selected = await this.fetchChannelJson(fetchFn, this.deps.manifestUrl)
+    } else {
+      // 缺省双通道并发（allSettled：通道结果独立消费，单通道异常不放大为整体失败）：
+      // github 发布权威源直拉 + gitcode 国内备源（两跳）。
+      const [github, gitcode] = await Promise.allSettled([
+        this.fetchChannelJson(fetchFn, DEFAULT_WOOL_MANIFEST_URL),
+        this.fetchGitcodeChannel(fetchFn),
+      ])
+      const githubOutcome = settledChannelOutcome(github)
+      const gitcodeOutcome = settledChannelOutcome(gitcode)
+      // github 成功恒用 github 结果：gitcode 是平台侧镜像，存在滞后窗口——按「先到
+      // 先得」竞速（Promise.any 形态）可能拿到旧清单装旧版扩展；github 失败才消费
+      // gitcode 成功结果。
+      if (githubOutcome.ok) {
+        selected = githubOutcome
+      } else if (gitcodeOutcome.ok) {
+        selected = gitcodeOutcome
+      } else {
+        // 两通道全失败：聚合双方原因（权威源细节在前，排障可归因是哪一侧断的）。
+        return {
+          ok: false,
+          error: {
+            code: 'unreachable',
+            message: `资产清单不可达（github：${githubOutcome.detail}；gitcode：${gitcodeOutcome.detail}）。请检查网络后重试；清单恢复前不执行安装`,
+          },
+        }
       }
-      raw = await response.json()
-    } catch (e) {
-      return { ok: false, error: { code: 'unreachable', message: `资产清单不可达：${toErrorMessage(e)}。请检查网络后重试；清单恢复前不执行安装` } }
     }
-    if (!isWoolAssetManifest(raw)) {
+    if (!selected.ok) {
+      return {
+        ok: false,
+        error: {
+          code: 'unreachable',
+          message: `资产清单不可达（${selected.detail}）。请检查网络后重试；清单恢复前不执行安装`,
+        },
+      }
+    }
+    if (!isWoolAssetManifest(selected.raw)) {
       return { ok: false, error: { code: 'bad_shape', message: '资产清单格式损坏（schema 校验不过）。请稍后重试或检查 taiji 发布通道；清单修复前不执行安装' } }
     }
-    this.manifestCache = { manifest: raw, fetchedAt: this.now() }
-    return { ok: true, manifest: raw, fetchedAt: this.manifestCache.fetchedAt }
+    this.manifestCache = { manifest: selected.raw, fetchedAt: this.now() }
+    return { ok: true, manifest: selected.raw, fetchedAt: this.manifestCache.fetchedAt }
+  }
+
+  /**
+   * 单 URL JSON GET 通道原语（github 直拉与 gitcode 两跳共用）：非 2xx / 网络异常 /
+   * JSON 解析失败 → 失败 detail（不抛出）。超时按单请求计（AbortSignal.timeout）。
+   */
+  private async fetchChannelJson(fetchFn: typeof fetch, url: string): Promise<ManifestChannelOutcome> {
+    try {
+      const response = await fetchFn(url, { signal: AbortSignal.timeout(MANIFEST_FETCH_TIMEOUT_MS) })
+      if (!response.ok) {
+        return { ok: false, detail: `HTTP ${response.status}` }
+      }
+      return { ok: true, raw: await response.json() }
+    } catch (e) {
+      return { ok: false, detail: toErrorMessage(e) }
+    }
+  }
+
+  /**
+   * gitcode 国内备源通道（两跳）：releases 匿名 API 列发布 → 首个非 prerelease 发布的
+   * 清单资产直链 → 拉取清单。任何一跳失败都折算通道失败。
+   */
+  private async fetchGitcodeChannel(fetchFn: typeof fetch): Promise<ManifestChannelOutcome> {
+    const releases = await this.fetchChannelJson(fetchFn, GITCODE_RELEASES_API_URL)
+    if (!releases.ok) return releases
+    const assetUrl = pickGitcodeManifestAssetUrl(releases.raw)
+    if (assetUrl === undefined) {
+      return { ok: false, detail: 'releases 响应结构不符或缺 wool-manifest.json 资产' }
+    }
+    return this.fetchChannelJson(fetchFn, assetUrl)
   }
 
   // ── 安装编排（D2：清单钉版本 → 既有 installExtension 链）────────────────
