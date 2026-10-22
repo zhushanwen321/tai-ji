@@ -22,7 +22,7 @@
         {{ seg.label }}
         <span
           v-if="seg.value === 'review' && openMustFixCount > 0"
-          class="rounded-full bg-danger px-1.5 font-mono text-[length:var(--text-3xs)] font-bold leading-4 text-white"
+          class="rounded-full bg-danger px-1.5 font-mono text-[length:var(--text-3xs)] font-bold leading-4 text-danger-fg"
           data-testid="canvas-review-tab-count"
         >{{ openMustFixCount }}</span>
       </Button>

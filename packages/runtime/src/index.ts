@@ -67,7 +67,7 @@ import { ModelService } from './services/model-service.js'
 
 import { mandatoryExtensions, isBtwVirtualId } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
-import { getDataDir } from '@taiji/shared/paths'
+import { getDataDir, getDefaultSessionDir } from '@taiji/shared/paths'
 // startupSweep：启动收编扫描 core 装配单点（挂点见 main() 内 registerRuntimeInstance
 // 之后的时序硬声明注释段）。
 import { startupSweep } from '@zhushanwen/subagent-core'
@@ -637,7 +637,17 @@ async function main(): Promise<void> {
   // RecentWorkspacesStore：最近工作区持久化（WriteBackCache 固定 partition 'global'）。
   // configDir 由 configService 动态推导，无硬编码路径（INV-5）。
   const recentWorkspacesStore = new RecentWorkspacesStore(configDir)
-  const workspaceService = new WorkspaceService(recentWorkspacesStore)
+  // 默认会话目录（<dataDir>/defaultSession/，landing「默认会话」固定入口）：启动即确保存在
+  // （用户裁决 2026-10-22，与 <dataDir> 配置目录同一保障时机）。失败不阻塞启动——后续经
+  // workspace.defaultSessionDir RPC 幂等重试（自愈），仍失败则前端隐藏入口。
+  try {
+    fs.mkdirSync(getDefaultSessionDir(), { recursive: true })
+  } catch (err) {
+    // best-effort 降级：启动期确保目录失败不阻塞启动——后续 workspace.defaultSessionDir
+    // RPC 幂等重试自愈，仍失败则前端隐藏入口（见上方 try 前注释）。
+    console.error('[runtime] ensure defaultSession dir failed (non-fatal, will retry on RPC):', err)
+  }
+  const workspaceService = new WorkspaceService(recentWorkspacesStore, () => getDefaultSessionDir())
   // ProjectStore：project 列表持久化（D14，2026-08-04 迁 runtime projects.json，
   // 与 recent-workspaces 同模式；前端 localStorage 仅首启迁移源）。
   const projectStore = new ProjectStore(configDir)

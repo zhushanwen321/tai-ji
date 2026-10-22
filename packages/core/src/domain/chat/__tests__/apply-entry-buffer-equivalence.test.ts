@@ -29,6 +29,7 @@ import { describe, it, expect } from 'vitest'
 import { applyEntry, createChatViewStateBuffer, createInitialChatViewState, replayEntries } from '../apply-entry'
 import type { PiEntry } from '../apply-entry'
 import { msgEntry } from './helpers/fixtures'
+import { expectDerivedIdSequence } from './helpers/equivalence-asserts'
 
 // ── fixture（msgEntry 构造收敛到 helpers/fixtures.ts 单源；混合全类型序列沿用
 //    apply-entry-fold-equivalence.test.ts 的手写字面量形态——承载 buffer 维度的序列语义）──
@@ -169,9 +170,7 @@ describe('createChatViewStateBuffer 连续 feed ≡ reduce(applyEntry) 元断言
       const viaReduce = entries.reduce(applyEntry, createInitialChatViewState())
       expect(buf.state, `n=${n}`).toEqual(viaReduce)
       expect(buf.state.messages, `n=${n}`).toHaveLength(n)
-      expect(buf.state.messages.map((m) => m.id), `n=${n}`).toEqual(
-        Array.from({ length: n }, (_, i) => `e${i}`),
-      )
+      expectDerivedIdSequence(buf.state.messages, n)
     }
   })
 

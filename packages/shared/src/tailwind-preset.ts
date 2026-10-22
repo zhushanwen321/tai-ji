@@ -43,6 +43,8 @@ export default {
         },
         border: 'var(--border)',
         'border-strong': 'var(--border-strong)',
+        // 弹层遮罩（modal/overlay 背后全场最暗层；真值源 style.css --scrim，黑基六主题共用一值）
+        scrim: 'var(--scrim)',
         accent: {
           DEFAULT: 'var(--accent)',
           hover: 'var(--accent-hover)',
@@ -53,9 +55,11 @@ export default {
           fg: 'var(--accent-fg)',
           foreground: 'var(--accent-foreground)', // shadcn text-accent-foreground
         },
-        success: { DEFAULT: 'var(--success)', soft: 'var(--success-soft)' },
+        // v6 §3.5.1 同律：状态色实底上的前景走对应 -fg token（--danger-fg/--success-fg），
+        // 不从 neutral 谱系借色、不用 text-white 硬编码（DESIGN.md §3.5.1 事故范式）。
+        success: { DEFAULT: 'var(--success)', soft: 'var(--success-soft)', fg: 'var(--success-fg)' },
         warn: { DEFAULT: 'var(--warn)', soft: 'var(--warn-soft)' },
-        danger: { DEFAULT: 'var(--danger)', soft: 'var(--danger-soft)' },
+        danger: { DEFAULT: 'var(--danger)', soft: 'var(--danger-soft)', fg: 'var(--danger-fg)' },
         info: { DEFAULT: 'var(--info)', soft: 'var(--info-soft)' },
         // reasoning 紫（draft-message-stream 思考块 / composer 思考等级专属色相）
         reasoning: { DEFAULT: 'var(--reasoning)', soft: 'var(--reasoning-soft)' },
@@ -110,6 +114,7 @@ export default {
         2: 'var(--shadow-2)',
         3: 'var(--shadow-3)',
         glow: 'var(--shadow-glow)',
+        'drawer-left': 'var(--shadow-drawer-left)',
       },
     },
   },

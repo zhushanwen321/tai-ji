@@ -31,6 +31,7 @@ import { EngineClient, SUBAGENT_TRANSPORT_ENV } from "../execution/engine/client
 import { pidfilePath, probePidAliveness } from "../execution/engine/client/pid-file.ts";
 import { LocalEngineTransport } from "../execution/engine/client/transport/local.ts";
 import { RuntimeEngineTransport } from "../execution/engine/client/transport/runtime.ts";
+import { waitFor } from "../execution/engine/client/__tests__/helpers/wait-for.ts";
 import type {
   EngineLaunchSpec,
   EngineTransport,
@@ -555,16 +556,6 @@ describe("EngineClient transport 谓词与错误码 preserve（验收②③）",
 describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
   `LocalEngineTransport：真进程治理链（验收①③）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
   () => {
-    /** 轮询等待谓词成立（真实子进程信号传播有毫秒级延迟——本组为集成门控真跑形态）。 */
-    async function waitFor(predicate: () => boolean, timeoutMs = 5_000, stepMs = 25): Promise<void> {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        if (predicate()) return;
-        await new Promise((resolve) => setTimeout(resolve, stepMs));
-      }
-      throw new Error("waitFor: condition not met within timeout");
-    }
-
     function makeTransport(
       overrides: Partial<ConstructorParameters<typeof LocalEngineTransport>[0]> = {},
     ): LocalEngineTransport {

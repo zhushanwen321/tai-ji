@@ -329,6 +329,20 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13/15）", () => {
     return file;
   }
 
+  /** collectRecords 全量扫描断言面：两 fixture 记录恰被收齐（id 升序）。 */
+  function expectCollectedBothRecords(): void {
+    const store = new RecordStore(() => sessionsDir);
+    const records = store.collectRecords(100, "all", "root-1");
+    expect(records.map((r) => r.id).sort()).toEqual(["sa-1", "sa-2"]);
+  }
+
+  /** 读盘索引并断言重写自愈形态：版本回到当前 INDEX_VERSION、条目键集恰为两 fixture 文件。 */
+  function expectIndexRewritten(): void {
+    const parsed = JSON.parse(fs.readFileSync(indexPath, "utf-8")) as { version?: number; entries: Record<string, unknown> };
+    expect(parsed.version).toBe(INDEX_VERSION);
+    expect(Object.keys(parsed.entries).sort()).toEqual(["a.jsonl", "b.jsonl"]);
+  }
+
   /** 真实落盘档（atomic-write 的 fsync 档原样执行）：覆盖 tmp+fsync+rename 端到端与
    *  .tmp. 残留形态——索引写完成回到真实磁盘窗口，等文件出现（rename 原子性保证出现即完整）。 */
   describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
@@ -348,16 +362,12 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13/15）", () => {
         fs.writeFileSync(indexPath, "{not valid json");
         const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-        const store = new RecordStore(() => sessionsDir);
-        const records = store.collectRecords(100, "all", "root-1");
-        expect(records.map((r) => r.id).sort()).toEqual(["sa-1", "sa-2"]); // 空索引=今天的全量行为
+        expectCollectedBothRecords(); // 空索引=今天的全量行为
 
         await vi.waitFor(() => {
           JSON.parse(fs.readFileSync(indexPath, "utf-8")); // 轮询索引变合法（损坏→空索引→全扫 dirty→重写自愈）
         });
-        const parsed = JSON.parse(fs.readFileSync(indexPath, "utf-8")) as { version?: number; entries: Record<string, unknown> };
-        expect(parsed.version).toBe(INDEX_VERSION);
-        expect(Object.keys(parsed.entries).sort()).toEqual(["a.jsonl", "b.jsonl"]);
+        expectIndexRewritten();
         expect(errSpy).not.toHaveBeenCalled(); // 损坏走 logger.warn（共享日志通道），不 console.error
         errSpy.mockRestore();
       });
@@ -468,13 +478,10 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13/15）", () => {
     writeSession({ name: "b.jsonl", id: "sa-2", assistantTexts: ["r2"] });
     fs.writeFileSync(indexPath, JSON.stringify({ version: 0, pid: 1, entries: {} }));
 
-    const store = new RecordStore(() => sessionsDir);
-    const records = store.collectRecords(100, "all", "root-1");
-    expect(records.map((r) => r.id).sort()).toEqual(["sa-1", "sa-2"]);
+    expectCollectedBothRecords();
 
-    const parsed = JSON.parse(fs.readFileSync(indexPath, "utf-8")) as { version?: number; entries: Record<string, unknown> };
-    expect(parsed.version).toBe(INDEX_VERSION);
-    expect(Object.keys(parsed.entries).sort()).toEqual(["a.jsonl", "b.jsonl"]); // 低版本丢弃→全扫 dirty→重写自愈
+    // 低版本丢弃→全扫 dirty→重写自愈
+    expectIndexRewritten();
   });
 
   it("S1TC5: 负条目命中——无 identity 的 junk 文件跨实例零重读", async () => {

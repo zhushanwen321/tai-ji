@@ -58,6 +58,8 @@ import { getSubagentService } from "@zhushanwen/subagent-core";
 import { MEMBER_VIEWS_MAX_CHARS, memberViewLine, runMemberViews, truncateRunMemberViews } from "@zhushanwen/subagent-core";
 import type { RunMemberRecordView, RunMemberView } from "@zhushanwen/subagent-core";
 import { ID_PREVIEW_LENGTH } from "../format/id-preview.ts";
+// runId 形态白名单（LLM 工具参数面的路径穿越防线；判定单点 = Infra store 的路径拼接处）
+import { isWorkflowRunId } from "../../jsonl-run-store.ts";
 import type { RunStartDetails, WorkflowToolResult } from "./tool-result.ts";
 import {
   acquireReentryGuard,
@@ -716,9 +718,14 @@ function runMemberHeaderLine(summary: RunSummary, memberCount: number, failedCou
  * record 流在」= 已终局且被 MAX_RETAINED_DONE_RUNS 逐出保留窗口；磁盘也无 =
  * 未知 id。超窗口的恢复动作 = 从该 run 的完成通知恢复结果（省略 runId 列全部不可用
  * ——列表同样不含已逐出 run）。
+ *
+ * 探测前先过 runId 形态白名单：runId 来自 LLM 工具参数（自由字符串），白名单外
+ * 形态（含路径分隔符 / `..`）拼 stateFile 路径会逃逸出 runs 目录，且存在性两文案
+ * 分叉可被当作文件存在性 oracle 探测——非法形态不触达磁盘，恒走「未知 id」分支
+ * （不新增可区分响应形态，不向调用方泄露形态检查的发生）。
  */
 function runNotFoundError(runId: string, deps: LauncherDeps): Error {
-  if (existsSync(deps.store.stateFilePath(runId))) {
+  if (isWorkflowRunId(runId) && existsSync(deps.store.stateFilePath(runId))) {
     return new Error(
       `Workflow run '${runId}' is settled and no longer in the in-memory retention window ` +
       `(the most recent ${MAX_RETAINED_DONE_RUNS} settled runs are kept). Recover its results from the run's completion ` +
@@ -825,6 +832,12 @@ export async function actionResume(
     throw new Error(
       "resume requires 'runId' parameter. Correct: {\"action\":\"resume\",\"runId\":\"<id>\"} (use action:\"status\" to find runId; args optional — must equal the original run's args)",
     );
+  }
+  // runId 形态白名单（路径穿越防线，与 status 查无判定同准入判据）：journalDir 由
+  // runId 经 store.stateFilePath 拼出，非法形态（含路径分隔符 / `..`）在进入 core
+  // resume 读链前按 not-found 语义拒绝，不让白名单外 id 参与路径拼接。
+  if (!isWorkflowRunId(runId)) {
+    throw runNotFoundError(runId, deps);
   }
   assertEntryTimeBudget(params.time);
   assertEntryTokenBudget(params.tokens);

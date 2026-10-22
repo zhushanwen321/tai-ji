@@ -18,6 +18,7 @@ services 层 infra 直接 import 检查（C-comm-03）——落实 runtime 三�
 退出码: 0 通过 / 2 违规
 """
 
+from __future__ import annotations
 import re
 import sys
 from pathlib import Path

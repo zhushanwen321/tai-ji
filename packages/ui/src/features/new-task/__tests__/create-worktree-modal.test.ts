@@ -38,6 +38,10 @@ function makeDeps(overrides?: Partial<NewTaskDeps>): NewTaskDeps {
     presetOpenRequest: ref(0),
     loadPresets: vi.fn(async () => {}),
     setDefaultPreset: vi.fn(async () => {}),
+    setPinned: vi.fn(async () => true),
+    defaultSessionDir: ref(''),
+    projects: ref([]),
+    activeProjectId: ref('proj-default'),
     toast: { error: vi.fn() },
   }
   return overrides ? { ...base, ...overrides } : base

@@ -13,7 +13,7 @@ function mockCtx(worktreeService?: WorkspaceHandlerContext['worktreeService']): 
     send: vi.fn(),
     sendError: vi.fn(),
     reply: vi.fn(),
-    workspaceService: { record: vi.fn(), list: vi.fn(() => []) },
+    workspaceService: { record: vi.fn(), list: vi.fn(() => []), setPinned: vi.fn(() => true), defaultSessionDir: vi.fn(() => '/ds') },
     worktreeService,
   } as unknown as WorkspaceHandlerContext
 }
@@ -57,6 +57,59 @@ describe('WorkspaceMessageHandler workspace.record → prefetch', () => {
     expect(ctx.reply).toHaveBeenCalledWith(
       expect.anything(), 'msg-1', 'workspace.recentList',
       expect.objectContaining({ degraded: true }),
+    )
+  })
+})
+
+describe('WorkspaceMessageHandler pin / defaultSessionDir', () => {
+  it('setPinned 生效 → reply 最新列表（无 degraded）', async () => {
+    const ctx = mockCtx()
+    const handler = new WorkspaceMessageHandler(ctx)
+
+    await handler.handleWorkspaceMessage(msg('workspace.setPinned', { cwd: '/project', pinned: true }), {} as never)
+
+    expect(ctx.workspaceService.setPinned).toHaveBeenCalledWith('/project', true)
+    expect(ctx.reply).toHaveBeenCalledWith(
+      expect.anything(), 'msg-1', 'workspace.recentList',
+      expect.objectContaining({ degraded: false }),
+    )
+  })
+
+  it('setPinned 被拒（超 pin 上限）→ degraded reply', async () => {
+    const ctx = mockCtx()
+    ;(ctx.workspaceService.setPinned as ReturnType<typeof vi.fn>).mockReturnValue(false)
+    const handler = new WorkspaceMessageHandler(ctx)
+
+    await handler.handleWorkspaceMessage(msg('workspace.setPinned', { cwd: '/project', pinned: true }), {} as never)
+
+    expect(ctx.reply).toHaveBeenCalledWith(
+      expect.anything(), 'msg-1', 'workspace.recentList',
+      expect.objectContaining({ degraded: true }),
+    )
+  })
+
+  it('setPinned 非法 payload → degraded reply，不调 service', async () => {
+    const ctx = mockCtx()
+    const handler = new WorkspaceMessageHandler(ctx)
+
+    await handler.handleWorkspaceMessage(msg('workspace.setPinned', { cwd: '', pinned: 'yes' }), {} as never)
+
+    expect(ctx.workspaceService.setPinned).not.toHaveBeenCalled()
+    expect(ctx.reply).toHaveBeenCalledWith(
+      expect.anything(), 'msg-1', 'workspace.recentList',
+      expect.objectContaining({ degraded: true }),
+    )
+  })
+
+  it('defaultSessionDir → reply dir（service 返回值直传）', async () => {
+    const ctx = mockCtx()
+    const handler = new WorkspaceMessageHandler(ctx)
+
+    await handler.handleWorkspaceMessage(msg('workspace.defaultSessionDir'), {} as never)
+
+    expect(ctx.workspaceService.defaultSessionDir).toHaveBeenCalled()
+    expect(ctx.reply).toHaveBeenCalledWith(
+      expect.anything(), 'msg-1', 'workspace.defaultSessionDir:result', { dir: '/ds' },
     )
   })
 })

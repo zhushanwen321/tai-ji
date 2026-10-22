@@ -8,7 +8,7 @@
  * 槽位（与 style.css 的 [data-theme] / [data-theme-preset] / [data-font-size] 规则对齐）：
  * - theme → <html data-theme>（:root 暗默认 / [data-theme=light] 亮色槽位）
  *   theme='system' 时按 prefers-color-scheme 解析为 light/dark（避免 CSS 再叠一层 media query，统一走 data-theme 单一通道）
- * - themePreset → <html data-theme-preset>（[data-theme-preset] 规则覆盖 --accent；cold-blue 与 :root 默认一致）
+ * - themePreset → <html data-theme-preset>（[data-theme-preset] 规则覆盖 --accent；空串与 :root 默认一致）
  * - fontSize → <html data-font-size>（[data-font-size] 规则调整基础字号，D17）
  * - fontScales → <html data-fs-sidebar/chat/drawer>（[data-fs-*] 规则映射 --font-scale-<region>，
  *   区域根节点 [data-fs-scope] 槽位重声明 --text-* 链实现分区缩放；chat scope 的语义挂点
@@ -49,8 +49,8 @@ export function applySystemToDom(
 
   root.setAttribute('data-theme', resolveTheme(s.theme))
 
-  // themePreset：缺省 cold-blue（与 DEFAULT_SYSTEM 一致，保证老数据无 themePreset 时回落）。
-  root.setAttribute('data-theme-preset', s.themePreset ?? 'cold-blue')
+  // themePreset：缺省空串（与 DEFAULT_SYSTEM 一致，保证老数据无 themePreset 时回落默认主题）。
+  root.setAttribute('data-theme-preset', s.themePreset ?? '')
 
   // fontSize：缺省 medium（D17，与 DEFAULT_SYSTEM 一致）。
   root.dataset.fontSize = s.fontSize ?? 'medium'

@@ -24,6 +24,7 @@ import {
 } from "../../../../../../../test-guard/integration-gate.ts";
 import { EngineClient, type RunRoute } from "../engine-client.ts";
 import { probePidAliveness, pidfilePath, readPidfile, writePidfileAtomic } from "../pid-file.ts";
+import { waitFor } from "./helpers/wait-for.ts";
 import { LocalEngineTransport } from "../transport/local.ts";
 import type {
   EngineLaunchSpec,
@@ -124,6 +125,37 @@ function fakeRunResult(runId: string): Record<string, unknown> {
       durationMs: 1,
     },
   };
+}
+
+/** childStateChanged 反向请求载荷（协议形态单点书写；__fixtures__/fake-engine.mjs 是被
+ * spawn 的独立脚本不共享本模块，其同语义动作为对齐副本——改协议时两处同步）。 */
+function childStateChangedPayload(
+  action: Extract<RunAction, { op: "childStateChanged" }>,
+): Record<string, unknown> {
+  return {
+    pid: action.pid,
+    recordId: action.recordId,
+    state: action.state ?? "exited",
+    killed: action.killed ?? false,
+    ...(action.exitCode !== undefined ? { exitCode: action.exitCode } : {}),
+    ...(action.signal !== undefined ? { signal: action.signal } : {}),
+  };
+}
+
+/** run-1 占位 run 请求（prompt "p"、cwd=dataDir；两轨用例共用的样板收敛点）。 */
+function requestRun1(client: EngineClient): Promise<unknown> {
+  return client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
+}
+
+/** run 往返断言面：run 终态 content + 首轮三路反向路由（event/delta/handleReady）各达一次。 */
+function expectRunRoundTrip(
+  result: { outcome: { content: string } },
+  routes: { events: unknown[]; deltas: string[]; readyPartials: Array<{ sessionRef: Record<string, string> }> },
+): void {
+  expect(result.outcome.content).toBe("fake-content-run-1");
+  expect(routes.events).toContainEqual({ type: "text_delta", delta: "hello" });
+  expect(routes.deltas).toEqual(["stream-1"]);
+  expect(routes.readyPartials).toEqual([{ sessionRef: { sessionId: "s-1" } }]);
 }
 
 interface WireFrame {
@@ -324,14 +356,7 @@ class ScriptedLocalTransport extends LocalEngineTransport {
           });
           break;
         case "childStateChanged":
-          this.reverseRequest(`rev-childst-${requestId}`, "host/childStateChanged", {
-            pid: action.pid,
-            recordId: action.recordId,
-            state: action.state ?? "exited",
-            killed: action.killed ?? false,
-            ...(action.exitCode !== undefined ? { exitCode: action.exitCode } : {}),
-            ...(action.signal !== undefined ? { signal: action.signal } : {}),
-          });
+          this.reverseRequest(`rev-childst-${requestId}`, "host/childStateChanged", childStateChangedPayload(action));
           break;
         case "log":
           this.reverseRequest(`rev-log-${requestId}`, "host/log", {
@@ -509,15 +534,11 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
     });
     const unregister = client.registerRunRoute("run-1", route);
     await client.ensureConnected();
-    const result = (await client.request("run", {
-      runId: "run-1",
-      task: { prompt: "p" },
-      ctx: { cwd: dataDir },
-    })) as { handle: { sessionRef: Record<string, string> }; outcome: { content: string } };
-    expect(result.outcome.content).toBe("fake-content-run-1");
-    expect(events).toContainEqual({ type: "text_delta", delta: "hello" });
-    expect(deltas).toEqual(["stream-1"]);
-    expect(readyPartials).toEqual([{ sessionRef: { sessionId: "s-1" } }]);
+    const result = (await requestRun1(client)) as {
+      handle: { sessionRef: Record<string, string> };
+      outcome: { content: string };
+    };
+    expectRunRoundTrip(result, { events, deltas, readyPartials });
     expect(client.getPartialHandle()).toEqual({ sessionRef: { sessionId: "s-1" } });
     unregister();
     await client.dispose();
@@ -531,7 +552,7 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
       ],
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
+    await requestRun1(client);
     expect(client.mirror.getEntry(4242)).toMatchObject({
       pid: 4242,
       state: "exited",
@@ -548,7 +569,7 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
       runActions: [{ op: "log", level: "warn", component: "fake-comp", message: "log-line-1" }],
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
+    await requestRun1(client);
     // run 应答成功即 host/log 分发未抛（分发抛错也回 ok，但缺省 logger 自身不得炸）。
     expect(client.currentState).toBe("ready");
     await client.dispose();
@@ -567,11 +588,7 @@ describe("stdout 非 NDJSON 行（客户端半；半行残片上限在 transport
     try {
       // 真实链路里这行 = 半行残片截断后被换行冲刷出的垃圾行（transport 层已丢头留尾）
       client.currentTransport!.emitLine("x".repeat(200));
-      const result = (await client.request("run", {
-        runId: "run-1",
-        task: { prompt: "p" },
-        ctx: { cwd: dataDir },
-      })) as { outcome: { content: string } };
+      const result = (await requestRun1(client)) as { outcome: { content: string } };
       expect(result.outcome.content).toBe("fake-content-run-1");
     } finally {
       console.warn = original;
@@ -642,7 +659,7 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
       },
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
+    await requestRun1(client);
     unregister();
     const echo = events.find((e) => e.message?.startsWith("askUser-result:"));
     expect(echo?.message).toContain('"value":"answer-A"');
@@ -663,7 +680,7 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
       },
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
+    await requestRun1(client);
     unregister();
     const echo = events.find((e) => e.message?.startsWith("askUser-result:"));
     expect(echo?.message).toContain('"cancelled":true');
@@ -682,7 +699,7 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
       },
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
+    await requestRun1(client);
     unregister();
     const echo = events.find((e) => e.message?.startsWith("askUser-result:"));
     expect(echo?.message).toContain('"unsupported":true');
@@ -704,9 +721,7 @@ describe("超时域二分（fake timers，R9-2 / R9-2b）", () => {
       onStreamDelta: () => new Promise<void>(() => {}), // 宿主消费方死锁
     });
     await client.ensureConnected();
-    const runFailed = expect(
-      client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } }),
-    ).rejects.toMatchObject({ code: "engine_crashed" });
+    const runFailed = expect(requestRun1(client)).rejects.toMatchObject({ code: "engine_crashed" });
     // 分步推进：guardTimer 10s 计时由 fake timers 驱动，循环小步推进直到杀链生效
     // （teardown → state 离开 ready）。端点桩帧到达是微任务序，advance 内联 flush。
     for (let i = 0; i < 200 && client.currentState === "ready"; i += 1) {
@@ -727,9 +742,7 @@ describe("超时域二分（fake timers，R9-2 / R9-2b）", () => {
     setHostUiRequestEndpoint(() => new Promise(() => {})); // 用户永不回答（槽注入，D3）
     await client.ensureConnected();
     const enginePid = client.enginePid!;
-    void client
-      .request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } })
-      .catch(() => {});
+    void requestRun1(client).catch(() => {});
     await vi.advanceTimersByTimeAsync(60_000);
     // ack 已回（引擎继续跑），handler 挂起不触发任何杀链
     expect(client.currentState).toBe("ready");
@@ -750,9 +763,7 @@ describe("引擎崩溃与终局（A8①③）", () => {
     });
     await client.ensureConnected();
     expect(client.enginePid).toBeDefined();
-    await expect(
-      client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } }),
-    ).rejects.toSatisfy((err: Error & { code?: string }) => {
+    await expect(requestRun1(client)).rejects.toSatisfy((err: Error & { code?: string }) => {
       expect(err.code).toBe("engine_crashed");
       expect(err.message).toContain("stderr tail");
       expect(err.message).toContain("mid-run crash sample");
@@ -853,16 +864,6 @@ describe("pidfile 启动期清扫（EngineClient 接线，R9-3）", () => {
 describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
   `EngineClient 真进程全链（W2 冒烟）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
   () => {
-    /** 轮询等待谓词成立（真实子进程信号传播有毫秒级延迟——本组为集成门控真跑形态）。 */
-    async function waitFor(predicate: () => boolean, timeoutMs = 5_000, stepMs = 25): Promise<void> {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        if (predicate()) return;
-        await new Promise((resolve) => setTimeout(resolve, stepMs));
-      }
-      throw new Error("waitFor: condition not met within timeout");
-    }
-
     function makeRealClient(
       overrides: Partial<ConstructorParameters<typeof EngineClient>[0]> = {},
     ): EngineClient {
@@ -917,15 +918,8 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
         engineId: "fake",
       });
       expect(readPidfile(path)?.engineStartTime).not.toBeNull(); // POSIX 真值（R9-3b）
-      const result = (await client.request("run", {
-        runId: "run-1",
-        task: { prompt: "p" },
-        ctx: { cwd: dataDir },
-      })) as { outcome: { content: string } };
-      expect(result.outcome.content).toBe("fake-content-run-1");
-      expect(events).toContainEqual({ type: "text_delta", delta: "hello" });
-      expect(deltas).toEqual(["stream-1"]);
-      expect(readyPartials).toEqual([{ sessionRef: { sessionId: "s-1" } }]);
+      const result = (await requestRun1(client)) as { outcome: { content: string } };
+      expectRunRoundTrip(result, { events, deltas, readyPartials });
       unregister();
       await client.dispose();
       expect(existsSync(path)).toBe(false); // dispose 清理
@@ -942,9 +936,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
       const unregister = client.registerRunRoute("run-1", {});
       void client
         .ensureConnected()
-        .then(() =>
-          client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } }),
-        )
+        .then(() => requestRun1(client))
         .catch(() => {});
       await waitFor(() => client.mirror.size > 0);
       const grandchildPid = client.mirror.snapshot()[0]!.pid;

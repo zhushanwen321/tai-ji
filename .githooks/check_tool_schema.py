@@ -30,6 +30,7 @@ parameters 直接引用，自然不报。字段级 `action: Type.Union(` 行首�
   2 — 违规（某 parameters 顶层是 Type.Union）
 """
 
+from __future__ import annotations
 import re
 import sys
 from pathlib import Path

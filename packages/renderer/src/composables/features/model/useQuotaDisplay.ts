@@ -22,9 +22,9 @@ import i18n from '@/i18n'
 import { getSettingsStore } from '@taiji/core'
 import { useQuotaQuery } from './useQuotaQuery'
 
-/** 分档阈值（复用现有规则）。 */
-const HIGH_THRESHOLD = 70
-const DANGER_THRESHOLD = 90
+/** 用量分档阈值（复用现有规则；导出 = 套餐浮层 PlanQuotaItem 环形/文字分档同口径共用）。 */
+export const QUOTA_USAGE_HIGH_THRESHOLD = 70
+export const QUOTA_USAGE_DANGER_THRESHOLD = 90
 
 /** 时间换算常量。 */
 const MS_PER_SEC = 1000
@@ -38,13 +38,22 @@ const SEC_PER_DAY = HOUR_PER_DAY * SEC_PER_HOUR
  * 格式化剩余秒数（i18n 化；null/<=0 → '--'）。模块级单点实现：useQuotaDisplay 返回的
  * formatReset 与套餐浮层（PlanQuotaItem）共用（i18n.global.t 非 setup 模式，同
  * useQuotaQuery 的 cast 先例）。
+ *
+ * inline=true 为浮层窗口格行内紧凑形态：省「剩」前缀直接拼 d/h/m 缩写（`2h31m`）——
+ * 单位缩写与界面语言无关，不走 i18n key（<1m / -- 两态仍走 key）。
  */
-export function formatResetSec(sec: number | null): string {
+export function formatResetSec(sec: number | null, inline = false): string {
   const t = i18n.global.t as (key: string, params?: Record<string, number>) => string
   if (sec == null || sec <= 0) return t('panel.context.resetEmpty')
   const d = Math.floor(sec / SEC_PER_DAY)
   const h = Math.floor((sec % SEC_PER_DAY) / SEC_PER_HOUR)
   const m = Math.floor((sec % SEC_PER_HOUR) / SEC_PER_MIN)
+  if (inline) {
+    if (d > 0) return `${d}d${h}h`
+    if (h > 0) return `${h}h${m}m`
+    if (m > 0) return `${m}m`
+    return t('panel.context.resetRemainingSoon')
+  }
   if (d > 0) return t('panel.context.resetRemainingDays', { d, h })
   if (h > 0) return t('panel.context.resetRemainingHours', { h, m })
   if (m > 0) return t('panel.context.resetRemainingMinutes', { m })
@@ -162,8 +171,8 @@ export function useQuotaDisplay(modelIdRef: Ref<string | undefined>): UseQuotaDi
       .filter((w): w is VisibleWindow => w != null)
   })
 
-  const quotaWarning = computed(() => visibleWindows.value.some((w) => w.pct >= HIGH_THRESHOLD && w.pct < DANGER_THRESHOLD))
-  const quotaDanger = computed(() => visibleWindows.value.some((w) => w.pct >= DANGER_THRESHOLD))
+  const quotaWarning = computed(() => visibleWindows.value.some((w) => w.pct >= QUOTA_USAGE_HIGH_THRESHOLD && w.pct < QUOTA_USAGE_DANGER_THRESHOLD))
+  const quotaDanger = computed(() => visibleWindows.value.some((w) => w.pct >= QUOTA_USAGE_DANGER_THRESHOLD))
 
   /** 格式化剩余秒数（i18n 化；实现单点 formatResetSec，与套餐浮层共用）。null/<=0 → '--'。 */
   function formatReset(sec: number | null): string {

@@ -39,6 +39,7 @@ const flowMock = vi.hoisted(() => ({
   openDirPopover: vi.fn(),
   openBranchPopover: vi.fn(),
   openPresetPopover: vi.fn(),
+  openProjectPopover: vi.fn(),
   openCreateWorktree: vi.fn(),
   closeOverlay: vi.fn(),
   selectWorkspace: vi.fn(),
@@ -47,6 +48,7 @@ const flowMock = vi.hoisted(() => ({
   openDirDialog: vi.fn(),
   openBranchModal: vi.fn(),
   setPendingPreset: vi.fn(),
+  setPendingProject: vi.fn(),
   state: { value: 'idle' as string },
   // [D4 卸载检查] onMounted 自动 startFlow + onUnmounted isActive 才 cancelFlow
   isActive: { value: false as boolean },
@@ -72,6 +74,10 @@ const depsMock = vi.hoisted(() => ({
   presetOpenRequest: { value: 0 },
   loadPresets: vi.fn(),
   setDefaultPreset: vi.fn(),
+  setPinned: vi.fn(),
+  defaultSessionDir: { value: '' },
+  projects: { value: [] as unknown[] },
+  activeProjectId: { value: 'proj-default' },
   toast: { error: vi.fn() },
 }))
 vi.mock('@/composables/features/new-task/useNewTaskDeps', () => ({
@@ -103,6 +109,8 @@ beforeEach(() => {
   flowMock.isInflight.value = false
   // [E] 默认非取消态；取消用例单独置位
   flowMock.isSubmitAbandoned.value = false
+  // 「默认会话」目录 mock 复位（select-default 用例单独置位）
+  depsMock.defaultSessionDir.value = ''
 })
 
 const DONE = 'done' as DerivedStatus
@@ -124,6 +132,12 @@ const landingStubs = {
   Composer: { template: '<div data-testid="composer-stub"><slot name="meta-row" /></div>' },
   // pi-launch-presets wave2: PresetSelectChip stub（避免触发其 Popover/HoverCard 重依赖）
   PresetSelectChip: { template: '<div data-testid="chip-preset-stub" />' },
+  // 归属项目选择 wave: ProjectSelectChip stub（事件路由测试用，emits 对齐 ui 包组件契约）
+  ProjectSelectChip: {
+    name: 'ProjectSelectChip',
+    template: '<div data-testid="chip-project-stub" />',
+    emits: ['select', 'update:projectOpen'],
+  },
 }
 
 function mountPanel(overrides: Record<string, unknown> = {}) {
@@ -355,6 +369,74 @@ describe('Landing 组件（presentational）', () => {
     // PresetSelectChip stub 带 testid，断言它与 directory/branch chip 同级存在于 meta-row
     expect(wrapper.find('[data-testid="chip-preset-stub"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="chip-directory"]').exists()).toBe(true)
+  })
+})
+
+describe('Landing project chip + 默认会话入口（归属项目选择 wave 2026-10-22）', () => {
+  /** landingStubs 基础上 stub Popover 三件套（真实 reka Popover 关闭态不渲染 Content 内容，
+   *  DirSelectPopover 不进 DOM——W3 stubs 同款解法）+ DirSelectPopover（select-default 事件路由可控） */
+  const projectWaveStubs = {
+    ...landingStubs,
+    Popover: { template: '<div><slot /></div>' },
+    PopoverTrigger: { template: '<div><slot /></div>' },
+    PopoverContent: { template: '<div><slot /></div>' },
+    DirSelectPopover: {
+      name: 'DirSelectPopover',
+      template: '<div data-testid="dir-select-stub" />',
+      emits: ['select', 'select-default', 'open-dir-dialog', 'close'],
+    },
+  }
+
+  it('meta-row 渲染 ProjectSelectChip（四 chip 布局：目录｜分支｜模式｜归属项目）', () => {
+    const wrapper = mount(Landing, {
+      props: { sessionId: 's1', currentCwd: '/repo', gitBranch: 'main' },
+      global: { stubs: landingStubs },
+    })
+    expect(wrapper.find('[data-testid="chip-project-stub"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="chip-preset-stub"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="chip-directory"]').exists()).toBe(true)
+  })
+
+  it('ProjectSelectChip emit select → flow.setPendingProject(projectId)（pending 只影响本次创建，非锚定切换）', async () => {
+    const wrapper = mount(Landing, {
+      props: { sessionId: null, currentCwd: null },
+      global: { stubs: landingStubs },
+    })
+    wrapper.findComponent({ name: 'ProjectSelectChip' }).vm.$emit('select', { projectId: 'proj-a' })
+    expect(flowMock.setPendingProject).toHaveBeenCalledTimes(1)
+    expect(flowMock.setPendingProject).toHaveBeenCalledWith('proj-a')
+  })
+
+  it('v-model:projectOpen true → flow.openProjectPopover；false → flow.closeOverlay（与 dir/branch/preset 共享 flow 单实例状态机互斥）', async () => {
+    const wrapper = mount(Landing, {
+      props: { sessionId: null, currentCwd: null },
+      global: { stubs: landingStubs },
+    })
+    const chip = wrapper.findComponent({ name: 'ProjectSelectChip' })
+    chip.vm.$emit('update:projectOpen', true)
+    expect(flowMock.openProjectPopover).toHaveBeenCalledTimes(1)
+    chip.vm.$emit('update:projectOpen', false)
+    expect(flowMock.closeOverlay).toHaveBeenCalled()
+  })
+
+  it('DirSelectPopover emit select-default → flow.selectWorkspace(defaultSessionDir, { record: false })（固定入口不计最近工作区 LRU）', async () => {
+    depsMock.defaultSessionDir.value = '/data/defaultSession'
+    const wrapper = mount(Landing, {
+      props: { sessionId: null, currentCwd: null },
+      global: { stubs: projectWaveStubs },
+    })
+    wrapper.findComponent({ name: 'DirSelectPopover' }).vm.$emit('select-default')
+    expect(flowMock.selectWorkspace).toHaveBeenCalledTimes(1)
+    expect(flowMock.selectWorkspace).toHaveBeenCalledWith('/data/defaultSession', { record: false })
+  })
+
+  it('defaultSessionDir 空（未拉取 / runtime ensure 失败）→ select-default noop 不调 selectWorkspace', async () => {
+    const wrapper = mount(Landing, {
+      props: { sessionId: null, currentCwd: null },
+      global: { stubs: projectWaveStubs },
+    })
+    wrapper.findComponent({ name: 'DirSelectPopover' }).vm.$emit('select-default')
+    expect(flowMock.selectWorkspace).not.toHaveBeenCalled()
   })
 })
 

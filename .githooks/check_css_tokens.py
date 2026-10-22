@@ -18,6 +18,7 @@ CSS 规范检查：确保 style.css 不含组件级样式
   2 — 有违规
 """
 
+from __future__ import annotations
 import re
 import sys
 from pathlib import Path

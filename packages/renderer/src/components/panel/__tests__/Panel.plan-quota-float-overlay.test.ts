@@ -8,7 +8,7 @@
  *
  * 覆盖：
  *  - conversation 分支 + entries 空 → 浮层不渲染；
- *  - conversation 分支 + entries 非空 → 浮层渲染（276px / left 12px）+ panel 无 padding-left；
+ *  - conversation 分支 + entries 非空 → 浮层渲染（240px / left 12px）+ panel 无 padding-left；
  *  - 手动收起（折叠钮）→ 浮层 44px，panel 仍无 padding-left；
  *  - panel 宽度 < 阈值 → 自动收起；恢复 → 自动展开；手动收起后恢复 → 保持收起。
  *
@@ -131,7 +131,7 @@ describe('Panel 套餐浮层 overlay 判据（纯浮层不让位 + 宽度自动�
     wrapper.unmount()
   })
 
-  it('conversation 分支 + entries 非空：浮层渲染（276px / left 12px），panel 无让位 padding（纯 overlay）', async () => {
+  it('conversation 分支 + entries 非空：浮层渲染（240px / left 12px），panel 无让位 padding（纯 overlay）', async () => {
     entriesRef.value = [{ providerId: 'kimi-coding', label: 'Kimi Coding' }]
     const wrapper = mountPanel('s1')
     await nextTick()
@@ -139,7 +139,7 @@ describe('Panel 套餐浮层 overlay 判据（纯浮层不让位 + 宽度自动�
 
     const floatPanel = wrapper.find('[data-testid="plan-quota-float"]')
     expect(floatPanel.exists()).toBe(true)
-    expect(floatPanel.attributes('style')).toContain('width: 276px')
+    expect(floatPanel.attributes('style')).toContain('width: 240px')
     expect(floatPanel.attributes('style')).toContain('left: 12px')
     // 回归锚点：浮层不得通过 padding 挤占对话流/composer 边距
     expect(panelSectionOf(wrapper).attributes('style')).not.toContain('padding-left')
@@ -176,7 +176,7 @@ describe('Panel 套餐浮层 overlay 判据（纯浮层不让位 + 宽度自动�
     wrapper.unmount()
   })
 
-  it('panel 宽度低于阈值：浮层自动收起（44px）；恢复宽度自动展开（276px）', async () => {
+  it('panel 宽度低于阈值：浮层自动收起（44px）；恢复宽度自动展开（240px）', async () => {
     entriesRef.value = [{ providerId: 'kimi-coding', label: 'Kimi Coding' }]
     const wrapper = mountPanel('s1')
     await nextTick()
@@ -186,7 +186,7 @@ describe('Panel 套餐浮层 overlay 判据（纯浮层不让位 + 宽度自动�
     const observer = FakeResizeObserver.instances[0]
 
     expect(await emitFloatStyle(observer, wrapper, QUOTA_FLOAT_AUTO_COLLAPSE_PANEL_WIDTH - 1)).toContain('width: 44px')
-    expect(await emitFloatStyle(observer, wrapper, QUOTA_FLOAT_AUTO_COLLAPSE_PANEL_WIDTH)).toContain('width: 276px')
+    expect(await emitFloatStyle(observer, wrapper, QUOTA_FLOAT_AUTO_COLLAPSE_PANEL_WIDTH)).toContain('width: 240px')
     wrapper.unmount()
   })
 
@@ -201,7 +201,7 @@ describe('Panel 套餐浮层 overlay 判据（纯浮层不让位 + 宽度自动�
 
     // 宽度恢复（自动来源解除）前用户手动展开，再触发恢复 → 自动来源不得覆盖手动态
     await wrapper.find('[data-testid="plan-quota-rail"]').trigger('click')
-    expect(await emitFloatStyle(observer, wrapper, QUOTA_FLOAT_AUTO_COLLAPSE_PANEL_WIDTH)).toContain('width: 276px')
+    expect(await emitFloatStyle(observer, wrapper, QUOTA_FLOAT_AUTO_COLLAPSE_PANEL_WIDTH)).toContain('width: 240px')
 
     // 手动收起 + 宽度充足 → 保持收起
     await wrapper.find('[data-testid="plan-quota-collapse"]').trigger('click')

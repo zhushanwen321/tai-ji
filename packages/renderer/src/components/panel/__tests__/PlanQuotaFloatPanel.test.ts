@@ -177,14 +177,16 @@ describe('PlanQuotaFloatPanel', () => {
     expect(wrapper.find('[data-testid="plan-quota-item-kimi-coding"] [data-testid="plan-quota-current-tag"]').exists()).toBe(false)
   })
 
-  it('用量 ≥90% 的窗口转 danger 色', async () => {
+  it('用量 ≥90% 的窗口转 danger 色（环保持原色；百分比文字走提亮档 --danger-text）', async () => {
     const wrapper = mountFloat()
     await flushPromises()
 
-    const kimi5hFill = wrapper.find('[data-testid="plan-quota-bar-kimi-coding-0"] div')
-    expect(kimi5hFill.classes()).toContain('bg-danger')
-    const zai5hFill = wrapper.find('[data-testid="plan-quota-bar-zai-coding-cn-0"] div')
-    expect(zai5hFill.classes()).not.toContain('bg-danger')
+    const kimi5hRing = wrapper.find('[data-testid="plan-quota-ring-kimi-coding-0"]')
+    expect(kimi5hRing.classes()).toContain('text-danger')
+    const kimi5hPct = wrapper.find('[data-testid="plan-quota-cell-kimi-coding-0"] [data-testid="plan-quota-pct"]')
+    expect(kimi5hPct.classes()).toContain('text-[color:var(--danger-text)]')
+    const zai5hRing = wrapper.find('[data-testid="plan-quota-ring-zai-coding-cn-0"]')
+    expect(zai5hRing.classes()).not.toContain('text-danger')
   })
 
   it('collapsed=true 渲染收起把手（列表隐藏），点击把手发发展开事件', async () => {

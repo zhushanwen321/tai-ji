@@ -15,6 +15,7 @@ import { inject } from 'vue'
 import type {
   ClientMessageMap,
   PiLaunchPreset,
+  Project,
   RecentWorkspaceRecord,
   ServerMessageMap,
 } from '@taiji/shared'
@@ -48,6 +49,16 @@ export interface NewTaskDeps {
   flow: ReturnType<typeof useNewTaskFlow>
   /** 最近工作区列表（壳适配 workspaceStore.records，Ref 保持响应式） */
   recentWorkspaces: Ref<RecentWorkspaceRecord[]>
+  /**
+   * pin/unpin 最近工作区条目（壳适配 workspaceStore.setPinned，内部已热更新 records）。
+   * 返回是否生效（false = 超 pin 上限被拒，调用方 toast 提示用户）。
+   */
+  setPinned: (cwd: string, pinned: boolean) => Promise<boolean>
+  /**
+   * 默认会话目录（壳适配 workspaceStore.defaultSessionDir，runtime 动态推导下发）。
+   * 空串 = 未拉取 / runtime ensure 失败（「默认会话」动作行据此隐藏）。
+   */
+  defaultSessionDir: Ref<string>
   /** 列出 cwd 仓库分支（壳适配 worktreeApi.listBranches） */
   listBranches: (cwd: string) => Promise<WorktreeBranchesReply>
   /** 创建 worktree（壳适配 worktreeApi.create） */
@@ -66,6 +77,13 @@ export interface NewTaskDeps {
   loadPresets: () => Promise<void>
   /** 设为全局默认（壳适配 usePiPresets().setDefault） */
   setDefaultPreset: (presetId: string) => Promise<void>
+  /**
+   * 项目列表（壳适配 projectStore.orderedProjects 渲染序，Ref 保持响应式）。
+   * ProjectSelectChip 下拉数据源（组序与侧栏一致）。
+   */
+  projects: Ref<Project[]>
+  /** 当前锚定项目 id（壳适配 projectStore.activeProjectId；chip 未显式选择时的回落归属） */
+  activeProjectId: Ref<string>
   /** toast 通知（壳适配 useToast().error） */
   toast: { error: (message: string) => void }
 }

@@ -94,7 +94,7 @@ export const QUOTA_PRESETS: QuotaPreset[] = [
   },
   {
     fetcher: 'opencode-go',
-    label: 'opencode.go',
+    label: 'OpenCode Go',
     auth: ['cookie'],
     match: {
       namePattern: '\\bopencode\\b',

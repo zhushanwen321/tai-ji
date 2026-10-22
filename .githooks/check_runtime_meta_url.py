@@ -17,6 +17,7 @@ guard 实现（typeof __dirname / typeof import.meta 双检查 + 清晰报错）
 退出码: 0 通过 / 2 违规
 """
 
+from __future__ import annotations
 import re
 import sys
 from pathlib import Path

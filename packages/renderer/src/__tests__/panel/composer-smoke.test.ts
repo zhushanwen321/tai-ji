@@ -77,6 +77,10 @@ const depsMock = vi.hoisted(() => ({
   presetOpenRequest: { value: 0 },
   loadPresets: vi.fn(),
   setDefaultPreset: vi.fn(),
+  // ProjectSelectChip 消费（NewTaskDeps 契约字段）：缺字段时 chip computed 读
+  // `activeProjectId.value` 直接 TypeError（Landing 态渲染即崩）
+  projects: { value: [] as unknown[] },
+  activeProjectId: { value: '' },
   toast: { error: vi.fn() },
 }))
 vi.mock('@/composables/features/new-task/useNewTaskDeps', () => ({
