@@ -225,6 +225,22 @@ describe('清单拉取与安装编排', () => {
     if (!reply.ok) expect(reply.error.code).toBe('install_failed')
     expect(ext.installs).toHaveLength(1)
   })
+
+  it('本地已装同版本 → 幂等短路（initialize 扫描后 install 不再重跑安装链）', async () => {
+    const { manager, ext } = assemble()
+    await manager.initialize()
+    const reply = await manager.runAction({ action: 'install', family: 'qoder' })
+    expect(reply).toEqual({ ok: true, data: { installedVersion: '0.2.0' } })
+    expect(ext.installs).toEqual([])
+  })
+
+  it('本地已装但版本与清单不一致 → 不短路，重装钉到清单版本', async () => {
+    const { manager, ext } = assemble({ extScan: [{ name: '@zhushanwen/pi-wool-qoder', version: '0.1.0', enabled: true }] })
+    await manager.initialize()
+    const reply = await manager.runAction({ action: 'install', family: 'qoder' })
+    expect(reply.ok).toBe(true)
+    expect(ext.installs).toEqual(['npm:@zhushanwen/pi-wool-qoder@0.2.0'])
+  })
 })
 
 // ── 清单双通道（github 权威源 + gitcode 国内备源）──────────────────────

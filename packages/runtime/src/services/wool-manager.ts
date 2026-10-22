@@ -788,6 +788,13 @@ export class WoolManager {
     if (!entry) {
       throw new WoolActionError('family_absent', `资产清单中没有 ${family} 家族条目。请升级 taiji 或等待清单更新后重试`)
     }
+    // 本地已装且版本与清单一致 → 幂等短路：重复进入向导 / 授权失败重试不再重跑 npm
+    // 安装链。缓存由 initialize（启动扫描）与安装后刷新维护——跨进程已装同样命中。
+    // 版本不一致（含本地比清单新）仍重装——钉版本契约 = 本地版本收敛到清单版本。
+    const cached = this.installedCache.get(family)
+    if (cached?.installed && cached.version === entry.version) {
+      return { installedVersion: cached.version }
+    }
     // 钉版本安装（npm + isValidPiExtension 校验 + 失败回滚全在既有链内）。
     await this.deps.extensionService.installExtension(`npm:${entry.pkg}@${entry.version}`)
     await this.refreshInstalledCache()
