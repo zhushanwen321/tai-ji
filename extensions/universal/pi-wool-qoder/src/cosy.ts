@@ -10,8 +10,9 @@ import {
 	constants,
 	createCipheriv,
 	createHash,
+	createSign,
+	createVerify,
 	generateKeyPairSync,
-	privateDecrypt,
 	publicEncrypt,
 	randomBytes,
 	randomUUID,
@@ -25,11 +26,15 @@ const COSY_TEMP_KEY_BYTES = 8;
 /** epoch 秒换算（cosy-date 头与签名 payload 的 date 段都是秒）。 */
 const MS_PER_SECOND = 1000;
 
-/** 服务端公钥自检（加载期一次）：① PKCS#1 v1.5 加密语义往返验证（临时密钥对，
- * 公钥加密 → 私钥解密逐字节相等——type 2 加密块数学上只有私钥可解，公钥解密
- * 是验签语义（type 1），拿 publicDecrypt 验加密块必失败）；② 官方公钥可被
- * OpenSSL 解析（公钥错 = 全部请求即刻失败，加载期 fail-fast 比首请求期报错
- * 更可诊断）。 */
+/** 服务端公钥自检（加载期一次）：① PKCS#1 v1.5 加密原语就绪（临时密钥对，公钥加密
+ * 两断言：密文长度 = modulus 字节数 + 同明文两次加密密文不同——type 2 随机填充的
+ * 构造性证据，无需私钥解密回读）；② RSA 签名/验签往返（私钥原语完整性，Bun 宿主
+ * 兼容层实测可用）；③ 官方公钥可被 OpenSSL 解析（公钥错 = 全部请求即刻失败，加载期
+ * fail-fast 比首请求期报错更可诊断）。
+ * [HISTORICAL] 自检原形态 = publicEncrypt→privateDecrypt 往返——D3 验收 a4 实测 pi
+ * 宿主（Bun 编译）的 node:crypto 兼容层禁用 RSA_PKCS1_PADDING 私钥解密（「no longer
+ * supported for private decryption」），而真实请求路径只用公钥加密方向（服务端响应
+ * 走 AES 会话密钥对称通道），私钥解密仅为自检手段——改用无需私钥解密的等价断言。 */
 let selfCheckDone = false;
 function assertCryptoReady(): void {
 	if (selfCheckDone) {
@@ -39,8 +44,20 @@ function assertCryptoReady(): void {
 	// 探针长度 = 会话密钥真实长度（16 字节——RSA 包裹的目标形态，自检才有代表性）。
 	const probe = randomBytes(AES_BLOCK_BYTES);
 	const wrapped = publicEncrypt({ key: publicKey, padding: constants.RSA_PKCS1_PADDING }, probe);
-	if (!privateDecrypt({ key: privateKey, padding: constants.RSA_PKCS1_PADDING }, wrapped).equals(probe)) {
-		throw new Error("cosy: RSA PKCS#1 v1.5 roundtrip self-check failed");
+	const signer = createSign("SHA256");
+	signer.update(probe);
+	const signature = signer.sign(privateKey);
+	// 签名长度 = modulus 字节数（RSA 输出恒等于模长）——密文长度与它对表。
+	if (wrapped.length !== signature.length) {
+		throw new Error("cosy: RSA PKCS#1 v1.5 ciphertext length mismatch");
+	}
+	if (publicEncrypt({ key: publicKey, padding: constants.RSA_PKCS1_PADDING }, probe).equals(wrapped)) {
+		throw new Error("cosy: RSA PKCS#1 v1.5 padding not randomized (deterministic ciphertext)");
+	}
+	const verifier = createVerify("SHA256");
+	verifier.update(probe);
+	if (!verifier.verify(publicKey, signature)) {
+		throw new Error("cosy: RSA sign/verify roundtrip failed");
 	}
 	publicEncrypt({ key: SERVER_PUBLIC_PEM, padding: constants.RSA_PKCS1_PADDING }, probe);
 	selfCheckDone = true;
