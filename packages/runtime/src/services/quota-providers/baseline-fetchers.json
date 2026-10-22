@@ -198,7 +198,7 @@
       "strictNumbers": true
     },
     "opencode-go": {
-      "label": "opencode.go",
+      "label": "OpenCode Go",
       "auth": [
         "cookie"
       ],
