@@ -56,7 +56,7 @@ import { ModelService } from './services/model-service.js'
 
 import { mandatoryExtensions, isBtwVirtualId } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
-import { getDataDir } from '@taiji/shared/paths'
+import { getDataDir, getSessionStoreDir } from '@taiji/shared/paths'
 // startupSweep：启动收编扫描 core 装配单点（挂点见 main() 内 registerRuntimeInstance
 // 之后的时序硬声明注释段）。
 import { startupSweep } from '@zhushanwen/subagent-core'
@@ -1563,6 +1563,14 @@ async function main(): Promise<void> {
     },
     dataDir: getDataDir(),
     broadcast: (msg) => server.broadcastServerMessage(msg),
+    // 管理会话 ext-sessions 树回收（命令-only 会话无 jsonl 主文件，delete 链对主文件缺失
+    // 是零动作——羊毛域经 sessionStore 整树软删自回收，ADR-0141 删除语义）
+    reclaimSessionTree: (sid) => {
+      // trashDirectory 是 async（废纸篓 AppleScript）；回收口契约 void——rejection 落 warn 不放大
+      sessionStore.trashDirectory(join(getSessionStoreDir(), sid)).catch((e: unknown) => {
+        console.warn(`[wool-manager] manage session tree reclaim failed (sid=${sid}): ${toErrorMessage(e)}`)
+      })
+    },
   })
   modelService.setWoolProviderSource(woolManager)
   void woolManager.initialize()

@@ -225,6 +225,13 @@ export interface WoolManagerDeps {  // oe-exempt:20261022:framework:依赖注入
   dataDir: string
   /** wool.state 广播出口（组合根组装 id 后经 broker 纯全局通道下发）。 */
   broadcast: (msg: ServerMessage<'wool.state'> | ServerMessage<'wool.authorize_url'>) => void
+  /**
+   * 管理会话 ext-sessions 树回收口（组合根装配 = sessionStore.trashDirectory）。
+   * 管理会话是命令-only 形态（pi 不 flush jsonl 主文件），而 sessionService.delete 的
+   * active 分支对「主文件缺失」语义 = 整体零动作（外部已删假设）——树内 logs 域会
+   * 泄漏累积，与 ADR-0141「删除会话 = 整树回收」相悖；羊毛域自回收（D3 验收发现）。
+   */
+  reclaimSessionTree?: (sessionId: string) => void
   /** 清单拉取地址（可配置；缺省 = DEFAULT_WOOL_MANIFEST_URL）。 */
   manifestUrl?: string
   /** 网络出口（测试注入；缺省 globalThis.fetch）。 */
@@ -727,6 +734,13 @@ export class WoolManager {
       } catch (e) {
         // best-effort 降级：回收失败不向调用方放大（进程死亡路径 delete 链自有收殓），warn 留痕。
         console.warn(`[wool-manager] manage session dispose failed (sid=${summary.id}): ${toErrorMessage(e)}`)
+      }
+      // 树回收独立于 delete 结果（delete 对无主文件的命令-only 会话是零动作，见 deps 注释）；
+      // trash 失败同样 best-effort（残留 logs 域无碍主链，warn 留痕）。
+      try {
+        this.deps.reclaimSessionTree?.(summary.id)
+      } catch (e) {
+        console.warn(`[wool-manager] manage session tree reclaim failed (sid=${summary.id}): ${toErrorMessage(e)}`)
       }
     }
   }

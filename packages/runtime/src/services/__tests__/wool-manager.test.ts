@@ -151,6 +151,8 @@ function assemble(opts: {
   modelsEntry?: WoolModelsEntryPort
   /** 每日签到提醒定时器延迟（0 = 立即触发，定时器接线用例）。 */
   dailyCheckinDelayMs?: number
+  /** 管理会话树回收口观测桩（缺省不注入 = 可选端口未装配形态）。 */
+  reclaimSink?: (sid: string) => void
 } = {}) {
   const session = makeSessionPort(opts.sessionOverrides)
   const ext = makeExtPort(opts.extScan ?? [{ name: '@zhushanwen/pi-wool-qoder', version: '0.2.0', enabled: true }], opts.installed ?? [])
@@ -164,6 +166,7 @@ function assemble(opts: {
     modelsEntry,
     dataDir,
     broadcast: (msg) => broadcasts.push(msg),
+    ...(opts.reclaimSink ? { reclaimSessionTree: opts.reclaimSink } : {}),
     fetchFn: opts.fetchFn ?? (async () => jsonResponse(manifestBody())),
     now: (() => 1_700_000_000_000) as () => number,
     ...(opts.manageResponseWaitMs !== undefined ? { manageResponseWaitMs: opts.manageResponseWaitMs } : {}),
@@ -1082,6 +1085,39 @@ describe('每日签到提醒（D5）', () => {
 })
 
 // ── 会话错误分类（D6 ③ 报错时刷新 + 失败路径表对话 401 分类）──────────
+
+describe('管理会话树回收（D3 验收发现：命令-only 会话无主文件，delete 零动作 → 羊毛域自回收）', () => {
+  it('管理编排收尾调用 reclaimSessionTree 且传入真实 sid', async () => {
+    const reclaimed: string[] = []
+    const { manager, session } = assemble({ reclaimSink: (sid) => reclaimed.push(sid) })
+    session.entriesBySid.set('sid-1', [manageEntry('qoder', { v: 1, ok: true, data: { detected: true, fetchedAt: 5 } })])
+    await manager.runAction({ action: 'detect', family: 'qoder' })
+    expect(reclaimed).toHaveLength(1)
+    // sid = 会话 port 分配的 id（与 delete 收到的同一 id——整树软删目标一致）
+    expect(reclaimed[0]).toBe('sid-1')
+  })
+
+  it('编排抛错（扩展缺失）仍回收（finally 语义）', async () => {
+    const reclaimed: string[] = []
+    const { manager } = assemble({
+      reclaimSink: (sid) => reclaimed.push(sid),
+      sessionOverrides: {
+        // 响应在指令写入前已在 entries（零等待轮询首轮即中）——本用例只验 finally 回收，不验编排成功
+        getRpcClient: (sid: string) => ({
+          getEntries: async () => ({ data: { entries: [manageEntry('qoder', { v: 1, ok: true, data: { detected: true, fetchedAt: 5 } })] } }),
+        }) as Awaited<ReturnType<WoolSessionPort['getRpcClient']>>,
+      },
+    })
+    await expect(manager.runAction({ action: 'detect', family: 'qoder' })).resolves.toBeDefined()
+    expect(reclaimed).toHaveLength(1)
+  })
+
+  it('端口未装配（可选缺省）零调用零异常', async () => {
+    const { manager, session } = assemble()
+    session.entriesBySid.set('sid-1', [manageEntry('qoder', { v: 1, ok: true, data: { detected: true, fetchedAt: 5 } })])
+    await expect(manager.runAction({ action: 'detect', family: 'qoder' })).resolves.toBeDefined()
+  })
+})
 
 describe('会话错误分类（D6 ③）', () => {
   it('对话 401（含 wool provider 标识）→ 账号缓存置失效 + 广播（失效徽标判定源之二）', async () => {
