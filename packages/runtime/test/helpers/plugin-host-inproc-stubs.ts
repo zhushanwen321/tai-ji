@@ -18,12 +18,13 @@
  *   terminate() → exit code=1（运行中被终止的 Node 语义；事件循环已排空的 Worker 自然退出
  *   code=0，复现不了「运行中被终止」形态，故桩恒按常驻句柄语义 exit 1）
  *
- * 使用模式（vi.mock 声明留测试文件——模块路径相对测试文件解析；工厂内 await import
- * 本文件转发，免疫 vitest hoist 时序；先例：test/helpers/rpc-client-mock.ts）：
- *   vi.mock('node:child_process', async () =>
- *     (await import('./helpers/plugin-host-inproc-stubs')).childProcessModule())
- *   vi.mock('node:worker_threads', async () =>
- *     (await import('./helpers/plugin-host-inproc-stubs')).workerThreadsModule())
+ * 使用模式（vi.mock 声明留测试文件——模块路径相对测试文件解析；测试文件顶部 import
+ * 本文件的两个模块工厂（childProcessModule / workerThreadsModule，路径写作
+ * './helpers/plugin-host-inproc-stubs'，纯文字不构成 import 语句——fallow 会把注释里的
+ * 动态 import 示例当真实 import 解析并误报 unresolved，故此处不写 import() 调用形态；
+ * 先例：test/helpers/rpc-client-mock.ts）：
+ *   vi.mock('node:child_process', async () => childProcessModule())
+ *   vi.mock('node:worker_threads', async () => workerThreadsModule())
  *
  * spread 而非完全替换（importActual 保留其余导出）：宿主依赖图内其他模块可能消费这两个
  * 内置模块的其他导出，完全替换式 mock 会随依赖图扩张静默断联（rpc-client-mock 头注登记的

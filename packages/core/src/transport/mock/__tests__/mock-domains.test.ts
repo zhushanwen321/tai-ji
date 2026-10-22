@@ -689,7 +689,8 @@ describe('mock workspace / quota / project / preset domain', () => {
     expect((await workspace.record('/any')).map((r) => r.cwd)).toEqual(recent.map((r) => r.cwd))
     expect(await workspace.detect('/any')).toMatchObject({ mode: 'not-repo' })
     // pin（mock 无持久化，恒 applied）/ 默认会话目录（固定演示路径，真实路径 runtime 动态推导）
-    expect(await workspace.setPinned('/any', true)).toEqual({ records: recent })
+    // setPinned 返回的 records 同样按调用时刻取 Date.now()（同上行 lastUsedAt 漂移口径），比对 cwd 序列而非全等
+    expect((await workspace.setPinned('/any', true)).records.map((r) => r.cwd)).toEqual(recent.map((r) => r.cwd))
     expect(await workspace.defaultSessionDir()).toBe('/tmp/taiji-mock/defaultSession')
   })
 
