@@ -23,11 +23,11 @@ defineOptions({ inheritAttrs: false })
 
 // 形态对照 demo（pages.css .pg-set .croot/.cpop 确认弹窗 + overlay.css .rmodal 大 modal）：
 // 盒底 = --bg（composer 同源档，2026-10-14 全族迁移；[HISTORICAL] 曾为浮层级 --bg-elevated，
-// 「遮罩上的面板不沉入内容层」归层原则改由 bg-black/80 遮罩 + shadow-3 承载——遮罩把身后
+// 「遮罩上的面板不沉入内容层」归层原则改由 bg-scrim 遮罩 + shadow-3 承载——遮罩把身后
 // 内容压暗后，--bg 盒面相对身后仍呈浮起）；
 // 边框 = --hairline（.rmodal-box 档）；阴影 = --shadow-3；圆角 --radius-lg 12px（去 sm:
 // 前缀——demo 无条件圆角，窄窗不该塌成直角）；内边距 20px（.cpop padding）；遮罩
-// bg-black/80 + blur 4px 与 demo .cmask 同值。z-index 走 --z-modal(1000)：demo .rmodal
+// bg-scrim（token 真值 = rgba(0,0,0,0.8)）+ blur 4px 与 demo .cmask 同值。z-index 走 --z-modal(1000)：demo .rmodal
 // 用 --z-dialog 是其单一语义；real 的 --z-dialog(1100) 档被嵌套弹层（Popover/Select）与
 // ui-request band（AP-2：浮于 modal 之上）占用，DialogContent 升到下一档会破坏 band 语义。
 // 进出场过渡参数见 style.css .reka-dialog-transition（demo rmodal-in 0.16s 档）。
@@ -62,7 +62,7 @@ onBeforeUnmount(disposeSurfaceRegistration)
 <template>
   <DialogPortal>
     <DialogOverlay
-      class="fixed inset-0 z-[var(--z-modal)] bg-black/80 backdrop-blur-sm reka-overlay-transition"
+      class="fixed inset-0 z-[var(--z-modal)] bg-scrim backdrop-blur-sm reka-overlay-transition"
     />
     <DialogContent
       v-bind="mergedAttrs"

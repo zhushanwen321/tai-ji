@@ -1,29 +1,22 @@
-# mobile-renderer 令牌镜像副本与桌面 style.css 分叉待裁决
+# mobile-renderer 令牌镜像副本与桌面 style.css 分叉（已裁决关闭）
 
-状态：待裁决（D5 终态同步 contested 裁决：不把 ui-optimize-unified 令牌终态扩张到 mobile 壳——该设计从未裁决 mobile 壳视觉，盲改无验收覆盖；但镜像同步契约已被桌面侧改值打破，须显式登记）。登记来源：ui-optimize-unified D5 终态同步（2026-10-08）。2026-10-11 用户裁决：保留登记；当前桌面 UI 正在进行大幅重构，待重构稳定后再做向 mobile 壳的同步
+状态：已对齐关闭（2026-10-22 用户裁决：**mobile 跟随桌面终态，全量对齐**；否决「解除镜像声称」备选项）。mobile tokens.css 暗亮两块已与桌面 style.css 对应块逐 token 对齐：背景五层阶梯 + neutral 六档去蓝偏值 + `--bubble-bg` 归层派生 `var(--bg-elevated)`（亮族纸白 `#fefefe` 独立档）+ 缺失组补齐（`--md-code-bg/fg`、`--link-c`/`--code-c`、`--name`、`--sel-bg`/`--sel-edge`、`--shadow-3`、亮色阴影三档、亮色 `--bg-stage`、`--ease-out`/`--ease-in`/`--ease-out-soft`——均经消费点核实后补）+ shadcn 别名映射目标对齐（`--secondary`→`var(--bg-card)`、`--popover`→`var(--bg-elevated)`）+ 公式类派生收敛桌面形态（亮块不重声明 `--accent-soft`/`--accent-ring`/`--*-soft`/`--bg-sunken`，继承 `:root` 公式自动跟随）。死定义清理：`--composer-bg`（全仓零消费）与 tailwind.config 四组零消费 keyframes（pulse-accent / pulse-warn / steer-breathe / working-pulse）；main.ts 启动失败兜底页 neutral 字面量同步现值。登记来源：ui-optimize-unified D5 终态同步（2026-10-08）。
 
-## 现状（2026-10-17 核实）
+## 现状（2026-10-22 对齐后）
 
-`packages/mobile-renderer/src/styles/tokens.css:20-22` 文件头自述「真值源仍是 renderer style.css……改动须同步两处」，但桌面侧 ui-optimize-unified 已完成五层分层改值 + 灰阶四档去蓝偏 + `--composer-bg` 退役删除 + `--bubble-bg` 归层派生 `--bg-elevated`（demo 暗族三主题同值；2026-10-10 demo 复刻保真修复），mobile 侧全部未跟随：
+无登记内分叉。镜像校验单测 `mobile-token-mirror-parity.test.ts`（accent 族四组 + shadcn `--primary`/`--ring` + `--neutral-fg-2` 逐字相等）双绿；其余 token 逐项对账随本次对齐完成。
 
-| 位置 | mobile 现值 | 桌面终态 |
-|---|---|---|
-| tokens.css:27 `--bg` | `#131316` | `#242428`（框架层提亮，六主题 v2） |
-| tokens.css:29 `--surface` | `#1f1f22`（亮于 bg 的旧方向） | `#18181b`（内容层沉底，六主题 v2） |
-| tokens.css:38 `--bubble-bg` | `var(--surface-hover)`（已退役改指） | `var(--bg-elevated)` 派生（暗族同值）/亮族 `#fefefe` 独立档 |
-| tokens.css:39/:189 `--composer-bg` | 残留（桌面已退役，全仓零消费方——死定义） | 已删除 |
-| tokens.css:43/:45 neutral fg/mid | `#dedee2`/`#96969c`（蓝偏旧值） | `#e6e6e6`/`#949494`（六主题 v2，fg 微降入舒适带 + mid 联动提亮） |
-| tokens.css 全文件 | 无 `--md-code-*` 组 | `--md-code-bg/fg` 六主题各一对（决策 5） |
-| main.ts:41-44 neutral 兜底值 | 同旧 | —（style.css 加载成功时不生效，但兜底失真） |
+mobile 合法独立档（镜像范围外，非分叉）：
 
-镜像校验单测 `mobile-token-mirror-parity.test.ts` 断言范围仅 accent 族四组，neutral/bg/fw 不在断言范围，故双绿不拦分叉。
+- `--safe-area-*` 视口安全区四变量（mobile 专属）
+- 字号槽位仅 `--font-scale-u`（无桌面三分区档 `--font-scale-sidebar/chat/drawer`）
+- `styles/shell.css` 浮层过渡段（dialog 居中依赖，独立镜像，头注释自带双壳同步义务）
+- 图表派生 token 组（`--chart-*`/`--heat-*`/`--cache-*`/`--hover-tint` 等，mobile 壳与所消费 @taiji/ui 组件零消费，未镜像）；`--blk-gap`/`--z-toast`/`--z-banner`/`--content-max-w-wide`/`--message-stream-pad-top` 等桌面专用 token 同理未镜像
+- tailwind.config 存量 keyframes 中 wiggle / pulse-strong / ask-user-slide-up 三组当前亦无消费点（本次范围外未删，留待后续动画清理波次裁决）
 
-增量（2026-10-10 demo 复刻波）：桌面侧六主题 accent 换青玉系 + 新增 `--link-c`/`--code-c`/`--md-code-*` 改 code-c 派生，parity 断言强制下 accent 族已机械同步到 mobile 镜像（:root + light 块）；其余分叉项如上表维持待裁决。
+## 裁决结果
 
-## 裁决选项
-
-1. **mobile 跟随本波终态**（一次性同步五层阶梯 + 四档灰阶 + `--md-code-*` 组 + 死定义清理）——收益：两壳观感一致、镜像契约恢复；代价：mobile 壳无像素验收轨，改值需真机核对。
-2. **解除镜像声称**：mobile 壳独立演进，删除 tokens.css 头部镜像自述与 parity 单测的同步义务前提——收益：诚实反映现状；代价：两壳令牌永久分叉，后续每波桌面令牌改动都需单独裁决 mobile 是否跟随。
+2026-10-22 用户裁决：**mobile 跟随桌面终态（全量对齐）**——两壳观感一致、镜像契约恢复；代价（mobile 壳无像素验收轨，改值需真机核对）知情接受。后续桌面令牌改值仍以 renderer style.css 为真值源同步 mobile 镜像。
 
 ## 关联登记
 

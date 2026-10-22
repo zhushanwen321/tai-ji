@@ -17,6 +17,7 @@
 退出码：0 = 干净；1 = 命中 emoji；2 = 用法/环境错误
 """
 
+from __future__ import annotations
 import re
 import sys
 

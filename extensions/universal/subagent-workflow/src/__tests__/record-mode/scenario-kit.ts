@@ -306,6 +306,15 @@ export async function scanScenarioEvents(env: RecordFixtureEnv, runId: string): 
   return createRunEventJournal(env.stateDir).scan(runId);
 }
 
+/** 按 taskIndex 统计 agent-settled 帧次数（scenario 族共用的「结果恰写一次」计数锚）。 */
+export function settledCountByTaskIndex(events: readonly WorkflowRunEvent[]): Map<number, number> {
+  const settledCount = new Map<number, number>();
+  for (const e of events) {
+    if (e.type === "agent-settled") settledCount.set(e.taskIndex, (settledCount.get(e.taskIndex) ?? 0) + 1);
+  }
+  return settledCount;
+}
+
 /** 轮询至终局（runSummary 派生视图——活体终局源 = 终局记录注册表）。 */
 export async function waitForScenarioSettled(
   runs: Map<string, WorkflowRun>,

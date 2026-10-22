@@ -71,6 +71,27 @@ const tasks = $ARGS.tasks;
 if (!Array.isArray(tasks) || tasks.length === 0) {
   throw new Error('fan-out: tasks is required (non-empty array of member objects). Correct: {"tasks":[{"task":"task one"},{"task":"task two"}]}');
 }
+// 旧格式迁移指引（成员对象化之前：tasks 字符串数组 / 顶层 agents 键）——与 scriptPath
+// 旧格式专属文案同构：命名旧形状、给迁移映射（agents 逗号串 → 逐成员 agent）与恢复
+// 动作（按旧 tasks 内容重派成员对象新 run）。纵深兜底覆盖绕过 validateRunArgs/ajv 的
+// 直参宿主形态（zsw 直参等）；pi 宿主标准路径在 ajv 层已被拒并拿到同款迁移文案
+// （args-validator legacyArgsAdvisory），两处文案同构。
+const legacyStringTasks = tasks.some((t) => typeof t === "string");
+const legacyAgentsKey = $ARGS.agents !== undefined;
+if (legacyStringTasks || legacyAgentsKey) {
+  throw new Error(
+    "fan-out: legacy args shape detected (" +
+      [
+        ...(legacyStringTasks ? ['tasks elements are plain strings'] : []),
+        ...(legacyAgentsKey ? ['top-level "agents" key present'] : []),
+      ].join("; ") +
+      ") — this shape predates the member-object parameter format and is no longer accepted. " +
+      "Migration: one member object per task (task required; agent/model/thinkingLevel optional per-member overrides; " +
+      'a legacy agents="/a.md,/b.md" maps to agent on each member in the same order). ' +
+      "Recovery: re-dispatch a NEW run with member-object tasks. " +
+      'Correct: {"tasks":[{"task":"task one","agent":"/a/one.md"},{"task":"task two"}]}',
+  );
+}
 // 成员对象校验（validateRunArgs/ajv 类型校验之后的纵深）：task 必填且非空白——schema
 // minLength 不拦空白字符串，入口 trim 检查补上；其余成员字段按 ajv 已校验类型采信
 if (tasks.some((m) => m === null || typeof m !== "object" || typeof m.task !== "string" || m.task.trim() === "")) {

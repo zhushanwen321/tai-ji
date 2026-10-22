@@ -15,6 +15,7 @@ r"""
 - 事故背景：100 个临时产物（.cw-*.json / wave-* / plan.* / .bak 等）曾被 git add
   进版本管理，.gitignore 兜底后仍有历史遗留。本检查是 .gitignore 之外的防呆层。
 """
+from __future__ import annotations
 import os
 import re
 import sys

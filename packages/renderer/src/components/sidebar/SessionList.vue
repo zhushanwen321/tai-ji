@@ -63,7 +63,7 @@
           <span
             v-if="archiveCount > 0"
             data-testid="sidebar-archive-count-badge"
-            class="absolute -right-[3px] -top-[3px] grid min-w-[14px] place-items-center rounded-full bg-accent px-[3px] font-mono text-[9px] leading-[14px] text-neutral-fg"
+            class="absolute -right-[3px] -top-[3px] grid min-w-[14px] place-items-center rounded-full bg-accent px-[3px] font-mono text-[9px] leading-[14px] text-accent-fg"
           >{{ archiveCount > 99 ? '99+' : archiveCount }}</span>
         </Button>
         <!-- A/C 双段图标开关（demo .mode-seg：surface 槽 + hairline 边 + 26×24 钮 + 13px 图标）：

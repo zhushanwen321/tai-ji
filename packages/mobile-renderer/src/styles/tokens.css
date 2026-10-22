@@ -22,31 +22,34 @@
    双壳收敛时抽共享 tokens.css，此文件与其同构（改动须同步两处）。
    ============================================================ */
 :root {
-  /* ── 背景层级（v6 玄：阶梯上抬+加宽级差，暗端防糊）────────── */
-  --bg-stage: #0a0a0c;          /* 舞台深底（最外层衬底，低于 --bg；v6 §4） */
-  --bg: #131316;                /* 画布底层（玄，侧栏/drawer/settings 内容区底） */
-  --bg-sunken: var(--bg);       /* 同画布色（语义变更，靠 surface 浮起分隔） */
-  --surface: #1f1f22;           /* 主面板/drawer 浮起表面 */
-  --surface-hover: #303033;     /* 面板悬停 */
-  --surface-2: #27272a;         /* 二级表面（header 浮起分层 / SegmentedTab active） */
-  --bg-elevated: #2b2b2e;       /* tab 型选中态浮起 / popover 浮层 */
-  --bg-input: #17171a;          /* 输入框/凹陷区（比 bg 更深） */
-  --bg-card: #1b1b1e;           /* 设置分组卡片（介于 bg 与 surface） */
-  /* 用户气泡/输入区专用底色（暗：浮起灰 / 亮：纯白，见 [data-theme="light"] 覆盖）。
-     亮色下灰底（surface-hover/bg-input）易读作禁用态，故白纸化——气泡/输入框是内容载体，
-     白色浮起与米白面板区分，墨绿链接对比度同步从 4.24 升至 5.53。 */
-  --bubble-bg: var(--surface-hover);
-  --composer-bg: var(--bg-input);
+  /* ── 背景层级（五层职能分层：读的地方沉下去，操作的地方浮上来；
+     阶梯单调递增「越浮越亮」，SSOT = docs/DESIGN.md §4.1）────── */
+  --bg-stage: #111114;          /* 舞台深底：最外层衬底/卡片之间的缝（全场最深） */
+  --bg: #242428;                /* 框架层：侧栏/composer/settings 内容区（同层同色） */
+  --bg-sunken: var(--bg);       /* 框架层沉底同值跟随（语义 = 与宿主 --bg 同值） */
+  --surface: #18181b;           /* 内容层：对话流/drawer 的阅读区（沉底） */
+  --surface-hover: #2d2d31;     /* 面板悬停 */
+  --surface-2: #2e2e32;         /* 二级表面（header 浮起分层 / SegmentedTab active） */
+  --bg-elevated: #323236;       /* 浮层：hover 详情卡/popover */
+  --bg-input: #1d1d20;          /* 内容层内次级：代码块/文件 chip 底 */
+  --bg-card: #2d2d30;           /* 设置分组卡片等操作域浮起容器（亮于 --bg 一档） */
+  /* 用户气泡随 --bg-elevated 派生（暗档无独立档）；亮色族纸白 #fefefe 独立档
+     （见 [data-theme="light"] 块）——灰底易读作禁用态，纸白浮起且与
+     card/elevated 保持微梯度 */
+  --bubble-bg: var(--bg-elevated);
   --bar-fill-soft: 55%;         /* progress-bar fill 柔化档 */
 
-  /* ── 文字（neutral 谱系，上抬，dim 对比度 ~4.4:1）────────── */
-  --neutral-fg: #dedee2;        /* 主前景 */
+  /* ── 文字（neutral 谱系 · 纯中性六档，去蓝偏校正）────────── */
+  --neutral-fg: #e6e6e6;        /* 主前景 + 正文 */
   --neutral-fg-2: #d2d2d2;      /* 次级正文（demo --fg-2：正文与工具行之间的强调文字档） */
-  --neutral-mid: #96969c;       /* 正文（过 AA） */
-  --neutral-dim: #74747a;       /* 次要（提亮一档） */
-  --neutral-faint: #46464c;     /* 极弱/装饰 */
-  --neutral-ico: #86868c;       /* 图标默认色 */
-  --neutral-ico-hover: #dedee2; /* 图标 hover 色 */
+  --neutral-mid: #949494;       /* 工具行/次要 */
+  --neutral-dim: #6e6e6e;       /* 时间与元信息（低显著度装饰性文字的显式取舍） */
+  --neutral-faint: #525257;     /* 极弱/装饰 */
+  --neutral-ico: #949494;       /* 图标默认色（随 mid 档校准） */
+  --neutral-ico-hover: #e6e6e6; /* 图标 hover 色 */
+  /* 对话流专属名称色（workflow / subagent 的具体名称）：暖驼微暖低饱和；
+     亮色主题（[data-theme="light"]）覆盖加深档 */
+  --name: #d7b894;
 
   /* ── 边框/分隔 ─────────────────────────────────────────── */
   --border: rgba(255, 255, 255, 0.07);
@@ -59,12 +62,29 @@
   --accent-soft: color-mix(in oklch, var(--accent) 10%, transparent);
   --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent); /* 选中态内描边（Card-Active），见 design-system §2 */
   --accent-fg: #152019;         /* accent 实色上的文字；对 #7fb89c 7.38:1 过 AA */
+  /* Tier A 状态件选中态（静态状态件用；行类不消费）。color-mix 中的 var()
+     每元素解析，主题换基色即自动适配 */
+  --sel-bg: color-mix(in oklch, var(--accent) 7%, var(--bg-elevated));
+  --sel-edge: color-mix(in oklch, var(--accent) 40%, transparent);
+
+  /* 职能分色（demo 终态）：链接正蓝 / 行内代码杏橘，各主题独立定值 */
+  --link-c: #4d8dff;
+  --code-c: #cf9d78;
+
+  /* 行内代码（demo R4 弱化终态）——底 = code-c 8% 弱化层，字 = 主前景 85% 混 code-c 15%
+     （「接近正文色、只微暖不抢眼」）。color-mix 中的 var() 每元素解析，
+     随本块 --neutral-fg/--code-c 自动跟随；亮色族 bg 百分率不同（7%）
+     由 [data-theme="light"] 块重声明 */
+  --md-code-bg: color-mix(in oklch, var(--code-c) 8%, transparent);
+  --md-code-fg: color-mix(in oklch, var(--neutral-fg) 85%, var(--code-c));
 
   /* ── 状态色（水墨降饱和，克制放开档）────────────────── */
   --success: #78a87e;
   --warn: #b79c54;
   --danger: #bf6b6b;
-  --danger-fg: #f0f0f2;         /* danger 实色上的文字 */
+  --danger-fg: color-mix(in oklch, var(--danger) 12%, #160b0b); /* danger 实色上的文字（暗档深字公式，与 renderer style.css :root 同构；亮色族由下方 light 块覆盖为白字） */
+  --success-fg: color-mix(in oklch, var(--success) 12%, #160b0b); /* success 实色上的文字（与 --danger-fg 同公式同浓度；亮色族由下方 light 块覆盖为白字） */
+  --danger-text: color-mix(in oklch, var(--danger) 78%, var(--neutral-fg)); /* danger 小字提亮档（renderer style.css :root 同构镜像；var 每元素解析随主题自动跟随，主题块零重声明） */
   --info: #6d99a5;
   /* reasoning 紫：思考块色相（draft-message-stream §4 + composer 思考等级） */
   --reasoning: #8e85ab;
@@ -95,11 +115,11 @@
   --fw-mid: 600;                /* 中档：行容器 / 组头 */
   --fw-bold: 700;               /* 粗体：动作词 / 工具名 */
 
-  /* ── 圆角（v6：xs 4px / sm 6px / 8px / lg 12px / card 10px）───────── */
+  /* ── 圆角（xs 4 / sm 6 / 8 / lg 12；卡片容器与 lg 同档）── */
   --radius-xs: 4px;             /* 微件：seg 项/badge 内件/popover trigger */
   --radius-sm: 6px;             /* 输入框/标签 */
   --radius: 8px;                /* 按钮/卡片（默认）*/
-  --radius-card: 10px;          /* 卡片容器 */
+  --radius-card: 12px;          /* 卡片容器（= --radius-lg 同档） */
   --radius-lg: 12px;            /* 面板/弹层 */
 
   /* ── 间距（4px 栅格）───────────────────────────────────── */
@@ -115,10 +135,17 @@
   /* ── 阴影 ───────────────────────────────────────────────── */
   --shadow-1: 0 0 0 1px rgba(0, 0, 0, 0.2);          /* 描边 */
   --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.4);         /* 浮层 */
+  --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.45);       /* 顶级浮层（demo 三档阴影最高档） */
   --shadow-glow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent); /* 聚焦环（跟随 accent） */
+  /* 弹层遮罩（modal/overlay 背后全场最暗层）+ 定向左投影（抽屉自右滑入的左侧落影）：
+     与桌面 style.css 阴影段同值镜像（黑遮罩亮暗族共用一值，light 块不覆盖）。共享
+     tailwind-preset 已映射 bg-scrim / shadow-drawer-left 工具类，变量缺定义时 var()
+     静默失效不报错——无消费点也须随 preset 声明面补齐 */
+  --scrim: rgba(0, 0, 0, 0.8);
+  --shadow-drawer-left: -24px 0 48px rgba(0, 0, 0, 0.4);
 
   /* ── 层级 / 组件尺寸 ──────────────────────────────────── */
-  --content-max-w: 720px;       /* 内容列最大宽（settings 等收窄） */
+  --content-max-w: min(720px, 100%); /* 内容列最大宽（settings 等收窄；窄容器自动让位满宽） */
   --panel-bg: var(--surface);   /* panel 内 sticky 浮层底色契约 */
   --z-sticky: 1;
   --z-popover: 10;
@@ -142,6 +169,10 @@
 
   /* ── 动效 ───────────────────────────────────────────────── */
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);   /* 进方向缓动（demo E5 抽屉配套） */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);    /* 出方向缓动（demo E5 抽屉配套） */
+  /* 入场类软缓出（demo tokens.css 同名同值）：内容入场统一缓动 */
+  --ease-out-soft: cubic-bezier(0.23, 1, 0.32, 1);
   --duration-fast: 120ms;
   --duration: 200ms;
   --duration-slow: 320ms;
@@ -156,7 +187,7 @@
        • --muted：v3=次级文字色 / shadcn=背景色 → 维持文字色 */
   --primary: var(--accent);            /* default Button 底 = 主色 */
   --primary-foreground: var(--neutral-fg);     /* 底上字 */
-  --secondary: var(--surface);         /* secondary Button 底 */
+  --secondary: var(--bg-card);         /* secondary Button 底（操作域浮起档，亮于内容区 --bg） */
   --secondary-foreground: var(--neutral-fg);
   --destructive: var(--danger);        /* destructive Button 底 */
   --destructive-foreground: var(--neutral-fg);
@@ -164,7 +195,7 @@
   --accent-foreground: var(--neutral-fg);      /* ghost hover 底配字 */
   --background: var(--bg);             /* bg-background / ring-offset-background */
   --foreground: var(--neutral-fg);             /* text-foreground */
-  --popover: var(--surface);           /* bg-popover */
+  --popover: var(--bg-elevated);       /* bg-popover（浮层档） */
   --popover-foreground: var(--neutral-fg);
   --input: var(--border);              /* border-input */
   --ring: var(--accent);               /* ring-ring（focus，主色）*/
@@ -183,17 +214,21 @@
 
 
 [data-theme="light"] {
+  /* 亮色最深衬底（窗口底，透过壳层圆角/padding 透出）：带青玉相的浅色
+     #dee3da（与 accent 同族色相，分离感靠色相差而非压暗舞台）；
+     防泄漏 :root 暗色 #111114 形成黑框 */
+  --bg-stage: #dee3da;
   --bg: #eef1ea;                /* 与桌面皓 bg 同步（青玉相舞台，2026-10-17 对话流颜色提案） */
-  --bg-sunken: #eef1ea;
+  /* --bg-sunken 不重声明：继承 :root var(--bg) 公式随本块 --bg 自动跟随 */
   --surface: #f7f6f3;
-  --surface-hover: #dbd9d4;
-  --surface-2: #e3e1dc;
-  --bg-elevated: #faf9f6;
-  --bg-input: #e5e3df;
-  --bg-card: #f1efec;
-  /* 亮色白纸：用户气泡与 composer 输入区用纯白（灰底读作禁用态，见 :root 注释） */
-  --bubble-bg: #ffffff;
-  --composer-bg: #ffffff;
+  --surface-hover: #e6e4e0;
+  --surface-2: #efede9;         /* = demo 亮族 --card-head（设置分组卡头） */
+  --bg-elevated: #ffffff;
+  --bg-input: #efedea;
+  --bg-card: #fcfbf9;           /* 卡浮于页底（亮于 --bg 两档近白纸） */
+  /* 亮色纸白：用户气泡用 #fefefe（灰底读作禁用态；纯白让位 elevated，
+     纸白与 card/elevated 保持微梯度） */
+  --bubble-bg: #fefefe;
 
   --neutral-fg: #2b2a28;
   --neutral-fg-2: #3a3936;
@@ -202,27 +237,41 @@
   --neutral-faint: #c7c5c0;
   --neutral-ico: #82807b;
   --neutral-ico-hover: #2b2a28;
+  /* 对话流专属名称色（亮色加深档，对比 5.2:1） */
+  --name: #8c6231;
 
   --border: rgba(0, 0, 0, 0.07);
   --border-strong: rgba(0, 0, 0, 0.14);
   --hairline: rgba(0, 0, 0, 0.05);
 
-  /* 青玉 accent（宣纸上的深颜料，demo 终态职能分色；亮色族 hover 压暗一档） */
+  /* 青玉 accent（宣纸上的深颜料，demo 终态职能分色；亮色族 hover 压暗一档）。
+     --accent-soft/--accent-ring 不重声明：继承 :root 派生公式，随本块 --accent
+     每元素解析自动跟随（公式类派生只声明一次） */
   --accent: #43765d;
   --accent-hover: #386650;
-  --accent-soft: color-mix(in oklch, var(--accent) 10%, transparent);
-  --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent);
   --accent-fg: #f2f7f4;
+  --link-c: #2e6ae0;            /* 链接正蓝（亮色族压暗档） */
+  --code-c: #96622f;            /* 行内代码杏橘（亮色族压暗档） */
 
-  /* 状态色（亮色族 TAIJI_STATES_LIGHT：宣纸上的沉稳颜料） */
+  /* 行内代码（亮色族）：底 = code-c 7%（百分率与暗色族 8% 不同故重声明）；
+     字 = var(--code-c) 公式继承 :root 不重声明 */
+  --md-code-bg: color-mix(in oklch, var(--code-c) 7%, transparent);
+
+  /* 状态色（亮色族：宣纸上的沉稳颜料）。
+     --*-soft 不重声明：继承 :root 派生公式随本块基色自动跟随（同 --md-code-bg 理由） */
   --success: #368047;
   --warn: #977629;
-  --warn-soft: color-mix(in oklch, var(--warn) 14%, transparent);
   --danger: #b24c4a;
-  --danger-fg: #faf5f5;
-  --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
+  --danger-fg: #ffffff;
+  --success-fg: #ffffff;        /* success 实色上的文字（亮色族白字，与 --danger-fg 同档镜像，renderer style.css light 块同构） */
   --info: #3a7688;
   --reasoning: #71659c;
+
+  /* 阴影三档（亮色族降浓度覆盖）：不覆盖会沿用 :root 暗色档（0.2/0.4/0.45），
+     亮色浮层（popover/dialog/hovercard/抽屉）阴影过重约 2.5-3.3 倍 */
+  --shadow-1: 0 0 0 1px rgba(0, 0, 0, 0.08);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.16);
 }
 
 

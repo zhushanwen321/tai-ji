@@ -22,6 +22,7 @@ v6-tokens.css 时代的名称集合校验只能防「漏登记」，防不了「
   2 — 有不一致（值不匹配 / 映射变量在 style.css 缺失）
 """
 
+from __future__ import annotations
 import re
 import sys
 from pathlib import Path

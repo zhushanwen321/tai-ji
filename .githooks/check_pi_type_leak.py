@@ -86,6 +86,7 @@ pi1-disposition-chat-flow 设计 D5「pi 词汇合法持有点清单 + 泄漏并
 退出码: 0 通过 / 2 发现泄漏 / 3 事件名词表取数失败（fail-fast）
 """
 
+from __future__ import annotations
 import os
 import re
 import subprocess

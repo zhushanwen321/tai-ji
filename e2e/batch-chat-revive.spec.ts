@@ -31,6 +31,7 @@ import {
   openMainListenWs,
   SAMPLE_PROJECT,
   seedRealCredentials,
+  testInfoDiag,
   tmpDiag,
   waitRealAppReady,
 } from './fixtures/batch-real-helpers'
@@ -63,7 +64,11 @@ You are a deterministic test worker. Follow the task text literally, using the b
 // ── 凭证门与播种 / 诊断 helpers（共享实现 = fixtures/batch-real-helpers.ts；
 //    本文件只留 tag 绑定、chat 特有的 worker agent 播种与泛型 waitUntil） ──────────
 
+// 载荷分类契约（ADR-0063 I2 / C-data-10 对话数据禁入 $TMPDIR）：writeDiag（/tmp）只收
+// 帧型/日志尾/进程清单等非对话数据载荷；含对话数据的载荷（session 正文尾、task 字段的
+// 列表视图）一律走 writeBodyDiag（testInfo.outputPath 托管产物位）。
 const writeDiag = tmpDiag('batch-cr')
+const writeBodyDiag = testInfoDiag('batch-cr')
 
 function seedDataDir(dataDir: string): void {
   seedRealCredentials(dataDir, 'batch-cr', {
@@ -217,7 +222,8 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
     }, ROUND_TIMEOUT_MS, 2_000)
     if (!idle1) {
       const items = await getSubagents(port, sid).catch(() => [])
-      writeDiag('batch-cr-round1-not-idle.json', {
+      // items 元素含 task（派发任务文本）——对话数据载荷走 testInfo.outputPath
+      writeBodyDiag(testInfo, 'batch-cr-round1-not-idle.json', {
         items,
         shellNow: shellPidsDetail(),
         dataDirTree: dirTree(dataDir, 2),
@@ -273,7 +279,8 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
     }, ROUND_TIMEOUT_MS, 2_000)
     if (!idle2) {
       const items = await getSubagents(port, sid).catch(() => [])
-      writeDiag('batch-cr-round2-not-idle.json', { items })
+      // items 元素含 task（派发任务文本）——对话数据载荷走 testInfo.outputPath
+      writeBodyDiag(testInfo, 'batch-cr-round2-not-idle.json', { items })
     }
     expect(idle2, `续写轮应在 ${ROUND_TIMEOUT_MS}ms 内完成（turns≥2）`).toBeDefined()
 
@@ -285,8 +292,9 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
     const hasRevive = sessionText.includes('WL-CHAT-7778')
     if (!hasRevive) {
       // 归因采集：区分「续聊写进了别的 session 文件」（产品偏离同文件续写）与
-      //「尚未 flush」（文件内容滞后）——尾部文本 + subagents 目录全清单一次判别
-      writeDiag('batch-cr-revive-text-missing.json', {
+      //「尚未 flush」（文件内容滞后）——尾部文本 + subagents 目录全清单一次判别。
+      // sessionTextTail 是会话正文载荷，走 testInfo.outputPath（ADR-0063 I2——正文禁入 /tmp）
+      writeBodyDiag(testInfo, 'batch-cr-revive-text-missing.json', {
         sessionFile,
         sessionTextTail: sessionText.slice(-2000),
         subagentsTree: dirTree(path.join(dataDir, 'agent', 'subagents'), 3),

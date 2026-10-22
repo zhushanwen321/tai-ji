@@ -14,7 +14,8 @@
 // allSettled failed 分支」断言对齐真实 worker 行为，而非测试自造契约。
 //
 // 回归锚点（断言在违背契约的旧实现上会红）：
-//   - tasks 对象-only 契约（成员对象元素；旧字符串形态/缺 task/空白 task 入口 fail-fast；
+//   - tasks 对象-only 契约（成员对象元素；旧字符串形态/顶层 agents 残留 → 专属迁移文案，
+//     缺 task/空白 task → 通用 Correct 形状文案，入口 fail-fast；
 //     validateRunArgs/ajv 类型校验是第一道，本脚本入口纵深兜底）
 //   - 成员级 agent/model/thinkingLevel 按成员传递，未指定字段不进 agent() 调用
 //     （留给 run 级 $MODEL / $THINKING_LEVEL 继承）
@@ -170,11 +171,23 @@ async function runScriptExpectThrow(args: unknown, behavior: AgentBehavior): Pro
 const THREE_TASKS = [{ task: "count ts files" }, { task: "count md files" }, { task: "list exports" }];
 
 describe("fan-out.js 入口 fail-fast（tasks 对象-only 契约）", () => {
-  it("tasks 元素为旧字符串形态 → throw（对象-only；validateRunArgs/ajv 类型校验第一道，脚本入口纵深兜底）", async () => {
+  it("tasks 元素为旧字符串形态 → 专属迁移文案（旧形状早于成员对象格式；validateRunArgs/ajv 类型校验第一道同款，本脚本纵深兜底直参宿主）", async () => {
     const message = await runScriptExpectThrow({ tasks: ["t0", "t1"] }, { aggregate: "none" });
-    expect(message).toContain('must be objects with a non-blank "task" string');
+    expect(message).toContain("legacy args shape detected");
+    expect(message).toContain("predates the member-object parameter format");
+    expect(message).toContain("Recovery: re-dispatch a NEW run with member-object tasks");
     expect(message).toContain("Correct:");
     // fail-fast 发生在派发前：零 agent 调用
+  });
+
+  it("顶层 agents 残留键（成员对象 tasks + agents）→ 专属迁移文案（旧 CLI 混合形态的纵深兜底）", async () => {
+    const message = await runScriptExpectThrow(
+      { tasks: [{ task: "t0" }], agents: "/a/one.md,/b/two.md" },
+      { aggregate: "none" },
+    );
+    expect(message).toContain('top-level "agents" key present');
+    expect(message).toContain("predates the member-object parameter format");
+    expect(message).toContain("Recovery: re-dispatch a NEW run with member-object tasks");
   });
 
   it("tasks 缺失 → throw 带 Correct 示例（直跑 workflow run 无 handler 前置校验时的兜底）", async () => {

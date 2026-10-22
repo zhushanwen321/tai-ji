@@ -20,6 +20,7 @@ import { describe, it, expect } from 'vitest'
 import { applyEntry, createInitialChatViewState, replayEntries } from '../apply-entry'
 import type { PiEntry } from '../apply-entry'
 import { msgEntry } from './helpers/fixtures'
+import { expectDerivedIdSequence } from './helpers/equivalence-asserts'
 
 // ── fixture（msgEntry 构造收敛到 helpers/fixtures.ts 单源；混合全类型序列仍为本文件
 //    手写字面量——它承载 fold 维度的序列形态语义，不跨文件共享）──────────
@@ -151,9 +152,7 @@ describe('replayEntries(mutable fold) ≡ reduce(applyEntry) 元断言', () => {
       const viaReduce = entries.reduce(applyEntry, createInitialChatViewState())
       expect(viaFold, `n=${n}`).toEqual(viaReduce)
       expect(viaFold.messages, `n=${n}`).toHaveLength(n)
-      expect(viaFold.messages.map((m) => m.id), `n=${n}`).toEqual(
-        Array.from({ length: n }, (_, i) => `e${i}`),
-      )
+      expectDerivedIdSequence(viaFold.messages, n)
     }
   })
 

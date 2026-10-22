@@ -17,6 +17,7 @@ i18n CJK 残留检测（维度 B）
   2 — 有 CJK 残留
 """
 
+from __future__ import annotations
 import re
 import sys
 from pathlib import Path

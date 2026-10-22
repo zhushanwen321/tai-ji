@@ -4,9 +4,10 @@
  * 各自头注「同款范式」的拷贝收敛单点）。
  *
  * 逐文件差异全部参数化，行为与拆出前逐字段一致：
- * - diag 落点两种现状都保留：tmpDiag → /tmp/<name>（窗口/进程族 spec 现状）；
- *   testInfoDiag → testInfo.outputPath（Playwright 托管产物位——诊断载荷含 session entry
- *   正文的 s1/s3/s4 走此落点，ADR-0063 I2）。
+ * - diag 落点两种现状都保留：tmpDiag → /tmp/<name>（窗口/进程族 spec 现状，载荷仅限
+ *   帧型/日志尾等非对话数据证据）；testInfoDiag → testInfo.outputPath（Playwright 托管
+ *   产物位——载荷含对话数据（session 正文尾 / task 字段等）的调用点走此落点，
+ *   ADR-0063 I2 / C-data-10）。
  * - console 前缀 tag（[batch-s1] / [batch-wl] / [s7] …）。
  * - 凭证源 env 覆盖键：TAIJI_BATCH_CREDENTIAL_SOURCE（batch 族缺省）/ TAIJI_S7_CREDENTIAL_SOURCE
  *   （btw-turn-isolation）。
@@ -117,7 +118,10 @@ export function seedRealCredentials(
 
 // ── 诊断落盘（两种落点现状共用核心） ──────────────────────────────────────
 
-/** /tmp 落点 diag 工厂（窗口/进程族 spec 现状——载荷为帧型/日志尾，无 entry 正文）。 */
+/** /tmp 落点 diag 工厂（窗口/进程族 spec 现状）。载荷契约：仅限帧型/日志尾/进程与文件
+ *  清单等非对话数据证据——session entry 正文及任何携带对话文本的载荷（sessionTextTail、
+ *  含 task/message 字段的对象等）禁走本通道（ADR-0063 I2 / C-data-10：对话数据禁入
+ *  $TMPDIR），必须改走 testInfoDiag。 */
 export function tmpDiag(tag: string): (name: string, data: Record<string, unknown>) => void {
   return (name, data) => {
     fs.writeFileSync(`/tmp/${name}`, JSON.stringify(data, null, JSON_INDENT))

@@ -53,6 +53,7 @@ mock-backend.ts 的桩实现）与 structured-output `tests/mock-pi-fixture.ts`
 退出码: 0 通过 / 1 发现白名单外调用点
 """
 
+from __future__ import annotations
 import re
 import sys
 import time

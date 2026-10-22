@@ -26,7 +26,7 @@ import {
   Button,
 } from '@taiji/ui'
 import type { BuiltinProviderTemplate } from '@taiji/shared'
-import { brandColor } from './brand-colors.js'
+import { brandAvatarColors } from './brand-colors.js'
 
 const props = defineProps<{ providers: BuiltinProviderTemplate[] }>()
 
@@ -208,8 +208,8 @@ function onSelect(tpl: BuiltinProviderTemplate): void {
         >
           <span class="flex items-center gap-2.5">
             <span
-              class="grid size-7 shrink-0 place-items-center rounded-sm text-[length:var(--text-sm)] font-bold text-white"
-              :style="{ backgroundColor: brandColor(p.id) }"
+              class="grid size-7 shrink-0 place-items-center rounded-sm text-[length:var(--text-sm)] font-bold"
+              :style="brandAvatarColors(p.id)"
             >{{ avatarChar(p) }}</span>
             <span class="min-w-0">
               <span class="block truncate text-[length:var(--text-sm)] font-semibold text-neutral-fg">{{ p.name }}</span>

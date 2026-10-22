@@ -37,6 +37,7 @@ A2 节登记并过评审——内部命令（cancel/workflows/__taiji_*__）与�
 用法：无参（默认扫仓库根）| --root <dir>（自定扫描根，供测试 fixture 用）。
 """
 
+from __future__ import annotations
 import argparse
 import os
 import re

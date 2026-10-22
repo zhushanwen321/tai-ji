@@ -123,7 +123,7 @@
                 class="relative size-[18px] rounded-sm after:absolute after:inset-[-3px] after:content-[''] disabled:cursor-default disabled:opacity-40"
                 :disabled="purgingSessionId === entry.sessionId"
                 :class="purgeConfirmingId === entry.sessionId
-                  ? 'bg-danger text-neutral-fg'
+                  ? 'bg-danger text-danger-fg'
                   : 'text-neutral-dim hover:bg-surface-hover hover:text-danger'"
                 :title="purgeConfirmingId === entry.sessionId ? t('archive.entry.purgeConfirm') : t('archive.entry.purge')"
                 @click.stop="onPurgeClick(entry)"

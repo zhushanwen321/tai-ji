@@ -21,6 +21,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
+import type { VueWrapper } from '@vue/test-utils'
 import { DrawerPanel } from '../index'
 import type { RightDrawerTab } from '@taiji/core/domain/drawer'
 
@@ -35,16 +36,23 @@ function baseProps<T extends object>(overrides: T = {} as T) {
   }
 }
 
+/** L1 tab 注册断言面（display-containers §7.2 单一权威）：8 个注册 tab 全在 DOM；
+ * terminal（迁底抽屉）/ browser / workflow（浮层）三个迁出位不在、总数恰 8。 */
+function expectL1DrawerTabs(wrapper: VueWrapper): void {
+  for (const key of ['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'trace']) {
+    expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
+  }
+  // 迁出位逐枚举断言不在（terminal 底抽屉 / browser、workflow 浮层）
+  for (const retired of ['terminal', 'browser', 'workflow'] as const) {
+    expect(wrapper.find(`[data-testid="drawer-tab-${retired}"]`).exists()).toBe(false)
+  }
+  expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(8)
+}
+
 describe('DrawerPanel (AC9/AC12 首屏冒烟)', () => {
   it('展开态：注册表派生视图的 8 个 L1 tab 按钮（terminal 迁底抽屉、browser 走浮层、workflow 走浮层主入口）+ 展开态内容区 DOM 存在', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps() })
-    for (const key of ['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'trace']) {
-      expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
-    }
-    expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="drawer-tab-browser"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="drawer-tab-workflow"]').exists()).toBe(false)
-    expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(8)
+    expectL1DrawerTabs(wrapper)
     expect(wrapper.find('[data-testid="drawer-content"]').exists()).toBe(true)
   })
 

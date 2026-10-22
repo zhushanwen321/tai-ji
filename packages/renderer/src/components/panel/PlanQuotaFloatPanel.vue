@@ -12,15 +12,16 @@
     data-testid="plan-quota-float"
     :aria-label="t('panel.quotaFloat.title')"
   >
-    <!-- 展开态：标题行 + 套餐清单（宽度定宽防内容随收起动画回流） -->
+    <!-- 展开态：标题行 + 套餐清单（宽度定宽防内容随收起动画回流；间距对齐紧凑化定稿：
+         body 10px / 标题行下 7px / 项分隔 7px） -->
     <div
       v-show="!collapsed"
-      class="max-h-[calc(100%-12px)] overflow-y-auto p-3"
+      class="max-h-[calc(100%-12px)] overflow-y-auto p-2.5"
       :style="{ width: `${QUOTA_FLOAT_WIDTH_EXPANDED}px` }"
       data-testid="plan-quota-body"
     >
-      <div class="mb-2 flex items-center gap-1.5">
-        <Zap class="size-3.5 shrink-0 text-neutral-dim" aria-hidden="true" />
+      <div class="mb-[7px] flex items-center gap-1.5">
+        <Zap class="size-3.5 shrink-0 text-neutral-mid" aria-hidden="true" />
         <span class="flex-1 text-[length:var(--text-xs)] font-medium text-neutral-fg">{{ t('panel.quotaFloat.title') }}</span>
         <Button
           variant="ghost"
@@ -40,7 +41,7 @@
           :provider-id="entry.providerId"
           :label="entry.label"
           :current="entry.providerId === currentProviderId"
-          :class="idx > 0 ? 'mt-2.5 border-t border-hairline pt-2.5' : ''"
+          :class="idx > 0 ? 'mt-[7px] border-t border-hairline pt-[7px]' : ''"
         />
       </div>
     </div>
@@ -48,7 +49,7 @@
     <Button
       v-show="collapsed"
       variant="ghost"
-      class="h-auto max-h-[calc(100%-12px)] flex-col gap-2 rounded-none py-2 text-neutral-dim hover:text-neutral-fg"
+      class="h-auto max-h-[calc(100%-12px)] flex-col gap-2 rounded-none py-2 text-neutral-mid hover:text-neutral-fg"
       :style="{ width: `${QUOTA_FLOAT_WIDTH_COLLAPSED}px` }"
       :aria-label="t('panel.quotaFloat.expand')"
       data-testid="plan-quota-rail"
