@@ -713,7 +713,7 @@ function runMemberHeaderLine(summary: RunSummary, memberCount: number, failedCou
 /**
  * 查无 runId 的两种文案（§3.1.3/错误规格）：判据 = 磁盘 record 流文件存在性——
  * 非终局 run（running 活体 / interrupted 重建）恒在内存 runs Map，「不在内存 + 磁盘
- * record 流在」= 已终局且被 MAX_RETAINED_DONE_RUNS(=20) 逐出保留窗口；磁盘也无 =
+ * record 流在」= 已终局且被 MAX_RETAINED_DONE_RUNS 逐出保留窗口；磁盘也无 =
  * 未知 id。超窗口的恢复动作 = 从该 run 的完成通知恢复结果（省略 runId 列全部不可用
  * ——列表同样不含已逐出 run）。
  */

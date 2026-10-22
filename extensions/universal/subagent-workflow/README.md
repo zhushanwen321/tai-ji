@@ -96,7 +96,7 @@ pi --tools todo,goal_control,workflow_run,subagent_start,ask_user
 
 Workflow run 有两类结束形态：**终局**（`done`，outcome 区分 done / failed / cancelled / time_limited——成败已定）与**中断**（`interrupted` 暂停态——执行被打断但可续跑）。`workflow_run` 启动 run；`workflow_control` 共 3 个 action：`status` / `abort` / `resume`。run 的 `name` 仅接受 `.js` 绝对路径（通常是 `<available_workflows>` 条目的 `<location>`；任意声明 `@pi-meta kind:"workflow"` 的绝对 `.js` 路径均可），裸名 / 相对路径拒绝（`not_found`，拒单文案列全部可用条目及 location，按 location 重试即可）。
 
-- **status（状态查询）**：`{"action":"status"}` 列本 session 内存保留窗口内全部 run 摘要；带 `{"action":"status","runId":"<id>"}` 返回该 run 摘要 + 成员表（每个已出现成员一行：state / stepIndex / turns / lastError 等，按 stepIndex 排序；run 行带 `failed N/M` 失败计数，N = failed 成员数 / M = 成员表行数）。带 `runId` 查无此 run 时报错并区分两种情形：id 不存在（核对 id 重试）vs 已终局且超出内存保留窗口（最近 20 个已终局 run；从该 run 的完成通知恢复结果——省略 `runId` 列全部也查不到它）
+- **status（状态查询）**：`{"action":"status"}` 列本 session 内存保留窗口内全部 run 摘要；带 `{"action":"status","runId":"<id>"}` 返回该 run 摘要 + 成员表（每个已出现成员一行：state / stepIndex / turns / lastError 等，按 stepIndex 排序；run 行带 `failed N/M` 失败计数，N = failed 成员数 / M = 成员表行数）。带 `runId` 查无此 run 时报错并区分两种情形：id 不存在（核对 id 重试）vs 已终局且超出内存保留窗口（保留窗口由 subagent-core 常量 `MAX_RETAINED_DONE_RUNS` 决定；从该 run 的完成通知恢复结果——省略 `runId` 列全部也查不到它）
 - **abort（主动取消）**：`{"action":"abort","runId":"<id>"}`（可选 `"error":"<reason>"`）→ `cancelled` 终局。要新结果就重新 run
 - **resume（断点续跑）**：`{"action":"resume","runId":"<id>"}`（可选 args 校验一致性与时间预算）——对 interrupted run 从断点恢复：已完成的调用回放缓存零 token、未完成的按三档恢复（会话完整 → 捞回结果；请求未完成 → 同会话续写；会话不在 → 整跑）；`/workflows resume <id>` 同能力
 - **session 切换/关闭时**，所有 running run 转 `interrupted` 暂停态（被打断不记失败）——回原 session 可 resume 续跑
