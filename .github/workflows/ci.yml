@@ -223,6 +223,11 @@ jobs:
         # coverage 门禁不在此跑：插桩 ~2x 会把本 job 推到 ~5min 关键路径——迁往
         # coverage.yml（nightly + 手动）由每日快照兜底，TEST-STRATEGY.md §7 同步更新。
         run: pnpm --filter @taiji/frontend exec vitest run --shard=${{ matrix.shard-index }}/${{ matrix.shard-total }}
+        env:
+          # 集成测试门控（SSOT = test-guard/integration-gate.ts）：本地默认跳过的
+          # 真进程 / 真 IO 用例（renderer 侧如 esc 消费点全仓重扫护栏）在 CI 启用；
+          # 登记清单 = docs/testing/e2e-map.json 的 E2E-INTEG-* 规则
+          TAIJI_TEST_INTEGRATION: '1'
 
       - name: Upload test results
         if: always()
@@ -257,6 +262,11 @@ jobs:
 
       - name: Test
         run: pnpm --filter @taiji/electron run test:main
+        env:
+          # 集成测试门控（SSOT = test-guard/integration-gate.ts）：本地默认跳过的
+          # 真进程用例（updater 真 hdiutil/DMG/bash 段）在 CI 启用；
+          # 登记清单 = docs/testing/e2e-map.json 的 E2E-INTEG-* 规则
+          TAIJI_TEST_INTEGRATION: '1'
 
   # state-machine 基础设施包（runtime/subagent-core/extension-protocol/goal 四消费方）
   # 独立 test job：包内 5 测试文件此前 CI 零执行。轻量包不并入其他 test job 的分片
@@ -314,6 +324,12 @@ jobs:
 
       - name: Test
         run: pnpm extensions:test
+        env:
+          # 集成测试门控（SSOT = test-guard/integration-gate.ts）：本地默认跳过的
+          # 真进程用例（subagent-workflow 真互斥/真链、pi/zcode CLI bin e2e、
+          # file-lock 跨进程 RMW、base-tool-enhance 真杀链、extension-protocol tsc）
+          # 在 CI 启用；登记清单 = docs/testing/e2e-map.json 的 E2E-INTEG-* 规则
+          TAIJI_TEST_INTEGRATION: '1'
 
       # builtin taiji 插件（resources/plugins/<name>/）单测：经根 test:resources-plugins
       # script 走 --config 指入（config root 钉在插件目录，cwd 无关），目标非空由
