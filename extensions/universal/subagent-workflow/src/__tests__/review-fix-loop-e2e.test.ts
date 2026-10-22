@@ -13,7 +13,7 @@
  *      是生产合法形态），单测层零真 spawn。
  * 真 worker thread + 真 git 的核心场景（E2E-1 锚点 + MF-1-1a/b autoCommit）保留在
  * 文件末尾的集成门控 describe（TAIJI_TEST_INTEGRATION，本地默认跳过、CI 真跑），
- * 锚定 faux 通道与真实协议不漂移。处置依据 docs/todo/test-single-layer-cleanup.md。
+ * 锚定 faux 通道与真实协议不漂移。处置依据 docs/TEST-STRATEGY.md「新写测试判据」节。
  *
  * §7.2 行为/E2E 测试（设计文档 7.2 三条）：
  *   1. R2 prompt 对账段断言 + defer 跨轮传递 mock 剧本（E2E-1，真链集成轨）

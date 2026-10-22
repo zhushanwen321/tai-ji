@@ -9,7 +9,7 @@
  *   - import-execute：rfl.mjs 作为 ES module 加载（main 在 import 时执行）——
  *     该 import 语句同时是静态依赖边，使依赖分析把 scripts/rfl.mjs 纳入测试可达域。
  *
- * 驱动方式（单测层拆分层，docs/todo/test-single-layer-cleanup.md 第二波）：全部用例
+ * 驱动方式（单测层拆分层，docs/TEST-STRATEGY.md「新写测试判据」节 第二波）：全部用例
  * 进程内加载 rfl.mjs（vi.resetModules + 动态 import，HOME 指向 fixture 临时目录），
  * 零子进程——真 execFile 冒烟由 rfl-cli.test.ts 承担（每包真进程缩到 1-2 条）。
  */

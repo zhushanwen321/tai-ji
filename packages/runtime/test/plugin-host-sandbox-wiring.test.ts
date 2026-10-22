@@ -6,7 +6,7 @@
  * - sandbox fork 子进程宿主经 PluginPoolOptions.bootstrapPathOverride 注入（fixtures/plugin-bootstrap-process.mock.cjs）
  * - trusted Worker 线程经 workerBootstrapOverride 注入（fixtures/mock-bootstrap.cjs）
  *
- * 2026-10-22 单测层整治（判据三档与处置通道见 docs/todo/test-single-layer-cleanup.md）：
+ * 2026-10-22 单测层整治（判据三档与处置通道见 docs/TEST-STRATEGY.md「新写测试判据」节）：
  * 原形态 spy 模式保留真实 fork/Worker（b+c+f 类）+ vi.waitFor 5s——进程启动与退出
  * 传播没有确定性完成信号。现经 vi.mock 把 node:child_process.fork 与
  * node:worker_threads.Worker 换成注入桩（test/helpers/plugin-host-inproc-stubs.ts，

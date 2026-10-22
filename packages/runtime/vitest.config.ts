@@ -24,7 +24,7 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
  *   用例（spawn 真 pi 进程 + 真 extension jiti 冷编译、真实 chokidar fs.watch、跨进程
  *   spawn 等）。建池理由 = 这些用例测的是「代码 + OS 组合行为」，没有确定性完成信号可等，
  *   负载下拉长无稳定上界，不满足单测层「只测逻辑、高负载下也极快」的定位（判据与整治
- *   清单见 docs/todo/test-single-layer-cleanup.md）；与 real-pi 的分界 = 是否需要真实 LLM
+ *   清单见 docs/TEST-STRATEGY.md「新写测试判据」节）；与 real-pi 的分界 = 是否需要真实 LLM
  *   凭证（本池不依赖凭证，故可进 CI）。
  *
  * 维护契约：

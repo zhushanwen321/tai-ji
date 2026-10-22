@@ -7,7 +7,7 @@
  * （2026-10-22 单测层整治第二波；原形态 spawn 真 pi 进程：--mode rpc + --extension
  * extensions/universal/session-manager + faux LLM 脚本驱动工具调用，双 spawn + 真
  * extension jiti 冷编译，满并行 7/7 红、单跑 12s——「代码 + OS 组合行为」没有完成信号
- * 可等，判据三档第三档，登记见 docs/todo/test-single-layer-cleanup.md 1.1 节）。
+ * 可等，判据三档第三档，登记见 docs/TEST-STRATEGY.md「新写测试判据」节 1.1 节）。
  * 其逻辑本质 = managed session marker 通道全链，全部落在 runtime 侧：
  *   extension 序列化的 marker select ui_request → event-adapter translate（marker 检测）
  *   → EventInterpreter（session-manager 路由）→ SessionManagerHandler（九 action +

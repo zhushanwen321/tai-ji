@@ -1,7 +1,7 @@
 /**
  * PluginHostProcess 单元测试（fork 版宿主侧）—— in-process 注入桩版
  *
- * 2026-10-22 单测层整治（判据三档与处置通道见 docs/todo/test-single-layer-cleanup.md）：
+ * 2026-10-22 单测层整治（判据三档与处置通道见 docs/TEST-STRATEGY.md「新写测试判据」节）：
  * 原形态每个用例 fork 真实子进程（b+f 类）——子进程启动 / 退出事件传播 / disconnect
  * grace 窗口没有确定性完成信号，CPU 满载下无稳定上界。现经 vi.mock 把
  * node:child_process.fork 换成注入桩（test/helpers/plugin-host-inproc-stubs.ts，

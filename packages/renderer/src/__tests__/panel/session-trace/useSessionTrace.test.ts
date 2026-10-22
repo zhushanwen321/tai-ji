@@ -278,7 +278,7 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
 
 describe('B11 登记清单治理（内存泄漏审计中危#9：seenIds 增量去重 + 软上限 + truncated 正交字段）', () => {
   // 软上限注入 50：停采/保尾/复位/flush 四边界语义与 5000 完全同构（阈值相对语义不变），
-  // fixture 从万条缩到 50 量级——单测只测逻辑正确性（test-single-layer-cleanup 判据 d）。
+  // fixture 从万条缩到 50 量级——单测只测逻辑正确性（TEST-STRATEGY「新写测试判据」类型码 d）。
   const CAP = 50
 
   beforeEach(() => {

@@ -75,7 +75,7 @@ node scripts/verify-scheduler-e2e.cjs
 
 ### 集成测试门控约定（TAIJI_TEST_INTEGRATION）
 
-> 门控唯一入口 = `test-guard/integration-gate.ts`（env 名不许在别处重复定义）。定位：把依赖真实进程 / 真实 IO / 真实挂钟窗口的用例（spawn 真子进程、真磁盘吞吐、真实 fs.watch 事件、跨进程互斥）移出默认单测组——这类用例没有确定性完成信号可等，负载下拉长无稳定上界，不满足单测层「只测逻辑、高负载下也极快」的定位（判据与整治清单见 [docs/todo/test-single-layer-cleanup.md](todo/test-single-layer-cleanup.md)）。
+> 门控唯一入口 = `test-guard/integration-gate.ts`（env 名不许在别处重复定义）。定位：把依赖真实进程 / 真实 IO / 真实挂钟窗口的用例（spawn 真子进程、真磁盘吞吐、真实 fs.watch 事件、跨进程互斥）移出默认单测组——这类用例没有确定性完成信号可等，负载下拉长无稳定上界，不满足单测层「只测逻辑、高负载下也极快」的定位（判据见下方「新写测试判据」节）。
 
 **方向，与既有四种门控的分工**：REAL_PI_READY / TAIJI_SKIP_REAL_PI / TAIJI_SKIP_REAL_ENGINE_E2E / ENGINE_CONFORMANCE_LIVE 按「凭证 / binary 是否在位」判定可用性，方向是「本地跑、CI 跳过」；本门控方向相反——**本地默认跳过、CI 或按改动范围启用**，只按「是否显式要求跑集成组」判定。两轴正交：集成组用例可同时受 REAL_PI_READY 约束（无凭证环境仍 skip）。
 
@@ -103,11 +103,42 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 
 文件级集成组的维护契约写在各包 config 文件头（现行范例 = `packages/runtime/vitest.config.ts`：main 满并行组 / real-pi 串行尾组 / integration 串行尾组三池分工）。新建 integration project 漏挂双防线由 `scripts/check-vitest-guard.mjs` 第 5 条拦截。
 
-**引擎包特例**：`packages/pi-subagent-cli` 与 `packages/zcode-subagent-cli` 受引擎包边界检查（`scripts/check-engine-package-boundary.mjs`）约束——src 内相对说明符不得逃出包根，测试文件**不** import 仓库根的 `test-guard/integration-gate.ts`，改 import 包内副本（`packages/pi-subagent-cli/src/__tests__/integration-gate.local.ts` 与 `packages/zcode-subagent-cli/src/__tests__/integration-gate.local.ts`，同语义读同名 env、注释指回本节；改语义时与 SSOT 同步）。env 名的语义权威仍在 `test-guard/integration-gate.ts`，包内副本只是边界约束下的投影。
+**引擎包特例**：`packages/pi-subagent-cli` 与 `packages/zcode-subagent-cli` 受引擎包边界检查（`scripts/check-engine-package-boundary.mjs`）约束——src 内相对说明符不得逃出包根，测试文件**不** import 仓库根的 `test-guard/integration-gate.ts`，改 import 包内副本（`packages/pi-subagent-cli/src/__tests__/integration-gate.local.ts` 与 `packages/zcode-subagent-cli/src/__tests__/integration-gate.local.ts`，同语义读同名 env、注释指回本节；改语义时与 SSOT 同步）。env 名的语义权威仍在 `test-guard/integration-gate.ts`，包内副本只是边界约束下同步维护的副本。
 
 **e2e-map 登记要求**：两种形态的资产都要在 [docs/testing/e2e-map.json](testing/e2e-map.json) 登记 R2 规则——`trigger: on-diff`、`layer: L2`、`serial: true`、`run` 命令形如 `TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run <文件>`；`scope` 取该测试 import 的被测源文件（宁全勿缺）；`id` 取 `E2E-INTEG-两位序号`（域段只允许一段——`scripts/validate-e2e-map.mjs` 的 id 正则 `E2E-<域>-<两位序号>` 不接受 `INTEG-RT` 式两段域，包归属落 `owner` 字段；域段已登记在 `_meta.fields.id`，序号按包顺序分配）。现行 53 条 = runtime 文件级集成组（E2E-INTEG-01..10）+ 各包用例级门控资产（E2E-INTEG-11..53：runtime 杂项与控制通道 / subagent-core / pi 与 zcode 引擎 CLI / zcode-session-source 慢轨 / renderer 重扫护栏 / extension-protocol 类型门禁 / subagent-workflow / base-tool-enhance / file-lock / apps/electron 升级脚本），逐条以 e2e-map 实际条目为准。防漏登记门禁 = `scripts/select-affected-e2e.mjs --check`，结构校验 = `scripts/validate-e2e-map.mjs`。
 
 **CI 接线**：覆盖「有门控文件的包」的既有 test job 在测试步骤设 `TAIJI_TEST_INTEGRATION: '1'`（现行 = ci.yml 的 `test-runtime` / `test-renderer` / `test-main` / `test-extensions` 四个 job）；不为此新建 job。`scripts/check-bun-driver.mjs` 的 bun 趟（invariants job，zcode-session-source 的 bun 运行时驱动路径）spawn env 同设 `TAIJI_TEST_INTEGRATION: '1'`——慢轨用例默认跳过会使 bun 趟对 sqlite 恢复阶梯零覆盖。subagent-core 的门控轨与 zcode-session-source 的 node 轨不在 CI 常驻 job 内，按改动范围本地触发（run 命令见 e2e-map 对应规则 E2E-INTEG-27..34 / 41-42）。某包新增集成组时，同 commit 给覆盖它的 test job 补同一 env。
+
+### 新写测试判据（单测层只测逻辑、高负载下也极快）
+
+> 原则（2026-10 用户裁决）：单元测试只测逻辑正确性，不保证性能；单测应尽量简单、耗时应极短；哪怕高负载下一个 case 也应极快。任何新用例落单测层前先过三档判据；过不了的按四通道处置。本节是判据的长期权威落点；写法级反例与整治史 git 可追溯，不再另设清单文档。
+
+**三档判据**：
+
+| 档 | 形态 | 判定 |
+|----|------|------|
+| ① | 同步逻辑（函数进、返回值出） | 合格——单测常态 |
+| ② | 异步但有确定性完成信号（promise / 回调 / 事件） | 合格——await 该信号等价于同步语义 |
+| ③ | 跨进程 / OS / 渲染调度的事实（进程存亡、磁盘吞吐、watcher 触发次数、模块图装载成本） | 不合格——没有「完成」信号可等，只能设窗口观测，窗口在任何负载下都可能被拉长。改写法变回纯逻辑，或移出单测层 |
+
+**极端形态类型码**（自查速查；下述机器防线兜其中可静态判定者）：`a` 真实批量 fs 操作 · `b` 真子进程 spawn · `c` 显式长等待 ≥1000ms · `d` 大数据量（≥1000 条 / ≥100KB fixture）· `e` 测试内跑编译器 / 外部命令 · `f` 显式 timeout ≥5000ms · `g` 性能断言（时延 / 吞吐水位）· `h` 重组件 mount（首条秒级以上）· `i` 真实时间窗口 / 触发次数断言。
+
+**四条处置通道**：
+
+| 通道 | 手法 | 适用 |
+|------|------|------|
+| 确定性同步化 | 时间参数注入 0 + mock 探测；fake timers 驱动确定性触发；计数断言改状态量断言；进程 / fs 换注入桩 | `i` 类与可桩化的 `b`/`c` 类——保留逻辑覆盖、负载无关 |
+| 缩数据量 | fixture 减半；上限参数化注入（如 5000→50 后用 49-51 覆盖同边界族）；重组件首载移文件级 beforeAll 预热共享 | `d`/`h` 类 |
+| 移 CI-only / 拆分层 | 真进程 / 真 IO 用例挂 [集成测试门控](#集成测试门控约定taiji_test_integration)（用例级 skipIf 或文件级集成轨）；性能水位断言移门控轨 | 第③档全部 |
+| 删冗余 | 与既有机器检查 / pre-commit 同源重复的用例删除（先核实承载方并留证据） | `e` 类整包 lint / tsc 冒烟等 |
+
+**反模式**：抬 timeout / 抬阈值换绿灯是掩盖问题不是解法——预算膨胀是负载症状的止痛药，发现即修根因（确定性化或挂门控）；`vi.waitFor` 真实轮询、自制 sleep 轮询是调度时序未确定的症状，改确定性 flush（微任务清空是事件循环构造性保证，参照「异步等待写法」节）。
+
+**机器防线**（新增测试的极端形态在提交与 CI 两级被拦，判断不留给人）：
+- pre-commit `.githooks/check-test-extremes.mjs`：staged 测试文件命中「真子进程调用但未挂门控 / 显式 timeout ≥5s / waitFor 显式 timeout ≥1s / performance.now 断言」任一信号即红；合法例外（锁语义需真实 pid 判定、检查器黑盒自测等）登记在该脚本的 EXEMPT 表，逐条附理由。
+- CI 慢用例门禁 `scripts/check-slow-tests.mjs`：各 test job 在测试步骤后解析 junit（`test-results/vitest-junit.xml` 每次运行自动落盘），默认轨任一用例 >2s 即红——e2e-map `E2E-INTEG-*` 规则登记的门控资产文件豁免（其耗时属集成轨语义）。本地对账入口：`node scripts/check-slow-tests.mjs`（扫当前已落盘的全部 junit）。
+
+**派发纪律**：向 subagent 派发涉及写测试的任务时，提示词必须附带本节三档判据与门控写法要点（或直接指路本节），防新用例把极端形态带回单测层——项目 AGENTS.md 测试节已登记此要求。
 
 ## 3. 三视角模型 + 渲染 gate DoD [HISTORICAL — 2026-06-27「新建任务」事故]
 

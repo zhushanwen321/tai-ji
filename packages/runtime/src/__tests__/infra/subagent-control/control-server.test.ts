@@ -1,7 +1,7 @@
 /**
  * subagent control server 协议与治理编排单测。
  *
- * 分层（判据三档，docs/todo/test-single-layer-cleanup.md）：
+ * 分层（判据三档，docs/TEST-STRATEGY.md「新写测试判据」节）：
  * - 默认组（本文件主体）：引擎侧换成进程内桩 fake-engine.ts（spawn 注入），控制面全部
  *   经 await 帧/事件收尾——第 ② 档「异步但有确定性完成信号」，与负载无关。覆盖协议状态机
  *   （hello/engine_open 失败面/幂等/通道上限）、帧双向与 UTF-8 跨 chunk、帧超限归因、

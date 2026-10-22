@@ -1169,13 +1169,15 @@
     },
     {
       "id": "E2E-PIPE-01",
-      "summary": "review-pipeline 工程门脚本轨：quality-gates（typecheck 三处 + coverage/metrics 聚合 + 盲区判定）/ changeset-check（check_changeset 唯一实装）/ cross-branch-overlap（兄弟线 diff 交集）单测锁 + pr-pre-merge 一体化脚本 + skill-data-dir（gate 产物目录解析单一出口）",
+      "summary": "review-pipeline 工程门脚本轨：quality-gates（typecheck 三处 + coverage/metrics 聚合 + 盲区判定）/ changeset-check（check_changeset 唯一实装）/ cross-branch-overlap（兄弟线 diff 交集）单测锁 + pr-pre-merge 一体化脚本 + skill-data-dir（gate 产物目录解析单一出口）；单测层极端形态静态检查 + CI 慢用例门禁自测",
       "scope": [
         "scripts/quality-gates.mjs",
         "scripts/changeset-check.mjs",
         "scripts/cross-branch-overlap.mjs",
         "scripts/pr-pre-merge.sh",
-        "scripts/skill-data-dir.mjs"
+        "scripts/skill-data-dir.mjs",
+        "scripts/check-slow-tests.mjs",
+        ".githooks/check-test-extremes.mjs"
       ],
       "layer": "L1",
       "assets": [
@@ -1210,6 +1212,10 @@
         {
           "kind": "spec",
           "ref": "scripts/__tests__/cross-branch-overlap.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-test-extremes.test.mjs"
         }
       ],
       "trigger": "on-diff",
@@ -3132,7 +3138,7 @@
       "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/usage-queue-commands-invalidation.test.ts",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
-      "note": "R2 态 + 文件级集成轨成员：路径登记在 packages/runtime/vitest.config.ts 的 integration project（include 登记 + main 的 exclude 同步加入，串行尾组），门控 = TAIJI_TEST_INTEGRATION（SSOT = test-guard/integration-gate.ts），本地不设 env 时组内用例经 describe.skipIf 跳过、CI test-runtime job 设 env=1 真跑。触发条件 = scope 内 usage 实例快照与失效收敛链（session-service / replicated-state / replicated-states.config / event-adapter / pi-protocol / interfaces / ports.pi-engine）任一 diff 命中时，开发阶段空载串行跑本文件。断言本质 = 实例快照 ≡ 权威 RPC 派生视图收敛；serial=真 的理由 = spawn 真 pi 进程 + 真 extension jiti 冷编译，CPU 满载下无稳定上界（整治判据见 docs/todo/test-single-layer-cleanup.md）。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
+      "note": "R2 态 + 文件级集成轨成员：路径登记在 packages/runtime/vitest.config.ts 的 integration project（include 登记 + main 的 exclude 同步加入，串行尾组），门控 = TAIJI_TEST_INTEGRATION（SSOT = test-guard/integration-gate.ts），本地不设 env 时组内用例经 describe.skipIf 跳过、CI test-runtime job 设 env=1 真跑。触发条件 = scope 内 usage 实例快照与失效收敛链（session-service / replicated-state / replicated-states.config / event-adapter / pi-protocol / interfaces / ports.pi-engine）任一 diff 命中时，开发阶段空载串行跑本文件。断言本质 = 实例快照 ≡ 权威 RPC 派生视图收敛；serial=真 的理由 = spawn 真 pi 进程 + 真 extension jiti 冷编译，CPU 满载下无稳定上界（整治判据见 docs/TEST-STRATEGY.md「新写测试判据」节）。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
     },
     {
       "id": "E2E-INTEG-02",

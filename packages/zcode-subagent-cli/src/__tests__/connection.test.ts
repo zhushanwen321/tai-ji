@@ -6,7 +6,7 @@
 // protocol 自报忽略 / 无 jsonrpc 字段的帧收发（出站精确键集 = 对面 strict 拒未知键
 // 的镜像义务）/ env 惯例 / 关闭原语幂等。
 //
-// 分层（判据三档，docs/todo/test-single-layer-cleanup.md）：
+// 分层（判据三档，docs/TEST-STRATEGY.md「新写测试判据」节）：
 // - 默认组（本文件主体）：单次请求-应答往返，await 应答即确定性完成信号（第二档），
 //   与负载无关；「构造不 spawn」是纯负向断言（分片采样），零进程。
 // - 门禁组（TAIJI_TEST_INTEGRATION，本文件「惰性启动与惰性重建（真进程代管理）」）：
@@ -140,7 +140,7 @@ describe("惰性启动与惰性重建", () => {
 });
 
 // 真进程代管理（首次 spawn / 死后重建 / spawn 失败收割）验证的是「代码 + OS 组合
-// 行为」（判据第三档，docs/todo/test-single-layer-cleanup.md：进程存亡没有「完成」
+// 行为」（判据第三档，docs/TEST-STRATEGY.md「新写测试判据」节：进程存亡没有「完成」
 // 信号可等，观测窗口在负载下无稳定上界）——拆分层：本地默认跳过，CI 或按改动范围
 // 触发时设 TAIJI_TEST_INTEGRATION=1 真跑（门控 SSOT = test-guard/integration-gate.ts）。
 describe.skipIf(!INTEGRATION_TESTS_ENABLED)(

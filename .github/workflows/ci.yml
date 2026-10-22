@@ -177,6 +177,11 @@ jobs:
         # 不经 `--`；reporter/outputFile 以 vitest.config.ts 为准，勿在此重复声明。
         run: pnpm --filter @taiji/runtime exec vitest run --shard=${{ matrix.shard-index }}/${{ matrix.shard-total }}
 
+      - name: Slow-case gate (default track)
+        # 判据 = docs/TEST-STRATEGY.md「新写测试判据」：默认轨单用例 >2s 红；
+        # e2e-map E2E-INTEG-* 门控资产豁免（耗时属集成轨语义）
+        run: node scripts/check-slow-tests.mjs
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -229,6 +234,11 @@ jobs:
           # 登记清单 = docs/testing/e2e-map.json 的 E2E-INTEG-* 规则
           TAIJI_TEST_INTEGRATION: '1'
 
+      - name: Slow-case gate (default track)
+        # 判据 = docs/TEST-STRATEGY.md「新写测试判据」：默认轨单用例 >2s 红；
+        # e2e-map E2E-INTEG-* 门控资产豁免（耗时属集成轨语义）
+        run: node scripts/check-slow-tests.mjs
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -267,6 +277,11 @@ jobs:
           # 真进程用例（updater 真 hdiutil/DMG/bash 段）在 CI 启用；
           # 登记清单 = docs/testing/e2e-map.json 的 E2E-INTEG-* 规则
           TAIJI_TEST_INTEGRATION: '1'
+
+      - name: Slow-case gate (default track)
+        # 判据 = docs/TEST-STRATEGY.md「新写测试判据」：默认轨单用例 >2s 红；
+        # e2e-map E2E-INTEG-* 门控资产豁免（耗时属集成轨语义）
+        run: node scripts/check-slow-tests.mjs
 
   # state-machine 基础设施包（runtime/subagent-core/extension-protocol/goal 四消费方）
   # 独立 test job：包内 5 测试文件此前 CI 零执行。轻量包不并入其他 test job 的分片
@@ -330,6 +345,11 @@ jobs:
           # file-lock 跨进程 RMW、base-tool-enhance 真杀链、extension-protocol tsc）
           # 在 CI 启用；登记清单 = docs/testing/e2e-map.json 的 E2E-INTEG-* 规则
           TAIJI_TEST_INTEGRATION: '1'
+
+      - name: Slow-case gate (default track)
+        # 判据 = docs/TEST-STRATEGY.md「新写测试判据」：默认轨单用例 >2s 红；
+        # e2e-map E2E-INTEG-* 门控资产豁免（耗时属集成轨语义）
+        run: node scripts/check-slow-tests.mjs
 
       # builtin taiji 插件（resources/plugins/<name>/）单测：经根 test:resources-plugins
       # script 走 --config 指入（config root 钉在插件目录，cwd 无关），目标非空由

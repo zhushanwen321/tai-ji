@@ -1,7 +1,7 @@
 /**
  * plugin 宿主（PluginHost / PluginHostProcess）in-process 注入桩。
  *
- * 背景（2026-10-22 单测层整治，判据与处置通道见 docs/todo/test-single-layer-cleanup.md）：
+ * 背景（2026-10-22 单测层整治，判据与处置通道见 docs/TEST-STRATEGY.md「新写测试判据」节）：
  * plugin 宿主族的单测原形态 fork 真实子进程 / 起真实 Worker 线程（判据 b+f 类）——进程
  * 启动与退出事件传播没有「完成」信号可等，CPU 满载下窗口无稳定上界，不满足单测层
  * 「只测逻辑、高负载下也极快」的定位。本 helper 把进程/线程边界换成同进程注入桩：

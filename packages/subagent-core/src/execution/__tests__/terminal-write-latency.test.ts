@@ -1,7 +1,7 @@
 // src/execution/__tests__/terminal-write-latency.test.ts
 //
 // [H4 / D2 / 待验证检查点①] markFinalized 终态写面——两条轨道（单测层极端测试
-// 整治第二波拆分层，判据见 docs/todo/test-single-layer-cleanup.md）：
+// 整治第二波拆分层，判据见 docs/TEST-STRATEGY.md「新写测试判据」节）：
 //
 //   1. 单测轨（默认）：终态写面的**逻辑断言**——「双写发生且 persisted=true」。
 //      现行写面（.state 收条已退场，见 record-store.ts 意图原语表 markFinalized 行）：

@@ -14,7 +14,7 @@
  *    structuredClone 整表对照——纯度断言对象是输入 entry 而非容器）；
  * 4. 长序列形态：500 条无 id entry 的 feed 正确性 + `e<N>` 确定性 id 全程唯一 + 0/1/2
  *    边界微用例（结构验证，不计时——性能画像归基准工具；数据量按「逻辑等价最小规模」
- *    缩档，判据见 docs/todo/test-single-layer-cleanup.md）。
+ *    缩档，判据见 docs/TEST-STRATEGY.md「新写测试判据」节）。
  *
  * 附带锁定活容器约束的读口义务：snapshot() 是低频浅拷贝（快照不随后续 feed 漂移），
  * `state` 引用恒定、内容随 feed 累积（跨帧持有其容器引用 = 观察到后续变更，属契约外用法）。

@@ -16,7 +16,7 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
 //
 // - **unit**：SLOW_SQLITE_TESTS 登记文件外的全部测试，默认满并行 + vitest 默认 testTimeout
 //   （5s）——单测层定位是「只测逻辑、高负载下也极快」（判据见
-//   docs/todo/test-single-layer-cleanup.md），默认轨不放宽预算。
+//   docs/TEST-STRATEGY.md「新写测试判据」节），默认轨不放宽预算。
 // - **slow-sqlite**：真实 sqlite I/O 慢文件（WAL 恢复阶梯 / 错误契约，单条 1.5-2.4s，
 //   插桩 + 全仓并行负载下实测最长 ~11s），串行尾组隔离 + 组级 testTimeout 30s；组内
 //   用例经 TAIJI_TEST_INTEGRATION 门控（SSOT = test-guard/integration-gate.ts）本地默认

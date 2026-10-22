@@ -22,7 +22,7 @@ const TSC_BIN = require.resolve('typescript/bin/tsc')
  *
  * 验证：
  * 1. tsc --noEmit 编译通过——挂集成门控（TAIJI_TEST_INTEGRATION）：整包编译属
- *    「测试内跑编译器」（整治判据 e 类，docs/todo/test-single-layer-cleanup.md），
+ *    「测试内跑编译器」（整治判据 e 类，docs/TEST-STRATEGY.md「新写测试判据」节），
  *    且本包无其他机器承载（`extensions:typecheck` 只覆盖 extensions/ 目录、
  *    CI typecheck job 无本包步骤），删除会失去唯一类型门禁，故保留但本地默认跳过
  * 2. index.ts 导出 SESSION_MANAGER_MARKER（纯逻辑，默认轨常驻）

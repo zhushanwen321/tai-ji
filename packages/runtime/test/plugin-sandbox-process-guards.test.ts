@@ -8,7 +8,7 @@
  *
  * 回归保护目标：未来 sandbox 重构若删除/弱化 override（如「清理死代码」），本测试拦截。
  *
- * 层级归属（docs/todo/test-single-layer-cleanup.md 判据三档）：隔离进程本身即测试目的
+ * 层级归属（docs/TEST-STRATEGY.md「新写测试判据」节 判据三档）：隔离进程本身即测试目的
  * （真实 fork + tsx CJS hook 注册链属「代码 + OS 组合行为」，无确定性完成信号可等），
  * 故整组经集成测试门控（TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts）
  * 移出默认单测轨——本地默认跳过，CI 或按改动范围触发时真跑。

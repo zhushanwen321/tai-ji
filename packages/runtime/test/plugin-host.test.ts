@@ -5,7 +5,7 @@
  * - trusted Worker 线程加载 fixtures/mock-bootstrap.cjs（经 workerBootstrapOverride 注入，不再写 src 目录）
  * - sandbox fork 子进程加载 fixtures/plugin-bootstrap-process.mock.cjs（经 bootstrapPathOverride 注入）
  *
- * 2026-10-22 单测层整治（判据三档与处置通道见 docs/todo/test-single-layer-cleanup.md）：
+ * 2026-10-22 单测层整治（判据三档与处置通道见 docs/TEST-STRATEGY.md「新写测试判据」节）：
  * 原形态 fork 真子进程 + 起真 Worker 线程（b+f 类），describe 30s 预算 + vi.waitFor 2s×2
  * ——进程/线程启动与退出事件传播没有确定性完成信号，CPU 满载下无稳定上界。现把进程/线程
  * 边界换成注入桩（test/helpers/plugin-host-inproc-stubs.ts，消息协议逐条对齐上述

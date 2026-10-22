@@ -39,7 +39,7 @@
  * 测试门控 TAIJI_TEST_INTEGRATION（本地默认跳过，CI 与按改动范围触发时真跑；SSOT =
  * test-guard/integration-gate.ts）——整文件为门控用例，已登记 packages/runtime
  * vitest.config.ts integration project（串行尾组），本地不设 env 时 describe.skipIf
- * 跳过（整治判据见 docs/todo/test-single-layer-cleanup.md）。
+ * 跳过（整治判据见 docs/TEST-STRATEGY.md「新写测试判据」节）。
  * [pi-bump 触发] /skill: 展开格式是 pi 源码行为，bump 时建议真实轨重放一次（e2e-map
  * E2E-INTEG-09 登记；跑时须带 TAIJI_TEST_INTEGRATION=1）。
  *

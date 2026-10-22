@@ -31,7 +31,7 @@
  * faux/faux-1-reasoning，档位 ⊇ {off, low} 确定性成立，摆脱宿主 models.json 依赖），
  * 断言语义与翻轨前一致。门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（本地默认跳过，CI
  * 与按改动范围触发时真跑；SSOT = test-guard/integration-gate.ts）——spawn 真 pi 的
- * 协议契约锁定属「代码 + OS 组合行为」（整治判据见 docs/todo/test-single-layer-cleanup.md）。
+ * 协议契约锁定属「代码 + OS 组合行为」（整治判据见 docs/TEST-STRATEGY.md「新写测试判据」节）。
  * **pi bump 时需真实轨重放一次**（本文件断言的 RPC reply 形状/事件范围/D5 负向断言是对
  * pi wire 协议的契约锁定；接线点 scripts/check-version-bump.sh 跑本文件须带
  * TAIJI_TEST_INTEGRATION=1，e2e-map 侧由 E2E-INTEG 规则承接）。

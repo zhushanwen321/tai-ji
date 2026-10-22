@@ -247,7 +247,7 @@ export interface SweepStalePidfilesOptions {
   killEngine?: (enginePid: number) => void;
   // ── 探测原语注入（缺省 = 本文件真实实现；单测注入确定性桩，消除真进程依赖——
   //    探测对象是「pid 存活 / cmdline / OS 启动时间」的进程事实，属单测层判据③，
-  //    见 docs/todo/test-single-layer-cleanup.md）──
+  //    见 docs/TEST-STRATEGY.md「新写测试判据」节）──
   /** pid 三态存活探测注入（缺省 probePidAliveness）。 */
   probeAliveness?: (pid: number) => boolean | undefined;
   /** cmdline 读取注入（缺省 ps -o command=）。 */
