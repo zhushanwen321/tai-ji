@@ -53,8 +53,9 @@ export async function run(ctx) {
   const uncovered = []
   const gotchas = [
     'session.delete 现行语义 = 归档域真删（ADR-0141 删除链）：断言 = 列表消失 + ext-sessions/<sid>/ 树消失双证据（旧「彻底删除」弱锚已废）',
+    'archive 的逆操作 = session.unarchive（解压回原路径）；session.restore 是「恢复崩溃前的活跃会话」，对归档会话报 SESSION_NOT_FOUND「无已保存内容」——两个词别混',
     'archive/restore/delete 的 reply 与 request 同名（protocol.ts 同名配对），protocol.call 不传 replyType 即正确',
-    'session.list 对未落盘会话不可见（API-CONTRACT L3）：本剧本的管理操作不需要消息落盘，列表断言只针对「创建成功」的会话',
+    'pi 会话 JSONL 延迟写入（关键规则 #6）与 archive 的耦合：未发过消息的会话没有 jsonl 文件，archive 搬移报 archive_io_error——归档/删除目标必须先发一轮消息落盘',
   ]
   const fs = await import('node:fs')
   const path = await import('node:path')
@@ -82,6 +83,16 @@ export async function run(ctx) {
     expected: 'label 相同 / id 不同',
     actual: `label=${a?.label}/${d?.label} id 异=${a?.id !== d?.id}`,
   })
+  // pi 会话 JSONL 延迟写入（关键规则 #6）：未发过消息的会话没有文件，archive 的搬移会
+  // ENOENT（archive_io_error）——归档/删除目标先各发一轮落盘（faux 队列 per-session 独立，1 步够）
+  for (const [name, sid] of [['A', a.id], ['B', b.id]]) {
+    await protocol.subscribe(sid)
+    const since = protocol.events.length
+    await protocol.send(sid, `落盘消息（${name}）`)
+    await protocol.waitTurnEnd(sid, { since, timeoutMs: 180_000 })
+  }
+  ev.step({ step: 'chat.send.persist', channel: 'B', exitCode: 0, stats: { a: a.id, b: b.id } })
+
   const list0 = await protocol.call('config.sessions', {})
   ev.assert('config.sessions 列出全部 4 个', sessionIds(list0).length >= 4, {
     channel: 'B',
@@ -98,29 +109,61 @@ export async function run(ctx) {
     expected: `无 ${a.id}`,
     actual: `count=${sessionIds(list1).length}`,
   })
+  // 归档落定是异步的（ledger staging→archived）：条件轮询 archives 出现 A
   let archives = []
-  try {
-    const arc = await protocol.call('config.archives', {})
-    archives = arc.groups ? arc.groups.flatMap((g) => g.sessions ?? []).map((s) => s.id) : (arc.sessions ?? []).map((s) => s.id)
-  } catch (e) {
-    ev.attach('config-archives-error', String(e?.message ?? e).slice(0, 300))
+  {
+    const deadline = Date.now() + 30_000
+    while (Date.now() < deadline) {
+      const arc = await protocol.call('config.archives', {})
+      archives = (arc.archives ?? []).map((s) => s.sessionId ?? s.id).filter(Boolean)
+      if (archives.includes(a.id)) break
+      await new Promise((r) => setTimeout(r, 500))
+    }
   }
   ev.assert('archive 后 config.archives 含 A', archives.includes(a.id), {
     channel: 'B',
     expected: a.id,
     actual: `count=${archives.length}`,
   })
-  ev.step({ step: 'session.archive', channel: 'B', exitCode: 0, stats: { archives } })
+  ev.step({ step: 'session.archive', channel: 'B', exitCode: archives.includes(a.id) ? 0 : 1, stats: { archives } })
 
   // ── restore A ───────────────────────────────────────────────
-  await protocol.call('session.restore', { sessionId: a.id }, { timeoutMs: 60_000 })
+  // restore 前置 = 归档文件实体落定（ledger 条目先出现、文件搬移后到；restore 读的是
+  // 归档目录里的 jsonl 实体，只看 ledger 会 SESSION_NOT_FOUND「无已保存内容」）
+  {
+    const archiveRoot = path.join(dataDir, 'agent', 'archive')
+    let fileSeen = false
+    const deadline = Date.now() + 30_000
+    const findArchivedFile = (root, depth = 0) => {
+      if (!fs.existsSync(root) || depth > 4) return false
+      for (const e of fs.readdirSync(root, { withFileTypes: true })) {
+        if (e.isDirectory()) {
+          if (findArchivedFile(path.join(root, e.name), depth + 1)) return true
+        } else if (e.name.includes(a.id)) return true
+      }
+      return false
+    }
+    while (Date.now() < deadline) {
+      fileSeen = findArchivedFile(archiveRoot)
+      if (fileSeen) break
+      await new Promise((r) => setTimeout(r, 500))
+    }
+    ev.assert('C: 归档文件实体落定（agent/archive 树含 A 的 jsonl）', fileSeen, {
+      channel: 'C',
+      expected: `${archiveRoot} 下含 ${a.id} 的文件`,
+      actual: `hit=${fileSeen}`,
+    })
+  }
+  // 归档的逆操作 = session.unarchive（解压回原路径）；session.restore 是「恢复崩溃前的
+  // 活跃会话」——两者别混（restore 对归档会话报 SESSION_NOT_FOUND「无已保存内容」）
+  await protocol.call('session.unarchive', { sessionId: a.id }, { timeoutMs: 60_000 })
   const list2 = await protocol.call('config.sessions', {})
-  ev.assert('restore 后 A 回到列表', sessionIds(list2).includes(a.id), {
+  ev.assert('unarchive 后 A 回到列表', sessionIds(list2).includes(a.id), {
     channel: 'B',
     expected: `含 ${a.id}`,
     actual: `count=${sessionIds(list2).length}`,
   })
-  ev.step({ step: 'session.restore', channel: 'B', exitCode: 0, stats: {} })
+  ev.step({ step: 'session.unarchive', channel: 'B', exitCode: 0, stats: {} })
 
   // ── delete B（列表 + 树双证据） ─────────────────────────────
   const treeB = path.join(dataDir, 'ext-sessions', String(b.id))

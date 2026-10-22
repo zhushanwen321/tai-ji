@@ -118,7 +118,8 @@ export async function run(ctx) {
   ev.step({ step: 'env.dispose.1', channel: 'C', exitCode: 0, stats: { dataDirKept: fs.existsSync(dataDir) } })
 
   // ── 段 3：重启应用 ─────────────────────────────────────────
-  const inst2 = createInstance({ repo, name: instanceName, dataDir, faux, background: true })
+  // 同 dataDir 二次预置需 force（seed-faux 遇已存在的 faux-responses.json 拒绝覆盖）
+  const inst2 = createInstance({ repo, name: instanceName, dataDir, faux: { ...faux, force: true }, background: true })
   await inst2.launch()
   await inst2.waitReady({ timeoutMs: 180_000 })
   const proto2 = await inst2.protocol()

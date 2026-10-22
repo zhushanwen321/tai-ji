@@ -50,6 +50,7 @@ export async function run(ctx) {
   const uncovered = []
   const gotchas = [
     '夹具每题 options 必须 ≥2（ask_user schema minItems:2）；选项 testid = `form-option-<label 原文>`（optValue 恒等，ChoiceQuestion.vue）',
+    'overlay 依附激活会话：协议建会话后必须点侧栏行激活（landing/empty 不可达，Panel.vue ui-presentation-protocol D5）',
     '提交后 pi 继续消费队列 step2；若剧本在提交前 waitTurnEnd 会等到第一个 turn 的工具暂停而非终态',
   ]
 
@@ -59,6 +60,8 @@ export async function run(ctx) {
   if (!sid) throw new Error('session.create 未返回 sessionId')
   await protocol.subscribe(sid)
 
+  // overlay 依附激活会话（landing/empty 不可达，Panel.vue D5 注释）：先点侧栏行激活
+  await ui.click('css=.session-item', { timeoutMs: 30_000 })
   const since = protocol.events.length
   await protocol.send(sid, '问两个问题再继续')
   // 表单浮层出现（工具调用轮不结束 turn——waitTurnEnd 会挂到提交后，此处直接等 UI）
