@@ -1,10 +1,17 @@
-// connection.test.ts —— R2 连接层测试：全部跑 __fixtures__/fake-appserver.mjs 子进程
+// connection.test.ts —— R2 连接层测试：默认组跑 __fixtures__/fake-appserver.mjs 子进程
 // （移植自 zsw 仓 84b63a0^ fake-server 测试模式，vitest 形态改造），绝不 spawn 真
 // zcode.cjs。覆盖验收条款：四帧型分发逐型 / 请求-应答 id 关联（并发不串）/
 // requestRuntimePreferences 常量应答逐字段 / 未知反向回空 result / onClose 全部在途
-// reject（含 stderr 尾 400 截断）/ 惰性启动与进程死后重建 / stderr tee 落盘 /
+// reject（含 stderr 尾 400 截断）/ stderr tee 落盘 /
 // protocol 自报忽略 / 无 jsonrpc 字段的帧收发（出站精确键集 = 对面 strict 拒未知键
 // 的镜像义务）/ env 惯例 / 关闭原语幂等。
+//
+// 分层（判据三档，docs/todo/test-single-layer-cleanup.md）：
+// - 默认组（本文件主体）：单次请求-应答往返，await 应答即确定性完成信号（第二档），
+//   与负载无关；「构造不 spawn」是纯负向断言（分片采样），零进程。
+// - 门禁组（TAIJI_TEST_INTEGRATION，本文件「惰性启动与惰性重建（真进程代管理）」）：
+//   首次 spawn / 进程死后重建 / spawn 失败收割——进程存亡是「代码 + OS 组合行为」
+//   （第三档，无完成信号可等），本地默认跳过、CI 或按改动范围触发时真跑。
 
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,6 +20,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "./integration-gate.local.ts";
 import { ZCODE_APPSERVER_STDERR_TAIL_CHARS } from "../constants.ts";
 import {
   AppServerConnection,
@@ -121,7 +129,7 @@ describe("惰性启动与惰性重建", () => {
     expect(conn.pid).toBeUndefined();
     // 负向断言（验证「未发生」）无完成信号可等——用分片采样替换单点 sleep(80)：
     // 每片让出事件循环后立即断言，构造若被误触发 spawn 会在任一片被抓住
-    //（总采样窗口量级与原 80ms 相当；CPU 忙时负向条件只会更稳，无假红风险）
+    // （总采样窗口量级与原 80ms 相当；CPU 忙时负向条件只会更稳，无假红风险）
     for (let slice = 0; slice < 8; slice += 1) {
       await sleep(10);
       expect(existsSync(stateFile), `第 ${slice} 片发现 stateFile——构造路径被误触发 spawn`).toBe(false);
@@ -129,45 +137,54 @@ describe("惰性启动与惰性重建", () => {
       expect(conn.alive).toBe(false);
     }
   });
-
-  it("首次请求才 spawn：boot 流水出现，argv 形态 = `app-server --cwd <dir>`（D10 基线，不带 --stdio/--surface）", async () => {
-    const { conn, stateFile, cwd } = makeConnection();
-    const r = await conn.request("test/echo", { marker: "first" });
-    expect(r).toEqual({ marker: "first" });
-    const boots = readState(stateFile).filter((e) => e.ev === "boot");
-    expect(boots).toHaveLength(1);
-    expect(boots[0].argv).toEqual(["app-server", "--cwd", cwd]);
-    expect(conn.pid).toBeGreaterThan(0);
-    expect(conn.alive).toBe(true);
-  }, 10_000);
-
-  it("进程死后下次请求自动重建（与惰性启动同路径）：boot 两次、pid 变化", async () => {
-    const { conn, stateFile } = makeConnection();
-    await conn.request("test/echo", { n: 1 });
-    const pidBefore = conn.pid;
-    await expect(conn.request("test/suicide")).rejects.toThrow(/app-server/);
-    expect(await waitFor(() => !conn.alive)).toBe(true);
-    const r2 = await conn.request("test/echo", { n: 2 });
-    expect(r2).toEqual({ n: 2 });
-    const boots = readState(stateFile).filter((e) => e.ev === "boot");
-    expect(boots).toHaveLength(2);
-    expect(boots[1].pid).not.toBe(boots[0].pid);
-    expect(conn.pid).not.toBe(pidBefore);
-  }, 15_000);
-
-  it("spawn 失败（nodeBin ENOENT）走同一收割路径：请求 reject 带 spawn 失败语境，连接不悬挂", async () => {
-    const conn = new AppServerConnection({
-      cliPath: FAKE_CLI,
-      cwd: TMP,
-      nodeBin: join(TMP, "no-such-node-bin"),
-      env: { PATH: process.env.PATH ?? "" },
-      stderrLogPath: join(TMP, "enoent.log"),
-    });
-    CONNECTIONS.push(conn);
-    await expect(conn.request("test/echo", {})).rejects.toThrow(/spawn 失败/);
-    expect(await waitFor(() => !conn.alive)).toBe(true);
-  }, 10_000);
 });
+
+// 真进程代管理（首次 spawn / 死后重建 / spawn 失败收割）验证的是「代码 + OS 组合
+// 行为」（判据第三档，docs/todo/test-single-layer-cleanup.md：进程存亡没有「完成」
+// 信号可等，观测窗口在负载下无稳定上界）——拆分层：本地默认跳过，CI 或按改动范围
+// 触发时设 TAIJI_TEST_INTEGRATION=1 真跑（门控 SSOT = test-guard/integration-gate.ts）。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `惰性启动与惰性重建（真进程代管理：首次 spawn / 死后重建 / spawn 失败收割）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
+    it("首次请求才 spawn：boot 流水出现，argv 形态 = `app-server --cwd <dir>`（D10 基线，不带 --stdio/--surface）", async () => {
+      const { conn, stateFile, cwd } = makeConnection();
+      const r = await conn.request("test/echo", { marker: "first" });
+      expect(r).toEqual({ marker: "first" });
+      const boots = readState(stateFile).filter((e) => e.ev === "boot");
+      expect(boots).toHaveLength(1);
+      expect(boots[0].argv).toEqual(["app-server", "--cwd", cwd]);
+      expect(conn.pid).toBeGreaterThan(0);
+      expect(conn.alive).toBe(true);
+    }, 10_000);
+
+    it("进程死后下次请求自动重建（与惰性启动同路径）：boot 两次、pid 变化", async () => {
+      const { conn, stateFile } = makeConnection();
+      await conn.request("test/echo", { n: 1 });
+      const pidBefore = conn.pid;
+      await expect(conn.request("test/suicide")).rejects.toThrow(/app-server/);
+      expect(await waitFor(() => !conn.alive)).toBe(true);
+      const r2 = await conn.request("test/echo", { n: 2 });
+      expect(r2).toEqual({ n: 2 });
+      const boots = readState(stateFile).filter((e) => e.ev === "boot");
+      expect(boots).toHaveLength(2);
+      expect(boots[1].pid).not.toBe(boots[0].pid);
+      expect(conn.pid).not.toBe(pidBefore);
+    }, 15_000);
+
+    it("spawn 失败（nodeBin ENOENT）走同一收割路径：请求 reject 带 spawn 失败语境，连接不悬挂", async () => {
+      const conn = new AppServerConnection({
+        cliPath: FAKE_CLI,
+        cwd: TMP,
+        nodeBin: join(TMP, "no-such-node-bin"),
+        env: { PATH: process.env.PATH ?? "" },
+        stderrLogPath: join(TMP, "enoent.log"),
+      });
+      CONNECTIONS.push(conn);
+      await expect(conn.request("test/echo", {})).rejects.toThrow(/spawn 失败/);
+      expect(await waitFor(() => !conn.alive)).toBe(true);
+    }, 10_000);
+  },
+);
 
 // ------------------------------------------- 四帧型分发（附录 A.1）
 
@@ -452,6 +469,18 @@ describe("关闭原语", () => {
     // 幂等：再次 shutdown 复用同一 promise，无新杀链、无新进程
     await conn.shutdown();
     expect(readState(stateFile).filter((e) => e.ev === "boot")).toHaveLength(1);
+  }, 10_000);
+
+  it("post：fire-and-forget 帧不等待应答（活连接 true；返回布尔不抛）；shutdown 后重建代复又可用", async () => {
+    // 连接层原语（dispose 编排的 close 帧「发出即算」通道）——本次整治从
+    // session-channel.test.ts 移入（该文件改按 SessionChannel 逻辑层重组）。
+    const { conn } = makeConnection();
+    expect(typeof conn.post).toBe("function");
+    expect(conn.post("session/close", { sessionId: "sess_x" })).toBe(true);
+    await conn.shutdown({ graceMs: 1_000 });
+    // 死连接：ensureStarted 重建一代（D1 重建语义）→ post 复又可用；不抛即可
+    expect(typeof conn.post("session/close", { sessionId: "sess_x" })).toBe("boolean");
+    await conn.shutdown({ graceMs: 1_000 });
   }, 10_000);
 });
 

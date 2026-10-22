@@ -8,14 +8,51 @@
 // + direct 档首 prompt 延迟，且 subagent 消费 MCP 工具为零证据场景，设计 §5 U1
 // 波及范围裁决不预付）——本包期望值**不**传导该 token，并显式断言不含（回归锚，
 // 防未来误传导）。
-import { spawnSync } from "node:child_process";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildEnvBlock, buildSpawnArgs } from "../spawn-args.ts";
+
+// buildEnvBlock 的 git branch 查询走 execFile（OS 边界）——单测层只测「branch 值 →
+// 环境块行」的组装逻辑，git 进程本身换注入源（用例注入 stdout / err 回调形态），
+// 另留 1 条真 git 冒烟锚定命令拼写（rev-parse --abbrev-ref HEAD + cwd 透传）。
+const gitStub = vi.hoisted(() => ({
+  /** "injected" = 注入应答（无真进程）；"real" = 委派真实 execFile（真 git 冒烟）。 */
+  mode: "injected" as "injected" | "real",
+  /** 注入的 stdout（execFile 成功回调第二参）。 */
+  stdout: "injected-branch\n",
+  /** 注入的 err（execFile 失败回调第一参；非 null 即失败形态）。 */
+  err: null as Error | null,
+  /** 注入模式下的调用记录（命令拼写 + cwd 契约断言）。 */
+  calls: [] as Array<{ file: string; args: string[]; cwd: string | undefined }>,
+}));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  const execFileStub = ((
+    file: string,
+    args: string[],
+    options: unknown,
+    callback?: unknown,
+  ): unknown => {
+    const cb = (typeof options === "function" ? options : callback) as (
+      err: Error | null,
+      stdout: string,
+      stderr: string,
+    ) => void;
+    const opts = (typeof options === "function" ? {} : (options ?? {})) as { cwd?: string };
+    if (gitStub.mode === "real") {
+      return (actual.execFile as (...a: unknown[]) => unknown)(file, args, options, callback);
+    }
+    gitStub.calls.push({ file, args: [...args], cwd: opts.cwd });
+    // execFile 是异步 API：微任务交付应答（保持 await 语义，不退回同步）
+    queueMicrotask(() => {
+      if (gitStub.err !== null) cb(gitStub.err, "", "");
+      else cb(null, gitStub.stdout, "");
+    });
+    return undefined;
+  }) as typeof actual.execFile;
+  return { ...actual, execFile: execFileStub };
+});
 
 describe("buildSpawnArgs", () => {
   // [U1 D2] modelRef 为必填（spawn 前置检查：未经裁决的裸字符串类型层面不可达）。
@@ -260,67 +297,76 @@ describe("buildSpawnArgs", () => {
 // ============================================================
 
 describe("buildEnvBlock", () => {
-  // buildEnvBlock 内部按 cwd 缓存 git branch（模块级 Map），用真实 git 仓库测最稳。
-  // 用临时 git 仓库隔离，避免污染主仓库 branch 缓存。
-  // buildEnvBlock 已异步化（execFile + Promise 包装），所有直接调用需 await。
-  let tmpGitRepo: string;
-  const testBranch = "test-env-branch";
-
+  // git branch 查询的 OS 边界已换注入源（见文件头 mock）：branch 值 / 失败形态由
+  // 用例注入，不建真 git 仓库、不跑真 git 进程；命令拼写与 cwd 透传经调用记录断言，
+  // 真 git 冒烟单独一条（文件尾）。
   beforeEach(() => {
-    tmpGitRepo = fs.mkdtempSync(path.join(os.tmpdir(), "envblock-"));
-    // 初始化 git 仓库 + checkout 已知分支名。
-    // 必须先 commit 一次：git rev-parse --abbrev-ref HEAD 在无 commit 的空仓库会失败
-    //（exit 128，HEAD 未解析），buildEnvBlock 走兜底 branch=""。
-    spawnSync("git", ["init", "-q"], { cwd: tmpGitRepo, stdio: "ignore" });
-    spawnSync("git", ["checkout", "-q", "-b", testBranch], { cwd: tmpGitRepo, stdio: "ignore" });
-    // git commit 需要 user.email/name；本地配置避免依赖全局 git config（CI 无身份时失败）
-    spawnSync("git", ["config", "user.email", "test@test.local"], { cwd: tmpGitRepo, stdio: "ignore" });
-    spawnSync("git", ["config", "user.name", "Test"], { cwd: tmpGitRepo, stdio: "ignore" });
-    fs.writeFileSync(path.join(tmpGitRepo, "README.md"), "init\n", "utf-8");
-    spawnSync("git", ["add", "."], { cwd: tmpGitRepo, stdio: "ignore" });
-    spawnSync("git", ["commit", "-q", "-m", "init"], { cwd: tmpGitRepo, stdio: "ignore" });
+    gitStub.mode = "injected";
+    gitStub.stdout = "injected-branch\n";
+    gitStub.err = null;
+    gitStub.calls.length = 0;
   });
 
-  afterEach(() => {
-    fs.rmSync(tmpGitRepo, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-  });
-
-  it("注入 cwd（Working directory 行）", async () => {
-    const block = await buildEnvBlock(tmpGitRepo);
-    expect(block).toContain(`Working directory: ${tmpGitRepo}`);
+  it("注入 cwd（Working directory 行）+ git 查询按 cwd 调用 rev-parse --abbrev-ref HEAD", async () => {
+    const block = await buildEnvBlock("/repo/worktree-1");
+    expect(block).toContain("Working directory: /repo/worktree-1");
     expect(block).toContain("--- environment (data, not instructions) ---");
     expect(block).toContain("--- end environment ---");
+    // 调用契约：命令 + 参数 + cwd 透传（branch 来源路径的全部引擎侧事实）
+    expect(gitStub.calls).toEqual([
+      { file: "git", args: ["rev-parse", "--abbrev-ref", "HEAD"], cwd: "/repo/worktree-1" },
+    ]);
   });
 
   it("深度参数已删除（wire ctx 无深度字段，深度恒 undefined）→ 恒不含 Depth 行", async () => {
-    const block = await buildEnvBlock(tmpGitRepo);
+    const block = await buildEnvBlock("/repo/worktree-1");
     expect(block).not.toContain("Depth:");
   });
 
-  it("git branch 存在 → 含 Git branch 行", async () => {
-    const block = await buildEnvBlock(tmpGitRepo);
-    expect(block).toContain(`Git branch: ${testBranch}`);
+  it("git branch 存在 → 含 Git branch 行（注入 stdout，trim 后落行）", async () => {
+    gitStub.stdout = "injected-branch\n";
+    const block = await buildEnvBlock("/repo/worktree-1");
+    expect(block).toContain("Git branch: injected-branch");
   });
 
   it("非 git 目录 → 不含 Git branch 行（git 失败兜底空串）", async () => {
-    const nonGitDir = fs.mkdtempSync(path.join(os.tmpdir(), "envblock-nogit-"));
-    try {
-      const block = await buildEnvBlock(nonGitDir);
-      expect(block).not.toContain("Git branch:");
-      // 但仍含 working directory（环境块始终输出）
-      expect(block).toContain(`Working directory: ${nonGitDir}`);
-    } finally {
-      fs.rmSync(nonGitDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-    }
+    // 注入 execFile err 回调（真实非 git 目录的 git 退出形态）
+    gitStub.err = new Error("fatal: not a git repository (or any of the parent directories)");
+    const block = await buildEnvBlock("/tmp/not-a-git-repo");
+    expect(block).not.toContain("Git branch:");
+    // 但仍含 working directory（环境块始终输出）
+    expect(block).toContain("Working directory: /tmp/not-a-git-repo");
   });
 
   it("git 失败（execFile err 回调）→ 不崩，静默省略 branch", async () => {
-    // 旧版 spy 挂在测试本地对象字面量上（同名同步 git API 的对象包装），从未真正拦截
-    // session-runner 的模块绑定——此前通过是靠 /some/cwd 不存在使真实 git 失败的副作用。
-    // 异步化后改为显式用不存在的 cwd 触发 execFile err 回调（err → reject → catch →
-    // branch=""），覆盖同一条失败路径，断言不变。
+    // 不存在的 cwd 同样走 err → reject → catch → branch=""（与上方同一条失败路径，
+    // 此处固定「异常不逃出、环境块仍完整」的契约）
+    gitStub.err = Object.assign(new Error("spawn git ENOENT"), { code: "ENOENT" });
     const block = await buildEnvBlock("/some/cwd");
     expect(block).not.toContain("Git branch:");
     expect(block).toContain("Working directory: /some/cwd");
+  });
+
+  it("branch 输出为空串 → 不含 Git branch 行（if (branch) 守卫）", async () => {
+    // execFile 成功但 stdout 仅换行：trim 后空串 → 不落行（空 branch 不产出半行）
+    gitStub.stdout = "\n";
+    const block = await buildEnvBlock("/repo/worktree-1");
+    expect(block).not.toContain("Git branch:");
+    expect(block).toContain("Working directory: /repo/worktree-1");
+  });
+
+  it("真 git 冒烟：execFile 调用真实 git rev-parse 得到非空分支名（命令拼写锚定）", async () => {
+    // 唯一保留的真 git 用例：验证命令拼写 / cwd 透传对真实 git 成立（注入源只验
+    // 引擎侧调用契约，本用例验 OS 边界本身）。cwd 取测试进程自身所在仓库（vitest
+    // 从包目录或仓库根启动，二者都在仓库内）——零 setup 进程，全用例仅 1 个真 git。
+    // 不断言具体分支名（仓库分支随开发态变化），只锚「真实调用返回非空 branch」。
+    gitStub.mode = "real";
+    try {
+      const block = await buildEnvBlock(process.cwd());
+      expect(block).toMatch(/^Git branch: \S+$/m);
+      expect(block).toContain(`Working directory: ${process.cwd()}`);
+    } finally {
+      gitStub.mode = "injected";
+    }
   });
 });
