@@ -217,7 +217,7 @@ LLM 通道三选一（决定能否零 token）：**faux**（主会话默认）/ 
 
 | 文件 | 功能 | 与 capability 的关系 |
 |------|------|---------------------|
-| [features/new-task.md](features/new-task.md) | 新建任务（Landing → 选目录 → 首发提交建 session） | `session.create` 的 UI 入口；参数面（`presetId`/`modelOverride`/`clientUuid` 等）见 [session.md](capabilities/session.md) |
+| [features/new-task.md](features/new-task.md) | 新建任务（Landing → 选目录 → 首发提交建 session） | `session.create` 的 UI 入口；参数清单（`presetId`/`modelOverride`/`clientUuid` 等）见 [session.md](capabilities/session.md) |
 | [features/session-management.md](features/session-management.md) | 多会话管理（列表 / 切换 / 归档 / 彻底删除 / 右键菜单） | **已知漂移**：会话行根是 `.session-item`（`session-detail-card` 是 hover 卡）；归档/彻底删除是两段确认，彻底删除在归档列表行 → 以 [session.md](capabilities/session.md) 为准 |
 | [features/chat-stream.md](features/chat-stream.md) | 对话发送与流式渲染（thinking / 工具 / 文本 / 变更集 / 中断） | 细节与失败信号见 [chat.md](capabilities/chat.md) |
 | [features/settings-provider.md](features/settings-provider.md) | 设置页 provider 管理 | 六面（provider / 系统提示词 / 预设 / MCP / 网络代理 / 主题）见 [settings.md](capabilities/settings.md) |
