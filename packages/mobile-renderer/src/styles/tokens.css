@@ -137,6 +137,12 @@
   --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.4);         /* 浮层 */
   --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.45);       /* 顶级浮层（demo 三档阴影最高档） */
   --shadow-glow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent); /* 聚焦环（跟随 accent） */
+  /* 弹层遮罩（modal/overlay 背后全场最暗层）+ 定向左投影（抽屉自右滑入的左侧落影）：
+     与桌面 style.css 阴影段同值镜像（黑遮罩亮暗族共用一值，light 块不覆盖）。共享
+     tailwind-preset 已映射 bg-scrim / shadow-drawer-left 工具类，变量缺定义时 var()
+     静默失效不报错——无消费点也须随 preset 声明面补齐 */
+  --scrim: rgba(0, 0, 0, 0.8);
+  --shadow-drawer-left: -24px 0 48px rgba(0, 0, 0, 0.4);
 
   /* ── 层级 / 组件尺寸 ──────────────────────────────────── */
   --content-max-w: min(720px, 100%); /* 内容列最大宽（settings 等收窄；窄容器自动让位满宽） */
