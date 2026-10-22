@@ -1,6 +1,6 @@
 # 单测层极端测试整治（只测逻辑、高负载极快原则）
 
-状态：第二波已完成（2026-10-22 登记；26 个整治单元 + scripts 收尾全部处置完毕，分 7 个批次 commit 落本分支。登记回写 = 本文档状态列 + `docs/testing/e2e-map.json` E2E-INTEG-01..53 + `docs/TEST-STRATEGY.md`「集成测试门控约定」）。剩余一项进行中：全量单测验收（无插桩口径，主会话执行）。第一波最小集已修复（同日；起因：merge 阶段 1 全量单测在负载波动下四轮随机红，归因结论为约 300 条「极端测试」混入单测层，用户裁决立项整治）
+状态：第二波已完成并合入 main（2026-10-22；26 个整治单元 + scripts 收尾全部处置完毕，merge commit 79546821f + main 侧收尾。登记回写 = 本文档状态列 + `docs/testing/e2e-map.json` E2E-INTEG-01..53 + `docs/TEST-STRATEGY.md`「集成测试门控约定」）。全量单测验收完成：14 个受影响包/目录带 TAIJI_SKIP_REAL_PI=1 全绿（runtime 678 文件 37.8s / renderer 502 文件 73.5s / ui 91 文件 12.1s / core 164 文件 5.5s / subagent-core 260 文件 14.8s / pi-CLI 30 文件 1.7s / zcode-CLI 20 文件 8.4s / extension-protocol 27 文件 0.8s / zcode-session-source 11 文件 0.6s / subagent-workflow 84 文件 9.4s / base-tool-enhance 16 文件 1.6s / file-lock 2 文件 0.3s / electron main 91 文件 3.7s / scripts 41 文件 2.7s），门控用例本地默认跳过属设计行为、CI 经 env=1 真跑。验收路径上发现的既有遗留（非本波引入）另登记：[check-prompt-outposts-test-drift.md](check-prompt-outposts-test-drift.md)。第一波最小集已修复（同日；起因：merge 阶段 1 全量单测在负载波动下四轮随机红，归因结论为约 300 条「极端测试」混入单测层，用户裁决立项整治）
 
 ## 背景与原则
 
