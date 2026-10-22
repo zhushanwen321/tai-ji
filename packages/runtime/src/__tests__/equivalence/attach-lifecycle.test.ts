@@ -24,9 +24,9 @@
  *   见 process-manager.ts assertPiSessionFile 注释）。
  *
  * 环境约定照抄先例（live-reload.test.ts / pi-protocol-contract.test.ts）：真实 spawn
- * `pi --mode rpc`（fixture，禁 mock 子进程）。faux LLM 轨（L2.5 翻轨）：被测语义是
+ * `pi --mode rpc`（fixture，禁 mock 子进程）。faux LLM 层（L2.5 迁组）：被测语义是
  * 附着/持久化屏障/断言行为（pi 自身机制），非模型智能——各轮 turn 响应由 fauxResponses
- * 脚本固定（marker 即脚本文本），断言语义与翻轨前一致；门控 = 集成测试门控
+ * 脚本固定（marker 即脚本文本），断言语义与迁组前一致；门控 = 集成测试门控
  * TAIJI_TEST_INTEGRATION（SSOT = test-guard/integration-gate.ts：本地默认跳过、CI 或按
  * 改动范围触发时真跑）。P1 模型恢复用例的演员替换：CLI 默认 = faux/faux-1、
  * 切换目标 = faux/faux-1-reasoning（被测语义「CLI model 恒优先于 entry 恢复」不变）。
@@ -140,7 +140,7 @@ function waitSessionHeaderFlushed(filePath: string, timeoutMs = 15_000): void {
 }
 
 async function seedSessionFile(workDir: string, fileName: string, marker: string): Promise<string> {
-  // faux 轨：种子轮回复由脚本固定（marker 即脚本文本，prompt 原文逐字落盘的断言锚不变）
+  // faux 层：种子轮回复由脚本固定（marker 即脚本文本，prompt 原文逐字落盘的断言锚不变）
   let fx = await spawnPiFixture({ fauxResponses: [{ text: marker }] })
   try {
     await fx.runTurn({ message: `Reply with exactly the word: ${marker}` }, TURN_TIMEOUT_MS)
@@ -169,7 +169,7 @@ async function seedSessionFile(workDir: string, fileName: string, marker: string
  * （afterFile − beforeTurnFileCount ↔ beforeKillMem − beforeTurnMem）口径差抵消。
  */
 async function attachAndRunTurn(targetFile: string, marker: string): Promise<{ fx: PiFixture; beforeTurnMem: SessionFileEntry[]; beforeTurnFileCount: number; beforeKill: SessionFileEntry[] }> {
-  // faux 轨同款：附着后一轮 turn 的回复 = marker（脚本固定）
+  // faux 层同款：附着后一轮 turn 的回复 = marker（脚本固定）
   const fx = await spawnPiFixture({ fauxResponses: [{ text: marker }] })
   await fx.sendCommand('switch_session', { sessionPath: targetFile }, SWITCH_TIMEOUT_MS)
   // attach 断言（I1）：真实正式文件天然通过——本行同时是 C3「withEphemeralPi/附着天然通过」
@@ -243,7 +243,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
         expect(afterKill.length).toBeGreaterThan(seedCount)
 
         // ── 阶段 5：重附着等价——重新 spawn 附着同一文件，状态一致 ──
-        // （faux 轨：重附着无 LLM turn，空队列即意外 turn 的 fail-fast）
+        // （faux 层：重附着无 LLM turn，空队列即意外 turn 的 fail-fast）
         let fx2: PiFixture | null = await spawnPiFixture({ fauxResponses: [] })
         fixture = fx2
         try {
@@ -319,7 +319,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
         // fork 继承的源历史在文件内（树过滤保留）
         expect(afterKill.some((e) => e.type === 'message' && e.message?.role === 'user' && messageText(e).includes('attach-fork-seed'))).toBe(true)
 
-        // ── 阶段 6：重附着等价 ──（faux 轨同款：空队列）
+        // ── 阶段 6：重附着等价 ──（faux 层同款：空队列）
         let fx2: PiFixture | null = await spawnPiFixture({ fauxResponses: [] })
         fixture = fx2
         try {
@@ -446,7 +446,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
       // inheritSessionModel（不拼 --model）。本用例在真实 pi 上锁定两侧行为：
       // 无 CLI model 附着 → entry 终态生效；带 CLI model 附着 → CLI 压过 entry
       //（后者同时是差异归因对照：证明恢复差异源于 CLI flag 本身，而非附着其他副作用）。
-      // faux 轨演员（L2.5 翻轨）：CLI 默认 = faux/faux-1（spawnPiFixture faux 通道强制），
+      // faux 层演员（L2.5 迁组）：CLI 默认 = faux/faux-1（spawnPiFixture faux 通道强制），
       // 切换目标 = 同 provider 兄弟 faux/faux-1-reasoning（真实模型的
       // 确定性等价演员；被测优先级语义不变）。set_model 参数 = 裸 provider + 裸 modelId
       //（broadcast-getstate.test.ts 同款口径）
@@ -482,7 +482,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
         }
 
         // ── 阶段 2：无 CLI --model 附着（= P1 修复后的生产 spawn 形态）→ entry 终态恢复 ──
-        // （faux 轨 model:null = 不拼 --model——空 agentDir 下 pi 以 model=unknown 占位
+        // （faux 层 model:null = 不拼 --model——空 agentDir 下 pi 以 model=unknown 占位
         // 冷启动，附着后由 model_change entry 恢复真值；全程无 LLM turn，队列空）
         //
         // 满载 flake 加固 [HISTORICAL]（coverage-gate 满载实测 `expected 'unknown' to be
@@ -525,7 +525,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 
         // ── 阶段 3：对照（bug 形态锁定）——带 CLI --model 附着同一文件 → CLI 压过 entry ──
         // pi 优先级语义的行为级锚：未来 pi 改变「CLI model 恒优先」语义时此处先红，
-        // 提示重验 inheritSessionModel 的前提。faux 轨默认 CLI model = faux/faux-1。
+        // 提示重验 inheritSessionModel 的前提。faux 层默认 CLI model = faux/faux-1。
         let fx3: PiFixture | null = await spawnPiFixture({ fauxResponses: [] })
         fixture = fx3
         try {

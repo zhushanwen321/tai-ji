@@ -1,6 +1,6 @@
 /**
  * G5 faux-pi 用例：思考等级生效回执端到端保险丝（pi-boundary-reliability D7-G5 / U7a，
- * L2.5 faux 轨翻轨：真 pi 进程 + 真 extension 加载 + 假 LLM）。
+ * L2.5 faux 层迁组：真 pi 进程 + 真 extension 加载 + 假 LLM）。
  *
  * 验收断言（设计 §3.3 D7 表 G5）：
  * - 真实 pi 下 reasoning:false 模型 set 'high' → runtime 回执 = get_state 实值 = 'off'；
@@ -15,7 +15,7 @@
  * 代码形态/同源函数行为；本文件起真实 pi 子进程验证 runtime 生产链路在真实钳制下的回执真值
  * （PS-02/PS-12 的运行时实证）。
  *
- * faux 轨装配（原真实 LLM 通道翻轨，断言语义不变）：全程无 LLM turn（set/get 皆本地 RPC），
+ * faux 层装配（原真实 LLM 通道迁组，断言语义不变）：全程无 LLM turn（set/get 皆本地 RPC），
  * 演员由 faux provider 双模型承担（faux-llm-ext 注册，见 fixtures/faux-llm-ext.ts 文件头）：
  * - faux/faux-1（reasoning:false）= 钳制用例演员（getSupportedThinkingLevels 恒 ['off']）；
  * - faux/faux-1-reasoning（reasoning:true，无 thinkingLevelMap）= 正常档位用例演员
@@ -27,7 +27,7 @@
  * spawnPiFixture faux 通道的临时 agentDir，dispose 删除，不污染 ~/.pi/agent。
  *
  * 运行：TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/thinking-level-effective-e2e.test.ts（不设 env 时本地默认跳过）
- * 登记：docs/testing/e2e-map.json E2E-INTEG-08（集成门控轨，R2 按改动范围触发）；文件级集成轨成员登记在 packages/runtime/vitest.config.ts 的 INTEGRATION_TESTS
+ * 登记：docs/testing/e2e-map.json E2E-INTEG-08（集成门控组，R2 按改动范围触发）；文件级集成组成员登记在 packages/runtime/vitest.config.ts 的 INTEGRATION_TESTS
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { SessionService } from '../../services/session/session-service.js'

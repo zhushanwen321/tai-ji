@@ -28,7 +28,7 @@ afterEach(() => {
  * <slug>/plan.md（slug 目录嵌套）——从 planFilePath 逆推项目级源曾因层级差致
  * 注入段扫浅层 .agents/plans（几乎恒不存在）→ 项目级模板
  * 投放（G2）从注入清单完全消失，而 select-template 侧用 listTemplates({
- * projectRoot: ctx.cwd }) 正确（两轨不同源）。本组用例按真实层级构造
+ * projectRoot: ctx.cwd }) 正确（两路不同源）。本组用例按真实层级构造
  * planFilePath，锁死「注入段项目级源 = PlanPromptInput.projectRoot 的
  * .agents/plans」——旧签名（无 projectRoot 字段）在类型层即编译失败。
  */

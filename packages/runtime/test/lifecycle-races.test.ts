@@ -599,7 +599,7 @@ describe('生命周期竞态（lifecycle races）', () => {
   // 下子进程 spawn/IPC 往返超 vitest 默认 5s testTimeout，对齐 plugin-host.test.ts 口径）。
   // 层级归属（docs/TEST-STRATEGY.md「新写测试判据」节）：真实 fork + 真实 IPC 往返属
   // 「代码 + OS 组合行为」，负载下拉长无稳定上界——整组经集成测试门控
-  // （TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts）移出默认单测轨，
+  // （TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts）移出默认单测层，
   // 本地默认跳过、CI 或按改动范围触发时真跑；逻辑面已由上方 fork 桩组确定性地覆盖。
   describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
     `PluginHostProcess（真实 fork IPC）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,

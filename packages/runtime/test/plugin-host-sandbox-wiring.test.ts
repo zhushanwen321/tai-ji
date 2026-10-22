@@ -13,7 +13,7 @@
  * 消息协议逐条对齐上述 fixtures）：
  * - 被测逻辑（sandbox→子进程宿主转调 / 字段映射 / 崩溃转发 / fork 边界断言）全部留在
  *   PluginHost 与 PluginHostProcess 实装内，fork/Worker 的调用实参经桩的 vi.fn 记录断言；
- * - 真实 fork 的进程级行为归集成轨（TAIJI_TEST_INTEGRATION 门控）覆盖。
+ * - 真实 fork 的进程级行为归集成组（TAIJI_TEST_INTEGRATION 门控）覆盖。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { resolve, dirname } from 'node:path'

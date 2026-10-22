@@ -30,7 +30,7 @@
  * - 凭证无关子集（CI 可跑，无条件执行）：mock 事件**照抄探针抓包样本**（0.84.1 历史 wire
  *   形态，无顶层 message 字段；与 0.84.4 实装的行为等价性见上方契约漂移注释）喂生产
  *   translate() + EventInterpreter 全链路。
- * - 真实 pi 子集（faux LLM 轨，L2.5 翻轨）：spawn 真实 pi + faux provider 跑一轮含工具调用
+ * - 真实 pi 子集（faux LLM 层，L2.5 迁组）：spawn 真实 pi + faux provider 跑一轮含工具调用
  *   对话，锁定 wire 契约与 tool-call-index 真实产出。wire 事件（message_update /
  *   toolcall_start / toolcall_end / tool_execution_start）由 pi 的 AssistantMessageEvent 流水线
  *   与 json-event 序列化产出，provider 无关——faux 流经同一管线产生同构 wire（2026-09-15
@@ -38,7 +38,7 @@
  *   CI 与按改动范围触发时真跑；SSOT = test-guard/integration-gate.ts）——spawn 真 pi 的
  *   wire 契约锁定属「代码 + OS 组合行为」，mock 子集（上一 describe）凭证无关、留默认组。
  *   [pi-bump 触发] pi 版本 bump 时 wire 序列化层（json-event.js 的 id/toolName 顶层提升）是
- *   断言对象，建议 bump 时真实轨重放一次（登记由 e2e-map 承接）。
+ *   断言对象，建议 bump 时真实层重放一次（登记由 e2e-map 承接）。
  */
 import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest'
 import { spawnPiFixture, type PiFixture } from './pi-fixture.js'
@@ -135,8 +135,8 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
     await fixture?.recover()
   })
 
-  // faux 轨（L2.5 翻轨）：toolCalls 步骤 100% 确定——真实 LLM 时代的「偶尔纯文本回复
-  // 不调工具」三连发重试护栏 [HISTORICAL 2026-08-22] 已随翻轨删除（脚本化 toolCall
+  // faux 层（L2.5 迁组）：toolCalls 步骤 100% 确定——真实 LLM 时代的「偶尔纯文本回复
+  // 不调工具」三连发重试护栏 [HISTORICAL 2026-08-22] 已随迁组删除（脚本化 toolCall
   // 不存在不确定性；语料检查仍要求 toolcall 事件存在，断言强度不变）。hook 显式超时
   // 保留（[HISTORICAL] 2026-08-20 PR #185：vitest 默认 hookTimeout 10s 在负载下先杀
   // hook）。

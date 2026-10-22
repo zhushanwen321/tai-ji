@@ -1,5 +1,5 @@
 /**
- * markdown 表格列宽地板 E2E —— L1 行为轨（@p0-smoke，零 token mock）。
+ * markdown 表格列宽地板 E2E —— L1 行为 mock 层（@p0-smoke，零 token mock）。
  *
  * 背景（2026-09-18 用户截图事故）：对话流表格 CSS 是 GitHub 四条声明
  * （display:block / overflow-x:auto / width:max-content / max-width:100%）。表格自然宽
@@ -10,7 +10,7 @@
  * packages/renderer/src/components/sidebar/UpdateButton.vue 同源同步）。
  *
  * 为什么落 e2e 而非单测：本条断言全是布局量（列宽 / 行数），jsdom 无 layout 引擎，
- * vitest 测不了——按 TEST-STRATEGY 三态纪律归 L1 CI 固定环节（e2e-behavior P0 smoke 轨）。
+ * vitest 测不了——按 TEST-STRATEGY 三态纪律归 L1 CI 固定环节（e2e-behavior P0 smoke 层）。
  *
  * 数据流：composer 发哨兵词 'md-table' → mock runSendStream 把回复体换成复刻宽表
  * （TABLE_REPLY，packages/core/src/transport/mock/run-send-stream.ts）→ Block text →
@@ -20,9 +20,9 @@
  *
  * ⚠️ agent bash / Electron 宿主内运行时先 `env -u ELECTRON_RUN_AS_NODE`：该变量透传会让
  * electron 二进制退化成裸 node，报 `Electron: bad option: --remote-debugging-port=0`——
- * 与代码无关，排障记录见 docs/TROUBLESHOOTING.md（electron 轨在 agent bash 里全灭条目）。
+ * 与代码无关，排障记录见 docs/TROUBLESHOOTING.md（electron 层在 agent bash 里全灭条目）。
  *
- * ⚠️ mock 轨要求 renderer 产物是 mock bundle（构建期 VITE_MOCK=true）。若刚跑过 real 轨，
+ * ⚠️ mock 层要求 renderer 产物是 mock bundle（构建期 VITE_MOCK=true）。若刚跑过 真实进程层，
  * 先 `VITE_E2E=true VITE_MOCK=true pnpm run build:e2e` 重建；launchApp 的 pre-flight 会
  * 检出错误形态并 fail-fast（见 e2e/fixtures/launch-app.ts assertMockRendererBundle）。
  */

@@ -23,9 +23,9 @@ import type { Section } from './types'
 import type { createCommandStore } from './command-store'
 
 /**
- * mock 搜索 fixture 端口（AC-5.2 mock 轨）。
+ * mock 搜索 fixture 端口（AC-5.2 mock 层）。
  * 壳适配 renderer api/mock search.query（VITE_MOCK=true 时走 fixture）。
- * 返回 Section[] 形态（{label, items}，与 real 轨 groupByType 对齐 D-001）。
+ * 返回 Section[] 形态（{label, items}，与 真实进程层 groupByType 对齐 D-001）。
  */
 export interface SearchDataPort {
   searchMock(query: string): Promise<Section[]>
@@ -100,7 +100,7 @@ export interface AppCommandActionsPort {
  * SearchDeps.ports 的类型别名——细粒度接口组合，消费方（useSearch/useSearchJump）按需取用。
  */
 export interface SearchPorts {
-  /** mock 轨标志（壳适配 import.meta.env.VITE_MOCK === 'true'；AC-5.2） */
+  /** mock 层标志（壳适配 import.meta.env.VITE_MOCK === 'true'；AC-5.2） */
   isMock: boolean
   /** macOS 平台标志（壳适配 navigator.platform.includes('Mac')；D8 收编，C-W3-5） */
   isMac: boolean

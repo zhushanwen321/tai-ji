@@ -3,7 +3,7 @@
  * （v1 账本存量 + v2 port schema）混入对话流序列时 applyEntry reducer 的确定性与
  * 派生视图口径（notify-once 设计 U5⑥；unified-delivery 波 2 随 entry schema v2 同步更新）。
  *
- * 静态 fixture（不 spawn pi、凭证无关，属凭证无关 unit 轨——勿登记 REAL_PI_TESTS）。
+ * 静态 fixture（不 spawn pi、凭证无关，属凭证无关 单测层——勿登记 REAL_PI_TESTS）。
  *
  * 断言三点：
  * 1. **确定性**：同一 entry 序列两次重放 deep-equal（「消息列表 = entry 日志的纯函数」

@@ -21,7 +21,7 @@
  *     本地默认跳过、CI 与按改动范围触发时真跑。与上方三种判据正交叠加（门控关闭时
  *     门控理由优先展示）。2026-10-22 测试整治（docs/TEST-STRATEGY.md「新写测试判据」节
  *     1.2 节）补挂：该 env 全仓无设置点，这两条 90s/120s 真引擎 bin 用例原本在本地与
- *     merge 门禁（scripts/pr-pre-merge.sh 只设 TAIJI_SKIP_REAL_PI）默认轨真跑——挂上
+ *     merge 门禁（scripts/pr-pre-merge.sh 只设 TAIJI_SKIP_REAL_PI）默认组真跑——挂上
  *     门控后本地与 merge 门禁跳过、CI（test-runtime 已设 env=1）照常真跑，覆盖不变。
  *     e2e-map 登记（待集中分配序号）：R2 / trigger=on-diff / layer=L2 / serial=true；
  *     run = TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run

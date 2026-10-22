@@ -14,13 +14,13 @@
  * 驱动器 settle 兑现（真 ClaimLedger）→ respond 素材回执 → payload reason/settleSeq/
  * fulfillsN/sessionFilePath 精确断言。
  *
- * 环境约定照抄 equivalence 族（pi-fixture.ts）。faux LLM 轨：子任务只需 settle
+ * 环境约定照抄 equivalence 族（pi-fixture.ts）。faux LLM 层：子任务只需 settle
  * （bash ls 真实执行 + 文本定局，脚本固定）。
  * 门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（本地默认跳过，CI 与按改动范围触发时
  * 真跑；SSOT = test-guard/integration-gate.ts）。
  *
  * 运行：TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/completion-backflow-e2e.test.ts（不设 env 时本地默认跳过）
- * 登记：docs/testing/e2e-map.json E2E-INTEG-07（集成门控轨，R2 按改动范围触发）；文件级集成轨成员登记在 packages/runtime/vitest.config.ts 的 INTEGRATION_TESTS
+ * 登记：docs/testing/e2e-map.json E2E-INTEG-07（集成门控组，R2 按改动范围触发）；文件级集成组成员登记在 packages/runtime/vitest.config.ts 的 INTEGRATION_TESTS
  */
 
 import { describe, it, expect } from 'vitest'
@@ -77,7 +77,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`notify-once settle 链 e2e faux pi$
     let childFx: PiFixture | undefined
     const ledger = createClaimLedger()
     try {
-      // ── 1. 真实 pi 子进程（faux 轨：bash ls 真实执行 + U6-DONE 定局）──
+      // ── 1. 真实 pi 子进程（faux 层：bash ls 真实执行 + U6-DONE 定局）──
       const childDir = join(dataRoot, 'child')
       mkdirSync(childDir, { recursive: true })
       childFx = await spawnPiFixture({

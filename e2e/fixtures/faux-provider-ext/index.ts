@@ -1,5 +1,5 @@
 /**
- * e2e real 轨 faux LLM provider 注入壳（re-export，勿在此复刻逻辑）。
+ * e2e 真实进程层 faux LLM provider 注入壳（re-export，勿在此复刻逻辑）。
  *
  * 真实实现在 packages/runtime/src/__tests__/fixtures/faux-llm-ext.ts（跨进程契约
  * SSOT 的一部分——ScriptedStep 与 equivalence/pi-fixture.ts 同构）。本壳只做 default

@@ -1,5 +1,5 @@
 /**
- * Workflow 任务托盘同步 E2E —— Playwright + Electron + mock 轨。
+ * Workflow 任务托盘同步 E2E —— Playwright + Electron + mock 层。
  *
  * [改写 2026-09-16] 原断言范围（侧栏 Flows/Agents tab 的 workflow-card / subagent-card /
  * workflow-detail）随侧栏任务 tab 退役（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——D10/D11：

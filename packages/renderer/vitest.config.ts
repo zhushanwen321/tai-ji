@@ -11,7 +11,7 @@ export default taijiTestConfig({
     // 放宽随根因修复退役——新用例再触 5s 上限时按 docs/TEST-STRATEGY.md「新写测试判据」
     // 处置（确定性化或挂集成门控），不抬预算。
     // W1 i18n-frontend-p2：注入 VITE_MOCK=true，让 useSearch 等 mock-mode 分支在测试环境默认走 mock fixture。
-    // （mock fixture 是 i18n-frontend-p2 U1 等用例的预期数据源；real 轨无 seed 数据会让 recents/suggested 全空导致断言失败。）
+    // （mock fixture 是 i18n-frontend-p2 U1 等用例的预期数据源；真实进程层无 seed 数据会让 recents/suggested 全空导致断言失败。）
     env: {
       VITE_MOCK: 'true',
     },

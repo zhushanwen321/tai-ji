@@ -108,7 +108,7 @@ export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Compon
  * [2026-10 trace 块动效退役] trace 块行头的 running 态已改用 RunningBlockIcon 动效组件
  * （每类活动专属动效，字形保留 + accent 动效元素）；本常量仅存 TurnRail / BashOutputBlock
  * 两个非块头消费点（rail 位置/通知位不与块动效同屏争抢），不再新增消费点。
- * 淡轨整圈 circle r=10 opacity 0.16 + accent 弧段 circle r=10 pathLength=100，
+ * 浅色轨道整圈 circle r=10 opacity 0.16 + accent 弧段 circle r=10 pathLength=100，
  * viewBox 0 0 24 24，stroke currentColor stroke-width 1.7 / linecap round / linejoin round。
  * 颜色唯一 accent（消费方 text-accent 继承 currentColor），不加发光与缩放脉冲。
  *
@@ -120,10 +120,10 @@ export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Compon
  *   data-v 属性，Tailwind 类也无法静态命中，只能全局类声明（keyframes 同理必须全局）。
  *
  * prefers-reduced-motion 由 style.css 全局 @media reduce 兜底（animation-duration 0.01ms
- * + iteration 1）：三重动画全部瞬切终态后回 .ld-arc 基态——静态呈现「淡轨整圈 + 固定
+ * + iteration 1）：三重动画全部瞬切终态后回 .ld-arc 基态——静态呈现「浅色轨道整圈 + 固定
  * 相位弧段」，无运动感但保留形态识别。
  *
- * 淡轨 .ld-track / 弧段 .ld-arc class 仅作形态标记与动画挂点，样式一律由 CSS 侧持有，
+ * 浅色轨道 .ld-track / 弧段 .ld-arc class 仅作形态标记与动画挂点，样式一律由 CSS 侧持有，
  * inline 只保留无动画的静态属性（opacity/pathLength），保证 v-html 可用。
  */
 export const RUNNING_LOADER_SVG: string =

@@ -1,13 +1,13 @@
 /**
- * session 归档行为 E2E —— mock 轨雏形（session-archive 设计 §8 V1-V10 / impl-plan u-e2e-cases）。
+ * session 归档行为 E2E —— mock 层雏形（session-archive 设计 §8 V1-V10 / impl-plan u-e2e-cases）。
  *
  * 覆盖面声明：
- * - mock 轨可跑（本文件）：V1 归档交互主链（两段确认 + 行消失 + 角标）/ V2 归档列表与
+ * - mock 层可跑（本文件）：V1 归档交互主链（两段确认 + 行消失 + 角标）/ V2 归档列表与
  *   摘要视图渲染（含 agent-null turn 占位文案断言）/ V4 恢复交互（切回会话列表 + 回场）/
  *   V8 彻底删除两段确认 + 空态 / V5① 生成中归档钮禁用（D13 renderer 门）。数据流 =
  *   VITE_MOCK=true → mockApi.session 归档四函数（archive/unarchive/purgeArchive/
  *   listArchives——内存 mockArchives 派生视图，mock 无磁盘搬移/压缩/staging 过渡）。
- * - L3-only（mock 轨不可达，D3 验收实例化按 exec-plan 验收计划 A1-A10 执行）：V3 agent
+ * - L3-only（mock 层不可达，D3 验收实例化按 exec-plan 验收计划 A1-A10 执行）：V3 agent
  *   session_read 引用（需真 extension 链路）/ V5② wscat 直发 RPC 生成中门（需真 runtime）/
  *   V6 恢复冲突 fail-fast / V7 崩溃自愈全中间态 / V9 后台任务在途收殓 / V10 staging 过渡态
  *   三处可见性 + V2 的 <300ms 呈现 / 全程无解压 IO（无 .tmp）/ 纯图片 turn 占位语义 +
@@ -48,7 +48,7 @@ async function archiveFromSidebar(page: Page, label: string): Promise<void> {
   await btn.click()
 }
 
-test.describe('session 归档行为 E2E（V1/V2/V4/V8/V5① mock 轨）', () => {
+test.describe('session 归档行为 E2E（V1/V2/V4/V8/V5① mock 层）', () => {
   test('V1 交互面：悬停两段确认归档 → 行消失 + 归档入口角标 +1', async ({ page }) => {
     // 起 app 后等侧栏渲染 fixture 列表。
     await expect(page.getByTestId('session-list-header')).toBeVisible({ timeout: 10_000 })
@@ -93,7 +93,7 @@ test.describe('session 归档行为 E2E（V1/V2/V4/V8/V5① mock 轨）', () => 
     await expect(page.getByTestId('archive-restore-button')).toBeVisible()
     // mock 归档条目带一条演示 turn（「（mock 归档演示）」user 气泡，agent 为占位——agent null）。
     await expect(page.getByTestId('archive-summary-flow')).toBeVisible()
-    // V2 占位语义（mock 轨可断言部分）：agent-null turn 渲染占位文案而非空白块。
+    // V2 占位语义（mock 层可断言部分）：agent-null turn 渲染占位文案而非空白块。
     await expect(page.getByTestId('archive-summary-turn-0-agent-placeholder')).toContainText(
       '此 turn 以工具调用结束，无文本回复',
     )

@@ -5,7 +5,7 @@
  * - 本模块顶层 `export const PI_PATH = detectPi()`——which/where pi 探测，命令形态与生产代码
  *   `src/infra/pi/process-manager.ts`（isWindows ? 'where pi' : 'which pi'）完全一致；
  *   探测失败返回 null。
- * - REAL 轨（真实 LLM turn）门控在 `./real-pi-gate.ts`（binary + LLM 凭证双探测，凭证按 pi
+ * - REAL 层（真实 LLM turn）门控在 `./real-pi-gate.ts`（binary + LLM 凭证双探测，凭证按 pi
  *   实际解析链：env API key / auth.json stored 条目 / models.json providers apiKey）。CI 无凭证
  *   环境若只判 PI_PATH 会 fail 而非 skip（pi binary 经 pnpm PATH 在 CI 可达）——这是等价性
  *   基线双轨的机制基础（见 TEST-STRATEGY.md §4）。
@@ -16,7 +16,7 @@
  *   CI 继续覆盖凭证无关子集。
  * - 禁止 mock pi 子进程（vi.mock('node:child_process') 形态）——本测试族的价值就在真实子进程。
  *
- * faux LLM 轨（L2.5，凭证无关双轨的第二轨）：spawnPiFixture 传 `fauxResponses` 即启用——
+ * faux LLM 层（L2.5，凭证无关双轨的第二路）：spawnPiFixture 传 `fauxResponses` 即启用——
  * 真 pi 进程 + 真 extension 加载（../fixtures/faux-llm-ext.ts 注册 pi-ai fauxProvider）+
  * 假 LLM（--model faux/faux-1，auth 恒无凭据、零网络、cost 恒 0）。把「验证 runtime↔pi
  * 协议/编排而非模型智能」的用例变成凭证无关、CI 可跑：
@@ -62,7 +62,7 @@ import { DEFAULT_MODEL, PI_PATH } from './pi-environment.js'
 export { DEFAULT_MODEL, PI_PATH }
 /** 冷启动就绪等待上限（探针结论中位数 ~500ms，取 10 倍余量） */
 const DEFAULT_COLD_START_TIMEOUT_MS = 5_000
-/** faux 轨冷启动就绪等待下限（jiti 冷编译 extension + 满并行负载余量；见 spawnPiFixture） */
+/** faux 层冷启动就绪等待下限（jiti 冷编译 extension + 满并行负载余量；见 spawnPiFixture） */
 const FAUX_COLD_START_TIMEOUT_MS = 15_000
 /** 单条 RPC 命令默认超时 */
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000
@@ -104,9 +104,9 @@ export interface PiFixtureOptions {
    * entry 终态生效（生产对应 RpcClientOptions.inheritSessionModel）。空 agentDir 下
    * pi 无模型仍可冷启动（get_state 应答 model=unknown 占位，附着后 entry 恢复真值）。
    *
-   * faux 轨的 model 值域（L2.5 二批放宽）：undefined = FAUX_MODEL；null = 不拼
+   * faux 层的 model 值域（L2.5 二批放宽）：undefined = FAUX_MODEL；null = 不拼
    * --model（同上语义）；字符串 = 必须以 'faux/' 开头（如 'faux/faux-1-reasoning'，
-   * thinking-level 契约用例的 reasoning 演员），传真实模型 id 直接 throw——「faux 轨
+   * thinking-level 契约用例的 reasoning 演员），传真实模型 id 直接 throw——「faux 层
    * 结构上排除误指定真实模型」的红线从「静默忽略」升级为「显式报错」。
    */
   model?: string | null
@@ -133,7 +133,7 @@ export interface PiFixtureOptions {
    */
   agentDefaultTools?: string[]
   /**
-   * faux LLM 轨（L2.5）：提供该字段（含空数组——用例全程无 LLM turn 的场景）即启用
+   * faux LLM 层（L2.5）：提供该字段（含空数组——用例全程无 LLM turn 的场景）即启用
    * 凭证无关装配，与真实 LLM 通道的差异（其余行为逐字节一致）：
    * - 凭证门不要求 REAL 门（FAUX_PI_READY 即可）；跳过凭证文件拷贝（空临时
    *   agentDir——faux auth 恒无凭据，空目录是凭证无关的直接证明）；
@@ -188,32 +188,32 @@ export interface PiFixture {
 // 本文件 re-export 维持既有消费方 import 路径不变）
 
 // ==================== 真实 LLM 凭证探测（等价性基线双轨，goal-audit 问题 1 修复） ====================
-// REAL 轨门控与凭证拷贝通道已整体迁至 ./real-pi-gate.ts（独立模块——探测读本机真实
+// REAL 层门控与凭证拷贝通道已整体迁至 ./real-pi-gate.ts（独立模块——探测读本机真实
 // ~/.pi/agent 凭证文件，拆出后只有显式 import real-pi-gate 的加载链才触发读取，
-// faux 轨（本文件全部现役消费方）运行零真实凭证接触）。pi-fixture 仅在 spawnPiFixture
+// faux 层（本文件全部现役消费方）运行零真实凭证接触）。pi-fixture 仅在 spawnPiFixture
 // 的 real 分支按需动态 import 该模块；新增真实 LLM 文件的门控引用约定见 real-pi-gate.ts 头注。
 
-// ==================== faux LLM 轨（凭证无关：真 pi 进程 + 真 extension 加载 + 假 LLM） ====================
+// ==================== faux LLM 层（凭证无关：真 pi 进程 + 真 extension 加载 + 假 LLM） ====================
 
 /**
- * faux 轨 spawn 的固定模型：provider `faux` 由测试专用 extension（../fixtures/faux-llm-ext.ts，
+ * faux 层 spawn 的固定模型：provider `faux` 由测试专用 extension（../fixtures/faux-llm-ext.ts，
  * 经 --extension 注入）在 pi 子进程内注册，faux 实装 auth 恒 `{auth:{}}` 无需凭据、零网络、
  * cost 恒 0——凭证探测在此轨道既不可能通过也无需通过。
  */
 const FAUX_MODEL = 'faux/faux-1'
 
 /**
- * faux 轨用例可用性探测：只判 pi binary（复用 PI_PATH 探测结果），不判凭证。
+ * faux 层用例可用性探测：只判 pi binary（复用 PI_PATH 探测结果），不判凭证。
  * 刻意不受 TAIJI_SKIP_REAL_PI 影响——该开关语义是「本环境只跑凭证无关子集」，而 faux 用例
- * 正是凭证无关子集（L2.5 faux 轨的目标：验证 runtime↔pi 协议/编排的用例凭证无关、CI 可跑）。
+ * 正是凭证无关子集（L2.5 faux 层的目标：验证 runtime↔pi 协议/编排的用例凭证无关、CI 可跑）。
  */
 export const FAUX_PI_SKIP_REASON: string | null = PI_PATH === null ? 'pi binary not found（which/where pi 未命中）' : null
 
-/** faux 轨用例可运行（pi binary 在位即可）。引用方一律 `describe.skipIf(!FAUX_PI_READY)` 包裹。 */
+/** faux 层用例可运行（pi binary 在位即可）。引用方一律 `describe.skipIf(!FAUX_PI_READY)` 包裹。 */
 export const FAUX_PI_READY: boolean = FAUX_PI_SKIP_REASON === null
 
 /**
- * faux 轨声明式响应步骤（SSOT 本类型；跨进程序列化契约的另一端是
+ * faux 层声明式响应步骤（SSOT 本类型；跨进程序列化契约的另一端是
  * ../fixtures/faux-llm-ext.ts 的同构类型——fixture 写 JSON 文件，extension 侧读并翻译成
  * faux 响应队列，两侧字段语义须同步）。步骤逐轮 shift 消费；队列耗尽 pi 报
  * "No more faux responses queued"（意外 turn 的天然 fail-fast 信号）。
@@ -267,8 +267,8 @@ export async function spawnPiFixture(options: PiFixtureOptions = {}): Promise<Pi
       `pi binary not found (which/where pi) —— equivalence 用例必须以 describe.skipIf(${fauxMode ? '!FAUX_PI_READY' : '!REAL_PI_READY'}) 包裹`,
     )
   }
-  // real 轨门控与凭证拷贝按需加载（见文件头 REAL 迁移说明）：faux 轨不 import real-pi-gate，
-  // 零真实凭证读取；real 轨在此显式加载，探测产物仅此分支消费。
+  // 真实进程层门控与凭证拷贝按需加载（见文件头 REAL 迁移说明）：faux 层不 import real-pi-gate，
+  // 零真实凭证读取；真实进程层在此显式加载，探测产物仅此分支消费。
   const realGate = fauxMode ? null : await import('./real-pi-gate.js')
   if (realGate && !realGate.REAL_PI_READY) {
     // describe.skipIf 已挡住正常路径；此处兜底防新用例漏包 skip 条件时以含理由的错误暴露
@@ -276,11 +276,11 @@ export async function spawnPiFixture(options: PiFixtureOptions = {}): Promise<Pi
       `real pi unavailable：${realGate.REAL_PI_SKIP_REASON} —— 真实 pi 用例必须以 describe.skipIf(!REAL_PI_READY) 包裹`,
     )
   }
-  // faux 轨 model 值域检查（PiFixtureOptions.model 注释）：undefined = FAUX_MODEL；
+  // faux 层 model 值域检查（PiFixtureOptions.model 注释）：undefined = FAUX_MODEL；
   // null = 不拼 --model（entry 恢复用例）；字符串必须 'faux/' 前缀——真实模型 id 直接
-  // throw（faux 零网络、cost 恒 0 是本轨红线，误指定从静默忽略升级为显式报错）。
+  // throw（faux 零网络、cost 恒 0 是本组红线，误指定从静默忽略升级为显式报错）。
   if (fauxMode && typeof options.model === 'string' && !options.model.startsWith('faux/')) {
-    throw new Error(`faux 轨禁用真实模型（options.model="${options.model}"）——只能省略 / null / "faux/<id>"（faux-llm-ext 注册的演员）`)
+    throw new Error(`faux 层禁用真实模型（options.model="${options.model}"）——只能省略 / null / "faux/<id>"（faux-llm-ext 注册的演员）`)
   }
   const model = fauxMode
     ? options.model === null
@@ -291,7 +291,7 @@ export async function spawnPiFixture(options: PiFixtureOptions = {}): Promise<Pi
     : options.model === undefined
       ? DEFAULT_MODEL
       : options.model
-  // faux 轨冷启动下限 15s：jiti 冷编译 extension + 满并行负载（真实轨参照
+  // faux 层冷启动下限 15s：jiti 冷编译 extension + 满并行负载（真实层参照
   // thinking-level-effective-e2e 的 15s 余量口径）；显式传值取 max 不降级
   const coldStartTimeoutMs = fauxMode
     ? Math.max(options.coldStartTimeoutMs ?? 0, FAUX_COLD_START_TIMEOUT_MS)
@@ -300,7 +300,7 @@ export async function spawnPiFixture(options: PiFixtureOptions = {}): Promise<Pi
 
   const sessionDir = options.sessionDir ?? mkdtempSync(join(tmpdir(), 'pi-equiv-'))
   // agent dir 隔离（见文件头）：与 sessionDir 分开建目录，dispose 各自清理。
-  // 真实轨 = 凭证文件拷贝（扩展不可见）；faux 轨 = 空目录 + 响应脚本 JSON（凭证无关）。
+  // 真实层 = 凭证文件拷贝（扩展不可见）；faux 层 = 空目录 + 响应脚本 JSON（凭证无关）。
   const agentDir = mkdtempSync(join(tmpdir(), 'pi-equiv-agent-'))
   let fauxScriptEnv: { TAIJI_FAUX_SCRIPT?: string } = {}
   if (fauxMode) {

@@ -6,7 +6,7 @@
  * → EventInterpreter session-manager 路由（onSessionManagerRequest）→ SessionManagerHandler
  * action 分发（handler routes 表现 9 键：create/send/history/status/list/abort/delete/
  * archive/watch；本探针驱动其中 6 个——create/send/history/status/list/abort 的旧断言面，
- * delete/archive 全链由 equivalence/session-manager-full-e2e.test.ts 真 LLM 轨覆盖，
+ * delete/archive 全链由 equivalence/session-manager-full-e2e.test.ts 真 LLM 层覆盖，
  * watch 不对 LLM 暴露）→ extension_ui_response 回写 pi stdin。mock 只保留两层：
  *   1. pi 子进程 IO 层（JSONL stdout → runtime / runtime → stdin 的 wire 映射）
  *   2. SessionService 数据层（ISessionService fake）

@@ -26,13 +26,13 @@
  * - pi 已 idle → 直投开新 turn。
  * 断言只锚终态（顺序 / 唯一性 / 标记 / delivered），不锚中间车道——车道是 pi 状态函数。
  *
- * 环境约定照抄 equivalence 族（pi-fixture.ts）。faux LLM 轨（L2.5）：被测语义是
+ * 环境约定照抄 equivalence 族（pi-fixture.ts）。faux LLM 层（L2.5）：被测语义是
  * 「压缩窗口的持有与释放按序投递」，非模型智能；门控 = 集成测试门控
  * TAIJI_TEST_INTEGRATION（本地默认跳过，CI 与按改动范围触发时真跑；SSOT =
  * test-guard/integration-gate.ts）。
  *
  * 运行：TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts（不设 env 时本地默认跳过）
- * 登记：docs/testing/e2e-map.json E2E-EQUIV-01（equivalence 目录族凭证无关子集）+ E2E-INTEG-06（本文件集成门控轨，R2 按改动范围触发）；文件级集成轨成员登记在 packages/runtime/vitest.config.ts 的 INTEGRATION_TESTS
+ * 登记：docs/testing/e2e-map.json E2E-EQUIV-01（equivalence 目录族凭证无关子集）+ E2E-INTEG-06（本文件集成门控组，R2 按改动范围触发）；文件级集成组成员登记在 packages/runtime/vitest.config.ts 的 INTEGRATION_TESTS
  */
 
 import { describe, it, expect } from 'vitest'

@@ -2,7 +2,7 @@
 //
 // Tests createAskUserChannelHandler：把 subagent 子进程的 ask_user 请求透传到主进程 UI。
 //
-// D9 双 payload mock 轨：孙进程 npm 版本不可控——新孙进程发 {formQuestions: FormQuestion[]}
+// D9 双 payload mock 层：孙进程 npm 版本不可控——新孙进程发 {formQuestions: FormQuestion[]}
 // （ui_form channel），旧孙进程发 {questions: AskUserQuestion[]}（ask_user channel）。
 // 核心行为用例全部在两种 payload 形态下各跑一遍（payloadShapes 参数化），断言输出逐字一致。
 //
@@ -95,7 +95,7 @@ const formMulti: FormQuestion = {
 	options: [{ label: "A" }, { label: "B" }, { label: "C" }],
 };
 
-/** D9 双 payload 轨：同一问题集的两种 wire 形态（旧 questions / 新 formQuestions） */
+/** D9 双 payload 对照：同一问题集的两种 wire 形态（旧 questions / 新 formQuestions） */
 function payloadShapes(
 	legacy: AskUserQuestion[],
 	form: FormQuestion[],
@@ -118,7 +118,7 @@ const multiShapes = payloadShapes([legacyMulti], [formMulti]);
 
 // ── Tests ───────────────────────────────────────────────
 
-describe("createAskUserChannelHandler — D9 双 payload 轨（两种形态行为逐字一致）", () => {
+describe("createAskUserChannelHandler — D9 双 payload 对照（两种形态行为逐字一致）", () => {
 	it.each(singleShapes)("RPC single-select: $label → {value: JSON.stringify(answers)}", async ({ req }) => {
 		// 前端回传 proto answers：{[key]: value}，key = question 全文（无 header）
 		const protoAnswers = { "Which DB?": "Postgres" };

@@ -9,7 +9,7 @@
 // 门控（本地默认跳过、CI 真跑）。stdin fd 不外泄（R9-4②）由 SDK spawn 单测兜底。
 //
 // 分层说明：stdout 半行残片上限（MAX_LINE_BYTES 丢头留尾）是 transport 层逻辑，
-// 用例已迁 transport-local.test.ts（进程端点桩轨）；本文件只保留客户端侧
+// 用例已迁 transport-local.test.ts（进程端点桩层）；本文件只保留客户端侧
 // 「非 NDJSON 行丢弃 + 后续帧照常解析」半。
 
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -555,7 +555,7 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
   });
 });
 
-describe("stdout 非 NDJSON 行（客户端半；半行残片上限在 transport-local 桩轨）", () => {
+describe("stdout 非 NDJSON 行（客户端半；半行残片上限在 transport-local 桩层）", () => {
   it("垃圾行丢弃留痕 + 截断不得破坏后续帧边界（后续 run 应答照常解析）", async () => {
     const warnMessages: string[] = [];
     const client = new ScriptedEngineClient({});
@@ -741,7 +741,7 @@ describe("超时域二分（fake timers，R9-2 / R9-2b）", () => {
 });
 
 describe("引擎崩溃与终局（A8①③）", () => {
-  it("run 中引擎死亡：在途 run 失败（engine_crashed + stderr 尾）+ 镜像清空（pidfile 清理在真进程门控轨）", async () => {
+  it("run 中引擎死亡：在途 run 失败（engine_crashed + stderr 尾）+ 镜像清空（pidfile 清理在真进程门控组）", async () => {
     const client = new ScriptedEngineClient({
       runActions: [
         { op: "childSpawned", pid: 5151, recordId: "rec-crash" },
@@ -811,7 +811,7 @@ describe("引擎崩溃与终局（A8①③）", () => {
   });
 });
 
-describe("收割与停机编排（R9-1；进程组真杀在真进程门控轨）", () => {
+describe("收割与停机编排（R9-1；进程组真杀在真进程门控组）", () => {
   it("dispose：帧 → 端点应答后自然退出 → 关闭编排；幂等；killAll 在已死通道上不抛", async () => {
     const client = new ScriptedEngineClient({});
     await client.ensureConnected();
@@ -853,7 +853,7 @@ describe("pidfile 启动期清扫（EngineClient 接线，R9-3）", () => {
 describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
   `EngineClient 真进程全链（W2 冒烟）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
   () => {
-    /** 轮询等待谓词成立（真实子进程信号传播有毫秒级延迟——本轨为集成门控真跑形态）。 */
+    /** 轮询等待谓词成立（真实子进程信号传播有毫秒级延迟——本组为集成门控真跑形态）。 */
     async function waitFor(predicate: () => boolean, timeoutMs = 5_000, stepMs = 25): Promise<void> {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {

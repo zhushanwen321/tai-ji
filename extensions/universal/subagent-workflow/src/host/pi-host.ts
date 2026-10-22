@@ -355,9 +355,9 @@ export function resolveGrandchildExtensionPaths(
 }
 
 /**
- * e2e harness 专用的孙进程扩展放行门（faux 轨装配）。
+ * e2e harness 专用的孙进程扩展放行门（faux 层装配）。
  *
- * faux 轨（e2e/fixtures/launch-app-real.ts seedFauxDataDir）的孙进程 LLM 演员注入
+ * faux 层（e2e/fixtures/launch-app-real.ts seedFauxDataDir）的孙进程 LLM 演员注入
  * 靠 `<agentDir>/extensions/faux-llm-ext.ts` 自动发现装载——[D2 扩展加载显式化]
  * 孙进程恒 `--no-extensions`（自动发现全关）+ 仅加载本文件白名单集后，该路径被
  * 排除，孙进程报 `Model "faux/..." not found`。faux-llm-ext 是 e2e harness 复制进

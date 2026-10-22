@@ -61,26 +61,26 @@ export const composer = isMock ? mockApi.composer : realComposer
 export const workspace = isMock ? mockApi.workspace : realWorkspace
 export const quota = isMock ? mockApi.quota : realQuota
 export const project = isMock ? mockApi.project : realProject
-// preset：pi 启动预设域（pi-launch-presets wave1）。mock 轨走 mockApi.preset 占位（空列表 + 默认 id），
-// real 轨走真实 RPC（preset.list/getDefault/setDefault）。
+// preset：pi 启动预设域（pi-launch-presets wave1）。mock 层走 mockApi.preset 占位（空列表 + 默认 id），
+// 真实进程层走真实 RPC（preset.list/getDefault/setDefault）。
 export const preset = isMock ? mockApi.preset : realPreset
 // btw：旁路提问 3 控制帧（btw-question D6，M2-a 残留接线点①——主 agent 授权 M3-a 补线）。
-// mock 轨走 mockApi.btw（in-memory 线注册表，G4 类型锚定签名全等）；real 轨走 core
+// mock 层走 mockApi.btw（in-memory 线注册表，G4 类型锚定签名全等）；真实进程层走 core
 // transport 域（运行时 handler 注册归 M2-b，接线前真实 RPC 不可达）。
 export const btw = isMock ? mockApi.btw : realBtw
 
-// usage（Settings · 用量统计页）：mock 轨走 mockApi.usage（fixture 行），real 轨扫 session JSONL。
+// usage（Settings · 用量统计页）：mock 层走 mockApi.usage（fixture 行），真实进程层扫 session JSONL。
 // [C3] settings 域 transport 收编后由 SettingsTransport seam 的 getUsageStats 消费。
 export const usage = isMock ? mockApi.usage : realUsage
 
-// tts：语音合成朗读域（ai-voice-tts，M0）。mock 轨走 mockApi.tts（内存态配置 + 静态演示
-// 派生视图，G4 类型锚定签名全等）；real 轨走 core transport 域（runtime 接线归 u3b）。
+// tts：语音合成朗读域（ai-voice-tts，M0）。mock 层走 mockApi.tts（内存态配置 + 静态演示
+// 派生视图，G4 类型锚定签名全等）；真实进程层走 core transport 域（runtime 接线归 u3b）。
 export const tts = isMock ? mockApi.tts : realTts
 // subagent 域（subagent-model-switch §7.1 入口层）：setModel（chat 域 / run 级全切共用）。
 export const subagent = isMock ? mockApi.subagent : realSubagent
 
 // search（⌘K 全局搜索）编排归 useSearchModalDeps（packages/renderer/src/composables/features/search/useSearchModalDeps.ts，D-026，#5）：
-// 该处判 VITE_MOCK 决定 mock 轨走 mockApi.search fixture / real 轨走真实 3 源聚合（命令/file/session domain）。
+// 该处判 VITE_MOCK 决定 mock 层走 mockApi.search fixture / 真实进程层走真实 3 源聚合（命令/file/session domain）。
 // 本门面不再导出 search（renderer 版 useSearch.ts 已随域迁移删除，2026-09-11）。
 // ModelInfo re-export 已删（消费方全部 import @taiji/shared，fallow unused_types 零消费方）。
 

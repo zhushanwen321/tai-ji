@@ -170,9 +170,9 @@ grep "transport selected" ~/.taiji/agent/logs/subagents-*.log
 
 打包模式下 runtime sidecar 由 main 以 `ELECTRON_RUN_AS_NODE=1` 启动（Electron 二进制当纯 node 跑 sidecar 的必需条件），打包态 runtime 再经 `getEngineRootsSpawnEnv` 以 extras 显式注入 pi 子进程（`engine-roots.ts:65-67` → `process-manager.ts` 注入 env → `rpc-client.ts:277-283` 的 `buildPiOutboundEnv`（`extras: this.options.env`）交 `buildOutboundChildEnv` 构建；`ENV_WHITELIST_PREFIXES` 不含 `ELECTRON_` 前缀，不是白名单继承），runtime spawn 引擎遇到 Electron 执行器时同样注入（SDK node-executor 的宿主矩阵①/②）——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。终端服务不受影响（TerminalService 独立构造 env 已剥离）。**playwright e2e 形态（fail-fast 非静默）[2026-09-22]**：经 subagent bash 跑 `npx playwright test --project=electron*` 时，launch-app fixture 的 `{...process.env}` 把该变量透传给 Playwright 拉起的 Electron → 纯 node 化不认 `--remote-debugging-port=0` → 全部用例 `electron.launch: Process failed to launch!` + `bad option` + exit 9（对照：直接跑 `--version` 打出 `v24.15.0` 而非 `Electron x.y.z` 即此病）。对策 = e2e 运行命令前缀 `env -u ELECTRON_RUN_AS_NODE`（CI 无此变量时 no-op）；pnpm dev 正规链（dev-instance `buildDevEnv` LEAK_ENV_KEYS）已内置剥离不受影响。机制细节见 `packages/subagent-engine-sdk/src/node-executor.ts` 的宿主矩阵注释与 `apps/electron/main/supervisor/process-control.ts` 的 sidecar env 注释。
 
-**同根因的第二个症状面（2026-09-19 实测）：playwright electron 轨在 agent bash 里全灭**——`npx playwright test --project=electron` 报 `electron.launch: Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`（`--version` 回显 `v24.x` 而非 `v42.3.3` = 已被降级为裸 node，node 的 CLI 不认该开关）；与代码无关，**跑 e2e 前先 `env -u ELECTRON_RUN_AS_NODE`**（例：`env -u ELECTRON_RUN_AS_NODE npx playwright test --project=electron-smoke`）。别误判为 Electron 二进制损坏或构建失败。解除该变量后 mock 轨与 real 轨均可跑通（2026-09-20 实测：electron 轨 64/64 全绿，real 轨为凭证无关的 faux LLM 装配，无需真实 provider）。
+**同根因的第二个症状面（2026-09-19 实测）：playwright electron 层在 agent bash 里全灭**——`npx playwright test --project=electron` 报 `electron.launch: Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`（`--version` 回显 `v24.x` 而非 `v42.3.3` = 已被降级为裸 node，node 的 CLI 不认该开关）；与代码无关，**跑 e2e 前先 `env -u ELECTRON_RUN_AS_NODE`**（例：`env -u ELECTRON_RUN_AS_NODE npx playwright test --project=electron-smoke`）。别误判为 Electron 二进制损坏或构建失败。解除该变量后 mock 层与 真实进程层均可跑通（2026-09-20 实测：electron 层 64/64 全绿，真实进程层为凭证无关的 faux LLM 装配，无需真实 provider）。
 
-**配套陷阱：mock/real 两轨共用同一份 renderer 产物，须分批构建**——两条轨都读 `apps/electron/renderer/dist`，构建期由 `VITE_MOCK` define 决定走哪条 transport 链，而 e2e globalSetup 只查产物存在、不查构建形态。故跑完 real 轨（`VITE_E2E=true pnpm run build:e2e`）后必须重建 mock bundle（`VITE_E2E=true VITE_MOCK=true pnpm run build:e2e`）再跑 mock 轨，否则 mock spec 全部以 30s 超时呈现。两个方向的形态错配均已由 pre-flight fail-fast 拦住并给出重建命令：`launch-app-real.ts` 的 `assertRealRendererBundle`（mock 产物在场）+ `launch-app.ts` 的 `assertMockRendererBundle`（real 产物在场，判据 = mock fixture 标记串 `Promise 代码评审`，两 fixture 共享导出）。
+**配套陷阱：mock/real 两种形态共用同一份 renderer 产物，须分批构建**——两种形态都读 `apps/electron/renderer/dist`，构建期由 `VITE_MOCK` define 决定走哪条 transport 链，而 e2e globalSetup 只查产物存在、不查构建形态。故跑完 真实进程层（`VITE_E2E=true pnpm run build:e2e`）后必须重建 mock bundle（`VITE_E2E=true VITE_MOCK=true pnpm run build:e2e`）再跑 mock 层，否则 mock spec 全部以 30s 超时呈现。两个方向的形态错配均已由 pre-flight fail-fast 拦住并给出重建命令：`launch-app-real.ts` 的 `assertRealRendererBundle`（mock 产物在场）+ `launch-app.ts` 的 `assertMockRendererBundle`（real 产物在场，判据 = mock fixture 标记串 `Promise 代码评审`，两 fixture 共享导出）。
 
 ### 8. runtime 启动即退出："fatal: subagent control server init failed"
 
@@ -321,18 +321,18 @@ vitest run --root <子包目录>                                 # 或从仓库�
 
 **排障**：输出里出现该通告 = 当前 shell 带宿主 env（正常现象，无需处理）；确需显式指定数据目录时，注入白名单内路径。
 
-### 19. e2e real 轨用例失败：sidebar 出现 mock 假会话数据（e2e 产物形态错误，2026-09-18）
+### 19. e2e 真实进程层用例失败：sidebar 出现 mock 假会话数据（e2e 产物形态错误，2026-09-18）
 
 **现象**：`e2e/*-real.spec.ts`（launch-app-real）跑出诡异失败——sidebar 列出大量不存在于临时数据目录的会话（mock 假数据），新建 session 的条目永远不出现；同 spec 的纯 WS 断言用例（不经 UI）却全绿。
 
-**真相**：playwright global-setup 构建产物时恒定注入 `VITE_MOCK=true`（mock 形态 bundle）。mock 轨与 real 轨共享同一份 `apps/electron/dist` 产物，谁最后构建产物就是谁的形态——real spec 跑在 mock bundle 上时 renderer 走 `mock://localhost`（连接日志可证），根本不连 runtime。
+**真相**：playwright global-setup 构建产物时恒定注入 `VITE_MOCK=true`（mock 形态 bundle）。mock 层与 真实进程层共享同一份 `apps/electron/dist` 产物，谁最后构建产物就是谁的形态——real spec 跑在 mock bundle 上时 renderer 走 `mock://localhost`（连接日志可证），根本不连 runtime。
 
 **排障动作**：
 
 ```bash
-# real 轨前重建 real 形态产物（无 VITE_MOCK）
+# 真实进程层前重建 real 形态产物（无 VITE_MOCK）
 VITE_E2E=true pnpm run build:e2e
-# real 轨跑完、要跑 mock 轨（launch-app 形态）前再重建 mock 形态产物
+# 真实进程层跑完、要跑 mock 层（launch-app 形态）前再重建 mock 形态产物
 VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 ```
 
@@ -493,11 +493,11 @@ Windows 等效：`tasklist /FI "PID eq <pid>"` 核对单进程；按命令行定
 - **现状**：`main.ts` dev 块经 `utils/dev-data-dir.ts` 的 `resolveDevDataDir` 受控采信——装配器注入的 `instances/<worktree>` 实例目录生效（多 worktree 并行 dev 自动隔离），树外值（泄漏形态 `~/.taiji` 等）仍固定回 `~/.taiji-dev`。
 - **处置建议**：排查多实例互相污染类问题先核对实际数据目录（日志首行/`getDataDir()` 输出），不要按文档预期推定；需要干净环境时使用 `--fresh`。
 
-### 36. e2e real 轨执行环境三坑（2026-09-19 session 导入验收实测）
+### 36. e2e 真实进程层执行环境三坑（2026-09-19 session 导入验收实测）
 
-- **坑① 沙箱杀子进程**：沙箱化终端（如 AI agent 的 sandbox bash）里跑 `npx playwright test <real 轨 spec>`，e2e 派生的 runtime/pi 子进程会被持续 SIGKILL（supervisor 日志呈 `exitCode 137` 循环重启、runtime 死前零错误输出、无 jetsam 系统记录）——症状是 WS reply 超时/「连接中…」卡死，极具迷惑性。**处置**：real 轨一律非沙箱执行；取证先看 `<dataDir>/logs/main-*.log` 的 supervisor restart decision 与 `log show` 查 jetsam（有 = 系统内存压力，无 = 沙箱/外部 kill）。
-- **坑② bundle 陈旧分裂**：`build:e2e` 链 = main + preload + vite 三产物，**不含 build:runtime**——runtime 源码改动后直接跑 real 轨会用旧 runtime bundle，行为与源码对不上且无告警。**处置**：改过 runtime 后重跑 real 轨前先 `VITE_E2E=true pnpm run build:e2e`（会重建 runtime），或核对 `apps/electron/dist*/runtime` 产物 mtime 晚于源码最后改动。
-- **坑③ mock/real 构建产物互斥覆盖**：mock 轨（`VITE_MOCK=true`）与 real 轨（`VITE_E2E=true` 不传 VITE_MOCK）写同一 renderer 产物目录，后构建者覆盖前者——mock 轨 spec 在 real bundle 下会以「UI 停空态/元素找不到」失败，real 轨 spec 在 mock bundle 下被 `assertRealRendererBundle` 检查拦截（报 mock fixture 标记）。**处置**：切换轨之前按轨重建 bundle；mock 轨的 13 个失败里若混着 real spec 的 8-38ms 秒败，属预期拦截非回归。
+- **坑① 沙箱杀子进程**：沙箱化终端（如 AI agent 的 sandbox bash）里跑 `npx playwright test <真实进程层 spec>`，e2e 派生的 runtime/pi 子进程会被持续 SIGKILL（supervisor 日志呈 `exitCode 137` 循环重启、runtime 死前零错误输出、无 jetsam 系统记录）——症状是 WS reply 超时/「连接中…」卡死，极具迷惑性。**处置**：真实进程层一律非沙箱执行；取证先看 `<dataDir>/logs/main-*.log` 的 supervisor restart decision 与 `log show` 查 jetsam（有 = 系统内存压力，无 = 沙箱/外部 kill）。
+- **坑② bundle 陈旧分裂**：`build:e2e` 链 = main + preload + vite 三产物，**不含 build:runtime**——runtime 源码改动后直接跑 真实进程层会用旧 runtime bundle，行为与源码对不上且无告警。**处置**：改过 runtime 后重跑 真实进程层前先 `VITE_E2E=true pnpm run build:e2e`（会重建 runtime），或核对 `apps/electron/dist*/runtime` 产物 mtime 晚于源码最后改动。
+- **坑③ mock/real 构建产物互斥覆盖**：mock 层（`VITE_MOCK=true`）与 真实进程层（`VITE_E2E=true` 不传 VITE_MOCK）写同一 renderer 产物目录，后构建者覆盖前者——mock 层 spec 在 real bundle 下会以「UI 停空态/元素找不到」失败，真实进程层 spec 在 mock bundle 下被 `assertRealRendererBundle` 检查拦截（报 mock fixture 标记）。**处置**：切换之前按所需形态重建 bundle；mock 层的 13 个失败里若混着 real spec 的 8-38ms 秒败，属预期拦截非回归。
 
 ### 37. 终端多实例（一会话多终端）四类症状定位（2026-10-04 交付）
 

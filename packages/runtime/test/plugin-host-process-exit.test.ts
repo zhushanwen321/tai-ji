@@ -14,7 +14,7 @@
  * 对齐 L-5 实测序），grace 定时器经 fake timers 确定性推进：
  * - 被测逻辑（exit 0 分流 / disconnect grace 兜底 / pre-mark 幂等）全部留在
  *   PluginHostProcess 实装内；
- * - 真实子进程退出的事件传播时序归集成轨（TAIJI_TEST_INTEGRATION 门控）覆盖。
+ * - 真实子进程退出的事件传播时序归集成组（TAIJI_TEST_INTEGRATION 门控）覆盖。
  *
  * 运行命令: pnpm --filter @taiji/runtime exec vitest run test/plugin-host-process-exit.test.ts
  */

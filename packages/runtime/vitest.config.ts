@@ -19,7 +19,7 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
  *   长等待窗口在 CPU 饱和下被饿死（单跑 15.8s 的用例满并行下 301s 顶满超时，19 倍差距，
  *   事件流证明 LLM 轮次在推进、非死锁），故结构性隔离；组内用例另经 REAL_PI_READY 门控，
  *   无凭证环境自动 skip。
- * - **integration**：集成测试门控轨（env 开关 SSOT = test-guard/integration-gate.ts 的
+ * - **integration**：集成测试门控组（env 开关 SSOT = test-guard/integration-gate.ts 的
  *   TAIJI_TEST_INTEGRATION）——本地默认跳过、CI 或按改动范围触发时真跑的真进程 / 真 IO
  *   用例（spawn 真 pi 进程 + 真 extension jiti 冷编译、真实 chokidar fs.watch、跨进程
  *   spawn 等）。建池理由 = 这些用例测的是「代码 + OS 组合行为」，没有确定性完成信号可等，
@@ -35,10 +35,10 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
  *   main project 的 exclude，漏加 = 文件落回 main 满并行组）；② 文件内只有部分用例需门控
  *   → 文件留在 main 组，用 `describe.skipIf(!INTEGRATION_TESTS_ENABLED)` 包裹（用例级
  *   门控）。选型判据 = 文件内是否还有快用例值得留在默认组。
- * - faux LLM 轨用例（spawnPiFixture 传 fauxResponses：真 pi 进程 + 真 extension 加载 + 假 LLM，
+ * - faux LLM 层用例（spawnPiFixture 传 fauxResponses：真 pi 进程 + 真 extension 加载 + 假 LLM，
  *   门控 FAUX_PI_READY）**不进 real-pi 池**——该池的存在理由是真实 LLM 轮次的长等待窗口
- *   在 CPU 饱和下饿死，faux 轮次是毫秒级本地计算、零网络，该模式结构性不存在。但 faux 轨
- *   被整治清单判为「移出单测轨」时进 integration 池（文件级集成轨），门控改用
+ *   在 CPU 饱和下饿死，faux 轮次是毫秒级本地计算、零网络，该模式结构性不存在。但 faux 层
+ *   被整治清单判为「移出单测层」时进 integration 池（文件级集成组），门控改用
  *   TAIJI_TEST_INTEGRATION。
  * - 防线（globalSetup env 固定 + fs-guard 切面）经 test-guard/factory 顶层注入；
  *   projects 内 setupFiles **不**继承 root 级（vitest projects 语义，实测 setup 0ms 不执行），
@@ -47,11 +47,11 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
  *   第 5 条拦截。
  */
 const REAL_PI_TESTS = [
-  // L2.5 二批（2026-09-15）后：全部「真实 pi + 真实 LLM turn」equivalence 用例已翻轨
-  // faux（见上方维护契约）。数组保留为注册位——新增真实 LLM 轨文件必须登记于此
+  // L2.5 二批（2026-09-15）后：全部「真实 pi + 真实 LLM turn」equivalence 用例已迁组
+  // faux（见上方维护契约）。数组保留为注册位——新增真实 LLM 层文件必须登记于此
   // （检查 session-manager-e2e-fixture-unit.test.ts 双向 diff）。
-  // [2026-10-20 state-machine-infrastructure u-m1] session-manager-full-e2e（faux 轨
-  // 7 用例 + session-manager-archive-delete U9 加入的真 LLM 轨 3 用例——经
+  // [2026-10-20 state-machine-infrastructure u-m1] session-manager-full-e2e（faux 层
+  // 7 用例 + session-manager-archive-delete U9 加入的真 LLM 层 3 用例——经
   // REAL_PI_READY 门控，无凭证环境自动 skip；双 spawn + 真 extension jiti 冷编译）
   // 同款自愿登记：满并行下 faux 7/7 红（2026-10-20
   // 两轮实证：runtime 全量 669 文件满载下该文件整体失败），单跑 12s 恒绿 7/7——
@@ -61,7 +61,7 @@ const REAL_PI_TESTS = [
 ] as const
 
 /**
- * 集成测试门控轨（TAIJI_TEST_INTEGRATION）登记表：真进程 / 真 IO 用例，本地默认跳过。
+ * 集成测试门控组（TAIJI_TEST_INTEGRATION）登记表：真进程 / 真 IO 用例，本地默认跳过。
  *
  * 维护契约见文件头。本表成员在 e2e-map.json 登记 R2 规则（id = E2E-INTEG-两位序号，
  * trigger: on-diff、layer: L2、serial: true、run 命令带 TAIJI_TEST_INTEGRATION=1）；
@@ -106,7 +106,7 @@ export default taijiTestConfig({
       },
       {
         // 集成测试门控组：真进程 / 真 IO 用例，文件间串行、主组结束后开跑；本地不设
-        // TAIJI_TEST_INTEGRATION 时组内用例经 describe.skipIf 跳过（文件级集成轨）。
+        // TAIJI_TEST_INTEGRATION 时组内用例经 describe.skipIf 跳过（文件级集成组）。
         test: guardProjectSetup({
           name: 'integration',
           include: [...INTEGRATION_TESTS],

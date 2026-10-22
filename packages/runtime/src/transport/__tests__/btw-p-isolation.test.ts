@@ -2,7 +2,7 @@
  * P-isolation 探针（btw-question 运行时断言探针表，M2-b 验收④）——两线并发流式，
  * MessageBus 分区无串扰。
  *
- * 口径：fixture/mock 轨（真 MessageBus + 内存 BusClient，零 pi 零 token，凭证无关）。
+ * 口径：fixture/mock 层（真 MessageBus + 内存 BusClient，零 pi 零 token，凭证无关）。
  * 覆盖 runtime 侧分区收尾点 = MessageBus.publish 的定向推送（per-session 订阅集合 +
  * per-session seq/ring/stateSnapshot）——renderer chatStore 分区回放半边归 M2-c
  * （文件→applyEntry 回放等价），两侧合起来构成 P-isolation 全断言。
@@ -61,7 +61,7 @@ const VID_A = 'btw:thread-alpha'
 const VID_B = 'btw:thread-beta'
 const VID_C = 'btw:thread-gamma'
 
-describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus 半边，fixture 轨）', () => {
+describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus 半边，fixture 层）', () => {
   it('并发交错 100+100 帧（transient 直传面）：各自订阅者零串扰 + 无关会话零帧', async () => {
     const bus = new MessageBus()
     const a = makeClient()

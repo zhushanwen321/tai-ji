@@ -26,7 +26,7 @@ import * as composerApi from '@taiji/core/transport/api/domains/composer'
 import * as sessionApi from '@taiji/core/transport/api/domains/session'
 import * as mockApi from '@taiji/core/transport/mock'
 // SM-E2E-6：fileRead 必须经 @/api 门面（isMock 切换 mockApi.file / realFile）——直引 core real 域
-// 会绕过 mock 切换，mock 轨 file.read RPC 无 handler 挂 65s backstop，confirm 永不完成
+// 会绕过 mock 切换，mock 层 file.read RPC 无 handler 挂 65s backstop，confirm 永不完成
 import { file } from '@/api'
 import { useCommandStore } from '@/composables/features/command/useCommandStore'
 import { useFileTree } from '@/composables/features/file-tree/useFileTree'

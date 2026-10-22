@@ -757,7 +757,7 @@ describe('subagent-control server：协议与治理编排（引擎进程内桩�
 /**
  * 进程治理（真进程组）——判据第 ③ 档「代码 + OS 组合行为」：组杀是否真收割孤儿、
  * kill-on-disconnect 真 fan-out、Windows 树杀兜底。没有完成信号可等，只能观测窗口，
- * 故移出默认单测轨：本地默认跳过，CI 或按改动范围触发时设 TAIJI_TEST_INTEGRATION=1 真跑
+ * 故移出默认单测层：本地默认跳过，CI 或按改动范围触发时设 TAIJI_TEST_INTEGRATION=1 真跑
  * （helper = test-guard/integration-gate.ts；登记见 docs/testing/e2e-map.json）。
  *
  * 真进程组用例 POSIX 断言 skipIf(win32)。

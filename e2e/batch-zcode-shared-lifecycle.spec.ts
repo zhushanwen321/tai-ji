@@ -7,10 +7,10 @@
  *    各跑一段 bash sleep）顺序执行——两任务在途期的 zcode 引擎进程（wrapper 落盘
  *    `<engineDataDir>/engines/zcode/` 特征）pid 恒同（双任务同 pid + 任务间不退）。
  *    「现状行为即通过标准」：改造未动 zcode spawn 形态（shared-service 透传 registry
- *    保形），本轨 = manifest 显式声明后的路由保形回归。
+ *    保形），本组 = manifest 显式声明后的路由保形回归。
  *  - A7/V7 taiji 退出杀引擎进程：app.close() 后 zcode 引擎进程随宿主退出（宽限窗内
  *    pid 消失——stdin EOF 自灭链/停机收割）。pi 薄壳的收尾回落已由
- *    batch-window-lifecycle（A1）/ batch-s4（A2）覆盖，本轨只验 zcode 面。
+ *    batch-window-lifecycle（A1）/ batch-s4（A2）覆盖，本组只验 zcode 面。
  *
  * 断言原始证据文档 = ps 进程表（/engines/zcode/ 特征，基线差分吸收环境常驻；
  * wrapper 进程 argv = node <engineDataDir>/engines/zcode/zcode-launcher.cjs，

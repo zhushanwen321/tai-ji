@@ -17,8 +17,8 @@
 // （stderr tee 落盘 + 镜像上报 + settled 收割 + active-children 注销）、V2 契约
 // （get_state 只回 sessionId → 3 轮耗尽 → close 后 LC-4 后缀反查落位）、abort →
 // SIGTERM → 128+signal 折算、真实 ENOENT（F4：从未启动不得判成功）。真进程存亡
-// 无完成信号可等、窗口随负载拉长——移出默认单测轨（TAIJI_TEST_INTEGRATION 启用
-// 时真跑），默认轨只保留形态 A 的进程内桩逻辑。
+// 无完成信号可等、窗口随负载拉长——移出默认单测层（TAIJI_TEST_INTEGRATION 启用
+// 时真跑），默认组只保留形态 A 的进程内桩逻辑。
 //
 // fake pi 脚本（形态 B）落 mkdtemp 临时目录；process.argv[1] 临时指向它
 // （getPiInvocation 分支 1 形态：node <pi 入口> ...），用后恢复——pi-invocation 的
@@ -622,7 +622,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 );
 
 describe("runSpawnOnce 集成（stub 子进程翻译/分诊）", () => {
-  // ── 形态 A：stub 子进程（翻译/分诊类，进程内桩——默认单测轨） ──
+  // ── 形态 A：stub 子进程（翻译/分诊类，进程内桩——默认单测层） ──
 
   it("[D5 诊断引用写入 journal 记录] 失败（exit 3）→ 终态应答携带 stderrTeePath 且 tee 文件存在（S2 引擎段）", async () => {
     const h = makeStubHarness(exit3Script());

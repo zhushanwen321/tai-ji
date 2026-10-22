@@ -455,7 +455,7 @@ describe('A5 reattach-skipped 事件（逐 session 一条）', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// A6 checkpoint 删除属主（D3 契约 1 第二轨）
+// A6 checkpoint 删除属主（D3 契约 1 第二路）
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('A6 checkpoint 删除（全部尝试完后无条件删）', () => {
@@ -504,7 +504,7 @@ describe('A6 checkpoint 删除（全部尝试完后无条件删）', () => {
     expect(report.checkpointDeleted).toBe(false)
   })
 
-  it('默认删除路径（无注入）：真实 tmp 文件被 unlink（D3 删除属主第二轨走 store.checkpointPath）', async () => {
+  it('默认删除路径（无注入）：真实 tmp 文件被 unlink（D3 删除属主第二路走 store.checkpointPath）', async () => {
     const h = makeHarness()
     seed(h, [entry({ piSessionId: 'a', lastActivityAt: T0 - MIN })])
     h.settleHarvest()

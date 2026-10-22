@@ -2,7 +2,7 @@
 /**
  * A6 场景：first-prompt 模式 —— 发出首条请求即得名，不等回复。
  *
- * [L2.5 faux 翻轨，2026-09-15] LLM 演员改 faux 脚本（凭证无关、零 token）。
+ * [L2.5 faux 迁组，2026-09-15] LLM 演员改 faux 脚本（凭证无关、零 token）。
  * 环境：config 写 mode:"first-prompt"、模型留空（设计 D5：空 ref 跟随会话主模型 = faux）。
  * faux 队列（全局到达序，注意 first-prompt 模式 rename LLM 先于主 LLM 发出）：
  * rename 标题 → 首轮主 turn 文本 → 次轮主 turn 文本。

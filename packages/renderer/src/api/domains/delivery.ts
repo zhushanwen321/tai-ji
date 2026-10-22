@@ -7,7 +7,7 @@
  * delivery 三方法收窄为 `DeliverySurface`，签名从 core real 域类型派生（`Pick` 派生 alias），
  * 漂移在编译期红。
  *
- * [u5a 收编] 前身 mock 轨分支（u3c 自建的三方法空响应对象）已删除：core mock
+ * [u5a 收编] 前身 mock 层分支（u3c 自建的三方法空响应对象）已删除：core mock
  * （`@taiji/core/transport/mock` 的 `chat`）已补齐 cancel/drain/resync，本模块回归纯切换
  * （real = core transport 域 / mock = core mock 域），与 `@/api` 的 `isMock ? mock : real`
  * 同款 DCE 形态（生产构建下 mock 分支随死分支摇除）。

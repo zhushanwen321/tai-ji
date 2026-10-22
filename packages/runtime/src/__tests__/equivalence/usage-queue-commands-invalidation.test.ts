@@ -12,7 +12,7 @@
  *   真实 pi it 2（数字 console.log 输出，写进 builder 汇报做量化终判；落登记表由主 agent
  *   串行处理）
  *
- * skip-if-no-real-pi：真实 pi 用例已翻轨 faux LLM 轨（L2.5，2026-09-15）——「真实 pi 子进程」
+ * skip-if-no-real-pi：真实 pi 用例已迁组 faux LLM 层（L2.5，2026-09-15）——「真实 pi 子进程」
  * describe 门控 TAIJI_TEST_INTEGRATION（集成测试门控，SSOT = test-guard/integration-gate.ts：
  * 本地默认跳过、CI 或按改动范围触发时真跑；被测语义 = 实例快照收敛 get_session_stats 权威
  * 派生视图，LLM 响应由 fauxResponses 脚本固定，不依赖凭证）；mock 层 describe 不依赖真进程，
@@ -240,7 +240,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
   })
 
   it('事件风暴（丢 context.update）后 usage 实例值收敛 get_session_stats 快照', { timeout: 420_000 }, async () => {
-    // faux 轨：验证对象是「实例快照 == get_session_stats 权威派生视图」，非模型智能——
+    // faux 层：验证对象是「实例快照 == get_session_stats 权威派生视图」，非模型智能——
     // 一轮 turn 的响应由脚本固定；usage 数值按 faux 估算口径断言 typeof number +
     // 逐字段与权威拉取一致（禁精确值）
     const fx = await spawnPiFixture({ fauxResponses: [{ text: 'w8-usage-round-1' }] })

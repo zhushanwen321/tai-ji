@@ -459,7 +459,7 @@ describe("resolveGrandchildExtensionPaths / createPiHostServices.extensionPaths�
     expect(resolveGrandchildExtensionPaths(["node", "/pi", "--mode", "rpc"], () => undefined)).toEqual([]);
   });
 
-  // e2e 门（faux 轨装配）：TAIJI_E2E=1 且 <agentDir>/extensions/faux-llm-ext.ts 在盘
+  // e2e 门（faux 层装配）：TAIJI_E2E=1 且 <agentDir>/extensions/faux-llm-ext.ts 在盘
   // 时追加进孙进程显式 --extension 集；非 e2e 环境该路径恒被收窄（生产语义不变）。
   describe("e2e 门：faux-llm-ext 放行（TAIJI_E2E=1）", () => {
     let fauxAgentDir: string;

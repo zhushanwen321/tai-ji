@@ -15,7 +15,7 @@
  *   视图等价；fullRebuild 内容不变零帧（cursor 自愈全量重新拉取旧形态发冗余帧——已知差异）。
  * - profiling 门①拆两层（单测层极端测试整治第二波）：单测半场 = 同值增量最重形态的
  *   「零帧输出」逻辑断言（fake timers，确定性完成）；性能水位半场（单轮 ≤100ms/session/轮，
- *   real timers）经 TAIJI_TEST_INTEGRATION 门控移集成轨——单测不保证性能，水位断言
+ *   real timers）经 TAIJI_TEST_INTEGRATION 门控移集成组——单测不保证性能，水位断言
  *   属 bench/集成域（生产侧另有 session-records.ts 运行时耗时 warn 兜底）。
  *
  * 分层：mock 层 = deps 5 方法（与 session-records.test.ts 同形态）；extractor 生产代码
@@ -525,7 +525,7 @@ describe('对账轮同值增量全量比对零帧（profiling 门①·单测半�
 
 describe.skipIf(
   !INTEGRATION_TESTS_ENABLED,
-)(`profiling 门①：单轮对账耗时水位（real timers，性能预算归集成轨）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
+)(`profiling 门①：单轮对账耗时水位（real timers，性能预算归集成组）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
   let recordsUnderTest: SessionRecords | null = null
 
   afterEach(() => {

@@ -117,7 +117,7 @@ async function locateSessionFile(agentDir: string): Promise<string> {
 
 // ── serial 共享态（同 app 同会话：S3b 依赖 S3a 的 record id） ─────────────
 
-const gateSkip = process.env['TAIJI_PI_LIVE'] !== '1' ? '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则）' : realCredentialSkipReason('batch-s3')
+const gateSkip = process.env['TAIJI_PI_LIVE'] !== '1' ? '真实 LLM 层门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则）' : realCredentialSkipReason('batch-s3')
 
 let shared: {
   dataDir: string

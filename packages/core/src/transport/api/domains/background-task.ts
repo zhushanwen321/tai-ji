@@ -12,7 +12,7 @@
  * 编译期检查——任一侧形状漂移即 tsc 红。
  *
  * 注：本 domain 按 tc-transport-consolidation 终态落位 core 真源，未接入 renderer api/index.ts
- * 门面聚合（无 mock 轨——任务数据源自真实 runtime registry，mock 模式无此数据源，消费侧空态兜底）；
+ * 门面聚合（无 mock 层——任务数据源自真实 runtime registry，mock 模式无此数据源，消费侧空态兜底）；
  * 消费方直接 `import * as backgroundTask from '@taiji/core/transport/api/domains/background-task'`。
  */
 import type { ServerMessageMap } from '@taiji/shared'

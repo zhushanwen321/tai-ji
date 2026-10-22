@@ -4,8 +4,8 @@
  * 「新写测试判据」节）。
  *
  * 解析各包 `test-results/vitest-junit.xml`（vitest config 每次运行自动落盘的用例级
- * 耗时，见 AGENTS.md「用例级耗时报告」），默认轨任一用例超阈值即红。e2e-map
- * `E2E-INTEG-*` 规则登记的门控资产文件豁免——它们的耗时属集成轨语义（真进程 / 真 IO
+ * 耗时，见 AGENTS.md「用例级耗时报告」），默认组任一用例超阈值即红。e2e-map
+ * `E2E-INTEG-*` 规则登记的门控资产文件豁免——它们的耗时属集成组语义（真进程 / 真 IO
  * 用例在 CI 经 TAIJI_TEST_INTEGRATION=1 真跑，本就不受单测层 ≤1s 判据约束）。
  *
  * 用法：node scripts/check-slow-tests.mjs [--max-ms 2000]
@@ -88,14 +88,14 @@ function main() {
     }
   }
   if (offenders.length > 0) {
-    console.error(`[check-slow-tests] 默认轨存在超 ${MAX_MS}ms 的用例（判据 = docs/TEST-STRATEGY.md「新写测试判据」）：`)
+    console.error(`[check-slow-tests] 默认组存在超 ${MAX_MS}ms 的用例（判据 = docs/TEST-STRATEGY.md「新写测试判据」）：`)
     console.error(offenders.join('\n'))
     console.error('  [恢复动作] 按判据处置：确定性同步化 / 缩数据量 / 挂 TAIJI_TEST_INTEGRATION 门控（并在 e2e-map 登记 E2E-INTEG 规则）；')
-    console.error('            真进程或性能水位语义确需保留时挂门控，不留在默认轨。')
+    console.error('            真进程或性能水位语义确需保留时挂门控，不留在默认组。')
     process.exit(1)
   }
   const exemptFiles = exempt.size
-  console.log(`[check-slow-tests] OK（${junitFiles.length} 份 junit，超阈值 ${cases} 条全部为门控资产豁免，默认轨零慢用例；豁免清单 = e2e-map E2E-INTEG-* ${exemptFiles} 个文件）`)
+  console.log(`[check-slow-tests] OK（${junitFiles.length} 份 junit，超阈值 ${cases} 条全部为门控资产豁免，默认组零慢用例；豁免清单 = e2e-map E2E-INTEG-* ${exemptFiles} 个文件）`)
 }
 
 main()

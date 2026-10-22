@@ -12,7 +12,7 @@
  * - 原「等真实事件传播」的 waitFor 轮询与 sleep 观察窗，换成 fake timers 对
  *   disconnect grace 定时器的确定性推进（advanceTimersByTimeAsync）与测试显式驱动的
  *   迟到 exit（M6a-03 竞态窗口）；
- * - 真实 fork 的进程级行为归集成轨（TAIJI_TEST_INTEGRATION 门控）覆盖。
+ * - 真实 fork 的进程级行为归集成组（TAIJI_TEST_INTEGRATION 门控）覆盖。
  *
  * 运行命令: pnpm --filter @taiji/runtime exec vitest run test/plugin-host-process.test.ts
  */
@@ -153,7 +153,7 @@ describe('PluginHostProcess', () => {
     const processId = await host.assignProcess('crash-test', 'sandbox')
     const handle = host.getProcessHandle('crash-test')!
     // 桩按 mock bootstrap 协议响应 crash → 自退 exit(1)：disconnect → exit 事件序
-    // 同步 emit，宿主 exit handler 当场完成崩溃分流（真实传播由集成轨覆盖）
+    // 同步 emit，宿主 exit handler 当场完成崩溃分流（真实传播由集成组覆盖）
     handle.postMessage({ type: 'crash' })
 
     expect(crashes.length).toBe(1)

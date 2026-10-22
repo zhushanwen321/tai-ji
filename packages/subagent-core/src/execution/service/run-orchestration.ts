@@ -274,7 +274,7 @@ export class RunOrchestration {
       ? this.deps.getModelService().getRequiredAgentConfig(opts.agent)
       : undefined;
 
-    // ── 1.5 引擎路由（D2 单轨 + D3-② 路由单点：统一经 routeEngineForHost）──
+    // ── 1.5 引擎路由（D2 单路 + D3-② 路由单点：统一经 routeEngineForHost）──
     // 唯一实现在 engine/routing.ts（pi 同步短路 + registry 注入收敛于此）；本调用点
     // 只装配三层输入与注入件。时机：路由（含 probe）在 record 创建前完成——引擎未
     // 注册 / probe 失败 / 全局配置读不出来都在此 throw，不产生孤儿 record，也不换
@@ -452,7 +452,7 @@ export class RunOrchestration {
   }
 
   /**
-   * chat 域统一执行入口（D2 单轨：全引擎——含 pi——经此进入 EnginePort）。路由
+   * chat 域统一执行入口（D2 单路：全引擎——含 pi——经此进入 EnginePort）。路由
    *（routeEngineForHost：三层 + pi 同步短路 + probe/检查）已由 execute 完成——这里
    * 只剩 unsupported 预检 → identity（pi 链解析 / 非 pi 按目标引擎校验，
    * [u-h2 D2-1/D2-2]）→ record 创建+盖章 → worktree → detached 引擎 run。

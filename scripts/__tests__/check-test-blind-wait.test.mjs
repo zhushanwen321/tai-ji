@@ -102,7 +102,7 @@ describe('check-test-blind-wait 判定形态', () => {
     expect(r.status).toBe(0)
   })
 
-  it('仓根 e2e/ 前缀（Playwright real 轨域）跳过', () => {
+  it('仓根 e2e/ 前缀（Playwright 真实进程层域）跳过', () => {
     const dir = makeTmp()
     const target = join(dir, 'e2e/real-flow.spec.ts')
     mkdirSync(join(target, '..'), { recursive: true })

@@ -2,7 +2,7 @@
 //
 // 防线背景：wrapper 的失效模式是静默的（曾出过首调走未赋值 __origReadFileSync
 // 导致拦截整体失效的 bug——56a49ad4c）。本文件两层形态锚定核心语义（v2 注入
-// 优先合并、existsSync 拦截、encoding 归一、no-patch 分支、D3 换轨 merge 视图、
+// 优先合并、existsSync 拦截、encoding 归一、no-patch 分支、D3 切换 merge 视图、
 // CLI 源码补丁三锚、账号元数据供给）：
 //
 // 1. 真进程主链（describe「真进程主链」）：跨进程组合行为——落盘产物被 node 真实
@@ -38,7 +38,7 @@ import { mergePersonalProviderConfig } from "../preparer.ts";
 // ---------- fixture 源码 ----------
 
 // 探针 fake CLI（真进程主链用）：以 wrapper 注入后的 fs 形态读取 CONFIG_PATH /
-// 真实 provider_config.json（D3 换轨拦截路径）的各种调用形态并落盘 state（wrapper
+// 真实 provider_config.json（D3 切换拦截路径）的各种调用形态并落盘 state（wrapper
 // 对它 import() 启动——与真实 zcode.cjs 同入口形态）
 
 const PROBE_SOURCE = `'use strict';
@@ -464,11 +464,11 @@ interface HomeSpec {
   realRaw?: string;
   /** cli config 对象形态；undefined = 不布置该文件（GUI-only 宿主） */
   real?: unknown;
-  /** provider_config.json 对象形态（D3 顺带发现 6 补注入源 + D3 换轨拦截的真实侧）；undefined = 不布置 */
+  /** provider_config.json 对象形态（D3 顺带发现 6 补注入源 + D3 切换拦截的真实侧）；undefined = 不布置 */
   providerConfig?: unknown;
   /** provider_config.json 原文（与 providerConfig 互斥——D3 拦截零变化断言的字节级锚点） */
   providerConfigRaw?: string;
-  /** taiji 同步副本对象形态（D3 换轨：env 指向 engineDataDir 下独立副本路径） */
+  /** taiji 同步副本对象形态（D3 切换：env 指向 engineDataDir 下独立副本路径） */
   syncedCopy?: unknown;
   /** 副本原文（损坏形态；与 syncedCopy 互斥） */
   syncedCopyRaw?: string;
@@ -507,7 +507,7 @@ function setupHome(spec: HomeSpec): {
     fs.mkdirSync(path.dirname(providerConfigPath), { recursive: true });
     fs.writeFileSync(providerConfigPath, JSON.stringify(spec.providerConfig, null, 2));
   }
-  // taiji 同步副本：与真实 provider_config 分置两路径（D3 换轨语义收窄——env 指
+  // taiji 同步副本：与真实 provider_config 分置两路径（D3 切换语义收窄——env 指
   // 副本，真实路径由 wrapper 按 homedir 推导独立拦截）
   const copyPath = path.join(engineDataDir, "engines", "zcode", "pi-synced-provider-config.json");
   if (spec.syncedCopyRaw !== undefined || spec.syncedCopy !== undefined) {

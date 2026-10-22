@@ -103,7 +103,7 @@ const AMBIENT_PROVIDERS = new Set(['google-vertex', 'amazon-bedrock'])
 // ============ taiji 附加内置 provider（pi-ai 上游 catalog 之外的 taiji 自维护段）============
 //
 // pi-ai 不收录的 provider 在此登记，生成时追加进快照 providers 尾部，使其获得与
-// pi catalog provider 同轨的内置形态（设置页模板 / isCatalogProvider / apiKey 写 auth.json）。
+// pi catalog provider 同层的内置形态（设置页模板 / isCatalogProvider / apiKey 写 auth.json）。
 // 约束：
 // - 必须追加在 generateBuiltinProviders() 返回值内（而非 main() 拼接）——check-pi-sync S4
 //   用该函数做内存重生成比对，两处拼接会让快照恒判过期。

@@ -438,7 +438,7 @@ export class BtwService {
    * 惰性 spawn 线进程 → 附着/读回 → registerSession(hidden:true) → 注册表登记。
    *
    * 全程零触碰主会话进程与主会话文件（P-no-abort 结构面：主 turn 不可能被本路径
-   * 打断——真机断言归 S7 真实进程轨）；零直写线会话文件（fork 文件由 pi 写、
+   * 打断——真机断言归 S7 真实进程层）；零直写线会话文件（fork 文件由 pi 写、
    * 回落文件由 pi 首 flush 自建）。
    *
    * 分解件（metrics-gate 复杂度偿还，编排序不变）：fork 编排归 forkSnapshotForLine、

@@ -2,7 +2,7 @@
 /**
  * A3 场景：防覆盖手动命名 —— 3a 静态 + 3b 竞态 + 3c 一次性语义。
  *
- * [L2.5 faux 翻轨，2026-09-15] LLM 演员改 faux 脚本（凭证无关、零 token）：
+ * [L2.5 faux 迁组，2026-09-15] LLM 演员改 faux 脚本（凭证无关、零 token）：
  * - 3a/3c 队列（全局到达序）：首轮主 turn 文本 → rename 标题 → 次轮主 turn 文本
  *   （3c 的 rename skip 不消费 rename 步骤，次轮只吃主 turn 步骤）
  * - 3b 竞态用 TAIJI_FAUX_TPS 流控拉长 rename 响应耗时（faux 即时返回会让竞态窗口

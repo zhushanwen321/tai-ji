@@ -522,7 +522,7 @@ function executeEnter(
 
 /**
  * select-template（D7）：三源合并视图解析 + content 携带胜者文件全文。
- * - 合并视图与注入段同源：两轨都以 ctx.cwd 为 projectRoot 调 listTemplates
+ * - 合并视图与注入段同源：两路都以 ctx.cwd 为 projectRoot 调 listTemplates
  *   （注入段经 PlanPromptInput.projectRoot 由命令层显式传入，不从 planFilePath
  *   逆推层级）——模型看到什么清单就能选中什么（含用户级/项目级投放）。
  * - 单次扫描复用（C1 去重）：清单查找与内容读取共用同一次扫描产物（胜者 path

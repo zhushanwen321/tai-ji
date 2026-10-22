@@ -12,7 +12,7 @@
  * fixtures）：被测逻辑（trusted 共享分配 / sandbox 转调 / 预期终止不误报崩溃的
  * pre-mark + 幂等检查）全部留在 PluginHost 实装内；真实进程/线程生命周期行为
  * （terminate → exit code=1、SIGKILL → exit code=null）属「代码 + OS 组合行为」，
- * 归集成轨（TAIJI_TEST_INTEGRATION 门控）覆盖，不在单测层断言。
+ * 归集成组（TAIJI_TEST_INTEGRATION 门控）覆盖，不在单测层断言。
  *
  * 运行命令: pnpm --filter @taiji/runtime exec vitest run test/plugin-host.test.ts
  */
@@ -114,7 +114,7 @@ describe('PluginHost', () => {
     host.getWorkerInstance(workerId)!.on('exit', (code) => exitCodes.push(code))
 
     await host.terminateWorker(workerId)
-    // 桩的 terminate() 同步 emit exit（真实线程退出传播由集成轨覆盖）：
+    // 桩的 terminate() 同步 emit exit（真实线程退出传播由集成组覆盖）：
     // await 返回即事件已处理，无需 waitFor 窗口
     expect(exitCodes).toEqual([1])
 

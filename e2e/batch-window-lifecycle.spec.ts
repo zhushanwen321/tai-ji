@@ -18,7 +18,7 @@
  * 执行侧约定（与 batch-s1/s3/s4 同款）：
  * - 触发：窗口资源模型行为范围（engine 窗口实例表 / finalizeRun 收尾链 / 路由）改动时
  *   开发期空载串行执行；双凭证门 = TAIJI_PI_LIVE=1 + 本机 provider 凭证，缺一 skip
- *   不 fail；CI/PR/merge 门禁不跑本轨。
+ *   不 fail；CI/PR/merge 门禁不跑本组。
  * - 前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle）。
  * - 预算：600s（长成员 150s sleep + 双派发 turn + 收尾确认）；「第一个 settled =
  *   short」判据由 sleep 硬下界保证（150s vs 20s），LLM 抖动不反转。

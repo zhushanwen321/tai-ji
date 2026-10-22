@@ -17,7 +17,7 @@
 // TAIJI_TEST_INTEGRATION=1 真跑（门控 SSOT = test-guard/integration-gate.ts）。
 // 保留的首条（initialize → run → 终态应答全链）即冒烟；resume 全链与迟到终态
 // stderr 分级两条链的逻辑面另有进程内覆盖（zcode-engine-resume.test.ts 引擎级
-// resume 链、session-channel.test.ts 分级日志机制层），bin 级形态在此门禁轨保留。
+// resume 链、session-channel.test.ts 分级日志机制层），bin 级形态在此门控层保留。
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

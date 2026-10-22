@@ -196,7 +196,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 					// 子进程内先断言锁已创建（证明「锁曾存在」），失败以非零退出码表达（不用
 					// console——extensions 日志规范禁 console；诊断信息由父进程断言消息带出）。
 					// strip-types 直接跑 TS 源码（Node >= 22.6）：门控用例只在 CI / 按改动
-					// 范围触发时跑，编译窗不占默认单测轨。
+					// 范围触发时跑，编译窗不占默认单测层。
 					const worker = `
 import * as fs from "node:fs";
 import { acquireLock } from "${PKG_DIR}/src/lock-core.ts";

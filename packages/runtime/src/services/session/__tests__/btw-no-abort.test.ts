@@ -4,7 +4,7 @@
  *    ⇒ 主 turn 不可能被本路径打断）；
  *  - 主会话文件字节级不变（宿主只读交源给 pi fork 链路，零直写）；
  *  - 进程键从不使用主会话 id（不碰主进程的 ProcessManager 条目）。
- * 真机断言（主 turn 进行中发 btw prompt、turn_end 正常到达）归 S7 真实进程轨（M4-b e2e）。
+ * 真机断言（主 turn 进行中发 btw prompt、turn_end 正常到达）归 S7 真实进程层（M4-b e2e）。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'

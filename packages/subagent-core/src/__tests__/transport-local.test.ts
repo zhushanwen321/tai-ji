@@ -555,7 +555,7 @@ describe("EngineClient transport 谓词与错误码 preserve（验收②③）",
 describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
   `LocalEngineTransport：真进程治理链（验收①③）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
   () => {
-    /** 轮询等待谓词成立（真实子进程信号传播有毫秒级延迟——本轨为集成门控真跑形态）。 */
+    /** 轮询等待谓词成立（真实子进程信号传播有毫秒级延迟——本组为集成门控真跑形态）。 */
     async function waitFor(predicate: () => boolean, timeoutMs = 5_000, stepMs = 25): Promise<void> {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {

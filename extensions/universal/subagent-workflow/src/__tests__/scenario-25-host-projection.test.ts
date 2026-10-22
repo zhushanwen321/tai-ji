@@ -7,7 +7,7 @@
 //   （workflow-record-entry 契约单源）、v2 注册条目锚点。
 // - 集成门段（TAIJI_TEST_INTEGRATION 门控）：session-reader 实装对拍——经 tsx
 //   子进程 probe 加载（vite resolver 不解析跨包物理相对路径——见 scenario-kit
-//   尾注）。tsx 冷编译 spawn 在负载下无完成信号上界（判据第 3 档），归集成轨；
+//   尾注）。tsx 冷编译 spawn 在负载下无完成信号上界（判据第 3 档），归集成组；
 //   概览链三态渲染 + 执行树家族链 calls[].sessionFile 提取（D16 ③ 强制连带断言
 //   ——挂靠本文件：宿主派生视图族同域）的断言体在 driver-session-reader.ts。
 // - CDP 门段（describe.skipIf(!process.env.TAIJI_E2E_HOST_PROJECTION_CDP)）：

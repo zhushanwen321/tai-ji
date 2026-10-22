@@ -56,7 +56,7 @@ vi.mock('@taiji/core/transport/api/domains/session', () => ({
 vi.mock('@taiji/core/transport/api/domains/file', () => ({ tree: vi.fn().mockResolvedValue({}) }))
 vi.mock('@taiji/core/transport/api/domains/git', () => ({ status: vi.fn().mockResolvedValue({}) }))
 
-// preset 域 mock：VITE_MOCK=true 下 '@/api'.preset 本就走 mock 轨，此处换成可控 fixture
+// preset 域 mock：VITE_MOCK=true 下 '@/api'.preset 本就走 mock 层，此处换成可控 fixture
 // （list/getDefault 即 usePiPresets.loadPresets 的数据源——ensureReady 接线断言探针）
 const presetApiMock = vi.hoisted(() => ({
   list: vi.fn().mockResolvedValue([] as PiLaunchPreset[]),

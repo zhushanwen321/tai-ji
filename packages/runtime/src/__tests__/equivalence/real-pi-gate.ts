@@ -1,12 +1,12 @@
 /**
- * 等价性测试 REAL 轨（真实 LLM turn）门控——与 pi-fixture.ts 的 faux 轨分离的独立模块。
+ * 等价性测试 REAL 层（真实 LLM turn）门控——与 pi-fixture.ts 的 faux 层分离的独立模块。
  *
  * 为什么单独成文件：REAL 门控探测要读本机真实 `~/.pi/agent` 凭证文件（auth.json /
  * models.json，只读存在性与非空 key，不触凭证值、不进断言）。pi-fixture 的全部现役
- * 消费方都是 faux 轨（凭证无关），若探测留在 pi-fixture 模块顶层，任何 import
+ * 消费方都是 faux 层（凭证无关），若探测留在 pi-fixture 模块顶层，任何 import
  * pi-fixture 的测试文件都会在加载期无条件触发真实凭证读取。拆出后探测只被显式
  * import 本模块的加载链触发（当前 = spawnPiFixture 的 real 分支按需动态 import），
- * faux 轨运行零真实凭证读取。
+ * faux 层运行零真实凭证读取。
  *
  * 引用约定：真实 LLM turn 用例（TEST-STRATEGY §4 完整基线，开发机手动跑）一律
  * `import { REAL_PI_READY } from './real-pi-gate.js'` + `describe.skipIf(!REAL_PI_READY)`
@@ -147,7 +147,7 @@ function detectRealPiSkipReason(): string | null {
   return `pi 凭证不可用：DEFAULT_MODEL "${DEFAULT_MODEL}" 需要 provider "${DEFAULT_PROVIDER}" 的 API key，已探测 ${checked.join('；')} 均未命中。真实 LLM turn 用例 skip（mock / fixture 重放子集照跑），完整等价性基线请在凭证在位的开发机运行（TEST-STRATEGY.md §4 等价性双轨）`
 }
 
-/** 凭证探测结果（模块顶层；本模块只被 REAL 轨消费方显式 import，顶层执行即按需探测）：
+/** 凭证探测结果（模块顶层；本模块只被 REAL 层消费方显式 import，顶层执行即按需探测）：
  * null = binary + 凭证双就绪；非 null = skip 理由（binary 缺席 / 凭证缺失 / env 强制三态可分辨）。 */
 export const REAL_PI_SKIP_REASON: string | null = detectRealPiSkipReason()
 

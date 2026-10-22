@@ -2,8 +2,8 @@
 //
 // D5b 对账双向 diff：物理（磁盘）侧 ↔ 注册表。
 //
-// 两条轨道（判据三档：只测逻辑、高负载极快）：
-//   1. 默认轨道（本文件上半）：in-process fixture——git 经 execFile 桩脚本化响应、
+// 两种形态道（判据三档：只测逻辑、高负载极快）：
+//   1. 默认组道（本文件上半）：in-process fixture——git 经 execFile 桩脚本化响应、
 //      pid 探活经 alive-store 桩注入，物理侧 checkout 目录 / .alive marker 走真实
 //      tmpdir 小文件。六个收敛方向的判定逻辑全部同步可断言，无真进程、无真 git。
 //   2. CI-only 轨道（本文件下半，TAIJI_TEST_INTEGRATION=1 才跑）：真实 git repo +
@@ -37,7 +37,7 @@ import { WorktreeManager } from "../worktree/worktree-manager.ts";
 const ORIG_TMPDIR = os.tmpdir();
 
 /**
- * in-process fixture 开关（默认轨道的 git / pid 探活桩）。
+ * in-process fixture 开关（默认组道的 git / pid 探活桩）。
  *
  * git = true 时 execFile 走 gitScript（脚本化 git，记录全部命令）；alive = true 时
  * isProcessAlive 按 alivePids 集合判定。CI-only 真实 git 轨道两个开关都置 false，
@@ -132,7 +132,7 @@ function useFakeGit(state: FakeGitState): void {
 }
 
 // ============================================================
-// 默认轨道：in-process fixture（无真 git、无真进程）
+// 默认组道：in-process fixture（无真 git、无真进程）
 // ============================================================
 
 describe("WorktreeManager.scan 对账双向 diff（D5b，in-process fixture）", () => {

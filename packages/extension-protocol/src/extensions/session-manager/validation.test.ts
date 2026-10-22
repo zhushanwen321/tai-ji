@@ -25,7 +25,7 @@ const TSC_BIN = require.resolve('typescript/bin/tsc')
  *    「测试内跑编译器」（整治判据 e 类，docs/TEST-STRATEGY.md「新写测试判据」节），
  *    且本包无其他机器承载（`extensions:typecheck` 只覆盖 extensions/ 目录、
  *    CI typecheck job 无本包步骤），删除会失去唯一类型门禁，故保留但本地默认跳过
- * 2. index.ts 导出 SESSION_MANAGER_MARKER（纯逻辑，默认轨常驻）
+ * 2. index.ts 导出 SESSION_MANAGER_MARKER（纯逻辑，默认组常驻）
  */
 describe('U1-A1 marker 常量 + 请求/结果 schema 类型 + 审计 entry schema 单一 SSOT', () => {
   it.skipIf(!INTEGRATION_TESTS_ENABLED)(

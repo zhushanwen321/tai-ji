@@ -424,7 +424,7 @@ export class WorkflowDispatch {
     return undefined;
   }
 
-  /** [executeWorkflowAgent 阶段拆分] 八步迁移①：引擎路由（D2 单轨——统一经
+  /** [executeWorkflowAgent 阶段拆分] 八步迁移①：引擎路由（D2 单路——统一经
    *  routeEngineForHost：三层输入 + probe 检查 + pi 同步短路）+ Promise 决议。
    *
    *  [U2 pi-workflow-run-resource-model] probe 通道窗口实例改道：probe 与

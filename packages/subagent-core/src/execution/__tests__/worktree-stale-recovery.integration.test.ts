@@ -13,10 +13,10 @@
 // 分层（判据三档：只测逻辑、高负载极快）：本文件是「代码 + 真 git 元数据」组合行为
 // ——真实 `git worktree add` 的失败形态（git 2.52 实测的 `already exists` /
 // `already used by worktree at` 文案与 prune/branch -D 的实际收敛效果）无法用进程内
-// 桩复现，故整文件迁 CI-only 集成轨（TAIJI_TEST_INTEGRATION=1 才跑，本地默认跳过）。
+// 桩复现，故整文件迁 CI-only 集成组（TAIJI_TEST_INTEGRATION=1 才跑，本地默认跳过）。
 // 同语义的判定逻辑（判定前置、git 命令序列、deleteStaleBranch 分支差异）已由
 // worktree-manager.test.ts 的 [1.2]/[1.3] + addWorktreeWithStaleRecovery 用例以
-// mock execFile 的进程内形态覆盖（默认轨，亚毫秒级）。
+// mock execFile 的进程内形态覆盖（默认组，亚毫秒级）。
 //
 // 隔离手段：TMPDIR 重定向到测试私有目录——checkout 物理根 = os.tmpdir()/pi-subagents
 // 跟随 TMPDIR；agentDir / repo 均在私有目录内，mkdtempSync 自建自删，不触碰真实

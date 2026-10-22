@@ -731,10 +731,10 @@ cd packages/renderer && npx vitest run src/__tests__/lib/match-engine.test.ts  #
 
 ## 6. 非 MOCK 模式测试（手工冒烟）
 
-> **铁律**：MOCK 轨测试全绿 ≠ 功能可用。search 改了 SearchModal + 新增 5 个 composable/lib/store，必须手工 `pnpm run dev` 确认模块加载健康（[00 §1.3](./00-overview.md) dev 冒烟门禁）。
+> **铁律**：MOCK 层测试全绿 ≠ 功能可用。search 改了 SearchModal + 新增 5 个 composable/lib/store，必须手工 `pnpm run dev` 确认模块加载健康（[00 §1.3](./00-overview.md) dev 冒烟门禁）。
 
 ```bash
-pnpm dev    # 非 MOCK 轨，起 runtime + pi
+pnpm dev    # 非 MOCK 层，起 runtime + pi
 ```
 
 手工冒烟清单（dev 启动后）：
@@ -777,7 +777,7 @@ pnpm dev    # 非 MOCK 轨，起 runtime + pi
 >
 > 协议定义见 `packages/extension-protocol/src/core/types.ts`，helper 见 `helpers.ts`。
 >
-> **[已退役/迁移 2026-09-16]** 本节「路径 A（SideDrawer widget）」消费端描述与 E2E-GUI-3/4 用例已退役：widgetGui 渲染消费端由 SideDrawer 迁至 **composer 任务托盘 widget 区**（`packages/renderer/src/components/panel/tray/`，`TrayWidgetButton`/`TrayWidgetPanel`；SideDrawer 内 `gui-stats-line`/`gui-list-tree` testid 已不存在）。widgetGui 端到端断言归宿 = real 轨 `e2e/tasks-drawer-real.spec.ts` R2（mock 轨不可达 crossSession 分发链，缺口见 `e2e/gui-components.spec.ts` 头注与 impl-plan 残留风险 5）。路径 B（对话流内联块）现行不变。另：「7 种 block type」= 有专测的 7 原语口径，协议 BUILTIN_MAP 共 8 类（Group 无独立专测文件），两处口径并存时以协议文档为准。
+> **[已退役/迁移 2026-09-16]** 本节「路径 A（SideDrawer widget）」消费端描述与 E2E-GUI-3/4 用例已退役：widgetGui 渲染消费端由 SideDrawer 迁至 **composer 任务托盘 widget 区**（`packages/renderer/src/components/panel/tray/`，`TrayWidgetButton`/`TrayWidgetPanel`；SideDrawer 内 `gui-stats-line`/`gui-list-tree` testid 已不存在）。widgetGui 端到端断言归宿 = 真实进程层 `e2e/tasks-drawer-real.spec.ts` R2（mock 层不可达 crossSession 分发链，缺口见 `e2e/gui-components.spec.ts` 头注与 impl-plan 残留风险 5）。路径 B（对话流内联块）现行不变。另：「7 种 block type」= 有专测的 7 原语口径，协议 BUILTIN_MAP 共 8 类（Group 无独立专测文件），两处口径并存时以协议文档为准。
 
 ## 1. 组件与 testid 清单
 
@@ -817,7 +817,7 @@ Mock 模式跳过 runtime event-adapter：`run-send-stream.ts` 直接 `pushSessi
 
 ### 4.1 公共前置
 
-- Mock 轨：`VITE_MOCK=true` + `TAIJI_MOCK=1`（launch-app fixture 自动设置）
+- Mock 层：`VITE_MOCK=true` + `TAIJI_MOCK=1`（launch-app fixture 自动设置）
 - 使用 `e2e-files` session（有文件树 + 可发消息）
 - mock `run-send-stream` 推送序列含 `tool_call_end(details.__gui__)` + `extension:widgetGui × 2`
 
@@ -827,7 +827,7 @@ Mock 模式跳过 runtime event-adapter：`run-send-stream.ts` 直接 `pushSessi
 |---|---|---|
 | E2E-GUI-1 | harness smoke | app 加载首窗口 + sidebar 会话按钮可见 |
 | E2E-GUI-2 | 路径 B: tool result `__gui__` → card 嵌套渲染 | `gui-card` + `gui-progress-bar` + `gui-stats-line` 可见，含 'CI Pipeline'/'build'/'7'/'8'/'turns'/'15' |
-| E2E-GUI-3 | ~~路径 A: widgetGui stats-line → terminal tab~~ **[已退役 2026-09-16]** | SideDrawer 内 `gui-stats-line` testid 已不存在（消费端迁托盘 widget 区）；widgetGui 端到端断言归宿 = real 轨 `e2e/tasks-drawer-real.spec.ts` R2（mock 轨不可达 crossSession 链） |
+| E2E-GUI-3 | ~~路径 A: widgetGui stats-line → terminal tab~~ **[已退役 2026-09-16]** | SideDrawer 内 `gui-stats-line` testid 已不存在（消费端迁托盘 widget 区）；widgetGui 端到端断言归宿 = 真实进程层 `e2e/tasks-drawer-real.spec.ts` R2（mock 层不可达 crossSession 链） |
 | E2E-GUI-4 | ~~路径 A: widgetGui list-tree → browser tab~~ **[已退役 2026-09-16]** | SideDrawer 内 `gui-list-tree` testid 已不存在；归宿同 E2E-GUI-3 |
 
 ### 4.3 每步期望输入输出
@@ -951,7 +951,7 @@ background 模式 subagent 的 sessionFile 可能为 null（bg-notify 不带 ses
 
 ## §5 MOCK 模式测试（vitest 集成）
 
-mock 层 `getSubagents` 返回空数组，故 mock 轨只能测空态。已有 vitest 单测覆盖组件交互逻辑。
+mock 层 `getSubagents` 返回空数组，故 mock 层只能测空态。已有 vitest 单测覆盖组件交互逻辑。
 
 **运行命令**（cwd 敏感）：
 
@@ -1019,7 +1019,7 @@ pnpm dev → Electron (--remote-debugging-port=9222)
 
 **当前状态：⚠️ 手工执行（非 spec 脚本自动化）**
 
-mock 轨的 Playwright E2E（`e2e/*.spec.ts`）无法覆盖本功能——mock 层返回空数组。real-track 的 Playwright 自动化需要连真实 runtime，现有 `launch-app-real.ts` fixture 仅用于 workspace 持久化测试，不包含 subagent 场景的 session 数据准备。
+mock 层的 Playwright E2E（`e2e/*.spec.ts`）无法覆盖本功能——mock 层返回空数组。real-track 的 Playwright 自动化需要连真实 runtime，现有 `launch-app-real.ts` fixture 仅用于 workspace 持久化测试，不包含 subagent 场景的 session 数据准备。
 
 **手工 E2E 价值**：验证完整数据链路（runtime JSONL 解析 → WS RPC → 前端渲染 → 用户交互），是 mock 单测不可替代的。
 
@@ -1175,7 +1175,7 @@ ForkGroup（当前会话的「本会话的分支」折叠区）已整体退役�
 
 > 来源：workflow-visualization 设计（2026-10-02 交付）。全屏 overlay = 左 DAG 蓝图 + 右多级 tab 实况面板；双入口（托盘 workflow 行 / 对话流 workflow block）改向 overlay，drawer WorkflowTab 保留作回落载体。
 >
-> **mock 轨 e2e**：`e2e/workflow-viz-overlay.spec.ts`（OV1-OV6：双入口/三子页对账/钻取与 tab 编排/DAG 降级/三通道关闭，挂 E2E-MOCK-01）；同域 `e2e/workflow-sidebar-sync.spec.ts` T1-T3（托盘同步 + 入口改向）。
+> **mock 层 e2e**：`e2e/workflow-viz-overlay.spec.ts`（OV1-OV6：双入口/三子页对账/钻取与 tab 编排/DAG 降级/三通道关闭，挂 E2E-MOCK-01）；同域 `e2e/workflow-sidebar-sync.spec.ts` T1-T3（托盘同步 + 入口改向）。
 >
 > **组件测试**：`packages/renderer/src/components/panel/workflow-viz/__tests__/`（gantt-segments 分段派生 fixture 单测含 rebuild/resume 代际样本断言、blueprint-match 匹配规则、panel 面板、workflow-store 缓存生命周期）。
 
@@ -1192,4 +1192,4 @@ ForkGroup（当前会话的「本会话的分支」折叠区）已整体退役�
 | 事件流 | 事件流子页（RunEventStream）含截断标注与错误二分形态 | record 原文（2KB 截断 + truncatedFields） |
 | Gantt | `wfvz-gantt`（`data-frozen` 标记停止冻结） | attempt 分段横条/phase 色带/游标 |
 
-**坑位**：① mock 轨 getWorkflowDag 恒 record_not_found 降级（T3/OV4 共用断言范围，勿改成功）；② block 反查名字形态归一（路径/basename/带扩展名互通，workflow-viz-overlay.ts findRun）——主 agent 传路径是常态；③ e2e 像素轨不覆盖 overlay（交互层不进 shell/composer 基线视口，视觉验证走 L4 截图）。
+**坑位**：① mock 层 getWorkflowDag 恒 record_not_found 降级（T3/OV4 共用断言范围，勿改成功）；② block 反查名字形态归一（路径/basename/带扩展名互通，workflow-viz-overlay.ts findRun）——主 agent 传路径是常态；③ e2e 像素对比层不覆盖 overlay（交互层不进 shell/composer 基线视口，视觉验证走 L4 截图）。

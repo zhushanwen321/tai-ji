@@ -33,17 +33,17 @@
  * TS 模块（SkillInjector / buildSkillMarker），无需 tsx/esbuild 加载或源码正则提取的妥协。
  *
  * 与探针族既有静态断言（pi-semantics-rpc-surface 等）的分工：静态族守 pi 源码形态、
- * 凭证无关；本探针是动态成员（真实展开产物对照）。faux LLM 轨（L2.5 翻轨）：turn 的
+ * 凭证无关；本探针是动态成员（真实展开产物对照）。faux LLM 层（L2.5 迁组）：turn 的
  * 唯一目的是触发 JSONL flush（PS-14 assistant 落盘门），faux 一轮文本回复即可，断言
- * 对象（pi 落盘展开文本 golden vs taiji 注入器逐字 diff）与翻轨前一致；门控 = 集成
+ * 对象（pi 落盘展开文本 golden vs taiji 注入器逐字 diff）与迁组前一致；门控 = 集成
  * 测试门控 TAIJI_TEST_INTEGRATION（本地默认跳过，CI 与按改动范围触发时真跑；SSOT =
  * test-guard/integration-gate.ts）——整文件为门控用例，已登记 packages/runtime
  * vitest.config.ts integration project（串行尾组），本地不设 env 时 describe.skipIf
  * 跳过（整治判据见 docs/TEST-STRATEGY.md「新写测试判据」节）。
- * [pi-bump 触发] /skill: 展开格式是 pi 源码行为，bump 时建议真实轨重放一次（e2e-map
+ * [pi-bump 触发] /skill: 展开格式是 pi 源码行为，bump 时建议真实层重放一次（e2e-map
  * E2E-INTEG-09 登记；跑时须带 TAIJI_TEST_INTEGRATION=1）。
  *
- * 运行（集成轨，须显式开门控）：cd packages/runtime && TAIJI_TEST_INTEGRATION=1 npx vitest run src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts
+ * 运行（集成组，须显式开门控）：cd packages/runtime && TAIJI_TEST_INTEGRATION=1 npx vitest run src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -127,7 +127,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
       mkdirSync(skillDir, { recursive: true })
       // frontmatter 只写 description：pi loadSkillFromFile 的 name 回退父目录名（skills.js :244-245）
       writeSkillFile(skillDir, SKILL_BODY_LINES)
-      // faux 轨：一轮文本回复只为触发 JSONL flush（PS-14 assistant 落盘门）；
+      // faux 层：一轮文本回复只为触发 JSONL flush（PS-14 assistant 落盘门）；
       // 冷启动余量 15s 由 faux 通道下限兜底（jiti 冷编译 extension）
       fixture = await spawnPiFixture({ sessionDir, coldStartTimeoutMs: 15_000, fauxResponses: [{ text: 'ok' }] })
     }, 30_000)

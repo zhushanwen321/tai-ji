@@ -4,7 +4,7 @@
  * 职责：
  * - spawnPi：隔离环境起真实 pi（RPC mode + rename-session extension），tmp 初始化
  *   （auth 迁移 / settings.json / auto-rename flag / 可选 models.json 与 ext-config 覆盖）
- * - faux LLM 轨（L2.5 翻轨，2026-09-15）：opts.faux 提供即切换凭证无关装配——
+ * - faux LLM 层（L2.5 迁组，2026-09-15）：opts.faux 提供即切换凭证无关装配——
  *   settings/models 预置 faux provider（defaultProvider=faux 过 pi 模型解析）+
  *   --extension 注入 runtime fixtures 的 faux-llm-ext.ts + TAIJI_FAUX_SCRIPT 响应脚本。
  *   主对话 turn 与 rename LLM 调用（llm-shared completeSimple）共享同一 faux 队列
@@ -62,7 +62,7 @@ const FAUX_LLM_EXT = join(
 	REPO_ROOT, "packages", "runtime", "src", "__tests__", "fixtures", "faux-llm-ext.ts",
 );
 
-/** faux 轨模型（faux 装配的 --model）。 */
+/** faux 层模型（faux 装配的 --model）。 */
 export const FAUX_MODEL = "faux/faux-1";
 
 /** rename LLM 超时（固定 30s，与 llm.ts RENAME_TIMEOUT_MS 同值）+ 余量，waitForSessionLog 等 rename 结果日志的默认上限。 */
@@ -538,8 +538,8 @@ export function startHangServer(host = "127.0.0.1") {
 
 /**
  * tmp agent 目录初始化：
- * - 真实轨（faux 未提供）：auth.json 复制自 ~/.pi/agent/auth.json（不存在则要求 env 兜底并留警告）
- * - faux 轨：跳过 auth 迁移（凭证无关），settings/models 预置 faux provider
+ * - 真实层（faux 未提供）：auth.json 复制自 ~/.pi/agent/auth.json（不存在则要求 env 兜底并留警告）
+ * - faux 层：跳过 auth 迁移（凭证无关），settings/models 预置 faux provider
  * - settings.json：enabledModels + retry.enabled=false（消除 error 轮 auto-retry 退避）
  * - auto-rename-enabled flag 文件（extension 开关 live 覆盖源）
  * - 可选覆盖：modelsJson（A4 坏 provider / A5 stub provider）、renameConfig（A5 标题模型指向）
@@ -548,8 +548,8 @@ function initAgentDir(agentDir, opts = {}) {
 	mkdirSync(agentDir, { recursive: true });
 
 	if (opts.faux) {
-		// faux 轨：settings/models 预置 faux provider（defaultProvider=faux 供 --model
-		// 解析 + pi 模型清单；与 e2e real 轨 launch-app-real.ts seedFauxDataDir 同款语义）
+		// faux 层：settings/models 预置 faux provider（defaultProvider=faux 供 --model
+		// 解析 + pi 模型清单；与 e2e 真实进程层 launch-app-real.ts seedFauxDataDir 同款语义）
 		writeFileSync(
 			join(agentDir, "settings.json"),
 			JSON.stringify(
@@ -645,7 +645,7 @@ function initAgentDir(agentDir, opts = {}) {
  * - cwd：agent 工作目录（默认 tmp；A1 需要 ts 文件的目录时传仓库内路径）
  * - sessionFile：--session 续跑（A4 阶段 2）
  * - modelsJson / renameConfig / enabledModels：透传 initAgentDir
- * - faux：faux LLM 轨装配 { responses: Array<{thinking?,text?,toolCalls?,stopReason?,error?}>, tps?: number }
+ * - faux：faux LLM 层装配 { responses: Array<{thinking?,text?,toolCalls?,stopReason?,error?}>, tps?: number }
  *   ——提供即凭证无关（settings/models 预置 faux + --extension faux-llm-ext + env
  *   TAIJI_FAUX_SCRIPT/TAUJI_FAUX_TPS；模型恒 FAUX_MODEL，opts.model 被覆盖）
  * - piCli：覆盖 pi cli 路径（默认 repo node_modules 内真身）
@@ -674,7 +674,7 @@ export async function spawnPi(opts = {}) {
 		throw err;
 	}
 
-	// faux 轨：响应脚本落 agentDir（pi 对该目录只读特定文件名，faux-responses.json
+	// faux 层：响应脚本落 agentDir（pi 对该目录只读特定文件名，faux-responses.json
 	// 不在读侧），env 注入后经 spawn 继承透传给 pi 子进程
 	const fauxEnv = {};
 	if (opts.faux) {

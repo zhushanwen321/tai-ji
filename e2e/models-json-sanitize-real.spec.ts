@@ -1,8 +1,8 @@
 /**
  * M1（e2e real）：models.json 脏数据 → bundled pi 拒绝加载 → sanitize 自愈。
  *
- * [R4 保留不翻，2026-09-15 L2.5 faux 翻轨盘点] 本 spec 断言的就是 **bundled pi 版本行为**
- * （0.80.3 → 0.84.4 语义固化，见下「版本语义」节）——faux 轨替换的是 LLM 演员而非 pi
+ * [R4 保留不翻，2026-09-15 L2.5 faux 迁组盘点] 本 spec 断言的就是 **bundled pi 版本行为**
+ * （0.80.3 → 0.84.4 语义固化，见下「版本语义」节）——faux 层替换的是 LLM 演员而非 pi
  * 二进制，此处验证面（pi schema 校验 + composition 降级语义）与 LLM 无关也不该 faux 化。
  * pi bump 时触发重验（正式登记归 e2e-map，阶段 3 收录）。
  *

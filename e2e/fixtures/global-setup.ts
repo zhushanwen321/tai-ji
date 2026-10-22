@@ -1,8 +1,8 @@
 /**
- * Playwright globalSetup —— 测试启动前确保 Electron 构建产物存在、新鲜，且构建形态与本次轨匹配。
+ * Playwright globalSetup —— 测试启动前确保 Electron 构建产物存在、新鲜，且构建形态与本次运行匹配。
  *
  * 三种情况会跑 build:e2e（build:main + build:preload + build:vite with VITE_E2E）：
- * ① 产物缺失；② renderer 产物形态（mock / real）与本次运行 spec 所需轨形态不一致；③ 产物过期。
+ * ① 产物缺失；② renderer 产物形态（mock / real）与本次运行 spec 所需构建形态不一致；③ 产物过期。
  * 产物齐备、新鲜且形态匹配则跳过（增量开发时避免每次重建，节省时间）。
  *
  * ── 新鲜度门禁 ──────────────────────────────────────────────────────────────
@@ -11,22 +11,22 @@
  * 中途状态构建的过期 bundle 上（被测 DOM ≠ 当前源码，spec 断言对着旧 DOM 报假红）。
  *
  * ── 形态门禁（v-e2e-real-post-w3 失败归因 spec-bug 的根因修复）──────────────────
- * mock 轨与 real 轨共用 apps/electron/renderer/dist（构建期 VITE_MOCK define），旧逻辑只查
- * 产物存在、不查构建形态：mock 轨留下的 mock bundle 被后续 real 轨复用（此处输出
+ * mock 层与 真实进程层共用 apps/electron/renderer/dist（构建期 VITE_MOCK define），旧逻辑只查
+ * 产物存在、不查构建形态：mock 层留下的 mock bundle 被后续 真实进程层复用（此处输出
  * 「构建产物已存在，跳过 build」），real spec 全部在 fixture 期 fail-fast（launch-app-real
  * pre-flight「detected mock renderer bundle」）。现按 MOCK_BUNDLE_MARKER（判据 SSOT 与依据
- * 见 fixtures/launch-app.ts 注释）区分 mock/real 变体，变体与轨不匹配即重建——real 构建
+ * 见 fixtures/launch-app.ts 注释）区分 mock/real 变体，变体与所需形态不匹配即重建——real 构建
  * VITE_E2E=true 且**不传 VITE_MOCK**（并从继承 env 剥离，防外层 shell 泄漏）；mock 构建
- * VITE_E2E=true VITE_MOCK=true。两轨产物形态切换成为运行内建前置，不再依赖手动恢复命令。
+ * VITE_E2E=true VITE_MOCK=true。两形态产物切换成为运行内建前置，不再依赖手动恢复命令。
  *
- * ── 轨形态判定（本次运行需要哪个变体）────────────────────────────────────────
+ * ── 构建形态判定（本次运行需要哪个变体）────────────────────────────────────────
  * 按被选中 spec 的源码 import 判定（CLI 文件过滤语义同 playwright：对 spec 路径做子串/正则
  * 匹配）：
- * - import fixtures/launch-app-real → real 轨；import fixtures/launch-app（不带 -real）→ mock 轨；
+ * - import fixtures/launch-app-real → 真实进程层；import fixtures/launch-app（不带 -real）→ mock 层；
  * - 自我跳过型 real spec 不强制 real 变体（skip 即不 launch，变体错配只表现为跳过而非失败）：
  *   凭证门 TAIJI_PI_LIVE 缺席即 skip（batch 系 / btw 双凭证门范式）、或轨道自保护
  *   （MOCK_BUNDLE_MARKER 判据 + test.skip，mock bundle 在场即带理由 skip）；
- * - 混合轨（同一次运行同时需要两种变体）物理无解（同一 outDir 只能一种形态），不自动重建，
+ * - 混合形态（同一次运行同时需要两种变体）物理无解（同一 outDir 只能一种形态），不自动重建，
  *   维持现状交 launch pre-flight 的响亮失败 + 恢复命令；无文件过滤的裸跑同理不强制。
  *
  * 产物路径：
@@ -64,7 +64,7 @@ const RENDERER_SOURCE_ROOTS = [
   path.join(REPO_ROOT, 'packages/extension-protocol/src'),
 ]
 
-/** renderer 构建形态（轨形态）：mock = 带 VITE_MOCK 的 mock fixture 构建；real = 不带 VITE_MOCK */
+/** renderer 构建形态（构建形态）：mock = 带 VITE_MOCK 的 mock fixture 构建；real = 不带 VITE_MOCK */
 export type BundleVariant = 'mock' | 'real'
 
 const SPEC_FILE_RE = /\.spec\.[cm]?[jt]s$/
@@ -117,7 +117,7 @@ export function detectCurrentBundleVariant(): BundleVariant | null {
   return mockHit ? 'mock' : 'real'
 }
 
-/** spec 源码 import 判定所需变体（null = 与轨形态无关，或自我跳过型不强制） */
+/** spec 源码 import 判定所需变体（null = 与构建形态无关，或自我跳过型不强制） */
 function specVariant(file: string): BundleVariant | null {
   let src: string
   try {
@@ -172,7 +172,7 @@ function matchesFilter(absPath: string, filter: string): boolean {
 }
 
 /**
- * 本次运行需要的产物形态（null = 不强制：无文件过滤的裸跑 / 选中集无定向 / 混合轨）。
+ * 本次运行需要的产物形态（null = 不强制：无文件过滤的裸跑 / 选中集无定向 / 混合形态）。
  */
 export function requiredBundleVariant(argv: string[]): BundleVariant | null {
   const filters = specFileFilters(argv)
@@ -184,7 +184,7 @@ export function requiredBundleVariant(argv: string[]): BundleVariant | null {
     const v = specVariant(f)
     if (v) needs.add(v)
   }
-  // 0 = 全部与形态无关；≥2 = 混合轨（物理无解）——都不强制
+  // 0 = 全部与形态无关；≥2 = 混合形态（物理无解）——都不强制
   if (needs.size !== 1) return null
   return needs.values().next().value ?? null
 }
@@ -206,8 +206,8 @@ function buildE2E(variant: BundleVariant): void {
 }
 
 /**
- * 产物就绪保障：齐备、新鲜且形态匹配则跳过 build；缺失 / 过期 / 形态失配则按本次轨形态重建并校验
- * （校验与收尾日志拆到 verifyRebuiltArtifacts——globalSetup 只做 visual 轨短路 + 参数解析）。
+ * 产物就绪保障：齐备、新鲜且形态匹配则跳过 build；缺失 / 过期 / 形态失配则按本次构建形态重建并校验
+ * （校验与收尾日志拆到 verifyRebuiltArtifacts——globalSetup 只做 visual 层短路 + 参数解析）。
  */
 function ensureArtifacts(required: BundleVariant | null, current: BundleVariant | null, stale: NewestSource | null): void {
   const missing = artifactsMissing()
@@ -216,13 +216,13 @@ function ensureArtifacts(required: BundleVariant | null, current: BundleVariant 
   if (!missing && !mismatch && stale === null) {
     console.log(
       `[e2e global-setup] 构建产物已存在且新鲜（renderer ${current ?? '形态未知'} bundle` +
-        (required ? `，与本次轨所需 ${required} 匹配` : '') +
+        (required ? `，与本次运行所需 ${required} 匹配` : '') +
         '，晚于 RENDERER_SOURCE_ROOTS 五树），跳过 build',
     )
     return
   }
 
-  // 产物缺失 / 过期时按本次轨形态构建（无定向时沿用 mock 形态——既有默认行为）；
+  // 产物缺失 / 过期时按本次构建形态构建（无定向时沿用 mock 形态——既有默认行为）；
   // 形态失配时强制按所需形态重建（形态切换成为运行内建前置，不再依赖手动恢复命令）
   const variant: BundleVariant = required ?? 'mock'
   console.log(
@@ -230,14 +230,14 @@ function ensureArtifacts(required: BundleVariant | null, current: BundleVariant 
       ? `[e2e global-setup] 构建产物缺失，跑 build:e2e（${variant} bundle）...`
       : stale !== null
         ? `[e2e global-setup] 构建产物过期（${stale.file} mtime 晚于 renderer bundle），跑 build:e2e（${variant} bundle）...`
-        : `[e2e global-setup] renderer bundle 形态失配（当前 ${current}，本次轨需 ${required}），重建 ${variant} bundle ...`,
+        : `[e2e global-setup] renderer bundle 形态失配（当前 ${current}，本次运行需 ${required}），重建 ${variant} bundle ...`,
   )
   buildE2E(variant)
   const after = verifyRebuiltArtifacts(required)
   console.log(`[e2e global-setup] 构建产物就绪（renderer ${after ?? '形态未知'} bundle）`)
 }
 
-/** 重建后校验：产物齐备且形态与本次轨所需一致，不符即 throw（fail-fast，不静默带病续跑） */
+/** 重建后校验：产物齐备且形态与本次运行所需一致，不符即 throw（fail-fast，不静默带病续跑） */
 function verifyRebuiltArtifacts(required: BundleVariant | null): BundleVariant | null {
   if (artifactsMissing()) {
     throw new Error('[e2e global-setup] build:e2e 完成后产物仍缺失：' + ARTIFACTS.filter((p) => !fs.existsSync(p)).join(', '))
@@ -246,7 +246,7 @@ function verifyRebuiltArtifacts(required: BundleVariant | null): BundleVariant |
   if (required !== null && after !== required) {
     throw new Error(
       `[e2e global-setup] build:e2e 后 renderer 产物形态仍为 ${after ?? '形态未知'} bundle，` +
-        `与本次轨所需 ${required} 不符——检查构建 env（mock 需 VITE_MOCK=true，real 需不传 VITE_MOCK）`,
+        `与本次运行所需 ${required} 不符——检查构建 env（mock 需 VITE_MOCK=true，real 需不传 VITE_MOCK）`,
     )
   }
   return after
@@ -255,9 +255,9 @@ function verifyRebuiltArtifacts(required: BundleVariant | null): BundleVariant |
 export default async function globalSetup(config?: FullConfig): Promise<void> {
   // visual-only 运行（CI e2e-visual job，E2E_VISUAL_ONLY=1）只需 chromium + vite（mock），
   // 不需要 Electron 构建产物——直接跳过产物检查，避免 fresh checkout 上触发 build:e2e
-  //（electron 行为轨专属，visual 轨不应承担构建开销）。
+  //（electron 行为 mock 层专属，visual 层不应承担构建开销）。
   if (process.env.E2E_VISUAL_ONLY === '1') {
-    console.log('[e2e global-setup] E2E_VISUAL_ONLY=1（visual 轨），跳过 Electron 构建产物检查')
+    console.log('[e2e global-setup] E2E_VISUAL_ONLY=1（visual 层），跳过 Electron 构建产物检查')
     return
   }
 

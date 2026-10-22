@@ -225,8 +225,8 @@ export function markerLiteral(bareId: string): string {
 export type SendPromptReason = 'command-missing' | 'hook-blocked' | 'error'
 
 /**
- * 帧条目 preview 截断长度（投递队列展示派生视图）。runtime transport 与 core mock 轨共用
- * 同值——mock 轨/real 轨帧形态一致（否则 mock 型前端测试的基线会与真机分叉）。
+ * 帧条目 preview 截断长度（投递队列展示派生视图）。runtime transport 与 core mock 层共用
+ * 同值——mock 层/真实进程层帧形态一致（否则 mock 型前端测试的基线会与真机分叉）。
  */
 export const DELIVERY_PREVIEW_MAX_CHARS = 80
 /** 消息生命周期状态（steer/followup 解耦后 pending 不再进消息流——m4 清理）。 */

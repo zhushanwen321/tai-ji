@@ -261,7 +261,7 @@ describe('mock session domain', () => {
       expect('dag' in dag || dag.code === 'parse_failed', `${actorId} DAG 回执可达（成功臂或 parse_failed 错误臂）`).toBe(true)
     }
     // [G4 锚定补齐] 缺失成员 stub：引擎配置视图 / 默认引擎回执回显 / agent call 路径恒空串
-    //（engineModels/engineDefaults = engine-provider-unification D5 扩展键，mock 轨空表/空偏好）
+    //（engineModels/engineDefaults = engine-provider-unification D5 扩展键，mock 层空表/空偏好）
     expect(await session.getSubagentEngineConfig()).toEqual({ engines: [], defaultEngine: '', engineModels: {}, engineDefaults: {} })
     expect(await session.setSubagentDefaultEngine('eng-x')).toEqual({ engineId: 'eng-x' })
     // D5 per-engine 默认模型写入：回执 = 请求值回显（setSubagentDefaultEngine mock 同模式）
@@ -445,7 +445,7 @@ describe('mock config domain', () => {
     expect(await config.listBuiltinProviders()).toEqual([])
     expect(await config.refreshProviderCatalogs()).toEqual({ refreshed: [], failed: [], corrupt: [] })
     // W3c/W1 新增 config.*：mock 无网络/落盘层，签名同构 ack（presets 返编译期基线，
-    // 与 runtime listQuotaPresets() 的「远程 ?? 基线」同口径——mock 轨额度类型下拉非空）
+    // 与 runtime listQuotaPresets() 的「远程 ?? 基线」同口径——mock 层额度类型下拉非空）
     expect(await config.listQuotaPresets()).toEqual(QUOTA_PRESETS)
     await expect(config.setProviderCatalogWatch(true)).resolves.toBeUndefined()
     expect(await config.checkEnvVars(['PATH'])).toEqual({ PATH: true })

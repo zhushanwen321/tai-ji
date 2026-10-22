@@ -849,7 +849,7 @@ function renderLevel0(
 // ── Level 1: Agent selection ──────────────────────────────────
 
 /** L1 左列：sidebar title + phase list（固定高度 viewport + 滚动，只构建可见行）。
- *  与 renderLevel0 左列同构——本 helper 只供 renderLevel1（renderLevel0 不在本单元目标内，不并轨，
+ *  与 renderLevel0 左列同构——本 helper 只供 renderLevel1（renderLevel0 不在本单元目标内，不并入，
  *  避免扩大行为范围；后续如消重可让 L0 复用）。 */
 function buildLevelSidebar(
   phases: ReturnType<typeof buildPhaseGroups>,

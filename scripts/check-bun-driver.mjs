@@ -90,8 +90,8 @@ const r = spawnSync(bun.cmd, ['x', '--bun', '--no-install', 'vitest', 'run'], {
   cwd: SOURCE_PKG_DIR,
   stdio: 'inherit',
   // 集成测试门控（SSOT = test-guard/integration-gate.ts）：zcode-session-source 拆出
-  // slow-sqlite 串行轨后，慢文件用例受 TAIJI_TEST_INTEGRATION 门控本地默认跳过——
-  // 不设 env 则 bun 趟对 sqlite 恢复阶梯 / 错误契约零覆盖（门控拆轨前的覆盖必须保持）。
+  // slow-sqlite 串行组后，慢文件用例受 TAIJI_TEST_INTEGRATION 门控本地默认跳过——
+  // 不设 env 则 bun 趟对 sqlite 恢复阶梯 / 错误契约零覆盖（门控拆组前的覆盖必须保持）。
   env: { ...process.env, TAIJI_TEST_INTEGRATION: '1' },
 })
 if (r.status !== 0) {

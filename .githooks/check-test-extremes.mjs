@@ -11,7 +11,7 @@
  *   X2 显式 timeout ≥5000ms —— `(test)?Timeout[:=]` 数值 ≥5000（含下划线数字 30_000）。
  *      预算膨胀是负载症状的止痛药；需要的不是预算，是确定性化或挂门控。
  *   X3 vi.waitFor 显式 timeout ≥1000ms —— 等待窗口无完成信号保证，1000ms 以上即第③档形态。
- *   X4 performance.now() / process.hrtime 断言素材 —— 性能水位断言（类型 g）归门控轨/bench。
+ *   X4 performance.now() / process.hrtime 断言素材 —— 性能水位断言（类型 g）归门控组/bench。
  *
  * 三种运行形态：
  *   无参        = hook 模式：扫 git staged 的测试文件（*.test.ts / *.test.mjs / *.spec.ts）
@@ -88,12 +88,12 @@ const EXEMPT = {
   'scripts/__tests__/changeset-check.test.mjs': '门禁脚本黑盒（每处真 node 进程 <600ms，二波已删死建仓）',
   'scripts/__tests__/cross-branch-overlap.test.mjs': 'overlap 判定黑盒，git 双分支是被测物（二波已缩 commit 数）',
   'scripts/__tests__/quality-gates.test.mjs': '锁语义需真实 pid 判定（裁决保留，2 处 spawn 均 <300ms）',
-  // —— 二波形态：亚秒级真进程冒烟留默认轨（实测 <300ms/条） ——
-  'packages/zcode-subagent-cli/src/__tests__/appserver-launcher.test.ts': '二波裁决形态：5 条主链真 spawn 留默认轨（实测单条 <300ms），env 矩阵已进程内化',
-  'packages/zcode-subagent-cli/src/__tests__/session-channel.test.ts': '二波裁决形态：8 条真进程冒烟留默认轨（实测单条 <300ms），其余 33 处已桩化',
+  // —— 二波形态：亚秒级真进程冒烟留默认组（实测 <300ms/条） ——
+  'packages/zcode-subagent-cli/src/__tests__/appserver-launcher.test.ts': '二波裁决形态：5 条主链真 spawn 留默认组（实测单条 <300ms），env 矩阵已进程内化',
+  'packages/zcode-subagent-cli/src/__tests__/session-channel.test.ts': '二波裁决形态：8 条真进程冒烟留默认组（实测单条 <300ms），其余 33 处已桩化',
   // —— 锁 / 进程语义本身是被测物 ——
   'apps/electron/main/test/update-self-healer.test.ts': 'argv 级进程识别是被测物：1 条真 bash 阳性 + 其余注入 ps 输出（二波裁决形态）',
-  'packages/subagent-core/src/__tests__/transport-local.test.ts': '谓词轨留一次确定性 ps -p 探活（不可达 pid、ENOENT 立返、零时间窗；E2E-INTEG-28 登记）',
+  'packages/subagent-core/src/__tests__/transport-local.test.ts': '谓词层留一次确定性 ps -p 探活（不可达 pid、ENOENT 立返、零时间窗；E2E-INTEG-28 登记）',
   // —— performance.now 作轮询时钟（fake Date 用例下 Date.now 冻结的替代），非性能断言 ——
   'apps/electron/main/logs/__tests__/main-logger.test.ts': 'performance.now 作轮询 deadline 时钟（fake Date 下 Date.now 冻结会死循环），非时延断言',
   'apps/electron/main/logs/__tests__/stderr-sink-rotation.test.ts': 'performance.now 作轮询 deadline 时钟（同上），非时延断言',
@@ -104,7 +104,7 @@ const EXEMPT = {
 }
 
 const TEST_FILE_RE = /\.test\.(ts|mjs)$|\.spec\.ts$/
-// e2e 层（Playwright 真实 app 轨）不归单测层防线管：其超时预算/真实交互属 e2e 语义，
+// e2e 层（Playwright 真实 app 层）不归单测层防线管：其超时预算/真实交互属 e2e 语义，
 // 触发与登记纪律走 docs/testing/e2e-map.json，不按单测判据拦。只扫测试文件本体
 // （*.test.* / *.spec.*）——__tests__/ 下的 helper/fixture/探针不扫：门控语义由
 // 消费它们的测试文件承载（pi-fixture.ts / fake-engine.ts / probes/*.mjs 属此类）。
@@ -143,8 +143,8 @@ function scanFile(rel) {
   if (!existsSync(abs)) return []
   const text = readFileSync(abs, 'utf8')
   const flattened = text.replace(/\s+/g, ' ')
-  // 挂了集成门控的文件 = 已受 sanction：真进程调用与门控轨预算（含大 timeout）属
-  // 集成轨语义，其代价由 CI 慢用例门禁 + e2e-map E2E-INTEG 登记看护，不在本检查拦。
+  // 挂了集成门控的文件 = 已受 sanction：真进程调用与门控组预算（含大 timeout）属
+  // 集成组语义，其代价由 CI 慢用例门禁 + e2e-map E2E-INTEG 登记看护，不在本检查拦。
   if (GATE_IMPORT_RE.test(flattened)) return []
   const hits = []
 
@@ -172,7 +172,7 @@ function scanFile(rel) {
     }
   }
   if (PERF_RE.test(flattened)) {
-    hits.push('X4 performance.now()/process.hrtime 断言素材——性能水位断言（类型 g）移集成门控轨或 bench，不进默认单测轨')
+    hits.push('X4 performance.now()/process.hrtime 断言素材——性能水位断言（类型 g）移集成门控组或 bench，不进默认单测层')
   }
   return hits
 }
