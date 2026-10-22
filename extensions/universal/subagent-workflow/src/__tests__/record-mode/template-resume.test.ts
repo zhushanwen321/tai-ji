@@ -60,12 +60,13 @@ const FAN_OUT_ARGS = { tasks: [{ task: "alpha job" }, { task: "beta job" }] };
 
 describe("场景 A2/A4：内置模板 resume（scriptPath 锚定恢复）", () => {
   let env: ScenarioEnv;
-  /** fan-out 可执行源缓存（registry 解析 + lint 只跑一次，两用例共用）。 */
+  /** fan-out 可执行源缓存（registry 解析只跑一次，两用例共用——toExecutable 是
+   * 纯文本变换（strip export const meta），本链路不含 lint）。 */
   let fanOutSource: string;
   beforeAll(async () => {
     env = mkScenarioEnv("template-resume");
     fanOutSource = await fanOutExecutableSource();
-  }, 30_000);
+  });
   afterAll(() => env.cleanup());
 
   it("A2 fan-out 中断续跑：锚定恢复 → worker 真跑 fan-out.js（scriptPath 锚定通过）→ 回放零重派 + 在途重派 + 终态 done", async () => {
@@ -90,7 +91,7 @@ describe("场景 A2/A4：内置模板 resume（scriptPath 锚定恢复）", () =
     expect(outcome.status).toBe("done");
     // 零重派断言：taskIndex 0 缓存回话（不进 dispatches），仅 taskIndex 1 真实派发
     expect(sd.faux.dispatches).toHaveLength(1);
-  }, 30_000);
+  });
 
   it("A4 旧格式帧（无 scriptPath 载荷）：fan-out resume 失败 = 收紧后 core_module_load_failed + 恢复指引，未到派发", async () => {
     const RUN = "wf-tpl-a4";
@@ -116,5 +117,5 @@ describe("场景 A2/A4：内置模板 resume（scriptPath 锚定恢复）", () =
     expect(outcome.error).toContain("resume");
     // 加载即失败（require _shared 前），未到任何成员派发
     expect(sd.faux.dispatches).toHaveLength(0);
-  }, 30_000);
+  });
 });

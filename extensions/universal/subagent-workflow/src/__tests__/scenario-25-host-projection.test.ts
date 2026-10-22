@@ -2,11 +2,14 @@
 //
 // 场景 25（修订设计 §4，D2/D16）：中断 run 宿主派生视图。
 //
-// 两段结构（任务书 §2）：
-// - 无门段（节点级默认跑）：宿主派生视图数据——中断形态条目（workflow-record-entry
-//   契约单源）、概览链三态渲染、执行树家族链 calls[].sessionFile 提取（D16 ③
-//   强制连带断言——挂靠本文件：宿主派生视图族同域）。session-reader 实装经 tsx 子进程
-//   probe 加载（vite resolver 不解析跨包物理相对路径——见 scenario-kit 尾注）。
+// 三段结构（任务书 §2 + 单测层极端测试整治）：
+// - 本地段（默认跑）：宿主派生视图数据中的进程内纯逻辑——中断形态条目
+//   （workflow-record-entry 契约单源）、v2 注册条目锚点。
+// - 集成门段（TAIJI_TEST_INTEGRATION 门控）：session-reader 实装对拍——经 tsx
+//   子进程 probe 加载（vite resolver 不解析跨包物理相对路径——见 scenario-kit
+//   尾注）。tsx 冷编译 spawn 在负载下无完成信号上界（判据第 3 档），归集成轨；
+//   概览链三态渲染 + 执行树家族链 calls[].sessionFile 提取（D16 ③ 强制连带断言
+//   ——挂靠本文件：宿主派生视图族同域）的断言体在 driver-session-reader.ts。
 // - CDP 门段（describe.skipIf(!process.env.TAIJI_E2E_HOST_PROJECTION_CDP)）：
 //   真机 dev app（TAIJI_DEV_BACKGROUND=1 pnpm dev + CDP）断 GUI workflow 列表
 //   文案字面量「已中断（可续跑）」（复审 F4：文案可脚本断言、色调已由
@@ -14,6 +17,8 @@
 import { describe, expect, it } from "vitest";
 
 import { buildWorkflowRecordInterruptedEntryData } from "@zhushanwen/subagent-core";
+
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "../../../../../test-guard/integration-gate.ts";
 
 import {
   mkScenarioEnv,
@@ -25,7 +30,7 @@ import { registeredEntry } from "./record-mode/helpers.ts";
 
 const RUN_ID = "wf-s25-projection";
 
-describe("场景 25 无门段：中断 run 宿主派生视图数据", () => {
+describe("场景 25 本地段：中断 run 宿主派生视图数据（进程内纯逻辑）", () => {
   it("中断形态条目（workflow-record-entry 契约单源）：status 字面量 'interrupted'", () => {
     const entry = buildWorkflowRecordInterruptedEntryData({
       runId: RUN_ID,
@@ -41,46 +46,60 @@ describe("场景 25 无门段：中断 run 宿主派生视图数据", () => {
     expect(entry).toMatchObject({ kind: "settled", runId: RUN_ID, status: "interrupted" });
   });
 
-  it("概览链三态渲染：中断 run 显示 interrupted（非 running）；复活流回 running（run-resumed 转移证据被概览链消费）", async () => {
-    const env = mkScenarioEnv("25ov");
+  it.skipIf(!INTEGRATION_TESTS_ENABLED)(
+    "概览链三态渲染：中断 run 显示 interrupted（非 running）；复活流回 running（run-resumed 转移证据被概览链消费）" +
+      (INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""),
+    async () => {
+      const env = mkScenarioEnv("25ov");
+      try {
+        await seedCrashedRun(env, RUN_ID, {
+          scriptSource: THREE_CALL_SERIAL_SCRIPT,
+          settled: [
+            { agent: "A", result: { content: "a", sessionFile: "/abs/sessions/a.jsonl" } },
+            { agent: "B", result: { content: "b", sessionFile: "/abs/sessions/b.jsonl" } },
+          ],
+          inflight: [{ agent: "C" }],
+        });
+        // 中断态：概览渲染 interrupted（GUI「已中断（可续跑）」的数据——文案消费
+        // 归 renderer，词面由 state-tone-lock 锁）
+        await runSessionReaderProbe("overview-interrupted", env.recordPath(RUN_ID), RUN_ID);
+        // 复活流（run-resumed 落流、无终局帧）：run-resumed 是 interrupted → running
+        // 的转移证据，session_read 概览链消费该帧回 running——与 runtime
+        // events-projection（foldRunEventCheckpoint 同款转移帧消费）状态语义一致。
+        await runSessionReaderProbe("overview-resumed", env.recordPath(RUN_ID), RUN_ID);
+      } finally {
+        env.cleanup();
+      }
+    },
+  );
+
+  it.skipIf(!INTEGRATION_TESTS_ENABLED)(
+    "[D16 ③] 执行树家族链：calls[].sessionFile 从 record 流新数据源可提取——workflow 子节点不退空" +
+      (INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""),
+    async () => {
+      const env = mkScenarioEnv("25fam");
+      try {
+        await seedCrashedRun(env, RUN_ID, {
+          scriptSource: THREE_CALL_SERIAL_SCRIPT,
+          settled: [
+            { agent: "A", result: { content: "a", sessionFile: "/abs/sessions/a.jsonl" } },
+            { agent: "B", result: { content: "b", sessionFile: "/abs/sessions/b.jsonl" } },
+          ],
+          inflight: [{ agent: "C" }],
+        });
+
+        // 家族链发现范围（D16 ③ 换源后的单点提取函数）：settled 帧 result.sessionFile
+        // 按 taskIndex 归位提取，非空 = workflow 子节点可跳转（不退空）
+        await runSessionReaderProbe("family-files", env.recordPath(RUN_ID), RUN_ID);
+      } finally {
+        env.cleanup();
+      }
+    },
+  );
+
+  it("v2 注册条目锚点 = record 流路径（新形态实体——发现链数据；registeredEntry 纯构造逻辑）", () => {
+    const env = mkScenarioEnv("25entry");
     try {
-      await seedCrashedRun(env, RUN_ID, {
-        scriptSource: THREE_CALL_SERIAL_SCRIPT,
-        settled: [
-          { agent: "A", result: { content: "a", sessionFile: "/abs/sessions/a.jsonl" } },
-          { agent: "B", result: { content: "b", sessionFile: "/abs/sessions/b.jsonl" } },
-        ],
-        inflight: [{ agent: "C" }],
-      });
-      // 中断态：概览渲染 interrupted（GUI「已中断（可续跑）」的数据——文案消费
-      // 归 renderer，词面由 state-tone-lock 锁）
-      await runSessionReaderProbe("overview-interrupted", env.recordPath(RUN_ID), RUN_ID);
-      // 复活流（run-resumed 落流、无终局帧）：run-resumed 是 interrupted → running
-      // 的转移证据，session_read 概览链消费该帧回 running——与 runtime
-      // events-projection（foldRunEventCheckpoint 同款转移帧消费）状态语义一致。
-      await runSessionReaderProbe("overview-resumed", env.recordPath(RUN_ID), RUN_ID);
-    } finally {
-      env.cleanup();
-    }
-  });
-
-  it("[D16 ③] 执行树家族链：calls[].sessionFile 从 record 流新数据源可提取——workflow 子节点不退空", async () => {
-    const env = mkScenarioEnv("25fam");
-    try {
-      await seedCrashedRun(env, RUN_ID, {
-        scriptSource: THREE_CALL_SERIAL_SCRIPT,
-        settled: [
-          { agent: "A", result: { content: "a", sessionFile: "/abs/sessions/a.jsonl" } },
-          { agent: "B", result: { content: "b", sessionFile: "/abs/sessions/b.jsonl" } },
-        ],
-        inflight: [{ agent: "C" }],
-      });
-
-      // 家族链发现范围（D16 ③ 换源后的单点提取函数）：settled 帧 result.sessionFile
-      // 按 taskIndex 归位提取，非空 = workflow 子节点可跳转（不退空）
-      await runSessionReaderProbe("family-files", env.recordPath(RUN_ID), RUN_ID);
-
-      // v2 注册条目锚点 = record 流路径（新形态实体——发现链数据）
       const entry = registeredEntry(RUN_ID, env.recordPath(RUN_ID));
       expect(entry.data).toMatchObject({
         v: 2,

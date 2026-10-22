@@ -36,17 +36,26 @@
  * 与 updater-script.test.ts 的边界：那边字符串视角（检查片段在不在），本文件
  * 执行视角（bash 跑不跑得通、分支真不真触发、终态对不对）。
  *
- * 运行：cd apps/electron/main && npx vitest run test/updater-script-integration.test.ts
+ * 集成门控（TAIJI_TEST_INTEGRATION，docs/todo/test-single-layer-cleanup.md 第二波）：
+ * 真 hdiutil/DMG + 真 bash + 真实等待窗的用例属「代码 + OS 组合行为」（判据档③，
+ * 无确定性完成信号，负载下窗口拉长），四段重执行 describe 挂门控——本地默认跳过、
+ * CI / 按 update 域改动范围触发时设 env 真跑。单测轨保留两类轻用例：bash -n 语法
+ * 检查（3 条）+ 脚本依赖的 CLI 工具可用性。
+ *
+ * 运行：cd apps/electron && pnpm run test:main test/updater-script-integration.test.ts
+ * （门控真跑：TAIJI_TEST_INTEGRATION=1 同命令）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../test-guard/integration-gate.ts'
 
-// 文件级超时预算：用例构造真实 dmg 并经 hdiutil/ditto/shasum 全链执行，
+// 文件级超时预算：管辖四段集成门控 describe 的真执行用例（本地默认跳过时不生效）。
+// 用例构造真实 dmg 并经 hdiutil/ditto/shasum 全链执行，
 // CI 的 mac runner 上 hdiutil 比本地慢约 3 倍（happy path 本地 ~7s、CI 实测 21-23s），
 // vitest 默认 20s 在 CI 必撞线（2026-09-07 v0.9.15 post-merge CI 两连挂）；
 // 60s = CI 最慢观测的 2.6 倍余量，M6（本地 17s 的固定等待窗口）同受覆盖
 // 注意：用例级第三参显式超时会覆盖本预算——曾漂移出 13 处显式 20_000，
-// 让 happy path 在 CI 仍撞 20s 线（2026-09-10）；本文件用例一律不写显式超时，
-// 统一由这行管辖，新增用例也不要补第三参。
+// 让 happy path 在 CI 仍撞 20s 线（2026-09-10）；除既有存量外不要补第三参，
+// 统一由这行管辖，新增用例也不要写显式超时。
 vi.setConfig({ testTimeout: 60_000 })
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync, statSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -77,6 +86,14 @@ const HAS_HDIUTIL = hasCommand('hdiutil') // 生成 dmg + 脚本挂载/卸载 + 
 const HAS_DITTO = hasCommand('ditto')     // 脚本 dmg→staging 拷贝用（批次 3 解包原语）
 const HAS_SHASUM = hasCommand('shasum')  // mac 脚本 sha256 用
 const IS_MAC = process.platform === 'darwin'
+
+// mac 三段（端到端/中断注入/磁盘满）共用的环境就绪条件（原 describe.skipIf 条件收编）
+const MAC_SUITE_READY = IS_MAC && HAS_HDIUTIL && HAS_DITTO && HAS_SHASUM
+
+/** 门控 describe 名：跳过时显式携带理由（env 未设置 = 本地默认跳过），不静默消失。 */
+function gatedTitle(name: string): string {
+  return name + (INTEGRATION_TESTS_ENABLED ? '' : `｜skip：${INTEGRATION_TESTS_SKIP_REASON}`)
+}
 
 // ──────────────────────────────────────────────────────────────────
 // 临时目录生命周期
@@ -343,9 +360,9 @@ describe('updater-script integration: bash 语法检查', () => {
 })
 
 // ════════════════════════════════════════════════════════════════
-// MAC 脚本：端到端 happy path（真 .app + 真 dmg + 真 attach/ditto/detach）
+// MAC 脚本：端到端 happy path（真 .app + 真 dmg + 真 attach/ditto/detach）【集成门控】
 // ════════════════════════════════════════════════════════════════
-describe.skipIf(!IS_MAC || !HAS_HDIUTIL || !HAS_DITTO || !HAS_SHASUM)('updater-script integration: mac 端到端', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 端到端'), () => {
   it(
     'happy path（M1 脚本侧）：S0→S5 走通 → exit 0、新 .app 就位、result done（合法 JSON）、无任何残留',
     () => {
@@ -505,9 +522,9 @@ describe.skipIf(!IS_MAC || !HAS_HDIUTIL || !HAS_DITTO || !HAS_SHASUM)('updater-s
 })
 
 // ════════════════════════════════════════════════════════════════
-// MAC 脚本：状态机中断注入（kill 进程组）与失败分支
+// MAC 脚本：状态机中断注入（kill 进程组）与失败分支【集成门控】
 // ════════════════════════════════════════════════════════════════
-describe.skipIf(!IS_MAC || !HAS_HDIUTIL || !HAS_DITTO || !HAS_SHASUM)('updater-script integration: mac 状态机中断注入', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 状态机中断注入'), () => {
   it(
     'S1 中断（M2 脚本侧）：staging 解压完成后 kill → 正式位置零接触 + staging 残留 + result 未写',
     async () => {
@@ -768,9 +785,9 @@ describe.skipIf(!IS_MAC || !HAS_HDIUTIL || !HAS_DITTO || !HAS_SHASUM)('updater-s
 })
 
 // ════════════════════════════════════════════════════════════════
-// MAC 脚本：磁盘满（M4 + P10：ditto 磁盘满必须非 0 退出）
+// MAC 脚本：磁盘满（M4 + P10：ditto 磁盘满必须非 0 退出）【集成门控】
 // ════════════════════════════════════════════════════════════════
-describe.skipIf(!IS_MAC || !HAS_HDIUTIL || !HAS_DITTO || !HAS_SHASUM)('updater-script integration: mac 磁盘满（P10）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 磁盘满（P10）'), () => {
   it(
     '小容量卷上 ditto 拷入 5MB 不可压产物 → ENOSPC → ditto 非零退出、error=ditto copy failed、旧 app 完好',
     (ctx) => {
@@ -818,9 +835,11 @@ describe.skipIf(!IS_MAC || !HAS_HDIUTIL || !HAS_DITTO || !HAS_SHASUM)('updater-s
 })
 
 // ════════════════════════════════════════════════════════════════
-// LINUX 脚本：mv 备份/回滚决策树 + 检查（不真 spawn AppImage）
+// LINUX 脚本：mv 备份/回滚决策树 + 检查（不真 spawn AppImage）【集成门控】
+// 真真 bash 子进程执行整脚本（含压缩后的真实等待窗），与 mac 三段同属「代码 + OS
+// 组合行为」——retry:2 与 bash 预算 15s 正是本段负载敏感症状，一并挂门控。
 // ════════════════════════════════════════════════════════════════
-describe('updater-script integration: linux mv 备份/回滚', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(gatedTitle('updater-script integration: linux mv 备份/回滚'), () => {
   function makeLinuxVars(opts: { appImagePath?: string; newFilePath?: string } = {}): LinuxUpdaterScriptVars {
     return {
       appImagePath: opts.appImagePath ?? path.join(tmpDir, 'TaiJi-x86_64.AppImage'),
