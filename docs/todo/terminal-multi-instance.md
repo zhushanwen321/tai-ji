@@ -1,6 +1,6 @@
 # 终端多实例（一个会话开多个终端）延期登记
 
-> **状态**：**已实施**（2026-10-03/04：经 tech-design-wf 三阶段 + dev-flow-wf 七段实施落地——设计文档 `.tmp/tech-design/terminal-multi-instance.md` v1.9，实施计划双格式同目录；实例编号 `term:<sid>:<n>` 贯通四层，runtime 为实例注册表与序号分配事实源，底部抽屉加实例切换条）。本文件自初始登记起至实施完成的过程记录保留于下，作为设计输入溯源。
+> **状态**：**已实施**（2026-10-03/04：经 tech-design-wf 三阶段 + dev-flow-wf 七段实施落地——设计文档 terminal-multi-instance v1.9（设计档案已随 .tmp 清理，不入 git），实施计划双格式同目录；实例编号 `term:<sid>:<n>` 贯通四层，runtime 为实例注册表与序号分配事实源，底部抽屉加实例切换条）。本文件自初始登记起至实施完成的过程记录保留于下，作为设计输入溯源。
 >
 > **未随本期落地的同族项**（依赖本设计建立的实例编号先例，后续另立项）：浏览器多页面、浮层实例 tab 条（本文档「同族延期项」节）。
 >
@@ -29,16 +29,16 @@
 ## 解锁条件 / 立项触发
 
 - 三容器重构 W1（底抽屉 + 终端搬家）交付并稳定后；
-- 设计时必须同时回答：实例 id 的命名空间（`term:<sid>:<n>`？）、WS 帧加字段的兼容策略（旧 renderer × 新 runtime）、底抽屉实例 tab 条与容器的关系（届时底抽屉从"终端面板"升格为真容器，参考设计文档 `.tmp/tech-design/display-containers.md` §7.1 的 YAGNI 注记）。
+- 设计时必须同时回答：实例 id 的命名空间（`term:<sid>:<n>`？）、WS 帧加字段的兼容策略（旧 renderer × 新 runtime）、底抽屉实例 tab 条与容器的关系（届时底抽屉从"终端面板"升格为真容器，参考 display-containers 设计 §7.1（设计档案已随 .tmp 清理）的 YAGNI 注记）。
 
 ## 关联
 
-- 设计文档（过程产物，不入 git）：`.tmp/tech-design/display-containers.md`（三容器重构，W4 节）
+- 设计文档（过程产物，不入 git，已随 .tmp 清理）：display-containers 设计（三容器重构，W4 节）
 - 现状锚点：`packages/renderer/src/composables/features/terminal/useTerminal.ts`、`packages/runtime/src/` terminal-service、`apps/electron/main/browser/browser-view-manager.ts`
 
 ## 残留风险与待裁决（交付时登记，2026-10-04）
 
-> 来源：impl-plan §6 残留风险表 + D3 走查留痕（`.tmp/dev-flow/terminal-multi-instance.*`，过程产物不入 git）。本登记为交付后的仓内可查载体；各条重审触发出现时按条响应。
+> 来源：impl-plan §6 残留风险表 + D3 走查留痕（dev-flow 过程产物，已随 .tmp 清理，不入 git）。本登记为交付后的仓内可查载体；各条重审触发出现时按条响应。
 
 ### 残留风险
 

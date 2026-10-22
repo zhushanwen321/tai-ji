@@ -1,17 +1,19 @@
 // src/__tests__/record-mode/template-resume.test.ts
 //
-// 场景 A2/A4（scriptPath 锚定恢复——设计 .tmp/tech-design/workflow-resume-scriptpath-recovery.md
-// §4 验收表）：内置模板脚本（fan-out 真文件）的 resume 真链路。
+// 场景 A2/A4（scriptPath 锚定恢复。机制自包含：run-created 帧携带 scriptPath 才能
+// 锚定重建，缺席/空串 fail-fast——被验行为见下文与断言本体；原引用的设计档案
+// workflow-resume-scriptpath-recovery.md §4 验收表随 .tmp 产物清理已不存在，git 可追溯）：
+// 内置模板脚本（fan-out 真文件）的 resume 真链路。
 //
 // 回归测试 = a1a4 真机终判 BLOCKED 的缺陷①：修复前 resume 重建 spec.scriptPath 恒空串，
-// worker 加载 fan-out 即炸 Cannot find module './_shared/agent-refs.cjs'（cwd 相对解析）；
-// 修复后 run-created 帧携带 scriptPath → 锚定恢复 → 续跑成功（A2）。A4 = 旧格式帧
-//（无 scriptPath 载荷）回落现状失败形态——检查收紧后带恢复指引的 fail-fast。
+// worker 加载 fan-out 即因 scriptPath 锚定检查 fail-fast（cwd 相对解析的依赖加载收紧后
+// 无回退）；修复后 run-created 帧携带 scriptPath → 锚定恢复 → 续跑成功（A2）。A4 = 旧
+// 格式帧（无 scriptPath 载荷）回落现状失败形态——收紧后带恢复指引的 fail-fast。
 //
 // 夹具协议与 scenario-kit 同源：真 resumeRun + 真 WorkerHostImpl（node:worker_threads
-// 真线程跑 fan-out.js，require _shared 经 scriptPath 锚定到包内真实目录），唯一替身 =
-// faux runner（LLM 层替身）。fan-out 派发序 = tasks 数组序（map 同步构造 + parallel
-// 按序发 agent-call），taskIndex 与 seed 对齐。
+// 真线程跑 fan-out.js，scriptPath 锚定检查消费包内真实路径），唯一替身 =
+// faux runner（LLM 层替身）。fan-out 派发序 = tasks 成员对象数组序（map 同步构造 +
+// parallel 按序发 agent-call），taskIndex 与 seed 对齐。
 import fs from "node:fs";
 import path from "node:path";
 
@@ -53,7 +55,8 @@ async function fanOutExecutableSource(): Promise<string> {
   return script!.toExecutable();
 }
 
-const FAN_OUT_ARGS = { tasks: ["alpha job", "beta job"] };
+/** 成员对象形态（对象-only 契约——旧字符串数组写法已被 @pi-meta schema 拒绝）。 */
+const FAN_OUT_ARGS = { tasks: [{ task: "alpha job" }, { task: "beta job" }] };
 
 describe("场景 A2/A4：内置模板 resume（scriptPath 锚定恢复）", () => {
   let env: ScenarioEnv;
@@ -65,7 +68,7 @@ describe("场景 A2/A4：内置模板 resume（scriptPath 锚定恢复）", () =
   }, 30_000);
   afterAll(() => env.cleanup());
 
-  it("A2 fan-out 中断续跑：锚定恢复 → worker 真跑 fan-out.js（require _shared 成功）→ 回放零重派 + 在途重派 + 终态 done", async () => {
+  it("A2 fan-out 中断续跑：锚定恢复 → worker 真跑 fan-out.js（scriptPath 锚定通过）→ 回放零重派 + 在途重派 + 终态 done", async () => {
     const RUN = "wf-tpl-a2";
     await seedCrashedRun(env, RUN, {
       scriptSource: fanOutSource,
@@ -83,7 +86,7 @@ describe("场景 A2/A4：内置模板 resume（scriptPath 锚定恢复）", () =
     // 锚定从 run-created 帧逐字恢复（修复核心断言——修复前恒 ""）
     expect(sd.runs.get(RUN)!.spec.scriptPath).toBe(FAN_OUT_ABS);
     const outcome = await waitForScenarioSettled(sd.runs, RUN);
-    // 修复前此处 failed（Cannot find module './_shared/agent-refs.cjs'）
+    // 修复前此处 failed（scriptPath 恒空串触发锚定 fail-fast）
     expect(outcome.status).toBe("done");
     // 零重派断言：taskIndex 0 缓存回话（不进 dispatches），仅 taskIndex 1 真实派发
     expect(sd.faux.dispatches).toHaveLength(1);

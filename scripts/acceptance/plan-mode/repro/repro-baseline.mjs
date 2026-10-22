@@ -14,6 +14,7 @@
  *
  * 用法：
  *   node scripts/acceptance/plan-mode/repro/repro-baseline.mjs [--out .tmp/dev-flow/mock-pi-repro-baseline.md]
+ *   （产物落 .tmp/dev-flow/ —— 易失工作产物目录，不入库）
  * 退出码：0 = F1-F5 全部复现成功；1 = 任一复现失败（基线不可信，禁止交付）。
  */
 import { spawn, spawnSync } from 'node:child_process';

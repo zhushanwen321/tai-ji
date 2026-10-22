@@ -35,7 +35,7 @@
 | `RunSpec`, `LifecycleDeps` | type | `runWorkflow` 参数类型 |
 | `terminateRunningRuns(deps, reason)` | fn | session 切换/关闭时批量终止全部 running run（转 done,failed 落盘） |
 | `evictDoneRunsBeyondCap(runs, keepDone)` | fn | done run 内存淘汰（按 completedAt 升序裁超出保留窗口的项） |
-| `MAX_RETAINED_DONE_RUNS` | const | done run 内存保留窗口（K=20），`evictDoneRunsBeyondCap` 生产入参 |
+| `MAX_RETAINED_DONE_RUNS` | const | done run 内存保留窗口，`evictDoneRunsBeyondCap` 生产入参 |
 | `scheduleTimeBudget(runId, deps, budgetTimeMs)` | fn | run 级墙钟预算计时器（到期 abortRun `time_limited`；溢出值 fail-fast） |
 | `LauncherDeps` | type | launcher 依赖（`LifecycleDeps` + `registry` 脚本发现） |
 | `WorkerHostImpl` | class | `WorkerHost` port 的 worker_threads 实现（`deps.workerHost` 默认装配） |
