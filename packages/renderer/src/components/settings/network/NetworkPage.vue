@@ -14,13 +14,12 @@
          不用 v-model:draft（reactive 对象整体重赋值无生产路径，仅余编译器 let 降级警告） -->
     <NetworkServerCard :draft="draft" :saving="saving" @save="onSave" />
 
-    <!-- 开关关闭仅降灰规则卡（demo data-disabled 形态：opacity + pointer-events 收敛，
-         关键控件再绑 disabled 键盘路径同闭——禁用态编辑规则无意义）；统计卡读侧观测与
-         enabled 正交（§3.1 卡 3 / 设计目标 3），不随开关降灰。间距 16px 与 GroupCard 兄弟规则等值 -->
+    <!-- 按服务商卡（rules + ipv4Only 两清单逐行开关）+ 统计卡。代理总开关只门控「走代理」
+         列（卡内开关自身 disabled 承担），卡体不整卡降灰——「强制 IPv4」列必须保持可用
+         （ipv4Only 与 enabled 正交，shared 契约语义）；统计卡读侧观测同样与开关正交。
+         间距 16px 与 GroupCard 兄弟规则等值 -->
     <div class="mt-[var(--space-4)] flex flex-col gap-[var(--space-4)]" data-testid="network-lower-cards">
-      <div :class="{ 'pointer-events-none opacity-50': !draft.enabled }" data-testid="network-rules-dim">
-        <NetworkRulesCard :rules="draft.rules" :enabled="draft.enabled" :providers="providers" />
-      </div>
+      <NetworkProviderCard v-model:rules="draft.rules" v-model:ipv4-only="draft.ipv4Only" :enabled="draft.enabled" :providers="providers" />
       <NetworkStatsCard :providers="providers" />
     </div>
   </div>
@@ -40,7 +39,7 @@
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import NetworkServerCard from './NetworkServerCard.vue'
-import NetworkRulesCard from './NetworkRulesCard.vue'
+import NetworkProviderCard from './NetworkProviderCard.vue'
 import NetworkStatsCard from './NetworkStatsCard.vue'
 import { getSettingsTransport } from '@taiji/core'
 import { createExplicitSave } from '@/composables/features/settings/setting-field'
@@ -65,7 +64,10 @@ const providers = ref<ProviderInfo[]>([])
 let loadedConfig: NetworkProxyConfig | null = null
 
 function applyLoaded(config: NetworkProxyConfig): void {
-  loadedConfig = config
+  // 基准归一化：旧配置文件无 ipv4Only 字段（schema 演进前的落盘形态），不补缺省会让
+  // isDirty 的 JSON 比较（build 输出恒含 ipv4Only 键）把「配置 schema 缺省」误判成
+  // 「用户编辑」——旧配置用户此后永远收不到广播刷新
+  loadedConfig = { ...config, ipv4Only: config.ipv4Only ?? [] }
   Object.assign(draft, draftFromConfig(config))
 }
 
