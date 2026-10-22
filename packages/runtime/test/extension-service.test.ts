@@ -371,6 +371,107 @@ describe('ExtensionService', () => {
     // 「classifies invalid pi extension as not_extension」（code + message 一处断言）
   })
 
+  // ── 钉版本安装源 npm:<pkg>@<version>（羊毛清单安全契约，ADR-0156 D2）──────
+  // 核心契约：版本只存在于安装执行时刻（installNpm 收 <纯名>@<版本>），
+  // settings.json packages[] 一律登记 npm:<纯名>（既有消费方 deduplicate/enabled/uninstall
+  // 全按纯名构造 key）；目录校验/回滚始终按纯名（scoped 纯名 path.join 拼路径天然正确）。
+  describe('installExtension pinned version source (npm:<pkg>@<version>)', () => {
+    /** 在 npm/node_modules 下造一个有效 pi extension fixture（scoped 纯名路径 node_modules/@scope/name） */
+    const seedScopedExtFixture = (scope: string, name: string): string => {
+      const pkgDir = join(testSettingsDir, 'npm', 'node_modules', `@${scope}`, name)
+      mkdirSync(pkgDir, { recursive: true })
+      writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({
+        name: `@${scope}/${name}`,
+        version: '1.2.3',
+        description: 'pinned install fixture',
+        keywords: ['pi-package'],
+        peerDependencies: { '@mariozechner/pi-coding-agent': '*' },
+      }), 'utf-8')
+      return pkgDir
+    }
+
+    const readSettingsPackages = (): string[] => {
+      const raw = readFileSync(join(testSettingsDir, 'settings.json'), 'utf-8')
+      return (JSON.parse(raw) as { packages: string[] }).packages
+    }
+
+    it('npm:@scope/xx@1.2.3 安装成功：installNpm 收带版本串、settings 登记纯名、校验按纯名目录', async () => {
+      const fixtureDir = seedScopedExtFixture('scope', 'xx')
+      mockedInstallPackage.mockResolvedValue(undefined)
+
+      await service.installExtension('npm:@scope/xx@1.2.3')
+
+      // 安装执行：installNpm → installPackage 第一参数是带版本安装串
+      expect(mockedInstallPackage).toHaveBeenCalledTimes(1)
+      expect(mockedInstallPackage.mock.calls[0]![0]).toBe('@scope/xx@1.2.3')
+      // settings 登记：一律写 npm:<纯名>，无版本形态（带版本入 settings 会令既有消费方 key 全量失配）
+      const packages = readSettingsPackages()
+      expect(packages).toContain('npm:@scope/xx')
+      expect(packages).not.toContain('npm:@scope/xx@1.2.3')
+      // isValidPiExtension 按纯名目录校验：fixture（node_modules/@scope/xx）未被回滚删除
+      expect(existsSync(fixtureDir)).toBe(true)
+    })
+
+    it('npm:@scope/xx（无版本，现状形态）行为完全不变：installNpm 收纯名、settings 登记纯名', async () => {
+      seedScopedExtFixture('scope', 'xx')
+      mockedInstallPackage.mockResolvedValue(undefined)
+
+      await service.installExtension('npm:@scope/xx')
+
+      expect(mockedInstallPackage).toHaveBeenCalledTimes(1)
+      expect(mockedInstallPackage.mock.calls[0]![0]).toBe('@scope/xx')
+      expect(readSettingsPackages()).toContain('npm:@scope/xx')
+    })
+
+    it('npm:name@1.2.3（unscoped 带版本）同 scoped 契约：installNpm 收 name@1.2.3、settings 登记纯名', async () => {
+      const pkgDir = join(testSettingsDir, 'npm', 'node_modules', 'plain-name')
+      mkdirSync(pkgDir, { recursive: true })
+      writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({
+        name: 'plain-name',
+        version: '1.2.3',
+        description: 'unscoped pinned fixture',
+        keywords: ['pi-package'],
+      }), 'utf-8')
+      mockedInstallPackage.mockResolvedValue(undefined)
+
+      await service.installExtension('npm:plain-name@1.2.3')
+
+      expect(mockedInstallPackage).toHaveBeenCalledTimes(1)
+      expect(mockedInstallPackage.mock.calls[0]![0]).toBe('plain-name@1.2.3')
+      expect(readSettingsPackages()).toContain('npm:plain-name')
+    })
+
+    it('npm:@scope/xx@abc（@ 后非数字开头）→ 整体按纯名处理 → isValidNpmPackageName 拒绝且不触发安装', async () => {
+      seedScopedExtFixture('scope', 'xx')
+
+      await expect(service.installExtension('npm:@scope/xx@abc'))
+        .rejects.toThrow('Invalid npm package name: @scope/xx@abc')
+
+      expect(mockedInstallPackage).not.toHaveBeenCalled()
+    })
+
+    it('npm install 成功但非 pi extension → 回滚 uninstall 用纯名（非带版本串）', async () => {
+      // 造一个非 extension 目录（package.json 无 pi 标记），install 成功后校验失败触发回滚
+      const badDir = join(testSettingsDir, 'npm', 'node_modules', '@scope', 'bad')
+      mkdirSync(badDir, { recursive: true })
+      writeFileSync(join(badDir, 'package.json'), JSON.stringify({
+        name: '@scope/bad',
+        version: '1.2.3',
+      }), 'utf-8')
+      mockedInstallPackage.mockResolvedValue(undefined)
+      mockedUninstallPackage.mockResolvedValue(undefined)
+
+      await expect(service.installExtension('npm:@scope/bad@1.2.3'))
+        .rejects.toThrow(/not a valid pi extension/)
+
+      // 回滚 uninstallNpm 第一参数必须是纯包名（带版本串拼目录会错位）
+      expect(mockedUninstallPackage).toHaveBeenCalledTimes(1)
+      expect(mockedUninstallPackage.mock.calls[0]![0]).toBe('@scope/bad')
+      // 失败路径不写 settings
+      expect(readSettingsPackages()).not.toContain('npm:@scope/bad')
+    })
+  })
+
   describe('uninstallExtension', () => {
     it('removes from settings.json', async () => {
       const pkgDir = join(testSettingsDir, 'npm', 'node_modules', 'test-pkg')

@@ -422,7 +422,10 @@ export class ExtensionService {
         throw new Error(`Unsupported source: ${source}. Only npm:xxx format is supported.`)
       }
 
-      const pkgName = source.slice(NPM_PREFIX_LENGTH)
+      // 支持 npm:<pkg>@<version> 钉版本形态（羊毛清单安全契约，ADR-0156 D2：防 registry
+      // 被推恶意新版）。拆分后 name/version 分流：安装执行用 <name>@<version>，
+      // settings 登记一律写 npm:<name> 纯名（见 splitNpmNameAndVersion 注释）。
+      const { name: pkgName, version } = splitNpmNameAndVersion(source.slice(NPM_PREFIX_LENGTH))
       if (!isValidNpmPackageName(pkgName)) {
         throw new ExtensionInstallError('not_found', `Invalid npm package name: ${pkgName}`)
       }
@@ -448,10 +451,12 @@ export class ExtensionService {
       }
 
       // npm install + 错误分类 + isValidPiExtension 验证 + 失败回滚
-      await this.installAndValidate(pkgName, npmDir)
+      await this.installAndValidate(pkgName, npmDir, 'install', version ? `${pkgName}@${version}` : undefined)
 
-      // 写入 settings.json packages[]（经 IExtensionSettings port → pi-settings-store 互斥 RMW）
-      await this.extSettings.addPackage(source)
+      // 写入 settings.json packages[]（经 IExtensionSettings port → pi-settings-store 互斥 RMW）。
+      // 一律写 npm:<纯名>：既有消费方（deduplicate/enabled/uninstall key）全按纯名构造，
+      // 版本语义只存在于安装执行时刻，不进 settings。
+      await this.extSettings.addPackage(`npm:${pkgName}`)
     })
   }
 
@@ -932,11 +937,14 @@ export class ExtensionService {
   }
 
   /** npm install + 错误分类 + isValidPiExtension 验证 + 失败回滚。
-   * installExtension 和 upgradeExtension 共用此流程，避免逻辑漂移。 */
-  private async installAndValidate(pkgName: string, npmDir: string, contextLabel = 'install'): Promise<void> {
+   * installExtension 和 upgradeExtension 共用此流程，避免逻辑漂移。
+   * installSpec：实际传给 npm install 的安装串（如 `pkg@1.2.3`），缺省用纯包名。
+   * 目录推导与回滚始终用 pkgName 纯名——scoped 纯名经 path.join 拼出
+   * node_modules/@scope/name 天然正确，带版本串拼目录会错位。 */
+  private async installAndValidate(pkgName: string, npmDir: string, contextLabel = 'install', installSpec?: string): Promise<void> {
     const nodeModulesDir = join(npmDir, 'node_modules')
     try {
-      await this.installer.installNpm(pkgName, nodeModulesDir, { timeout: NPM_INSTALL_TIMEOUT })
+      await this.installer.installNpm(installSpec ?? pkgName, nodeModulesDir, { timeout: NPM_INSTALL_TIMEOUT })
     } catch (e) {
       const msg = toErrorMessage(e)
       const errCode = (e as { code?: string }).code
@@ -1087,4 +1095,21 @@ export class ExtensionService {
  * scoped：@scope/name；unscoped：name。只允许小写字母、数字、-_.~ */
 function isValidNpmPackageName(name: string): boolean {
   return /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/.test(name)
+}
+
+/** 拆分 `npm:` 剥前缀后的安装串为 { name, version }。
+ *
+ * 为什么：钉版本安装（npm:<pkg>@<version>，羊毛清单安全契约 ADR-0156 D2——防 registry
+ * 被推恶意新版）的版本语义 = 安装执行时刻生效；settings.json packages[] 不承载版本——
+ * 既有消费方（deduplicate/setEnabled/uninstall）全按 `npm:<纯名>` 构造 key，带版本形态
+ * 入 settings 会全量失配。故安装串与登记名在此分流。
+ *
+ * 判定规则：从右往左找最后一个 `@`，其后内容以数字开头（semver 形态 /^\d[\w.+-]*$/）
+ * 才算版本后缀；scoped 名首个 @ 在位置 0，不会被误拆；无版本后缀时 version 为空串。 */
+function splitNpmNameAndVersion(spec: string): { name: string; version: string } {
+  const at = spec.lastIndexOf('@')
+  if (at <= 0) return { name: spec, version: '' }
+  const version = spec.slice(at + 1)
+  if (!/^\d[\w.+-]*$/.test(version)) return { name: spec, version: '' }
+  return { name: spec.slice(0, at), version }
 }
