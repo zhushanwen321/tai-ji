@@ -897,7 +897,7 @@
       "run": "node scripts/verify-provider-live-sync.mjs",
       "owner": "extensions/universal/provider-live-sync",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "faux 轨：真实 pi 二进制 + 真实扩展 + 本地 mock LLM（OpenAI chat-completions 流式，随机端口）——零 token 零外网；断言基线（新增前 Model not found）/ 新增后可直接切换 + get_state 真生效 / model_change 落 JSONL / 删除生效且其它模型无塌陷 / 扩展日志。验收结果与测试时序陷阱见 .tmp/tech-design/acceptance/pi-live-provider-e2e-RESULTS.md（设计过程档案）"
+      "note": "faux 轨：真实 pi 二进制 + 真实扩展 + 本地 mock LLM（OpenAI chat-completions 流式，随机端口）——零 token 零外网；断言基线（新增前 Model not found）/ 新增后可直接切换 + get_state 真生效 / model_change 落 JSONL / 删除生效且其它模型无塌陷 / 扩展日志。验收结果与测试时序陷阱记录在设计过程档案（已随 .tmp 清理，git 可追溯）"
     },
     {
       "id": "E2E-PLUGINCONTRACT-01",
@@ -1037,7 +1037,7 @@
       "run": "（开发阶段手测链，已执行 2026-09-19 仿真验收——S2/S3/S4/S5/S7/S8 主链 PASS，两 blocker 见下）dev 实例（TAIJI_DEV_BACKGROUND=1）桌面面板开远程访问 → 取 LAN URL + token → 浏览器移动仿真（iPhone UA + 375x812 视口 + CDP 驱动）按设计 §4.2 场景逐条验：负面探针（curl 静态范围/路径穿越 400/WS 无·错 token close 1008/pre-auth 静默 10s）可脚本化复跑",
       "owner": "packages/mobile-renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态（来源设计 .tmp/tech-design/remote-use-mobile.md §4.3：触发条件 = 触碰 connection-manager / use-connection / ws-client / 移动壳 / 远程访问配置侧）。asset 锚 = 被验能力本体（token 集合+静态托管 / D4 三分支连接装配），非验证剧本。S2-S8 含真实 LLM 轮次（streaming / 新建任务 / ask-user 闭环）故 L3；S3/S4/S5 负面与生命周期子项可脚本化（curl + WS 探针 + CDP）。2026-09-19 仿真验收结论：S2 连接全链（列表/streaming/发送/中断/桌面同屏/图片粘贴降级占位）PASS、S3 鉴权负面全 PASS、S4 关闭即消失（回环复位 + LAN 拒绝 + ambient env 伪造免疫）PASS、S5 token 生命周期四子链（坏链接不毁 storage / 重启免重扫 / 轮换热读落 token 视图 / 重扫覆盖）PASS、S7 新建任务链（含桌面侧栏同步）PASS、S8 ask-user 双端闭环（任一端作答即闭环）PASS；S6 断网恢复以 runtime 重启断连 + visibility 切前台重连等价覆盖（CDP offline 模拟无法切断已建立 WS——工具限制，真机开关 WiFi 留用户补验）。验收时点两 blocker（不阻塞链路断言、阻塞视觉形态断言；均已修复——① fix 8773e4f38：tokens.css 置顶 @tailwind 三指令补 Tailwind 入口，产物 CSS 工具类亲验恢复；② fix 280aa32bc：core utils/random-uuid 单一入口 + 19 处调用点全迁，非 secure context 走 RFC 4122 v4 fallback）。iOS Safari / Android Chrome 真机子项（CSP ws: 残差 / ITP / 触控体感）待用户补验"
+      "note": "R2 态（来源设计 remote-use-mobile.md §4.3，档案已随 .tmp 清理：触发条件 = 触碰 connection-manager / use-connection / ws-client / 移动壳 / 远程访问配置侧）。asset 锚 = 被验能力本体（token 集合+静态托管 / D4 三分支连接装配），非验证剧本。S2-S8 含真实 LLM 轮次（streaming / 新建任务 / ask-user 闭环）故 L3；S3/S4/S5 负面与生命周期子项可脚本化（curl + WS 探针 + CDP）。2026-09-19 仿真验收结论：S2 连接全链（列表/streaming/发送/中断/桌面同屏/图片粘贴降级占位）PASS、S3 鉴权负面全 PASS、S4 关闭即消失（回环复位 + LAN 拒绝 + ambient env 伪造免疫）PASS、S5 token 生命周期四子链（坏链接不毁 storage / 重启免重扫 / 轮换热读落 token 视图 / 重扫覆盖）PASS、S7 新建任务链（含桌面侧栏同步）PASS、S8 ask-user 双端闭环（任一端作答即闭环）PASS；S6 断网恢复以 runtime 重启断连 + visibility 切前台重连等价覆盖（CDP offline 模拟无法切断已建立 WS——工具限制，真机开关 WiFi 留用户补验）。验收时点两 blocker（不阻塞链路断言、阻塞视觉形态断言；均已修复——① fix 8773e4f38：tokens.css 置顶 @tailwind 三指令补 Tailwind 入口，产物 CSS 工具类亲验恢复；② fix 280aa32bc：core utils/random-uuid 单一入口 + 19 处调用点全迁，非 secure context 走 RFC 4122 v4 fallback）。iOS Safari / Android Chrome 真机子项（CSP ws: 残差 / ITP / 触控体感）待用户补验"
     },
     {
       "id": "E2E-REMOTE-02",
@@ -1946,7 +1946,7 @@
       "run": "node scripts/acceptance/plan-mode/mock-pi/selftest.mjs && node_modules/.bin/tsx scripts/acceptance/plan-mode/fixture-skill/selftest.mts && node scripts/acceptance/plan-mode/cdp/selftest.mjs && bash scripts/acceptance/plan-mode/exit-chain/verify-A1a.sh",
       "owner": "scripts/acceptance/plan-mode",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态（e2e 资产归宿纪律三态）：**触发条件 = scripts/acceptance/plan-mode/** diff 命中**（验收资产/剧本/自测自身变更）时开发期执行 run（三自测入口零 token 确定性，~20s；mock-pi 自测的装/恢复用例用 mkdtemp 假 bin 目录 + stub symlink，不触碰真实 node_modules/.bin/pi，与 AGENTS.md「验收构造 mock pi」窗口纪律不冲突，serial=false）。真机段（S1-S16 场景表 / CDP 断言连 dev 实例）执行归阶段 5 验收五窗口空载串行，PR/merge/CI 门禁不跑（AGENTS.md e2e 执行准则）；cdp/selftest 的 dev-instance-reachable 用例无 dev 实例时 SKIP（真机连跑归 U6）。资产全集（25 文件，经本 rule scope 全覆盖）与剧本表 / 能力侧见 scripts/acceptance/plan-mode/README.md（含 S12 三证恢复纪律）；F1-F5 复现 runner（repro/repro-baseline.mjs）产物落 .tmp/dev-flow/ 不入库。[2026-09-24 plan-mode-state-machine D-5] 实施计划 §4 与本表承诺的「实施落地后以 --base 复跑对账补核」于本 rule 兑现：基线 595b9cbaa2d2553191bc629335ec85af277d1da4 的 diff 未登记文件（25 本族文件）经本 rule 覆盖、check-extension-dependencies.mjs 经 E2E-EXTDEPS-01 覆盖，select-affected-e2e --check 转绿。exit-chain/（2026-09-26 增补）：V1 exit 链八场景 L3 剧本（真实 pi -ne + 本地 mock LLM 零 token），plan-mode-audit-remediation D3 交付后转为可复用回归资产（R2 态同批触发），产物落 .tmp/acceptance/exit-chain/"
+      "note": "R2 态（e2e 资产归宿纪律三态）：**触发条件 = scripts/acceptance/plan-mode/** diff 命中**（验收资产/剧本/自测自身变更）时开发期执行 run（三自测入口零 token 确定性，~20s；mock-pi 自测的装/恢复用例用 mkdtemp 假 bin 目录 + stub symlink，不触碰真实 node_modules/.bin/pi，与 AGENTS.md「验收构造 mock pi」窗口纪律不冲突，serial=false）。真机段（S1-S16 场景表 / CDP 断言连 dev 实例）执行归阶段 5 验收五窗口空载串行，PR/merge/CI 门禁不跑（AGENTS.md e2e 执行准则）；cdp/selftest 的 dev-instance-reachable 用例无 dev 实例时 SKIP（真机连跑归 U6）。资产全集（25 文件，经本 rule scope 全覆盖）与剧本表 / 能力侧见 scripts/acceptance/plan-mode/README.md（含 S12 三证恢复纪律）；F1-F5 复现 runner（repro/repro-baseline.mjs）产物落 .tmp/dev-flow/ 不入库（易失）。[2026-09-24 plan-mode-state-machine D-5] 实施计划 §4 与本表承诺的「实施落地后以 --base 复跑对账补核」于本 rule 兑现：基线 595b9cbaa2d2553191bc629335ec85af277d1da4 的 diff 未登记文件（25 本族文件）经本 rule 覆盖、check-extension-dependencies.mjs 经 E2E-EXTDEPS-01 覆盖，select-affected-e2e --check 转绿。exit-chain/（2026-09-26 增补）：V1 exit 链八场景 L3 剧本（真实 pi -ne + 本地 mock LLM 零 token），plan-mode-audit-remediation D3 交付后转为可复用回归资产（R2 态同批触发），产物落 .tmp/acceptance/exit-chain/（易失，不入库）"
     },
     {
       "id": "E2E-EXTDEPS-01",
@@ -2675,7 +2675,7 @@
       "run": "node scripts/skill-data-dir.mjs pr-review && bash scripts/pr-status.sh",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "skill-data 迁移（2026-10-18）补登：解析器为 gate 脚本族单一出口，slug 向量基准见 .tmp/skill-data-redesign/impl-spec.md §3（真机对账由 workflow/gate 脚本内向量自证承担）；pr-status.sh 直跑为只读状态输出，改脚本自身时冒烟。R2 态：真实运行形态 = pr-cr-fix 阶段 3b / dev-merge 人工触发"
+      "note": "skill-data 迁移（2026-10-18）补登：解析器为 gate 脚本族单一出口，slug 向量基准来自设计档案 skill-data-redesign impl-spec §3（已随 .tmp 清理；真机对账由 workflow/gate 脚本内向量自证承担）；pr-status.sh 直跑为只读状态输出，改脚本自身时冒烟。R2 态：真实运行形态 = pr-cr-fix 阶段 3b / dev-merge 人工触发"
     },
     {
       "id": "E2E-BTASK-01",
@@ -2700,7 +2700,7 @@
       "run": "（A12 真机脚本未落建：能力本体锚登记态——脚本落建后同 commit 回填 run 与 spec asset，先例 E2E-BATCH-01）",
       "owner": "extensions/universal/base-tool-enhance",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态（统一投递波 3 / A12 依赖此登记）：bash 后台任务完成通知真机轨——断言口径 = 任务完成经 port.deliver 入账（delivery-port-outbox entry 先于受理）→ steer 档边界注入（details.deliveryId = taskId）→ message_end 送达凭据命中（delivery-port-ack entry）→ kill pi 进程重启后 session_start 差集重放重投未送达通知；收殓终态（process-exit/orphaned）由对账路径经 port 补投。A12 验收已执行 PASS（runlog = .tmp/dev-flow/unified-delivery.accept/a12-bash-notify-chain/：probe-run.log / summary.jsonl / verdict.json——.tmp 易失，验收时点证据）。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填 run 与 spec asset，先例 E2E-BATCH-01）。执行口径：真 pi 进程 + 空载串行（AGENTS.md e2e 执行准则），真机执行归 u4 committed 后（impl-plan A12）"
+      "note": "R2 态（统一投递波 3 / A12 依赖此登记）：bash 后台任务完成通知真机轨——断言口径 = 任务完成经 port.deliver 入账（delivery-port-outbox entry 先于受理）→ steer 档边界注入（details.deliveryId = taskId）→ message_end 送达凭据命中（delivery-port-ack entry）→ kill pi 进程重启后 session_start 差集重放重投未送达通知；收殓终态（process-exit/orphaned）由对账路径经 port 补投。A12 验收已执行 PASS（runlog 含 probe-run.log / summary.jsonl / verdict.json，已随 .tmp 清理不入 git，验收时点证据 git 提交可追溯）。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填 run 与 spec asset，先例 E2E-BATCH-01）。执行口径：真 pi 进程 + 空载串行（AGENTS.md e2e 执行准则），真机执行归 u4 committed 后（impl-plan A12）"
     },
     {
       "id": "E2E-DELIVERY-01",
@@ -2751,7 +2751,7 @@
       "run": "（A13 真机脚本未落建：能力本体锚登记态——脚本落建后同 commit 回填 run 与 spec asset，先例 E2E-BTASK-01）",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态（统一投递波 4 / A13 依赖此登记）：真 pi + 真 runtime 进程——kill -9 runtime（pi 存活）→ 重启 → runStartupReattach 恢复链（reattach-delivery-trigger 包装 → reconcile('pi-restored') → outbox 重放）→ 断言未送达消息重新入队、已送达消息不重投（transcript 裸标记判重）；与 E2E-DELIVERY-01 mock 轨构成双层口径（设计 §6 波 4 增补）。A13 验收已执行（runlog = .tmp/dev-flow/unified-delivery.accept/a13-crash-recovery-and-regression/：截图 s0-s10 与 summary.jsonl——.tmp 易失，验收时点证据；观察项 = respawn 后旧 session 队列区派生视图失效，登记 docs/todo/unified-delivery-residuals.md #3）。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填 run 与 spec asset，先例 E2E-BTASK-01）。执行口径：空载串行（AGENTS.md e2e 执行准则），真机执行归 u5b committed 后（impl-plan A13/A15 同轮）"
+      "note": "R2 态（统一投递波 4 / A13 依赖此登记）：真 pi + 真 runtime 进程——kill -9 runtime（pi 存活）→ 重启 → runStartupReattach 恢复链（reattach-delivery-trigger 包装 → reconcile('pi-restored') → outbox 重放）→ 断言未送达消息重新入队、已送达消息不重投（transcript 裸标记判重）；与 E2E-DELIVERY-01 mock 轨构成双层口径（设计 §6 波 4 增补）。A13 验收已执行（runlog 含截图 s0-s10 与 summary.jsonl，已随 .tmp 清理不入 git，验收时点证据 git 提交可追溯；观察项 = respawn 后旧 session 队列区派生视图失效，登记 docs/todo/unified-delivery-residuals.md #3）。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填 run 与 spec asset，先例 E2E-BTASK-01）。执行口径：空载串行（AGENTS.md e2e 执行准则），真机执行归 u5b committed 后（impl-plan A13/A15 同轮）"
     },
     {
       "id": "E2E-DELIVERY-03",
@@ -2802,7 +2802,7 @@
       "run": "（D3 collect 验收节点执行 S1-S9：真机 pi + 真实后台任务（S8 需 taiji runtime managed 环境），开发期按改动范围空载串行；真机脚本未落建——能力本体锚登记态，脚本落建后同 commit 回填 run 与 spec asset，先例 E2E-BTASK-01）",
       "owner": "extensions/shared/delivery-port",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态（来源设计 result-collect §4 e2e 影响面评估表「新增真机 collect 链路 rule」行；设计档案在 .tmp 不入库，authority 回退 TEST-STRATEGY 三态锚点，E2E-RESUME-01 同款先例）。触发条件（必填）：改挂起/收取端口（delivery-port src）、collect_results 工具（pending-notifications src）或四生产方 collectKey 申报链（bash notify + pending-reconcile 对账补投 / subagent notifier 世代首个通知 / workflow workflow-notify runId / managed notify-delivery 批键集 + watch-coordinator lifetime 债权注册）任一时，S1-S9 由 D3 collect 验收节点执行（inspect 形态，场景-验收项对账 = impl-plan acceptancePlan A1-A9；空载串行跨套件不并发——AGENTS.md e2e 执行准则）。场景面：S1 核心收取（含 reload 反向防线）/ S2 超时恢复 push / S3 已完成快照 / S4 kill -9 崩溃恢复（差集重放零丢失）/ S5 并发 collect 串行 / S6 abort 正常返回 / S7 push 管线态 / S8 managed 合批收取 / S9 非 bash 域收取（subagent 首轮 + workflow runId）。中断形态族（session 替换/重放作用域/dispose 在途等待器 warn/终局写失败降级）无真机场景，由端口 handle 级单测承载（A10，归 u-p-port）；工具范围单测（lifetime 排除/跨 session 残留反向/errors 组装/第四态返回形态）归 u-p-tool（A11）——两者 L1 单测不占本轨。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填，先例 E2E-BTASK-01）。与既有 rule 重叠口径：BTASK-01 / SESSMGR-03 / BATCH-06 等既有触发范围各自的既有断言范围不变，本 rule 只补 collect 挂起收取面（多 rule 命中同一 diff 时按各自 run 执行）。D3 验收已执行（runlog = .tmp/dev-flow/result-collect.accept/：五场景 4 pass + crash degraded（S4a 断言 4 归因 taiji runtime 收殓器——裸 pi 环境结构性不含）；.tmp 易失，验收时点证据）。"
+      "note": "R2 态（来源设计 result-collect §4 e2e 影响面评估表「新增真机 collect 链路 rule」行；设计档案在 .tmp 不入库，authority 回退 TEST-STRATEGY 三态锚点，E2E-RESUME-01 同款先例）。触发条件（必填）：改挂起/收取端口（delivery-port src）、collect_results 工具（pending-notifications src）或四生产方 collectKey 申报链（bash notify + pending-reconcile 对账补投 / subagent notifier 世代首个通知 / workflow workflow-notify runId / managed notify-delivery 批键集 + watch-coordinator lifetime 债权注册）任一时，S1-S9 由 D3 collect 验收节点执行（inspect 形态，场景-验收项对账 = impl-plan acceptancePlan A1-A9；空载串行跨套件不并发——AGENTS.md e2e 执行准则）。场景面：S1 核心收取（含 reload 反向防线）/ S2 超时恢复 push / S3 已完成快照 / S4 kill -9 崩溃恢复（差集重放零丢失）/ S5 并发 collect 串行 / S6 abort 正常返回 / S7 push 管线态 / S8 managed 合批收取 / S9 非 bash 域收取（subagent 首轮 + workflow runId）。中断形态族（session 替换/重放作用域/dispose 在途等待器 warn/终局写失败降级）无真机场景，由端口 handle 级单测承载（A10，归 u-p-port）；工具范围单测（lifetime 排除/跨 session 残留反向/errors 组装/第四态返回形态）归 u-p-tool（A11）——两者 L1 单测不占本轨。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填，先例 E2E-BTASK-01）。与既有 rule 重叠口径：BTASK-01 / SESSMGR-03 / BATCH-06 等既有触发范围各自的既有断言范围不变，本 rule 只补 collect 挂起收取面（多 rule 命中同一 diff 时按各自 run 执行）。D3 验收已执行（五场景 4 pass + crash degraded（S4a 断言 4 归因 taiji runtime 收殓器——裸 pi 环境结构性不含）；runlog 已随 .tmp 清理不入 git，验收时点证据 git 提交可追溯）。"
     },
     {
       "id": "E2E-NETPROXY-01",
