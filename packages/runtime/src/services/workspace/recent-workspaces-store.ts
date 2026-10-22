@@ -53,12 +53,16 @@ export class RecentWorkspacesStore {
 
   /**
    * 记录一次工作区使用。INV-1 兜底：空串静默跳过。
-   * INV-3：同 cwd 覆盖更新（WriteBackCache.set 语义）。
+   * INV-3：同 cwd 合并更新——WriteBackCache.set 是整值替换，必须 spread 旧值保留既有
+   * 字段（pinned），否则已固定目录被再次选用即静默失固定（固定标记被新对象抹掉）；
+   * cwd/lastUsedAt/label 三字段由本方法刷新。
    */
   record(cwd: string): void {
     if (!cwd || cwd.trim() === '') return
 
+    const prev = this.cache.get(PARTITION_KEY, cwd)
     this.cache.set(PARTITION_KEY, cwd, {
+      ...prev,
       cwd,
       lastUsedAt: Date.now(),
       label: basename(cwd),

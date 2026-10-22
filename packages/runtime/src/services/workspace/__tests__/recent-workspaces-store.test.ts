@@ -93,4 +93,19 @@ describe('RecentWorkspacesStore pin 语义', () => {
     expect(store.setPinned('/not-exist', true)).toBe(true)
     expect(store.list()).toHaveLength(0)
   })
+
+  it('record 已 pinned 条目保留 pinned 标记（合并写，重录不因 set 整值替换失固定）', () => {
+    const store = makeStore()
+    store.record('/a')
+    store.record('/b')
+    expect(store.setPinned('/a', true)).toBe(true)
+
+    // 用户再次选用已固定目录：record 刷新 lastUsedAt/label，pinned 标记不被抹掉
+    store.record('/a')
+
+    const again = store.list().find((r) => r.cwd === '/a')
+    expect(again?.pinned).toBe(true)
+    expect(again?.label).toBe('a')
+    expect(store.list()[0].cwd).toBe('/a') // pinned 置前
+  })
 })
