@@ -712,7 +712,7 @@ export interface RecoverCrashedRunsResult {
  *    run 不复活，其两件遗留文件按 [D1] 历史数据处置不读不写，跟随裁决点 7 清理
  *    消亡）。单 run 收编失败仅记日志不中断其余 run——恢复天然幂等，下次启动重试；
  * 3. **evict**：全量重新加载后立即 `evictDoneRunsBeyondCap(runs,
- *    MAX_RETAINED_DONE_RUNS)`（K=20）——done run 内存有界性；只 delete 内存
+ *    MAX_RETAINED_DONE_RUNS)`——done run 内存有界性；只 delete 内存
  *    Map 条目，磁盘文件不动。
  *
  * 所有 loaded run（含 done）都注册进 runs Map（runId → WorkflowRun）——done run
@@ -793,7 +793,7 @@ export async function recoverCrashedRuns(
     runs.set(run.runId, run);
   }
 
-  // 步骤 3：done run 内存有界性（K=20）。kill-9 恢复转出的 done run
+  // 步骤 3：done run 内存有界性。kill-9 恢复转出的 done run
   // completedAt 为 transition 时刻（全局最新）必在保留端；多条恢复 run 同 ms
   // completedAt → tie 稳定排序（evictDoneRunsBeyondCap 契约）。
   const evicted = evictDoneRunsBeyondCap(runs, MAX_RETAINED_DONE_RUNS);

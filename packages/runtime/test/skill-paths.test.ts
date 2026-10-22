@@ -185,11 +185,7 @@ async function createSessionService() {
 
 // ── Tests ──────────────────────────────────────────────────────────
 
-// timeout 30s：用例走真实 spawn 链路（process-manager 真实探测 pi binary + RpcClient
-// start 自旋等待），单跑 0.5-1.2s，但 pnpm test 全量多 worker 高负载下默认 5s 余量不足——
-// 曾 observed 用例超时判死后悬挂 promise 在后续用例期间产出 spawn，污染模块级
-// spawnArgsCapture 导致连锁假失败（2026-09-15 全量终验）。
-describe('skillPaths passing chain', { timeout: 30_000 }, () => {
+describe('skillPaths passing chain', () => {
   let savedPackaged: string | undefined
 
   beforeAll(() => {

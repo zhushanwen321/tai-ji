@@ -20,7 +20,7 @@
 
 - 现象：多次 runtime respawn 的旧 session 队列区派生视图失效——in-flight 条目不显示、乐观气泡不 morph（高频采样恒零）；全新 session 正常。渲染链 7 文件对 main 零 diff（非本次改动范围）。
 - 疑点：respawn 恢复后 renderer 重订阅 / topic 快照链缺口（`session-message-handler.ts:830` 附近）。D3 验收者立场未修复，待独立排查。
-- 触发：排队排查；复现路径见 `.tmp/dev-flow/unified-delivery.accept/a13-crash-recovery-and-regression/`（截图 s0-s10 与 summary.jsonl）。
+- 触发：排队排查；复现证据（截图 s0-s10 与 summary.jsonl）为 dev-flow 过程产物，已随 .tmp 清理，复现需按本条现象重新真机构造。
 
 ## 4. pi 1.0.0 idle+triggerTurn 注入 entry 双写（pi 上游形态，呈报项）
 

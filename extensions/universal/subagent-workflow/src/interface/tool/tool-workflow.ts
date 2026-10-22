@@ -4,9 +4,9 @@
  * 拆为两工具（命名与 schedule_control 同族）：
  * - `workflow_run`：registry.getPath → runWorkflow（直接启动，无需用户确认；name 必填
  *   由 schema 表达）
- * - `workflow_control`（action: status/abort/resume）：status 列出 runs（deps.runs）、
- *   abort 调 abortRun、resume 调 resumeRun（interrupted 态 run 断点续跑，D14 args
- *   校验在入口）
+ * - `workflow_control`（action: status/abort/resume）：status 无 runId 列出 runs
+ *   （deps.runs）/ 带 runId 返回该 run 成员表（statusSingleRun）、abort 调 abortRun、
+ *   resume 调 resumeRun（interrupted 态 run 断点续跑，D14 args 校验在入口）
  *
  * **resume 是中断恢复不是挂起恢复**：仅 interrupted 态 run 可续（崩溃收编 / terminate
  * 被动失联后的断点续跑，workflow-run-resume-revision U3/D14），不是把活跃 run 暂停再继续。
@@ -15,6 +15,7 @@
  * 层归属：Interface。依赖 Pi SDK + Engine lifecycle/launcher + helpers。
  */
 
+import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import os from "node:os";
 
@@ -44,11 +45,18 @@ import { getModelConfigService } from "@zhushanwen/subagent-core";
 import {
   argKeysFromMeta,
   findFlattenedArgKeys,
+  MAX_RETAINED_DONE_RUNS,
   MAX_TIMER_DELAY_MS,
   workflowNotFoundMessage,
 } from "@zhushanwen/subagent-core";
 import { assertEntryTimeBudget, assertEntryTokenBudget, assertSlugWithinLimit } from "@zhushanwen/subagent-core";
 import { runSummary } from "@zhushanwen/subagent-core";
+// run 成员视图（subagent-tool-interface-refactor §3.3.3/§3.4）：record 优先 + trace 兜底
+// 的 core 纯函数族——渲染与截断预算共用 core 同一度量单位（memberViewLine），防两处口径漂移。
+import { ArgsValidationError } from "@zhushanwen/subagent-core";
+import { getSubagentService } from "@zhushanwen/subagent-core";
+import { MEMBER_VIEWS_MAX_CHARS, memberViewLine, runMemberViews, truncateRunMemberViews } from "@zhushanwen/subagent-core";
+import type { RunMemberRecordView, RunMemberView } from "@zhushanwen/subagent-core";
 import { ID_PREVIEW_LENGTH } from "../format/id-preview.ts";
 import type { RunStartDetails, WorkflowToolResult } from "./tool-result.ts";
 import {
@@ -58,6 +66,8 @@ import {
   releaseReentryGuard,
 } from "./reentry-guard.ts";
 import { formatRunStatusElapsed } from "../format/format.ts";
+// run 视图 record 拉取上限（与 TUI run 视图 collectRecordsByParentRunId 同源口径）。
+import { LIST_LIMIT } from "../tui/list-shared.ts";
 import {
   assertNotAborted,
   buildRunSpecFromScript,
@@ -106,21 +116,27 @@ const WorkflowRunParams = Type.Object({
   model: Type.Optional(Type.String({
     // 缺省继承主 agent 的纪律句已删（D1 单源化→注入段）；
     // run 级 override 作用域 / user override 优先级是本参数功能语义，保留。
+    // 尾句 = §3.3.7 残留风险处置的说明腿：脚本把同名参数声明为可选时工具不会报错
+    // （顶层键不进 args、脚本静默走自己的缺省值），schema 字段说明是该歧义唯一的
+    // 结构性提示层（错误腿 = reservedKeyChannelError 只覆盖 required 缺参形态）。
     description:
       "Run-level model override in 'provider/modelId' format — all agents spawned by this run inherit it (unless a per-call agent() opts.model is set). " +
-      "A user-issued runtime override (panel switch / /subagent-model) wins over this parameter and over any explicitly scripted model.",
+      "A user-issued runtime override (panel switch / /subagent-model) wins over this parameter and over any explicitly scripted model. " +
+      "This key is NOT passed to the script — a script's own same-named parameter must be passed inside 'args'.",
   })),
   thinkingLevel: Type.Optional(StringEnum(THINKING_ORDER, {
     // 枚举值由 schema 自身的 enum 承载（不重复列举）；「user override 不改显式 scripted
     // level」的优先级事实随 D1 单源化从 promptGuidelines Note 条迁入本字段说明。
-    description: "Run-level thinkingLevel override — all agents in the run inherit it. Omit for each agent's model's highest available level. A user-issued runtime override (panel switch / /subagent-model) does not change an explicitly scripted level (explicit levels outrank the override's inline level).",
+    // 尾句同 model：§3.3.7 残留风险处置的说明腿（脚本同名参数的通道指引）。
+    description: "Run-level thinkingLevel override — all agents in the run inherit it. Omit for each agent's model's highest available level. A user-issued runtime override (panel switch / /subagent-model) does not change an explicitly scripted level (explicit levels outrank the override's inline level). " +
+      "This key is NOT passed to the script — a script's own same-named parameter must be passed inside 'args'.",
   })),
 });
 
 const WorkflowControlParams = Type.Object({
-  action: StringEnum(WORKFLOW_CONTROL_ACTIONS, { description: "Control operation: 'status' lists runs, 'abort' stops one, 'resume' continues an interrupted run" }),
+  action: StringEnum(WORKFLOW_CONTROL_ACTIONS, { description: "Control operation: 'status' without runId lists runs / with runId returns that run's member table, 'abort' stops one, 'resume' continues an interrupted run" }),
   runId: Type.Optional(
-    Type.String({ description: "Workflow run ID (abort / resume; find via action:status)" }),
+    Type.String({ description: "Workflow run ID (status with runId returns that run's member table; abort / resume; find ids via action:status without runId)" }),
   ),
   args: Type.Optional(
     Type.Record(Type.String(), Type.Unknown(), {
@@ -159,7 +175,7 @@ type WorkflowControlToolParams = Static<typeof WorkflowControlParams>;
  *
  * D9 下沉后作为 core args-meta 的 reservedKeys 注入（ArgMetaOptions）——core 缺省
  * 空集，不注入则撞名保护失效（run 调用顶层必有 name，会被误判平铺）。
- * export 供 detectors.test 复用同一集合防漂移。
+ * export 供 __tests__/tool-workflow.test.ts（TC3i 宿主 reservedKeys 接线锚）复用同一集合防漂移。
  */
 export const TOOL_TOP_LEVEL = new Set([
   "action",
@@ -185,6 +201,20 @@ export const TOOL_TOP_LEVEL = new Set([
  */
 const ARGS_META_OPTIONS = { reservedKeys: TOOL_TOP_LEVEL };
 
+/**
+ * 保留键双通道解释的键集（§3.3.7）：workflow 脚本把这些名字声明为 required 参数、
+ * 而 args 里缺失时，缺参错误补「顶层键 = run 级覆盖 / 脚本参数要进 args」的通道
+ * 解释。name/args/error/action 等 tool 结构键不在此列——它们与脚本参数同名时语义
+ * 不是「覆盖值」，平铺检测（findFlattenedArgKeys + TOOL_TOP_LEVEL 豁免）已另有处理。
+ */
+const RESERVED_OVERRIDE_KEYS: ReadonlySet<string> = new Set([
+  "model",
+  "thinkingLevel",
+  "tokens",
+  "time",
+  "slug",
+]);
+
 // ── Types ────────────────────────────────────────────────────
 
 interface RunSummary {
@@ -208,10 +238,25 @@ interface RunSummary {
  *
  * Discriminant: `action`. Each action's details shape is explicitly typed so
  * downstream consumers (structured-output) can narrow without unsafe casts.
+ *
+ * status 双变体（subagent-tool-interface-refactor §3.1.3，`mode` 为新增判别字段，
+ * additive：list 变体仍带 runs，既有消费方读 details.runs 行为不变）：
+ * - mode:"list" = 无 runId 列表（内存保留窗口内 run 摘要）；
+ * - mode:"run" = 带 runId 单 run 视图（run 摘要 + 成员表 + 截断标记；members 为
+ *   core runMemberViews 派生视图，truncated/total 来自同一截断预算）。
  */
 export type WorkflowToolDetails =
   | ({ action: "run"; name: string } & RunStartDetails)
-  | { action: "status"; runs: RunSummary[] }
+  | { action: "status"; mode: "list"; runs: RunSummary[] }
+  | {
+      action: "status";
+      mode: "run";
+      run: RunSummary;
+      members: RunMemberView[];
+      truncated: boolean;
+      /** 成员表总行数（截断前——failed N/M 的 M 同源）。 */
+      total: number;
+    }
   | { action: "abort"; runId: string; status: string; reason?: string }
   | ({ action: "resume"; runId: string } & RunStartDetails);
 
@@ -309,7 +354,7 @@ export function registerWorkflowTool(
     name: "workflow_control",
     label: "Workflow Control",
     description:
-      "Control workflow runs: status (list), abort (stop a run), resume (continue an interrupted run).\n" +
+      "Control workflow runs: status (without runId = list runs; with runId = that run's member table), abort (stop a run), resume (continue an interrupted run).\n" +
       "Runs are one-shot (no pause): stop early with abort; for a settled run start a new one via `workflow_run`.",
     promptSnippet: "Check, abort, or resume workflow runs",
     promptGuidelines: [
@@ -317,7 +362,7 @@ export function registerWorkflowTool(
       // 调用形状与「不得 resume 已终态 run」的纪律条（锚词清单见 tool-prompt-contract.test.ts）。
       "resume is ONLY for interrupted runs (crash or session-switch): it replays completed calls at zero token cost and continues. Do NOT resume a settled (done/failed/cancelled) run — start a new run via `workflow_run`.",
       "Call shapes (JSON): " +
-      "- status: {\"action\":\"status\"}. " +
+      "- status: {\"action\":\"status\"} — or {\"action\":\"status\",\"runId\":\"<id>\"} for a single run's member table. " +
       "- abort: {\"action\":\"abort\",\"runId\":\"<id>\"}. " +
       "- resume: {\"action\":\"resume\",\"runId\":\"<id>\"} (+ optional args/tokens/time/model).",
     ],
@@ -341,7 +386,7 @@ export function registerWorkflowTool(
         const action = params.action as WorkflowControlAction;
         switch (action) {
           case "status":
-            result = actionStatus(deps);
+            result = actionStatus(params, deps);
             break;
           case "abort":
             result = await actionAbort(params, deps);
@@ -478,20 +523,31 @@ export async function actionRun(
   }
 
  // 构建 RunSpec + 启动（m3：parameters 从 script.meta 拷贝——chokepoint 校验用；
- // 校验失败 → ArgsValidationError 直接 throw 给 pi（W4：err.message 含 §5.3 指引，
- // pi catch 后原文案进 toolResult content 并置 isError:true），其他错误保持传播）
-  const runId = await runWorkflow(
-    buildRunSpecFromScript(script, {
-      args,
-      budgetTokens: tokens,
-      budgetTimeMs: time,
-      slug: params.slug,
-      model: params.model,
-      thinkingLevel: params.thinkingLevel,
-    }),
-    deps,
-    signal,
-  );
+ // 校验失败 → ArgsValidationError 被 catch 补保留键双通道解释后以 Error throw 给 pi
+ //（W4：err.message 含 §5.3 指引，pi catch 后原文案进 toolResult content 并置
+ // isError:true），其他错误保持传播）
+  let runId: string;
+  try {
+    runId = await runWorkflow(
+      buildRunSpecFromScript(script, {
+        args,
+        budgetTokens: tokens,
+        budgetTimeMs: time,
+        slug: params.slug,
+        model: params.model,
+        thinkingLevel: params.thinkingLevel,
+      }),
+      deps,
+      signal,
+    );
+  } catch (err) {
+    // [§3.3.7 保留键双通道] 按类型 catch：缺失 required 键与工具顶层 run 级覆盖键
+    // 相交时补一段通道解释，普通缺参/类型错原样透出。
+    if (err instanceof ArgsValidationError) {
+      throw reservedKeyChannelError(err);
+    }
+    throw err;
+  }
 
   return {
     content: [
@@ -507,14 +563,67 @@ export async function actionRun(
 }
 
 
+// ── 保留键双通道解释（§3.3.7，actionRun 的 ArgsValidationError catch 附属）──
+
+/**
+ * ArgsValidationError → 双通道解释错误：ajv 报告的缺失 required 键与
+ * RESERVED_OVERRIDE_KEYS 相交时，在原错误文案后补「顶层键是 run 级覆盖、脚本参数
+ * 要放进 args、同时传两者的正确形状」；不相交（普通缺参/类型错）原 message 原样透出。
+ * 返回新 Error（不 mutate 原错误——保留其类型与调用方栈）。
+ */
+function reservedKeyChannelError(err: ArgsValidationError): Error {
+  const overlaps = missingRequiredKeysOf(err).filter((k) => RESERVED_OVERRIDE_KEYS.has(k));
+  if (overlaps.length === 0) {
+    return new Error(err.message);
+  }
+  const keys = overlaps.map((k) => `"${k}"`).join(", ");
+  const example: Record<string, unknown> = { name: "<script>" };
+  for (const key of overlaps) {
+    example[key] = "<run-level override>";
+  }
+  example.args = Object.fromEntries(overlaps.map((k) => [k, "<script argument>"]));
+  return new Error(
+    `${err.message}\n` +
+    `Channel note: top-level ${keys} on workflow_run ${overlaps.length === 1 ? "is" : "are"} a run-level ` +
+    `override applied to the whole run — it is NOT passed to the script. The script reads its own ` +
+    `parameters from 'args'. Correct shape to pass both: ${JSON.stringify(example)} ` +
+    `(omit the top-level ${keys} if no run-level override is needed).`,
+  );
+}
+
+/**
+ * 从 ArgsValidationError.errors（ajv 错误数组）提取缺失的 required 参数名
+ * （ajv required 错误携带 params.missingProperty）；非 required 错误 / errors 缺席
+ * （畸形 schema 形态）返回空集——不猜不扩。
+ */
+function missingRequiredKeysOf(err: ArgsValidationError): string[] {
+  const keys = new Set<string>();
+  for (const e of err.errors ?? []) {
+    if (e === null || typeof e !== "object") continue;
+    const params = (e as Record<string, unknown>).params;
+    if (params === null || typeof params !== "object") continue;
+    const missing = (params as Record<string, unknown>).missingProperty;
+    if (typeof missing === "string") keys.add(missing);
+  }
+  return [...keys];
+}
+
 // ── status action ────────────────────────────────────────────
 
-function actionStatus(deps: LauncherDeps): WorkflowExecuteResult {
+/**
+ * status 双分支（subagent-tool-interface-refactor §3.1.3/§3.4）：带 runId = 单 run
+ * 视图（run 摘要 + 成员表）；无 runId = 列表（现状，内存保留窗口内全部 run 摘要）。
+ */
+function actionStatus(params: WorkflowControlToolParams, deps: LauncherDeps): WorkflowExecuteResult {
+  const runId = params.runId;
+  if (runId !== undefined && runId !== "") {
+    return statusSingleRun(runId, deps);
+  }
   const runs = Array.from(deps.runs.values());
   if (runs.length === 0) {
     return {
       content: [{ type: "text", text: "No workflows in current session." }],
-      details: { action: "status", runs: [] },
+      details: { action: "status", mode: "list", runs: [] },
     };
   }
   const summaries = runs.map((r) => toRunSummary(r, deps.store));
@@ -527,8 +636,100 @@ function actionStatus(deps: LauncherDeps): WorkflowExecuteResult {
   });
   return {
     content: [{ type: "text", text: lines.join("\n") }],
-    details: { action: "status", runs: summaries },
+    details: { action: "status", mode: "list", runs: summaries },
   };
+}
+
+/**
+ * 单 run 视图（§3.1.3 成员表终态形状）：run 摘要行（带 failed N/M）+ 成员行
+ * （stepIndex 序）+ 截断省略行。成员事实 = core runMemberViews（record 优先、
+ * trace 兜底）；record 查询经 SubagentService 单例，缺席（standalone pi / session_start
+ * 前）或查询读失败（磁盘/manifest 异常）降级 trace-only，不抛错、不隐藏成员行
+ * （§3.4 错误规格：record 查询不可用 | 降级（不抛错））。
+ */
+function statusSingleRun(runId: string, deps: LauncherDeps): WorkflowExecuteResult {
+  const run = deps.runs.get(runId);
+  if (!run) {
+    throw runNotFoundError(runId, deps);
+  }
+  const summary = toRunSummary(run, deps.store);
+  // record 查询不可用降级（§3.1.3 trace 兜底把「跨进程读失败」与 service 缺席并列；
+  // §3.4 错误规格「record 查询不可用 | 降级（不抛错）」）：查询抛错（磁盘/manifest
+  // 异常）与缺席同样折为 records undefined → 全部成员行走 trace 兜底行，status 不整体
+  // 失败。collectRecordsByParentRunId 的 limit 位与 TUI run 视图同源 LIST_LIMIT——同量级口径。
+  let records: readonly RunMemberRecordView[] | undefined;
+  const service = getSubagentService();
+  if (service) {
+    try {
+      records = service.queries.collectRecordsByParentRunId(runId, LIST_LIMIT);
+    } catch (err) {
+      logger.warn(
+        `[tool-workflow] record query failed for run ${runId} — falling back to trace-only member rows`,
+        err,
+      );
+    }
+  }
+  const members = runMemberViews(run, { records, now: Date.now() });
+  const budget = truncateRunMemberViews(members, MEMBER_VIEWS_MAX_CHARS);
+  // failed N/M 从截断前的全量成员行计数（M = 去重后成员表行数，设计 §3.1.3 唯一定义；
+  // 截断只省略渲染行，不改计数）。
+  const failedCount = members.filter((m) => m.state === "failed").length;
+  const lines: string[] = [runMemberHeaderLine(summary, members.length, failedCount)];
+  for (const member of budget.members) {
+    lines.push(memberViewLine(member));
+  }
+  if (budget.truncated) {
+    lines.push(`… ${budget.omitted} more members omitted (failed rows kept)`);
+  }
+  return {
+    content: [{ type: "text", text: lines.join("\n") }],
+    details: {
+      action: "status",
+      mode: "run",
+      run: summary,
+      members: budget.members,
+      truncated: budget.truncated,
+      total: budget.total,
+    },
+  };
+}
+
+/**
+ * 单 run 摘要行（设计 §3.1.3 示例形态）：
+ * `Run <runId> [<status>[:<reason>]] <name> · <M> members · <elapsed> · failed <N>/<M>`。
+ * reason 恒显示（含 completed——与 list 行的「completed 无后缀」惯例不同，run 行
+ * 对照设计示例 `[done:completed]`）；run 级 error 仍缀行尾（失败 run 的顶层错误可见）。
+ */
+function runMemberHeaderLine(summary: RunSummary, memberCount: number, failedCount: number): string {
+  const reasonSuffix = summary.reason ? `:${summary.reason}` : "";
+  const duration = summary.startedAt ? ` · ${formatRunStatusElapsed(summary.startedAt, summary.completedAt)}` : "";
+  const errorSuffix = summary.error ? ` · error: ${summary.error}` : "";
+  return (
+    `Run ${summary.runId} [${summary.status}${reasonSuffix}] ${summary.name}` +
+    ` · ${memberCount} members${duration} · failed ${failedCount}/${memberCount}${errorSuffix}`
+  );
+}
+
+/**
+ * 查无 runId 的两种文案（§3.1.3/错误规格）：判据 = 磁盘 record 流文件存在性——
+ * 非终局 run（running 活体 / interrupted 重建）恒在内存 runs Map，「不在内存 + 磁盘
+ * record 流在」= 已终局且被 MAX_RETAINED_DONE_RUNS 逐出保留窗口；磁盘也无 =
+ * 未知 id。超窗口的恢复动作 = 从该 run 的完成通知恢复结果（省略 runId 列全部不可用
+ * ——列表同样不含已逐出 run）。
+ */
+function runNotFoundError(runId: string, deps: LauncherDeps): Error {
+  if (existsSync(deps.store.stateFilePath(runId))) {
+    return new Error(
+      `Workflow run '${runId}' is settled and no longer in the in-memory retention window ` +
+      `(the most recent ${MAX_RETAINED_DONE_RUNS} settled runs are kept). Recover its results from the run's completion ` +
+      `notification — a status listing will not include it.`,
+    );
+  }
+  return new Error(
+    `Workflow run '${runId}' not found. Double-check the runId (copy it from the tool result that ` +
+    `started the run). ` +
+    `Correct: {"action":"status"} without runId lists the runs still in the retention window.`,
+  );
 }
 
 // ── abort action ─────────────────────────────────────────────

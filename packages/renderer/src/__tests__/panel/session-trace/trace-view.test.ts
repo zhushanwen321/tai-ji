@@ -19,7 +19,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/session-trace/trace-view.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { computed, nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -62,6 +62,7 @@ import PanelHeader from '@/components/panel/PanelHeader.vue'
 import TraceView from '@/components/panel/trace/TraceView.vue'
 import {
   _resetTraceStoreForTest,
+  _setTraceEntriesSoftCapForTest,
   bindTraceSessionId,
   ensureTraceLoaded,
   revealTraceEntry,
@@ -609,11 +610,21 @@ describe('error 态 envelope message 透出（回流修复）', () => {
 })
 
 describe('B11 登记清单截断降级 banner（truncated 正交字段→现有降级渲染分支，不新增 status 值）', () => {
-  it('超限快照：保尾部 5000 + truncated 置位 → banner 可见且登记清单仍正常渲染', async () => {
-    // 5001 条线性链（软上限 5000 → 丢弃头部 e0，保 e1..e5000）
+  // 软上限注入 50：截断/降级分支语义与 5000 同构，fixture 51 条替代 5001 条
+  //（test-single-layer-cleanup 判据 d：上限参数化注入，消万条 fixture 与实现常量耦合）
+  beforeEach(() => {
+    _setTraceEntriesSoftCapForTest(50)
+  })
+
+  afterEach(() => {
+    _setTraceEntriesSoftCapForTest(null)
+  })
+
+  it('超限快照：保尾部 50 + truncated 置位 → banner 可见且登记清单仍正常渲染', async () => {
+    // 51 条线性链（软上限 50 → 丢弃头部 t0，保 t1..t50）
     const entries: unknown[] = []
     let parent: string | null = null
-    for (let i = 0; i < 5001; i++) {
+    for (let i = 0; i < 51; i++) {
       const id = `t${i}`
       entries.push({ type: 'message', id, parentId: parent, message: { role: 'user', content: `row ${i}` } })
       parent = id
@@ -623,20 +634,19 @@ describe('B11 登记清单截断降级 banner（truncated 正交字段→现有�
       source: 'file',
       entries,
       malformed: [],
-      leafId: 't5000',
+      leafId: 't50',
     } satisfies ServerMessageMap['session.traceEntries'])
 
     const view = await mountTraceView()
-    // 分区层：软上限生效（A8「entries ≤ 5000 且 truncated 标记」）
+    // 分区层：软上限生效（A8「entries ≤ 50 且 truncated 标记」）
     const p = useSessionTrace().partition.value
     expect(p.truncated).toBe(true)
-    expect(p.entries).toHaveLength(5000)
+    expect(p.entries).toHaveLength(50)
     expect(p.status).toBe('ready') // 登记清单仍 ready——截断不是错误态，不新增 status 值
 
     // 用户可见 DOM 断言：降级 banner（与 file 降级 banner 同构）+ 登记清单主体仍在
     const banner = view.find('[data-testid="trace-truncated-banner"]')
     expect(banner.exists()).toBe(true)
-    expect(banner.text()).toContain('5000')
     expect(banner.text()).toContain('已停止追加')
     expect(view.find('[data-testid="trace-list"]').exists()).toBe(true)
     view.unmount()

@@ -9,20 +9,39 @@ Pi 的 subagent + workflow 合并包：任务委派 + 多 agent 编排（chain /
 | `subagent_start` | —（单动作） | `task` + `slug`（≤35 字符）必填，`agent`（.md 绝对路径，缺省 general-purpose）、`model`、`engine`、`fork`、`worktree`、`maxTurns`、`idleTimeoutMs` 等 start 场景可选字段 |
 | `subagent_manage` | `list` / `cancel` / `close`（3 个） | `cancel` / `close`：`subagentId` 必填 |
 | `subagent_message` | `message` / `fork-from`（2 个） | `message`：`subagentId` + `text` 必填；`fork-from`：`sourceSubagentId` 必填 |
-| `subagents` | —（单动作，批量派发，deferred 延迟加载） | `tasks` 必填（每元素一个自包含任务 prompt，全部并行、结果一条通知收尾），可选 `agents`（逗号分隔 .md 绝对路径，单值或与 tasks 一一对应）、`aggregate`、`slug`、`model` 等；run 级状态控制走 `workflow_control` |
+| `subagents` | —（单动作，批量派发，常驻） | `tasks` 必填（成员对象数组，每元素 `{task, agent?, model?, thinkingLevel?}` 为一次派发，全部并行、结果一条通知收尾），可选运行级 `agent` / `model` / `thinkingLevel`（成员缺省值）与 `slug`、`tokens`、`time`；run 级状态控制走 `workflow_control`。形状与示例见「批量派发（`subagents`）」节 |
 | `workflow_run` | —（单动作） | `name`（`.js` 绝对路径）+ 可选 `args` / 预算，见「Workflow 生命周期」节 |
-| `workflow_control` | `status` / `abort` / `resume`（3 个） | `abort` / `resume`：`runId` 必填，见「Workflow 生命周期」节 |
+| `workflow_control` | `status` / `abort` / `resume`（3 个） | `status`：可选 `runId`（带 = 单 run 成员表视图）；`abort` / `resume`：`runId` 必填，见「Workflow 生命周期」节 |
 | `workflow-script` | `generate` / `lint` / `save` / `delete` / `list`（5 个） | `generate`：`script` + `name`（可选 `description`）；`save`：`name`（可 `newName` 改名）；`lint` / `delete`：`name` |
+
+### 批量派发（`subagents`）
+
+`tasks` 是成员对象数组，每个元素一次派发；全部成员并行执行，run 收尾时一条通知带回全部结果：
+
+```json
+{
+  "tasks": [
+    { "task": "读 packages/runtime/src/services，产出模块清单与职责摘要", "agent": "<absolute-path>/explorer.md", "model": "provider/model-a" },
+    { "task": "读 docs/testing，产出测试资产清单" }
+  ],
+  "agent": "<absolute-path>/explorer.md",
+  "slug": "inventory-scan"
+}
+```
+
+- 成员字段：`task` 必填（自包含任务正文，非空白）；`agent`（.md 绝对路径）、`model`（`provider/modelId`）、`thinkingLevel` 为成员级覆盖
+- 运行级 `agent` / `model` / `thinkingLevel` 是成员未显式指定时的缺省值，成员级值优先
+- `slug`（批次标签）、`tokens` / `time`（整批预算）为整批可选参数
 
 ## 工具激活（deferred）
 
-`subagents` / `workflow-script` 两工具注册为 `exposure: "deferred"`——不占常驻工具声明，由 pi 内置 `tool_search` 工具检索命中后按需激活。taiji 宿主内开箱即用（宿主启动时已激活 `tool_search`）；独立 pi 使用需在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）开启：
+`workflow-script` 工具注册为 `exposure: "deferred"`——不占常驻工具声明，由 pi 内置 `tool_search` 工具检索命中后按需激活。taiji 宿主内开箱即用（宿主启动时已激活 `tool_search`）；独立 pi 使用需在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）开启：
 
 ```json
 { "defaultTools": ["+tool_search"] }
 ```
 
-`+` 前缀是增量修饰（保留 read/bash/edit/write 默认集）。未开启 `tool_search` 时这两个工具对模型不可见。
+`+` 前缀是增量修饰（保留 read/bash/edit/write 默认集）。未开启 `tool_search` 时该工具对模型不可见。`subagents` 为常驻注册，无需 `tool_search`。
 
 ## 内置 Agents
 
@@ -77,6 +96,7 @@ pi --tools todo,goal_control,workflow_run,subagent_start,ask_user
 
 Workflow run 有两类结束形态：**终局**（`done`，outcome 区分 done / failed / cancelled / time_limited——成败已定）与**中断**（`interrupted` 暂停态——执行被打断但可续跑）。`workflow_run` 启动 run；`workflow_control` 共 3 个 action：`status` / `abort` / `resume`。run 的 `name` 仅接受 `.js` 绝对路径（通常是 `<available_workflows>` 条目的 `<location>`；任意声明 `@pi-meta kind:"workflow"` 的绝对 `.js` 路径均可），裸名 / 相对路径拒绝（`not_found`，拒单文案列全部可用条目及 location，按 location 重试即可）。
 
+- **status（状态查询）**：`{"action":"status"}` 列本 session 内存保留窗口内全部 run 摘要；带 `{"action":"status","runId":"<id>"}` 返回该 run 摘要 + 成员表（每个已出现成员一行：state / stepIndex / turns / lastError 等，按 stepIndex 排序；run 行带 `failed N/M` 失败计数，N = failed 成员数 / M = 成员表行数）。带 `runId` 查无此 run 时报错并区分两种情形：id 不存在（核对 id 重试）vs 已终局且超出内存保留窗口（保留窗口由 subagent-core 常量 `MAX_RETAINED_DONE_RUNS` 决定；从该 run 的完成通知恢复结果——省略 `runId` 列全部也查不到它）
 - **abort（主动取消）**：`{"action":"abort","runId":"<id>"}`（可选 `"error":"<reason>"`）→ `cancelled` 终局。要新结果就重新 run
 - **resume（断点续跑）**：`{"action":"resume","runId":"<id>"}`（可选 args 校验一致性与时间预算）——对 interrupted run 从断点恢复：已完成的调用回放缓存零 token、未完成的按三档恢复（会话完整 → 捞回结果；请求未完成 → 同会话续写；会话不在 → 整跑）；`/workflows resume <id>` 同能力
 - **session 切换/关闭时**，所有 running run 转 `interrupted` 暂停态（被打断不记失败）——回原 session 可 resume 续跑
@@ -86,6 +106,18 @@ Workflow run 有两类结束形态：**终局**（`done`，outcome 区分 done /
 ## 性能：sessions-index.json 持久化索引
 
 冷启动首扫的 identity 探测结论持久化为 `<enc>/sessions-index.json`（`<enc>` = agentDir 下 `subagents/` 内按 cwd 编码的目录段，索引落 sessions 目录同级；stat 戳自校验、tmp(pid+seq)+rename 原子写、60s 节流、损坏/版本不符静默回退全量探测），真实目录（1744 jsonl / 671MB）实测冷扫描中位数 972.8ms → 80.6ms（12.1x，预算 ≤300ms）。可复现验收脚本：`bench/cold-scan.bench.ts`（冷扫描计时 + 输出等价断言）、`bench/concurrent-scan.bench.ts`（3 实例并发 + 随机变异四判定）。
+
+## 从旧版本升级
+
+批量工具 `subagents` 的 `tasks` 从字符串数组改为成员对象数组；旧参数 `agents`（逗号分隔执行者串）与 `aggregate`（结果归约开关）已从工具移除。旧写法对照：
+
+| 旧写法 | 新写法 |
+|--------|--------|
+| `"tasks": ["任务一", "任务二"]` + `"agents": "<path-a>/explorer.md,<path-b>/explorer.md"` | `"tasks": [{"task": "任务一", "agent": "<path-a>/explorer.md"}, {"task": "任务二", "agent": "<path-b>/explorer.md"}]` |
+| `"agents": "<path-a>/explorer.md"`（单值作用于全部成员） | 运行级 `"agent": "<path-a>/explorer.md"` |
+| `"aggregate": true`（追加一个归约成员） | 无对应参数：结果照常逐条返回，归约由主 agent 收到完成通知后自行完成 |
+
+旧写法会被拒绝，错误信息即迁移指引：工具调用中出现 `agents` / `aggregate` 时入口直接报错并给出成员对象 / 自行归约的正确形状；`workflow_run` 直调 fan-out 模板的旧 CLI 风格写法 `tasks=["…"]` / `agents="…"` 会在 worker 启动前被类型校验拒绝。已保存的旧脚本按上表改为成员对象写法。
 
 ## 安装
 

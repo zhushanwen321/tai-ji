@@ -35,18 +35,25 @@
  * 与探针族既有静态断言（pi-semantics-rpc-surface 等）的分工：静态族守 pi 源码形态、
  * 凭证无关；本探针是动态成员（真实展开产物对照）。faux LLM 轨（L2.5 翻轨）：turn 的
  * 唯一目的是触发 JSONL flush（PS-14 assistant 落盘门），faux 一轮文本回复即可，断言
- * 对象（pi 落盘展开文本 golden vs taiji 注入器逐字 diff）与翻轨前一致；门控
- * FAUX_PI_READY（只判 binary，凭证无关、CI 可跑，已从 REAL_PI_TESTS 分池移出）。
- * [pi-bump 触发] /skill: 展开格式是 pi 源码行为，bump 时建议真实轨重放一次（登记由
- * 后续 e2e-map 承接）。
+ * 对象（pi 落盘展开文本 golden vs taiji 注入器逐字 diff）与翻轨前一致；门控 = 集成
+ * 测试门控 TAIJI_TEST_INTEGRATION（本地默认跳过，CI 与按改动范围触发时真跑；SSOT =
+ * test-guard/integration-gate.ts）——整文件为门控用例，已登记 packages/runtime
+ * vitest.config.ts integration project（串行尾组），本地不设 env 时 describe.skipIf
+ * 跳过（整治判据见 docs/todo/test-single-layer-cleanup.md）。
+ * [pi-bump 触发] /skill: 展开格式是 pi 源码行为，bump 时建议真实轨重放一次（e2e-map
+ * E2E-INTEG-09 登记；跑时须带 TAIJI_TEST_INTEGRATION=1）。
  *
- * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts
+ * 运行（集成轨，须显式开门控）：cd packages/runtime && TAIJI_TEST_INTEGRATION=1 npx vitest run src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { spawnPiFixture, FAUX_PI_READY, FAUX_PI_SKIP_REASON, type PiFixture } from '../../../__tests__/equivalence/pi-fixture.js'
+import { spawnPiFixture, type PiFixture } from '../../../__tests__/equivalence/pi-fixture.js'
+import {
+  INTEGRATION_TESTS_ENABLED,
+  INTEGRATION_TESTS_SKIP_REASON,
+} from '../../../../../../test-guard/integration-gate.ts'
 import { SkillInjector } from '../../../services/session/skill-injector.js'
 import type { IPiEngine } from '../../../services/ports/pi-engine.js'
 import { buildSkillMarker, SKILL_DATA_BLOCK_TAG } from '@taiji/shared'
@@ -106,8 +113,8 @@ function extractFirstUserTextFromJsonl(sessionDir: string): string {
   return userTexts[0]!
 }
 
-describe.skipIf(!FAUX_PI_READY)(
-  `PS-24 探针：/skill: 展开格式 golden diff（faux-pi RPC${FAUX_PI_SKIP_REASON ? `｜skip：${FAUX_PI_SKIP_REASON}` : ''}）`,
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `PS-24 探针：/skill: 展开格式 golden diff（faux-pi RPC，集成测试门控${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}）`,
   () => {
     let fixture: PiFixture | null = null
     // sessionDir 刻意不走 fixture 的默认 mkdtemp：探针要在 spawn 之前预置 .pi/skills/<name>/SKILL.md

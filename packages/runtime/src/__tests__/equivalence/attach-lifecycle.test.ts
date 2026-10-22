@@ -26,20 +26,20 @@
  * 环境约定照抄先例（live-reload.test.ts / pi-protocol-contract.test.ts）：真实 spawn
  * `pi --mode rpc`（fixture，禁 mock 子进程）。faux LLM 轨（L2.5 翻轨）：被测语义是
  * 附着/持久化屏障/断言行为（pi 自身机制），非模型智能——各轮 turn 响应由 fauxResponses
- * 脚本固定（marker 即脚本文本），断言语义与翻轨前一致；门控 FAUX_PI_READY（只判
- * binary，凭证无关、CI 可跑）。P1 模型恢复用例的演员替换：CLI 默认 = faux/faux-1、
+ * 脚本固定（marker 即脚本文本），断言语义与翻轨前一致；门控 = 集成测试门控
+ * TAIJI_TEST_INTEGRATION（SSOT = test-guard/integration-gate.ts：本地默认跳过、CI 或按
+ * 改动范围触发时真跑）。P1 模型恢复用例的演员替换：CLI 默认 = faux/faux-1、
  * 切换目标 = faux/faux-1-reasoning（被测语义「CLI model 恒优先于 entry 恢复」不变）。
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
+import { spawnPiFixture, type PiFixture } from './pi-fixture.js'
 import {
-  spawnPiFixture,
-  FAUX_PI_READY,
-  FAUX_PI_SKIP_REASON,
-  type PiFixture,
-} from './pi-fixture.js'
+  INTEGRATION_TESTS_ENABLED,
+  INTEGRATION_TESTS_SKIP_REASON,
+} from '../../../../../test-guard/integration-gate.ts'
 import { assertPiSessionFile } from '../../infra/pi/session-attach-assert.js'
 import { createForkedSessionFile } from '../../services/session/session-fork.js'
 // applyHeaderCwdFallback 自 session-lifecycle 迁出（max-lines 行数合规），权威源在 restore-seeding。
@@ -183,8 +183,8 @@ async function attachAndRunTurn(targetFile: string, marker: string): Promise<{ f
   return { fx, beforeTurnMem, beforeTurnFileCount, beforeKill }
 }
 
-describe.skipIf(!FAUX_PI_READY)(
-  `equivalence: attach 生命周期（faux-pi 子进程，W2${FAUX_PI_SKIP_REASON ? `｜skip：${FAUX_PI_SKIP_REASON}` : ''}）`,
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `equivalence: attach 生命周期（faux-pi 子进程，W2，集成测试门控${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}）`,
   () => {
   let fixture: PiFixture | null = null
 

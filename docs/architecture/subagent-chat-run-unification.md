@@ -3,7 +3,7 @@
 > **层声明**：技术方案层设计——当前层 = 方案决策与协议/语义规格，下一层 = 可实施的 PR 单元（§5）。问题定义经多轮用户裁定收敛（§3.3 七题决策逐条有用户拍板），无未答疑点。
 > **修订状态**：v7（设计就绪，2026-09-11 双审双 0 收敛）。收敛轨迹：主审 6→3→1→3→0、影响面 6→3→3→3→2→1→0 must-fix；关键修正谱系见附录 B（19 条）：D8 回撤（B#6）、收割链进程组论证反转 + 平台分通道（B#9/#15/#16）、one-shot 收尾四分支图景（B#12）、成功载体迁移清单（B#13/#17/#19——接管点内部步骤逐项核对纪律四度生效）、settle 交棒 run 应答驱动（B#14）、base 死记账退役（B#18）。行号基线 = commit `64e379a7c` 附近（subagent-service.ts 行号随 H1 实施批次有漂移——「L 批次」指用户并行批次，非 Gate B 修复批次 L；实施期以 grep 锚定符号名为准）。
 > **实施状态（2026-09-13）**：v7 已实施交付（chat 域统一进 run 域全单元落地；实施后语义演进见下条注记）。
-> **演进注记（2026-09-13）**：本文 H1 语义侧已被 [subagent-permanent-session-model.md](subagent-permanent-session-model.md)（永久会话模型，同日实施完毕）**partially superseded**——① §3.1 失败路径表与 §3.3 D4 的「closed（user-close/cancelled）→ endedMessageGuard 硬拒」已消亡：现行 reviveOrThrow 万物可续（conversation-continuation.ts），endedMessageGuard 已 [U4] 缩型为异进程占用单形态（subagent-actions-core.ts 段注释自证）；② D4 close 行「abort 在途+清队+立即终态化」已改 U5 优雅收尾（closeAfterRound 挂起→通知送达后终态写点）；③ D7 通知门 `notifyGateAllowsDelivery(record.closedReason)` + `NOTIFY_BLOCKED_CLOSED_REASONS` 集合已被 U5 通知 gate 取代（同名函数判据源换放弃轮标记；原 intent 判据分支已随 2026-09-16 裁决删除，notifier.ts）；④ 通知 dedup key `record:round` 已扩为 `id:epoch:round`（epoch=0 保持旧格式）；⑤ U6 保留清单 consumeCloseAfterRound 已更名 consumePendingArchive（run-orchestration.ts）；⑥ S6/S7 验收场景的 user-close 硬拒指引不再可构造（任何 closed 形态 message 均可续聊）。偏差全表见 `.tmp/dev-flow/subagent-permanent-session-model.impl-plan.md` §5。
+> **演进注记（2026-09-13）**：本文 H1 语义侧已被 [subagent-permanent-session-model.md](subagent-permanent-session-model.md)（永久会话模型，同日实施完毕）**partially superseded**——① §3.1 失败路径表与 §3.3 D4 的「closed（user-close/cancelled）→ endedMessageGuard 硬拒」已消亡：现行 reviveOrThrow 万物可续（conversation-continuation.ts），endedMessageGuard 已 [U4] 缩型为异进程占用单形态（subagent-actions-core.ts 段注释自证）；② D4 close 行「abort 在途+清队+立即终态化」已改 U5 优雅收尾（closeAfterRound 挂起→通知送达后终态写点）；③ D7 通知门 `notifyGateAllowsDelivery(record.closedReason)` + `NOTIFY_BLOCKED_CLOSED_REASONS` 集合已被 U5 通知 gate 取代（同名函数判据源换放弃轮标记；原 intent 判据分支已随 2026-09-16 裁决删除，notifier.ts）；④ 通知 dedup key `record:round` 已扩为 `id:epoch:round`（epoch=0 保持旧格式）；⑤ U6 保留清单 consumeCloseAfterRound 已更名 consumePendingArchive（run-orchestration.ts）；⑥ S6/S7 验收场景的 user-close 硬拒指引不再可构造（任何 closed 形态 message 均可续聊）。偏差全表见 subagent-permanent-session-model 实施计划 §5（dev-flow 过程产物，已随 .tmp 清理，不入库）。
 >
 > **一句话结论**：chat 域为「引擎进程跨轮长驻」维持的独立状态机整族退役；续聊轮统一为「新 run + resume 锚点」（pi `--session` 续写原 session 文件——该链路已是设计内降级路径并经真机验收）。代价 = 每轮续聊多一次进程冷启（量级与回退边界见 D2）；收益 = 净删约 2.5-3.5k 行 + 永久消除「每个活性/守护/通知修复都要 chat 域单独再做一遍」的域税。
 
@@ -82,9 +82,9 @@ subagent 派发链按 transport 分两种形态（引擎与任务子进程不变
 **成功路径——三轮对话**：
 
 ```
-用户: subagent start {task, slug, conversation:true}
+用户: subagent_start {task, slug}
 → 首轮 run 派发（无 resume）→ 完成，通知①（dedup key = record:round，见 D7）
-用户: subagent message {slug, message:"对比 Y"} → 新 run（resume = record.sessionFile）
+用户: subagent_message {subagentId, text:"对比 Y"} → 新 run（resume = record.sessionFile）
 → 完成，通知②；再 message → 通知③；GUI 列表始终一行，详情按轮追加
 ```
 

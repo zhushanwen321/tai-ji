@@ -57,9 +57,17 @@ describe("场景 14：trace 不污染——回放调用 trace 与崩溃前逐字
       expect(nodeB.agent).toBe("B");
       expect(nodeB.status).toBe("completed");
       expect(nodeB.result).toEqual({ content: "trace-b-result" });
-      // 重派调用（C = stepIndex 2）为真实新帧（非回放污染：独立 completed 节点；
-      // 重派节点的 result 面归 record 流 settled 帧断言——trace 节点不重复承载）
-      const nodeC = nodes.find((n) => n.stepIndex === 2)!;
+      // 重派调用（C = stepIndex 2）：同 stepIndex 存在两个节点（设计 §2.6 已知形态）——
+      // 首个 = 崩溃重建 fold 产出的在途 draft 节点（fold 诚实语义：有 started 无 settled
+      // 折 running，不是 completed——completed 是假成功）；最后 = worker 重放脚本重发
+      // agent-call 时 dispatchAgentCall 重复 append 的真实新节点（Trace.byIndex last-wins
+      // 使 update 命中新节点，重复节点由读侧 last-wins 语义消化）。
+      // 首节点锁定 fold 的诚实语义（防假成功回归）；最新节点断言重派真实终态。
+      // 重派节点的 result 面归 record 流 settled 帧断言——trace 节点不重复承载。
+      const stepIndex2Nodes = nodes.filter((n) => n.stepIndex === 2);
+      expect(stepIndex2Nodes.length).toBe(2);
+      expect(stepIndex2Nodes[0]!.status).toBe("running");
+      const nodeC = stepIndex2Nodes.at(-1)!;
       expect(nodeC.agent).toBe("C");
       expect(nodeC.status).toBe("completed");
     } finally {

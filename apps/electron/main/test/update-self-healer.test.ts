@@ -28,6 +28,20 @@ vi.mock('electron', () => ({
   },
 }))
 
+// ── ps argv 校验注入点（单测层拆分层，docs/todo/test-single-layer-cleanup.md 第二波）──
+// isUpdaterInFlight 的 argv 加固用 execFileSync('ps', ...) 识别在途升级脚本。ps 语义
+// 本身是被测物：真 bash updater.sh 进程的正向回归锚点保留 1 条真进程用例；其余
+// 用例注入受控 ps command= 输出断言 argv 解析逻辑。默认透传真实 execFileSync，
+// 仅注入用例期间替换（mock 的是 ps 数据源这个进程端点，不是被测判定逻辑）。
+const psArgvStub = vi.hoisted(() => ({ impl: null as null | (() => string) }))
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  const realExecFileSync = actual.execFileSync
+  const execFileSync = (...args: Parameters<typeof realExecFileSync>) =>
+    psArgvStub.impl ? psArgvStub.impl() : realExecFileSync(...args)
+  return { ...actual, execFileSync: execFileSync as unknown as typeof realExecFileSync }
+})
+
 // ── 必须在 import constants（间接被 self-healer import）前设 ────────
 const TMP_DATA_DIR = mkdtempSync(path.join(tmpdir(), 'w3-healer-'))
 process.env.TAIJI_AGENT_DATA_DIR = TMP_DATA_DIR
@@ -630,25 +644,27 @@ describe('批次 5: updater.pid 互斥（§3.7.1 检查方）', () => {
     }
   })
 
-  it('mac 阳性（linux 脚本名）：真实 bash updater-linux.sh 进程 → 识别为 in-flight', async () => {
+  it('mac 阳性（linux 脚本名，注入 ps 输出）：argv 含 updater-linux.sh → 识别为 in-flight（defer），pid 文件保留', async () => {
+    // 「真实 bash 脚本进程 + 真实 ps 识别在途升级」的回归锚点由上一条（updater.sh
+    // 真进程）承担；本条注入受控 ps command= 输出，断言 argv 解析对 -linux 变体的
+    // 匹配（command= 通道必须同样覆盖 updater-linux.sh——comm= 退化会把两种脚本
+    // 一并 100% 误判为 PID 复用，fail-open）。
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
-    const fakeScript = path.join(updateDir2, 'updater-linux.sh')
-    writeFileSync(fakeScript, '#!/bin/bash\nsleep 30\n')
-    const child = spawn('bash', [fakeScript], { detached: true, stdio: 'ignore' })
+    // pid = 测试进程自身（真实存活，满足 kill -0 探活前置）；ps 输出注入为 bash
+    // 解释器执行 updater-linux.sh 的完整 argv 形态（与真进程一致）
+    writeFileSync(pidFile, String(process.pid))
+    writeReplacingResult()
+    psArgvStub.impl = () => '/bin/bash /tmp/fake-update-dir/updater-linux.sh'
     try {
-      // 同款只读探活等待（见 waitForUpdaterArgv 注释）
-      await waitForUpdaterArgv(child.pid!, /\/updater-linux\.sh(?:\s|$)/)
-      writeFileSync(pidFile, String(child.pid))
-      writeReplacingResult()
-
       const mod = await loadModule()
       const rolledBack = await mod.maybeRollbackInterruptedUpdate()
 
+      // defer：不回滚、result 原样保留、pid 文件不被误清（argv 匹配 → in-flight）
       expect(rolledBack).toBe(false)
-      expect(existsSync(pidFile), 'updater-linux.sh 在跑 → pid 文件必须保留').toBe(true)
+      expect(readFileSync(resultFile, 'utf-8')).toContain('replacing')
+      expect(existsSync(pidFile), 'updater-linux.sh argv → pid 文件必须保留').toBe(true)
     } finally {
-      try { process.kill(-child.pid!, 'SIGKILL') } catch { /* 进程组已退 */ }
-      try { child.kill('SIGKILL') } catch { /* 已退 */ }
+      psArgvStub.impl = null
     }
   })
 })

@@ -114,12 +114,21 @@ describe('端到端（临时 git 仓库跑真实脚本进程）', () => {
     dirs.length = 0
   })
 
-  function commitFile(git, dir, rel, content, msg) {
-    const abs = join(dir, rel)
-    mkdirSync(join(abs, '..'), { recursive: true })
-    writeFileSync(abs, content)
+  /**
+   * 多文件单 commit（缩数据量：同分支的文件并成一个 commit——diff main...branch 按
+   * 分支拓扑聚合输出，commit 粒度不影响 diff 结果，省逐文件 add+commit 的 git 进程）。
+   */
+  function commitFiles(git, dir, entries, msg) {
+    for (const [rel, content] of entries) {
+      const abs = join(dir, rel)
+      mkdirSync(join(abs, '..'), { recursive: true })
+      writeFileSync(abs, content)
+    }
     git(['add', '-A'])
     git(['commit', '-qm', msg])
+  }
+  function commitFile(git, dir, rel, content, msg) {
+    commitFiles(git, dir, [[rel, content]], msg)
   }
   function makeGit(dir) {
     return (args) => {
@@ -137,14 +146,18 @@ describe('端到端（临时 git 仓库跑真实脚本进程）', () => {
     git(['config', 'user.email', 't@t.local'])
     git(['config', 'user.name', 't'])
     commitFile(git, dir, 'base.txt', 'base\n', 'init')
-    // 当前线 dev-0.10.5：改 shared.txt 与 mine.txt
+    // 当前线 dev-0.10.5：改 shared.txt 与 mine.txt（单 commit——diff 输出与逐文件 commit 等价）
     git(['checkout', '-qb', 'dev-0.10.5'])
-    commitFile(git, dir, 'shared.txt', 'from 5\n', 'line5 shared')
-    commitFile(git, dir, 'mine.txt', 'mine\n', 'line5 mine')
+    commitFiles(git, dir, [
+      ['shared.txt', 'from 5\n'],
+      ['mine.txt', 'mine\n'],
+    ], 'line5 shared+mine')
     // 兄弟线 dev-0.10.6（自 main 分出）：改 shared.txt 与 theirs.txt
     git(['checkout', '-qb', 'dev-0.10.6', 'main'])
-    commitFile(git, dir, 'shared.txt', 'from 6\n', 'line6 shared')
-    commitFile(git, dir, 'theirs.txt', 'theirs\n', 'line6 theirs')
+    commitFiles(git, dir, [
+      ['shared.txt', 'from 6\n'],
+      ['theirs.txt', 'theirs\n'],
+    ], 'line6 shared+theirs')
     git(['checkout', '-q', 'dev-0.10.5'])
 
     const r = spawnSync('node', [SCRIPT, '--json'], { cwd: dir, encoding: 'utf-8' })

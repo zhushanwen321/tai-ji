@@ -1,8 +1,22 @@
 /**
- * review-fix-loop E2E（真实 worker thread + 场景化 mock LLM runner）
+ * review-fix-loop 编排回归（faux worker 宿主 + 场景化 mock LLM runner）
+ *
+ * 本文件的被测逻辑本质 = review-fix-loop 编排状态机端到端（轮次推进 / 对账 / 终态
+ * 收敛），全部断言驱动同一编排代码路径：真实 runWorkflowToSettled → 真实 lifecycle
+ * → WorkerHost port → 同一 buildWorkerScript 产物 → 真实 review-fix-loop.js 脚本
+ * （含 review-fix-loop-utils.cjs 纯函数）。mock 的只有两个进程/OS 端点：
+ *   1. worker thread 端点——FauxWorkerHost（见下方）in-process 执行同一 worker
+ *      产物，消息协议（agent-call / agent-result / return / error / log / phase /
+ *      budget-update / abort）逐字保留；
+ *   2. git 端点——child_process 按「非 git 目录」降级路径禁用（脚本 gitQuery /
+ *      resolveRunRoot / prevHead / git diff 均有既定 try/catch，catch 后空串/空数组
+ *      是生产合法形态），单测层零真 spawn。
+ * 真 worker thread + 真 git 的核心场景（E2E-1 锚点 + MF-1-1a/b autoCommit）保留在
+ * 文件末尾的集成门控 describe（TAIJI_TEST_INTEGRATION，本地默认跳过、CI 真跑），
+ * 锚定 faux 通道与真实协议不漂移。处置依据 docs/todo/test-single-layer-cleanup.md。
  *
  * §7.2 行为/E2E 测试（设计文档 7.2 三条）：
- *   1. R2 prompt 对账段断言 + defer 跨轮传递 mock 剧本（E2E-1）
+ *   1. R2 prompt 对账段断言 + defer 跨轮传递 mock 剧本（E2E-1，真链集成轨）
  *   2. skipCleanAgents 语义 + fixAgent 参数接受（E2E-2）
  *   3. 渲染 gate：非 clean 终止 message 的 [UNRESOLVED] 透出 + ES3 硬校验拦截（E2E-3）
  *   4. M2 回归：全 fixed + 新发现 → reconcile 门控（reconCount）+ 新发现 merge 独立执行（E2E-4）
@@ -10,8 +24,7 @@
  *   6. F1 回归：doc-reviewer-only 批（reconciliation 恒空）→ merge 重新报告转换 → needs-redesign（E2E-6）
  *   另含 fail-fast describe（结构化返回失败立即终判，W1-W6；弱格式降级通道已整体拆除）。
  *
- * 与 workflows-e2e.test.ts 同模式：真实 runWorkflowToSettled + 真实 worker thread +
- * 唯一 mock 是 deps.runner（AgentRunner）。runner 按调用分流：
+ * 唯一的 LLM mock 是 deps.runner（AgentRunner）。runner 按调用分流：
  *   - schema 含 must_fix_ids → aggregator
  *   - schema 含 fixed_count → fix
  *   - 其余 → review agent
@@ -29,16 +42,26 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { EventEmitter } from "node:events";
+import { createRequire } from "node:module";
+import vm from "node:vm";
+import type { Worker } from "node:worker_threads";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { JsonlRunStore } from "../jsonl-run-store.ts";
 import type { AgentResult } from "@zhushanwen/subagent-core/orchestration/models/types.ts";
+import type { LauncherDeps } from "@zhushanwen/subagent-core";
+import type { AgentRunner, WorkerHost, WorkerHandlers } from "@zhushanwen/subagent-core/orchestration/models/ports.ts";
+import type { RunSpec } from "@zhushanwen/subagent-core/orchestration/models/run-spec.ts";
+import { WorkerHandle } from "@zhushanwen/subagent-core/orchestration/worker-handle.ts";
+import { buildWorkerScript } from "@zhushanwen/subagent-core/orchestration/worker-script-builder.ts";
 // fail-fast 用例：F-1 形态 error 哨兵的引擎 SSOT 常量（output-collector 构造 error 时
 // 开头拼接）——结构化返回失败已无降级通道，一切 error 哨兵都走终判；此常量只用于
 // 构造「真实引擎确定性失败形态」的 error 文本。
 import { DETERMINISTIC_SCHEMA_FAILURE_PREFIX } from "@zhushanwen/pi-subagent-cli";
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "../../../../../test-guard/integration-gate.ts";
 // 与 workflows-e2e.test.ts 共享的测试基建（逐字重复段抽取，行为零变化）。
 import {
   bindRunStore,
@@ -61,6 +84,218 @@ const agentMd = (name: string): string => {
 
 let runsDir: string;
 let createdStores: JsonlRunStore[] = [];
+
+// ══ faux worker 宿主（单测层确定性同步化）═══════════════════════════════
+//
+// mock 的只有两个进程/OS 端点（编排状态机与对账逻辑零 mock，见文件头）：
+//   1. worker thread 端点：FauxWorkerHost 实现 WorkerHost port，用 buildWorkerScript
+//      生成与 WorkerHostImpl 逐字相同的 worker 产物，经 node:vm 在本进程执行——
+//      parentPort 是 in-process EventEmitter 通道（脚本侧 postMessage/on("message")
+//      协议不变），消息投递走 microtask（对齐真实 worker 的异步跨线程投递语义，
+//      且防同步重入）。
+//   2. git 端点：child_process 全方法抛错 = 脚本既定的「非 git 目录」降级路径
+//      （gitQuery / resolveRunRoot / prevHead / git diff 的 try/catch 消费），单测层
+//      零真 spawn。真 git 场景见文件末尾集成门控 describe（MF-1-1a/b）。
+
+const FAUX_CHILD_PROCESS_MESSAGE =
+  "faux worker host: child_process 端点已按「非 git 目录」降级路径禁用（单测层不 spawn 真进程；真链见集成门控 describe）";
+
+function fauxChildProcessDisabled(): never {
+  throw new Error(FAUX_CHILD_PROCESS_MESSAGE);
+}
+
+/** child_process 替身：全部方法抛错（调用方均有 try/catch 降级）。 */
+const FAUX_CHILD_PROCESS = {
+  exec: fauxChildProcessDisabled,
+  execSync: fauxChildProcessDisabled,
+  execFile: fauxChildProcessDisabled,
+  execFileSync: fauxChildProcessDisabled,
+  spawn: fauxChildProcessDisabled,
+  spawnSync: fauxChildProcessDisabled,
+};
+
+/** 真实 require 锚点（workflows 目录）——fs/path/os 与绝对路径 require 走真实模块。 */
+const realRequire = createRequire(join(WORKFLOWS_DIR, "review-fix-loop.js"));
+
+/**
+ * review-fix-loop-utils.cjs 经 git-shim require 装载：utils 内部的
+ * require("child_process")（resolveRunRoot 的 execFn 缺省）必须同样命中禁用端点，
+ * 故不能直接用真实 require 加载（builtin 模块无法从 require.cache 替换）。
+ * 纯函数模块无状态，模块级缓存一次、跨用例共享安全。
+ */
+let utilsWithGitShim: unknown;
+/** vm 包装的 CJS 模块装载器签名（utils 版：无 console 影参）。 */
+type UtilsCjsLoader = (
+  require: (id: string) => unknown,
+  module: { exports: Record<string, unknown> },
+  exports: Record<string, unknown>,
+  filename: string,
+  dirname: string,
+) => void;
+/** vm 包装的 CJS 模块装载器签名（worker 产物版：console 影参防 PRE 模板重写污染）。 */
+type WorkerCjsLoader = (
+  require: (id: string) => unknown,
+  module: { exports: Record<string, unknown> },
+  exports: Record<string, unknown>,
+  console: Record<string, () => void>,
+  filename: string,
+  dirname: string,
+) => void;
+function loadUtilsWithGitShim(): unknown {
+  if (utilsWithGitShim) return utilsWithGitShim;
+  const utilsPath = join(WORKFLOWS_DIR, "review-fix-loop-utils.cjs");
+  const loader = vm.runInThisContext(
+    `(function (require, module, exports, __filename, __dirname) {\n${readFileSync(utilsPath, "utf-8")}\n})`,
+    { filename: utilsPath },
+  ) as UtilsCjsLoader;
+  const mod = { exports: {} as Record<string, unknown> };
+  loader(
+    (id: string) => (id === "child_process" ? FAUX_CHILD_PROCESS : realRequire(id)),
+    mod,
+    mod.exports,
+    utilsPath,
+    WORKFLOWS_DIR,
+  );
+  utilsWithGitShim = mod.exports;
+  return utilsWithGitShim;
+}
+
+/**
+ * 仿 parentPort（脚本侧视角）：postMessage = worker → main 投递（microtask，
+ * 终止后丢弃）；on("message") = 接收 main → worker 的 agent-result /
+ * budget-update / abort。
+ */
+class FauxParentPort extends EventEmitter {
+  constructor(private readonly deliver: (msg: unknown) => void) {
+    super();
+  }
+  postMessage(msg: unknown): void {
+    this.deliver(msg);
+  }
+}
+
+/**
+ * 仿 node:worker_threads.Worker（主线程视角）：WorkerHandle 经 on("message"|"error"|
+ * "exit") 绑事件、经 postMessage 发 main → worker 消息、经 terminate 终止——形态与
+ * 真实 Worker 兼容（WorkerHandle 按此鸭子形态消费）。
+ */
+class FauxWorker extends EventEmitter {
+  private terminated = false;
+  constructor(private readonly parentPort: FauxParentPort) {
+    super();
+  }
+  /** main → worker：转发到脚本 parentPort 的 "message" 事件。 */
+  postMessage(msg: unknown): void {
+    if (this.terminated) return;
+    this.parentPort.emit("message", msg);
+  }
+  /** worker 终止（run 终局 releaseRuntime 调用）——幂等，此后双向消息停发。 */
+  async terminate(): Promise<void> {
+    this.terminated = true;
+  }
+  get isTerminated(): boolean {
+    return this.terminated;
+  }
+}
+
+/**
+ * WorkerHost port 的 in-process 实现（接口与 WorkerHostImpl 一致）。
+ * start 的执行语义：同步求值 worker 产物顶层（async IIFE 内代码同步段），脚本后续
+ * 推进全部由 microtask 驱动——与真实 worker 的异步起步等价，且 handlers 绑定先于
+ * 首条消息投递（投递恒经 microtask 延迟）。
+ */
+class FauxWorkerHost implements WorkerHost {
+  start(spec: RunSpec, args: Record<string, unknown>, handlers: WorkerHandlers): WorkerHandle {
+    const workerCode = buildWorkerScript(spec.scriptSource);
+
+    const fauxWorkerHolder: { worker?: FauxWorker } = {};
+    const parentPort = new FauxParentPort((msg) => {
+      // worker → main：真实 worker 的 postMessage 是跨线程异步投递，这里以
+      // microtask 保序 + 防同步重入；terminate 后丢弃（对齐真实 worker 通道关闭）。
+      queueMicrotask(() => {
+        const worker = fauxWorkerHolder.worker;
+        if (!worker || worker.isTerminated) return;
+        worker.emit("message", msg);
+      });
+    });
+
+    const fauxWorker = new FauxWorker(parentPort);
+    fauxWorkerHolder.worker = fauxWorker;
+
+    // workerData 组装与 WorkerHostImpl 逐字对齐（budget/model/thinkingLevel 注入契约）。
+    const workerData = {
+      scriptPath: spec.scriptPath,
+      args,
+      workspace: process.cwd(),
+      meta: {
+        name: spec.scriptName,
+        description: spec.description,
+      },
+      budget: {
+        maxTokens: spec.budgetTokens,
+        usedTokens: 0,
+        usedCost: 0,
+      },
+      model: spec.model,
+      thinkingLevel: spec.thinkingLevel,
+    };
+
+    const requireShim = (id: string): unknown => {
+      if (id === "node:worker_threads") {
+        return { parentPort, workerData, isMainThread: false };
+      }
+      if (id === "child_process") return FAUX_CHILD_PROCESS;
+      if (id.endsWith("/review-fix-loop-utils.cjs")) return loadUtilsWithGitShim();
+      return realRequire(id);
+    };
+
+    // 事件绑定顺序与 WorkerHostImpl 相同（handle 包装 → onMessage/onError/onExit）。
+    // 双重断言理由（taste/no-unsafe-cast）：WorkerHandle 构造签名固定为 node:worker_threads
+    // 的 Worker 具体类（含 threadId/ref 等本宿主无关成员），FauxWorker 只实现其消费方
+    // 用到的三个方法（postMessage / terminate / on("message"|"error"|"exit")）——结构
+    // 不兼容是构造签名固定所致，非数据不确定；运行时 guard = 下方消息协议逐字对齐 +
+    // 集成门控真链 describe（E2E-1）以真实 WorkerHandle×真实 Worker 锚定同一编排语义。
+    const handle = new WorkerHandle(fauxWorker as unknown as Worker);
+    handle.onMessage((raw) => {
+      void handlers.onMessage(raw);
+    });
+    handle.onError((err) => {
+      void handlers.onError(err);
+    });
+    handle.onExit((code) => {
+      void handlers.onExit(code, handle);
+    });
+
+    // console 用独立对象：PRE 模板会重写 console.log/warn/error/info（防污染主进程
+    // vitest 输出）；其余全局（Promise/JSON/process/setTimeout/Buffer）与主 realm
+    // 同一身份——beforeEach 的 stubEnv 隔离（HOME/SKILL_DATA_DIR）对 in-process
+    // 脚本同样生效（os.homedir() 每次现读 process.env.HOME）。
+    const sandboxConsole = { log(): void {}, warn(): void {}, error(): void {}, info(): void {} };
+    const loader = vm.runInThisContext(
+      `(function (require, module, exports, console, __filename, __dirname) {\n${workerCode}\n})`,
+      { filename: spec.scriptPath + " (faux-worker)" },
+    ) as WorkerCjsLoader;
+    const mod = { exports: {} as Record<string, unknown> };
+    try {
+      loader(requireShim, mod, mod.exports, sandboxConsole, spec.scriptPath, dirname(spec.scriptPath));
+    } catch (err) {
+      // 同步求值期异常 ≈ 真实 worker 的 "error" 事件（IIFE 内的异常走脚本自身的
+      // .catch → type:"error" 消息，不会到这）。发 error + 非 0 exit，对齐真实
+      // worker 的崩溃事件序列。
+      fauxWorker.emit("error", err instanceof Error ? err : new Error(String(err)));
+      fauxWorker.emit("exit", 1);
+    }
+    // 正常完成不主动发 exit(0)：终态由 return/error 消息驱动（handleReturn /
+    // handleScriptError → finalizeRun），handleWorkerExit 对「已交付终态消息后的
+    // exit(0)」本就 no-op——省去终态消息与 exit 事件的投递排序耦合。
+    return handle;
+  }
+}
+
+/** 组装 faux deps：共享 helper 的 registry/store 产物不变，仅替换 workerHost 端点。 */
+function makeFauxDeps(runner: AgentRunner): LauncherDeps {
+  return { ...makeDeps(runner), workerHost: new FauxWorkerHost() };
+}
 
 /**
  * 轻量 schema 契约校验（m8）：递归校验 parsed 是否符合 opts.schema，防止 mock runner
@@ -308,11 +543,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// faux 轨用例预算：in-process 执行收敛在几十 ms 量级，10s 只是失败探测器上限
+// （较此前真链的 60s 收紧；单条真实耗时验收 ≤1s）。
+const FAUX_RUN_TIMEOUT_MS = 10_000;
+// 真链集成轨（真 worker thread + 真 git）保留原预算。
 const RUN_TIMEOUT_MS = 60_000;
 const RUN_ID = () => "rfl-e2e-" + Date.now() + "-" + Math.floor(Math.random() * 1e6);
 
 /**
- * MF-1-1 临时 git 仓：统一 commit 块（autoCommit）的 e2e 载体。仓内 config 写死
+ * MF-1-1 临时 git 仓：统一 commit 块（autoCommit）的真链载体（消费方 = 文件末尾
+ * 集成门控 describe）。仓内 config 写死
  * user.name/email（不依赖宿主全局 git 配置——CI 环境可能缺失）。worker 未显式传
  * cwd（WorkerHost 的 new Worker 默认继承主进程 cwd）——测试主线程 process.chdir(repo)
  * 后再 runWorkflowToSettled，脚本内 execFileSync("git", ...) 即作用于本仓。
@@ -333,75 +573,7 @@ function makeTmpGitRepo(): string {
   return repo;
 }
 
-describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () => {
-  it(
-    "E2E-1：defer 跨轮传递 + R2 prompt 对账段 + clean 终止（§7.2 1/3）",
-    async () => {
-      const runner = makeScenarioRunner({
-        review: [
-          // R1：1 must-fix + 1 suggestion
-          () => ({ report_file: "/tmp/r1-reviewer.md", must_fix: 1, suggestion: 1, reconciliation: [] }),
-          // R2：known-remaining 必须含 S-1（fix 阶段 deferred 写入 → 同步 knownRemaining）；
-          // 对账 MF-1 已修。若 prompt 缺 S-1 → must_fix=9 使测试失败可见。
-          (prompt) => {
-            if (!prompt.includes("S-1")) {
-              return { report_file: "/tmp/r2-reviewer.md", must_fix: 9, suggestion: 0, reconciliation: [] };
-            }
-            return {
-              report_file: "/tmp/r2-reviewer.md", must_fix: 0, suggestion: 0,
-              reconciliation: [{ prev_id: "MF-1", status: "fixed", evidence: "read confirmed" }],
-            };
-          },
-        ],
-        aggregate: () => ({
-          report_file: "/tmp/agg.md", must_fix: 1, suggestion: 1,
-          must_fix_ids: [{ id: "MF-1", severity: "major" }], fixes_caution: [],
-        }),
-        fix: () => ({
-          fixed_count: 1,
-          fixes: [{ issue_id: "MF-1", description: "mock fix", self_check: "grep: 1 hit; synced", affected_files: ["src/a.ts"] }],
-          deferred: [{ issue_id: "S-1", severity: "minor", reason: "needs new mechanism across modules, high cost" }],
-        }),
-      });
-      const deps = makeDeps(runner);
-
-      const result = await runWorkflowToSettled(
-        wf("review-fix-loop"),
-        { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
-        deps,
-        RUN_TIMEOUT_MS,
-      );
-
-
-      expect(result.reason).toBe("completed");
-      expect(result.error).toBeUndefined();
-      const outcome = assertScriptOutcome(result.scriptResult);
-      expect(outcome.terminated).toBe("clean");
-      expect(outcome.totalFixed).toBe(1);
-      expect(outcome.message).toContain("All batches clean");
-
-      // prompt 内容断言：R1 全量深挖（Round 1）→ fix 分流段 → R2 对账段 + known-remaining
-      const { prompts, kinds, reviewCalls } = runner.stats();
-      const reviewPrompts = prompts.filter((_, i) => kinds[i] === "review");
-      expect(reviewPrompts[0]).toContain("Round 1");
-      expect(reviewPrompts[1]).toContain("RECONCILE PREVIOUS ROUND");
-      expect(reviewPrompts[1]).toContain("S-1"); // 5.3-4 deferred 跨轮继承
-      // m6：aggregator prompt 裁决段（5.4 ADJUDICATION）——裁决证据/降级保真/采信抽查
-      const aggPrompt = prompts[kinds.indexOf("aggregate")];
-      expect(aggPrompt).toContain("ADJUDICATION");
-      // m6：fix prompt 全等级修复文案（must-fix + minor 都修 / minor defer 需真实阻塞理由）+ 自检要求
-      const fixPrompt = prompts[kinds.indexOf("fix")];
-      expect(fixPrompt).toContain("Fix scope");
-      expect(fixPrompt).toContain("all severity levels");
-      expect(fixPrompt).toContain("Minor (suggestion) issues are in fix scope too");
-      expect(fixPrompt).toContain("concrete blocker");
-      expect(fixPrompt).toContain("self_check in each fixes[] entry MUST include");
-      expect(fixPrompt).toContain("grep command + hit count + sync action");
-      expect(reviewCalls.length).toBe(2);
-    },
-    RUN_TIMEOUT_MS,
-  );
-
+describe("review-fix-loop 编排（faux worker 宿主 in-process + 场景化 mock runner）", () => {
   it(
     "E2E-1b：suggestions-only 轮进 fix（全等级修复语义）→ R2 全清才 clean 终止",
     async () => {
@@ -426,13 +598,13 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
           deferred: [],
         }),
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
         deps,
-        RUN_TIMEOUT_MS,
+        FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed");
@@ -451,7 +623,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       expect(fixPrompt).toContain("all severity levels");
       expect(fixPrompt).toContain("Minor (suggestion) issues are in fix scope too");
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -489,13 +661,13 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
           deferred: [],
         }),
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer") + "," + agentMd("doc-reviewer"), fixAgent: agentMd("reviewer"), _runId: RUN_ID() },
         deps,
-        RUN_TIMEOUT_MS,
+        FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed");
@@ -527,7 +699,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       expect(existsSync(docReportPath)).toBe(true);
       expect(readFileSync(docReportPath, "utf-8")).toContain("doc-reviewer report");
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -548,13 +720,13 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
           deferred: [{ issue_id: "MF-1", severity: "critical", reason: "cannot fix in this round" }],
         }),
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
         deps,
-        RUN_TIMEOUT_MS,
+        FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed"); // 结构化终止而非抛错
@@ -566,7 +738,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       expect(outcome.message).toContain("must-fix 不得 defer");
       expect(outcome.message).toContain("MF-1");
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -617,13 +789,13 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
           };
         },
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), maxRounds: 2, _runId: RUN_ID() },
         deps,
-        RUN_TIMEOUT_MS,
+        FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed");
@@ -643,7 +815,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       expect(kinds.filter((k) => k === "aggregate").length).toBe(2);
       expect(kinds.filter((k) => k === "fix").length).toBe(2);
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -679,13 +851,13 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
           deferred: [],
         }),
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer") + "," + agentMd("doc-reviewer"), recheckAfterFix: true, _runId: RUN_ID() },
         deps,
-        RUN_TIMEOUT_MS,
+        FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed");
@@ -708,7 +880,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       // R2+ 全量分支同时被触发（reviewer）
       expect(prompts.some((p) => p.includes("RECONCILE PREVIOUS ROUND"))).toBe(true);
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -747,13 +919,13 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
           };
         },
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("doc-reviewer"), _runId: RUN_ID() },
         deps,
-        RUN_TIMEOUT_MS,
+        FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed");
@@ -767,7 +939,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       const { reviewCalls } = runner.stats();
       expect(reviewCalls.length).toBe(3); // R1/R2/R3 各一次，R3 终止不再续轮
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -822,13 +994,13 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
           return { fixed_count: 1, fixes: [{ issue_id: "MF-1", description: "fix5", self_check: "grep: 1 hit; synced", affected_files: [] }], deferred: [] };
         },
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), maxRounds: 4, _runId: RUN_ID() },
         deps,
-        RUN_TIMEOUT_MS,
+        FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed");
@@ -843,7 +1015,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       const { reviewCalls } = runner.stats();
       expect(reviewCalls.length).toBe(4); // R1/R2/R3/R4——修复前 R3 即 converged（3 次）
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -886,13 +1058,13 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
           return { fixed_count: 1, fixes: [{ issue_id: "MF-5", description: "fix2", self_check: "grep: 1 hit; synced", affected_files: [] }], deferred: [] };
         },
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), maxRounds: 4, stuckThreshold: 5, _runId: RUN_ID() },
         deps,
-        RUN_TIMEOUT_MS,
+        FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed");
@@ -916,7 +1088,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       expect(objBranch!.properties.title).toBeDefined();
       expect(objBranch!.properties.title.type).toBe("string");
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -927,13 +1099,13 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
         aggregate: () => ({ report_file: "/tmp/agg.md", must_fix: 0, suggestion: 0, must_fix_ids: [], fixes_caution: [] }),
         fix: () => ({ fixed_count: 0, fixes: [], deferred: [] }),
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), batchl: "fallow-scan", _runId: RUN_ID() },
         deps,
-        RUN_TIMEOUT_MS,
+        FAUX_RUN_TIMEOUT_MS,
       );
 
       // 脚本顶层白名单校验 fail() 抛错 → worker type:"error" → 一次即 done,failed
@@ -943,138 +1115,13 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       // 校验发生在任何 agent 调用之前（参数校验在脚本最顶部）
       expect(runner.stats().kinds).toEqual([]);
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   // 【targetType 非法枚举 / target 空串变体已并入 workflows-e2e.test.ts 的
   // actionRun 参数校验用例（同走 validateRunArgs chokepoint，throw + 指引文案）】
-
-  // ── MF-1-1：统一 commit 块（autoCommit）e2e——真实 tmp git 仓 ──────────
-
-  it(
-    "MF-1-1a: autoCommit=true 统一 commit——staged ≡ 去重后存在路径、message 格式、误报路径过滤",
-    async () => {
-      const repo = makeTmpGitRepo();
-      // mock fixer 声称触碰的文件（真实落盘两个）；affected_files 含重复/空白/空串/误报
-      mkdirSync(join(repo, "src"), { recursive: true });
-      writeFileSync(join(repo, "src", "a.ts"), "export const a = 1;\n", "utf-8");
-      writeFileSync(join(repo, "src", "b.ts"), "export const b = 2;\n", "utf-8");
-      const origCwd = process.cwd();
-      process.chdir(repo);
-      try {
-        const runner = makeScenarioRunner({
-          review: [
-            () => ({ report_file: "/tmp/mf11a-r1.md", must_fix: 1, suggestion: 0, reconciliation: [] }),
-            () => ({
-              report_file: "/tmp/mf11a-r2.md", must_fix: 0, suggestion: 0,
-              reconciliation: [{ prev_id: "MF-1", status: "fixed", evidence: "read confirmed" }],
-            }),
-          ],
-          aggregate: () => ({
-            report_file: "/tmp/mf11a-agg.md", must_fix: 1, suggestion: 0,
-            must_fix_ids: [{ id: "MF-1", severity: "major" }], fixes_caution: [],
-          }),
-          fix: () => ({
-            fixed_count: 1,
-            fixes: [{
-              issue_id: "MF-1", description: "mock fix", self_check: "grep: 1 hit; synced",
-              // 重复 + 尾随空白 + 空串/纯空白 + 误报（磁盘不存在）——staged 收敛为两个存在文件
-              affected_files: ["src/a.ts", " src/a.ts ", "", "   ", "src/b.ts", "ghost/missing.ts"],
-            }],
-            deferred: [],
-          }),
-        });
-        const deps = makeDeps(runner);
-        const result = await runWorkflowToSettled(
-          wf("review-fix-loop"),
-          { targetType: "file", target: "README.md", agents: agentMd("reviewer"), autoCommit: true, _runId: RUN_ID() },
-          deps, undefined, RUN_TIMEOUT_MS,
-        );
-
-        expect(result.reason).toBe("completed");
-        expect(result.error).toBeUndefined();
-        const outcome = assertScriptOutcome(result.scriptResult);
-        expect(outcome.terminated).toBe("clean");
-        expect(outcome.totalFixed).toBe(1);
-
-        // commit message 格式（batch/round/计数插值，与 planUnifiedCommit 单测同锚）
-        const subject = execFileSync("git", ["log", "-1", "--pretty=%s"], { cwd: repo, encoding: "utf-8", timeout: 10_000, env: gitEnv() }).trim();
-        expect(subject).toBe("fix: review batch 1 round 1 — 1 must-fix + 0 suggestion");
-        // staged 集合 ≡ 去重后存在的 affected_files（误报路径被过滤，未炸整次 git add）
-        const committed = execFileSync("git", ["show", "--name-only", "--pretty=", "HEAD"], { cwd: repo, encoding: "utf-8", timeout: 10_000, env: gitEnv() })
-          .split("\n").map((s) => s.trim()).filter(Boolean).sort();
-        expect(committed).toEqual(["src/a.ts", "src/b.ts"]);
-        // fixImpactFiles 不做存在性过滤（收集层语义：声称触碰即进 recheck 观测点）
-        const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
-          fixImpactFiles: string[];
-        };
-        expect(st.fixImpactFiles).toEqual(["src/a.ts", "src/b.ts", "ghost/missing.ts"]);
-      } finally {
-        process.chdir(origCwd);
-        rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-      }
-    },
-    RUN_TIMEOUT_MS,
-  );
-
-  it(
-    "MF-1-1b: 统一 commit 的 git add 失败（index.lock 争用）→ fix-failure 结构化终止 + state.json 落盘",
-    async () => {
-      const repo = makeTmpGitRepo();
-      mkdirSync(join(repo, "src"), { recursive: true });
-      writeFileSync(join(repo, "src", "a.ts"), "export const a = 1;\n", "utf-8");
-      // 预置 index.lock：模拟并行进程持锁（统一 commit 设计注释点名的真实风险形态——
-      // 计划层（planUnifiedCommit）只过滤不存在路径，锁争用仍须走 fix-failure 分类）
-      writeFileSync(join(repo, ".git", "index.lock"), "", "utf-8");
-      const origCwd = process.cwd();
-      process.chdir(repo);
-      try {
-        const runner = makeScenarioRunner({
-          review: [
-            () => ({ report_file: "/tmp/mf11b-r1.md", must_fix: 1, suggestion: 0, reconciliation: [] }),
-          ],
-          aggregate: () => ({
-            report_file: "/tmp/mf11b-agg.md", must_fix: 1, suggestion: 0,
-            must_fix_ids: [{ id: "MF-1", severity: "major" }], fixes_caution: [],
-          }),
-          fix: () => ({
-            fixed_count: 1,
-            fixes: [{ issue_id: "MF-1", description: "mock fix", self_check: "grep: 1 hit; synced", affected_files: ["src/a.ts"] }],
-            deferred: [],
-          }),
-        });
-        const deps = makeDeps(runner);
-        const result = await runWorkflowToSettled(
-          wf("review-fix-loop"),
-          { targetType: "file", target: "README.md", agents: agentMd("reviewer"), autoCommit: true, _runId: RUN_ID() },
-          deps, undefined, RUN_TIMEOUT_MS,
-        );
-
-        expect(result.reason).toBe("completed"); // 结构化终止而非抛错
-        expect(result.error).toBeUndefined();
-        const outcome = assertScriptOutcome(result.scriptResult);
-        // git add 抛错 → terminated='fix-failure'（结构化终止语义）
-        expect(outcome.terminated).toBe("fix-failure");
-        expect(outcome.message).toContain("[UNRESOLVED]");
-        expect(outcome.message).toContain("统一 commit 环境恢复重试后仍失败");
-        expect(outcome.message).toContain("git status"); // 恢复动作指引
-        // 终止路径 saveState 已落盘（断点恢复依据）
-        expect(existsSync(join(outcome.runDir!, "state.json"))).toBe(true);
-        // 无 commit 产生（add 失败在 commit 之前；空仓 HEAD 仍不存在）
-        let revParseErr = "";
-        try {
-          execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, timeout: 10_000, env: gitEnv() });
-        } catch (e) {
-          revParseErr = String(e);
-        }
-        expect(revParseErr).toContain("unknown revision");
-      } finally {
-        process.chdir(origCwd);
-        rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-      }
-    },
-    RUN_TIMEOUT_MS,
-  );
+  // 【MF-1-1a/b（autoCommit 统一 commit，真 git 集成场景）移至文件末尾集成门控
+  // describe（TAIJI_TEST_INTEGRATION）——真链核心场景保留，本地默认跳过】
 
   // ── MF-1-12：多分组并行派发编排（非退化 k=2 形态） ─────────────────────
 
@@ -1124,11 +1171,11 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
             };
         },
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
-        deps, undefined, RUN_TIMEOUT_MS,
+        deps, undefined, FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed");
@@ -1172,7 +1219,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       const fixerNames = st.calls.filter((c) => c.role === "fixer").map((c) => c.name).sort();
       expect(fixerNames).toEqual(["fix-G1", "fix-G2"]);
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 });
 
@@ -1202,18 +1249,18 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
     },
   ])("TC1/TC2: $label → 启动期 fail-fast，未调 agent", async ({ makeArgs, missingPath }) => {
     const runner = makeScenarioRunner(emptyScenario);
-    const deps = makeDeps(runner);
+    const deps = makeFauxDeps(runner);
     const result = await runWorkflowToSettled(
       wf("review-fix-loop"),
       { ...makeArgs(), _runId: RUN_ID() },
-      deps, undefined, RUN_TIMEOUT_MS,
+      deps, undefined, FAUX_RUN_TIMEOUT_MS,
     );
     expect(result.reason).not.toBe("completed");
     expect(String(result.error ?? "")).toContain("Agent file not found");
     expect(String(result.error ?? "")).toContain(missingPath);
     // fail-fast 在 round 前：agent mock 未被调用
     expect(runner.stats().kinds.length).toBe(0);
-  }, RUN_TIMEOUT_MS);
+  }, FAUX_RUN_TIMEOUT_MS);
 
   // ── A6: rfl 仪表 e2e（tier-1 T3+T4：存储迁移 + calls[] 采集） ──
 
@@ -1239,12 +1286,12 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
           deferred: [],
         }),
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
       const userRunId = RUN_ID();
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: userRunId },
-        deps, undefined, RUN_TIMEOUT_MS,
+        deps, undefined, FAUX_RUN_TIMEOUT_MS,
       );
       expect(result.reason).toBe("completed");
       const outcome = assertScriptOutcome(result.scriptResult);
@@ -1311,7 +1358,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       expect(r2.phaseTimings.aggregate).toBeNull();
       expect(r2.phaseTimings.fix).toBeNull();
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -1346,11 +1393,11 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
           deferred: [],
         }),
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer") + "," + agentMd("doc-reviewer"), recheckAfterFix: true, _runId: RUN_ID() },
-        deps, undefined, RUN_TIMEOUT_MS,
+        deps, undefined, FAUX_RUN_TIMEOUT_MS,
       );
       expect(result.reason).toBe("completed");
       const outcome = assertScriptOutcome(result.scriptResult);
@@ -1366,7 +1413,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       // R1 两调用 full；R2 全批重派：reviewer 走 R2+ full、doc-reviewer（上轮 clean）走 scoped
       expect(modes).toEqual(["full", "full", "full", "scoped"]);
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   // ── B6: rfl 数据链 e2e（tier-1 M1：origin/dormant/复活/消费侧过滤/schema） ──
@@ -1446,12 +1493,12 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
           };
         },
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
-        deps, undefined, RUN_TIMEOUT_MS,
+        deps, undefined, FAUX_RUN_TIMEOUT_MS,
       );
       expect(result.reason).toBe("completed");
       const outcome = assertScriptOutcome(result.scriptResult);
@@ -1509,7 +1556,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       }
       expect(aggSchema.properties).toHaveProperty("scores");
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   // ── C5: rfl 打分 + clean 轮回填 + aggregatorModel（tier-1 M2） ──
@@ -1567,13 +1614,13 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
           deferred: [],
         }),
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"),
           aggregatorModel: "mock-model-x", _runId: RUN_ID() },
-        deps, undefined, RUN_TIMEOUT_MS,
+        deps, undefined, FAUX_RUN_TIMEOUT_MS,
       );
       expect(result.reason).toBe("completed");
       const outcome = assertScriptOutcome(result.scriptResult);
@@ -1619,7 +1666,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       expect(wfSource).toContain("AGENTS.md");
       expect(wfSource).toContain("confirm with the owner");
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -1675,12 +1722,12 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
           };
         },
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
-        deps, undefined, RUN_TIMEOUT_MS,
+        deps, undefined, FAUX_RUN_TIMEOUT_MS,
       );
       expect(result.reason).toBe("completed");
       const outcome = assertScriptOutcome(result.scriptResult);
@@ -1710,7 +1757,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       expect(st.issues["N-1"].status).toBe("fixed");
       expect(st.issues["N-1"].history).toContainEqual({ round: 3, status: "fixed" });
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   // ── D1/D4: T9 前缀稳定化（schema 跨轮统一 + R1 空数组下游无异常） ──
@@ -1747,12 +1794,12 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
           };
         },
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
-        deps, undefined, RUN_TIMEOUT_MS,
+        deps, undefined, FAUX_RUN_TIMEOUT_MS,
       );
       expect(result.reason).toBe("completed");
       const outcome = assertScriptOutcome(result.scriptResult);
@@ -1772,7 +1819,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       // 【源码 grep 断言已删（"...reviewerSchema, required:" 不在脚本内）——同用例上方
       // 的真实调用 schema 逐字节比对已覆盖该行为范围】
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   // ── 实施后对抗式审查修复（v7.1）：A1/A2/A3/A4 ──────────────────────
@@ -1799,7 +1846,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
         }),
         fix: () => ({ fixed_count: 0, fixes: [], deferred: [] }),
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
@@ -1808,7 +1855,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
           batch1: agentMd("reviewer-a"),
           batch2: agentMd("reviewer-a") + "," + agentMd("reviewer-b"), _runId: RUN_ID(),
         },
-        deps, undefined, RUN_TIMEOUT_MS,
+        deps, undefined, FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed");
@@ -1838,7 +1885,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       // dormant 批作用域重置（A2）且批 2 无降级 → 最终落盘为空
       expect(st.dormant).toEqual([]);
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -1864,7 +1911,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
         aggregate: () => ({ report_file: "/tmp/f2-agg.md", must_fix: 0, suggestion: 0, fixes_caution: [] }),
         fix: () => ({ fixed_count: 0, fixes: [], deferred: [] }),
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
@@ -1873,7 +1920,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
           batch1: agentMd("reviewer-a"),
           batch2: agentMd("reviewer-a") + "," + agentMd("reviewer-b"), _runId: RUN_ID(),
         },
-        deps, undefined, RUN_TIMEOUT_MS,
+        deps, undefined, FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed");
@@ -1902,7 +1949,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       // 而非批 1 弱证据补记（修复前 =1）
       expect(st.agentStatus["reviewer-a"]).toMatchObject({ lastCleanBatch: 2, lastCleanFixCount: 0 });
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -1956,12 +2003,12 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
           deferred: [],
         }),
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
-        deps, undefined, RUN_TIMEOUT_MS,
+        deps, undefined, FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed");
@@ -1988,7 +2035,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       expect(kinds.filter((k) => k === "aggregate").length).toBe(4);
       expect(kinds.filter((k) => k === "fix").length).toBe(1);
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -2005,7 +2052,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
         },
         fix: () => ({ fixed_count: 0, fixes: [], deferred: [] }),
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
@@ -2013,7 +2060,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
           targetType: "file", target: "README.md",
           batch1: agentMd("reviewer-a"), _runId: RUN_ID(),
         },
-        deps, undefined, RUN_TIMEOUT_MS,
+        deps, undefined, FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed");
@@ -2035,7 +2082,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       expect(kinds.filter((k) => k === "aggregate").length).toBe(0);
       expect(kinds.filter((k) => k === "fix").length).toBe(0);
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -2110,7 +2157,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
           };
         },
       });
-      const deps = makeDeps(runner);
+      const deps = makeFauxDeps(runner);
 
       const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
@@ -2118,7 +2165,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
           targetType: "file", target: "README.md", maxRounds: 2,
           batch1: agentMd("reviewer-a"), batch2: agentMd("reviewer-b"), _runId: RUN_ID(),
         },
-        deps, undefined, RUN_TIMEOUT_MS,
+        deps, undefined, FAUX_RUN_TIMEOUT_MS,
       );
 
       expect(result.reason).toBe("completed");
@@ -2167,7 +2214,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       // 无 guidance 条目的轮（agg3 无 guidance）→ 文档无 guidance 行
       expect(readFileSync(docOf(fixPrompts[2]), "utf-8")).not.toContain("guidance:");
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
 });
@@ -2210,11 +2257,11 @@ describe("review-fix-loop fail-fast（结构化返回失败立即终判）", () 
     runner: ReturnType<typeof makeScenarioRunner>,
     args: Record<string, unknown> = {},
   ): Promise<FailFastOutcome> {
-    const deps = makeDeps(runner);
+    const deps = makeFauxDeps(runner);
     const result = await runWorkflowToSettled(
       wf("review-fix-loop"),
       { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID(), ...args },
-      deps, undefined, RUN_TIMEOUT_MS,
+      deps, undefined, FAUX_RUN_TIMEOUT_MS,
     );
     expect(result.reason).toBe("completed");
     expect(result.error).toBeUndefined();
@@ -2264,7 +2311,7 @@ describe("review-fix-loop fail-fast（结构化返回失败立即终判）", () 
       expect("degradedRounds" in outcome).toBe(false);
       expect("degradedRounds" in (st.meta as Record<string, unknown>)).toBe(false);
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -2295,7 +2342,7 @@ describe("review-fix-loop fail-fast（结构化返回失败立即终判）", () 
       expect(kinds.filter((k) => k === "aggregate").length).toBe(0);
       expect(kinds.filter((k) => k === "fix").length).toBe(0);
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -2332,7 +2379,7 @@ describe("review-fix-loop fail-fast（结构化返回失败立即终判）", () 
       expect(st.fixCount).toBe(0);
       expect(st.fixResults).toEqual([]);
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -2358,7 +2405,7 @@ describe("review-fix-loop fail-fast（结构化返回失败立即终判）", () 
       expect(kinds.filter((k) => k === "aggregate").length).toBe(2);
       expect(kinds.filter((k) => k === "fix").length).toBe(0);
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 
   it(
@@ -2385,6 +2432,214 @@ describe("review-fix-loop fail-fast（结构化返回失败立即终判）", () 
       const { kinds } = runner.stats();
       expect(kinds.filter((k) => k === "review").length).toBe(1);
     },
-    RUN_TIMEOUT_MS,
+    FAUX_RUN_TIMEOUT_MS,
   );
 });
+
+// ══ 真链集成轨（真 worker thread + 真 git，集成门控）════════════════════
+//
+// 保留的核心真链场景（本地默认跳过、CI / TAIJI_TEST_INTEGRATION=1 真跑）：
+//   1. E2E-1——worker 线程消息协议全链锚点（defer 跨轮传递 + R2 对账段 + clean
+//      终止），防上方 faux 通道与真实协议漂移；
+//   2. MF-1-1a/b——autoCommit 统一 commit 的真 git 集成（staged 收敛 / commit
+//      message 格式 / index.lock 争用失败路径），git 端点无法 faux 化。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  "review-fix-loop 真链 e2e（真实 worker thread + 真实 git）" +
+    (INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""),
+  () => {
+    it(
+      "E2E-1：defer 跨轮传递 + R2 prompt 对账段 + clean 终止（§7.2 1/3）",
+      async () => {
+        const runner = makeScenarioRunner({
+          review: [
+            // R1：1 must-fix + 1 suggestion
+            () => ({ report_file: "/tmp/r1-reviewer.md", must_fix: 1, suggestion: 1, reconciliation: [] }),
+            // R2：known-remaining 必须含 S-1（fix 阶段 deferred 写入 → 同步 knownRemaining）；
+            // 对账 MF-1 已修。若 prompt 缺 S-1 → must_fix=9 使测试失败可见。
+            (prompt) => {
+              if (!prompt.includes("S-1")) {
+                return { report_file: "/tmp/r2-reviewer.md", must_fix: 9, suggestion: 0, reconciliation: [] };
+              }
+              return {
+                report_file: "/tmp/r2-reviewer.md", must_fix: 0, suggestion: 0,
+                reconciliation: [{ prev_id: "MF-1", status: "fixed", evidence: "read confirmed" }],
+              };
+            },
+          ],
+          aggregate: () => ({
+            report_file: "/tmp/agg.md", must_fix: 1, suggestion: 1,
+            must_fix_ids: [{ id: "MF-1", severity: "major" }], fixes_caution: [],
+          }),
+          fix: () => ({
+            fixed_count: 1,
+            fixes: [{ issue_id: "MF-1", description: "mock fix", self_check: "grep: 1 hit; synced", affected_files: ["src/a.ts"] }],
+            deferred: [{ issue_id: "S-1", severity: "minor", reason: "needs new mechanism across modules, high cost" }],
+          }),
+        });
+        const deps = makeDeps(runner);
+
+        const result = await runWorkflowToSettled(
+          wf("review-fix-loop"),
+          { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
+          deps,
+          RUN_TIMEOUT_MS,
+        );
+
+
+        expect(result.reason).toBe("completed");
+        expect(result.error).toBeUndefined();
+        const outcome = assertScriptOutcome(result.scriptResult);
+        expect(outcome.terminated).toBe("clean");
+        expect(outcome.totalFixed).toBe(1);
+        expect(outcome.message).toContain("All batches clean");
+
+        // prompt 内容断言：R1 全量深挖（Round 1）→ fix 分流段 → R2 对账段 + known-remaining
+        const { prompts, kinds, reviewCalls } = runner.stats();
+        const reviewPrompts = prompts.filter((_, i) => kinds[i] === "review");
+        expect(reviewPrompts[0]).toContain("Round 1");
+        expect(reviewPrompts[1]).toContain("RECONCILE PREVIOUS ROUND");
+        expect(reviewPrompts[1]).toContain("S-1"); // 5.3-4 deferred 跨轮继承
+        // m6：aggregator prompt 裁决段（5.4 ADJUDICATION）——裁决证据/降级保真/采信抽查
+        const aggPrompt = prompts[kinds.indexOf("aggregate")];
+        expect(aggPrompt).toContain("ADJUDICATION");
+        // m6：fix prompt 全等级修复文案（must-fix + minor 都修 / minor defer 需真实阻塞理由）+ 自检要求
+        const fixPrompt = prompts[kinds.indexOf("fix")];
+        expect(fixPrompt).toContain("Fix scope");
+        expect(fixPrompt).toContain("all severity levels");
+        expect(fixPrompt).toContain("Minor (suggestion) issues are in fix scope too");
+        expect(fixPrompt).toContain("concrete blocker");
+        expect(fixPrompt).toContain("self_check in each fixes[] entry MUST include");
+        expect(fixPrompt).toContain("grep command + hit count + sync action");
+        expect(reviewCalls.length).toBe(2);
+      },
+      RUN_TIMEOUT_MS,
+    );
+
+    // ── MF-1-1：统一 commit 块（autoCommit）e2e——真实 tmp git 仓 ──────────
+
+    it(
+      "MF-1-1a: autoCommit=true 统一 commit——staged ≡ 去重后存在路径、message 格式、误报路径过滤",
+      async () => {
+        const repo = makeTmpGitRepo();
+        // mock fixer 声称触碰的文件（真实落盘两个）；affected_files 含重复/空白/空串/误报
+        mkdirSync(join(repo, "src"), { recursive: true });
+        writeFileSync(join(repo, "src", "a.ts"), "export const a = 1;\n", "utf-8");
+        writeFileSync(join(repo, "src", "b.ts"), "export const b = 2;\n", "utf-8");
+        const origCwd = process.cwd();
+        process.chdir(repo);
+        try {
+          const runner = makeScenarioRunner({
+            review: [
+              () => ({ report_file: "/tmp/mf11a-r1.md", must_fix: 1, suggestion: 0, reconciliation: [] }),
+              () => ({
+                report_file: "/tmp/mf11a-r2.md", must_fix: 0, suggestion: 0,
+                reconciliation: [{ prev_id: "MF-1", status: "fixed", evidence: "read confirmed" }],
+              }),
+            ],
+            aggregate: () => ({
+              report_file: "/tmp/mf11a-agg.md", must_fix: 1, suggestion: 0,
+              must_fix_ids: [{ id: "MF-1", severity: "major" }], fixes_caution: [],
+            }),
+            fix: () => ({
+              fixed_count: 1,
+              fixes: [{
+                issue_id: "MF-1", description: "mock fix", self_check: "grep: 1 hit; synced",
+                // 重复 + 尾随空白 + 空串/纯空白 + 误报（磁盘不存在）——staged 收敛为两个存在文件
+                affected_files: ["src/a.ts", " src/a.ts ", "", "   ", "src/b.ts", "ghost/missing.ts"],
+              }],
+              deferred: [],
+            }),
+          });
+          const deps = makeDeps(runner);
+          const result = await runWorkflowToSettled(
+            wf("review-fix-loop"),
+            { targetType: "file", target: "README.md", agents: agentMd("reviewer"), autoCommit: true, _runId: RUN_ID() },
+            deps, undefined, RUN_TIMEOUT_MS,
+          );
+
+          expect(result.reason).toBe("completed");
+          expect(result.error).toBeUndefined();
+          const outcome = assertScriptOutcome(result.scriptResult);
+          expect(outcome.terminated).toBe("clean");
+          expect(outcome.totalFixed).toBe(1);
+
+          // commit message 格式（batch/round/计数插值，与 planUnifiedCommit 单测同锚）
+          const subject = execFileSync("git", ["log", "-1", "--pretty=%s"], { cwd: repo, encoding: "utf-8", timeout: 10_000, env: gitEnv() }).trim();
+          expect(subject).toBe("fix: review batch 1 round 1 — 1 must-fix + 0 suggestion");
+          // staged 集合 ≡ 去重后存在的 affected_files（误报路径被过滤，未炸整次 git add）
+          const committed = execFileSync("git", ["show", "--name-only", "--pretty=", "HEAD"], { cwd: repo, encoding: "utf-8", timeout: 10_000, env: gitEnv() })
+            .split("\n").map((s) => s.trim()).filter(Boolean).sort();
+          expect(committed).toEqual(["src/a.ts", "src/b.ts"]);
+          // fixImpactFiles 不做存在性过滤（收集层语义：声称触碰即进 recheck 观测点）
+          const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
+            fixImpactFiles: string[];
+          };
+          expect(st.fixImpactFiles).toEqual(["src/a.ts", "src/b.ts", "ghost/missing.ts"]);
+        } finally {
+          process.chdir(origCwd);
+          rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+        }
+      },
+      RUN_TIMEOUT_MS,
+    );
+
+    it(
+      "MF-1-1b: 统一 commit 的 git add 失败（index.lock 争用）→ fix-failure 结构化终止 + state.json 落盘",
+      async () => {
+        const repo = makeTmpGitRepo();
+        mkdirSync(join(repo, "src"), { recursive: true });
+        writeFileSync(join(repo, "src", "a.ts"), "export const a = 1;\n", "utf-8");
+        // 预置 index.lock：模拟并行进程持锁（统一 commit 设计注释点名的真实风险形态——
+        // 计划层（planUnifiedCommit）只过滤不存在路径，锁争用仍须走 fix-failure 分类）
+        writeFileSync(join(repo, ".git", "index.lock"), "", "utf-8");
+        const origCwd = process.cwd();
+        process.chdir(repo);
+        try {
+          const runner = makeScenarioRunner({
+            review: [
+              () => ({ report_file: "/tmp/mf11b-r1.md", must_fix: 1, suggestion: 0, reconciliation: [] }),
+            ],
+            aggregate: () => ({
+              report_file: "/tmp/mf11b-agg.md", must_fix: 1, suggestion: 0,
+              must_fix_ids: [{ id: "MF-1", severity: "major" }], fixes_caution: [],
+            }),
+            fix: () => ({
+              fixed_count: 1,
+              fixes: [{ issue_id: "MF-1", description: "mock fix", self_check: "grep: 1 hit; synced", affected_files: ["src/a.ts"] }],
+              deferred: [],
+            }),
+          });
+          const deps = makeDeps(runner);
+          const result = await runWorkflowToSettled(
+            wf("review-fix-loop"),
+            { targetType: "file", target: "README.md", agents: agentMd("reviewer"), autoCommit: true, _runId: RUN_ID() },
+            deps, undefined, RUN_TIMEOUT_MS,
+          );
+
+          expect(result.reason).toBe("completed"); // 结构化终止而非抛错
+          expect(result.error).toBeUndefined();
+          const outcome = assertScriptOutcome(result.scriptResult);
+          // git add 抛错 → terminated='fix-failure'（结构化终止语义）
+          expect(outcome.terminated).toBe("fix-failure");
+          expect(outcome.message).toContain("[UNRESOLVED]");
+          expect(outcome.message).toContain("统一 commit 环境恢复重试后仍失败");
+          expect(outcome.message).toContain("git status"); // 恢复动作指引
+          // 终止路径 saveState 已落盘（断点恢复依据）
+          expect(existsSync(join(outcome.runDir!, "state.json"))).toBe(true);
+          // 无 commit 产生（add 失败在 commit 之前；空仓 HEAD 仍不存在）
+          let revParseErr = "";
+          try {
+            execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, timeout: 10_000, env: gitEnv() });
+          } catch (e) {
+            revParseErr = String(e);
+          }
+          expect(revParseErr).toContain("unknown revision");
+        } finally {
+          process.chdir(origCwd);
+          rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+        }
+      },
+      RUN_TIMEOUT_MS,
+    );
+  },
+);

@@ -1,23 +1,34 @@
-// src/__tests__/worktree-reconcile.integration.test.ts
+// src/execution/__tests__/worktree-reconcile.integration.test.ts
 //
-// D5b 对账双向 diff 集成测试：真实 git repo + 真实 tmpdir（不 mock fs/execFile）。
+// D5b 对账双向 diff：物理（磁盘）侧 ↔ 注册表。
 //
-// 隔离手段：TMPDIR env 重定向到测试私有目录——WorktreeManager 的物理（磁盘）侧扫描
-// 根 = os.tmpdir()/pi-subagents（跟随 TMPDIR），避免扫到本机其他进程的真实残留。
+// 两条轨道（判据三档：只测逻辑、高负载极快）：
+//   1. 默认轨道（本文件上半）：in-process fixture——git 经 execFile 桩脚本化响应、
+//      pid 探活经 alive-store 桩注入，物理侧 checkout 目录 / .alive marker 走真实
+//      tmpdir 小文件。六个收敛方向的判定逻辑全部同步可断言，无真进程、无真 git。
+//   2. CI-only 轨道（本文件下半，TAIJI_TEST_INTEGRATION=1 才跑）：真实 git repo +
+//      真实 `git worktree add`，端到端验证上面 fixture 化的判定在真 git 元数据上成立。
 //
 // 覆盖四个收敛方向（判据见 worktree-manager.ts reconcileWithPhysical）：
 //   1. 物理有 + 注册无 + 无活 pid + 超 grace → 清分支与目录
 //   2. 物理有 + 注册无 + 恰好 1 活 pid + 1 残留 → 补写回注册表（自愈）
 //   3. 注册有（pid 活）+ 物理无 → 移除幻影条目
 //   4. 多活 pid / 多残留（对应歧义）→ 跳过不动（宁延迟勿误删）
+//
+// 隔离手段：TMPDIR env 重定向到测试私有目录——WorktreeManager 的物理（磁盘）侧扫描
+// 根 = os.tmpdir()/pi-subagents（跟随 TMPDIR），避免扫到本机其他进程的真实残留。
 
 import { execFileSync, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  INTEGRATION_TESTS_ENABLED,
+  INTEGRATION_TESTS_SKIP_REASON,
+} from "../../../../../test-guard/integration-gate.ts";
 import { encodeCwd, getSessionSubagentSessionsDir } from "@taiji/shared/paths";
 import { WorktreeRegistry } from "../worktree/worktree-registry.ts";
 import { WorktreeManager } from "../worktree/worktree-manager.ts";
@@ -25,163 +36,435 @@ import { WorktreeManager } from "../worktree/worktree-manager.ts";
 /** 原始 TMPDIR（beforeEach 重定向、afterEach 还原）。 */
 const ORIG_TMPDIR = os.tmpdir();
 
-/** git 辅助：repo 内执行（输出 trim）。 */
+/**
+ * in-process fixture 开关（默认轨道的 git / pid 探活桩）。
+ *
+ * git = true 时 execFile 走 gitScript（脚本化 git，记录全部命令）；alive = true 时
+ * isProcessAlive 按 alivePids 集合判定。CI-only 真实 git 轨道两个开关都置 false，
+ * 交还真实实现（execFile 真起 git 子进程 / process.kill 真探活）。
+ */
+const fakeIo = vi.hoisted(() => ({
+  git: false,
+  gitScript: null as null | ((args: string[], cwd: string) => string | Error),
+  alive: false,
+  alivePids: new Set<number>(),
+}));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  const execFileStub = ((
+    file: string,
+    args: readonly string[],
+    options: unknown,
+    // execFile 的 err.code 运行时是数字（GitRunError 据此取 exitCode），NodeJS.ErrnoException
+    // 的 code 类型是 string——本桩自定回调签名，外层一次性转成真实 execFile 重载签名。
+    callback: (err: (Error & { code?: number }) | null, stdout: string, stderr: string) => void,
+  ): void => {
+    if (!fakeIo.git) {
+      (actual.execFile as unknown as (...a: unknown[]) => void)(file, args, options, callback);
+      return;
+    }
+    const script = fakeIo.gitScript;
+    const result = script === null ? "" : script([...args], (options as { cwd: string }).cwd);
+    if (result instanceof Error) {
+      callback(Object.assign(result, { code: 128 }), "", result.message);
+      return;
+    }
+    callback(null, result, "");
+  }) as unknown as typeof actual.execFile;
+  return { ...actual, execFile: execFileStub };
+});
+
+vi.mock("../persistence/alive-store.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../persistence/alive-store.ts")>();
+  return {
+    ...actual,
+    isProcessAlive: (pid: number): boolean =>
+      fakeIo.alive ? fakeIo.alivePids.has(pid) : actual.isProcessAlive(pid),
+  };
+});
+
+/** git 辅助：repo 内执行（输出 trim）。CI-only 真实 git 轨道专用。 */
 function git(repo: string, ...args: string[]): string {
-	return execFileSync("git", ["-C", repo, ...args], { encoding: "utf-8" }).trim();
+  return execFileSync("git", ["-C", repo, ...args], { encoding: "utf-8" }).trim();
 }
 
-// [HISTORICAL] 2026-08-20 PR #185：真实 git 子进程 + 注册表文件锁集成用例显式超时——
-// 每用例多次 git init/worktree add/branch -D 真实子进程调用，整包满并行 + 系统余载下
-// 超 vitest 默认 5s testTimeout（对齐本包 worktree-registry D5a / process-shutdown-hook 口径）。
-describe("WorktreeManager.scan 物理（磁盘）侧对账（D5b）", { timeout: 30_000 }, () => {
-	let baseDir: string;
-	let agentDir: string;
-	let repo: string;
-	let enc: string;
-	let registry: WorktreeRegistry;
-	let mgr: WorktreeManager;
-	/** 真实系统 tmp 下的测试根（TMPDIR 重定向目标）。 */
-	let outerDir: string;
+/** 脚本化 git 的磁盘状态（分支全集 + branch↔checkout 反查 + 命令流水）。 */
+interface FakeGitState {
+  /** repo → 该 repo 的分支全集（`branch --list` 的回答源）。 */
+  readonly branches: Map<string, Set<string>>;
+  /** branch → checkout 路径（`worktree remove` 反查删分支用）。 */
+  readonly checkoutByBranch: Map<string, string>;
+  /** 全部 git 命令流水（断言清理序列与幂等性用）。 */
+  readonly calls: string[];
+}
 
-	beforeEach(() => {
-		outerDir = fs.mkdtempSync(path.join(ORIG_TMPDIR, "wt-reconcile-it-"));
-		// 磁盘侧扫描根重定向：os.tmpdir() 跟随 TMPDIR env（darwin/linux 均如此）
-		process.env.TMPDIR = outerDir;
-		// [session-store-layout-inversion] 对账活信号根 = session 存储树
-		// getSessionStoreDir()（env dataDir）——重定向进 outerDir 内，构造
-		// WorktreeManager 前置（reconciler 构造期解析 storeRoot）
-		process.env.TAIJI_AGENT_DATA_DIR = path.join(outerDir, "engine-data");
-		baseDir = outerDir;
+/** 建一个空 fake git 状态。 */
+function createFakeGit(): FakeGitState {
+  return { branches: new Map(), checkoutByBranch: new Map(), calls: [] };
+}
 
-		agentDir = path.join(baseDir, "agent");
-		repo = path.join(baseDir, "repo");
-		fs.mkdirSync(repo, { recursive: true });
-		git(repo, "init", "-q");
-		git(repo, "config", "user.email", "test@test.local");
-		git(repo, "config", "user.name", "test");
-		fs.writeFileSync(path.join(repo, "a.txt"), "init\n", "utf-8");
-		git(repo, "add", "-A");
-		git(repo, "commit", "-q", "-m", "init");
+/** 把 script 挂到当前 fake git 状态。 */
+function useFakeGit(state: FakeGitState): void {
+  fakeIo.git = true;
+  fakeIo.gitScript = (args, cwd) => {
+    state.calls.push(args.join(" "));
+    if (args[0] === "branch" && args[1] === "--list") {
+      return [...(state.branches.get(cwd) ?? [])].join("\n");
+    }
+    if (args[0] === "worktree" && args[1] === "remove") {
+      const target = args[3];
+      for (const [branch, checkout] of state.checkoutByBranch) {
+        if (checkout === target) {
+          state.branches.get(cwd)?.delete(branch);
+          state.checkoutByBranch.delete(branch);
+        }
+      }
+      return "";
+    }
+    if (args[0] === "worktree" && args[1] === "prune") return "";
+    if (args[0] === "branch" && args[1] === "-D") {
+      state.branches.get(cwd)?.delete(args[2] ?? "");
+      return "";
+    }
+    return "";
+  };
+}
 
-		enc = encodeCwd(repo);
-		registry = new WorktreeRegistry(agentDir);
-		mgr = new WorktreeManager(agentDir);
-	});
+// ============================================================
+// 默认轨道：in-process fixture（无真 git、无真进程）
+// ============================================================
 
-	afterEach(() => {
-		process.env.TMPDIR = ORIG_TMPDIR;
-		delete process.env.TAIJI_AGENT_DATA_DIR;
-		fs.rmSync(outerDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-	});
+describe("WorktreeManager.scan 对账双向 diff（D5b，in-process fixture）", () => {
+  let outerDir: string;
+  let agentDir: string;
+  let repo: string;
+  let enc: string;
+  let registry: WorktreeRegistry;
+  let mgr: WorktreeManager;
+  let fakeGit: FakeGitState;
 
-	/** 建一个物理 worktree（按 create() 的真实路径布局，绕过 WorktreeManager.create 的脏树校验）。 */
-	function makePhysicalWorktree(branch: string): string {
-		const checkout = path.join(baseDir, "pi-subagents", enc, branch);
-		git(repo, "worktree", "add", "-q", "-b", branch, checkout, "HEAD");
-		return checkout;
-	}
+  beforeEach(() => {
+    outerDir = fs.mkdtempSync(path.join(ORIG_TMPDIR, "wt-reconcile-it-"));
+    // 磁盘侧扫描根重定向：os.tmpdir() 跟随 TMPDIR env（darwin/linux 均如此）
+    process.env.TMPDIR = outerDir;
+    // [session-store-layout-inversion] 对账活信号根 = session 存储树
+    // getSessionStoreDir()（env dataDir）——重定向进 outerDir 内，构造
+    // WorktreeManager 前置（reconciler 构造期解析 storeRoot）
+    process.env.TAIJI_AGENT_DATA_DIR = path.join(outerDir, "engine-data");
+    agentDir = path.join(outerDir, "agent");
+    repo = path.join(outerDir, "repo");
+    enc = encodeCwd(repo);
 
-	/** 在 <storeRoot>/<sid>/subagents/sessions/ 下写一个 .alive marker
-	 *  （[session-store-layout-inversion] 活信号随 subagent 文族落 session 存储树）。 */
-	function writeAliveMarker(sessionId: string, pid: number): void {
-		const sessions = getSessionSubagentSessionsDir(sessionId);
-		fs.mkdirSync(sessions, { recursive: true });
-		fs.writeFileSync(
-			path.join(sessions, `${sessionId}.jsonl.alive`),
-			JSON.stringify({ pid, id: sessionId, startedAt: Date.now() }),
-			"utf-8",
-		);
-	}
+    fakeGit = createFakeGit();
+    useFakeGit(fakeGit);
+    fakeIo.alive = true;
+    fakeIo.alivePids.clear();
 
-	/** 把目录 mtime 设到 grace 之前（对账判据的 createdAt 近似）。 */
-function ageBeyondGrace(dir: string): void {
-		const past = new Date(Date.now() - 120_000);
-		fs.utimesSync(dir, past, past);
-	}
+    registry = new WorktreeRegistry(agentDir);
+    mgr = new WorktreeManager(agentDir);
+  });
 
-	it("物理有 + 注册无 + 无活 pid + 超 grace → 清分支与目录", async () => {
-		const checkout = makePhysicalWorktree("pi-sub-t1");
-		ageBeyondGrace(checkout);
+  afterEach(() => {
+    fakeIo.git = false;
+    fakeIo.gitScript = null;
+    fakeIo.alive = false;
+    process.env.TMPDIR = ORIG_TMPDIR;
+    delete process.env.TAIJI_AGENT_DATA_DIR;
+    fs.rmSync(outerDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
 
-		await mgr.scan();
+  /** 建一个物理 worktree：checkout 目录 + .git 指针文件（repo 推导源）+ fake git 分支登记。
+   *  路径布局与 create() 同源（os.tmpdir()/pi-subagents/<enc>/<branch>）。 */
+  function makePhysicalWorktree(branch: string): string {
+    const checkout = path.join(outerDir, "pi-subagents", enc, branch);
+    fs.mkdirSync(checkout, { recursive: true });
+    fs.writeFileSync(
+      path.join(checkout, ".git"),
+      `gitdir: ${path.join(repo, ".git", "worktrees", branch)}\n`,
+      "utf-8",
+    );
+    fakeGit.branches.set(repo, (fakeGit.branches.get(repo) ?? new Set()).add(branch));
+    fakeGit.checkoutByBranch.set(branch, checkout);
+    return checkout;
+  }
 
-		expect(fs.existsSync(checkout)).toBe(false);
-		expect(git(repo, "branch", "--list", "pi-sub-*")).toBe("");
-		expect(registry.load()).toEqual([]);
-	});
+  /** 在 <storeRoot>/<sid>/subagents/sessions/ 下写一个 .alive marker
+   *  （[session-store-layout-inversion] 活信号随 subagent 文族落 session 存储树），
+   *  并把 pid 注册进探活桩的活集合。 */
+  function writeAliveMarker(sessionId: string, pid: number): void {
+    const sessions = getSessionSubagentSessionsDir(sessionId);
+    fs.mkdirSync(sessions, { recursive: true });
+    fs.writeFileSync(
+      path.join(sessions, `${sessionId}.jsonl.alive`),
+      JSON.stringify({ pid, id: sessionId, startedAt: Date.now() }),
+      "utf-8",
+    );
+    fakeIo.alivePids.add(pid);
+  }
 
-	it("物理有 + 注册无 + 未超 grace（create 窗口）→ 跳过不删", async () => {
-		const checkout = makePhysicalWorktree("pi-sub-t2");
-		// mtime 保持「现在」——另一进程 worktree add 完成到 registry.add 落盘之间的窗口
+  /** 把目录 mtime 设到 grace 之前（对账判据的 createdAt 近似）。 */
+  function ageBeyondGrace(dir: string): void {
+    const past = new Date(Date.now() - 120_000);
+    fs.utimesSync(dir, past, past);
+  }
 
-		await mgr.scan();
+  /** 清理类命令流水（worktree remove / prune / branch -D）。 */
+  function cleanupCalls(): string[] {
+    return fakeGit.calls.filter(
+      (c) => c.startsWith("worktree remove") || c.startsWith("worktree prune") || c.startsWith("branch -D"),
+    );
+  }
 
-		expect(fs.existsSync(checkout)).toBe(true);
-		expect(git(repo, "branch", "--list", "pi-sub-t2")).not.toBe("");
-	});
+  it("物理有 + 注册无 + 无活 pid + 超 grace → 清分支与目录", async () => {
+    const checkout = makePhysicalWorktree("pi-sub-t1");
+    ageBeyondGrace(checkout);
 
-	it("物理有 + 注册无 + 恰好 1 活 pid + 1 残留 → 补写回注册表（自愈）", async () => {
-		const checkout = makePhysicalWorktree("pi-sub-t3");
-		// 活 pid 用本测试进程（isProcessAlive 真实调用必活）
-		writeAliveMarker("s-t3", process.pid);
+    await mgr.scan();
 
-		await mgr.scan();
+    expect(fs.existsSync(checkout)).toBe(false);
+    expect([...(fakeGit.branches.get(repo) ?? [])]).toEqual([]); // 分支已删
+    expect(registry.load()).toEqual([]);
+    // 死体清理序列：worktree remove → prune → branch -D（目录由兜底 rmSync 收尾）
+    expect(cleanupCalls()).toEqual([
+      `worktree remove --force ${checkout}`,
+      "worktree prune",
+      "branch -D pi-sub-t1",
+    ]);
+  });
 
-		const entries = registry.load();
-		expect(entries).toHaveLength(1);
-		expect(entries[0].branch).toBe("pi-sub-t3");
-		expect(entries[0].pid).toBe(process.pid);
-		expect(entries[0].checkout).toBe(checkout);
-		// 物理资源未被删（自愈而非只删）
-		expect(fs.existsSync(checkout)).toBe(true);
-	});
+  it("物理有 + 注册无 + 未超 grace（create 窗口）→ 跳过不删", async () => {
+    const checkout = makePhysicalWorktree("pi-sub-t2");
+    // mtime 保持「现在」——另一进程 worktree add 完成到 registry.add 落盘之间的窗口
 
-	it("注册有（pid 活）+ 物理无 → 移除幻影条目", async () => {
-		// pid 活（本进程）使阶段一孤儿清理跳过，隔离方向一的独立语义
-		await registry.add({
-			repo,
-			branch: "pi-sub-ghost",
-			checkout: path.join(baseDir, "pi-subagents", enc, "pi-sub-ghost"),
-			pid: process.pid,
-			createdAt: Date.now(),
-		});
+    await mgr.scan();
 
-		await mgr.scan();
+    expect(fs.existsSync(checkout)).toBe(true);
+    expect([...(fakeGit.branches.get(repo) ?? [])]).toEqual(["pi-sub-t2"]);
+    expect(registry.load()).toEqual([]);
+    expect(cleanupCalls()).toEqual([]); // 宽限窗内零清理动作
+  });
 
-		expect(registry.load()).toEqual([]);
-	});
+  it("物理有 + 注册无 + 恰好 1 活 pid + 1 残留 → 补写回注册表（自愈）", async () => {
+    const checkout = makePhysicalWorktree("pi-sub-t3");
+    writeAliveMarker("s-t3", 4242);
 
-	it("多残留 + 多活 pid（对应歧义）→ 跳过不动", async () => {
-		const c1 = makePhysicalWorktree("pi-sub-m1");
-		const c2 = makePhysicalWorktree("pi-sub-m2");
-		ageBeyondGrace(c1);
-		ageBeyondGrace(c2);
-		// 第二个「活 pid」用真实 sleep 子进程（与 process.pid 不同值）
-		const sleeper = spawn("sleep", ["60"]);
-		try {
-			expect(sleeper.pid).toBeTruthy();
-			writeAliveMarker("s-m1", process.pid);
-			writeAliveMarker("s-m2", sleeper.pid as number);
+    await mgr.scan();
 
-			await mgr.scan();
+    const entries = registry.load();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ branch: "pi-sub-t3", checkout, pid: 4242 });
+    // 物理资源未被删（自愈而非只删）
+    expect(fs.existsSync(checkout)).toBe(true);
+    expect(cleanupCalls()).toEqual([]);
+  });
 
-			// 歧义 → 本周期全部跳过（宁延迟勿误删），下周期活 pid 消失后收敛
-			expect(fs.existsSync(c1)).toBe(true);
-			expect(fs.existsSync(c2)).toBe(true);
-			expect(registry.load()).toEqual([]);
-		} finally {
-			sleeper.kill("SIGKILL");
-		}
-	});
+  it("注册有（pid 活）+ 物理无 → 移除幻影条目", async () => {
+    // pid 活使阶段一孤儿清理跳过，隔离方向一的独立语义
+    await registry.add({
+      repo,
+      branch: "pi-sub-ghost",
+      checkout: path.join(outerDir, "pi-subagents", enc, "pi-sub-ghost"),
+      pid: 4242,
+      createdAt: Date.now(),
+    });
+    fakeIo.alivePids.add(4242);
 
-	it("幂等：连续两次 scan 结果一致（无重复动作）", async () => {
-		const checkout = makePhysicalWorktree("pi-sub-idem");
-		ageBeyondGrace(checkout);
+    await mgr.scan();
 
-		await mgr.scan();
-		await mgr.scan();
+    expect(registry.load()).toEqual([]);
+    // 幻影条目是纯清账：不删任何 git 资源（分支与 checkout 本就不存在）
+    expect(cleanupCalls()).toEqual([]);
+  });
 
-		expect(fs.existsSync(checkout)).toBe(false);
-		expect(git(repo, "branch", "--list", "pi-sub-*")).toBe("");
-	});
+  it("多残留 + 多活 pid（对应歧义）→ 跳过不动", async () => {
+    const c1 = makePhysicalWorktree("pi-sub-m1");
+    const c2 = makePhysicalWorktree("pi-sub-m2");
+    ageBeyondGrace(c1);
+    ageBeyondGrace(c2);
+    writeAliveMarker("s-m1", 1001);
+    writeAliveMarker("s-m2", 1002);
+
+    await mgr.scan();
+
+    // 歧义 → 本周期全部跳过（宁延迟勿误删），下周期活 pid 消失后收敛
+    expect(fs.existsSync(c1)).toBe(true);
+    expect(fs.existsSync(c2)).toBe(true);
+    expect(registry.load()).toEqual([]);
+    expect(cleanupCalls()).toEqual([]);
+  });
+
+  it("幂等：连续两次 scan 结果一致（无重复动作）", async () => {
+    const checkout = makePhysicalWorktree("pi-sub-idem");
+    ageBeyondGrace(checkout);
+
+    await mgr.scan();
+    expect(fs.existsSync(checkout)).toBe(false);
+
+    fakeGit.calls.length = 0;
+    await mgr.scan();
+
+    // 第二轮无任何 git 动作（残留已收敛、注册表已空）——幂等由「零命令」证
+    expect(fakeGit.calls).toEqual([]);
+  });
 });
+
+// ============================================================
+// CI-only 轨道：真实 git repo + 真实 worktree 元数据
+// ============================================================
+
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `WorktreeManager.scan 物理（磁盘）侧对账（D5b，真实 git）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
+    let baseDir: string;
+    let agentDir: string;
+    let repo: string;
+    let enc: string;
+    let registry: WorktreeRegistry;
+    let mgr: WorktreeManager;
+    /** 真实系统 tmp 下的测试根（TMPDIR 重定向目标）。 */
+    let outerDir: string;
+
+    beforeEach(() => {
+      outerDir = fs.mkdtempSync(path.join(ORIG_TMPDIR, "wt-reconcile-it-"));
+      // 磁盘侧扫描根重定向：os.tmpdir() 跟随 TMPDIR env（darwin/linux 均如此）
+      process.env.TMPDIR = outerDir;
+      // [session-store-layout-inversion] 对账活信号根 = session 存储树
+      // getSessionStoreDir()（env dataDir）——重定向进 outerDir 内，构造
+      // WorktreeManager 前置（reconciler 构造期解析 storeRoot）
+      process.env.TAIJI_AGENT_DATA_DIR = path.join(outerDir, "engine-data");
+      baseDir = outerDir;
+
+      agentDir = path.join(baseDir, "agent");
+      repo = path.join(baseDir, "repo");
+      fs.mkdirSync(repo, { recursive: true });
+      git(repo, "init", "-q");
+      git(repo, "config", "user.email", "test@test.local");
+      git(repo, "config", "user.name", "test");
+      fs.writeFileSync(path.join(repo, "a.txt"), "init\n", "utf-8");
+      git(repo, "add", "-A");
+      git(repo, "commit", "-q", "-m", "init");
+
+      enc = encodeCwd(repo);
+      registry = new WorktreeRegistry(agentDir);
+      mgr = new WorktreeManager(agentDir);
+    });
+
+    afterEach(() => {
+      process.env.TMPDIR = ORIG_TMPDIR;
+      delete process.env.TAIJI_AGENT_DATA_DIR;
+      fs.rmSync(outerDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    });
+
+    /** 建一个物理 worktree（按 create() 的真实路径布局，绕过 WorktreeManager.create 的脏树校验）。 */
+    function makePhysicalWorktree(branch: string): string {
+      const checkout = path.join(baseDir, "pi-subagents", enc, branch);
+      git(repo, "worktree", "add", "-q", "-b", branch, checkout, "HEAD");
+      return checkout;
+    }
+
+    /** 在 <storeRoot>/<sid>/subagents/sessions/ 下写一个 .alive marker
+     *  （[session-store-layout-inversion] 活信号随 subagent 文族落 session 存储树）。 */
+    function writeAliveMarker(sessionId: string, pid: number): void {
+      const sessions = getSessionSubagentSessionsDir(sessionId);
+      fs.mkdirSync(sessions, { recursive: true });
+      fs.writeFileSync(
+        path.join(sessions, `${sessionId}.jsonl.alive`),
+        JSON.stringify({ pid, id: sessionId, startedAt: Date.now() }),
+        "utf-8",
+      );
+    }
+
+    /** 把目录 mtime 设到 grace 之前（对账判据的 createdAt 近似）。 */
+    function ageBeyondGrace(dir: string): void {
+      const past = new Date(Date.now() - 120_000);
+      fs.utimesSync(dir, past, past);
+    }
+
+    it("物理有 + 注册无 + 无活 pid + 超 grace → 清分支与目录", async () => {
+      const checkout = makePhysicalWorktree("pi-sub-t1");
+      ageBeyondGrace(checkout);
+
+      await mgr.scan();
+
+      expect(fs.existsSync(checkout)).toBe(false);
+      expect(git(repo, "branch", "--list", "pi-sub-*")).toBe("");
+      expect(registry.load()).toEqual([]);
+    });
+
+    it("物理有 + 注册无 + 未超 grace（create 窗口）→ 跳过不删", async () => {
+      const checkout = makePhysicalWorktree("pi-sub-t2");
+      // mtime 保持「现在」——另一进程 worktree add 完成到 registry.add 落盘之间的窗口
+
+      await mgr.scan();
+
+      expect(fs.existsSync(checkout)).toBe(true);
+      expect(git(repo, "branch", "--list", "pi-sub-t2")).not.toBe("");
+    });
+
+    it("物理有 + 注册无 + 恰好 1 活 pid + 1 残留 → 补写回注册表（自愈）", async () => {
+      const checkout = makePhysicalWorktree("pi-sub-t3");
+      // 活 pid 用本测试进程（isProcessAlive 真实调用必活）
+      writeAliveMarker("s-t3", process.pid);
+
+      await mgr.scan();
+
+      const entries = registry.load();
+      expect(entries).toHaveLength(1);
+      expect(entries[0].branch).toBe("pi-sub-t3");
+      expect(entries[0].pid).toBe(process.pid);
+      expect(entries[0].checkout).toBe(checkout);
+      // 物理资源未被删（自愈而非只删）
+      expect(fs.existsSync(checkout)).toBe(true);
+    });
+
+    it("注册有（pid 活）+ 物理无 → 移除幻影条目", async () => {
+      // pid 活（本进程）使阶段一孤儿清理跳过，隔离方向一的独立语义
+      await registry.add({
+        repo,
+        branch: "pi-sub-ghost",
+        checkout: path.join(baseDir, "pi-subagents", enc, "pi-sub-ghost"),
+        pid: process.pid,
+        createdAt: Date.now(),
+      });
+
+      await mgr.scan();
+
+      expect(registry.load()).toEqual([]);
+    });
+
+    it("多残留 + 多活 pid（对应歧义）→ 跳过不动", async () => {
+      const c1 = makePhysicalWorktree("pi-sub-m1");
+      const c2 = makePhysicalWorktree("pi-sub-m2");
+      ageBeyondGrace(c1);
+      ageBeyondGrace(c2);
+      // 第二个「活 pid」用真实 sleep 子进程（与 process.pid 不同值）
+      const sleeper = spawn("sleep", ["60"]);
+      try {
+        expect(sleeper.pid).toBeTruthy();
+        writeAliveMarker("s-m1", process.pid);
+        writeAliveMarker("s-m2", sleeper.pid as number);
+
+        await mgr.scan();
+
+        // 歧义 → 本周期全部跳过（宁延迟勿误删），下周期活 pid 消失后收敛
+        expect(fs.existsSync(c1)).toBe(true);
+        expect(fs.existsSync(c2)).toBe(true);
+        expect(registry.load()).toEqual([]);
+      } finally {
+        sleeper.kill("SIGKILL");
+      }
+    });
+
+    it("幂等：连续两次 scan 结果一致（无重复动作）", async () => {
+      const checkout = makePhysicalWorktree("pi-sub-idem");
+      ageBeyondGrace(checkout);
+
+      await mgr.scan();
+      await mgr.scan();
+
+      expect(fs.existsSync(checkout)).toBe(false);
+      expect(git(repo, "branch", "--list", "pi-sub-*")).toBe("");
+    });
+  },
+);

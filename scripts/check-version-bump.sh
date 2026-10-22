@@ -67,10 +67,12 @@ if [ "$RELEASE_PI" != "$CURRENT_PI" ]; then
   echo "  当前工作区:             ${CURRENT_PI}"
   if ! command -v pi > /dev/null 2>&1; then
     echo "警告: pi 不在 PATH，契约测试将 skip（skipIf 约定）——请在有 pi 的环境补跑："
-    echo "  cd packages/runtime && pnpm exec vitest run src/__tests__/equivalence/pi-protocol-contract.test.ts"
+    echo "  cd packages/runtime && TAIJI_TEST_INTEGRATION=1 pnpm exec vitest run src/__tests__/equivalence/pi-protocol-contract.test.ts"
   fi
   echo "运行 pi 协议契约测试（RPC 面 / 事件范围 / entry 面 + D5 固化）..."
-  if ! (cd "${WS_ROOT}/packages/runtime" && pnpm exec vitest run src/__tests__/equivalence/pi-protocol-contract.test.ts); then
+  # TAIJI_TEST_INTEGRATION=1 必带：pi-protocol-contract 用例受集成测试门控（SSOT =
+  # test-guard/integration-gate.ts）本地默认跳过——不带 env 时整文件 skip，bump 门静默放行。
+  if ! (cd "${WS_ROOT}/packages/runtime" && TAIJI_TEST_INTEGRATION=1 pnpm exec vitest run src/__tests__/equivalence/pi-protocol-contract.test.ts); then
     echo ""
     echo "ERROR: pi 协议契约测试失败——上游协议漂移，禁止直接 bump 发布。"
     echo "处置路径（data-source-governance W25）："

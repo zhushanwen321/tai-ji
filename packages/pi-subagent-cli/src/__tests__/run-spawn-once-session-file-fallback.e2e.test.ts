@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { configureLoggerSink, resetLoggerSinkForTests, type LogLevel } from "@zhushanwen/subagent-engine-sdk";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "./integration-gate.local.ts";
 import {
   killAllActiveChildren,
   runSpawnOnce,
@@ -126,31 +127,36 @@ afterEach(() => {
   }
 });
 
-describe("close 时 sessionFile 缺失的响亮 warn（runSpawnOnce + fake pi 全程不应答）", () => {
-  it("三路全 miss → warn 留痕（recordId + unobtainable + 排查指引）且 run 正常终态", async () => {
-    const h = makeHarness();
+// 真 pi 对端（fake 脚本真子进程）+ close 收尾 warn 留痕 = 代码 × OS 组合行为
+// （进程存亡无完成信号可等）——移出默认单测轨，集成门控启用时真跑。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `close 时 sessionFile 缺失的响亮 warn（runSpawnOnce + fake pi 全程不应答）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
+    it("三路全 miss → warn 留痕（recordId + unobtainable + 排查指引）且 run 正常终态", async () => {
+      const h = makeHarness();
 
-    const result: SpawnRunResult = await runSpawnOnce(baseParams(), callbacksOf(h));
+      const result: SpawnRunResult = await runSpawnOnce(baseParams(), callbacksOf(h));
 
-    // run 正常终态：resolveExit 必达（await 不挂死）+ agent_settled resolve 的 exit 0 口径
-    expect(result.success).toBe(true);
-    expect(result.error).toBeUndefined();
-    // 全 miss 形态：身份信息无锚点（不自动认领）
-    expect(result.sessionFile).toBeUndefined();
-    expect(result.sessionId).toBeUndefined();
-    expect(h.handleReady).toHaveLength(0);
+      // run 正常终态：resolveExit 必达（await 不挂死）+ agent_settled resolve 的 exit 0 口径
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+      // 全 miss 形态：身份信息无锚点（不自动认领）
+      expect(result.sessionFile).toBeUndefined();
+      expect(result.sessionId).toBeUndefined();
+      expect(h.handleReady).toHaveLength(0);
 
-    // 响亮 warn：含 recordId + unobtainable + 全路 miss 归因 + 人工排查指引。
-    // 等 exited 再断言：close finalizer 同帧内先报 exited 再发 warn，exited 到达
-    // 即 warn 已入 sink（run resolve 早于收割，不等则与 close 事件赛跑）。
-    await waitFor(() => h.stateChanges.some((s) => s.state === "exited"));
-    const warns = logs
-      .filter((l) => l.level === "warn" && l.message.includes("[sessionfile]"))
-      .map((l) => l.message);
-    expect(warns).toHaveLength(1);
-    expect(warns[0]).toContain("unobtainable for rec-warn-e2e");
-    expect(warns[0]).toContain("all acquisition paths missed: spawn handshake, late response, LC-4 suffix lookup");
-    expect(warns[0]).toContain("record finalized without transcript anchor");
-    expect(warns[0]).toContain("Recovery:");
-  }, 15_000);
-});
+      // 响亮 warn：含 recordId + unobtainable + 全路 miss 归因 + 人工排查指引。
+      // 等 exited 再断言：close finalizer 同帧内先报 exited 再发 warn，exited 到达
+      // 即 warn 已入 sink（run resolve 早于收割，不等则与 close 事件赛跑）。
+      await waitFor(() => h.stateChanges.some((s) => s.state === "exited"));
+      const warns = logs
+        .filter((l) => l.level === "warn" && l.message.includes("[sessionfile]"))
+        .map((l) => l.message);
+      expect(warns).toHaveLength(1);
+      expect(warns[0]).toContain("unobtainable for rec-warn-e2e");
+      expect(warns[0]).toContain("all acquisition paths missed: spawn handshake, late response, LC-4 suffix lookup");
+      expect(warns[0]).toContain("record finalized without transcript anchor");
+      expect(warns[0]).toContain("Recovery:");
+    }, 15_000);
+  },
+);

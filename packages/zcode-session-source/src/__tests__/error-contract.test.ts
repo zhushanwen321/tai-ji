@@ -14,11 +14,16 @@
  *
  * 假驱动只在本文件生效（vi.mock 文件级）：fixture 用例（前两组 describe）走真实驱动
  * （slot 置空回退 actual.loadSqliteDriver）。
+ *
+ * 轨道归属：本文件整体登记在 vitest.config.ts 的 slow-sqlite 串行尾组（fixture 真库 +
+ * 错误注入走 sqlite 驱动行为），组内用例经 TAIJI_TEST_INTEGRATION 门控本地默认跳过
+ * （SSOT = test-guard/integration-gate.ts，约定见 docs/TEST-STRATEGY.md）。
  */
 
 import { describe, expect, it, vi, afterEach, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../test-guard/integration-gate.ts'
 
 import {
   SNAPSHOT_TMP_PREFIX,
@@ -116,7 +121,9 @@ function installFakeDriver(opts: RoutingOpts): void {
 
 // ── parseRowData 三段 throw（fixture 真库 + 真实驱动）────────────────────────────
 
-describe('parseRowData 错误契约（schema 漂移上游——不静默跳过，上下文带行标识）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `parseRowData 错误契约（schema 漂移上游——不静默跳过，上下文带行标识）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   it('非 string（message data 为 BLOB 形态）：throw 列类型异常（期望 JSON 字符串）', async () => {
     const fx = makeFixtureDir('zss-ec-ns-')
     try {
@@ -211,7 +218,9 @@ describe('parseRowData 错误契约（schema 漂移上游——不静默跳过�
 
 // ── candidatesByteSize 行检查（fixture 真库 + 真实驱动）─────────────────────────
 
-describe('candidatesByteSize 行检查（bytes 非 number → warn 留痕 + 跳过）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `candidatesByteSize 行检查（bytes 非 number → warn 留痕 + 跳过）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   it('全 NULL part.data 组 SUM 返 NULL：该会话不入 Map（大小未知非 0 B）+ warn 留痕；健康会话照常', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const fx = makeFixtureDir('zss-ec-bytes-')
@@ -254,7 +263,9 @@ describe('candidatesByteSize 行检查（bytes 非 number → warn 留痕 + 跳�
 
 // ── recovery 阶梯错误收尾契约（假驱动注入）──────────────────────────────────────
 
-describe('recovery 错误收尾契约（假驱动：close 失败 / probe 失败 / 表集缺失）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `recovery 错误收尾契约（假驱动：close 失败 / probe 失败 / 表集缺失）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   it('probe 失败 ∧ close 也失败：先 close 防泄漏、归因仍以探测错误为准，全链 attempted 记录', async () => {
     installFakeDriver({ masterThrows: true, closeThrows: true })
     const fx = makeFixtureDir('zss-ec-probe-')

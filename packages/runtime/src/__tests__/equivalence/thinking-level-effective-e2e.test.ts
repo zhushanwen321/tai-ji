@@ -21,17 +21,20 @@
  * - faux/faux-1-reasoning（reasoning:true，无 thinkingLevelMap）= 正常档位用例演员
  *   （档位 ['off','minimal','low','medium','high']，含 high）。
  * 双演员取代旧「宿主 models.json 撞运气 + injectReasoningOffProbe 注入 openai 演员」两套
- * 来源——用例确定性自足，且凭证无关（门控 FAUX_PI_READY 只判 binary，CI 可跑）。
+ * 来源——用例确定性自足，且凭证无关（门控 = 集成测试门控 TAIJI_TEST_INTEGRATION：本地
+ * 默认跳过，CI 与按改动范围触发时真跑，SSOT = test-guard/integration-gate.ts）。
  * pi 的 setThinkingLevel 档位变化时写全局 settings（setDefaultThinkingLevel）落在
  * spawnPiFixture faux 通道的临时 agentDir，dispose 删除，不污染 ~/.pi/agent。
  *
- * 运行：cd packages/runtime && npx vitest run src/__tests__/equivalence/thinking-level-effective-e2e.test.ts
+ * 运行：TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/thinking-level-effective-e2e.test.ts（不设 env 时本地默认跳过）
+ * 登记：docs/testing/e2e-map.json E2E-INTEG-08（集成门控轨，R2 按改动范围触发）；文件级集成轨成员登记在 packages/runtime/vitest.config.ts 的 INTEGRATION_TESTS
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { SessionService } from '../../services/session/session-service.js'
 import type { IPiEngine, IProcessManager } from '../../services/ports/pi-engine.js'
 import type { IMessageBroker } from '../../interfaces.js'
-import { spawnPiFixture, FAUX_PI_READY, FAUX_PI_SKIP_REASON, type PiFixture } from './pi-fixture.js'
+import { spawnPiFixture, type PiFixture } from './pi-fixture.js'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../test-guard/integration-gate.ts'
 
 const SID = 'g5-thinking-level'
 
@@ -81,8 +84,8 @@ function makeSessionService(engine: IPiEngine): SessionService {
   )
 }
 
-describe.skipIf(!FAUX_PI_READY)(
-  `G5 equivalence: 思考等级生效回执（faux-pi 子进程${FAUX_PI_SKIP_REASON ? `｜skip：${FAUX_PI_SKIP_REASON}` : ''}）`,
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `G5 equivalence: 思考等级生效回执（faux-pi 子进程${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}）`,
   () => {
     let fixture: PiFixture | null = null
     let svc: SessionService | null = null

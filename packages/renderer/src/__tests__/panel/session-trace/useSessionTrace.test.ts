@@ -14,7 +14,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/session-trace/useSessionTrace.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { computed } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
@@ -276,7 +276,11 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
   })
 })
 
-describe('B11 登记清单治理（内存泄漏审计中危#9：seenIds 增量去重 + 5000 软上限 + truncated 正交字段）', () => {
+describe('B11 登记清单治理（内存泄漏审计中危#9：seenIds 增量去重 + 软上限 + truncated 正交字段）', () => {
+  // 软上限注入 50：停采/保尾/复位/flush 四边界语义与 5000 完全同构（阈值相对语义不变），
+  // fixture 从万条缩到 50 量级——单测只测逻辑正确性（test-single-layer-cleanup 判据 d）。
+  const CAP = 50
+
   beforeEach(() => {
     vi.clearAllMocks()
     apiMock.getTraceEntries.mockReset()
@@ -284,6 +288,11 @@ describe('B11 登记清单治理（内存泄漏审计中危#9：seenIds 增量�
     setActivePinia(createPinia())
     traceStore.bindTraceSessionId(computed(() => usePanelStore().focusedSessionId))
     focusSession(null)
+    traceStore._setTraceEntriesSoftCapForTest(CAP)
+  })
+
+  afterEach(() => {
+    traceStore._setTraceEntriesSoftCapForTest(null)
   })
 
   /** 线性链 entry fixture（id 可控，去重断言用）。 */
@@ -322,47 +331,47 @@ describe('B11 登记清单治理（内存泄漏审计中危#9：seenIds 增量�
     expect(partitionOf(SID_A).entries).toHaveLength(2)
   })
 
-  it('软上限边界：4999 + 2 增量 → 恰 5000 停采 + truncated 置位；重复 id 不触截断', async () => {
-    const base = Array.from({ length: 4999 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`))
-    await loadReady(SID_A, base, { leafId: 'e4998' })
+  it('软上限边界：49 + 2 增量 → 恰 50 停采 + truncated 置位；重复 id 不触截断', async () => {
+    const base = Array.from({ length: CAP - 1 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`))
+    await loadReady(SID_A, base, { leafId: `e${CAP - 2}` })
     expect(partitionOf(SID_A).truncated).toBe(false)
 
-    // 第 5000 条：达上限但未超——追加成功且不置 truncated
-    pushAppend(SID_A, [chainEntry('e4999', 'e4998')], 'e4999')
-    expect(partitionOf(SID_A).entries).toHaveLength(5000)
+    // 第 50 条：达上限但未超——追加成功且不置 truncated
+    pushAppend(SID_A, [chainEntry(`e${CAP - 1}`, `e${CAP - 2}`)], `e${CAP - 1}`)
+    expect(partitionOf(SID_A).entries).toHaveLength(CAP)
     expect(partitionOf(SID_A).truncated).toBe(false)
 
     // 已达上限后再推重复 id：去重先行，不触截断标记
-    pushAppend(SID_A, [chainEntry('e4999', 'e4998')], 'e4999')
+    pushAppend(SID_A, [chainEntry(`e${CAP - 1}`, `e${CAP - 2}`)], `e${CAP - 1}`)
     expect(partitionOf(SID_A).truncated).toBe(false)
 
-    // 第 5001 条：停止追加 + truncated 置位；leafId 仍滚动（单字符串不占内存，保 core 边界计算输入最新）
-    pushAppend(SID_A, [chainEntry('e5000', 'e4999')], 'e5000')
-    expect(partitionOf(SID_A).entries).toHaveLength(5000)
+    // 第 51 条：停止追加 + truncated 置位；leafId 仍滚动（单字符串不占内存，保 core 边界计算输入最新）
+    pushAppend(SID_A, [chainEntry(`e${CAP}`, `e${CAP - 1}`)], `e${CAP}`)
+    expect(partitionOf(SID_A).entries).toHaveLength(CAP)
     expect(partitionOf(SID_A).truncated).toBe(true)
-    expect(partitionOf(SID_A).leafId).toBe('e5000')
-    expect((partitionOf(SID_A).entries.at(-1) as { id?: string }).id).toBe('e4999')
+    expect(partitionOf(SID_A).leafId).toBe(`e${CAP}`)
+    expect((partitionOf(SID_A).entries.at(-1) as { id?: string }).id).toBe(`e${CAP - 1}`)
   })
 
-  it('超限快照：保尾部 5000 + truncated 置位；后续增量立即停采', async () => {
-    const entries = Array.from({ length: 5003 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`))
-    await loadReady(SID_A, entries, { leafId: 'e5002' })
+  it('超限快照：保尾部 50 + truncated 置位；后续增量立即停采', async () => {
+    const entries = Array.from({ length: CAP + 3 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`))
+    await loadReady(SID_A, entries, { leafId: `e${CAP + 2}` })
 
-    expect(partitionOf(SID_A).entries).toHaveLength(5000)
+    expect(partitionOf(SID_A).entries).toHaveLength(CAP)
     expect(partitionOf(SID_A).truncated).toBe(true)
-    // 保尾部：丢弃最前 e0/e1/e2，保留 e3..e5002（最新 entry 靠尾 + leafId 在尾部）
+    // 保尾部：丢弃最前 e0/e1/e2，保留 e3..e52（最新 entry 靠尾 + leafId 在尾部）
     expect((partitionOf(SID_A).entries[0] as { id?: string }).id).toBe('e3')
-    expect((partitionOf(SID_A).entries.at(-1) as { id?: string }).id).toBe('e5002')
-    expect(partitionOf(SID_A).leafId).toBe('e5002')
+    expect((partitionOf(SID_A).entries.at(-1) as { id?: string }).id).toBe(`e${CAP + 2}`)
+    expect(partitionOf(SID_A).leafId).toBe(`e${CAP + 2}`)
 
     // 截断后的增量：直接停采（新 id 不可进入，登记清单恒有界）
-    pushAppend(SID_A, [chainEntry('e5003', 'e5002')], 'e5003')
-    expect(partitionOf(SID_A).entries).toHaveLength(5000)
+    pushAppend(SID_A, [chainEntry(`e${CAP + 3}`, `e${CAP + 2}`)], `e${CAP + 3}`)
+    expect(partitionOf(SID_A).entries).toHaveLength(CAP)
     expect(partitionOf(SID_A).truncated).toBe(true)
   })
 
   it('重新拉取小快照后 truncated 复位：全量快照是权威状态，截断标记随新快照重置', async () => {
-    await loadReady(SID_A, Array.from({ length: 5001 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`)), { leafId: 'e5000' })
+    await loadReady(SID_A, Array.from({ length: CAP + 1 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`)), { leafId: `e${CAP}` })
     expect(partitionOf(SID_A).truncated).toBe(true)
 
     await loadReady(SID_A, [chainEntry('n1', null)], { leafId: 'n1' })
@@ -373,7 +382,7 @@ describe('B11 登记清单治理（内存泄漏审计中危#9：seenIds 增量�
     expect(partitionOf(SID_A).entries).toHaveLength(2)
   })
 
-  it('loading 窗口缓冲 flush 同受软上限约束：快照 + 缓冲合计超 5000 停采并置位', async () => {
+  it('loading 窗口缓冲 flush 同受软上限约束：快照 + 缓冲合计超 50 停采并置位', async () => {
     let resolveSnap!: (v: ServerMessageMap['session.traceEntries']) => void
     apiMock.getTraceEntries.mockImplementation(
       () => new Promise<ServerMessageMap['session.traceEntries']>((res) => { resolveSnap = res }),
@@ -383,14 +392,14 @@ describe('B11 登记清单治理（内存泄漏审计中危#9：seenIds 增量�
     await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('loading'))
 
     // 窗口内缓冲 3 条（含 1 条与快照重叠）
-    pushAppend(SID_A, [chainEntry('e4998', 'e4997'), chainEntry('e4999', 'e4998'), chainEntry('e5000', 'e4999')], 'e5000')
+    pushAppend(SID_A, [chainEntry(`e${CAP - 2}`, `e${CAP - 3}`), chainEntry(`e${CAP - 1}`, `e${CAP - 2}`), chainEntry(`e${CAP}`, `e${CAP - 1}`)], `e${CAP}`)
 
-    resolveSnap(snapshotOf(SID_A, Array.from({ length: 4999 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`)), { leafId: 'e4998' }))
+    resolveSnap(snapshotOf(SID_A, Array.from({ length: CAP - 1 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`)), { leafId: `e${CAP - 2}` }))
     await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'))
-    // 快照 4999 + flush 去重后新增 e4999（5000 达上限）+ e5000 停采置位
-    expect(partitionOf(SID_A).entries).toHaveLength(5000)
+    // 快照 49 + flush 去重后新增 e49（50 达上限）+ e50 停采置位
+    expect(partitionOf(SID_A).entries).toHaveLength(CAP)
     expect(partitionOf(SID_A).truncated).toBe(true)
-    expect((partitionOf(SID_A).entries.at(-1) as { id?: string }).id).toBe('e4999')
-    expect(partitionOf(SID_A).leafId).toBe('e5000')
+    expect((partitionOf(SID_A).entries.at(-1) as { id?: string }).id).toBe(`e${CAP - 1}`)
+    expect(partitionOf(SID_A).leafId).toBe(`e${CAP}`)
   })
 })

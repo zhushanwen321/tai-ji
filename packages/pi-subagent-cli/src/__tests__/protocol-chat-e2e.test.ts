@@ -26,6 +26,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { ENGINE_PROTOCOL_VERSION } from "@zhushanwen/subagent-engine-sdk";
 
 import { assertDistFresh } from "./dist-fresh.ts";
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "./integration-gate.local.ts";
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const BIN = path.join(PKG_ROOT, "bin", "pi-subagent-cli.mjs");
@@ -144,7 +145,11 @@ async function awaitReaped(host: FakeHost, recordId: string): Promise<void> {
   host.replyReverse(String(exited.id), { ok: true });
 }
 
-describe("pi-subagent-cli chat 轮 run 派发形态 e2e（bin 真机 NDJSON 往返）", () => {
+// bin CLI chat 轮派发 + resume 锚 = 双真进程协议往返（代码 × OS 组合行为，无完成
+// 信号可等，窗口随负载拉长）——移出默认单测轨，集成门控启用时真跑。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `pi-subagent-cli chat 轮 run 派发形态 e2e（bin 真机 NDJSON 往返）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   // bin 加载 dist-first：stale dist 会让本套件验证旧引擎代码（假红），先过时效门
   beforeAll(assertDistFresh);
 

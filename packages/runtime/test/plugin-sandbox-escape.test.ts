@@ -14,6 +14,17 @@
  *
  * 端到端（真实 activator → assignProcess → fork env → loader）由
  * scripts/verify-plugin-e2e.sh 的 SEC-A1/A2 场景覆盖。
+ *
+ * 2026-10-22 单测层整治（判据三档与处置通道见 docs/todo/test-single-layer-cleanup.md）：
+ * ESM loader 边界是「代码 + OS 组合行为」——真实 fork 子进程 + Node ESM loader hook
+ * 的注册与拦截没有进程内的确定性完成信号（判据三档第 3 类），无法改写成纯逻辑，
+ * 按处置通道「移 CI-only / 拆分层」门控：
+ * - 「sandbox escape regression（real fork + real ESM loader）」与「S-36 usage monitor」
+ *   两个 describe 经 describe.skipIf(!INTEGRATION_TESTS_ENABLED) 包裹——本地默认跳过，
+ *   CI / 按改动范围触发时设 TAIJI_TEST_INTEGRATION=1 真跑（门控 SSOT =
+ *   test-guard/integration-gate.ts，e2e-map 登记 R2 规则）；
+ * - 「CJS interceptor boundary」与「BLOCKED_BUILTINS SSOT」是纯 in-process 逻辑
+ *   （拦截器函数进/断言出 + require 数据源比对），无进程无时钟，留在默认单测组。
  */
 
 import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest'
@@ -25,6 +36,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { createRequireInterceptor, BLOCKED_BUILTINS } from '../src/services/plugin-service/plugin-sandbox.js'
 import { createTsxPathsTsconfig } from './helpers/tsx-fork-tsconfig.js'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../test-guard/integration-gate.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOADER_PATH = join(__dirname, '../src/services/plugin-service/plugin-esm-loader.cjs')
@@ -86,7 +98,7 @@ function runInSandbox(
   return { child, results }
 }
 
-describe('S1-W3: sandbox escape regression (real fork + real ESM loader)', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`S1-W3: sandbox escape regression (real fork + real ESM loader)${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
   let pluginDir = ''
 
   afterEach(() => {
@@ -260,7 +272,7 @@ describe('S1-W3: BLOCKED_BUILTINS SSOT 防退化', () => {
   })
 })
 
-describe('S-36: CJS 拦截一次性监控日志（usage monitor）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`S-36: CJS 拦截一次性监控日志（usage monitor）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
   // 与 plugin-sandbox-process-guards.test.ts 同一隔离模式：initSandbox 修改全局
   // process.env / process.kill / process.ppid / Module._resolveFilename，必须在 fork
   // 子进程调用（进程退出即丢弃污染，in-process 不可恢复）。区别在于本 fixture 由

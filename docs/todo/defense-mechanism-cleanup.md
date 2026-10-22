@@ -30,8 +30,8 @@
   - update 下载停滞检测（`apps/electron/main/update/download-asset.ts`）：IDLE_TIMEOUT_MS=30s 无字节进展 abort watchdog——删（追加裁决推翻初scan「唯一保留超时」标注）；断点续传 temp 机制保留；curl 引擎 --speed-time 不在裁决点名范围，保留。
   - renderer 崩溃恢复提示条死链（`useCrashRecoveryNotice` + `CrashRecoveredBar`）：数据源 reloadWindowAfterCrash 随 recovery-policy 删除后无生产者、结构性永不可见——四文件整删 + 3 个死 i18n 键清理。
   - scheduler 模型切换对账（`extensions/universal/scheduler/src/runtime.ts`）：MODEL_SWITCH_RECONCILE_TICKS 2-tick 窗口计数 + phase/ticksOpen 字段 + forceSettleExpiredInFlight——合并为 settlePendingIfIdle 单点（记录存在 + isIdle() 事实查询即恢复）。
-- journal 推送通道（event-push-channel W-P1..W-P4，2026-10-05 落地）：run/record 两域落盘提交点经 SUBAGENT_JOURNAL_MARKER select 通道推送 runtime，派生视图改「启动冷读一次 + 推送增量折叠 + seq 缺口本地补读 + 终局条目补读触发」；event-tail watch 族（DirectoryEventTailer / watch 挂载 / 30s 周期复查 / 5s 失败重挂 / 200ms 合并）整体退役，readEventTail 补读原语保留。设计权威源 `.tmp/tech-design/event-push-channel.md`。
-- 跳过待裁决项全录见 `.tmp/dev-flow/defense-scan/*-changes.md`（gitignore 产物目录，逐条带理由）：holdEdgeTick、PingProbe、外部网络墙钟族等（ABORT_STALL 收敛窗、trace-sync/background-task/btw-fork 轮询已在本批裁决——前者删、后三者登记退役条件保留）。
+- journal 推送通道（event-push-channel W-P1..W-P4，2026-10-05 落地）：run/record 两域落盘提交点经 SUBAGENT_JOURNAL_MARKER select 通道推送 runtime，派生视图改「启动冷读一次 + 推送增量折叠 + seq 缺口本地补读 + 终局条目补读触发」；event-tail watch 族（DirectoryEventTailer / watch 挂载 / 30s 周期复查 / 5s 失败重挂 / 200ms 合并）整体退役，readEventTail 补读原语保留。设计权威源为 event-push-channel 设计文档（设计档案已随 .tmp 清理，不入库）。
+- 跳过待裁决项全录为 defense-scan 过程产物（已随 .tmp 清理，不入库；逐条带理由）：holdEdgeTick、PingProbe、外部网络墙钟族等（ABORT_STALL 收敛窗、trace-sync/background-task/btw-fork 轮询已在本批裁决——前者删、后三者登记退役条件保留）。
 
 - relay 通道残留引用收口（M3 relay-spawn-transport u-m3-delete，2026-10-18）：`deinitRelayServer` 的 3s grace 已随 ADR-0122 退役，`index.ts` 注释残留与 relay 本体（含孤儿收割豁免项）随通道整体退役清出；control server 关停语义 = 全通道组杀 + 有界等待（非时间补偿），引擎孤儿收割 = 启动 sweep + owner 存活判定的确定性事实。
 

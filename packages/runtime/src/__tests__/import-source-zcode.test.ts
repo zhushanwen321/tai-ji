@@ -512,14 +512,20 @@ describe('ZcodeImportSource.prepareImport（T1 header/fileName 全量）', () =>
 })
 
 describe('恢复阶梯 dispose 契约（L3 快照清理回归锚）', () => {
-  // 前缀 SSOT = zcode-session-source recovery.ts 的 SNAPSHOT_TMP_PREFIX（上方包内相对
-  // 路径 import 绑定；兼崩溃残留人工识别面）
+  // 快照计数域 = 测试私有扫描根（fixturesRoot 下 mkdtemp 自建，目录内条目恒个位数，
+  // readdir 恒快）。生产快照根是用户 tmpdir——长期跑测的机器上 mkdtemp 残留可堆积到
+  // 十万条目级（实测 readdir 单次 >3s）；「dispose 后前缀目录清零」的判定语义只依赖
+  // 计数根内的相对差分，扫描根私有化后语义不变且免受环境退化拖累。前缀 SSOT =
+  // zcode-session-source recovery.ts 的 SNAPSHOT_TMP_PREFIX（上方包内相对路径 import
+  // 绑定；兼崩溃残留人工识别面）——源内漂移时 mkdtemp 建目与计数判据同源漂移、断言显式红。
+  let scanRoot: string
   const countSnapshotDirs = () =>
-    readdirSync(tmpdir()).filter((n) => n.startsWith(SNAPSHOT_TMP_PREFIX)).length
+    readdirSync(scanRoot).filter((n) => n.startsWith(SNAPSHOT_TMP_PREFIX)).length
 
   let dbPath: string
 
   beforeAll(() => {
+    scanRoot = mkdtempSync(join(fixturesRoot, 'snapshot-scan-'))
     dbPath = join(fixturesRoot, 'zc-dispose.sqlite')
     buildFixtureDb(
       dbPath,
@@ -536,10 +542,11 @@ describe('恢复阶梯 dispose 契约（L3 快照清理回归锚）', () => {
     // close + L3 快照目录清理）。修复前 openDb 只回传 handle.db、finally 只 db.close()，
     // dispose 永不被调 → 快照目录残留 → 本用例红。
     const actual = await vi.importActual<typeof import('@zhushanwen/zcode-session-source')>('@zhushanwen/zcode-session-source')
-    // 基线先于建目录取值（基线不得含本用例自建的快照目录——否则 dispose 删掉它后差分恒 -1）
-    const snapshotsBefore = countSnapshotDirs()
-    const snapshotDir = mkdtempSync(join(tmpdir(), SNAPSHOT_TMP_PREFIX))
+    // 私有扫描根内基线恒 0（不依赖环境干净）；建目后计数 = 1 先钉住计数器本身可见该目录
+    expect(countSnapshotDirs()).toBe(0)
+    const snapshotDir = mkdtempSync(join(scanRoot, SNAPSHOT_TMP_PREFIX))
     expect(existsSync(snapshotDir)).toBe(true)
+    expect(countSnapshotDirs()).toBe(1)
     vi.mocked(openZcodeSessionDb).mockImplementation(async () => {
       // 真连接保真（fixture 库真实可查），仅收尾替换为 L3 形态；快照目录只删一次
       //（首调 dispose 即删，后续 rmSync force=true 幂等）
@@ -569,9 +576,6 @@ describe('恢复阶梯 dispose 契约（L3 快照清理回归锚）', () => {
       vi.mocked(openZcodeSessionDb).mockImplementation((p: string) => actual.openZcodeSessionDb(p))
     }
     expect(existsSync(snapshotDir)).toBe(false)
-    expect(countSnapshotDirs()).toBe(snapshotsBefore)
-    // timeout 放宽（默认 5s 不够）：countSnapshotDirs 全量 readdir 用户 tmpdir，长期跑测
-    // 的机器上 mkdtemp 残留会堆积到十万条目级（实测 readdir 单次 >3s，本用例调两次）——
-    // 环境退化暴露的断言脆弱点，非被测行为变慢；快照目录清零判定语义不变。
-  }, 30000)
+    expect(countSnapshotDirs()).toBe(0)
+  })
 })

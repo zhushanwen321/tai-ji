@@ -12,10 +12,13 @@
 // record 流 run 正常渲染（runId/状态/calls 可见），错误契约形态保持（不可读流由
 // 概览函数容错承接——上层 skippedRuns 归 session-reader 侧既有用例）。概览实装的
 // 加载经 tsx 子进程 probe（vite resolver 不解析跨包物理相对路径——见
-// scenario-kit 尾注）。
+// scenario-kit 尾注）；probe 是 tsx 冷编译 spawn（负载下无完成信号上界，判据
+// 第 3 档），消费用例经 TAIJI_TEST_INTEGRATION 门控（本地默认跳过）。
 import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
+
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "../../../../../test-guard/integration-gate.ts";
 
 import {
   adoptCrashedRun,
@@ -76,25 +79,29 @@ describe("场景 6：record 重建保真（真收编链 + D16 ③ 概览消费�
     }
   });
 
-  it("[D16 ③] session_read workflow 概览对本场景 record 流正常渲染：runId/中断状态/calls 可见（sessionFile 可提取），错误契约形态保持", async () => {
-    const env = mkScenarioEnv("06ov");
-    try {
-      await seedCrashedRun(env, RUN_ID, {
-        scriptSource: THREE_CALL_SERIAL_SCRIPT,
-        settled: [
-          { agent: "A", result: { content: "a", sessionFile: "/abs/sessions/a.jsonl" } },
-          { agent: "B", result: { content: "b", sessionFile: "/abs/sessions/b.jsonl" } },
-        ],
-        inflight: [{ agent: "C" }],
-      });
+  it.skipIf(!INTEGRATION_TESTS_ENABLED)(
+    "[D16 ③] session_read workflow 概览对本场景 record 流正常渲染：runId/中断状态/calls 可见（sessionFile 可提取），错误契约形态保持" +
+      (INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""),
+    async () => {
+      const env = mkScenarioEnv("06ov");
+      try {
+        await seedCrashedRun(env, RUN_ID, {
+          scriptSource: THREE_CALL_SERIAL_SCRIPT,
+          settled: [
+            { agent: "A", result: { content: "a", sessionFile: "/abs/sessions/a.jsonl" } },
+            { agent: "B", result: { content: "b", sessionFile: "/abs/sessions/b.jsonl" } },
+          ],
+          inflight: [{ agent: "C" }],
+        });
 
-      // 概览链消费（D16 ③ 换源后：record 流直读；tsx 子进程加载 session-reader
-      // 实装——断言体在 driver-session-reader.ts 的 overview-interrupted 族）
-      await runSessionReaderProbe("overview-interrupted", env.recordPath(RUN_ID), RUN_ID);
-      // 错误契约形态保持：坏行/不可读流的容错（上层 skippedRuns 的承接前提）
-      await runSessionReaderProbe("overview-corrupt-tolerant", env.recordPath(RUN_ID), RUN_ID);
-    } finally {
-      env.cleanup();
-    }
-  });
+        // 概览链消费（D16 ③ 换源后：record 流直读；tsx 子进程加载 session-reader
+        // 实装——断言体在 driver-session-reader.ts 的 overview-interrupted 族）
+        await runSessionReaderProbe("overview-interrupted", env.recordPath(RUN_ID), RUN_ID);
+        // 错误契约形态保持：坏行/不可读流的容错（上层 skippedRuns 的承接前提）
+        await runSessionReaderProbe("overview-corrupt-tolerant", env.recordPath(RUN_ID), RUN_ID);
+      } finally {
+        env.cleanup();
+      }
+    },
+  );
 });
