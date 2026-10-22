@@ -21,38 +21,38 @@
 |---|---|---|---|---|---|
 | 1 | 应用启动与进程编排 | `env.launch` `env.ready` `env.doctor` `env.cleanup` `env.isolation` `protocol.auth` | `p0-env-smoke` ✅实跑 | **`scenario`（部分）** | **实测覆盖**：runtime 子进程拉起（pid + runtime.port）、WS 握手（ping→pong）、三条就绪判据、doctor 五项、扩展装载 N≥8、数据目录隔离。**未覆盖**：`FEATURE-PRIORITIES` 该行用例组里的「**Electron 窗口创建**」与「**单实例锁**」——本剧本不断言窗口存在，也不验证第二个实例被拒。→ 补 `p0-app-shell`（CDP 页面 URL 已能间接证窗口存在，但需显式断言 + 单实例锁需真起第二个实例验 `app.quit`） |
 | 2 | 会话创建与首发 | `session.create` `session.list` `session.history` `chat.send` | `p0-session-chat` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（19 条断言）：协议 `session.create` → cwd 生效 → 模型解析 → subscribe → delivery 发送 → `message.complete` → history 文本 = 脚本 → 会话树落盘 → 双会话隔离 → `modelOverride` 生效 → pi 子进程日志。**未覆盖**：① 「**首发提交**」= UI Landing 链（选目录 chip / branch chip / 提交建 session），本剧本走的是协议不是 UI；② 「**模式选择（landing 第三 chip，模式 id 创建时锁定）**」；③ 其余 `session.create` 参数（`hidden`/`presetId`/`projectId`/`thinkingOverride`/`clientUuid` 幂等）。→ `p0-session-create-ui` + `p0-preset-lock` |
-| 3 | 对话发送与流式渲染 | `chat.send` `chat.stream` `chat.wait`（composer 输入三态挂在 `chat.send` 的 Gotcha 里） | `p0-session-chat`（仅到 history 文本） | **`capability-only`** | **已登记未验**：UI 流式块序 / thinking / 工具块 / 变更集 / **composer 输入三态（slash·mention·file 三个 portal 浮层）** → `p0-chat-stream-ui`（faux `thinking-stream.json` + `TAJI_FAUX_TPS` 拉窗口）。三态锚点表见 `chat.md` 的 `chat.send` Gotcha 1 |
+| 3 | 对话发送与流式渲染 | `chat.send` `chat.stream` `chat.wait`（composer 输入三态挂在 `chat.send` 的 Gotcha 里） | `p0-chat-stream-ui` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（22 断言，2026-10-22）：UI 激活链（侧栏行点击）、turn 轮渲染、markdown 表格/ts 代码/收尾哨兵、`html-preview-inline`、kitchen-sink 写盘副作用、history ≡ UI。**未覆盖**：流式中途活动条抓拍（TPS 窗口与渲染时机不稳定，归 e2e-visual）、thinking 全文（默认折叠，UI 只断 chip）、composer 输入三态（portal 锚点未稳定） |
 | 4 | pi RPC 适配 | `protocol.rpc` `protocol.events` `evidence.logs` | — | **`reuse-e2e`** | 机器资产 `TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime test:equivalence`（E2E-EQUIV-01，**layer L2.5**，零 token，cwd 必须是 `packages/runtime` 而非仓库根——`test:equivalence` 是子包 script）。本技能侧只补「帧按契约到达 + pi stdout tee 落盘」 |
-| 5 | session 持久化与恢复 | `session.persistence` `chat.reload-equiv` `session.history` | — | **`capability-only`** | live≡reload 等价性是最强证明，目前无剧本。跨进程等价由 E2E-EQUIV-01 覆盖；**本技能应补**「关会话重开 / 重启应用后 history 一致」两条 → `p0-session-persistence` |
+| 5 | session 持久化与恢复 | `session.persistence` `chat.reload-equiv` `session.history` | `p0-session-persistence` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（17 断言，2026-10-22）：切走切回 history ≡、重启应用（同 dataDir 二次 launch，faux 需 force）后 config.sessions 仍列出、history ≡、modelId 记忆一致、ext-sessions 树幸存。**未覆盖**：entry 级逐条等价（归 E2E-EQUIV-01 机器轨）、renderer 首屏重建时序 |
 | 6 | per-session 隔离 | `session.isolation` `session.switch` `chat.stream` | `p0-session-chat`（history 层） | **`capability-only`** | 已验「两 session history 不串」；**未验**并发流式不串 + 切走切回不污染 + `message.*` 必带 sessionId → `p0-session-isolation-stream` |
-| 7 | 多会话管理 | `session.list` `session.switch` `session.archive` `session.restore` `session.delete` | — | **`capability-only`** | `features/session-management.md` 有故事但**三处锚点错误**（已在该文件头标注）。归档/恢复/彻底删除是 P2 功能但触及 P0 删除链 → `p0-multi-session` 必须按 `capabilities/session.md` 重写 |
+| 7 | 多会话管理 | `session.list` `session.switch` `session.archive` `session.restore` `session.delete` | `p0-multi-session` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（18 断言，2026-10-22，协议面）：同名隔离（同 label 独立 id）、archive → 列表消失 + config.archives 含 A（ledger 轮询 + 归档文件实体轮询——文件搬移晚于 ledger）、**unarchive**（archive 的逆操作是 unarchive 不是 restore，两词别混）回列表、delete → 列表消失 + ext-sessions 树消失双证据。**未覆盖**：归档目录搬移细节、UI 侧栏交互、废纸篓可恢复性 |
 | 8 | 模型与 thinking level | `model.list` `model.switch` `model.thinking` `model.subagent-switch` | `p0-model-switch` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（24 断言，2026-10-22）：model.list 目录、`model.switch` 回执生效值、state 快照 `state_changed` 收敛（复合串 modelId）、session.create 默认模型、热切不破坏对话、切换不丢历史、C 通道 `model_change` + `thinking_level_change` 双 entry、`session.setThinkingLevel(high)` 回执生效档 + state 快照档位收敛、失败信号 `MODEL_NOT_FOUND` 不破坏会话、A 通道模型弹层目录可见性。**未覆盖**：composer 模型名随回执更新（需 UI 激活链路 → `p0-chat-stream-ui`）；执行域切换（`model.subagent-switch`：记账 + 热切 + run 级全切三要素）另立剧本；thinking 档位钳制分支（请求档不支持时的钳制回执，如对仅 off 档的 faux-1 设 high）；`responseModel` 反映切换（零 token 通道无模型语义，live 才可断言） |
-| 9 | 中断/取消 | `chat.abort` `subagent.cancel` `workflow.abort` | — | **`capability-only`** | 主会话中断（faux + 低 TPS）可验；执行域取消需 mock-http 通道 → `p0-interrupt-cancel` |
+| 9 | 中断/取消 | `chat.abort` `subagent.cancel` `workflow.abort` | `p0-interrupt-cancel` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（18 断言，2026-10-22，mock-http）：主会话 abort → `stopReason=aborted` + isGenerating 复位（恢复轮正常完成）；执行域 cancel → 成员 `stopReason=interrupted`（**取消效果达成**）。**缺陷发现（docs/todo/subagent-cancel-receipt-race.md）**：streaming cancel 的 Done 回执缺失（handler_error，4 次稳定复现——client.prompt 异步返回 vs 结果文件即读的通道竞态），本剧本 verdict=fail 为对该缺陷的诚实判定。**未覆盖**：workflow.abort（窗口难制造）、Deny 分支、两段式取消钮 A 通道 |
 | 10 | Markdown 渲染 | `render.markdown` `render.shiki` `render.html-preview` | — | **`reuse-e2e`** | `e2e/markdown-table-layout.spec.ts`（@p0-smoke）+ E2E-VISUAL-01 像素轨 + 渲染采样管道 `docs/testing/render-sampling.md`。本技能补 `render.markdown` 的 faux `markdown-kitchen-sink.json` 一轮即可 |
-| 11 | 扩展装载框架 | `extension.load` + `env.doctor` 第三判据 | `p0-env-smoke`（仅 N≥8） | **`capability-only`** | N = resolver 去重目录数，**不是装载成功数**。要验「某扩展真的可用」需行为证据（命令注册 / tool 可用 / 日志）→ `p0-extension-load` |
+| 11 | 扩展装载框架 | `extension.load` + `env.doctor` 第三判据 | `p0-extension-load` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（14 断言，2026-10-22）：extension.list 数量 ≥15、faux 临时挂载在列、infrastructure 组无 disabled、`session.getCommands` 含 source=extension 注册命令（行为证据）、runtime 日志无装载失败。**未覆盖**：各扩展深层功能（各自域 scenario）、插件系统（P0-14 reuse-e2e）、sandbox 隔离（无夹具） |
 | 12 | subagent/workflow 面板与派发 | `subagent.dispatch` `list` `stream` `cancel` `model` + `workflow.dispatch` `runs` `overlay` `abort` `reconnect` + `subagent.session-observation` | `p0-subagent-workflow-dispatch` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（24 断言，2026-10-22，mock-http 双段单实例；审查修复后复跑全绿）：subagent 派发 record 终态 + 成员模型解析 + canary 落子代理产物；workflow fan-out run status=done + 两成员 outcome=done + canary 摘要落 record；铁证 = mock.requests 出现成员模型有效请求（孙进程真的打到 mock）；装配自检（models.json baseUrl / engineDefaults.pi）。**未覆盖**（结构层/UI 面）：overlay 可视化、托盘面板、drawer 详情 tab（回落载体）、`subagent.stream`（内容帧 transient，断言手段受限，见已知空洞 #5）、通知链帧（本剧本的衔接断言只是通知轮发生的间接证据）、`subagent.cancel` / `workflow.abort` / `workflow.reconnect`、`subagent.setModel` 热切、`subagent.session-observation`（managed session 托盘观测面，与 subagent record 两族）→ 各自 capability 文档 + 后续剧本（机器资产：`e2e/workflow-viz-overlay.spec.ts` 等 mock 轨） |
-| 13 | 设置页 | `settings.provider` `system-prompt` `preset` `mcp` `network-proxy` `theme` | — | **`capability-only`** | 六面文档齐；仅 provider 一面有旧故事。建议拆两个剧本：`p0-settings-provider`（写侧 + provider-live-sync 联动）+ `p0-settings-others`（提示词/预设/主题/MCP/代理抽样） |
+| 13 | 设置页 | `settings.provider` `system-prompt` `preset` `mcp` `network-proxy` `theme` | `p0-settings-provider` ✅实跑 | **`scenario`（部分，六面中 provider 一面）** | **实测覆盖**（16 断言，2026-10-22）：setProvider 写侧 + models.json 落盘 + model.list 热可见（live-sync 轮询窗）+ deleteProvider + 删除无塌陷（faux 会话仍可建）。**未覆盖**：system-prompt/preset/mcp/network-proxy/theme 五面、设置页 UI 表单交互、oauth 凭据流 → `p0-settings-others` 仍待补 |
 | 14 | 插件系统 | `plugin.list` `toggle` `statusbar` `mountpoints` | — | **`reuse-e2e`** | `bash scripts/verify-plugin-contract.sh`（E2E-PLUGINCONTRACT-01）+ `bash scripts/verify-plugin-e2e.sh`（E2E-PLUGINCONTRACT-02）。⚠️ **这两个 rule 在 e2e-map 里标 L3，但实测并不打真 LLM**：contract 脚本写入的 provider 是 `baseUrl: http://127.0.0.1:9/v1` + `apiKey: dummy`（故意无响应的地址，只为过 pi 的模型校验），e2e 脚本明确「非 mock，真实加载路径」= 真插件装载而非真模型。→ 对验收技能**可用且零 token**；但**要跑在 main/目标 worktree 的仓库根**（脚本相对路径 `scripts/`）。注意 `plugin.statusbar` 已退役（ADR-0141），现役点位 = headerAction / tray widget / modal |
-| 15 | 统一提问表单 FormOverlay | `interaction.askuser` | — | **`capability-only`** | `features/ask-user-form.md` 有故事但**示例脚本违反 schema**（options 需 ≥2）；正确夹具 = `fixtures/faux-responses/ask-user-two-questions.json` → `p0-form-overlay` |
+| 15 | 统一提问表单 FormOverlay | `interaction.askuser` | `p0-form-overlay` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（16 断言，2026-10-22）：浮层可见（依附激活会话——协议建会话后必须点侧栏行激活）、两题 tab、选项点选（`form-option-<label>`）、已答态、提交、浮层消失、turn 继续收尾、选择回灌 pi 会话树（C）。**未覆盖**：自由文本/OTHER 分支、多选形态、Deny/取消路径 |
 | 16 | provider-live-sync（包级 P0） | `model.live-sync`（v1.1 补登） | — | **`reuse-e2e`** | `node scripts/verify-provider-live-sync.mjs`（E2E-MODELS-02，L2.5，真实 pi + 本地 mock LLM，零外网）。**该脚本同时是 mock-http 通道的权威先例** |
-| 17 | 展示容器体系（右抽屉 / 底抽屉 / 浮层 + 键盘栈序） | `ui.container`（v1.1 补登）`workspace.drawer` `workspace.terminal` `workflow.overlay` | — | **`capability-only`** | 抽屉 tab 集已更正为 7+1（`workflow` tab 2026-10-19 删除）；**键盘栈序（Esc 路由）无锚点** 是本行的最大缺口 → `p0-display-containers` |
+| 17 | 展示容器体系（右抽屉 / 底抽屉 / 浮层 + 键盘栈序） | `ui.container`（v1.1 补登）`workspace.drawer` `workspace.terminal` `workflow.overlay` | `p0-display-containers` ✅实跑（degraded） | **`scenario`（部分）** | **实测覆盖**（11 断言 0 失败 + 托盘面 uncovered，2026-10-22）：模型弹层浮层「打开 → Esc → 关闭」最小回路。**不可达面（如实登记）**：托盘按钮（builtin/aggregate）在无运行记录实例不渲染且渲染条件无文档锚点（空洞 #1 扩展）；键盘栈序完整语义无栈顶信号（空洞 #3）；终端/底抽屉零登记 |
 
 ## 二、P1（4 行）
 
 | # | 功能面 | capability id | 剧本 | 状态 | 备注 |
 |---|---|---|---|---|---|
 | 1 | 文件树与文件查看 | `workspace.filetree` `workspace.drawer` | — | **`reuse-e2e`** | `e2e/file-tree.spec.ts`（10 用例，含 @p0-smoke 子集，E2E-ELECTRON-01）。本技能补「懒加载 + git 角标 + ignored 双色」一轮即可 |
-| 2 | 工具调用过程展示 | `chat.stream`（工具块）+ `render.tool-call`（v1.1 补登） | — | **`capability-only`** | faux `tool-bash.json` / `tool-edit.json` 可驱动；变更集需 cwd 为 git 仓库 → `p1-tool-call-render` |
-| 3 | 权限审批闭环 | `interaction.permission` | — | **`capability-only`** | 两个子系统需分清：pi-permission 工具审批（**`companion-band`** 家族，不是 `permission-dialog`）/ 插件权限审批（`permission-dialog`，仓内无 sandbox 插件夹具 → 不可达）。默认 `mode=yolo` 不弹审批，需先写 `agent/config/permission-ext-config.json` → `p1-permission-approval` |
-| 4 | 消息撤回 | `chat.revoke` `session.history` | — | **`capability-only`** | 双通道（在途 `delivery.cancel` / 已送达 `session.revokeMessage`）+ 六错误码 + 草稿回填 + 树回退（ADR-0076）→ `p1-chat-revoke` |
+| 2 | 工具调用过程展示 | `chat.stream`（工具块）+ `render.tool-call`（v1.1 补登） | `p1-tool-call-render` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（16 断言，2026-10-22）：bash 工具执行（B：history 回灌 faux-bash-ok）、change-set-card 容器出现、write+edit 落盘（C：faux-v2）+ git untracked（A 态数据面）。**缺口登记**：工具块锚点（block-tool-* / tool-block-header）实测未进 DOM（空洞 #1 扩展）、卡内文件行渲染形态待查（现场留档 changeset-card-probe） |
+| 3 | 权限审批闭环 | `interaction.permission` | `p1-permission-approval`（实测未通，fail 存档） | **`capability-only`（UI 闭环当前不可达）** | 剧本已写（strict 配置前置 + CompanionBand 驱动）但 4 次实测未通：①侧栏激活链在该装配形态下 3/4 不可见（未定位）；②strict 配置写入后 companion-band 60s 未现（配置契约待核实）。**插件权限审批**（permission-dialog 家族）无 sandbox 夹具 = 不可达。两未知待产品侧核实后重跑 |
+| 4 | 消息撤回 | `chat.revoke` `session.history` | `p1-chat-revoke` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（15 断言，2026-10-22，已送达支）：revokeMessage → `revoked:true` + content 原文（草稿回填数据）、history 回退（哨兵消失）、UI 气泡移除、二次撤回幂等（revoked:true 重返原文——实测形态，非 D8 错误码路径）、JSONL append-only 形态留档。**未覆盖**：在途通道 delivery.cancel、六错误码逐码 |
 
 ## 三、统计与待补剧本优先级
 
 | 状态 | P0 | P1 | 合计 |
 |---|---|---|---|
 | `scenario`（已实跑，**完整**覆盖该行全部用例组） | 0 | 0 | **0** |
-| `scenario`（已实跑，**部分**覆盖——见各行「未覆盖」） | 4 | 0 | 4 |
-| `capability-only` | 9 | 3 | 12 |
+| `scenario`（已实跑，**部分**覆盖——见各行「未覆盖」） | 9 | 2 | 11 |
+| `capability-only`（含 P1-3 实测未通的 UI 闭环） | 4 | 2 | 6 |
 | `reuse-e2e` | 4 | 1 | 5 |
 | `unreachable` | 0 | 0 | 0 |
 
@@ -69,20 +69,26 @@
 读到同一份 models.json），因此执行域的可验性口径是 **`requires: mock-http | live`**，不再强制真 LLM
 （见 `capabilities/env.md` Gotchas 与 `capabilities/API-CONTRACT.md` §2 的 `requires` 枚举）。
 
-**补剧本优先级**（按「P0 未覆盖 × 成本」排序；✅ = 已实跑交付）：
+**补剧本优先级**（2026-10-22 全量收口；✅ = 已实跑交付）：
 
-| 序 | 剧本 | 覆盖行 | 理由 |
+| 序 | 剧本 | 覆盖行 | 状态 |
 |---|---|---|---|
-| ~~1~~ | ✅ `p0-model-switch`（2026-10-22） | P0-8 模型与 thinking | 已交付：24 断言 pass，A+B+C 三通道 |
-| ~~2~~ | ✅ `p0-subagent-workflow-dispatch`（2026-10-22） | P0-12 执行层 | 已交付：23 断言 pass，两探针合成、双段单实例 |
-| 3 | `p0-chat-stream-ui` | P0-3 对话流式 + P1-2 工具块 | faux 夹具已备，UI 断言补齐 A 通道完整链路（`p0-model-switch` 已验弹层目录可见性，composer 链路待此剧本） |
-| 4 | `p0-session-persistence` | P0-5 持久化 | live≡reload 是 P0 核心不变量 |
-| 5 | `p0-form-overlay` | P0-15 | 夹具已修对，旧故事锚点风险已登记 |
-| 6 | `p0-interrupt-cancel` | P0-9 | 需低 TPS 制造窗口，中等成本 |
-| 7 | `p0-multi-session` | P0-7 | 需按源码重写故事中的三处错锚 |
-| 8 | `p0-settings-provider` / `p0-settings-others` | P0-13 | 六面中五面无剧本 |
-| 9 | `p0-extension-load` / `p0-display-containers` | P0-11 / P0-17 | 需先补可观测锚点（扩展能力 / Esc 栈序） |
-| 10 | `p1-*` 四项 | P1 | 优先级低，可复用 e2e/单测 |
+| 1 | `p0-model-switch` | P0-8 | ✅ 24 断言 pass |
+| 2 | `p0-subagent-workflow-dispatch` | P0-12 执行层 | ✅ 24 断言 pass |
+| 3 | `p0-chat-stream-ui` | P0-3 + P0-10 渲染抽样 | ✅ 22 断言 pass（A 通道首链） |
+| 4 | `p0-session-persistence` | P0-5 | ✅ 17 断言 pass |
+| 5 | `p0-form-overlay` | P0-15 | ✅ 16 断言 pass |
+| 6 | `p0-interrupt-cancel` | P0-9 | ✅ 18 断言（verdict fail = cancel 回执缺陷的诚实判定，效果面已验） |
+| 7 | `p0-multi-session` | P0-7 | ✅ 18 断言 pass |
+| 8 | `p0-settings-provider` | P0-13 provider 面 | ✅ 16 断言 pass |
+| 9 | `p0-extension-load` | P0-11 | ✅ 14 断言 pass |
+| 10 | `p0-display-containers` | P0-17 | ✅ 11 断言 degraded（托盘锚点缺口如实登记） |
+| 11 | `p1-tool-call-render` | P1-2 | ✅ 16 断言 pass |
+| 12 | `p1-chat-revoke` | P1-4 | ✅ 15 断言 pass |
+| 13 | `p1-permission-approval` | P1-3 | ❌ 实测未通（fail 存档：激活链 + strict 配置契约两未知），矩阵保持 capability-only |
+
+**剩余工作**（后续排期，非本技能缺口）：`p0-settings-others`（五面抽样）、`p0-session-isolation-stream`（并发流式隔离）、P0-12 结构层 overlay UI 面、`p1-permission-approval` 待配置契约核实后重跑。
+
 
 ## 三之二、P2 功能对 P0/P1 旅程的阻断关系（A4 核对结果）
 
