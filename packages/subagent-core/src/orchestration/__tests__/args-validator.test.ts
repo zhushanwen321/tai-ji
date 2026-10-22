@@ -41,13 +41,26 @@ function reviewFixLoopParameters(): Record<string, unknown> {
   return meta.parameters;
 }
 
-function makeSpec(parameters: Record<string, unknown> | undefined, args: Record<string, unknown>): RunSpec {
+function fanOutParameters(): Record<string, unknown> {
+  const src = readFileSync(join(WORKFLOWS_DIR, "fan-out.js"), "utf-8");
+  const meta = parseResourceMeta(src, "workflow");
+  if (!meta || meta.kind !== "workflow" || !meta.parameters) {
+    throw new Error("fan-out parameters not parsed");
+  }
+  return meta.parameters;
+}
+
+function makeSpec(
+  parameters: Record<string, unknown> | undefined,
+  args: Record<string, unknown>,
+  scriptName = "test-wf",
+): RunSpec {
   return {
     scriptSource: "",
     args,
     parameters,
-    scriptName: "test-wf",
-    scriptPath: "/x/test-wf.js",
+    scriptName,
+    scriptPath: `/x/${scriptName}.js`,
   };
 }
 
@@ -166,5 +179,59 @@ describe("validateRunArgs — 校验语义", () => {
     expect(() => validateRunArgs(good)).not.toThrow();
     expect(() => validateRunArgs(bad)).toThrow(ArgsValidationError);
     expect(() => validateRunArgs(good)).not.toThrow();
+  });
+});
+
+describe("validateRunArgs — fan-out 旧格式迁移指引（legacyArgsAdvisory）", () => {
+  it("旧格式 tasks 字符串数组 → ajv 拒绝文案后附专属迁移指引（命名旧形状 + 迁移映射 + 重派新 run）", () => {
+    const spec = makeSpec(fanOutParameters(), { tasks: ["t0", "t1"] }, "fan-out");
+    try {
+      validateRunArgs(spec);
+      expect.unreachable("should throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ArgsValidationError);
+      const e = err as ArgsValidationError;
+      expect(e.workflowName).toBe("fan-out");
+      // ajv 诊断保留在前（类型错在哪仍可查），迁移指引附在后
+      expect(e.message).toContain("Invalid args for workflow 'fan-out'");
+      expect(e.message).toContain("must be object");
+      expect(e.message).toContain("Legacy args shape detected");
+      expect(e.message).toContain('"tasks" elements are plain strings');
+      expect(e.message).toContain("predates the member-object parameter format");
+      expect(e.message).toContain("Recovery: re-dispatch a NEW run with member-object tasks");
+      expect(e.message).toContain("Correct:");
+    }
+  });
+
+  it("顶层 agents 残留键 → 同款迁移指引（旧 CLI 混合形态在 ajv 层即被命名）", () => {
+    const spec = makeSpec(fanOutParameters(), { tasks: [{ task: "t0" }], agents: "/a/one.md" }, "fan-out");
+    try {
+      validateRunArgs(spec);
+      expect.unreachable("should throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ArgsValidationError);
+      const e = err as ArgsValidationError;
+      expect(e.message).toContain('top-level "agents" key present');
+      expect(e.message).toContain("predates the member-object parameter format");
+      expect(e.message).toContain("Recovery: re-dispatch a NEW run with member-object tasks");
+    }
+  });
+
+  it("成员对象合法 args → 通过（指引不干扰正常路径）", () => {
+    const spec = makeSpec(fanOutParameters(), { tasks: [{ task: "t0" }, { task: "t1" }] }, "fan-out");
+    expect(() => validateRunArgs(spec)).not.toThrow();
+  });
+
+  it("同形 args 但非 fan-out 工作流 → 仅通用 ajv 文案（登记按模板名收敛，不给第三方 workflow 发明文案）", () => {
+    const spec = makeSpec(fanOutParameters(), { tasks: ["t0", "t1"] }, "other-wf");
+    try {
+      validateRunArgs(spec);
+      expect.unreachable("should throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ArgsValidationError);
+      const e = err as ArgsValidationError;
+      expect(e.message).toContain("Invalid args for workflow 'other-wf'");
+      expect(e.message).not.toContain("Legacy args shape detected");
+    }
   });
 });

@@ -109,6 +109,36 @@ function compileSchema(
   }
 }
 
+// ── 旧格式迁移指引（按包内自带模板名登记，当前仅 fan-out）────────────────
+//
+// fan-out 把成员参数对象化（tasks 元素 = 成员对象 {task, agent?, model?, thinkingLevel?}，
+// 顶层 agents 参数删除）后，按旧格式形状（tasks 字符串数组 / 顶层 agents 键）新派的
+// args 会被 ajv 拒，但 ajv 文案只有 schema 语义（"must be object" /
+// "must NOT have additional properties"），模型无从识别「这是旧格式形状而非随手写错」
+// ——补专属迁移文案，与 fan-out.js 内 scriptPath 旧格式文案同构：命名旧形状、给迁移
+// 映射（agents 逗号串 → 逐成员 agent）与恢复动作（按旧 tasks 内容重派成员对象新 run）。
+// 登记收敛在包内自带模板名上，不发明第三方 workflow 的文案；本表只附加迁移指引，
+// 不改变拒绝判定（schema 仍是类型校验唯一权威——命中与否都以 ajv 已拒绝为前提）。
+function legacyArgsAdvisory(scriptName: string, args: Record<string, unknown>): string | undefined {
+  if (scriptName !== "fan-out") return undefined;
+  const tasks: unknown = args.tasks;
+  const stringTasks = Array.isArray(tasks) && tasks.some((t) => typeof t === "string");
+  const agentsKey = args.agents !== undefined;
+  if (!stringTasks && !agentsKey) return undefined;
+  const shapes = [
+    ...(stringTasks ? ['"tasks" elements are plain strings'] : []),
+    ...(agentsKey ? ['top-level "agents" key present'] : []),
+  ].join(" and ");
+  return (
+    `Legacy args shape detected (${shapes}) — this shape predates the member-object parameter ` +
+    "format of this workflow. " +
+    "Migration: one member object per task (task required; agent/model/thinkingLevel optional " +
+    'per-member overrides; a legacy agents="/a.md,/b.md" maps to agent on each member in the same order). ' +
+    "Recovery: re-dispatch a NEW run with member-object tasks. " +
+    'Correct: {"tasks":[{"task":"task one","agent":"/a/one.md"},{"task":"task two"}]}'
+  );
+}
+
 /**
  * 校验 spec.parameters（JSON Schema draft-07）对 spec.args 的约束。
  *
@@ -135,9 +165,11 @@ export function validateRunArgs(spec: RunSpec): void {
   const validate = compileSchema(parameters, scriptName);
 
   if (!validate(args)) {
+    const base = formatMessage(scriptName, validate.errors ?? []);
+    const legacy = legacyArgsAdvisory(scriptName, args);
     throw new ArgsValidationError(
       scriptName,
-      formatMessage(scriptName, validate.errors ?? []),
+      legacy !== undefined ? `${base}\n${legacy}` : base,
       validate.errors ?? undefined,
     );
   }
