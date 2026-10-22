@@ -839,10 +839,33 @@ export default [
   // 保留软上限告警」先例抬到 920。
   // 沿用既有「sanitize* 校验组拆分是长期方向，短期 override 与 chat.ts 等聚合中心同模式」表述——
   // 长期仍应拆分（防线载体可拆独立模块）。
+  // [gate static-gate 2026-10] provider 用量回写段入列后净代码行 938 > 920，微超即提额先例
+  // （session-service 634→650 同型）抬到 950。提额而非 off：保留软上限告警，超限即再暴露，勿再增行。
   {
     files: ['packages/runtime/src/services/provider-config-helper.ts'],
     rules: {
-      'max-lines': ['warn', { max: 920, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 950, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // declarative-engine：quota fetcher 声明式执行引擎（5 家平台 fetcher 的受限原语解释器），
+  // 各平台 shape guard / 字段归口规则内聚于单一引擎体，按平台拆分引入引擎边界收益不抵成本。
+  // [gate static-gate 2026-10] 净代码行 519 > 500（base 上限），微超即提额先例
+  // （session-service 634→650 同型）抬到 540。提额而非 off：保留软上限告警，超限即再暴露，勿再增行。
+  {
+    files: ['packages/runtime/src/services/quota-providers/declarative-engine.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 540, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // session-manager-handler：agent-managed session 请求 handler（9 action 编排 + notify-once
+  // 债权状态机受理侧）；迁移 services/session/ 是文件头登记的既定方向，拆分属独立重构任务。
+  // [gate static-gate 2026-10] 死亡收敛 settleClaimsOnDeath 共享助手入列后净代码行 533 > 500
+  // （base 上限），微超即提额先例（session-service 634→650 同型）抬到 555。提额而非 off：
+  // 保留软上限告警，超限即再暴露，勿再增行（迁移落地前本文件不得继续扩行）。
+  {
+    files: ['packages/runtime/src/transport/session-manager-handler.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 555, skipBlankLines: true, skipComments: true }],
     },
   },
   // runtime 组合根 main()：装配顺序带文档化时序耦合（函数内注释逐段说明构造先后

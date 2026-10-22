@@ -1,7 +1,7 @@
 <template>
   <!-- Settings · 网络代理菜单页（llm-network-proxy U4）：单页纵排三卡（§3.3 决策 6 变体一）。
        保存语义 = 单页单保存（§3.1）：三卡编辑进页面级内存草稿，代理服务器卡「保存」一次
-       全量 setNetworkProxyConfig 整页草稿；开关关闭时规则卡降灰禁交互（统计卡观测与开关正交）。 -->
+       全量 setNetworkProxyConfig 整页草稿（代理总开关的门控范围见下方按服务商卡注释）。 -->
   <div data-testid="network-page" class="flex flex-col">
     <header class="page-head">
       <div class="head-text">
@@ -14,13 +14,12 @@
          不用 v-model:draft（reactive 对象整体重赋值无生产路径，仅余编译器 let 降级警告） -->
     <NetworkServerCard :draft="draft" :saving="saving" @save="onSave" />
 
-    <!-- 开关关闭仅降灰规则卡（demo data-disabled 形态：opacity + pointer-events 收敛，
-         关键控件再绑 disabled 键盘路径同闭——禁用态编辑规则无意义）；统计卡读侧观测与
-         enabled 正交（§3.1 卡 3 / 设计目标 3），不随开关降灰。间距 16px 与 GroupCard 兄弟规则等值 -->
+    <!-- 按服务商卡（rules + ipv4Only 两清单逐行开关）+ 统计卡。代理总开关只门控「走代理」
+         列（卡内开关自身 disabled 承担），卡体不整卡降灰——「强制 IPv4」列必须保持可用
+         （ipv4Only 与 enabled 正交，shared 契约语义）；统计卡读侧观测同样与开关正交。
+         间距 16px 与 GroupCard 兄弟规则等值 -->
     <div class="mt-[var(--space-4)] flex flex-col gap-[var(--space-4)]" data-testid="network-lower-cards">
-      <div :class="{ 'pointer-events-none opacity-50': !draft.enabled }" data-testid="network-rules-dim">
-        <NetworkRulesCard :rules="draft.rules" :enabled="draft.enabled" :providers="providers" />
-      </div>
+      <NetworkProviderCard v-model:rules="draft.rules" v-model:ipv4-only="draft.ipv4Only" :enabled="draft.enabled" :providers="providers" />
       <NetworkStatsCard :providers="providers" />
     </div>
   </div>
@@ -29,7 +28,7 @@
 <script setup lang="ts">
 /**
  * 网络代理页编排（数据层 = SettingsTransport seam，[C3]）：
- * - 加载：onMounted 拉 getNetworkProxyConfig 回填草稿 + listProviders 取 chips/反查数据源
+ * - 加载：onMounted 拉 getNetworkProxyConfig 回填草稿 + listProviders 取服务商行与统计反查数据源
  *   （SystemLlmRetrySection best-effort 先例：加载失败保默认值，console.warn 不打扰）。
  * - 订阅：onNetworkProxyConfig 广播多窗口同步；草稿脏（与最近加载基准不等）时跳过覆盖
  *   ——单页草稿下不丢用户输入；自保存回声与基准同值，幂等。
@@ -40,7 +39,7 @@
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import NetworkServerCard from './NetworkServerCard.vue'
-import NetworkRulesCard from './NetworkRulesCard.vue'
+import NetworkProviderCard from './NetworkProviderCard.vue'
 import NetworkStatsCard from './NetworkStatsCard.vue'
 import { getSettingsTransport } from '@taiji/core'
 import { createExplicitSave } from '@/composables/features/settings/setting-field'
@@ -65,8 +64,13 @@ const providers = ref<ProviderInfo[]>([])
 let loadedConfig: NetworkProxyConfig | null = null
 
 function applyLoaded(config: NetworkProxyConfig): void {
-  loadedConfig = config
-  Object.assign(draft, draftFromConfig(config))
+  // 基准归一化：旧配置文件无 ipv4Only 字段（schema 演进前的落盘形态），不补缺省会让
+  // isDirty 的 JSON 比较（build 输出恒含 ipv4Only 键）把「配置 schema 缺省」误判成
+  // 「用户编辑」——旧配置用户此后永远收不到广播刷新。
+  // 归一化一次、基准与草稿共用同一产物（草稿侧 draftFromConfig 也接归一化后的 config）。
+  const normalized: NetworkProxyConfig = { ...config, ipv4Only: config.ipv4Only ?? [] }
+  loadedConfig = normalized
+  Object.assign(draft, draftFromConfig(normalized))
 }
 
 /** 草稿是否脏（组装归一后与基准比较——输入形态差异已被 buildConfigFromDraft 消除）。 */
@@ -94,7 +98,7 @@ onMounted(async () => {
     const res = await transport.listProviders()
     providers.value = res.providers
   } catch (e) {
-    // chips 与统计反查降级：无 provider 数据 = chip 组无项、统计行显裸主机名，页面仍可用
+    // 服务商行与统计反查降级：无 provider 数据 = 服务商行无项、统计行显裸主机名，页面仍可用
     console.warn('[NetworkPage] failed to load providers:', e)
   }
 })

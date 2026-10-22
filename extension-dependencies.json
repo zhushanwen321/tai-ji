@@ -96,6 +96,11 @@
           "package": "@zhushanwen/pi-session-path",
           "type": "package",
           "reason": "代码层静态 import filterActivePath（src/session.ts top-level import，活跃路径裁剪单一实现——todo/plan/goal/scheduler 四包同构副本收编于该共享库），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/state-machine",
+          "type": "package",
+          "reason": "代码层静态 import defineStateMachine（src/engine/goal.ts top-level import——goal 状态机行式声明与 transitionStatus 保形包装的判定内核），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -518,7 +523,12 @@
         {
           "package": "@zhushanwen/pi-extension-logger",
           "type": "package",
-          "reason": "代码层静态 import getLogger/setPiHandle（src/index.ts top-level import——轮询日志走共享 logger 双通道：error 落 pi.appendEntry 持久化 + TAIJI_AGENT_DEBUG/TAIJI_AGENT_EXT_LOG 文件日志，不依赖 pi 不捕获的 extension stderr），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import getLogger/setPiHandle（src/index.ts top-level import——轮询日志走共享 logger 双通道：error 落 pi.appendEntry 持久化 + TAIJI_AGENT_DEBUG/TAIJI_AGENT_EXT_LOG 文件日志，不依赖 pi 不捕获的 extension stderr），缺失时模块加载抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-llm-shared",
+          "type": "package",
+          "reason": "代码层静态 import computeInjectionSet/getPiStorePath/getTaijiOverlayCachePath/mergeEntriesNewerWins/parseOverlayCache（src/catalog-bridge.ts top-level import——两份缓存解析/新者胜合并/三态判定/并集计算），缺失即模块加载抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -605,44 +615,6 @@
           "reason": "代码层静态 import withFileLockSync（src/stats.ts flushStats 与 runtime 截断/重置同一把跨进程锁，top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
-    },
-    {
-      "name": "@zhushanwen/pi-wool-qoder",
-      "directory": "extensions/universal/pi-wool-qoder",
-      "dependsOn": [
-        {
-          "package": "@zhushanwen/pi-wool-shared",
-          "type": "package",
-          "reason": "代码层静态 import defineWoolExtension/woolLoggedOutStatus（src/index.ts top-level import，扩展脚手架组装与账号状态词表同源），缺失时模块加载即抛 Cannot find module，是强依赖"
-        }
-      ]
-    },
-    {
-      "name": "@zhushanwen/pi-wool-trae",
-      "directory": "extensions/universal/pi-wool-trae",
-      "dependsOn": [
-        {
-          "package": "@zhushanwen/pi-wool-shared",
-          "type": "package",
-          "reason": "代码层静态 import defineWoolExtension（src/index.ts top-level import，pi 契约接线脚手架与 wool 类型词表同源），缺失时模块加载即抛 Cannot find module，是强依赖"
-        }
-      ]
-    },
-    {
-      "name": "@zhushanwen/pi-wool-workbuddy",
-      "directory": "extensions/universal/pi-wool-workbuddy",
-      "dependsOn": [
-        {
-          "package": "@zhushanwen/pi-wool-shared",
-          "type": "package",
-          "reason": "代码层静态 import defineWoolExtension/readSnapshotFile（src/index.ts top-level import，pi 契约接线脚手架与模型目录快照读取同源），缺失时模块加载即抛 Cannot find module，是强依赖"
-        }
-      ]
-    },
-    {
-      "name": "@zhushanwen/pi-wool-shared",
-      "directory": "extensions/shared/wool-shared",
-      "dependsOn": []
     }
   ]
 }

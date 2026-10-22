@@ -355,6 +355,20 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
       return { wrapper, entry: entry! }
     }
 
+    /**
+     * 失败态 popover 用例共同开场：seed 旧数据 + 置 network error（store 失败态 =
+     * 旧 data + error）→ 开 popover → flush。D11 凭证缺失形态不走此助手（error 文案不同）。
+     */
+    async function openFailedPopover(): Promise<ReturnType<typeof mount>> {
+      setupProviders([zhipuProvider])
+      const quotaStore = useQuotaStore()
+      quotaStore.setCache('zhipu', mockQuotaRow, 500)
+      quotaStore.setError('zhipu', 'panel.context.quotaFailNetwork')
+      const wrapper = await openPopover()
+      await flushPromises()
+      return wrapper
+    }
+
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     })
@@ -425,18 +439,24 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
     })
 
     it('失败态 popover 渲染「查询失败：{error}」（queryFailed DOM 断言，全库首例）', async () => {
-      setupProviders([zhipuProvider])
-      const quotaStore = useQuotaStore()
-      quotaStore.setCache('zhipu', mockQuotaRow, 500)
-      // 模拟上一次查询失败（store 失败态：旧 data + error）
-      quotaStore.setError('zhipu', 'panel.context.quotaFailNetwork')
-
-      const wrapper = await openPopover()
-      await flushPromises()
+      const wrapper = await openFailedPopover()
 
       // coding-plan 区失败提示渲染（v-if="error" 分支）：「查询失败：{error}」，
       // error 经 '@/i18n' mock 返回 key 本身（vitest-i18n-setup 插值 {error}）
       const bodyText = document.body.textContent ?? ''
+      expect(bodyText).toContain('查询失败：panel.context.quotaFailNetwork')
+      wrapper.unmount()
+    })
+
+    it('失败态兜底：有旧数据时余量三窗口行与失败提示并存（不再整体替换为失败文案）', async () => {
+      // 兜底语义：查询失败时最后成功余量（store 的 setError 恒保留旧 data）继续展示，
+      // 失败原因降级为一行提示——旧实现 v-if="error" 独占，一次失败即把余量行整个换掉
+      const wrapper = await openFailedPopover()
+
+      const bodyText = document.body.textContent ?? ''
+      // 余量行仍在：68% 来自 mockQuotaRow.wins[0].pct
+      expect(bodyText).toContain('68%')
+      // 失败提示并存（非二选一替换）
       expect(bodyText).toContain('查询失败：panel.context.quotaFailNetwork')
       wrapper.unmount()
     })
@@ -539,6 +559,50 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
 
       expect(findBodyButton('配置')).toBeTruthy()
       expect(findBodyButton('刷新')).toBeUndefined()
+      wrapper.unmount()
+    })
+  })
+
+  describe('额度百分比展示口径（2 位小数）', () => {
+    /** 卡内三窗口行走的是同一模版直渲染（不经 HoverCard portal，直接 mount 本卡即可断言文本） */
+    function mountCardWithRow(row: NormalizedQuotaRow): ReturnType<typeof mount> {
+      setupProviders([zhipuProvider])
+      useQuotaStore().setCache('zhipu', row, 1000)
+      return mount(ContextCapacityCard, { props: { sessionId: 's1', modelId: 'zhipu/glm-4' } })
+    }
+
+    it('[HISTORICAL] 浮点尾数不泄漏：2.9499999999999997 → 2.95%（截图事故原值）', async () => {
+      // 事故形态：OpenDesign 的 pct = usedCredits/limitCredits*100 是连续量，原模板
+      // `{{ win.pct }}%` 直接插值，满屏 `2.9499999999999997%` 撑爆 32px 数字列并溢出行宽。
+      const wrapper = mountCardWithRow({
+        label: 'OpenDesign Coding Plan',
+        wins: [
+          { pct: 0.148, resetSec: 10680 },
+          { pct: 2.9499999999999997, resetSec: 10680 },
+          { pct: null, resetSec: null },
+        ],
+      })
+      await flushPromises()
+
+      const text = wrapper.text()
+      expect(text).toContain('0.15%')
+      expect(text).toContain('2.95%')
+      // 用户可见文本里不得出现未格式化尾数
+      expect(text).not.toContain('2.949999')
+      wrapper.unmount()
+    })
+
+    it('整数 pct 不补尾零，与设置页同一函数（formatQuotaPct）', async () => {
+      const wrapper = mountCardWithRow({
+        label: '智谱 GLM Coding Plan',
+        wins: [{ pct: 68, resetSec: 4980 }, { pct: 100, resetSec: 266400 }, { pct: null, resetSec: null }],
+      })
+      await flushPromises()
+
+      const text = wrapper.text()
+      expect(text).toContain('68%')
+      expect(text).toContain('100%')
+      expect(text).not.toContain('68.00%')
       wrapper.unmount()
     })
   })

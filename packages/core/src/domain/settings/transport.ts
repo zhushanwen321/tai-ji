@@ -27,6 +27,7 @@
  *   平铺接口出现 install/list/create 之类无归属裸名。
  */
 import type {
+  QuotaPreset,
   ProviderInfo,
   ModelInfo,
   SkillInfo,
@@ -87,6 +88,8 @@ export interface DiscoverModelsRequest {
    * 'test' 只需 providerId（代表模型选择归 runtime，前端零推导，对齐 view-ready 原则）。
    */
   mode?: 'test' | 'discover'
+  /** test 模式的单模型测试目标（2026-10-21 per-model 行内入口）；省略 = provider 级分组测试。 */
+  modelId?: string
 }
 
 /** discoverModels 的响应载荷（config.discoveredModels reply 形状）。 */
@@ -150,6 +153,10 @@ export interface SettingsTransport {
   detectSources(): Promise<SourceDetectResult[]>
   /** 进入 Settings Provider 页触发远程模型目录刷新（fail-safe；failed 非空 → 目录可能过期） */
   refreshProviderCatalogs(): Promise<ProviderCatalogsRefreshResult>
+  /** 页签可见期间 models-store.json 变化感知开关（离开页签 disable，变化经 onProviders 推回） */
+  setProviderCatalogWatch(enable: boolean): Promise<void>
+  /** quota presets 合并视图拉取（基线 ⊕ 远程；连接建立即拉缓存，聊天面板 hover 依赖） */
+  listQuotaPresets(): Promise<QuotaPreset[]>
   /** 按 sources 扫描 skill（加入 discovery） */
   scanSkills(sources: string[]): Promise<ScannedSkillInfo[]>
   /** 按 sources 扫描 agent */

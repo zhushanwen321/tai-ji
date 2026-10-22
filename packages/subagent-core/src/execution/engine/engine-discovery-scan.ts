@@ -220,6 +220,22 @@ export function engineConversationCapable(engineId: string | undefined): boolean
   return (caps ?? CONSERVATIVE_CAPABILITIES).conversation !== "unsupported";
 }
 
+/**
+ * 引擎模型翻译表读侧（[engine-ref-translation D5] 声明表的宿主投影辅助，与
+ * engineConversationCapable 同族的 descriptor 派生位）：manifest `modelTranslation`
+ * 声明（pi 词汇 provider 段 → 本引擎原生 provider 段）原样透出，供宿主侧做反向
+ * 显示翻译（引擎原生 ref → pi 词汇——record 盖章值是翻译后 ref，展示链全程 pi
+ * 词汇，消费方 = runtime run 详情增强的注入侧）。
+ *
+ * 判定：descriptor.cli 的 manifest 快照表原样返回（引用透传，表不可变约定与
+ * 快照同源）；inproc descriptor（无 manifest 面）/ 未发现引擎 → undefined =
+ * 无翻译面（消费方按恒等透传处理，与派发期 translateModelRef 缺席语义对齐）。
+ */
+export function engineModelTranslationTable(engineId: string | undefined): Record<string, string> | undefined {
+  const descriptor = getEngineDescriptor(normalizeEngineId(engineId));
+  return descriptor?.kind === "cli" ? descriptor.manifest?.modelTranslation : undefined;
+}
+
 /** L3 显式命令解析：含路径分隔符 → 按路径验证；裸命令名 → PATH 查找。失败 = 不可用。 */
 function resolveExplicitCommand(command: string, env: NodeJS.ProcessEnv): string | undefined {
   if (command.includes("/") || command.includes("\\")) {

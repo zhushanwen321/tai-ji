@@ -69,6 +69,14 @@ export interface ProviderExtras {
    * （避免「键已剥、标记待清」窗口展示 stale 标注）。
    */
   gatewayBaseUrl?: string
+  /**
+   * taiji 远程清单来源标记（remote-config 域 1）：值 = configs/remote/builtin-providers.json
+   * 的清单条目 id。QuickSetup 从 taiji 清单模板创建时随 SetProviderData.remoteSource 写入。
+   * 该标记是「参与远程模型热更新」的唯一判据（remote-provider-sync 按它圈定同步对象）：
+   * 有标记 = taiji 内置来源；无标记 = 用户手动 custom（不参与任何自动更新）。
+   * 删除 provider 时随 extras 条目一并清除（既有删除链）。
+   */
+  remoteSource?: string
 }
 
 const EMPTY_FILE: ProviderExtrasFile = { version: 1, providers: {} }

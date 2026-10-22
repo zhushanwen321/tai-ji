@@ -510,15 +510,24 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       // mock 覆盖（U1「端口缺席 = 载荷不造键」语义不受影响）。
       modelOverrideQuery: createModelOverrideQuery({}),
     }, new SkillInjector(this.skillSource))
-    // pi 崩溃自动恢复编排组装（u8，D7）：restore 复用既有惰性恢复内核（facade.restoreSession
-    // → lifecycle.restoreSession，附着自动走 u4c 预算化 restore 路径——⑤档超阈值走逆序分块
-    // 最小规范化（流式 strip + 首行 cwd fallback，见 restore-seeding.normalizeLargeSessionFileMinimal）。
+    // pi 崩溃自动恢复编排组装（u8，D7）：restore = 恢复执行内核（唯一执行点，join 注册表内
+    // 运行）——lifecycle.restoreSession 全流程（附着自动走 u4c 预算化 restore 路径——⑤档超
+    // 阈值走逆序分块最小规范化（流式 strip + 首行 cwd fallback，
+    // 见 restore-seeding.normalizeLargeSessionFileMinimal））+ 恢复成功出口（onRestoreSuccess
+    // 随内核执行恰一次，join 方不重复发布）。全部恢复入口（惰性 ensureActive / 手动
+    // session.restore RPC / startup-reattach）经 facade.restoreSession（ensureRestored join
+    // 包装）收敛到本内核 [switch-race-window 修复]：原 reattach 与手动 RPC 直连 facade 绕过
+    // 注册表，恢复窗口内并发的 ensureActive 快路径拿到半成品 client 误报切换失败。
     this.respawn = new RespawnOrchestrator({
       // isActive 检查走可选调用：挂点在崩溃收敛链（onSessionExit）内，任何异常都会打断
       // exitCallbacks 多播——检查是 best-effort 优化（attemptRespawn 触发时还有复查 +
       // restore 失败链兜底），port 缺失时按「不活跃」继续，不让检查本身成为新故障源。
       isActive: (sessionId) => this.pm.hasClient?.(sessionId) ?? false,
-      restore: (sessionId) => this.restoreSession(sessionId),
+      restore: async (sessionId) => {
+        const summary = await this.lifecycle.restoreSession(sessionId)
+        this.onRestoreSuccess(sessionId)
+        return summary
+      },
       publish: (sessionId, msg) => this.messageBus?.publish(sessionId, msg),
     })
 
@@ -929,14 +938,23 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     return this.dispatcher.sendSystemCommand(sessionId, commandLine, requireCommand)
   }
   async renameSession(sessionId: string, newName: string): Promise<void> { return this.lifecycle.renameSession(sessionId, newName) }
+  /**
+   * 恢复入口（join 内建）：全部恢复调用方（惰性 ensureActive / 手动 session.restore RPC /
+   * startup-reattach）经本 facade 收敛进 in-flight 注册表——恢复全程单次执行
+   * （P-respawn-join），并发第二调用方 join（等待同一 Promise），不报错不双跑。
+   *
+   * [switch-race-window 修复] 原 facade 直连 lifecycle.restoreSession，reattach 与手动 RPC
+   * 绕过注册表：恢复窗口内（spawn 已登记 client、registerSession 未落 sessions Map，典型
+   * ~700ms）并发的 ensureActive 快路径拿到半成品 client、getSummary 落空，session.switch
+   * 误报「切换失败但实际能进」；窗口内手动 restore 还会清场杀掉在途 pi 重开。收进注册表后
+   * ensureActive 对任意来源的在途恢复 join。
+   */
   async restoreSession(sessionId: string): Promise<SessionSummary> {
-    const summary = await this.lifecycle.restoreSession(sessionId)
-    // [D3 msg-pipeline-debloat] 恢复成功出口（单一发布事实源）：判别 → 发布
-    // session.restored → 核销崩溃登记。本 facade 是恢复入口的真实汇合点（惰性
-    // ensureActive / 手动 RPC / startup-reattach 的 restore 内核都是它），发布锚钉在此。
-    // 普通懒 spawn / startup-reattach 无崩溃登记静默恢复不发布（判别见
-    // pi-respawn.onRestoreSuccess）。
-    this.onRestoreSuccess(sessionId)
+    await this.respawn.ensureRestored(sessionId)
+    const summary = this.getSummary(sessionId)
+    if (!summary) {
+      throw new Error(`Session ${sessionId} restored but summary unavailable`)
+    }
     return summary
   }
 
@@ -1085,7 +1103,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
-   * 确保会话活跃;不存在则自动 restore。
+   * 确保会话活跃;不存在则自动 restore。返回时该会话必已完整注册（sessions Map 条目在）——
+   * 快路径只在「client 存活 + Map 条目在」时直返；恢复窗口内（spawn 已登记 client、
+   * registerSession 未落 Map）条目缺失一律经 ensureRestored join 等注册完成，不直返半成品
+   * client（半成品会让调用方随后的 getSummary 等派生读点全部落空）。
    *
    * 并发语义（crash-resilience D7-③，u8 join 改造）：[HISTORICAL] 原对并发调用直接
    * throw「already being restored」——自动恢复落地后恢复窗口内用户发消息是常态路径
@@ -1105,10 +1126,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     }
     const existing = this.pm.getClient(sessionId)
     // 纵深防御（pi-exit-notification-and-respawn §6.6）：上游清理（onSessionExit）出现竞态时
-    // processes Map 可能残留已死 client——视同无 client 走下方 restoreSession（其内部对
-    // existing sessions 条目已有 detach + safeDestroy + removeSessionEntry 清场），
+    // processes Map 可能残留已死 client——视同无 client 走下方 ensureRestored（restore 内核
+    // 对 existing sessions 条目已有 detach + safeDestroy + removeSessionEntry 清场），
     // 不把死 client 交给 prompt。
-    if (existing && !existing.exited) return existing
+    //
+    // 快路径前提 = 完整注册态（client 存活 + sessions Map 条目在）[switch-race-window 修复]：
+    // 只看进程存活会在恢复窗口内直返半成品 client——「切换失败但实际能进」竞态的根因。
+    // 条目缺失 → 下方 ensureRestored join 在途恢复（restoreSession 全入口已收进注册表）；
+    // 无在途（异常残留半成品）→ 全量恢复自愈（restore 内核清场重开）。
+    if (existing && !existing.exited && this.lifecycle.get(sessionId)) return existing
     await this.respawn.ensureRestored(sessionId)
     const client = this.pm.getClient(sessionId)
     if (!client) throw new Error('Restore succeeded but client not available')

@@ -3,8 +3,8 @@
  *
  * 归一语义 = basename 化（含反斜杠路径）+ 去脚本扩展名（.js/.mjs/.cjs/.ts），
  * 路径 / 带扩展名 / bare 三形态互通（L4 真机发现：主 agent 常传脚本路径而
- * record.scriptName 存 basename）。本函数是 overlay findRun 与 drawer WorkflowTab
- * 两入口判据的共同实现——入口级行为（runId 优先 / 取最新）归各自入口测试。
+ * record.scriptName 存 basename）。本函数是 overlay findRun 的 run 定位判据实现——
+ * 入口级行为（runId 优先 / 取最新）归 overlay 控制器测试。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/workflow-viz/__tests__/run-name.test.ts
  */

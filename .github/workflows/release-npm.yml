@@ -58,11 +58,24 @@ jobs:
           fi
           echo "No .changeset/pre.json — stable release mode confirmed."
 
+      # state-machine 新包构建入口（C-proc-11 三要素补齐）：extension-protocol 的
+      # runtime dependency（发布闭包最上游），First release changeset 已登记——
+      # publish 前磁盘无 dist 会发出坏包（files 幽灵条目，surface guard 连坐拦截）。
+      # 构建顺序必须在 extension-protocol 之前。
+      - name: Build state-machine
+        run: pnpm --filter @zhushanwen/state-machine build
+
       - name: Build extension-protocol
         run: pnpm --filter @zhushanwen/extension-protocol build
 
       - name: Build session-delivery
         run: pnpm --filter @zhushanwen/session-delivery build
+
+      # state-machine 是 extension-protocol / subagent-core 的 runtime dependency
+      # （发布闭包最上游），构建顺序必须在前——surface guard 的 files↔dist 双向
+      # 检查要求 tarball 打包前 dist 已存在（与 ci.yml Build dist packages 段同款）。
+      - name: Build state-machine
+        run: pnpm --filter @zhushanwen/state-machine build
 
       # session 读取共享基座两包（session-reader-shared-core 实施，impl-plan U5）：
       # session-core 是 zcode-session-source 的 workspace 依赖（converter 消费 Entry 类型），
@@ -137,6 +150,7 @@ jobs:
           echo "Published all packages with pending changesets to npm." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "This includes:" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`@zhushanwen/state-machine\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`@zhushanwen/extension-protocol\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`@zhushanwen/session-delivery\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`@zhushanwen/session-core\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"

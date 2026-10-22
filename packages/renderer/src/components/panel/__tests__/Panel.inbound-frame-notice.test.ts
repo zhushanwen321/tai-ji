@@ -6,7 +6,9 @@
  * 走真实链路的可见性闭环：installInboundFrameGuard（App 装配层等价动作）→ core 丢帧回调
  * → 终止阀派生视图 → 真实 Panel 会话视图 → 提示条可见；切走切回 → 重试订阅恰好一次 + 提示消失。
  *
- * Mock 策略（Panel 挂载测试最小完备集，同 Panel.dead-diagnostics-export.test.ts）：
+ * Mock 策略（Panel 挂载测试最小完备集）：
+ * - 壳依赖六连（sidebar/toast/extensionUI/new-task-flow/chat/session）由
+ *   helpers/panel-mount-mocks 导入即注册（chat/session 状态经单例引用注入）；
  * - mock core：捕获 onInboundFrameDropped 回调（用真实 useInboundFrameGuard 消费它）+
  *   retryInboundDroppedSession/subscribeSession 调用断言；
  * - mock '@/lib/ipc'（reportRendererLog）——上报侧非本用例关注点（unit 文件已覆盖）；
@@ -18,13 +20,17 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { ref, nextTick } from 'vue'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { InboundFrameDroppedInfo } from '@taiji/core'
-// Panel 挂载壳 mock 三连（useSidebar/useToast/useExtensionUI）由 panel-mount-mocks 导入即
-// 注册——置于 Panel import 之前，注册早于其导入链加载（useToast 工厂绑定 TDZ 坑，
-// 见 helpers/i18n-toast-mock.ts；本文件不断言 toast，仅隔离副作用）
-import { MessageStreamStub } from '@/__tests__/helpers/panel-mount-mocks'
+// Panel 挂载壳 mock 六连（useSidebar/useToast/useExtensionUI/useNewTaskFlow/chat/session）
+// 由 panel-mount-mocks 导入即注册——置于 Panel import 之前，注册早于其导入链加载
+// （本文件不断言 toast，仅隔离副作用；chat/session 状态经 panelChatMock/panelSessionMock 注入）
+import {
+  MessageStreamStub,
+  panelChatMock,
+  panelSessionMock,
+} from '@/__tests__/helpers/panel-mount-mocks'
 import { ROOT_PANEL_ID, usePanelStore } from '@/stores/panel'
 import Panel from '../Panel.vue'
 import {
@@ -52,27 +58,6 @@ vi.mock('@taiji/core', async (importOriginal) => ({
 vi.mock('@/lib/ipc', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ipc')>()),
   reportRendererLog: reportMock,
-}))
-
-/** chat store mock：Panel 只消费 readers 面（含 isRespawnPending 过渡条） */
-const chatMock = vi.hoisted(() => ({
-  getMessages: vi.fn(() => [] as unknown[]),
-  isActive: vi.fn(() => false),
-  isCompacting: vi.fn(() => false),
-  isRespawnPending: vi.fn(() => false),
-  // occupancy 派生视图读口（缺省全 idle，对齐 store.getOccupancy 无记录缺省）
-  getOccupancy: vi.fn(() => ({ turn: 'idle', compacting: false, bash: false })),
-  failedHistory: new Map<string, boolean>(),
-}))
-vi.mock('@/stores/chat', () => ({ useChatStore: () => chatMock }))
-
-const sessionMock = vi.hoisted(() => ({
-  list: [] as Array<{ id: string; status: string }>,
-}))
-vi.mock('@/stores/session', () => ({ useSessionStore: () => sessionMock }))
-
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ state: ref('idle'), isActive: ref(false) }),
 }))
 
 function mountPanel(sessionId: string) {
@@ -115,9 +100,9 @@ beforeEach(() => {
       if (dropCallback === cb) dropCallback = null
     }
   })
-  chatMock.getMessages.mockReturnValue([])
-  chatMock.failedHistory.clear()
-  sessionMock.list = []
+  panelChatMock.getMessages.mockReturnValue([])
+  panelChatMock.failedHistory.clear()
+  panelSessionMock.list = []
   setActivePinia(createPinia())
   panel = usePanelStore()
 })

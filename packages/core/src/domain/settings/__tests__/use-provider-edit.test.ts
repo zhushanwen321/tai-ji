@@ -52,15 +52,16 @@ function mount(providerRef: Ref<ProviderInfo | null>): ProviderEditSession {
 }
 
 describe('3 组子 interface 装配（form / discover / models）', () => {
-  it('按组可消费：form 组（草稿+dirty+save）、discover 组（test/discover）、models 组（清单 CRUD）', () => {
+  it('按组可消费：form 组（草稿+dirty+save）、discover 组（per-model 测试 + discover）、models 组（清单 CRUD）', () => {
     const edit = mount(ref<ProviderInfo | null>(null))
     // form 组
     expect(edit.form.draft.name).toBe('')
     expect(edit.form.isDirty.value).toBe(false)
     expect(typeof edit.form.save).toBe('function')
-    // discover 组
-    expect(edit.discover.testResult.value).toBeNull()
-    expect(typeof edit.discover.testConnection).toBe('function')
+    // discover 组（2026-10-21：provider 级「测试连接」入口退役，testModel 行内入口接位）
+    expect(edit.discover.modelTestResults.value).toEqual({})
+    expect(edit.discover.testingModelIds.value).toEqual([])
+    expect(typeof edit.discover.testModel).toBe('function')
     expect(typeof edit.discover.autoDiscover).toBe('function')
     // models 组
     expect(edit.models.localModels.value).toEqual([])
@@ -91,14 +92,14 @@ describe('provider 变化重置编辑态（facade 重置序）', () => {
     await nextTick()
     // 制造瞬态态（下次切换须复位）
     edit.form.draft.name = 'P2'
-    edit.discover.testResult.value = 'ok'
+    edit.discover.modelTestResults.value = { m1: { api: 'anthropic-messages', modelId: 'm1', ok: true } }
     edit.models.showAddModel.value = true
     providerRef.value = null
     await nextTick()
     expect(edit.form.draft.name).toBe('')
     expect(edit.form.draft.api).toBe('anthropic-messages')
     expect(edit.models.localModels.value).toHaveLength(0)
-    expect(edit.discover.testResult.value).toBeNull()
+    expect(edit.discover.modelTestResults.value).toEqual({})
     expect(edit.models.showAddModel.value).toBe(false)
     expect(edit.form.isDirty.value).toBe(false)
   })
@@ -229,9 +230,9 @@ describe('discover 错误通道接线（facade 注入回调 → form.actionError
     // 错误经 facade 的 reportActionError 回调落 form module（带 source 标签，呈现 message）
     expect(edit.form.actionError.value).toBe('conn refused')
 
-    // 成功探活：runDiscover 开头 clearActionError → 错误派生视图清除
+    // 成功探活：动作发起开头 clearActionError → 错误派生视图清除（testModel 与 autoDiscover 共用该置况序）
     provideSettingsTransport(makeFakeTransport())
-    await edit.discover.testConnection()
+    await edit.discover.testModel('m1')
     expect(edit.form.actionError.value).toBe('')
   })
 })

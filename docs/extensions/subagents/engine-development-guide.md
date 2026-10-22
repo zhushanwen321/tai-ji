@@ -284,7 +284,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | 会话库隔离模式（zcode 先例） | spawn env 覆写 `ZCODE_SESSION_DB_PATH` + 清空别名键；路径单一来源 `zcodeSessionDbPath()`（`<engineDataDir>/engines/zcode/session-db/db.sqlite`）；与 GUI 引擎库分离（约束 C-ext-20，[zcode-session-db-isolation.md](../../architecture/zcode-session-db-isolation.md)）。隔离条目 TTL sweep 引擎侧（C-data-22：30 天同窗 / 活跃豁免集 / 进程级 24h 节流，`zcode-engine.ts:720-729`） |
 | 新增写侧登记义务 | 引擎新增任何磁盘写侧必须显式登记清理通道，或登记「无清理可接受」判定及理由。先例（设计 4（schemaEnforcement 升级，已裁决未实施）裁决）：`mcp/` 脚本目录——单文件恒覆盖、内容随包版本、无累积增长 → 「无清理通道」判定可接受 |
 
-**路径动态推导红线**：禁硬编码绝对路径，一律从 `getDataDir()` / `getEngineDataDir()` 等动态推导（pre-commit 路径白名单检查；根 AGENTS.md 规则 22）。
+**路径动态推导红线**：禁硬编码绝对路径，一律动态推导（pre-commit 路径白名单检查；根 AGENTS.md 规则 22）。推导函数按进程形态选（C-ext-31）：引擎/pi 子进程内用 `getEngineDataDir()`（env → 宿主 dataRoot）与 subagent-core `resolveSessionStoreBase()`，session 存储树公式经 `@taiji/shared/session-store-paths` 纯函数族；`@taiji/shared/paths` 的 `getDataDir()` 仅 runtime/main 进程可用——其 C-proc-26 准入检查在打包态 pi/引擎进程内必抛（该进程无 `TAIJI_AGENT_PACKAGED`，被 C-proc-09 出站契约剥除）。
 
 ## 10. 可靠性模式库（降级与可观测）
 

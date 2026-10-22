@@ -8,7 +8,8 @@
  * - 类型 / 凭证 / Workspace 进草稿，经 saveAndTest 一次点击提交（D2/D5）；开关只写配置位（D4）
  * - readiness 是「保存并测试」按钮禁用状态的唯一依据；密文字段取「草稿 ∨ 已保存」并集，
  *   明文的 Workspace 只看草稿（D13）
- * - cookie 输入去掩码（D7）：cookie 草稿永远只放用户真实输入，保存成功后清空
+ * - 密文输入掩码哨兵（D7）：已保存的 cookie / 专属 Key 在输入框显示 QUOTA_SECRET_MASK，
+ *   保存侧识别哨兵不发送（保留既存）；哨兵展示单源来自 syncFromProvider 的磁盘态重建
  */
 import { ref, computed, watch } from 'vue'
 import type {
@@ -19,7 +20,9 @@ import type {
   QuotaAuthKind,
   QuotaFetchFailureReason,
 } from '@taiji/shared'
-import { QUOTA_PRESETS, normalizeCookieHeader, normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
+import { normalizeCookieHeader, normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, resolveQuotaPresets, supportsExclusiveCredential } from '@taiji/shared'
+// W3c：presets 数据源从编译期基线切到 runtime 下发的合并视图（remote-config 域 2）
+import { getSettingsStore } from '@taiji/core'
 import type {
   QuotaConfigureInputs,
   QuotaConfigureModule,
@@ -32,9 +35,10 @@ import type {
   QuotaTestView,
   ReadinessMissing,
 } from '@taiji/core'
-import { API_KEY_CLEAR_SENTINEL, getSettingsTransport } from '@taiji/core'
+import { API_KEY_CLEAR_SENTINEL, QUOTA_SECRET_MASK, getSettingsTransport } from '@taiji/core'
 import { optimisticUpdate, refCell } from '@taiji/core/foundation/optimistic-update'
 import { useQuotaStore } from '@/stores/quota'
+import { quotaFailReasonText } from '@/composables/features/model/useQuotaQuery'
 
 /**
  * Workspace 草稿的保存前归一化（模块级辅助）。
@@ -58,9 +62,20 @@ function normalizeWorkspaceDraft(
   return { ok: true, payload: normalized.url }
 }
 
+/**
+ * 当前 presets 合并视图（空态回落编译期基线）。
+ *
+ * store 初值是 `[]`（非 undefined）且 RPC 拉取失败只 warn 不写基线——裸读 `.value` 会让
+ * 类型下拉在合并视图未下发期间恒空且本挂载期不恢复（C-proc-21：用户可见的辅助能力失败
+ * 必须有可见反馈，禁静默空值）。回落判据与 ProviderEditBody 的 matchedPreset 同源。
+ */
+function currentPresets(): readonly QuotaPreset[] {
+  return resolveQuotaPresets(getSettingsStore().quotaPresets.value)
+}
+
 /** 当前草稿 fetcher 对应的预设；未选择草稿时 fallback 到自动匹配的 preset。 */
 function findPreset(fetcherId: string | undefined, fallback: QuotaPreset | undefined): QuotaPreset | undefined {
-  if (fetcherId) return QUOTA_PRESETS.find((p) => p.fetcher === fetcherId)
+  if (fetcherId) return currentPresets().find((p) => p.fetcher === fetcherId)
   return fallback
 }
 
@@ -169,7 +184,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   /** 类型草稿底层态：外部经 selectType（同值短路 + 真变清凭证草稿）写入 */
   const fetcherIdDraft = ref<string | undefined>(undefined)
   /**
-   * 输入草稿（D7 去掩码：cookie / 专属 Key 只放用户真实输入，不回填掩码、不回填密文）。
+   * 输入草稿（D7 掩码哨兵：已保存的密文以 QUOTA_SECRET_MASK 展示；真实输入随时覆盖哨兵）。
    * D13 已知代价（设计 §6.14）：UI 不支持清除已保存 workspace（清空草稿 → readiness 置灰
    * 保存不出去）；换地址直接覆盖、停用关开关。显式清除按钮是登记的重审触发条件，勿在
    * readiness 里单独开「空串 = 清除」后门。
@@ -190,8 +205,16 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   /** 最近一次查询失败原因（A2-4 reason 透传；null = 无失败）。旧缓存保留在 quotaData（「查看上次成功数据」） */
   const testFailReason = ref<QuotaFetchFailureReason | null>(null)
 
-  /** 下拉框选项：QUOTA_PRESETS 映射为 { value, label } */
-  const fetcherOptions = QUOTA_PRESETS.map((p) => ({ value: p.fetcher, label: p.label }))
+  /**
+   * 下拉框选项：presets 合并视图映射为 { value, label }。
+   * computed 而非 setup 期一次性快照：quotaPresets 由 config.listQuotaPresets RPC 异步填充，
+   * 回包晚于本 composable 装配——一次性求值会让下拉恒空且本挂载期不恢复（与 isCookieAuth /
+   * activePreset 的 computed 读取路径保持同源新鲜度）。读取经 currentPresets 空态回落基线，
+   * RPC 未回包 / 拉取失败期间下拉同样非空。
+   */
+  const fetcherOptions = computed(() =>
+    currentPresets().map((p) => ({ value: p.fetcher, label: p.label })),
+  )
 
   /**
    * 类型草稿写入（§7.1：类型进草稿，由 saveAndTest 一次提交，不再即时落盘）。
@@ -227,7 +250,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   const isCookieAuth = computed(() => {
     const fid = fetcherIdDraft.value
     if (fid) {
-      const opt = QUOTA_PRESETS.find((p) => p.fetcher === fid)
+      const opt = currentPresets().find((p) => p.fetcher === fid)
       return opt?.auth.includes('cookie') ?? false
     }
     return preset.value?.auth.includes('cookie') ?? false
@@ -319,7 +342,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     return {
       type: {
         selected: fetcherIdDraft.value,
-        options: fetcherOptions,
+        options: fetcherOptions.value,
         undetermined,
       },
       enabled: enabled.value,
@@ -371,12 +394,12 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     enabled.value = p.quota.enabled
     // fetcherId 初始值：手动指定的 quota.fetcher 优先，未设置时 fallback 到自动匹配值
     applyFetcherId(p.quota.fetcher ?? preset.value?.fetcher)
-    // D7 去掩码：密文（cookie / 专属 Key）一律不回填，输入框只承载用户本次的真实输入；
-    // workspace 非凭证（用户浏览器地址栏可见的 URL），明文回显供编辑
+    // D7 掩码哨兵：runtime 不回传密文，已保存的 cookie / 专属 Key 以 QUOTA_SECRET_MASK 展示
+    // 「已保存密文在此」；workspace 非凭证（用户浏览器地址栏可见的 URL），明文回显供编辑
     // D3 读侧：未显式设置时按既存标记推断（历史数据兼容）；两端调用同一函数避免推断背离
     draft.value = {
-      cookie: '',
-      apiKey: '',
+      cookie: p.quota.cookieSet ? QUOTA_SECRET_MASK : '',
+      apiKey: p.quota.apiKeySet ? QUOTA_SECRET_MASK : '',
       credentialSource: resolveQuotaCredentialSource(p.quota),
       workspace: p.quota.workspace ?? '',
     }
@@ -456,26 +479,54 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   }
 
   /**
-   * 保存前本地校验（不发 RPC）：cookie 粘贴格式 / workspace 归一化。
-   * 返回 { errorKey } = 拦住（调用方转 i18n 文案）；{ workspace } = 通过并带回 payload
-   * （undefined = 该 fetcher 不需要 workspace）。从 saveAndTest 抽出：校验分支与参数构造
-   * 分开后各自职责单一，saveAndTest 的圈复杂度回到门限内（metrics-gate ≤15）。
+   * 保存 payload 构造段（§7.2 细节 4 的构造表；从 saveAndTest 拆出，语义注释在彼处）。
+   * cookie 粘贴格式 / workspace 归一化两类本地校验失败 = { ok:false, errorKey }，
+   * 调用方落错误终止（不发 RPC）。
    */
-  function resolvePreSaveInputs(
-    cookieDraft: string,
-  ): { errorKey: string } | { workspace: string | undefined } {
+  function buildConfigurePayload(p: { id: string }, typeChanged: boolean): { ok: true; payload: QuotaConfigurePayload } | { ok: false; errorKey: string } {
+    const source = draft.value.credentialSource
+    const cookieDraft = draft.value.cookie.trim()
+    const apiKeyDraft = draft.value.apiKey.trim()
+    // 掩码哨兵 = 「已保存密文」的展示态（D7），不是用户输入：照常发送会把圆点串写成真实凭证。
+    // 哨兵与空串同归「未填新值」；类型切换时哨兵已被 selectType 清空，不落入此分支
+    const cookieMasked = cookieDraft === QUOTA_SECRET_MASK
+    const apiKeyMasked = apiKeyDraft === QUOTA_SECRET_MASK
+
     // cookie 粘贴格式前置校验（2026-10-18，用户手动复制路径）：归一化后为空（不含任何
     // name=value 对，典型 = 从 DevTools Application → Cookies 表格复制的制表符文本）
     // 当场拦下并给精确指引——不发 RPC，不落入 runtime 侧「凭证可能已失效」的误报。
     // 归一化实现 SSOT 在 shared（与 runtime fetcher 同一函数，两端判据不得各写一份）。
-    if (isCookieAuth.value && cookieDraft && normalizeCookieHeader(cookieDraft) === '') {
-      return { errorKey: 'settings.providerEdit.quotaCookieFormatInvalid' }
+    // 掩码哨兵无 k=v 形态但不是用户输入，跳过校验
+    if (isCookieAuth.value && cookieDraft && !cookieMasked && normalizeCookieHeader(cookieDraft) === '') {
+      return { ok: false, errorKey: 'settings.providerEdit.quotaCookieFormatInvalid' }
     }
+
     // Workspace：明文回显字段，传归一化后的草稿（D13：永不传 ''）；空 / 非法输入本地拦截。
     // 归一化分流按当前草稿 fetcher（与 runtime 侧同源：同 input 同 fetcher 同规则）
-    if (!needsWorkspace.value) return { workspace: undefined }
-    const normalized = normalizeWorkspaceDraft(draft.value.workspace, fetcherIdDraft.value ?? activePreset.value?.fetcher)
-    return normalized.ok ? { workspace: normalized.payload } : { errorKey: normalized.errorKey }
+    let workspacePayload: string | undefined
+    if (needsWorkspace.value) {
+      const normalized = normalizeWorkspaceDraft(draft.value.workspace, fetcherIdDraft.value ?? activePreset.value?.fetcher)
+      if (!normalized.ok) return { ok: false, errorKey: normalized.errorKey }
+      workspacePayload = normalized.payload
+    }
+
+    return {
+      ok: true,
+      payload: {
+        providerId: p.id,
+        // 恒传当前值：保存并测试不改启用状态（开关是独立动作，D4）
+        enabled: enabled.value,
+        fetcher: fetcherIdDraft.value,
+        // 恒传当前选择（幂等）：显式化磁盘字段，消除「未设置」这一中间态
+        credentialSource: source,
+        // 类型一变旧 Cookie 的归属就不成立 → 无条件清除（''）；类型没变则缺省 = 保留既存
+        //（哨兵同归「未填新值」：undefined 保留既存）
+        cookie: cookieMasked ? undefined : (cookieDraft || (typeChanged ? '' : undefined)),
+        // 专属 Key 永不传 ''：失效由 credentialSource 表达，删文件不可逆（D3）
+        apiKey: source === 'exclusive' && apiKeyDraft && !apiKeyMasked ? apiKeyDraft : undefined,
+        workspace: workspacePayload,
+      },
+    }
   }
 
   /**
@@ -499,36 +550,17 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     const draftFetcher = fetcherIdDraft.value
     // 归属判据同 readiness（§7.2 细节 1）：无既存归属不算类型已变
     const typeChanged = savedFetcher !== undefined && draftFetcher !== savedFetcher
-    const source = draft.value.credentialSource
-    const cookieDraft = draft.value.cookie.trim()
-    const apiKeyDraft = draft.value.apiKey.trim()
 
     configureError.value = ''
-
-    const preSave = resolvePreSaveInputs(cookieDraft)
-    if ('errorKey' in preSave) {
-      configureError.value = t(preSave.errorKey)
+    const built = buildConfigurePayload(p, typeChanged)
+    if (!built.ok) {
+      configureError.value = t(built.errorKey)
       return
-    }
-    const workspacePayload = preSave.workspace
-
-    const payload: QuotaConfigurePayload = {
-      providerId: p.id,
-      // 恒传当前值：保存并测试不改启用状态（开关是独立动作，D4）
-      enabled: enabled.value,
-      fetcher: draftFetcher,
-      // 恒传当前选择（幂等）：显式化磁盘字段，消除「未设置」这一中间态
-      credentialSource: source,
-      // 类型一变旧 Cookie 的归属就不成立 → 无条件清除（''）；类型没变则缺省 = 保留既存
-      cookie: cookieDraft || (typeChanged ? '' : undefined),
-      // 专属 Key 永不传 ''：失效由 credentialSource 表达，删文件不可逆（D3）
-      apiKey: source === 'exclusive' && apiKeyDraft ? apiKeyDraft : undefined,
-      workspace: workspacePayload,
     }
 
     configuring.value = true
     try {
-      const result = await getSettingsTransport().configureQuota(payload)
+      const result = await getSettingsTransport().configureQuota(built.payload)
       // 半提交窗口对齐（runtime 改动 4：清理锚定 persist 成功而非 configure 整体成功）：
       // persist 成功 + secrets 段失败 → runtime 返回 ok:false 但 QuotaCache 已清、fetcher
       // 已换新 —— renderer 镜像失效不能只挂在 ok:true 上，typeChanged 时无条件同步失效
@@ -538,9 +570,8 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
         configureError.value = result.error || t('settings.providerEdit.quotaSaveAndTestFail')
         return
       }
-      // 保存成功：密文草稿清空（不回显）；已保存态由 provider 广播 → syncFromProvider 重建
-      draft.value.cookie = ''
-      draft.value.apiKey = ''
+      // 保存成功：密文草稿不动（用户输入保留在框内，不再「保存即消失」）；掩码哨兵展示态
+      // 由 provider 广播 → syncFromProvider 按磁盘态统一重建（展示态单源，见 syncFromProvider）
       await testQuery()
     } catch (e) {
       configureError.value = e instanceof Error ? e.message : t('settings.providerEdit.quotaSaveAndTestFail')
@@ -549,7 +580,13 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     }
   }
 
-  /** 测试查询（触发 quota.refresh，绕过 throttle） */
+  /**
+   * 测试查询（触发 quota.refresh，绕过 throttle）。
+   * 结果同步写回全局 quota store（quotaStore 是套餐浮层 / 容量卡的单源镜像）——
+   * 浮层常驻不重新挂载，若结果只留在本 composable 本地 ref，用户在设置页「保存并测试」
+   * 成功后浮层仍显示旧的失败态/旧数据（实际缺陷）。成功 setCache 清 error；失败 setError
+   * 保留旧 data（与 useQuotaQuery 失败路径同口径）。
+   */
   async function testQuery(): Promise<void> {
     const p = providerRef.value
     if (!p) return
@@ -564,6 +601,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
       if (result.data) {
         quotaData.value = result.data
         lastFetchAt.value = result.lastFetchAt
+        quotaStore.setCache(p.id, result.data, result.lastFetchAt)
         testStatus.value = 'success'
       } else {
         // 失败态（A2-4）：reason 归一给 UI（恢复指引文案按分档渲染）；旧缓存保留在
@@ -572,10 +610,12 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
         testFailReason.value = result.reason ?? null
         lastFetchAt.value = result.lastFetchAt
         testError.value = t('settings.providerEdit.quotaTestFail')
+        if (result.reason) quotaStore.setError(p.id, quotaFailReasonText(result.reason))
       }
     } catch (e) {
       testStatus.value = 'error'
       testError.value = e instanceof Error ? e.message : t('settings.providerEdit.quotaTestFail')
+      quotaStore.setError(p.id, e instanceof Error ? e.message : String(e))
     }
   }
 

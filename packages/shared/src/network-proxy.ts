@@ -36,6 +36,24 @@ export interface NetworkProxyConfig { // oe-exempt:20261019:framework:ext-config
   noProxy: string[]
   /** 代理规则（主机名条目），命中即经代理 */
   rules: string[]
+  /**
+   * 直连 + 强制 IPv4 清单（主机名条目）：命中即不走代理，DNS 解析锁定 A 记录
+   * （`connect.lookup` 强制 family:4）后直连——URL / Host 头 / TLS SNI 保持原样
+   * （SNI / 证书校验按原域名，只干预「选哪个 IP」）。
+   *
+   * 存在理由：双栈域名在「IPv6 可达但握手抖动」时，pi 的 fetch 会走 happy-eyeballs
+   * （autoSelectFamilyAttemptTimeout=2000）反复尝试 IPv6，把 connect 预算耗在坏路径上，
+   * 最终表现为 `Request timed out.` / `Connection error.`（实为连接层超时，非 provider 故障）。
+   * 本清单让指定域名绕开 IPv6——确定性事实（A 记录）替代时间推测，不是超时补偿机制。
+   *
+   * 优先级：noProxy（排除代理）> ipv4Only（直连+锁 v4）> rules（经代理）。
+   * 即命中 noProxy 时即便同时命中 ipv4Only 也不做地址族锁定（用户显式「别动这个域名」优先）；
+   * 未命中 noProxy 而命中 ipv4Only 时不走代理（直连语义）。
+   *
+   * 独立于 enabled 代理开关：enabled=false 时本清单照常生效（IPv4 锁定是直连的地址族
+   * 修正，不是代理能力）；rules 分流另受 enabled 门控（开关关闭时规则不参与分流）。
+   */
+  ipv4Only: string[]
 }
 
 /** 默认配置：禁用态 + 常见本地代理地址占位 + 保护本地回环。 */
@@ -44,6 +62,7 @@ export const DEFAULT_NETWORK_PROXY_CONFIG: NetworkProxyConfig = {
   proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' },
   noProxy: ['localhost', '127.0.0.1'],
   rules: [],
+  ipv4Only: [],
 }
 
 /** 校验结果信封：ok 或面向用户的错误清单（每条含修复动作，逐项收集不短路）。 */
@@ -153,12 +172,17 @@ export function validateNetworkProxyConfig(config: NetworkProxyConfig): NetworkP
     return { ok: false, errors: [`网络代理配置必须是对象: ${String(config)}`] }
   }
   const errors: string[] = []
-  const { enabled, proxy, noProxy, rules } = config
+  const { enabled, proxy, noProxy, rules, ipv4Only } = config
   if (typeof enabled !== 'boolean') {
     errors.push(`网络代理开关必须是开或关: ${JSON.stringify(enabled) ?? String(enabled)}，请重新切换一次开关后保存`)
   }
   errors.push(...collectProxyServerErrors(proxy))
   errors.push(...collectHostEntryErrors(noProxy, '直连排除清单（noProxy）'))
   errors.push(...collectHostEntryErrors(rules, '代理规则（rules）'))
+  // ipv4Only 是后加字段：缺省（undefined）= 空清单，向后兼容旧配置文件；
+  // 只有显式声明了非数组形态才报错。
+  if (ipv4Only !== undefined) {
+    errors.push(...collectHostEntryErrors(ipv4Only, '强制 IPv4 直连清单（ipv4Only）'))
+  }
   return errors.length > 0 ? { ok: false, errors } : { ok: true }
 }

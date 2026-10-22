@@ -318,11 +318,11 @@ taste/no-silent-catch 处理：纯 console.warn 仍报（要求传播/重抛）�
 
 ### 羊毛 provider 真机验收轨（S1–S12，R2）
 
-羊毛 provider（[ADR-0152](adr/decisions.md)，三家族 pi provider 扩展 + 宿主编排）的真实验收轨：依赖三家真实凭据链路（Qoder 钥匙串提取 / Trae storage.json 容器解密 / WorkBuddy OAuth 授权）与本机登录态、真实上游对话（烧账号额度），不可凭证无关化——按 e2e 资产三态全部归 **R2（按改动范围触发）**，不进 CI、不进 PR/merge 门禁（与「等价性测试双轨」的 real-pi 分工同口径）。
+羊毛 provider（[ADR-0156](adr/decisions.md)，三家族 pi provider 扩展 + 宿主编排）的真实验收轨：依赖三家真实凭据链路（Qoder 钥匙串提取 / Trae storage.json 容器解密 / WorkBuddy OAuth 授权）与本机登录态、真实上游对话（烧账号额度），不可凭证无关化——按 e2e 资产三态全部归 **R2（按改动范围触发）**，不进 CI、不进 PR/merge 门禁（与「等价性测试双轨」的 real-pi 分工同口径）。
 
-- **触发条件**：改动 `extensions/universal/pi-wool-*/`、`extensions/shared/wool-shared/`、`packages/shared/src/wool.ts`、`packages/runtime/src/services/wool-manager.ts`、model-service 聚合、`packages/renderer/src/components/settings/provider/WoolWizard/`、`packages/renderer/src/composables/features/settings/useWool*.ts`（羊毛条目/向导状态编排：useWool / useWoolEntries / useWoolWizard）时，在 dev-flow 验收阶段跑受影响家族的对应场景子集
+- **触发条件**：改动独立仓 tai-ji-plugin 的扩展包（家族侧改动在该仓跑测试；涉及宿主契约时回主仓跑本轨）、`packages/shared/src/wool.ts`、`packages/runtime/src/services/wool-manager.ts`、model-service 聚合、`packages/renderer/src/components/settings/provider/WoolWizard/`、`packages/renderer/src/composables/features/settings/useWool*.ts`（羊毛条目/向导状态编排：useWool / useWoolEntries / useWoolWizard）时，在 dev-flow 验收阶段跑受影响家族的对应场景子集
 - **执行纪律**：空载串行（真实 LLM 轮次延迟受 CPU 并发影响，项目 e2e 执行准则 SSOT = AGENTS.md「测试」节）；临时数据目录 dev 实例（`--data-dir` 隔离）；凭据探针产物不入库
-- **场景清单**（逐条步骤与通过标准见 wool-provider 设计文档 §4 场景表；本节只登记归宿，判定方式按「脚本可判定 / agent 判定 / 既有套件承接」描述——不使用 L1-L3 执行层标签，避免与上方四层框架撞名）：S1 Qoder 全链路接入 / S2 WorkBuddy OAuth 接入 / S3 Trae 接入（真实凭据对话，agent 判定）；S4 模型清单更新 / S5 扩展热更新 / S8 生命周期与邻居不变量 / S12 选择器整合双态（脚本可判定，其中 S5 的 npm 发布链与 S2 的 OAuth 全链路依赖发布资产/用户交互，分段执行）；S6 令牌过期恢复 / S7 签到默认关 / S10 降级隔离 / S11 未装 IDE 家族（确定性断言 + 交互判定混合）；S9 既有零回归 = 既有单测全量套件承接（非真实凭据轨——model.list 聚合与扩展装载的回归由 ADR-0152 登记的 P0 关联义务覆盖）
+- **场景清单**（逐条步骤与通过标准见 wool-provider 设计文档 §4 场景表；本节只登记归宿，判定方式按「脚本可判定 / agent 判定 / 既有套件承接」描述——不使用 L1-L3 执行层标签，避免与上方四层框架撞名）：S1 Qoder 全链路接入 / S2 WorkBuddy OAuth 接入 / S3 Trae 接入（真实凭据对话，agent 判定）；S4 模型清单更新 / S5 扩展热更新 / S8 生命周期与邻居不变量 / S12 选择器整合双态（脚本可判定，其中 S5 的 npm 发布链与 S2 的 OAuth 全链路依赖发布资产/用户交互，分段执行）；S6 令牌过期恢复 / S7 签到默认关 / S10 降级隔离 / S11 未装 IDE 家族（确定性断言 + 交互判定混合）；S9 既有零回归 = 既有单测全量套件承接（非真实凭据轨——model.list 聚合与扩展装载的回归由 ADR-0156 登记的 P0 关联义务覆盖）
 - **登记形态说明**：本轨无固定 spec 文件资产（场景为真机编排 + 断言脚本按次执行，不落 e2e/ 目录），按新资产流转规则 1 的「本表」分支登记——触发条件落本节即为登记，不属 `docs/testing/e2e-map.json` 收录对象（其结构校验要求每条 rule 的 assets 非空且指向磁盘存在的 spec，见 `scripts/validate-e2e-map.mjs`）；场景定义权威 = wool-provider 设计文档 §4，执行记录 = dev-flow runlog
 
 ## 8. Extension Upgrade 回归基线 [from: extension-upgrade]
@@ -399,11 +399,11 @@ pi 边界可靠性设计的测试范围落地（2026-08-27 事故对 → 四支�
 
 `[HISTORICAL]` 案例锚（pgrep 全机扫描跨包互踩）：base-tool-enhance 包原 kill-tree.test.ts 曾用 `pgrep -f "sleep 30"` 全机扫描验证子进程无残留——扫描范围覆盖全机进程，与并行运行的其他测试/无关进程互踩；载体文件已随 ext-simplify-13（进程原语下沉 extension-protocol）删除，现行承接方是 extension-protocol 包的 background-task-process.test.ts（限定 pid 的探针）。规则不变：验证「自己 spawn 的进程已死」应限定 pid/进程组（`pgrep -P <pid>`）或读自有句柄，禁止全机模式扫描做断言。
 
-### vitest 拆卸竞态假红与供应商补丁（2026-10-03）
+### vitest 全绿假红与供应商补丁（2026-10-03）
 
-**现象**：全仓 `pnpm test` 间歇「全绿 + exit 1」——每个包 Test Files / Tests 全 passed，退出码非 0，归属文件每轮漂移（排查时易误判某用例坏了）。**根因**：上游 vitest#11153，池 worker 拆卸机器（birpc `$rejectPendingCalls` / pool-runner rpc `$close`）抛出的迟到 rejection 经 `VITEST_TEST_PATH` 归属到测试文件、落入 `state.errors` 致 `exitCode = 1`，**与用户代码无关**。
+**现象**：全仓 `pnpm test` 间歇「全绿 + exit 1」——每个包 Test Files / Tests 全 passed，退出码非 0，归属文件每轮漂移（排查时易误判某用例坏了）。**根因**：两族**相互独立**的上游 vitest 缺陷，均**与用户代码无关**——① 拆卸竞态（vitest#11153）：池 worker 拆卸机器（birpc `$rejectPendingCalls` / pool-runner rpc `$close`）抛出的迟到 rejection 经 `VITEST_TEST_PATH` 归属到测试文件、落入 `state.errors` 致 `exitCode = 1`；② 堆栈格式化器（2026-10-20 登记，独立于 #11153）：绿跑下 `parseErrorStacktrace` → convert-source-map 解析某文件 sourceMappingURL 抛 `SyntaxError("is not valid JSON")`，成 run 级 unhandled error 假红（junit / JSON reporter 均 success、断言层零失败）。
 
-**处置**：供应商补丁 `patches/vitest.patch`（登记 `pnpm-workspace.yaml` 的 `patchedDependencies`；pnpm 10 忽略 package.json 的 `pnpm` 字段）。防卫门双条件：**全绿** 且 **每条错误逐条命中拆卸竞态签名**（`EnvironmentTeardownError` / `[vitest-worker]:` 前缀 / `[vitest-pool-runner]: Pending methods while closing rpc`）；worker 崩溃族（`Worker exited unexpectedly` / `emitted error`）、`EPIPE`、`Unhandled Error` 类型**刻意不吞**（吞了会掩盖丢文件的假绿）。命中打 suppressed 行、未命中打 `ARCHIVE THIS LINE as race evidence` 行——两条日志通道自证。**退役条件**：上游修复后移除补丁 + 20 轮全仓探针复验零假红；补丁用裸键登记，升级打不上即 install 报错（响亮失败优于静默跳过）。完整登记见 [docs/todo/vitest-teardown-race-vendor-patch.md](todo/vitest-teardown-race-vendor-patch.md)。
+**处置**：供应商补丁 `patches/vitest.patch`（登记 `pnpm-workspace.yaml` 的 `patchedDependencies`；pnpm 10 忽略 package.json 的 `pnpm` 字段）。防卫门双条件：**全绿** 且 **每条错误逐条命中 vitest 内部假红签名**（两族根因各自的签名集：拆卸竞态族 = `EnvironmentTeardownError` / `[vitest-worker]:` 前缀 / `[vitest-pool-runner]: Pending methods while closing rpc`；堆栈格式化器族 = `SyntaxError` 且消息含 `is not valid JSON` 且堆栈锚 `convert-source-map`——堆栈锚限定错误全链在 vitest sourcemap 工具链内，测试自身的 `JSON.parse` 失败堆栈含测试文件路径、不命中）；worker 崩溃族（`Worker exited unexpectedly` / `emitted error`）、`EPIPE`、`Unhandled Error` 类型**刻意不吞**（吞了会掩盖丢文件的假绿）。命中打 suppressed 行、未命中打 `ARCHIVE THIS LINE as race evidence` 行——两条日志通道自证。**退役条件**：按根因分判——① 拆卸竞态族以 vitest#11153 上游修复为准；② 堆栈格式化器族以 vitest 堆栈格式化器对 sourceMappingURL 解析的上游修复为准。某族上游修复落地才可从补丁删该族签名段，两族全部删净后移除补丁 + 20 轮全仓探针复验零假红（只修其一就整补丁退役，另一族假红将复发）。补丁用裸键登记，升级打不上即 install 报错（响亮失败优于静默跳过）。完整登记见 [docs/todo/vitest-teardown-race-vendor-patch.md](todo/vitest-teardown-race-vendor-patch.md)。
 
 **负载型超时（同批实测，误判陷阱）**：全仓 46 包并发下，长窗等待型用例（如 subagent-core `remote-engine.test.ts` 用 15s 超时度量收敛窗）可能因 CPU 饱和超时——2026-10-03 第 08 轮即此形态（单独复跑同文件 31/31 通过 / 7.7s）。归因法：**先单独复跑可疑文件**，再判是否回归；此时补丁 `suppressed=0`（真失败没被吞）也是「这不是假红」的正向信号。
 

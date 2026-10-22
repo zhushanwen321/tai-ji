@@ -62,13 +62,21 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
       }
     }
 
-    // 配置侧：按字符串字面量静态提取（走配置 import 会拉起 globalSetup，超出 unit 校验边界）
+    // 配置侧：按字符串字面量静态提取（走配置 import 会拉起 globalSetup，超出 unit 校验边界）。
+    // 数组成员行间穿插 // 注释，注释内可含方括号（如 [HISTORICAL ...]）——结束边界不能用
+    // 「下一个 ']' 字符」判定：会命中注释内的闭合括号，把提取截断成空集（2026-10-20 真实
+    // LLM 轨用例登记后即触发「已登记却报未登记」误报）。改按行扫描：注释行跳过，行首
+    // （去缩进）']' 即数组结束（'] as const' 同形态命中）。
     const arrayStart = config.indexOf('const REAL_PI_TESTS = [')
     expect(arrayStart, 'vitest.config.ts 找不到 REAL_PI_TESTS 数组声明——检查提取逻辑需随配置形态更新').toBeGreaterThanOrEqual(0)
-    const arrayText = config.slice(arrayStart, config.indexOf(']', arrayStart))
     const registered: string[] = []
-    for (const match of arrayText.matchAll(/['"]([^'"]+\.test\.ts)['"]/g)) {
-      if (match[1]) registered.push(match[1])
+    for (const line of config.slice(arrayStart).split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed.startsWith('//')) continue
+      if (trimmed.startsWith(']')) break
+      for (const match of trimmed.matchAll(/['"]([^'"]+\.test\.ts)['"]/g)) {
+        if (match[1]) registered.push(match[1])
+      }
     }
     // [L2.5 二批后允许空池] 全部真实 LLM 用例已翻轨 faux，REAL_PI_TESTS 当前 0 成员是合法
     // 终态（数组保留为「新增真实 LLM 文件必须登记」的注册位）；检查的提取断言点 =

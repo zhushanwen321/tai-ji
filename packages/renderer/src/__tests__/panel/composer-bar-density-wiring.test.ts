@@ -169,7 +169,8 @@ function makeHeaderActionSource(hidden = false): object {
         headerAction: { activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' },
       },
     ],
-    getRuntimeState: () => (hidden ? { hidden: true } : undefined),
+    // 缺省反转后「可见」用例一律已推送形态（hidden=true 显式停用 / false 已推送在场）
+    getRuntimeState: () => ({ headerActionId: 'scheduler-manager.open', pluginId: 'scheduler-manager', updatedAt: 1, hidden }),
     resolveCommandAvailability: () => 'registered',
     executeCommand: () => true,
   }
@@ -226,9 +227,10 @@ async function dispatchFitGeometry(
   await stubFitGeometry({ bar: barEl, left: leftEl, right: rightEl }, avail, left, widthByFit)
 }
 
-/** 底栏首/末按钮（序 0 锚点断言用） */
+/** 底栏首/末按钮（序 0 锚点断言用）：首钮 = `+`（aria-label，原生 title 已退役）；
+ *  末钮 = 发送位（不在左簇清理范围，title 保留原生） */
 function firstButtonTitle(): string | undefined {
-  return bar().findAll('button')[0]?.attributes('title')
+  return bar().findAll('button')[0]?.attributes('aria-label')
 }
 function lastButtonTitle(): string | undefined {
   const buttons = bar().findAll('button')

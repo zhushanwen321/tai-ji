@@ -35,6 +35,16 @@ vi.mock('@/api', () => ({
   file: { read: (...args: unknown[]) => mockFileRead(...(args as [string, string?])) },
   git: { getDiff: (...args: unknown[]) => mockGitGetDiff(...(args as [string, string])) },
 }))
+// drawer 域 importOriginal 部分 mock（真模块 headless 零副作用，只覆写关空收敛通道）：
+// closeTab 的关空分支经 core closeDrawerIfTabsEmpty（规则单一落点），桩化后可断言
+// 「关空 → true / 非空 → false」的调用序列。
+vi.mock('@taiji/core/domain/drawer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/core/domain/drawer')>()
+  return {
+    ...actual,
+    closeDrawerIfTabsEmpty: vi.fn(),
+  }
+})
 // sessionStore.list 查 cwd（sessionCwd）：默认空列表（session 不在册 → cwd null → 位置分流
 // 走 cwd 外/preview 分支）；需要 cwd 内分支的用例（双通道 forceDiff 位置分流）向
 // mockSessionList push { id, cwd } 注入。工厂内的箭头函数延迟读取数组引用（工厂执行时不解引用，
@@ -47,6 +57,7 @@ vi.mock('@/stores/session', () => ({
 import { useDetailPane, __loadTokenKeyCountForTest } from '@/composables/features/file-tree/useDetailPane'
 import { useFileTreeStore } from '@/stores/fileTree'
 import { useSideDrawer, resetSideDrawer } from '@/composables/features/drawer/useSideDrawer'
+import { closeDrawerIfTabsEmpty } from '@taiji/core/domain/drawer'
 import { triggerSessionCleanups } from '@/composables/useSessionScopedState'
 
 /**
@@ -374,13 +385,18 @@ describe('S4: detail 多文件 tab 注入语义（§6.3：未开新增并激活 
     await nextTick()
     expect(activePath.value).toBe('a.txt')
 
-    // 关最后一个 → 空态
+    // 关最后一个 → 空态 + 抽屉关空收敛（前两次关非最后为 false，最后一次 true——
+    // 规则单一落点 core closeDrawerIfTabsEmpty）
     closeTab('a.txt')
     await nextTick()
     expect(tabs.value.length).toBe(0)
     expect(activePath.value).toBeNull()
     expect(state.value.path).toBe('')
     expect(state.value.status).toBe('idle')
+    expect(closeDrawerIfTabsEmpty).toHaveBeenCalledTimes(3)
+    expect(closeDrawerIfTabsEmpty).toHaveBeenNthCalledWith(1, false)
+    expect(closeDrawerIfTabsEmpty).toHaveBeenNthCalledWith(2, false)
+    expect(closeDrawerIfTabsEmpty).toHaveBeenNthCalledWith(3, true)
   })
 
   it('S4 关闭非激活 tab：激活不变、选中态不动', async () => {

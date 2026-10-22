@@ -14,7 +14,7 @@
     running）时游标冻结于最后事件 ts、未收束段不显示运行脉冲、着色随终局形态
     （D9 停止维度：failed/time_limited → 失败色系，interrupted/cancelled → 中性暗）。
 
-  本组件零时钟：不内置 interval（WorkflowTab 1s tick 同款手法归上层），nowMs 由
+  本组件零时钟：不内置 interval（1s tick 由上层 WorkflowTabContent 持有），nowMs 由
   props 注入保证纯展示可测。
 -->
 <template>

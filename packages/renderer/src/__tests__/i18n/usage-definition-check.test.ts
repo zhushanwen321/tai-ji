@@ -120,6 +120,11 @@ const USAGE_WHITELIST: ReadonlyArray<{ literal: string; kind: 'exact' | 'prefix'
     reason: '模板属性里的 store 属性链（v-if="sidebar.collapsed"），非 i18n key',
   },
   {
+    literal: 'sidebar.widthPx',
+    kind: 'exact',
+    reason: '模板属性里的 store 属性链（SidebarResizeHandle :aria-valuenow="sidebar.widthPx"），非 i18n key',
+  },
+  {
     literal: 'sidebar.activeTab',
     kind: 'exact',
     reason: '模板属性里的 store 属性链（v-model="sidebar.activeTab"），非 i18n key',

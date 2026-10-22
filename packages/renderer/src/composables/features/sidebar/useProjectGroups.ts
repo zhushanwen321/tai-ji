@@ -2,7 +2,9 @@
  * useProjectGroups —— 侧栏项目锚定分组的派生与动作集合（R6.2，从 SessionList 提取）。
  *
  * 职责：项目分组视图模型（归属切分 + 组序 + 组内平铺序）、锚定交互（组头点击按模式
- * 裁决 / 组头「+」落点新建）、项目新建草稿流、行内重命名与删除确认的壳侧状态。
+ * 裁决；平铺模式展开态按组独立记忆支持多项目同开——锚定只决定新会话归属与「当前」
+ * chip，不再互斥收起其他组 / 组头「+」落点新建）、项目新建草稿流、行内重命名与删除
+ * 确认的壳侧状态。
  * 归属切分规则 SSOT = sessionBelongsToProject（默认项目聚未归类 + 孤儿）；组序 SSOT =
  * projectStore.orderedProjects（lastUsedAt 稳定序 + 默认项目固定最后，锚定切换不重排）；
  * 组内平铺序 = sessionsInRuntimeGroupOrder（runtime 组序展平，客户端零重排）。
@@ -77,23 +79,34 @@ export function useProjectGroups(options: {
     groups().reduce((sum, g) => sum + g.sessions.length, 0),
   )
 
-  // ── 锚定分组交互（方案 A：显式锚定 + 零隐式行为）──
+  // ── 锚定分组交互（显式锚定 + 多开：展开态按组独立记忆，不与锚定互斥）──
 
-  /** 平铺模式当前组展开态（内存态；切换锚定/新建落点时重置为展开） */
-  const curOpen = ref(true)
+  /** 平铺模式「被手动收起的组 id」集合（空集 = 全开，新增项目天然展开）。
+   *  点锚定组头 = 翻转本组；点非锚定组头 = 切锚定并展开目标组，其余组保持自身开合态
+   *  （多项目同时展开；锚定只决定新会话归属与「当前」chip，不再收起其他组）。 */
+  const flatClosed = ref(new Set<string>())
 
   /** 目录模式「被手动收起的组 id」集合（空集 = 全开，新增项目天然展开）；组头只开合、不切换锚定 */
   const dirClosed = ref(new Set<string>())
+
+  /** 从开合集移除单组（不可变替换触发响应，与 dirClosed 同范式） */
+  function reopen(closed: Ref<Set<string>>, pgId: string): void {
+    if (!closed.value.has(pgId)) return
+    closed.value = new Set([...closed.value].filter((id) => id !== pgId))
+  }
 
   /** 组头点击（父级按模式裁决，demo onGroupHead/onGroupHeadDir 同构） */
   function onGroupHeadClick(pg: ProjectGroupVM): void {
     if (mode.value === 'flat') {
       if (pg.id === projectStore.activeProjectId) {
-        curOpen.value = !curOpen.value
+        const next = new Set(flatClosed.value)
+        if (next.has(pg.id)) next.delete(pg.id)
+        else next.add(pg.id)
+        flatClosed.value = next
         return
       }
       projectStore.setActiveProject(pg.id)
-      curOpen.value = true
+      reopen(flatClosed, pg.id)
       return
     }
     const next = new Set(dirClosed.value)
@@ -105,8 +118,14 @@ export function useProjectGroups(options: {
   /** 组头「+」：先落点该项目（新会话归属读 activeProjectId）再进空态新建 */
   function onCreateTaskIn(pg: ProjectGroupVM): void {
     projectStore.setActiveProject(pg.id)
-    curOpen.value = true
+    reopen(flatClosed, pg.id)
     onNewSession()
+  }
+
+  /** 强制展开某组（平铺/目录两套开合集都移除——拖拽落组后的展开保证，模式无关） */
+  function expandGroup(pgId: string): void {
+    reopen(flatClosed, pgId)
+    reopen(dirClosed, pgId)
   }
 
   // ── 项目重命名（ProjectGroup 行内输入）/ 删除（二次确认）──
@@ -123,8 +142,7 @@ export function useProjectGroups(options: {
     if (pendingDelete.value) projectStore.removeProject(pendingDelete.value.id)
     pendingDelete.value = null
     deleteOpen.value = false
-    // 删除当前项目后锚定回落（store 回落默认项目），展开让归回的会话直接可见（spec sidebar §3.7）
-    curOpen.value = true
+    // 归回的会话落默认项目区（恒展开可见，spec sidebar §3.7）；命名组开合记忆保留不动
   }
 
   /** 组头行内重命名提交（ProjectGroup 已做空名检查，store 层再检查默认项目/未知 id） */
@@ -154,13 +172,11 @@ export function useProjectGroups(options: {
     })
   }
 
-  /** 提交草稿：非空名创建并锚定展开（addProject 内部锚定新项目）；空名 = 丢弃草稿不创建 */
+  /** 提交草稿：非空名创建并锚定展开（addProject 内部锚定新项目；新 id 不在收起集合，天然展开）；
+   *  空名 = 丢弃草稿不创建 */
   function commitCreate(): void {
     const name = draft.value.trim()
-    if (name) {
-      projectStore.addProject(name)
-      curOpen.value = true
-    }
+    if (name) projectStore.addProject(name)
     creating.value = false
     draft.value = ''
   }
@@ -179,8 +195,9 @@ export function useProjectGroups(options: {
   return {
     projectGroups,
     totalCount,
-    curOpen,
+    flatClosed,
     dirClosed,
+    expandGroup,
     onGroupHeadClick,
     onCreateTaskIn,
     deleteOpen,

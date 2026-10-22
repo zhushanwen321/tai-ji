@@ -106,11 +106,13 @@ const PUBLISHED_REGISTRY_PACKAGES = new Set([
   // extension-protocol / session-delivery：原 @taiji/* scope（npm 无 taiji org，
   // 2026-09-16 改发 @zhushanwen），随 npm-extension-protocol-first 首发登记
   // session-core / zcode-session-source：随 v0.10.4 npm 批次首发登记
+  // state-machine：随 v0.11.10 npm 批次首发登记（extension-protocol / subagent-core 的 dependencies）
   '@zhushanwen/extension-protocol',
   '@zhushanwen/session-core',
   '@zhushanwen/session-delivery',
   '@zhushanwen/pi-rpc',
   '@zhushanwen/pi-subagent-cli',
+  '@zhushanwen/state-machine',
   '@zhushanwen/subagent-core',
   '@zhushanwen/subagent-engine-sdk',
   '@zhushanwen/zcode-session-source',

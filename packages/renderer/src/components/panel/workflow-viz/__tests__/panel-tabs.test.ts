@@ -7,7 +7,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   WORKFLOW_FIXED_TAB_KEY,
-  agentTabKey,
   closeLiveTab,
   openLiveTab,
   phaseTabKey,
@@ -16,10 +15,6 @@ import type { WorkflowLiveTab } from '../panel/panel-tabs'
 
 function phaseTab(name: string): WorkflowLiveTab {
   return { key: phaseTabKey(name), kind: 'phase', title: name, phase: name }
-}
-
-function agentTab(id: number, title: string): WorkflowLiveTab {
-  return { key: agentTabKey(id), kind: 'agent', title, callId: id }
 }
 
 describe('panel-tabs：openLiveTab', () => {
@@ -44,14 +39,14 @@ describe('panel-tabs：closeLiveTab', () => {
   })
 
   it('关闭激活 tab 激活左侧相邻；首个动态 tab 关闭后回 workflow 固定 tab', () => {
-    const tabs = [phaseTab('alpha'), phaseTab('beta'), agentTab(0, 'rev')]
-    // 关最右（agent rev）→ 激活左侧 beta
-    const closeRight = closeLiveTab(tabs, agentTabKey(0), agentTabKey(0))
+    const tabs = [phaseTab('alpha'), phaseTab('beta'), phaseTab('gamma')]
+    // 关最右（gamma）→ 激活左侧 beta
+    const closeRight = closeLiveTab(tabs, phaseTabKey('gamma'), phaseTabKey('gamma'))
     expect(closeRight.tabs.map((t) => t.title)).toEqual(['alpha', 'beta'])
     expect(closeRight.activeKey).toBe(phaseTabKey('beta'))
     // 关首个（alpha，当前激活）→ 无左侧相邻 → 回 workflow 固定 tab
     const closeFirst = closeLiveTab(tabs, phaseTabKey('alpha'), phaseTabKey('alpha'))
-    expect(closeFirst.tabs.map((t) => t.title)).toEqual(['beta', 'rev'])
+    expect(closeFirst.tabs.map((t) => t.title)).toEqual(['beta', 'gamma'])
     expect(closeFirst.activeKey).toBe(WORKFLOW_FIXED_TAB_KEY)
   })
 

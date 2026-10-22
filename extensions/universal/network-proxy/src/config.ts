@@ -38,6 +38,22 @@ export interface NetworkProxyConfig { // oe-exempt:20261019:framework:ext-config
 	noProxy: string[];
 	/** 代理规则（主机名条目），命中即经代理 */
 	rules: string[];
+	/**
+	 * 直连 + 强制 IPv4 清单（主机名条目）：命中即不走代理，DNS 解析锁定 A 记录后直连
+	 * （`connect.lookup` 强制 family:4；URL / Host 头 / TLS SNI 保持原样——选型依据见
+	 * ipv4.ts 头注）。
+	 *
+	 * 存在理由：双栈域名在「IPv6 可达但握手抖动」时，pi 的 fetch 走 happy-eyeballs
+	 * （autoSelectFamilyAttemptTimeout=2000）反复试 IPv6，把 connect 预算耗在坏路径上，
+	 * 最终表现为 `Request timed out.`——实为连接层超时，不是 provider 故障。
+	 *
+	 * 独立于 `enabled` 代理开关：`enabled=false` 时本清单照常生效（IPv4 锁定是直连的
+	 * 地址族修正，不是代理能力；清单非空即安装包装层）。
+	 *
+	 * 优先级：noProxy > ipv4Only > rules（rules 另受 enabled 门控——开关关闭时规则
+	 * 不参与分流）。
+	 */
+	ipv4Only: string[];
 }
 
 /** 默认配置：禁用态 + 常见本地代理地址占位 + 保护本地回环（与 shared DEFAULT 深相等，镜像锁定测试锁两侧）。 */
@@ -46,6 +62,7 @@ export const DEFAULT_NETWORK_PROXY_CONFIG: NetworkProxyConfig = {
 	proxy: { protocol: "http", host: "127.0.0.1", port: 7890, username: "", password: "" },
 	noProxy: ["localhost", "127.0.0.1"],
 	rules: [],
+	ipv4Only: [],
 };
 
 /** llm-shared loadConfig 的包名（决定文件名 network-proxy-ext-config.json）。 */
@@ -114,7 +131,7 @@ export function validateNetworkProxyConfig(config: unknown): NetworkProxyValidat
 		return { ok: false, errors: [`网络代理配置必须是对象: ${String(config)}`] };
 	}
 	const errors: string[] = [];
-	const { enabled, proxy, noProxy, rules } = config as Record<string, unknown>;
+	const { enabled, proxy, noProxy, rules, ipv4Only } = config as Record<string, unknown>;
 	if (typeof enabled !== "boolean") {
 		errors.push(
 			`网络代理开关必须是开或关: ${JSON.stringify(enabled) ?? String(enabled)}，请重新切换一次开关后保存`,
@@ -123,6 +140,11 @@ export function validateNetworkProxyConfig(config: unknown): NetworkProxyValidat
 	errors.push(...collectProxyServerErrors(proxy));
 	errors.push(...collectHostEntryErrors(noProxy, "直连排除清单（noProxy）"));
 	errors.push(...collectHostEntryErrors(rules, "代理规则（rules）"));
+	// ipv4Only 是后加字段：缺省（undefined）= 空清单，向后兼容旧配置文件；
+	// 只有显式声明了非数组形态才报错。
+	if (ipv4Only !== undefined) {
+		errors.push(...collectHostEntryErrors(ipv4Only, "强制 IPv4 直连清单（ipv4Only）"));
+	}
 	return errors.length > 0 ? { ok: false, errors } : { ok: true };
 }
 
@@ -131,13 +153,17 @@ export function validateNetworkProxyConfig(config: unknown): NetworkProxyValidat
  * 非法配置 throw（含逐项错误清单）→ loadConfig 回落 defaults 并把消息交给 onWarning——
  * 非法配置不静默修正（设计验收场景 10：坏配置不装分流器且 error 可归因），回落 defaults
  * 即「全部直连」的安全态。
+ *
+ * `ipv4Only` 向后兼容：旧配置文件无此键时补空数组（校验层已容忍 undefined，此处补全
+ * 让下游 `hitsIpv4Only(config.ipv4Only)` 无需再判 undefined）。
  */
 export function normalizeNetworkProxyConfig(raw: unknown): NetworkProxyConfig {
 	const result = validateNetworkProxyConfig(raw);
 	if (!result.ok) {
 		throw new Error(result.errors.join("；"));
 	}
-	return raw as NetworkProxyConfig;
+	const config = raw as NetworkProxyConfig;
+	return { ...config, ipv4Only: config.ipv4Only ?? [] };
 }
 
 /** 条目去重 + 归一化视图（分流匹配用：匹配函数自带归一化，这里只去重保序）。 */
@@ -162,8 +188,13 @@ export function hitsRules(host: string, rules: string[]): boolean {
 	return dedupeEntries(rules).some((pattern) => matchesHostPattern(host, pattern));
 }
 
+/** 强制 IPv4 直连命中判定（去重视图 + suffix 匹配，与 rules / noProxy 同一匹配语义）。 */
+export function hitsIpv4Only(host: string, ipv4Only: string[]): boolean {
+	return dedupeEntries(ipv4Only).some((pattern) => matchesHostPattern(host, pattern));
+}
+
 /**
- * 配置指纹：enabled+proxy+noProxy+rules 序列化比对（行为序列 2——指纹变化才重建分发器）。
+ * 配置指纹：enabled+proxy+noProxy+rules+ipv4Only 序列化比对（行为序列 2——指纹变化才重建分发器）。
  * normalize 后结构固定，JSON.stringify 字段序稳定（字面量构造序）。
  */
 export function networkProxyFingerprint(config: NetworkProxyConfig): string {
@@ -172,5 +203,6 @@ export function networkProxyFingerprint(config: NetworkProxyConfig): string {
 		proxy: config.proxy,
 		noProxy: dedupeEntries(config.noProxy),
 		rules: dedupeEntries(config.rules),
+		ipv4Only: dedupeEntries(config.ipv4Only),
 	});
 }

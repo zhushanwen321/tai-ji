@@ -7,7 +7,7 @@
  * open=false 时不渲染 overlay。断言 DOM 结构（data-testid），不断言文案。
  *
  * 交互覆盖（review batch 1 round 1 重建，蓝本：旧 renderer 套件 41519a72d^）：
- *  - 键盘导航：↑↓ 循环取模 + aria-selected 转移 + preventDefault、Enter→confirmSel、Tab/Shift+Tab 五态循环切类 + selIdx 重置
+ *  - 键盘导航：↑↓ 循环取模 + aria-selected 转移 + preventDefault、Enter→confirmSel、Tab/Shift+Tab 六态循环切类 + selIdx 重置
  *  - confirmSel 三分支：ok+drawerTab → onOpenDrawer + close；ok 无 drawerTab → close；ok:false → 保持打开 + onToastError
  *  - 关闭路径：Esc / 遮罩 .self / close 重置（query/selIdx/activeType 清空 + MR-7.1 孤儿查询检查）/ 同实例 open 翻转
  *  - 错误路径：query reject → 不崩 + loading 清 + errorMsg transient（AC-8.5，新查询恢复）
@@ -26,7 +26,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createCommandStore, resetSearchModal } from '@taiji/core'
 import type { SearchDeps, Section } from '@taiji/core'
-import type { FileNode, SessionGroup } from '@taiji/shared'
+import type { ArchiveSummary, FileNode, SessionGroup } from '@taiji/shared'
 import SearchModal from '../SearchModal.vue'
 
 /** Map 实现 KVStorage（对齐 w3 command-store.test.ts makeMockStorage 模式） */
@@ -57,6 +57,8 @@ function makeDeps(): SearchDeps {
       fileCandidates: vi.fn(async () => [] as FileNode[]),
       sessionList: vi.fn(async () => [] as SessionGroup[]),
       selectSession: vi.fn(async () => {}),
+      archiveList: vi.fn(async () => [] as ArchiveSummary[]),
+      archiveJump: vi.fn(),
       t: vi.fn((key: string) => key),
     },
     commandStore: createCommandStore(makeMockStorage()),
@@ -200,7 +202,7 @@ describe('键盘导航（MF-2，AC-7.2/BC-2/AC-9.1~9.4）', () => {
     expect(emitted?.[emitted.length - 1]).toEqual([false])
   })
 
-  it('Tab/Shift+Tab 五态循环切类：null→command→file→symbol→session→null 逐态过滤分组', async () => {
+  it('Tab/Shift+Tab 六态循环切类：null→command→file→symbol→session→archive→null 逐态过滤分组', async () => {
     vi.useFakeTimers()
     const deps = makeDeps()
     deps.commandStore.registerApp([{ id: 'c1', name: 'cmd-x', action: vi.fn() }])
@@ -243,15 +245,21 @@ describe('键盘导航（MF-2，AC-7.2/BC-2/AC-9.1~9.4）', () => {
     expect(sec('sectionSession')).toBe(true)
     expect(sec('sectionSymbol')).toBe(false)
 
-    // Tab 5: session → null（循环回全部）
+    // Tab 5: session → archive（归档分组：mock archiveList 空 → 空态，Tab 仍可继续切）
+    await input.trigger('keydown', { key: 'Tab' })
+    expect(sec('sectionSession')).toBe(false)
+    expect(sec('sectionArchive')).toBe(false)
+    expect(wrapper.find('[data-testid="search-empty"]').exists()).toBe(true)
+
+    // Tab 6: archive → null（循环回全部）
     await input.trigger('keydown', { key: 'Tab' })
     expect(sec('sectionCommand')).toBe(true)
     expect(sec('sectionFile')).toBe(true)
     expect(sec('sectionSession')).toBe(true)
 
-    // Shift+Tab 反向 1: null → session
+    // Shift+Tab 反向 1: null → archive
     await input.trigger('keydown', { key: 'Tab', shiftKey: true })
-    expect(sec('sectionSession')).toBe(true)
+    expect(sec('sectionSession')).toBe(false)
     expect(sec('sectionCommand')).toBe(false)
   })
 

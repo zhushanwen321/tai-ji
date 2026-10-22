@@ -17,6 +17,7 @@ import type {
   WorkflowRunPhaseFoldEntry,
 } from "@taiji/shared";
 import type { SessionMetaRef } from "./model-override-query.js";
+import { extractRecordEngine } from "./subagent-engine-history.js";
 
 /** ms → ISO（WorkflowAgentCall/WorkflowRunRecord 时间契约是 ISO 字符串）。 */
 function toIso(ms: number): string {
@@ -236,14 +237,18 @@ export function projectV2Workflow(
  *   派生——含 pi session model_change 尾条目读取与「仅 pi 成员」判定）按
  *   (parentRunId, stepIndex) 圈定后透传到对应 agentCall。同族替换可只发生在部分成员，
  *   聚合范围不取单一值；一键多 attempt 的权威成员取与 workflow-step-merge.pickAuthoritativeRecord
- *   同判据（running 优先、startedAt 最新——显示权威一致）。
+ *   同判据（running 优先、startedAt 最新——显示权威一致）；
+ * - **盖章模型**：成员 record.model 透传到 agentCall.model（v2 投影骨架行无 model
+ *   域——RunAskStepFold 无此字段，本增强是 call.model 在现行投影链上的唯一填充点，
+ *   前端展示链五级回退的兜底分支数据面）。透传经注入的显示词汇翻译（引擎原生 ref →
+ *   pi 词汇，见 session-records 注入侧注释；未注入 = 原样透传）。
  *
- * 纯函数（无 IO）；输入 runs/subagents 均为已合并派生产物，无增强项时返回原引用
- * （零拷贝快路径，调用方 getWorkflows 每次读 RPC 消费）。sessionId 是覆盖查询的
- * 定位锚首参（query 实装按 session cwd 分片定位记录域文件——无全局 id 索引）。
- * resolved = 调用方一次解析的 session 定位锚（SessionMetaRef）：逐 run 的覆盖查询
- * 共用同一锚（传入则跳过查询内 scanSessions 全目录扫描，每帧 1 次扫替代 N 次），
- * 缺省 undefined = 各查询自扫（现行为）。
+ * 纯函数（无 IO；显示词汇翻译由调用方注入）；输入 runs/subagents 均为已合并派生产物，
+ * 无增强项时返回原引用（零拷贝快路径，调用方 getWorkflows 每次读 RPC 消费）。
+ * sessionId 是覆盖查询的定位锚首参（query 实装按 session cwd 分片定位记录域文件
+ * ——无全局 id 索引）。resolved = 调用方一次解析的 session 定位锚（SessionMetaRef）：
+ * 逐 run 的覆盖查询共用同一锚（传入则跳过查询内 scanSessions 全目录扫描，每帧 1 次
+ * 扫替代 N 次），缺省 undefined = 各查询自扫（现行为）。
  */
 export function projectSubagentModelDetailIntoRuns(
   sessionId: string,
@@ -256,6 +261,7 @@ export function projectSubagentModelDetailIntoRuns(
       }
     | undefined,
   resolved?: SessionMetaRef,
+  translateMemberModel?: (engineId: string, rawModelRef: string) => string,
 ): WorkflowRunRecord[] {
   if (runs.length === 0) return runs
   const byRun = buildMemberIndexByRun(subagents)
@@ -267,7 +273,7 @@ export function projectSubagentModelDetailIntoRuns(
     // 需重建的 run（changed）记入 updated；skip run 保持 undefined（循环尾原样写回）
     let updated: WorkflowRunRecord | undefined
     if (byStep !== undefined || runOverride !== undefined) {
-      updated = enhanceRunAgentCalls(run, byStep, runOverride)
+      updated = enhanceRunAgentCalls(run, byStep, runOverride, translateMemberModel)
     }
     // 惰性拷贝 + 全索引写（与 session-records.ts enhanceSubagentDetails 已修形态同款，
     // 两处注释互引防第三份手写副本）：result 惰性 slice(0, i) 只覆盖首个 changed 之前
@@ -304,30 +310,43 @@ function buildMemberIndexByRun(subagents: SubagentRecord[]): Map<string, Map<num
 
 /**
  * [enhanceRunAgentCalls 拆分] 单 call 的成员增强目标字段（runOverride 优先于成员
- * 自有覆盖——run 级全切是 run 作用域意图，分发到该 run 全部条目）。三字段全缺席 =
+ * 自有覆盖——run 级全切是 run 作用域意图，分发到该 run 全部条目）。四字段全缺席 =
  * 无增强项（零拷贝快路径保留条件）。成员标识恒透出（member 在场即携带，不等覆盖/
  * 生效值在场）——它是回执显示态的读取键，切换发生时面板数据源可能尚无任何覆盖载荷
  * （首次切换前两者恒缺席）。subagentId = record 创建事件 identity.id
  * （projectV2Subagent 身份域），与聚合应答成员标识
  * （listAcceptedMemberRunIdsForSwitch 的 ExecutionRecord.id）同源。
+ * 盖章模型：member.model 在场即透传（经注入的显示词汇翻译；未注入原样透传）——
+ * member 缺席时 call.model 保持原值不触碰。
  */
 interface AgentCallEnhancement {
   memberRecordId?: WorkflowAgentCall['memberRecordId']
   modelOverride?: WorkflowAgentCall['modelOverride']
   recentEffectiveModel?: WorkflowAgentCall['recentEffectiveModel']
+  model?: WorkflowAgentCall['model']
 }
 
 function callEnhancementTarget(
   member: SubagentRecord | undefined,
   runOverride: SubagentModelOverrideStatus | undefined,
+  translateMemberModel: ((engineId: string, rawModelRef: string) => string) | undefined,
 ): AgentCallEnhancement | undefined {
   const memberRecordId = member?.subagentId
   const modelOverride = runOverride ?? member?.modelOverride
   const recentEffectiveModel = member?.recentEffectiveModel
-  if (memberRecordId === undefined && modelOverride === undefined && recentEffectiveModel === undefined) {
+  const model =
+    member?.model !== undefined && translateMemberModel !== undefined
+      ? translateMemberModel(extractRecordEngine(member), member.model)
+      : member?.model
+  if (
+    memberRecordId === undefined &&
+    modelOverride === undefined &&
+    recentEffectiveModel === undefined &&
+    model === undefined
+  ) {
     return undefined
   }
-  return { memberRecordId, modelOverride, recentEffectiveModel }
+  return { memberRecordId, modelOverride, recentEffectiveModel, ...(model !== undefined ? { model } : {}) }
 }
 
 /** 引用相等短路（返回值直进 RPC reply 不缓存，无跨轮幂等消费位；形状级比较不必
@@ -336,18 +355,20 @@ function agentCallFieldsEqual(call: WorkflowAgentCall, target: AgentCallEnhancem
   return (
     call.memberRecordId === target.memberRecordId &&
     call.modelOverride === target.modelOverride &&
-    call.recentEffectiveModel === target.recentEffectiveModel
+    call.recentEffectiveModel === target.recentEffectiveModel &&
+    call.model === target.model
   )
 }
 
 /** 目标字段条件展开（键缺席语义；展开序 = memberRecordId → modelOverride →
- * recentEffectiveModel，与原组装逐字段同构）。 */
+ * recentEffectiveModel → model，与原组装逐字段同构）。 */
 function applyAgentCallEnhancement(call: WorkflowAgentCall, target: AgentCallEnhancement): WorkflowAgentCall {
   return {
     ...call,
     ...(target.memberRecordId !== undefined ? { memberRecordId: target.memberRecordId } : {}),
     ...(target.modelOverride !== undefined ? { modelOverride: target.modelOverride } : {}),
     ...(target.recentEffectiveModel !== undefined ? { recentEffectiveModel: target.recentEffectiveModel } : {}),
+    ...(target.model !== undefined ? { model: target.model } : {}),
   }
 }
 
@@ -364,10 +385,11 @@ function enhanceRunAgentCalls(
   run: WorkflowRunRecord,
   byStep: Map<number, SubagentRecord> | undefined,
   runOverride: SubagentModelOverrideStatus | undefined,
+  translateMemberModel: ((engineId: string, rawModelRef: string) => string) | undefined,
 ): WorkflowRunRecord | undefined {
   let changed = false
   const agentCalls = run.agentCalls.map((call) => {
-    const target = callEnhancementTarget(byStep?.get(call.id), runOverride)
+    const target = callEnhancementTarget(byStep?.get(call.id), runOverride, translateMemberModel)
     if (target === undefined || agentCallFieldsEqual(call, target)) return call
     changed = true
     return applyAgentCallEnhancement(call, target)

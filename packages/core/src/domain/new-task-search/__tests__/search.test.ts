@@ -9,7 +9,7 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { ref } from 'vue'
-import type { FileNode, SessionGroup } from '@taiji/shared'
+import type { ArchiveSummary, FileNode, SessionGroup } from '@taiji/shared'
 import type { KVStorage } from '../../../platform/port'
 import { createCommandStore } from '../command-store'
 import { useSearch } from '../search'
@@ -46,6 +46,8 @@ function makeDeps(overrides?: Partial<SearchDeps>): SearchDeps {
       fileCandidates: vi.fn(async () => [] as FileNode[]),
       sessionList: vi.fn(async () => [] as SessionGroup[]),
       selectSession: vi.fn(async () => {}),
+      archiveList: vi.fn(async () => [] as ArchiveSummary[]),
+      archiveJump: vi.fn(),
       // t 返回实际本地化标签（mock fixture 用中文标签，与 real 轨 i18n 行为一致）
       t: vi.fn((key: string) => {
         const labels: Record<string, string> = {
@@ -55,6 +57,10 @@ function makeDeps(overrides?: Partial<SearchDeps>): SearchDeps {
           'search.sectionCommand': '命令',
           'search.sectionFile': '文件',
           'search.sectionSession': '会话',
+          'search.sectionArchive': '归档',
+          // archive 域词条（renderer zh-CN/archive.ts 同值）：归档条目状态标注经 t 通道取词
+          'archive.summary.compressing': '压缩中',
+          'archive.summary.empty': '（无对话记录）',
         }
         return labels[key] ?? key
       }),
@@ -316,5 +322,97 @@ describe('mock 端口检查（tc u3/D4-②：isMock=true 而未装配 searchMock
     const { query } = useSearch(ref<string | null>('s1'), deps)
 
     await expect(query('a', { activeSessionId: 's1' })).rejects.toThrow('SearchPorts.searchMock 未装配')
+  })
+})
+
+describe('归档源（名称 + 摘要全文匹配，载荷透传）', () => {
+  function makeArchivedArchive(): ArchiveSummary {
+    return {
+      sessionId: 'arc-1',
+      name: 'v0.10 renderer 重构',
+      originalFile: '2026-10-20T00-00-00-000Z_arc-1.jsonl',
+      cwd: '/proj/x',
+      archivedAt: '2026-10-20T00:00:00.000Z',
+      rawBytes: 1024,
+      status: 'archived',
+      codec: 'zstd-3',
+      compressedBytes: 256,
+      sha256: 'a'.repeat(64),
+      summary: { turns: [{ user: 'renderer 重构开始，先出分层方案', agent: '六层分层：Shell / Workspace' }] },
+    }
+  }
+
+  function makeStagingArchive(): ArchiveSummary {
+    return {
+      sessionId: 'arc-2',
+      name: '压缩中的会话',
+      originalFile: '2026-10-20T00-00-00-000Z_arc-2.jsonl',
+      cwd: '/proj/x',
+      archivedAt: '2026-10-20T00:00:00.000Z',
+      rawBytes: 1024,
+      status: 'staging',
+      summary: null,
+    }
+  }
+
+  it('按名称命中 → 归档分组带载荷（archive 透传供跳转）', async () => {
+    const deps = makeDeps()
+    ;(deps.ports.archiveList as ReturnType<typeof vi.fn>).mockResolvedValue([makeArchivedArchive()])
+
+    const { query } = useSearch(ref<string | null>(null), deps)
+    const sections = await query('renderer', { activeSessionId: null })
+
+    const archiveSection = findSection(sections, 'archive')
+    expect(archiveSection).toBeTruthy()
+    expect(archiveSection!.items[0]).toMatchObject({ type: 'archive', title: 'v0.10 renderer 重构' })
+    expect(archiveSection!.items[0]!.archive?.sessionId).toBe('arc-1')
+  })
+
+  it('按摘要内容命中（名称不含查询词）→ 归档分组出现（「摘要进搜索」的落点）', async () => {
+    const deps = makeDeps()
+    ;(deps.ports.archiveList as ReturnType<typeof vi.fn>).mockResolvedValue([makeArchivedArchive()])
+
+    const { query } = useSearch(ref<string | null>(null), deps)
+    const sections = await query('六层分层', { activeSessionId: null })
+
+    expect(findSection(sections, 'archive')).toBeTruthy()
+  })
+
+  it('staging 态只匹配名称（summary 为 null 无摘要可匹配），sub 标注「压缩中」', async () => {
+    const deps = makeDeps()
+    ;(deps.ports.archiveList as ReturnType<typeof vi.fn>).mockResolvedValue([makeStagingArchive()])
+
+    const { query } = useSearch(ref<string | null>(null), deps)
+    const byName = await query('压缩中', { activeSessionId: null })
+    expect(findSection(byName, 'archive')?.items[0]?.sub).toBe('压缩中')
+    // 状态标注必须经 i18n 通道取词（archive 域词条单源）——硬编码中文绕过 ports.t 的回归在此拦截
+    expect(deps.ports.t).toHaveBeenCalledWith('archive.summary.compressing')
+
+    const bySummary = await query('六层分层', { activeSessionId: null })
+    expect(findSection(bySummary, 'archive')).toBeUndefined()
+  })
+
+  it('archived 态 turns 空数组 → sub 走 archive.summary.empty 词条（i18n 通道，不硬编码）', async () => {
+    const deps = makeDeps()
+    const emptyTurns = { ...makeArchivedArchive(), summary: { turns: [] } }
+    ;(deps.ports.archiveList as ReturnType<typeof vi.fn>).mockResolvedValue([emptyTurns])
+
+    const { query } = useSearch(ref<string | null>(null), deps)
+    const sections = await query('renderer', { activeSessionId: null })
+
+    expect(findSection(sections, 'archive')?.items[0]?.sub).toBe('（无对话记录）')
+    expect(deps.ports.t).toHaveBeenCalledWith('archive.summary.empty')
+  })
+
+  it('archiveList reject → 归档分组空，其他源不阻断（MR-4.2 同款）', async () => {
+    const deps = makeDeps()
+    ;(deps.ports.archiveList as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('archive down'))
+    deps.commandStore.registerApp([{ id: 'n', name: '新建', action: vi.fn() }])
+
+    const { query } = useSearch(ref<string | null>(null), deps)
+    const sections = await query('新', { activeSessionId: null })
+
+    expect(findSection(sections, 'archive')).toBeUndefined()
+    expect(findSection(sections, 'command')).toBeTruthy()
   })
 })

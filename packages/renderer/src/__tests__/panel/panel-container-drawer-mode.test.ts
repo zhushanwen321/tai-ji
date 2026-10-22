@@ -28,7 +28,7 @@
  * 兼容层——C1）：测试同样直连 core（bindDrawerSessionId + openDrawerTab + _resetDrawerForTest）。
  * 静态依赖隔离：重面板（GitPanel/CommandDocPanel/BackgroundTaskDetailPanel/PlanDocsPanel/
  * BtwPanel）与壳层组件（Panel/PanelHeader/ToastContainer/TraceInspector/SubagentTab/
- * WorkflowTab）vi.mock 占位组件（import 期替换——global.stubs 只在渲染期替换，
+ * SubagentTab）vi.mock 占位组件（import 期替换——global.stubs 只在渲染期替换，
  * import 期仍加载原模块触发 PanelContainer 整棵依赖图 transform，四个 PanelContainer 测试
  * 文件的用例时间合计被该 transform 主导；壳层组件零 DOM 断言，占位只保挂载点）。懒加载
  * DetailPane/TerminalView（PanelContainer 动态 import，不在静态图内）保留渲染期 stub。
@@ -108,9 +108,7 @@ vi.mock('@/components/panel/trace/TraceInspector.vue', () => ({
 vi.mock('@/components/panel/SubagentTab.vue', () => ({
   default: { name: 'SubagentTab', template: '<div />' },
 }))
-vi.mock('@/components/panel/WorkflowTab.vue', () => ({
-  default: { name: 'WorkflowTab', template: '<div />' },
-}))
+
 // ── mock chatStore：unread badge（AC-13）可控消息数 ──
 // PanelContainer 用 chatStore.getMessages(sessionId).length 感知 agent 新消息。
 // vitest 的 vi.mock 工厂无法引用非 hoisted 顶层 import（reactive），故用 hoisted 容器做转发：
@@ -215,9 +213,10 @@ describe('drawer-tab 注册表契约（L1 全量收敛点，display-containers �
     expect(L1_DRAWER_TABS).toHaveLength(8)
     expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="drawer-tab-browser"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="drawer-tab-workflow"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(8)
 
-    // 注册表形状机器锚（§8.2：右 8/底 1/浮 2——迁移源侧清空）
+    // 注册表形状机器锚（§8.2：右 8/底 1/浮 2——迁移源侧清空；[2026-10-19] workflow tab 删除 + trace 一级 tab 追加）
     expect(RIGHT_DRAWER_REGISTRY).toHaveLength(8)
     expect(BOTTOM_DRAWER_REGISTRY).toHaveLength(1)
     expect(OVERLAY_REGISTRY).toHaveLength(2)

@@ -373,13 +373,29 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
         if [ -d "$APP_PATH/Contents/Resources/pi" ]; then
             echo -e "  ${GREEN}✓${NC} pi binary in Resources"
 
-            # 致命：pi 目录中不能有指向外部绝对路径的 symlink
-            PI_SYMLINK=$(find "$APP_PATH/Contents/Resources/pi" -maxdepth 1 -type l 2>/dev/null | head -1)
-            if [ -n "$PI_SYMLINK" ]; then
-                echo -e "  ${RED}✗${NC} Resources/pi 存在 symlink: $(basename "$PI_SYMLINK")"
+            # 致命：pi 目录中不能有指向 bundle 外部的 symlink。同目录相对 symlink 合法
+            # （prepare-pi-resources.sh 的 pi PATH 别名 = pi -> pi-darwin-arm64，拷贝进
+            # bundle 后仍指向同目录二进制，自包含；判定语义与 scripts/check-pi-resources-links.mjs
+            # 构建前检查一致——目标 resolve 后落在 pi 目录内部即放行）。原「find -type l
+            # 全拦」实现比注释意图严，pi 别名引入后误伤 CI（2026-10-22）。
+            PI_EXTERNAL_LINK=""
+            # 前缀双侧归一化：APP_PATH 本身可能含 symlink 段（如 macOS /tmp -> /private/tmp），
+            # 只归一化目标不归一化前缀会前缀失配误拦
+            PI_DIR_REAL=$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$APP_PATH/Contents/Resources/pi")
+            while IFS= read -r PI_LINK; do
+                [ -z "$PI_LINK" ] && continue
+                PI_TARGET=$(python3 -c 'import os, sys; print(os.path.realpath(os.path.join(os.path.dirname(sys.argv[1]), sys.argv[2])))' "$PI_LINK" "$(readlink "$PI_LINK")")
+                case "$PI_TARGET" in
+                    "$PI_DIR_REAL"/*) ;; # bundle 内自包含，合法
+                    *) PI_EXTERNAL_LINK="$PI_LINK"; break ;;
+                esac
+            done < <(find "$APP_PATH/Contents/Resources/pi" -maxdepth 1 -type l 2>/dev/null)
+            if [ -n "$PI_EXTERNAL_LINK" ]; then
+                echo -e "  ${RED}✗${NC} Resources/pi 存在指向 bundle 外部的 symlink: $(basename "$PI_EXTERNAL_LINK") -> $(readlink "$PI_EXTERNAL_LINK")"
                 FAILED=1
             else
-                echo -e "  ${GREEN}✓${NC} Resources/pi 无 symlink"
+                LINK_COUNT=$(find "$APP_PATH/Contents/Resources/pi" -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' ')
+                echo -e "  ${GREEN}✓${NC} Resources/pi symlink 均为 bundle 内相对链接（${LINK_COUNT} 个，含 pi PATH 别名）"
             fi
         fi
 
@@ -394,10 +410,12 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
         # builtin pi extensions 完整性校验（index.js 存在 / 无 .ts 残留 R3 / permission wasm / dry-run import）
         # prepare-builtin-extensions.sh 部署 + electron-builder extraResources 拷贝。
         # 复用 verify-staged-extensions.mjs：文件级校验 + import dry-run（external 缺失降级，
-        # prod 环境无 node_modules 属预期，pi runtime 提供）。
+        # prod 环境无 node_modules 属预期，pi runtime 提供）。--engines-dir 让 C-ext-31
+        # 门禁与构建期 bundle-extensions.mjs 覆盖对齐：引擎 staged 产物同扫。
         BUILTIN_EXT_DIR="$APP_PATH/Contents/Resources/extensions/@zhushanwen"
+        BUILTIN_ENGINES_DIR="$APP_PATH/Contents/Resources/engines"
         if [ -d "$BUILTIN_EXT_DIR" ]; then
-            if node "$PROJECT_ROOT/scripts/verify-staged-extensions.mjs" --staged-dir "$BUILTIN_EXT_DIR" > /tmp/ext-verify-mac.log 2>&1; then
+            if node "$PROJECT_ROOT/scripts/verify-staged-extensions.mjs" --staged-dir "$BUILTIN_EXT_DIR" --engines-dir "$BUILTIN_ENGINES_DIR" > /tmp/ext-verify-mac.log 2>&1; then
                 echo -e "  ${GREEN}✓${NC} builtin ext 完整性校验通过（verify-staged）"
             else
                 echo -e "  ${RED}✗${NC} builtin ext 完整性校验失败（缺 index.js / 残留 .ts / 缺 wasm）:"
@@ -488,10 +506,10 @@ if [ -d "$OUTPUT_DIR/win-unpacked" ]; then
             FAILED=1
         fi
     done
-    # builtin pi extensions（Windows 同 mac 校验，复用 verify-staged）
+    # builtin pi extensions（Windows 同 mac 校验，复用 verify-staged；--engines-dir 同扫引擎产物 C-ext-31）
     WIN_BUILTIN="$WIN_RESOURCES/extensions/@zhushanwen"
     if [ -d "$WIN_BUILTIN" ]; then
-        if node "$PROJECT_ROOT/scripts/verify-staged-extensions.mjs" --staged-dir "$WIN_BUILTIN" > /tmp/ext-verify-win.log 2>&1; then
+        if node "$PROJECT_ROOT/scripts/verify-staged-extensions.mjs" --staged-dir "$WIN_BUILTIN" --engines-dir "$WIN_RESOURCES/engines" > /tmp/ext-verify-win.log 2>&1; then
             echo -e "  ${GREEN}✓${NC} builtin ext 完整性校验通过（verify-staged）"
         else
             echo -e "  ${RED}✗${NC} builtin ext 完整性校验失败:"
@@ -584,12 +602,12 @@ if [ -d "$OUTPUT_DIR/linux-unpacked" ]; then
             fi
         done
     fi
-    # builtin pi extensions（Linux 同 mac/win 校验，复用 verify-staged）。builtin 迁移
-    # npm 包化（2026-08）时 mac/win 补了本校验、linux 覆盖丢失（PR #185 review S1），
-    # extraResources from 路径错等 linux 专属回归将静默漏检。
+    # builtin pi extensions（Linux 同 mac/win 校验，复用 verify-staged；--engines-dir 同扫引擎产物
+    # C-ext-31）。builtin 迁移 npm 包化（2026-08）时 mac/win 补了本校验、linux 覆盖丢失
+    # （PR #185 review S1），extraResources from 路径错等 linux 专属回归将静默漏检。
     LINUX_BUILTIN="$LINUX_RESOURCES/extensions/@zhushanwen"
     if [ -d "$LINUX_BUILTIN" ]; then
-        if node "$PROJECT_ROOT/scripts/verify-staged-extensions.mjs" --staged-dir "$LINUX_BUILTIN" > /tmp/ext-verify-linux.log 2>&1; then
+        if node "$PROJECT_ROOT/scripts/verify-staged-extensions.mjs" --staged-dir "$LINUX_BUILTIN" --engines-dir "$LINUX_RESOURCES/engines" > /tmp/ext-verify-linux.log 2>&1; then
             echo -e "  ${GREEN}✓${NC} builtin ext 完整性校验通过（verify-staged）"
         else
             echo -e "  ${RED}✗${NC} builtin ext 完整性校验失败:"

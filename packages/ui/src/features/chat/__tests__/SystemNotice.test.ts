@@ -304,10 +304,10 @@ describe('SystemNotice background-bash 结构化行（U3 / D2 / 方案 A）', ()
     wrapper.unmount()
   })
 
-  it('解析 null（旧数据无 details）→ 兜底原文行（Archive 图标 + content 原文，无 meta）', () => {
+  it('解析 null（旧数据无 details）→ 兜底原文行（Info 图标 + content 原文，无 meta）', () => {
     const wrapper = mount(SystemNotice, { props: { message: bashMessage({ details: undefined }) } })
     const row = wrapper.find('.system-notice')
-    expect(row.find('svg').classes()).toContain('lucide-archive')
+    expect(row.find('svg').classes()).toContain('lucide-info')
     expect(row.find('[data-testid="system-notice-text"]').text()).toBe(
       '[background-bash] bt-3 finished (exit 0, 3m12s): pnpm test --workspace extensions',
     )
@@ -323,7 +323,7 @@ describe('SystemNotice background-bash 结构化行（U3 / D2 / 方案 A）', ()
     })
     const row = wrapper.find('.system-notice')
     expect(row.find('[data-testid="system-notice-text"]').text()).toContain('[background-bash]')
-    expect(row.find('svg').classes()).toContain('lucide-archive')
+    expect(row.find('svg').classes()).toContain('lucide-info')
     wrapper.unmount()
   })
 })

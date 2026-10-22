@@ -25,13 +25,23 @@ export interface WorkspaceDetectResult {
   barePath: string
   repoRoot: string
   defaultBranch: string
+  /**
+   * 推导默认 base ref（如 'github/main'）：按仓库远端实况动态推导（checkout.defaultRemote →
+   * origin → 单一远端 → 清单首个；无远端退本地 main/master），恒经 rev-parse 验证可解析。
+   * repo 两态附带；解析失败或推导不出可用基线（远端无默认分支且本地无 main/master）时
+   * 缺省。前端建 worktree 的默认基线直接用它，不再自拼 origin/*。
+   */
+  defaultBaseRef?: string
 }
 
 /** worktree 创建参数。 */
 export interface WorktreeCreateParams {
   /** 新分支名（如 'feat/oauth'）。目录名由其派生（/ → -）。 */
   branch: string
-  /** 基分支：'current'（继承当前分支，默认）/ 'origin/main'（校验远端 ref 存在后使用）/ 任意分支名。 */
+  /**
+   * 基分支：'current'（继承当前分支）/ 'auto'（远端实况动态推导，缺省默认）/
+   * '<remote>/<branch>'（先验证远端已配置，幽灵 ref 拒绝采信）/ 任意本地分支名。
+   */
   baseBranch?: string
   /** worktree 创建位置模式。省略时 bare 模式默认 'workspace'，plain-repo 默认 'dedicated-dir'。 */
   locationMode?: 'workspace' | 'repo-dir' | 'dedicated-dir'
@@ -68,10 +78,12 @@ export interface WorktreeCreateResult {
 export interface WorktreeBranchListResult {
   /** 本地分支名列表。 */
   local: string[]
-  /** 远程分支名列表（origin/*）。 */
+  /** 远程分支名列表（仅已配置远端前缀下的条目——refs/remotes/ 残留的死数据被过滤）。 */
   remote: string[]
   /** 默认分支名（如 'main'）。检测不到则为空串。 */
   defaultBranch: string
+  /** 推导默认 base ref（如 'github/main'，远端实况推导，恒经 rev-parse 验证）；解析失败或推导不出可用基线时为本地 'main' 占位（UI 缺省建议；创建路径对无可用基线另作精确报错）。 */
+  defaultBaseRef: string
 }
 
 /** 单个 worktree 条目。 */
@@ -100,7 +112,8 @@ export interface WorktreeListResult {
  * - WORKTREE_EXISTS：目标 worktree 目录已存在。detail = { cwd, dirName }，
  *   前端可核对 dirName 是否与当前请求分支一致——区分「同分支已存在」与
  *   「另一分支名映射同目录碰撞」（feat/a 与 feat-a 映射同目录）。
- * - GIT_FAILED：git worktree add 失败（exitCode 非 0）
+ * - GIT_FAILED：git worktree add 失败（exitCode 非 0），或 base 解析不出任何可用基线
+ *   （远端无可识别默认分支且本地无 main/master，detail 带 requestedBaseBranch）
  * - SETUP_FAILED：setup-worktree.sh 失败（exitCode 非 0），detail 含 exitCode + stderr
  */
 export interface IWorktreeService {
@@ -111,4 +124,9 @@ export interface IWorktreeService {
   listBranches(cwd: string): Promise<WorktreeBranchListResult>
   /** 列出 cwd 所在 workspace 的所有 worktree。 */
   list(cwd: string): Promise<WorktreeListResult>
+  /**
+   * 后台刷新默认远端的 remote-tracking ref（打开仓库预热）。永不抛：预热失败仅日志留痕，
+   * 不影响调用方主流程——workspace.record 的 fire-and-forget 调用依赖此契约。
+   */
+  prefetchDefaultRemote(cwd: string): Promise<void>
 }

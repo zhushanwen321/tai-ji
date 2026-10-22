@@ -29,7 +29,9 @@
         :collision-padding="8"
       >
         <!-- 标记完成（自 ghost 层迁入 2026-10-10）：toggle 模块级 markers 集合，
-             Display 的 icon/降权响应式跟随；title 随态切换。
+             Display 的 icon/降权响应式跟随；title 随态切换。图标 = 对勾系 CircleCheck
+             （「做完了」语义；归档箱 Archive 归归档域——「收起来」，两者图标区分文案不共用）；
+             已完成态只靠 success 色承载，不做 fill（CircleCheck 填充会把圆填实淹没勾形）。
              键盘高亮 = data-[highlighted]（与 ui/select SelectItem 先例同形态；demo
              .ctxmenu button:hover 仅变底色）；确认态分支不挂 highlighted 类，红底不被覆盖。 -->
         <ContextMenuItem
@@ -40,7 +42,7 @@
             : 'text-neutral-fg hover:bg-surface-hover hover:text-neutral-fg data-[highlighted]:bg-surface-hover data-[highlighted]:text-neutral-fg'"
           @select="onMarkDone"
         >
-          <Archive :class="markedDone ? 'fill-current' : ''" />
+          <CircleCheck />
           <span>{{ markedDone ? t('sidebar.sessionItem.unmarkDone') : t('sidebar.sessionItem.markDone') }}</span>
         </ContextMenuItem>
         <!-- 导出 JSONL（2026-10-12 立项落地；demo 菜单
@@ -149,7 +151,7 @@
 <script setup lang="ts">
 import { computed, ref, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Archive, Check, CornerLeftUp, FileDown, Power, Quote, Square } from '@lucide/vue'
+import { CircleCheck, Check, CornerLeftUp, FileDown, Power, Quote, Square } from '@lucide/vue'
 import type { SessionJsonlExportPayload } from '@taiji/shared'
 import {
   ContextMenuRoot,

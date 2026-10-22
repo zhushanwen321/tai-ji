@@ -13,6 +13,7 @@ export const BUILTIN_PREVIEW: Readonly<Record<Exclude<RenameStyle, 'custom'>, st
   slug: '根据以上对话，为这个会话生成一个 slug 式标题。要求：\n- 名词或动名词词组，例：「修复登录超时」「重构配置加载」「refactor-config-loader」\n- 反例（错误）：「我帮你修复了登录 bug」「This session is about fixing bugs」\n- 英文小写 kebab-case，中文直接用词组，不要句号\n使用对话所用的语言。只输出标题文本。',
   sentence: '根据以上对话，为这个会话生成一个简短标题：一个不超过 20 字的完整短句，概括本次任务的目标或结果，不加句尾标点。反例（错误）：「重构」。使用对话所用的语言。只输出标题文本。',
   emoji: '根据以上对话，为这个会话生成一个标题：以一个贴切的 emoji 开头，后接不超过 15 字的词组或短句。例：「🔧 重构配置加载」「🐛 修复登录超时」。使用对话所用的语言。只输出标题文本。',
+  topic: '为会话生成一个「主题标签」式标题——像代码库里的分支名或任务卡名，不像一句话。\n默认形态：对象 + 动作（修复、重构、优化、简化、清理、设计、审查、适配、统一），4~15 个字。\n- 会话围绕具体模块、工具、技能或文件时，标题里直接用它的原词（英文原样保留），例：「provider统一」「composer icon」「pr-cr-fix」\n- 主题本身就是单一功能点时，裸名词即可，例：「托盘」「快捷键」「changeset」\n例外：定时或等待类任务（定时执行、等某条件满足后继续、额度恢复后重试），标题写成「触发条件 + 动作」的完整短句，例：「18:46 额度恢复后继续 dev-flow 开发」「每30分钟检查两会话完成后执行 pr-cr-fix」\n禁止：完整叙述句（如「我帮你修复了登录 bug」）、超长任务描述（如「分析侧边栏会话重命名失败的问题并给出修复方案」）、时态与结果表述（已修复X、完成了X）、emoji、句尾标点。\n用对话所用的语言写，代码符号保留原词。只输出标题文本。',
 }
 
 /** slug 风格的 systemPrompt（参考折叠区展示）——与 extension RENAME_SYSTEM_PROMPT 同值镜像。 */
@@ -24,5 +25,6 @@ export const STYLE_EXAMPLES: Readonly<Record<RenameStyle, string>> = {
   slug: 'refactor-config-loader',
   sentence: '重构配置加载模块',
   emoji: '🔧 重构配置加载',
+  topic: '对话投递重构',
   custom: '—',
 }

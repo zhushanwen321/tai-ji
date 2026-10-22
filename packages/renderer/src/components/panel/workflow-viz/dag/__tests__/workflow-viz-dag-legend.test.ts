@@ -114,13 +114,13 @@ describe('WorkflowVizDag 图例（workflow-overlay-refine D4）', () => {
     const legend = wrapper.find('[data-testid="wfvz-dag-legend"]')
     expect(legend.classes()).toContain('pointer-events-none')
     expect(legend.classes()).toContain('absolute')
-    // 图例在场时节点点击照常上抛（agent 语义）
-    const agentNode = wrapper.find('[data-testid="wfvz-dag-node-n-done"]')
-    await agentNode.trigger('pointerdown')
-    await agentNode.trigger('pointerup')
+    // 图例在场时 pending 节点点击照常上抛（phase 语义；[2026-10-19] agent 语义已删）
+    const pendingNode = wrapper.find('[data-testid="wfvz-dag-node-n-pending"]')
+    await pendingNode.trigger('pointerdown')
+    await pendingNode.trigger('pointerup')
     const events = wrapper.emitted('select')
     expect(events).toHaveLength(1)
-    expect(events?.[0]?.[0]).toEqual({ semantic: 'agent', nodeId: 'n-done', templateName: 'done', phase: 'p' })
+    expect(events?.[0]?.[0]).toEqual({ semantic: 'phase', phase: 'p' })
     // 图例在场时 wheel 缩放照常生效（视口 transform 偏离初始 1:1）
     const viewport = wrapper.find('[data-testid="wfvz-dag-viewport"]')
     expect(viewport.attributes('transform')).toContain('scale(1)')

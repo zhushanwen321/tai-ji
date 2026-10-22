@@ -478,6 +478,43 @@ describe('projectSubagentModelDetailIntoRuns — run 详情逐成员携带', () 
     expect(result[0]?.agentCalls[0]?.recentEffectiveModel).toBeUndefined()
   })
 
+  // ── 盖章模型透传（call.model 唯一填充点——v2 骨架行无 model 域，五级回退兜底的数据面）──
+
+  it('盖章模型透传：member.model 经注入的显示词汇翻译落 call.model（引擎原生 ref → pi 词汇，engineId 随行透传）', () => {
+    const runs = [{ ...runBase, agentCalls: [{ id: 0, agent: 'w', status: 'running' as const }] }]
+    const zcodeMember: SubagentRecord = {
+      ...memberA,
+      model: 'account:bigmodel-individual-coding-plan/GLM-5.3-Flash',
+      engine: 'zcode',
+      recentEffectiveModel: undefined,
+    }
+    const translate = vi.fn((_engineId: string, ref: string) => ref.replace('account:bigmodel-individual-coding-plan', 'zai-coding-cn'))
+    const result = projectSubagentModelDetailIntoRuns('main-1', runs, [zcodeMember], undefined, undefined, translate)
+    expect(translate).toHaveBeenCalledWith('zcode', 'account:bigmodel-individual-coding-plan/GLM-5.3-Flash')
+    expect(result[0]?.agentCalls[0]?.model).toBe('zai-coding-cn/GLM-5.3-Flash')
+  })
+
+  it('盖章模型透传：未注入翻译按原值透传（pi 成员 ref 本就是 pi 词汇——恒等语义）', () => {
+    const runs = [{ ...runBase, agentCalls: [{ id: 0, agent: 'w', status: 'running' as const }] }]
+    const piMember: SubagentRecord = { ...memberA, model: 'xiaomi-token-plan-cn/mimo-v2.6-flash', recentEffectiveModel: undefined }
+    const result = projectSubagentModelDetailIntoRuns('main-1', runs, [piMember], undefined)
+    expect(result[0]?.agentCalls[0]?.model).toBe('xiaomi-token-plan-cn/mimo-v2.6-flash')
+  })
+
+  it('盖章模型透传：member.model 缺席（缺省派发存量 record）不造键；成员圈定 miss 的 call 不触碰', () => {
+    const runs = [
+      { ...runBase, agentCalls: [
+        { id: 0, agent: 'w', status: 'running' as const },
+        { id: 1, agent: 'w2', status: 'running' as const, model: 'p/kept' },
+      ] },
+    ]
+    const noModelMember: SubagentRecord = { ...memberA, model: undefined, recentEffectiveModel: undefined }
+    const result = projectSubagentModelDetailIntoRuns('main-1', runs, [noModelMember], undefined, undefined, () => 'should-not-appear')
+    expect(result[0]?.agentCalls[0]?.model).toBeUndefined()
+    // id 1 无成员圈定：原值保留（翻译函数不得被无关 call 触发）
+    expect(result[0]?.agentCalls[1]?.model).toBe('p/kept')
+  })
+
   it('changed/skip 交错多 run：输出完整不丢 run（dmg-r2-1——惰性 slice + push 追加式曾把首个 changed 之后 skip run 整条丢失）', () => {
     const mkRun = (runId: string) => ({
       ...runBase,

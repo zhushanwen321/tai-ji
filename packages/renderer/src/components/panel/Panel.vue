@@ -15,9 +15,21 @@
     compacting 的禁用模态由 Composer 内部承担）。
   -->
   <section
+    ref="panelElRef"
     class="relative flex min-w-0 h-full flex-col overflow-hidden"
     :style="panelStyle"
   >
+    <!-- 对话流左侧套餐浮层（plan-quota-float）：全部 quota.enabled provider 的窗口用量。
+         纯 overlay 悬浮在对话流上方，不挤占消息列/composer 边距。挂载域 =
+         conversation/trace 分支且 entries 非空（dead/landing/empty 不挂、无额度监控
+         provider 也不挂）；收起态由 quotaFloatCollapsed 单点收敛（trace 激活 /
+         drawer 打开 / panel 宽度不足 / 用户手动）。 -->
+    <PlanQuotaFloatPanel
+      v-if="quotaFloatVisible"
+      :session-id="sessionId"
+      :collapsed="quotaFloatCollapsed"
+      @update:user-collapsed="quotaFloatUserCollapsed = $event"
+    />
     <!-- dead session 占位：进程已退出，不渲染对话流/composer，提供重开入口（W6：dead 优先级吞掉 form overlay） -->
     <div
       v-if="panelView.kind === 'dead'"
@@ -152,13 +164,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onScopeDispose, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessageSquare, AlertCircle, RotateCcw, Trash2, LoaderCircle } from '@lucide/vue'
 import { isFormQuestion, isScheduleDraft, type FormQuestion, type ScheduleDraft } from '@zhushanwen/extension-protocol'
 import MessageStream from './MessageStream.vue'
 import ModeDeclarationRow from './ModeDeclarationRow.vue'
 import Composer from './Composer.vue'
+import PlanQuotaFloatPanel from './PlanQuotaFloatPanel.vue'
+import {
+  QUOTA_FLOAT_AUTO_COLLAPSE_PANEL_WIDTH,
+} from './plan-quota-float'
+import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
+import { useQuotaPlanList } from '@/composables/features/model/useQuotaPlanList'
 import { COMPOSER_BAND_CLASS } from './composer-band'
 import PlanModeBar from './plan/PlanModeBar.vue'
 import TraceView from './trace/TraceView.vue'
@@ -341,10 +359,57 @@ async function onDeleteGhostSession(): Promise<void> {
   }
 }
 
+// ── 套餐浮层（plan-quota-float）收起状态（宿主单点收敛四来源，纯 overlay 不让位）──
+/** 文件 drawer 打开 → 浮层收起（per-session 分区状态，切会话自动跟随） */
+const { isOpen: quotaDrawerOpen } = useSideDrawer()
+/** 用户手动收起（浮层把手/折叠钮上报；auto 来源解除后保持到再次点击展开） */
+const quotaFloatUserCollapsed = ref(false)
+/**
+ * panel 宽度不足 → 浮层自动收起（收起来源之一，独立于用户手动：宽度恢复即自动展开，
+ * 用户手动收起仍优先保持）。阈值与推导见 plan-quota-float.ts
+ * QUOTA_FLOAT_AUTO_COLLAPSE_PANEL_WIDTH。读 border box 总宽（含 padding——
+ * content box 会随后续可能出现的容器内边距漂移，border box 恒等于用户看到的 panel 宽）。
+ */
+const panelElRef = ref<HTMLElement | null>(null)
+const quotaFloatWidthCollapsed = ref(false)
+onMounted(() => {
+  const el = panelElRef.value
+  if (!el || typeof ResizeObserver === 'undefined') return
+  const observer = new ResizeObserver((observed) => {
+    const box = observed[0]?.borderBoxSize?.[0]
+    const width = box ? box.inlineSize : el.getBoundingClientRect().width
+    quotaFloatWidthCollapsed.value = width < QUOTA_FLOAT_AUTO_COLLAPSE_PANEL_WIDTH
+  })
+  observer.observe(el)
+  onScopeDispose(() => observer.disconnect())
+})
+/** 浮层清单（挂载判据源：entries 为空 → 浮层本体不渲染，见下） */
+const { entries: quotaEntries } = useQuotaPlanList()
+/** 浮层挂载域 = conversation/trace 分支 **且清单非空**：清单为空时浮层本体（内部
+ *  v-if="entries.length > 0"）不渲染——全新安装/未配置额度监控的常态，不渲染空壳浮层。 */
+const quotaFloatVisible = computed(
+  () =>
+    (conversationSessionId.value !== null || traceSessionId.value !== null)
+    && quotaEntries.value.length > 0,
+)
+/** 收起 = Trace 视图激活 或 drawer 打开 或 panel 宽度不足 或 用户手动收起 */
+const quotaFloatCollapsed = computed(
+  () =>
+    traceSessionId.value !== null
+    || quotaDrawerOpen.value
+    || quotaFloatWidthCollapsed.value
+    || quotaFloatUserCollapsed.value,
+)
+
 /**
  * Panel 底色 + --panel-bg CSS 变量（供子组件如 sticky turn-meta 消费，保证浮层底色与所在 panel 一致）。
  * section 透明继承 MainPanel 的 bg-surface，--panel-bg=surface 供子组件浮层对齐。
  * header 已提升到 PanelContainer，本组件仅 body 区，无边框/圆角（融入统一外壳）。
+ *
+ * 套餐浮层（plan-quota-float）是纯 overlay：悬浮在对话流上方，不设让位 gutter、
+ * 不挤占消息列/composer 边距（宽度不足时的收起兜底见 quotaFloatWidthCollapsed）。
  */
-const panelStyle = computed(() => ({ '--panel-bg': 'var(--surface)' }))
+const panelStyle = computed(() => ({
+  '--panel-bg': 'var(--surface)',
+}))
 </script>

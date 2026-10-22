@@ -43,7 +43,7 @@ AI 继续干别的；测试在后台跑
 [约 4 分钟后] 对话流出现一条 custom 消息（background-bash 类型，SystemNotice 结构化行）：
   ─── ⌨ pnpm test [后台] · exit 1 · 4m12s ───
   （命令 mono 主体 + 「后台」chip + exit/耗时 meta，exit≠0 走 warn 色；写给 LLM 接力的 content
-   日志行不再上屏。旧 session 数据无 details → 结构化解析落空，仍走 Archive 图标 + content
+   日志行不再上屏。旧 session 数据无 details → 结构化解析落空，仍走 Info 图标 + content
    原文兜底行——两形态并存。）
 ```
 

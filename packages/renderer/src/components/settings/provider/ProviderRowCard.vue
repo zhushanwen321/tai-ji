@@ -107,6 +107,7 @@
         :provider="isNew ? null : provider"
         :oauth-present="oauthPresent"
         :oauth-supported="oauthSupported"
+        :quota-presets="quotaPresets"
         @dirty-change="emit('dirty-change', $event)"
         @saved="emit('saved', $event)"
         @cancel="emit('cancel')"
@@ -125,7 +126,7 @@ import { Switch } from '@/components/ui/switch'
 import { PopoverTrigger } from '@/components/ui/popover'
 import ModelSelectPopover from '@/components/panel/ModelSelectPopover.vue'
 import { ProviderEditBody } from '@taiji/ui/features/settings'
-import type { ProviderId, ProviderInfo, ProviderStatus } from '@taiji/shared'
+import type { ProviderId, ProviderInfo, ProviderStatus, QuotaPreset } from '@taiji/shared'
 import { authBadgeClass, authBadgeTextKey } from './provider-badge'
 
 defineProps<{
@@ -147,6 +148,8 @@ defineProps<{
   oauthPresent?: boolean
   /** 该 provider 支持 OAuth 登录（父侧按 builtinProviders 模板判定） */
   oauthSupported: boolean
+  /** quota presets（settings store 快照，透传 ProviderEditBody 匹配展示；undefined → 编辑体回落编译期基线） */
+  quotaPresets?: QuotaPreset[]
 }>()
 
 const emit = defineEmits<{

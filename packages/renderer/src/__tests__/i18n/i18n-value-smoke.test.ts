@@ -65,10 +65,10 @@ describe('GitPanel en-US locale 显示英文按钮 + 状态 pill', () => {
     expect(i18n.global.t('panel.git.pillConflict')).toBe('Conflict')
   })
 
-  it('SideDrawer 5 tab label 走 i18n key', async () => {
+  it('SideDrawer tab label 走 i18n key', async () => {
     await setLocale('en-US')
-    // tabTerminal / tabBrowser / tabGit / tabDoc / tabDetail key 存在且非空
-    for (const k of ['tabTerminal', 'tabBrowser', 'tabGit', 'tabDoc', 'tabDetail']) {
+    // tabTerminal / tabBrowser / tabGit / tabDoc / tabDetail / tabTrace key 存在且非空
+    for (const k of ['tabTerminal', 'tabBrowser', 'tabGit', 'tabDoc', 'tabDetail', 'tabTrace']) {
       const label = i18n.global.t(`panel.sideDrawer.${k}`)
       expect(label).toBeTruthy()
       expect(label).not.toBe(`panel.sideDrawer.${k}`)

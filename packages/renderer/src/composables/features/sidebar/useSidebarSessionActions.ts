@@ -30,6 +30,7 @@ import { useProjectStore } from '@/stores/project'
 import { useToast } from '@/composables/useToast'
 import { markForcedExit, consumeForcedExit } from '@/composables/effects/forced-exit-marks'
 import { useI18n } from 'vue-i18n'
+import { archiveErrorKey } from './archive-error-text'
 
 /** useSidebarSessionActions 所需的注入依赖（来自 useSidebar + Sidebar.vue 本地 UI ref） */
 export interface UseSidebarSessionActionsOptions {
@@ -40,6 +41,12 @@ export interface UseSidebarSessionActionsOptions {
   loadSessions: () => void
   renameSession: (id: string, label: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
+  /**
+   * 归档（session-archive D6/D14，u-renderer-entry）：SessionItem 悬停归档钮两段确认后
+   * emit archive → 本 handler → useSidebar.archiveSession（core 编排：
+   * cleanupSessionState 同族 + wasActive 回退）。
+   */
+  archiveSession: (id: string) => Promise<void>
   deleteFolder: (cwd: string) => Promise<{ failed: Array<{ error?: string }> }>
   /** 归入项目（D14 语义修正，2026-08-04）：RPC + 乐观更新编排在 useSidebar。 */
   assignSessionToProject: (sessionId: string, projectId: string) => Promise<void>
@@ -57,6 +64,7 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     loadSessions,
     renameSession,
     deleteSession,
+    archiveSession,
     deleteFolder,
     assignSessionToProject,
     renameOpen,
@@ -103,6 +111,26 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
       const msg = e instanceof Error ? e.message : String(e)
       toastError(t('sidebar.deleteSessionFailed', { msg }))
     }
+  }
+
+  /**
+   * 归档 session（session-archive D6/D13，u-renderer-entry）：悬停归档钮两段确认后经
+   * SessionItem/SessionList emit 到此。成功 toast「已归档 "<名>"」（§5.1 成功路径；压缩
+   * 在后台进行，文案不宣称已压缩——toast 无 action 通道，[查看归档] 跳转降级为侧栏
+   * 归档入口角标 +1 的即时可见反馈）。失败 toast 按 error envelope code 分流（§5.2
+   * 界面表现 + 恢复指引的双语文案；未知码回退通用模板 + runtime message）。
+   * 生成中已由归档钮禁用拦截（D13 renderer 层），此处到达的均为可归档态。
+   */
+  async function onArchiveSession(id: string): Promise<void> {
+    const label = useSessionStore().list.find((s) => s.id === id)?.label ?? ''
+    try {
+      await archiveSession(id)
+    } catch (e) {
+      const key = archiveErrorKey('archive', e)
+      toastError(t(key ?? 'sidebar.archiveSessionFailed', { msg: e instanceof Error ? e.message : String(e) }))
+      return
+    }
+    toastInfo(t('sidebar.archiveSessionDone', { name: label.length > 0 ? label : t('archive.summary.unnamed') }))
   }
 
   /** 目录行「+」：以该目录为预选 cwd 进 landing（延迟 create，session 由首发提交创建） */
@@ -277,6 +305,7 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     onNewSessionInFolder,
     onRenameSession,
     onDeleteSession,
+    onArchiveSession,
     onDeleteFolder,
     onAbortSession,
     onForceQuitSession,

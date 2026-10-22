@@ -125,6 +125,8 @@ interface Harness {
   destroySession: (session: SessionInfo) => void
   /** onDidActivateSession 捕获的回调（会话激活/焦点切换信号注入口） */
   activateSession: (session: SessionInfo) => void
+  /** onDidCreateSession 捕获的回调（会话创建信号注入口） */
+  createSession: (session: SessionInfo) => void
   /** views.update 收到的最新树（modal 内容断言入口） */
   lastTree: () => GuiComponent[]
 }
@@ -239,6 +241,14 @@ async function setup(opts: {
     },
   )
 
+  let createHandler: ((session: SessionInfo) => void) | null = null
+  api.sessions.onDidCreateSession = vi.fn(
+    (handler: (session: SessionInfo) => void): { dispose: () => void } => {
+      createHandler = handler
+      return { dispose: () => {} }
+    },
+  )
+
   const context = { api, subscriptions: [] } as unknown as PluginContext
   await mod.activate(context)
 
@@ -253,6 +263,7 @@ async function setup(opts: {
     notifyWarnings,
     destroySession: (session: SessionInfo) => destroyHandler?.(session),
     activateSession: (session: SessionInfo) => activateHandler?.(session),
+    createSession: (session: SessionInfo) => createHandler?.(session),
     lastTree: () => trees[trees.length - 1] ?? [],
   }
 }
@@ -874,5 +885,41 @@ describe('buildTaskRows: 展示层三态', () => {
       'every 1m · 下次 in 1d',
       '已执行 2 次 · 上次 1d ago · 成功',
     ])
+  })
+})
+
+// ── ⑩ onDidCreateSession 补挂点（ADR-0097 拉为主配套：新建会话即建镜像）──────
+
+describe('onDidCreateSession: 新会话即建镜像（didCreate 即挂失效订阅，非等 didActivate）', () => {
+  it('新建会话 didCreate → 首拉推 hidden=true（新会话零任务），失效信号可达（readEntries 触发）', async () => {
+    const h = await setup({
+      readScript: [
+        // 冷启动兜底 s-1 首拉（空）
+        { entries: [] },
+        // s-2 didCreate 补挂首拉（空——新会话零任务）
+        { entries: [] },
+        // s-2 失效信号触发后增量拉取（出现一个任务：按钮出现）
+        { sessionFile: '/sessions/s-2.jsonl', entries: [upsertEntry('cccc2222', true, 'e1', '/sessions/s-2.jsonl')], leafEntryId: 'e1' },
+      ],
+    })
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+
+    // 新建会话 s-2（session.create 不触发 didActivate——runtime handleSessionCreate 只
+    // reply + 广播会话列表）：didCreate 即建镜像，首拉推 hidden=true（零任务不显示）
+    h.createSession(makeSession({ id: 's-2', label: 'fresh-session' }))
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+
+    expect(h.readCalls).toEqual([
+      { sessionId: 's-1', opts: { customType: TASK_ENTRY_TYPE } },
+      { sessionId: 's-2', opts: { customType: TASK_ENTRY_TYPE } },
+    ])
+    expect(lastHeaderAction(h.api)).toMatchObject({ sessionId: 's-2', hidden: true })
+
+    // 失效订阅就位：s-2 任务 entry 失效信号 → 重新拉取（首拉空 envelope 无游标 → 仍全量）
+    // → 徽标推送（按钮出现）。若无 didCreate 挂点，此信号无镜像可达、按钮永不出现
+    h.invalidate('s-2')
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+    expect(h.readCalls.at(-1)).toEqual({ sessionId: 's-2', opts: { customType: TASK_ENTRY_TYPE } })
+    expect(lastHeaderAction(h.api)).toMatchObject({ sessionId: 's-2', badge: '1', hidden: false })
   })
 })

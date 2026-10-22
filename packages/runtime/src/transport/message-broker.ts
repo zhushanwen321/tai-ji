@@ -16,6 +16,7 @@ import type { ServerMessage, ServerMessageMap, ServerMessageType, SkillCacheScop
 import { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES } from '@taiji/shared'
 import type { ISessionService, IConfigService, IModelService, IMessageBroker, IPluginService, IExtensionService } from '../interfaces.js'
 import { buildDirConfigs, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS } from '../services/skill-dir-config.js'
+import type { ArchiveService } from '../services/archive/archive-service.js'
 import { formatReplyOversizeMessage, appendReplyFrameJournal } from '../services/message-bus/outbound-frame-registry.js'
 import { warnIfBacklogged } from '../utils/backpressure-warn.js'
 import type { ErrorDetails } from './message-context.js'
@@ -76,6 +77,13 @@ export interface BrokerServices {
   projectRoot: string
   /** 应用 + pi 版本号（sendInitialState 推 app.info）。 */
   appInfo: { appVersion: string; piVersion: string }
+  /**
+   * 归档服务（session-archive 设计 D5，u-rpc-wiring）：config.sessions 帧的 archiveCount
+   * 角标数据源（窄视图——broker 只读列表，归档操作 RPC 走 session-message-handler）。
+   * 可选：未注入（旧装配 / 无归档数据的最小测试）时帧内 archiveCount 缺省，消费方按 0
+   * 隐藏角标（协议 optional 字段语义）。
+   */
+  archiveService?: Pick<ArchiveService, 'listArchiveEntries'>
 }
 
 /**
@@ -242,7 +250,16 @@ export class ServerMessageBroker implements IMessageBroker {
   // 每个 builder 返回 1~2 条消息（provider 段含 config.providers + model.list）。
 
   private buildSessionListMsg(): ServerMessage {
-    return { type: 'config.sessions', id: this.nextPushId(), payload: { groups: this.services.sessionService.listPersistedSessions() } }
+    // archiveCount（session-archive 设计 D5 协议变更点）：归档角标随广播帧即时——计数 =
+    // 归档列表条目数（listArchiveEntries 过滤 .restoring，与 config.archives 列表同数据源，
+    // 角标与「已归档 (N)」头恒一致）。广播频度 = 用户动作级（create/delete/rename/归档域操作），
+    // 每帧一次目录扫描可接受；archiveService 未注入时字段缺省（协议 optional）。
+    const archiveCount = this.services.archiveService?.listArchiveEntries().length
+    return {
+      type: 'config.sessions',
+      id: this.nextPushId(),
+      payload: { groups: this.services.sessionService.listPersistedSessions(), ...(archiveCount !== undefined ? { archiveCount } : {}) },
+    }
   }
   /**
    * app.info 消息构造（sendInitialState 首推）。

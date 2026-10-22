@@ -1,5 +1,11 @@
 # @zhushanwen/pi-delivery-port
 
+## 0.2.1
+
+### Patch Changes
+
+- df839883b: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.22.0 → @zhushanwen/extension-protocol@0.23.0)
+
 ## 0.2.0
 
 ### Minor Changes

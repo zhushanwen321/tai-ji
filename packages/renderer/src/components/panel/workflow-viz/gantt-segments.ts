@@ -464,8 +464,8 @@ export interface WorkflowNodeDerivedInput { // oe-exempt:20261002:framework:work
  *   phase 整段未执行；run 运行中/中断（暂停态）零实例节点一律 pending，防循环重入
  *   场景「phase 第一轮收束、第二轮未到」时下轮才执行的调用点被误判 skipped 而震荡。
  * - 有实例：按实例渲染态聚合，优先级 retrying > running > failed > done > pending
- *   （failed > done：含失败实例的节点显示失败——对齐 WorkflowTab aggregatePhaseStatus
- *   「含 failed 即 failed」先例；retrying/running 优先表达进行中故障与活动）。
+ *   （failed > done：含失败实例的节点显示失败——「含 failed 即 failed」先例；
+ *   retrying/running 优先表达进行中故障与活动）。
  */
 export function deriveNodeStatus(input: WorkflowNodeDerivedInput): WorkflowNodeDerivedStatus {
   if (input.calls.length === 0) {

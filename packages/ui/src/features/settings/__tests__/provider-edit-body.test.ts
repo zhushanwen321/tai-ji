@@ -30,9 +30,11 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
+import type { Ref } from 'vue'
 import type {
   ProviderInfo,
   ProviderId,
+  QuotaPreset,
   SetProviderData,
 } from '@taiji/shared'
 import {
@@ -42,6 +44,7 @@ import {
   createSettingsStore,
   getSettingsStore,
   __resetPlatformForTesting,
+  type QuotaConfigureFactoryInputs,
   type SettingsTransport,
   type DiscoverModelsResponse,
 } from '@taiji/core'
@@ -168,8 +171,9 @@ const CATALOG_GATEWAY_P: ProviderInfo = {
 // ── injection stub（零 renderer import：契约对齐 core quota-configure-module.ts）──
 
 /** QUOTA_CONFIGURE_FACTORY_KEY stub 工厂（vi.fn 包装供「注入被真实消费」断言；契约门由
- *  makeQuotaModuleStub 的 QuotaConfigureModule 返回标注承担） */
-const quotaFactoryStub = vi.fn(() => makeQuotaModuleStub({ state: 'ready' }))
+ *  makeQuotaModuleStub 的 QuotaConfigureModule 返回标注承担）。入参可选：preset 捕获用例
+ *  经 mockImplementationOnce 收 QuotaConfigureFactoryInputs，其余用例零参兼容。 */
+const quotaFactoryStub = vi.fn((_inputs?: QuotaConfigureFactoryInputs) => makeQuotaModuleStub({ state: 'ready' }))
 
 const toastInfoSpy = vi.fn()
 const toastErrorSpy = vi.fn()
@@ -295,6 +299,50 @@ describe('凭证区条件化：oauth 型 provider', () => {
     const loginBtn = wrapper.find('[data-testid="oauth-relogin-btn"]')
     expect(loginBtn.exists()).toBe(true)
     expect(loginBtn.text().trim()).toBe('settings.providerEdit.credentialOauthLogin')
+  })
+
+  it('quota preset 自动关联：baseUrl 命中基线 → 工厂收到的 preset 求值命中；无关 baseUrl → undefined', async () => {
+    // matchedPreset computed 由 quota module 消费（preset.value）触发求值；工厂 stub 捕获
+    // 注入引用并读值，覆盖 ProviderEditBody 的 preset 匹配链（命中与未命中两分支）。
+    let captured: Ref<QuotaPreset | undefined> | undefined
+    quotaFactoryStub.mockImplementationOnce((inputs?: QuotaConfigureFactoryInputs) => {
+      captured = inputs?.preset
+      return makeQuotaModuleStub({ state: 'ready' })
+    })
+    wrapper = mountBody({ ...OAUTH_P, baseUrl: 'https://open.bigmodel.cn/api/paas/v4' })
+    await flushPromises()
+    expect(captured).toBeDefined()
+    expect(captured!.value?.fetcher).toBe('zhipu')
+    // 第一段收尾后再挂第二段（双实例并存会让 afterEach 的 unmount 走已清 DOM 报错）
+    wrapper.unmount()
+    wrapper = null
+    document.body.innerHTML = ''
+
+    let capturedMiss: Ref<QuotaPreset | undefined> | undefined
+    quotaFactoryStub.mockImplementationOnce((inputs?: QuotaConfigureFactoryInputs) => {
+      capturedMiss = inputs?.preset
+      return makeQuotaModuleStub({ state: 'ready' })
+    })
+    // CUSTOM_P（name 'My OpenAI'）无 preset 关键字，自建 baseUrl 也无 pattern 命中
+    wrapper = mountBody({ ...CUSTOM_P, baseUrl: 'https://self-hosted.example.internal/v1' })
+    await flushPromises()
+    expect(capturedMiss).toBeDefined()
+    expect(capturedMiss!.value).toBeUndefined()
+  })
+
+  it('quotaPresets 传空数组（store 初值 / RPC 拉取失败）→ 回落编译期基线，matchedPreset 不永久为空', async () => {
+    // dmg-r3-1 回归：settings-store 的 quotaPresets 初值是 `[]`（非 undefined），`??` 只覆盖
+    // undefined——空数组原样穿过回落表达式会让 matchedPreset 恒 undefined，额度区拿不到
+    // 自动关联的 preset（C-proc-21：用户可见的辅助能力失败禁静默空值）。
+    let captured: Ref<QuotaPreset | undefined> | undefined
+    quotaFactoryStub.mockImplementationOnce((inputs?: QuotaConfigureFactoryInputs) => {
+      captured = inputs?.preset
+      return makeQuotaModuleStub({ state: 'ready' })
+    })
+    wrapper = mountBody({ ...OAUTH_P, baseUrl: 'https://open.bigmodel.cn/api/paas/v4' }, { quotaPresets: [] })
+    await flushPromises()
+    expect(captured).toBeDefined()
+    expect(captured!.value?.fetcher).toBe('zhipu')
   })
 
   it('点 relogin 按钮 → 上抛 oauth-login（OAuth 状态机在父组件，ui 零 renderer import）', async () => {
@@ -563,19 +611,13 @@ describe('编排链路：dirty 上抛与测试连接', () => {
     expect(wrapper.emitted('cancel')).toBeTruthy()
   })
 
-  it('测试连接：经 transport.discoverModels 探活，成功态渲染（用户可见反馈）', async () => {
+  it('测试连接按钮已退役：编辑体内不渲染（入口下沉到模型行，provider 级一键全测移除）', async () => {
     wrapper = mountBody(APIKEY_P)
     await flushPromises()
 
-    // 两个 secondary 按钮（测试连接 / 自动发现）取第一个
+    // 2026-10-21 用户拍板：不再提供「所有模型都测试」的 provider 级入口
     const testBtn = wrapper.findAll('button').find((b) => b.text().includes('settings.providerEdit.testConnection'))
-    expect(testBtn).toBeTruthy()
-    await testBtn!.trigger('click')
-    await flushPromises()
-
-    expect(discoverModelsSpy).toHaveBeenCalledTimes(1)
-    // 成功态用户可见（t(key, {count}) mock 会 append 命名参数值）
-    expect(wrapper.text()).toContain('settings.providerEdit.testOk')
+    expect(testBtn).toBeUndefined()
   })
 })
 
@@ -1053,22 +1095,21 @@ describe('M4 catalog 展示：类型只读派生 + 端点（自定义网关）',
   })
 })
 
-// ══ 场景 ⑨：M3b 测试连接/发现接线（计划 D-17 集成缺口回归）════════════════════
+// ══ 场景 ⑨：per-model 行内测试接线（2026-10-21 测试入口下沉）════════════════════
 
 /**
- * M3b 单元把 ProviderTestDiscoverSection 改成「按协议分组 + catalog 门控模型发现」并加了 4 个
- * 可选 props（providerKind/testResults/testError/providerBaseUrl），但宿主 ProviderEditBody 未接线，
- * 4 个 props 全走默认值——子组件级测试绿，应用级「模型发现」按钮对 catalog 仍渲染、测试结果拿不到
- * results（计划登记为 D-17）。本组断言**应用级**行为：mount 宿主组件、点宿主按钮、断言宿主 DOM，
- * 证明 props 真由 useProviderEdit 经 useCatalogDisplay().testDiscoverProps 接上，而非子组件默认值。
+ * 2026-10-21（用户拍板）：「测试连接」provider 级入口退役，测试入口下沉到每个模型行
+ * （ModelTestButton，编排经 MODEL_LIST_DEPS_KEY.modelTest 注入 = core discover module 状态切片）。
+ * 本组断言**应用级**行为：mount 宿主组件、点宿主内的行内按钮、断言宿主 DOM 与 transport spy，
+ * 证明编排真由 useProviderEdit 的 discover module 接上，而非组件空壳。
  *
  * 三视角：
- * - 黑盒用户视角（主）：catalog 编辑体内无「模型发现」按钮、custom 有；测试连接后按协议分组的结果
- *   行与失败指引出现在编辑体内；无可用模型时的指引文案按 provider 体系分叉。
- * - 构建者白盒（佐证）：结果数据由 transport.discoverModels 真实流经 useProviderEdit → props → DOM。
+ * - 黑盒用户视角（主）：catalog/custom 编辑体内均无「测试连接」按钮；行内测试按钮出现在
+ *   builtin 行与自定义行；点击后结果条出现在该行下（成功带耗时、失败带真实原因）。
+ * - 构建者白盒（佐证）：点击经 transport.discoverModels 发出 mode=test + modelId 单模型请求。
  * - 观察者形态：全部为 DOM 断言 + transport spy，不窥探组件内部状态。
  */
-describe('M3b 接线：测试连接分组结果与模型发现门控（应用级）', () => {
+describe('per-model 行内测试接线（应用级）', () => {
   const DISCOVER_TEXT = 'settings.providerEdit.autoDiscover'
   const TEST_TEXT = 'settings.providerEdit.testConnection'
 
@@ -1077,84 +1118,68 @@ describe('M3b 接线：测试连接分组结果与模型发现门控（应用级
     return wrapper!.findAll('button').find((b) => b.text().includes(text))
   }
 
-  async function clickTest(): Promise<void> {
-    const btn = findButton(TEST_TEXT)
-    expect(btn).toBeTruthy()
-    await btn!.trigger('click')
-    await flushPromises()
-  }
-
-  it('catalog provider：编辑体内不渲染「模型发现」按钮（catalog 门控经宿主接线生效）', async () => {
+  it('catalog provider：无「测试连接」、无「模型发现」按钮；builtin 行有行内测试按钮', async () => {
     wrapper = mountBody(CATALOG_MIXED_P)
     await flushPromises()
 
+    expect(findButton(TEST_TEXT)).toBeUndefined()
     expect(findButton(DISCOVER_TEXT)).toBeUndefined()
-    // 门控只针对发现：测试连接按钮仍在
-    expect(findButton(TEST_TEXT)).toBeTruthy()
+    // builtin 行内测试按钮（data-testid = model-test-<modelId>，三个 builtin 模型各一）
+    for (const id of ['minimax-m3', 'qwen3.8-flash', 'gpt-5.6-luna']) {
+      expect(wrapper.find(`[data-testid="model-test-${id}"]`).exists()).toBe(true)
+    }
   })
 
-  it('custom provider：编辑体内渲染「模型发现」按钮（custom 发现语义保留）', async () => {
+  it('custom provider：有「模型发现」、无「测试连接」按钮；自定义行有行内测试按钮', async () => {
     wrapper = mountBody(CUSTOM_P)
     await flushPromises()
 
+    expect(findButton(TEST_TEXT)).toBeUndefined()
     expect(findButton(DISCOVER_TEXT)).toBeTruthy()
+    expect(wrapper.find('[data-testid="model-test-gpt-4o"]').exists()).toBe(true)
   })
 
-  it('测试连接回多协议结果 → 编辑体内按协议分组渲染结果行 + 失败指引（testResults / providerBaseUrl 接线）', async () => {
+  it('点击行内测试按钮 → transport.discoverModels 收到 mode=test + modelId；成功结果条渲染在该行下', async () => {
     discoverModelsSpy.mockResolvedValueOnce({
       success: true,
-      results: [
-        { api: 'anthropic-messages', modelId: 'minimax-m3', ok: true },
-        { api: 'openai-completions', modelId: 'qwen3.8-flash', ok: false, error: 'http_error|404|not found' },
-      ],
+      results: [{ api: 'anthropic-messages', modelId: 'minimax-m3', ok: true, durationMs: 812 }],
     })
-    // 网关态 fixture：生效端点 = provider.baseUrl（网关 override，非表单快照 artifact）
-    wrapper = mountBody(CATALOG_GATEWAY_P)
-    await flushPromises()
-    await clickTest()
-
-    const results = wrapper.find('[data-testid="provider-test-results"]')
-    expect(results.exists()).toBe(true)
-    // 标题 + 每协议一行 = 3 个直接子节点（未接线时 testResults 走默认 []，本区根本不渲染）
-    expect(results.element.children.length).toBe(3)
-    expect(results.text()).toContain('settings.providerEdit.testRowSuccess')
-    expect(results.text()).toContain('anthropic-messages')
-    expect(results.text()).toContain('settings.providerEdit.testRowHttpError')
-    expect(results.text()).toContain('404')
-    // 有分组结果时不渲染整体失败行
-    expect(wrapper.find('[data-testid="provider-test-overall-error"]').exists()).toBe(false)
-
-    // 失败指引的 {baseUrl} = 宿主下发的生效端点（默认 '' 时 mock 不 append，故此断言即接线证据）
-    expectTestHints(wrapper, 'settings.providerEdit.testHintHttpError', CATALOG_GATEWAY_URL)
-  })
-
-  it('测试连接整体失败（success=false）→ 编辑体内渲染整体失败原因 + 指引（testError 接线）', async () => {
-    discoverModelsSpy.mockResolvedValueOnce({ success: false, error: 'no_api_key' })
-    wrapper = mountBody(APIKEY_P)
-    await flushPromises()
-    await clickTest()
-
-    const overall = wrapper.find('[data-testid="provider-test-overall-error"]')
-    expect(overall.exists()).toBe(true)
-    expect(overall.text()).toContain('settings.providerEdit.testNoApiKey')
-    // 无分组结果（testResults 保持空）→ 整体指引按 testError 分类
-    expect(wrapper.find('[data-testid="provider-test-results"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="provider-test-hints"]').text()).toContain('settings.providerEdit.testHintNoApiKey')
-  })
-
-  it('providerKind 接线：无可用模型失败指引按 catalog / custom 分叉', async () => {
-    discoverModelsSpy.mockResolvedValueOnce({ success: false, error: 'no_models' })
     wrapper = mountBody(CATALOG_MIXED_P)
     await flushPromises()
-    await clickTest()
-    expect(wrapper.find('[data-testid="provider-test-hints"]').text()).toContain('settings.providerEdit.testHintNoModelsCatalog')
 
-    wrapper.unmount()
-    discoverModelsSpy.mockResolvedValueOnce({ success: false, error: 'no_models' })
-    wrapper = mountBody(CUSTOM_P)
+    await wrapper.find('[data-testid="model-test-minimax-m3"]').trigger('click')
     await flushPromises()
-    await clickTest()
-    expect(wrapper.find('[data-testid="provider-test-hints"]').text()).toContain('settings.providerEdit.testHintNoModelsCustom')
+
+    // 白盒佐证：单模型请求形状（provider 级分组测试不再被 UI 触发）
+    expect(discoverModelsSpy).toHaveBeenCalledWith({
+      mode: 'test',
+      baseUrl: '',
+      providerId: 'opencode-go',
+      modelId: 'minimax-m3',
+    })
+    // 用户可见结果条：成功 + 耗时（t mock 对 {seconds} 命名参数追加值）
+    const result = wrapper.find('[data-testid="model-test-result-minimax-m3"]')
+    expect(result.exists()).toBe(true)
+    expect(result.text()).toContain('settings.providerEdit.modelTestOk')
+    expect(result.text()).toContain('0.8')
+  })
+
+  it('行级失败如实展示（HTTP 状态 + 响应原因），失败按钮态可辨识', async () => {
+    discoverModelsSpy.mockResolvedValueOnce({
+      success: true,
+      results: [{ api: 'openai-completions', modelId: 'qwen3.8-flash', ok: false, error: 'http_error|503|Upstream request failed' }],
+    })
+    wrapper = mountBody(CATALOG_MIXED_P)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="model-test-qwen3.8-flash"]').trigger('click')
+    await flushPromises()
+
+    const result = wrapper.find('[data-testid="model-test-result-qwen3.8-flash"]')
+    expect(result.exists()).toBe(true)
+    expect(result.text()).toContain('settings.providerEdit.modelTestHttpError')
+    expect(result.text()).toContain('503')
+    expect(result.text()).toContain('Upstream request failed')
   })
 })
 

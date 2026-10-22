@@ -34,6 +34,17 @@ import type {
 } from './migration'
 import type { SegmentsMetadataEntry } from './message-metadata'
 import type { ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply } from './import-session'
+// 归档域 payload/reply 形状 SSOT 在 ./archive（session-archive 设计 D5 三 RPC + config.archives，
+// 本文件仅登记 type→payload 映射——u-renderer-entry 发起侧接线；runtime 分发表属 u-rpc-wiring）
+import type {
+  SessionArchiveRequest,
+  SessionArchiveReply,
+  SessionUnarchiveRequest,
+  SessionUnarchiveReply,
+  SessionPurgeArchiveRequest,
+  SessionPurgeArchiveReply,
+  ConfigArchivesReply,
+} from './archive'
 // codemode 域：payload/reply 形状 SSOT 在 ./codemode（codemode 设计 D1/A1，本文件仅登记
 // type→payload 映射）
 import type { CodemodeEnabledResult, CodemodeSetEnabledRequest, CodemodeSetEnabledResult } from './codemode'
@@ -56,6 +67,7 @@ import type { UsageStatsResult } from './usage-stats'
 import type { GenStatsFrame } from './gen-stats'
 // quota.configure payload 形状 SSOT 引用（coding-plan-quota-config-ux §7.1 契约收敛）
 import type { QuotaConfigurePayload } from './quota-types'
+import type { QuotaPreset } from './quota-presets'
 
 // plan 生命周期状态类型（plan 状态机显式化 D2）：经包出口（@zhushanwen/extension-protocol）
 // 直接引用 PlanLifecycleState（canonical = packages/extension-protocol/src/extensions/plan/state-machine，barrel 已 re-export），
@@ -104,6 +116,8 @@ export interface ConnectionTestResultRow {
   ok: boolean
   /** 失败时的真实原因（HTTP 状态码与响应截断） */
   error?: string
+  /** 请求往返耗时（毫秒，tester 实测；行内展示「200 · 0.8s」用）。缺省 = 未计时。 */
+  durationMs?: number
 }
 
 // ── Client → Runtime message types
@@ -193,6 +207,12 @@ export type ClientMessageType =
   // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：导入 pi 会话
   // 两步流——importCandidates 拉候选列表，import 执行导入；reply 同名（request/reply 同名模式）。
   | 'session.importCandidates' | 'session.import'
+  // session 归档域三 RPC + 列表拉取（session-archive 设计 D5）：archive 归档（同步段搬移 +
+  // 簿记骨架，后台压缩异步）、unarchive 恢复回原路径原分组、purgeArchive 彻底删除（= delete
+  // 的归档态版本）；config.archives 拉归档列表（拉为主——打开归档视图时调用）。命名避开
+  // session.restore（已承载「重开 dead session 重新 spawn pi」语义）。reply 与 request 同名
+  //（payload 消费型，session.getSubagentStreamState 同模式）。
+  | 'session.archive' | 'session.unarchive' | 'session.purgeArchive' | 'config.archives'
   | 'message.send' | 'message.abort'
   // delivery.*（投递所有权内核 D5，ADR-0046 配对）：renderer 统一提交/单条撤销/全量回收回草稿/
   // 断连重报四 RPC。submit 后内核永不拒绝（排队取代拒绝）。
@@ -203,7 +223,8 @@ export type ClientMessageType =
   | 'delivery.submit' | 'delivery.cancel' | 'delivery.drain' | 'delivery.resync'
   | 'message.bash' | 'message.abortBash'
   | 'config.getProviders' | 'config.setProvider' | 'config.deleteProvider' | 'config.setToolPermissions'
-  | 'config.refreshProviderCatalogs'
+  | 'config.refreshProviderCatalogs' | 'config.setProviderCatalogWatch'
+  | 'config.listQuotaPresets'
   | 'config.discoverModels' | 'config.setDefaultModel'
   | 'config.scanSkills' | 'config.setSkill' | 'config.deleteSkill'
   | 'config.scanSessionSkills'
@@ -237,6 +258,7 @@ export type ClientMessageType =
   | 'plugin.config.get' | 'plugin.config.set'
   | 'plugin.uiResponse'
   | 'plugin.mountPoints.sync'
+  | 'plugin.ui.snapshot'
   | 'file.read'
   | 'file.tree' | 'file.tree.expand' | 'file.search' | 'file.search.cwd'
   | 'git.diff'
@@ -383,6 +405,12 @@ export interface SetProviderData {
    * （$开头→env_var，非空→api_key）。
    */
   authMethod?: 'api_key' | 'oauth' | 'env_var' | 'ambient'
+  /**
+   * taiji 远程清单来源标记（remote-config 域 1，与 BuiltinProviderTemplate.remoteSource
+   * 同值）：QuickSetup 从 taiji 清单模板创建时回传，runtime 写 extras remoteSource
+   * （该 provider 参与远程模型更新的唯一判据；缺省 = 普通 custom，不参与自动更新）。
+   */
+  remoteSource?: string
   baseUrl?: string
   /** 自定义请求头（provider 级，与 ProviderInfo.headers 对齐）。 */
   headers?: Record<string, string>
@@ -531,7 +559,7 @@ export type RenameMode = 'first-prompt' | 'first-stop' | 'agent-tool'
  * custom = 用户自定义自由文本（customInstruction 字段承载，空串回落内置 slug 默认）；
  * 其余枚举值 = extension 内置词表（随 extension 版本升级自动跟随）。
  */
-export type RenameStyle = 'slug' | 'sentence' | 'emoji' | 'custom'
+export type RenameStyle = 'slug' | 'sentence' | 'emoji' | 'topic' | 'custom'
 
 /**
  * config.renamePrompt 的 reply 形状（具名 interface：mutation-reply-contract 清单检查的
@@ -562,6 +590,29 @@ export interface HeaderActionUpdatePayload {
   /** true = 入口整体不渲染（与 disabled 灰置正交）；缺省 false */
   hidden?: boolean
 }
+
+/**
+ * 视图快照条目（'plugin:uiSnapshot'.views 元素）：与 'plugin:viewUpdate' 广播载荷同构
+ * （guiTree 用 unknown[] 保持 shared 依赖最小化，消费端 isGuiComponent 收窄）。
+ */
+export interface ViewSnapshotItem {
+  sessionId: string
+  viewId: string
+  pluginId: string
+  guiTree: unknown[]
+  updatedAt: number
+}
+
+/**
+ * 插件 UI 快照（'plugin:uiSnapshot'，plugin.ui.snapshot 的 reply）：runtime 持有的每
+ * (sessionId, id) 最新 headerAction 状态与视图树全集（或按过滤参数的子集）。快照条目
+ * 与实时推送帧同构——渲染端喂同一 store 写入口，快照回放与实时帧两路同函数。
+ */
+export interface PluginUiSnapshotPayload {
+  headerActions: HeaderActionUpdatePayload[]
+  views: ViewSnapshotItem[]
+}
+
 
 // ── ClientMessage discriminated union ───────────────────────────
 
@@ -740,6 +791,12 @@ export interface ClientMessageMap {
   // 导入 pi 会话两步流：importCandidates 拉候选列表（对话框/搜索/切目录），import 执行导入。
   'session.importCandidates': ImportCandidatesRequest
   'session.import': ImportRequest
+  // session 归档域三 RPC 请求（session-archive 设计 D5；payload 形状 SSOT = ./archive）。
+  'session.archive': SessionArchiveRequest
+  'session.unarchive': SessionUnarchiveRequest
+  'session.purgeArchive': SessionPurgeArchiveRequest
+  // config.archives：归档列表拉取（无参数——列表 = 归档目录扫描全量派生，D9 不变量 3）。
+  'config.archives': Record<string, never>
   // message.send：images 是 Cmd+V 富呈现通路的图片数据（base64，不含 data: 前缀）。
   // runtime 适配层（rpc-client）补 type:'image' 组装成 pi 的 ImageContent。
   // 不带 type 字段（type 是 pi 私有，runtime 适配层负责补）。
@@ -784,6 +841,11 @@ export interface ClientMessageMap {
   'config.getProviders': Record<string, never>
   // 进入 Settings Provider 页时触发远程模型目录刷新（无参：刷新列表内全部 catalog provider）
   'config.refreshProviderCatalogs': Record<string, never>
+  // 设置页 Provider 页签可见期间的 models-store.json 变化感知开关（W1 缝隙 A：pi 启动刷
+  // 落盘后页签开着也能看到）。enable/disable 最后写者赢，runtime 内部幂等
+  'config.setProviderCatalogWatch': { enable: boolean }
+  // quota presets 合并视图拉取（基线 ⊕ 远程 quota-fetchers.json presets；remote-config 域 2）
+  'config.listQuotaPresets': Record<string, never>
   'config.setProvider': { providerId: ProviderId } & SetProviderData
   'config.deleteProvider': { providerId: ProviderId }
   // wave4：provider 启用切换（wave3 RPC 链路在 wave4 补全）。enabled=false 时 runtime 移除白名单 pattern，
@@ -795,7 +857,8 @@ export interface ClientMessageMap {
   // 模型发现 / 测试连接共享入口（design catalog-provider-field-authority §3.5 D4）。
   // discover 模式：拉 GET /v1/models（baseUrl 必填），只对 custom provider 有意义；
   // test 模式：按模型协议分组发真实最小请求（providerId 必填，baseUrl/apiKey 忽略，
-  // 凭据经 runtime 唯一的 provider 凭据解析通道取）。
+  // 凭据经 runtime 唯一的 provider 凭据解析通道取）；test + modelId = 单模型测试
+  // （per-model 行内入口，只测该模型一行，不做代表模型分组）。
   'config.discoverModels': {
     baseUrl: string
     apiKey?: string
@@ -803,6 +866,8 @@ export interface ClientMessageMap {
     providerId?: string
     /** 缺省 'discover'，向后兼容旧调用方（runtime CLI 等）。 */
     mode?: 'test' | 'discover'
+    /** test 模式的单模型测试目标（省略 = 按协议分组选代表模型，旧行为）。 */
+    modelId?: string
   }
   // W3 默认模型持久化：前端设置全局默认模型，runtime 调 configService.setDefaultModel 写 settings.json。
   'config.setDefaultModel': { provider: ProviderId; modelId: string }
@@ -868,6 +933,9 @@ export interface ClientMessageMap {
   'plugin.config.set': { pluginId: string; key: string; value: unknown }
   'plugin.uiResponse': { requestId: string; result: unknown }
   'plugin.mountPoints.sync': { mountPoints: string[] }
+  // plugin.ui.snapshot：拉取插件 UI 快照（headerAction 状态 + 视图树）。无过滤 = 全部会话
+  //（connected 边沿全量恢复）；sessionId/viewId 过滤 = 单分区补拉（ViewHost 挂载缺失自举）。
+  'plugin.ui.snapshot': { sessionId?: string; viewId?: string }
   'file.read': { path: string; sessionId?: string }
   'file.tree': { sessionId: string }
   'file.tree.expand': { sessionId: string; path: string }
@@ -900,13 +968,19 @@ export interface ClientMessageMap {
   /** worktree.list：列出 cwd 所在 workspace 的所有 worktree。 */
   'worktree.list': { cwd: string }
   /** worktree.create：在 bare repo + worktree 结构中创建隔离的工作目录。
-   *  branch 必填；baseBranch 默认 'current'（继承当前分支），可为任意分支名（runtime 验证存在性）。
+   *  branch 必填；baseBranch 省略时 runtime 取 config.defaultBaseBranch（其缺省为哨兵
+   *  WORKTREE_AUTO_BASE_BRANCH 'auto'），值域四形态见字段注释。
    *  locationMode 控制 worktree 创建位置：'workspace'（workspace 根，bare 模式默认）、
    *  'repo-dir'（.bare 同级 repo 子目录）、'dedicated-dir'（用户指定的专用目录）。
    *  workspaceHint 用于显式指定 workspace 根（检测 .bare 的起点 cwd），省略则用 process.cwd()。 */
   'worktree.create': {
     branch: string
-    /** 基础分支。'current' 为特殊值（继承当前分支），其余为具体分支名（runtime 验证存在性）。 */
+    /**
+     * 基础分支，四形态（与 runtime ports/worktree-service.ts WorktreeCreateParams.baseBranch 对齐）：
+     * 'current'（继承当前分支）/ WORKTREE_AUTO_BASE_BRANCH 'auto'（按仓库远端实况动态推导，
+     * 字段省略时的 config 缺省）/ '<remote>/<branch>'（先验证远端已配置，幽灵 ref 拒绝采信）/
+     * 任意本地分支名（runtime 验证存在性）。
+     */
     baseBranch?: string
     /** worktree 创建位置模式。省略时 bare 模式默认 'workspace'。 */
     locationMode?: 'workspace' | 'repo-dir' | 'dedicated-dir'
@@ -1172,6 +1246,17 @@ export type WorktreeUnknownErrorCode = 'worktree_failed'
 export type WorktreeEnvelopeCode = WorktreeErrorCode | WorktreeUnknownErrorCode
 
 /**
+ * worktree 默认基线哨兵 'auto'（runtime ↔ renderer 契约 SSOT，C-comm-22：shared 是前后端
+ * 唯一类型源，禁某一端私自重定义或手抄字面量）。
+ *
+ * 出现点：renderer Settings 默认基分支字段的缺省值（经 config.setDefaultBaseBranch 写入
+ * config.json.defaultBaseBranch）；worktree.create.baseBranch 的值域成员（字段省略时 runtime
+ * 以 config 值补位，其缺省即本哨兵）。runtime 读到后不作为字面 ref，而是按仓库远端实况
+ * 动态推导基线（DefaultBaseResolver；实现侧以 AUTO_BASE_BRANCH 名 re-export 本常量）。
+ */
+export const WORKTREE_AUTO_BASE_BRANCH = 'auto'
+
+/**
  * session.compact RPC 失败的分类码（msg-pipeline-debloat D4-2，runtime ↔ renderer 契约 SSOT）。
  *
  * 产生点：session-message-handler.handleSessionCompact 的 error envelope——
@@ -1272,6 +1357,7 @@ export type ServerMessageType =
   | 'config.providers' | 'config.providerUpdated' | 'config.discoveredModels' | 'config.defaults'
   | 'config.toolPermissionsSaved'
   | 'config.providerCatalogsRefreshed'
+  | 'config.quotaPresets'
   | 'config.scopedModels'
   | 'config.scannedSkills' | 'config.skillUpdated' | 'config.skillDeleted'
   | 'config.sessionSkills'
@@ -1312,6 +1398,8 @@ export type ServerMessageType =
   // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：reply 与 request
   // 同名（session.subscribe 模式，sendCommand 按 id resolve），payload 见 ServerMessageMapBase。
   | 'session.importCandidates' | 'session.import'
+  // session 归档域 reply（与 request 同名，payload 消费型——session.getSubagentStreamState 同模式）
+  | 'session.archive' | 'session.unarchive' | 'session.purgeArchive' | 'config.archives'
   | 'session.exited'
   // D7（u8-pi-respawn）：pi 崩溃自动恢复结果推送（payload 见
   // ServerMessageMapBase 两行注释）。
@@ -1341,6 +1429,10 @@ export type ServerMessageType =
   //（AP-1）。必带 sessionId——渲染端按 (sessionId, headerActionId) 写对应会话分区；
   // 经 broker 全局广播直发（同上不入 ring）。
   | 'plugin:headerActionUpdate'
+  // plugin:uiSnapshot：plugin.ui.snapshot 拉取 RPC 的 reply（renderer connected 边沿 /
+  // ViewHost 分区缺失补拉时拉取插件 UI 快照，ADR-0097「拉为主、推补充」——transient
+  // 推送帧的丢失收敛通道）。
+  | 'plugin:uiSnapshot'
   | 'extension:widget' | 'extension:widgetGui' | 'extension:notify'
   | 'extension:setEditorText'
   | 'extension:requestsInvalidated'
@@ -2179,6 +2271,8 @@ export interface ServerMessageMapBase {
     corrupt?: Array<'own' | 'pi'>
     persistFailed?: boolean
   }
+  // quota presets 合并视图（runtime 基线 ⊕ 远程；前端缓存 + 聊天面板/设置页消费）
+  'config.quotaPresets': { presets: QuotaPreset[] }
   'config.skills': { skills: SkillInfo[] }
   /**
    * skill 缓存失效信号（landing useGlobalSkills/useProjectSkills 失效缓存重新拉取）。
@@ -2221,6 +2315,9 @@ export interface ServerMessageMapBase {
   // plugin:headerActionUpdate：headerAction 可变字段下行帧（AP-1；必带 sessionId，
   // 渲染端按 (sessionId, headerActionId) 写会话分区）。payload 契约见 HeaderActionUpdatePayload。
   'plugin:headerActionUpdate': HeaderActionUpdatePayload
+  // plugin:uiSnapshot：plugin.ui.snapshot 的 reply（runtime PluginUiSnapshotStore 读出）。
+  // 条目与两类实时推送帧同构，渲染端喂 HeaderActionStore / ViewHostStore 同一写入口。
+  'plugin:uiSnapshot': PluginUiSnapshotPayload
   // plugin:uiRequest：plugin dialog 交互请求下行（runtime UiRequestQueue 广播回调生产，
   // payload 注入当前活跃 sessionId 后经 bus.publish 定向发布，无活跃 session 时回退全局广播）。
   // requestId 必带（前端 message-bus-bridge.parseUiRequest 缺失即丢弃整条）；method/title 等
@@ -2251,7 +2348,10 @@ export interface ServerMessageMapBase {
   // 清理唤醒）——撤窗语义两值一致，approved 供消费端审计/展示，不参与匹配。
   'plugin:permissionRequestResolved': { pluginId: string; requestId: string; approved: boolean } & Record<string, unknown>
   'model.list': { models: ModelInfo[] }
-  'config.sessions': { groups: SessionGroup[] }
+  // config.sessions：reply + broadcast 双用帧。archiveCount（session-archive 设计 D5 协议
+  // 变更点）= 归档目录条目数（侧栏归档入口角标数据源），reply 与广播帧均携带；可选字段
+  //（旧 runtime / mock 缺省 = 无归档数据，消费方按 0 隐藏角标）。
+  'config.sessions': { groups: SessionGroup[]; archiveCount?: number }
   /** config.systemPrompt：reply + broadcast + 初始推送三用。corrupted=true 表示磁盘配置损坏已回退默认（SR5）。 */
   'config.systemPrompt': { config: SystemPromptConfig; corrupted?: boolean }
   // config.uiLocaleSet：config.setUiLocale 的 ack 型 reply（无读回字段——写盘失败走错误信封）。
@@ -2405,6 +2505,14 @@ export interface ServerMessageMapBase {
   // 与 ClientMessageMap 同名 request 一一对应；失败走 error envelope（code 见 ImportErrorCode）。
   'session.importCandidates': ImportCandidatesReply
   'session.import': ImportReply
+  // session 归档域三 RPC reply（与 request 同名，payload 消费型）：unarchive 返回恢复后的
+  // SessionSummary（前端原项目组顶部高亮置顶）；purgeArchive 在 keep-all 保守分支触发时
+  // 携带 keptSubagentsDir（失败显式上报，D5 步骤 7）。领域错误走统一 error envelope
+  //（code 见 ./archive ARCHIVE_ERROR_CODES 六值词表）。
+  'session.archive': SessionArchiveReply
+  'session.unarchive': SessionUnarchiveReply
+  'session.purgeArchive': SessionPurgeArchiveReply
+  'config.archives': ConfigArchivesReply
   // session.subagents：当前 session 派生的 subagent 列表。
   // [W1 读路径换源] 数据源 = runtime 每会话内存派生视图（pi entry 游标 + record 事件文件 journal tail
   //   双增量源喂入，主 session JSONL 不再全文重读——v2 注册/终态条目稀疏化后 entry 通道只承载
@@ -2669,6 +2777,12 @@ export interface ServerMessageMapBase {
     barePath: string
     repoRoot: string
     defaultBranch: string
+    /**
+     * 推导默认 base ref（如 'github/main'）：按仓库远端实况动态推导（checkout.defaultRemote →
+     * origin → 单一远端 → 清单首个；无远端用本地 main）。repo 两态附带，
+     * 解析失败缺省——前端建 worktree 的默认基线直接用它，不自拼 origin/*。
+     */
+    defaultBaseRef?: string
   }
   /** worktree.created：worktree.create 的成功 reply（新 worktree 的 cwd 与分支名）。
    *  usedBaseRef：实际用作创建基线的 ref（RT-8#8）。请求的 baseBranch 校验失败时
@@ -2703,8 +2817,8 @@ export interface ServerMessageMapBase {
   'quota.configure:result': { ok: boolean; error?: string }
   'quota.refresh:result': QuotaFetchResultPayload
   'usage.getStats:result': UsageStatsResult
-  /** worktree.branches：worktree.listBranches 的 reply（本地/远程分支列表 + 默认分支名）。 */
-  'worktree.branches': { local: string[]; remote: string[]; defaultBranch: string }
+  /** worktree.branches：worktree.listBranches 的 reply（本地/远程分支列表 + 默认分支名 + 推导默认 base ref）。 */
+  'worktree.branches': { local: string[]; remote: string[]; defaultBranch: string; defaultBaseRef?: string }
   /** worktree.list:result：worktree.list 的 reply（worktree 条目列表）。 */
   'worktree.list:result': { items: Array<{ path: string; branch: string; HEAD: boolean; bare: boolean }> }
   /** config.worktreeRootDir：config.getWorktreeRootDir 的 reply。 */
@@ -3311,6 +3425,12 @@ export interface ReplyPayloadMap {
   // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：reply 与 request 同名
   'session.importCandidates': ServerMessageMap['session.importCandidates']
   'session.import': ServerMessageMap['session.import']
+  // session 归档域（session-archive 设计 D5）：三 RPC reply 同名（payload 消费型）+
+  // config.archives 归档列表拉取。领域错误走统一 error envelope（ARCHIVE_ERROR_CODES）。
+  'session.archive': ServerMessageMap['session.archive']
+  'session.unarchive': ServerMessageMap['session.unarchive']
+  'session.purgeArchive': ServerMessageMap['session.purgeArchive']
+  'config.archives': ServerMessageMap['config.archives']
   // plugin.* RPC reply 映射（plugin-message-handler.ts 全部发 reply）：
   //  - plugin.list / toggle / uninstall / install → reply 'config.plugins' { plugins }（前端读 plugins 列表刷新 UI）
   //  - 权限命令（approvePermissions / revokePermissions / denyPermissions）→ reply 'pong' {}
@@ -3330,6 +3450,7 @@ export interface ReplyPayloadMap {
   'plugin.config.get': ServerMessageMap['plugin:config']
   'plugin.config.set': ServerMessageMap['plugin:config']
   'plugin.mountPoints.sync': ServerMessageMap['pong']
+  'plugin.ui.snapshot': ServerMessageMap['plugin:uiSnapshot']
   'workspace.listRecent': ServerMessageMap['workspace.recentList']
   'workspace.record': ServerMessageMap['workspace.recentList']
   'project.load': ServerMessageMap['project.loaded']
@@ -3418,6 +3539,10 @@ export interface ReplyPayloadMap {
   // ── ack 型（value = void，domain register<void> 不读 reply payload）──
   'config.deleteAgent': void      // reply config.agentDeleted
   'config.deleteProvider': void   // reply config.providerUpdated
+  // watch 开关 ack 型（状态变更经 config.providers 广播承载，reply 无生效值；mutation
+  // 契约测试登记 excluded：运行时会话内开关，无持久化与 renderer store 副本）
+  'config.setProviderCatalogWatch': void
+  'config.listQuotaPresets': ServerMessageMap['config.quotaPresets']
   'config.deleteSkill': void      // reply config.skillDeleted
   'config.setAgent': void         // reply config.agentUpdated
   'config.setAgentDirs': void     // reply config.agentDirs

@@ -19,6 +19,14 @@ export interface ConfigProviderConfig {
   authMethod?: 'api_key' | 'oauth' | 'env_var' | 'ambient'
   /** provider 级启停（W1）。省略时默认 true，与 infra PiProviderConfig 同构。 */
   enabled?: boolean
+  /**
+   * provider 级自定义请求头（读侧透传，与 SetProviderData.headers 写路径对称，
+   * pi ProviderConfigSchema 内字段）。缺省 = 未配置（向后兼容）。曾因视图缺声明
+   * 导致 listProviders 不下发、编辑界面无法回显已存 headers（磁盘值成幽灵数据）。
+   */
+  headers?: Record<string, string>
+  /** 是否把 apiKey 写入 Authorization 头（与 headers 同批补的读侧透传，写路径 B-4a 同源）。 */
+  authHeader?: boolean
   models?: ConfigModelDefinition[]
   /**
    * Coding Plan 额度查询配置（寄生字段，仅存量数据兼容读）。

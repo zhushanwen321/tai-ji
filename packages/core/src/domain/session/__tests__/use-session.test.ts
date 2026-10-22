@@ -49,6 +49,7 @@ interface Fixture {
     create: ReturnType<typeof vi.fn>
     rename: ReturnType<typeof vi.fn>
     remove: ReturnType<typeof vi.fn>
+    archive: ReturnType<typeof vi.fn>
     removeByCwd: ReturnType<typeof vi.fn>
     migrateImage: ReturnType<typeof vi.fn>
     onConfigSessions: ReturnType<typeof vi.fn>
@@ -91,6 +92,7 @@ function makeFixture(
     create: vi.fn(),
     rename: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),
+    archive: vi.fn().mockResolvedValue(undefined),
     removeByCwd: vi.fn().mockResolvedValue({ cwd: '/a', deleted: [], failed: [] } as BatchDeleteResult),
     migrateImage: vi.fn(),
     onConfigSessions: vi.fn(() => vi.fn()),
@@ -477,6 +479,92 @@ describe('deleteSession', () => {
   })
 })
 
+describe('archiveSession（session-archive D14：发起侧编排与 delete 同款）', () => {
+  beforeEach(() => {
+    resetSessionListSubForTest()
+  })
+
+  it('AC-1 归档回调清理：api.archive → S3 全 hooks 调用序 → removeFromList（cleanupSessionState 同族）', async () => {
+    const f = makeFixture()
+    seed(f.store, [{ cwd: '/a', sessions: [summary('arc'), summary('b')] }])
+    f.store.activeId.value = 'b'
+    f.panel.findPanelBySession.mockReturnValue({ id: 'p1', sessionId: 'arc' })
+
+    await f.session.archiveSession('arc')
+
+    expect(f.api.archive).toHaveBeenCalledTimes(1)
+    expect(f.api.archive).toHaveBeenCalledWith('arc')
+    // panel 解绑（归档 session 绑定 panel 时清空绑定）
+    expect(f.panel.loadSession).toHaveBeenCalledWith('p1', null)
+    // removeFromList 生效（剩 b）
+    expect(f.store.list.value.map((s) => s.id)).toEqual(['b'])
+    // S3 全序与 deleteSession TC-4 同款（清理链完全同族，D14）
+    const expectedOrder = [
+      'clearFileTree(arc)', 'clearSubagent(arc)', 'clearWorkflow(arc)',
+      'clearExtensionUI(arc)', 'clearExtensionHost(arc)', 'evictChat(arc)',
+      'evictVirtualKeys(arc)', 'clearAgentCallMapping(arc)', 'disposeChat(arc)', 'invalidateStatus(arc)',
+      'browserDestroy(arc)',
+      'clearTerminalQueue(arc)', 'clearSlashCommands(arc)', 'clearForkNotices(arc)',
+    ]
+    expect(f.log).toEqual(expectedOrder)
+    // 非 active 归档：无回退
+    expect(f.api.switchSession).not.toHaveBeenCalled()
+    expect(f.navigation.push).not.toHaveBeenCalled()
+    f.dispose()
+  })
+
+  it('AC-2 wasActive 回退：归档的恰是当前查看的 session → 切回 list[0]', async () => {
+    const f = makeFixture()
+    seed(f.store, [{ cwd: '/a', sessions: [summary('a'), summary('b')] }])
+    f.store.activeId.value = 'a'
+
+    await f.session.archiveSession('a')
+
+    // cleanup 后 activeId 回退到 list[0]（removeFromList 语义）
+    expect(f.store.activeId.value).toBe('b')
+    // 回退走完整切入（switchSession('b') 被调）
+    expect(f.api.switchSession).toHaveBeenCalledWith('b')
+    f.dispose()
+  })
+
+  it('AC-3 wasActive + 列表空 → [D7] 空态承接（push chat + startFlow）', async () => {
+    const f = makeFixture({ withFlow: true })
+    seed(f.store, [{ cwd: '/a', sessions: [summary('only')] }])
+    f.store.activeId.value = 'only'
+
+    await f.session.archiveSession('only')
+
+    expect(f.navigation.push).toHaveBeenCalledWith({ view: 'chat' })
+    expect(f.flow.startFlow).toHaveBeenCalledTimes(1)
+    f.dispose()
+  })
+
+  it('AC-4 wasActive 回退失败（网络抖动）→ ES1 空态承接，不抛（S4 同款）', async () => {
+    const f = makeFixture()
+    seed(f.store, [{ cwd: '/a', sessions: [summary('a'), summary('b')] }])
+    f.store.activeId.value = 'a'
+    f.api.switchSession.mockRejectedValue(new Error('net'))
+
+    await expect(f.session.archiveSession('a')).resolves.toBeUndefined()
+    expect(f.navigation.push).toHaveBeenCalledWith({ view: 'chat' })
+    f.dispose()
+  })
+
+  it('AC-5 api.archive 失败（error envelope reject）→ 抛出且零本地清理（RPC 先行，失败不误清）', async () => {
+    const f = makeFixture()
+    seed(f.store, [{ cwd: '/a', sessions: [summary('arc')] }])
+    f.store.activeId.value = 'arc'
+    f.api.archive.mockRejectedValue(new Error('会话正在生成中 (archive_generating)'))
+
+    await expect(f.session.archiveSession('arc')).rejects.toThrow('archive_generating')
+    // 失败路径零清理：列表保留、hooks 未触达、activeId 未动
+    expect(f.store.list.value.map((s) => s.id)).toEqual(['arc'])
+    expect(f.log).toEqual([])
+    expect(f.store.activeId.value).toBe('arc')
+    f.dispose()
+  })
+})
+
 describe('deleteFolder', () => {
   it('TC-7 wasActiveInFolder 回退：逐个 cleanup + selectSession(list[0]) + 返回值透传', async () => {
     const f = makeFixture()
@@ -669,7 +757,7 @@ describe('bindSessionListBroadcast refCount', () => {
     const apiA = {
       list: vi.fn().mockResolvedValue([]),
       switchSession: vi.fn().mockResolvedValue(undefined),
-      create: vi.fn(), rename: vi.fn(), remove: vi.fn(),
+      create: vi.fn(), rename: vi.fn(), remove: vi.fn(), archive: vi.fn(),
       removeByCwd: vi.fn(), migrateImage: vi.fn(),
       onConfigSessions: vi.fn((h: (g: SessionGroup[]) => void) => {
         capturedHandler = h

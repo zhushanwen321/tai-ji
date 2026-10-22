@@ -110,7 +110,7 @@
 </template>
 
 <script setup lang="ts">
-import { GitBranch, Archive, ArrowRight, SquareTerminal } from '@lucide/vue'
+import { GitBranch, Layers, Info, ArrowRight, SquareTerminal } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { onUnmounted, ref, type Component } from 'vue'
 import {
@@ -211,7 +211,10 @@ interface NoticeView {
   detail?: NoticeDetail
 }
 
-/** 按消息类型选图标 + 主体/meta（纯函数，props 不变则结果不变） */
+/** 按消息类型选图标 + 主体/meta（纯函数，props 不变则结果不变）。
+ *  图标分配（2026-10-21 用户裁决）：压缩行 Layers（多层堆叠 = 上下文摘要；与收纳通知
+ *  managed 行同形——同属多条目堆叠语义族，撞形已接受）；兜底行 Info（系统信息通行图标）；
+ *  Archive 归归档域（侧栏会话归档箱），对话流不再占用。 */
 const notice: NoticeView = finalizeDetail(resolveNotice(props.message))
 
 function resolveNotice(message: Message): NoticeView {
@@ -224,7 +227,7 @@ function resolveNotice(message: Message): NoticeView {
     const tokens = message.compactionSummary.tokensBefore
     // tokens 从主文案拆出为钉右 meta（D3）：主文案只留短语，数字进等宽 meta 供扫读对齐
     return {
-      icon: Archive,
+      icon: Layers,
       iconClass: ICON_NEUTRAL_CLASS,
       text: t('panel.message.compacted'),
       meta: tokens !== undefined ? t('panel.message.compactedTokens', { tokens: formatTokens(tokens) }) : undefined,
@@ -239,7 +242,7 @@ function resolveNotice(message: Message): NoticeView {
     }
   }
   // 兜底：纯 system 文本（流健康警告 / scheduler 派发提示等 display:true custom 消息同族同规格）
-  return { icon: Archive, iconClass: ICON_NEUTRAL_CLASS, text: normalizeContent(message.content) }
+  return { icon: Info, iconClass: ICON_NEUTRAL_CLASS, text: normalizeContent(message.content) }
 }
 
 /**

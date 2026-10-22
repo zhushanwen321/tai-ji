@@ -268,8 +268,10 @@ export function registerWorkflowTool(
       _ctx: ExtensionContext,
     ): Promise<WorkflowExecuteResult> {
       // P1-2: Honor abort signal up-front
-      // throw（W4b）：pi 只对 execute throw 置 isError:true，返回值里的 isError
-      // 被 agent-loop 丢弃（agent-loop.js:453-483）——文案原样进 toolResult。
+      // throw（W4b）：execute throw → pi agent-loop catch 置 isError:true
+      //（pi-agent-core dist/agent-loop.js executePreparedToolCall，1.0.0 实读 catch :581-588；
+      // 1.0.0 起正常 return 的 isError 也被尊重——:579 isError: result.isError === true，
+      // 0.84.4 才硬编码 false——本包失败恒走 throw，行为不变）——文案原样进 toolResult。
       // abort 前置判定收敛在 tool-shared（三处 tool 同源）。
       assertNotAborted(signal);
       // P1-6: Reentry guard（acquire 失败时尚未持有 guard，throw 前无需 release）
@@ -407,8 +409,10 @@ export async function actionRun(
   // stub（非 undefined），仅判 !script 会绕过 not_found → 空 sourceCode 假启动
   //（W4b verifier 探针实测复现）。
   if (!script || !script.available) {
-    // throw（W4）：pi 只对 execute throw 置 isError:true，返回值里的 isError 被
-    // agent-loop 丢弃（agent-loop.js:453-483）——文案原样进 toolResult。
+    // throw（W4）：execute throw → pi agent-loop catch 置 isError:true（pi-agent-core
+    // dist/agent-loop.js executePreparedToolCall，1.0.0 实读 catch :581-588；1.0.0 起
+    // 正常 return 的 isError 也被尊重——:579 isError: result.isError === true，0.84.4
+    // 才硬编码 false——本包失败恒走 throw，行为不变）——文案原样进 toolResult。
     // [全路径自救指引] 清单逐条附绝对路径 location：run 的 name 形参最贴近的
     // 读侧就是本清单（<available_workflows> 注入点在 start 时已过时/可能不在
     // 上下文）——带 location 后失败一次即可按绝对路径自救。按名解析已退役
@@ -680,5 +684,7 @@ function toRunSummary(run: WorkflowRun, store: RunStore): RunSummary {
 }
 
 // W4b：原 textResult(text, isError) helper 已删除——23 处错误路径全部改 throw
-// （pi 只对 execute throw 置 isError:true，返回值里的 isError 被 agent-loop 丢弃，
-// agent-loop.js:453-483），且本文件无非错误纯文本结果用途，无残留调用方。
+//（execute throw → pi agent-loop catch 置 isError:true——pi-agent-core dist/agent-loop.js
+// executePreparedToolCall，1.0.0 实读 catch :581-588；1.0.0 起正常 return 的 isError
+// 也被尊重，:579 isError: result.isError === true，0.84.4 才硬编码 false——本包失败
+// 恒走 throw，行为不变），且本文件无非错误纯文本结果用途，无残留调用方。

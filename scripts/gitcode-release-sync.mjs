@@ -616,7 +616,19 @@ function listFilesRecursive(dir) {
 
 /* ── 模式三：本地中转同步（gh 下载 GitHub Release → 并发上传 GitCode）── */
 
-async function runSyncFromGithub({ tag, githubRepo }) {
+/**
+ * 下载代理地址解析（GitHub 附件直连失败时的自动重试通道）。来源优先级：
+ * --proxy 参数 > TAIJI_GITHUB_DL_PROXY > 既有 *_proxy 环境变量。代理可能是
+ * 局域网地址（如 http://192.168.1.202:7890），无法靠探测本机端口发现——只认显式配置。
+ */
+function resolveDownloadProxy(cliValue) {
+  return (cliValue || process.env.TAIJI_GITHUB_DL_PROXY ||
+    process.env.https_proxy || process.env.HTTPS_PROXY ||
+    process.env.http_proxy || process.env.HTTP_PROXY ||
+    process.env.all_proxy || process.env.ALL_PROXY || '').trim();
+}
+
+async function runSyncFromGithub({ tag, githubRepo, proxyUrl }) {
   // prerelease 以版本号含 '-' 判断（beta/alpha 等测试版标注用）
   const prerelease = tag.includes('-');
   const tmpDir = mkdtempSync(join(tmpdir(), 'gitcode-sync-'));
@@ -639,6 +651,7 @@ async function runSyncFromGithub({ tag, githubRepo }) {
     // 无重试时单次运行全灭概率高，只能整条命令重跑。
     const assets = (meta.assets || []).map((a) => ({ name: a.name, url: a.url, size: a.size }));
     if (assets.length === 0) die(`GitHub release ${tag} 没有附件可同步——确认 tag 正确、Release 已发布`);
+    const dlProxy = resolveDownloadProxy(proxyUrl);
     const DOWNLOAD_CONCURRENCY = 4;
     const failures = [];
     let next = 0;
@@ -647,23 +660,39 @@ async function runSyncFromGithub({ tag, githubRepo }) {
       while (next < assets.length) {
         const a = assets[next++];
         const dest = join(tmpDir, a.name);
+        // 两轮制（2026-10-21 v0.11.10 发版定型）：第一轮真直连（--noproxy 剥离代理 env，
+        // 多连接并行吃满直连带宽）；失败且有可用代理时自动挂 -x 重试一次——此前直连
+        // 大附件跨境超时后要人工开代理整条重跑，境外附件反复超时是发版常客。
         try {
           await execP(
-            `curl -sSL --retry 5 --retry-all-errors --max-time 900 -o ${shellQuote(dest)} ${shellQuote(a.url)}`,
+            `curl -sSL --noproxy '*' --retry 5 --retry-all-errors --max-time 900 -o ${shellQuote(dest)} ${shellQuote(a.url)}`,
             { timeout: 900000, shell: '/bin/bash', maxBuffer: 10 * 1024 * 1024 },
           );
-          const actual = statSync(dest).size;
-          if (actual !== a.size) throw new Error(`大小不符（${actual} vs ${a.size}）`);
-          console.log(`[sync-from-github] 已下载：${a.name}（${(a.size / 1048576).toFixed(1)}MB）`);
-        } catch (e) {
-          failures.push(`${a.name} —— ${String(e.message || e).slice(0, 200)}`);
+        } catch (directErr) {
+          if (!dlProxy) {
+            failures.push(`${a.name} —— ${String(directErr.message || directErr).slice(0, 200)}（直连失败且未配置代理——传 --proxy <url> 或设 TAIJI_GITHUB_DL_PROXY 后重跑）`);
+            continue;
+          }
+          console.log(`[sync-from-github] ${a.name} 直连失败，挂代理重试…`);
+          try {
+            await execP(
+              `curl -sSL -x ${shellQuote(dlProxy)} --retry 5 --retry-all-errors --max-time 900 -o ${shellQuote(dest)} ${shellQuote(a.url)}`,
+              { timeout: 900000, shell: '/bin/bash', maxBuffer: 10 * 1024 * 1024 },
+            );
+          } catch (proxyErr) {
+            failures.push(`${a.name} —— 直连与代理（${dlProxy}）均失败：${String(proxyErr.message || proxyErr).slice(0, 160)}`);
+            continue;
+          }
         }
+        const actual = statSync(dest).size;
+        if (actual !== a.size) throw new Error(`大小不符（${actual} vs ${a.size}）`);
+        console.log(`[sync-from-github] 已下载：${a.name}（${(a.size / 1048576).toFixed(1)}MB）`);
       }
     });
     await Promise.all(workers);
     if (failures.length > 0) {
       die(`下载失败 ${failures.length}/${assets.length} 个附件：\n  - ${failures.join('\n  - ')}\n`
-        + '恢复：检查本机代理后重跑（已下载完成的附件会被 curl 重下覆盖，耗时可控）。');
+        + '恢复：确认代理地址可用后重跑（--proxy <url> 或 TAIJI_GITHUB_DL_PROXY；已下载完成的附件会被 curl 重下覆盖，耗时可控）。');
     }
     const elapsed = Math.round((performance.now() - t0) / 1000);
     console.log(`[sync-from-github] 下载完成：${assets.length} 个附件，耗时 ${elapsed}s（${(1100.5 / Math.max(elapsed, 1)).toFixed(1)}MB/s 级）。开始上传 GitCode…`);
@@ -691,8 +720,9 @@ const USAGE = `用法：
   node scripts/gitcode-release-sync.mjs probe [--large] [--no-repo]
   node scripts/gitcode-release-sync.mjs push-repo [--ref-source <remote>]
   node scripts/gitcode-release-sync.mjs sync <tag> <release-name> <notes-file> <artifacts-dir> [--prerelease]
-  node scripts/gitcode-release-sync.mjs sync-from-github <tag> [--github-repo owner/repo]
-环境变量：GITCODE_TOKEN（必填）；sync-from-github 另需本机 gh 已登录`;
+  node scripts/gitcode-release-sync.mjs sync-from-github <tag> [--github-repo owner/repo] [--proxy <url>]
+环境变量：GITCODE_TOKEN（必填）；sync-from-github 另需本机 gh 已登录；
+  附件下载代理：--proxy <url> 或 TAIJI_GITHUB_DL_PROXY（直连失败时自动挂代理重试）`;
 
 /** 子命令分派表：args = argv.slice(1)（不含子命令名） */
 const COMMANDS = {
@@ -718,10 +748,15 @@ const COMMANDS = {
   'sync-from-github': async (args) => {
     const [tag] = positionalArgs(args);
     const githubRepo = githubRepoFromArgs(args);
-    if (!tag) {
-      die('用法：node scripts/gitcode-release-sync.mjs sync-from-github <tag> [--github-repo owner/repo]');
+    const proxyIdx = args.indexOf('--proxy');
+    const proxyUrl = proxyIdx >= 0 ? args[proxyIdx + 1] : undefined;
+    if (proxyUrl !== undefined && (!proxyUrl || proxyUrl.startsWith('--'))) {
+      die('用法：--proxy 需要一个代理地址参数，如 --proxy http://192.168.1.202:7890');
     }
-    await runSyncFromGithub({ tag, githubRepo });
+    if (!tag) {
+      die('用法：node scripts/gitcode-release-sync.mjs sync-from-github <tag> [--github-repo owner/repo] [--proxy <url>]');
+    }
+    await runSyncFromGithub({ tag, githubRepo, proxyUrl });
   },
   sync: async (args) => {
     const [tag, name, notesFile, artifactsDir] = positionalArgs(args);

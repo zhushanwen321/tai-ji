@@ -30,6 +30,10 @@
  *  - @earendil-works/*（pi-coding-agent / pi-ai / pi-tui / pi-agent-core 等）
  *  - @mariozechner/*（旧名别名）
  *  - typebox / @sinclair/typebox（pi binary 内提供）
+ *  - undici（非 virtualModules——由宿主解析器分流：Node → node_modules npm 副本；
+ *    Bun（打包版 pi）→ 二进制内置副本 builtin://thirdparty/undici。动机：内联 npm
+ *    undici 副本在 Bun 兼容层下 fetch 读 chunked 流式响应体永不产块，2026-10-22
+ *    事故，仅 network-proxy 消费，见该包 dispatcher.ts 头注副本策略段）
  * 其余（@zhushanwen/extension-protocol、@zhushanwen/pi-* workspace value dep、
  * web-tree-sitter、ajv、croner 等）全部 inline。
  *
@@ -43,6 +47,11 @@ import { fileURLToPath } from "node:url";
 // staged 特殊资产目录单一登记表（MF-1-17）：与 verify-staged-extensions.mjs 共读，
 // 契约与条目动机见该模块注释——本脚本不得另持字面量表
 import { PACKAGE_ASSET_DIRS } from "./lib/staged-asset-dirs.mjs";
+// C-ext-31 门禁（pi 子树 bundle 禁含 C-proc-26 准入检查代码），单一实现
+import {
+	assertNoPiEnvAdmissionGuard,
+	collectPiEnvAdmissionGuardViolations,
+} from "./lib/pi-env-admission-gate.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -74,6 +83,13 @@ const EXTERNAL = [
 	// 任何误 import 在 staged 运行期报 Cannot find module（fail-fast）而非静默内联。
 	"@zhushanwen/pi-subagent-cli",
 	"@zhushanwen/zcode-subagent-cli",
+	// undici 按宿主运行时解析（不内联）：内联 npm undici 7.28.0 副本曾在打包版 pi
+	// （Bun）下 fetch 读 chunked 流式响应体永不产块（2026-10-22 事故，LLM SSE 请求
+	// 挂死 20 分钟）。external 后 Node 宿主解析 node_modules npm 副本、Bun 宿主解析
+	// 二进制内置副本（探针指纹实测：49 导出、无 Socks5ProxyAgent、fetch + ProxyAgent
+	// + Agent(family:4) 流式均正常）。消费方 network-proxy 的能力差异处理见其
+	// dispatcher.ts 头注副本策略段。
+	"undici",
 ];
 
 /** 包名 @zhushanwen/pi-<x> → 源码目录 extensions/<group>/<x>/（group = taiji | universal，见 docs/extensions/extension-conventions.md 分组约定） */
@@ -397,6 +413,19 @@ async function main() {
 	}
 
 	await bundleEngines();
+
+	// C-ext-31 门禁：pi 子树 bundle 禁含 @taiji/shared 的 C-proc-26 准入检查代码——
+	// 打包态 pi/引擎进程没有 TAIJI_AGENT_PACKAGED，该检查进入 bundle 即 subagent 全灭
+	// （2026-10-19 事故）。单一实现见 scripts/lib/pi-env-admission-gate.mjs。
+	// 挂点刻意放在 main() 内、staging 全量完成之后（与 bundleEngines() 解耦）：
+	// 引擎包发现/staging 逻辑重构不得吞掉本断言，postbuild 侧同一门禁经
+	// verify-staged-extensions.mjs --engines-dir 逐平台产物再拦一道。
+	// 接线由 scripts/__tests__/builtin-ext-bundle.test.mjs 源码文本断言锁定。
+	assertNoPiEnvAdmissionGuard(
+		await collectPiEnvAdmissionGuardViolations([STAGED_ROOT, ENGINES_STAGED_ROOT]),
+		"[bundle-extensions] staged bundle 门禁红灯：",
+	);
+	console.log(`  pi-env admission guard: ✓ clean（C-ext-31）`);
 }
 
 /**

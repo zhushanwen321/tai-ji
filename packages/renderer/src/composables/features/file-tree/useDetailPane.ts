@@ -32,6 +32,7 @@ import { computed, watch, watchEffect, type Ref } from 'vue'
 import { useFileTreeStore, type DetailTabState, type DetailViewMode } from '@/stores/fileTree'
 import { useSessionStore } from '@/stores/session'
 import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
+import { closeDrawerIfTabsEmpty } from '@taiji/core/domain/drawer'
 import { registerSessionCleanup } from '@/composables/useSessionScopedState'
 import { file as fileApi, git as gitApi } from '@/api'
 import { parseDiff } from '@/composables/logic/parseDiff'
@@ -311,6 +312,8 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     // 加载的 stale 判据随即成立——迟到回写本就被 updateDetailTab 的分区/tab 缺席 no-op
     // 检查拦住，双防线语义一致。
     loadTokens.delete(loadKey(sid, path))
+    // 关空收敛：最后一个二级 tab 关闭即关整个抽屉（规则单一落点见 core closeDrawerIfTabsEmpty）
+    closeDrawerIfTabsEmpty(store.getDetailTabs(sid).length === 0)
   }
 
   /**

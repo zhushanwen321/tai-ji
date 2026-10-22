@@ -378,6 +378,13 @@ export function useSidebar() {
     return core.deleteFolder(id)
   }
   const loadSessions = core.loadSessions
+  // [session-archive D14，u-renderer-entry] 归档发起侧编排代理 core（cleanupSessionState
+  // 同族 + wasActive 回退——与 deleteSession 同款；归档后 TTS 停播同 delete 惯例：归档的
+  // 恰是正在播放的 session 时，消息与停止入口随行消失）。
+  const archiveSession = async (id: string): Promise<void> => {
+    useTtsPlayer().stop()
+    await core.archiveSession(id)
+  }
 
   /**
    * 归入项目（D14 语义修正 2026-08-04）：RPC 写归属 sidecar + 乐观更新 pinia store。
@@ -489,6 +496,7 @@ export function useSidebar() {
     syncSessionToPanel,
     renameSession,
     deleteSession,
+    archiveSession,
     deleteFolder,
     assignSessionToProject,
     forkSession,

@@ -31,8 +31,8 @@ describe('U10: settings UI 文案经 i18n 渲染', () => {
     expect(i18n.global.t('settings.provider.add')).toBe('添加供应商')
     expect(i18n.global.t('settings.provider.modelsCount', { count: 5 })).toBe('5 模型')
     expect(i18n.global.t('settings.provider.deleteConfirmTitle', { name: 'OpenAI' })).toBe('删除 OpenAI？')
-    // providerEdit
-    expect(i18n.global.t('settings.providerEdit.testOk', { count: 3 })).toBe('连接成功，找到 3 个模型')
+    // providerEdit（2026-10-21 provider 级一键测试退役为 per-model 行内测试，断言现行 modelTestOk 具名插值键）
+    expect(i18n.global.t('settings.providerEdit.modelTestOk', { seconds: 2 })).toBe('连接成功 · 2s')
     // extension
     expect(i18n.global.t('settings.extension.recommendedTitle')).toBe('推荐扩展')
     expect(i18n.global.t('settings.extension.discoverResultTitle', 2, { named: { count: 2 } })).toBe('发现 2 个候选')
@@ -55,7 +55,9 @@ describe('U10: settings UI 文案经 i18n 渲染', () => {
     expect(i18n.global.t('settings.network.enabled')).toBe('启用网络代理')
     expect(i18n.global.t('settings.network.authPairHint')).toBe('用户名与密码须成对填写，或同时留空')
     expect(i18n.global.t('settings.network.savedToast')).toBe('已保存，自下一轮对话起生效')
-    expect(i18n.global.t('settings.network.quickAdd')).toBe('从服务商快速添加')
+    expect(i18n.global.t('settings.network.providerCard')).toBe('按服务商配置')
+    expect(i18n.global.t('settings.network.colProxy')).toBe('走代理')
+    expect(i18n.global.t('settings.network.colIpv4')).toBe('强制 IPv4')
     expect(i18n.global.t('settings.network.noBaseUrl')).toBe('未配置 baseURL')
     expect(i18n.global.t('settings.network.rangeAll')).toBe('累计')
     expect(i18n.global.t('settings.network.truncatedNote')).toBe('累计数据基于保留的历史窗口，更早的记录已清理')
@@ -73,7 +75,7 @@ describe('U10: settings UI 文案经 i18n 渲染', () => {
     expect(i18n.global.t('settings.provider.add')).toBe('Add Provider')
     expect(i18n.global.t('settings.provider.modelsCount', { count: 5 })).toBe('5 models')
     expect(i18n.global.t('settings.provider.deleteConfirmTitle', { name: 'OpenAI' })).toBe('Delete OpenAI?')
-    expect(i18n.global.t('settings.providerEdit.testOk', { count: 3 })).toBe('Connection successful, found 3 models')
+    expect(i18n.global.t('settings.providerEdit.modelTestOk', { seconds: 2 })).toBe('Connected · 2s')
     expect(i18n.global.t('settings.extension.recommendedTitle')).toBe('Recommended')
     // 复数键（pipe 语法，t(key, count, { named })，对齐 sidebar.deleteFolderPartialFailed 先例）
     expect(i18n.global.t('settings.extension.discoverResultTitle', 2, { named: { count: 2 } })).toBe('Found 2 candidates')
@@ -95,7 +97,9 @@ describe('U10: settings UI 文案经 i18n 渲染', () => {
     expect(i18n.global.t('settings.network.enabled')).toBe('Enable network proxy')
     expect(i18n.global.t('settings.network.authPairHint')).toBe('Username and password must be filled as a pair, or both left empty')
     expect(i18n.global.t('settings.network.savedToast')).toBe('Saved. Takes effect from the next conversation turn')
-    expect(i18n.global.t('settings.network.quickAdd')).toBe('Quick add from providers')
+    expect(i18n.global.t('settings.network.providerCard')).toBe('Per-provider Routing')
+    expect(i18n.global.t('settings.network.colProxy')).toBe('Via proxy')
+    expect(i18n.global.t('settings.network.colIpv4')).toBe('Force IPv4')
     expect(i18n.global.t('settings.network.noBaseUrl')).toBe('No baseURL configured')
     expect(i18n.global.t('settings.network.rangeAll')).toBe('All time')
     expect(i18n.global.t('settings.network.truncatedNote')).toBe('All-time stats cover the retained history window; older records have been trimmed')

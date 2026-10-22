@@ -90,6 +90,7 @@
         <span class="w-14">{{ t('settings.providerEdit.headInput') }}</span>
         <span class="w-[80px]">{{ t('settings.providerEdit.headContext') }}</span>
         <span class="w-24">{{ t('settings.providerEdit.headThinking') }}</span>
+        <span class="w-7" />
         <span class="w-8" />
       </div>
 
@@ -98,8 +99,8 @@
         :key="m.id"
         class="border-b border-border"
       >
-        <!-- 横向行（原列内容）-->
-        <div class="flex items-center px-5 py-2 text-[length:var(--text-xs)]">
+        <!-- 横向行（原列内容）。flex-wrap 供行内测试结果条（w-full）换行占满 -->
+        <div class="flex flex-wrap items-center px-5 py-2 text-[length:var(--text-xs)]">
           <span class="flex flex-1 min-w-0 items-center gap-1.5">
             <span class="truncate font-mono text-neutral-fg">{{ m.id }}</span>
             <!-- 来源徽章（B-2：catalog 复用时标「自定义」；custom 不传不渲染） -->
@@ -165,6 +166,8 @@
           >
             <Settings2 />
           </Button>
+          <!-- 行内测试（2026-10-21 per-model 入口）：按钮 + 结果条共享组件，编排经注入 -->
+          <ModelTestButton :model-id="m.id" />
           <!-- 移除 -->
           <Button
             variant="ghost"
@@ -197,6 +200,7 @@ import { useI18n } from 'vue-i18n'
 import { FileText, ImageIcon, X, Settings2 } from '@lucide/vue'
 
 import CompatEditor from '../compat/CompatEditor.vue'
+import ModelTestButton from './ModelTestButton.vue'
 import {
   CONTEXT_OPTIONS,
   THINKING_STRATEGIES,

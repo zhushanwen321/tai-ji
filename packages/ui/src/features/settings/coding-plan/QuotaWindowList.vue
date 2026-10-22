@@ -13,7 +13,7 @@
         <span v-if="unitLabel(win.unit)" :class="['font-normal', tone === 'current' ? 'text-neutral-mid' : 'text-neutral-dim']">{{ unitLabel(win.unit) }}</span>
         ·
       </template>
-      {{ Math.round(win.pct) }}%
+      {{ formatQuotaPct(win.pct) }}%
       <span v-if="win.resetSec !== null" class="ml-1 font-normal text-neutral-dim">· {{ formatResetSec(win.resetSec) }}</span>
     </span>
     <span v-else class="text-neutral-dim">∞</span>
@@ -22,6 +22,7 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { formatQuotaPct } from '@taiji/shared'
 
 defineProps<{
   windows: Array<{

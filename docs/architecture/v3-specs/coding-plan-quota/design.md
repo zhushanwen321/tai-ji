@@ -95,7 +95,7 @@ taiji 作为 Electron 桌面应用，**直接以 npm 依赖形式引入该包即
 | 维度 | 评价 |
 |---|---|
 | 架构正确性 | ✅ 最佳。额度查询是「可插拔能力」而非「核心能力」——某个 provider 的 endpoint 变了、加新 provider、甚至整个额度查询功能下线，都不应该影响 runtime 核心逻辑。plugin 化让能力边界清晰 |
-| 隔离性 | ✅ Worker Thread 隔离。某个 provider 查询崩溃（如 SSR HTML 解析异常）不会影响其他 provider 或 runtime 主进程。现状 `Promise.allSettled` 只是「不 reject」，崩溃（throw）仍会冒泡 |
+| 隔离性 | ✅ Worker Thread 隔离。某个 provider 查询崩溃（如响应解析异常）不会影响其他 provider 或 runtime 主进程。现状 `Promise.allSettled` 只是「不 reject」，崩溃（throw）仍会冒泡 |
 | 可扩展性 | ✅ 第三方可开发新 provider plugin（如私有部署的 coding-plan），无需改 taiji 主仓库。符合「plugin 是唯一适配层」的架构约束 #11 |
 | 独立升级 | ✅ plugin 版本独立，provider endpoint 变化发新 plugin 版本即可，不需 taiji 发版 |
 | 复用度 | 内部仍依赖 `@zhushanwen/pi-quota-providers` 共享包做实际查询，5 个 provider 实现零成本复用 |
@@ -148,7 +148,7 @@ taiji 作为 Electron 桌面应用，**直接以 npm 依赖形式引入该包即
 | 复用度 | 零复用，5 个 provider 重新写一遍（约 800 行） |
 | 维护成本 | 共享包修了 bug，两边都要改；statusline 修了 endpoint 变化，这边不知道 |
 | 数据隔离 | 天然隔离（读自己的路径） |
-| 风险 | 复制粘贴 5 个 provider 的实现细节（normalize 反转、cookie 过期判定、SSR HTML 正则解析等）极易出错 |
+| 风险 | 复制粘贴 5 个 provider 的实现细节（normalize 反转、cookie 过期判定、响应解析等）极易出错 |
 
 **短期性**：绕过「共享包需要适配数据目录注入」的工程量，但留下双份维护债务。仅在共享包无法短期适配时作为过渡。
 
@@ -361,9 +361,9 @@ interface QuotaState {
 │  ──────────────────────────────────  │  ← divider
 │  CODING PLAN   智谱                  │  ← section label + provider tag
 │                                       │
-│  5h    ▓▓▓▓▓▓▓▓░░░░░░  68%  剩1h23m │  ← 单行 4 列
-│  本周  ▓▓▓▓▓▓░░░░░░░░  42%  剩3d12h │
-│  本月  ───────────      ∞   未订阅   │
+│  5h    ▓▓▓▓▓▓▓▓░░░░░░  68.42%  剩1h23m │  ← 单行 4 列
+│  本周  ▓▓▓▓▓▓░░░░░░░░  42%     剩3d12h │
+│  本月  ───────────      ∞      未订阅   │
 │                                       │
 │  2 分钟前更新              [刷新]    │  ← footer（现有，保留）
 └───────────────────────────────────────┘
@@ -372,9 +372,17 @@ interface QuotaState {
 **紧凑行布局**（grid 4 列，每个窗口严格一行）：
 
 ```
-grid-template-columns: 32px 1fr 32px 52px;
+grid-template-columns: 32px 1fr 44px 52px;
                        标签 | 进度条 | 百分比 | 剩余时间
 ```
+
+百分比列宽随展示口径定（两位数小数 + `%` 的最宽形态 `100%` / `12.34%` 均不折行）。
+
+**百分比展示口径**：保留 **2 位小数**，唯一实现 = `@taiji/shared` 的 `formatQuotaPct`
+（`QUOTA_PCT_DECIMALS = 2`）。pct 是 fetcher 派生连续量（`used/limit` 除法、`percent01to100`
+乘法），直接插值会吐出浮点尾数（实测 `2.9499999999999997`，撑爆数字列并溢出行宽）；
+指标聚合页（`ContextCapacityCard`）与设置页（`QuotaWindowList`）必须同一函数，否则同一
+窗口在两处显示不同数字。整数 pct 不补尾零（`68%`），非有限值降级 `--`。
 
 **分档配色**（复用现有规则）：
 - `<70%`：`fill-accent`（蓝色渐变）
@@ -431,7 +439,7 @@ P3 可以与 P2 并行（数据通路打通后，UI 两处独立）。
 | 3 | 查询时机与缓存 | **hover 触发查询 + 持久缓存不删除 + 失败用缓存 + log** | hover 进入容量 chip 时主动调 `quota.fetch(providerId)` 查询（非后台轮询）。成功 → 更新缓存；失败 → 展示旧缓存（**缓存永不删除**）+ runtime logger 落盘 log。并发保护：同一 provider pending 期间复用 Promise 不重复发起。最小间隔保护：10s 内不重复发同一 provider 请求 |
 | 4 | Composer 浮层挂载点 | **合并到 ContextCapacity popover，不挂 model chip** | Coding-plan 信息合并到「上下文容量」hover 浮层下半区。Model chip 回归纯模型切换。理由：容量与额度都是「用量」类信息，聚合一个浮层比分散两个 chip 更合理。详见 demo 第 2 部分 |
 | 5 | 共享包依赖 | **不依赖共享包，runtime 自研 5 个 provider fetcher** | 推翻原方案 A「集成 @zhushanwen/pi-quota-providers 共享包」。改为：runtime 新增 `quota-providers/` 目录，5 个 provider 各自实现 fetcher（zhipu/kimi/minimax/mimo/opencode），只参考 statusline 的 endpoint/认证/解析思路，代码用 taiji 自己的风格重写。statusline 的实现仅作技术参考，不引入代码依赖 |
-| 6 | fetcher 架构 | **可插拔 ProviderQuotaFetcher 接口 + 注册表** | 抽象 `ProviderQuotaFetcher` 接口（`fetchQuota(credential) → NormalizedQuotaRow`）+ 注册表（`QUOTA_FETCHERS: Map<fetcherId, ProviderQuotaFetcher>`）。5 个 provider 各自实现并注册。为后续 plugin 化铺路：Phase 2 每个 fetcher 可独立迁移成 plugin |
+| 6 | fetcher 架构 | **可插拔 ProviderQuotaFetcher 接口 + 声明式引擎 + 基线⊕远程配置** | 抽象 `ProviderQuotaFetcher` 接口 + 声明式执行引擎（`declarative-engine.ts`，受限原语集）按配置运行。5 家逻辑抽成基线配置 `baseline-fetchers.json`（随发版更新），远程配置 `configs/remote/quota-fetchers.json` 同 fetcherId 整体覆盖基线（remote-config 域 2，免发版热更新）；注册表 = 基线 ⊕ 远程合并视图（`getQuotaFetcher`）。fetcher id 是持久化契约（providers.json extras），只增不改名 |
 
 ---
 

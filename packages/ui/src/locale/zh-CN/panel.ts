@@ -46,6 +46,9 @@ export default {
     pluginActionExtensionNotLoaded: '本会话未加载所需扩展',
     pluginActionRestoring: '会话恢复中，暂无法判定',
     pluginActionTemporarilyUnavailable: '暂不可用',
+    // scheduler 快捷面板（SchedulerQuickCard，2026-10-19 左簇浮层优化）：
+    schedulerPanelTitle: '定时任务',
+    schedulerQuickOpen: '打开定时任务面板',
   },
   composer: {
     send: '发送',
@@ -277,6 +280,16 @@ export default {
     pillConflict: '冲突',
     unavailableTitle: 'Git 不可用，无法读取仓库状态',
   },
+  quotaFloat: {
+    // 对话流左侧套餐浮层（plan-quota-float）：全部 quota.enabled provider 的窗口用量
+    //（pct=null 的窗口整格不渲染）
+    title: '套餐额度',
+    current: '当前',
+    expand: '展开套餐面板',
+    collapse: '折叠套餐面板',
+    usedPct: '已用 {pct}%',
+    fetchFailed: '额度查询失败',
+  },
   context: {
     // 指标聚合入口（W3a 单图标聚合按钮；ui-optimize 决策 6 起对所有 fit 级常驻，hover 出容量+TTFT+速度+缓存四卡聚合页）title
     metricsAggregateTitle: '指标',
@@ -383,7 +396,6 @@ export default {
     subagentNoOutcome: '（无结果记录）',
     engineBadgeTitle: '执行引擎：{engine}',
     subagentStopReason: '上一轮为什么停（停因词，仅展示）',
-    backToWorkflow: '返回工作流',
     subagentLoadFailed: '加载失败',
     subagentRetry: '重试',
     workflowRunning: '运行中',
@@ -439,6 +451,10 @@ export default {
     bashTaskAlreadyExited: '任务已结束',
     bashTaskIdentityUnverifiable: '无法验证进程身份，已拒绝终止（宁不杀勿误杀）',
     bashTaskWriteFailed: '操作未生效（数据写入失败），请重试',
+    // trace tab（session-trace 一级 tab：选中 trace 条目的详情页；未选中走空态 fallback）
+    tabTrace: 'Trace',
+    noTraceEntry: '未选中条目',
+    traceHint: '切换到 Trace 视图后点击条目查看详情',
   },
   browserPane: {
     overlayTitle: '浏览器',

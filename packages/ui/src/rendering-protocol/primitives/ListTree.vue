@@ -14,6 +14,9 @@
  * - numbered（v1.1）：行首弱化 mono 序号（1/2/3…，编辑器行号范式）。扁平有序清单用；
  *   icon 与序号互斥（序号占据 icon 槽位，避免行首双元素）。
  * - 递归 depth 逻辑不变。
+ * - label 截断（2026-10-19 优化）：min-w-0 + flex-1 + truncate 单行截断——todo 文本 /
+ *   goal success criteria / scheduler 任务行都经本原语渲染，长行此前会撑破托盘浮层；
+ *   截断后全文仍由消费方（浮层行 title / aria）承载，本原语只负责视觉不溢出。
  */
 import type { TreeItem, TreeItemIcon } from '@zhushanwen/extension-protocol'
 import {
@@ -70,7 +73,7 @@ const depthPadding = () => ({ paddingLeft: `${currentDepth() * INDENT_PX}px` })
             class="size-3"
           />
         </span>
-        <span :class="labelClass(item.status)">{{ item.label }}</span>
+        <span :class="['min-w-0 flex-1 truncate', labelClass(item.status)]">{{ item.label }}</span>
         <span
           v-if="item.status"
           data-testid="list-tree-status"

@@ -37,11 +37,13 @@ function mockContext(overrides?: Partial<WorktreeHandlerContext>): WorktreeHandl
         barePath: '/project/.bare',
         repoRoot: '/project',
         defaultBranch: 'main',
+        defaultBaseRef: 'origin/main',
       })),
       listBranches: vi.fn(async () => ({
         local: ['main', 'feat-x'],
         remote: ['origin/main', 'origin/feat-y'],
         defaultBranch: 'main',
+        defaultBaseRef: 'origin/main',
       })),
       list: vi.fn(async () => ({
         items: [
@@ -49,6 +51,7 @@ function mockContext(overrides?: Partial<WorktreeHandlerContext>): WorktreeHandl
           { path: '/project/feat-x', branch: 'feat-x', HEAD: false, bare: false },
         ],
       })),
+      prefetchDefaultRemote: vi.fn(async () => undefined),
     },
     ...overrides,
   }
@@ -367,6 +370,7 @@ describe('WorktreeMessageHandler worktree.listBranches', () => {
       local: ['main', 'feat-x'],
       remote: ['origin/main', 'origin/feat-y'],
       defaultBranch: 'main',
+      defaultBaseRef: 'origin/main',
     })
   })
 
@@ -427,6 +431,7 @@ describe('WorktreeMessageHandler workspace.detect', () => {
       barePath: '/project/.bare',
       repoRoot: '/project',
       defaultBranch: 'main',
+      defaultBaseRef: 'origin/main',
     })
   })
 

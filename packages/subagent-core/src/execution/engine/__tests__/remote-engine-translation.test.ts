@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 
 import { EngineClient } from "../client/engine-client.ts";
 import { RemoteEngine } from "../client/remote-engine.ts";
+import { translateByTableReverse } from "../client/manifest-lookup.ts";
 import type { EngineCapabilities } from "../types.ts";
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "remote-engine-translation-"));
@@ -88,5 +89,31 @@ describe("RemoteEngine translateModelRef 形态映射（manifest modelTranslatio
   it("声明表缺席 → 成员摘除（消费方 typeof 探测缺席语义：恒等透传 + 生效回执 warn）", () => {
     const engine = makeEngine({});
     expect(typeof engine.translateModelRef).toBe("undefined");
+  });
+});
+
+describe("translateByTableReverse — 显示侧反向查表（引擎原生 ref 翻回 pi 词汇）", () => {
+  it("值域命中：引擎原生 provider 段翻回 pi 词汇，模型段原样保留（引擎目录大小写不在此归一）", () => {
+    expect(translateByTableReverse(TABLE, "account:bigmodel-individual-coding-plan/GLM-5.3-Flash")).toBe(
+      "zai-coding-cn/GLM-5.3-Flash",
+    );
+  });
+
+  it("幂等：pi 词汇 ref 与 1:1 provider ref 再入恒等（不在值域透传）", () => {
+    expect(translateByTableReverse(TABLE, "zai-coding-cn/glm-5.3-flash")).toBe("zai-coding-cn/glm-5.3-flash");
+    expect(translateByTableReverse(TABLE, "xiaomi-token-plan-cn/mimo-v2.6-flash")).toBe(
+      "xiaomi-token-plan-cn/mimo-v2.6-flash",
+    );
+  });
+
+  it("裸 id（无 '/' 或空 provider 段）恒等透传", () => {
+    expect(translateByTableReverse(TABLE, "GLM-5.3-Flash")).toBe("GLM-5.3-Flash");
+    expect(translateByTableReverse(TABLE, "/GLM-5.3-Flash")).toBe("/GLM-5.3-Flash");
+  });
+
+  it("模型段可含 '/'：反查只吞第一个 '/' 前的 provider 段", () => {
+    expect(translateByTableReverse(TABLE, "account:bigmodel-individual-coding-plan/family/GLM-5.3")).toBe(
+      "zai-coding-cn/family/GLM-5.3",
+    );
   });
 });

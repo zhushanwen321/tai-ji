@@ -86,8 +86,8 @@ import { WorkflowRunEventsReader } from './workflow-run-events-reader.js'
 import type { WorkflowDagReply, WorkflowRunEventsReply } from '@taiji/shared'
 import { getConfigDir, getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { logger } from '../../infra/logger.js'
-import { discoverAndRegisterEngines, engineConversationCapable } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
-import { getSubagentMessageResultsDir } from '@zhushanwen/subagent-core'
+import { discoverAndRegisterEngines, engineConversationCapable, engineModelTranslationTable } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
+import { getSubagentMessageResultsDir, translateByTableReverse } from '@zhushanwen/subagent-core'
 import { isStrictlyUnder } from '../../utils/path-utils.js'
 import type { ISessionStore } from '../ports/session.js'
 import { toErrorMessage } from '../../utils/errors.js'
@@ -1333,6 +1333,7 @@ export class SessionRecords {
       this.enhanceSubagentDetails(sessionId, Array.from(projection.subagents.values()), resolved),
       this.deps.modelOverrideQuery,
       resolved,
+      translateEngineModelRefToDisplay,
     )
     return { records: workflows, oversize: false, found: true }
   }
@@ -1923,6 +1924,24 @@ function ensureEngineRegistryForProjection(): void {
     // 高于误判 false 的代价（用户重开面板触发重扫），此处只留痕失败原因。
     console.warn(`[session-records] engine discovery for chatCapable projection failed: ${toErrorMessage(e)}`)
   }
+}
+
+/**
+ * 成员盖章模型 ref → 显示词汇翻译（run 详情增强的注入侧，workflow-record-projection
+ * 消费）。[engine-ref-translation] 的反向半边：record.model 存的是派发期翻译后的引擎
+ * 原生 ref（stamp 前经 EnginePort.translateModelRef——zcode 实装 zai-coding-cn/* →
+ * account:bigmodel-individual-*，其余 provider 两世界 1:1 透传），而 run 级展示链
+ * （下拉候选 / 覆盖意图 / 目录校验）全程 pi 词汇——显示侧按引擎 manifest
+ * modelTranslation 声明表逆映射 provider 段翻回 pi 词汇（查表逻辑 = core
+ * translateByTableReverse 纯函数），无翻译面（pi 引擎 / 未发现引擎）恒等透传。
+ * 模型段大小写两世界拼写差（pi 行 id 小写 vs zcode 目录大写）不在此归一——归一
+ * 消费 pi 清单行，属 renderer 匹配侧职责（model-picker-data canonicalize 对
+ * settingsStore.models 行）。
+ */
+function translateEngineModelRefToDisplay(engineId: string, rawModelRef: string): string {
+  ensureEngineRegistryForProjection()
+  const table = engineModelTranslationTable(engineId)
+  return table === undefined ? rawModelRef : translateByTableReverse(table, rawModelRef)
 }
 
 /**

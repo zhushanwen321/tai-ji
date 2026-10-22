@@ -11,6 +11,13 @@ export default {
   switchSessionFailed: '切换会话失败：{msg}',
   newTaskFailed: '新建任务失败：{msg}',
   deleteSessionFailed: '删除会话失败：{msg}',
+  // 归档发起 toast（session-archive §5.1 成功路径；压缩后台进行，文案不宣称已压缩）
+  archiveSessionDone: '已归档「{name}」',
+  archiveSessionFailed: '归档失败：{msg}',
+  // 工具组归档入口（D10：Archive 图标 + count 角标，0 隐藏）
+  archiveEntry: {
+    title: '已归档会话（{count}）',
+  },
   deleteFolderFailed: '删除文件夹会话失败：{msg}',
   // S3：带首个失败原因（error 占位符），让用户感知失败根因。zh-CN 无复数形态。
   deleteFolderPartialFailed: '{count} 个会话删除失败：{error}',
@@ -25,7 +32,9 @@ export default {
     restarting: '即将重启',
     error: '升级失败',
     goToDownload: '前往下载',
+    // downloaded = 完整语义（title / 确认弹窗语境）；restart = 侧边栏行内短文案（单行宽度契约）
     downloaded: '已下载，重启安装',
+    restart: '重启',
     restartInstall: '重启并安装更新',
     confirmInstall: '新版本 v{version} 已下载完成。立即重启将中断当前所有任务（包括正在进行的 AI 会话），确定继续吗？',
     installLater: '稍后再说',
@@ -55,6 +64,10 @@ export default {
     rename: '重命名',
     delete: '删除',
     deleteConfirm: '确认删除？',
+    // 归档（session-archive D6/D12/D13，u-renderer-entry）：悬停归档钮两段确认 + 生成中禁用 title
+    archive: '归档',
+    archiveConfirm: '再次点击确认归档',
+    archiveGenerating: '生成中不可归档',
     forkFrom: 'fork 自',
     markDone: '标记完成',
     unmarkDone: '取消标记',
@@ -89,6 +102,8 @@ export default {
     header: '项目与会话',
     groupEmpty: '暂无会话，点组头「+」在此新建任务',
     newSessionInProject: '在此项目新建任务',
+    // DefaultProjectHead 轻量头行「+」：锚定默认项目后新建（修复锚定切走后新会话进不了默认区）
+    newSessionInDefault: '在默认项目新建任务',
     newSessionInFolder: '在此目录新建会话',
     deleteFolderConfirm: '确认删除此文件夹下所有会话？',
     // N8 A/C 双模式（ui-optimize-unified 决策 9）：双段图标开关的模式名（title 悬停提示）

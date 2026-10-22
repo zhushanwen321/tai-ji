@@ -133,7 +133,7 @@ describe('drawer types：btw tab 扩展（btw-question D7，M3-a）', () => {
 // 类型从 true 塌缩为 false，赋值即 tsc 红）。
 
 // §7.1 终态 8 员逐字成员序（成员缺失/改序即 tsc 红）
-const rightDrawerTabs: RightDrawerTab[] = ['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'workflow']
+const rightDrawerTabs: RightDrawerTab[] = ['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'trace']
 
 // 'terminal' 不属于右抽屉终态枚举（已迁底抽屉）——若 RightDrawerTab 混入 'terminal'，本类型塌缩为 false、赋值 tsc 红
 type TerminalIsNotRightTab = 'terminal' extends RightDrawerTab ? false : true
@@ -161,7 +161,7 @@ const controlStateSlimAnchor: ParasiteFieldsRemoved = true
 
 describe('drawer types：右抽屉 8 tab 枚举（display-containers §7.1，U7 收窄终态）', () => {
   it('RightDrawerTab = §7.1 终态 8 员（编译期断言的运行期影子）', () => {
-    expect(rightDrawerTabs).toEqual(['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'workflow'])
+    expect(rightDrawerTabs).toEqual(['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'trace'])
   })
 
   it("'terminal'/'browser' 均不可赋给 RightDrawerTab（条件类型负向锚的运行期影子；tab 类型单一化 = RightDrawerTab）", () => {

@@ -259,6 +259,25 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
 fi
 
 # ============================================================================
+# 0.8 EdgeFade 渐焦遮罩消费范围门禁（2026-10-21 用户裁决）
+#     EdgeFade（顶缘渐焦：blur+沉色+容器 mask）仅对话流及同族场景可用——唯一挂载点
+#     MessageStream.vue（drawer subagent / 旁路提问 / workflow agent 经其复用）；
+#     列表 / 面板 / 文件树等一律禁止。判定唯一源 =
+#     .githooks/check_edge_fade_scope.mjs（白名单 ALLOWLIST 同文件）。
+#     按 R1 惯例不设独立 SKIP 开关，走 SKIP_ALL_CHECKS。
+# ============================================================================
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    EDGE_FADE_STAGED=$(echo "$STAGED_FILES" | grep -E "^packages/.*\.(vue|tsx?)$" || true)
+    if [ -n "$EDGE_FADE_STAGED" ]; then
+        echo -e "${BLUE}[INFO] 运行 EdgeFade 消费范围检查...${NC}"
+        if ! node .githooks/check_edge_fade_scope.mjs $EDGE_FADE_STAGED; then
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    fi
+fi
+
+# ============================================================================
 # 1. 前端 ESLint 检查
 # ============================================================================
 
@@ -731,6 +750,65 @@ if echo "$STAGED_FILES" | grep -qE "^packages/zcode-session-source/|^extensions/
         exit 1
     fi
     echo -e "${GREEN}[OK] P-bundle 门检查通过${NC}"
+fi
+
+# ============================================================================
+# 2h-3. C-ext-31 门禁提交期触发（pi 子树存储树路径准入检查）
+#     pi-env-admission-gate（assertNoPiEnvAdmissionGuard）此前只在 dev 链 /
+#     build:pre / CI build job 生效——本地 git commit 改门禁自身或 pi 子树源码时
+#     无任何触发，准入检查退化（标记被清空 / 扫描范围被改窄）可静默进主干，
+#     直到下次 CI build 才炸（2026-10-19 打包版 subagent 全灭事故即此类滞后）。
+#     本段补提交期触发：执行 node scripts/bundle-extensions.mjs 全量重建 staged
+#     （<1s，main() 内 staging 全量完成后执行门禁断言 assertNoPiEnvAdmissionGuard，
+#     与 bundleEngines() 解耦），同时覆盖
+#     门禁脚本 / bundle 脚本 / postbuild 复扫脚本 / pi 子树源码 / shared paths 与
+#     session-store-paths 两源任一变更。红灯 = staged bundle 内含准入检查标记或
+#     重建失败，按下方恢复动作处理。
+#     触发范围用 STAGED_FILES（ACMR）：本段执行的是全量重建（读工作区源码，不按
+#     staged 清单裁剪）——staged 删除的文件此刻仍在工作区，照常进入重建输入；
+#     连工作区一起删的场景由重建本身失败红灯覆盖（esbuild 解析不到即非零退出）。
+#     不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^scripts/lib/pi-env-admission-gate\.mjs$|^scripts/bundle-extensions\.mjs$|^scripts/verify-staged-extensions\.mjs$|^packages/subagent-core/src/|^packages/shared/src/(paths|session-store-paths)\.ts$"; then
+    print_section "[C-ext-31 门禁（staged bundle 准入检查标记重建校验）]"
+
+    if ! node scripts/bundle-extensions.mjs; then
+        echo -e "${RED}[ERROR] C-ext-31 门禁未通过——staged bundle 重建失败或内含准入检查标记（getDataDir 族在打包态 pi 进程抛）${NC}"
+        echo -e "${YELLOW}[INFO] 恢复动作：pi 子树改回 '@taiji/shared/session-store-paths' 纯公式 + resolveSessionStoreBase 显式传 base（store-base.ts），勿经 getDataDir env 缺省通道${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] C-ext-31 门禁检查通过${NC}"
+fi
+
+# ============================================================================
+# 2i. 模型可见性投喂单点调用点白名单检查（约束 C-ext-32）
+#     .githooks/check_register_allowlist.py：全仓 extensions/ 下
+#     registerProvider|registerNativeProvider|registerVirtualModel 调用点只许
+#     出现在两个白名单包——provider-live-sync（投喂通道本体，写入单点）与
+#     scheduler（ack 合成轮临时覆写 + backend 转发，语义不同不在禁列）。
+#     防未来新开常驻注入点绕过投喂单点、制造第二写入方：pi 进程注册表是模型
+#     可见性的事实源，消费方（--model 解析 / rpc set_model / rename /
+#     smart-context / permission / scheduler / subagent 校验 / provider 对账）
+#     零改动即自动受益，新开注入点等于绕过单点。零第三方依赖，实测 ~0.1s
+#     （328 个非测试源文件，extensions/ 全量扫描、已排除测试目录，随仓库线性
+#     增长）。复用 SKIP_EXTENSION_LINT
+#     开关（与 2b-2e 扩展检查同族，不新增逃生口）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^extensions/.*\.(ts|mts|cts|js|mjs)$|^\.githooks/check_register_allowlist\.py$|^\.githooks/install-hooks\.sh$"; then
+    print_section "[模型可见性投喂单点调用点白名单检查]"
+
+    if [ "$SKIP_EXTENSION_LINT" != "1" ]; then
+        if ! python3 .githooks/check_register_allowlist.py; then
+            echo -e "${RED}[ERROR] 发现白名单外的注册表注入调用点——投喂单点 = provider-live-sync 包（C-ext-32），按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] 投喂单点调用点白名单检查已跳过${NC}"
+    fi
 fi
 
 # ============================================================================
@@ -1819,11 +1897,12 @@ ${STAGED_DELETED}"
     # SESSION_ARTIFACTS_DIR_SEGMENT + resolveSessionArtifactsDir）的**段名字面量与 sessionId
     # 校验正则字面量**对拍（读源文件文本，零散文解析；与 u1 的 capability 清单对拍同型）。
     # 任一漂移 = agent 收到的路径与实际目录不符（写偏或预览 404），仅此检查红灯。
-    # 触发范围：检查脚本自身 / shared paths 源 / system-prompt 源 / runtime pi-paths 第三源
+    # 触发范围：检查脚本自身 / shared paths 源 / shared session-store-paths 源（存储树
+    # 纯公式模块，C-ext-31 拆分）/ system-prompt 源 / runtime pi-paths 第三源
     # （sessionId 正则三方对拍的第三源）/ base-tool-enhance registry 源（域 5 镜像）/
     # session-reader tool-handler 源（域 6 镜像）——对拍源文件被删除也必须触发，脚本对
     # 文件缺失自带 fail 分支。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
-    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-artifact-dir-formula-sync\.mjs$|^packages/shared/src/paths\.ts$|^extensions/taiji/system-prompt/src/index\.ts$|^packages/runtime/src/infra/pi/pi-paths\.ts$|^extensions/universal/base-tool-enhance/src/background/registry\.ts$|^extensions/universal/session-reader/src/tool-handler\.ts$"; then
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-artifact-dir-formula-sync\.mjs$|^packages/shared/src/paths\.ts$|^packages/shared/src/session-store-paths\.ts$|^extensions/taiji/system-prompt/src/index\.ts$|^packages/runtime/src/infra/pi/pi-paths\.ts$|^extensions/universal/base-tool-enhance/src/background/registry\.ts$|^extensions/universal/session-reader/src/tool-handler\.ts$"; then
         echo -e "${BLUE}[INFO] 产物目录公式文件有变更，运行公式对拍检查...${NC}"
         if [ ! -f "scripts/check-artifact-dir-formula-sync.mjs" ]; then
             echo -e "${RED}[ERROR] 找不到 scripts/check-artifact-dir-formula-sync.mjs（D7 对拍机器检查交付物缺失）${NC}"
@@ -1836,6 +1915,34 @@ ${STAGED_DELETED}"
         fi
     else
         echo -e "${GREEN}[OK] 无产物目录公式文件变更，跳过公式对拍检查${NC}"
+    fi
+
+    # pi 子树源码级 shared import 边界检查（C-ext-31 源码级判定，按路径触发）：
+    # bundle 门禁（bundle-extensions 构建期 / verify-staged-extensions postbuild）只做
+    # 标记字符串匹配，"import '@taiji/shared/paths' 的纯符号（如 encodeCwd）"不带守卫
+    # 码、暂未调用 getDataDir 时门禁恒绿。本检查扫 packages/subagent-core/src 与
+    # extensions/ 源码的 import/from 语句，命中 '@taiji/shared/paths' 或裸根
+    # '@taiji/shared' 即红灯并列行号（stderr 附恢复动作）——不等 bundle，源码层拦截。
+    # 合法形态 = '@taiji/shared/session-store-paths' 纯公式 + resolveSessionStoreBase
+    # 显式传 base；注释引用旧路径（说明边界的文档形态）与 __tests__/*.test.ts
+    # （存量测试造 packaged env 场景）不拦。
+    # 触发范围：pi 子树两个源根 + 检查脚本自身（源文件被删除也必须触发——删除是
+    # 把 import 挪去别处的前兆，且脚本对扫描根缺失自带 fail 分支；复用 PI_SYNC_TRIGGER_FILES
+    # 的 staged ACMR + deleted D 清单）。不设独立 SKIP_* 开关（R1 后惯例，总开关兜底）。
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^packages/subagent-core/src/|^extensions/|^scripts/check-pi-subtree-shared-imports\.mjs$"; then
+        echo -e "${BLUE}[INFO] pi 子树源码有变更，运行 shared import 边界检查...${NC}"
+        if [ ! -f "scripts/check-pi-subtree-shared-imports.mjs" ]; then
+            echo -e "${RED}[ERROR] 找不到 scripts/check-pi-subtree-shared-imports.mjs（C-ext-31 源码级检查交付物缺失）${NC}"
+            exit 1
+        fi
+        if ! node scripts/check-pi-subtree-shared-imports.mjs; then
+            echo -e "${RED}[ERROR] pi 子树源码级 shared import 边界检查未通过——按上方 ✗ 明细改 import '@taiji/shared/session-store-paths' + resolveSessionStoreBase 后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}[OK] pi 子树 shared import 边界检查通过${NC}"
+    else
+        echo -e "${GREEN}[OK] 无 pi 子树源码变更，跳过 shared import 边界检查${NC}"
     fi
 
     # POSIX resolve 折叠实现三份镜像对拍检查（chat-html-support v16 内联容器 / markdown

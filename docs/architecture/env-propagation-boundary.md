@@ -113,7 +113,7 @@
 | 变量 | 设置点 | 穿越 | 消费点 | 泄露危害判定 |
 |------|--------|------|--------|---------------|
 | `TAIJI_AGENT_PACKAGED` | main 注入（`process-control.ts:260`；dev 下 undefined 清残留 `safe-env.ts:36-40`） | B2 合规；B3/B4/B5/B6/B7/B8 无合规依据 | runtime 六处（§2.2 图）；**生产代码消费者全部位于 runtime 进程自身**，pi 子树零消费（grep 证实） | **有害**（本案元凶，探针 P1/P2 实锤）。出站应为零 |
-| `TAIJI_AGENT_DATA_DIR` | 用户 shell；dev 缺省 `~/.taiji-dev`（`main.ts:123`） | B2 extras(:262)；B3 **显式注入**（`process-manager.ts:124`，与白名单双保险） | runtime `shared getDataDir()`（`shared/src/paths.ts:40-42`）；pi 内 extensions（`subagent-workflow/src/execution/engine/common/data-dir.ts:45`） | **合法跨界功能契约**，应显式 forward，不应靠前缀侥幸 |
+| `TAIJI_AGENT_DATA_DIR` | 用户 shell；dev 缺省 `~/.taiji-dev`（`main.ts:123`） | B2 extras(:262)；B3 **显式注入**（`process-manager.ts:124`，与白名单双保险） | runtime `shared getDataDir()`（`shared/src/paths.ts:40-42`）；pi 内 extensions（`packages/subagent-core/src/execution/engine/common/data-dir.ts:43`——session 存储树 base 同通道，subagent-core `store-base.ts`，C-ext-31） | **合法跨界功能契约**，应显式 forward，不应靠前缀侥幸 |
 | `TAIJI_AGENT_PORT_OFFSET` | 用户 shell；dev 缺省（`main.ts:125`） | B2 extras(:263)；随白名单漏入 B3 后 | main/runtime 端口计算；pi 子树零消费 | 无害但违反最小暴露；观察名单（D3） |
 | `TAIJI_RUNTIME_TOKEN` | main 注入（`:266`，WS 鉴权令牌） | B2 extras；白名单漏入 B3/B4…（P2 活体取证） | renderer 经 IPC 读 supervisor；pi 子树零消费 | **有害（安全级）**：任意 hook/npm 脚本可读 WS 凭证。出站应为零 |
 | `ELECTRON_RUN_AS_NODE` | main(:259)；引擎执行器探针（SDK node-executor）；plugin-host 强制('1') | B2 extras；漏入 B7/B8 | sidecar/node 语义切换 | 半有害（B8 内 node 退化 GUI）；B7 已删、B8 未删 |

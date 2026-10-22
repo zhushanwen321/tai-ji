@@ -25,6 +25,26 @@ export interface QuotaWindow {
 /** 三窗口：[5h 滚动, 本周, 本月]。 */
 export type QuotaWins = [QuotaWindow, QuotaWindow, QuotaWindow]
 
+/** 额度百分比展示保留的小数位（2026-10-20 裁决：两位）。 */
+export const QUOTA_PCT_DECIMALS = 2
+
+/**
+ * 额度百分比 → 展示文本（只产出数值本体，`%` 由调用方拼）。
+ *
+ * 存在理由（SSOT）：pct 是 fetcher 派生值的连续量（`used/limit` 除法、`percent01to100` 乘法），
+ * 直接插值会暴露浮点尾数——实测 `2.9499999999999997` 撑爆 32px 数字列并溢出行宽。
+ * 两个消费面（指标聚合页 ContextCapacityCard / 设置页 QuotaWindowList）必须同一口径，
+ * 否则同一窗口在两处显示不同数字。
+ *
+ * 定点兜底而非四舍五入后插值：`toFixed` 二进制舍入在白噪声上稳定（0.005 边界不追求
+ * 数学精确），且 `Number(...)` 归一后再插值可丢掉 `2.95` 与 `2.9500000001` 的尾零差异。
+ * 非有限值（NaN/±Infinity）→ `'--'`，与 resetSec 缺省占位一致（不渲染 `NaN%`）。
+ */
+export function formatQuotaPct(pct: number): string {
+  if (!Number.isFinite(pct)) return '--'
+  return String(Number(pct.toFixed(QUOTA_PCT_DECIMALS)))
+}
+
 /** 归一化额度行（fetcher 统一输出格式）。 */
 export interface NormalizedQuotaRow {
   /** Provider 显示名（如 '智谱 GLM Coding Plan'）。 */
@@ -308,4 +328,18 @@ function normalizeOpendesignWorkspace(trimmed: string): QuotaWorkspaceNormalizeR
 
 function opendesignUsageUrl(id: string): string {
   return `${OPENDESIGN_API_BASE}/api/v1/workspaces/${id}/billing/coding-plan-usage`
+}
+
+/**
+ * 从已配置的 workspace 地址提取 workspace id（读侧反提取——opencode fetcher 请求
+ * console API 时以 id 作 `x-org-id` header）。
+ *
+ * 写侧产物是规范 URL（normalizeQuotaWorkspaceUrl → `/workspace/<id>/go`）；本函数同时
+ * 容忍裸 `wrk_` id 与其他路径形态（读侧不做二次归一化，存量数据形态不保证）。提取不到
+ * 返回 null，调用方按配置不可用处理（恢复指引指向重填配置）。
+ */
+export function extractQuotaWorkspaceId(workspaceUrl: string): string | null {
+  const trimmed = workspaceUrl.trim()
+  if (WORKSPACE_ID_RE.test(trimmed)) return trimmed
+  return trimmed.match(/wrk_[A-Za-z0-9]+/)?.[0] ?? null
 }

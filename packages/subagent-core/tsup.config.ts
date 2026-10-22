@@ -40,7 +40,12 @@ const mainConfig = defineConfig({
   // 点 engine-discovery.ts 仅 pi 壳深路径消费，dist 实测零常量命中；noExternal 为
   // 防御性边界，未来 entry 引入运行时引用时即生效 bundle。）
   // 降级路径（D4 既定）：bundle 边界出问题时改为全量 bundle 闭包内非 node 依赖。
-  noExternal: ['@zhushanwen/extension-protocol'],
+  // @zhushanwen/state-machine [state-machine-infrastructure M2/F2]：本包首个 import
+  // 该包的单元是 M2（record 域翻边写点 import 机器声明，档 1 index entry 运行时
+  // 闭包内）。其 npm dist 对齐 extension-protocol 先例仅 ESM（exports 无 require
+  // 条目）——不登记则档 1 CJS dist 把它 external 化为 require 链上的 ESM-only 依赖
+  //（真实 require 断链形态，比 protocol 条目的防御性边界更实）。
+  noExternal: ['@zhushanwen/extension-protocol', '@zhushanwen/state-machine'],
 })
 
 // ── 档 2：自包含 CJS bundle（host-surface D2） ──────────────────

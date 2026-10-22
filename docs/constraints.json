@@ -2189,7 +2189,7 @@
     },
     {
       "id": "C-data-20",
-      "summary": "record 持久化写侧唯一入口：subagent record 状态（.state 上一轮收条 / .alive 写权声明 / manifest 派生视图 / sessions-index 缓存 / subagent-record entry / .record-binding 锚键 sidecar）的写侧全部归 RecordStore 意图原语，store 外零直写。【2026-09-13 永久会话模型原语清单刷新】状态机两态化（running|idle，closed 终态与 ClosedReason 资格角色删除）后现役原语 = markSettled（轮收尾：.state 新格式收条 status=idle + stopReason/endedAt，binding 统计快照锚分派 pi sessionFile 路径 / zcode 锚键路径）/ markReopened（锚失效同 id 带历史重开）/ markSettledOut（close 终态写点：worktreeHandle 清句 + .alive release + manifest 派生视图，幂等恒 true）/ markResurrected / tryEnterRunning + 轮次族 markRoundStarted / markRoundIdle / markBatchFinalized / adoptEngineDeath / register / appendEvent / acquireWriteLease（.alive acquire 三时机唯一包装）；markFinalized / markCancelled 退役（@deprecated，仅 workflow-origin D7 例外族 finalizeFailed/finalizeAborted/settleOneShotOutcome 经 finalize-record 保留调用）。检查两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。settle/终态持久化写入点全同步（.state writeSync 先 + manifest writeSync 后，D8 v7 写序在两态下不变），实测 P99 <0.5ms（N=100 采样、数字时变，terminal-write-latency.test.ts 常驻回归；D2 阈值 10ms）。【W1 介质归位写侧刷新（ADR-0094，2026-09-26）】record 运行态的事实写 = 事件文件追加（RecordJournalWriteFace，record-store-rounds.ts——record-created/bound/round-started/round-idle/settled/reopened 六类事件 + 单调 seq，唯一写者 record-events.ts）；主 session 条目范围 = 每实体注册 + 终态两条 v2 小条目（register/archive/收编入口内置——register 与 archive 真终局写，reportRecordTransition 的 v1 全量快照写点退役，改落 record-bound 帧 + bound manifest 物化）；v1 快照唯一残余写点 = reportSubagentRecord（v1 实体孤儿纠偏兼容层，W4 sunset 退役）；state/manifest/.record-binding 均为 fold 物化派生视图（.alive 操作租约不计事实源）。检查两级不变，grep 门断言范围扩为 R1-R7（R2 加宽常量形态 + 白名单扩 rounds face；R3 workflow-record 三写点宿主白名单（worker-message-pump / lifecycle / 壳 jsonl-run-store）；R4 v1 快照派生视图构造器白名单（record-entry 定义 + store 兼容层）；R5 workflow-record v1 快照载荷形态全域拒绝；R6 eventLog/displayItems 死字节载荷全域拒绝；R7 .events 直写白名单（record-events / run-events））",
+      "summary": "record 持久化写侧唯一入口：subagent record 状态（.alive 写权声明 / manifest 派生视图 / sessions-index 缓存 / subagent-record entry / .record-binding 锚键 sidecar）的写侧全部归 RecordStore 意图原语，store 外零直写。【2026-09-13 永久会话模型原语清单刷新】状态机两态化（running|idle，closed 终态与 ClosedReason 资格角色删除）后现役原语 = markSettled（轮收尾：内存翻 idle + stopReason，磁盘只写 binding 统计快照（锚分派 pi sessionFile 路径 / zcode 锚键路径，merge-or-create），终局由 record-settled 事件帧承载）/ markReopened（锚失效同 id 带历史重开）/ markSettledOut（close 终态写点：worktreeHandle 清句 + .alive release + manifest 派生视图，幂等恒 true）/ markResurrected / tryEnterRunning + 轮次族 markRoundStarted / markRoundIdle / markBatchFinalized / adoptEngineDeath / register / appendEvent / acquireWriteLease（.alive acquire 三时机唯一包装）；markFinalized / markCancelled 退役（@deprecated，仅 workflow-origin D7 例外族 finalizeFailed/finalizeAborted/settleOneShotOutcome 经 finalize-record 保留调用）。检查两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。settle/轮终收条由事件帧承载（markSettled → record-settled 帧；markRoundIdle 轮终停因 → record-round-idle 帧），终态权威 = 事件流折叠 stateMarkerFromFold（.state sidecar 读写两侧退场），磁盘写面 = 事件文件追加（事实源）+ binding writeSync + manifest writeSync。【W1 介质归位写侧刷新（ADR-0094，2026-09-26）】record 运行态的事实写 = 事件文件追加（RecordJournalWriteFace，record-store-rounds.ts——record-created/bound/round-started/round-idle/settled/reopened 六类事件 + 单调 seq，唯一写者 record-events.ts）；主 session 条目范围 = 每实体注册 + 终态两条 v2 小条目（register/archive/收编入口内置——register 与 archive 真终局写，reportRecordTransition 的 v1 全量快照写点退役，改落 record-bound 帧 + bound manifest 物化）；v1 快照唯一残余写点 = reportSubagentRecord（v1 实体孤儿纠偏兼容层，W4 sunset 退役）；state/manifest/.record-binding 均为 fold 物化派生视图（.alive 操作租约不计事实源）。检查两级不变，grep 门断言范围扩为 R1-R7（R2 加宽常量形态 + 白名单扩 rounds face；R3 workflow-record 三写点宿主白名单（worker-message-pump / lifecycle / 壳 jsonl-run-store）；R4 v1 快照派生视图构造器白名单（record-entry 定义 + store 兼容层）；R5 workflow-record v1 快照载荷形态全域拒绝；R6 eventLog/displayItems 死字节载荷全域拒绝；R7 .events 直写白名单（record-events / run-events））",
       "scope": [
         "packages/subagent-core/src/**",
         "extensions/**"
@@ -2936,9 +2936,11 @@
     },
     {
       "id": "C-proc-26",
-      "summary": "数据目录缺省反转（fail-safe default，2026-09-23）：getDataDir() 缺省 = ~/.taiji-dev，prod 数据目录（~/.taiji）只能被显式声明触达——打包 main 经 resolvePackagedDataDir 固定（外部值仅 ~/.taiji 树内采信，与 dev 侧 resolveDevDataDir 镜像对称）并自置位 TAIJI_AGENT_PACKAGED=1，dev main 经 resolveDevDataDir（~/.taiji-dev 树内采信）；main spawn runtime 时 TAIJI_AGENT_PACKAGED 与 TAIJI_AGENT_DATA_DIR 成对注入，runtime 组合根最早期（早于 initLogger）经 spawnDataDirContractViolation 交叉断言缺一即 fail-fast。第二支柱 prod 值准入检查：getDataDir 内 assertNotLeakedProdDataDir——非 PACKAGED 进程持有 ~/.taiji 树值即 throw（堵「env 被污染 + 防线不在场」组合：bun test 等绕过 vitest config 的执行器恰逢宿主泄漏 ~/.taiji 值，globalSetup 脱钩与 fs-guard 双防线同时失守的 2026-09-22 事故残余形态），检查挂在唯一入口不依赖任何 config 被加载。裸跑（手动 tsx / 验证脚本 / 探针）一律落缺省 dev 树。测试守护 = packages/shared __tests__/paths.test.ts（检查矩阵 + 缺省字面断言）+ apps/electron/main test/packaged-data-dir.test.ts（行为矩阵）+ test/main-dev-datadir-pin.test.ts packaged describe（接线时序 + 自置位）+ packages/runtime src/utils/__tests__/runtime-env.test.ts（契约函数）；validate-runtime-bundle.sh 起 runtime 必须 mkdtemp 注入数据目录并剥 TAIJI_AGENT_PACKAGED",
+      "summary": "数据目录缺省反转（fail-safe default，2026-09-23）：getDataDir() 缺省 = ~/.taiji-dev，prod 数据目录（~/.taiji）只能被显式声明触达——打包 main 经 resolvePackagedDataDir 固定（外部值仅 ~/.taiji 树内采信，与 dev 侧 resolveDevDataDir 镜像对称）并自置位 TAIJI_AGENT_PACKAGED=1，dev main 经 resolveDevDataDir（~/.taiji-dev 树内采信）；main spawn runtime 时 TAIJI_AGENT_PACKAGED 与 TAIJI_AGENT_DATA_DIR 成对注入，runtime 组合根最早期（早于 initLogger）经 spawnDataDirContractViolation 交叉断言缺一即 fail-fast。第二支柱 prod 值准入检查：getDataDir 内 assertNotLeakedProdDataDir——非 PACKAGED 进程持有 ~/.taiji 树值即 throw（堵「env 被污染 + 防线不在场」组合：bun test 等绕过 vitest config 的执行器恰逢宿主泄漏 ~/.taiji 值，globalSetup 脱钩与 fs-guard 双防线同时失守的 2026-09-22 事故残余形态），检查挂在唯一入口不依赖任何 config 被加载。裸跑（手动 tsx / 验证脚本 / 探针）一律落缺省 dev 树。测试守护 = packages/shared __tests__/paths.test.ts（检查矩阵 + 缺省字面断言）+ apps/electron/main test/packaged-data-dir.test.ts（行为矩阵）+ test/main-dev-datadir-pin.test.ts packaged describe（接线时序 + 自置位）+ packages/runtime src/utils/__tests__/runtime-env.test.ts（契约函数）；validate-runtime-bundle.sh 起 runtime 必须 mkdtemp 注入数据目录并剥 TAIJI_AGENT_PACKAGED。pi 子树（extension bundle / 引擎子进程）豁免：session 存储树 base 经 subagent-core resolveSessionStoreBase 解析（显式 dataDir → env TAIJI_AGENT_DATA_DIR → 宿主 dataRoot），不经 getDataDir 准入检查——完整约束见 C-ext-31",
       "scope": [
         "packages/shared/src/paths.ts",
+        "packages/shared/src/session-store-paths.ts",
+        "packages/subagent-core/src/execution/assembly/store-base.ts",
         "apps/electron/main/main.ts",
         "apps/electron/main/utils/packaged-data-dir.ts",
         "packages/runtime/src/utils/runtime-env.ts",
@@ -3296,6 +3298,77 @@
         {
           "type": "machine",
           "hook": "check-extension-dependencies.mjs"
+        },
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-ext-31",
+      "summary": "pi 子树（extension bundle / 引擎子进程）禁止消费 @taiji/shared 的 env 缺省路径函数（getDataDir 族，内置 C-proc-26 准入检查）：打包态 pi 进程持有 TAIJI_AGENT_DATA_DIR=~/.taiji（入站白名单放行）但没有 TAIJI_AGENT_PACKAGED（C-proc-09 出站 deny 清单剥除），准入检查在该进程内必抛——session_start 装配失败、subagent/workflow 全灭（2026-10-19 起 0.11.8/0.11.9 打包版事故）。session 存储树公式唯一合法通道 = '@taiji/shared/session-store-paths' 纯公式模块（零 env 读写，dataDir 必传）+ subagent-core resolveSessionStoreBase（显式 dataDir → env TAIJI_AGENT_DATA_DIR → 宿主 dataRoot，与 engine journal 同通道）；env 缺省形态只保留在 @taiji/shared/paths 供 runtime/main 消费（env 对完整）",
+      "scope": [
+        "packages/subagent-core/**",
+        "extensions/**",
+        "packages/shared/src/session-store-paths.ts",
+        "packages/shared/src/paths.ts",
+        "scripts/lib/pi-env-admission-gate.mjs",
+        "scripts/check-pi-subtree-shared-imports.mjs",
+        "scripts/__tests__/check-pi-subtree-shared-imports.test.mjs",
+        ".githooks/install-hooks.sh",
+        ".github/workflows/ci.yml"
+      ],
+      "authority": [
+        "../packages/shared/src/session-store-paths.ts",
+        "../packages/subagent-core/src/execution/assembly/store-base.ts"
+      ],
+      "dimensions": [
+        "arch-boundary",
+        "extension-api",
+        "process-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "bundle-extensions.mjs"
+        },
+        {
+          "type": "machine",
+          "hook": "verify-staged-extensions.mjs"
+        },
+        {
+          "type": "machine",
+          "hook": "install-hooks.sh §2h-3 C-ext-31 段（提交期 staged 重建门禁触发）"
+        },
+        {
+          "type": "machine",
+          "hook": "check-pi-subtree-shared-imports.mjs"
+        },
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-ext-32",
+      "summary": "模型可见性投喂单点 = provider-live-sync 包（extensions/universal/provider-live-sync/，投喂模块 src/catalog-bridge.ts）：taiji 侧目录缓存 → pi 进程注册表常驻条目的写入单点。新增模型数据来源（未来第三条缓存链、新目录源）时改该投喂模块的输入，禁止在其他扩展新开 registerProvider/registerNativeProvider/registerVirtualModel 常驻注入——注入修的是注册表这一事实源，消费方（--model 解析 / rpc set_model / rename / smart-context / permission / scheduler / subagent 校验 / provider 对账）零改动自动受益，新开注入点等于绕过单点、制造第二写入方。scheduler 的 ack 合成轮（src/ack-turn.ts 临时注册合成 provider、one-shot 注销）是执行通道覆写、非可见性投喂，语义不同不在禁列。机器执行点 = check_register_allowlist.py 调用点白名单（包粒度：provider-live-sync + scheduler 两包，测试目录排除）",
+      "scope": [
+        "extensions/**"
+      ],
+      "authority": [
+        "extensions/extension-conventions.md",
+        "../AGENTS.md"
+      ],
+      "dimensions": [
+        "arch-boundary",
+        "extension-api"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check_register_allowlist.py"
         },
         {
           "type": "review",

@@ -15,6 +15,8 @@ export interface ConnectionTestRequest {
   /** 已由编排层按回落链解析好的请求端点（非空）。 */
   baseUrl: string
   apiKey?: string
+  /** provider id（opencode 网关识别的 provider-id 分支用，缺省只按 baseUrl 判定）。 */
+  providerId?: string
 }
 
 /** 单行测试结果（协议 × 代表模型）；形状 SSOT = shared ConnectionTestResultRow（S-9 收编，

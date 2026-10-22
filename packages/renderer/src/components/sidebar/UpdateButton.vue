@@ -1,13 +1,17 @@
 <template>
   <!--
-    升级状态指示器 · 嵌入 Sidebar 版本号 span（兄弟元素）。
+    升级状态指示器 · 嵌入 Sidebar 版本号行（兄弟元素）。
     按 state 分支渲染：idle/checking 不渲染；available 显可升级角标 + release note 浮层；
     downloading/replacing 显 spinner + 进度条；restarting 显成功态；
     error 显错误图标 + 完整错误浮层；unsupported 显「前往下载」按钮。
 
     单例：useAppUpdate 的 state 全应用共享（Sidebar initAutoCheck 检测，UpdateButton 消费）。
+
+    单行契约：shrink-0 让指示器不参与 Brand 行的 flex 挤压（宽度不足由版本号 truncate
+    吸收），whitespace-nowrap 禁文字折行（white-space 继承覆盖各状态行内文案）。
+    release notes / error 浮层经 HoverCardPortal teleport 到 body，不在继承链上，不受影响。
   -->
-  <span v-if="visible" class="update-button inline-flex items-center" data-testid="update-button">
+  <span v-if="visible" class="update-button inline-flex shrink-0 items-center whitespace-nowrap" data-testid="update-button">
     <!-- available：可升级，hover 显 release note，click 触发 performDownload。
          形态对齐 demo .upd（brand 行升级钮）：32px 图标钮（tbtn 语言）+ 右上 7px danger 红点。 -->
     <HoverCard v-if="state.state === 'available'">
@@ -83,7 +87,8 @@
       <span>{{ t('sidebar.update.restarting') }}</span>
     </span>
 
-    <!-- downloaded：已下载待安装，click 弹确认 Dialog -->
+    <!-- downloaded：已下载待安装，click 弹确认 Dialog。行内短文案「重启」（单行宽度契约，
+         2026-10-21 用户裁决），完整语义在 title 与点击后的确认 Dialog -->
     <span
       v-else-if="state.state === 'downloaded'"
       class="inline-flex select-none items-center gap-0.5 text-[length:var(--text-3xs)] text-success cursor-pointer"
@@ -92,7 +97,7 @@
       @click="onInstallClick"
     >
       <CheckCircle2 class="size-3" />
-      <span>{{ t('sidebar.update.downloaded') }}</span>
+      <span>{{ t('sidebar.update.restart') }}</span>
     </span>
 
     <!-- error：升级失败，hover 显完整错误信息 -->

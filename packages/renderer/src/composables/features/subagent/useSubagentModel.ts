@@ -14,7 +14,7 @@
  * （switched 成员重派同样吃 run 级覆盖——badge 不等载荷重推，dmg-r3-4 同屏一致）。
  *
  * 显示态（回执态）的归属与生命周期：renderer 会话期内存（模块级 reactive Map，跨组件
- * 实例共享——SubagentTab / WorkflowTab 各自调本 composable 读同一份）；**不写
+ * 实例共享——SubagentTab / WorkflowVizOverlayHost 各自调本 composable 读同一份）；**不写
  * SubagentRecord.model 等详情载荷字段**（那是 runtime 详情载荷组装的域，前端写它会
  * 被下一帧 runtime 推送冲掉）。重载后回执态随组件生命周期丢失，标签由详情载荷字段
  * 承接（分支④「最近生效值」——仅活进程在场 / 覆盖状态），见 resolveSubagentModelDisplay。

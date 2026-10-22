@@ -2,11 +2,11 @@
  * workflow-viz overlay 控制器 + Host 容器测试（workflow-visualization U6——三视角）。
  *
  * - 构建者（白盒）：opener 反查全分支（runId 直开 / (scriptName, slug) 精确 / slug 缺失
- *   回落 name → 最新 / slug 碰撞取最新 / 未命中兜底 drawer）；DAG 通道两路错误归一
- *   （结构化领域回执 / RPC 通道错误 'channel'）；D10 fallback 动作序列（关 overlay +
- *   openDrawerTab('workflow') + openWorkflowInDrawer(runId)）
- * - 使用者（黑盒 DOM）：打开后 overlay 面板呈现；装载异常回落 drawer workflow tab（选中
- *   态已注入，非空态）；回落后再点击 overlay 重试呈现（Guard epoch 重挂，无失败卡死）
+ *   回落 name → 最新 / slug 碰撞取最新 / 未命中兜底 toast）；DAG 通道两路错误归一
+ *   （结构化领域回执 / RPC 通道错误 'channel'）；D10 fallback 动作序列（关 overlay——
+ *   [2026-10-19] drawer workflow tab 删除，回落载体不再存在）
+ * - 使用者（黑盒 DOM）：打开后 overlay 面板呈现；装载异常关 overlay；回落后再点击
+ *   overlay 重试呈现（Guard epoch 重挂，无失败卡死）
  * - 观察者（形态）：D11⑤ session 删除关 overlay 的会话匹配语义
  *
  * mock 策略：api/domains/session（getWorkflows/getWorkflowDag）+ @/api 门面回指 +
@@ -16,15 +16,13 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { h } from 'vue'
+import { defineComponent, h } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import {
   bindDrawerSessionId,
   bindWorkflowOverlayOpener,
   openWorkflow,
-  openWorkflowInDrawer,
   useDrawerControl,
-  useWorkflowSelection,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
 import { ref } from 'vue'
@@ -102,6 +100,13 @@ vi.mock('../../panel/WorkflowLivePanel.vue', () => ({
   },
 }))
 
+// ── mock：useToast（反查未命中兜底 toast——[2026-10-19] drawer 空态兜底已删）────
+
+const { toastErrorMock } = vi.hoisted(() => ({ toastErrorMock: vi.fn() }))
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ error: toastErrorMock }),
+}))
+
 // ── mock：BrowserOverlay stub（kind 门控用例经 openBrowser 换入 browser 内容）────
 // 真实 BrowserOverlay 会拉起 BrowserPane/view 链路；本文件只关心 Host 侧 kind 门控，
 // 壳内容无断言观测范围，stub 掉保用例密闭。
@@ -109,10 +114,55 @@ vi.mock('@/components/panel/BrowserOverlay.vue', () => ({
   default: { name: 'BrowserOverlayStub', template: '<div />' },
 }))
 
-// ── mock：Guard 挂载计数包装（U4 kind 门控对账观测范围）─────────────────────────
-// 保留真实 Guard 回落语义（onErrorCaptured → emit fallback 原样转发），仅在 setup 计数：
-// guardEpoch 重挂 = Guard 重建（:key 换代），计数即重挂次数。
-const { guardMounts } = vi.hoisted(() => ({ guardMounts: { count: 0 } }))
+// ── mock：useSubagentModel（run 级模型全切动作边界——断言 Host 接线，不深入 RPC）──
+
+const { setSubagentModelMock } = vi.hoisted(() => ({ setSubagentModelMock: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('@/composables/features/subagent/useSubagentModel', () => ({
+  useSubagentModel: () => ({
+    setSubagentModel: setSubagentModelMock,
+    memberDisplayOf: () => undefined,
+  }),
+  resolveSubagentModelDisplay: (input: { stampedModel?: string }) => ({
+    label: input.stampedModel,
+    overridden: false,
+  }),
+}))
+
+// ── mock：ModelSelectPopover + PopoverTrigger（标题栏全切入口组件边界，壳测试同款）──
+
+vi.mock('@/components/panel/ModelSelectPopover.vue', () => ({
+  default: defineComponent({
+    name: 'ModelSelectPopoverStub',
+    props: { selected: { type: String, default: '' }, switching: { type: Boolean, default: false } },
+    emits: ['select'],
+    setup(_, { emit, slots }) {
+      return () =>
+        h('div', {
+          'data-testid': 'model-select-stub',
+          onClick: () => emit('select', { modelId: 'glm-4.7', provider: 'zai-coding-cn' }),
+        }, slots.trigger?.())
+    },
+  }),
+}))
+vi.mock('@/components/ui/popover', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  return {
+    ...actual,
+    PopoverTrigger: defineComponent({
+      inheritAttrs: false,
+      setup(_, { attrs, slots }) {
+        return () => h('button', attrs, slots.default?.())
+      },
+    }),
+  }
+})
+
+// ── mock：Guard 实例身份记录（U4 kind 门控对账观测范围）─────────────────────────
+// 保留真实 Guard 回落语义（onErrorCaptured → emit fallback 原样转发），仅在 setup 记录
+// 实例身份。2026-10-22 测试整治：原「mount 累计计数」把批处理切分时机变成了断言对象
+// （一次开合触发两轮 watch 排空时计数跳 2 → 满并行下随机红）；实例身份差分（重挂 =
+// 末位实例更换）只依赖「是否发生重挂」这一行为事实，与重挂发生几次无关。
+const { guardMounts } = vi.hoisted(() => ({ guardMounts: { instances: [] as symbol[] } }))
 vi.mock('../WorkflowVizOverlayGuard.vue', async (importOriginal) => {
   const { defineComponent, h } = await import('vue')
   const actual = await importOriginal<typeof import('../WorkflowVizOverlayGuard.vue')>()
@@ -122,12 +172,17 @@ vi.mock('../WorkflowVizOverlayGuard.vue', async (importOriginal) => {
       inheritAttrs: false,
       emits: ['fallback'],
       setup(_props, { attrs, slots, emit }) {
-        guardMounts.count++
+        guardMounts.instances.push(Symbol('guard-instance'))
         return () => h(actual.default, { ...attrs, onFallback: () => emit('fallback') }, slots)
       },
     }),
   }
 })
+
+/** 当前在场的最后一个 Guard 实例身份（无实例 = undefined）。 */
+function lastGuardInstance(): symbol | undefined {
+  return guardMounts.instances[guardMounts.instances.length - 1]
+}
 
 // ── 测试数据 ──────────────────────────────────────────────────────────────────
 
@@ -188,7 +243,7 @@ beforeEach(async () => {
   overlayDag.value = null
   overlayDagError.value = null
   panelThrowBox.value = false
-  guardMounts.count = 0
+  guardMounts.instances.length = 0
   mockGetDag.mockResolvedValue({ runId: 'x', dag: SAMPLE_DAG })
   focusPanel(SID)
 })
@@ -227,7 +282,7 @@ describe('opener 反查（D1 调用点：托盘 runId 直开 + block (name, slug
     expect(currentRun()?.runId).toBe('wf-2')
   })
 
-  it('slug 缺失回落「name → 最新 run」（记录末条，与 WorkflowTab 兼收解析同口径）', async () => {
+  it('slug 缺失回落「name → 最新 run」（记录末条，run-name 归一后取最新）', async () => {
     await seedRecords([makeRun('wf-1', 's1'), makeRun('wf-2', 's2'), makeRun('wf-3', 's3')])
 
     openWorkflow('flow-a', { sessionId: SID })
@@ -245,17 +300,18 @@ describe('opener 反查（D1 调用点：托盘 runId 直开 + block (name, slug
     expect(currentRun()?.runId).toBe('wf-2')
   })
 
-  it('反查未命中 → 兜底显式 drawer 语义（workflow tab 打开 + 选中名注入，点击不丢反馈）', async () => {
+  it('反查未命中 → 兜底 toast（[2026-10-19] drawer workflow tab 已删，点击不丢反馈）', async () => {
     await seedRecords([makeRun('wf-1', 's1')])
 
     openWorkflow('gone-flow', { sessionId: SID })
     await flushPromises()
 
     expect(isOverlayOpen()).toBe(false)
+    // drawer 不被误开（workflow tab 已不存在）
     const drawer = useDrawerControl()
-    expect(drawer.isOpen.value).toBe(true)
-    expect(drawer.activeTab.value).toBe('workflow')
-    expect(useWorkflowSelection().selectedWorkflowName.value).toBe('gone-flow')
+    expect(drawer.isOpen.value).toBe(false)
+    // toast 反馈错误可操作（错误 → 重试闭环的入口提示）
+    expect(toastErrorMock).toHaveBeenCalledTimes(1)
   })
 
   it('opener 未传 sessionId 且焦点 pane 无 session → no-op', async () => {
@@ -389,7 +445,7 @@ describe('Host 容器（黑盒 DOM + D10 回落）', () => {
     wrapper.unmount()
   })
 
-  it('D10 fallback：装载异常 → 关 overlay + drawer workflow tab 打开且选中态已注入（runId）', async () => {
+  it('D10 fallback：装载异常 → 关 overlay（[2026-10-19] 回落载体 drawer workflow tab 已删，重开即重试）', async () => {
     await seedRecords([makeRun('wf-1', 's1')])
     panelThrowBox.value = true
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -398,14 +454,35 @@ describe('Host 容器（黑盒 DOM + D10 回落）', () => {
     openWorkflowVizOverlay(SID, 'wf-1')
     await flushPromises()
 
-    // Guard 捕获 → fallback 序列执行
+    // Guard 捕获 → fallback 序列执行：仅关 overlay，drawer 不被误开
     const drawer = useDrawerControl()
     expect(isOverlayOpen()).toBe(false)
-    expect(drawer.isOpen.value).toBe(true)
-    expect(drawer.activeTab.value).toBe('workflow')
-    expect(useWorkflowSelection().selectedWorkflowName.value).toBe('wf-1')
+    expect(drawer.isOpen.value).toBe(false)
     wrapper.unmount()
     consoleSpy.mockRestore()
+  })
+
+  it('标题栏模型全切接线：壳 select-model → setSubagentModel（runId + provider + modelId 透传）', async () => {
+    await seedRecords([makeRun('wf-1', 's1', {
+      agentCalls: [{
+        id: 0, agent: 'worker-0', phase: 'alpha', status: 'running', startedAt: new Date().toISOString(),
+        sessionId: 'acs-0', model: 'glm-5.3',
+      } as unknown as WorkflowRunRecord['agentCalls'][number]],
+    })])
+    const wrapper = mount(WorkflowVizOverlayHost)
+    openWorkflowVizOverlay(SID, 'wf-1')
+    await flushPromises()
+
+    // 触发器在场（run 元素行内），点击选模型 → 宿主接线 setSubagentModel
+    expect(wrapper.find('[data-testid="wfvz-overlay-model-trigger"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="model-select-stub"]').trigger('click')
+    await flushPromises()
+    expect(setSubagentModelMock).toHaveBeenCalledWith({
+      runId: 'wf-1',
+      provider: 'zai-coding-cn',
+      modelId: 'glm-4.7',
+    })
+    wrapper.unmount()
   })
 
   it('回落后再点击 → overlay 重试呈现（Guard epoch 重挂，failed 不卡死后续打开——D10 每次点击均重试）', async () => {
@@ -586,25 +663,29 @@ describe('kind 门控（U4 修复对账）：Guard 重挂与时长 tick 只随 w
     await seedRecords([makeRun('wf-1', 's1')])
     const wrapper = mount(WorkflowVizOverlayHost)
     await flushPromises()
-    expect(guardMounts.count).toBe(1) // 关闭态首挂 1 次（immediate watch 不递增）
+    const initial = lastGuardInstance() // 关闭态首挂的实例（immediate watch 不重挂）
+    expect(initial).toBeDefined()
 
     openWorkflowVizOverlay(SID, 'wf-1')
     await flushPromises()
-    expect(guardMounts.count).toBe(2) // workflow 开 → epoch++ → 重挂
+    const afterWorkflowOpen = lastGuardInstance()
+    expect(afterWorkflowOpen).not.toBe(initial) // workflow 开 → epoch++ → 重挂（fresh Guard）
 
     // 单例换内容：workflow → browser（isOpen 全程 true，仅 kind 判定感知换出）
     openBrowser('http://localhost:1420', SID)
     await flushPromises()
-    expect(guardMounts.count).toBe(2) // [U4] browser 换入零重挂（旧裸 overlayOpen 语义无法感知）
+    expect(lastGuardInstance()).toBe(afterWorkflowOpen) // [U4] browser 换入零重挂（旧裸 overlayOpen 语义无法感知）
 
     openWorkflowVizOverlay(SID, 'wf-1')
     await flushPromises()
-    expect(guardMounts.count).toBe(3) // workflow 再入必重挂（fresh Guard，D10 每次点击均重试）
+    const afterReopen = lastGuardInstance()
+    expect(afterReopen).not.toBe(afterWorkflowOpen) // workflow 再入必重挂（fresh Guard，D10 每次点击均重试）
 
     closeOverlay()
     openBrowser('http://localhost:1420', SID)
     await flushPromises()
-    expect(guardMounts.count).toBe(3) // [U4] 关闭态开 browser 零重挂（旧行为在此无谓重挂）
+    // [U4] 关闭态开 browser 零重挂（旧行为在此无谓重挂）：关闭已卸载 Guard，开 browser 不应再挂新实例
+    expect(lastGuardInstance()).toBe(afterReopen)
 
     wrapper.unmount()
   })
@@ -613,28 +694,36 @@ describe('kind 门控（U4 修复对账）：Guard 重挂与时长 tick 只随 w
     await seedRecords([makeRun('wf-1', 's1', { startedAt: new Date(Date.now() - 5_000).toISOString() })])
     const wrapper = mount(WorkflowVizOverlayHost)
     await flushPromises()
-    // spy 在 mount 后建立：只观测用例内的开合动作（隔离环境杂音）
+    // spy 在 mount 后建立：只观测用例内的开合动作（隔离环境杂音）。
+    // 2026-10-22 测试整治：断言「活跃 handle 集合」而非「spy 调用次数」——次数把
+    // watch 重跑的批处理切分变成了断言对象（满并行下一次开合多排空一轮即随机红）；
+    // 行为语义是「同一时刻至多一个活跃 tick、内容换出/关闭后零活跃」，与重启几轮无关。
     const setSpy = vi.spyOn(globalThis, 'setInterval')
     const clearSpy = vi.spyOn(globalThis, 'clearInterval')
+    const activeTickHandles = (): number => {
+      // setInterval 的返回 handle 在 mock.results（calls 里 [0] 是回调参数）；clearInterval 的 handle 在 calls[0]
+      const handles = setSpy.mock.results.map((result) => result.value)
+      const cleared = new Set(clearSpy.mock.calls.map((call) => call[0]))
+      return handles.filter((handle) => !cleared.has(handle)).length
+    }
 
     openWorkflowVizOverlay(SID, 'wf-1')
     await flushPromises()
-    expect(setSpy).toHaveBeenCalledTimes(1) // workflow 开 → tick 启动
+    expect(activeTickHandles()).toBe(1) // workflow 开 → tick 启动（恰一个活跃）
     // 时长的用户可见消费方（壳 header 时长槽）随开渲染
     expect(wrapper.find('[data-testid="wfvz-overlay-elapsed"]').exists()).toBe(true)
 
     openBrowser('http://localhost:1420', SID)
     await flushPromises()
-    expect(clearSpy).toHaveBeenCalledTimes(1) // [U4] 换入 browser 即停（旧行为 tick 空转）
-    expect(setSpy).toHaveBeenCalledTimes(1)
+    expect(activeTickHandles()).toBe(0) // [U4] 换入 browser 即停（旧行为 tick 空转）
 
     openWorkflowVizOverlay(SID, 'wf-1')
     await flushPromises()
-    expect(setSpy).toHaveBeenCalledTimes(2) // workflow 再入 → 重启
+    expect(activeTickHandles()).toBe(1) // workflow 再入 → 重启（仍恰一个活跃）
 
     closeOverlay()
     await flushPromises()
-    expect(clearSpy).toHaveBeenCalledTimes(2) // 关闭即停
+    expect(activeTickHandles()).toBe(0) // 关闭即停
 
     wrapper.unmount()
     setSpy.mockRestore()

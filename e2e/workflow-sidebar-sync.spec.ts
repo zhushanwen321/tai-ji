@@ -141,8 +141,8 @@ test.describe('Workflow 任务托盘同步 E2E', () => {
   test('T3: 点面板 workflow 行 → workflow overlay 打开（U6 入口改向），关闭后 composer/drawer 恢复', async ({ page }) => {
     await activateSession(page)
 
-    // D1 改向后点 workflow 行只开 overlay、不再开 drawer（drawer WorkflowTab = 被动回落
-    // 载体，设计 §3.3-D10）——「临时层不替换 Panel」不变量后置到 ESC 关闭后断言
+    // D1 改向后点 workflow 行只开 overlay、不再开 drawer（drawer 已无 workflow 详情载体，
+    // 设计 §3.3-D10）——「临时层不替换 Panel」不变量后置到 ESC 关闭后断言
     // （drawer 仍可正常打开）。不在点行前预开 drawer：drawer 打开压缩 composer 宽度
     // 触发密度状态机 L1（leftCluster 聚合为单图标按钮），tray-builtin-button 从 DOM
     // 摘除（ComposerTray v-if="!aggregated"），托盘面板行不可达。

@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { WorktreeService, type WorktreeServiceDeps } from './worktree-service.js'
 import { ShellRunnerError } from '../ports/shell-runner.js'
+import { GitExecutorError } from '../ports/git-executor.js'
 import { logger } from '../../infra/logger.js'
 
 // mock logger：断言结构化打点（成败/回滚/base fallback），且避免测试写真实日志文件
@@ -23,6 +24,7 @@ function mockGitExecutor(overrides?: {
   const defaultResults = new Map<string, { stdout: string; stderr: string; exitCode: number }>([
     ['rev-parse --verify origin/main', { stdout: 'abc123', stderr: '', exitCode: 0 }],
     ['rev-parse --verify main', { stdout: 'abc123', stderr: '', exitCode: 0 }],
+    ['remote', { stdout: 'origin\n', stderr: '', exitCode: 0 }],
     ['worktree add', { stdout: '', stderr: '', exitCode: 0 }],
     ['branch --list --format=%(refname:short)', { stdout: 'main\nfeat-x\n', stderr: '', exitCode: 0 }],
     ['branch --list --remotes --format=%(refname:short)', { stdout: 'origin/main\norigin/HEAD\norigin/feat-y\n', stderr: '', exitCode: 0 }],
@@ -32,7 +34,6 @@ function mockGitExecutor(overrides?: {
       exitCode: 0,
     }],
     ['rev-parse --show-toplevel', { stdout: '/project', stderr: '', exitCode: 0 }],
-    ['rev-parse --abbrev-ref origin/HEAD', { stdout: 'origin/main', stderr: '', exitCode: 0 }],
     ['rev-parse --verify refs/heads/main', { stdout: 'abc123', stderr: '', exitCode: 0 }],
     ['rev-parse --verify refs/heads/master', { stdout: '', stderr: 'not found', exitCode: 128 }],
   ])
@@ -137,7 +138,7 @@ function createDeps(options?: {
     // plain-repo 检测：.bare 不存在，但 rev-parse --show-toplevel 成功
     gitOverrides.execResults = new Map([
       ['rev-parse --show-toplevel', { stdout: '/home/user/my-repo', stderr: '', exitCode: 0 }],
-      ['rev-parse --abbrev-ref origin/HEAD', { stdout: 'origin/main', stderr: '', exitCode: 0 }],
+      ['remote', { stdout: 'origin\n', stderr: '', exitCode: 0 }],
       ['rev-parse --verify refs/heads/main', { stdout: 'abc', stderr: '', exitCode: 0 }],
       ['rev-parse --verify origin/main', { stdout: 'abc', stderr: '', exitCode: 0 }],
       ['rev-parse --verify main', { stdout: 'abc', stderr: '', exitCode: 0 }],
@@ -165,6 +166,8 @@ describe('WorktreeService.detect()', () => {
     expect(result.mode).toBe('bare-workspace')
     expect(result.wsRoot).toBe('/project')
     expect(result.barePath).toBe('/project/.bare')
+    // repo 态附带推导默认 base（mock 远端清单 = origin → origin/main）
+    expect(result.defaultBaseRef).toBe('origin/main')
   })
 
   it('plain-repo：cwd 在普通 git 仓库下', async () => {
@@ -302,7 +305,8 @@ describe('WorktreeService.listBranches()', () => {
         execResults: new Map([
           ['branch --list --format=%(refname:short)', { stdout: 'main\nfeat-x\n', stderr: '', exitCode: 0 }],
           ['branch --list --remotes --format=%(refname:short)', {
-            stdout: 'origin/main\norigin/HEAD\norigin/feat-y\n',
+            // mirror/* = 幽灵分支（远端未配置，refs/remotes 残留）——应被过滤
+            stdout: 'origin/main\norigin/HEAD\norigin/feat-y\nmirror/dev\nmirror/HEAD\n',
             stderr: '',
             exitCode: 0,
           }],
@@ -315,6 +319,8 @@ describe('WorktreeService.listBranches()', () => {
     expect(result.local).toEqual(['main', 'feat-x'])
     expect(result.remote).toEqual(['origin/main', 'origin/feat-y'])
     expect(result.defaultBranch).toBeDefined()
+    // 推导默认 base（mock 远端清单 = origin → origin/main）
+    expect(result.defaultBaseRef).toBe('origin/main')
   })
 
   it('plain-repo 模式下用 repoRoot 而非 barePath', async () => {
@@ -1079,7 +1085,7 @@ describe('WorktreeService git 命令超时校准', () => {
 // ── base 解析 fallback（RT-8#8 留痕升级为结构化 warn）──
 
 describe('WorktreeService base 解析 fallback', () => {
-  it('请求 ref 不存在 → fallback 本地 main + usedBaseRef 显形 + 结构化 warn', async () => {
+  it('请求 ref 不存在 → fallback 推导默认 + usedBaseRef 显形 + 结构化 warn', async () => {
     const deps = createDeps({
       mode: 'bare-workspace',
       existingPaths: new Set(['/project/.bare']),
@@ -1093,14 +1099,226 @@ describe('WorktreeService base 解析 fallback', () => {
 
     const result = await service.create({ branch: 'feat-x', baseBranch: 'origin/gone', workspaceHint: '/project' })
 
-    expect(result.usedBaseRef).toBe('main')
+    // fallback 语义（2026-10-20 起）：不再直落本地 main，落「仓库远端实况推导的默认」
+    //（mock 远端清单 = origin → origin/main）——更接近请求 'origin/gone' 的用户意图
+    expect(result.usedBaseRef).toBe('origin/main')
     expect(logger.warn).toHaveBeenCalledWith(
-      '[worktree-service] base 解析 fallback：请求 ref 校验失败，改用本地 main',
+      '[worktree-service] base 解析 fallback：请求 ref 校验失败，改用推导默认',
       expect.objectContaining({
         branch: 'feat-x',
         requestedBaseBranch: 'origin/gone',
-        fallback: 'main',
+        fallback: 'origin/main',
       }),
+    )
+  })
+
+  it('请求 ref 校验失败且仓库无任何可用基线 → 直接 GIT_FAILED「无可用基线」，不打伪回退 warn、不跑 worktree add', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+      gitOverrides: {
+        execResults: new Map([
+          ['rev-parse --verify origin/gone', { stdout: '', stderr: 'unknown revision', exitCode: 128 }],
+          // 无远端 + 本地无 main/master：推导不出任何可解析的默认基线
+          ['remote', { stdout: '', stderr: '', exitCode: 0 }],
+          ['rev-parse --verify refs/heads/main', { stdout: '', stderr: 'not found', exitCode: 128 }],
+        ]),
+      },
+    })
+    const service = new WorktreeService(deps)
+    vi.mocked(logger.warn).mockClear()
+
+    await expect(service.create({ branch: 'feat-x', baseBranch: 'origin/gone', workspaceHint: '/project' }))
+      .rejects.toMatchObject({
+        code: 'GIT_FAILED',
+        message: expect.stringContaining('无可用基线'),
+        detail: { branch: 'feat-x', requestedBaseBranch: 'origin/gone' },
+      })
+    // 此前形态：fallback ≡ 刚校验失败的 'main' 字面，仍打「改用推导默认」warn 再由 git worktree add
+    // 以 invalid reference 失败——现在推导不出即报校验失败，伪回退 warn 与注定失败的 add 都不发生
+    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('base 解析 fallback'), expect.anything())
+    expect(deps.gitExecutor.exec).not.toHaveBeenCalledWith(
+      expect.anything(), 'worktree', expect.arrayContaining(['add']), expect.anything(),
+    )
+  })
+})
+
+// ── base 动态推导（auto 哨兵 + 幽灵 remote-tracking ref 防护，2026-10-20 事故修复）──
+
+describe('WorktreeService base 动态推导', () => {
+  it("baseBranch 'auto' → 按远端实况推导（origin 远端 → origin/main）", async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+    })
+    ;(deps.configService.getDefaultBaseBranch as ReturnType<typeof vi.fn>).mockReturnValue('auto')
+    const service = new WorktreeService(deps)
+
+    const result = await service.create({ branch: 'feat-auto', workspaceHint: '/project' })
+    expect(result.usedBaseRef).toBe('origin/main')
+  })
+
+  it('无远端仓库的 auto → 本地 main', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+      gitOverrides: {
+        execResults: new Map([
+          ['remote', { stdout: '', stderr: '', exitCode: 0 }],
+        ]),
+      },
+    })
+    ;(deps.configService.getDefaultBaseBranch as ReturnType<typeof vi.fn>).mockReturnValue('auto')
+    const service = new WorktreeService(deps)
+
+    const result = await service.create({ branch: 'feat-auto', workspaceHint: '/project' })
+    expect(result.usedBaseRef).toBe('main')
+  })
+
+  it('无远端且本地无 main/master 的 auto → GIT_FAILED「无可用基线」（不把未验证的 main 交给 worktree add）', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+      gitOverrides: {
+        execResults: new Map([
+          ['remote', { stdout: '', stderr: '', exitCode: 0 }],
+          ['rev-parse --verify refs/heads/main', { stdout: '', stderr: 'not found', exitCode: 128 }],
+        ]),
+      },
+    })
+    ;(deps.configService.getDefaultBaseBranch as ReturnType<typeof vi.fn>).mockReturnValue('auto')
+    const service = new WorktreeService(deps)
+
+    await expect(service.create({ branch: 'feat-auto', workspaceHint: '/project' }))
+      .rejects.toMatchObject({
+        code: 'GIT_FAILED',
+        message: expect.stringContaining('无可用基线'),
+        detail: { branch: 'feat-auto', requestedBaseBranch: 'auto' },
+      })
+    expect(deps.gitExecutor.exec).not.toHaveBeenCalledWith(
+      expect.anything(), 'worktree', expect.arrayContaining(['add']), expect.anything(),
+    )
+  })
+
+  it('幽灵 remote-tracking ref（远端未配置但 ref 残留）→ 拒绝采信 + warn + fallback 推导默认', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+      gitOverrides: {
+        execResults: new Map([
+          ['rev-parse --verify --symbolic-full-name ghost/main', { stdout: 'refs/remotes/ghost/main\n', stderr: '', exitCode: 0 }],
+          ['rev-parse --verify ghost/main', { stdout: 'abc123', stderr: '', exitCode: 0 }],
+        ]),
+      },
+    })
+    const service = new WorktreeService(deps)
+
+    const result = await service.create({ branch: 'feat-ghost', baseBranch: 'ghost/main', workspaceHint: '/project' })
+
+    // ghost 不在 remote 清单（origin）→ symbolic-full-name 解析到 refs/remotes/ghost/main
+    // → 判死数据，fallback 推导默认 origin/main（而非采信可通过存在性校验的幽灵 ref）
+    expect(result.usedBaseRef).toBe('origin/main')
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[worktree-service] base 解析 fallback：幽灵 remote-tracking ref，拒绝采信',
+      expect.objectContaining({
+        requestedBaseBranch: 'ghost/main',
+        resolvedRef: 'refs/remotes/ghost/main',
+        fallback: 'origin/main',
+      }),
+    )
+  })
+
+  it('含斜杠的本地分支（refs/heads 下）不受幽灵防护误伤', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+      gitOverrides: {
+        execResults: new Map([
+          ['rev-parse --verify --symbolic-full-name feat/slash', { stdout: 'refs/heads/feat/slash\n', stderr: '', exitCode: 0 }],
+          ['rev-parse --verify feat/slash', { stdout: 'abc123', stderr: '', exitCode: 0 }],
+        ]),
+      },
+    })
+    const service = new WorktreeService(deps)
+
+    const result = await service.create({ branch: 'feat-x', baseBranch: 'feat/slash', workspaceHint: '/project' })
+    expect(result.usedBaseRef).toBe('feat/slash')
+  })
+})
+
+// ── prefetchDefaultRemote（打开仓库预热默认远端）──
+
+describe('WorktreeService.prefetchDefaultRemote()', () => {
+  it('对默认远端执行 fetch --quiet（bare-workspace：repoDir = barePath，60s 超时档）', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+      gitOverrides: {
+        execResults: new Map([
+          ['fetch --quiet origin', { stdout: '', stderr: '', exitCode: 0 }],
+        ]),
+      },
+    })
+    const service = new WorktreeService(deps)
+
+    await service.prefetchDefaultRemote('/project')
+    expect(deps.gitExecutor.exec).toHaveBeenCalledWith(
+      '/project/.bare', 'fetch', ['--quiet', 'origin'],
+      { timeoutMs: 60_000 },
+    )
+  })
+
+  it('fetch 失败（非零退出）→ 不抛 + info 留痕（降级继续用本地 ref）', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+      gitOverrides: {
+        execResults: new Map([
+          ['fetch --quiet origin', { stdout: '', stderr: 'network unreachable', exitCode: 128 }],
+        ]),
+      },
+    })
+    const service = new WorktreeService(deps)
+
+    await expect(service.prefetchDefaultRemote('/project')).resolves.toBeUndefined()
+    expect(logger.info).toHaveBeenCalledWith(
+      '[worktree-service] prefetch 默认远端失败（降级：继续用本地 ref）',
+      expect.objectContaining({ remote: 'origin', exitCode: 128 }),
+    )
+  })
+
+  it('not-repo → 不 fetch', async () => {
+    const deps = createDeps({
+      mode: 'not-repo',
+      gitOverrides: {
+        execResults: new Map([
+          ['rev-parse --show-toplevel', { stdout: '', stderr: 'not a git repo', exitCode: 128 }],
+        ]),
+      },
+    })
+    const service = new WorktreeService(deps)
+
+    await service.prefetchDefaultRemote('/tmp/random')
+    const fetchCall = deps.gitExecutor.exec.mock.calls.find((c) => c[1] === 'fetch')
+    expect(fetchCall).toBeUndefined()
+  })
+
+  it('resolver 抛 GitExecutorError（git 不可用）→ 吞掉不抛 + warn 留痕', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+    })
+    const originalExec = deps.gitExecutor.exec.getMockImplementation()
+    deps.gitExecutor.exec.mockImplementation(async (cwd: string, command: string, args?: string[], opts?: { timeoutMs?: number }) => {
+      if (command === 'remote') throw new GitExecutorError('git_unavailable', 'git gone')
+      return originalExec!(cwd, command, args, opts)
+    })
+    const service = new WorktreeService(deps)
+
+    await expect(service.prefetchDefaultRemote('/project')).resolves.toBeUndefined()
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[worktree-service] prefetch 默认远端异常（降级：继续用本地 ref）',
+      expect.objectContaining({ cwd: '/project' }),
     )
   })
 })

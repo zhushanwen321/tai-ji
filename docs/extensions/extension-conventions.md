@@ -191,6 +191,17 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 - **检查**：`check_subagent_channels.py` 拦截白名单外的 `"--model"` 字面量（pre-commit + CI，行级豁免须给职责定性注释）；全等裁决不通过时 start 同步期拒单并给纠错候选
 - **约束登记**：[docs/constraints.json](../constraints.json) C-ext-19；能力档位同理由 C-pi-12 禁本地推断（只消费注册表下发的 supportedLevels）
 
+## 模型可见性投喂单点 [MANDATORY]
+
+扩展需要模型一律查 pi 注册表（pi 进程内的模型视图唯一事实源）；**查不到 = 投喂缺口，报给 provider-live-sync 补数据来源**（改其投喂模块输入），**禁止自行注入或静默降级扩大化**。
+
+- **已知例外**：用户在 `models.json` 里给某个 catalog provider 手写的自定义模型，在该 provider 被目录投喂注入后从视图中被挤出（extension 层是映射替换语义，注入集就是该 provider 的最终可见集合）。该场景同样表现为「查不到模型」，但根因是注入集映射替换挤出用户配置、不是目录缓存缺数据——「补数据来源」对它无效。已接受边界（2026-10-20 用户裁决不立项修法；删掉手写条目即恢复），不按投喂缺口上报
+
+- **原因**：taiji 侧目录缓存 → pi 注册表常驻条目的写入单点 = provider-live-sync 包（`extensions/universal/provider-live-sync/`，投喂模块 `src/catalog-bridge.ts`）。注册表是事实源，全部消费方（`--model` 解析 / rpc `set_model` / rename / smart-context / permission 分类器 / scheduler / subagent 模型校验 / provider 对账）零改动即自动受益——扩展自行注入等于绕过单点、制造第二写入方，两侧数据各自演化后「展示可见 ≠ 执行可用」在该子集反向复现；静默降级扩大化则把投喂缺口转成用户侧无提示的能力失效
+- **守卫**：`check_register_allowlist.py` 拦截白名单外的 `registerProvider`/`registerNativeProvider`/`registerVirtualModel` 调用点（pre-commit，包粒度白名单 = provider-live-sync 投喂通道本体 + scheduler 的 ack 合成轮临时覆写，测试目录排除）
+- **消费侧静默失败的基本盘**：扩展域解析失败统一 warn 日志，且 taiji 托管环境恒落盘（`TAIJI_AGENT_EXT_LOG=1`）——查不到模型时留痕可查，不靠 UI 提示
+- **约束登记**：[docs/constraints.json](../constraints.json) C-ext-32
+
 ## 命令/技能获取 [MANDATORY]
 
 扩展域内任何「发现可执行 skill / 校验技能可用」一律走共享包 `@zhushanwen/pi-exec-skills`（`extensions/shared/exec-skills/`）：`detectExecSkills` 自研扫描直读磁盘 = **发现**（表单列出可用技能，技能热装即时可见，无 reload 滞后）；`resolveSkills` = **执行门禁**（pi 注册表 `pi.getCommands()` 过滤 `source === "skill"` 确认 pi 实际认得，注入前把关）——扫描与门禁两段消费语义闭环，**禁止各扩展自扫 skill 目录或直用 pi 注册表快照形成第二实现**。

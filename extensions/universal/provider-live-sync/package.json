@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-provider-live-sync",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Keep the running pi process's model snapshot in sync with on-disk provider/model/credential config changes.",
   "type": "module",
   "main": "index.ts",
@@ -29,9 +29,11 @@
     "skills/"
   ],
   "dependencies": {
-    "@zhushanwen/pi-extension-logger": "workspace:*"
+    "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-llm-shared": "workspace:*"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "1.0.0",
     "@vitest/coverage-v8": "^4.1.9",
     "vitest": "^4.1.8"
   },

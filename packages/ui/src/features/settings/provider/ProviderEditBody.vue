@@ -215,12 +215,11 @@
            CodingPlanSection 跨 seam 直接持有（原 23 props + 7 emits 逐名管道已删）。 -->
       <CodingPlanSection v-if="quota" />
 
-      <!-- 测试连接 / 自动发现（纯展示块抽为 ProviderTestDiscoverSection，编排仍在 useProviderEdit）。
-           props 经 useCatalogDisplay().testDiscoverProps 整体接线（含 M3b 的 providerKind /
-           testResults / testError / providerBaseUrl 4 项），派生来源见 provider-catalog-display.ts。 -->
+      <!-- 模型发现（纯展示块抽为 ProviderTestDiscoverSection，编排仍在 useProviderEdit）。
+           props 经 useCatalogDisplay().testDiscoverProps 整体接线，派生来源见 provider-catalog-display.ts。
+           2026-10-21：「测试连接」入口退役（下沉到模型行 ModelTestButton），本区只发起模型发现。 -->
       <ProviderTestDiscoverSection
         v-bind="testDiscoverProps"
-        @test="testConnection"
         @discover="autoDiscover"
       />
     </div>
@@ -245,7 +244,7 @@
               v-for="m in builtinModels"
               :key="m.id"
               data-testid="builtin-model-row"
-              class="flex items-center gap-1.5 rounded-sm bg-surface px-2.5 py-1 text-[length:var(--text-xs)] text-neutral-mid"
+              class="flex flex-wrap items-center gap-1.5 rounded-sm bg-surface px-2.5 py-1 text-[length:var(--text-xs)] text-neutral-mid"
             >
               <span class="font-medium text-neutral-fg">{{ m.name || m.id }}</span>
               <span class="text-[length:var(--text-3xs)] text-neutral-dim">{{ m.id }}</span>
@@ -253,6 +252,8 @@
                 data-testid="model-badge-builtin"
                 class="ml-auto shrink-0 rounded-sm bg-surface-hover px-1.5 py-0.5 text-[9px] font-medium text-neutral-mid"
               >{{ t('settings.providerEdit.modelSourceBuiltin') }}</span>
+              <!-- 行内测试（2026-10-21 per-model 入口）：builtin 只读条目同样可测（测试不改配置） -->
+              <ModelTestButton :model-id="m.id" />
             </li>
           </ul>
         </div>
@@ -334,7 +335,7 @@ import {
   Eye, EyeOff,
   X, Trash2,
 } from '@lucide/vue'
-import { matchQuotaPreset } from '@taiji/shared'
+import { matchQuotaPreset, resolveQuotaPresets, type QuotaPreset } from '@taiji/shared'
 
 import type { ProviderInfo } from '@taiji/shared'
 // API_KEY_CLEAR_SENTINEL：清除哨兵常量与 core save 链同源（MF-1-9：模板判断不再手写
@@ -343,6 +344,7 @@ import { API_KEY_CLEAR_SENTINEL, useProviderEdit } from '@taiji/core'
 import { MODEL_LIST_DEPS_KEY, QUOTA_CONFIGURE_MODULE_KEY, useQuotaConfigureFactory } from '../injection-keys'
 import CodingPlanSection from '../coding-plan/CodingPlanSection.vue'
 import ModelListSection from '../common/ModelListSection.vue'
+import ModelTestButton from '../common/ModelTestButton.vue'
 import ProviderTestDiscoverSection from './ProviderTestDiscoverSection.vue'
 import { useCatalogDisplay } from './provider-catalog-display.js'
 import { useSettingsToast as useToast } from '../injection-keys'
@@ -357,6 +359,8 @@ const props = defineProps<{
   oauthPresent?: boolean
   /** 该 provider 支持 OAuth 登录（父组件按 builtinProviders 模板 oauthSupported 判定） */
   oauthSupported?: boolean
+  /** quota presets 合并视图（remote-config 域 2，renderer 自 store 传入；缺省回落编译期基线） */
+  quotaPresets?: QuotaPreset[]
 }>()
 const emit = defineEmits<{
   /** 保存成功（wroteApiKey=本次写入非空 apiKey，父组件据此做「配置完即自动启用」；
@@ -384,7 +388,12 @@ const builtinModels = computed(() => props.provider?.models.filter((m) => m.sour
 // ── Coding Plan 额度查询：自动关联 + 配置 ──
 const matchedPreset = computed(() => {
   const p = props.provider
-  return matchQuotaPreset({ baseUrl: p?.baseUrl, name: p?.name })
+  // quotaPresets 未下发（store 初始空数组 / RPC 失败 / mock 轨）显式回落编译期基线；生产由
+  // renderer 传合并视图。回落判据取空态而非 nullish——store 初值是 `[]` 不是 undefined，
+  // `??` 盖不住空数组（契约见 resolveQuotaPresets）。
+  // matchQuotaPreset 的 presets 形参契约必填（无缺省）——调用点显式写回落表达式，
+  // 堵「漏传静默读基线」通道（远程 presets 下发后展示链与 runtime 匹配链读同一权威）。
+  return matchQuotaPreset({ baseUrl: p?.baseUrl, name: p?.name }, resolveQuotaPresets(props.quotaPresets))
 })
 
 // 业务编排全在 core 三组 module（[C4] 31 成员扁平返回结构收敛为 form / discover / models 三组
@@ -414,7 +423,7 @@ const {
   syncHeadersFromRows,
 } = formEdit
 // discover 组：探活编排（结果状态经 useCatalogDisplay 转 testDiscoverProps）
-const { testConnection, autoDiscover } = discover
+const { testModel, testingModelIds, modelTestResults, autoDiscover, canTest } = discover
 // models 组：清单 CRUD（addModel 抛错由 onAddModel 捕获填 actionError）
 const { showAddModel, addModel } = models
 
@@ -508,6 +517,13 @@ function onAuthHeaderChange(value: unknown): void {
 provide(MODEL_LIST_DEPS_KEY, {
   ...models,
   providerApi: computed(() => isCatalog.value ? props.provider?.api : form.api),
+  // per-model 行内测试编排（discover module 状态切片；ModelListSection 行内按钮 + builtin 行共用）
+  modelTest: {
+    results: modelTestResults,
+    testingIds: testingModelIds,
+    canTest,
+    test: testModel,
+  },
 })
 
 // dirty 上抛父组件（展开切换检查）。immediate 让父组件初始即知当前 dirty 态

@@ -89,6 +89,12 @@ export interface BuiltinProviderTemplate {
   logoUrl?: string
   /** OAuth flow 配置（prebuild 从 pi-ai dist/auth/oauth/*.js 提取，仅 oauthSupported provider 有值）。 */
   oauthConfig?: BuiltinOAuthConfig
+  /**
+   * taiji 远程清单来源标记（remote-config 域 1）：值 = 清单条目 id。pi catalog 快照条目
+   * 无此字段。前端 QuickSetup 据此走「落盘 baseUrl/api/models」分支（非 catalog——模型
+   * 必须进 models.json），runtime 据此写 extras remoteSource 标记（远程模型更新的唯一判据）。
+   */
+  remoteSource?: string
 }
 
 /**

@@ -95,9 +95,7 @@ vi.mock('@/components/panel/trace/TraceInspector.vue', () => ({
 vi.mock('@/components/panel/SubagentTab.vue', () => ({
   default: { name: 'SubagentTab', template: '<div />' },
 }))
-vi.mock('@/components/panel/WorkflowTab.vue', () => ({
-  default: { name: 'WorkflowTab', template: '<div />' },
-}))
+
 vi.mock('@/composables/features/file-tree/useGitStatus', () => ({
   GIT_STATUS_KEY: Symbol('git-status'),
   provideGitStatus: () => ({ indicator: { value: undefined }, state: { value: 'clean' }, lines: { value: [] } }),

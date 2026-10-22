@@ -583,6 +583,8 @@ describe('SessionService · dispatcher', () => {
   describe('sendMessage', () => {
     it('calls client.prompt with the user content on normal send', async () => {
       const client = setup.mountClient('sid-1')
+      // 快路径前提 = 完整注册态 [switch-race-window]：不注册 = 恢复窗口半成品 → 走恢复链
+      await setup.service.initializeManagedSession('sid-1', client as unknown as IPiEngine, tmpdir(), 'label')
       await setup.service.sendMessage('sid-1', 'hello pi')
       await flushDelivery()
       // [u2 投递所有权内核] 出站交接在适配层：正文 + 裸标记身份（D2），无图片、direct 车道
@@ -612,6 +614,8 @@ describe('SessionService · dispatcher', () => {
 
     it('passes through when hook returns blocked:false', async () => {
       const client = setup.mountClient('sid-1')
+      // 快路径前提 = 完整注册态 [switch-race-window]（同上）
+      await setup.service.initializeManagedSession('sid-1', client as unknown as IPiEngine, tmpdir(), 'label')
       setup.service.setSendMessageHook(async () => ({ blocked: false }))
       await setup.service.sendMessage('sid-1', 'go')
       await flushDelivery()
@@ -621,6 +625,8 @@ describe('SessionService · dispatcher', () => {
 
     it('passes through when hook returns null', async () => {
       const client = setup.mountClient('sid-1')
+      // 快路径前提 = 完整注册态 [switch-race-window]（同上）
+      await setup.service.initializeManagedSession('sid-1', client as unknown as IPiEngine, tmpdir(), 'label')
       setup.service.setSendMessageHook(async () => null)
       await setup.service.sendMessage('sid-1', 'go')
       await flushDelivery()
@@ -632,6 +638,8 @@ describe('SessionService · dispatcher', () => {
     // 时 dispatcher 用改写后的文本发 pi（demo 插件 !important → IMPORTANT 的消费链路）
     it('sends the hook-modified content when hook returns modifiedContent', async () => {
       const client = setup.mountClient('sid-1')
+      // 快路径前提 = 完整注册态 [switch-race-window]（同上）
+      await setup.service.initializeManagedSession('sid-1', client as unknown as IPiEngine, tmpdir(), 'label')
       setup.service.setSendMessageHook(async (_sid, content) => ({
         blocked: false,
         modifiedContent: content.replace('!important', 'IMPORTANT'),
@@ -669,6 +677,8 @@ describe('SessionService · dispatcher', () => {
 
     it('broadcasts message.error when prompt rejects', async () => {
       const client = setup.mountClient('sid-1')
+      // 快路径前提 = 完整注册态 [switch-race-window]（同上）
+      await setup.service.initializeManagedSession('sid-1', client as unknown as IPiEngine, tmpdir(), 'label')
       client.prompt.mockRejectedValueOnce(new Error('pi down'))
       await setup.service.sendMessage('sid-1', 'go')
       await flushDelivery()
@@ -1446,40 +1456,51 @@ describe('SessionService · Facade', () => {
 
   describe('ensureActive', () => {
     it('returns existing client without restoring', async () => {
-      const client = setup.mountClient('sid-e')
-      const got = await setup.service.ensureActive('sid-e')
+      // 快路径前提 = 完整注册态 [switch-race-window]：mountClient 只放 pm 不注册——
+      // 活 client + Map 缺条目 = 恢复窗口半成品，会走恢复内核；seedSession 经 create
+      // 注册汇聚点播种完整注册态。
+      const { id, client } = await setup.seedSession()
+      const got = await setup.service.ensureActive(id)
       expect(got).toBe(client)
     })
 
     it('restores session when client missing and returns new client', async () => {
-      pushScannedSession({ id: 'persist-ens', filePath: '/fake/ens.jsonl', cwd: tmpdir() })
-      const client = makeMockClient()
-      // 手动把 client 关联进 clientMap，让 ensureActive 末尾的 getClient 能取到。
-      stubNextCreatedClient(setup, client, { clientMapId: 'persist-ens' })
-      const got = await setup.service.ensureActive('persist-ens')
-      expect(got).toBe(client)
+      // [switch-race-window] 原用例经 stubNextCreatedClient 的 clientMapId 预挂 client，
+      // 实际命中的是快路径（空转通过）；快路径加注册态前提后本用例回到真恢复链——
+      // 真实临时 session 文件（attach 的 statSync / seeding 读侧都要真文件）。
+      await withTempSessionFile('svc-restore-ens', 'ens.jsonl', '{"entries":[]}', async (_dir, filePath) => {
+        pushScannedSession({ id: 'persist-ens', filePath, cwd: tmpdir() })
+        const client = makeMockClient()
+        // spawn 替身：恢复内核 pm.createSession 返回新 client 并按 clientMapId 入进程表
+        stubNextCreatedClient(setup, client, { clientMapId: 'persist-ens' })
+        const got = await setup.service.ensureActive('persist-ens')
+        expect(got).toBe(client)
+      })
     })
 
     it('joins the same in-flight restore when called concurrently (crash-resilience D7-3 join)', async () => {
       // [HISTORICAL] 原断言第二个并发调用被 already being restored 拒绝（throw 语义）；
       // u8（crash-resilience D7-③）throw→join：并发调用等待同一 in-flight Promise，
       // restore 内核只进入一次（不报错不双跑）。
-      // 让 restoreSession 挂起，模拟并发 restore。不能 mountClient，否则 ensureActive
+      // [switch-race-window] 恢复执行内核 = RespawnDeps.restore 直连 lifecycle.restoreSession
+      // （facade 只是 join 包装）——门控内核须 spy lifecycle，spy facade 拦不到 ensureActive 链。
+      // 让 restore 内核挂起，模拟并发 restore。不能 mountClient，否则 ensureActive
       // 走 fast path（直接返回现有 client），不会进入 restoring 分支。
+      const lc = setup.service as unknown as { lifecycle: { restoreSession: (sessionId: string) => Promise<SessionSummary> } }
       let resolveRestore!: (v: SessionSummary) => void
       const pending = new Promise<SessionSummary>(r => { resolveRestore = r })
-      const restoreSpy = vi.spyOn(setup.service, 'restoreSession').mockReturnValueOnce(pending)
+      const kernelSpy = vi.spyOn(lc.lifecycle, 'restoreSession').mockReturnValueOnce(pending)
 
       const first = setup.service.ensureActive('dedup-sid')
       const second = setup.service.ensureActive('dedup-sid')
       // join：restore 内核只进入一次（没有第二路并发 restore）
-      expect(restoreSpy).toHaveBeenCalledTimes(1)
+      expect(kernelSpy).toHaveBeenCalledTimes(1)
       resolveRestore({} as SessionSummary)
       // 双方都等恢复完成后继续；随后都因 getClient 无 client 而 reject（符合无进程的真实场景）
       await expect(first).rejects.toThrow('client not available')
       await expect(second).rejects.toThrow('client not available')
-      expect(restoreSpy).toHaveBeenCalledTimes(1)
-      restoreSpy.mockRestore()
+      expect(kernelSpy).toHaveBeenCalledTimes(1)
+      kernelSpy.mockRestore()
     })
   })
 
@@ -2286,7 +2307,9 @@ describe('SessionService · revokeMessage', () => {
   })
 
   it('facade 委派编排全链可用：空树定位 miss → no-mapping（deps 窄注入经真实装配跑通）', async () => {
-    setup.mountClient('sid-r1')
+    const client = setup.mountClient('sid-r1')
+    // 快路径前提 = 完整注册态 [switch-race-window]：ensureActive 对未注册活 client 会走恢复链
+    await setup.service.initializeManagedSession('sid-r1', client as unknown as IPiEngine, tmpdir(), 'label')
     const reply = await setup.service.revokeMessage('sid-r1', 'u-missing-target')
     // mock client 默认空 entries（getEntries → {entries:[], leafId:null}）→ 通道 a/b 均
     // miss → no-mapping（六码之一；走完 hold/空闲/workflow 检查 + ensureActive + 读树）

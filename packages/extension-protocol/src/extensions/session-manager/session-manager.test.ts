@@ -11,6 +11,8 @@ import type {
   SessionManagerStatusParams,
   SessionManagerListParams,
   SessionManagerAbortParams,
+  SessionManagerDeleteParams,
+  SessionManagerArchiveParams,
   SessionManagerWatchParams,
   SessionManagerCreateResult,
   SessionManagerSendResult,
@@ -19,7 +21,13 @@ import type {
   SessionManagerListResult,
   SessionManagerSessionSummary,
   SessionManagerAbortResult,
+  SessionManagerDeleteResult,
+  SessionManagerArchiveResult,
   SessionManagerErrorResult,
+} from './types'
+import {
+  isSessionManagerDeleteParams,
+  isSessionManagerArchiveParams,
 } from './types'
 
 /**
@@ -45,7 +53,7 @@ describe('U1-A2 marker 精确值 + 类型覆盖', () => {
     expect(SESSION_MANAGER_MARKER).not.toBe(GUI_WIDGET_MARKER)
   })
 
-  it('U1-A2 SessionManagerAction 包含全部 7 个 action（含 notify-once watch）', () => {
+  it('U1-A2 SessionManagerAction 包含全部 9 个 action（含 notify-once watch + delete/archive）', () => {
     const actions: SessionManagerAction[] = [
       'create',
       'send',
@@ -53,9 +61,11 @@ describe('U1-A2 marker 精确值 + 类型覆盖', () => {
       'status',
       'list',
       'abort',
+      'delete',
+      'archive',
       'watch',
     ]
-    expect(actions).toHaveLength(7)
+    expect(actions).toHaveLength(9)
   })
 
   it('U1-A2 请求为嵌套形状：{action, params}（params 不携带 action 字段）', () => {
@@ -67,9 +77,11 @@ describe('U1-A2 marker 精确值 + 类型覆盖', () => {
       { action: 'status', params: { sessionId: 's' } },
       { action: 'list', params: {} },
       { action: 'abort', params: { sessionId: 's' } },
+      { action: 'delete', params: { sessionId: 's' } },
+      { action: 'archive', params: { sessionId: 's' } },
       { action: 'watch', params: { notifyId: 'sm-123e4567-e89b-12d3-a456-426614174000' } },
     ]
-    expect(requests).toHaveLength(7)
+    expect(requests).toHaveLength(9)
     for (const req of requests) {
       expect(req.params).not.toHaveProperty('action')
     }
@@ -115,6 +127,16 @@ describe('U1-A2 各 action 请求 params 类型结构（嵌套契约）', () => 
 
   it('U1-A2 SessionManagerAbortParams 必含 sessionId', () => {
     const req: SessionManagerAbortParams = { sessionId: 'abc' }
+    expect(req.sessionId).toBe('abc')
+  })
+
+  it('U1-A2 SessionManagerDeleteParams 必含 sessionId（与 abort 同形态）', () => {
+    const req: SessionManagerDeleteParams = { sessionId: 'abc' }
+    expect(req.sessionId).toBe('abc')
+  })
+
+  it('U1-A2 SessionManagerArchiveParams 必含 sessionId（与 abort 同形态）', () => {
+    const req: SessionManagerArchiveParams = { sessionId: 'abc' }
     expect(req.sessionId).toBe('abc')
   })
 
@@ -199,6 +221,22 @@ describe('U1-A2 各 action 结果类型结构', () => {
     expect(res.success).toBe(true)
   })
 
+  it('U1-A2 SessionManagerDeleteResult：{sessionId, deleted:true}（设计 §3.1 交互样例字段名）', () => {
+    const res: SessionManagerDeleteResult = { deleted: true, sessionId: 'abc' }
+    expect(res.deleted).toBe(true)
+    expect(res.sessionId).toBe('abc')
+    // wire 往返（handler respond 经 select 通道）
+    expect(JSON.parse(JSON.stringify(res))).toEqual(res)
+  })
+
+  it('U1-A2 SessionManagerArchiveResult：{sessionId, archived:true}（设计 §3.1 交互样例字段名）', () => {
+    const res: SessionManagerArchiveResult = { archived: true, sessionId: 'abc' }
+    expect(res.archived).toBe(true)
+    expect(res.sessionId).toBe('abc')
+    // wire 往返（handler respond 经 select 通道）
+    expect(JSON.parse(JSON.stringify(res))).toEqual(res)
+  })
+
   it('U1-A2 SessionManagerErrorResult 必含 error，sessionId 和 hint 可选', () => {
     const err: SessionManagerErrorResult = { error: 'failed' }
     expect(err.error).toBe('failed')
@@ -211,5 +249,45 @@ describe('U1-A2 各 action 结果类型结构', () => {
       sessionId: 'abc',
     }
     expect(errWithHint.hint).toBe('use send_to_session')
+  })
+})
+
+/**
+ * session-manager-archive-delete U2：delete/archive params 检查（同 abort 的
+ * isSessionIdParams 形态——信任边界入站校验，非法 params 走 error envelope）。
+ * 畸形矩阵与 abort 检查现状形态对齐：isRecord 只排数组、必填字段类型检查、
+ * 多余字段放行（同 status/abort——仅 watch 是封闭单键）。
+ */
+describe('U2 delete/archive params 检查（isSessionIdParams 同形态）', () => {
+  it('happy-path：{sessionId: string} 通过', () => {
+    expect(isSessionManagerDeleteParams({ sessionId: 'child-1' })).toBe(true)
+    expect(isSessionManagerArchiveParams({ sessionId: 'child-1' })).toBe(true)
+  })
+
+  it('boundary：非对象 / 数组 / null / undefined 拒绝', () => {
+    expect(isSessionManagerDeleteParams(null)).toBe(false)
+    expect(isSessionManagerDeleteParams(undefined)).toBe(false)
+    expect(isSessionManagerDeleteParams('child-1')).toBe(false)
+    expect(isSessionManagerDeleteParams(42)).toBe(false)
+    expect(isSessionManagerDeleteParams([{ sessionId: 'child-1' }])).toBe(false)
+    expect(isSessionManagerArchiveParams(null)).toBe(false)
+    expect(isSessionManagerArchiveParams(undefined)).toBe(false)
+    expect(isSessionManagerArchiveParams('child-1')).toBe(false)
+    expect(isSessionManagerArchiveParams(42)).toBe(false)
+    expect(isSessionManagerArchiveParams([{ sessionId: 'child-1' }])).toBe(false)
+  })
+
+  it('boundary：缺 sessionId / sessionId 非 string 拒绝', () => {
+    expect(isSessionManagerDeleteParams({})).toBe(false)
+    expect(isSessionManagerDeleteParams({ session_id: 'child-1' })).toBe(false)
+    expect(isSessionManagerDeleteParams({ sessionId: 42 })).toBe(false)
+    expect(isSessionManagerArchiveParams({})).toBe(false)
+    expect(isSessionManagerArchiveParams({ session_id: 'child-1' })).toBe(false)
+    expect(isSessionManagerArchiveParams({ sessionId: { id: 'x' } })).toBe(false)
+  })
+
+  it('多余字段放行（对齐 abort 检查现状形态：仅 watch 是封闭单键）', () => {
+    expect(isSessionManagerDeleteParams({ sessionId: 'child-1', extra: 'x' })).toBe(true)
+    expect(isSessionManagerArchiveParams({ sessionId: 'child-1', extra: 'x' })).toBe(true)
   })
 })

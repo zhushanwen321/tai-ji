@@ -472,7 +472,7 @@ export function detectIdentity(file: string, size: number): IdentityHeaderRecon 
 /**
  * 折叠状态 → 终态收条（`.state` sidecar 退场的桥，① 读侧换源的落点）。
  *
- * 语义与 `readStateMarker` 读出的新格式同形（status=idle + reason + endedAt）：
+ * 产出形态 = { status: "idle", reason, endedAt }（`StateMarker` 的现役 idle 形态）：
  *   - `record-settled` 在场 → 终局收条（endedAt 用事件自带时间）；
  *   - 否则 `record-round-idle` **且它是最后一条事件** → 轮终收条（endedAt 用该事件
  *     时间；记录停在轮终未终局）；

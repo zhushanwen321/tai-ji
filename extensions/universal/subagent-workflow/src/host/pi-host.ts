@@ -270,41 +270,63 @@ export function createPiHostServices(): HostServices {
   };
 }
 
-// ── [D2 扩展加载显式化] 孙进程扩展白名单注入源（双形态） ──
+// ── [D2 扩展加载显式化] 孙进程扩展注入源（白名单，双形态） ──
 
 /**
- * 孙进程（subagent 任务子进程）schema 强制所需的最小扩展集（P-C5 起步裁决：
- * 仅 structured-output）。全量 staged 下发会让孙进程加载全部无关扩展——每包都
- * 可能注册工具/注入提示词，孙进程的工具范围与 system prompt 行为不可控。
+ * 孙进程（subagent 任务子进程）扩展集 = **白名单**：主进程 argv `--extension` 值中
+ * 位于「受管三根」的子集（= runtime 下发的 staged/安装受管集），再剔除下方名单内的包。
  *
- * 白名单组成唯一登记处（runtime 侧 getExtensionPaths 全量下发、本常量收窄，
- * 无第二份判据副本——扩白名单只改此处并同步 pi-host.test.ts 用例，以及
- * spawn-runner.ts 断言②的 SCHEMA_ENFORCEMENT_EXTENSION_SEGS 同判据两端）。
+ * 白名单池判据 = 受管三根（词法判定，权威源 = packages/runtime/src/infra/pi/
+ * spawn-markers.ts 的 isStagedMarkerPath——reap 收殓登记用同一判据；extension bundle
+ * 不 import runtime，本处自包含镜像，两端口径漂移由 pi-host.test.ts 用例锁定）：
+ *   ① 打包资源根   `*.app/Contents/Resources/extensions/`（打包 builtin staged 集）
+ *   ② dev 仓库     `apps/electron/resources/extensions`（staged 产物）与
+ *                  `extensions/<group>/<pkg>`（源码，分组层恒在故要求 ≥2 层）
+ *   ③ dataDir 两子树 `<dataDir>/extensions` 与 `<dataDir>/npm`（settings 安装集）
+ * discovery 目录（`<agentDir>/extensions`，pi CLI 生态顺带加载的外挂扩展）构造上
+ * 不在三根 → 天然不进孙进程。缺省方向 = **未登记（受管集之外）不继承**。
  *
- * 每条 = 路径段序列（`/`|`\` 分段后连续匹配）。两形态别名：
- *   - `@zhushanwen/pi-structured-output`：npm staged 布局
- *     `.../node_modules/@zhushanwen/pi-structured-output[/index.js]`。
- *   - `universal/structured-output`：dev 源码布局 `.../extensions/universal/structured-output`
- *     （dev 下 runtime 下发的 --extension 是源码目录，无 @zhushanwen scope 段——
- *     只认 npm 布局时孙进程扩展集恒空，schema 拦截链静默失效）。
- *     选型：两段连续匹配（分组目录名 + 包目录名）而非尾段单匹配 `structured-output`
- *     ——尾段会撞任意同名无关目录（如其他包内的同名子目录）；两段含本仓 extensions
- *     固定分组名 `universal`，且 --extension 值来源可控（runtime extension-service
- *     下发 / pi CLI flags），实际碰撞风险可忽略。
+ * 为什么是白名单不是排除式（2026-10-21/22 真机事故）：排除式（默认继承全集、黑名单
+ * 剔除）下，discovery 外挂 opendesign-ipv4 自动继承进孙进程——它把 URL 改写成 IP
+ * 字面量，Cloudflare 按 SNI+Host 路由拒之（孙进程的 node 版 pi TLS 握手必败），
+ * LLM 请求全部 `Connection error.`。黑名单只拦「已登记的坏」，拦不住尚未登记的
+ * 外挂；白名单把缺省方向反转，外挂止步于主进程，进孙进程必须落在受管集内。
+ *
+ * 剔除名单（池内收窄，只列「孙进程里必然无用或有害」的受管包）：
+ * - 交互决策类（plan / canvas / goal）：需要人类在 GUI 裁决，孙进程无人可问，
+ *   加载后只会多出挂起等待的工具入口；
+ * - 定时调度类（scheduler）：定时任务是会话级能力，孙进程生命周期短且一次性。
+ *
+ * 组成唯一登记处（runtime 侧受管集全量下发、本层三根镜像判定 + 名单收窄，无第二份
+ * 判据副本——改剔除项只改此处并同步 pi-host.test.ts 用例，以及 spawn-runner.ts
+ * 断言②的 SCHEMA_ENFORCEMENT_EXTENSION_SEGS 同判据两端）。
+ *
+ * 每条 = 路径段序列（`/`|`\` 分段后连续匹配）。两形态别名（npm staged 布局
+ * `@zhushanwen/pi-xxx` 与 dev 源码布局 `extensions/<group>/<pkg>`）都要登记，否则
+ * 两条装配路径行为不一致。
  */
-const GRANDCHILD_EXTENSION_PKG_SEGMENTS: readonly (readonly string[])[] = [
-  ["@zhushanwen", "pi-structured-output"],
-  ["universal", "structured-output"],
+const GRANDCHILD_EXCLUDED_PKG_SEGMENTS: readonly (readonly string[])[] = [
+  // plan：计划模式需人在审阅条裁决（submit-review 挂起等用户）
+  ["@zhushanwen", "pi-plan"],
+  ["universal", "plan"],
+  // canvas：问题解决画布需人在 overlay 裁决
+  ["@zhushanwen", "pi-canvas"],
+  ["taiji", "canvas"],
+  // goal：目标循环需用户确认
+  ["@zhushanwen", "pi-goal"],
+  ["universal", "goal"],
+  // scheduler：定时任务属主会话能力，孙进程无生命周期承载
+  ["@zhushanwen", "pi-scheduler"],
+  ["universal", "scheduler"],
 ];
 
-/** npm 布局包名（peerDep 解析锚点与诊断文案用；匹配判据见上段集）。 */
+/** structured-output 包名（包组 peerDep 解析锚点与诊断文案用；匹配判据见排除名单）。 */
 const GRANDCHILD_EXTENSION_NPM_PKG = "@zhushanwen/pi-structured-output";
 
 /**
- * 孙进程扩展路径集解析（设计 D2 双形态；argv 与 peerDep 解析器经参数注入，纯函数
- * 可测——HostServices 方法闭包传 process.argv）：
- *   1. taiji 宿主形态：主 pi 进程 argv 的 `--extension` 全量值 = runtime
- *      extension-service 经 spawn argv 下发的 staged 集——按白名单收窄。该形态
+ * 孙进程扩展路径集解析（白名单；argv / peerDep 解析器 / 受管判定基经参数注入，纯函数可测）：
+ *   1. taiji 宿主形态：主 pi 进程 argv 的 `--extension` 值中位于受管三根的子集
+ *      （= runtime extension-service 下发的 staged/安装受管集），减去剔除名单。该形态
  *      判据 = argv 有 `--extension`（taiji spawn 恒带）。
  *   2. 独立 pi 形态（npm 安装、无 taiji runtime）：从包自身 optional peerDep 解析
  *      structured-output sibling 路径（安装了即解析、未安装则空）。
@@ -316,12 +338,17 @@ export function resolveGrandchildExtensionPaths(
   argv: readonly string[],
   resolvePeer: () => string | undefined = resolveStructuredOutputPeer,
   resolveE2eFaux: () => string | undefined = resolveE2eFauxExtensionPath,
+  managedDirBase: string = dirname(getAgentDir()),
 ): string[] {
   const stagedAll = collectExtensionFlagValues(argv);
-  const whitelisted = stagedAll.filter(isGrandchildExtensionPath);
+  // builtin: 旗标（codemode / mcp / tool-search）由 spawn-args 的上游模板单独追加，
+  // 不经本函数——这里只处理文件/目录路径。
+  const inherited = stagedAll.filter(
+    (p) => isManagedExtensionPath(p, managedDirBase) && !isGrandchildExcludedPath(p),
+  );
   const e2eFaux = resolveE2eFaux();
-  if (whitelisted.length > 0 || e2eFaux !== undefined) {
-    return e2eFaux !== undefined ? [...whitelisted, e2eFaux] : whitelisted;
+  if (inherited.length > 0 || e2eFaux !== undefined) {
+    return e2eFaux !== undefined ? [...inherited, e2eFaux] : inherited;
   }
   const peer = resolvePeer();
   return peer !== undefined ? [peer] : [];
@@ -346,12 +373,69 @@ function resolveE2eFauxExtensionPath(): string | undefined {
   return existsSync(fauxExtPath) ? fauxExtPath : undefined;
 }
 
-/** 路径是否命中孙进程扩展白名单：路径段序列包含白名单任一段集的连续匹配
+/** win32 反斜杠归一为斜杠（段链判定统一按 posix 形态做，跨平台一致）。 */
+function toSlashPath(value: string): string {
+  return value.split("\\").join("/");
+}
+
+/**
+ * 路径是否落在受管扩展三根之内（白名单池判据；词法判定，不触盘不 realpath）。
+ *
+ * 自包含镜像 = packages/runtime/src/infra/pi/spawn-markers.ts 的 isStagedMarkerPath
+ * （reap 收殓登记同一判据；extension bundle 不 import runtime，故本地复制——两端
+ * 段集漂移由 pi-host.test.ts 与 runtime 侧 spawn-markers 测试各自锁定，任一端改
+ * 三根口径必须同步另一端）：
+ *   ① 打包资源根    `*.app/Contents/Resources/extensions(/|$)`（.app 是目录名后缀，
+ *                    段内任意 bundle 名 + 精确段界）；
+ *   ②-a dev 资源根  `apps/electron/resources/extensions`（段链精确成界：chain + '/'
+ *                    为后代、endsWith(chain) 为根目录自身，防 fake-apps/ 与
+ *                    extensionsExtra/ 之类字符串误吸）；
+ *   ②-b dev 源码根  `/extensions/<group>/<pkg>`（分组层恒在故要求 extensions 段后
+ *                    ≥2 段；用户世界 `.pi/extensions/<pkg>` 无子层天然排除）；
+ *   ③ dataDir 两子树 `<dataDir>/extensions` 与 `<dataDir>/npm`（settings 安装集；
+ *                    子目录名与 @taiji/shared/paths 的 getExtensionsDir/getNpmDir
+ *                    同源）。managedDirBase = dataDir（agentDir 上溯一级——taiji
+ *                    spawn 恒注入 PI_CODING_AGENT_DIR=<dataDir>/agent）。
+ * 非绝对路径一律 false（无法锚定三根）。原理性极限与 spawn-markers 同款接受：
+ * 用户自有仓库的同形三层路径词法上不可区分（其进孙进程的实际前提是它已在主 pi
+ * argv 里——即用户显式 --extension 加载过，主进程侧已过同款词法闸）。
+ */
+function isManagedExtensionPath(value: string, managedDirBase: string): boolean {
+  if (!value) return false;
+  const normalized = toSlashPath(value);
+  if (PACKAGED_APP_EXTENSIONS_RE.test(normalized)) return true;
+  if (
+    normalized.includes(`${DEV_REPO_EXTENSIONS_CHAIN}/`) ||
+    normalized.endsWith(DEV_REPO_EXTENSIONS_CHAIN)
+  ) {
+    return true;
+  }
+  if (DEV_SOURCE_EXTENSIONS_RE.test(normalized)) return true;
+  return (
+    isPathUnderDir(normalized, join(managedDirBase, "extensions")) ||
+    isPathUnderDir(normalized, join(managedDirBase, "npm"))
+  );
+}
+
+/** ① 打包资源根段链（macOS .app bundle 布局；`*.app` 为任意 bundle 名——.app 是目录名后缀）。 */
+const PACKAGED_APP_EXTENSIONS_RE = /\/[^/]+\.app\/Contents\/Resources\/extensions(?:\/|$)/;
+/** ②-a dev 仓库资源根段链（<repoRoot>/apps/electron/resources/extensions）。 */
+const DEV_REPO_EXTENSIONS_CHAIN = "/apps/electron/resources/extensions";
+/** ②-b dev 仓库源码根（<repoRoot>/extensions/<group>/<pkg>；判据见 isManagedExtensionPath）。 */
+const DEV_SOURCE_EXTENSIONS_RE = /\/extensions\/[^/]+\/[^/]+/;
+
+/** 值（posix 形态）是否位于 root 子树内（root 自身也算命中；双方须同为绝对路径）。 */
+function isPathUnderDir(value: string, root: string): boolean {
+  if (!value.startsWith("/") || !root.startsWith("/")) return false;
+  return value === root || value.startsWith(`${root}/`);
+}
+
+/** 路径是否命中孙进程扩展剔除名单：路径段序列包含任一段集的连续匹配
  *  （目录形态与入口文件形态都命中——末尾越界段取 undefined 不等，天然界内；
- *  前缀相似目录如 `pi-structured-output-lookalike` 因段值不等不误判）。 */
-function isGrandchildExtensionPath(p: string): boolean {
+ *  前缀相似目录如 `pi-plan-lookalike` 因段值不等不误判）。 */
+function isGrandchildExcludedPath(p: string): boolean {
   const segs = p.split(/[\\/]/).filter((s) => s.length > 0);
-  return GRANDCHILD_EXTENSION_PKG_SEGMENTS.some((wanted) =>
+  return GRANDCHILD_EXCLUDED_PKG_SEGMENTS.some((wanted) =>
     segs.some((_, i) => wanted.every((w, j) => segs[i + j] === w)),
   );
 }

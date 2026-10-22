@@ -16,7 +16,16 @@ pi 的可用模型集合在**进程启动时**冻结：`set_model` 从内存快�
   pi 的 `ModelRuntime.refresh()` 首行重读磁盘配置并重组 provider，`allowNetwork:false` 保证
   **零网络请求**（本地恢复相位，凭据解析/入网前返回）；
 - 刷新后读 `ctx.modelRegistry.getError()`：非空即原样落 ERROR 日志（模型配置被引擎拒绝的
-  唯一有效判据——该退化形态下 `refresh().errors` 为空）。
+  唯一有效判据——该退化形态下 `refresh().errors` 为空）；
+- taiji 托管环境另有**目录投喂（catalog overlay）**职责：模型目录缓存
+  `<数据目录>/provider-catalog-overlay.json` 作为**第三个监视条目**按 **mtime** 比较（区别于
+  两条目的内容比较；基线在扩展工厂期播种、首拍放行），工厂期经 `pi.registerProvider` 注入
+  「内置基线 ⊕ 缓存条目」并集，运行中变化先对本拍 fresh 且尚未注册的 provider 做一次**注册对账**
+  （补 `registerProvider`——工厂期因过期 / 缺失 / 损坏未注入的 provider 没有刷新钩子，单靠刷新
+  重建不了注入），再触发同一次零网络刷新——上游目录新模型对运行中的会话立即可见。条目三态：
+  **fresh** 注入 / **expired·never-seen** 不注入（已注入的撤销、回落 pi 内置基线）/
+  **损坏·不可读** 不注入新 provider、已注入的保留，文件修复后下一拍对账重建注入。原生 pi 用户
+  （无 `TAIJI_AGENT_DATA_DIR`）整条不挂（pass-through）。
 
 ## 语义要点（易误解处）
 
@@ -26,6 +35,10 @@ pi 的可用模型集合在**进程启动时**冻结：`set_model` 从内存快�
 | 文件**曾存在、现在缺失**（被隔离/外部删除） | 更新基线但**抑制刷新**（避免用空配置重建可用集合），只记一行日志 |
 | 读失败（权限等非 ENOENT） | 该文件本拍不比较、基线不动；另一文件照常 |
 | 刷新抛错 | 基线照常推进（同一内容不重复刷新），下一拍继续 |
+| 目录缓存条目 **fresh** | 注入「内置基线 ⊕ 缓存条目」并集；运行中变化经同一 tick 刷新生效（工厂期未注册的 provider 在该拍先补注册） |
+| 目录缓存条目 **expired / never-seen**（过期、从未见过、缓存缺失） | 不注入；已注入的经 `refreshModels` 钩子撤销、回落 pi 内置基线 |
+| 目录缓存**损坏 / 不可读** | 不注入新 provider，已注入的保留当前注入；修复或删除文件（下次目录刷新重写）后下一拍自动对账重建注入，无需重开会话 |
+| `models.json` 抑制窗口内目录缓存变化 | 不穿透抑制（窗口内一律不刷新），解除后补一次刷新 |
 
 ## 安装
 
@@ -34,7 +47,15 @@ pi 的可用模型集合在**进程启动时**冻结：`set_model` 从内存快�
 
 ## 排障
 
-- 日志前缀 `[provider-live-sync]`：`config change detected (...)` 表示检测到变更并已刷新；
-  `model config rejected by the engine: ...` 表示 pi 拒绝了配置文件（原文含字段路径）；
-  `config file disappeared: ...` 表示文件被隔离/删除（此拍不刷新，引擎保留上一份快照）。
+- 日志前缀 `[provider-live-sync]`：`config change detected (...)` 表示检测到变更并已刷新
+  （列表含 `models.json` / `auth.json` / `provider-catalog-overlay.json`）；`model config rejected
+  by the engine: ...` 表示 pi 拒绝了配置（原文含字段路径，来源不限——两配置文件与目录投喂
+  注入集都可能被拒）；`config file disappeared: ...` 表示文件被隔离/删除（此拍不刷新，引擎保留
+  上一份快照）。
+- 目录投喂侧：`catalog cache corrupt/unreadable ..., overlay injection skipped` = 工厂期或对账拍
+  缓存损坏/不可读、本拍不注入新 provider（修复或删除该文件后下一拍自动对账重建注入，无需重开
+  会话）；`catalog cache unreadable during refresh ... keeping the current injection` = 运行期
+  保留注入、文件恢复可读后下一拍自愈；`catalog overlay model skipped` / `registerProvider failed`
+  = 目录数据不完整或 pi 结构校验失败，等下次设置页目录刷新或按日志里的缓存路径修数据源
+  （缓存重写后自动重试注册）。
 - 配置无轮询开关：周期为设计标定值（2s）。

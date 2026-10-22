@@ -393,7 +393,7 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 ### 26. workflow run 状态异常排查：run 事件 journal 取证（2026-09-21 run 显式状态机落地）
 
-- **取证源**：workflow run 生命周期由显式状态机裁决（`subagent-core/src/orchestration/run-events.ts`，`RUN_TRANSITIONS` 转移表 + `transition` 纯函数，表外转移 fail-fast）；record 流 journal 是 run 态权威派生视图源——`<agentDir>/workflow-state/<runId>.record.jsonl`（[D1] record 单源，后缀经 core `RUN_EVENT_JOURNAL_SUFFIX`；workspace 有活跃 session 时为 `<agentDir>/sessions/<slug>/workflow-state/`，推导 = `resolvePiWorkflowStateDir`），JSONL 逐行（`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`；`agent-started` 载荷携带 `phase?` = 剧本 phase 归属，抽屉分组视图供源；成员词表权威源 = `subagent-core/src/orchestration/run-events.ts` 的 `RUN_EVENT_TYPES`）。旧格式 `.events.jsonl` 两件套不读不写（历史 run 不进 GUI 列表、resume 拒绝，随孤儿对账清理自然消亡）——不是取证源。
+- **取证源**：workflow run 生命周期由显式状态机裁决（`subagent-core/src/orchestration/run-events.ts`，`RUN_MACHINE` 机器声明（@zhushanwen/state-machine，[ADR-0152](adr/decisions.md)）+ `transition` 纯函数，表外转移 fail-fast）；record 流 journal 是 run 态权威派生视图源——`<agentDir>/workflow-state/<runId>.record.jsonl`（[D1] record 单源，后缀经 core `RUN_EVENTS_SUFFIX`；workspace 有活跃 session 时为 `<agentDir>/sessions/<slug>/workflow-state/`，推导 = `resolvePiWorkflowStateDir`），JSONL 逐行（`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`；`agent-started` 载荷携带 `phase?` = 剧本 phase 归属，抽屉分组视图供源；成员词表权威源 = `subagent-core/src/orchestration/run-events.ts` 的 `RUN_EVENT_TYPES`）。旧格式 `.events.jsonl` 两件套不读不写（历史 run 不进 GUI 列表、resume 拒绝，随孤儿对账清理自然消亡）——不是取证源。
 - **判定姿势**：run 卡死/终态异常先读 journal 事件序列对照合法转移表——① 缺 `run-settled` 事件 = run 未终局（查 pump 日志）；② schema 任务武装回执异常：journal 里没有也不该有 `armed` 事件（占位事件已随 D5 删除——回执经运行时事件路由喂入宿主等待门，不落 journal）；现行断言点 = run 终态 failed 且 error 文案含 `[schema-arming]`（宿主 armed 回执等待窗窗满合成失败 outcome，fail-fast 先行——查引擎侧武装断言与 `@zhushanwen/pi-structured-output` 扩展装载；native 引擎 + schema 任务才有武装面，emulated 引擎 / 无 schema 任务豁免不适用本条）；③ debug 日志 `run event dispatch yielded (runId=...)` = 表外转移让位，常见根因是派发链 runId 键错、事件落进占位键（旁证：binding sidecar `.record-binding` 的 `parentRunId` 为 `sar-unattached` 占位而非真实 runId = 未走 workflowAgentDispatch 通道）。
 - **注册表派生视图**：run 列表态 = journal fold（四相 missing/active/terminal/interrupted），不看文件 mtime；journal 缺失即 missing 相，手工挪动/删除 journal 文件直接改变派生视图结果。
 
@@ -530,6 +530,26 @@ Windows 等效：`tasklist /FI "PID eq <pid>"` 核对单进程；按命令行定
   2. **resume 场景查生效值**：journal 的 `run-resumed` 事件携带生效模型——三档回落：resume 显式参数（协议预留）> 持久化覆盖记录 > run 创建时模型。
   3. **查成员实际执行模型**：成员 pi session 文件的 `model_change` 条目序列（尾条目 = 当前实际使用模型，审计权威）。
 - **处置**：需要脚本显式模型赢时，对该目标再次切换即可（覆盖替换幂等——新覆盖值压旧值，不存在叠加）；确认从未切换过而模型仍不符预期，才按模型解析回归排查（三层解析：调用参数 > frontmatter > ctxModel）。
+### 41. 新建 worktree 基线落后 main：幽灵 remote-tracking ref（origin/* 残留镜像，2026-10-20 事故）
+
+**症状**：从 landing 页创建 worktree（base 选 `origin/main` 或默认），新分支起点落后本地 main 几百个提交；`git rev-parse --verify origin/main` 却能通过（ref 存在）。
+
+**判定**：`refs/remotes/origin/*` 的更新通道有且只有「名为 origin 的远端被 fetch」——`git remote` 清单里没有 origin（如 bare workspace 远端叫别的名字）时，这组 ref 是外部工具（git-cwt 兼容镜像等）抄写后冻结的死数据。两查：
+
+```bash
+git -C <repo> remote                          # 清单里没有 'origin' 即中招
+git -C <repo> for-each-ref refs/remotes/origin --format='%(refname) %(objectname:short)'
+```
+
+runtime 侧防护（2026-10-20 落地）：默认 base 不再硬编码 `origin/main`，按 `git remote` 实况动态推导（checkout.defaultRemote → origin → 单一远端 → 清单首个；无远端用本地 main，实现 `packages/runtime/src/services/worktree/default-base-resolver.ts`）；显式传 `<remote>/<branch>` 时若远端未配置且 ref 落在 `refs/remotes/` 下会拒绝采信（RT-8#8 warn 留痕 + fallback 推导默认）；打开仓库（workspace.record）后台 fetch 默认远端保新鲜。
+
+**恢复动作**（清理残留 refs，卫生性修复）：
+
+```bash
+git -C <barePath> for-each-ref --format='%(refname)' refs/remotes/origin | xargs -n1 git -C <barePath> update-ref -d
+```
+
+已受害的分支用 `git merge main` 补齐（快进或常规合并均可）。
 ### 33. LLM 网络代理分流失效：配了代理规则的服务商仍直连失败（pi 升级后高发）
 
 **症状**：settings「网络代理」页已启用并配置规则，但命中规则的服务商请求仍不走代理（或代理软件侧无新 CONNECT 隧道）；典型触发时点 = pi 版本升级后（分流依赖两个 pi/Node 未承诺前提：上游 SDK 默认 fetch 运行时读 `globalThis.fetch`；外部 undici 包 `setGlobalDispatcher` 写入的槽与 Node 内置 fetch 读取的槽一致——任一被升级打破即静默失效）。

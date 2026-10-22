@@ -208,9 +208,6 @@
       @mouseup="onContentMouseup"
       @scroll="onContentScroll"
     >
-      <!-- 顶缘 EdgeFade（spec §3.5 五个可滚动面板）：滚动容器首子元素，sticky 离顶渐焦，
-           自驱动（scrollTop>4 显隐 + 容器顶部 mask），与上方 @scroll 锚点逻辑互不干扰。 -->
-      <EdgeFade />
       <!-- 截断提示（>1MB，AC-6.5/T6.5） -->
       <div
         v-if="state.truncated"
@@ -313,7 +310,6 @@ import { useI18n } from 'vue-i18n'
 import { FileText, Loader2, AlertCircle, Image as ImageIcon, Copy, Check, Quote, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
-import { EdgeFade } from '@/components/ui/edge-fade'
 import { useDetailPane, type DetailViewMode } from '@/composables/features/file-tree/useDetailPane'
 import { useCopy } from '@/composables/panel/useCopy'
 import { composerInjectionStore } from '@/composables/panel/composer-injection-store'

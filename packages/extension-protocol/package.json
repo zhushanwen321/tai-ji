@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/extension-protocol",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "Cross-layer pi extension contract package: dual-mode (TUI/GUI) rendering helpers, session/background-task/pending-entries protocols, and shared behavior primitives",
   "type": "module",
   "main": "src/index.ts",
@@ -40,6 +40,9 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@zhushanwen/state-machine": "workspace:*"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.9",

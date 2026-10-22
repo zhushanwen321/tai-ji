@@ -7,6 +7,7 @@
  * 无契约价值——阶段经历顺序不变，只消墙钟），afterAll 还原默认。
  */
 import type { ProviderId, ImportSourceKind } from '@taiji/shared'
+import { QUOTA_PRESETS } from '@taiji/shared'
 import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest'
 import type { ServerMessageUnion } from '@taiji/shared'
 import * as events from '../../api/events'
@@ -183,6 +184,41 @@ describe('mock session domain', () => {
     expect(forked.forkEntryId).toBe('pi-entry-1')
     await session.remove(created.id)
     await session.remove(forked.id)
+  })
+
+  it('归档域四函数：archive → listArchives → unarchive → purgeArchive 全链路 + 不存在 id 抛错', async () => {
+    const created = await session.create('/tmp/arc', 'arc-src')
+
+    // archive：fixtureSessions 移除 + mockArchives 落 archived 态条目（形状对齐 real）
+    await expect(session.archive(created.id)).resolves.toEqual({ sessionId: created.id })
+    const archives = await session.listArchives()
+    const entry = archives.find((a) => a.sessionId === created.id)
+    expect(entry).toMatchObject({ sessionId: created.id, name: 'arc-src', status: 'archived', codec: 'zstd-3' })
+    // ArchiveSummary 是 staging|archived 可辨识联合（列表可含压缩未完成的 staging 条目，
+    // real listArchiveEntries 只滤 restoring）——sha256 只在 archived 分支，先按判别字段收窄
+    if (!entry || entry.status !== 'archived') {
+      throw new Error(`expected archived ledger entry, got ${JSON.stringify(entry)}`)
+    }
+    expect(entry.sha256).toHaveLength(64)
+    // 列表快照隔离：调用方突变不污染源数组
+    archives[0]!.name = 'mutated'
+    expect((await session.listArchives()).find((a) => a.sessionId === created.id)!.name).toBe('arc-src')
+    // 不存在 session 归档 → 抛错
+    await expect(session.archive('ghost-id')).rejects.toThrow('不存在')
+
+    // unarchive：预备表 session 放回 fixtureSessions + reply 形状对齐 real（{ sessionId, session } 解包后）
+    const restored = await session.unarchive(created.id)
+    expect(restored.id).toBe(created.id)
+    expect(await session.listArchives()).toEqual([])
+    // 不存在归档记录恢复 → 抛错
+    await expect(session.unarchive('ghost-id')).rejects.toThrow('不存在')
+
+    // purgeArchive：重新归档后彻底删除（mock 无 keep-all 分支，恒干净删除）——
+    // 终态 session 不在 fixtureSessions（archive 已移除、purge 不放回），无需收尾清理
+    await session.archive(created.id)
+    await expect(session.purgeArchive(created.id)).resolves.toEqual({ sessionId: created.id })
+    expect(await session.listArchives()).toEqual([])
+    await expect(session.purgeArchive('ghost-id')).rejects.toThrow('不存在')
   })
 
   it('getCommands / getContext / getSubagents(s3 fixture) / getWorkflows / 空历史与 stub 动作', async () => {
@@ -407,6 +443,10 @@ describe('mock config domain', () => {
   it('空签名同构 stub：builtin/refresh/checkEnv/oauth/discover/detectSources', async () => {
     expect(await config.listBuiltinProviders()).toEqual([])
     expect(await config.refreshProviderCatalogs()).toEqual({ refreshed: [], failed: [], corrupt: [] })
+    // W3c/W1 新增 config.*：mock 无网络/落盘层，签名同构 ack（presets 返编译期基线，
+    // 与 runtime listQuotaPresets() 的「远程 ?? 基线」同口径——mock 轨额度类型下拉非空）
+    expect(await config.listQuotaPresets()).toEqual(QUOTA_PRESETS)
+    await expect(config.setProviderCatalogWatch(true)).resolves.toBeUndefined()
     expect(await config.checkEnvVars(['PATH'])).toEqual({ PATH: true })
     expect(await config.oauthLogin('p')).toMatchObject({ started: false })
     expect(await config.oauthCancel('p')).toEqual({ cancelled: false })
@@ -546,6 +586,7 @@ describe('mock config domain', () => {
       proxy: { protocol: 'http' as const, host: '127.0.0.1', port: 7891, username: '', password: '' },
       noProxy: ['localhost'],
       rules: ['api.anthropic.com'],
+      ipv4Only: [],
     }
     const npSeen: unknown[] = []
     const unNp = config.onNetworkProxyConfig((c) => npSeen.push(c))

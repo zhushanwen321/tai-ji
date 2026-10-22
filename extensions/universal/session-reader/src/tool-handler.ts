@@ -20,8 +20,10 @@
  * 本模块 re-export 供 index.ts 生产消费）。
  *
  * 错误规格 F1-F6：handler 抛 Error（message 含 👉 恢复指引），index.ts 的 execute 闭包
- * 原样传播给 pi——pi-agent-core 只对 execute throw 置 isError:true（返回值里的 isError
- * 字段被丢弃，agent-loop.js:453-483）。handler 可抛（纯逻辑可测）。
+ * 原样传播给 pi——execute throw → agent-loop catch 置 isError:true（pi-agent-core dist/
+ * agent-loop.js executePreparedToolCall，1.0.0 实读 catch :581-588；1.0.0 起正常 return 的
+ * isError 也被尊重——:579 isError: result.isError === true，0.84.4 才硬编码 false——本包
+ * 失败恒走 throw，行为不变）。handler 可抛（纯逻辑可测）。
  * 例外：F2 多匹配与 F1 find 零匹配「不视为错误」，返回消歧/提示结果而非抛错。
  */
 import { existsSync } from 'node:fs'
@@ -38,6 +40,10 @@ import {
   type SessionMetadataEntry,
   type SessionMetadataProvider,
 } from './discovery/find.js'
+import {
+  resolveArchiveFragment,
+  type ArchiveResolve,
+} from './discovery/archive-match.js'
 import { resolveSessionRoots } from './discovery/roots.js'
 import { readSessionHeaderIdSync } from './discovery/session-header.js'
 import { findZcodeEntryAnchor, type ZcodeAnchor } from './discovery/entry-anchor.js'
@@ -122,6 +128,7 @@ import {
   formatZcodeRecordNotFound,
   formatZcodeSessionNotFound,
   isToolResultSummary,
+  resolveNonOkResult,
   zcodeReadErrorMessage,
 } from './tool-format.js'
 import { doDoctor, type SessionReadSignals } from './doctor.js'
@@ -215,6 +222,13 @@ export type ResolveResult =
       zcodeAnchor?: ZcodeAnchor
     }
   | { kind: 'multi'; query: string; candidates: MatchedSession[] }
+  /**
+   * [session-archive D7] 片段命中归档 session（在场零命中后的归档回退层，两支
+   * 形态见 ArchiveResolve）：消费方（各 do* 的 non-ok 分发 resolveNonOkResult /
+   * result-action）统一返回归档态摘要——不读压缩体，头部显式标注归档态
+   * （agent 区分摘要与完整历史的硬契约）。
+   */
+  | ArchiveResolve
 
 // readSessionHeaderIdSync（同步读首行 header 取 id，resolveSessionId 形态①/②消费）
 // 在 discovery/session-header.ts（基座 readFirstJsonlLineSync 的谓词/降级薄包装，G2 单源）。
@@ -467,6 +481,11 @@ async function resolveByRecordId(session: string, agentDir: string, prefetchedMa
  * 形态③：其余片段 → findSessions 透传 source/liveSessionDir 沿用 F1（零匹配）/ F2（多匹配消歧）。
  * liveSessionDir 透传保证片段匹配与 find 同一 roots；F1 自检行同理须含 [live] 根行
  *（否则 [live]≠[default] 环境下自检行看不到最高优先级根，计数失真）。
+ *
+ * [session-archive D7] 归档回退层：在场匹配零命中 → 查归档簿记（archive-match）。
+ * 在场优先保证既有行为零变化（归档 session 不在 sessions/ 扫描范围，「在场零命中」
+ * 与「已归档」对同一 session 互斥成立——D9 不变量 1）；命中归档不走 F1（历史引用
+ * 不断链，D7 方案否决项「agent 完全不可见」）。
  */
 async function resolveByFragment(
   session: string,
@@ -481,6 +500,10 @@ async function resolveByFragment(
   }
   const { matches } = await findSessions(session, agentDir, opts)
   if (matches.length === 0) {
+    // [session-archive D7] 归档回退层：单命中返回归档态、多命中返回归档消歧
+    //（实现与匹配口径在 discovery/archive-match.ts）；无簿记命中落 F1。
+    const archive = await resolveArchiveFragment(session, agentDir)
+    if (archive !== undefined) return archive
     // F1 自检行需要发现层实况：无 options 的 resolveSessionRoots 恒实扫（根扫描无
     // 缓存——doctor 缓存机已删除，ext-simplify-04 U3），与 find 刚完成的扫描同一数据
     // 源（roots.ts 薄包装语义）；信号包同源（liveSessionDir 透传）——findSessions
@@ -719,7 +742,8 @@ async function doFamily(
     undefined,
     liveSessionDir,
   )
-  if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
+  // non-ok 支统一分发（multi 消歧 / 归档态两支，[session-archive D7] 归并点）
+  if (resolved.kind !== 'ok') return resolveNonOkResult(resolved)
 
   // recursive=true：嵌套执行树（U7/U8）
   if (params.recursive) {
@@ -766,7 +790,8 @@ async function doOutline(
     undefined,
     liveSessionDir,
   )
-  if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
+  // non-ok 支统一分发（multi 消歧 / 归档态两支，[session-archive D7] 归并点）
+  if (resolved.kind !== 'ok') return resolveNonOkResult(resolved)
   const { entries, totalBytes, skippedLines } = await loadParsed(resolved, agentDir)
   const tree = buildTreeView(entries)
   const turns = segmentTurns(entries, new Set(tree.leafPath))
@@ -802,7 +827,8 @@ async function doExpand(
     undefined,
     liveSessionDir,
   )
-  if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
+  // non-ok 支统一分发（multi 消歧 / 归档态两支，[session-archive D7] 归并点）
+  if (resolved.kind !== 'ok') return resolveNonOkResult(resolved)
   const turnIdx = parseTurnIndex(requireStr(params.turn, 'turn', 'expand'))
   const { entries } = await loadParsed(resolved, agentDir)
   const tree = buildTreeView(entries)
@@ -835,7 +861,8 @@ async function doDetail(
     undefined,
     liveSessionDir,
   )
-  if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
+  // non-ok 支统一分发（multi 消歧 / 归档态两支，[session-archive D7] 归并点）
+  if (resolved.kind !== 'ok') return resolveNonOkResult(resolved)
   const range = parseTurnsRange(requireStr(params.turns, 'turns', 'detail'))
   const { entries } = await loadParsed(resolved, agentDir)
   const tree = buildTreeView(entries)
@@ -893,7 +920,8 @@ async function doSearch(
     undefined,
     signals.liveSessionDir,
   )
-  if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
+  // non-ok 支统一分发（multi 消歧 / 归档态两支，[session-archive D7] 归并点）
+  if (resolved.kind !== 'ok') return resolveNonOkResult(resolved)
   const scope = params.scope ?? 'all'
   const limit = params.limit ?? SEARCH_DEFAULT_LIMIT
   const { entries } = await loadParsed(resolved, agentDir)
@@ -927,7 +955,8 @@ async function doExport(
     undefined,
     liveSessionDir,
   )
-  if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
+  // non-ok 支统一分发（multi 消歧 / 归档态两支，[session-archive D7] 归并点）
+  if (resolved.kind !== 'ok') return resolveNonOkResult(resolved)
 
   let text: string
   let label: string
@@ -1034,7 +1063,8 @@ async function doExtract(
     undefined,
     liveSessionDir,
   )
-  if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
+  // non-ok 支统一分发（multi 消歧 / 归档态两支，[session-archive D7] 归并点）
+  if (resolved.kind !== 'ok') return resolveNonOkResult(resolved)
   const { entries } = await loadParsed(resolved, agentDir)
   // extract 遍历全量 entry（含旁支/压缩历史），与 outline/expand/detail 的 leaf 视图不同：
   // 素材提取要全量（design §2.3 实测全量 519 toolCall / 26 user / 515 toolResult），
@@ -1213,7 +1243,8 @@ async function doWorkflow(
     undefined,
     liveSessionDir,
   )
-  if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
+  // non-ok 支统一分发（multi 消歧 / 归档态两支，[session-archive D7] 归并点）
+  if (resolved.kind !== 'ok') return resolveNonOkResult(resolved)
 
   let workflows: WorkflowRef[]
   try {

@@ -28,6 +28,8 @@ import {
   SHARED_BG_TASKS_FN,
   SHARED_VIEW_FN,
   SR_VIEW_FN_ANCHOR,
+  SHARED_ARCHIVE_STATUS_CONST,
+  D7_LITERAL_CONSTS,
   compareTreeSegmentsShape,
   extractFunctionBlock,
   extractJoinSegment,
@@ -123,6 +125,10 @@ ${decl}`, RUNTIME_PATTERN_CONST).value).toBe(DEFAULT_REGEX)
       `export function ${RUNTIME_TREE_FNS[2]}(): string {`,
       `  return join(getPiAgentDir(), 'btw')`,
       `}`,
+      ``,
+      `export function ${RUNTIME_TREE_FNS[3]}(): string {`,
+      `  return join(getPiAgentDir(), 'archive')`,
+      `}`,
     ].join('\n')
     for (const fn of RUNTIME_TREE_FNS) {
       const block = extractFunctionBlock(runtime, `export function ${fn}`)
@@ -158,13 +164,33 @@ ${decl}`, RUNTIME_PATTERN_CONST).value).toBe(DEFAULT_REGEX)
 
 // ── fixture 生成（源文件真实形态：函数块 + 常量）────────────────────────
 
-const DEFAULT_TREE_SEGMENTS = ['sessions', 'subagents', 'btw', 'ext-sessions']
+// 树段真实形态：4 宿主段（sessions/subagents/btw/archive）+ 末位存储树根段（域 10
+// getArchiveDir 加入 RUNTIME_TREE_FNS 后的真实五段）。
+const DEFAULT_TREE_SEGMENTS = ['sessions', 'subagents', 'btw', 'archive', 'ext-sessions']
 
+// 双 fixture 按真实仓布局拆分（C-ext-31 纯公式符号收敛：paths.ts 保留树段常量与
+// getSessionArtifactsDir，store 段常量 / sessionId 正则 / 存储路径函数族迁入
+// session-store-paths.ts；守卫提取源随之分读两文件）。两构造器共享同一 overrides
+// 对象——漂移注入参数路由不变。
 const sharedPathsSrc = ({
   segment = 'artifacts',
+  treeSegments = DEFAULT_TREE_SEGMENTS,
+} = {}) =>
+  [
+    `export function ${SHARED_FN}(sessionId: string, dataDir?: string): string {`,
+    `  assertPiSessionId(sessionId)`,
+    `  return join(getSessionStoreDir(dataDir), sessionId, '${segment}')`,
+    `}`,
+    ``,
+    // treeSegments = null 注入「常量缺席」形态（守卫第四组提取失败一律 fail）
+    ...(treeSegments
+      ? [`export const ${SHARED_TREE_CONST} = [${treeSegments.map((s) => `'${s}'`).join(', ')}] as const`, '']
+      : []),
+  ].join('\n')
+
+const sharedStorePathsSrc = ({
   regex = DEFAULT_REGEX,
   storeSegment = 'ext-sessions',
-  treeSegments = DEFAULT_TREE_SEGMENTS,
   bgTasksSegment = 'background-tasks',
   viewFileSegment = 'session-view.md',
   subagentsSegment = 'subagents',
@@ -173,11 +199,6 @@ const sharedPathsSrc = ({
     `export const ${STORE_SEGMENT_CONST} = '${storeSegment}'`,
     ``,
     `const ${SHARED_PATTERN_CONST} = ${regex}`,
-    ``,
-    `export function ${SHARED_FN}(sessionId: string, dataDir?: string): string {`,
-    `  assertPiSessionId(sessionId)`,
-    `  return join(getSessionStoreDir(dataDir), sessionId, '${segment}')`,
-    `}`,
     ``,
     // 第五组（域 5）对拍权威函数：bgTasksSegment = null 注入「函数缺席」形态
     ...(bgTasksSegment
@@ -208,10 +229,6 @@ const sharedPathsSrc = ({
           `}`,
           ``,
         ]
-      : []),
-    // treeSegments = null 注入「常量缺席」形态（守卫第四组提取失败一律 fail）
-    ...(treeSegments
-      ? [`export const ${SHARED_TREE_CONST} = [${treeSegments.map((s) => `'${s}'`).join(', ')}] as const`, '']
       : []),
   ].join('\n')
 
@@ -254,6 +271,11 @@ const runtimePiPathsSrc = ({ regex = DEFAULT_REGEX, treeSegments = DEFAULT_TREE_
     '',
     `export function ${RUNTIME_TREE_FNS[2]}(): string {`,
     `  return join(getPiAgentDir(), '${treeSegments[2]}')`,
+    `}`,
+    '',
+    // 域 10 归档根（RUNTIME_TREE_FNS 第 4 位，dmg-r1-9 补齐镜像形态）。
+    `export function ${RUNTIME_TREE_FNS[3]}(): string {`,
+    `  return join(getPiAgentDir(), '${treeSegments[3] ?? 'archive'}')`,
     `}`,
     '',
   ].join('\n')
@@ -311,22 +333,108 @@ const sessionReaderDiscoveryRootsSrc = ({
     ``,
   ].join('\n')
 
+// 第八组（域 10）fixture：归档镜像四源（shared schema / extension 簿记解析 / runtime
+// 簿记路径 / renderer 预检正文；drift 注入观察域 10 各轴红）。sessionIdRegex 为
+// dmg-r2-1 轴（shared schema 内 PI_SESSION_ID_PATTERN 镜像 ↔ shared paths 权威）。
+const sharedArchiveSchemaSrc = ({
+  statuses = ['staging', 'archived'],
+  turnMembers = ['user', 'agent'],
+  sessionIdRegex = '/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/',
+} = {}) =>
+  [
+    `export const ${SHARED_ARCHIVE_STATUS_CONST} = [`,
+    ...statuses.map((s) => `  '${s}',`),
+    `] as const satisfies readonly ArchiveLedgerStatus[]`,
+    ``,
+    `export interface ArchiveSummaryTurn {`,
+    ...turnMembers.map((m) => `  ${m}: string | null`),
+    `}`,
+    ``,
+    `function parseSummaryTurn(raw: unknown, index: number): ArchiveSummaryTurn | string {`,
+    ...turnMembers.map((m) => `  const ${m} = (raw as Record<string, unknown>).${m}`),
+    `  return { ${turnMembers.join(', ')} }`,
+    `}`,
+    ``,
+    `const ${SHARED_PATTERN_CONST} = ${sessionIdRegex}`,
+    ``,
+  ].join('\n')
+
+const srArchiveLedgerSrc = ({
+  dirnameConst = 'archive',
+  statuses = ['staging', 'archived'],
+  turnMembers = ['user', 'agent'],
+  headerLiteral = '状态: 已归档 (archived) — 完整内容已压缩离线，以下仅为摘要',
+  restoreNote = '注: 如需完整历史，请让用户在归档列表中恢复该会话。',
+} = {}) =>
+  [
+    `export const ARCHIVE_DIRNAME = '${dirnameConst}'`,
+    ``,
+    `export interface ArchiveLedgerTurn {`,
+    ...turnMembers.map((m) => `  ${m}: string | null`),
+    `}`,
+    ``,
+    `const ARCHIVED_HEADER = '${headerLiteral}'`,
+    `const RESTORE_NOTE = '${restoreNote}'`,
+    `const USER_ATTACHMENT_PLACEHOLDER = '[图片/附件消息]'`,
+    `const AGENT_NO_TEXT_PLACEHOLDER = '（此 turn 以工具调用结束，无文本回复）'`,
+    ``,
+    `function collect(files: string[]) {`,
+    `  const mine = files.filter((f) => f.endsWith('.archive.json'))`,
+    `  return mine`,
+    `}`,
+    ``,
+    `function parseArchiveLedgerText(text: string) {`,
+    `  if (obj.status !== '${statuses[0]}' && obj.status !== '${statuses[1]}') return undefined`,
+    `}`,
+    ``,
+    `function parseSummary(raw: unknown) {`,
+    ...turnMembers.map((m) => `  if (typeof obj.${m} !== 'string') return undefined`),
+    `}`,
+    ``,
+  ].join('\n')
+
+const runtimeArchivePathsSrc = () =>
+  [
+    `export function archiveLedgerPath(unitDir: string, originalFile: string): string {`,
+    `  return join(unitDir, \`\${originalFile}.archive.json\`)`,
+    `}`,
+    ``,
+  ].join('\n')
+
+const rendererArchiveReferenceSrc = ({
+  headerLiteral = '状态: 已归档 (archived) — 完整内容已压缩离线，以下仅为摘要',
+  restoreNote = '注: 如需完整历史，请让用户在归档列表中恢复该会话。',
+} = {}) =>
+  [
+    `const ARCHIVED_HEADER = '${headerLiteral}'`,
+    `const RESTORE_NOTE = '${restoreNote}'`,
+    `const USER_ATTACHMENT_PLACEHOLDER = '[图片/附件消息]'`,
+    `const AGENT_NO_TEXT_PLACEHOLDER = '（此 turn 以工具调用结束，无文本回复）'`,
+    ``,
+  ].join('\n')
+
 /**
  * tmp mirror 工厂：目录布局对齐守卫 ROOT 相对路径（packages/shared/src、extensions/taiji/
  * system-prompt/src、packages/runtime/src/infra/pi、extensions/universal/base-tool-enhance/
- * src/background、extensions/universal/session-reader/src）。overrides 覆盖任一侧公式
- * （漂移注入点），missing 指定不落盘的文件。root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
+ * src/background、extensions/universal/session-reader/src、packages/renderer/src）。
+ * overrides 覆盖任一侧公式（漂移注入点），missing 指定不落盘的文件。root/落盘/清理/
+ * 守卫副本装置见 guard-mirror.mjs。
  */
-function makeMirror({ shared = {}, mirror = {}, runtime = {}, bte = {}, sr = {}, srRoots = {}, missing = [] } = {}) {
+function makeMirror({ shared = {}, mirror = {}, runtime = {}, bte = {}, sr = {}, srRoots = {}, sharedArchive = {}, srLedger = {}, runtimeArchive = {}, rendererRef = {}, missing = [] } = {}) {
   return makeGuardMirror({
     prefix: 'artifact-formula-fx-',
     files: {
       'packages/shared/src/paths.ts': sharedPathsSrc(shared),
+      'packages/shared/src/session-store-paths.ts': sharedStorePathsSrc(shared),
       'extensions/taiji/system-prompt/src/index.ts': mirrorSystemPromptSrc(mirror),
       'packages/runtime/src/infra/pi/pi-paths.ts': runtimePiPathsSrc(runtime),
       'extensions/universal/base-tool-enhance/src/background/registry.ts': bteRegistrySrc(bte),
       'extensions/universal/session-reader/src/tool-handler.ts': sessionReaderViewSrc(sr),
       'extensions/universal/session-reader/src/discovery/roots.ts': sessionReaderDiscoveryRootsSrc(srRoots),
+      'packages/shared/src/archive.ts': sharedArchiveSchemaSrc(sharedArchive),
+      'extensions/universal/session-reader/src/discovery/archive-ledger.ts': srArchiveLedgerSrc(srLedger),
+      'packages/runtime/src/services/archive/archive-paths.ts': runtimeArchivePathsSrc(runtimeArchive),
+      'packages/renderer/src/components/archive/agent-reference-format.ts': rendererArchiveReferenceSrc(rendererRef),
     },
     missing,
     script: SCRIPT,
@@ -358,6 +466,14 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       expect(r.stdout).toContain(`域 9 存储树根段一致（'ext-sessions'，shared ↔ session-reader discovery 镜像）`)
       expect(r.stdout).toContain(`域 9 subagent 域段一致（'subagents'，shared getSessionSubagentsDir ↔ 镜像常量）`)
       expect(r.stdout).toContain(`域 9 sessionId 校验正则一致（${DEFAULT_REGEX}）`)
+      // 第八组（域 10）：归档镜像——目录名/后缀 + schema 字段级 + D7 四字面
+      expect(r.stdout).toContain(`域 10 归档目录名一致（'archive'，shared 树段 ↔ runtime getArchiveDir ↔ 镜像 ARCHIVE_DIRNAME）`)
+      expect(r.stdout).toContain(`域 10 簿记后缀一致（'.archive.json'，runtime archiveLedgerPath ↔ 镜像扫描后缀）`)
+      expect(r.stdout).toContain(`域 10 status 词表一致（[staging, archived]，shared ${SHARED_ARCHIVE_STATUS_CONST} ↔ 镜像守卫字面量）`)
+      expect(r.stdout).toContain(`域 10 summary.turns 成员名一致（[user,agent]，shared ArchiveSummaryTurn ↔ 镜像 ArchiveLedgerTurn，两端 parse 块消费同名校验通过）`)
+      for (const name of D7_LITERAL_CONSTS) {
+        expect(r.stdout).toContain(`域 10 D7 字面一致（${name}，renderer 预检 ↔ extension 返回正文逐字相同）`)
+      }
     } finally {
       fx.cleanup()
     }
@@ -506,6 +622,54 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
     }
   })
 
+  it('漂移红（域 10 D7 字面 renderer 预检与 extension 返回正文不一致）→ exit 1，报双侧值', () => {
+    const fx = makeMirror({ rendererRef: { headerLiteral: '状态: 已归档 — 漂移的头部' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`域 10 D7 字面漂移（ARCHIVED_HEADER）`)
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（域 10 status 词表 extension 守卫与 shared 元组不一致）→ exit 1，报双侧值', () => {
+    const fx = makeMirror({ srLedger: { statuses: ['staging', 'expired'] } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`域 10 status 词表漂移: shared=[staging, archived] vs 镜像=[staging, expired]`)
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（域 10 summary.turns 成员名两侧 interface 不一致）→ exit 1，报双侧值', () => {
+    const fx = makeMirror({ sharedArchive: { turnMembers: ['user', 'agent', 'extra'] } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`域 10 summary.turns 成员名漂移: shared=[user,agent,extra] vs 镜像=[user,agent]`)
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（域 10 簿记 sessionId 正则与 shared paths 权威不一致）→ exit 1，报双侧值（dmg-r2-1 轴非恒绿）', () => {
+    const fx = makeMirror({ sharedArchive: { sessionIdRegex: '/^[A-Za-z0-9_-]+$/' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`域 10 簿记 sessionId 正则漂移: shared paths='/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/' vs shared archive='/^[A-Za-z0-9_-]+$/'`)
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
   it('比对面文件缺失 → exit 1，报缺失路径与迁移同步指引（提取失败一律 fail）', () => {
     const fx = makeMirror({ missing: ['packages/shared/src/paths.ts'] })
     try {
@@ -545,6 +709,17 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       const r = fx.run()
       expect(r.status).toBe(1)
       expect(r.stderr).toContain('session-reader discovery roots 源文件 缺失')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('域 10 新增源缺失 → exit 1，报 renderer 归档预检正文缺失路径（dmg-r1-9 对拍轴）', () => {
+    const fx = makeMirror({ missing: ['packages/renderer/src/components/archive/agent-reference-format.ts'] })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain('renderer 归档预检正文源文件 缺失')
     } finally {
       fx.cleanup()
     }

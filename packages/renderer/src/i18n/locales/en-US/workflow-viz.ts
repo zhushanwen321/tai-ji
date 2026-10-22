@@ -13,6 +13,9 @@ export default {
     overlayTabCanvas: 'Canvas',
     runStatusRunning: 'Running',
     runStatusDone: 'Completed',
+    // Agent drawer ([2026-10-19] demo-confirmed shape: trace row -> right multi-tab drawer)
+    agentDrawerCollapse: 'Collapse drawer',
+    workflowNotFound: 'Workflow run "{name}" not found (it may have been cleaned up)',
     // DAG canvas
     dagCanvasLabel: 'Workflow structure diagram (DAG)',
     dagZoomHint: 'Scroll to zoom · Drag to pan',

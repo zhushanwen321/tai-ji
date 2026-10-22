@@ -143,13 +143,14 @@ describe('UpdateButton', () => {
     await flushPromises()
   }
 
-  it('W3TC1：downloaded 渲染 CheckCircle2 + downloaded 文案', () => {
+  it('W3TC1：downloaded 渲染 CheckCircle2 + 行内短文案「重启」，title 保留完整语义', () => {
     setCardUpdateState({ state: 'downloaded', latestRelease: makeCardRelease('0.9.0') })
     const wrapper = mount(UpdateButton)
     const downloaded = wrapper.find('[data-testid="update-downloaded"]')
     expect(downloaded.exists()).toBe(true)
-    // zh-CN 文案（vitest-i18n-setup 从 zh-CN/sidebar 取值）
-    expect(downloaded.text()).toContain('已下载，重启安装')
+    // 行内短文案（sidebar 单行宽度契约，2026-10-21 裁决）；完整语义在 title
+    expect(downloaded.text()).toContain('重启')
+    expect(downloaded.attributes('title')).toContain('已下载，重启安装')
   })
 
   it('W3TC2：downloaded click 弹确认 Dialog', async () => {

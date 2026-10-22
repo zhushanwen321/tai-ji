@@ -51,7 +51,6 @@ const { flow, listBranches, createWorktree, detectWorkspace, pickDirectory } = u
 const repoMode = ref<RepoMode>('not-repo')
 const repoPath = ref('')
 const repoDetectLoading = ref(true)
-const defaultBranch = ref('main')
 const remoteBranches = ref<string[]>([])
 const localBranches = ref<string[]>([])
 const branchesLoading = ref(true)
@@ -120,8 +119,9 @@ onMounted(async () => {
     if (cancelled.value) return
     repoMode.value = result.mode
     repoPath.value = result.mode === 'bare-workspace' ? result.wsRoot : result.repoRoot
-    defaultBranch.value = result.defaultBranch || 'main'
-    baseBranch.value = `origin/${defaultBranch.value}`
+    // 默认基线用 runtime 推导的 defaultBaseRef（远端实况，如 'github/main'）——不自拼
+    // 'origin/' 前缀：远端不一定叫 origin，残留的幽灵 origin/* 会让 base 落在冻结快照
+    baseBranch.value = result.defaultBaseRef ?? (result.defaultBranch || 'main')
     locationMode.value = result.mode === 'bare-workspace' ? 'workspace' : 'dedicated-dir'
   } catch (e) {
     // 检测失败 ≠ 不是 Git 仓库：归 not-repo 会误导用户去换目录——留痕 + 独立失败态
@@ -135,10 +135,11 @@ onMounted(async () => {
       if (cancelled.value) return
       remoteBranches.value = branches.remote
       localBranches.value = branches.local
-      if (branches.defaultBranch) { defaultBranch.value = branches.defaultBranch; baseBranch.value = `origin/${branches.defaultBranch}` }
+      const derived = branches.defaultBaseRef ?? branches.defaultBranch
+      if (derived) baseBranch.value = derived
     } catch (e) {
-      // best-effort: 分支加载失败不阻断，用 workspace.detect 的 defaultBranch 兜底
-      console.warn('[CreateWorktreeModal] listBranches failed, falling back to workspace.detect defaultBranch:', e)
+      // best-effort: 分支加载失败不阻断，保留 workspace.detect 推导的默认基线
+      console.warn('[CreateWorktreeModal] listBranches failed, keeping detect-derived base:', e)
     } finally { branchesLoading.value = false }
   } else { branchesLoading.value = false }
 })
@@ -165,15 +166,15 @@ async function onChangeRepo(): Promise<void> {
     if (cancelled.value) return
     repoMode.value = detectResult.mode
     repoPath.value = detectResult.mode === 'bare-workspace' ? detectResult.wsRoot : detectResult.repoRoot
-    defaultBranch.value = detectResult.defaultBranch || 'main'
-    baseBranch.value = `origin/${defaultBranch.value}`
+    baseBranch.value = detectResult.defaultBaseRef ?? (detectResult.defaultBranch || 'main')
     if (cancelled.value) return
     branchesLoading.value = true
     try {
       const branches = await listBranches(repoPath.value || result.path)
       if (cancelled.value) return
       remoteBranches.value = branches.remote; localBranches.value = branches.local
-      if (branches.defaultBranch) { defaultBranch.value = branches.defaultBranch; baseBranch.value = `origin/${branches.defaultBranch}` }
+      const derived = branches.defaultBaseRef ?? branches.defaultBranch
+      if (derived) baseBranch.value = derived
     } catch (e) {
       // best-effort: 分支加载失败不阻断
       console.warn('[CreateWorktreeModal] listBranches failed after repo change:', e)

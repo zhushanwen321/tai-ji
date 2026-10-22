@@ -53,6 +53,23 @@ export function isSessionCompleted(status: SessionStatus): boolean {
 }
 
 /**
+ * 判据：session 是否「生成中/在途」（session-archive D13 归档门 renderer 拦截层）。
+ *
+ * 六瞬态（derive-status 派生优先级段）：streaming（流式）/ pending（已提交待确认）/
+ * compacting（上下文压缩中）/ waiting（工具执行/审批等待）/ retrying（自动重试中）/
+ * working（后台 subagent/workflow 在途）——任一在途即归档钮禁用（生成中归档会丢
+ * 尾部未落盘 entry 或泄漏在途后台任务；runtime session.archive 首门
+ * archive_generating 兜底 RPC 直发路径）。done/stopped/error 三终态不在集合。
+ */
+const GENERATING_STATUSES: ReadonlySet<DerivedStatus> = new Set([
+  'streaming', 'pending', 'compacting', 'waiting', 'retrying', 'working',
+])
+
+export function isSessionGenerating(status: DerivedStatus): boolean {
+  return GENERATING_STATUSES.has(status)
+}
+
+/**
  * 状态点语义类：背景色（9 态）。
  * 活跃态在组件层改用语义图标 + 动画，圆点仅作为静态 fallback 等处的点状指示。
  */

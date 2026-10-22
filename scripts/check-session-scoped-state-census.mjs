@@ -39,6 +39,7 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'test-re
  * useSessionTrace.ts；后续增量见下方各 [注记]，来源在括号内标注）。
  * [display-containers §6.6 W0 五字段迁出] 新增 drawer/selection/ 五处内容域/瞬时参数分区
  * （subagent/workflow/bash-task/btw/transient——选中态迁出 DrawerControlState 的落点）。
+ * [2026-10-19 drawer workflow tab 删除] 移除 drawer/selection/workflow.ts 调用点（1 处）。
  * [display-containers §7.1 u-w1-core] 新增 bottom-drawer/control.ts（底抽屉 per-session
  * 开合分区，bindDrawerSessionId 同款模块级单例）。
  * [quality-gates，main 线 5c190c7bb] 新增 BtwPanel.vue / useBtwTabData.ts 两处（非本设计引入，
@@ -52,7 +53,6 @@ export const CENSUS_SNAPSHOT = {
   'packages/core/src/domain/drawer/selection/btw.ts': 1,
   'packages/core/src/domain/drawer/selection/subagent.ts': 1,
   'packages/core/src/domain/drawer/selection/transient.ts': 1,
-  'packages/core/src/domain/drawer/selection/workflow.ts': 1,
   'packages/dom-core/src/composer/input/history.ts': 1,
   'packages/renderer/src/components/panel/MessageStream.vue': 1,
   'packages/renderer/src/components/panel/BtwPanel.vue': 1,

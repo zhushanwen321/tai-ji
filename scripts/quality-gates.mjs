@@ -23,6 +23,10 @@
  * `~/.agents/skill-data/pr-review/<project-slug>/`（经 scripts/skill-data-dir.mjs 解析），
  * 缺产物时回退旧 `.review/`（迁移过渡期，design.md §7 风险 2）。
  *
+ * 并发互斥：同 worktree 同时只允许一个 quality-gates 整体运行（worktree 级互斥锁，
+ * 根因 = 并发两次会让两个 vitest coverage 跑互删 .tmp 覆盖文件、报 ENOENT 哑 FAIL，
+ * 详见 acquireGateLock 头注释）。
+ *
  * base 口径两侧差异有意保留（参数化承载，设计 §5-U1）：
  *   --side dev-merge  → base = `git merge-base github/main HEAD`（fallback main）——分支增量
  *   --side pr-cr-fix  → base = main（--base 可覆盖）——累积
@@ -32,9 +36,10 @@
  *         2 = 用法/环境错误（py 实体缺失、base 无法解析、py 工具错误）
  */
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, linkSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { delimiter, dirname, join } from 'node:path'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { skillDataDir } from './skill-data-dir.mjs'
@@ -308,6 +313,248 @@ function isDirectory(dir) {
   }
 }
 
+// ── worktree 级互斥锁（并发 quality-gates 串行化）──────────────────────────
+// 根因（2026-10-21 dev-merge-gates 双发实例）：同一 worktree 同时跑两个
+// quality-gates 时，两个 coverage-gate.py 各起一个 `vitest run --coverage`，
+// 共用同一 reportsDirectory（packages/*/coverage）。后启动方的 clean() 会
+// rm -rf 整个 reportsDirectory 再重建，把先启动方 worker 已写出的 .tmp 覆盖
+// 文件删掉 → 先启动方 readCoverageFiles 读 ENOENT 崩溃，coverage-gate 报
+// 「测试失败（exit=1）」的哑 FAIL（vitest 的 normalizeCoverageFileError 对此
+// 形态有明示：不要同时跑多个共用 reportsDirectory 的 vitest）。
+// 修法按 ADR-0122 ⑥（竞态用顺序契约消解，不用宽限窗/重试兜底）：同 worktree
+// 互斥，第二个进程等第一个整体跑完再跑。锁文件落系统临时目录、按 root 路径
+// 哈希分 worktree 桶——不污染工作区（发起前脏区预检看不到它），跨 worktree
+// 天然隔离（各自 coverage 目录独立，无需互斥）。
+//
+// 锁内容与回收判定（二轮加固，登记 dmg-r1-1 / dmg-r1-2 / pid 复用披露项）：
+// - 建锁原子：pid + 进程启动时间先写临时文件，再 link() 为锁文件——内容先于
+//   可见性完整，锁文件结构上不可能为空（旧实现「建文件→写 pid」两步间崩溃
+//   留下的空锁「永不回收」状态被消除而非检测）。
+// - 持锁身份 = pid + 启动时间双因子：pid 复用（崩溃后 pid 被无关进程接走）时
+//   纯存活探测定恒真、锁永不回收；启动时间不匹配 → 判非原持锁方偷锁。启动
+//   时间是确定性同步查询（ADR-0122 ⑤）：linux /proc/<pid>/stat、macOS
+//   `ps -o lstart=`（LC_ALL=C 稳定格式），只做同源字符串相等比对，不解析日期。
+// - 无主回收三通道：pid 已死 / 启动时间不匹配 / 内容空或损坏（旧实现崩溃
+//   残留）。旧格式锁（纯 pid 数字）降级为纯 pid 存活语义——过渡期不误偷仍
+//   活着的旧版持锁方；启动时间读不到（平台不支持 / ps 失败）同样降级不偷。
+const GATE_LOCK_TIMEOUT_MS = 2 * 60 * 60 * 1000
+const GATE_LOCK_POLL_MS = 2000
+
+/** 锁路径：root 经 realpath 规范化后取哈希前缀分桶，落 tmpdir（每用户独立）。 */
+export function gateLockPath(root) {
+  let canonical = root
+  try {
+    canonical = realpathSync(root)
+  } catch {
+    // root 不存在（测试注入的假路径）→ 用原值，哈希仍确定
+  }
+  const bucket = createHash('sha256').update(canonical).digest('hex').slice(0, 16)
+  return join(tmpdir(), `taiji-quality-gates-${bucket}.lock`)
+}
+
+/** pid 存活判定：kill(pid, 0) 不发信号只探存在；EPERM = 存在但无权发信号，仍算存活。 */
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return e.code === 'EPERM'
+  }
+}
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+/**
+ * 进程启动时间（持锁身份第二因子）：linux 读 /proc/<pid>/stat 第 22 字段（自
+ * boot 的时钟滴答数），macOS 经 `ps -p <pid> -o lstart=`（LC_ALL=C 固定英文
+ * 格式）。返回带平台前缀的字符串——只做同源相等比对（当前值 vs 锁内记录值），
+ * 绝不跨平台比对或解析日期。读不到（进程不存在 / 平台不支持 / ps 失败）返回
+ * null，调用方降级为纯 pid 存活语义。
+ */
+export function captureProcessStartTime(pid) {
+  if (process.platform === 'linux') return captureStartTimeLinux(pid)
+  if (process.platform === 'darwin') return captureStartTimeDarwin(pid)
+  return null
+}
+
+/** [captureProcessStartTime 拆分] linux：/proc/<pid>/stat 第 22 字段（comm 可含空格与括号，最后一个 ')' 之后起算）。 */
+function captureStartTimeLinux(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf-8')
+    // starttime 是剩余部分的第 20 个 token（下标 19）
+    const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)
+    return fields[19] ? `linux:${fields[19]}` : null
+  } catch {
+    return null
+  }
+}
+
+/** [captureProcessStartTime 拆分] darwin：ps -o lstart=（LC_ALL=C 稳定格式），status 0 且输出非空才算读到。 */
+function captureStartTimeDarwin(pid) {
+  const r = spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], {
+    encoding: 'utf-8',
+    env: { ...process.env, LC_ALL: 'C' },
+  })
+  const out = (r.stdout ?? '').trim()
+  return r.status === 0 && out ? `darwin:${out}` : null
+}
+
+/** 锁 pid 合法形态守卫：正整数。 */
+function isLockPid(value) {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+}
+
+/** 锁记录是否为对象形态（新格式 { pid, started }；null / 数组均非）。 */
+function isLockRecord(value) {
+  return value !== null && typeof value === 'object'
+}
+
+/** [readLockInfo 拆分] 新格式锁记录 → 持锁身份；started 非字符串降级 null（纯 pid 存活语义）。 */
+function parseRecordLock(parsed) {
+  return { pid: parsed.pid, started: typeof parsed.started === 'string' ? parsed.started : null }
+}
+
+/**
+ * 读锁内容 → 持锁身份 { pid, started }。空/非 JSON 文件（旧实现「建文件→写
+ * pid」两步间崩溃的残留——新实现结构上不产生）返回 null = 无主可偷；旧格式
+ * （纯 pid 数字）解析为 started 缺失，降级纯 pid 存活语义。
+ */
+function readLockInfo(lockPath) {
+  let raw
+  try {
+    raw = readFileSync(lockPath, 'utf-8')
+  } catch {
+    return null
+  }
+  return parseLockPayload(raw)
+}
+
+/** [readLockInfo 拆分] 锁内容解析：读失败 = 无主；解析归一委托 parseLockIdentity。 */
+function parseLockPayload(raw) {
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null // 空文件 / 非 JSON → 旧实现崩溃残留，无主
+  }
+  return parseLockIdentity(parsed)
+}
+
+/** [parseLockPayload 拆分] 旧格式（纯 pid 数字）与新格式（{ pid, started } 对象）统一归一为持锁身份；其余形态 = 无主可偷。 */
+function parseLockIdentity(parsed) {
+  if (typeof parsed === 'number') return { pid: parsed, started: null }
+  if (isLockRecord(parsed) && isLockPid(parsed.pid)) return parseRecordLock(parsed)
+  return null
+}
+
+/**
+ * 获取 worktree 级互斥锁，返回 release 函数（幂等，重复调用安全）。
+ * 无主回收走确定性事实判定（ADR-0122 ⑤）：持锁 pid 已死 / pid 复用（启动时间
+ * 不匹配）/ 锁内容残留（空、损坏）→ 偷锁，不用时间启发判陈旧；等待超时抛错
+ * （调用方转 exit 2 环境错误并附恢复动作）。
+ */
+export function acquireGateLock(lockPath, { timeoutMs = GATE_LOCK_TIMEOUT_MS, pollMs = GATE_LOCK_POLL_MS } = {}) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const release = tryCreateLock(lockPath)
+    if (release) return release
+    awaitLockRelease(lockPath, deadline, timeoutMs, pollMs)
+  }
+}
+
+/**
+ * 原子占锁：pid + 启动时间先写临时文件，再 link() 为锁文件——内容先于可见性
+ * 完整，锁文件不可能为空。link EEXIST = 已被占（返回 null，非 EEXIST 错误上
+ * 抛）；临时文件无论成败都清（link 成功后删的只是临时名，锁本体不受影响）。
+ */
+function tryCreateLock(lockPath) {
+  const tmpPath = `${lockPath}.${process.pid}.tmp`
+  try {
+    writeFileSync(tmpPath, JSON.stringify({ pid: process.pid, started: captureProcessStartTime(process.pid) }))
+    try {
+      linkSync(tmpPath, lockPath)
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e
+      return null
+    }
+    return makeRelease(lockPath)
+  } finally {
+    try {
+      unlinkSync(tmpPath)
+    } catch {
+      // 临时文件已不存在（写失败前未建 / 已清理）——无残留可清
+    }
+  }
+}
+
+/** release 闭包：幂等删锁（重复调用安全；锁已被他方删除时静默）。 */
+function makeRelease(lockPath) {
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    try {
+      unlinkSync(lockPath)
+    } catch {
+      // 锁文件已不存在（他方偷锁清理）→ 无主可释放
+    }
+  }
+}
+
+/** 锁被占用时的单轮处置：无主（死/复用/残留）→ 偷锁；超时 → 抛错（指引按持锁状态分流）；否则睡一轮再试。 */
+function awaitLockRelease(lockPath, deadline, timeoutMs, pollMs) {
+  if (stealStaleLock(lockPath)) return
+  if (Date.now() >= deadline) {
+    throw new Error(lockTimeoutMessage(lockPath, timeoutMs))
+  }
+  sleepSync(pollMs)
+}
+
+/** 无主判定：锁内容缺失 / 持锁 pid 已死 / pid 复用（启动时间不符）任一命中 = 可偷。 */
+function isLockOrphaned(lockPath) {
+  const info = readLockInfo(lockPath)
+  return info === null || !pidAlive(info.pid) || lockHolderReplaced(info)
+}
+
+/**
+ * 无主锁回收：无主（三通道判定见 isLockOrphaned）→ 删锁返回 true；pid 活且身份
+ * 核实一致 / 身份不可核实（旧格式、平台不支持）→ 不偷返回 false。
+ */
+function stealStaleLock(lockPath) {
+  if (!isLockOrphaned(lockPath)) return false
+  try {
+    unlinkSync(lockPath)
+  } catch {
+    // 偷锁竞争落败（他方先删/先建）→ 由外层循环下一轮重试
+  }
+  return true
+}
+
+/** pid 复用判定：锁内记录了启动时间且当前该 pid 的启动时间与之不符 → 已被无关进程复用（读不到 = 无法核实，降级不偷）。 */
+function lockHolderReplaced(info) {
+  if (!info.started) return false
+  const current = captureProcessStartTime(info.pid)
+  return current !== null && current !== info.started
+}
+
+/**
+ * 超时报错文案：走到超时意味着偷锁三通道都未命中（持锁 pid 存活且身份成立或
+ * 不可核实），指引统一为 ps 核对——真在跑（冷缓存大 diff 首跑可达小时级）等它，
+ * 无 quality-gates 在跑（pid 复用残留 / 身份不可核实）删锁重跑。不给 kill 指引：
+ * pid 复用场景下被复用的 pid 属无关进程，盲目 kill 会误伤。
+ */
+function lockTimeoutMessage(lockPath, timeoutMs) {
+  const info = readLockInfo(lockPath)
+  return (
+    `等待 quality-gates 互斥锁超时（${Math.round(timeoutMs / 60000)} 分钟）：${lockPath} ` +
+    `被进程 ${info?.pid ?? '未知'} 持有且未释放。` +
+    `恢复：ps aux | grep quality-gates.mjs 核对——确在跑则等其结束后重跑；` +
+    `无 quality-gates 在跑（pid 复用 / 异常残留）则手动删除 ${lockPath} 后重跑`
+  )
+}
+
 /** 组装真实依赖（测试注入点：runGates 的全部 IO 经 deps）。 */
 export function createDefaultDeps(cwd = process.cwd()) {
   const root = execFileSync('git', ['rev-parse', '--show-toplevel'], {
@@ -361,6 +608,8 @@ export function createDefaultDeps(cwd = process.cwd()) {
       const text = fd.toString('utf-8')
       return chars === Infinity ? text : text.slice(0, chars) // 字符切片，与 py read_text()[:2400] 同口径
     },
+    // worktree 级互斥锁（并发 quality-gates 串行化，根因见 acquireGateLock 头注释）
+    acquireGateLock: () => acquireGateLock(gateLockPath(root)),
   }
 }
 
@@ -393,23 +642,49 @@ export async function runGates(deps, args) {
 
   const { base, source } = resolveBase({ side, explicitBase }, deps.git)
 
-  // 1. typecheck 四处（自跑）
-  runTypecheckGates(deps, gates)
+  // worktree 级互斥：同 worktree 同时只允许一个 quality-gates 整体运行（并发两次
+  // 会让两个 vitest coverage 跑互删 .tmp 覆盖文件、报 ENOENT 哑 FAIL，根因与修法
+  // 见 acquireGateLock 头注释）。获取失败 = 环境错误（exit 2，不自动重试）。
+  let release
+  try {
+    release = deps.acquireGateLock()
+  } catch (e) {
+    return {
+      exitCode: 2,
+      result: {
+        verdict: 'error',
+        base,
+        baseSource: source,
+        gates: [],
+        error: {
+          message: `quality-gates 互斥锁获取失败：${e.message}`,
+          recover: '持锁进程在跑则等其结束后重跑；持锁方已退出或 pid 复用时锁会被自动回收；仍异常时 ps aux | grep quality-gates.mjs 核对，无进程在跑可手动删除报错中的锁文件后重跑',
+        },
+      },
+    }
+  }
 
-  // 2. coverage-gate（py）
-  const covError = runCoverageGate(deps, base, gates)
-  if (covError) return finish(deps, base, source, gates, covError)
+  try {
+    // 1. typecheck 四处（自跑）
+    runTypecheckGates(deps, gates)
 
-  // 3. 机器盲区判定（消费 coverage.json；py fail 时产物仍在，判定照跑并叠加明细）
-  const blindspotError = runBlindspotGate(deps, gates)
-  if (blindspotError) return finish(deps, base, source, gates, blindspotError)
+    // 2. coverage-gate（py）
+    const covError = runCoverageGate(deps, base, gates)
+    if (covError) return finish(deps, base, source, gates, covError)
 
-  // 4. metrics-gate（py；coverage 之后——消费同 base coverage.json）
-  const metricsError = runMetricsGate(deps, base, gates)
-  if (metricsError) return finish(deps, base, source, gates, metricsError)
+    // 3. 机器盲区判定（消费 coverage.json；py fail 时产物仍在，判定照跑并叠加明细）
+    const blindspotError = runBlindspotGate(deps, gates)
+    if (blindspotError) return finish(deps, base, source, gates, blindspotError)
 
-  const hasFail = gates.some((g) => g.status === 'FAIL')
-  return { exitCode: hasFail ? 1 : 0, result: { verdict: hasFail ? 'fail' : 'pass', base, baseSource: source, gates, metrics: buildMetricsBrief(deps) } }
+    // 4. metrics-gate（py；coverage 之后——消费同 base coverage.json）
+    const metricsError = runMetricsGate(deps, base, gates)
+    if (metricsError) return finish(deps, base, source, gates, metricsError)
+
+    const hasFail = gates.some((g) => g.status === 'FAIL')
+    return { exitCode: hasFail ? 1 : 0, result: { verdict: hasFail ? 'fail' : 'pass', base, baseSource: source, gates, metrics: buildMetricsBrief(deps) } }
+  } finally {
+    release()
+  }
 }
 
 /** [runGates 拆分] fail-fast 前置：py 实体缺失清单（缺失即中止，不白跑重型 typecheck）。 */

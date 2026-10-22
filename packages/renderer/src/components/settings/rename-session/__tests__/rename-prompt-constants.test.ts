@@ -20,7 +20,7 @@ const LLM_TS_PATH = join(REPO_ROOT, 'extensions', 'universal', 'rename-session',
 describe('rename 内置词表跨包镜像同值锁定（BUILTIN_PREVIEW ↔ llm.ts BUILTIN_TEMPLATES）', () => {
   const llmSource = readFileSync(LLM_TS_PATH, 'utf-8')
 
-  it('三个内置风格的预览文案与 extension BUILTIN_TEMPLATES 词表逐条字面同值', () => {
+  it('四个内置风格的预览文案与 extension BUILTIN_TEMPLATES 词表逐条字面同值', () => {
     for (const preview of Object.values(BUILTIN_PREVIEW)) {
       expect(llmSource).toContain(JSON.stringify(preview))
     }

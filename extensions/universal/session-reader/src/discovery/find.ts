@@ -354,6 +354,9 @@ async function loadTitleIndex(ctx: MetadataContext): Promise<Map<string, Session
     if (root.dedupedInto !== undefined) continue
     if (!root.exists) continue // guard：仅对存在的根调用
     if (!isFlatRoot(root)) continue // 策略 ②：含子目录根跳过 listAll
+    // [session-archive D7] 归档根不是标题数据源（listAll 只看一层 .jsonl，归档根
+    // 第一层是 encodeCwd 目录恒空手而归）——跳过多余调用
+    if (root.kind === 'archive') continue
     push(root.path)
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-delivery-port",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "In-process delivery port for the pi half of the unified delivery service (design .tmp/tech-design/unified-delivery.md §3.7): binds pi appendEntry / sessionManager.getEntries / isIdle / sendMessage / message_end / session_compact into the @zhushanwen/session-delivery v3 kernel as the sole executor of the custom lane — outbox journal (entry schema v2 + v1 notify-ledger compat read), details-id delivery proof, session_start difference-set replay, submit-side merge window with external-channel isolation, and compaction-wait degradation (shared library, not a Pi extension).",
   "type": "module",
   "main": "src/index.ts",

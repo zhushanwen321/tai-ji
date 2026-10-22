@@ -196,10 +196,17 @@ export const DEFAULT_PRESETS: PiLaunchPreset[] = [
     // 同序会退化为 id 字符串比较（'builtin:readonly' < 'builtin:session-dispatch'），排位与意图不符。
     order: 3,
     toolMode: 'allowlist',
+    // session-manager 八件套全部列入（含 archive_session / delete_session，裁决登记 ADR-0136 补记）：
+    // allowlist 下 --tools 命名的 deferred 工具直接激活并声明给模型（pi 1.0.0 sdk.js:148 initialActiveToolNames
+    // = options.tools → _applyToolLoadout 只滤 hidden，本地 pi CLI 探针实证），deferred「平时不可见」保护在本
+    // 模式对白名单全部工具整体让位于用户显式选择模式的语义，并非 delete 独有；delete 的发起者约束
+    // （仅用户提示可调）由 USER-INITIATED ONLY 标记词与 isOwnedBy 圈定承载，随激活一并声明，不依赖可见性层。
+    // tool_search 不列：allowlist 下白名单内工具已全部激活、白名单外不进 registry，其候选集恒空。
     allowedTools: [
       'read', 'grep', 'find', 'ls',
       'create_managed_session', 'send_to_session', 'read_session_history',
       'list_my_sessions', 'get_session_status', 'abort_session',
+      'archive_session', 'delete_session',
       'ask_user', 'todo',
     ],
     extensionMode: 'denylist',

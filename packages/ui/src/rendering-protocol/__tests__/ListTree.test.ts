@@ -126,4 +126,15 @@ describe('ListTree', () => {
     const wrapper = mount(ListTree, { props: { items: [] } })
     expect(wrapper.find('[data-testid="gui-list-tree"]').exists()).toBe(true)
   })
+
+  it('label 单行截断（min-w-0 + truncate）：todo/criteria/scheduler 长行不撑破托盘浮层', () => {
+    const items: TreeItem[] = [
+      { label: '把会话归属写入 sidecar 后补一组等价性测试，覆盖 fork 与 restore 两条路径' },
+    ]
+    const wrapper = mount(ListTree, { props: { items } })
+    const label = wrapper.findAll('span').find((s) => s.text().includes('sidecar'))!
+    expect(label.classes()).toContain('min-w-0')
+    expect(label.classes()).toContain('flex-1')
+    expect(label.classes()).toContain('truncate')
+  })
 })

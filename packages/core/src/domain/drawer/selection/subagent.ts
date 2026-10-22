@@ -1,8 +1,9 @@
 /**
  * subagent 内容域选中态（display-containers §6.6① 五字段迁出，W0 还债）。
  *
- * 迁出来源 = DrawerControlState.selectedSubagentId + enteredFrom（同迁 subagent 内容域——
- * enteredFrom 是 subagent 面板进入来源态，与 selectedSubagentId 同生命周期同分区）。
+ * 迁出来源 = DrawerControlState.selectedSubagentId（enteredFrom 进入来源态
+ * 2026-10-19 随 drawer workflow tab 删除移除——'workflow' 来源（SubagentTab 返回
+ * 按钮语义）唯一生产点是 WorkflowTab，后者已删）。
  * 状态本体按 per-session 分区（useSessionScopedState，ADR-0049），与控制态分区同键
  * （drawerSessionKey，control.ts 绑定），但物理独立——控制态只留开合 + activeTab。
  *
@@ -20,8 +21,6 @@ import { drawerSessionKey } from '../control'
 export interface SubagentSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费方即本批 D1 单元
   /** subagent tab 当前展示的 subagent 虚拟 id（`subagent:<mainSid>:<subId>` 或 `agentcall:<acsId>`，由调用方算好传入）；null=未选中（subagent tab 显空态） */
   selectedSubagentId: string | null
-  /** subagent tab 的进入来源：'chat'=从 chat subagent 块进入（无返回按钮）；'workflow'=从 workflow tab 点 agent call 进入（显←返回按钮）；null=未在 subagent tab */
-  enteredFrom: 'chat' | 'workflow' | null
 }
 
 function createDefaultSubagentSelection(): SubagentSelectionState {
@@ -29,7 +28,6 @@ function createDefaultSubagentSelection(): SubagentSelectionState {
   // plain object 的 mutate 不触发下游 computed 重算（ADR-0049 W2 教训）。
   return reactive({
     selectedSubagentId: null,
-    enteredFrom: null,
   })
 }
 
@@ -41,23 +39,19 @@ const selection = useSessionScopedState<SubagentSelectionState>(
 /** subagent 选中态视图（当前分区，切 session 自动跟随） */
 export function useSubagentSelection(): {
   selectedSubagentId: ComputedRef<string | null>
-  enteredFrom: ComputedRef<'chat' | 'workflow' | null>
   } {
   return {
     selectedSubagentId: computed(() => selection.current.value.selectedSubagentId),
-    enteredFrom: computed(() => selection.current.value.enteredFrom),
   }
 }
 
 /**
- * 设置 subagent tab 视图（D4）：记录选中的 subagent 虚拟 id + 进入来源。
+ * 设置 subagent tab 视图（D4）：记录选中的 subagent 虚拟 id。
  * virtualId 由调用方算好（subagentVirtualId/agentCallVirtualId），core 不感知 id 结构。
  * 切 tab + 开 drawer 的编排在 coordination.openSubagent（本函数只写选中态）。
  */
-export function setSubagentView(virtualId: string, enteredFrom: 'chat' | 'workflow'): void {
-  const cur = selection.current.value
-  cur.selectedSubagentId = virtualId
-  cur.enteredFrom = enteredFrom
+export function setSubagentView(virtualId: string): void {
+  selection.current.value.selectedSubagentId = virtualId
 }
 
 /**
@@ -66,9 +60,7 @@ export function setSubagentView(virtualId: string, enteredFrom: 'chat' | 'workfl
  * 并拉流；重选同一 vid 也不触发 watch（同值写不产生变化边沿）。
  */
 export function clearSubagentView(): void {
-  const cur = selection.current.value
-  cur.selectedSubagentId = null
-  cur.enteredFrom = null
+  selection.current.value.selectedSubagentId = null
 }
 
 /** 按 sid 读 subagent 选中态（复合谓词跨域读取用；updateFor 语义：已删 sid 不复活分区） */

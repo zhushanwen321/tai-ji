@@ -7,7 +7,8 @@ packages:
 
 # pnpm 10：patchedDependencies 的规范家（package.json 的 pnpm 字段被 pnpm>=10 忽略，
 # 写那里会导致下次 install 洗掉补丁）。裸键 = 应用到所有 vitest 版本实例。
-# vitest#11153 worker 拆卸竞态假红修复，退役条件见补丁文件头注释。
+# vitest 全绿假红修复（两族根因签名：#11153 拆卸竞态族 + 堆栈格式化器族），退役条件按根因分判，
+# 权威登记见 docs/todo/vitest-teardown-race-vendor-patch.md。
 patchedDependencies:
   vitest: patches/vitest.patch
 

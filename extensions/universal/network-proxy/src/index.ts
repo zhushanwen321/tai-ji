@@ -2,11 +2,13 @@
  * @zhushanwen/pi-network-proxy 入口：配置驱动的 globalThis.fetch 包装与事件接线。
  *
  * 行为序列（fetch-wrapper.ts 头注有完整设计依据）：
- * - 加载时：读配置校验，enabled 且校验过 → 包装 globalThis.fetch（命中规则走代理，
- *   未命中委托原 fetch）；校验失败 / 构造失败 → extension error（文案含恢复动作：
- *   配置文件路径），不包装不阻断 pi（全部直连）。
+ * - 加载时：读配置校验，enabled 或 ipv4Only 非空且校验过 → 包装 globalThis.fetch
+ *   （ipv4Only 命中锁 IPv4 直连、enabled 且命中规则走代理，未命中委托原 fetch）；
+ *   校验失败 / 构造失败 → extension error（文案含恢复动作：配置文件路径），不包装
+ *   不阻断 pi（全部直连）。
  * - 每 turn 开始：重读配置（llm-shared 读时刷新热重载），指纹变化才重建；enabled true→false
- *   恢复原 fetch（fetch-wrapper.ts 状态机）。
+ *   且 ipv4Only 空时恢复原 fetch（fetch-wrapper.ts 状态机；ipv4Only 非空则包装保留，
+ *   IPv4 锁定不随代理开关关闭而失效）。
  * - 每 turn 结束：计数增量 flush 追加写入 stats JSONL（stats.ts）；进程退出兜底 flush。
  *
  * 覆盖面含 subagent 的 pi 进程（subagent 的 LLM 请求同样分流计数，设计前提 P4）——不设
@@ -21,7 +23,7 @@ import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import { getConfigPath } from "@zhushanwen/pi-llm-shared";
 
 import { loadNetworkProxyConfig } from "./config.js";
-import { buildProxyDispatcher } from "./dispatcher.js";
+import { buildIpv4Dispatcher, buildProxyDispatcher } from "./dispatcher.js";
 import {
 	applyNetworkProxyConfig,
 	detachResidualFetchWrapper,
@@ -57,6 +59,7 @@ const deps: FetchWrapperDeps = {
 		globalThis.fetch = fetch;
 	},
 	buildProxy: buildProxyDispatcher,
+	buildIpv4: buildIpv4Dispatcher,
 	proxyFetch,
 	onError: (message) => logger.error(`${message} ${recoveryHint()}`),
 };
@@ -94,7 +97,8 @@ export default function networkProxyExtension(pi: ExtensionAPI): void {
 	ensureExitFlush();
 	refreshFromConfig();
 
-	// turn 粒度热生效：turn 开始重读配置（mtime+size 未变时零 IO），指纹变化重建 / 禁用恢复。
+	// turn 粒度热生效：turn 开始重读配置（mtime+size 未变时零 IO），指纹变化重建 /
+	// 代理关且 ipv4Only 空时恢复直连。
 	pi.on("turn_start", () => {
 		refreshFromConfig();
 	});

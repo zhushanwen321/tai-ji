@@ -19,7 +19,7 @@ export class PluginMessageHandler {
     'plugin.list', 'plugin.toggle', 'plugin.uninstall', 'plugin.approvePermissions', 'plugin.revokePermissions',
     'plugin.denyPermissions',
     'plugin.executeCommand', 'plugin.config.get', 'plugin.config.set', 'plugin.install', 'plugin.uiResponse',
-    'plugin.mountPoints.sync',
+    'plugin.mountPoints.sync', 'plugin.ui.snapshot',
   ]
 
   async handlePluginMessage(msg: ClientMessage, ws: WsType): Promise<void> {
@@ -52,7 +52,7 @@ type PluginHandledType =
   | 'plugin.list' | 'plugin.toggle' | 'plugin.uninstall' | 'plugin.approvePermissions' | 'plugin.revokePermissions'
   | 'plugin.denyPermissions'
   | 'plugin.executeCommand' | 'plugin.config.get' | 'plugin.config.set' | 'plugin.install' | 'plugin.uiResponse'
-  | 'plugin.mountPoints.sync'
+  | 'plugin.mountPoints.sync' | 'plugin.ui.snapshot'
 
 /** 按 type 字面量收窄 ClientMessage（查表 key = 运行时 guard，与原 switch narrowing 同构）。 */
 type PluginMsgOf<K extends ClientMessageType> = Extract<ClientMessage, { type: K }>
@@ -161,6 +161,13 @@ async function handlePluginMountPointsSync(ctx: PluginHandlerContext, msg: Plugi
   return ctx.reply(ws, msg.id, 'pong', {})
 }
 
+async function handlePluginUiSnapshot(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.ui.snapshot'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  // renderer 拉取插件 UI 快照（ADR-0097 拉为主，C-comm-08）：transient 推送
+  //（plugin:headerActionUpdate / plugin:viewUpdate）丢失后的收敛通道。
+  // sessionId/viewId 过滤 = 单分区补拉（ViewHost 挂载缺失自举），缺省全量。
+  return ctx.reply(ws, msg.id, 'plugin:uiSnapshot', pluginService.getUiSnapshot(msg.payload))
+}
+
 /**
  * plugin.* 分发表（形态 2 表驱动分发）：key = ClientMessageType 字面量，值 = 该 case 的
  * 处理函数（msg 参数按该 key 收窄）。主函数只留查表 + 落空（未命中行为与原 switch 无
@@ -184,4 +191,5 @@ const PLUGIN_CASE_HANDLERS: { readonly [K in PluginHandledType]: (
   'plugin.install': handlePluginInstall,
   'plugin.uiResponse': handlePluginUiResponse,
   'plugin.mountPoints.sync': handlePluginMountPointsSync,
+  'plugin.ui.snapshot': handlePluginUiSnapshot,
 }

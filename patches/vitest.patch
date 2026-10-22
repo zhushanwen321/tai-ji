@@ -2,7 +2,7 @@ diff --git a/dist/chunks/cli-api.24X8XwN1.js b/dist/chunks/cli-api.24X8XwN1.js
 index 63a0164a50e1a3fc1522b122820d33c2fa22d389..8951a991260eb738a5531b515cdbf85d8255b761 100644
 --- a/dist/chunks/cli-api.24X8XwN1.js
 +++ b/dist/chunks/cli-api.24X8XwN1.js
-@@ -13911,7 +13911,51 @@ class Vitest {
+@@ -13911,7 +13911,58 @@ class Vitest {
  	}
  	/** @internal */
  	_checkUnhandledErrors(errors) {
@@ -30,6 +30,13 @@ index 63a0164a50e1a3fc1522b122820d33c2fa22d389..8951a991260eb738a5531b515cdbf85d
 +				(e) => e.name === "EnvironmentTeardownError",
 +				(e) => typeof e.message === "string" && e.message.startsWith("[vitest-worker]:"),
 +				(e) => typeof e.message === "string" && e.message.startsWith("[vitest-pool-runner]: Pending methods while closing rpc"),
++				// [2026-10-20 state-machine D2 Gate A] vitest 堆栈格式化器假红：green run 下
++				// parseErrorStacktrace → convert-source-map 解析某文件 sourceMappingURL 抛
++				// SyntaxError("is not valid JSON")，两轮全量稳定复现且 junit/JSON reporter
++				// 均 success（断言层零失败）。堆栈锚 convert-source-map 限定错误全链在
++				// vitest sourcemap 工具链内——测试自身 JSON.parse 失败同报 SyntaxError 但
++				// 堆栈含测试文件路径，不满足锚条件、不进本签名。
++				(e) => e.name === "SyntaxError" && typeof e.message === "string" && e.message.includes("is not valid JSON") && typeof e.stack === "string" && e.stack.includes("convert-source-map"),
 +				// deliberately excluded: "[vitest-pool]: Worker ... emitted error" /
 +				// "Worker exited unexpectedly" (mid-run worker crash can lose files
 +				// without any failed task — swallowing would mask a fake green),

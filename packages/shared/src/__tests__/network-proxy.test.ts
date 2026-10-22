@@ -11,6 +11,7 @@ const valid = (): NetworkProxyConfig => ({
   enabled: true,
   proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' },
   noProxy: ['localhost', '127.0.0.1'],
+  ipv4Only: [],
   rules: ['api.anthropic.com'],
 })
 
@@ -22,6 +23,7 @@ describe('validateNetworkProxyConfig', () => {
         enabled: true,
         proxy: { protocol: 'socks5', host: 'proxy.example.com', port: 1080, username: 'u', password: 'p' },
         noProxy: ['localhost', 'internal.test'],
+        ipv4Only: [],
         rules: ['api.anthropic.com', 'api.anthropic.com'],
       }),
     ).toEqual({ ok: true })
@@ -120,6 +122,7 @@ describe('validateNetworkProxyConfig', () => {
       enabled: 'x' as never,
       proxy: { protocol: 'ftp' as never, host: '', port: 70000, username: 'u', password: '' },
       noProxy: [''],
+      ipv4Only: [],
       rules: [],
     })
     expect(r.ok).toBe(false)

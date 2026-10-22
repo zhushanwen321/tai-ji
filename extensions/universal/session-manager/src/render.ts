@@ -1,4 +1,4 @@
-// render.ts — session-manager 六工具共用 renderResult（pi TUI 侧；taiji GUI 对话流
+// render.ts — session-manager 八工具共用 renderResult（pi TUI 侧；taiji GUI 对话流
 // 不走本文件——GUI 直读 details.summary）。形态对齐 todo / canvas 扩展 render 先例：
 // 折叠态一行摘要（dim 染色），展开态 / 无摘要（异常形态）回退原始 content 文本。
 

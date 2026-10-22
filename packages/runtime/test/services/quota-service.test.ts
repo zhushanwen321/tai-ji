@@ -21,6 +21,7 @@ import { QuotaService } from '../../src/services/quota-service.js'
 import type { ProviderInfoLike } from '../../src/services/quota-service.js'
 import { TaijiProviderStore } from '../../src/services/provider-extras-store.js'
 import type { IProviderCredentialResolver } from '../../src/services/ports/provider-credential-resolver.js'
+import { QUOTA_PRESETS } from '@taiji/shared'
 
 // vi.hoisted 提升变量到 vi.mock factory 可访问的位置（factory 会被 hoist 到文件顶部）
 // [A2-1] fetcher 接口数组化：authType 单值 → auth 数组；fetchQuota(credential, kind)
@@ -41,9 +42,14 @@ const { mockFetchQuota, kimiMockFetchQuota, oauthOnlyMockFetchQuota, mockFetcher
   return { mockFetchQuota, kimiMockFetchQuota, oauthOnlyMockFetchQuota, mockFetchers }
 })
 
-// ── mock QUOTA_FETCHERS：注入可控 fetcher，不依赖真实 HTTP ──
+// ── mock quota-providers 注册表：注入可控 fetcher，不依赖真实 HTTP ──
+// W3ab 后 quota-service 经 getQuotaFetcher(id) / listQuotaPresets() 消费注册表：
+// getQuotaFetcher 对齐实装语义（id 不存在返回 null，quota-service 显式失败）；
+// listQuotaPresets 返回基线常量（测试环境无远程配置缓存，实装同落 QUOTA_PRESETS）。
 vi.mock('../../src/services/quota-providers/index.js', () => ({
   QUOTA_FETCHERS: mockFetchers,
+  getQuotaFetcher: (id: string) => mockFetchers.get(id) ?? null,
+  listQuotaPresets: () => QUOTA_PRESETS,
 }))
 
 // ── mock pi-provider-store：模拟 quota 配置持久化 ──（凭据读取已收敛到 resolver，M2fg）

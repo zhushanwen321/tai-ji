@@ -1,5 +1,11 @@
 # @zhushanwen/pi-structured-output
 
+## 6.2.2
+
+### Patch Changes
+
+- df839883b: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.22.0 → @zhushanwen/extension-protocol@0.23.0)
+
 ## 6.2.1
 
 ### Patch Changes

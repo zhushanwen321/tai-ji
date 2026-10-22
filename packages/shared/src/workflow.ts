@@ -58,7 +58,12 @@ export interface WorkflowAgentCall {
   phase?: string
   /** call 状态（trace.status） */
   status: 'pending' | 'running' | 'done' | 'failed'
-  /** 执行所用 model（trace.model，'default' 表示 pi 默认 model） */
+  /**
+   * 执行所用 model（run 详情增强透传成员 record.model——v2 fold 骨架行无此域，
+   * workflow-record-projection.callEnhancementTarget 是现行唯一填充点）。值形态 =
+   * 显示词汇 ref（runtime 侧已把引擎原生 ref 的 provider 段翻回 pi 词汇，模型段保留
+   * 引擎目录拼写）；'default' 表示引擎缺省 model（历史占位词，缺省派发现形为无键）。
+   */
   model?: string
   /** pi session ID（trace.sessionId，uuidv7，定位 agent call 对话流 JSONL） */
   sessionId?: string

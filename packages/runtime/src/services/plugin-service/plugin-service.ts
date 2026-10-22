@@ -1,6 +1,6 @@
 import { PluginPermissionChecker as PermissionChecker } from './plugin-permission.js'
 import type { PluginDescriptor, ToolEntry, HookEntry, HookContext, HookResult, IPluginServiceDeps } from './plugin-types.js'
-import type { PluginInfo } from '@taiji/shared'
+import type { PluginInfo, PluginUiSnapshotPayload } from '@taiji/shared'
 import type { IPluginService, ISessionService } from '../../interfaces.js'
 import type { IMessageBroker } from '../../interfaces.js'
 import type { ServerMessageMap, ServerMessageType } from '@taiji/shared'
@@ -15,6 +15,8 @@ import { bootstrapPluginService } from './plugin-lifecycle.js'
 import { ActiveSessionResolver, SessionEventDispatch, sessionInfoFromSummary } from './api/session-api.js'
 import type { CommandRegistration } from './api/commands-api.js'
 import { EntryInvalidationDispatch, ENTRY_INVALIDATION_NOTIFY_METHOD } from './plugin-entry-invalidation-dispatch.js'
+import { PluginUiSnapshotStore } from './plugin-ui-snapshot-store.js'
+import type { UiSnapshotFilter } from './plugin-ui-snapshot-store.js'
 import { executeCommand as executePluginCommand, deliverInvokeResult as deliverPluginInvokeResult } from './api/commands-executor.js'
 import type { InstallResult } from '../ports/plugin-installer.js'
 import { toConfigKey, fromConfigKey, isConfigKey } from './api/config-api.js'
@@ -106,6 +108,13 @@ export class PluginService implements IPluginService {
 
   /** 挂载点集合（renderer 经 plugin.mountPoints.sync 上报，views.listMountPoints 中继查询，AC10） */
   private mountPoints: string[] = []
+
+  /**
+   * 插件 UI 快照存储（ADR-0097 拉为主）：两条 transient 推送链（headerAction 出线 /
+   * views.update）的校验出口处写入最新值，plugin.ui.snapshot 拉取 RPC 读出——renderer
+   * 重载/重连后由此收敛。清理随会话销毁与插件生命周期链（crash/disable/uninstall/enable）。
+   */
+  readonly uiSnapshotStore = new PluginUiSnapshotStore()
 
   /**
    * IMessageBus（wave:perf-w08，02 文档 D1-1）：plugin 的 session 级广播接 bus 定向发布。
@@ -214,6 +223,11 @@ export class PluginService implements IPluginService {
     this.mountPoints.push(...mountPoints)
   }
 
+  /** 读插件 UI 快照（plugin.ui.snapshot handler 消费；filter 语义见 PluginUiSnapshotStore.snapshot） */
+  getUiSnapshot(filter?: UiSnapshotFilter): PluginUiSnapshotPayload {
+    return this.uiSnapshotStore.snapshot(filter)
+  }
+
   /** Wire sessionService after construction (breaks circular dependency at creation time) */
   setSessionService(sessionService: ISessionService): void {
     this.deps.sessionService = sessionService
@@ -298,6 +312,9 @@ export class PluginService implements IPluginService {
         this.removeCommandEntriesFor(pluginId)
         this.sessionEventDispatch.clearForPlugin(pluginId)
         this.entryInvalidationDispatch.clearForPlugin(pluginId)
+        // UI 快照同清理（对齐 toggle/uninstall 的贡献清理集）：崩溃插件的
+        // headerAction/视图快照不再出现在拉取回包（renderer 侧另有 clearForPlugin 帧链）
+        this.uiSnapshotStore.clearForPlugin(pluginId)
       }
       for (const pluginId of pluginIds) {
         this.broker.broadcast({
@@ -355,6 +372,9 @@ export class PluginService implements IPluginService {
         // 清理 owner，缺此路则长会话反复建删时订阅条目单调累积。setOnSessionDestroyed
         // 为追加式回调列表（D6a），不挤占既有投递。
         this.entryInvalidationDispatch.clearForSession(summary.id)
+        // 插件 UI 快照同址清理（ADR-0097）：会话销毁后快照条目即失效（插件侧镜像也随
+        // onDidDestroySession 拆除），残留会以幽灵按钮/陈旧树出现在下次快照拉取
+        this.uiSnapshotStore.clearForSession(summary.id)
       })
       // AP-4 会话激活 relay ③（u5a）：session.switch 成功（含自动 restore）→ transport 层
       // notifySessionActivated（relay ①②）流经本回调 → 激活订阅注册表定向投递 didActivate
@@ -391,6 +411,9 @@ export class PluginService implements IPluginService {
 
     try {
       if (enabled) {
+        // 启用前清掉该插件的旧 UI 快照（禁用期间残留的 headerAction/视图条目若在插件
+        // 重新激活、重推前被拉取，会以陈旧态呈现；激活后插件重推即收敛）
+        this.uiSnapshotStore.clearForPlugin(pluginId)
         // 启用：只激活目标插件（非全部）
         await this.activator.activatePlugin(pluginId, { type: 'onStartupFinished' }, this.host)
         // 激活成功后，对外部插件启动热重载监听
@@ -420,6 +443,8 @@ export class PluginService implements IPluginService {
         // S3-W2：session 事件注册表同步清理（禁用插件的 didCreate/didDestroy 订阅不再投递）
         this.sessionEventDispatch.clearForPlugin(pluginId)
         this.entryInvalidationDispatch.clearForPlugin(pluginId)
+        // UI 快照同步清理（禁用插件的 headerAction/视图条目不再出现在拉取回包）
+        this.uiSnapshotStore.clearForPlugin(pluginId)
         // E2 修复：disable 路径补 plugin:statusChange 广播——renderer E2 触发链
         //（plugin-status-change{inactive} → handlePluginGone：三容器清理 + 命令注销 +
         // 顶栏按钮/modal 收起）此前无触发源，禁用后按钮残留。deactivatePlugin 抛错走
@@ -519,6 +544,7 @@ export class PluginService implements IPluginService {
     // S3-W2：session 事件注册表同步清理（卸载插件的订阅不再投递）
     this.sessionEventDispatch.clearForPlugin(pluginId)
     this.entryInvalidationDispatch.clearForPlugin(pluginId)
+    this.uiSnapshotStore.clearForPlugin(pluginId)
 
     this.broadcastPluginList()
     // RT-6#6：内存清理与回滚广播已全部完成，此刻才把磁盘删除失败抛给调用方——
@@ -693,6 +719,7 @@ export class PluginService implements IPluginService {
           sourceWorkerId,
         ),
       mountPoints: this.mountPoints,
+      uiSnapshotStore: this.uiSnapshotStore,
       publishViewUpdate: (payload) => this.publishViewUpdate(payload),
     })
   }

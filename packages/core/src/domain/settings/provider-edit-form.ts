@@ -49,7 +49,9 @@ export function buildHeadersFromRows(
   let hasDuplicate = false
   for (const r of rows) {
     const k = r.key.trim()
-    if (!k) continue
+    // 空 value 与空 key 同规格：只填了一半的编辑行不落盘（空 value 的请求头无语义，
+    // 曾因放行 {"x-opencode-session": ""} 落盘而压制 pi 的同名头自动注入，网关 400）
+    if (!k || !r.value.trim()) continue
     if (seen.has(k)) hasDuplicate = true
     seen.add(k)
     headers[k] = r.value
@@ -64,6 +66,30 @@ export function buildHeadersFromRows(
  */
 export function headerRowsFromHeaders(headers: Record<string, string>): Array<{ key: string; value: string }> {
   return Object.keys(headers).map((k) => ({ key: k, value: headers[k] }))
+}
+
+/**
+ * 计算 save 时实际发送的 headers（W3 D7 删除路径，纯）。
+ *
+ * 三态必须可区分——「空 = 不变」与「删空 = 清空」是两种用户意图：
+ * - 草稿非空 → 草稿值（增删改都走显式覆盖）
+ * - 草稿空 + 初始有 headers（加载后把行删空）→ `{}`：runtime 侧
+ *   `provider-config-helper.ts:974-976` 的 sanitizeHeaders 接受空对象并写盘清空
+ *   （pi schema Type.Record 允许空对象，无需 apiKey 式哨兵——对象 {} 天然是清空值）
+ * - 草稿空 + 初始无 headers（新增态 / 该 provider 从未配过 headers）→ undefined
+ *   （「不变」，不覆盖 runtime 既有值）
+ *
+ * 缺第三态时（旧实现只判草稿是否为空）「删行 + 保存」发的是 undefined，runtime 不写盘，
+ * 磁盘上的 header 原样复活——读侧回显（buildCatalogProviderInfo / buildCustomProviderInfo
+ * 的 headers 透传）又把该行送回编辑表单，用户从界面永远删不掉。
+ */
+export function resolveHeadersForSave(
+  initialHeaders: Record<string, string> | undefined,
+  draftHeaders: Record<string, string>,
+): Record<string, string> | undefined {
+  if (Object.keys(draftHeaders).length > 0) return draftHeaders
+  if (initialHeaders && Object.keys(initialHeaders).length > 0) return {}
+  return undefined
 }
 
 // ── module 契约 ──
@@ -322,6 +348,27 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   }
 
   /**
+   * save 用 headers 基线：载入时快照优先（headersJson 是 captureSnapshot 对草稿的
+   * 字符串化，捕获时点草稿 = provider 载入值），快照未初始化或损坏回退实时
+   * providerRef（保留「删空仍可清空」语义）。
+   */
+  function headersBaselineForSave(): Record<string, string> | undefined {
+    const s = snapshot.value
+    if (!s) return providerRef.value?.headers
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(s.headersJson)
+    } catch {
+      // headersJson 由 captureSnapshot 的 JSON.stringify 产出，损坏按无快照回退实时值
+      return providerRef.value?.headers
+    }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, string>
+    }
+    return providerRef.value?.headers
+  }
+
+  /**
    * setProvider 载荷构造（防线①：catalog / custom 的 provider 级字段分体系）。
    * isCatalog / baseUrl 由调用方先算后传（保持原求值时点）；条件键各自按 isCatalog 与 truthy
    * 检查决定带不带键。
@@ -344,8 +391,12 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
       apiKey: resolveApiKeyChange(),
       // B-1：凭证形态回传（undefined = 不变；runtime 写 providers.json authMethod 标注）
       authMethod: draft.authMethod,
-      // W3 D7：headers（空对象时不传，避免覆盖 runtime 既有值）+ authHeader 回写。
-      headers: Object.keys(draft.headers).length > 0 ? draft.headers : undefined,
+      // W3 D7：headers 三态（初始有值 + 草稿删空 → 显式 {} 清空；其余 undefined = 不变）。
+      // 基线取载入时快照（与 dirty 判定同源，D8 非 dirty 重拍会同步基线）——表单打开期间
+      // 外部广播给 provider 新增的 headers，不因「草稿空 + 实时基线非空」被误判为删空清掉
+      // （2026-10-21 竞态修复：原取实时 providerRef 值）。快照未捕获（snapshot=null）时
+      // 回退实时已存值——删空仍须可清空。authHeader 恒回写（boolean 显式 false 是合法值）。
+      headers: resolveHeadersForSave(headersBaselineForSave(), draft.headers),
       authHeader: draft.authHeader,
       // 透传 model 级字段（B-2 builtin 不回传 + B-4b round-trip 规则见 buildModelsPayload）
       models: buildModelsPayload(models.localModels.value),

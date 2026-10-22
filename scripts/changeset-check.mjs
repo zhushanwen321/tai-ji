@@ -100,11 +100,14 @@ export function computeMissing(changed, declared) {
 export function renderLines({ status, changed, missing, unversionable = [] }) {
   if (status === 'skip') return ['↷ skip（找不到 main 分支，无法对比）']
   if (status === 'fail') {
+    // 阻断态（退出码 1，pr-pre-merge.sh 置 FAIL）：恢复动作与 pre-commit 消费方
+    // .githooks/check_changeset_packages.mjs 同义——无效声明的修法是删声明，不是再跑 pnpm changeset。
+    // 本脚本跑在 PR / dev-merge 门禁，changeset 文件通常已提交，删文件用 git rm（非 restore）。
     return [
       `✗ ${unversionable.length} 个 changeset 声明了不可版本化的包（private/config.ignore，声明永不生效）：`,
       ...unversionable.map((d) => `  - ${d.file}: '${d.name}': ${d.bumpType}`),
-      '如需发布，运行: pnpm changeset',
-      '如是纯文档/测试/重构改动无需发布，可忽略此警告',
+      '该包不发 npm（private 或 config.ignore 清单内），版本语义由 Electron 发布线承载，不经 changesets：',
+      '从该 changeset 的 frontmatter 删除对应行，或删除整个 changeset 文件（git rm .changeset/<文件>），然后重跑本检查',
     ]
   }
   if (status === 'pass' && changed.length === 0) return ['✓ 无 extension src/ 改动，跳过 changeset 检查']

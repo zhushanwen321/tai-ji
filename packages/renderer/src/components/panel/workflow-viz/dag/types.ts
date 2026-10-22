@@ -21,24 +21,14 @@ export type WorkflowVizDagNodeStatus =
   | 'skipped'
 
 /**
- * DAG 画布点击上抛语义：agent 节点点击 = 'agent'（开该 agent 的钻取）；
+ * DAG 画布点击上抛语义（[2026-10-19 用户裁决] agent 钻取入口收归实例 trace 行，
+ * DAG 节点/实例行不再开 agent 详情——'agent' 语义删除）：
  * pending/skipped 节点（零实例、无对话可看——skipped = run 终局后零实例）与
  * phase 分区点击 = 'phase'（开所属 phase tab）——「pending/skipped 节点点击 =
- * phase 语义」由画布按已派生六态路由（设计 §3.1-2 点击行为边界），非业务派生。
+ * phase 语义」由画布按已派生六态路由（设计 §3.1-2 点击行为边界），非业务派生；
+ * 其余态节点点击 no-op（纯展示）。
  */
 export type WorkflowVizDagClickPayload =
-  | {
-      semantic: 'agent'
-      nodeId: string
-      templateName: string
-      phase: string
-      /**
-       * 点击命中节点内某个实例行时携带该实例的 call id（WorkflowAgentCall.id）——
-       * 多实例节点点击具体实例直接钻取该 agent；缺省（点节点非实例行）由宿主取
-       * 该节点首个挂接实例。
-       */
-      callId?: number
-    }
   | { semantic: 'phase'; phase: string }
 
 /**

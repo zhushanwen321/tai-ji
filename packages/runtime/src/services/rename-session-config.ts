@@ -226,7 +226,13 @@ export function setRenameMode(mode: RenameMode): void {
 const DEFAULT_RENAME_STYLE: RenameStyle = 'slug'
 
 /** 合法风格清单（与 extension pure.ts RenameStyle 值域一致；Set 免 as 断言）。 */
-const RENAME_STYLES: ReadonlySet<RenameStyle> = new Set<RenameStyle>(['slug', 'sentence', 'emoji', 'custom'])
+const RENAME_STYLES: ReadonlySet<RenameStyle> = new Set<RenameStyle>([
+  'slug',
+  'sentence',
+  'emoji',
+  'topic',
+  'custom',
+])
 
 /** style 值域 guard（与 extension isRenameStyle 同构；读取回退与写入归一共用）。 */
 function isRenameStyle(raw: unknown): raw is RenameStyle {

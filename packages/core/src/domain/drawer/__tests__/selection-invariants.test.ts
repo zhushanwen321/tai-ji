@@ -118,7 +118,7 @@ describe('三消费方复合谓词不变量（真实事件序对账，selection-
     focusSession('A')
     panels.value = ['A']
 
-    openSubagent({ virtualId: V, enteredFrom: 'workflow' })
+    openSubagent({ virtualId: V })
     await nextTick()
     expect(viewedSubagentVidFor('A')).toBe(V)
     expect(getViewedVids()).toEqual(new Set([V]))
@@ -145,7 +145,7 @@ describe('三消费方复合谓词不变量（真实事件序对账，selection-
     openDrawerTab('btw')
     setBtwView(B)
     focusSession('B')
-    openSubagent({ virtualId: S, enteredFrom: 'chat' })
+    openSubagent({ virtualId: S })
     panels.value = ['A', 'B']
     await nextTick()
 

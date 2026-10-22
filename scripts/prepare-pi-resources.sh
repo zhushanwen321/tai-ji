@@ -86,6 +86,22 @@ else
   popd > /dev/null
 fi
 
+# --- PATH alias (name-based resolution entry) ---
+# 子 agent 引擎按名字 "pi"（Windows "pi.exe"）解析 pi：runtime 把本目录前缀进引擎
+# PATH（engine-launch-env piDir 注入），名字缺失时解析穿透到宿主 PATH 的 npm 版 pi，
+# 与打包版运行时行为漂移。别名用指向 BINARY_NAME 的同目录相对形态：electron-builder
+# extraResources 原样拷贝进 bundle 后仍指向同目录二进制（bundle 自包含，codesign 合法）。
+# 恒执行（放在存在性跳过块之外）：symlink stage 形态（条目指向 .pi-binary-cache）也补别名。
+if [[ "$PLATFORM" == mingw* ]] || [[ "$PLATFORM" == msys* ]] || [[ "$PLATFORM" == cygwin* ]]; then
+  if [ ! -f "${RESOURCES_DIR}/pi.exe" ]; then
+    cp "${BINARY_PATH}" "${RESOURCES_DIR}/pi.exe"
+    echo "Created pi.exe alias (copy of ${BINARY_NAME})"
+  fi
+else
+  ln -sfn "${BINARY_NAME}" "${RESOURCES_DIR}/pi"
+  echo "Created pi alias (symlink to ${BINARY_NAME})"
+fi
+
 echo "=== Done ==="
 echo "Resources ready at: ${RESOURCES_DIR}/"
 ls -la "$RESOURCES_DIR/"

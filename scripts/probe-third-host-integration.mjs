@@ -303,8 +303,8 @@ async function partB() {
 async function rebuildRunsFromRecordDir(runsDir, journal) {
   const runs = [];
   for (const file of readdirSync(runsDir)) {
-    if (!file.endsWith(core.RUN_EVENT_JOURNAL_SUFFIX)) continue;
-    const id = file.slice(0, -core.RUN_EVENT_JOURNAL_SUFFIX.length);
+    if (!file.endsWith(core.RUN_EVENTS_SUFFIX)) continue;
+    const id = file.slice(0, -core.RUN_EVENTS_SUFFIX.length);
     const events = await journal.scan(id);
     runs.push(rebuildSingleRunFromRecord(id, file, events, runsDir));
   }
@@ -370,7 +370,7 @@ async function seedPartCCrashFixture(journal, runsDir, runId) {
     attempt: 1,
     ts: createdTs + 10,
   });
-  return join(runsDir, `${runId}${core.RUN_EVENT_JOURNAL_SUFFIX}`);
+  return join(runsDir, `${runId}${core.RUN_EVENTS_SUFFIX}`);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -407,7 +407,7 @@ async function verifyPartCJournalAppendEvidence(journal, runsDir, runId) {
   check(
     "S5③ 收编零文件覆盖: runsDir 恰 1 个文件（record 流——无快照/manifest 派生落盘）",
     readdirSync(runsDir).length === 1 &&
-      readdirSync(runsDir)[0] === `${runId}${core.RUN_EVENT_JOURNAL_SUFFIX}`,
+      readdirSync(runsDir)[0] === `${runId}${core.RUN_EVENTS_SUFFIX}`,
     JSON.stringify(readdirSync(runsDir)),
   );
 }
@@ -484,7 +484,7 @@ async function partC() {
   const store = {
     async save() {},
     stateFilePath(id) {
-      return join(runsDir, `${id}${core.RUN_EVENT_JOURNAL_SUFFIX}`);
+      return join(runsDir, `${id}${core.RUN_EVENTS_SUFFIX}`);
     },
     async loadAll() {
       return rebuildRunsFromRecordDir(runsDir, journal);
