@@ -28,7 +28,6 @@ export const meta = {
     'env.launch', 'env.ready', 'env.isolation',
     'session.create', 'chat.send', 'chat.wait', 'chat.abort',
     'subagent.dispatch', 'subagent.cancel',
-    'workflow.abort',
   ],
   requires: ['mock-http'],
   parallelGroup: 'subagent',
@@ -62,7 +61,7 @@ export const meta = {
     tps: 2,
   },
   provable: [
-    '执行域：running record 被 session.subagentAction(cancel) 中断（stopReason=interrupted）——注意：取消效果达成，但 Done 回执通道有缺陷（见 notProvable 后的实测注记）',
+    '执行域：running record 被 session.subagentAction(cancel) 中断（stopReason=interrupted）——回执通道缺陷见 deviations',
     'C：取消前成员真的跑到 LLM（mock.requests 含 mock-sub-a 请求）',
     '主会话：流式进行中 message.abort 后 turn 以 message.complete + stopReason=aborted 收尾',
     '主会话：abort 后 isGenerating 复位（再发一轮正常完成；具体文本不定——成员完成通知轮会插队消费主队步）',
@@ -80,7 +79,7 @@ export async function run(ctx) {
   const gotchas = [
     'faux 与 mock-http 双域不能同实例（createInstance 互斥）：要同实例验「主会话 abort + 执行域 cancel」必须整体走 mock-http',
     'abort 的权威收尾 = pi agent_end 携带 stopReason=aborted → message.complete{stopReason:aborted}（event-adapter：aborted 不是 stream_error）',
-    '执行域取消实现 = client.prompt("/subagents cancel <id>")（扩展命令，不经 LLM）；回执 session.subagentActionDone',
+    '执行域取消实现 = client.prompt("/subagents cancel <id> --req=<uuid>")（扩展命令，不经 LLM），回执经请求作用域结果文件；成功路径的回执写入有缺口（docs/todo/subagent-cancel-receipt-race.md），Done 回执可能缺失但取消效果已达成',
   ]
 
   // ── 段 1：执行域 cancel ─────────────────────────────────────
@@ -257,6 +256,6 @@ export async function run(ctx) {
 
   log(`done sid=${sid}`)
   // streaming cancel 的通道缺陷如实进 deviations（runner 据 ev.ok/未决项判级，不改断言凑绿）
-  if (cancelDefect) uncovered.push(`执行域 streaming cancel 回执缺失（handler_error 稳定复现，疑似 client.prompt 异步与结果文件即读的通道竞态）——cancel 语义未达成，成员靠自然收敛离开 running`)
+  if (cancelDefect) uncovered.push(`执行域 streaming cancel 的 Done 回执缺失（handler_error 确定性复现）——取消效果已达成（stopReason=interrupted），缺陷只在回执通道：根因 = 扩展 rpcCancel 成功路径不写结果文件 + runtime 缺失即报错（见 docs/todo/subagent-cancel-receipt-race.md）`)
   return { uncovered, gotchas }
 }

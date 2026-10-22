@@ -47,6 +47,8 @@ const REPLY_TYPES = {
   'config.sessions': 'config.sessions',
   'model.list': 'model.list',
   'model.switch': 'model.switched',
+  'config.setProvider': 'config.providerUpdated',
+  'config.deleteProvider': 'config.providerUpdated',
   'message.send': 'message.status',
   'message.abort': 'message.status',
   'ping': 'pong',

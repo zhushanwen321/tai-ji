@@ -54,7 +54,7 @@ export async function run(ctx) {
   const gotchas = [
     'session.delete 现行语义 = 归档域真删（ADR-0141 删除链）：断言 = 列表消失 + ext-sessions/<sid>/ 树消失双证据（旧「彻底删除」弱锚已废）',
     'archive 的逆操作 = session.unarchive（解压回原路径）；session.restore 是「恢复崩溃前的活跃会话」，对归档会话报 SESSION_NOT_FOUND「无已保存内容」——两个词别混',
-    'archive/restore/delete 的 reply 与 request 同名（protocol.ts 同名配对），protocol.call 不传 replyType 即正确',
+    'archive/unarchive 的 reply 与 request 同名；但 restore→session.created、delete→session.deleted 是异名（lib REPLY_TYPES 已登记）——不传 replyType 时靠帧 id 权威匹配兜住',
     'pi 会话 JSONL 延迟写入（关键规则 #6）与 archive 的耦合：未发过消息的会话没有 jsonl 文件，archive 搬移报 archive_io_error——归档/删除目标必须先发一轮消息落盘',
   ]
   const fs = await import('node:fs')
@@ -128,8 +128,9 @@ export async function run(ctx) {
   ev.step({ step: 'session.archive', channel: 'B', exitCode: archives.includes(a.id) ? 0 : 1, stats: { archives } })
 
   // ── restore A ───────────────────────────────────────────────
-  // restore 前置 = 归档文件实体落定（ledger 条目先出现、文件搬移后到；restore 读的是
-  // 归档目录里的 jsonl 实体，只看 ledger 会 SESSION_NOT_FOUND「无已保存内容」）
+  // restore 前置 = 归档文件搬移落定（archive 同步段先搬文件后写 ledger 骨架、reply 前完成，
+  // reply 后异步的只有压缩；restore 只扫 agent/sessions 树——归档会话在该树无文件时报
+  // SESSION_NOT_FOUND「无已保存内容」，与 ledger 无关）。此处轮询兜底搬移可见性。
   {
     const archiveRoot = path.join(dataDir, 'agent', 'archive')
     let fileSeen = false

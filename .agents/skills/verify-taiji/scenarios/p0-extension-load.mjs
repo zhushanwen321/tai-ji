@@ -12,7 +12,7 @@ export const meta = {
   id: 'p0-extension-load',
   priority: 'P0',
   title: '扩展装载行为证据：清单数量/infrastructure enabled/命令注册/日志无装载失败',
-  covers: ['env.launch', 'env.ready', 'env.doctor', 'extension.load', 'protocol.rpc'],
+  covers: ['env.launch', 'env.ready', 'env.doctor', 'extension.load'],
   requires: ['faux'],
   parallelGroup: 'env',
   estimateSec: 120,

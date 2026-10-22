@@ -4,7 +4,7 @@
  * 装配：faux（plain-text）。路径（ADR-0076 双通道的「已送达」支）：
  *   发消息 → turn 完成（已送达）→ history 取该 user 消息 id →
  *   session.revokeMessage { sessionId, targetId } → 回执 revoked:true + content=原文（草稿回填数据）→
- *   B：history 中该消息消失（树回退）→ C：pi 会话 JSONL 中原文消失 →
+ *   B：history 读侧不再含该消息（树回退 = append-only 追加标记 + 读侧过滤）→ C：JSONL 尾部留档 →
  *   A：页面 HTML 不再含原文（气泡移除，条件轮询等 UI 更新）。
  *
  * 在途通道（delivery.cancel）不在本剧本：那是「发送中撤回」，时机窗口由队列语义另验。

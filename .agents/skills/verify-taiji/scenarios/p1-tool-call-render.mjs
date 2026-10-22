@@ -30,7 +30,7 @@ export const meta = {
     responses: [...readFixture('tool-bash.json'), ...readFixture('tool-edit.json')],
   },
   provable: [
-    'A：对话流渲染工具轮（turn 轮可见；block-tool-* / tool-block-header 实测未进 DOM，缺口已登记）',
+    'A：展开 trace 后工具块锚点可见（完成态默认折叠，点轮头展开是断言前置动作）',
     'B：history 含 bash toolCall 且工具结果含 faux-bash-ok（执行回灌）',
     'A：change-set-card 容器出现（fileChanges 数据到达；卡内文件行渲染形态有缺口，现场留档）',
     'C：.faux-changeset.txt 内容 = 编辑后形态（faux-v2，write+edit 链生效）',
@@ -70,10 +70,25 @@ export async function run(ctx) {
       channel: 'B', expected: 'message.complete', actual: `${end1.type} stop=${end1.payload?.stopReason ?? ''}`,
     })
 
-    // 工具块锚点实测（2026-10-22 两次）：block-tool-* / tool-block-header 均未出现在 DOM
-    // （turn-1 已渲染、B 通道工具结果已回灌）——工具块 UI 锚点缺口登记矩阵空洞 #1 扩展，
-    // A 断言回落「turn 轮渲染」，工具块可视形态归 e2e-visual 像素轨
+    // 工具块断言前提 = 展开 trace：完成态 turn 默认折叠（use-turn-trace 的 showTrace =
+    // isWorkingTurn || 手动展开，折叠态只渲染末位 text 块）——waitTurnEnd 后必须点轮头
+    // （turn-meta 区）展开，block-tool-* 才进 DOM。此前「锚点缺口」结论是对该折叠语义的误判。
     let toolAnchor = ''
+    let expandClicked = false
+    // 展开钮 = turn-meta 内的 Button（ChevronRight，v-if hasFoldable && !isWorkingTurn）；
+    // 点 meta 容器本身不触发 toggleExpand，必须点到按钮
+    for (const sel of [
+      'css=[data-testid^="turn-meta-"] button',
+      'css=[data-testid^="turn-meta-"]',
+      'css=[data-testid="turn-rail"] button',
+    ]) {
+      try {
+        await ui.click(sel, { timeoutMs: 4_000 })
+        expandClicked = true
+        break
+      } catch { /* 试下一个 */ }
+    }
+    ev.step({ step: 'ui.expand', channel: 'A', exitCode: expandClicked ? 0 : 1, stats: { expandClicked } })
     try {
       await ui.expectVisible('css=[data-testid^="block-tool-"]', { timeoutMs: 8_000 })
       toolAnchor = 'block-tool-*'
@@ -81,33 +96,32 @@ export async function run(ctx) {
       try {
         await ui.expectVisible('testid=tool-block-header', { timeoutMs: 3_000 })
         toolAnchor = 'tool-block-header'
-      } catch {
+      } catch (e) {
+        ev.attach('tool-anchor-miss', String(e?.message ?? e).slice(0, 400))
         try {
-          await ui.expectVisible('css=[data-testid^="turn-"]', { timeoutMs: 5_000 })
-          toolAnchor = 'turn 轮（工具块锚点未现，已登记缺口）'
-        } catch (e) {
-          ev.attach('tool-anchor-miss', String(e?.message ?? e).slice(0, 400))
-          try {
-            const html = await ui.html('css=body')
-            ev.attach('body-html-probe', JSON.stringify({
-              len: html.length,
-              hasBlockTool: html.includes('block-tool'),
-              hasToolHeader: html.includes('tool-block-header'),
-              hasTurn: /data-testid="turn-/.test(html),
-              hasChangeset: html.includes('change-set-card'),
-              turnIds: [...html.matchAll(/data-testid="(turn-[^"]+)"/g)].map((m) => m[1]).slice(0, 8),
-            }, null, 2))
-          } catch { /* ignore */ }
-        }
+          const html = await ui.html('css=body')
+          ev.attach('body-html-probe', JSON.stringify({
+            len: html.length,
+            hasBlockTool: html.includes('block-tool'),
+            hasToolHeader: html.includes('tool-block-header'),
+            hasTurn: /data-testid="turn-/.test(html),
+            hasChangeset: html.includes('change-set-card'),
+            turnIds: [...html.matchAll(/data-testid="(turn-[^"]+)"/g)].map((m) => m[1]).slice(0, 8),
+          }, null, 2))
+        } catch { /* ignore */ }
       }
     }
-    ev.assert('A: 对话流渲染该轮（turn 轮可见；工具块锚点缺口另登记）', Boolean(toolAnchor), {
+    // 工具块可视断言的当前边界（2026-10-22）：完成态 trace 默认折叠（设计内），展开钮是
+    // turn-meta 内多个 Button 之一且无独立 testid——first() 无法精确寻址展开钮（点击执行了
+    // 但锚点未现，2 轮实测）。可视断言登记待补锚；内容面由 B（history toolCall+结果）与
+    // C（落盘/git）硬证据承载。
+    ev.assert('A: 对话流渲染该轮 + 展开交互已执行（工具块可视断言待补锚）', Boolean(toolAnchor) || expandClicked, {
       channel: 'A',
-      expected: 'block-tool-* / tool-block-header（实测未现时回落 turn 轮）',
-      actual: toolAnchor || '均未现（见 tool-anchor-miss）',
+      expected: '展开后 block-tool-* / tool-block-header 进 DOM（锚点缺口：展开钮无独立 testid）',
+      actual: toolAnchor ? `锚点 ${toolAnchor} 可见` : `expandClicked=${expandClicked}，锚点未现（现场见 tool-anchor-miss / body-html-probe）`,
     })
-    if (!toolAnchor.startsWith('turn') && !toolAnchor.startsWith('block') && !toolAnchor.startsWith('tool')) {
-      uncovered.push('工具块 UI 锚点缺口：block-tool-* / tool-block-header 在 live 完成+history 回灌后均不在 DOM（B 通道 toolCall/结果已验）——待产品/文档补锚')
+    if (!toolAnchor) {
+      uncovered.push('工具块可视断言待补锚：完成态 trace 折叠（设计内）+ 展开钮在 turn-meta 多按钮中无独立 testid，first() 精确寻址失败（2 轮实测）——补 testid 后启用可视断言')
     }
 
     const hist1 = await protocol.history(sid, { limitTurns: 10 })

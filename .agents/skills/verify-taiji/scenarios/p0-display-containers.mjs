@@ -12,8 +12,8 @@
 export const meta = {
   id: 'p0-display-containers',
   priority: 'P0',
-  title: '托盘容器最小闭环：容器可见 + builtin 按钮开面板 + Esc 关闭（键盘栈序最小观测）',
-  covers: ['env.launch', 'env.ready', 'ui.container', 'workspace.drawer'],
+  title: '容器体系最小闭环：模型弹层开/Esc 关 + bash 制造记录后托盘面板开/Esc 关',
+  covers: ['env.launch', 'env.ready', 'ui.container', 'chat.send', 'chat.wait'],
   requires: ['faux'],
   parallelGroup: 'chat',
   estimateSec: 100,
@@ -32,10 +32,10 @@ export const meta = {
 }
 
 export async function run(ctx) {
-  const { protocol, ev, log } = ctx
+  const { protocol, ev, log, instance } = ctx
   const uncovered = []
   const gotchas = [
-    '托盘 builtin 件（bash/workflow/subagent）无运行记录时不渲染（D4 隔离后无恒渲染豁免）：容器回路验走恒在的聚合按钮（tray-aggregate-button）',
+    '托盘 builtin 件（bash/workflow/subagent/canvas）无运行记录时不渲染（ComposerTray.vue D4 隔离后无恒渲染豁免，total===0 不进数组）——聚合按钮也非恒在（showAggregate 条件）：验托盘回路必须先制造记录（本剧本跑一轮 bash）',
     'Esc 的键盘栈序完整验证需产品侧暴露栈顶信号（空洞 #3）；本剧本只证「打开→Esc→收起」的最小回路',
   ]
   const ui = ctx.ui
@@ -49,8 +49,6 @@ export async function run(ctx) {
   ev.step({ step: 'ui.activate', channel: 'A', exitCode: 0, stats: { sid } })
 
   // ── A：浮层容器开/关回路（模型弹层） ────────────────────────
-  // 托盘按钮（builtin/aggregate）在无运行记录实例上实测不渲染（渲染条件无文档锚点，
-  // 空洞 #1 扩展登记）——容器「开 → Esc → 关」回路用已验证的模型弹层承载
   await ui.click('css=[title="切换模型"]', { timeoutMs: 15_000 })
   await ui.expectVisible('testid=model-picker-panel', { timeoutMs: 15_000 })
   ev.assert('A: 模型弹层（浮层容器）打开', true, {
@@ -63,9 +61,40 @@ export async function run(ctx) {
   })
   ev.step({ step: 'ui.container.overlay', channel: 'A', exitCode: 0, stats: {} })
 
-  // 托盘面如实记录（不凑绿）：按钮不可见属锚点缺口，登记 uncovered
-  const traySeen = await ui.html('css=body').then((h) => h.includes('composer-tray'))
-  uncovered.push(`托盘按钮容器回路不可达：composer-tray ${traySeen ? '在' : '不在'} DOM，但 builtin/aggregate 按钮均不渲染（渲染条件无文档锚点，矩阵空洞 #1 扩展）——托盘面登记待产品补锚`)
+  // ── A：跑一轮 bash 制造托盘条目（builtin 件按记录数渲染，空实例不渲染是设计内） ──
+  const since = protocol.events.length
+  await protocol.send(sid, '跑一条 bash 生成托盘条目')
+  const end = await protocol.waitTurnEnd(sid, { since, timeoutMs: 180_000 })
+  ev.assert('B: bash 轮完成（托盘条目数据面）', end.ok === true, {
+    channel: 'B', expected: 'message.complete', actual: `${end.type} stop=${end.payload?.stopReason ?? ''}`,
+  })
+
+  // ── A：托盘回路（条件等待，不可达则如实登记） ────────────────
+  // 托盘统计面 = subagent/workflow/后台 bash 记录（useTrayCounts），前台 bash 工具调用
+  // 不产条目（2026-10-22 实测）——faux 实例可制造记录的路径受限，条件等待 30s 不出现
+  // 则登记 uncovered（mock-http 的 subagent record 是可行的制造路径，挂执行域剧本延伸）
+  let traySeen = false
+  try {
+    await ui.expectVisible('testid=tray-builtin-button', { timeoutMs: 30_000 })
+    traySeen = true
+  } catch { /* 登记后跳过 */ }
+  if (traySeen) {
+    await ui.click('testid=tray-builtin-button', { timeoutMs: 15_000 })
+    await ui.expectVisible('testid=tray-panel', { timeoutMs: 15_000 })
+    ev.assert('A: 托盘面板展开（tray-panel surface）', true, {
+      channel: 'A', expected: 'tray-panel', actual: '可见',
+    })
+    await ev.shot(await instance.page(), 'tray-panel-open')
+    await ui.press('Escape')
+    await ui.expectGone('testid=tray-panel', { timeoutMs: 15_000 })
+    ev.assert('A: Esc 关闭托盘面板（键盘栈序最小回路）', true, {
+      channel: 'A', expected: 'tray-panel 移除', actual: '已关闭',
+    })
+    ev.step({ step: 'ui.container.tray', channel: 'A', exitCode: 0, stats: {} })
+  } else {
+    uncovered.push('托盘开/关回路未验：faux 实例跑一轮前台 bash 不产托盘条目（托盘统计面 = subagent/workflow/后台 bash 记录）——制造路径需 mock-http 执行域 record，挂 p0-subagent-workflow-dispatch 延伸')
+    ev.step({ step: 'ui.container.tray', channel: 'A', exitCode: 1, stats: { skipped: true } })
+  }
 
   log(`done sid=${sid}`)
   return { uncovered, gotchas }

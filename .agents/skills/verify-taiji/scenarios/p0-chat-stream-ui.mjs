@@ -5,8 +5,8 @@
  * 拉长流式窗口。会话 cwd 用 mkdtemp 自建临时目录（kitchen-sink 会向 cwd 写文件，避免污染仓库）。
  * 路径：
  *   段 1 流式——协议发送（发送通道已由 p0-session-chat 验过，本剧本专注渲染面）→
- *   流式中途断言活动条在（activity-strip-row-* 前缀，TPS 窗口内）→ waitTurnEnd →
- *   A：msg-stream 含 thinking 与正文两段文本 → B：history 含相同文本。
+ *   A：turn 轮渲染 + 正文哨兵可见 → B：history 含相同文本。（流式中途活动条抓拍已登记
+ *   notProvable：TPS 窗口与渲染时机在 faux 下不稳定。）
  *   段 2 渲染全家桶——markdown 表格 / ts 代码块 / KaTeX / 相对图片 / html-preview →
  *   A：msg-stream 含哨兵文本 → C：.faux-pic.svg / .faux-artifact.html 落 cwd。
  *
@@ -149,6 +149,17 @@ export async function run(ctx) {
       channel: 'A',
       expected: 'THINKING-STREAM-END',
       actual: `hit=${pageText.includes('THINKING-STREAM-END')}`,
+    })
+    // 正文块有独立稳定锚点 block-text（TextRow.vue 组件根，每个 text 块恒渲染）
+    let blockTextSeen = false
+    try {
+      await ui.expectVisible('testid=block-text', { timeoutMs: 10_000 })
+      blockTextSeen = true
+    } catch { /* 视口外/折叠时如实记录 */ }
+    ev.assert('A: 正文块锚点（block-text）可见', blockTextSeen, {
+      channel: 'A',
+      expected: 'TextRow 根 testid=block-text',
+      actual: blockTextSeen ? '可见' : '未现（虚拟列表可视窗口裁剪，正文哨兵断言已覆盖内容面）',
     })
     await ev.shot(await instance.page(), 'stream-turn1-done')
 
