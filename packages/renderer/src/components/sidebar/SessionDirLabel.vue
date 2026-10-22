@@ -39,7 +39,7 @@
         size="icon"
         data-testid="folder-delete-btn"
         :class="confirming
-          ? 'size-[22px] rounded-sm border border-danger bg-danger text-neutral-fg'
+          ? 'size-[22px] rounded-sm border border-danger bg-danger text-danger-fg'
           : 'size-[22px] rounded-sm border border-border-strong bg-surface text-neutral-mid hover:bg-surface-hover hover:text-danger'"
         :title="confirming
           ? t('sidebar.sessionList.deleteFolderConfirm')
