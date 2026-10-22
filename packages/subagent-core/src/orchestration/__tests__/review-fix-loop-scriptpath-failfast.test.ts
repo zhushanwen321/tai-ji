@@ -124,7 +124,7 @@ function probeCode(stem: string, workerDataJson: string, argsJson: string): stri
   ].join("\n");
 }
 
-describe("内置 workflow 脚本 scriptPath 锚定 fail-fast（u0-failfast）", () => {
+describe("内置 workflow 脚本 scriptPath 锚定 fail-fast", () => {
   it.each(SCRIPT_STEMS.map((stem) => [stem]))(
     "%s：scriptPath 缺席 → 非零退出 + core_module_load_failed，cwd 植入依赖不被加载",
     async (stem) => {
