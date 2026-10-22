@@ -921,3 +921,13 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：三家协议探针全链路出话实证（Qoder 钥匙串解密 / Trae 容器解密 / WorkBuddy OAuth）；pi custom provider 扩展机制按 node_modules 实装版 + 官方文档核实（事件流契约/refreshModels 持久化/oauth 三钩子完整）；taiji 扩展分发链与 RPC 扩展 UI 通道读码核实；上游主动对抗（校验持续加码）决定协议实装必须按家族独立成包、可独立于 taiji 发版更新。方案对比与逐项否决理由见 wool-provider 设计文档 §3.2。
 
 **登记**：实装 = `extensions/universal/pi-wool-{qoder,trae,workbuddy}/` + 共享库 `extensions/shared/wool-shared/`（脚手架/管理指令协议/账号状态/SSE 工具）；taiji 宿主 = `packages/shared/src/wool.ts`（域类型与清单 schema）+ `packages/runtime/src/services/wool-manager.ts`（清单拉取/安装编排/管理专用会话/缓存）+ model-service 聚合并入 + `packages/renderer/src/components/settings/provider/WoolWizard/`（两族模板向导）；文档同步 = [FEATURE-PRIORITIES.md](../FEATURE-PRIORITIES.md) §4/§6、[CONTEXT.md](../CONTEXT.md) 羊毛词条、[TEST-STRATEGY.md](../TEST-STRATEGY.md) 真机验收轨、AGENTS.md extensions 列举。设计过程产物（tech-design 归档），本条即该形态决策的现行登记处。
+
+### ADR-0153 羊毛插件包迁独立仓 tai-ji-plugin：单仓多包 + npm 独立发版线 + 资产清单随 release 上传（2026-10-22 用户裁决，wool-provider）
+
+**决策**：羊毛 provider 插件包（`wool-shared` + `pi-wool-{qoder,trae,workbuddy}` 共 4 包）从主仓 `extensions/` 迁出到独立 git 仓库 `zhushanwen321/tai-ji-plugin`（本地 `<workspace>/../tai-ji-plugin-workspace`，bare 模式 workspace：`.bare` git dir + `main` worktree）。仓库形态 = pnpm workspace 单仓多包、源码直出、changeset 管版本、npm 发布独立于 taiji 应用版本（热更新解耦的根因 = 消费级私有协议主动对抗，扩展必须独立于 taiji 发版更新——ADR-0152 的分发决策在仓库层的收口）。
+
+**发布链收口（a5 验收发现的缺口）**：`wool-manifest.json` 由新仓 `scripts/gen-manifest.mjs` 生成（家族静态元数据内联 + version 从各包 package.json 单源读取），随 `npm-*` tag 触发的 release workflow 上传 GitHub release——taiji 宿主 `DEFAULT_WOOL_MANIFEST_URL`（releases/latest/download 语义）自此有真实供给，install 动作的清单校验不再 404。
+
+**主仓侧**：`packages/runtime` wool-manager 与扩展包的契约 = 管理指令协议（字符串信封）+ models.json 条目（数据契约），无模块级依赖（迁移安全性的机器证据 = 迁移前 grep 全仓零 `pi-wool` import）；设置页向导、wool-manager、凭据通道全部保留在主仓（taiji 是扩展的增值前端）。AGENTS.md 扩展列举同步（21 包 + 新仓指针）；验收剧本 fixture 预置源改挂新仓。
+
+**依据**：能读凭据的可执行代码独立成仓 = 供应链隔离边界（与「首版官方源收紧」同向）；独立 issue/PR/发布节奏解耦主仓 P0 载体的变更节奏；既有「旧独立扩展仓废弃、统一主仓」约定由本条修订——羊毛包是首个例外，其余 21 个 builtin/feature 扩展维持主仓（无独立发版诉求，不迁移）。
