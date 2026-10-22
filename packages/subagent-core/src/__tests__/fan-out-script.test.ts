@@ -3,10 +3,11 @@
 // 决策编号，现行设计文档与 impl-plan 均无对应——git 可追溯）。
 //
 // 测试方法（同 review-fix-loop-script.test.ts 先例）：fan-out.js 是 pi worker 模板
-// 脚本——顶层执行 + 顶层 return，不可作为 ES module import。用 node -e「AsyncFunction
-// 包装 + 真实子进程」跑整脚本副本：注入 fake agent / parallel / phase / log 与真实
-// require 沙箱（workerData.scriptPath 锚定契约，探针注入真实路径）。探针无文件系统
-// 副作用（fan-out 不落盘），读原路径即可。
+// 脚本——顶层执行 + 顶层 return，不可作为 ES module import。用 AsyncFunction 在
+// 本进程内复刻 worker 模板宿主形态（注入 fake agent / parallel / phase / log 与
+// require；workerData.scriptPath 锚定契约，注入真实路径）。[单测层极端测试整治]
+// 原形态为 node -e 冷 spawn 探针（每用例 ~0.3s，负载下无上界），in-process 化后
+// 派发/断言语义不变、零 spawn。探针无文件系统副作用（fan-out 不落盘）。
 //
 // fake parallel 复刻 worker-script-builder.ts parallel() 的结果归一化语义
 // （fulfilled 对象透传 / fulfilled 非对象→failed / rejected→failed），使「成员死亡走
@@ -23,10 +24,9 @@
 //   - D5 通知体积保序截断（truncated 标记 + taskIndex/status 恒完整）
 //   - D4 aggregate 可选归约（末尾一个 agent()；归约失败不炸 run）
 //   - @pi-meta parameters 对象-only（additionalProperties:false + task minLength + pattern ^/）
-import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { promisify } from "node:util";
+import { createRequire } from "node:module";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -36,18 +36,7 @@ const WORKFLOWS_DIR = join(__dirname, "..", "..", "workflows");
 const FANOUT_PATH = join(WORKFLOWS_DIR, "fan-out.js");
 const FANOUT_SOURCE = readFileSync(FANOUT_PATH, "utf8");
 
-const run = promisify(execFile);
-
-interface ExecFailure extends Error {
-  code?: number | string;
-  stderr?: string;
-}
-
-function isExecFailure(e: unknown): e is ExecFailure {
-  return e instanceof Error;
-}
-
-/** fake agent 行为表（JSON 可序列化，内联进探针）。 */
+/** fake agent 行为表。 */
 interface AgentBehavior {
   /** 每个成功成员的 summary 字符串（默认短摘要） */
   summaryOf?: string;
@@ -87,124 +76,138 @@ interface ProbeResult {
   logs: string[];
 }
 
-/** 生成 node -e 探针：AsyncFunction 复刻 worker 模板宿主形态。 */
-function probeCode(argsJson: string, behaviorJson: string): string {
-  return [
-    "const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;",
-    "const src = require('fs').readFileSync(" + JSON.stringify(FANOUT_PATH) + ", 'utf8');",
-    "const runner = new AsyncFunction('workerData', '$ARGS', 'agent', 'parallel', 'phase', 'log', 'require', src + '\\n');",
-    "const workerData = { scriptPath: " + JSON.stringify(FANOUT_PATH) + " };",
-    "const $ARGS = " + argsJson + ";",
-    "const behavior = " + behaviorJson + ";",
-    "const agentCalls = [];",
-    "function fakeAgent(opts) {",
-    "  agentCalls.push(opts);",
-    "  const m = /^fan-out-(\\d+)$/.exec(opts.description || '');",
-    "  const idx = m ? Number(m[1]) : -1;",
-    "  if (idx >= 0) {",
-    "    if ((behavior.failIndexes || []).indexOf(idx) >= 0) {",
-    "      if (behavior.failMode === 'resolve-string') return Promise.resolve('plain error text ' + idx);",
-    "      return Promise.reject(new Error('boom-' + idx));",
-    "    }",
-    "    return Promise.resolve({ summary: behavior.summaryOf || ('summary-' + idx), fullReportPath: '/tmp/fanout-report-' + idx + '.md' });",
-    "  }",
-    "  if (opts.description === 'fan-out-aggregate') {",
-    "    if (behavior.aggregate === 'reject') return Promise.reject(new Error('agg-boom'));",
-    "    return Promise.resolve({ conclusion: 'conclusion-text' });",
-    "  }",
-    "  return Promise.resolve({ summary: 'misc' });",
-    "}",
-    // parallel 归一化语义复刻（worker-script-builder.ts parallel() 的三分支）
-    "async function fakeParallel(calls) {",
-    "  const settled = await Promise.allSettled(calls.map((c) => (c && typeof c.then === 'function') ? c : fakeAgent(c)));",
-    "  return settled.map((r) => {",
-    "    if (r.status === 'fulfilled') {",
-    "      const v = r.value;",
-    "      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {",
-    "        if (typeof v.error === 'string' && v.error.length > 0) return { status: 'failed', error: v.error };",
-    "        return v;",
-    "      }",
-    "      return { status: 'failed', error: 'agent returned non-object result (type=' + typeof v + ')' };",
-    "    }",
-    "    const reason = r.reason;",
-    "    return { status: 'failed', error: reason instanceof Error ? reason.message : String(reason) };",
-    "  });",
-    "}",
-    "const logs = [];",
-    "runner(workerData, $ARGS, fakeAgent, fakeParallel, function () {}, function (msg) { logs.push(String(msg)); }, require)",
-    "  .then((outcome) => {",
-    "    process.stdout.write('PROBE_RESULT:' + JSON.stringify({ outcome, agentCalls, logs }) + '\\n');",
-    "  })",
-    "  .catch((e) => {",
-    "    process.stderr.write('PROBE_THROW:' + String((e && e.message) || e) + '\\n');",
-    "    process.exit(1);",
-    "  });",
-  ].join("\n");
+/** worker 模板宿主形态：AsyncFunction 以注入参数为自由变量执行整脚本源码（顶层 return 即 runner 应答值）。 */
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (
+  ...params: string[]
+) => (this: unknown, ...args: unknown[]) => Promise<unknown>;
+
+const makeRunner = () =>
+  new AsyncFunction("workerData", "$ARGS", "agent", "parallel", "phase", "log", "require", FANOUT_SOURCE + "\n");
+
+const WORKER_DATA = { scriptPath: FANOUT_PATH };
+const requireFromTest = createRequire(import.meta.url);
+const noopPhase = (): void => {};
+
+/** fake agent：行为表驱动（与原 node -e 探针内联版本逐语义对齐）。 */
+function makeFakeAgent(behavior: AgentBehavior, agentCalls: AgentCallRecord[]) {
+  return (opts: AgentCallRecord): Promise<unknown> => {
+    agentCalls.push(opts);
+    const m = /^fan-out-(\d+)$/.exec(opts.description ?? "");
+    const idx = m ? Number(m[1]) : -1;
+    if (idx >= 0) {
+      if ((behavior.failIndexes ?? []).includes(idx)) {
+        if (behavior.failMode === "resolve-string") {
+          // resolve-string = 引擎失败回退形态（非对象结果 → parallel 归一化判 failed）
+          return Promise.resolve("plain error text " + idx);
+        }
+        return Promise.reject(new Error("boom-" + idx));
+      }
+      return Promise.resolve({
+        summary: behavior.summaryOf ?? "summary-" + idx,
+        fullReportPath: "/tmp/fanout-report-" + idx + ".md",
+      });
+    }
+    if (opts.description === "fan-out-aggregate") {
+      if (behavior.aggregate === "reject") return Promise.reject(new Error("agg-boom"));
+      return Promise.resolve({ conclusion: "conclusion-text" });
+    }
+    return Promise.resolve({ summary: "misc" });
+  };
 }
 
-async function runProbe(args: unknown, behavior: AgentBehavior): Promise<ProbeResult> {
-  const r = await run(process.execPath, ["-e", probeCode(JSON.stringify(args), JSON.stringify(behavior))], {
-    timeout: 30_000,
-  });
-  const line = r.stdout.split("\n").find((l) => l.startsWith("PROBE_RESULT:"));
-  if (!line) throw new Error("probe produced no PROBE_RESULT line; stdout=" + r.stdout);
-  return JSON.parse(line.slice("PROBE_RESULT:".length)) as ProbeResult;
-}
-
-async function runProbeExpectThrow(args: unknown, behavior: AgentBehavior): Promise<string> {
-  const outcome = await run(process.execPath, ["-e", probeCode(JSON.stringify(args), JSON.stringify(behavior))], {
-    timeout: 30_000,
-  }).then(
-    (): ExecFailure | null => null,
-    (e: unknown): ExecFailure | null => (isExecFailure(e) ? e : null),
+/** parallel 归一化语义复刻（worker-script-builder.ts parallel() 的三分支）。 */
+async function fakeParallel(
+  calls: Array<Promise<unknown> | AgentCallRecord>,
+  fakeAgent: (opts: AgentCallRecord) => Promise<unknown>,
+): Promise<Array<Record<string, unknown>>> {
+  const settled = await Promise.allSettled(
+    calls.map((c) => (c instanceof Promise ? c : fakeAgent(c as AgentCallRecord))),
   );
-  if (outcome === null) {
-    throw new Error("expected non-zero exit, but node exited 0 with args: " + JSON.stringify(args));
+  return settled.map((r) => {
+    if (r.status === "fulfilled") {
+      const v = r.value;
+      if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+        const rec = v as Record<string, unknown>;
+        if (typeof rec.error === "string" && rec.error.length > 0) {
+          return { status: "failed", error: rec.error };
+        }
+        return rec;
+      }
+      return { status: "failed", error: "agent returned non-object result (type=" + typeof v + ")" };
+    }
+    const reason = r.reason;
+    return { status: "failed", error: reason instanceof Error ? reason.message : String(reason) };
+  });
+}
+
+async function runScript(args: unknown, behavior: AgentBehavior): Promise<ProbeResult> {
+  const agentCalls: AgentCallRecord[] = [];
+  const logs: string[] = [];
+  const fakeAgent = makeFakeAgent(behavior, agentCalls);
+  const outcome = (await makeRunner()(
+    WORKER_DATA,
+    args,
+    fakeAgent,
+    (calls: Array<Promise<unknown> | AgentCallRecord>) => fakeParallel(calls, fakeAgent),
+    noopPhase,
+    (msg: unknown) => {
+      logs.push(String(msg));
+    },
+    requireFromTest,
+  )) as ProbeResult["outcome"];
+  return { outcome, agentCalls, logs };
+}
+
+async function runScriptExpectThrow(args: unknown, behavior: AgentBehavior): Promise<string> {
+  try {
+    await runScript(args, behavior);
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
   }
-  return String(outcome.stderr ?? "");
+  throw new Error("expected script to throw, but it resolved with args: " + JSON.stringify(args));
 }
 
 const THREE_TASKS = [{ task: "count ts files" }, { task: "count md files" }, { task: "list exports" }];
 
 describe("fan-out.js 入口 fail-fast（tasks 对象-only 契约）", () => {
   it("tasks 元素为旧字符串形态 → throw（对象-only；validateRunArgs/ajv 类型校验第一道，脚本入口纵深兜底）", async () => {
-    const stderr = await runProbeExpectThrow({ tasks: ["t0", "t1"] }, { aggregate: "none" });
-    expect(stderr).toContain('must be objects with a non-blank "task" string');
-    expect(stderr).toContain("Correct:");
+    const message = await runScriptExpectThrow({ tasks: ["t0", "t1"] }, { aggregate: "none" });
+    expect(message).toContain('must be objects with a non-blank "task" string');
+    expect(message).toContain("Correct:");
     // fail-fast 发生在派发前：零 agent 调用
   });
 
   it("tasks 缺失 → throw 带 Correct 示例（直跑 workflow run 无 handler 前置校验时的兜底）", async () => {
-    const stderr = await runProbeExpectThrow({}, { aggregate: "none" });
-    expect(stderr).toContain("tasks is required");
-    expect(stderr).toContain('Correct: {"tasks"');
+    const message = await runScriptExpectThrow({}, { aggregate: "none" });
+    expect(message).toContain("tasks is required");
+    expect(message).toContain('Correct: {"tasks"');
   });
 
   it("tasks 空数组 → throw（minItems:1 的脚本入口纵深）", async () => {
-    const stderr = await runProbeExpectThrow({ tasks: [] }, { aggregate: "none" });
-    expect(stderr).toContain("tasks is required");
+    const message = await runScriptExpectThrow({ tasks: [] }, { aggregate: "none" });
+    expect(message).toContain("tasks is required");
   });
 
   it("成员缺 task 字段 → throw（task 必填的脚本入口纵深）", async () => {
-    const stderr = await runProbeExpectThrow(
+    const message = await runScriptExpectThrow(
       { tasks: [{ task: "ok" }, { agent: "/a/one.md" }] },
       { aggregate: "none" },
     );
-    expect(stderr).toContain('must be objects with a non-blank "task" string');
+    expect(message).toContain('must be objects with a non-blank "task" string');
   });
 
   it("member.task 为空白字符串 → throw（schema minLength 不拦空白，入口 trim 检查保留）", async () => {
-    const stderr = await runProbeExpectThrow(
+    const message = await runScriptExpectThrow(
       { tasks: [{ task: "ok" }, { task: "   " }] },
       { aggregate: "none" },
     );
-    expect(stderr).toContain('must be objects with a non-blank "task" string');
+    expect(message).toContain('must be objects with a non-blank "task" string');
   });
 });
 
 describe("fan-out.js 成员级配置派发（成员对象 agent/model/thinkingLevel）", () => {
   it("成员级 agent 逐成员生效（各成员可不同执行者）", async () => {
-    const r = await runProbe(
+    const r = await runScript(
       { tasks: [{ task: "t0", agent: "/a/one.md" }, { task: "t1", agent: "/b/two.md" }, { task: "t2", agent: "/a/one.md" }] },
       { aggregate: "none" },
     );
@@ -213,7 +216,7 @@ describe("fan-out.js 成员级配置派发（成员对象 agent/model/thinkingLe
   });
 
   it("成员未指定 agent → 不带 agent 字段（默认执行者；未指定字段不进 agent() 调用）", async () => {
-    const r = await runProbe({ tasks: [{ task: "t0" }, { task: "t1" }] }, { aggregate: "none" });
+    const r = await runScript({ tasks: [{ task: "t0" }, { task: "t1" }] }, { aggregate: "none" });
     expect(r.outcome.status).toBe("ok");
     for (const call of r.agentCalls) {
       expect(call.agent).toBeUndefined();
@@ -221,7 +224,7 @@ describe("fan-out.js 成员级配置派发（成员对象 agent/model/thinkingLe
   });
 
   it("成员级 model/thinkingLevel 进 agent() 调用；未指定不带字段（留给 $MODEL/$THINKING_LEVEL 继承）", async () => {
-    const r = await runProbe(
+    const r = await runScript(
       {
         tasks: [
           { task: "t0", model: "prov/model-one", thinkingLevel: "high" },
@@ -237,7 +240,7 @@ describe("fan-out.js 成员级配置派发（成员对象 agent/model/thinkingLe
   });
 
   it("description 恒为 fan-out-<i>（成员复用身份键，正则 ^fan-out-(\\d+)$ 派发序对齐）", async () => {
-    const r = await runProbe({ tasks: THREE_TASKS }, { aggregate: "none" });
+    const r = await runScript({ tasks: THREE_TASKS }, { aggregate: "none" });
     expect(r.agentCalls.map((c) => c.description)).toEqual(["fan-out-0", "fan-out-1", "fan-out-2"]);
     // 静态锚：派发块的 description 不承载显示语义，模板源码保持 "fan-out-" + i 字面拼接
     expect(FANOUT_SOURCE).toContain('description: "fan-out-" + i,');
@@ -246,7 +249,7 @@ describe("fan-out.js 成员级配置派发（成员对象 agent/model/thinkingLe
 
 describe("fan-out.js taskIndex 派发序赋值（D4 权威源契约）", () => {
   it("results[].taskIndex 严格等于 $ARGS.tasks 下标，task 文本以 member.task 为权威源", async () => {
-    const r = await runProbe(
+    const r = await runScript(
       { tasks: THREE_TASKS.map((m) => ({ ...m, agent: "/x/one.md" })) },
       { aggregate: "none" },
     );
@@ -262,7 +265,7 @@ describe("fan-out.js taskIndex 派发序赋值（D4 权威源契约）", () => {
   });
 
   it("成员输出 schema 不含 taskIndex（成员无从错报）——schema 只有 summary/fullReportPath", async () => {
-    const r = await runProbe({ tasks: [{ task: "t0" }, { task: "t1" }] }, { aggregate: "none" });
+    const r = await runScript({ tasks: [{ task: "t0" }, { task: "t1" }] }, { aggregate: "none" });
     for (const call of r.agentCalls) {
       expect(call.schema?.required).toEqual(["summary"]);
       expect(Object.keys(call.schema?.properties ?? {}).sort()).toEqual(["fullReportPath", "summary"]);
@@ -278,7 +281,7 @@ describe("fan-out.js taskIndex 派发序赋值（D4 权威源契约）", () => {
 
 describe("fan-out.js 失败语义（D4/G2：allSettled partial 收尾）", () => {
   it("部分成员失败 → status=partial，失败条目带 error，其余成员 ok 不被阻断；收尾提示只重派失败 taskIndex", async () => {
-    const r = await runProbe(
+    const r = await runScript(
       { tasks: THREE_TASKS.map((m) => ({ ...m, agent: "/x/one.md" })) },
       { failIndexes: [1], aggregate: "none" },
     );
@@ -298,7 +301,7 @@ describe("fan-out.js 失败语义（D4/G2：allSettled partial 收尾）", () =>
   });
 
   it("成员 resolve 非对象结果（引擎失败回退形态）→ failed 条目，不炸 run", async () => {
-    const r = await runProbe(
+    const r = await runScript(
       { tasks: [{ task: "t0" }, { task: "t1" }] },
       { failIndexes: [0], failMode: "resolve-string", aggregate: "none" },
     );
@@ -309,19 +312,19 @@ describe("fan-out.js 失败语义（D4/G2：allSettled partial 收尾）", () =>
   });
 
   it("全员失败 → throw（run failed，非 error outcome 收尾）", async () => {
-    const stderr = await runProbeExpectThrow(
+    const message = await runScriptExpectThrow(
       { tasks: [{ task: "t0" }, { task: "t1" }] },
       { failIndexes: [0, 1], aggregate: "none" },
     );
-    expect(stderr).toContain("all tasks failed");
-    expect(stderr).toContain("2/2");
+    expect(message).toContain("all tasks failed");
+    expect(message).toContain("2/2");
   });
 });
 
 describe("fan-out.js 通知体积保序截断（D5：truncated 标记）", () => {
   it("results 超预算 → truncated:true，按序截断（靠前完整、靠后让出 summary），taskIndex/status/路径恒完整", async () => {
     const behavior: AgentBehavior = { summaryOf: "x".repeat(3000), aggregate: "none" };
-    const r = await runProbe(
+    const r = await runScript(
       { tasks: [{ task: "t0" }, { task: "t1" }, { task: "t2" }, { task: "t3" }, { task: "t4" }] },
       behavior,
     );
@@ -340,7 +343,7 @@ describe("fan-out.js 通知体积保序截断（D5：truncated 标记）", () =>
   });
 
   it("总量在预算内 → 无 truncated 标记（缺省即 false 语义）", async () => {
-    const r = await runProbe({ tasks: [{ task: "t0" }, { task: "t1" }] }, { aggregate: "none" });
+    const r = await runScript({ tasks: [{ task: "t0" }, { task: "t1" }] }, { aggregate: "none" });
     expect(r.outcome.truncated).toBeUndefined();
     expect(r.outcome.results[0].summary).toBe("summary-0");
   });
@@ -348,7 +351,7 @@ describe("fan-out.js 通知体积保序截断（D5：truncated 标记）", () =>
 
 describe("fan-out.js aggregate 可选归约（D4）", () => {
   it("aggregate=true → 末尾追加一个聚合 agent（共 N+1 次调用），outcome.aggregate 为结论，status=ok", async () => {
-    const r = await runProbe(
+    const r = await runScript(
       { tasks: THREE_TASKS, aggregate: true },
       { aggregate: "ok" },
     );
@@ -360,13 +363,13 @@ describe("fan-out.js aggregate 可选归约（D4）", () => {
   });
 
   it("aggregate 缺省 → 纯收集，不派聚合成员，outcome 无 aggregate 字段", async () => {
-    const r = await runProbe({ tasks: [{ task: "t0" }, { task: "t1" }] }, { aggregate: "none" });
+    const r = await runScript({ tasks: [{ task: "t0" }, { task: "t1" }] }, { aggregate: "none" });
     expect(r.agentCalls).toHaveLength(2);
     expect(r.outcome.aggregate).toBeUndefined();
   });
 
   it("归约成员失败 → 不炸 run：已收集 results 照常收尾，status 降 partial，aggregate 携带 error", async () => {
-    const r = await runProbe(
+    const r = await runScript(
       { tasks: THREE_TASKS, aggregate: true },
       { aggregate: "reject" },
     );

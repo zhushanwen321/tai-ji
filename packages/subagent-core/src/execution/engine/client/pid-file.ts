@@ -245,6 +245,15 @@ export interface SweepStalePidfilesOptions {
   platform?: NodeJS.Platform;
   /** 杀执行器注入（缺省 POSIX 负 pid 按进程组终止；测试红线：绝不真杀无关进程）。 */
   killEngine?: (enginePid: number) => void;
+  // ── 探测原语注入（缺省 = 本文件真实实现；单测注入确定性桩，消除真进程依赖——
+  //    探测对象是「pid 存活 / cmdline / OS 启动时间」的进程事实，属单测层判据③，
+  //    见 docs/todo/test-single-layer-cleanup.md）──
+  /** pid 三态存活探测注入（缺省 probePidAliveness）。 */
+  probeAliveness?: (pid: number) => boolean | undefined;
+  /** cmdline 读取注入（缺省 ps -o command=）。 */
+  readCmdline?: (pid: number) => string | undefined;
+  /** OS 启动时间读取注入（缺省 ps -o lstart=）。 */
+  readStartTime?: (pid: number) => string | undefined;
 }
 
 /**
@@ -298,7 +307,7 @@ function sweepOnePidfile(
     return;
   }
 
-  const hostAlive = probePidAliveness(content.hostPid);
+  const hostAlive = (opts.probeAliveness ?? probePidAliveness)(content.hostPid);
   if (hostAlive === undefined) {
     result.skipped.push({ file, reason: "host-pid-probe-uncertain" });
     return;
@@ -333,7 +342,7 @@ function reapDeadHostEngine(
     return;
   }
 
-  const engineAlive = probePidAliveness(content.enginePid);
+  const engineAlive = (opts.probeAliveness ?? probePidAliveness)(content.enginePid);
   if (engineAlive === undefined) {
     result.skipped.push({ file, reason: "engine-pid-probe-uncertain" });
     return;
@@ -344,7 +353,7 @@ function reapDeadHostEngine(
     return;
   }
 
-  const cmdline = readProcessCmdline(content.enginePid);
+  const cmdline = (opts.readCmdline ?? readProcessCmdline)(content.enginePid);
   if (cmdline === undefined) {
     result.skipped.push({ file, reason: "engine-cmdline-probe-uncertain" });
     return;
@@ -356,7 +365,7 @@ function reapDeadHostEngine(
     return;
   }
 
-  const startTime = readProcessStartTime(content.enginePid);
+  const startTime = (opts.readStartTime ?? readProcessStartTime)(content.enginePid);
   if (startTime === undefined) {
     result.skipped.push({ file, reason: "engine-start-time-probe-uncertain" });
     return;

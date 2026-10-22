@@ -20,7 +20,6 @@
  * 运行：cd packages/runtime && npx vitest run test/background-task-reaper.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -165,13 +164,6 @@ function findEntry(agentDir: string, sessionId: string, taskId: string): Backgro
 
 function zeroResult(): BackgroundTaskReapResult {
   return { scannedDirs: 0, ownerAliveSkipped: 0, killedOrphans: 0, finalizedOrphans: 0, conservativelySkipped: 0 }
-}
-
-/** 取一个确定已死亡的 pid（短命子进程退出即死；测试内即刻使用，pid 复用窗口趋零）。 */
-function deadPid(): number {
-  const r = spawnSync(process.execPath, ['-e', ''])
-  if (typeof r.pid !== 'number') throw new Error('cannot acquire dead pid for fixture')
-  return r.pid
 }
 
 // ── 三分支判定 ─────────────────────────────────────────────
@@ -479,7 +471,14 @@ function makeSessionService(): SessionService {
 describe('触发面 A 挂接（session-service.removeSessionDestroyed 汇聚点）', () => {
   it('removeSessionEntry 触发收殓：参数 (getPiAgentDir(), sessionId)，且不 await 销毁链（延后拍完成处置）', async () => {
     const service = makeSessionService()
-    // 真实 registry + 真实 pid 探测：owner/task 均为确定已死 pid → 走③终态收尾
+    // 真实 registry + 注入 pid 探测替身（与全文件 Mock 边界一致，零真实进程）：挂接方
+    // 调用不带 deps（生产默认真实探测），经 vi.fn 包装层注入——alivePids 空 = owner/task
+    // 均判死 → 走③终态收尾；reaper 判定与 registry RMW 仍为真实执行
+    const actual = await vi.importActual<typeof import('../src/services/session/background-task-reaper.js')>('../src/services/session/background-task-reaper.js')
+    const { deps } = makeDeps()
+    vi.mocked(reapSessionBackgroundTasks).mockImplementation(
+      async (agentDir: string, sessionId: string) => actual.reapSessionBackgroundTasks(agentDir, sessionId, deps),
+    )
     const sid = `trigger-a-${process.pid}`
     // 布局与生产 registry 同源（ext-sessions 树内 background-tasks 域）
     const sessionDir = dirname(getSessionRegistryPath(getPiAgentDir(), sid))
@@ -487,18 +486,23 @@ describe('触发面 A 挂接（session-service.removeSessionDestroyed 汇聚点�
     mkdirSync(sessionDir, { recursive: true })
     writeFileSync(
       join(sessionDir, 'registry.json'),
-      `${JSON.stringify({ version: 1, entries: [makeEntry({ taskId: `bt-${sid}`, pid: deadPid(), ownerPiPid: deadPid(), sessionId: sid })] }, null, 2)}\n`,
+      `${JSON.stringify({ version: 1, entries: [makeEntry({ taskId: `bt-${sid}`, sessionId: sid })] }, null, 2)}\n`,
     )
 
-    service.removeSessionEntry(sid) // 同步返回（void）
+    try {
+      service.removeSessionEntry(sid) // 同步返回（void）
 
-    // 挂接参数：agentDir 为 pi agent 目录（registry 目录布局契约的 agentDir 同源）
-    expect(reapSessionBackgroundTasks).toHaveBeenCalledWith(getPiAgentDir(), sid)
-    // fire-and-forget：销毁链同步返回时收殓尚未执行（延后拍）
-    expect(findEntry(getPiAgentDir(), sid, `bt-${sid}`)?.state).toBe('running')
+      // 挂接参数：agentDir 为 pi agent 目录（registry 目录布局契约的 agentDir 同源）
+      expect(reapSessionBackgroundTasks).toHaveBeenCalledWith(getPiAgentDir(), sid)
+      // fire-and-forget：销毁链同步返回时收殓尚未执行（延后拍）
+      expect(findEntry(getPiAgentDir(), sid, `bt-${sid}`)?.state).toBe('running')
 
-    await new Promise((resolve) => setImmediate(resolve))
-    expect(findEntry(getPiAgentDir(), sid, `bt-${sid}`)?.state).toBe('orphaned')
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(findEntry(getPiAgentDir(), sid, `bt-${sid}`)?.state).toBe('orphaned')
+    } finally {
+      // 恢复透传实现（后续用例不被本用例的 deps 注入影响）
+      vi.mocked(reapSessionBackgroundTasks).mockImplementation(actual.reapSessionBackgroundTasks)
+    }
   })
 
   it('收殓 reject 不外抛：removeSessionEntry 不 throw，catch 落 warn', async () => {

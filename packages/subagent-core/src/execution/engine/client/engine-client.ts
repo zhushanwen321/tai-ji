@@ -865,7 +865,9 @@ export class EngineClient {
     return this.writeFrame({ id, result });
   }
 
-  private appendStderrTail(chunk: string): void {
+  // protected = 测试 seam：进程端点桩 transport（resolveTransport 子类覆写）需要与
+  // 生产同源的 stderr 环形缓冲接线（onStderr → 本方法），单测据此验证环缓冲语义。
+  protected appendStderrTail(chunk: string): void {
     this.stderrTail = (this.stderrTail + chunk).slice(-STDERR_TAIL_CHARS);
   }
 }

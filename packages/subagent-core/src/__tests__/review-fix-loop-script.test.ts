@@ -18,11 +18,10 @@
 // 结构化返回失败即终判，脚本侧无 F-1 字面量、无降级可观测性；引擎侧
 // DETERMINISTIC_SCHEMA_FAILURE_PREFIX 常量仍被宿主 execute-agent-call 重试分诊
 // 消费（output-collector.test.ts 侧覆盖），与本脚本无契约关系。
-import { execFile } from "node:child_process";
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import vm from "node:vm";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -347,86 +346,52 @@ describe("review-fix-loop.js buildRemaining（终态残留四字段清单）", (
 
 // ── RX2-F2：fixAgent=fallow-scan 显式拒收（脚本顶层参数校验，非函数段） ──
 // 拒收逻辑位于脚本顶层（FIX_AGENT_RAW 解析后、resolveAgentDefs 前），函数段抽取法
-// 覆盖不到；改用 review-fix-loop-scriptpath-failfast.test.ts 同款「AsyncFunction 包装
-// + node -e 真实子进程」探针跑整脚本顶层副本。拒收点在 RUN_ROOT 落盘 / lockReviewBase
-// 之前，探针无文件系统副作用、恒非零退出。
+// 覆盖不到；改用「AsyncFunction 包装」在本进程内跑整脚本顶层（worker 模板宿主形态：
+// workerData/$ARGS/require/log/$MODEL 注入；workerData.scriptPath 锚定真实路径——
+// utils 锚定加载经 scriptPath 同目录 require，无需副本）。[单测层极端测试整治]
+// 原形态为 node -e 冷 spawn 探针，in-process 化后断言语义不变、零 spawn。拒收点在
+// RUN_ROOT 落盘 / lockReviewBase 之前（对照用例 fail 于 parseBatches 的批次校验，
+// 仍在 RUN_ROOT 创建之前），执行无文件系统副作用、恒 reject。
 describe("review-fix-loop.js fixAgent=fallow-scan 显式拒收（RX2-F2）", () => {
-  const run = promisify(execFile);
+  /** worker 模板宿主形态：AsyncFunction 以注入参数为自由变量执行整脚本源码。 */
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (
+    ...params: string[]
+  ) => (this: unknown, ...args: unknown[]) => Promise<unknown>;
 
-  /** execFile reject 侧的最小形状（Node ExecException 子集）。 */
-  interface ExecFailure extends Error {
-    code?: number | string;
-    stderr?: string;
-  }
+  const RFL_PATH = join(__dirname, "..", "..", "workflows", "review-fix-loop.js");
+  const runner = new AsyncFunction("workerData", "$ARGS", "require", "log", "$MODEL", WORKFLOW_SOURCE + "\n");
+  const requireFromTest = createRequire(import.meta.url);
 
-  function isExecFailure(e: unknown): e is ExecFailure {
-    return e instanceof Error;
-  }
-
-  let sandboxDir = "";
-
-  beforeEach(() => {
-    sandboxDir = mkdtempSync(join(tmpdir(), "rfl-fixagent-guard-"));
-    const workflowsDir = join(__dirname, "..", "..", "workflows");
-    // 副本以 .cjs 落 sandbox（require 解析形态对齐 worker 宿主）；utils 锚定加载经
-    // workerData.scriptPath（副本同目录），白名单校验前即需要它
-    copyFileSync(join(workflowsDir, "review-fix-loop.js"), join(sandboxDir, "review-fix-loop.cjs"));
-    copyFileSync(join(workflowsDir, "review-fix-loop-utils.cjs"), join(sandboxDir, "review-fix-loop-utils.cjs"));
-  });
-
-  afterEach(() => {
-    rmSync(sandboxDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-  });
-
-  /** -e 探针体：AsyncFunction 复刻 worker 模板宿主形态（workerData/$ARGS/log 注入）。 */
-  function probeCode(argsJson: string): string {
-    const copyPath = join(sandboxDir, "review-fix-loop.cjs");
-    return [
-      "const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;",
-      "const src = require('fs').readFileSync(" + JSON.stringify(copyPath) + ", 'utf8');",
-      "const runner = new AsyncFunction('workerData', '$ARGS', 'require', 'log', src + '\\n');",
-      "const workerData = { scriptPath: " + JSON.stringify(join(sandboxDir, "review-fix-loop.cjs")) + " };",
-      "const $ARGS = " + argsJson + ";",
-      // $MODEL 是 worker 模板全局（主模型注入）——对照用例会推进到 fixAgent 解析之后
-      // 的 MODEL = $MODEL 行（:204），缺席会 ReferenceError 而非到达批次校验
-      "const $MODEL = 'probe-model';",
-      "runner(workerData, $ARGS, require, function () {}).catch(function (e) {",
-      "  require('fs').writeSync(2, String((e && e.message) || e) + '\\n');",
-      "  process.exit(1);",
-      "});",
-    ].join("\n");
-  }
-
-  async function runProbeExpectFailure(argsJson: string): Promise<string> {
-    const outcome = await run(process.execPath, ["-e", probeCode(argsJson)], {
-      cwd: sandboxDir,
-      timeout: 30_000,
-    }).then(
-      (): ExecFailure | null => null,
-      (e: unknown): ExecFailure | null => (isExecFailure(e) ? e : null),
-    );
-    if (outcome === null) {
-      throw new Error("expected non-zero exit, but node exited 0 with args: " + argsJson);
+  /** 跑整脚本顶层；两个用例的参数形态都必然 reject（fail-fast），resolve 即测试失败。 */
+  async function runTopLevelExpectThrow(args: Record<string, unknown>): Promise<string> {
+    try {
+      await runner({ scriptPath: RFL_PATH }, args, requireFromTest, () => {}, "probe-model");
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
     }
-    return String(outcome.stderr ?? "");
+    throw new Error("expected script to throw, but it resolved with args: " + JSON.stringify(args));
   }
 
-  it("fixAgent=fallow-scan → 非零退出 + 保留字错误 + fallowScan=true 恢复指引", async () => {
-    const stderr = await runProbeExpectFailure(
-      '{ targetType: "file", target: "probe", fixAgent: "fallow-scan" }',
-    );
-    expect(stderr).toContain("内部保留字");
-    expect(stderr).toContain("fallowScan=true");
+  it("fixAgent=fallow-scan → throw 保留字错误 + fallowScan=true 恢复指引", async () => {
+    const message = await runTopLevelExpectThrow({
+      targetType: "file",
+      target: "probe",
+      fixAgent: "fallow-scan",
+    });
+    expect(message).toContain("内部保留字");
+    expect(message).toContain("fallowScan=true");
     // 旧实现静默映射 FALLOW_DEF（fix 派发退化为通用 subagent）——不会到达此处报错
   });
 
   it("对照：合法形态 fixAgent（.md 路径）不触发保留字拒收（后续批次校验照常 fail）", async () => {
-    const stderr = await runProbeExpectFailure(
-      '{ targetType: "file", target: "probe", fixAgent: "/tmp/rx2-f2-fake-agent.md" }',
-    );
+    const message = await runTopLevelExpectThrow({
+      targetType: "file",
+      target: "probe",
+      fixAgent: "/tmp/rx2-f2-fake-agent.md",
+    });
     // 推进到批次解析才失败（缺批次参数）——证明拒收只对字面值 fallow-scan 触发
-    expect(stderr).toContain("缺少批次参数");
-    expect(stderr).not.toContain("内部保留字");
+    expect(message).toContain("缺少批次参数");
+    expect(message).not.toContain("内部保留字");
   });
 });
 
