@@ -15,7 +15,10 @@
 // （ModelRegistry 公开方法，请求时鉴权语义）——脚手架经首个 session_start 捕获 ctx 后，
 // 家族 stream 在请求时拿到 { apiKey, headers, baseUrl }。
 
-import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
+// pi 宿主注入清单只支持 pi-ai 根/compat/oauth/providers/all 四入口（virtual-modules.js），
+// utils/transcript 深路径在真机 pi 加载下不可解析（单测环境被 repo node_modules 掩盖）——
+// getCurrentSystemPrompt/getCurrentTools 根入口有等价导出，改根 import
+import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import type {
 	ExtensionAPI,
 	ExtensionFactory,

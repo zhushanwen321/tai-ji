@@ -258,7 +258,7 @@ export async function runStreamCase(input: WoolStreamCaseInput): Promise<Assista
 }
 
 /** transcript 构造入口（家族测试需要多轮消息时用，normalizeContext 是唯一合法入口）。 */
-export { normalizeContext as buildTranscriptContext } from "@earendil-works/pi-ai/utils/transcript";
+export { normalizeContext as buildTranscriptContext } from "@earendil-works/pi-ai";
 
 /** HTTP 200（mockSseFetch 缺省状态码）。 */
 const HTTP_OK = 200;
