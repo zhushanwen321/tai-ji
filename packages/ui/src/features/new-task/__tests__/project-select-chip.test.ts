@@ -12,6 +12,7 @@ import { flushPromises } from '@vue/test-utils'
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import ProjectSelectChip from '../ProjectSelectChip.vue'
+import { Popover } from '../../../primitives/popover'
 import { NewTaskDepsKey, type NewTaskDeps } from '../new-task-deps'
 import type { Project } from '@taiji/shared'
 
@@ -104,5 +105,48 @@ describe('ProjectSelectChip', () => {
   it('历史态（projectId undefined）→ 锁定形态渲染且不崩', () => {
     const wrapper = mountChip(makeDeps(), { sessionId: 's1' })
     expect(wrapper.find('[data-testid="chip-project-locked"]').exists()).toBe(true)
+  })
+
+  it('popover open 变化回传 update:projectOpen（v-model:projectOpen 透传，flow 状态机互斥驱动）', async () => {
+    const wrapper = mountChip(makeDeps(), { sessionId: null })
+    wrapper.findComponent(Popover).vm.$emit('update:open', true)
+    await flushPromises()
+    expect(wrapper.emitted('update:projectOpen')).toEqual([[true]])
+  })
+
+  // 悬停 tooltip 打开（portal 挂 body，vue-test-utils 树外）：reka HoverCardTrigger 监听
+  // pointerenter（SystemNotice.test 同款手法），open-delay 200ms 后 vi.waitFor 轮询 document。
+  it('锁定态悬停 → HoverCard tooltip 渲染归属提示；历史态加注（未记录归属）', async () => {
+    const wrapper = mountChip(makeDeps(), { sessionId: 's1', projectId: 'proj-a' })
+    try {
+      await wrapper.find('[data-testid="chip-project-locked"]').trigger('pointerenter')
+      // reka HoverCardContent 无 role 语义（探针核实）：外层 popper wrapper 是唯一稳定锚点
+      const tooltip = await vi.waitFor(
+        () => {
+          const el = document.querySelector<HTMLElement>('[data-reka-popper-content-wrapper]')
+          expect(el).not.toBeNull()
+          return el!
+        },
+        { timeout: 2000, interval: 50 },
+      )
+      // vue-i18n mock 回 key + 命名参数追加：锁定提示含归属项目名（显示 ≡ 归属真源）
+      expect(tooltip.textContent).toContain('Project A')
+
+      // 历史态（projectId undefined）→ 加注文案拼接（legacy 后缀段进入 tooltip）
+      const legacy = mountChip(makeDeps(), { sessionId: 's2' })
+      try {
+        await legacy.find('[data-testid="chip-project-locked"]').trigger('pointerenter')
+        await vi.waitFor(() => {
+          const tooltips = document.querySelectorAll<HTMLElement>('[data-reka-popper-content-wrapper]')
+          expect(tooltips.length).toBe(2)
+          expect(tooltips[1]!.textContent).toContain('newTask.projectSelect.legacySessionTooltip')
+        }, { timeout: 2000, interval: 50 })
+      } finally {
+        legacy.unmount()
+      }
+    } finally {
+      wrapper.unmount()
+      document.body.innerHTML = ''
+    }
   })
 })

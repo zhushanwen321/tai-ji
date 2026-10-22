@@ -645,6 +645,41 @@ describe('useNewTaskFlow', () => {
   })
 })
 
+// ── 归属项目选择（ProjectSelectChip 数据链，2026-10-22）──────────────────────
+
+describe('useNewTaskFlow 归属项目选择（setPendingProject / openProjectPopover）', () => {
+  beforeEach(() => {
+    resetNewTaskFlow()
+    __resetLastUsedModelForTesting()
+    __resetModelThinkingMemoryForTesting()
+    __resetOrphanedDraftForTesting()
+  })
+
+  it('setPendingProject 态检查：idle noop；landing 写入 pendingProjectId（只读视图回读一致）', async () => {
+    const flow = useNewTaskFlow(makeDeps())
+    // idle（startFlow 前）非 landing/project-popover → noop
+    flow.setPendingProject('proj-a')
+    expect(useNewTaskFlowState().pendingProjectId.value).toBeNull()
+    await enterLanding(flow)
+    flow.setPendingProject('proj-a')
+    expect(flow.pendingProjectId.value).toBe('proj-a')
+  })
+
+  it('openProjectPopover → state 进 project-popover；overlay 内写入放行（点列表项时的真实态）', async () => {
+    const flow = useNewTaskFlow(makeDeps())
+    await enterLanding(flow)
+    flow.openProjectPopover()
+    expect(useNewTaskFlowState().state.value).toBe('project-popover')
+    // 用户点列表项 → Landing.onProjectSelect → setPendingProject（此时 state 是 project-popover）
+    flow.setPendingProject('proj-b')
+    expect(flow.pendingProjectId.value).toBe('proj-b')
+    // 关闭回 landing（用户点空白/Esc 关）后显式选择保持（chip 回显与 submit 同源）
+    flow.closeOverlay()
+    expect(useNewTaskFlowState().state.value).toBe('landing')
+    expect(flow.pendingProjectId.value).toBe('proj-b')
+  })
+})
+
 // ── 对抗审查修复回归（E 取消语义 / A 消费侧保稿 / B uuid 黏滞 / G 检查顺序） ──
 
 describe('useNewTaskFlow [E/B/A/G] 对抗审查修复', () => {

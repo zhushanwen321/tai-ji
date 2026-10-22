@@ -9,7 +9,7 @@
  * 运行：cd packages/ui && npx vitest run src/features/new-task
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import DirSelectPopover from '../DirSelectPopover.vue'
 import { NewTaskDepsKey, type NewTaskDeps } from '../new-task-deps'
@@ -158,5 +158,75 @@ describe('DirSelectPopover pin / 默认会话（2026-10-22）', () => {
       global: { provide: { [NewTaskDepsKey]: makeDeps({ defaultSessionDir: ref('') }) } },
     })
     expect(hidden.find('[data-testid="action-default-session"]').exists()).toBe(false)
+  })
+
+  it('setPinned 返回 false（store 层超上限被拒）→ toast 上限提示（调用后拒绝链路）', async () => {
+    const ts = 1_700_000_000_000
+    const setPinned = vi.fn(async () => false)
+    const toastError = vi.fn()
+    const deps = makeDeps({
+      recentWorkspaces: ref([{ cwd: '/Code/a', lastUsedAt: ts, label: 'a' }]),
+      setPinned,
+      toast: { error: toastError },
+    })
+    const wrapper = mount(DirSelectPopover, {
+      props: { currentCwd: null },
+      global: { provide: { [NewTaskDepsKey]: deps } },
+    })
+    await wrapper.find('[data-testid="workspace-pin-on"]').trigger('click')
+    await flushPromises()
+    expect(setPinned).toHaveBeenCalledWith('/Code/a', true)
+    expect(toastError).toHaveBeenCalled()
+  })
+})
+
+// ── 键盘导航与交互链（useFlatListNav 契约 + 行动作，2026-10-22）──────────────
+
+describe('DirSelectPopover 键盘导航 / 行交互', () => {
+  const ts = 1_700_000_000_000
+
+  function mountWith(overrides?: Partial<NewTaskDeps>) {
+    const deps = makeDeps({
+      recentWorkspaces: ref([
+        { cwd: '/Code/pinned-one', lastUsedAt: ts - 10, label: 'pinned-one', pinned: true },
+        { cwd: '/Code/recent-one', lastUsedAt: ts, label: 'recent-one' },
+      ]),
+      defaultSessionDir: ref('/data/defaultSession'),
+      ...overrides,
+    })
+    return mount(DirSelectPopover, {
+      props: { currentCwd: null },
+      global: { provide: { [NewTaskDepsKey]: deps } },
+    })
+  }
+
+  it('↑↓/Enter 扁平序激活：pinned 项 → recent 项 → 默认会话 → 打开文件夹（四分支各 emit）', async () => {
+    const wrapper = mountWith()
+    const root = wrapper.find('[data-testid="dir-select-popover"]')
+    await root.trigger('keydown', { key: 'Enter' }) // idx0 = pinned 项
+    await root.trigger('keydown', { key: 'ArrowDown' })
+    await root.trigger('keydown', { key: 'Enter' }) // idx1 = recent 项
+    await root.trigger('keydown', { key: 'ArrowDown' })
+    await root.trigger('keydown', { key: 'Enter' }) // idx2 = 默认会话动作项
+    await root.trigger('keydown', { key: 'ArrowDown' })
+    await root.trigger('keydown', { key: 'Enter' }) // idx3 = 打开文件夹
+    expect(wrapper.emitted('select')).toEqual([[{ cwd: '/Code/pinned-one' }], [{ cwd: '/Code/recent-one' }]])
+    expect(wrapper.emitted('select-default')).toHaveLength(1)
+    expect(wrapper.emitted('open-dir-dialog')).toHaveLength(1)
+  })
+
+  it('点击列表项 → emit select({cwd})；悬停行 → activeIndex 跟随（焦点高亮 bg-surface-hover）', async () => {
+    const wrapper = mountWith()
+    const items = wrapper.findAll('[data-testid="workspace-item"]')
+    await items[1]!.trigger('mouseenter')
+    expect(items[1]!.classes()).toContain('bg-surface-hover')
+    await items[1]!.trigger('click')
+    expect(wrapper.emitted('select')).toEqual([[{ cwd: '/Code/recent-one' }]])
+  })
+
+  it('悬停默认会话动作行 → activeIndex 移到该行（defaultSessionIdx 扁平索引）', async () => {
+    const wrapper = mountWith()
+    await wrapper.find('[data-testid="action-default-session"]').trigger('mouseenter')
+    expect(wrapper.find('[data-testid="action-default-session"]').classes()).toContain('bg-surface-hover')
   })
 })
