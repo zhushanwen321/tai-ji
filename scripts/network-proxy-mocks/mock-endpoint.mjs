@@ -2,8 +2,8 @@
  * mock-endpoint.mjs — mock LLM HTTPS 端点 + 自签证书生成（零 npm 依赖）
  *
  * llm-network-proxy 验收工具的共享模块（mock-proxy.mjs / socks5-server.mjs 经
- * --with-mock-endpoint 桥接本端点）。设计依据 .tmp/tech-design/llm-network-proxy.md
- * §4 场景 1 / 场景 9：无 anthropic 真实 key 依赖，CONNECT 目标一律桥接本地端点。
+ * --with-mock-endpoint 桥接本端点）。设计依据 llm-network-proxy 设计 §4 场景 1 / 场景 9
+ * （设计档案已随 .tmp 清理，git 可追溯）：无 anthropic 真实 key 依赖，CONNECT 目标一律桥接本地端点。
  *
  * 端点行为：
  *   - POST /v1/messages，按请求体 stream 字段分两形态：

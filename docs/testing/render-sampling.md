@@ -23,7 +23,7 @@
 ## 使用
 
 ```bash
-# 管道冒烟（写场景断言前先跑通本条——预飞纪律）
+# 管道冒烟（写场景断言前先跑通本条——预飞纪律；产物落 .tmp/ 易失产物目录，不入库）
 node scripts/render-sampling/cli.mjs --cdp-port <端口> --sample <样本.md> --out .tmp/dev-flow/<plan>.acceptance --name a1
 
 # 场景脚本内复用

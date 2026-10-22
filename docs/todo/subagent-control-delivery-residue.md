@@ -7,7 +7,7 @@
 - **现状**：runtime `markDegraded()` 只改 tee/查询态，不发布推送帧；`degraded` 只在 `session.getSubagentStreamState` 拉取响应中返回。`useSubagentTabData` 仅在订阅建立与 chunk 失步时拉取。
 - **后果**：drawer 已打开、之后无 chunk 时，用户看到 live 流停止但无提示条，直到重开/刷新。
 - **候选修法**：runtime 在 markDegraded 时发布 `session.subagentStreamDegraded {sessionId, recordId}`，renderer 经 event-bus 应用到同一 per-(virtualId,recordId) 位（单一事实源不变）。
-- **权威登记**：impl-plan §5 DC-8（`.tmp/tech-design/relay-spawn-transport.impl-plan.md`，git 外）。
+- **权威登记**：relay-spawn-transport impl-plan §5 DC-8（工作流过程产物，已随 .tmp 清理，git 外；登记内容以本文件与 ADR 登记为准）。
 
 ## 2 非缺省引擎首轮 probe→run 双 spawn（DC-12）
 

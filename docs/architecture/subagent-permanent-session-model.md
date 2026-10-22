@@ -10,7 +10,7 @@
 
 ## 0. 实施状态（2026-09-13，dev-flow 全单元落毕）
 
-本设计已按实施计划 `.tmp/dev-flow/subagent-permanent-session-model.impl-plan.md` 全单元交付（U1-U9 + u-foundation + U6b/U8a/U8b 拆分），实施后事实以代码为准；与本文的全部偏差逐条登记在 **impl-plan §5 偏差登记表**（62 条，含每条的裁决依据；其中 26 行系 2026-09-13 design-code-sync 补登——§6 散文点名的六单元偏差回填），本文不重复。约束侧已回写：C-data-20（原语清单刷新）/ C-data-22（zcode 会话库 TTL 引擎侧 sweep）/ C-proc-13（u7a 挂点注记）；母设计 [subagent-record-persistence-consolidation.md](subagent-record-persistence-consolidation.md) D5/D8 已加演进注记。
+本设计已按实施计划（dev-flow 过程产物，已随 .tmp 清理，不入库）全单元交付（U1-U9 + u-foundation + U6b/U8a/U8b 拆分），实施后事实以代码为准；与本文的全部偏差逐条登记在 **impl-plan §5 偏差登记表**（62 条，含每条的裁决依据；其中 26 行系 2026-09-13 design-code-sync 补登——§6 散文点名的六单元偏差回填），本文不重复。约束侧已回写：C-data-20（原语清单刷新）/ C-data-22（zcode 会话库 TTL 引擎侧 sweep）/ C-proc-13（u7a 挂点注记）；母设计 [subagent-record-persistence-consolidation.md](subagent-record-persistence-consolidation.md) D5/D8 已加演进注记。
 
 > **【2026-09-16 用户裁决修订：「已收起」第三状态全链路清除】** intent 意愿维度全链路删除——Intent 类型与 ExecutionRecord.intent / SubagentRecord.intent 字段删除；markArchived 原语删除，close 的资源收尾职责由 **`markSettledOut`** 承接（close 终态写点：幂等、worktreeHandle 清句、`.alive` release、manifest 派生视图，不写任何意愿字段）；markReactivated 删除（message 续聊无翻位发生）；通知 gate ①（archived 静默检查）删除，close 注销 reason 词 `archived` → `completed`；renderer 用户可见状态两桶化——进行中 / 已结束（判据 = `isRunningProjection` 及其取反），「已收起」不以第三状态呈现。本文涉及 intent 机制的叙述（§1.2/§3.1 场景 3/§3.2.1/§3.2.2/§3.2.4/§3.2.5/§3.2.7/§3.2.8/§3.2.9/§3.5 K 表/§4 验收/§5 单元表）已按删除后现状改写。裁决记录见 [decisions.md ADR-0067](../adr/decisions.md)。
 
@@ -31,7 +31,7 @@
 | 阶段 3 审查修复 | `3143447b5`..`2890700d0` | 检查补齐 / relay 收敛 / markRoundIdle 轮终写侧（A-lite）/ closeAfterRound 清除 / 注释与值比较 |
 | 阶段 5 验收修复 | `d01f0f225` `5dcb99453` `8ea19681e` | cancel 收敛窗 30s+迟到轮检查（A1 22/22）/ engine 水合（A3 16/16）/ worktree 重建脱离注册表+keepBranch（A5 18/18，U5-D8 失效） |
 
-**上游跟踪项（U6 遗留）**：zcode -32031 `ZCODE_RUNTIME_MODEL_UNAVAILABLE`——resume 后原会话 send 被 restoreWarning 挂起卡死（provider 注入生产形态不解除；协议层 session/setModel 应答成功但不清除），本设计选型绕开（resume 读通道取历史 + `session/create` 新会话注入，§3.2.6 要点 3 / §3.5 P-1）；若 zcode 未来版本打通 restoreWarning 的协议层清除路径，可升级为原地 resume 续聊（机制不变，省 token）。探针存证：`.tmp/probe/zcode-resume-probe*.mjs`（gitignore，不进 git）。
+**上游跟踪项（U6 遗留）**：zcode -32031 `ZCODE_RUNTIME_MODEL_UNAVAILABLE`——resume 后原会话 send 被 restoreWarning 挂起卡死（provider 注入生产形态不解除；协议层 session/setModel 应答成功但不清除），本设计选型绕开（resume 读通道取历史 + `session/create` 新会话注入，§3.2.6 要点 3 / §3.5 P-1）；若 zcode 未来版本打通 restoreWarning 的协议层清除路径，可升级为原地 resume 续聊（机制不变，省 token）。探针存证为 zcode-resume-probe 探针脚本（gitignore，不进 git，已随 .tmp 清理）。
 
 ---
 
@@ -76,7 +76,7 @@
 - 三派生视图形态（GUI/runtime/TUI）与对外契约的影响清单（§3.2.8）
 
 **out-of-scope**（另立设计/已另有归属）：
-- zcode 引擎外移（`.tmp/zcode-extraction/proposal.md`，与本立项正交）
+- zcode 引擎外移（过程产物 proposal，已随 .tmp 清理，不入库；与本立项正交）
 - GUI 快修批次（gui-quickfix-batch-root-causes 记忆，动同一显示链但正交）
 - workflow 域（WorkflowRun）的状态机——本设计只动 record 会话域；workflow origin 的 one-shot 立即终态化行为（run-orchestration.ts:966-971，D7 例外）保持不变
 - 主 agent 会话自身的管理（多会话/切换/LRU）——只在 RPC 公共包面与它相交
@@ -351,7 +351,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 2. **锚的承载**：内存 record 的 `transcriptRef` 字段（替代裸 sessionFile 的引擎专属性）；磁盘 = `.record-binding` 增 `transcriptRef` 块 + 主 session entry 的 engineHandle.sessionRef（已有，record-entry.ts:99）。
 3. **锚的消费**：续聊链三处硬拒点（conversation-continuation.ts:260-263 锚点检查 / record-store.ts:910-914 markResurrected 无锚 throw / actions-core.ts:752-759 fork-from 检查 6）统一改为「按 transcriptRef.engine 分派」：
    - pi → 现状路径（`--session <file>` 续写原文件）；
-   - zcode → **P-1 探针已测（2026-09-13，zcode 0.16.5 真机 6 轮）**：`session/resume {sessionId}` 原生存在（strict 键集）且**应答自带完整双向 messages 历史**（user/assistant 全量、tokens、parts、timeline 事件、会话快照）——读通道完全成立；但 **resume 后原会话 send 被 -32031 `ZCODE_RUNTIME_MODEL_UNAVAILABLE` 卡死**（restoreWarning 挂起；provider 注入生产形态不解除；协议层 session/setModel 应答成功但不清除——bundle 内部 setModel 路径有清除逻辑、协议 handler 未接通）；CLI `--resume` flag 对 app-server 子命令不生效（create 返回新 id 无预绑定）；`session/fork` 需 workspace checkpoint 非轻量通道。**选型结论：zcode 续聊 = resume 读通道取结构化历史 + `session/create` 新会话注入首轮**——与 §3.2.3 reopen 机制同构（每次续聊换新 sessionId，record.transcriptRef 更新新锚，旧 sessionId 历史仍可经读通道回溯，round/epoch 不变），零依赖 -32031 修复，token 成本经 resume 应答自带的 tokens 数据做裁剪预算。探针脚本：`.tmp/probe/zcode-resume-probe*.mjs` + `fs-patch.cjs`（复刻 launcher 注入）。
+   - zcode → **P-1 探针已测（2026-09-13，zcode 0.16.5 真机 6 轮）**：`session/resume {sessionId}` 原生存在（strict 键集）且**应答自带完整双向 messages 历史**（user/assistant 全量、tokens、parts、timeline 事件、会话快照）——读通道完全成立；但 **resume 后原会话 send 被 -32031 `ZCODE_RUNTIME_MODEL_UNAVAILABLE` 卡死**（restoreWarning 挂起；provider 注入生产形态不解除；协议层 session/setModel 应答成功但不清除——bundle 内部 setModel 路径有清除逻辑、协议 handler 未接通）；CLI `--resume` flag 对 app-server 子命令不生效（create 返回新 id 无预绑定）；`session/fork` 需 workspace checkpoint 非轻量通道。**选型结论：zcode 续聊 = resume 读通道取结构化历史 + `session/create` 新会话注入首轮**——与 §3.2.3 reopen 机制同构（每次续聊换新 sessionId，record.transcriptRef 更新新锚，旧 sessionId 历史仍可经读通道回溯，round/epoch 不变），零依赖 -32031 修复，token 成本经 resume 应答自带的 tokens 数据做裁剪预算。探针脚本：zcode-resume-probe*.mjs + fs-patch.cjs（探针产物已随 .tmp 清理，不入库；复刻 launcher 注入）。
 4. **zcode conversation 能力位**：`capabilities.conversation` 从 `unsupported` 升为 `cold`（新值：冷恢复会话——resume 读 + 新 session 注入，无热 steering）——capability-gate 的 message 升级 gate（run-orchestration canUpgradeToConversation :1394-1401）自动放行 zcode record 的 chat 升级。`steer` 维持 unsupported（interrupt=true 的 message 对 zcode 先做「等轮结束再投」降级，映射 followUp 语义，capabilities 声明如实）。
 5. **entry-born 形态消亡**：zcode record 有了 transcriptRef，`finalizeEntryOnlyOrphan` 直断分支删除（见 3.2.3 删除清单）——Gate B F2（缓存重建缺员）与 F3（纳管态误结案）随 anchor 统一自动消解。
 

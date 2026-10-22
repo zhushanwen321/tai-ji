@@ -28,7 +28,7 @@
 
 ## 退役条件
 
-**按根因分判**，两族各自的上游修复判据：① 拆卸竞态族 = [vitest#11153](https://github.com/vitest-dev/vitest/issues/11153) 上游修复发布；② 堆栈格式化器族 = vitest 堆栈格式化器（`parseErrorStacktrace` → convert-source-map 的 sourceMappingURL 解析）上游修复发布。某族判据满足 → 从补丁删该族签名段 → **全仓 20 轮探针复验**（脚本模板见本次验证，产物曾落 `.tmp/vitest-patch-verify/`）该族零假红；两族签名段全部删净后才删除 `patches/vitest.patch` 与 `pnpm-workspace.yaml` 登记——只修其一就整补丁退役，另一族假红将复发。补丁用**裸键** `vitest:`（不带版本）登记：vitest 升级导致补丁打不上即 install 报错——这是刻意选的**响亮失败**（若用固定版本号的键，升级后会静默跳过补丁、假红复现而无人察觉）。
+**按根因分判**，两族各自的上游修复判据：① 拆卸竞态族 = [vitest#11153](https://github.com/vitest-dev/vitest/issues/11153) 上游修复发布；② 堆栈格式化器族 = vitest 堆栈格式化器（`parseErrorStacktrace` → convert-source-map 的 sourceMappingURL 解析）上游修复发布。某族判据满足 → 从补丁删该族签名段 → **全仓 20 轮探针复验**（脚本模板见本次验证，验证产物已随 .tmp 清理，不入库）该族零假红；两族签名段全部删净后才删除 `patches/vitest.patch` 与 `pnpm-workspace.yaml` 登记——只修其一就整补丁退役，另一族假红将复发。补丁用**裸键** `vitest:`（不带版本）登记：vitest 升级导致补丁打不上即 install 报错——这是刻意选的**响亮失败**（若用固定版本号的键，升级后会静默跳过补丁、假红复现而无人察觉）。
 
 ## 验证证据（2026-10-03）
 

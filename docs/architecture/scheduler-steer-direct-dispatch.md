@@ -43,7 +43,7 @@ tick 扫描（30s）→ 到期任务 pending → dispatchTask
 3. **工具范围简化**：`schedule` 删除 `force` 参数（全部任务统一语义）；创建回显删 `no-force`/`force` 标签。
 4. **调度本体不动**：tick 轮询 + pending 状态机、rate limit（6 次/分钟）、append-only 记账（upsert/advance/toggle/delete）、croner 解析、resume 重放、importer 一次性迁移——全部保留。
 
-**In-scope**：`extensions/universal/scheduler/`（src + tests + package.json version bump 0.6.0 → 0.7.0）；本文档 + ext-simplify-08 设计文档头部 supersede 注记；changeset；`.tmp/dev-flow/ext-simplify-group-a.impl-plan.md` 风险 10 登记收尾（归因结论 + 以简化移除载体关闭）。
+**In-scope**：`extensions/universal/scheduler/`（src + tests + package.json version bump 0.6.0 → 0.7.0）；本文档 + ext-simplify-08 设计文档头部 supersede 注记；changeset；ext-simplify-group-a impl-plan（dev-flow 过程产物，已随 .tmp 清理，不入库）风险 10 登记收尾（归因结论 + 以简化移除载体关闭）。
 **Out-of-scope**：`packages/session-delivery`（保留——runtime 的 session-manager send 通路与 subagent-workflow 仍在消费；其 per-message settled 语义对 runtime 零影响，runtime 不配 onSettled）；runtime / subagent-workflow 的 delivery 装配；scheduler 的 event sourcing 存储层。
 
 ## 3. 现状：投递模型为何可以砍
