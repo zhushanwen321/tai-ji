@@ -16,7 +16,8 @@
  * 保留 pi 原生 EnvHttpProxyAgent / 连接调优 / 错误处理语义。
  *
  * 生命周期与旧安装状态机同构：
- * - 加载 / 每 turn 开始：重读配置推进状态（禁用 = 摘除包装恢复原 fetch）；
+ * - 加载 / 每 turn 开始：重读配置推进状态（`enabled` 关且 `ipv4Only` 空 = 摘除包装恢复原
+ *   fetch；`ipv4Only` 非空时包装保留——IPv4 锁定是直连地址族修正，独立于代理开关）；
  * - 指纹未变且包装仍在进程槽位：零动作（不重建）；
   * - 槽位被第三方整体覆盖（其他 extension 包装 / 手动改写；pi 的 configureHttpDispatcher
   *   有 shouldInstallGlobals 守卫（pi dist/core/http-dispatcher.js:88-99）——检测到 fetch
@@ -147,8 +148,9 @@ function wrapperMarkOf(fetch: FetchLike): FetchWrapperMark | null {
  *
  * 分流优先级（单一源在这里，config.ts 的 hits* 只提供匹配，不重复排序）：
  * 1. `noProxy` 命中 → 原样直连（用户显式排除，连 IPv4 锁定也不做）；
- * 2. `ipv4Only` 命中 → IPv4 锁定直连（**不走代理**，本扩展只做地址族选择）；
- * 3. `rules` 命中 → 经代理 fetch；
+ * 2. `ipv4Only` 命中 → IPv4 锁定直连（**不走代理**，本扩展只做地址族选择；独立于
+ *    `enabled` 代理开关——开关关闭时本分支照常生效）；
+ * 3. `enabled` 且 `rules` 命中 → 经代理 fetch（开关关闭时 rules 不参与分流，落入直连）；
  * 4. 其余 → 原样直连。
  *
  * 计数时点 = 请求发起时（与旧分流器一致；不等待完成，成败由 pi 原生错误链路呈现）。
@@ -178,7 +180,7 @@ function createWrappedFetch(
 			return proxyFetch(input, { ...(init ?? {}), dispatcher: ipv4 });
 		}
 
-		if (hitsRules(host, config.rules)) {
+		if (config.enabled && hitsRules(host, config.rules)) {
 			recordDispatch(host, true);
 			// proxy 非空由 applyNetworkProxyConfig 保证（rules 非空才会构造）。
 			if (proxy === null) return originalFetch(input, init);
@@ -279,7 +281,11 @@ export function applyNetworkProxyConfig(
 	state: FetchWrapperState | null,
 	deps: FetchWrapperDeps,
 ): FetchWrapperState | null {
-	if (!config.enabled) {
+	// 包装层的存在条件 = 代理开关开（rules 分流可用）或 ipv4Only 非空（IPv4 锁定直连）。
+	// 两者全无才摘除包装——ipv4Only 是直连地址族修正，语义上不依赖代理开关；
+	// 依据：2026-10-22 真机事故，用户仅配 ipv4Only（enabled=false）时整层被摘，
+	// subagent 的 LLM 请求全部 Connection error（双栈域名的 IPv6 路径抖动）。
+	if (!config.enabled && config.ipv4Only.length === 0) {
 		restoreOriginalIfOwned(state, deps);
 		return null;
 	}
@@ -293,12 +299,12 @@ export function applyNetworkProxyConfig(
 	}
 	const originalFetch = installed && state ? state.originalFetch : currentFetch;
 
-	// 代理分发器只在「确实可能用到代理」时构造：rules 为空 = 无任何主机走代理，
-	// 此时不应因代理配置不可用而锁死整个包装（含 ipv4Only 直连改写）。
+	// 代理分发器只在「确实可能用到代理」时构造：开关关闭或 rules 为空 = 无任何主机走
+	// 代理，此时不应因代理配置不可用而锁死整个包装（含 ipv4Only 直连改写）。
 	// 依据：一次事故（2026-10-22 真机验证）——仅配 ipv4Only、rules=[] 时仍构造
 	// ProxyAgent 并失败，lockOnBuildFailure 把包装整层撤下，ipv4Only 静默失效。
 	let proxy: Dispatcher | null = null;
-	if (config.rules.length > 0) {
+	if (config.enabled && config.rules.length > 0) {
 		try {
 			proxy = deps.buildProxy(config);
 		} catch (error) {

@@ -16,7 +16,11 @@
 //
 // CI 影响：零。CI 上 prepare-pi-resources.sh 走真实下载复制，无 symlink，检查空过。
 //
-// 用法：
+// 用法（两种消费模式，形态归属各自负责）：
+//   build:pre 链（apps/electron/package.json）以 --fix 消费——dev 形态（symlink 复用
+//     .pi-binary-cache 缓存）与构建形态（bundle 自包含）由两个入口各自切换：构建链
+//     第一步实体化（幂等，无 symlink 时 no-op），本地 dev 过后直接构建不再失败
+//   preflight-check.sh 检查 7 以纯检查消费——发现即拦截的检查语义，不落 --fix
 //   node scripts/check-pi-resources-links.mjs          # 检测；发现外部 symlink → 退出 1
 //   node scripts/check-pi-resources-links.mjs --fix    # 外部 symlink 替换为真实复制后复检
 //

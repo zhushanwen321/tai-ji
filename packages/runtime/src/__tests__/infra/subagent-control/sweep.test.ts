@@ -166,32 +166,36 @@ describe('pid 判据与失败语义（m-rt-3 / m-rt-4）', () => {
     engine.kill('SIGKILL')
   })
 
-  it('m-rt-4：kill 未能杀灭（权限/系统错误）→ 保留 pid 文件供下次 sweep', { timeout: 20_000 }, async () => {
+  it('m-rt-4：kill 未能杀灭（权限/系统错误）→ 保留 pid 文件供下次 sweep', async () => {
+    // 确定性同步化（2026-10-22 测试整治，docs/todo/test-single-layer-cleanup.md）：
+    // 原形态 spawn 真实长驻进程 + 真实探活 + 真实 30ms 确认窗，有两处时序脆弱点——
+    // ① 探测 start time 用「当前秒」，与 spawnedAt 跨秒边界时 pidStartMatchesRegistered
+    //   的降级判据（actual <= floor(spawnedAt/1000)）翻转成「pid 已复用」误删档；
+    // ② 探活与断言之间的间隙被 CPU 抢占拉长。
+    // 「kill 未杀灭」前提改由注入桩表达：owner 判死 / 引擎判活（恒真桩需按 pid 区分，
+    // 否则 ownerRuntimeAlive 提前跳过）、start time 固定同秒、kill 空操作、确认窗 0
+    // （waitForProcessDeath 立即判超时 = 未死）。决策逻辑「确认窗过后仍活 → 保留」
+    // 纯同步可断言；真进程 kill 失败路径的端到端验收由 CI-only 冒烟承接（todo 文档 1.2 节）。
     const dataDir = await makeTmpDir('ctl-pid-killfail-')
     tmpDirs.push(dataDir)
     const enginesDir = getControlEnginesDir(dataDir)
     mkdirSync(enginesDir, { recursive: true })
-    const engine = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
-    const enginePid = engine.pid
-    if (enginePid === null || enginePid === undefined) throw new Error('spawn pid unavailable')
+    const enginePid = 424_242 // 无真实进程——存活与身份由注入桩表达
     const pidFile = join(enginesDir, 'sess-y-fake-y-ch-y.pid')
     writeFileSync(pidFile, JSON.stringify({
       pid: enginePid,
-      spawnedAt: Date.now(),
-      runtimePid: 999_999_999,
+      spawnedAt: 1_000_000, // epoch ms；秒值 1000，与下方 start time 桩同秒
+      runtimePid: 999_999_999, // 非真实进程 → owner 判死（桩下同语义）
       instanceId: '999999999',
     }))
 
     await sweepOrphanEnginePids(dataDir, {
-      // 匹配当前进程的 start time（通过 pid 复用防护），但 kill 是空操作
-      getProcessStartTimeSec: () => Math.floor(Date.now() / 1000),
+      isPidAlive: (pid) => pid === enginePid, // owner 死 / 引擎活（kill 未杀灭前提）
+      getProcessStartTimeSec: () => 1_000, // 固定同秒：通过身份判定，无跨秒翻转
       killProcessTree: () => {},
-      killConfirmTimeoutMs: 30,
+      killConfirmTimeoutMs: 0, // 确认窗零等待：立即判「仍活」
     })
-    expect(isPidAlive(enginePid)).toBe(true)
-    expect(existsSync(pidFile)).toBe(true)
-
-    engine.kill('SIGKILL')
+    expect(existsSync(pidFile)).toBe(true) // 未能杀灭 → 保留供下次 sweep
   })
 
   it('不可解析 pid 文件 → 保留 + warn（不静默销账）', { timeout: 20_000 }, async () => {

@@ -47,7 +47,11 @@ export interface NetworkProxyConfig { // oe-exempt:20261019:framework:ext-config
 	 * （autoSelectFamilyAttemptTimeout=2000）反复试 IPv6，把 connect 预算耗在坏路径上，
 	 * 最终表现为 `Request timed out.`——实为连接层超时，不是 provider 故障。
 	 *
-	 * 优先级：noProxy > ipv4Only > rules。
+	 * 独立于 `enabled` 代理开关：`enabled=false` 时本清单照常生效（IPv4 锁定是直连的
+	 * 地址族修正，不是代理能力；清单非空即安装包装层）。
+	 *
+	 * 优先级：noProxy > ipv4Only > rules（rules 另受 enabled 门控——开关关闭时规则
+	 * 不参与分流）。
 	 */
 	ipv4Only: string[];
 }
