@@ -1,19 +1,19 @@
 /**
  * 网络代理请求拦截层：包装 pi 进程的 `globalThis.fetch`（打包版兼容设计）。
  *
- * 为什么不是 undici 全局分发器：打包版 pi 是 Bun 单文件二进制，HTTP 栈用二进制内置的
- * undici（`builtin://thirdparty/undici`）；扩展 bundle 由 esbuild 内联自己的 undici 副本
- * （`scripts/bundle-extensions.mjs` 的 EXTERNAL 不含 undici）。undici 的
- * `setGlobalDispatcher` 槽是模块级变量，两套副本互不相通——扩展改的全局槽 pi 根本不用，
- * LLM 请求照常直连（2026-10-20 打包版实测：请求直连 Cloudflare，统计文件零行）。
- * dev 用 `node_modules/.bin/pi`，pi 与扩展源码解析到同一份 undici，所以旧方案在 dev 正常、
- * 打包版静默失效。
+ * 为什么不是 undici 全局分发器：undici 的 `setGlobalDispatcher` 槽是模块级变量，
+ * 只在「pi 与扩展加载同一份 undici 模块实例」时生效。本包的 undici 按宿主运行时
+ * 解析（Node → node_modules npm 副本；Bun 打包版 → 二进制内置副本，副本策略与依据
+ * 见 dispatcher.ts 头注），与 pi 自己的 HTTP 栈不保证同实例。[HISTORICAL] 2026-10-20
+ * 打包版实测：setGlobalDispatcher 方案下扩展改的全局槽 pi 不用，LLM 请求照常直连、
+ * 统计文件零行——dev 下两实例恰好相同所以 dev 正常、打包版静默失效，拦截点因此
+ * 定为 `globalThis.fetch`（不依赖副本实例是否共享）。
  *
  * 稳定接缝 = `globalThis.fetch`：pi-ai 的 OpenAI 兼容请求在每次构造 client 时经
  * `Shims.getDefaultFetch()` 动态取当前全局 fetch（node_modules/openai/internal/shims.js），
- * 包装它不依赖 pi 与扩展是否共享 undici 副本。命中规则的请求用扩展自己的 undici fetch +
- * 分发器发出（代理或 IPv4 锁定，见 dispatcher.ts）；未命中的请求原样调用包装前的 fetch，
- * 保留 pi 原生 EnvHttpProxyAgent / 连接调优 / 错误处理语义。
+ * 包装它不依赖 pi 与扩展是否共享 undici 副本。命中规则的请求用扩展解析到的 undici
+ * fetch + 分发器发出（代理或 IPv4 锁定，见 dispatcher.ts）；未命中的请求原样调用包装前
+ * 的 fetch，保留 pi 原生 EnvHttpProxyAgent / 连接调优 / 错误处理语义。
  *
  * 生命周期与旧安装状态机同构：
  * - 加载 / 每 turn 开始：重读配置推进状态（`enabled` 关且 `ipv4Only` 空 = 摘除包装恢复原

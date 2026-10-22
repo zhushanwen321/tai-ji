@@ -30,6 +30,10 @@
  *  - @earendil-works/*（pi-coding-agent / pi-ai / pi-tui / pi-agent-core 等）
  *  - @mariozechner/*（旧名别名）
  *  - typebox / @sinclair/typebox（pi binary 内提供）
+ *  - undici（非 virtualModules——由宿主解析器分流：Node → node_modules npm 副本；
+ *    Bun（打包版 pi）→ 二进制内置副本 builtin://thirdparty/undici。动机：内联 npm
+ *    undici 副本在 Bun 兼容层下 fetch 读 chunked 流式响应体永不产块，2026-10-22
+ *    事故，仅 network-proxy 消费，见该包 dispatcher.ts 头注副本策略段）
  * 其余（@zhushanwen/extension-protocol、@zhushanwen/pi-* workspace value dep、
  * web-tree-sitter、ajv、croner 等）全部 inline。
  *
@@ -79,6 +83,13 @@ const EXTERNAL = [
 	// 任何误 import 在 staged 运行期报 Cannot find module（fail-fast）而非静默内联。
 	"@zhushanwen/pi-subagent-cli",
 	"@zhushanwen/zcode-subagent-cli",
+	// undici 按宿主运行时解析（不内联）：内联 npm undici 7.28.0 副本曾在打包版 pi
+	// （Bun）下 fetch 读 chunked 流式响应体永不产块（2026-10-22 事故，LLM SSE 请求
+	// 挂死 20 分钟）。external 后 Node 宿主解析 node_modules npm 副本、Bun 宿主解析
+	// 二进制内置副本（探针指纹实测：49 导出、无 Socks5ProxyAgent、fetch + ProxyAgent
+	// + Agent(family:4) 流式均正常）。消费方 network-proxy 的能力差异处理见其
+	// dispatcher.ts 头注副本策略段。
+	"undici",
 ];
 
 /** 包名 @zhushanwen/pi-<x> → 源码目录 extensions/<group>/<x>/（group = taiji | universal，见 docs/extensions/extension-conventions.md 分组约定） */
