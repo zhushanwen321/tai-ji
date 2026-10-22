@@ -31,6 +31,7 @@ import {
   openMainListenWs,
   SAMPLE_PROJECT,
   seedRealCredentials,
+  testInfoDiag,
   tmpDiag,
   waitRealAppReady,
 } from './fixtures/batch-real-helpers'
@@ -63,7 +64,11 @@ You are a deterministic test worker. Follow the task text literally, using the b
 // ── 凭证门与播种 / 诊断 helpers（共享实现 = fixtures/batch-real-helpers.ts；
 //    本文件只留 tag 绑定、chat 特有的 worker agent 播种与泛型 waitUntil） ──────────
 
+// 诊断落点分流纪律（ADR-0063 I2：对话数据禁入 $TMPDIR）：载荷含 session entry 正文的
+// 走 writeTestDiag（testInfoDiag → Playwright 托管产物位，batch-s1 同款三参调用）；
+// 其余（列表 / 进程 / 事件类型 / 目录树 / 日志尾）走 writeDiag（tmpDiag 现状落点）。
 const writeDiag = tmpDiag('batch-cr')
+const writeTestDiag = testInfoDiag('batch-cr')
 
 function seedDataDir(dataDir: string): void {
   seedRealCredentials(dataDir, 'batch-cr', {
@@ -286,7 +291,9 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
     if (!hasRevive) {
       // 归因采集：区分「续聊写进了别的 session 文件」（产品偏离同文件续写）与
       //「尚未 flush」（文件内容滞后）——尾部文本 + subagents 目录全清单一次判别
-      writeDiag('batch-cr-revive-text-missing.json', {
+      // 载荷含 sessionTextTail（session JSONL 正文）——按 ADR-0063 I2 分流走
+      // testInfoDiag（Playwright 托管产物位），禁落 /tmp
+      writeTestDiag(testInfo, 'batch-cr-revive-text-missing.json', {
         sessionFile,
         sessionTextTail: sessionText.slice(-2000),
         subagentsTree: dirTree(path.join(dataDir, 'agent', 'subagents'), 3),
