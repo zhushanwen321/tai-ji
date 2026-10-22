@@ -147,6 +147,7 @@ export function createSettingsTransport(): SettingsTransport {
     onDefaultsWithSource: (h) => config.onDefaultsWithSource(h),
     onSkillCacheInvalidated: (h) => config.onSkillCacheInvalidated(h),
     onWoolState: (h) => wool.onWoolState(h),
+    onWoolAuthorizeUrl: (h) => wool.onWoolAuthorizeUrl(h),
     onSystemPrompt: (h) => config.onSystemPrompt(h),
     onTerminalConfig: (h) => config.onTerminalConfig(h),
     onRetryConfig: (h) => config.onRetryConfig(h),

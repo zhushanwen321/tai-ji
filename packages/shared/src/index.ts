@@ -494,8 +494,10 @@ export type {
   WoolActionRequest,
   WoolActionType,
   WoolAssetManifest,
+  WoolAuthorizeUrlPayload,
   WoolCatalogModelView,
   WoolCatalogView,
+  WoolCredentialsData,
   WoolCredentialsSource,
   WoolDetectResultView,
   WoolExtractStep,
@@ -514,6 +516,7 @@ export type {
 export {
   isWoolAccountStatusView,
   isWoolAssetManifest,
+  isWoolCredentialsData,
   isWoolDetectData,
   isWoolFamilyId,
   WOOL_ACTION_TYPES,

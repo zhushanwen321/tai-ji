@@ -1,8 +1,9 @@
 <template>
   <!--
     羊毛向导 · 授权族步骤区（D7 / §3.1 五步：install → authorize → ready → checkin → done）。
-    authorize = 「在 TaiJi 浏览器中打开授权页」按钮（当前扩展协议无 authorize 动作时进入
-    authorize_unavailable 失败态 + 重试指引——浮层编排随扩展协议扩展后生效）；
+    authorize = 「在 TaiJi 浏览器中打开授权页」按钮（真实流程：authorize 动作挂起至用户
+    完成授权，授权页 URL 广播到达后浮层打开 + 提示行；旧扩展协议无 authorize 动作时
+    进入 authorize_unavailable 失败态 + 更新指引）；
     ready = 账号昵称/令牌有效期（status 拉取）；checkin = 两开关（自动签到默认关 + 黄色警示）；
     done = 模型清单加载态。
   -->
@@ -15,7 +16,8 @@
       @retry="emit('retryInstall')"
     />
 
-    <!-- authorize 步：按钮触发（pending 态显示按钮；running = 等待授权完成） -->
+    <!-- authorize 步：按钮触发（pending 态显示按钮；running = 等待授权完成；
+         授权页 URL 到达（浮层已开）后显示完成授权提示行） -->
     <WoolStepRow
       :label="t('wool.stepAuthorize')"
       :state="stepStates.authorize"
@@ -31,6 +33,37 @@
         data-testid="wool-authorize-open"
         @click="emit('authorize')"
       >{{ t('wool.authorizeOpen') }}</Button>
+      <p
+        v-if="authorizeUrlOpened && stepStates.authorize.status === 'running'"
+        data-testid="wool-authorize-opened-hint"
+        class="mt-[6px] text-[length:var(--text-2xs)] text-neutral-mid"
+      >{{ t('wool.authorizeOpenedHint') }}</p>
+      <!-- 授权确认交互（callback-server 契约：done 信号驱动扩展侧令牌交换，202=未完成可再点；cancel = 取消终态回待授权态） -->
+      <div
+        v-if="authorizeUrlOpened && stepStates.authorize.status === 'running'"
+        class="mt-[6px] flex gap-2"
+        data-testid="wool-authorize-signal-row"
+      >
+        <Button
+          variant="default"
+          class="h-[24px] rounded-full px-[12px] py-0 text-[length:var(--text-2xs)]"
+          data-testid="wool-authorize-done"
+          :disabled="authorizeSignaling"
+          @click="emit('authorizeDone')"
+        >{{ t('wool.authorizeDone') }}</Button>
+        <Button
+          variant="ghost"
+          class="h-[24px] rounded-full px-[12px] py-0 text-[length:var(--text-2xs)]"
+          data-testid="wool-authorize-cancel"
+          :disabled="authorizeSignaling"
+          @click="emit('authorizeCancel')"
+        >{{ t('wool.authorizeCancel') }}</Button>
+      </div>
+      <p
+        v-if="authorizeRetryHint"
+        data-testid="wool-authorize-retry-hint"
+        class="mt-[6px] text-[length:var(--text-2xs)] text-warn"
+      >{{ t('wool.authorizeRetryHint') }}</p>
     </WoolStepRow>
 
     <!-- ready 步：账号信息（昵称/令牌有效期；status 动作数据经快照） -->
@@ -106,21 +139,32 @@ import type { WoolAccountStatusView } from '@taiji/shared'
 import type { WoolWizardStepId, WoolWizardStepState } from '@/composables/features/settings/useWoolWizard'
 import WoolStepRow from './WoolStepRow.vue'
 
-defineProps<{
+withDefaults(defineProps<{
   displayName: string
   stepStates: Readonly<Record<WoolWizardStepId, WoolWizardStepState>>
   currentStep: WoolWizardStepId
   account: WoolAccountStatusView | null
   autoCheckin: boolean
+  /** 授权页浮层已打开（wool.authorize_url 广播已到达；authorize running 态提示行）。 */
+  authorizeUrlOpened: boolean
+  /** 授权确认信号在途（done/cancel 按钮 disabled 判定）。 */
+  authorizeSignaling?: boolean
+  /** done 信号回 202（浏览器内尚未完成登录）提示行。 */
+  authorizeRetryHint?: boolean
   catalogLoading: boolean
   catalogCount: number | null
-}>()
+}>(), {
+  authorizeSignaling: false,
+  authorizeRetryHint: false,
+})
 
 const emit = defineEmits<{
   retryInstall: []
   retryAuthorize: []
   retryReady: []
   authorize: []
+  authorizeDone: []
+  authorizeCancel: []
   setAutoCheckin: [enabled: boolean]
 }>()
 

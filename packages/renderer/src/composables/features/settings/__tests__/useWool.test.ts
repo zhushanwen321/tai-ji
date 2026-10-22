@@ -134,14 +134,31 @@ describe('useWoolWizard（纯状态机）', () => {
     expect(w2.currentStep.value).toBe('credentials')
   })
 
-  it('extract 透传动作 invalid_request → extract_unavailable（协议未就绪分流）', async () => {
-    const reply: WoolActionReply = { ok: false, error: { code: 'invalid_request', message: 'unknown action' } }
-    const w = useWoolWizard('qoder', 'extract', vi.fn(async () => reply))
+  it('extract 真实流程：动作 ok → 凭据步 ok 推进（凭据落库在 runtime 侧，回执不携凭据）', async () => {
+    const okWithData: WoolActionReply = { ok: true, data: { credentialsStored: true } }
+    const w = useWoolWizard('qoder', 'extract', vi.fn(async () => okWithData))
+    w.markStep('install', 'ok')
+    const reply = await w.runStepAction('credentials', 'extract')
+    expect(reply).toEqual(okWithData)
+    expect(w.stepStates.credentials.status).toBe('ok')
+    expect(w.currentStep.value).toBe('done')
+  })
+
+  it('extract 真实失败：not_logged_in → failed 携步骤失败码（恢复指引按码分流）', async () => {
+    const fail: WoolActionReply = { ok: false, error: { code: 'not_logged_in', message: 'no credentials' } }
+    const w = useWoolWizard('qoder', 'extract', vi.fn(async () => fail))
     await w.runStepAction('credentials', 'extract')
-    // invalid_request（动作层）→ internal（步骤层）；wool-manager 侧已把 extract 协议缺失
-    // 转译为 extract_unavailable（runtime 层），此处锚定映射函数的专属码直通
     expect(w.stepStates.credentials.status).toBe('failed')
+    expect(w.stepStates.credentials.failure).toEqual({ code: 'not_logged_in', message: 'no credentials' })
+  })
+
+  it('动作码 → 步骤码映射：invalid_request 归 internal；协议未就绪/动作不支持/取消专属码直通', () => {
+    expect(actionErrorToStepFailure('invalid_request')).toBe('internal')
     expect(actionErrorToStepFailure('extract_unavailable')).toBe('extract_unavailable')
+    expect(actionErrorToStepFailure('authorize_unavailable')).toBe('authorize_unavailable')
+    expect(actionErrorToStepFailure('action_not_supported')).toBe('action_not_supported')
+    expect(actionErrorToStepFailure('cancelled')).toBe('cancelled')
+    expect(actionErrorToStepFailure('not_logged_in')).toBe('not_logged_in')
   })
 
   it('catalogRefreshed 防重 + reset 复位', async () => {

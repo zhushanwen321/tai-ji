@@ -81,12 +81,13 @@ export type WoolStepFailureCode =
   | 'extension_missing'     // 扩展未加载（管理命令探测未命中）→ 重试 / 重装
   | 'not_logged_in'         // 扩展报无凭据 → 引导接入流程
   | 'upstream_error'        // 上游调用失败 → 可重试
-  | 'authorize_unavailable' // 授权动作通道未就绪（扩展管理协议无 authorize 动作）
-  | 'extract_unavailable'   // 提取动作通道未就绪（扩展管理协议无 extract 动作）
+  | 'authorize_unavailable' // 授权动作通道未就绪（旧扩展协议词表无 authorize 动作）
+  | 'extract_unavailable'   // 提取动作通道未就绪（旧扩展协议词表无 extract 动作）
+  | 'action_not_supported'  // 家族凭据策略不支持该动作（如 OAuth 家族请求 extract）→ 用对应接入动作
   | 'uninstall_failed'      // 卸载链失败（extension-service uninstallExtension 抛错；与 WoolActionErrorCode 同名码）
   | 'manage_unavailable'    // 管理会话编排失败（spawn/指令往返链路，可重试）
   | 'internal'              // 扩展内部异常 / taiji 侧编排异常
-  | 'cancelled'             // 用户取消（非错误态）
+  | 'cancelled'             // 用户取消（非错误态——向导回待授权态）
 
 // ── 运行态视图（wool.state 帧 payload；taiji 侧缓存快照）──
 
@@ -168,10 +169,15 @@ export interface WoolRuntimeSnapshot {  // oe-exempt:20261022:framework:runtime�
 
 /**
  * 宿主动作词表（taiji 向导/条目区经 wool.action 触发的编排动作）。
- * 与扩展管理动作词表（wool-shared WOOL_MANAGE_ACTIONS：status/detect/checkin/clear）
- * 是两层：本词表是 renderer → runtime 的编排动作；wool-manager 把其中
- * detect/status/checkin/clear（uninstall 第一步）翻译为管理会话内的同名扩展动作。
- * uninstall = D3 卸载三步编排（管理会话 clear → extension-service 卸载 → settings 羊毛域清除）。
+ * 与扩展管理动作词表（wool-shared WOOL_MANAGE_ACTIONS：status/detect/checkin/clear/
+ * extract/authorize）是两层：本词表是 renderer → runtime 的编排动作；wool-manager 把其中
+ * detect/status/checkin/clear（uninstall 第一步）/extract/authorize 翻译为管理会话内的
+ * 同名扩展动作。authorizeSignal 是宿主自有动作（不透传扩展）：authorize 授权窗内用户
+ * 确认完成/取消 → 宿主向扩展本机回调端点发 done/cancel 信号（回调监听在扩展侧承载）。
+ * extract/authorize 成功回包 = 凭据载荷（WoolCredentialsData），宿主落 models.json
+ * 羊毛 provider 条目（凭据通道 D2 裁决：不写 pi auth.json）。
+ * uninstall = D3 卸载编排（管理会话 clear → models.json 羊毛条目删除 +
+ * extension-service 卸载 → settings 羊毛域清除）。
  */
 export const WOOL_ACTION_TYPES = [
   'install',
@@ -181,6 +187,7 @@ export const WOOL_ACTION_TYPES = [
   'refresh',
   'setAutoCheckin',
   'authorize',
+  'authorizeSignal',
   'extract',
   'uninstall',
 ] as const
@@ -191,8 +198,8 @@ export interface WoolActionRequest {  // oe-exempt:20261022:framework:taiji↔�
   action: WoolActionType
   /** family 必填（全部动作都是家族维度）。 */
   family: WoolFamilyId
-  /** 动作参数（setAutoCheckin 消费 { enabled }；其余动作无参）。 */
-  params?: { enabled?: boolean }
+  /** 动作参数（setAutoCheckin 消费 { enabled }；authorizeSignal 消费 { status: 'done' | 'cancel' }；其余动作无参）。 */
+  params?: { enabled?: boolean; status?: 'done' | 'cancel' }
 }
 
 /** wool.action reply payload（动作结果信封；状态变化经 wool.state 广播推回）。 */
@@ -201,17 +208,35 @@ export type WoolActionReply =
   | { ok: false; error: { code: WoolActionErrorCode; message: string } }
 
 /**
- * uninstall 动作回执 data（D3 三步编排结果视图，按扩展侧 clear 实际能力分层）。
- * credentialsCleared = pi auth.json 凭据是否已清除（D3 ①）——pi 扩展 API 无凭据删除
- * 通道、宿主无 Models.logout 通路，清除通道补齐前恒 false；此时 residualHint 必带
- * （D3 降级条款：不静默残留——扩展侧 clear 的分层结果〔进程内副本 / persist 目录〕
- * 与手动清除指引并入 hint 文本），renderer 按 hint 呈现。
+ * uninstall 动作回执 data（D3 三步编排结果视图）。凭据通道 D2 裁决后凭据落在
+ * models.json 羊毛 provider 条目（宿主自有写入器）：credentialsCleared = 该条目
+ * 是否已清除（条目删除成功或本就不存在 = true；models.json 写入被拒（损坏降级态）
+ * = false 且 residualHint 必带修复指引）。
  */
 export interface WoolUninstallResult {  // oe-exempt:20261022:framework:uninstall 动作回执视图（runtime 组装 / renderer 消费）
-  /** pi auth.json 凭据是否已清除（D3 ①；清除通道缺失期间恒 false，残留提示必带）。 */
+  /** models.json 羊毛 provider 条目凭据是否已清除（含「本就无条目」的空清除形态）。 */
   credentialsCleared: boolean
-  /** 残留提示（credentialsCleared=false 时必带：扩展侧已清项分层说明 + 残留内容 + 手动清除指引）。 */
+  /** 残留提示（credentialsCleared=false 时必带：写入被拒原因 + 修复指引）。 */
   residualHint?: string
+}
+
+/**
+ * extract/authorize 成功回包 data（与 wool-shared 管理协议凭据通道契约对齐：
+ * credentials 必带 apiKey；refreshToken 为 oauth 家族令牌续期素材；account/expiresAt
+ * 供宿主即时点亮账号态）。字段对齐义务由两侧包内测试锚定（wool-shared 管理协议测试 +
+ * 本域 isWoolCredentialsData 消费侧测试）。
+ */
+export interface WoolCredentialsData {  // oe-exempt:20261022:framework:扩展管理协议凭据回包宿主侧形状（runtime 消费），与 wool-shared 对齐
+  credentials: {
+    /** 请求时鉴权令牌（落 models.json 羊毛条目 apiKey，经 getApiKeyAndHeaders 流入家族 stream）。 */
+    apiKey: string
+    /** 刷新令牌（oauth 家族；落 models.json 羊毛条目 headers 透传家族侧，键 x-wool-refresh-token）。 */
+    refreshToken?: string
+  }
+  /** 账号展示名（进 wool 域账号缓存 nickname）。 */
+  account?: { displayName?: string }
+  /** 凭据有效期（Unix ms；进 wool 域账号缓存 tokenExpiresAt）。 */
+  expiresAt?: number
 }
 
 /** 动作错误码词表（renderer 按码分流恢复指引；与 WoolStepFailureCode 对应关系在 renderer 映射）。 */
@@ -224,8 +249,10 @@ export type WoolActionErrorCode =
   | 'upstream_error'
   | 'internal'
   | 'manage_unavailable'    // 管理会话编排失败（spawn/prompt/getEntries 链路错误）
-  | 'authorize_unavailable' // 授权动作通道未就绪（扩展管理协议无 authorize 动作；与 WoolStepFailureCode 同名码）
-  | 'extract_unavailable'   // 提取动作通道未就绪（扩展管理协议无 extract 动作；同上对称码）
+  | 'authorize_unavailable' // 授权动作通道未就绪（旧扩展协议词表无 authorize 动作；与 WoolStepFailureCode 同名码）
+  | 'extract_unavailable'   // 提取动作通道未就绪（旧扩展协议词表无 extract 动作；同上对称码）
+  | 'action_not_supported'  // 家族凭据策略不支持该动作（如 OAuth 家族请求 extract）→ 引导用对应接入动作
+  | 'cancelled'             // 用户取消（扩展授权窗取消信号终态；向导回待授权态）
   | 'uninstall_failed'      // 卸载链失败（extension-service uninstallExtension 抛错；凭据清除失败不阻断卸载，走 credentialsCleared=false 残留提示形态）
 
 // ── 运行时守卫（读侧不信任外部格式；消费 WS 帧 / 清单 JSON 前收窄）──
@@ -262,6 +289,35 @@ export function isWoolDetectData(value: unknown): value is { detected: boolean; 
   if (typeof value.detected !== 'boolean') return false
   if (value.detail !== undefined && typeof value.detail !== 'string') return false
   return true
+}
+
+/**
+ * extract/authorize 回包 data 守卫（读侧不信任扩展回包）：credentials.apiKey 缺失或
+ * 非非空字符串即拒（凭据落库前置门禁）；refreshToken/account/expiresAt 形态不符即拒。
+ */
+export function isWoolCredentialsData(value: unknown): value is WoolCredentialsData {
+  if (!isRecord(value)) return false
+  const credentials = value.credentials
+  if (!isRecord(credentials)) return false
+  if (typeof credentials.apiKey !== 'string' || credentials.apiKey.length === 0) return false
+  if (credentials.refreshToken !== undefined &&
+    (typeof credentials.refreshToken !== 'string' || credentials.refreshToken.length === 0)) return false
+  if (value.account !== undefined) {
+    if (!isRecord(value.account)) return false
+    if (value.account.displayName !== undefined && typeof value.account.displayName !== 'string') return false
+  }
+  if (value.expiresAt !== undefined && typeof value.expiresAt !== 'number') return false
+  return true
+}
+
+/**
+ * wool.authorize_url 广播帧 payload（授权族 authorize 编排在途时扩展经 pi notify
+ * 发出的授权页 URL；宿主拦截后广播，renderer 驱动浮层浏览器打开）。无 sessionId——
+ * 设置域全局通道（与 wool.state 同路由形态）。
+ */
+export interface WoolAuthorizeUrlPayload {  // oe-exempt:20261022:framework:runtime→renderer 授权 URL 广播形状，wool-manager 产 / 向导消费
+  family: WoolFamilyId
+  url: string
 }
 
 /**

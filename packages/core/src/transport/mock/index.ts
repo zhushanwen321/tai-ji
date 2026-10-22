@@ -2313,6 +2313,9 @@ const woolImpl = {
   onWoolState(_h: (snapshot: WoolRuntimeSnapshot) => void): () => void {
     return () => {}
   },
+  onWoolAuthorizeUrl(_h: (payload: { family: 'qoder' | 'trae' | 'workbuddy'; url: string }) => void): () => void {
+    return () => {}
+  },
 }
 
 // [G4] 参数全等断言：mock wool 任一方法少参/多参/错型在此行编译失败

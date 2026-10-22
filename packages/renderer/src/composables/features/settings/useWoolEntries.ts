@@ -3,7 +3,8 @@
  *
  * 职责：向导入口开关 + 已接入家族条目列表（adopted 过滤）+ 条目动作编排
  * （刷新 = status+refresh 双拉取 / 一键签到 / 更新（D2 显式触发 install 钉版本升级）/
- * 卸载（D3 三步编排，残留提示按回执呈现）/ running 态防抖重复点击）。
+ * 失效重授权（401 分类命中后重跑 authorize/extract，凭据通道 D2）/ 卸载（D3 编排，
+ * 残留提示按回执呈现）/ running 态防抖重复点击）。
  * 快照数据源 = useWool（设置域全局态单例）；本 composable 是实例级编排态
  * （ProviderPage 单页消费，随页面生命周期）。
  */
@@ -30,9 +31,15 @@ export type UseWoolEntriesReturn = {
   /** 显式更新（install 动作重跑 = 按清单钉版本升级；D2 更新角标点击）。 */
   updateEntry: (family: WoolFamilyState['family']) => Promise<void>
   /**
-   * 卸载（D3 三步编排：clear 凭据与 persist → 包卸载 → 羊毛域清除）。auth.json 凭据
-   * 清除通道缺失期间回执恒为 credentialsCleared=false → 按 residualHint 弹残留提示
-   * toast（不静默残留，D3 降级形态——hint 含扩展侧已清项分层说明与 pi 侧 /logout 指引）。
+   * 失效重授权（401 词界分类命中后的恢复入口，凭据通道 D2）：oauth 家族重跑 authorize
+   * （重开浮层授权页）、提取族重跑 extract——凭据重新落 models.json 羊毛条目，成功后
+   * 账号态经 wool.state 广播回推（失效徽标自动回落）。
+   */
+  reauthorize: (family: WoolFamilyState['family']) => Promise<void>
+  /**
+   * 卸载（D3 编排：扩展侧 clear → models.json 凭据条目删除 → 包卸载 → 羊毛域清除）。
+   * credentialsCleared=false（models.json 删除被拒）时按 residualHint 弹残留提示
+   * toast（不静默残留——hint 含修复指引）。
    */
   uninstall: (family: WoolFamilyState['family']) => Promise<void>
   /** 卸载确认目标（null = 无弹窗；template 赋值触发弹窗）。 */
@@ -82,6 +89,11 @@ export function useWoolEntries(): UseWoolEntriesReturn {
     await runGuarded(family, [['install'], ['refresh']])
   }
 
+  async function reauthorize(family: WoolFamilyState['family']): Promise<void> {
+    const action: WoolActionType = wool.familyOf(family)?.credentialsSource === 'oauth' ? 'authorize' : 'extract'
+    await runGuarded(family, [[action]])
+  }
+
   async function uninstall(family: WoolFamilyState['family']): Promise<void> {
     if (uninstallingActions.value.has(family)) return
     uninstallingActions.value.add(family)
@@ -119,8 +131,8 @@ export function useWoolEntries(): UseWoolEntriesReturn {
     void uninstall(target)
   }
 
-  return { wizardOpen, adoptedFamilies, runningActions, uninstallingActions, refreshEntry, checkin, updateEntry, uninstall, uninstallTarget, uninstallDialogOpen, uninstallName, confirmUninstall }
+  return { wizardOpen, adoptedFamilies, runningActions, uninstallingActions, refreshEntry, checkin, updateEntry, reauthorize, uninstall, uninstallTarget, uninstallDialogOpen, uninstallName, confirmUninstall }
 }
 
-/** 动作参数形态别名（setAutoCheckin 的 { enabled }；其余动作无参）。 */
-type WoolActionRequestParams = { enabled?: boolean }
+/** 动作参数形态别名（setAutoCheckin 的 { enabled }；authorizeSignal 的 { status }；其余动作无参）。 */
+type WoolActionRequestParams = { enabled?: boolean; status?: 'done' | 'cancel' }

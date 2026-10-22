@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest'
 import {
   isWoolAccountStatusView,
   isWoolAssetManifest,
+  isWoolCredentialsData,
   isWoolDetectData,
   isWoolFamilyId,
   WOOL_ACTION_TYPES,
@@ -98,8 +99,34 @@ describe('isWoolDetectData / isWoolFamilyId', () => {
   })
 })
 
+describe('isWoolCredentialsData（extract/authorize 回包守卫——wool-shared 凭据通道对齐锚点）', () => {
+  it('最小合法（credentials.apiKey）与全字段形态通过', () => {
+    expect(isWoolCredentialsData({ credentials: { apiKey: 'sk-1' } })).toBe(true)
+    expect(isWoolCredentialsData({
+      credentials: { apiKey: 'sk-1', refreshToken: 'rt-1' },
+      account: { displayName: 'demo' },
+      expiresAt: 1_800_000_000_000,
+    })).toBe(true)
+  })
+
+  it('apiKey 缺失 / 空串 / 错型 → 拒（凭据落库前置门禁）', () => {
+    expect(isWoolCredentialsData({})).toBe(false)
+    expect(isWoolCredentialsData({ credentials: {} })).toBe(false)
+    expect(isWoolCredentialsData({ credentials: { apiKey: '' } })).toBe(false)
+    expect(isWoolCredentialsData({ credentials: { apiKey: 42 } })).toBe(false)
+    expect(isWoolCredentialsData(null)).toBe(false)
+  })
+
+  it('refreshToken / account / expiresAt 坏形态 → 拒', () => {
+    expect(isWoolCredentialsData({ credentials: { apiKey: 'k', refreshToken: '' } })).toBe(false)
+    expect(isWoolCredentialsData({ credentials: { apiKey: 'k' }, account: 'demo' })).toBe(false)
+    expect(isWoolCredentialsData({ credentials: { apiKey: 'k' }, account: { displayName: 1 } })).toBe(false)
+    expect(isWoolCredentialsData({ credentials: { apiKey: 'k' }, expiresAt: 'soon' })).toBe(false)
+  })
+})
+
 describe('动作词表（wool-manager dispatch 穷举前提）', () => {
-  it('七动作 + extract（透传通道）+ uninstall（D3 卸载三步编排）词表封闭', () => {
-    expect(WOOL_ACTION_TYPES).toEqual(['install', 'detect', 'status', 'checkin', 'refresh', 'setAutoCheckin', 'authorize', 'extract', 'uninstall'])
+  it('宿主动作词表封闭（含 authorizeSignal 宿主自有信号动作）', () => {
+    expect(WOOL_ACTION_TYPES).toEqual(['install', 'detect', 'status', 'checkin', 'refresh', 'setAutoCheckin', 'authorize', 'authorizeSignal', 'extract', 'uninstall'])
   })
 })

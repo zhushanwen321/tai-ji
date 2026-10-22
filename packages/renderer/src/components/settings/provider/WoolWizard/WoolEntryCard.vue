@@ -26,6 +26,16 @@
         class="inline-flex h-[18px] shrink-0 items-center rounded-full bg-danger-soft px-[7px] text-[length:var(--text-2xs)] font-semibold text-danger"
       >{{ t('wool.loginExpired') }}</span>
 
+      <!-- 失效重授权按钮（401 词界命中/状态失效后的恢复入口：oauth 家族重跑 authorize、提取族重跑 extract——凭据重新落 models.json） -->
+      <Button
+        v-if="loginExpired"
+        variant="ghost"
+        :data-testid="`wool-entry-reauth-${family.family}`"
+        class="h-[18px] shrink-0 rounded-full bg-danger-soft px-[7px] py-0 text-[length:var(--text-2xs)] font-semibold text-danger hover:bg-danger-soft hover:text-danger"
+        :title="t('wool.reauthHint')"
+        @click="emit('reauth')"
+      >{{ family.credentialsSource === 'oauth' ? t('wool.reauthorize') : t('wool.reextract') }}</Button>
+
       <!-- 可更新角标（D2 更新提示：installedVersion ≠ 清单 version；点击 = 用户显式触发更新，install 动作钉版本升级） -->
       <Button
         v-if="family.updateAvailable"
@@ -100,9 +110,9 @@
 
 <script setup lang="ts">
 /**
- * 纯展示 + 动作上抛（刷新/签到/更新/卸载由 ProviderPage 编排——wool.runAction 后快照经广播回推）。
+ * 纯展示 + 动作上抛（刷新/签到/更新/卸载/重授权由 ProviderPage 编排——wool.runAction 后快照经广播回推）。
  * 登录态失效判定（失败路径表）：account.loggedIn=false（status 动作回写或对话 401 分类，
- * 任一命中）即失效呈现。
+ * 任一命中）即失效呈现 + 重新授权/提取恢复入口（凭据通道 D2）。
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -122,6 +132,7 @@ const emit = defineEmits<{
   checkin: []
   update: []
   uninstall: []
+  reauth: []
 }>()
 
 const { t } = useI18n()

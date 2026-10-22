@@ -121,6 +121,7 @@
             @refresh="woolEntries.refreshEntry(f.family)"
             @checkin="woolEntries.checkin(f.family)"
             @update="woolEntries.updateEntry(f.family)"
+            @reauth="woolEntries.reauthorize(f.family)"
             @uninstall="woolUninstallTarget = f.family"
           />
         </div>

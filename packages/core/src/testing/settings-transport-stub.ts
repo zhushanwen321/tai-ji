@@ -37,7 +37,7 @@ export type SettingsSubscriptionStubs = Pick<
   | 'onProviders' | 'onModels' | 'onSkills' | 'onAgents' | 'onExtensions'
   | 'onSkillDirs' | 'onAgentDirs' | 'onExtensionDirs' | 'onDefaults' | 'onDefaultsWithSource'
   | 'onSkillCacheInvalidated' | 'onSystemPrompt' | 'onTerminalConfig' | 'onRetryConfig'
-  | 'onNetworkProxyConfig' | 'onWoolState'
+  | 'onNetworkProxyConfig' | 'onWoolState' | 'onWoolAuthorizeUrl'
   | 'onAuthDeviceCode' | 'onAuthAuthUrl' | 'onAuthSuccess' | 'onAuthError'
 >
 
@@ -67,6 +67,7 @@ export function makeSettingsSubscriptionStubs(): SettingsSubscriptionStubs {
     onRetryConfig: makeUnsubscribeStub(),
     onNetworkProxyConfig: makeUnsubscribeStub(),
     onWoolState: makeUnsubscribeStub(),
+    onWoolAuthorizeUrl: makeUnsubscribeStub(),
     onAuthDeviceCode: makeUnsubscribeStub(),
     onAuthAuthUrl: makeUnsubscribeStub(),
     onAuthSuccess: makeUnsubscribeStub(),

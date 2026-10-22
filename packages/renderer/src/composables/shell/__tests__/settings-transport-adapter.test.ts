@@ -294,6 +294,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
       t.onSkillCacheInvalidated(h),
     ),
     onWoolState: fwd('wool', 'onWoolState', [probeHandler], (t, h) => t.onWoolState(h)),
+    onWoolAuthorizeUrl: fwd('wool', 'onWoolAuthorizeUrl', [probeHandler], (t, h) => t.onWoolAuthorizeUrl(h)),
     onSystemPrompt: fwd('config', 'onSystemPrompt', [probeHandler], (t, h) => t.onSystemPrompt(h)),
     onTerminalConfig: fwd('config', 'onTerminalConfig', [probeHandler], (t, h) => t.onTerminalConfig(h)),
     onRetryConfig: fwd('config', 'onRetryConfig', [probeHandler], (t, h) => t.onRetryConfig(h)),

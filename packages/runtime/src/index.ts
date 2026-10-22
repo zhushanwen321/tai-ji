@@ -74,7 +74,7 @@ import { appendProcessEscapeLog, isContainedStreamError } from './infra/system/u
 import { trash, trashDirectory } from './infra/system/trash.js'
 
 import { ProcessManager } from './infra/pi/process-manager.js'
-import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver, cleanLeakedPackages, sanitizeInvalidProviders, isModelsStoreCorrupted } from './infra/pi/pi-provider-store.js'
+import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver, cleanLeakedPackages, sanitizeInvalidProviders, isModelsStoreCorrupted, upsertWoolProviderEntry, removeProvider } from './infra/pi/pi-provider-store.js'
 // engine-provider-unification u2：pi→zcode provider 启动同步接线（路径拼装 + D7 降级
 // 包装收敛在该模块——组合根 import 即执行 main()，降级分支抽独立模块才可单测，
 // run-extras-migration 同族先例）。
@@ -1058,7 +1058,29 @@ async function main(): Promise<void> {
             if (text !== undefined) woolManager.noteSessionError(text)
           }
         } catch (e) {
+          // best-effort 降级（旁路观察同 resumeDecision）：分类失败只 warn 不炸 interpret
+          // 批次——分类缺席 = 失效徽标暂不点亮，下一动作/广播自愈。
           console.warn('[runtime] wool session-error observe failed (isolated):', e)
+        }
+        try {
+          // wool（凭据通道 D2 授权 URL 拦截）：管理会话内 extension:notify 喂羊毛授权
+          // URL 观察器——authorize 编排在途时提取授权页 URL 并广播 wool.authorize_url
+          // （renderer 驱动浮层浏览器）。woolManager 只消费自家管理会话的 notify（合法
+          // 来源判定在其内部），普通会话通知零误报；旁路异常隔离同上。
+          for (const ev of events) {
+            if (ev.kind !== 'message') continue
+            if (ev.message.type !== 'extension:notify') continue
+            const payload: unknown = ev.message.payload
+            if (payload === null || typeof payload !== 'object') continue
+            const record = payload as Record<string, unknown>
+            if (typeof record.sessionId === 'string' && typeof record.message === 'string') {
+              woolManager.noteExtensionNotify(record.sessionId, record.message)
+            }
+          }
+        } catch (e) {
+          // best-effort 降级：拦截失败只 warn 不炸 interpret 批次——授权页 URL 缺席时
+          // 用户可关闭向导重开授权（authorize 动作回执仍正常落）。
+          console.warn('[runtime] wool extension-notify observe failed (isolated):', e)
         }
         interpreter.interpret(events)
         try {
@@ -1517,6 +1539,28 @@ async function main(): Promise<void> {
     sessionService,
     extensionService,
     settings: woolSettingsPort,
+    // models.json 羊毛条目 port（凭据通道 D2）：pi-provider-store 既有写入器闭包装配
+    //（writeEntry = upsertWoolProviderEntry 单条目全量覆写、其余条目保留；损坏降级态
+    // 拒入 ModelsStoreCorruptedError 由 writeModels 防线承载；deleteEntry 返回「删前
+    // 条目含非空 apiKey」供 credentialsCleared 判定）。services 层禁直连 infra，经 port
+    // 注入（clearApiKey 闭包同款先例；upsert 直调收进 pi-provider-store 具名函数，
+    // C-proc-15 检查 B 白名单形态）。
+    modelsEntry: {
+      readEntry: (providerId) => getProviderConfig(providerId) as Record<string, unknown> | undefined,
+      writeEntry: (providerId, entry) => {
+        upsertWoolProviderEntry(providerId, entry)
+      },
+      deleteEntry: (providerId) => {
+        const prev = getProviderConfig(providerId)
+        const hadApiKey = prev !== undefined && typeof prev.apiKey === 'string' && prev.apiKey.length > 0
+        if (prev !== undefined) removeProvider(providerId)
+        return hadApiKey
+      },
+      hasCredentials: (providerId) => {
+        const cfg = getProviderConfig(providerId)
+        return cfg !== undefined && typeof cfg.apiKey === 'string' && cfg.apiKey.length > 0
+      },
+    },
     dataDir: getDataDir(),
     broadcast: (msg) => server.broadcastServerMessage(msg),
   })

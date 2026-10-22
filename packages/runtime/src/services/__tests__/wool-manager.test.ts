@@ -15,11 +15,11 @@
  * 测试框架：vitest。运行：cd packages/runtime && npx vitest run src/services/__tests__/wool-manager.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ServerMessage, WoolFamilyState } from '@taiji/shared'
-import { WoolManager, type WoolExtensionPort, type WoolSessionPort, type WoolSettingsPort } from '../wool-manager.js'
+import { WoolManager, type WoolExtensionPort, type WoolModelsEntryPort, type WoolSessionPort, type WoolSettingsPort } from '../wool-manager.js'
 
 // ── 桩基建 ─────────────────────────────────────────────────────────────
 
@@ -76,9 +76,46 @@ function makeSettingsPort(initial: Record<string, unknown> = {}) {
   return { port, read: () => data }
 }
 
+/**
+ * models.json 羊毛条目 port 内存桩（凭据通道 D2）：条目表 + hasCredentials 按 apiKey
+ * 事实判。真实写入器防线（损坏拒入）由「models.json 真实写入器」describe 块经
+ * setModelsPath/setSettingsPath 重定向到 mkdtemp 覆盖。
+ */
+function makeModelsEntryPort(initial: Record<string, Record<string, unknown>> = {}) {
+  const entries = new Map<string, Record<string, unknown>>(Object.entries(initial))
+  const port: WoolModelsEntryPort = {
+    readEntry: (id) => {
+      const entry = entries.get(id)
+      return entry !== undefined ? JSON.parse(JSON.stringify(entry)) : undefined
+    },
+    writeEntry: (id, entry) => { entries.set(id, JSON.parse(JSON.stringify(entry))) },
+    deleteEntry: (id) => {
+      const prev = entries.get(id)
+      const hadApiKey = prev !== undefined && typeof prev.apiKey === 'string' && (prev.apiKey as string).length > 0
+      entries.delete(id)
+      return hadApiKey
+    },
+    hasCredentials: (id) => {
+      const entry = entries.get(id)
+      return entry !== undefined && typeof entry.apiKey === 'string' && (entry.apiKey as string).length > 0
+    },
+  }
+  return { port, entries }
+}
+
 /** 管理响应 custom entry（wool-shared manage-protocol 回写形态镜像）。 */
 function manageEntry(family: string, response: unknown) {
   return { type: 'custom', customType: 'wool-manage-response', data: { family, response } }
+}
+
+/** extract/authorize 成功回包（凭据通道 D2 契约形态）。 */
+const CREDENTIALS_OK = {
+  v: 1, ok: true,
+  data: {
+    credentials: { apiKey: 'sk-wool-1', refreshToken: 'rt-wool-1' },
+    account: { displayName: 'demo-user' },
+    expiresAt: 1_800_000_000_000,
+  },
 }
 
 function manifestBody(families: Record<string, unknown> = {}): unknown {
@@ -110,17 +147,21 @@ function assemble(opts: {
   manageResponseWaitMs?: number
   /** settings 羊毛域预置（adopted/autoCheckin 用例形态）。 */
   settingsInitial?: Record<string, unknown>
+  /** models.json 羊毛条目 port（缺省 = 内存桩；真实写入器用例经此注入 setModelsPath 重定向的实装）。 */
+  modelsEntry?: WoolModelsEntryPort
   /** 每日签到提醒定时器延迟（0 = 立即触发，定时器接线用例）。 */
   dailyCheckinDelayMs?: number
 } = {}) {
   const session = makeSessionPort(opts.sessionOverrides)
   const ext = makeExtPort(opts.extScan ?? [{ name: '@zhushanwen/pi-wool-qoder', version: '0.2.0', enabled: true }], opts.installed ?? [])
   const settings = makeSettingsPort(opts.settingsInitial)
-  const broadcasts: ServerMessage<'wool.state'>[] = []
+  const modelsEntry = opts.modelsEntry ?? makeModelsEntryPort().port
+  const broadcasts: Array<ServerMessage<'wool.state'> | ServerMessage<'wool.authorize_url'>> = []
   const manager = new WoolManager({
     sessionService: session.port,
     extensionService: ext.port,
     settings: settings.port,
+    modelsEntry,
     dataDir,
     broadcast: (msg) => broadcasts.push(msg),
     fetchFn: opts.fetchFn ?? (async () => jsonResponse(manifestBody())),
@@ -128,7 +169,7 @@ function assemble(opts: {
     ...(opts.manageResponseWaitMs !== undefined ? { manageResponseWaitMs: opts.manageResponseWaitMs } : {}),
     ...(opts.dailyCheckinDelayMs !== undefined ? { dailyCheckinDelayMs: opts.dailyCheckinDelayMs } : {}),
   })
-  return { manager, session, ext, settings, broadcasts }
+  return { manager, session, ext, settings, modelsEntry, broadcasts }
 }
 
 beforeEach(() => {
@@ -221,6 +262,7 @@ describe('管理专用会话生命周期', () => {
       sessionService: port,
       extensionService: makeExtPort([]).port,
       settings: makeSettingsPort().port,
+      modelsEntry: makeModelsEntryPort().port,
       dataDir,
       broadcast: () => {},
       now: () => 1,
@@ -269,6 +311,7 @@ describe('管理专用会话生命周期', () => {
       sessionService: port,
       extensionService: makeExtPort([]).port,
       settings: makeSettingsPort().port,
+      modelsEntry: makeModelsEntryPort().port,
       dataDir,
       broadcast: () => {},
       now: (() => 1_700_000_000_000) as () => number,
@@ -295,7 +338,9 @@ describe('状态缓存与快照组装', () => {
     // 动作后 wool.state 广播（payload 无 sessionId 纯全局帧）
     expect(broadcasts).toHaveLength(1)
     expect(broadcasts[0].type).toBe('wool.state')
-    expect(broadcasts[0].payload.snapshot.families.some((f) => f.family === 'qoder' && f.account?.nickname === 'demo')).toBe(true)
+    if (broadcasts[0].type === 'wool.state') {
+      expect(broadcasts[0].payload.snapshot.families.some((f) => f.family === 'qoder' && f.account?.nickname === 'demo')).toBe(true)
+    }
   })
 
   it('status 回 not_logged_in → accountCache 落 loggedIn:false + not_logged_in 错误回（合法状态面）', async () => {
@@ -358,6 +403,7 @@ describe('目录缓存与聚合源', () => {
       ]) } as unknown as WoolSessionPort, // 桩 client 仅消费面成员，经 unknown 中转（见 wool-manager refreshCatalog 探测窄化）
       extensionService: makeExtPort([]).port,
       settings: makeSettingsPort().port,
+      modelsEntry: makeModelsEntryPort().port,
       dataDir,
       broadcast: () => {},
       now: () => 42,
@@ -384,6 +430,7 @@ describe('目录缓存与聚合源', () => {
       sessionService: { ...session.port, getRpcClient: () => clientWithModels([{ id: 'hy3', name: 'HY3', provider: 'wool-workbuddy' }]) } as unknown as WoolSessionPort,
       extensionService: makeExtPort([]).port,
       settings: makeSettingsPort().port,
+      modelsEntry: makeModelsEntryPort().port,
       dataDir,
       broadcast: () => {},
       now: () => 7,
@@ -405,14 +452,16 @@ describe('目录缓存与聚合源', () => {
   })
 })
 
-// ── 卸载编排（D3 三步：clear → 包卸载 → 羊毛域清除）───────────────────
+// ── 卸载编排（D3：clear 扩展侧副本 → models.json 条目删除 → 包卸载 → 羊毛域清除）──
 
-describe('卸载编排（D3）', () => {
-  it('干净卸载：clear 指令送达 → 包卸载 → settings 羊毛域与缓存全清 + 聚合源条目消失', async () => {
-    // 预置接入态 + 目录缓存（卸载后断言缓存清理）。
+describe('卸载编排（D3 + 凭据通道 D2）', () => {
+  it('干净卸载：clear 指令送达 → models.json 条目删除 → 包卸载 → settings 羊毛域与缓存全清 + 聚合源条目消失', async () => {
+    // 预置接入态 + 目录缓存 + models.json 凭据条目（卸载后断言全部清理）。
+    const modelsEntry = makeModelsEntryPort({ 'wool-qoder': { name: 'Qoder', apiKey: 'sk-old', headers: { 'x-wool-refresh-token': 'rt' } } })
     const { manager, session, ext } = assemble({
       extScan: [{ name: '@zhushanwen/pi-wool-qoder', version: '0.2.0', enabled: true }],
       settingsInitial: { families: { qoder: { adopted: true } } },
+      modelsEntry: modelsEntry.port,
     })
     // 先经 refresh 落一份目录缓存（聚合源有条目）。
     const refreshSession = makeSessionPort()
@@ -420,6 +469,7 @@ describe('卸载编排（D3）', () => {
       sessionService: { ...refreshSession.port, getRpcClient: () => ({ getEntries: async () => ({ data: { entries: [] } }), getAvailableModels: async () => [{ id: 'hy3', name: 'HY3', provider: 'wool-qoder' }] }) } as unknown as WoolSessionPort,
       extensionService: ext.port,
       settings: makeSettingsPort({ families: { qoder: { adopted: true } } }).port,
+      modelsEntry: modelsEntry.port,
       dataDir,
       broadcast: () => {},
       now: () => 1,
@@ -427,18 +477,19 @@ describe('卸载编排（D3）', () => {
     await refreshManager.runAction({ action: 'refresh', family: 'qoder' })
     expect(refreshManager.listWoolProviderInfos()).toHaveLength(1)
 
-    // 卸载三步：管理会话 clear 响应预置（cleared=进程内副本已清，persistCleared=目录已删）。
+    // 卸载编排：管理会话 clear 响应预置（cleared=进程内副本已清，persistCleared=目录已删）。
     session.entriesBySid.set('sid-1', [manageEntry('qoder', { v: 1, ok: true, data: { cleared: true, persistCleared: true } })])
     const reply = await manager.runAction({ action: 'uninstall', family: 'qoder' })
     expect(reply.ok).toBe(true)
     if (reply.ok) {
-      // D3 ① auth.json 清除通道缺失 → credentialsCleared 恒 false + 分层残留提示
-      // （扩展侧已清项 + pi 侧 /logout 手动指引，不静默残留）。
+      // 凭据通道 D2：models.json 条目删除成功 → credentialsCleared=true（无残留提示）。
       const data = reply.data as { credentialsCleared: boolean; residualHint?: string }
-      expect(data.credentialsCleared).toBe(false)
-      expect(data.residualHint).toContain('进程内凭据副本与模型目录持久化缓存已清理')
-      expect(data.residualHint).toContain('/logout wool-qoder')
+      expect(data.credentialsCleared).toBe(true)
+      expect(data.residualHint).toBeUndefined()
     }
+    // models.json 羊毛条目已删除（apiKey 随条目清除）。
+    expect(modelsEntry.port.hasCredentials('wool-qoder')).toBe(false)
+    expect(modelsEntry.port.readEntry('wool-qoder')).toBeUndefined()
     expect(ext.uninstalls).toEqual(['@zhushanwen/pi-wool-qoder'])
     // 既有卸载链语义：卸载后 scanExtensions 不再返回该包。
     const scanned = await ext.port.scanExtensions()
@@ -451,41 +502,42 @@ describe('卸载编排（D3）', () => {
     expect(after.manager.listWoolProviderInfos()).toHaveLength(0)
   })
 
-  it('clear 送达但家族无可清副本（workbuddy 形态）→ 分层报告只列实际已清项 + 残留提示恒在', async () => {
+  it('条目本就不存在（从未接入凭据）→ credentialsCleared=true 空清除形态（无残留提示）', async () => {
     const session = makeSessionPort()
     const manager = new WoolManager({
       sessionService: session.port,
       extensionService: makeExtPort([{ name: '@zhushanwen/pi-wool-workbuddy', version: '0.3.0', enabled: true }]).port,
       settings: makeSettingsPort({ families: { workbuddy: { adopted: true } } }).port,
+      modelsEntry: makeModelsEntryPort().port,
       dataDir,
       broadcast: () => {},
       now: () => 1,
     })
-    // workbuddy 家族 clear 如实回 cleared:false（无可清进程内副本），persistCleared:true。
     session.entriesBySid.set('sid-1', [manageEntry('workbuddy', { v: 1, ok: true, data: { cleared: false, persistCleared: true } })])
     const reply = await manager.runAction({ action: 'uninstall', family: 'workbuddy' })
     expect(reply.ok).toBe(true)
     if (reply.ok) {
       const data = reply.data as { credentialsCleared: boolean; residualHint?: string }
-      expect(data.credentialsCleared).toBe(false)
-      // 已清项只列 persist 目录（cleared=false 不冒充进程内副本已清）。
-      expect(data.residualHint).toContain('模型目录持久化缓存已清理')
-      expect(data.residualHint).not.toContain('进程内凭据副本与')
-      expect(data.residualHint).toContain('/logout wool-workbuddy')
+      expect(data.credentialsCleared).toBe(true)
+      expect(data.residualHint).toBeUndefined()
     }
   })
 
-  it('clear 不可达（扩展损坏）→ 卸载照常完成 + credentialsCleared=false 残留提示（D3 降级不静默）', async () => {
+  it('models.json 条目删除被拒（损坏降级态）→ 卸载照常完成 + credentialsCleared=false 残留提示（不静默）', async () => {
+    const modelsEntry = makeModelsEntryPort({ 'wool-qoder': { apiKey: 'sk-old' } })
+    modelsEntry.port.deleteEntry = () => { throw new Error('models.json 已损坏，拒绝写入') }
     const { manager, ext } = assemble({
       extScan: [{ name: '@zhushanwen/pi-wool-qoder', version: '0.2.0', enabled: true }],
       sessionOverrides: { sendSystemCommand: async () => ({ kind: 'extension-missing' as const }) },
+      modelsEntry: modelsEntry.port,
     })
     const reply = await manager.runAction({ action: 'uninstall', family: 'qoder' })
     expect(reply.ok).toBe(true)
     if (reply.ok) {
       const data = reply.data as { credentialsCleared: boolean; residualHint?: string }
       expect(data.credentialsCleared).toBe(false)
-      expect(data.residualHint).toContain('残留')
+      expect(data.residualHint).toContain('wool-qoder')
+      expect(data.residualHint).toContain('models.json')
     }
     // 主链不受降级影响：包卸载照常。
     expect(ext.uninstalls).toEqual(['@zhushanwen/pi-wool-qoder'])
@@ -499,6 +551,7 @@ describe('卸载编排（D3）', () => {
       sessionService: session.port,
       extensionService: ext.port,
       settings: makeSettingsPort({ families: { qoder: { adopted: true } } }).port,
+      modelsEntry: makeModelsEntryPort().port,
       dataDir,
       broadcast: () => {},
       now: () => 1,
@@ -507,6 +560,387 @@ describe('卸载编排（D3）', () => {
     const reply = await manager.runAction({ action: 'uninstall', family: 'qoder' })
     expect(reply.ok).toBe(false)
     if (!reply.ok) expect(reply.error.code).toBe('uninstall_failed')
+  })
+})
+
+// ── 凭据编排（extract/authorize，凭据通道 D2：models.json 羊毛条目）────────
+
+describe('凭据编排（extract/authorize → models.json 条目 + 账号态点亮）', () => {
+  it('extract 成功 → models.json 条目幂等写入（name/apiKey/refreshToken headers）+ adopted + 账号态点亮 + 回执不含 apiKey', async () => {
+    const modelsEntry = makeModelsEntryPort({ 'wool-qoder': { baseUrl: 'https://keep.example' } })
+    const { manager, session } = assemble({ modelsEntry: modelsEntry.port })
+    // initialize 拉清单（name 取清单显示名的前提；向导真实时序 = install 后 extract，
+    // 清单已就位）。
+    await manager.initialize()
+    session.entriesBySid.set('sid-1', [manageEntry('qoder', CREDENTIALS_OK)])
+    const reply = await manager.runAction({ action: 'extract', family: 'qoder' })
+    expect(reply.ok).toBe(true)
+    if (reply.ok) {
+      // 回执只携安全摘要——凭据不出 models.json。
+      expect(reply.data).toEqual({
+        credentialsStored: true,
+        account: { displayName: 'demo-user' },
+        expiresAt: 1_800_000_000_000,
+      })
+    }
+    // 条目形态：保留他方键（baseUrl）+ 最小凭据形态（name 取清单显示名）。
+    expect(modelsEntry.port.readEntry('wool-qoder')).toEqual({
+      baseUrl: 'https://keep.example',
+      name: 'Qoder',
+      apiKey: 'sk-wool-1',
+      headers: { 'x-wool-refresh-token': 'rt-wool-1' },
+    })
+    expect(modelsEntry.port.hasCredentials('wool-qoder')).toBe(true)
+    // adopted 置位 + 账号缓存即时点亮（displayName/expiresAt 入状态）。
+    expect(manager.getSnapshot().families.find((f) => f.family === 'qoder')?.adopted).toBe(true)
+    expect(manager.getSnapshot().families.find((f) => f.family === 'qoder')?.account).toMatchObject({
+      loggedIn: true, nickname: 'demo-user', tokenExpiresAt: 1_800_000_000_000,
+    })
+  })
+
+  it('二次 extract 无 refreshToken → 旧 refresh 键删除（幂等 = 条目反映本次凭据集）；headers 空则省键', async () => {
+    const modelsEntry = makeModelsEntryPort()
+    const { manager, session } = assemble({ modelsEntry: modelsEntry.port })
+    await manager.initialize()
+    session.entriesBySid.set('sid-1', [manageEntry('qoder', CREDENTIALS_OK)])
+    await manager.runAction({ action: 'extract', family: 'qoder' })
+    // 第二次编排 spawn 新会话（sid-2）——响应 entry 挂新 sid。
+    session.entriesBySid.set('sid-2', [manageEntry('qoder', {
+      v: 1, ok: true, data: { credentials: { apiKey: 'sk-wool-2' } },
+    })])
+    const reply = await manager.runAction({ action: 'extract', family: 'qoder' })
+    expect(reply.ok).toBe(true)
+    expect(modelsEntry.port.readEntry('wool-qoder')).toEqual({ name: 'Qoder', apiKey: 'sk-wool-2' })
+  })
+
+  it('extract 成功但回包缺凭据载荷 → internal（读侧不信任扩展回包）', async () => {
+    const modelsEntry = makeModelsEntryPort()
+    const { manager, session } = assemble({ modelsEntry: modelsEntry.port })
+    session.entriesBySid.set('sid-1', [manageEntry('qoder', { v: 1, ok: true, data: { foo: 1 } })])
+    const reply = await manager.runAction({ action: 'extract', family: 'qoder' })
+    expect(reply.ok).toBe(false)
+    if (!reply.ok) expect(reply.error.code).toBe('internal')
+    expect(modelsEntry.port.readEntry('wool-qoder')).toBeUndefined()
+  })
+
+  it('旧扩展回 invalid_request（Unknown action 文案）→ extract_unavailable / authorize_unavailable（协议未就绪分流）', async () => {
+    const { manager, session } = assemble()
+    await manager.initialize()
+    session.entriesBySid.set('sid-1', [manageEntry('qoder', { v: 1, ok: false, error: { code: 'invalid_request', message: 'Unknown action "extract"; expected one of status, detect, checkin, clear. Expected: /wool-qoder {...}' } })])
+    const extractReply = await manager.runAction({ action: 'extract', family: 'qoder' })
+    expect(extractReply.ok).toBe(false)
+    if (!extractReply.ok) expect(extractReply.error.code).toBe('extract_unavailable')
+
+    session.entriesBySid.set('sid-2', [manageEntry('workbuddy', { v: 1, ok: false, error: { code: 'invalid_request', message: 'Unknown action "authorize"; expected one of status, detect, checkin, clear.' } })])
+    const authorizeReply = await manager.runAction({ action: 'authorize', family: 'workbuddy' })
+    expect(authorizeReply.ok).toBe(false)
+    if (!authorizeReply.ok) expect(authorizeReply.error.code).toBe('authorize_unavailable')
+  })
+
+  it('invalid_request 非 Unknown action 文案（家族凭据策略不支持）→ action_not_supported 分流', async () => {
+    const { manager, session } = assemble()
+    session.entriesBySid.set('sid-1', [manageEntry('workbuddy', {
+      v: 1, ok: false,
+      error: { code: 'invalid_request', message: 'WorkBuddy is an OAuth family: run the authorize action (browser sign-in), not local extraction' },
+    })])
+    const reply = await manager.runAction({ action: 'extract', family: 'workbuddy' })
+    expect(reply.ok).toBe(false)
+    if (!reply.ok) {
+      expect(reply.error.code).toBe('action_not_supported')
+      expect(reply.error.message).toContain('authorize')
+    }
+  })
+
+  it('authorize 回 internal + cancelled 文案（扩展取消终态）→ cancelled 转译（向导回待授权态）', async () => {
+    const { manager, session } = assemble()
+    session.entriesBySid.set('sid-1', [manageEntry('workbuddy', {
+      v: 1, ok: false,
+      error: { code: 'internal', message: 'WorkBuddy login cancelled: overlay cancel signal' },
+    })])
+    const reply = await manager.runAction({ action: 'authorize', family: 'workbuddy' })
+    expect(reply.ok).toBe(false)
+    if (!reply.ok) expect(reply.error.code).toBe('cancelled')
+  })
+
+  it('authorize 成功（全载荷）→ 凭据落库同 extract', async () => {
+    const modelsEntry = makeModelsEntryPort()
+    const { manager, session } = assemble({ modelsEntry: modelsEntry.port })
+    await manager.initialize()
+    session.entriesBySid.set('sid-1', [manageEntry('workbuddy', CREDENTIALS_OK)])
+    const reply = await manager.runAction({ action: 'authorize', family: 'workbuddy' })
+    expect(reply.ok).toBe(true)
+    expect(modelsEntry.port.readEntry('wool-workbuddy')).toEqual({
+      name: 'WorkBuddy',
+      apiKey: 'sk-wool-1',
+      headers: { 'x-wool-refresh-token': 'rt-wool-1' },
+    })
+    expect(manager.getSnapshot().families.find((f) => f.family === 'workbuddy')?.adopted).toBe(true)
+  })
+
+  /** wool-authorize 单行 JSON 通知（buildWoolAuthorizeNotice 契约形态）。 */
+  function authorizeNotice(sidUrl: { authUrl: string; callbackUrl?: string; state?: string } = {
+    authUrl: 'https://auth.workbuddy.example/oauth?state=xyz',
+  }): string {
+    return JSON.stringify({
+      type: 'wool-authorize', family: 'workbuddy',
+      authUrl: sidUrl.authUrl,
+      callbackUrl: sidUrl.callbackUrl ?? 'http://127.0.0.1:45678/wool-auth/callback',
+      state: sidUrl.state ?? 'st-1',
+    })
+  }
+
+  it('授权通知 JSON 契约：在途窗口内 → callbackUrl/state 登记 + wool.authorize_url 广播；他 sid / 非 JSON / 家族不符零消费', async () => {
+    const modelsEntry = makeModelsEntryPort()
+    // 会话桩：首查 entries 空（触发轮询窗口）——在窗口内模拟扩展 notify 到达；
+    // 次查返回 authorize 完成响应。
+    let poll = 0
+    const base = makeSessionPort()
+    let notifyProbe: ((sid: string, message: string) => void) | undefined
+    const port: WoolSessionPort = {
+      ...base.port,
+      getRpcClient: ((sid: string) => ({
+        getEntries: async () => {
+          poll += 1
+          if (poll === 1) {
+            // 在途窗口内：自家管理会话合法 JSON 通知 → 消费；他 sid / 非 JSON / 家族不符零消费。
+            notifyProbe?.('sid-1', authorizeNotice())
+            notifyProbe?.('sid-other', authorizeNotice())
+            notifyProbe?.('sid-1', 'plain text page url https://auth.example/x')
+            notifyProbe?.('sid-1', JSON.stringify({ type: 'other-kind', family: 'workbuddy', authUrl: 'https://x.example', callbackUrl: 'http://127.0.0.1:1/cb', state: 's' }))
+            return { data: { entries: [] } }
+          }
+          return { data: { entries: [manageEntry('workbuddy', CREDENTIALS_OK)] } }
+        },
+      })) as unknown as WoolSessionPort['getRpcClient'],
+    }
+    const broadcasts: Array<ServerMessage<'wool.state'> | ServerMessage<'wool.authorize_url'>> = []
+    const manager = new WoolManager({
+      sessionService: port,
+      extensionService: makeExtPort([]).port,
+      settings: makeSettingsPort().port,
+      modelsEntry: modelsEntry.port,
+      dataDir,
+      broadcast: (msg) => broadcasts.push(msg),
+      now: () => 1_700_000_000_000,
+      manageResponsePollIntervalMs: 1,
+    })
+    notifyProbe = (sid, message) => manager.noteExtensionNotify(sid, message)
+    const reply = await manager.runAction({ action: 'authorize', family: 'workbuddy' })
+    expect(reply.ok).toBe(true)
+    // 恰一条授权 URL 广播（自家会话合法 JSON；他 sid / 纯文本 / type 不符各零条）。
+    const urlFrames = broadcasts.filter((b) => b.type === 'wool.authorize_url')
+    expect(urlFrames).toEqual([{
+      type: 'wool.authorize_url',
+      payload: { family: 'workbuddy', url: 'https://auth.workbuddy.example/oauth?state=xyz' },
+    }])
+    // 编排收尾后（会话已回收 + 窗口关闭）同 sid 的通知不再消费。
+    const before = broadcasts.length
+    manager.noteExtensionNotify('sid-1', authorizeNotice({ authUrl: 'https://late.example' }))
+    expect(broadcasts.length).toBe(before)
+  })
+
+  it('authorizeSignal：done 202（未完成可重试）/ 200（完成）/ cancel / 窗外 invalid_request', async () => {
+    // 信号目标 URL 断言素材 + 可编排响应码的 fetch 桩。
+    const fetchedUrls: string[] = []
+    let nextStatus = 202
+    const modelsEntry = makeModelsEntryPort()
+    const base = makeSessionPort()
+    let notifyProbe: ((sid: string, message: string) => void) | undefined
+    let signalEntries: unknown[] | undefined
+    const port: WoolSessionPort = {
+      ...base.port,
+      getRpcClient: ((sid: string) => ({
+        getEntries: async () => ({ data: { entries: signalEntries ?? [] } }),
+      })) as unknown as WoolSessionPort['getRpcClient'],
+    }
+    const manager = new WoolManager({
+      sessionService: port,
+      extensionService: makeExtPort([]).port,
+      settings: makeSettingsPort().port,
+      modelsEntry: modelsEntry.port,
+      dataDir,
+      broadcast: () => {},
+      now: () => 1_700_000_000_000,
+      manageResponsePollIntervalMs: 1,
+      // fetch 桩：manifest 正常回 + 信号端点按 nextStatus 回。
+      fetchFn: (async (input: Parameters<typeof fetch>[0]) => {
+        const url = String(input)
+        if (url.includes('wool-auth/callback')) {
+          fetchedUrls.push(url)
+          return new Response('', { status: nextStatus })
+        }
+        return jsonResponse(manifestBody())
+      }) as typeof fetch,
+    })
+    notifyProbe = (sid, message) => manager.noteExtensionNotify(sid, message)
+    // authorize 编排挂起（响应 entry 延迟注入——信号测试窗口）。
+    const authorizePromise = manager.runAction({ action: 'authorize', family: 'workbuddy' })
+    // 等通知消费（callback 登记）落地：signal 成功即登记完成（确定性信号）。
+    for (let i = 0; i < 50; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      notifyProbe?.('sid-1', authorizeNotice())
+      const probe = await manager.runAction({ action: 'authorizeSignal', family: 'workbuddy', params: { status: 'done' } })
+      if (probe.ok) break
+    }
+
+    // 202 = 未完成（completed=false，可重试）。
+    nextStatus = 202
+    const pending = await manager.runAction({ action: 'authorizeSignal', family: 'workbuddy', params: { status: 'done' } })
+    expect(pending).toEqual({ ok: true, data: { completed: false } })
+
+    // 200 = 扩展侧令牌交换完成（completed=true）。
+    nextStatus = 200
+    const done = await manager.runAction({ action: 'authorizeSignal', family: 'workbuddy', params: { status: 'done' } })
+    expect(done).toEqual({ ok: true, data: { completed: true } })
+    // 信号 URL 形态（callback-server 契约：?state=...&status=done）。
+    expect(fetchedUrls.some((u) => u.includes('state=st-1') && u.includes('status=done'))).toBe(true)
+
+    // 放行 authorize 响应（编排收尾 → 窗口关闭）。
+    signalEntries = [manageEntry('workbuddy', CREDENTIALS_OK)]
+    const authorizeReply = await authorizePromise
+    expect(authorizeReply.ok).toBe(true)
+
+    // 窗外信号 → invalid_request（authorizeCallback 已清）。
+    const outside = await manager.runAction({ action: 'authorizeSignal', family: 'workbuddy', params: { status: 'done' } })
+    expect(outside.ok).toBe(false)
+    if (!outside.ok) expect(outside.error.code).toBe('invalid_request')
+  })
+
+  it('authorizeSignal cancel：信号送达 + URL 带 status=cancel', async () => {
+    const fetchedUrls: string[] = []
+    const modelsEntry = makeModelsEntryPort()
+    const base = makeSessionPort()
+    let notifyProbe: ((sid: string, message: string) => void) | undefined
+    let signalEntries: unknown[] | undefined
+    const port: WoolSessionPort = {
+      ...base.port,
+      getRpcClient: ((sid: string) => ({
+        getEntries: async () => ({ data: { entries: signalEntries ?? [] } }),
+      })) as unknown as WoolSessionPort['getRpcClient'],
+    }
+    const manager = new WoolManager({
+      sessionService: port,
+      extensionService: makeExtPort([]).port,
+      settings: makeSettingsPort().port,
+      modelsEntry: modelsEntry.port,
+      dataDir,
+      broadcast: () => {},
+      now: () => 1_700_000_000_000,
+      manageResponsePollIntervalMs: 1,
+      fetchFn: (async (input: Parameters<typeof fetch>[0]) => {
+        const url = String(input)
+        if (url.includes('wool-auth/callback')) {
+          fetchedUrls.push(url)
+          return new Response('', { status: 200 })
+        }
+        return jsonResponse(manifestBody())
+      }) as typeof fetch,
+    })
+    notifyProbe = (sid, message) => manager.noteExtensionNotify(sid, message)
+    const authorizePromise = manager.runAction({ action: 'authorize', family: 'workbuddy' })
+    // 等 callback 登记 + 发 cancel 信号（确定性信号 = fetchedUrls 出现 cancel URL）。
+    let cancelReply: Awaited<ReturnType<typeof manager.runAction>> | undefined
+    for (let i = 0; i < 50; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      notifyProbe?.('sid-1', authorizeNotice())
+      cancelReply = await manager.runAction({ action: 'authorizeSignal', family: 'workbuddy', params: { status: 'cancel' } })
+      if (cancelReply.ok) break
+    }
+    expect(cancelReply).toEqual({ ok: true, data: { cancelled: true } })
+    expect(fetchedUrls.some((u) => u.includes('status=cancel'))).toBe(true)
+    // authorize 随取消终态回执（cancelled 转译）。
+    signalEntries = [manageEntry('workbuddy', { v: 1, ok: false, error: { code: 'internal', message: 'WorkBuddy login cancelled: overlay cancel signal' } })]
+    const authorizeReply = await authorizePromise
+    expect(authorizeReply.ok).toBe(false)
+    if (!authorizeReply.ok) expect(authorizeReply.error.code).toBe('cancelled')
+  })
+
+  it('非授权窗（无 authorize 在途）的 extension:notify → 零编排零广播', () => {
+    const { manager, broadcasts } = assemble()
+    manager.noteExtensionNotify('sid-1', authorizeNotice())
+    expect(broadcasts).toHaveLength(0)
+  })
+})
+
+// ── models.json 真实写入器防线（组合根同款 port 装配 + mkdtemp 注入路径）────
+
+describe('models.json 真实写入器（pi-provider-store 装配 + 损坏拒入）', () => {
+  let modelsDir: string
+  // 组合根同款 port 装配（index.ts woolManager.modelsEntry 的镜像——分层约束下
+  // services 测试经 infra 函数直接组装，形态漂移由组合根评审兜底）。
+  let realPort: WoolModelsEntryPort
+
+  beforeEach(async () => {
+    modelsDir = mkdtempSync(join(tmpdir(), 'wool-models-entry-test-'))
+    const { setModelsPath, setSettingsPath, getProviderConfig, upsertProvider, removeProvider } = await import('../../infra/pi/pi-provider-store.js')
+    setModelsPath(join(modelsDir, 'models.json'))
+    setSettingsPath(join(modelsDir, 'settings.json'))
+    realPort = {
+      readEntry: (providerId) => getProviderConfig(providerId) as Record<string, unknown> | undefined,
+      writeEntry: (providerId, entry) => {
+        upsertProvider(providerId, entry as Parameters<typeof upsertProvider>[1])
+      },
+      deleteEntry: (providerId) => {
+        const prev = getProviderConfig(providerId)
+        const hadApiKey = prev !== undefined && typeof prev.apiKey === 'string' && prev.apiKey.length > 0
+        if (prev !== undefined) removeProvider(providerId)
+        return hadApiKey
+      },
+      hasCredentials: (providerId) => {
+        const cfg = getProviderConfig(providerId)
+        return cfg !== undefined && typeof cfg.apiKey === 'string' && cfg.apiKey.length > 0
+      },
+    }
+  })
+
+  afterEach(() => {
+    rmSync(modelsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('extract 全链 → models.json 落盘（保留其他 provider 条目）+ hasCredentials 事实源 + uninstall 删条目', async () => {
+    const { manager, session } = assemble({ modelsEntry: realPort })
+    await manager.initialize()
+    session.entriesBySid.set('sid-1', [manageEntry('qoder', CREDENTIALS_OK)])
+    const reply = await manager.runAction({ action: 'extract', family: 'qoder' })
+    expect(reply.ok).toBe(true)
+    const onDisk = JSON.parse(readFileSync(join(modelsDir, 'models.json'), 'utf8')) as {
+      providers: Record<string, Record<string, unknown>>
+    }
+    expect(onDisk.providers['wool-qoder']).toEqual({
+      name: 'Qoder',
+      apiKey: 'sk-wool-1',
+      headers: { 'x-wool-refresh-token': 'rt-wool-1' },
+    })
+    expect(realPort.hasCredentials('wool-qoder')).toBe(true)
+    // 聚合源 apiKeySet 走条目事实（无凭据条目 = false）。
+    expect(manager.listWoolProviderInfos().every((info) => info.id !== 'wool-qoder' || info.apiKeySet)).toBe(true)
+
+    // 卸载删条目：磁盘条目消失 + deleteEntry 返回删前含 apiKey。
+    session.entriesBySid.set('sid-2', [manageEntry('qoder', { v: 1, ok: true, data: { cleared: true, persistCleared: false } })])
+    const uninstallReply = await manager.runAction({ action: 'uninstall', family: 'qoder' })
+    expect(uninstallReply.ok).toBe(true)
+    const afterDisk = JSON.parse(readFileSync(join(modelsDir, 'models.json'), 'utf8')) as {
+      providers: Record<string, Record<string, unknown>>
+    }
+    expect(afterDisk.providers['wool-qoder']).toBeUndefined()
+    expect(realPort.hasCredentials('wool-qoder')).toBe(false)
+  })
+
+  it('models.json 损坏（JSON 非法已隔离）→ extract 落库被拒 internal + 坏文件不被空基线覆写', async () => {
+    writeFileSync(join(modelsDir, 'models.json'), '{ not valid json', 'utf8')
+    const { manager, session } = assemble({ modelsEntry: realPort })
+    session.entriesBySid.set('sid-1', [manageEntry('qoder', CREDENTIALS_OK)])
+    const reply = await manager.runAction({ action: 'extract', family: 'qoder' })
+    expect(reply.ok).toBe(false)
+    if (!reply.ok) {
+      expect(reply.error.code).toBe('internal')
+      expect(reply.error.message).toContain('models.json')
+    }
+    // 损坏拒入防线：坏文件被隔离为 .corrupt- 副本（现场保留），原位未出现
+    // 以空 providers 合法化覆写的新文件（writeModels 拒入，未触碰磁盘）。
+    const files = readdirSync(modelsDir)
+    expect(files.some((name) => name.startsWith('models.json.corrupt-'))).toBe(true)
+    expect(existsSync(join(modelsDir, 'models.json'))).toBe(false)
   })
 })
 
@@ -545,6 +979,7 @@ describe('每日签到提醒（D5）', () => {
       sessionService: session.port,
       extensionService: makeExtPort([]).port,
       settings: makeSettingsPort({ families: { workbuddy: { adopted: true, autoCheckin: true } } }).port,
+      modelsEntry: makeModelsEntryPort().port,
       dataDir,
       broadcast: () => {},
       now: () => 1,
@@ -560,11 +995,12 @@ describe('每日签到提醒（D5）', () => {
     const session = recordingSession([
       manageEntry('workbuddy', { v: 1, ok: true, data: { loggedIn: true, nickname: 'n', checkin: { doneToday: false }, fetchedAt: 5 } }),
     ])
-    const broadcasts: ServerMessage<'wool.state'>[] = []
+    const broadcasts: Array<ServerMessage<'wool.state'> | ServerMessage<'wool.authorize_url'>> = []
     const manager = new WoolManager({
       sessionService: session.port,
       extensionService: makeExtPort([]).port,
       settings: makeSettingsPort({ families: { workbuddy: { adopted: true } } }).port,
+      modelsEntry: makeModelsEntryPort().port,
       dataDir,
       broadcast: (msg) => broadcasts.push(msg),
       now: () => 1,
@@ -586,11 +1022,12 @@ describe('每日签到提醒（D5）', () => {
         ...session.port,
         sendSystemCommand: async () => ({ kind: 'error' as const, message: 'boom' }),
       }
-      const broadcasts: ServerMessage<'wool.state'>[] = []
+      const broadcasts: Array<ServerMessage<'wool.state'> | ServerMessage<'wool.authorize_url'>> = []
       const manager = new WoolManager({
         sessionService: port,
         extensionService: makeExtPort([]).port,
         settings: makeSettingsPort({ families: { workbuddy: { adopted: true } } }).port,
+        modelsEntry: makeModelsEntryPort().port,
         dataDir,
         broadcast: (msg) => broadcasts.push(msg),
         now: () => 1,
@@ -610,6 +1047,7 @@ describe('每日签到提醒（D5）', () => {
       sessionService: session.port,
       extensionService: makeExtPort([]).port,
       settings: makeSettingsPort().port,
+      modelsEntry: makeModelsEntryPort().port,
       dataDir,
       broadcast: () => {},
       now: () => 1,
@@ -626,6 +1064,7 @@ describe('每日签到提醒（D5）', () => {
       sessionService: session.port,
       extensionService: makeExtPort([]).port,
       settings: makeSettingsPort({ families: { workbuddy: { adopted: true } } }).port,
+      modelsEntry: makeModelsEntryPort().port,
       dataDir,
       broadcast: () => {},
       now: () => 1,
@@ -669,6 +1108,7 @@ describe('会话错误分类（D6 ③）', () => {
       }) } as unknown as WoolSessionPort,
       extensionService: makeExtPort([]).port,
       settings: makeSettingsPort().port,
+      modelsEntry: makeModelsEntryPort().port,
       dataDir,
       broadcast: () => {},
       now: () => 1,

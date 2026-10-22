@@ -74,6 +74,7 @@ const FAILURE_I18N_KEYS: Record<WoolStepFailureCode, string> = {
   upstream_error: 'wool.errUpstreamError',
   authorize_unavailable: 'wool.errAuthorizeUnavailable',
   extract_unavailable: 'wool.errExtractUnavailable',
+  action_not_supported: 'wool.errActionNotSupported',
   uninstall_failed: 'wool.errUninstallFailed',
   manage_unavailable: 'wool.errManageUnavailable',
   internal: 'wool.errInternal',

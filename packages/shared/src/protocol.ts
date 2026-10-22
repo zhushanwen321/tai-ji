@@ -88,7 +88,7 @@ import type {
   TtsProviderId,
 } from './tts-types'
 // wool.* 域载荷形状 SSOT 引用（wool-provider 设计：域形状归属 ./wool，本文件仅登记 type→payload 映射）
-import type { WoolActionReply, WoolActionRequest, WoolRuntimeSnapshot } from './wool'
+import type { WoolActionReply, WoolActionRequest, WoolAuthorizeUrlPayload, WoolRuntimeSnapshot } from './wool'
 
 
 /**
@@ -1467,6 +1467,10 @@ export type ServerMessageType =
   | 'wool.state'
   // wool.action：动作 RPC 的 reply（与 request 同名——canvas.mutate 同款）。
   | 'wool.action'
+  // wool.authorize_url：授权族 authorize 编排在途时扩展经 pi notify 发出的授权页 URL
+  // （wool-manager 拦截后广播，renderer 驱动浮层浏览器打开）。无 sessionId，同 wool.state
+  // 走 broker 纯全局通道；一次性事件，不进 wool.state 快照。
+  | 'wool.authorize_url'
 
 /** skill 缓存失效广播的作用域：global=全局 skill 变动，project=某项目 cwd 的 skill 变动。 */
 export type SkillCacheScope = 'global' | 'project'
@@ -3126,6 +3130,8 @@ export interface ServerMessageMapBase {
   'wool.state': { snapshot: WoolRuntimeSnapshot }
   // wool.action：动作结果两态信封；状态变化另行 wool.state 广播（reply 不捎快照，单一数据源）。
   'wool.action': WoolActionReply
+  // wool.authorize_url：授权页 URL 一次性广播（authorize 编排在途；形状 SSOT ./wool WoolAuthorizeUrlPayload）。
+  'wool.authorize_url': WoolAuthorizeUrlPayload
 }
 
 /**

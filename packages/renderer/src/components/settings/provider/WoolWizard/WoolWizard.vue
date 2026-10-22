@@ -39,12 +39,17 @@
         :current-step="wizard.currentStep.value"
         :account="selectedFamily.account"
         :auto-checkin="selectedFamily.autoCheckin"
+        :authorize-url-opened="authorizeUrlOpened"
+        :authorize-signaling="authorizeSignaling"
+        :authorize-retry-hint="authorizeRetryHint"
         :catalog-loading="catalogLoading"
         :catalog-count="catalogCount"
         @retry-install="runInstallStep"
         @retry-authorize="runAuthorizeStep"
         @retry-ready="runReadyStep"
         @authorize="runAuthorizeStep"
+        @authorize-done="onAuthorizeDone"
+        @authorize-cancel="onAuthorizeCancel"
         @set-auto-checkin="onSetAutoCheckin"
       />
 
@@ -74,14 +79,18 @@
  * 向导编排（状态机驱动；组件相 = family ↔ flow）：
  * - 打开：拉快照 + ide-extract 家族各发一次 detect（存在性检查，徽标数据源）
  * - 选家族：构造 useWoolWizard 状态机（shallowRef 持有，选家族时重建）→ install 自动执行
- * - 提取族：install ok → credentials（detect → 确认框 → extract → status 后台拉）
- * - 授权族：install ok → authorize（按钮触发）→ ready（status）→ checkin（开关交互态）
+ * - 提取族：install ok → credentials（detect → 确认框 → extract）→ status 后台拉 → done
+ * - 授权族：install ok → authorize（按钮触发；授权窗内订阅 wool.authorize_url →
+ *   浮层浏览器打开授权页，done/cancel 信号驱动扩展侧回调，凭据回传即落步）→ ready（status）→ checkin → done
  * - done：catalog refresh（一次）+ 目录计数；完成钮关闭
- * 中途关闭（授权待决态）零本地持久化——恢复靠快照（wool.state）重新呈现。
+ * 中途关闭（授权待决态）零本地持久化——恢复靠快照（wool.state）重新呈现；
+ * 关闭不撤销在途 authorize（runtime 授权窗有界回收，重开可等完成或重新授权）。
  */
 import { computed, shallowRef, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle } from '@taiji/ui'
+import { openBrowser } from '@taiji/core/domain/overlay'
+import { getSettingsTransport } from '@taiji/core'
 import type { WoolFamilyId } from '@taiji/shared'
 import { useWool } from '@/composables/features/settings/useWool'
 import { useWoolWizard, woolTemplateOf } from '@/composables/features/settings/useWoolWizard'
@@ -110,9 +119,41 @@ const wizard = shallowRef<ReturnType<typeof useWoolWizard> | null>(null)
 const catalogLoading = ref(false)
 const catalogCount = ref<number | null>(null)
 
+/** 授权页浮层浏览器的合成会话键（WebContentsView key；非真会话 id——授权页无会话归属）。 */
+const WOOL_OAUTH_OVERLAY_SID = 'wool-oauth'
+/** 授权 URL 订阅取消函数（authorize 编排期间挂载；back/close/完成时解除）。 */
+let unsubscribeAuthorizeUrl: (() => void) | null = null
+/** 授权页已打开标记（authorize running 态「授权页已打开」提示行数据源）。 */
+const authorizeUrlOpened = ref(false)
+/** 授权确认信号在途（done/cancel 按钮 disabled 判定）。 */
+const authorizeSignaling = ref(false)
+/** done 信号回 202（浏览器内尚未完成登录）提示行。 */
+const authorizeRetryHint = ref(false)
+
+/** 订阅授权 URL 广播（授权族进入 flow 相时挂载；URL 到达 → 浮层浏览器打开）。 */
+function subscribeAuthorizeUrl(family: WoolFamilyId): void {
+  teardownAuthorizeUrl()
+  unsubscribeAuthorizeUrl = getSettingsTransport().onWoolAuthorizeUrl((payload) => {
+    if (payload.family !== family) return
+    authorizeUrlOpened.value = true
+    openBrowser(payload.url, WOOL_OAUTH_OVERLAY_SID)
+  })
+}
+
+function teardownAuthorizeUrl(): void {
+  unsubscribeAuthorizeUrl?.()
+  unsubscribeAuthorizeUrl = null
+  authorizeUrlOpened.value = false
+  authorizeRetryHint.value = false
+  authorizeSignaling.value = false
+}
+
 // 打开时复位相 + 检测（每次打开重新检测——凭据文件可能已变化，D3 存在性检查语义）。
 watch(() => props.open, (open) => {
-  if (!open) return
+  if (!open) {
+    teardownAuthorizeUrl()
+    return
+  }
   phase.value = 'family'
   selected.value = null
   wizard.value = null
@@ -127,6 +168,8 @@ function onFamilySelect(family: WoolFamilyId): void {
   selected.value = family
   phase.value = 'flow'
   wizard.value = useWoolWizard(family, template.value, wool.runAction)
+  // 授权族：authorize URL 广播在授权窗内随时到达（扩展发 URL 先于动作回执），进相即订阅。
+  if (template.value === 'oauth') subscribeAuthorizeUrl(family)
   void runInstallStep()
 }
 
@@ -134,6 +177,7 @@ function backToFamily(): void {
   phase.value = 'family'
   selected.value = null
   wizard.value = null
+  teardownAuthorizeUrl()
 }
 
 function cancelExtract(): void {
@@ -164,7 +208,7 @@ async function startCredentialsStep(): Promise<void> {
   w.extractConfirmPending.value = true
 }
 
-/** 确认框「提取」→ extract 动作（成功即凭据入库 + adopted 置位）→ status 后台 → done。 */
+/** 确认框「提取」→ extract 动作（runtime 凭据回传落 models.json + adopted 置位）→ status 后台 → done。 */
 async function onConfirmExtract(): Promise<void> {
   const w = wizard.value
   if (!w || !selected.value) return
@@ -177,12 +221,48 @@ async function onConfirmExtract(): Promise<void> {
   }
 }
 
-/** 授权族 authorize 步（按钮/重试共用；成功 → ready）。 */
+/** 授权族 authorize 步（按钮/重试共用）：authorize 动作挂起至用户完成授权（授权窗内 URL 广播开浮层
+ *  + done/cancel 信号交互）；成功 → ready；cancelled → 回待授权态（§3.1 授权取消停待授权态）。 */
 async function runAuthorizeStep(): Promise<void> {
   const w = wizard.value
   if (!w || !selected.value) return
   await w.runStepAction('authorize', 'authorize')
-  if (w.stepStates.authorize.status === 'ok') void runReadyStep()
+  if (w.stepStates.authorize.status === 'ok') {
+    // 授权完成（凭据已落库）——URL 订阅使命结束，解除。
+    teardownAuthorizeUrl()
+    void runReadyStep()
+    return
+  }
+  if (w.stepStates.authorize.status === 'failed' && w.stepStates.authorize.failure?.code === 'cancelled') {
+    // 取消终态：回待授权态（非失败呈现；用户可重新点授权按钮）。
+    teardownAuthorizeUrl()
+    w.markStep('authorize', 'pending')
+  }
+}
+
+/** done 信号（「我已完成授权」按钮）：runtime 向扩展本机回调端点发确认——202 = 浏览器内
+ * 尚未完成登录（提示行 + 可再点），200 = 交换完成（authorize 动作回执随后落步）。 */
+async function onAuthorizeDone(): Promise<void> {
+  if (!selected.value || authorizeSignaling.value) return
+  authorizeSignaling.value = true
+  try {
+    const reply = await wool.runAction({ action: 'authorizeSignal', family: selected.value, params: { status: 'done' } })
+    authorizeRetryHint.value = reply.ok && reply.data !== null && typeof reply.data === 'object'
+      && (reply.data as { completed?: unknown }).completed === false
+  } finally {
+    authorizeSignaling.value = false
+  }
+}
+
+/** cancel 信号（「取消授权」按钮）：扩展侧取消终态 → authorize 动作回 cancelled → 步骤回待授权态。 */
+async function onAuthorizeCancel(): Promise<void> {
+  if (!selected.value || authorizeSignaling.value) return
+  authorizeSignaling.value = true
+  try {
+    await wool.runAction({ action: 'authorizeSignal', family: selected.value, params: { status: 'cancel' } })
+  } finally {
+    authorizeSignaling.value = false
+  }
 }
 
 /** ready 步：status 动作（账号昵称/有效期就绪即过步；checkin 步为开关交互态直通）。 */

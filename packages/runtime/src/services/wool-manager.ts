@@ -1,22 +1,29 @@
 /**
- * WoolManager — 羊毛 provider 宿主编排服务（wool-provider 设计 D2/D6/D7）。
+ * WoolManager — 羊毛 provider 宿主编排服务（wool-provider 设计 D2/D6/D7；凭据通道 D2 裁决）。
  *
- * 职责（四件，M5 宿主编排）：
+ * 职责（五件，M5 宿主编排 + 凭据通道）：
  * ① 资产清单拉取（远端 JSON，钉版本 + 家族展示元数据；清单不可达 = 阻断 + 重试，不降级直装）；
  * ② 安装编排（消费既有 extension-service installExtension：npm 安装 + 校验 + 失败回滚全既有）；
  * ③ 管理专用会话生命周期（D6 ②：hidden RPC 会话即起即收——一次编排 spawn 一个会话、
  *    编排完成即回收销毁；禁常驻、禁空闲回收定时器；指令经 message-dispatcher 的
  *    sendSystemCommand 正道直达扩展命令，响应经 get_entries 拉 custom entry）；
- * ④ 账号状态 / 登录态检测 / 模型目录三类缓存（目录持久化 <dataDir>/wool-catalog.json，
+ * ④ 凭据通道（extract/authorize 编排：管理会话收凭据回包 → models.json 羊毛 provider
+ *    条目幂等更新（WoolModelsEntryPort，凭据落 apiKey + refreshToken headers 键，不写
+ *    pi auth.json）；授权族 authorize 窗内拦截扩展 notify 的授权页 URL → wool.authorize_url
+ *    广播驱动浮层浏览器；卸载删条目即凭据清除）；
+ * ⑤ 账号状态 / 登录态检测 / 模型目录三类缓存（目录持久化 <dataDir>/wool-catalog.json，
  *    标注数据时点供无会话时设置页展示；pi registry 是羊毛模型唯一权威，本缓存是派生视图）。
  *
  * 通道事实链（u-foundation P6 探针定夺，runlog 21:52）：
  * - 管理会话触发正道 = sendSystemCommand（"/" 前缀编排旁路，不经用户消息内核）；
  * - 命令-only 会话（无 user/assistant 消息）pi 文件不 flush，appendEntry 响应仅内存态——
  *   结果读取通道 = getRpcClient(sid).getEntries()（RPC 响应内存态），无磁盘残留。
+ * - pi 请求时凭据消费链（已核实 provider-composer.js / model-runtime.js prepareRequest）：
+ *   models.json 羊毛条目 apiKey/headers 经 getApiKeyAndHeaders 合并进 resolvedAuth 传
+ *   扩展 streamSimple；运行中会话可见性由 provider-live-sync 扩展 2s 轮询 registry refresh 承载。
  *
- * 错误分级（分级即错误处理契约）：安装/清单是核心链 fail-fast 结构化错误（code + 中文
- * 恢复指引）；账号状态/目录拉取是辅助链——失败回结构化错误信封不拖垮 provider 列表
+ * 错误分级（分级即错误处理契约）：安装/清单/凭据落库是核心链 fail-fast 结构化错误（code +
+ * 中文恢复指引）；账号状态/目录拉取是辅助链——失败回结构化错误信封不拖垮 provider 列表
  * （listWoolProviderInfos 纯内存缓存读，管理链故障零影响）。
  */
 
@@ -26,6 +33,7 @@ import type { ProviderInfo, ServerMessage } from '@taiji/shared'
 import {
   isWoolAccountStatusView,
   isWoolAssetManifest,
+  isWoolCredentialsData,
   isWoolDetectData,
   isWoolFamilyId,
   type WoolAccountStatusView,
@@ -35,6 +43,7 @@ import {
   type WoolAssetManifest,
   type WoolCatalogModelView,
   type WoolCatalogView,
+  type WoolCredentialsData,
   type WoolDetectResultView,
   type WoolFamilyId,
   type WoolFamilyState,
@@ -74,6 +83,38 @@ const MANAGE_ORCHESTRATION_TIMEOUT_MS = 120_000
 const MANAGE_RESPONSE_POLL_INTERVAL_MS = 100
 /** 单指令响应等待上界（prompt 受理口径后扩展 handler 执行 + entry 落树的窗口；量级秒级）。 */
 const MANAGE_RESPONSE_WAIT_MS = 10_000
+/**
+ * authorize 授权窗等待上界（任务书契约：管理会话在授权窗内保持存活，即起即收边界 =
+ * 编排完成含授权轮询完成或取消）。覆盖「扩展发授权页 URL → 用户在浮层浏览器完成授权 →
+ * 扩展轮询到回调完成 → 响应 entry 落树」全程；用户显式点击授权按钮触发（红线 19 的
+ * 用户显式发起形态），5 分钟覆盖常规 OAuth 操作。同时作为 authorize 编排的回收上界
+ * （withTimeout 同值覆盖）——超时 = 编排判失败 + 会话回收，用户可重开授权。
+ */
+const AUTHORIZE_WINDOW_MS = 300_000
+/**
+ * 羊毛条目 refreshToken 的 headers 承载键（凭据通道 D2：models.json ProviderConfig 无
+ * refreshToken 字段，headers 经 getApiKeyAndHeaders 合并透传家族 stream——是刷新令牌
+ * 到达扩展请求面的唯一通道）。键名与扩展侧（wool-shared 家族 stream 消费方）对齐。
+ */
+const WOOL_REFRESH_TOKEN_HEADER = 'x-wool-refresh-token'
+/**
+ * 授权通知 JSON 的 type 判别值（扩展侧 buildWoolAuthorizeNotice 契约：单行 JSON
+ * { type, family, authUrl, callbackUrl, state } 经 pi notify 投递）。
+ */
+const WOOL_AUTHORIZE_NOTICE_TYPE = 'wool-authorize'
+/**
+ * 授权确认信号请求超时（控制范围单请求粒度，红线 19：秒级）——本机 127.0.0.1 回调
+ * 端点往返 + 扩展侧一次令牌交换（上游 HTTP），10s 覆盖。
+ */
+const AUTHORIZE_SIGNAL_TIMEOUT_MS = 10_000
+/** done 信号的「令牌交换完成」响应码（callback-server 契约）。 */
+const AUTHORIZE_SIGNAL_DONE_STATUS = 200
+/** done 信号的「上游尚未完成（等待页，可重试）」响应码。 */
+const AUTHORIZE_SIGNAL_PENDING_STATUS = 202
+/** 旧扩展 invalid_request 的「词表未实装」判别（wool-shared parseWoolManageRequest 文案锚点）。 */
+const UNKNOWN_ACTION_RE = /Unknown action/i
+/** 授权取消终态判别（扩展 OAuth 取消路径 throw 的 DOMException message 文案锚点）。 */
+const AUTH_CANCELLED_RE = /cancelled/i
 /** 目录装载等待上界（refresh 动作：registry spawn 后异步装载，persist 缺失的快照回落路径秒级稳定）。 */
 const CATALOG_LOAD_WAIT_MS = 5_000
 /** 目录装载轮询间隔。 */
@@ -152,26 +193,52 @@ export interface WoolSettingsPort {  // oe-exempt:20261022:framework:依赖注�
   write(data: WoolSettingsDomain): void
 }
 
+/**
+ * models.json 羊毛 provider 条目读写 port（凭据通道 D2：凭据落 models.json 条目，
+ * 不写 pi auth.json）。组合根以 infra/pi/pi-provider-store（upsertProvider /
+ * removeProvider / getProviderConfig）闭包装配——写前 JSON 损坏拒入（ModelsStoreCorruptedError）
+ * 由该既有写入器防线承载；条目 id 公式 `wool-<family>` 与扩展注册名一致（woolProviderId）。
+ * 读写均为同步原语（pi-provider-store 全同步，无锁竞争窗口外移）。
+ */
+export interface WoolModelsEntryPort {  // oe-exempt:20261022:framework:依赖注入端口模式——models.json 条目端口，生产 pi-provider-store 装配 + 测试 stub 双实现
+  /** 读单条目（无条目 = undefined；深拷贝形态，调用方可原地合并）。 */
+  readEntry(providerId: string): Record<string, unknown> | undefined
+  /** 写条目（整体替换该 provider 条目；其余条目由 infra 写入器保留）。 */
+  writeEntry(providerId: string, entry: Record<string, unknown>): void
+  /**
+   * 删条目（卸载编排：条目整体删除即凭据清除——含 apiKey/headers/name 全部）。
+   * 返回删除前条目是否含非空 apiKey（credentialsCleared 判定素材；条目本就不存在 = false，
+   * 语义为「无凭据可清」而非「清除失败」）。
+   */
+  deleteEntry(providerId: string): boolean
+  /** 条目是否持非空 apiKey（listWoolProviderInfos 的 apiKeySet 事实源）。 */
+  hasCredentials(providerId: string): boolean
+}
+
 export interface WoolManagerDeps {  // oe-exempt:20261022:framework:依赖注入端口模式——WoolManager 构造依赖聚合，生产装配 + 测试 stub 双实现
   sessionService: WoolSessionPort
   extensionService: WoolExtensionPort
   settings: WoolSettingsPort
+  /** models.json 羊毛条目读写 port（凭据通道 D2；组合根以 pi-provider-store 装配）。 */
+  modelsEntry: WoolModelsEntryPort
   /** 数据目录（管理会话 cwd + 目录缓存文件落点；动态推导注入，禁止硬编码绝对路径）。 */
   dataDir: string
   /** wool.state 广播出口（组合根组装 id 后经 broker 纯全局通道下发）。 */
-  broadcast: (msg: ServerMessage<'wool.state'>) => void
+  broadcast: (msg: ServerMessage<'wool.state'> | ServerMessage<'wool.authorize_url'>) => void
   /** 清单拉取地址（可配置；缺省 = DEFAULT_WOOL_MANIFEST_URL）。 */
   manifestUrl?: string
   /** 网络出口（测试注入；缺省 globalThis.fetch）。 */
   fetchFn?: typeof fetch
   /** 时钟（测试注入）。 */
   now?: () => number
-  /** 管理编排回收上界（测试压缩用；生产缺省 MANAGE_ORCHESTRATION_TIMEOUT_MS）。 */
+  /** 管理编排回收上界（测试压缩用；生产缺省 MANAGE_ORCHESTRATION_TIMEOUT_MS；authorize 另用 authorizeWindowMs）。 */
   manageTimeoutMs?: number
   /** 单指令响应等待上界（测试压缩用；生产缺省 MANAGE_RESPONSE_WAIT_MS）。 */
   manageResponseWaitMs?: number
   /** 管理响应轮询间隔（测试压缩用；生产缺省 MANAGE_RESPONSE_POLL_INTERVAL_MS）。 */
   manageResponsePollIntervalMs?: number
+  /** authorize 授权窗等待上界（测试压缩用；生产缺省 AUTHORIZE_WINDOW_MS，覆盖响应等待与编排回收两层）。 */
+  authorizeWindowMs?: number
   /**
    * 每日签到提醒定时器延迟（测试注入用；缺省 = 到下一个本地时 09:00 的实际毫秒数）。
    * 注入 0 使定时器立即触发，单测可验证到点编排全链。
@@ -226,6 +293,7 @@ export class WoolManager {
   private readonly deps: WoolManagerDeps
   private readonly now: () => number
   private readonly manageTimeoutMs: number
+  private readonly authorizeWindowMs: number
 
   /** 清单内存缓存（成功结果缓存；失败不缓存，下次动作重拉）。 */
   private manifestCache: { manifest: WoolAssetManifest; fetchedAt: number } | undefined
@@ -237,6 +305,15 @@ export class WoolManager {
   private detectCache = new Map<WoolFamilyId, WoolDetectResultView>()
   /** 模型目录缓存（key = family；持久化 wool-catalog.json + 内存镜像）。 */
   private catalogCache = new Map<WoolFamilyId, WoolCatalogView>()
+  /**
+   * 在途管理会话 sid 集合（授权 URL 通知的合法来源判定：只消费自家管理会话的
+   * extension:notify，普通会话的通知零误报）。withManageSession create 入集 / finally 出集。
+   */
+  private readonly liveManageSessions = new Set<string>()
+  /** authorize 编排在途的家族（null = 无在途授权；URL 通知只在该窗口内消费）。 */
+  private authorizeInFlight: WoolFamilyId | null = null
+  /** authorize 授权窗的本机回调端点（扩展通知投递；authorizeSignal done/cancel 信号目标；编排收尾清空）。 */
+  private authorizeCallback: { callbackUrl: string; state: string } | null = null
   /** 每日签到提醒定时器句柄（D5 产品功能定时；unref 不阻止进程退出，dispose 清除）。 */
   private dailyCheckinTimer: NodeJS.Timeout | undefined
   /** dispose 已置位标记（定时器回调 fire 后的重排护栏——timer 已出队时 clearTimeout 追不上）。 */
@@ -248,6 +325,7 @@ export class WoolManager {
     this.deps = deps
     this.now = deps.now ?? (() => Date.now())
     this.manageTimeoutMs = deps.manageTimeoutMs ?? MANAGE_ORCHESTRATION_TIMEOUT_MS
+    this.authorizeWindowMs = deps.authorizeWindowMs ?? AUTHORIZE_WINDOW_MS
   }
 
   /**
@@ -389,6 +467,80 @@ export class WoolManager {
       .finally(() => this.errorRefreshInFlight.delete(family))
   }
 
+  // ── 授权 URL 通知拦截（授权族 authorize 编排在途 → 浮层浏览器打开链）────────
+
+  /**
+   * 管理会话内 extension:notify 观察（组合根 EventAdapter interpret 旁路喂入，与
+   * noteSessionError 同挂点同隔离范式）。授权族 authorize 协议契约（扩展侧
+   * buildWoolAuthorizeNotice）：授权窗内经 pi notify 发单行 JSON
+   * `{ type: 'wool-authorize', family, authUrl, callbackUrl, state }`——宿主按此解析
+   * （非 JSON/类型不符零消费，generic 通知通道不受影响），只消费「自家在途管理会话 +
+   * authorize 编排中 + family 匹配」的通知（普通会话通知/非授权窗通知零误报）：
+   * authUrl 经 wool.authorize_url 广播（无 sessionId 全局帧）驱动 renderer 浮层浏览器；
+   * callbackUrl/state 存 authorizeCallback（authorizeSignal 的 done/cancel 信号目标）。
+   */
+  noteExtensionNotify(sessionId: string, message: string): void {
+    if (typeof sessionId !== 'string' || typeof message !== 'string') return
+    const family = this.authorizeInFlight
+    if (family === null) return
+    if (!this.liveManageSessions.has(sessionId)) return
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(message)
+    } catch {
+      return
+    }
+    if (!isRecord(parsed) || parsed.type !== WOOL_AUTHORIZE_NOTICE_TYPE) return
+    if (parsed.family !== family) return
+    const authUrl = parsed.authUrl
+    const callbackUrl = parsed.callbackUrl
+    const state = parsed.state
+    if (typeof authUrl !== 'string' || authUrl.length === 0) return
+    if (typeof callbackUrl !== 'string' || callbackUrl.length === 0) return
+    if (typeof state !== 'string' || state.length === 0) return
+    this.authorizeCallback = { callbackUrl, state }
+    try {
+      this.deps.broadcast({ type: 'wool.authorize_url', payload: { family, url: authUrl } })
+    } catch (e) {
+      // 广播失败不阻断授权主链（authorize 动作回执仍会落；authorizeSignal 仍可发），
+      // warn 留痕非静默。
+      console.warn(`[wool-manager] authorize url broadcast failed (family=${family}): ${toErrorMessage(e)}`)
+    }
+  }
+
+  /**
+   * authorizeSignal（宿主自有动作，不透传扩展）：authorize 授权窗内用户「已完成授权/
+   * 取消」→ 向扩展本机回调端点发信号（callback-server 契约：
+   * `GET callbackUrl?state=<state>&status=done|cancel`）。done：200 = 扩展侧令牌交换
+   * 完成（authorize 动作回执随后到达）；202 = 浏览器内登录尚未完成（completed=false，
+   * 用户可再次确认）；cancel：扩展侧取消终态（authorize 动作随后回 cancelled）。
+   * 信号只在本授权窗内有效（authorizeCallback 缺失/家族不符 = 窗外误触，invalid_request）。
+   */
+  private async authorizeSignalFamily(family: WoolFamilyId, status: 'done' | 'cancel'): Promise<unknown> {
+    if (this.authorizeInFlight !== family || this.authorizeCallback === null) {
+      throw new WoolActionError('invalid_request', '授权窗不在进行中（授权页未打开或已结束）。请在向导重新发起授权')
+    }
+    const { callbackUrl, state } = this.authorizeCallback
+    const url = `${callbackUrl}?state=${encodeURIComponent(state)}&status=${status}`
+    const fetchFn = this.deps.fetchFn ?? ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => fetch(input, init))
+    let response: Response
+    try {
+      response = await fetchFn(url, { signal: AbortSignal.timeout(AUTHORIZE_SIGNAL_TIMEOUT_MS) })
+    } catch (e) {
+      // 回调端点不可达 = 授权窗已收口（完成/取消/超时后扩展回收监听）——如实报，不猜状态。
+      throw new WoolActionError('invalid_request', `授权回调通道不可达（授权窗可能已结束）：${toErrorMessage(e)}。若授权已完成请直接查看结果；否则请重新发起授权`)
+    }
+    if (status === 'cancel') {
+      return { cancelled: true }
+    }
+    // done：200 = 扩展侧令牌交换完成；202 = 上游尚未完成（扩展侧等待页语义，用户可再点
+    // 确认重试）。completed 只认 200（Response.ok 对一切 2xx 为 true，202 不可混入）。
+    if (response.status !== AUTHORIZE_SIGNAL_DONE_STATUS && response.status !== AUTHORIZE_SIGNAL_PENDING_STATUS) {
+      throw new WoolActionError('upstream_error', `授权确认信号失败（HTTP ${response.status}）。请重试；持续失败请重新发起授权`)
+    }
+    return { completed: response.status === AUTHORIZE_SIGNAL_DONE_STATUS }
+  }
+
   // ── 快照组装（纯内存读，设置页 wool.getState 零 IO 即时回）──────────────
 
   getSnapshot(): WoolRuntimeSnapshot {
@@ -467,6 +619,14 @@ export class WoolManager {
         return this.setAutoCheckin(req.family, req.params?.enabled === true)
       case 'authorize':
         return this.authorizeFamily(req.family)
+      case 'authorizeSignal': {
+        // status 必填收窄（done/cancel）——缺省不默认静默（renderer bug 显形）。
+        const status = req.params?.status
+        if (status !== 'done' && status !== 'cancel') {
+          throw new WoolActionError('invalid_request', 'authorizeSignal 需要 params.status = "done" | "cancel"')
+        }
+        return this.authorizeSignalFamily(req.family, status)
+      }
       case 'extract':
         return this.extractFamily(req.family)
       case 'uninstall':
@@ -543,17 +703,25 @@ export class WoolManager {
   /**
    * 一次管理编排 = spawn 一个 hidden 会话 → fn 内指令往返 → finally 回收销毁。
    * 超时上界兜底回收（回收层有界）；会话删除失败只 warn（进程死亡路径 delete 链
-   * 自有收殓，不向调用方放大）。
+   * 自有收殓，不向调用方放大）。sid 入 liveManageSessions 集合（authorize URL 通知
+   * 的合法来源判定）。
+   * @param timeoutMs 本编排的回收上界（缺省 manageTimeoutMs；authorize 传授权窗上界）。
    */
-  private async withManageSession<T>(family: WoolFamilyId, fn: (sessionId: string) => Promise<T>): Promise<T> {
+  private async withManageSession<T>(
+    family: WoolFamilyId,
+    fn: (sessionId: string) => Promise<T>,
+    timeoutMs?: number,
+  ): Promise<T> {
     const summary = await this.deps.sessionService.create(
       this.deps.dataDir,
       `wool-manage-${family}`,
       { hidden: true },
     )
+    this.liveManageSessions.add(summary.id)
     try {
-      return await this.withTimeout(fn(summary.id), family)
+      return await this.withTimeout(fn(summary.id), family, timeoutMs ?? this.manageTimeoutMs)
     } finally {
+      this.liveManageSessions.delete(summary.id)
       try {
         await this.deps.sessionService.delete(summary.id)
       } catch (e) {
@@ -563,14 +731,14 @@ export class WoolManager {
     }
   }
 
-  private withTimeout<T>(run: Promise<T>, family: WoolFamilyId): Promise<T> {
+  private withTimeout<T>(run: Promise<T>, family: WoolFamilyId, timeoutMs: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new WoolActionError(
           'manage_unavailable',
-          `管理会话编排超时（上界 ${this.manageTimeoutMs}ms，family=${family}）。会话已回收，请稍后重试；持续超时请查看 runtime 日志`,
+          `管理会话编排超时（上界 ${timeoutMs}ms，family=${family}）。会话已回收，请稍后重试；持续超时请查看 runtime 日志`,
         ))
-      }, this.manageTimeoutMs)
+      }, timeoutMs)
       run.then(
         (value) => {
           clearTimeout(timer)
@@ -590,6 +758,7 @@ export class WoolManager {
     family: WoolFamilyId,
     action: string,
     params?: Record<string, unknown>,
+    opts?: { responseWaitMs?: number },
   ): Promise<{ ok: true; data: unknown } | { ok: false; code: string; message: string }> {
     const envelope = { v: WOOL_MANAGE_PROTOCOL_VERSION, action, ...(params !== undefined ? { params } : {}) }
     const command = woolManageCommandName(family)
@@ -628,7 +797,7 @@ export class WoolManager {
     // MANAGE_ORCHESTRATION_TIMEOUT_MS 兜底，两层粒度不同：本上界管单指令往返，
     // 后者管整个编排含 spawn）。
     const pollIntervalMs = this.deps.manageResponsePollIntervalMs ?? MANAGE_RESPONSE_POLL_INTERVAL_MS
-    const waitMs = this.deps.manageResponseWaitMs ?? MANAGE_RESPONSE_WAIT_MS
+    const waitMs = opts?.responseWaitMs ?? this.deps.manageResponseWaitMs ?? MANAGE_RESPONSE_WAIT_MS
     const deadline = this.now() + waitMs
     for (;;) {
       // port 尚未声明 getAvailableModels 之外的直读面（model-capability 先例）：getEntries 在
@@ -799,49 +968,141 @@ export class WoolManager {
   }
 
   /**
-   * authorize：透传 authorize 动作到扩展管理协议。当前协议词表无 authorize（wool-shared
-   * WOOL_MANAGE_ACTIONS 四值）——扩展侧 parse 会回 invalid_request，此处转译为
-   * authorize_unavailable 结构化错误（恢复指引指向扩展侧通道就绪）。协议词表扩展后
-   * 本动作零改动生效。成功 = 凭据入库（OAuth 回调后 pi auth.json 写入），置 adopted。
+   * invalid_request 语义分流（跨组契约：invalid_request 双载）：
+   * - 「Unknown action」= 旧扩展协议词表未实装该动作 → <phase>_unavailable（更新扩展指引）；
+   * - 其余 = 家族凭据策略不支持该动作（如 OAuth 家族请求 extract）→ action_not_supported
+   *   （引导用对应接入动作）。判别锚 = wool-shared parseWoolManageRequest 的「Unknown
+   *   action」文案；扩展侧若未来引入专用错误码，此处分流可改为按码判定。
    */
-  private async authorizeFamily(family: WoolFamilyId): Promise<unknown> {
-    return this.withManageSession(family, async (sid) => {
-      const response = await this.runManageCommand(sid, family, 'authorize')
-      if (!response.ok) {
-        const unavailable = response.code === 'invalid_request'
-        throw new WoolActionError(
-          unavailable ? 'authorize_unavailable' : mapManageErrorCode(response.code),
-          unavailable
-            ? '授权动作通道未就绪（扩展管理协议暂不支持 authorize 动作）。请等待羊毛扩展更新后重试'
-            : `授权失败：${response.message}`,
+  private credentialActionError(phase: 'extract' | 'authorize', code: string, message: string): WoolActionError {
+    const actionName = phase === 'authorize' ? 'authorize' : 'extract'
+    if (code === 'invalid_request') {
+      if (UNKNOWN_ACTION_RE.test(message)) {
+        return new WoolActionError(
+          phase === 'authorize' ? 'authorize_unavailable' : 'extract_unavailable',
+          `${phase === 'authorize' ? '授权' : '提取'}动作通道未就绪（扩展版本可能过旧，协议词表无 ${actionName} 动作）。请更新羊毛扩展后重试`,
         )
       }
-      this.markAdopted(family)
-      return response.data
-    })
+      return new WoolActionError(
+        'action_not_supported',
+        `该家族不支持「${phase === 'authorize' ? '授权' : '提取'}」动作（凭据来源策略不符）：${message}。请使用对应的接入动作`,
+      )
+    }
+    // 授权取消终态（扩展 OAuth 取消路径 throw 的 message 含 cancelled，envelope 落
+    // internal）→ 转译 cancelled（向导回待授权态，失败路径表 §3.1）。
+    if (phase === 'authorize' && code === 'internal' && AUTH_CANCELLED_RE.test(message)) {
+      return new WoolActionError('cancelled', '已取消授权')
+    }
+    return new WoolActionError(
+      mapManageErrorCode(code),
+      `${phase === 'authorize' ? '授权' : '提取'}失败：${message}`,
+    )
   }
 
   /**
-   * extract：透传 extract 动作（提取族向导第 2 步触发）。与 authorize 同款——当前协议
-   * 词表无 extract，扩展回 invalid_request 转译为 extract_unavailable 结构化错误；
-   * 扩展侧提取实装（login 等效流程，设计 D3）随家族扩展包交付后零改动生效。
-   * 成功 = 提取即登录（D3），置 adopted。
+   * authorize：授权族凭据获取编排（凭据通道 D2）。动作透传扩展管理协议 authorize——
+   * 扩展在授权窗内经 pi notify 发授权页 URL（noteExtensionNotify 拦截 → 浮层浏览器 +
+   * authorizeCallback 登记），用户经 authorizeSignal(done/cancel) 驱动本机回调端点，
+   * 扩展完成令牌交换后回凭据载荷。响应等待与编排回收上界 = 授权窗上界（管理会话在
+   * 授权窗内保持存活，即起即收边界 = 编排完成含授权轮询完成或取消）。
+   * 成功 = 凭据落 models.json 羊毛条目（applyCredentials）。
+   */
+  private async authorizeFamily(family: WoolFamilyId): Promise<unknown> {
+    if (this.authorizeInFlight !== null) {
+      throw new WoolActionError('invalid_request', '已有授权编排在途，请等待完成或稍后重试')
+    }
+    this.authorizeInFlight = family
+    try {
+      return await this.withManageSession(family, async (sid) => {
+        const response = await this.runManageCommand(sid, family, 'authorize', undefined, {
+          responseWaitMs: this.authorizeWindowMs,
+        })
+        if (!response.ok) {
+          throw this.credentialActionError('authorize', response.code, response.message)
+        }
+        return this.applyCredentials(family, response.data, 'authorize')
+      }, this.authorizeWindowMs)
+    } finally {
+      this.authorizeInFlight = null
+      this.authorizeCallback = null
+    }
+  }
+
+  /**
+   * extract：提取族凭据获取编排（Qoder 钥匙串提取 / Trae 容器解密，D3 提取即登录）。
+   * 动作透传扩展管理协议 extract；成功 = 凭据落 models.json 羊毛条目（applyCredentials）。
    */
   private async extractFamily(family: WoolFamilyId): Promise<unknown> {
     return this.withManageSession(family, async (sid) => {
       const response = await this.runManageCommand(sid, family, 'extract')
       if (!response.ok) {
-        const unavailable = response.code === 'invalid_request'
-        throw new WoolActionError(
-          unavailable ? 'extract_unavailable' : mapManageErrorCode(response.code),
-          unavailable
-            ? '凭据提取动作通道未就绪（扩展管理协议暂不支持 extract 动作）。请等待羊毛扩展更新后重试'
-            : `凭据提取失败：${response.message}`,
-        )
+        throw this.credentialActionError('extract', response.code, response.message)
       }
-      this.markAdopted(family)
-      return response.data
+      return this.applyCredentials(family, response.data, 'extract')
     })
+  }
+
+  /**
+   * 凭据载荷落库（extract/authorize 成功共用）：回包守卫（isWoolCredentialsData，读侧
+   * 不信任扩展）→ models.json 羊毛条目幂等更新（最小形态 { name?, apiKey, headers? }，
+   * baseUrl/api 由扩展注册侧承载）→ 账号缓存即时点亮（loggedIn/nickname/tokenExpiresAt）
+   * → adopted 置位。回执只携安全摘要（不含 apiKey——凭据不出 models.json）。
+   *
+   * 生效链（无宿主显式刷新通道，D2 裁决链路）：models.json 落盘后，运行中 pi 会话由
+   * provider-live-sync 扩展的 2s 内容轮询触发 registry refresh 自动可见；新 spawn 会话
+   * spawn 时读盘即见——宿主无需等待动作（轮询周期内必然收敛）。
+   */
+  private applyCredentials(family: WoolFamilyId, data: unknown, phase: 'extract' | 'authorize'): unknown {
+    if (!isWoolCredentialsData(data)) {
+      throw new WoolActionError('internal', `${phase === 'authorize' ? '授权' : '提取'}成功但回包缺凭据载荷（扩展版本可能不匹配），请更新扩展后重试`)
+    }
+    const providerId = woolProviderId(family)
+    try {
+      this.writeCredentialEntry(family, providerId, data)
+    } catch (e) {
+      // models.json 写入被拒（损坏降级态拒入等 infra 防线）→ 凭据未落库，如实失败。
+      throw new WoolActionError('internal', `凭据写入 models.json 失败（${providerId}）：${toErrorMessage(e)}。请按提示修复后重试${phase === 'authorize' ? '授权' : '提取'}`)
+    }
+    const displayName = data.account?.displayName
+    this.accountCache.set(family, {
+      loggedIn: true,
+      fetchedAt: this.now(),
+      ...(displayName !== undefined ? { nickname: displayName } : {}),
+      ...(data.expiresAt !== undefined ? { tokenExpiresAt: data.expiresAt } : {}),
+    })
+    this.markAdopted(family)
+    return {
+      credentialsStored: true,
+      ...(displayName !== undefined ? { account: { displayName } } : {}),
+      ...(data.expiresAt !== undefined ? { expiresAt: data.expiresAt } : {}),
+    }
+  }
+
+  /**
+   * models.json 羊毛条目幂等更新：保留既有条目其余键（他方写入的 baseUrl 等不触碰），
+   * 更新 name（清单显示名优先，回退回包账号名/家族 id）/ apiKey / refreshToken headers
+   * 键（WOOL_REFRESH_TOKEN_HEADER；无 refreshToken 时删旧键——幂等语义 = 条目反映本次
+   * 凭据集）。headers 空则省键（pi schema Record<string,string> 合法但空对象无信息量）。
+   */
+  private writeCredentialEntry(family: WoolFamilyId, providerId: string, data: WoolCredentialsData): void {
+    const existing = this.deps.modelsEntry.readEntry(providerId) ?? {}
+    const displayName = this.manifestCache?.manifest.families[family]?.displayName
+      ?? data.account?.displayName
+      ?? family
+    const headers = { ...(isRecord(existing.headers) ? existing.headers as Record<string, string> : {}) }
+    if (data.credentials.refreshToken !== undefined) {
+      headers[WOOL_REFRESH_TOKEN_HEADER] = data.credentials.refreshToken
+    } else {
+      delete headers[WOOL_REFRESH_TOKEN_HEADER]
+    }
+    // headers 键显式置/删（不能靠条件展开省键——existing 里的旧 headers 会漏过）。
+    const entry: Record<string, unknown> = { ...existing, name: displayName, apiKey: data.credentials.apiKey }
+    if (Object.keys(headers).length > 0) {
+      entry.headers = headers
+    } else {
+      delete entry.headers
+    }
+    this.deps.modelsEntry.writeEntry(providerId, entry)
   }
 
   /** 接入完成置位（settings 羊毛域 adopted=true；幂等——重复置位无副作用）。 */
@@ -852,21 +1113,21 @@ export class WoolManager {
     this.deps.settings.write({ ...settings, families })
   }
 
-  // ── 卸载编排（D3 三步：clear 凭据与 persist → 包卸载 → 羊毛域清除）────────
+  // ── 卸载编排（D3：clear 扩展侧副本 → 包卸载 → 羊毛域清除）────────────────
 
   /**
-   * uninstall：D3 卸载 = 视为放弃接入，清理编排三步。第一步 clear 经管理会话透传扩展侧
-   * 同名动作，实际能力分层：扩展侧 clear 只清进程内凭据副本 + persist 模型目录（D3 ②，
-   * persistCleared 如实并入残留提示）；D3 ① 的 auth.json 凭据清除通道当前不存在（pi
-   * 扩展 API 无凭据删除、宿主无 Models.logout 通路），通道补齐前恒按 D3 降级条款返回
-   * credentialsCleared=false + 残留提示（指引 pi 侧 /logout，不静默残留）——**clear 失败
-   * 不阻断卸载**（清理指令不可达 = 扩展损坏形态，同样残留提示）；第二步既有
-   * extension-service 卸载链（失败 = 动作整体失败回执）；第三步 settings 羊毛域清除 +
+   * uninstall：D3 卸载 = 视为放弃接入，清理编排。① 扩展侧 clear（进程内凭据副本 +
+   * persist 模型目录；不可达不阻断——扩展损坏形态，分层报告进回执）；② models.json
+   * 羊毛条目删除（凭据清除宿主位——凭据通道 D2 后凭据落 models.json 条目，宿主自有
+   * 删除通道，credentialsCleared 按删除结果如实判：条目删除成功或本就不存在 = true，
+   * 写入被拒（models.json 损坏降级态）= false + 修复指引残留提示）；③ 既有
+   * extension-service 卸载链（失败 = 动作整体失败回执）；④ settings 羊毛域清除 +
    * 全部缓存清理（目录缓存持久化文件同步重写，条目从选择器聚合源消失）。
    */
   private async uninstallFamily(family: WoolFamilyId): Promise<WoolUninstallResult> {
+    const providerId = woolProviderId(family)
     // 分层报告素材：clear 往返成功时消费扩展侧如实回执（cleared=进程内副本已清，
-    // persistCleared=pi persist 目录已删），组装进残留提示的已清项说明。
+    // persistCleared=pi persist 目录已删），组装进回执的已清项说明。
     let clearDelivered = false
     let clearData: Record<string, unknown> | undefined
     try {
@@ -880,15 +1141,26 @@ export class WoolManager {
       clearDelivered = true
     } catch (e) {
       // D3 降级形态：清理指令不可达（扩展未装/未启用/加载失败/损坏）不阻断卸载主链——
-      // 残留事实经 residualHint 显式上呈，由 renderer 呈现手动清除指引。
-      console.warn(`[wool-manager] credential clear unreachable before uninstall (family=${family}): ${toErrorMessage(e)}`)
+      // 分层事实进回执说明，由 renderer 呈现。
+      console.warn(`[wool-manager] extension clear unreachable before uninstall (family=${family}): ${toErrorMessage(e)}`)
+    }
+    // models.json 羊毛条目删除（凭据清除宿主位）。删除失败（写入被拒）不阻断卸载主链
+    // ——凭据残留经 credentialsCleared=false + residualHint 显式上呈（不静默残留）。
+    let credentialsCleared = true
+    let residualHint: string | undefined
+    try {
+      this.deps.modelsEntry.deleteEntry(providerId)
+    } catch (e) {
+      credentialsCleared = false
+      residualHint = `扩展已卸载，但 models.json 羊毛条目（${providerId}）删除被拒：${toErrorMessage(e)}。请修复或删除该文件后重新执行卸载（或手动删除 ${providerId} 条目）。`
+      console.warn(`[wool-manager] models.json entry removal rejected before uninstall (family=${family}): ${toErrorMessage(e)}`)
     }
     try {
       await this.deps.extensionService.uninstallExtension(`@zhushanwen/pi-wool-${family}`)
     } catch (e) {
       throw new WoolActionError(
         'uninstall_failed',
-        `扩展卸载失败：${toErrorMessage(e)}。请到扩展管理页重试卸载；扩展侧 clear${clearDelivered ? '已执行（auth.json 凭据残留仍须手动清除）' : '未执行（残留提示见卸载完成回执）'}`,
+        `扩展卸载失败：${toErrorMessage(e)}。请到扩展管理页重试卸载；${credentialsCleared ? `models.json 凭据条目已清除（${providerId}）` : `models.json 凭据条目（${providerId}）删除被拒，见卸载完成后的残留提示`}`,
       )
     }
     // settings 羊毛域清除该家族条目（adopted/autoCheckin/nickname 全清 = 放弃接入语义）。
@@ -902,18 +1174,16 @@ export class WoolManager {
     this.detectCache.delete(family)
     this.catalogCache.delete(family)
     this.persistCatalogCacheFile()
-    // D3 ①（auth.json 凭据清除）通道缺失期间恒走降级条款（不静默残留）；clear 已送达时
-    // 分层报告扩展侧实际清理项，不可达时全量残留提示。
     const clearedParts: string[] = []
     if (clearData?.cleared === true) clearedParts.push('进程内凭据副本')
     if (clearData?.persistCleared === true) clearedParts.push('模型目录持久化缓存')
-    const localNote = clearDelivered
-      ? `扩展侧 clear 已执行（${clearedParts.length > 0 ? `${clearedParts.join('与')}已清理` : '本机无该家族进程内数据'}）`
-      : `凭据清除指令不可达，pi 凭据库（auth.json）与模型目录缓存可能残留 ${family} 家族数据`
-    return {
-      credentialsCleared: false,
-      residualHint: `扩展已卸载；${localNote}。pi 凭据库（auth.json）中的该家族凭据无法由宿主清除（凭据删除通道缺失，D3 降级形态）：请在 pi 会话执行 /logout wool-${family}，或到上游账号页吊销该应用授权。`,
+    if (!clearDelivered) {
+      // 扩展侧 clear 不可达：分层事实进回执 message 素材（不阻断、不静默）。
+      console.warn(`[wool-manager] extension-side residue may remain (family=${family}): clear undelivered, cleared=${JSON.stringify(clearedParts)}`)
     }
+    // credentialsCleared=true 时无 residualHint（凭据已清 + 扩展已卸载 = 完整清理，无残留
+    // 须呈现；扩展侧分层清理项仅日志留痕——失败面已由 credentialsCleared=false 单一承载）。
+    return { credentialsCleared, ...(residualHint !== undefined ? { residualHint } : {}) }
   }
 
   // ── 目录缓存持久化（QuotaCache 同形态：<dataDir>/wool-catalog.json 原子写）──
@@ -974,6 +1244,8 @@ export class WoolManager {
    * 羊毛条目 ProviderInfo 视图（model.list 聚合并入数据源）。只并入有目录缓存的家族
    * （数据驱动；无缓存 = 选择器无羊毛条目）。不进 config.providers 帧（S9 零回归——
    * 既有 provider 管理面零感知羊毛），kind 不标（羊毛条目不经 ProviderKind 消费方）。
+   * apiKeySet 按 models.json 羊毛条目事实（凭据通道 D2：条目缺凭据 = false，选择器
+   * 呈现未配置态而非假就绪）。
    */
   listWoolProviderInfos(): ProviderInfo[] {
     const infos: ProviderInfo[] = []
@@ -981,10 +1253,11 @@ export class WoolManager {
       if (catalog.models.length === 0) continue
       const manifestEntry = this.manifestCache?.manifest.families[family]
       const account = this.accountCache.get(family)
+      const providerId = woolProviderId(family)
       infos.push({
-        id: woolProviderId(family) as ProviderInfo['id'],
+        id: providerId as ProviderInfo['id'],
         name: manifestEntry?.displayName ?? family,
-        apiKeySet: true,
+        apiKeySet: this.deps.modelsEntry.hasCredentials(providerId),
         status: account?.loggedIn === true ? 'connected' : 'not_configured',
         models: catalog.models.map((model) => ({
           id: model.id,

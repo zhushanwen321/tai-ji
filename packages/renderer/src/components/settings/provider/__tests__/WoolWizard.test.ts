@@ -180,6 +180,7 @@ describe('WoolOauthFlow（授权族模板）', () => {
       currentStep: 'authorize',
       account: null,
       autoCheckin: false,
+      authorizeUrlOpened: false,
       catalogLoading: false,
       catalogCount: null,
     })
@@ -197,6 +198,7 @@ describe('WoolOauthFlow（授权族模板）', () => {
       currentStep: 'checkin',
       account: null,
       autoCheckin: false,
+      authorizeUrlOpened: false,
       catalogLoading: false,
       catalogCount: null,
     })
@@ -209,13 +211,81 @@ describe('WoolOauthFlow（授权族模板）', () => {
       currentStep: 'checkin',
       account: null,
       autoCheckin: true,
+      authorizeUrlOpened: false,
       catalogLoading: false,
       catalogCount: null,
     })
     expect(on.find('[data-testid="wool-autocheckin-warn"]').text()).toContain('批量封号')
   })
 
-  it('授权通道未就绪失败态（authorize_unavailable 恢复指引——扩展协议现状的诚实呈现）', () => {
+  it('授权族模板默认 props（authorizeUrlOpened=false）→ opened hint 不渲染', () => {
+    const wrapper = mountComp(WoolOauthFlow, {
+      displayName: 'WorkBuddy',
+      stepStates: stepStates({ authorize: { status: 'running' } }),
+      currentStep: 'authorize',
+      account: null,
+      autoCheckin: false,
+      authorizeUrlOpened: false,
+      catalogLoading: false,
+      catalogCount: null,
+    })
+    expect(wrapper.find('[data-testid="wool-authorize-opened-hint"]').exists()).toBe(false)
+  })
+
+  it('授权页 URL 到达（authorizeUrlOpened + running）→ 「授权页已打开」提示行 + done/cancel 信号按钮（callback 契约交互）', async () => {
+    const wrapper = mountComp(WoolOauthFlow, {
+      displayName: 'WorkBuddy',
+      stepStates: stepStates({ authorize: { status: 'running' } }),
+      currentStep: 'authorize',
+      account: null,
+      autoCheckin: false,
+      authorizeUrlOpened: true,
+      catalogLoading: false,
+      catalogCount: null,
+    })
+    expect(wrapper.find('[data-testid="wool-authorize-opened-hint"]').text()).toContain('授权页已在浮层浏览器打开')
+    const done = wrapper.find('[data-testid="wool-authorize-done"]')
+    expect(done.text()).toBe('我已完成授权')
+    await done.trigger('click')
+    expect(wrapper.emitted('authorizeDone')).toHaveLength(1)
+    await wrapper.find('[data-testid="wool-authorize-cancel"]').trigger('click')
+    expect(wrapper.emitted('authorizeCancel')).toHaveLength(1)
+  })
+
+  it('done 信号 202（未完成）→ 重试提示行；信号在途 → 按钮 disabled', () => {
+    const wrapper = mountComp(WoolOauthFlow, {
+      displayName: 'WorkBuddy',
+      stepStates: stepStates({ authorize: { status: 'running' } }),
+      currentStep: 'authorize',
+      account: null,
+      autoCheckin: false,
+      authorizeUrlOpened: true,
+      authorizeSignaling: true,
+      authorizeRetryHint: true,
+      catalogLoading: false,
+      catalogCount: null,
+    })
+    expect(wrapper.find('[data-testid="wool-authorize-retry-hint"]').text()).toContain('尚未完成登录')
+    expect((wrapper.find('[data-testid="wool-authorize-done"]').attributes('disabled'))).toBeDefined()
+  })
+
+  it('家族不支持动作失败态（action_not_supported 恢复指引——invalid_request 语义分流的呈现侧）', () => {
+    const wrapper = mountComp(WoolOauthFlow, {
+      displayName: 'WorkBuddy',
+      stepStates: stepStates({
+        authorize: { status: 'failed', failure: { code: 'action_not_supported', message: 'x' } },
+      }),
+      currentStep: 'authorize',
+      account: null,
+      autoCheckin: false,
+      authorizeUrlOpened: false,
+      catalogLoading: false,
+      catalogCount: null,
+    })
+    expect(wrapper.find('[data-testid="wool-step-authorize-failure"]').text()).toContain('该家族不支持此接入动作')
+  })
+
+  it('授权通道未就绪失败态（authorize_unavailable 恢复指引——旧扩展的诚实呈现）', () => {
     const wrapper = mountComp(WoolOauthFlow, {
       displayName: 'WorkBuddy',
       stepStates: stepStates({
@@ -224,6 +294,7 @@ describe('WoolOauthFlow（授权族模板）', () => {
       currentStep: 'authorize',
       account: null,
       autoCheckin: false,
+      authorizeUrlOpened: false,
       catalogLoading: false,
       catalogCount: null,
     })
@@ -238,6 +309,7 @@ describe('WoolOauthFlow（授权族模板）', () => {
       currentStep: 'ready',
       account: { loggedIn: true, nickname: 'demo-user', fetchedAt: 1 },
       autoCheckin: false,
+      authorizeUrlOpened: false,
       catalogLoading: false,
       catalogCount: null,
     })
@@ -271,6 +343,32 @@ describe('WoolEntryCard（provider 列表羊毛条目）', () => {
     })
     expect(wrapper.find('[data-testid="wool-entry-login-expired"]').text()).toBe('登录态失效')
     expect(wrapper.find('[data-testid="wool-entry-not-adopted"]').exists()).toBe(true)
+  })
+
+  it('失效重授权按钮：提取族 → 「重新提取」（点击上抛 reauth = 401 分类命中的恢复入口）', async () => {
+    const wrapper = mountComp(WoolEntryCard, {
+      family: familyState({ account: { loggedIn: false, fetchedAt: 1 } }),
+    })
+    const btn = wrapper.find('[data-testid="wool-entry-reauth-qoder"]')
+    expect(btn.text()).toBe('重新提取')
+    await btn.trigger('click')
+    expect(wrapper.emitted('reauth')).toHaveLength(1)
+  })
+
+  it('失效重授权按钮：oauth 家族 → 「重新授权」；登录正常时不渲染', () => {
+    const expired = mountComp(WoolEntryCard, {
+      family: familyState({
+        family: 'workbuddy',
+        credentialsSource: 'oauth',
+        account: { loggedIn: false, fetchedAt: 1 },
+      }),
+    })
+    expect(expired.find('[data-testid="wool-entry-reauth-workbuddy"]').text()).toBe('重新授权')
+
+    const healthy = mountComp(WoolEntryCard, {
+      family: familyState({ account: { loggedIn: true, fetchedAt: 1 } }),
+    })
+    expect(healthy.find('[data-testid="wool-entry-reauth-qoder"]').exists()).toBe(false)
   })
 
   it('可更新角标（updateAvailable → 「可更新」呈现 + 点击上抛 update = D2 用户显式触发更新）；无标记时不渲染', async () => {

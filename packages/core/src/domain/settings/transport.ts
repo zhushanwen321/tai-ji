@@ -66,6 +66,7 @@ import type {
   WoolRuntimeSnapshot,
   WoolActionRequest,
   WoolActionReply,
+  WoolAuthorizeUrlPayload,
 } from '@taiji/shared'
 
 /**
@@ -374,6 +375,8 @@ export interface SettingsTransport {
 
   // ── 羊毛 provider（wool-provider D6：状态变化广播，与 getState reply 同名同形）──
   onWoolState(h: (snapshot: WoolRuntimeSnapshot) => void): () => void
+  /** 授权页 URL 一次性广播（authorize 编排在途；向导消费驱动浮层浏览器打开授权页） */
+  onWoolAuthorizeUrl(h: (payload: WoolAuthorizeUrlPayload) => void): () => void
 
   // ── system 设置项 ──
   onSystemPrompt(h: (cfg: SystemPromptConfig, corrupted: boolean) => void): () => void
