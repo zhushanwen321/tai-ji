@@ -154,12 +154,16 @@ interface StatusToolView extends CapturedTool { // oe-exempt:20260927:wip:test f
 }
 
 /** 注册层黑盒 capture（actionStatus/actionAbort 未导出，经 execute 唯一入口；
- *  fake pi 捕获单点见 capture-tool.ts，此处只留差异点：runs Map + 泛型 view）。 */
-function captureRegisteredTool<T extends CapturedTool>(runs: Map<string, WorkflowRun>, toolName: string): T {
+ *  fake pi 捕获单点见 capture-tool.ts，此处只留差异点：runs Map + 泛型 view + 可注入
+ *  store（status {runId} 查无判定 = stateFilePath 文件存在性，落自建 tmp 目录）。 */
+function captureRegisteredTool<T extends CapturedTool>(
+  runs: Map<string, WorkflowRun>,
+  toolName: string,
+  store: { stateFilePath: (runId: string) => string } = { stateFilePath: (runId: string) => `/state/${runId}.jsonl` },
+): T {
   const deps = {
     runs,
-    // status/abort 路径只触 store.stateFilePath（RunSummary 宿主扩展字段）
-    store: { stateFilePath: (runId: string) => `/state/${runId}.jsonl` },
+    store,
     registry: { get: vi.fn(), getPath: vi.fn(), loadAll: vi.fn(), invalidate: vi.fn() },
   };
   const guard: ReentryGuardRef = { isProcessing: false };
@@ -317,18 +321,32 @@ describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
 describe("status {runId} 单 run 视图（成员表 + failed N/M + 查无两种文案）", () => {
   const FAKE_NOW = new Date("2026-01-01T00:00:30.000Z").getTime();
 
-  /** statusSingleRun 专用 capture：store.stateFilePath 落在自建 tmp 目录（查无判定 = 文件存在性）。 */
+  /** statusSingleRun 专用 capture：store.stateFilePath 落在自建 tmp 目录（查无判定 = 文件存在性）
+   *  ——经 captureRegisteredTool 的 store 注入点，deps/guard 装配单点不重复。 */
   function captureStatusTool(runs: Map<string, WorkflowRun>, journalDir: string): StatusToolView {
-    const deps = {
-      runs,
-      store: { stateFilePath: (runId: string) => join(journalDir, `${runId}.record.jsonl`) },
-      registry: { get: vi.fn(), getPath: vi.fn(), loadAll: vi.fn(), invalidate: vi.fn() },
-    };
-    const guard: ReentryGuardRef = { isProcessing: false };
-    return captureTool<StatusToolView>(
-      (pi) => registerWorkflowTool(pi as never, deps as never, guard),
-      "workflow_control",
-    );
+    return captureRegisteredTool<StatusToolView>(runs, "workflow_control", {
+      stateFilePath: (runId: string) => join(journalDir, `${runId}.record.jsonl`),
+    });
+  }
+
+  /** 失败 trace 行断言（stepIndex 0 completed / 1 failed + error 尾缀）——头行与成员行
+   *  逐用例校验前的公共成员行检查（runId 命中 / record 读失败两用例共用）。 */
+  function expectFailedTraceRows(text: string): void {
+    expect(text).toContain("[0] completed");
+    expect(text).toContain("[1] failed");
+    expect(text).toContain("error: Request timed out.");
+  }
+
+  /** status 单 run 查询的公共执行步：capture → execute → 提取 LLM 可见文本（四用例共用）。 */
+  async function executeStatusRun(
+    runs: Map<string, WorkflowRun>,
+    journalDir: string,
+    runId: string,
+  ): Promise<{ r: StatusResult; text: string }> {
+    const tool = captureStatusTool(runs, journalDir);
+    const r = await tool.execute("id", { action: "status", runId }, undefined, undefined, {});
+    const text = r.content[0]?.text ?? "";
+    return { r, text };
   }
 
   /** trace 节点 fixture（成员表兜底行来源；model 空串 = 请求缺省 → 渲染 "default"）。 */
@@ -376,16 +394,16 @@ describe("status {runId} 单 run 视图（成员表 + failed N/M + 查无两种�
       traceNode(1, "failed", { error: "Request timed out." }),
       traceNode(2, "running"),
     ]);
-    const tool = captureStatusTool(new Map([[runId, run]]), mkdtempSync(join(tmpdir(), "wf-status-run-")));
-    const r = await tool.execute("id", { action: "status", runId }, undefined, undefined, {});
+    const { r, text } = await executeStatusRun(
+      new Map([[runId, run]]),
+      mkdtempSync(join(tmpdir(), "wf-status-run-")),
+      runId,
+    );
 
     // 头行对照设计 §3.1.3：Run <runId> [<status>] <name> · <M> members · <elapsed> · failed <N>/<M>
-    const text = r.content[0]?.text ?? "";
     expect(text.split("\n")[0]).toBe(`Run ${runId} [running] fan-out · 3 members · 30s · failed 1/3`);
     // 成员行（stepIndex 序；failed 行带 error 尾缀）
-    expect(text).toContain("[0] completed");
-    expect(text).toContain("[1] failed");
-    expect(text).toContain("error: Request timed out.");
+    expectFailedTraceRows(text);
     expect(text).toContain("[2] running");
     // details run 变体（成员行全保留 → truncated:false，total = 去重后行数）
     const details = r.details as Record<string, unknown>;
@@ -417,10 +435,12 @@ describe("status {runId} 单 run 视图（成员表 + failed N/M + 查无两种�
     ];
     const collect = vi.fn(() => records);
     setSubagentService({ queries: { collectRecordsByParentRunId: collect } } as never);
-    const tool = captureStatusTool(new Map([[runId, run]]), mkdtempSync(join(tmpdir(), "wf-status-rec-")));
-    const r = await tool.execute("id", { action: "status", runId }, undefined, undefined, {});
+    const { r, text } = await executeStatusRun(
+      new Map([[runId, run]]),
+      mkdtempSync(join(tmpdir(), "wf-status-rec-")),
+      runId,
+    );
 
-    const text = r.content[0]?.text ?? "";
     expect(text).toContain("[0] running");
     expect(text).toContain("writer");
     expect(text).toContain("prov/m1");
@@ -443,16 +463,16 @@ describe("status {runId} 单 run 视图（成员表 + failed N/M + 查无两种�
       throw new Error("record store disk I/O failure");
     });
     setSubagentService({ queries: { collectRecordsByParentRunId: collect } } as never);
-    const tool = captureStatusTool(new Map([[runId, run]]), mkdtempSync(join(tmpdir(), "wf-status-readfail-")));
     // 读失败不传播（§3.4 错误规格：record 查询不可用 | 降级（不抛错））——status
     // 整体成功，成员行全部走 trace 兜底折行。
-    const r = await tool.execute("id", { action: "status", runId }, undefined, undefined, {});
+    const { r, text } = await executeStatusRun(
+      new Map([[runId, run]]),
+      mkdtempSync(join(tmpdir(), "wf-status-readfail-")),
+      runId,
+    );
 
-    const text = r.content[0]?.text ?? "";
     expect(text.split("\n")[0]).toBe(`Run ${runId} [running] fan-out · 2 members · 30s · failed 1/2`);
-    expect(text).toContain("[0] completed");
-    expect(text).toContain("[1] failed");
-    expect(text).toContain("error: Request timed out.");
+    expectFailedTraceRows(text);
     const details = r.details as Record<string, unknown>;
     expect(details.mode).toBe("run");
     expect(details.truncated).toBe(false);
@@ -467,10 +487,12 @@ describe("status {runId} 单 run 视图（成员表 + failed N/M + 查无两种�
       nodes.push(traceNode(i, i === 199 ? "failed" : "completed"));
     }
     const run = makeRunWithTrace(runId, nodes);
-    const tool = captureStatusTool(new Map([[runId, run]]), mkdtempSync(join(tmpdir(), "wf-status-trunc-")));
-    const r = await tool.execute("id", { action: "status", runId }, undefined, undefined, {});
+    const { r, text } = await executeStatusRun(
+      new Map([[runId, run]]),
+      mkdtempSync(join(tmpdir(), "wf-status-trunc-")),
+      runId,
+    );
 
-    const text = r.content[0]?.text ?? "";
     expect(text).toContain("more members omitted (failed rows kept)");
     const details = r.details as Record<string, unknown>;
     expect(details.truncated).toBe(true);
@@ -533,14 +555,19 @@ function argsValidationError(missing: string): ArgsValidationError {
   );
 }
 
+/** 三用例公共执行步：注册 workflow_run 捕获工具 + runWorkflow 单次失败 mock + execute 捕获错误
+ *  （params 并入顶层参数；name 固定 /abs/demo-wf.js）。 */
+async function runWorkflowCapturingError(params: Record<string, unknown>, rejection: unknown): Promise<Error> {
+  const tool = captureWorkflowTool(makeDeps(scriptRegistry()), { isProcessing: false }, "workflow_run");
+  vi.mocked(runWorkflow).mockRejectedValueOnce(rejection);
+  return tool
+    .execute("id", { name: "/abs/demo-wf.js", ...params }, undefined, undefined, {})
+    .catch((e: unknown) => e as Error);
+}
+
 describe("workflow_run 保留键同名缺参双通道解释（§3.3.7）", () => {
   it("缺失 model（保留键）→ 原错误 + Channel note（run 级覆盖 / 参数进 args / 正确形状）", async () => {
-    const deps = makeDeps(scriptRegistry());
-    const tool = captureWorkflowTool(deps, { isProcessing: false }, "workflow_run");
-    vi.mocked(runWorkflow).mockRejectedValueOnce(argsValidationError("model"));
-    const err = await tool
-      .execute("id", { name: "/abs/demo-wf.js", model: "prov/m1" }, undefined, undefined, {})
-      .catch((e: unknown) => e as Error);
+    const err = await runWorkflowCapturingError({ model: "prov/m1" }, argsValidationError("model"));
 
     expect(err.message).toContain("Invalid args for workflow 'demo-wf'"); // 原文案保留在前
     expect(err.message).toContain("Channel note");
@@ -552,18 +579,15 @@ describe("workflow_run 保留键同名缺参双通道解释（§3.3.7）", () =>
   });
 
   it("缺失非保留键（task）→ 原错误原样透出，无 Channel note", async () => {
-    const deps = makeDeps(scriptRegistry());
-    const tool = captureWorkflowTool(deps, { isProcessing: false }, "workflow_run");
-    vi.mocked(runWorkflow).mockRejectedValueOnce(argsValidationError("task"));
-    const err = await tool
-      .execute("id", { name: "/abs/demo-wf.js" }, undefined, undefined, {})
-      .catch((e: unknown) => e as Error);
+    const err = await runWorkflowCapturingError({}, argsValidationError("task"));
 
     expect(err.message).toContain("Invalid args for workflow 'demo-wf'");
     expect(err.message).not.toContain("Channel note");
   });
 
   it("非 ArgsValidationError 的 runWorkflow 失败 → 原样传播（catch 不吞）", async () => {
+    // 不走 runWorkflowCapturingError（其 .catch 会把 rejection 折成 resolved 值）——
+    // 本用例断言的正是「rejection 原样传播」，必须直连 rejects 断言。
     const deps = makeDeps(scriptRegistry());
     const tool = captureWorkflowTool(deps, { isProcessing: false }, "workflow_run");
     vi.mocked(runWorkflow).mockRejectedValueOnce(new Error("boom from lifecycle"));

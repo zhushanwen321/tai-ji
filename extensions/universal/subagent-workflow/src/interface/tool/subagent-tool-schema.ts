@@ -110,8 +110,9 @@ export const SubagentStartParams = Type.Object({
 // 迁移检查在 tool-subagents.ts 适配器（typebox Object 不产 additionalProperties，
 // 未知字段静默放行——schema 拒不了旧字段，见文件尾 [collect 退役] 同款先例）。
 
-/** 批量成员对象（SubagentsParams.tasks 元素）：task 必填非空白 + 成员级覆盖三件。 */
-export const SubagentsMember = Type.Object({
+/** 批量成员对象（SubagentsParams.tasks 元素）：task 必填非空白 + 成员级覆盖三件。
+ *  仅文件内消费（SubagentsParams 的 Array 元素），非导出 API——fallow unused_exports 门禁锚。 */
+const SubagentsMember = Type.Object({
   task: Type.String({
     description:
       "REQUIRED. The member's complete self-contained task prompt. One-shot members do NOT see your " +

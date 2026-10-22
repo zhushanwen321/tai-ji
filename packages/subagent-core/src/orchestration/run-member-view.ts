@@ -195,23 +195,39 @@ function memberViewFromRecord(
   const view: RunMemberView = {
     stepIndex,
     state,
-    agent: record.agent !== "" ? record.agent : (node?.agent ?? ""),
+    agent: agentOf(record, node),
     model: firstNonEmpty(record.model, node?.model) ?? "default",
   };
-  if (state === "running") {
-    view.durationMs = now - record.startedAt;
-    view.lastError = lastErrorOf(record.eventLog);
-    if (record.currentActivity !== undefined) {
-      view.currentActivity = formatActivity(record.currentActivity);
-    }
-  } else {
-    const endMs = record.endedAt ?? parseIsoMs(node?.completedAt);
-    if (endMs !== undefined) view.durationMs = endMs - record.startedAt;
-    view.lastError = firstDefined(record.error, node?.result?.error, node?.error);
-  }
+  if (state === "running") applyRunningFields(view, record, now);
+  else applyFinalFields(view, record, node);
   const turns = record.turns ?? node?.result?.usage?.turns;
   if (turns !== undefined) view.turns = turns;
   return view;
+}
+
+/** 执行者短名（record.agent 优先；空串回落 trace 标签，无 trace = 空串缺省）。 */
+function agentOf(record: RunMemberRecordView, node: ExecutionTraceNode | undefined): string {
+  return record.agent !== "" ? record.agent : (node?.agent ?? "");
+}
+
+/** 运行中行字段（设计 §3.1.3）：耗时 = now-startedAt；lastError 取 eventLog 最后一条 error。 */
+function applyRunningFields(view: RunMemberView, record: RunMemberRecordView, now: number): void {
+  view.durationMs = now - record.startedAt;
+  view.lastError = lastErrorOf(record.eventLog);
+  if (record.currentActivity !== undefined) {
+    view.currentActivity = formatActivity(record.currentActivity);
+  }
+}
+
+/** 终局行字段：耗时 = 结束-开始（endedAt 优先，回落 trace completedAt）；lastError 三级回落。 */
+function applyFinalFields(
+  view: RunMemberView,
+  record: RunMemberRecordView,
+  node: ExecutionTraceNode | undefined,
+): void {
+  const endMs = record.endedAt ?? parseIsoMs(node?.completedAt);
+  if (endMs !== undefined) view.durationMs = endMs - record.startedAt;
+  view.lastError = firstDefined(record.error, node?.result?.error, node?.error);
 }
 
 /**

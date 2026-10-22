@@ -41,6 +41,7 @@ import { Budget } from "../models/budget.ts";
 import { Trace } from "../models/trace.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
 import type { WorkflowRunEvent } from "../run-events.ts";
+import { expectReplayedCallEntry } from "./helpers/replay-call-assert.ts";
 import type { LifecycleDeps } from "../models/ports.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 
@@ -211,10 +212,8 @@ describe("resumeRun — 复活主链（方案 A 同 runId 复活）", () => {
     expect(run!.spec.scriptSource).toBe(SCRIPT_SOURCE);
     // 锚定恢复：scriptPath 从 run-created 帧逐字恢复（worker 沙箱 _shared 定位来源）
     expect(run!.spec.scriptPath).toBe("/abs/workflows/fan-out.js");
-    const replayed = run!.state.calls.get(0);
-    expect(replayed?.status).toBe("done");
-    expect(replayed?.result?.content).toBe("result-0");
-    expect(run!.state.calls.has(1)).toBe(false);
+    // 回放集/重派集 call 条目（共享断言 = __tests__/helpers/replay-call-assert.ts）
+    expectReplayedCallEntry(run!.state.calls);
     // v2 注册条目（裁决点 7：锁段内、先于复活事件）
     expect(appendEntry).toHaveBeenCalledTimes(1);
     const [customType, entry] = appendEntry.mock.calls[0] as [

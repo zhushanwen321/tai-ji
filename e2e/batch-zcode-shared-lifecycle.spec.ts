@@ -20,25 +20,33 @@
  * 凭据：zcode 引擎共享宿主 HOME（spawn 不覆写），本机 ~/.zcode 凭据直接可用；
  * 缺失时任务失败归 run failed，skip 门只做 config.json 存在性宽松检查。
  */
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import {
   launchRealApp,
-  waitForRuntime,
   wsRoundTrip,
-  openListenWs,
   readRuntimeLogs,
   readPiLogs,
-  waitForExtensionsReady,
   type WsFrame,
 } from './fixtures/launch-app-real'
+import {
+  applyRealTrackGate,
+  attachConsoleErrorCapture,
+  cleanupRealTrackApp,
+  listFilesRecursive,
+  openMainListenWs,
+  parseJsonlLines,
+  REPO_ROOT,
+  SAMPLE_PROJECT,
+  seedRealCredentials,
+  tmpDiag,
+  waitRealAppReady,
+  waitUntil,
+} from './fixtures/batch-real-helpers'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-project')
 const ZC_TEMPLATE = path.join(REPO_ROOT, 'e2e', 'fixtures', 'wl-zcode-two.js')
 
 const FIRST_TASK = `[WL-ZC-R1-9911] First run \`sleep 15\` using the bash tool, wait for it to finish, then reply with a one-word summary.`
@@ -50,103 +58,15 @@ const SETTLE_TIMEOUT_MS = 300_000
 /** 退出宽限：app.close() 后引擎进程（stdin EOF 自灭 / 停机收割）退出窗。 */
 const EXIT_GRACE_MS = 30_000
 
-// ── 凭证门与播种 / 诊断 helpers（batch-window-lifecycle 同款） ─────────────
+// ── 凭证门与播种 / 诊断 helpers（共享实现 = fixtures/batch-real-helpers.ts；
+//    本文件只留 tag 绑定与 ZSL 特有的 zcode 进程快照与凭据门） ───────────────────
 
-function sourceAgentDir(): string {
-  const override = process.env['TAIJI_BATCH_CREDENTIAL_SOURCE']
-  if (override && override.trim() !== '') return override
-  return path.join(os.homedir(), '.taiji', 'agent')
-}
-
-function realCredentialSkipReason(): string | null {
-  const src = sourceAgentDir()
-  try {
-    const auth = JSON.parse(fs.readFileSync(path.join(src, 'auth.json'), 'utf8')) as Record<string, { key?: unknown }>
-    if (Object.values(auth).some((c) => typeof c?.key === 'string' && c.key.trim() !== '')) return null
-  } catch {
-    console.warn(`[batch-zsl] auth.json 不可读，继续探测 models.json：${src}`)
-  }
-  try {
-    const models = JSON.parse(fs.readFileSync(path.join(src, 'models.json'), 'utf8')) as {
-      providers?: Record<string, { apiKey?: unknown }>
-    }
-    if (Object.values(models.providers ?? {}).some((p) => typeof p?.apiKey === 'string' && p.apiKey.trim() !== '')) {
-      return null
-    }
-  } catch {
-    console.warn(`[batch-zsl] models.json 不可读：${src}`)
-  }
-  return `${src} 的 auth.json / models.json 均无非空 key（本机 provider 凭证缺失）`
-}
+const writeDiag = tmpDiag('batch-zsl')
 
 function zcodeCredentialSkipReason(): string | null {
   const cliConfig = path.join(os.homedir(), '.zcode', 'cli', 'config.json')
   if (fs.existsSync(cliConfig)) return null
   return `${cliConfig} 不存在（本机 zcode CLI 凭据缺失，zcode 引擎任务无法执行）`
-}
-
-function seedRealCredentials(dataDir: string): void {
-  const src = sourceAgentDir()
-  const dst = path.join(dataDir, 'agent')
-  fs.mkdirSync(dst, { recursive: true })
-  for (const f of ['models.json', 'auth.json']) {
-    const p = path.join(src, f)
-    if (fs.existsSync(p)) fs.copyFileSync(p, path.join(dst, f))
-  }
-  let source: Record<string, unknown> = {}
-  try {
-    source = JSON.parse(fs.readFileSync(path.join(src, 'settings.json'), 'utf8')) as Record<string, unknown>
-  } catch {
-    console.warn(`[batch-zsl] settings.json 不可读，defaultProvider/defaultModel 缺失将由门禁拦截：${src}`)
-  }
-  const defaultProvider = source['defaultProvider']
-  const defaultModel = source['defaultModel']
-  if (typeof defaultProvider !== 'string' || !defaultProvider
-    || typeof defaultModel !== 'string' || !defaultModel) {
-    throw new Error(`[batch-zsl] ${src}/settings.json 缺 defaultProvider/defaultModel——先在太极设置页完成 provider 配置`)
-  }
-  fs.writeFileSync(
-    path.join(dst, 'settings.json'),
-    JSON.stringify({ defaultProvider, defaultModel, retry: source['retry'] ?? { enabled: false } }, null, 2),
-  )
-}
-
-function writeDiag(name: string, data: Record<string, unknown>): void {
-  fs.writeFileSync(`/tmp/${name}`, JSON.stringify(data, null, 2))
-  console.log(`[batch-zsl] diag → /tmp/${name}`)
-}
-
-async function waitUntil(pred: () => boolean, deadlineMs: number, intervalMs = 200): Promise<boolean> {
-  const end = Date.now() + deadlineMs
-  while (Date.now() < end) {
-    if (pred()) return true
-    await new Promise((r) => setTimeout(r, intervalMs))
-  }
-  return pred()
-}
-
-function listFilesRecursive(root: string, suffix: string, depth = 0, acc: string[] = []): string[] {
-  if (depth > 8 || !fs.existsSync(root)) return acc
-  for (const name of fs.readdirSync(root)) {
-    const p = path.join(root, name)
-    if (fs.statSync(p).isDirectory()) listFilesRecursive(p, suffix, depth + 1, acc)
-    else if (name.endsWith(suffix)) acc.push(p)
-  }
-  return acc
-}
-
-function parseJsonlLines(file: string): { entries: Record<string, unknown>[]; badLines: number } {
-  const entries: Record<string, unknown>[] = []
-  let badLines = 0
-  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-    if (line.trim() === '') continue
-    try {
-      entries.push(JSON.parse(line) as Record<string, unknown>)
-    } catch {
-      badLines += 1
-    }
-  }
-  return { entries, badLines }
 }
 
 /** zcode 引擎进程快照（特征 = /engines/zcode/——wrapper 落盘路径；app-server 即该 pid）。 */
@@ -173,33 +93,18 @@ function zcodeProcessSnapshot(): { pids: Set<number>; lines: string[] } {
   return { pids, lines }
 }
 
-function attachConsoleCapture(page: Page): { errors: string[] } {
-  const errors: string[] = []
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push(`[console] ${msg.text()}`)
-  })
-  page.on('pageerror', (err) => errors.push(`[pageerror] ${String(err)}`))
-  return { errors }
-}
-
 test('ZSL (batch real): zcode 双任务同 pid（V4 懒加载单例回归）+ taiji 退出引擎进程随退（V7）', async ({ }, testInfo) => {
-  test.setTimeout(600_000)
-  test.skip(process.env['TAIJI_PI_LIVE'] !== '1', '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行')
-  const credSkip = realCredentialSkipReason()
-  test.skip(credSkip !== null, credSkip ?? '')
+  applyRealTrackGate(test, { timeoutMs: 600_000, tag: 'batch-zsl' })
   const zcSkip = zcodeCredentialSkipReason()
   test.skip(zcSkip !== null, zcSkip ?? '')
 
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-batch-zsl-'))
-  seedRealCredentials(dataDir)
+  seedRealCredentials(dataDir, 'batch-zsl')
   const { app, page, cleanup } = await launchRealApp({ dataDir })
-  const consoleCap = attachConsoleCapture(page)
+  const consoleCap = attachConsoleErrorCapture(page)
   let listen: { ws: { close: () => void }; events: WsFrame[] } | undefined
   try {
-    await expect(page).toHaveTitle(/太极/)
-    const port = await waitForRuntime(dataDir, 30_000)
-    expect(port).toBeGreaterThan(0)
-    await waitForExtensionsReady(dataDir)
+    const port = await waitRealAppReady(page, dataDir, 'batch-zsl')
     await page.screenshot({ path: testInfo.outputPath('zsl-ready.png'), fullPage: true })
 
     const createReply = await wsRoundTrip(port, {
@@ -207,10 +112,7 @@ test('ZSL (batch real): zcode 双任务同 pid（V4 懒加载单例回归）+ ta
       id: 'zsl-create',
       payload: { cwd: SAMPLE_PROJECT, label: 'batch-zsl-shared-lifecycle' },
     }, 'zsl-create')
-    expect(createReply.type).toBe('session.created')
-    const sid = ((createReply.payload ?? {}) as { session?: { id?: string } }).session?.id
-    if (typeof sid !== 'string' || sid === '') throw new Error('session.created reply 应携带非空 session.id')
-    const sub = await openListenWs(port, sid)
+    const { sid, sub } = await openMainListenWs(port, createReply)
     listen = sub
 
     const zcBase = zcodeProcessSnapshot()
@@ -311,13 +213,6 @@ test('ZSL (batch real): zcode 双任务同 pid（V4 懒加载单例回归）+ ta
     listen = undefined
     console.log(`[batch-zsl] PASS：zcode pid=${zcPid} 双任务恒同；app 退出后引擎进程随退`)
   } finally {
-    try {
-      listen?.ws.close()
-    } finally {
-      await cleanup()
-      if (!process.env['PLAYWRIGHT_DEBUG_KEEP_DATA']) {
-        fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
-    }
+    await cleanupRealTrackApp({ closeListeners: () => listen?.ws.close(), cleanup, dataDir })
   }
 })

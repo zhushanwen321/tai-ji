@@ -41,24 +41,36 @@
  * 凭证播种：拷本机真实 provider 配置进临时 dataDir（只读源目录，写侧恒为临时 dataDir；
  * TAIJI_BATCH_CREDENTIAL_SOURCE 可覆盖源目录，缺省 ~/.taiji/agent）。
  */
-import { test, expect, type Page, type TestInfo } from '@playwright/test'
+import { test, expect, type TestInfo } from '@playwright/test'
 import {
   launchRealApp,
-  waitForRuntime,
   wsRoundTrip,
-  openListenWs,
   readRuntimeLogs,
   readPiLogs,
-  waitForExtensionsReady,
   type WsFrame,
 } from './fixtures/launch-app-real'
+import {
+  applyRealTrackGate,
+  assertNotifyThreeChannels,
+  cleanupRealTrackApp,
+  attachConsoleCapture,
+  extractCustomEntries,
+  extractCustomMessageEntries,
+  locateMainSessionFile,
+  openMainListenWs,
+  parseJsonlLines,
+  SAMPLE_PROJECT,
+  seedRealCredentials,
+  testInfoDiag,
+  waitForRunJournal,
+  waitRealAppReady,
+  listFilesRecursive,
+  waitUntil,
+} from './fixtures/batch-real-helpers'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-project')
 const SESSION_LABEL = 'batch-s1-basic-chain'
 
 /** 任务哨兵（进成员 prompt；成员 summary 归 fan-out schema required 字段）。 */
@@ -94,146 +106,16 @@ const NOTIFY_TIMEOUT_MS = 300_000
 const ACK_TIMEOUT_MS = 180_000
 const JSONL_FLUSH_TIMEOUT_MS = 20_000
 
-// ── 凭证门与播种（E2E-BTW-01 同款范式；只读源 = 本机真实数据目录） ─────────────
+// ── 凭证门与播种 / 诊断与扫描 helpers（共享实现 = fixtures/batch-real-helpers.ts；
+//    本文件只留 tag 绑定与 s1 特有的 readJournalFrames 坏行告警变体） ─────────────
 
-function sourceAgentDir(): string {
-  const override = process.env['TAIJI_BATCH_CREDENTIAL_SOURCE']
-  if (override && override.trim() !== '') return override
-  return path.join(os.homedir(), '.taiji', 'agent')
-}
+const writeDiag = testInfoDiag('batch-s1')
 
-function realCredentialSkipReason(): string | null {
-  const src = sourceAgentDir()
-  try {
-    const auth = JSON.parse(fs.readFileSync(path.join(src, 'auth.json'), 'utf8')) as Record<string, { key?: unknown }>
-    if (Object.values(auth).some((c) => typeof c?.key === 'string' && c.key.trim() !== '')) return null
-  } catch {
-    console.warn(`[batch-s1] auth.json 不可读，继续探测 models.json：${src}`)
-  }
-  try {
-    const models = JSON.parse(fs.readFileSync(path.join(src, 'models.json'), 'utf8')) as {
-      providers?: Record<string, { apiKey?: unknown }>
-    }
-    if (Object.values(models.providers ?? {}).some((p) => typeof p?.apiKey === 'string' && p.apiKey.trim() !== '')) {
-      return null
-    }
-  } catch {
-    console.warn(`[batch-s1] models.json 不可读：${src}`)
-  }
-  return `${src} 的 auth.json / models.json 均无非空 key（本机 provider 凭证缺失）`
-}
-
-function seedRealCredentials(dataDir: string): void {
-  const src = sourceAgentDir()
-  const dst = path.join(dataDir, 'agent')
-  fs.mkdirSync(dst, { recursive: true })
-  for (const f of ['models.json', 'auth.json']) {
-    const p = path.join(src, f)
-    if (fs.existsSync(p)) fs.copyFileSync(p, path.join(dst, f))
-  }
-  let source: Record<string, unknown> = {}
-  try {
-    source = JSON.parse(fs.readFileSync(path.join(src, 'settings.json'), 'utf8')) as Record<string, unknown>
-  } catch {
-    console.warn(`[batch-s1] settings.json 不可读，defaultProvider/defaultModel 缺失将由门禁拦截：${src}`)
-  }
-  const defaultProvider = source['defaultProvider']
-  const defaultModel = source['defaultModel']
-  if (typeof defaultProvider !== 'string' || !defaultProvider
-    || typeof defaultModel !== 'string' || !defaultModel) {
-    throw new Error(`[batch-s1] ${src}/settings.json 缺 defaultProvider/defaultModel——先在太极设置页完成 provider 配置`)
-  }
-  fs.writeFileSync(
-    path.join(dst, 'settings.json'),
-    JSON.stringify({ defaultProvider, defaultModel, retry: source['retry'] ?? { enabled: false } }, null, 2),
-  )
-}
-
-// ── 诊断与扫描 helpers（btw-turn-isolation 同款范式 + W1 介质族） ─────────────
-
-/** 诊断落 Playwright 托管产物位（testInfo.outputPath，随 output 目录管理）——
- *  载荷可含 session entry 正文，/tmp 不是其合法落盘位置（ADR-0063 I2）。 */
-function writeDiag(testInfo: TestInfo, name: string, data: Record<string, unknown>): void {
-  const target = testInfo.outputPath(name)
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  fs.writeFileSync(target, JSON.stringify(data, null, 2))
-  console.log(`[batch-s1] diag → ${target}`)
-}
-
-async function waitUntil(pred: () => boolean, deadlineMs: number, intervalMs = 200): Promise<boolean> {
-  const end = Date.now() + deadlineMs
-  while (Date.now() < end) {
-    if (pred()) return true
-    await new Promise((r) => setTimeout(r, intervalMs))
-  }
-  return pred()
-}
-
-function listFilesRecursive(root: string, suffix: string, depth = 0, acc: string[] = []): string[] {
-  if (depth > 8 || !fs.existsSync(root)) return acc
-  for (const name of fs.readdirSync(root)) {
-    const p = path.join(root, name)
-    if (fs.statSync(p).isDirectory()) listFilesRecursive(p, suffix, depth + 1, acc)
-    else if (name.endsWith(suffix)) acc.push(p)
-  }
-  return acc
-}
-
-/** pi session JSONL 行解析（宽容：坏行跳过计数——与 W1 tail 契约的坏行语义一致）。 */
-function parseJsonlLines(file: string): { entries: Record<string, unknown>[]; badLines: number } {
-  const entries: Record<string, unknown>[] = []
-  let badLines = 0
-  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-    if (line.trim() === '') continue
-    try {
-      entries.push(JSON.parse(line) as Record<string, unknown>)
-    } catch {
-      badLines += 1
-    }
-  }
-  return { entries, badLines }
-}
-
-/** 主 session JSONL 内指定 customType 的 entry data 集（v2 条目/送达通知断言的取数面）。 */
-function extractCustomEntries(file: string, customType: string): Record<string, unknown>[] {
-  const { entries } = parseJsonlLines(file)
-  return entries
-    .filter((e) => e['type'] === 'custom' && e['customType'] === customType)
-    .map((e) => (e['data'] ?? {}) as Record<string, unknown>)
-}
-
-/** 送达标签通道：type=custom_message（pi.sendMessage 落盘形态，进 LLM 上下文——
- *  notify-ledger-helpers.ts collectDeliveredNotifyIds 是该形态的权威消费方：
- *  entry.type==='custom_message' + entry.customType + 顶层 entry.details.notifyId。
- *  与 plain custom entry（type=custom，data 平铺——ledger/ack/record 族）是两条
- *  不同的落盘通道，customType 同名也不能混用 extractor。 */
-function extractCustomMessageEntries(file: string, customType: string): Record<string, unknown>[] {
-  const { entries } = parseJsonlLines(file)
-  return entries.filter((e) => e['type'] === 'custom_message' && e['customType'] === customType)
-}
-
-/** run journal 帧解析：{ type, seq, ts, ...载荷 }。 */
+/** pi session JSONL 行解析的 s1 变体：journal 坏行超 0 时 console 告警（与 tail 契约一致）。 */
 function readJournalFrames(file: string): Record<string, unknown>[] {
   const { entries, badLines } = parseJsonlLines(file)
   if (badLines > 0) console.warn(`[batch-s1] journal 含 ${badLines} 坏行（宽容跳过，与 tail 契约一致）：${file}`)
   return entries
-}
-
-/** console 抓取（renderer 主窗口）：errors 单列，失败诊断必带。 */
-function attachConsoleCapture(page: Page): { all: string[]; errors: string[] } {
-  const all: string[] = []
-  const errors: string[] = []
-  page.on('console', (msg) => {
-    const line = `[${msg.type()}] ${msg.text()}`
-    all.push(line)
-    if (msg.type() === 'error') errors.push(line)
-  })
-  page.on('pageerror', (err) => {
-    const line = `[pageerror] ${String(err)}`
-    all.push(line)
-    errors.push(line)
-  })
-  return { all, errors }
 }
 
 /**
@@ -246,30 +128,28 @@ async function settleS1Anchors(
   consoleCap: { errors: string[] },
 ): Promise<{ journalFile: string; runId: string; sessionFile: string }> {
   const agentDir = path.join(dataDir, 'agent')
-  const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.record.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
-  if (!journalFound) {
-    writeDiag(testInfo, 'batch-s1-journal-missing.json', {
+  const journalFile = await waitForRunJournal({
+    agentDir,
+    dataDir,
+    timeoutMs: JOURNAL_TIMEOUT_MS,
+    foundMessage: `run journal (wf-*.record.jsonl) 应在 ${JOURNAL_TIMEOUT_MS}ms 内落盘于 <agentDir>/sessions/**/workflow-state/`,
+    diag: (name, data) => writeDiag(testInfo, name, data),
+    diagName: 'batch-s1-journal-missing.json',
+    diagExtra: {
       agentTree: fs.existsSync(agentDir) ? fs.readdirSync(agentDir) : [],
-      runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-      piLogsTail: readPiLogs(dataDir).slice(-3000),
       consoleErrors: consoleCap.errors,
-    })
-  }
-  expect(journalFound, `run journal (wf-*.record.jsonl) 应在 ${JOURNAL_TIMEOUT_MS}ms 内落盘于 <agentDir>/sessions/**/workflow-state/`).toBe(true)
-  const journalFile = listFilesRecursive(agentDir, '.record.jsonl')[0]
+    },
+  })
   const runId = path.basename(journalFile).replace(/\.record\.jsonl$/, '')
   expect(runId.startsWith('wf-'), `journal 文件名应为 <runId>.record.jsonl 且 runId 带 wf- 前缀，收到 "${runId}"`).toBe(true)
 
   // ── 通知等待：notifyDone 送达 entry（customType=workflow-result，details.notifyId=wf-done:<runId>） ──
-  const sessionFileFound = await waitUntil(
-    () => listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl').some((f) => {
-      try { return fs.readFileSync(f, 'utf8').includes(MAIN_MARKER) } catch { return false }
-    }),
+  const sessionFile = await locateMainSessionFile(
+    agentDir,
+    MAIN_MARKER,
     JSONL_FLUSH_TIMEOUT_MS,
+    '主会话 JSONL 应已落盘（含 MAIN 哨兵）',
   )
-  expect(sessionFileFound, '主会话 JSONL 应已落盘（含 MAIN 哨兵）').toBe(true)
-  const sessionFile = listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl')
-    .find((f) => fs.readFileSync(f, 'utf8').includes(MAIN_MARKER))!
 
   const notifyId = `wf-done:${runId}`
   const notifyArrived = await waitUntil(
@@ -292,15 +172,8 @@ async function settleS1Anchors(
 }
 
 
-/** [S1 test 拆分] 断言 N1（一条收齐，三通道口径）：送达恰 1 + ledger/ack 各恰 1。
- * W1 通知链在会话 JSONL 落三类含 wf-done:<runId> 的 entry，通道与 entry type 均不同：
- * ①送达 = type custom_message + customType "workflow-result"（u9 外部通道设计，
- *   workflow-notify.ts 以 deliveryCustomType=WORKFLOW_RESULT_CUSTOM_TYPE record；
- *   权威消费方 collectDeliveredNotifyIds 只认此形态，键在顶层 details.notifyId）
- * ②ledger 条目写入 = type custom + "subagent-bg-notify-ledger"（键在 data.notifyId）
- * ③ack 关闭 = type custom + "subagent-bg-notify-ack"
- * 「notifyId 字面出现次数」结构性 = 3 ≠ 投递次数——送达恰 1（单次投递）
- * + ledger/ack 各恰 1（at-least-once 幂等闭环，BATCH-06 口径）。 */
+/** [S1 test 拆分] 断言 N1（一条收齐，三通道口径）——共享实现见
+ *  fixtures/batch-real-helpers.ts assertNotifyThreeChannels（通道注释随实现）。 */
 async function assertS1NotifyChannels(
   testInfo: TestInfo,
   sessionFile: string,
@@ -308,49 +181,15 @@ async function assertS1NotifyChannels(
   journalFile: string,
   dataDir: string,
 ): Promise<void> {
-const notifyId = `wf-done:${runId}`
-// ── 断言 N1（一条收齐，三通道口径）：送达恰 1 + ledger/ack 各恰 1 ──
-// W1 通知链在会话 JSONL 落三类含 wf-done:<runId> 的 entry，通道与 entry type 均不同：
-// ①送达 = type custom_message + customType "workflow-result"（u9 外部通道设计，
-//   workflow-notify.ts 以 deliveryCustomType=WORKFLOW_RESULT_CUSTOM_TYPE record；
-//   权威消费方 collectDeliveredNotifyIds 只认此形态，键在顶层 details.notifyId）
-// ②ledger 条目写入 = type custom + "subagent-bg-notify-ledger"（键在 data.notifyId）
-// ③ack 关闭 = type custom + "subagent-bg-notify-ack"
-// 「notifyId 字面出现次数」结构性 = 3 ≠ 投递次数——送达恰 1（单次投递）
-// + ledger/ack 各恰 1（at-least-once 幂等闭环，BATCH-06 口径）。
-const deliveredWorkflowResults = extractCustomMessageEntries(sessionFile, 'workflow-result').filter(
-  (e) => ((e['details'] ?? {}) as Record<string, unknown>)['notifyId'] === notifyId,
-)
-expect(
-  deliveredWorkflowResults.length,
-  'notifyDone 送达通道（custom_message × workflow-result）应恰 1 条（幂等键单次投递）',
-).toBe(1)
-const countNotifyEntries = (customType: string): number =>
-  extractCustomEntries(sessionFile, customType)
-    .filter((d) => JSON.stringify(d).includes(notifyId)).length
-expect(
-  countNotifyEntries('subagent-bg-notify-ledger'),
-  'notifyDone ledger 条目应恰 1 条（at-least-once 幂等闭环——写入/关闭各恰一次，BATCH-06 口径）',
-).toBe(1)
-// ack 关闭等回执扫描的 agent_settled 边沿（通知 triggerTurn 唤醒的 turn 结算后
-// 才写）——先等待再计数（r3 实测：送达后立即断言 Received 0）
-const ackArrived = await waitUntil(
-  () => countNotifyEntries('subagent-bg-notify-ack') > 0,
-  ACK_TIMEOUT_MS,
-)
-if (!ackArrived) {
-  writeDiag(testInfo, 'batch-s1-ack-missing.json', {
-    sessionTail: fs.readFileSync(sessionFile, 'utf8').slice(-4000),
-    runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-    journalEventTypes: readJournalFrames(journalFile).map((f) => f['type']),
+  await assertNotifyThreeChannels({
+    sessionFile,
+    notifyId: `wf-done:${runId}`,
+    ackTimeoutMs: ACK_TIMEOUT_MS,
+    dataDir,
+    diag: (name, data) => writeDiag(testInfo, name, data),
+    diagName: 'batch-s1-ack-missing.json',
+    diagExtra: { journalEventTypes: readJournalFrames(journalFile).map((f) => f['type']) },
   })
-}
-expect(ackArrived, `notifyDone ack 关闭应在 turn 结算后落盘（agent_settled 边沿，${ACK_TIMEOUT_MS}ms 窗）`).toBe(true)
-expect(
-  countNotifyEntries('subagent-bg-notify-ack'),
-  'notifyDone ack 关闭应恰 1 条（at-least-once 幂等闭环——写入/关闭各恰一次，BATCH-06 口径）',
-).toBe(1)
-
 }
 
 /** [S1 test 拆分] 断言 N2（S1 原始口径）：status=ok / results=2 / taskIndex 0,1 / Agent Trace 2 条均 ok。 */
@@ -450,28 +289,17 @@ expect(recordEvents.length, 'record 事件文件族应恰 2 个（<recordsDir>/<
 // ── S1 主用例 ────────────────────────────────────────────────────────────
 
 test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + W1 新介质锚定', async ({ }, testInfo) => {
-  test.setTimeout(600_000)
-
   // 凭证双门（缺一 skip 不 fail——防全量扫跑烧 token）
-  test.skip(
-    process.env['TAIJI_PI_LIVE'] !== '1',
-    '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则——开发期按改动范围手动触发，CI/门禁不跑）',
-  )
-  const credSkip = realCredentialSkipReason()
-  test.skip(credSkip !== null, credSkip ?? '')
+  applyRealTrackGate(test, { timeoutMs: 600_000, tag: 'batch-s1' })
 
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-batch-s1-'))
-  seedRealCredentials(dataDir)
+  seedRealCredentials(dataDir, 'batch-s1')
 
   const { page, cleanup } = await launchRealApp({ dataDir })
   const consoleCap = attachConsoleCapture(page)
   let listen: { ws: { close: () => void }; events: WsFrame[] } | undefined
   try {
-    await expect(page).toHaveTitle(/太极/)
-    const port = await waitForRuntime(dataDir, 30_000)
-    expect(port).toBeGreaterThan(0)
-    const resolved = await waitForExtensionsReady(dataDir)
-    if (resolved === 0) console.warn('[batch-s1] extensions not ready within timeout, continue anyway')
+    const port = await waitRealAppReady(page, dataDir, 'batch-s1')
     await page.screenshot({ path: testInfo.outputPath('s1-app-ready.png'), fullPage: true })
 
     // session 创建 + 订阅（broadcast 早于订阅丢消息的时序竞争防护，先订阅再发 prompt）
@@ -480,10 +308,7 @@ test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + 
       id: 's1-create',
       payload: { cwd: SAMPLE_PROJECT, label: SESSION_LABEL },
     }, 's1-create')
-    expect(createReply.type).toBe('session.created')
-    const sid = ((createReply.payload ?? {}) as { session?: { id?: string } }).session?.id
-    if (typeof sid !== 'string' || sid === '') throw new Error('session.created reply 应携带非空 session.id')
-    const sub = await openListenWs(port, sid)
+    const { sid, sub } = await openMainListenWs(port, createReply)
     listen = sub
 
     const sendReply = await wsRoundTrip(port, {
@@ -519,13 +344,6 @@ test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + 
     }
     console.log(`[batch-s1] PASS：runId=${runId}，journal=${journalFile}`)
   } finally {
-    try {
-      listen?.ws.close()
-    } finally {
-      await cleanup()
-      if (!process.env['PLAYWRIGHT_DEBUG_KEEP_DATA']) {
-        fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
-    }
+    await cleanupRealTrackApp({ closeListeners: () => listen?.ws.close(), cleanup, dataDir })
   }
 })

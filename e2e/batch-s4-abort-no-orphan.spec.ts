@@ -47,25 +47,37 @@
  * （派发 turn → abort turn）；断言原始证据文档 = journal 文件 + 主 session JSONL +
  * 进程表（磁盘与系统事实，不依赖 DOM）。
  */
-import { test, expect, type Page, type TestInfo } from '@playwright/test'
+import { test, expect, type TestInfo } from '@playwright/test'
 import {
   launchRealApp,
-  waitForRuntime,
   wsRoundTrip,
-  openListenWs,
   readRuntimeLogs,
   readPiLogs,
-  waitForExtensionsReady,
   type WsFrame,
 } from './fixtures/launch-app-real'
-import { execSync, execFileSync } from 'node:child_process'
+import {
+  applyRealTrackGate,
+  assertNotifyThreeChannels,
+  cleanupRealTrackApp,
+  assertSingleRunSettled,
+  attachConsoleCapture,
+  countEngineShellProcesses,
+  countMemberSleeperProcesses,
+  extractCustomEntries,
+  locateMainSessionFile,
+  openMainListenWs,
+  readJournalFrames,
+  SAMPLE_PROJECT,
+  seedRealCredentials,
+  testInfoDiag,
+  waitForRunJournal,
+  waitRealAppReady,
+  waitUntil,
+} from './fixtures/batch-real-helpers'
+import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-project')
 
 /** 在途保活旋钮（执行侧约定「预算」）：成员 bash sleep 秒数，abort 须落在其内。 */
 const MEMBER_SLEEP_S = 180
@@ -96,175 +108,10 @@ const ACK_TIMEOUT_MS = 180_000
 const ORPHAN_GRACE_MS = 150_000
 const JSONL_FLUSH_TIMEOUT_MS = 20_000
 
-// ── 凭证门与播种（E2E-BTW-01 同款范式） ──────────────────────────────────
+// ── 凭证门与播种 / 诊断与扫描 helpers（共享实现 = fixtures/batch-real-helpers.ts；
+//    本文件只留 tag 绑定；成员保活计数固定锚 = sleep ${MEMBER_SLEEP_S}） ──────────
 
-function sourceAgentDir(): string {
-  const override = process.env['TAIJI_BATCH_CREDENTIAL_SOURCE']
-  if (override && override.trim() !== '') return override
-  return path.join(os.homedir(), '.taiji', 'agent')
-}
-
-function realCredentialSkipReason(): string | null {
-  const src = sourceAgentDir()
-  try {
-    const auth = JSON.parse(fs.readFileSync(path.join(src, 'auth.json'), 'utf8')) as Record<string, { key?: unknown }>
-    if (Object.values(auth).some((c) => typeof c?.key === 'string' && c.key.trim() !== '')) return null
-  } catch {
-    console.warn(`[batch-s4] auth.json 不可读，继续探测 models.json：${src}`)
-  }
-  try {
-    const models = JSON.parse(fs.readFileSync(path.join(src, 'models.json'), 'utf8')) as {
-      providers?: Record<string, { apiKey?: unknown }>
-    }
-    if (Object.values(models.providers ?? {}).some((p) => typeof p?.apiKey === 'string' && p.apiKey.trim() !== '')) {
-      return null
-    }
-  } catch {
-    console.warn(`[batch-s4] models.json 不可读：${src}`)
-  }
-  return `${src} 的 auth.json / models.json 均无非空 key（本机 provider 凭证缺失）`
-}
-
-function seedRealCredentials(dataDir: string): void {
-  const src = sourceAgentDir()
-  const dst = path.join(dataDir, 'agent')
-  fs.mkdirSync(dst, { recursive: true })
-  for (const f of ['models.json', 'auth.json']) {
-    const p = path.join(src, f)
-    if (fs.existsSync(p)) fs.copyFileSync(p, path.join(dst, f))
-  }
-  let source: Record<string, unknown> = {}
-  try {
-    source = JSON.parse(fs.readFileSync(path.join(src, 'settings.json'), 'utf8')) as Record<string, unknown>
-  } catch {
-    console.warn(`[batch-s4] settings.json 不可读，defaultProvider/defaultModel 缺失将由门禁拦截：${src}`)
-  }
-  const defaultProvider = source['defaultProvider']
-  const defaultModel = source['defaultModel']
-  if (typeof defaultProvider !== 'string' || !defaultProvider
-    || typeof defaultModel !== 'string' || !defaultModel) {
-    throw new Error(`[batch-s4] ${src}/settings.json 缺 defaultProvider/defaultModel——先在太极设置页完成 provider 配置`)
-  }
-  fs.writeFileSync(
-    path.join(dst, 'settings.json'),
-    JSON.stringify({ defaultProvider, defaultModel, retry: source['retry'] ?? { enabled: false } }, null, 2),
-  )
-}
-
-// ── 诊断与扫描 helpers ──────────────────────────────────────────────────
-
-/** 诊断落 Playwright 托管产物位（testInfo.outputPath，随 output 目录管理）——
- *  载荷可含 session entry 正文，/tmp 不是其合法落盘位置（ADR-0063 I2；s1/s3 同族同款）。 */
-function writeDiag(testInfo: TestInfo, name: string, data: Record<string, unknown>): void {
-  const target = testInfo.outputPath(name)
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  fs.writeFileSync(target, JSON.stringify(data, null, 2))
-  console.log(`[batch-s4] diag → ${target}`)
-}
-
-async function waitUntil(pred: () => boolean, deadlineMs: number, intervalMs = 200): Promise<boolean> {
-  const end = Date.now() + deadlineMs
-  while (Date.now() < end) {
-    if (pred()) return true
-    await new Promise((r) => setTimeout(r, intervalMs))
-  }
-  return pred()
-}
-
-function listFilesRecursive(root: string, suffix: string, depth = 0, acc: string[] = []): string[] {
-  if (depth > 8 || !fs.existsSync(root)) return acc
-  for (const name of fs.readdirSync(root)) {
-    const p = path.join(root, name)
-    if (fs.statSync(p).isDirectory()) listFilesRecursive(p, suffix, depth + 1, acc)
-    else if (name.endsWith(suffix)) acc.push(p)
-  }
-  return acc
-}
-
-function parseJsonlLines(file: string): { entries: Record<string, unknown>[]; badLines: number } {
-  const entries: Record<string, unknown>[] = []
-  let badLines = 0
-  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-    if (line.trim() === '') continue
-    try {
-      entries.push(JSON.parse(line) as Record<string, unknown>)
-    } catch {
-      badLines += 1
-    }
-  }
-  return { entries, badLines }
-}
-
-function extractCustomEntries(file: string, customType: string): Record<string, unknown>[] {
-  return parseJsonlLines(file).entries
-    .filter((e) => e['type'] === 'custom' && e['customType'] === customType)
-    .map((e) => (e['data'] ?? {}) as Record<string, unknown>)
-}
-
-/** 送达标签通道：type=custom_message（pi.sendMessage 落盘形态，进 LLM 上下文——
- *  权威消费方 notify-ledger-helpers.ts collectDeliveredNotifyIds：entry.type ===
- *  'custom_message' + entry.customType + 顶层 entry.details.notifyId）。与 plain
- *  custom entry（type=custom，data 平铺——ledger/ack/record 族）是两条落盘通道。 */
-function extractCustomMessageEntries(file: string, customType: string): Record<string, unknown>[] {
-  return parseJsonlLines(file).entries
-    .filter((e) => e['type'] === 'custom_message' && e['customType'] === customType)
-}
-
-function readJournalFrames(file: string): Record<string, unknown>[] {
-  return parseJsonlLines(file).entries
-}
-
-function attachConsoleCapture(page: Page): { all: string[]; errors: string[] } {
-  const all: string[] = []
-  const errors: string[] = []
-  page.on('console', (msg) => {
-    const line = `[${msg.type()}] ${msg.text()}`
-    all.push(line)
-    if (msg.type() === 'error') errors.push(line)
-  })
-  page.on('pageerror', (err) => {
-    const line = `[pageerror] ${String(err)}`
-    all.push(line)
-    errors.push(line)
-  })
-  return { all, errors }
-}
-
-/** 成员任务保活进程计数（孤儿核对锚 ①，见头注「进程核对锚」段）。
- *  只数成员保活 sleep 进程；引擎宿主薄壳走 countEngineShellProcesses（锚 ②）。 */
-function countMemberSleeperProcesses(): { count: number; lines: string[] } {
-  let out = ''
-  try {
-    out = execSync('ps -axo command=', { encoding: 'utf8', timeout: 10_000 })
-  } catch (err) {
-    console.warn(`[batch-s4] ps 不可读（进程核对降级为 -1 哨兵）：${String(err)}`)
-    return { count: -1, lines: [] }
-  }
-  const marker = `sleep ${MEMBER_SLEEP_S}`
-  const lines = out.split('\n').filter((line) =>
-    line.includes(marker) && !line.includes('playwright') && !line.includes('Electron.app'),
-  )
-  return { count: lines.length, lines }
-}
-
-/** 引擎宿主薄壳计数（孤儿核对锚 ②：'pi-subagent-cli' / '/engines/' 特征并集）。
- *  复用 scripts/count-engine-shell-processes.mjs（特征串权威单源——从引擎 spawn
- *  实装读取，子进程取 JSON 输出）；宿主判定用基线差分（zcode 常驻单例与测试进程
- *  cmdline 噪声被基线吸收，脚本头注口径）。 */
-function countEngineShellProcesses(): { count: number; lines: string[] } {
-  try {
-    const out = execFileSync(
-      process.execPath,
-      [path.join(REPO_ROOT, 'scripts', 'count-engine-shell-processes.mjs')],
-      { encoding: 'utf8', timeout: 10_000 },
-    )
-    const parsed = JSON.parse(out) as { count: number; processes: { pid: number; command: string }[] }
-    return { count: parsed.count, lines: parsed.processes.map((p) => `${p.pid} ${p.command}`) }
-  } catch (err) {
-    console.warn(`[batch-s4] 引擎宿主计数不可读（降级 -1 哨兵）：${String(err)}`)
-    return { count: -1, lines: [] }
-  }
-}
+const writeDiag = testInfoDiag('batch-s4')
 
 /**
  * [S4 test 拆分] 在途证据段：journal 落盘 + agent-started 帧（成员在途事实，
@@ -278,15 +125,14 @@ async function awaitS4InFlightEvidence(
   shellBaseline: { count: number; lines: string[] },
 ): Promise<{ journalFile: string; runId: string }> {
   const agentDir = path.join(dataDir, 'agent')
-  const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.record.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
-  if (!journalFound) {
-    writeDiag(testInfo, 'batch-s4-journal-missing.json', {
-      runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-      piLogsTail: readPiLogs(dataDir).slice(-3000),
-    })
-  }
-  expect(journalFound, 'run journal 应落盘').toBe(true)
-  const journalFile = listFilesRecursive(agentDir, '.record.jsonl')[0]
+  const journalFile = await waitForRunJournal({
+    agentDir,
+    dataDir,
+    timeoutMs: JOURNAL_TIMEOUT_MS,
+    foundMessage: 'run journal 应落盘',
+    diag: (name, data) => writeDiag(testInfo, name, data),
+    diagName: 'batch-s4-journal-missing.json',
+  })
   const runId = path.basename(journalFile).replace(/\.record\.jsonl$/, '')
   const dispatched = await waitUntil(
     () => readJournalFrames(journalFile).some((f) => f['type'] === 'agent-started'),
@@ -301,22 +147,22 @@ async function awaitS4InFlightEvidence(
   expect(dispatched, `journal 应出现 agent-started 帧（成员在途——abort 才有「中途」语义）`).toBe(true)
 
   // 成员保活进程在跑（正面对照：孤儿断言的前提是派发后确实有任务进程可回收）
-  const inFlight = await waitUntil(() => countMemberSleeperProcesses().count > baseline.count, JOURNAL_TIMEOUT_MS)
+  const inFlight = await waitUntil(() => countMemberSleeperProcesses(MEMBER_SLEEP_S, 'batch-s4').count > baseline.count, JOURNAL_TIMEOUT_MS)
   if (!inFlight) {
     writeDiag(testInfo, 'batch-s4-engine-process-not-seen.json', {
       baseline: baseline.lines,
-      current: countMemberSleeperProcesses().lines,
+      current: countMemberSleeperProcesses(MEMBER_SLEEP_S, 'batch-s4').lines,
       hint: '特征集不命中——按头注「进程核对锚」校准特征集，不删孤儿断言',
     })
   }
   expect(inFlight, `派发后成员保活进程数应 > 基线（在途证据；特征锚见 diag）`).toBe(true)
 
   // 引擎宿主薄壳在跑（per-window 在途证据：窗口内薄壳存活，是收尾后可回收的前提）
-  const shellInFlight = await waitUntil(() => countEngineShellProcesses().count > shellBaseline.count, JOURNAL_TIMEOUT_MS)
+  const shellInFlight = await waitUntil(() => countEngineShellProcesses('batch-s4').count > shellBaseline.count, JOURNAL_TIMEOUT_MS)
   if (!shellInFlight) {
     writeDiag(testInfo, 'batch-s4-engine-shell-not-seen.json', {
       shellBaseline: shellBaseline.lines,
-      shellCurrent: countEngineShellProcesses().lines,
+      shellCurrent: countEngineShellProcesses('batch-s4').lines,
       hint: '薄壳特征不命中（pi-subagent-cli / /engines/）——按 count-engine-shell-processes.mjs 头注校准特征集，不删宿主断言',
     })
   }
@@ -346,28 +192,19 @@ async function awaitS4SettlementAndNotifyBase(
   if (!settled) {
     writeDiag(testInfo, 'batch-s4-not-settled.json', {
       journalEventTypes: frames.map((f) => f['type']),
-      engineProcesses: countMemberSleeperProcesses().lines,
+      engineProcesses: countMemberSleeperProcesses(MEMBER_SLEEP_S, 'batch-s4').lines,
       piLogsTail: readPiLogs(dataDir).slice(-3000),
     })
   }
   expect(settled, `abort 后 run 应在 ${ABORT_SETTLE_TIMEOUT_MS}ms 内落 run-settled 帧`).toBe(true)
-  const settledFrames = frames.filter((f) => f['type'] === 'run-settled')
-  expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
-  expect(
-    settledFrames[0]?.['outcome'],
-    `abort 终局 outcome 应为 cancelled（收到 "${String(settledFrames[0]?.['outcome'])}"；若为 completed = 保活窗口不足，调大 MEMBER_SLEEP_S）`,
-  ).toBe('cancelled')
+  assertSingleRunSettled(
+    frames,
+    'cancelled',
+    `abort 终局 outcome 应为 cancelled（若为 completed = 保活窗口不足，调大 MEMBER_SLEEP_S）`,
+  )
 
   // ── 断言 A2：notifyDone 照达恰 1 ──
-  const sessionFound = await waitUntil(
-    () => listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl').some((f) => {
-      try { return fs.readFileSync(f, 'utf8').includes(MAIN_MARKER) } catch { return false }
-    }),
-    JSONL_FLUSH_TIMEOUT_MS,
-  )
-  expect(sessionFound, '主会话 JSONL 应已落盘').toBe(true)
-  const sessionFile = listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl')
-    .find((f) => fs.readFileSync(f, 'utf8').includes(MAIN_MARKER))!
+  const sessionFile = await locateMainSessionFile(agentDir, MAIN_MARKER, JSONL_FLUSH_TIMEOUT_MS, '主会话 JSONL 应已落盘')
   const notifyId = `wf-done:${runId}`
   const notifyArrived = await waitUntil(() => fs.readFileSync(sessionFile, 'utf8').includes(notifyId), NOTIFY_TIMEOUT_MS)
   if (!notifyArrived) {
@@ -417,7 +254,7 @@ async function assertS4SettledEntryAndOrphanFree(
   //    finalizeRun 遍历窗口实例 dispose），收尾后同样回落基线（头注断言 ④ 的升级；
   //    计数复用 count-engine-shell-processes.mjs，基线差分吸收环境噪声）。
   // diag 带 etime/ppid 供残留时定位 kill 链路。
-  const orphanFree = await waitUntil(() => countMemberSleeperProcesses().count <= baseline.count, ORPHAN_GRACE_MS, 1000)
+  const orphanFree = await waitUntil(() => countMemberSleeperProcesses(MEMBER_SLEEP_S, 'batch-s4').count <= baseline.count, ORPHAN_GRACE_MS, 1000)
   if (!orphanFree) {
     // countMemberSleeperProcesses 的 lines 是 `ps -axo command=` 纯命令行（无 PID 列）——
     // PID 需按同特征从 `ps -axo pid,command=` 重采样（r5 实测取 command 第二段当
@@ -438,7 +275,7 @@ async function assertS4SettledEntryAndOrphanFree(
     }
     writeDiag(testInfo, 'batch-s4-orphans.json', {
       baseline: baseline.lines,
-      current: countMemberSleeperProcesses().lines,
+      current: countMemberSleeperProcesses(MEMBER_SLEEP_S, 'batch-s4').lines,
       psDetail,
       journalEventTypes: frames.map((f) => f['type']),
     })
@@ -448,28 +285,17 @@ async function assertS4SettledEntryAndOrphanFree(
 // ── S4 主用例 ────────────────────────────────────────────────────────────
 
 test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达 + 无孤儿（成员任务子进程 + 引擎宿主薄壳）', async ({ }, testInfo) => {
-  test.setTimeout(420_000)
-
   // 凭证双门（缺一 skip 不 fail——防全量扫跑烧 token）
-  test.skip(
-    process.env['TAIJI_PI_LIVE'] !== '1',
-    '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则——开发期按改动范围手动触发，CI/门禁不跑）',
-  )
-  const credSkip = realCredentialSkipReason()
-  test.skip(credSkip !== null, credSkip ?? '')
+  applyRealTrackGate(test, { timeoutMs: 420_000, tag: 'batch-s4' })
 
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-batch-s4-'))
-  seedRealCredentials(dataDir)
+  seedRealCredentials(dataDir, 'batch-s4')
 
   const { page, cleanup } = await launchRealApp({ dataDir })
   const consoleCap = attachConsoleCapture(page)
   let listen: { ws: { close: () => void }; events: WsFrame[] } | undefined
   try {
-    await expect(page).toHaveTitle(/太极/)
-    const port = await waitForRuntime(dataDir, 30_000)
-    expect(port).toBeGreaterThan(0)
-    const resolved = await waitForExtensionsReady(dataDir)
-    if (resolved === 0) console.warn('[batch-s4] extensions not ready within timeout, continue anyway')
+    const port = await waitRealAppReady(page, dataDir, 'batch-s4')
     await page.screenshot({ path: testInfo.outputPath('s4-app-ready.png'), fullPage: true })
 
     const createReply = await wsRoundTrip(port, {
@@ -477,17 +303,14 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
       id: 's4-create',
       payload: { cwd: SAMPLE_PROJECT, label: 'batch-s4-abort-no-orphan' },
     }, 's4-create')
-    expect(createReply.type).toBe('session.created')
-    const sid = ((createReply.payload ?? {}) as { session?: { id?: string } }).session?.id
-    if (typeof sid !== 'string' || sid === '') throw new Error('session.created reply 应携带非空 session.id')
-    const sub = await openListenWs(port, sid)
+    const { sid, sub } = await openMainListenWs(port, createReply)
     listen = sub
 
     // 进程基线（成员保活进程与引擎宿主薄壳 spawn 前；正常环境两者均应为 0）
     const agentDir = path.join(dataDir, 'agent')
-    const baseline = countMemberSleeperProcesses()
+    const baseline = countMemberSleeperProcesses(MEMBER_SLEEP_S, 'batch-s4')
     expect(baseline.count, '进程基线应可读（ps 失败 = -1 哨兵，环境异常 fail-fast）').toBeGreaterThanOrEqual(0)
-    const shellBaseline = countEngineShellProcesses()
+    const shellBaseline = countEngineShellProcesses('batch-s4')
     expect(shellBaseline.count, '引擎宿主薄壳基线应可读（计数脚本失败 = -1 哨兵，环境异常 fail-fast）').toBeGreaterThanOrEqual(0)
 
     // ── turn 1：派发长任务批（成员 bash sleep 保活） ──
@@ -529,49 +352,26 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     expect(abortTurnDone, `abort turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成`).toBe(true)
 
     const sessionFile = await awaitS4SettlementAndNotifyBase(testInfo, dataDir, agentDir, journalFile, runId, consoleCap)
-    const notifyId = `wf-done:${runId}`
-    const deliveredWorkflowResults = extractCustomMessageEntries(sessionFile, 'workflow-result').filter(
-      (e) => ((e['details'] ?? {}) as Record<string, unknown>)['notifyId'] === notifyId,
-    )
-    expect(
-      deliveredWorkflowResults.length,
-      'notifyDone 送达通道（custom_message × workflow-result）应恰 1 条（幂等键单次投递）',
-    ).toBe(1)
-    const countNotifyEntries = (customType: string): number =>
-      extractCustomEntries(sessionFile, customType)
-        .filter((d) => JSON.stringify(d).includes(notifyId)).length
-    expect(
-      countNotifyEntries('subagent-bg-notify-ledger'),
-      'notifyDone ledger 条目应恰 1 条（at-least-once 幂等闭环——写入/关闭各恰一次，BATCH-06 口径）',
-    ).toBe(1)
-    // ack 关闭等回执扫描的 agent_settled 边沿（通知 triggerTurn 唤醒的 turn 结算后
-    // 才写）——先等待再计数（r3 实测：送达后立即断言 Received 0）
-    const ackArrived = await waitUntil(
-      () => countNotifyEntries('subagent-bg-notify-ack') > 0,
-      ACK_TIMEOUT_MS,
-    )
-    if (!ackArrived) {
-      writeDiag(testInfo, 'batch-s4-ack-missing.json', {
-        sessionTail: fs.readFileSync(sessionFile, 'utf8').slice(-4000),
-        runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-      })
-    }
-    expect(ackArrived, `notifyDone ack 关闭应在 turn 结算后落盘（agent_settled 边沿，${ACK_TIMEOUT_MS}ms 窗）`).toBe(true)
-    expect(
-      countNotifyEntries('subagent-bg-notify-ack'),
-      'notifyDone ack 关闭应恰 1 条（at-least-once 幂等闭环——写入/关闭各恰一次，BATCH-06 口径）',
-    ).toBe(1)
+    // ── 三通道口径（BATCH-06；与 s1 同款口径，通道注释见共享实现）──
+    await assertNotifyThreeChannels({
+      sessionFile,
+      notifyId: `wf-done:${runId}`,
+      ackTimeoutMs: ACK_TIMEOUT_MS,
+      dataDir,
+      diag: (name, data) => writeDiag(testInfo, name, data),
+      diagName: 'batch-s4-ack-missing.json',
+    })
 
     const frames = readJournalFrames(journalFile)
     await assertS4SettledEntryAndOrphanFree(testInfo, sessionFile, runId, baseline, frames)
 
     // 断言 A4b：引擎宿主薄壳回落基线（per-window 收尾 dispose——abort 收尾杀薄壳，
     // 头注断言 ④ 的升级；同窗等待吸收成员任务收尾与薄壳退出的时序差）
-    const shellOrphanFree = await waitUntil(() => countEngineShellProcesses().count <= shellBaseline.count, ORPHAN_GRACE_MS, 1000)
+    const shellOrphanFree = await waitUntil(() => countEngineShellProcesses('batch-s4').count <= shellBaseline.count, ORPHAN_GRACE_MS, 1000)
     if (!shellOrphanFree) {
       writeDiag(testInfo, 'batch-s4-engine-shell-orphans.json', {
         shellBaseline: shellBaseline.lines,
-        shellCurrent: countEngineShellProcesses().lines,
+        shellCurrent: countEngineShellProcesses('batch-s4').lines,
         journalEventTypes: frames.map((f) => f['type']),
       })
     }
@@ -584,13 +384,6 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     }
     console.log(`[batch-s4] PASS：runId=${runId} cancelled 收尾、通知照达、零成员任务残留、引擎宿主薄壳已退出`)
   } finally {
-    try {
-      listen?.ws.close()
-    } finally {
-      await cleanup()
-      if (!process.env['PLAYWRIGHT_DEBUG_KEEP_DATA']) {
-        fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
-    }
+    await cleanupRealTrackApp({ closeListeners: () => listen?.ws.close(), cleanup, dataDir })
   }
 })

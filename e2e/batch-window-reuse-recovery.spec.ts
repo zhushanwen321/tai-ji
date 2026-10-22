@@ -23,25 +23,33 @@
  * 磁盘事实。执行侧约定与 batch-window-lifecycle.spec.ts 同款（双凭证门 skip、
  * 空载串行、失败 writeDiag 归因禁盲重试）。
  */
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import {
   launchRealApp,
-  waitForRuntime,
   wsRoundTrip,
-  openListenWs,
   readRuntimeLogs,
   readPiLogs,
-  waitForExtensionsReady,
   type WsFrame,
 } from './fixtures/launch-app-real'
-import { execFileSync, execSync } from 'node:child_process'
+import {
+  applyRealTrackGate,
+  attachConsoleErrorCapture,
+  countMemberSleeperProcesses,
+  engineShellProcessSnapshot,
+  listFilesRecursive,
+  openMainListenWs,
+  parseJsonlLines,
+  REPO_ROOT,
+  SAMPLE_PROJECT,
+  seedRealCredentials,
+  tmpDiag,
+  waitRealAppReady,
+  waitUntil,
+} from './fixtures/batch-real-helpers'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-project')
 const SEQ_TEMPLATE = path.join(REPO_ROOT, 'e2e', 'fixtures', 'wl-seq-two.js')
 const REUSE_TEMPLATE = path.join(REPO_ROOT, 'e2e', 'fixtures', 'wl-name-reuse.js')
 
@@ -58,132 +66,16 @@ const JOURNAL_TIMEOUT_MS = 120_000
 const SETTLE_TIMEOUT_MS = 300_000
 const ORPHAN_GRACE_MS = 150_000
 
-// ── 凭证门与播种 / 诊断 helpers（batch-window-lifecycle 同款） ─────────────
+// ── 凭证门与播种 / 诊断 helpers（共享实现 = fixtures/batch-real-helpers.ts；
+//    本文件只留 tag 绑定与 WRR 特有的薄壳 pid 快照） ─────────────────────────────
 
-function sourceAgentDir(): string {
-  const override = process.env['TAIJI_BATCH_CREDENTIAL_SOURCE']
-  if (override && override.trim() !== '') return override
-  return path.join(os.homedir(), '.taiji', 'agent')
-}
+const writeDiag = tmpDiag('batch-wrr')
 
-function realCredentialSkipReason(): string | null {
-  const src = sourceAgentDir()
-  try {
-    const auth = JSON.parse(fs.readFileSync(path.join(src, 'auth.json'), 'utf8')) as Record<string, { key?: unknown }>
-    if (Object.values(auth).some((c) => typeof c?.key === 'string' && c.key.trim() !== '')) return null
-  } catch {
-    console.warn(`[batch-wrr] auth.json 不可读，继续探测 models.json：${src}`)
-  }
-  try {
-    const models = JSON.parse(fs.readFileSync(path.join(src, 'models.json'), 'utf8')) as {
-      providers?: Record<string, { apiKey?: unknown }>
-    }
-    if (Object.values(models.providers ?? {}).some((p) => typeof p?.apiKey === 'string' && p.apiKey.trim() !== '')) {
-      return null
-    }
-  } catch {
-    console.warn(`[batch-wrr] models.json 不可读：${src}`)
-  }
-  return `${src} 的 auth.json / models.json 均无非空 key（本机 provider 凭证缺失）`
-}
-
-function seedRealCredentials(dataDir: string): void {
-  const src = sourceAgentDir()
-  const dst = path.join(dataDir, 'agent')
-  fs.mkdirSync(dst, { recursive: true })
-  for (const f of ['models.json', 'auth.json']) {
-    const p = path.join(src, f)
-    if (fs.existsSync(p)) fs.copyFileSync(p, path.join(dst, f))
-  }
-  let source: Record<string, unknown> = {}
-  try {
-    source = JSON.parse(fs.readFileSync(path.join(src, 'settings.json'), 'utf8')) as Record<string, unknown>
-  } catch {
-    console.warn(`[batch-wrr] settings.json 不可读，defaultProvider/defaultModel 缺失将由门禁拦截：${src}`)
-  }
-  const defaultProvider = source['defaultProvider']
-  const defaultModel = source['defaultModel']
-  if (typeof defaultProvider !== 'string' || !defaultProvider
-    || typeof defaultModel !== 'string' || !defaultModel) {
-    throw new Error(`[batch-wrr] ${src}/settings.json 缺 defaultProvider/defaultModel——先在太极设置页完成 provider 配置`)
-  }
-  fs.writeFileSync(
-    path.join(dst, 'settings.json'),
-    JSON.stringify({ defaultProvider, defaultModel, retry: source['retry'] ?? { enabled: false } }, null, 2),
-  )
-}
-
-function writeDiag(name: string, data: Record<string, unknown>): void {
-  fs.writeFileSync(`/tmp/${name}`, JSON.stringify(data, null, 2))
-  console.log(`[batch-wrr] diag → /tmp/${name}`)
-}
-
-async function waitUntil(pred: () => boolean, deadlineMs: number, intervalMs = 200): Promise<boolean> {
-  const end = Date.now() + deadlineMs
-  while (Date.now() < end) {
-    if (pred()) return true
-    await new Promise((r) => setTimeout(r, intervalMs))
-  }
-  return pred()
-}
-
-function listFilesRecursive(root: string, suffix: string, depth = 0, acc: string[] = []): string[] {
-  if (depth > 8 || !fs.existsSync(root)) return acc
-  for (const name of fs.readdirSync(root)) {
-    const p = path.join(root, name)
-    if (fs.statSync(p).isDirectory()) listFilesRecursive(p, suffix, depth + 1, acc)
-    else if (name.endsWith(suffix)) acc.push(p)
-  }
-  return acc
-}
-
-function parseJsonlLines(file: string): { entries: Record<string, unknown>[]; badLines: number } {
-  const entries: Record<string, unknown>[] = []
-  let badLines = 0
-  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-    if (line.trim() === '') continue
-    try {
-      entries.push(JSON.parse(line) as Record<string, unknown>)
-    } catch {
-      badLines += 1
-    }
-  }
-  return { entries, badLines }
-}
-
-/** 引擎宿主薄壳进程快照（pid 集合 + 明细；计数脚本 JSON 输出含 pid）。 */
+/** 引擎宿主薄壳进程快照（pid 集合 + 明细；JSON 原语 = 共享 engineShellProcessSnapshot）。
+ *  与共享 countEngineShellProcesses 的差异：快照形态（pid 集差分）且不可读时抛错不降级。 */
 function shellProcessSnapshot(): { pids: Set<number>; lines: string[] } {
-  const out = execFileSync(
-    process.execPath,
-    [path.join(REPO_ROOT, 'scripts', 'count-engine-shell-processes.mjs')],
-    { encoding: 'utf8', timeout: 10_000 },
-  )
-  const parsed = JSON.parse(out) as { count: number; processes: { pid: number; command: string }[] }
+  const parsed = engineShellProcessSnapshot()
   return { pids: new Set(parsed.processes.map((p) => p.pid)), lines: parsed.processes.map((p) => `${p.pid} ${p.command}`) }
-}
-
-function countMemberSleeperProcesses(sleepS: number): { count: number; lines: string[] } {
-  let out = ''
-  try {
-    out = execSync('ps -axo command=', { encoding: 'utf8', timeout: 10_000 })
-  } catch (err) {
-    console.warn(`[batch-wrr] ps 不可读（进程核对降级为 -1 哨兵）：${String(err)}`)
-    return { count: -1, lines: [] }
-  }
-  const marker = `sleep ${sleepS}`
-  const lines = out.split('\n').filter((line) =>
-    line.includes(marker) && !line.includes('playwright') && !line.includes('Electron.app'),
-  )
-  return { count: lines.length, lines }
-}
-
-function attachConsoleCapture(page: Page): { errors: string[] } {
-  const errors: string[] = []
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push(`[console] ${msg.text()}`)
-  })
-  page.on('pageerror', (err) => errors.push(`[pageerror] ${String(err)}`))
-  return { errors }
 }
 
 interface JournalView { // oe-exempt:20260927:test:e2e 剧本内视图形状声明（DOM mock 类型，非架构契约范围）
@@ -254,59 +146,87 @@ async function waitForRunSettled(agentDir: string, deadlineMs: number, tag: stri
 
 // ── A6/V6：窗口内薄壳崩溃自愈 ────────────────────────────────────────────
 
-test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成，run 不放大失败', async ({ }, testInfo) => {
-  test.setTimeout(600_000)
-  test.skip(process.env['TAIJI_PI_LIVE'] !== '1', '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行')
-  const credSkip = realCredentialSkipReason()
-  test.skip(credSkip !== null, credSkip ?? '')
-
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-batch-wrr-a6-'))
-  seedRealCredentials(dataDir)
+/** WRR 两用例共享 app 生命周期壳：临时 dataDir + 播种 + 真机启动 + error 抓取 + 就绪三连 +
+ *  ready 截图。listen 经返回的 ref 注册（调用方 finally 统一关）；就绪前失败在壳内
+ *  清理后重抛（不泄漏进程）。 */
+async function launchWrrApp(
+  testInfo: TestInfo,
+  tmpPrefix: string,
+  readyShot: string,
+): Promise<{
+  dataDir: string
+  page: Page
+  port: number
+  consoleCap: { errors: string[] }
+  listen: { current: { ws: { close: () => void }; events: WsFrame[] } | undefined }
+  cleanup: () => Promise<void>
+}> {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), tmpPrefix))
+  seedRealCredentials(dataDir, 'batch-wrr')
   const { page, cleanup } = await launchRealApp({ dataDir })
-  const consoleCap = attachConsoleCapture(page)
-  let listen: { ws: { close: () => void }; events: WsFrame[] } | undefined
+  const consoleCap = attachConsoleErrorCapture(page)
+  const listen: { current: { ws: { close: () => void }; events: WsFrame[] } | undefined } = { current: undefined }
   try {
-    await expect(page).toHaveTitle(/太极/)
-    const port = await waitForRuntime(dataDir, 30_000)
-    expect(port).toBeGreaterThan(0)
-    await waitForExtensionsReady(dataDir)
-    await page.screenshot({ path: testInfo.outputPath('a6-ready.png'), fullPage: true })
+    const port = await waitRealAppReady(page, dataDir, 'batch-wrr')
+    await page.screenshot({ path: testInfo.outputPath(readyShot), fullPage: true })
+    return {
+      dataDir,
+      page,
+      port,
+      consoleCap,
+      listen,
+      cleanup: async () => {
+        await cleanup()
+        if (!process.env['PLAYWRIGHT_DEBUG_KEEP_DATA']) {
+          fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+        }
+      },
+    }
+  } catch (err) {
+    await cleanup()
+    if (!process.env['PLAYWRIGHT_DEBUG_KEEP_DATA']) {
+      fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+    throw err
+  }
+}
 
-    const createReply = await wsRoundTrip(port, {
+test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成，run 不放大失败', async ({ }, testInfo) => {
+  applyRealTrackGate(test, { timeoutMs: 600_000, tag: 'batch-wrr' })
+  const app = await launchWrrApp(testInfo, 'taiji-batch-wrr-a6-', 'a6-ready.png')
+  try {
+    const createReply = await wsRoundTrip(app.port, {
       type: 'session.create',
       id: 'a6-create',
       payload: { cwd: SAMPLE_PROJECT, label: 'batch-wrr-a6-kill-respawn' },
     }, 'a6-create')
-    expect(createReply.type).toBe('session.created')
-    const sid = ((createReply.payload ?? {}) as { session?: { id?: string } }).session?.id
-    if (typeof sid !== 'string' || sid === '') throw new Error('session.created reply 应携带非空 session.id')
-    const sub = await openListenWs(port, sid)
-    listen = sub
+    const { sid, sub } = await openMainListenWs(app.port, createReply)
+    app.listen.current = sub
 
     // 基线：薄壳 pid 集 + 成员 sleep 进程
     const shellBase = shellProcessSnapshot()
-    const sleepBase = countMemberSleeperProcesses(30)
+    const sleepBase = countMemberSleeperProcesses(30, 'batch-wrr')
     expect(sleepBase.count).toBeGreaterThanOrEqual(0)
 
-    await dispatchTemplateRun(port, sid, SEQ_TEMPLATE, {
+    await dispatchTemplateRun(app.port, sid, SEQ_TEMPLATE, {
       firstTask: FIRST_TASK_SEQ,
       secondTask: SECOND_TASK_SEQ,
-    }, 'a6-dispatch', sub, consoleCap.errors, dataDir)
+    }, 'a6-dispatch', sub, app.consoleCap.errors, app.dataDir)
 
-    const agentDir = path.join(dataDir, 'agent')
+    const agentDir = path.join(app.dataDir, 'agent')
 
     // r1 在途证据：薄壳新 pid + sleep 30 进程
     const shellUp = await waitUntil(() => {
       const now = shellProcessSnapshot()
       return [...now.pids].filter((p) => !shellBase.pids.has(p)).length >= 1
     }, JOURNAL_TIMEOUT_MS)
-    const sleepUp = await waitUntil(() => countMemberSleeperProcesses(30).count > sleepBase.count, JOURNAL_TIMEOUT_MS)
+    const sleepUp = await waitUntil(() => countMemberSleeperProcesses(30, 'batch-wrr').count > sleepBase.count, JOURNAL_TIMEOUT_MS)
     if (!shellUp || !sleepUp) {
       writeDiag('batch-wrr-a6-inflight-missing.json', {
         shellBase: shellBase.lines,
         shellNow: shellProcessSnapshot().lines,
-        sleepNow: countMemberSleeperProcesses(30).lines,
-        runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
+        sleepNow: countMemberSleeperProcesses(30, 'batch-wrr').lines,
+        runtimeLogsTail: readRuntimeLogs(app.dataDir).slice(-3000),
       })
     }
     expect(shellUp, '派发后引擎宿主薄壳应出现（per-window 窗口实例）').toBe(true)
@@ -321,7 +241,7 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
     const killedPid = newPids[0]!
     process.kill(killedPid, 'SIGKILL')
     console.log(`[batch-wrr] A6 kill 注入：SIGKILL pid=${killedPid}`)
-    await page.screenshot({ path: testInfo.outputPath('a6-killed.png'), fullPage: true })
+    await app.page.screenshot({ path: testInfo.outputPath('a6-killed.png'), fullPage: true })
 
     // respawn 证据：新薄壳 pid（≠被杀 pid）重现
     const respawned = await waitUntil(() => {
@@ -334,19 +254,19 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
         killedPid,
         shellBase: shellBase.lines,
         shellNow: afterRespawn.lines,
-        runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-        piLogsTail: readPiLogs(dataDir).slice(-3000),
+        runtimeLogsTail: readRuntimeLogs(app.dataDir).slice(-3000),
+        piLogsTail: readPiLogs(app.dataDir).slice(-3000),
       })
     }
     expect(respawned, `kill 后第二条 agent() 应 respawn 新薄壳（pid≠${killedPid}；diag 见进程明细）`).toBe(true)
     const respawnPid = [...afterRespawn.pids].find((p) => !shellBase.pids.has(p) && p !== killedPid)
 
     // r2 在途证据：sleep 20 进程出现（respawn 后薄壳承载的服务）
-    const sleep2Up = await waitUntil(() => countMemberSleeperProcesses(20).count > 0, JOURNAL_TIMEOUT_MS)
+    const sleep2Up = await waitUntil(() => countMemberSleeperProcesses(20, 'batch-wrr').count > 0, JOURNAL_TIMEOUT_MS)
     if (!sleep2Up) {
       writeDiag('batch-wrr-a6-r2-not-seen.json', {
         respawnPid,
-        sleepNow: countMemberSleeperProcesses(20).lines,
+        sleepNow: countMemberSleeperProcesses(20, 'batch-wrr').lines,
       })
     }
     expect(sleep2Up, 'r2 成员 sleep 20 进程应出现（respawn 薄壳承载第二条 ask）').toBe(true)
@@ -385,19 +305,16 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
     }
     expect(shellBack, `run 收尾后薄壳应回落基线（${ORPHAN_GRACE_MS}ms 窗）`).toBe(true)
 
-    if (consoleCap.errors.length > 0) {
-      writeDiag('batch-wrr-a6-console-errors.json', { errors: consoleCap.errors.slice(-50) })
-      console.warn(`[batch-wrr] A6 renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言范围）`)
+    if (app.consoleCap.errors.length > 0) {
+      writeDiag('batch-wrr-a6-console-errors.json', { errors: app.consoleCap.errors.slice(-50) })
+      console.warn(`[batch-wrr] A6 renderer console errors: ${app.consoleCap.errors.length} 条（diag 已落盘，非断言范围）`)
     }
     console.log(`[batch-wrr] A6 PASS：kill pid=${killedPid} → respawn pid=${respawnPid} → r2 done → run done`)
   } finally {
     try {
-      listen?.ws.close()
+      app.listen.current?.ws.close()
     } finally {
-      await cleanup()
-      if (!process.env['PLAYWRIGHT_DEBUG_KEEP_DATA']) {
-        fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
+      await app.cleanup()
     }
   }
 })
@@ -457,42 +374,25 @@ async function assertA8RecordMediaFace(
 // ── A8/V8：同名续写同一子代理 ────────────────────────────────────────────
 
 test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（memberRecordId 绑定恰 1 + session 文件连续）', async ({ }, testInfo) => {
-  test.setTimeout(600_000)
-  test.skip(process.env['TAIJI_PI_LIVE'] !== '1', '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行')
-  const credSkip = realCredentialSkipReason()
-  test.skip(credSkip !== null, credSkip ?? '')
-
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-batch-wrr-a8-'))
-  seedRealCredentials(dataDir)
-  const { page, cleanup } = await launchRealApp({ dataDir })
-  const consoleCap = attachConsoleCapture(page)
-  let listen: { ws: { close: () => void }; events: WsFrame[] } | undefined
+  applyRealTrackGate(test, { timeoutMs: 600_000, tag: 'batch-wrr' })
+  const app = await launchWrrApp(testInfo, 'taiji-batch-wrr-a8-', 'a8-ready.png')
   try {
-    await expect(page).toHaveTitle(/太极/)
-    const port = await waitForRuntime(dataDir, 30_000)
-    expect(port).toBeGreaterThan(0)
-    await waitForExtensionsReady(dataDir)
-    await page.screenshot({ path: testInfo.outputPath('a8-ready.png'), fullPage: true })
-
-    const createReply = await wsRoundTrip(port, {
+    const createReply = await wsRoundTrip(app.port, {
       type: 'session.create',
       id: 'a8-create',
       payload: { cwd: SAMPLE_PROJECT, label: 'batch-wrr-a8-name-reuse' },
     }, 'a8-create')
-    expect(createReply.type).toBe('session.created')
-    const sid = ((createReply.payload ?? {}) as { session?: { id?: string } }).session?.id
-    if (typeof sid !== 'string' || sid === '') throw new Error('session.created reply 应携带非空 session.id')
-    const sub = await openListenWs(port, sid)
-    listen = sub
+    const { sid, sub } = await openMainListenWs(app.port, createReply)
+    app.listen.current = sub
 
-    const agentDir = path.join(dataDir, 'agent')
+    const agentDir = path.join(app.dataDir, 'agent')
     const sessionsDir = path.join(agentDir, 'sessions')
     const shellBase = shellProcessSnapshot()
 
-    await dispatchTemplateRun(port, sid, REUSE_TEMPLATE, {
+    await dispatchTemplateRun(app.port, sid, REUSE_TEMPLATE, {
       firstTask: FIRST_TASK_REUSE,
       secondTask: SECOND_TASK_REUSE,
-    }, 'a8-dispatch', sub, consoleCap.errors, dataDir)
+    }, 'a8-dispatch', sub, app.consoleCap.errors, app.dataDir)
 
     // run 收尾
     const run = await waitForRunSettled(agentDir, SETTLE_TIMEOUT_MS, 'a8')
@@ -559,20 +459,17 @@ test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（membe
     const shellBack = await waitUntil(() => shellProcessSnapshot().pids.size <= shellBase.pids.size, ORPHAN_GRACE_MS, 1_000)
     expect(shellBack, `run 收尾后薄壳应回落基线（${ORPHAN_GRACE_MS}ms 窗）`).toBe(true)
 
-    await page.screenshot({ path: testInfo.outputPath('a8-done.png'), fullPage: true })
-    if (consoleCap.errors.length > 0) {
-      writeDiag('batch-wrr-a8-console-errors.json', { errors: consoleCap.errors.slice(-50) })
-      console.warn(`[batch-wrr] A8 renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言范围）`)
+    await app.page.screenshot({ path: testInfo.outputPath('a8-done.png'), fullPage: true })
+    if (app.consoleCap.errors.length > 0) {
+      writeDiag('batch-wrr-a8-console-errors.json', { errors: app.consoleCap.errors.slice(-50) })
+      console.warn(`[batch-wrr] A8 renderer console errors: ${app.consoleCap.errors.length} 条（diag 已落盘，非断言范围）`)
     }
     console.log(`[batch-wrr] A8 PASS：memberRecordId 绑定恰 1、两轮同 session 文件、run done`)
   } finally {
     try {
-      listen?.ws.close()
+      app.listen.current?.ws.close()
     } finally {
-      await cleanup()
-      if (!process.env['PLAYWRIGHT_DEBUG_KEEP_DATA']) {
-        fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
+      await app.cleanup()
     }
   }
 })

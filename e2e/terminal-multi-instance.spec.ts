@@ -42,14 +42,11 @@ import { launchRealApp, waitForRuntime, wsRoundTrip, type WsFrame } from './fixt
 // 轨道判据共享（launch-app-real.ts assertRealRendererBundle 同源导出）：mock/real 两轨共用
 // apps/electron/renderer/dist，MOCK_BUNDLE_MARKER 是「当前产物是 mock 构建」的判据
 import { RENDERER_DIST_ASSETS, MOCK_BUNDLE_MARKER } from './fixtures/launch-app'
+import { SAMPLE_PROJECT } from './fixtures/batch-real-helpers'
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-project')
 
 // ── 超时/节奏常量（全部走 deadline 轮询，禁固定 waitForTimeout）──────────────
 const RUNTIME_START_TIMEOUT_MS = 30_000

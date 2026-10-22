@@ -42,21 +42,30 @@
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import {
   launchRealApp,
-  waitForRuntime,
   wsRoundTrip,
-  openListenWs,
   readRuntimeLogs,
   readPiLogs,
-  waitForExtensionsReady,
   type WsFrame,
 } from './fixtures/launch-app-real'
+import {
+  assertSingleRunSettled,
+  attachConsoleCapture,
+  extractCustomEntries,
+  extractCustomMessageEntries,
+  listFilesRecursive,
+  openMainListenWs,
+  readJournalFrames,
+  realCredentialSkipReason,
+  SAMPLE_PROJECT,
+  seedRealCredentials,
+  testInfoDiag,
+  waitForRunJournal,
+  waitRealAppReady,
+  waitUntil,
+} from './fixtures/batch-real-helpers'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-project')
 
 const MAIN_MARKER = 'BATCH-S3-MAIN-5310'
 const BAD_AGENT_PATH = '/nonexistent/broken-agent-5313.md'
@@ -84,90 +93,10 @@ const JOURNAL_TIMEOUT_MS = 300_000
 const NOTIFY_TIMEOUT_MS = 300_000
 const JSONL_FLUSH_TIMEOUT_MS = 20_000
 
-// ── 凭证门与播种（E2E-BTW-01 同款范式） ──────────────────────────────────
+// ── 凭证门与播种 / 诊断与扫描 helpers（共享实现 = fixtures/batch-real-helpers.ts；
+//    本文件只留 tag 绑定与 s3 特有的会话定位变体） ─────────────────────────────
 
-function sourceAgentDir(): string {
-  const override = process.env['TAIJI_BATCH_CREDENTIAL_SOURCE']
-  if (override && override.trim() !== '') return override
-  return path.join(os.homedir(), '.taiji', 'agent')
-}
-
-function realCredentialSkipReason(): string | null {
-  const src = sourceAgentDir()
-  try {
-    const auth = JSON.parse(fs.readFileSync(path.join(src, 'auth.json'), 'utf8')) as Record<string, { key?: unknown }>
-    if (Object.values(auth).some((c) => typeof c?.key === 'string' && c.key.trim() !== '')) return null
-  } catch {
-    console.warn(`[batch-s3] auth.json 不可读，继续探测 models.json：${src}`)
-  }
-  try {
-    const models = JSON.parse(fs.readFileSync(path.join(src, 'models.json'), 'utf8')) as {
-      providers?: Record<string, { apiKey?: unknown }>
-    }
-    if (Object.values(models.providers ?? {}).some((p) => typeof p?.apiKey === 'string' && p.apiKey.trim() !== '')) {
-      return null
-    }
-  } catch {
-    console.warn(`[batch-s3] models.json 不可读：${src}`)
-  }
-  return `${src} 的 auth.json / models.json 均无非空 key（本机 provider 凭证缺失）`
-}
-
-function seedRealCredentials(dataDir: string): void {
-  const src = sourceAgentDir()
-  const dst = path.join(dataDir, 'agent')
-  fs.mkdirSync(dst, { recursive: true })
-  for (const f of ['models.json', 'auth.json']) {
-    const p = path.join(src, f)
-    if (fs.existsSync(p)) fs.copyFileSync(p, path.join(dst, f))
-  }
-  let source: Record<string, unknown> = {}
-  try {
-    source = JSON.parse(fs.readFileSync(path.join(src, 'settings.json'), 'utf8')) as Record<string, unknown>
-  } catch {
-    console.warn(`[batch-s3] settings.json 不可读，defaultProvider/defaultModel 缺失将由门禁拦截：${src}`)
-  }
-  const defaultProvider = source['defaultProvider']
-  const defaultModel = source['defaultModel']
-  if (typeof defaultProvider !== 'string' || !defaultProvider
-    || typeof defaultModel !== 'string' || !defaultModel) {
-    throw new Error(`[batch-s3] ${src}/settings.json 缺 defaultProvider/defaultModel——先在太极设置页完成 provider 配置`)
-  }
-  fs.writeFileSync(
-    path.join(dst, 'settings.json'),
-    JSON.stringify({ defaultProvider, defaultModel, retry: source['retry'] ?? { enabled: false } }, null, 2),
-  )
-}
-
-// ── 诊断与扫描 helpers ──────────────────────────────────────────────────
-
-/** 诊断落 Playwright 托管产物位（testInfo.outputPath，随 output 目录管理）——
- *  载荷可含 session entry 正文，/tmp 不是其合法落盘位置（ADR-0063 I2）。 */
-function writeDiag(testInfo: TestInfo, name: string, data: Record<string, unknown>): void {
-  const target = testInfo.outputPath(name)
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  fs.writeFileSync(target, JSON.stringify(data, null, 2))
-  console.log(`[batch-s3] diag → ${target}`)
-}
-
-async function waitUntil(pred: () => boolean, deadlineMs: number, intervalMs = 200): Promise<boolean> {
-  const end = Date.now() + deadlineMs
-  while (Date.now() < end) {
-    if (pred()) return true
-    await new Promise((r) => setTimeout(r, intervalMs))
-  }
-  return pred()
-}
-
-function listFilesRecursive(root: string, suffix: string, depth = 0, acc: string[] = []): string[] {
-  if (depth > 8 || !fs.existsSync(root)) return acc
-  for (const name of fs.readdirSync(root)) {
-    const p = path.join(root, name)
-    if (fs.statSync(p).isDirectory()) listFilesRecursive(p, suffix, depth + 1, acc)
-    else if (name.endsWith(suffix)) acc.push(p)
-  }
-  return acc
-}
+const writeDiag = testInfoDiag('batch-s3')
 
 /**
  * 会话文件定位：waitUntil sessions 树下出现会话 JSONL 后返回路径。
@@ -186,57 +115,9 @@ async function locateSessionFile(agentDir: string): Promise<string> {
   return listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl').find(isSessionFile)!
 }
 
-function parseJsonlLines(file: string): { entries: Record<string, unknown>[]; badLines: number } {
-  const entries: Record<string, unknown>[] = []
-  let badLines = 0
-  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-    if (line.trim() === '') continue
-    try {
-      entries.push(JSON.parse(line) as Record<string, unknown>)
-    } catch {
-      badLines += 1
-    }
-  }
-  return { entries, badLines }
-}
-
-function extractCustomEntries(file: string, customType: string): Record<string, unknown>[] {
-  return parseJsonlLines(file).entries
-    .filter((e) => e['type'] === 'custom' && e['customType'] === customType)
-    .map((e) => (e['data'] ?? {}) as Record<string, unknown>)
-}
-
-/** 送达标签通道：type=custom_message（pi.sendMessage 落盘形态——权威消费方
- *  collectDeliveredNotifyIds 只认此形态）。与 plain custom entry（type=custom，
- *  data 平铺）是两条落盘通道，customType 同名不能混用 extractor。 */
-function extractCustomMessageEntries(file: string, customType: string): Record<string, unknown>[] {
-  return parseJsonlLines(file).entries
-    .filter((e) => e['type'] === 'custom_message' && e['customType'] === customType)
-}
-
-function readJournalFrames(file: string): Record<string, unknown>[] {
-  return parseJsonlLines(file).entries
-}
-
-function attachConsoleCapture(page: Page): { all: string[]; errors: string[] } {
-  const all: string[] = []
-  const errors: string[] = []
-  page.on('console', (msg) => {
-    const line = `[${msg.type()}] ${msg.text()}`
-    all.push(line)
-    if (msg.type() === 'error') errors.push(line)
-  })
-  page.on('pageerror', (err) => {
-    const line = `[pageerror] ${String(err)}`
-    all.push(line)
-    errors.push(line)
-  })
-  return { all, errors }
-}
-
 // ── serial 共享态（同 app 同会话：S3b 依赖 S3a 的 record id） ─────────────
 
-const gateSkip = process.env['TAIJI_PI_LIVE'] !== '1' ? '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则）' : realCredentialSkipReason()
+const gateSkip = process.env['TAIJI_PI_LIVE'] !== '1' ? '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则）' : realCredentialSkipReason('batch-s3')
 
 let shared: {
   dataDir: string
@@ -259,7 +140,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
     if (gateSkip !== null) return
 
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-batch-s3-'))
-    seedRealCredentials(dataDir)
+    seedRealCredentials(dataDir, 'batch-s3')
     const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-batch-s3-agents-'))
     const goodAgentPath = path.join(fixtureDir, 's3-echo-agent.md')
     fs.writeFileSync(goodAgentPath, GOOD_AGENT_MD)
@@ -269,20 +150,14 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
     await page.waitForLoadState('domcontentloaded')
     await page.screenshot({ path: testInfo.outputPath('s3-app-ready.png'), fullPage: true })
 
-    await expect(page).toHaveTitle(/太极/)
-    const port = await waitForRuntime(dataDir, 30_000)
-    const resolved = await waitForExtensionsReady(dataDir)
-    if (resolved === 0) console.warn('[batch-s3] extensions not ready within timeout, continue anyway')
+    const port = await waitRealAppReady(page, dataDir, 'batch-s3')
 
     const createReply = await wsRoundTrip(port, {
       type: 'session.create',
       id: 's3-create',
       payload: { cwd: SAMPLE_PROJECT, label: 'batch-s3-partial-failfast' },
     }, 's3-create')
-    expect(createReply.type).toBe('session.created')
-    const sid = ((createReply.payload ?? {}) as { session?: { id?: string } }).session?.id
-    if (typeof sid !== 'string' || sid === '') throw new Error('session.created reply 应携带非空 session.id')
-    const sub = await openListenWs(port, sid)
+    const { sid, sub } = await openMainListenWs(port, createReply)
 
     // 会话文件不在此处等待：pi 延迟写入语义 = 首条 assistant 消息 flush 前文件可能
     // 不存在，session.create 后裸等必超时——sessionFile 由各用例发首条消息后
@@ -388,15 +263,14 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
 
     // journal 出现 → runId（journal 后缀 .record.jsonl，run-vocabulary RUN_EVENTS_SUFFIX）
     const agentDir = path.join(s.dataDir, 'agent')
-    const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.record.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
-    if (!journalFound) {
-      writeDiag(testInfo, 'batch-s3a-journal-missing.json', {
-        runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000),
-        piLogsTail: readPiLogs(s.dataDir).slice(-3000),
-      })
-    }
-    expect(journalFound, 'run journal 应落盘').toBe(true)
-    const journalFile = listFilesRecursive(agentDir, '.record.jsonl')[0]
+    const journalFile = await waitForRunJournal({
+      agentDir,
+      dataDir: s.dataDir,
+      timeoutMs: JOURNAL_TIMEOUT_MS,
+      foundMessage: 'run journal 应落盘',
+      diag: (name, data) => writeDiag(testInfo, name, data),
+      diagName: 'batch-s3a-journal-missing.json',
+    })
     const runId = path.basename(journalFile).replace(/\.record\.jsonl$/, '')
 
     // notifyDone 到达（坏成员也要等全批收尾——allSettled 语义）
@@ -432,10 +306,11 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
     expect(failedEntries[0]?.error, 'failed 条目应带 error 字段（失败归因）').toBeTruthy()
 
     // W1 介质锚：journal run-settled outcome=completed（脚本层失败 ≠ run 死法——D7 终态双维度）
-    const frames = readJournalFrames(journalFile)
-    const settledFrames = frames.filter((f) => f['type'] === 'run-settled')
-    expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
-    expect(settledFrames[0]?.['outcome'], 'partial 收尾的 run outcome 应为 completed（run 正常跑完，失败在脚本层结论）').toBe('completed')
+    assertSingleRunSettled(
+      readJournalFrames(journalFile),
+      'completed',
+      'partial 收尾的 run outcome 应为 completed（run 正常跑完，失败在脚本层结论）',
+    )
 
     // v2 条目：settled 数 === registered 数（每注册实体必有终态）+ record id 留给 S3b
     const saRegistered = extractCustomEntries(s.sessionFile, 'subagent-record').filter((d) => d['v'] === 2 && d['kind'] === 'registered')

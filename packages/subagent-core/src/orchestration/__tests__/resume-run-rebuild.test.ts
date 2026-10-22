@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import { rebuildRunFromRecord } from "../resume-run-rebuild.ts";
 import type { WorkflowRunEvent } from "../run-events.ts";
+import { expectReplayedCallEntry } from "./helpers/replay-call-assert.ts";
 
 const T0 = 1_770_000_000_000;
 
@@ -74,9 +75,7 @@ describe("rebuildRunFromRecord — fold 在途语义（中断恢复）", () => {
     ];
 
     const run = rebuildRunFromRecord("wf-fold", created, events);
-    const replayed = run.state.calls.get(0);
-    expect(replayed?.status).toBe("done");
-    expect(replayed?.result?.content).toBe("result-0");
-    expect(run.state.calls.has(1)).toBe(false);
+    // 回放集/重派集 call 条目（共享断言 = __tests__/helpers/replay-call-assert.ts）
+    expectReplayedCallEntry(run.state.calls);
   });
 });
