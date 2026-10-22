@@ -328,6 +328,27 @@ describe('行内 code 对比（场景 2③，六主题；demo R4 弱化终态 = 
       }
     }
   })
+
+  it('--danger-text（danger 78% 混 neutral-fg 提亮档）于浮层底 --bg 上对比 ≥4.5:1（六主题；套餐浮层窗口百分比小字消费点，环/条填充仍用 --danger 原色）', () => {
+    for (const theme of THEMES) {
+      const raw = parseThemeRawVars(theme, ['--danger-text', '--danger', '--neutral-fg', '--bg'])
+      const fgRaw = (raw['--danger-text'] ?? '').trim()
+      const mix = fgRaw.match(/^color-mix\(in oklch,\s*var\(--danger\)\s*([\d.]+)%,\s*var\(--neutral-fg\)\)$/)
+      expect(
+        mix,
+        `主题 ${theme.label} --danger-text 形态非 color-mix(in oklch, var(--danger) N%, var(--neutral-fg))：${fgRaw}`,
+      ).not.toBeNull()
+      const danger = (raw['--danger'] ?? '').toLowerCase()
+      const fg = (raw['--neutral-fg'] ?? '').toLowerCase()
+      const bg = (raw['--bg'] ?? '').toLowerCase()
+      expect(danger, `主题 ${theme.label} --danger 非 hex 字面值：${raw['--danger']}`).toMatch(/^#[0-9a-fA-F]{6}$/)
+      expect(fg, `主题 ${theme.label} --neutral-fg 非 hex 字面值：${raw['--neutral-fg']}`).toMatch(/^#[0-9a-fA-F]{6}$/)
+      expect(bg, `主题 ${theme.label} --bg 非 hex 字面值：${raw['--bg']}`).toMatch(/^#[0-9a-fA-F]{6}$/)
+      const fgLinear = mixOklabToLinear(danger, Number(mix![1]) / 100, fg)
+      const ratio = contrastRatioLinear(fgLinear, hexToLinearRgb(bg))
+      expect(ratio, `${theme.label} --danger-text on --bg（${bg}）= ${ratio.toFixed(2)}:1 低于 WCAG AA 4.5:1`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
 })
 
 describe('bg 分层方向（场景 1① 纯计算形态，§3.1 分层/镜像规则）', () => {

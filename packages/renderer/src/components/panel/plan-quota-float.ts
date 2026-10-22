@@ -10,8 +10,9 @@ import type { InjectionKey, Ref } from 'vue'
 /** 浮层左缘偏移（原 left-3 = 12px）：浮层与 panel 左缘的间距 */
 export const QUOTA_FLOAT_INSET_LEFT = 12
 
-/** 展开态浮层宽度（原 w-[276px]）：标题行 + 全部套餐的窗口用量清单 */
-export const QUOTA_FLOAT_WIDTH_EXPANDED = 276
+/** 展开态浮层宽度：标题行 + 全部套餐的「名称行 + 窗口格行」清单（紧凑化定稿 240px 定宽，
+ *  不随可见格数变化——增减周期只改格数不跳版） */
+export const QUOTA_FLOAT_WIDTH_EXPANDED = 240
 
 /** 收起态把手宽度（原 w-11 = 44px）：竖排文案 + 展开箭头 */
 export const QUOTA_FLOAT_WIDTH_COLLAPSED = 44
@@ -21,7 +22,7 @@ export const QUOTA_FLOAT_WIDTH_COLLAPSED = 44
 const QUOTA_FLOAT_MIN_VISIBLE_CHAT_WIDTH = 432
 
 /**
- * 浮层自动收起的 panel 总宽阈值（720）= 浮层悬浮遮盖区（inset 12 + 宽 276 = 288px）
+ * 浮层自动收起的 panel 总宽阈值（684）= 浮层悬浮遮盖区（inset 12 + 宽 240 = 252px）
  * + 剩余可读宽下限（432）。panel 总宽低于此值时遮盖占比过高（>40%），宿主强制收起
  * （把手档仅占 44px）；宽度恢复后自动展开（用户手动收起优先）。
  */

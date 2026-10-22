@@ -300,6 +300,12 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --success-fg: color-mix(in oklch, var(--success) 12%, #160b0b);
 /* success 实色上的文字（与 --danger-fg 同公式同浓度 12%；消费点 = OAuthDialog 授权成功
    图标实底；亮色族由 [data-theme="light"] 块覆盖为白字 #ffffff，青墨/朱印继承该覆盖）*/
+--danger-text: color-mix(in oklch, var(--danger) 78%, var(--neutral-fg));
+/* danger 小字提亮档：暗底小字号 danger 原色 ~4.2:1 不足 AA 正文线，混入前景 22% 提亮
+   过线（消费点 = 套餐浮层窗口百分比文字）；环形/进度填充保留 --danger 原色不上提亮。
+   color-mix 中 var() 每元素解析，随各主题 --danger/--neutral-fg 自动跟随，主题块零重声明。
+   对比度实测（对浮层底 --bg，contrast-tokens.test.ts 同线断言 ≥4.5:1）：
+   玄 5.35 / 黛蓝 5.11 / 暖墨 5.33 / 皓·青墨 5.76 / 朱印 6.33 */
 
 /* soft 派生（自动跟随，主题切换无需单独覆盖）*/
 --success-soft:   color-mix(in oklch, var(--success) 12%, transparent);
