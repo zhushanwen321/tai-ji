@@ -74,7 +74,8 @@ const recentItems = computed<RecentWorkspaceRecord[]>(() => {
   return recent.slice(0, MAX_DISPLAY)
 })
 
-/** 搜索即时过滤（无 debounce，list < 50 本地缓存，spec §3.2）；两区独立过滤 + 截断 */
+/** 搜索即时过滤（无 debounce，list < 50 本地缓存，spec §3.2）；截断已在上游
+ *  pinnedItems/recentItems（双保险），过滤只会缩短无需再截 */
 const filteredPinned = computed<RecentWorkspaceRecord[]>(() => {
   const q = search.value.trim().toLowerCase()
   if (!q) return pinnedItems.value
@@ -84,7 +85,7 @@ const filteredPinned = computed<RecentWorkspaceRecord[]>(() => {
 const filteredRecent = computed<RecentWorkspaceRecord[]>(() => {
   const q = search.value.trim().toLowerCase()
   if (!q) return recentItems.value
-  return recentItems.value.filter((w) => w.cwd.toLowerCase().includes(q)).slice(0, MAX_DISPLAY)
+  return recentItems.value.filter((w) => w.cwd.toLowerCase().includes(q))
 })
 
 /** 空态：两区均空且无默认会话入口（有固定入口时恒有可选目标，不出空态） */
@@ -121,7 +122,7 @@ const DUP_THRESHOLD = 2
  */
 const dupBasenames = computed<Set<string>>(() => {
   const counts = new Map<string, number>()
-  for (const w of [...filteredPinned.value, ...filteredRecent.value]) {
+  for (const w of allFiltered.value) {
     const b = dirNameOf(w.cwd)
     counts.set(b, (counts.get(b) ?? 0) + 1)
   }
