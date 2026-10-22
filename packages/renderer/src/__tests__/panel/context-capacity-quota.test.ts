@@ -40,7 +40,7 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
   model: { onModels: vi.fn(() => () => {}) },
   extension: { onExtensions: vi.fn(() => () => {}) },
   settings: {
-    getSystem: vi.fn(async () => ({ locale: 'zh-CN', theme: 'dark', themePreset: 'cold-blue' })),
+    getSystem: vi.fn(async () => ({ locale: 'zh-CN', theme: 'dark', themePreset: '' })),
     updateSystem: vi.fn(async () => {}),
   },
 }))

@@ -89,6 +89,7 @@
   --warn: #b79c54;
   --danger: #bf6b6b;
   --danger-fg: color-mix(in oklch, var(--danger) 12%, #160b0b); /* danger 实色上的文字（demo tokens.css 同公式浓度 12%；var 随各主题 --danger 自动解析，亮色族由 [data-theme="light"] 块覆盖为白字） */
+  --success-fg: color-mix(in oklch, var(--success) 12%, #160b0b); /* success 实色上的文字（与 --danger-fg 同公式同浓度；var 随各主题 --success 自动解析，亮色族由 [data-theme="light"] 块覆盖为白字） */
   --info: #6d99a5;
   /* reasoning 紫：思考块色相（draft-message-stream §4 + composer 思考等级） */
   --reasoning: #8e85ab;
@@ -304,6 +305,7 @@
   --warn: #977629;
   --danger: #b24c4a;
   --danger-fg: #ffffff;          /* danger 实底钮文字（demo tokens.css light 块同值白字；:root 公式为暗色档不适用亮底） */
+  --success-fg: #ffffff;         /* success 实底图标文字（与 --danger-fg 同款白字覆盖；:root 公式为暗色档不适用亮底） */
   --info: #3a7688;
   --reasoning: #71659c;
 

@@ -295,6 +295,9 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 /* danger 实色上的文字（demo tokens.css 同公式浓度 12%；暗色族 color-mix 中的
    var(--danger) 每元素解析，随各自 --danger 自动跟随——Chromium 实测行为；
    亮色族由 [data-theme="light"] 块覆盖为白字 #ffffff，青墨/朱印继承该覆盖）*/
+--success-fg: color-mix(in oklch, var(--success) 12%, #160b0b);
+/* success 实色上的文字（与 --danger-fg 同公式同浓度 12%；消费点 = OAuthDialog 授权成功
+   图标实底；亮色族由 [data-theme="light"] 块覆盖为白字 #ffffff，青墨/朱印继承该覆盖）*/
 
 /* soft 派生（自动跟随，主题切换无需单独覆盖）*/
 --success-soft:   color-mix(in oklch, var(--success) 12%, transparent);
@@ -396,14 +399,14 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 
 机制：CSS 属性选择器覆盖——切换只写 `<html>` 的 `data-theme`（dark/light）与 `data-theme-preset` 两个属性，令牌值全部由 `packages/renderer/src/style.css` 的选择器块静态声明（派生色 `color-mix` 引用基色自动跟随）。
 
-**切换链路**：`applySystemToDom`（`packages/ui/src/features/settings/apply-system-to-dom.ts`）把 SystemSettings 外观偏好写入 DOM 槽位——`theme=system` 经 `matchMedia` 解析为 light/dark，`themePreset` 缺省 `cold-blue`；W4 壳侧 watch store 调用。主题列表渲染 = 设置页 AppearancePage（`packages/renderer/src/components/settings/appearance/AppearancePage.vue`）消费 `useTaijiThemes.ts` 的 `TAIJI_THEMES`（label/preset/swatch 预览色；令牌真值不在其中，真值唯一权威 = style.css，见 style.css 头注释）。
+**切换链路**：`applySystemToDom`（`packages/ui/src/features/settings/apply-system-to-dom.ts`）把 SystemSettings 外观偏好写入 DOM 槽位——`theme=system` 经 `matchMedia` 解析为 light/dark，`themePreset` 缺省为空串（= 玄/皓默认主题，无 preset 覆盖）；W4 壳侧 watch store 调用。主题列表渲染 = 设置页 AppearancePage（`packages/renderer/src/components/settings/appearance/AppearancePage.vue`）消费 `useTaijiThemes.ts` 的 `TAIJI_THEMES`（label/preset/swatch 预览色；令牌真值不在其中，真值唯一权威 = style.css，见 style.css 头注释）。
 
 **选择器块与覆盖范围**（按 style.css 现值，非默认主题按块内声明覆盖、块外继承族默认；派生公式 color-mix 中的 var() 每元素解析，preset 只覆盖基色即自动跟随）：
 
 | 主题 | 选择器块 | 覆盖变量数与构成 |
 |---|---|---|
 | 玄（暗·默认） | `:root` | 全部默认值，无独立块 |
-| 皓（亮·默认） | `[data-theme="light"]` | 54 = bg 阶梯 8 + bubble 1 + neutral 8（含 name、fg-2）+ border 3 + accent 3 + link-c/code-c 2 + md-code 1（7% 重声明）+ 状态 6（含 danger-fg 白字覆盖）+ 阴影 3 + chart 族 19（--bg-sunken 与 accent-soft/accent-ring/*-soft 派生公式继承 ：root 不重声明） |
+| 皓（亮·默认） | `[data-theme="light"]` | 55 = bg 阶梯 8 + bubble 1 + neutral 8（含 name、fg-2）+ border 3 + accent 3 + link-c/code-c 2 + md-code 1（7% 重声明）+ 状态 7（含 danger-fg / success-fg 白字覆盖）+ 阴影 3 + chart 族 19（--bg-sunken 与 accent-soft/accent-ring/*-soft 派生公式继承 ：root 不重声明） |
 | 黛蓝 / 暖墨 | `:root[data-theme-preset="dailan"/"nuanmo"]` | 39 = bg 阶梯 8（含 --bg-stage 各自落定）+ neutral 7（含 fg-2）+ accent 3 + link-c/code-c 2 + chart 族 19（不覆盖 border/状态色；--bg-sunken/--md-code 继承派生公式不重声明） |
 | 青墨 | `[data-theme="light"][data-theme-preset="qingmo"]` | 24 = accent 3 + link-c/code-c 2 + chart 族 19（宣纸底不换、只换颜料） |
 | 朱印 | `[data-theme="light"][data-theme-preset="zhuyin"]` | 25 = accent 3 + link-c/code-c 2 + danger 1（玫红错开）+ chart 族 19（其余状态色与 light 族默认同值不重声明；--danger-fg 继承 light 块白字覆盖不重声明） |

@@ -48,7 +48,7 @@ vi.mock('@/api', () => ({
   model: subscriptionStubs(['onModels']),
   extension: subscriptionStubs(['onExtensions']),
   settings: {
-    getSystem: vi.fn(async () => ({ locale: 'zh-CN', theme: 'dark', themePreset: 'cold-blue' })),
+    getSystem: vi.fn(async () => ({ locale: 'zh-CN', theme: 'dark', themePreset: '' })),
     updateSystem: vi.fn(async () => {}),
   },
 }))

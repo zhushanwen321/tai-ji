@@ -297,7 +297,7 @@ function onOpenBrowser(): void {
           data-testid="oauth-success"
           class="flex flex-col items-center gap-2 rounded-md border border-[color-mix(in_oklch,var(--success)_30%,transparent)] bg-success-soft px-3 py-6 text-[length:var(--text-xs)]"
         >
-          <span class="flex size-9 items-center justify-center rounded-full bg-success text-white">
+          <span class="flex size-9 items-center justify-center rounded-full bg-success text-success-fg">
             <Check class="size-5" />
           </span>
           <span class="font-medium text-success">{{ t('settings.provider.oauthDialog.success') }}</span>

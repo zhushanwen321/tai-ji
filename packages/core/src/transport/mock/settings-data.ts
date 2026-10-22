@@ -127,5 +127,5 @@ export interface FixtureSystemSettings {
 export const fixtureSystem: FixtureSystemSettings = {
   locale: 'zh-CN',
   theme: 'dark',
-  themePreset: 'cold-blue',
+  themePreset: '',
 }
