@@ -643,6 +643,8 @@ async function main(): Promise<void> {
   try {
     fs.mkdirSync(getDefaultSessionDir(), { recursive: true })
   } catch (err) {
+    // best-effort 降级：启动期确保目录失败不阻塞启动——后续 workspace.defaultSessionDir
+    // RPC 幂等重试自愈，仍失败则前端隐藏入口（见上方 try 前注释）。
     console.error('[runtime] ensure defaultSession dir failed (non-fatal, will retry on RPC):', err)
   }
   const workspaceService = new WorkspaceService(recentWorkspacesStore, () => getDefaultSessionDir())
