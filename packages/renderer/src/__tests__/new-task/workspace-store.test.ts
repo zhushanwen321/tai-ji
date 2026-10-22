@@ -17,7 +17,7 @@ import type { RecentWorkspaceRecord } from '@taiji/shared'
 
 // mock @/api 门面的 workspace（store 走门面，mock 路径须与 store import 一致；vi.mock 自动 hoist）
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  workspace: { listRecent: vi.fn(), record: vi.fn() },
+  workspace: { listRecent: vi.fn(), record: vi.fn(), defaultSessionDir: vi.fn(), setPinned: vi.fn() },
 }))
 
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -26,6 +26,8 @@ import { workspace } from '@/api'
 // store 现经门面调 workspace.listRecent / workspace.record；mock 后此处即 vi.fn 实例
 const mockListRecent = workspace.listRecent as unknown as ReturnType<typeof vi.fn>
 const mockRecord = workspace.record as unknown as ReturnType<typeof vi.fn>
+const mockDefaultSessionDir = workspace.defaultSessionDir as unknown as ReturnType<typeof vi.fn>
+const mockSetPinned = workspace.setPinned as unknown as ReturnType<typeof vi.fn>
 
 function mkRecord(cwd: string, lastUsedAt: number): RecentWorkspaceRecord {
   return { cwd, lastUsedAt, label: cwd.split('/').filter(Boolean).pop() ?? cwd }
@@ -35,6 +37,8 @@ beforeEach(() => {
   setActivePinia(createPinia())
   mockListRecent.mockReset()
   mockRecord.mockReset()
+  mockDefaultSessionDir.mockReset()
+  mockSetPinned.mockReset()
 })
 
 describe('workspaceStore.load（T3.1 / T3.2）', () => {
@@ -122,5 +126,88 @@ describe('workspaceStore.record（热更新）', () => {
     const store = useWorkspaceStore()
     await store.record('')
     expect(mockRecord).not.toHaveBeenCalled()
+  })
+})
+
+describe('defaultCwd pinned 过滤（pin 固定目录 wave）', () => {
+  it('首条记录 pinned → defaultCwd 取第一条未 pinned 的 cwd（pinned 条目不参与默认 cwd）', async () => {
+    const pinned = { ...mkRecord('/pinned', 500), pinned: true }
+    mockListRecent.mockResolvedValue([pinned, mkRecord('/normal', 400)])
+    const store = useWorkspaceStore()
+    await store.load()
+    expect(store.defaultCwd).toBe('/normal')
+  })
+
+  it('全部记录 pinned → defaultCwd undefined（无可用默认目录）', async () => {
+    mockListRecent.mockResolvedValue([{ ...mkRecord('/pinned', 500), pinned: true }])
+    const store = useWorkspaceStore()
+    await store.load()
+    expect(store.defaultCwd).toBeUndefined()
+  })
+})
+
+describe('workspaceStore.loadDefaultSessionDir（默认会话目录）', () => {
+  it('成功 → defaultSessionDir = RPC 返回目录（landing「默认会话」入口数据源）', async () => {
+    mockDefaultSessionDir.mockResolvedValue('/data/defaultSession')
+    const store = useWorkspaceStore()
+    await store.loadDefaultSessionDir()
+    expect(mockDefaultSessionDir).toHaveBeenCalledTimes(1)
+    expect(store.defaultSessionDir).toBe('/data/defaultSession')
+  })
+
+  it('RPC reject → defaultSessionDir 置空串不抛（空串 = 入口隐藏，降级不阻断启动）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      mockDefaultSessionDir.mockRejectedValue(new Error('RPC timeout'))
+      const store = useWorkspaceStore()
+      await store.loadDefaultSessionDir()
+      expect(store.defaultSessionDir).toBe('')
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('loadDefaultSessionDir failed'),
+        expect.any(Error),
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+})
+
+describe('workspaceStore.setPinned（pin/unpin）', () => {
+  it('成功且未降级 → records 用回传列表热更新，返回 true', async () => {
+    const fresh = [{ ...mkRecord('/pinned-a', 500), pinned: true }, mkRecord('/repo-a', 300)]
+    mockSetPinned.mockResolvedValue({ records: fresh, degraded: false })
+    const store = useWorkspaceStore()
+    const ok = await store.setPinned('/pinned-a', true)
+    expect(mockSetPinned).toHaveBeenCalledWith('/pinned-a', true)
+    expect(ok).toBe(true)
+    expect(store.records).toEqual(fresh)
+  })
+
+  it('成功但 degraded=true（超 pin 上限被拒）→ 返回 false，列表以 runtime 回传为准', async () => {
+    const unchanged = [mkRecord('/repo-a', 300)]
+    mockSetPinned.mockResolvedValue({ records: unchanged, degraded: true })
+    const store = useWorkspaceStore()
+    const ok = await store.setPinned('/pinned-a', true)
+    expect(ok).toBe(false)
+    expect(store.records).toEqual(unchanged)
+  })
+
+  it('RPC reject → 返回 false 且保留旧 records（stale 降级，与 record 同款不抛）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const stale = [mkRecord('/repo-a', 300)]
+      mockSetPinned.mockRejectedValue(new Error('RPC timeout'))
+      const store = useWorkspaceStore()
+      store.records = stale
+      const ok = await store.setPinned('/pinned-a', true)
+      expect(ok).toBe(false)
+      expect(store.records).toEqual(stale)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('setPinned failed'),
+        expect.any(Error),
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })
