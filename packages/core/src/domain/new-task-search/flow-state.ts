@@ -120,17 +120,14 @@ const pendingCwd: Ref<string | null> = ref(null)
  */
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：landing 态待定 model 单例 ref（同上）
 const pendingModel: Ref<string | null> = ref(null)
+/** landing 态用户显式选定归属的 project id（写经 flow.ts setPendingProject，startFlow/reset 重置 null，submit 随 createSessionFlow input.projectId 透传；null = 未显式选择，壳层回落「当前 activeProject 归属」既有语义）。 */
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，已登记 registry §4 ⑧ 2026-10-22）：landing 态待定归属 project 单例 ref（同上）
+const pendingProjectId: Ref<string | null> = ref(null)
 /**
  * landing 态用户选定的启动预设 id（pendingCwd/pendingModel/pendingProjectId 同层单例；写经
  * flow.ts setPendingPreset，startFlow/reset 重置 null，submit 经 resolveLaunchConfig 终值透传）。
  */
-
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：landing 态待定归属 project 单例 ref（同上）
-const pendingProjectId: Ref<string | null> = ref(null)
-/**
- * landing 态用户选定的启动预设 id（与 pendingProjectId 同层；写经 flow.ts setPendingPreset）。
- */
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：landing 态待定 preset 单例 ref（同上）
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，已登记 registry §4 ⑧ 2026-10-22）：landing 态待定 preset 单例 ref（同上）
 const pendingPreset: Ref<string | null> = ref(null)
 /** submitFirstMessage in-flight 标记（双击并发只建 1 session） */
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：submitFirstMessage in-flight 标记（同上）

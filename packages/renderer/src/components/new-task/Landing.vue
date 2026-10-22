@@ -257,7 +257,7 @@ function onPresetSelect(payload: { presetId: string }): void {
 }
 /**
  * onProjectSelect — ProjectSelectChip emit select 的接收点（对齐 onPresetSelect 范式）。
- * 用户在 landing 态真实点击选归属项目 → 写 flow.pendingProject（pending 语义：只影响本次
+ * 用户在 landing 态真实点击选归属项目 → 写经 flow.setPendingProject（pending 语义：只影响本次
  * 创建，不切换侧栏锚定），submitFirstMessage create session 时经 input.projectId 透传。
  */
 function onProjectSelect(payload: { projectId: string }): void {

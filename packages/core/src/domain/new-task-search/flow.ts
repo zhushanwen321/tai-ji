@@ -92,9 +92,22 @@ function hashSegments(segments: Segment[]): string {
  * 供重试复用——失败场景的同段重发正是要由 runtime 幂等返回已建 session。
  * 模块级单例（Q2=A 同款裁决：flow 壳层以模块级单例消费，黏滞槽是流程级状态非实例状态）。
  */
+// @data-owner #75 —— 新建任务首发提交 clientUuid 黏滞槽（plain-let 单槽 = R3 结构性盲区，
+// 主表 #75 行登记 + 本注解接入检查项 5 锁定）
 let lastAttempt: { hash: string; uuid: string } | null = null
 
-/** 保稿时把黏滞槽 hash 同步对齐为保稿段指纹（保稿段 ≡ 槽 hash 口径，重发幂等命中同一 uuid）。 */
+/**
+ * 投递失败保稿（A 消费侧）+ 黏滞 hash 口径对齐（B）。
+ *
+ * 保稿存**迁移后**段：migrateImageSegments 是 move 语义（tmpdir 文件已移进
+ * attachments/<sessionId>/），存原始段会还原出失效路径。但黏滞槽 hash 原记迁移**前**段
+ * （takeClientUuidFor 在 create 前取指纹），迁移会改写 image 段 path → 含图重发的
+ * JSON 指纹结构性不匹配 → 换新 uuid → api.create 重复建 session、已建 session 空壳残留。
+ * 故保稿时把槽 hash 同步对齐为保稿段指纹（槽 hash ≡ 保稿段口径，由构造成立）：
+ * 重发取回的是保稿段，takeClientUuidFor 必命中同一 uuid，由 runtime 幂等返回已建 session。
+ * create 失败（throw 未放弃）不经此处——槽 hash 仍是迁移前段指纹，与 send.ts catch
+ * 归还的原始段同口径（65s 超时重试场景幂等成立）。
+ */
 function stashAttemptDraft(finalSegments: Segment[]): void {
   stashOrphanedDraft(finalSegments)
   if (lastAttempt) lastAttempt.hash = hashSegments(finalSegments)
@@ -194,18 +207,6 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     return uuid
   }
 
-  /**
-   * 投递失败保稿（A 消费侧）+ 黏滞 hash 口径对齐（B）。
-   *
-   * 保稿存**迁移后**段：migrateImageSegments 是 move 语义（tmpdir 文件已移进
-   * attachments/<sessionId>/），存原始段会还原出失效路径。但黏滞 hash 原记迁移**前**段
-   * （takeClientUuidFor 在 create 前取指纹），迁移会改写 image 段 path → 含图重发的
-   * JSON 指纹结构性不匹配 → 换新 uuid → api.create 重复建 session、已建 session 空壳残留。
-   * 故保稿时把槽 hash 同步对齐为保稿段指纹（槽 hash ≡ 保稿段口径，由构造成立）：
-   * 重发取回的是保稿段，takeClientUuidFor 必命中同一 uuid，由 runtime 幂等返回已建 session。
-   * create 失败（throw 未放弃）不经此处——槽 hash 仍是迁移前段指纹，与 send.ts catch
-   * 归还的原始段同口径（65s 超时重试场景幂等成立）。
-   */
   // 受控写入口 controller（父编排器独占）：setter 不再模块级 export，杜绝子模块 /
   // 组件越权 import 调用。本编排器独占后，按需把具体 setter 作为参数下发给子模块。
   const controller = useNewTaskFlowController()
