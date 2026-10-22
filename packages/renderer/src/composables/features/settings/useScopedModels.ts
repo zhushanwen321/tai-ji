@@ -67,13 +67,15 @@ export function useScopedModels() {
       const modelId = fullId.substring(slashIdx + 1)
       const woolModel = woolSelectable.value.find((w) => w.fullId === fullId)
       const provider = providers.find((p) => p.id === providerId)
+      const model = provider?.models.find((m) => m.id === modelId)
 
-      if (!provider && woolModel) {
-        return { scoped: fullId, modelName: modelId, providerName: woolModel.providerName, apiKeySet: true, missing: false }
+      // 羊毛模型行：凭据通道写入的 models.json 条目无 models 数组（目录在授权后才拉取），
+      // provider 命中但 model 必然找不到——目录快照是行渲染的权威源，缺失才标「已不存在」。
+      if (woolModel) {
+        return { scoped: fullId, modelName: woolModel.name ?? modelId, providerName: provider?.name ?? woolModel.providerName, apiKeySet: true, missing: false }
       }
-      if (!provider) return { scoped: fullId, modelName: modelId, providerName: providerId, apiKeySet: true, missing: true }
+      if (!provider || !model) return { scoped: fullId, modelName: modelId, providerName: provider?.name ?? providerId, apiKeySet: provider?.apiKeySet ?? true, missing: !model }
 
-      const model = provider.models.find((m) => m.id === modelId)
       return {
         scoped: fullId,
         modelName: model?.name ?? modelId,
