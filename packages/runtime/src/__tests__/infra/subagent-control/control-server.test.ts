@@ -92,6 +92,13 @@ function killGroupRecorder(): { killed: number[]; killGroup: (pid: number | null
   }
 }
 
+/** 治理收尾断言收敛点：等 engine_closed（reason = killed_by_control）+ 组杀已落到 recorder。 */
+async function expectKilledByControlClose(agent: TestAgent, pid: number, killed: number[]): Promise<void> {
+  const closed = await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed, 'engine_closed')
+  expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl)
+  expect(killed).toContain(pid)
+}
+
 /** vi.spyOn(logger, ...) 的最小消费面（mock.calls）。 */
 interface LogSpy {
   mock: { calls: unknown[][] }
@@ -250,10 +257,8 @@ describe('subagent-control server：协议与治理编排（引擎进程内桩�
     })
     const { channelId, pid } = expectOpened(await agent.open(launchSpec({ args: ['--hang'] }), 1))
     agent.send({ v: 1, kind: SUBAGENT_CONTROL_FRAME_KINDS.engineClose, channelId })
-    const closed = await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed, 'engine_closed')
-    expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl)
     // 组杀判定（真实组杀效果由门控用例覆盖）：grace 超时必杀该通道引擎组
-    expect(killed).toContain(pid)
+    await expectKilledByControlClose(agent, pid, killed)
   })
 
   it('engine_open 失败面：相对路径 invalid_launch / 根会话不一致 session / 重复 id duplicate', async () => {
@@ -301,9 +306,7 @@ describe('subagent-control server：协议与治理编排（引擎进程内桩�
     // m-rt-7：recovery 必须是可执行文案（SDK 词表），不能是错误码复读
     expect(String(error.recovery)).toContain('reduce concurrent subagent fan-out')
     expect(String(error.recovery)).not.toBe('engine_backpressure_overflow')
-    const closed = await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed, 'engine_closed')
-    expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl)
-    expect(killed).toContain(pid)
+    await expectKilledByControlClose(agent, pid, killed)
   })
 
   it('下行帧超限：maxFrameBytes 小值 → error frame_too_large + 关通道（连接保持）', async () => {
@@ -320,9 +323,7 @@ describe('subagent-control server：协议与治理编排（引擎进程内桩�
     )
     // m-rt-7：下行超限走 handleOversize，recovery 已是可执行指引（非错误码）
     expect(String(oversizeError.recovery)).toContain('Split the payload')
-    const closed = await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed, 'engine_closed')
-    expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl)
-    expect(killed).toContain(pid)
+    await expectKilledByControlClose(agent, pid, killed)
     // 通道已关：后续该通道帧回 unknown_channel error（连接未被销毁——hello 后畸形/未知通道不升连）
     agent.sendFrame(channelId, 'after-close')
     await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.error && f.code === 'unknown_channel', 'unknown_channel error')

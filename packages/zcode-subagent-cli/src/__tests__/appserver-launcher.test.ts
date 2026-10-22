@@ -35,6 +35,23 @@ import {
 import { ACCOUNT_METADATA_SECTION, CLI_PATCH_SECTION } from "../appserver-launcher-patches.ts";
 import { mergePersonalProviderConfig } from "../preparer.ts";
 
+/** 账号供给断言面（ADR-0143）：读 v2 credentials.json，断言缺键派生 identity + oauth
+ *  认证来源、既有 oauth token 内容未动。 */
+function expectProvisionedAccount(credPath: string, pid: string): void {
+  const after = JSON.parse(fs.readFileSync(credPath, "utf8")) as Record<string, string>;
+  expect(after[`account-provider:${pid}:identity`]).toBe("test-identity-0001");
+  expect(after[`account-provider:${pid}:auth-source`]).toBe("oauth");
+  expect(after["oauth:bigmodel:access_token"]).toBe("enc:v1:fake-oauth-token");
+}
+
+/** 账号元数据供给组合断言面（ADR-0143）：运行出声 + credentials 落盘内容复核。
+ *  stderr 兼容行数组（h.run()）与全文（spawnSync）两种调用形态。 */
+function expectAccountMetadataProvisioned(stderr: string | string[], credPath: string, pid: string): void {
+  const text = Array.isArray(stderr) ? stderr.join("") : stderr;
+  expect(text).toContain("account metadata provisioned");
+  expectProvisionedAccount(credPath, pid);
+}
+
 // ---------- fixture 源码 ----------
 
 // 探针 fake CLI（真进程主链用）：以 wrapper 注入后的 fs 形态读取 CONFIG_PATH /
@@ -733,11 +750,7 @@ describe("真进程主链（落盘产物被 node 真实执行；spawnSync 同步
     expect(res.stderr).toContain("standalone-account=armed");
     expect(res.stderr).toContain("header-port=armed");
     // 双锚武装 → 账号元数据供给（缺键派生 identity + oauth 来源；ADR-0143）
-    expect(res.stderr).toContain("account metadata provisioned");
-    const after = JSON.parse(fs.readFileSync(credPath, "utf8")) as Record<string, string>;
-    expect(after[`account-provider:${PID}:identity`]).toBe("test-identity-0001");
-    expect(after[`account-provider:${PID}:auth-source`]).toBe("oauth");
-    expect(after["oauth:bigmodel:access_token"]).toBe("enc:v1:fake-oauth-token");
+    expectAccountMetadataProvisioned(res.stderr, credPath, PID);
   });
 
   it("主链④ 内建目录派生：Rust arch 变体命中 semver 最大；exact 形态优先于字典序；跳过决策出声 + no-patch 原生透出", () => {
@@ -972,12 +985,7 @@ describe("standalone 账号元数据（产物内嵌 ensureAccountMetadata 同进
     const catalogPath = writeCatalog("meta");
     const mod = loadAccountMetadata(home, catalogPath);
     mod.run();
-    expect(mod.stderr.join("")).toContain("account metadata provisioned");
-    const after = JSON.parse(fs.readFileSync(credPath, "utf8")) as Record<string, string>;
-    expect(after[`account-provider:${PID}:identity`]).toBe("test-identity-0001");
-    expect(after[`account-provider:${PID}:auth-source`]).toBe("oauth");
-    // 既有键未被动
-    expect(after["oauth:bigmodel:access_token"]).toBe("enc:v1:fake-oauth-token");
+    expectAccountMetadataProvisioned(mod.stderr, credPath, PID);
     // 幂等：二次运行不重写（无 provisioned 行、文件内容等同）
     const before = fs.readFileSync(credPath, "utf8");
     const second = loadAccountMetadata(home, catalogPath);

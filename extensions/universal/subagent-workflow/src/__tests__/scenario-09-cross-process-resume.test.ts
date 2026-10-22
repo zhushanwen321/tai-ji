@@ -32,6 +32,7 @@ import {
   resumeScenarioRun,
   scanScenarioEvents,
   seedCrashedRun,
+  settledCountByTaskIndex,
   THREE_CALL_SERIAL_SCRIPT,
   waitForScenarioSettled,
 } from "./record-mode/scenario-kit.ts";
@@ -127,10 +128,7 @@ describe("场景 9 逻辑面：双宿主并发 resume（锁桩裁决恰一个进
       // 帧每 taskIndex 恰 1 条（败者零写入；回放命中不重复落 settled）
       const events = await scanScenarioEvents(env, RUN_ID);
       expect(events.filter((e) => e.type === "run-resumed")).toHaveLength(1);
-      const settledCount = new Map<number, number>();
-      for (const e of events) {
-        if (e.type === "agent-settled") settledCount.set(e.taskIndex, (settledCount.get(e.taskIndex) ?? 0) + 1);
-      }
+      const settledCount = settledCountByTaskIndex(events);
       expect(settledCount.size).toBe(3);
       expect([...settledCount.values()].every((n) => n === 1)).toBe(true);
     } finally {
@@ -271,10 +269,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
         // （竞争方零写入；严格 seq 连续由后续可 resume 构造性保证）
         const events = await scanScenarioEvents(env, RUN_ID);
         expect(events.filter((e) => e.type === "run-resumed")).toHaveLength(1);
-        const settledCount = new Map<number, number>();
-        for (const e of events) {
-          if (e.type === "agent-settled") settledCount.set(e.taskIndex, (settledCount.get(e.taskIndex) ?? 0) + 1);
-        }
+        const settledCount = settledCountByTaskIndex(events);
         expect(settledCount.size).toBe(3);
         expect([...settledCount.values()].every((n) => n === 1)).toBe(true);
       } finally {
