@@ -50,7 +50,7 @@ export function createEvidence({ runDir, feature, meta = {} } = {}) {
     /**
      * 追加一行 step 到 summary.jsonl（同时保留内存副本供 report）。
      *
-     * [M4] `command` **恒输出**（契约 §5.7 与 dev-flow compile.md §5 都要求每步带 command）：
+     * [M4] `command` **恒输出**（证据契约要求每步带 command——「这一步跑了什么」是最小事实）：
      * 调用方不传时回落为 step 名（可执行语义 = 「这一步跑了什么」的最小事实），
      * 不再静默缺字段（审查 C 实测 46/46 行缺失）。
      */
@@ -177,7 +177,7 @@ export function createEvidence({ runDir, feature, meta = {} } = {}) {
     /**
      * 写 verdict.json。
      *
-     * [M5] `testEvidence`：dev-flow inspect 契约（compile.md §6 + 引擎 validateInspectResult）
+     * [M5] `testEvidence`：inspect 证据契约（引擎 validateInspectResult 同款要求）
      * 要求 `test_evidence` 为 string 必填。字段名用 snake_case（`test_evidence`）以对齐引擎，
      * 同时保留 camelCase 入参名便于调用。未传时自动生成「证据指针摘要」——保证 inspect 节点
      * 可以直接复用本文件，不必自己补写。
