@@ -65,5 +65,5 @@ docs/
 - taiji-harness 工作流产出物（spec / plan / test / retrospect / review / impl-plan）→ 本地 `.taiji-harness/<date>-<slug>/`（gitignored，不入库）
 - 单模块设计文档 → 蒸馏进代码注释后删除（见上文归属判定）
 - 一次性审查日志、已完成的修复记录 → 完成后删除（git 可追溯）
-- UI demo / HTML 设计稿 → `.tmp/`（不入库；禁止散落仓库或 `demos/`、`impeccable/` 目录）
+- UI demo / HTML 设计稿 → `.tmp/`（易失工作产物目录，不入库；禁止散落仓库或 `demos/`、`impeccable/` 目录）
 - 竞品/技术调研资料 → 本地归档目录（不进 git）

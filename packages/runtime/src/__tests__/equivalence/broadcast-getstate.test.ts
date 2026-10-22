@@ -26,13 +26,18 @@
  * 同构，非模型智能——事件风暴的三轮 turn 响应与 it2 的 bash 工具轮由 fauxResponses 脚本
  * 固定（单一队列逐轮消费，消费序 = r1 → r2 → followup → bash toolCall → 总结文本），
  * 断言语义与翻轨前一致。usage 数值按 faux 估算口径断言 typeof number + 与权威拉取逐字段
- * 一致（禁精确值）。门控 FAUX_PI_READY（只判 binary，凭证无关、CI 可跑）。
+ * 一致（禁精确值）。门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（SSOT =
+ * test-guard/integration-gate.ts：本地默认跳过、CI 或按改动范围触发时真跑）。
  */
 import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest'
 import { effectScope } from 'vue'
 import { textToSegments } from '@taiji/shared'
 import type { ServerMessage } from '@taiji/shared'
-import { spawnPiFixture, FAUX_PI_READY, FAUX_PI_SKIP_REASON, type PiFixture } from './pi-fixture.js'
+import { spawnPiFixture, type PiFixture } from './pi-fixture.js'
+import {
+  INTEGRATION_TESTS_ENABLED,
+  INTEGRATION_TESTS_SKIP_REASON,
+} from '../../../../../test-guard/integration-gate.ts'
 import { translate } from '../../infra/pi/event-adapter.js'
 import type { PiEvent } from '../../infra/pi/pi-protocol.js'
 import { EventInterpreter } from '../../services/session/event-interpreter.js'
@@ -85,8 +90,8 @@ function entryOfMessageEndFrame(frame: ServerMessage): PiEntry | undefined {
   return entry as PiEntry
 }
 
-describe.skipIf(!FAUX_PI_READY)(
-  `W22 equivalence: broadcast ≡ get_state（faux-pi 子进程${FAUX_PI_SKIP_REASON ? `｜skip：${FAUX_PI_SKIP_REASON}` : ''}）`,
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `W22 equivalence: broadcast ≡ get_state（faux-pi 子进程，集成测试门控${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}）`,
   () => {
   let fixture: PiFixture | null = null
 

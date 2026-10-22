@@ -11,9 +11,10 @@
  * unhandled error。
  *
  * 修复：tsx 的 resolver 中 tsconfig paths 优先于 node_modules exports 解析——
- * fork env 注入 TSX_TSCONFIG_PATH 指向本工厂生成的临时 tsconfig，将协议包直接
- * 映射到其 TS 源码入口，require 链即跳过 exports 解析。仅影响 fork 子进程，
- * 不改生产 tsconfig / 包 manifests。目录 mkdtemp 自建自删（测试红线）。
+ * fork env 注入 TSX_TSCONFIG_PATH 指向本工厂生成的临时 tsconfig，将协议包（及其
+ * 运行时依赖 @zhushanwen/state-machine）直接映射到 TS 源码入口，require 链即跳过
+ * exports 解析。仅影响 fork 子进程，不改生产 tsconfig / 包 manifests。目录 mkdtemp
+ * 自建自删（测试红线）。
  */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -45,6 +46,12 @@ export function createTsxPathsTsconfig(): TsxPathsTsconfig {
         paths: {
           '@taiji/shared': [join(PACKAGES_ROOT, 'shared', 'src', 'index.ts')],
           '@zhushanwen/extension-protocol': [join(PACKAGES_ROOT, 'extension-protocol', 'src', 'index.ts')],
+          '@zhushanwen/state-machine': [join(PACKAGES_ROOT, 'state-machine', 'src', 'index.ts')],
+          // extension-protocol 的运行时依赖（其 src/extensions/plan/state-machine.ts 静态
+          // import 它）：与协议包同族——workspace 内 TS 源码直连形态，exports 无 require
+          // 条件，不映射则 tsx 的 CJS require 解析撞 ERR_PACKAGE_PATH_NOT_EXPORTED，
+          // fork 子进程启动即崩溃（stderr 栈进 vitest parseErrorStacktrace 还会炸
+          // sourcemap artifact，整个 run 判 unhandled error）
         },
       },
     }),

@@ -30,6 +30,11 @@
  * 判死全协议。
  * worker 脚本在 scripts/probe/（领地约束），进程内并发 + fake timers 均不适用
  * （真实文件系统竞争，vitest 默认真实定时器）。
+ *
+ * 集成门控（2026-10-22 单测层极端测试整治）：S3 探针 = 双真子进程 × 100 次真实文件
+ * 锁竞争，启动屏障 / 运行区间重叠 / 写序交替均为真实挂钟观测（无确定性完成信号，判据
+ * 第三档）——经 TAIJI_TEST_INTEGRATION 门控（SSOT = test-guard/integration-gate.ts）
+ * 本地默认跳过；参数对照与单进程互斥（上方 parity describe）保留本地默认组。
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { spawn } from 'node:child_process'
@@ -39,6 +44,7 @@ import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../test-guard/integration-gate.ts'
 
 import {
   DEFAULT_RETRY_BUDGET_MS,
@@ -165,7 +171,9 @@ function parseWorkerReport(res: WorkerResult, tag: string): WorkerReport {
   return report
 }
 
-describe('S3 锁互操作集成探针（runtime 自实现 × proper-lockfile@4.1.2 实库，真子进程并发）', () => {
+describe.skipIf(
+  !INTEGRATION_TESTS_ENABLED,
+)(`S3 锁互操作集成探针（runtime 自实现 × proper-lockfile@4.1.2 实库，真子进程并发）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
   // 真实并发：两子进程各 100 轮「ELOCKED 等待 → 临界区 RMW → 释放」。本机实测 ~1s，
   // CI 慢机余量取 120s（vitest 默认 5s 远不够；无 fake timers——真实定时器是探针语义本体）
   it(

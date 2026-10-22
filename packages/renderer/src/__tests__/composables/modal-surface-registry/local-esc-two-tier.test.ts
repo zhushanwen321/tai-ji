@@ -9,10 +9,12 @@
  * - **后行档 SessionList**（window bubble 注册晚于编排器，preventDefault 不可达）：入聚合让位
  *   （yieldsEsc ✓），开合态绑定**删除确认态本体**（SessionItem 后代确认态 ∪ folderConfirmingCwd）
  *   ——反向断言 escCount 广播计数器不参与聚合（误绑 = 全局 Esc 死键）。
- * - **全仓重扫门禁（2026-10-03 F1-15 补，护栏机器承载）**：scanEscConsumers 三形态全仓扫描
- *   （@keydown.esc / @keydown.escape / 'Escape'），命中必须已登记或在下方 ESC_SCAN_EXEMPT
- *   豁免清单（各有归宿：编排器本体 / 所有权第 2 层输入编辑态 / 未收编模态族 / 模态内消费方）——
- *   「新增消费方不登记即红」从承诺变机器防线（F1-15：ProjectSwitcher 漏登即原盲区实证）。
+ * - **全仓重扫门禁（护栏机器承载，集成门控轨）**：scanEscConsumers 三形态全仓扫描
+ *   （@keydown.esc / @keydown.escape / 'Escape'），命中必须已登记或在下方豁免清单
+ *   （各有归宿：编排器本体 / 所有权第 2 层输入编辑态 / 未收编模态族 / 模态内消费方）——
+ *   「新增消费方不登记即红」机器防线。全仓源文件扫描属重负载（负载态耗时无稳定上界，
+ *   判据见 docs/todo/test-single-layer-cleanup.md），挂 TAIJI_TEST_INTEGRATION 门控：
+ *   本地默认跳过，CI / 集成轨真跑（门控 SSOT = test-guard/integration-gate.ts）。
  *
  * 三视角：构建者白盒（登记清单全等 + 执行序断言）+ 使用者黑盒（每用例 DOM 断言：浮条/浮层/
  * 确认态按钮的可见性与文案翻转）+ 观察者形态（真实事件序 yield→act 递进）。
@@ -41,6 +43,10 @@ import ScheduleForm from '@/components/extension/form/ScheduleForm.vue'
 import PlanCommentPopover from '@/components/panel/plan/PlanCommentPopover.vue'
 import SessionList from '@/components/sidebar/SessionList.vue'
 import { findRepoRoot, scanEscConsumers } from './z-scan-helper'
+import {
+  INTEGRATION_TESTS_ENABLED,
+  INTEGRATION_TESTS_SKIP_REASON,
+} from '../../../../../../test-guard/integration-gate.ts'
 
 function escEvent(): KeyboardEvent {
   return new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
@@ -82,40 +88,50 @@ describe('两档登记清单 ↔ §6.7 扫描清单全等（检查类）', () =>
       if (entry.tier === 'second') expect(text, entry.file).toContain('session-delete-confirm')
     }
   })
-
-  it('全仓三形态重扫：每个 Esc 消费点已登记或在豁免清单（F1-15 护栏机器承载，防漏登回归）', () => {
-    const root = findRepoRoot()
-    const registeredFiles = new Set(LOCAL_ESC_CONSUMERS.map((e) => e.file))
-    // 豁免清单（§6.7 各有归宿，非局部表面两档成员——新增命中落入此处时先判断归宿再登记/豁免）：
-    const exempt: Record<string, string> = {
-      // 编排器本体（Esc 唯一属主，非局部消费方）
-      'packages/renderer/src/composables/features/app/key-orchestrator/orchestrator.ts': 'Esc 唯一属主（编排器本体）',
-      // §6.7 所有权第 2 层：输入编辑态消费方（各有真实 Esc 语义，不入两档）
-      'packages/core/src/domain/composer/dispatch/staging-mode.ts': '第 2 层输入编辑态（staging handleEsc）',
-      'packages/renderer/src/components/panel/BrowserPane.vue': '第 2 层输入编辑态（浮层地址栏 @keydown.escape 回填放弃）',
-      'packages/renderer/src/components/panel/message-stream/UserBubbleEditComposer.vue':
-        '第 2 层输入编辑态（编辑态 Esc 取消编辑；CommandPopover 开启时先经已登记 command-popover 成员消费，组件级 Esc 仅浮层关闭时可达）',
-      // 模态内消费方：仅模态开着时可达，编排器经聚合让位不参与
-      'packages/renderer/src/components/settings/system/SystemShortcutSection.vue': '模态内消费方（改键录制）',
-      // 未收编模态族：模态自消费 + 聚合让位（modal-surface-registry 登记表成员）
-      'packages/renderer/src/components/settings/SettingsModal.vue': '未收编模态族（自消费 + 聚合让位）',
-      'packages/ui/src/overlays/SearchModal.vue': '未收编模态族（自消费 + 聚合让位）',
-    }
-    const hits = scanEscConsumers(root)
-    const unaccounted = hits.filter(
-      (h) => !registeredFiles.has(h.file) && exempt[h.file] === undefined,
-    )
-    expect(
-      unaccounted,
-      `未登记且未豁免的 Esc 消费方（新增局部表面按 §6.7 两档登记；豁免需在 exempt 补行并写明归宿）：\n${unaccounted.map((h) => `${h.file} [${h.form}] ${h.snippet}`).join('\n')}`,
-    ).toEqual([])
-    // 豁免清单反向锚：清单内文件必须仍有命中（改名/删除后清理豁免行，防腐化）
-    const hitFiles = new Set(hits.map((h) => h.file))
-    for (const file of Object.keys(exempt)) {
-      expect(hitFiles.has(file), `豁免行过期（文件已无 Esc 命中，请清理）：${file}`).toBe(true)
-    }
-  })
 })
+
+// ── 全仓重扫门禁（集成门控轨）───────────────────────────────────────────────
+// 全仓源文件扫描的重负载护栏（e 类，判据见 docs/todo/test-single-layer-cleanup.md）：
+// 本地默认跳过，CI / 集成轨设 TAIJI_TEST_INTEGRATION=1 真跑。护栏语义（漏登即红 +
+// 豁免行反向锚）完整保留在本用例，不与 pre-commit / scripts 检查重复（无同源实装）。
+
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  '全仓三形态重扫' + (INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''),
+  () => {
+    it('每个 Esc 消费点已登记或在豁免清单（F1-15 护栏机器承载，防漏登回归）', () => {
+      const root = findRepoRoot()
+      const registeredFiles = new Set(LOCAL_ESC_CONSUMERS.map((e) => e.file))
+      // 豁免清单（§6.7 各有归宿，非局部表面两档成员——新增命中落入此处时先判断归宿再登记/豁免）：
+      const exempt: Record<string, string> = {
+        // 编排器本体（Esc 唯一属主，非局部消费方）
+        'packages/renderer/src/composables/features/app/key-orchestrator/orchestrator.ts': 'Esc 唯一属主（编排器本体）',
+        // §6.7 所有权第 2 层：输入编辑态消费方（各有真实 Esc 语义，不入两档）
+        'packages/core/src/domain/composer/dispatch/staging-mode.ts': '第 2 层输入编辑态（staging handleEsc）',
+        'packages/renderer/src/components/panel/BrowserPane.vue': '第 2 层输入编辑态（浮层地址栏 @keydown.escape 回填放弃）',
+        'packages/renderer/src/components/panel/message-stream/UserBubbleEditComposer.vue':
+          '第 2 层输入编辑态（编辑态 Esc 取消编辑；CommandPopover 开启时先经已登记 command-popover 成员消费，组件级 Esc 仅浮层关闭时可达）',
+        // 模态内消费方：仅模态开着时可达，编排器经聚合让位不参与
+        'packages/renderer/src/components/settings/system/SystemShortcutSection.vue': '模态内消费方（改键录制）',
+        // 未收编模态族：模态自消费 + 聚合让位（modal-surface-registry 登记表成员）
+        'packages/renderer/src/components/settings/SettingsModal.vue': '未收编模态族（自消费 + 聚合让位）',
+        'packages/ui/src/overlays/SearchModal.vue': '未收编模态族（自消费 + 聚合让位）',
+      }
+      const hits = scanEscConsumers(root)
+      const unaccounted = hits.filter(
+        (h) => !registeredFiles.has(h.file) && exempt[h.file] === undefined,
+      )
+      expect(
+        unaccounted,
+        `未登记且未豁免的 Esc 消费方（新增局部表面按 §6.7 两档登记；豁免需在 exempt 补行并写明归宿）：\n${unaccounted.map((h) => `${h.file} [${h.form}] ${h.snippet}`).join('\n')}`,
+      ).toEqual([])
+      // 豁免清单反向锚：清单内文件必须仍有命中（改名/删除后清理豁免行，防腐化）
+      const hitFiles = new Set(hits.map((h) => h.file))
+      for (const file of Object.keys(exempt)) {
+        expect(hitFiles.has(file), `豁免行过期（文件已无 Esc 命中，请清理）：${file}`).toBe(true)
+      }
+    })
+  },
+)
 
 // ── 先行档：消费即 preventDefault（真实事件驱动）───────────────────────────
 

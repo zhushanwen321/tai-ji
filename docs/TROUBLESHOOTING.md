@@ -480,7 +480,7 @@ Windows 等效：`tasklist /FI "PID eq <pid>"` 核对单进程；按命令行定
 - **症状一：投递日志有 `collected` 条目、对话流却无该通知**——先判定是不是 collect 语义：`collected`（ack outcome 枚举）= 该通知随 `collect_results` 工具返回值到达 agent，**构造性不注入对话流**（双重呈现消除，ADR-0146）；对照 `delivered` = 注入对话流。判据 = 按载体与注入史区分：查该 turn 是否有 collect_results 调用、工具返回的 `collected` 数组是否含此 id。属 collect 语义 = 正常，非投递丢失；确认无 collect 调用却出现 `collected` 终局才按缺陷报（collected 只写于从未注入的挂起条目）。
 - **症状二：缺省 collect 挂满 3_600_000（1h）无返回**——多为 lifetime 债权升级边沿：升级时点已存活的 managed session 的 lifetime 死亡债权键（注册于升级前、无 kind 标记）被缺省等待集计入（无到达边沿，等不到）。三条恢复路径：① agent 显式传 `ids`（目标键集合）即绕过缺省集；② 用户 ESC 中断等待（AbortSignal 正常返回，已收子集保留）；③ runtime 进程重启自愈（claims 为 runtime 内存态，重启后旧 lifetime 键重开 watch 走 fail-closed 即时注销）——managed session 死亡注销亦自愈。判据 = 缺省集含 `type:"session"` 且无 `kind:"lifetime"` 标记的旧注册条目。
 - **症状三：collect 一直等不到某任务（stillOpen 直到超时）**——按「等待中与返回后同、无死因信息」的诚实行为排查三类真残余：① subagent 子进程静默死亡（无终态通知生产者）；② managed watch 应答未达（cancelled/timeout 不动 pending，等待下次 session_start 清理收尾）；③ fork 子 session 继承的父 session register（bash 域永久活跃 / subagent 域等待窗口内无注销）。处置：孤儿等待占比高（>10%）或用户可感知长挂反馈时，重审死亡类 reason 边沿接入（设计登记的重审触发条件）；个别任务确认死亡后显式传剩余 ids 续收。
-- **通用取证**：投递日志（journal）条目的 `collectKey` 键集字段 + ack outcome 值；pending entries 的 register/unregister 对（`kind`/`status` 字段）；机制 SSOT = ADR-0146 + 设计档案 `.tmp/tech-design/result-collect.md` §3.1 失败路径（六形态 + [端口缺席]）。
+- **通用取证**：投递日志（journal）条目的 `collectKey` 键集字段 + ack outcome 值；pending entries 的 register/unregister 对（`kind`/`status` 字段）；机制 SSOT = ADR-0146 + result-collect 设计档案 §3.1 失败路径（设计档案已随 .tmp 清理，不入库；六形态 + [端口缺席]）。
 
 ### 34. 自装引擎包（TAIJI_AGENT_ENGINE_ROOTS / config.json engines）的发现优先级，与自装旧版包 chat 报 engine_capability_unsupported（协议 v1.x）
 

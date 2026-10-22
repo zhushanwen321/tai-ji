@@ -13,11 +13,12 @@
  *    corrupted 提示条；参考折叠区内容（用户可见断言）。
  *
  * mock 策略：setupSystemPageTest 单源（pinia/store/seam mock 注入 + toast/ipc mock），
- * mount 分级：冒烟走 mountPage（全页编排回归锚），交互走 mountSection 直挂本页。
+ * mount 分级：冒烟走 mountPage（全页编排回归锚，SystemPage 模块图经 beforeAll 预热），
+ * 交互走 mountSection 直挂本页。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/settings/rename-session-page.test.ts
  */
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, beforeAll } from 'vitest'
 import {
   flushPromises,
   seedStore,
@@ -27,6 +28,14 @@ import {
 const { settingsMock, mountPage, mountSection, pageWrapper } = setupSystemPageTest(
   () => import('@/components/settings/rename-session/RenameSessionPage.vue'),
 )
+
+// SystemPage 模块图预热一次（h 类整治）：全树（7 Section + 头部）编译装载成本落文件级
+// beforeAll，下方唯一的 mountPage 用例不再吸收装载成本。该用例不能改 mountSection 直挂：
+// 断言对象是 SystemPage 编排 DOM 的否定形态（已迁出区块不出现），直挂 RenameSessionPage
+// 时其根节点即携带 rename-session-page testid，否定断言恒假；且 mountSection 不 attach 到
+// body，document.body.querySelector 形态断言会沦为恒真空转。vi.mock 注册在测试文件 import
+// 期完成、先于本 hook，动态 import 保持 TDZ 安全（同 system-page-mount.mountSystemPage）。
+beforeAll(() => import('@/components/settings/system/SystemPage.vue'))
 
 /** 打开 reka Select 下拉（SelectTrigger pointerdown 开启，portal 挂 body；同 provider-edit-modal 模式）。 */
 async function openSelect(testid: string): Promise<HTMLElement[]> {

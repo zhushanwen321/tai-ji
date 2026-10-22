@@ -24,7 +24,7 @@
  *       ESC 关闭后 overlay 消失，composer 恢复可用、drawer 仍可正常打开（临时层不替换 Panel）
  *
  * mock 数据事实（packages/core/src/transport/mock/workflow-data.ts，本 spec 不改数据源；
- * 演员清单 SSOT = .tmp/dev-flow/ui-redesign-combined.runlog/u-wf-mock.md 冻结表）：
+ * 演员清单（来源档案已随 .tmp 清理，内容以内联冻结表为准））：
  * - getWorkflows('s3') = 11 条 WorkflowRunRecord（wf-mock-001 既有 done + D8 十演员）→
  *   进行中桶（status==='running'）4 条：wf-mock-running / wf-mock-pending / wf-mock-retrying /
  *   wf-mock-wide-phase；已结束桶（其余，含 interrupted——一次性生命周期 D-2 后 interrupted

@@ -1,11 +1,17 @@
 /**
  * A7: rfl.mjs CLI smoke（rfl 仪表 T4，tier-1 §7.4）。
  *
- * node 子进程执行 scripts/rfl.mjs，HOME 指向临时目录 + 预置 fixture state.json：
+ * HOME 指向临时目录 + 预置 fixture state.json，覆盖：
  *   - list：列出两 run（runId/时间/terminated/轮数）
  *   - stats latest：token 汇总 + 缓存命中率 + per-role + 轮次时间线
  *   - trends：跨 run 行
  *   - clean --older-than：默认干跑不删；--yes 删过期保留新 run
+ *
+ * 驱动方式（单测层拆分层，docs/todo/test-single-layer-cleanup.md 第二波）：
+ *   - 输出断言主通道 = 进程内加载 rfl.mjs（vi.resetModules + 动态 import，main 在
+ *     import 时执行）——CLI 输出解析/渲染逻辑零子进程，高负载无 fork/exec 窗口；
+ *   - 真 node 子进程（execFile）缩到 2 条冒烟（list 全链路 stdout + clean --yes
+ *     真删），守护「rfl.mjs 作为 bin 被 node 执行」的进程级契约。
  */
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -13,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const RFL_PATH = join(__dirname, "..", "..", "scripts", "rfl.mjs");
 const run = promisify(execFile);
@@ -60,34 +66,51 @@ function writeRun(repoSlug: string, runId: string, state: Record<string, unknown
   return dir;
 }
 
+/** 真 node 子进程执行 rfl.mjs（仅冒烟用例使用）。 */
 async function rfl(args: string[]): Promise<{ stdout: string; stderr: string }> {
   // SKILL_DATA_DIR 显式置空：防宿主环境残留值把 ROOT 重定向出 HOME 隔离树
   return run(process.execPath, [RFL_PATH, ...args], { env: { ...process.env, HOME: home, SKILL_DATA_DIR: "" } });
 }
 
-describe("A7 rfl CLI（list/stats/trends/clean）", () => {
-  it("A7 list：列出两 run 的 runId/terminated/rounds", async () => {
-    writeRun("repo-a", "wf-old-1", fixtureState({
-      startedAt: "2026-07-01T10:00:00.000Z", terminated: "clean",
-      calls: [{ batch: 1, round: 1, role: "reviewer", name: "r1" }],
-    }));
-    writeRun("repo-a", "wf-new-2", fixtureState({
-      startedAt: "2026-08-15T10:00:00.000Z", terminated: "stuck",
-      calls: [{ batch: 1, round: 1, role: "reviewer", name: "r1" }, { batch: 1, round: 1, role: "aggregator", name: "aggregate" }],
-      rounds: [
-        { round: 1, phaseTimings: { review: [1, 2], aggregate: [2, 3], fix: [3, 4] } },
-        { round: 2, phaseTimings: { review: [5, 6], aggregate: [6, 7], fix: null } },
-      ],
-    }));
-    const { stdout } = await rfl(["list", "repo-a"]);
-    expect(stdout).toContain("wf-old-1");
-    expect(stdout).toContain("wf-new-2");
-    expect(stdout).toContain("clean");
-    expect(stdout).toContain("stuck");
-    // rounds 计数来自 batches[].rounds
-    expect(stdout).toMatch(/wf-new-2.*rounds: 2/);
-  });
+/**
+ * 进程内驱动 rfl.mjs（输出断言主通道）：rfl.mjs 的 main 在 import 时执行（读
+ * process.argv），SKILL_DATA_ROOT 在模块加载期求值——HOME/SKILL_DATA_DIR 须先指向
+ * fixture。process.exit 拦截为 no-op 记录（switch 分支 break 后模块正常完成，不杀
+ * worker），console.log/error 捕获为行数组 = execFile stdout 的进程内等价物。
+ */
+async function rflInProcess(args: string[]): Promise<{ out: string; lines: string[]; exitCodes: number[] }> {
+  const lines: string[] = [];
+  const exitCodes: number[] = [];
+  const realLog = console.log;
+  const realErr = console.error;
+  const realExit = process.exit;
+  const realArgv = process.argv;
+  const realHome = process.env.HOME;
+  const realSkillDataDir = process.env.SKILL_DATA_DIR;
+  process.env.HOME = home;
+  // SKILL_DATA_DIR 显式清空：ROOT 在 import 时求值，防宿主残留值重定向出 HOME 隔离树
+  delete process.env.SKILL_DATA_DIR;
+  process.argv = ["node", "rfl.mjs", ...args];
+  console.log = ((...a: unknown[]) => { lines.push(a.map(String).join(" ")); }) as typeof console.log;
+  console.error = ((...a: unknown[]) => { lines.push(a.map(String).join(" ")); }) as typeof console.error;
+  // exit 拦截为 no-op 记录：switch 分支 break 后模块正常完成，不杀 vitest worker
+  process.exit = ((code?: number) => { exitCodes.push(code ?? 0); }) as unknown as typeof process.exit;
+  try {
+    vi.resetModules();
+    await import("../../scripts/rfl.mjs");
+  } finally {
+    console.log = realLog;
+    console.error = realErr;
+    process.exit = realExit;
+    process.argv = realArgv;
+    process.env.HOME = realHome;
+    if (realSkillDataDir === undefined) delete process.env.SKILL_DATA_DIR;
+    else process.env.SKILL_DATA_DIR = realSkillDataDir;
+  }
+  return { out: lines.join("\n"), lines, exitCodes };
+}
 
+describe("A7 rfl CLI（list/stats/trends/clean，进程内）", () => {
   it("A7 stats latest：token 汇总 + 缓存命中率 + per-role + 轮次时间线 + phaseTimings 派生", async () => {
     writeRun("repo-b", "wf-stats-1", fixtureState({
       startedAt: "2026-08-15T10:00:00.000Z", terminated: "clean",
@@ -98,19 +121,19 @@ describe("A7 rfl CLI（list/stats/trends/clean）", () => {
       ],
       rounds: [{ round: 1, phaseTimings: { review: [1000, 61000], aggregate: [61000, 91000], fix: [91000, 151000] } }],
     }));
-    const { stdout } = await rfl(["stats", "latest", "repo-b"]);
-    expect(stdout).toContain("wf-stats-1");
-    expect(stdout).toContain("repo-b");
+    const { out } = await rflInProcess(["stats", "latest", "repo-b"]);
+    expect(out).toContain("wf-stats-1");
+    expect(out).toContain("repo-b");
     // 汇总：input 1700 → 2k 级；cacheRead 5000 / (1700+5000) = 75%
-    expect(stdout).toContain("75%");
-    expect(stdout).toContain("reviewer ×1");
-    expect(stdout).toContain("aggregator ×1");
-    expect(stdout).toContain("fixer ×1");
+    expect(out).toContain("75%");
+    expect(out).toContain("reviewer ×1");
+    expect(out).toContain("aggregator ×1");
+    expect(out).toContain("fixer ×1");
     // 轮次时间线（phaseTimings 派生：60s/30s/60s）
-    expect(stdout).toContain("R1 (batch 1)");
-    expect(stdout).toContain("review 1m0s");
-    expect(stdout).toContain("aggregate 30s");
-    expect(stdout).toContain("fix 1m0s");
+    expect(out).toContain("R1 (batch 1)");
+    expect(out).toContain("review 1m0s");
+    expect(out).toContain("aggregate 30s");
+    expect(out).toContain("fix 1m0s");
   });
 
   it("A7 trends：跨 run 行含轮数与缓存命中率", async () => {
@@ -126,34 +149,12 @@ describe("A7 rfl CLI（list/stats/trends/clean）", () => {
         { round: 2, phaseTimings: { review: [5, 6], aggregate: [6, 7], fix: [7, 8] } },
       ],
     }));
-    const { stdout } = await rfl(["trends", "repo-c"]);
-    expect(stdout).toContain("wf-t1");
-    expect(stdout).toContain("wf-t2");
+    const { out } = await rflInProcess(["trends", "repo-c"]);
+    expect(out).toContain("wf-t1");
+    expect(out).toContain("wf-t2");
     // cache% 列：t1 = 300/400 = 75%；t2 = 100/200 = 50%
-    expect(stdout).toContain("75%");
-    expect(stdout).toContain("50%");
-  });
-
-  it("A7 clean：默认干跑不删；--yes 删过期保留新 run", async () => {
-    const oldDir = writeRun("repo-d", "wf-old", fixtureState({
-      startedAt: "2026-06-01T10:00:00.000Z", terminated: "clean",
-      calls: [{ batch: 1, round: 1, role: "reviewer", name: "r" }],
-    }));
-    const newDir = writeRun("repo-d", "wf-new", fixtureState({
-      startedAt: new Date().toISOString(), terminated: "clean",
-      calls: [{ batch: 1, round: 1, role: "reviewer", name: "r" }],
-    }));
-    // 干跑：两个目录都在
-    const dry = await rfl(["clean", "--older-than", "30d"]);
-    expect(dry.stdout).toContain("would delete");
-    expect(dry.stdout).toContain("wf-old");
-    expect(existsSync(join(oldDir, "state.json"))).toBe(true);
-
-    // --yes：old 删除、new 保留
-    const del = await rfl(["clean", "--older-than", "30d", "--yes"]);
-    expect(del.stdout).toContain("deleted");
-    expect(existsSync(join(oldDir, "state.json"))).toBe(false);
-    expect(existsSync(join(newDir, "state.json"))).toBe(true);
+    expect(out).toContain("75%");
+    expect(out).toContain("50%");
   });
 
   it("A7 stats：无字段容错（M1/M2 的 origin/dormant/scores 缺省显示不崩）", async () => {
@@ -162,10 +163,10 @@ describe("A7 rfl CLI（list/stats/trends/clean）", () => {
       batches: [],
     });
     expect(existsSync(join(dir, "state.json"))).toBe(true);
-    const { stdout } = await rfl(["stats", "latest", "repo-e"]);
-    expect(stdout).toContain("wf-bare");
+    const { out } = await rflInProcess(["stats", "latest", "repo-e"]);
+    expect(out).toContain("wf-bare");
     // B3：dormant 是批作用域（最终 state 只含末批），表述显式限定 last batch
-    expect(stdout).toContain("dormant (last batch) 0");
+    expect(out).toContain("dormant (last batch) 0");
   });
 
   it("B1 trends：regressed 列输出 regressed/attempted（分母=曾进入 fix-attempted 的 issue 数，§6.7 issue 计数口径），分母 0 显示 -", async () => {
@@ -195,17 +196,17 @@ describe("A7 rfl CLI（list/stats/trends/clean）", () => {
         "MF-7": { status: "open", history: [{ round: 1, status: "open" }] },
       },
     }));
-    const { stdout } = await rfl(["trends", "repo-f"]);
+    const { out, lines } = await rflInProcess(["trends", "repo-f"]);
     // G2：列名缩短为 reg/att（该列是末批作用域，长名会被读成 run 级指标）
-    expect(stdout.split("\n")[0]).toContain("reg/att");
+    expect(lines[0]).toContain("reg/att");
     // started 列宽 = ISO 8601 恒长 24：表头须 padEnd(24) 才与数据行对齐（20 会左移 4 字符）
-    expect(stdout.split("\n")[0]).toContain("started".padEnd(24) + "  " + "rounds");
-    expect(stdout).toMatch(/wf-b1a[^\n]*1\/5/);
+    expect(lines[0]).toContain("started".padEnd(24) + "  " + "rounds");
+    expect(out).toMatch(/wf-b1a[^\n]*1\/5/);
     // 分母 0：行尾 regressed 列为 -（cache% 列有值 75%，行尾 - 只能是 regressed 列）
-    expect(stdout).toMatch(/wf-b1b[^\n]*75%\s+-\s*$/m);
+    expect(out).toMatch(/wf-b1b[^\n]*75%\s+-\s*$/m);
     // G2：表后 legend 标注 reg/att 的末批作用域与分母口径（与 rounds/tokens/cache%
     // 的 run 级口径区分），跨 run 对比不再误读
-    expect(stdout).toContain("reg/att: last-batch scope (issues reset per batch); denominator = issues ever fix-attempted");
+    expect(out).toContain("reg/att: last-batch scope (issues reset per batch); denominator = issues ever fix-attempted");
   });
 
   it("B2 stats：scores 的 dimensions.regression=null 显示 n/a（不输出字面量 null）+ B3 dormant (last batch) 计数", async () => {
@@ -218,20 +219,20 @@ describe("A7 rfl CLI（list/stats/trends/clean）", () => {
       ],
       dormant: [{ id: "MF-9", reason: "unverified", detail: "d", round: 1, revived: false }],
     }));
-    const { stdout } = await rfl(["stats", "latest", "repo-g"]);
+    const { out } = await rflInProcess(["stats", "latest", "repo-g"]);
     // null 维度显示 n/a（unverifiable），非 null 维度正常输出
-    expect(stdout).toContain("regression n/a");
-    expect(stdout).toContain("quality 8");
-    expect(stdout).toContain("regression 6");
-    expect(stdout).not.toContain("regression null");
+    expect(out).toContain("regression n/a");
+    expect(out).toContain("quality 8");
+    expect(out).toContain("regression 6");
+    expect(out).not.toContain("regression null");
     // C2：issues 行与 dormant 同为末批作用域（state.issues 批重置后只含末批），
     // 行首同样带 (last batch) 限定
-    expect(stdout).toContain("issues (last batch): total 0");
+    expect(out).toContain("issues (last batch): total 0");
     // B3：dormant 计数为末批作用域，非 0 时同样带限定
-    expect(stdout).toContain("dormant (last batch) 1");
+    expect(out).toContain("dormant (last batch) 1");
     // G1：fixture 的 scores entry 均无 batch 字段（旧数据），score 行回退 B1
-    expect(stdout).toContain("score B1 R1");
-    expect(stdout).toContain("score B1 R2");
+    expect(out).toContain("score B1 R1");
+    expect(out).toContain("score B1 R2");
   });
 
   it("G1 stats：score 行带批标识 B<n>，多批 run 中批局部 round 编号可归批", async () => {
@@ -245,8 +246,54 @@ describe("A7 rfl CLI（list/stats/trends/clean）", () => {
         { batch: 2, round: 1, targetKind: "diff", targetName: "fixer-b", total: 7 },
       ],
     }));
-    const { stdout } = await rfl(["stats", "latest", "repo-h"]);
-    expect(stdout).toContain("score B1 R1 diff/fixer-a");
-    expect(stdout).toContain("score B2 R1 diff/fixer-b");
+    const { out } = await rflInProcess(["stats", "latest", "repo-h"]);
+    expect(out).toContain("score B1 R1 diff/fixer-a");
+    expect(out).toContain("score B2 R1 diff/fixer-b");
+  });
+});
+
+describe("A7 rfl CLI 真进程冒烟（execFile 真 node）", () => {
+  it("list：真 node 子进程执行 rfl.mjs，stdout 列出两 run 的 runId/terminated/rounds", async () => {
+    writeRun("repo-a", "wf-old-1", fixtureState({
+      startedAt: "2026-07-01T10:00:00.000Z", terminated: "clean",
+      calls: [{ batch: 1, round: 1, role: "reviewer", name: "r1" }],
+    }));
+    writeRun("repo-a", "wf-new-2", fixtureState({
+      startedAt: "2026-08-15T10:00:00.000Z", terminated: "stuck",
+      calls: [{ batch: 1, round: 1, role: "reviewer", name: "r1" }, { batch: 1, round: 1, role: "aggregator", name: "aggregate" }],
+      rounds: [
+        { round: 1, phaseTimings: { review: [1, 2], aggregate: [2, 3], fix: [3, 4] } },
+        { round: 2, phaseTimings: { review: [5, 6], aggregate: [6, 7], fix: null } },
+      ],
+    }));
+    const { stdout } = await rfl(["list", "repo-a"]);
+    expect(stdout).toContain("wf-old-1");
+    expect(stdout).toContain("wf-new-2");
+    expect(stdout).toContain("clean");
+    expect(stdout).toContain("stuck");
+    // rounds 计数来自 batches[].rounds
+    expect(stdout).toMatch(/wf-new-2.*rounds: 2/);
+  });
+
+  it("clean：真 node 子进程默认干跑不删；--yes 删过期保留新 run", async () => {
+    const oldDir = writeRun("repo-d", "wf-old", fixtureState({
+      startedAt: "2026-06-01T10:00:00.000Z", terminated: "clean",
+      calls: [{ batch: 1, round: 1, role: "reviewer", name: "r" }],
+    }));
+    const newDir = writeRun("repo-d", "wf-new", fixtureState({
+      startedAt: new Date().toISOString(), terminated: "clean",
+      calls: [{ batch: 1, round: 1, role: "reviewer", name: "r" }],
+    }));
+    // 干跑：两个目录都在
+    const dry = await rfl(["clean", "--older-than", "30d"]);
+    expect(dry.stdout).toContain("would delete");
+    expect(dry.stdout).toContain("wf-old");
+    expect(existsSync(join(oldDir, "state.json"))).toBe(true);
+
+    // --yes：old 删除、new 保留
+    const del = await rfl(["clean", "--older-than", "30d", "--yes"]);
+    expect(del.stdout).toContain("deleted");
+    expect(existsSync(join(oldDir, "state.json"))).toBe(false);
+    expect(existsSync(join(newDir, "state.json"))).toBe(true);
   });
 });

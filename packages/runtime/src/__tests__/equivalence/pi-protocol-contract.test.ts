@@ -2,9 +2,10 @@
  * W25 pi 协议契约测试（data-source-governance P4.3 收官件）。
  *
  * 职责：pi 版本升级时（root package.json devDependencies 的 @earendil-works/pi-coding-agent
- * 变更——注意：plan 写 packages/runtime/package.json，实际声明在 root，接线检测两者）自动跑
+ * 变更——注意：plan 写 packages/runtime/package.json，实际声明在 root，接线检测两者）跑
  * 本测试，防上游事件语义漂移悄悄制造新分叉。接线点：scripts/check-version-bump.sh（merge
- * 阶段 3.5 版本校验门，pi 依赖相对最新 release tag 变更时先跑本测试再放行 bump）。
+ * 阶段 3.5 版本校验门，pi 依赖相对最新 release tag 变更时先跑本测试再放行 bump——跑时须带
+ * TAIJI_TEST_INTEGRATION=1，否则本文件用例被集成门控跳过 = 静默放行）。
  *
  * 契约三断言（w25-acceptance.md 交付物 1）：
  * - ① RPC 命令范围：set_session_name / get_state / get_session_stats / get_entries / get_commands
@@ -28,22 +29,23 @@
  * faux LLM 轨（L2.5 翻轨，2026-09-15）：验证对象是 RPC/事件/entry 三个协议范围（pi 自身
  * 行为），非模型智能——LLM turn 由 fauxResponses 脚本固定（it2 用 reasoning 演员
  * faux/faux-1-reasoning，档位 ⊇ {off, low} 确定性成立，摆脱宿主 models.json 依赖），
- * 断言语义与翻轨前一致。门控 FAUX_PI_READY（只判 binary，凭证无关、CI 可跑，已从
- * REAL_PI_TESTS 分池移出）。**pi bump 时需真实轨重放一次**（本文件断言的 RPC reply
- * 形状/事件范围/D5 负向断言是对 pi wire 协议的契约锁定，bump 触发的重放登记由后续
- * e2e-map 承接）。
+ * 断言语义与翻轨前一致。门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（本地默认跳过，CI
+ * 与按改动范围触发时真跑；SSOT = test-guard/integration-gate.ts）——spawn 真 pi 的
+ * 协议契约锁定属「代码 + OS 组合行为」（整治判据见 docs/todo/test-single-layer-cleanup.md）。
+ * **pi bump 时需真实轨重放一次**（本文件断言的 RPC reply 形状/事件范围/D5 负向断言是对
+ * pi wire 协议的契约锁定；接线点 scripts/check-version-bump.sh 跑本文件须带
+ * TAIJI_TEST_INTEGRATION=1，e2e-map 侧由 E2E-INTEG 规则承接）。
  *
- * 禁 mock pi（真实 fixture）；skip-if 约定见 pi-fixture.ts 文件头。
+ * 禁 mock pi（真实 fixture）；skip-if 约定 = describe.skipIf(!INTEGRATION_TESTS_ENABLED)
+ * 包裹（本文件两条用例均为 spawn 真 pi 的门控用例，无快用例留默认组）。
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { execSync } from 'node:child_process'
+import { spawnPiFixture, type PiFixture, type PiRpcResponse } from './pi-fixture.js'
 import {
-  spawnPiFixture,
-  FAUX_PI_READY,
-  FAUX_PI_SKIP_REASON,
-  type PiFixture,
-  type PiRpcResponse,
-} from './pi-fixture.js'
+  INTEGRATION_TESTS_ENABLED,
+  INTEGRATION_TESTS_SKIP_REASON,
+} from '../../../../../test-guard/integration-gate.ts'
 import type { PiEntry } from '@taiji/shared'
 import type { GetEntriesResponse, PiEvent, PiSessionEntry } from '../../infra/pi/pi-protocol.js'
 
@@ -206,8 +208,8 @@ function assertObservedEntryTypesKnown(observedTypes: string[]): Set<string> {
   return new Set(observedTypes)
 }
 
-describe.skipIf(!FAUX_PI_READY)(
-  `pi 协议契约（faux-pi 子进程，W25${FAUX_PI_SKIP_REASON ? `｜skip：${FAUX_PI_SKIP_REASON}` : ''}）`,
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `pi 协议契约（faux-pi 子进程，W25，集成测试门控${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}）`,
   () => {
   let fixture: PiFixture | null = null
 

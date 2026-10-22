@@ -16,7 +16,16 @@
  *   - 显式开关 TAIJI_SKIP_REAL_ENGINE_E2E=1 → console.warn + skip；
  *   - bin 缺失 = 仓内资产缺失 → 硬失败（不 skip）；
  *   - dist 缺失且当前 Node 不支持 TS type-stripping（workspace src fallback 不可用）
- *     → console.warn + skip（附重建命令）。
+ *     → console.warn + skip（附重建命令）；
+ *   - 集成测试门控 TAIJI_TEST_INTEGRATION（SSOT = test-guard/integration-gate.ts）：
+ *     本地默认跳过、CI 与按改动范围触发时真跑。与上方三种判据正交叠加（门控关闭时
+ *     门控理由优先展示）。2026-10-22 测试整治（docs/todo/test-single-layer-cleanup.md
+ *     1.2 节）补挂：该 env 全仓无设置点，这两条 90s/120s 真引擎 bin 用例原本在本地与
+ *     merge 门禁（scripts/pr-pre-merge.sh 只设 TAIJI_SKIP_REAL_PI）默认轨真跑——挂上
+ *     门控后本地与 merge 门禁跳过、CI（test-runtime 已设 env=1）照常真跑，覆盖不变。
+ *     e2e-map 登记（待集中分配序号）：R2 / trigger=on-diff / layer=L2 / serial=true；
+ *     run = TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run
+ *     src/__tests__/infra/subagent-control/real-engine-integration.test.ts。
  */
 import { existsSync, mkdirSync, symlinkSync } from 'node:fs'
 import { delimiter, dirname, join, resolve } from 'node:path'
@@ -40,6 +49,7 @@ import {
   rmTmpDir,
   waitFor,
 } from './test-helpers.js'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../../test-guard/integration-gate.ts'
 
 const REAL_ENGINE_BIN = resolve(process.cwd(), '../pi-subagent-cli/bin/pi-subagent-cli.mjs')
 const REAL_ENGINE_DIST = resolve(dirname(REAL_ENGINE_BIN), '../dist/main.js')
@@ -74,6 +84,10 @@ function realEngineSkipReason(): string | null {
 }
 
 const skipReason = realEngineSkipReason()
+
+/** 集成门控叠加：门控关闭（本地 / merge 门禁）时门控理由优先展示；开启时回归原判据。 */
+const gatedSkip = !INTEGRATION_TESTS_ENABLED || skipReason !== null
+const gatedSkipLabel = !INTEGRATION_TESTS_ENABLED ? INTEGRATION_TESTS_SKIP_REASON : skipReason
 
 const tmpDirs: string[] = []
 const servers: SubagentControlServer[] = []
@@ -158,7 +172,9 @@ function parseLine(line: unknown): EngineFrame | null {
   }
 }
 
-describe.skipIf(skipReason !== null)('control server × 真实 pi-subagent-cli 引擎（跨包集成）', () => {
+describe.skipIf(gatedSkip)(
+  `control server × 真实 pi-subagent-cli 引擎（跨包集成）${gatedSkipLabel ? `｜skip：${gatedSkipLabel}` : ''}`,
+  () => {
   it('engine_open → initialize → run（假 pi 往返）→ engine_close → engine_closed 全链', { timeout: 90_000 }, async () => {
     const dataDir = await makeTmpDir('real-engine-')
     tmpDirs.push(dataDir)

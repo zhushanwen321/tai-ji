@@ -16,9 +16,14 @@
  * mock 策略：与 session-exited.test.ts 同款（vi.hoisted 捕获 routeInbound handler 注入
  * ServerMessage；VITE_MOCK=false 强制真实 api domains；ws-client mock 捕获 send）。
  *
+ * 模块图装载策略：beforeAll 一次性装载全文件共享（每用例 resetModules 重求值整条
+ * useConnection→useMessageEffects→stores→@/api 模块图是慢用例主因）。不能改顶层静态
+ * import——@/api 门面在模块加载期捕获 isMock，stub 必须先于加载——故 beforeAll 内
+ * stub 后动态 import 一次。用例隔离改由手动状态重置承担（见 beforeEach 注释）。
+ *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/respawn-pending.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ref, nextTick } from 'vue'
 import type { ServerMessage, SessionGroup } from '@taiji/shared'
@@ -61,22 +66,53 @@ vi.mock('@/lib/ipc', () => ({
 let useConnection: typeof import('@/composables/useConnection').useConnection
 let useChatStore: typeof import('@/stores/chat').useChatStore
 let useSessionStore: typeof import('@/stores/session').useSessionStore
+let resetChatModuleState: typeof import('@/composables/features/chat/useChat').resetChatModuleState
 let forcedExitMarks: typeof import('@/composables/effects/forced-exit-marks')
+let useToast: typeof import('@/composables/useToast').useToast
 
-beforeEach(async () => {
-  setActivePinia(createPinia())
-  vi.clearAllMocks()
+// 模块图一次性装载：VITE_MOCK stub 必须先于 @/api 求值（门面加载期捕获 isMock），
+// 故在此 stub 后动态 import；用例内的 await import 全部命中模块缓存（零重求值）。
+// resetModules 仅此一次：全局 setupFiles 静态 import @taiji/core，真实 ws-client 已随
+// 之进入模块缓存——不清缓存则 core use-connection 绑定的是真实 ws-client（本文件的
+// ws-client mock 只对重载后的图生效）；清一次后全文件共享绑定到 mock 的模块图，
+// mock 注册本身不随 resetModules 撤销。
+beforeAll(async () => {
   vi.stubEnv('VITE_MOCK', 'false')
-  mockHolder.routeHandler = null
-  mockHolder.stateRef = ref('disconnected')
   vi.resetModules()
-
   const conn = await import('@/composables/useConnection')
   useConnection = conn.useConnection
   useChatStore = (await import('@/stores/chat')).useChatStore
   useSessionStore = (await import('@/stores/session')).useSessionStore
+  ;({ resetChatModuleState } = await import('@/composables/features/chat/useChat'))
   forcedExitMarks = await import('@/composables/effects/forced-exit-marks')
+  ;({ useToast } = await import('@/composables/useToast'))
+  // 预热用例内动态 import 的其余重模块（useSidebar / core / api 门面 / events）
+  await Promise.all([
+    import('@/api'),
+    import('@/composables/features/sidebar/useSidebar'),
+    import('@taiji/core'),
+    import('@taiji/core/transport/api'),
+  ])
+})
+
+// 手动状态重置清单（模块图共享后，用例隔离的全部承担点）：
+// - pinia 新实例：chat/session store 分区态（respawnPending 是 store 内 ref，随新 store 归零）
+// - resetChatModuleState：core useChat 模块级订阅表 / 观测计数（streamSubscriptions 等）
+// - useConnection().teardown()：core use-connection 模块级单例（dispatcherInstalled /
+//   initialised / stateWatch / 各监听器），使本用例 init() 重新安装 dispatcher（routeHandler
+//   重新捕获）
+// - resetForcedExitMarks：强制退出意图标记 Set
+// - useToast().toasts 清空：toast 队列是模块级共享态（exited 处理链会入列），不清会
+//   跨用例累积触 in-flight 上限丢弃
+beforeEach(() => {
+  setActivePinia(createPinia())
+  vi.clearAllMocks()
+  mockHolder.routeHandler = null
+  mockHolder.stateRef = ref('disconnected')
+  resetChatModuleState()
+  useConnection().teardown()
   forcedExitMarks.resetForcedExitMarks()
+  useToast().toasts.value = []
 
   const sessionStore = useSessionStore()
   const group: SessionGroup = {
@@ -86,6 +122,17 @@ beforeEach(async () => {
     ],
   }
   sessionStore.applySnapshot({ groups: [group] })
+})
+
+// useMessageEffects 模块级 respawnTimeoutTimers 的用例间清理：对仍开启的恢复窗口注入
+// restored 帧走真实收尾路径（clearRespawnTimeout 删表项）。表项残留会让下一用例的
+// injectExited 不再注册新 timer（超时用例 fake timers 下 advance 无效）；收尾写入落在
+// 本用例已废弃的 store 上，随下一用例新 pinia 丢弃。
+afterEach(() => {
+  mockHolder.routeHandler?.({
+    type: 'session.restored',
+    payload: { sessionId: 's-respawn', attempts: 1 },
+  })
 })
 
 async function initAndConnect(): Promise<void> {

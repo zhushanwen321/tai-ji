@@ -18,4 +18,4 @@
 
 ## 出处
 
-- dev-merge branch-review run `.tmp/dev-merge-review/dmg-505bbfa72/`（ledger.json + round-1/aggregated.md）
+- dev-merge branch-review run 过程产物（ledger.json + round-1/aggregated.md，已随 .tmp 清理，不入库）

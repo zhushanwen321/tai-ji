@@ -12,8 +12,9 @@
  *    连续 feed 下收敛单投递——R2-S1 双入口幂等在活容器形态下保持；
  * 3. 输入纯度：feed 不 mutate 外部传入的 entry 对象（buffer 自身容器可变，不适用
  *    structuredClone 整表对照——纯度断言对象是输入 entry 而非容器）；
- * 4. 长序列形态：10k 条无 id entry 的 feed 正确性 + `e<N>` 确定性 id 全程唯一（O(1)
- *    每帧记账路径的结构验证，不计时——性能画像归基准工具）。
+ * 4. 长序列形态：500 条无 id entry 的 feed 正确性 + `e<N>` 确定性 id 全程唯一 + 0/1/2
+ *    边界微用例（结构验证，不计时——性能画像归基准工具；数据量按「逻辑等价最小规模」
+ *    缩档，判据见 docs/todo/test-single-layer-cleanup.md）。
  *
  * 附带锁定活容器约束的读口义务：snapshot() 是低频浅拷贝（快照不随后续 feed 漂移），
  * `state` 引用恒定、内容随 feed 累积（跨帧持有其容器引用 = 观察到后续变更，属契约外用法）。
@@ -63,6 +64,16 @@ function feedMixed(): ReturnType<typeof createChatViewStateBuffer> {
   const buf = createChatViewStateBuffer()
   for (const entry of mixedEntries()) buf.feed(entry)
   return buf
+}
+
+/** 无 id user entry 序列（`e<N>` 确定性 id 派生路径的载体；n 含 0/1/2 边界档） */
+function idLessEntries(n: number): PiEntry[] {
+  return Array.from({ length: n }, (_, i) => ({
+    type: 'message',
+    parentId: null,
+    timestamp: ISO(i),
+    message: { role: 'user', content: [{ type: 'text', text: `m${i}` }], timestamp: i },
+  }))
 }
 
 describe('createChatViewStateBuffer 连续 feed ≡ reduce(applyEntry) 元断言', () => {
@@ -138,21 +149,30 @@ describe('createChatViewStateBuffer 连续 feed ≡ reduce(applyEntry) 元断言
     expect(a.state.messages).toHaveLength(1)
   })
 
-  it('长序列（10k 条无 id user entry）：id e0..e9999 确定性唯一，buffer feed 与 reduce 产物全等', () => {
-    const entries: PiEntry[] = Array.from({ length: 10_000 }, (_, i) => ({
-      type: 'message',
-      parentId: null,
-      timestamp: ISO(i),
-      message: { role: 'user', content: [{ type: 'text', text: `m${i}` }], timestamp: i },
-    }))
+  it('长序列（500 条无 id user entry）：id e0..e499 确定性唯一，buffer feed 与 reduce 产物全等', () => {
+    const entries = idLessEntries(500)
     const buf = createChatViewStateBuffer()
     for (const entry of entries) buf.feed(entry)
     const viaReduce = entries.reduce(applyEntry, createInitialChatViewState())
     expect(buf.state).toEqual(viaReduce)
-    expect(buf.state.messages).toHaveLength(10_000)
+    expect(buf.state.messages).toHaveLength(500)
     expect(buf.state.messages[0]?.id).toBe('e0')
-    expect(buf.state.messages[9_999]?.id).toBe('e9999')
-    expect(new Set(buf.state.messages.map((m) => m.id))).toHaveLength(10_000)
+    expect(buf.state.messages[499]?.id).toBe('e499')
+    expect(new Set(buf.state.messages.map((m) => m.id))).toHaveLength(500)
+  })
+
+  it('无 id 边界微用例（0/1/2 条）：id 自 e0 起连续派生，buffer feed 与 reduce 产物全等', () => {
+    for (const n of [0, 1, 2]) {
+      const entries = idLessEntries(n)
+      const buf = createChatViewStateBuffer()
+      for (const entry of entries) buf.feed(entry)
+      const viaReduce = entries.reduce(applyEntry, createInitialChatViewState())
+      expect(buf.state, `n=${n}`).toEqual(viaReduce)
+      expect(buf.state.messages, `n=${n}`).toHaveLength(n)
+      expect(buf.state.messages.map((m) => m.id), `n=${n}`).toEqual(
+        Array.from({ length: n }, (_, i) => `e${i}`),
+      )
+    }
   })
 
   it('initial 接续：非空 initial 的 buffer feed ≡ 逐条 reduce(applyEntry, initial)', () => {

@@ -3,7 +3,7 @@
  * W2 VLM 视觉验证——截图脚本（IF2 / B 层基础设施）。
  *
  * 目标：为 minimax-m3 VLM 语义对照提供稳定的截图入口。支持三 target：
- *   - demo  : spawn .tmp/v6 vite dev server（v6 视觉参考实现，localhost:1421）→ chromium.launch → 截图
+ *   - demo  : spawn .tmp/v6 vite dev server（v6 视觉参考实现，localhost:1421；.tmp/v6 为易失工作产物目录，不入库，缺失时先重建）→ chromium.launch → 截图
  *   - devapp: chromium.connectOverCDP('http://localhost:9222') 连已运行的 dev Electron renderer → 复用现有 page → 截图（不 spawn）
  *   - mock  : spawn packages/renderer vite + VITE_MOCK=true（自洽渲染，复用 W1 token-consume-check 范式）→ chromium.launch → 截图
  *

@@ -13,9 +13,10 @@
  *   串行处理）
  *
  * skip-if-no-real-pi：真实 pi 用例已翻轨 faux LLM 轨（L2.5，2026-09-15）——「真实 pi 子进程」
- * describe 门控 FAUX_PI_READY（只判 binary，凭证无关、CI 可跑；被测语义 = 实例快照收敛
- * get_session_stats 权威派生视图，LLM 响应由 fauxResponses 脚本固定）；mock 层 describe 不依赖
- * 凭证，无条件执行。mock 层用例用 fake timers（项目规范，禁真实 sleep）。
+ * describe 门控 TAIJI_TEST_INTEGRATION（集成测试门控，SSOT = test-guard/integration-gate.ts：
+ * 本地默认跳过、CI 或按改动范围触发时真跑；被测语义 = 实例快照收敛 get_session_stats 权威
+ * 派生视图，LLM 响应由 fauxResponses 脚本固定，不依赖凭证）；mock 层 describe 不依赖真进程，
+ * 无条件执行。mock 层用例用 fake timers（项目规范，禁真实 sleep）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ServerMessage } from '@taiji/shared'
@@ -30,7 +31,11 @@ import { translate } from '../../infra/pi/event-adapter.js'
 import type { PiQueueUpdateEvent } from '../../infra/pi/pi-protocol.js'
 import type { IMessageBroker } from '../../interfaces.js'
 import type { IPiEngine, IProcessManager } from '../../services/ports/pi-engine.js'
-import { spawnPiFixture, FAUX_PI_READY, FAUX_PI_SKIP_REASON, type PiFixture } from './pi-fixture.js'
+import { spawnPiFixture, type PiFixture } from './pi-fixture.js'
+import {
+  INTEGRATION_TESTS_ENABLED,
+  INTEGRATION_TESTS_SKIP_REASON,
+} from '../../../../../test-guard/integration-gate.ts'
 
 /** 事件风暴规模：模拟风暴期密集到达的 context 相关事件（防抖应聚合为一次拉取）。 */
 const EVENT_STORM_SIZE = 20
@@ -222,8 +227,8 @@ interface ContextUsageShape {
   percent: number | null
 }
 
-describe.skipIf(!FAUX_PI_READY)(
-  `W8 equivalence: usage / queue / commands 实例收敛（faux-pi 子进程${FAUX_PI_SKIP_REASON ? `｜skip：${FAUX_PI_SKIP_REASON}` : ''}）`,
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `W8 equivalence: usage / queue / commands 实例收敛（faux-pi 子进程，集成测试门控${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}）`,
   () => {
   let fixture: PiFixture | null = null
 

@@ -415,6 +415,11 @@ export { discoverAgents } from "./execution/assembly/agents-assembly.ts";
 // 组装 LifecycleDeps 需要亲手构造三个 port 实现与消费细粒度编排函数，深路径消费
 // 在 npm 形态不可达（发布范围无 `./*` 通配）——宿主触点证据即 zsw 回接设计 D2。
 export { abortRun, runWorkflow } from "./orchestration/lifecycle.ts";
+
+// ArgsValidationError：runWorkflow 首行 args 校验的结构化错误类型（subagent-tool-interface-refactor
+// §3.3.7——壳 tool 层按类型 catch 做保留键同名缺参的双通道解释，不做深路径 import；
+// 校验器本体 validateRunArgs 仍为 core 内部 chokepoint，不进 barrel）。
+export { ArgsValidationError } from "./orchestration/args-validator.ts";
 export {
   terminateRunningRuns,
   evictDoneRunsBeyondCap,
@@ -705,6 +710,22 @@ export {
 
 // run 派生视图（U7 / D8）：runSummary 以 core WorkflowRun 为准的派生视图（双派生视图分叉收尾）。
 export { runSummary } from "./orchestration/workflow-run-summary.ts";
+
+// run 成员视图（subagent-tool-interface-refactor §3.3.3/§3.4）：workflow_control status
+// 成员表的 core 纯函数（record 优先 + trace 兜底；零 IO、时钟显式传入）——壳 tool 层
+// 渲染与截断预算共用同一度量单位（memberViewLine），按类型消费不做深路径 import。
+export {
+  lastErrorOf,
+  memberViewLine,
+  MEMBER_VIEWS_MAX_CHARS,
+  runMemberViews,
+  truncateRunMemberViews,
+  type MemberState,
+  type MemberViewsBudget,
+  type RunMemberEventView,
+  type RunMemberRecordView,
+  type RunMemberView,
+} from "./orchestration/run-member-view.ts";
 
 // ── schema 助手（U9 / D9）─────────────────────────────────────
 // workflow 资产 @pi-meta parameters 的 schema→已知键集与平铺参数检测

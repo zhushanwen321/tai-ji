@@ -34,12 +34,15 @@
  *   对话，锁定 wire 契约与 tool-call-index 真实产出。wire 事件（message_update /
  *   toolcall_start / toolcall_end / tool_execution_start）由 pi 的 AssistantMessageEvent 流水线
  *   与 json-event 序列化产出，provider 无关——faux 流经同一管线产生同构 wire（2026-09-15
- *   探针实测四断言前提全过）。门控 FAUX_PI_READY（只判 binary，凭证无关、CI 可跑）。
+ *   探针实测四断言前提全过）。门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（本地默认跳过，
+ *   CI 与按改动范围触发时真跑；SSOT = test-guard/integration-gate.ts）——spawn 真 pi 的
+ *   wire 契约锁定属「代码 + OS 组合行为」，mock 子集（上一 describe）凭证无关、留默认组。
  *   [pi-bump 触发] pi 版本 bump 时 wire 序列化层（json-event.js 的 id/toolName 顶层提升）是
  *   断言对象，建议 bump 时真实轨重放一次（登记由 e2e-map 承接）。
  */
 import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest'
-import { spawnPiFixture, FAUX_PI_READY, FAUX_PI_SKIP_REASON, type PiFixture } from './pi-fixture.js'
+import { spawnPiFixture, type PiFixture } from './pi-fixture.js'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../test-guard/integration-gate.ts'
 import { translate } from '../../infra/pi/event-adapter.js'
 import type { PiEvent } from '../../infra/pi/pi-protocol.js'
 import { EventInterpreter } from '../../services/session/event-interpreter.js'
@@ -121,8 +124,8 @@ describe('W3 tool-call-index: translate 提取（真实 wire 形态 mock，凭�
   })
 })
 
-describe.skipIf(!FAUX_PI_READY)(
-  `W3 tool-call-index: 真实 pi wire 契约锁定（faux-pi 子进程${FAUX_PI_SKIP_REASON ? `｜skip：${FAUX_PI_SKIP_REASON}` : ''}）`,
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `W3 tool-call-index: 真实 pi wire 契约锁定（faux-pi 子进程${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}）`,
   () => {
   let fixture: PiFixture | null = null
   const sid = 'w3-toolcall'

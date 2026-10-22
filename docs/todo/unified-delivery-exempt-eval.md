@@ -2,7 +2,7 @@
 
 状态：待用户裁决（评估结论：scheduler=不迁；smart-context=不迁）。两域维持现状通道，重审触发见文末汇总；steering mode 覆写复评（unified-delivery 设计 §7 检查点 4）结论 = 维持 one-at-a-time 不覆写。
 
-评估依据：unified-delivery 设计（`.tmp/tech-design/unified-delivery.md` §9 非目标 5 / §3.9 / 附录 C）+ impl-plan 单元 u6-exempt-eval（A17）；port 接口以 u2 已交付实装为准（`extensions/shared/delivery-port`）。全部现状陈述以本仓实码与 pi 实装（`node_modules/@earendil-works/pi-coding-agent/dist`）为依据。
+评估依据：unified-delivery 设计（设计档案已随 .tmp 清理；§9 非目标 5 / §3.9 / 附录 C）+ impl-plan 单元 u6-exempt-eval（A17）；port 接口以 u2 已交付实装为准（`extensions/shared/delivery-port`）。全部现状陈述以本仓实码与 pi 实装（`node_modules/@earendil-works/pi-coding-agent/dist`）为依据。
 
 背景一句话：统一消息投递重构已建投递端口（delivery-port，`extensions/shared/delivery-port`——custom 通知通道的唯一执行者：受理前写投递日志（session entry）、注入直达 pi 原生 steer/followUp 队列、送达回执命中后 ack、pi 崩溃重启后差集重放）。scheduler 与 smart-context 是设计 §9 登记的两个豁免域（默认不迁），本评估按各自现状实码逐项核对迁移收益与代价。
 

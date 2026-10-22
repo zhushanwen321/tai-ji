@@ -1,25 +1,44 @@
 /**
- * PluginHostProcess 单元测试（fork 版宿主侧）
+ * PluginHostProcess 单元测试（fork 版宿主侧）—— in-process 注入桩版
  *
- * 使用 fixtures/plugin-bootstrap-process.mock.cjs 作为 fork 目标（bootstrapPathOverride 注入），
- * fork 真实子进程覆盖 IPC 往返 / 崩溃检测 / 超时清理。
+ * 2026-10-22 单测层整治（判据三档与处置通道见 docs/todo/test-single-layer-cleanup.md）：
+ * 原形态每个用例 fork 真实子进程（b+f 类）——子进程启动 / 退出事件传播 / disconnect
+ * grace 窗口没有确定性完成信号，CPU 满载下无稳定上界。现经 vi.mock 把
+ * node:child_process.fork 换成注入桩（test/helpers/plugin-host-inproc-stubs.ts，
+ * 消息协议逐条对齐 fixtures/plugin-bootstrap-process.mock.cjs 与
+ * fixtures/mock-bootstrap-exit0.cjs）：
+ * - 被测逻辑（分配/复用/IPC 往返/崩溃检测与分流/清理/幂等/重建竞态防护）全部留在
+ *   PluginHostProcess 实装内，桩只替代进程边界；
+ * - 原「等真实事件传播」的 waitFor 轮询与 sleep 观察窗，换成 fake timers 对
+ *   disconnect grace 定时器的确定性推进（advanceTimersByTimeAsync）与测试显式驱动的
+ *   迟到 exit（M6a-03 竞态窗口）；
+ * - 真实 fork 的进程级行为归集成轨（TAIJI_TEST_INTEGRATION 门控）覆盖。
  *
- * 运行命令: pnpm --filter @taiji/runtime test -- test/plugin-host-process.test.ts
+ * 运行命令: pnpm --filter @taiji/runtime exec vitest run test/plugin-host-process.test.ts
  */
 
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { PluginHostProcess } from '../src/services/plugin-service/plugin-host-process.js'
 import { PluginRpcServer } from '../src/services/plugin-service/plugin-rpc-server.js'
+import { fakePluginChildren, resetPluginHostStubs } from './helpers/plugin-host-inproc-stubs.js'
+
+vi.mock('node:child_process', async () =>
+  (await import('./helpers/plugin-host-inproc-stubs')).childProcessModule(),
+)
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+/** fork 目标（bootstrapPathOverride 注入；fork 已桩化，路径仅作构造入参记录）。 */
 const MOCK_BOOTSTRAP = resolve(__dirname, 'fixtures/plugin-bootstrap-process.mock.cjs')
+/** MF-1：sandbox fork 边界断言 execArgv 含 --import（生产 fail-closed 检查，必须满足）。 */
 const NOOP_ESM_LOADER = resolve(__dirname, 'fixtures/noop-esm-loader.cjs')
 
-/** disconnect 宽限注入值（生产默认 250ms 不变；配套检查窗口 sleep 等比缩小）。 */
+/** disconnect 宽限注入值（生产默认 250ms 不变；配套检查窗口经 fake timers 推进）。 */
 const TEST_DISCONNECT_GRACE_MS = 50
+/** grace 定时器推进余量（> 注入宽限即保证到期）。 */
+const GRACE_ADVANCE_MS = TEST_DISCONNECT_GRACE_MS + 10
 
 function createHost(): {
   host: PluginHostProcess
@@ -35,24 +54,22 @@ function createHost(): {
   return { host, rpc }
 }
 
-/** 轮询等待条件成立（上限 timeoutMs），避免固定 sleep 猜时序 */
-async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
-  const start = Date.now()
-  while (!cond()) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error('waitFor timeout')
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25))
-  }
-}
-
 describe('PluginHostProcess', () => {
   const hosts: PluginHostProcess[] = []
 
+  beforeEach(() => {
+    // fake timers：disconnect grace 定时器（宿主分流逻辑的组成部分）由测试确定性推进，
+    // 不依赖真实挂钟——桩的进程事件同步 emit，无需等待传播。
+    vi.useFakeTimers()
+    // 每测试清零 fork 记录：fakePluginChildren() 下标按本测试创建顺序对齐
+    resetPluginHostStubs()
+  })
+
   afterEach(async () => {
-    // 兜底清理残留子进程（即使用例已 shutdown 也无害）
+    // 兜底清理残留子进程（即使用例已 shutdown 也无害；桩的 kill 同步 emit exit）
     await Promise.allSettled(hosts.map((h) => h.shutdown()))
     hosts.length = 0
+    vi.useRealTimers()
   })
 
   function track(host: PluginHostProcess): PluginHostProcess {
@@ -80,6 +97,7 @@ describe('PluginHostProcess', () => {
     expect(handle2!.trustLevel).toBe('sandbox')
     expect(handle1!.status).toBe('active')
     expect(handle2!.status).toBe('active')
+    // pid 来自 child.pid（桩给出确定性非零 pid；`?? -1` 兜底分支不命中）
     expect(handle1!.pid).toBeGreaterThan(0)
     expect(rpc).toBeTruthy()
   })
@@ -101,7 +119,7 @@ describe('PluginHostProcess', () => {
     expect(handle.pluginIds.length).toBe(3)
   })
 
-  // ── TC3: loadPlugin IPC 往返（真实 fork）─────────────────────
+  // ── TC3: loadPlugin IPC 往返（桩回路）────────────────────────
   it('TC3: loadPlugin resolves on loaded from mock child process', async () => {
     const { host } = createHost()
     track(host)
@@ -134,9 +152,11 @@ describe('PluginHostProcess', () => {
 
     const processId = await host.assignProcess('crash-test', 'sandbox')
     const handle = host.getProcessHandle('crash-test')!
+    // 桩按 mock bootstrap 协议响应 crash → 自退 exit(1)：disconnect → exit 事件序
+    // 同步 emit，宿主 exit handler 当场完成崩溃分流（真实传播由集成轨覆盖）
     handle.postMessage({ type: 'crash' })
 
-    await waitFor(() => crashes.length >= 1)
+    expect(crashes.length).toBe(1)
     expect(crashes[0].processId).toBe(processId)
     expect(crashes[0].pluginIds).toContain('crash-test')
     // R3: disconnect 先于 exit 触发 crash（IPC channel 先断），error 为两事件之一
@@ -160,7 +180,7 @@ describe('PluginHostProcess', () => {
     const handle = host.getProcessHandle('fatal-test')!
     handle.postMessage({ type: 'fatal' })
 
-    await waitFor(() => crashes.length >= 1)
+    expect(crashes.length).toBe(1)
     expect(crashes[0].error).toContain('mock fatal error')
     // RT-6#5：crash 收尾即删 processes Map（幽灵条目不再滞留，见 TC5 同款注释）
     expect(host.getProcessHandleById(processId)).toBeUndefined()
@@ -179,14 +199,21 @@ describe('PluginHostProcess', () => {
     const processId = await host.assignProcess('term-test', 'sandbox')
     expect(host.getProcessHandleById(processId)).toBeTruthy()
 
+    // 观测 disconnect 确已到达（kill → 通道关闭的真实事件序）：它是 grace 定时器存在
+    // 的前提——没有它，下方「到期不报」会是空过
+    let disconnected = false
+    fakePluginChildren()[0].on('disconnect', () => { disconnected = true })
+
     await host.terminateProcess(processId)
+    expect(disconnected).toBe(true)
 
     expect(host.getProcessHandleById(processId)).toBeUndefined()
     // rpcServer 已 unregister：invoke 应报 Worker not found
     await expect(rpc.invoke(processId, 'test.method', {})).rejects.toThrow(/not found/i)
 
-    // 等待事件传播，terminated 检查应阻止 crash 回调（覆盖 grace 定时器到期后的形态）
-    await new Promise((resolve) => setTimeout(resolve, TEST_DISCONNECT_GRACE_MS + 50))
+    // kill 触发的 exit/disconnect 已同步传播；再确定性推进过 grace 定时器到期：
+    // pre-mark 的 terminated 检查与 disconnect 幂等检查都必须拦住回调
+    await vi.advanceTimersByTimeAsync(GRACE_ADVANCE_MS)
     expect(crashes.length).toBe(0)
   })
 
@@ -237,17 +264,21 @@ describe('PluginHostProcess', () => {
 
     const processId = await host.assignProcess('idem-test', 'sandbox')
     const handle = host.getProcessHandle('idem-test')!
+    // 观测 disconnect 确已到达（自退 exit(1) 前通道先断的真实事件序）：保证下方
+    // grace 定时器真实存在并被推进，避免「到期不重复报」空过
+    let disconnected = false
+    fakePluginChildren()[0].on('disconnect', () => { disconnected = true })
     handle.postMessage({ type: 'crash' })
 
-    await waitFor(() => crashes.length >= 1)
+    expect(disconnected).toBe(true)
+    expect(crashes.length).toBe(1)
 
-    // 等足够时间让后续事件（如额外 exit/disconnect）传播，检查应阻止重复回调
-    // （sleep 覆盖 grace 定时器到期：到期后幂等检查必须拦住第二次回调）
-    await new Promise((resolve) => setTimeout(resolve, TEST_DISCONNECT_GRACE_MS + 50))
+    // 确定性推进过 grace 定时器到期：到期后幂等检查必须拦住第二次回调
+    await vi.advanceTimersByTimeAsync(GRACE_ADVANCE_MS)
     expect(crashes.length).toBe(1)
   })
 
-  // ── TC12: terminateProcess 对不存在进程是 no-op ──────────────
+  // ── TC12: terminateProcess 对不存在进程是 no-op ───────────────
   it('TC12: terminateProcess is no-op for non-existent process', async () => {
     const { host } = createHost()
     track(host)
@@ -265,15 +296,15 @@ describe('PluginHostProcess', () => {
       crashes.push({ processId, pluginIds, error })
     })
 
-    // 1. 首启 + fatal_error（mock 发 fatal 后延迟 300ms 才退出，留出重建窗口）
+    // 1. 首启 + fatal_error（mock 发 fatal 后旧 child 被宿主 SIGKILL 兜底终结）
     const processId = await host.assignProcess('rebuild-test', 'sandbox')
     const handle = host.getProcessHandle('rebuild-test')!
-    handle.postMessage({ type: 'fatalThenExit' })
+    handle.postMessage({ type: 'fatal' })
 
-    await waitFor(() => crashes.length >= 1)
+    expect(crashes.length).toBe(1)
     // RT-6#5：crash 收尾即删两处 Map（processes + processInstances）——旧 child 的监听
-    // 已在崩溃路径摘除，迟到 exit 无法再触碰任何 handle（M6a-03 语义由 removeAllListeners
-    // 承接，不再依赖 createProcess 的残留清理 lookup）。
+    // 已在崩溃路径摘除（removeAllListeners），迟到 exit 无法再触碰任何 handle
+    // （M6a-03 语义由 removeAllListeners 承接，不再依赖 createProcess 的残留清理 lookup）。
     expect(host.getProcessHandleById(processId)).toBeUndefined()
 
     // 2. 崩溃后重激活（crash 路径是插件系统明确支持的路径）→ 走 createProcess 重建
@@ -284,18 +315,14 @@ describe('PluginHostProcess', () => {
     expect(rebuilt!.status).toBe('active')
     expect(rebuilt!.pid).toBeGreaterThan(0)
 
-    // 3. 等旧进程晚到的 exit 传播：修复前旧 child 监听残留，exit 会命中新 handle
-    //    （健康进程被误标 crashed + crash 回调重复触发）；修复后 createProcess 已
-    //    removeAllListeners 旧 child + handleProcessCrash kill 兜底，不应再有任何影响。
-    //    观察窗须覆盖 mock fatalThenExit 的 300ms 退出延迟 + 传播余量（mock 竞态窗口
-    //    构造部件，与 disconnectGraceMs 无关，不可随宽限注入等比缩小）。负向断言
-    //    （窗口内不出第二起 crash）无完成信号可等——分片采样替换单点盲等（15×40ms
-    //    总窗 600ms 与原观察窗一致），每片让出事件循环后断言一次，回归时中途即红
-    for (let i = 0; i < 15; i++) {
-      await new Promise((r) => setTimeout(r, 40))
-      expect(host.getProcessHandleById(processId)!.status).toBe('active')
-      expect(crashes.length).toBe(1)
-    }
+    // 3. 旧 child 晚到的 exit：原 fixture 的 300ms setTimeout 退出会被崩溃路径的 SIGKILL
+    //    抢占（从未真正到达），原 600ms 采样窗只是「等一个大概率不来的事件」。改为测试
+    //    显式驱动迟到 exit——修复前旧 child 监听残留，exit 会命中新 handle（健康进程被
+    //    误标 crashed + crash 回调重复触发）。
+    const staleChild = fakePluginChildren()[0]
+    staleChild.emitLateExit(1)
+    expect(host.getProcessHandleById(processId)!.status).toBe('active')
+    expect(crashes.length).toBe(1)
   })
 
   // ── TC14: sandbox 复用分支 pluginIds 去重（M6a-06）───────────

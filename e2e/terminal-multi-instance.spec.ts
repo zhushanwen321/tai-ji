@@ -1,8 +1,8 @@
 /**
  * 终端多实例端到端验收 —— 真实 app 轨（L2，零 token，无任何 LLM 调用）。
  *
- * 覆盖设计 `.tmp/tech-design/terminal-multi-instance.md` §4 T1-T13 中**可脚本化**的部分
- * （逐条对应见各 test 标题的 T 号标注）：
+ * 覆盖终端多实例设计 §4 T1-T13（来源设计档案已随 .tmp 清理，git 可追溯）中**可脚本化**的
+ * 部分（逐条对应见各 test 标题的 T 号标注）：
  *
  * - T1 双终端并行（脚本化部分）：⌃`/StatusBar 开底部抽屉 → 「终端 1」→ 「+」→ 两条目 →
  *   两实例各自跑命令并断言**输出**可见 → 切换来回各自历史在屏（分区隔离）→ 不可见实例隐藏期
@@ -42,14 +42,11 @@ import { launchRealApp, waitForRuntime, wsRoundTrip, type WsFrame } from './fixt
 // 轨道判据共享（launch-app-real.ts assertRealRendererBundle 同源导出）：mock/real 两轨共用
 // apps/electron/renderer/dist，MOCK_BUNDLE_MARKER 是「当前产物是 mock 构建」的判据
 import { RENDERER_DIST_ASSETS, MOCK_BUNDLE_MARKER } from './fixtures/launch-app'
+import { SAMPLE_PROJECT } from './fixtures/batch-real-helpers'
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-project')
 
 // ── 超时/节奏常量（全部走 deadline 轮询，禁固定 waitForTimeout）──────────────
 const RUNTIME_START_TIMEOUT_MS = 30_000

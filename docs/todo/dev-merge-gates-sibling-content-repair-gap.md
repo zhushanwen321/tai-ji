@@ -1,6 +1,6 @@
 # 同族 workflow 内容配套类 commit 拦截缺口（review-fix-loop / pr-lifecycle 双胞胎）
 
-状态：已实施 + 验证通过（2026-10-12 收尾）。路线 B 按设计包 commit-content-self-heal（T2 审查 converged：must-fix 轨迹 3→2→0）落齐三份脚本：补修子循环（上限 2 次/报错原文权威源/快照对账/显式路径 add/同命令重跑/终态信息全集）+ 补修 agent 契约（CommitRepairReport 三版字段级同构）+ pr-lifecycle zcode 孪生 PATH 前缀注入（随批裁决）+ attempt throw 文案来源中性更新。验证：真机构造场景 review-fix-loop 批 4/4 PASS（补修成功/不可修终态/env 不可传播进补修/env 恢复成功零补修派发/正常成功零介入）、pr-lifecycle zcode 孪生场景 1 全链 PASS（真实维度审查→修复→拦截→补修→对账披露→重跑成功）+ attempt 自动重跑与来源中性 throw 文案实证；语义走查 pass（16 环节三版一致、0 must-fix）；pi 版降级为走查承接（全链真机单轮 ≥1400 万 token 且 pi `--args` 不支持数组无法 skipSteps——备份 `.bak-20261011` 保留，待首次真实使用观察后删）。实施期范围外必要改动 2 批（呈用户追认）：①孪生 cr-fix 维度裁剪 files.glob 不追 `.agents` symlink 致 reviewers 逃生舱恒空（存量缺陷）→ 改 fs.readdirSync 经 nodeAbs；②孪生 6 处裸 `world.run("node")` 在 PATH 无 node 引擎环境 spawn ENOENT 炸 fix 阶段、U4 不可达 → 全部改走 runNode。验证记录全文 = `.tmp/dev-flow/commit-content-self-heal.verify.md`（.tmp 不入 git，git 可追溯 = 本 commit message）。原方案细节（三处现状/数据流/路线取舍）保留于下方各节备查。
+状态：已实施 + 验证通过（2026-10-12 收尾）。路线 B 按设计包 commit-content-self-heal（T2 审查 converged：must-fix 轨迹 3→2→0）落齐三份脚本：补修子循环（上限 2 次/报错原文权威源/快照对账/显式路径 add/同命令重跑/终态信息全集）+ 补修 agent 契约（CommitRepairReport 三版字段级同构）+ pr-lifecycle zcode 孪生 PATH 前缀注入（随批裁决）+ attempt throw 文案来源中性更新。验证：真机构造场景 review-fix-loop 批 4/4 PASS（补修成功/不可修终态/env 不可传播进补修/env 恢复成功零补修派发/正常成功零介入）、pr-lifecycle zcode 孪生场景 1 全链 PASS（真实维度审查→修复→拦截→补修→对账披露→重跑成功）+ attempt 自动重跑与来源中性 throw 文案实证；语义走查 pass（16 环节三版一致、0 must-fix）；pi 版降级为走查承接（全链真机单轮 ≥1400 万 token 且 pi `--args` 不支持数组无法 skipSteps——备份 `.bak-20261011` 保留，待首次真实使用观察后删）。实施期范围外必要改动 2 批（呈用户追认）：①孪生 cr-fix 维度裁剪 files.glob 不追 `.agents` symlink 致 reviewers 逃生舱恒空（存量缺陷）→ 改 fs.readdirSync 经 nodeAbs；②孪生 6 处裸 `world.run("node")` 在 PATH 无 node 引擎环境 spawn ENOENT 炸 fix 阶段、U4 不可达 → 全部改走 runNode。验证记录全文为 dev-flow 过程产物（已随 .tmp 清理，不入 git；git 可追溯 = 本 commit message）。原方案细节（三处现状/数据流/路线取舍）保留于下方各节备查。
 
 ## 三处现状实装（2026-10-11 逐行核实；行号以当日文件为准）
 
@@ -112,7 +112,7 @@ dev-merge-gates 是组级 commit 编排（committer agent 按多组计划逐组�
 ## 实施后验证
 
 1. 语义走查：三份 diff 对照上方数据流逐环节核对（报错捕获 → env 分支 → 补修 agent 自判 → 对账 → add → 重跑 → 上限 → 终态信息完整），三版语义一致、仅平台 API 形态差异。
-2. 真机构造验证（每份脚本一次）：测试仓库装临时 pre-commit hook（如「docs/x.md 必须含某标记否则 exit 1」）→ 制造缺登记的 staged 改动 → 跑 workflow 触发统一 commit → 观察补修 agent 产出 → 对账 → git add → 重跑成功路径；再构造补修必然失败的场景（标记要求自相矛盾）观察 ≤2 次上限后 fix-failure 终态与信息完整 → 移除临时 hook，验证记录落 `.tmp/`。
+2. 真机构造验证（每份脚本一次）：测试仓库装临时 pre-commit hook（如「docs/x.md 必须含某标记否则 exit 1」）→ 制造缺登记的 staged 改动 → 跑 workflow 触发统一 commit → 观察补修 agent 产出 → 对账 → git add → 重跑成功路径；再构造补修必然失败的场景（标记要求自相矛盾）观察 ≤2 次上限后 fix-failure 终态与信息完整 → 移除临时 hook，验证记录落 `.tmp/`（易失工作产物目录，不入库）。
 3. 现行回归点：env 类恢复路径行为不变（content 分支只接在其后）；commit 成功路径零变化；显式路径纪律不变。
 
 ## 核实附记（2026-10-11）

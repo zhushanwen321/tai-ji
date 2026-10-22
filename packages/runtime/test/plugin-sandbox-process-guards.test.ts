@@ -7,12 +7,18 @@
  * 隔离 CJS 进程中调用真实 initSandbox，进程退出即丢弃全部污染。
  *
  * 回归保护目标：未来 sandbox 重构若删除/弱化 override（如「清理死代码」），本测试拦截。
+ *
+ * 层级归属（docs/todo/test-single-layer-cleanup.md 判据三档）：隔离进程本身即测试目的
+ * （真实 fork + tsx CJS hook 注册链属「代码 + OS 组合行为」，无确定性完成信号可等），
+ * 故整组经集成测试门控（TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts）
+ * 移出默认单测轨——本地默认跳过，CI 或按改动范围触发时真跑。
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { fork } from 'node:child_process'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createTsxPathsTsconfig, type TsxPathsTsconfig } from './helpers/tsx-fork-tsconfig.js'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../test-guard/integration-gate.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FIXTURE = resolve(__dirname, 'fixtures/sandbox-process-guards.fixture.cjs')
@@ -60,7 +66,9 @@ function runFixture(): Promise<GuardResult> {
   })
 }
 
-describe('MF-1: initSandbox process 检查（process.kill / process.ppid）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `MF-1: initSandbox process 检查（process.kill / process.ppid）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   // 临时 tsconfig 生命周期 = describe 级（mkdtemp 自建自删，测试红线）
   beforeAll(() => {
     tsxTsconfig = createTsxPathsTsconfig()
@@ -69,9 +77,9 @@ describe('MF-1: initSandbox process 检查（process.kill / process.ppid）', ()
     tsxTsconfig?.dispose()
     tsxTsconfig = null
   })
-  // 超时豁免登记（口径对齐 plugin-host.test.ts fork 用例的显式超时登记）：真实 fork 子进程
-  // + execArgv ['--import','tsx'] 注册链，CI 满并行下冷启可达数秒超 vitest 默认 5s testTimeout；
-  // 本地实测 0.25s——15s 是 CI 负载余量非真实耗时。
+  // 超时登记（用例级门控后仅集成轨真跑时生效）：真实 fork 子进程 + execArgv
+  // ['--import','tsx'] 注册链，CI 满并行下冷启可达数秒超 vitest 默认 5s testTimeout；
+  // 本地实测 0.25s——15s 是 CI 负载余量非真实耗时，且只作用于门控开启后的集成轨。
   it('process.kill 被封堵 → 抛 PERMISSION_DENIED（阻断 DoS 向量）', async () => {
     const result = await runFixture()
     // MF-2 核心防护：sandbox 插件 process.kill(process.ppid,'SIGKILL') 必须被拦截
@@ -79,7 +87,7 @@ describe('MF-1: initSandbox process 检查（process.kill / process.ppid）', ()
     expect(result.killErrorCode).toBe('PERMISSION_DENIED')
   }, 15000)
 
-  // 超时豁免登记同上（同一 fork + tsx 注册链，15s = CI 负载余量，本地实测 0.25s）
+  // 超时登记同上（同一 fork + tsx 注册链，15s = CI 负载余量，本地实测 0.25s）
   it('process.ppid 被屏蔽 → undefined（阻断父进程 PID 定位）', async () => {
     const result = await runFixture()
     expect(result.ppidMasked).toBe(true)

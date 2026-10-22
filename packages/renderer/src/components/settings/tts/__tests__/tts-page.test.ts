@@ -249,35 +249,31 @@ describe('保存提交与保存并测试', () => {
     expectToastContaining('已保存')
   })
 
-  it('apiKeys：有输入才带；清除按钮 → null；联动带入 → from-provider（仅 providerKeyAvailable 时可点）', async () => {
-    // a) 手动粘贴 Key
+  it('apiKeys a) 手动粘贴才带：有输入 → 提交明文；未输入且未点动作 → apiKeys 缺席该家（不动）', async () => {
     let w = await mountPage()
     await sel(w, 'tts-apikey-input-minimax').setValue('sk-test-123')
     expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: 'sk-test-123' })
-    // 未输入且未点动作 → apiKeys 缺席该家（不动）
     w.unmount()
     ttsApiMock.configure.mockClear()
     w = await mountPage()
     expect((await saveAndCaptureApiKeys(w))?.minimax).toBeUndefined()
-    w.unmount()
-    ttsApiMock.configure.mockClear()
+  })
 
-    // b) 联动（MiniMax providerKeyAvailable=true）：提示行渲染 + 带入 → 'from-provider'
+  it('apiKeys b) 联动带入（MiniMax providerKeyAvailable=true）：提示行渲染 + 带入 → from-provider；不参与家无提示行', async () => {
     ttsApiMock.getConfig.mockImplementation(() => Promise.resolve({ config: configWithKeyAvailable('minimax') }))
-    w = await mountPage()
+    const w = await mountPage()
     expect(sel(w, 'tts-key-link-hint-minimax').exists()).toBe(true)
     // StepFun 恒不参与联动（providerKeyAvailable false → 提示行不渲染）
     expect(sel(w, 'tts-key-link-hint-stepfun').exists()).toBe(false)
     await sel(w, 'tts-key-bring-minimax').trigger('click')
     expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: 'from-provider' })
-    w.unmount()
+  })
 
-    // c) 清除：hasApiKey 家点清除 → null
-    ttsApiMock.configure.mockClear()
+  it('apiKeys c) 清除：hasApiKey 家点清除按钮 → 提交 null', async () => {
     const clearedConfig = configFixture()
     clearedConfig.providers.minimax.hasApiKey = true
     ttsApiMock.getConfig.mockImplementation(() => Promise.resolve({ config: clearedConfig }))
-    w = await mountPage()
+    const w = await mountPage()
     expect(sel(w, 'tts-apikey-clear-minimax').exists()).toBe(true)
     await sel(w, 'tts-apikey-clear-minimax').trigger('click')
     expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: null })
