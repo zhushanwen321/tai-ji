@@ -1,10 +1,10 @@
 /**
  * SystemPage · 智能上下文压缩 Section 测试（SystemSmartContextSection）。
  *
- * mount 分两级：首屏冒烟走 mountSystemPage 全页集成入口（容器编排回归锚 + 全页级联加载
- * 的用户可见断言）；交互断言用例走 mountSystemSection 直挂单 Section——全页集成树
- * （6 Section + UpdateCheckCard 等）的编译成本对单 Section 交互断言是纯浪费，且被测
- * 断言对象（setting-smart-context-* 全族 testid）都落在 SystemSmartContextSection 内。
+ * mount 统一走 mountSystemSection 直挂单 Section：被测断言对象（setting-smart-context-*
+ * 全族 testid）都落在 SystemSmartContextSection 内，全页集成树（7 Section 等）的编译成本
+ * 对本文件断言是纯浪费；SystemPage 容器编排回归锚由 rename-session-page.test.ts 的
+ * mountPage 用例承担。
  *
  * 覆盖：
  *  - 首屏冒烟：DOM 含 switch / model Select / 3 档阈值 input / 排除容器（用户可见断言）。
@@ -16,14 +16,14 @@
  *  - 排除 tag：getSmartContextConfig 返回 excludedModels → tag 文本渲染；点 × → 列表移除项被传。
  *
  * mock 策略：mock 工厂 / fixtures / mount 编排经 __tests__/helpers/system-page-mount
- *  共享；vi.mock 注册 + 超时放宽 + 生命周期骨架经 __tests__/helpers/system-page-test-setup
+ *  共享；vi.mock 注册 + 生命周期骨架经 __tests__/helpers/system-page-test-setup
  *  一站式 setup（import 即注册 + setupSystemPageTest 工厂，两个 SystemPage 集成测试文件单源）；
  *  用例断言与特定覆写保留在各自 describe。
  *  settings store 经 provideSettingsStore(createSettingsStore()) 每用例注入全新实例，无跨用例残留。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/settings/system-page-smart-context.test.ts
  */
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, beforeAll } from 'vitest'
 import {
   flushPromises,
   seedStore,
@@ -32,9 +32,14 @@ import {
 } from '../helpers/system-page-test-setup'
 
 // 工厂引用 helper 单例（seam 桩与断言共享同一 mock fn 实例）
-const { settingsMock, mountPage, mountSection, pageWrapper } = setupSystemPageTest(
-  () => import('@/components/settings/system/SystemSmartContextSection.vue'),
-)
+const loadSmartContextSection = () =>
+  import('@/components/settings/system/SystemSmartContextSection.vue')
+const { settingsMock, mountSection, pageWrapper } = setupSystemPageTest(loadSmartContextSection)
+
+// Section 模块图预热一次（h 类整治）：依赖链（@taiji/ui GroupCard / @taiji/core transport /
+// useAuthedModelGroups 等）装载成本落文件级 beforeAll，首条用例只付 mount 成本。vi.mock
+// 注册在测试文件 import 期完成、先于本 hook，动态 import 保持 TDZ 安全。
+beforeAll(loadSmartContextSection)
 
 beforeEach(() => {
   // 本文件默认值覆写：切 Switch 用例断言传参 false，响应也用 false 保持一致形态
@@ -44,7 +49,7 @@ beforeEach(() => {
 
 describe('SystemSmartContextSection 智能上下文压缩', () => {
   it('mount 后 DOM 含 switch / model Select / 3 档阈值 input / 排除容器', async () => {
-    await mountPage()
+    await mountSection()
     expect(pageWrapper()!.find('[data-testid="setting-smart-context-switch"]').exists()).toBe(true)
     expect(pageWrapper()!.find('[data-testid="setting-smart-context-model"]').exists()).toBe(true)
     expect(pageWrapper()!.find('[data-testid="setting-smart-context-threshold-1"]').exists()).toBe(true)

@@ -37,7 +37,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/panel-container-drawer-mode.test.ts
  */
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, vi, afterEach } from 'vitest'
 import { mount, enableAutoUnmount } from '@vue/test-utils'
 import { defineComponent, ref, computed, nextTick, reactive, type Component } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -167,9 +167,16 @@ async function mountOpenAndCloseDrawer(sid: string, stubOverrides: Record<string
   return wrapper
 }
 
+// 模块图文件级预热（vi.mock 工厂经 hoisting 先于本 import 注册，mock 语义不变）：
+// PanelContainer 整图 transform 集中在此一次，全部用例只付 mount 成本（此前首个
+// 动态 import 落在首个用例内，3.11s 一条的主因）。
+let PanelContainer: (typeof import('@/components/workspace/PanelContainer.vue'))['default']
+
+beforeAll(async () => {
+  PanelContainer = (await import('@/components/workspace/PanelContainer.vue')).default
+})
+
 async function mountContainer(stubOverrides: Record<string, Component> = {}) {
-  // 动态 import 让 vi.mock 先生效
-  const PanelContainer = (await import('@/components/workspace/PanelContainer.vue')).default
   return mount(PanelContainer, {
     global: {
       stubs: {
@@ -197,7 +204,23 @@ beforeEach(() => {
 enableAutoUnmount(afterEach)
 
 describe('drawer-tab 注册表契约（L1 全量收敛点，display-containers §7.2）', () => {
-  it('drawer 打开态渲染注册表派生视图的全部 L1 tab（8 条终态，terminal/browser 均不在）+ 注册表形状 右 8/底 1/浮 2', async () => {
+  // 形状契约 = 纯数据断言（注册表 import 自 core/domain/drawer + helpers 常量，无 mount）：
+  // 注册表派生数据本身的机器锚，与渲染断言分离后零渲染成本。
+  it('注册表形状：L1 8 成员（terminal/browser/workflow 均不在）；右 8/底 1/浮 2 + 底抽屉首内容 = terminal', () => {
+    // terminal 迁出 L1（用户可见：右抽屉不再有终端图标——入口改底抽屉 ⌃` / 顶栏终端开关按钮）；
+    // browser 迁出 L1（用户可见：右抽屉不再有浏览器图标——能力在浮层复活，点 localhost 链接进入）
+    expect(L1_DRAWER_TABS).toHaveLength(8)
+    expect(L1_DRAWER_TABS).not.toContain('terminal')
+    expect(L1_DRAWER_TABS).not.toContain('browser')
+    expect(L1_DRAWER_TABS).not.toContain('workflow')
+    // 注册表形状机器锚（§8.2：右 8/底 1/浮 2——迁移源侧清空；[2026-10-19] workflow tab 删除 + trace 一级 tab 追加）
+    expect(RIGHT_DRAWER_REGISTRY).toHaveLength(8)
+    expect(BOTTOM_DRAWER_REGISTRY).toHaveLength(1)
+    expect(OVERLAY_REGISTRY).toHaveLength(2)
+    expect(CONTAINER_REGISTRY['bottom-drawer'][0]?.content).toBe('terminal')
+  })
+
+  it('drawer 打开态渲染注册表派生视图的全部 L1 tab 按钮（8 个，terminal/browser/workflow 按钮不在）', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-tab-registry')
     openDrawerTab('git')
@@ -208,20 +231,11 @@ describe('drawer-tab 注册表契约（L1 全量收敛点，display-containers �
     for (const key of L1_DRAWER_TABS) {
       expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists(), `drawer-tab-${key} 应存在`).toBe(true)
     }
-    // terminal 迁出 L1（用户可见：右抽屉不再有终端图标——入口改底抽屉 ⌃` / 顶栏终端开关按钮）；
-    // browser 迁出 L1（用户可见：右抽屉不再有浏览器图标——能力在浮层复活，点 localhost 链接进入）
-    expect(L1_DRAWER_TABS).toHaveLength(8)
     expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="drawer-tab-browser"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="drawer-tab-workflow"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(8)
-
-    // 注册表形状机器锚（§8.2：右 8/底 1/浮 2——迁移源侧清空；[2026-10-19] workflow tab 删除 + trace 一级 tab 追加）
-    expect(RIGHT_DRAWER_REGISTRY).toHaveLength(8)
-    expect(BOTTOM_DRAWER_REGISTRY).toHaveLength(1)
-    expect(OVERLAY_REGISTRY).toHaveLength(2)
-    expect(CONTAINER_REGISTRY['bottom-drawer'][0]?.content).toBe('terminal')
-  }, 60_000)
+  })
 })
 
 describe('PanelContainer 单 panel + Drawer 壳路径（AC9/AC12 冒烟载体）', () => {
@@ -238,7 +252,7 @@ describe('PanelContainer 单 panel + Drawer 壳路径（AC9/AC12 冒烟载体）
     expect(wrapper.find('[data-testid="drawer-content"]').exists()).toBe(true)
     // git tab 内容面板经 slot 注入（C2 v-if chain）
     expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
-  }, 60_000)
+  })
 
   it('drawerOpen=false：无 drawer-panel aside，drawer-area 收缩 0%（内容卸载、宽度承载者常驻）', async () => {
     const panel = usePanelStore()
@@ -249,7 +263,7 @@ describe('PanelContainer 单 panel + Drawer 壳路径（AC9/AC12 冒烟载体）
 
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid="panel"]')).toHaveLength(1)
-  }, 60_000)
+  })
 
   // R3 抽屉域焦点收敛（MF-1-51）：抽屉挂载层（drawer-area = 右抽屉 FindBar surface）持
   // input 聚焦零框作用域，双属性同压——MF-1-71 后全局 Input 聚焦走 outline 通道，
@@ -266,7 +280,7 @@ describe('PanelContainer 单 panel + Drawer 壳路径（AC9/AC12 冒烟载体）
     const area = wrapper.find('[data-testid="drawer-area"]')
     expect(area.classes()).toContain('[&_input:focus-visible]:outline-none')
     expect(area.classes()).toContain('[&_input:focus-visible]:shadow-none')
-  }, 60_000)
+  })
 })
 
 // 首屏冒烟（TC1）：DrawerPanel 探针 stub 仅本用例覆盖——断言壳派发的 sessionId 落进
@@ -307,7 +321,7 @@ describe('PanelContainer 首屏冒烟（TC1）', () => {
     expect(wrapper.find('[data-testid="main-area"]').classes()).toContain('ease-[var(--ease)]')
     // DrawerPanel 探针收到壳派发的 sessionId（分区键跟随 panel）
     expect(wrapper.find('[data-testid="drawer-panel"]').attributes('data-session-id')).toBe('sess-tc1')
-  }, 60_000)
+  })
 })
 
 describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言壳路径版）', () => {
@@ -326,13 +340,13 @@ describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言�
     await nextTick()
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="panel"]').exists()).toBe(true)
-  }, 60_000)
+  })
 
   it('close 按钮点击 → drawer 关闭（DrawerPanel emit close → 壳 closeDrawer）', async () => {
     const wrapper = await mountOpenAndCloseDrawer('s-close-btn')
     // 壳层过渡 ease 不随开合方向变化（恒 --ease；E5 分向缓动只属显隐层）
     expect(wrapper.find('[data-testid="main-area"]').classes()).toContain('ease-[var(--ease)]')
-  }, 60_000)
+  })
 
   it('点 drawer-close 关闭后焦点回 composer（§6.7 焦点契约右抽屉鼠标通道，TerminalToggleButton（终端开关）同款）', async () => {
     // focusComposer 按 testid/class 查 document——测试内挂真实 composer 锚
@@ -345,7 +359,7 @@ describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言�
     } finally {
       document.body.innerHTML = ''
     }
-  }, 60_000)
+  })
 
   it('PanelHeader 开关按钮：关闭分支焦点回 composer，打开分支不抢焦点（镜像 TerminalToggleButton）', async () => {
     document.body.innerHTML = '<div class="composer-box" data-testid="composer-box" tabindex="0"></div>'
@@ -378,7 +392,7 @@ describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言�
     } finally {
       document.body.innerHTML = ''
     }
-  }, 60_000)
+  })
 })
 
 // bashTask tab 接线（background-task-sidebar-view D5③：v-if chain 加分支 + 未选中空态 fallback）
@@ -395,7 +409,7 @@ describe('PanelContainer bashTask tab 接线（D5③）', () => {
 
     expect(wrapper.find('[data-testid="bash-task-detail-panel"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(false)
-  }, 60_000)
+  })
 
   it('bashTask + 未选中任务（selectedBackgroundTaskId undefined）→ 不注入 → DrawerPanel 空态 fallback', async () => {
     const panel = usePanelStore()
@@ -409,7 +423,7 @@ describe('PanelContainer bashTask tab 接线（D5③）', () => {
     expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(true)
     // bashTask tab 按钮随 RightDrawerTab 终态常驻（DrawerPanel D5②）
     expect(wrapper.find('[data-testid="drawer-tab-bashTask"]').exists()).toBe(true)
-  }, 60_000)
+  })
 })
 
 // plan tab 接线（plan 模式重设计 u1-drawer-tab + u1-docs-panel：v-if chain 分支 + 面板常驻注入；
@@ -430,7 +444,7 @@ describe('PanelContainer plan tab 接线（u1-drawer-tab + u1-docs-panel）', ()
     expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(false)
     // plan tab 按钮随右抽屉注册表条目常驻（DrawerPanel TabMeta；全量清单归注册表契约用例）
     expect(wrapper.find('[data-testid="drawer-tab-plan"]').exists()).toBe(true)
-  }, 60_000)
+  })
 
   it('切走 tab（git）→ plan 面板卸载（v-if 按 tab 激活切换）', async () => {
     const panel = usePanelStore()
@@ -446,7 +460,7 @@ describe('PanelContainer plan tab 接线（u1-drawer-tab + u1-docs-panel）', ()
     await nextTick()
     expect(wrapper.find('[data-testid="plan-docs-panel"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
-  }, 60_000)
+  })
 })
 
 describe('PanelContainer unread badge 壳侧补回（AC-13，旧 SideDrawer 逻辑迁移）', () => {
@@ -465,7 +479,7 @@ describe('PanelContainer unread badge 壳侧补回（AC-13，旧 SideDrawer 逻�
     await nextTick()
     expect(wrapper.find('[data-testid="drawer-unread-badge"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="drawer-unread-badge"]').text()).toContain('2')
-  }, 60_000)
+  })
 
   it('关 drawer（回对话流）→ unreadCount 清零，badge 消失', async () => {
     const panel = usePanelStore()
@@ -482,7 +496,7 @@ describe('PanelContainer unread badge 壳侧补回（AC-13，旧 SideDrawer 逻�
     await wrapper.find('[data-testid="drawer-close"]').trigger('click')
     await nextTick()
     expect(wrapper.find('[data-testid="drawer-unread-badge"]').exists()).toBe(false)
-  }, 60_000)
+  })
 })
 
 // ── 动态宽度（feat-chat-flow-width）：无 drawer 卡撑满 + 内容列 2/3（720px 下限撑满）/ 有 drawer 拆分 + 拖动/键盘/持久化 ──
@@ -539,7 +553,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     } finally {
       restoreRect()
     }
-  }, 60_000)
+  })
 
   it('无 drawer 窄 panel：2/3 实算低于 720px 下限 → 内容列撑满封 720（min(720px, 100%)）', async () => {
     // 1000 × 2/3 ≈ 667 < 720 → 下限触发撑满（drawer 挤窄后恒撑满同因）；撑满封 720 cap
@@ -556,7 +570,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     } finally {
       restoreRect()
     }
-  }, 60_000)
+  })
 
   it('有 drawer（默认）：main = calc(100% - 50% - 4px) + margin 0 贴左 + 内容列恒撑满，drawer = 50%，handle 挂载', async () => {
     const panel = usePanelStore()
@@ -574,7 +588,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     expect(areaWidth(wrapper, 'drawer-area')).toBe('50%')
     const handle = expectResizeHandleReachable(wrapper)
     expect(handle.attributes('tabindex')).toBe('0')
-  }, 60_000)
+  })
 
   it('拖动：pointerdown+move 更新宽度并 clamp 到 [20,60]，pointerup 持久化 localStorage；拖动期间 transition 移除', async () => {
     const panel = usePanelStore()
@@ -611,7 +625,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     expect(localStorage.getItem('taiji:drawer-width')).toBe('20')
     expect(wrapper.find('[data-testid="main-area"]').classes().join(' ')).toContain('transition-[width]')
     expect(handle.attributes('data-state')).toBeUndefined()
-  }, 60_000)
+  })
 
   it('键盘微调：ArrowLeft/Right ±2% 并 clamp，同步持久化', async () => {
     const panel = usePanelStore()
@@ -636,7 +650,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     await handle.trigger('keydown', { key: 'Enter' })
     await nextTick()
     expect(areaWidth(wrapper, 'drawer-area')).toBe('60%')
-  }, 60_000)
+  })
 
   it('持久化恢复：localStorage 预置 35 → mount 后 drawer 35%；非法值回退 50；越界值 clamp', async () => {
     localStorage.setItem('taiji:drawer-width', '35')
@@ -670,7 +684,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     wrapper = await mountContainer()
     await nextTick()
     expect(areaWidth(wrapper, 'drawer-area')).toBe('60%')
-  }, 60_000)
+  })
 
   it('开合切换：drawer 打开后 main 从撑满（内容列 2/3）动画到拆分比例（内容列恒撑满），断言终态', async () => {
     const panel = usePanelStore()
@@ -693,7 +707,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     expect(areaStyle(wrapper, 'main-area')).toContain('margin-left: 0')
     expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: 100%')
     expect(areaWidth(wrapper, 'drawer-area')).toBe('50%')
-  }, 60_000)
+  })
 })
 
 // btw tab 接线（btw-question D7，M3-a）：v-if chain 加分支 + 面板常驻注入（与 plan 同款
@@ -713,7 +727,7 @@ describe('PanelContainer btw tab 接线（btw-question D7 M3-a）', () => {
     expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(false)
     // btw tab 按钮随右抽屉终态 8 员常驻（DrawerPanel TabMeta；全量清单归注册表契约用例）
     expect(wrapper.find('[data-testid="drawer-tab-btw"]').exists()).toBe(true)
-  }, 60_000)
+  })
 
   it('切走 tab（git）→ btw 面板卸载（v-if chain 互斥）', async () => {
     const panel = usePanelStore()
@@ -728,5 +742,5 @@ describe('PanelContainer btw tab 接线（btw-question D7 M3-a）', () => {
     await nextTick()
     expect(wrapper.find('[data-testid="btw-panel"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
-  }, 60_000)
+  })
 })

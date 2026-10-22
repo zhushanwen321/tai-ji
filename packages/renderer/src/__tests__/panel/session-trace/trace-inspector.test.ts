@@ -14,9 +14,9 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/session-trace/trace-inspector.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest'
 import { computed, defineComponent, nextTick, reactive } from 'vue'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import type { ServerMessageMap } from '@taiji/shared'
@@ -153,9 +153,17 @@ const PanelStub = defineComponent({
   template: '<div data-testid="panel" :data-panel-id="panelId" />',
 })
 
+// PanelContainer 组件构造器（beforeAll 预热填充）：整图 transform 首载成本（junit 实测
+// 单条 13s+）一次性移入文件级 beforeAll，不落在任何单条用例预算内（test-single-layer-cleanup
+// h 类处置：模块图首载预热共享；vi.mock 声明提升到文件顶部，预热 import 时 mock 已生效）
+let PanelContainerCtor: (typeof import('@/components/workspace/PanelContainer.vue'))['default']
+
+beforeAll(async () => {
+  PanelContainerCtor = (await import('@/components/workspace/PanelContainer.vue')).default
+})
+
 async function mountContainer() {
-  const PanelContainer = (await import('@/components/workspace/PanelContainer.vue')).default
-  return mount(PanelContainer, {
+  return mount(PanelContainerCtor, {
     global: {
       stubs: {
         Panel: PanelStub,
@@ -168,10 +176,9 @@ async function mountContainer() {
 
 async function readyPartition() {
   ensureTraceLoaded(SID)
-  // mock 数据一个微任务即 ready，interval 缺省 50ms 白付一个轮询 tick——缩到 1ms 只改轮询
-  // 粒度，等待语义不变（下同：本文件三处 vi.waitFor 统一处理，timeout 显式 5s——
-// 全量并发高负载下缺省 1s 上限曾产偶发假失败，interval 轮询粒度不变）
-  await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'), { interval: 1, timeout: 5_000 })
+  // mock 回包是纯微任务链（mockResolvedValue → loadTrace 续体同步写 ready，链上无定时器）：
+  // flushPromises 打一次 macrotask 边界，微任务清空是事件循环保证——构造性必达，无轮询窗口
+  await flushPromises()
 }
 
 beforeEach(() => {
@@ -438,11 +445,11 @@ describe('SESSION 行溯源跳转失败的用户反馈（onJumpParent catch+toas
     jumpMock.jumpToParentSession.mockRejectedValue(new Error('selectSession boom'))
     const { view, btn } = await mountSessionInspector()
     await btn.trigger('click')
-    await vi.waitFor(() => {
-      const errorToast = useToast().toasts.value.find((toast) => toast.type === 'error')
-      expect(errorToast).toBeDefined()
-      expect(errorToast?.message).toContain('trace 加载超时')
-    }, { interval: 1, timeout: 5_000 })
+    // mock reject → catch → toastError 同步写 toasts（纯微任务链）：flushPromises 构造性必达
+    await flushPromises()
+    const errorToast = useToast().toasts.value.find((toast) => toast.type === 'error')
+    expect(errorToast).toBeDefined()
+    expect(errorToast?.message).toContain('trace 加载超时')
     view.unmount()
   })
 
@@ -450,11 +457,10 @@ describe('SESSION 行溯源跳转失败的用户反馈（onJumpParent catch+toas
     jumpMock.jumpToParentSession.mockResolvedValue({ ok: false, reason: 'target_not_found' })
     const { view, btn } = await mountSessionInspector()
     await btn.trigger('click')
-    await vi.waitFor(() => {
-      const errorToast = useToast().toasts.value.find((toast) => toast.type === 'error')
-      expect(errorToast).toBeDefined()
-      expect(errorToast?.message).toContain('未找到源 session')
-    }, { interval: 1, timeout: 5_000 })
+    await flushPromises()
+    const errorToast = useToast().toasts.value.find((toast) => toast.type === 'error')
+    expect(errorToast).toBeDefined()
+    expect(errorToast?.message).toContain('未找到源 session')
     view.unmount()
   })
 })
@@ -487,12 +493,15 @@ describe('safeJson 检查 + 损坏行行号未知降级（RD-2#5 / RD-2#6）', (
     view.unmount()
   })
 
-  it('[RD-2#5] arguments 超 200KB → 截断展示 + 「过大已截断」标记行（巨型 payload 不整段渲染）', async () => {
-    const { view, args } = await mountBlockArguments(snapshotWithToolCallArguments({ blob: 'x'.repeat(210 * 1024) }))
+  it('[RD-2#5] arguments 超 200KB 阈值 → 截断展示 + 「过大已截断」标记行（巨型 payload 不整段渲染）', async () => {
+    // 阈值锚定 TraceInspector.vue 的 RAW_JSON_MAX_CHARS（204_800 字符）：超 1 字符即走
+    // 截断分支——「阈值 +1」与「阈值 +10KB」证明的是同一条路径，不付多余序列化/渲染成本
+    const RAW_JSON_MAX_CHARS = 204_800
+    const { view, args } = await mountBlockArguments(snapshotWithToolCallArguments({ blob: 'x'.repeat(RAW_JSON_MAX_CHARS + 1) }))
     expect(args.exists()).toBe(true)
     expect(args.text()).toContain('过大，已截断')
     // 截断生效：DOM 文本不超阈值 + 标记行余量
-    expect(args.text().length).toBeLessThanOrEqual(200 * 1024 + 200)
+    expect(args.text().length).toBeLessThanOrEqual(RAW_JSON_MAX_CHARS + 200)
     view.unmount()
   })
 
