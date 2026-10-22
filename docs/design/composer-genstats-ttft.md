@@ -126,6 +126,6 @@ S1/S2/S3 落 U4；S4 落 U1+U3（恢复路径协议 + 服务回填）；S5 落 U
 
 | 轮次 | 报告 | must_fix | 处置 |
 |------|------|----------|------|
-| R1 | 主审 / 影响面审 / 简洁审（2026-09-22，`.tmp/tech-design/design-review-20260922-181552*.md`） | 去重后 3 条，全部成立（源码逐条核实） | ① 压缩口径时序反向 → §3.2 重写窗口构成 + [HISTORICAL] 标注；② TtftRecord 单元素组被 isValidRecord 丢弃 → §3.3 校验参数化**（R2 扩至 service 侧 appendRecord/entriesSince 泛型化）** + S8 双向单测；③ interpreter 三点兜底钩冗余 → §3.2 删除 + 否决表 E |
+| R1 | 主审 / 影响面审 / 简洁审（2026-09-22，审查报告为 tech-design 过程产物，已随 .tmp 清理） | 去重后 3 条，全部成立（源码逐条核实） | ① 压缩口径时序反向 → §3.2 重写窗口构成 + [HISTORICAL] 标注；② TtftRecord 单元素组被 isValidRecord 丢弃 → §3.3 校验参数化**（R2 扩至 service 侧 appendRecord/entriesSince 泛型化）** + S8 双向单测；③ interpreter 三点兜底钩冗余 → §3.2 删除 + 否决表 E |
 | R1-suggestion | 3+3+1 条 | — | **采纳**：p50 行 label 不复用「今日均值」（§3.1 新 i18n key）、阈值初值 + 重审触发声明（§3.1）、interpreter 分发检查（§3.5/U2）、e2e 预列补 MOCK-01/EQUIV-01 + 机器对账落定（§4.2）、pi 语义依赖登记探针（§3.2）、S7 补工具轮重锚契约钉；**登记不采纳**：ttft/durationMs 生命周期差异加一句理由（两者消费同点、差异已由 §3.2 重锚清除不变量覆盖，不另占篇幅） |
 | R2/R2b 聚焦复审 | 主审 R2 报告 + 简洁审 R2/R3 + 影响面审 R2/R3（同时间戳 `-r2`/`-impact-r2`/`-impact-r3`） | 主审 0 / 简洁审 1→0 / 影响面审 2→0（终态三审均 0） | 简洁审 R2：§5 U2 悬空括注删，改分发检查条款；影响面审 R2：§3.3 扩至 service 侧 `appendRecord`/`entriesSince` 签名面（泛型化禁 as）；硬编码计数「8 个」改族名（主审 INFO）。**终态三审均 0，过阶段 0 门** |

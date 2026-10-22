@@ -1,8 +1,9 @@
 /**
  * U9-U1：full-e2e 探针基建的纯单元校验（不 spawn pi）。
  *
- * 覆盖两点：REAL_PI_TESTS 分池注册（全量双向 diff 检查——漏登记会在满并行下饿死，
- * vitest.config 维护契约）+ writeLine 的 stdin 写入形态（JSONL 行以换行结尾——rpc 协议按行解析）。
+ * 覆盖两点：串行尾组注册（REAL_PI_TESTS / INTEGRATION_TESTS 两池——spawnPiFixture
+ * 消费方必须登记其一，漏登记会在满并行下饿死，vitest.config 维护契约）的全量双向
+ * diff 检查 + writeLine 的 stdin 写入形态（JSONL 行以换行结尾——rpc 协议按行解析）。
  *
  * faux LLM 轨豁免（L2.5）：只 import FAUX_PI_READY（无 REAL_PI_READY）的消费文件是纯
  * faux 轨（凭证无关，门控只判 binary），属 main 满并行组——real-pi 池的饿死模式（真实 LLM
@@ -50,15 +51,24 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
     const realReadyShape =
       /import\s*\{[^{}]*\bREAL_PI_READY\b[^{}]*\}\s*from\s*['"][^'"]*(pi-fixture|real-pi-gate)(\.js)?['"]/
     const fauxReadyShape = /import\s*\{[^{}]*\bFAUX_PI_READY\b[^{}]*\}\s*from\s*['"][^'"]*pi-fixture(\.js)?['"]/
+    // 集成门控信号：文件 import INTEGRATION_TESTS_ENABLED（test-guard/integration-gate.ts
+    // 或引擎包内 integration-gate.local 副本）→ spawnPiFixture 调用位于门控 describe 内，
+    // 本地默认跳过、CI 由 env=1 启用——真进程面受控，豁免串行尾组登记（文件保留的
+    // 快速用例继续占 main 满并行组）。
+    const integrationGateShape =
+      /import\s*\{[^{}]*\bINTEGRATION_TESTS_ENABLED\b[^{}]*\}\s*from\s*['"][^'"]*integration-gate(\.local)?(\.ts)?['"]/
     const consumers: string[] = []
     /** 纯 faux 轨文件（有 FAUX 门控、无 REAL 门控 → 无真实 LLM turn 用例，豁免登记） */
     const fauxTrackFiles: string[] = []
+    /** 集成门控文件（spawn 用例受 TAIJI_TEST_INTEGRATION 门控，豁免登记） */
+    const integrationGatedFiles: string[] = []
     for (const dir of ['src', 'test']) {
       for (const rel of collectTestFiles(join(RUNTIME_ROOT, dir))) {
         const flattened = readFileSync(resolve(RUNTIME_ROOT, rel), 'utf-8').replace(/\s+/g, ' ')
         if (!importShape.test(flattened)) continue
         consumers.push(rel)
         if (!realReadyShape.test(flattened) && fauxReadyShape.test(flattened)) fauxTrackFiles.push(rel)
+        if (integrationGateShape.test(flattened)) integrationGatedFiles.push(rel)
       }
     }
 
@@ -67,43 +77,51 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
     // 「下一个 ']' 字符」判定：会命中注释内的闭合括号，把提取截断成空集（2026-10-20 真实
     // LLM 轨用例登记后即触发「已登记却报未登记」误报）。改按行扫描：注释行跳过，行首
     // （去缩进）']' 即数组结束（'] as const' 同形态命中）。
-    const arrayStart = config.indexOf('const REAL_PI_TESTS = [')
-    expect(arrayStart, 'vitest.config.ts 找不到 REAL_PI_TESTS 数组声明——检查提取逻辑需随配置形态更新').toBeGreaterThanOrEqual(0)
-    const registered: string[] = []
-    for (const line of config.slice(arrayStart).split('\n')) {
-      const trimmed = line.trim()
-      if (trimmed.startsWith('//')) continue
-      if (trimmed.startsWith(']')) break
-      for (const match of trimmed.matchAll(/['"]([^'"]+\.test\.ts)['"]/g)) {
-        if (match[1]) registered.push(match[1])
+    const extractPoolArray = (decl: string): string[] => {
+      const start = config.indexOf(decl)
+      expect(start, `vitest.config.ts 找不到 ${decl} 数组声明——检查提取逻辑需随配置形态更新`).toBeGreaterThanOrEqual(0)
+      const members: string[] = []
+      for (const line of config.slice(start).split('\n')) {
+        const trimmed = line.trim()
+        if (trimmed.startsWith('//')) continue
+        if (trimmed.startsWith(']')) break
+        for (const match of trimmed.matchAll(/['"]([^'"]+\.test\.ts)['"]/g)) {
+          if (match[1]) members.push(match[1])
+        }
       }
+      return members
     }
+    const registeredRealPi = extractPoolArray('const REAL_PI_TESTS = [')
+    const registeredIntegration = extractPoolArray('const INTEGRATION_TESTS = [')
+    const registered = [...registeredRealPi, ...registeredIntegration]
     // [L2.5 二批后允许空池] 全部真实 LLM 用例已翻轨 faux，REAL_PI_TESTS 当前 0 成员是合法
     // 终态（数组保留为「新增真实 LLM 文件必须登记」的注册位）；检查的提取断言点 =
-    // 数组声明可定位（上方 arrayStart），不再要求非空。
+    // 数组声明可定位（上方 start），不再要求非空。
 
-    // 双向 diff：漏登记（消费方未进清单，落回 main 满并行组复发饿死超时；纯 faux 轨例外，
-    // 见文件头豁免说明）+ 失效项（清单成员在磁盘已不存在，文件删除/改名后清单未同步）
+    // 双向 diff：漏登记（消费方未进任一串行尾组，落回 main 满并行组复发饿死超时；纯 faux
+    // 轨例外，见文件头豁免说明）+ 失效项（清单成员在磁盘已不存在，文件删除/改名后清单未同步）
     const unregistered = consumers
-      .filter((p) => !registered.includes(p) && !fauxTrackFiles.includes(p))
+      .filter((p) => !registered.includes(p) && !fauxTrackFiles.includes(p) && !integrationGatedFiles.includes(p))
       .sort()
     const staleOnDisk = registered.filter((p) => !existsSync(resolve(RUNTIME_ROOT, p)))
 
     const problems: string[] = []
     if (unregistered.length > 0) {
       problems.push(
-        `以下 ${unregistered.length} 个文件 import spawnPiFixture 但未登记 REAL_PI_TESTS：\n`
+        `以下 ${unregistered.length} 个文件 import spawnPiFixture 但未登记任一串行尾组（REAL_PI_TESTS / INTEGRATION_TESTS）：\n`
           + unregistered.map((p) => `  ${p}`).join('\n')
-          + '\n👉 真实 LLM 轨文件把该路径加入 packages/runtime/vitest.config.ts 的 REAL_PI_TESTS'
-          + '（漏加会落回 main 满并行组，复发饿死超时）；纯 faux 轨文件（无真实 LLM turn 用例）'
-          + '改为门控 FAUX_PI_READY（describe.skipIf(!FAUX_PI_READY) + spawn 传 fauxResponses）即豁免登记',
+          + '\n👉 真实 LLM 轨文件把该路径加入 packages/runtime/vitest.config.ts 的 REAL_PI_TESTS；'
+          + '真进程 / 真 IO 集成轨文件加入 INTEGRATION_TESTS（用例挂 TAIJI_TEST_INTEGRATION 门控）；'
+          + 'spawn 用例用例级门控（文件 import INTEGRATION_TESTS_ENABLED、快速用例留默认组）同样合法；'
+          + '纯 faux 轨文件（无真实 LLM turn 用例）改为门控 FAUX_PI_READY'
+          + '（describe.skipIf(!FAUX_PI_READY) + spawn 传 fauxResponses）即豁免登记',
       )
     }
     if (staleOnDisk.length > 0) {
       problems.push(
-        `REAL_PI_TESTS 中 ${staleOnDisk.length} 个路径在磁盘上不存在（文件删除/改名后清单未同步）：\n`
+        `REAL_PI_TESTS / INTEGRATION_TESTS 中 ${staleOnDisk.length} 个路径在磁盘上不存在（文件删除/改名后清单未同步）：\n`
           + staleOnDisk.map((p) => `  ${p}`).join('\n')
-          + '\n👉 从 packages/runtime/vitest.config.ts 的 REAL_PI_TESTS 移除失效路径',
+          + '\n👉 从 packages/runtime/vitest.config.ts 的对应数组移除失效路径',
       )
     }
     if (problems.length > 0) throw new Error(`\n${problems.join('\n\n')}`)

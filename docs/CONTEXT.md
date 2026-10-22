@@ -155,13 +155,10 @@ R2+ 聚合重报命中问题清单已追踪条目的形态：title 缺失侧从�
 ### Fan-out / 批量派发
 
 
-2+ 独立任务并行、结果收齐一起处理的批量编排形态。唯一入口是 `subagents` 批量 tool：一次调用传 `tasks` 数组（每个元素 = 一条自包含任务 prompt），handler 转译 `runWorkflow("fan-out")` 走 workflow 单管道——`parallel()` allSettled 并行派 N 个一次性成员（one-shot，不可 message/续聊，恢复 = 重派），任一成员失败降 `partial` 不炸 run；run 收敛后主 agent 收到一条聚合结果通知（结构化 results：task / taskIndex / status / summary / fullReportPath）。机制落点：[subagents/architecture.md §4 批量编排行](../extensions/subagents/architecture.md)。
+2+ 独立任务并行、结果收齐一起处理的批量编排形态。唯一入口是 `subagents` 批量 tool（常驻 direct）：一次调用传 `tasks` 成员对象数组——每个元素 = `{task, agent?, model?, thinkingLevel?}`（task 必填、自包含、非空白；成员级执行者 / 模型 / 思考档位实现逐成员隔离），运行级 `agent` / `model` / `thinkingLevel` 是成员未指定时的缺省值（`agent` 由工具填入未指定的成员；`model` / `thinkingLevel` 留空给 `$MODEL` / `$THINKING_LEVEL` 继承）。工具不接受 `agents`（逗号串）与 `aggregate`——出现即报错并给出正确形状（「一个执行者用于全员」用运行级 `agent`，「每个成员不同」用成员级 `agent`，归约由主 agent 自行完成）。handler 转译 `runWorkflow("fan-out")` 走 workflow 单管道——`parallel()` allSettled 并行派 N 个一次性成员（one-shot，不可 message/续聊），任一成员失败降 `partial` 不炸 run。run 未收敛窗口内可查 `workflow_control {"action":"status","runId":"…"}` 得成员表：每成员一行（stepIndex / state / agent / model / 耗时 / 最后一错；state 四态 running / completed / failed / cancelled；record 为权威源，trace 派生兜底），run 行带 `failed N/M` 失败计数；恢复 = 只把失败 taskIndex 对应的成员对象再发一次。run 收敛后主 agent 收到一条聚合结果通知（结构化 results：task / taskIndex / status / summary / fullReportPath）。机制落点：[subagents/architecture.md §4 批量编排行](../extensions/subagents/architecture.md)。
 
 
-**collect 退役迁移说明（2026-09-16 落地）**：
-1. 旧调用形态（`subagent start` 显式带 `collect` 字段）不会被 pi 拒绝——typebox 参数校验无 `additionalProperties`，未知字段静默放行且不剥离；字段退役后行为等价原 `collect:"async"` 缺省路径（立即逐条通知），无迁移动作、无功能损失。
-2. 误读风险 = 调用方以为仍会攒批、等一条聚合通知——`subagent` tool 的 start description 已留迁移期提示（"The former collect param is removed — for 2+ independent tasks in one dispatch, use the `subagents` tool instead."）。
-3. 2+ 独立任务并行的正确调用 = `subagents` tool（`tasks` 数组、一次调用、一条聚合结果通知）。
+**与单数派发的边界**：`subagent_start` 无批量与通知路由参数（pi 参数校验对未知字段静默放行——typebox 不产 `additionalProperties`，携带不存在的字段不报错但也不生效），单发逐条独立通知；2+ 独立任务并行的正确调用 = `subagents` tool（成员对象 `tasks` 数组、一次调用、一条聚合结果通知）。
 
 ### Resume 锚点（锚）
 
@@ -656,7 +653,7 @@ pi settings.json 的默认工具集字段（数组，settings-manager 解析后�
 
 ### deferred（extension 工具可达性分级）
 
-extension 工具注册定义（`registerTool`）的 `exposure` 字段取 `deferred` 档（pi `ToolExposure` 五档 `direct / model-only / codemode / deferred / hidden` 之一）时的行为：该工具**不声明给模型**（不进每轮请求的 tools 数组），被 pi 内置 [tool_search](#tool_searchpi-内置工具检索) 检索命中后加入激活集，下一轮起模型可直接调用。跨进程边界：fork/resume 后先前激活的 deferred 工具退场（pi 构造期激活恢复分支不可达），再次需要时重新检索一次即恢复。taiji 现状分级：低频工具（session_read、plan、goal_control、schedule 族、compact_context、rename_session、bash_output、bash_kill、session-manager 八件套、subagents、workflow-script）为 deferred，高频工具（bash、todo、ask_user、pending_notifications、subagent 三件套、workflow 两件、structured-output）保持 direct。与 [暴露档位（exposure）](#暴露档位exposure) 词条的边界：彼处管 MCP 服务器工具的 per-server 档位（mcp.json 条目字段），本词条管 taiji extension 工具注册定义的 exposure——两处档位语义同源（pi 同一 `ToolExposure` 类型）但载体与配置入口不同。defer 名单归属与启用机制决策：[ADR-0136](adr/decisions.md)；能力分级：[FEATURE-PRIORITIES.md](FEATURE-PRIORITIES.md)「工具延迟加载」条目（P2）。
+extension 工具注册定义（`registerTool`）的 `exposure` 字段取 `deferred` 档（pi `ToolExposure` 五档 `direct / model-only / codemode / deferred / hidden` 之一）时的行为：该工具**不声明给模型**（不进每轮请求的 tools 数组），被 pi 内置 [tool_search](#tool_searchpi-内置工具检索) 检索命中后加入激活集，下一轮起模型可直接调用。跨进程边界：fork/resume 后先前激活的 deferred 工具退场（pi 构造期激活恢复分支不可达），再次需要时重新检索一次即恢复。taiji 现状分级：低频工具（session_read、plan、goal_control、schedule 族、compact_context、rename_session、bash_output、bash_kill、session-manager 八件套、workflow-script）为 deferred，高频工具（bash、todo、ask_user、pending_notifications、subagent 三件套、subagents、workflow 两件、structured-output）保持 direct。与 [暴露档位（exposure）](#暴露档位exposure) 词条的边界：彼处管 MCP 服务器工具的 per-server 档位（mcp.json 条目字段），本词条管 taiji extension 工具注册定义的 exposure——两处档位语义同源（pi 同一 `ToolExposure` 类型）但载体与配置入口不同。defer 名单归属与启用机制决策：[ADR-0136](adr/decisions.md)；能力分级：[FEATURE-PRIORITIES.md](FEATURE-PRIORITIES.md)「工具延迟加载」条目（P2）。
 
 **代码映射**: defer 名单各工具的注册定义（`extensions/universal/*/src/`）。
 

@@ -25,25 +25,32 @@
  * - 失败归因：writeDiag 落 /tmp/batch-wl-*.json（journal 帧型 + 进程明细 + 日志尾），
  *   禁不归因重试、禁放宽断言换绿灯。
  */
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import {
   launchRealApp,
-  waitForRuntime,
   wsRoundTrip,
-  openListenWs,
   readRuntimeLogs,
   readPiLogs,
-  waitForExtensionsReady,
   type WsFrame,
 } from './fixtures/launch-app-real'
-import { execFileSync, execSync } from 'node:child_process'
+import {
+  applyRealTrackGate,
+  attachConsoleCapture,
+  cleanupRealTrackApp,
+  countEngineShellProcesses,
+  countMemberSleeperProcesses,
+  listFilesRecursive,
+  openMainListenWs,
+  parseJsonlLines,
+  SAMPLE_PROJECT,
+  seedRealCredentials,
+  tmpDiag,
+  waitRealAppReady,
+  waitUntil,
+} from './fixtures/batch-real-helpers'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-project')
 
 const MEMBER_SLEEP_LONG_S = 150
 const MEMBER_SLEEP_SHORT_S = 20
@@ -51,15 +58,23 @@ const MEMBER_SLEEP_SHORT_S = 20
 const taskText = (sleepS: number): string =>
   `First run \`sleep ${sleepS}\` using the bash tool, wait for it to finish, then reply with only the word MEMBER-DONE.`
 
+/** 成员对象形状（subagent-tool-interface-refactor §3.1.2 终态）：tasks 元素只接受
+ *  {task, agent?, model?, thinkingLevel?} 对象——字符串元素已被 schema 拒绝。 */
+const longTasks = [
+  { task: taskText(MEMBER_SLEEP_LONG_S) },
+  { task: taskText(MEMBER_SLEEP_LONG_S) },
+]
+const shortTasks = [{ task: taskText(MEMBER_SLEEP_SHORT_S) }]
+
 const DISPATCH_PROMPT_LONG =
   `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagents\` tool ` +
   `(do NOT do the tasks yourself). Both tasks are identical long-running tasks: ` +
-  `"${taskText(MEMBER_SLEEP_LONG_S)}" ` +
+  `tasks = ${JSON.stringify(longTasks)} ` +
   `After the tool call returns, reply with only the word DISPATCHED. [BATCH-WL-LONG-7731]`
 
 const DISPATCH_PROMPT_SHORT =
   `Dispatch exactly 1 background subagent task in ONE call using the \`subagents\` tool ` +
-  `(do NOT do the task yourself). The task: "${taskText(MEMBER_SLEEP_SHORT_S)}" ` +
+  `(do NOT do the task yourself). The task: tasks = ${JSON.stringify(shortTasks)} ` +
   `After the tool call returns, reply with only the word DISPATCHED. [BATCH-WL-SHORT-7732]`
 
 // ── 预算 ────────────────────────────────────────────────────────────────
@@ -71,148 +86,10 @@ const ORPHAN_GRACE_MS = 150_000
  *  留小窗让 dispose 与进程退出可见，再断言长窗口未被波及。 */
 const SHORT_TEARDOWN_OBSERVE_MS = 5_000
 
-// ── 凭证门与播种（batch-s4 同款） ────────────────────────────────────────
+// ── 凭证门与播种 / 诊断与扫描 helpers（共享实现 = fixtures/batch-real-helpers.ts；
+//    本文件只留 tag 绑定与 WL 特有的 settled 视图） ─────────────────────────────
 
-function sourceAgentDir(): string {
-  const override = process.env['TAIJI_BATCH_CREDENTIAL_SOURCE']
-  if (override && override.trim() !== '') return override
-  return path.join(os.homedir(), '.taiji', 'agent')
-}
-
-function realCredentialSkipReason(): string | null {
-  const src = sourceAgentDir()
-  try {
-    const auth = JSON.parse(fs.readFileSync(path.join(src, 'auth.json'), 'utf8')) as Record<string, { key?: unknown }>
-    if (Object.values(auth).some((c) => typeof c?.key === 'string' && c.key.trim() !== '')) return null
-  } catch {
-    console.warn(`[batch-wl] auth.json 不可读，继续探测 models.json：${src}`)
-  }
-  try {
-    const models = JSON.parse(fs.readFileSync(path.join(src, 'models.json'), 'utf8')) as {
-      providers?: Record<string, { apiKey?: unknown }>
-    }
-    if (Object.values(models.providers ?? {}).some((p) => typeof p?.apiKey === 'string' && p.apiKey.trim() !== '')) {
-      return null
-    }
-  } catch {
-    console.warn(`[batch-wl] models.json 不可读：${src}`)
-  }
-  return `${src} 的 auth.json / models.json 均无非空 key（本机 provider 凭证缺失）`
-}
-
-function seedRealCredentials(dataDir: string): void {
-  const src = sourceAgentDir()
-  const dst = path.join(dataDir, 'agent')
-  fs.mkdirSync(dst, { recursive: true })
-  for (const f of ['models.json', 'auth.json']) {
-    const p = path.join(src, f)
-    if (fs.existsSync(p)) fs.copyFileSync(p, path.join(dst, f))
-  }
-  let source: Record<string, unknown> = {}
-  try {
-    source = JSON.parse(fs.readFileSync(path.join(src, 'settings.json'), 'utf8')) as Record<string, unknown>
-  } catch {
-    console.warn(`[batch-wl] settings.json 不可读，defaultProvider/defaultModel 缺失将由门禁拦截：${src}`)
-  }
-  const defaultProvider = source['defaultProvider']
-  const defaultModel = source['defaultModel']
-  if (typeof defaultProvider !== 'string' || !defaultProvider
-    || typeof defaultModel !== 'string' || !defaultModel) {
-    throw new Error(`[batch-wl] ${src}/settings.json 缺 defaultProvider/defaultModel——先在太极设置页完成 provider 配置`)
-  }
-  fs.writeFileSync(
-    path.join(dst, 'settings.json'),
-    JSON.stringify({ defaultProvider, defaultModel, retry: source['retry'] ?? { enabled: false } }, null, 2),
-  )
-}
-
-// ── 诊断与扫描 helpers ──────────────────────────────────────────────────
-
-function writeDiag(name: string, data: Record<string, unknown>): void {
-  fs.writeFileSync(`/tmp/${name}`, JSON.stringify(data, null, 2))
-  console.log(`[batch-wl] diag → /tmp/${name}`)
-}
-
-async function waitUntil(pred: () => boolean, deadlineMs: number, intervalMs = 200): Promise<boolean> {
-  const end = Date.now() + deadlineMs
-  while (Date.now() < end) {
-    if (pred()) return true
-    await new Promise((r) => setTimeout(r, intervalMs))
-  }
-  return pred()
-}
-
-function listFilesRecursive(root: string, suffix: string, depth = 0, acc: string[] = []): string[] {
-  if (depth > 8 || !fs.existsSync(root)) return acc
-  for (const name of fs.readdirSync(root)) {
-    const p = path.join(root, name)
-    if (fs.statSync(p).isDirectory()) listFilesRecursive(p, suffix, depth + 1, acc)
-    else if (name.endsWith(suffix)) acc.push(p)
-  }
-  return acc
-}
-
-function parseJsonlLines(file: string): { entries: Record<string, unknown>[]; badLines: number } {
-  const entries: Record<string, unknown>[] = []
-  let badLines = 0
-  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-    if (line.trim() === '') continue
-    try {
-      entries.push(JSON.parse(line) as Record<string, unknown>)
-    } catch {
-      badLines += 1
-    }
-  }
-  return { entries, badLines }
-}
-
-/** 指定 sleep 秒数的成员保活进程计数（差分锚——特征串含秒数，长短成员互不串扰）。 */
-function countMemberSleeperProcesses(sleepS: number): { count: number; lines: string[] } {
-  let out = ''
-  try {
-    out = execSync('ps -axo command=', { encoding: 'utf8', timeout: 10_000 })
-  } catch (err) {
-    console.warn(`[batch-wl] ps 不可读（进程核对降级为 -1 哨兵）：${String(err)}`)
-    return { count: -1, lines: [] }
-  }
-  const marker = `sleep ${sleepS}`
-  const lines = out.split('\n').filter((line) =>
-    line.includes(marker) && !line.includes('playwright') && !line.includes('Electron.app'),
-  )
-  return { count: lines.length, lines }
-}
-
-/** 引擎宿主薄壳计数（特征并集权威单源 = scripts/count-engine-shell-processes.mjs）。 */
-function countEngineShellProcesses(): { count: number; lines: string[] } {
-  try {
-    const out = execFileSync(
-      process.execPath,
-      [path.join(REPO_ROOT, 'scripts', 'count-engine-shell-processes.mjs')],
-      { encoding: 'utf8', timeout: 10_000 },
-    )
-    const parsed = JSON.parse(out) as { count: number; processes: { pid: number; command: string }[] }
-    return { count: parsed.count, lines: parsed.processes.map((p) => `${p.pid} ${p.command}`) }
-  } catch (err) {
-    console.warn(`[batch-wl] 引擎宿主计数不可读（降级 -1 哨兵）：${String(err)}`)
-    return { count: -1, lines: [] }
-  }
-}
-
-function attachConsoleCapture(page: Page): { all: string[]; errors: string[] } {
-  const all: string[] = []
-  const errors: string[] = []
-  page.on('console', (msg) => {
-    const line = `[${msg.type()}] ${msg.text()}`
-    all.push(line)
-    if (msg.type() === 'error') errors.push(line)
-  })
-  page.on('pageerror', (err) => {
-    const line = `[pageerror] ${String(err)}`
-    all.push(line)
-    errors.push(line)
-  })
-  return { all, errors }
-}
+const writeDiag = tmpDiag('batch-wl')
 
 interface RunSettledView { // oe-exempt:20260927:test:e2e 剧本内视图形状声明（DOM mock 类型，非架构契约范围）
   runId: string
@@ -223,7 +100,7 @@ function readSettledFrames(journalFile: string): RunSettledView[] {
   return parseJsonlLines(journalFile).entries
     .filter((f) => f['type'] === 'run-settled')
     .map((f) => ({
-      runId: path.basename(journalFile).replace(/\.events\.jsonl$/, ''),
+      runId: path.basename(journalFile).replace(/\.record\.jsonl$/, ''),
       outcome: typeof f['outcome'] === 'string' ? f['outcome'] : undefined,
     }))
 }
@@ -241,9 +118,9 @@ async function awaitWLInFlightEvidence(
   baseShort: { count: number; lines: string[] },
   shellBaseline: { count: number; lines: string[] },
 ): Promise<string[]> {
-  // ── journal 恰 2 个 run（双 workflow 在途） ──
+  // ── journal 恰 2 个 run（双 workflow 在途；后缀 .record.jsonl——run-vocabulary RUN_EVENTS_SUFFIX） ──
   const agentDir = path.join(dataDir, 'agent')
-  const journalsFound = await waitUntil(() => listFilesRecursive(agentDir, '.events.jsonl').length >= 2, JOURNAL_TIMEOUT_MS)
+  const journalsFound = await waitUntil(() => listFilesRecursive(agentDir, '.record.jsonl').length >= 2, JOURNAL_TIMEOUT_MS)
   if (!journalsFound) {
     writeDiag('batch-wl-journals-missing.json', {
       runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
@@ -251,26 +128,26 @@ async function awaitWLInFlightEvidence(
     })
   }
   expect(journalsFound, '双 workflow run journal 应落盘').toBe(true)
-  const journalFiles = listFilesRecursive(agentDir, '.events.jsonl')
+  const journalFiles = listFilesRecursive(agentDir, '.record.jsonl')
 
   // ── 在途证据：long 两成员 + short 一成员 + 引擎宿主薄壳（每 run 一窗口） ──
   const inFlightLong = await waitUntil(
-    () => countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S).count - baseLong.count >= 2,
+    () => countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S, 'batch-wl').count - baseLong.count >= 2,
     JOURNAL_TIMEOUT_MS,
   )
-  const inFlightShort = countMemberSleeperProcesses(MEMBER_SLEEP_SHORT_S).count - baseShort.count >= 1
+  const inFlightShort = countMemberSleeperProcesses(MEMBER_SLEEP_SHORT_S, 'batch-wl').count - baseShort.count >= 1
   const shellInFlight = await waitUntil(
-    () => countEngineShellProcesses().count > shellBaseline.count,
+    () => countEngineShellProcesses('batch-wl').count > shellBaseline.count,
     JOURNAL_TIMEOUT_MS,
   )
   if (!inFlightLong || !inFlightShort || !shellInFlight) {
     writeDiag('batch-wl-inflight-missing.json', {
       baseLong: baseLong.lines,
-      longNow: countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S).lines,
+      longNow: countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S, 'batch-wl').lines,
       baseShort: baseShort.lines,
-      shortNow: countMemberSleeperProcesses(MEMBER_SLEEP_SHORT_S).lines,
+      shortNow: countMemberSleeperProcesses(MEMBER_SLEEP_SHORT_S, 'batch-wl').lines,
       shellBaseline: shellBaseline.lines,
-      shellNow: countEngineShellProcesses().lines,
+      shellNow: countEngineShellProcesses('batch-wl').lines,
       hint: '特征不命中——按 count-engine-shell-processes.mjs 头注校准特征集，不删在途断言',
     })
   }
@@ -281,27 +158,16 @@ async function awaitWLInFlightEvidence(
 }
 
 test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）+ 长正常完成后薄壳回落基线（V1）', async ({ }, testInfo) => {
-  test.setTimeout(600_000)
-
-  test.skip(
-    process.env['TAIJI_PI_LIVE'] !== '1',
-    '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则——开发期按改动范围手动触发，CI/门禁不跑）',
-  )
-  const credSkip = realCredentialSkipReason()
-  test.skip(credSkip !== null, credSkip ?? '')
+  applyRealTrackGate(test, { timeoutMs: 600_000, tag: 'batch-wl' })
 
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-batch-wl-'))
-  seedRealCredentials(dataDir)
+  seedRealCredentials(dataDir, 'batch-wl')
 
   const { page, cleanup } = await launchRealApp({ dataDir })
   const consoleCap = attachConsoleCapture(page)
   const listeners: { ws: { close: () => void }; events: WsFrame[] }[] = []
   try {
-    await expect(page).toHaveTitle(/太极/)
-    const port = await waitForRuntime(dataDir, 30_000)
-    expect(port).toBeGreaterThan(0)
-    const resolved = await waitForExtensionsReady(dataDir)
-    if (resolved === 0) console.warn('[batch-wl] extensions not ready within timeout, continue anyway')
+    const port = await waitRealAppReady(page, dataDir, 'batch-wl')
     await page.screenshot({ path: testInfo.outputPath('wl-app-ready.png'), fullPage: true })
 
     // ── 双 session 装配（long / short 各自独立 session 并发推进） ──
@@ -311,10 +177,7 @@ test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）
         id,
         payload: { cwd: SAMPLE_PROJECT, label },
       }, id)
-      expect(createReply.type).toBe('session.created')
-      const sid = ((createReply.payload ?? {}) as { session?: { id?: string } }).session?.id
-      if (typeof sid !== 'string' || sid === '') throw new Error('session.created reply 应携带非空 session.id')
-      const sub = await openListenWs(port, sid)
+      const { sid, sub } = await openMainListenWs(port, createReply)
       listeners.push(sub)
       return sid
     }
@@ -322,9 +185,9 @@ test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）
     const shortSid = await openSession('batch-wl-short', 'wl-create-short')
 
     // ── 基线（派发前；差分吸收环境常驻薄壳与测试进程 cmdline 噪声） ──
-    const baseLong = countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S)
-    const baseShort = countMemberSleeperProcesses(MEMBER_SLEEP_SHORT_S)
-    const shellBaseline = countEngineShellProcesses()
+    const baseLong = countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S, 'batch-wl')
+    const baseShort = countMemberSleeperProcesses(MEMBER_SLEEP_SHORT_S, 'batch-wl')
+    const shellBaseline = countEngineShellProcesses('batch-wl')
     expect(baseLong.count, '进程基线应可读（ps 失败 = -1 哨兵，环境异常 fail-fast）').toBeGreaterThanOrEqual(0)
     expect(baseShort.count, '进程基线应可读（ps 失败 = -1 哨兵，环境异常 fail-fast）').toBeGreaterThanOrEqual(0)
     expect(shellBaseline.count, '引擎宿主薄壳基线应可读（计数脚本失败 = -1 哨兵）').toBeGreaterThanOrEqual(0)
@@ -375,13 +238,13 @@ test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）
     // ── A3/V3 断言：短收尾后长窗口不被波及 ──
     // 留观察窗让短收尾 dispose 与进程退出可见，再核对长侧存活。
     await new Promise((r) => setTimeout(r, SHORT_TEARDOWN_OBSERVE_MS))
-    const longMembersAlive = countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S).count - baseLong.count >= 2
-    const longShellAlive = countEngineShellProcesses().count > shellBaseline.count
+    const longMembersAlive = countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S, 'batch-wl').count - baseLong.count >= 2
+    const longShellAlive = countEngineShellProcesses('batch-wl').count > shellBaseline.count
     if (!longMembersAlive || !longShellAlive) {
       writeDiag('batch-wl-long-window-hit.json', {
         shortRunId,
-        longMembersNow: countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S).lines,
-        shellNow: countEngineShellProcesses().lines,
+        longMembersNow: countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S, 'batch-wl').lines,
+        shellNow: countEngineShellProcesses('batch-wl').lines,
         shellBaseline: shellBaseline.lines,
         journals: journalFiles.map((f) => ({ file: path.basename(f), types: parseJsonlLines(f).entries.map((e) => String(e['type'])) })),
       })
@@ -400,26 +263,26 @@ test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）
       writeDiag('batch-wl-long-not-completed.json', {
         settledFrames: settledNow,
         journals: journalFiles.map((f) => ({ file: path.basename(f), types: parseJsonlLines(f).entries.map((e) => String(e['type'])) })),
-        longMembersNow: countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S).lines,
+        longMembersNow: countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S, 'batch-wl').lines,
         piLogsTail: readPiLogs(dataDir).slice(-3000),
       })
     }
     expect(longSettledCompleted, `long run 应 completed 收尾（若为 failed/partial = 短收尾波及长窗口或成员超预算，见 diag）`).toBe(true)
 
     const membersBack = await waitUntil(
-      () => countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S).count <= baseLong.count,
+      () => countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S, 'batch-wl').count <= baseLong.count,
       ORPHAN_GRACE_MS,
       1_000,
     )
     const shellBack = await waitUntil(
-      () => countEngineShellProcesses().count <= shellBaseline.count,
+      () => countEngineShellProcesses('batch-wl').count <= shellBaseline.count,
       ORPHAN_GRACE_MS,
       1_000,
     )
     if (!membersBack || !shellBack) {
       writeDiag('batch-wl-teardown-residue.json', {
-        longMembersNow: countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S).lines,
-        shellNow: countEngineShellProcesses().lines,
+        longMembersNow: countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S, 'batch-wl').lines,
+        shellNow: countEngineShellProcesses('batch-wl').lines,
         shellBaseline: shellBaseline.lines,
       })
     }
@@ -433,13 +296,12 @@ test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）
     }
     console.log(`[batch-wl] PASS：shortRunId=${shortRunId} 短收尾未波及长窗口；long completed 收尾后成员与薄壳均回落基线`)
   } finally {
-    try {
-      for (const l of listeners) l.ws.close()
-    } finally {
-      await cleanup()
-      if (!process.env['PLAYWRIGHT_DEBUG_KEEP_DATA']) {
-        fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
-    }
+    await cleanupRealTrackApp({
+      closeListeners: () => {
+        for (const l of listeners) l.ws.close()
+      },
+      cleanup,
+      dataDir,
+    })
   }
 })

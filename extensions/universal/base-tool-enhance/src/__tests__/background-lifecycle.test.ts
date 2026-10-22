@@ -1,21 +1,57 @@
-// src/__tests__/background-lifecycle.test.ts —— background 核心生命周期集成：
+// src/__tests__/background-lifecycle.test.ts —— background 核心生命周期：
 // 真实 spawn 边沿收尾 / exit 事件自动收尾 / killing intent 双侧 / timeout / 并发上限 /
 // 收殓 / D15 abort / bash_output / bash_kill（黑盒：经工具 execute 断言使用者可见行为）
+//
+// 轨道拆分（单测层极端测试整治第二波）：
+//   - 单测轨（本文件主体）= 进程端点桩化：vi.mock 把 node:child_process 的 spawn 换成
+//     桩 ChildProcess（EventEmitter + pid/exitCode/unref），protocol 判活 / start time
+//     读取对桩 pid 截获，kill-tree 只记录不转发。被测逻辑——单例表、registry 锁内
+//     RMW、killing intent 双侧标记、timeout 定时器杀链编排、exit 边沿收尾、通知入账
+//     ——全部真跑；exit 事件由 emitFakeExit 显式派发（exitCode 先落再派发，对齐真
+//     ChildProcess 语义），确定性同步、无等待窗口。
+//   - 集成轨（文件尾门控 describe，TAIJI_TEST_INTEGRATION=1 真跑）= 5 条真子进程核心：
+//     spawn+自然退出全链 / bash_kill 真杀进程树 / timeout 真杀链 / 进程退出收殓真杀 /
+//     真实时钟下自然完成不补杀。真子进程满载下延迟不可预估（无确定性完成信号），
+//     属「代码 + OS 组合行为」，本地默认跳过（门控 SSOT = test-guard/integration-gate.ts）。
+//   - 预算：单测用例走 vitest 默认；集成轨用例单独挂 20s（原文件级预算随拆轨下沉到
+//     用例级，非抬升），轮询 deadline 常量（10s / 8s）仅集成轨消费。
 import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EventEmitter } from "node:events";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.setConfig({ testTimeout: 20000 });
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "../../../../../test-guard/integration-gate.ts";
 
 // getAgentDir → 测试临时数据目录（工具 execute 内部调用，不写真 ~/.pi/agent）。
 // [session-store-layout-inversion 域 5] 工具的 dataDir 来源已换为 resolveTaijiDataDir()
 // （env 注入）——getAgentDir mock 随换根退役，改 beforeEach stubEnv + afterEach 还原。
-// 进程原语（ext-simplify-13 后单点在 protocol 子出口）转发真实杀 + 记录调用
-//（timeout 分支断言 killProcessTree 被调）
-const { killTreeCalls } = vi.hoisted(() => ({ killTreeCalls: [] as number[] }));
+//
+// 进程端点桩（单测轨）：vi.mock 两处——
+//   1) node:child_process.spawn：spawnMode.real=false（默认）返回桩 ChildProcess，
+//      集成轨 describe 的 beforeEach 置 true 走真 spawn；
+//   2) @zhushanwen/extension-protocol/background-task 的进程原语（kill-tree 发令 /
+//      pid 判活 / start time 读取）：桩 pid 截获（fakePids 登记表），真 pid 原样转发
+//      （timeout 分支断言 killProcessTree 被调；集成轨真杀）。
+const { killTreeCalls, fakePids, spawnMode, fakeChildSeq } = vi.hoisted(() => ({
+	killTreeCalls: [] as number[],
+	fakePids: new Map<number, { alive: boolean; startSec?: number }>(),
+	spawnMode: { real: false },
+	fakeChildSeq: { n: 0 },
+}));
+
+vi.mock("node:child_process", async (importOriginal) => {
+	const orig = await importOriginal<typeof import("node:child_process")>();
+	const realSpawn = orig.spawn;
+	return {
+		...orig,
+		spawn: (...args: Parameters<typeof realSpawn>) =>
+			spawnMode.real ? realSpawn(...args) : fakeSpawn(),
+	};
+});
+
 vi.mock("@zhushanwen/extension-protocol/background-task", async (importOriginal) => {
 	const orig = await importOriginal<
 		typeof import("@zhushanwen/extension-protocol/background-task")
@@ -24,7 +60,17 @@ vi.mock("@zhushanwen/extension-protocol/background-task", async (importOriginal)
 		...orig,
 		killProcessTree: (pid: number, onFallback?: (step: string, err: unknown) => void): void => {
 			killTreeCalls.push(pid);
+			// 桩 pid 上无进程可杀，不转发真信号；真 pid（集成轨真杀 / 误杀守卫断言对象）原样转发
+			if (fakePids.has(pid)) return;
 			orig.killProcessTree(pid, onFallback);
+		},
+		isPidAlive: (pid: number): boolean => {
+			const fake = fakePids.get(pid);
+			return fake === undefined ? orig.isPidAlive(pid) : fake.alive;
+		},
+		getProcessStartTimeSec: (pid: number): number | undefined => {
+			const fake = fakePids.get(pid);
+			return fake === undefined ? orig.getProcessStartTimeSec(pid) : fake.startSec;
 		},
 	};
 });
@@ -36,7 +82,7 @@ import { createBashOutputToolDefinition } from "../bash-output-tool.ts";
 import { handleTaskExit, refreshPiReference, resetNotifyForTest } from "../background/notify.ts";
 import { setOnTaskExit } from "../background/exit-collector.ts";
 import { getRegistryPath, readRegistry, taskToRegistryEntry, writeRegistryEntry } from "../background/registry.ts";
-import type { RegistryEntry } from "../background/types.ts";
+import type { BackgroundTask, RegistryEntry } from "../background/types.ts";
 import { DEFAULT_MAX_CONCURRENT_BACKGROUND, spawnBackgroundTask } from "../background/spawn-background.ts";
 import { clearTaskStoreForTest, getActiveTasks, getTask, markKillingIntent } from "../background/task-store.ts";
 import { reapBackgroundTasksNow, resetProcessExitGuardForTest } from "../background/process-exit-guard.ts";
@@ -71,6 +117,45 @@ async function killTool(taskId: string, sessionId: string = SESSION_ID): Promise
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+// ──────────────────────── 进程端点桩（单测轨专用） ────────────────────────
+
+/** 桩 pid 基数：远离真实 pid 区间，fakePids 登记即截获判活/身份读取，与真 pid 互不串扰。 */
+const FAKE_PID_BASE = 4_000_000;
+/**
+ * 桩进程 start time（epoch 秒，恒定过去时刻）：镜像 macOS ps 可读形态（spawn 即得
+ * pidStartTime）；取过去值保证 ≤ 任何真实 startedAt 的秒级降级比较恒匹配
+ * （pidStartMatchesRegistered 的降级分支用「actual ≤ floor(startedAt/1000)」）。
+ */
+const FAKE_START_SEC = 1_700_000_000;
+
+/** 桩 ChildProcess 最小形状：BackgroundTask 只消费 pid / exitCode / unref / on('exit')。 */
+type FakeChildProcess = EventEmitter & { pid: number; exitCode: number | null; unref: () => void };
+
+/** 桩 spawn：登记 fake pid（默认存活 + 恒定 start time），返回可派发 exit 的假 ChildProcess。 */
+function fakeSpawn(): FakeChildProcess {
+	const pid = FAKE_PID_BASE + ++fakeChildSeq.n;
+	fakePids.set(pid, { alive: true, startSec: FAKE_START_SEC });
+	return Object.assign(new EventEmitter(), {
+		pid,
+		exitCode: null as number | null,
+		unref: () => {},
+	});
+}
+
+/**
+ * 派发桩进程退出（单测轨的 exit 事件边沿）：exitCode 先落再 emit——对齐真
+ * ChildProcess 语义（finalizeExitedTask 从 child.exitCode 读码）。同步触发全部
+ * 收尾链（tail 摘要 → reason 判定 → 两侧终态写 → onTaskExit 回调），确定性完成。
+ */
+function emitFakeExit(task: BackgroundTask, exitCode: number | null): void {
+	const child = task.child as FakeChildProcess | undefined;
+	if (child === undefined) throw new Error("fake child missing (already finalized)");
+	child.exitCode = exitCode;
+	child.emit("exit", exitCode, null);
+}
+
+// ──────────────────────── 集成轨轮询原语（仅门控 describe 消费） ────────────────────────
 
 /**
  * 真实子进程链（spawn+exec+sleep+exit）满载下延迟不可预估，deadline 放宽到 10s；
@@ -126,7 +211,11 @@ beforeEach(() => {
 afterEach(() => {
 	// env stub 逐用例还原（防同 worker 跨文件残留）
 	vi.unstubAllEnvs();
-	// 残留活跃任务先杀干净再清表（防句柄/进程泄漏影响后续测试）
+	// 进程端点桩复位：集成轨的 real 开关关回、桩 pid 登记表清空（防截获串到下一用例）
+	spawnMode.real = false;
+	fakePids.clear();
+	// 残留活跃任务先杀干净再清表（防句柄/进程泄漏影响后续测试）；桩 pid 无进程可杀
+	// （kill ESRCH 落 catch），真 pid（集成轨）正常回收
 	for (const task of getActiveTasks()) {
 		try {
 			process.kill(-task.pid, "SIGKILL");
@@ -152,26 +241,28 @@ afterAll(() => {
 	rmSync(DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
-describe("real spawn lifecycle (exit event edge finalization)", () => {
+// ──────────────────────── 单测轨：spawn + exit 边沿收尾（进程端点桩化） ────────────────────────
+
+describe("spawn + exit edge finalization (stub process endpoint)", () => {
 	it("short task: running → exited with exitCode 0, output file readable, registry terminal", async () => {
-		// 断言只要求「exit 事件边沿前 state=running」与退出产物，不依赖命令时长（终态化只在 finalizeTask）
 		const spawned = spawnBg("sleep 0.1 && echo done");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
+		// spawn 登记即写 running 条目（含 ownerPiPid，M5 属主判定依据）
 		expect(task.state).toBe("running");
 		expect(existsSync(task.outputFile)).toBe(true);
-		// registry 登记即写 running 条目（含 ownerPiPid，M5 属主判定依据）
 		expect(readRegistry(REGISTRY_PATH).get(task.taskId)?.state).toBe("running");
 		expect(readRegistry(REGISTRY_PATH).get(task.taskId)?.ownerPiPid).toBe(process.pid);
 
-		// 轮询等命令退出 + libuv reap（tick 收尾；满载下延迟不可预估）
-		await pollUntilTicked(() => getTask(task.taskId)?.state === "exited", POLL_DEADLINE_MS, "task finalization");
+		// 桩端点：命令「输出」由测试直写输出文件（真 spawn 下由子进程写，内容同源）
+		writeFileSync(task.outputFile, "done\n", "utf8");
+		emitFakeExit(task, 0);
 
 		const finalized = getTask(task.taskId);
 		expect(finalized?.state).toBe("exited");
 		expect(finalized?.exitCode).toBe(0);
 		expect(finalized?.reason).toBe("natural");
-		expect(finalized?.durationMs).toBeGreaterThan(0);
+		expect(finalized?.durationMs).toBeGreaterThanOrEqual(0);
 
 		const registryEntry = readRegistry(REGISTRY_PATH).get(task.taskId);
 		expect(registryEntry?.state).toBe("exited");
@@ -182,39 +273,40 @@ describe("real spawn lifecycle (exit event edge finalization)", () => {
 		expect(detail.exitCode).toBe(0);
 	});
 
-	it("nonzero exit code is surfaced (exitCode 1)", async () => {
-		// 断言只看 exitCode 透写，不依赖命令时长
+	it("nonzero exit code is surfaced (exitCode 1)", () => {
 		const spawned = spawnBg("sleep 0.1; exit 3");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
-		await pollUntilTicked(() => getTask(task.taskId)?.exitCode === 3, POLL_DEADLINE_MS, "exitCode to surface");
+		emitFakeExit(task, 3);
 		expect(getTask(task.taskId)?.exitCode).toBe(3);
-		const registryEntry = readRegistry(REGISTRY_PATH).get(task.taskId);
-		expect(registryEntry?.exitCode).toBe(3);
+		expect(readRegistry(REGISTRY_PATH).get(task.taskId)?.exitCode).toBe(3);
 	});
 
-	it("onTaskExit callback (M3 hook point) fires with the finalized task", async () => {
+	it("onTaskExit callback (M3 hook point) fires with the finalized task", () => {
 		const seen: string[] = [];
 		setOnTaskExit((task) => seen.push(`${task.taskId}:${task.state}:${task.reason}`));
 		const spawned = spawnBg("true");
 		if (!spawned.ok) throw new Error(spawned.error);
-		await pollUntilTicked(() => seen.length === 1, POLL_DEADLINE_MS, "onTaskExit callback to fire");
+		emitFakeExit(spawned.task, 0);
+		// 桩派发同步走完收尾链（无等待窗口），回调即时可见
 		expect(seen).toHaveLength(1);
 		expect(seen[0]).toBe(`${spawned.task.taskId}:exited:natural`);
 	});
 
-	it("spawned entry carries pidStartTime for kill-side precise comparison (M5→M3)", async () => {
+	it("spawned entry carries pidStartTime for kill-side precise comparison (M5→M3)", () => {
 		const spawned = spawnBg("sleep 30");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
-		// 单例表与 registry 两侧均含字段（epoch 秒；ps 可用平台读取成功）
-		expect(typeof task.pidStartTime).toBe("number");
+		// 桩端点：spawn 即从身份原语读 start time 进条目（真 ps 读取形态由集成轨覆盖）
+		expect(task.pidStartTime).toBe(FAKE_START_SEC);
 		const registryEntry = readRegistry(REGISTRY_PATH).get(task.taskId) as
 			| { pidStartTime?: number }
 			| undefined;
 		expect(registryEntry?.pidStartTime).toBe(task.pidStartTime);
 	});
 });
+
+// ──────────────────────── 单测轨：bash_output 工具 ────────────────────────
 
 describe("bash_output tool", () => {
 	it("description pins the auto-notify contract (on-demand checks only, DO NOT bash sleep)", () => {
@@ -224,7 +316,7 @@ describe("bash_output tool", () => {
 	});
 
 	it("list merges store + registry terminal entries, store wins on same id", async () => {
-		// 单例表：一个 running 真任务
+		// 单例表：一个 running 桩任务
 		const spawned = spawnBg("sleep 5");
 		if (!spawned.ok) throw new Error(spawned.error);
 		// registry 手写：另一个终态历史条目（不在单例表——模拟已被 LRU 淘汰后回落）
@@ -293,11 +385,10 @@ describe("bash_output tool", () => {
 	});
 
 	it("deleted output file degrades to <lost> without crashing (§3.6)", async () => {
-		// 断言只看退出后输出文件缺失的降级路径，不依赖命令时长
 		const spawned = spawnBg("sleep 0.1 && echo gone");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
-		await pollUntilTicked(() => getTask(task.taskId)?.state === "exited", POLL_DEADLINE_MS, "task finalization");
+		emitFakeExit(task, 0);
 		unlinkSync(task.outputFile);
 		const detail = JSON.parse(await outputTool({ task_id: task.taskId })) as {
 			output: string;
@@ -308,23 +399,26 @@ describe("bash_output tool", () => {
 	});
 
 	it("output tail respects line cap", async () => {
-		// 2100 行输出 → tail 只保留最后 2000 行
+		// 2100 行输出 → tail 只保留最后 2000 行（输出内容由测试直写，截断逻辑真跑）
 		const spawned = spawnBg("for i in $(seq 1 2100); do echo line$i; done");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
-		// 轮询等 2100 行输出跑完退出收尾（满载下 shell 循环耗时不可预估）
-		await pollUntilTicked(() => getTask(task.taskId)?.state === "exited", POLL_DEADLINE_MS, "output loop to finish");
+		const lines = Array.from({ length: 2100 }, (_, i) => `line${i + 1}`);
+		writeFileSync(task.outputFile, `${lines.join("\n")}\n`, "utf8");
+		emitFakeExit(task, 0);
 		const detail = JSON.parse(await outputTool({ task_id: task.taskId })) as {
 			output: string;
 			truncated: boolean;
 		};
-		const lines = detail.output.split("\n");
-		expect(lines.length).toBeLessThanOrEqual(2000);
+		const got = detail.output.split("\n");
+		expect(got.length).toBeLessThanOrEqual(2000);
 		expect(detail.truncated).toBe(true);
 		expect(detail.output).toContain("line2100");
 		expect(detail.output).not.toContain("line50\n");
 	});
 });
+
+// ──────────────────────── 单测轨：bash_kill 工具（killing intent 双侧） ────────────────────────
 
 describe("bash_kill tool (killing intent, single-point finalization)", () => {
 	it("kill marks BOTH store and registry as killing before the exit event edge lands", async () => {
@@ -335,7 +429,7 @@ describe("bash_kill tool (killing intent, single-point finalization)", () => {
 		const killResult = JSON.parse(await killTool(task.taskId)) as { killed: boolean; reason: string };
 		expect(killResult.killed).toBe(true);
 
-		// exit 边沿未到（sleep 60 才死、kill 后立即断言）：两侧 killing 即可见，无倒挂
+		// exit 边沿未派发（sleep 60 语义下任务仍在）：两侧 killing 即可见，无倒挂
 		expect(getTask(task.taskId)?.state).toBe("killing");
 		expect(readRegistry(REGISTRY_PATH).get(task.taskId)?.state).toBe("killing");
 		// kill-tree 确实对该 pid 发过令
@@ -347,8 +441,8 @@ describe("bash_kill tool (killing intent, single-point finalization)", () => {
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
 		await killTool(task.taskId);
-		// 轮询到 kill 边沿收尾（SIGKILL 生效 + tick 终态化）
-		await pollUntilTicked(() => getTask(task.taskId)?.reason === "killed", POLL_DEADLINE_MS, "killed finalization");
+		// 桩端点派发 kill 后的进程死亡（SIGKILL 终止 = exitCode null）
+		emitFakeExit(task, null);
 		const finalized = getTask(task.taskId);
 		expect(finalized?.state).toBe("exited");
 		expect(finalized?.reason).toBe("killed");
@@ -367,11 +461,10 @@ describe("bash_kill tool (killing intent, single-point finalization)", () => {
 	});
 
 	it("already exited task → killed:false with exit code", async () => {
-		// 断言只看已终态条目的 kill 拒绝，不依赖命令时长
 		const spawned = spawnBg("sleep 0.1");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
-		await pollUntilTicked(() => getTask(task.taskId)?.state === "exited", POLL_DEADLINE_MS, "task finalization");
+		emitFakeExit(task, 0);
 		const result = JSON.parse(await killTool(task.taskId)) as { killed: boolean; reason: string };
 		expect(result.killed).toBe(false);
 		expect(result.reason).toBe("already exited (code 0)");
@@ -419,7 +512,7 @@ describe("bash_kill tool (killing intent, single-point finalization)", () => {
 		const spawned = spawnBg("sleep 30");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
-		// 构造不匹配的登记值（真实进程 start time 之外的时间）——pid 活但身份不符
+		// 构造不匹配的登记值（桩身份原语读到的 start time 之外的时间）——pid 活但身份不符
 		task.pidStartTime = (task.pidStartTime ?? 0) + 500;
 
 		const result = JSON.parse(await killTool(task.taskId)) as { killed: boolean; reason: string; hint?: string };
@@ -434,21 +527,25 @@ describe("bash_kill tool (killing intent, single-point finalization)", () => {
 		const spawned = spawnBg("sleep 30");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
-		// spawn 时读到的真实 start time 原样保留 → 校验通过，正常 kill 路径
+		// spawn 时身份原语读到的 start time 原样保留 → 校验通过，正常 kill 路径
 		const result = JSON.parse(await killTool(task.taskId)) as { killed: boolean };
 		expect(result.killed).toBe(true);
 		expect(killTreeCalls).toContain(task.pid);
 	});
 });
 
+// ──────────────────────── 单测轨：并发上限（D10） ────────────────────────
+
 describe("concurrency cap (D10, default 8)", () => {
-	it("rejects the 9th task with the oldest task id in the error", async () => {
+	it("rejects the 9th task with the oldest task id in the error", () => {
 		const tasks: string[] = [];
 		for (let i = 0; i < DEFAULT_MAX_CONCURRENT_BACKGROUND; i++) {
 			const spawned = spawnBg("sleep 30");
 			if (!spawned.ok) throw new Error(spawned.error);
+			// 桩端点同毫秒连发：直接改写条目 startedAt 保证「最老」判定确定有序
+			//（单例表持同一对象引用；真 spawn 形态靠错峰 sleep，此处无需）
+			spawned.task.startedAt = 1_000 + i;
 			tasks.push(spawned.task.taskId);
-			await sleep(20); // 错开 startedAt 保证「最老」判定稳定
 		}
 		const ninth = spawnBg("echo should-fail");
 		expect(ninth.ok).toBe(false);
@@ -471,36 +568,31 @@ describe("concurrency cap (D10, default 8)", () => {
 	});
 });
 
+// ──────────────────────── 单测轨：显式后台 timeout（D6，fake timers 驱动） ────────────────────────
+
 describe("explicit background timeout (D6)", () => {
-	it("fires kill-tree at the deadline and finalizes with reason timeout", async () => {
+	it("fires kill-tree at the deadline and finalizes with reason timeout", () => {
 		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-		let taskId = "";
-		let pid = -1;
+		let finalized: BackgroundTask | undefined;
 		try {
 			// fake 生效后 spawn：timeout 定时器进 fake 队列，由 advanceTimers 推进
 			const spawned = spawnBg("sleep 30", { timeoutSec: 1 });
 			if (!spawned.ok) throw new Error(spawned.error);
-			taskId = spawned.task.taskId;
-			pid = spawned.task.pid;
+			const { task } = spawned;
 
 			vi.advanceTimersByTime(1000);
 			// 到点：kill-tree 已发令 + 两侧 killing intent（reason 候选 timeout）
-			expect(killTreeCalls).toContain(pid);
-			expect(getTask(taskId)?.state).toBe("killing");
-			expect(getTask(taskId)?.intent?.reason).toBe("timeout");
-			expect(readRegistry(REGISTRY_PATH).get(taskId)?.state).toBe("killing");
+			expect(killTreeCalls).toContain(task.pid);
+			expect(getTask(task.taskId)?.state).toBe("killing");
+			expect(getTask(task.taskId)?.intent?.reason).toBe("timeout");
+			expect(readRegistry(REGISTRY_PATH).get(task.taskId)?.state).toBe("killing");
+
+			// 桩端点派发 kill 后的进程死亡：exit 边沿按 intent 收尾 → exited(reason:"timeout")
+			emitFakeExit(task, null);
+			finalized = getTask(task.taskId);
 		} finally {
 			vi.useRealTimers();
 		}
-
-		// SIGKILL 已真实发出：exit 事件边沿收尾 → exited(reason:"timeout")，终态由边沿写
-		//（timeout 路径满载下 SIGKILL 生效延迟不可预估，deadline 放宽到 8s）
-		await pollUntilTicked(
-			() => getTask(taskId)?.state === "exited" && getTask(taskId)?.reason === "timeout",
-			POLL_DEADLINE_SLOW_MS,
-			"timeout finalization",
-		);
-		const finalized = getTask(taskId);
 		expect(finalized?.state).toBe("exited");
 		expect(finalized?.reason).toBe("timeout");
 	});
@@ -511,7 +603,7 @@ describe("explicit background timeout (D6)", () => {
 			const spawned = spawnBg("sleep 30", { timeoutSec: 1 });
 			if (!spawned.ok) throw new Error(spawned.error);
 			const { task } = spawned;
-			// 构造不匹配的登记值（真实进程 start time 之外的时间）——pid 活但身份不符，
+			// 构造不匹配的登记值（身份原语读到的 start time 之外的时间）——pid 活但身份不符，
 			// 同 bash_kill P0-2.2 篡改范式
 			task.pidStartTime = (task.pidStartTime ?? 0) + 500;
 
@@ -536,7 +628,7 @@ describe("explicit background timeout (D6)", () => {
 			if (!spawned.ok) throw new Error(spawned.error);
 			const { task } = spawned;
 			// 模拟 ps 不可用平台的 spawn（无 pidStartTime 字段）→ 降级 startedAt 秒级
-			// 比较；startedAt 篡改为 epoch 1（实际进程 start time 远大于 0）→ 不匹配
+			// 比较；startedAt 篡改为 epoch 1（桩 start time 远大于 0）→ 不匹配
 			task.pidStartTime = undefined;
 			task.startedAt = 1;
 
@@ -558,7 +650,8 @@ describe("explicit background timeout (D6)", () => {
 			if (!spawned.ok) throw new Error(spawned.error);
 			const { task } = spawned;
 			// 无 pidStartTime + 真实 startedAt（登记晚于 spawn → 原进程 start time 必然
-			// ≤ floor(startedAt/1000)，floor 单调性）→ 降级判据匹配，正常发 kill
+			// ≤ floor(startedAt/1000)，floor 单调性；桩 start time 取恒定过去值同判）→
+			// 降级判据匹配，正常发 kill
 			task.pidStartTime = undefined;
 
 			vi.advanceTimersByTime(1000);
@@ -569,33 +662,34 @@ describe("explicit background timeout (D6)", () => {
 		}
 	});
 
-	it("natural completion before the deadline cancels the timer (no late kill)", async () => {
-		// 全程真实 timers：命令 0.1s 完成 < 0.5s 超时（真实时间必须真实流过——
-		// 本用例证明「到点不补杀」，fake 时钟会让回调先于进程死亡触发）
-		const before = killTreeCalls.length;
-		const spawned = spawnBg("sleep 0.1 && echo quick", { timeoutSec: 0.5 });
-		if (!spawned.ok) throw new Error(spawned.error);
-		const { task } = spawned;
+	it("natural completion before the deadline cancels the timer (no late kill)", () => {
+		// fake timers + 桩端点：先自然退出（终态化清 timer）再推进时钟越过 deadline——
+		// 「到点不补杀」不变量确定性验证（真进程 + 真实时钟形态由集成轨覆盖）
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			const before = killTreeCalls.length;
+			const spawned = spawnBg("sleep 0.1 && echo quick", { timeoutSec: 1 });
+			if (!spawned.ok) throw new Error(spawned.error);
+			const { task } = spawned;
 
-		// 轮询命令退出收尾（未到 0.5s deadline）
-		await pollUntilTicked(() => getTask(task.taskId)?.state === "exited", POLL_DEADLINE_SLOW_MS, "natural finalization");
-		expect(getTask(task.taskId)?.state).toBe("exited");
-		expect(getTask(task.taskId)?.reason).toBe("natural");
+			emitFakeExit(task, 0);
+			expect(getTask(task.taskId)?.state).toBe("exited");
+			expect(getTask(task.taskId)?.reason).toBe("natural");
 
-		// 越过 deadline 的时间窗内不得再补杀（终态化必须已清 timer）：轮询真实时钟
-		// 越过 deadline+200ms 余量后断言——这里等待的是时钟流逝本身，非子进程事件
-		await pollUntilTicked(
-			() => Date.now() >= task.startedAt + 500 + 200,
-			POLL_DEADLINE_SLOW_MS,
-			"real clock to pass the deadline window",
-		);
-		expect(killTreeCalls.length).toBe(before);
-		expect(getTask(task.taskId)?.state).toBe("exited");
+			// 越过 deadline：终态化必须已清 timer（fake 队列中被 clearTimeout 的回调不再触发）
+			vi.advanceTimersByTime(5000);
+			expect(killTreeCalls.length).toBe(before);
+			expect(getTask(task.taskId)?.state).toBe("exited");
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
 
+// ──────────────────────── 单测轨：D6-en intent 读回（exit 边沿 reason 判定） ────────────────────────
+
 describe("D6-en: exit edge finalization reads back registry killing (cross-process UI kill)", () => {
-	it("memory intent missing + registry killing → reason killed; AI not woken (no sendMessage)", async () => {
+	it("memory intent missing + registry killing → reason killed; AI not woken (no sendMessage)", () => {
 		const pi = { events: { emit: vi.fn() }, sendMessage: vi.fn(), appendEntry: vi.fn() };
 		refreshPiReference(pi as unknown as ExtensionAPI);
 		setOnTaskExit(handleTaskExit);
@@ -606,9 +700,8 @@ describe("D6-en: exit edge finalization reads back registry killing (cross-proce
 		// 杀进程树，不经本进程 markKillingIntent
 		writeRegistryEntry(REGISTRY_PATH, taskToRegistryEntry({ ...task, state: "killing" }));
 		expect(getTask(task.taskId)?.intent).toBeUndefined(); // 前置：内存无 intent
-		process.kill(task.pid, "SIGKILL");
-		// exit 事件边沿自动收尾（读回 registry killing → killed）
-		await pollUntilTicked(() => getTask(task.taskId)?.reason === "killed", 5000, "exit edge to read back killing");
+		// 桩端点派发被杀死亡（exit 事件边沿自动收尾，读回 registry killing → killed）
+		emitFakeExit(task, null);
 
 		const finalized = getTask(task.taskId);
 		expect(finalized?.state).toBe("exited");
@@ -622,103 +715,107 @@ describe("D6-en: exit edge finalization reads back registry killing (cross-proce
 		expect(pi.sendMessage).not.toHaveBeenCalled();
 	});
 
-	it("memory intent present wins — registry NOT read back (killed kept while registry stays running)", async () => {
+	it("memory intent present wins — registry NOT read back (killed kept while registry stays running)", () => {
 		const spawned = spawnBg("sleep 30");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
 		// 内存预写 killed intent（AI bash_kill 形态），registry 刻意停留 running
 		//（模拟 intent 落盘失败）——若实现误读回，会按 running 判 natural
 		expect(markKillingIntent(task.taskId, "killed")).toBeDefined();
-		// 前置（SIGKILL 前断言——事件模式下死亡即边沿收尾，registry 停留 running
-		//（模拟 intent 落盘失败，markKillingIntent 不写盘）：若实现误读回会按 running 判 natural
 		expect(readRegistry(REGISTRY_PATH).get(task.taskId)?.state).toBe("running");
-		process.kill(task.pid, "SIGKILL");
-		await pollUntilTicked(() => getTask(task.taskId)?.reason === "killed", 5000, "exit edge to finalize with intent");
+		emitFakeExit(task, null);
 		expect(getTask(task.taskId)?.reason).toBe("killed"); // intent 优先，非 natural
 	});
 
-	it("registry read failure (corrupt file) degrades to no-intent natural; finalization not blocked", async () => {
+	it("registry read failure (corrupt file) degrades to no-intent natural; finalization not blocked", () => {
 		const spawned = spawnBg("sleep 30");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
 		writeFileSync(REGISTRY_PATH, "{corrupted", "utf8"); // 读回路径解析失败
-		process.kill(task.pid, "SIGKILL");
+		emitFakeExit(task, 0);
 		// exit 事件边沿自动收尾（读回失败按无 intent 处理）
-		await pollUntilTicked(() => getTask(task.taskId)?.state === "exited", 5000, "exit edge to finalize");
 		const finalized = getTask(task.taskId);
 		expect(finalized?.state).toBe("exited"); // 终态化未被阻塞
 		expect(finalized?.reason).toBe("natural"); // 读失败按无 intent 处理
 	});
 });
 
+// ──────────────────────── 单测轨：D6-en/R2-S1 加固（已终态任务到点不补杀不改写） ────────────────────────
+
 describe("D6-en/R2-S1 hardening: armBackgroundTimeout skips kill+mark when recorded pid is gone", () => {
-	it("UI kill × timeout overlap: no timeout mark; exit edge reads back registry killing → killed", async () => {
-		// 真实时间必须真实流过（R2-S1 前提：到点时 pid 已死才有「跳过补杀」可言），
-		// fake 时钟会让 timeout 回调先于进程死亡触发
-		const spawned = spawnBg("sleep 30", { timeoutSec: 0.5 });
-		if (!spawned.ok) throw new Error(spawned.error);
-		const { task } = spawned;
-		// UI 代杀（跨进程形态）：registry 预写 killing + 直接杀进程，不经内存
-		writeRegistryEntry(REGISTRY_PATH, taskToRegistryEntry({ ...task, state: "killing" }));
-		process.kill(task.pid, "SIGKILL");
-		// exit 事件边沿在 deadline 前收尾（D6-en 读回 registry killing → killed）
-		await pollUntilTicked(() => getTask(task.taskId)?.reason === "killed", 5000, "exit edge to read back killing before deadline");
-		// 越过 deadline（0.5s）+200ms 余量：轮询真实时钟，等待的是时钟流逝本身
-		await pollUntilTicked(
-			() => Date.now() >= task.startedAt + 500 + 200,
-			POLL_DEADLINE_SLOW_MS,
-			"real clock to pass the deadline window",
-		);
-		// 加固生效：到点时任务已终态 → 不补杀、intent 不被改写为 timeout、reason 保持 killed
-		expect(killTreeCalls).not.toContain(task.pid);
-		expect(getTask(task.taskId)?.state).toBe("exited");
-		expect(getTask(task.taskId)?.intent).toBeUndefined();
-		expect(getTask(task.taskId)?.reason).toBe("killed"); // D6-en 读回（非 timeout）
+	it("UI kill × timeout overlap: no timeout mark; exit edge reads back registry killing → killed", () => {
+		// 桩端点 + fake timers：deadline 前先被 UI 代杀收尾（终态化清 timer），再推进
+		// 时钟越过 deadline——「不补杀、不改写 intent」确定性验证（真实时钟形态由集成轨覆盖）
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			const spawned = spawnBg("sleep 30", { timeoutSec: 1 });
+			if (!spawned.ok) throw new Error(spawned.error);
+			const { task } = spawned;
+			// UI 代杀（跨进程形态）：registry 预写 killing + 直接杀进程，不经内存
+			writeRegistryEntry(REGISTRY_PATH, taskToRegistryEntry({ ...task, state: "killing" }));
+			emitFakeExit(task, null);
+			// exit 边沿在 deadline 前收尾（D6-en 读回 registry killing → killed）
+			expect(getTask(task.taskId)?.reason).toBe("killed");
+
+			vi.advanceTimersByTime(5000); // 越过 deadline
+			// 加固生效：到点时任务已终态 → 不补杀、intent 不被改写为 timeout、reason 保持 killed
+			expect(killTreeCalls).not.toContain(task.pid);
+			expect(getTask(task.taskId)?.state).toBe("exited");
+			expect(getTask(task.taskId)?.intent).toBeUndefined();
+			expect(getTask(task.taskId)?.reason).toBe("killed"); // D6-en 读回（非 timeout）
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("AI bash_kill × timeout overlap: killed intent survives (no 'timed out' misreport)", async () => {
-		const spawned = spawnBg("sleep 30", { timeoutSec: 0.5 });
-		if (!spawned.ok) throw new Error(spawned.error);
-		const { task } = spawned;
-		const killed = JSON.parse(await killTool(task.taskId)) as { killed: boolean };
-		expect(killed.killed).toBe(true);
-		// exit 事件边沿在 deadline 前收尾（intent 优先 → killed）
-		await pollUntilTicked(() => getTask(task.taskId)?.reason === "killed", 5000, "exit edge to finalize killed before deadline");
-		// 越过 deadline（0.5s）+200ms 余量：轮询真实时钟——任务已终态 → 跳过 timeout mark
-		await pollUntilTicked(
-			() => Date.now() >= task.startedAt + 500 + 200,
-			POLL_DEADLINE_SLOW_MS,
-			"real clock to pass the deadline window",
-		);
-		expect(getTask(task.taskId)?.intent).toBeUndefined(); // 终态化消费 intent，不再存在
-		expect(killTreeCalls.filter((pid) => pid === task.pid)).toHaveLength(1); // 无第二次 kill
-		expect(getTask(task.taskId)?.state).toBe("exited");
-		expect(getTask(task.taskId)?.reason).toBe("killed"); // 加固后保持 killed（无通知路径）
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			const spawned = spawnBg("sleep 30", { timeoutSec: 1 });
+			if (!spawned.ok) throw new Error(spawned.error);
+			const { task } = spawned;
+			const killed = JSON.parse(await killTool(task.taskId)) as { killed: boolean };
+			expect(killed.killed).toBe(true);
+			// exit 边沿在 deadline 前收尾（intent 优先 → killed）
+			emitFakeExit(task, null);
+			expect(getTask(task.taskId)?.reason).toBe("killed");
+
+			vi.advanceTimersByTime(5000); // 越过 deadline
+			expect(getTask(task.taskId)?.intent).toBeUndefined(); // 终态化消费 intent，不再存在
+			expect(killTreeCalls.filter((pid) => pid === task.pid)).toHaveLength(1); // 无第二次 kill
+			expect(getTask(task.taskId)?.state).toBe("exited");
+			expect(getTask(task.taskId)?.reason).toBe("killed"); // 加固后保持 killed（无通知路径）
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
-	it("natural death before the deadline: no timeout mark; exit edge finalizes natural (accepted shift)", async () => {
-		// 命令 0.1s 自然退出 < 0.5s deadline；真实时间必须真实流过（fake 会先于死亡触发回调）
-		const before = killTreeCalls.length;
-		const spawned = spawnBg("sleep 0.1", { timeoutSec: 0.5 });
-		if (!spawned.ok) throw new Error(spawned.error);
-		const { task } = spawned;
-		// exit 事件边沿在 deadline 前收尾
-		await pollUntilTicked(() => getTask(task.taskId)?.state === "exited", 5000, "natural death before the deadline");
-		// 越过 deadline（0.5s）+200ms 余量：等待的是时钟流逝本身
-		await pollUntilTicked(
-			() => Date.now() >= task.startedAt + 500 + 200,
-			POLL_DEADLINE_SLOW_MS,
-			"real clock to pass the deadline window",
-		);
-		expect(killTreeCalls.length).toBe(before); // 死任务不补杀
-		expect(getTask(task.taskId)?.state).toBe("exited");
-		expect(getTask(task.taskId)?.intent).toBeUndefined();
-		expect(getTask(task.taskId)?.reason).toBe("natural"); // 语义微移：natural 非 timeout
+	it("natural death before the deadline: no timeout mark; exit edge finalizes natural (accepted shift)", () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			const before = killTreeCalls.length;
+			const spawned = spawnBg("sleep 0.1", { timeoutSec: 1 });
+			if (!spawned.ok) throw new Error(spawned.error);
+			const { task } = spawned;
+			// exit 边沿在 deadline 前收尾（自然退出）
+			emitFakeExit(task, 0);
+			expect(getTask(task.taskId)?.state).toBe("exited");
+
+			vi.advanceTimersByTime(5000); // 越过 deadline
+			expect(killTreeCalls.length).toBe(before); // 死任务不补杀
+			expect(getTask(task.taskId)?.state).toBe("exited");
+			expect(getTask(task.taskId)?.intent).toBeUndefined();
+			expect(getTask(task.taskId)?.reason).toBe("natural"); // 语义微移：natural 非 timeout
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
 
+// ──────────────────────── 单测轨：进程退出收殓（D12，编排逻辑） ────────────────────────
+
 describe("process-exit reap (D12)", () => {
-	it("reaps all active tasks with reason process-exit, kills pids, writes registry terminal", async () => {
+	it("reaps all active tasks with reason process-exit, kills pids, writes registry terminal", () => {
 		const first = spawnBg("sleep 30");
 		const second = spawnBg("sleep 30");
 		if (!first.ok || !second.ok) throw new Error("spawn failed");
@@ -726,11 +823,9 @@ describe("process-exit reap (D12)", () => {
 		expect(pids.every((pid) => isPidAlive(pid))).toBe(true);
 
 		reapBackgroundTasksNow();
-		// SIGKILL 发出到进程表移除是异步的：轮询等 pid 判死（满载下延迟不可预估）
-		await pollUntilTicked(() => pids.every((pid) => !isPidAlive(pid)), 5000, "reaped pids to die");
-
+		// 桩端点：kill 发令断言 + 终态两侧断言（真 pid 判死由集成轨覆盖）
 		for (const pid of pids) {
-			expect(isPidAlive(pid)).toBe(false);
+			expect(killTreeCalls).toContain(pid);
 		}
 		for (const t of [first.task, second.task]) {
 			const finalized = getTask(t.taskId);
@@ -742,8 +837,10 @@ describe("process-exit reap (D12)", () => {
 	});
 });
 
+// ──────────────────────── 单测轨：D15 abort 不传播 ────────────────────────
+
 describe("D15: abort signal does not propagate to background tasks", () => {
-	it("aborted execute-signal leaves the task running", async () => {
+	it("aborted execute-signal leaves the task running", () => {
 		const controller = new AbortController();
 		const spawned = spawnBg("sleep 1");
 		if (!spawned.ok) throw new Error(spawned.error);
@@ -752,14 +849,14 @@ describe("D15: abort signal does not propagate to background tasks", () => {
 		controller.abort();
 		expect(controller.signal.aborted).toBe(true);
 
-		// 非断言性观察窗口（150ms，留事件传播时间；命令 sleep 1 未退出）：断言的是
-		// 「任务不受 abort 影响」的负向不变量，期望状态恒真，轮询语义不适用
-		await sleep(150);
-		// 任务不受中断影响：进程活、状态 running
+		// 不变量「spawn 链路不读 signal」同步即成立（无需观察窗）；任务不受中断影响：
+		// 进程活、状态 running
 		expect(isPidAlive(task.pid)).toBe(true);
 		expect(getTask(task.taskId)?.state).toBe("running");
 	});
 });
+
+// ──────────────────────── 单测轨：spawn 失败路径（§3.6） ────────────────────────
 
 describe("spawn failure paths (§3.6)", () => {
 	it("nonexistent cwd reports the builtin-style error", () => {
@@ -776,9 +873,12 @@ describe("spawn failure paths (§3.6)", () => {
 	});
 
 	it("missing shell reports a spawn failure error", () => {
-		// 通过临时 SHELL 指向不存在路径模拟 shell 缺失（POSIX 分支）
+		// 通过临时 SHELL 指向不存在路径模拟 shell 缺失（POSIX 分支）。走真 spawn 调用
+		// （不存在路径不产生真进程：ENOENT → 无 pid → 失败返回），验证的是 spawn 侧
+		// 失败分支而非桩工厂
 		const original = process.env.SHELL;
 		process.env.SHELL = "/no/such/shell-binary";
+		spawnMode.real = true;
 		try {
 			const result = spawnBg("echo hi");
 			expect(result.ok).toBe(false);
@@ -786,8 +886,171 @@ describe("spawn failure paths (§3.6)", () => {
 				expect(result.error).toContain("Failed to start background command");
 			}
 		} finally {
+			spawnMode.real = false;
 			if (original === undefined) delete process.env.SHELL;
 			else process.env.SHELL = original;
 		}
 	});
 });
+
+// ──────────────────────── 集成轨：真子进程核心 5 条（TAIJI_TEST_INTEGRATION 门控） ────────────────────────
+
+// 真子进程链（spawn+exec+sleep+exit）满载下延迟不可预估，无确定性完成信号可等——
+// 属「代码 + OS 组合行为」，移出默认单测轨：本地默认跳过，CI / 按改动范围触发时
+// 设 TAIJI_TEST_INTEGRATION=1 真跑（门控 SSOT = test-guard/integration-gate.ts）。
+// 保留的 5 条核心 = 真进程端点语义（真 spawn 产物 / 真 SIGKILL 生效 / 真 pid 判死 /
+// 真实时钟不补杀），编排与判定逻辑已由上方单测轨全覆盖。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+	`real process core (spawn / kill tree / timeout chain / reap)${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+	() => {
+		beforeEach(() => {
+			// 真 spawn 模式：node:child_process.spawn 走原实现，进程原语对真 pid 直通
+			spawnMode.real = true;
+		});
+
+		it(
+			"short task: running → exited with exitCode 0, output file readable, registry terminal, pidStartTime carried",
+			{ timeout: 20_000 },
+			async () => {
+				// 断言只要求「exit 事件边沿前 state=running」与退出产物，不依赖命令时长（终态化只在 finalizeTask）
+				const spawned = spawnBg("sleep 0.1 && echo done");
+				if (!spawned.ok) throw new Error(spawned.error);
+				const { task } = spawned;
+				expect(task.state).toBe("running");
+				expect(existsSync(task.outputFile)).toBe(true);
+				// registry 登记即写 running 条目（含 ownerPiPid，M5 属主判定依据）
+				expect(readRegistry(REGISTRY_PATH).get(task.taskId)?.state).toBe("running");
+				expect(readRegistry(REGISTRY_PATH).get(task.taskId)?.ownerPiPid).toBe(process.pid);
+				// 真实 ps 读取的 start time 进条目与 registry（M5→M3 kill 侧精确比较依据）
+				expect(typeof task.pidStartTime).toBe("number");
+				expect(readRegistry(REGISTRY_PATH).get(task.taskId)?.pidStartTime).toBe(task.pidStartTime);
+
+				// 轮询等命令退出 + libuv reap（tick 收尾；满载下延迟不可预估）
+				await pollUntilTicked(() => getTask(task.taskId)?.state === "exited", POLL_DEADLINE_MS, "task finalization");
+
+				const finalized = getTask(task.taskId);
+				expect(finalized?.state).toBe("exited");
+				expect(finalized?.exitCode).toBe(0);
+				expect(finalized?.reason).toBe("natural");
+				expect(finalized?.durationMs).toBeGreaterThan(0);
+
+				const registryEntry = readRegistry(REGISTRY_PATH).get(task.taskId);
+				expect(registryEntry?.state).toBe("exited");
+				expect(registryEntry?.reason).toBe("natural");
+
+				const detail = JSON.parse(await outputTool({ task_id: task.taskId })) as { output: string; exitCode: number };
+				expect(detail.output).toContain("done");
+				expect(detail.exitCode).toBe(0);
+			},
+		);
+
+		it(
+			"kill edge: intent consumed → exited with reason killed",
+			{ timeout: 20_000 },
+			async () => {
+				const spawned = spawnBg("sleep 60");
+				if (!spawned.ok) throw new Error(spawned.error);
+				const { task } = spawned;
+				await killTool(task.taskId);
+				// 轮询到 kill 边沿收尾（SIGKILL 生效 + tick 终态化）
+				await pollUntilTicked(() => getTask(task.taskId)?.reason === "killed", POLL_DEADLINE_MS, "killed finalization");
+				const finalized = getTask(task.taskId);
+				expect(finalized?.state).toBe("exited");
+				expect(finalized?.reason).toBe("killed");
+				expect(readRegistry(REGISTRY_PATH).get(task.taskId)?.reason).toBe("killed");
+			},
+		);
+
+		it(
+			"fires kill-tree at the deadline and finalizes with reason timeout",
+			{ timeout: 20_000 },
+			async () => {
+				vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+				let taskId = "";
+				let pid = -1;
+				try {
+					// fake 生效后 spawn：timeout 定时器进 fake 队列，由 advanceTimers 推进
+					const spawned = spawnBg("sleep 30", { timeoutSec: 1 });
+					if (!spawned.ok) throw new Error(spawned.error);
+					taskId = spawned.task.taskId;
+					pid = spawned.task.pid;
+
+					vi.advanceTimersByTime(1000);
+					// 到点：kill-tree 已发令 + 两侧 killing intent（reason 候选 timeout）
+					expect(killTreeCalls).toContain(pid);
+					expect(getTask(taskId)?.state).toBe("killing");
+					expect(getTask(taskId)?.intent?.reason).toBe("timeout");
+					expect(readRegistry(REGISTRY_PATH).get(taskId)?.state).toBe("killing");
+				} finally {
+					vi.useRealTimers();
+				}
+
+				// SIGKILL 已真实发出：exit 事件边沿收尾 → exited(reason:"timeout")，终态由边沿写
+				//（timeout 路径满载下 SIGKILL 生效延迟不可预估，deadline 放宽到 8s）
+				await pollUntilTicked(
+					() => getTask(taskId)?.state === "exited" && getTask(taskId)?.reason === "timeout",
+					POLL_DEADLINE_SLOW_MS,
+					"timeout finalization",
+				);
+				const finalized = getTask(taskId);
+				expect(finalized?.state).toBe("exited");
+				expect(finalized?.reason).toBe("timeout");
+			},
+		);
+
+		it(
+			"reaps all active tasks with reason process-exit, real pids die, writes registry terminal",
+			{ timeout: 20_000 },
+			async () => {
+				const first = spawnBg("sleep 30");
+				const second = spawnBg("sleep 30");
+				if (!first.ok || !second.ok) throw new Error("spawn failed");
+				const pids = [first.task.pid, second.task.pid];
+				expect(pids.every((pid) => isPidAlive(pid))).toBe(true);
+
+				reapBackgroundTasksNow();
+				// SIGKILL 发出到进程表移除是异步的：轮询等 pid 判死（满载下延迟不可预估）
+				await pollUntilTicked(() => pids.every((pid) => !isPidAlive(pid)), POLL_DEADLINE_MS, "reaped pids to die");
+
+				for (const pid of pids) {
+					expect(isPidAlive(pid)).toBe(false);
+				}
+				for (const t of [first.task, second.task]) {
+					const finalized = getTask(t.taskId);
+					expect(finalized?.state).toBe("exited");
+					expect(finalized?.reason).toBe("process-exit");
+					expect(readRegistry(REGISTRY_PATH).get(t.taskId)?.reason).toBe("process-exit");
+				}
+				expect(getActiveTasks()).toHaveLength(0);
+			},
+		);
+
+		it(
+			"natural completion before the deadline cancels the timer (no late kill, real clock)",
+			{ timeout: 20_000 },
+			async () => {
+				// 全程真实 timers：命令 0.1s 完成 < 0.5s 超时（真实时间必须真实流过——
+				// 本用例证明「到点不补杀」，fake 时钟会让回调先于进程死亡触发）
+				const before = killTreeCalls.length;
+				const spawned = spawnBg("sleep 0.1 && echo quick", { timeoutSec: 0.5 });
+				if (!spawned.ok) throw new Error(spawned.error);
+				const { task } = spawned;
+
+				// 轮询命令退出收尾（未到 0.5s deadline）
+				await pollUntilTicked(() => getTask(task.taskId)?.state === "exited", POLL_DEADLINE_SLOW_MS, "natural finalization");
+				expect(getTask(task.taskId)?.state).toBe("exited");
+				expect(getTask(task.taskId)?.reason).toBe("natural");
+
+				// 越过 deadline 的时间窗内不得再补杀（终态化必须已清 timer）：轮询真实时钟
+				// 越过 deadline+200ms 余量后断言——这里等待的是时钟流逝本身，非子进程事件
+				await pollUntilTicked(
+					() => Date.now() >= task.startedAt + 500 + 200,
+					POLL_DEADLINE_SLOW_MS,
+					"real clock to pass the deadline window",
+				);
+				expect(killTreeCalls.length).toBe(before);
+				expect(getTask(task.taskId)?.state).toBe("exited");
+			},
+		);
+	},
+);

@@ -6,7 +6,7 @@
  * 混合声明阻断 version。判定与 changesets shouldSkipPackage 语义对齐（private ∨ ignore）。
  * 端到端组在临时目录（mkdtemp 自建自删）跑真实脚本进程。
  */
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -78,7 +78,10 @@ function makeTmpRoot() {
   tmpDirs.push(root)
   return root
 }
-afterEach(() => {
+// afterAll（非 afterEach）：git root 由 describe 级 beforeAll 共享（缩数据量——git init 与
+// workspace fixture 是 6 用例中唯一的重复建仓成本，git 是被测依赖不可 mock），首个用例
+// 后即清会把后续用例的共享 root 删掉
+afterAll(() => {
   for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
@@ -114,9 +117,15 @@ function stageFile(root, rel) {
 }
 
 describe('check_changeset_packages.mjs 端到端（--root 指临时仓）', () => {
-  it('private 声明 → exit 1，[ERROR]/[FIX] 指向恢复动作', () => {
-    const root = makeTmpRoot()
+  // 共享 git root（缩重复 init 成本）：脚本按显式文件参数经 `git show :<path>` 读 index，
+  // 用例各写互不相同的 changeset 文件名，残留不进入后续用例的判定范围
+  let root
+  beforeAll(() => {
+    root = makeTmpRoot()
     writeWorkspaceFixture(root)
+  })
+
+  it('private 声明 → exit 1，[ERROR]/[FIX] 指向恢复动作', () => {
     const cs = join(root, '.changeset', 'a.md')
     writeFileSync(cs, "---\n'@taiji/shared': minor\n---\n\nbody\n")
     stageFile(root, '.changeset/a.md')
@@ -127,24 +136,18 @@ describe('check_changeset_packages.mjs 端到端（--root 指临时仓）', () =
     expect(r.stderr).toContain('frontmatter 删除对应行')
   })
   it('ignore 清单声明 → exit 1', () => {
-    const root = makeTmpRoot()
-    writeWorkspaceFixture(root)
     writeFileSync(join(root, '.changeset', 'b.md'), '---\nfrozen-pkg: patch\n---\n')
     stageFile(root, '.changeset/b.md')
     const r = spawnSync('node', [HOOK_SCRIPT, '--root', root, '.changeset/b.md'], { encoding: 'utf-8' })
     expect(r.status).toBe(1)
   })
   it('发布包声明 → exit 0', () => {
-    const root = makeTmpRoot()
-    writeWorkspaceFixture(root)
     writeFileSync(join(root, '.changeset', 'c.md'), '---\n"@zhushanwen/pi-todo": patch\n---\n')
     stageFile(root, '.changeset/c.md')
     const r = spawnSync('node', [HOOK_SCRIPT, '--root', root, '.changeset/c.md'], { encoding: 'utf-8' })
     expect(r.status).toBe(0)
   })
   it('无文件参数 → exit 0（不跑判定）', () => {
-    const root = makeTmpRoot()
-    writeWorkspaceFixture(root)
     const r = spawnSync('node', [HOOK_SCRIPT, '--root', root], { encoding: 'utf-8' })
     expect(r.status).toBe(0)
   })
@@ -153,10 +156,17 @@ describe('check_changeset_packages.mjs 端到端（--root 指临时仓）', () =
 // ---------- changeset-check.mjs 方向②（Gate-1a.5 / dev-merge gates）端到端 ----------
 
 describe('changeset-check.mjs 无效声明方向（fail 无条件于 base）', () => {
-  it('磁盘残留 private 声明 → status fail + exit 1（无 git 仓库也拦）', () => {
-    const root = makeTmpRoot()
+  // 独立 root（不与 hook 组共享）：本组脚本是磁盘扫描式（.changeset/*.md 全量），
+  // hook 组残留的 a/b/c.md 会进入 unversionable 断言；组内共享 root 缩重复 init 成本
+  let root
+  beforeAll(() => {
+    root = makeTmpRoot()
     writeWorkspaceFixture(root)
-    writeFileSync(join(root, '.changeset', 'residue.md'), "---\n'@taiji/shared': minor\n---\n")
+  })
+
+  it('磁盘残留 private 声明 → status fail + exit 1（无 git base 也拦）', () => {
+    const residue = join(root, '.changeset', 'residue.md')
+    writeFileSync(residue, "---\n'@taiji/shared': minor\n---\n")
     const r = spawnSync('node', [CHECK_SCRIPT, '--json'], { cwd: root, encoding: 'utf-8' })
     expect(r.status).toBe(1)
     const j = JSON.parse(r.stdout)
@@ -165,10 +175,10 @@ describe('changeset-check.mjs 无效声明方向（fail 无条件于 base）', (
       { file: '.changeset/residue.md', name: '@taiji/shared', bumpType: 'minor' },
     ])
     expect(j.lines[0]).toContain('1 个 changeset 声明了不可版本化的包')
+    // 扫描式判定：用例自清残留，防泄漏到同 root 的后续用例
+    rmSync(residue)
   })
   it('README.md 不参与判定（非 changeset 文件）', () => {
-    const root = makeTmpRoot()
-    writeWorkspaceFixture(root)
     writeFileSync(join(root, '.changeset', 'README.md'), "---\n'@taiji/shared': minor\n---\n")
     const r = spawnSync('node', [CHECK_SCRIPT, '--json'], { cwd: root, encoding: 'utf-8' })
     expect(r.status).toBe(0)

@@ -5,13 +5,16 @@
  * 覆盖点：down-queue stdin 不可用/写抛错；sweep stale socket 删除失败 / instanceId 失配 /
  * pid 复用不杀只删 / pid 文件删除失败；control-server 连接 error / 畸形帧丢弃 /
  * destroy 时 socket 文件删除失败 / pid 文件写失败 / pid 文件清理失败 / spawn ENOENT。
+ *
+ * 分层（判据三档，docs/todo/test-single-layer-cleanup.md）：失败 deps 一律注入——
+ * 引擎进程换进程内桩（fake-engine.ts，spawn 注入）、pid 判活/杀链/start time 走
+ * sweepOrphanEnginePids 的 deps 槽。全部用例经事件/回执收尾（第 ② 档），零真 spawn、
+ * 零真实等待窗口。
  */
-import { spawn, type ChildProcess } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, afterEach, vi } from 'vitest'
 
-import { isPidAlive } from '../../../utils/protocol-background-task.js'
 import { ChannelDownQueue, type DownStdin } from '../../../infra/subagent-control/down-queue.js'
 import {
   SUBAGENT_CONTROL_CLOSED_REASONS,
@@ -30,12 +33,30 @@ import {
   launchSpec,
   makeRegisteredTmpDir,
   setupServer,
-  waitFor,
 } from './test-helpers.js'
+import { resetFakeEngines } from './fake-engine.js'
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
+/** spawn 闸门（hoisted：vi.mock factory 与用例都要读写同一对象）。 */
+const spawnGate = vi.hoisted(() => ({ real: false }))
+
+// 引擎进程换进程内桩（零真 spawn）。本文件无真进程组用例，闸门恒 false。
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  const { fakeSpawn } = await import('./fake-engine.js')
+  return {
+    ...actual,
+    spawn: (command: string, args: readonly string[], options?: unknown) =>
+      spawnGate.real
+        ? actual.spawn(command, args, options as never)
+        : fakeSpawn(command, args, options),
+  }
+})
+
+afterEach(async () => {
+  vi.restoreAllMocks()
+  await cleanupTestServers()
+  resetFakeEngines()
+})
 
 function makeDownQueue(stdin: DownStdin | null): ChannelDownQueue {
   return new ChannelDownQueue({
@@ -50,18 +71,16 @@ function makeDownQueue(stdin: DownStdin | null): ChannelDownQueue {
   })
 }
 
-/** 起一个长睡子进程并收窄 pid（pid 复用用例的观测对象；调用方持 engine 负责 finally kill）。 */
-function spawnSleeperEngine(): { engine: ChildProcess; enginePid: number } {
-  const engine = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
-  const pid = engine.pid
-  if (pid === null || pid === undefined) throw new Error('spawn pid unavailable')
-  return { engine, enginePid: pid }
+/** 孤儿 pid 文件的登记形状（spawn 后原子写；owner 死 + 引擎 pid 活 + start 晚于登记）。 */
+function writeReusedPidFile(pidFile: string, enginePid: number): void {
+  writeFileSync(pidFile, JSON.stringify({
+    pid: enginePid,
+    spawnedAt: Date.now(), // 登记 = 现在；注入的 start = 2h 后 → start 晚于登记 = 已复用
+    runtimePid: 999_999_999, // owner 死（不可能的 pid）
+    instanceId: '999999999',
+    hostKind: 'runtime-sidecar',
+  }))
 }
-
-afterEach(async () => {
-  vi.restoreAllMocks()
-  await cleanupTestServers()
-})
 
 describe('down-queue 降级分支', () => {
   it('stdin 不可用（null）：push 静默丢帧不抛错', () => {
@@ -111,35 +130,52 @@ describe('sweep 降级分支', () => {
     expect(existsSync(pidFile)).toBe(true) // owner 活 → 跳过（身份不可核实只告警）
   })
 
-  it('pid 复用（start 晚于登记）→ 不杀只删；目录只读时删除失败降级保留', { timeout: 20_000 }, async () => {
+  it('pid 复用（start 晚于登记）→ 不杀只删', async () => {
     const dataDir = await makeRegisteredTmpDir('ctl-reuse-')
     const enginesDir = getControlEnginesDir(dataDir)
     mkdirSync(enginesDir, { recursive: true })
-    const { engine, enginePid } = spawnSleeperEngine()
     const pidFile = join(enginesDir, 'sess-r-fake-r-ch-r.pid')
-    writeFileSync(pidFile, JSON.stringify({
-      pid: enginePid,
-      spawnedAt: Date.now(), // 登记 = 现在；注入的 start = 2h 后 → start 晚于登记 = 已复用
-      runtimePid: 999_999_999, // owner 死（不可能的 pid）
-      instanceId: '999999999',
-      hostKind: 'runtime-sidecar',
-    }))
+    // 合成 pid：判活/杀链/start time 全部经 deps 注入，无需真进程（真实探活由
+    // control-server 的门控用例与 sweep.test.ts 承担）
+    const enginePid = 999_000_001
+    writeReusedPidFile(pidFile, enginePid)
+
+    const killSpy = vi.fn()
+    await sweepOrphanEnginePids(dataDir, {
+      // 只让引擎 pid 判活（owner runtime 的 999_999_999 必须判死才会进入收割判定）
+      isPidAlive: (pid) => pid === enginePid,
+      killProcessTree: killSpy,
+      getProcessStartTimeSec: () => Math.floor(Date.now() / 1000) + 7200, // start 晚于登记 = 已复用
+    })
+
+    expect(killSpy).not.toHaveBeenCalled() // 复用判定 → 不杀（宁不杀勿误杀）
+    expect(existsSync(pidFile)).toBe(false) // 只删记录
+  })
+
+  it('pid 文件删除失败（目录只读）→ 降级保留，不抛错', async () => {
+    const dataDir = await makeRegisteredTmpDir('ctl-reuse-ro-')
+    const enginesDir = getControlEnginesDir(dataDir)
+    mkdirSync(enginesDir, { recursive: true })
+    const pidFile = join(enginesDir, 'sess-r-fake-r-ch-r.pid')
+    writeReusedPidFile(pidFile, 999_000_002)
     chmodSync(enginesDir, 0o555) // 只读 → removeQuietly 的 unlink 必失败（叠加第二个降级点）
     try {
-      await sweepOrphanEnginePids(dataDir, {
+      const killSpy = vi.fn()
+      await expect(sweepOrphanEnginePids(dataDir, {
+        isPidAlive: (pid) => pid === 999_000_002,
+        killProcessTree: killSpy,
         getProcessStartTimeSec: () => Math.floor(Date.now() / 1000) + 7200,
-      })
-      expect(isPidAlive(enginePid)).toBe(true) // 复用判定 → 不杀
+      })).resolves.toBeUndefined()
+      expect(killSpy).not.toHaveBeenCalled() // 复用判定仍不杀
       expect(existsSync(pidFile)).toBe(true) // 删除失败 → 保留（warn 留痕）
     } finally {
       chmodSync(enginesDir, 0o755)
-      engine.kill('SIGKILL')
     }
   })
 })
 
 describe('control-server 降级分支', () => {
-  it('spawn ENOENT（resolveLaunch 注入不可执行 command）→ engine process error → engine_closed(127)', { timeout: 20_000 }, async () => {
+  it('spawn ENOENT（resolveLaunch 注入不可执行 command）→ engine process error → engine_closed(127)', async () => {
     const { agent } = await connectAgent({
       resolveLaunch: async () => ({
         command: '/nonexistent/pi-runner-for-test',
@@ -149,7 +185,8 @@ describe('control-server 降级分支', () => {
       }),
     })
     // spawn error 路径没有 engine_opened/engine_open_failed 回执——open 永远等不到应答，
-    // 只挂 catch 防 unhandled rejection，终态断言走 engine_closed 帧
+    // 只挂 catch 防 unhandled rejection，终态断言走 engine_closed 帧（桩按 Node 同款
+    // 异步 error + 无 pid 形态送达）
     void agent.open(launchSpec(), 'open-spawn-err').catch(() => {})
     const closed = await agent.waitForFrame(
       (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed,
@@ -160,7 +197,7 @@ describe('control-server 降级分支', () => {
     expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.engineExit)
   })
 
-  it('hello 后畸形帧：丢弃并保持连接可用', { timeout: 20_000 }, async () => {
+  it('hello 后畸形帧：丢弃并保持连接可用', async () => {
     const { agent } = await connectAgent()
     await agent.waitFor((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.helloOk, 'hello_ok')
     agent.sendRaw('not-json {{{') // 解析失败 → 丢弃、连接保持
@@ -170,7 +207,7 @@ describe('control-server 降级分支', () => {
     expect(channelId).toBeTruthy()
   })
 
-  it('destroy 时 socket 文件被目录占位：unlink 失败降级，关停不阻断', { timeout: 20_000 }, async () => {
+  it('destroy 时 socket 文件被目录占位：unlink 失败降级，关停不阻断', async () => {
     const { server } = await setupServer()
     const socketPath = server.listeningSocketPath
     rmSync(socketPath)
@@ -182,7 +219,7 @@ describe('control-server 降级分支', () => {
     rmSync(socketPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  it('引擎目录只读：pid 文件写失败降级，open 照常成功', { timeout: 20_000 }, async () => {
+  it('引擎目录只读：pid 文件写失败降级，open 照常成功', async () => {
     const { agent, dataDir } = await connectAgent()
     const enginesDir = getControlEnginesDir(dataDir)
     mkdirSync(enginesDir, { recursive: true })
@@ -195,9 +232,9 @@ describe('control-server 降级分支', () => {
     }
   })
 
-  it('引擎目录只读 + 引擎退出：pid 文件清理失败降级，closed 照常送达', { timeout: 20_000 }, async () => {
+  it('引擎目录只读 + 引擎退出：pid 文件清理失败降级，closed 照常送达', async () => {
     const { agent, dataDir } = await connectAgent()
-    const { channelId, pid } = expectOpened(
+    const { channelId } = expectOpened(
       await agent.open(launchSpec({ args: ['--exit-on', 'bye', '--exit-code', '7'] }), 'open-cleanup'),
     )
     const enginesDir = getControlEnginesDir(dataDir)
@@ -205,6 +242,5 @@ describe('control-server 降级分支', () => {
     const closed = await byeAndExpectClosed(agent, channelId, 7)
     expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.engineExit)
     chmodSync(enginesDir, 0o755) // 恢复写权限：降级残留的 pid 文件随 tmp 清理
-    await waitFor(() => !isPidAlive(pid), 'engine reaped')
   })
 })

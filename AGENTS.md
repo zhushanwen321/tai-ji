@@ -25,6 +25,7 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 问题排查 | 排障时 | 新排障规则/日志路径/常见问题 |
 | [docs/todo/](docs/todo/) | 未解决缺陷与待裁决项登记（一文件一主题，状态行承载） | 收尾盘点 / 裁决时 | 新增登记或状态变化同 commit 更新 |
 | [docs/CODE-DUPLICATION-BASELINE.md](docs/CODE-DUPLICATION-BASELINE.md) | 代码重复度口径 SSOT + 健康基线（jscpd 生产口径 / 一键重跑 `scripts/measure-code-duplication.mjs`） | 重复度审计执行前（保证度量可比） | jscpd 版本 / 口径参数 / 扫描范围任一变更 |
+| [.agents/skills/verify-taiji/SKILL.md](.agents/skills/verify-taiji/SKILL.md) | AI 真机验收技能（能力原语 / scenario 剧本 / runner；`capabilities/P0-P1-COVERAGE.md` 覆盖矩阵 = 验收项↔剧本对账入口） | dev-flow-wf T3 验收计划期（查矩阵标 verifyAsset）+ D3 验收期（verify/inspect 节点消费）+ D4 收尾（同步检查） | 交付触达覆盖矩阵登记的功能面（dev-flow-wf D4 第 5 步承接；技能实体经 `.agents` symlink 共享不入 git，本行登记其入口与触发） |
 
 ### 主题索引
 

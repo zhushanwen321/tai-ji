@@ -24,7 +24,7 @@
 // removePidfile / killLeakedChild / sweepStalePidfiles）。
 
 import { spawn } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
+import type { ChildProcess, SpawnOptions } from "node:child_process";
 
 import {
   buildEngineChildEnv,
@@ -95,6 +95,15 @@ export interface LocalEngineTransportOptions { // oe-exempt:20261018:framework:s
    * 调用时点 = 镜像置死之前（宿主编排保证）；缺省空表（POSIX 组杀不受影响）。
    */
   readonly listLiveOrphanPids?: () => number[];
+  /**
+   * 子进程 spawn 注入点（缺省 node:child_process spawn；单测注入进程端点桩——
+   * stdio 行切分 / 半行残片上限 / 终局投影等帧面逻辑可在无真进程下确定性验证，
+   * 见 docs/todo/test-single-layer-cleanup.md「确定性同步化」）。注入桩必须实现
+   * wireChild / close / waitForChildExit 消费的 ChildProcess 面（on/removeAllListeners /
+   * pid / exitCode / signalCode / stdin/stdout/stderr 流）；pid 应取不可达高位
+   * （killProcessTree 对其 ESRCH no-op，不触碰真实进程表）。
+   */
+  readonly spawnChildProcess?: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 }
 
 /**
@@ -175,7 +184,9 @@ export class LocalEngineTransport implements EngineTransport {
     });
 
     // stdin 恒 'pipe' 且独占（引擎自灭主判据 stdio EOF 的前提；不覆写、不继承）。
-    const child = spawn(launch.command, launch.args, {
+    // spawnChildProcess 注入点见 LocalEngineTransportOptions（单测进程端点桩）。
+    const spawnChildProcess = this.opts.spawnChildProcess ?? spawn;
+    const child = spawnChildProcess(launch.command, launch.args, {
       cwd: spec.cwd,
       env,
       ...engineSpawnPlatformOptions(),

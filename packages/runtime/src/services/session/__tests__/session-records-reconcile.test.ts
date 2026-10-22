@@ -13,13 +13,17 @@
  *   清零随 onSessionDisposed 停、与在途拉取经 inflight 合并。
  * - A5 反向：无 reload 演进序列帧只在真实变化时发（帧序列为改动前子集），消费端最终
  *   视图等价；fullRebuild 内容不变零帧（cursor 自愈全量重新拉取旧形态发冗余帧——已知差异）。
- * - profiling 门①：单轮对账耗时 ≤100ms/session/轮（real timers，faux 规模）。
+ * - profiling 门①拆两层（单测层极端测试整治第二波）：单测半场 = 同值增量最重形态的
+ *   「零帧输出」逻辑断言（fake timers，确定性完成）；性能水位半场（单轮 ≤100ms/session/轮，
+ *   real timers）经 TAIJI_TEST_INTEGRATION 门控移集成轨——单测不保证性能，水位断言
+ *   属 bench/集成域（生产侧另有 session-records.ts 运行时耗时 warn 兜底）。
  *
  * 分层：mock 层 = deps 5 方法（与 session-records.test.ts 同形态）；extractor 生产代码
  * 真实执行；fake timers（项目规范）。fixture 复制自 session-records.test.ts（测试文件
  * 间不互相 import）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../../test-guard/integration-gate.ts'
 import type { IMessageBus } from '../../message-bus/message-bus.js'
 import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
 import type { ISessionStore } from '../../ports/session.js'
@@ -483,9 +487,45 @@ describe('A5 反向：无 reload 演进序列', () => {
   })
 })
 
-// ── profiling 门①（real timers：单轮对账耗时红绿线）────────────────────────
+// ── profiling 门①·单测半场：对账轮同值增量最重形态零帧（fake timers）──────────
+// 性能水位断言（单轮 ≤100ms）已拆到下方集成门控 describe——单测只测逻辑正确性。
 
-describe('profiling 门①：单轮对账耗时（real timers）', () => {
+describe('对账轮同值增量全量比对零帧（profiling 门①·单测半场）', () => {
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('faux 规模（50 subagent×2KB + 20 workflow + plan）同值增量对账：增量路径确认 + 全量比对后 diff 空（零帧）', async () => {
+    const bigTask = 'x'.repeat(2048)
+    const subEntries = Array.from({ length: 50 }, (_, i) => subagentRecordEntries(`sa-${i}`, 'idle', `e-sub-${i}`, { task: bigTask, result: bigTask })).flat()
+    const wfEntries = Array.from({ length: 20 }, (_, i) => workflowRecordEntries(`run-${i}`, 'done', `e-wf-${i}`, 'completed')).flat()
+    const entries = [...subEntries, ...wfEntries, planStateEntry(fullPlanData('awaiting'), 'e-plan')]
+
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+
+    // 轮 1：全量拉取 + 首发布（建立水位）
+    await seedRound(records, fire, client, entries, 'e-plan')
+    expect(publish).toHaveBeenCalled()
+
+    // 轮 2（对账，agent_settled 路径）：增量批返回全部同值 entry（新 entryId 同内容）——
+    // merge 全量 + 水位全量比对 = 单轮对账最重形态（稳态 diff 路径全走、无 publish 兜底）
+    const sameValueDelta = entries.map((e) => ({ ...(e as Record<string, unknown>), id: `${(e as { id: string }).id}-r2` }))
+    client.getEntries.mockResolvedValue({ data: { entries: sameValueDelta, leafId: 'e-plan-r2' } })
+    const framesBefore = publish.mock.calls.length
+    records.reconcileRecordEntries('s1')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(client.getEntries).toHaveBeenCalledWith('e-plan') // 增量路径确认
+    expect(publish.mock.calls.length).toBe(framesBefore) // 全量比对后 diff 空（零帧）
+  })
+})
+
+// ── profiling 门①·性能水位半场（real timers）——集成门控，本地默认跳过 ─────────
+
+describe.skipIf(
+  !INTEGRATION_TESTS_ENABLED,
+)(`profiling 门①：单轮对账耗时水位（real timers，性能预算归集成轨）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
   let recordsUnderTest: SessionRecords | null = null
 
   afterEach(() => {

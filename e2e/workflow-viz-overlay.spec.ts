@@ -9,7 +9,7 @@
  * workflow-sidebar-sync.spec.ts T3 同源，本 spec 深入 overlay 内部行为。
  *
  * mock 数据事实（packages/core/src/transport/mock/workflow-data.ts + index.ts；演员
- * 清单 SSOT = .tmp/dev-flow/ui-redesign-combined.runlog/u-wf-mock.md 冻结表）：
+ * 清单（来源档案已随 .tmp 清理，内容以内联冻结表为准））：
  * - getWorkflows('s3') = 11 条演员（全部入托盘；分桶 running 4 / ended 7），
  *   单行定位按 slug 等值过滤（行 testid 恒 tray-workflow-row）
  * - getWorkflowRunEvents / getWorkflowDag 按 runId 查预置表：wf-mock-001 接通 DAG

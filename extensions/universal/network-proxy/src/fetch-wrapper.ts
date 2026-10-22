@@ -1,22 +1,23 @@
 /**
  * 网络代理请求拦截层：包装 pi 进程的 `globalThis.fetch`（打包版兼容设计）。
  *
- * 为什么不是 undici 全局分发器：打包版 pi 是 Bun 单文件二进制，HTTP 栈用二进制内置的
- * undici（`builtin://thirdparty/undici`）；扩展 bundle 由 esbuild 内联自己的 undici 副本
- * （`scripts/bundle-extensions.mjs` 的 EXTERNAL 不含 undici）。undici 的
- * `setGlobalDispatcher` 槽是模块级变量，两套副本互不相通——扩展改的全局槽 pi 根本不用，
- * LLM 请求照常直连（2026-10-20 打包版实测：请求直连 Cloudflare，统计文件零行）。
- * dev 用 `node_modules/.bin/pi`，pi 与扩展源码解析到同一份 undici，所以旧方案在 dev 正常、
- * 打包版静默失效。
+ * 为什么不是 undici 全局分发器：undici 的 `setGlobalDispatcher` 槽是模块级变量，
+ * 只在「pi 与扩展加载同一份 undici 模块实例」时生效。本包的 undici 按宿主运行时
+ * 解析（Node → node_modules npm 副本；Bun 打包版 → 二进制内置副本，副本策略与依据
+ * 见 dispatcher.ts 头注），与 pi 自己的 HTTP 栈不保证同实例。[HISTORICAL] 2026-10-20
+ * 打包版实测：setGlobalDispatcher 方案下扩展改的全局槽 pi 不用，LLM 请求照常直连、
+ * 统计文件零行——dev 下两实例恰好相同所以 dev 正常、打包版静默失效，拦截点因此
+ * 定为 `globalThis.fetch`（不依赖副本实例是否共享）。
  *
  * 稳定接缝 = `globalThis.fetch`：pi-ai 的 OpenAI 兼容请求在每次构造 client 时经
  * `Shims.getDefaultFetch()` 动态取当前全局 fetch（node_modules/openai/internal/shims.js），
- * 包装它不依赖 pi 与扩展是否共享 undici 副本。命中规则的请求用扩展自己的 undici fetch +
- * 分发器发出（代理或 IPv4 锁定，见 dispatcher.ts）；未命中的请求原样调用包装前的 fetch，
- * 保留 pi 原生 EnvHttpProxyAgent / 连接调优 / 错误处理语义。
+ * 包装它不依赖 pi 与扩展是否共享 undici 副本。命中规则的请求用扩展解析到的 undici
+ * fetch + 分发器发出（代理或 IPv4 锁定，见 dispatcher.ts）；未命中的请求原样调用包装前
+ * 的 fetch，保留 pi 原生 EnvHttpProxyAgent / 连接调优 / 错误处理语义。
  *
  * 生命周期与旧安装状态机同构：
- * - 加载 / 每 turn 开始：重读配置推进状态（禁用 = 摘除包装恢复原 fetch）；
+ * - 加载 / 每 turn 开始：重读配置推进状态（`enabled` 关且 `ipv4Only` 空 = 摘除包装恢复原
+ *   fetch；`ipv4Only` 非空时包装保留——IPv4 锁定是直连地址族修正，独立于代理开关）；
  * - 指纹未变且包装仍在进程槽位：零动作（不重建）；
   * - 槽位被第三方整体覆盖（其他 extension 包装 / 手动改写；pi 的 configureHttpDispatcher
   *   有 shouldInstallGlobals 守卫（pi dist/core/http-dispatcher.js:88-99）——检测到 fetch
@@ -147,8 +148,9 @@ function wrapperMarkOf(fetch: FetchLike): FetchWrapperMark | null {
  *
  * 分流优先级（单一源在这里，config.ts 的 hits* 只提供匹配，不重复排序）：
  * 1. `noProxy` 命中 → 原样直连（用户显式排除，连 IPv4 锁定也不做）；
- * 2. `ipv4Only` 命中 → IPv4 锁定直连（**不走代理**，本扩展只做地址族选择）；
- * 3. `rules` 命中 → 经代理 fetch；
+ * 2. `ipv4Only` 命中 → IPv4 锁定直连（**不走代理**，本扩展只做地址族选择；独立于
+ *    `enabled` 代理开关——开关关闭时本分支照常生效）；
+ * 3. `enabled` 且 `rules` 命中 → 经代理 fetch（开关关闭时 rules 不参与分流，落入直连）；
  * 4. 其余 → 原样直连。
  *
  * 计数时点 = 请求发起时（与旧分流器一致；不等待完成，成败由 pi 原生错误链路呈现）。
@@ -178,7 +180,7 @@ function createWrappedFetch(
 			return proxyFetch(input, { ...(init ?? {}), dispatcher: ipv4 });
 		}
 
-		if (hitsRules(host, config.rules)) {
+		if (config.enabled && hitsRules(host, config.rules)) {
 			recordDispatch(host, true);
 			// proxy 非空由 applyNetworkProxyConfig 保证（rules 非空才会构造）。
 			if (proxy === null) return originalFetch(input, init);
@@ -279,7 +281,11 @@ export function applyNetworkProxyConfig(
 	state: FetchWrapperState | null,
 	deps: FetchWrapperDeps,
 ): FetchWrapperState | null {
-	if (!config.enabled) {
+	// 包装层的存在条件 = 代理开关开（rules 分流可用）或 ipv4Only 非空（IPv4 锁定直连）。
+	// 两者全无才摘除包装——ipv4Only 是直连地址族修正，语义上不依赖代理开关；
+	// 依据：2026-10-22 真机事故，用户仅配 ipv4Only（enabled=false）时整层被摘，
+	// subagent 的 LLM 请求全部 Connection error（双栈域名的 IPv6 路径抖动）。
+	if (!config.enabled && config.ipv4Only.length === 0) {
 		restoreOriginalIfOwned(state, deps);
 		return null;
 	}
@@ -293,12 +299,12 @@ export function applyNetworkProxyConfig(
 	}
 	const originalFetch = installed && state ? state.originalFetch : currentFetch;
 
-	// 代理分发器只在「确实可能用到代理」时构造：rules 为空 = 无任何主机走代理，
-	// 此时不应因代理配置不可用而锁死整个包装（含 ipv4Only 直连改写）。
+	// 代理分发器只在「确实可能用到代理」时构造：开关关闭或 rules 为空 = 无任何主机走
+	// 代理，此时不应因代理配置不可用而锁死整个包装（含 ipv4Only 直连改写）。
 	// 依据：一次事故（2026-10-22 真机验证）——仅配 ipv4Only、rules=[] 时仍构造
 	// ProxyAgent 并失败，lockOnBuildFailure 把包装整层撤下，ipv4Only 静默失效。
 	let proxy: Dispatcher | null = null;
-	if (config.rules.length > 0) {
+	if (config.enabled && config.rules.length > 0) {
 		try {
 			proxy = deps.buildProxy(config);
 		} catch (error) {

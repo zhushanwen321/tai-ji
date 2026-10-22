@@ -2,7 +2,7 @@
 
 状态：登记生效（随 U20 交付首笔落档；本文件是 remote-use-shell-unification 设计 D9②「真差异白名单」的登记容器——双壳保留差异逐条登记于此，未来新增差异先对照本表分类：真差异（业务含义/变化原因不同）登记保留，假差异（形式语义都同构）收敛）。
 
-设计源：`.tmp/tech-design/remote-use-shell-unification.md` §3.3 D9（防复发 = 双壳共享装配检查 helper + 真差异白名单）。
+设计源：remote-use-shell-unification 设计 §3.3 D9（设计档案已随 .tmp 清理；防复发 = 双壳共享装配检查 helper + 真差异白名单）。
 
 ## 1. 列表状态派生谓词 blockingOverlay 输入：移动恒 false（U20/A14）
 

@@ -1,6 +1,6 @@
 ---
 name: network-proxy-ext-config
-description: "配置 @zhushanwen/pi-network-proxy（LLM 网络代理分流）时加载。含配置文件路径、NetworkProxyConfig schema（enabled/proxy/noProxy/rules）、协议三选一（http/https/socks5）、suffix 主机名匹配语义、noProxy 优先级、凭据成对约束、默认值、示例、生效时机（turn 粒度热重载）、统计文件、故障恢复。触发词：配置网络代理、network-proxy 配置、代理规则、走代理、socks5、noProxy、network-proxy config、代理不生效、代理报错、直连排除。"
+description: "配置 @zhushanwen/pi-network-proxy（LLM 网络代理分流）时加载。含配置文件路径、NetworkProxyConfig schema（enabled/proxy/noProxy/rules/ipv4Only）、协议三选一（http/https/socks5，socks5 仅 Node 宿主——打包版 Bun 内置 undici 副本无此 API）、suffix 主机名匹配语义、noProxy 优先级、凭据成对约束、默认值、示例、生效时机（turn 粒度热重载）、统计文件、故障恢复。触发词：配置网络代理、network-proxy 配置、代理规则、走代理、socks5、noProxy、network-proxy config、代理不生效、代理报错、直连排除、强制 IPv4、ipv4Only。"
 ---
 
 # network-proxy 配置指南
@@ -20,18 +20,22 @@ description: "配置 @zhushanwen/pi-network-proxy（LLM 网络代理分流）时
 
 ```ts
 interface NetworkProxyConfig {
-  enabled: boolean;      // 总开关，默认 false（禁用 = 不包装 fetch，全部按 pi 原生行为出站）
+  enabled: boolean;      // 代理分流总开关，默认 false（关闭 = rules 不参与分流，全部直连/env 代理；
+                         // 不影响 ipv4Only——见下）
   proxy: {
-    protocol: "http" | "https" | "socks5";  // http/https 走 undici ProxyAgent，socks5 走 Socks5ProxyAgent
+    protocol: "http" | "https" | "socks5";  // http/https 走 undici ProxyAgent；socks5 走 Socks5ProxyAgent
+                                           // （仅 Node 宿主——打包版 pi 的 Bun 内置 undici 副本无此 API，
+                                           //  构造时明确报错并保持全部直连，见「故障恢复」）
     host: string;        // 代理服务器地址，如 127.0.0.1
     port: number;        // 1-65535 整数
     username: string;    // 认证用户名（可空，但必须与 password 成对）
     password: string;    // 认证密码（可空，但必须与 username 成对）
   };
   noProxy: string[];     // 直连排除清单（主机名条目），优先级高于 rules——本地网关地址必须加在这里
-  rules: string[];       // 代理规则（主机名条目），命中即经代理
+  rules: string[];       // 代理规则（主机名条目），enabled 开启时命中即经代理
   ipv4Only: string[];    // 直连 + 强制 IPv4 清单（主机名条目）：命中不走代理，DNS 解析锁定 A 记录直连
-                         // （URL / Host 头 / TLS SNI 保持原样，只干预「选哪个 IP」）；用于「IPv6 可达但握手抖动」的服务商
+                         // （URL / Host 头 / TLS SNI 保持原样，只干预「选哪个 IP」）；用于「IPv6 可达但握手抖动」的服务商。
+                         // 独立于 enabled 开关：代理关闭时本清单照常生效（清单非空即安装分流包装层）
 }
 ```
 
@@ -51,7 +55,7 @@ interface NetworkProxyConfig {
 ## 生效时机（turn 粒度热重载）
 
 - 每个 turn 开始重读配置，指纹（enabled+proxy+noProxy+rules+ipv4Only）变化才重建包装——**运行中会话自下一轮对话起生效，无需重启**；turn 进行中（工具循环连续请求）保存的配置对该 turn 内后续请求不生效
-- `enabled` 从 true → false：立即恢复包装前的 fetch（全部直连/env 代理路由）
+- `enabled` 从 true → false 且 `ipv4Only` 为空：立即恢复包装前的 fetch（全部直连/env 代理路由）；`ipv4Only` 非空时包装保留（IPv4 锁定不随代理开关关闭而失效，仅代理分流停用）
 - 未命中规则的流量委托包装前的 fetch——独立 pi 用户设了 `HTTPS_PROXY` 环境变量时，未命中流量仍走 env 代理，语义不丢失
 - pi 的 `configureHttpDispatcher` 带 shouldInstallGlobals 守卫（pi dist/core/http-dispatcher.js:88-99）：检测到 `globalThis.fetch` 已被第三方覆盖即保留不重装，本扩展的包装在同进程内持续生效；槽位被其他第三方整体覆盖时，下一 turn 开始自动以覆盖者为新 original 重新包装（防御路径）
 
@@ -64,17 +68,32 @@ interface NetworkProxyConfig {
 | 现象 | 处置 |
 |---|---|
 | 代理不可达（请求报 `fetch failed` / `ECONNREFUSED`） | 启动代理软件；或把 `enabled` 改为 `false` 一键恢复直连 |
-| socks5 构造失败（undici 实验性 API 变化） | extension error 提示并保持全部直连；切回 `http` 协议即可恢复代理 |
+| socks5 不可用（打包版：Bun 内置 undici 副本无 Socks5ProxyAgent；或 undici 实验性 API 变化） | extension error 提示并保持全部直连；切回 `http`/`https` 协议即可恢复代理（打包版不支持 socks5 属能力边界，非配置错误） |
 | 配置校验失败（端口越界 / 凭据单边等） | 按报错文案修正配置文件，或删除该文件恢复默认禁用态 |
 | 想让某服务商不再走代理 | 从 `rules` 删除对应主机名条目，或将其加入 `noProxy` |
 
 ## 配置示例
+
+代理分流 + IPv4 锁定并用：
 
 ```json
 {
   "enabled": true,
   "proxy": { "protocol": "http", "host": "127.0.0.1", "port": 7890, "username": "", "password": "" },
   "noProxy": ["localhost", "127.0.0.1"],
-  "rules": ["api.anthropic.com"]
+  "rules": ["api.anthropic.com"],
+  "ipv4Only": ["open-design.ai"]
+}
+```
+
+仅 IPv4 锁定、不走代理（`enabled=false` 时 `rules` 不参与分流，`ipv4Only` 照常生效）：
+
+```json
+{
+  "enabled": false,
+  "proxy": { "protocol": "http", "host": "127.0.0.1", "port": 7890, "username": "", "password": "" },
+  "noProxy": ["localhost", "127.0.0.1"],
+  "rules": [],
+  "ipv4Only": ["open-design.ai"]
 }
 ```

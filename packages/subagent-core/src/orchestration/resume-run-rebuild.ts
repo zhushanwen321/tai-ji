@@ -28,7 +28,11 @@ const logger = getLogger("subagents");
  * 预算挂引擎 maxTokens 派生视图）；args 从 run-created 帧的 args 全文恢复（设计 §3.1
  * 载荷表，旧格式帧回落 argsSummary 尽力恢复——见 parseArgsSummary）。
  */
-/** call 重建中间形态（Trace 先建——traceNode 回链 D-10 引用共享；重派集成员不建 node——dispatchAgentCall 重派时 trace.append 自然落位，重建悬空节点只会与重派 append 重复）。 */
+/** call 重建中间形态（Trace 先建——traceNode 回链 D-10 引用共享；重派集成员建 running
+ * 节点（在途折 running，见 draftsToTraceNodes）——成员表 trace 兜底与 run 视图按该节点
+ * 成行；worker 重跑脚本重发 agent-call 时 dispatchAgentCall 对同 stepIndex 重复 append
+ * 新节点，Trace.byIndex last-wins 使 update 命中新节点，重复节点由读侧 last-wins 语义
+ * 消化（设计 §2.6 已知形态，不是本函数的清理义务）。 */
 type CallDraft = { agentName: string; phase?: string; startedAtIso: string; attempts: number; result?: AgentResult; settledTs?: number; opts?: AgentCallOpts };
 
 /** [rebuildRunFromRecord 拆分] 事件流 → call 重建中间形态（per taskIndex 聚合 started/settled 两帧）。 */
@@ -78,14 +82,18 @@ function applySettledFrameToDraft(
   drafts.set(event.taskIndex, base);
 }
 
-/** [rebuildRunFromRecord 拆分] 中间形态 → trace 节点（result.error 定 failed/completed 状态位）。 */
+/** [rebuildRunFromRecord 拆分] 中间形态 → trace 节点（在途 draft 折 running；settled 帧按 result.error 定 failed/completed 状态位）。 */
 function draftsToTraceNodes(drafts: Map<number, CallDraft>): ExecutionTraceNode[] {
   return [...drafts.entries()].map(([taskIndex, d]) => ({
     stepIndex: taskIndex,
     agent: d.agentName,
     task: "",
     model: "",
-    status: d.result?.error !== undefined ? "failed" : "completed",
+    // 在途 draft（有 started 无 settled）折 running，不是 completed——completed 是
+    // 假成功（设计 §3.3.3 不采用② 的当场直接修复）：与壳侧 foldRecordStreamToRun
+    // 的在途 = running 语义对齐（jsonl-run-store draftsToExecutionTraceNodes 同款
+    // 三态判定）；成员表兜底路径消费 trace，fold 语义正确是兜底可信的前提。
+    status: d.result === undefined ? "running" : d.result.error !== undefined ? "failed" : "completed",
     ...(d.phase !== undefined ? { phase: d.phase } : {}),
     startedAt: d.startedAtIso,
     ...(d.result !== undefined ? { result: d.result } : {}),

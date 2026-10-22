@@ -1,16 +1,16 @@
 /**
- * SystemPage 集成测试文件骨架单源（system-page-rename-model / system-page-smart-context
- * 两文件的公共样板收敛：vi.mock 注册 + 超时放宽 + 生命周期 + mount 编排一站式 setup）。
+ * SystemPage 集成测试文件骨架单源（rename-session-page / system-page-smart-context
+ * 两文件的公共样板收敛：vi.mock 注册 + 生命周期 + mount 编排一站式 setup）。
  *
  * 消费形态（测试文件头部，sectionPath 为目标 Section 组件的动态 import 表达式）：
  *   const { settingsMock, mountPage, mountSection, pageWrapper } = setupSystemPageTest(
  *     () => import(sectionPath),
  *   )
  *
- * import 本模块即完成两类注册（副作用模块形态，须先于任何被 mock 模块加载）：
+ * import 本模块即完成注册（副作用模块形态，须先于任何被 mock 模块加载）：
  *  - vi.mock 三件套（useToast / useCommandStore / lib/ipc）——本模块求值时注册，组件经
- *    mountSystemPage/mountSystemSection 的动态 import 推迟到用例内，注册天然先行；
- *  - testTimeout 放宽 20s（SystemPage 集成 mount 重组件树，5s 默认预算插桩/全量并发下击穿）。
+ *    mountSystemPage/mountSystemSection 的动态 import 推迟到用例内（或文件级 beforeAll
+ *    预热），注册天然先行。
  *
  * setupSystemPageTest(sectionLoader) 调用时注册 per-file 生命周期：
  *  - beforeEach：pinia + settings store 全新实例 + settings API mock 重置 + seam 注入；
@@ -39,8 +39,6 @@ import {
 vi.mock('@/composables/useToast', () => toastModule())
 vi.mock('@/composables/features/command/useCommandStore', () => commandStoreModule())
 vi.mock('@/lib/ipc', () => ipcModule())
-
-vi.setConfig({ testTimeout: 20_000 })
 
 /** seedStore / smartContextFixture 转发（调用方一站式 import，不再直连 system-page-mount）。 */
 export { seedStore, smartContextFixture } from './system-page-mount'

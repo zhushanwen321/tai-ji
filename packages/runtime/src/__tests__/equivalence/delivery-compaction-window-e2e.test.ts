@@ -27,10 +27,12 @@
  * 断言只锚终态（顺序 / 唯一性 / 标记 / delivered），不锚中间车道——车道是 pi 状态函数。
  *
  * 环境约定照抄 equivalence 族（pi-fixture.ts）。faux LLM 轨（L2.5）：被测语义是
- * 「压缩窗口的持有与释放按序投递」，非模型智能；门控 FAUX_PI_READY（只判 binary，凭证无关）。
+ * 「压缩窗口的持有与释放按序投递」，非模型智能；门控 = 集成测试门控
+ * TAIJI_TEST_INTEGRATION（本地默认跳过，CI 与按改动范围触发时真跑；SSOT =
+ * test-guard/integration-gate.ts）。
  *
- * 运行：cd packages/runtime && npx vitest run src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts
- * 登记：docs/testing/e2e-map.json E2E-EQUIV-01（equivalence 目录族，R2 按改动范围触发）
+ * 运行：TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts（不设 env 时本地默认跳过）
+ * 登记：docs/testing/e2e-map.json E2E-EQUIV-01（equivalence 目录族凭证无关子集）+ E2E-INTEG-06（本文件集成门控轨，R2 按改动范围触发）；文件级集成轨成员登记在 packages/runtime/vitest.config.ts 的 INTEGRATION_TESTS
  */
 
 import { describe, it, expect } from 'vitest'
@@ -40,7 +42,8 @@ import { join } from 'node:path'
 import { createSessionDeliveryRegistry } from '../../services/session/session-delivery-registry.js'
 import { applySessionOccupancyTransition } from '../../services/session/event-interpreter.js'
 import type { IManagedSessionView } from '../../services/session/types.js'
-import { spawnPiFixture, FAUX_PI_READY, FAUX_PI_SKIP_REASON, type PiFixture } from './pi-fixture.js'
+import { spawnPiFixture, type PiFixture } from './pi-fixture.js'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../test-guard/integration-gate.ts'
 
 /** 单步等待上限（任务护栏：每步最多 120s，真实进程轮次余量——与 send-queue-e2e 同口径） */
 const STEP_TIMEOUT_MS = 120_000
@@ -114,7 +117,7 @@ async function waitUntil(
   }
 }
 
-describe.skipIf(!FAUX_PI_READY)(`delivery compaction window e2e faux pi${FAUX_PI_READY ? '' : `（skip：${FAUX_PI_SKIP_REASON}）`}`, () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`delivery compaction window e2e faux pi${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
   it('V1 压缩中提交两条 → 压缩窗口零投递 → 压缩结束按序逐条到达（标记确认 + delivered）', { timeout: 150_000 }, async () => {
     const dataRoot = mkdtempSync(join(tmpdir(), 'cw-delivery-'))
     let targetFx: PiFixture | undefined

@@ -1,10 +1,10 @@
 # plan 模式验收资产（U0 验收资产前置）
 
-> 设计 = `.tmp/tech-design/plan-mode-state-machine.md`（§4 验收场景 S1-S16 / §3.3 D4、D7③）；
-> 实施计划 = `.tmp/dev-flow/plan-mode-state-machine.impl-plan.md`（U0 单元）。本目录是 U0 唯一领地。
+> 设计 = plan-mode-state-machine 设计文档（§4 验收场景 S1-S16 / §3.3 D4、D7③；设计档案已随 .tmp 清理，不入库）；
+> 实施计划 = plan-mode-state-machine impl-plan（U0 单元；dev-flow 过程产物，已随 .tmp 清理，不入库）。本目录是 U0 唯一领地。
 >
 > 三件资产 + 一份复现基线：**mock pi 脚本族**（确定性时序/崩溃构造）、**S5 fixture 技能模板**（执行方式三档弹窗构造）、**CDP 等待断言脚本**（抑制窗/稳定窗/兜底窗断言脚本化）；
-> **mock pi 对现版的 F1-F5 症状复现基线** = `.tmp/dev-flow/mock-pi-repro-baseline.md`。
+> **mock pi 对现版的 F1-F5 症状复现基线** = repro-baseline.mjs 的生成产物（落 `.tmp/dev-flow/` 易失产物目录，不入库，可按「自测入口④」重新生成）。
 > 全部零 token、确定性可复跑；U6 真机验收「只跑不建」。
 
 ## 目录
@@ -31,7 +31,7 @@ scripts/acceptance/plan-mode/
 │   ├── lib/sampler-script.mjs    # 页内采样器（CDP 与自测 vm 沙箱同一份代码）
 │   └── selftest.mjs              # 自测入口③（采样语义 + 对 dev 实例空跑）
 └── repro/
-    ├── repro-baseline.mjs        # F1-F5 症状复现基线 runner（产 .tmp/dev-flow/mock-pi-repro-baseline.md）
+    ├── repro-baseline.mjs        # F1-F5 症状复现基线 runner（产 .tmp/dev-flow/mock-pi-repro-baseline.md，易失不入库）
     └── derive-probe.mts          # 真实派生函数探针（scanPlanStateEntries + derivePlanStage，零镜像）
 ```
 
@@ -41,7 +41,7 @@ scripts/acceptance/plan-mode/
 node scripts/acceptance/plan-mode/mock-pi/selftest.mjs                       # ① mock pi 起停/延迟/崩溃/边界帧/装恢复（31 用例，~10s）
 node_modules/.bin/tsx scripts/acceptance/plan-mode/fixture-skill/selftest.mts # ② fixture 生成/清理 dry-run + 真实检测（9 用例，~5s）
 node scripts/acceptance/plan-mode/cdp/selftest.mjs                            # ③ CDP 断言语义 + 对 dev 实例空跑（15 用例，~3s）
-# ④ 复现基线（验收条款②，产物落 .tmp/dev-flow/mock-pi-repro-baseline.md）
+# ④ 复现基线（验收条款②，产物落 .tmp/dev-flow/ 易失产物目录，不入库）
 node scripts/acceptance/plan-mode/repro/repro-baseline.mjs --out .tmp/dev-flow/mock-pi-repro-baseline.md
 ```
 
@@ -140,7 +140,7 @@ node scripts/acceptance/plan-mode/cdp/assert-window.mjs --kind suppress --dry-ru
 
 ## ④ F1-F5 症状复现基线
 
-产物 = `.tmp/dev-flow/mock-pi-repro-baseline.md`（生成命令见上「自测入口④」，可重复生成）。
+产物落 `.tmp/dev-flow/mock-pi-repro-baseline.md`（易失产物目录，不入库；生成命令见上「自测入口④」，可重复生成）。
 层级声明：F1-F5 各条 = 协议/持久/派生层**实跑**（mock pi 剧本 + `derive-probe.mts` 直接调用现版
 `scanPlanStateEntries` / `derivePlanStage`，零镜像）+ **GUI 层构造法**（真机复现步骤，归 U6 执行）；
 偏离点与原因在基线文档「deviations 说明」节。

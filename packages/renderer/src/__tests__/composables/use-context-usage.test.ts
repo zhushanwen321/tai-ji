@@ -2,15 +2,18 @@
  * useContextUsage 单测 —— context-consistency Phase 2.3 层 1
  * （用例定义：context-consistency-equivalence-test §2 层 1）。
  *
- * 分两块：
+ * 分三块：
  * 1. 定向用例 U1-U5（每条一个故障模式回归锚点）+ U1b（切 sid 竞态窗口，红蓝注入口）
  *    + G4 dev 漂移检测器三例；
- * 2. 属性测试：E1-E7 伪随机事件驱动（固定种子 42，自写 LCG，不引入 fast-check 依赖）
+ * 2. 属性测试：E1-E7 伪随机事件驱动（固定种子 42，自写 LCG，不引入 fast-check 依赖，
+ *    100 步——随机采样规模按单测层「高负载极快」原则收敛）
  *    × I1-I4 不变量逐步断言；最终裁决角色 维护「每个 sid 最后一次合法帧/RPC resolve 确定的
  *    期望值」对账（I1），与实现的三条 recency/抑制规则逐一对齐：
  *    - 合法帧到达当前订阅 sid → 写分区（全 0 帧 / 非订阅 sid / 被清理抑制 → no-op）；
  *    - RPC resolve → 发起后无合法帧落地且未被清理抑制时写分区，否则 no-op；
- *    - RPC 失败 → 分区不降级（最终裁决角色 不变）。
+ *    - RPC 失败 → 分区不降级（最终裁决角色 不变）；
+ * 3. 定向补强三例（竞态窗口风暴 / 清理抑制帧面 / RPC 失败不降级）：随机轨采样外
+ *    确定性锁死同三族语义，覆盖不依赖采样运气。
  *
  * mock 边界：session.getContext mock 掉（transport 层不在本层职责）；事件分发走真实
  * events.dispatchSession 通道（测 composable 对真实分发形态的响应）。
@@ -378,7 +381,7 @@ describe('G4 dev 漂移检测器（TAIJI_AGENT_DEBUG=1）', () => {
 // ── 属性测试：E1-E7 驱动 × I1-I4 不变量（固定种子 42）────────────
 
 describe('属性测试：E1-E7 × I1-I4（switch ≡ snapshot 层 1）', () => {
-  it('500 步伪随机交错，每步全量不变量成立', async () => {
+  it('100 步伪随机交错，每步全量不变量成立', async () => {
     // 静音实现侧诊断日志（E3 落地帧/E5 失败会逐步骤输出）
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
@@ -427,7 +430,7 @@ describe('属性测试：E1-E7 × I1-I4（switch ≡ snapshot 层 1）', () => {
       }
     }
 
-    for (let step = 0; step < 500; step++) {
+    for (let step = 0; step < 100; step++) {
       const r = rand()
       if (r < 0.22) {
         // E1 收帧(ok 值)
@@ -514,6 +517,97 @@ describe('属性测试：E1-E7 × I1-I4（switch ≡ snapshot 层 1）', () => {
     }
 
     warnSpy.mockRestore()
+    debugSpy.mockRestore()
+  })
+})
+
+// ── 定向补强：属性测试随机采样外的确定性覆盖 ────────────────────
+// 与 100 步属性测试互补：随机轨（固定种子 42）前 100 步的采样分布中竞态窗（E4×0.3）
+// 与清理（E6）各命中 12/6 次，但 RPC 失败（E5 的 15% 分支）零命中——三族语义各留一条
+// 定向用例锁死，不依赖采样运气。
+describe('定向补强：竞态窗口 / 清理抑制 / RPC 失败', () => {
+  it('竞态窗口风暴：连续快速切换 + 每步旧 sid 迟到帧——帧只写所属 sid 分区，新 sid 恒不被污染', async () => {
+    const host = mountHost('A')
+    await settle()
+    resolveForSid('A', { sessionId: 'A', inputTokens: 1000, contextLimit: 100000, usagePercent: 1 })
+    await settle()
+    host.sidRef.value = 'B'
+    await settle()
+    resolveForSid('B', { sessionId: 'B', inputTokens: 2000, contextLimit: 100000, usagePercent: 2 })
+    await settle()
+
+    const expected: Record<'A' | 'B', Snap> = {
+      A: { status: 'ok', used: 1000, total: 100000, percent: 1 },
+      B: { status: 'ok', used: 2000, total: 100000, percent: 2 },
+    }
+    for (let i = 0; i < 10; i++) {
+      const from: 'A' | 'B' = (host.sidRef.value === 'B' ? 'B' : 'A')
+      const to: 'A' | 'B' = from === 'A' ? 'B' : 'A'
+      // 竞态窗口注入：ref 已变但 watch pre-flush 未跑，from 的订阅仍活跃——此刻同步派发
+      // from 的迟到帧（updateFor 误写为 update 时污染 to 分区，本用例红灯）
+      host.sidRef.value = to
+      const frame: Snap = { status: 'ok', used: 3000 + i, total: 90000, percent: 3 }
+      dispatchOkFrame(from, frame.used, frame.total, frame.percent)
+      await settle()
+      // 新 sid 分区不被污染（保持自己的最近合法值）
+      expect(readSnap(host)).toEqual(expected[to])
+      expected[from] = frame
+      // 切回读取：迟到帧落在所属 sid 自己的分区（I1 对账）
+      host.sidRef.value = from
+      await settle()
+      expect(readSnap(host)).toEqual(frame)
+    }
+  })
+
+  it('清理抑制（帧面）：deleteSession 后到达的帧被拦截不复活分区；重新进入视图恢复路径重新拉取写入', async () => {
+    const host = mountHost('A')
+    await settle()
+    resolveForSid('A', { sessionId: 'A', inputTokens: 5000, contextLimit: 100000, usagePercent: 5 })
+    await settle()
+
+    // 清理后帧到达（当前订阅 sid）：deletedSids 拦截（D-B2-1），分区不复活僵尸值
+    triggerSessionCleanups('A')
+    dispatchOkFrame('A', 6000, 100000, 6)
+    await settle()
+    expect(readSnap(host)).toEqual(UNKNOWN_SNAP)
+
+    // 重新进入视图 = 新生命周期：恢复路径重新拉取 → resolve 写入新值
+    host.sidRef.value = 'B'
+    await settle()
+    host.sidRef.value = 'A'
+    await settle()
+    resolveForSid('A', { sessionId: 'A', inputTokens: 7000, contextLimit: 100000, usagePercent: 7 })
+    await settle()
+    expect(readSnap(host)).toEqual({ status: 'ok', used: 7000, total: 100000, percent: 7 })
+  })
+
+  it('RPC 失败分区不降级（I5）：已有值 sid 的恢复拉取 reject → 缓存值保持；下次切入重新拉取自愈', async () => {
+    // 静音实现侧失败诊断日志（reject 路径 console.debug）
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+    const host = mountHost('A')
+    await settle()
+    resolveForSid('A', { sessionId: 'A', inputTokens: 8000, contextLimit: 100000, usagePercent: 8 })
+    await settle()
+
+    // 切走再切回产生第二次拉取，reject：分区缓存不降级（unknown 回退 = 闪横线缺陷形态）
+    host.sidRef.value = 'B'
+    await settle()
+    host.sidRef.value = 'A'
+    await settle()
+    const idx = pendingRpcs.findIndex((e) => e.sid === 'A')
+    if (idx < 0) throw new Error('测试编排错误：sid A 无在途 RPC')
+    pendingRpcs.splice(idx, 1)[0].reject(new Error('rpc-fail'))
+    await settle()
+    expect(readSnap(host)).toEqual({ status: 'ok', used: 8000, total: 100000, percent: 8 })
+
+    // 下次切入无条件重新拉取：成功 resolve 写入新值（自愈）
+    host.sidRef.value = 'B'
+    await settle()
+    host.sidRef.value = 'A'
+    await settle()
+    resolveForSid('A', { sessionId: 'A', inputTokens: 9000, contextLimit: 100000, usagePercent: 9 })
+    await settle()
+    expect(readSnap(host)).toEqual({ status: 'ok', used: 9000, total: 100000, percent: 9 })
     debugSpy.mockRestore()
   })
 })

@@ -5,9 +5,14 @@
  * 在断言内显式分叉——F22「静息态直开抛 CANTOPEN」是 darwin bun 的事实（linux bun
  * 相反：直开成功可读），bun 侧断言按平台矩阵对账（platform-matrix.ts，对账红灯 =
  * bun 捆绑 sqlite 语义漂移警报）；node 趟断言其不对称半边（直开成功但创建 -shm/-wal）。
+ *
+ * 轨道归属：本文件整体登记在 vitest.config.ts 的 slow-sqlite 串行尾组（真实 sqlite
+ * WAL 恢复语义，mock 不可替代），组内用例经 TAIJI_TEST_INTEGRATION 门控本地默认跳过
+ * （SSOT = test-guard/integration-gate.ts，约定见 docs/TEST-STRATEGY.md）。
  */
 
 import { describe, expect, it, vi, afterAll } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../test-guard/integration-gate.ts'
 import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -58,8 +63,8 @@ afterAll(() => {
   if (privateTmp.root) rmSync(privateTmp.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
-// 超时预算已上移包级 vitest.config.ts（testTimeout 30s，真实 sqlite I/O 测试族共用，
-// 含本文件与 error-contract 假驱动族）——文件级设置移除，单一来源。
+// 超时预算在 vitest.config.ts 的 slow-sqlite 轨组级（testTimeout 30s，真实 sqlite I/O
+// 测试族共用，含本文件与 error-contract 族）；unit 轨保持 vitest 默认 5s。
 
 const TOTAL_ROWS = 3 // 建库 2 行（sess_fix_a/​sess_fix_b）+ 1 条只存在于 -wal 的行（WALROW-PROOF）
 
@@ -85,7 +90,9 @@ async function buildWalLadderFixture(dir: string): Promise<{ dbPath: string; wal
   return { dbPath: fixture.dbPath, walSizeDuringWrite }
 }
 
-describe('W1 恢复路径配对断言（静息态库：-wal 缺失）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `W1 恢复路径配对断言（静息态库：-wal 缺失）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   it('① 不走恢复直开：bun 静息态直开按平台矩阵（darwin 抛 / linux 成功可读）/ node 成功但创建附属文件（F24 不对称另一半）', async () => {
     const fx = makeFixtureDir('zss-w1-direct-')
     try {
@@ -154,7 +161,9 @@ describe('W1 恢复路径配对断言（静息态库：-wal 缺失）', () => {
   })
 })
 
-describe('W2 两态断言（-wal 在场）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `W2 两态断言（-wal 在场）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   it('① 写者打开 + -wal 有内容未 checkpoint：直开成功直接读（不开快照、不触发 L3）', async () => {
     const fx = makeFixtureDir('zss-w2-live-')
     try {
@@ -227,7 +236,9 @@ describe('W2 两态断言（-wal 在场）', () => {
   })
 })
 
-describe('阶梯编排（openWithRecovery）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `阶梯编排（openWithRecovery）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   it('静息态合法库：命中级别按平台矩阵（node 与 linux bun 命中 L1 直开 / darwin bun 命中 L2 immutable）', async () => {
     const fx = makeFixtureDir('zss-ladder-')
     try {
@@ -301,7 +312,9 @@ describe('阶梯编排（openWithRecovery）', () => {
   })
 })
 
-describe('L3 快照兜底（单级）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `L3 快照兜底（单级）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   it('成功：db 拷贝 + 自建 0 字节 -wal → 表集合验证 → 行可读；收尾删除快照目录', async () => {
     const fx = makeFixtureDir('zss-l3-ok-')
     try {

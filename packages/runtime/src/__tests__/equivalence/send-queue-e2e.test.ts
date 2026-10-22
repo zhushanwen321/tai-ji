@@ -26,9 +26,10 @@
  * 环境约定照抄 equivalence 族（pi-fixture.ts）。faux LLM 轨（L2.5 翻轨）：被测语义是
  * 「受理即出站入 pi 队列 → turn 边界注入 → 队列快照归零 → 送达回执关闭」，非模型智能
  * ——长任务的「长」由 TAIJI_FAUX_TPS 节流制造，PROBE turn 的 ACK 回复由脚本固定。
- * 门控 FAUX_PI_READY（只判 binary，凭证无关、CI 可跑）。
+ * 门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（SSOT = test-guard/integration-gate.ts：
+ * 本地默认跳过、CI 或按改动范围触发时真跑）。
  *
- * 运行：cd packages/runtime && npx vitest run src/__tests__/equivalence/send-queue-e2e.test.ts
+ * 运行：cd packages/runtime && TAIJI_TEST_INTEGRATION=1 npx vitest run src/__tests__/equivalence/send-queue-e2e.test.ts
  * 入口脚本：bash scripts/cw-acceptance/sd-e2e.sh S1（标记行由外层 cw 命令包装，exit code 透传）
  */
 
@@ -39,7 +40,11 @@ import { join } from 'node:path'
 import { createSessionDeliveryRegistry } from '../../services/session/session-delivery-registry.js'
 import { applySessionOccupancyTransition } from '../../services/session/event-interpreter.js'
 import type { IManagedSessionView } from '../../services/session/types.js'
-import { spawnPiFixture, FAUX_PI_READY, FAUX_PI_SKIP_REASON, type PiFixture } from './pi-fixture.js'
+import { spawnPiFixture, type PiFixture } from './pi-fixture.js'
+import {
+  INTEGRATION_TESTS_ENABLED,
+  INTEGRATION_TESTS_SKIP_REASON,
+} from '../../../../../test-guard/integration-gate.ts'
 
 /** 单步等待上限（任务护栏：每步最多 120s，真实 LLM 轮次余量）。
  * 60s 在全量套件并发跑（469 文件 + real-pi 进程）时余量不足，曾观测单步超时
@@ -109,7 +114,7 @@ async function waitUntil(
   }
 }
 
-describe.skipIf(!FAUX_PI_READY)(`send queue e2e faux pi${FAUX_PI_READY ? '' : `（skip：${FAUX_PI_SKIP_REASON}）`}`, () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`send queue e2e faux pi（集成测试门控${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}）`, () => {
   it('S1 目标 session streaming 期间 submit 第二条 → 受理即出站入 pi 队列（快照可见）→ turn 边界注入 → 回执关闭 delivered', { timeout: 150_000 }, async () => {
     const dataRoot = mkdtempSync(join(tmpdir(), 'sd1-sendqueue-'))
     let targetFx: PiFixture | undefined

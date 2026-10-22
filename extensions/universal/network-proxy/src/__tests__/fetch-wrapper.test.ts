@@ -2,6 +2,7 @@
  * fetch 包装状态机单测（fake 依赖注入，不触真实网络）：
  * 命中/未命中分流、计数、noProxy/ipv4Only 优先级、ipv4 与代理构造的差异化降级
  * （ipv4 失败只丢 v4 锁定、proxy 失败锁整层；rules 为空不构造代理）、禁用恢复、
+ * ipv4Only 独立于 enabled 代理开关（开关关闭时清单照常生效、rules 不参与分流）、
  * 外部覆盖重装、构造失败锁定、reload 残留摘除、入参形态覆盖。
  * 转移表见 fetch-wrapper.ts 文件头。
  */
@@ -333,6 +334,62 @@ describe("applyNetworkProxyConfig 包装状态机", () => {
 		expect(applyNetworkProxyConfig(config({ enabled: false }), null, h.deps)).toBeNull();
 		expect(h.buildCalls).toHaveLength(0);
 		expect(h.errors).toHaveLength(0);
+	});
+
+	it("enabled=false 且 ipv4Only 非空：包装保留，ipv4Only 命中照常锁 v4 直连", async () => {
+		const h = createHarness();
+		h.setBuildProxy(() => {
+			throw new Error("开关关闭不应构造代理分发器");
+		});
+		const state = applyNetworkProxyConfig(
+			config({ enabled: false, rules: [], ipv4Only: ["open-design.ai"] }),
+			null,
+			h.deps,
+		);
+		expect(state?.wrapper).not.toBeNull();
+		expect(h.getCurrent()).toBe(state?.wrapper);
+		expect(h.buildCalls).toHaveLength(0); // 代理分流不构建
+		expect(h.buildIpv4Calls).toHaveLength(1);
+
+		const response = await h.getCurrent()("https://amr-link.open-design.ai/v1/chat");
+		expect(h.proxyCalls).toHaveLength(1);
+		expect(h.proxyCalls[0]?.init.dispatcher).toBe(h.ipv4);
+		expect(await response.text()).toBe("proxy");
+		expect(snapshotCounters().get("amr-link.open-design.ai")).toEqual({ proxied: 0, direct: 1 });
+	});
+
+	it("enabled=false 时 rules 不参与分流：规则主机直连计数，不走代理", async () => {
+		const h = createHarness();
+		applyNetworkProxyConfig(
+			config({ enabled: false, rules: ["api.anthropic.com"], ipv4Only: ["open-design.ai"] }),
+			null,
+			h.deps,
+		);
+		await h.getCurrent()("https://api.anthropic.com/v1/messages");
+		expect(h.proxyCalls).toHaveLength(0);
+		expect(h.originalCalls).toHaveLength(1);
+		expect(snapshotCounters().get("api.anthropic.com")).toEqual({ proxied: 0, direct: 1 });
+	});
+
+	it("enabled true→false 且 ipv4Only 非空：包装保持（重建不摘除），ipv4 分流继续生效", async () => {
+		const h = createHarness();
+		const first = applyNetworkProxyConfig(
+			config({ rules: [], ipv4Only: ["open-design.ai"] }),
+			null,
+			h.deps,
+		);
+		const after = applyNetworkProxyConfig(
+			config({ enabled: false, rules: [], ipv4Only: ["open-design.ai"] }),
+			first,
+			h.deps,
+		);
+		expect(after).not.toBeNull();
+		expect(h.getCurrent()).toBe(after?.wrapper);
+		expect(h.getCurrent()).not.toBe(h.originalFetch);
+
+		await h.getCurrent()("https://amr-link.open-design.ai/v1/chat");
+		expect(h.proxyCalls).toHaveLength(1);
+		expect(h.proxyCalls[0]?.init.dispatcher).toBe(h.ipv4);
 	});
 
 	it("构造失败：onError + 不包装（全直连），同指纹锁定不重试；指纹变化后重试", () => {

@@ -157,10 +157,12 @@ vi.mock('@/components/ui/popover', async (importOriginal) => {
   }
 })
 
-// ── mock：Guard 挂载计数包装（U4 kind 门控对账观测范围）─────────────────────────
-// 保留真实 Guard 回落语义（onErrorCaptured → emit fallback 原样转发），仅在 setup 计数：
-// guardEpoch 重挂 = Guard 重建（:key 换代），计数即重挂次数。
-const { guardMounts } = vi.hoisted(() => ({ guardMounts: { count: 0 } }))
+// ── mock：Guard 实例身份记录（U4 kind 门控对账观测范围）─────────────────────────
+// 保留真实 Guard 回落语义（onErrorCaptured → emit fallback 原样转发），仅在 setup 记录
+// 实例身份。2026-10-22 测试整治：原「mount 累计计数」把批处理切分时机变成了断言对象
+// （一次开合触发两轮 watch 排空时计数跳 2 → 满并行下随机红）；实例身份差分（重挂 =
+// 末位实例更换）只依赖「是否发生重挂」这一行为事实，与重挂发生几次无关。
+const { guardMounts } = vi.hoisted(() => ({ guardMounts: { instances: [] as symbol[] } }))
 vi.mock('../WorkflowVizOverlayGuard.vue', async (importOriginal) => {
   const { defineComponent, h } = await import('vue')
   const actual = await importOriginal<typeof import('../WorkflowVizOverlayGuard.vue')>()
@@ -170,12 +172,17 @@ vi.mock('../WorkflowVizOverlayGuard.vue', async (importOriginal) => {
       inheritAttrs: false,
       emits: ['fallback'],
       setup(_props, { attrs, slots, emit }) {
-        guardMounts.count++
+        guardMounts.instances.push(Symbol('guard-instance'))
         return () => h(actual.default, { ...attrs, onFallback: () => emit('fallback') }, slots)
       },
     }),
   }
 })
+
+/** 当前在场的最后一个 Guard 实例身份（无实例 = undefined）。 */
+function lastGuardInstance(): symbol | undefined {
+  return guardMounts.instances[guardMounts.instances.length - 1]
+}
 
 // ── 测试数据 ──────────────────────────────────────────────────────────────────
 
@@ -236,7 +243,7 @@ beforeEach(async () => {
   overlayDag.value = null
   overlayDagError.value = null
   panelThrowBox.value = false
-  guardMounts.count = 0
+  guardMounts.instances.length = 0
   mockGetDag.mockResolvedValue({ runId: 'x', dag: SAMPLE_DAG })
   focusPanel(SID)
 })
@@ -656,25 +663,29 @@ describe('kind 门控（U4 修复对账）：Guard 重挂与时长 tick 只随 w
     await seedRecords([makeRun('wf-1', 's1')])
     const wrapper = mount(WorkflowVizOverlayHost)
     await flushPromises()
-    expect(guardMounts.count).toBe(1) // 关闭态首挂 1 次（immediate watch 不递增）
+    const initial = lastGuardInstance() // 关闭态首挂的实例（immediate watch 不重挂）
+    expect(initial).toBeDefined()
 
     openWorkflowVizOverlay(SID, 'wf-1')
     await flushPromises()
-    expect(guardMounts.count).toBe(2) // workflow 开 → epoch++ → 重挂
+    const afterWorkflowOpen = lastGuardInstance()
+    expect(afterWorkflowOpen).not.toBe(initial) // workflow 开 → epoch++ → 重挂（fresh Guard）
 
     // 单例换内容：workflow → browser（isOpen 全程 true，仅 kind 判定感知换出）
     openBrowser('http://localhost:1420', SID)
     await flushPromises()
-    expect(guardMounts.count).toBe(2) // [U4] browser 换入零重挂（旧裸 overlayOpen 语义无法感知）
+    expect(lastGuardInstance()).toBe(afterWorkflowOpen) // [U4] browser 换入零重挂（旧裸 overlayOpen 语义无法感知）
 
     openWorkflowVizOverlay(SID, 'wf-1')
     await flushPromises()
-    expect(guardMounts.count).toBe(3) // workflow 再入必重挂（fresh Guard，D10 每次点击均重试）
+    const afterReopen = lastGuardInstance()
+    expect(afterReopen).not.toBe(afterWorkflowOpen) // workflow 再入必重挂（fresh Guard，D10 每次点击均重试）
 
     closeOverlay()
     openBrowser('http://localhost:1420', SID)
     await flushPromises()
-    expect(guardMounts.count).toBe(3) // [U4] 关闭态开 browser 零重挂（旧行为在此无谓重挂）
+    // [U4] 关闭态开 browser 零重挂（旧行为在此无谓重挂）：关闭已卸载 Guard，开 browser 不应再挂新实例
+    expect(lastGuardInstance()).toBe(afterReopen)
 
     wrapper.unmount()
   })
@@ -683,28 +694,36 @@ describe('kind 门控（U4 修复对账）：Guard 重挂与时长 tick 只随 w
     await seedRecords([makeRun('wf-1', 's1', { startedAt: new Date(Date.now() - 5_000).toISOString() })])
     const wrapper = mount(WorkflowVizOverlayHost)
     await flushPromises()
-    // spy 在 mount 后建立：只观测用例内的开合动作（隔离环境杂音）
+    // spy 在 mount 后建立：只观测用例内的开合动作（隔离环境杂音）。
+    // 2026-10-22 测试整治：断言「活跃 handle 集合」而非「spy 调用次数」——次数把
+    // watch 重跑的批处理切分变成了断言对象（满并行下一次开合多排空一轮即随机红）；
+    // 行为语义是「同一时刻至多一个活跃 tick、内容换出/关闭后零活跃」，与重启几轮无关。
     const setSpy = vi.spyOn(globalThis, 'setInterval')
     const clearSpy = vi.spyOn(globalThis, 'clearInterval')
+    const activeTickHandles = (): number => {
+      // setInterval 的返回 handle 在 mock.results（calls 里 [0] 是回调参数）；clearInterval 的 handle 在 calls[0]
+      const handles = setSpy.mock.results.map((result) => result.value)
+      const cleared = new Set(clearSpy.mock.calls.map((call) => call[0]))
+      return handles.filter((handle) => !cleared.has(handle)).length
+    }
 
     openWorkflowVizOverlay(SID, 'wf-1')
     await flushPromises()
-    expect(setSpy).toHaveBeenCalledTimes(1) // workflow 开 → tick 启动
+    expect(activeTickHandles()).toBe(1) // workflow 开 → tick 启动（恰一个活跃）
     // 时长的用户可见消费方（壳 header 时长槽）随开渲染
     expect(wrapper.find('[data-testid="wfvz-overlay-elapsed"]').exists()).toBe(true)
 
     openBrowser('http://localhost:1420', SID)
     await flushPromises()
-    expect(clearSpy).toHaveBeenCalledTimes(1) // [U4] 换入 browser 即停（旧行为 tick 空转）
-    expect(setSpy).toHaveBeenCalledTimes(1)
+    expect(activeTickHandles()).toBe(0) // [U4] 换入 browser 即停（旧行为 tick 空转）
 
     openWorkflowVizOverlay(SID, 'wf-1')
     await flushPromises()
-    expect(setSpy).toHaveBeenCalledTimes(2) // workflow 再入 → 重启
+    expect(activeTickHandles()).toBe(1) // workflow 再入 → 重启（仍恰一个活跃）
 
     closeOverlay()
     await flushPromises()
-    expect(clearSpy).toHaveBeenCalledTimes(2) // 关闭即停
+    expect(activeTickHandles()).toBe(0) // 关闭即停
 
     wrapper.unmount()
     setSpy.mockRestore()

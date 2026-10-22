@@ -146,8 +146,8 @@ describe('端到端（临时 git 仓库跑真实脚本进程）', () => {
   })
 
   it('无 main 分支 → skip（no main）', () => {
-    const { dir, git } = makeRepo()
-    // 只有 feature 分支（init -b feat），main 不存在
+    // 只有 feature 分支（init -b feat），main 不存在——本形态需要独立建仓，
+    // 不走 makeRepo（其 init -b main 恰是本用例要排除的形态）
     const dir2 = mkdtempSync(join(tmpdir(), 'changeset-check-test-'))
     dirs.push(dir2)
     const git2 = (args) => {
@@ -165,8 +165,6 @@ describe('端到端（临时 git 仓库跑真实脚本进程）', () => {
     git2(['commit', '-qm', 'init'])
     const deps = { root: dir2, git: git2 }
     expect(runCheck(deps).status).toBe('skip')
-    void dir
-    void git
   })
 
   it('发布改动无 changeset → warn + missing 清单（发布判定边界）', () => {

@@ -57,9 +57,11 @@ export const SUBAGENT_LIST_GUIDE =
  */
 export const SUBAGENT_DISPATCH_SHARED_RULES =
 	"Cross-tool dispatch rules (subagent_start, subagent_manage, subagent_message, subagents, workflow_run, workflow_control tools): " +
-	"background dispatches auto-deliver results via a completion notification that wakes your next turn — do NOT bash sleep, busy-wait, or poll while waiting; do useful non-overlapping work, otherwise stop. " +
+	"after dispatching, STOP — that is the default. Results arrive as a completion notification that wakes your next turn; do NOT bash sleep, busy-wait, or poll while waiting. " +
+	"Until the result arrives, make no tool calls unrelated to it — the only exception is other work the user explicitly requested (work you judge \"useful\" or \"relevant research\" on your own does NOT qualify). " +
+	"If the notification has not arrived, make exactly ONE recovery query — for a run: workflow_control status with its runId; for a single dispatch: subagent_manage list — then stop again and wait for the notification. " +
 	"tokens/time budgets: omit unless the user explicitly requests a limit (default = unlimited). " +
-	"model/thinkingLevel: omit by default (inherit the main agent's model; thinkingLevel defaults to each model's highest available level) — set them only when the user explicitly requests a specific model or thinking depth.";
+	"model/thinkingLevel: omit by default (inherit the main agent's model; thinkingLevel defaults to each model's highest available level) — set them only when the user explicitly requests a specific model or thinking depth, or to isolate a failed member onto a different model.";
 
 /**
  * agent 清单实例：缓存生命周期 / 三 handler 经工厂骨架；装配循环经 assemble 覆写

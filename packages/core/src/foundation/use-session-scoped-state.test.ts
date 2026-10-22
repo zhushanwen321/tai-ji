@@ -14,8 +14,10 @@
  * - registerSessionCleanup / triggerSessionCleanups 注册触发机制
  * - C-1 条件注册检查三分支（有 scope dispose 反注册 / 无 scope 不 warn 不抛 /
  *   无 scope 时 cleanup 保留在注册表 = 前提 2）
- * - C-1 census 静态锁（扫描设施与快照单一源 = scripts/check-session-scoped-state-census.mjs，
- *   本文件薄包装消费其导出保持 CI 覆盖；快照 15 文件各 1 处，清单外新调用点即红）
+ * - C-1 census 扫描机制：全仓「census ≡ 快照」护栏由 pre-commit 承载（E2E-CENSUS-01，
+ *   消费 scripts/check-session-scoped-state-census.mjs 同一实现与快照，staged 任意
+ *   .ts/.tsx/.vue 即触发）；本文件只在 fixture 目录上锁扫描机制本身（剪枝/排除/计数/
+ *   对账 diff 三态），不递归全仓
 
  *
  * 运行：cd packages/core && npx vitest run src/foundation/use-session-scoped-state.test.ts
@@ -23,6 +25,9 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { effectScope, ref, nextTick } from 'vue'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   useSessionScopedState,
   registerSessionCleanup,
@@ -32,9 +37,9 @@ import {
 // @ts-expect-error —— 无类型 .mjs 检查脚本（Node 直跑形态），core 不为测试引入 allowJs；类型边界见下方别名
 import { collectCallSites, compareCensusToSnapshot, CENSUS_SNAPSHOT } from '../../../../scripts/check-session-scoped-state-census.mjs'
 
-/** census 脚本（无类型 .mjs）的类型边界：仓库相对路径 → 非测试调用点次数 */
+/** census 脚本（无类型 .mjs）的类型边界：扫描根相对路径 → 非测试调用点次数 */
 type CensusCallSites = Record<string, number>
-const collectCensusCallSites = collectCallSites as () => CensusCallSites
+const collectCensusCallSites = collectCallSites as (rootDir?: string) => CensusCallSites
 const censusDiffToSnapshot = compareCensusToSnapshot as (actual: CensusCallSites) => string[] | null
 const censusSnapshot = CENSUS_SNAPSHOT as CensusCallSites
 
@@ -398,19 +403,71 @@ describe('C-1 条件注册检查（console-noise-triage D1：if (getCurrentScope
   })
 })
 
-describe('C-1 census 静态锁（检查后误调用的唯一入口拦，新调用点即红）', () => {
-  // 扫描设施 + 快照单一源 = scripts/check-session-scoped-state-census.mjs（与 pre-commit
-  // 干跑同一实现，零双口径）；匹配口径（双形态锁模式 / 工厂定义行排除 / 扫描剪枝）与
-  // 快照修正流程登记在脚本头注释。锁模式回归（如漏掉泛型形态）会表现为 census 计数
-  // 下降 → 下方双向对账 diff 非空即红，无需独立自检用例。
-  it('全仓非测试调用点 census 与快照逐文件一致（清单外新调用点即红）', () => {
-    const actual = collectCensusCallSites()
-    // 双向对账：新增 / 消失 / 计数变化任一即非 null（逐文件清单而非总数——防
-    // 「+1 新调用 +1 删除」净额抵消漏检）
-    expect(censusDiffToSnapshot(actual)).toBeNull()
-    // 文件数从快照派生（快照单一源，与 diff 断言同口径）——硬编码计数在多单元并行
-    // 各自登记调用点时会双写冲突（display-containers u-w0-debt + u-w1-core 同批新增）
-    expect(Object.keys(actual)).toHaveLength(Object.keys(censusSnapshot).length)
+describe('C-1 census 扫描机制（fixture 级）', () => {
+  // 全仓「census ≡ 快照」护栏由 pre-commit 承载（.githooks/install-hooks.sh 的
+  // E2E-CENSUS-01 段：staged 任意 .ts/.tsx/.vue 或脚本自身即触发
+  // node scripts/check-session-scoped-state-census.mjs，与本处 import 消费同一实现
+  // 同一快照，零双口径）——staged glob 与扫描范围同构，新增调用点的提交必经该门。
+  // 单测层不递归全仓（秒级重负载，判据 e），只在 tmpdir fixture 树上锁扫描机制本身：
+  // 剪枝（node_modules/点前缀目录）、排除（测试后缀/__tests__/工厂定义行/非 ts 扩展）、
+  // 计数（裸括号/泛型双形态 + 同行多调用）与对账 diff 输出三态。
+  it('collectCallSites：fixture 树计数与剪枝/排除口径逐条命中', () => {
+    const root = mkdtempSync(join(tmpdir(), 'census-fixture-'))
+    try {
+      mkdirSync(join(root, 'sub', '__tests__'), { recursive: true })
+      mkdirSync(join(root, 'node_modules', 'pkg'), { recursive: true })
+      mkdirSync(join(root, '.hidden'), { recursive: true })
+      // 命中：裸括号形态 + 泛型形态 + 同行双调用（g 变体计数，防 lastIndex 翻转）
+      writeFileSync(join(root, 'alpha.ts'), [
+        'const a = useSessionScopedState(sidRef, init)',
+        'const b = useSessionScopedState<{ v: number }>(sidRef, init)',
+        'const c = useSessionScopedState(x, i); const d = useSessionScopedState(y, i)',
+        'export {}',
+      ].join('\n'))
+      // 不命中：import 引用（锁模式要求 [<(] 尾随）
+      writeFileSync(join(root, 'importer.ts'), "import { useSessionScopedState } from './x'\nexport {}\n")
+      // 排除：工厂定义行（命中模式但非调用点）
+      writeFileSync(
+        join(root, 'definition.ts'),
+        'export function useSessionScopedState<T>(sid: unknown, init: () => T) {\n  return null as never\n}\n',
+      )
+      // .vue / .tsx 计入
+      writeFileSync(join(root, 'component.vue'), '<script setup lang="ts">\nconst s = useSessionScopedState(sid, init)\n</script>\n')
+      writeFileSync(join(root, 'sub', 'beta.tsx'), 'const s = useSessionScopedState(sid, init)\n')
+      // 剪枝/排除：测试后缀 / __tests__ 目录 / node_modules / 点前缀目录 / 非 ts 扩展
+      writeFileSync(join(root, 'skip.test.ts'), 'const s = useSessionScopedState(sid, init)\n')
+      writeFileSync(join(root, 'sub', '__tests__', 'nested.ts'), 'const s = useSessionScopedState(sid, init)\n')
+      writeFileSync(join(root, 'node_modules', 'pkg', 'x.ts'), 'const s = useSessionScopedState(sid, init)\n')
+      writeFileSync(join(root, '.hidden', 'x.ts'), 'const s = useSessionScopedState(sid, init)\n')
+      writeFileSync(join(root, 'notes.md'), 'const s = useSessionScopedState(sid, init)\n')
 
+      expect(collectCensusCallSites(root)).toEqual({
+        'alpha.ts': 4,
+        'component.vue': 1,
+        [join('sub', 'beta.tsx')]: 1,
+      })
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('compareCensusToSnapshot：一致 null / 新增 / 消失 / 计数变化四态', () => {
+    // 基线从真实快照派生（快照单一源，不硬编码文件清单）
+    const baseline = { ...censusSnapshot }
+    expect(censusDiffToSnapshot(baseline)).toBeNull()
+
+    const added = censusDiffToSnapshot({ ...baseline, 'ghost/new-callsite.ts': 1 })
+    expect(added).toHaveLength(1)
+    expect(added![0]).toContain('+ 新增调用点: ghost/new-callsite.ts')
+
+    const sampleKey = Object.keys(baseline)[0] as string
+    const { [sampleKey]: _omitted, ...withoutSample } = baseline
+    const removed = censusDiffToSnapshot(withoutSample)
+    expect(removed).toHaveLength(1)
+    expect(removed![0]).toContain(`- 消失调用点: ${sampleKey}`)
+
+    const changed = censusDiffToSnapshot({ ...baseline, [sampleKey]: baseline[sampleKey]! + 1 })
+    expect(changed).toHaveLength(1)
+    expect(changed![0]).toContain(`~ 计数变化: ${sampleKey}`)
   })
 })

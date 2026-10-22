@@ -12,7 +12,14 @@
  * 本文件不 mock chokidar（顶层的 vi.mock('chokidar') 仅作用于 skill-registry.test.ts 同文件作用域，
  * 独立 test 文件默认走真实 chokidar），用真实磁盘 + 跨进程 spawn 创建 skill 子目录，验证 onChange 被触发。
  *
- * 运行：cd packages/runtime && npx vitest run test/skill-registry-watcher-real.test.ts
+ * 集成门控（2026-10-22 单测层极端测试整治）：真实 fs.watch 事件到达在满并行下无确定性完成信号
+ * （判据第三档，只能挂钟 deadline 观测），整组经 TAIJI_TEST_INTEGRATION 门控（SSOT =
+ * test-guard/integration-gate.ts）——本地默认跳过，CI 与按改动范围触发时真跑；文件已登记在
+ * packages/runtime/vitest.config.ts 的 INTEGRATION_TESTS（integration 串行尾组）。
+ * 「watcher 事件 → rescan / onChange 通知」的逻辑面由 test/skill-registry.test.ts 的
+ * chokidar 假 watcher 桩覆盖（U3 onChange 触发通知 / W3 补挂重扫 / D8-a 批内事件合并 rescan）。
+ *
+ * 运行：TAIJI_TEST_INTEGRATION=1 npx vitest run test/skill-registry-watcher-real.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync } from 'node:fs'
@@ -21,6 +28,7 @@ import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import type { FSWatcher } from 'chokidar'
 import type { SkillInfo } from '@taiji/shared'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../test-guard/integration-gate.ts'
 
 /**
  * watcher 触发检测的挂钟轮询 deadline（reviewer-D WARNING-4 加固）。
@@ -60,7 +68,9 @@ function createSkillSubdir(parentDir: string, skillName: string): void {
   spawnSync('sh', ['-c', `mkdir -p ${join(parentDir, skillName)} && echo body > ${join(parentDir, skillName, 'SKILL.md')}`], { encoding: 'utf-8' })
 }
 
-describe('SkillRegistry watcher real fs (W5: 新建 skill 子目录触发 rescan)', () => {
+describe.skipIf(
+  !INTEGRATION_TESTS_ENABLED,
+)(`SkillRegistry watcher real fs (W5: 新建 skill 子目录触发 rescan)${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
   let tempRoot: string
   let skillDir: string
 

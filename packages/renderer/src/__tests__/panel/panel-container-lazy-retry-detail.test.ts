@@ -11,7 +11,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/panel-container-lazy-retry-detail.test.ts
  */
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, vi, afterEach } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 import { computed, nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -124,10 +124,19 @@ vi.mock('@/stores/chat', () => ({
 }))
 chatMock.registerReader((sid) => reactiveMessages.get(sid) ?? [])
 
+// 模块图文件级预热（vi.mock 工厂经 hoisting 先于本 import 注册，mock 语义不变）：
+// PanelContainer 整图 transform 是单用例 3.38s 的主因，移进 beforeAll 后用例只付 mount
+// 成本；懒加载 DetailPane/TerminalView 的 vi.mock 工厂不在静态图内（defineAsyncComponent
+// 渲染期才触发），lazy.* 计数不受预热影响。
+let PanelContainer: (typeof import('@/components/workspace/PanelContainer.vue'))['default']
+
+beforeAll(async () => {
+  PanelContainer = (await import('@/components/workspace/PanelContainer.vue')).default
+})
+
 async function mountContainer() {
-  // 动态 import 让 vi.mock 先生效；不 mock/stub DetailPane/TerminalView 的渲染范围（本测试的被测对象，
-  // 两者的 vi.mock 工厂在文件头控制失败/成功）
-  const PanelContainer = (await import('@/components/workspace/PanelContainer.vue')).default
+  // 不 mock/stub DetailPane/TerminalView 的渲染范围（本测试的被测对象，两者的 vi.mock
+  // 工厂在文件头控制失败/成功）
   return mount(PanelContainer)
 }
 
@@ -197,5 +206,5 @@ describe('PanelContainer 懒加载内部自动重试——detail 方向（重开
 
     // ⑤ terminal 挂载点未开未加载（本文件不触底抽屉）
     expect(lazy.terminalLoads).toBe(0)
-  }, 60_000)
+  })
 })
