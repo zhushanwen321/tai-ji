@@ -15,7 +15,6 @@ export const meta = {
   title: '容器体系最小闭环：模型弹层开/Esc 关 + bash 制造记录后托盘面板开/Esc 关',
   covers: ['env.launch', 'env.ready', 'ui.container', 'chat.send', 'chat.wait'],
   requires: ['faux'],
-  parallelGroup: 'chat',
   estimateSec: 100,
   faux: {
     responses: [{ text: 'display-containers-spare', stopReason: 'stop' }],

@@ -18,7 +18,6 @@ export const meta = {
   title: '环境原语冒烟：启动/就绪/doctor/协议往返/扩展装载/隔离',
   covers: ['env.launch', 'env.ready', 'env.doctor', 'env.isolation'],
   requires: ['none'],
-  parallelGroup: 'env',
   estimateSec: 90,
   provable: [
     '独立实例名派生独立端口段，与 worktree 默认实例（1665/9304）不冲突',

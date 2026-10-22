@@ -25,7 +25,6 @@ export const meta = {
     'interaction.askuser',
   ],
   requires: ['faux'],
-  parallelGroup: 'chat',
   estimateSec: 120,
   faux: {
     responses: JSON.parse(fs.readFileSync(path.join(SKILL_ROOT, 'fixtures', 'faux-responses', 'ask-user-two-questions.json'), 'utf8')),

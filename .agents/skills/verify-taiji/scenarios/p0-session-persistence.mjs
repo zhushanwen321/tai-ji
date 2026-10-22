@@ -28,7 +28,6 @@ export const meta = {
     'chat.send', 'chat.wait', 'chat.reload-equiv',
   ],
   requires: ['faux'],
-  parallelGroup: 'chat',
   estimateSec: 150,
   faux: {
     responses: {

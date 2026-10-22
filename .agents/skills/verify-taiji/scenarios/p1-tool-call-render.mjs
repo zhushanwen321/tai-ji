@@ -24,7 +24,6 @@ export const meta = {
   title: 'bash 工具块渲染 + write/edit 变更集卡 + git untracked（A 态）',
   covers: ['chat.send', 'chat.wait', 'session.history', 'chat.stream', 'render.tool-call', 'render.changeset'],
   requires: ['faux'],
-  parallelGroup: 'chat',
   estimateSec: 120,
   faux: {
     responses: [...readFixture('tool-bash.json'), ...readFixture('tool-edit.json')],

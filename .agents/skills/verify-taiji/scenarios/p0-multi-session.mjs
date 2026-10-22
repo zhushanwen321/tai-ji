@@ -20,7 +20,6 @@ export const meta = {
     'session.create', 'session.list', 'session.archive', 'session.restore', 'session.delete',
   ],
   requires: ['faux'],
-  parallelGroup: 'chat',
   estimateSec: 120,
   faux: {
     responses: [{ text: 'multi-session-spare', stopReason: 'stop' }],

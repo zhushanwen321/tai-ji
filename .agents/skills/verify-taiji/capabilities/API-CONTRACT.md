@@ -188,7 +188,6 @@ export const meta = {
   title: '...',
   covers: ['chat.send', 'chat.wait'],// capability id 数组（必须都能在 capabilities/ 找到）
   requires: ['faux'],                // faux | mock-http | live | custom-provider | none
-  parallelGroup: 'chat',             // 同组 = 需互斥（独立实例名）
   estimateSec: 90,
   provable: ['...'],
   notProvable: ['...'],
@@ -261,21 +260,31 @@ runner 职责（scenario 只写业务步骤）：
 | L6 | **`vp` 只实现 19 个 capability**（契约登记 72 个） | 其余 53 个只有文档，没有单步 CLI | 走 scenario（`run.mjs`）或按文档手工驱动；后续按需扩 vp |
 | L7 | **`session.history` 的 `truncated` 语义** 以 runtime 为准 | 大历史下 messages 可能被截断 | 断言关键文本用 `--limit-turns` 收窄 + grep，不要假设全量 |
 
-## 8. dev-flow D3 调用形态（唯一正确写法）
+## 8. dev-flow D3 调用形态（唯一引擎可用形态 = D0 生成的 .mjs wrapper）
 
-引擎只 `spawn(解释器, [script])`（零参数），因此 verify 节点的 `script` **必须**指向包装壳：
+引擎只 `spawn(解释器, [script])`（零参数、无 per-node env），因此 verify 节点的 `script` = **dev-flow D0 生成的
+wrapper 文件**（落 exec-plan 同目录 `<name>.verify/<nodeId>.mjs`），内容直参 spawn 本 runner——参数经 argv 写死，
+不经 env（引擎通道没有 env 供给方，env 驱动形态在 workflow 内跑不通）：
 
-```bash
-# verify 节点 script = <repo>/.agents/skills/verify-taiji/scripts/verify-run.sh
-# 参数全部经 env 传入：
-TAIJI_VERIFY_SCENARIO=scenarios/p0-env-smoke.mjs \
-TAIJI_VERIFY_ARTIFACTS=<artifactsDir>/<node-id> \
-TAIJI_VERIFY_NAME=verify-<node-id> \
-bash .agents/skills/verify-taiji/scripts/verify-run.sh
+```js
+// <name>.verify/<nodeId>.mjs（D0 生成；runner/scenario/artifactsDir 三个值 D0 全部已知）
+import { spawnSync } from 'node:child_process'
+const r = spawnSync(process.execPath, [
+  '<repo>/.agents/skills/verify-taiji/scripts/run.mjs',
+  '<repo>/.agents/skills/verify-taiji/scenarios/p0-xxx.mjs',
+  '--repo', '<repo>',
+  '--artifacts-dir', '<节点 artifactsDir>',
+  '--name', 'verify-<nodeId>',
+  '--run-id', '<nodeId>-<时间戳>',
+], { stdio: 'inherit' })
+process.exit(r.status ?? 1)
 ```
 
 **不要**把 `script` 直接写成 `scenarios/*.mjs`：ESM 顶层 export 在 node 下是空操作，
 会 exit 0 且零断言（**静默假绿**，比失败更危险）。也不要直接写 `run.mjs`：零参数会 exit 2。
+**并行纪律**：同一 runner 的 verify 节点由调用方串行成链（deps 前驱），默认 runId 是秒级时间戳且
+并发 run 会争抢仓内 staged 扩展目录（见 §7 L4/L5）；`--name` / `--run-id` 按 nodeId 派生兜底。
+`scripts/verify-run.sh` 是人工复跑形态（env / flag 双驱动 + scenario 三段相对路径解析），不用于引擎通道。
 
 产物锚：`<artifactsDir>/verdict.json` 与 `<artifactsDir>/summary.jsonl` **会在 artifactsDir 根**
 镜像一份（引擎的 `inspectVerdictAnchorOk` 读根），完整细节仍在 `<artifactsDir>/<runId>/<scenarioId>/`。

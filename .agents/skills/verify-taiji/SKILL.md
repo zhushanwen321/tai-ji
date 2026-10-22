@@ -209,7 +209,7 @@ node .agents/skills/verify-taiji/scripts/probes/mock-llm-workflow.mjs [--repo <r
 
 LLM 通道三选一（决定能否零 token）：**faux**（主会话默认）/ **mock-http**（孙进程即 subagent·workflow 执行层）/ **live**（真模型智能或真鉴权）。判定依据与装配要点见 [capabilities/README.md §3](capabilities/README.md)。
 
-**被 dev-flow-wf D3 消费的节点契约**：dev-flow 引擎与剧本进程之间只有 script 路径一个通道（`node <script>` 直跑，无参数、无 per-node env），所以 workflow 内 verify 节点的 script = dev-flow D0 生成的 wrapper（spawnSync 本 runner + scenario 绝对路径 + `--artifacts-dir <节点 artifactsDir>`），不是剧本本体。本 runner 侧已满足的对齐契约：退出码 fail=1 / degraded=0（`--strict` 时 2）；`verdict.json` 与 `summary.jsonl` 镜像落 artifactsDir 根（引擎事实锚读此根）；`summary.jsonl` 每步一行。手工 / 主 agent 直跑仍用 §6 的 run.mjs 命令形态。T3 验收计划表对本技能的引用入口 = [capabilities/P0-P1-COVERAGE.md](capabilities/P0-P1-COVERAGE.md)（矩阵行四态即「验收项 ↔ 现成剧本」对账）。
+**被 dev-flow-wf D3 消费的节点契约**：dev-flow 引擎与剧本进程之间只有 script 路径一个通道（`node <script>` 直跑，无参数、无 per-node env），所以 workflow 内 verify 节点的 script = dev-flow D0 生成的 wrapper（spawnSync 本 runner + scenario 绝对路径 + `--repo` + `--artifacts-dir <节点 artifactsDir>` + 按 nodeId 派生的 `--name`/`--run-id`），不是剧本本体；同一 runner 的 verify 节点由调用方串行成链（默认 runId 秒级 + 并发争抢 staged 构建产物，详见 [API-CONTRACT §7 L4/L5 / §8](capabilities/API-CONTRACT.md)）。本 runner 侧已满足的对齐契约：退出码 fail=1 / degraded=0（`--strict` 时 2）；`verdict.json` 与 `summary.jsonl` 镜像落 artifactsDir 根（引擎事实锚读此根）；`summary.jsonl` 每步一行。手工 / 主 agent 直跑仍用 §6 的 run.mjs 命令形态（`verify-run.sh` 为人工复跑便利壳）。T3 验收计划表对本技能的引用入口 = [capabilities/P0-P1-COVERAGE.md](capabilities/P0-P1-COVERAGE.md)（矩阵行四态即「验收项 ↔ 现成剧本」对账）。
 
 ## 8. 人工剧本（features/）
 

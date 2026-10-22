@@ -14,7 +14,6 @@ export const meta = {
   title: 'faux 装配下协议建会话 + 发消息 + 历史断言 + 会话隔离 + 会话树存在',
   covers: ['env.launch', 'env.ready', 'env.isolation', 'session.create', 'session.history', 'chat.send', 'chat.wait'],
   requires: ['faux'],
-  parallelGroup: 'chat',
   estimateSec: 150,
   // B0 已知缺口：session.* / chat.* 的 capability 文档在 B1+ 分批交付；runner 只记录缺口不判 fail
   // model-keyed 脚本（faux fixture 的两种形态之一）：每个 session 是独立 pi 进程、

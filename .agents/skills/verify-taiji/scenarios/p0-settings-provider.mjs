@@ -27,7 +27,6 @@ export const meta = {
     'settings.provider', 'model.list', 'model.live-sync',
   ],
   requires: ['faux'],
-  parallelGroup: 'model',
   estimateSec: 120,
   faux: {
     responses: [{ text: 'settings-provider-spare', stopReason: 'stop' }],

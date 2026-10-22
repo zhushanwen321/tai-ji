@@ -14,7 +14,6 @@ export const meta = {
   title: '扩展装载行为证据：清单数量/infrastructure enabled/命令注册/日志无装载失败',
   covers: ['env.launch', 'env.ready', 'env.doctor', 'extension.load'],
   requires: ['faux'],
-  parallelGroup: 'env',
   estimateSec: 120,
   faux: {
     responses: [{ text: 'extension-load-spare', stopReason: 'stop' }],

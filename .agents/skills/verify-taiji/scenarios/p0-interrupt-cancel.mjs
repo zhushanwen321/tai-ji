@@ -30,7 +30,6 @@ export const meta = {
     'subagent.dispatch', 'subagent.cancel',
   ],
   requires: ['mock-http'],
-  parallelGroup: 'subagent',
   estimateSec: 180,
   llm: {
     responses: {

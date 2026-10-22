@@ -36,7 +36,6 @@ export const meta = {
     'render.markdown', 'render.shiki', 'render.html-preview',
   ],
   requires: ['faux'],
-  parallelGroup: 'chat',
   estimateSec: 120,
   faux: {
     responses: [...readFixture('thinking-stream.json'), ...readFixture('markdown-kitchen-sink.json')],

@@ -124,9 +124,9 @@ node .agents/skills/verify-taiji/scripts/run.mjs scenarios/p0-session-chat.mjs \
 | dev-flow 环节 | 接法 |
 |---------------|------|
 | T3 impl-plan「验收计划表」 | L3 行 → `scenarios/xxx.mjs`（**D0 前必须已实跑 exit 0**，见 `flow/compile.md` 剧本实装硬门槛）；L4 判断行 → promptFile 指向 `capabilities/*.md` 作为执行依据 |
-| D3 verify 节点 | **必须经包装壳**（引擎 `spawn(解释器,[script])` 零参数，直接写 scenario 会 exit 0 假绿）：`script` = `<repo>/.agents/skills/verify-taiji/scripts/verify-run.sh`，参数经 env：`TAIJI_VERIFY_SCENARIO` / `TAIJI_VERIFY_ARTIFACTS` / `TAIJI_VERIFY_NAME`。详见 [API-CONTRACT.md §8](API-CONTRACT.md) |
+| D3 verify 节点 | `script` = dev-flow D0 生成的 `.mjs` wrapper（直参 spawn `run.mjs`，scenario / artifactsDir / `--name` / `--run-id` 写死——引擎零参数零 env；直接写 scenario 会 exit 0 假绿）。`verify-run.sh` = 人工复跑形态（env / flag 驱动）。详见 [API-CONTRACT.md §8](API-CONTRACT.md) |
 | D3 inspect 节点 | 只读 `<artifactsDir>/summary.jsonl` + `verdict.json`（根镜像）；`verdict` 语义固定 `pass/fail/degraded`，`test_evidence` 已由 runner 填好 |
-| D3 熔断/并行 | `meta.parallelGroup`（同组互斥）+ `meta.estimateSec`（预算）+ **独立实例名 + 独立 runId**。⚠️ 并行有两条已实测的坑：① 同秒同 runId 会共享 dataDir（一绿一红）；② 仓内 staged 扩展目录会被 `bundle-extensions.mjs` 抢占写（串行必绿、并行常见 EEXIST）。**并行节点必须串行错开启动**（详见 [API-CONTRACT.md §7 L4/L5](API-CONTRACT.md)） |
+| D3 熔断/并行 | **同一 runner 的 verify 节点由调用方串行成链**（deps 前驱）+ wrapper 按 nodeId 派生 `--name` / `--run-id`。⚠️ 并行有两条已实测的坑：① 默认 runId 是秒级时间戳，同秒两个 run 共享 dataDir（一绿一红）；② 仓内 staged 扩展目录会被 `bundle-extensions.mjs` 抢占写（串行必绿、并行常见 EEXIST）。`meta.estimateSec`（预算）保留（详见 [API-CONTRACT.md §7 L4/L5](API-CONTRACT.md)） |
 | D4 分流 | 一次性 → 留 skill-data；可复用且**能降为 L1/L2 零 token 机器轨** → 迁 `e2e/` 并登记 `docs/testing/e2e-map.json`；**本技能的 scenario 本身永不进 CI**（它跑真 dev 实例） |
 
 ## 6. 边界（防变成第六套验证体系）

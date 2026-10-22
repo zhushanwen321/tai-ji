@@ -25,7 +25,6 @@ export const meta = {
   title: 'strict 模式下 bash 工具审批：CompanionBand 浮层 → Approve → 工具真执行 → 收尾',
   covers: ['env.launch', 'env.ready', 'env.isolation', 'session.create', 'chat.send', 'chat.wait', 'session.history', 'interaction.permission'],
   requires: ['faux'],
-  parallelGroup: 'chat',
   estimateSec: 120,
   faux: {
     responses: JSON.parse(fs.readFileSync(path.join(SKILL_ROOT, 'fixtures', 'faux-responses', 'permission-tool.json'), 'utf8')),

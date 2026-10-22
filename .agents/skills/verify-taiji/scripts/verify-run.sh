@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
-# verify-run.sh —— dev-flow D3 verify 节点的**唯一调用形态**（审查 C M1/M2/M3）。
+# verify-run.sh —— 人工复跑形态（env / flag 双驱动 + scenario 三段相对路径解析）。
+#   dev-flow D3 verify 节点的引擎通道**不走本文件**：引擎零参数零 per-node env，
+#   env 驱动在 workflow 内没有供给方——引擎接入 = D0 生成的 .mjs wrapper 直参
+#   spawn run.mjs（唯一引擎可用形态，见 capabilities/API-CONTRACT.md §8 与
+#   dev-flow-wf flow/compile.md §6）。
 #
-# 为什么需要这层壳：
-#   dev-flow 的引擎执行器（wave-executor 的 runVerifyScript）只做
-#   `spawn(解释器, [script], { cwd })` —— **零参数**。而 run.mjs 必须拿到
-#   `<scenario>` 与 `--artifacts-dir`，否则：
-#     · script = scenario 本身 → ESM 顶层 export 被当成空操作 → exit 0、零断言（假绿）
-#     · script = run.mjs       → exit 2（缺 scenario 参数）
-#   所以 verify 节点的 `script` 字段必须指向**本文件**，参数全部经 env 传入。
+# 为什么需要这层壳（人工侧）：
+#   run.mjs 必须拿到 `<scenario>` 与 `--artifacts-dir`，本壳提供 env / flag
+#   双驱动与 scenario 相对路径解析（<repo> / 技能目录 / scenarios/<basename>），
+#   便于人及 agent 在会话里一行复跑。
 #
 # 用法（两种，等价）：
-#   # A. env 驱动（dev-flow 引擎形态，零参数调用）
+#   # A. env 驱动
 #   TAIJI_VERIFY_SCENARIO=scenarios/p0-env-smoke.mjs \
 #   TAIJI_VERIFY_ARTIFACTS=/path/to/acceptance/<node-id> \
 #   TAIJI_VERIFY_NAME=verify-<node-id> \
 #   bash .agents/skills/verify-taiji/scripts/verify-run.sh
 #
-#   # B. 位置/flag 驱动（人工复跑）
+#   # B. 位置/flag 驱动
 #   bash .agents/skills/verify-taiji/scripts/verify-run.sh \
 #     scenarios/p0-env-smoke.mjs --artifacts-dir /tmp/acc --name verify-manual
 #

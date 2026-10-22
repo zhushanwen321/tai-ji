@@ -53,7 +53,6 @@ export const meta = {
     'protocol.rpc', 'protocol.events',
   ],
   requires: ['mock-http'],
-  parallelGroup: 'subagent',
   estimateSec: 120,
   llm: {
     responses: {

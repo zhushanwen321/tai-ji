@@ -28,7 +28,6 @@ export const meta = {
     'chat.send', 'chat.wait',
   ],
   requires: ['faux'],
-  parallelGroup: 'model',
   estimateSec: 90,
   // 统一数组队列（非 model-keyed）：faux 的 model-keyed 选队按进程 argv --model 一次定型
   // （faux-llm-ext.ts selfModelRef/loadScript），同进程热切模型不会重选队——切换前后必须

@@ -18,7 +18,6 @@ export const meta = {
   title: '已送达 user 消息撤回：revoked:true + 原文回执 + history/树/UI 三面回退',
   covers: ['env.launch', 'env.ready', 'env.isolation', 'session.create', 'chat.send', 'chat.wait', 'session.history', 'chat.revoke'],
   requires: ['faux'],
-  parallelGroup: 'chat',
   estimateSec: 120,
   faux: {
     responses: [{ text: 'revoke-scenario-answer', stopReason: 'stop' }],
