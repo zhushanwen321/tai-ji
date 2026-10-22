@@ -317,7 +317,7 @@ describe("createPiHostServices.log（桥接 pi-extension-logger）", () => {
   });
 });
 
-describe("resolveGrandchildExtensionPaths / createPiHostServices.extensionPaths（[D2] 双形态注入源）", () => {
+describe("resolveGrandchildExtensionPaths / createPiHostServices.extensionPaths（[D2] 白名单注入源）", () => {
   const argvSaved = process.argv;
 
   function withArgv(argv: string[], fn: () => void): void {
@@ -329,30 +329,32 @@ describe("resolveGrandchildExtensionPaths / createPiHostServices.extensionPaths�
     }
   }
 
-  it("宿主形态：主进程 argv --extension 全量 → 继承全部，仅剔除排除名单（plan/canvas/goal/scheduler）", () => {
-    // taiji 宿主形态：runtime spawn 主 pi 时 --extension = getExtensionPaths 全量 staged 集。
-    // [排除式] 孙进程是完整 agent：默认继承全部扩展，只剔除「需人裁决 / 无生命周期」的四类。
+  it("宿主形态：受管三根内的扩展继承（白名单池），剔除名单四包照常剔除", () => {
+    // taiji 宿主形态：runtime spawn 主 pi 时 --extension = 受管集（staged 三根内）+ discovery 外挂混排。
+    // [白名单] 孙进程只继承受管池内的扩展，再剔除「需人裁决 / 无生命周期」的四类；
+    // discovery 外挂（~/.pi/agent/extensions/...）不在三根 → 不继承（2026-10-21/22 外挂事故回归锚点）。
     const argv = [
       "node", "/pi",
       "--mode", "rpc", "--no-extensions", "--approve",
-      "--extension", "/staged/resources/extensions/@zhushanwen/pi-subagent-workflow",
-      "--extension=/staged/resources/extensions/@zhushanwen/pi-structured-output",
-      "--extension", "/staged/resources/extensions/@zhushanwen/pi-goal",
-      "--extension", "/staged/resources/extensions/@zhushanwen/pi-network-proxy",
-      "--extension", "/staged/resources/extensions/@zhushanwen/pi-plan",
-      "--extension", "/staged/resources/extensions/@zhushanwen/pi-canvas",
-      "--extension", "/staged/resources/extensions/@zhushanwen/pi-scheduler",
+      "--extension", "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-subagent-workflow",
+      "--extension=/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-structured-output",
+      "--extension", "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-goal",
+      "--extension", "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-network-proxy",
+      "--extension", "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-plan",
+      "--extension", "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-canvas",
+      "--extension", "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-scheduler",
+      "--extension", "/Users/u/.pi/agent/extensions/opendesign-ipv4",
+      "--extension", "/Users/u/.pi/agent/extensions/bash-timeout-override.ts",
     ];
     expect(resolveGrandchildExtensionPaths(argv, () => undefined)).toEqual([
-      "/staged/resources/extensions/@zhushanwen/pi-subagent-workflow",
-      "/staged/resources/extensions/@zhushanwen/pi-structured-output",
-      "/staged/resources/extensions/@zhushanwen/pi-network-proxy",
+      "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-subagent-workflow",
+      "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-structured-output",
+      "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-network-proxy",
     ]);
   });
 
-  it("宿主形态 dev 源码布局：剔除 dev 分组形态的 plan/canvas/goal/scheduler，其余继承", () => {
-    // dev 下 runtime extension-service 下发的是源码目录（无 @zhushanwen scope 段）——
-    // 排除名单须同时登记 dev 布局别名，否则两条装配路径行为不一致。
+  it("宿主形态 dev 源码布局：受管池继承 + 剔除 dev 分组形态的 plan/canvas/goal/scheduler", () => {
+    // dev 下 runtime extension-service 下发的是源码目录（extensions/<group>/<pkg>，②-b 根）。
     const argv = [
       "node", "/pi",
       "--mode", "rpc", "--no-extensions", "--approve",
@@ -373,33 +375,67 @@ describe("resolveGrandchildExtensionPaths / createPiHostServices.extensionPaths�
     ]);
   });
 
-  it("排除名单点边界：前缀相似的包名不误剔（pi-plan-lookalike / plan-extra）", () => {
+  it("受管池覆盖三根全部形态：打包根 / dev staged 产物 / settings 安装（dataDir extensions 与 npm）", () => {
+    const dataDir = "/home/u/.taiji";
+    const argv = [
+      "node", "/pi",
+      "--mode", "rpc",
+      "--extension", "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-structured-output",
+      "--extension", "/repo/apps/electron/resources/extensions/@zhushanwen/pi-network-proxy",
+      "--extension", `${dataDir}/extensions/@zhushanwen/pi-ext-from-settings`,
+      "--extension", `${dataDir}/npm/node_modules/@zhushanwen/pi-npm-installed`,
+    ];
+    expect(
+      resolveGrandchildExtensionPaths(argv, () => undefined, () => undefined, dataDir),
+    ).toEqual([
+      "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-structured-output",
+      "/repo/apps/electron/resources/extensions/@zhushanwen/pi-network-proxy",
+      `${dataDir}/extensions/@zhushanwen/pi-ext-from-settings`,
+      `${dataDir}/npm/node_modules/@zhushanwen/pi-npm-installed`,
+    ]);
+  });
+
+  it("白名单缺省方向：非受管路径（discovery 外挂 / 相对路径 / 用户目录杂项）不继承", () => {
+    const argv = [
+      "node", "/pi",
+      "--mode", "rpc",
+      "--extension", "/Users/u/.pi/agent/extensions/opendesign-ipv4",
+      "--extension", "relative/path/extension",
+      "--extension", "/Users/u/ somewhere/extensions/universal/plan",
+      "--extension", "/repo/extensions/universal/structured-output",
+    ];
+    expect(resolveGrandchildExtensionPaths(argv, () => undefined)).toEqual([
+      "/repo/extensions/universal/structured-output",
+    ]);
+  });
+
+  it("剔除名单点边界：受管池内前缀相似的包名不误剔（plan-lookalike / other 分组 plan）", () => {
     const argv = [
       "node", "/pi",
       "--mode", "rpc",
       "--extension", "/repo/extensions/universal/plan-lookalike",
-      "--extension", "/some/other/plan",
+      "--extension", "/repo/extensions/other/plan",
       "--extension", "/repo/extensions/universal/plan-extra/index.js",
     ];
-    // 尾段 / 分组段不匹配 → 全部继承（`/some/other/plan` 不命中 `universal/plan` 两段集）
+    // 尾段 / 分组段不匹配剔除段集 → 全部继承（`other/plan` 不命中 `universal/plan` 两段集）
     expect(resolveGrandchildExtensionPaths(argv, () => undefined)).toEqual([
       "/repo/extensions/universal/plan-lookalike",
-      "/some/other/plan",
+      "/repo/extensions/other/plan",
       "/repo/extensions/universal/plan-extra/index.js",
     ]);
   });
 
-  it("宿主形态解析不误吃其他 flag 值（--skill 值被跳过、真 flag 不吃值、单 - 路径是值）", () => {
+  it("宿主形态解析不误吃其他 flag 值（--skill 值被跳过、真 flag 不吃值、单 - 开头绝对路径是值）", () => {
     const argv = [
       "node", "/pi",
       "--mode", "rpc",
       "--skill", "@zhushanwen/pi-plan-skill-lookalike",
       "--extension", "--approve", // 后跟真 flag 不吃值
-      "--extension", "-weird-dir/@zhushanwen/pi-structured-output", // 单 - 开头路径是值（原 MF-7a）
+      "--extension", "/-weird-dir/extensions/universal/structured-output", // 单 - 开头路径是值（原 MF-7a），命中 ②-b 受管
       "some positional prompt",
     ];
     expect(resolveGrandchildExtensionPaths(argv, () => undefined)).toEqual([
-      "-weird-dir/@zhushanwen/pi-structured-output",
+      "/-weird-dir/extensions/universal/structured-output",
     ]);
   });
 
@@ -459,21 +495,20 @@ describe("resolveGrandchildExtensionPaths / createPiHostServices.extensionPaths�
       ]);
     });
 
-    it("非 e2e（env 缺失）不追加；argv 显式携带的 faux-llm-ext 仍在排除名单外故被继承", () => {
+    it("非 e2e（env 缺失）不追加；argv 显式携带的 faux-llm-ext 属 discovery 形态不入白名单池", () => {
       seedFauxExt();
       vi.mocked(getAgentDir).mockReturnValue(fauxAgentDir);
       vi.stubEnv("TAIJI_E2E", "");
       const fauxArgvPath = join(fauxAgentDir, "extensions", "faux-llm-ext.ts");
       const argv = [
         "node", "/pi", "--mode", "rpc",
-        "--extension", "/staged/resources/extensions/@zhushanwen/pi-structured-output",
+        "--extension", "/repo/extensions/universal/structured-output",
         "--extension", fauxArgvPath,
       ];
-      // 排除式语义：非 e2e 下不做「主动追加」，但 argv 里已经显式给出的路径
-      // 只要不在排除名单就照常继承（白名单时代的「被收窄」语义已不存在）。
+      // 白名单语义：非 e2e 下不做「主动追加」；argv 里的 faux 路径在 <agentDir>/extensions
+      // （discovery 形态，非受管三根）→ 不继承；受管池内的 structured-output 照常继承。
       expect(resolveGrandchildExtensionPaths(argv, () => undefined)).toEqual([
-        "/staged/resources/extensions/@zhushanwen/pi-structured-output",
-        fauxArgvPath,
+        "/repo/extensions/universal/structured-output",
       ]);
     });
 
@@ -495,8 +530,8 @@ describe("resolveGrandchildExtensionPaths / createPiHostServices.extensionPaths�
     withArgv(["node", "/pi", "--mode", "rpc"], () => {
       expect(host.extensionPaths?.()).not.toContain("/staged/x");
     });
-    withArgv(["node", "/pi", "--extension", "/staged/@zhushanwen/pi-structured-output"], () => {
-      expect(host.extensionPaths?.()).toEqual(["/staged/@zhushanwen/pi-structured-output"]);
+    withArgv(["node", "/pi", "--extension", "/repo/extensions/universal/structured-output"], () => {
+      expect(host.extensionPaths?.()).toEqual(["/repo/extensions/universal/structured-output"]);
     });
   });
 });

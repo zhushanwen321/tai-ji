@@ -322,7 +322,7 @@ export function buildChildEnv(
 
 /**
  * 孙进程 schema 强制的唯一必备扩展包（P-C5 白名单起步组成）。与宿主注入侧
- * （subagent-workflow pi-host `GRANDCHILD_EXTENSION_PKG_SEGMENTS`）是同一契约的
+ * （subagent-workflow pi-host `GRANDCHILD_EXCLUDED_PKG_SEGMENTS`）是同一契约的
  * 两端：宿主决定注入什么，本断言验证引擎确实收到——扩白名单时两处同批扩。
  *
  * 本常量 = npm 布局包名（错误文案/恢复指引用）；匹配判据 =
@@ -331,7 +331,7 @@ export function buildChildEnv(
 const SCHEMA_ENFORCEMENT_EXTENSION_PKG = "@zhushanwen/pi-structured-output";
 
 /**
- * 断言②匹配段集（契约两端与 pi-host `GRANDCHILD_EXTENSION_PKG_SEGMENTS` 同判据，
+ * 断言②匹配段集（契约两端与 pi-host `GRANDCHILD_EXCLUDED_PKG_SEGMENTS` 同判据，
  * 扩白名单时两处同批扩）。两形态别名：
  *   - `@zhushanwen/pi-structured-output`：npm staged 布局
  *     `.../node_modules/@zhushanwen/pi-structured-output[/index.js]`。
