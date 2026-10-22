@@ -82,9 +82,9 @@ subagent 派发链按 transport 分两种形态（引擎与任务子进程不变
 **成功路径——三轮对话**：
 
 ```
-用户: subagent start {task, slug, conversation:true}
+用户: subagent_start {task, slug}
 → 首轮 run 派发（无 resume）→ 完成，通知①（dedup key = record:round，见 D7）
-用户: subagent message {slug, message:"对比 Y"} → 新 run（resume = record.sessionFile）
+用户: subagent_message {subagentId, text:"对比 Y"} → 新 run（resume = record.sessionFile）
 → 完成，通知②；再 message → 通知③；GUI 列表始终一行，详情按轮追加
 ```
 
