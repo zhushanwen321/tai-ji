@@ -7,13 +7,15 @@
  * 消费方（renderer 壳 Landing.vue，w5 接入）经 @taiji/ui 顶层 barrel 消费；
  * 壳层 provide NewTaskDepsKey（真 renderer 实现：flow 编排器 + workspace/worktree/preset RPC）。
  */
-// 5 个跨端共享组件（C-NT-4：DirSelectPopover/BranchSelectPopover/CreateBranchModal/
-// CreateWorktreeModal/PresetSelectChip；Landing.vue 留壳）
+// 跨端共享组件（C-NT-4：DirSelectPopover/BranchSelectPopover/CreateBranchModal/
+// CreateWorktreeModal/PresetSelectChip + ProjectSelectChip（归属项目选择）；
+// Landing.vue 留壳）
 export { default as DirSelectPopover } from './DirSelectPopover.vue'
 export { default as BranchSelectPopover } from './BranchSelectPopover.vue'
 export { default as CreateBranchModal } from './CreateBranchModal.vue'
 export { default as CreateWorktreeModal } from './CreateWorktreeModal.vue'
 export { default as PresetSelectChip } from './PresetSelectChip.vue'
+export { default as ProjectSelectChip } from './ProjectSelectChip.vue'
 // deps inject token（C-W4-1/2：flow + workspace/worktree/preset RPC + toast）
 export { NewTaskDepsKey, useNewTaskDeps } from './new-task-deps'
 export type {

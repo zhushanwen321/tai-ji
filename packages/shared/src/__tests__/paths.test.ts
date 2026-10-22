@@ -21,6 +21,7 @@ import {
   getPiAgentDir,
   getPiSessionsDir,
   getTtsCacheDir,
+  getDefaultSessionDir,
   PI_SESSION_TREE_SEGMENTS,
   SESSION_STORE_DIR_SEGMENT,
   DATA_DIR_ROOT_NAMES,
@@ -270,6 +271,16 @@ describe('getTtsCacheDir（TTS 朗读缓存，设计 §7.4）', () => {
 
   it('不传 dataDir → path.join(getDataDir(), "tts-cache")（动态推导，禁硬编码绝对路径）', () => {
     expect(getTtsCacheDir()).toBe(join(getDataDir(), 'tts-cache'))
+  })
+})
+
+describe('getDefaultSessionDir（默认会话固定入口，2026-10-22）', () => {
+  it('传 dataDir → path.join(dataDir, "defaultSession")', () => {
+    expect(getDefaultSessionDir('/custom/data')).toBe(join('/custom/data', 'defaultSession'))
+  })
+
+  it('不传 dataDir → path.join(getDataDir(), "defaultSession")（动态推导，禁硬编码绝对路径）', () => {
+    expect(getDefaultSessionDir()).toBe(join(getDataDir(), 'defaultSession'))
   })
 })
 

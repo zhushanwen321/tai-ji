@@ -844,6 +844,18 @@ describe('workspace 域', () => {
     await expect(workspace.detect('/ws/proj')).resolves.toEqual(bareReply)
     expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['workspace.detect', { cwd: '/ws/proj' }])
   })
+
+  it('setPinned 解包 records + degraded 透传（pin 上限拒绝降级链路）', async () => {
+    mockCommand.mockResolvedValueOnce({ records: [{ cwd: '/a' }], degraded: true })
+    await expect(workspace.setPinned('/a', true)).resolves.toEqual({ records: [{ cwd: '/a' }], degraded: true })
+    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['workspace.setPinned', { cwd: '/a', pinned: true }])
+  })
+
+  it('defaultSessionDir 解包 dir（空串 = runtime ensure 失败，透传不吞）', async () => {
+    mockCommand.mockResolvedValueOnce({ dir: '/data/defaultSession' })
+    await expect(workspace.defaultSessionDir()).resolves.toBe('/data/defaultSession')
+    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['workspace.defaultSessionDir', {}])
+  })
 })
 
 // ── config 域 ──────────────────────────────────────────────────────────────

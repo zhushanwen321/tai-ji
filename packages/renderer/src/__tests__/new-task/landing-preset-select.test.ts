@@ -118,6 +118,10 @@ beforeEach(() => {
     presetOpenRequest: ref(0),
     loadPresets: vi.fn().mockResolvedValue(undefined),
     setDefaultPreset: vi.fn(),
+    setPinned: vi.fn(async () => true),
+    defaultSessionDir: ref(''),
+    projects: ref([]),
+    activeProjectId: ref('proj-default'),
     toast: { error: vi.fn() },
   } satisfies NewTaskDeps
 })

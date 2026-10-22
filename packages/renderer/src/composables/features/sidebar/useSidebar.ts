@@ -335,8 +335,22 @@ export function useSidebar() {
   }
 
   /**
-   * newSession——壳重编排（不代理 core.newSession：壳侧补 presetCwd ?? workspaceStore.defaultCwd
-   * 兜底，core 版无此回退）。委托 useNewTaskFlow.startFlow 进 landing。
+   * 当前选中 session 的 cwd（新建任务预填，用户裁决 2026-10-22「选中 session 后新建，
+   * 默认 cwd = 选中 session 的 cwd」）。必须在 startFlow 之前取：startFlow 内部强制清
+   * activeId（core flow.ts 不变量），landing 态再取恒空。
+   */
+  function activeSessionCwd(): string | undefined {
+    // 走未 cast 的 pinia store 实例（activeId 解包为 string | null）——cast 后的 sessionStore
+    // 类型层是 core factory 返回形态（activeId 为 Ref，未解包）。
+    const id = useSessionStore().activeId
+    if (!id) return undefined
+    return sessionStore.getList().find((s) => s.id === id)?.cwd
+  }
+
+  /**
+   * newSession——壳重编排（不代理 core.newSession：壳侧补 cwd 预填链，core 版无此回退）。
+   * 预填链（用户裁决 2026-10-22）：入口显式 cwd（目录行「+」）→ 当前选中 session 的 cwd
+   * → workspaceStore.defaultCwd。委托 useNewTaskFlow.startFlow 进 landing。
    * 延迟 create 终态：startFlow 恒不建 session（session 由首发提交 submitFirstMessage 创建并
    * 绑定），此处恒进 chat view 让 Panel 渲染 landing 空态，恒返回 null。返回类型保持
    * string | null 对齐 core NewTaskFlowPort 契约形状（当前调用方均不消费返回值）。
@@ -347,7 +361,7 @@ export function useSidebar() {
     newTaskInFlight = true
     try {
       const newTaskFlow = useNewTaskFlow()
-      const fallback = presetCwd ?? workspaceStore.defaultCwd
+      const fallback = presetCwd ?? activeSessionCwd() ?? workspaceStore.defaultCwd
       await newTaskFlow.startFlow(fallback)
       // 延迟 create（AC-1.7）：无 session 可选，进 chat view 让 Panel 渲染 landing 空态
       navigationPort.push({ view: 'chat' })
@@ -422,6 +436,8 @@ export function useSidebar() {
       await newSession()
       await loadSessions()
       await workspaceStore.load()
+      // 默认会话目录（landing「默认会话」固定入口）：启动拉取（失败降级空串隐藏入口，不阻断）
+      void workspaceStore.loadDefaultSessionDir()
       // 预填 cwd（G1.1「沿用最近 session 目录」）：取 sessionStore.list 中 lastActiveAt 最大者
       const sessions = sessionStore.getList()
       let recentCwd: string | undefined

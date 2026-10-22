@@ -39,7 +39,7 @@ export function useNewTaskDirSelect(
   currentCwd: () => string | null,
 ): {
   openDirPopover: () => void
-  selectWorkspace: (cwd: string) => Promise<void>
+  selectWorkspace: (cwd: string, opts?: { record?: boolean }) => Promise<void>
   openDirDialog: () => Promise<void>
   openWorktreeModal: () => void
   isBare: ReturnType<typeof ref<boolean>>
@@ -119,8 +119,11 @@ export function useNewTaskDirSelect(
    * 全局扫描结果（CommandPopover 双源），不再依赖预建 session 取真实命令。
    * - cwd 未变→noop（仅关 popover）
    * - cwd 变→记 pendingCwd + 关 popover
+   *
+   * @param opts.record 是否计入最近工作区 LRU（缺省 true）。固定入口（「默认会话」目录）
+   *   传 false——固定入口恒显，record 进 LRU 反而挤占名额（用户裁决 2026-10-22）。
    */
-  async function selectWorkspace(cwd: string): Promise<void> {
+  async function selectWorkspace(cwd: string, opts?: { record?: boolean }): Promise<void> {
     if (cwd === currentCwd()) {
       transition('landing') // dir-popover→landing（关 popover）
       return
@@ -129,7 +132,7 @@ export function useNewTaskDirSelect(
     transition('landing') // dir-popover→landing（关 popover，chip 回灌新 cwd）
     // 热更新最近工作区列表：选中后 record 写入 runtime，刷新后的 records 回补 store，
     // 下次打开 popover 即可见（无需重启）。失败静默降级（不阻断选目录流程）。
-    void workspaceState.record(cwd)
+    if (opts?.record !== false) void workspaceState.record(cwd)
   }
 
   /**

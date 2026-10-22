@@ -21,10 +21,11 @@ import type { SessionSummary } from '@taiji/shared'
 /** 期望的 ALLOWED 转换表（契约锁定——测试防实现误改转换规则） */
 const EXPECTED_ALLOWED: Record<NewTaskFlowState, NewTaskFlowState[]> = {
   idle: ['landing'],
-  landing: ['dir-popover', 'branch-popover', 'preset-popover', 'worktree-modal', 'completed', 'cancelled'],
+  landing: ['dir-popover', 'branch-popover', 'preset-popover', 'project-popover', 'worktree-modal', 'completed', 'cancelled'],
   'dir-popover': ['landing', 'dir-dialog', 'cancelled'],
   'branch-popover': ['landing', 'branch-modal', 'worktree-modal', 'cancelled'],
   'preset-popover': ['landing', 'cancelled'],
+  'project-popover': ['landing', 'cancelled'],
   'dir-dialog': ['landing', 'dir-popover', 'cancelled'],
   'branch-modal': ['landing', 'cancelled'],
   'worktree-modal': ['landing', 'cancelled'],
@@ -38,6 +39,7 @@ const ALL_STATES: NewTaskFlowState[] = [
   'dir-popover',
   'branch-popover',
   'preset-popover',
+  'project-popover',
   'dir-dialog',
   'branch-modal',
   'worktree-modal',
@@ -66,7 +68,7 @@ function setState(s: NewTaskFlowState): void {
     transition('branch-popover')
     transition('branch-modal')
   } else {
-    // dir-popover / branch-popover / preset-popover / worktree-modal（landing 可直达）
+    // dir-popover / branch-popover / preset-popover / project-popover / worktree-modal（landing 可直达）
     transition('landing')
     transition(s)
   }

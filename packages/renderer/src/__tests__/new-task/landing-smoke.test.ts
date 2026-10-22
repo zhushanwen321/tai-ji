@@ -59,6 +59,10 @@ const depsMock = vi.hoisted(() => ({
   presetOpenRequest: { value: 0 },
   loadPresets: vi.fn(),
   setDefaultPreset: vi.fn(),
+  setPinned: vi.fn(),
+  defaultSessionDir: { value: '' },
+  projects: { value: [] as unknown[] },
+  activeProjectId: { value: 'proj-default' },
   toast: { error: vi.fn() },
 }))
 vi.mock('@/composables/features/new-task/useNewTaskDeps', () => ({

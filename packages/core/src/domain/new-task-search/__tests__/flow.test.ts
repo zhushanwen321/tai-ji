@@ -236,6 +236,7 @@ describe('useNewTaskFlow', () => {
       bashCommand: null,
       pendingThinkingLevel: expected.thinkingLevel,
       clientUuid: expect.any(String),
+      projectId: null,
     })
     // 主链路不变：载入 panel + activeId + 导航 + 文件树 + send(migratedSegments) + completed
     expect(deps.ports.navigation.setActiveSession).toHaveBeenCalledWith('s1')
@@ -269,6 +270,7 @@ describe('useNewTaskFlow', () => {
       bashCommand: null,
       pendingThinkingLevel: 'high',
       clientUuid: expect.any(String),
+      projectId: null,
     })
   })
 
@@ -316,6 +318,7 @@ describe('useNewTaskFlow', () => {
       bashCommand: { command: 'ls', excludeFromContext: true },
       pendingThinkingLevel: 'high',
       clientUuid: expect.any(String),
+      projectId: null,
     })
     expect(deps.ports.chat.sendBash).toHaveBeenCalledWith('s1', 'ls', true)
     expect(deps.ports.chat.send).not.toHaveBeenCalled()
@@ -639,6 +642,41 @@ describe('useNewTaskFlow', () => {
     expect(deps.ports.createSessionFlow.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ presetId: 'builtin:session-dispatch' }),
     )
+  })
+})
+
+// ── 归属项目选择（ProjectSelectChip 数据链，2026-10-22）──────────────────────
+
+describe('useNewTaskFlow 归属项目选择（setPendingProject / openProjectPopover）', () => {
+  beforeEach(() => {
+    resetNewTaskFlow()
+    __resetLastUsedModelForTesting()
+    __resetModelThinkingMemoryForTesting()
+    __resetOrphanedDraftForTesting()
+  })
+
+  it('setPendingProject 态检查：idle noop；landing 写入 pendingProjectId（只读视图回读一致）', async () => {
+    const flow = useNewTaskFlow(makeDeps())
+    // idle（startFlow 前）非 landing/project-popover → noop
+    flow.setPendingProject('proj-a')
+    expect(useNewTaskFlowState().pendingProjectId.value).toBeNull()
+    await enterLanding(flow)
+    flow.setPendingProject('proj-a')
+    expect(flow.pendingProjectId.value).toBe('proj-a')
+  })
+
+  it('openProjectPopover → state 进 project-popover；overlay 内写入放行（点列表项时的真实态）', async () => {
+    const flow = useNewTaskFlow(makeDeps())
+    await enterLanding(flow)
+    flow.openProjectPopover()
+    expect(useNewTaskFlowState().state.value).toBe('project-popover')
+    // 用户点列表项 → Landing.onProjectSelect → setPendingProject（此时 state 是 project-popover）
+    flow.setPendingProject('proj-b')
+    expect(flow.pendingProjectId.value).toBe('proj-b')
+    // 关闭回 landing（用户点空白/Esc 关）后显式选择保持（chip 回显与 submit 同源）
+    flow.closeOverlay()
+    expect(useNewTaskFlowState().state.value).toBe('landing')
+    expect(flow.pendingProjectId.value).toBe('proj-b')
   })
 })
 

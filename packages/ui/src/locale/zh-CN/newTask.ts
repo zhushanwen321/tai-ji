@@ -33,6 +33,11 @@ export default {
     remoteConnect: '远程连接',
     existingWorktrees: '已有 worktree',
     noWorktrees: '暂无已有 worktree',
+    pinnedGroup: '已固定',
+    defaultSession: '默认会话',
+    pin: '固定',
+    unpin: '取消固定',
+    pinLimitReached: '最多固定 {count} 个目录',
   },
   createWorktree: {
     title: '新建 worktree',
@@ -102,5 +107,13 @@ export default {
   presetChip: {
     ariaLabel: '模式：{name}',
     replaceHint: '含替换提示词',
+  },
+  // 归属项目 chip（2026-10-22）：landing 首行第 4 chip，标注/选择本次创建的 session 归属项目
+  projectSelect: {
+    title: '选择归属项目',
+    defaultProject: '默认项目',
+    projectLockedTooltip: '此会话归属「{name}」项目',
+    legacySessionTooltip: '（历史会话，未记录归属）',
+    ariaLabel: '归属项目：{name}',
   },
 }

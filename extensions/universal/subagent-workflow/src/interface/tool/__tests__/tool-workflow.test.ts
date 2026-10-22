@@ -539,6 +539,25 @@ describe("status {runId} 单 run 视图（成员表 + failed N/M + 查无两种�
     // 省略 runId 列全部不是超窗口的恢复动作（列表同样不含已逐出 run）
     expect(err.message).not.toContain("without runId");
   });
+
+  it("runId 白名单外形态（路径穿越载荷）→ 恒走未知 id 文案，不触达磁盘探测（存在性 oracle 关闭）", async () => {
+    // 预埋穿越目标文件：白名单缺位时 existsSync(join(journalDir, "../outside.record.jsonl"))
+    // 命中 → 「settled」分支泄露目标文件存在性；白名单前置后 store 零触达，恒「未知 id」。
+    const root = mkdtempSync(join(tmpdir(), "wf-status-traversal-"));
+    const journalDir = join(root, "journal");
+    mkdirSync(journalDir, { recursive: true });
+    writeFileSync(join(root, "outside.record.jsonl"), "{}\n", "utf-8");
+    try {
+      const tool = captureStatusTool(new Map(), journalDir);
+      const err = await tool
+        .execute("id", { action: "status", runId: "../outside" }, undefined, undefined, {})
+        .catch((e: unknown) => e as Error);
+      expect(err.message).toContain("Workflow run '../outside' not found.");
+      expect(err.message).not.toContain("settled and no longer in the in-memory retention window");
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
 });
 
 // ══════════════════════════════════════════════════════════════
