@@ -13,7 +13,7 @@
  * 依赖前置：testCommand 先跑 prepare-builtin-extensions.sh 产出 staged 产物，本测试只读校验。
  * TC1/TC2/TC5/TC6（dev/packaged 发会话、permission 解析 bash、source map）是 integration/e2e/manual，留 T7/T8。
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { existsSync, readFileSync, rmSync, mkdirSync, copyFileSync, readdirSync, writeFileSync, mkdtempSync, cpSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -203,9 +203,11 @@ describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
 	let tmpScoped;
 	let tmpPkg;
 
-	beforeEach(() => {
-		// fs-guard：fixture 落 os.tmpdir() mkdtemp 自建自删（仓库相对 .cw/ 路径在白名单外被拦；
-		// mkdtemp 每次全新目录，免旧路径的预清理 rmSync）
+	beforeAll(() => {
+		// fs-guard：fixture 落 os.tmpdir() mkdtemp 自建自删（仓库相对 .cw/ 路径在白名单外被拦）。
+		// 缩数据量（共享 mirror）：verify-staged 对 staged 目录只读，包目录内唯一可变成员 =
+		// package.json，由各用例自行重写（「缺 package.json」用例自带 force 删除），无跨用例
+		// 状态泄漏——7 用例共享一个 mirror，省 6 次检查脚本复制与建仓成本。
 		tmpBase = mkdtempSync(join(tmpdir(), "builtin-ext-bundle-verify-"));
 		stageVerifyGuardInto(tmpBase);
 		mkdirSync(join(tmpBase, "packages/shared/src"), { recursive: true });
@@ -221,7 +223,7 @@ describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
 		writeFileSync(join(tmpPkg, "index.js"), "export default {};\n", "utf8");
 	});
 
-	afterEach(() => {
+	afterAll(() => {
 		rmSync(tmpBase, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 	});
 
@@ -233,6 +235,8 @@ describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
 	}
 
 	it("缺 package.json → exit 1 + stderr 定位缺 manifest", () => {
+		// 共享 mirror 下前序用例可能残留 package.json——force 删除幂等，保证「缺失」形态自包含
+		rmSync(join(tmpPkg, "package.json"), { force: true });
 		// package.json 未生成（bundle 失败的早期回归）
 		const r = runVerify();
 		expect(r.status, "checkManifest 应报「缺 package.json」").toBe(1);

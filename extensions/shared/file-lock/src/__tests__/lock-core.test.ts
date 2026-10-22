@@ -5,9 +5,15 @@
 //   - ELOCKED 错误码（async/sync 同构）
 //   - stale 判死夺取（先 rmdir 再 mkdir）+ stale 下限 clamp 2000ms
 //   - realpath:false 语义：不存在的目标可锁；symlink 目标锁在 symlink 路径（不解析）
-//   - graceful exit 兜底：子进程持锁正常退出后锁目录被 process.on('exit') 清理
+//   - graceful exit 兜底（门控用例）：子进程持锁正常退出后锁目录被
+//     process.on('exit') 清理——需真实子进程退出，经 TAIJI_TEST_INTEGRATION 门控
+//     （本地默认跳过；SSOT = test-guard/integration-gate.ts）
 //
 // 协议参照：proper-lockfile@4.1.2 实装（pi 内嵌同款），逐字段兼容是 S3 互斥探针的前提。
+//
+// 轨道与预算：本文件整体登记在包 vitest.config.ts 的 integration 串行尾组（真实
+// fs IO）；进程内用例走 vitest 默认预算，门控用例单独挂预算（覆盖其 spawnSync
+// timeout），不设文件级放宽。
 
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -15,12 +21,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "../../../../../test-guard/integration-gate.ts";
 
 import { acquireLock, acquireLockSync } from "../lock-core.ts";
-
-// 真实文件系统 IO（含子进程），放宽文件级预算（vitest 默认 5s）
-vi.setConfig({ testTimeout: 20000 });
 
 const PKG_DIR = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 
@@ -174,15 +179,25 @@ describe("acquireLockSync", () => {
 	});
 });
 
-describe("graceful exit 兜底（process.on('exit') 配对 rmdir）", () => {
-	it("子进程持锁正常退出后，锁目录被 exit hook 清理（无需等 stale）", () => {
-		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "lock-core-exit-"));
-		const target = path.join(tmpDir, "target.json");
-		try {
-			// 子进程 acquire 后自然退出（graceful exit）——'exit' hook 必须清掉锁目录。
-			// 子进程内先断言锁已创建（证明「锁曾存在」），失败以非零退出码表达（不用
-			// console——extensions 日志规范禁 console；诊断信息由父进程断言消息带出）。
-			const worker = `
+// graceful exit 兜底需真实子进程退出（'exit' hook 只在真进程终止时触发，无进程内
+// 等价信号）——经 TAIJI_TEST_INTEGRATION 门控：本地默认跳过，CI / 按改动范围触发时
+// 真跑（门控 SSOT = test-guard/integration-gate.ts；本文件登记在包 vitest.config.ts
+// 的 integration 串行尾组，见该配置头注释）。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+	`graceful exit 兜底（process.on('exit') 配对 rmdir）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+	() => {
+		it(
+			"子进程持锁正常退出后，锁目录被 exit hook 清理（无需等 stale）",
+			() => {
+				const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "lock-core-exit-"));
+				const target = path.join(tmpDir, "target.json");
+				try {
+					// 子进程 acquire 后自然退出（graceful exit）——'exit' hook 必须清掉锁目录。
+					// 子进程内先断言锁已创建（证明「锁曾存在」），失败以非零退出码表达（不用
+					// console——extensions 日志规范禁 console；诊断信息由父进程断言消息带出）。
+					// strip-types 直接跑 TS 源码（Node >= 22.6）：门控用例只在 CI / 按改动
+					// 范围触发时跑，编译窗不占默认单测轨。
+					const worker = `
 import * as fs from "node:fs";
 import { acquireLock } from "${PKG_DIR}/src/lock-core.ts";
 const target = process.argv[2];
@@ -191,18 +206,22 @@ if (!fs.existsSync(target + ".lock")) {
 	process.exit(1);
 }
 `;
-			const workerFile = path.join(tmpDir, "worker.ts");
-			fs.writeFileSync(workerFile, worker, "utf-8");
-			const proc = spawnSync(process.execPath, ["--experimental-strip-types", workerFile, target], {
-				encoding: "utf-8",
-				timeout: 30_000,
-			});
-			// 失败消息带出 worker stderr/stdout，保证非零退出时调试信息不丢
-			expect(proc.status, `worker stderr: ${proc.stderr} stdout: ${proc.stdout}`).toBe(0);
-			// graceful exit 后锁目录不残留（等价 proper-lockfile signal-exit 清理语义）
-			expect(fs.existsSync(`${target}.lock`)).toBe(false);
-		} finally {
-			fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-		}
-	});
-});
+					const workerFile = path.join(tmpDir, "worker.ts");
+					fs.writeFileSync(workerFile, worker, "utf-8");
+					const proc = spawnSync(process.execPath, ["--experimental-strip-types", workerFile, target], {
+						encoding: "utf-8",
+						timeout: 30_000,
+					});
+					// 失败消息带出 worker stderr/stdout，保证非零退出时调试信息不丢
+					expect(proc.status, `worker stderr: ${proc.stderr} stdout: ${proc.stdout}`).toBe(0);
+					// graceful exit 后锁目录不残留（等价 proper-lockfile signal-exit 清理语义）
+					expect(fs.existsSync(`${target}.lock`)).toBe(false);
+				} finally {
+					fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+				}
+			},
+			// 预算与原文件级放宽同值（20s），随门控下沉到用例级——非抬升
+			20_000,
+		);
+	},
+);
