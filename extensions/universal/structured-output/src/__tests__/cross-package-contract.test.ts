@@ -222,8 +222,9 @@ describe("cross-package contract: SW subagent tool schema（真实 typebox 校�
 		expect(Object.keys(batch.properties)).not.toContain("agents");
 		expect(Object.keys(batch.properties)).not.toContain("aggregate");
 
-		// tasks 数组：minItems 1 + items 为成员对象
+		// tasks 数组：minItems 1 + maxItems 20（与 fan-out 模板 @pi-meta 同值，声明与执行同源）+ items 为成员对象
 		expect(batch.properties.tasks?.minItems, "tasks.minItems = 1").toBe(1);
+		expect(batch.properties.tasks?.maxItems, "tasks.maxItems = 20（与 fan-out 模板 @pi-meta 同源）").toBe(20);
 		const memberRaw: unknown = batch.properties.tasks?.items;
 		if (memberRaw === null || typeof memberRaw !== "object") throw new Error("tasks.items is not an object schema");
 		const member = memberRaw as SchemaView;
@@ -256,6 +257,10 @@ describe("cross-package contract: SW subagent tool schema（真实 typebox 校�
 		expect(batchCompiled.Check({ tasks: [{ task: "t" }], agent: "/abs/default.md" })).toBe(true);
 		// 破坏性变更的拒单面：旧写法在 schema 层即拒（pi 参数校验第一道关卡）
 		expect(batchCompiled.Check({ tasks: [] })).toBe(false);
+		// maxItems 上界（与 fan-out 模板 @pi-meta 同值 = 20）：20 成员合法、21 在工具声明面即拒
+		const twenty = Array.from({ length: 20 }, (_, i) => ({ task: `t${i}` }));
+		expect(batchCompiled.Check({ tasks: twenty })).toBe(true);
+		expect(batchCompiled.Check({ tasks: [...twenty, { task: "t20" }] })).toBe(false);
 		expect(batchCompiled.Check({ tasks: [{ agent: "/a.md" }] })).toBe(false);
 		expect(batchCompiled.Check({ tasks: ["legacy string element"] })).toBe(false);
 		expect(batchCompiled.Check({ tasks: [{ task: "t", agent: "relative/a.md" }] })).toBe(false);
@@ -420,5 +425,19 @@ describe("cross-package contract: pi-ai validateToolArguments 真实 SDK 冒烟�
 			message = err instanceof Error ? err.message : String(err);
 		}
 		expect(message).toMatch(/^Validation failed for tool "subagents"/);
+
+		// maxItems = 20（与 fan-out 模板 @pi-meta 同值）在 pi 消费链端到端生效：
+		// 21 个成员在工具声明面即拒，不再漏到 runWorkflow 入口才被 ajv 拒（少一轮可避免的重试）
+		let overflowMessage = "";
+		try {
+			validateToolArguments(
+				batchTool,
+				toolCall({ tasks: Array.from({ length: 21 }, (_, i) => ({ task: `t${i}` })) }, "subagents"),
+			);
+			expect.unreachable("21 members must be rejected by the tool declaration (maxItems = 20)");
+		} catch (err) {
+			overflowMessage = err instanceof Error ? err.message : String(err);
+		}
+		expect(overflowMessage).toMatch(/^Validation failed for tool "subagents"/);
 	});
 });

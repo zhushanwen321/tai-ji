@@ -102,7 +102,10 @@ export const SubagentStartParams = Type.Object({
 // ── subagents：批量派发（成员对象形状，subagent-tool-interface-refactor §3.1.2 终态）──
 //
 // 与 fan-out 模板共用同一形状（§3.1.2）：tasks 元素 = 成员对象（task/agent/model/
-// thinkingLevel），不再接受字符串元素；旧 `agents`（逗号串位置映射）与 `aggregate`
+// thinkingLevel），不再接受字符串元素；tasks 的 minItems/maxItems 与 fan-out 模板
+// @pi-meta 的 tasks 块同键同值（执行侧声明 = packages/subagent-core/workflows/fan-out.js
+// parameters 块）——声明与执行同源，双源同步由 tool-subagents.test.ts 源码对拍 +
+// structured-output cross-package-contract.test.ts 真实 typebox 断言锁定。旧 `agents`（逗号串位置映射）与 `aggregate`
 // 从工具 schema 移除——「一个执行者用于全员」用运行级 agent 表达、「每个成员不同」
 // 用成员级 agent 表达、归约由主 agent 自行完成。成员未指定 model/thinkingLevel 时
 // 留空给 $MODEL/$THINKING_LEVEL 继承（运行级值经 workerData 流动，handler 不复制
@@ -142,6 +145,8 @@ export const SubagentsParams = Type.Object({
       "One or more batch members; each element = one dispatch (object: {task, agent?, model?, thinkingLevel?}). " +
       "All members run in parallel as independent one-shot subagents.",
     minItems: 1,
+    // 与 fan-out 模板 @pi-meta 的 tasks.maxItems 同值（上限本源在执行侧模板）
+    maxItems: 20,
   }),
   agent: Type.Optional(Type.String({
     description:

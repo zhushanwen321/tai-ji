@@ -53,6 +53,9 @@ import { captureTool } from "./capture-tool.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOL_SRC = readFileSync(join(__dirname, "../tool-subagents.ts"), "utf-8");
+// schema 叶子源码（SubagentsParams 声明面；本包 typebox mock 丢 options，构造面
+// 断言不了 minItems/maxItems——同源对拍走源码级，真实语义由 SO 侧真实 typebox 锁定）。
+const SCHEMA_SRC = readFileSync(join(__dirname, "../subagent-tool-schema.ts"), "utf-8");
 // 跨工具通用纪律的收敛点（tool-declaration-slimming D1 单源化终态的注入段侧锚源）。
 const SUBAGENT_LIST_INJECTOR_SRC = readFileSync(
   join(__dirname, "../../../injectors/subagent-list-injector.ts"),
@@ -253,6 +256,24 @@ describe("schema 契约：一跳扁平 + 成员对象 tasks 必填 + 常驻", ()
     expect(TOOL_SRC).toContain('from "./subagent-tool-schema.ts"');
     expect(TOOL_SRC).toContain("SubagentsParams");
     expect(TOOL_SRC).not.toContain("Type.Array(");
+  });
+
+  it("tasks.minItems/maxItems 与 fan-out 模板 @pi-meta 同值（声明与执行同源，双源漂移即红）", () => {
+    // 本包 typebox mock 丢 options（文件头注），maxItems 同步对拍走源码级：SW 声明面
+    // （subagent-tool-schema.ts）与 fan-out 执行面（@pi-meta parameters 块）各恰一处
+    // maxItems 且同为 20——任何一侧单改即红（执行侧值另由 subagent-core 的
+    // fan-out-script.test.ts 锁定）。
+    const singleMaxItems = (src: string, label: string): number => {
+      const found = [...src.matchAll(/maxItems:\s*(\d+)/g)];
+      expect(found, `${label} 恰好一处 maxItems 声明（新增声明须同步更新本对拍）`).toHaveLength(1);
+      return Number(found[0]?.[1]);
+    };
+    const fanOutSrc = readFileSync(
+      join(__dirname, "../../../../../../../packages/subagent-core/workflows/fan-out.js"),
+      "utf-8",
+    );
+    expect(singleMaxItems(SCHEMA_SRC, "subagent-tool-schema.ts")).toBe(20);
+    expect(singleMaxItems(fanOutSrc, "fan-out.js @pi-meta")).toBe(20);
   });
 
   it("常驻（§3.3.4）：零 exposure: \"deferred\" 残留（SDK 默认 direct 即常驻声明）", () => {
