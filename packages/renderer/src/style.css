@@ -151,6 +151,11 @@
   --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.4);         /* 浮层 */
   --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.45);       /* 顶级浮层（demo 三档阴影最高档） */
   --shadow-glow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent); /* steer/活跃环（composer-shell isActive 分支；focus 聚焦环用 --accent-ring） */
+  /* 弹层遮罩（modal/overlay 背后全场最暗层）：黑基六主题共用一值（demo .cmask 同值；亮色族黑遮罩
+     为行业惯例），上面板靠 border + shadow 分离（DESIGN.md §4.1）。唯一值单点收敛，改浓度只动这里 */
+  --scrim: rgba(0, 0, 0, 0.8);
+  /* 定向左投影（抽屉自右滑入时的左侧落影；浓度与 --shadow-2 同档，方向性 shadow-2 无现成档） */
+  --shadow-drawer-left: -24px 0 48px rgba(0, 0, 0, 0.4);
 
   /* ── 层级 / 组件尺寸 ──────────────────────────────────── */
   --content-max-w: min(720px, 100%); /* 内容列最大宽（settings/对话流收窄；窄容器自动让位满宽） */

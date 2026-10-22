@@ -43,6 +43,8 @@ export default {
         },
         border: 'var(--border)',
         'border-strong': 'var(--border-strong)',
+        // 弹层遮罩（modal/overlay 背后全场最暗层；真值源 style.css --scrim，黑基六主题共用一值）
+        scrim: 'var(--scrim)',
         accent: {
           DEFAULT: 'var(--accent)',
           hover: 'var(--accent-hover)',
@@ -112,6 +114,7 @@ export default {
         2: 'var(--shadow-2)',
         3: 'var(--shadow-3)',
         glow: 'var(--shadow-glow)',
+        'drawer-left': 'var(--shadow-drawer-left)',
       },
     },
   },

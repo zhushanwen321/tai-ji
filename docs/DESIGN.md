@@ -245,7 +245,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 - **窗口壳**：`--bg-stage` `#111114`（ShellView .stage 引用；黛蓝 preset `#0e0f15` / 暖墨 preset `#100e0c` 各自落定，缝隙不再与他主题色相打架）。**亮色（皓族）**：`--bg-stage` `#dee3da`（TAIJI_PAPER 未定义独立 stage，取带青玉相浅色、与 accent `#43765d` 同族色相——分离感靠色相差而非压暗舞台，2026-10-17 用户裁决借 OpenDesign 舞台层策略；style.css `[data-theme=light]` 覆盖，避免泄漏暗色 #111114 形成黑框）
 - **内容层（沉底）**：`--surface` `#18181b`（对话流 / 右抽屉 / 底抽屉三张阅读卡同色共享）；`--bg-input` `#1d1d20` 为其内次级（代码块/文件 chip，亮于 surface 一小档保阶梯单调）
 - **框架层（浮起）**：`--bg` `#242428`（aside / composer / settings 内容区同层同色）；操作域浮起容器 `--bg-card` `#2d2d30` 亮于本层一档
-- **浮层**：`--bg-elevated` `#323236`（hover 详情卡 / popover；用户气泡 `--bubble-bg` 随本层派生——demo 暗族三主题 bubble 逐块等于 elevated、无独立档，亮族独立 `#fefefe`）；**2026-10-13 用户裁决 demo 方案 A 后该族已全迁 composer 同源档**（`--bg` + `--border` + shadow-2，elevated 比行高亮 surface-hover 亮会致 hover 行反向变暗，见 §5.12；本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面）；overlay 遮罩半透明黑（`bg-black/80`）全场最暗，遮罩上面板靠 border + shadow 分离
+- **浮层**：`--bg-elevated` `#323236`（hover 详情卡 / popover；用户气泡 `--bubble-bg` 随本层派生——demo 暗族三主题 bubble 逐块等于 elevated、无独立档，亮族独立 `#fefefe`）；**2026-10-13 用户裁决 demo 方案 A 后该族已全迁 composer 同源档**（`--bg` + `--border` + shadow-2，elevated 比行高亮 surface-hover 亮会致 hover 行反向变暗，见 §5.12；本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面）；overlay 遮罩半透明黑（`--scrim` token，真值 rgba(0,0,0,0.8)，`bg-scrim` 类消费）全场最暗，遮罩上面板靠 border + shadow 分离
 - 黛蓝/暖墨暗色 entry 按玄五层骨架 + 各自色相偏移推导（黛蓝 B>R、暖墨 R>B）；亮色族三主题（皓/青墨/朱印）bg 阶梯沿用宣纸镜像（surface 最亮、框架层深一档），青墨/朱印不覆写
 - **亮色（皓族）设置卡双层底**：`--bg-card` `#fcfbf9`（分组卡底，近白纸、亮于页底 `#eef1ea`）、`--surface-2` `#efede9`（分组卡头，= demo 亮族 `--card-head`；style.css `[data-theme=light]`）——「卡浮于底」层级在亮色族与暗色族同构（卡底亮于页底，卡头 = 页底色调档）
 
@@ -389,6 +389,10 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --shadow-2: 0 8px 24px rgba(0,0,0,0.4);
 --shadow-3: 0 12px 32px rgba(0,0,0,0.45);   /* 顶级浮层 */
 --shadow-glow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent);
+--shadow-drawer-left: -24px 0 48px rgba(0,0,0,0.4);  /* 定向左投影：抽屉自右滑入的左侧落影（浓度与 shadow-2 同档；Tailwind 映射 shadow-drawer-left）*/
+
+/* 弹层遮罩（modal/overlay 背后全场最暗层；黑基六主题共用一值，demo .cmask 同值）*/
+--scrim: rgba(0,0,0,0.8);   /* Tailwind 映射 bg-scrim；消费点 = DialogContent overlay / SearchModal / workflow-viz OverlayShell */
 
 /* z-index 语义化（demo styles #8 梯队：sticky < popover < overlay < hovercard < modal < dialog < toast < banner）*/
 --z-sticky: 1;  --z-popover: 10;  --z-overlay: 20;  --z-hovercard: 500;
