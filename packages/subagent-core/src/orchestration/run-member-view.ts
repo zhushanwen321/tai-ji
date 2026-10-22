@@ -220,7 +220,8 @@ function memberViewFromRecord(
  * （trace 节点无 cancelled 状态，取消语义由错误文案承载）——兜底是降级形态。
  */
 function memberViewFromTraceNode(node: ExecutionTraceNode, now: number): RunMemberView {
-  // 节点 completed → completed；failed → failed；pending/running → running（设计 §3.1.3 状态表第三行）。
+  // 节点 completed → completed；failed → failed；pending/running → running
+  // （设计 §3.1.3 状态表「record 缺失，trace 节点兜底」行）。
   const state: MemberState =
     node.status === "completed" ? "completed" : node.status === "failed" ? "failed" : "running";
   const startedMs = parseIsoMs(node.startedAt);

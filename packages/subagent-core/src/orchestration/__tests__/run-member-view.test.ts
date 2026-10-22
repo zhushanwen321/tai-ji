@@ -2,7 +2,7 @@
 // 设计 §3.1.3 / §3.3.3 / §3.4；impl-plan u-foundation 验收条款①）。
 //
 // 覆盖：
-// - state 映射四态（record 两行规则 + trace 兜底第三行映射；cancelled 与兜底 failed 的粒度差异）
+// - state 映射四态（record 规则含存量回落 + trace 兜底行映射；cancelled 与兜底 failed 的粒度差异）
 // - stepIndex 去重（running 优先 / startedAt 最新 / trace 兜底 last-wins / 合并后每 stepIndex 至多一行）
 // - trace 兜底折行（records undefined 不抛错；字段回落链）
 // - 8K 截断省略行（failed/cancelled 行优先保留；未超预算全保留）
