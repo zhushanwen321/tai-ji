@@ -7,7 +7,7 @@
     useWoolWizard（纯状态机工厂）；快照数据在 useWool。
   -->
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent class="max-w-[440px]">
+    <DialogContent class="max-w-[440px]" @interact-outside="onInteractOutside">
       <DialogHeader>
         <DialogTitle data-testid="wool-wizard-title">
           {{ phase === 'family' || !selectedFamily ? t('wool.menuLabel') : selectedFamily.displayName }}
@@ -171,6 +171,14 @@ function onFamilySelect(family: WoolFamilyId): void {
   // 授权族：authorize URL 广播在授权窗内随时到达（扩展发 URL 先于动作回执），进相即订阅。
   if (template.value === 'oauth') subscribeAuthorizeUrl(family)
   void runInstallStep()
+}
+
+/** 浮层内交互不 dismiss 向导：授权浮层（wfvz-overlay）盖在向导弹层之上（z-dialog >
+ *  z-modal），用户与浮层的交互（点遮罩/关闭钮）对 reka DismissableLayer 是「层外点击」，
+ *  不拦截会把授权进行中的向导连带关掉（ComposerTray / SchedulerQuickCard 同款拦截）。 */
+function onInteractOutside(e: Event): void {
+  const target = e.target as Element | null
+  if (target?.closest('[data-testid="wfvz-overlay"]')) e.preventDefault()
 }
 
 function backToFamily(): void {
