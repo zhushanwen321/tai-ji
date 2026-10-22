@@ -1,7 +1,7 @@
 /**
  * 网络代理页草稿模型（llm-network-proxy U4）——NetworkPage 各卡共用的纯逻辑层：
  * config ↔ 表单草稿双向映射（输入形态适配：noProxy 逗号串 / port 字符串承载）+
- * provider baseUrl 主机名解析（快速添加 chips 数据源与统计行服务商名反查共用一套解析）。
+ * provider baseUrl 主机名解析（按服务商路由卡行数据源与统计行服务商名反查共用一套解析）。
  * 校验与匹配语义直接消费 shared network-proxy SSOT（禁另写一套，llm-retry 同款纪律）。
  */
 import type { NetworkProxyConfig, NetworkProxyProtocol, ProviderInfo } from '@taiji/shared'
@@ -102,22 +102,6 @@ function hostnameOf(url: string): string | null {
   } catch {
     return null
   }
-}
-
-/** 快速添加 chip 数据源（provider 清单投影；host=null = 无可用 baseURL，chip 禁用态）。 */
-export interface ProviderChip { // oe-exempt:20261019:framework:快速添加 chip 的数据源投影形状（UI 与 model 层共用）
-  id: string
-  name: string
-  host: string | null
-}
-
-export function buildProviderChips(providers: ProviderInfo[]): ProviderChip[] {
-  return providers.map((p) => ({ id: p.id, name: p.name, host: providerBaseHost(p) }))
-}
-
-/** chip 已添加态判定（设计 §3.1：判定键 = 主机名条目，归一化后相等即同一条规则）。 */
-export function rulesContainHost(rules: string[], host: string): boolean {
-  return rules.some((rule) => normalizeHostname(rule) === normalizeHostname(host))
 }
 
 /**

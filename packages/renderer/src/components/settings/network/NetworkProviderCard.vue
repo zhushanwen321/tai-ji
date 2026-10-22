@@ -127,7 +127,7 @@
  * 按服务商卡：两个主机名清单（rules / ipv4Only）的逐行可视化编辑器。
  *   - 行 = 一个主机名（服务商的 baseURL 主机名，或自定义条目），行内两开关分别表示
  *     该主机名在两个清单中的成员关系；切换 = push / remove 条目（判定键 = 归一化
- *     主机名，与 chip toggle 时代同一套 shared normalizeHostname 语义）。
+ *     主机名，与 shared normalizeHostname 语义一致）。
  *   - 自定义行底层存储 = rules/ipv4Only 两个数组的条目本身（不引入第三份存储）：
  *     新增行 = push 空串到 rules（空 host 行两开关禁用；保存时 shared 校验显式拦截
  *     「第 N 条为空」），改名行 = 两个数组原位替换该条目，删除行 = 两个数组移除。
@@ -176,16 +176,24 @@ const customRows = computed<string[]>(() => {
   return rows
 })
 
-/** 清单成员判定：归一化主机名相等（与 chip 已添加态判定同语义）。 */
+/** 清单内归一化主机名匹配的条目下标（未命中 -1；归一化目标在循环外算一次）。
+ *  成员判定与行内开关增删共用同一判据——两处判定键必须一致，否则会出现
+ *  「开关显示未添加但点击却移除 / 显示已添加但点击却追加」的错位。 */
+function findHostIndex(list: string[], host: string): number {
+  const target = normalizeHostname(host)
+  return list.findIndex((entry) => normalizeHostname(entry) === target)
+}
+
+/** 清单成员判定：归一化主机名相等（开关显示态与 toggleHost 增删判据同源）。 */
 function containsHost(list: string[], host: string): boolean {
-  return list.some((entry) => normalizeHostname(entry) === normalizeHostname(host))
+  return findHostIndex(list, host) >= 0
 }
 
 /** 行内开关：on = push 主机名（未在清单时），off = remove 清单内该主机名（归一化相等匹配）。
  *  host = null（无可用 baseURL 的服务商）走 no-op：该行的开关 disabled 已拦点击，这里再兜一次。 */
 function toggleHost(list: string[], host: string | null, on: boolean): void {
   if (host === null) return
-  const idx = list.findIndex((entry) => normalizeHostname(entry) === normalizeHostname(host))
+  const idx = findHostIndex(list, host)
   if (on && idx < 0) list.push(host)
   if (!on && idx >= 0) list.splice(idx, 1)
 }
@@ -200,7 +208,7 @@ function renameCustomEntry(index: number, next: string): void {
   const old = customRows.value[index]
   if (old === undefined) return
   for (const list of [rules, ipv4Only]) {
-    const idx = list.value.findIndex((entry) => entry === old)
+    const idx = list.value.indexOf(old)
     if (idx >= 0) list.value.splice(idx, 1, next)
   }
 }
@@ -210,7 +218,7 @@ function removeCustomEntry(index: number): void {
   const host = customRows.value[index]
   if (host === undefined) return
   for (const list of [rules, ipv4Only]) {
-    const idx = list.value.findIndex((entry) => entry === host)
+    const idx = list.value.indexOf(host)
     if (idx >= 0) list.value.splice(idx, 1)
   }
 }

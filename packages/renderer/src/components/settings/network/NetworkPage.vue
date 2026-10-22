@@ -1,7 +1,7 @@
 <template>
   <!-- Settings · 网络代理菜单页（llm-network-proxy U4）：单页纵排三卡（§3.3 决策 6 变体一）。
        保存语义 = 单页单保存（§3.1）：三卡编辑进页面级内存草稿，代理服务器卡「保存」一次
-       全量 setNetworkProxyConfig 整页草稿；开关关闭时规则卡降灰禁交互（统计卡观测与开关正交）。 -->
+       全量 setNetworkProxyConfig 整页草稿（代理总开关的门控范围见下方按服务商卡注释）。 -->
   <div data-testid="network-page" class="flex flex-col">
     <header class="page-head">
       <div class="head-text">
@@ -28,7 +28,7 @@
 <script setup lang="ts">
 /**
  * 网络代理页编排（数据层 = SettingsTransport seam，[C3]）：
- * - 加载：onMounted 拉 getNetworkProxyConfig 回填草稿 + listProviders 取 chips/反查数据源
+ * - 加载：onMounted 拉 getNetworkProxyConfig 回填草稿 + listProviders 取服务商行与统计反查数据源
  *   （SystemLlmRetrySection best-effort 先例：加载失败保默认值，console.warn 不打扰）。
  * - 订阅：onNetworkProxyConfig 广播多窗口同步；草稿脏（与最近加载基准不等）时跳过覆盖
  *   ——单页草稿下不丢用户输入；自保存回声与基准同值，幂等。
@@ -66,9 +66,11 @@ let loadedConfig: NetworkProxyConfig | null = null
 function applyLoaded(config: NetworkProxyConfig): void {
   // 基准归一化：旧配置文件无 ipv4Only 字段（schema 演进前的落盘形态），不补缺省会让
   // isDirty 的 JSON 比较（build 输出恒含 ipv4Only 键）把「配置 schema 缺省」误判成
-  // 「用户编辑」——旧配置用户此后永远收不到广播刷新
-  loadedConfig = { ...config, ipv4Only: config.ipv4Only ?? [] }
-  Object.assign(draft, draftFromConfig(config))
+  // 「用户编辑」——旧配置用户此后永远收不到广播刷新。
+  // 归一化一次、基准与草稿共用同一产物（草稿侧 draftFromConfig 也接归一化后的 config）。
+  const normalized: NetworkProxyConfig = { ...config, ipv4Only: config.ipv4Only ?? [] }
+  loadedConfig = normalized
+  Object.assign(draft, draftFromConfig(normalized))
 }
 
 /** 草稿是否脏（组装归一后与基准比较——输入形态差异已被 buildConfigFromDraft 消除）。 */
@@ -96,7 +98,7 @@ onMounted(async () => {
     const res = await transport.listProviders()
     providers.value = res.providers
   } catch (e) {
-    // chips 与统计反查降级：无 provider 数据 = chip 组无项、统计行显裸主机名，页面仍可用
+    // 服务商行与统计反查降级：无 provider 数据 = 服务商行无项、统计行显裸主机名，页面仍可用
     console.warn('[NetworkPage] failed to load providers:', e)
   }
 })
