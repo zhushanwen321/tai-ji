@@ -1,7 +1,10 @@
 <!--
   OverlayShell —— 内容浮层统一壳（display-containers §6.5/§7.3「浮层公共壳组件」）。
 
-  从 WorkflowVizOverlay 抽出的公共壳：面板（88%×92% 圆角面板 + 遮罩、--z-modal）+ **两通道
+  从 WorkflowVizOverlay 抽出的公共壳：面板（88%×92% 圆角面板 + 遮罩、--z-dialog 档——设置
+  弹窗经 DialogPortal teleport 到 body 尾部且同用 --z-modal，同值后序者胜会把浮层盖住；
+  浮层语义 = 从任何业务弹窗内都可唤起的全局工作层，授权浮层（设置弹窗内发起）是首个同屏
+  场景）+ **两通道
   关闭**（点遮罩 / 右上关闭按钮）+ 标题栏 slot（#title，内容侧注入自己的 header 信息）+
   body slot（默认槽 = 面板 body 区，直接挂在面板 flex-col 下——内容自带 `min-h-0 flex-1`
   尺寸控制，如 workflow 的左 DAG 右实况分栏）。browser 与 workflow 两个内容挂进来
@@ -28,7 +31,7 @@
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/80 backdrop-blur-[2px]"
+    class="fixed inset-0 z-[var(--z-dialog)] flex items-center justify-center bg-black/80 backdrop-blur-[2px]"
     data-testid="wfvz-overlay"
     @click.self="close"
   >
