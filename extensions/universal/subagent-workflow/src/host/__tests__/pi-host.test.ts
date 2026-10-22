@@ -344,7 +344,7 @@ describe("resolveGrandchildExtensionPaths / createPiHostServices.extensionPathsï
       "--extension", "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-canvas",
       "--extension", "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-scheduler",
       "--extension", "/Users/u/.pi/agent/extensions/opendesign-ipv4",
-      "--extension", "/Users/u/.pi/agent/extensions/bash-timeout-override.ts",
+      "--extension", "/Users/u/.pi/agent/extensions/sample-discovery-stub.ts",
     ];
     expect(resolveGrandchildExtensionPaths(argv, () => undefined)).toEqual([
       "/app/TaiJi.app/Contents/Resources/extensions/@zhushanwen/pi-subagent-workflow",
