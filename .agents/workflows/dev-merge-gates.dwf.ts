@@ -512,10 +512,26 @@ async function runStep<T>(id: string, fn: () => Promise<T>): Promise<T | null> {
 async function main(): Promise<Record<string, unknown>> {
   report({ stage: "start", base: args.base ?? "auto(merge-base github/main HEAD)" });
 
+  // world.run cwd 继承宿主 bash 持久 cwd（zcode 宿主不保证停在 worktree 根）——repo 相对
+  // 路径的脚本/文件引用一律经 repoRoot 拼绝对路径执行；探测失败 fail-fast（cwd 不在仓库内
+  // 时 diff/审查/commit 全部口径失效，猜根 = 静默错审）
+  const rootProbe = await world.run("git", ["rev-parse", "--show-toplevel"]);
+  if (rootProbe.exitCode !== 0 || rootProbe.stdout.trim() === "") {
+    throw new Error(
+      `git rev-parse --show-toplevel 失败（exit ${rootProbe.exitCode}）：${rootProbe.stderr.trim() || "无 stderr"}——workflow 执行 cwd 不在待合并 worktree 内。恢复：宿主 bash cd 到 worktree 根后重新发起本 workflow`,
+    );
+  }
+  const repoRoot = rootProbe.stdout.trim();
+
   async function existsViaNode(path: string): Promise<boolean> {
     const r = await world.run("node", ["-e", EXISTS, path]);
     return r.exitCode === 0;
   }
+
+  // repo 相对路径存在性探测（绝对路径原样放行；相对一律按 repoRoot 解析——存在性判定与
+  // 后续执行用同一绝对路径，防「检查 cwd A、执行 cwd B」劈叉）
+  const existsRepoPath = async (p: string): Promise<boolean> =>
+    p.startsWith("/") ? existsViaNode(p) : existsViaNode(`${repoRoot}/${p}`);
 
   // porcelain 过滤 .review/.tmp（脚本自持目录），与 pr-lifecycle dirtyWorktree 同源
   async function dirtyFiles(): Promise<string[]> {
@@ -853,7 +869,7 @@ async function main(): Promise<Record<string, unknown>> {
     // ── 存在性检查（zcode/pi 两侧通用行为，设计 §5 时序约束 3）：脚本随 git 分支传播、
     //    skill 实体 symlink 即时生效——feature 分支未含脚本 commit 时必然缺失。缺失 =
     //    显式披露跳过，不崩溃、不静默（跳过必须披露，不构成静默降级）。
-    if (!(await existsViaNode(GATES_SCRIPT))) {
+    if (!(await existsRepoPath(GATES_SCRIPT))) {
       gatesStatus = "skipped";
       disclosures.push({ item: "gates", reason: "quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露" });
       log(`[gates] quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露；恢复通道：源 worktree git merge dev-0.10.5 主动吸收后重跑`);
@@ -869,7 +885,7 @@ async function main(): Promise<Record<string, unknown>> {
     for (let round = 1; round <= MAX_GATE_ROUNDS; round++) {
       // timeoutMs 必设：quality-gates 全量（typecheck 三处 + 增量 coverage + metrics）
       // 真机耗时在分钟级，300s 默认上限会把正常执行误判为超时拒绝（连续两跑实证）
-      const last = await world.run("node", [GATES_SCRIPT, "--side", "dev-merge", "--base", base, "--json"], { timeoutMs: 1_800_000 });
+      const last = await world.run("node", [`${repoRoot}/${GATES_SCRIPT}`, "--side", "dev-merge", "--base", base, "--json"], { timeoutMs: 1_800_000 });
       const lastJson = parseGatesJson(last.stdout);
       if (last.exitCode === 0) {
         gatesStatus = "pass";
@@ -902,7 +918,7 @@ async function main(): Promise<Record<string, unknown>> {
           `workflow dev-merge-gates 第 ${round} 轮质量门失败（quality-gates --side dev-merge，base=${base}），失败门与详情（每门 detail 已截断）：`,
           lastSummary,
           "",
-          `需要全量输出时可自行重跑：node scripts/quality-gates.mjs --side dev-merge --base ${base}。`,
+          `需要全量输出时可自行重跑：node ${repoRoot}/scripts/quality-gates.mjs --side dev-merge --base ${base}。`,
           "",
           "要求：",
           "1. 修复上述失败门的全部问题，只改与失败直接相关的文件。",
@@ -941,12 +957,12 @@ async function main(): Promise<Record<string, unknown>> {
     // 入口经 pi 真实加载一遍（--mode rpc + stdin EOF，零 LLM 调用），抓 main 声明指向缺失
     // 文件 / 入口加载期即崩——装进 pi 宿主才暴露的问题前置到合并边界。脚本宿主无 pi 或无
     // 可加载入口时自身 skip（exit 0 + status skip），照常披露不阻塞
-    if (!(await existsViaNode(SMOKE_SCRIPT))) {
-      throw new Error(`pi-extension-smoke 脚本不存在：${SMOKE_SCRIPT}（skill 实体损坏或 worktree 内 .agents symlink 断裂）。恢复：检查 workspace 根 .agents/skills/dev-merge/scripts/ 完整性后重新发起本 workflow`);
+    if (!(await existsRepoPath(SMOKE_SCRIPT))) {
+      throw new Error(`pi-extension-smoke 脚本不存在：${repoRoot}/${SMOKE_SCRIPT}（skill 实体损坏或 worktree 内 .agents symlink 断裂）。恢复：检查 workspace 根 .agents/skills/dev-merge/scripts/ 完整性后重新发起本 workflow`);
     }
     const smokeRoundFails: string[] = [];
     for (let round = 1; round <= MAX_GATE_ROUNDS; round++) {
-      const sm = await world.run("node", [SMOKE_SCRIPT, "--json"], { timeoutMs: 300_000 });
+      const sm = await world.run("node", [`${repoRoot}/${SMOKE_SCRIPT}`, "--json"], { timeoutMs: 300_000 });
       let smJson: { status?: unknown; reason?: unknown; entryCount?: unknown } | null = null;
       try {
         // catch 分支必 throw，此处实指非空载荷；as 非 null 形态让控制流收窄生效
@@ -986,10 +1002,10 @@ async function main(): Promise<Record<string, unknown>> {
       );
       const reply = await fixer.ask<string>(
         [
-          `workflow dev-merge-gates 第 ${round} 轮 pi extension 启动冒烟失败（${SMOKE_SCRIPT}），失败明细：`,
+          `workflow dev-merge-gates 第 ${round} 轮 pi extension 启动冒烟失败（${repoRoot}/${SMOKE_SCRIPT}），失败明细：`,
           failDetail,
           "",
-          `需要全量输出时可自行重跑：node ${SMOKE_SCRIPT} --json。`,
+          `需要全量输出时可自行重跑：node ${repoRoot}/${SMOKE_SCRIPT} --json。`,
           "",
           "要求：",
           "1. 修复失败涉及的全部问题（package.json main 声明指向缺失文件 → 修声明或补文件；入口加载期报错 → 修对应源码），只改与失败直接相关的文件。",
@@ -1012,7 +1028,7 @@ async function main(): Promise<Record<string, unknown>> {
     }
 
     // changeset 检查（与 quality-gates 同批落盘的独立脚本；缺失时同款检查披露）
-    if (!(await existsViaNode(CHANGESET_SCRIPT))) {
+    if (!(await existsRepoPath(CHANGESET_SCRIPT))) {
       disclosures.push({ item: "changeset-check", reason: "changeset-check 脚本不存在（该分支未含 U1 commit），本轮跳过 changeset 检查并披露" });
       log(`[gates] changeset-check 脚本不存在（该分支未含 U1 commit），本轮跳过 changeset 检查并披露`);
       return;
@@ -1033,7 +1049,7 @@ async function main(): Promise<Record<string, unknown>> {
       "你是 changeset 起草工程师：按 Gate-1a.5 同款分类逻辑处置 changeset 缺失，分类判断必须有 diff 证据，不弹窗问用户。",
     );
     for (let round = 1; round <= MAX_GATE_ROUNDS; round++) {
-      const cs = await world.run("node", [CHANGESET_SCRIPT, "--json"]);
+      const cs = await world.run("node", [`${repoRoot}/${CHANGESET_SCRIPT}`, "--json"]);
       if (cs.exitCode !== 0) {
         throw new Error(`changeset-check exit ${cs.exitCode}（工具错误）：\n${tailLines(`${cs.stderr}\n${cs.stdout}`, 15)}\n按输出处置后重新发起本 workflow`);
       }
@@ -1152,7 +1168,7 @@ async function main(): Promise<Record<string, unknown>> {
     }
 
     // 约束动态加载（SKILL 1.7 第 1 步；失败按 CR 门语义终止，不降级空跑）
-    const sc = await world.run("node", ["scripts/select-constraints.mjs", "--base", base]);
+    const sc = await world.run("node", [`${repoRoot}/scripts/select-constraints.mjs`, "--base", base]);
     if (sc.exitCode !== 0) {
       throw new Error(`select-constraints 失败（exit ${sc.exitCode}）：${tailLines(`${sc.stderr}\n${sc.stdout}`, 10)}\n先恢复约束加载（脚本/权限/git 状态）再重新发起本 workflow`);
     }
@@ -1166,7 +1182,7 @@ async function main(): Promise<Record<string, unknown>> {
 
     // agent 定义在盘性检查（.agents 实体缺失/滞后时 fail-fast 指明路径，不静默变维）
     for (const dim of dims) {
-      const p = `${AGENT_DIR}/review-${dim}.md`;
+      const p = `${repoRoot}/${AGENT_DIR}/review-${dim}.md`;
       if (!(await existsViaNode(p))) {
         throw new Error(`review agent 定义缺失：${p}——.agents 实体缺失或滞后，恢复通道 = refs/skills-snapshot 备份 ref；恢复后重新发起本 workflow`);
       }
@@ -1413,7 +1429,7 @@ async function main(): Promise<Record<string, unknown>> {
     // 该类失败最常见形态是报告已写好、JSON 尾部字段错（计数漂移），重试只需重出有效 JSON；
     // 仍败才 review-failure 终态（无降级完成形态的 CR 门语义不变）
     async function dispatchReviewer(dim: string, round: number, activeAll: DmgRecord[]): Promise<ReviewerVerdict> {
-      const agentPath = `${AGENT_DIR}/review-${dim}.md`;
+      const agentPath = `${repoRoot}/${AGENT_DIR}/review-${dim}.md`;
       const reportPath = `${runDir}/round-${round}/review-${dim}.md`;
       const promptLines: string[] = [
         `workflow dev-merge-gates branch-review 第 ${round} 轮——维度 ${dim}。`,
@@ -1491,7 +1507,7 @@ async function main(): Promise<Record<string, unknown>> {
         '2. 逐条证据裁决三档：有真实代码证据 → adjudication="evidence"；reviewer 未给实证 → "unverified"；臆测或纯风格指控 → "downgraded" + note。unverified/downgraded 同样写进聚合报告供人复核，但只有 evidence 条目进修复队列。',
         round >= 2 ? "3. 跨轮身份对齐：延续上轮的条目必须复用问题清单条目 id；新条目不填 id（workflow 统一分配）。" : "3. 全部为新问题，不填 id（workflow 统一分配）。",
         "4. 修复分组：把 evidence 条目按相关性和独立性分组——同文件/同模块/同根因归同组（一个 agent 修一组）；不同组的文件集必须不相交（组间可并行修复、互不冲突）；单条问题独立成组即可，无关联不强行合并。",
-        `5. 拦截前置消解检查（content 类 commit 拦截第一道防线，设计 §4.1）：亲跑只读门禁复现检查 node scripts/select-affected-e2e.mjs --check --base ${base}（e2e 资产防漏登记门禁）。若报出看护目录文件缺 rule 覆盖且该文件在本轮任一修复分组涉及文件中：把报错写明的恢复动作（按报错原文，如在 docs/testing/e2e-map.json 为该文件补 rule）并入涉及该文件的分组表最前一组（提交按分组表顺序执行）的对应条目 guidance，并注明该登记须与修复同批提交——拦截条件在提交时点被消解。报错与全部修复分组文件无关时不处理（既有欠账由补修链在该文件下次提交时承接）。`,
+        `5. 拦截前置消解检查（content 类 commit 拦截第一道防线，设计 §4.1）：亲跑只读门禁复现检查 node ${repoRoot}/scripts/select-affected-e2e.mjs --check --base ${base}（e2e 资产防漏登记门禁）。若报出看护目录文件缺 rule 覆盖且该文件在本轮任一修复分组涉及文件中：把报错写明的恢复动作（按报错原文，如在 docs/testing/e2e-map.json 为该文件补 rule）并入涉及该文件的分组表最前一组（提交按分组表顺序执行）的对应条目 guidance，并注明该登记须与修复同批提交——拦截条件在提交时点被消解。报错与全部修复分组文件无关时不处理（既有欠账由补修链在该文件下次提交时承接）。`,
         "",
         `产出——聚合总报告 ${reportPath}（先建目录）：## Summary（一句话）+ Must-fix/Suggestions 计数 + 问题表（ID|严重度|来源维度|文件|证据|修复方向）+ 修复分组表（组ID|问题ID|涉及文件|分组依据）+ 裁决说明（unverified/downgraded 及原因）。`,
         "工作流会从你返回的 groups + issues 数据确定性渲染每组的修复任务文档（aggregate-4-fixer-<k>.md）——返回 JSON 里的 guidance 务必具体可执行。",
@@ -1875,7 +1891,7 @@ async function main(): Promise<Record<string, unknown>> {
         const files: string[] = [];
         const skipped: string[] = [];
         for (const p of tokens) {
-          if (await existsViaNode(p)) files.push(p);
+          if (await existsRepoPath(p)) files.push(p);
           else skipped.push(p);
         }
         if (skipped.length > 0) {
