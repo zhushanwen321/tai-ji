@@ -1,7 +1,7 @@
 /**
  * PluginHostProcess 单元测试（fork 版宿主侧）—— in-process 注入桩版
  *
- * 2026-10-22 单测层整治（判据三档与处置通道见 docs/todo/test-single-layer-cleanup.md）：
+ * 2026-10-22 单测层整治（判据三档与处置通道见 docs/TEST-STRATEGY.md「新写测试判据」节）：
  * 原形态每个用例 fork 真实子进程（b+f 类）——子进程启动 / 退出事件传播 / disconnect
  * grace 窗口没有确定性完成信号，CPU 满载下无稳定上界。现经 vi.mock 把
  * node:child_process.fork 换成注入桩（test/helpers/plugin-host-inproc-stubs.ts，
@@ -12,7 +12,7 @@
  * - 原「等真实事件传播」的 waitFor 轮询与 sleep 观察窗，换成 fake timers 对
  *   disconnect grace 定时器的确定性推进（advanceTimersByTimeAsync）与测试显式驱动的
  *   迟到 exit（M6a-03 竞态窗口）；
- * - 真实 fork 的进程级行为归集成轨（TAIJI_TEST_INTEGRATION 门控）覆盖。
+ * - 真实 fork 的进程级行为归集成组（TAIJI_TEST_INTEGRATION 门控）覆盖。
  *
  * 运行命令: pnpm --filter @taiji/runtime exec vitest run test/plugin-host-process.test.ts
  */
@@ -153,7 +153,7 @@ describe('PluginHostProcess', () => {
     const processId = await host.assignProcess('crash-test', 'sandbox')
     const handle = host.getProcessHandle('crash-test')!
     // 桩按 mock bootstrap 协议响应 crash → 自退 exit(1)：disconnect → exit 事件序
-    // 同步 emit，宿主 exit handler 当场完成崩溃分流（真实传播由集成轨覆盖）
+    // 同步 emit，宿主 exit handler 当场完成崩溃分流（真实传播由集成组覆盖）
     handle.postMessage({ type: 'crash' })
 
     expect(crashes.length).toBe(1)

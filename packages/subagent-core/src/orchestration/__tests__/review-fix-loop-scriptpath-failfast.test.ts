@@ -9,7 +9,7 @@
 // 驱动方式：AsyncFunction 包装 + require/log 注入，进程内求值真实脚本源码
 // （单测层极端测试整治第二波收敛：依赖加载 fail-fast 是纯逻辑判定，用注入
 // 加载器即可确定性断言，不背 node 子进程冷启动成本，判据见
-// docs/todo/test-single-layer-cleanup.md「判据类型 / 处置通道」）。五个脚本均含
+// docs/TEST-STRATEGY.md「新写测试判据」节「判据类型 / 处置通道」）。五个脚本均含
 // 顶层 await（agent/parallel 入口）与顶层 return，是 worker 模板宿主形态——纯文件
 // 加载（.js ESM / .cjs CJS）在解析期即 SyntaxError，检查无从执行；以
 // AsyncFunction 构造器复刻 worker 模板的「async 函数包装 + require 注入」宿主

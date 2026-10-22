@@ -5,10 +5,10 @@
  * 消费方必须登记其一，漏登记会在满并行下饿死，vitest.config 维护契约）的全量双向
  * diff 检查 + writeLine 的 stdin 写入形态（JSONL 行以换行结尾——rpc 协议按行解析）。
  *
- * faux LLM 轨豁免（L2.5）：只 import FAUX_PI_READY（无 REAL_PI_READY）的消费文件是纯
- * faux 轨（凭证无关，门控只判 binary），属 main 满并行组——real-pi 池的饿死模式（真实 LLM
+ * faux LLM 层豁免（L2.5）：只 import FAUX_PI_READY（无 REAL_PI_READY）的消费文件是纯
+ * faux 层（凭证无关，门控只判 binary），属 main 满并行组——real-pi 池的饿死模式（真实 LLM
  * 轮次长等待窗口在 CPU 饱和下超时）在 faux 毫秒级本地轮次下结构性不存在（见 vitest.config.ts
- * 维护契约），故豁免登记；混合轨文件（同时 import 两个 READY）含真实 LLM 用例，仍强制登记。
+ * 维护契约），故豁免登记；混合形态文件（同时 import 两个 READY）含真实 LLM 用例，仍强制登记。
  * [HISTORICAL 2026-09-26] 例外：多 spawn + jiti 冷编译的重 faux 件（idle-pi-reclaim-
  * integration）在满并行下存在扩展注册/模型解析竞态，允许自愿登记进 REAL_PI_TESTS
  * 顺序尾组（豁免 = 不强制，非禁止；登记证据见 vitest.config.ts 同日注释）。
@@ -46,8 +46,8 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
     // 错误消息里的同名文案会造成自匹配假红。
     const importShape = /import\s*\{[^{}]*\bspawnPiFixture\b[^{}]*\}\s*from\s*['"][^'"]*pi-fixture(\.js)?['"]/
     // 轨道判定的 import 信号（同款「整句结构」匹配，防裸标识符自匹配）：REAL_PI_READY =
-    // 真实 LLM 轨门控（SSOT 在 real-pi-gate.ts，历史形态自 pi-fixture import 亦兼容）；
-    // FAUX_PI_READY = faux 轨门控（凭证无关）。
+    // 真实 LLM 层门控（SSOT 在 real-pi-gate.ts，历史形态自 pi-fixture import 亦兼容）；
+    // FAUX_PI_READY = faux 层门控（凭证无关）。
     const realReadyShape =
       /import\s*\{[^{}]*\bREAL_PI_READY\b[^{}]*\}\s*from\s*['"][^'"]*(pi-fixture|real-pi-gate)(\.js)?['"]/
     const fauxReadyShape = /import\s*\{[^{}]*\bFAUX_PI_READY\b[^{}]*\}\s*from\s*['"][^'"]*pi-fixture(\.js)?['"]/
@@ -58,7 +58,7 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
     const integrationGateShape =
       /import\s*\{[^{}]*\bINTEGRATION_TESTS_ENABLED\b[^{}]*\}\s*from\s*['"][^'"]*integration-gate(\.local)?(\.ts)?['"]/
     const consumers: string[] = []
-    /** 纯 faux 轨文件（有 FAUX 门控、无 REAL 门控 → 无真实 LLM turn 用例，豁免登记） */
+    /** 纯 faux 层文件（有 FAUX 门控、无 REAL 门控 → 无真实 LLM turn 用例，豁免登记） */
     const fauxTrackFiles: string[] = []
     /** 集成门控文件（spawn 用例受 TAIJI_TEST_INTEGRATION 门控，豁免登记） */
     const integrationGatedFiles: string[] = []
@@ -75,7 +75,7 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
     // 配置侧：按字符串字面量静态提取（走配置 import 会拉起 globalSetup，超出 unit 校验边界）。
     // 数组成员行间穿插 // 注释，注释内可含方括号（如 [HISTORICAL ...]）——结束边界不能用
     // 「下一个 ']' 字符」判定：会命中注释内的闭合括号，把提取截断成空集（2026-10-20 真实
-    // LLM 轨用例登记后即触发「已登记却报未登记」误报）。改按行扫描：注释行跳过，行首
+    // LLM 层用例登记后即触发「已登记却报未登记」误报）。改按行扫描：注释行跳过，行首
     // （去缩进）']' 即数组结束（'] as const' 同形态命中）。
     const extractPoolArray = (decl: string): string[] => {
       const start = config.indexOf(decl)
@@ -94,12 +94,12 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
     const registeredRealPi = extractPoolArray('const REAL_PI_TESTS = [')
     const registeredIntegration = extractPoolArray('const INTEGRATION_TESTS = [')
     const registered = [...registeredRealPi, ...registeredIntegration]
-    // [L2.5 二批后允许空池] 全部真实 LLM 用例已翻轨 faux，REAL_PI_TESTS 当前 0 成员是合法
+    // [L2.5 二批后允许空池] 全部真实 LLM 用例已迁组 faux，REAL_PI_TESTS 当前 0 成员是合法
     // 终态（数组保留为「新增真实 LLM 文件必须登记」的注册位）；检查的提取断言点 =
     // 数组声明可定位（上方 start），不再要求非空。
 
     // 双向 diff：漏登记（消费方未进任一串行尾组，落回 main 满并行组复发饿死超时；纯 faux
-    // 轨例外，见文件头豁免说明）+ 失效项（清单成员在磁盘已不存在，文件删除/改名后清单未同步）
+    // 层例外，见文件头豁免说明）+ 失效项（清单成员在磁盘已不存在，文件删除/改名后清单未同步）
     const unregistered = consumers
       .filter((p) => !registered.includes(p) && !fauxTrackFiles.includes(p) && !integrationGatedFiles.includes(p))
       .sort()
@@ -110,10 +110,10 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
       problems.push(
         `以下 ${unregistered.length} 个文件 import spawnPiFixture 但未登记任一串行尾组（REAL_PI_TESTS / INTEGRATION_TESTS）：\n`
           + unregistered.map((p) => `  ${p}`).join('\n')
-          + '\n👉 真实 LLM 轨文件把该路径加入 packages/runtime/vitest.config.ts 的 REAL_PI_TESTS；'
-          + '真进程 / 真 IO 集成轨文件加入 INTEGRATION_TESTS（用例挂 TAIJI_TEST_INTEGRATION 门控）；'
+          + '\n👉 真实 LLM 层文件把该路径加入 packages/runtime/vitest.config.ts 的 REAL_PI_TESTS；'
+          + '真进程 / 真 IO 集成组文件加入 INTEGRATION_TESTS（用例挂 TAIJI_TEST_INTEGRATION 门控）；'
           + 'spawn 用例用例级门控（文件 import INTEGRATION_TESTS_ENABLED、快速用例留默认组）同样合法；'
-          + '纯 faux 轨文件（无真实 LLM turn 用例）改为门控 FAUX_PI_READY'
+          + '纯 faux 层文件（无真实 LLM turn 用例）改为门控 FAUX_PI_READY'
           + '（describe.skipIf(!FAUX_PI_READY) + spawn 传 fauxResponses）即豁免登记',
       )
     }

@@ -11,7 +11,7 @@
 //      finalizeEngineOutcome 已删——adopt 链随 one-shot engine-run 编排退役）；
 //   3. settleOneShotOutcome 直驱：markRoundIdle 簿记（idle 翻边 / round+1 /
 //      result / closedReason 清除）+ `.alive` 不删 + pending:unregister 发射点②
-//      store 簿记⑧单轨发射（恰好一次）；
+//      store 簿记⑧单点发射（恰好一次）；
 //   4. workflow 域（executeAndAwait → runAndFinalize → outcomeToAgentResult 主回填
 //      点）：sessionFile 回填后 `.alive` 存在且 pid=本进程；
 //   5. [U2b 修复轮/D2] adoptEngineDeath 收敛（adoptResumableAfterEngineDeath 三写
@@ -191,7 +191,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
 
 
 describe("settleOneShotOutcome SP-5 成功分支 → store.markRoundIdle 接线（U2b/C3）", () => {
-  it("markRoundIdle 簿记 + `.alive` 不删（D3a 跨轮保留）+ pending:unregister 发射点② store 簿记⑧单轨发射恰好一次", async () => {
+  it("markRoundIdle 簿记 + `.alive` 不删（D3a 跨轮保留）+ pending:unregister 发射点② store 簿记⑧单点发射恰好一次", async () => {
     const h = makeService();
     try {
       const sessionFile = path.join(h.agentDir, "sp5-session.jsonl");
@@ -226,7 +226,7 @@ describe("settleOneShotOutcome SP-5 成功分支 → store.markRoundIdle 接线�
       expect(record.result).toBe("round done");
       // 簿记⑦：`.alive` 保留（旧 doFinalizeRoundToIdle 删点随收敛移除——B5/D3a）
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
-      // 簿记⑧单轨：注销发射点②已收尾 store 簿记⑧（SubagentService 构造点经
+      // 簿记⑧单点：注销发射点②已收尾 store 簿记⑧（SubagentService 构造点经
       // setPendingUnregister 注入 notifyHost.emitPendingUnregister），本用例期间
       // pi.events.emit 仅此一笔——调用方直发回归（双轨重复注销）会使计数 >1 而红
       expect(h.pi.events.emit).toHaveBeenCalledTimes(1);

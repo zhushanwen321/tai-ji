@@ -1,10 +1,10 @@
 /**
  * workflow 断连恢复语义 E2E（A2，设计 reload-closeout-reliability §4 A2）。
  *
- * faux LLM 轨（L2.5，零 token）。场景：WS 断开期间 run 完成 → 重连 → 收敛。
+ * faux LLM 层（L2.5，零 token）。场景：WS 断开期间 run 完成 → 重连 → 收敛。
  * 验证对象 = 传输兜底路径回归（G2 覆盖矩阵「publish 之后的传输跳」分治）：断连下 publish
  * 正常完成并推进水位、重连后 diff 空——水位结构性不触发，恢复只能来自既有传输兜底
- * （stateSnapshot 回放 / 主动拉取）。水位的直接证明在 A3 单测轨 + A1 e2e 轨（S1b/S2 的
+ * （stateSnapshot 回放 / 主动拉取）。水位的直接证明在 A3 单测层 + A1 e2e 层（S1b/S2 的
  * ≤30s 帧到达断言），不在本用例。
  *
  * 断连的实现载体（u3a 裁决，deviations 登记）：spec 自备 WS 客户端扮演断连者——它与
@@ -62,10 +62,10 @@ const SESSION_LABEL = 'wf-disconnect-recovery'
 const STEADY_WINDOW_MS = 16_000
 
 /**
- * 轨道自保护（batch-* 的 TAIJI_PI_LIVE 门同款范式）：mock bundle 在场时本 faux 真实 app 轨
+ * 轨道自保护（batch-* 的 TAIJI_PI_LIVE 门同款范式）：mock bundle 在场时本 faux 真实 app 层
  * 不适用，返回 skip 理由（null = 轨道正确，不 skip）。判据与 fixtures/launch-app-real.ts 的
  * assertRealRendererBundle 同源（MOCK_BUNDLE_MARKER 单一判据，注释见 fixtures/launch-app.ts）。
- * mock 在场时 launchRealApp 会 fail-fast 抛错——此处先行带理由 skip，防轨道错配（mock 轨
+ * mock 在场时 launchRealApp 会 fail-fast 抛错——此处先行带理由 skip，防轨道错配（mock 层
  * 剧本误收本 spec 等）以失败信号冒充产品缺陷；产物缺失不在此拦，交 fail-fast 响亮报错。
  */
 function mockBundleSkipReason(): string | null {
@@ -77,7 +77,7 @@ function mockBundleSkipReason(): string | null {
   if (!mockAsset) return null
   return (
     `轨道自保护：当前 renderer 产物是 mock bundle（assets/${mockAsset} 含 mock fixture 标记），` +
-    '本 faux 真实 app 轨需 real bundle——rebuild with: VITE_E2E=true pnpm run build:e2e（不传 VITE_MOCK）后再跑'
+    '本 faux 真实 app 层需 real bundle——rebuild with: VITE_E2E=true pnpm run build:e2e（不传 VITE_MOCK）后再跑'
   )
 }
 

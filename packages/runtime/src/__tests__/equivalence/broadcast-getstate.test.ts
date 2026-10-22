@@ -22,10 +22,10 @@
  * fixture 进程复用（验收 4，总时长 <120s 预算）：整 describe 一个 pi 进程（beforeAll/afterAll），
  * 两用例共享累积事件流；it 2 以事件起点标记切分本用例增量（it 1 的事件不进本次 live 侧）。
  *
- * faux LLM 轨（L2.5 翻轨）：验证对象是「实例快照/广播 == 权威 RPC 派生视图」与 store 喂入
+ * faux LLM 层（L2.5 迁组）：验证对象是「实例快照/广播 == 权威 RPC 派生视图」与 store 喂入
  * 同构，非模型智能——事件风暴的三轮 turn 响应与 it2 的 bash 工具轮由 fauxResponses 脚本
  * 固定（单一队列逐轮消费，消费序 = r1 → r2 → followup → bash toolCall → 总结文本），
- * 断言语义与翻轨前一致。usage 数值按 faux 估算口径断言 typeof number + 与权威拉取逐字段
+ * 断言语义与迁组前一致。usage 数值按 faux 估算口径断言 typeof number + 与权威拉取逐字段
  * 一致（禁精确值）。门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（SSOT =
  * test-guard/integration-gate.ts：本地默认跳过、CI 或按改动范围触发时真跑）。
  */
@@ -96,7 +96,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
   let fixture: PiFixture | null = null
 
   beforeAll(async () => {
-    // 流控（faux 轨特有）：TAIJI_FAUX_TPS=15 + r2 长文本 → r2 轮流式窗口（窗口宽度 ≈
+    // 流控（faux 层特有）：TAIJI_FAUX_TPS=15 + r2 长文本 → r2 轮流式窗口（窗口宽度 ≈
     // token/TPS，保持远宽于测试注入动作），保证 follow_up 落在 turn 进行中（pi 在跑 →
     // 入队 + queue_update 事件；idle 后投递无非空队列生命周期，队列断言假失败）。
     // spawn 前设置，afterAll 恢复。

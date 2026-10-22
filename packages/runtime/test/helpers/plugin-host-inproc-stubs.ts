@@ -1,14 +1,14 @@
 /**
  * plugin 宿主（PluginHost / PluginHostProcess）in-process 注入桩。
  *
- * 背景（2026-10-22 单测层整治，判据与处置通道见 docs/todo/test-single-layer-cleanup.md）：
+ * 背景（2026-10-22 单测层整治，判据与处置通道见 docs/TEST-STRATEGY.md「新写测试判据」节）：
  * plugin 宿主族的单测原形态 fork 真实子进程 / 起真实 Worker 线程（判据 b+f 类）——进程
  * 启动与退出事件传播没有「完成」信号可等，CPU 满载下窗口无稳定上界，不满足单测层
  * 「只测逻辑、高负载下也极快」的定位。本 helper 把进程/线程边界换成同进程注入桩：
  * 被测逻辑（宿主的分配/复用/IPC 往返/崩溃分流/清理/幂等/误报防护）全部留在
  * PluginHost / PluginHostProcess 实装内，真实进程/线程生命周期行为（terminate →
  * exit code=1、SIGKILL → exit code=null、SIGTERM 宽限链）属「代码 + OS 组合行为」，
- * 归集成轨（TAIJI_TEST_INTEGRATION 门控，见 test-guard/integration-gate.ts）覆盖。
+ * 归集成组（TAIJI_TEST_INTEGRATION 门控，见 test-guard/integration-gate.ts）覆盖。
  *
  * 消息协议逐条对齐 test/fixtures/ 下三个 mock bootstrap（本桩只移植这些单测实际驱动的分支）：
  * - plugin-bootstrap-process.mock.cjs：load → loaded；rpc → response(result:null)；

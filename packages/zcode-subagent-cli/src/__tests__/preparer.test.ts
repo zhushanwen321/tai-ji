@@ -153,7 +153,7 @@ describe("resolveZcodeModelRef（provider_config 单源）", () => {
   });
 });
 
-// ── 默认解析链（engine-provider-unification D3 换轨：副本存在→读 merge(真实,副本)
+// ── 默认解析链（engine-provider-unification D3 切换：副本存在→读 merge(真实,副本)
 // 视图，缺失→回落真实文件直读；路径函数仍按三态链返回单路径供 env 赋值）──
 // env 全局污染防护：本 describe 用例独占 TAIJI_AGENT_DATA_DIR 的 save/set/restore
 //（防线 global-setup 会把它固定为 tmp 树，这里指向本用例自建 dataDir）；homedir 经
@@ -226,7 +226,7 @@ describe("resolvePersonalProviderConfigPath（默认解析链：显式 sources >
     // 副本独有条目可见（merge 追加逻辑）。用全名 ref：短名按合并序首位（真实侧
     // PROVIDER_A）解析，不再落副本——「副本遮蔽真实」的旧短名语义已随 merge 退役
     expect(resolveZcodeModelRef(`${COPY_PROVIDER}/copy-model-x`)).toBe(`${COPY_PROVIDER}/copy-model-x`);
-    // 真实文件条目同样可见——D3 换轨核心：校验链与 Registry 读同一 merge 视图，
+    // 真实文件条目同样可见——D3 切换核心：校验链与 Registry 读同一 merge 视图，
     // 「读源 = 副本整体遮蔽真实」的旧语义已退役
     expect(resolveZcodeModelRef("GLM-5.3")).toBe(`${PROVIDER_A}/GLM-5.3`);
     // 清单聚合 = merge 视图全体（真实条目整条保留在前 → PROVIDER_A 先于副本条目）。

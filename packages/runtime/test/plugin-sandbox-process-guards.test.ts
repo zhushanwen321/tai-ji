@@ -8,10 +8,10 @@
  *
  * 回归保护目标：未来 sandbox 重构若删除/弱化 override（如「清理死代码」），本测试拦截。
  *
- * 层级归属（docs/todo/test-single-layer-cleanup.md 判据三档）：隔离进程本身即测试目的
+ * 层级归属（docs/TEST-STRATEGY.md「新写测试判据」节 判据三档）：隔离进程本身即测试目的
  * （真实 fork + tsx CJS hook 注册链属「代码 + OS 组合行为」，无确定性完成信号可等），
  * 故整组经集成测试门控（TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts）
- * 移出默认单测轨——本地默认跳过，CI 或按改动范围触发时真跑。
+ * 移出默认单测层——本地默认跳过，CI 或按改动范围触发时真跑。
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { fork } from 'node:child_process'
@@ -77,9 +77,9 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
     tsxTsconfig?.dispose()
     tsxTsconfig = null
   })
-  // 超时登记（用例级门控后仅集成轨真跑时生效）：真实 fork 子进程 + execArgv
+  // 超时登记（用例级门控后仅集成组真跑时生效）：真实 fork 子进程 + execArgv
   // ['--import','tsx'] 注册链，CI 满并行下冷启可达数秒超 vitest 默认 5s testTimeout；
-  // 本地实测 0.25s——15s 是 CI 负载余量非真实耗时，且只作用于门控开启后的集成轨。
+  // 本地实测 0.25s——15s 是 CI 负载余量非真实耗时，且只作用于门控开启后的集成组。
   it('process.kill 被封堵 → 抛 PERMISSION_DENIED（阻断 DoS 向量）', async () => {
     const result = await runFixture()
     // MF-2 核心防护：sandbox 插件 process.kill(process.ppid,'SIGKILL') 必须被拦截

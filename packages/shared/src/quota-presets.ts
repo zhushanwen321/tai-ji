@@ -163,7 +163,7 @@ export function isQuotaPreset(v: unknown): v is QuotaPreset {
  *
  * 判据取「空态」而非 nullish：settings-store 的 quotaPresets 初值是 `[]`（非 undefined），
  * `??` 只覆盖 undefined——空数组会原样穿过回落表达式，额度类型下拉与 matchedPreset 在
- * RPC 未回包 / 拉取失败 / mock 轨时永久为空（C-proc-21：用户可见的辅助能力失败必须有
+ * RPC 未回包 / 拉取失败 / mock 层时永久为空（C-proc-21：用户可见的辅助能力失败必须有
  * 可见反馈，禁静默空值）。空态在读取侧与「权威显式下发空表」不可区分，统一回落基线
  * （基线即无远程覆盖时的合并视图原形，见 QUOTA_PRESETS 注释）。
  *

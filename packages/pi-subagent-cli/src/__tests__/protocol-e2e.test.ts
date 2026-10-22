@@ -138,7 +138,7 @@ class FakeHost {
 }
 
 // bin CLI + fake pi 双真进程协议往返 = 代码 × OS 组合行为（无完成信号可等，窗口随
-// 负载拉长）——移出默认单测轨，集成门控（TAIJI_TEST_INTEGRATION）启用时真跑。
+// 负载拉长）——移出默认单测层，集成门控（TAIJI_TEST_INTEGRATION）启用时真跑。
 describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
   `pi-subagent-cli 协议 e2e（bin 真机 NDJSON 往返）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
   () => {
@@ -251,7 +251,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 });
 
 // fake pi 可执行性自检（spawnSync 探针失败时给出可操作报错）——fixture 自检属集成
-// 轨（真进程），同受门控。
+// 层（真进程），同受门控。
 describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
   `fake pi fixture 自检${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
   () => {

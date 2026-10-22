@@ -3,18 +3,18 @@
 // 收殓 / D15 abort / bash_output / bash_kill（黑盒：经工具 execute 断言使用者可见行为）
 //
 // 轨道拆分（单测层极端测试整治第二波）：
-//   - 单测轨（本文件主体）= 进程端点桩化：vi.mock 把 node:child_process 的 spawn 换成
+//   - 单测层（本文件主体）= 进程端点桩化：vi.mock 把 node:child_process 的 spawn 换成
 //     桩 ChildProcess（EventEmitter + pid/exitCode/unref），protocol 判活 / start time
 //     读取对桩 pid 截获，kill-tree 只记录不转发。被测逻辑——单例表、registry 锁内
 //     RMW、killing intent 双侧标记、timeout 定时器杀链编排、exit 边沿收尾、通知入账
 //     ——全部真跑；exit 事件由 emitFakeExit 显式派发（exitCode 先落再派发，对齐真
 //     ChildProcess 语义），确定性同步、无等待窗口。
-//   - 集成轨（文件尾门控 describe，TAIJI_TEST_INTEGRATION=1 真跑）= 5 条真子进程核心：
+//   - 集成组（文件尾门控 describe，TAIJI_TEST_INTEGRATION=1 真跑）= 5 条真子进程核心：
 //     spawn+自然退出全链 / bash_kill 真杀进程树 / timeout 真杀链 / 进程退出收殓真杀 /
 //     真实时钟下自然完成不补杀。真子进程满载下延迟不可预估（无确定性完成信号），
 //     属「代码 + OS 组合行为」，本地默认跳过（门控 SSOT = test-guard/integration-gate.ts）。
-//   - 预算：单测用例走 vitest 默认；集成轨用例单独挂 20s（原文件级预算随拆轨下沉到
-//     用例级，非抬升），轮询 deadline 常量（10s / 8s）仅集成轨消费。
+//   - 预算：单测用例走 vitest 默认；集成组用例单独挂 20s（原文件级预算随拆组下沉到
+//     用例级，非抬升），轮询 deadline 常量（10s / 8s）仅集成组消费。
 import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,12 +29,12 @@ import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "../../
 // [session-store-layout-inversion 域 5] 工具的 dataDir 来源已换为 resolveTaijiDataDir()
 // （env 注入）——getAgentDir mock 随换根退役，改 beforeEach stubEnv + afterEach 还原。
 //
-// 进程端点桩（单测轨）：vi.mock 两处——
+// 进程端点桩（单测层）：vi.mock 两处——
 //   1) node:child_process.spawn：spawnMode.real=false（默认）返回桩 ChildProcess，
-//      集成轨 describe 的 beforeEach 置 true 走真 spawn；
+//      集成组 describe 的 beforeEach 置 true 走真 spawn；
 //   2) @zhushanwen/extension-protocol/background-task 的进程原语（kill-tree 发令 /
 //      pid 判活 / start time 读取）：桩 pid 截获（fakePids 登记表），真 pid 原样转发
-//      （timeout 分支断言 killProcessTree 被调；集成轨真杀）。
+//      （timeout 分支断言 killProcessTree 被调；集成组真杀）。
 const { killTreeCalls, fakePids, spawnMode, fakeChildSeq } = vi.hoisted(() => ({
 	killTreeCalls: [] as number[],
 	fakePids: new Map<number, { alive: boolean; startSec?: number }>(),
@@ -60,7 +60,7 @@ vi.mock("@zhushanwen/extension-protocol/background-task", async (importOriginal)
 		...orig,
 		killProcessTree: (pid: number, onFallback?: (step: string, err: unknown) => void): void => {
 			killTreeCalls.push(pid);
-			// 桩 pid 上无进程可杀，不转发真信号；真 pid（集成轨真杀 / 误杀守卫断言对象）原样转发
+			// 桩 pid 上无进程可杀，不转发真信号；真 pid（集成组真杀 / 误杀守卫断言对象）原样转发
 			if (fakePids.has(pid)) return;
 			orig.killProcessTree(pid, onFallback);
 		},
@@ -118,7 +118,7 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ──────────────────────── 进程端点桩（单测轨专用） ────────────────────────
+// ──────────────────────── 进程端点桩（单测层专用） ────────────────────────
 
 /** 桩 pid 基数：远离真实 pid 区间，fakePids 登记即截获判活/身份读取，与真 pid 互不串扰。 */
 const FAKE_PID_BASE = 4_000_000;
@@ -144,7 +144,7 @@ function fakeSpawn(): FakeChildProcess {
 }
 
 /**
- * 派发桩进程退出（单测轨的 exit 事件边沿）：exitCode 先落再 emit——对齐真
+ * 派发桩进程退出（单测层的 exit 事件边沿）：exitCode 先落再 emit——对齐真
  * ChildProcess 语义（finalizeExitedTask 从 child.exitCode 读码）。同步触发全部
  * 收尾链（tail 摘要 → reason 判定 → 两侧终态写 → onTaskExit 回调），确定性完成。
  */
@@ -155,7 +155,7 @@ function emitFakeExit(task: BackgroundTask, exitCode: number | null): void {
 	child.emit("exit", exitCode, null);
 }
 
-// ──────────────────────── 集成轨轮询原语（仅门控 describe 消费） ────────────────────────
+// ──────────────────────── 集成组轮询原语（仅门控 describe 消费） ────────────────────────
 
 /**
  * 真实子进程链（spawn+exec+sleep+exit）满载下延迟不可预估，deadline 放宽到 10s；
@@ -218,11 +218,11 @@ beforeEach(() => {
 afterEach(() => {
 	// env stub 逐用例还原（防同 worker 跨文件残留）
 	vi.unstubAllEnvs();
-	// 进程端点桩复位：集成轨的 real 开关关回、桩 pid 登记表清空（防截获串到下一用例）
+	// 进程端点桩复位：集成组的 real 开关关回、桩 pid 登记表清空（防截获串到下一用例）
 	spawnMode.real = false;
 	fakePids.clear();
 	// 残留活跃任务先杀干净再清表（防句柄/进程泄漏影响后续测试）；桩 pid 无进程可杀
-	// （kill ESRCH 落 catch），真 pid（集成轨）正常回收
+	// （kill ESRCH 落 catch），真 pid（集成组）正常回收
 	for (const task of getActiveTasks()) {
 		try {
 			process.kill(-task.pid, "SIGKILL");
@@ -248,7 +248,7 @@ afterAll(() => {
 	rmSync(DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
-// ──────────────────────── 单测轨：spawn + exit 边沿收尾（进程端点桩化） ────────────────────────
+// ──────────────────────── 单测层：spawn + exit 边沿收尾（进程端点桩化） ────────────────────────
 
 describe("spawn + exit edge finalization (stub process endpoint)", () => {
 	it("short task: running → exited with exitCode 0, output file readable, registry terminal", async () => {
@@ -306,7 +306,7 @@ describe("spawn + exit edge finalization (stub process endpoint)", () => {
 	});
 });
 
-// ──────────────────────── 单测轨：bash_output 工具 ────────────────────────
+// ──────────────────────── 单测层：bash_output 工具 ────────────────────────
 
 describe("bash_output tool", () => {
 	it("description pins the auto-notify contract (on-demand checks only, DO NOT bash sleep)", () => {
@@ -413,7 +413,7 @@ describe("bash_output tool", () => {
 	});
 });
 
-// ──────────────────────── 单测轨：bash_kill 工具（killing intent 双侧） ────────────────────────
+// ──────────────────────── 单测层：bash_kill 工具（killing intent 双侧） ────────────────────────
 
 describe("bash_kill tool (killing intent, single-point finalization)", () => {
 	it("kill marks BOTH store and registry as killing before the exit event edge lands", async () => {
@@ -519,7 +519,7 @@ describe("bash_kill tool (killing intent, single-point finalization)", () => {
 	});
 });
 
-// ──────────────────────── 单测轨：并发上限（D10） ────────────────────────
+// ──────────────────────── 单测层：并发上限（D10） ────────────────────────
 
 describe("concurrency cap (D10, default 8)", () => {
 	it("rejects the 9th task with the oldest task id in the error", () => {
@@ -552,7 +552,7 @@ describe("concurrency cap (D10, default 8)", () => {
 	});
 });
 
-// ──────────────────────── 单测轨：显式后台 timeout（D6，fake timers 驱动） ────────────────────────
+// ──────────────────────── 单测层：显式后台 timeout（D6，fake timers 驱动） ────────────────────────
 
 describe("explicit background timeout (D6)", () => {
 	it("fires kill-tree at the deadline and finalizes with reason timeout", () => {
@@ -640,7 +640,7 @@ describe("explicit background timeout (D6)", () => {
 
 	it("natural completion before the deadline cancels the timer (no late kill)", () => {
 		// fake timers + 桩端点：先自然退出（终态化清 timer）再推进时钟越过 deadline——
-		// 「到点不补杀」不变量确定性验证（真进程 + 真实时钟形态由集成轨覆盖）
+		// 「到点不补杀」不变量确定性验证（真进程 + 真实时钟形态由集成组覆盖）
 		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		try {
 			const before = killTreeCalls.length;
@@ -660,7 +660,7 @@ describe("explicit background timeout (D6)", () => {
 	});
 });
 
-// ──────────────────────── 单测轨：D6-en intent 读回（exit 边沿 reason 判定） ────────────────────────
+// ──────────────────────── 单测层：D6-en intent 读回（exit 边沿 reason 判定） ────────────────────────
 
 describe("D6-en: exit edge finalization reads back registry killing (cross-process UI kill)", () => {
 	it("memory intent missing + registry killing → reason killed; AI not woken (no sendMessage)", () => {
@@ -708,12 +708,12 @@ describe("D6-en: exit edge finalization reads back registry killing (cross-proce
 	});
 });
 
-// ──────────────────────── 单测轨：D6-en/R2-S1 加固（已终态任务到点不补杀不改写） ────────────────────────
+// ──────────────────────── 单测层：D6-en/R2-S1 加固（已终态任务到点不补杀不改写） ────────────────────────
 
 describe("D6-en/R2-S1 hardening: armBackgroundTimeout skips kill+mark when recorded pid is gone", () => {
 	it("UI kill × timeout overlap: no timeout mark; exit edge reads back registry killing → killed", () => {
 		// 桩端点 + fake timers：deadline 前先被 UI 代杀收尾（终态化清 timer），再推进
-		// 时钟越过 deadline——「不补杀、不改写 intent」确定性验证（真实时钟形态由集成轨覆盖）
+		// 时钟越过 deadline——「不补杀、不改写 intent」确定性验证（真实时钟形态由集成组覆盖）
 		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		try {
 			const task = spawnOk("sleep 30", { timeoutSec: 1 });
@@ -774,7 +774,7 @@ describe("D6-en/R2-S1 hardening: armBackgroundTimeout skips kill+mark when recor
 	});
 });
 
-// ──────────────────────── 单测轨：进程退出收殓（D12，编排逻辑） ────────────────────────
+// ──────────────────────── 单测层：进程退出收殓（D12，编排逻辑） ────────────────────────
 
 describe("process-exit reap (D12)", () => {
 	it("reaps all active tasks with reason process-exit, kills pids, writes registry terminal", () => {
@@ -785,7 +785,7 @@ describe("process-exit reap (D12)", () => {
 		expect(pids.every((pid) => isPidAlive(pid))).toBe(true);
 
 		reapBackgroundTasksNow();
-		// 桩端点：kill 发令断言 + 终态两侧断言（真 pid 判死由集成轨覆盖）
+		// 桩端点：kill 发令断言 + 终态两侧断言（真 pid 判死由集成组覆盖）
 		for (const pid of pids) {
 			expect(killTreeCalls).toContain(pid);
 		}
@@ -799,7 +799,7 @@ describe("process-exit reap (D12)", () => {
 	});
 });
 
-// ──────────────────────── 单测轨：D15 abort 不传播 ────────────────────────
+// ──────────────────────── 单测层：D15 abort 不传播 ────────────────────────
 
 describe("D15: abort signal does not propagate to background tasks", () => {
 	it("aborted execute-signal leaves the task running", () => {
@@ -816,7 +816,7 @@ describe("D15: abort signal does not propagate to background tasks", () => {
 	});
 });
 
-// ──────────────────────── 单测轨：spawn 失败路径（§3.6） ────────────────────────
+// ──────────────────────── 单测层：spawn 失败路径（§3.6） ────────────────────────
 
 describe("spawn failure paths (§3.6)", () => {
 	it("nonexistent cwd reports the builtin-style error", () => {
@@ -853,13 +853,13 @@ describe("spawn failure paths (§3.6)", () => {
 	});
 });
 
-// ──────────────────────── 集成轨：真子进程核心 5 条（TAIJI_TEST_INTEGRATION 门控） ────────────────────────
+// ──────────────────────── 集成组：真子进程核心 5 条（TAIJI_TEST_INTEGRATION 门控） ────────────────────────
 
 // 真子进程链（spawn+exec+sleep+exit）满载下延迟不可预估，无确定性完成信号可等——
-// 属「代码 + OS 组合行为」，移出默认单测轨：本地默认跳过，CI / 按改动范围触发时
+// 属「代码 + OS 组合行为」，移出默认单测层：本地默认跳过，CI / 按改动范围触发时
 // 设 TAIJI_TEST_INTEGRATION=1 真跑（门控 SSOT = test-guard/integration-gate.ts）。
 // 保留的 5 条核心 = 真进程端点语义（真 spawn 产物 / 真 SIGKILL 生效 / 真 pid 判死 /
-// 真实时钟不补杀），编排与判定逻辑已由上方单测轨全覆盖。
+// 真实时钟不补杀），编排与判定逻辑已由上方单测层全覆盖。
 describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 	`real process core (spawn / kill tree / timeout chain / reap)${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
 	() => {

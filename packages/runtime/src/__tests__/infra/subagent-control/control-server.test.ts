@@ -1,7 +1,7 @@
 /**
  * subagent control server 协议与治理编排单测。
  *
- * 分层（判据三档，docs/todo/test-single-layer-cleanup.md）：
+ * 分层（判据三档，docs/TEST-STRATEGY.md「新写测试判据」节）：
  * - 默认组（本文件主体）：引擎侧换成进程内桩 fake-engine.ts（spawn 注入），控制面全部
  *   经 await 帧/事件收尾——第 ② 档「异步但有确定性完成信号」，与负载无关。覆盖协议状态机
  *   （hello/engine_open 失败面/幂等/通道上限）、帧双向与 UTF-8 跨 chunk、帧超限归因、
@@ -758,7 +758,7 @@ describe('subagent-control server：协议与治理编排（引擎进程内桩�
 /**
  * 进程治理（真进程组）——判据第 ③ 档「代码 + OS 组合行为」：组杀是否真收割孤儿、
  * kill-on-disconnect 真 fan-out、Windows 树杀兜底。没有完成信号可等，只能观测窗口，
- * 故移出默认单测轨：本地默认跳过，CI 或按改动范围触发时设 TAIJI_TEST_INTEGRATION=1 真跑
+ * 故移出默认单测层：本地默认跳过，CI 或按改动范围触发时设 TAIJI_TEST_INTEGRATION=1 真跑
  * （helper = test-guard/integration-gate.ts；登记见 docs/testing/e2e-map.json）。
  *
  * 真进程组用例 POSIX 断言 skipIf(win32)。

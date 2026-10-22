@@ -1,7 +1,7 @@
 /**
  * channel 树：登记面（纯台账）+ 递归收割（真进程组，门控）。
  *
- * 分层（判据三档，docs/todo/test-single-layer-cleanup.md）：
+ * 分层（判据三档，docs/TEST-STRATEGY.md「新写测试判据」节）：
  * - 默认组：`ControlChannelRegistry.findDescendantIds` 的图遍历语义（父链 fan-out、
  *   跨连接、BFS 间接后代、环形申报有限终止、recordId 缺省无挂点）。纯函数进/出，第 ① 档，
  *   零 socket 零进程。

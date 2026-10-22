@@ -608,7 +608,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **骨架行**：`height 10px + radius 999px`（胶囊条），3 行堆叠模拟列表（间距用标准 scale）
 - **骨架卡片**：`bg-card` 卡片 + 内部 shimmer 扫光
 - **loading 防闪**（SearchModal）：`LOADING_DELAY_MS=200`，开扫 200ms 后才显 spinner，防连续输入闪烁
-- **ToolBlock running**：呼吸弧 loader（13px，淡轨整圈 opacity 0.16 + accent 弧段 `pathLength=100`；三重动画 = 整体 1.15s/圈旋转 `cubic-bezier(.6,.1,.35,.9)` + 弧段 dasharray 16%↔54% 呼吸 2.3s ease-in-out + 弧段 150° 摆动同周期同相；`prefers-reduced-motion` 静态呈「淡轨整圈 + 固定相位弧段」），name 染 accent
+- **ToolBlock running**：呼吸弧 loader（13px，浅色轨道整圈 opacity 0.16 + accent 弧段 `pathLength=100`；三重动画 = 整体 1.15s/圈旋转 `cubic-bezier(.6,.1,.35,.9)` + 弧段 dasharray 16%↔54% 呼吸 2.3s ease-in-out + 弧段 150° 摆动同周期同相；`prefers-reduced-motion` 静态呈「浅色轨道整圈 + 固定相位弧段」），name 染 accent
 - **TaijiLogo 旋转**：8s（reduced-motion 停），`currentColor` 适配主题
 
 ### 5.11 内联反馈条（v6 不做全局 toast）
@@ -838,7 +838,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 ### 8.1 阶段 0：测试基础设施（最先，为重构护航）
 
 - 启用 coverage + 设观察门槛
-- E2E 进 CI（mock 轨 + real 轨独立 job）
+- E2E 进 CI（mock 层 + 真实进程层独立 job）
 - 补建 dev-smoke 门禁
 - 重写 TEST-STRATEGY.md
 

@@ -129,7 +129,7 @@ async function killProcess(child: ChildProcess): Promise<void> {
 }
 
 /**
- * 对 page 注入 bundled webfont（visual-chromium 轨字体固定的核心步骤）：
+ * 对 page 注入 bundled webfont（visual-chromium 层字体固定的核心步骤）：
  *
  * 1. route 拦截：@font-face 的 url 以文档 URL 为基准解析（内嵌 CSS 后为
  *    http://localhost:<port>/files/<subset>.woff2），按 basename 映射回 node_modules

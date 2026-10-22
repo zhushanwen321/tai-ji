@@ -1,6 +1,6 @@
 /**
  * sqlite 双驱动适配层（设计 D3：bun/node 运行时探测，方案 A）。
- * coverage-file-gate-exempt: bun 驱动分支在 node 轨结构性不可达（bun:sqlite 仅 bun 运行时存在）——bun 轨由 pre-commit「bun 驱动双跑」检查（bunx vitest 全绿）覆盖，node 轨由 driver.test.ts 覆盖；两轨合计覆盖，单轨文件级数字不适用
+ * coverage-file-gate-exempt: bun 驱动分支在 node 层结构性不可达（bun:sqlite 仅 bun 运行时存在）——bun 层由 pre-commit「bun 驱动双跑」检查（bunx vitest 全绿）覆盖，node 层由 driver.test.ts 覆盖；两层合计覆盖，单层文件级数字不适用
  *
  * - 运行时探测：bun 全局在场 → `bun:sqlite`，否则 `node:sqlite`（探测读
  *   `globalThis.Bun`——与 `typeof Bun !== 'undefined'` 同义，TS 无 bun-types

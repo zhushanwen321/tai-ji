@@ -2315,6 +2315,39 @@ else
 fi
 
 # ============================================================================
+# 单测层极端形态静态检查（判据权威 = docs/TEST-STRATEGY.md「新写测试判据」节）
+#   staged 命中测试文件（*.test.ts / *.test.mjs / *.spec.ts，排除 e2e/ 层与
+#   node_modules）时扫描四类信号：X1 真子进程调用未挂集成门控 / X2 显式
+#   timeout ≥5000ms / X3 waitFor 显式 timeout ≥1000ms / X4 performance.now
+#   断言素材。豁免 = 检查器内 EXEMPT 表（存量登记 + 合法例外，逐条带理由）。
+#   结果侧兜底 = CI 慢用例门禁 scripts/check-slow-tests.mjs。不设独立 SKIP_*
+#   开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+TEST_EXTREMES_CHECKER=".githooks/check-test-extremes.mjs"
+TEST_EXTREMES_STAGED=$(echo "$STAGED_FILES" | grep -E "\.test\.(ts|mjs)$|\.spec\.ts$" | grep -v "node_modules" | grep -v "^e2e/" || true)
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    print_section "[单测层极端形态检查]"
+    if [ ! -f "$TEST_EXTREMES_CHECKER" ]; then
+        echo -e "${RED}[ERROR] 找不到检查脚本 $TEST_EXTREMES_CHECKER${NC}"
+        exit 1
+    fi
+    if [ -n "$TEST_EXTREMES_STAGED" ]; then
+        # if ! 形态跑 checker：set -e 下非零退出会先于 EXIT_CODE=$? 捕获终止本 hook
+        if ! node "$TEST_EXTREMES_CHECKER"; then
+            echo ""
+            echo -e "${RED}[ERROR] 单测层极端形态检查失败${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}[OK] 单测层极端形态检查通过${NC}"
+    else
+        echo -e "${GREEN}[OK] staged 无测试文件，跳过极端形态扫描${NC}"
+    fi
+fi
+
+# ============================================================================
 # Provider 凭据读取单通道检查（C-proc-14/15，catalog-provider-field-authority §3.3 D3/D6）
 #   packages/runtime/src 有变更时触发：scripts/check-provider-credential-reads.mjs
 #   检查 A——凭据直查禁令（getApiKeyForProvider / readAuthCredentials /
@@ -2816,6 +2849,7 @@ echo -e "  ${GREEN}[+]${NC} subagent-service 聚合边界检查（H3/R5：聚合
 echo -e "  ${GREEN}[+]${NC} 文档-代码符号漂移检查（C-proc-10：①符号漂移 ②测试文档路径存在性 ③[G5] 源码注释悬空 docs 引用，含检查单测）"
 echo -e "  ${GREEN}[+]${NC} 消息流滚动跟随链路检查（C-state-11：滚动到底唯一原语 + 禁 findItemIndex(scrollSize) 模式）"
 echo -e "  ${GREEN}[+]${NC} 测试 flake 卫生检查（F5 scripts.test --no-bail + F3 recursive 删除 maxRetries）"
+echo -e "  ${GREEN}[+]${NC} 单测层极端形态检查（staged 测试文件：真进程未挂门控 / timeout≥5s / waitFor≥1s / 性能断言素材；EXEMPT 逐条登记）"
 echo -e "  ${GREEN}[+]${NC} Provider 凭据读取单通道检查（runtime 变更时触发：凭据直查禁令 + upsertProvider 直调清单，C-proc-14/15）"
 echo -e "  ${GREEN}[+]${NC} 数据布局字面量检查（C-pi-14：pi/ 兄弟布局引用回流拦截，豁免集中 LAYOUT_LITERAL_EXEMPT）"
 echo -e "  ${GREEN}[+]${NC} e2e-map SSOT 结构校验（登记表 + 调度脚本变更时触发：结构/幽灵 asset 强校验 + select 匹配逻辑单测）"

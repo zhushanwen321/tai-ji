@@ -84,7 +84,7 @@ Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
 })
 
 /** 大文件目录 fixture：big/ 下 1000 个文件（万级缩量：1000 行下窗口化逻辑等价可证，
- *  test-single-layer-cleanup 判据 d——fixture 缩量，断言强度不变） */
+ *  TEST-STRATEGY「新写测试判据」类型码 d——fixture 缩量，断言强度不变） */
 function buildBigTree(): FileNode[] {
   return [
     {

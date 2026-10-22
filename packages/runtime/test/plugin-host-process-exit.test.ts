@@ -6,7 +6,7 @@
  * exit 到达（实测事件序 disconnect → exit，exit 晚约一个事件循环圈），权威分流
  * 在 exit handler，disconnect 只做 grace 兜底：仅存活进程断开 IPC 才报 crash。
  *
- * 2026-10-22 单测层整治（判据三档与处置通道见 docs/todo/test-single-layer-cleanup.md）：
+ * 2026-10-22 单测层整治（判据三档与处置通道见 docs/TEST-STRATEGY.md「新写测试判据」节）：
  * 原形态 fork 真实子进程（b+c 类）+ vi.waitFor 3s + sleep 观察窗——事件传播与 grace
  * 窗口没有确定性完成信号。现经 vi.mock 把 fork 换成注入桩
  * （test/helpers/plugin-host-inproc-stubs.ts，exit0 / ipc-disconnect 分支逐条对齐
@@ -14,7 +14,7 @@
  * 对齐 L-5 实测序），grace 定时器经 fake timers 确定性推进：
  * - 被测逻辑（exit 0 分流 / disconnect grace 兜底 / pre-mark 幂等）全部留在
  *   PluginHostProcess 实装内；
- * - 真实子进程退出的事件传播时序归集成轨（TAIJI_TEST_INTEGRATION 门控）覆盖。
+ * - 真实子进程退出的事件传播时序归集成组（TAIJI_TEST_INTEGRATION 门控）覆盖。
  *
  * 运行命令: pnpm --filter @taiji/runtime exec vitest run test/plugin-host-process-exit.test.ts
  */

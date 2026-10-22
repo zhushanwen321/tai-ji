@@ -1,13 +1,13 @@
 /**
- * session-manager 全链路 e2e（faux 轨 mock 化单测 7 条 + 真 LLM 轨 3 条）— 设计文档
+ * session-manager 全链路 e2e（faux 层 mock 化单测 7 条 + 真 LLM 层 3 条）— 设计文档
  * §7.2 场景 1 + §7.3 重启恢复 + §4 场景 9（watch 开表/晚 respond/静默，D2/D4 watch
  * 路由）+ 死亡收尾 D5（U9-D1/D2）+ session-manager-archive-delete 验收 1/2/3 的机器化。
  *
- * **faux 轨（本文件前半，U9-S1/S2/W1/W2/W3/D1/D2）= marker 通道协议 mock 化单测**
+ * **faux 层（本文件前半，U9-S1/S2/W1/W2/W3/D1/D2）= marker 通道协议 mock 化单测**
  * （2026-10-22 单测层整治第二波；原形态 spawn 真 pi 进程：--mode rpc + --extension
  * extensions/universal/session-manager + faux LLM 脚本驱动工具调用，双 spawn + 真
  * extension jiti 冷编译，满并行 7/7 红、单跑 12s——「代码 + OS 组合行为」没有完成信号
- * 可等，判据三档第三档，登记见 docs/todo/test-single-layer-cleanup.md 1.1 节）。
+ * 可等，判据三档第三档，登记见 docs/TEST-STRATEGY.md「新写测试判据」节 1.1 节）。
  * 其逻辑本质 = managed session marker 通道全链，全部落在 runtime 侧：
  *   extension 序列化的 marker select ui_request → event-adapter translate（marker 检测）
  *   → EventInterpreter（session-manager 路由）→ SessionManagerHandler（九 action +
@@ -28,7 +28,7 @@
  * 分层参照 src/__tests__/session-manager-e2e-probe.test.ts（FakePiProcessIo 同款：
  * 只替 IO 两侧与 SessionService 数据层）。
  *
- * **真 LLM 轨（本文件后半，U9-S3/S4/S5）**：spawn 真 pi + 真实模型轮次驱动 archive/
+ * **真 LLM 层（本文件后半，U9-S3/S4/S5）**：spawn 真 pi + 真实模型轮次驱动 archive/
  * delete 全链（REAL_PI_READY 门控，凭证相关，保持开发机手动；session-manager-archive-
  * delete U-D3）——不在本波整治范围，形态与门控原样保留。
  *
@@ -77,17 +77,17 @@ import type { ISessionService } from '../../interfaces.js'
 import { spawnPiFixture, type PiFixture, type PiStreamEvent } from './pi-fixture.js'
 import { REAL_PI_READY, REAL_PI_SKIP_REASON } from './real-pi-gate.js'
 
-/** 真 extension 源码路径（worktree 内 extensions/universal/session-manager，pi 原生 loader 加载 TS 源；仅真 LLM 轨 spawn 消费） */
+/** 真 extension 源码路径（worktree 内 extensions/universal/session-manager，pi 原生 loader 加载 TS 源；仅真 LLM 层 spawn 消费） */
 // import.meta.url 仅测试可用（vitest ESM 环境）；禁止复制进 runtime src——CJS bundle 下
 // import.meta.url 失效（架构约定 #12），check_runtime_meta_url.py 只扫 src 不拦测试。
 const EXTENSION_PATH = fileURLToPath(new URL('../../../../../extensions/universal/session-manager', import.meta.url))
-/** 单步等待上限（任务护栏：真 LLM 轨每步最多 60s） */
+/** 单步等待上限（任务护栏：真 LLM 层每步最多 60s） */
 const STEP_TIMEOUT_MS = 60_000
-/** mock 轨固定父 session id（无真 pi get_state；归属校验与断言以它为权威源） */
+/** mock 层固定父 session id（无真 pi get_state；归属校验与断言以它为权威源） */
 const PARENT_SESSION_ID = 'u9-smoke-parent'
 /** 固定 create label（防漂移） */
 const FIXED_LABEL = 'u9-smoke'
-/** watch 三路径轨的固定初始 prompt：携带 → willNotify:true → handler arm claim + 经 marker 通道开表 */
+/** watch 三路径层的固定初始 prompt：携带 → willNotify:true → handler arm claim + 经 marker 通道开表 */
 const FIXED_PROMPT = 'Run a trivial task and report done.'
 
 /** respond 回写记录（sendExtensionUiResponse 捕获侧；watch 断言按 requestId 过滤） */
@@ -128,7 +128,7 @@ function markerPayloadOf(e: PiStreamEvent): { action?: unknown; params?: { notif
   }
 }
 
-/** marker 请求的 action 名（非 marker 事件 / 解析失败 → undefined；真 LLM 轨驱动谓词共用）。 */
+/** marker 请求的 action 名（非 marker 事件 / 解析失败 → undefined；真 LLM 层驱动谓词共用）。 */
 function markerActionOf(e: PiStreamEvent): string | undefined {
   const action = markerPayloadOf(e)?.action
   return typeof action === 'string' ? action : undefined
@@ -141,7 +141,7 @@ interface CreateCallRecord {
   opts: Record<string, unknown>
 }
 
-/** mock 化全链路装配（faux 轨 7 用例共用；真 LLM 轨 runRealToolChain 的 mock 化对应物） */
+/** mock 化全链路装配（faux 层 7 用例共用；真 LLM 层 runRealToolChain 的 mock 化对应物） */
 interface MarkerChain {
   parentSessionId: string
   childId: string
@@ -226,7 +226,7 @@ function openMarkerChain(): MarkerChain {
     },
   } as unknown as ISessionService
 
-  // delivery：最小 stub——create 带 prompt（watch 三路径轨）时 sendDirect 走置空 stub
+  // delivery：最小 stub——create 带 prompt（watch 三路径层）时 sendDirect 走置空 stub
   // （即受理回执锚，claim 随即 markInjected）；send action 不被驱动；真实排队链路由
   // session-manager-send-queue.test.ts 覆盖。
   const responds: RecordedRespond[] = []
@@ -309,7 +309,7 @@ interface WatchChain extends MarkerChain {
 }
 
 /**
- * watch 三路径共用前置：create 携 prompt 全链（mock 轨）→ 债权面核验（claim injected /
+ * watch 三路径共用前置：create 携 prompt 全链（mock 层）→ 债权面核验（claim injected /
  * lifetime armed）→ 按 extension onResult 同款构造 claim watch 开表事件（刻意不喂入——
  * 各用例自行控制喂入时机以构造 deferred / catch-up / fail-closed 三分支）。
  * 任一步失败先收尾（cleanup）再抛，防账本/临时目录泄漏。
@@ -334,7 +334,7 @@ async function openClaimWatchChain(): Promise<WatchChain> {
 
     // 开表事件：extension onResult 见 willNotify:true 即经 marker 通道为 claim 开表
     // （watch-coordinator openWatch → callWatch 序列化 {action:'watch',params:{notifyId}}）；
-    // lifetime 的开表事件不构造（extension 侧其 fire-and-forget 悬 promise 在 mock 轨无
+    // lifetime 的开表事件不构造（extension 侧其 fire-and-forget 悬 promise 在 mock 层无
     // 对应物；lifetime 债权保持 armed 稳态，由 U9-W3 的 clearSession 双记录计数覆盖）
     const watchRequestId = 'req-watch-claim'
     const watchEvent = buildMarkerEvent(watchRequestId, 'watch', { notifyId: claimNotifyId })
@@ -363,7 +363,7 @@ function expectClaimRecycled(w: WatchChain): void {
   expect(w.claims.getClaim(w.parentSessionId, w.claimNotifyId)).toBeUndefined()
 }
 
-describe('session-manager full e2e faux 轨（marker 通道 mock 化单测）', () => {
+describe('session-manager full e2e faux 层（marker 通道 mock 化单测）', () => {
   it('U9-S1 marker 通道全链 create：create_managed_session → 真实 translate/interpreter/handler → 回写 {sessionId,status:created} + sidecar 写入', async () => {
     const chain = openMarkerChain()
     try {
@@ -413,15 +413,15 @@ describe('session-manager full e2e faux 轨（marker 通道 mock 化单测）', 
   // 偏离登记（按 §4-9「handler 真实通道集成」意图的最小可达形态）：
   //   ① 入站 watch 与出站 respond 均走真实通道（translate → interpreter → handler →
   //     sendExtensionUiResponse 捕获），但 U9-W1 的 settle 兑现路径由测试直调
-  //     claims.settle + deliverRespondTargets（与组合根 index.ts 同函数同序）——mock 轨
+  //     claims.settle + deliverRespondTargets（与组合根 index.ts 同函数同序）——mock 层
   //     无真实子会话，产不出 agent_settled 事件；
   //   ② U9-W3 的「查无 claim」以 claims.clearSession 构造（等价 D8-v1 runtime 重启内存
   //     账本全失形态），非真实 runtime 重启；
   //   ③ lifetime watch 开表事件不构造不喂（extension 侧其 fire-and-forget 悬 promise 在
-  //     mock 轨无对应物；lifetime 债权保持 armed 稳态，由 U9-W3 的 clearSession 双记录
+  //     mock 层无对应物；lifetime 债权保持 armed 稳态，由 U9-W3 的 clearSession 双记录
   //     计数覆盖）。
   //   ④ U9-D1/D2 的死亡收尾路径由测试直调 claims.onSessionDeath + deliverRespondTargets +
-  //     clearSession（组合根 index.ts speakSessionDeath 同函数同序三步）——mock 轨无真实
+  //     clearSession（组合根 index.ts speakSessionDeath 同函数同序三步）——mock 层无真实
   //     子进程可 kill（进程死亡事件边界在组合根 pm.onSessionExit，不在本文件可触碰面），
   //     exit 现场以 pm 上报形态注入 extra（stderrTail 经真实 collectStderrTail）；
   //     被测对象 = 死亡批分流 → 词形映射（toWatchRespondPayload cause 分派 exited/deleted +
@@ -434,7 +434,7 @@ describe('session-manager full e2e faux 轨（marker 通道 mock 化单测）', 
       expect(w.claims.getClaim(w.parentSessionId, w.claimNotifyId)?.watchId, 'wait 路由应登记 watch 槽').toBe(w.watchRequestId)
 
       // 2. 后续 settle 兑现：injected → fulfilled + 经同一写回通道 respond
-      //（与组合根 index.ts settle 兑现路径同函数同序；mock 轨无子会话 → 测试直调，见上方偏离登记）
+      //（与组合根 index.ts settle 兑现路径同函数同序；mock 层无子会话 → 测试直调，见上方偏离登记）
       const batch = w.claims.settle(w.childId, 'done')
       expect(batch.targets, '已挂 watch 的 injected claim 应进 respond 批').toHaveLength(1)
       deliverRespondTargets(w.claims, batch.targets, w.handler.watchRespond)
@@ -557,16 +557,16 @@ describe('session-manager full e2e faux 轨（marker 通道 mock 化单测）', 
   })
 })
 
-// ── 真 LLM 轨（REAL 轨，session-manager-archive-delete 验收 1/2 + 设计 §5 验收 3 取样）────
-// 与上方 faux 轨的差异 = 驱动源：faux 轨由测试构造 marker 事件直驱 runtime 链路（无 pi
-// 进程）；本轨 spawn 真 pi + 真实模型轮次（不传 fauxResponses，model = DEFAULT_MODEL，
-// 真实凭证轨、REAL_PI_READY 门控），agent 是否真调工具不受控 → 1+2 重试护栏（历史真实轨
+// ── 真 LLM 层（REAL 层，session-manager-archive-delete 验收 1/2 + 设计 §5 验收 3 取样）────
+// 与上方 faux 层的差异 = 驱动源：faux 层由测试构造 marker 事件直驱 runtime 链路（无 pi
+// 进程）；本组 spawn 真 pi + 真实模型轮次（不传 fauxResponses，model = DEFAULT_MODEL，
+// 真实凭证层、REAL_PI_READY 门控），agent 是否真调工具不受控 → 1+2 重试护栏（历史真实层
 // 形态——单轮结束而无工具调用 / 单次等待超时才重试；人身约束违反不进重试，防重试掩盖违反）。
 // 服务面 fake：getSummary/delete（SessionService）与 archive（ArchiveService）最小实现，
 // delete/archive 执行体记录调用并使 getSummary 此后查无（归档/删除后不可见的同形模拟）；
 // claims 为真实账本，归档收尾 onSessionDeath 经 wrapper 观测点记录后透传原实现。
 
-/** 真实 LLM 轨驱动尝试上限（1 + 2 重试，历史真实轨形态） */
+/** 真实 LLM 层驱动尝试上限（1 + 2 重试，历史真实构建形态） */
 const MAX_REAL_ATTEMPTS = 3
 
 /** marker action → 工具名（turn_end.toolResults 的匹配键） */
@@ -616,7 +616,7 @@ interface RealToolChain {
  * archive_session / delete_session → 等 marker ui_request → 真实 translate/interpreter/
  * handler 处理（归属校验 + fake 执行体 + claims 收尾）→ 回写 → 等 turn_end 工具结果。
  *
- * 重试护栏（历史真实轨形态）：单轮 agent_end 而无工具调用 / 单次 waitForEvent 超时 →
+ * 重试护栏（历史真实构建形态）：单轮 agent_end 而无工具调用 / 单次 waitForEvent 超时 →
  * 换下一条指令重试，至多 MAX_REAL_ATTEMPTS 次；violationActions 的 marker 请求到达即
  * 抛（人身约束违反不进重试）。任一步失败先收尾（fx.dispose + cleanup）再抛。
  */
@@ -641,7 +641,7 @@ async function runRealToolChain(options: RealChainOptions): Promise<RealToolChai
     rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   }
 
-  // 真 LLM 轨：不传 fauxResponses → model = DEFAULT_MODEL（mimo flash），凭证拷贝走 real 分支
+  // 真 LLM 层：不传 fauxResponses → model = DEFAULT_MODEL（mimo flash），凭证拷贝走 real 分支
   const fx = await spawnPiFixture({
     extensions: [EXTENSION_PATH],
     sessionDir,
@@ -689,7 +689,7 @@ async function runRealToolChain(options: RealChainOptions): Promise<RealToolChai
       },
     } as unknown as ArchiveService
 
-    // ── 3. runtime 真实链路接线（与 openMarkerChain 同款；delivery 置空 stub——本轨不驱动 send）──
+    // ── 3. runtime 真实链路接线（与 openMarkerChain 同款；delivery 置空 stub——本组不驱动 send）──
     const responds: RecordedRespond[] = []
     const handler = new SessionManagerHandler({
       sessionService,

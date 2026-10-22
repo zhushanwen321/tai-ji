@@ -781,7 +781,7 @@ describe('B-3 额度显示双轨（used/limit + pct）', () => {
     expect(text).toContain('41%')
   })
 
-  it('无绝对量数据 → 维持 pct 单轨不显示 used-of', async () => {
+  it('无绝对量数据 → 维持 pct 单值不显示 used-of', async () => {
     quota.test.value.status = 'success'
     quota.test.value.row = {
       label: 'Zhipu Plan',

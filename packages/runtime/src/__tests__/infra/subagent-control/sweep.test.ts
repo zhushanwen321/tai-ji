@@ -3,7 +3,7 @@
  * 孤儿引擎 pid 收割（owner runtime 死 → 立即组杀；owner 活 → 跳过；引擎已死 → 删档；
  * pid 复用 → 不杀只删）。附 paths 形状断言（socket 长度门禁 / pid 文件名清洗）。
  *
- * 整治口径（docs/todo/test-single-layer-cleanup.md 1.2 节，判据三档）：
+ * 整治口径（docs/TEST-STRATEGY.md「新写测试判据」节 1.2 节，判据三档）：
  * - socket 探活（connect 成败）是「代码 + OS」组合事实：无监听者的 socket 文件 connect
  *   报错、有监听者 connect 成功，探活内部的 1s 超时在事件 loop 拥塞下可能与 connect/
  *   error 事件竞争，把活文件误判成死文件。单测层改经 node:net mock 按路径注入探活
@@ -117,7 +117,7 @@ describe('stale socket 清理（D7：扫 subagent-*.sock 全族）', () => {
 
 describe('孤儿引擎 pid 收割（owner runtime 死 → 立即组杀）', () => {
   it('owner 死 + 引擎活 → 组杀 + 删档；owner 活 → 跳过；引擎已死 → 删档不杀', async () => {
-    // 确定性同步化（2026-10-22 测试整治，docs/todo/test-single-layer-cleanup.md 1.2 节）：
+    // 确定性同步化（2026-10-22 测试整治，docs/TEST-STRATEGY.md「新写测试判据」节 1.2 节）：
     // 原形态 spawn 两个真实长驻 node 进程 + 真实探活 + waitFor 真实杀灭，杀链确认依赖
     // 真实进程状态翻转（无完成信号可等，负载下窗口被拉长）。改全桩化——探活按 pid 区分、
     // kill 桩翻转存活态（= 杀灭成功）、start time 固定同秒（身份判定通过）、确认窗 0
@@ -204,7 +204,7 @@ describe('pid 判据与失败语义（m-rt-3 / m-rt-4）', () => {
   })
 
   it('m-rt-4：kill 未能杀灭（权限/系统错误）→ 保留 pid 文件供下次 sweep', async () => {
-    // 确定性同步化（2026-10-22 测试整治，docs/todo/test-single-layer-cleanup.md）：
+    // 确定性同步化（2026-10-22 测试整治，docs/TEST-STRATEGY.md「新写测试判据」节）：
     // 原形态 spawn 真实长驻进程 + 真实探活 + 真实 30ms 确认窗，有两处时序脆弱点——
     // ① 探测 start time 用「当前秒」，与 spawnedAt 跨秒边界时 pidStartMatchesRegistered
     //   的降级判据（actual <= floor(spawnedAt/1000)）翻转成「pid 已复用」误删档；

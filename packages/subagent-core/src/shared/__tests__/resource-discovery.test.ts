@@ -557,7 +557,7 @@ describe("getCachedParsed（mtime 级解析缓存）", () => {
 });
 
 // ── manifestCache（async readPackageManifest）缓存语义 ──
-// 原 resource-discovery-manifest-cache.test.ts 的 async 侧语义迁编（C3 sync 轨删除：
+// 原 resource-discovery-manifest-cache.test.ts 的 async 侧语义迁编（C3 sync 层删除：
 // sync 读者消亡，双读者共享用例随之前提失效；读计数断言改走 node:fs/promises 包装）。
 // readPackageManifest 是 module 私有，经 TAIJI_EXTENSION_PATHS → discoverResources 路径驱动；
 // 其余源（user-agents / npm / project）无 package.json 可读，asyncReadCount 即

@@ -18,9 +18,9 @@
  * prompt 同走 message_end 全量通道（本测试以多轮 prompt 覆盖 user/assistant/toolResult 序列）；
  * 后台 subagent 完成通知依赖扩展安装（fixture 无扩展），subagent 侧栏等价性留场景 3。
  *
- * faux LLM 轨（L2.5 翻轨）：验证对象是协议双通路（message_end 流 vs get_entries 重放）与
+ * faux LLM 层（L2.5 迁组）：验证对象是协议双通路（message_end 流 vs get_entries 重放）与
  * reducer 同构，非模型智能——turn 响应由 fauxResponses 脚本固定（bash toolCall + 文本回复，
- * 经 --approve 真实执行），断言语义与翻轨前一致。spawn 真 pi 的三个用例经集成测试门控
+ * 经 --approve 真实执行），断言语义与迁组前一致。spawn 真 pi 的三个用例经集成测试门控
  * TAIJI_TEST_INTEGRATION 包裹（本地默认跳过，CI 与按改动范围触发时真跑；SSOT =
  * test-guard/integration-gate.ts）；文件末尾 plan-state 静态 fixture 组不 spawn 进程、
  * 任何环境可跑，留默认组。
@@ -42,7 +42,7 @@ import {
 import { scanPlanStateEntries } from '../../services/session/plan-state-extractor.js'
 import type { PlanStateView } from '@taiji/shared'
 
-/** 等 turn 完成的上限（faux 轨实际毫秒级；名义上限保留翻轨前余量防 flake） */
+/** 等 turn 完成的上限（faux 层实际毫秒级；名义上限保留迁组前余量防 flake） */
 const TURN_TIMEOUT_MS = 120_000
 /** 用例总超时 = 冷启动 + 多轮 turn + bash + get_entries + dispose 的和再留余量 */
 const TEST_TIMEOUT_MS = 300_000
@@ -284,7 +284,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 // plan 状态派生视图的「live ≡ reload」由 scanPlanStateEntries 唯一派生代码构造性保证
 // （plan-state-extractor.ts：live = SessionRecords 增量重新拉取的前缀切片派生；reload =
 // getPlanState 磁盘全量派生——同一函数，冷热共用）。本组用静态 entry 序列（不 spawn pi
-// 进程，与上方 faux 轨 describe.skipIf 块正交、任何环境可跑）钉住该构造性：fixture 含旧
+// 进程，与上方 faux 层 describe.skipIf 块正交、任何环境可跑）钉住该构造性：fixture 含旧
 // 四字段与新七字段（skills/docs/reviewState 三 optional，D4）两种 schema entry + 噪声
 // entry（message 载体 / 其他 extension custom / data 非对象的坏 plan-state——派生按
 // 「跳过继续向前」语义穿越）。派生语义 = 最后一条合法 plan-state entry（extension 侧

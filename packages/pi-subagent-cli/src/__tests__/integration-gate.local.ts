@@ -9,7 +9,7 @@
  */
 const INTEGRATION_TESTS_ENV = 'TAIJI_TEST_INTEGRATION'
 
-/** 集成测试轨是否启用（模块加载时求值一次）。未设置或取值非 '1' / 'true' → false。 */
+/** 集成测试组是否启用（模块加载时求值一次）。未设置或取值非 '1' / 'true' → false。 */
 export const INTEGRATION_TESTS_ENABLED: boolean =
   process.env[INTEGRATION_TESTS_ENV] === '1' || process.env[INTEGRATION_TESTS_ENV] === 'true'
 

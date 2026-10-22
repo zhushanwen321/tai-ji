@@ -1,5 +1,5 @@
 /**
- * ask-user REAL E2E —— 真实 runtime + pi 子进程 + faux LLM 演员（L2.5 翻轨，2026-09-15）。
+ * ask-user REAL E2E —— 真实 runtime + pi 子进程 + faux LLM 演员（L2.5 迁组，2026-09-15）。
  *
  * 验证目标（设计文档 /tmp/e2e-real-test-design-askuser-thinkinglevel.md §3）：
  * - A1 协议透传：真实 ask_user tool 调用 → extension.dialog 富交互 form 帧广播
@@ -23,7 +23,7 @@
  *   本 spec 只读 form 形态，问题列表只读 formQuestions。
  * - FormQuestion / AskUserQuestion（@zhushanwen/extension-protocol）：header/question/
  *   context/options/multiSelect/allowOther —— 无 allowComment（commit 74a0b1001 删除
- *   字段 + UI + __comment key）。faux 轨 dev 装配下 mandatory 扩展经源码目录加载
+ *   字段 + UI + __comment key）。faux 层 dev 装配下 mandatory 扩展经源码目录加载
  *   （extensions/universal/ask-user = 统一表单协议版），不再 symlink npm 目录绕开
  *   registry 旧版；FormAnswers key = header ?? question，与旧 AskUserAnswers 一致
  *   （回写 result 序列化格式不变）。
@@ -32,7 +32,7 @@
  * - extension.ui_response 不广播：回写闭环以「pi 恢复 turn 的广播事件」为断言范围
  * - pi 恢复 turn 事件：message.message_start / message.complete（ServerMessageType）
  *
- * faux 翻轨要点：ask_user 触发改脚本化 toolCall（faux 队列步骤 1）——确定性触发，
+ * faux 迁组要点：ask_user 触发改脚本化 toolCall（faux 队列步骤 1）——确定性触发，
  * 原「真实 LLM 不调 ask_user → flaky skip」的容忍层全部移除；UI/DOM 断言语义不动。
  * 回写后 pi 恢复 turn 消费队列步骤 2（stop 文本）。
  */
@@ -81,7 +81,7 @@ function writeDiag(name: string, data: Record<string, unknown>): void {
 }
 
 /**
- * 通过 WS 创建 session。faux 轨 dev 装配下 mandatory 扩展（含 pi-ask-user）经源码目录
+ * 通过 WS 创建 session。faux 层 dev 装配下 mandatory 扩展（含 pi-ask-user）经源码目录
  * 加载（无 npm 安装等待），仍以 resolver 日志信号确认就绪（防 session.create 过早）。
  * OS 原生目录选择 dialog 不可自动化，TEST-STRATEGY 约定用 WS 直连触发等效业务动作。
  */
@@ -100,7 +100,7 @@ async function createSession(port: number, dataDir: string): Promise<string> {
 }
 
 /**
- * UI 切 session（新范式：real 轨首次操作真实 page）。
+ * UI 切 session（新范式：真实进程层首次操作真实 page）。
  *
  * WS create 后 config.sessions 广播 → sidebar 列表出现该 session → Playwright
  * 点 sidebar 会话列表项（session.switch RPC + panel 绑定）→ composer 出现即 Panel
@@ -284,7 +284,7 @@ test('A2: ask-user overlay 真实渲染 — overlay/Other 保留，页面无 com
 
     // ── 断言 3：overlay UI 无 comment 字样（comment UI/i18n 已删除）──
     // 注意：不能断言全页 —— 消息流可能渲染含 "comment" 的自由文本（faux 回复文本受控，
-    // 但 overlay 内部才是「comment UI 删除」的正确回归测试，与原轨保持同一断言语义）。
+    // 但 overlay 内部才是「comment UI 删除」的正确回归测试，与原用例保持同一断言语义）。
     const overlayText = (await overlay.textContent()) ?? ''
     expect(overlayText.toLowerCase().includes('comment'),
       'overlay UI 文本不应含 "comment"（comment UI + i18n key 已删除）').toBe(false)

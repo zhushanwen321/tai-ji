@@ -1,5 +1,5 @@
 /**
- * Wave 0 TDD: 包结构合并验证（组合根全图装载轨）
+ * Wave 0 TDD: 包结构合并验证（组合根全图装载层）
  *
  * 本文件 = 组合根接线完整性：装载 index.js 全模块图 + factory 对 mock api 执行
  * 一次，断言注册点全集（7 tool + 2 command + messageRenderer + session 事件
@@ -8,7 +8,7 @@
  * 默认跳过，CI / 按改动范围触发时真跑（门控约定见 docs/TEST-STRATEGY.md
  * 「集成测试门控约定」）。
  *
- * 注册清单的单点断言归属（细粒度专测——本地轨恒快，本文件只保「组合根全集
+ * 注册清单的单点断言归属（细粒度专测——本地组恒快，本文件只保「组合根全集
  * 接线」这一层；新增注册点须同步补对应专测并更新本表）：
  * - subagent_start/manage/message 三工具名：interface/tool/__tests__/subagent-tool-actions.test.ts
  * - subagents tool：interface/tool/__tests__/tool-subagents.test.ts
@@ -22,7 +22,7 @@
  *   + session-start-once-guard.test.ts
  *
  * [装载模型] 模块图 beforeAll 静态加载一次（装载预算 30s 挂 beforeAll——门控
- * 内保留，不占单测轨预算），factory 对同一 mock api 执行一次，用例共享同一份
+ * 内保留，不占单测层预算），factory 对同一 mock api 执行一次，用例共享同一份
  * 注册记录断言。各用例断言均为存在性形态（toContain / toBeDefined / length
  * 下界），无「从零只有自己注册项」的隔离性断言，共享一份记录不改变任何断言
  * 语义。factory 幂等（D2b 稳定标识等价保留单例），单次执行即注册点全集。

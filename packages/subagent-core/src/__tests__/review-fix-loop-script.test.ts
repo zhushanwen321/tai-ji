@@ -680,7 +680,7 @@ describe("review-fix-loop.js fixerDocPath + groupCalls（fixer 文件总线渲�
 
 // ── 结构化失败终判恢复指引（fail-fast：错误信息带恢复动作是要求，不是兜底）──
 // 源文本锚定防「终判文案被精简后丢恢复指引」——行为级断言（终判 message 内容）
-// 在 subagent-workflow e2e mock 轨（review-fix-loop-e2e.test.ts fail-fast describe），
+// 在 subagent-workflow e2e mock 层（review-fix-loop-e2e.test.ts fail-fast describe），
 // 此处锁源级形态。弱格式通道相关锚点（summarizeDegradedTrigger 直测 / F-1 前缀
 // 契约锁定 / degraded 三落点 / 兜底差集清单）已随通道拆除整体退役。
 describe("review-fix-loop.js 结构化失败终判恢复指引锚点", () => {

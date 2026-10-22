@@ -285,7 +285,7 @@ e. `pi-host-*.log` 无"注入根解析失败"新条目（d8-compat 的 warn 属 
 | `scripts/bundle-extensions.mjs` | `E2E-PLUGINCONTRACT-01`（scope 含该脚本＝"链变更随契约脚本回归"） | L3 |
 
 处置：L3 项（`E2E-BATCH-01`、`E2E-PLUGINCONTRACT-01`）**不进 PR 门禁**，登记进 dev-flow 验收计划表，
-空载串行跑（`TAIJI_PI_LIVE=1` 轨）；L1/L2 由 CI/固定环节覆盖。
+空载串行跑（`TAIJI_PI_LIVE=1` 真机层）；L1/L2 由 CI/固定环节覆盖。
 
 ### 4.4 三形态回归
 
@@ -439,7 +439,7 @@ hostPackageNodeModulesRoot），说明本类问题是**系统性机理**而非�
 | S6 收尾 | 删顶层 `workflows/` 拷贝（同批改 TC8/V1-④/架构文档，release notes 说明跨升级 resume 一次性影响） | S1–S5 全绿 + 一个发布周期 |
 
 **e2e 纪律**：S3–S5 各自落地时按项目规则跑 `node scripts/select-affected-e2e.mjs --base <ref>` 重新圈定
-（本文 §4.3 的表仅覆盖 S1 的 pi-host/bundle-extensions 两项）；L3 轨登记进 dev-flow 验收计划表，不进 PR 门禁。
+（本文 §4.3 的表仅覆盖 S1 的 pi-host/bundle-extensions 两项）；L3 层登记进 dev-flow 验收计划表，不进 PR 门禁。
 
 ---
 

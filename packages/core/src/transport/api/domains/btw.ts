@@ -10,7 +10,7 @@
  * - ack 必回：三帧在 ReplyPayloadMap 全登记（create/list payload 消费型、remove ack 型
  *   void）；失败走统一 error envelope（pending reject，code 透传）。
  * - mock 同构：mock 门面（transport/mock/index.ts 的 `btw`，G4 类型锚定）签名全等，
- *   VITE_MOCK 轨道经 renderer api/index 三元切换接入。
+ *   VITE_MOCK 层道经 renderer api/index 三元切换接入。
  * - reply 类型经 `ServerMessageMap` 索引访问取形（BtwForkState / BtwThreadInfo 具名类型
  *   定义在 shared protocol.ts，包出口 index.ts 为选择性 re-export 未挂具名——与
  *   SegmentsMetadataEntry 等消费方同款 indexed-access 惯例）。

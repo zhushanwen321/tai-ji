@@ -25,7 +25,7 @@
  * 执行侧约定（与 e2e-map note 同步维护，改其一须同 commit 改另一）：
  * - 触发：scope diff 命中（subagent-workflow shell / fan-out 模板 / core 执行链）时开发期
  *   按改动范围空载串行执行；双凭证门 = env TAIJI_PI_LIVE=1 + 本机 provider 凭证（缺一 skip
- *   不 fail，防全量扫跑烧 token）；CI/PR/merge 门禁不跑本轨（AGENTS.md e2e 执行准则）。
+ *   不 fail，防全量扫跑烧 token）；CI/PR/merge 门禁不跑本组（AGENTS.md e2e 执行准则）。
  *   前置：real renderer bundle（VITE_E2E=true pnpm run build:e2e，不带 VITE_MOCK）。
  * - 预算：test.setTimeout 600s（真实 LLM 双成员并行 + 通知落盘）；journal/通知到达
  *   等待 300s（轮询，不固定 sleep）；窗口不足属预算校准，禁止放宽断言换绿灯。

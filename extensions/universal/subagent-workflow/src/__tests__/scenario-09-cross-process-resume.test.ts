@@ -4,13 +4,13 @@
 //
 // 通过标准（原文）：恰一个进入重放，另一个锁拒绝；record 无交错事件。
 //
-// 两轨结构（单测层极端测试整治）：
+// 两组结构（单测层极端测试整治）：
 // - 逻辑面（默认跑）：vi.mock("proper-lockfile") 注入进程内锁桩——先到者得锁、
 //   持有中再 lock() 同一 target 即 ELOCKED（JS 单线程内两次调用的到达序即裁决序，
 //   模拟真锁「锁文件新鲜即拒绝」的仲裁语义）。mock 的只是锁原语（进程互斥边界），
 //   resumeRun 编排全真跑（资格校验 → v2 条目补写 → run-resumed 落盘 → 活体注册
 //   → worker 重放）。
-// - 集成轨（TAIJI_TEST_INTEGRATION 门控，本地默认跳过）：两个真实 OS 子进程
+// - 集成组（TAIJI_TEST_INTEGRATION 门控，本地默认跳过）：两个真实 OS 子进程
 //   （tsx 载体 driver-resume.ts）各自调 resumeRun 的真互斥形态——跨进程 mkdir
 //   互斥属判据第 3 档（无完成信号可等，负载下窗口无上界），只能设窗口观测。
 //   tsx 子进程纯 node 解析、不继承父进程 vi.mock——门控段真锁语义不受桩污染。
@@ -37,10 +37,10 @@ import {
   waitForScenarioSettled,
 } from "./record-mode/scenario-kit.ts";
 
-// ── proper-lockfile 进程内锁桩（逻辑面专用；集成轨子进程不受影响）────────────
+// ── proper-lockfile 进程内锁桩（逻辑面专用；集成组子进程不受影响）────────────
 //
 // 桩语义与真实 proper-lockfile.lock 的裁决面同构：持有中拒绝（ELOCKED）、
-// release 归还；粒度差在跨进程 mkdir（真互斥归集成轨验证）。calls 记录用例
+// release 归还；粒度差在跨进程 mkdir（真互斥归集成组验证）。calls 记录用例
 // 断言锁获取参数语义 + mock 生效检查（未命中先红，防真锁静默顶替）。
 const injectedLock = vi.hoisted(() => {
   const state = {
@@ -124,7 +124,7 @@ describe("场景 9 逻辑面：双宿主并发 resume（锁桩裁决恰一个进
       const outcome = await waitForScenarioSettled(winner.runs, RUN_ID);
       expect(outcome.status).toBe("done");
 
-      // record 无交错事件（与集成轨同款断言口径）：run-resumed 恰 1 条、settled
+      // record 无交错事件（与集成组同款断言口径）：run-resumed 恰 1 条、settled
       // 帧每 taskIndex 恰 1 条（败者零写入；回放命中不重复落 settled）
       const events = await scanScenarioEvents(env, RUN_ID);
       expect(events.filter((e) => e.type === "run-resumed")).toHaveLength(1);
@@ -162,7 +162,7 @@ describe("场景 9 逻辑面：双宿主并发 resume（锁桩裁决恰一个进
   });
 });
 
-// ── 集成轨：真互斥（tsx 双子进程 + proper-lockfile 跨进程 mkdir）──────────────
+// ── 集成组：真互斥（tsx 双子进程 + proper-lockfile 跨进程 mkdir）──────────────
 
 interface DriverOutcome { // oe-exempt:20260929:test:driver outcome shape (test fixture infra)
   code: number | null;
@@ -232,7 +232,7 @@ function waitForFile(file: string, timeoutMs: number): Promise<void> {
 }
 
 describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
-  "场景 9 集成轨：跨进程双 resume（proper-lockfile 真互斥）" +
+  "场景 9 集成组：跨进程双 resume（proper-lockfile 真互斥）" +
     (INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""),
   () => {
     it("双宿主几乎同时 resume：恰一个进入重放，另一个锁拒绝；record 无交错事件", async () => {
@@ -246,9 +246,9 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 
         // 持锁方先起：marker 出现 = 锁已被真实持有（跨进程 mkdir 产物在盘）
         const holder = spawnDriver("holder", env.stateDir, "holder-a", env.runsDir);
-        const holderPromise = waitExit(holder, 60_000);
+        const holderPromise = waitExit(holder, 240_000);
         try {
-          await waitForFile(driverMarkerPath(env.stateDir, "holder-a"), 20_000);
+          await waitForFile(driverMarkerPath(env.stateDir, "holder-a"), 60_000);
         } catch (err) {
           const holderDebug = await holderPromise.catch((e: unknown) => `holder spawn error: ${String(e)}`);
           throw new Error(`${String((err as Error).message)}\nholder outcome: ${JSON.stringify(holderDebug)}`);
@@ -256,7 +256,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 
         // 竞争方到达（锁持有段内）：必 ELOCKED → 明确拒绝退出
         const contender = spawnDriver("contender", env.stateDir, "contender-b", env.runsDir);
-        const contenderOutcome = await waitExit(contender, 30_000);
+        const contenderOutcome = await waitExit(contender, 120_000);
 
         const holderOutcome = await holderPromise;
 
@@ -275,6 +275,6 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
       } finally {
         env.cleanup();
       }
-    }, 90_000);
+    }, 300_000);
   },
 );

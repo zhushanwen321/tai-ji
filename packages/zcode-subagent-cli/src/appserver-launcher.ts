@@ -37,7 +37,7 @@
 //    `node --require <wrapper> <cliPath>` preload 形态（设计 §3.1 方案 E——wrapper
 //    退化为纯 fs-patch preload，argv 与模块标识双双恢复原生）。
 //
-// D3 换轨装载通道（engine-provider-unification §3.3 D3，2026-10-12 A0 实测后）：
+// D3 切换装载通道（engine-provider-unification §3.3 D3，2026-10-12 A0 实测后）：
 // zcode CLI 0.16.9 的 Provider Registry 个人 provider 供数 = 进程直读真实
 // `~/.zcode/v2/provider_config.json`（HOME 覆写与 env 通道均绕不过，wrapper 补注入
 // cli config 的条目 Registry 不消费）——同一 patch 基建增加该路径分支：命中时返回
@@ -64,7 +64,7 @@ export const ZCODE_APPSERVER_LAUNCHER_NAME = "appserver-launcher.cjs";
  * CLI 补丁段与元数据段两区块自 appserver-launcher-patches.ts 内插（见该文件头注）。
  * env 契约：ZCODE_ENG_CLI_PATH（zcode.cjs 绝对路径，必填）、
  * ZCODE_ENG_V2_CONFIG（v2 config 路径，缺省 ~/.zcode/v2/config.json）、
- * ZCODE_ENG_PROVIDER_CONFIG（taiji 同步副本路径——D3 换轨后语义收窄：补注入段
+ * ZCODE_ENG_PROVIDER_CONFIG（taiji 同步副本路径——D3 切换后语义收窄：补注入段
  * 读取源 + 真实 provider_config.json 拦截分支的副本源；未设 = 拦截分支不激活）。
  */
 export const APPSERVER_LAUNCHER_SOURCE = `'use strict';
@@ -185,7 +185,7 @@ function injectedConfigText() {
 // [merge-fn-start]（对账单测提取锚——appserver-launcher.test.ts 按标记截取本函数
 // eval 执行；preparer.ts mergePersonalProviderConfig 与本函数同规则锁步，改任一侧
 // 须同步另一侧并跑对账单测）
-// merge(真实, 副本)——D3 换轨版规则：
+// merge(真实, 副本)——D3 切换版规则：
 //   - 副本非对象 → 原样返回 real（副本缺席回落语义；wrapper 侧更早短路，防御形态）
 //   - 真实非对象（ENOENT/损坏）→ 原样返回 copy（副本独有条目为全集：providerRules
 //     仅副本条目 + order 仅副本序，顶层字段随副本保持形态完整）
@@ -232,7 +232,7 @@ function mergeProviderConfig(realObj, copyObj) {
 }
 // [merge-fn-end]
 
-// D3 换轨装载通道：命中真实 provider_config.json 的读取重定向为 merge(真实实时
+// D3 切换装载通道：命中真实 provider_config.json 的读取重定向为 merge(真实实时
 // 内容, taiji 同步副本)——每次读取重算（事实驱动，无缓存/时间窗，ZCode 端变更
 // 实时生效）。副本缺失/不可读 → null = 调用方短路回原文件（回落真实文件语义，
 // 零行为变化）；env 未设 → null（分支不激活）。读取一律经 readOrig 间接取（防
@@ -414,7 +414,7 @@ if (text !== null || catalogPatch !== null || cliPatchProbe !== null) {
       const cur = injectedConfigText();
       if (cur !== null) return shape(rest, cur);
     }
-    // D3 换轨：Registry 直读真实 provider_config.json → merge(真实, 副本) 视图
+    // D3 切换：Registry 直读真实 provider_config.json → merge(真实, 副本) 视图
     if (typeof p === 'string' && p === REAL_PROVIDER_CONFIG_PATH) {
       const cur = mergedProviderConfigText();
       if (cur !== null) return shape(rest, cur);
@@ -472,7 +472,7 @@ if (text !== null || catalogPatch !== null || cliPatchProbe !== null) {
   // existsSync 拦截：真实 bundle 的用户 config 读取（loadFileConfig）以 existsSync
   // 为短路门——文件不存在时返回空 config 且 readFileSync 不被调用，GUI-only
   // 登录宿主（cli/config.json 从未被 CLI 侧写过）上注入只挂在读侧 = 不可见。
-  // D3 换轨：真实 provider_config.json 的存在性 = 真实或副本任一存在即 true
+  // D3 切换：真实 provider_config.json 的存在性 = 真实或副本任一存在即 true
   //（真实缺失 + 副本存在时 Registry 的 existsSync 门不得拦掉 merge 视图读取）
   fs.__origExistsSync = fs.existsSync;
   fs.existsSync = function (p) {

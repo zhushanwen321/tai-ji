@@ -11,7 +11,8 @@
  *     把 <artifacts-dir> 下所有文件同步到 GitCode 同 tag 的 Release（幂等：同名同大小跳过）；
  *     --prerelease 在 release 正文加测试版标注
  *   本地中转同步（推荐给国内快速分发）：node scripts/gitcode-release-sync.mjs sync-from-github <tag> [--github-repo owner/repo]
- *     本机 gh 拉取 GitHub Release 附件（走本地 proxy，快）→ 复用并发上传到 GitCode（国内上行，快）。
+ *     本机 gh 拉取 GitHub Release 附件（断点续传：按 tag 缓存目录 + .part + curl -C -，
+ *     失败重跑从未断点继续、已完成件跳过）→ 复用并发上传到 GitCode（国内上行，快）。
  *     绕开 GitHub Actions runner → GitCode 的跨境慢链路；与 CI 自动同步幂等互不冲突。
  *
  * 环境变量（必填）：
@@ -28,7 +29,7 @@
  *   - API 限流：实测 8 并发即 429 → 全程串行 + 每次调用间隔 1.5s
  */
 
-import { readFileSync, readdirSync, statSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, writeFileSync, mkdtempSync, rmSync, mkdirSync, existsSync, renameSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -216,13 +217,15 @@ async function fetchUploadTarget(tag, fileName) {
  * PUT 走 curl 子进程：Node fetch(undici) 的 headersTimeout 默认 300s，200MB 级附件
  * 在跨境链路下必然 UND_ERR_HEADERS_TIMEOUT（2026-09-05 CI 实测），curl 无此限制。
  * 跨境单连接吞吐波动大（实测 0.09-0.4MB/s，晚高峰最低），必须配合 runSync 的
- * 多路并发使用；--max-time 1800 为单附件兜底。 */
+ * 多路并发使用；--max-time 1800 为单附件兜底。--retry 3：PUT 到预签名地址幂等
+ * （重传整件覆盖），连接类错误原地重试无回卷风险（下载侧的 -C - 回卷坑不适用），
+ * 降低「整件重传」触发频率。 */
 async function curlPutUpload(filePath, finalUrl, headerArgs) {
   const t0 = performance.now();
   let code = '';
   try {
     const res = await execP(
-      `curl -sS --max-time 1800 -o /dev/null -w "%{http_code}" -X PUT ${headerArgs} `
+      `curl -sS --max-time 1800 --retry 3 --retry-all-errors -o /dev/null -w "%{http_code}" -X PUT ${headerArgs} `
       + `--data-binary @${shellQuote(filePath)} ${shellQuote(finalUrl)}`,
       { encoding: 'utf8', timeout: 1800000, shell: '/bin/bash', maxBuffer: 10 * 1024 * 1024 },
     );
@@ -628,78 +631,124 @@ function resolveDownloadProxy(cliValue) {
     process.env.all_proxy || process.env.ALL_PROXY || '').trim();
 }
 
+/** 按 tag 派生跨进程持久的下载缓存目录：同一 tag 重跑时，未完成附件从断点续传、
+ * 已完成附件直接跳过（正式文件大小与 GitHub 侧一致才视为完成）。tag 含路径分隔符
+ * 等字符时清洗为安全目录名。 */
+export function cacheDirForTag(baseDir, tag) {
+  const safe = String(tag).replace(/[^A-Za-z0-9._-]/g, '_');
+  return join(baseDir, 'gitcode-sync-cache', safe);
+}
+
+/**
+ * 单次下载 curl 命令构造（proxy 为空串 = 直连形态）。
+ * [HISTORICAL] 不带 curl --retry：curl 内置重试沿用启动时探测的续传偏移，与 -C - 组合
+ * 会把 .part 回卷重写（2026-10-22 v0.11.13 发布实测 119MB 回卷至 28MB）——重试职责
+ * 全在外层循环 downloadAssetResumable，每轮 curl 重新探测 .part 大小续传。
+ * --speed-limit/--speed-time：60s 低于 1KB/s 判定断流即中断（跨境 stall 常态，靠
+ * 续传重连收敛）；--max-time 900 单轮兜底。
+ */
+export function buildDownloadCurlCommand(url, partFile, proxy) {
+  const head = proxy
+    ? `curl -sSL -x ${shellQuote(proxy)}`
+    : `curl -sSL --noproxy '*'`;
+  return `${head} -C - --speed-limit 1024 --speed-time 60 --max-time 900 -o ${shellQuote(partFile)} ${shellQuote(url)}`;
+}
+
+/**
+ * 单附件断点续传下载：目标 = <dir>/<name>，进行中 = <dir>/<name>.part。
+ * 每轮「直连 →（配置了代理时）代理」各一次单发尝试，curl 失败/断流即断，下一轮从
+ * .part 当前大小续传；正式文件只在大小与 GitHub 侧完全一致时由 .part 改名产生
+ * （半截文件永远不会被误当完整件）。轮尽未完成 throw（缓存保留，重跑续传）。
+ * deps 全量可注入（单测 mock 命令执行 / sleep / 文件系统）。
+ */
+export async function downloadAssetResumable(asset, dir, proxyUrl, deps = {}) {
+  const execFn = deps.exec ?? execP;
+  const sleep = deps.sleep ?? ((ms) => new Promise((r) => { setTimeout(r, ms); }));
+  const statSize = deps.statSize ?? ((f) => statSync(f).size);
+  const fileExists = deps.fileExists ?? existsSync;
+  const renameFn = deps.rename ?? ((from, to) => renameSync(from, to));
+  const log = deps.log ?? ((msg) => { console.log(`[sync-from-github] ${msg}`); });
+  const maxRounds = deps.maxRounds ?? 15;
+  const finalPath = join(dir, asset.name);
+  const partPath = `${finalPath}.part`;
+  if (fileExists(finalPath) && statSize(finalPath) === asset.size) return { skipped: true };
+  const curlOptions = { timeout: 920000, shell: '/bin/bash', maxBuffer: 10 * 1024 * 1024 };
+  for (let round = 1; round <= maxRounds; round++) {
+    const before = fileExists(partPath) ? statSize(partPath) : 0;
+    for (const attempt of [{ label: '直连', proxy: '' }, { label: '代理', proxy: proxyUrl }]) {
+      if (attempt.label === '代理' && !proxyUrl) continue;
+      await execFn(buildDownloadCurlCommand(asset.url, partPath, attempt.proxy), curlOptions).catch(() => {});
+      if (fileExists(partPath) && statSize(partPath) === asset.size) {
+        renameFn(partPath, finalPath);
+        log(`已下载：${asset.name}（${(asset.size / 1048576).toFixed(1)}MB，第 ${round} 轮${attempt.label === '代理' ? '·代理' : ''}）`);
+        return { rounds: round, viaProxy: attempt.label === '代理' };
+      }
+    }
+    const now = fileExists(partPath) ? statSize(partPath) : 0;
+    log(`${asset.name} 第 ${round}/${maxRounds} 轮未完成（${now}/${asset.size} 字节${now < before ? `，较上轮回退 ${before}→${now}，续传继续` : ''}）`);
+    await sleep(3000);
+  }
+  throw new Error(
+    `${asset.name} 断点续传 ${maxRounds} 轮未完成（当前 ${fileExists(partPath) ? statSize(partPath) : 0}/${asset.size} 字节）。`
+    + `缓存目录保留，确认代理可用（--proxy <url> 或 TAIJI_GITHUB_DL_PROXY）后重跑从未断点继续。`,
+  );
+}
+
 async function runSyncFromGithub({ tag, githubRepo, proxyUrl }) {
   // prerelease 以版本号含 '-' 判断（beta/alpha 等测试版标注用）
   const prerelease = tag.includes('-');
-  const tmpDir = mkdtempSync(join(tmpdir(), 'gitcode-sync-'));
-  try {
-    console.log(`[sync-from-github] 从 GitHub 拉取 release ${tag}（repo: ${githubRepo}，走本机 proxy）…`);
-    const view = execSync(
-      `gh release view ${shellQuote(tag)} --repo ${shellQuote(githubRepo)} --json name,body,assets`,
-      { encoding: 'utf8', timeout: 60000, shell: '/bin/bash' },
-    );
-    const meta = JSON.parse(view);
-    const notesFile = join(tmpDir, 'release-notes.md');
-    writeFileSync(notesFile, meta.body || '');
+  // 断点续传缓存目录（按 tag 键控、跨进程持久）：失败重跑未完成件从未断点继续、
+  // 已完成件直接跳过；全部上传验证成功后才清理（此前的一次性 mkdtemp 目录在整条
+  // 命令失败后连同已下载字节一起销毁，重跑全量重下——2026-10-22 v0.11.13 发布两轮
+  // 实测各白下 253MB）。
+  const cacheDir = cacheDirForTag(tmpdir(), tag);
+  mkdirSync(cacheDir, { recursive: true });
+  console.log(`[sync-from-github] 从 GitHub 拉取 release ${tag}（repo: ${githubRepo}，缓存目录 ${cacheDir}）…`);
+  const view = execSync(
+    `gh release view ${shellQuote(tag)} --repo ${shellQuote(githubRepo)} --json name,body,assets`,
+    { encoding: 'utf8', timeout: 60000, shell: '/bin/bash' },
+  );
+  const meta = JSON.parse(view);
+  const notesFile = join(cacheDir, 'release-notes.md');
+  writeFileSync(notesFile, meta.body || '');
 
-    // 下载用 curl 直链而非 gh release download：实测 gh 的下载实现把每连接压到
-    // 0.07-0.09MB/s（同代理下 curl 单连接 1.36MB/s、4 连接合计 ~5MB/s，2026-09-05 实测），
-    // 1.1GB 会拖到 40 分钟以上；curl 多文件并行走满代理容量（~4 分钟）。
-    // url 字段：gh release view --json assets 的下载直链字段名是 url（browser_download_url
-    // 恒为 null，gh 2.89.0 实测）——曾用错字段致 URL 变字符串 "undefined" 下载段全灭（2026-09-06 实测抓出）。
-    // --retry 5 --retry-all-errors：跨境单连接常 80s 零字节 stall（2026-09-06 实测 4 并发只成 1），
-    // 无重试时单次运行全灭概率高，只能整条命令重跑。
-    const assets = (meta.assets || []).map((a) => ({ name: a.name, url: a.url, size: a.size }));
-    if (assets.length === 0) die(`GitHub release ${tag} 没有附件可同步——确认 tag 正确、Release 已发布`);
-    const dlProxy = resolveDownloadProxy(proxyUrl);
-    const DOWNLOAD_CONCURRENCY = 4;
-    const failures = [];
-    let next = 0;
-    const t0 = performance.now();
-    const workers = Array.from({ length: Math.min(DOWNLOAD_CONCURRENCY, assets.length) }, async () => {
-      while (next < assets.length) {
-        const a = assets[next++];
-        const dest = join(tmpDir, a.name);
-        // 两轮制（2026-10-21 v0.11.10 发版定型）：第一轮真直连（--noproxy 剥离代理 env，
-        // 多连接并行吃满直连带宽）；失败且有可用代理时自动挂 -x 重试一次——此前直连
-        // 大附件跨境超时后要人工开代理整条重跑，境外附件反复超时是发版常客。
-        try {
-          await execP(
-            `curl -sSL --noproxy '*' --retry 5 --retry-all-errors --max-time 900 -o ${shellQuote(dest)} ${shellQuote(a.url)}`,
-            { timeout: 900000, shell: '/bin/bash', maxBuffer: 10 * 1024 * 1024 },
-          );
-        } catch (directErr) {
-          if (!dlProxy) {
-            failures.push(`${a.name} —— ${String(directErr.message || directErr).slice(0, 200)}（直连失败且未配置代理——传 --proxy <url> 或设 TAIJI_GITHUB_DL_PROXY 后重跑）`);
-            continue;
-          }
-          console.log(`[sync-from-github] ${a.name} 直连失败，挂代理重试…`);
-          try {
-            await execP(
-              `curl -sSL -x ${shellQuote(dlProxy)} --retry 5 --retry-all-errors --max-time 900 -o ${shellQuote(dest)} ${shellQuote(a.url)}`,
-              { timeout: 900000, shell: '/bin/bash', maxBuffer: 10 * 1024 * 1024 },
-            );
-          } catch (proxyErr) {
-            failures.push(`${a.name} —— 直连与代理（${dlProxy}）均失败：${String(proxyErr.message || proxyErr).slice(0, 160)}`);
-            continue;
-          }
-        }
-        const actual = statSync(dest).size;
-        if (actual !== a.size) throw new Error(`大小不符（${actual} vs ${a.size}）`);
-        console.log(`[sync-from-github] 已下载：${a.name}（${(a.size / 1048576).toFixed(1)}MB）`);
-      }
-    });
-    await Promise.all(workers);
-    if (failures.length > 0) {
-      die(`下载失败 ${failures.length}/${assets.length} 个附件：\n  - ${failures.join('\n  - ')}\n`
-        + '恢复：确认代理地址可用后重跑（--proxy <url> 或 TAIJI_GITHUB_DL_PROXY；已下载完成的附件会被 curl 重下覆盖，耗时可控）。');
-    }
-    const elapsed = Math.round((performance.now() - t0) / 1000);
-    console.log(`[sync-from-github] 下载完成：${assets.length} 个附件，耗时 ${elapsed}s（${(1100.5 / Math.max(elapsed, 1)).toFixed(1)}MB/s 级）。开始上传 GitCode…`);
-    await runSync({ tag, name: meta.name || tag, notesFile, artifactsDir: tmpDir, prerelease });
-  } finally {
-    rmSync(tmpDir, { recursive: true, force: true });
+  // 下载用 curl 直链而非 gh release download：实测 gh 的下载实现把每连接压到
+  // 0.07-0.09MB/s（同代理下 curl 单连接 1.36MB/s、4 连接合计 ~5MB/s，2026-09-05 实测），
+  // 1.1GB 会拖到 40 分钟以上；curl 多文件并行走满代理容量（~4 分钟）。
+  // url 字段：gh release view --json assets 的下载直链字段名是 url（browser_download_url
+  // 恒为 null，gh 2.89.0 实测）——曾用错字段致 URL 变字符串 "undefined" 下载段全灭（2026-09-06 实测抓出）。
+  // 断点续传语义见 downloadAssetResumable 头注；代理来源 = --proxy / TAIJI_GITHUB_DL_PROXY /
+  // 既有 *_proxy env（resolveDownloadProxy），直连与代理每轮交替尝试。
+  const assets = (meta.assets || []).map((a) => ({ name: a.name, url: a.url, size: a.size }));
+  if (assets.length === 0) die(`GitHub release ${tag} 没有附件可同步——确认 tag 正确、Release 已发布`);
+  const dlProxy = resolveDownloadProxy(proxyUrl);
+  if (!dlProxy) {
+    console.log('[sync-from-github] 未配置代理（--proxy / TAIJI_GITHUB_DL_PROXY / *_proxy env）——直连断流时将无法走代理通道，跨境大附件成功率显著降低');
   }
+  const DOWNLOAD_CONCURRENCY = 4;
+  const failures = [];
+  let next = 0;
+  const t0 = performance.now();
+  const workers = Array.from({ length: Math.min(DOWNLOAD_CONCURRENCY, assets.length) }, async () => {
+    while (next < assets.length) {
+      const a = assets[next++];
+      try {
+        await downloadAssetResumable(a, cacheDir, dlProxy);
+      } catch (e) {
+        failures.push(String(e.message || e).slice(0, 250));
+      }
+    }
+  });
+  await Promise.all(workers);
+  if (failures.length > 0) {
+    die(`下载失败 ${failures.length}/${assets.length} 个附件：\n  - ${failures.join('\n  - ')}`);
+  }
+  const elapsed = Math.round((performance.now() - t0) / 1000);
+  console.log(`[sync-from-github] 下载完成：${assets.length} 个附件，耗时 ${elapsed}s。开始上传 GitCode…`);
+  await runSync({ tag, name: meta.name || tag, notesFile, artifactsDir: cacheDir, prerelease });
+  // 上传 + 远端验证全部通过才清缓存；die 路径（process.exit）缓存保留供重跑续传
+  rmSync(cacheDir, { recursive: true, force: true });
+  console.log('[sync-from-github] 缓存目录已清理（全部附件上传验证通过）。');
 }
 
 /* ── 入口 ─────────────────────────────────────────────────── */
@@ -722,7 +771,8 @@ const USAGE = `用法：
   node scripts/gitcode-release-sync.mjs sync <tag> <release-name> <notes-file> <artifacts-dir> [--prerelease]
   node scripts/gitcode-release-sync.mjs sync-from-github <tag> [--github-repo owner/repo] [--proxy <url>]
 环境变量：GITCODE_TOKEN（必填）；sync-from-github 另需本机 gh 已登录；
-  附件下载代理：--proxy <url> 或 TAIJI_GITHUB_DL_PROXY（直连失败时自动挂代理重试）`;
+  附件下载代理：--proxy <url> 或 TAIJI_GITHUB_DL_PROXY（每轮直连失败自动挂代理续传重试；
+  下载断点续传——失败重跑从未断点继续，已上传/已完整附件直接跳过）`;
 
 /** 子命令分派表：args = argv.slice(1)（不含子命令名） */
 const COMMANDS = {

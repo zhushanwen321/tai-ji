@@ -10,12 +10,12 @@ const REPO_ROOT = path.dirname(fileURLToPath(import.meta.url))
  * Playwright config —— taiji E2E（Electron 行为 + visual chromium 像素 diff）。
  *
  * 四 project 架构（W3 新增 visual-chromium；2026-09-15 新增 electron-smoke；electron 排除
- * real 轨 spec 族 + 新增 electron-real 承接，见 REAL_TRACK_SPECS 注释）：
- * - electron        : 行为 E2E mock 轨全量（_electron.launch + mock 构建产物），testIgnore visual/** + real 轨 spec 族（launch-app-real 与 mock bundle 互斥，按改动范围单独跑）
- * - electron-real   : real 轨承接（真实 app 启动轨），testMatch = real 轨 spec 族；只为显式文件
+ * 真实进程层 spec 族 + 新增 electron-real 承接，见 REAL_TRACK_SPECS 注释）：
+ * - electron        : 行为 E2E mock 层全量（_electron.launch + mock 构建产物），testIgnore visual/** + 真实进程层 spec 族（launch-app-real 与 mock bundle 互斥，按改动范围单独跑）
+ * - electron-real   : 真实进程层承接（真实 app 启动层），testMatch = 真实进程层 spec 族；只为显式文件
  *                     命令（e2e-map REAL 族 run 形态）提供发现通道，不进任何门禁全量
  * - electron-smoke  : 行为 E2E 的 P0 smoke 子集（grep @p0-smoke 用例标签），CI e2e-behavior job
- *                     每 PR 固定跑（零 token mock 轨）。与 electron 是**子集关系非互斥分轨**
+ *                     每 PR 固定跑（零 token mock 层）。与 electron 是**子集关系非互斥子集**
  *                     （smoke ⊂ 全量），故用 grep 表达而非 testMatch/testIgnore——裸跑
  *                     `npx playwright test` 时 smoke 用例会随 electron 全量 + 本 project 各跑一遍，
  *                     跑全量请显式 `--project=electron`
@@ -35,13 +35,13 @@ const REPO_ROOT = path.dirname(fileURLToPath(import.meta.url))
  *（复用 W1/W2 spawnVite 范式），不用全局 webServer——避免 visual 的 vite 依赖拖累 electron project。
  */
 /**
- * real 轨 spec 族（真实 app 启动：launch-app-real / 真机轨）——清单本体迁至
+ * 真实进程层 spec 族（真实 app 启动：launch-app-real / 真机层）——清单本体迁至
  * e2e/fixtures/real-track-specs.ts（SSOT：playwright project 匹配与 global-setup
  * 构建形态判定共用同一清单；变更登记说明见该文件头注）。消费关系：
  * - electron project 用它做 testIgnore —— mock bundle 与 real bundle 同 outDir 互斥
  *   （launch-app-real.ts 的 assertRealRendererBundle 对 mock 标记 fail-fast），real spec
- *   卷入 mock 轨必红；`--project=electron` 语义收敛为零 token mock 轨
- * - electron-real project 用它做 testMatch —— real 轨 run 命令是显式文件形态（如
+ *   卷入 mock 层必红；`--project=electron` 语义收敛为零 token mock 层
+ * - electron-real project 用它做 testMatch —— 真实进程层 run 命令是显式文件形态（如
  *   `npx playwright test e2e/workspace-real.spec.ts`，不带 --project），Playwright 的
  *   project testIgnore 对显式文件参数同样生效，排除后必须由本 project 承接才能被发现
  * - 清单登记 SSOT = docs/testing/e2e-map.json REAL/SKILLRELOAD/BTW/MODELS 各 rule 的
@@ -75,24 +75,24 @@ export default defineConfig({
 
   projects: [
     {
-      // 行为 E2E mock 轨：_electron.launch + mock 构建产物（零 token）。排除 visual/（由
-      // visual-chromium 接管）与 real 轨 spec 族（REAL_TRACK_SPECS，见其注释）
+      // 行为 E2E mock 层：_electron.launch + mock 构建产物（零 token）。排除 visual/（由
+      // visual-chromium 接管）与 真实进程层 spec 族（REAL_TRACK_SPECS，见其注释）
       name: 'electron',
       testIgnore: ['**/visual/**/*.spec.ts', ...REAL_TRACK_SPECS],
       use: {},
     },
     {
-      // real 轨承接 project：真实 app 启动（launch-app-real / 真机轨），按改动范围显式文件跑
+      // 真实进程层承接 project：真实 app 启动（launch-app-real / 真机层），按改动范围显式文件跑
       // （docs/testing/e2e-map.json REAL/SKILLRELOAD/BTW/MODELS 各 rule 的 run 命令）。
       // 只为让显式文件命令在 electron project 排除 real 族后仍可发现测试；不得全量扫跑
-      // （CI/PR/merge 门禁不跑本轨，AGENTS.md e2e 执行准则）
+      // （CI/PR/merge 门禁不跑本组，AGENTS.md e2e 执行准则）
       name: 'electron-real',
       testMatch: REAL_TRACK_SPECS,
       use: {},
     },
     {
-      // 行为 E2E P0 smoke 子集（CI e2e-behavior job 每 PR 固定跑，零 token mock 轨）：
-      // grep @p0-smoke 圈定（子集关系非互斥分轨，见文件头注释）；用例标签打在现存 spec 的
+      // 行为 E2E P0 smoke 子集（CI e2e-behavior job 每 PR 固定跑，零 token mock 层）：
+      // grep @p0-smoke 圈定（子集关系非互斥子集，见文件头注释）；用例标签打在现存 spec 的
       // test() 标题上（圈定名单 SSOT = grep 标签 + docs/TEST-STRATEGY.md「e2e 资产归宿纪律」）
       name: 'electron-smoke',
       testIgnore: '**/visual/**/*.spec.ts',

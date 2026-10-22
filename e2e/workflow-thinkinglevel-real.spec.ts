@@ -1,6 +1,6 @@
 /**
  * Workflow agent() thinkingLevel REAL E2E —— 真实 runtime + pi 子进程 + faux LLM 演员
- * （L2.5 翻轨，2026-09-15）。
+ * （L2.5 迁组，2026-09-15）。
  *
  * 验证目标：workflow script 里 agent({ model, thinkingLevel: "high" }) 的
  * thinkingLevel 端到端真实生效。观测表面全部是 pi 自己写的文件（零 taiji
@@ -15,7 +15,7 @@
  * - TC3: session.workflowUpdate done 信号 + 子进程 JSONL 有 assistant 消息
  *        （faux 演者跑完产出，凭证无关）
  *
- * faux 翻轨装配：主对话模型 faux/faux-1（settings 预置），faux 响应脚本用
+ * faux 迁组装配：主对话模型 faux/faux-1（settings 预置），faux 响应脚本用
  * model-keyed 对象形态（faux-llm-ext loadScript 的第二种形态）——主进程队列
  * [workflow toolCall → done 文本]（faux-1 槽位）、子进程队列 [PROBE-OK 文本]
  * （faux-1-reasoning 槽位，由 agent() 的 model 选择）。主/子进程共享同一
@@ -87,7 +87,7 @@ function buildFauxScript(probePath: string): Record<string, FauxStep[]> {
 
 /**
  * 预置 dataDir：workflow 探针脚本复制到 user 级 <dataDir>/agent/workflows/。
- * provider/model/npm 扩展目录预置已由 launchRealApp({ faux }) 接管（L2.5 翻轨，
+ * provider/model/npm 扩展目录预置已由 launchRealApp({ faux }) 接管（L2.5 迁组，
  * 凭证无关）；piAgentDir = <dataDir>/agent（runtime pi-paths SSOT）。
  *
  * 不能依赖 project 级 <workspaceRoot>/.pi/workflows/：sample-project 的祖先目录

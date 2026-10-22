@@ -321,11 +321,11 @@ describe('pi-settings-store', () => {
     // 子进程持 proper-lockfile 锁，满并行 + 系统余载下 spawn/锁往返超 vitest 默认 5s
     // testTimeout（对齐 worktree-registry D5a 口径）。
     // [2026-10-22 单测层极端测试整治] 「spawn 挂钟 + 跨进程持锁窗」无确定性完成信号
-    // （判据第三档），经 TAIJI_TEST_INTEGRATION 门控移出默认单测轨（SSOT =
+    // （判据第三档），经 TAIJI_TEST_INTEGRATION 门控移出默认单测层（SSOT =
     // test-guard/integration-gate.ts）；本地默认跑上方 0 窗口注入版。
     describe.skipIf(
       !INTEGRATION_TESTS_ENABLED,
-    )(`busy-wait 跨进程真子进程（集成轨：真 spawn + 150ms 真实持锁窗）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
+    )(`busy-wait 跨进程真子进程（集成组：真 spawn + 150ms 真实持锁窗）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
       it('busy-waits and acquires after a cross-process holder releases (real subprocess)', { timeout: 30_000 }, async () => {
         writeSettings({ defaultModel: 'v1', packages: ['p1'] })
         // 子进程 = 模拟 pi：锁请求对齐 pi 真实语义（pi-settings-store 模块头注释引

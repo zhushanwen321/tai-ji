@@ -1,5 +1,5 @@
 /**
- * plugin-esm-loader.cjs 测试（拆分层，判据与处置通道见 docs/todo/test-single-layer-cleanup.md）。
+ * plugin-esm-loader.cjs 测试（拆分层，判据与处置通道见 docs/TEST-STRATEGY.md「新写测试判据」节）。
  *
  * 默认组（本文件主体）= loader 本体的 in-process 单测：用 node:vm 装载 loader 源码、
  * 把 self-register 的 `register` 打成桩（不在 vitest 进程注册 ESM hook——原 TC7 注释

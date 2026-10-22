@@ -13,10 +13,10 @@
  *      是生产合法形态），单测层零真 spawn。
  * 真 worker thread + 真 git 的核心场景（E2E-1 锚点 + MF-1-1a/b autoCommit）保留在
  * 文件末尾的集成门控 describe（TAIJI_TEST_INTEGRATION，本地默认跳过、CI 真跑），
- * 锚定 faux 通道与真实协议不漂移。处置依据 docs/todo/test-single-layer-cleanup.md。
+ * 锚定 faux 通道与真实协议不漂移。处置依据 docs/TEST-STRATEGY.md「新写测试判据」节。
  *
  * §7.2 行为/E2E 测试（设计文档 7.2 三条）：
- *   1. R2 prompt 对账段断言 + defer 跨轮传递 mock 剧本（E2E-1，真链集成轨）
+ *   1. R2 prompt 对账段断言 + defer 跨轮传递 mock 剧本（E2E-1，真链集成组）
  *   2. skipCleanAgents 语义 + fixAgent 参数接受（E2E-2）
  *   3. 渲染 gate：非 clean 终止 message 的 [UNRESOLVED] 透出 + ES3 硬校验拦截（E2E-3）
  *   4. M2 回归：全 fixed + 新发现 → reconcile 门控（reconCount）+ 新发现 merge 独立执行（E2E-4）
@@ -543,10 +543,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// faux 轨用例预算：in-process 执行收敛在几十 ms 量级，10s 只是失败探测器上限
+// faux 层用例预算：in-process 执行收敛在几十 ms 量级，10s 只是失败探测器上限
 // （较此前真链的 60s 收紧；单条真实耗时验收 ≤1s）。
 const FAUX_RUN_TIMEOUT_MS = 10_000;
-// 真链集成轨（真 worker thread + 真 git）保留原预算。
+// 真链集成组（真 worker thread + 真 git）保留原预算。
 const RUN_TIMEOUT_MS = 60_000;
 const RUN_ID = () => "rfl-e2e-" + Date.now() + "-" + Math.floor(Math.random() * 1e6);
 
@@ -2220,7 +2220,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
 });
 
 
-// ── fail-fast（弱格式降级通道拆除后的唯一失败语义，mock 轨）─────────────
+// ── fail-fast（弱格式降级通道拆除后的唯一失败语义，mock 层）─────────────
 //
 // 结构化返回是必须满足的前提：reviewer / aggregator / fixer 任一结构化返回失败 =
 // 立即终止整个 workflow（结构化终判 + 恢复指引），不等全批跑完，由上游修环境。
@@ -2436,7 +2436,7 @@ describe("review-fix-loop fail-fast（结构化返回失败立即终判）", () 
   );
 });
 
-// ══ 真链集成轨（真 worker thread + 真 git，集成门控）════════════════════
+// ══ 真链集成组（真 worker thread + 真 git，集成门控）════════════════════
 //
 // 保留的核心真链场景（本地默认跳过、CI / TAIJI_TEST_INTEGRATION=1 真跑）：
 //   1. E2E-1——worker 线程消息协议全链锚点（defer 跨轮传递 + R2 对账段 + clean

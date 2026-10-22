@@ -9,7 +9,7 @@
  * 2. 输入纯度：entries 与 initial（含非空 initial 接续场景）均不被 mutable fold mutate；
  * 3. 长序列形态：500 条无 id entry 的 fold 正确性 + `e<N>` 确定性 id 全程唯一 + 0/1/2
  *    边界微用例（结构验证，不计时——性能画像归基准工具；数据量按「逻辑等价最小规模」
- *    缩档，判据见 docs/todo/test-single-layer-cleanup.md）。
+ *    缩档，判据见 docs/TEST-STRATEGY.md「新写测试判据」节）。
  *
  * 行为级具体断言（role 细分 / 回填字段 / 分组渲染）在 apply-entry.test.ts 与
  * apply-entry-equivalence.test.ts，本文件不重复。

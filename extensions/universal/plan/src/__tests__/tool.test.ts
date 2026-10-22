@@ -170,7 +170,7 @@ describe("registerPlanTool", () => {
       const res = await exec({ action: "select-template", templateName: "feature-plan" });
       const text = res.content[0].text;
       // 全文到达模型可见通道（对照同参数合并视图胜者 path 的直读——与生产侧同一次
-      // 扫描语义，运行机用户级遮蔽时两轨拿同一胜者，断言同样成立）
+      // 扫描语义，运行机用户级遮蔽时两路拿同一胜者，断言同样成立）
       const winner = listTemplates({ projectRoot: ctx.cwd }).find((t) => t.name === "feature-plan");
       const winnerContent = winner ? fs.readFileSync(winner.path, "utf-8") : null;
       expect(winnerContent).not.toBeNull();

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# session-manager-full-e2e.sh — 真 pi 进程端到端冒烟探针（U9-S1 / U9-S2 + 真 LLM 轨 U9-S3/S4/S5，
+# session-manager-full-e2e.sh — 真 pi 进程端到端冒烟探针（U9-S1 / U9-S2 + 真 LLM 层 U9-S3/S4/S5，
 # 设计文档 §7.2 场景 1 + §7.3 机器化 + session-manager-archive-delete 验收 1/2/3）
 #
 # 用法：bash scripts/cw/session-manager-full-e2e.sh
@@ -24,8 +24,8 @@
 #   U9-S5 PASS|FAIL   人身约束取样（tidy up 语料 → archive 调用、全程零 delete_session 调用）
 #
 # 护栏：
-#   - 每步 60s 上限在测试内（waitForEvent STEP_TIMEOUT_MS；真 LLM 轨 agent 未调工具可重试 2 次）
-#   - 总脚本 480s watchdog（超时杀 vitest + 孤儿 pi；预算按真 LLM 轨最坏路径校准——
+#   - 每步 60s 上限在测试内（waitForEvent STEP_TIMEOUT_MS；真 LLM 层 agent 未调工具可重试 2 次）
+#   - 总脚本 480s watchdog（超时杀 vitest + 孤儿 pi；预算按真 LLM 层最坏路径校准——
 #     3 条真 LLM 用例各 150s 上限 + 重试护栏 3 attempts + faux 12s + vitest/spawn 启动）
 #   - trap 清理：pi 进程结束必须 kill，session-dir 命名带 u9-smoke 便于 pgrep 核查
 

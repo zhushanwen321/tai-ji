@@ -2,8 +2,8 @@
 //
 // 对账「歧义跳过」老化升级（PS-12 措施⑤）。
 //
-// 两条轨道（判据三档：只测逻辑、高负载极快）：
-//   1. 默认轨道（本文件上半）：in-process fixture——git 经 execFile 桩脚本化响应、
+// 两种形态道（判据三档：只测逻辑、高负载极快）：
+//   1. 默认组道（本文件上半）：in-process fixture——git 经 execFile 桩脚本化响应、
 //      pid 探活经 alive-store 桩注入，物理侧 checkout 目录 / .alive marker 走真实
 //      tmpdir 小文件。老化计数 + 升级 warn 的判定逻辑全部同步可断言，无真进程、
 //      无真 git、无 spawn sleep。
@@ -49,7 +49,7 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 const ORIG_TMPDIR = os.tmpdir();
 
 /**
- * in-process fixture 开关（默认轨道的 git / pid 探活桩）。
+ * in-process fixture 开关（默认组道的 git / pid 探活桩）。
  *
  * git = true 时 execFile 走 gitScript（脚本化 git，记录全部命令）；alive = true 时
  * isProcessAlive 按 alivePids 集合判定。CI-only 真实 git 轨道两个开关都置 false，
@@ -148,7 +148,7 @@ function escalationCalls(): Array<{ msg: string; data: Record<string, unknown> }
 }
 
 // ============================================================
-// 默认轨道：in-process fixture（无真 git、无 spawn sleep）
+// 默认组道：in-process fixture（无真 git、无 spawn sleep）
 // ============================================================
 
 describe("WorktreeManager 对账歧义跳过老化（PS-12 措施⑤，in-process fixture）", () => {

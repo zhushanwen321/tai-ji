@@ -23,7 +23,7 @@
  * 现有 fixtures 不提供该分支，故在 tmpdir 运行时生成一次性 mock 子进程脚本
  * （不触碰仓库文件）。
  *
- * fork 宿主用例的双层拆分（docs/todo/test-single-layer-cleanup.md 判据三档）：
+ * fork 宿主用例的双层拆分（docs/TEST-STRATEGY.md「新写测试判据」节 判据三档）：
  * - 默认组：fork 桩（假子进程）+ 消息注入——LC-U1-ENTRY / LC-C1 的逻辑本质是宿主
  *   侧的 message 入口防御与 loadPlugin 回复归属匹配，与「消息经真实 OS IPC 到达」
  *   无关，注入即确定性同步验证（判据二档）；
@@ -597,9 +597,9 @@ describe('生命周期竞态（lifecycle races）', () => {
   // ── fork 宿主（PluginHostProcess）：真实 IPC 上的入口防御与 loadPlugin 过滤 ──
   // [HISTORICAL] 2026-08-20 PR #185：真实 fork 子进程用例显式超时（满并行 + 系统余载
   // 下子进程 spawn/IPC 往返超 vitest 默认 5s testTimeout，对齐 plugin-host.test.ts 口径）。
-  // 层级归属（docs/todo/test-single-layer-cleanup.md）：真实 fork + 真实 IPC 往返属
+  // 层级归属（docs/TEST-STRATEGY.md「新写测试判据」节）：真实 fork + 真实 IPC 往返属
   // 「代码 + OS 组合行为」，负载下拉长无稳定上界——整组经集成测试门控
-  // （TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts）移出默认单测轨，
+  // （TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts）移出默认单测层，
   // 本地默认跳过、CI 或按改动范围触发时真跑；逻辑面已由上方 fork 桩组确定性地覆盖。
   describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
     `PluginHostProcess（真实 fork IPC）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,

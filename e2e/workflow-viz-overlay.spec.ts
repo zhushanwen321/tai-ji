@@ -1,5 +1,5 @@
 /**
- * Workflow 可视化 overlay E2E —— Playwright + Electron + mock 轨。
+ * Workflow 可视化 overlay E2E —— Playwright + Electron + mock 层。
  *
  * 分层定位（workflow-visualization 设计 §4 验收场景 S1/S2/S4/S6 的 mock 可达面 +
  * workflow-overlay-refine §4.1 V3/V5 与 §4.2 影响面 + impl-plan 验收计划表 A5a/A6/A7
@@ -130,7 +130,7 @@ test.describe('Workflow 可视化 overlay E2E', () => {
     await activateSession(page)
 
     // [对话流 block 第二入口 mock 不可达] S1 的「先后从托盘 workflow 行与对话流 block
-    // 点击」在 mock 轨只有托盘入口可达：workflow 记录只对 s3 返回（T2 锁死语义），而
+    // 点击」在 mock 层只有托盘入口可达：workflow 记录只对 s3 返回（T2 锁死语义），而
     // s3 是空消息 session——composer/state-tearing 等 5 个既有 spec 依赖其空态，不能
     // 注入 workflow tool 消息。block 点击链路（(name,slug) 反查 → overlay）已由组件
     // 测试覆盖（packages/ui BlockWorkflow.test.ts）；双入口同 run 的端到端形态归

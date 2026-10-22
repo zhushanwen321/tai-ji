@@ -8,8 +8,8 @@
  * 执行侧六要素（与 e2e-map E2E-BTW-01.note 同步维护，改其一须同 commit 改另一）：
  * - 触发：scope diff 命中（btw 会话生命周期 / 消息路由 / 协议帧 / vid 工厂 + spec 自身）时开发期
  *   按改动范围执行；双凭证门 = env TAIJI_PI_LIVE=1 + 本机 provider 凭证（缺一 skip 不 fail——防
- *   `--project=electron` 全量扫跑烧 token，CI/PR/merge 门禁不跑本轨，AGENTS.md e2e 执行准则）。
- *   前置：real renderer bundle（`VITE_E2E=true pnpm run build:e2e`，不带 VITE_MOCK；mock 轨跑过
+ *   `--project=electron` 全量扫跑烧 token，CI/PR/merge 门禁不跑本组，AGENTS.md e2e 执行准则）。
+ *   前置：real renderer bundle（`VITE_E2E=true pnpm run build:e2e`，不带 VITE_MOCK；mock 层跑过
  *   之后必须重建——launch-real pre-flight 会 fail-fast 并给出重建命令）。
  * - 预算：test.setTimeout 300s；**主 turn 在途窗口旋钮 = MAIN_PROMPT 里的 bash `sleep 40`**
  *   （真实 LLM 三轮 btw 问答须在窗口内完成；窗口不足属预算校准 → 调 sleep 秒数，禁止放宽断言
@@ -129,7 +129,7 @@ function countOccurrences(haystack: string, needle: string): number {
 // ── S7 主用例 ────────────────────────────────────────────────────────────
 
 test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort / 无 steer / 主流历史不含 btw 内容', async () => {
-  // 凭证双门（六要素「触发」）：真实 LLM 轨只在显式授权 + 本机凭证齐备时执行
+  // 凭证双门（六要素「触发」）：真实 LLM 层只在显式授权 + 本机凭证齐备时执行
   applyRealTrackGate(test, { timeoutMs: 300_000, tag: 's7', envVar: 'TAIJI_S7_CREDENTIAL_SOURCE' })
 
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-s7-btw-'))

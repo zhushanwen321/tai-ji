@@ -4,7 +4,7 @@
  * 三类断言中「CSS 变量定义存在性」的归位点（vitest 纯 JS 解析 style.css :root，
  * 不经 DOM 渲染）。组件消费层断言（computed style 取自 var()）因 happy-dom 不展开
  * var()（见 tokens.test.ts TC2 探测结论），归 scripts/token-consume-check.mjs
- * 的 chromium 轨，不在本模块。
+ * 的 chromium 层，不在本模块。
  *
  * SSOT 变量名：docs/DESIGN.md §4（ADR-0018 归一命名）。
  * v3 style.css 与 v6 tokens.css 变量名几乎一致，仅值不同（D5），故本模块对

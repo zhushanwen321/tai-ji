@@ -385,7 +385,7 @@ function emit(sessionId: string, msg: ServerMessageUnion): void {
 // [u5a 退役] mock 的 `queue_update` 镜像链（mockQueues / emitQueueUpdate /
 // emitDrainAssistantTurn + TIMING.steerDrain）已随 `chat.steer` / `chat.followUp` 删除——
 // 该链唯一职责是喂 QueueBubble 的 queue_update 快照（u3b 退役该消费路径，u3c 转 session.delivery
-// 单源），删除后 mock 轨的提交链路只剩 submitDelivery（与真实 runtime 同通道）。
+// 单源），删除后 mock 层的提交链路只剩 submitDelivery（与真实 runtime 同通道）。
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -442,7 +442,7 @@ function zcodeMockCandidates(): import('@taiji/shared').ImportCandidate[] {
 // ── 发现 B（create 幂等化）mock 面：clientUuid → 已建 session ─────────────────
 // 行为对齐 runtime create-idempotency（同 uuid 重试返回已建 session 不重复建号 +
 // TTL 保留 + 容量上限驱逐最老）；mock 无 spawn，登记清单即内存派生视图。保持签名/行为
-// 双同构，防 mock 轨（VITE_MOCK UI 开发）把真实面已修的重复建号 bug 重新演一遍。
+// 双同构，防 mock 层（VITE_MOCK UI 开发）把真实面已修的重复建号 bug 重新演一遍。
 const MOCK_CREATE_IDEMPOTENCY_TTL_MS = 600_000
 const MOCK_CREATE_IDEMPOTENCY_MAX_ENTRIES = 256
 // taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：create clientUuid 幂等去重表
@@ -474,8 +474,8 @@ function recordMockCreate(clientUuid: string, session: SessionSummary): void {
 
 const sessionImpl = {
   /**
-   * session trace 条目清单全量（session-trace，design D4）。mock 轨道无真实 JSONL/pi 进程，
-   * 恒返回 empty 快照（Trace 视图空态）；real 轨道走 runtime A1 混合路由。
+   * session trace 条目清单全量（session-trace，design D4）。mock 层道无真实 JSONL/pi 进程，
+   * 恒返回 empty 快照（Trace 视图空态）；真实进程层道走 runtime A1 混合路由。
    * 与 real domain 同接口（api/index 门面三元要求两侧同构）。
    */
   async getTraceEntries(sessionId: string): Promise<import('@taiji/shared').ServerMessageMap['session.traceEntries']> {
@@ -483,8 +483,8 @@ const sessionImpl = {
     return { sessionId, source: 'empty', entries: [], malformed: [] }
   },
   /**
-   * 现取当前 system prompt（session-trace §3.1 失败路径，C2）。mock 轨道无 pi 进程，
-   * 恒 reject session_not_active（与 real 轨道「非活跃 session」错误路径同形，供 UI
+   * 现取当前 system prompt（session-trace §3.1 失败路径，C2）。mock 层道无 pi 进程，
+   * 恒 reject session_not_active（与 真实进程层道「非活跃 session」错误路径同形，供 UI
    * 错误态演示）。与 real domain 同接口（api/index 门面三元要求两侧同构）。
    */
   async fetchCurrentSystemPrompt(sessionId: string): Promise<import('@taiji/shared').ServerMessageMap['session.currentSystemPrompt']> {
@@ -820,9 +820,9 @@ const sessionImpl = {
 
   /**
    * Mock 子代理引擎配置视图（[G4 锚定补齐]：锚定前 mock 缺此成员）。mock 无 engines.json
-   * 基建，返回空清单 + 空 default（Settings「子代理」页 mock 轨展示空态）。
+   * 基建，返回空清单 + 空 default（Settings「子代理」页 mock 层展示空态）。
    * engine-provider-unification D5：engineModels/engineDefaults 显式空表/空偏好——与协议
-   * 缺省语义等价（optional 键缺失 = 空），mock 轨不带可用模型数据。
+   * 缺省语义等价（optional 键缺失 = 空），mock 层不带可用模型数据。
    */
   async getSubagentEngineConfig(): Promise<ServerMessageMap['session.subagentEngineConfig']> {
     await sleep(TIMING.ack)
@@ -837,7 +837,7 @@ const sessionImpl = {
 
   /**
    * Mock per-engine 默认模型偏好写入（engine-provider-unification D5）：回执 = 请求值回显
-   * （setSubagentDefaultEngine mock 同模式）；无持久化/无清单校验（mock 轨 engineModels 恒空，
+   * （setSubagentDefaultEngine mock 同模式）；无持久化/无清单校验（mock 层 engineModels 恒空，
    * 无校验数据源）。
    */
   async setSubagentEngineDefaultModel(
@@ -924,7 +924,7 @@ const sessionImpl = {
   /**
    * Mock importCandidates：source 显式判别（与 importSession 分支策略收敛，r-审查
    * P3——real 侧 resolveSource 未知 source 抛 import_source_missing，mock 否决式分支
-   * 曾把缺省/pi/未知合并返回空集不同构）：缺省/'pi' 恒空候选集（mock 轨道无外部
+   * 曾把缺省/pi/未知合并返回空集不同构）：缺省/'pi' 恒空候选集（mock 层道无外部
    * pi sessions 目录可扫）；'zcode' 返回硬编码 zcode 形态候选（sess_ 前缀
    * sessionId + dirLabel 聚合，驱动导入对话框两阶段视图 mock 模式开发）；其余字面量
    * （WS JSON 注入的类型外运行时值）抛 import_source_missing。不模拟 query 过滤——
@@ -1103,7 +1103,7 @@ const chatImpl = {
   // 让开发者能看到 loading 态（spinner + 取消按钮）。
   // 不模拟真实 shell 输出（与 send 的 mock 策略一致——只驱动 UI 状态机，不验证业务逻辑）。
   // happy path：普通命令 → exitCode:0 + '(mock) <command>'（保留原有行为，不破坏）。
-  // 回执（bash 投递可靠性契约）：mock 全分支都「已执行并收尾」→ settled（与 real 轨
+  // 回执（bash 投递可靠性契约）：mock 全分支都「已执行并收尾」→ settled（与 真实进程层
   // ChatApiPort.bash 同契约）。
   async bash(sessionId: string, command: string, excludeFromContext?: boolean): Promise<BashDispatchReceipt> {
     await sleep(TIMING.ack)
@@ -1379,7 +1379,7 @@ const configImpl = {
     await sleep(TIMING.ack)
   },
   // quota presets 合并视图：mock 无 remote-config 层，返编译期基线（与 runtime
-  // listQuotaPresets() 的「远程 presets ?? 基线」同口径——mock 轨额度类型下拉非空）。
+  // listQuotaPresets() 的「远程 presets ?? 基线」同口径——mock 层额度类型下拉非空）。
   async listQuotaPresets(): Promise<QuotaPreset[]> {
     await sleep(TIMING.ack)
     return QUOTA_PRESETS
@@ -1498,7 +1498,7 @@ const configImpl = {
     defaultsSub.broadcast(`${provider}/${modelId}`)
   },
   /**
-   * 上报 UI 语言（u-locale-channel 的 mock 轨对齐）：ack 即成功，**不落盘**——mock 无真实
+   * 上报 UI 语言（u-locale-channel 的 mock 层对齐）：ack 即成功，**不落盘**——mock 无真实
    * 数据目录也无 extension 读取方，仅保证门面同构（ConfigDomainParamsExact 编译期锁定）。
    */
   async setUiLocale(_locale: UiLocale): Promise<void> {
@@ -1521,7 +1521,7 @@ const configImpl = {
   },
   /**
    * [G4 锚定 ConfigDomain] 返回类型补齐：real scanSkills 返回扫描结果 ScannedSkillInfo[]
-   * （锚定前 mock 返回 void，调用方读返回值在 mock 轨静默 undefined）。mock 无真实文件系统
+   * （锚定前 mock 返回 void，调用方读返回值在 mock 层静默 undefined）。mock 无真实文件系统
    * 扫描，返回空结果（空 sources 扫描的同形语义）；skillsSub 广播照旧驱动订阅演示。
    */
   async scanSkills(_sources: string[]): Promise<ScannedSkillInfo[]> {
@@ -1664,7 +1664,7 @@ const configImpl = {
   onTerminalConfig: (h: (config: TerminalConfig, corrupted: boolean) => void) =>
     terminalSub.subscribe((p) => h(p.config, p.corrupted)),
   // ── 重试配置（[G4 锚定补齐]：锚定前 mock 缺 getRetryConfig/setRetryConfig/onRetryConfig，
-  //    Settings 重试页在 mock 轨调用会 crash）──
+  //    Settings 重试页在 mock 层调用会 crash）──
   // mock 内存态 stub：get 恒 configured=false（无 config.json 条目的同形语义）、set 回显
   // configured=true；不持久化、不广播（onRetryConfig no-op）——登记 docs/TEST-STRATEGY.md §5。
   async getRetryConfig(): Promise<{ config: LlmRetryConfig; configured: boolean }> {
@@ -1720,7 +1720,7 @@ let mockNetworkProxyConfig: NetworkProxyConfig = {
   rules: [],
   ipv4Only: [],
 }
-// 统计演示行（非零双通道示例，mock 轨统计卡可演示计数条；reset 清空）
+// 统计演示行（非零双通道示例，mock 层统计卡可演示计数条；reset 清空）
 let mockNetworkProxyStats: NetworkProxyStats[] = [
   { host: 'api.anthropic.com', proxied: 12, direct: 0 },
   { host: 'openrouter.ai', proxied: 4, direct: 8 },
@@ -1937,7 +1937,7 @@ export const search = {
    * 按查询过滤四类数据，空查询返回 recent + suggested。
    * W1 i18n-frontend-p2：返回 Section[] 带 kind 字段（recent/suggested/command/file/symbol/session），
    * 供 SearchModal kind-based 判定用（不再依赖中文字面量 s.label === '最近' 比较）。
-   * label 仍为本地化文案（mock 内联 zh-CN 默认值，real 轨 useSearch 统一走 i18n.t）。
+   * label 仍为本地化文案（mock 内联 zh-CN 默认值，真实进程层 useSearch 统一走 i18n.t）。
    */
   async query(q: string): Promise<Section[]> {
     await sleep(TIMING.ack)
@@ -2153,7 +2153,7 @@ export const quota: QuotaDomain = quotaImpl
 
 /* ── Usage mock（[C3] usage.getStats seam 收编配套：settings 页用量统计全 seam 可用）── */
 // mock 无 session JSONL 扫描，返回小型 fixture（2 条日级用量行）让 UsagePage 演示链路完整；
-// real 轨扫真实会话聚合。
+// 真实进程层扫真实会话聚合。
 const MOCK_USAGE_INPUT_TOKENS = 12_000
 const MOCK_USAGE_OUTPUT_TOKENS = 3_400
 const MOCK_USAGE_CACHE_READ_TOKENS = 8_000
@@ -2197,7 +2197,7 @@ const workspaceImpl = {
     // Mock record：模拟写入后返回最新列表（与 listRecent 一致，简化实现）
     return listRecentRecords()
   },
-  // detect：mock 恒返 not-repo（三态检测，real 轨驱动）
+  // detect：mock 恒返 not-repo（三态检测，真实进程层驱动）
   async detect(_cwd: string): Promise<import('@taiji/shared').ServerMessageMap['workspace.detected']> {
     return { mode: 'not-repo', wsRoot: '', barePath: '', repoRoot: '', defaultBranch: '' }
   },
@@ -2208,7 +2208,7 @@ export type WorkspaceDomainParamsExact = AssertExact<DomainParamsExact<Workspace
 export const workspace: WorkspaceDomain = workspaceImpl
 
 // project 域 mock 占位（D14，2026-08-04）：mock 模式无 runtime，project 列表回退默认空态。
-// 与 real 轨 api/domains/project.ts 签名同构（load/save），避免门面三元崩溃。
+// 与 真实进程层 api/domains/project.ts 签名同构（load/save），避免门面三元崩溃。
 const projectImpl = {
   async load(): Promise<import('@taiji/shared').ProjectStoreState> {
     return { projects: [], activeProjectId: '' }
@@ -2225,7 +2225,7 @@ export type ProjectDomainParamsExact = AssertExact<DomainParamsExact<ProjectDoma
 export const project: ProjectDomain = projectImpl
 
 // preset 域 mock（pi-launch-presets wave1）：返回内置预设目录 + 默认全工具模式 id。
-// 与 real 轨 api/domains/preset.ts 签名同构（list/getDefault/setDefault + CRUD），避免门面三元崩溃。
+// 与 真实进程层 api/domains/preset.ts 签名同构（list/getDefault/setDefault + CRUD），避免门面三元崩溃。
 // mock 无自定义预设持久化（CRUD 只改内存），但**内置目录必须非空**：模式可见性三态判定
 // （u5 设计 D5）把「presets 空 + 无错误」当「未加载 → 不渲染」，空列表会让非默认模式会话的
 // chip / 声明行永远落不到正常分支——[u7a] 补 DEFAULT_PRESETS 后 mock fixture 的
@@ -2355,8 +2355,8 @@ const ttsImpl = {
   },
 
   /**
-   * mock 恒以 tts_not_configured 失败（与 real 轨「未配置」错误路径同形，供按钮/toast
-   * 状态机与错误码→i18n 映射在 mock 轨开发；真实合成链验收归 runtime 轨）。
+   * mock 恒以 tts_not_configured 失败（与 真实进程层「未配置」错误路径同形，供按钮/toast
+   * 状态机与错误码→i18n 映射在 mock 层开发；真实合成链验收归 runtime 层）。
    */
   async speak(_payload: { sessionId?: string; text: string }): Promise<ServerMessageMap['tts.speak:result']> {
     await sleep(TIMING.ack)

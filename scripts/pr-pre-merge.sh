@@ -14,7 +14,7 @@
 #                                                         #   result 反映 typecheck + lint
 #   bash scripts/pr-pre-merge.sh --test-result PASS|FAIL  # 终局 gate（流程阶段 3a）：
 #                                                         #   typecheck 五处 + lint + test:runtime 实跑
-#                                                         #   （无插桩；TAIJI_SKIP_REAL_PI=1 只跑 unit 轨，
+#                                                         #   （无插桩；TAIJI_SKIP_REAL_PI=1 只跑 单测层，
 #                                                         #   e2e 不在 PR/merge 承接）；test:extensions/renderer
 #                                                         #   不执行，以注入值计入 result
 #
@@ -295,7 +295,7 @@ fi
 run_step "lint" pnpm run lint
 
 # ── Step 3: test（extensions + runtime + renderer 三条线；按模式取舍）
-# [e2e 执行准则] PR/merge 门禁不跑 e2e：test:runtime 以 TAIJI_SKIP_REAL_PI=1 跑 unit 轨
+# [e2e 执行准则] PR/merge 门禁不跑 e2e：test:runtime 以 TAIJI_SKIP_REAL_PI=1 跑 单测层
 #（与 CI test-runtime job 同口径）；真实 pi 等价性用例只在开发阶段按改动范围跑
 #（清单由 tech-design e2e 影响面评估 + dev-flow 验收计划表圈定，SSOT = AGENTS.md「测试」节）
 if [[ "$MODE" == "default" ]]; then
@@ -310,7 +310,7 @@ if [[ "$MODE" == "default" ]]; then
 elif [[ "$MODE" == "test-result" ]]; then
     # extensions / renderer 线由 coverage-gate 承接（插桩口径），此处不重复执行，
     # 判定以注入值计入最终 result；runtime 线实跑——无插桩，TAIJI_SKIP_REAL_PI=1 跑
-    # unit 轨（e2e 执行准则：real-pi 不在 PR/merge 承接，开发阶段按改动范围跑）
+    # 单测层（e2e 执行准则：real-pi 不在 PR/merge 承接，开发阶段按改动范围跑）
     log "  ↷ test:extensions skipped（--test-result 注入: ${TEST_RESULT_INJECT}）"
     RESULTS+=("SKIP test:extensions 0s (injected=${TEST_RESULT_INJECT})")
     run_step "test:runtime" bash -c 'cd packages/runtime && TAIJI_SKIP_REAL_PI=1 npx vitest run'

@@ -15,7 +15,7 @@
  * 保存与编辑体保存合流到同一 `setProvider`（quotaAutoEnabled reply 透传语义不变）。
  *
  * 两个 adapter 证明 seam 真实：real adapter（renderer settings-transport-adapter，
- * 转发 @/api/WS 命令）+ mock adapter（@/api 三元的 mock 轨，core/transport/mock）。
+ * 转发 @/api/WS 命令）+ mock adapter（@/api 三元的 mock 层，core/transport/mock）。
  *
  * 注入机制（C-W1-2）：仿 platform/port.ts 模块级单例模式——provideSettingsTransport
  * 注入、getSettingsTransport 注入前调用 fail-fast 抛错（防隐式 undefined）。

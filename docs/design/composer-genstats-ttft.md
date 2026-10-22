@@ -92,11 +92,11 @@ composer 右下工具带（`Composer.vue` composer-bar）已展示生成指标�
 
 - **受影响登记资产**（按 `docs/testing/e2e-map.json` scope 人工预列，阶段 1 与 `select-affected-e2e.mjs --base <基线>` 机器对账、双向披露差异后落定）：
   - `E2E-ELECTRON-01`（scope 含 `packages/renderer/src/**`，L1 always，CI 固定）→ **跑**
-  - `E2E-VISUAL-01`（scope 含 `packages/renderer/src/**`，L1 CI 像素轨，含 composer 视觉 spec）→ **跑**
-  - `E2E-MOCK-01`（行为轨，scope 含 renderer 面时命中）→ **跑（以机器对账命中为准；命中则空载串行）**
+  - `E2E-VISUAL-01`（scope 含 `packages/renderer/src/**`，L1 CI 像素对比层，含 composer 视觉 spec）→ **跑**
+  - `E2E-MOCK-01`（行为 mock 层，scope 含 renderer 面时命中）→ **跑（以机器对账命中为准；命中则空载串行）**
   - `E2E-EQUIV-01`（等价性双轨，scope 含 runtime 事件管道时命中）→ **跑（同上以命中为准，只跑受影响子集）**
-- **不跑**：真实 LLM 自动化 e2e —— 本仓库无 TTFT 既有真机 e2e 资产；S1/S2 真机验收走阶段 5 人工/agent 端到端（L4），不建新真实 LLM 自动化轨（成本 > 收益，且 CI 门禁不跑真实 LLM）。
-- CI / PR / merge 门禁只承担 unit 轨（项目 AGENTS.md 测试节口径）。
+- **不跑**：真实 LLM 自动化 e2e —— 本仓库无 TTFT 既有真机 e2e 资产；S1/S2 真机验收走阶段 5 人工/agent 端到端（L4），不建新真实 LLM 自动化层（成本 > 收益，且 CI 门禁不跑真实 LLM）。
+- CI / PR / merge 门禁只承担 单测层（项目 AGENTS.md 测试节口径）。
 
 ### 4.3 场景 → 实现回溯
 

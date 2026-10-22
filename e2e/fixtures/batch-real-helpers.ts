@@ -1,5 +1,5 @@
 /**
- * batch-real 系 spec 共享 helpers —— 真实 LLM 轨「凭证门与播种 / 诊断与扫描 / run 介质锚」
+ * batch-real 系 spec 共享 helpers —— 真实 LLM 层「凭证门与播种 / 诊断与扫描 / run 介质锚」
  * 的单一实现（原 batch-s1/s3/s4、batch-window-*、batch-zsl、batch-cr、btw-turn-isolation
  * 各自头注「同款范式」的拷贝收敛单点）。
  *
@@ -32,7 +32,7 @@ import {
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-/** 仓根 / e2e 采样项目路径（real 轨 spec 共享——原各 spec 头部同构派生收敛单点）。 */
+/** 仓根 / e2e 采样项目路径（真实进程层 spec 共享——原各 spec 头部同构派生收敛单点）。 */
 export { REPO_ROOT }
 export const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-project')
 
@@ -286,8 +286,8 @@ export async function waitRealAppReady(page: Page, dataDir: string, tag: string,
 }
 
 /**
- * 真实 LLM 轨双凭证门（在 test 体内调用）：预算 + TAIJI_PI_LIVE 门 + 本机 provider 凭证门
- * （缺一 skip 不 fail——防全量扫跑烧 token；CI/PR/merge 门禁不跑本轨）。
+ * 真实 LLM 层双凭证门（在 test 体内调用）：预算 + TAIJI_PI_LIVE 门 + 本机 provider 凭证门
+ * （缺一 skip 不 fail——防全量扫跑烧 token；CI/PR/merge 门禁不跑本组）。
  */
 export function applyRealTrackGate(
   testFn: { setTimeout(ms: number): void; skip(condition: unknown, description?: string): void },
@@ -296,7 +296,7 @@ export function applyRealTrackGate(
   testFn.setTimeout(opts.timeoutMs)
   testFn.skip(
     process.env['TAIJI_PI_LIVE'] !== '1',
-    '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则——开发期按改动范围手动触发，CI/门禁不跑）',
+    '真实 LLM 层门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则——开发期按改动范围手动触发，CI/门禁不跑）',
   )
   const credSkip = realCredentialSkipReason(opts.tag, opts.envVar)
   testFn.skip(credSkip !== null, credSkip ?? '')
@@ -304,7 +304,7 @@ export function applyRealTrackGate(
 
 // ── session / journal / notify 锚 ─────────────────────────────────────────
 
-/** real 轨 spec 共享收尾（各 spec finally 单行调用）：listener 关闭 → app cleanup →
+/** 真实进程层 spec 共享收尾（各 spec finally 单行调用）：listener 关闭 → app cleanup →
  *  临时 dataDir 清理（PLAYWRIGHT_DEBUG_KEEP_DATA 置位时保留现场）。listener 关闭
  *  异常不阻断后续清理（swallow——清理链继续）。 */
 export async function cleanupRealTrackApp(opts: {

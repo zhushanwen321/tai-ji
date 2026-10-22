@@ -423,7 +423,7 @@ describe('Host 容器（黑盒 DOM + D10 回落）', () => {
     wrapper.unmount()
   })
 
-  it('关闭态 DOM 零痕迹（壳 v-if 不渲染——像素轨基线安全）', () => {
+  it('关闭态 DOM 零痕迹（壳 v-if 不渲染——像素对比层基线安全）', () => {
     const wrapper = mount(WorkflowVizOverlayHost)
     expect(wrapper.find('[data-testid="wfvz-overlay"]').exists()).toBe(false)
     wrapper.unmount()
