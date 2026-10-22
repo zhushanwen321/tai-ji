@@ -214,7 +214,7 @@ export const MODAL_SURFACE_MANIFEST = [
     family: 'overlay-shell',
     kind: 'excluded',
     zAnchors: [
-      { file: 'packages/renderer/src/components/panel/workflow-viz/overlay/OverlayShell.vue', form: 'class-token', literal: 'var(--z-modal)', count: 1 },
+      { file: 'packages/renderer/src/components/panel/workflow-viz/overlay/OverlayShell.vue', form: 'class-token', literal: 'var(--z-dialog)', count: 1 },
     ],
     basis: '§6.7 末段：浮层壳自身不入聚合——它是容器不是模态，Esc 由编排器层级序管理，view 可见性受浮层内容切换/错误态支配（§7.4）；z 锤点随 u-w2-shell 壳抽取落位 OverlayShell.vue（原 WorkflowVizOverlay.vue 同字面量随迁移清空）',
   },
