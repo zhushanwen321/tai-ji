@@ -58,6 +58,11 @@ cd packages/runtime && npx tsc --noEmit
 node scripts/verify-scheduler-e2e.cjs
 ```
 
+已知坑两条：
+
+- apps/electron main 测试唯一正确入口 = `pnpm --filter @taiji/electron run test:main`（script = `cd main && vitest run`，CI 同款）——`cd apps/electron && pnpm exec vitest run main/test/...` 与 `cd apps/electron/main && pnpm exec vitest run ...` 都会因 config 解析上浮到 `apps/electron/vitest.config.ts`（include 只有 scripts/__tests__）报 no tests found；带文件参数经 `pnpm run test:main <路径>` 透传（路径相对 `apps/electron/main/`，如 `test/updater-script-integration.test.ts`）。
+- renderer 测试 setupFiles（vitest-settings-transport-setup.ts / vitest-i18n-setup.ts）静态 import `@taiji/core`，真实 ws-client 随之进入模块缓存——测试文件以相对路径 mock core 内部模块（如 `vi.mock('...core/src/transport/ws-client')`）时须先 `vi.resetModules()` 清缓存一次再装载被测模块图（beforeAll 内一次即可），否则 mock 不生效、表现为真连 ws://localhost:3310。
+
 ### 测试数据隔离防线（test-guard，仓库级强制）
 
 > 规则 SSOT = AGENTS.md「测试」节「测试禁止触碰真实数据目录」。双层防线原为 runtime 包私有（2026-09-02 会话丢失事故后固化在 runtime vitest），2026-09-16 升级为仓库级强制——从非包 cwd 误跑 workspace 全仓 vitest 时 runtime 配置不加载、防线整段失效，测试删光 prod 数据目录（2026-09-16 同族事故）。
@@ -100,9 +105,9 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 
 **引擎包特例**：`packages/pi-subagent-cli` 与 `packages/zcode-subagent-cli` 受引擎包边界检查（`scripts/check-engine-package-boundary.mjs`）约束——src 内相对说明符不得逃出包根，测试文件**不** import 仓库根的 `test-guard/integration-gate.ts`，改 import 包内副本（`packages/pi-subagent-cli/src/__tests__/integration-gate.local.ts` 与 `packages/zcode-subagent-cli/src/__tests__/integration-gate.local.ts`，同语义读同名 env、注释指回本节；改语义时与 SSOT 同步）。env 名的语义权威仍在 `test-guard/integration-gate.ts`，包内副本只是边界约束下的投影。
 
-**e2e-map 登记要求**：两种形态的资产都要在 [docs/testing/e2e-map.json](testing/e2e-map.json) 登记 R2 规则——`trigger: on-diff`、`layer: L2`、`serial: true`、`run` 命令形如 `TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run <文件>`；`scope` 取该测试 import 的被测源文件（宁全勿缺）；`id` 取 `E2E-INTEG-两位序号`（域段只允许一段——`scripts/validate-e2e-map.mjs` 的 id 正则 `E2E-<域>-<两位序号>` 不接受 `INTEG-RT` 式两段域，包归属落 `owner` 字段；域段已登记在 `_meta.fields.id`）。现行 10 条 = runtime 集成组全体成员。防漏登记门禁 = `scripts/select-affected-e2e.mjs --check`，结构校验 = `scripts/validate-e2e-map.mjs`。
+**e2e-map 登记要求**：两种形态的资产都要在 [docs/testing/e2e-map.json](testing/e2e-map.json) 登记 R2 规则——`trigger: on-diff`、`layer: L2`、`serial: true`、`run` 命令形如 `TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run <文件>`；`scope` 取该测试 import 的被测源文件（宁全勿缺）；`id` 取 `E2E-INTEG-两位序号`（域段只允许一段——`scripts/validate-e2e-map.mjs` 的 id 正则 `E2E-<域>-<两位序号>` 不接受 `INTEG-RT` 式两段域，包归属落 `owner` 字段；域段已登记在 `_meta.fields.id`，序号按包顺序分配）。现行 53 条 = runtime 文件级集成组（E2E-INTEG-01..10）+ 各包用例级门控资产（E2E-INTEG-11..53：runtime 杂项与控制通道 / subagent-core / pi 与 zcode 引擎 CLI / zcode-session-source 慢轨 / renderer 重扫护栏 / extension-protocol 类型门禁 / subagent-workflow / base-tool-enhance / file-lock / apps/electron 升级脚本），逐条以 e2e-map 实际条目为准。防漏登记门禁 = `scripts/select-affected-e2e.mjs --check`，结构校验 = `scripts/validate-e2e-map.mjs`。
 
-**CI 接线**：覆盖「有门控文件的包」的既有 test job 在测试步骤设 `TAIJI_TEST_INTEGRATION: '1'`（现行 = ci.yml 的 `test-runtime`）；不为此新建 job。某包新增集成组时，同 commit 给覆盖它的 test job 补同一 env。
+**CI 接线**：覆盖「有门控文件的包」的既有 test job 在测试步骤设 `TAIJI_TEST_INTEGRATION: '1'`（现行 = ci.yml 的 `test-runtime` / `test-renderer` / `test-main` / `test-extensions` 四个 job）；不为此新建 job。`scripts/check-bun-driver.mjs` 的 bun 趟（invariants job，zcode-session-source 的 bun 运行时驱动路径）spawn env 同设 `TAIJI_TEST_INTEGRATION: '1'`——慢轨用例默认跳过会使 bun 趟对 sqlite 恢复阶梯零覆盖。subagent-core 的门控轨与 zcode-session-source 的 node 轨不在 CI 常驻 job 内，按改动范围本地触发（run 命令见 e2e-map 对应规则 E2E-INTEG-27..34 / 41-42）。某包新增集成组时，同 commit 给覆盖它的 test job 补同一 env。
 
 ## 3. 三视角模型 + 渲染 gate DoD [HISTORICAL — 2026-06-27「新建任务」事故]
 
