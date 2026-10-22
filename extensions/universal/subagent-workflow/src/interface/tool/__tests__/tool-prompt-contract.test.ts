@@ -499,8 +499,10 @@ describe("workflow_run promptGuidelines 契约（U1/TC4 拆分重排）", () => 
 
   it("workflow_control promptGuidelines 含 status/abort/resume call shapes 与 resume 语义", () => {
     const guidelines = promptGuidelinesText(CONTROL_SECTION);
-    // guidelines 源码内 JSON 是转义形态（\"action\"）
+    // guidelines 源码内 JSON 是转义形态（\"action\"）；status 锚双形态——无 runId 列表
+    // + 带 runId 单 run 成员表（subagentsStartupText / 注入段教模型的就是带 runId 形态）
     expect(guidelines).toContain('{\\"action\\":\\"status\\"}');
+    expect(guidelines).toContain('{\\"action\\":\\"status\\",\\"runId\\":\\"<id>\\"}');
     expect(guidelines).toContain('{\\"action\\":\\"abort\\",\\"runId\\":\\"<id>\\"}');
     expect(guidelines).toContain('{\\"action\\":\\"resume\\",\\"runId\\":\\"<id>\\"');
     expect(guidelines).toContain("ONLY for interrupted runs");

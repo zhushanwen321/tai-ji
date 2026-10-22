@@ -24,8 +24,9 @@
  * - D8 describe 首条必须在任何 setCatalogService 调用之前执行（声明序 = 执行序）：
  *   setModelConfigService 无复位情形，单例 set 后「目录缺席」防御分支不可再达。
  *
- * mock 策略：lifecycle 深路径 stub（runWorkflow/abortRun 为 vi.fn——不起真
- * Worker，只测启动面与入口校验）。范式：captureTool 注册层黑盒。框架：vitest。
+ * mock 策略：lifecycle 深路径部分 stub（runWorkflow/abortRun 为 vi.fn——不起真
+ * Worker，只测启动面与入口校验；其余导出经 importOriginal 展开保真，见 mock 处注释）。
+ * 范式：captureTool 注册层黑盒。框架：vitest。
  */
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,6 +38,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ArgsValidationError,
   Budget,
+  MAX_RETAINED_DONE_RUNS,
   SLUG_MAX_LENGTH,
   Trace,
   WorkflowRun,
@@ -69,11 +71,16 @@ import { captureTool, type CapturedTool } from "./capture-tool.ts";
 // status {runId} 成员查询的 record 拉取上限（生产消费点与 TUI run 视图同源口径）
 import { LIST_LIMIT } from "../../tui/list-shared.ts";
 
-/** 桩化 lifecycle——runWorkflow/abortRun 为 vi.fn（不起真 Worker，只测启动面/入口校验）。 */
-vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", () => ({
-  runWorkflow: vi.fn(),
-  abortRun: vi.fn(),
-}));
+/** 桩化 lifecycle——runWorkflow/abortRun 换 vi.fn（不起真 Worker，只测启动面/入口校验），
+ *  其余导出经 importOriginal 展开保真实模块：runNotFoundError 的超窗口文案随
+ *  MAX_RETAINED_DONE_RUNS 插值后，生产与断言须读到同一常量——裸工厂会把该常量
+ *  折成 undefined，插值文案失锚。 */
+vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@zhushanwen/subagent-core/orchestration/lifecycle.ts")
+  >();
+  return { ...actual, runWorkflow: vi.fn(), abortRun: vi.fn() };
+});
 
 // 顶层 mock 生命周期（合并自原 run-builtin-name / model-rejection 两文件的
 // 同构 beforeEach/afterEach；abort 用例另在 stubAbortTransition 内重置 abortRun）
@@ -526,7 +533,8 @@ describe("status {runId} 单 run 视图（成员表 + failed N/M + 查无两种�
       .execute("id", { action: "status", runId }, undefined, undefined, {})
       .catch((e: unknown) => e as Error);
     expect(err.message).toContain("settled and no longer in the in-memory retention window");
-    expect(err.message).toContain("the most recent 20 settled runs are kept");
+    // 保留窗口数随 core 同一常量插值锁定（不锚死字面量——常量改值时文案与断言同动）
+    expect(err.message).toContain(`the most recent ${MAX_RETAINED_DONE_RUNS} settled runs are kept`);
     expect(err.message).toContain("completion notification");
     // 省略 runId 列全部不是超窗口的恢复动作（列表同样不含已逐出 run）
     expect(err.message).not.toContain("without runId");

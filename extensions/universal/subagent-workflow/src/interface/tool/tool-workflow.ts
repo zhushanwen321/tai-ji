@@ -4,9 +4,9 @@
  * 拆为两工具（命名与 schedule_control 同族）：
  * - `workflow_run`：registry.getPath → runWorkflow（直接启动，无需用户确认；name 必填
  *   由 schema 表达）
- * - `workflow_control`（action: status/abort/resume）：status 列出 runs（deps.runs）、
- *   abort 调 abortRun、resume 调 resumeRun（interrupted 态 run 断点续跑，D14 args
- *   校验在入口）
+ * - `workflow_control`（action: status/abort/resume）：status 无 runId 列出 runs
+ *   （deps.runs）/ 带 runId 返回该 run 成员表（statusSingleRun）、abort 调 abortRun、
+ *   resume 调 resumeRun（interrupted 态 run 断点续跑，D14 args 校验在入口）
  *
  * **resume 是中断恢复不是挂起恢复**：仅 interrupted 态 run 可续（崩溃收编 / terminate
  * 被动失联后的断点续跑，workflow-run-resume-revision U3/D14），不是把活跃 run 暂停再继续。
@@ -45,6 +45,7 @@ import { getModelConfigService } from "@zhushanwen/subagent-core";
 import {
   argKeysFromMeta,
   findFlattenedArgKeys,
+  MAX_RETAINED_DONE_RUNS,
   MAX_TIMER_DELAY_MS,
   workflowNotFoundMessage,
 } from "@zhushanwen/subagent-core";
@@ -133,9 +134,9 @@ const WorkflowRunParams = Type.Object({
 });
 
 const WorkflowControlParams = Type.Object({
-  action: StringEnum(WORKFLOW_CONTROL_ACTIONS, { description: "Control operation: 'status' lists runs, 'abort' stops one, 'resume' continues an interrupted run" }),
+  action: StringEnum(WORKFLOW_CONTROL_ACTIONS, { description: "Control operation: 'status' without runId lists runs / with runId returns that run's member table, 'abort' stops one, 'resume' continues an interrupted run" }),
   runId: Type.Optional(
-    Type.String({ description: "Workflow run ID (abort / resume; find via action:status)" }),
+    Type.String({ description: "Workflow run ID (status with runId returns that run's member table; abort / resume; find ids via action:status without runId)" }),
   ),
   args: Type.Optional(
     Type.Record(Type.String(), Type.Unknown(), {
@@ -353,7 +354,7 @@ export function registerWorkflowTool(
     name: "workflow_control",
     label: "Workflow Control",
     description:
-      "Control workflow runs: status (list), abort (stop a run), resume (continue an interrupted run).\n" +
+      "Control workflow runs: status (without runId = list runs; with runId = that run's member table), abort (stop a run), resume (continue an interrupted run).\n" +
       "Runs are one-shot (no pause): stop early with abort; for a settled run start a new one via `workflow_run`.",
     promptSnippet: "Check, abort, or resume workflow runs",
     promptGuidelines: [
@@ -361,7 +362,7 @@ export function registerWorkflowTool(
       // 调用形状与「不得 resume 已终态 run」的纪律条（锚词清单见 tool-prompt-contract.test.ts）。
       "resume is ONLY for interrupted runs (crash or session-switch): it replays completed calls at zero token cost and continues. Do NOT resume a settled (done/failed/cancelled) run — start a new run via `workflow_run`.",
       "Call shapes (JSON): " +
-      "- status: {\"action\":\"status\"}. " +
+      "- status: {\"action\":\"status\"} — or {\"action\":\"status\",\"runId\":\"<id>\"} for a single run's member table. " +
       "- abort: {\"action\":\"abort\",\"runId\":\"<id>\"}. " +
       "- resume: {\"action\":\"resume\",\"runId\":\"<id>\"} (+ optional args/tokens/time/model).",
     ],
@@ -720,7 +721,7 @@ function runNotFoundError(runId: string, deps: LauncherDeps): Error {
   if (existsSync(deps.store.stateFilePath(runId))) {
     return new Error(
       `Workflow run '${runId}' is settled and no longer in the in-memory retention window ` +
-      `(the most recent 20 settled runs are kept). Recover its results from the run's completion ` +
+      `(the most recent ${MAX_RETAINED_DONE_RUNS} settled runs are kept). Recover its results from the run's completion ` +
       `notification — a status listing will not include it.`,
     );
   }
