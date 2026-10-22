@@ -13,6 +13,7 @@
 | [subagent-core-d1-residual-edges.md](subagent-core-d1-residual-edges.md) | D1③ 拆边残余：2 条显式豁免反向值边 + 1 条转发路径残留（2026-10-11 源码核实） | §2.0 D1 / §2.3 |
 | [subagent-d5-nested-dispatch-verification.md](subagent-d5-nested-dispatch-verification.md) | D5 真机嵌套验收（父→子→孙真实派发） | §2.0 D5 / §2.7 |
 | [subagent-reload-replacement-window-recheck.md](subagent-reload-replacement-window-recheck.md) | reload // /new 替换窗真机复验 + supervisor 重启循环归因 | §6.1 |
+| [workflow-reserved-key-channel-nested-required.md](workflow-reserved-key-channel-nested-required.md) | workflow_run 保留键通道解释误判嵌套 required 同名键（missingRequiredKeysOf 未过滤 instancePath，minor） | dev-merge-gates 横切审查残余（2026-10-23） |
 | [zcode-provider-wiring-recheck.md](zcode-provider-wiring-recheck.md) | zcode Provider Registry / reasoningLevel 接线真机复验（随 a1a4 复跑） | §6.2 |
 
 已关闭不再单独立项：§3.3 遗留③的文档治理终裁——session-reader 两份 2026-08-10 日期归档设计笔记（subagent-workflow-reading / cwd-popup-redesign）已删除（commit 4ffeef5fa，现行能力语义由包 README 与 `docs/workflow-record-formats.md` 承载），删除 vs 保留终裁落定，本项关闭。
