@@ -71,9 +71,11 @@ export const CENSUS_SNAPSHOT = {
   'packages/ui/src/extension-host/dialog-request-queue.ts': 1,
 }
 
-/** 收集全仓非测试源码（.ts/.tsx/.vue）中的工厂调用点：{ 仓库相对路径: 调用次数 }。
+/** 收集非测试源码（.ts/.tsx/.vue）中的工厂调用点：{ 扫描根相对路径: 调用次数 }。
+ *  rootDir 缺省 = 仓库根（CLI / pre-commit 全仓形态）；单测传 fixture 目录验证
+ *  扫描机制本身（剪枝/排除/计数），不递归全仓（单测层只测逻辑、高负载极快）。
  *  不可读目录 stderr 告警后跳过（降级显形，不计入违规判定）。 */
-export function collectCallSites() {
+export function collectCallSites(rootDir = REPO_ROOT) {
   const out = {}
   const walk = (dir) => {
     let entries
@@ -95,10 +97,10 @@ export function collectCallSites() {
       if (/\.(spec|test)\.(ts|tsx|vue)$/.test(entry.name)) continue // 测试文件
       if (abs.includes(`${path.sep}__tests__${path.sep}`)) continue
       const count = countFactoryCalls(abs)
-      if (count > 0) out[path.relative(REPO_ROOT, abs)] = count
+      if (count > 0) out[path.relative(rootDir, abs)] = count
     }
   }
-  walk(REPO_ROOT)
+  walk(rootDir)
   return out
 }
 

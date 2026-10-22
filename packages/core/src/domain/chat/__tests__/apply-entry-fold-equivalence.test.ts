@@ -7,8 +7,9 @@
  * 1. 产物同构：混合全类型序列两条路径全量 state deep-equal（messages / orphanToolResults /
  *    deliveredToolResultIds / lastAssistantWithToolCalls 非抽样）；
  * 2. 输入纯度：entries 与 initial（含非空 initial 接续场景）均不被 mutable fold mutate；
- * 3. 长序列形态：10k 条无 id entry 的 fold 正确性 + `e<N>` 确定性 id 全程唯一（O(n) 路径
- *    的结构验证，不计时——性能画像归基准工具）。
+ * 3. 长序列形态：500 条无 id entry 的 fold 正确性 + `e<N>` 确定性 id 全程唯一 + 0/1/2
+ *    边界微用例（结构验证，不计时——性能画像归基准工具；数据量按「逻辑等价最小规模」
+ *    缩档，判据见 docs/todo/test-single-layer-cleanup.md）。
  *
  * 行为级具体断言（role 细分 / 回填字段 / 分组渲染）在 apply-entry.test.ts 与
  * apply-entry-equivalence.test.ts，本文件不重复。
@@ -47,6 +48,16 @@ function mixedEntries(): PiEntry[] {
     { type: 'custom_message', id: 'cmb-1', parentId: null, timestamp: ISO(800), customType: 'goal-context', content: '<goal_context>x</goal_context>', display: true, details: { k: 1 } },
     { type: 'model_change', id: 'mc-1', parentId: null, timestamp: ISO(810), provider: 'p', modelId: 'm' },
   ] as unknown as PiEntry[]
+}
+
+/** 无 id user entry 序列（`e<N>` 确定性 id 派生路径的载体；n 含 0/1/2 边界档） */
+function idLessEntries(n: number): PiEntry[] {
+  return Array.from({ length: n }, (_, i) => ({
+    type: 'message',
+    parentId: null,
+    timestamp: ISO(i),
+    message: { role: 'user', content: [{ type: 'text', text: `m${i}` }], timestamp: i },
+  }))
 }
 
 describe('replayEntries(mutable fold) ≡ reduce(applyEntry) 元断言', () => {
@@ -122,20 +133,28 @@ describe('replayEntries(mutable fold) ≡ reduce(applyEntry) 元断言', () => {
     expect(replayEntries([])).toEqual(createInitialChatViewState())
   })
 
-  it('长序列（10k 条无 id user entry）：id e0..e9999 确定性唯一，fold 与 reduce 产物全等', () => {
-    const entries: PiEntry[] = Array.from({ length: 10_000 }, (_, i) => ({
-      type: 'message',
-      parentId: null,
-      timestamp: ISO(i),
-      message: { role: 'user', content: [{ type: 'text', text: `m${i}` }], timestamp: i },
-    }))
+  it('长序列（500 条无 id user entry）：id e0..e499 确定性唯一，fold 与 reduce 产物全等', () => {
+    const entries = idLessEntries(500)
     const viaFold = replayEntries(entries)
     const viaReduce = entries.reduce(applyEntry, createInitialChatViewState())
     expect(viaFold).toEqual(viaReduce)
-    expect(viaFold.messages).toHaveLength(10_000)
+    expect(viaFold.messages).toHaveLength(500)
     expect(viaFold.messages[0]?.id).toBe('e0')
-    expect(viaFold.messages[9_999]?.id).toBe('e9999')
-    expect(new Set(viaFold.messages.map((m) => m.id))).toHaveLength(10_000)
+    expect(viaFold.messages[499]?.id).toBe('e499')
+    expect(new Set(viaFold.messages.map((m) => m.id))).toHaveLength(500)
+  })
+
+  it('无 id 边界微用例（0/1/2 条）：id 自 e0 起连续派生，fold 与 reduce 产物全等', () => {
+    for (const n of [0, 1, 2]) {
+      const entries = idLessEntries(n)
+      const viaFold = replayEntries(entries)
+      const viaReduce = entries.reduce(applyEntry, createInitialChatViewState())
+      expect(viaFold, `n=${n}`).toEqual(viaReduce)
+      expect(viaFold.messages, `n=${n}`).toHaveLength(n)
+      expect(viaFold.messages.map((m) => m.id), `n=${n}`).toEqual(
+        Array.from({ length: n }, (_, i) => `e${i}`),
+      )
+    }
   })
 
   /** 头段序列的 reduce 终态（非空 initial 接续用例的基座） */

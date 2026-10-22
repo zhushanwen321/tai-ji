@@ -70,10 +70,12 @@ function extractDataCode(html: string): string {
   return m![1]
 }
 
-/** 分块边界压力文本：总字节远超 2×CHUNK(0x8000)，多字节字符（中文 3B / emoji 4B）大量分布，
- *  分块边界必然落在多字节 UTF-8 序列内部——字节级切分正确性由对拍锁定 */
+/** 分块边界压力文本：总字节 ≈175KB（多倍于 2×CHUNK(0x8000)），多字节字符（中文 3B /
+ *  emoji 4B）大量分布，分块边界必然落在多字节 UTF-8 序列内部——字节级切分正确性由对拍
+ *  锁定。数据量取「跨多分块 + 边界落多字节」的最小充分规模（逻辑等价缩量，判据见
+ *  docs/todo/test-single-layer-cleanup.md），不追求量。 */
 const LARGE_TEXT =
-  'a'.repeat(40000) + '中文注释'.repeat(20000) + '😀🎉'.repeat(5000) + 'const x = 1;\n'.repeat(3000)
+  'a'.repeat(20000) + '中文注释'.repeat(10000) + '😀🎉'.repeat(2500) + 'const x = 1;\n'.repeat(1500)
 
 describe('encodeBase64 输出逐字节不变（fence data-code 对拍）', () => {
   beforeEach(() => {

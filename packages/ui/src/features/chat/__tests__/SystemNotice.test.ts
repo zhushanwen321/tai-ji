@@ -233,6 +233,8 @@ function bashMessage(over: Omit<Partial<Message>, 'details'> & { details?: unkno
  * 完成即可，条件成立自适应，不赌固定余量。负路径（无 detail 的行不弹面板）：waitFor
  * 回调挂「墙钟已过 260ms 观察窗」检查（> open-delay 150ms），未过窗持续重试、过窗仍无
  * 才返回 null——保持原固定等待的观察窗强度，避免负断言在 open-delay 生效前空过。
+ * 预算 1000ms = 必要值：负路径观察窗 260ms 是硬下限（预算低于它则负路径结构性假红），
+ * 正路径绿路空载 ~190ms / 负路径 ~316ms，余量 2-5 倍轮询轮数（interval 50ms）。
  * afterEach 兑现清理（防 portal 残留）。
  */
 async function openDetailAndQuery(wrapper: { find: (sel: string) => { trigger: (ev: string) => Promise<void> } }): Promise<Element | null> {
@@ -245,7 +247,7 @@ async function openDetailAndQuery(wrapper: { find: (sel: string) => { trigger: (
       expect(Date.now() - startedAt).toBeGreaterThanOrEqual(260)
       return null
     },
-    { timeout: 2000, interval: 50 },
+    { timeout: 1000, interval: 50 },
   )
 }
 

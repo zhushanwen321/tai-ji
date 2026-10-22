@@ -13,6 +13,12 @@
  * timer 惯例：stall 触发窗口用 fake timers 验证默认 60s（D3-2）；不误杀 / timeout
  * 旋钮连通用真实短定时器（经 options.timeout 传入小值，D3-2 单旋钮语义）。
  *
+ * 集成门控（2026-10-22 单测层极端测试整治）：「不误杀与旋钮」组的 3 条依赖真实
+ * TCP/TLS 传输完成（trickle 限速 ~1s 真实传输 / 真实短定时器触发），传输墙钟在满载下
+ * 无确定性完成信号可等（判据第三档）——经 TAIJI_TEST_INTEGRATION 门控（SSOT =
+ * test-guard/integration-gate.ts）本地默认跳过；stall 窗口触发语义（fake timers 推进
+ * 60s 窗口）与完整成功路径回归保留本地默认组。
+ *
  * 运行：cd packages/runtime && npx vitest run test/npm-installer-tarball-stall.test.ts
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
@@ -26,6 +32,7 @@ import zlib from 'node:zlib'
 import crypto from 'node:crypto'
 import * as tar from 'tar'
 import { installPackage, NpmInstallError } from '../src/infra/installers/npm-installer.js'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../test-guard/integration-gate.ts'
 
 // ── 证书 fixture（自签 localhost，仅测试用）────────────────────────────
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'test-localhost-cert')
@@ -295,7 +302,11 @@ describe('tarball stall 兜底 — 触发路径（默认 60s 窗口，fake timer
   })
 })
 
-describe('tarball stall 兜底 — 不误杀与旋钮（真实短定时器，options.timeout 注入）', () => {
+// 真实传输组（集成轨）：trickle ~1s 真实限速传输 / 真实短定时器窗口——传输墙钟无
+// 确定性完成信号，本地默认跳过（见文件头门控说明）
+describe.skipIf(
+  !INTEGRATION_TESTS_ENABLED,
+)(`tarball stall 兜底 — 不误杀与旋钮（真实短定时器，options.timeout 注入）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
   it('慢速持续数据流（流式路径）不误杀：总时长超过窗口仍安装成功', async () => {
     behavior = 'trickle'
     withIntegrity = false
