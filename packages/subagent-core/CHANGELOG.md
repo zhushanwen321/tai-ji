@@ -1,5 +1,18 @@
 # @zhushanwen/subagent-core
 
+## 2.0.0
+
+### Major Changes
+
+- e37e7e659: Reject legacy fan-out args shapes with dedicated migration messages. Legacy shapes (`tasks` elements as plain strings, or a top-level `agents` key) now fail with an explicit migration hint — naming the old shape, the mapping from `agents="/a.md,/b.md"` to per-member `agent`, and the recovery action (re-dispatch a new run with member-object tasks) — both at the ajv chokepoint (`validateRunArgs`) and as a second layer inside the fan-out workflow script for hosts that bypass validation. Rejection semantics are unchanged (schema stays the sole type authority).
+
+- e37e7e659: Breaking: the bundled `workflows/fan-out.js` template (published via the `./workflows/*` export) now takes `tasks` as an array of member objects, and the `agents` param is removed.
+
+  - `tasks: [{ task, agent?, model?, thinkingLevel? }]` — each member can set its own executor, model, and thinking level; fields a member omits inherit the run-level `$MODEL` / `$THINKING_LEVEL`. Old CLI forms `tasks=["..."]` / `agents="..."` fail loudly in `validateRunArgs` before the worker starts — `workflow_run` callers that drive fan-out directly must switch to member objects.
+  - `aggregate` remains a template-only param; the batch tool side (`subagents`) changed the same way in `@zhushanwen/pi-subagent-workflow` — see that package's changeset for the tool-side migration table.
+
+  Add the run member view API for workflow run status: `runMemberViews(run, { records?, now })` derives one row per dispatched member (four-state `MemberState`, record-first with trace fallback, per-`stepIndex` dedup), with `RunMemberView` / `RunMemberRecordView` / `RunMemberEventView` types, `lastErrorOf(eventLog)` derivation, and the `memberViewLine` / `truncateRunMemberViews` render-budget pair (8,000-char budget, failed/cancelled rows kept on truncation). `ArgsValidationError` is now exported from the package barrel so hosts can catch it by type.
+
 ## 1.6.1
 
 ### Patch Changes

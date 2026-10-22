@@ -1,5 +1,17 @@
 # @zhushanwen/pi-subagent-workflow
 
+## 10.0.0
+
+### Major Changes
+
+- e37e7e659: Enforce a runId shape whitelist on workflow record path joins. `workflow_control` `status`/`resume` called with a malformed runId (path separators, `..`) is now handled as an unknown run without touching the filesystem, blocking path traversal and file-existence probing through the "settled-evicted vs not found" error split. The run store additionally fails fast if asked to build a record path that would escape the runs directory.
+
+- e37e7e659: Breaking: `subagents` tool batch params — `tasks` now takes member objects instead of strings, and the `agents` / `aggregate` params are removed.
+
+  - `tasks: [{ task, agent?, model?, thinkingLevel? }]` (min 1) — each member can set its own executor, model, and thinking level (e.g. use a healthy provider for one member while others inherit the run-level default). Run-level `agent` / `model` / `thinkingLevel` act as defaults for members that omit them.
+  - `agents` (comma-separated path string) is replaced by per-member `agent` or the run-level `agent` param; `aggregate` is removed — reduce results yourself after the batch returns. Calls carrying either old param fail fast with a `Correct:` shape.
+  - `subagents` is now always declared to the model (no longer deferred), so the member-object schema is visible from the first turn.
+
 ## 9.8.0
 
 ### Minor Changes
