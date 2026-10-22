@@ -32,6 +32,7 @@ import {
   setHostUiRequestEndpoint,
 } from "../../host/host-ui-endpoint.ts";
 import { configureCore, resetCoreForTests } from "../../../../core/host-services.ts";
+import { waitFor } from "./helpers/wait-for.ts";
 
 const FAKE_ENGINE = fileURLToPath(new URL("./__fixtures__/fake-engine.mjs", import.meta.url));
 
@@ -53,15 +54,10 @@ const FAKE_MATCHED_CAPS = {
   maxTurns: false,
 } as const;
 
-/** 轮询等待（真实 timers；引擎启动/信号传播是真实 IO，fake timers 会挂死自写轮询）。 */
-async function waitForTrue(predicate: () => boolean, timeoutMs = 8_000, stepMs = 25): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, stepMs));
-  }
-  throw new Error("waitForTrue: condition not met within timeout");
-}
+/** 轮询等待本文件用例量级 8s（引擎全链真 IO），经共享 waitFor 转发（真实 timers；
+ *  引擎启动/信号传播是真实 IO，fake timers 会挂死自写轮询）。 */
+const waitForTrue = (predicate: () => boolean, timeoutMs = 8_000, stepMs = 25): Promise<void> =>
+  waitFor(predicate, timeoutMs, stepMs);
 
 function waitForReady(client: EngineClient): Promise<void> {
   return waitForTrue(() => client.currentState === "ready");
