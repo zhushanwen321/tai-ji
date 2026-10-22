@@ -218,6 +218,10 @@ let openTickTimer: ReturnType<typeof setInterval> | null = null
 watch(isWorkflowOpen, (open) => {
   if (open) {
     now.value = Date.now()
+    // 先清旧 handle 再启新：open 态下 watch 重入（同一开合被批处理多轮排空）时，
+    // 直接覆盖槽位会把旧 handle 泄漏成永久活跃定时器（2026-10-22 overlay-host
+    // 活跃集合断言实测暴露）；幂等重启保证「同一时刻至多一个活跃 tick」。
+    if (openTickTimer !== null) clearInterval(openTickTimer)
     openTickTimer = setInterval(() => { now.value = Date.now() }, OPEN_TICK_INTERVAL_MS)
   } else if (openTickTimer !== null) {
     clearInterval(openTickTimer)

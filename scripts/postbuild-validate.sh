@@ -373,13 +373,29 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
         if [ -d "$APP_PATH/Contents/Resources/pi" ]; then
             echo -e "  ${GREEN}✓${NC} pi binary in Resources"
 
-            # 致命：pi 目录中不能有指向外部绝对路径的 symlink
-            PI_SYMLINK=$(find "$APP_PATH/Contents/Resources/pi" -maxdepth 1 -type l 2>/dev/null | head -1)
-            if [ -n "$PI_SYMLINK" ]; then
-                echo -e "  ${RED}✗${NC} Resources/pi 存在 symlink: $(basename "$PI_SYMLINK")"
+            # 致命：pi 目录中不能有指向 bundle 外部的 symlink。同目录相对 symlink 合法
+            # （prepare-pi-resources.sh 的 pi PATH 别名 = pi -> pi-darwin-arm64，拷贝进
+            # bundle 后仍指向同目录二进制，自包含；判定语义与 scripts/check-pi-resources-links.mjs
+            # 构建前检查一致——目标 resolve 后落在 pi 目录内部即放行）。原「find -type l
+            # 全拦」实现比注释意图严，pi 别名引入后误伤 CI（2026-10-22）。
+            PI_EXTERNAL_LINK=""
+            # 前缀双侧归一化：APP_PATH 本身可能含 symlink 段（如 macOS /tmp -> /private/tmp），
+            # 只归一化目标不归一化前缀会前缀失配误拦
+            PI_DIR_REAL=$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$APP_PATH/Contents/Resources/pi")
+            while IFS= read -r PI_LINK; do
+                [ -z "$PI_LINK" ] && continue
+                PI_TARGET=$(python3 -c 'import os, sys; print(os.path.realpath(os.path.join(os.path.dirname(sys.argv[1]), sys.argv[2])))' "$PI_LINK" "$(readlink "$PI_LINK")")
+                case "$PI_TARGET" in
+                    "$PI_DIR_REAL"/*) ;; # bundle 内自包含，合法
+                    *) PI_EXTERNAL_LINK="$PI_LINK"; break ;;
+                esac
+            done < <(find "$APP_PATH/Contents/Resources/pi" -maxdepth 1 -type l 2>/dev/null)
+            if [ -n "$PI_EXTERNAL_LINK" ]; then
+                echo -e "  ${RED}✗${NC} Resources/pi 存在指向 bundle 外部的 symlink: $(basename "$PI_EXTERNAL_LINK") -> $(readlink "$PI_EXTERNAL_LINK")"
                 FAILED=1
             else
-                echo -e "  ${GREEN}✓${NC} Resources/pi 无 symlink"
+                LINK_COUNT=$(find "$APP_PATH/Contents/Resources/pi" -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' ')
+                echo -e "  ${GREEN}✓${NC} Resources/pi symlink 均为 bundle 内相对链接（${LINK_COUNT} 个，含 pi PATH 别名）"
             fi
         fi
 

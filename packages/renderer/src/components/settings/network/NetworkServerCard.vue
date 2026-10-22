@@ -81,18 +81,6 @@
         />
       </SettingRow>
 
-      <!-- 强制 IPv4 直连清单（ipv4Only）：与 noProxy 同形态（逗号串），但语义不同——
-           命中后不走代理，而是把域名解到 A 记录后直连，避开「IPv6 握手抖动把 connect
-           预算耗在坏路径上」导致的 Request timed out.。 -->
-      <SettingRow :label="t('settings.network.ipv4Only')" :desc="t('settings.network.ipv4OnlyHint')">
-        <Input
-          v-model="draft.ipv4OnlyInput"
-          data-testid="network-ipv4only-input"
-          class="max-w-[360px]"
-          autocomplete="off"
-        />
-      </SettingRow>
-
       <!-- 测试结果行（三态：idle 不渲染 / testing / done 归因文案+耗时；ok 绿 err 红）。
            message = runtime 两段探测的归因文案（含恢复指引），本组件不自造文案。 -->
       <div class="flex min-h-[44px] items-center gap-[12px] border-t border-hairline px-[6px] py-[10px]">
