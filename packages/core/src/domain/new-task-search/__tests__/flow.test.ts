@@ -236,6 +236,7 @@ describe('useNewTaskFlow', () => {
       bashCommand: null,
       pendingThinkingLevel: expected.thinkingLevel,
       clientUuid: expect.any(String),
+      projectId: null,
     })
     // 主链路不变：载入 panel + activeId + 导航 + 文件树 + send(migratedSegments) + completed
     expect(deps.ports.navigation.setActiveSession).toHaveBeenCalledWith('s1')
@@ -269,6 +270,7 @@ describe('useNewTaskFlow', () => {
       bashCommand: null,
       pendingThinkingLevel: 'high',
       clientUuid: expect.any(String),
+      projectId: null,
     })
   })
 
@@ -316,6 +318,7 @@ describe('useNewTaskFlow', () => {
       bashCommand: { command: 'ls', excludeFromContext: true },
       pendingThinkingLevel: 'high',
       clientUuid: expect.any(String),
+      projectId: null,
     })
     expect(deps.ports.chat.sendBash).toHaveBeenCalledWith('s1', 'ls', true)
     expect(deps.ports.chat.send).not.toHaveBeenCalled()

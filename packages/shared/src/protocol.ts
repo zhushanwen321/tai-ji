@@ -263,6 +263,7 @@ export type ClientMessageType =
   | 'file.write.create' | 'file.write.rename' | 'file.write.delete'
   | 'git.status' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.checkoutCwd' | 'git.createBranch'
   | 'workspace.listRecent' | 'workspace.record' | 'workspace.detect'
+  | 'workspace.setPinned' | 'workspace.defaultSessionDir'
   | 'project.load' | 'project.save'
   | 'worktree.create' | 'worktree.listBranches' | 'worktree.list'
   | 'terminal.spawn' | 'terminal.write' | 'terminal.resize' | 'terminal.kill' | 'terminal.attach'
@@ -948,6 +949,12 @@ export interface ClientMessageMap {
   'git.createBranch': { sessionId: string; name: string }
   'workspace.listRecent': Record<string, never>
   'workspace.record': { cwd: string }
+  /** workspace.setPinned：pin/unpin 最近工作区条目（pinned 条目免 LRU 淘汰、弹层置顶分组展示）。
+   *  上限 5 条由 runtime 拦截（超限 no-op 降级返回当前列表）；reply 复用 workspace.recentList。 */
+  'workspace.setPinned': { cwd: string; pinned: boolean }
+  /** workspace.defaultSessionDir：取默认会话目录（<dataDir>/defaultSession/，启动时已确保存在；
+   *  handler 内幂等 ensureDir 自愈），reply 附 dir（ensure 失败 = 空串，前端隐藏入口）。 */
+  'workspace.defaultSessionDir': Record<string, never>
   // project.load / project.save：project 列表持久化（D14，2026-08-04 迁 runtime projects.json，
   // 对齐 recent-workspaces.json 模式；localStorage 仅首启迁移源）。
   'project.load': Record<string, never>
@@ -1443,6 +1450,7 @@ export type ServerMessageType =
   | 'session.writeImage:result' | 'session.migrateImage:result' | 'session.writeSegments:result'
   | 'git.status:result'
   | 'workspace.recentList'
+  | 'workspace.defaultSessionDir:result'
   | 'workspace.detected'
   | 'worktree.created'
   | 'terminal.data' | 'terminal.exit' | 'terminal.alive' | 'terminal.ack' | 'terminal.writeFailed'
@@ -2748,6 +2756,9 @@ export interface ServerMessageMapBase {
    * 已记录列表（RPC 契约要求 pending Promise 必然 resolve）。可选字段，正常路径缺省。
    */
   'workspace.recentList': { records: RecentWorkspaceRecord[]; degraded?: boolean }
+  /** workspace.defaultSessionDir 的 reply：默认会话目录绝对路径；空串 = runtime ensureDir 失败
+   *  （前端隐藏「默认会话」入口，不返回不可用路径防 create 落错目录）。 */
+  'workspace.defaultSessionDir:result': { dir: string }
   /** workspace.detected：workspace.detect 的三态 reply。 */
   'workspace.detected': {
     mode: 'bare-workspace' | 'plain-repo' | 'not-repo'
@@ -3423,6 +3434,8 @@ export interface ReplyPayloadMap {
   'plugin.ui.snapshot': ServerMessageMap['plugin:uiSnapshot']
   'workspace.listRecent': ServerMessageMap['workspace.recentList']
   'workspace.record': ServerMessageMap['workspace.recentList']
+  'workspace.setPinned': ServerMessageMap['workspace.recentList']
+  'workspace.defaultSessionDir': ServerMessageMap['workspace.defaultSessionDir:result']
   'project.load': ServerMessageMap['project.loaded']
   'project.save': void                  // ack 型（保存成功即 resolve）
   'workspace.detect': ServerMessageMap['workspace.detected']

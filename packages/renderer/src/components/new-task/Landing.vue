@@ -19,8 +19,6 @@ import { computed, onMounted, onUnmounted, provide, watch } from 'vue'
 
 import { useI18n } from 'vue-i18n'
 import { Folder, GitFork, LoaderCircle, RefreshCw } from '@lucide/vue'
-import { resolveLaunchConfig } from '@taiji/core'
-import { BUILTIN_PRESET_IDS, type PiLaunchPreset } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
@@ -29,11 +27,13 @@ import {
   CreateBranchModal,
   CreateWorktreeModal,
   PresetSelectChip,
+  ProjectSelectChip,
   NewTaskDepsKey,
   dirNameOf,
 } from '@taiji/ui'
 import Composer from '@/components/panel/Composer.vue'
 import { useNewTaskDeps } from '@/composables/features/new-task/useNewTaskDeps'
+import { useLandingPresetDisplay } from './useLandingPresetDisplay'
 
 const props = withDefaults(
   defineProps<{
@@ -61,6 +61,7 @@ const deps = useNewTaskDeps()
 provide(NewTaskDepsKey, deps)
 const flow = deps.flow
 const toastError = deps.toast.error
+const { modeName, modeHasReplace, modeReplaceHint, isNonDefaultPreset } = useLandingPresetDisplay(deps, flow)
 
 /** [D9] landing 输入卡固定窄宽：根元素局部覆写全局令牌 --content-max-w（demo 阅读列形态
  *  min(720px, 100%)——窄容器自动让位满宽）。main-area 恒把该令牌覆写为 100%
@@ -182,6 +183,11 @@ const isPresetOpen = computed({
   get: () => flow.state.value === 'preset-popover',
   set: (v) => { if (!v) flow.closeOverlay(); else flow.openPresetPopover() },
 })
+/** project popover 展开绑定（归属项目选择 wave）：与 dir/branch/preset 同模式共享 flow 单实例状态机互斥 */
+const isProjectOpen = computed({
+  get: () => flow.state.value === 'project-popover',
+  set: (v) => { if (!v) flow.closeOverlay(); else flow.openProjectPopover() },
+})
 /** 创建分支 modal 渲染绑定（#7）：state===branch-modal 时挂载 CreateBranchModal（Dialog teleport 到 body） */
 const isBranchModalOpen = computed(() => flow.state.value === 'branch-modal')
 
@@ -194,52 +200,17 @@ const isWorktreeModalOpen = computed(() => flow.state.value === 'worktree-modal'
 /** 当前 cwd 所在 workspace 的已有 worktree 列表（BranchSelectPopover Worktree tab 数据源）。 */
 const worktreeItems = computed(() => flow.worktreeItems?.value ?? [])
 
-/**
- * 当前显示 / 将生效的模式（u4b 接线）：与 PresetSelectChip 内部同一 resolve 链
- * （explicit > 全局默认 > builtin:full，D3 单一解析层）。renderer 侧算好全名 /
- * 信任标记文案，经 props 传给 ui chip（ui 包不耦合 renderer i18n——u4a 的 props 契约；
- * 短名不在传参面——chip 内 fallback 是唯一实现，避免去尾缀启发式双实现漂移）。
- */
-const displayPreset = computed<PiLaunchPreset | null>(() => {
-  const presets = deps.presets.value
-  const resolved = resolveLaunchConfig({
-    pendingPreset: flow.pendingPreset?.value ?? null,
-    presets,
-    defaultPresetId: deps.defaultPresetId.value,
-  })
-  const id =
-    resolved.presetId ??
-    (presets.some((p) => p.id === BUILTIN_PRESET_IDS.FULL) ? BUILTIN_PRESET_IDS.FULL : '')
-  return presets.find((p) => p.id === id) ?? null
-})
-/** 模式全名（缺省 undefined → ui chip 回落其内部解析名，既有接入零改动） */
-const modeName = computed(() => displayPreset.value?.name)
-/** 信任标记判据（设计 §7.1：`replace.enabled && 文案非空`） */
-const modeHasReplace = computed(() => {
-  const seg = displayPreset.value?.prompt?.replace
-  return !!seg?.enabled && (seg.prompt ?? '').trim().length > 0
-})
-/** 信任标记文案（文本/短名档 = chip 内后缀；纯图标档 = 角标 tooltip；空 → ui chip 不渲染标记） */
-const modeReplaceHint = computed(() =>
-  modeHasReplace.value ? t('newTask.presetChip.replaceHint') : undefined,
-)
-/**
- * 模式 chip 强调底判据（设计 §5.1「颜色即状态」；方案 B）：当前生效模式 ≠ 默认模式才算非默认。
- *
- * 与 displayPreset 同源（同一 resolve 链）——displayPreset 存在 + id !== 默认档。默认档用
- * `||` 而非 `??`：store 未加载时 deps.defaultPresetId 为 `''`（非 null），`'' ?? x` 仍是 `''`，
- * 会把默认模式误判成非默认（恒亮 accent = 不携带信息，正是本判据要消除的退化）。
- * 注意 displayPreset 已把「解析不到」回落到 builtin:full（含 presets 未加载的 `''` 分支），
- * 故存在性 + 默认档比对即可，无需再处理空档。
- */
-const isNonDefaultPreset = computed(() => {
-  const p = displayPreset.value
-  if (!p) return false
-  return p.id !== (deps.defaultPresetId.value || BUILTIN_PRESET_IDS.FULL)
-})
-
 function onSelectWorkspace(payload: { cwd: string }): void {
   flow.selectWorkspace(payload.cwd)
+}
+/**
+ * onSelectDefaultSession — 「默认会话」固定入口（用户裁决 2026-10-22）：选定 runtime 下发的
+ * 默认会话目录，且不计入最近工作区 LRU（record:false——固定入口恒显，record 反而挤占名额）。
+ */
+function onSelectDefaultSession(): void {
+  const dir = deps.defaultSessionDir.value
+  if (!dir) return
+  flow.selectWorkspace(dir, { record: false })
 }
 function onSelectBranch(payload: { name: string }): void {
   flow.selectBranch(payload.name)
@@ -283,6 +254,14 @@ function onRetry(): void {
  */
 function onPresetSelect(payload: { presetId: string }): void {
   flow.setPendingPreset(payload.presetId)
+}
+/**
+ * onProjectSelect — ProjectSelectChip emit select 的接收点（对齐 onPresetSelect 范式）。
+ * 用户在 landing 态真实点击选归属项目 → 写 flow.pendingProject（pending 语义：只影响本次
+ * 创建，不切换侧栏锚定），submitFirstMessage create session 时经 input.projectId 透传。
+ */
+function onProjectSelect(payload: { projectId: string }): void {
+  flow.setPendingProject(payload.projectId)
 }
 </script>
 
@@ -349,11 +328,11 @@ function onPresetSelect(payload: { presetId: string }): void {
          landing 态 session 真源用 flow（composerSid），props 作 fallback。 -->
     <Composer variant="landing" :session-id="composerSid" class="landing-cascade-composer">
       <template #meta-row>
-        <!-- 首行三 chip（目录 ｜ 分支 ｜ 模式；设计 §7.4）：容器 nowrap + overflow-hidden，
-             各 chip min-w-0；截断优先级 = 目录截断(110px) → 分支截断(76px) → 分支退化为图标
-             （纯 CSS flex-shrink，分支 shrink-[8] 先于模式 shrink）→ 模式退化为纯图标
-             （PresetSelectChip 内部实测自适应，颜色即状态：默认模式中性底 / 非默认模式 accent 底
-             [方案 B，:accent=isNonDefaultPreset]，跨档不丢的信任标记）。 -->
+        <!-- 首行四 chip（目录 ｜ 分支 ｜ 模式 ｜ 归属项目；设计 §7.4 + 归属项目选择 2026-10-22）：
+             容器 nowrap + overflow-hidden，各 chip min-w-0；截断优先级 = 目录截断(110px) →
+             分支截断(76px) → 分支退化为图标（纯 CSS flex-shrink，分支 shrink-[8] 先于模式/项目
+             收缩）→ 模式退化为纯图标（PresetSelectChip 内部实测自适应，颜色即状态）→
+             项目名截断(110px)。 -->
         <div class="flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden px-2.5 pt-2.5">
           <Popover v-model:open="isDirOpen">
             <PopoverTrigger as-child>
@@ -371,6 +350,7 @@ function onPresetSelect(payload: { presetId: string }): void {
               <DirSelectPopover
                 :current-cwd="currentCwd ?? null"
                 @select="onSelectWorkspace"
+                @select-default="onSelectDefaultSession"
                 @open-dir-dialog="onOpenDirDialog"
                 @close="flow.closeOverlay()"
               />
@@ -412,6 +392,12 @@ function onPresetSelect(payload: { presetId: string }): void {
             :replace-hint="modeReplaceHint"
             v-model:preset-open="isPresetOpen"
             @select="onPresetSelect"
+          />
+          <ProjectSelectChip
+            :session-id="composerSid"
+            :project-id="flow.currentSession.value?.projectId"
+            v-model:project-open="isProjectOpen"
+            @select="onProjectSelect"
           />
         </div>
       </template>

@@ -405,6 +405,7 @@ async function runMatrixCell(cell: {
       bashCommand: null,
       pendingThinkingLevel: B.thinkingLevel as ThinkingLevel,
       clientUuid: expect.any(String),
+      projectId: null, // landing 未显式选归属项目（pendingProjectId 默认 null）
     })
   } finally {
     h.scope.stop()

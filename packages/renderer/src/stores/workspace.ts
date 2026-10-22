@@ -20,8 +20,43 @@ export const useWorkspaceStore = defineStore('workspace', () => {
    */
   const loadError = ref<string | null>(null)
 
-  /** 默认 cwd：最近活跃工作区（records[0]?.cwd，W3 取代 resolveDefaultCwd） */
-  const defaultCwd = computed(() => records.value[0]?.cwd)
+  /** 默认 cwd：最近活跃工作区（records 中第一条未 pinned 的 cwd，W3 取代 resolveDefaultCwd）。
+   *  pinned 条目不参与（用户固定目录 ≠ 最近使用，保持本 computed 既有语义不变）。 */
+  const defaultCwd = computed(() => records.value.find((r) => !r.pinned)?.cwd)
+
+  /**
+   * 默认会话目录（<dataDir>/defaultSession/，runtime 动态推导下发）。
+   * 空串 = 未拉取 / runtime ensure 失败（「默认会话」入口据此隐藏）。
+   */
+  const defaultSessionDir = ref('')
+
+  /**
+   * 拉取默认会话目录（initApp 编排，landing 打开前就绪；失败降级空串不阻断启动）。
+   */
+  async function loadDefaultSessionDir(): Promise<void> {
+    try {
+      defaultSessionDir.value = await workspace.defaultSessionDir()
+    } catch (e) {
+      defaultSessionDir.value = ''
+      console.warn('[workspace] loadDefaultSessionDir failed, hide default-session entry', e)
+    }
+  }
+
+  /**
+   * pin/unpin 最近工作区条目并热更新列表（DirSelectPopover 悬停动作调用）。
+   * 返回是否生效（false = 超 pin 上限被拒，调用方 toast 提示；列表未变）。
+   * RPC reject → 返回 false 并保留旧 records（与 record 同款 stale 降级）。
+   */
+  async function setPinned(cwd: string, pinned: boolean): Promise<boolean> {
+    try {
+      const reply = await workspace.setPinned(cwd, pinned)
+      records.value = reply.records
+      return !reply.degraded
+    } catch (e) {
+      console.warn('[workspace] setPinned failed, keeping stale records', e)
+      return false
+    }
+  }
 
   /**
    * 加载最近工作区记录（initApp INV-6 时序：在 presetCwd 前调用）。
@@ -33,7 +68,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       loadError.value = null
     } catch (e) {
       // AC-4.5：reject → records 置 [] 不抛（降级空态，不阻断启动）。RD-3#4：补一次 console.warn
-      // + loadError 标记，让「读失败」显形（此前零日志零标记，读失败被当首启空态）。
+      // + loadError 标记，让「读失败」与「真无历史」在日志/观测范围可分（修复此前 catch 零日志零标记）。
       records.value = []
       loadError.value = e instanceof Error ? e.message : String(e)
       console.warn('[workspace] load failed, degraded to empty recent list:', loadError.value)
@@ -51,7 +86,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!cwd) return
     try {
       records.value = await workspace.record(cwd)
-     
     } catch (e) {
       // 降级：record 失败时保留旧 records（stale 但有用，不清空——与 load() 清空语义不同：
       // load 是首次加载失败则无数据可显；record 是增量更新失败，旧列表仍有效）。不阻断选目录流程。
@@ -59,5 +93,5 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  return { records, loadError, defaultCwd, load, record }
+  return { records, loadError, defaultCwd, defaultSessionDir, load, record, loadDefaultSessionDir, setPinned }
 })

@@ -80,6 +80,26 @@ async function removeSessionBestEffort(
   }
 }
 
+/** segments 序列化指纹（JSON 全等。restore→重发走同一 getSegments 构造路径，键序稳定）。 */
+function hashSegments(segments: Segment[]): string {
+  return JSON.stringify(segments)
+}
+
+/**
+ * [B renderer 半] clientUuid 黏滞槽：同一用户意图（segments 序列化全等）的重试复用同一
+ * uuid（runtime 按 uuid 幂等——防 65s 超时后重试重复建 session）。投递落定（delivered）
+ * 或 abandoned 清槽；投递失败（deliver 返 false）与 create 失败（throw 未放弃）保留
+ * 供重试复用——失败场景的同段重发正是要由 runtime 幂等返回已建 session。
+ * 模块级单例（Q2=A 同款裁决：flow 壳层以模块级单例消费，黏滞槽是流程级状态非实例状态）。
+ */
+let lastAttempt: { hash: string; uuid: string } | null = null
+
+/** 保稿时把黏滞槽 hash 同步对齐为保稿段指纹（保稿段 ≡ 槽 hash 口径，重发幂等命中同一 uuid）。 */
+function stashAttemptDraft(finalSegments: Segment[]): void {
+  stashOrphanedDraft(finalSegments)
+  if (lastAttempt) lastAttempt.hash = hashSegments(finalSegments)
+}
+
 /**
  * launch 配置解析端口（D1「store 数据经 deps 注入」，U2b）。
  *
@@ -153,16 +173,10 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     currentSession,
     pendingCwd,
     pendingModel,
+    pendingProjectId,
+    pendingPreset,
     createInFlight,
   } = useNewTaskFlowState()
-
-  /**
-   * Landing 态用户选定的预设 id（session.create 透传用）。
-   * 对齐 pendingCwd/pendingModel 范式：landing 态记录选定值，submitFirstMessage 时透传。
-   * startFlow 时重置为 null。PresetSelectChip 通过 setPendingPreset 写入。
-   * 实例局部 ref（源语义，非模块级）。
-   */
-  const pendingPreset = ref<string | null>(null)
 
   /**
    * [E] 放弃标志：abandonSubmit() 置位（不改状态机 state——创建中 state 仍是 landing）。
@@ -170,19 +184,6 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * 每次 submit 真正启动（过 createInFlight 检查）时清零，防上一轮残留标志误杀新一轮。
    */
   const submitAbandoned = ref(false)
-
-  /**
-   * [B renderer 半] clientUuid 黏滞槽：同一用户意图（segments 序列化全等）的重试复用同一
-   * uuid（runtime 按 uuid 幂等——防 65s 超时后重试重复建 session）。投递落定（delivered）
-   * 或 abandoned 清槽；投递失败（deliver 返 false）与 create 失败（throw 未放弃）保留
-   * 供重试复用——失败场景的同段重发正是要由 runtime 幂等返回已建 session。
-   */
-  let lastAttempt: { hash: string; uuid: string } | null = null
-
-  /** segments 序列化指纹（JSON 全等。restore→重发走同一 getSegments 构造路径，键序稳定）。 */
-  function hashSegments(segments: Segment[]): string {
-    return JSON.stringify(segments)
-  }
 
   /** 取本次 create 的 clientUuid：同段重试复用黏滞槽，换段/已清槽则新 uuid 并记槽。 */
   function takeClientUuidFor(segments: Segment[]): string {
@@ -205,11 +206,6 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * create 失败（throw 未放弃）不经此处——槽 hash 仍是迁移前段指纹，与 send.ts catch
    * 归还的原始段同口径（65s 超时重试场景幂等成立）。
    */
-  function stashAttemptDraft(finalSegments: Segment[]): void {
-    stashOrphanedDraft(finalSegments)
-    if (lastAttempt) lastAttempt.hash = hashSegments(finalSegments)
-  }
-
   // 受控写入口 controller（父编排器独占）：setter 不再模块级 export，杜绝子模块 /
   // 组件越权 import 调用。本编排器独占后，按需把具体 setter 作为参数下发给子模块。
   const controller = useNewTaskFlowController()
@@ -296,6 +292,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     pendingCwd.value = presetCwd ?? null
     pendingModel.value = null
     pendingPreset.value = null
+    pendingProjectId.value = null
     controller.bindCurrentSession(null)
     // 强制不变量：landing 态无 session 绑定。清 activeId + active panel leaf.sessionId，
     // 让 Panel 的 sessionId prop 变 null → 渲染落到 Landing（而非旧会话 MessageStream）。
@@ -395,6 +392,9 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
       // D3：透传 resolve 终值 presetId（出厂 builtin:full → undefined 不透传，
       // 行为与写侧全等现状）
       presetId: resolved.presetId ?? null,
+      // 归属 project（pending 语义，用户裁决 2026-10-22）：landing 显式选择优先透传；
+      // null = 未显式选择，壳层回落「当前 activeProject 归属」既有语义
+      projectId: pendingProjectId.value,
       // D5 契约快照化：恒传解析终值（'' 全链空防御形态不上线——回落 runtime 全局默认）
       pendingModel: resolved.model || null,
       segments,
@@ -652,6 +652,13 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     pendingPreset.value = presetId
   }
 
+  // setPendingProject：landing 态记录选定归属 project（setPendingPreset 同款检查——写入点在
+  // project-popover overlay 内，两个「选择进行中」态一并放行，其余 noop）。
+  function setPendingProject(projectId: string): void {
+    if (state.value !== 'landing' && state.value !== 'project-popover') return
+    pendingProjectId.value = projectId
+  }
+
   /**
    * adoptWorktreeCwd —— CreateWorktreeModal 创建成功即回灌新 worktree cwd（不待 modal 关闭）。
    *
@@ -730,6 +737,14 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     openOverlay('preset-popover')
   }
 
+  /**
+   * openProjectPopover —— 点 ProjectSelectChip 打开 project popover（landing→project-popover）。
+   * 对齐 openPresetPopover：overlay 互斥由 openOverlay 统一处理，不涉及 git 检查，内联主 controller。
+   */
+  function openProjectPopover(): void {
+    openOverlay('project-popover')
+  }
+
   return {
     state,
     currentSession,
@@ -749,6 +764,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     presetCwd,
     setPendingModel,
     setPendingPreset,
+    setPendingProject,
     /**
      * [U4r2] landing 态显式选定 preset id 只读视图（写经 setPendingPreset，读写分离——
      * 对齐 pendingModel 经 currentModel 的只读暴露先例）。消费方：composer-shell 把它
@@ -756,9 +772,12 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
      * 选择（与 submit 侧同源同输入，「显示 ≡ 生效」全矩阵成立）。
      */
     pendingPreset: computed(() => pendingPreset.value),
+    /** landing 态显式选定归属 project id 只读视图（写经 setPendingProject，同上读写分离）。 */
+    pendingProjectId: computed(() => pendingProjectId.value),
     openDirPopover: dirSelect.openDirPopover,
     openBranchPopover: branch.openBranchPopover,
     openPresetPopover,
+    openProjectPopover,
     selectWorkspace: dirSelect.selectWorkspace,
     adoptWorktreeCwd,
     openDirDialog: dirSelect.openDirDialog,

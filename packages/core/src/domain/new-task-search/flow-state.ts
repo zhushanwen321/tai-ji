@@ -35,6 +35,7 @@ export type NewTaskFlowState =
   | 'dir-popover'
   | 'branch-popover'
   | 'preset-popover'
+  | 'project-popover'
   | 'dir-dialog'
   | 'branch-modal'
   | 'worktree-modal'
@@ -61,6 +62,7 @@ export const OVERLAY_STATES: ReadonlySet<NewTaskFlowState> = new Set([
   'dir-popover',
   'branch-popover',
   'preset-popover',
+  'project-popover',
   'dir-dialog',
   'branch-modal',
   'worktree-modal',
@@ -77,6 +79,7 @@ export const ACTIVE_STATES: ReadonlySet<NewTaskFlowState> = new Set([
   'dir-popover',
   'branch-popover',
   'preset-popover',
+  'project-popover',
   'dir-dialog',
   'branch-modal',
   'worktree-modal',
@@ -88,10 +91,11 @@ export const ACTIVE_STATES: ReadonlySet<NewTaskFlowState> = new Set([
  */
 const ALLOWED: Record<NewTaskFlowState, NewTaskFlowState[]> = {
   idle: ['landing'],
-  landing: ['dir-popover', 'branch-popover', 'preset-popover', 'worktree-modal', 'completed', 'cancelled'],
+  landing: ['dir-popover', 'branch-popover', 'preset-popover', 'project-popover', 'worktree-modal', 'completed', 'cancelled'],
   'dir-popover': ['landing', 'dir-dialog', 'cancelled'],
   'branch-popover': ['landing', 'branch-modal', 'worktree-modal', 'cancelled'],
   'preset-popover': ['landing', 'cancelled'],
+  'project-popover': ['landing', 'cancelled'],
   'dir-dialog': ['landing', 'dir-popover', 'cancelled'],
   'branch-modal': ['landing', 'cancelled'],
   'worktree-modal': ['landing', 'cancelled'],
@@ -116,6 +120,18 @@ const pendingCwd: Ref<string | null> = ref(null)
  */
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：landing 态待定 model 单例 ref（同上）
 const pendingModel: Ref<string | null> = ref(null)
+/**
+ * landing 态用户选定的启动预设 id（pendingCwd/pendingModel/pendingProjectId 同层单例；写经
+ * flow.ts setPendingPreset，startFlow/reset 重置 null，submit 经 resolveLaunchConfig 终值透传）。
+ */
+
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：landing 态待定归属 project 单例 ref（同上）
+const pendingProjectId: Ref<string | null> = ref(null)
+/**
+ * landing 态用户选定的启动预设 id（与 pendingProjectId 同层；写经 flow.ts setPendingPreset）。
+ */
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：landing 态待定 preset 单例 ref（同上）
+const pendingPreset: Ref<string | null> = ref(null)
 /** submitFirstMessage in-flight 标记（双击并发只建 1 session） */
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：submitFirstMessage in-flight 标记（同上）
 const createInFlight = ref(false)
@@ -132,6 +148,8 @@ export function resetNewTaskFlow(): void {
   currentSession.value = null
   pendingCwd.value = null
   pendingModel.value = null
+  pendingProjectId.value = null
+  pendingPreset.value = null
   createInFlight.value = false
   branchCreateInFlight.value = false
 }
@@ -253,6 +271,8 @@ export interface NewTaskFlowStateRefs {
   currentSession: DeepReadonly<Ref<SessionSummary | null>>
   pendingCwd: Ref<string | null>
   pendingModel: Ref<string | null>
+  pendingProjectId: Ref<string | null>
+  pendingPreset: Ref<string | null>
   createInFlight: DeepReadonly<Ref<boolean>>
   branchCreateInFlight: DeepReadonly<Ref<boolean>>
 }
@@ -269,6 +289,8 @@ export function useNewTaskFlowState(): NewTaskFlowStateRefs {
     currentSession: readonly(currentSession),
     pendingCwd,
     pendingModel,
+    pendingProjectId,
+    pendingPreset,
     createInFlight: readonly(createInFlight),
     branchCreateInFlight: readonly(branchCreateInFlight),
   }

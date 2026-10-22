@@ -13,4 +13,10 @@ export interface RecentWorkspaceRecord {
   lastUsedAt: number
   /** 显示名（cwd basename，运行时算零冗余存储） */
   label: string
+  /**
+   * 用户固定标记（2026-10-22，需求「pin 固定目录不随最新使用刷走」）：pinned 条目免 LRU
+   * 淘汰、弹层置顶「已固定」分组展示，上限 5 条（runtime RecentWorkspacesStore 拦截）。
+   * 缺省/false = 未固定（随最近使用排序与淘汰）。
+   */
+  pinned?: boolean
 }

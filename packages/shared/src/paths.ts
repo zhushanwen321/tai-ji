@@ -461,6 +461,21 @@ export function getTtsCacheDir(dataDir?: string): string {
 }
 
 /**
+ * 默认会话目录（`<dataDir>/defaultSession/`，用户裁决 2026-10-22）。
+ *
+ * landing 目录选择弹层「默认会话」固定入口指向的目录——为用户提供一个免选目录、
+ * 随手可开的常驻会话落点。全局目录（不属于任何 session，不入 ext-sessions 存储树）。
+ *
+ * runtime 启动时确保存在（用户裁决：与 `<dataDir>` 配置目录同一保障时机）；选择该目录
+ * 不计入最近工作区（固定入口恒显，record 进 LRU 反而占名额）。
+ *
+ * @param dataDir 可选数据根目录（测试注入）；缺省读 getDataDir()
+ */
+export function getDefaultSessionDir(dataDir?: string): string {
+  return join(dataDir ?? getDataDir(), 'defaultSession')
+}
+
+/**
  * 单 session 的图片缓存目录（session 存储树域 3：`<root>/<sessionId>/image-cache`）。
  *
  * [D6-⑨] 纯缓存语义（可随时丢弃、可幂等重建）；落盘执行方 = main 进程（IPC

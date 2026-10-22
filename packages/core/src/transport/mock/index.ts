@@ -2201,6 +2201,17 @@ const workspaceImpl = {
   async detect(_cwd: string): Promise<import('@taiji/shared').ServerMessageMap['workspace.detected']> {
     return { mode: 'not-repo', wsRoot: '', barePath: '', repoRoot: '', defaultBranch: '' }
   },
+  // setPinned：mock 无持久化，恒返回当前列表 + applied=true（E2E 只验 UI 链路）
+  async setPinned(
+    _cwd: string,
+    _pinned: boolean,
+  ): Promise<{ records: import('@taiji/shared').RecentWorkspaceRecord[]; degraded?: boolean }> {
+    return { records: listRecentRecords() }
+  },
+  // defaultSessionDir：mock 返回固定演示路径（真实路径由 runtime 动态推导）
+  async defaultSessionDir(): Promise<string> {
+    return '/tmp/taiji-mock/defaultSession'
+  },
 }
 
 // [G4] 参数全等断言：mock workspace 任一方法少参/多参/错型在此行编译失败

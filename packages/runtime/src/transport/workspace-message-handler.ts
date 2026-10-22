@@ -24,7 +24,12 @@ export class WorkspaceMessageHandler {
   constructor(private ctx: WorkspaceHandlerContext) {}
 
   /** D1: 本 handler 认领的 ClientMessageType 清单。 */
-  readonly handles: ClientMessageType[] = ['workspace.listRecent', 'workspace.record']
+  readonly handles: ClientMessageType[] = [
+    'workspace.listRecent',
+    'workspace.record',
+    'workspace.setPinned',
+    'workspace.defaultSessionDir',
+  ]
 
   async handleWorkspaceMessage(msg: ClientMessage, ws: WsType): Promise<void> {
     switch (msg.type) {
@@ -52,6 +57,27 @@ export class WorkspaceMessageHandler {
           records: this.ctx.workspaceService.list(),
         })
       }
+      case 'workspace.setPinned': {
+        // pin/unpin 后回传最新列表（与 record 同款一次往返热更新）。超 pin 上限 /
+        // 入参非法 → 列表不变 + degraded 标记（reply 恒发，不破坏 RPC 契约）。
+        const { cwd, pinned } = msg.payload
+        if (typeof cwd !== 'string' || cwd.trim() === '' || typeof pinned !== 'boolean') {
+          console.warn(`[workspace-handler] workspace.setPinned degraded: invalid payload (cwd=${JSON.stringify(cwd)}, pinned=${JSON.stringify(pinned)})`)
+          this.ctx.reply(ws, msg.id, 'workspace.recentList', { records: this.ctx.workspaceService.list(), degraded: true })
+          return
+        }
+        const applied = this.ctx.workspaceService.setPinned(cwd, pinned)
+        return this.ctx.reply(ws, msg.id, 'workspace.recentList', {
+          records: this.ctx.workspaceService.list(),
+          degraded: !applied,
+        })
+      }
+      case 'workspace.defaultSessionDir':
+        // 幂等 ensureDir 后返回路径（启动序列已 ensure 一次，此处自愈兜底）；
+        // ensure 失败 = dir 空串（前端隐藏「默认会话」入口）。
+        return this.ctx.reply(ws, msg.id, 'workspace.defaultSessionDir:result', {
+          dir: this.ctx.workspaceService.defaultSessionDir(),
+        })
     }
   }
 }
