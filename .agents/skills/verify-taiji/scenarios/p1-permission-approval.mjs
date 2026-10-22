@@ -112,7 +112,7 @@ export async function run(ctx) {
       actual: activated ? '已激活' : '60s 未现（现场见 sidebar-miss）',
     })
 
-    const since = protocol.events.length
+    const since = proto.events.length
     await proto.send(sid, '执行需要审批的命令')
     // 审批浮层出现（工具调用轮不结束 turn——waitTurnEnd 会挂到审批后）
     await ui.expectVisible('testid=companion-band', { timeoutMs: 60_000 })
