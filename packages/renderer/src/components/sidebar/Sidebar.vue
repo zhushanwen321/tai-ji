@@ -454,7 +454,7 @@ async function applyChatTier(tier: FontScaleTier): Promise<void> {
     toastError(e instanceof Error ? e.message : String(e))
   }
 }
-const { selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, archiveSession, deleteFolder, assignSessionToProject, focusedSessionId, focusedSession: currentSession, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant } = useSidebar()
+const { selectSession, restoreSession, newSession, loadSessions, renameSession, archiveSession, deleteFolder, assignSessionToProject, focusedSessionId, focusedSession: currentSession, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant } = useSidebar()
 const piVersion = ref('')
 const versionLabel = computed(() => piVersion.value ? `v${__APP_VERSION__} · pi v${piVersion.value}` : `v${__APP_VERSION__}`)
 const renameOpen = ref(false)
@@ -468,7 +468,7 @@ function onSessionImported(payload: ImportSessionImportedPayload): void {
 const { sessionCount, fileCount } = useSidebarCounts(focusedSessionId)
 const { derivedStatus } = useSessionDerivations()
 function statusOf(id: string) { return derivedStatus(id).value }
-const { onSelectSession, onNewSession, onNewSessionInFolder, onRenameSession, onArchiveSession, onDeleteFolder, onAbortSession, onForceQuitSession, onConfirmRename, onAssignProject, onExportSessionJsonl, onRetryLoadSessions, searchDeps, onOpenSearchDrawer } = useSidebarSessionActions({ selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, archiveSession, deleteFolder, assignSessionToProject, renameOpen, targetSessionId })
+const { onSelectSession, onNewSession, onNewSessionInFolder, onRenameSession, onArchiveSession, onDeleteFolder, onAbortSession, onForceQuitSession, onConfirmRename, onAssignProject, onExportSessionJsonl, onRetryLoadSessions, searchDeps, onOpenSearchDrawer } = useSidebarSessionActions({ selectSession, restoreSession, newSession, loadSessions, renameSession, archiveSession, deleteFolder, assignSessionToProject, renameOpen, targetSessionId })
 
 // ── 归档视图编排（session-archive D10/D11，u-renderer-entry）──
 const archiveStore = useArchiveStore()

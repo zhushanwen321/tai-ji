@@ -8,10 +8,11 @@
  * - provider-edit-reconcile.ts 广播 × 用户编辑并发对齐纯核（D8 + S8 规则，接口级可测）
  * - provider-edit-types.ts    跨 module 共享类型
  *
- * 本 facade 只做两件事：① 三 module 装配（互相依赖的注入点在此接线）② provider 变化时的
- * 重置序（载入 → 瞬态重置 → 快照捕获，原 watch(props.provider) 的执行序逐字保持——唯一
- * 例外是同 id 刷新：不重置，由 form module 的 watch(providers) + applyReconcile 承接，
- * 见下方 watch 内注释）。返回结构收敛为 3 组子 interface（form / discover / models），调用方按组消费。
+ * 本 facade 只做两件事：① 三 module 装配（互相依赖的注入点在此接线）② provider 变化统一经
+ * form.reconcile 分流后的重置序编排（id 变化：载入 → 瞬态重置 → 快照捕获，执行序逐字保持；
+ * 同 id 刷新由 form module 的 applyReconcile 承接——保留编辑态刷新数据，SG-8 契约见
+ * ProviderEditFormModule.reconcile JSDoc）。返回结构收敛为 3 组子 interface（form / discover
+ * / models），调用方按组消费。
  *
  * 历史导出清单（CONTEXT_OPTIONS / THINKING_STRATEGIES / API_KEY_CLEAR_SENTINEL / LocalModel /
  * ThinkingStrategy / DiscoverAction 等）已归位各 module，经 settings 域 barrel（index.ts）
@@ -43,10 +44,12 @@ export interface ProviderEditSession {
 }
 
 /**
- * @param providerRef 当前编辑的 provider（null = 弹窗关闭/新增态）。**id 变化**时重置全部
- *   编辑态（同 id 刷新不重置：广播替换数组元素由 form module 的 watch(settingsStore.providers)
- *   + applyReconcile 承接，避免抹掉用户输入/回显态）。该 ref 必须取自 settings store 的
- *   provider 列表（同一数据源）——否则同 id 判据与广播对齐数据源脱钩。
+ * @param providerRef 当前编辑的 provider（null = 弹窗关闭/新增态）。变化统一经
+ *   form.reconcile 分流（SG-8）：**id 变化**（含打开/关闭/切换）重置全部编辑态；
+ *   **同 id 新对象**保留编辑态、按广播对齐规则刷新（applyReconcile）——无论新引用来自
+ *   settings store 列表元素替换还是独立构造的 prop。取自 store 列表时与 form module 的
+ *   watch(providers) 广播对齐共享同一数据源（同 id 场景两条路径重复处理幂等），但不再是
+ *   硬性契约——分流判据在 form module 内（已载入 id），不依赖调用方数据源形态。
  * @param deps TC4 注入：t（i18n 翻译函数，壳侧传 vue-i18n 的 global.t）。
  */
 export function useProviderEdit(providerRef: Ref<ProviderInfo | null>, deps: ProviderEditDeps): ProviderEditSession {
@@ -73,18 +76,15 @@ export function useProviderEdit(providerRef: Ref<ProviderInfo | null>, deps: Pro
     t,
   })
 
-  // provider 同步：打开/切换 provider 时重置编辑态（原 watch(props.provider) 执行序逐字保持：
-  // 表单载入 → 瞬态态重置 → 模型清单载入 → 记录初始快照。快照最后捕获，确保覆盖全部编辑态）。
+  // provider 同步（SG-8）：providerRef 变化统一经 form.reconcile 分流——id 变化（含打开/
+  // 关闭/切换）→ 'reset'，facade 编排跨 module 重置序（原执行序逐字保持：表单载入（reconcile
+  // 内 applyProvider）→ 瞬态态重置 → 模型清单载入 → 记录初始快照，快照最后捕获确保覆盖全部
+  // 编辑态）；同 id 新对象 → 'refreshed'，保留编辑态按广播对齐规则刷新（applyReconcile，
+  // 与 form module 的 watch(providers) 同一处理路径，幂等——不在这里重复重置）。
   watch(
     () => providerRef.value,
-    (p, prev) => {
-      // MF-1-1：同 id 的新对象 = 广播/刷新替换了列表元素（ProviderPage v-for 直接把数组元素作
-      // :provider，settingsStore.setProviders 整体替换数组），不是「切换 provider」。
-      // 这里若继续全量重置，会把用户已输入或已回显的 apiKey 抹掉（回显态含 revealedApiKey/showKey）。
-      // 同 id 刷新由 form module 的 watch(providers) + applyReconcile 承接（非 dirty 整体重拍
-      // 表单与模型清单并重捕获快照，dirty 保留用户改动）——不在这里重复重置。
-      if (p && prev && p.id === prev.id) return
-      form.applyProvider(p)
+    (p) => {
+      if (form.reconcile(p) !== 'reset') return
       models.applyProvider(p)
       form.resetTransient()
       discover.resetTransient()

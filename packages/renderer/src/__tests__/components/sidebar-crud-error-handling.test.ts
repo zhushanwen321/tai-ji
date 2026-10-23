@@ -5,7 +5,8 @@
  * catch + toastError，不产生 unhandled rejection。对齐同组件已有的
  * onSelectAgentCall / onWorkflowAction 模式。
  *
- * 覆盖边界：onDeleteSession 的 UI 挂点已迁移为归档钮（handler 保留但无 UI 挂点）；
+ * 覆盖边界：sidebar 删除链路的 UI 入口是归档钮（session-archive D6 迁移后删除走
+ * archive 链路，其异常处理契约由 onArchiveSession 承载断言）；
  * onConfirmRename / onNewSession 的错误路径不在本文件覆盖范围。
  *
  * 策略：mount Sidebar 前把 useSidebar 返回的方法 mock 成 reject，mock useToast 捕获
@@ -29,7 +30,6 @@ vi.mock('@/composables/useToast', () => ({
 // ── mock useSidebar：返回的 CRUD 方法可控制 reject ──
 const sidebarMocks = vi.hoisted(() => ({
   selectSession: vi.fn(),
-  deleteSession: vi.fn(),
   archiveSession: vi.fn(),
   renameSession: vi.fn(),
   newSession: vi.fn(),
@@ -119,7 +119,6 @@ beforeEach(() => {
   vi.clearAllMocks()
   // 默认 resolve（非异常用例的基础状态）
   sidebarMocks.selectSession.mockResolvedValue(undefined)
-  sidebarMocks.deleteSession.mockResolvedValue(undefined)
   sidebarMocks.archiveSession.mockResolvedValue(undefined)
   sidebarMocks.renameSession.mockResolvedValue(undefined)
   sidebarMocks.newSession.mockResolvedValue(null)
@@ -149,12 +148,11 @@ describe('Sidebar CRUD handler 异常处理', () => {
   })
 
   /**
-   * U6: onDeleteSession remove 失败时 toast 报错。
+   * U6: 删除链路 remove 失败时 toast 报错。
    */
   it('onArchiveSession 失败时 toast 报错', async () => {
-    // [session-archive D6] 悬停删除钮已迁移为归档钮——Sidebar 异常处理契约的现行载体是
-    // archive 链路（onDeleteSession handler 保留但无 UI 挂点，其 catch 契约由本用例的
-    // 同构链路 onArchiveSession 承载断言）
+    // [session-archive D6] 悬停删除钮已迁移为归档钮——Sidebar 删除链路异常处理契约的
+    // 现行载体是 archive 链路
     sidebarMocks.archiveSession.mockRejectedValue(new Error('server error'))
     const wrapper = shallowMount(Sidebar)
 

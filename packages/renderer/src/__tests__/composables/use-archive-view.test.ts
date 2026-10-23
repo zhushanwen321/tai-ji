@@ -124,6 +124,33 @@ describe('openSummary / refreshArchives（D11 摘要视图入口 + D10 列表拉
 
     expect(useArchiveStore().listError).toBe('net down')
   })
+
+  it('refreshArchives 在途期间再触发：去重并发 + 完成后自动补拉一轮（trailing 收敛到最新快照）', async () => {
+    const { refreshArchives } = useArchiveView()
+    // 两轮拉取均受控挂起（慢 RPC 形态），分别返回新旧快照——补拉轮返回新触发时点的数据
+    let resolveFirst!: (v: ArchiveSummary[]) => void
+    let resolveSecond!: (v: ArchiveSummary[]) => void
+    apiMocks.listArchives.mockImplementationOnce(
+      () => new Promise<ArchiveSummary[]>((res) => { resolveFirst = res }),
+    )
+    apiMocks.listArchives.mockImplementationOnce(
+      () => new Promise<ArchiveSummary[]>((res) => { resolveSecond = res }),
+    )
+
+    const first = refreshArchives()
+    const second = refreshArchives() // 在途期间新触发（帧密集到达形态）：复用在途 promise
+    expect(apiMocks.listArchives).toHaveBeenCalledTimes(1) // 不并发、不丢弃
+
+    resolveFirst([makeArchive()])
+    await Promise.all([first, second])
+    // 首轮结果落地（触发者复用同一 promise）；补拉轮已由工具自动发起（挂起中）
+    expect(useArchiveStore().archives.map((a) => a.sessionId)).toEqual(['arc-1'])
+    expect(apiMocks.listArchives).toHaveBeenCalledTimes(2)
+
+    resolveSecond([makeArchive('arc-2')])
+    await vi.waitFor(() => expect(useArchiveStore().archives.map((a) => a.sessionId)).toEqual(['arc-2']))
+    expect(useArchiveStore().loading).toBe(false)
+  })
 })
 
 describe('restoreArchive（验收条款：恢复成功切回会话列表）', () => {

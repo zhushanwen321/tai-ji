@@ -11,7 +11,7 @@
  * （useTrayCounts 的 retry + watch(sessionId) 首次拉取）。
  *
  * 依赖注入说明：useSidebar 的方法（selectSession/newSession/loadSessions/renameSession/
- * deleteSession/deleteFolder）由调用方注入——useSidebar 非单例（每次调用
+ * deleteFolder）由调用方注入——useSidebar 非单例（每次调用
  * createSessionStore + createUseSession 新建实例），不能在本 composable 内重复调用。
  * renameOpen/targetSessionId 是 RenameSessionDialog 的本地 UI ref，由 Sidebar.vue 创建并注入，
  * onRenameSession 设置这两个 ref 打开 dialog。useChat/useToast/useI18n/useSearchModalDeps/
@@ -40,7 +40,6 @@ export interface UseSidebarSessionActionsOptions {
   newSession: (cwd?: string) => Promise<string | null>
   loadSessions: () => void
   renameSession: (id: string, label: string) => Promise<void>
-  deleteSession: (id: string) => Promise<void>
   /**
    * 归档（session-archive D6/D14，u-renderer-entry）：SessionItem 悬停归档钮两段确认后
    * emit archive → 本 handler → useSidebar.archiveSession（core 编排：
@@ -63,7 +62,6 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     newSession,
     loadSessions,
     renameSession,
-    deleteSession,
     archiveSession,
     deleteFolder,
     assignSessionToProject,
@@ -102,15 +100,6 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
   async function onRenameSession(id: string): Promise<void> {
     targetSessionId.value = id
     renameOpen.value = true
-  }
-
-  async function onDeleteSession(id: string): Promise<void> {
-    try {
-      await deleteSession(id)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      toastError(t('sidebar.deleteSessionFailed', { msg }))
-    }
   }
 
   /**
@@ -304,7 +293,6 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     onNewSession,
     onNewSessionInFolder,
     onRenameSession,
-    onDeleteSession,
     onArchiveSession,
     onDeleteFolder,
     onAbortSession,

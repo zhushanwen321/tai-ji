@@ -10,7 +10,6 @@ export default {
   sessionListLoadFailed: 'Failed to load sessions ({error})',
   switchSessionFailed: 'Failed to switch session: {msg}',
   newTaskFailed: 'Failed to create task: {msg}',
-  deleteSessionFailed: 'Failed to delete session: {msg}',
   // Archive action toasts (session-archive §5.1 success path; compression runs in
   // background — wording does not claim completion)
   archiveSessionDone: 'Archived "{name}"',

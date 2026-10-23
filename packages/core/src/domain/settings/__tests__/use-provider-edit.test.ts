@@ -189,6 +189,69 @@ describe('同 id 刷新（广播替换列表元素）不重置编辑态（MF-1-1
   })
 })
 
+describe('reconcile 入口契约（SG-8：provider 变化统一经 form.reconcile 分流）', () => {
+  it('仅 prop 变化（同 id 新引用、store 列表不动）→ 不重置：回显态保留 + 非 dirty 字段经刷新分支重拍', async () => {
+    const providerRef = ref<ProviderInfo | null>(makeProvider({ apiKeySet: true }))
+    const edit = mount(providerRef)
+    await nextTick()
+    ;(getSettingsTransport().revealProviderApiKey as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ available: true, apiKey: 'sk-stored', source: 'auth.json' })
+    await edit.form.revealApiKey()
+    expect(edit.form.draft.apiKey).toBe('sk-stored')
+    expect(edit.form.showKey.value).toBe(true)
+
+    // prop 换同 id 新引用（独立构造对象，settings store 的 providers 不动）——旧契约依赖
+    // 「providerRef 必取自 store 列表」并靠 watcher 早退跳过；新契约统一经 reconcile 分流
+    providerRef.value = makeProvider({ name: 'P1-prop-refresh' })
+    await nextTick()
+
+    // 不重置：回显态保留（误走 reset 会清空 apiKey 草稿 + showKey）
+    expect(edit.form.draft.apiKey).toBe('sk-stored')
+    expect(edit.form.showKey.value).toBe(true)
+    // 非 dirty → 同 id 刷新分支重拍字段
+    expect(edit.form.draft.name).toBe('P1-prop-refresh')
+    expect(edit.form.isDirty.value).toBe(false)
+  })
+
+  it('仅 prop 变化 + dirty → 用户改动保留（刷新走 ignore 分支），不触发重置序', async () => {
+    const providerRef = ref<ProviderInfo | null>(makeProvider())
+    const edit = mount(providerRef)
+    await nextTick()
+    edit.form.draft.apiKey = 'sk-typed'
+    expect(edit.form.isDirty.value).toBe(true)
+
+    providerRef.value = makeProvider({ name: 'P1-prop-refresh' })
+    await nextTick()
+
+    // 用户改动优先：apiKey 草稿保留（误走 reset 会被清空）、已编辑字段不被重拍
+    expect(edit.form.draft.apiKey).toBe('sk-typed')
+    expect(edit.form.draft.name).toBe('P1')
+    expect(edit.form.isDirty.value).toBe(true)
+  })
+
+  it('幂等 store watch：providers 连续替换同 id fresh → 表单稳定收敛、不虚报 dirty', async () => {
+    const providerRef = ref<ProviderInfo | null>(makeProvider())
+    const edit = mount(providerRef)
+    await nextTick()
+
+    getSettingsStore().providers.value = [makeProvider({ name: 'P1-broadcast' })]
+    await nextTick()
+    expect(edit.form.draft.name).toBe('P1-broadcast')
+    expect(edit.form.isDirty.value).toBe(false)
+
+    // 二次替换同值（providerRef 同 tick 换新引用模拟 v-for 元素替换 → 两条 watch 都触发）
+    const refreshed = makeProvider({ name: 'P1-broadcast' })
+    getSettingsStore().providers.value = [refreshed]
+    providerRef.value = refreshed
+    await nextTick()
+
+    // 幂等收敛：值稳定、快照已对齐、不虚报 dirty
+    expect(edit.form.draft.name).toBe('P1-broadcast')
+    expect(edit.form.isDirty.value).toBe(false)
+    expect(edit.models.localModels.value).toHaveLength(1)
+  })
+})
+
 describe('discover 凭据取值复用「真实未保存草稿」判据（MF-1-1）', () => {
   it('回显值（= 所存值）不作为 payload apiKey 发出（$ENV 引用仍由 runtime resolver 展开）', async () => {
     const providerRef = ref<ProviderInfo | null>(makeProvider({ apiKeySet: true }))

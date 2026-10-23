@@ -26,6 +26,7 @@ import type { ArchiveSummary } from '@taiji/shared'
 import { session as sessionApi } from '@/api'
 import * as events from '@taiji/core/transport/api'
 import { toErrorMessage } from '@taiji/core'
+import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
 import i18n from '@/i18n'
 import { useArchiveStore } from '@/stores/archive'
 import { useNavigationStore } from '@/stores/navigation'
@@ -38,40 +39,30 @@ const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => st
 /**
  * 拉取归档列表（config.archives；打开视图 / 归档域操作成功后对账 / 压缩完成帧触发）。
  * 失败置 listError 供归档列表重试入口（拉为主：列表 = 归档目录扫描派生，D9 不变量 3）。
- * in-flight 期间的新调用合并为完成后补拉一次（trailing）：帧到达密集时旧快照后到
- * 覆盖新快照的竞态由串行化收敛（多入口并发同样受益——openView 与恢复/删除后刷新）。
+ *
+ * in-flight 去重 + trailing 补拉经 createInflightDedup 单点工具（C-data-18，禁手写
+ * 同构实现）：同 key 在途的新触发复用在途 promise 并登记补拉，settle 后自动再拉一轮
+ * ——帧到达密集时旧快照后到覆盖新快照的竞态由串行化收敛（多入口并发同样受益：
+ * openView 与恢复/删除后刷新）。单键退化形态（固定 key 常量）。
  */
-let refreshInFlight: Promise<void> | null = null
-let refreshPending = false
-async function refreshArchives(): Promise<void> {
-  if (refreshInFlight) {
-    // 已有拉取在途：标记补拉，由在途任务完成后承接（不并发、不丢弃）。
-    refreshPending = true
-    await refreshInFlight
-    return
-  }
-  const run = (async () => {
+const archiveRefreshDedup = createInflightDedup<void>({ trailing: true })
+const ARCHIVES_REFRESH_KEY = 'config.archives'
+
+function refreshArchives(): Promise<void> {
+  const { promise } = archiveRefreshDedup.run(ARCHIVES_REFRESH_KEY, async () => {
+    const store = useArchiveStore()
+    store.loading = true
+    store.listError = null
     try {
-      do {
-        refreshPending = false
-        const store = useArchiveStore()
-        store.loading = true
-        store.listError = null
-        try {
-          const archives = await sessionApi.listArchives()
-          store.setArchives(archives)
-        } catch (e) {
-          store.listError = toErrorMessage(e)
-        } finally {
-          store.loading = false
-        }
-      } while (refreshPending)
+      const archives = await sessionApi.listArchives()
+      store.setArchives(archives)
+    } catch (e) {
+      store.listError = toErrorMessage(e)
     } finally {
-      refreshInFlight = null
+      store.loading = false
     }
-  })()
-  refreshInFlight = run
-  return run
+  })
+  return promise
 }
 
 /**
