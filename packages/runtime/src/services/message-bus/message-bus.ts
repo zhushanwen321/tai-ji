@@ -191,6 +191,11 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   // renderer 订阅已被 bus.clearSession 清除，回放是提示条的主要送达通路）。
   'session.restored': 'stream',
   'session.restoreFailed': 'stream',
+  // subagent live 流降级一次性信号（DC-8，subagent-control-delivery-residue）：低频（每
+  // record 至多一次）+ 需可靠送达——stream 入 ring（session.restored / terminal.writeFailed
+  // 同款理由）；消费端幂等（降级位单次翻转），回放重复帧零副作用。缺席丢失的兜底 =
+  // 接入拉取（session.getSubagentStreamState 的 degraded 字段是权威来源）。
+  'session.subagentStreamDegraded': 'stream',
   'terminal.alive': 'stream',
   'terminal.exit': 'stream',
   'terminal.ack': 'stream',

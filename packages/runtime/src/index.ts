@@ -89,7 +89,7 @@ import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver,
 // engine-provider-unification u2：pi→zcode provider 启动同步接线（路径拼装 + D7 降级
 // 包装收敛在该模块——组合根 import 即执行 main()，降级分支抽独立模块才可单测，
 // run-extras-migration 同族先例）。
-import { createZcodeProviderMirrorSync, runZcodeProviderStartupSync } from './services/zcode-provider-sync-wiring.js'
+import { createZcodeProviderMirrorSync, runZcodeProviderStartupSync, type ZcodeProviderStartupSyncDeps } from './services/zcode-provider-sync-wiring.js'
 import { getExtensionsDir, getNpmDir, getTmpDir, getProviderExtrasPath } from './infra/pi/pi-paths.js'
 import { getPiGlobalAgentDir, syncBundledResources } from './infra/pi/pi-maintenance.js'
 import { runCodemodeStartupMigration } from './infra/pi/pi-codemode-settings.js'
@@ -1230,11 +1230,15 @@ async function main(): Promise<void> {
   // 早于此点会 TDZ（wiring 的 catch 降级能兜住但同步功能整体失效，不可接受）。
   // D7 降级语义在 wiring 模块收敛：任何异常 warn 不阻断启动（副本是可用性增强不是启动
   // 前置）。路径缺省拼装与 catalog 单点直传均收在 runZcodeProviderStartupSync。
-  await runZcodeProviderStartupSync({
+  // S-12（dev-0.11.7 review residue）：三依赖在此单点组装——本处启动同步与下方
+  // createZcodeProviderMirrorSync（server setServices）两个消费点共用同一份，杜绝
+  // 字面量手抄两份漂移。
+  const zcodeProviderSyncDeps: ZcodeProviderStartupSyncDeps = {
     configStore,
     credentialResolver: providerCredentialResolver,
     isModelsCorrupted: isModelsStoreCorrupted,
-  })
+  }
+  await runZcodeProviderStartupSync(zcodeProviderSyncDeps)
   const fileService = new FileService({
     sessionService,
     executor: new FsExecutor(),
@@ -1545,6 +1549,13 @@ async function main(): Promise<void> {
     getClient: (sessionId) => sessionService.getRpcClient(sessionId),
     scanSessions: (opts) => sessionStore.scanSessions(opts),
   })
+  // zcode 镜像同步 write-through 触发面实例（ADR-0142 镜像架构）：唯一实例、三触发面共用
+  // 同一串行化队列（latest-wins，顺序契约见 createZcodeProviderMirrorSync 头注释）——
+  // ① settings 域 provider 变更（server.setServices 注入，write-through）；② 凭据域 OAuth
+  // 事件（handler 侧同实例消费）；③ 启动后台 legacy provider 迁移完成后（下方
+  // runStartupBackgroundInit 注入，S-9：迁移写入的 provider 配置不在启动同步快照内，须
+  // 触发镜像重跑）。三依赖 = 上方 zcodeProviderSyncDeps 单点（S-12）。
+  const zcodeProviderMirrorSync = createZcodeProviderMirrorSync(zcodeProviderSyncDeps)
   server.setServices(sessionService, configService, modelService, {
     extension: extensionService,
     plugin: pluginService,
@@ -1558,13 +1569,9 @@ async function main(): Promise<void> {
     quota: quotaService,
     // zcode 镜像同步 write-through（ADR-0142 镜像架构）：settings 域 provider 变更成功后
     // 与启动同步同源同实现地重跑镜像（同一判定链，副本天然对账；失败只 warn 不阻断配置写入）。
-    // 三依赖装配收口在 createZcodeProviderMirrorSync（与启动同步单点组装，防手抄漂移）；
+    // 实例与三依赖均为上方单点（zcodeProviderMirrorSync / zcodeProviderSyncDeps，S-12）；
     // trigger='mutation' 使日志措辞按来源分流（不冒用启动同步文案）。
-    zcodeProviderMirrorSync: createZcodeProviderMirrorSync({
-      configStore,
-      credentialResolver: providerCredentialResolver,
-      isModelsCorrupted: isModelsStoreCorrupted,
-    }),
+    zcodeProviderMirrorSync,
     // ai-voice-tts：tts 四 RPC 路由（TtsMessageHandler 装配 + buildRoutes 展开 handles）。
     tts: ttsService,
     handoff: handoffService,
@@ -1864,6 +1871,9 @@ async function main(): Promise<void> {
     readSpawnMarkers: () => readSpawnMarkerList(getDataDir()),
     // 加固轮：spawn 清单 tmp 残片清扫（infra 实现经 port 注入，同上闭包形态）
     sweepSpawnMarkerTmpResidue: () => sweepStaleSpawnMarkerTmpFiles(getDataDir()),
+    // S-9：legacy provider 迁移完成后触发镜像重跑——迁移写入的配置不在启动同步快照内，
+    // 不触发则副本陈旧至下次 mutation/重启。与 settings 域共用上方同一实例（串行化队列）。
+    zcodeProviderMirrorSync,
   })
 
   // ── remote-config 启动拉取（延迟 30s 单次）────────────────────────

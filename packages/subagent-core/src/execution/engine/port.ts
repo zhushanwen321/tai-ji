@@ -174,8 +174,13 @@ export interface EnginePort {
   /** D3（同步无副作用——调用前拒绝的判据）。 */
   capabilities(): EngineCapabilities;
 
-  /** D7（factory 初始化 + 版本变化检测触发；opts.force 跳过缓存强探）。 */
-  probe(opts?: { force?: boolean }): Promise<ProbeReport>;
+  /**
+   * D7（factory 初始化 + 版本变化检测触发；opts.force 跳过缓存强探）。
+   * opts.rootSessionId（DC-12）：调用方注入的权威根——probe 与后续 run 命中同一
+   * (socket, root) 共享连接（双连接 = runtime 双 spawn 引擎 + rebind 的 3s close
+   * grace 等待）；缺席时 runtime transport 以 control env 的 spawn 期值回落。
+   */
+  probe(opts?: { force?: boolean; rootSessionId?: string }): Promise<ProbeReport>;
 
   /** D1 主语义：fire-to-completion。[D6 合流] task = AgentCallOpts（单一任务形状，
    *  原 AgentTaskSpec 已并入——字段裁定见 orchestration/models/types.ts）。会话形态

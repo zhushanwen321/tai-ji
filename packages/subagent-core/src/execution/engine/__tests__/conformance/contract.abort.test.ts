@@ -88,7 +88,7 @@ describe("conformance C4：abort 行为（协议黑盒：cancel 帧 + 引擎收�
       // 推进到 run 受理再 abort——abort 先于受理会走 pre-aborted 短路面（cancel 帧
       // 先于 run 帧写入，覆盖不到 cancel 收敛），确定性推进两步：
       // ① 预建连接（真实信号：spawn + initialize 握手完成）；
-      await client.ensureConnected(ctx.sessionRootId);
+      await client.ensureConnected(ctx.sessionRootId !== undefined ? { rootSessionId: ctx.sessionRootId } : undefined);
       const runP = engine.run(task, ctx);
       // ② 跨一个宏任务边沿再 abort。连接就绪后 run() 的「ensureConnected 幂等返回 →
       // wireAbortSignal 注册 → run 帧同步写入」全链是纯微任务，宏任务边沿构造性保证

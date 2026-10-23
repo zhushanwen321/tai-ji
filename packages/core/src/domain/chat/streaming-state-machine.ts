@@ -466,6 +466,17 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
   }
 
   /**
+   * [DC-8] 降级位推送写入口（session.subagentStreamDegraded 广播的消费侧）：runtime
+   * markDegraded 的一次性信号直写 per-(virtualId, recordId) degraded 位——与拉取响应
+   * （applySubagentStreamState 第 0 步）同一位，推送只是即时性补强，拉取快照仍是权威
+   * 来源（非降级快照会把位覆盖回 false）。幂等（位已真时 setPartitionDegraded 零副作用），
+   * 分区不存在时创建（只置位不动消息实体）。
+   */
+  function markSubagentStreamDegraded(virtualId: string, recordId: string): void {
+    setPartitionDegraded(getOrCreateChunkPartition(virtualId, recordId), true)
+  }
+
+  /**
    * 分区/record 级清除（生命周期挂点：record 删除 / 虚拟分区删除路径由 renderer 接线，
    * ADR-0049 分区范式）。recordId 缺省删整个 virtualId 名下全部分区。
    */
@@ -581,6 +592,7 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
     applySubagentStreamState,
     requestSubagentStreamState,
     sealSubagentStream,
+    markSubagentStreamDegraded,
     isSubagentStreamDegraded,
     clearSubagentChunkState,
     clearSubagentChunkStateForSession,

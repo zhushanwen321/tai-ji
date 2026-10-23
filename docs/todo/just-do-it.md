@@ -89,14 +89,14 @@
 
 - [ ] **条目 39（S-12 字面量手抄）** `packages/runtime/src/index.ts:1205-1209` 与 `:1492-1496` 三依赖字面量手抄两份。抽模块级常量单点定义，工厂头注「单处组装」改写为事实。来源 dev-0.11.7-review-residue。
 - [ ] **条目 40（DC-8 降级推送）** runtime `markDegraded()` 只改态不发布，drawer 已打开且无 chunk 时用户看不到降级提示。修复：markDegraded 时发布 `session.subagentStreamDegraded {sessionId, recordId}` 广播，renderer 经 event-bus 应用到同一 per-(virtualId, recordId) 位（`useSubagentTabData` 摄入）。位置：runtime infra/subagent-control + renderer useSubagentTabData。补单测。来源 subagent-control-delivery-residue。
-- [ ] **条目 41（DC-12 双 spawn）** 共享 control 客户端按 `(socketPath, rootSessionId)` 复用导致非缺省引擎首轮 probe→run 双 spawn + 3s close grace。修复（选项 a，数据正确性优先）：把权威 rootSessionId 注入 probe/read/setModel 调用（消除键不一致）；位置 `packages/subagent-core/src/.../transport/control-client.ts`。来源同上。
-- [ ] **条目 42（hasPendingFrames 无调用方导出）** `runtime/src/infra/subagent-control/outbound-queue.ts` 的 `hasPendingFrames` 无调用方（删前 grep 全仓确认零引用），删除。来源同上（D5 卫生项）。
+- [x] **条目 41（DC-12 双 spawn）** 共享 control 客户端按 `(socketPath, rootSessionId)` 复用导致非缺省引擎首轮 probe→run 双 spawn + 3s close grace。修复（选项 a，数据正确性优先）：把权威 rootSessionId 注入 probe/read/setModel 调用（消除键不一致）；位置 `packages/subagent-core/src/.../transport/control-client.ts`。来源同上。
+- [x] **条目 42（hasPendingFrames 无调用方导出）** `runtime/src/infra/subagent-control/outbound-queue.ts` 的 `hasPendingFrames` 无调用方（删前 grep 全仓确认零引用），删除。来源同上（D5 卫生项）。
 - [ ] **条目 43（tmp 残片扫描）** `runtime/src/infra/subagent-control/pid-file.ts` 的 `.pid.tmp-*` 残片不在 sweep 扫描范围（只扫 `*.pid`）。sweep 扫描模式扩为含 `.pid.tmp-*`。位置：`sweep.ts:39-113`。来源同上。
 
 ### T12 subagent-control infra 批
 
 - [ ] **条目 44（S-9 listen 探活）** `runtime/src/infra/subagent-control/control-server.ts:378-388` + `sweep.ts:46`：当前 socket 路径被 sweep 跳过 → 崩溃残片 + pid 复用 → `EADDRINUSE` 致命。修复：listen 前对当前路径探活（尝试连接，通则报致命冲突，不通则清理后 bind），必须保留 pid 复用 fail-fast 语义。补用例。来源 dev-0.11.8-review-residue。
-- [ ] **条目 45（S-10 recordId 接线）** `frames.ts:76` 的 `launch.recordId` 生产恒不写 → `findDescendantIds()` 死路径。修复：从 `RemoteEngine.run` / `ctx.taskId` 接线写入 recordId（位置 `packages/subagent-core/src/.../transport/control-client.ts:195-207`、`runtime/src/infra/subagent-control/channel-registry.ts:86`）。若接线成本过高，改为显式降级（删字段 + 递归分支并更新登记），不留死路径。来源同上。
+- [x] **条目 45（S-10 recordId 接线）** `frames.ts:76` 的 `launch.recordId` 生产恒不写 → `findDescendantIds()` 死路径。修复：从 `RemoteEngine.run` / `ctx.taskId` 接线写入 recordId（位置 `packages/subagent-core/src/.../transport/control-client.ts:195-207`、`runtime/src/infra/subagent-control/channel-registry.ts:86`）。若接线成本过高，改为显式降级（删字段 + 递归分支并更新登记），不留死路径。来源同上。
 - [ ] **条目 46（S-5 registry 登记）** `docs/architecture/data-source-registry.md` §6 补 subagent-control run/socket/pid 文件族登记行（位置 `runtime/src/infra/subagent-control/paths.ts:20-57`、`pid-file.ts:47-79`、`sweep.ts:39-113`）。来源同上。
 - [ ] **条目 47（S-11 tsup 注释）** `packages/runtime/tsup.config.ts:36-42` noExternal 注释错误，按事实改写。来源同上。
 - [ ] **条目 48（S-12 CJS 检查扫描根）** `.githooks/check_runtime_meta_url.py:25-60` 与 `scripts/validate-runtime-bundle.sh:236` 附近：CJS 兼容检查只扫 `packages/runtime/src`。扫描根扩到 tsup noExternal 所列 workspace 包（或补产物级断言，优先扩扫描根）。来源同上。
@@ -114,8 +114,8 @@
 ### T14 杂项收尾批
 
 - [ ] **条目 56（S-4 接线断言）** todo / rename-session / session-reader / scheduler / pending-notifications / smart-context 六包 `renderResult` 接线点补 `expect(typeof tool.renderResult).toBe('function')` + 折叠输出断言（约 3-6 行/包）。来源 dev-0.11.8-review-residue。
-- [ ] **条目 57（F S-7 槽键）** `packages/subagent-core/src/.../transport/control-client.ts:70` 模块级 `sharedClients` Map 违反 globalThis 槽纪律（`shared/global-slots.ts`）。修复：加槽键（经 global-slots 注册），保留 per-(socket, root) 复用键语义。来源同上。
-- [ ] **条目 58（F S-8 mirrorKey）** `runtime/src/infra/subagent-control/mirror.ts:94,217,277`：`mirrorKey` 缺 channelId。修复：identity 纳入 channelId 并同步查询侧；不做降级（数据正确性优先）。来源同上。
+- [x] **条目 57（F S-7 槽键）** `packages/subagent-core/src/.../transport/control-client.ts:70` 模块级 `sharedClients` Map 违反 globalThis 槽纪律（`shared/global-slots.ts`）。修复：加槽键（经 global-slots 注册），保留 per-(socket, root) 复用键语义。来源同上。
+- [x] **条目 58（F S-8 mirrorKey）** `runtime/src/infra/subagent-control/mirror.ts:94,217,277`：`mirrorKey` 缺 channelId。修复：identity 纳入 channelId 并同步查询侧；不做降级（数据正确性优先）。来源同上。
 - [ ] **条目 59（viz fit 竞态）** `packages/renderer/src/components/panel/workflow-viz/dag/WorkflowVizDag.vue`：fit 前确认容器尺寸就绪（ResizeObserver 首回调或 rAF 双帧后执行 fit）。来源 workflow-viz-dag-minor-residuals。
 - [ ] **条目 60（viz callId 空态）** `workflow-viz/overlay/WorkflowVizOverlayHost.vue`：callId 未命中时回退 `calls?.[0]` 改显式空态（no-op），不静默换目标。来源同上。
 - [ ] **条目 61（S-6 realpath 复核）** `apps/electron/main/utils/local-file-prefixes.ts`（isPathUnderSessionTmp）：`.tmp/` 准入只做词法 resolve。session-tmp 分支加 `realpathSync` 复核（性能敏感则复核结果缓存）。来源 dev-0.11.4-review-residue。

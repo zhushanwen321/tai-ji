@@ -88,8 +88,9 @@ export interface RoundsCtx {
   /**
    * [W1 / D3 表行 3/4] record 事件追加注入位（markRoundStarted 的
    * record-round-started 帧 / markRoundIdle 的 record-round-idle 帧——record 轮次
-   * 粒度事件进 journal 是 D5 增量裁决：不进则 .state 仍是事实源，事实源介质数
-   * 降不到 1）。幂等/落盘收在被调侧（容器 appendJournal 单点）。
+   * 粒度事件进 journal 是 D5 增量裁决：`.state` sidecar 已退场，轮终终局只由
+   * 事件帧承载，不进则事实源缺轮次终局一档）。幂等/落盘收在被调侧（容器
+   * appendJournal 单点）。
    */
   appendJournalEvent: (record: ExecutionRecord, input: RecordEventInput) => void;
   notifyChange: () => void;
@@ -201,7 +202,8 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
 /**
  * 意图原语：轮末收尾——**写 idle**（[two-state-convergence U4/D3] A-lite 桥接退役：
  * 「轮已收尾」回归 §3.2.2 事件表 `running --settle--> idle` 的单字段编码，对齐
- * markSettled/`.state` 收条/重建单规则。message 资资格核验已核验（设计 D3 + [modeless
+ * markSettled（轮终收条由 record-round-idle 事件帧承载，`.state` 收条已退场）
+ * /重建单规则。message 资资格核验已核验（设计 D3 + [modeless
  * 波1] SP-5 记录级升级门 canUpgradeToConversation 消亡）：资格 = 引擎能力轴
  * engineSupportsConversation（不查 status）；message 准入走 tryEnterRunning CAS
  * （idle→running）；onMessage 按 `status!=='running'` 分流进 revive 格——idle 形态
@@ -218,8 +220,9 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
  *      携带新 round 与本轮 result）；
  *      ⑩ [A-lite] stopReason 展示位（成功轮 completed / 失败轮 failed——status 已
  *      idle，endedAt 不写）；⑪ [A-lite / U7] 轮终磁盘写点（锚分派对齐 markSettled：
- *      pi 路径 `.state` 收条 + binding 快照 / zcode 路径锚键 binding 快照——正常轮终后
- *      宿主崩溃 revive 水合 turns/tokens 不归零）；⑫ [B2] 轮终 manifest 派生视图
+ *      pi 路径 sessionFile binding 快照 / zcode 路径锚键 binding 快照——`.state`
+ *      收条已退场，轮终停因由 record-round-idle 事件帧承载；正常轮终后宿主崩溃
+ *      revive 水合 turns/tokens 不归零）；⑫ [B2] 轮终 manifest 派生视图
  *      （ctx.writeDerivedManifest——session-reader manifest 直读主路径的数据源，
  *      idle 派生视图 = legacy "running" + executionStatus "idle"；缓存性质重复写
  *      幂等无害）。
@@ -254,8 +257,10 @@ function settleRoundResult(rec: ExecutionRecord, outcome: RoundSettlementOutcome
  * ⑪ 轮终磁盘写点（markRoundIdleImpl 拆出，[A-lite / U7 统计口径]）：锚分派对齐
  * markSettled 写法——pi 路径 sessionFile 快照 / zcode 路径 transcriptRef 派生锚键 /
  * 无锚 warn 留痕。正常轮终后宿主崩溃 → markResurrected 的 revive 水合需 binding
- * 快照在场（turns/tokens 不归零，U7 目标在最常见形态成立）。`.state` 收条 = 轮收尾
- * idle 形态（U4 翻边后内存侧与磁盘侧同词——重建单规则「一律 idle」不再有桥接例外）。
+ * 快照在场（turns/tokens 不归零，U7 目标在最常见形态成立）。`.state` 收条已退场：
+ * 轮终收条由 record-round-idle 事件帧承载，终态权威 = 事件流折叠
+ * （stateMarkerFromFold），本写点只写 binding 快照。U4 翻边后轮收尾形态内存侧与
+ * 磁盘侧同词（重建单规则「一律 idle」不再有桥接例外）。
  * best-effort 语义同 markSettled（失败 warn 留痕不抛——内存态已收尾，磁盘侧滞后由
  * 下次收尾/接管补写）。
  */
@@ -277,8 +282,8 @@ function persistRoundSettleDiskFace(rec: ExecutionRecord, id: string): void {
 
 /**
  * [W1 / D3 表行 4] record-round-idle 帧载荷组装（markRoundIdleImpl 拆出）：轮终收条
- * ——stopReason + 轮统计快照 + result 摘要锚 + 失败原因原文；.state 降级为本事件的
- * 落盘物化派生视图，D2 sidecar 裁决表 .state 行。摘要锚与 record-settled 同款截断
+ * ——stopReason + 轮统计快照 + result 摘要锚 + 失败原因原文；`.state` sidecar 已
+ * 退场，本事件帧是轮终收条的唯一承载。摘要锚与 record-settled 同款截断
  * （summarizeResultForJournal 单源）——承接 v1 轮终 result 显示信号（U8b），本轮
  * rec.result 已在②定稿。error 原文锚（W1 终态同步 F2-2 裁决）：失败轮承载
  * outcome.reason——v1 rec.error 显示信号的 journal 承接；成功轮缺席。「轮始清残留
@@ -326,7 +331,7 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   }
   // [轮次轴 CAS] 在途门：只在「在途（running）」时允许轮终。此前唯一保护是上面的
   // endedAt 终态冻结检查——cancel（markSettled 有意不写 endedAt）或迟到应答把 record
-  // 收成 idle 后再轮终，会静默多推一轮：round 二次递增 + `.state` 收条被覆写 +
+  // 收成 idle 后再轮终，会静默多推一轮：round 二次递增 + binding 快照被覆写 +
   // 多写一条 record-round-idle 事件行（事件流事实源被污染）。三类生产调用链
   // （settleOneShotOutcome / finalizeFailed / chat 域 onRunSettled）均在 running 门下，
   // 本段为原语级兜底（chat 域的门与轮终之间隔着 settleRoundXxx 的 await 边界）。

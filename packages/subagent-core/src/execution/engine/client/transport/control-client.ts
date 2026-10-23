@@ -35,7 +35,7 @@ import {
   ENGINE_OPEN_TIMEOUT_MS,
   controlClientKey,
   makeTransportError,
-  mapControlError,
+  mapControlError, sharedControlClientsSlot,
   type ControlChannelHandlers,
   type ControlChannelIdentity,
   type ControlChannelOpenResult,
@@ -66,16 +66,15 @@ const logger = getLogger("subagents");
  * 且无重置点，不同根的后续 open 一律 `session` 拒绝。只按 socketPath 复用会把真根
  * 引擎与探针（spawn 期 temp 根）塞进同一条连接 → 先到者定根、后到者永久 mismatch；
  * 根纳入键 = 「一连接一根」协议不变量的构造性投影，无需跨引擎锁或重连。
+ * 表本体经 [C-state-20] globalThis 槽承载（sharedControlClientsSlot，S-7）。
  */
-const sharedClients = new Map<string, RuntimeControlClient>();
-
 /** 取得共享客户端（引用计数 +1）；不可用实例（lost/disposed）弃用后新建。 */
 export function acquireRuntimeControlClient(opts: RuntimeControlClientOptions): RuntimeControlClient {
   const key = controlClientKey(opts.socketPath, opts.rootSessionId);
-  const reusable = sharedClients.get(key);
+  const reusable = sharedControlClientsSlot<RuntimeControlClient>().get(key);
   if (reusable?.isUsable === true) { reusable.acquire(); return reusable; }
   const created = new RuntimeControlClient(opts);
-  sharedClients.set(key, created);
+  sharedControlClientsSlot<RuntimeControlClient>().set(key, created);
   created.acquire();
   return created;
 }
@@ -203,6 +202,9 @@ export class RuntimeControlClient {
             ? { parentRecordId: identity.parentRecordId }
             : {}),
           ...(identity.depth !== undefined ? { depth: identity.depth } : {}),
+          // [S-10] 自申报 record id（channel 树父链挂点）：run 触发的 open 携带，
+          // probe 先行的通道缺席（wire 可选扩展，runtime 侧 `?? null` 登记）。
+          ...(identity.recordId ? { recordId: identity.recordId } : {}),
         },
       };
       if (!this.sendRaw(frame)) {
@@ -314,9 +316,9 @@ export class RuntimeControlClient {
       socket.removeAllListeners();
       socket.destroy();
     }
-    if (sharedClients.get(controlClientKey(this.socketPath, this.rootSessionId)) === this) {
-      sharedClients.delete(controlClientKey(this.socketPath, this.rootSessionId));
-    }
+    const key = controlClientKey(this.socketPath, this.rootSessionId);
+    const sharedClients = sharedControlClientsSlot<RuntimeControlClient>();
+    if (sharedClients.get(key) === this) sharedClients.delete(key);
   }
 
   private clearConnectTimers(): void {

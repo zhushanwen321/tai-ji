@@ -38,10 +38,44 @@ export type SubagentStatus = 'running' | 'idle'
 
 /**
  * 派发期模型来源（SubagentRecord.modelSource 同语义锚；与 subagent-core 域内本地
- * 副本逐字段等值——core 不依赖 @taiji/shared，workflow-dag-parser 同款边界，双侧
- * 值域修改须同步）。
+ * 副本逐字段等值——副本 = packages/subagent-core/src/execution/domain/record-model.ts
+ * 的 SubagentModelSource，core 不依赖 @taiji/shared，workflow-dag-parser 同款边界，
+ * 双侧值域修改须同步）。同步的机器检查 = 双侧运行时清单对拍单测
+ * （subagent-core src/execution/__tests__/subagent-model-source-parity.test.ts：
+ * 编译期双向类型兼容断言 + 运行时清单逐项比对，任一侧增删值即红）。
  */
 export type SubagentModelSource = 'explicit' | 'frontmatter' | 'preference' | 'default'
+
+/**
+ * SubagentModelSource 值全集（对拍清单锚点；结构同 SUBAGENT_STATUS_ALL）。
+ *
+ * 用途：与 subagent-core 侧 SUBAGENT_MODEL_SOURCES（record-model.ts）做双侧值域
+ * 对拍——两侧类型联合无运行时表示，值域漂移的运行时判据锚在本元组与 core 元组上
+ * （对拍单测见上方类型注释）。扩枚举检查（两处同步，缺一即编译/测试红）：
+ * - 上方联合与本元组须同步改——正向（元组含非联合值）由下方 satisfies 编译期拦截；
+ *   反向（联合扩值漏改元组）由 _SubagentModelSourceCoversAll 编译锁拦截；
+ * - core 侧副本（类型 + 元组）须同批同步——对拍单测运行时比对拦截。
+ */
+export const SUBAGENT_MODEL_SOURCE_ALL = [
+  'explicit',
+  'frontmatter',
+  'preference',
+  'default',
+] as const satisfies readonly SubagentModelSource[]
+
+/**
+ * 反向完备编译锁：SubagentModelSource 联合 ⊆ SUBAGENT_MODEL_SOURCE_ALL 值域
+ * （结构同 _SubagentStatusCoversAll；联合扩值漏改元组时本类型退化为错误信息元组，
+ * 下行赋值 tsc 编译错）。
+ */
+type _SubagentModelSourceCoversAll = [SubagentModelSource] extends [
+  (typeof SUBAGENT_MODEL_SOURCE_ALL)[number],
+]
+  ? true
+  : ['SubagentModelSource 扩值须同步 SUBAGENT_MODEL_SOURCE_ALL 元组']
+
+/** 编译锁消费点（导出以通过 noUnusedLocals；不经 barrel 导出，对外不可达）。 */
+export const SUBAGENT_MODEL_SOURCE_COVERAGE_LOCK: _SubagentModelSourceCoversAll = true
 
 /**
  * SubagentStatus 值全集（adversarial-review-fixes §3.3 B3；[U6] 两态收窄后 = 两值）。
@@ -122,7 +156,9 @@ export interface SubagentRecord {
    * ——「派发时是显式指定还是缺省补缺」。与模型覆盖（modelOverride/热切）正交：本字段
    * 只记录 spawn 时点来源，不随后续切换变化。additive：undefined（存量 record）=
    * 来源未知，读侧不展示标注。注意：subagent-core 域内有逐字段等值的本地副本
-   * （core 不依赖 @taiji/shared，workflow-dag-parser 同款边界），双侧值域修改须同步。
+   * （packages/subagent-core/src/execution/domain/record-model.ts 的 SubagentModelSource；
+   * core 不依赖 @taiji/shared，workflow-dag-parser 同款边界），双侧值域修改须同步
+   * （机器检查 = 对拍单测，见 SubagentModelSource 类型注释）。
    */
   modelSource?: SubagentModelSource
   /** 思考等级（off/minimal/low/medium/high/xhigh） */

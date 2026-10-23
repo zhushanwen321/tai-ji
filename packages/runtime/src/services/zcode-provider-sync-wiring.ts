@@ -114,14 +114,15 @@ export async function runZcodeProviderStartupSync(
 }
 
 /**
- * write-through 触发面工厂（ADR-0142 镜像架构）：组合根把「启动同步」与「变更镜像」
- * 收敛为同一装配点——configStore / credentialResolver / isModelsCorrupted 三依赖单处
- * 组装，避免两次手抄漂移；返回值吞掉同步结果（镜像失败只 warn，不阻断调用方）。
+ * write-through 触发面工厂（ADR-0142 镜像架构）：组合根把三依赖（configStore /
+ * credentialResolver / isModelsCorrupted）单点定义为 zcodeProviderSyncDeps 常量，喂给
+ * 「启动同步」（runZcodeProviderStartupSync 直调）与本工厂两个入口——不手抄两份字面量；
+ * 返回值吞掉同步结果（镜像失败只 warn，不阻断调用方）。
  *
  * 顺序契约（ADR-0122「竞态用顺序契约消解」，MF-4）：返回的触发闭包是唯一串行化点——
- * 所有触发面（settings 域 provider mutation + 凭据域 OAuth 登录/退出事件）共用同一
- * 队列：同一时刻最多一次镜像运行；运行中到达的触发不合弃（pending），本轮结束后按
- * 最新配置重跑一次（latest-wins + re-run）。副本收敛时点 = 队列清空（最后一次变更
+ * 所有触发面（settings 域 provider mutation + 凭据域 OAuth 登录/退出事件 + 启动后台
+ * legacy 迁移完成，S-9）共用同一队列：同一时刻最多一次镜像运行；运行中到达的触发不合弃
+ * （pending），本轮结束后按最新配置重跑一次（latest-wins + re-run）。副本收敛时点 = 队列清空（最后一次变更
  * 的副本已落盘），不以固定时延窗口作保证。重跑读取的是当时的 provider 配置快照，
  * 因此异步凭据解析期间到达的 mutation 不会被更早启动的旧快照覆盖。
  */

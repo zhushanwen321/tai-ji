@@ -101,13 +101,28 @@ function applyDeltaFrame(msg: StreamFrame, ctx: StreamFrameContext): void {
   ctx.chatApplyDelta(ctx.virtualId, payload.lines)
 }
 
-/** 构造 stream 帧处理函数（chunk / stream_delta 两通道分派；双键订阅共用同一处理函数，
+/** session.subagentStreamDegraded 帧（DC-8）：runtime markDegraded 的一次性推送——按
+ *  recordId 过滤后写 per-(virtualId, recordId) 降级位（chunkOps.markDegraded → core 状态机
+ *  与拉取响应 degraded 字段同一位）。chunkOps 未接线时忽略（与 chunk 帧同款兼容形态）。 */
+function applyDegradedFrame(msg: StreamFrame, ctx: StreamFrameContext): void {
+  if (ctx.chunkOps === undefined) return
+  const payload = msg.payload as { recordId?: string }
+  if (payload.recordId !== ctx.recordId) return
+  ctx.chunkOps.markDegraded(ctx.virtualId, ctx.recordId)
+}
+
+/** 构造 stream 帧处理函数（chunk / stream_delta / degraded 三通道分派；双键订阅共用同一处理函数，
  *  每条消息只命中一键）。 */
 function createStreamFrameHandler(ctx: StreamFrameContext): (msg: StreamFrame) => void {
   return (msg) => {
     // ── R 路径增量 chunk（唯一内容推送通道）──
     if (msg.type === 'subagent.stream_chunk') {
       applyChunkFrame(msg, ctx)
+      return
+    }
+    // ── DC-8：live 流降级一次性信号（payload.sessionId = 主 sid，经主键订阅命中）──
+    if (msg.type === 'session.subagentStreamDegraded') {
+      applyDegradedFrame(msg, ctx)
       return
     }
     if (msg.type !== 'subagent.stream_delta') return
@@ -128,6 +143,8 @@ interface SubagentStreamChunkOps {
   seal: (virtualId: string, recordId: string, msgSeq: number) => void
   /** 触发点①接入拉取（订阅建立完成后运行中 record 主动拉取）→ chat.requestSubagentStreamState（core 在途拉取去重） */
   requestState: (virtualId: string, recordId: string) => void
+  /** session.subagentStreamDegraded 帧（DC-8）→ chat.markSubagentStreamDegraded（与拉取响应 degraded 同一位） */
+  markDegraded: (virtualId: string, recordId: string) => void
 }
 
 export const useSubagentStore = defineStore('subagent', () => {
@@ -403,6 +420,9 @@ export const useSubagentStore = defineStore('subagent', () => {
    *   事件必发的 entry 帧派生视图覆盖）。W 路径清除帧无 msgSeq，不进 chunk 状态机（§4.1）。
    * - `subagent.stream_delta` lines 非空（W 路径全量形态，R 路径已不产生）→ chatApplyDelta
    *   全量替换原样（W 产生端不动，行为零变化）。
+   * - `session.subagentStreamDegraded`（DC-8，一次性降级信号，payload.sessionId = 主 sid
+   *   经主键订阅命中）→ chunkOps.markDegraded 写 per-(virtualId, recordId) 降级位（与拉取
+   *   响应 degraded 字段同一位，core 状态机单点）。chunkOps 缺省时忽略（同 chunk 帧兼容形态）。
    *
    * W4 契约保持：内容 mutation 全部经注入的 chat store 回调，store 不直接碰 chat 分区。
    *

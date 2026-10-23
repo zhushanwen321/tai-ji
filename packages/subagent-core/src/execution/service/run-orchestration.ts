@@ -301,7 +301,13 @@ export class RunOrchestration {
       // [2026-10-13 进程形态修复] shared-service 引擎（zcode）已经由 descriptor
       // 装配修复（processModel 同源进 manifest）在透传路径直通单例；本处 U3 接线的
       // 剩余场景 = 未来「每窗口一份」的非 pi 引擎接入 chat 直派时才需要。
-      probe: (engineId) => resolveWorkflowWindowEnginePort(undefined, engineId).probe(),
+      // [DC-12] probe 携带 service 层权威根（与 runCtx.sessionRootId 同源）：probe
+      // 与 run 命中同一 (socket, root) 共享连接，消「temp 根连接 + rebind」双 spawn。
+      probe: (engineId) => resolveWorkflowWindowEnginePort(undefined, engineId).probe(
+        this.sessionRootId !== null && this.sessionRootId !== ""
+          ? { rootSessionId: this.sessionRootId }
+          : undefined,
+      ),
       // [W3] chat 域 pi 路由 = registry cli 形态 port（协议客户端）——inproc DI 实例
       // 随 inproc pi 引擎目录 删除消亡，chat 与 run 域同路（G1 单一 CLI 形态）。
       piEngine: this.resolveChatEnginePort(),
@@ -572,7 +578,9 @@ export class RunOrchestration {
     // [engine-ref-translation D2] 四层产物经引擎翻译侧改写为引擎原生 ref（共享 helper
     // resolveEngineModelWithTranslation——与 workflow 域同语义；两层失败语义分立见模块头）。
     // [subagent-detail-model-info] 来源标注与解析同点判定：pi 路由 = task 显式 ?
-    // explicit : default（frontmatter/偏好层不适用——pi 链自解析）。
+    // (agent frontmatter ? frontmatter : default)（S-2：pi 链自解析虽不经 taiji 侧
+    // helper，但 agent .md 声明的模型同样被 pi 链消费，标注须与事实同构；偏好层
+    // 不适用——pi 路由不插 taiji 级偏好，D6 不采用段）。
     const resolvedModel = isPiRoute
       ? undefined
       : resolveEngineModelWithTranslation(
@@ -585,7 +593,9 @@ export class RunOrchestration {
       );
     const engineModel = resolvedModel?.engineModel;
     const modelSource: SubagentModelSource = isPiRoute
-      ? (opts.model !== undefined ? "explicit" : "default")
+      ? (opts.model !== undefined
+        ? "explicit"
+        : (preIdentity.agentConfig?.model !== undefined ? "frontmatter" : "default"))
       : (resolvedModel?.source ?? "default");
     const identity = isPiRoute
       ? await this.deps.resolveIdentity(opts, preIdentity)

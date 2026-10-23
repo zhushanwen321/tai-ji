@@ -1180,6 +1180,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
       streamingStateMachine.applySubagentStreamState(virtualId, recordId, response),
     requestSubagentStreamState: (virtualId: string, recordId: string) => streamingStateMachine.requestSubagentStreamState(virtualId, recordId),
     sealSubagentStream: (virtualId: string, recordId: string, msgSeq: number) => streamingStateMachine.sealSubagentStream(virtualId, recordId, msgSeq),
+    markSubagentStreamDegraded: (virtualId: string, recordId: string) => streamingStateMachine.markSubagentStreamDegraded(virtualId, recordId),
     isSubagentStreamDegraded: (virtualId: string, recordId: string) => streamingStateMachine.isSubagentStreamDegraded(virtualId, recordId),
     clearSubagentChunkState: (virtualId: string, recordId?: string) => streamingStateMachine.clearSubagentChunkState(virtualId, recordId),
     clearSubagentChunkStateForSession: (sessionId: string) => streamingStateMachine.clearSubagentChunkStateForSession(sessionId),
@@ -1286,7 +1287,7 @@ export type ChatStoreOps = Pick<
   | 'clearHistoryError' | 'hydrate' | 'setMessages' | 'reconcileHistory'
   | 'prependHistory' | 'applySubagentStreamDelta' | 'finalizeSubagentStream'
   | 'applySubagentStreamChunk' | 'applySubagentStreamState' | 'requestSubagentStreamState'
-  | 'sealSubagentStream' | 'clearSubagentChunkState' | 'clearSubagentChunkStateForSession'
+  | 'sealSubagentStream' | 'markSubagentStreamDegraded' | 'clearSubagentChunkState' | 'clearSubagentChunkStateForSession'
   | 'applySubagentEntries' | 'appendUser'
   | 'applyMessageEvent' | 'finalizeSession'
   | 'finalizeAllStreaming' | 'resetTransientStates' | 'addPendingSend'

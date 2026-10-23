@@ -182,6 +182,9 @@ export function useSubagentTabData(deps: SubagentTabDataDeps) {
           chatStore.applySubagentStreamChunk(id, recId, msgSeq, deltaSeq, delta),
         seal: (id, recId, msgSeq) => chatStore.sealSubagentStream(id, recId, msgSeq),
         requestState: (id, recId) => chatStore.requestSubagentStreamState(id, recId),
+        // DC-8：session.subagentStreamDegraded 广播经本订阅 handler 分派到此——与拉取响应
+        // degraded 字段写同一 per-(virtualId, recordId) 位（core 状态机单点）。
+        markDegraded: (id, recId) => chatStore.markSubagentStreamDegraded(id, recId),
       },
     )
   }

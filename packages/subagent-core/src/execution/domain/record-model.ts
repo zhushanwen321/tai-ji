@@ -45,10 +45,27 @@ import type {
 } from "./record-types.ts";
 
 /**
- * 派发期模型来源（本地副本——shared SubagentRecord.modelSource 同语义锚，core 不依赖
- * @taiji/shared；双侧值域修改须同步）。
+ * 派发期模型来源（本地副本——shared SubagentRecord.modelSource 同语义锚 = 
+ * packages/shared/src/subagent.ts 的 SubagentModelSource，core 不依赖 @taiji/shared；
+ * 双侧值域修改须同步）。同步的机器检查 = 双侧对拍单测
+ * （src/execution/__tests__/subagent-model-source-parity.test.ts：编译期双向类型
+ * 兼容断言 + 运行时清单逐项比对，任一侧增删值即红）。
  */
 export type SubagentModelSource = "explicit" | "frontmatter" | "preference" | "default";
+
+/**
+ * SubagentModelSource 值全集（对拍清单锚点，NEW_STOP_REASONS 同款形态）：与 shared 侧
+ * SUBAGENT_MODEL_SOURCE_ALL（packages/shared/src/subagent.ts）对拍——类型联合无运行时
+ * 表示，值域漂移的运行时判据锚在本元组与 shared 元组上。联合扩值漏改本元组由对拍
+ * 单测（shared 侧经 _SubagentModelSourceCoversAll 编译锁先行拦截）+ 本元组 satisfies
+ * 正向锁共同拦截；core 侧不经 barrel 导出（测试相对路径消费，不扩公共 API 面）。
+ */
+export const SUBAGENT_MODEL_SOURCES = [
+  "explicit",
+  "frontmatter",
+  "preference",
+  "default",
+] as const satisfies readonly SubagentModelSource[];
 
 /**
  * 未显式指定 agent 时的兜底名。

@@ -2676,6 +2676,27 @@
       "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发范围 = packages/subagent-core/src/ 或 extensions/ 或本脚本自身 staged，见 .githooks/install-hooks.sh pi 边界可靠性护栏段）+ ci.yml scripts guards 步骤跑其单测；无 staged 产物依赖。改动本脚本须本地双验（本表 run 两条）；非恒绿证明（静态/动态/多行 import 三类违规各一例红 + 注释与 __tests__ 排除不误拦）由同 scope 单测覆盖。补登原因（dmg-r1-4）：新脚本落入 scripts/ 看护目录，零登记被 e2e-map --staged 门禁拦截，随修复同批补登"
     },
     {
+      "id": "E2E-PIPE-18",
+      "summary": "SubagentModelSource 双侧值域对拍单测（dev-0.11.4 S-9）：shared 联合+SUBAGENT_MODEL_SOURCE_ALL 元组 ↔ subagent-core 本地副本联合+SUBAGENT_MODEL_SOURCES 元组——编译期双向类型兼容断言（tsc）+ 运行时清单逐项比对（vitest），任一侧增删值即红；core 不依赖 @taiji/shared（workflow-dag-parser 同款副本边界）",
+      "scope": [
+        "packages/shared/src/subagent.ts",
+        "packages/subagent-core/src/execution/domain/record-model.ts",
+        "packages/subagent-core/src/execution/__tests__/subagent-model-source-parity.test.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/subagent-core/src/execution/__tests__/subagent-model-source-parity.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm --filter @zhushanwen/subagent-core exec vitest run src/execution/__tests__/subagent-model-source-parity.test.ts",
+      "owner": "packages/subagent-core",
+      "authority": "docs/todo/dev-0.11.4-review-residue.md"
+    },
+    {
       "id": "E2E-BOUNDARY-01",
       "summary": "AC7 extension-host 边界静态检查脚本（pre-commit 消费端 import 边界检查，无独立 e2e 资产；改动 = 消费端模块 TARGETS 清单维护）",
       "scope": [

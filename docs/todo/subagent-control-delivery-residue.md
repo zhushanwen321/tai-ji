@@ -11,9 +11,9 @@
 
 ## 2 非缺省引擎首轮 probe→run 双 spawn（DC-12）
 
-- **现状**：共享 control 客户端按 `(socketPath, rootSessionId)` 复用；探针以 spawn 期 temp 根建立连接，run 以真根建立第二条连接。rebind 不先发 dispose，runtime 侧 3s close grace 会走满。
-- **后果**：非缺省引擎（zcode 等）新会话首轮启动延迟增加（双连接 + 一次 grace 等待），无功能错误。
-- **候选修法**：把权威 rootSessionId 注入 probe/read/setModel（R2A-N1 选项 a），或 root 变化时 dispose 整条共享连接（选项 c）。
+状态：已修复（2026-10-23，just-do-it 批次 3 T12c）
+
+- **修法（选项 a，数据正确性优先）**：`EnginePort.probe` 契约扩展 `opts.rootSessionId`，两个生产调用点（`run-orchestration.ts` chat 域 / `workflow-dispatch.ts` workflow 域）注入 service 层权威根（`this.sessionRootId`，与 runCtx.sessionRootId 同源 = `envRoot ?? init.sessionId`）——probe 与 run 命中同一 `(socket, root)` 共享连接，单 open 零 rebind。read/setModel 作用于 run 已锚定权威根的连接（`requestedRootSessionId` 持久），无参 `ensureConnected` 恒安全，不受双连接窗口影响（remote-engine.ts 成员注释登记）。验证：transport-runtime.test.ts `[DC-12]` 用例（单 open / 单连接 / 无 engine_close）。
 - **权威登记**：impl-plan §5 DC-12。
 
 ## 3 真机/混合版本验收窗口（A5 / A11 / A13）
@@ -28,7 +28,7 @@
 
 ## 5 D5 复审遗留的 info 级卫生项
 
-- `outbound-queue.ts` 的 `hasPendingFrames` 当前无调用方（可删或补消费）。
+- `outbound-queue.ts` 的 `hasPendingFrames` 无调用方——已删除（2026-10-23，just-do-it 批次 3 T12c；全仓 grep 零引用）。
 - `pid-file.ts` 的 `.pid.tmp-*` 残片不在 sweep 扫描面（只扫 `*.pid`）；崩溃窗口可能留下 tmp 文件。
 - `outbound-queue` 的 destroyed 判定未覆盖半关闭态；溢出标记后不再复判上限（行为已显式失败，仅记录）。
 - `sweep` 的 owner 判活只有 `isPidAlive`，`instanceId` 恒等于 runtimePid（一致性校验在正常数据上不触发）；pid 复用误判「owner 活着」时仍会跳过收割——已裁决加固（2026-10-23，转 just-do-it 清单；候选 boot id 或连接探活二选一，约束「宁不杀勿误杀」不得引入误杀）。

@@ -15,6 +15,7 @@
 
 import { ENGINE_TRANSPORT_ERROR_RECOVERY, EngineSdkError } from "@zhushanwen/subagent-engine-sdk";
 
+import { GLOBAL_SLOT_KEYS } from "../../../../shared/global-slots.ts";
 import type { EngineTransportExitInfo } from "./types.ts";
 
 // ── 时间窗与上限（设计 §3.3 D8：三个独立窗口 + 双上限；客户端侧与 runtime 侧各自独立
@@ -40,11 +41,17 @@ export type ControlChannelHandlers = {
   onStderr?: (chunk: string) => void;
 };
 
-/** engine_open 归属键（rootSessionId 必填非空；parentRecordId/depth 仅嵌套携带）。 */
+/** engine_open 归属键（rootSessionId 必填非空；parentRecordId/depth/recordId 可选携带）。 */
 export type ControlChannelIdentity = {
   rootSessionId: string;
   parentRecordId?: string;
   depth?: number;
+  /**
+   * [S-10] 本通道的自申报 record id（launch.recordId wire 扩展，channel 树父链挂点）。
+   * 值源 = run 的 record 锚（ctx.resume?.recordId ?? ctx.taskId）；probe 先行建立的
+   * 通道缺席（无树挂点，收割依赖结构性兜底）。见 types.ts EngineLaunchSpec.recordId。
+   */
+  recordId?: string;
 };
 
 /** openChannel 结果（channelId 是 control 层内部键，RuntimeEngineTransport 不外泄）。 */
@@ -87,6 +94,24 @@ export function makeTransportError(code: string, detail: string): EngineSdkError
  */
 export function controlClientKey(socketPath: string, rootSessionId: string | undefined): string {
   return `${socketPath}\u0000${rootSessionId ?? ""}`;
+}
+
+/**
+ * [C-state-20] control 客户端进程级共享表的槽访问（S-7；spawned-children.ts 同款
+ * globalThis[Symbol.for] 槽纪律）：workspace 源码 / npm dist / pi jiti 三实例化通道下
+ * 模块级 Map 会分裂成两份，双包实例共存时每个 (socket, root) 各起一条连接——复用
+ * 语义（controlClientKey 注释）要求跨实例共享同一张表。值类型在消费侧
+ * （control-client.ts）收窄为 Map of RuntimeControlClient。
+ */
+const SHARED_CLIENTS_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.runtimeControlClients);
+
+export function sharedControlClientsSlot<T>(): Map<string, T> {
+  let slot = Reflect.get(globalThis, SHARED_CLIENTS_SLOT_KEY) as Map<string, T> | undefined;
+  if (slot === undefined) {
+    slot = new Map<string, T>();
+    Reflect.set(globalThis, SHARED_CLIENTS_SLOT_KEY, slot);
+  }
+  return slot;
 }
 
 /** runtime 裁决字面 → SDK 错误码收敛表（按 D10 语义分流；唯一收敛点）。 */

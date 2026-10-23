@@ -447,7 +447,13 @@ export class WorkflowDispatch {
         agentEngine: agentConfig?.engine,
         globalDefaultEngine: modelService.getGlobalConfig().defaultEngine,
       },
-      probe: (engineId) => resolveWorkflowWindowEnginePort(parentRunId, engineId).probe(),
+      // [DC-12] probe 携带 service 层权威根（与 runCtx.sessionRootId 同源）：probe
+      // 与 run 命中同一 (socket, root) 共享连接，消「temp 根连接 + rebind」双 spawn。
+      probe: (engineId) => resolveWorkflowWindowEnginePort(parentRunId, engineId).probe(
+        this.sessionRootId !== null && this.sessionRootId !== ""
+          ? { rootSessionId: this.sessionRootId }
+          : undefined,
+      ),
       // [U2 pi-workflow-run-resource-model] pi 同步短路位的 piEngine 注入同样携带
       // parentRunId 窗口键：pi 请求经 routeEngineForHost 短路返回本 port，是成员任务
       // engine.run 的实际执行体——无窗口键会拿到 registry 只读代理，per-window 引擎
@@ -486,9 +492,10 @@ export class WorkflowDispatch {
    * 解析，D6 不采用段；下方 declaredModel 只看两层显式声明，与偏好层无关）。 */
   /**
    * [resolveWorkflowIdentity 拆分] 引擎感知 model 解析 + 来源标注判定：pi 路由不进
-   * 翻译 helper（modelSource = task 显式 ? explicit : default）；非 pi 经
-   * resolveEngineModelWithTranslation 四层解析（?? 链惰性求值——前两层任一在场时
-   * 不触盘读偏好），modelSource = resolvedModel?.source ?? "default"。
+   * 翻译 helper（modelSource 三层：task 显式 ? explicit : agent frontmatter ?
+   * frontmatter : default——S-2，与 run-orchestration.resolveIdentityForRoute 同构）；
+   * 非 pi 经 resolveEngineModelWithTranslation 四层解析（?? 链惰性求值——前两层任一
+   * 在场时不触盘读偏好），modelSource = resolvedModel?.source ?? "default"。
    */
   private resolveWorkflowModel(
     route: EngineRouteResult,
@@ -501,7 +508,9 @@ export class WorkflowDispatch {
     // 清单跳过走引擎缺省 + warn，两层失败语义分立见模块头）。?? 链惰性求值保形：
     // 前两层任一在场时不触盘读偏好。pi 路由不进 helper（偏好层不插层 + 无翻译面）。
     // [subagent-detail-model-info] 来源标注与解析同点判定：pi 路由 = task 显式 ?
-    // explicit : default（frontmatter/偏好层不适用——pi 链自解析）。
+    // (agent frontmatter ? frontmatter : default)（S-2：pi 链自解析虽不经 taiji 侧
+    // helper，但 agent .md 声明的模型同样被 pi 链消费，标注须与事实同构；偏好层
+    // 不适用——pi 路由不插 taiji 级偏好，D6 不采用段）。
     const resolvedModel = isPiRoute
       ? undefined
       : resolveEngineModelWithTranslation(
@@ -513,7 +522,9 @@ export class WorkflowDispatch {
         "workflow-dispatch",
       );
     const modelSource: SubagentModelSource = isPiRoute
-      ? (opts.model !== undefined ? "explicit" : "default")
+      ? (opts.model !== undefined
+        ? "explicit"
+        : (agentConfig?.model !== undefined ? "frontmatter" : "default"))
       : (resolvedModel?.source ?? "default");
     return { engineModel: resolvedModel?.engineModel, modelSource };
   }
@@ -594,13 +605,20 @@ export class WorkflowDispatch {
     }
     const overrideRef = `${override.ref.provider}/${override.ref.modelId}`;
     if (engine.id !== DEFAULT_ENGINE_ID) {
+      // restamp 经引擎翻译面（S-3）：override.ref 是 pi 词汇，record.model 经
+      // buildTaskSpec 直成 taskSpec.model 发引擎——restamp 未经翻译会呈现引擎从未
+      // 收到的 ref。翻译面缺席（成员未实装）时恒等透传，幂等。projected（展示用
+      // ModelInfo）保留 pi 词汇——UI 消费方以 pi 词汇统一展示，翻译只约束 restamp。
+      const engineRef = engine.translateModelRef !== undefined
+        ? engine.translateModelRef(overrideRef)
+        : overrideRef;
       const projected: ModelInfo = {
         id: override.ref.modelId,
         name: override.ref.modelId,
         provider: override.ref.provider,
         reasoning: false,
       };
-      (record as MutableStampRecord).model = overrideRef;
+      (record as MutableStampRecord).model = engineRef;
       return {
         model: projected,
         thinkingLevel: opts.thinkingLevel ?? identity.resolved.thinkingLevel,

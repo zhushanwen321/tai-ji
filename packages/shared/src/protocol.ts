@@ -1322,6 +1322,9 @@ export type ServerMessageType =
   | 'session.subagentEngineDefaultModelSet'
   // E 方案（subagent-realtime-channel §4.3）：runtime SubagentTee 产出的 subagent entry 增量帧
   | 'session.subagentEntriesAppended'
+  // DC-8（subagent-control-delivery-residue）：raw mirror seq 空洞降级的一次性广播信号
+  //（runtime SubagentMirrorHub markDegraded 时发布；payload 见 ServerMessageMapBase 对应条目）
+  | 'session.subagentStreamDegraded'
   | 'session.workflows' | 'session.agentCallHistory' | 'session.agentCallFilePath'
   // workflow 可视化拉取 RPC 的 reply type（与 request 异名，跟随 getWorkflows →
   // session.workflows 先例；payload 形状见 ServerMessageMapBase 对应条目）。
@@ -2552,6 +2555,13 @@ export interface ServerMessageMapBase {
     subagentId: string
     entries: Array<import('./pi-entry').PiEntry | import('./pi-entry').PiToolCallEntryForm>
   }
+  // session.subagentStreamDegraded（DC-8，subagent-control-delivery-residue）：raw mirror
+  // seq 空洞 → runtime 停止 live 发布时的一次性广播信号（非 last-value 快照，幂等消费）。
+  // sessionId 是主 session id（bus 路由键 + 帧归属），recordId 即 subagentId（tee 帧口径）。
+  // 消费端（useSubagentTabData 恒订阅 handler）应用到与 session.getSubagentStreamState 拉取
+  // 响应同一 per-(virtualId, recordId) 降级位——拉取响应的 degraded 字段仍是该位权威来源
+  //（推送只是「drawer 已打开且无后续 chunk」场景的即时性补强，缺席丢失由接入拉取兜底）。
+  'session.subagentStreamDegraded': { sessionId: string; recordId: string }
   // session.workflows：当前 session 派生的 workflow 列表。
   // [W1 读路径换源] 数据源 = runtime 每会话内存派生视图（pi entry 游标 + run journal（workflow-state
   //   目录）tail 双增量源喂入）——主 session JSONL 全文重读退役；条目源自 workflow-record v2

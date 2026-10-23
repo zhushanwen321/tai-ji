@@ -354,6 +354,40 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     }
   })
 
+  it('DC-8 降级推送：session.subagentStreamDegraded 帧（主 sid 路由）→ 降级提示条立即可见；recordId 过滤', async () => {
+    // done record：无接入拉取（避免拉取响应 found:false 把降级位覆盖回 false——拉取快照是权威源）
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'done' })])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID })
+    const wrapper = mountTab()
+    try {
+      await settle(wrapper)
+
+      // 生产路由按 payload.sessionId = 主 sid 走主键订阅；双键共用同一 handler 函数对象——
+      // 断言主键注册点与虚拟分区键是同一函数（接线不漂移），经 handler 直接驱动。
+      const handler = streamHandler()
+      const mainCall = vi.mocked(events.on).mock.calls.findLast(([key]) => key === MAIN_SID)
+      expect(mainCall?.[1]).toBe(handler)
+
+      const bar = () => wrapper.find('[data-testid="subagent-stream-degraded"]')
+      expect(bar().exists()).toBe(false)
+
+      // recordId 过滤：非本 record 的降级帧不分派（降级位保持 false）
+      handler({ type: 'session.subagentStreamDegraded', payload: { sessionId: MAIN_SID, recordId: 'sub-other' } })
+      await settle(wrapper)
+      expect(bar().exists()).toBe(false)
+
+      // 命中本 record：一次性信号直写降级位 → 提示条可见（无任何 chunk/拉取参与）。
+      // 本文件用真实 i18n（非 key 回显桩）——断言 zh-CN 实文（i18n key 锚见 SubagentTab.degraded.test.ts）
+      handler({ type: 'session.subagentStreamDegraded', payload: { sessionId: MAIN_SID, recordId: SUB_ID } })
+      await settle(wrapper)
+      expect(bar().exists()).toBe(true)
+      expect(bar().text()).toContain('实时流已降级')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it('引擎 badge（U3 D9）：engine 缺省 → 常态 badge 显示 pi', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ engine: undefined })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
