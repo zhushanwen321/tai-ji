@@ -33,7 +33,7 @@
 
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { firstContentText } from "@zhushanwen/extension-protocol";
+import { resultContentText } from "@zhushanwen/extension-protocol";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { type Static, Type } from "typebox";
 
@@ -470,7 +470,7 @@ export function registerGoalControlTool(pi: ExtensionAPI, session: GoalSession):
 			const d = hasGoalDetails(result) ? result.details : undefined;
 			// 展开态 = content 纯文本（多行详情）；content 缺失时回退折叠形态
 			if (options.expanded) {
-				const content = getContentText(result);
+				const content = resultContentText(result);
 				if (content !== "") return new Text(content, 0, 0);
 			}
 			// 折叠态 = details.summary 一行（dim）；旧 entry 无 summary 时保留原 ◆ 状态行
@@ -480,19 +480,6 @@ export function registerGoalControlTool(pi: ExtensionAPI, session: GoalSession):
 			return renderLegacyGoalResult(d, theme);
 		},
 	});
-}
-
-/** unknown 值按字段名安全取值（index-signature 收窄，替代全可选结构断言）。 */
-function fieldValue(v: unknown, key: string): unknown {
-	if (typeof v !== "object" || v === null) return undefined;
-	return (v as Record<string, unknown>)[key];
-}
-
-/** content[0] 的 text 纯文本（content 缺失或非 text 类型时兜底空串）。 */
-function getContentText(result: unknown): string {
-	const content = fieldValue(result, "content");
-	if (!Array.isArray(content)) return "";
-	return firstContentText({ content });
 }
 
 /** 旧形态回退（details 无 summary 的历史 entry）：原 ◆ 状态行，视觉零变化。 */

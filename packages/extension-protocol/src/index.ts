@@ -49,6 +49,9 @@ export {
   validateWidgetIconPaths,
   extractGui,
   firstContentText,
+  readDetailsSummary,
+  resultContentText,
+  firstLine,
 } from './core/helpers'
 export type { DualWidgetContent, WidgetIconPathsValidation, WidgetIconPathsRejection } from './core/helpers'
 
