@@ -1,6 +1,6 @@
 # taiji 领域模型登记
 
-> **本文件定位**：领域聚合、不变量与状态机的登记处（统一语言词条在 [CONTEXT.md](CONTEXT.md)）。当前登记域：**画布（problem-solve canvas，聚合与不变量，2026-10）**；**状态机基建与五域状态机（run / 画布节点 / plan / goal / permanent-session + 归档单元，2026-10，见下「状态机基建」节）**；**session 存储归档域（归档单元聚合 + 不变量 + 转移表，2026-10，见下「session 存储归档域」节）**。
+> **本文件定位**：领域聚合、不变量与状态机的登记处（统一语言词条在 [CONTEXT.md](CONTEXT.md)）。当前登记域：**画布（problem-solve canvas，聚合与不变量，2026-10）**；**状态机基建与五域状态机（run / 画布节点 / plan / goal / permanent-session + 归档单元，2026-10，见下「状态机基建」节）**；**session 存储归档域（归档单元聚合 + 不变量 + 转移表，2026-10，见下「session 存储归档域」节）**；**subagent 会话轮债权域（record 会话 / 轮 / 债权聚合不变量，2026-10，见下「subagent 会话轮债权域」节）**。
 >
 ## 状态机基建（@zhushanwen/state-machine）
 
@@ -114,3 +114,16 @@ session 存储域（SessionLifecycle 写、SessionScanner 读、文件系统为�
 状态判定唯一权威 = 读磁盘（无簿记 = 无单元；status 字段 = staging / archived；`.restoring` 后缀 = restoring）。同 session 的归档域操作（后台压缩任务 / unarchive / purgeArchive）按到达顺序串行执行，后到者对已消失归档单元按簿记存在性门 fail-fast（`archive_not_found`，拒绝时零副作用）；操作中途崩溃由启动自愈归位（七行表覆盖全部中间态，含压缩收尾窗口〔明文已删 + 压缩体在场 + 簿记仍 staging〕：archive / unarchive 态自动归位，purge 态簿记保持可见、重试幂等达终态）。
 
 **唯一入口**：领域规则单实现 = `ArchiveService`（archive / unarchive / purgeArchive 三操作 + 启动自愈，`packages/runtime/src/services/archive/`）；transport 入口两条，均只调该服务、不各自持有归档规则——① 三条 WS RPC（`session.archive` / `session.unarchive` / `session.purgeArchive`，分发表挂 session 域，命名避开已承载「重开 dead session」语义的 `session.restore`；GUI 侧栏 / 归档视图的调用通道）② session-manager select 通道 `archive` action（agent 工具 `archive_session` → `SessionManagerHandler.handleArchive`：归属校验〔仅限该 agent 管理的子会话〕后调 `archiveService.archive(sessionId)`；仅开放 archive 一操作，unarchive / purgeArchive 不开放给 agent）；彻底删除复用 session 删除级联原语（cascadeDeleteSessionContent + 引用枚举源入参扩展），不自建删除清单。
+
+## subagent 会话轮债权域
+> 机制纪律：record 会话状态权威 = subagent-core RecordStore 意图原语族（唯一写入口，C-data-20），轮成败判定唯一产点 = 引擎收尾边沿（pi 引擎适配层），债权结清唯一裁决 = 轮终事实（pending 注销枚举 SettlementReason）。统一语言词条（轮收条 / 失败分类 / 债权结清 / 失联清点 / 被接管轮）见 [CONTEXT.md](CONTEXT.md)；决策登记 [ADR-0158](adr/decisions.md)～[ADR-0163](adr/decisions.md)。
+
+subagent 体系的领域模型在「会话 + 轮 + 债权」框架下组织（permanent-session 模型，万物可续）：**record 是会话**不是任务——两态（running/idle）+ 归档 + 复活（归档唤醒续聊），没有也不需要任务终局（失败可续聊、成功也可续聊）；**轮**（round）是一次有边界的执行（一进程、一问一答），是成败判定与收条的承载单位；**债权**是一笔「等待这轮结果」的请求（派发即欠、轮终结清、失联也是结清形态，对齐 managed session 债权模型 ADR-0087）；**run** 是一次性编排，有终局（与 record 无终局不矛盾——run 终局由成员交付结算集合派生，见 [ADR-0159](adr/decisions.md)）。
+
+不变量（全部可核对，违反即缺陷；词表锚与枚举完整性测试 = `packages/subagent-engine-sdk/src/__tests__/failure-cause-vocabulary.test.ts` / `packages/subagent-core/src/execution/domain/__tests__/record-types.test.ts` / `src/shared/run-vocabulary.test.ts`）：
+
+1. **record 事件流 append-only**，历史不可改写——派生层禁止反写事实源（失败事实只追加进轮级 `errors: ErrorFact[]`，`lastError` 由「最后一个非空轮失败」派生，`applyTurnEnd` 不清空）
+2. **轮成败判定只产自引擎收尾边沿**（看见 stopReason / exitCode / 引擎 error 事件的层）——最后一条 assistant 消息停因 ∈ {error, aborted} 或存在未消费引擎 error 事件 → 轮失败；`agent_settled` 是 run 结束信号不是成功证据，不构成任何置成功依据；aborted 三源判别（用户/run 取消 → user.cancelled；turn 预算耗尽 → harness.turn_budget_exhausted；其余引擎异常 → engine.*），禁止把中止一律记失败
+3. **轮收条只存事实**（引擎停因原值 + FailureCause + 结果正文），推断词只派生不存储——「completed」这类「没报错=成功」的推断只允许作为展示层派生词（引擎停因 = stop 且无失败分类 → 派生「正常收尾」）；被接管轮（promptDisposition=handled）无停因、构造性不满足派生判据，不产生假成功
+4. **派生视图只读事实源**（manifest / 通知文案 / list 字段 / 展示词 / renderer 失败红点判据全部消费轮收条事实字段，禁止自建成败推断）
+5. **债权结清状态如实**（SettlementReason 封闭五值 completed/failed/cancelled/lost/no_result，fail-visible——词表外解析缺省 unknown，「遇未知按成功」的 fail-open 方向废除）；run 终局如实吸收成员交付（partially_succeeded 入 RunOutcome 值域，一半失败不再显示 done）
