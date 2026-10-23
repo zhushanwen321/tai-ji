@@ -208,7 +208,7 @@ test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）
           consoleErrors: consoleCap.errors,
         })
       }
-      expect(done, `派发 turn（${wsId}）未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagents 工具？）`).toBe(true)
+      expect(done, `派发 turn（${wsId}）未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagent_batch 工具？）`).toBe(true)
       sub.events.length = 0
     }
     await dispatch(longSid, DISPATCH_PROMPT_LONG, 'wl-dispatch-long', listeners[0]!)

@@ -328,7 +328,7 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
         consoleErrors: consoleCap.errors,
       })
     }
-    expect(dispatchDone, `派发 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagents 工具？）`).toBe(true)
+    expect(dispatchDone, `派发 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagent_batch 工具？）`).toBe(true)
     sub.events.length = 0
 
     // ── 在途证据（journal + agent-started + 双进程正面对照；拆出 awaitS4InFlightEvidence）──

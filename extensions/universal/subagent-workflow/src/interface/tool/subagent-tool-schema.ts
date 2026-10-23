@@ -99,7 +99,7 @@ export const SubagentStartParams = Type.Object({
   // 声明层无迁移期提示（原 description 的退役说明已随声明压缩删除，未在其他层重新承载）。
 });
 
-// ── subagents：批量派发（成员对象形状，subagent-tool-interface-refactor §3.1.2 终态）──
+// ── subagent_batch：批量派发（成员对象形状，subagent-tool-interface-refactor §3.1.2 终态）──
 //
 // 与 fan-out 模板共用同一形状（§3.1.2）：tasks 元素 = 成员对象（task/agent/model/
 // thinkingLevel），不再接受字符串元素；tasks 的 minItems/maxItems 与 fan-out 模板

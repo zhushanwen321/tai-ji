@@ -239,7 +239,7 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   //  同在 subagents 域段，workflows 在本段段尾。
   //
   //  lazyDeps / isScriptRunning / registry 由 workflow-events.ts 装配结果提供。
-  //  guard：workflow tool 与 subagents（批量派发入口）共用同一 guard——两者是同一条
+  //  guard：workflow tool 与 subagent_batch（批量派发入口）共用同一 guard——两者是同一条
   //  runWorkflow 管道的入口，单检查防双 guard 语义漂移（D3 复用裁决）。
   // ════════════════════════════════════════════════════════════
   const guard = { isProcessing: false };
