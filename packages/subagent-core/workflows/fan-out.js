@@ -58,7 +58,7 @@ parameters:
 usage: |
   ## 使用说明
   - tasks 每个元素 = 一个成员对象：task 必填（完整自包含、可直接派发的任务描述），可选 agent（成员级执行者 .md 绝对路径，pattern ^/）/ model / thinkingLevel（成员级覆盖）；全部任务并行执行，结果一次性收齐
-  - 成员未指定的 agent/model/thinkingLevel 留空继承 run 级默认；经 subagents 工具调用时工具层会自动把运行级 agent 填进未指定的成员
+  - 成员未指定的 agent/model/thinkingLevel 留空继承 run 级默认；经 subagent_batch 工具调用时工具层会自动把运行级 agent 填进未指定的成员
   - 任一成员失败不阻断其余成员：部分失败收尾 status=partial（失败条目带 taskIndex/error），只重派失败 taskIndex 对应的成员即可，勿全批重跑
   - aggregate=true 时末尾追加一个聚合 agent，把全部结果归约成一份结论（缺省 false 纯收集）
   - 每个成员输出 summary（数百字内，通知内联展示）+ 可选 fullReportPath（完整产物落盘路径）；结果总量超预算时按序截断并置 truncated 标记（taskIndex/status/路径恒完整）

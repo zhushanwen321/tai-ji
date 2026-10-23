@@ -749,7 +749,7 @@ describe("⛔4 messageHandler（检查 + upgrade + 投递，快照 = pi-sw 实�
     expect(deliverChatMessage).not.toHaveBeenCalled();
   });
 
-  it("[S3 域边界] workflow-origin record 收 message → 硬拒，文案含 list 检查指引 + subagents 重派指引", async () => {
+  it("[S3 域边界] workflow-origin record 收 message → 硬拒，文案含 list 检查指引 + subagent_batch 重派指引", async () => {
     const deliverChatMessage = vi.fn(async () => {});
     const wfRec = makeExecRecord({ id: "bg-wf", origin: "workflow" });
     const err = await errOf(() =>
@@ -762,7 +762,7 @@ describe("⛔4 messageHandler（检查 + upgrade + 投递，快照 = pi-sw 实�
     expect(err.message).toContain("results are collected by the workflow run");
     expect(err.message).toContain("Recovery: use action:'list' with includeWorkflow:true to inspect it.");
     // [S3/core-U1] 重派指引（编排者裁定文案，逐字锁定）
-    expect(err.message).toContain("To get these results, re-dispatch via the subagents tool.");
+    expect(err.message).toContain("To get these results, re-dispatch via the subagent_batch tool.");
     expect(deliverChatMessage).not.toHaveBeenCalled();
   });
 

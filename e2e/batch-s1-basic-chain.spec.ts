@@ -92,7 +92,7 @@ const TASKS = [
 ]
 
 const MAIN_PROMPT =
-  `Dispatch exactly ${TASKS.length} background subagent tasks in ONE call using the \`subagents\` tool ` +
+  `Dispatch exactly ${TASKS.length} background subagent tasks in ONE call using the \`subagent_batch\` tool ` +
   `(do NOT do the tasks yourself, do NOT use any other tool). ` +
   `tasks = ${JSON.stringify(TASKS)} ` +
   `After the tool call returns, reply with only the word DISPATCHED. [${MAIN_MARKER}]`

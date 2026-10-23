@@ -84,7 +84,7 @@ const MEMBER_SLEEP_S = 180
 const MAIN_MARKER = 'BATCH-S4-MAIN-5320'
 
 const DISPATCH_PROMPT =
-  `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagents\` tool ` +
+  `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagent_batch\` tool ` +
   `(do NOT do the tasks yourself). Both tasks are identical long-running tasks: ` +
   `"First run \\\`sleep ${MEMBER_SLEEP_S}\\\` using the bash tool, wait for it to finish, then reply with only the word MEMBER-DONE." ` +
   `After the tool call returns, reply with only the word DISPATCHED. [${MAIN_MARKER}]`

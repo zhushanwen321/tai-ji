@@ -67,13 +67,13 @@ const longTasks = [
 const shortTasks = [{ task: taskText(MEMBER_SLEEP_SHORT_S) }]
 
 const DISPATCH_PROMPT_LONG =
-  `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagents\` tool ` +
+  `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagent_batch\` tool ` +
   `(do NOT do the tasks yourself). Both tasks are identical long-running tasks: ` +
   `tasks = ${JSON.stringify(longTasks)} ` +
   `After the tool call returns, reply with only the word DISPATCHED. [BATCH-WL-LONG-7731]`
 
 const DISPATCH_PROMPT_SHORT =
-  `Dispatch exactly 1 background subagent task in ONE call using the \`subagents\` tool ` +
+  `Dispatch exactly 1 background subagent task in ONE call using the \`subagent_batch\` tool ` +
   `(do NOT do the task yourself). The task: tasks = ${JSON.stringify(shortTasks)} ` +
   `After the tool call returns, reply with only the word DISPATCHED. [BATCH-WL-SHORT-7732]`
 
