@@ -168,6 +168,51 @@ async function purgeArchiveEntry(archive: ArchiveSummary): Promise<void> {
 }
 
 /**
+ * 批量彻底删除（归档列表筛选行的「N 项」钮，两段确认后）：对传入条目**串行**循环
+ * session.purgeArchive（幂等 + runtime 侧 per-session 串行已内建，前端循环即承载批量
+ * 语义，不新增批量 RPC）。逐条独立 catch——单条失败不中断整批（失败显式上报），
+ * 结束统一 refreshArchives 一次（循环内不逐条刷新，避免 N 次拉取）+ toast 按结果
+ * 分流：全成功 info；含 keep-all 保守分支 warning 出声（keptSubagentsDir 携带，与
+ * 单条 purgeArchiveEntry 同语义）；含失败 warning 汇总成功/失败数。在途防重入：
+ * store.batchPurging 期间新触发直接忽略。主区 selected 落在被删集合时与单条删除
+ * 同编排：清空选中 + 导航回 chat（空态占位兜底其余形态）。
+ */
+async function purgeArchivesBatch(entries: ArchiveSummary[]): Promise<void> {
+  const { info: toastInfo, warning: toastWarning } = useToast()
+  const store = useArchiveStore()
+  if (store.batchPurging || entries.length === 0) return
+  store.batchPurging = true
+  let ok = 0
+  let kept = 0
+  let failed = 0
+  try {
+    for (const entry of entries) {
+      try {
+        const reply = await sessionApi.purgeArchive(entry.sessionId)
+        ok += 1
+        if (reply.keptSubagentsDir !== undefined) kept += 1
+      } catch {
+        failed += 1
+      }
+    }
+  } finally {
+    store.batchPurging = false
+  }
+  if (store.selected !== null && entries.some((e) => e.sessionId === store.selected?.sessionId)) {
+    store.selectArchive(null)
+    useNavigationStore().push({ view: 'chat' })
+  }
+  void refreshArchives()
+  if (failed > 0) {
+    toastWarning(t('archive.entry.batchPurgePartial', { ok, failed }))
+  } else if (kept > 0) {
+    toastWarning(t('archive.entry.batchPurgeKept', { count: ok, kept }))
+  } else {
+    toastInfo(t('archive.entry.batchPurgeSuccess', { count: ok }))
+  }
+}
+
+/**
  * 归档域编排函数集（多调用点等价闭包——store 走 pinia 单例，无实例态）。
  * 消费点：Sidebar（侧栏视图切换 + 事件接线）、ArchiveMainView（主区恢复编排）。
  */
@@ -180,6 +225,7 @@ export function useArchiveView() {
     closeSummary,
     restoreArchive,
     purgeArchiveEntry,
+    purgeArchivesBatch,
   }
 }
 
