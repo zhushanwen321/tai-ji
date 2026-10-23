@@ -11,6 +11,13 @@ import { taijiTestConfig } from "../../../test-guard/factory.ts";
 export default taijiTestConfig({
   test: {
     include: ["src/**/__tests__/**/*.test.ts"],
+    // testTimeout 15s（默认 5s 的 3 倍）：本包最重的一批用例是 session_start 真装配
+    // 维护轮（真实 mkdtemp 夹具扫描 + 全池引用集采集，无 mock 替代的场景语义），
+    // 空载单用例 ~0.8s 内；coverage 插桩 + 门禁全仓连跑 + 开发实例抢核叠加下可放大
+    // 到默认 5s 预算外（门禁偶发 3 例超时、空载复跑恒绿的负载敏感形态）。放宽预算
+    // 不掩盖真挂死：挂死用例仍会红，只是延后暴露。同族取舍先例：
+    // packages/zcode-session-source/vitest.config.ts slow-sqlite 组（30s）。
+    testTimeout: 15_000,
     // [F-R5] 每个测试文件加载前统一删三个 watchdog env（watchdog 预算语义默认关），
     // 根治宿主 shell export 导致的假红；用例内 vi.stubEnv 仍照常叠加生效。
     setupFiles: ["./vitest.setup.ts"],
