@@ -234,6 +234,20 @@ const self = fs.readFileSync(process.env.ZCODE_ENG_CLI_PATH, 'utf8');
 fs.writeFileSync(STATE, JSON.stringify({ self }));
 `;
 
+/** 回退调用点锚歧义形态（两处 \`create:r(()=>aBc(\`，定义锚不可用〔多缺省参数〕）：
+ * 与定义锚同口径 count 校验——全文件 >1 处同款调用 = 无法确定协议路径调用点 →
+ * 放弃本锚 not armed（N-1 回归：曾取首个文本命中，注入无关调用后假报 armed）。 */
+const CLI_DUP_CALL_SITE_PROBE_SOURCE = `'use strict';
+const fs = require('node:fs');
+const STATE = process.env.ZCODE_PROBE_STATE;
+// function aBc(e,t={},o={}){let s=t.standalone;return {runtime:{registryService:null}}}
+// startProcessProviderRegistryRuntime:()=>aBc,
+// create:r(()=>aBc(z),"create")
+// create:r(()=>aBc(y),"other")
+const self = fs.readFileSync(process.env.ZCODE_ENG_CLI_PATH, 'utf8');
+fs.writeFileSync(STATE, JSON.stringify({ self }));
+`;
+
 /** 端口注入行为探针（可执行形态）：createZCodeApp 选项对象里的调用方端口在
  * registry 无本地端口时必须保留（host 回落），有本地端口时被覆盖（standalone）。
  * 旧实现无条件尾插 \`<reg>.providerRuntimeHeadersPort\`（undefined）→ host 端口被
@@ -919,6 +933,15 @@ describe("CLI 源码补丁锚点（产物内嵌 patchedCliSource 同进程执行
     expect(flags).toMatchObject({ standalone: true });
   });
 
+  it("两处同款调用点 → 回退锚放弃、not armed（N-1 回归：曾取首个文本命中，注入无关调用且假报 armed）", () => {
+    // 定义锚多缺省参数不可用 + 调用点锚两处命中 → 与定义锚同口径 count 校验放弃本锚；
+    // 三锚全 miss → 不交付产物（null），不得出现「产物含 standalone 注入」的假 armed
+    const { self, flags, stderr } = runCliPatch(CLI_DUP_CALL_SITE_PROBE_SOURCE);
+    expect(self).toBeNull();
+    expect(flags).toEqual({ entitled: false, standalone: false, headerPort: false });
+    expect(stderr.join("")).toContain("standalone account: CLI bundle anchor not found");
+  });
+
   it("端口注入条件 spread 行为：host 形态保留调用方端口，standalone 形态本地端口覆盖（S-4 行为回归，同进程执行补丁产物）", () => {
     const api = loadCliPatch();
     const rawPath = writeCliFixture(CLI_PORT_BEHAVIOUR_SOURCE);
@@ -1066,6 +1089,119 @@ describe("standalone 账号元数据（产物内嵌 ensureAccountMetadata 同进
     expect(afterRotated[`account-provider:${PID}:identity`]).toBe("key-BBBB");
     expect(afterRotated[`account-provider:${PID}:auth-source`]).toBe("manual");
     expect(afterRotated[`account-provider:coding-plan:${PID}:account:key-BBBB:api-key`]).toBe("enc:v1:rotated-plan-key");
+  });
+
+  it("多 plan api-key：project-key-location 确定性信号矫正；无信号多候选不猜测、保留 stored identity 并 log 歧义（DG-R2-01 回归）", () => {
+    const PID = "account:bigmodel-individual-coding-plan";
+    const catalogPath = writeCatalog("meta-multikey");
+    // project-key-location 键名尾段 = URL 编码 JSON 数组 [origin, family, identity, ...]
+    // （真实凭据库实测形态，identity = 第 3 元素）
+    const keyLoc = (identity: string) =>
+      `project-key-location:v1:${encodeURIComponent(JSON.stringify(["https://bigmodel.cn", "bigmodel", identity, null, 1, "default"]))}`;
+
+    // 场景①：stored identity（old-acct-1，其 key 已删）成孤儿，双残留 api-key 中
+    // Object.keys 首个是无关残留 other-acct-3——确定性信号指向 new-acct-2 → 矫正到
+    // new-acct-2（旧实现取首个命中 = 矫正到 other-acct-3，错）。
+    const homeSignal = fs.mkdtempSync(path.join(tmpRoot, "home-meta-multikey-signal-"));
+    const credSignal = plantCreds(homeSignal, {
+      [`account-provider:coding-plan:${PID}:account:other-acct-3:api-key`]: "enc:v1:stale-residue",
+      [`account-provider:coding-plan:${PID}:account:new-acct-2:api-key`]: "enc:v1:new-key",
+      [keyLoc("new-acct-2")]: "enc:v1:loc",
+      [`account-provider:${PID}:identity`]: "old-acct-1",
+      [`account-provider:${PID}:auth-source`]: "manual",
+    });
+    const signal = loadAccountMetadata(homeSignal, catalogPath);
+    signal.run();
+    expect(signal.stderr.join("")).toContain("account metadata reconciled");
+    const afterSignal = JSON.parse(fs.readFileSync(credSignal, "utf8")) as Record<string, string>;
+    expect(afterSignal[`account-provider:${PID}:identity`]).toBe("new-acct-2");
+    expect(afterSignal[`account-provider:${PID}:auth-source`]).toBe("manual");
+
+    // 场景②：无 project-key-location + 双 api-key 候选 → 无法确定 → 不猜测：保留
+    // stored identity（含孤儿值——猜测改写比陈旧值更糟）+ log 歧义 + 零写入。
+    const homeAmbig = fs.mkdtempSync(path.join(tmpRoot, "home-meta-multikey-ambig-"));
+    const credAmbig = plantCreds(homeAmbig, {
+      [`account-provider:coding-plan:${PID}:account:other-acct-3:api-key`]: "enc:v1:stale-residue",
+      [`account-provider:coding-plan:${PID}:account:new-acct-2:api-key`]: "enc:v1:new-key",
+      [`account-provider:${PID}:identity`]: "old-acct-1",
+      [`account-provider:${PID}:auth-source`]: "manual",
+    });
+    const beforeAmbig = fs.readFileSync(credAmbig, "utf8");
+    const ambig = loadAccountMetadata(homeAmbig, catalogPath);
+    ambig.run();
+    const ambigErr = ambig.stderr.join("");
+    expect(ambigErr).toContain("multiple plan api-key identities");
+    expect(ambigErr).not.toContain("account metadata provisioned");
+    expect(ambigErr).not.toContain("account metadata reconciled");
+    expect(fs.readFileSync(credAmbig, "utf8")).toBe(beforeAmbig);
+
+    // 场景③：project-key-location 指向的 identity 无 api-key（键残留）→ 信号不成立，
+    // 回退 api-key 候选路径：候选唯一 → 正常派生矫正。
+    const homeStale = fs.mkdtempSync(path.join(tmpRoot, "home-meta-multikey-stale-"));
+    const credStale = plantCreds(homeStale, {
+      [`account-provider:coding-plan:${PID}:account:new-acct-2:api-key`]: "enc:v1:new-key",
+      [keyLoc("ghost-acct-9")]: "enc:v1:loc",
+      [`account-provider:${PID}:identity`]: "old-acct-1",
+      [`account-provider:${PID}:auth-source`]: "manual",
+    });
+    const stale = loadAccountMetadata(homeStale, catalogPath);
+    stale.run();
+    expect(stale.stderr.join("")).toContain("account metadata reconciled");
+    const afterStale = JSON.parse(fs.readFileSync(credStale, "utf8")) as Record<string, string>;
+    expect(afterStale[`account-provider:${PID}:identity`]).toBe("new-acct-2");
+  });
+
+  it("oauth 在场 + 登录写入 identity 且无 api-key 时不得改写（!oauthBacked 守卫回归——翻转条件即红）；manual + oauth 同时在场仍按 manual 判定矫正（DG-R2-03 + ADR-0143 表述对齐）", () => {
+    const PID = "account:bigmodel-individual-coding-plan";
+    const catalogPath = writeCatalog("meta-oauth-nokey");
+    // 场景①：oauth token 在场 + identity uid-login（CLI 登录写入，永无 api-key）+
+    // 无任何 plan api-key → identity 不参与凭据查找，不得按缺失矫正/补派生。
+    const homeNoKey = fs.mkdtempSync(path.join(tmpRoot, "home-meta-oauth-nokey-"));
+    plantCreds(homeNoKey, {
+      "oauth:bigmodel:access_token": "enc:v1:fake-oauth-token",
+      [`account-provider:${PID}:identity`]: "uid-login",
+      [`account-provider:${PID}:auth-source`]: "oauth",
+    });
+    const noKey = loadAccountMetadata(homeNoKey, catalogPath);
+    noKey.run();
+    const noKeyErr = noKey.stderr.join("");
+    expect(noKeyErr).not.toContain("account metadata provisioned");
+    expect(noKeyErr).not.toContain("account metadata reconciled");
+    const afterNoKey = JSON.parse(fs.readFileSync(path.join(homeNoKey, ".zcode", "v2", "credentials.json"), "utf8")) as Record<string, string>;
+    expect(afterNoKey[`account-provider:${PID}:identity`]).toBe("uid-login");
+    expect(afterNoKey[`account-provider:${PID}:auth-source`]).toBe("oauth");
+
+    // 场景②（守卫直打）：同上但存在另一 identity 的 plan api-key（派生目标可算出）
+    // ——若孤儿判定误含 oauth 形态（翻转 !oauthBacked），uid-login 会被改写为派生值。
+    const homeOtherKey = fs.mkdtempSync(path.join(tmpRoot, "home-meta-oauth-otherkey-"));
+    const credOtherKey = plantCreds(homeOtherKey, {
+      "oauth:bigmodel:access_token": "enc:v1:fake-oauth-token",
+      [`account-provider:coding-plan:${PID}:account:key-9999:api-key`]: "enc:v1:other-plan-key",
+      [`account-provider:${PID}:identity`]: "uid-login",
+      [`account-provider:${PID}:auth-source`]: "oauth",
+    });
+    const beforeOtherKey = fs.readFileSync(credOtherKey, "utf8");
+    const otherKey = loadAccountMetadata(homeOtherKey, catalogPath);
+    otherKey.run();
+    const otherKeyErr = otherKey.stderr.join("");
+    expect(otherKeyErr).not.toContain("account metadata provisioned");
+    expect(otherKeyErr).not.toContain("account metadata reconciled");
+    expect(fs.readFileSync(credOtherKey, "utf8")).toBe(beforeOtherKey);
+
+    // 场景③（对照）：manual + oauth token 同时在场 + identity 孤儿（无自己 api-key）
+    // → 仍按 manual 判定矫正（仅 auth-source==='oauth' 时 identity 不参与查找）。
+    const homeManual = fs.mkdtempSync(path.join(tmpRoot, "home-meta-oauth-manual-"));
+    plantCreds(homeManual, {
+      "oauth:bigmodel:access_token": "enc:v1:fake-oauth-token",
+      [`account-provider:coding-plan:${PID}:account:key-9999:api-key`]: "enc:v1:plan-key",
+      [`account-provider:${PID}:identity`]: "old-acct-1",
+      [`account-provider:${PID}:auth-source`]: "manual",
+    });
+    const manual = loadAccountMetadata(homeManual, catalogPath);
+    manual.run();
+    expect(manual.stderr.join("")).toContain("account metadata reconciled");
+    const afterManual = JSON.parse(fs.readFileSync(path.join(homeManual, ".zcode", "v2", "credentials.json"), "utf8")) as Record<string, string>;
+    expect(afterManual[`account-provider:${PID}:identity`]).toBe("key-9999");
   });
 });
 
@@ -1228,6 +1364,47 @@ describe("v2 注入合并（产物内嵌 injectedConfigText 同进程执行）",
     expect(injected2.provider["v2-only"]).toEqual(providerEntry("k"));
   });
 
+  it("危险键 provider id（__proto__/toString）：v2 字典条目注入不丢 + providerRules 合成不被原型链误判 real 已有（DG-R2-02 回归）", () => {
+    // v2 字典的 __proto__ 键必须以 JSON 文本形态布置——TS 对象字面量 `{ __proto__: x }`
+    // 触发原型 setter，own property 根本不存在（旧实现的丢失形态正是同款 setter 语义）
+    const v2Raw = '{"provider":{"__proto__":{"options":{"apiKey":"k-proto","baseURL":"https://example.test/v1"}},'
+      + '"toString":{"options":{"apiKey":"k-tostr","baseURL":"https://example.test/v1"}}}}';
+    const { text } = runInjectedConfigText({
+      v2Raw,
+      real: {},
+      providerConfig: {
+        schemaVersion: 1,
+        config: {
+          providerConfigRules: {
+            providerRules: [{
+              // 原型方法名 id：旧实现 `realProviders['constructor']` 恒 truthy → 误判
+              // real 已有而跳过合成；own-property 检查后正常合成
+              providerId: "constructor",
+              providerName: "Ctor",
+              config: {
+                access: { type: "api-key", apiKey: "sk-ctor" },
+                api: { baseUrl: "https://ctor.test/v1" },
+                modelOrder: ["m1"],
+              },
+            }],
+          },
+        },
+      },
+    });
+    expect(text).not.toBeNull();
+    const injected = JSON.parse(text!) as {
+      provider: Record<string, { options: { apiKey: string; baseURL: string }; source?: string }>;
+    };
+    // v2 字典危险键条目保留（旧实现 injectable['__proto__']=entry 被原型 setter 吞 → 丢条目）
+    expect(injected.provider["__proto__"].options.apiKey).toBe("k-proto");
+    expect(injected.provider["toString"].options.apiKey).toBe("k-tostr");
+    // providerRules 合成不被 realProviders 原型链误判跳过
+    expect(injected.provider["constructor"]).toMatchObject({
+      options: { apiKey: "sk-ctor", baseURL: "https://ctor.test/v1" },
+      source: "custom",
+    });
+  });
+
   it("no-patch 三态：v2 无带 apiKey 的 provider → null；v2 缺失（ENOENT 未登录）→ null 且 stderr 静默；v2 损坏 → null 且 stderr 出声（与「未登录」区分）", () => {
     const none = runInjectedConfigText({
       v2: { provider: { p1: { options: { apiKey: "" } } } },
@@ -1272,6 +1449,31 @@ describe("provider_config merge 视图（launcher 内嵌 JS × preparer TS 双�
     for (const c of cases) {
       expect(JSON.stringify(jsMerge(c.real, c.copy)), c.name).toBe(JSON.stringify(mergePersonalProviderConfig(c.real, c.copy)));
     }
+  });
+
+  it("危险键 provider id（__proto__/toString/constructor）：副本独有条目不因 seen 字典原型链被丢，同名让位语义不变（DG-R2-02 回归，双实装锁步）", () => {
+    const jsMerge = loadLauncherMerge();
+    // 副本独有危险键 id：旧实现 seen 普通对象上 `seen['__proto__']=true` 被 setter 吞 /
+    // `seen['toString']` 读到原型方法恒 truthy → 副本条目被误判已见丢弃（TS 侧 Set 保留 → 分歧）
+    const real = conf(["a"], ["a"]);
+    const copy = conf(["__proto__", "toString", "constructor", "b"], ["__proto__", "toString", "constructor", "b"]);
+    const expected = mergePersonalProviderConfig(real, copy) as {
+      config: { providerConfigRules: { providerRules: Array<{ providerId: string }> } };
+    };
+    // 行为锚定（防双实装同丢）：TS 侧（Set，S-17）保留全部副本独有条目
+    expect(expected.config.providerConfigRules.providerRules.map((r) => r.providerId))
+      .toEqual(["a", "__proto__", "toString", "constructor", "b"]);
+    // launcher 内嵌 JS 与 preparer TS 输出逐字节相等
+    expect(JSON.stringify(jsMerge(real, copy))).toBe(JSON.stringify(mergePersonalProviderConfig(real, copy)));
+    // 真实侧危险键 id + 副本同名 → 同名让位（副本条目丢弃是语义行为，非丢键 bug）
+    const realDanger = conf(["__proto__", "a"], ["__proto__", "a"]);
+    const copyDanger = conf(["__proto__", "b"], ["__proto__", "b"]);
+    const expectedDanger = mergePersonalProviderConfig(realDanger, copyDanger) as {
+      config: { providerConfigRules: { providerRules: Array<{ providerId: string }> } };
+    };
+    expect(expectedDanger.config.providerConfigRules.providerRules.map((r) => r.providerId))
+      .toEqual(["__proto__", "a", "b"]);
+    expect(JSON.stringify(jsMerge(realDanger, copyDanger))).toBe(JSON.stringify(mergePersonalProviderConfig(realDanger, copyDanger)));
   });
 
   it("规则锚定（防双实装同错）：同名真实优先/order 前缀追加去重/其余字段取真实/真实缺返回副本整体", () => {

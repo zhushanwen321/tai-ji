@@ -114,7 +114,11 @@ function injectedConfigText() {
   const v2Providers = v2.provider && typeof v2.provider === 'object' ? v2.provider : {};
   const hasKey = (entry) => entry && typeof entry === 'object'
     && entry.options && typeof entry.options.apiKey === 'string' && entry.options.apiKey !== '';
-  const injectable = {};
+  // 无原型字典（DG-R2-02）：provider id 值域含 '__proto__'/'toString' 等危险键
+  //（runtime 侧有意产出，S-17）——普通对象上对 __proto__ 键赋值触发原型 setter
+  // 静默丢条目、读 toString 键落到原型方法误判已存在。Object.create(null) 使
+  // 键读写均落在 own property。
+  const injectable = Object.create(null);
   for (const [id, entry] of Object.entries(v2Providers)) {
     if (hasKey(entry)) injectable[id] = entry;
   }
@@ -127,7 +131,9 @@ function injectedConfigText() {
     const rules = Array.isArray(pcr.providerRules) ? pcr.providerRules : [];
     const mcr = typeof pcCfg.modelConfigRules === 'object' && pcCfg.modelConfigRules ? pcCfg.modelConfigRules : {};
     const modelRules = Array.isArray(mcr.providerModelRules) ? mcr.providerModelRules : [];
-    const modelMeta = {};
+    // 无原型字典（DG-R2-02 同族）：id 为 'constructor' 等原型方法名时普通对象读取
+    // 落到原型 Function，for...of 直接 TypeError 被 catch 静默吞掉该 rule 的合成
+    const modelMeta = Object.create(null);
     for (const mr of modelRules) {
       if (!mr || typeof mr !== 'object' || typeof mr.providerId !== 'string' || typeof mr.modelId !== 'string') continue;
       (modelMeta[mr.providerId] = modelMeta[mr.providerId] || []).push(mr);
@@ -138,8 +144,10 @@ function injectedConfigText() {
       const cfg = rule.config && typeof rule.config === 'object' ? rule.config : {};
       const access = cfg.access && typeof cfg.access === 'object' ? cfg.access : {};
       const api = cfg.api && typeof cfg.api === 'object' ? cfg.api : {};
-      // v2/real 已有 → 不重复合成（v2 条目更全，整条优先语义不受影响）
-      if (!id || injectable[id] || realProviders[id]) continue;
+      // v2/real 已有 → 不重复合成（v2 条目更全，整条优先语义不受影响）。
+      // realProviders 是 JSON.parse 普通对象（有原型）——id 为 'toString' 等
+      // 原型方法名时直接下标读取恒 truthy 误判 real 已有，须 own-property 检查
+      if (!id || injectable[id] || Object.prototype.hasOwnProperty.call(realProviders, id)) continue;
       // hasKey 纪律同款：无 apiKey 不合成；无 baseUrl（endpoint 由模板提供的形态）
       // 不合成——残缺条目比不注入更糟，原生「不存在 Model」报错照旧透出
       if (typeof access.apiKey !== 'string' || access.apiKey === '') continue;
@@ -205,7 +213,10 @@ function mergeProviderConfig(realObj, copyObj) {
   };
   const strArr = (v) => (Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s.trim() !== '') : []);
   const mergedRules = [];
-  const seen = {};
+  // 无原型字典（DG-R2-02）：providerId 为 '__proto__'/'toString' 等危险键时普通对象
+  // 的 seen 读写都会撞原型链（__proto__ 赋值被 setter 吞 / toString 读到原型方法
+  // 误判已见 → 副本独有条目被丢，与 TS 侧 Set 实装分歧）。Object.create(null) 消除。
+  const seen = Object.create(null);
   for (const rule of rulesOf(realObj)) {
     mergedRules.push(rule);
     if (isRec(rule) && typeof rule.providerId === 'string' && rule.providerId !== '') seen[rule.providerId] = true;
