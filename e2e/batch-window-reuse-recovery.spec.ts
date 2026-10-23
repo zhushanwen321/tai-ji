@@ -15,7 +15,7 @@
  *    文件 record-round-started/idle 各恰 2（同一 record 两轮 revive 续写）。
  *
  * 自定义模板：e2e/fixtures/wl-seq-two.js / wl-name-reuse.js（@pi-meta 头齐全；经
- * workflow tool run action 的绝对路径 name 派发——subagents tool 恒转译 fan-out，
+ * workflow tool run action 的绝对路径 name 派发——subagent_batch tool 恒转译 fan-out，
  * 承载不了顺序/同名形态）。
  *
  * 断言原始证据文档 = run journal（run-events 帧型，W1 权威介质）+ ps 进程表

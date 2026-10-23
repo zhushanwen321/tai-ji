@@ -29,7 +29,7 @@
 
 模型经 `plan` tool 驱动状态流转，actions 六项：`enter` / `select-template` / `register-doc` / `submit-review` / `complete` / `abort`。
 
-> **工具激活（deferred）**：`plan` 工具为 `exposure: "deferred"`——不占常驻工具声明，由 pi 内置 `tool_search` 工具检索命中后按需激活。taiji 宿主内开箱即用（宿主启动时已激活 `tool_search`）；独立 pi 使用需在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）加 `"defaultTools": ["+tool_search"]`（`+` 前缀是增量修饰，保留 read/bash/edit/write 默认集）。未开启 `tool_search` 时该工具对模型不可见。
+> **工具激活**：`plan` 工具为 direct 常驻——注册不声明 `exposure` 字段（pi SDK 缺省 `direct`），工具声明随会话常驻、对模型默认可见，无需经 `tool_search` 检索激活，独立 pi 开箱即用。
 
 - `register-doc`：登记一份产物文档（同 fileName 重登 = version+1 覆盖），供 GUI 产物 tab 展示与内容刷新。
 - `submit-review`：全部文档就绪后请求审阅。**必带非空 `selfReview`（自审硬门，无豁免，含修订后重挂）**：缺失/空 → 纠偏错误不挂审批；文档已变而 selfReview 与上次逐字节相同 → 防照抄袭拒收（必须对新版本重做自审）。docs 为空或计划态已退出时返回错误提示（E6 双检查）。

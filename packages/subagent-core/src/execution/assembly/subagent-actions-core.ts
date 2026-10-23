@@ -103,7 +103,7 @@ export interface StartHandlerInput {
   engine?: string;
   // [collect 退役] 原 collect 字段（sync 批通知路由选项）已随 collect 批机制整体删除：
   // pi 对未知字段静默放行（typebox 无 additionalProperties），存量调用形态的 collect
-  // 值到达此处即被忽略——批量编排走 `subagents` tool（fan-out 模板），完成通知恒为
+  // 值到达此处即被忽略——批量编排走 `subagent_batch` tool（fan-out 模板），完成通知恒为
   // 逐条 async 投递。
 }
 
@@ -490,7 +490,7 @@ export async function cancelHandler(
  * 都放行——idle → Continuation 派发新轮（锚失效自动 markReopened 降级，同 id 带
  * 历史重开）；在途轮存在 → D2 打断（abort + 入队）。真实拒绝情形（三类）：异进程占用
  *（ResurrectDeniedError 含 pid）/ 归属不匹配 / workflow 域边界（results are collected
- * by the workflow run——一次性成员不可续聊，重派走 `subagents` tool）。interrupt 输入字段
+ * by the workflow run——一次性成员不可续聊，重派走 `subagent_batch` tool）。interrupt 输入字段
  * 保留（[A4] 工具 schema 兼容范围——extensions subagent-tool-schema 仍声明该字段）但
  * 不参与分派（D2 统一打断语义）。
  *
@@ -532,7 +532,7 @@ export async function messageHandler(
       `subagent ${id} is a workflow-origin record — it is managed by its workflow script ` +
       `(results are collected by the workflow run, not by messaging). ` +
       `Recovery: use action:'list' with includeWorkflow:true to inspect it.` +
-      ` To get these results, re-dispatch via the subagents tool.`,
+      ` To get these results, re-dispatch via the subagent_batch tool.`,
     );
   }
 

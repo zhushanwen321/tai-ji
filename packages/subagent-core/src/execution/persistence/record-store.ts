@@ -1073,7 +1073,7 @@ export class RecordStore {
    * 区分。内存与磁盘源都按 rootSessionFilter 过滤后再 merge/sort/slice。
    *
    * [H2 W1] includeWorkflow（设计 subagent-workflow-record-unification §3.3 D1）：
-   * 缺省 false = 过滤 origin==="workflow" 的 record（subagents tool list / TUI
+   * 缺省 false = 过滤 origin==="workflow" 的 record（subagent_manage action:'list' / TUI
    * /subagents 等消费面默认不展示 workflow 派发的 record）；true = 全量（排查通道）。
    * 过滤只在查询消费面——治理路径（recoverOrphanRecords / recoverEntryOnlyOrphans /
    * revive）与本参数无关，永远全量可见（D1 ⑥ 负向规格）。

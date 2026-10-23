@@ -58,15 +58,17 @@ import { updatePlanWidget } from "../widget.js";
 
 /** Build a fake pi + ctx and capture the execute callback from registerTool. */
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
-// D4 回归锚素材（对齐 pi 实装档位，快照式恢复 dmg-r1-2）：plan = deferred（tool.ts
-// 注册档位）；tool_search = model-only + defaultActive:false 注册（pi tool-search/
+// D4 回归锚素材（对齐 pi 实装注册档位）：plan = direct 常驻（tool.ts 注册零 exposure
+// 字段，pi 默认 direct）；tool_search = model-only + defaultActive:false 注册（pi tool-search/
 // index.js:11）——model-only 档但注册不进默认激活集（agent-session _isDefaultActive：
 // defaultActive !== false 才默认激活），setActiveTools 点名即声明（_applyToolLoadout 只滤
 // hidden），恢复集点名它 = 未 opt-in 的独立 pi 上常驻激活它
 const TOOL_SEARCH = "tool_search";
 /**
- * 独立 pi 进入 plan 前的默认激活集（getActiveTools 语义）：direct 全量——
- * 不含 plan（deferred）与 tool_search（model-only + defaultActive:false）
+ * 独立 pi 进入 plan 前的默认激活集（getActiveTools 语义）：不含 plan 与
+ * tool_search（model-only + defaultActive:false）。plan 的排除是本组用例布景
+ * （激活前状态），锻炼 setActiveTools 激活路径，与 exposure 无关——注册终态
+ * plan = direct 常驻
  */
 const DEFAULT_ACTIVE_TOOLS = ALL_TOOL_NAMES.filter((n) => n !== "plan");
 
@@ -82,7 +84,8 @@ function setup() {
     getAllTools: vi.fn(() =>
       [...ALL_TOOL_NAMES, TOOL_SEARCH].map((n) => ({
         name: n,
-        exposure: n === "plan" ? "deferred" : n === TOOL_SEARCH ? "model-only" : "direct",
+        // plan 已转 direct 常驻（2026-10-23 裁决）；tool_search 保持 model-only 布景
+        exposure: n === TOOL_SEARCH ? "model-only" : "direct",
       })),
     ),
   } as unknown as Parameters<typeof registerPlanTool>[0];
@@ -120,6 +123,13 @@ describe("registerPlanTool", () => {
     const { pi } = setup();
     expect(pi.registerTool).toHaveBeenCalledOnce();
     expect((pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0].name).toBe("plan");
+  });
+
+  it("exposure 注册终态（C-ext-05，2026-10-23 ADR-0136）：direct 常驻 = 不写 exposure 字段（SDK 缺省 direct，pi-semantics PS-91）", () => {
+    const { pi } = setup();
+    const tool = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0] as { exposure?: string };
+    // 误写 "deferred" 会把 plan 入口从模型默认可见集收走（tool_search 才可激活），此处红
+    expect(tool.exposure).toBeUndefined();
   });
 
   it("declares executionMode 'sequential'（D-B1-4：action 就地突变共享 PlanState，串行声明消除同批并行交错）", () => {

@@ -23,9 +23,9 @@ export const MAX_PORT = 65535 as const
  *  record 失效信号），故同集合。
  *  旧名 'subagent' 保留（tool-declaration-slimming §4 影响面修正声明：历史会话
  *  toolCall 渲染依赖旧名在集——拆分前落盘的会话按旧名渲染 agentgraph 块）。
- *  刻意不含 'subagents'（批量派发 tool——它跑的是 workflow run 不是 subagent record，
- *  见 WORKFLOW_TOOL_NAMES 注释）；两集合判定并存处（Block.vue isSubagent 分支在前）
- *  双收录会把批量块误路由进 subagent 分支。 */
+ *  刻意不含 'subagents' / 'subagent_batch'（批量派发 tool 新旧名——它跑的是 workflow
+ *  run 不是 subagent record，见 WORKFLOW_TOOL_NAMES 注释）；两集合判定并存处
+ *  （Block.vue isSubagent 分支在前）双收录会把批量块误路由进 subagent 分支。 */
 export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   'subagent',
   'subagent_start',
@@ -40,13 +40,15 @@ export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
  *  （status/abort/resume）——两者执行的都是 workflow run 域（abort/resume 迁移
  *  record 状态，触发 record 失效信号），故同集合。
  *  旧名 'workflow' 保留（同上：历史会话 toolCall 渲染依赖）。
- *  'subagents' = 批量派发入口（N 个独立任务一次派发，handler 转译 runWorkflow("fan-out")）：
+ *  'subagent_batch' = 批量派发入口（N 个独立任务一次派发，handler 转译 runWorkflow("fan-out")）：
  *  执行的是一次性 workflow run（record 快照为 workflow-record entry），故与 'workflow'
  *  同集合——单收录是零 runtime 改动的唯一全对解（D1 裁决：进 SUBAGENT 集合会误触发
- *  subagent-record 失效分支，双收录则两分支双打）。 */
+ *  subagent-record 失效分支，双收录则两分支双打）。旧名 'subagents' 保留（历史会话
+ *  toolCall 渲染依赖——工具出生（2026-09-16）至改名日落盘的会话按旧名渲染）。 */
 export const WORKFLOW_TOOL_NAMES: ReadonlySet<string> = new Set([
   'workflow',
   'subagents',
+  'subagent_batch',
   'workflow_run',
   'workflow_control',
 ])

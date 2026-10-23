@@ -142,7 +142,7 @@ Agent 能力通过 pi 扩展机制实现，涵盖权限控制、定时任务、�
 
 taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](extensions/)（20 个 `@zhushanwen/pi-*` 包 + `shared/` 共享库），其中 19 个随应用打包（15 个通用扩展 + 4 个 TaiJi 集成专用）。
 
-以下 16 个扩展可脱离 taiji 独立使用（全部经 npm 发布，也可 `--extension` 直接加载）。注意：9 个包的低频工具标记 `exposure: "deferred"`，需 pi 内置 `tool_search` 按需激活——独立 pi 使用在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）加 `"defaultTools": ["+tool_search"]`（`+` 前缀保留默认工具集），否则这些工具对模型不可见，激活说明见各包 README 的「工具激活（deferred）」节：
+以下 16 个扩展可脱离 taiji 独立使用（全部经 npm 发布，也可 `--extension` 直接加载）。注意：5 个包的低频工具标记 `exposure: "deferred"`（subagent-workflow / session-manager 除 create_managed_session 外的七件 / session-reader / rename-session / base-tool-enhance），需 pi 内置 `tool_search` 按需激活——独立 pi 使用在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）加 `"defaultTools": ["+tool_search"]`（`+` 前缀保留默认工具集），否则这些工具对模型不可见，激活说明见各包 README 的「工具激活」节：
 
 | 扩展 | 用途 |
 |------|------|

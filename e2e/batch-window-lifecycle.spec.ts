@@ -67,13 +67,13 @@ const longTasks = [
 const shortTasks = [{ task: taskText(MEMBER_SLEEP_SHORT_S) }]
 
 const DISPATCH_PROMPT_LONG =
-  `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagents\` tool ` +
+  `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagent_batch\` tool ` +
   `(do NOT do the tasks yourself). Both tasks are identical long-running tasks: ` +
   `tasks = ${JSON.stringify(longTasks)} ` +
   `After the tool call returns, reply with only the word DISPATCHED. [BATCH-WL-LONG-7731]`
 
 const DISPATCH_PROMPT_SHORT =
-  `Dispatch exactly 1 background subagent task in ONE call using the \`subagents\` tool ` +
+  `Dispatch exactly 1 background subagent task in ONE call using the \`subagent_batch\` tool ` +
   `(do NOT do the task yourself). The task: tasks = ${JSON.stringify(shortTasks)} ` +
   `After the tool call returns, reply with only the word DISPATCHED. [BATCH-WL-SHORT-7732]`
 
@@ -208,7 +208,7 @@ test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）
           consoleErrors: consoleCap.errors,
         })
       }
-      expect(done, `派发 turn（${wsId}）未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagents 工具？）`).toBe(true)
+      expect(done, `派发 turn（${wsId}）未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagent_batch 工具？）`).toBe(true)
       sub.events.length = 0
     }
     await dispatch(longSid, DISPATCH_PROMPT_LONG, 'wl-dispatch-long', listeners[0]!)

@@ -47,7 +47,7 @@ export const SUBAGENT_LIST_GUIDE =
 
 /**
  * 跨工具通用调度纪律（tool-declaration-slimming D1 信息单源化：这些规则曾重复出现在
- * subagent 组（subagent_start/manage/message）/ subagents / workflow 组（workflow_run/
+ * subagent 组（subagent_start/manage/message）/ subagent_batch / workflow 组（workflow_run/
  * workflow_control）的 description / schema 字段说明 / promptGuidelines 里——「勿 poll
  * 等待」讲三遍、「tokens/time 仅用户明确要求才设」写四份、「model 缺省继承主 agent」
  * 三处。现收敛到本常量，随 <available_subagents> 段每 turn 注入说一次；工具声明文案
@@ -56,7 +56,7 @@ export const SUBAGENT_LIST_GUIDE =
  * 保留在 bash 工具文案内。
  */
 export const SUBAGENT_DISPATCH_SHARED_RULES =
-	"Cross-tool dispatch rules (subagent_start, subagent_manage, subagent_message, subagents, workflow_run, workflow_control tools): " +
+	"Cross-tool dispatch rules (subagent_start, subagent_manage, subagent_message, subagent_batch, workflow_run, workflow_control tools): " +
 	"after dispatching, STOP — that is the default. Results arrive as a completion notification that wakes your next turn; do NOT bash sleep, busy-wait, or poll while waiting. " +
 	"Until the result arrives, make no tool calls unrelated to it — the only exception is other work the user explicitly requested (work you judge \"useful\" or \"relevant research\" on your own does NOT qualify). " +
 	"If the notification has not arrived, make exactly ONE recovery query — for a run: workflow_control status with its runId; for a single dispatch: subagent_manage list — then stop again and wait for the notification. " +

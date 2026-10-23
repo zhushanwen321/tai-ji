@@ -20,7 +20,7 @@ import type { SubagentService } from "../subagent-service.ts";
 /**
  * SAR 直调（无 workflow run 上下文）时的 parentRunId 占位——record 仍带
  * origin:"workflow" 进 store，但不隶属任何 run（views 按真实 runId 查询
- * collectRecordsByParentRunId 天然不中；治理通道 `subagents action:'list'
+ * collectRecordsByParentRunId 天然不中；治理通道 `subagent_manage action:'list'
  * includeWorkflow:true` 仍可查）。
  *
  * 生产链路 pump 恒经 workflowAgentDispatch 注入（闭包携带真实 run.runId），

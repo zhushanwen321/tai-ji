@@ -378,7 +378,7 @@ export interface ExecuteOptions {
   /** 覆盖执行 cwd（默认 mainCwd）。 */
   cwd?: string;
   // [collect 退役] 原 collect 字段（sync 批通知路由选项，U1 foundation）已随批机制
-  // 整体删除——批量编排走 `subagents` tool（fan-out 模板），完成通知恒为逐条 async
+  // 整体删除——批量编排走 `subagent_batch` tool（fan-out 模板），完成通知恒为逐条 async
   // 投递。pi 对未知字段静默放行，存量调用形态的 collect 值不进本选项。
   /**
    * 空闲超时毫秒数（全 record 生效的 idle GC 节奏——原「仅 conversation 模式」

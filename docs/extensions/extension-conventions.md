@@ -337,9 +337,15 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 
 ### 跨包隐式契约：permission 旧名展开表 ↔ subagent-workflow 工具注册名 [强制]
 
-`permission` 扩展的旧工具名迁移表 `LEGACY_TOOL_NAME_EXPANSION`（extensions/universal/permission/src/rules/legacy-tool-names.ts）硬编码展开 `subagent` → `subagent_start`/`subagent_manage`/`subagent_message`、`workflow` → `workflow_run`/`workflow_control`——展开目标名与 subagent-workflow 的工具注册名互为跨包隐式契约，两包间无 import 依赖，漂移不产生任何编译/加载报错。
+`permission` 扩展的旧工具名迁移表 `LEGACY_TOOL_NAME_EXPANSION`（extensions/universal/permission/src/rules/legacy-tool-names.ts）硬编码展开 `subagent` → `subagent_start`/`subagent_manage`/`subagent_message`、`workflow` → `workflow_run`/`workflow_control`、`subagents` → `subagent_batch`（2026-10-23 批量工具改名）——展开目标名与 subagent-workflow 的工具注册名互为跨包隐式契约，两包间无 import 依赖，漂移不产生任何编译/加载报错。
 
 **因此 subagent-workflow 工具再拆分/改名时必须同步该展开表**：用户权限规则按工具名精确匹配并持久化落盘，展开表与注册名失配时失配后果 = 旧名 deny 规则静默退化成 ask/AI 分类（无报错）。同步 = 被拆/改名的现行注册名进旧名 key、拆分/改名后的新注册名进展开目标。
+
+### 跨包隐式契约：subagent-core 恢复指引字符串 ↔ subagent-workflow 工具注册名 [强制]
+
+`packages/subagent-core` 的 message 域边界拒绝文案（`src/execution/assembly/subagent-actions-core.ts` 的 messageHandler workflow-origin 分支）与嵌套连带关闭 warn 文案（`src/execution/service/record-lifecycle.ts` 的 disposeAllRecords）以字面量指名 subagent-workflow 的工具注册名（现行：`subagent_manage action:'list' includeWorkflow:true` 查询 + `subagent_batch` 批量重派）——模型在收到拒绝后按该指引调用工具，指名的注册名与 subagent-workflow 的实际注册名互为跨包隐式契约，两包间无 import 依赖，漂移不产生任何编译/加载报错，失配后果 = 模型按指引调用不存在的工具（恢复路径断裂）。恢复指引字符串另被单元测试（`subagent-actions-core.test.ts` 逐字 toContain）与 e2e 断言（`e2e/batch-s3-partial-failfast.spec.ts` 的 `REJECT_REDIPATCH_SNIPPET`，逐字消费生产文案）双重联锁。
+
+**因此 subagent-workflow 批量/管理工具再拆分/改名时必须同批同步四处**：① subagent-actions-core.ts 生产文案；② record-lifecycle.ts 运行时文案；③ subagent-actions-core.test.ts 逐字断言；④ e2e REJECT_REDIPATCH_SNIPPET 常量及同文件引用该文案的注释（断言消费生产文案，须逐字对齐）。
 
 ## 禁止使用已废弃的 Pi SDK namespace [MANDATORY]
 
