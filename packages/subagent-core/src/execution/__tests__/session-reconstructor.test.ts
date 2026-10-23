@@ -304,7 +304,7 @@ describe("reconstructFromFile", () => {
       expect(rec!.status).toBe("idle");
     });
 
-    it("前序 error 但最后 stop → lastError 清除（镜像 turn_end 语义），status=done", () => {
+    it("前序 error 但最后 stop → lastError 保留（[subagent-observability §3.3.5 u3 收编] 错误事实只追加不清除——与 SDK reducer 新语义镜像一致），status=done", () => {
       writeJsonl([
         headerLine(),
         identityEntry({ id: "r1", agent: "w", mode: "background", task: "t", startedAt: 100 }),
@@ -314,7 +314,9 @@ describe("reconstructFromFile", () => {
         assistantEntry([{ type: "text", text: "recovered" }], { stopReason: "stop", ts: 2000 }),
       ]);
       const rec = reconstructFromFile(filePath);
-      expect(rec!.lastError).toBeUndefined(); // 后续 stop 清除了 error
+      // u2 移交的语义分叉收编：reducer 侧 turn_end 不再清 lastError（真实事件序
+      // error → turn_end 与旧补偿假设相反），重建通道镜像跟随——后续 stop 不清除。
+      expect(rec!.lastError).toBe("transient");
       expect(rec!.status).toBe("idle");
       expect(rec!.result).toBe("oops\n\nrecovered");
     });

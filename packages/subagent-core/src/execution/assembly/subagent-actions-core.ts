@@ -19,13 +19,16 @@ import { findForeignLiveInstance } from "../persistence/alive-store.ts";
 // 检查 5 的「锚不可解析 → 引导 reopen」分流消费。
 import { isAnchorResolvable } from "./cold-lookup.ts";
 import { computeElapsedSeconds, projectOutcome } from "../persistence/execution-record.ts";
+// [subagent-observability §3.3.6] list lastRound.result 的摘要锚（journal 摘要同源
+// 截断——与轮收条帧 resultSummary 同一单源）。
+import { summarizeResultForJournal } from "../persistence/record-entry-write.ts";
 import { SLUG_MAX_LENGTH } from "../../shared/run-vocabulary.ts";
 import type { ModelInfo } from "./model-resolver.ts";
 import type { SubagentService } from "../subagent-service.ts";
 import { displayAgentName } from "../../shared/agent-ref.ts";
 import type { ExecutionStatus, ExternalState } from "../domain/record-types.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
-import type { BgResponse, CancelResponse, CloseResponse, ForkFromResponse, ListResponse, MessageResponse, SubagentListItem, SubagentRecord } from "./types.ts";
+import type { BgResponse, CancelResponse, CloseResponse, ForkFromResponse, ListResponse, MessageResponse, SubagentListItem, SubagentListLastRound, SubagentRecord } from "./types.ts";
 import { ResurrectDeniedError } from "../domain/record-types.ts";
 // [modeless 波1] message 资格 gate 的错误构造（文案/错误码/恢复指引单一权威，与
 // Continuation revive 翻边格写点②共用）+ 引擎路由裁决单点（engine 留痕缺省 = pi；
@@ -296,14 +299,39 @@ export function mapExternalState(status: ExecutionStatus): ExternalState {
   }
 }
 
-/** SubagentRecord → SubagentListItem（state 两态主字段 + status 调试字段，duration 实时计算）。
+/**
+ * [subagent-observability §3.3.6 查询入口补全] list 条目的 lastRound 载荷组装：
+ * 事实快照（RoundFacts——markRoundIdle 写点产出）直读透传 + 正文摘要/累计轮数从
+ * 聚合字段派生（快照不重复存储——RoundFacts 语义；turns = 收条时点的累计 turn 数，
+ * 与 record-round-idle 帧 turns 同源）。undefined = 尚无已完成的轮（首轮在途/存量）。
+ */
+function listLastRoundOf(r: SubagentRecord): SubagentListLastRound | undefined {
+  if (r.lastRound === undefined) return undefined;
+  return {
+    ...r.lastRound,
+    ...(r.result !== undefined ? { result: summarizeResultForJournal(r.result) } : {}),
+    ...(r.turns !== undefined ? { turns: r.turns } : {}),
+  };
+}
+
+/**
+ * SubagentRecord → SubagentListItem（state 两态主字段 + status 调试字段，duration 实时计算）。
  *  parent 从 record.parentRecordId 派生（配合直接父检查）；[U5/D4] resumable 字段已
  *  退役（idle 即可续聊，state 主字段已并存表达）；outcome 一等终态语义（projectOutcome
  *  唯一出口），closedReason 退出对外 JSON（保留为 record 内部诊断字段），对外成败判读
  *  收尾到 outcome。
  *  agent 是 GUI/TUI list 共用的显示名——取 basename 短名（displayAgentName），
- *  完整路径保留在 record.agent（数据层）。 */
+ *  完整路径保留在 record.agent（数据层）。
+ *
+ *  [subagent-observability §3.3.6 查询入口补全] 轮收条事实字段：lastRound（引擎停因
+ *  原值/失败分类/接管三态/正文摘要/turns/usage——消费方先读事实，outcome 展示词保留
+ *  为兼容读侧）+ lastError（§3.3.5 派生——最后一个非空轮失败）+ swept 失联标注
+ *  （§3.3.4 清点附注随 lastRound 走）。budget 分轴结构位已入类型契约（缺省不落键
+ *  ——预算持久化产出侧接线归 u5，§3.3.9）；evidence 取证指针同（stderrTeePath 死链
+ *  成因排查为设计待验证项，指针通道随其落地）。
+ */
 export function recordToListItem(r: SubagentRecord): SubagentListItem {
+  const lastRound = listLastRoundOf(r);
   return {
     subagentId: r.id,
     agent: displayAgentName(r.agent),
@@ -317,6 +345,9 @@ export function recordToListItem(r: SubagentRecord): SubagentListItem {
     sessionFile: r.sessionFile,
     parent: r.parentRecordId,
     outcome: projectOutcome(r),
+    ...(lastRound !== undefined ? { lastRound } : {}),
+    ...(lastRound?.swept !== undefined ? { swept: lastRound.swept } : {}),
+    ...(r.lastError !== undefined ? { lastError: r.lastError } : {}),
     origin: r.origin,
     parentRunId: r.parentRunId,
   };

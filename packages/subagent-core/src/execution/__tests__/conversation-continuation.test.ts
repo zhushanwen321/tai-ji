@@ -724,7 +724,6 @@ describe("ConversationContinuation — 轮末分流（D7）与通知侧", () => 
     configureNotifyDomain({ getDeliveryPort: () => fakePort });
     const notifier = createNotifier({
       sendMessage: () => {}, // port 主投不经此端口；仅缺席直发兜底消费
-      hasRunningBackground: () => false,
       isIdle: () => true,
     });
     const origNotifyRecord = host.notifyRecord;
@@ -904,7 +903,7 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
     expect(routeOrder).toEqual(["route:round=2"]);
   });
 
-  it("空 content 成功轮 → result = '(no output this round)'，lastError 不混入正文（D7 ⑤）", async () => {
+  it("空 content 成功轮 → result 原样空串（[subagent-observability §3.3.3 空正文语义]——无文本输出非异常，占位制造退役），lastError 不混入正文（D7 ⑤）", async () => {
     const record = makeChatRecord("sa-round-empty", agentDir);
     record.lastError = "stale engine_crashed: previous failure";
     store.register(record);
@@ -914,7 +913,7 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
     fake.runs[0]!.settle({ content: "" });
 
     await vi.waitFor(() => expect(record.round).toBe(2));
-    expect(record.result).toBe("(no output this round)");
+    expect(record.result).toBe("");
     expect(record.result).not.toContain("stale engine_crashed");
   });
 

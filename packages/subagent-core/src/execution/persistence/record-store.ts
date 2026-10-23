@@ -36,9 +36,9 @@
 // | register(record) | 创建入册（既有方法，意图语义补齐） | entry（best-effort）+ 缓存一致性（stat 戳自校验承接） |
 // | appendEvent(id, event) | 事件追加（过程；turns 归约） | entry 变迁（best-effort） |
 // | markRoundStarted(id) | 轮始重置（status=running + result 清除） | entry（best-effort） |
-// | markRoundIdle(id, outcome) | 轮末收口（[two-state-convergence U4/D3] 轮终翻边写 idle；簿记全集①-⑫见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ A-lite 轮终 stopReason 展示位 + binding 快照（轮终停因由 record-round-idle 事件帧承载）；⑫ [B2] 轮终派生 manifest 投影） | binding 快照（A-lite）+ 派生 manifest 投影（[B2]，session-reader 直读主路径数据源）+ entry + 注销发射点② |
+// | markRoundIdle(id, outcome) | 轮末收口（[two-state-convergence U4/D3] 轮终翻边写 idle；簿记全集①-⑫见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ [subagent-observability §3.3.3] 轮终停因事实化（引擎原值经派生展示词进旧展示位，迁移期双写）+ rec.lastRound 事实快照 + binding 快照（轮终停因由 record-round-idle 事件帧承载）；⑫ [B2] 轮终派生 manifest 投影） | binding 快照（A-lite）+ 派生 manifest 投影（[B2]，session-reader 直读主路径数据源）+ entry + 结清发射点②（[§3.3.6] completed/failed/no_result 按轮终事实） |
 // | [collect 退役] markBatchFinalized 原语行已随 sync 批机制删除 |
-// | adoptEngineDeath(id, {error}) | 引擎死亡收养（[U5/D4] error/result/stopReason 三写——W4 新态 running+stopReason=failed；监督器接管编排留调用方） | 纯内存三写，无持久化面（[W1] 过程 entry 停写；尾部 reportRecordTransition 仅引擎域回填感知，引擎域未变零写入） |
+// | [subagent-observability u3 退役] adoptEngineDeath 原语行已随判定事实化删除（引擎死亡走正常轮终 error 停因，W4 死亡纳管态退役） |
 // | markResurrected(record, wasClosed) | 磁盘终态位翻回活态（acquire-first + 内存翻回 + register，单 try 域原子收敛，任一步失败响亮抛错，D3c） | `.alive` 写（writeSync）先 → 内存翻回 + register（无磁盘终态位清理——磁盘终态由事件流折叠判定，翻回由 record-reopened 帧表达） |
 // | acquireWriteLease(sessionFile, id) | store 内部 acquire 动作（writeAliveMarker 唯一包装；spawn 侧 sessionFile 回填挂钩用，D3a 时机①，U2b 消费） | `.alive` 写（失败响亮抛错） |
 //
@@ -67,9 +67,10 @@
 //                    markFinalized 序言随投影持久化；acquireWriteLease 在锚点确立时
 //                    声明写权（D3a 时机①）
 //   ⑧ turns       —— 事件累积族→appendEvent（execution-record.updateFromEvent 归约）
-//   ⑨ lastError   —— 轮终失败→markRoundIdle failed 载荷
-//   ⑩ error       —— 收养/失败→adoptEngineDeath/markRoundIdle
-//   ⑪ stopReason  —— 轮终写（成功 completed / 失败 failed，A-lite 展示位——status
+//   ⑨ lastError   —— 轮终失败→markRoundIdle failed 载荷（[u3] 经 appendErrorFact 单点——errors 只追加 + lastError 派生）
+//   ⑩ error       —— 轮终失败→markRoundIdle（[u3 退役] adoptEngineDeath 写点已删）
+//   ⑪ stopReason  —— 轮终写（[subagent-observability §3.3.3] 事实优先——引擎原值派生
+//                    展示词 completed/failed 迁移期双写；被接管轮不写——status
 //                    已翻 idle，U4/D3）→markRoundIdle；settle 写（中断族）→markSettled
 //
 // [perf] 两级读写设计（修复 /subagents 打开慢）：
@@ -172,13 +173,13 @@ import {
 } from "./record-store-terminal.ts";
 import type { TerminalCtx } from "./record-store-terminal.ts";
 // [H4 三轴拆分] 轮次簿记轴（record-store-rounds.ts）：appendEvent/markRoundStarted/
-// markRoundIdle/adoptEngineDeath 实现——轮次过程簿记（轮始重置/轮末收口/事件归约/
-// 收养）。经 RoundsCtx 注入（records 共享 Map + manifest/事件写面注入；binding
-// settle 快照由 rounds 轴直接 import persistSettleSnapshot——定义在 terminal 轴，
-// H4 依赖方向允许）。
+// markRoundIdle 实现——轮次过程簿记（轮始重置/轮末收口/事件归约）。经 RoundsCtx
+// 注入（records 共享 Map + manifest/事件写面注入；binding settle 快照由 rounds 轴
+// 直接 import persistSettleSnapshot——定义在 terminal 轴，H4 依赖方向允许）。
+// [subagent-observability u3] adoptEngineDeath 意图原语已退役删除（写点随判定
+// 事实化退役——引擎死亡走正常轮终，见 record-store-rounds.ts 退役注释）。
 // 依赖方向单向：store → rounds → {terminal, rebuild}（不回 import store，无环）。
 import {
-  adoptEngineDeathImpl,
   appendEventImpl,
   markRoundIdleImpl,
   markRoundStartedImpl,
@@ -650,19 +651,8 @@ export class RecordStore {
 
   // [collect 退役] 原 markBatchFinalized（sync 批终态统一写点——manifest 屏障 +
   // batchFinalized 落标 entry）已随批机制整体删除。
-
-  /**
-   * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] 新态
-   * running + stopReason=failed 表驱动死亡，禁 completed 谎报 / closed 直接终局）。
-   * 归口调用面已随 adopt 派发链退役：one-shot engine-run 编排不再经本原语收口
-   * （原归口调用点随 U2b 修复轮移除），现仅测试直调可达
-   * （run-orchestration-write-lease.test.ts 用例 2/5 为退役与归口语义锚）。
-   *
-   * @returns false = id 不在内存（debug 留痕，无副作用）。
-   */
-  adoptEngineDeath(id: string, opts: { error: string }): boolean {
-    return adoptEngineDeathImpl(id, opts, this.roundsCtx);
-  }
+  // [subagent-observability u3] 原 adoptEngineDeath 意图原语已退役删除（W4 死亡
+  // 纳管态写点随判定事实化退役——引擎死亡走正常轮终 error 停因，纳管语义被吸收）。
 
   /**
    * 意图原语：磁盘终态位翻回活态（透明重生回边整体收编，D3c 规格）。

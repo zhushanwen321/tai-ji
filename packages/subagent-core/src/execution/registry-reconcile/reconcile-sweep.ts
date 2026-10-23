@@ -194,8 +194,10 @@ function appendUnregisterEntry(
   result.reconciled.push(id);
 }
 
-/** closedReason → pending reason（未知值交 pending-notifications mapReasonToStatus
- *  的 default=completed 兜底——诚实且对差集消费方无行为影响，reason 不参与计数）。 */
+/** closedReason → pending reason（直通载体；未知值交 pending-notifications 解析通道——
+ *  mapReasonToStatus 历史六值通道对词表外值落 unknown（fail-visible，§3.3.11④ 后缺省
+ *  方向已反转，原 default=completed 的注释补偿假设退役）、新权威通道
+ *  resolveSettlementReason 按 §3.3.6 解析表解析。reason 不参与计数。） */
 function closedReasonToPendingReason(closedReason: string | undefined): string {
   return closedReason ?? "completed";
 }

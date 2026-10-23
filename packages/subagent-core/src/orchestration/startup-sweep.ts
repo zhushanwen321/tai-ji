@@ -57,6 +57,9 @@ import {
   type AdoptInterruptedRunOutcome,
 } from "./run-registry.ts";
 import { createPiHostRunEnumeration } from "../execution/assembly/pi-host-run-store.ts";
+// [subagent-observability §3.3.4 合并清点] record 半边（失联清点）——同一扫描入口
+// 的 record 侧执行体，模块头注承载判定谓词与命中处置语义。
+import { sweepInterruptedRecords } from "./record-restart-sweep.ts";
 
 /**
  * 扫描日志通道（结构子集，规格 6 签名定形）：runtime logger 的 `{debug, info,
@@ -86,7 +89,12 @@ export interface StartupSweepResult { // oe-exempt:20260928:framework:startupSwe
    * 目录对 adopted/skipped 均无贡献，不进本计数）。枚举整体失败时为 0。
    */
   stateDirs: number;
-  /** 错误摘要（单 run 收编失败逐条 + 枚举整体失败一条；空数组 = 全程无失败）。 */
+  /**
+   * [subagent-observability §3.3.4 合并清点] record 半边命中数（失联轮收条补写 +
+   * manifest 快照摘除占用）。run 侧计数的 adopted/skipped 恒等式不包含本值。
+   */
+  recordsSwept: number;
+  /** 错误摘要（单 run 收编失败逐条 + 枚举整体失败一条 + record 半边失败逐条；空数组 = 全程无失败）。 */
   errors: string[];
 }
 
@@ -109,6 +117,7 @@ export async function startupSweep(
     adopted: 0,
     skipped: 0,
     stateDirs: 0,
+    recordsSwept: 0,
     errors: [],
   };
   let runs: Array<{ runId: string; stateDir: string; status: string }>;
@@ -153,6 +162,14 @@ export async function startupSweep(
       result.skipped += 1;
     }
   }
+  // [subagent-observability §3.3.4 合并清点] record 半边：同一启动扫描入口完成
+  // run 收编与 record 失联清点（同一数据根、同一启动时点——「同一主 session 的
+  // run 与 record 在一次遍历里一起清点」的用户裁决；候选枚举走 manifest 快照
+  // 通道，禁全量事件流 fold，见 record-restart-sweep 模块头）。失败折进同一
+  // errors 摘要（旁路维护不阻断启动，纪律同上）。
+  const records = await sweepInterruptedRecords(getDataDir, log);
+  result.recordsSwept = records.swept;
+  result.errors.push(...records.errors);
   log.info(
     `${LOG_PREFIX} adopted ${result.adopted} run(s), ` +
       `skipped ${result.skipped}, ` +

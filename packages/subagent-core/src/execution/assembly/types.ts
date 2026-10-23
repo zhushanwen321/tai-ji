@@ -21,6 +21,7 @@ import type { ExecutionStatus, RecordOrigin, ClosedReason, ExecutionOutcome, Pro
 // [subagent-model-switch §6.2] SubagentRecord.modelOverride 的载荷类型（与
 // ExecutionRecord.modelOverride 同源——领域词汇权威在 domain/record-model.ts）。
 import type { ModelOverride, SubagentModelSource } from "../domain/record-model.ts";
+import type { FailureCause, AgentUsageTotal } from "@zhushanwen/subagent-engine-sdk";
 
 
 
@@ -441,6 +442,39 @@ export interface SubagentListItem {
    */
   outcome?: ProjectedOutcome;
   /**
+   * [subagent-observability §3.3.6 查询入口补全] 最近一轮的轮收条事实（引擎停因
+   * 原值 / 失败分类 / 接管三态 / 结果正文摘要 / turns / usage——「上一轮怎么收尾」
+   * 的查询侧真相通道）。undefined = 尚无已完成的轮（首轮在途 / 存量 record）。
+   */
+  lastRound?: SubagentListLastRound;
+  /**
+   * [§3.3.6] 取证指针（轮收条附注载体）：事件文件定位 + fold 水位（journal seq 区间
+   * 上界）+ 失联清点标注。undefined = 事件流未接线 / 存量形态。
+   */
+  evidence?: SubagentListEvidence;
+  /**
+   * [§3.3.5 派生 lastError] 最后一个非空轮失败（errors 只追加数组尾项——失败事实
+   * 跨轮可见，复活/续聊后仍可查）。undefined = 无失败事实（成功轮 / 存量）。
+   */
+  lastError?: string;
+  /**
+   * [§3.3.6/§3.3.9 budget 分轴显式] 四轴预算结构（null = 显式无界）。u3 交付结构位
+   * 与缺省形态；产出侧接线归 u5（预算显式传参生效 + 持久化落地后填实值——此前
+   * 全 null = 任务级默认无超时的如实表达，规则 19）。
+   */
+  budget?: {
+    maxTurns: number | null;
+    timeoutMs: number | null;
+    budgetTokens: number | null;
+    budgetTimeMs: number | null;
+  };
+  /**
+   * [§3.3.3/§3.3.4 失联标注（清点结果）] 宿主重启失联清点命中的轮收条附注（swept
+   * 标记 + evidence 摘要——恢复动作 = 查 evidence 指针；续聊即重建，或重新派发）。
+   * undefined = 非清点命中轮。
+   */
+  swept?: { at: number; evidence: string };
+  /**
    * 来源身份（H2 W1）：undefined（存量 list 形态 / record 无 origin）= "tool" 语义。
    * includeWorkflow 打开后 list 条目与手动派发 record 靠本字段区分（排查 workflow
    * run's subagents 场景的辨识数据）。
@@ -448,6 +482,42 @@ export interface SubagentListItem {
   origin?: RecordOrigin;
   /** origin="workflow" 时所属 workflow run id；tool 来源恒缺省（同 record 侧）。 */
   parentRunId?: string;
+}
+
+/**
+ * [subagent-observability §3.3.6] list 条目的 lastRound 载荷形状——shared
+ * SubagentLastRound 的结构镜像（wire 形状 SSOT = @taiji/shared；core 读模型按
+ * 既有纪律不 import shared 主入口，跨包形状一致由 runtime 投影产出侧 + 对拍测试
+ * 锚定）。停因是引擎/宿主原值（completed/failed 是派生展示词，不经本通道——
+ * list 的 outcome 字段承载展示词）。
+ */
+export interface SubagentListLastRound {
+  /** 引擎停因原值（string 跨进程契约；undefined = 无停因——被接管轮）。 */
+  engineStopReason?: string;
+  /** 失败分类（收尾边沿一次产出）。undefined = 无失败发生。 */
+  failure?: FailureCause;
+  /** pi 接管三态（handled = 被接管——引擎未执行）。undefined = 无 disposition 事实。 */
+  promptDisposition?: "started" | "queued" | "handled";
+  /** 结果正文摘要（journal 摘要锚同源截断；空串 = 无文本输出）。 */
+  result?: string;
+  /** 本轮结束时的累计轮数。 */
+  turns?: number;
+  /** 轮收条 usage 快照（最终尝试值）。 */
+  usage?: AgentUsageTotal;
+  /** 重试尝试计数（auto_retry_start 帧数）。 */
+  retryAttempts?: number;
+  /** 观察性事实（谓词未满足等降级通道）。undefined = 无观察项。 */
+  observations?: string[];
+  /** 失联清点附注（清点写点落键）。undefined = 非清点命中轮。 */
+  swept?: { at: number; evidence: string };
+}
+
+/** [§3.3.6] list 条目 evidence 取证指针（journal 事件文件 + fold 水位）。 */
+export interface SubagentListEvidence {
+  /** record 事件文件绝对路径（journal 落盘事实源——seq 区间读侧的物理定位）。 */
+  eventsFile?: string;
+  /** fold 水位 = 已接受事件的最高 seq（journal seq 区间上界；0 = 空流）。 */
+  lastSeq?: number;
 }
 
 /** background 启动的内层响应（挂在 SubagentToolResult.bgResponse）。 */
@@ -556,6 +626,18 @@ export interface SubagentRecord {
    * closed→idle 时同步从 closedReason 迁移）；undefined = 从未收尾 / 旧数据。
    */
   stopReason?: StopReason;
+  /**
+   * [subagent-observability §3.3.3] 最近一轮的轮收条事实快照（markRoundIdle 写点
+   * 产出 → recordToSubagent 直读 / fold 重建经 projectFoldToLight 恢复——「上一轮
+   * 怎么收尾」的读模型权威源）。undefined = 尚无已完成的轮（首轮在途 / 存量）。
+   */
+  lastRound?: SubagentListLastRound;
+  /**
+   * [§3.3.5 派生 lastError] 最后一个非空轮失败（内存源 = record.lastError；磁盘
+   * 重建路径事实不可得时缺省——errors 数组的持久化权威 = agent 事件流，见
+   * ExecutionRecord.errors）。
+   */
+  lastError?: string;
   /** 终态三态对外语义（U3 C-outcome）。磁盘重建源一等直读；无字段的存量兜底走 projectOutcome。 */
   outcome?: ExecutionOutcome;
   mode: ExecutionMode;

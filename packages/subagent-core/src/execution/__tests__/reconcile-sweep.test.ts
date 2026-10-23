@@ -104,15 +104,17 @@ describe("runReconcileSweep 差集补发", () => {
     ]);
   });
 
-  it("[D4] 未知 closedReason → status 由 protocol default=completed 兜底（原 status 裸写漂移修复）", () => {
+  it("[D4 → subagent-observability §3.3.11④] 词表外 closedReason → status 落 unknown（fail-visible——原 default=completed 兜底方向整体废除）", () => {
     writeSessionFile([reg("bg-gc")]);
     const { deps, appended } = makeDeps({
       states: new Map([["bg-gc", { terminal: true, closedReason: "gc" }]]),
     });
     const result = runReconcileSweep(deps);
     expect(result.reconciled).toEqual(["bg-gc"]);
+    // reason "gc" 在历史六值通道（mapReasonToStatus）落 unknown（u1 落地映射侧：
+    // gc → unknown）；结清语义经 resolveSettlementReason("gc") = no_result 新权威通道。
     expect(appended).toEqual([
-      { customType: "pending:unregister", data: { id: "bg-gc", reason: "gc", status: "completed" } },
+      { customType: "pending:unregister", data: { id: "bg-gc", reason: "gc", status: "unknown" } },
     ]);
   });
 

@@ -1234,3 +1234,77 @@ describe("⛔4 forkFromHandler（检查链 + slug 派生 + prompt 包装，快�
     expect(executeResumed.mock.calls[0]![0].slug).toBe("resumed-resumed");
   });
 });
+
+// ============================================================
+// [subagent-observability §3.3.6 查询入口补全] list 条目轮收条事实字段
+// （UC-1③：父 agent 查询拿到「上一轮怎么收尾」的真相通道——消费方先读事实，
+// outcome 展示词保留为兼容读侧）。
+// ============================================================
+describe("recordToListItem 轮收条事实字段（subagent-observability u3）", () => {
+  it("失败轮事实：lastRound 携带引擎停因原值 + 失败分类 + 正文摘要 + turns；swept 失联标注随附；lastError 透传", () => {
+    const item = recordToListItem(
+      makeRec({
+        id: "bg-lr-fail",
+        status: "idle",
+        stopReason: "failed",
+        turns: 6,
+        result: "429: tier_limit_exceeded, resets 2026-10-24T06:58:00Z",
+        lastError: "429: tier_limit_exceeded, resets 2026-10-24T06:58:00Z",
+        lastRound: {
+          engineStopReason: "error",
+          failure: {
+            class: "provider",
+            kind: "rate_limited",
+            retryable: "conditional",
+            retryAfterMs: 1_320_000,
+            raw: "429: tier_limit_exceeded",
+          },
+        },
+      }),
+    );
+    expect(item.lastRound).toMatchObject({
+      engineStopReason: "error",
+      failure: { class: "provider", kind: "rate_limited", retryable: "conditional" },
+      result: "429: tier_limit_exceeded, resets 2026-10-24T06:58:00Z",
+      turns: 6,
+    });
+    expect(item.lastError).toContain("tier_limit_exceeded");
+    expect(item.swept).toBeUndefined();
+  });
+
+  it("失联清点命中：lastRound.swept 附注随 lastRound 派生（清点事实落轮收条附注——恢复动作 = 查 evidence + 续聊重建）", () => {
+    const item = recordToListItem(
+      makeRec({
+        id: "bg-lr-swept",
+        status: "idle",
+        stopReason: "interrupted-by-restart",
+        lastRound: {
+          engineStopReason: "interrupted-by-restart",
+          swept: { at: 1_700_000_000_000, evidence: "manifest=executionStatus:running" },
+        },
+      }),
+    );
+    expect(item.swept).toEqual({ at: 1_700_000_000_000, evidence: "manifest=executionStatus:running" });
+    expect(item.lastRound?.engineStopReason).toBe("interrupted-by-restart");
+    // 失联非失败：无 failure 分类（红点判据读 failure——失联轮不误报红点，中性档）。
+    expect(item.lastRound?.failure).toBeUndefined();
+  });
+
+  it("被接管轮（promptDisposition=handled）事实透传；无 lastRound 事实的存量形态不落键（⛔4 快照零扰动）", () => {
+    const handled = recordToListItem(
+      makeRec({
+        id: "bg-lr-handled",
+        status: "idle",
+        lastRound: { promptDisposition: "handled" },
+      }),
+    );
+    // turns 随聚合字段派生（收条时点的累计 turn 数——makeRec 基线 turns=1）。
+    expect(handled.lastRound).toEqual({ promptDisposition: "handled", turns: 1 });
+
+    // 存量 record（无轮收条事实）→ lastRound/lastError/swept 键缺省（JSON 形态零新增键）。
+    const legacy = recordToListItem(makeRec({ id: "bg-lr-legacy" }));
+    expect("lastRound" in legacy).toBe(false);
+    expect("lastError" in legacy).toBe(false);
+    expect("swept" in legacy).toBe(false);
+  });
+});

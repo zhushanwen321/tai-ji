@@ -49,7 +49,7 @@ import {
 } from "./session-reconstructor.ts";
 import type { ClosedReason, ExecutionMode, ExecutionStatus, RecordOrigin, ZcodeTranscriptRef } from "../domain/record-types.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
-import type { SubagentRecord } from "../assembly/types.ts";
+import type { SubagentRecord, SubagentListLastRound } from "../assembly/types.ts";
 import { CLOSED_REASONS as CLOSED_REASON_LIST } from "../domain/record-types.ts";
 import { isZcodeTranscriptRef, isValidStopReason } from "../domain/record-model.ts";
 
@@ -194,6 +194,19 @@ function mapManifestStatus(s: string): ExecutionStatus | null {
 function manifestStatusToExecution(m: ManifestRecord): ExecutionStatus | null {
   if (m.executionStatus === "idle" || m.executionStatus === "running") return m.executionStatus;
   return mapManifestStatus(m.status);
+}
+
+/**
+ * [subagent-observability §3.3.4 失联清点] manifest 快照在途判定（清点候选枚举的
+ * 唯一通道——禁止全量事件流重放 fold 判定在途态，P0-25 红线）：快照两态权威词
+ * executionStatus 优先、越界/缺席回落 legacy status 映射（与 manifestStatusToExecution
+ * 同一套读侧判据——本函数是其谓词形态，同文件同源防漂移）。
+ * true = 快照停在轮在途形态（轮始写点随 u3 落 manifest 派生视图——running 快照与
+ * 在途轮一一对应；轮终写点刷 idle）。候选仍须经收条未写确认（markRoundIdle 的
+ * 事件先落、manifest 后刷的崩溃半更新窗），确认通道在 sweep 编排侧。
+ */
+export function manifestSnapshotInFlight(m: ManifestRecord): boolean {
+  return manifestStatusToExecution(m) === "running";
 }
 
 // ============================================================
@@ -568,6 +581,37 @@ export function projectFoldToLight(
   if (fold?.modelOverride !== undefined) {
     light.modelOverride = copyModelOverride(fold.modelOverride);
   }
+  // [subagent-observability §3.3.3/§3.3.6] 轮收条事实快照派生视图（fold 的轮终收条
+  // 帧 → lastRound）——重启后 fold 重建路径的内存读侧恢复源（与内存写点 rec.lastRound
+  // 同形）。result/turns 事实在收条帧上（resultSummary 摘要锚 + turns 快照），随
+  // lastRound 事实字段一并派生（list 消费方零二次查询）。
+  const lastRound = lastRoundFromFold(fold);
+  if (lastRound !== undefined) light.lastRound = lastRound;
+}
+
+/**
+ * [subagent-observability §3.3.6] 轮终收条帧 → lastRound 读模型（fold 重建路径与
+ * fold 直查通道共用的纯派生单点）。result 取收条帧 resultSummary 摘要锚（空串 =
+ * 无文本输出——§3.3.3 空正文语义）；turns 取帧累计轮数快照；事实字段（engineStopReason/
+ * failure/promptDisposition/usage/retryAttempts/observations）直读透传。
+ * undefined = fold 缺席或无轮终收条（从未收尾 / 存量旧帧）。
+ */
+export function lastRoundFromFold(
+  fold: RecordEventFoldState | undefined,
+): SubagentListLastRound | undefined {
+  const receipt = fold?.roundIdle;
+  if (receipt === undefined) return undefined;
+  return {
+    ...(receipt.engineStopReason !== undefined ? { engineStopReason: receipt.engineStopReason } : {}),
+    ...(receipt.failure !== undefined ? { failure: receipt.failure } : {}),
+    ...(receipt.promptDisposition !== undefined ? { promptDisposition: receipt.promptDisposition } : {}),
+    ...(receipt.resultSummary !== undefined ? { result: receipt.resultSummary } : {}),
+    ...(receipt.turns !== undefined ? { turns: receipt.turns } : {}),
+    ...(receipt.usage !== undefined ? { usage: receipt.usage } : {}),
+    ...(receipt.retryAttempts !== undefined ? { retryAttempts: receipt.retryAttempts } : {}),
+    ...(receipt.observations !== undefined ? { observations: receipt.observations } : {}),
+    ...(receipt.swept !== undefined ? { swept: receipt.swept } : {}),
+  };
 }
 
 /**
@@ -1041,6 +1085,12 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     // 水合的候选数据源 + 覆盖状态查询通道）。持久化权威 = record-model-override 事件
     // 帧（写点 = store.markModelOverride），本派生视图只透传内存值；undefined 自然缺省。
     modelOverride: r.modelOverride,
+    // [subagent-observability §3.3.3/§3.3.6] 轮收条事实快照（markRoundIdle 写点产出，
+    // 直读透传——「上一轮怎么收尾」的内存读侧权威源）+ §3.3.5 派生 lastError（最后
+    // 一个非空轮失败——u2 只追加语义后跨轮可见）。undefined 自然缺省（本进程内尚无
+    // 轮终 / 旧数据）。
+    lastRound: r.lastRound,
+    lastError: r.lastError,
   };
 }
 

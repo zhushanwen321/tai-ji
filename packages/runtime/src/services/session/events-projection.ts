@@ -75,6 +75,8 @@ import {
 } from '@zhushanwen/subagent-core'
 
 import { mergeWorkflowStepRecords } from './workflow-step-merge.js'
+// [subagent-observability u3 F4] lastRound wire 产出单点（独立模块——本文件行数上限顶满）。
+import { resolveSubagentLastRound } from './events-projection-last-round.js'
 import { projectV2Workflow } from "./workflow-record-projection.js"
 
 // ── run journal 行解析（域无关 tail 原语的 run 域注入）─────────
@@ -406,6 +408,8 @@ export function projectV2Subagent(
     engine: binding.engine,
     engineHandle: binding.engineHandle,
     result: resolveSubagentResult(settled, roundIdle, settledEntry),
+    // [subagent-observability u3 F4] 轮收条事实 wire 透传（缺字段则红点判据走迁移期回落）。
+    lastRound: resolveSubagentLastRound(roundIdle),
   }
 }
 

@@ -892,9 +892,11 @@ describe("RecordStore", () => {
     });
 
     it("[P4-② ⛔ two-state-convergence U5] W4 纳管态孤儿（failed/error 只在内存，entry-born 无锚）跨重启 → entry-only 纠偏 idle + interrupted-by-restart", () => {
-      // W4 新态 = adoptEngineDeath 纳管产物（[U5/D4] error/result/stopReason 三写、status
-      // 保持 running）——[W1/D2] 过程 entry 停写：failed/error 只在内存，跨重启后的 v2
-      // 注册条目结构上不承载它们，entry-only 纠偏恒落 interrupted-by-restart。
+      // [subagent-observability u3 退役注记] 原 W4 新态产点 adoptEngineDeath 写点已随
+      // 判定事实化退役删除（引擎死亡走正常轮终——error 停因 + 失败事实入账，跨轮
+      // 可见）；本用例锁定的「纳管态孤儿跨重启 → entry-only 纠偏 idle +
+      // interrupted-by-restart」归宿语义不变（[W1/D2] 过程 entry 停写：轮终事实只在
+      // 事件流/内存，v2 注册条目结构上不承载）。
       // 设计 D6a 登记：W4 跨重启归宿 = 孤儿纠偏 idle 等 revive（非 readopt——
       // isBootReadoptable 现状空转）。
       const mainFile = writeMainSession([

@@ -56,6 +56,14 @@ export interface RunMemberRecordView { // oe-exempt:20261022:framework:设计 §
   readonly error?: string;
   readonly eventLog?: readonly RunMemberEventView[];
   readonly currentActivity?: { readonly type: "tool" | "text" | "thinking"; readonly label: string };
+  /**
+   * [subagent-observability §3.3.6 成员行对齐] 轮收条事实快照（最小消费视图——
+   * SubagentRecord.lastRound 结构性满足；本行只消费失败分类维）。undefined =
+   * 尚无已完成的轮 / 存量。
+   */
+  readonly lastRound?: {
+    readonly failure?: { readonly class: string; readonly kind: string };
+  };
 }
 
 /** 单成员行（8 字段，设计 §3.1.3 的 RunMemberView）。 */
@@ -78,6 +86,23 @@ export interface RunMemberView { // oe-exempt:20261022:framework:设计 §3.1.3 
   turns?: number;
   /** 仅运行中：record 派生（如 "tool: bash"）。 */
   currentActivity?: string;
+  /**
+   * [subagent-observability §3.3.6 成员行对齐] 失败分类（点拼 `"<class>.<kind>"`——
+   * 终局事件 cause 同款序列化形态，§3.3.8；record.lastRound.failure 派生）。
+   * undefined = 无失败事实。
+   */
+  failure?: string;
+  /**
+   * [§3.3.6/§3.3.9 budget 分轴显式] 四轴预算结构（null = 显式无界）。结构位随本
+   * 单元入契约；产出侧接线归 u5（预算显式传参生效 + 持久化落地后填实值——此前
+   * 缺省不落键 = 任务级默认无超时的如实表达，规则 19）。
+   */
+  budget?: {
+    maxTurns: number | null;
+    timeoutMs: number | null;
+    budgetTokens: number | null;
+    budgetTimeMs: number | null;
+  };
 }
 
 // ── 单行派生 ──────────────────────────────────────────────────
@@ -198,6 +223,10 @@ function memberViewFromRecord(
     agent: agentOf(record, node),
     model: firstNonEmpty(record.model, node?.model) ?? "default",
   };
+  // [subagent-observability §3.3.6 成员行对齐] 失败分类随轮收条事实（点拼序列化，
+  // 与终局事件 cause 同形——record 事实优先，trace 兜底节点无分类维）。
+  const failure = record.lastRound?.failure;
+  if (failure !== undefined) view.failure = `${failure.class}.${failure.kind}`;
   if (state === "running") applyRunningFields(view, record, now);
   else applyFinalFields(view, record, node);
   const turns = record.turns ?? node?.result?.usage?.turns;

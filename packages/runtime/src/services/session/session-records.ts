@@ -1855,6 +1855,12 @@ function recordStateEquals(a: SubagentRecord, b: SubagentRecord): boolean {
     && a.result === b.result
     && a.stopReason === b.stopReason
     && a.origin === b.origin
+    // [subagent-observability u3 F4] 轮收条事实进发布基线——lastRound 在 stopReason
+    // 不翻的形态下也可能变化（被接管轮 promptDisposition 落帧：stopReason 两侧恒
+    // undefined，漏比对则 wire 永不下发新轮收条）。引用快照对象整体替换（fold 派生
+    // 每次重建新对象），引用不等即视为变化——语义正确性优先，多一次发布无害
+    // （内容级 diff 的收益不抵双实现漂移成本）。
+    && a.lastRound === b.lastRound
 }
 
 /**

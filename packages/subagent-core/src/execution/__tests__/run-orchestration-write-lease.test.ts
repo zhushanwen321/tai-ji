@@ -8,7 +8,8 @@
 //      后 marker 跨轮保留（D3a/B5）；
 //   2. 非 pi 引擎死亡（run reject → Continuation 失败分支收尾 settleRoundFailed：
 //      idle 可恢复 + 失败通知，无监督器 adopt 接管；旧 adopt 形态回填点
-//      finalizeEngineOutcome 已删——adopt 链随 one-shot engine-run 编排退役）；
+//      finalizeEngineOutcome 已删——adopt 链随 one-shot engine-run 编排退役；
+//      [subagent-observability u3] adoptEngineDeath 写点已随之退役删除）；
 //   3. settleOneShotOutcome 直驱：markRoundIdle 簿记（idle 翻边 / round+1 /
 //      result / closedReason 清除）+ `.alive` 不删 + pending:unregister 发射点②
 //      store 簿记⑧单点发射（恰好一次）；
@@ -230,9 +231,12 @@ describe("settleOneShotOutcome SP-5 成功分支 → store.markRoundIdle 接线�
       // setPendingUnregister 注入 notifyHost.emitPendingUnregister），本用例期间
       // pi.events.emit 仅此一笔——调用方直发回归（双轨重复注销）会使计数 >1 而红
       expect(h.pi.events.emit).toHaveBeenCalledTimes(1);
+      // [subagent-observability §3.3.6 结清枚举新写入方] 按轮终事实产 SettlementReason
+      //（成功轮 → completed）——旧恒发字面量 "running"（词表外，历史直落 completed 的
+      // fail-open 形态）随写入方退役。
       expect(h.pi.events.emit).toHaveBeenCalledWith("pending:unregister", {
         id: "bg-sp5",
-        reason: "running",
+        reason: "completed",
       });
     } finally {
       h.service.dispose();

@@ -250,3 +250,140 @@ describe("markRoundIdle 正常轮终磁盘侧（A-lite 簿记⑩⑪）", () => {
     expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
   });
 });
+
+// ============================================================
+// [subagent-observability §3.3.3/§3.3.6] markRoundIdle 轮收条事实化：
+//   - 停因事实优先（引擎原值 engineStopReason 在场 → 旧展示位走派生展示词）；
+//   - 失败分类/接管三态/usage 事实快照（帧 + rec.lastRound 内存读侧双承载）；
+//   - 被接管轮（promptDisposition=handled）：无停因、无失败分类、空正文、结清 no_result；
+//   - pending 结清枚举新写入方（completed/failed/no_result 按轮终事实，旧 "running" 退役）；
+//   - 失败事实入账走 SDK appendErrorFact 单点（errors 只追加 + lastError 派生——u2 移交收编）。
+// ============================================================
+describe("markRoundIdle 轮收条事实化（subagent-observability u3）", () => {
+  let tmpDir: string;
+  let sessionsDir: string;
+  let manifestDir: string;
+  let sessionFile: string;
+  let store: RecordStore;
+  let settlements: Array<{ id: string; reason: string }>;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "round-facts-"));
+    sessionsDir = path.join(tmpDir, "sessions");
+    manifestDir = path.join(tmpDir, "records");
+    store = makeStore(sessionsDir, manifestDir);
+    settlements = [];
+    store.setPendingUnregister((id, reason) => settlements.push({ id, reason }));
+    sessionFile = path.join(sessionsDir, "2026-01-01_uuid.jsonl");
+    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  const readIdleFrame = (id: string): Record<string, unknown> | undefined => {
+    const file = path.join(manifestDir, `${id}.events`);
+    if (!fs.existsSync(file)) return undefined;
+    const idles = fs
+      .readFileSync(file, "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((e) => e.type === "record-round-idle");
+    return idles.at(-1);
+  };
+
+  it("引擎停因事实在场：帧事实字段 + rec.lastRound 快照 + 旧展示位派生（error → failed）+ 结清 failed", () => {
+    const record = makeRecord("bg-fact-error", { sessionFile });
+    record.turnCount = 6;
+    store.register(record);
+
+    expect(
+      store.markRoundIdle("bg-fact-error", {
+        kind: "failed",
+        reason: "429: tier_limit_exceeded, resets 2026-10-24T06:58:00Z",
+        engineStopReason: "error",
+        failure: {
+          class: "provider",
+          kind: "rate_limited",
+          retryable: "conditional",
+          retryAfterMs: 1_320_000,
+          raw: "429: tier_limit_exceeded, resets 2026-10-24T06:58:00Z",
+        },
+      }),
+    ).toBe(true);
+
+    // 事实字段：帧并行产出（§3.4 迁移期双写）。
+    const frame = readIdleFrame("bg-fact-error");
+    expect(frame?.engineStopReason).toBe("error");
+    expect(frame?.failure).toMatchObject({ class: "provider", kind: "rate_limited", retryable: "conditional" });
+    // 旧展示位 = 事实派生（引擎停因 error → failed——非旧写入判据「没报错=completed」）。
+    expect(record.stopReason).toBe("failed");
+    expect(frame?.stopReason).toBe("failed");
+    // 事实快照（内存读侧权威源——recordToSubagent/list 消费）。
+    expect(record.lastRound).toMatchObject({
+      engineStopReason: "error",
+      failure: { class: "provider", kind: "rate_limited" },
+    });
+    // 结清枚举：轮失败结清 = failed。
+    expect(settlements).toEqual([{ id: "bg-fact-error", reason: "failed" }]);
+    // 失败事实入账（appendErrorFact 单点——errors 只追加 + lastError 派生）。
+    expect(record.lastError).toContain("tier_limit_exceeded");
+    expect(record.errors?.at(-1)?.message).toContain("tier_limit_exceeded");
+  });
+
+  it("被接管轮（promptDisposition=handled）：无停因、无失败分类、空正文、结清 no_result（§3.3.1 P6 第三形态）", () => {
+    const record = makeRecord("bg-handled", { sessionFile });
+    store.register(record);
+
+    expect(
+      store.markRoundIdle("bg-handled", {
+        kind: "success",
+        content: "",
+        promptDisposition: "handled",
+      }),
+    ).toBe(true);
+
+    // 轮终层记事实：engineStopReason 无值（引擎未执行）+ promptDisposition=handled +
+    // 空正文 + 不写 FailureCause；「正常收尾」派生判据要求停因 stop——本形态无停因
+    // 构造性不满足，stopReason 不写。
+    expect(record.stopReason).toBeUndefined();
+    expect(record.result).toBe("");
+    expect(record.lastRound).toEqual({ promptDisposition: "handled" });
+    const frame = readIdleFrame("bg-handled");
+    expect(frame?.stopReason).toBeUndefined();
+    expect(frame?.engineStopReason).toBeUndefined();
+    expect(frame?.failure).toBeUndefined();
+    expect(frame?.promptDisposition).toBe("handled");
+    // 结清：被接管 = 无果（细因经轮收条 promptDisposition 披露，§3.3.6）。
+    expect(settlements).toEqual([{ id: "bg-handled", reason: "no_result" }]);
+  });
+
+  it("正常收尾事实：engineStopReason=stop 且无失败分类 → 展示词 completed + 结清 completed（旧展示位=事实派生）", () => {
+    const record = makeRecord("bg-fact-stop", { sessionFile });
+    store.register(record);
+
+    expect(
+      store.markRoundIdle("bg-fact-stop", {
+        kind: "success",
+        content: "done",
+        engineStopReason: "stop",
+        usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, total: 3, cost: 0 },
+        retryAttempts: 0,
+      }),
+    ).toBe(true);
+
+    expect(record.stopReason).toBe("completed");
+    expect(record.lastRound).toMatchObject({
+      engineStopReason: "stop",
+      retryAttempts: 0,
+    });
+    expect(record.lastRound?.usage?.output).toBe(2);
+    const frame = readIdleFrame("bg-fact-stop");
+    expect(frame?.engineStopReason).toBe("stop");
+    expect(frame?.stopReason).toBe("completed");
+    expect(frame?.usage).toMatchObject({ output: 2 });
+    expect(settlements).toEqual([{ id: "bg-fact-stop", reason: "completed" }]);
+  });
+});
