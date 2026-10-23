@@ -1609,6 +1609,7 @@ phase("静态门禁");
 // step 2：static-gate（typecheck 三处 + lint，不跑测试；skill-yaml 校验条件并入——
 // diff 触及 .agents/skills/ 时校验对应 SKILL.md frontmatter，与门禁同一 step 承担静态面）
 let changesetWarn = false;
+let changesetWarnDetail = "";
 let staticGateSkipped = false;
 await step("static-gate", async () => {
   const out = await gateFixLoop(
@@ -1618,6 +1619,21 @@ await step("static-gate", async () => {
     (res) => res,
   );
   changesetWarn = /WARN changeset-check/.test(out.stdout);
+  // WARN 详情（缺 changeset 的包清单行 + 相邻列表项）注入 pr-meta prompt——agent 的
+  // 分类对象与 WARN 清单对齐，不再从全量 diff 自行推断哪些包缺（提取失败留空串，
+  // prompt 走"自行判断"降级分支，行为退化无害）
+  {
+    const outLines = out.stdout.split("\n");
+    const detailLines: string[] = [];
+    for (let i = 0; i < outLines.length; i++) {
+      if (!/changeset-check/.test(outLines[i] ?? "")) continue;
+      detailLines.push(outLines[i]!);
+      for (let j = i + 1; j < outLines.length && /^\s+-\s/.test(outLines[j] ?? ""); j++) {
+        detailLines.push(outLines[j]!);
+      }
+    }
+    changesetWarnDetail = detailLines.join("\n");
+  }
   const names = await world.run("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
   if (names.exitCode !== 0) {
     throw new Error(`static-gate 读 diff 文件清单失败（skill-yaml 条件判定，exit ${names.exitCode}）：\n${tailLines(names.stderr, 10)}；确认仓库状态后重新发起`);
@@ -1660,7 +1676,7 @@ await step("pr-meta", async () => {
         "",
         "【任务一：changeset 缺失兜底起草（先做）】",
         changesetWarn
-          ? "背景：changeset 复核发现缺失——部分 extension 包改了 src/ 但没有对应 changeset（WARN changeset-check，检测口径 git diff main...HEAD——base 非 main 的 stacked PR 上 WARN 可能由 base 分支已有改动触发，分类时以本分支实际触及的包为准）。起草主责在 dev-merge gates 环节，本分支未经 dev-merge 或其侧未带齐，此处按 Gate-1a.5 原逻辑补起草兜底。"
+          ? `背景：changeset 复核发现缺失——部分 extension 包改了 src/ 但没有对应 changeset（WARN changeset-check，检测口径 git diff main...HEAD——base 非 main 的 stacked PR 上 WARN 可能由 base 分支已有改动触发，分类时以本分支实际触及的包为准）。起草主责在 dev-merge gates 环节，本分支未经 dev-merge 或其侧未带齐，此处按 Gate-1a.5 原逻辑补起草兜底。\nWARN 清单原文（分类对象 = 这里面列出的包）：\n${changesetWarnDetail || "（详情提取失败——按本分支实际触及的包自行判断）"}`
           : "背景：static gate 被发起方跳过，changeset 复核无法执行（状态未知）——请按 diff 自行判断，宁可起草。",
         "按 diff 逐包分类并处理：",
         "- 实质行为改动（逻辑/接口/行为变化）→ 直接写入 .changeset/<slug>.md：",
@@ -1674,7 +1690,9 @@ await step("pr-meta", async () => {
         "- 已删除的包跳过（package.json 读不到）",
         "",
         "写完不 commit——changeset 文件由 workflow 统一显式路径提交（你要 commit 也不要用 git add -A）。",
-        "任务一完成后以 changeset 字段返回：action=draft + files（写入的文件路径列表）或 action=no-release + skipReasons。",
+        "任务一返回 changeset 字段前先做显式判定（二选一，选错 = 契约违规被拒绝）：",
+        "- 实际写入了至少一个 .changeset/<slug>.md → action 必须为 \"draft\"，且 files 必须逐个列出写入路径（files 空数组 = 契约违规）",
+        "- 一个文件都没写（全部包均为非发布改动）→ action 必须为 \"no-release\"，且 skipReasons 逐包列出理由；此时禁止返回 action=\"draft\" 或非空 files",
       ]
     : [];
   const v = await agent(
@@ -1751,12 +1769,26 @@ await step("pr-meta", async () => {
 // step 4：pr-submit（push 分支 + 开/更新 PR）
 await step("pr-submit", async () => {
   if (!prTitle) throw new Error("pr-submit 前置产物缺失：pr-meta 未 done（被跳过或失败）；请先补 PR 标题或去掉 skipSteps 中的 pr-meta");
-  const res = await world.run("bash", [
-    "scripts/pr-submit.sh",
+  // 脚本绝对路径 + 127 重试：实测出现过相对路径 127（bash: scripts/pr-submit.sh: No such
+  // file or directory；同 run 内 git 相对操作正常、事后 snippet 同命令正常）的 worker 环境
+  // 异常，形态吻合 spawn cwd 解析失败——绝对路径消除 cwd 假设，127 时打印 pwd 现场并重试
+  const topRes = await world.run("git", ["rev-parse", "--show-toplevel"]);
+  const submitScript = topRes.exitCode === 0
+    ? `${topRes.stdout.trim()}/scripts/pr-submit.sh`
+    : "scripts/pr-submit.sh";
+  const runSubmit = () => world.run("bash", [
+    submitScript,
     "--title-file", `${prReviewDir}/pr-workflow/pr-title.txt`,
     "--body-file", `${prReviewDir}/pr-workflow/pr-body.md`,
     "--base", base,
   ], { timeoutMs: 600_000 });
+  let res = await runSubmit();
+  if (res.exitCode === 127) {
+    const cwdRes = await world.run("pwd");
+    const lsRes = await world.run("ls", ["-la", "scripts/pr-submit.sh"]);
+    log(`[pr-submit] exit 127（bash 打不开脚本文件）：pwd=${cwdRes.stdout.trim()}，script=${submitScript}，ls exit=${lsRes.exitCode}——重试一次`);
+    res = await runSubmit();
+  }
   if (res.exitCode === 0) {
     const urls = res.stdout.split("\n").map((s) => s.trim()).filter((l) => PR_URL_RE.test(l));
     if (urls.length === 0) {
