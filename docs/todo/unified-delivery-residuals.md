@@ -9,7 +9,7 @@
 ### 落地内容
 
 - `packages/session-delivery/src/delivery.ts`：queue-hold 投递路径整体删除——busy gate（isIdle + 在途内查双条件）、合批窗口（merge timer 三函数 + send 的 useMerge 判定）、出站模式分支；受理即出站为唯一出站形态。与模式无关的共用机制保留：settled 边沿订阅与 flush（retain 留守条目的重投触发）、in-flight 防重、doSend 积累队列成批、判重三级链、dispose 语义。
-- `packages/session-delivery/src/types.ts`：`dispatchMode` / `mergeWindowMs` / `mergeHoldActive` 配置位与 `DeliveryHandle.send` 的 `merge` 选项删除（无消费方的配置项不留存）；`DeliveryPort.isIdle` 保留（port 契约与诊断面成员，内核不读）。
+- `packages/session-delivery/src/types.ts`：`dispatchMode` / `mergeWindowMs` / `mergeHoldActive` 配置位与 `DeliveryHandle.send` 的 `merge` 选项删除（无消费方的配置项不留存）；`DeliveryPort.isIdle` 保留（port 契约与诊断用成员，内核不读）。
 - 生产装配显式传参同步删：`extensions/shared/delivery-port/src/delivery-port.ts`（kernelConfig）与 `packages/runtime/src/services/session/session-delivery-registry.ts`（createDelivery config）。
 - 测试改造（登记原文「`tests/` 23 个显式传参文件」与实测不符——实际仅 delivery-dispatch-mode.test.ts 显式传 `dispatchMode`，改造面实为消费缺省 queue-hold 行为的测试）：测 busy 排队 / settled 边沿忙闲复核 / 合批窗口语义本体的用例删除（各文件带 [已不可达用例删除登记] 注记）；借道用例改以受理即出站下的等价构造保留（in-flight 防重挂起 / deferred 设计内等待 / retain 失败留守）。`delivery-merge.test.ts` 删除（depth 诊断用例迁入 ownership-view 套件）；`delivery-dispatch-mode.test.ts` 更名 `delivery-dispatch.test.ts`。
 

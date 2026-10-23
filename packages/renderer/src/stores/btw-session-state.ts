@@ -11,7 +11,7 @@
  *   `model: undefined + inheritSessionModel: true`（btw-line-spawn-options.ts），模型终态
  *   从 fork 快照（= 主会话创建线当时的模型）经 entry 恢复；
  * - 回退与线真值的分歧（用户在该线切过模型后）由回执覆盖；pi 侧静默换模（无 renderer
- *   回执）不回显——权威推送/拉取通路缺口登记 docs/todo/btw-line-model-state.md。
+ *   回执）不回显——权威推送/拉取通路缺口登记 docs/todo/need-design.md 条目 1。
  *
  * mainSid 绑定：btw.list / btw.create reply 的 mainSid（BtwPanel 拉取/建线时写入），
  * 供回退解析「该线归属哪个主会话」——vid 本身只编码线的 pi 会话 id，不含主会话。

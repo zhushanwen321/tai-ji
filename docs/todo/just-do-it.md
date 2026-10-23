@@ -1,6 +1,6 @@
 # docs/todo 可直接开工清单（just-do-it）
 
-状态：执行中（2026-10-23 自 docs/todo/ 45 份登记文档整理归并；修复方向均已明确，按批次派发实施）
+状态：全部完成（2026-10-23 自 docs/todo/ 45 份登记文档整理归并，68 条全部处置：62 条修复落地、4 条经核实关闭、2 条随裁决登记关闭口径并入完成批；不派发项与验证活动见文末两节）
 
 本清单承载「修复方向明确、无需设计裁决」的待办。每条含来源、位置、修复内容、验收标准。条目完成后在行首标记 `[x]` 并附 commit；全部完成后本文件转收尾记录，随下次 docs/todo 清理处置。
 
@@ -46,87 +46,92 @@
 - [x] **条目 17（N-3 测试顺序脆弱）** `packages/ui/src/rendering-protocol/primitives/container-registry.ts` 模块级 Map 无 reset，`--sequence.shuffle` 6 跑 5 红。修复：加 `resetPrimitiveContainers()`（测试专用），`__tests__/PrimitiveRouter.test.ts` beforeEach 调用（或把「barrel 未加载」两用例拆独立文件，二选一，优先 reset 方案）。验收：`--sequence.shuffle` 跑绿。来源同上。
 - [x] **条目 18（mobile 死 keyframes）** `packages/mobile-renderer` 的 tailwind.config 删除 wiggle / pulse-strong / ask-user-slide-up 三组零消费 keyframes（删前 grep 全仓确认零引用）。来源 mobile-token-mirror-divergence（登记的动画清理小项）。
 
-## 批次 2
+## 批次 2（已完成：T6=226e7c124 T7=d2db9fc35 T8=d842397e9 T9=7fb8fba8c T10=cddce84ff；条目 22 随 f257b92e0）
 
 ### T6 renderer 会话状态批
 
-- [ ] **条目 19（S-4 数据编排门控）** `packages/renderer/src/composables/panel/useSubagentDrawerTabs.ts`：`enteredFrom === null` 时 activate/close 跳过停流与加载编排（隐性分叉）。修复：数据编排改挂 `activeTab` 变化（或解除 enteredFrom 门控），保证语义不依赖入口来源。来源 dev-0.11.4-review-residue。
-- [ ] **条目 20（S-5 空串分区）** 同文件 activate/close 入口补 `if (!focusedSid.value) return`，杜绝 `''` 键退化分区。来源同上。
-- [ ] **条目 21（N-1 清除分区键不一致）** `clearSubagentSelection` 清 current 分区而其余读写以 focusedSid 为键。修复：加可选 sid 参数走 `updateFor(sid)`（或注释声明前提，优先前者）。位置：`useSubagentDrawerTabs.ts` + `packages/core/src/domain/drawer/selection/subagent.ts`。来源同上。
-- [ ] **条目 22（S-9 对拍单测）** `packages/shared/src/subagent.ts:756` 注释声称与 subagent-core 本地类型副本「逐字段等值」但未给副本路径。修复：注释补副本路径；补双侧字面量对拍单测（shared 与副本字段级比对）。来源同上。
+- [x] **条目 19（S-4 数据编排门控，关闭不改代码）** `packages/renderer/src/composables/panel/useSubagentDrawerTabs.ts`：`enteredFrom === null` 时 activate/close 跳过停流与加载编排（隐性分叉）。修复：数据编排改挂 `activeTab` 变化（或解除 enteredFrom 门控），保证语义不依赖入口来源。来源 dev-0.11.4-review-residue。（2026-10-23 关闭：enteredFrom 门控已被 3ee709342 整体删除（agent 钻取语义重构），登记担忧的隐性分叉不复存在，现状即建议形态）
+- [x] **条目 20（S-5 空串分区）** 同文件 activate/close 入口补 `if (!focusedSid.value) return`，杜绝 `''` 键退化分区。来源同上。
+- [x] **条目 21（N-1 清除分区键不一致）** `clearSubagentSelection` 清 current 分区而其余读写以 focusedSid 为键。修复：加可选 sid 参数走 `updateFor(sid)`（或注释声明前提，优先前者）。位置：`useSubagentDrawerTabs.ts` + `packages/core/src/domain/drawer/selection/subagent.ts`。来源同上。
+- [x] **条目 22（S-9 对拍单测）** `packages/shared/src/subagent.ts:756` 注释声称与 subagent-core 本地类型副本「逐字段等值」但未给副本路径。修复：注释补副本路径；补双侧字面量对拍单测（shared 与副本字段级比对）。来源同上。
 
 ### T7 renderer 设置与归档批
 
-- [ ] **条目 23（dmg-r3-2 无调用方导出链）** `packages/renderer/src/composables/features/sidebar/useSidebarSessionActions.ts`：`onDeleteSession` 全仓零调用点，其唯一依赖 `options.deleteSession` 为它而设。删除 `onDeleteSession`（:107 定义 / :307 导出），`deleteSession` 依赖降级可选或移除（:43/:66）；核对两个测试文件的间接引用并同步更新。来源 dev-0.11.10-review-residue。
-- [ ] **条目 24（dmg-r3-4 in-flight 收编）** `packages/renderer/src/composables/features/sidebar/useArchiveView.ts` 的 `refreshArchives` 手写 in-flight 去重违反 C-data-18（`createInflightDedup` 收编禁令）且无豁免登记。收编进单点；先核对 trailing 补充拉取语义是否为该工具已覆盖形态，不覆盖则补工具能力（不留双轨、不登记豁免）。来源同上。
-- [ ] **条目 25（SG-8 reconcile 入口）** `packages/core/src/domain/settings/use-provider-edit.ts` + `provider-edit-form.ts`：form module 新增 `reconcile(fresh)` 公共入口（统一分流 id 变化 / 同 id 刷新），补幂等 store watch 与「仅 prop 变化」契约测试；完成后删除 `providerRef` watcher 的同 id 早退分支（JSDoc 契约随之更新）。来源 dev-0.11.7-provider-reveal-review-residue。
+- [x] **条目 23（dmg-r3-2 无调用方导出链）** `packages/renderer/src/composables/features/sidebar/useSidebarSessionActions.ts`：`onDeleteSession` 全仓零调用点，其唯一依赖 `options.deleteSession` 为它而设。删除 `onDeleteSession`（:107 定义 / :307 导出），`deleteSession` 依赖降级可选或移除（:43/:66）；核对两个测试文件的间接引用并同步更新。来源 dev-0.11.10-review-residue。
+- [x] **条目 24（dmg-r3-4 in-flight 收编）** `packages/renderer/src/composables/features/sidebar/useArchiveView.ts` 的 `refreshArchives` 手写 in-flight 去重违反 C-data-18（`createInflightDedup` 收编禁令）且无豁免登记。收编进单点；先核对 trailing 补充拉取语义是否为该工具已覆盖形态，不覆盖则补工具能力（不留双轨、不登记豁免）。来源同上。
+- [x] **条目 25（SG-8 reconcile 入口）** `packages/core/src/domain/settings/use-provider-edit.ts` + `provider-edit-form.ts`：form module 新增 `reconcile(fresh)` 公共入口（统一分流 id 变化 / 同 id 刷新），补幂等 store watch 与「仅 prop 变化」契约测试；完成后删除 `providerRef` watcher 的同 id 早退分支（JSDoc 契约随之更新）。来源 dev-0.11.7-provider-reveal-review-residue。
 
 ### T8 归档链批
 
-- [ ] **条目 26（零消息 session 归档）** 归档前主文件不存在时报错。修复（按登记倾向）：主文件不存在 → 直接成功返回（空归档语义，幂等），簿记 name 回退 sessionId；报错文案通道删除。先读 `archive-service.ts` 归档入口现状再改。来源 archive-edge-inputs-failfast。
-- [ ] **条目 27（符号链接 cwd 归档）** 归档单元目录按 cwd 编码、symlink cwd 与 pi 落盘路径编码不一致导致报错。修复：归档入口对 cwd 做 `realpathSync` 归一（与 pi 落盘同编码）；核对恢复路径（`sessionOriginalPath` 按簿记 cwd 推导）两侧一致性。来源同上。
-- [ ] **条目 28（GUI 归档收尾 watch）** GUI 侧栏归档路径不收尾 completion-watch，父 agent watch 挂起至 runtime 重启。修复：`SessionDeathDisposition` 增 `'archive'` 值（`session-lifecycle.ts`，现为 `'delete' | 'suppress'`），归档 teardown 改发 `'archive'`；组合根（`packages/runtime/src/index.ts`）对该值统一 `speakSessionDeath(sid, 'exit')`，GUI 与 agent 工具两入口同判。位置：`session-lifecycle.ts`、`packages/runtime/src/index.ts`、`packages/runtime/src/transport/session-manager-handler.ts`（handleArchive，JSDoc 登记的缺口）、`session-message-handler.ts`（handleSessionArchive）、`archive-service.ts`（teardownForArchive → fireSuppressDisposition）。补测试：GUI 归档路径触发 disposition 收尾。来源 archive-watch-settlement-gap。
+- [x] **条目 26（零消息 session 归档）** 归档前主文件不存在时报错。修复（按登记倾向）：主文件不存在 → 直接成功返回（空归档语义，幂等），簿记 name 回退 sessionId；报错文案通道删除。先读 `archive-service.ts` 归档入口现状再改。来源 archive-edge-inputs-failfast。
+- [x] **条目 27（符号链接 cwd 归档）** 归档单元目录按 cwd 编码、symlink cwd 与 pi 落盘路径编码不一致导致报错。修复：归档入口对 cwd 做 `realpathSync` 归一（与 pi 落盘同编码）；核对恢复路径（`sessionOriginalPath` 按簿记 cwd 推导）两侧一致性。来源同上。
+- [x] **条目 28（GUI 归档收尾 watch）** GUI 侧栏归档路径不收尾 completion-watch，父 agent watch 挂起至 runtime 重启。修复：`SessionDeathDisposition` 增 `'archive'` 值（`session-lifecycle.ts`，现为 `'delete' | 'suppress'`），归档 teardown 改发 `'archive'`；组合根（`packages/runtime/src/index.ts`）对该值统一 `speakSessionDeath(sid, 'exit')`，GUI 与 agent 工具两入口同判。位置：`session-lifecycle.ts`、`packages/runtime/src/index.ts`、`packages/runtime/src/transport/session-manager-handler.ts`（handleArchive，JSDoc 登记的缺口）、`session-message-handler.ts`（handleSessionArchive）、`archive-service.ts`（teardownForArchive → fireSuppressDisposition）。补测试：GUI 归档路径触发 disposition 收尾。来源 archive-watch-settlement-gap。
 
 ### T9 runtime 同步链批
 
-- [ ] **条目 29（S-8 镜像触发位置）** `packages/runtime/src/transport/oauth-message-handler.ts:51-62`（provider-message-handler.ts 同形态）：镜像触发在 logout `try` 内 `ok:true` 之后，同步 throw 会走 catch 回第二份 `ok:false`。修复：镜像触发挪出 try（或 try 外独立 try-catch），失败不吞掉主结果、单独上报。来源 dev-0.11.7-review-residue。
-- [ ] **条目 30（S-9 迁移后镜像）** `packages/runtime/src/services/startup-background-init.ts:285-310`：legacy provider migration 完成后无镜像触发。修复：补 `zcodeProviderMirrorSync` 依赖并在迁移完成后触发镜像同步。来源同上。
-- [ ] **条目 31（S-13 sync wiring）** `packages/runtime/src/services/zcode-provider-sync-wiring.ts:82-86`：`defaultZcodeProviderSyncPaths()` 挪进 `try` 内；`:136-145` drain 补单轮 catch（单 listener 失败不中断其余 drain）。来源同上。
-- [ ] **条目 32（S-7 注释补缺）** 三处注释补齐：`packages/subagent-core` 的 `registry.ts:88` 快照余项注释补 `modelTranslation`；`port.ts:236-244` translateModelRef 注释补 manifest/remote 形态；`services/ports/provider-credential-resolver.ts:54-57` resolver port 注释补 sync 消费方。来源同上。
-- [ ] **条目 33（S-21 注释补缺）** `packages/runtime/src/transport/settings-message-handler.ts:61-67` 注释补 `refreshProviderCatalogs` 与凭据域触发点。来源同上。
-- [ ] **条目 34（S-1 判据统一）** account 家族清单判据跨包漂移：`runtime/services/zcode-provider-sync.ts` 与 `zcode-subagent-cli/src/preparer.ts`（readAccountFamilyRules / pushAccountFamilyRuleModels）去重粒度与空 builtinModelIds 回落语义相反。统一为：模型级去重 +「数组在位即用（含空），缺键才回落 personal」，任一侧注释登记对齐点。来源 dev-0.11.4-review-residue。
-- [ ] **条目 35（S-6 凭据断言锚定）** `packages/runtime/src/services/zcode-provider-sync.ts:322-330` 与 `runtime/src/services/auth/provider-credential-resolver.ts:142-155` 第二处 pi 凭据断言未锚定。修复：锚 `auth-storage.js:207-220`（pi 实装版本），或注释声明 skip 为独立 fail-closed 判定。来源 dev-0.11.8-review-residue。
+- [x] **条目 29（S-8 镜像触发位置）** `packages/runtime/src/transport/oauth-message-handler.ts:51-62`（provider-message-handler.ts 同形态）：镜像触发在 logout `try` 内 `ok:true` 之后，同步 throw 会走 catch 回第二份 `ok:false`。修复：镜像触发挪出 try（或 try 外独立 try-catch），失败不吞掉主结果、单独上报。来源 dev-0.11.7-review-residue。
+- [x] **条目 30（S-9 迁移后镜像）** `packages/runtime/src/services/startup-background-init.ts:285-310`：legacy provider migration 完成后无镜像触发。修复：补 `zcodeProviderMirrorSync` 依赖并在迁移完成后触发镜像同步。来源同上。
+- [x] **条目 31（S-13 sync wiring）** `packages/runtime/src/services/zcode-provider-sync-wiring.ts:82-86`：`defaultZcodeProviderSyncPaths()` 挪进 `try` 内；`:136-145` drain 补单轮 catch（单 listener 失败不中断其余 drain）。来源同上。
+- [x] **条目 32（S-7 注释补缺）** 三处注释补齐：`packages/subagent-core` 的 `registry.ts:88` 快照余项注释补 `modelTranslation`；`port.ts:236-244` translateModelRef 注释补 manifest/remote 形态；`services/ports/provider-credential-resolver.ts:54-57` resolver port 注释补 sync 消费方。来源同上。
+- [x] **条目 33（S-21 注释补缺）** `packages/runtime/src/transport/settings-message-handler.ts:61-67` 注释补 `refreshProviderCatalogs` 与凭据域触发点。来源同上。
+- [x] **条目 34（S-1 判据统一）** account 家族清单判据跨包漂移：`runtime/services/zcode-provider-sync.ts` 与 `zcode-subagent-cli/src/preparer.ts`（readAccountFamilyRules / pushAccountFamilyRuleModels）去重粒度与空 builtinModelIds 回落语义相反。统一为：模型级去重 +「数组在位即用（含空），缺键才回落 personal」，任一侧注释登记对齐点。来源 dev-0.11.4-review-residue。
+- [x] **条目 35（S-6 凭据断言锚定）** `packages/runtime/src/services/zcode-provider-sync.ts:322-330` 与 `runtime/src/services/auth/provider-credential-resolver.ts:142-155` 第二处 pi 凭据断言未锚定。修复：锚 `auth-storage.js:207-220`（pi 实装版本），或注释声明 skip 为独立 fail-closed 判定。来源 dev-0.11.8-review-residue。
 
 ### T10 extensions summary 契约批
 
-- [ ] **条目 36（S-1 单行契约）** `details.summary` 单行契约被 4 处违反：`extensions/universal/goal/src/adapters/goal-control-adapter.ts:163-169`、`todo/src/model.ts:373-378`、`ask-user/src/types.ts:133-138`、`scheduler/src/tool.ts:191-201`。修复：截断前归一单行（复用 `plan/src/tool.ts` 的 toSingleLine 模式，各包本地实现或提共享 helper），补用例。来源 dev-0.11.8-review-residue。
-- [ ] **条目 37（S-2 列表去重）** `todo/src/model.ts:429-435` delete summary 未去重，渲染前 `[...new Set(ids)]`。来源同上。
-- [ ] **条目 38（S-3 代理对安全截断）** `goal-control-adapter.ts:166-168` 与 `base-tool-enhance/src/render-result.ts:66-68` UTF-16 截断可劈开代理对。统一 code-point-safe 截断（与条目 36 共享 helper）。来源同上。
+- [x] **条目 36（S-1 单行契约）** `details.summary` 单行契约被 4 处违反：`extensions/universal/goal/src/adapters/goal-control-adapter.ts:163-169`、`todo/src/model.ts:373-378`、`ask-user/src/types.ts:133-138`、`scheduler/src/tool.ts:191-201`。修复：截断前归一单行（复用 `plan/src/tool.ts` 的 toSingleLine 模式，各包本地实现或提共享 helper），补用例。来源 dev-0.11.8-review-residue。
+- [x] **条目 37（S-2 列表去重）** `todo/src/model.ts:429-435` delete summary 未去重，渲染前 `[...new Set(ids)]`。来源同上。
+- [x] **条目 38（S-3 代理对安全截断）** `goal-control-adapter.ts:166-168` 与 `base-tool-enhance/src/render-result.ts:66-68` UTF-16 截断可劈开代理对。统一 code-point-safe 截断（与条目 36 共享 helper）。来源同上。
 
-## 批次 3
+## 批次 3（已完成：T11+T12c+T13 主体=f257b92e0；T12d sweep 防护=89b12525e）
 
 ### T11 runtime index 与 subagent-control 批
 
-- [ ] **条目 39（S-12 字面量手抄）** `packages/runtime/src/index.ts:1205-1209` 与 `:1492-1496` 三依赖字面量手抄两份。抽模块级常量单点定义，工厂头注「单处组装」改写为事实。来源 dev-0.11.7-review-residue。
-- [ ] **条目 40（DC-8 降级推送）** runtime `markDegraded()` 只改态不发布，drawer 已打开且无 chunk 时用户看不到降级提示。修复：markDegraded 时发布 `session.subagentStreamDegraded {sessionId, recordId}` 广播，renderer 经 event-bus 应用到同一 per-(virtualId, recordId) 位（`useSubagentTabData` 摄入）。位置：runtime infra/subagent-control + renderer useSubagentTabData。补单测。来源 subagent-control-delivery-residue。
+- [x] **条目 39（S-12 字面量手抄）** `packages/runtime/src/index.ts:1205-1209` 与 `:1492-1496` 三依赖字面量手抄两份。抽模块级常量单点定义，工厂头注「单处组装」改写为事实。来源 dev-0.11.7-review-residue。
+- [x] **条目 40（DC-8 降级推送）** runtime `markDegraded()` 只改态不发布，drawer 已打开且无 chunk 时用户看不到降级提示。修复：markDegraded 时发布 `session.subagentStreamDegraded {sessionId, recordId}` 广播，renderer 经 event-bus 应用到同一 per-(virtualId, recordId) 位（`useSubagentTabData` 摄入）。位置：runtime infra/subagent-control + renderer useSubagentTabData。补单测。来源 subagent-control-delivery-residue。
 - [x] **条目 41（DC-12 双 spawn）** 共享 control 客户端按 `(socketPath, rootSessionId)` 复用导致非缺省引擎首轮 probe→run 双 spawn + 3s close grace。修复（选项 a，数据正确性优先）：把权威 rootSessionId 注入 probe/read/setModel 调用（消除键不一致）；位置 `packages/subagent-core/src/.../transport/control-client.ts`。来源同上。
 - [x] **条目 42（hasPendingFrames 无调用方导出）** `runtime/src/infra/subagent-control/outbound-queue.ts` 的 `hasPendingFrames` 无调用方（删前 grep 全仓确认零引用），删除。来源同上（D5 卫生项）。
-- [ ] **条目 43（tmp 残片扫描）** `runtime/src/infra/subagent-control/pid-file.ts` 的 `.pid.tmp-*` 残片不在 sweep 扫描范围（只扫 `*.pid`）。sweep 扫描模式扩为含 `.pid.tmp-*`。位置：`sweep.ts:39-113`。来源同上。
+- [x] **条目 43（tmp 残片扫描）** `runtime/src/infra/subagent-control/pid-file.ts` 的 `.pid.tmp-*` 残片不在 sweep 扫描范围（只扫 `*.pid`）。sweep 扫描模式扩为含 `.pid.tmp-*`。位置：`sweep.ts:39-113`。来源同上。
 
 ### T12 subagent-control infra 批
 
-- [ ] **条目 44（S-9 listen 探活）** `runtime/src/infra/subagent-control/control-server.ts:378-388` + `sweep.ts:46`：当前 socket 路径被 sweep 跳过 → 崩溃残片 + pid 复用 → `EADDRINUSE` 致命。修复：listen 前对当前路径探活（尝试连接，通则报致命冲突，不通则清理后 bind），必须保留 pid 复用 fail-fast 语义。补用例。来源 dev-0.11.8-review-residue。
+- [x] **条目 44（S-9 listen 探活）** `runtime/src/infra/subagent-control/control-server.ts:378-388` + `sweep.ts:46`：当前 socket 路径被 sweep 跳过 → 崩溃残片 + pid 复用 → `EADDRINUSE` 致命。修复：listen 前对当前路径探活（尝试连接，通则报致命冲突，不通则清理后 bind），必须保留 pid 复用 fail-fast 语义。补用例。来源 dev-0.11.8-review-residue。
 - [x] **条目 45（S-10 recordId 接线）** `frames.ts:76` 的 `launch.recordId` 生产恒不写 → `findDescendantIds()` 死路径。修复：从 `RemoteEngine.run` / `ctx.taskId` 接线写入 recordId（位置 `packages/subagent-core/src/.../transport/control-client.ts:195-207`、`runtime/src/infra/subagent-control/channel-registry.ts:86`）。若接线成本过高，改为显式降级（删字段 + 递归分支并更新登记），不留死路径。来源同上。
-- [ ] **条目 46（S-5 registry 登记）** `docs/architecture/data-source-registry.md` §6 补 subagent-control run/socket/pid 文件族登记行（位置 `runtime/src/infra/subagent-control/paths.ts:20-57`、`pid-file.ts:47-79`、`sweep.ts:39-113`）。来源同上。
-- [ ] **条目 47（S-11 tsup 注释）** `packages/runtime/tsup.config.ts:36-42` noExternal 注释错误，按事实改写。来源同上。
-- [ ] **条目 48（S-12 CJS 检查扫描根）** `.githooks/check_runtime_meta_url.py:25-60` 与 `scripts/validate-runtime-bundle.sh:236` 附近：CJS 兼容检查只扫 `packages/runtime/src`。扫描根扩到 tsup noExternal 所列 workspace 包（或补产物级断言，优先扩扫描根）。来源同上。
-- [ ] **条目 49（S-13 relay 残片收割）** `runtime/src/infra/subagent-control/sweep.ts:44,132`：旧 relay 残片不在新 sweep 覆盖。sweep 增 relay 族与 `relay-children/*.pid` 收割。来源同上。
+- [x] **条目 46（S-5 registry 登记）** `docs/architecture/data-source-registry.md` §6 补 subagent-control run/socket/pid 文件族登记行（位置 `runtime/src/infra/subagent-control/paths.ts:20-57`、`pid-file.ts:47-79`、`sweep.ts:39-113`）。来源同上。
+- [x] **条目 47（S-11 tsup 注释）** `packages/runtime/tsup.config.ts:36-42` noExternal 注释错误，按事实改写。来源同上。
+- [x] **条目 48（S-12 CJS 检查扫描根）** `.githooks/check_runtime_meta_url.py:25-60` 与 `scripts/validate-runtime-bundle.sh:236` 附近：CJS 兼容检查只扫 `packages/runtime/src`。扫描根扩到 tsup noExternal 所列 workspace 包（或补产物级断言，优先扩扫描根）。来源同上。
+- [x] **条目 49（S-13 relay 残片收割）** `runtime/src/infra/subagent-control/sweep.ts:44,132`：旧 relay 残片不在新 sweep 覆盖。sweep 增 relay 族与 `relay-children/*.pid` 收割。来源同上。
 
 ### T13 subagent-core 批
 
-- [ ] **条目 50（S-6 trim 入库）** `packages/subagent-core/src/execution/engine/engine-manifest.ts:253-257`：trim 只用于校验，`out[k] = val` 原始值入库带空白永不匹配。修复：入库也用 trim 后的值。来源 dev-0.11.7-review-residue。
-- [ ] **条目 51（S-15 null 判定）** `packages/subagent-core/src/execution/engine/client/remote-engine.ts:273、:291`：`modelTranslation === undefined` 未含 null；`as Record<string, string>` 断言。改为 undefined/null 双判定 + 运行时类型检查替代 as 断言。来源同上。
-- [ ] **条目 52（S-2 modelSource 三层判定）** `packages/subagent-core/src/execution/service/run-orchestration.ts` pi 分支 + `workflow-dispatch.ts` 同构点：`modelSource` 判定改三层 `opts.model ? "explicit" : (agentConfig?.model ? "frontmatter" : "default")`。来源 dev-0.11.4-review-residue。
-- [ ] **条目 53（S-3 restamp 翻译）** `workflow-dispatch.ts` consultOverrideAtTaskSpec 非 pi 分支：模型覆盖路径直写 record.model（pi 词汇 ref）。restamp 前经 `engine.translateModelRef?.(overrideRef) ?? overrideRef`（幂等）。来源同上。
-- [ ] **条目 54（dmg-r3-1 注释改写）** `packages/subagent-core/src/execution/persistence/record-store-rounds.ts`（:204/:221/:257/:329）正文注释仍把已退场的 `.state` 收条描述为现行写点。四处按现行事实改写（终态由事件承载、磁盘写入点 = 事件追加 + binding/manifest writeSync）。来源 dev-0.11.10-review-residue。
-- [ ] **条目 55（d1 残余 3 转发路径）** `packages/subagent-core/src/shared/entry-guards.ts:15` 改直连 `shared/run-vocabulary.ts`（现经 `orchestration/models/types.ts` re-export）。来源 subagent-core-d1-residual-edges。
+- [x] **条目 50（S-6 trim 入库）** `packages/subagent-core/src/execution/engine/engine-manifest.ts:253-257`：trim 只用于校验，`out[k] = val` 原始值入库带空白永不匹配。修复：入库也用 trim 后的值。来源 dev-0.11.7-review-residue。
+- [x] **条目 51（S-15 null 判定）** `packages/subagent-core/src/execution/engine/client/remote-engine.ts:273、:291`：`modelTranslation === undefined` 未含 null；`as Record<string, string>` 断言。改为 undefined/null 双判定 + 运行时类型检查替代 as 断言。来源同上。
+- [x] **条目 52（S-2 modelSource 三层判定）** `packages/subagent-core/src/execution/service/run-orchestration.ts` pi 分支 + `workflow-dispatch.ts` 同构点：`modelSource` 判定改三层 `opts.model ? "explicit" : (agentConfig?.model ? "frontmatter" : "default")`。来源 dev-0.11.4-review-residue。
+- [x] **条目 53（S-3 restamp 翻译）** `workflow-dispatch.ts` consultOverrideAtTaskSpec 非 pi 分支：模型覆盖路径直写 record.model（pi 词汇 ref）。restamp 前经 `engine.translateModelRef?.(overrideRef) ?? overrideRef`（幂等）。来源同上。
+- [x] **条目 54（dmg-r3-1 注释改写）** `packages/subagent-core/src/execution/persistence/record-store-rounds.ts`（:204/:221/:257/:329）正文注释仍把已退场的 `.state` 收条描述为现行写点。四处按现行事实改写（终态由事件承载、磁盘写入点 = 事件追加 + binding/manifest writeSync）。来源 dev-0.11.10-review-residue。
+- [x] **条目 55（d1 残余 3 转发路径）** `packages/subagent-core/src/shared/entry-guards.ts:15` 改直连 `shared/run-vocabulary.ts`（现经 `orchestration/models/types.ts` re-export）。来源 subagent-core-d1-residual-edges。
 
-### T14 杂项收尾批
+### T14 杂项收尾批（已完成：fecebd1b0）
 
-- [ ] **条目 56（S-4 接线断言）** todo / rename-session / session-reader / scheduler / pending-notifications / smart-context 六包 `renderResult` 接线点补 `expect(typeof tool.renderResult).toBe('function')` + 折叠输出断言（约 3-6 行/包）。来源 dev-0.11.8-review-residue。
+- [x] **条目 56（S-4 接线断言）** todo / rename-session / session-reader / scheduler / pending-notifications / smart-context 六包 `renderResult` 接线点补 `expect(typeof tool.renderResult).toBe('function')` + 折叠输出断言（约 3-6 行/包）。来源 dev-0.11.8-review-residue。
 - [x] **条目 57（F S-7 槽键）** `packages/subagent-core/src/.../transport/control-client.ts:70` 模块级 `sharedClients` Map 违反 globalThis 槽纪律（`shared/global-slots.ts`）。修复：加槽键（经 global-slots 注册），保留 per-(socket, root) 复用键语义。来源同上。
 - [x] **条目 58（F S-8 mirrorKey）** `runtime/src/infra/subagent-control/mirror.ts:94,217,277`：`mirrorKey` 缺 channelId。修复：identity 纳入 channelId 并同步查询侧；不做降级（数据正确性优先）。来源同上。
-- [ ] **条目 59（viz fit 竞态）** `packages/renderer/src/components/panel/workflow-viz/dag/WorkflowVizDag.vue`：fit 前确认容器尺寸就绪（ResizeObserver 首回调或 rAF 双帧后执行 fit）。来源 workflow-viz-dag-minor-residuals。
-- [ ] **条目 60（viz callId 空态）** `workflow-viz/overlay/WorkflowVizOverlayHost.vue`：callId 未命中时回退 `calls?.[0]` 改显式空态（no-op），不静默换目标。来源同上。
-- [ ] **条目 61（S-6 realpath 复核）** `apps/electron/main/utils/local-file-prefixes.ts`（isPathUnderSessionTmp）：`.tmp/` 准入只做词法 resolve。session-tmp 分支加 `realpathSync` 复核（性能敏感则复核结果缓存）。来源 dev-0.11.4-review-residue。
-- [ ] **条目 62（S-7 成立性复核）** 同文件 cwd=`/` 空串候选问题：先复核问题成立性（R1 报告行号已漂移），成立则切片为空/根时跳过该候选（fail-closed），不成立则条目关闭并说明。来源同上。
-- [ ] **条目 63（S-11 注释清理）** 4 处注释按现行事实改写：`packages/core/src/transport/api/domains/file.ts:18` + `packages/runtime/src/services/file-service.ts:92`（showIgnored 已退役）、`TurnSummary.test.ts:166`、`fork-entry-behavior.test.ts`。来源同上。
-- [ ] **条目 64（scanDegradedFlag 退役）** `packages/runtime/src/infra/pi/session-file-utils.ts`：`scanDegradedFlag`（定义 :1134-1139，置位 :1251-1252/:1262-1264）零消费方。摘除旗标本体与置位/复位逻辑（`scanPiSessionsFromDisk` 降级判定改写，确认无其它依赖该旗标的分支），相关测试同步更新。来源 scan-degraded-flag-retirement。验收：全仓 grep `scanDegradedFlag` 零命中，runtime 包测试绿。
+- [x] **条目 59（viz fit 竞态）** `packages/renderer/src/components/panel/workflow-viz/dag/WorkflowVizDag.vue`：fit 前确认容器尺寸就绪（ResizeObserver 首回调或 rAF 双帧后执行 fit）。来源 workflow-viz-dag-minor-residuals。
+- [x] **条目 60（viz callId 空态，关闭不改代码）** `workflow-viz/overlay/WorkflowVizOverlayHost.vue`：callId 未命中时回退 `calls?.[0]` 改显式空态（no-op），不静默换目标。来源同上。（2026-10-23 关闭：`calls?.[0]` 回退已被 3ee709342 整体移除，现行点击链全程传完整 call 对象且有 pending/sessionId 检查，登记问题不复存在；fecebd1b0 复核确认）
+- [x] **条目 61（S-6 realpath 复核）** `apps/electron/main/utils/local-file-prefixes.ts`（isPathUnderSessionTmp）：`.tmp/` 准入只做词法 resolve。session-tmp 分支加 `realpathSync` 复核（性能敏感则复核结果缓存）。来源 dev-0.11.4-review-residue。
+- [x] **条目 62（S-7 成立性复核）** 同文件 cwd=`/` 空串候选问题：先复核问题成立性（R1 报告行号已漂移），成立则切片为空/根时跳过该候选（fail-closed），不成立则条目关闭并说明。来源同上。
+- [x] **条目 63（S-11 注释清理）** 4 处注释按现行事实改写：`packages/core/src/transport/api/domains/file.ts:18` + `packages/runtime/src/services/file-service.ts:92`（showIgnored 已退役）、`TurnSummary.test.ts:166`、`fork-entry-behavior.test.ts`。来源同上。
+- [x] **条目 64（scanDegradedFlag 退役）** `packages/runtime/src/infra/pi/session-file-utils.ts`：`scanDegradedFlag`（定义 :1134-1139，置位 :1251-1252/:1262-1264）零消费方。摘除旗标本体与置位/复位逻辑（`scanPiSessionsFromDisk` 降级判定改写，确认无其它依赖该旗标的分支），相关测试同步更新。来源 scan-degraded-flag-retirement。验收：全仓 grep `scanDegradedFlag` 零命中，runtime 包测试绿。（2026-10-23 完成：代码/现行文档零命中，残留仅本条目描述与 scan-degraded-flag-retirement.md 登记本体；catch 内 console.error 留痕与降级计数打点保留，测试改写为 session-scan-degraded-tolerance.test.ts）
 
-### T15 裁决转入批（2026-10-23 用户裁决，need-design 条目 8/13 转入）
+### T15 裁决转入批（2026-10-23 用户裁决，need-design 条目 8/13 转入；已完成：65=89b12525e 66=22806820b）
 
-- [ ] **条目 65（sweep owner 判活加固）** subagent-control sweep 判活只有 `isPidAlive(pid)`、instanceId 恒等于 runtimePid，pid 复用时误判 owner 活着跳过收割。加固二选一（实施时定并记录选型理由）：boot id / 进程启动时间二元组（mac/linux 可得，Windows 不可得维持保守跳过）或连接探活（断连信号即事实，对齐 ADR-0122）。硬约束：宁不杀勿误杀——只减少漏清、绝不引入误清。验收：pid 复用场景单测不再误判（登记被收割）+ owner 存活不误清回归 + Windows 保守跳过不变。来源：用户裁决（/tmp/need-design-2026-10-23-justdoit.md 项 1）；登记 docs/todo/subagent-control-delivery-residue.md §5。
-- [ ] **条目 66（pi 引擎 provider 目录注入）** pi 引擎配置目录回落 `~/.pi/agent` 与 taiji 主会话（`<dataDir>/agent/`）不同源，settings 配的 provider 对 pi 引擎派发不生效。裁决原则：taiji 派发的 pi 即 taiji 专用，参数一切由 taiji 控制；系统独立安装的 pi 不受影响。实施：注入 `PI_CODING_AGENT_DIR=<dataDir>/agent`——① `ENV_WHITELIST_PREFIXES`（packages/shared/src/constants.ts，SSOT）加 `PI_` 前缀准入或专用条目；② runtime 派发 pi 引擎处（engine-inspect-package.ts:197-210 EngineClient 构造）补 baseEnv/identityEnv，值动态推导禁写死；③ 与 C-proc-09 出站契约核对（新注入值属 runtime→引擎方向，不属出站剥离范围）；④ engine-query.ts:45-48 注释假设同批修正；⑤ 两形态（runtime 派发 / pi 会话内 extension 派发）均落 taiji 目录。附带可选项（provider CRUD 追加 zcode 同步调用）维持不做。验收：派发进程 env 含注入值且 pi 实际读该目录 models.json/auth.json（单测或探针）+ 独立 pi CLI 直跑行为不变 + ENV WHITELIST SSOT 检查与 check_spawn_env_boundary.py 过。来源：用户裁决（同上）；登记 docs/todo/engine-default-provider-setting.md「新发现」节。
+- [x] **条目 65（sweep owner 判活加固）** subagent-control sweep 判活只有 `isPidAlive(pid)`、instanceId 恒等于 runtimePid，pid 复用时误判 owner 活着跳过收割。加固二选一（实施时定并记录选型理由）：boot id / 进程启动时间二元组（mac/linux 可得，Windows 不可得维持保守跳过）或连接探活（断连信号即事实，对齐 ADR-0122）。硬约束：宁不杀勿误杀——只减少漏清、绝不引入误清。验收：pid 复用场景单测不再误判（登记被收割）+ owner 存活不误清回归 + Windows 保守跳过不变。来源：用户裁决（/tmp/need-design-2026-10-23-justdoit.md 项 1）；登记 docs/todo/subagent-control-delivery-residue.md §5。（2026-10-23 完成：选型 pid + start time 二元组——连接探活不可行，init() 顺序中 sweepStaleControlSockets 先 unlink 死 socket，owner 死后探活依据已灭失，且 socket 探活验证「路径有人听」而非「pid 同一进程」；实施 = 登记侧 pid 文件补 `runtimePidStartSec`（cachedRuntimePidStartSec 读一次缓存，ps 取不到自动省略该键）+ sweep 侧 ownerRuntimeAlive 经 ownerPidIsOriginal 比对 start time，不匹配判 owner 死进收割链，旧格式登记/取不到一律保守判活跳过；四类单测覆盖 pid 复用收割 / owner 存活不误清 / 取不到保守 / 旧格式保守，登记侧形状断言随附；顺带把两文件注释里的砍字禁词改写为「按进程组终止」）
+- [x] **条目 66（pi 引擎 provider 目录注入）** pi 引擎配置目录回落 `~/.pi/agent` 与 taiji 主会话（`<dataDir>/agent/`）不同源，settings 配的 provider 对 pi 引擎派发不生效。裁决原则：taiji 派发的 pi 即 taiji 专用，参数一切由 taiji 控制；系统独立安装的 pi 不受影响。实施：注入 `PI_CODING_AGENT_DIR=<dataDir>/agent`——① `ENV_WHITELIST_PREFIXES`（packages/shared/src/constants.ts，SSOT）加 `PI_` 前缀准入或专用条目；② runtime 派发 pi 引擎处（engine-inspect-package.ts:197-210 EngineClient 构造）补 baseEnv/identityEnv，值动态推导禁写死；③ 与 C-proc-09 出站契约核对（新注入值属 runtime→引擎方向，不属出站剥离范围）；④ engine-query.ts:45-48 注释假设同批修正；⑤ 两形态（runtime 派发 / pi 会话内 extension 派发）均落 taiji 目录。附带可选项（provider CRUD 追加 zcode 同步调用）维持不做。验收：派发进程 env 含注入值且 pi 实际读该目录 models.json/auth.json（单测或探针）+ 独立 pi CLI 直跑行为不变 + ENV WHITELIST SSOT 检查与 check_spawn_env_boundary.py 过。来源：用户裁决（同上）；登记 docs/todo/engine-default-provider-setting.md「新发现」节。
+
+### T16 裁决转入批 2（2026-10-23 用户裁决，need-design 条目 2/10 转入；已完成：67=be24effd1 68=77245a661）
+
+- [x] **条目 67（details.summary 读侧 helper 收敛）** 10 个 extension 包的 `details.summary` 读侧现为「6 处成对手抄（fieldValue + readDetailsSummary：rename-session/render.ts、session-reader/tui/tool-render.ts、scheduler/render-result.ts、smart-context/render-result.ts、base-tool-enhance/render-result.ts、pending-notifications/render-result.ts）+ 2 处单独 fieldValue 手抄（structured-output/render-result.ts、goal/goal-control-adapter.ts）+ 2 处 as 断言直读（taiji/canvas/render.ts、session-manager/render.ts）」双形态并存。实施：① `@zhushanwen/extension-protocol`（实际位于 packages/extension-protocol/，包名 @zhushanwen/extension-protocol）新增单点读侧 helper `readDetailsSummary(result: unknown): string | undefined`（检查式：非对象/非字符串/空串一律 undefined，以现存 6 份副本最严格防御为基线，个别包依赖宽松行为时改调用点适配方不得静默放宽 helper）；content 首文本读取先扫 14 处消费点确认是否普遍需要，仅两三处用则各自内联不强加抽象。② 8 文件删手抄副本换 import；canvas/session-manager as 断言换检查式写法。③ 版本号 bump 按仓库现行惯例（workspace 内引用不需 bump 就不 bump）。④ 来源登记文档已删除（状态行删除前已改已解决，git 可追溯）。验收：grep 手抄 helper 零命中（排除 test）+ as 断言零命中 + extensions 三连全绿。来源：用户裁决（need-design 条目 2）；交接文档含 2026-10-23 行号核实。
+- [x] **条目 68（queue-hold 非生产形态物理删除）** 统一投递 v3 缺省翻转 on-accept 后，queue-hold 代码路径只剩测试消费。实施：① 删 `packages/session-delivery/src/delivery.ts` queue-hold 分支（busy gate 排队 + settled 边沿 flush + 合批窗口中仅服务 queue-hold 的部分，on-accept 下已不用的配套逻辑一并清，保留与 dispatchMode 无关的既有机制）；② `dispatchMode` 配置项整个删除（推荐形态）：types.ts:309 类型、delivery-port.ts:260 与 runtime session-delivery-registry.ts:1582 显式传参、types.ts:32/:300 与 delivery.ts:88 头注同步清；③ 测试改造：delivery-dispatch-mode.test.ts 逐用例判定——测 queue-hold 语义本体的删、借参测其他语义的去参保留；其余 24 个测试文件预期零改动（跑全量确认）；④ delivery.ts 头注「留待后续清理波」段、docs/todo/unified-delivery-residuals.md 项 1 标记完成同 commit。验收：grep `queue-hold` 在 packages/session-delivery/ 与 extensions/shared/delivery-port/ 清零 + session-delivery 包全量测试绿 + extensions:typecheck/lint 绿 + runtime 侧若有改动跑该包构建检查。注意：登记原文「23 个测试文件」与现状不符（实为 1 个文件涉 dispatchMode），以交接文档实测为准。来源：用户裁决（need-design 条目 10）。
 
 ## 不派发项（注记）
 

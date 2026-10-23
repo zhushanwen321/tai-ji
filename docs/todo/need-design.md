@@ -21,6 +21,8 @@
 
 ### 2. extension 工具 details.summary 读侧检查收敛
 
+状态：已裁决转 just-do-it（2026-10-23，条目 67）——helper 签名以现存 6 份副本最严格防御为基线，实施细节见 just-do-it.md T16 批。
+
 来源：details-summary-guard-convergence.md。
 
 问题：`details.summary` 读侧检查代码 14 处手抄 helper + 2 处 `as` 断言双形态并存（跨 8 包），无单点。
@@ -101,6 +103,8 @@
 开放问题：独立批次排期；npm 分发版本的发布窗口。
 
 ### 10. queue-hold 非生产形态物理删除
+
+状态：已裁决转 just-do-it（2026-10-23，条目 68）——本次即清理波窗口，dispatchMode 配置项整个删除（终态不留单值死配置），实施细节见 just-do-it.md T16 批。
 
 来源：unified-delivery-residuals.md 项 1。
 

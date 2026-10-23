@@ -29,7 +29,7 @@
 ## 5 D5 复审遗留的 info 级卫生项
 
 - `outbound-queue.ts` 的 `hasPendingFrames` 无调用方——已删除（2026-10-23，just-do-it 批次 3 T12c；全仓 grep 零引用）。
-- `pid-file.ts` 的 `.pid.tmp-*` 残片不在 sweep 扫描面（只扫 `*.pid`）——已修复（2026-10-23，just-do-it 批次 3 T12d：sweepOrphanEnginePids 扫描范围扩为同时匹配 `.pid.tmp-<writerPid>-<hex>` 残片直接清，写者 = 本实例的在途原子写跳过；sweep.test.ts 覆盖）。
+- `pid-file.ts` 的 `.pid.tmp-*` 残片不在 sweep 扫描范围（只扫 `*.pid`）——已修复（2026-10-23，just-do-it 批次 3 T12d：sweepOrphanEnginePids 扫描范围扩为同时匹配 `.pid.tmp-<writerPid>-<hex>` 残片直接清，写者 = 本实例的在途原子写跳过；sweep.test.ts 覆盖）。
 - `outbound-queue` 的 destroyed 判定未覆盖半关闭态；溢出标记后不再复判上限（行为已显式失败，仅记录）。
 - `sweep` 的 owner 判活只有 `isPidAlive`，`instanceId` 恒等于 runtimePid（一致性校验在正常数据上不触发）；pid 复用误判「owner 活着」时仍会跳过收割——已修复（2026-10-23，just-do-it 条目 65：owner 判活改 pid + start time 二元组，pid 文件登记 `runtimePidStartSec`（登记侧读一次缓存，ps 取不到省略该键），sweep 比对不匹配判 owner 死进收割链；旧格式登记无该字段 / sweep 侧取不到（Windows）一律保守判活跳过，存量登记不清）。选型记录：连接探活不可行——init() 顺序中 sweepStaleControlSockets 先 unlink 死 socket，owner 死后探活依据已灭失，且 socket 探活验证「路径有人听」而非「pid 同一进程」。
 - Windows 引擎意外退出时 child pid 集合来自 host/childSpawned 反向帧；只按 `isAlive` 选目标，无 start-time 二次校验（Windows 不可得，设计已接受「宁不杀勿误杀」的降级）。
