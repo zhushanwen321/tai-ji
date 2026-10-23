@@ -66,7 +66,10 @@
           @click="selectFilter(f.key)"
         >{{ t(f.labelKey) }}</Button>
       </div>
-      <!-- 批量清理（仅筛选生效且有可见条目；待发态「N 项」——垃圾桶图标承载删除语义；两段确认第二击执行） -->
+      <!-- 批量清理（仅筛选生效且有可见条目；待发态「N 项」——垃圾桶图标承载删除语义；两段确认第二击执行。
+           确认态字色用 text-neutral-fg 而非 text-danger-fg：暗色主题下 --danger-fg 是暗红褐
+           （danger 12% 混深底），红底暗红字对比不足；danger 实底上亮字对齐 destructive 按钮
+           先例（--destructive-foreground = --neutral-fg）。行级彻底删除钮确认态同口径。） -->
       <Button
         v-if="batchPurgeVisible"
         variant="ghost"
@@ -78,7 +81,7 @@
         data-testid="archive-batch-purge-btn"
         class="ml-auto inline-flex h-[22px] shrink-0 items-center gap-[5px] rounded-[var(--radius-xs)] px-[7px] font-mono text-[length:var(--text-2xs)] transition-colors disabled:cursor-default disabled:opacity-40"
         :class="batchConfirming
-          ? 'bg-danger [font-weight:var(--fw-mid)] text-danger-fg hover:bg-danger'
+          ? 'bg-danger [font-weight:var(--fw-mid)] text-neutral-fg hover:bg-danger'
           : 'text-danger hover:bg-danger-soft'"
         @click="onBatchPurgeClick"
       >
@@ -184,7 +187,7 @@
                 class="relative size-[18px] rounded-sm after:absolute after:inset-[-3px] after:content-[''] disabled:cursor-default disabled:opacity-40"
                 :disabled="purgingSessionId === entry.sessionId"
                 :class="purgeConfirmingId === entry.sessionId
-                  ? 'bg-danger text-danger-fg hover:bg-danger'
+                  ? 'bg-danger text-neutral-fg hover:bg-danger'
                   : 'text-neutral-dim hover:bg-surface-hover hover:text-danger'"
                 :title="purgeConfirmingId === entry.sessionId ? t('archive.entry.purgeConfirm') : t('archive.entry.purge')"
                 @click.stop="onPurgeClick(entry)"
