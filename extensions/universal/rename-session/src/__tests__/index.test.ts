@@ -11,7 +11,7 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
 }));
 
 import type { Api, Model, Usage } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // mock llm-shared：只 override resolveModel + callLLM（callRenameLLM 的依赖），
@@ -780,6 +780,7 @@ describe("usage 记录接线（appendUsageEntry 回调注入）", () => {
 interface RegisteredRenameTool {
 	name: string;
 	parameters: object;
+	renderResult: (result: unknown, options: { expanded: boolean }, theme: Theme) => { render: (width: number) => string[] };
 	execute: (
 		toolCallId: string,
 		params: { title: string },
@@ -817,6 +818,21 @@ describe("rename_session 工具注册与 execute 检查（D3）", () => {
 		const tool = setup.registeredTool as RegisteredRenameTool;
 		expect(tool.name).toBe("rename_session");
 		expect(tool.parameters).toHaveProperty("properties.title");
+	});
+
+	it("TC-T1b: renderResult 接线（C-ext-05）：注册定义携带函数成员 + 折叠态输出 details.summary 一行", () => {
+		setupWithMode(AGENT_TOOL_CONFIG);
+		const tool = setup.registeredTool as RegisteredRenameTool;
+		expect(typeof tool.renderResult).toBe("function");
+		const renderTheme = { fg: (_token: string, text: string) => text } as unknown as Theme;
+		const result = {
+			content: [{ type: "text", text: "已命名：new-title" }],
+			details: { summary: 'Renamed session to "new-title"' },
+		};
+		// Text.render 按宽度 pad，trim 后断言（折叠态 = details.summary 一行）
+		const lines = tool.renderResult(result, { expanded: false }, renderTheme).render(400);
+		expect(lines.length).toBe(1);
+		expect(lines[0].trim()).toBe('Renamed session to "new-title"');
 	});
 
 	it("TC-T2: load 时 mode=first-prompt → 工具不注册（三值互斥，工具范围 load 求值）", () => {

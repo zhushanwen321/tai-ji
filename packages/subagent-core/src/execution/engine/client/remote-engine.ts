@@ -219,9 +219,10 @@ export class RemoteEngine implements EnginePort {
       // 抛给用户（capabilities 注释的消费点登记）。
       (this as { setModel?: unknown }).setModel = undefined;
     }
-    if (opts.manifest.modelTranslation === undefined) {
+    if (opts.manifest.modelTranslation === undefined || opts.manifest.modelTranslation === null) {
       // [engine-ref-translation D5] translateModelRef 成员同款形态映射：manifest 无
-      // modelTranslation 声明 → 成员**不实现**——消费方
+      // modelTranslation 声明（null 合法等价省略，同 modelCatalog 三态）→ 成员
+      // **不实现**——消费方
       // （resolveEngineModelWithTranslation）以 `route.engine.translateModelRef !==
       // undefined` 探测：缺席 = 翻译恒等透传 + 生效回执 warn（部署形态翻译面缺席
       // 不再静默——2026-10-16 修复：staged 引擎经 cli descriptor 装载时，此前
@@ -237,7 +238,11 @@ export class RemoteEngine implements EnginePort {
    * 缺席时本成员已在构造器摘除（见构造器注释）。
    */
   translateModelRef(modelRef: string): string {
-    return translateByTable(this.opts.manifest.modelTranslation as Record<string, string>, modelRef);
+    const table = this.opts.manifest.modelTranslation;
+    // 运行时窄化替代 as 断言（S-15）：null 形态构造器已摘除本成员，此处兜住
+    // 窄化缺口——缺席按翻译面恒等透传语义处理，不把 undefined/null 炸进查表。
+    if (table === undefined || table === null) return modelRef;
+    return translateByTable(table, modelRef);
   }
 
   /** 直读 manifest 注册期快照（无缓存——每次调用同值，快照不可变）。 */

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import type { ExtensionAPI, Theme } from '@earendil-works/pi-coding-agent'
 import { Check } from 'typebox/value'
 
 /**
@@ -106,6 +106,22 @@ describe('sessionReaderExtension - execute 契约', () => {
     await expect(
       toolDef.execute('tc-1', { action: 'find' }, undefined, undefined, undefined),
     ).rejects.toThrow(/👉/)
+  })
+
+  it('renderResult 接线（C-ext-05）：注册定义携带函数成员 + 折叠态输出 details.summary 一行', () => {
+    const toolDef = fake.registerTool.mock.calls[0][0] as {
+      renderResult: (result: unknown, options: { expanded: boolean }, theme: Theme) => { render: (width: number) => string[] }
+    }
+    expect(typeof toolDef.renderResult).toBe('function')
+    const renderTheme = { fg: (_token: string, text: string) => text } as unknown as Theme
+    const result = {
+      content: [{ type: 'text', text: 'session outline…' }],
+      details: { summary: 'Read 12 turns from session abc' },
+    }
+    // Text.render 按宽度 pad，trim 后断言（折叠态 = details.summary 一行）
+    const lines = toolDef.renderResult(result, { expanded: false }, renderTheme).render(400)
+    expect(lines.length).toBe(1)
+    expect(lines[0].trim()).toBe('Read 12 turns from session abc')
   })
 })
 

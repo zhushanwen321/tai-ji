@@ -41,7 +41,7 @@
  * 「同一谓词」/ §6.9 D9）。
  */
 import path from 'node:path'
-import { readFileSync as fsReadFileSync, readdirSync as fsReaddirSync, statSync as fsStatSync } from 'node:fs'
+import { readFileSync as fsReadFileSync, readdirSync as fsReaddirSync, realpathSync as fsRealpathSync, statSync as fsStatSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { encodeCwd, getSessionStoreDir, isPiSessionId } from '@taiji/shared/paths'
@@ -156,10 +156,16 @@ const SESSION_PROJECT_TMP_SEGMENT = '.tmp'
 /** 目录枚举 fs 切面（缺省 node:fs；单测注入桩） */
 export interface SessionTmpDirFs {
   readdirSync?: (dir: string) => string[]
+  /** 符号链接解析（isPathUnderSessionTmp 的 realpath 复核消费；缺省 node:fs） */
+  realpathSync?: (p: string) => string
 }
 
 function defaultReaddir(dir: string): string[] {
   return fsReaddirSync(dir)
+}
+
+function defaultRealpath(p: string): string {
+  return fsRealpathSync(p)
 }
 
 /**
@@ -191,25 +197,54 @@ export function collectSessionTmpEncodeCwdDirs(
  * 折叠，对拍基于最终形态：`<cwd>/.tmp/../../other` 折叠后脱离 `.tmp` 前缀，不误放行。
  * Windows 形态：path.sep 为 `\` 时按同长斜杠归一副本找边界，原形态与归一形态双候选
  * 对拍（pi 在 win 上编码的是原生 `\` 路径，候选须复现两种形态）。
+ *
+ * 词法命中后做 `realpathSync` 复核（S-6）：`.tmp/` 准入只按词法形态判定时，模型可控
+ * 符号链接可让 `.tmp/` 下路径指向任意文件经预览通道读出——真实路径（符号链接全部
+ * 解析后）必须仍落在某会话项目的 `.tmp/` 子树内；目标不存在（ENOENT——尚未创建的
+ * 合法路径）等异常回落词法判定（不比复核前更紧，后续存在性检查自然接住）。
  */
-export function isPathUnderSessionTmp(resolvedPath: string, encodeCwdDirs: ReadonlySet<string>): boolean {
+export function isPathUnderSessionTmp(
+  resolvedPath: string,
+  encodeCwdDirs: ReadonlySet<string>,
+  fs: Pick<SessionTmpDirFs, 'realpathSync'> = {},
+): boolean {
   if (encodeCwdDirs.size === 0) return false
+  if (!matchesSessionTmpLexically(resolvedPath, encodeCwdDirs)) return false
+  // 只对词法白名单域内的路径触 fs（越界路径在上一行已短路），与「越界不触 fs」
+  // 的探测通道性质不冲突
+  try {
+    const realpath = fs.realpathSync ?? defaultRealpath
+    return matchesSessionTmpLexically(realpath(resolvedPath), encodeCwdDirs)
+  } catch {
+    return true
+  }
+}
+
+/** 词法对拍（realpath 复核前后复用同一判定；见 isPathUnderSessionTmp 注释） */
+function matchesSessionTmpLexically(resolvedPath: string, encodeCwdDirs: ReadonlySet<string>): boolean {
   const sep = path.sep
   const normalized = resolvedPath.split(sep).join('/')
   const marker = `/${SESSION_PROJECT_TMP_SEGMENT}`
   const candidates = new Set<string>()
+  // 候选切片为空串时跳过（fail-closed，S-7）：cwd='/'（打包态 Finder 启动异常形态）
+  // 下 `/.tmp/...` 的边界切片产出空串，encodeCwd('') === '----' 与 encodeCwd('/') 同产物
+  // ——目录集含 '----'（该形态会话目录或残留）时空串候选碰撞命中，放行文件系统根下的
+  // `.tmp`。空串不构成合法会话项目根，跳过（与 D2a 打包态剔除 cwd 同立场）
+  const addCandidate = (candidate: string): void => {
+    if (candidate !== '') candidates.add(candidate)
+  }
   let from = 0
   for (;;) {
     const i = normalized.indexOf(`${marker}/`, from)
     if (i === -1) break
-    candidates.add(resolvedPath.slice(0, i))
-    candidates.add(normalized.slice(0, i))
+    addCandidate(resolvedPath.slice(0, i))
+    addCandidate(normalized.slice(0, i))
     from = i + 1
   }
   // 目录自身形态 <cwd>/.tmp：让它进入白名单域拿到准确的 is_dir reason（而非 out_of_whitelist）
   if (normalized.endsWith(marker)) {
-    candidates.add(resolvedPath.slice(0, resolvedPath.length - marker.length))
-    candidates.add(normalized.slice(0, normalized.length - marker.length))
+    addCandidate(resolvedPath.slice(0, resolvedPath.length - marker.length))
+    addCandidate(normalized.slice(0, normalized.length - marker.length))
   }
   for (const candidate of candidates) {
     if (encodeCwdDirs.has(encodeCwd(candidate))) return true
@@ -274,6 +309,8 @@ export interface LocalFileProbeResult extends LocalFileServableResult {
  */
 export interface LocalFileProbeFs {
   statSync?: (filePath: string) => { isDirectory(): boolean; size: number } | undefined
+  /** 会话 `.tmp/` 准入的 realpath 复核（透传 isPathUnderSessionTmp；缺省 node:fs） */
+  realpathSync?: (p: string) => string
   /**
    * 探测 / 读取异常旁路（EACCES / EIO 等读不到，非「不存在」）。
    *
@@ -349,7 +386,7 @@ export function probeLocalFileServable(
   // 运算，不触被验路径的 fs）——两关都过不去才短路 out_of_whitelist，越界路径依旧不触 fs，
   // 不构成任意路径的存在性探测通道
   if (!isPathInAllowedPrefixes(resolvedPath, allowedPrefixes)
-    && !(sessionTmpDirs && isPathUnderSessionTmp(resolvedPath, sessionTmpDirs))) {
+    && !(sessionTmpDirs && isPathUnderSessionTmp(resolvedPath, sessionTmpDirs, fs))) {
     return { servable: false, reason: 'out_of_whitelist', resolvedPath: '' }
   }
   let stat: { isDirectory(): boolean; size: number } | undefined
@@ -407,6 +444,8 @@ export const MAX_LOCAL_FILE_READ_BYTES = 1_048_576
 /** 读取用 fs 切面（缺省 node:fs；单测注入桩） */
 export interface LocalFileReadFs {
   readFileSync?: (filePath: string) => Uint8Array
+  /** 会话 `.tmp/` 准入的 realpath 复核（透传 isPathUnderSessionTmp；缺省 node:fs） */
+  realpathSync?: (p: string) => string
 }
 
 function defaultReadFile(filePath: string): Uint8Array {

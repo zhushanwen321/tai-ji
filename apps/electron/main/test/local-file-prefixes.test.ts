@@ -400,6 +400,35 @@ describe('会话项目 .tmp/ 子树准入（ADR-0118 决策②代价修订 3d）
       expect(isPathUnderSessionTmp('/Users/tester/Code/my/proj/.tmp/x.html', dirs)).toBe(true)
       expect(isPathUnderSessionTmp('/Users/tester/Code/my-proj/.tmp/x.html', dirs)).toBe(true)
     })
+
+    it('realpath 复核（S-6）：词法命中后符号链接指向 .tmp 外 → 拒绝（不静默换目标读出）', () => {
+      const realpath = vi.fn(() => '/Users/tester/.ssh/id_rsa')
+      expect(isPathUnderSessionTmp(`${PROJECT_CWD}/.tmp/evil-link`, SESSION_DIRS, { realpathSync: realpath })).toBe(false)
+      expect(realpath).toHaveBeenCalledWith(`${PROJECT_CWD}/.tmp/evil-link`)
+    })
+
+    it('realpath 复核：真实路径仍在会话项目 .tmp 内（项目内跳转/无链接）→ 放行', () => {
+      expect(isPathUnderSessionTmp(`${PROJECT_CWD}/.tmp/report.html`, SESSION_DIRS, {
+        realpathSync: () => `${PROJECT_CWD}/.tmp/report.html`,
+      })).toBe(true)
+      expect(isPathUnderSessionTmp(`${PROJECT_CWD}/.tmp/link`, SESSION_DIRS, {
+        realpathSync: () => `${PROJECT_CWD}/.tmp/real-target.html`,
+      })).toBe(true)
+    })
+
+    it('realpath 复核：目标不存在（尚未创建的合法路径）→ 回落词法判定不误拒', () => {
+      expect(isPathUnderSessionTmp(`${PROJECT_CWD}/.tmp/pending.html`, SESSION_DIRS, {
+        realpathSync: () => { throw Object.assign(new Error('enoent'), { code: 'ENOENT' }) },
+      })).toBe(true)
+    })
+
+    it('cwd=/ 空串候选 fail-closed（S-7）：目录集含 ---- 时根下 .tmp 不经空串碰撞放行', () => {
+      // encodeCwd('') 与 encodeCwd('/') 同产物 '----'——cwd='/' 会话目录/残留进目录集后，
+      // 修复前 `/.tmp/...` 边界切片的空串候选碰撞命中，放行文件系统根下 .tmp
+      const dirs = new Set(['----'])
+      expect(isPathUnderSessionTmp('/.tmp/x.html', dirs, { realpathSync: (p) => p })).toBe(false)
+      expect(isPathUnderSessionTmp('/.tmp', dirs, { realpathSync: (p) => p })).toBe(false)
+    })
   })
 
   describe('collectSessionTmpEncodeCwdDirs', () => {

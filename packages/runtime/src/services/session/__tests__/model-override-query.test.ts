@@ -174,7 +174,7 @@ describe('getRunOverride — run 域 journal 覆盖查询', () => {
       expect(warnSpy).toHaveBeenCalledTimes(1)
       expect(String(warnSpy.mock.calls[0]?.[0])).toContain('stat failed')
     } finally {
-      // 权限恢复先于自删（chmod 000 目录 rm 枚举会 EACCES，session-scan-degraded-flag 同款）
+      // 权限恢复先于自删（chmod 000 目录 rm 枚举会 EACCES，session-scan-degraded-tolerance 同款）
       chmodSync(runsDir, 0o755)
       warnSpy.mockRestore()
     }

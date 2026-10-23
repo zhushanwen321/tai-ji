@@ -10,7 +10,8 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/workflow-viz/dag/__tests__/workflow-viz-dag.test.ts
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import type { WorkflowAgentCall, WorkflowDag, WorkflowDagNode } from '@taiji/shared'
 import WorkflowVizDag from '../WorkflowVizDag.vue'
@@ -291,6 +292,58 @@ describe('WorkflowVizDag 视口 fit-to-view（2026-10 用户裁决：默认打�
     expect(vp.k).toBeCloseTo((200 - 40) / 352, 6)
     expect(vp.ty).toBeCloseTo(20, 6)
   })
+
+  it('容器零尺寸挂载（overlay 过渡态）不 fit；ResizeObserver 首次非零回调补 fit 且一次性（残余 1 竞态）', async () => {
+    // jsdom 无 ResizeObserver——stub 捕获回调手动派发（模拟挂载后布局就绪）
+    const observers: { cb: ResizeObserverCallback; disconnected: boolean }[] = []
+    class FakeResizeObserver {
+      cb: ResizeObserverCallback
+      disconnected = false
+      constructor(cb: ResizeObserverCallback) {
+        this.cb = cb
+        observers.push(this)
+      }
+      observe(): void {}
+      disconnect(): void {
+        this.disconnected = true
+      }
+      unobserve(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    try {
+      const solo: WorkflowDag = {
+        phases: [{ name: 'solo', order: 0 }],
+        nodes: [node({ id: 'solo', phase: 'solo' })],
+        edges: [],
+        parallelGroups: [],
+        loops: [],
+      }
+      const wrapper = mountDag(solo)
+      const svg = wrapper.find('[data-testid="wfvz-dag-svg"]').element
+      // 挂载时零尺寸 → 不 fit（初始视口保持退化形态）+ 观察器已挂上等待
+      expect(readViewport(wrapper)).toEqual({ k: 1, tx: 0, ty: 0 })
+      expect(observers).toHaveLength(1)
+      // 布局就绪（宽 1000）→ 派发观察器回调 → 补 fit（DOM 更新经 nextTick 刷入）
+      Object.defineProperty(svg, 'clientWidth', { value: 1000, configurable: true })
+      observers[0]!.cb([], {} as ResizeObserver)
+      await nextTick()
+      const vp = readViewport(wrapper)
+      expect(vp.k).toBe(1)
+      expect(vp.tx).toBeCloseTo((1000 - 180) / 2, 6)
+      // 一次性：补 fit 后观察器断开，后续 resize 回调不再追 fit
+      expect(observers[0]!.disconnected).toBe(true)
+      Object.defineProperty(svg, 'clientWidth', { value: 2000, configurable: true })
+      observers[0]!.cb([], {} as ResizeObserver)
+      await nextTick()
+      expect(readViewport(wrapper).tx).toBeCloseTo((1000 - 180) / 2, 6)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('WorkflowVizDag 执行实例行（实际 agent 画进图，2026-10 用户裁决）', () => {

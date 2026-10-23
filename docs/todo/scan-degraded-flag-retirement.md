@@ -1,14 +1,12 @@
-# scanDegradedFlag 零消费方暂留（退出清理待后续单元）
+# scanDegradedFlag 零消费方登记（已关闭：旗标退役）
 
-状态：未解决（旗标本体暂留为显式登记的延迟项；2026-10-18 终态同步 G1 登记）
+状态：已解决（2026-10-23 just-do-it 批次 3 条目 64 执行：旗标本体与置位/复位逻辑摘除——`scanPiSessionsFromDisk` 的降级判定分支删除，catch 内 console.error 留痕与降级计数打点保留；data-source-registry §8 EX-C 补登段同批清扫；旗标测试改写为扫描降级容错测试 `session-scan-degraded-tolerance.test.ts`）
 
-## 现状
+## 退役内容
 
-`packages/runtime/src/infra/pi/session-file-utils.ts` 的导出旗标 `scanDegradedFlag`（:1134-1139）原消费方 = btw 孤儿补账闸（读 `.last`），补账已随 session-store-layout-inversion（ADR-0151）整体退役，当前零消费方：置位点（:1251-1252 / :1262-1264 附近）仍在每轮扫描写一个无人读的模块级变量。
+- `packages/runtime/src/infra/pi/session-file-utils.ts`：`scanDegradedFlag` 导出、`hasScanDegradation`（唯一消费点 = 旗标置位）、`scanPiSessionsFromDisk` 内三处置位/复位。
+- 保留的现行副作用：降级空返回 `[]` 的容错（顶层 readdir 失败 console.error 留痕）、降级计数统计与 `logScanDegradedSummary` 轮末打点（单条坏文件「侧栏少一条」可归因）。
 
-## 退出条件（择一即关闭本登记）
+## 原登记背景
 
-- 置位/复位逻辑摘除（`scanPiSessionsFromDisk` 的降级判定改写，属扫描器登记单元 territory，非消费方代码组）；
-- 或新消费方出现（旗标重新承载闸语义，届时本登记转正常文档）。
-
-退役前旗标本体暂留无害：纯内存模块级变量，无磁盘写、无行为副作用。
+`scanDegradedFlag`（`{ last }` 可变单例）原唯一消费方 = btw 孤儿补账的不可逆删除闸（读 `.last`），补账随 session-store-layout-inversion（ADR-0151）整体退役后零消费方，旗标以「每轮扫描写一个无人读的模块级变量」形态暂留。退出条件「置位/复位逻辑摘除」已于 2026-10-23 满足，本登记关闭。

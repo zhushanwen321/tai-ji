@@ -113,13 +113,13 @@ describe('U7 首屏冒烟：fork 按钮恒渲染（门控已放宽）', () => {
     expect(wrapper.find('[data-testid="fork-ask-btn"]').exists()).toBe(true)
   })
 
-  it('多条 assistant 消息时，summary action 行有 fork 后台 + fork 提问按钮（与复制同行）', () => {
+  it('多条 assistant 消息时，summary action 行有 fork 提问按钮（与复制同行）', () => {
     const turn = makeTurn([
       makeAssistant({ id: 'a1', content: '第一条回复' }),
       makeAssistant({ id: 'a2', content: '第二条回复' }),
     ])
     const wrapper = mountTurn(turn, 's-idle')
-    // fork 统一为 fork-ask-btn（与复制MD/朗读/handoff 并列同行）
+    // fork 统一为 fork-ask-btn（与复制正文/朗读/handoff 并列同行）
     expect(wrapper.findAll('[data-testid="fork-background-btn"]').length).toBe(0)
     expect(wrapper.findAll('[data-testid="fork-ask-btn"]').length).toBe(1)
     // fork 按钮与复制按钮在同一容器（action 行，4 个并列按钮：纯文本复制已退役，

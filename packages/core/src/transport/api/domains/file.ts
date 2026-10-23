@@ -15,7 +15,8 @@ import { command } from '../request'
 
 /**
  * 文件树首加载（UC-1）。返回顶层 + 一级子 FileNode[]。
- * ignored 节点始终返回并标 ignored=true，前端按 showIgnored 开关本地过滤。
+ * ignored 节点始终返回并标 ignored=true，前端全量显示（2026-10-15 裁决：showIgnored
+ * 过滤开关退役，跟踪态由文件名颜色区分）。
  */
 export async function tree(sessionId: string): Promise<FileNode[]> {
   const reply = await command('file.tree', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)

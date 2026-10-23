@@ -12,11 +12,12 @@ vi.mock("../pure.js", async (importOriginal) => {
 import { DEFAULT_SMART_CONTEXT_CONFIG, loadSmartContextConfig } from "../pure.js";
 import { registerCompactContextTool } from "../tool.js";
 import { countCompactions } from "../pure.js";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 
 interface RegisteredTool {
 	name: string;
 	parameters: { type?: string };
+	renderResult?: (result: unknown, options: { expanded: boolean }, theme: Theme) => { render: (width: number) => string[] };
 	execute: (id: string, params: Record<string, unknown>, signal: undefined, onUpdate: undefined, ctx: ExtensionContext) => Promise<{ content: Array<{ type: string; text: string }>; details: Record<string, unknown> }>;
 }
 
@@ -93,6 +94,19 @@ describe("compact_context 工具（R2 降级态：fire-and-forget + 结果注入
 		expect(result.content[0].text).toContain("压缩已启动");
 		expect(result.content[0].text).toContain("same-model");
 		expect(result.details).toMatchObject({ mode: "same-model", launched: true, fellBack: false, compactionCount: 1 });
+	});
+
+	it("renderResult 接线（C-ext-05）：注册定义携带函数成员 + 折叠态输出 details.summary 一行", async () => {
+		const { pi, tools } = makePi();
+		registerCompactContextTool(pi, { getEntries: () => [{ type: "message" }] });
+		const tool = tools[0];
+		expect(typeof tool.renderResult).toBe("function");
+		const result = await tool.execute("t1", {}, undefined, undefined, makeCtx());
+		const renderTheme = { fg: (_token: string, text: string) => text } as unknown as Theme;
+		const lines = tool.renderResult!(result, { expanded: false }, renderTheme).render(400);
+		// Text.render 按宽度 pad，trim 后断言（折叠态 = details.summary 一行）
+		expect(lines.length).toBe(1);
+		expect(lines[0].trim()).toBe("Context compacted");
 	});
 
 	it("onComplete 兑现后 nextTurn 注入结果（含模式/前后 tokens/成本；降智提示按次数）", async () => {
