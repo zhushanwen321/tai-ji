@@ -51,6 +51,8 @@ export type ModalSurfaceFamily =
   | 'session-delete-confirm'
   /** workflow 浮层 agent 钻取抽屉（浮层子交互层——只在浮层开时存在，非阻塞、Esc 归编排器） */
   | 'agent-stream-drawer'
+  /** 用量热力图 hover 提示层（teleport to body 的指针跟随提示，非阻塞、不消费 Esc） */
+  | 'usage-heat-tooltip'
   /** 浮层壳（容器非模态，不入聚合——kind='excluded' 专用，旗标恒不参与） */
   | 'overlay-shell'
 
@@ -79,6 +81,9 @@ export const MODAL_SURFACE_FAMILY_FLAGS: Record<ModalSurfaceFamily, ModalSurface
   // workflow 浮层 agent 钻取抽屉：非阻塞子交互层（挂载随浮层开合，Esc 归编排器关浮层整体、
   // 抽屉随之消亡，无独立 Esc 消费）；右侧 452px 面板按几何相交遮蔽 view
   'agent-stream-drawer': { yieldsEsc: false, yieldsCmdW: false, shieldsView: 'intersecting' },
+  // 指针跟随提示层：非阻塞、不消费 Esc（显示期 Esc 照常走层级序），pointer-events-none
+  // 无几何遮蔽需求（'none'）
+  'usage-heat-tooltip': { yieldsEsc: false, yieldsCmdW: false, shieldsView: 'none' },
   'overlay-shell': { yieldsEsc: false, yieldsCmdW: false, shieldsView: 'none' },
 }
 
@@ -151,9 +156,9 @@ export const MODAL_SURFACE_MANIFEST = [
     family: 'companion-band',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/ui/src/extension-host/CompanionBand.vue', form: 'inline-style', literal: 'var(--z-dialog)', count: 1 },
+      { file: 'packages/ui/src/extension-host/CompanionBand.vue', form: 'inline-style', literal: 'calc(var(--z-dialog)+1)', count: 1 },
     ],
-    basis: '§6.7 表：CompanionBand expanded 待决确认（inline zIndex: var(--z-dialog) 高于 modal）',
+    basis: '§6.7 表：CompanionBand expanded 待决确认（inline zIndex calc(var(--z-dialog)+1) 高于 modal 与浮层壳——壳同用 z-dialog，同值平局 DOM 后序者胜会盖住本带，+1 消除平局）',
   },
   {
     id: 'form-overlay',
@@ -231,6 +236,15 @@ export const MODAL_SURFACE_MANIFEST = [
       { file: 'packages/renderer/src/components/panel/workflow-viz/panel/AgentStreamDrawer.vue', form: 'class-token-calc', literal: 'calc(var(--z-dialog)+1)', count: 1 },
     ],
     basis: '浮层子交互层：workflow 浮层内 trace 行钻取的 agent 对话流抽屉（挂载随浮层开合，[2026-10-19] demo 形态）；z = dialog+1 浮于壳之上（壳提档 z-dialog 后随档，曾因壳提档未同步致 1001<1100 被遮罩盖死）；非阻塞、Esc 归编排器关浮层整体',
+  },
+  {
+    id: 'usage-heat-tooltip',
+    family: 'usage-heat-tooltip',
+    kind: 'member',
+    zAnchors: [
+      { file: 'packages/renderer/src/components/settings/usage/UsageHeatCalendar.vue', form: 'class-token', literal: 'var(--z-dialog)', count: 1 },
+    ],
+    basis: '指针跟随提示层：用量热力图 hover tooltip（teleport to body、pointer-events-none）；唯一宿主是设置弹窗（z-modal 1000 不透明全屏），原 z-40 恒被宿主盖死（提示层从未可见），提档 z-dialog 后浮于宿主之上、低于 toast',
   },
   {
     id: 'session-delete-confirm',
