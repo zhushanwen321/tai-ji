@@ -47,7 +47,15 @@ import {
 } from "@zhushanwen/subagent-engine-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { killAllActiveChildren, getActiveChild, runSpawnOnce, applyIdentityEnvToChildEnv, truncateTaskForEnv, type SpawnRunCallbacks, type SpawnRunParams, type SpawnRunResult } from "../spawn-runner.ts";
+import {
+  killAllActiveChildren,
+  getActiveChild,
+  runSpawnOnce,
+  type SpawnRunCallbacks,
+  type SpawnRunParams,
+  type SpawnRunResult,
+} from "../spawn-runner.ts";
+import { applyIdentityEnvToChildEnv, truncateTaskForEnv } from "../child-env.ts";
 import { PROMPT_ACK_TIMEOUT_ENV } from "../prompt-ack.ts";
 
 /**

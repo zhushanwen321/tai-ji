@@ -410,3 +410,56 @@ describe("resolvePromptAckTimeoutMs", () => {
     expect(h.failures).toEqual([]); // acked 正常
   });
 });
+
+// ============================================================
+// [subagent-observability §3.3.1 P6] onHandled 接线（disposition=handled 接管信号）
+// ============================================================
+
+describe("onHandled（handled = 本条 prompt 未启动任何 run——P6 结算分派触发点）", () => {
+  function makeTrackerWithHandled(handled: () => void): TrackerHarness {
+    const diagnostics = silentDiagnostics();
+    const failures: PromptAckResult[] = [];
+    const tracker = createPromptAckTracker({
+      recordId: "rec-handled",
+      timeoutMs: DEFAULT_PROMPT_ACK_TIMEOUT_MS,
+      diagnostics: () => diagnostics,
+      onFailure: (r) => failures.push(r),
+      onHandled: handled,
+    });
+    return { tracker, failures, diagnostics };
+  }
+
+  it("disposition=handled → settle(acked) 后触发 onHandled 恰一次（回执层先结，P6 分派随后）", () => {
+    let handledCalls = 0;
+    const h = makeTrackerWithHandled(() => {
+      handledCalls++;
+      // 回执层先结：回调触发时 tracker 已 settle（迟到 response 留痕忽略的既有门已关）
+      h.tracker.dispatch("id-1", "prompt", true, { disposition: "handled" }); // 迟到帧——不得重复触发
+    });
+    h.tracker.register("id-1");
+    dispatchPrompt(h, "id-1", true, { disposition: "handled" });
+
+    expect(handledCalls).toBe(1);
+    expect(h.failures).toEqual([]); // handled 是 acked 族——非失败
+  });
+
+  it("started/queued disposition 不触发 onHandled（在途形态走既有 settled 通路）", () => {
+    let handledCalls = 0;
+    const h = makeTrackerWithHandled(() => {
+      handledCalls++;
+    });
+    h.tracker.register("id-1");
+    dispatchPrompt(h, "id-1", true, { disposition: "started" });
+    dispatchPrompt(h, "id-1", true, { disposition: "queued" });
+
+    expect(handledCalls).toBe(0);
+    expect(h.failures).toEqual([]);
+  });
+
+  it("缺省 onHandled（既有装配形态）→ handled ack 正常结算零副作用", () => {
+    const h = makeTracker();
+    h.tracker.register("id-1");
+    dispatchPrompt(h, "id-1", true, { disposition: "handled" });
+    expect(h.failures).toEqual([]);
+  });
+});

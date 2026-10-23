@@ -155,18 +155,26 @@ export function collectActivePendingIds(entries: unknown[], opts?: CollectPendin
  *
  * [notify-once D3 族映射] session-manager watch 应答的 4 个新 reason 同族接入：
  * stopped→aborted（用户 UI 掐断含债权轮）、exited/deleted/orphaned→cancelled
- * （终局死亡/删除/orphan 吸收态）。**不扩 MappedPendingStatus/PendingStatus 词表**——
- * 四个新 reason 全仓零读方按 status 分流（countActiveFromEntries 只用 register−unregister
- * 差集、notify-summary outcome 读 details 不读 entry.status），精确状态由通知正文与
- * get_session_status 承载，高于 G2 感知线。
+ * （终局死亡/删除/orphan 吸收态）。
+ *
+ * [subagent-observability §3.3.6/§3.3.11④] 本通道保留为**历史 reason 解析兼容通道**
+ * （解析词表纪律：旧值保留解析）；债权结清的新权威通道 = resolveSettlementReason
+ * （下方 SettlementReason 封闭五值），双通道以新写入方为权威。缺省方向废除
+ * fail-open：词表外 reason → unknown（不再产假成功）。
  *
  * 返回值 MappedPendingStatus（本文件封闭字面量联合）：PendingStatus 枚举留在
- * pending-notifications（本包不引 extension 侧类型），本联合是其终态子集——消费方
- * 免 as 收窄直接赋值。
+ * pending-notifications（本包不引 extension 侧类型），本联合是其终态子集+解析缺省
+ * unknown——消费方免 as 收窄直接赋值。
  */
-/** mapReasonToStatus 的封闭返回值域：pending-notifications PendingStatus 的终态子集
- * （不含初始态 active）。protocol 不引 extension 侧类型（分层裁决不变），以自有
- * 字面量联合锁定值域，switch 分支编译期受限。 */
+/**
+ * mapReasonToStatus 的封闭返回值域：pending-notifications PendingStatus 的终态子集
+ * （不含初始态 active）+ 解析缺省 unknown。protocol 不引 extension 侧类型（分层裁决
+ * 不变），以自有字面量联合锁定值域，switch 分支编译期受限。
+ *
+ * [subagent-observability §3.3.6/§3.3.11④ fail-open 废除] 第七成员 unknown = 词表外
+ * reason 的解析缺省（fail-visible——解析词表纪律的缺省方向与旧 fail-open=completed
+ * 相反：不可判读时如实标注，不产假成功）。
+ */
 export type MappedPendingStatus =
   | 'completed'
   | 'failed'
@@ -174,12 +182,23 @@ export type MappedPendingStatus =
   | 'expired'
   | 'time_limited'
   | 'aborted'
+  | 'unknown'
 
 /** reason→status 映射表（mapReasonToStatus 唯一数据源）：键集 = 全部已知 reason
- *  词表；interrupted 三态归 aborted、budget_limited 归 failed、reopened 归 completed、
- *  notify-once D3 四 reason（stopped→aborted / exited・deleted・orphaned→cancelled，
- *  词表零扩张）。新 reason 漏登记落下方 default 兜底 completed（防误标 cancelled 同族
- *  事故先例的防线在测试的键集断言）。 */
+ *  词表。新 reason 漏登记落 default 兜底 unknown（fail-visible——fail-open=completed
+ *  方向整体废除，§3.3.11④）。
+ *
+ *  [subagent-observability §3.3.6 三组词表外字面量显式映射（走查补）] 此前直落
+ *  default=completed 的三组生产字面量显式登记：
+ *  - `running`（markRoundIdle 轮终注销恒发字面量——轮结束事实明确、成败未载的
+ *    历史簿记）→ completed（历史口径显式化；新写入方按轮终事实产 completed/failed，
+ *    字面量随 u3 判定链接线退役）；
+ *  - `closed`（doFinalize 编排性收尾）→ cancelled；
+ *  - reconcile-sweep 直通族（closedReason 值直通）：parent-shutdown/parent-fork/
+ *    parent-new/disconnected → aborted（宿主侧打断族——与 interrupted 族同口径；
+ *    disconnected 死因不可考、现行兜底展示即 interrupted-by-restart 族）、
+ *    user-close/cancelled → cancelled（用户主动关闭/取消）、gc → unknown（通用
+ *    终态无专属语义——诚实缺省，不产假成功）。 */
 const REASON_STATUS_MAP: Readonly<Record<string, MappedPendingStatus>> = {
   completed: 'completed',
   failed: 'failed',
@@ -196,11 +215,21 @@ const REASON_STATUS_MAP: Readonly<Record<string, MappedPendingStatus>> = {
   exited: 'cancelled',
   deleted: 'cancelled',
   orphaned: 'cancelled',
+  // ── [subagent-observability §3.3.6] 三组词表外字面量显式映射（原直落 default）──
+  running: 'completed',
+  closed: 'cancelled',
+  'parent-shutdown': 'aborted',
+  'parent-fork': 'aborted',
+  'parent-new': 'aborted',
+  'user-close': 'cancelled',
+  disconnected: 'aborted',
+  gc: 'unknown',
 }
 
 export function mapReasonToStatus(reason: string): MappedPendingStatus {
-  // 未知 reason → completed（与既有 switch default 同义：日终 summary 的兜底口径）
-  return REASON_STATUS_MAP[reason] ?? 'completed'
+  // 未知 reason → unknown（fail-visible：[subagent-observability §3.3.11④] 旧
+  // fail-open=completed 缺省废除——不可判读时如实标注，不产假成功）。
+  return REASON_STATUS_MAP[reason] ?? 'unknown'
 }
 
 /**
@@ -210,5 +239,98 @@ export function mapReasonToStatus(reason: string): MappedPendingStatus {
  * import 本常量，禁止本地复制六值 Set（曾两包各持一份本地拷贝注释自认「同步维护」）。
  * Set 成员与 MappedPendingStatus 联合的相等性由 pending-entries.test.ts 断言锁定。
  * string 元素类型是消费面要求（对任意落盘 status 做成员判定，窄化前的原始值）。
+ *
+ * [subagent-observability §3.3.11④] 值集含解析缺省 unknown（fail-visible）——词表外
+ * 落盘 status 由成员判定放行进入字段视图（不再静默丢弃），消费方按「不可判读」呈现。
  */
 export const MAPPED_PENDING_STATUSES: ReadonlySet<string> = new Set(Object.values(REASON_STATUS_MAP))
+
+// ============================================================
+// [subagent-observability §3.3.6] SettlementReason 结清枚举（债权结清新权威通道）
+// ============================================================
+
+/**
+ * 债权结清词表（封闭五值；值域语义与 subagent-core run-vocabulary ALL_SETTLEMENT_REASONS
+ * 同源——「债权」= pending-notifications 的 collect 挂起债，结清 = 该债以何种事实形态
+ * 兑现或消灭）：
+ *   completed — 轮正常收尾兑现；
+ *   failed    — 轮失败结清（含预算/超时轮失败）；
+ *   cancelled — 轮中止、run 取消、编排性收尾打断（interrupted 族宿主侧打断）；
+ *   lost      — 失联清点（宿主重启代际 + pid 探活事实，§3.3.4 合并清点产物）；
+ *   no_result — 无果：退出无 settle 无结果、清理扫描无事实可依、或轮被扩展接管
+ *               （细因经轮收条 promptDisposition 披露；与 lost 的边界 = 有无
+ *               「宿主重启」事实）。
+ *
+ * 依赖方向：core → 本包（权威写侧产值在 core run-vocabulary；本包按协议单点纪律
+ * 自持同值字面量，双包字面量一致性由各自枚举完整性测试 + core 侧对账测试锁定）。
+ */
+export const SETTLEMENT_REASONS = [
+  'completed',
+  'failed',
+  'cancelled',
+  'lost',
+  'no_result',
+] as const
+
+/** 债权结清词表（封闭五值；值域语义见 {@link SETTLEMENT_REASONS}）。 */
+export type SettlementReason = (typeof SETTLEMENT_REASONS)[number]
+
+/**
+ * 结清解析产出类型：词表外 reason 解析缺省 `unknown`（fail-visible——不可判读时
+ * 如实标注，不产假成功；缺省方向与旧 fail-open=completed 相反）。
+ */
+export type ResolvedSettlementReason = SettlementReason | 'unknown'
+
+/**
+ * 历史/现行 reason → 结清枚举解析表（resolveSettlementReason 唯一数据源）。
+ * 解析规则（§3.3.6 解析词表纪律）：
+ *   - 同名直通：completed/failed/cancelled；
+ *   - expired → no_result（过期 = 扫描无事实可依的无果形态）；
+ *   - time_limited / budget_limited → failed（轮失败结清含预算/超时轮失败）；
+ *   - aborted / interrupted 三态 / stopped → cancelled（中止族）；
+ *   - exited/deleted/orphaned → cancelled（终局死亡/删除/orphan 吸收）；
+ *   - reopened → completed（锚失效重开不改变既有结清）；
+ *   - [§3.3.6 三组词表外字面量] running → no_result（轮终注销簿记——原因字面量
+ *     本身不载成败事实，无事实可依归无果）；closed → cancelled（doFinalize 编排性
+ *     收尾）；reconcile-sweep 直通族（closedReason 值）：宿主侧打断族
+ *     parent-shutdown/parent-fork/parent-new 与用户关闭族 user-close → cancelled、
+ *     disconnected/gc → no_result（死因不可考/通用终态无事实可依）；
+ *   - lost/no_result 同名直通（新写入方产物原样解析）。
+ * 词表外 reason → unknown（fail-visible）。
+ */
+const SETTLEMENT_REASON_MAP: Readonly<Record<string, ResolvedSettlementReason>> = {
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: 'cancelled',
+  lost: 'lost',
+  no_result: 'no_result',
+  expired: 'no_result',
+  time_limited: 'failed',
+  budget_limited: 'failed',
+  aborted: 'cancelled',
+  interrupted: 'cancelled',
+  'interrupted-by-restart': 'cancelled',
+  'interrupted-by-parent': 'cancelled',
+  stopped: 'cancelled',
+  exited: 'cancelled',
+  deleted: 'cancelled',
+  orphaned: 'cancelled',
+  reopened: 'completed',
+  running: 'no_result',
+  closed: 'cancelled',
+  'parent-shutdown': 'cancelled',
+  'parent-fork': 'cancelled',
+  'parent-new': 'cancelled',
+  'user-close': 'cancelled',
+  disconnected: 'no_result',
+  gc: 'no_result',
+}
+
+/**
+ * pending 注销 reason → 债权结清枚举解析（新权威通道；双通道以新写入方为权威——
+ * 新写入方直接产 SettlementReason 字面量，本函数服务历史 reason 与防御性解析）。
+ * mapReasonToStatus（六值+unknown 历史通道）保留并行，两表键集一致性由测试锁定。
+ */
+export function resolveSettlementReason(reason: string): ResolvedSettlementReason {
+  return SETTLEMENT_REASON_MAP[reason] ?? 'unknown'
+}

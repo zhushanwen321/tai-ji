@@ -46,6 +46,20 @@ export interface SdkEvent {
     };
     stopReason?: string;
     errorMessage?: string;
+    /**
+     * [subagent-observability §3.3.2 结构化输入] pi 1.0.0 AssistantMessage.rawStopReason
+     * （provider 原生 finish reason，如 anthropic 的 stop_reason / openai responses 的
+     * status.incompleteReason——dist 各 api 层 6 处写入点）。接收侧原先窄化丢弃，u1 起
+     * 停止丢弃：随收尾边沿事实携带供分类兜底通道消费。
+     */
+    rawStopReason?: string;
+    /**
+     * [subagent-observability §3.3.2 结构化输入] pi 1.0.0 AssistantMessage.diagnostics
+     * （AssistantMessageDiagnostic[]，bedrock response_failure 等结构化诊断——含
+     * error.code/details 机读字段）。接收侧原先窄化丢弃，u1 起停止丢弃（原样透传，
+     * 消费侧运行时 guard 窄化）。
+     */
+    diagnostics?: unknown;
   };
   reason?: string;
   assistantMessageEvent?: { type?: string; delta?: string };

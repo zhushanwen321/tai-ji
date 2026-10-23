@@ -312,3 +312,148 @@ describe("[subagent 派生视图丢失修复] tool_execution_end result content 
     });
   }
 });
+
+// [subagent-observability §3.3.1] 收尾边沿停因事实优先（判定事实化）。
+//
+// 判据（设计定稿）：最后一条 assistant 消息停因 ∈ {error, aborted} 或存在未消费的
+// 引擎 error 事件 → onErroredEnd（失败收口）→ endedCleanly=false → 退出码非 0 →
+// 轮失败；settled 只是 run 结束事实，不再是任何置 0 依据。aborted 三源判别在同一
+// 收尾边沿裁决：宿主取消 > turn-limiter 耗尽（didAbort 事实位）> 引擎异常兜底；
+// 禁止把 aborted 一律记失败。结构化输入（rawStopReason/diagnostics）随事实携带
+//（§3.3.2 停止丢弃）。P5 计账：失败尝试识别锚 = auto_retry_start 边界，turns 排除
+// 失败尝试、usage 切片基与 retryAttempts 计数随 settled 快照传出。
+describe("[subagent-observability §3.3.1] 收尾边沿停因事实优先（表驱动）", () => {
+  /** 标准错误 message_end 行（openai 兼容层 "<status>: <body>" 机读主通道形态）。 */
+  const errorLine = (overrides: Record<string, unknown> = {}): string =>
+    JSON.stringify({
+      type: "message_end",
+      message: { stopReason: "error", errorMessage: "429: rate limited", ...overrides },
+    });
+
+  it("停因=error → onErroredEnd（停因 + errorMessage + 结构化输入三汇合），onAgentEnd 不触发", () => {
+    let errored: import("../spawn-event-translator.ts").EngineRoundErrorFact | undefined;
+    let agentEndSeen = false;
+    const h = makeHarness({
+      onAgentEnd: () => { agentEndSeen = true; },
+      onErroredEnd: (fact) => { errored = fact; },
+    });
+    h.feed(errorLine());
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: false, reason: "error" }));
+
+    expect(agentEndSeen).toBe(false); // 成功默认口径不再适用
+    expect(errored).toMatchObject({ stopReason: "error", errorMessage: "429: rate limited", abortSource: "engine" });
+  });
+
+  it("结构化输入停止丢弃：rawStopReason / diagnostics 随收尾边沿事实携带（§3.3.2）", () => {
+    let errored: import("../spawn-event-translator.ts").EngineRoundErrorFact | undefined;
+    const h = makeHarness({
+      onErroredEnd: (fact) => { errored = fact; },
+    });
+    h.feed(errorLine({ rawStopReason: "throttled", diagnostics: [{ type: "bedrock_response_failure", timestamp: 1 }] }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: false }));
+
+    expect(errored?.rawStopReason).toBe("throttled");
+    expect(errored?.diagnostics).toEqual([{ type: "bedrock_response_failure", timestamp: 1 }]);
+  });
+
+  it("重试恢复：失败尝试（willRetry=true）不判终；成功响应清除未消费 error 事实 → 干净收尾", () => {
+    let errored: import("../spawn-event-translator.ts").EngineRoundErrorFact | undefined;
+    let agentEndSeen = false;
+    const h = makeHarness({
+      onAgentEnd: () => { agentEndSeen = true; },
+      onErroredEnd: (fact) => { errored = fact; },
+    });
+    // 失败尝试（真实事件序 error → turn_end → agent_end willRetry=true）
+    h.feed(errorLine());
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: true, reason: "retryable" }));
+    expect(errored).toBeUndefined(); // 重试在途——非轮终
+    h.feed(JSON.stringify({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 10, errorMessage: "429" }));
+    // 最终尝试成功（非 error 停因到达 = 未消费 error 事实清除）
+    h.feed(JSON.stringify({ type: "message_end", message: { usage: { input: 1 }, stopReason: "stop" } }));
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: false, reason: "end_turn" }));
+
+    expect(agentEndSeen).toBe(true);
+    expect(errored).toBeUndefined();
+  });
+
+  it("aborted 三源判别（表驱动）：宿主取消 > limiter 耗尽 > 引擎异常兜底", () => {
+    const rows: Array<{
+      name: string;
+      hostAborted: boolean;
+      limiterAbort: boolean;
+      expected: "host-cancel" | "turn-budget" | "engine";
+    }> = [
+      { name: "宿主取消信号置位 → host-cancel（中止非失败）", hostAborted: true, limiterAbort: false, expected: "host-cancel" },
+      { name: "宿主取消 + limiter 同时置位 → 宿主取消优先", hostAborted: true, limiterAbort: true, expected: "host-cancel" },
+      { name: "limiter didAbort（宽限轮耗尽）→ turn-budget", hostAborted: false, limiterAbort: true, expected: "turn-budget" },
+      { name: "无前两者的 aborted → 引擎异常兜底", hostAborted: false, limiterAbort: false, expected: "engine" },
+    ];
+    for (const row of rows) {
+      let errored: import("../spawn-event-translator.ts").EngineRoundErrorFact | undefined;
+      const h = makeHarness({
+        isHostAbortRequested: () => row.hostAborted,
+        onErroredEnd: (fact) => { errored = fact; },
+        ...(row.limiterAbort
+          ? // limiter 耗尽形态：同一 translator 闭包内制造 didAbort 事实位
+            //（maxTurns=1 + graceTurns=0 下两个 turn_end 触发 abort——abort 经
+            // opts.abort 注入，didAbort 翻真后停因事实才到达）
+            { maxTurns: 1, graceTurns: 0 }
+          : {}),
+      });
+      if (row.limiterAbort) {
+        h.feed(JSON.stringify({ type: "turn_end" }));
+        h.feed(JSON.stringify({ type: "turn_end" })); // steered 后 grace 耗尽 → abort
+      }
+      h.feed(JSON.stringify({ type: "message_end", message: { stopReason: "aborted", errorMessage: "aborted by user" } }));
+      h.feed(JSON.stringify({ type: "agent_end", willRetry: false, reason: "aborted" }));
+
+      expect(errored?.stopReason).toBe("aborted");
+      expect(errored?.abortSource).toBe(row.expected);
+    }
+  });
+
+  it("干净停因（stop）→ onAgentEnd（成功口径维持）；settled 快照停因记 stop", () => {
+    let agentEndSeen = false;
+    let erroredSeen = false;
+    let snapshot: import("../spawn-event-translator.ts").SettledRoundSnapshot | undefined;
+    const h = makeHarness({
+      onAgentEnd: () => { agentEndSeen = true; },
+      onErroredEnd: () => { erroredSeen = true; },
+      onAgentSettled: (s) => { snapshot = s; },
+    });
+    h.feed(JSON.stringify({ type: "message_end", message: { usage: { input: 3 }, stopReason: "stop" } }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: false, reason: "end_turn" }));
+    h.feed(JSON.stringify({ type: "agent_settled" }));
+
+    expect(agentEndSeen).toBe(true);
+    expect(erroredSeen).toBe(false);
+    expect(snapshot).toMatchObject({ turnsAtSettle: 0, finalAttemptTurnBase: 0, retryAttempts: 0, stopReason: "stop" });
+  });
+
+  it("P5 计账：auto_retry_start 边界后的 turns 才计入（失败尝试排除）+ retryAttempts 计数", () => {
+    let snapshot: import("../spawn-event-translator.ts").SettledRoundSnapshot | undefined;
+    const h = makeHarness({
+      onAgentSettled: (s) => { snapshot = s; },
+    });
+    // 失败尝试：1 个 turn
+    h.feed(errorLine());
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: true }));
+    h.feed(JSON.stringify({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 10, errorMessage: "429" }));
+    // 最终尝试：1 个 turn
+    h.feed(JSON.stringify({ type: "message_end", message: { usage: { input: 1 }, stopReason: "stop" } }));
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: false }));
+    h.feed(JSON.stringify({ type: "agent_settled" }));
+
+    // record.turnCount 原始累计 2（reducer 语义不动）；快照排除失败尝试 → 1
+    expect(h.record.turnCount).toBe(0); // settled 后按轮清零（SP-9）
+    expect(snapshot?.turnsAtSettle).toBe(1);
+    expect(snapshot?.finalAttemptTurnBase).toBe(1);
+    expect(snapshot?.retryAttempts).toBe(1);
+    expect(snapshot?.stopReason).toBe("stop");
+  });
+});

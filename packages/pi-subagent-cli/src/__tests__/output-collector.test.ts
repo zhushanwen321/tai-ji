@@ -7,12 +7,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildExitErrorText,
+  classifyFailureCause,
   classifyFailureKind,
   collectOutcome,
   describeMissingParsedOutput,
   describePromptAckFailure,
   DETERMINISTIC_SCHEMA_FAILURE_PREFIX,
   extractParsedOutput,
+  extractRetryAfterMsFromText,
   isDeterministicSchemaFailureMsg,
   isEngineSpawnDeliveryErrorMsg,
   isStaleContextErrorMsg,
@@ -407,7 +409,7 @@ describe("classifyFailureKind（词表 → 结构化标签）", () => {
   });
 });
 
-describe("collectOutcome — D5-③ failureKind 产出", () => {
+describe("collectOutcome — failureKind 改轨（subagent-observability §3.3.2 子串分诊退役）", () => {
   /** 最小 ReplayRecordView stub（collectOutcome 只读 turns/toolCalls 派生字段）。 */
   function makeRecordWithCalls(calls: ToolCall[]): ReplayRecordView {
     return {
@@ -423,52 +425,70 @@ describe("collectOutcome — D5-③ failureKind 产出", () => {
     sessionFile: undefined,
   };
 
-  it("error 命中 stale 词表 → failureKind=stale_context", () => {
+  it("子串分诊退役：stale 文案不再产出 stale_context（failureKind 改轨为送达码确定性分诊）", () => {
     const record = makeRecordWithCalls([]);
     const result = collectOutcome(record, {
       ...baseArgs,
       success: false,
       error: "This extension ctx is stale after session replacement or reload.",
     });
-    expect(result.failureKind).toBe("stale_context");
+    expect(result.failureKind).toBeUndefined();
   });
 
-  it("F-1 归因覆写（态①②确定性标记）→ failureKind=schema_deterministic", () => {
+  it("[F-1 退役为 observations] schema 声明 + 成功收尾 + 无产出 → agent.no_deliverable（诚实失败，不再产 schema_deterministic 假死因）", () => {
     const record = makeRecordWithCalls([]);
     const result = collectOutcome(record, { ...baseArgs, success: true, error: undefined, schemaExpected: true });
+    expect(result.success).toBe(false);
     expect(result.error).toBeDefined();
-    expect(result.failureKind).toBe("schema_deterministic");
+    expect(result.failureKind).toBeUndefined();
+    // 新分类面：agent.no_deliverable（§3.3.2 硬规则①「SO 未调用」只能是它）
+    expect(result.failure).toEqual({
+      class: "agent",
+      kind: "no_deliverable",
+      retryable: false,
+      raw: result.error,
+    });
+    // 观察事实承载（F-1 兜底退役为 observations）
+    expect(result.observations).toHaveLength(1);
+    expect(result.observations?.[0]).toBe(result.error);
+    // 负面断言（场景 1）：不再产出 schema_deterministic
+    expect(JSON.stringify(result)).not.toContain("schema_deterministic");
   });
 
-  it("态③归因（调用过但无 details，无标记）→ failureKind=unknown（可重试，矩阵保留）", () => {
+  it("态③归因（调用过但无 details）→ agent.no_deliverable + observations（分类面承接，failureKind 退役）", () => {
     const record = makeRecordWithCalls([
       { toolName: "structured-output", result: { content: [] } },
     ]);
     const result = collectOutcome(record, { ...baseArgs, success: true, error: undefined, schemaExpected: true });
+    expect(result.success).toBe(false);
     expect(result.error).toBeDefined();
-    expect(result.failureKind).toBe("unknown");
+    expect(result.failure?.class).toBe("agent");
+    expect(result.failure?.kind).toBe("no_deliverable");
+    expect(result.observations).toHaveLength(1);
   });
 
-  it("普通 provider 错误 → failureKind=unknown", () => {
+  it("引擎送达错误码前缀保留确定性分诊 failureKind=unknown（结构化码事实，非文案启发）", () => {
     const record = makeRecordWithCalls([]);
-    const result = collectOutcome(record, { ...baseArgs, success: false, error: "provider boom 5xx" });
+    const result = collectOutcome(record, {
+      ...baseArgs,
+      success: false,
+      error:
+        "engine_prompt_not_delivered: zero stdout after prompt write within 30000ms. Recovery: re-run the task.",
+    });
     expect(result.failureKind).toBe("unknown");
   });
 
-  it("成功路径（error undefined）→ failureKind 不写（缺省 = unknown = 可重试，消费侧语义）", () => {
+  it("成功路径（error undefined）→ failureKind 不写", () => {
     const record = makeRecordWithCalls([]);
     const result = collectOutcome(record, { ...baseArgs, success: true, error: undefined });
     expect(result.failureKind).toBeUndefined();
   });
 
-  it("词表漂移失效模式：未知文案（未来 pi 形态）→ failureKind=unknown（保守重试，非静默漏诊）", () => {
+  it("普通 provider 错误（无结构化事实）→ failure 也不产（未分类形态落引擎停因原值，不产假分类）", () => {
     const record = makeRecordWithCalls([]);
-    const result = collectOutcome(record, {
-      ...baseArgs,
-      success: false,
-      error: "extension runtime was superseded by a newer orchestration epoch",
-    });
-    expect(result.failureKind).toBe("unknown");
+    const result = collectOutcome(record, { ...baseArgs, success: false, error: "provider boom 5xx" });
+    expect(result.failureKind).toBeUndefined();
+    expect(result.failure).toBeUndefined();
   });
 });
 
@@ -537,5 +557,90 @@ describe("M2: describePromptAckFailure（tracker 结算 → outcome.error 文案
 
   it("acked 不经此函数（正常 outcome，防御性抛错）", () => {
     expect(() => describePromptAckFailure({ kind: "acked", disposition: "started" })).toThrow(/acked/);
+  });
+});
+
+// ============================================================
+// [subagent-observability §3.3.2] classifyFailureCause（收尾边沿分类单点）
+// ============================================================
+
+describe("classifyFailureCause（结构化输入分类，子串分诊的接替者）", () => {
+  const NOW = 1_700_000_000_000;
+
+  it("status 机读主通道：429 → provider.rate_limited + conditional（429 不全可重试——禁止按状态码判 true）", () => {
+    const cause = classifyFailureCause(
+      { terminalError: { stopReason: "error", errorMessage: '429: {"code":"rate_limit_exceeded"}', abortSource: "engine" } },
+      NOW,
+    );
+    expect(cause).toMatchObject({ class: "provider", kind: "rate_limited", retryable: "conditional" });
+  });
+
+  it("retryAfterMs 文本兜底通道：resets ISO 时间戳命中 → 毫秒差值；无字样 → undefined（缺省 unknown 不产假 0）", () => {
+    const resetsAt = new Date(NOW + 22 * 60 * 1000).toISOString();
+    const withReset = classifyFailureCause(
+      { terminalError: { stopReason: "error", errorMessage: `429: quota exceeded, resets ${resetsAt}`, abortSource: "engine" } },
+      NOW,
+    );
+    expect(withReset?.retryAfterMs).toBe(22 * 60 * 1000);
+
+    const withoutReset = classifyFailureCause(
+      { terminalError: { stopReason: "error", errorMessage: "429: rate limited", abortSource: "engine" } },
+      NOW,
+    );
+    expect(withoutReset).toMatchObject({ class: "provider", kind: "rate_limited" });
+    expect(withoutReset?.retryAfterMs).toBeUndefined();
+  });
+
+  it("非 429 4xx → provider.protocol_unsupported（retryable false——重发必然同样失败）", () => {
+    for (const status of [400, 401, 403, 404, 422]) {
+      const cause = classifyFailureCause(
+        { terminalError: { stopReason: "error", errorMessage: `${status}: {"error":{"code":"x"}}`, abortSource: "engine" } },
+        NOW,
+      );
+      expect(cause).toMatchObject({ class: "provider", kind: "protocol_unsupported", retryable: false });
+    }
+  });
+
+  it("5xx / 无 status 前缀的无词表形态 → 不产 FailureCause（未分类落引擎停因原值，不猜）", () => {
+    expect(
+      classifyFailureCause({ terminalError: { stopReason: "error", errorMessage: "503: service unavailable", abortSource: "engine" } }, NOW),
+    ).toBeUndefined();
+    expect(
+      classifyFailureCause({ terminalError: { stopReason: "error", errorMessage: "provider exploded mysteriously", abortSource: "engine" } }, NOW),
+    ).toBeUndefined();
+  });
+
+  it("兜底文案词表：pi 模块常量字面量（has no API implementation）→ protocol_unsupported", () => {
+    const cause = classifyFailureCause(
+      { terminalError: { stopReason: "error", errorMessage: 'Provider p has no API implementation for "anthropic"', abortSource: "engine" } },
+      NOW,
+    );
+    expect(cause).toMatchObject({ class: "provider", kind: "protocol_unsupported", retryable: false });
+    expect(cause?.raw).toContain("has no API implementation");
+  });
+
+  it("aborted 三源 → user.cancelled / harness.turn_budget_exhausted / engine.engine_aborted（禁止一律记失败）", () => {
+    expect(
+      classifyFailureCause({ terminalError: { stopReason: "aborted", errorMessage: "cancel", abortSource: "host-cancel" } }, NOW),
+    ).toMatchObject({ class: "user", kind: "cancelled", retryable: false });
+    expect(
+      classifyFailureCause({ terminalError: { stopReason: "aborted", errorMessage: "budget", abortSource: "turn-budget" } }, NOW),
+    ).toMatchObject({ class: "harness", kind: "turn_budget_exhausted", retryable: false });
+    expect(
+      classifyFailureCause({ terminalError: { stopReason: "aborted", errorMessage: "engine", abortSource: "engine" } }, NOW),
+    ).toMatchObject({ class: "engine", kind: "engine_aborted", retryable: false });
+  });
+
+  it("limiter 事实位（SIGKILL 直杀无停因形态）→ harness.turn_budget_exhausted；无输入 → undefined", () => {
+    expect(
+      classifyFailureCause({ turnBudgetExhausted: true }, NOW),
+    ).toMatchObject({ class: "harness", kind: "turn_budget_exhausted", retryable: false });
+    expect(classifyFailureCause({}, NOW)).toBeUndefined();
+  });
+
+  it("extractRetryAfterMsFromText：resets ISO / retry after 秒数 / 无命中 undefined", () => {
+    expect(extractRetryAfterMsFromText(`resets ${new Date(NOW + 5000).toISOString()}`, NOW)).toBe(5000);
+    expect(extractRetryAfterMsFromText("try again in 90 seconds", NOW)).toBe(90_000);
+    expect(extractRetryAfterMsFromText("no hint here", NOW)).toBeUndefined();
   });
 });

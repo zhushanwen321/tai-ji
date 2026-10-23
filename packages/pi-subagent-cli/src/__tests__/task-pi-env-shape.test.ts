@@ -24,7 +24,7 @@ import {
 } from "@zhushanwen/subagent-engine-sdk";
 
 import { isRawMirrorActive, RAW_MIRROR_ENV_VAR } from "../raw-mirror.ts";
-import { buildChildEnv, type SpawnRunParams } from "../spawn-runner.ts";
+import { buildChildEnv, type SpawnRunParams } from "../child-env.ts";
 
 const CONTROL_SOCKET = "/tmp/taiji-control.sock";
 const ROOT_SESSION_ID = "sess-root-1";

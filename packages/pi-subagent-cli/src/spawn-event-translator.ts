@@ -38,6 +38,45 @@ type PendingToolRegistry = Map<string, { toolName: string; args?: unknown }>;
 type AgentEventSink = (event: AgentEvent) => void;
 
 /**
+ * [subagent-observability §3.3.1] 收尾边沿结构化轮终事实（停因 + errorMessage + aborted
+ * 三源判别三汇合）。由 handleAgentEnd 在最终 agent_end（willRetry !== true）一次产出，
+ * 供 spawn-runner 落 runEnd → collectOutcome 一次分类 FailureCause（§3.3.2）。
+ *
+ * abortSource 三源判别（同一收尾边沿裁决，禁止把 aborted 一律记失败）：
+ *   host-cancel  — 用户/run 取消（宿主 abort 信号置位——isHostAbortRequested 注入谓词）
+ *                  → FailureCause user.cancelled（中止，非失败）；
+ *   turn-budget  — turn-limiter 宽限轮耗尽（limiter.didAbort 事实位）→ harness.turn_budget_exhausted；
+ *   engine       — 无前两者的 aborted 兜底 → engine.engine_aborted。
+ */
+export interface EngineRoundErrorFact {
+  stopReason: "error" | "aborted";
+  errorMessage: string;
+  /** pi AssistantMessage.rawStopReason 原值（provider 原生 finish reason，结构化输入）。 */
+  rawStopReason?: string;
+  /** pi AssistantMessage.diagnostics 原样（结构化诊断，消费侧运行时窄化）。 */
+  diagnostics?: unknown;
+  abortSource: "host-cancel" | "turn-budget" | "engine";
+}
+
+/**
+ * [subagent-observability §3.3.1 P5 计账] agent_settled 轮终快照。
+ *   turnsAtSettle        — 失败尝试排除后的轮数（P5：turns 计数排除失败尝试）；
+ *   finalAttemptTurnBase — 最终尝试的 turns 切片基（record.turns 下标——auto_retry_start
+ *                          边界处的 turnCount 快照）；收集侧据此对 usage 聚合切片，
+ *                          轮收条 usage 记最终尝试值（失败尝试 usage 不静默计入）；
+ *   retryAttempts        — auto_retry_start 帧计数（重试波次数，随 outcome 上报）；
+ *   stopReason           — 最后一条 assistant 消息停因（成功轮 = 非 error/aborted 停因；
+ *                          引擎停因词表展示口径 stop/error/aborted——非 error/aborted 的
+ *                          正常停因（toolUse/length/deferred）统一记 stop）。
+ */
+export interface SettledRoundSnapshot {
+  turnsAtSettle: number;
+  finalAttemptTurnBase: number;
+  retryAttempts: number;
+  stopReason: string | undefined;
+}
+
+/**
  * [codemode u5 / D4] 嵌套工具调用判定（live ≡ reload 对齐，非 codemode 专属逻辑）。
  *
  * 判据来源（pi 1.0.0 dist 实证）：工具经 ctx.executeTool() 发起的嵌套调用，其
@@ -71,11 +110,25 @@ export interface SdkTranslatorOpts {
   /** agent_end（非 willRetry）到达：turn 已终态、轮收敛（不 kill，收割等 agent_settled）。 */
   onAgentEnd?: () => void;
   /**
-   * agent_settled（真空闲）到达：run resolve 点 + 轮收割边界。入参 = resolve 时刻
-   * 的真实轮数快照——收集侧（collectOutcome）在 resolve 后的微任务延续中读轮数，
-   * 快照先行传出，防止下方「按轮清零」把成功 run 的 outcome.turns 腐化成 0。
+   * [subagent-observability §3.3.1 停因事实优先] 最终 agent_end 携带错误停因事实
+   * （最后一条 assistant 停因 ∈ {error, aborted} 或存在未消费的引擎 error 事件）：
+   * 收尾边沿按失败事实收口（→ endedCleanly=false → 退出码非 0 → 轮失败），
+   * onAgentEnd/onAgentSettled 的「默认成功」口径不再适用。
    */
-  onAgentSettled?: (turnsAtSettle: number) => void;
+  onErroredEnd?: (fact: EngineRoundErrorFact) => void;
+  /**
+   * [subagent-observability §3.3.1 aborted 三源判别] 宿主 abort 信号谓词注入
+   * （spawn-runner 传 `params.signal?.aborted === true`）：收尾边沿判别 abortSource
+   * 用。缺省 = 恒 false（无宿主取消通道的装配/测试形态）。
+   */
+  isHostAbortRequested?: () => boolean;
+  /**
+   * agent_settled（真空闲）到达：run resolve 点 + 轮收割边界。入参 = 轮终快照
+   * （失败尝试排除后的轮数 + usage 切片基 + retryAttempts + 停因）——收集侧
+   * （collectOutcome）在 resolve 后的微任务延续中读快照，快照先行传出，防止下方
+   * 「按轮清零」把成功 run 的 outcome 计数腐化成 0。
+   */
+  onAgentSettled?: (snapshot: SettledRoundSnapshot) => void;
 }
 
 /** tool_execution_start → tool_start（toolCallId 在册时寄存 args 供 end 回填）。 */
@@ -157,10 +210,37 @@ function handleToolExecutionUpdate(
   agentEvent(TOOL_ACTIVITY_EVENT);
 }
 
-/** agent_end → 轮收敛分派（非 willRetry 才是轮终）。 */
-function handleAgentEnd(raw: SdkEvent, opts: SdkTranslatorOpts): void {
-  // [F1.2 从根源修复，Gate B 2026-09-09] pi rpc 模式 turn 完成后进程常驻不退出；旧 core
-  // runSpawn 的 routeAgentEnd（agent_end → 非 willRetry → 终结子进程 → close →
+/**
+ * [subagent-observability §3.3.1] 收尾边沿状态（闭包内 per-run 累积，handleAgentEnd
+ * 一次消费）。字段语义：
+ *   lastStopReason / lastErrorMessage — 最后一条 assistant 消息停因事实（message_end）；
+ *   pendingErrorFact — 未消费的引擎 error 事实：stopReason=error/aborted 置位，后续
+ *                      非 error 停因（重试恢复后的成功响应）清除——判据不依赖 record
+ *                      lastError（reducer turn_end 会清空它，u2 归属）；
+ *   rawStopReason / lastDiagnostics — 结构化输入停止丢弃（§3.3.2 分类机读通道）。
+ */
+interface ClosingEdgeState {
+  lastStopReason: string | undefined;
+  lastErrorMessage: string | undefined;
+  pendingErrorFact: string | undefined;
+  rawStopReason: string | undefined;
+  lastDiagnostics: unknown;
+  /** [P5 计账] auto_retry_start 帧计数（重试波次）。 */
+  retryAttempts: number;
+  /** [P5 计账] 最近一次 auto_retry_start 边界处的 turnCount（失败尝试 turns 切片基）。 */
+  failedAttemptTurnBase: number;
+}
+
+/** agent_end → 轮收敛分派（[§3.3.1] 停因事实优先：willRetry 只裁「是否最终 agent_end」，
+ * 成败判定锚停因事实，不再默认成功）。 */
+function handleAgentEnd(
+  raw: SdkEvent,
+  edge: ClosingEdgeState,
+  limiter: ReturnType<typeof createTurnLimiter>,
+  opts: SdkTranslatorOpts,
+): void {
+  // [F1.2 从根源修复，Gate B 2026-09-09] pi rpc 模式 turn 完成后进程常驻不退出；
+  // 旧 core runSpawn 的 routeAgentEnd（agent_end → 非 willRetry → 终结子进程 → close →
   // runSpawn resolve）在 W7 协议化提取时丢失，导致 run 永不终态（事件流出齐全、
   // outcome 悬挂）。此处承载轮终收敛语义：message_end/turn_end 已先于 agent_end
   // 到达并累积进 record，run 的 resolve 挂 agent_settled（真空闲），收割在其后
@@ -168,12 +248,46 @@ function handleAgentEnd(raw: SdkEvent, opts: SdkTranslatorOpts): void {
   // 旧实现的 pending 后代 keep-alive 分支（session 文件 pending:register 差集
   // 判活 + no-progress timer + notifier steer 唤醒）未随迁移——本执行器口径是
   // 每 run 一进程，后台后代保活编排登记为协议化偏差。
-  if (raw.willRetry !== true) opts.onAgentEnd?.();
+  if (raw.willRetry === true) return;
+  // [subagent-observability §3.3.1] 停因事实优先：错误停因（error/aborted）或存在
+  // 未消费的引擎 error 事实 → onErroredEnd（失败收口），settled 门控在 spawn-runner
+  // 同点覆盖（settled 不再是任何置 0 依据）。
+  const stopReasonIsErrorFact =
+    edge.lastStopReason === "error" || edge.lastStopReason === "aborted";
+  if (stopReasonIsErrorFact || edge.pendingErrorFact !== undefined) {
+    const stopReason: "error" | "aborted" = edge.lastStopReason === "aborted" ? "aborted" : "error";
+    opts.onErroredEnd?.({
+      stopReason,
+      errorMessage:
+        edge.lastErrorMessage ?? edge.pendingErrorFact ?? "engine reported error without message text",
+      ...(edge.rawStopReason !== undefined ? { rawStopReason: edge.rawStopReason } : {}),
+      ...(edge.lastDiagnostics !== undefined ? { diagnostics: edge.lastDiagnostics } : {}),
+      // [§3.3.1 aborted 三源判别] 同一收尾边沿裁决：宿主取消 > limiter 耗尽 > 引擎异常。
+      abortSource: adjudicateAbortSource(opts, limiter),
+    });
+    return;
+  }
+  opts.onAgentEnd?.();
 }
 
-/** agent_settled → 轮计数与 limiter 标志按轮重置 + run resolve 点回调。 */
+/** [§3.3.1 三源判别] aborted 停因的来源裁决（严格序）：宿主取消 → limiter 耗尽 → 引擎异常。 */
+function adjudicateAbortSource(
+  opts: SdkTranslatorOpts,
+  limiter: ReturnType<typeof createTurnLimiter>,
+): EngineRoundErrorFact["abortSource"] {
+  if (opts.isHostAbortRequested?.() === true) return "host-cancel";
+  if (limiter.didAbort) return "turn-budget";
+  return "engine";
+}
+
+/**
+ * agent_settled → 轮计数与 limiter 标志按轮重置 + run resolve 点回调。
+ * [subagent-observability P5 计账] 快照含失败尝试排除后的轮数与 usage 切片基——
+ * 失败尝试（auto_retry_start 边界之前累积的 turns）不再静默计入轮收条计数。
+ */
 function handleAgentSettled(
   record: ReturnType<typeof createReplayRecord>,
+  edge: ClosingEdgeState,
   limiter: ReturnType<typeof createTurnLimiter>,
   opts: SdkTranslatorOpts,
 ): void {
@@ -183,14 +297,35 @@ function handleAgentSettled(
   // 轮数快照必须先于清零传出（opts.onAgentSettled 内部 settle exitPromise），
   // 否则收集侧读到的成功 run 轮数恒为 0。
   if (opts.onAgentSettled !== undefined) {
-    opts.onAgentSettled(record.turnCount);
+    const turnsAtSettle = Math.max(0, record.turnCount - edge.failedAttemptTurnBase);
+    opts.onAgentSettled({
+      turnsAtSettle,
+      finalAttemptTurnBase: Math.min(edge.failedAttemptTurnBase, record.turns.length),
+      retryAttempts: edge.retryAttempts,
+      // 引擎停因词表展示口径（stop/error/aborted）：非 error/aborted 的正常停因
+      // （toolUse/length/deferred）统一记 stop——成功收尾事实。
+      stopReason:
+        edge.lastStopReason === "error" || edge.lastStopReason === "aborted"
+          ? edge.lastStopReason
+          : edge.lastStopReason !== undefined
+            ? "stop"
+            : undefined,
+    });
     record.turnCount = 0;
     limiter.reset();
   }
 }
 
-/** message_end 累积（usage 折算 + stopReason error/aborted → error 事件）。 */
-function accumulateMessageEnd(raw: SdkEvent, agentEvent: AgentEventSink): void {
+/**
+ * message_end 累积（usage 折算 + 停因事实累积 + stopReason error/aborted → error 事件）。
+ * [subagent-observability §3.3.1/§3.3.2] 停因事实与结构化输入（rawStopReason/diagnostics）
+ * 在闭包累积供收尾边沿消费；error 事实的消费语义 = 后续非 error 停因（重试恢复）清除。
+ */
+function accumulateMessageEnd(
+  raw: SdkEvent,
+  edge: ClosingEdgeState,
+  agentEvent: AgentEventSink,
+): void {
   const msg = raw.message;
   if (msg?.usage) {
     const { cost: costObj } = msg.usage;
@@ -204,9 +339,21 @@ function accumulateMessageEnd(raw: SdkEvent, agentEvent: AgentEventSink): void {
     agentEvent({ type: "message_end", usage });
   }
   const stopReason = msg?.stopReason;
+  if (stopReason !== undefined) {
+    edge.lastStopReason = stopReason;
+    edge.lastErrorMessage = msg?.errorMessage;
+    // [§3.3.2 结构化输入停止丢弃] rawStopReason/diagnostics 原样留存（分类兜底通道）。
+    if (msg?.rawStopReason !== undefined) edge.rawStopReason = msg.rawStopReason;
+    if (msg?.diagnostics !== undefined) edge.lastDiagnostics = msg.diagnostics;
+  }
   if (stopReason === "error" || stopReason === "aborted") {
     const errMsg = msg?.errorMessage ?? raw.reason ?? stopReason;
+    edge.pendingErrorFact = errMsg;
     agentEvent({ type: "error", message: errMsg });
+  } else if (stopReason !== undefined) {
+    // 非 error 停因到达 = 此前的失败尝试已被重试恢复（P5：auto_retry 重跑成功）——
+    // 未消费 error 事实清除，收尾边沿不再据旧失败判终。
+    edge.pendingErrorFact = undefined;
   }
 }
 
@@ -223,6 +370,17 @@ export function createSdkEventTranslator(
 
   // a2. [U-A6] 工具执行期活性信号的节流时钟（per-translator，即 per-run）
   const activityClock = { lastEmittedAtMs: 0 };
+
+  // a3. [subagent-observability §3.3.1] 收尾边沿事实累积（per-run 闭包）
+  const edge: ClosingEdgeState = {
+    lastStopReason: undefined,
+    lastErrorMessage: undefined,
+    pendingErrorFact: undefined,
+    rawStopReason: undefined,
+    lastDiagnostics: undefined,
+    retryAttempts: 0,
+    failedAttemptTurnBase: 0,
+  };
 
   // b. turnLimiter（spawn 版：abort = kill 子进程；steer 未接通，靠 WRAP_UP_HINT 补偿）
   const limiter = createTurnLimiter({
@@ -262,13 +420,25 @@ export function createSdkEventTranslator(
         agentEvent({ type: "turn_end" });
         return;
       case "agent_end":
-        handleAgentEnd(raw, opts);
+        handleAgentEnd(raw, edge, limiter, opts);
         return;
       case "agent_settled":
-        handleAgentSettled(record, limiter, opts);
+        handleAgentSettled(record, edge, limiter, opts);
         return;
       case "message_end":
-        accumulateMessageEnd(raw, agentEvent);
+        accumulateMessageEnd(raw, edge, agentEvent);
+        return;
+      case "auto_retry_start":
+        // [subagent-observability §3.3.1 P5 计账] 失败尝试识别锚 = auto_retry 事件边界：
+        // start 帧 = 刚结束的整个 run 是失败尝试、即将整体重跑——此刻已累计的 turns
+        // 全属失败尝试，记为切片基（最终尝试 usage/turns 从此界起算）；retryAttempts
+        // 计数随轮终快照上报（重试波次可见，失败尝试不再静默）。
+        edge.retryAttempts += 1;
+        edge.failedAttemptTurnBase = record.turnCount;
+        return;
+      case "auto_retry_end":
+        // end 帧的成败事实已由 message_end（stopReason/errorMessage）承载——本边界
+        // 无独立计账义务（retryAttempts 锚在 start 帧，finalError 即 lastErrorMessage）。
         return;
       case "compaction_start":
         agentEvent({ type: "compaction" });
