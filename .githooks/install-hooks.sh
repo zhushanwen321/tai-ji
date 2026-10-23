@@ -166,12 +166,15 @@ fi
 
 # 获取变更文件
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
-# [type-gate-coverage 2026-10-15] 前端域 = renderer + ui + mobile-renderer 三包。既有盲区 =
-# ui/mobile 的**测试文件**：renderer 默认 tsconfig 排除测试（typecheck-test 变体只含 renderer
-# 自己的测试），ui src 虽经 renderer include 传递覆盖，但 ui 测试文件（如 UserBubble.test 的
-# EditComposerProps 契约漂移 9 错存量）无任何编译期信号，mobile 全包同理。ESLint 与 vue-tsc
-# 两段同源本变量，随之扩大范围。
-FRONTEND_FILES=$(echo "$STAGED_FILES" | grep -E "^packages/(renderer|ui|mobile-renderer)/src/" || true)
+# [type-gate-coverage 2026-10-15] 前端域 = renderer + ui + mobile-renderer + core 四包。
+# 既有盲区 = ui/mobile 的**测试文件**：renderer 默认 tsconfig 排除测试（typecheck-test
+# 变体只含 renderer 自己的测试），ui src 虽经 renderer include 传递覆盖，但 ui 测试文件
+# （如 UserBubble.test 的 EditComposerProps 契约漂移 9 错存量）无任何编译期信号，
+# mobile 全包同理。ESLint 与 vue-tsc 两段同源本变量，随之扩大范围。
+# core 纳入：staged core 文件此前不触发任何门禁段——ESLint 段按根 flat config 的
+# core 规则块直查，vue-tsc 段经 renderer/ui/mobile import 传递覆盖 core 被引用源码
+#（未被引用文件的兜底 = CI typecheck job 的 TypeCheck - core 全量步）。
+FRONTEND_FILES=$(echo "$STAGED_FILES" | grep -E "^packages/(renderer|ui|mobile-renderer|core)/src/" || true)
 EXTENSION_FILES=$(echo "$STAGED_FILES" | grep -E "^extensions/.*\.ts$" | grep -vE "__tests__|\.test\.|/workflows/|/examples/|\.d\.ts$" || true)
 
 # ============================================================================
@@ -305,8 +308,9 @@ if [ -n "$FRONTEND_FILES" ]; then
                 exit 1
             fi
 
-            # 自动添加修复后的文件
-            FIXED_FILES=$(git diff --cached --name-only --diff-filter=M | grep -E "^packages/(renderer|ui|mobile-renderer)/src/" || true)
+            # 自动添加修复后的文件（与 FRONTEND_FILES 同域：core 文件同样会被 --fix 改写，
+            # 漏登记会令提交内容停留在修复前版本而检查按修复后版本通过）
+            FIXED_FILES=$(git diff --cached --name-only --diff-filter=M | grep -E "^packages/(renderer|ui|mobile-renderer|core)/src/" || true)
             if [ -n "$FIXED_FILES" ]; then
                 echo -e "${BLUE}[INFO] ESLint 自动修复了以下文件:${NC}"
                 echo "$FIXED_FILES" | sed 's/^/  - /'

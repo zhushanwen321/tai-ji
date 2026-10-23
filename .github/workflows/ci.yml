@@ -88,11 +88,21 @@ jobs:
       - name: TypeCheck - renderer tests
         run: pnpm --filter @taiji/frontend run typecheck:test
 
+      # mobile-renderer 独立 typecheck（与 pre-commit 前端类型门禁段同口径）：renderer
+      # tsconfig include 不含 mobile 包，缺本步则 mobile 全包在 CI 零编译期信号。
+      - name: TypeCheck - mobile-renderer
+        run: pnpm --filter @taiji/mobile-renderer run typecheck
+
       - name: TypeCheck - runtime
         run: pnpm --filter @taiji/runtime run typecheck
 
       - name: TypeCheck - shared
         run: pnpm --filter @taiji/shared run typecheck
+
+      # core 独立 typecheck：renderer/ui/mobile 经 import 只传递覆盖 core 的被引用文件，
+      # 未被引用的 core 源文件此前零编译期信号——本步按包内 tsconfig（include src）全量覆盖。
+      - name: TypeCheck - core
+        run: pnpm --filter @taiji/core run typecheck
 
       - name: TypeCheck - state-machine
         run: pnpm --filter @zhushanwen/state-machine run typecheck
@@ -412,11 +422,14 @@ jobs:
       # changeset 双防线（versionable 判定 + check 完整性）同批追加（private 包 changeset 拦截）。
       # check-test-blind-wait 同批追加（测试盲等形态拦截，CPU 并发偶发假红防再发；判定本体 +
       # pre-commit 触发段在 .githooks，tmpdir 自建树 × 真实脚本进程直测判定与豁免/跳过语义）。
+      # check-prompt-outposts 检查测试同批追加（判定行为机器锁定：fixture 注入内容从检查本体
+      # OUTPOST_CALLSITES 常量提取生成，白名单登记漂移结构性不可发生；--root 全量扫描 fixture
+      # 树，不依赖 staged 上下文，同上惯例不依赖 staged 产物）。
       # C-ext-31 源码级边界检查测试同批追加（bundle 门禁只查标记匹配，源码层 import
       # '@taiji/shared/paths' 回归无拦截；tmp mirror × spawnSync 直测静态/动态/多行
       # import 判定与注释、测试文件排除语义，另断言真仓当前干净，不依赖 staged 产物）。
       - name: Test - scripts guards
-        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-subagent-core-value-cycles.test.mjs scripts/__tests__/check-global-slot-keys.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs scripts/__tests__/check-domain-type-path.test.mjs scripts/__tests__/check-capability-allowlist-sync.test.mjs scripts/__tests__/check-artifact-dir-formula-sync.test.mjs scripts/__tests__/check-posix-resolve-mirror-sync.test.mjs scripts/__tests__/pi-env-admission-gate.test.mjs scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs scripts/__tests__/merge-release.test.mjs scripts/__tests__/merge-verify-ci-release.test.mjs scripts/__tests__/changeset-versionable.test.mjs scripts/__tests__/changeset-check.test.mjs scripts/__tests__/check-test-blind-wait.test.mjs scripts/__tests__/check-pi-subtree-shared-imports.test.mjs
+        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-subagent-core-value-cycles.test.mjs scripts/__tests__/check-global-slot-keys.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs scripts/__tests__/check-domain-type-path.test.mjs scripts/__tests__/check-capability-allowlist-sync.test.mjs scripts/__tests__/check-artifact-dir-formula-sync.test.mjs scripts/__tests__/check-posix-resolve-mirror-sync.test.mjs scripts/__tests__/pi-env-admission-gate.test.mjs scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs scripts/__tests__/merge-release.test.mjs scripts/__tests__/merge-verify-ci-release.test.mjs scripts/__tests__/changeset-versionable.test.mjs scripts/__tests__/changeset-check.test.mjs scripts/__tests__/check-test-blind-wait.test.mjs scripts/__tests__/check-prompt-outposts.test.mjs scripts/__tests__/check-pi-subtree-shared-imports.test.mjs
 
   # E2E 视觉回归（mock 层 visual-chromium）：只跑像素 diff baseline（S2 W3 交付的
   # visual-chromium project，testMatch **/visual/** + chromium.launch + spawn vite @ VITE_MOCK=true）。
@@ -771,8 +784,11 @@ jobs:
       # runtime 的 .prompt( / .steer( / .followUp( 调用点必须登记白名单（文件 + 行内
       # 指纹 + 内容性质 + 注入状态），未登记新调用点即拦截——防新增用户内容出站通路
       # 忘挂 SkillInjector（MF-B @ 定向 / MF-C landing 首发同类缺口复发）。
+      # --all 必带：CI checkout 后 index 与 HEAD 一致、staged 恒空集，无 --all 时
+      # staged 交集会把扫描面清空、本检查退化为恒绿（同 check_subagent_channels.py
+      # 的 CI 形态）。
       - name: Prompt outposts guard (A2, full-repo)
-        run: python3 .githooks/check_prompt_outposts.py
+        run: python3 .githooks/check_prompt_outposts.py --all
       # vitest alias ↔ tsconfig paths 一致性——subagent-core 深路径 alias（vitest
       # 运行时解析）必须有 tsconfig paths 镜像（静态工具解析），两侧漂移即拦截
       # （PR #198 曾因缺失镜像一次产生 138 条 unresolved-import 假阳性）。
