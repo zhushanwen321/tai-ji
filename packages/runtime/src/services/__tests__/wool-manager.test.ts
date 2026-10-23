@@ -483,6 +483,37 @@ describe('状态缓存与快照组装', () => {
     expect(manager.getSnapshot().families.find((f) => f.family === 'qoder')?.account).toEqual({ loggedIn: false, fetchedAt: 1_700_000_000_000 })
   })
 
+  it('status 命令携带 params.apiKey（models.json 羊毛条目凭据随命令传入——管理会话冷启动的双通道存储分裂缝合）；无凭据时不带 params', async () => {
+    const sentCommands: string[] = []
+    const overrides: Partial<WoolSessionPort> = {
+      sendSystemCommand: async (_sid: string, commandLine: string) => {
+        sentCommands.push(commandLine)
+        return { kind: 'sent' as const }
+      },
+    }
+    const modelsPort = makeModelsEntryPort({ 'wool-qoder': { name: 'Qoder', apiKey: 'dt-passed-key-0000' } })
+
+    // 有凭据 → 命令行 JSON 携带 params.apiKey
+    const withKey = assemble({ sessionOverrides: overrides, modelsEntry: modelsPort.port })
+    withKey.session.entriesBySid.set('sid-1', [
+      manageEntry('qoder', { v: 1, ok: true, data: { loggedIn: true, fetchedAt: 5 } }),
+    ])
+    const okReply = await withKey.manager.runAction({ action: 'status', family: 'qoder' })
+    expect(okReply.ok).toBe(true)
+    const withKeyEnvelope = JSON.parse(sentCommands[0]!.replace(/^\/wool-qoder /, '')) as { params?: { apiKey?: string } }
+    expect(withKeyEnvelope.params?.apiKey).toBe('dt-passed-key-0000')
+
+    // 无凭据（未接入）→ 不带 params（扩展回 not_logged_in 是正确语义）
+    sentCommands.length = 0
+    const noKey = assemble({ sessionOverrides: overrides })
+    noKey.session.entriesBySid.set('sid-1', [
+      manageEntry('qoder', { v: 1, ok: false, error: { code: 'not_logged_in', message: 'no credentials' } }),
+    ])
+    await noKey.manager.runAction({ action: 'status', family: 'qoder' })
+    const noKeyEnvelope = JSON.parse(sentCommands[0]!.replace(/^\/wool-qoder /, '')) as { params?: unknown }
+    expect(noKeyEnvelope.params).toBeUndefined()
+  })
+
   it('setAutoCheckin → settings 羊毛域写入 + 快照回读（默认关）', async () => {
     const { manager, settings } = assemble()
     expect(manager.getSnapshot().families.find((f) => f.family === 'workbuddy')?.autoCheckin).toBe(false)

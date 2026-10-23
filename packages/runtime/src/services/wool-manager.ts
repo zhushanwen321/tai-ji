@@ -975,10 +975,24 @@ export class WoolManager {
     })
   }
 
+  /**
+   * status 命令传参（wool-manage 协议 status params.apiKey）：models.json 羊毛条目
+   * 凭据随命令传入扩展——管理会话每次动作新建 pi 进程（扩展进程内凭据缓存恒冷）、
+   * pi auth.json 恒无羊毛条目（taiji 从不写它，凭据权威在宿主 models.json），不传参
+   * 则扩展侧登录态校验恒报 not_logged_in（对话链经 options.apiKey 可用、状态链恒失效
+   * 的双通道存储分裂由本传参缝合——与对话链同源）。无凭据返回 undefined（未接入语义，
+   * 扩展回 not_logged_in 正确）。
+   */
+  private statusParams(family: WoolFamilyId): { apiKey: string } | undefined {
+    const entry = this.deps.modelsEntry.readEntry(woolProviderId(family))
+    const apiKey = entry?.apiKey
+    return typeof apiKey === 'string' && apiKey.length > 0 ? { apiKey } : undefined
+  }
+
   /** status：拉账号状态并更新缓存（not_logged_in 也是合法状态面，更新 loggedIn:false 后按错误回）。 */
   private async fetchAccountStatus(family: WoolFamilyId): Promise<WoolAccountStatusView> {
     return this.withManageSession(family, async (sid) => {
-      const response = await this.runManageCommand(sid, family, 'status')
+      const response = await this.runManageCommand(sid, family, 'status', this.statusParams(family))
       if (!response.ok) {
         if (response.code === 'not_logged_in') {
           const prev = this.accountCache.get(family)
@@ -1019,9 +1033,10 @@ export class WoolManager {
     })
   }
 
-  /** 会话内复用的 status 拉取（checkin 编排第二步；不走独立 withManageSession）。 */
+  /** 会话内复用的 status 拉取（checkin 编排第二步；不走独立 withManageSession）。
+   *  传参同 fetchAccountStatus（statusParams——同会话凭据与独立拉取同源）。 */
   private async fetchStatusInSession(sessionId: string, family: WoolFamilyId): Promise<WoolAccountStatusView> {
-    const response = await this.runManageCommand(sessionId, family, 'status')
+    const response = await this.runManageCommand(sessionId, family, 'status', this.statusParams(family))
     if (!response.ok) {
       throw new WoolActionError(mapManageErrorCode(response.code), response.message)
     }
