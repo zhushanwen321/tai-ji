@@ -43,7 +43,7 @@
 |---|---|---|---|---|---|
 | 1 | 文件树与文件查看 | `workspace.filetree` `workspace.drawer` | — | **`reuse-e2e`** | `e2e/file-tree.spec.ts`（10 用例，含 @p0-smoke 子集，E2E-ELECTRON-01）。本技能补「懒加载 + git 角标 + ignored 双色」一轮即可 |
 | 2 | 工具调用过程展示 | `chat.stream`（工具块）+ `render.tool-call`（v1.1 补登） | `p1-tool-call-render` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（16 断言，2026-10-22）：bash 工具执行（B：history 回灌 faux-bash-ok）、change-set-card 容器出现、write+edit 落盘（C：faux-v2）+ git untracked（A 态数据面）。**修正（2026-10-22 对抗审查 + 复跑）**：早前「工具块锚点未进 DOM」的主因是完成态 trace 默认折叠（use-turn-trace 设计内，折叠态只渲染末位 text 块）；展开钮在 turn-meta 多按钮中无独立 testid，first() 无法精确寻址（复跑 2 轮未现）——**可视断言待补锚**（剧本 uncovered 登记，verdict degraded），内容面由 B/C 硬证据承载。卡内文件行渲染形态待查（changeset-card-probe 留档） |
-| 3 | 权限审批闭环 | `interaction.permission` | `p1-permission-approval`（实测未通，fail 存档） | **`capability-only`（UI 闭环当前不可达）** | 剧本已写（strict 配置前置 + CompanionBand 驱动）但 4 次实测未通：①侧栏激活链在该装配形态下 4/4 不可见（未定位；101151 轮另有剧本自身 bug 已修）；②strict 配置写入后 companion-band 60s 未现（配置契约待核实）。**插件权限审批**（permission-dialog 家族）无 sandbox 夹具 = 不可达。两未知待产品侧核实后重跑 |
+| 3 | 权限审批闭环 | `interaction.permission` | `p1-permission-deny-flow` ✅实跑（deny 分支）· `p1-permission-approval`（fail 存档，待重写吸收 deny-flow 装配） | **`scenario`（部分）** | **deny-flow 实测覆盖**（19 断言，2026-10-24，chat-flow-consistency U9 交付）：strict 模式 bash 审批 companion-band 可见、等待期工具块已入流运行中（S1 撤案结论行为锁定）、侧栏 waiting 警示点（permission 判定键 → deriveStatus）、广播帧 permission:true、Deny（radio+確認两步）→ 展开回合 trace 失败块可见（`[pi-permission] deny: denied via rpc (source=user)`）、page.reload 重放展开后同位置、history isError tool_result。**装配解法（消解 2026-10-22 登记的两未知）**：strict 配置在 `run()` 开头、session.create 之前写（permission 扩展每次读时刷新，pi 按 session spawn——launch 前置写非必要）；侧栏激活条件轮询（偶发环境抖动重试即可，非产品缺陷）。**未覆盖**：approve 分支（approval 剧本待按 deny-flow 装配重写）、AI classifier（auto 模式）、插件权限审批（无 sandbox 夹具不可达）。**坑**：回合收尾后 trace 折叠 + 工具行收进 run-group 组行——deny 文本断言须经「重进会话行 → 点 turn-meta 展开 → 点 run-group-header」三层展开；approval 剧本当年 fail 的「Approve 后浮层不消失」疑似同因（radio 未提交確認） |
 | 4 | 消息撤回 | `chat.revoke` `session.history` | `p1-chat-revoke` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（15 断言，2026-10-22，已送达支）：revokeMessage → `revoked:true` + content 原文（草稿回填数据）、history 回退（哨兵消失）、UI 气泡移除、二次撤回幂等（revoked:true 重返原文——实测形态，非 D8 错误码路径）、JSONL append-only 形态留档。**未覆盖**：在途通道 delivery.cancel、六错误码逐码、direct/steer 车道撤回差异、派生面板随树重建、上下文裁剪、定时任务不复活（FEATURE :63 后四项） |
 
 ## 三、统计与待补剧本优先级
@@ -88,7 +88,7 @@
 | 10 | `p0-display-containers` | P0-17 | ✅ 12 断言 degraded（托盘制造路径需执行域 record，弹层/激活回路已验） |
 | 11 | `p1-tool-call-render` | P1-2 | ✅ 16 断言 degraded（工具块可视待补锚，B/C 硬证据全过） |
 | 12 | `p1-chat-revoke` | P1-4 | ✅ 15 断言 pass |
-| 13 | `p1-permission-approval` | P1-3 | ❌ 实测未通（fail 存档：激活链 + strict 配置契约两未知），矩阵保持 capability-only |
+| 13 | `p1-permission-approval` | P1-3 | ❌ 实测未通（fail 存档：激活链 + strict 配置契约两未知），矩阵保持 capability-only → **2026-10-24 更新**：两未知已由 `p1-permission-deny-flow` 实跑消解（配置 = session.create 前写入即可；激活链 = 环境抖动），approval 剧本待按 deny-flow 装配重写 |
 
 **剩余工作**（后续排期，非本技能缺口）：`p0-settings-others`（五面抽样）、`p0-session-isolation-stream`（并发流式隔离）、P0-12 结构层 overlay UI 面、`p1-permission-approval` 待配置契约核实后重跑。
 

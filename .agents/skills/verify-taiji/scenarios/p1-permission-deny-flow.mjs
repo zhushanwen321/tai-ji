@@ -41,12 +41,12 @@ export const meta = {
   },
   provable: [
     'strict 模式下 bash 工具触发审批：A：companion-band 浮层可见',
-    'A：等待期对话流工具块已入流（tool_execution_start 先于审批等待——S1 撤案结论的行为锁定）',
+    'A：等待期对话流工具块已入流运行中（tool_execution_start 先于审批等待——S1 撤案结论的行为锁定）',
     'A：等待期侧栏会话行 waiting 警示点（S4：permission 判定键 → deriveStatus waiting）',
     'A：审批广播帧携带 permission:true（S4 runtime 侧判定键）',
-    'A：点 Deny（空理由）后浮层消失，实时对话流出现失败工具块（含 denied via strict 原因）',
-    'A：page.reload 重开后失败块仍在同位置（live ≡ reload）',
-    'B：turn 收尾正常 + history 工具结果含 denied via strict',
+    'A：点 Deny（空理由）后浮层消失，展开回合 trace 失败工具块可见（含 [pi-permission] deny 原因；收起时机契约下回看形态 = 展开后可见）',
+    'A：page.reload 重开重放、展开 trace 后失败块仍在（live ≡ reload）',
+    'B：turn 收尾正常 + history 工具结果含 [pi-permission] deny 原因（isError tool_result）',
   ],
   notProvable: [
     'AI classifier 分支（auto 模式）——只验 strict 确定性分支',
@@ -63,6 +63,30 @@ async function pollUntil(predicate, { timeoutMs, intervalMs = 1000 }) {
     if (Date.now() >= deadline) return null
     await new Promise((r) => setTimeout(r, intervalMs))
   }
+}
+
+/**
+ * 确保会话视图在位（对话流 TurnMeta 可点）：实测回合收尾后焦点会话可能被应用侧切回
+ * landing（runDir deny-failed-block.png 现场）——用户回看路径就是重进会话行，此处同法
+ * 恢复：turn-meta 在场直接返回；不在场点会话行后等其在场。
+ */
+async function ensureSessionView(ui) {
+  const inView = await pollUntil(async () => {
+    try {
+      await ui.html('testid=turn-meta-1')
+      return true
+    } catch { return false }
+  }, { timeoutMs: 4_000 })
+  if (inView !== null) return true
+  try {
+    await ui.click('css=.session-item', { timeoutMs: 5_000 })
+  } catch { return false }
+  return (await pollUntil(async () => {
+    try {
+      await ui.html('testid=turn-meta-1')
+      return true
+    } catch { return false }
+  }, { timeoutMs: 15_000 })) !== null
 }
 
 export async function run(ctx) {
@@ -140,18 +164,21 @@ export async function run(ctx) {
     actual: `hit=${hasPermissionKey}`,
   })
 
-  // S1 行为锁定①：等待期工具块已入流（tool_execution_start 先于审批等待）且运行中
+  // S1 行为锁定①：等待期工具块已入流（tool_execution_start 先于审批等待）且运行中。
+  // 工具行渲染双形态：独立 Block（data-testid="block-tool-<id>"）或 run-group 组行
+  // （"执行命令" 分组，RunGroupBlock data-testid="run-group"）——任一命中即工具已入流；
+  // 运行态指示 = 呼吸弧动画类（Work turn 状态行 / 运行中块共用 animate-loader-spin）。
   await pollUntil(async () => {
     try {
       const html = await ui.html('css=body')
-      return html.includes('tool-block-header') && html.includes('animate-loader-spin')
+      return (html.includes('data-testid="block-tool-') || html.includes('data-testid="run-group"')) && html.includes('animate-loader-spin')
     } catch { return false }
   }, { timeoutMs: 20_000 })
   const waitHtml = await ui.html('css=body')
-  const toolBlockLive = waitHtml.includes('tool-block-header')
+  const toolBlockLive = waitHtml.includes('data-testid="block-tool-') || waitHtml.includes('data-testid="run-group"')
   const runningIndicator = waitHtml.includes('animate-loader-spin')
-  ev.assert('A: 等待期工具块已入流且运行中（呼吸弧在）', toolBlockLive && runningIndicator, {
-    channel: 'A', expected: 'tool-block-header 可见 + 运行态指示',
+  ev.assert('A: 等待期工具块已入流且运行中（工具行/组行 + 呼吸弧）', toolBlockLive && runningIndicator, {
+    channel: 'A', expected: 'block-tool-*/run-group 可见 + 运行态指示',
     actual: `toolBlock=${toolBlockLive} running=${runningIndicator}`,
   })
 
@@ -171,57 +198,93 @@ export async function run(ctx) {
   await ev.shot(await instance.page(), 'waiting-state')
 
   // ── Deny 分支 ──
-  await ui.click('text=Deny', { timeoutMs: 15_000 })
+  // CompanionBand select 形态 = radio 单选（companion-select-option-<value>）+ 確認提交
+  // （companion-select-ok，选中前置 disabled）——两步：选 Deny → 点確認。
+  await ui.click('testid=companion-select-option-Deny', { timeoutMs: 15_000 })
+  await ui.click('testid=companion-select-ok', { timeoutMs: 15_000 })
 
-  // Reject-with-Reason input 对话框（Reject-with-Reason W6 T9 G3）：出现则空提交跳过
-  const reasonHandled = await pollUntil(async () => {
+  // Reject-with-Reason input 对话框（W6 T9 G3）：CompanionBand 换渲染 input 形态
+  // （companion-input + companion-input-ok），空提交即 fallback 固定文案——出现则点確認跳过
+  const reasonShown = await pollUntil(async () => {
     try {
       const html = await ui.html('css=body')
-      if (!html.includes('Reason for denying')) return true // 未出现（双形态之一）→ 已处理
-      // 出现：找 CompanionBand 输入区回车空提交
-      const bandHtml = await ui.html('testid=companion-band')
-      return bandHtml.includes('<input') || bandHtml.includes('textarea') || bandHtml.includes('contenteditable')
+      return html.includes('Reason for denying')
     } catch { return false }
-  }, { timeoutMs: 10_000 })
-  if (reasonHandled !== null) {
+  }, { timeoutMs: 8_000 })
+  if (reasonShown !== null) {
     try {
-      const bandInput = await ui.html('testid=companion-band')
-      if (bandInput.includes('Reason for denying')) {
-        await ui.press('Enter', { timeoutMs: 5_000 })
-        ev.step({ step: 'permission.reason-input', channel: 'A', exitCode: 0, stats: { skipped: 'empty-submit' } })
-      }
+      await ui.click('testid=companion-input-ok', { timeoutMs: 8_000 })
+      ev.step({ step: 'permission.reason-input', channel: 'A', exitCode: 0, stats: { skipped: 'empty-submit' } })
     } catch { /* input 框可能已自行关闭（fail-soft fallback） */ }
   }
 
   await ui.expectGone('testid=companion-band', { timeoutMs: 30_000 })
   ev.assert('A: Deny 后浮层消失', true, { channel: 'A', expected: 'companion-band 移除', actual: '已消失' })
 
-  // S1 行为锁定②：实时失败工具块（含拒绝原因）出现在对话流
-  const denyShown = await pollUntil(async () => {
-    try {
-      const html = await ui.html('css=body')
-      return html.includes('denied via strict')
-    } catch { return false }
-  }, { timeoutMs: 30_000 })
-  ev.assert('A: 实时对话流出现失败工具块（含 denied via strict 原因）', denyBlocked(denyShown), {
-    channel: 'A', expected: '失败块展开显示拒绝原因', actual: denyShown ? 'denied via strict 命中' : '30s 未现',
-  })
-  await ev.shot(await instance.page(), 'deny-failed-block')
-
-  // ── B：turn 收尾 + history ──
+  // S1 行为锁定②：失败工具块（含拒绝原因）。文本锚 = "[pi-permission] deny"（index.ts
+  // tool_call handler 的 block reason 前缀；fallback 细节形态 = "denied via rpc"——approvalCtx.mode
+  // 是 RPC 审批通道标识，非 permission 配置 mode）。
+  // 时序：deny 的 tool_call_end 到达即实时渲染失败块（展开态），但 faux 第二响应紧随收尾回合
+  // → trace 按收起时机契约折叠（U4 C4：会话结束不清展开分区、折叠态只显末位 text 正文）——
+  // 回看形态 = 用户点 TurnMeta 展开 trace（design §3.1 交互6「回看就是全量」）。断言走展开后
+  // 可见性（折叠瞬间窗口过窄，不作断言依据）。
   const end = await proto.waitTurnEnd(sid, { since, timeoutMs: 180_000 })
   ev.assert('B: deny 后 turn 正常收尾', end.ok === true, {
     channel: 'B', expected: 'message.complete', actual: `${end.type} stop=${end.payload?.stopReason ?? ''}`,
   })
 
+  // 诊断 attach：deny 相关广播帧全文（toolResult isError 文本形态取证）
+  const denyFrames = proto.events.slice(since).filter((e) => {
+    const t = JSON.stringify(e)
+    return t.includes('[pi-permission]') || t.includes('"isError"')
+  })
+  ev.attach('deny-frames', JSON.stringify(denyFrames.slice(-6), null, 2).slice(0, 4000))
+
+  // 展开本回合 trace（TurnMeta 按钮，工具 ×1 = hasFoldable）→ 失败块可见。
+  // 工具行渲染为 run-group 组行（"执行命令"分组）时组行自身还有一层折叠——点开组头
+  // （run-group-header）展开成员行，deny 文本在成员失败块的 output 里。
+  const viewReady = await ensureSessionView(ui)
+  if (!viewReady) ev.attach('view-restore-probe', '回合收尾后会话视图未恢复（landing 态，重进会话行未果）')
+  await ui.click('testid=turn-meta-1', { timeoutMs: 15_000 })
+  await pollUntil(async () => {
+    try {
+      await ui.click('testid=run-group-header', { timeoutMs: 2_000 })
+      return true
+    } catch {
+      return false // 非 run-group 形态（独立工具行）→ 无组头可点
+    }
+  }, { timeoutMs: 4_000 })
+  const denyShown = await pollUntil(async () => {
+    try {
+      const html = await ui.html('css=body')
+      return html.includes('[pi-permission] deny')
+    } catch { return false }
+  }, { timeoutMs: 20_000 })
+  ev.assert('A: 展开回合 trace 后失败工具块可见（含 [pi-permission] deny 原因）', denyShown === true, {
+    channel: 'A', expected: '失败块展开显示拒绝原因（[pi-permission] deny: …）',
+    actual: denyShown ? '命中' : '展开后 20s 未现',
+  })
+  if (denyShown !== true) {
+    try {
+      const html = await ui.html('css=body')
+      const hit = html.match(/\[pi-permission\][^<"]{0,120}/)
+      ev.attach('deny-dom-probe', hit ? hit[0] : `no [pi-permission] text in body (len=${html.length})`)
+    } catch { /* ignore */ }
+  }
+  await ev.shot(await instance.page(), 'deny-failed-block')
+
   const hist = await proto.history(sid, { limitTurns: 10 })
   const histText = JSON.stringify(hist.messages ?? [])
-  const histDenied = histText.includes('denied via strict')
-  ev.assert('B: history 工具结果含 denied via strict（isError tool_result）', histDenied, {
+  const histDenied = histText.includes('[pi-permission] deny')
+  ev.assert('B: history 工具结果含 deny 原因（isError tool_result）', histDenied, {
     channel: 'B', expected: 'deny 原因进 agent 上下文（历史事实）', actual: `hit=${histDenied}`,
   })
+  if (!histDenied) {
+    ev.attach('history-probe', histText.slice(0, 3000))
+  }
 
   // ── S1 行为锁定③：重开一致（page.reload → 重放 → 失败块仍在）──
+  // 重放后 trace 同为折叠态（收起时机契约），同法展开回合 trace 后断言。
   let reloadHit = false
   try {
     const page = await instance.page()
@@ -233,23 +296,30 @@ export async function run(ctx) {
         return true
       } catch { return false }
     }, { timeoutMs: 30_000 })
+    await ui.click('testid=turn-meta-1', { timeoutMs: 20_000 })
+    await pollUntil(async () => {
+      try {
+        await ui.click('testid=run-group-header', { timeoutMs: 2_000 })
+        return true
+      } catch {
+        return false
+      }
+    }, { timeoutMs: 4_000 })
     const replayHit = await pollUntil(async () => {
       try {
         const html = await ui.html('css=body')
-        return html.includes('denied via strict')
+        return html.includes('[pi-permission] deny')
       } catch { return false }
-    }, { timeoutMs: 30_000 })
-    reloadHit = replayHit !== null
+    }, { timeoutMs: 20_000 })
+    reloadHit = replayHit === true
   } catch (e) {
     ev.attach('reload-error', e instanceof Error ? e.message : String(e))
   }
-  ev.assert('A: 重开（reload 重放）后失败块仍在同位置', reloadHit, {
-    channel: 'A', expected: '重放对话流含 denied via strict 失败块', actual: reloadHit ? '命中' : '重放未命中（现场见 reload-error）',
+  ev.assert('A: 重开（reload 重放）展开后失败块仍在同位置', reloadHit, {
+    channel: 'A', expected: '重放对话流展开后含 [pi-permission] deny 失败块', actual: reloadHit ? '命中' : '重放未命中（现场见 reload-error）',
   })
   if (!reloadHit) uncovered.push('重开一致性断言未命中（reload 后会话激活或重放窗口问题）')
   await ev.shot(await instance.page(), 'after-reload')
 
   log(`done sid=${sid}`)
 }
-
-function denyBlocked(v) { return v === true }
