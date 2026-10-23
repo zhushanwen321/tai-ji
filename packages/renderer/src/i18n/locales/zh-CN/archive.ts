@@ -68,7 +68,7 @@ export default {
     batchPurging: '删除中…',
     batchPurgeSuccess: '已彻底删除 {count} 个归档会话',
     batchPurgeKept: '已彻底删除 {count} 个归档会话；{kept} 条的子代理记录因数据不可读已保守保留',
-    batchPurgePartial: '已彻底删除 {ok} 个、失败 {failed} 个；列表已刷新，可重试剩余项',
+    batchPurgePartial: '已彻底删除 {ok} 个、失败 {failed} 个；{msg}；列表已刷新，可重试剩余项',
     // 恢复编排 toast（useArchiveView；成功后切回会话列表）
     restoreSuccess: '已恢复「{name}」，已回到原项目分组',
     restoreFailed: '恢复失败：{msg}',

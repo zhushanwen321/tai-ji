@@ -372,18 +372,52 @@ describe('purgeArchivesBatch（筛选行批量彻底删除：串行循环 + 结�
     expect(apiMocks.listArchives).toHaveBeenCalled() // 结束统一刷新一次
   })
 
-  it('部分失败：单条失败不中断整批 + warning toast 汇总成功/失败数', async () => {
+  it('部分失败：单条失败不中断整批 + warning toast 汇总成功/失败数并附首个失败原因文案', async () => {
     const { purgeArchivesBatch } = useArchiveView()
     apiMocks.purgeArchive
       .mockResolvedValueOnce({ sessionId: 'arc-1' })
-      .mockRejectedValueOnce(new Error('彻底删除失败'))
+      .mockRejectedValueOnce(new Error('会话目录被占用'))
       .mockResolvedValueOnce({ sessionId: 'arc-3' })
 
     await purgeArchivesBatch([makeArchive(), makeArchive('arc-2'), makeArchive('arc-3')])
 
     expect(apiMocks.purgeArchive).toHaveBeenCalledTimes(3)
-    expect(toastMocks.warning).toHaveBeenCalledWith('已彻底删除 2 个、失败 1 个；列表已刷新，可重试剩余项')
+    // 未知码回退操作级通用模板（archive.entry.purgeFailed）——原因文案随汇总 toast 附带
+    expect(toastMocks.warning).toHaveBeenCalledWith(
+      '已彻底删除 2 个、失败 1 个；彻底删除失败：会话目录被占用；列表已刷新，可重试剩余项',
+    )
     expect(toastMocks.info).not.toHaveBeenCalled()
+  })
+
+  it('archive_not_found 幂等达成：计成功口径不入 failed（不触发「可重试」误导指引），warning 只汇总真实失败并附首因', async () => {
+    const { purgeArchivesBatch } = useArchiveView()
+    // 第 2 条列表过期（并发单条删除/陈旧快照形态）：code 信封挂 Error.code，archiveErrorKey 命中映射
+    apiMocks.purgeArchive
+      .mockResolvedValueOnce({ sessionId: 'arc-1' })
+      .mockRejectedValueOnce(Object.assign(new Error('归档记录不存在'), { code: 'archive_not_found' }))
+      .mockRejectedValueOnce(Object.assign(new Error('disk io hung'), { code: 'archive_io_error' }))
+
+    await purgeArchivesBatch([makeArchive(), makeArchive('arc-2'), makeArchive('arc-3')])
+
+    expect(apiMocks.purgeArchive).toHaveBeenCalledTimes(3)
+    // ok=2（真实成功 + 幂等达成）、failed=1（仅 archive_io_error）；首因取 ioError 映射文案
+    expect(toastMocks.warning).toHaveBeenCalledWith(
+      '已彻底删除 2 个、失败 1 个；操作失败：disk io hung（archive_io_error）。session 状态以磁盘为准，启动自愈会归位，重试或检查磁盘；列表已刷新，可重试剩余项',
+    )
+    expect(toastMocks.info).not.toHaveBeenCalled()
+  })
+
+  it('全部 archive_not_found（列表过期形态）：幂等达成全计成功口径，info toast 不出 warning', async () => {
+    const { purgeArchivesBatch } = useArchiveView()
+    apiMocks.purgeArchive.mockRejectedValue(
+      Object.assign(new Error('归档记录不存在'), { code: 'archive_not_found' }),
+    )
+    apiMocks.listArchives.mockResolvedValue([])
+
+    await purgeArchivesBatch([makeArchive(), makeArchive('arc-2')])
+
+    expect(toastMocks.info).toHaveBeenCalledWith('已彻底删除 2 个归档会话')
+    expect(toastMocks.warning).not.toHaveBeenCalled()
   })
 
   it('keep-all 保守分支（keptSubagentsDir 携带）：warning toast 出声（与单条 purge 同语义）', async () => {

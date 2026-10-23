@@ -46,7 +46,7 @@ export default {
     batchPurging: 'Deleting…',
     batchPurgeSuccess: 'Permanently deleted {count} archived sessions',
     batchPurgeKept: 'Permanently deleted {count} archived sessions; subagent records of {kept} entries were conservatively kept because archive data was unreadable',
-    batchPurgePartial: 'Permanently deleted {ok}, failed {failed}; the list has refreshed, retry the remaining entries',
+    batchPurgePartial: 'Permanently deleted {ok}, failed {failed}; {msg}; the list has refreshed, retry the remaining entries',
     restoreSuccess: 'Restored "{name}" to its original project group',
     restoreFailed: 'Restore failed: {msg}',
     purgeSuccess: 'Permanently deleted "{name}"',
