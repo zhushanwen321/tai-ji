@@ -3400,7 +3400,7 @@
     },
     {
       "id": "C-data-27",
-      "summary": "subagent-core 包内依赖图禁止值依赖环：静态 import/export-from、动态 import()、require() 构成的值边不得成环（含自环）；`import type` / 全 `type` 修饰具名导入 / `export type from` 属编译期擦除边，不参与判定（仅打印提示）。判据机器化于 scripts/check-subagent-core-value-cycles.mjs——execution（记录/执行域）与 orchestration（编排域）互指会在此红；修复方向 = 具体值依赖经端口反转 + 装配期注入，或把跨域共享词汇下沉契约层（决策记录见 docs/adr/decisions.md）。",
+      "summary": "subagent-core 包内依赖图禁止值依赖环与反向依赖边。①值依赖环：静态 import/export-from、动态 import()、require() 构成的值边不得成环（含自环）；`import type` / 全 `type` 修饰具名导入 / `export type from` 属编译期擦除边，不参与环判定（仅打印提示）。②反向依赖边零容忍：src 下 orchestration 以外的全部文件（层子目录 execution/shared/core、包根测试目录 src/__tests__/ 与未来新增顶层目录；生产与测试，无豁免白名单）的值边或类型边指向 orchestration/** 或包入口 barrel src/index.ts 即红，入 barrel 边照拦（含无扩展名 from \"../index\" 形态）；射程定界 = barrel 自身 re-export 出边豁免（包公共 API 出口）、orchestration/** 内文件（含其 __tests__/）同层消费射程外。判据机器化于 scripts/check-subagent-core-value-cycles.mjs——execution（记录/执行域）与 orchestration（编排域）互指、或下层文件反向指编排层会在此红；修复方向 = 符号下沉 shared / 本体搬迁 execution / 消费点或测试归属迁移，值环修复 = 具体值依赖经端口反转 + 装配期注入，或把跨域共享词汇下沉契约层（决策记录见 docs/adr/decisions.md）。",
       "scope": [
         "packages/subagent-core/src/**"
       ],

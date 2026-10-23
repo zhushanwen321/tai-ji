@@ -9,7 +9,7 @@
 // 方向反转：orchestration 反过来 import 本模块。
 //
 // 依赖方向说明：本模块对事件**载荷接口**（`WorkflowRunEvent` 一族）只做 `import type`
-// ——类型边在编译期擦除，值依赖环检查（C-data-26）不看它；词表值
+// ——类型边在编译期擦除，值依赖环检查（C-data-27）不看它；词表值
 // （`RUN_EVENT_TYPES` / `RUN_EVENTS_SUFFIX`）已在 shared，不构成反向值边。
 //
 // [D1 拆边 Class C 第 3 步] 本模块同时承接 **journal 目录解析集群 + record 读面**
