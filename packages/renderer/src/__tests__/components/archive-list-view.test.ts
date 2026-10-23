@@ -177,9 +177,9 @@ describe('ArchiveListView 行交互（D10 悬停双钮 + 事件）', () => {
     // 悬停压色（vision 验收缺陷回归锚点）：确认态须带 hover:bg-danger 抵消 ghost
     // variant 的 hover:bg-surface-hover（点击后指针悬停在钮上，灰底曾覆盖红底）
     expect(btn.classes()).toContain('hover:bg-danger')
-    // 实底亮字（vision 二轮验收锚点）：--danger-fg 暗色主题下是暗红褐，红底暗红字
-    // 对比不足；字色对齐 destructive 按钮先例用 neutral-fg
-    expect(btn.classes()).toContain('text-neutral-fg')
+    // 实底前景语义令牌（token 层修复后的终态）：字色走 text-danger-fg
+    //（2026-10-23 裁决后 --danger-fg 暗色族即亮字，不再绕道 text-neutral-fg）
+    expect(btn.classes()).toContain('text-danger-fg')
     expect(btn.attributes('title')).toBe('确认彻底删除？')
     expect(wrapper.emitted('purge')).toBeUndefined()
 
@@ -255,7 +255,7 @@ describe('ArchiveListView 时间筛选行（mono 短码档位 + 总体积 + 批�
     expect(btn.text()).toBe('确认删除 1 项？')
     expect(btn.classes()).toContain('bg-danger')
     expect(btn.classes()).toContain('hover:bg-danger') // 同行级钮：确认态悬停压色
-    expect(btn.classes()).toContain('text-neutral-fg') // 同行级钮：实底亮字（danger-fg 暗红对比不足）
+    expect(btn.classes()).toContain('text-danger-fg') // 同行级钮：实底前景语义令牌（token 层修复后即亮字）
     expect(wrapper.emitted('purgeBatch')).toBeUndefined()
 
     await btn.trigger('click')
