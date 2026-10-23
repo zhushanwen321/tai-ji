@@ -63,8 +63,9 @@
     </WorkflowVizOverlay>
   </WorkflowVizOverlayGuard>
   <!-- workflow agent 抽屉（[2026-10-19] demo 形态）：随 workflow 内容开合挂载/消亡
-       （tab 集构造性清空）；fixed 定位浮在 overlay 壳之上（z = modal+1）。置于 Guard
-       外——抽屉渲染失败不进 D10 回落链（壳装载失败才回落；抽屉失败不该连坐关 overlay）。 -->
+       （tab 集构造性清空）；fixed 定位浮在 overlay 壳之上（z = dialog+1，壳提档
+       z-dialog 后随档）。置于 Guard 外——抽屉渲染失败不进 D10 回落链（壳装载失败才
+       回落；抽屉失败不该连坐关 overlay）。 -->
   <AgentStreamDrawer
     v-if="isWorkflowOpen && panelInput"
     ref="agentDrawerRef"

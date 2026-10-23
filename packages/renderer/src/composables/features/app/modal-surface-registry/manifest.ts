@@ -49,6 +49,8 @@ export type ModalSurfaceFamily =
   | 'rolling-banner'
   /** SessionList 删除确认态本体（§6.7 局部表面后行档入聚合，确认态聚合谓词开合） */
   | 'session-delete-confirm'
+  /** workflow 浮层 agent 钻取抽屉（浮层子交互层——只在浮层开时存在，非阻塞、Esc 归编排器） */
+  | 'agent-stream-drawer'
   /** 浮层壳（容器非模态，不入聚合——kind='excluded' 专用，旗标恒不参与） */
   | 'overlay-shell'
 
@@ -74,6 +76,9 @@ export const MODAL_SURFACE_FAMILY_FLAGS: Record<ModalSurfaceFamily, ModalSurface
   // preventDefault 不可达，只能靠让位达成「Esc 只清确认态不动容器」）；⌘W 不让位
   // （无未提交输入、行内瞬态，让位即死键）；行内小面积不覆盖 view 显示矩形（'none'）
   'session-delete-confirm': { yieldsEsc: true, yieldsCmdW: false, shieldsView: 'none' },
+  // workflow 浮层 agent 钻取抽屉：非阻塞子交互层（挂载随浮层开合，Esc 归编排器关浮层整体、
+  // 抽屉随之消亡，无独立 Esc 消费）；右侧 452px 面板按几何相交遮蔽 view
+  'agent-stream-drawer': { yieldsEsc: false, yieldsCmdW: false, shieldsView: 'intersecting' },
   'overlay-shell': { yieldsEsc: false, yieldsCmdW: false, shieldsView: 'none' },
 }
 
@@ -84,7 +89,7 @@ export interface ModalSurfaceZAnchor { // oe-exempt:20261003:framework:类型契
   /** 仓库根相对路径 */
   file: string
   /** z 字面形态（§6.7 三类字面形态 + CSS 声明形） */
-  form: 'class-token' | 'class-raw' | 'inline-style' | 'css-decl'
+  form: 'class-token' | 'class-token-calc' | 'class-raw' | 'inline-style' | 'css-decl'
   /** 字面量：token 名（'var(--z-modal)'）或裸数字（'1000'） */
   literal: string
   /** 同文件同字面量出现次数（AsyncErrorFallback overlay 态两分支同 class = 2） */
@@ -217,6 +222,15 @@ export const MODAL_SURFACE_MANIFEST = [
       { file: 'packages/renderer/src/components/panel/workflow-viz/overlay/OverlayShell.vue', form: 'class-token', literal: 'var(--z-dialog)', count: 1 },
     ],
     basis: '§6.7 末段：浮层壳自身不入聚合——它是容器不是模态，Esc 由编排器层级序管理，view 可见性受浮层内容切换/错误态支配（§7.4）；z 锤点随 u-w2-shell 壳抽取落位 OverlayShell.vue（原 WorkflowVizOverlay.vue 同字面量随迁移清空）',
+  },
+  {
+    id: 'agent-stream-drawer',
+    family: 'agent-stream-drawer',
+    kind: 'member',
+    zAnchors: [
+      { file: 'packages/renderer/src/components/panel/workflow-viz/panel/AgentStreamDrawer.vue', form: 'class-token-calc', literal: 'calc(var(--z-dialog)+1)', count: 1 },
+    ],
+    basis: '浮层子交互层：workflow 浮层内 trace 行钻取的 agent 对话流抽屉（挂载随浮层开合，[2026-10-19] demo 形态）；z = dialog+1 浮于壳之上（壳提档 z-dialog 后随档，曾因壳提档未同步致 1001<1100 被遮罩盖死）；非阻塞、Esc 归编排器关浮层整体',
   },
   {
     id: 'session-delete-confirm',
