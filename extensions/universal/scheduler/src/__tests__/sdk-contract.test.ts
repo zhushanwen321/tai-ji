@@ -105,6 +105,18 @@ describe('pi-scheduler SDK contract', () => {
     }
   })
 
+  // exposure 重划终态锚（C-ext-05，2026-10-23 ADR-0136）：两工具保持 direct 常驻 =
+  // 注册时不写 exposure 字段（SDK 缺省 direct）——误写 "deferred" 会把触发入口从模型
+  // 默认可见集收走（tool_search 才可激活），此处红。
+  it('exposure 注册终态：schedule / schedule_control 均 direct 常驻（不写 exposure 字段，SDK 缺省）', () => {
+    const { pi, tools } = createMockPi()
+    schedulerExtension(pi)
+    expect(tools.map(t => t.name).sort()).toEqual(['schedule', 'schedule_control'])
+    for (const tool of tools) {
+      expect(tool.exposure).toBeUndefined()
+    }
+  })
+
   it('每个 tool 有 renderResult 函数成员（C-ext-05）+ 折叠态输出 details.summary 一行', () => {
     const { pi, tools } = createMockPi()
     schedulerExtension(pi)

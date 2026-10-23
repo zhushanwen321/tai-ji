@@ -14,6 +14,9 @@
  *     注册，D3「旧名不保留别名」），不对其迁移后结论作断言；
  *  5b. 反向混合集（wildcard deny 在前、精确 allow 在后）——与分支5互为镜像，
  *     区分度弱，承重位置锚 = 精确条目仍在 wildcard 之前。
+ *  6. subagents → subagent_batch（2026-10-23 批量工具改名入表）——单目标展开：
+ *     展开正确 + 字段保留 + 幂等 + 保序位置锚 + 真实 matcher 结论等价四维度合并
+ *     锁定（单元素展开无次序承重，四维度一用例足够）。
  *
  * 匹配器行为注释：matchNonBashTool 的 tool 字段经 wildcardToRegExp 全锚定匹配
  * （精确名 = 精确匹配，'*' = 匹配全部）；pattern 对 path 匹配（path 缺省时对
@@ -34,7 +37,7 @@ function userRule(overrides: Partial<Rule> & { id: string; tool: string }): Rule
 	};
 }
 
-describe("旧工具名精确规则迁移（D3）— 表驱动六用例（五分支 + 分支5b 反向混合集）", () => {
+describe("旧工具名精确规则迁移（D3）— 表驱动七用例（六分支 + 分支5b 反向混合集）", () => {
 	it("分支1：精确旧名展开（subagent 三条 + workflow 两条，展开顺序承重，其余字段保留）", () => {
 		const rules: Rule[] = [
 			userRule({ id: "user-1", tool: "subagent", pattern: "*", action: "deny", description: "no subagent" }),
@@ -195,5 +198,37 @@ describe("旧工具名精确规则迁移（D3）— 表驱动六用例（五分�
 		// wildcard deny 对无关工具的结论迁移前后不变（bash 只被头部 wildcard deny 命中）
 		expect(matchNonBashTool("bash", "/x", migrated).action).toBe(matchNonBashTool("bash", "/x", mixed).action);
 		expect(matchNonBashTool("bash", "/x", mixed).action).toBe("deny");
+	});
+
+	it("分支6：subagents → subagent_batch（2026-10-23 批量工具改名入表）— 展开 + 幂等 + 保序 + matcher 结论等价", () => {
+		// 展开正确 + 字段保留：单目标展开（一条旧名规则 → 一条 subagent_batch）
+		const rules: Rule[] = [
+			userRule({ id: "user-1", tool: "subagents", pattern: "*", action: "deny", description: "no batch" }),
+			userRule({ id: "user-2", tool: "*", pattern: "*", action: "allow" }),
+		];
+		const migrated = migrateLegacyToolRules(rules);
+
+		// 保序位置锚：展开条目原位替换，wildcard 仍在后（单目标无展开次序承重）
+		expect(migrated).toHaveLength(2);
+		expect(migrated.map((r) => r.tool)).toEqual(["subagent_batch", "*"]);
+		// pattern/action/source/description 保留（只换 tool 名与 id）
+		expect(migrated[0]).toMatchObject({ pattern: "*", action: "deny", source: "user", description: "no batch" });
+		// 新 id（D3 契约②）：不克隆原 id，形态 user-N
+		expect(migrated[0]?.id).not.toBe("user-1");
+		expect(migrated[0]?.id).toMatch(/^user-\d+$/);
+		// 纯函数：原数组不改写
+		expect(rules).toHaveLength(2);
+		expect(rules[0]?.tool).toBe("subagents");
+
+		// 幂等：新名不在旧名集合，再迁移深度相等
+		expect(migrateLegacyToolRules(migrated)).toEqual(migrated);
+
+		// 真实 matcher 结论等价：场景同分支5（尾部 wildcard allow 覆盖精确 deny）——
+		// 若实装错误地把展开条目追加到数组尾部，subagent_batch deny 落到 wildcard
+		// allow 之后 → 结论翻成 deny ≠ 迁移前 allow，本断言即红灯。
+		const beforeSubagents = matchNonBashTool("subagents", "/x", rules).action;
+		const afterBatch = matchNonBashTool("subagent_batch", "/x", migrated).action;
+		expect(beforeSubagents).toBe("allow");
+		expect(afterBatch).toBe(beforeSubagents);
 	});
 });

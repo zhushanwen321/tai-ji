@@ -36,6 +36,8 @@ type ExecuteResult = {
 
 interface CapturedTool {
 	name: string;
+	/** pi SDK 的 exposure 缺省值 "direct"（常驻）——不写字段时 SDK 侧默认，本视图可缺省。 */
+	exposure?: string;
 	execute: (
 		toolCallId: string,
 		params: Record<string, unknown>,
@@ -122,6 +124,18 @@ function createViaHandler(
 }
 
 // ── 测试场景 ─────────────────────────────────────────
+
+// exposure 重划终态锚（C-ext-05，2026-10-23 ADR-0136）：goal_control 保持 direct 常驻 =
+// 注册时不写 exposure 字段（SDK 缺省 direct）——误写 "deferred" 会把目标管理入口从模型
+// 默认可见集收走（tool_search 才可激活），此处红。
+describe("goal_control SDK 契约 — exposure 注册终态（C-ext-05）", () => {
+	it("direct 常驻：不写 exposure 字段（SDK 缺省 direct）", () => {
+		const { pi } = makeFixture("rpc");
+		const tool = captureTool(pi);
+		expect(tool.name).toBe("goal_control");
+		expect(tool.exposure).toBeUndefined();
+	});
+});
 
 describe("goal_control execute — RPC 模式 tool result 无 __gui__", () => {
 	it("RPC + 有 budget 的 create → details 无 __gui__ 字段（content 仍正常）", async () => {

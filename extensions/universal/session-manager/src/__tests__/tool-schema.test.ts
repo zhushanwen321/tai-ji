@@ -25,6 +25,16 @@ describe("U5-A3 tool-schema", () => {
 	const schemas = getRegisteredSchemas();
 
 	describe("create_managed_session", () => {
+		// exposure 重划终态锚（C-ext-05，2026-10-23 裁决）：direct 常驻 = 注册时不写
+		// exposure 字段（registerSessionTool 条件展开，与 SDK 缺省 direct 等价）——
+		// 对照下方 delete/archive 的 toBe("deferred") 反向锚；误写 "deferred" 会把
+		// 创建入口从模型默认可见集收走，此处红。
+		it("is registered as direct (exposure 字段缺省 — SDK 缺省 direct)", () => {
+			const tool = getRegisteredTools().find((t) => t.name === "create_managed_session");
+			expect(tool).toBeDefined();
+			expect(tool?.exposure).toBeUndefined();
+		});
+
 		it("requires cwd (string)", () => {
 			const s = schemas.create_managed_session;
 			expect(s.type).toBe("object");

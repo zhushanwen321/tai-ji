@@ -16,6 +16,8 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 
 interface RegisteredTool {
 	name: string;
+	/** pi SDK 的 exposure 缺省值 "direct"（常驻）——不写字段时 SDK 侧默认，本视图可缺省。 */
+	exposure?: string;
 	parameters: { type?: string };
 	renderResult?: (result: unknown, options: { expanded: boolean }, theme: Theme) => { render: (width: number) => string[] };
 	execute: (id: string, params: Record<string, unknown>, signal: undefined, onUpdate: undefined, ctx: ExtensionContext) => Promise<{ content: Array<{ type: string; text: string }>; details: Record<string, unknown> }>;
@@ -66,6 +68,17 @@ describe("compact_context 工具（R2 降级态：fire-and-forget + 结果注入
 		registerCompactContextTool(pi);
 		expect(tools[0].parameters.type).toBe("object");
 		expect(tools[0].name).toBe("compact_context");
+	});
+
+	// exposure 重划终态锚（C-ext-05，2026-10-23 ADR-0136）：direct 常驻 = 注册时不写
+	// exposure 字段（SDK 缺省 direct）——误写 "deferred" 会把压缩入口从模型默认可见集
+	// 收走（tool_search 才可激活），此处红。
+	it("exposure 注册终态：direct 常驻——不写 exposure 字段（SDK 缺省 direct）", () => {
+		const { pi, tools } = makePi();
+		registerCompactContextTool(pi);
+		expect(tools).toHaveLength(1);
+		expect(tools[0]!.name).toBe("compact_context");
+		expect(tools[0]!.exposure).toBeUndefined();
 	});
 
 	it("门控拒绝（排除命中）→ throw 带原因与恢复指引（D5）", async () => {
