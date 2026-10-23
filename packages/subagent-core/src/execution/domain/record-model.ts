@@ -23,13 +23,15 @@
 import type {
   AgentFailureKind,
   AgentUsageTotal,
+  ErrorFact,
+  FailureCause,
   ModelRef,
   ToolCall,
   Turn,
   WorktreeHandle,
 } from "@zhushanwen/subagent-engine-sdk";
 
-import { STOP_REASONS } from "./record-types.ts";
+import { ROUND_TERMINAL_STOP_REASONS, STOP_REASONS } from "./record-types.ts";
 import type {
   AbandonedRoundMark,
   ClosedReason,
@@ -142,6 +144,28 @@ export interface AgentResult { // oe-exempt:20260930:framework:领域值对象�
   sessionFile?: string;
   /** schema 模式下，structured-output tool 的 result.details（已通过 schema 校验）。 */
   parsedOutput?: unknown;
+}
+
+/**
+ * 轮收条事实快照（[subagent-observability §3.3.3] markRoundIdle 写点产出，附录在
+ * {@link ExecutionRecord.lastRound}）——只承载「派生不出来的事实」：结果正文与轮数
+ * 已在聚合字段 result/turnCount 上（正文摘要由读侧 summarize 派生），不重复存储。
+ * 结构镜像 shared SubagentLastRound 的事实子集（wire 形状 SSOT = shared；core 读模型
+ * 只取事实维度——跨包形状一致由 runtime 投影产出侧 + 对拍测试锚定）。
+ */
+export interface RoundFacts { // oe-exempt:20260930:framework:领域值对象——轮收条事实快照（subagent-observability §3.3.3）
+  /** 引擎停因原值（值域 = ROUND_TERMINAL_STOP_REASONS；undefined = 迁移期回落帧 / 被接管轮）。 */
+  engineStopReason?: (typeof ROUND_TERMINAL_STOP_REASONS)[number];
+  /** 失败分类（收尾边沿一次产出，只读不可替换——§3.3.2）。undefined = 无失败发生。 */
+  failure?: FailureCause;
+  /** pi 接管三态（handled = 被接管——引擎未执行，§3.3.1 P6）。undefined = 无 disposition 事实。 */
+  promptDisposition?: "started" | "queued" | "handled";
+  /** 轮收条 usage 快照（最终尝试值，P5 计账）。undefined = 引擎未上报。 */
+  usage?: AgentUsageTotal;
+  /** 重试尝试计数（auto_retry_start 帧数）。undefined = 无重试事实。 */
+  retryAttempts?: number;
+  /** 观察性事实（§3.3.10 降级通道，不改写 failure）。undefined = 无观察项。 */
+  observations?: string[];
 }
 
 /**
@@ -304,6 +328,20 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   totalTokens: number;
   /** 运行期最近一次 error 事件的消息（getEventLog 派生 error 条目用）。 */
   lastError: string | undefined;
+  /**
+   * 轮失败事实只追加数组（subagent-observability §3.3.5；ErrorFact 权威定义在 SDK
+   * journal-replay.ts）。append-only，不因轮终清除；lastError 由「最后一个非空轮
+   * 失败」派生刷新（reducer appendErrorFact 单点）。undefined = 旧数据（reducer
+   * 侧 `??=` 兜底初始化，读侧按空数组理解）。
+   */
+  errors?: ErrorFact[];
+  /**
+   * 最近一轮的轮收条事实快照（[subagent-observability §3.3.3] markRoundIdle 写点
+   * 一次写入、下轮轮始不清理——「上一轮怎么收尾」的内存读侧权威源，recordToSubagent
+   * 派生视图直读）。停因词表值（rec.stopReason 旧展示位）与事实快照并存（迁移期
+   * 双写，§3.4）。undefined = 本进程内尚无轮终（重启后经 fold 重建路径恢复）。
+   */
+  lastRound?: RoundFacts;
   /**
    * 对话轮次计数（modeless 波1 起全 record 语义）。首轮运行时 = 0；每完成一轮
    * （finalizeRoundToIdle 进 idle）+1。undefined 时视为 0。
