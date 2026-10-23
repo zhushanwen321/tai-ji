@@ -75,7 +75,7 @@
 
 ### 7. workflow-viz 两项交互/算法设计
 
-状态：已裁决立项（2026-10-23：出设计方案），设计进行中（产物 `.tmp/need-design-batch/`）。
+状态：设计完成（2026-10-23 裁决立项 → 设计产物 `.tmp/need-design-batch/workflow-viz-fit-and-routing-design.md`，待实施排期）。设计期核实修正：穿卡的是跨列不同行边的通道中位竖线（原登记「同列边」与实码不符，同列边走列右缘细道不穿卡）；fit 打断风险点 = 组件契约层可达的 watch 防御代码。边界外新发现一条（跨列同行直线边穿卡，登记为来源文件残余 5）。设计期待裁决项（回到全景入口等）见来源登记。
 
 来源：workflow-viz-dag-minor-residuals.md（另 2 条小项已入 just-do-it 条目 59/60）。
 
