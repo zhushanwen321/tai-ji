@@ -522,8 +522,18 @@ describe('状态缓存与快照组装', () => {
     expect(settings.read()).toEqual({ families: { workbuddy: { autoCheckin: true } } } as never)
   })
 
-  it('updateAvailable 派生（D2 更新角标数据源）：已装版本 = 清单版本 → 无标记；版本落后 → true', async () => {
-    // assemble 缺省 extScan qoder@0.2.0 与清单 0.2.0 一致 → 无标记。
+  it('清单不可达时快照兜底 WOOL_FAMILY_FALLBACK_META：workbuddy 仍 oauth（向导模板/重连按钮语义不漂移）、qoder/trae 仍 ide-extract、显示名非裸家族 id', async () => {
+    // manifestCache = null 形态：不 initialize（清单从未拉到）直接取快照。
+    const { manager } = assemble()
+    const snap = manager.getSnapshot()
+    const byId = new Map(snap.families.map((f) => [f.family, f]))
+    expect(byId.get('workbuddy')?.credentialsSource).toBe('oauth')
+    expect(byId.get('qoder')?.credentialsSource).toBe('ide-extract')
+    expect(byId.get('trae')?.credentialsSource).toBe('ide-extract')
+    expect(byId.get('workbuddy')?.displayName).toBe('WorkBuddy')
+  })
+
+  it('updateAvailable 派生（D2 更新角标数据源）：已装版本 = 清单版本 → 无标记；版本落后 → true', async () => {    // assemble 缺省 extScan qoder@0.2.0 与清单 0.2.0 一致 → 无标记。
     const sameVersion = assemble()
     await sameVersion.manager.initialize()
     const fresh = sameVersion.manager.getSnapshot().families.find((f) => f.family === 'qoder')

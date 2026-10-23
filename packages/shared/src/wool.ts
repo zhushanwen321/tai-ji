@@ -21,6 +21,19 @@ export type WoolFamilyId = (typeof WOOL_FAMILY_IDS)[number]
 /** 凭据来源两值（设计 D3；与 wool-shared WoolCredentialsSource 对齐）。 */
 export type WoolCredentialsSource = 'ide-extract' | 'oauth'
 
+/**
+ * 家族静态兜底元数据（清单不可达时的降级源）：凭据来源是家族固有属性（qoder/trae
+ * 恒本机提取、workbuddy 恒 OAuth 浏览器授权），权威在发布侧清单（wool-manifest.json
+ * 的 credentialsSource 字段）；清单拉取失败时宿主用它兜底——否则 OAuth 家族会被
+ * 「?? ide-extract」缺省误导成提取族（向导模板/重连按钮语义全错）。新增家族或某家族
+ * 凭据方式变更时与清单发布侧同批更新（同 WOOL_FAMILY_IDS 的两处同步约定）。
+ */
+export const WOOL_FAMILY_FALLBACK_META: Record<WoolFamilyId, { credentialsSource: WoolCredentialsSource; displayName: string }> = {
+  qoder: { credentialsSource: 'ide-extract', displayName: 'Qoder' },
+  trae: { credentialsSource: 'ide-extract', displayName: 'Trae' },
+  workbuddy: { credentialsSource: 'oauth', displayName: 'WorkBuddy' },
+}
+
 // ── 资产清单 schema（设计 D2：家族 → 版本 + 完整性散列，taiji 官方发布通道维护）──
 
 /** 清单内单家族条目：安装钉版本 + 展示元数据（向导家族卡数据源，D7 宿主渲染不执行扩展 UI 代码）。 */

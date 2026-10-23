@@ -552,5 +552,6 @@ export {
   isWoolDetectData,
   isWoolFamilyId,
   WOOL_ACTION_TYPES,
+  WOOL_FAMILY_FALLBACK_META,
   WOOL_FAMILY_IDS,
 } from './wool'

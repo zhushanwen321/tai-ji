@@ -36,6 +36,7 @@ import {
   isWoolCredentialsData,
   isWoolDetectData,
   isWoolFamilyId,
+  WOOL_FAMILY_FALLBACK_META,
   type WoolAccountStatusView,
   type WoolActionErrorCode,
   type WoolActionReply,
@@ -611,9 +612,13 @@ export class WoolManager {
         installed.version !== manifestEntry.version
       families.push({
         family,
-        displayName: manifestEntry?.displayName ?? family,
+        // 清单不可达（manifestCache=null）时兜底 WOOL_FAMILY_FALLBACK_META：凭据来源是
+        // 家族固有属性，静态兜底正确；旧缺省 '?? ide-extract' 会把 OAuth 家族（workbuddy）
+        // 误导成提取族——向导模板与已接入卡的重连按钮语义全错（重连对 OAuth 扩展发
+        // extract 必失败）。
+        displayName: manifestEntry?.displayName ?? WOOL_FAMILY_FALLBACK_META[family].displayName,
         vendor: manifestEntry?.vendor ?? '',
-        credentialsSource: manifestEntry?.credentialsSource ?? 'ide-extract',
+        credentialsSource: manifestEntry?.credentialsSource ?? WOOL_FAMILY_FALLBACK_META[family].credentialsSource,
         riskNotice:
           manifestEntry?.riskNotice ??
           '非官方接口：使用你自己的账号额度，存在账号风控与接口变动风险；凭据与协议实装仅在本机运行',
