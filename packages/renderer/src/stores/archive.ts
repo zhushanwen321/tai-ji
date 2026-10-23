@@ -41,6 +41,11 @@ export const useArchiveStore = defineStore('archive', () => {
   const restoringSessionId = ref<string | null>(null)
   const purgingSessionId = ref<string | null>(null)
   /**
+   * 批量彻底删除进行中（筛选行内联钮的在途态）：true 期间批量钮禁用并显示「删除中…」，
+   * 防重入由编排入口（useArchiveView.purgeArchivesBatch）按本字段短路。
+   */
+  const batchPurging = ref(false)
+  /**
    * 刚恢复的 session id（§5.1 恢复样例「原项目组顶部、accent-soft 高亮渐隐」的前端
    * 高亮态）：unarchive reply 的 SessionSummary.id 消费点（D5 步骤 7「前端高亮置顶」）。
    * null = 无恢复高亮。置顶构造性成立（恢复路径重写主文件 → mtime = 恢复时刻 → 列表
@@ -110,6 +115,7 @@ export const useArchiveStore = defineStore('archive', () => {
     restoredSessionId,
     restoringSessionId,
     purgingSessionId,
+    batchPurging,
     setArchives,
     setCount,
     openView,

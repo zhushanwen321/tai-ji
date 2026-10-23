@@ -88,8 +88,8 @@
   --success: #78a87e;
   --warn: #b79c54;
   --danger: #bf6b6b;
-  --danger-fg: color-mix(in oklch, var(--danger) 12%, #160b0b); /* danger 实色上的文字（demo tokens.css 同公式浓度 12%；var 随各主题 --danger 自动解析，亮色族由 [data-theme="light"] 块覆盖为白字） */
-  --success-fg: color-mix(in oklch, var(--success) 12%, #160b0b); /* success 实色上的文字（与 --danger-fg 同公式同浓度；var 随各主题 --success 自动解析，亮色族由 [data-theme="light"] 块覆盖为白字） */
+  --danger-fg: var(--neutral-fg); /* danger 实色上的文字（2026-10-23 裁决：暗色族亮字——旧公式 danger 12% 混深底产出暗红褐，红底暗红字视觉发闷，vision 真机验收三轮判 FAIL 后废弃；实底短标签前景按 WCAG 1.4.11 组件线 3:1 断言，对齐 destructive 按钮先例；亮色族由 [data-theme="light"] 块覆盖为白字） */
+  --success-fg: color-mix(in oklch, var(--success) 12%, #160b0b); /* success 实色上的文字（深字公式保留：--success #78a87e 明度高于 --danger，亮字形态仅 2.18:1 连组件线 3:1 都不过，深字 6.24:1 过 AA 正文线；消费点 = OAuthDialog 授权成功图标实底；亮色族由 [data-theme="light"] 块覆盖为白字） */
   --danger-text: color-mix(in oklch, var(--danger) 78%, var(--neutral-fg)); /* danger 小字提亮档：暗底小字号 danger 原色不足 AA 4.5:1，混入前景提亮过线（套餐浮层百分比消费点）；环/条填充仍用 --danger 原色。var 每元素解析随各主题 --danger/--neutral-fg 自动跟随，主题块零重声明 */
   --info: #6d99a5;
   /* reasoning 紫：思考块色相（draft-message-stream §4 + composer 思考等级） */
@@ -213,7 +213,7 @@
   --secondary: var(--bg-card);         /* secondary Button 底（操作域浮起档，亮于 settings 内容区 --bg） */
   --secondary-foreground: var(--neutral-fg);
   --destructive: var(--danger);        /* destructive Button 底 */
-  --destructive-foreground: var(--neutral-fg);
+  --destructive-foreground: var(--danger-fg); /* 底上字（danger 实底前景单一语义源 = --danger-fg） */
   --muted-foreground: var(--neutral-mid);     /* shadcn 次级文字 */
   --accent-foreground: var(--neutral-fg);      /* ghost hover 底配字 */
   --background: var(--bg);             /* bg-background / ring-offset-background */

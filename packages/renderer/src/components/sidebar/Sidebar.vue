@@ -100,10 +100,12 @@
               :list-error="archiveStore.listError"
               :restoring-session-id="archiveStore.restoringSessionId"
               :purging-session-id="archiveStore.purgingSessionId"
+              :batch-purging="archiveStore.batchPurging"
               @back="onArchiveBack"
               @select="onArchiveSelect"
               @restore="onArchiveRestore"
               @purge="onArchivePurge"
+              @purge-batch="onArchivePurgeBatch"
               @retry="onArchiveRetry"
             />
             <SessionList
@@ -478,6 +480,7 @@ const {
   openSummary: onArchiveSelect,
   restoreArchive: onArchiveRestore,
   purgeArchiveEntry: onArchivePurge,
+  purgeArchivesBatch: onArchivePurgeBatch,
   refreshArchives: onArchiveRetry,
 } = useArchiveView()
 // archiveCount 角标广播订阅（config.sessions 帧携带值；模块级 refCount 多实例安全，见 composable 注释）

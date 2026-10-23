@@ -168,6 +168,73 @@ async function purgeArchiveEntry(archive: ArchiveSummary): Promise<void> {
 }
 
 /**
+ * 批量彻底删除（归档列表筛选行的「N 项」钮，两段确认后）：对传入条目**串行**循环
+ * session.purgeArchive（幂等 + runtime 侧 per-session 串行已内建，前端循环即承载批量
+ * 语义，不新增批量 RPC）。逐条独立 catch 经 archiveErrorKey('purge', e) 单点分流（与
+ * 单条 purgeArchiveEntry 同源，archive-error-text.ts 映射只读复用）——archive_not_found
+ * 幂等语义下目标已达成（归档已不存在，重试恒失败），计成功口径不入 failed（不触发
+ * 「可重试」误导指引；批量在途行级钮未禁用的并发删除 toast 噪声同此收敛）；其余失败
+ * 不中断整批（失败显式上报），结束统一 refreshArchives 一次（循环内不逐条刷新，避免
+ * N 次拉取）+ toast 按结果分流：全成功 info；含 keep-all 保守分支 warning 出声
+ * （keptSubagentsDir 携带，与单条 purgeArchiveEntry 同语义）；含失败 warning 汇总
+ * 成功/失败数并附首个失败原因文案。在途防重入：store.batchPurging 期间新触发直接
+ * 忽略。主区 selected 落在成功删除集合时与单条删除同编排：清空选中 + 导航回 chat；
+ * 落在失败条目时保留选中与摘要视图（与单条 purgeArchiveEntry 失败分支同编排——失败
+ * 显式上报后用户经摘要视图与列表行重试，不清选中不踢回 chat）。
+ */
+async function purgeArchivesBatch(entries: ArchiveSummary[]): Promise<void> {
+  const { info: toastInfo, warning: toastWarning } = useToast()
+  const store = useArchiveStore()
+  if (store.batchPurging || entries.length === 0) return
+  store.batchPurging = true
+  let ok = 0
+  let kept = 0
+  let failed = 0
+  let firstFailure: string | null = null
+  const failedSessionIds = new Set<string>()
+  try {
+    for (const entry of entries) {
+      try {
+        const reply = await sessionApi.purgeArchive(entry.sessionId)
+        ok += 1
+        if (reply.keptSubagentsDir !== undefined) kept += 1
+      } catch (e) {
+        const key = archiveErrorKey('purge', e)
+        if (key === 'archive.error.notFound') {
+          // archive_not_found（映射 archive-error-text.ts:30）：幂等达成，按成功口径吸收
+          ok += 1
+        } else {
+          failed += 1
+          failedSessionIds.add(entry.sessionId)
+          if (firstFailure === null) {
+            firstFailure = t(key ?? 'archive.entry.purgeFailed', { msg: toErrorMessage(e) })
+          }
+        }
+      }
+    }
+  } finally {
+    store.batchPurging = false
+  }
+  if (
+    store.selected !== null &&
+    !failedSessionIds.has(store.selected.sessionId) &&
+    entries.some((e) => e.sessionId === store.selected?.sessionId)
+  ) {
+    store.selectArchive(null)
+    useNavigationStore().push({ view: 'chat' })
+  }
+  void refreshArchives()
+  if (failed > 0) {
+    // failed > 0 ⟹ 首个真实失败已登记原因（同一判别分支计数），?? '' 仅为类型收窄
+    toastWarning(t('archive.entry.batchPurgePartial', { ok, failed, msg: firstFailure ?? '' }))
+  } else if (kept > 0) {
+    toastWarning(t('archive.entry.batchPurgeKept', { count: ok, kept }))
+  } else {
+    toastInfo(t('archive.entry.batchPurgeSuccess', { count: ok }))
+  }
+}
+
+/**
  * 归档域编排函数集（多调用点等价闭包——store 走 pinia 单例，无实例态）。
  * 消费点：Sidebar（侧栏视图切换 + 事件接线）、ArchiveMainView（主区恢复编排）。
  */
@@ -180,6 +247,7 @@ export function useArchiveView() {
     closeSummary,
     restoreArchive,
     purgeArchiveEntry,
+    purgeArchivesBatch,
   }
 }
 
