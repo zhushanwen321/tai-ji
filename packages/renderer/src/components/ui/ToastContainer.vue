@@ -9,7 +9,7 @@
     挂载点两分支（互斥）：PanelContainer main-area（chat 主区）/ MainPanel
     （settings view 兜底）。
   -->
-  <div ref="containerRef" class="absolute inset-x-4 top-4 z-[var(--z-toast)] flex flex-col items-end gap-2 pointer-events-none">
+  <div ref="containerRef" data-testid="toast-container" class="absolute inset-x-4 top-4 z-[var(--z-toast)] flex flex-col items-end gap-2 pointer-events-none">
     <!-- RD-3#7 溢出折叠摘要：droppedCount 消费方——在列上限丢弃的通知以「还有 N 条」显形，
          不再只 console.warn 无 UI 留痕。可关闭（resetDropped 归零，给累计计数一个重置出口）。 -->
     <div

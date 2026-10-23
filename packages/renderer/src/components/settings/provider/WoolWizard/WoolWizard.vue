@@ -173,12 +173,30 @@ function onFamilySelect(family: WoolFamilyId): void {
   void runInstallStep()
 }
 
-/** 浮层内交互不 dismiss 向导：授权浮层（wfvz-overlay）盖在向导弹层之上（z-dialog >
- *  z-modal），用户与浮层的交互（点遮罩/关闭钮）对 reka DismissableLayer 是「层外点击」，
- *  不拦截会把授权进行中的向导连带关掉（ComposerTray / SchedulerQuickCard 同款拦截）。 */
+/**
+ * 层外交互守卫（interact-outside 同时承接 reka DismissableLayer 的两条关闭判定：
+ * pointerdown 层外 + focusin 层外——按 originalEvent 类型分流）：
+ * - focusin 通道一律不关：多步向导期间「真实焦点离开向导层」全是程序性/浮层联动
+ *   （授权浮层开合、关闭浮层时焦点归还 composer），不构成「用户想离开」——曾致
+ *   授权进行中的向导被焦点转移连带关掉（2026-10-22 排查定性）。
+ * - pointerdown 通道三类例外不关：授权浮层（wfvz-overlay，z-dialog 高于本层——
+ *   浮层是全局工作层，点它不是「点向导外面」）、Toast 通知（独立层，非阻塞通知
+ *   点击不该中断向导）、授权等待态（authorize 步 running 或授权页已开——授权流程
+ *   中向导锁定，只认取消/Esc 关闭）。其余层外点击（设置页空白处）保留标准关闭。
+ */
 function onInteractOutside(e: Event): void {
+  const original = (e as CustomEvent<{ originalEvent?: Event }>).detail?.originalEvent
+  if (original instanceof FocusEvent) {
+    e.preventDefault()
+    return
+  }
   const target = e.target as Element | null
-  if (target?.closest('[data-testid="wfvz-overlay"]')) e.preventDefault()
+  if (target?.closest('[data-testid="wfvz-overlay"]') || target?.closest('[data-testid="toast-container"]')) {
+    e.preventDefault()
+    return
+  }
+  const authorizeActive = authorizeUrlOpened.value || wizard.value?.stepStates.authorize?.status === 'running'
+  if (template.value === 'oauth' && authorizeActive) e.preventDefault()
 }
 
 function backToFamily(): void {
