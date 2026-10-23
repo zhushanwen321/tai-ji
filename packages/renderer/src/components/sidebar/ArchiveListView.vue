@@ -280,6 +280,13 @@ const filterKey = ref<ArchiveFilterKey>('all')
 /** 批量清理两段确认态（档位切换/在途开始即复位；语义对齐行级 purgeConfirmingId）。 */
 const batchConfirming = ref(false)
 
+/**
+ * 批量确认的条目 ID 快照（确认态进入时定格）。两段确认之间后台广播可刷新可见集
+ * （新条目落入当前筛选档时钮保持挂载、确认态保持）——第二击按快照过滤后再 emit，
+ * 删除对象恒等于用户确认过的集合，不会带入未经确认的新条目。
+ */
+const batchConfirmedIds = ref<string[] | null>(null)
+
 /** 筛选产物：可见条目（archivedAt 距今小时数按档位判据过滤；快照刷新/档位切换自动重算）。 */
 const visibleArchives = computed<ArchiveSummary[]>(() => {
   const def = FILTER_DEFS.find((f) => f.key === filterKey.value)!
@@ -313,13 +320,17 @@ const batchPurgeLabel = computed(() => {
 // 卸载（visible 翻 false）即清；与 selectFilter 的档位切换复位互补（跨非全档切换
 // 时 visible 恒 true，靠后者复位），两路均幂等。
 watch(batchPurgeVisible, (v) => {
-  if (!v) batchConfirming.value = false
+  if (!v) {
+    batchConfirming.value = false
+    batchConfirmedIds.value = null
+  }
 })
 
 function selectFilter(key: ArchiveFilterKey): void {
   if (filterKey.value === key) return
   filterKey.value = key
   batchConfirming.value = false
+  batchConfirmedIds.value = null
 }
 
 /** tablist 方向键环形切换（对齐 SegmentedTab 先例：四键同义，移动即激活）。 */
@@ -336,15 +347,20 @@ function onFilterKeydown(e: KeyboardEvent): void {
   }
 }
 
-/** 批量清理两段确认：首击进 danger 确认态（完整文案防误触）；第二击 emit 执行。 */
+/** 批量清理两段确认：首击进 danger 确认态并定格当前可见集 ID（完整文案防误触）；第二击按快照过滤后 emit 执行。 */
 function onBatchPurgeClick(): void {
   if (props.batchPurging) return
   if (!batchConfirming.value) {
     batchConfirming.value = true
+    batchConfirmedIds.value = visibleArchives.value.map((a) => a.sessionId)
     return
   }
   batchConfirming.value = false
-  emit('purgeBatch', visibleArchives.value)
+  const ids = batchConfirmedIds.value
+  batchConfirmedIds.value = null
+  emit('purgeBatch', ids
+    ? visibleArchives.value.filter((a) => ids.includes(a.sessionId))
+    : visibleArchives.value)
 }
 
 /**

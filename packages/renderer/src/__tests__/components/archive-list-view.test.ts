@@ -269,6 +269,25 @@ describe('ArchiveListView 时间筛选行（mono 短码档位 + 总体积 + 批�
     wrapper.unmount()
   })
 
+  it('确认态下后台刷新混入新条目：第二击只删确认时快照内的条目（防删未确认条目）', async () => {
+    // 时序缺陷回归（PR #51 greptile P1）：两段确认之间后台广播刷新可见集（新条目落入
+    // 当前筛选档、钮保持挂载确认态保持），第二击必须只删确认时快照内的条目
+    const buckets = makeFourBuckets()
+    const confirmed = buckets.filter((a) => a.sessionId === 'arc-older')
+    const wrapper = mountList(buckets)
+    await wrapper.find('[data-testid="archive-filter-older"]').trigger('click')
+    await wrapper.find('[data-testid="archive-batch-purge-btn"]').trigger('click') // 首击：确认 1 项
+
+    // 后台刷新（config.sessions 广播 → refreshArchives）：又一条 older 档新条目落入可见集
+    const newcomer: ArchiveSummary = { ...confirmed[0], sessionId: 'arc-newcomer' }
+    await wrapper.setProps({ archives: [...buckets, newcomer] })
+    expect(wrapper.find('[data-testid="archive-batch-purge-btn"]').text()).toBe('确认删除 2 项？')
+
+    await wrapper.find('[data-testid="archive-batch-purge-btn"]').trigger('click') // 第二击
+    expect(wrapper.emitted('purgeBatch')).toEqual([[confirmed]]) // 只含确认时快照，新混入条目不得进删除集
+    wrapper.unmount()
+  })
+
   it('档位切换复位确认态；批量在途（batchPurging）钮禁用', async () => {
     const wrapper = mountList(makeFourBuckets())
     await wrapper.find('[data-testid="archive-filter-older"]').trigger('click')
