@@ -43,9 +43,13 @@ export interface PiModelEntry { // oe-exempt:20260927:framework:pi 数据目录�
 
 /**
  * 解析 pi agent 目录（对齐 pi 上游 getAgentDir 惯例）：env `PI_CODING_AGENT_DIR`
- * 优先（taiji 托管形态下宿主注入的托管目录——薄壳 env 经 manifest envPrefixes
- * PI_ 白名单继承，孙进程 pi 同源消费，判定输入恒一致），缺省 = 系统独立 pi 的
- * `~/.pi/agent`（os.homedir() 动态推导，禁硬编码绝对路径）。
+ * 优先（taiji 派发链两形态均由宿主注入托管目录——runtime 派发 = core 发现管线
+ * EngineClient 的 identityEnv L0 注入（engine-inspect-package
+ * piHostedAgentDirIdentityEnv）；pi 会话内 extension 派发 = pi 主进程 env 继承
+ * （主会话 spawn 侧 pi-rpc buildPiOutboundEnv 终态写入）。引擎 CLI 与孙 pi 进程
+ * 全量继承同值，判定输入恒一致），缺省 = 系统独立 pi 的 `~/.pi/agent`
+ * （os.homedir() 动态推导，禁硬编码绝对路径——独立 pi CLI 直跑不经 taiji 派发链，
+ * 走本回落分支不受托管注入影响）。
  */
 export function resolvePiAgentDir(env: NodeJS.ProcessEnv = process.env): string {
   const fromEnv = env[PI_AGENT_DIR_ENV]?.trim();

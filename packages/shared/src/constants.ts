@@ -93,7 +93,12 @@ export const KNOWN_PI_API_TYPES: ReadonlySet<string> = new Set([
 /** Environment variable prefixes allowed to pass to child processes */
 export const ENV_WHITELIST_PREFIXES: readonly string[] = [
   'PATH', 'HOME', 'USER', 'LANG', 'TERM',
-  'NODE_', 'NVM_', 'TAIJI_', 'XDG_',
+  // PI_ = pi 域 env 整域准入（PI_CODING_AGENT_DIR / PI_WORKFLOW_SCHEMA / PI_SUBAGENT_*
+  // 身份链等，无凭据类成员——凭据在 <agentDir>/auth.json，不走 env）。目录权威值由
+  // 派发链终态强制写入（主会话 = pi-rpc buildPiOutboundEnv；引擎链 = EngineClient
+  // identityEnv L0 注入），本白名单只管 ambient 值能否随 spawn 链流转，双源时权威值
+  // 恒胜（2026-10-23 裁决：taiji 派发的 pi 参数一切由 taiji 控制，独立安装 pi 不受影响）。
+  'NODE_', 'NVM_', 'TAIJI_', 'XDG_', 'PI_',
   'APPDATA', 'LOCALAPPDATA', 'PROGRAMFILES', 'SYSTEMROOT', 'TEMP', 'TMP',
   // ambient 云凭证具体变量名（spec §7）：只加具体名不整前缀（AWS_/GOOGLE_ 整前缀会
   // 把用户生产 AWS 凭证暴露给所有 pi 子进程，最小暴露面）。GOOGLE_APPLICATION_CREDENTIALS

@@ -45,6 +45,10 @@ describe('ENV_WHITELIST_PREFIXES ambient 名单（spec §7 最小暴露面）', 
     expect(ENV_WHITELIST_PREFIXES).not.toContain('GOOGLE_')
     expect(ENV_WHITELIST_PREFIXES).not.toContain('CLOUDSDK_')
   })
+
+  it('含 PI_（pi 域 env 整域准入——PI_CODING_AGENT_DIR / PI_WORKFLOW_SCHEMA 等 ambient 值随 spawn 链流转；目录权威值由派发链终态写入，本白名单只管 ambient 流转）', () => {
+    expect(ENV_WHITELIST_PREFIXES).toContain('PI_')
+  })
 })
 
 describe('AMBIENT_ENV_NAMES', () => {
