@@ -158,10 +158,12 @@ export default [
   // [M3 relay-spawn-transport u-m3-control] subagent control server：control 帧路由 /
   // 通道台账 / 引擎 spawn 与按组收割 / fd3 raw mirror 接线的单点聚合文件（职责内聚，
   // 再拆属独立重构任务）。1051 行 > 500 软上限，提额保留软上限告警（先例同型）。
+  // [2026-10-23 just-do-it 条目 65] owner start time 登记（cachedRuntimePidStartSec
+  // 缓存 + pid 文件 runtimePidStartSec 字段）净增 7 行，1067 > 1060 微超即提额至 1080。
   {
     files: ['packages/runtime/src/infra/subagent-control/control-server.ts'],
     rules: {
-      'max-lines': ['warn', { max: 1060, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 1080, skipBlankLines: true, skipComments: true }],
     },
   },
   // [M3 relay-spawn-transport u-m2-prompt-ack] pi 引擎 spawn runner：spawn/握手/帧泵/

@@ -1252,7 +1252,7 @@ fi
 #   - check_services_infra_import.py C-comm-03：services 禁白名单外 infra value import
 #   - check_infra_services_import.py C-comm-01：infra 禁白名单外 services value import（三层单向补向）
 #   - check_shared_node_builtin.py  C-state-05：shared 禁 node: 内置 import
-#   - check_runtime_meta_url.py     C-build-01：runtime 禁无 guard 的 import.meta.url / globalThis.__dirname
+#   - check_runtime_meta_url.py     C-build-01：runtime + noExternal workspace 包禁无 guard 的 import.meta 属性访问 / globalThis.__dirname
 #   - check_staged_forbidden_lines.py C-ext-07/C-proc-04：staged 新增行禁 extensions console.warn/error
 #                                    与无说明的 eslint-disable（行级增量，存量不拦）
 #   - check_layering_registry_sync.py S2②：runtime-layering §3 表行 ↔ 检查

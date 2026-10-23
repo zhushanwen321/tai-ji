@@ -23,7 +23,7 @@ import {
   SUBAGENT_CONTROL_FRAME_KINDS,
   SUBAGENT_CONTROL_CLOSED_REASONS,
 } from '@zhushanwen/subagent-engine-sdk'
-import { isPidAlive } from '../../../utils/protocol-background-task.js'
+import { isPidAlive, getProcessStartTimeSec } from '../../../utils/protocol-background-task.js'
 import { logger } from '../../../infra/logger.js'
 import {
   getControlEnginesDir,
@@ -193,6 +193,10 @@ describe('subagent-control server：协议与治理编排（引擎进程内桩�
     const record = JSON.parse(await readFile(pidFile, 'utf-8')) as Record<string, unknown>
     expect(record.pid).toBe(pid)
     expect(record.runtimePid).toBe(process.pid)
+    // 条目 65：owner start time 登记（ps 可得平台与实际 start time 一致；Windows/ps 取
+    // 不到时该键省略 = 旧格式形态，sweep 侧保守跳过——由 sweep.test.ts 覆盖）
+    const ownStartSec = getProcessStartTimeSec(process.pid)
+    if (ownStartSec !== undefined) expect(record.runtimePidStartSec).toBe(ownStartSec)
     expect(record.instanceId).toBe(String(process.pid))
     expect(record.hostKind).toBe('runtime-sidecar')
     expect(record.engineId).toBe('fake-engine')
