@@ -1,0 +1,61 @@
+{
+  "name": "@zhushanwen/pi-retry-rules",
+  "version": "0.1.0",
+  "description": "Retryable error rules for Pi — message_end rewrite triggers the native retry loop for throttling-class provider errors, with configurable rules (builtin baseline ⊕ remote overlay ⊕ user custom) and ReDoS-guarded matching.",
+  "type": "module",
+  "main": "index.ts",
+  "taiji": {
+    "role": "universal",
+    "startupConfig": [
+      {
+        "path": "config/retry-rules-ext-config.json",
+        "content": {
+          "version": 1,
+          "customRules": [],
+          "effectiveRules": []
+        }
+      }
+    ]
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "keywords": [
+    "pi-package",
+    "extension",
+    "retry",
+    "rate-limit"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/",
+    "!src/__tests__/",
+    "index.ts",
+    "vitest.config.ts"
+  ],
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@zhushanwen/pi-ext-guards": "workspace:*",
+    "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-file-lock": "workspace:*",
+    "@zhushanwen/pi-llm-shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  }
+}

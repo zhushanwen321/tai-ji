@@ -615,6 +615,32 @@
           "reason": "代码层静态 import withFileLockSync（src/stats.ts flushStats 与 runtime 截断/重置同一把跨进程锁，top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
+    },
+    {
+      "name": "@zhushanwen/pi-retry-rules",
+      "directory": "extensions/universal/retry-rules",
+      "dependsOn": [
+        {
+          "package": "@zhushanwen/pi-ext-guards",
+          "type": "package",
+          "reason": "代码层静态 import 守护原语"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger"
+        },
+        {
+          "package": "@zhushanwen/pi-file-lock",
+          "type": "package",
+          "reason": "ext-config 读改写并发锁"
+        },
+        {
+          "package": "@zhushanwen/pi-llm-shared",
+          "type": "package",
+          "reason": "LLM 共享工具函数"
+        }
+      ]
     }
   ]
 }

@@ -15,6 +15,9 @@ import type { GitStatusResult } from './git'
 import type { PluginInfo } from './plugin'
 import type { RecentWorkspaceRecord } from './workspace'
 import type { LlmRetryConfig } from './llm-retry'
+// 重试规则域（subagent-observability §3.3.12）：形状 SSOT 在 ./retry-rules，本文件仅登记
+// type→payload 映射
+import type { RetryableErrorRule } from './retry-rules'
 // 网络代理域（llm-network-proxy 设计 §3.1/§5 U1）：形状 SSOT 在 ./network-proxy，
 // 本文件仅登记 type→payload 映射
 import type {
@@ -270,6 +273,9 @@ export type ClientMessageType =
   | 'terminal.list'
   | 'config.getTerminalConfig' | 'config.setTerminalConfig'
   | 'config.getRetryConfig' | 'config.setRetryConfig'
+  // 重试规则域（subagent-observability §3.3.12）：读 = 合并视图（内置层 + 用户自定义层）；
+  // 写 = 仅 customRules 段（内置预设本体走 remote-config 热更新，不经 settings 写）。
+  | 'config.getRetryRules' | 'config.setRetryRules'
   // 网络代理（llm-network-proxy 设计 §5 U1）：get/set 配置、test 测试连接（两段探测）、
   // getStats/resetStats 请求统计。reply/broadcast 键见 config.networkProxy / config.networkProxyStats。
   | 'config.getNetworkProxy' | 'config.setNetworkProxy' | 'config.testNetworkProxy'
@@ -373,6 +379,15 @@ export interface QuotaFetchResultPayload {
   data: import('./quota-types').NormalizedQuotaRow | null
   lastFetchAt: number | null
   reason?: import('./quota-types').QuotaFetchFailureReason
+}
+
+/** config.retryRules 的 reply/broadcast 形状（subagent-observability §3.3.12）：
+ *  builtinRules = 编译期基线 ⊕ 远程覆盖合并后的内置层（settings 预设展示源，source 字段
+ *  区分 builtin/remote）；customRules = 用户盘上态（settings 编辑 round-trip 对象）。
+ *  verdict 词表与执行语义见 shared/retry-rules.ts。 */
+export interface RetryRulesView {
+  builtinRules: RetryableErrorRule[]
+  customRules: RetryableErrorRule[]
 }
 
 /** config.setProvider 除 providerId 外的透传字段，与 IConfigService.setProvider 参数对齐。
@@ -1004,6 +1019,10 @@ export interface ClientMessageMap {
   'config.setTerminalConfig': { config: TerminalConfig }
   'config.getRetryConfig': Record<string, never>
   'config.setRetryConfig': { config: LlmRetryConfig }
+  // 重试规则域（subagent-observability §3.3.12）：读 = 合并视图（内置层 + 用户自定义层）；
+  // 写 = 仅 customRules 段（内置预设本体走 remote-config 热更新，不经 settings 写）。
+  'config.getRetryRules': Record<string, never>
+  'config.setRetryRules': { customRules: RetryableErrorRule[] }
   // 网络代理（llm-network-proxy 设计 §5 U1）：test 带完整配置（测的是表单草稿，未保存也可探测）；
   // getStats 的 range = 统计时间范围档（24h/7d 读侧过滤，all = 截断保尾窗口内累计）。
   'config.getNetworkProxy': Record<string, never>
@@ -1459,6 +1478,8 @@ export type ServerMessageType =
   | 'terminal.data' | 'terminal.exit' | 'terminal.alive' | 'terminal.ack' | 'terminal.writeFailed'
   | 'config.terminalConfig'
   | 'config.retryConfig'
+  // 重试规则域（subagent-observability §3.3.12）：配置 reply/broadcast 多窗口同步（retry 范式）。
+  | 'config.retryRules'
   // 网络代理（llm-network-proxy 设计 §5 U1）：配置 reply/broadcast + 统计聚合 reply +
   // 测试连接回执（一次性探测不广播，request/reply 键对形态同 quota.fetch:result 先例）。
   | 'config.networkProxy' | 'config.networkProxyStats' | 'config.networkProxyTest'
@@ -2804,6 +2825,8 @@ export interface ServerMessageMapBase {
   'config.terminalConfig': { config: TerminalConfig; corrupted?: boolean }
   // config.retryConfig：reply + broadcast 多窗口同步（同 terminal 范式）；configured 区分「显式配置」与「未配置（显示默认）」。
   'config.retryConfig': { config: LlmRetryConfig; configured: boolean }
+  // config.retryRules：reply + broadcast 同形（retry 范式）；形状 RetryRulesView（§3.3.12）。
+  'config.retryRules': RetryRulesView
   // config.networkProxy：reply + broadcast 同形（set 成功后广播多窗口同步，llm-network-proxy 设计 §5 U1）。
   'config.networkProxy': { config: NetworkProxyConfig }
   // config.networkProxyStats：stats 读聚合 reply；truncatedNote = 「累计」档基于截断保尾窗口的标注文案。
@@ -3454,6 +3477,11 @@ export interface ReplyPayloadMap {
   'config.setTerminalConfig': ServerMessageMap['config.terminalConfig']
   'config.getRetryConfig': ServerMessageMap['config.retryConfig']
   'config.setRetryConfig': ServerMessageMap['config.retryConfig']
+  // 重试规则域（subagent-observability §3.3.12）：get/set reply 走 config.retryRules（set 后
+  // 读回终态——写侧对 customRules 的确定性变换后生效值 = 合并持久段重算结果，消费侧以服务端
+  // 终态校准）。
+  'config.getRetryRules': ServerMessageMap['config.retryRules']
+  'config.setRetryRules': ServerMessageMap['config.retryRules']
   // 网络代理（llm-network-proxy 设计 §5 U1）：get/set reply 走 config.networkProxy（set 后端不
   // 变换请求值，生效值 = 原样落盘配置，C-pi-14 payload 消费型）；test reply 为两段探测结果
   // （一次性探测不广播，内联具名类型——message.bash: BashDispatchReceipt 先例）；getStats/reset

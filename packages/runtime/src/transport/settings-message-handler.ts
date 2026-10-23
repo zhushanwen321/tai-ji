@@ -36,6 +36,7 @@ import { RetryConfigMessageHandler } from './retry-config-message-handler.js'
 import { RenameConfigMessageHandler } from './rename-config-message-handler.js'
 import { SmartContextConfigMessageHandler } from './smart-context-config-message-handler.js'
 import { NetworkProxyConfigMessageHandler } from './network-proxy-config-message-handler.js'
+import { RetryRulesConfigMessageHandler } from './retry-rules-config-message-handler.js'
 import { CodemodeMessageHandler } from './codemode-message-handler.js'
 import { McpMessageHandler } from './mcp-message-handler.js'
 import type { McpServersService } from '../services/mcp-servers-service.js'
@@ -127,6 +128,7 @@ export class SettingsMessageHandler {
   private renameConfigHandler: RenameConfigMessageHandler
   private smartContextConfigHandler: SmartContextConfigMessageHandler
   private networkProxyConfigHandler: NetworkProxyConfigMessageHandler
+  private retryRulesConfigHandler: RetryRulesConfigMessageHandler
   private codemodeHandler: CodemodeMessageHandler
   /** mcp 域子 handler：mcpServersService 缺省（退化测试装配）时不构造，mcp.* 落 unknown_type。 */
   private mcpHandler: McpMessageHandler | null
@@ -143,6 +145,7 @@ export class SettingsMessageHandler {
     this.renameConfigHandler = new RenameConfigMessageHandler(ctx)
     this.smartContextConfigHandler = new SmartContextConfigMessageHandler(ctx)
     this.networkProxyConfigHandler = new NetworkProxyConfigMessageHandler(ctx)
+    this.retryRulesConfigHandler = new RetryRulesConfigMessageHandler(ctx)
     this.codemodeHandler = new CodemodeMessageHandler(ctx)
     const { mcpServersService } = ctx
     this.mcpHandler = mcpServersService
@@ -205,6 +208,9 @@ export class SettingsMessageHandler {
     // ── LLM retry 域（retry-config-message-handler.ts）──
     'config.getRetryConfig': (msg, ws) => this.retryConfigHandler.handle(msg, ws),
     'config.setRetryConfig': (msg, ws) => this.retryConfigHandler.handle(msg, ws),
+    // ── 重试规则域（retry-rules-config-message-handler.ts，subagent-observability §3.3.12）──
+    'config.getRetryRules': (msg, ws) => this.retryRulesConfigHandler.handle(msg, ws),
+    'config.setRetryRules': (msg, ws) => this.retryRulesConfigHandler.handle(msg, ws),
     // ── 重命名配置域（rename-config-message-handler.ts）──
     'config.setAutoRenameEnabled': (msg, ws) => this.renameConfigHandler.handle(msg, ws),
     'config.getAutoRenameEnabled': (msg, ws) => this.renameConfigHandler.handle(msg, ws),

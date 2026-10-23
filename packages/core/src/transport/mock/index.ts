@@ -31,6 +31,7 @@ import type {
   PluginUiSnapshotPayload,
   SkillDirConfig, FileNode, RecommendedExtension, SubagentRecord, WorkflowRunRecord,
   SystemPromptConfig,
+  RetryableErrorRule,
   WorkflowRunEventsReply,
   WorkflowDagReply,
   TerminalConfig,
@@ -56,7 +57,7 @@ import type {
   Segment,
   ArchiveSummary,
 } from '@taiji/shared'
-import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS, DELIVERY_PREVIEW_MAX_CHARS, QUOTA_PRESETS } from '@taiji/shared'
+import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS, DELIVERY_PREVIEW_MAX_CHARS, QUOTA_PRESETS, RETRY_RULES_BASELINE } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
 import { fixtureProviders, fixtureSkills, fixtureAgents, fixtureExtensions, toCandidate } from './settings-data'
 import { MOCK_MODELS, mockModelToInfo, FILE_CANDIDATES } from './composer-data'
@@ -1353,6 +1354,16 @@ const terminalSub = makeMockSubscription(() => ({ config: defaultTerminalConfig(
 // 网络代理配置订阅（llm-network-proxy U4：模拟 config.networkProxy 广播；初始推内存态）。
 const networkProxySub = makeMockSubscription(() => ({ config: cloneMockNetworkProxyConfig() }))
 
+// retry-rules mock 内存态（get/set/onRetryRules 消费；builtin 快照自 shared 基线）
+let mockRetryRulesCustom: RetryableErrorRule[] = []
+const retryRulesSub = makeMockSubscription(() => ({
+  builtinRules: structuredClone(RETRY_RULES_BASELINE) as RetryableErrorRule[],
+  customRules: structuredClone(mockRetryRulesCustom),
+}))
+function mockRetryRulesBuiltin(): RetryableErrorRule[] {
+  return structuredClone(RETRY_RULES_BASELINE) as RetryableErrorRule[]
+}
+
 const configImpl = {
   // 请求型：直接返 fixture 深拷贝（不依赖 sub）。
   // scoped-model D7：与真实门面同形返回 { providers, scopedModels }，scopedModels 与
@@ -1677,6 +1688,22 @@ const configImpl = {
     return { config: mockRetryConfig, configured: true }
   },
   onRetryConfig: (_h: (payload: { config: LlmRetryConfig; configured: boolean }) => void) => () => {},
+  // ── 重试规则（subagent-observability §3.3.12：mock 内存态 stub，与 retry 域同构）——
+  // get 回内存态（builtin = shared RETRY_RULES_BASELINE 快照）、set 深拷贝后广播
+  // config.retryRules；不持久化（真实合并/落盘归 runtime remote-config 域 3）。
+  async getRetryRules(): Promise<{ builtinRules: RetryableErrorRule[]; customRules: RetryableErrorRule[] }> {
+    await sleep(TIMING.ack)
+    return { builtinRules: mockRetryRulesBuiltin(), customRules: mockRetryRulesCustom }
+  },
+  async setRetryRules(customRules: RetryableErrorRule[]): Promise<{ builtinRules: RetryableErrorRule[]; customRules: RetryableErrorRule[] }> {
+    await sleep(TIMING.ack)
+    mockRetryRulesCustom = structuredClone(customRules)
+    const view = { builtinRules: mockRetryRulesBuiltin(), customRules: structuredClone(mockRetryRulesCustom) }
+    retryRulesSub.broadcast(view)
+    return view
+  },
+  onRetryRules: (h: (payload: { builtinRules: RetryableErrorRule[]; customRules: RetryableErrorRule[] }) => void) =>
+    retryRulesSub.subscribe((p) => h(p)),
   // ── 网络代理（llm-network-proxy U4：mock 内存态 stub，与 real domains/config 同构；
   //    G4 参数全等断言强制五方法 + 订阅签名对齐）──
   // get 回内存态、set 深拷贝后广播 config.networkProxy；test 恒成功（message/耗时为演示值）；
