@@ -466,4 +466,25 @@ describe('purgeArchivesBatch（筛选行批量彻底删除：串行循环 + 结�
     expect(useArchiveStore().selected).toBeNull()
     expect(navigation.current.view).toBe('chat')
   })
+
+  it('主区 selected 条目删除失败：选中保留、不导航回 chat（对齐单条失败分支），失败汇总 toast 照常', async () => {
+    const { purgeArchivesBatch, openSummary } = useArchiveView()
+    const archive = makeArchive()
+    openSummary(archive)
+    const navigation = useNavigationStore()
+
+    apiMocks.purgeArchive
+      .mockRejectedValueOnce(new Error('会话目录被占用'))
+      .mockResolvedValueOnce({ sessionId: 'arc-2' })
+    // 刷新后失败条目仍在列表（删除失败 = 磁盘未动，列表即事实源）——store 对账不清选中
+    apiMocks.listArchives.mockResolvedValue([archive])
+
+    await purgeArchivesBatch([archive, makeArchive('arc-2')])
+
+    expect(useArchiveStore().selected?.sessionId).toBe('arc-1')
+    expect(navigation.current.view).toBe('archive')
+    expect(toastMocks.warning).toHaveBeenCalledWith(
+      '已彻底删除 1 个、失败 1 个；彻底删除失败：会话目录被占用；列表已刷新，可重试剩余项',
+    )
+  })
 })

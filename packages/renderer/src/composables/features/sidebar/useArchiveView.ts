@@ -178,8 +178,9 @@ async function purgeArchiveEntry(archive: ArchiveSummary): Promise<void> {
  * N 次拉取）+ toast 按结果分流：全成功 info；含 keep-all 保守分支 warning 出声
  * （keptSubagentsDir 携带，与单条 purgeArchiveEntry 同语义）；含失败 warning 汇总
  * 成功/失败数并附首个失败原因文案。在途防重入：store.batchPurging 期间新触发直接
- * 忽略。主区 selected 落在被删集合时与单条删除同编排：清空选中 + 导航回 chat（空态
- * 占位兜底其余形态）。
+ * 忽略。主区 selected 落在成功删除集合时与单条删除同编排：清空选中 + 导航回 chat；
+ * 落在失败条目时保留选中与摘要视图（与单条 purgeArchiveEntry 失败分支同编排——失败
+ * 显式上报后用户经摘要视图与列表行重试，不清选中不踢回 chat）。
  */
 async function purgeArchivesBatch(entries: ArchiveSummary[]): Promise<void> {
   const { info: toastInfo, warning: toastWarning } = useToast()
@@ -190,6 +191,7 @@ async function purgeArchivesBatch(entries: ArchiveSummary[]): Promise<void> {
   let kept = 0
   let failed = 0
   let firstFailure: string | null = null
+  const failedSessionIds = new Set<string>()
   try {
     for (const entry of entries) {
       try {
@@ -203,6 +205,7 @@ async function purgeArchivesBatch(entries: ArchiveSummary[]): Promise<void> {
           ok += 1
         } else {
           failed += 1
+          failedSessionIds.add(entry.sessionId)
           if (firstFailure === null) {
             firstFailure = t(key ?? 'archive.entry.purgeFailed', { msg: toErrorMessage(e) })
           }
@@ -212,7 +215,11 @@ async function purgeArchivesBatch(entries: ArchiveSummary[]): Promise<void> {
   } finally {
     store.batchPurging = false
   }
-  if (store.selected !== null && entries.some((e) => e.sessionId === store.selected?.sessionId)) {
+  if (
+    store.selected !== null &&
+    !failedSessionIds.has(store.selected.sessionId) &&
+    entries.some((e) => e.sessionId === store.selected?.sessionId)
+  ) {
     store.selectArchive(null)
     useNavigationStore().push({ view: 'chat' })
   }
