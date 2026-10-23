@@ -2,7 +2,7 @@
  * subagent-workflow Extension — Factory（extension 装配点）
  *
  * 合并 @zhushanwen/pi-subagents + @zhushanwen/pi-workflow 为统一包。
- * 注册项：7 tool（subagent_start / subagent_manage / subagent_message + subagents
+ * 注册项：7 tool（subagent_start / subagent_manage / subagent_message + subagent_batch
  * + workflow_run / workflow_control + workflow-script）+ 3 command（subagents + workflows + subagent-model）
  * + messageRenderer（subagent-bg-notify）+ session 事件。
  *

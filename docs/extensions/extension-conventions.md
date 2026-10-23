@@ -337,7 +337,7 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 
 ### 跨包隐式契约：permission 旧名展开表 ↔ subagent-workflow 工具注册名 [强制]
 
-`permission` 扩展的旧工具名迁移表 `LEGACY_TOOL_NAME_EXPANSION`（extensions/universal/permission/src/rules/legacy-tool-names.ts）硬编码展开 `subagent` → `subagent_start`/`subagent_manage`/`subagent_message`、`workflow` → `workflow_run`/`workflow_control`——展开目标名与 subagent-workflow 的工具注册名互为跨包隐式契约，两包间无 import 依赖，漂移不产生任何编译/加载报错。
+`permission` 扩展的旧工具名迁移表 `LEGACY_TOOL_NAME_EXPANSION`（extensions/universal/permission/src/rules/legacy-tool-names.ts）硬编码展开 `subagent` → `subagent_start`/`subagent_manage`/`subagent_message`、`workflow` → `workflow_run`/`workflow_control`、`subagents` → `subagent_batch`（2026-10-23 批量工具改名）——展开目标名与 subagent-workflow 的工具注册名互为跨包隐式契约，两包间无 import 依赖，漂移不产生任何编译/加载报错。
 
 **因此 subagent-workflow 工具再拆分/改名时必须同步该展开表**：用户权限规则按工具名精确匹配并持久化落盘，展开表与注册名失配时失配后果 = 旧名 deny 规则静默退化成 ask/AI 分类（无报错）。同步 = 被拆/改名的现行注册名进旧名 key、拆分/改名后的新注册名进展开目标。
 

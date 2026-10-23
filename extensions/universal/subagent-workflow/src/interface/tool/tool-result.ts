@@ -21,7 +21,7 @@ export interface ToolTextContent {
 /**
  * 一次 run 启动回执的公共字段（两侧 details 各自扩展工具特有字段与判别式）。
  *
- * `status` 取并集：`subagents` 只有一个动作、启动即返回，收窄为 `"running"`；
+ * `status` 取并集：`subagent_batch` 只有一个动作、启动即返回，收窄为 `"running"`；
  * workflow_run 的 actionRun 另有 `not_found` / `invalid_args` 两态。
  */
 export interface RunStartDetails {

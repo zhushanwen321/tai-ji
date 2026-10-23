@@ -1,10 +1,11 @@
 /**
- * Subagent Workflow Extension — subagents tool（批量派发入口，一跳扁平 schema）。
+ * Subagent Workflow Extension — subagent_batch tool（批量派发入口，一跳扁平 schema）。
  *
- * ⚠️ 命名同名不同命名空间，互指防混淆：本文件是 **tool**（模型调用的批量派发面，
- * 名为 `subagents`），`interface/command/subagents.ts` 是 **slash 命令**壳（`/subagents`：
- * TUI list overlay + GUI 定向消息通道）。两者无共享状态、无调用关系——改本文件
- * 不影响命令壳，反之亦然。
+ * 命名（2026-10-23 裁决，自 `subagents` 改名）：本文件是 **tool**（模型调用的批量
+ * 派发面，名为 `subagent_batch`——与 start/manage/message 同族 `subagent_` 前缀，
+ * 且消除与 `interface/command/subagents.ts` **slash 命令**壳（`/subagents`：TUI
+ * list overlay + GUI 定向消息通道）的同名异空间混淆。两者无共享状态、无调用
+ * 关系——改本文件不影响命令壳，反之亦然。
  *
  * 行为契约（subagent-tool-interface-refactor §3.1.2 批量终态 / §3.3.2）：
  * - 唯一批量入口：N 个已知独立任务一次派发；handler 按固定名解析内置 `fan-out`
@@ -85,7 +86,7 @@ export type SubagentsToolParams = Static<typeof SubagentsParams>;
 // ── Tool result types ────────────────────────────────────────
 
 /**
- * `subagents` tool 的 details。
+ * `subagent_batch` tool 的 details。
  *
  * 单形态（无 action 判别式——本工具只有一个动作）。刻意不含 `__gui__`（D8）：
  * 批量块由集合分流走 workflow 块分支，不消费 GUI 描述符。
@@ -100,7 +101,7 @@ export interface SubagentsToolDetails extends RunStartDetails {
   taskCount: number;
 }
 
-/** Result returned by the `subagents` tool's execute（公共骨架见 tool-result.ts）。 */
+/** Result returned by the `subagent_batch` tool's execute（公共骨架见 tool-result.ts）。 */
 type SubagentsExecuteResult = WorkflowToolResult<SubagentsToolDetails>;
 
 // ── helpers ──────────────────────────────────────────────────
@@ -241,7 +242,7 @@ export async function runSubagentsBatch(
     const all = await deps.registry.loadAll();
     const available = formatAvailableWorkflowRefs(all);
     throw new Error(
-      `Built-in workflow '${FAN_OUT_SCRIPT_NAME}' is not available — the subagents tool runs it as its batch body. ` +
+      `Built-in workflow '${FAN_OUT_SCRIPT_NAME}' is not available — the subagent_batch tool runs it as its batch body. ` +
       `Recovery: verify the @zhushanwen/subagent-core package ships workflows/${FAN_OUT_SCRIPT_NAME}.js (reinstall/repair it), then retry. ` +
       `Workflows currently available:\n${available || "  (none)"}`,
     );
@@ -289,7 +290,7 @@ export async function runSubagentsBatch(
 // ── Tool registration ────────────────────────────────────────
 
 /**
- * 注册 `subagents` tool（唯一批量派发入口）。
+ * 注册 `subagent_batch` tool（唯一批量派发入口）。
  *
  * @param pi ExtensionAPI
  * @param deps LauncherDeps（LifecycleDeps + registry）
@@ -304,21 +305,17 @@ export function registerSubagentsTool(
   reentryRef: ReentryGuardRef,
 ): void {
   pi.registerTool({
-    name: "subagents",
-    label: "Subagents (batch)",
-    // deferred（2026-10-23 用户裁决，反转 2026-10-22 ADR-0156 决策 3 的常驻裁决——
-    // 削减常驻声明预算优先于成员对象形状首调可见性；登记 ADR-0136 补记）：
-    // 不常驻声明，tool_search 命中即激活；检索入口 = 启动迁移写入的 +tool_search
-    // 条目（runtime pi-codemode-settings）。promptSnippet 保留——激活后进系统
-    // 提示词工具文字清单，模型激活当轮即见名可调
-    exposure: "deferred",
+    // 常驻（2026-10-23 用户裁决，ADR-0136 补记）：同日内先收起后转回常驻——
+    // 批量派发是高频入口，成员对象形状首调可见性恢复 ADR-0156 决策 3 的论证
+    name: "subagent_batch",
+    label: "Subagent Batch",
     description:
       "Spawn multiple subagents in ONE call, collect all results together — for N INDEPENDENT tasks.\n" +
       "Each member is a one-shot batch member: you cannot message or continue it (re-dispatch instead). Results arrive as ONE notification when the whole batch settles (not per member).\n" +
       "Single subagent you can message later: `subagent_message` tool. Dependent tasks (step 2 needs step 1's result): `workflow_run` tool — batch members never see each other's results.",
     promptSnippet: "Dispatch N independent subagent tasks in one batch",
     promptGuidelines: [
-      "PRIORITY: 2+ independent tasks in one dispatch (results combined by you afterwards) → call `subagents` ONCE with the tasks array — do NOT issue N separate subagent_start calls and do NOT hand-build a workflow.",
+      "PRIORITY: 2+ independent tasks in one dispatch (results combined by you afterwards) → call `subagent_batch` ONCE with the tasks array — do NOT issue N separate subagent_start calls and do NOT hand-build a workflow.",
       "One-shot batch members: message/fork-from is not supported; to redo or extend a member's work, dispatch a new task in a second batch.",
       // 勿等待条 / 预算纪律条 / 模型缺省继承条 三条已删（tool-declaration-slimming D1
       // 单源化→<available_subagents> 注入段 SUBAGENT_DISPATCH_SHARED_RULES 说一次，
@@ -351,12 +348,12 @@ export function registerSubagentsTool(
     },
 
     renderCall(args: Record<string, unknown>, theme: Theme, _context?: unknown) {
-      // 单行标题：subagents <N tasks> · <slug>（TUI 惯例同 workflow_run 的 renderCall）
+      // 单行标题：subagent_batch <N tasks> · <slug>（TUI 惯例同 workflow_run 的 renderCall）
       const count = Array.isArray(args.tasks) ? args.tasks.length : 0;
       const bulk = count > 0 ? ` ${count} tasks` : "";
       const slug = optionSlugSuffix(args.slug, theme);
       return new Text(
-        theme.fg("toolTitle", theme.bold("subagents ")) +
+        theme.fg("toolTitle", theme.bold("subagent_batch ")) +
           theme.fg("muted", bulk) +
           slug,
         0,

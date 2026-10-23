@@ -191,7 +191,7 @@ describe("旧名残留负锚（U-B1）：声明侧源文件零旧工具名指引
  *      交叉引用，D1 范围裁决②：保留原文）
  *  A9  Delegate FIRST —— 何时委派（原 description「When to delegate」段的承载点）
  *  A10 untrusted —— 注入防御（completion 即确认 + 不可信数据）
- *  A12 `subagents` tool —— 批量入口交叉引用
+ *  A12 `subagent_batch` tool —— 批量入口交叉引用（2026-10-23 改名，原 `subagents`）
  * schema 层（功能语义；required/enum/pattern/maxLength 由 structured-output
  * cross-package-contract 以真实 typebox 锁定）：
  *  A13 task description "Throws if missing or whitespace-only"（原 REQUIRED for
@@ -257,7 +257,8 @@ describe("subagent_start description — 锚词保留清单（D2/D3 契约）", 
     expect(guidelines).toContain("Never guess an id");
     // A8：defer 名单工具交叉引用保留原文（D1 范围裁决②；源码内是转义形态）
     expect(START_SECTION).toContain('session_read {\\"action\\":\\"result\\"');
-    expect(guidelines).toContain("`subagents` tool");
+    // A12：批量入口交叉引用（2026-10-23 改名 subagent_batch）
+    expect(guidelines).toContain("`subagent_batch` tool");
   });
 
   it("agent 字段通用化（防漂移）：description 不写死 agent 名，指向 <available_subagents>", () => {
@@ -435,10 +436,12 @@ describe("subagents 批量声明契约（成员对象 + 启动文案锚 + 常驻
     expect(TOOL_SUBAGENTS_SRC).not.toContain("Do NOT poll");
   });
 
-  it("工具名不变 + 档位 deferred（2026-10-23 可见性重划，反转 §3.3.4 常驻）", () => {
-    expect(TOOL_SUBAGENTS_SRC).toContain('name: "subagents"');
-    // 零改名断言：第二目标（subagent_batch）不在主干出现任何条件形态
-    expect(TOOL_SUBAGENTS_SRC).not.toContain("subagent_batch");
+  it("改名 subagent_batch（2026-10-23 裁决，反转 §3.3.4 零改名）+ 常驻（同日二次裁决）", () => {
+    expect(TOOL_SUBAGENTS_SRC).toContain('name: "subagent_batch"');
+    // 旧注册名不在注册点出现（头注释的改名裁决叙述除外，其字面为 `subagent_batch`）
+    expect(TOOL_SUBAGENTS_SRC).not.toContain('name: "subagents"');
+    // 常驻终态：注册点零 deferred 声明
+    expect(TOOL_SUBAGENTS_SRC).not.toContain('exposure: "deferred"');
   });
 
   it("schema 叶子承载成员对象形状权威（跨包契约 import 点）", () => {
@@ -571,8 +574,8 @@ describe("workflow_run promptGuidelines 契约（U1/TC4 拆分重排）", () => 
 // subagent start schema 退役契约（原 subagent-schema-collect.test.ts）
 // ══════════════════════════════════════════════════════════════
 
-describe("subagent start schema: collect param retired (批量入口 = subagents tool)", () => {
-  it("collect 字段已删（schema 层不可再自报：批量编排唯一入口是 `subagents` tool）", () => {
+describe("subagent start schema: collect param retired (批量入口 = subagent_batch tool)", () => {
+  it("collect 字段已删（schema 层不可再自报：批量编排唯一入口是 `subagent_batch` tool）", () => {
     const start = schemaData(SubagentStartParams, "SubagentStartParams");
     const manage = schemaData(SubagentManageParams, "SubagentManageParams");
     const message = schemaData(SubagentMessageParams, "SubagentMessageParams");

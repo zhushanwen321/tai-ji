@@ -5,6 +5,7 @@
  * subagent_start/subagent_manage/subagent_message 与 workflow_run/workflow_control，
  * 旧名不保留别名（探针 PB-fork）。用户权限规则按工具名匹配（`Rule.tool`）并持久化
  * 落盘（config.ts saveConfig），旧名精确规则随改名失配——deny 静默退化成 ask/AI 分类。
+ * 批量工具 `subagents` → `subagent_batch` 改名（2026-10-23）同机制入表。
  *
  * 迁移语义（D3 两条契约）：
  *  ① 展开落位与保序——精确匹配旧名的用户规则**原地替换**为其新名展开（展开顺序
@@ -38,6 +39,7 @@ import { makeNextIdCounter } from "../rule-templates.js";
 const LEGACY_TOOL_NAME_EXPANSION: Readonly<Record<string, readonly string[]>> = {
 	subagent: ["subagent_start", "subagent_manage", "subagent_message"],
 	workflow: ["workflow_run", "workflow_control"],
+	subagents: ["subagent_batch"],
 };
 
 /**

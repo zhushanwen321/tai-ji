@@ -220,7 +220,7 @@ function lastSpec(): Record<string, unknown> {
 describe("schema 契约：一跳扁平 + 成员对象 tasks 必填 + 常驻", () => {
   it("注册名/label/description 存在，且以 batch 语义自述（one-shot 成员 + 一条通知）", () => {
     const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
-    expect(tool.name).toBe("subagents");
+    expect(tool.name).toBe("subagent_batch");
     expect(tool.label.length).toBeGreaterThan(0);
     expect(tool.description).toContain("one-shot batch member");
     expect(tool.description).toContain("ONE notification");
@@ -276,12 +276,11 @@ describe("schema 契约：一跳扁平 + 成员对象 tasks 必填 + 常驻", ()
     expect(singleMaxItems(fanOutSrc, "fan-out.js @pi-meta")).toBe(20);
   });
 
-  it("deferred（2026-10-23 可见性重划，反转 §3.3.4 常驻裁决）：不常驻声明，tool_search 命中即激活", () => {
+  it("常驻（2026-10-23 二次裁决：先收起后转回常驻）：不写 exposure 字段（SDK 缺省 direct）", () => {
     const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
-    expect(tool.exposure).toBe("deferred");
-    expect(TOOL_SRC).toContain('exposure: "deferred"');
+    expect(tool.exposure).toBeUndefined();
+    expect(TOOL_SRC).not.toContain('exposure: "deferred"');
   });
-
   it("slug 走 SLUG_MAX_LENGTH 上界（schema 第一道关卡 + 运行时第二道）", () => {
     expect(TOOL_SRC).toContain("assertSlugWithinLimit");
   });
@@ -685,9 +684,12 @@ describe("reentry guard：与 workflow_run/workflow_control 共用同一实例",
 
 // ══════════════════════════════════════════════════════════════
 describe("集合收录（D1：单收录 WORKFLOW，不进 SUBAGENT）", () => {
-  it("'subagents' ∈ WORKFLOW_TOOL_NAMES 且 ∉ SUBAGENT_TOOL_NAMES", async () => {
+  it("'subagent_batch' 与旧名 'subagents' 均 ∈ WORKFLOW_TOOL_NAMES 且 ∉ SUBAGENT_TOOL_NAMES", async () => {
     const constants = await loadSharedConstants();
+    expect(constants.WORKFLOW_TOOL_NAMES.has("subagent_batch")).toBe(true);
+    // 旧名保留（2026-10-23 改名）：历史会话 toolCall 渲染依赖旧名在集
     expect(constants.WORKFLOW_TOOL_NAMES.has("subagents")).toBe(true);
+    expect(constants.SUBAGENT_TOOL_NAMES.has("subagent_batch")).toBe(false);
     expect(constants.SUBAGENT_TOOL_NAMES.has("subagents")).toBe(false);
     // 既有成员不回归
     expect(constants.WORKFLOW_TOOL_NAMES.has("workflow")).toBe(true);
@@ -697,13 +699,13 @@ describe("集合收录（D1：单收录 WORKFLOW，不进 SUBAGENT）", () => {
 
 // ══════════════════════════════════════════════════════════════
 describe("TUI 渲染（renderCall/renderResult 既有惯例）", () => {
-  it("renderCall 单行：subagents + 任务数 + slug", () => {
+  it("renderCall 单行：subagent_batch + 任务数 + slug", () => {
     const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     const text = renderedText(tool.renderCall(
       { tasks: TWO_TASKS, slug: "foo-tri-review" },
       makeTheme(),
     ));
-    expect(text).toContain("subagents");
+    expect(text).toContain("subagent_batch");
     expect(text).toContain("2 tasks");
     expect(text).toContain("foo-tri-review");
     expect(text).not.toContain("\n");

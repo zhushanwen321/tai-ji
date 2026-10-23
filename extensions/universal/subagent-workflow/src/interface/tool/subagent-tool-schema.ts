@@ -8,7 +8,7 @@
 //   - `subagent_manage` → SubagentManageParams（action: list/cancel/close）
 //   - `subagent_message`→ SubagentMessageParams（action: message/fork-from）
 // manage/message 内部保留小 action 枚举是 D3 范围裁决（参数同构、条件必填失真可忽略）。
-// 另含批量派发 `subagents` → SubagentsParams（成员对象形状，自 tool-subagents.ts 移入；
+// 另含批量派发 `subagent_batch` → SubagentsParams（成员对象形状，自 tool-subagents.ts 移入；
 // 设计 §3.4：schema 类型与 start/manage/message 同文件，供跨包契约测试直接 import）。
 //
 // 抽取自 subagent-tool.ts（跨包契约另一半）：subagent-tool 依赖树沉重（pi SDK /
@@ -93,7 +93,7 @@ export const SubagentStartParams = Type.Object({
     description:
       "Execution engine. Omit to inherit config. Priority: this param > agent .md frontmatter > config.json defaultEngine. Non-pi engines reject fork/worktree.",
   })),
-  // [collect 退役] collect 参数已删除——批量编排的唯一入口是 `subagents` tool（fan-out run
+  // [collect 退役] collect 参数已删除——批量编排的唯一入口是 `subagent_batch` tool（fan-out run
   // 管道），单数 start 不再有通知路由选项。旧调用形态（显式带 collect）不会被 pi 参数校验
   // 拒绝（typebox Object 不产 additionalProperties → 未知字段静默放行），通知路由不再生效；
   // 声明层无迁移期提示（原 description 的退役说明已随声明压缩删除，未在其他层重新承载）。
