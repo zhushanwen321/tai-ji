@@ -5,6 +5,9 @@ import type { SessionGroup, SessionSummary, SessionStatus, SessionDataSource } f
 import type { FileChange, ChangeSetStatus, Message } from './message'
 // delivery 域帧 DTO（投递所有权内核 D7/ADR-0043）：segments 快照供草稿恢复
 import type { Segment } from './segments'
+// session occupancy 域（chat-flow-consistency D1 契约根）：turn 相位值域 SSOT，
+// 形状与「回合进行中」判定集合 SSOT 在 ./session-occupancy
+import type { SessionTurnPhase } from './session-occupancy'
 import type { PiMessageEntry, PiToolCallEntryForm } from './pi-entry'
 import type { FileNode } from './file-tree'
 // 领域 DTO 已下沉到各自领域文件（E2 架构候选）：protocol.ts 仅保留 type→payload 映射 SSOT，
@@ -2444,14 +2447,21 @@ export interface ServerMessageMapBase {
   // PiCompactionReason，驱动前端 compacting 浮层文案区分手动/自动。
   'session.compacting': { sessionId: string; status: 'compacting'; reason: 'manual' | 'threshold' | 'overflow' }
   'session.compacted': { sessionId: string; status: 'compacted'; error?: string }
-  // session.occupancy（session-occupancy-send-closure D3/P3）：占用三维结构快照，state topic
-  // （message-bus 分配 seq + 写 last-value 快照、不入 ring——重连/切回 session 经 stateSnapshot
-  // 回放自动恢复）。turn 三阶段：dispatching = prompt 已发、message_start 未到；
+  // session.occupancy（session-occupancy-send-closure D3/P3；chat-flow-consistency D1 扩
+  // handingOff 第四维）：占用结构快照，state topic（message-bus 分配 seq + 写 last-value 快照、
+  // 不入 ring——重连/切回 session 经 stateSnapshot 回放自动恢复）。turn 四相位值域 SSOT =
+  // SessionTurnPhase（./session-occupancy）：dispatching = prompt 已发、message_start 未到；
   // generating = turn-start..turn-end；settling = turn-end..agent-settled（pi post-run 收尾期）。
-  // 三维独立（compacting/bash 与 turn 各阶段可并存：settling+compacting 是 overflow 收尾常态，
+  // 维度独立（compacting/bash 与 turn 各阶段可并存：settling+compacting 是 overflow 收尾常态，
   // threshold 模式 turn 内自动压缩则 generating+compacting）。session.compacting/compacted 事件
   // 保留（浮层 reason 文案源），isCompacting 改由本消息派生。
-  'session.occupancy': { sessionId: string; turn: 'idle' | 'dispatching' | 'generating' | 'settling'; compacting: boolean; bash: boolean }
+  // handingOff（chat-flow-consistency §6「交接在途状态归属」裁决）：handoff（会话交接）编排
+  // 在途两态布尔，与 compacting/bash 同型正交——handingOff 与 turn=generating 可并存（交接
+  // turn 在跑，两维互不替代）。置位/复位 = U1 落地的 handingOff-start/end 转移行 +
+  // handoff-service 编排接线（本帧契约根先行，帧值由 runtime 展开构造点随 U1 补齐）。
+  // 可选性 = 跨波落地的过渡形态：U1 落地前 runtime 不发本字段，消费方按未置位（false）处理；
+  // 落地后帧恒带四维。
+  'session.occupancy': { sessionId: string; turn: SessionTurnPhase; compacting: boolean; bash: boolean; handingOff?: boolean }
   // session.delivery（投递所有权内核 D5/D9②）：条目状态全量快照（展示派生视图），state topic
   // last-value 语义（message-bus 不入 ring，重连/切回经 stateSnapshot 回放自动恢复）。
   // 数据源 = 内核 entries() 派生视图：活跃条目（queued/in-flight/failed）全量 + delivered
@@ -3128,7 +3138,14 @@ export interface ServerMessageMapBase {
   // 的持久化触发点，agent-session.ts:545-561），实时路径与文件重放（get_entries）喂同一个
   // core reducer（applyEntry）的权威载体。entry.id 恒缺省（pi 在 emit 之后才 appendMessage
   // 分配 uuidv7，事件上拿不到）——reducer 按 `e<N>` 确定性派生，W22 对账靠 get_entries。
-  'message.message_end': { sessionId: string; entry: PiMessageEntry }
+  // messageId（chat-flow-consistency §6「D3 定位升级」裁决；消费方 = U3 定稿重建定位 +
+  // textFinalized 标记）：message_end(assistant) 帧的翻译层锚点 = interpreter currentMessageId
+  // （runtime a-uuid，message_start 时设置，与 tool_call_start 帧 entry.messageId 同一空间），
+  // 使定稿重建升级为「id 锚定优先、位置兜底」，错挂形态类整体消除。可选性：仅 assistant
+  // 消息帧携带（翻译层同步附加）；user/toolResult/custom 帧不带。文件重放路径（get_entries）
+  // 无此字段——翻译层产物不入 PiMessageEntry（保持其 pi SessionEntry 结构镜像定位），
+  // 锚点挂在帧顶层。
+  'message.message_end': { sessionId: string; entry: PiMessageEntry; messageId?: string }
   // message.tool_call_start：tool_execution_start 重构的 toolCall entry 形态（替换直译平铺
   // payload——overlay 挂 running toolCall 从 entry 读取）。contentIndex/messageId 由
   // event-interpreter 从缓存补齐（产出顺序锚点 + 挂载目标）；turnId 恒缺省（值填充归

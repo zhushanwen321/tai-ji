@@ -519,3 +519,8 @@ export {
 export { RUNTIME_INSTANCE_FILE } from './runtime-instance'
 export type { RuntimeInstanceRecord } from './runtime-instance'
 export { displayAgentName, displayWorkflowName } from './display-name'
+// session occupancy 域（chat-flow-consistency D1 契约根）：turn 相位值域 + 「回合进行中」
+// 判定集合（laneOf 投递判定 / 发送位预测 / 活动条 / 前端回合判定统一引用）。
+// 形状 SSOT = ./session-occupancy，protocol.ts 的 'session.occupancy' 帧内联引用其类型。
+export type { SessionTurnPhase, ActiveTurnPhase } from './session-occupancy'
+export { ACTIVE_TURN_PHASES } from './session-occupancy'
