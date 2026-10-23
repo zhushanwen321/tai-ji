@@ -76,7 +76,6 @@ import type { WorkflowRun } from "./models/workflow-run.ts";
 // 消费的下述符号经本行直接指向权威（下方 re-export 块供 orchestration 消费面、barrel
 // 与外部包深导入零改动）。
 import type {
-  WorkflowModelOverride,
   WorkflowRunEvent,
   WorkflowRunEventInput,
 } from "../shared/run-event-contracts.ts";
@@ -950,31 +949,11 @@ export function errorLogsFromEvents(events: readonly WorkflowRunEvent[]): Worker
   return logs.length > MAX_ERROR_LOGS ? logs.slice(-MAX_ERROR_LOGS) : logs;
 }
 
-/**
- * 事件流 → 最新模型覆盖记账值（subagent-model-switch §6.2 折叠语义：生效覆盖值 =
- * 最新一条，覆盖旧覆盖值不叠加——设计不变量 2；无覆盖 undefined）。
- *
- * 单点辅助，直接调用面枚举（消费面扩大时同步本清单，锚 grep
- * `latestModelOverride(` 生产调用点）：① 壳侧 foldRecordStreamToRun 挂
- * WorkflowRunMeta.modelOverride（重启重建的派生视图）；② core resume-run 生效
- * 模型三档回落的中档（决策七，resume-run.ts）；③ U4b 派发侧内存表 miss 重建
- * （subagent-service.ts rebuildRunOverride 闭包，workflow-dispatch 派发链消费）；
- * 另有 runtime 侧等价尾读第四面（model-override-query.ts 的独立实装，自注释
- * 「构造性等价」——不调用本函数、按尾块倒序读同源 journal 文件）。
- * 尾向扫描首条命中即返回（与 findLatestRunResumed 同款手写循环——findLast 属
- * ES2023 lib，本包 target ES2022）。
- */
-export function latestModelOverride(
-  events: readonly WorkflowRunEvent[],
-): WorkflowModelOverride | undefined {
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const event = events[i]!;
-    if (event.type === "model-override") {
-      return { model: event.model, ...(event.thinkingLevel !== undefined ? { thinkingLevel: event.thinkingLevel } : {}), ts: event.ts };
-    }
-  }
-  return undefined;
-}
+// [D1 反向依赖收编决策三] 折叠原语 latestModelOverride 本体在
+// execution/persistence/run-event-journal.ts（与 scanRunEvents 同文件的同域读侧
+// 折叠原语）；本处保留 re-export——orchestration 消费面（resume-run）、barrel 与
+// 外部包深导入零改动，全仓仍只有一份实现。
+export { latestModelOverride } from "../execution/persistence/run-event-journal.ts";
 
 // ── journal 实装（createRunEventJournal——本模块唯一 IO 边）────
 
