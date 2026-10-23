@@ -78,13 +78,13 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
       mod.default(mounted.api);
     }, 30_000);
 
-    it("AC-1.1: registers 7 tools (subagent 组三件 + subagents + workflow 组两件 + workflow-script)", () => {
-      // D3 拆分后 7 tools: subagent_start/manage/message (from subagents) + subagents +
+    it("AC-1.1: registers 7 tools (subagent 组三件 + subagent_batch + workflow 组两件 + workflow-script)", () => {
+      // D3 拆分后 7 tools: subagent_start/manage/message (from subagents) + subagent_batch +
       // workflow_run/workflow_control + workflow-script
       expect(mounted.tools).toContain("subagent_start");
       expect(mounted.tools).toContain("subagent_manage");
       expect(mounted.tools).toContain("subagent_message");
-      expect(mounted.tools).toContain("subagents");
+      expect(mounted.tools).toContain("subagent_batch");
       expect(mounted.tools).toContain("workflow_run");
       expect(mounted.tools).toContain("workflow_control");
       expect(mounted.tools).toContain("workflow-script");
