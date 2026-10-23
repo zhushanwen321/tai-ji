@@ -58,15 +58,17 @@ import { updatePlanWidget } from "../widget.js";
 
 /** Build a fake pi + ctx and capture the execute callback from registerTool. */
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
-// D4 回归锚素材（对齐 pi 实装档位，快照式恢复 dmg-r1-2）：plan = deferred（tool.ts
-// 注册档位）；tool_search = model-only + defaultActive:false 注册（pi tool-search/
+// D4 回归锚素材（对齐 pi 实装注册档位）：plan = direct 常驻（tool.ts 注册零 exposure
+// 字段，pi 默认 direct）；tool_search = model-only + defaultActive:false 注册（pi tool-search/
 // index.js:11）——model-only 档但注册不进默认激活集（agent-session _isDefaultActive：
 // defaultActive !== false 才默认激活），setActiveTools 点名即声明（_applyToolLoadout 只滤
 // hidden），恢复集点名它 = 未 opt-in 的独立 pi 上常驻激活它
 const TOOL_SEARCH = "tool_search";
 /**
- * 独立 pi 进入 plan 前的默认激活集（getActiveTools 语义）：direct 全量——
- * 不含 plan（deferred）与 tool_search（model-only + defaultActive:false）
+ * 独立 pi 进入 plan 前的默认激活集（getActiveTools 语义）：不含 plan 与
+ * tool_search（model-only + defaultActive:false）。plan 的排除是本组用例布景
+ * （激活前状态），锻炼 setActiveTools 激活路径，与 exposure 无关——注册终态
+ * plan = direct 常驻
  */
 const DEFAULT_ACTIVE_TOOLS = ALL_TOOL_NAMES.filter((n) => n !== "plan");
 
