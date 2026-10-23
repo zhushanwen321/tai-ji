@@ -460,8 +460,11 @@ function buildTranslatorOpts(
     onDelta: callbacks.onDelta,
     // [§3.3.1 三源判别] limiter abort 事实位镜像：limiter 耗尽走 SIGKILL 直杀（进程
     // 死前无停因可采），本位是 turn-budget 支的事实载体（→ harness.turn_budget_exhausted）。
-    abort: () => {
+    // [§3.3.9/UC-10] abort 签名携带耗尽事实（{used, limit}，translator/limiter 一次
+    // 产出）——快照随事实位传入 collectOutcome，cause.budget 结构化承载。
+    abort: (info) => {
       runEnd.turnBudgetExhausted = true;
+      runEnd.turnBudgetExhaustion = info;
       killChild();
     },
     // [§3.3.1 三源判别] 宿主取消信号谓词（收尾边沿 host-cancel 支输入）。
@@ -559,7 +562,11 @@ function collectRunResult(
     // 单源不双裁）。
     ...(runEnd.terminalErrorFact !== undefined ? { terminalError: runEnd.terminalErrorFact } : {}),
     ...(runEnd.turnBudgetExhausted === true && runEnd.terminalErrorFact === undefined
-      ? { turnBudgetExhausted: true }
+      ? {
+        turnBudgetExhausted: true,
+        // [§3.3.9/UC-10] 耗尽事实（{used, limit}）随事实位传入——cause.budget。
+        ...(runEnd.turnBudgetExhaustion !== undefined ? { turnBudget: runEnd.turnBudgetExhaustion } : {}),
+      }
       : {}),
     ...(runEnd.promptHandledNoRun === true ? { promptHandledNoRun: true } : {}),
     // [P5 计账] 最终尝试 usage 切片基 + 重试波次计数。

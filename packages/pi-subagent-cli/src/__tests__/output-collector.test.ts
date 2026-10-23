@@ -638,6 +638,31 @@ describe("classifyFailureCause（结构化输入分类，子串分诊的接替�
     expect(classifyFailureCause({}, NOW)).toBeUndefined();
   });
 
+  it("[§3.3.9/UC-10] 耗尽事实 {used, limit} 结构化进 cause.budget（事实位与停因支两路）", () => {
+    // SIGKILL 直杀主路径：事实位 + turnBudget → cause.budget 携带
+    expect(
+      classifyFailureCause({ turnBudgetExhausted: true, turnBudget: { used: 12, limit: 10 } }, NOW),
+    ).toMatchObject({ class: "harness", kind: "turn_budget_exhausted", budget: { used: 12, limit: 10 } });
+    // 事实位在、快照缺席（极端竞窗）→ 轮失败事实不变、budget 缺省不产结构
+    const factOnly = classifyFailureCause({ turnBudgetExhausted: true }, NOW);
+    expect(factOnly).toMatchObject({ class: "harness", kind: "turn_budget_exhausted" });
+    expect(factOnly && "budget" in factOnly).toBe(false);
+    // aborted 停因支：EngineRoundErrorFact.turnBudget 快照 → cause.budget 透传
+    expect(
+      classifyFailureCause(
+        { terminalError: { stopReason: "aborted", errorMessage: "budget", abortSource: "turn-budget", turnBudget: { used: 3, limit: 1 } } },
+        NOW,
+      ),
+    ).toMatchObject({ class: "harness", kind: "turn_budget_exhausted", budget: { used: 3, limit: 1 } });
+    // 非 turn-budget 支（host-cancel）不产 budget
+    const cancelled = classifyFailureCause(
+      { terminalError: { stopReason: "aborted", errorMessage: "cancel", abortSource: "host-cancel" } },
+      NOW,
+    );
+    expect(cancelled).toMatchObject({ class: "user", kind: "cancelled" });
+    expect(cancelled && "budget" in cancelled).toBe(false);
+  });
+
   it("extractRetryAfterMsFromText：resets ISO / retry after 秒数 / 无命中 undefined", () => {
     expect(extractRetryAfterMsFromText(`resets ${new Date(NOW + 5000).toISOString()}`, NOW)).toBe(5000);
     expect(extractRetryAfterMsFromText("try again in 90 seconds", NOW)).toBe(90_000);

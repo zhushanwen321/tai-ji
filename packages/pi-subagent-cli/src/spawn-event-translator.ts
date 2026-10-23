@@ -13,10 +13,7 @@ import {
 
 import { mapAssistantMessageDelta, resolveToolEndArgs } from "./spawn-args.ts";
 import type { SdkEvent } from "./spawn-event-adapter.ts";
-import { createTurnLimiter } from "./turn-limiter.ts";
-
-/** 默认 grace turns（soft limit 后宽限轮数，core 现状值）。 */
-const DEFAULT_GRACE_TURNS = 2;
+import { createTurnLimiter, type TurnBudgetExhaustion } from "./turn-limiter.ts";
 
 /** [U-A6] 工具执行期活性信号的最小发射间隔（ms）；量级依据见 handleToolExecutionUpdate。 */
 const TOOL_ACTIVITY_MIN_INTERVAL_MS = 1_000;
@@ -56,6 +53,12 @@ export interface EngineRoundErrorFact {
   /** pi AssistantMessage.diagnostics 原样（结构化诊断，消费侧运行时窄化）。 */
   diagnostics?: unknown;
   abortSource: "host-cancel" | "turn-budget" | "engine";
+  /**
+   * [subagent-observability §3.3.9/UC-10] turn 预算耗尽事实（limiter abort 边沿一次
+   * 产出，abortSource="turn-budget" 支随停因事实带出）：cause
+   * harness.turn_budget_exhausted 的 budget 字段结构化承载（{used, limit} 可查询）。
+   */
+  turnBudget?: TurnBudgetExhaustion;
 }
 
 /**
@@ -106,7 +109,12 @@ export interface SdkTranslatorOpts {
   graceTurns?: number;
   onEvent: (e: AgentEvent) => void;
   onDelta?: (d: string) => void;
-  abort: () => void;
+  /**
+   * limiter 耗尽执行（kill 子进程）。[subagent-observability §3.3.9/UC-10] 签名携带
+   * TurnBudgetExhaustion 事实（{used, limit}，abort 边沿一次产出）——宿主装配按需
+   * 捕获（少参闭包类型兼容，不消费事实的装配零改动）。
+   */
+  abort: (info: TurnBudgetExhaustion) => void;
   /** agent_end（非 willRetry）到达：turn 已终态、轮收敛（不 kill，收割等 agent_settled）。 */
   onAgentEnd?: () => void;
   /**
@@ -256,14 +264,20 @@ function handleAgentEnd(
     edge.lastStopReason === "error" || edge.lastStopReason === "aborted";
   if (stopReasonIsErrorFact || edge.pendingErrorFact !== undefined) {
     const stopReason: "error" | "aborted" = edge.lastStopReason === "aborted" ? "aborted" : "error";
+    // [§3.3.1 aborted 三源判别] 同一收尾边沿裁决：宿主取消 > limiter 耗尽 > 引擎异常。
+    const abortSource = adjudicateAbortSource(opts, limiter);
     opts.onErroredEnd?.({
       stopReason,
       errorMessage:
         edge.lastErrorMessage ?? edge.pendingErrorFact ?? "engine reported error without message text",
       ...(edge.rawStopReason !== undefined ? { rawStopReason: edge.rawStopReason } : {}),
       ...(edge.lastDiagnostics !== undefined ? { diagnostics: edge.lastDiagnostics } : {}),
-      // [§3.3.1 aborted 三源判别] 同一收尾边沿裁决：宿主取消 > limiter 耗尽 > 引擎异常。
-      abortSource: adjudicateAbortSource(opts, limiter),
+      abortSource,
+      // [§3.3.9/UC-10] limiter 耗尽支随停因事实带出 {used, limit}（abort 边沿一次
+      // 产出的耗尽事实快照；宿主取消/引擎异常支无该事实）。
+      ...(abortSource === "turn-budget" && limiter.turnBudgetExhaustion !== undefined
+        ? { turnBudget: limiter.turnBudgetExhaustion }
+        : {}),
     });
     return;
   }
@@ -383,9 +397,14 @@ export function createSdkEventTranslator(
   };
 
   // b. turnLimiter（spawn 版：abort = kill 子进程；steer 未接通，靠 WRAP_UP_HINT 补偿）
+  // [subagent-observability §3.3.9 预算显式化] maxTurns 显式传参时管道生效：WRAP_UP
+  // 提示（spawn-runner 启动注入）→ 宽限轮（缺省 DEFAULT_GRACE_TURNS，limiter 内
+  // 单点缺省）→ abort（携带 {used, limit} 耗尽事实——快照在 limiter
+  // turnBudgetExhaustion 事实位，收尾边沿 turn-budget 支读取）。maxTurns 缺省 0 =
+  // unbounded（limiter 禁用，不 steer 不 abort——UC-9 默认行为不变）。
   const limiter = createTurnLimiter({
     maxTurns: opts.maxTurns ?? 0,
-    graceTurns: opts.graceTurns ?? DEFAULT_GRACE_TURNS,
+    ...(opts.graceTurns !== undefined ? { graceTurns: opts.graceTurns } : {}),
     steer: () => {
       // no-op：rpc stdin steer 通道未接通；启动时已注入 WRAP_UP_HINT 让 agent 主动收尾。
     },

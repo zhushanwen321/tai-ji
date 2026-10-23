@@ -21,6 +21,7 @@ import type { ReplayRecordView } from "@zhushanwen/subagent-engine-sdk";
 
 import type { EngineRoundErrorFact } from "./spawn-event-translator.ts";
 import type { PromptAckResult } from "./prompt-ack.ts";
+import type { TurnBudgetExhaustion } from "./turn-limiter.ts";
 
 // ============================================================
 // 失败分诊词表（D5-③，产出侧单点；与 core 版逐字等价）
@@ -177,6 +178,12 @@ export interface FailureCauseInput {
   terminalError?: EngineRoundErrorFact;
   /** limiter abort 事实位（SIGKILL 直杀路径——进程死前无 message_end 停因可采）。 */
   turnBudgetExhausted?: boolean;
+  /**
+   * [subagent-observability §3.3.9/UC-10] limiter 耗尽事实（{used, limit}，abort 边沿
+   * 一次产出）：随 turnBudgetExhausted 事实位/turn-budget 停因支进入 cause.budget
+   * 结构化承载。undefined = 事实缺席（极端竞窗，轮失败事实不受影响）。
+   */
+  turnBudget?: TurnBudgetExhaustion;
 }
 
 /**
@@ -197,6 +204,7 @@ export function classifyFailureCause(input: FailureCauseInput, nowMs: number = D
       kind: "turn_budget_exhausted",
       retryable: false,
       raw: "turn budget exhausted after grace turns (limiter abort)",
+      ...(input.turnBudget !== undefined ? { budget: input.turnBudget } : {}),
     };
   }
   if (terminalError === undefined) return undefined;
@@ -213,6 +221,9 @@ export function classifyFailureCause(input: FailureCauseInput, nowMs: number = D
         kind: "turn_budget_exhausted",
         retryable: false,
         raw,
+        // [§3.3.9/UC-10] 停因事实的 turnBudget 快照（EngineRoundErrorFact.turnBudget）
+        // 优先；无快照的竞窗形态事实不足不产结构（budget 缺省）。
+        ...(terminalError.turnBudget !== undefined ? { budget: terminalError.turnBudget } : {}),
       };
     }
     return { class: "engine", kind: "engine_aborted", retryable: false, raw };
@@ -317,6 +328,11 @@ export interface CollectResultArgs {
   terminalError?: EngineRoundErrorFact;
   /** [§3.3.1 三源判别] limiter abort 事实位（SIGKILL 直杀路径的 turn-budget 支）。 */
   turnBudgetExhausted?: boolean;
+  /**
+   * [§3.3.9/UC-10] limiter 耗尽事实（{used, limit}）——随 turnBudgetExhausted 事实位
+   * 传入，cause.budget 结构化承载。undefined = 事实缺席（轮失败事实不受影响）。
+   */
+  turnBudget?: TurnBudgetExhaustion;
   /**
    * [§3.3.1 P6-A] prompt disposition=handled 且执行从未启动（isStreaming=false 确定性
    * 立即轮终）：回执层成功 + engineStopReason 无值 + promptDisposition 字段定稿 +
@@ -531,6 +547,8 @@ export function collectOutcome(
     failure = classifyFailureCause({
       ...(args.terminalError !== undefined ? { terminalError: args.terminalError } : {}),
       ...(args.turnBudgetExhausted === true ? { turnBudgetExhausted: true } : {}),
+      // [§3.3.9/UC-10] limiter 耗尽事实（{used, limit}）→ cause.budget。
+      ...(args.turnBudget !== undefined ? { turnBudget: args.turnBudget } : {}),
     });
   } else if (args.promptHandledNoRun === true) {
     // ②-A 被接管轮：回执层成功，无执行、无失败、无停因——不写 FailureCause。

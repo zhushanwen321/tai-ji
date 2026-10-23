@@ -23,6 +23,7 @@ import { createReplayRecord, type AgentEvent } from "@zhushanwen/subagent-engine
 
 import { parseSpawnLine, type SdkEvent } from "../spawn-event-adapter.ts";
 import { createSdkEventTranslator, type SdkTranslatorOpts } from "../spawn-event-translator.ts";
+import type { TurnBudgetExhaustion } from "../turn-limiter.ts";
 
 /**
  * 实装 pi 0.84.4 rpc 形态的原始 stdout 行（agent-loop emit → agent-session _emit →
@@ -455,5 +456,65 @@ describe("[subagent-observability §3.3.1] 收尾边沿停因事实优先（表�
     expect(snapshot?.finalAttemptTurnBase).toBe(1);
     expect(snapshot?.retryAttempts).toBe(1);
     expect(snapshot?.stopReason).toBe("stop");
+  });
+});
+
+describe("[subagent-observability §3.3.9/UC-10] 预算显式化：limiter 管道生效 + 耗尽事实随收尾边沿带出", () => {
+  /** aborted 停因行（limiter 耗尽与 aborted 停因并存的防御性同判形态）。 */
+  const abortedLine = (): string =>
+    JSON.stringify({ type: "message_end", message: { stopReason: "aborted", errorMessage: "aborted by user" } });
+
+  it("maxTurns 显式传参：宽限轮耗尽 → opts.abort 收到 {used, limit}（UC-9 缺省不传 = 管道禁用零 abort）", () => {
+    const abortCalls: TurnBudgetExhaustion[] = [];
+    const h = makeHarness({ maxTurns: 1, abort: (info) => abortCalls.push(info) });
+    h.feed(JSON.stringify({ type: "turn_end" })); // steer（到达 maxTurns）
+    h.feed(JSON.stringify({ type: "turn_end" })); // grace 0（显式缺省 2 未到）——不 abort
+    expect(abortCalls).toEqual([]); // 缺省宽限轮 2：steer 后两轮内不杀
+    h.feed(JSON.stringify({ type: "turn_end" })); // 缺省宽限第 2 轮耗尽 → abort
+    expect(abortCalls).toEqual([{ used: 3, limit: 1 }]);
+    // unbounded 对照：maxTurns 缺省（不传）下同规模轮数零 abort（UC-9 默认行为不变）
+    const abortUnbounded: TurnBudgetExhaustion[] = [];
+    const hu = makeHarness({ abort: (info) => abortUnbounded.push(info) });
+    for (let i = 0; i < 10; i++) hu.feed(JSON.stringify({ type: "turn_end" }));
+    expect(abortUnbounded).toEqual([]);
+  });
+
+  it("limiter 耗尽 + aborted 停因并存 → EngineRoundErrorFact 带 turnBudget {used, limit}（abortSource=turn-budget）", () => {
+    let errored: import("../spawn-event-translator.ts").EngineRoundErrorFact | undefined;
+    const abortCalls: TurnBudgetExhaustion[] = [];
+    const h = makeHarness({
+      maxTurns: 1,
+      abort: (info) => abortCalls.push(info),
+      onErroredEnd: (fact) => { errored = fact; },
+    });
+    h.feed(JSON.stringify({ type: "turn_end" })); // steer
+    h.feed(JSON.stringify({ type: "turn_end" })); // 缺省宽限轮 1 —— 不 abort
+    expect(abortCalls).toEqual([]);
+    h.feed(JSON.stringify({ type: "turn_end" })); // 缺省宽限轮 2 耗尽 → abort({used:3,limit:1})
+    expect(abortCalls).toEqual([{ used: 3, limit: 1 }]);
+    h.feed(abortedLine());
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: false, reason: "aborted" }));
+
+    expect(errored?.stopReason).toBe("aborted");
+    expect(errored?.abortSource).toBe("turn-budget");
+    expect(errored?.turnBudget).toEqual({ used: 3, limit: 1 });
+  });
+
+  it("非 turn-budget 支无 turnBudget 事实（host-cancel / engine，无耗尽发生）", () => {
+    const rows: Array<{ name: string; hostAborted: boolean; expected: "host-cancel" | "engine" }> = [
+      { name: "宿主取消", hostAborted: true, expected: "host-cancel" },
+      { name: "引擎异常兜底", hostAborted: false, expected: "engine" },
+    ];
+    for (const row of rows) {
+      let errored: import("../spawn-event-translator.ts").EngineRoundErrorFact | undefined;
+      const h = makeHarness({
+        isHostAbortRequested: () => row.hostAborted,
+        onErroredEnd: (fact) => { errored = fact; },
+      });
+      h.feed(abortedLine());
+      h.feed(JSON.stringify({ type: "agent_end", willRetry: false, reason: "aborted" }));
+      expect(errored?.abortSource).toBe(row.expected);
+      expect(errored?.turnBudget).toBeUndefined();
+    }
   });
 });

@@ -100,6 +100,12 @@ export interface RunEndState {
    */
   turnBudgetExhausted?: boolean;
   /**
+   * [subagent-observability §3.3.9/UC-10] limiter 耗尽事实（{used, limit}，abort 边沿
+   * 一次产出）：collectRunResult 随 turnBudgetExhausted 事实位传给 collectOutcome，
+   * cause.budget 结构化承载。undefined = 事实缺席（轮失败事实不受影响）。
+   */
+  turnBudgetExhaustion?: import("./turn-limiter.ts").TurnBudgetExhaustion;
+  /**
    * [subagent-observability §3.3.1 P6-A] disposition=handled 且执行从未启动的确定性
    * 立即轮终（isStreaming=false 判定后置位）：回执层成功口径 + engineStopReason 无值 +
    * promptDisposition="handled"，无 FailureCause（无失败发生）。
