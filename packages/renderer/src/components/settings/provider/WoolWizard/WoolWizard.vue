@@ -89,7 +89,7 @@
 import { computed, shallowRef, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle } from '@taiji/ui'
-import { openBrowser } from '@taiji/core/domain/overlay'
+import { openBrowser, useOverlayControl } from '@taiji/core/domain/overlay'
 import { getSettingsTransport } from '@taiji/core'
 import type { WoolFamilyId } from '@taiji/shared'
 import { useWool } from '@/composables/features/settings/useWool'
@@ -103,6 +103,11 @@ const emit = defineEmits<{ 'update:open': [open: boolean] }>()
 
 const { t } = useI18n()
 const wool = useWool()
+// 浮层全局开合态（core SSOT）：守卫第 4 条的判定源——浮层在场（无论本轮向导是否发起过
+// 授权，含上一轮授权遗留的浮层）时向导锁定。modal 的 body pointer-events:none 会让浮层
+// DOM 的点击穿透到 reka 遮罩（elementFromPoint 实证：target=遮罩 div），按 target 判
+// 「浮层内」结构性失效，必须按全局浮层态判定。
+const { isOpen: overlayIsOpen } = useOverlayControl()
 
 /** 当前相（family = 家族选择；flow = 步骤区）。 */
 const phase = ref<'family' | 'flow'>('family')
@@ -177,16 +182,18 @@ function onFamilySelect(family: WoolFamilyId): void {
  * 层外交互守卫（interact-outside 同时承接 reka DismissableLayer 的两条关闭判定：
  * pointerdown 层外 + focusin 层外——按 originalEvent 类型分流）：
  * - focusin 通道一律不关：多步向导期间「真实焦点离开向导层」全是程序性/浮层联动
- *   （授权浮层开合、关闭浮层时焦点归还 composer），不构成「用户想离开」——曾致
- *   授权进行中的向导被焦点转移连带关掉（2026-10-22 排查定性）。
- * - pointerdown 通道三类例外不关：授权浮层（wfvz-overlay，z-dialog 高于本层——
- *   浮层是全局工作层，点它不是「点向导外面」）、Toast 通知（独立层，非阻塞通知
- *   点击不该中断向导）、授权等待态（authorize 步 running 或授权页已开——授权流程
- *   中向导锁定，只认取消/Esc 关闭）。其余层外点击（设置页空白处）保留标准关闭。
+ *   （授权浮层开合、关闭浮层时焦点归还 composer），不构成「用户想离开」。
+ * - pointerdown 通道：浮层在场（overlayIsOpen 全局浮层态，core SSOT）时向导整体锁定
+ *   ——modal 的 body pointer-events:none 使浮层 DOM 点击穿透到 reka 遮罩
+ *   （elementFromPoint 实证 target=遮罩 div），「浮层内 target」判定结构性失效，只能按
+ *   全局浮层态判定，且不分相/模板（浮层盖着一切下层交互，「点浮层=想关向导」不成立）；
+ *   浮层 DOM / Toast 的 target 命中分支（非 modal 场景 target 可达）与授权等待态
+ *   （authorize running / 授权页已开——覆盖浮层判定不到的窄窗）同样不关；其余层外
+ *   点击（设置页空白处）保留标准关闭。
  */
 function onInteractOutside(e: Event): void {
   const original = (e as CustomEvent<{ originalEvent?: Event }>).detail?.originalEvent
-  if (original instanceof FocusEvent) {
+  if (original instanceof FocusEvent || overlayIsOpen.value) {
     e.preventDefault()
     return
   }
