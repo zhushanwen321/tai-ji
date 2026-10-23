@@ -12,6 +12,9 @@ import { describe, expect, it } from 'vitest'
 import {
   SUBAGENT_STATUS_ALL,
   deriveClosedDisplay,
+  type FailureCause,
+  type SubagentLastRound,
+  type SubagentRecord,
   type SubagentStatus,
 } from '../subagent'
 
@@ -36,6 +39,67 @@ describe('deriveClosedDisplay（legacy 终态三分色，扩值不回归）', ()
     expect(deriveClosedDisplay({ closedReason: 'gc', error: 'boom' })).toBe('failed')
     expect(deriveClosedDisplay({ closedReason: 'gc' })).toBe('done')
     expect(deriveClosedDisplay({})).toBe('done')
+  })
+})
+
+// ── [subagent-observability §3.3.3⑤(c) / plan-review F4] lastRound wire 契约 ──
+
+describe('SubagentRecord.lastRound wire 契约（u-foundation F4——字段存在性 + re-export 类型可达）', () => {
+  it('lastRound 字段在 shared 契约上可达（消费方数据自 shared 类型导出，防 mock 自造字段假绿）', () => {
+    // 类型层验证：lastRound?: SubagentLastRound 在 SubagentRecord 上（编译期承载，
+    // 运行时构造一次完整载荷证明形状可满足）。
+    const lastRound: SubagentLastRound = {
+      engineStopReason: 'error',
+      failure: {
+        class: 'provider',
+        kind: 'rate_limited',
+        retryable: 'conditional',
+        retryAfterMs: 60_000,
+        raw: '429: tier_limit_exceeded resets 18:00',
+      },
+      promptDisposition: 'handled',
+      result: '',
+      turns: 3,
+      usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, total: 15, cost: 0 },
+      retryAttempts: 1,
+      observations: ['deliverable predicate not satisfied'],
+    }
+    const record: SubagentRecord = {
+      subagentId: 'bg-x',
+      sessionFile: null,
+      agent: 'general-purpose',
+      slug: 'x',
+      task: 't',
+      status: 'idle',
+      lastRound,
+    }
+    // wire 往返保真（跨进程载荷逐字序列化）。
+    const wire = JSON.parse(JSON.stringify(record)) as SubagentRecord
+    expect(wire.lastRound?.engineStopReason).toBe('error')
+    expect(wire.lastRound?.failure?.class).toBe('provider')
+    expect(wire.lastRound?.failure?.kind).toBe('rate_limited')
+  })
+
+  it('FailureCause 类型自 shared re-export 可达（sdk 权威的 type-only 通道——renderer 红点判据数据源）', () => {
+    // 红点判据（红 = lastRound.failure 非空且非 user.cancelled）的判别输入形态：
+    // failure 存在 + kind !== 'cancelled'。
+    const failure: FailureCause = { class: 'user', kind: 'cancelled', retryable: false, raw: 'cancel' }
+    const isRed = failure !== undefined && failure.kind !== 'cancelled'
+    expect(isRed).toBe(false)
+    const providerFailure: FailureCause = {
+      class: 'provider',
+      kind: 'rate_limited',
+      retryable: true,
+      raw: 'r',
+    }
+    expect(providerFailure !== undefined && providerFailure.kind !== 'cancelled').toBe(true)
+  })
+
+  it('被接管轮形态：engineStopReason 无值 + promptDisposition=handled + 无 failure（§3.3.1 第三形态的契约承载）', () => {
+    const takenOver: SubagentLastRound = { promptDisposition: 'handled', result: '' }
+    expect(takenOver.engineStopReason).toBeUndefined()
+    expect(takenOver.failure).toBeUndefined()
+    expect(takenOver.promptDisposition).toBe('handled')
   })
 })
 

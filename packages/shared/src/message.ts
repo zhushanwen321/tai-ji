@@ -568,7 +568,8 @@ export function parseBackgroundBashDetails(details: unknown): BackgroundBashDeta
  * - completed：reason === 'completed'（正常完成）
  * - failed：reason 属失败族（failed / aborted / budget_limited / time_limited）
  * - neutral：reason 缺失或不在 shared WorkflowDoneReason 镜像词表内（枚举漂移防御——词表外
- *   一律中性，不静默当成功；消费侧并入 neutralCount，与 cancelled 同档）
+ *   一律中性，不静默当成功；消费侧并入 neutralCount，与 cancelled 同档）；
+ *   partially_succeeded 同落 neutral（部分成功非全败非全成，见镜像表行注）
  *
  * bg-notify 载荷的成败判据不在此列（仍复用 deriveClosedDisplay，D5 两段式判据）。
  */
@@ -586,6 +587,10 @@ const WORKFLOW_DONE_REASON_OUTCOME: Record<WorkflowDoneReason, WorkflowResultOut
   aborted: 'failed',
   budget_limited: 'failed',
   time_limited: 'failed',
+  // [subagent-observability §3.3.8] 部分成功 = 存在失败成员但非全败——不落 failed
+  // 计数（夸大失败数）也不落 completed（吞失败成分，即本设计反对的 done 吞失败）。
+  // neutral 初值；「部分成功」独立档呈现与计数档裁决归 u4 消费链①实施核对。
+  partially_succeeded: 'neutral',
 }
 
 /** reason 词表成员判定（hasOwnProperty.call 检查原型链键如 toString/constructor；不用

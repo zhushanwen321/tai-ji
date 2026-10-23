@@ -19,6 +19,20 @@
  * - 旧 session JSONL（startParam 无 slug）反序列化时 slug 兜底空串
  */
 
+// FailureCause 权威定义在 @zhushanwen/subagent-engine-sdk（引擎协议词表家址，
+// subagent-observability §3.3.2/§3.4 词表落点）；shared 为 private 包、sdk 为
+// npm 发布包，方向 private → 已发布（先例 = @zhushanwen/extension-protocol），
+// type-only 编译期擦除、零运行时增量——本 re-export 承载 SubagentRecord.lastRound
+// 的 wire 类型（§3.3.3⑤(a)，发布闭包禁含 private 包引用，故不反向定义第二份）。
+import type { AgentUsageTotal, FailureCause } from '@zhushanwen/subagent-engine-sdk'
+
+export type {
+  FailureCause,
+  FailureCauseClass,
+  FailureRetryability,
+  AgentUsageTotal,
+} from '@zhushanwen/subagent-engine-sdk'
+
 /**
  * subagent 状态（[two-state-convergence U6/D5/G4] 契约收窄终态：占用两态，终态概念
  * 不存在——对齐永久会话模型 subagent-permanent-session-model §3.2.2）：
@@ -278,6 +292,60 @@ export interface SubagentRecord {
    * （读前校验前缀白名单）；poolKey 隔离池定位。缺省 = pi（走 JSONL 直读链）。
    */
   engineHandle?: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string }
+  /**
+   * 轮收条事实快照（subagent-observability §3.3.3/§3.3.6——最近一轮的引擎事实，
+   * 「上一轮怎么收尾」的 wire 契约；runtime 派生视图透传产出归 u3
+   * session-records.ts / list 条目）。缺省（undefined）= 尚无已完成的轮（首轮在途 /
+   * 存量 record）。消费位：renderer 失败红点判据（红 = failure 非空且非 user.cancelled，
+   * §3.3.3⑥）与 SubagentTab/任务托盘 lastRound 展示（u8）。
+   */
+  lastRound?: SubagentLastRound
+}
+
+/**
+ * 轮收条事实快照（{@link SubagentRecord.lastRound} 的载荷形状）。
+ *
+ * 事实维度与轮收条（record-round-idle 帧）同源——本接口只承载事实不承载推断：
+ * 停因是引擎/宿主原值（completed/failed 是派生展示词，不经本通道）；
+ * 失败分类是收尾边沿一次产出的 {@link FailureCause}（下游只读不可替换）。
+ */
+export interface SubagentLastRound {
+  /**
+   * 引擎停因原值（值域 = core StopReason 词表：引擎原值 stop/error/aborted + 宿主
+   * 中断族 interrupted / interrupted-by-restart / interrupted-by-parent + reopened 等）。
+   * string 而非字面量联合：跨进程契约 SSOT，core 词表扩值时读侧不因类型收窄丢字段
+   * （与 SubagentRecord.stopReason 同理由）。undefined = 无停因（被接管轮——引擎未
+   * 执行，无停因可言，§3.3.1 P6 第三形态）。
+   */
+  engineStopReason?: string
+  /**
+   * 失败分类（收尾边沿一次产出，写入后不可替换——§3.3.2 三硬规则）。
+   * undefined = 无失败发生（成功轮 / 被接管轮不写 FailureCause——无 provider/harness/
+   * agent/engine 事实可记）。
+   */
+  failure?: FailureCause
+  /**
+   * prompt disposition（pi 1.0.0 官方语义三值，§3.3.1：started = 本条 prompt 启动了
+   * run；queued = 进入待派队列；handled = 本条 prompt 未启动任何 run——被接管的
+   * 事实字段）。undefined = 无 disposition 事实（非接管链路轮）。
+   */
+  promptDisposition?: 'started' | 'queued' | 'handled'
+  /**
+   * 结果正文摘要（本轮产出文本，journal 摘要锚同源截断形态）。空串 = 无文本输出
+   * （纯工具调用收尾，非异常不告警——§3.3.3 空正文语义）。
+   */
+  result?: string
+  /** 本轮结束时的累计轮数。 */
+  turns?: number
+  /** 轮收条 usage 快照（最终尝试值——失败尝试 usage 经 journal auto_retry 帧可查）。 */
+  usage?: AgentUsageTotal
+  /** 重试尝试计数（auto_retry_start 帧数，§3.3.1 P5 计账规则；无重试 = 0/undefined）。 */
+  retryAttempts?: number
+  /**
+   * 观察性事实（谓词未满足、「SO 未调用」等——§3.3.10：观察降级落此处，
+   * 不改写 failure）。缺省 = 无观察项。
+   */
+  observations?: string[]
 }
 
 /**

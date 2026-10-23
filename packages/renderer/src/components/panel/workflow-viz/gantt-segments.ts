@@ -28,7 +28,9 @@ import type {
 // ── agent-settled outcome → 段收束态映射 ─────────────────────────────────────
 // agent-settled.outcome 协议值域 = done/failed/cancelled（time_limited 为 run 级、
 // shared/workflow.ts 注释明示）；time_limited 分支是值域外防御兜底，落失败色系——
-// 不猜新语义，注释声明兜底性质。
+// 不猜新语义，注释声明兜底性质。[subagent-observability §3.3.8] partially_succeeded
+// 是 run 级聚合形态（call 级实际值域三值，core run-vocabulary 注释明示）——到达即
+// 数据异常，fail-visible 抛出不静默渲染成败任一档。
 function outcomeToSegmentState(outcome: WorkflowRunOutcome): WorkflowGanttSegmentState {
   switch (outcome) {
     case 'done':
@@ -38,10 +40,8 @@ function outcomeToSegmentState(outcome: WorkflowRunOutcome): WorkflowGanttSegmen
       return 'failed'
     case 'cancelled':
       return 'cancelled'
-    default: {
-      const exhaustive: never = outcome
-      throw new Error(`unreachable outcome: ${String(exhaustive)}`)
-    }
+    case 'partially_succeeded':
+      throw new Error(`unreachable outcome: ${outcome} (run-level aggregate never appears on agent-settled frames)`)
   }
 }
 

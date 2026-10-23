@@ -96,6 +96,7 @@ import type { WorkflowRun } from "./models/workflow-run.ts";
  * | aborted         | cancelled    | —                    | 用户主动取消（cancel-requested 控制事件合成路径的终局 outcome 同值——转移表 cancelled 行与本映射构造性一致） |
  * | budget_limited  | failed       | 'budget_limited'     | 预算耗尽 = 任务没跑完，failed 是用户视角的诚实归因（维持 failed && errorCode 分级） |
  * | time_limited    | time_limited | —                    | [D2] 活体墙钟预算超时升格为独立 outcome（新写入方无码；错误处理分级改双路判定——outcome=time_limited 直判） |
+ * | partially_succeeded | partially_succeeded | —            | [subagent-observability §3.3.8] 部分成功独立档（成员交付结算派生，聚合规则归 u4；失败成员因经 failedMembers[].cause 承载） |
  *
  * 被动收编语境注记：[D2] 后收编不再落 run-settled(outcome=interrupted)——中断 =
  * run-interrupted 转移事件（非终局帧），由收编写入方（D15 入口 interruptRun）直
@@ -118,6 +119,10 @@ export function doneReasonToRunOutcome(reason: DoneReason): RunOutcome {
       return "failed";
     case "time_limited":
       return "time_limited";
+    // [subagent-observability §3.3.8] 部分成功 = 独立 outcome（不折进 failed——
+    // 「一半成功」与全败不可分辨即故障 B 反方向失真）。
+    case "partially_succeeded":
+      return "partially_succeeded";
   }
 }
 
@@ -133,13 +138,16 @@ export function doneReasonToRunOutcome(reason: DoneReason): RunOutcome {
  * - budget_limited：run 级终局码恒等映射（同名字面量，上方注释载收录依据）；
  * - time_limited：[D2] 无码（超时终局已升格为 outcome 直判，RunErrorCode 的
  *   time_limited 成员保留为历史帧解析，新写入方不产出）；
- * - failed：按因提取。
+ * - failed：按因提取；
+ * - partially_succeeded：无码（[subagent-observability §3.3.8] 部分成功非 failed
+ *   终局；失败成员的因经终局帧 failedMembers[].cause 点拼承载，u4 接线）。
  */
 export function finalRunErrorCodeOf(run: WorkflowRun, doneReason: DoneReason): RunErrorCode | undefined {
   switch (doneReason) {
     case "completed":
     case "aborted":
     case "time_limited":
+    case "partially_succeeded":
       return undefined;
     case "budget_limited":
       return "budget_limited";
@@ -539,6 +547,26 @@ export interface WorkerLogEvent extends EventEnvelope { // oe-exempt:20260930:fr
   entry: WorkerLogEntry;
 }
 
+/**
+ * 成员交付结算报告（[subagent-observability §3.3.8] run-settled 帧载荷，成员交付债
+ * 结算集合的明细面）：失败成员带 `"<class>.<kind>"` 点拼 cause；部分交付成员
+ * （产物契约部分满足，u5 填充）不进 failedMembers、无 cause——missing 清单独立承载。
+ */
+export interface FailedMemberReport { // oe-exempt:20260930:framework:workflow/record 协议契约类型——与既有 run 事件族同款豁免
+  /** 成员 call 关联键（对齐 AgentCall.id / agent-settled.taskIndex）。 */
+  taskIndex: number;
+  /** 失败分类点拼（`"<class>.<kind>"`，如 `provider.rate_limited`；未分类 = "unknown"）。 */
+  cause: string;
+}
+
+/** 部分交付成员报告（产物契约部分满足——u5 交付校验填充；u4 落帧字段结构）。 */
+export interface PartialMemberReport { // oe-exempt:20260930:framework:workflow/record 协议契约类型——与既有 run 事件族同款豁免
+  /** 成员 call 关联键（对齐 AgentCall.id）。 */
+  taskIndex: number;
+  /** 未满足的 deliverable 谓词清单（u5 填充）。 */
+  missing: string[];
+}
+
 /** `run-settled`——run 终局（一个 run 恰好一帧；终局通知的单点判定源，防多处各判漏分支）。 */
 export interface RunSettledEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "run-settled";
@@ -549,6 +577,16 @@ export interface RunSettledEvent extends EventEnvelope { // oe-exempt:20260929:f
   reason?: string;
   /** 产物目录指针：run 持久化产物所在目录绝对路径（终局通知与排障的入口载荷）。 */
   artifactsDir: string;
+  /**
+   * [subagent-observability §3.3.8] 失败成员明细（成员交付结算派生的终局携带；
+   * done/cancelled 等无失败终局缺省——cancelled 族不产失败成员，UC-16）。
+   */
+  failedMembers?: FailedMemberReport[];
+  /**
+   * [subagent-observability §3.3.8/u5] 部分交付成员明细（产物契约部分满足——u5
+   * 交付校验填充；u4 落帧字段结构，缺省恒缺省）。
+   */
+  partialMembers?: PartialMemberReport[];
 }
 
 /** run 事件判别联合（D5 词表全集，[D4] 对齐 9 个 + model-override 记账 + worker-log 诊断；判别键 = type）。 */
@@ -1043,8 +1081,16 @@ export interface RunJournalFold { // oe-exempt:20260929:framework:workflow/recor
   interrupted?: { errorCode?: RunErrorCode; reason?: string; ts: number };
   /** 最近一次复活（run-resumed 帧；未复活 undefined——[D2] resume 锚点投影，D10 预算算式的切段边界之一）。 */
   resumed?: { reason?: string; host?: string; ts: number };
-  /** run-settled 终局（未终态 undefined；terminal 吸收性保证先到帧为准）。 */
-  runSettled: { outcome: RunOutcome; errorCode?: RunErrorCode; reason?: string; ts: number } | undefined;
+  /** run-settled 终局（未终态 undefined；terminal 吸收性保证先到帧为准；failedMembers/
+   *  partialMembers 随帧透传——§3.3.8 成员交付结算明细，runtime 派生视图消费）。 */
+  runSettled: {
+    outcome: RunOutcome;
+    errorCode?: RunErrorCode;
+    reason?: string;
+    ts: number;
+    failedMembers?: FailedMemberReport[];
+    partialMembers?: PartialMemberReport[];
+  } | undefined;
 }
 
 /**
@@ -1331,7 +1377,14 @@ export function foldRunEventCheckpoint(
             : checkpoint.resumed,
         runSettled:
           event.type === "run-settled"
-            ? { outcome: event.outcome, errorCode: event.errorCode, reason: event.reason, ts: event.ts }
+            ? {
+              outcome: event.outcome,
+              errorCode: event.errorCode,
+              reason: event.reason,
+              ts: event.ts,
+              ...(event.failedMembers !== undefined ? { failedMembers: event.failedMembers } : {}),
+              ...(event.partialMembers !== undefined ? { partialMembers: event.partialMembers } : {}),
+            }
             : checkpoint.runSettled,
       };
     } catch (err) {

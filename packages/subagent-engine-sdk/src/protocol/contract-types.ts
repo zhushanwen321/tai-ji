@@ -214,7 +214,10 @@ type EventName<T extends AgentEventTypeName> = T;
 
 // 编译锁③（兜底）：union 成员绕过 EventName 约束裸加字面量 → 本断言赋值处爆红
 // （union ⊆ 词表 的精确落点由锁①承担，此处兜住绕过约束的裸写形态）。
-const _EventVocabSyncLock: AssertMutuallyAssignable<AgentEvent["type"], AgentEventTypeName> = true;
+// 导出 = noUnusedLocals 跨配置安全（shared 依赖本包后，renderer/runtime 等更严
+// tsconfig 的源码闭包会编译到本文件——shared WORKFLOW_RUN_OUTCOME_COVERAGE_LOCK
+// 同款先例：「编译锁消费点导出以通过 noUnusedLocals」）。
+export const _EventVocabSyncLock: AssertMutuallyAssignable<AgentEvent["type"], AgentEventTypeName> = true;
 
 // ============================================================
 // handle / read 视图
@@ -389,7 +392,101 @@ export interface ProbeReport {
 // 终态 / 任务声明
 // ============================================================
 
-/** 失败分诊结构化标签。unknown（含缺省）= 可重试（语义守恒）。 */
+/**
+ * [subagent-observability §3.3.2] 失败分类权威契约（五维正交，原位替换
+ * AgentFailureKind 三值词表——本文件是引擎协议词表家址）。
+ *
+ * 由收尾边沿（判定链）一次产出并写入轮收条，下游只读不可替换（三硬规则①②——
+ * 只有知道事实的层能填 class；写入后观察性事实降级 observations，不改写 cause）。
+ * 跨进程 wire 载体 = shared `SubagentRecord.lastRound.failure`（type-only re-export，
+ * 判别联合逐字序列化）。消费锚：轮应答恢复指引（§3.3.7）、run 终局 failedMembers[].cause
+ * （§3.3.8——序列化为 `"<class>.<kind>"` 点拼字符串，retryable/retryAfterMs 不进终局
+ * 事件、由成员轮收条承载）。
+ *
+ * cause 优先级（分类边沿裁决序，严格递减）：provider 事实 > harness 预算/契约 >
+ * agent 行为 > engine 崩溃 > unknown（未分类形态不产 FailureCause，落引擎停因原值）。
+ */
+export type FailureCauseClass = "provider" | "harness" | "agent" | "engine" | "user";
+
+/**
+ * retryable 三态（§3.3.2 硬规则③，与重试规则 extension 的 verdict 同词表）：
+ *   true         = 等待后重发可恢复；
+ *   false        = 重发必然同样失败；
+ *   "conditional" = 条件恢复——等限额重置窗口或人/账户先动作（执行层对 conditional
+ *                   不自动重试，呈现层如实展示）。
+ */
+export type FailureRetryability = true | false | "conditional";
+
+/**
+ * FailureCause 公共字段面（class×kind 判别联合各成员共享）。
+ *   retryable    — 三态（{@link FailureRetryability}）；429 不全可重试，禁止仅按
+ *                  HTTP 状态码判可重试（provider 业务码层裁决，§3.3.2 码表硬约束）；
+ *   retryAfterMs — 恢复等待毫秒（Retry-After 头 / 错误文本重置时间双通道提取），
+ *                  皆无 → 缺省 unknown（undefined，不产假 0）；
+ *   raw          — 分类输入的原始错误文本（取证链：分类不丢原文）。
+ */
+interface FailureCauseFields {
+  retryable: FailureRetryability;
+  retryAfterMs?: number;
+  raw: string;
+}
+
+/**
+ * class×kind 合法组合矩阵（判别联合构造性成立——非法组合写不出来）：
+ *   provider.rate_limited / provider.protocol_unsupported / harness.turn_budget_exhausted /
+ *   agent.no_deliverable / user.cancelled / engine.*（`engine_${string}` 引擎自报透传族，
+ *   开放前缀面——对齐 RunErrorCode 的 engine_ 透传契约，core 不解释文案）。
+ *
+ * kind 是封闭登记词表：新增成员同 commit 登记下方 {@link FAILURE_CAUSE_CLOSED_KINDS}
+ * （解析词表纪律），漏登记由 {@link FAILURE_CAUSE_KIND_VOCAB_LOCK} 编译锁拦截。
+ */
+export type FailureCause =
+  | (FailureCauseFields & { class: "provider"; kind: "rate_limited" | "protocol_unsupported" })
+  | (FailureCauseFields & {
+      class: "harness";
+      kind: "turn_budget_exhausted";
+      /**
+       * [subagent-observability §3.3.9/UC-10] turn 预算耗尽事实（limiter abort 边沿
+       * 一次产出）：used = abort 时轮数、limit = 显式 maxTurns 上界。undefined =
+       * 极端竞窗下收尾边沿只有 aborted 停因而 limiter 快照缺席（防御性同判形态，
+       * 事实不足不产结构——轮失败事实不受影响）。与 §3.3.6 查询侧 budget 分轴
+       * 结构（{maxTurns, ...}）同构的 {used, limit} 形态。
+       */
+      budget?: { used: number; limit: number };
+    })
+  | (FailureCauseFields & { class: "agent"; kind: "no_deliverable" })
+  | (FailureCauseFields & { class: "user"; kind: "cancelled" })
+  | (FailureCauseFields & { class: "engine"; kind: `engine_${string}` });
+
+/**
+ * FailureCause.kind 闭合成员词表（运行时枚举完整性测试锚；engine 透传族
+ * `engine_${string}` 开放前缀面不进闭合表——逐成员断言见 failure-cause-vocabulary.test.ts）。
+ * 新增 kind 成员 = 联合与本元组同 commit 同批（编译锁双向拦截漏改）。
+ */
+export const FAILURE_CAUSE_CLOSED_KINDS = [
+  "rate_limited",
+  "protocol_unsupported",
+  "turn_budget_exhausted",
+  "no_deliverable",
+  "cancelled",
+] as const satisfies readonly Exclude<FailureCause["kind"], `engine_${string}`>[];
+
+/**
+ * 词表编译锁（双向）：kind 联合闭合面 ⊆ 且 ⊇ FAILURE_CAUSE_CLOSED_KINDS。
+ * 联合扩值漏登元组（或元组多配联合外值）→ 本赋值 tsc 红，错误指向漏改侧。
+ */
+export const FAILURE_CAUSE_KIND_VOCAB_LOCK: AssertMutuallyAssignable<
+  Exclude<FailureCause["kind"], `engine_${string}`>,
+  (typeof FAILURE_CAUSE_CLOSED_KINDS)[number]
+> = true;
+
+/**
+ * @deprecated [subagent-observability §3.3.2] 三值分诊词表已由 {@link FailureCause}
+ * 取代（class×kind 封闭矩阵 + retryable 三态）。本类型保留至判定链事实化接线
+ * （u1：output-collector classifyFailureKind 退役 + AgentOutcome.failureKind 改轨）
+ * 后删除——退役时 `RunErrorCode` 的 failureKind 成员族与 record 侧 failureKind
+ * 字段同批清理（设计 §3.4 枚举清理项）。
+ */
 export type AgentFailureKind = "stale_context" | "schema_deterministic" | "unknown";
 
 /**
@@ -432,6 +529,14 @@ export interface AgentOutcome {
   content: string;
   /** 失败分诊标签。产出侧 = 引擎；缺省 = unknown = 可重试。 */
   failureKind?: AgentFailureKind;
+  /**
+   * [subagent-observability §3.3.8] 失败分类（收尾边沿一次产出——CollectedOutcome.failure
+   * 经引擎适配层 toOutcome 透传上协议）。run 终局成员交付结算消费本字段点拼
+   * `"<class>.<kind>"` 进 failedMembers[].cause；缺省 = 未分类（cause 回落
+   * error 前缀协议码 / "unknown"）。可选 = 读取面对旧格式应答放行（字段落地前
+   * 的引擎缺省，写侧契约由引擎适配层承担）。
+   */
+  failure?: FailureCause;
   /** native 引擎直传 / 仿真层 ajv 产出（D4 硬分流：native 路径宿主不做二次校验）。 */
   parsedOutput?: unknown;
   usage?: AgentOutcomeUsage;

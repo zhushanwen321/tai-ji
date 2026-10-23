@@ -33,7 +33,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@zhushanwen/extension-protocol": "workspace:*"
+    "@zhushanwen/extension-protocol": "workspace:*",
+    "@zhushanwen/subagent-engine-sdk": "workspace:*"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.9",

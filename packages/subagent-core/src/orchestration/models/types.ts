@@ -5,7 +5,7 @@
  * 可独立编译测试（反向边由包级值依赖环检查拦截）。
  *
  * 核心内容：
- * - DoneReason（completed/failed/aborted/budget_limited/time_limited）
+ * - DoneReason（completed/failed/aborted/budget_limited/time_limited/partially_succeeded）
  *   （run 生命周期两态机词表已随 [D6(a)] 退役——生命周期判定唯一走
  *   六态机 dispatchRunTrigger 链与终局记录注册表，聚合不持状态机词表）
  * - AgentCallOpts / AgentResult（单次 agent 调用的输入/输出，宿主侧 SSOT 留守本地）
@@ -18,6 +18,7 @@
 import type {
   AgentFailureKind,
   AgentOutcomeUsage as AgentUsage,
+  FailureCause,
   ToolCallEntry,
   // [§2.3 环解开] WorktreeHandle 的权威定义在 SDK（assembly/types.ts 只是 re-export）；
   // 此前本文件经 assembly/types.ts 转手取它，构成 orchestration/models ↔
@@ -43,7 +44,8 @@ export type DoneReason =
   | "failed"
   | "aborted"
   | "budget_limited"
-  | "time_limited";
+  | "time_limited"
+  | "partially_succeeded";
 
 export const ALL_DONE_REASONS: readonly DoneReason[] = [
   "completed",
@@ -51,6 +53,7 @@ export const ALL_DONE_REASONS: readonly DoneReason[] = [
   "aborted",
   "budget_limited",
   "time_limited",
+  "partially_succeeded",
 ] as const;
 
 /**
@@ -60,6 +63,8 @@ export const ALL_DONE_REASONS: readonly DoneReason[] = [
  *
  * 穷举 switch 无 default：DoneReason 新增成员时 tsc 强制在此显式归类，
  * 消费方（壳 workflow-notify）不再持有本地词表镜像。
+ * [subagent-observability §3.3.8] partially_succeeded 归终止性（部分成功仍含
+ * 失败成员——模型把它当全成汇报即吞失败，终止性提示适用）。
  */
 export function isTerminalDoneReason(reason: DoneReason): boolean {
   switch (reason) {
@@ -69,6 +74,7 @@ export function isTerminalDoneReason(reason: DoneReason): boolean {
     case "aborted":
     case "budget_limited":
     case "time_limited":
+    case "partially_succeeded":
       return true;
   }
 }
@@ -261,6 +267,13 @@ export interface AgentResult {
  * （语义守恒，见 AgentFailureKind）。
  */
   failureKind?: AgentFailureKind;
+ /**
+ * [subagent-observability §3.3.8] 失败分类（AgentOutcome.failure 协议透传，引擎收尾
+ * 边沿一次产出）。run 终局成员交付结算消费本字段点拼 `"<class>.<kind>"` 进
+ * failedMembers[].cause（场景 2 断言的数据源）；缺省 = 未分类（cause 回落 error
+ * 前缀协议码 / "unknown"）。
+ */
+  failure?: FailureCause;
  /**
  * Parsed structured output.
  * Present when `schema` was provided and the output was valid JSON.

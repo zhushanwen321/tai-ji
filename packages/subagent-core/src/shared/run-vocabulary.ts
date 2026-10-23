@@ -21,8 +21,20 @@ import type { AgentFailureKind, EngineProtocolErrorCode } from "@zhushanwen/suba
  * （编排层），shared 是更低层，import 它会把依赖方向倒置。两侧由
  * `packages/runtime/test/workflow-status-vocab-parity.test.ts` 一族的词表断言与
  * `run-vocabulary` 的映射测试共同钉住值级一致。
+ *
+ * [subagent-observability §3.3.8] 增 partially_succeeded：run 终局吸收成员交付的
+ * 独立档——存在失败且存在非失败成员（或无失败但部分交付）时 run 不折进 failed
+ * （「一半成功」与全败不可分辨 = 故障 B 的反方向失真）。聚合派生归 u4
+ * terminal-actions；词表通道本单元先行扩齐（core DoneReason / RunDoneReason /
+ * shared WorkflowDoneReason 三份同批）。
  */
-export type RunDoneReason = "completed" | "failed" | "aborted" | "budget_limited" | "time_limited";
+export type RunDoneReason =
+  | "completed"
+  | "failed"
+  | "aborted"
+  | "budget_limited"
+  | "time_limited"
+  | "partially_succeeded";
 
 /**
  * run 终局形态词表（四值，[D2] 词表变更登记后的形态——workflow-run-resume-revision）。
@@ -49,15 +61,24 @@ export type RunDoneReason = "completed" | "failed" | "aborted" | "budget_limited
  *    三值（time_limited 为 run 级终局、interrupted 已移出 outcome——均不出现在
  *    call 帧，沿用「ask 级实装取值 = result.failureKind 映射」的值域边界纪律）。
  *
+ * [subagent-observability §3.3.8] **partially_succeeded 第五值（行为反转登记）**：
+ * run 级 outcome 从「result.error 有无」改为成员交付债结算集合的派生物——存在失败
+ * 且存在非失败 → partially_succeeded；无失败但存在部分交付（产物契约部分满足）同值。
+ * run 级终局（budget_limited/time_limited/cancelled）优先于成员集合派生；call 级
+ * （agent-settled 载荷）实际值域仍 = done/failed/cancelled 三值（time_limited 为
+ * run 级终局；partially_succeeded 是 run 级聚合形态，不出现在 call 帧）。
+ *
  * 值域跟随锚：shared `WorkflowRunOutcome`（派生视图推算的输出口径的第三份字面量，
  * core↔shared 依赖方向不允许物理单源）经 runtime 侧双包值级等价断言钉住
- * （core ALL_RUN_OUTCOMES ≡ extractor 集合 ≡ shared 词表成员，runtime 单测）。
+ * （core ALL_RUN_OUTCOMES ≡ shared 词表成员，runtime 单测——对账范围含派生视图
+ * 收窄点 WORKFLOW_DONE_REASON_SET 与 TUI isFailedTerminal 消费链，扩值接线归 u4）。
  */
 export const ALL_RUN_OUTCOMES = [
   "done",
   "failed",
   "cancelled",
   "time_limited",
+  "partially_succeeded",
 ] as const;
 /** run 终局形态（run-settled 与 agent-settled 共用——agent 粒度的 cancelled = run 中止连带在途 agent 终止；call 级实际值域 = done/failed/cancelled 三值）。 */
 export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
@@ -113,6 +134,42 @@ export type RunErrorCode =
   | "idle-evicted"
   | "crashed"
   | "terminated";
+
+/**
+ * [subagent-observability §3.3.6] 债权结清枚举（pending 注销 reason 的新写入词表，
+ * 封闭五值——「债权」= pending-notifications 的 collect 挂起债，结清 = 该债以何种
+ * 事实形态兑现或消灭）：
+ *   completed — 轮正常收尾兑现；
+ *   failed    — 轮失败结清（含预算/超时轮失败）；
+ *   cancelled — 轮中止、run 取消、编排性收尾打断（interrupted 族宿主侧打断）；
+ *   lost      — 失联清点（宿主重启代际 + pid 探活事实，§3.3.4 合并清点产物）；
+ *   no_result — 无果：退出无 settle 无结果、清理扫描无事实可依、或轮被扩展接管
+ *               （细因经轮收条 promptDisposition 披露；与 lost 的边界 = 有无
+ *               「宿主重启」事实）。
+ *
+ * 权威落点 = 本文件（core 写侧产值）；extension-protocol 的六值 MappedPendingStatus
+ * 保留为历史 reason 解析兼容通道（解析词表纪律：expired → no_result、
+ * time_limited → failed、aborted → cancelled、其余同名），双通道以新写入方为权威，
+ * mapReasonToStatus 的 fail-open 废除与显式映射改写归 u1（pending-entries.ts）。
+ * 枚举完整性测试锚 = shared/__tests__/run-vocabulary.test.ts 同位（词表漂移静态
+ * 防线，§3.4）。
+ */
+export const ALL_SETTLEMENT_REASONS = [
+  "completed",
+  "failed",
+  "cancelled",
+  "lost",
+  "no_result",
+] as const;
+/** 债权结清词表（封闭五值；值域语义见 {@link ALL_SETTLEMENT_REASONS}）。 */
+export type SettlementReason = (typeof ALL_SETTLEMENT_REASONS)[number];
+
+/**
+ * 结清解析产出类型：词表外 reason 解析缺省 `unknown`（fail-visible——解析词表
+ * 纪律的缺省方向与旧 fail-open=completed 相反：不可判读时如实标注，不产假成功）。
+ * 解析函数落点 = u1（extension-protocol pending-entries 改写处消费本类型）。
+ */
+export type ResolvedSettlementReason = SettlementReason | "unknown";
 /**
  * run record 事件流文件名尾段（`<runId>.record.jsonl` 的 `.record.jsonl`）。
  *
@@ -173,7 +230,9 @@ export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
  * 五处 reason 统一本派生源）。budget_limited 恢复同名细分（与帧生产侧
  * finalRunErrorCodeOf 恒等映射互逆——纯 outcome 反推会把预算终局静默折叠成
  * "failed"，通知串与条目 reason 细分丢失，不采用）；time_limited outcome 直返
- * 同名 DoneReason（[D2] 升格后双向恒等）。DoneReason 无 interrupted 成员——
+ * 同名 DoneReason（[D2] 升格后双向恒等）；partially_succeeded 直返同名 DoneReason
+ * （[subagent-observability §3.3.8]——折叠成 failed 即丢「部分成功」终局原因，
+ * runtime 派生视图 reason 归值依赖本行）。DoneReason 无 interrupted 成员——
  * [D2] 后 interrupted 已移出 outcome，无该分支。
  */
 export function runSettledOutcomeToDoneReason(outcome: RunOutcome, errorCode?: RunErrorCode): RunDoneReason {
@@ -187,6 +246,8 @@ export function runSettledOutcomeToDoneReason(outcome: RunOutcome, errorCode?: R
       return "aborted";
     case "time_limited":
       return "time_limited";
+    case "partially_succeeded":
+      return "partially_succeeded";
     case "failed":
       return "failed";
     default:

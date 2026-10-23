@@ -114,6 +114,9 @@ interface TraceRow {
 /**
  * 停止着色映射（D9 全枚举）：cancelled → 取消（中性）色；failed/time_limited → 失败色系；
  * interrupted（暂停态，无 outcome）→ 中性停止色。非停止在途 = accent 蓝脉冲（不叠加）。
+ * [subagent-observability §3.3.8] partially_succeeded 是 run 级聚合形态（call 级实际
+ * 值域三值，core run-vocabulary 注释明示）——本表只着色 ask 步骤行（call 级），到达即
+ * 数据异常，fail-visible 抛出不静默着色。
  */
 function stoppedColorOf(runStatus: WorkflowRunStatus, outcome: WorkflowRunOutcome | undefined): string {
   if (runStatus === 'interrupted') return 'text-neutral-mid'
@@ -126,10 +129,8 @@ function stoppedColorOf(runStatus: WorkflowRunStatus, outcome: WorkflowRunOutcom
     case 'done':
     case undefined:
       return 'text-neutral-mid'
-    default: {
-      const exhaustive: never = outcome
-      throw new Error(`unreachable outcome: ${String(exhaustive)}`)
-    }
+    case 'partially_succeeded':
+      throw new Error(`unreachable outcome: ${outcome} (run-level aggregate never appears on ask rows)`)
   }
 }
 
