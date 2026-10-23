@@ -980,8 +980,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   /**
-   * [u5b / D1] sessionPhase —— occupancy 派生视图读口（P4 ActivityStrip / 发送位四态 /
-   * 发送分发器 getSendRoute 的单一数据源；语义命名面向消费方）。无记录（未收到任何帧 /
+   * [u5b / D1] sessionPhase —— occupancy 派生视图读口（P4 ActivityStrip / 发送位形态与
+   * 角标 / Alt+⏎ 分流的单一数据源；语义命名面向消费方）。无记录（未收到任何帧 /
    * 已断连收尾）= 全 idle 缺省。原 getOccupancy 读口已删（生产外部消费 0，同值双读口收敛本口）。
    */
   function sessionPhase(sessionId: string): SessionOccupancyState {

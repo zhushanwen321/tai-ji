@@ -11,8 +11,8 @@
  * 等「当前 session 的 X」由调用方以 computed 只读注入，本文件只消费不存储），
  * 纯事件分派 → 普通 composable，无需 useSessionScopedState 工厂。
  *
- * 分发语义（键位 → 行为，u5b D6 改造——路由判定收敛在 core dispatch/send，本层只按
- * sendRoute 决定 Alt+⏎ 的 followUp 保留语义）：
+ * 分发语义（键位 → 行为，chat-flow-consistency D5 改造——Alt 分流读 D1「回合进行中」判定
+ * 集合，本层只按判定决定 Alt+⏎ 的 followUp 保留语义）：
  *   浮层 open → 浮层内部路由（handleKeydown 真值短路 return）
  *   IME 组合中 → 放行不拦截
  *   命令动作表（composer-shortcut-actions，composer-pi-shortcuts 设计）→ 四键位
@@ -23,13 +23,13 @@
  *   裸 ↑/↓ → preventDefault → moveCaretVertical 垂直移光标；at-edge 时 ↑ 历史 / ↓ 历史
  *   修饰键 + ↑/↓ → 放行原生（选区扩展/按词移动/段首段尾跳转）
  *   ⇧⏎ → 放行原生换行
- *   ⏎（preventDefault 后）：staging 活跃 → onSend；Alt+⏎ → steer 路由行 onFollowUp /
- *   其余（queued/direct）onSend；裸 ⏎ → onSend（统一分发器提交：steer 并入当前回合 /
- *   queued 排队 / direct 直发——lane 判定收归 runtime 内核；[HISTORICAL] isActive→onSteer 与
- *   isCompacting→onSend 两套分散判定（优先级倒挂根因）已退役）
+ *   ⏎（preventDefault 后）：staging 活跃 → onSend；Alt+⏎ → 回合进行中（turn ∈ 判定集合）
+ *   onFollowUp / 其余（空闲、压缩、bash）onSend；裸 ⏎ → onSend（统一分发器提交——lane 判定
+ *   收归 runtime 内核；[HISTORICAL] isActive→onSteer 与 isCompacting→onSend 两套分散判定
+ *   （优先级倒挂根因）已退役；[HISTORICAL] resolveSendRoute 六行预测表随 D5 退役，Alt 分流
+ *   改读判定集合——settling 由 onSend 变 onFollowUp = settling 纳入集合的设计语义）
  */
 import type { ComputedRef, Ref } from 'vue'
-import type { SendRoute } from '@taiji/core/domain/composer'
 import type { ComposerShellReturn, ShellInputInstance } from './composer-shell'
 
 /** CommandPopover expose 的键盘路由窄契约（结构兼容 InstanceType<typeof CommandPopover>） */
@@ -47,8 +47,8 @@ export interface ComposerKeydownDeps {
   inputRef: Readonly<Ref<ShellInputInstance | null>>
   /** staging 聚合路由（core dispatch/staging，ADR-0057）：Esc 路由 + activeStaging 检查 */
   staging: Pick<ComposerShellReturn['staging'], 'handleEsc' | 'activeStaging'>
-  /** 当前 session 的发送路由（D6 表 direct/steer/queued；Alt+⏎ steer 行保留 followUp 语义） */
-  sendRoute: ComputedRef<SendRoute>
+  /** 当前 session 回合是否进行中（D1 判定集合经 shell isActiveTurn；Alt+⏎ 集合内保留 followUp 语义） */
+  activeTurn: ComputedRef<boolean>
   /**
    * 命令动作表处理器（composer-shortcut-actions，composer-pi-shortcuts U1）：四键位命中
    * （含 no-op 行）返回 true = 已 stopPropagation + preventDefault；浮层 open 时其入口检查
@@ -91,14 +91,13 @@ function createBareArrowNav(
  * ⏎ 落地分派（已 preventDefault）：staging（fork/handoff）优先于发送路由——模式 chip
  * 在时 Enter/Alt+Enter 均提交 staging，不注入当前对话（streaming 中 fork-ask 合法——对源
  * session 只读；handoff 的 streaming 拦截在 enterHandoffMode 入口 + handleHandoffSend 兜底，
- * 此处无需区分）。Alt+⏎ 按 D6 路由行分流：steer 行（turn 活跃）保留 followUp 下一轮语义
- * （现状 isActive→onFollowUp 等价）；queued/direct 行经分发器（[u5b] 原 isCompacting→onSend
- * 特判由 queued 路由自然覆盖）。裸 ⏎ 统一 onSend（steer 路由并入当前回合 / queued 排队 /
- * direct 直发——优先级倒挂消除：turn 活跃 + compacting（行 3）按 D6 表走 steer 而非误排队）。
+ * 此处无需区分）。Alt+⏎ 按 D1 判定集合分流：回合进行中（dispatching/generating/settling）
+ * 保留 followUp 下一轮语义（等本回合完全结束后另起一轮，排队语义；D5 采用 4 判定共用）；
+ * 其余（空闲 / 压缩 / bash——均非集合成员）经统一分发器提交。裸 ⏎ 恒 onSend。
  */
 function createEnterDispatcher(
   staging: Pick<ComposerShellReturn['staging'], 'activeStaging'>,
-  sendRoute: ComputedRef<SendRoute>,
+  activeTurn: ComputedRef<boolean>,
   onFollowUp: () => void,
   onSend: () => void,
 ): (e: KeyboardEvent) => void {
@@ -108,7 +107,7 @@ function createEnterDispatcher(
       return
     }
     if (e.altKey) {
-      if (sendRoute.value === 'steer') onFollowUp()
+      if (activeTurn.value) onFollowUp()
       else onSend()
     } else {
       onSend()
@@ -128,7 +127,7 @@ export function useComposerKeydown(deps: ComposerKeydownDeps): (e: KeyboardEvent
     commandPopoverRef,
     inputRef,
     staging,
-    sendRoute,
+    activeTurn,
     shortcutActions,
     handleArrowUp,
     handleArrowDown,
@@ -136,7 +135,7 @@ export function useComposerKeydown(deps: ComposerKeydownDeps): (e: KeyboardEvent
     onSend,
   } = deps
   const handleBareArrowNav = createBareArrowNav(inputRef, handleArrowUp, handleArrowDown)
-  const dispatchEnter = createEnterDispatcher(staging, sendRoute, onFollowUp, onSend)
+  const dispatchEnter = createEnterDispatcher(staging, activeTurn, onFollowUp, onSend)
   return function onKeydown(e: KeyboardEvent): void {
     if (cmdOpen.value && commandPopoverRef.value?.handleKeydown(e)) return
     if (e.isComposing) return // IME 组合中不拦截（与 useContenteditableInput 检查一致）

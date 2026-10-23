@@ -11,7 +11,8 @@
  * （useChat.send：乐观气泡 + delivery.submit）。canSend 检查语义收窄为「可提交」
  * （hasInput ∧ ¬isSending——占用不再拦截，内核排队取代拦截/拒绝）；busy 期命令拒绝退役。
  *
- * 发送位预测表六行的纯函数断言见 ./send-route.test.ts；本文件锁定分发器行为。
+ * 分发器行为锁定（发送位形态/角标与 Alt+⏎ 分流断言在 renderer 测试族——chat-flow-consistency
+ * D5 内容驱动双形态后判定源在 shared isActiveTurnPhase + renderer composer-shell）；本文件锁定分发器行为。
  *
  * 运行：cd packages/core && npx vitest run src/domain/composer/dispatch/send.test.ts
  */

@@ -52,7 +52,10 @@ export default {
     composer: {
       placeholder: 'Type a message…',
       send: 'Send',
+      queueSend: 'Queue message',
+      sendHint: 'Type a message to send',
       stop: 'Stop',
+      stopCompacting: 'Stop compacting',
       sendFailed: 'Not delivered — check your connection and retry',
     },
     queueStrip: {

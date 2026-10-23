@@ -520,7 +520,12 @@ export { RUNTIME_INSTANCE_FILE } from './runtime-instance'
 export type { RuntimeInstanceRecord } from './runtime-instance'
 export { displayAgentName, displayWorkflowName } from './display-name'
 // session occupancy 域（chat-flow-consistency D1 契约根）：turn 相位值域 + 「回合进行中」
-// 判定集合（laneOf 投递判定 / 发送位预测 / 活动条 / 前端回合判定统一引用）。
-// 形状 SSOT = ./session-occupancy，protocol.ts 的 'session.occupancy' 帧内联引用其类型。
-export type { SessionTurnPhase, ActiveTurnPhase } from './session-occupancy'
-export { ACTIVE_TURN_PHASES } from './session-occupancy'
+// 判定集合与函数（laneOf 投递判定 / 发送位形态与角标 / Alt+⏎ 分流 / 活动条 / 前端回合判定
+// 统一引用）。形状 SSOT = ./session-occupancy，protocol.ts 的 'session.occupancy' 帧内联引用
+// 其类型；SessionPhase/IDLE_SESSION_PHASE 随 D5 六行预测表退役自 core send-route.ts 迁入。
+export type { SessionTurnPhase, ActiveTurnPhase, SessionPhase } from './session-occupancy'
+export { ACTIVE_TURN_PHASES, isActiveTurnPhase, IDLE_SESSION_PHASE } from './session-occupancy'
+// handoff 域（chat-flow-consistency U9 / 特殊流程 S2）：交接 prompt 固定模板常量——
+// runtime 发送侧（handoff-prompt）与 core 派生侧（交接回合识别，apply-entry-convert）
+// 同源引用，识别判定与发送值不漂移。措辞冻结约束见 ./handoff 头注。
+export { HANDOFF_PROMPT_TEMPLATE } from './handoff'

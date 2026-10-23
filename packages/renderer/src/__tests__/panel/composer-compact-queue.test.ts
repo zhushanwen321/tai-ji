@@ -28,7 +28,7 @@
 // helper import 必须先于项目内模块（@/api mock factory 在模块图加载期执行，TDZ 约束）
 import { composerApiModule, composerChildStubs, composerFlowModule, composerSessionStoreModule, makeComposerInputMock } from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
@@ -120,8 +120,8 @@ async function typeAndEnter(
 ): Promise<void> {
   await typeText(wrapper, text)
   wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter', ...mods }))
-  await wrapper.vm.$nextTick()
-  await wrapper.vm.$nextTick() // onSend 是 async，需 flush
+  await flushPromises()
+  await wrapper.vm.$nextTick() // onSend 是 async：flushPromises 排空 await 恢复链（isSending 复位 + clearInput）后再渲染
 }
 
 describe('Composer compact 期间发送（u3c/D1：统一提交，占用不拦截）', () => {
@@ -135,30 +135,34 @@ describe('Composer compact 期间发送（u3c/D1：统一提交，占用不拦�
     expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('hello'))
     // 输入已清空（clearInput → ComposerInput.clear）
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
-    // DOM：发送位为 stop 态（按钮 = 中止入口；排队由 ⏎ 承担，两问题分立——2026-10 用户裁决）
+    // DOM：发送位为 stop 态（无内容 + 压缩 → 停止，title 分型=终止压缩；排队由 ⏎ 承担）
     expect(wrapper.find('.stop-btn').exists()).toBe(true)
     expect(wrapper.find('.stop-btn').attributes('title')).toBe('终止压缩')
-    expect(wrapper.find('.queue-send-btn').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="composer-send-btn"]').exists()).toBe(false)
   })
 
-  it('TC12: compact 期间发送位按钮点击 → abort（中止压缩流程，不再充当提交入口）', async () => {
-    // 按钮位在压缩期是「终止压缩」：排队提交走 ⏎（TC11），按钮点击走 onStopClick → abort。
+  it('TC12: compact 期有内容 → 发送按钮（D5 行为变更点：点击=统一提交内核排队，不 abort）；提交清空后 stop 回归', async () => {
+    // [chat-flow-consistency D5] 有内容恒发送（任何占用组合）：压缩期按钮不再是「终止压缩」
+    // 停止入口——点击走统一提交（内核 queued 排队）；中止入口保留在无内容格（TC17）。
     const chat = useChatStore()
     chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's1' })
     await typeText(wrapper, 'world')
 
-    const stopBtn = wrapper.find('.stop-btn')
-    expect(stopBtn.exists()).toBe(true)
-    expect(stopBtn.attributes('title')).toBe('终止压缩')
-    expect(stopBtn.attributes('disabled')).toBeUndefined()
+    const sendBtn = wrapper.find('[data-testid="composer-send-btn"]')
+    expect(sendBtn.exists()).toBe(true)
+    expect(sendBtn.attributes('title')).toBe('排队发送 · ⏎')
+    expect(sendBtn.attributes('disabled')).toBeUndefined()
 
-    await stopBtn.trigger('click')
+    await sendBtn.trigger('click')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
 
-    expect(chatApiMock.abort).toHaveBeenCalled()
-    expect(chatApiMock.send).not.toHaveBeenCalled()
+    expect(chatApiMock.send).toHaveBeenCalled()
+    expect(chatApiMock.abort).not.toHaveBeenCalled()
+    // 提交成功清空输入（clear → emitInput('')）→ 无内容 + 压缩 → stop 回归（中止入口回位）
+    expect(wrapper.find('.stop-btn').exists()).toBe(true)
+    expect(wrapper.find('.stop-btn').attributes('title')).toBe('终止压缩')
   })
 
   it('TC17: compact 态无输入 → 发送位 stop 仍可点（canSubmit 不拦停止），点击 → abort', async () => {
@@ -179,13 +183,14 @@ describe('Composer compact 期间发送（u3c/D1：统一提交，占用不拦�
     expect(chatApiMock.send).not.toHaveBeenCalled()
   })
 
-  it('TC18: compact 期间 Alt+⏎ → 统一提交（非 steer 路由行，不 followUp）', async () => {
+  it('TC18: compact 期间 Alt+⏎ → 统一提交（非判定集合成员，不 followUp）', async () => {
     const chat = useChatStore()
     chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's1' })
     await typeAndEnter(wrapper, 'alt-msg', { altKey: true })
 
-    // sendRoute 在 compacting 行是 queued（UI 预测）→ Alt+⏎ 走统一提交；followUp 不被调
+    // compacting 不在 ACTIVE_TURN_PHASES 判定集合（chat-flow-consistency D5 后 Alt 分流
+    // 读 isActiveTurn）→ Alt+⏎ 走统一提交；followUp 不被调
     expect(chatApiMock.followUp).not.toHaveBeenCalled()
     expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('alt-msg'))
   })

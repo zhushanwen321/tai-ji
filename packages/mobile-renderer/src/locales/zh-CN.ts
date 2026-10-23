@@ -54,7 +54,10 @@ export default {
     composer: {
       placeholder: '输入消息…',
       send: '发送',
+      queueSend: '排队发送',
+      sendHint: '输入内容后发送',
       stop: '停止',
+      stopCompacting: '终止压缩',
       sendFailed: '未送达，请检查网络后重试',
     },
     queueStrip: {

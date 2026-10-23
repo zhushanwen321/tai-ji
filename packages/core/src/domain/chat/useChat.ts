@@ -674,7 +674,7 @@ function recoverStalledSession(sid: string, chat: ChatStoreInstance, deps: Ensur
 
 /** [u5b / D1+D3 → u3b/D7 简化] occupancy 派生视图消费（state topic：live 广播 + subscribeSession 的
  * stateSnapshot 回放同路径到达——WS 重连 resubscribeAll / 切回 session 时快照恢复，G4）。
- * 写入 chat store 派生视图分区（sessionPhase 单一数据源；send-route 的 UI 预测消费）。
+ * 写入 chat store 派生视图分区（sessionPhase 单一数据源；发送位形态 / 角标 / Alt+⏎ 分流的统一读口——chat-flow-consistency D5 后判定源 = shared isActiveTurnPhase）。
  * [HISTORICAL → u3b 退役] defer 队列 flush 触发（「全 idle 且队列非空」→ 投递）已随 defer
  * 队列整体退役：投递时机由 runtime 内核驱动（occupancy 边沿是内核 lane 再判定的触发源，
  * renderer 只渲染派生视图）。本 handler 保留派生视图写入 + idle 兜底清 pendingSend +

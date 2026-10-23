@@ -11,6 +11,7 @@
  * runtime 侧镜像类型 packages/runtime/src/services/session/types.ts SessionOccupancy
  * 的字段值域与本文件保持一致（广播帧由 updateSessionOccupancy 按字段展开构造）。
  */
+import type { ServerMessageMap } from './protocol'
 
 /**
  * turn 维四相位（protocol.ts 'session.occupancy' 帧 turn 字段值域 SSOT）：
@@ -36,3 +37,17 @@ export const ACTIVE_TURN_PHASES = ['dispatching', 'generating', 'settling'] as c
 /** ACTIVE_TURN_PHASES 的元素类型（判定集合成员与 wire 类型同源：⊆ SessionTurnPhase，
  *  'idle' 恒不在集——回合进行中判定不含空档）。 */
 export type ActiveTurnPhase = (typeof ACTIVE_TURN_PHASES)[number]
+
+/** 「回合进行中」判定函数——ACTIVE_TURN_PHASES 的唯一函数读口（chat-flow-consistency §3.3
+ *  D5 采用 4：角标判定与 Alt+⏎ 分流共用同一函数，判定恒等于真实去向）。 */
+export function isActiveTurnPhase(turn: SessionTurnPhase): boolean {
+  return (ACTIVE_TURN_PHASES as readonly SessionTurnPhase[]).includes(turn)
+}
+
+/** session occupancy 的 renderer/core 派生视图三维形状（= 'session.occupancy' 帧去 sessionId；
+ *  原 core dispatch/send-route.ts 定义，随 D5 六行预测表退役迁本文件——occupancy 形状 SSOT
+ *  同点收敛）。 */
+export type SessionPhase = Omit<ServerMessageMap['session.occupancy'], 'sessionId'>
+
+/** occupancy 缺省值（session 无 occupancy 记录时 = 全 idle；landing 无 session 同值）。 */
+export const IDLE_SESSION_PHASE: SessionPhase = { turn: 'idle', compacting: false, bash: false }

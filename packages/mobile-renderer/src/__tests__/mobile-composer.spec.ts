@@ -1,6 +1,10 @@
 // MobileComposer 测试（remote-use U1.4c：中断键/发送键——发送正路 segments 形状 +
 // 空输入检查；图片粘贴降级链以真实 paste 事件驱动，断言落 DOM 观察点）。
 //
+// [chat-flow-consistency D5] 发送位改内容驱动双形态：有内容=发送（排队去向叠角标）、
+// 无内容+占用=停止、无内容+空闲=禁用占位（disabled 含 !hasInput）——发送/停止互斥分支
+// 由 showStop 判定（occupancy 派生 + 乐观投影），不再是 isActive 单信号。
+//
 // app-runtime 模块级 mock：隔离 core WS 依赖（测试禁触网络），直接断言组件层对
 // useChat.abort / useChat.send 的调用接线。MobileMessageStream 的 provide 链测试
 // 在 mobile-ui.spec.ts（不 mock，走真实 core store）。
@@ -21,7 +25,8 @@ vi.mock('../shell/app-runtime', async (importOriginal) => {
     ...actual,
     chatStore: {
       ...actual.chatStore,
-      // 组件模板按 isActive 分支渲染中断/发送键；sid-active 走中断分支，其余走发送分支
+      // 乐观窗成分（D5-4：本地 send 的乐观置位先于 occupancy 广播）：sid-active 投影
+      // dispatching → 无内容走停止分支，其余会话全 idle（sessionPhase 走真实现缺省）
       isActive: (sid: string) => sid === 'sid-active',
       getMessages: () => [],
     },
@@ -40,7 +45,7 @@ function mountComposer(sessionId: string | null) {
   })
 }
 
-describe('MobileComposer 中断键（remote-use-mobile D7（移动壳 v1 功能集裁定）中断行：isActive 时可见，点击调 useChat.abort）', () => {
+describe('MobileComposer 发送位双形态（D5 裁剪集：停止键/发送键/禁用占位）', () => {
   beforeEach(() => {
     abortMock.mockClear()
     sendMock.mockClear()
@@ -48,7 +53,7 @@ describe('MobileComposer 中断键（remote-use-mobile D7（移动壳 v1 功能�
     sendMock.mockResolvedValue(undefined)
   })
 
-  it('isActive session 渲染中断键（不渲染发送键），点击调 abort(sessionId)', async () => {
+  it('乐观占用 session（isActive，无内容）渲染停止键（不渲染发送键），点击调 abort(sessionId)', async () => {
     const wrapper = mountComposer('sid-active')
     await flushPromises()
     expect(wrapper.find('[data-testid="mobile-composer-stop"]').exists()).toBe(true)
@@ -59,15 +64,20 @@ describe('MobileComposer 中断键（remote-use-mobile D7（移动壳 v1 功能�
     wrapper.unmount()
   })
 
-  it('非活跃 session 渲染发送键（不渲染中断键），输入文本后点击调 send(sessionId, segments) 并清空输入', async () => {
+  it('空闲 session 渲染发送键；输入文本（input 事件驱动 hasInput）后点击调 send(sessionId, segments) 并清空输入', async () => {
     const wrapper = mountComposer('sid-idle')
     await flushPromises()
     expect(wrapper.find('[data-testid="mobile-composer-stop"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="mobile-composer-send"]').exists()).toBe(true)
+    const sendBtn = wrapper.get('[data-testid="mobile-composer-send"]')
+    // 无内容 = 禁用态发送占位（D5：disabled 含 !hasInput，title 提示输入）
+    expect(sendBtn.attributes('disabled')).toBeDefined()
     // 输入注入参照 ui composer-input-get-text.test.ts：直接写 [role="textbox"] 的 innerHTML
-    //（getSegments 从 DOM 遍历提取，与 input 事件无关）；纯文本产出 { type:'text', text } 段
+    //（getSegments 从 DOM 遍历提取，与 input 事件无关）；再 trigger('input') 走组件真实
+    // onInput → 解析 segments + emit('input') → 组件 hasInput 置真解锁按钮。纯文本产出
+    // { type:'text', text } 段
     const editable = wrapper.get('[role="textbox"]')
     ;(editable.element as HTMLDivElement).innerHTML = 'hello mobile'
+    await editable.trigger('input')
     await wrapper.get('[data-testid="mobile-composer-send"]').trigger('click')
     await flushPromises()
     expect(sendMock).toHaveBeenCalledTimes(1)
@@ -77,9 +87,10 @@ describe('MobileComposer 中断键（remote-use-mobile D7（移动壳 v1 功能�
     wrapper.unmount()
   })
 
-  it('空输入点击发送键：segments 空 guard，组件层不发（sendMock 不被调）', async () => {
+  it('无内容点击发送键：禁用态拦截（disabled 含 !hasInput），组件层不发（sendMock 不被调）', async () => {
     const wrapper = mountComposer('sid-idle')
     await flushPromises()
+    expect(wrapper.get('[data-testid="mobile-composer-send"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-testid="mobile-composer-send"]').trigger('click')
     await flushPromises()
     expect(sendMock).not.toHaveBeenCalled()

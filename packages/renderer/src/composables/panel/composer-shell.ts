@@ -28,7 +28,7 @@ import { computed, onMounted, reactive, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowRightLeft, GitBranch } from '@lucide/vue'
 import type { ProviderId, Segment } from '@taiji/shared'
-import { normalizeContent } from '@taiji/shared'
+import { normalizeContent, IDLE_SESSION_PHASE, isActiveTurnPhase, type SessionPhase } from '@taiji/shared'
 import {
   useComposerModelThinking,
   useComposerInjection,
@@ -40,10 +40,6 @@ import {
   useComposerSubmit,
   useComposerSend,
   takeOrphanedDraft,
-  resolveSendRoute,
-  IDLE_SESSION_PHASE,
-  type SendRoute,
-  type SessionPhase,
 } from '@taiji/core/domain/composer'
 // input 域 3 个 composable 已迁 @taiji/dom-core（ADR-0058）：history/dragdrop/restore
 import {
@@ -170,9 +166,10 @@ export function deriveHistoryFromChatStore(chatStore: ReturnType<typeof useChatS
 }
 
 /**
- * D6 发送路由 + 发送位四态派生工厂（u5b/u6b；useComposerShell 行数治理拆出的纯派生块，
- * 语义与拆出前逐行等价）。deps = 读取面注入：chat store 占用投影 / sessionIdRef /
- * subagent 车道两信号（车道占用覆盖，subagent-composer）/ activeView（本地乐观并集源）。
+ * 发送位形态派生工厂（chat-flow-consistency D5 内容驱动双形态；前身 = u5b/u6b「D6 发送路由 +
+ * 发送位四态」工厂，行数治理拆出的纯派生块）。deps = 读取面注入：chat store 占用投影 /
+ * sessionIdRef / subagent 车道两信号（车道占用覆盖，subagent-composer）/ activeView（本地乐观
+ * 并集源）/ hasInput（内容驱动分档依据）。
  */
 function createSendPhaseDerived(deps: {
   sessionPhaseOf: (sid: string) => SessionPhase
@@ -180,20 +177,16 @@ function createSendPhaseDerived(deps: {
   isSubagentLane: ComputedRef<boolean>
   laneStreaming: ComputedRef<boolean>
   activeView: ComputedRef<boolean>
+  hasInput: ComputedRef<boolean>
 }) {
-  // ── D6 发送路由（u5b）+ 发送位四态（u6b）：sessionPhase（occupancy 投影）单一派生 ─
+  // ── effectivePhase：sessionPhase（occupancy 投影）单一派生 ─────────────────────────────
   // 数据源 = chat store sessionPhase（session.occupancy 帧驱动 + stateSnapshot 快照恢复）。
-  // 发送位四态（D6 表「发送位」列）与 ActivityStrip 从同一真值取数（不双真源）；与 ⏎ 分发器
-  // 的关系见下方「故意分立」注——同源 ≠ 同输出。
+  // 发送位形态、角标、Alt+⏎ 分流从同一真值取数（不双真源）。
   //
   // turn 活跃判定取**并集**：occupancy 权威投影 ∨ 本地乐观视图（isActive = streaming 实体
   // ∨ 乐观 pendingSend）。本地 send 的乐观置位先于 runtime occupancy 广播（RPC RTT 窗口），
-  // 只看投影会让窗口内 Enter 落 direct 被 canSend 守卫拦死（死键回退）——并集保持现状
-  // isActive→steer 语义；settling/compacting/bash 维度无本地乐观源，由权威帧独占。
-  // sendRoute（三值浓缩）与发送位（需原始 turn/compacting/bash 维度细分——如 settling 单独
-  // vs settling+bash 的 stop/queue 分档）共用同一 effective phase，不双真源。**两者输出故意
-  // 分立**（2026-10 用户裁决）：压缩期 sendRoute=queued（⏎ 排队）而发送位=stop（按钮中止
-  // 压缩）——按钮与 Enter 回答不同问题，派生处分叉不等于漂移（详见 sendButtonState 注释）。
+  // 只看投影会让窗口内按钮/分流退化（死键回退）——并集保持现状 isActive 乐观升级语义；
+  // settling/compacting/bash 维度无本地乐观源，由权威帧独占。
   const effectivePhase = computed<SessionPhase>(() => {
     const sid = deps.sessionIdRef.value
     if (!sid) return IDLE_SESSION_PHASE // landing（无 session）无 occupancy 记录 → 全 idle
@@ -204,51 +197,58 @@ function createSendPhaseDerived(deps: {
     }
     const phase = deps.sessionPhaseOf(sid)
     // 本地乐观 busy 投影化为 dispatching（「已发起未确认」的 occupancy 语义）后过统一派生
-    // ——判定逻辑单点在 resolveSendRoute / 发送位派生，消费方复用同源不漂移。
+    // ——判定逻辑单点在 isActiveTurnPhase / 发送位派生，消费方复用同源不漂移。
     return deps.activeView.value && phase.turn === 'idle' ? { ...phase, turn: 'dispatching' as const } : phase
   })
-  const sendRoute = computed<SendRoute>(() => resolveSendRoute(effectivePhase.value))
+
+  // 「回合进行中」单点判定（D1 判定集合经 isActiveTurnPhase 函数读口）——Alt+⏎ 分流
+  // 与角标共用本值（D5 采用 4：判定共用同一函数，角标恒等于真实去向）。
+  const isActiveTurn = computed(() => isActiveTurnPhase(effectivePhase.value.turn))
 
   /**
-   * [u6b] 发送位四态（D6 表「发送位」列）：send（↑ 直发）/ stop（■ 中止）/ queue（↑ 带时钟
-   * 角标排队）。派生自与 sendRoute 同源的 effectivePhase。
-   *
-   * **按钮形态与 Enter 车道是两个问题**（2026-10 用户裁决，修 a46f6fd7b 的过度收敛）：
-   * - 按钮回答「现在能中止什么」——压缩期（任意 turn 组合，含 generating/settling）→ stop，
-   *   点击中止**压缩流程**（复用 abort 链路：pi session.abort → abortCompaction）。压缩期
-   *   从不渲染 queue 按钮——排队提交走 ⏎（内核 queued 车道 + compaction-end flush，车道
-   *   判定见 sendRoute），按钮位是中止入口而非第二提交入口。
-   * - Enter 回答「这条消息走哪条车道」——由 resolveSendRoute 独占（compacting → queued）。
-   * 两者故意分立：a46f6fd7b 曾把 compacting 归 queue 以「对齐内核 holdReasonOf」修按钮/
-   * Enter 漂移，代价是压缩期 composer 失去全部中止能力（阈值自动压缩的 stop 一并消失），
-   * 用户裁决恢复「忙 → 终止钮」直觉（与执行中同构）；漂移根源（按钮语义 vs 车道语义混谈）
-   * 由本分立消除，而非再次二选一。
-   * - turn ∈ {dispatching, generating}（无 compacting）→ stop（turn 活跃，点击 abort）
-   * - settling 分档：单独 → stop（收尾期可中止）；settling + bash → queue（turn 不活跃 +
-   *   其他维度忙；D6 表未单列 settling+bash，按同构归 queue，登记 impl-plan 偏差表）
-   * - bash（turn 不活跃）→ queue
-   * - 全 idle → send（行 1）
+   * [D5] 发送位内容驱动双形态（2026-10-23 用户裁决：有内容才是发送按钮；无内容按占用叠加
+   * 停止）：
+   * - 输入框有内容 → 'send'（发送按钮；排队去向时叠加时钟角标，见 sendButtonBadge）——
+   *   任何占用组合都不改形态（有内容恒发送，投递去向由内核裁定）。
+   * - 输入框无内容 + 回合进行中/收尾/压缩中 → 'stop'（停止按钮，title 两档分型见
+   *   sendButtonStopTarget——现状规则保留：干活/收尾 → 停止；仅压缩 → 终止压缩；压缩与
+   *   干活并存按回合中止优先）。bash 不触发停止（取消入口在其输出块自身，不占发送位）。
+   * - 无内容 + 空闲 → 'send'（禁用态发送占位，禁用由模板 canSubmit 承担）。
+   * spinner（isSending 提交在途）与 staging（交接横幅）不进本派生——它们在模板优先级链上
+   * 位于本形态之前（Composer.vue：spinner › staging › stop › send±角标）。
+   * [HISTORICAL] 前身四态 'queue'（bash/settling+bash → 时钟角标排队按钮）随 D5 内容驱动
+   * 双形态退役：排队语义改由发送按钮 + 角标承载（有内容时按判定集合叠加）。
    */
-  const sendButtonState = computed<'send' | 'stop' | 'queue'>(() => {
-    const phase = effectivePhase.value
-    if (phase.compacting) return 'stop'
-    if (phase.turn === 'dispatching' || phase.turn === 'generating') return 'stop'
-    if (phase.turn === 'settling') return phase.bash ? 'queue' : 'stop'
-    return phase.bash ? 'queue' : 'send'
+  const sendButtonState = computed<'send' | 'stop'>(() => {
+    if (deps.hasInput.value) return 'send'
+    return isActiveTurn.value || effectivePhase.value.compacting ? 'stop' : 'send'
   })
 
   /**
-   * stop 态的中止目标（按钮 title 分型）。判定序**有意不与 sendButtonState 同形**——
-   * 对齐 runtime abort 的 compaction-cancel 门（message-dispatcher.abort：source='user'
-   * ∧ isCompacting ∧ ¬isGenerating 才走压缩取消语义；settling → isGenerating=false，
+   * [D5] 发送按钮排队角标（有内容时）：消息不会立刻被处理 → 角标 = 回合进行中
+   * （turn ∈ ACTIVE_TURN_PHASES）∨ 压缩中；bash 不参与（D5 采用 3——bash 占用期消息仍
+   * 直发）；空闲无角标。判定与 Alt+⏎ 分流共用 isActiveTurn（D5 采用 4）——角标恒等于
+   * 真实去向。按住 Alt 同样加角标（Alt+⏎ = 等本回合完全结束后另起一轮，同为排队语义，
+   * 判定同一集合自然覆盖，无 Alt 专属分支）。无内容恒 false（角标只在发送按钮上）。
+   */
+  const sendButtonBadge = computed(() => {
+    if (!deps.hasInput.value) return false
+    return isActiveTurn.value || effectivePhase.value.compacting
+  })
+
+  /**
+   * stop 态的中止目标（按钮 title 分型，D5 采用 2：现状规则保留）。判定序**有意不与
+   * sendButtonState 同形**——对齐 runtime abort 的 compaction-cancel 门（message-dispatcher.abort：
+   * source='user' ∧ isCompacting ∧ ¬isGenerating 才走压缩取消语义；settling → isGenerating=false，
    * 见 event-interpreter 占用→flags 映射），保证「title 说终止压缩 ⇔ runtime 真走压缩取消」：
    * - dispatching/generating → 'turn'：isGenerating=true，abort 是回合中止；即便 compacting
    *   同真（threshold turn 内压缩），title 标「终止压缩」即谎报（2026-10 审查修正）。
    * - 'compacting'：压缩期且 turn 非生成中（idle 手动 /compact、settling+overflow）——
    *   点击中止压缩流程（不写 stopped 终态、不广播 message.complete）。
    * - 'turn'：settling 单独——点击中止当前回合（既有 abort 语义）。
-   * 与 sendButtonState 的关系：stop/queue 全集内非空，唯一错位 settling+bash
-   * （state='queue' 而 target='turn'）——title 仅 stop 态渲染消费，错位无行为影响。
+   * [HISTORICAL] 前身「stop/queue 全集内唯一错位 settling+bash（state='queue' 而
+   * target='turn'）」随 D5 queue 态退役消除：settling+bash 现归 stop（settling ∈ 判定集合），
+   * state/target 不再有错位格。
    */
   const sendButtonStopTarget = computed<'compacting' | 'turn' | null>(() => {
     const phase = effectivePhase.value
@@ -258,7 +258,7 @@ function createSendPhaseDerived(deps: {
     return null
   })
 
-  return { effectivePhase, sendRoute, sendButtonState, sendButtonStopTarget }
+  return { effectivePhase, isActiveTurn, sendButtonState, sendButtonBadge, sendButtonStopTarget }
 }
 
 /**
@@ -357,13 +357,28 @@ export function useComposerShell(params: ComposerShellParams) {
     getActiveSessionId: () => sessionStore.active?.id ?? null,
   })
 
+  // ── 发送后清空 / 失败恢复（core input/restore）──
+  // 装配序：useComposerRestore 先于 useComposerHistory——history deps 的 restoreSegments
+  // 回调引用本处产物（↓ 退回最近条目按 segments 快照恢复草稿，U8）。
+  const { clearInput, restoreInput, restoreSegments } = useComposerRestore({
+    draft,
+    inputRef,
+    drafts,
+    sessionId: sessionIdRef,
+  })
+
   // ── 输入历史导航（↑/↓ shell 风格，core input/history）──
-  const { handleArrowUp, handleArrowDown, resetBrowsing, isBrowsingFor, getSavedDraft } =
+  // [U8 草稿 segments 化] 进 browsing 快照走 getSegments、退回恢复走 restoreSegments
+  // （restoreSegmentsIntoInput 单点）——setText 回填历史条目经 replaceChildren 清掉
+  // DOM chips，纯文本快照救不回 chip 结构（比切走会话更早的丢失点）。
+  const { handleArrowUp, handleArrowDown, resetBrowsing, isBrowsingFor, getSavedSegments } =
     useComposerHistory(sessionIdRef, {
       getText: () => inputRef.value?.getText() ?? '',
       setText: (text, caretPosition) => inputRef.value?.setText(text, caretPosition),
       clear: () => inputRef.value?.clear(),
       getHistoryEntries: (sid: string) => deriveHistoryFromChatStore(chatStore, sid),
+      getSegments: () => inputRef.value?.getSegments() ?? [],
+      restoreSegments: (segments) => restoreSegments(segments),
     })
 
   // ── 已附上下文 chip 行（core context/context-chips）──
@@ -372,14 +387,6 @@ export function useComposerShell(params: ComposerShellParams) {
   // ── composer-box 拖拽落位（core input/dragdrop；pasteImage 注入 handleImagePaste）──
   const { onDragOver, onDragLeave, onDrop } = useComposerDragDrop(inputRef, composerBoxRef, refreshAttachedItems, sessionIdRef, {
     pasteImage: handleImagePaste,
-  })
-
-  // ── 发送后清空 / 失败恢复（core input/restore）──
-  const { clearInput, restoreInput, restoreSegments } = useComposerRestore({
-    draft,
-    inputRef,
-    drafts,
-    sessionId: sessionIdRef,
   })
 
   // [robustness P2/③b] orphan 草稿取回：上次 landing 首发失败且 Composer 已卸载（create 飞行
@@ -440,14 +447,15 @@ export function useComposerShell(params: ComposerShellParams) {
 
   const hasInput = computed(() => draft.value.trim().length > 0)
 
-  // ── D6 发送路由 + 发送位四态（u5b/u6b）：单一派生链抽模块级工厂
-  //    createSendPhaseDerived（纯派生无副作用，语义与拆出前逐行等价；行数治理非语义改动）──
-  const { sendRoute, sendButtonState, sendButtonStopTarget } = createSendPhaseDerived({
+  // ── 发送位形态（D5 内容驱动双形态）：单一派生链抽模块级工厂 createSendPhaseDerived
+  //    （纯派生无副作用；hasInput 是内容驱动分档依据）──
+  const { isActiveTurn, sendButtonState, sendButtonBadge, sendButtonStopTarget } = createSendPhaseDerived({
     sessionPhaseOf: (sid) => chatStore.sessionPhase(sid),
     sessionIdRef,
     isSubagentLane,
     laneStreaming: subagentLane.isStreaming,
     activeView,
+    hasInput,
   })
 
   // ── bash 命令模式（core dispatch/bash；sendBash 注入）──
@@ -671,7 +679,10 @@ export function useComposerShell(params: ComposerShellParams) {
     handleArrowDown,
     resetBrowsing,
     isBrowsingFor,
-    getSavedDraft,
+    getSavedSegments,
+    // 发送失败/草稿恢复链（U8：Composer.vue 切会话恢复与 fork/handoff/orphan 共用同一
+    // restoreSegmentsIntoInput 单点产物）
+    restoreSegments,
     // context chips
     attachedItems,
     refreshAttachedItems,
@@ -693,12 +704,14 @@ export function useComposerShell(params: ComposerShellParams) {
     restoreToDraft,
     // composer 命令动作表（composer-pi-shortcuts：分发链「动作表」分支消费）
     shortcutActions,
-    // D6 发送路由 + 发送位四态（u5b 导出：分发器路由 / P4 发送位与 ActivityStrip 同源消费）。
-    // [u3c/D1] sendRoute 保留为**发送位 UI 预测**（不再是投递决策——决策权在内核），
-    // Alt+⏎ 的 followUp 保留语义按它分流（composer-keydown）。
-    sendRoute,
+    // 发送位形态（chat-flow-consistency D5 内容驱动双形态）：
+    // isActiveTurn = 「回合进行中」判定（D1 判定集合经 isActiveTurnPhase；Alt+⏎ 分流消费，
+    // turn ∈ 集合 → followUp 下一轮语义）；sendButtonState = send|stop 内容驱动；
+    // sendButtonBadge = 发送按钮排队角标（有内容 ∧ 回合进行中/压缩中）；sendButtonStopTarget =
+    // stop 态中止目标（按钮 title 分型：compacting=终止压缩 / turn=停止；null=非 stop 态）。
+    isActiveTurn,
     sendButtonState,
-    // stop 态中止目标（按钮 title 分型：compacting=终止压缩 / turn=停止；null=非 stop 态）
+    sendButtonBadge,
     sendButtonStopTarget,
     // 派生状态
     canSubmit,
@@ -719,21 +732,35 @@ export type { Segment }
  * FR4: per-session 草稿存储（内存不持久化）；session 切换时保存旧/恢复新草稿。
  * ADR-0049：裸 Map 迁到 useSessionScopedState 分区——结构化消除 session 泄漏。
  * DraftStore 窄接口：消费方（restore.ts）只关心 get/save/delete，不持有 Map 引用。
+ *
+ * [U8 草稿 segments 化] 分区值从 { text } 扩为 { segments: Segment[] }（纯数据判别联合，
+ * 内存 Map 直存——orphan-draft 先例）：image/file/skill/session/subagent chip 结构随切走
+ * 切回保真。空草稿归一单点在 saveDraft（空数组或只含空 text 段 → 存空数组 = 未保存语义），
+ * 消费方以 getDraft 返回空数组判「无草稿」。
  */
 export function createComposerDrafts(sessionIdRef: ComputedRef<string | null>): DraftStore {
-  const draftsState = useSessionScopedState(sessionIdRef, () => reactive({ text: '' }))
+  const draftsState = useSessionScopedState(sessionIdRef, () => reactive({ segments: [] as Segment[] }))
   return {
     getDraft: (sid: string) => {
-      let text = ''
-      draftsState.updateFor(sid, (s) => { text = s.text })
-      return text
+      let segments: Segment[] = []
+      draftsState.updateFor(sid, (s) => { segments = s.segments })
+      return segments
     },
-    saveDraft: (sid: string, text: string) => {
-      draftsState.updateFor(sid, (s) => { s.text = text })
+    saveDraft: (sid: string, segments: Segment[]) => {
+      const normalized = isEmptyDraftSegments(segments) ? [] : segments
+      draftsState.updateFor(sid, (s) => { s.segments = normalized })
     },
     deleteDraft: (sid: string) => {
       // cleanup 移除分区（triggerSessionCleanups 也会调，此处是发送成功后即时清理）
       draftsState.cleanup(sid)
     },
   }
+}
+
+/**
+ * 空草稿判定（U8）：空数组或只含空 text 段 = 无草稿（等价旧「getText() 为空串」语义）。
+ * createComposerDrafts.saveDraft 归一单点消费。
+ */
+function isEmptyDraftSegments(segments: Segment[]): boolean {
+  return segments.every((s) => s.type === 'text' && s.text === '')
 }

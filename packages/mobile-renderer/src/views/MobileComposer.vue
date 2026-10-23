@@ -8,7 +8,13 @@
 // - t：vue-i18n（chip × 按钮 aria-label 文案，单源 ui locale 下沉域）
 //
 // 发送走 core useChat.send（乐观气泡/steer 路由/sidecar 写入均为 core send 编排内置）；
-// 中断键（isActive 时可见）调 useChat.abort（remote-use-mobile D7 中断行）。
+// 停止键（无内容 + 会话占用时可见）调 useChat.abort（remote-use-mobile D7 中断行）。
+//
+// 发送位形态（chat-flow-consistency D5 内容驱动双形态，移动壳裁剪集 = 有内容/无内容 + 乐观窗，
+// 不含 Alt/交接/landing 首发形态/subagent 变体——设计 D5 变体条）：有内容恒发送按钮（排队去向
+// 叠加时钟角标）；无内容 + 会话占用（回合进行中/压缩中）→ 停止按钮；无内容 + 空闲 → 禁用态
+// 发送占位。bash 不触发停止（取消入口在其输出块自身）；角标判定读 shared isActiveTurnPhase
+// （D1 判定集合，与桌面壳共用同一函数——裁剪集内两壳同格同形态）。
 //
 // 发送失败契约（D6，对齐 core R2-A5 失败信号）：send 返回 false = RPC 失败（内部已
 // 消化——乐观气泡已回滚、transport 级 toast 已发；契约内不 throw）→ ComposerInput
@@ -20,11 +26,12 @@
 // 单通道留 UX 复审裁决。
 import { computed, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Send, Square } from '@lucide/vue'
+import { Clock, Send, Square } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { ComposerInput, ComposerInputDepsKey } from '@taiji/ui/features/composer'
 import type { ComposerInputDeps } from '@taiji/ui/features/composer'
 import type { HandleImagePasteResult } from '@taiji/dom-core/composer/input'
+import { IDLE_SESSION_PHASE, isActiveTurnPhase } from '@taiji/shared'
 import { chatStore, composerInjectionStore, useChatInstance } from '../shell/app-runtime'
 
 const props = defineProps<{ sessionId: string | null }>()
@@ -46,7 +53,37 @@ const deps: ComposerInputDeps = {
 provide(ComposerInputDepsKey, deps)
 
 const canSend = computed(() => props.sessionId !== null)
-const isActive = computed(() => (props.sessionId ? chatStore.isActive(props.sessionId) : false))
+
+// ── 发送位形态判定（D5 内容驱动双形态，移动壳裁剪集）────────────────────────────
+// 输入内容跟踪（有内容 = 发送按钮的分档依据）：ComposerInput input 事件驱动；clear/setText
+// 程序化写入同样 emit input（dom-core contenteditable），无陈旧窗口。
+const hasInput = ref(false)
+function onInputChange(text: string): void {
+  hasInput.value = text.trim().length > 0
+}
+
+// occupancy 派生视图 + 乐观窗（D5-4 变体：chatStore.isActive 含 pendingSend 乐观成分——本地
+// send 的乐观置位先于 occupancy 广播，投影化为 dispatching 对齐桌面壳 effectivePhase 同款）。
+// 无会话（landing 等价态）= 全 idle → 恒禁用发送占位（移动壳无首条发送形态）。
+const effectivePhase = computed(() => {
+  const sid = props.sessionId
+  if (!sid) return IDLE_SESSION_PHASE
+  const phase = chatStore.sessionPhase(sid)
+  return chatStore.isActive(sid) && phase.turn === 'idle' ? { ...phase, turn: 'dispatching' as const } : phase
+})
+const activeTurn = computed(() => isActiveTurnPhase(effectivePhase.value.turn))
+/** 无内容 + 会话占用（回合进行中/压缩中）→ 停止按钮；bash 不参与（D5 采用 2） */
+const showStop = computed(() => !hasInput.value && (activeTurn.value || effectivePhase.value.compacting))
+/** 停止 title 两档（对齐桌面 sendButtonStopTarget 规则：回合中止优先于压缩取消） */
+const stopTarget = computed<'compacting' | 'turn' | null>(() => {
+  const phase = effectivePhase.value
+  if (phase.turn === 'dispatching' || phase.turn === 'generating') return 'turn'
+  if (phase.compacting) return 'compacting'
+  if (phase.turn === 'settling') return 'turn'
+  return null
+})
+/** 发送按钮排队角标（有内容 ∧ 回合进行中/压缩中——bash 不参与、空闲无角标，D5 采用 3） */
+const queueBadge = computed(() => hasInput.value && (activeTurn.value || effectivePhase.value.compacting))
 
 /** 发送失败内联错误行（D6，respondFailedId 范式：新尝试或切换 session 时不残留） */
 const sendFailed = ref(false)
@@ -88,7 +125,7 @@ async function onSend(): Promise<void> {
   comp.clear()
 }
 
-/** 中断当前回合（remote-use-mobile D7 中断行） */
+/** 中止会话当前占用（remote-use-mobile D7 中断行；中止对象 = 压缩流程/当前回合由 runtime 按权威态判定） */
 async function onStop(): Promise<void> {
   const sid = props.sessionId
   if (!sid) return
@@ -147,31 +184,36 @@ function onKeydown(e: KeyboardEvent): void {
           :session-id="sessionId"
           :placeholder="t('mobile.composer.placeholder')"
           :disabled="!canSend"
+          @input="onInputChange"
           @keydown="onKeydown"
         />
       </div>
+      <!-- 停止按钮（无内容 + 会话占用；title 两档对齐桌面：回合中止=停止 / 仅压缩=终止压缩） -->
       <Button
-        v-if="isActive"
+        v-if="showStop"
         variant="default"
         size="icon"
         data-testid="mobile-composer-stop"
-        :aria-label="t('mobile.composer.stop')"
-        :title="t('mobile.composer.stop')"
+        :aria-label="stopTarget === 'compacting' ? t('mobile.composer.stopCompacting') : t('mobile.composer.stop')"
+        :title="stopTarget === 'compacting' ? t('mobile.composer.stopCompacting') : t('mobile.composer.stop')"
         @click="onStop"
       >
         <Square class="size-4" />
       </Button>
+      <!-- 发送按钮（±排队角标）：有内容恒发送；无内容空闲 = 禁用态发送占位（title「输入内容后发送」） -->
       <Button
         v-else
         variant="default"
         size="icon"
+        class="relative"
         data-testid="mobile-composer-send"
-        :disabled="!canSend"
-        :aria-label="t('mobile.composer.send')"
-        :title="t('mobile.composer.send')"
+        :disabled="!canSend || !hasInput"
+        :aria-label="queueBadge ? t('mobile.composer.queueSend') : t('mobile.composer.send')"
+        :title="queueBadge ? t('mobile.composer.queueSend') : !hasInput ? t('mobile.composer.sendHint') : t('mobile.composer.send')"
         @click="onSend"
       >
         <Send class="size-4" />
+        <Clock v-if="queueBadge" class="absolute right-[2px] top-[2px] size-[8px]" aria-hidden="true" />
       </Button>
     </div>
   </div>
