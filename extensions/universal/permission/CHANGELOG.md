@@ -1,5 +1,11 @@
 # @zhushanwen/pi-permission
 
+## 1.6.5
+
+### Patch Changes
+
+- 318994f4a: Permission rules written against the old batch tool name `subagents` now migrate to the renamed `subagent_batch`, keeping existing rules enforcing after the tool rename.
+
 ## 1.6.4
 
 ### Patch Changes
