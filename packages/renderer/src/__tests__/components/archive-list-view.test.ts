@@ -11,7 +11,8 @@
  * - 点击行 emit select / 返回钮 emit back / 恢复钮 emit restore
  * - name 空串回退「未命名会话」（D3 合法簿记形态）
  * - 时间筛选行：档位过滤（互斥四档 + 全部）/ 计数与总体积联动（staging 按原文件计）/
- *   批量清理钮显隐 + 两段确认 emit purgeBatch / 档位切换复位确认态
+ *   批量清理钮显隐 + 两段确认 emit purgeBatch / 档位切换复位确认态 /
+ *   确认态随钮卸载复位（后台刷新卸载重现后首击不得执行）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/archive-list-view.test.ts
  */
@@ -277,6 +278,32 @@ describe('ArchiveListView 时间筛选行（mono 短码档位 + 总体积 + 批�
 
     await wrapper.setProps({ batchPurging: true })
     expect(wrapper.find('[data-testid="archive-batch-purge-btn"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('确认态下钮经后台刷新卸载重现：确认态随卸载复位，重现后首击不得执行', async () => {
+    // 快照数组只构造一次复用（hoursAgo 依赖 Date.now()，两次构造毫秒不同会破坏 toEqual 比对）
+    const buckets = makeFourBuckets()
+    const entries = buckets.filter((a) => a.sessionId === 'arc-older')
+    const wrapper = mountList(buckets)
+    await wrapper.find('[data-testid="archive-filter-older"]').trigger('click')
+    await wrapper.find('[data-testid="archive-batch-purge-btn"]').trigger('click') // 进入确认态
+    expect(wrapper.find('[data-testid="archive-batch-purge-btn"]').text()).toBe('确认删除 1 项？')
+
+    // 后台刷新序列（归档域广播 → refreshArchives）：可见集空 → 钮卸载；快照恢复 → 钮重现
+    await wrapper.setProps({ archives: [] })
+    expect(wrapper.find('[data-testid="archive-batch-purge-btn"]').exists()).toBe(false)
+    await wrapper.setProps({ archives: buckets })
+    const btn = wrapper.find('[data-testid="archive-batch-purge-btn"]')
+    expect(btn.exists()).toBe(true)
+    expect(btn.text()).toBe('1 项') // 重现为待发态，不携带 danger 确认态
+
+    await btn.trigger('click') // 重现后首击：两段确认的第一段，不得执行
+    expect(wrapper.emitted('purgeBatch')).toBeUndefined()
+    expect(btn.text()).toBe('确认删除 1 项？') // 首击进确认态
+
+    await btn.trigger('click') // 再击确认才执行
+    expect(wrapper.emitted('purgeBatch')).toEqual([[entries]])
     wrapper.unmount()
   })
 

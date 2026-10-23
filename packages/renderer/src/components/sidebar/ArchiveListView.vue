@@ -204,7 +204,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowLeft, RotateCcw, Trash2, Check, Archive, AlertCircle } from '@lucide/vue'
 import type { ArchiveSummary } from '@taiji/shared'
@@ -304,6 +304,14 @@ const totalDiskSizeLabel = computed(() =>
 
 /** 批量清理钮可见性：筛选生效（非「全」）且有可见条目（空档无操作对象，不渲染）。 */
 const batchPurgeVisible = computed(() => filterKey.value !== 'all' && visibleArchives.value.length > 0)
+
+// 确认态随钮卸载复位：后台归档域广播触发 refreshArchives 可让可见集空→非空翻转
+// （钮 v-if 卸载后带确认态重现），两段确认会退化为首击即执行不可恢复删除——
+// 卸载（visible 翻 false）即清；与 selectFilter 的档位切换复位互补（跨非全档切换
+// 时 visible 恒 true，靠后者复位），两路均幂等。
+watch(batchPurgeVisible, (v) => {
+  if (!v) batchConfirming.value = false
+})
 
 function selectFilter(key: ArchiveFilterKey): void {
   if (filterKey.value === key) return
