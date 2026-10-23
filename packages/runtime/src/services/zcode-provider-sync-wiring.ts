@@ -80,10 +80,12 @@ export async function runZcodeProviderStartupSync(
   deps: ZcodeProviderStartupSyncDeps,
 ): Promise<ZcodeProviderStartupSyncResult> {
   const log = deps.log ?? logger
-  const paths = deps.paths ?? defaultZcodeProviderSyncPaths()
   const mutation = deps.trigger === 'mutation'
   const syncLabel = mutation ? '变更镜像同步完成' : '启动同步完成'
   try {
+    // 缺省路径拼装收进 try（S-13）：getDataDir 的 prod 值准入检查（C-proc-26）等同步
+    // throw 不得击穿「任何异常吞掉 + warn 留痕」的 D7 降级契约
+    const paths = deps.paths ?? defaultZcodeProviderSyncPaths()
     const outcome = await syncZcodeProviders({
       configStore: deps.configStore,
       credentialResolver: deps.credentialResolver,
@@ -135,7 +137,17 @@ export function createZcodeProviderMirrorSync(
     try {
       while (pending) {
         pending = false
-        await runZcodeProviderStartupSync({ ...deps, trigger: 'mutation' })
+        try {
+          await runZcodeProviderStartupSync({ ...deps, trigger: 'mutation' })
+        } catch (err) {
+          // 单轮意外异常只留痕不中断 drain（S-13）：runZcodeProviderStartupSync 内部已把
+          // 常规失败吞成 kind:'failed'，此处兜极端 throw（deps.log 通道自身故障等）——
+          // await 期间到达的剩余 pending 重跑照常执行（触发不丢），本轮丢弃由下次
+          // mutation/启动对账。留痕走模块 logger 而非 deps.log：后者可能正是故障源
+          logger.warn(
+            `[zcode-provider-sync] 变更镜像同步轮意外异常（不中断后续重跑；本轮丢弃，下次 mutation/启动自动重试）：${err instanceof Error ? err.message : String(err)}`,
+          )
+        }
       }
     } finally {
       running = false

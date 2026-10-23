@@ -234,8 +234,11 @@ export interface EnginePort {
    * pi 词汇 ref → 引擎原生 ref（zcode 实装：`zai-coding-cn/*` →
    * `account:bigmodel-individual-coding-plan/*`，模型段大小写归一——同一「智谱 GLM
    * coding plan」通道在两个引擎世界的名字互译；其余 provider 两世界 1:1 原样，不在
-   * 表内原样透传）。幂等契约：翻译产物再入恒等（引擎内 validateModel/run prepare
-   * 的同名翻译分支零冲突）。无跨世界等价表的引擎省略本成员（pi 不实现）。
+   * 表内原样透传）。翻译表来源 = manifest `modelTranslation` 静态声明（cli 形态由
+   * RemoteEngine 构造期按声明装配本成员，见 EngineManifestSnapshot.modelTranslation
+   * 注释；声明缺省 undefined = 引擎无翻译面，本成员摘除）。幂等契约：翻译产物再入
+   * 恒等（引擎内 validateModel/run prepare 的同名翻译分支零冲突）。无跨世界等价表
+   * 的引擎省略本成员（pi 不实现）。
    *
    * 错误语义：翻译不可达（目标通道缺失 / 模型无等价）同步 throw = 显式失败
    * （首败即停，错误自带恢复指引），禁静默回落、禁伪造兜底。消费点：

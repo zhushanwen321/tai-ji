@@ -202,6 +202,25 @@ describe('runZcodeProviderStartupSync 摘要日志', () => {
     expect(warns.some(w => w.includes('变更镜像同步意外异常') && w.includes('不阻断配置写入应答'))).toBe(true)
     expect(warns.some(w => w.includes('不阻断 runtime 启动'))).toBe(false)
   })
+
+  it('deps.paths 缺省 + 缺省路径拼装同步 throw → 不上抛：kind:failed + warn 留痕（S-13）', async () => {
+    // 让 defaultZcodeProviderSyncPaths 内的 getDataDir 同步 fail-fast（C-proc-26：非
+    // PACKAGED 进程持有 prod 树值 throw，纯词法判定不触磁盘）。修复前该 throw 在 try
+    // 之外直接击穿降级契约上抛到调用方
+    const prev = process.env.TAIJI_AGENT_DATA_DIR
+    process.env.TAIJI_AGENT_DATA_DIR = join(homedir(), '.taiji')
+    try {
+      const result = await runZcodeProviderStartupSync({
+        ...makeDeps({ providers: { stepfun: stdProvider() } }),
+        paths: undefined,
+      })
+      expect(result.kind).toBe('failed')
+      expect(warns.some(w => w.includes('启动同步意外异常') && w.includes('prod-admission guard'))).toBe(true)
+    } finally {
+      if (prev === undefined) delete process.env.TAIJI_AGENT_DATA_DIR
+      else process.env.TAIJI_AGENT_DATA_DIR = prev
+    }
+  })
 })
 
 // ── write-through 触发面工厂 ────────────────────────────────────────────────
@@ -273,6 +292,35 @@ describe('createZcodeProviderMirrorSync', () => {
     expect(copy.config.providerConfigRules.providerRules.map(r => r.providerId)).toEqual(
       expect.arrayContaining(['stepfun', 'secondgw']),
     )
+  })
+
+  it('drain 单轮意外异常（deps.log 通道自身 throw）→ 不中断 drain、chain 不 reject、后续触发照常（S-13）', async () => {
+    // 构造 runZcodeProviderStartupSync 上抛的唯一路径：resolver 正常 → sync 成功 →
+    // log.info throw → 内部 catch → log.warn throw → 上抛。修复前该异常击穿 drain
+    // 使 chain reject；修复后单轮 catch 吞掉（logger 留痕，不走故障源 deps.log）
+    const explodingLog = {
+      warn: (): void => { throw new Error('log channel exploded') },
+      info: (): void => { throw new Error('log channel exploded') },
+    }
+    const deps = makeDeps({
+      providers: { stepfun: stdProvider() },
+      credentials: { stepfun: { key: 'pi-key', source: 'models.json', kind: 'api_key' } },
+    })
+    const mirror = createZcodeProviderMirrorSync({ ...deps, log: explodingLog })
+
+    await expect(mirror()).resolves.toBeUndefined()
+
+    // 内部状态未损坏：后续触发照常执行（换正常 log 通道验证 drain 可再入）
+    const mirrorCalls: string[] = []
+    const mirror2 = createZcodeProviderMirrorSync({
+      ...deps,
+      log: {
+        warn: msg => mirrorCalls.push(msg),
+        info: msg => mirrorCalls.push(msg),
+      },
+    })
+    await expect(mirror2()).resolves.toBeUndefined()
+    expect(mirrorCalls.some(m => m.includes('变更镜像同步完成'))).toBe(true)
   })
 })
 

@@ -104,9 +104,15 @@ export class ProviderMessageHandler {
    * 保证而非固定时延窗口（ADR-0122）。
    */
   private mirrorAfterMutation(): void {
-    this.ctx.providersMutatedSync?.().catch(err => {
+    try {
+      this.ctx.providersMutatedSync?.().catch(err => {
+        console.warn('[provider-message-handler] zcode provider mirror sync failed:', err instanceof Error ? err.message : String(err))
+      })
+    } catch (err) {
+      // 同步 throw 同样只 warn 不上抛（S-8 同族）：调用点均已在 reply 之后，异常冒泡
+      // 会被 server 层对同一 msg.id 补发 error envelope（成功 + 失败双回复）
       console.warn('[provider-message-handler] zcode provider mirror sync failed:', err instanceof Error ? err.message : String(err))
-    })
+    }
   }
 
   private handleGetProviders(ws: WsType, msg: Extract<ClientMessage, { type: 'config.getProviders' }>): boolean {

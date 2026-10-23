@@ -779,7 +779,16 @@ function readCatalogProviderRules(catalog: unknown): readonly unknown[] {
   return Array.isArray(rules) ? rules : [];
 }
 
-/** [listAccountFamilyModels 拆分] 单条 account: 规则的模型清单展开（追加进 out）。 */
+/**
+ * [listAccountFamilyModels 拆分] 单条 account: 规则的模型清单展开（追加进 out）。
+ *
+ * 模型清单判据（S-1 统一基准形态）：`builtinModelIds` **数组在位即用（含空数组），
+ * 缺键才回落 `personalModelIds`**。对齐点 = runtime 侧
+ * `packages/runtime/src/services/zcode-provider-sync.ts` 的 readAccountFamilyRules
+ * （settings 清单派生，2026-10-23 起同判据——此前该侧为「builtin 非空才用」，空
+ * builtin 数组时两侧集合不同）。normalizeAccountModel / translatePiModelRefToZcode
+ * 的 `??` 取清单形态与本函数同判据。
+ */
 function pushAccountFamilyRuleModels(
   rule: unknown,
   out: Array<{ id: string; name?: string }>,

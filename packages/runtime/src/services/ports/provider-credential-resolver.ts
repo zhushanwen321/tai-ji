@@ -12,6 +12,8 @@
  * - 链 3 infra/pi/pi-provider-store 的 catalog 凭据校验 → hasProviderCredential
  *   （infra 层只 `import type` 本接口，不 import 实现；注入通道见 D3「分层与注入设计」）
  * - 链 5 provider-config-helper.listProviders 的 apiKeySet 判定 → listCredentialBackedProviderIds
+ * - 链 6 zcode provider 镜像同步（zcode-provider-sync.ts，含启动同步与变更镜像两触发面）
+ *   → resolveProviderCredential（副本条目凭据映射）+ resolveProviderBaseUrl + listCredentialBackedProviderIds
  *
  * 双形态存在的理由：listProviders / findValidDefaultModel 是**同步热路径**，若只有 async
  * 形态，调用方会继续内联同步拷贝（收敛失效）；两形态在实现层共享同一份源优先级声明。
@@ -52,7 +54,9 @@ export interface IProviderCredentialResolver {
 
   /**
    * 同步批量列出「有凭据」的 providerId 并集（两源各单次读，非 N+1 读盘）。
-   * 供 listProviders 热路径消费（先例：provider-config-helper.ts:412 的 B3「消除 N+1 读盘」）。
+   * 供 listProviders 热路径消费（先例：provider-config-helper.ts:412 的 B3「消除 N+1 读盘」）；
+   * zcode provider 镜像同步（zcode-provider-sync.ts）也按本方法圈定「可映射进副本」的
+   * provider 集合（文件头消费方清单链 6）。
    */
   listCredentialBackedProviderIds(): Set<string>
 

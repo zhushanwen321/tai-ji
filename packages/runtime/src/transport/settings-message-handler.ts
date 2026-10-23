@@ -61,10 +61,18 @@ export interface SettingsHandlerContext extends MessageHandlerContext {
    */
   providerCredentialResolver: IProviderCredentialResolver
   /**
-   * provider 配置变更后的 zcode 镜像同步（write-through，ADR-0142 镜像架构裁决）：
-   * settings 域成功的 provider 变更（set/delete/toggle/removeByKind/applyImport）后由
-   * provider-message-handler 调用。缺省 undefined = 不镜像（存量测试装配形态）。
-   * 实现内部自捕获错误只 warn（镜像同步是可用性增强，失败不阻断配置写入应答）。
+   * provider 配置变更后的 zcode 镜像同步（write-through，ADR-0142 镜像架构裁决）。
+   * 触发面全清单（经 provider-message-handler.mirrorAfterMutation / oauth-message-handler
+   * .mirrorAfterCredentialMutation 两个触发点收敛）：
+   * - provider 域（settings-message-handler 子域）：setProvider / deleteProvider /
+   *   toggleProviderEnabled / removeProviderByKind / applyImportProviders（成功分支，
+   *   导入后目录刷新完成再触发一次）+ refreshProviderCatalogs（目录刷新可能带远程
+   *   清单合并写盘，副本须跟随）
+   * - 凭据域（oauth-message-handler）：oauthLogin 成功回调 + oauthLogout 成功——
+   *   auth.json 凭据域事实变化改变「可映射凭据」判定与 models.json apiKey 状态
+   *   （MF-2；OAuth token 本身不进副本，见 zcode-provider-sync 的 oauth-credential skip）
+   * 缺省 undefined = 不镜像（存量测试装配形态）。实现内部自捕获错误只 warn（镜像
+   * 同步是可用性增强，失败不阻断配置写入应答）。
    */
   providersMutatedSync?: () => Promise<void>
   /**
