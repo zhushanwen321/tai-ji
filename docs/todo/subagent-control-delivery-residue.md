@@ -31,5 +31,5 @@
 - `outbound-queue.ts` 的 `hasPendingFrames` 当前无调用方（可删或补消费）。
 - `pid-file.ts` 的 `.pid.tmp-*` 残片不在 sweep 扫描面（只扫 `*.pid`）；崩溃窗口可能留下 tmp 文件。
 - `outbound-queue` 的 destroyed 判定未覆盖半关闭态；溢出标记后不再复判上限（行为已显式失败，仅记录）。
-- `sweep` 的 owner 判活只有 `isPidAlive`，`instanceId` 恒等于 runtimePid（一致性校验在正常数据上不触发）；pid 复用误判「owner 活着」时仍会跳过收割——候选：boot id 或连接探活。
+- `sweep` 的 owner 判活只有 `isPidAlive`，`instanceId` 恒等于 runtimePid（一致性校验在正常数据上不触发）；pid 复用误判「owner 活着」时仍会跳过收割——已裁决加固（2026-10-23，转 just-do-it 清单；候选 boot id 或连接探活二选一，约束「宁不杀勿误杀」不得引入误杀）。
 - Windows 引擎意外退出时 child pid 集合来自 host/childSpawned 反向帧；只按 `isAlive` 选目标，无 start-time 二次校验（Windows 不可得，设计已接受「宁不杀勿误杀」的降级）。

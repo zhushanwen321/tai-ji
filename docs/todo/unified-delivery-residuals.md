@@ -22,7 +22,7 @@
 - 疑点：respawn 恢复后 renderer 重订阅 / topic 快照链缺口（`session-message-handler.ts:830` 附近）。D3 验收者立场未修复，待独立排查。
 - 触发：排队排查；复现证据（截图 s0-s10 与 summary.jsonl）为 dev-flow 过程产物，已随 .tmp 清理，复现需按本条现象重新真机构造。
 
-## 4. pi 1.0.0 idle+triggerTurn 注入 entry 双写（pi 上游形态，呈报项）
+## 4. pi 1.0.0 idle+triggerTurn 注入 entry 双写（pi 上游形态，真伪核实中）
 
 - 现象：pi 1.0.0 空闲 + triggerTurn 注入时同一通知在 transcript 可能落两条 custom_message（port 层 sendMessage 恰一次已实证，pi 内部时序竞态）——非本次改动引入（pi 上游形态）。
-- 待裁决：渲染侧是否按 details.deliveryId 判重去重（用户裁决项）；上游核验归 pi-boundary-reliability 附录 B 登记线。
+- 2026-10-23 用户裁决：先核实该现象是否真实存在（node_modules 实装 + 探针），核实产物 `.tmp/need-design-batch/`；核实为真后再裁决渲染侧是否按 details.deliveryId 判重去重。上游核验归 pi-boundary-reliability 附录 B 登记线。

@@ -1,6 +1,6 @@
 # docs/todo 需详细设计后开工清单（need-design）
 
-状态：待用户确认排期（2026-10-23 自 docs/todo/ 45 份登记文档整理归并）
+状态：待用户确认排期（2026-10-23 自 docs/todo/ 45 份登记文档整理归并）。
 
 本清单承载「方案未定 / 多方案权衡 / 涉及协议或跨包 API 变更，需设计裁决后才可开工」的待办。每条含来源、问题、候选方向、开放问题。用户裁决后条目转入 just-do-it.md 或独立立项（tech-design-wf）。
 
@@ -31,6 +31,8 @@
 
 ### 3. zcode 引擎成员校验 async 化（listModels 协议方法）
 
+状态：已裁决立项（2026-10-23：按推荐路线出设计），设计进行中（产物 `.tmp/need-design-batch/`）。
+
 来源：engine-remote-membership-face.md（本登记唯一未决主体）。
 
 问题：zcode 远程形态 engineDefaults 偏好层缺成员校验数据来源（async listModels 需经引擎进程 RPC），现无协议方法承载。
@@ -41,6 +43,8 @@
 
 ### 4. scheduler 定时任务结果感知通道
 
+状态：现状核实进行中（2026-10-23 用户裁决）：待核实「注入消息是否已统一走 pending-notifications 统一通道、该通道能否感知投递成功与发送给 LLM 成功」；用户已在另一独立会话实施 scheduler 迁移，核实 main 现状后重评残余缺口。smart-context / steering mode 两豁免结论已裁决确认（见 unified-delivery-exempt-eval.md），scheduler 迁移线由本条承接。
+
 来源：scheduler-result-awareness-channel.md。
 
 问题：scheduler 经扩展 API sendMessage 注入 owner session 后无投递结果感知（返回 `Promise<void>`），失败静默。
@@ -49,17 +53,7 @@
 
 开放问题：立项排期；若上游 pi 给 sendMessage 提供结果回执，按新事实重评。
 
-### 5. session-pick GUI 补齐
-
-来源：session-pick-tui-only-gui-gap.md。
-
-问题：session-reader 的 /session-pick 命令与 `#` 会话引用补全仅 TUI 模式注册（`extensions/universal/session-reader/src/index.ts:250` 仅 `ctx.mode === 'tui'` 分支），GUI 不可用。taiji 有独立会话切换入口，功能不受阻，仅命令形态缺位。
-
-候选方向：方案未定（GUI 侧 RPC 模式补注册分支的交互形态需设计——GUI 无 TUI 补全 UI，需要 taiji 侧 UI 载体或放弃命令形态）。
-
-开放问题：登记口径「GUI 侧出现该命令的实际使用需求时立项」，需裁决是否现在立项。
-
-### 6. dev 实例 runtime 慢启动被健康检查误杀
+### 5. dev 实例 runtime 慢启动被健康检查误杀
 
 来源：dev-runtime-slow-start-killed-by-health-check.md。
 
@@ -69,7 +63,9 @@
 
 开放问题：三个候选的取舍与组合；位置：main 侧 `waitForHealth`（35s 上限）、`apps/electron/scripts/dev-instance.mjs` 启动链。
 
-### 7. subagent-core D1 反向值边收编
+### 6. subagent-core D1 反向值边收编
+
+状态：已裁决立项（2026-10-23：不留长期豁免，不能有反向依赖），收编设计进行中（产物 `.tmp/need-design-batch/`）。
 
 来源：subagent-core-d1-residual-edges.md（残余 1、2；残余 3 随手改已入 just-do-it 条目 55）。
 
@@ -79,22 +75,16 @@
 
 开放问题：登记原判断「低优先」，需裁决收编 or 长期豁免。
 
-### 8. sweep owner 判活机制加固
+### 7. workflow-viz 两项交互/算法设计
 
-来源：subagent-control-delivery-residue.md（D5 卫生项）。
-
-问题：subagent-control sweep 的 owner 判活只有 `isPidAlive`、`instanceId` 恒等于 runtimePid；pid 复用误判「owner 活着」时跳过收割。
-
-候选方向：boot id 或连接探活（二选一）。注意 sweep 安全语义是「宁不杀勿误杀」，加固不得引入误杀。
-
-### 9. workflow-viz 两项交互/算法设计
+状态：已裁决立项（2026-10-23：出设计方案），设计进行中（产物 `.tmp/need-design-batch/`）。
 
 来源：workflow-viz-dag-minor-residuals.md（另 2 条小项已入 just-do-it 条目 59/60）。
 
 - fit 不追打策略：需要「仅首次 fit + 用户操作后不再自动 fit」的策略收敛（交互策略设计，涉及用户意图判定——什么操作算「用户接管」）。位置 `WorkflowVizDag.vue`。
 - 同列垂直 sequence 边折线穿卡片：垂直边路由对途经节点 x 区间做避让侧道（布局算法改动，需防回归）。位置 `workflow-viz/dag/layout.ts`。
 
-### 10. review-fix-loop 聚合器延续条目空壳缺陷
+### 8. review-fix-loop 聚合器延续条目空壳缺陷
 
 来源：workflow-viz-dag-minor-residuals.md 关联工具缺陷登记。
 
@@ -102,7 +92,7 @@
 
 开放问题：修复载体确认——review-fix-loop 存在多份（zcode 侧 `.agents/skills/pr-cr-fix/workflows/` 等 + 全局 `~/.zcode/workflows/`），属仓外/多平台 workflow 资产，需确认改哪份、是否双版本同步（多平台 workflow 脚本双版本对齐纪律）。
 
-### 11. pi 内置版 review-fix-loop 补修子循环
+### 9. pi 内置版 review-fix-loop 补修子循环
 
 来源：dev-merge-gates-sibling-content-repair-gap.md（残留②；原文件保留作设计输入）。
 
@@ -112,7 +102,7 @@
 
 开放问题：独立批次排期；npm 分发版本的发布窗口。
 
-### 12. queue-hold 非生产形态物理删除
+### 10. queue-hold 非生产形态物理删除
 
 来源：unified-delivery-residuals.md 项 1。
 
@@ -120,17 +110,7 @@
 
 开放问题：是否把本次清理视为该窗口、现在执行（动作本身机械，量在测试改动）。
 
-## 二、裁决类（需用户拍板，无需大设计）
-
-### 13. pi 引擎 provider 配置目录注入
-
-来源：engine-default-provider-setting.md（残留登记，主登记已关闭）。
-
-问题：pi 引擎的 provider 配置目录与 taiji 主会话不同源（pi 引擎回落 `~/.pi/agent`，taiji 主会话在 `<dataDir>/agent/`），「provider 来源统一」未完整收敛。
-
-裁决点：是否给 pi 引擎注入 `PI_CODING_AGENT_DIR=<dataDir>/agent`。附带可选项（同来源）：provider CRUD 服务层（upsertProvider/removeProvider 调用方）追加一次同步调用，覆盖会话内变更重同步（登记为「本期不做」的可选项，是否激活待裁决）。
-
-### 14. session-delivery msg.meta 透传链退役
+### 11. session-delivery msg.meta 透传链退役
 
 来源：session-delivery-meta-retirement-eval.md。状态：待裁决。
 
@@ -140,39 +120,15 @@
 
 裁决点：是否启动判据 ① 的 notify-once 域改道设计（退役的前置）。
 
-### 15. unified-delivery 豁免域评估结论确认
+### 12. pi 1.0.0 idle+triggerTurn 注入 entry 双写真伪核实
 
-来源：unified-delivery-exempt-eval.md。状态：待用户裁决。
-
-评估结论：scheduler=不迁、smart-context=不迁（两域维持现状通道）；steering mode 覆写复评 = 维持 one-at-a-time 不覆写。裁决点：确认三个结论。
-
-附带独立小修（与迁移解耦、待独立授权）：scheduler compaction 直闯缺口——dispatch 前查 `pi.isIdle()`，false 则 pending 保留等下个 tick 重试（backend 增加一个 isIdle 方法，约数行；位置 `extensions/universal/scheduler/src/runtime.ts` :470-495 附近）。
-
-### 16. pi 1.0.0 idle+triggerTurn 注入 entry 双写呈报
+状态：核实进行中（2026-10-23 用户裁决：先核实现象是否真实存在——node_modules 实装代码级核实 + 零 token 探针，产物 `.tmp/need-design-batch/`；核实为真后再裁决渲染侧是否按 details.deliveryId 判重去重）。
 
 来源：unified-delivery-residuals.md 项 4。
 
-问题：pi 上游形态——idle 态 triggerTurn 注入的 entry 双写（同轮次消息重复进 session jsonl）。
+问题：pi 上游形态——idle 态 triggerTurn 注入的 entry 双写（同轮次消息重复进 session jsonl）；port 层 sendMessage 恰一次已实证，疑 pi 内部时序竞态。上游核验归 pi-boundary-reliability 附录 B 登记线。
 
-裁决点：渲染侧是否按 `details.deliveryId` 判重去重。上游核验归 pi-boundary-reliability 附录 B 登记线。
-
-### 17. 终端多实例三组裁决项
-
-来源：terminal-multi-instance.md（探针欠账在 just-do-it 验证活动节；R2-R8 残留风险按条件触发保留于原文件）。
-
-- T10「重置后空态」产品口径：产品若须保留空态，需抑制挂载路径自动新建（改动落 TerminalView/useTerminal）
-- I-A5 O1-O2 redraw 观察（旧会话命令文本叠新会话提示符行，未复现）：登记待裁决是否处理
-- 世代判据是否需显式透出 token 拉取失败（F1-56 分支②）：若采纳，实施面 = use-connection 拉取失败态透出 + getCurrentToken 语义扩展 + 重置触发范围复核；触发条件 = 真机出现「世代变更未被 token 判据捕获」症状
-
-同族延期项（新功能另立项）：浏览器多页面（`apps/electron/main/browser/browser-view-manager.ts:33`）、浮层实例 tab 条。
-
-### 18. subagent-workflow-issues §7 否定性结论归宿
-
-来源：subagent-workflow-issues.md（导航页，剩余项已全部由本次两清单承接或保留原文件）。
-
-裁决点：§7 否定性结论「删除 or 折进 docs/adr/decisions.md」。裁决后该导航文件处置（预计删除）。
-
-## 三、低优先债（正式 deferred 登记，不重报）
+## 二、低优先债（正式 deferred 登记，不重报）
 
 - dev-0.11.7 S-10：`zcode-provider-sync.ts` warn sink 未收敛统一日志通道
 - dev-0.11.7 S-16：翻译通道键集三处手写；runtime 测试按源码树相对路径读 zcode 包 package.json
@@ -180,6 +136,6 @@
 - dev-0.11.8 S-15：`TAIJI_ENGINE_RAW_MIRROR` 字面量三处镜像无机器锁，真正修法 = `.githooks/check_env_whitelist_sync.py` 新增 rule-3 断言（独立加固改动、带自己的测试）
 - dev-0.11.7-review SG-7 其余 7 个设置页 `overflow: clip` 复核（见 just-do-it 验证活动节，属验证不属代码）
 
-## 四、保留原文件的登记（非待办，不进本清单处置）
+## 三、保留原文件的登记（非待办，不进本清单处置）
 
-以下文档为终态存档 / 条件触发观察 / 登记容器，无当前动作，保留原文件：defense-mechanism-cleanup（终态存档）、disconnect-window-dialog-loss（不修+重审触发）、long-stream-delta-double-count（观察不实施）、font-weight-dual-cjk-verification（挂起等反馈）、mcp-session-lifetime-apply（五项观察）、remote-use-shell-unification-reserved-divergences（真差异白名单容器）、system-prompt-trace-context-with-system（前瞻登记）、vitest-teardown-race-vendor-patch（等上游退役）、workflow-subtask-local-model-unsupported（不修+上游触发）、dev-merge-gates-sibling-content-repair-gap（残留条件触发 + pi 内置版设计输入）、engine-default-provider-setting（溯源保留）、e2e-spec-blind-wait-cleanup / zcode-provider-wiring-recheck / subagent-d5-nested-dispatch-verification / subagent-reload-replacement-window-recheck / terminal-multi-instance / subagent-control-delivery-residue（验证活动与条件登记载体）、unified-delivery-exempt-eval / unified-delivery-residuals（裁决容器）、subagent-workflow-issues（§7 待裁决）。
+以下文档为终态存档 / 条件触发观察 / 登记容器，无当前动作，保留原文件：defense-mechanism-cleanup（终态存档）、disconnect-window-dialog-loss（不修+重审触发）、long-stream-delta-double-count（观察不实施）、font-weight-dual-cjk-verification（挂起等反馈）、mcp-session-lifetime-apply（五项观察）、remote-use-shell-unification-reserved-divergences（真差异白名单容器）、system-prompt-trace-context-with-system（前瞻登记）、vitest-teardown-race-vendor-patch（等上游退役）、workflow-subtask-local-model-unsupported（不修+上游触发）、dev-merge-gates-sibling-content-repair-gap（残留条件触发 + pi 内置版设计输入）、engine-default-provider-setting（溯源保留；新发现节已裁决转 just-do-it）、e2e-spec-blind-wait-cleanup / zcode-provider-wiring-recheck / subagent-d5-nested-dispatch-verification / subagent-reload-replacement-window-recheck / terminal-multi-instance（验证活动与条件登记载体；产品口径已全部裁决落定）/ subagent-control-delivery-residue（验证活动与条件登记载体；sweep 判活加固已裁决转 just-do-it）、unified-delivery-exempt-eval（已裁决存档：smart-context 不迁 + steering mode 维持确认；scheduler 节结论作废、迁移线由本清单条目 4 承接）、unified-delivery-residuals（裁决容器）。

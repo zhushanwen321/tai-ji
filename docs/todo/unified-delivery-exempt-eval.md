@@ -1,12 +1,14 @@
 # 统一消息投递重构：豁免类（scheduler / smart-context）迁移评估
 
-状态：待用户裁决（评估结论：scheduler=不迁；smart-context=不迁）。两域维持现状通道，重审触发见文末汇总；steering mode 覆写复评（unified-delivery 设计 §7 检查点 4）结论 = 维持 one-at-a-time 不覆写。
+状态：已裁决（2026-10-23）：smart-context=不迁（确认）；steering mode=维持 one-at-a-time 不覆写（确认）；scheduler=迁移——本文件「一、scheduler」节的「不迁」结论作废（用户裁决推翻），迁移已由独立会话实施，现状核实与残余缺口承接于 [need-design.md](need-design.md) scheduler 条目（来源 [scheduler-result-awareness-channel.md](scheduler-result-awareness-channel.md)）。
 
 评估依据：unified-delivery 设计（设计档案已随 .tmp 清理；§9 非目标 5 / §3.9 / 附录 C）+ impl-plan 单元 u6-exempt-eval（A17）；port 接口以 u2 已交付实装为准（`extensions/shared/delivery-port`）。全部现状陈述以本仓实码与 pi 实装（`node_modules/@earendil-works/pi-coding-agent/dist`）为依据。
 
 背景一句话：统一消息投递重构已建投递端口（delivery-port，`extensions/shared/delivery-port`——custom 通知通道的唯一执行者：受理前写投递日志（session entry）、注入直达 pi 原生 steer/followUp 队列、送达回执命中后 ack、pi 崩溃重启后差集重放）。scheduler 与 smart-context 是设计 §9 登记的两个豁免域（默认不迁），本评估按各自现状实码逐项核对迁移收益与代价。
 
-## 一、scheduler：不迁
+## 一、scheduler（结论作废：2026-10-23 用户裁决迁移，本节保留作评估记录）
+
+> 本节「不迁」建议已被 2026-10-23 用户裁决推翻——scheduler 迁移到统一投递通道，已由独立会话实施；现状核实与残余缺口见 need-design.md scheduler 条目。下文为当时的评估内容，勿再引用其结论。
 
 ### 现状机制
 
@@ -41,9 +43,9 @@ dispatch 改为 `port.deliver({ payload: custom, timing: 'steer', id })`：受�
 
 **不迁**。提醒类丢失的代价已被 09-14 裁决显式接受（scheduler-steer-direct-dispatch 代价 b：丢一轮远小于 10min 级延迟）；唯一耐久收益窗口罕见，不抵「重新引入必达机制 + 幂等键改造 + 失败语义裁决」的代价。
 
-### 附带发现（与迁移解耦，待独立裁决）
+### 附带发现（scheduler compaction 直闯缺口；现状随迁移核实线核实）
 
-行为变化 4 的 compaction 直闯缺口是 scheduler 域内问题，不需要 port 迁移即可修复：dispatch 前查 `pi.isIdle()`（扩展 API 可用，port host 即经 `ctx.isIdle()` 接线），false 则 pending 保留等下个 tick 重试（与既有 rate-limit 跳过同型，backend 增加一个 isIdle 方法）。低频但后果是 pi 侧未定义行为，修复代价约数行——建议作为 scheduler 域内小修独立登记，不与波 5 绑定。
+行为变化 4 的 compaction 直闯缺口是 scheduler 域内问题：dispatch 前查 `pi.isIdle()`（扩展 API 可用，port host 即经 `ctx.isIdle()` 接线），false 则 pending 保留等下个 tick 重试（与既有 rate-limit 跳过同型，backend 增加一个 isIdle 方法）。是否已随 2026-10-23 的迁移实施一并解决，归 need-design.md scheduler 条目的现状核实线确认。
 
 ## 二、smart-context：不迁
 

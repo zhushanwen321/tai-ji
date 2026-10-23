@@ -975,3 +975,21 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **不采用**：保留 `agents`/`aggregate` 做兼容（混合形状是模型记忆残留，静默放行丢失用户意图）；让批量成员变成可续聊 record（one-shot 成员结果由脚本返回值承载，无 message 对端）；新增 `retry` 工具或 run 级 `retryFailedOnly` 字段（重派就是一次普通派发，拆开会把「任务知识」与「重试决策」分开）；向主 agent 推送成员进度事件（反复唤醒烧上下文，主 agent 无订阅通道）；批量走直接派发不走 workflow 管道（复制持久化/journal/GUI 视图/完成通知/abort·resume 五件事或引入第二套批机制）。
 
 **登记**：实装 = `extensions/universal/subagent-workflow/src/interface/tool/tool-subagents.ts`（成员对象 schema、迁移检查、入口校验、常驻注册）+ `interface/tool/subagent-tool-schema.ts`（`SubagentsParams`/`SubagentsMember` 权威定义）+ `packages/subagent-core/workflows/fan-out.js`（`@pi-meta` 对象-only、成员级字段派发、partial 收尾文案）+ `packages/subagent-core/src/orchestration/run-member-view.ts`（`runMemberViews` 纯函数 + `RunMemberView`/`MemberState` 类型）+ `interface/tool/tool-workflow.ts`（status 消费 `runId` 渲染成员表）。同步登记：[CONTEXT.md](../CONTEXT.md)（Fan-out / 批量派发词条、deferred 词条）；[architecture.md](../extensions/subagents/architecture.md) §4 批量编排行；ADR-0135/0136 补记。设计文档为 tech-design 工作流产物（`~/.agents/skill-data/tech-design/<slug>/subagent-tool-interface-refactor.md`，不入库），本条即该设计关键决策（§3.3.2/§3.3.3/§3.3.4）的现行登记处。
+
+### ADR-0157 subagent 体系对抗式审查否定性结论收编：勿重复怀疑清单（2026-10-23 用户裁决，归宿自 subagent-workflow-issues §7）
+
+**决策**：2026-09-29 三轮对抗式架构审查对 subagent 体系（subagent-core / engine-sdk / pi·zcode 引擎 / subagent-workflow / runtime 派生视图消费链）核实的 9 条否定性结论（怀疑过、源码级查实不是问题）收编入本登记处，后续审计/审查不再重复怀疑：
+
+1. **防御堆积假设在 notify/ui/lifecycle 三域证伪**：notify 七层防线各自覆盖不同丢失窗口，与设计三路径三桶一一对应；ui 三层错误围栏各承独立契约。
+2. **reaper 与 pid-file 无误杀路径**：判据全是身份四元组（宿主死 + 引擎活 + cmdline + lstart 四道校验），无端口/时间窗启发式。
+3. **run journal append 物理单写点成立**：全仓恰 1 处生产写点（terminal-actions.ts appendTransition），dispatchRunTrigger 唯一投递漏斗，无第六写点。
+4. **reentry-guard check-set 竞态不成立**：acquire 同步无 await，原子性构造性保证；真实窗口是 guard 未进 domain-state 槽（reload 后新旧 guard 并存的窄窗口）。
+5. **gui-mappers 现行输入域覆盖正确**。
+6. **19 组包间同名文件 12 组是合法垫片/参数化收敛形态**；真差异双实现仅 best-effort / logger / data-dir / server 四组且均有文档登记。
+7. **worktree reconcile 无误删路径**：判死清理有 mtime+宽限防 create 窗口误清；方向一要求双消失且查询失败保守跳过；歧义宁跳勿删。
+8. **测试深路径 import 不是缺陷**（2026-09-29 用户裁决）：属 C-ext-27 已裁决设计——测试/bench/mocks 消费符号不塞 barrel，经 vitest alias + tsconfig paths 双轨解析；生产码深路径由该约束的 ESLint 门单独拦。
+9. **subagents 批量 tool 无文本生成**（2026-09-29 核实）：handler 只做 args 组装与按名解析内置模板，`@pi-meta` 与 `workerData.scriptPath` 注入安全锚均有效。
+
+**为什么**：这批结论每条都经源码级核实，价值是「勿重复怀疑」——后续审查反复翻出等同重复支付审计成本。原载体 subagent-workflow-issues.md（导航页）随剩余项全部拆分为独立登记而删除，本条是该文件 §7 的现行承载（原文 git 可追溯）。
+
+**登记**：本条不改变任何现行行为；来源核实记录 = 原文件 git 历史（2026-09-29 登记、2026-10-11 重组为导航页、2026-10-23 收编删除）。

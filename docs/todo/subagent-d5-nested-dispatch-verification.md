@@ -20,4 +20,4 @@
 
 - 身份机制权威文档：[docs/architecture/subagent-identity-and-recursive-visibility.md](../architecture/subagent-identity-and-recursive-visibility.md)。
 - 引擎义务：[docs/extensions/subagents/engine-development-guide.md](../extensions/subagents/engine-development-guide.md) §9「子代理身份 env」。
-- D1 执行纲领原表 D5 行（原样保留）：[subagent-workflow-issues.md](subagent-workflow-issues.md) §2.0。
+- 终态演进纲领（含 D5 行）：原 subagent-workflow-issues.md §2.0，已随该导航页删除收编，git 可追溯。

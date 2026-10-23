@@ -1,6 +1,6 @@
 # workflow-viz DAG 布局打磨 minor 残余（4 条，随分支带走）
 
-状态：开放（minor 档，不阻塞合并；终局 PR 期复核）。来源：dev-merge branch-review review-fix-loop run wf-1792073055433-g3dxvf（分支 fix-workflow-graph，R2-R4 三轮 reviewer 全员 clean、must-fix MF-1 已修，4 条 suggestion 未派修延续至清单）。
+状态：已裁决立项（2026-10-23 用户裁决：出设计方案）——残余 2（fit 不追打策略）与残余 3（同列垂直边避让）设计进行中，产物 `.tmp/need-design-batch/`；残余 1、4 已入 just-do-it 条目 59/60。来源：dev-merge branch-review review-fix-loop run wf-1792073055433-g3dxvf（分支 fix-workflow-graph，R2-R4 三轮 reviewer 全员 clean、must-fix MF-1 已修，4 条 suggestion 未派修延续至清单）。
 
 ## 残余清单
 

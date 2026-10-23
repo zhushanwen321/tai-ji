@@ -2,7 +2,7 @@
 
 ## 状态
 
-拆分登记（2026-10-16 真机测试后改写；同日 headersApplied 项已由 ADR-0143 关闭）：①枚举面缺口未解决（本登记唯一未决主体）；②GLM plan 通道 headersApplied 已关闭——根因 = taiji headless spawn 恒落 host-account 模式（非 ZCode.app 自身 bug，当日初判「ZCode 自身 bug」已作废，见文末附录），ADR-0143 standalone 补丁 + 元数据键供给真机验证通过。前提修复已落地：ADR-0142 补齐 RemoteEngine `translateModelRef`（manifest 声明表快照）+ 引擎侧 account 直通大小写归一。
+已裁决立项（2026-10-23 用户裁决：按推荐路线出设计）：设计进行中，产物 `.tmp/need-design-batch/`。拆分登记（2026-10-16 真机测试后改写；同日 headersApplied 项已由 ADR-0143 关闭）：①枚举面缺口未解决（本登记唯一未决主体）；②GLM plan 通道 headersApplied 已关闭——根因 = taiji headless spawn 恒落 host-account 模式（非 ZCode.app 自身 bug，当日初判「ZCode 自身 bug」已作废，见文末附录），ADR-0143 standalone 补丁 + 元数据键供给真机验证通过。前提修复已落地：ADR-0142 补齐 RemoteEngine `translateModelRef`（manifest 声明表快照）+ 引擎侧 account 直通大小写归一。
 
 ## 问题
 
