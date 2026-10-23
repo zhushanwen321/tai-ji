@@ -11,40 +11,40 @@
 - 行号以当前 HEAD 为准，登记行号漂移时按符号名定位
 - 修复中发现登记与现状不符（已修/已不存在），不改代码，在汇报中说明并标记条目关闭
 
-## 批次 1
+## 批次 1（已完成：T1=69c0b0818 T2=33bf7a018 T3=f18fe0a6a T4=9365b6f77 T5=0c81f904c）
 
 ### T1 CI 与钩子配置批
 
-- [ ] **条目 1（dmg-r3-3）** mobile-renderer typecheck 补 CI：`.github/workflows/ci.yml` typecheck job 增补 mobile-renderer typecheck step（本地 quality-gates 已覆盖，CI 对齐）。来源 dev-0.11.10-review-residue。
-- [ ] **条目 2（N-4-typegate）** core 包类型门禁：`.github/workflows/ci.yml` typecheck job 增补 `TypeCheck - core` step（`pnpm --filter @taiji/core run typecheck`）；`.githooks/install-hooks.sh` FRONTEND_FILES 正则扩含 `packages/core`。来源 dev-0.11.6-review-residue。验收：注入类型错的用例不再静默通过（可本地模拟验证正则匹配）。
-- [ ] **条目 3（check-prompt-outposts）** 修复 `scripts/__tests__/check-prompt-outposts.test.mjs` 中 4 条红测试：fixture 改为直接 import `.githooks/check_prompt_outposts.py` 的 `OUTPOST_CALLSITES` 常量生成注入内容（消除指纹漂移，长期方案）；测试文件读 Python 常量可用正则提取。修完把该测试加进 `.github/workflows/ci.yml`「Test - scripts guards」步骤固定文件清单。来源 check-prompt-outposts-test-drift。验收：该测试文件全绿，CI 清单含此文件。
+- [x] **条目 1（dmg-r3-3）** mobile-renderer typecheck 补 CI：`.github/workflows/ci.yml` typecheck job 增补 mobile-renderer typecheck step（本地 quality-gates 已覆盖，CI 对齐）。来源 dev-0.11.10-review-residue。
+- [x] **条目 2（N-4-typegate）** core 包类型门禁：`.github/workflows/ci.yml` typecheck job 增补 `TypeCheck - core` step（`pnpm --filter @taiji/core run typecheck`）；`.githooks/install-hooks.sh` FRONTEND_FILES 正则扩含 `packages/core`。来源 dev-0.11.6-review-residue。验收：注入类型错的用例不再静默通过（可本地模拟验证正则匹配）。
+- [x] **条目 3（check-prompt-outposts）** 修复 `scripts/__tests__/check-prompt-outposts.test.mjs` 中 4 条红测试：fixture 改为直接 import `.githooks/check_prompt_outposts.py` 的 `OUTPOST_CALLSITES` 常量生成注入内容（消除指纹漂移，长期方案）；测试文件读 Python 常量可用正则提取。修完把该测试加进 `.github/workflows/ci.yml`「Test - scripts guards」步骤固定文件清单。来源 check-prompt-outposts-test-drift。验收：该测试文件全绿，CI 清单含此文件。补充：实测真实根因是检查脚本 10-04 加的 staged 交集使 fixture 树必然空扫描（顺带使 CI 全量扫描步静默恒绿），已随 69c0b0818 一并修复（--root/--all 跳过 staged 交集 + CI 步改 --all）。
 
 ### T2 canvas 批
 
-- [ ] **条目 4（零发现轮停摆）** reviewer 零发现轮永不推进轮次：`ReviewReport` 聚合补「本轮 run 已完成写回」的事实字段（如 `lastRunRound`，随 review-append 事件落盘，保持直写与重放等价；禁止占位假条目——会污染 entries 全部消费方），`roundHasReport` 据此对零发现轮成立，恢复轮次推进与 max-rounds 终态判定。位置：`extensions/taiji/canvas/src/review.ts`（:81、:220-223）、`packages/runtime/src/services/canvas/canvas-review-actions.ts`（:24-26、:53、:65-69）、`packages/extension-protocol/src/extensions/canvas/state.ts:157`。补测试：reviewer 零发现（空 entries / 全 dropped）后再发起应推进轮次；达 maxRounds 触发 max-rounds 终态。来源 canvas-review-round-zero-finding-stall。
-- [ ] **条目 5（基线债登记）** `docs/architecture/runtime-layering.md` §3 ④ 基线债清单按既有批次格式补 canvas-service.ts 条目：fs 使用点（events.jsonl appendFileSync / canvas.json writeFileSync 与 atomicWrite / exports writeFileSync / 启动扫描 readdirSync / 目录 mkdirSync）+ 同族形态（对齐 gen-stats-store 存储落盘族）+ 收编路线（随 ports 收编统一迁移）。位置参照 `packages/runtime/src/services/canvas/canvas-service.ts:25-26`。来源 canvas-service-fs-baseline-debt-registration。验收：登记格式与清单内既有条目一致。
+- [x] **条目 4（零发现轮停摆）** reviewer 零发现轮永不推进轮次：`ReviewReport` 聚合补「本轮 run 已完成写回」的事实字段（如 `lastRunRound`，随 review-append 事件落盘，保持直写与重放等价；禁止占位假条目——会污染 entries 全部消费方），`roundHasReport` 据此对零发现轮成立，恢复轮次推进与 max-rounds 终态判定。位置：`extensions/taiji/canvas/src/review.ts`（:81、:220-223）、`packages/runtime/src/services/canvas/canvas-review-actions.ts`（:24-26、:53、:65-69）、`packages/extension-protocol/src/extensions/canvas/state.ts:157`。补测试：reviewer 零发现（空 entries / 全 dropped）后再发起应推进轮次；达 maxRounds 触发 max-rounds 终态。来源 canvas-review-round-zero-finding-stall。
+- [x] **条目 5（基线债登记）** `docs/architecture/runtime-layering.md` §3 ④ 基线债清单按既有批次格式补 canvas-service.ts 条目：fs 使用点（events.jsonl appendFileSync / canvas.json writeFileSync 与 atomicWrite / exports writeFileSync / 启动扫描 readdirSync / 目录 mkdirSync）+ 同族形态（对齐 gen-stats-store 存储落盘族）+ 收编路线（随 ports 收编统一迁移）。位置参照 `packages/runtime/src/services/canvas/canvas-service.ts:25-26`。来源 canvas-service-fs-baseline-debt-registration。验收：登记格式与清单内既有条目一致。
 
 ### T3 subagent-workflow 扩展批
 
-- [ ] **条目 6（cancel 回执缺失）** subagent streaming 态 cancel 成功路径不写结果文件，runtime 消费侧报 handler_error（5 轮确定性复现）。修复（方案 A，从源头修复）：`extensions/universal/subagent-workflow/src/interface/command/subagents.ts` 的 rpcCancel 成功路径（`service.cancel(recordId)` 返回 true 时）补写 `{scope:"ok"}` 结果文件，写法对齐同文件 rpcMessage 的成功回执先例。不改 runtime 消费侧判定（`packages/runtime/src/services/session/session-records.ts` 的「文件不存在判回执缺失」语义保持）。补单测锁定成功路径写回执。来源 subagent-cancel-receipt-race。
-- [ ] **条目 7（保留键误判嵌套 required）** `missingRequiredKeysOf` 提取缺失键时未过滤 `instancePath`，嵌套 required 同名键被误报进「保留键通道被占用」解释文案。修复：仅收集 `instancePath === ""` 的顶层缺失键，嵌套缺失归普通缺参原样透出。位置：`extensions/universal/subagent-workflow/src/interface/tool/tool-workflow.ts`（missingRequiredKeysOf :599、reservedKeyChannelError :574）。补用例：嵌套 required 缺失不触发保留键解释。来源 workflow-reserved-key-channel-nested-required。
+- [x] **条目 6（cancel 回执缺失）** subagent streaming 态 cancel 成功路径不写结果文件，runtime 消费侧报 handler_error（5 轮确定性复现）。修复（方案 A，从源头修复）：`extensions/universal/subagent-workflow/src/interface/command/subagents.ts` 的 rpcCancel 成功路径（`service.cancel(recordId)` 返回 true 时）补写 `{scope:"ok"}` 结果文件，写法对齐同文件 rpcMessage 的成功回执先例。不改 runtime 消费侧判定（`packages/runtime/src/services/session/session-records.ts` 的「文件不存在判回执缺失」语义保持）。补单测锁定成功路径写回执。来源 subagent-cancel-receipt-race。
+- [x] **条目 7（保留键误判嵌套 required）** `missingRequiredKeysOf` 提取缺失键时未过滤 `instancePath`，嵌套 required 同名键被误报进「保留键通道被占用」解释文案。修复：仅收集 `instancePath === ""` 的顶层缺失键，嵌套缺失归普通缺参原样透出。位置：`extensions/universal/subagent-workflow/src/interface/tool/tool-workflow.ts`（missingRequiredKeysOf :599、reservedKeyChannelError :574）。补用例：嵌套 required 缺失不触发保留键解释。来源 workflow-reserved-key-channel-nested-required。
 
 ### T4 zcode-subagent-cli 批
 
-- [ ] **条目 8（ADR-0143 表述）** `docs/adr/decisions.md:770` 括号内「oauth 同时存在时 identity 不参与凭据查找」与代码条件不一致（代码：`authSource === 'manual' || !oauthBacked` 时 identity 仍参与 manual 查找）。改写为「仅 `auth-source==='oauth'` 时 identity 不参与查找；`manual` 形态即使 oauth token 同时存在仍按 manual 判定」，与代码逐字对齐。来源 dev-0.11.7-review-residue。
-- [ ] **条目 9（N-1 回退调用点锚）** `packages/zcode-subagent-cli/src/appserver-launcher-patches.ts:193-196` 回退调用点锚取全文件首个匹配、无 count 检查，同名函数双调用点时静默假 armed。修复：与定义锚同口径统计 `callAnchor` 出现次数，>1 放弃本锚；补「两处同款调用点 → not armed」变体用例。来源同上。
-- [ ] **条目 10（N-2 陈旧行号）** `docs/architecture/data-source-registry.md:170` 重写副本行 5 处陈旧行号（deriveZcodeEngineModels、removeStaleCopyOrOutcome、wrapper merge catch、piSyncedProviderConfigPath、defaultZcodeProviderSyncPaths）替换为符号名（消除行号漂移）。来源同上。
-- [ ] **条目 11（N-3 无锁 RMW）** `appserver-launcher-patches.ts:301→:398-406` 快照读与写回之间 GUI 权威写入可能被陈旧值覆盖。加固修复：写回前重读，两键（identity/auth-source）当前值与快照不同则放弃本次写入（compare-and-skip）；`docs/adr/decisions.md:770` 并发边界补一句「矫正可能因陈旧快照放弃写入，恢复 = 重新登录/配置」。来源同上。
-- [ ] **条目 12（DG-R2-01 多 plan api-key）** `appserver-launcher-patches.ts:340-348` 多 plan api-key 时 derivedIdentity 取首个永不自愈。修复：优先用 `project-key-location:v1:[...]` 键内嵌 identity 作确定性信号；多候选时不猜测，保留既有 stored identity 并 log 歧义；补双 account fixture。来源同上。
-- [ ] **条目 13（DG-R2-02 原型链键）** `appserver-launcher.ts:208-218`（seen）与 `:117-119,142,166`（injectable）普通对象字典丢弃 `__proto__`/`toString` 类 provider id。修复：改 `Object.create(null)` 或 `Set`，`realProviders` 查找用 own-property 检查；merge 对账矩阵补 `__proto__`/`toString` 用例。来源同上。
-- [ ] **条目 14（DG-R2-03 补用例）** `appserver-launcher.test.ts` 补最高风险分支用例：oauth 在场 + 登录写入 identity + 无 api-key 时不得改写（`!oauthBacked` 条件检查拦截改写）。fixture：`oauth:bigmodel:access_token` + identity `uid-login` + 无 `account:uid-login:api-key` → 断言无写入且 identity 保留。来源同上。
-- [ ] **条目 15（S-20 文档表述）** `docs/extensions/subagents/engine-development-guide.md:53` 修「与 modelCatalog 行同款三态登记体例」互斥表述与「非非空字符串」笔误。来源同上。
+- [x] **条目 8（ADR-0143 表述）** `docs/adr/decisions.md:770` 括号内「oauth 同时存在时 identity 不参与凭据查找」与代码条件不一致（代码：`authSource === 'manual' || !oauthBacked` 时 identity 仍参与 manual 查找）。改写为「仅 `auth-source==='oauth'` 时 identity 不参与查找；`manual` 形态即使 oauth token 同时存在仍按 manual 判定」，与代码逐字对齐。来源 dev-0.11.7-review-residue。
+- [x] **条目 9（N-1 回退调用点锚）** `packages/zcode-subagent-cli/src/appserver-launcher-patches.ts:193-196` 回退调用点锚取全文件首个匹配、无 count 检查，同名函数双调用点时静默假 armed。修复：与定义锚同口径统计 `callAnchor` 出现次数，>1 放弃本锚；补「两处同款调用点 → not armed」变体用例。来源同上。
+- [x] **条目 10（N-2 陈旧行号）** `docs/architecture/data-source-registry.md:170` 重写副本行 5 处陈旧行号（deriveZcodeEngineModels、removeStaleCopyOrOutcome、wrapper merge catch、piSyncedProviderConfigPath、defaultZcodeProviderSyncPaths）替换为符号名（消除行号漂移）。来源同上。
+- [x] **条目 11（N-3 无锁 RMW）** `appserver-launcher-patches.ts:301→:398-406` 快照读与写回之间 GUI 权威写入可能被陈旧值覆盖。加固修复：写回前重读，两键（identity/auth-source）当前值与快照不同则放弃本次写入（compare-and-skip）；`docs/adr/decisions.md:770` 并发边界补一句「矫正可能因陈旧快照放弃写入，恢复 = 重新登录/配置」。来源同上。
+- [x] **条目 12（DG-R2-01 多 plan api-key）** `appserver-launcher-patches.ts:340-348` 多 plan api-key 时 derivedIdentity 取首个永不自愈。修复：优先用 `project-key-location:v1:[...]` 键内嵌 identity 作确定性信号；多候选时不猜测，保留既有 stored identity 并 log 歧义；补双 account fixture。来源同上。
+- [x] **条目 13（DG-R2-02 原型链键）** `appserver-launcher.ts:208-218`（seen）与 `:117-119,142,166`（injectable）普通对象字典丢弃 `__proto__`/`toString` 类 provider id。修复：改 `Object.create(null)` 或 `Set`，`realProviders` 查找用 own-property 检查；merge 对账矩阵补 `__proto__`/`toString` 用例。来源同上。
+- [x] **条目 14（DG-R2-03 补用例）** `appserver-launcher.test.ts` 补最高风险分支用例：oauth 在场 + 登录写入 identity + 无 api-key 时不得改写（`!oauthBacked` 条件检查拦截改写）。fixture：`oauth:bigmodel:access_token` + identity `uid-login` + 无 `account:uid-login:api-key` → 断言无写入且 identity 保留。来源同上。
+- [x] **条目 15（S-20 文档表述）** `docs/extensions/subagents/engine-development-guide.md:53` 修「与 modelCatalog 行同款三态登记体例」互斥表述与「非非空字符串」笔误。来源同上。
 
 ### T5 ui 包批
 
-- [ ] **条目 16（S-3 v-memo deps）** `packages/ui/src/features/chat/composables/use-turn-trace.ts` 组块 v-memo deps 缺 `header.failedCount` 与成员内容指纹：deps 追加 `unit.header.failedCount`（`Turn.vue:192`「组块七项」注释同步改）；补成员内容指纹 dep（如 `unit.members.map((m)=>m.block.ref).join('|')`）；补回归测试（takeover + 未变化成员复用同一对象引用时失败 chip 不滞旧）。来源 dev-0.11.6-review-residue。
-- [ ] **条目 17（N-3 测试顺序脆弱）** `packages/ui/src/rendering-protocol/primitives/container-registry.ts` 模块级 Map 无 reset，`--sequence.shuffle` 6 跑 5 红。修复：加 `resetPrimitiveContainers()`（测试专用），`__tests__/PrimitiveRouter.test.ts` beforeEach 调用（或把「barrel 未加载」两用例拆独立文件，二选一，优先 reset 方案）。验收：`--sequence.shuffle` 跑绿。来源同上。
-- [ ] **条目 18（mobile 死 keyframes）** `packages/mobile-renderer` 的 tailwind.config 删除 wiggle / pulse-strong / ask-user-slide-up 三组零消费 keyframes（删前 grep 全仓确认零引用）。来源 mobile-token-mirror-divergence（登记的动画清理小项）。
+- [x] **条目 16（S-3 v-memo deps）** `packages/ui/src/features/chat/composables/use-turn-trace.ts` 组块 v-memo deps 缺 `header.failedCount` 与成员内容指纹：deps 追加 `unit.header.failedCount`（`Turn.vue:192`「组块七项」注释同步改）；补成员内容指纹 dep（如 `unit.members.map((m)=>m.block.ref).join('|')`）；补回归测试（takeover + 未变化成员复用同一对象引用时失败 chip 不滞旧）。来源 dev-0.11.6-review-residue。
+- [x] **条目 17（N-3 测试顺序脆弱）** `packages/ui/src/rendering-protocol/primitives/container-registry.ts` 模块级 Map 无 reset，`--sequence.shuffle` 6 跑 5 红。修复：加 `resetPrimitiveContainers()`（测试专用），`__tests__/PrimitiveRouter.test.ts` beforeEach 调用（或把「barrel 未加载」两用例拆独立文件，二选一，优先 reset 方案）。验收：`--sequence.shuffle` 跑绿。来源同上。
+- [x] **条目 18（mobile 死 keyframes）** `packages/mobile-renderer` 的 tailwind.config 删除 wiggle / pulse-strong / ask-user-slide-up 三组零消费 keyframes（删前 grep 全仓确认零引用）。来源 mobile-token-mirror-divergence（登记的动画清理小项）。
 
 ## 批次 2
 
