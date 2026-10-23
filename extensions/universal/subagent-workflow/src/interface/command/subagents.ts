@@ -90,6 +90,12 @@ async function rpcCancel(
         scope: "error",
         error: { code: "subagent_cancel_not_found", message: `Subagent ${recordId} not found or already finished` },
       });
+    } else {
+      // 成功也写回执（rpcMessage 成功先例同款）：runtime consume 侧把「文件不存在」
+      // 一律判回执缺失抛 handler_error——成功路径不写 = 确定性 handler_error（todo
+      // subagent-cancel-receipt-race：取消效果达成但 5/5 复现回执缺失）。消费侧
+      // 宽容读：scope:'ok' 即成功，无 error 载荷需求。
+      writeMessageResultFile(requestId, resolveRootSessionId(ctx), { scope: "ok" });
     }
     ctx.ui.notify(
       ok ? `Cancelled subagent ${recordId}` : `Subagent ${recordId} not found or already finished`,

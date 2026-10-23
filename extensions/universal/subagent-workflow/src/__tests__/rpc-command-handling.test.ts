@@ -476,6 +476,25 @@ describe("registerSubagentsCommand — RPC 分支 dispatch", () => {
     );
   });
 
+  it("RPC + cancel 成功（cancel 返回 true）→ --req 结果文件写 scope:ok 回执", async () => {
+    // [回执通道完整性] 成功路径必须写结果文件：runtime consume 侧把「文件不存在」
+    // 一律判回执缺失抛 handler_error——成功不写 = 取消效果达成但 5/5 确定性复现
+    // 回执缺失（todo subagent-cancel-receipt-race，条目 6）。消费侧宽容读：
+    // scope:'ok' 即成功。
+    const receipt = pinReceiptEnv();
+    ctx.cwd = receipt.cwd;
+    cancelMock.mockReturnValue(true);
+
+    try {
+      await runHandler("cancel bg-ok-1 --req=req-ok-1");
+
+      expect(readReceipt(receipt.agentDir, receipt.cwd, "req-ok-1")).toEqual({ scope: "ok" });
+      expect(ctx.ui.notify).toHaveBeenCalledWith("Cancelled subagent bg-ok-1", "info");
+    } finally {
+      receipt.dispose();
+    }
+  });
+
   it("RPC + cancel 无 id → Usage 提示 warning", async () => {
     await runHandler("cancel");
 

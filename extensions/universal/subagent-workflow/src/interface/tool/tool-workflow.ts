@@ -597,11 +597,16 @@ function reservedKeyChannelError(err: ArgsValidationError): Error {
  * 从 ArgsValidationError.errors（ajv 错误数组）提取缺失的 required 参数名
  * （ajv required 错误携带 params.missingProperty）；非 required 错误 / errors 缺席
  * （畸形 schema 形态）返回空集——不猜不扩。
+ * 仅收集 instancePath === "" 的顶层缺失键：ajv 对嵌套对象内部的 required 缺失同样
+ * 产生 missingProperty（instancePath 指向真实位置如 /args/tasks/0），此处收进会把
+ * 嵌套缺参误解释成「顶层保留键通道被占用」——嵌套缺失归普通缺参原样透出分支。
  */
 function missingRequiredKeysOf(err: ArgsValidationError): string[] {
   const keys = new Set<string>();
   for (const e of err.errors ?? []) {
     if (e === null || typeof e !== "object") continue;
+    const instancePath = (e as Record<string, unknown>).instancePath;
+    if (instancePath !== "") continue;
     const params = (e as Record<string, unknown>).params;
     if (params === null || typeof params !== "object") continue;
     const missing = (params as Record<string, unknown>).missingProperty;
