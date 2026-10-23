@@ -853,11 +853,11 @@ export class WoolManager {
         // best-effort 降级：回收失败不向调用方放大（进程死亡路径 delete 链自有收殓），warn 留痕。
         console.warn(`[wool-manager] manage session dispose failed (sid=${summary.id}): ${toErrorMessage(e)}`)
       }
-      // 树回收独立于 delete 结果（delete 对无主文件的命令-only 会话是零动作，见 deps 注释）；
-      // trash 失败同样 best-effort（残留 logs 域无碍主链，warn 留痕）。
+      // 树回收独立于 delete 结果（delete 对无主文件的命令-only 会话是零动作，见 deps 注释）。
       try {
         this.deps.reclaimSessionTree?.(summary.id)
       } catch (e) {
+        // best-effort 降级：trash 失败不向调用方放大（残留 logs 域无碍主链），warn 留痕。
         console.warn(`[wool-manager] manage session tree reclaim failed (sid=${summary.id}): ${toErrorMessage(e)}`)
       }
     }
