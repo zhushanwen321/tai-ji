@@ -409,9 +409,9 @@ export function createNotifier(host: NotifierHost): BgNotifier {
           },
           id: notifyId,
         },
-        // 攒批判定跟随提交方语义（账本 mergeHoldActive 现状保持）：有活跃后台任务
-        // → 端口 60s 滑动窗口攒批；否则直通。collectKey 债权申报（result-collect
-        // 设计 §3.4）：世代首个通知携带（见 notify() 内申报判据），后续轮次 undefined。
+        // 攒批判定跟随提交方语义：有活跃后台任务 → 端口 60s 滑动窗口攒批；否则直通。
+        // collectKey 债权申报（result-collect 设计 §3.4）：世代首个通知携带（见
+        // notify() 内申报判据），后续轮次 undefined。
         { merge: host.hasRunningBackground(), ...(collectKey !== undefined ? { collectKey } : {}) },
       );
       if (result.kind === "rejected") {

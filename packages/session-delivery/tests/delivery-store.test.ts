@@ -98,10 +98,13 @@ describe('DeliveryStore 契约：终局 ack', () => {
   })
 
   it('cancel 终局 → ack：已撤销消息的防复活凭据 = 撤销时写持久终局', () => {
-    const { store, port } = makeStoreWithPort()
+    const { store, port } = makeStoreWithPort({
+      // hold 拒（设计内等待）：条目受理前留守 queued（未出站，cancel 直接终局）
+      send: () => ({ accepted: false as const, deferred: 'merge-commit-hold' as const }),
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port, { store })
     try {
-      port.idle = false // busy 起步：条目留守 queued（未出站，cancel 直接终局）
       handle.send(textMsg('m-1'), { id: 'sid-1' })
       const result = handle.cancel('sid-1')
       expect(result.kind).toBe('cancelled')
@@ -109,6 +112,7 @@ describe('DeliveryStore 契约：终局 ack', () => {
       expect(store.terminals.has('sid-1')).toBe(true) // 持久终局（防复活）
       expect(store.loadTerminalIds()).toContain('sid-1')
     } finally {
+      warnSpy.mockRestore()
       handle.dispose()
     }
   })

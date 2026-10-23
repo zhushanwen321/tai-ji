@@ -4,10 +4,14 @@
  * 投递且无重复。
  *
  * - 变体 1「内核有在途共存」：自有条目已受理滞留（in-flight），对账回收经
- *   requeue 至队首；收养条目入队后排其后——自有优先、相对序保持（D3 own）。
+ *   requeue 至队首先行重投；收养条目随后入站投递——自有先行、相对序保持（D3 own）。
  * - 变体 2「无内核在途的纯外来滞留」：内核空闲无在途时收养条目直接成为唯一
  *   在途并正常投递（「空闲 + 槽位非空」两条件触发口径的 Reconciler 侧判定归
  *   u2 registry；本文件锁内核侧收养通道与幂等面）。
+ *
+ * [已不可达用例删除登记] 原「busy 内核：收养条目经 gate 排队等边沿」用例随忙闲门禁
+ * 删除而不可达（受理即出站下收养条目受理即出站，无排队语义），2026-10-23
+ * 投递域清理批次删除。
  *
  * 形态：真实 createDelivery + fake port 重放收养序列（e2e 层暂无收养回归——待补）。
  */
@@ -40,16 +44,14 @@ describe('u1-adopt P-adopt 变体 1：内核有在途共存（自有回收条目
     expect(port.sendCalls[1]!.msg.payload.content).toBe('own user msg')
 
     // ── 重放步骤 3：外来无标记文本收养（subagent notifyDone 形态，新 clientUuid）──
-    // D2 后内核在途内查：own-1 in-flight 未拿回执时 gate 关，收养条目留队（不往 pi 堆叠）
+    // 受理即出站：收养条目 send 即出站（在途防重是内核自身并发保护，非忙闲门禁）
     handle.send(textMsg('notify: subagent task done'), { id: 'u-adopt-1', lane: 'direct' })
     expect(handle.entriesFull().active.some((e) => e.id === 'u-adopt-1')).toBe(true)
-    expect(port.sendCalls).toHaveLength(2) // 在途未清 → 收养条目未投
-
-    // ── 重放步骤 4：own 条目回执到达（message_end 标记命中）→ gate 开 → 收养条目续投 ──
-    expect(handle.confirmDelivered('u-own-1')).toBe(true)
-    handle.flush()
-    expect(port.sendCalls).toHaveLength(3)
+    expect(port.sendCalls).toHaveLength(3) // 收养条目已出站受理
     expect(port.sendCalls[2]!.msg.payload.content).toBe('notify: subagent task done')
+
+    // ── 重放步骤 4：两侧送达回执先后到达（message_end 标记命中）──
+    expect(handle.confirmDelivered('u-own-1')).toBe(true)
     expect(handle.confirmDelivered('u-adopt-1')).toBe(true)
 
     // 终态：全部 delivered，tombstone 可判重
@@ -101,32 +103,6 @@ describe('u1-adopt P-adopt 变体 2：无内核在途的纯外来收养', () => 
     handle.send(textMsg('notify: subagent task done'), { id: 'u-adopt-1' })
     expect(port.sendCalls).toHaveLength(1)
     expect(handle.entriesFull().active).toHaveLength(0)
-
-    handle.dispose()
-  })
-
-  it('busy 内核：收养条目经 gate 排队等边沿，不与在途 run 竞速', () => {
-    let idle = false
-    let settledCb: (() => void) | undefined
-    const port = makeMockPort({
-      isIdle: () => idle,
-      subscribeSettled: (cb) => {
-        settledCb = cb
-        return () => {}
-      },
-    })
-    const handle = createDelivery(port)
-
-    // 收养发生时目标 session busy（对账器在 settled 边沿收回后立即收养的形态）
-    handle.send(textMsg('notify: late arrival'), { id: 'u-adopt-2' })
-    expect(port.sendCalls).toHaveLength(0) // busy gate 拦下排队
-    expect(handle.entriesFull().active[0]!.state).toBe('queued')
-    expect(handle.depth()).toBe(1)
-
-    idle = true
-    settledCb!() // settled 边沿 → busy 复核通过 → 投递
-    expect(port.sendCalls).toHaveLength(1)
-    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
 
     handle.dispose()
   })

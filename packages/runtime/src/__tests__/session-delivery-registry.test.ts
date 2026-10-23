@@ -683,8 +683,8 @@ describe('delivery.resync 用户重试（§3.4 重试钮）：failed → queued 
     // 用户点重试钮 = delivery.resync 单条重报：failed → queued（requeue）+ 立即 flush
     const deduped = await h.registry.resync('s1', [id])
     expect(deduped).toEqual([]) // 非终态：不进判重命中集（条目仍是队列行）
-    // 首投经 deliverOne 已置 occupancy dispatching（busy gate 关闸）——重投在 gate 复核后
-    // 由 settled 边沿驱动（mock 链 = 复位 idle + 触发边沿）
+    // 首投经 deliverOne 已置 occupancy dispatching——对账器条件（空闲 + 槽位非空）
+    // 未满足前不重投（mock 链 = 复位 idle + 触发边沿）
     applySessionOccupancyTransition(h.view, null, 'idle')
     h.emitSettled()
     await h.flush()

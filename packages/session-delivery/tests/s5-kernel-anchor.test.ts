@@ -4,8 +4,13 @@
  *
  * 场景取 S1 的内核半边最小复刻（真实 createDelivery + mock port）：
  * ① busy 下 sendChecked 经投递受理入 pi 队列（resolve = `{queued:true}` 语义，
- *    受理即可达性确认，不返回假 queued）；② 普通 send 的 busy 排队 → settled
- * 边沿 flush 送达。`cd packages/session-delivery && npx vitest run` 全绿即锚生效。
+ *    受理即可达性确认，不返回假 queued）；② 普通 send 受理即出站（忙闲门禁旁路，
+ *    pi 死时首败即停由 A6 套件锁定）。
+ * `cd packages/session-delivery && npx vitest run` 全绿即锚生效。
+ *
+ * [已不可达用例删除登记] 原「普通 send busy 排队 → settled 边沿 busy 复核通过 →
+ * flush 送达」用例随忙闲门禁删除而不可达，2026-10-23 投递域清理批次删除；
+ * 冒烟②改为受理即出站形态（当前唯一出站行为）。
  */
 import { describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
@@ -64,10 +69,9 @@ describe('S5-kernel-unit-tests 聚合冒烟（根单元验收锚）', () => {
     }
   })
 
-  it('普通 send busy 排队 → settled 边沿 busy 复核通过 → flush 送达 → 队列清空', () => {
+  it('普通 send 受理即出站（busy 下立即投递）→ 队列清空', () => {
     const sendCalls: { msg: DeliveryMessage; intent: DeliveryIntent }[] = []
-    let idle = false // busy 起步
-    let settledCb: (() => void) | undefined
+    let idle = false // busy 起步（受理即出站：忙闲门禁旁路）
     const port: DeliveryPort = {
       supportedPayloads: ['text'],
       isIdle: () => idle,
@@ -75,23 +79,15 @@ describe('S5-kernel-unit-tests 聚合冒烟（根单元验收锚）', () => {
         sendCalls.push({ msg, intent })
       },
       subscribeSettled: (cb) => {
-        settledCb = cb
-        return () => {
-          settledCb = undefined
-        }
+        void cb
+        return () => {}
       },
     }
 
     const handle = createDelivery(port)
     try {
       handle.send({ payload: { kind: 'text', content: 'S5 smoke message' } })
-      expect(sendCalls).toHaveLength(0)
-      expect(handle.depth()).toBe(1)
-
-      // settled 边沿：busy 复核通过 → flush 送达
-      idle = true
-      settledCb?.()
-      expect(sendCalls).toHaveLength(1)
+      expect(sendCalls).toHaveLength(1) // 受理即出站
       expect(sendCalls[0]!.intent).toBe('interrupt-at-turn-boundary')
       expect(handle.depth()).toBe(0)
     } finally {

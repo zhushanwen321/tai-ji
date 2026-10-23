@@ -54,7 +54,16 @@ describe('判重二级：内存已完结 id 索引（loadTerminalIds 播种）',
 
   it('本生命周期内终局即时登记索引：delivered / cancelled 后同 id 均吞', () => {
     const store = seedStore()
-    const port = makeMockPort()
+    // hold 拒 port（设计内等待）：sid-c 留守 queued，cancel 走本地终局路径
+    const port = makeMockPort({
+      send: (m) => {
+        if (m.payload.kind === 'text' && m.payload.content === 'm-2') {
+          return { accepted: false as const, deferred: 'merge-commit-hold' as const }
+        }
+        return undefined
+      },
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port, { store })
     try {
       handle.send(textMsg('m-1'), { id: 'sid-d' })
@@ -64,8 +73,7 @@ describe('判重二级：内存已完结 id 索引（loadTerminalIds 播种）',
         reason: 'already-seen',
       })
 
-      port.idle = false
-      handle.send(textMsg('m-2'), { id: 'sid-c' })
+      handle.send(textMsg('m-2'), { id: 'sid-c' }) // hold 拒留守 queued
       handle.cancel('sid-c')
       expect(handle.send(textMsg('m-2 重报'), { id: 'sid-c' })).toEqual({
         kind: 'swallowed',
@@ -73,6 +81,7 @@ describe('判重二级：内存已完结 id 索引（loadTerminalIds 播种）',
       })
       expect(store.terminals).toEqual(new Set(['sid-d', 'sid-c'])) // 持久终局同步落
     } finally {
+      warnSpy.mockRestore()
       handle.dispose()
     }
   })
@@ -126,13 +135,19 @@ describe('判重三级：持久记录（store.hasTerminal 索引 miss 兜底）'
 describe('防复活凭据：撤销写持久终局 + 重启（新 handle 同 store）不复活', () => {
   it('cancel → 持久终局 → 重启播种后同 id 重报被吞', () => {
     const store = seedStore()
-    const port = makeMockPort()
-    // 第一生命周期：busy 入队 → cancel 撤销（持久终局落盘）
+    // hold 拒 port（设计内等待）：sid-1 留守 queued，cancel 走本地终局路径（持久终局落盘）
+    const port = makeMockPort({
+      send: () => ({ accepted: false as const, deferred: 'merge-commit-hold' as const }),
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle1 = createDelivery(port, { store })
-    port.idle = false
-    handle1.send(textMsg('m-1'), { id: 'sid-1' })
-    expect(handle1.cancel('sid-1').kind).toBe('cancelled')
-    handle1.dispose()
+    try {
+      handle1.send(textMsg('m-1'), { id: 'sid-1' })
+      expect(handle1.cancel('sid-1').kind).toBe('cancelled')
+    } finally {
+      warnSpy.mockRestore()
+      handle1.dispose()
+    }
 
     // 第二生命周期（重启）：loadTerminalIds 播种 → resync 重报同 id 被吞
     const handle2 = createDelivery(port, { store })

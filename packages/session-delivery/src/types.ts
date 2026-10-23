@@ -13,8 +13,7 @@
  * /D1），非 pi API 词汇——intent → 底层参数的翻译在适配器内部，本包只记录车道，
  * 零依赖纪律对 lane 不破例。
  *
- * v3 增量（统一消息投递内核，设计 .tmp/tech-design/unified-delivery.md §3.5，波 1
- * 纯增量零行为变化——装配不传新参数 = v2 行为逐字节不变）：
+ * v3 增量（统一消息投递内核，设计 .tmp/tech-design/unified-delivery.md §3.5）：
  * - DeliveryStore 持久化存储端口（persist / ack / discard / loadUndelivered /
  *   loadTerminalIds / hasTerminal）：耐久承诺先于投递尝试；终局写持久终局；判重
  *   第三级查持久记录。两个实现在两半区适配层（runtime 半区磁盘 outbox / port 半区
@@ -28,8 +27,8 @@
  *   已完结 id 索引（loadTerminalIds 播种 + 终局即时登记）→ 持久记录（store.hasTerminal）。
  *   entriesFull() 的 tombstones 视图字段与结构保持（双视图消费方零改动），元素类型
  *   由 DeliveryTerminalRecord 承载。
- * - 受理即出站模式（DeliveryDispatchMode）：'on-accept' 旁路忙闲门禁与合批窗口；
- *   缺省 'queue-hold' = v2 队列持有行为不变。
+ * - 受理即出站（唯一出站形态，v2 队列持有分支已删）：受理后立即 port.send，无
+ *   忙闲门禁、无合批窗口（合批归 port 提交侧承载）。
  */
 
 // ─── 投递意图 ───────────────────────────────────────────────
@@ -128,7 +127,7 @@ export type SendReceipt =
 export interface DeliveryPort {
   /** 本通路支持的 payload kind（D9 fail-fast）。 */
   supportedPayloads: readonly DeliveryPayload['kind'][]
-  /** 主 agent 是否空闲。 */
+  /** 主 agent 是否空闲（受理即出站下内核不读——port 契约与诊断面保留）。 */
   isIdle(): boolean
   /**
    * 投递消息（intent → pi 参数的翻译在适配器内部）。
@@ -141,7 +140,10 @@ export interface DeliveryPort {
    * 处置 = 用户显式失败 + 重启应用。
    */
   send(msg: DeliveryMessage, intent: DeliveryIntent): Promise<SendReceipt | void> | SendReceipt | void
-  /** agent_settled 边沿订阅（D8）。缺省时 busy 条目留守至外部 flush/send 触发。返回退订函数。 */
+  /**
+   * agent_settled 边沿订阅（D8）：边沿即 flush 触发（retain 失败留守条目的重投时机）。
+   * 缺省时留守条目归外部 flush/send 触发。返回退订函数。
+   */
   subscribeSettled?(cb: () => void): () => void
 }
 
@@ -252,11 +254,6 @@ export interface DeliveryStore {
 export interface DeliveryConfig {
   /** 默认意图：'interrupt-at-turn-boundary'（D3）。 */
   intent?: DeliveryIntent
-  /** 合批窗口（ms）：0 = 关；>0 = 滑动窗口合批。 */
-  mergeWindowMs?: number
-  /** 合批依赖谓词（D4 must-fix #1）。true 时 send() 走合批窗口，false/缺省时立即投。
-   *  禁止用 isIdle 代替。 */
-  mergeHoldActive?: () => boolean
   /** 去重配置（条数 LRU）。 */
   dedupe?: { maxKeys: number }
   /**
@@ -295,26 +292,14 @@ export interface DeliveryConfig {
    * 缺省 undefined = details-id 条目无法经 confirmDeliveredByProof 确认（留守 in-flight）。
    */
   proofCheck?: DeliveryProofCheck
-  /**
-   * 出站运行模式（v3，受理即出站 / 队列持有的模式参数；设计 §3.5.6）：
-   * - 'queue-hold'（缺省）= v2 队列持有行为：busy gate（isIdle + 在途内查）排队 +
-   *   settled 边沿驱动 flush + 合批窗口出站。
-   * - 'on-accept' = 受理即出站：受理后立即 port.send（忙闲门禁旁路——承重前提 =
-   *   底层唯一队列忙时不拒，适配层保证）；合批窗口不用（队列唯一化后无组批时机，
-   *   合批归 port 提交侧承载），config.mergeWindowMs>0 与提交方 merge:true 被忽略；
-   *   in-flight 防重保留（内核自身并发保护，非忙闲门禁）；retain 失败留守条目仍经
-   *   settled 边沿 / 外部 flush 重投。
-   * runtime 装配不传 = v2 队列持有行为不变（波 1 只实现不接线）。
-   */
-  dispatchMode?: 'queue-hold' | 'on-accept'
 }
 
 // ─── Handle ──────────────────────────────────────────────────
 
 /** 投递句柄（createDelivery 返回）。 */
 export interface DeliveryHandle {
-  /** 唯一常规入口（D4 入口收敛）；合批窗口 + 空闲零延迟立即投。 */
-  send(msg: DeliveryMessage, opts?: { merge?: boolean }): void
+  /** 唯一常规入口（D4 入口收敛）；受理即出站立即投。 */
+  send(msg: DeliveryMessage): void
   /** 入队 + 可达性同步确认。reject = 入队失败。 */
   sendChecked(msg: DeliveryMessage): Promise<void>
   /** 强制投递尝试（shutdown flush / 外部重触发 / settled 边沿内部复用）。 */

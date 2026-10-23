@@ -17,7 +17,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
 import type { DeliveryMessage } from '../src/types.js'
-import { MemoryDeliveryStore, customMsg, makeBusyParkPort, makeMockPort, textMsg } from './helpers.js'
+import { MemoryDeliveryStore, customMsg, makeMockPort, textMsg } from './helpers.js'
 
 const transientReject = { accepted: false as const, reason: 'transient' }
 /** 设计内等待拒（F1-13，MF-1-4 判别联合 deferred 字段）：port 合批提交窗 hold（entry 未注入，非失败）。 */
@@ -93,24 +93,33 @@ describe('retain：留守与下一边沿重投（事件驱动，无定时器）'
     }
   })
 
-  it('下一 settled 边沿驱动重投（busy park 脚手架：边沿触发 busy 复核后出站）', () => {
-    const bp = makeBusyParkPort()
+  it('下一 settled 边沿驱动重投（受理即出站首拍已发生，边沿触发 flush 重投留守条目）', () => {
+    let settledCb: (() => void) | undefined
     const sendMock = vi.fn(() => transientReject)
-    bp.port.send = sendMock as unknown as typeof bp.port.send
+    const port = makeMockPort({
+      send: sendMock,
+      subscribeSettled: (cb) => {
+        settledCb = cb
+        return () => {
+          settledCb = undefined
+        }
+      },
+    })
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const handle = createDelivery(bp.port)
+    const handle = createDelivery(port)
     try {
       handle.send(customMsg('subagents:notify', 'n-1'), { id: 'sid-1' })
-      // 首次边沿：busy 解除 → 首拍投递失败（retain 留守）
-      bp.setIdle(true)
-      bp.fireSettled()
+      // 首拍投递失败（retain 留守；受理即出站，无忙闲门禁前置）
       const callsAfterFailure = sendMock.mock.calls.length
       expect(callsAfterFailure).toBeGreaterThan(0)
 
-      // 恢复可投 + 第二次边沿 → 重投成功（缺省 marker 锚 → in-flight）→ 凭据确认终局
-      sendMock.mockImplementation(() => undefined)
-      bp.fireSettled()
+      // settled 边沿 → flush 重投留守条目（旁路忙闲门禁）
+      settledCb!()
       expect(sendMock.mock.calls.length).toBeGreaterThan(callsAfterFailure)
+
+      // 恢复可投 + 再次边沿 → 重投成功（缺省 marker 锚 → in-flight）→ 凭据确认终局
+      sendMock.mockImplementation(() => undefined)
+      settledCb!()
       expect(handle.confirmDelivered('sid-1')).toBe(true)
       expect(handle.entriesFull().active).toHaveLength(0)
     } finally {

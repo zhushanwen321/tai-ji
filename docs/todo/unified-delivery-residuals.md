@@ -1,13 +1,21 @@
-# 统一投递 v3 实施残留（queue-hold 清理波 + port 缺省 genId 精度）
+# 统一投递 v3 实施残留登记
 
-状态：未解决（两项均低优先级登记；2026-10-17 D2 一致性审查回流登记）
+状态：项 1 已解决（2026-10-23 just-do-it 条目 68 queue-hold 清理批次执行，见下）；项 2-4 未解决（低优先级登记；2026-10-17 D2 一致性审查回流登记）
 
-## 1. queue-hold 非生产形态的物理删除（清理波立项）
+## 1. queue-hold 非生产形态的物理删除（已关闭：清理波执行完毕）
 
-- 位置：`packages/session-delivery/src/delivery.ts:82-89` 头注承诺「留待后续清理波」；`grep queue-hold|dispatchMode` 确认 docs/todo 此前无对应登记（本文件补登记）。
-- 内容：v3 缺省值翻转 on-accept（受理即出站）后，queue-hold 投递路径无生产调用方；物理删除 = 删除 queue-hold 分支 + `tests/` 23 个显式传参文件改缺省。
-- 触发条件：下一个内核清理波（随统一投递后的首个重构窗口）。
-- 关联：`delivery.ts:82-89` 头注与本条互指。
+状态：已解决（2026-10-23 just-do-it 条目 68 执行）。
+
+### 落地内容
+
+- `packages/session-delivery/src/delivery.ts`：queue-hold 投递路径整体删除——busy gate（isIdle + 在途内查双条件）、合批窗口（merge timer 三函数 + send 的 useMerge 判定）、出站模式分支；受理即出站为唯一出站形态。与模式无关的共用机制保留：settled 边沿订阅与 flush（retain 留守条目的重投触发）、in-flight 防重、doSend 积累队列成批、判重三级链、dispose 语义。
+- `packages/session-delivery/src/types.ts`：`dispatchMode` / `mergeWindowMs` / `mergeHoldActive` 配置位与 `DeliveryHandle.send` 的 `merge` 选项删除（无消费方的配置项不留存）；`DeliveryPort.isIdle` 保留（port 契约与诊断面成员，内核不读）。
+- 生产装配显式传参同步删：`extensions/shared/delivery-port/src/delivery-port.ts`（kernelConfig）与 `packages/runtime/src/services/session/session-delivery-registry.ts`（createDelivery config）。
+- 测试改造（登记原文「`tests/` 23 个显式传参文件」与实测不符——实际仅 delivery-dispatch-mode.test.ts 显式传 `dispatchMode`，改造面实为消费缺省 queue-hold 行为的测试）：测 busy 排队 / settled 边沿忙闲复核 / 合批窗口语义本体的用例删除（各文件带 [已不可达用例删除登记] 注记）；借道用例改以受理即出站下的等价构造保留（in-flight 防重挂起 / deferred 设计内等待 / retain 失败留守）。`delivery-merge.test.ts` 删除（depth 诊断用例迁入 ownership-view 套件）；`delivery-dispatch-mode.test.ts` 更名 `delivery-dispatch.test.ts`。
+
+### 原登记背景
+
+v3 把投递缺省从 queue-hold（busy gate 排队 + settled 边沿 flush + 合批窗口）翻转为 on-accept（受理即出站）后，queue-hold 代码路径无生产调用方（`delivery.ts` 头注「留待后续清理波」承诺与本条互指）。触发条件「随统一投递后的首个重构窗口」于 2026-10-23 满足，本登记关闭。
 
 ## 2. port 缺省 genId 的毫秒精度理论残余
 

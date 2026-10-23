@@ -158,8 +158,8 @@ export interface DeliveryPortHost { // oe-exempt:20261017:framework:pi 能力注
   readSessionEntries(): readonly unknown[];
   /**
    * 主 agent 是否空闲（ctx.isIdle()——含 run 活跃与 compaction 两态）。仅作内核
-   * port.isIdle 供给（内核接口必填成员；on-accept 模式内核 busy gate 旁路，恒不
-   * 消费）。提交侧挂起判定不用本端口——compaction 等待由 compaction 事件标记承载
+   * port.isIdle 供给（内核接口必填成员；内核受理即出站不读忙闲探测，恒不消费）。
+   * 提交侧挂起判定不用本端口——compaction 等待由 compaction 事件标记承载
    * （见 onSessionBeforeCompact），run 活跃必须放行（sendMessage 入 pi steer 队列
    * 不拒），isIdle 的复合语义不能承载该区分。
    */
@@ -186,7 +186,7 @@ export interface DeliveryPortHost { // oe-exempt:20261017:framework:pi 能力注
   onSessionCompact(handler: () => void): () => void;
   /** compaction 失败/中止边沿（标记同样复位 + 唤醒——失败也要重投尝试，失败可见性归日志）。 */
   onSessionCompactFailed(handler: () => void): () => void;
-  /** 攒批条件谓词（有活跃后台任务；账本 mergeHoldActive = hasRunningBackground 同源）。 */
+  /** 攒批条件谓词（有活跃后台任务 = hasRunningBackground）。 */
   hasRunningBackground(): boolean;
   /** 分桶诊断与降级 warn 出口（extensionLogger——落 session JSONL 不进 LLM +
    *  TAIJI_AGENT_DEBUG 落日志盘）。 */

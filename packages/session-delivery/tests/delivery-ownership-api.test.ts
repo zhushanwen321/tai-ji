@@ -14,6 +14,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
 import { makeMockPort, textMsg } from './helpers.js'
 
+/** hold 拒 port（设计内等待）：条目受理前留守 queued 的构造器（warn 由用例自行静音）。 */
+function makeHoldPort(): ReturnType<typeof makeMockPort> {
+  return makeMockPort({
+    send: () => ({ accepted: false as const, deferred: 'merge-commit-hold' as const }),
+  })
+}
+
 describe('u1-api confirmDelivered', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -64,82 +71,58 @@ describe('u1-api requeue', () => {
   })
 
   it('多条保相对序至队首：[B,A] 重排后重投序为 B、A、C（D3 保持原相对序）', () => {
-    // busy 起步：A、B 入队排队；settled 边沿合批投出受理
-    let idle = false
-    let settledCb: (() => void) | undefined
+    // hold 拒积累 A、B 入队；窗口结束 flush 整队成批投出受理
+    let hold = true
     const port = makeMockPort({
-      isIdle: () => idle,
-      subscribeSettled: (cb) => {
-        settledCb = cb
-        return () => {
-          settledCb = undefined
-        }
-      },
+      send: () => (hold ? { accepted: false as const, deferred: 'merge-commit-hold' as const } : undefined),
     })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port)
+    try {
+      handle.send(textMsg('A'), { id: 'u-a' }) // hold 拒留守
+      handle.send(textMsg('B'), { id: 'u-b' })
 
-    handle.send(textMsg('A'), { id: 'u-a' })
-    handle.send(textMsg('B'), { id: 'u-b' })
-    idle = true
-    settledCb!() // 合批投出 A+B → 双双受理 in-flight（滞留形态）
+      // 窗口结束 → flush 整队成批 → A、B 双双受理 in-flight（滞留形态）
+      hold = false
+      handle.flush()
+      expect(handle.entriesFull().active.map((e) => e.state)).toEqual(['in-flight', 'in-flight'])
 
-    // C 在 A、B 滞留期间入队（busy，等 gate）
-    idle = false
-    handle.send(textMsg('C'), { id: 'u-c' })
+      // C 在 A、B 滞留期间入队（hold 拒留守）
+      hold = true
+      handle.send(textMsg('C'), { id: 'u-c' })
 
-    // 对账回收：clear_queue 全收 → own 集 [B, A] 重排至队首（保 ids 相对序）
-    idle = true
-    expect(handle.requeue(['u-b', 'u-a'])).toBe(2)
-
-    // 重投：B、A、C 一起成批，composed 顺序 = 队列序 = B、A、C
-    expect(port.sendCalls).toHaveLength(2)
-    expect(port.sendCalls[1]!.msg.payload.content).toBe('B\n\n---\n\nA\n\n---\n\nC')
-
-    handle.dispose()
+      // 对账回收：clear_queue 全收 → own 集 [B, A] 重排至队首（保 ids 相对序）→
+      // 受理即出站下重排后立即整队成批重投，composed 顺序 = 队列序 = B、A、C
+      hold = false
+      expect(handle.requeue(['u-b', 'u-a'])).toBe(2)
+      expect(port.sendCalls.at(-1)!.msg.payload.content).toBe('B\n\n---\n\nA\n\n---\n\nC')
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
   })
 
   it('queued 条目幂等跳过（已在队列），混合集只重排合法条目', () => {
-    const port = makeMockPort({ isIdle: () => false })
+    const port = makeHoldPort()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port)
+    try {
+      handle.send(textMsg('A'), { id: 'u-a' }) // hold 拒留守 queued
+      handle.send(textMsg('B'), { id: 'u-b' })
 
-    handle.send(textMsg('A'), { id: 'u-a' }) // queued（busy 留队）
-    handle.send(textMsg('B'), { id: 'u-b' }) // queued
-
-    // u-a 在队列（跳过）、u-x 未知（跳过）→ 重排数 0
-    expect(handle.requeue(['u-a', 'u-x'])).toBe(0)
-    // 队列序不变：A 仍在 B 前
-    expect(handle.entriesFull().active.map((e) => e.id)).toEqual(['u-a', 'u-b'])
-
-    handle.dispose()
+      // u-a 在队列（跳过）、u-x 未知（跳过）→ 重排数 0
+      expect(handle.requeue(['u-a', 'u-x'])).toBe(0)
+      // 队列序不变：A 仍在 B 前
+      expect(handle.entriesFull().active.map((e) => e.id)).toEqual(['u-a', 'u-b'])
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
   })
 
-  it('requeue 后 busy 时经 gate 排队，settled 边沿再投（不绕 gate 强发）', () => {
-    let idle = true
-    let settledCb: (() => void) | undefined
-    const port = makeMockPort({
-      isIdle: () => idle,
-      subscribeSettled: (cb) => {
-        settledCb = cb
-        return () => {}
-      },
-    })
-    const handle = createDelivery(port)
-
-    handle.send(textMsg('A'), { id: 'u-a' })
-    expect(port.sendCalls).toHaveLength(1) // idle 立即投，受理
-
-    // 对账回收后目标 session busy
-    idle = false
-    handle.requeue(['u-a'])
-    expect(port.sendCalls).toHaveLength(1) // busy gate 拦下，不强发
-
-    idle = true
-    settledCb!()
-    expect(port.sendCalls).toHaveLength(2) // 边沿驱动重投
-    expect(port.sendCalls[1]!.msg.payload.content).toBe('A')
-
-    handle.dispose()
-  })
+  // [已不可达用例删除登记] 原「requeue 后 busy 时经 gate 排队，settled 边沿再投（不绕
+  // gate 强发）」用例随忙闲门禁删除而不可达（受理即出站下重排后立即重投，无 gate 可绕），
+  // 2026-10-23 投递域清理批次删除。
 
   it('撤销待收回条目拒绝重排：返回数不含它，留守原态且撤销标记不清（dmg-r1-2）', () => {
     let idle = true
@@ -174,19 +157,22 @@ describe('u1-api cancel', () => {
   })
 
   it('cancelled 快照含 payload 全文（D-3：草稿恢复依赖全文）', () => {
-    const port = makeMockPort({ isIdle: () => false })
+    const port = makeHoldPort()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port)
+    try {
+      handle.send(textMsg('full text to restore', { dedupeKey: 'k1' }), { id: 'u-1' }) // hold 拒留守
+      const result = handle.cancel('u-1')
 
-    handle.send(textMsg('full text to restore', { dedupeKey: 'k1' }), { id: 'u-1' })
-    const result = handle.cancel('u-1')
-
-    expect(result.kind).toBe('cancelled')
-    if (result.kind === 'cancelled') {
-      expect(result.entry.payload).toEqual({ kind: 'text', content: 'full text to restore' })
-      expect(result.entry.settledAt).toBeTypeOf('number')
+      expect(result.kind).toBe('cancelled')
+      if (result.kind === 'cancelled') {
+        expect(result.entry.payload).toEqual({ kind: 'text', content: 'full text to restore' })
+        expect(result.entry.settledAt).toBeTypeOf('number')
+      }
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
     }
-
-    handle.dispose()
   })
 
   it('in-flight 撤销后文本实际进 transcript：confirmDelivered 事实优先转 delivered', () => {
@@ -291,17 +277,26 @@ describe('u1-api confirmAccepted（分段受理登记，dmg-r1-4）', () => {
     handle.dispose()
   })
 
-  it('非出站批成员（gate 等待中）与未知 id 登记拒绝：不转移不 settle', () => {
-    // busy gate 拦下的 queued 条目未触达底层通道，登记即虚报受理（拒）
-    const port = makeMockPort({ isIdle: () => false })
+  it('非出站批成员（在途防重挂起）与未知 id 登记拒绝：不转移不 settle', async () => {
+    // 在途防重挂起的 queued 条目未触达底层通道，登记即虚报受理（拒）
+    let sendResolve: (() => void) | undefined
+    const port = makeMockPort({
+      send: () => new Promise<void>((resolve) => { sendResolve = resolve }),
+    })
     const handle = createDelivery(port)
+    try {
+      const p1 = handle.sendChecked(textMsg('m0'), { id: 'u-0' }) // 第 1 条出站在途（批成员）
+      handle.send(textMsg('m1'), { id: 'u-1' }) // 在途防重：挂起 queued，不在出站批内
+      expect(handle.confirmAccepted('u-1')).toBe(false)
+      expect(handle.confirmAccepted('u-unknown')).toBe(false)
+      expect(handle.entriesFull().active.find((e) => e.id === 'u-1')!.state).toBe('queued')
 
-    handle.send(textMsg('m1'), { id: 'u-1' }) // busy：留队等 gate，不在出站批内
-    expect(handle.confirmAccepted('u-1')).toBe(false)
-    expect(handle.confirmAccepted('u-unknown')).toBe(false)
-    expect(handle.entriesFull().active[0]!.state).toBe('queued')
-
-    handle.dispose()
+      sendResolve!()
+      await vi.advanceTimersByTimeAsync(0)
+      await p1
+    } finally {
+      handle.dispose()
+    }
   })
 })
 
@@ -314,67 +309,71 @@ describe('u1-api drain', () => {
   })
 
   it('混合队列全量取回：queued + in-flight + failed 全返回，条目清空 + 全记 cancelled tombstone', () => {
-    // 构造：A 受理 in-flight；B 断连终局 failed（failInFlight）；C busy 留队 queued
-    let idle = true
+    // 构造：A 受理 in-flight；B、C hold 拒留守 queued；failInFlight 将 A 转 failed
     const port = makeMockPort({
-      isIdle: () => idle,
+      send: (m) => {
+        if (m.payload.kind === 'text' && m.payload.content === 'A') return undefined
+        return { accepted: false as const, deferred: 'merge-commit-hold' as const }
+      },
     })
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port)
+    try {
+      handle.send(textMsg('A'), { id: 'u-a' }) // 受理即出站 → in-flight
+      expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
 
-    handle.send(textMsg('A'), { id: 'u-a' }) // 立即投 → 受理 in-flight
-    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
+      handle.send(textMsg('B'), { id: 'u-b' }) // hold 拒留守 queued
+      handle.send(textMsg('C'), { id: 'u-c' })
+      // 断连终局：A 在途转 failed（failed 唯一产生方 = failInFlight，ADR-0122）；
+      // queued 条目不触碰（B/C 留守队列）
+      expect(handle.failInFlight('pi connection lost')).toBe(1)
+      expect(handle.entriesFull().active.map((e) => e.state)).toEqual(['failed', 'queued', 'queued'])
 
-    idle = false
-    handle.send(textMsg('B'), { id: 'u-b' }) // busy 留队 queued
-    handle.send(textMsg('C'), { id: 'u-c' })
-    // 断连终局：A 在途转 failed（failed 唯一产生方 = failInFlight，ADR-0122）；
-    // queued 条目不触碰（B/C 留守队列）
-    expect(handle.failInFlight('pi connection lost')).toBe(1)
-    expect(handle.entriesFull().active.map((e) => e.state)).toEqual(['failed', 'queued', 'queued'])
-
-    const drained = handle.drain()
-    expect(drained.map((d) => d.id)).toEqual(['u-a', 'u-b', 'u-c'])
-    expect(drained.map((d) => (d.payload.kind === 'text' ? d.payload.content : ''))).toEqual([
-      'A',
-      'B',
-      'C',
-    ])
-    expect(handle.entriesFull().active).toHaveLength(0)
-    expect(handle.entriesFull().tombstones.map((t) => t.state)).toEqual([
-      'cancelled',
-      'cancelled',
-      'cancelled',
-    ])
-    expect(handle.depth()).toBe(0)
-
-    warnSpy.mockRestore()
-    handle.dispose()
+      const drained = handle.drain()
+      expect(drained.map((d) => d.id)).toEqual(['u-a', 'u-b', 'u-c'])
+      expect(drained.map((d) => (d.payload.kind === 'text' ? d.payload.content : ''))).toEqual([
+        'A',
+        'B',
+        'C',
+      ])
+      expect(handle.entriesFull().active).toHaveLength(0)
+      expect(handle.entriesFull().tombstones.map((t) => t.state)).toEqual([
+        'cancelled',
+        'cancelled',
+        'cancelled',
+      ])
+      expect(handle.depth()).toBe(0)
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
   })
 
   it('drain 后无后续投递（port.send 不再被调），同 id 重报被 tombstone 吞', () => {
-    const port = makeMockPort({ isIdle: () => false })
+    const port = makeHoldPort()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port)
+    try {
+      handle.send(textMsg('A'), { id: 'u-a' }) // hold 拒留守
+      handle.send(textMsg('B'), { id: 'u-b' })
+      expect(port.sendCalls).toHaveLength(2) // hold 拒尝试
 
-    handle.send(textMsg('A'), { id: 'u-a' })
-    handle.send(textMsg('B'), { id: 'u-b' })
-    expect(port.sendCalls).toHaveLength(0)
+      expect(handle.drain()).toHaveLength(2)
+      const callsAfterDrain = port.sendCalls.length
 
-    expect(handle.drain()).toHaveLength(2)
-    const callsAfterDrain = port.sendCalls.length
+      // drain 后外部 flush / 定时推进均不投（ADR-0122：零周期 timer）
+      handle.flush()
+      vi.advanceTimersByTime(60_000)
+      expect(port.sendCalls).toHaveLength(callsAfterDrain)
 
-    // drain 后占用方消失（idle 翻转 + settled 边沿）也不投
-    ;(port as { idle: boolean }).idle = true
-    handle.flush()
-    vi.advanceTimersByTime(60_000) // 无任何定时触发（ADR-0122 退役后零周期 timer）
-    expect(port.sendCalls).toHaveLength(callsAfterDrain)
-
-    // resync 重报同 id：cancelled tombstone 去重
-    handle.send(textMsg('A'), { id: 'u-a' })
-    expect(port.sendCalls).toHaveLength(callsAfterDrain)
-    expect(handle.entriesFull().active).toHaveLength(0)
-
-    handle.dispose()
+      // resync 重报同 id：cancelled tombstone 去重
+      handle.send(textMsg('A'), { id: 'u-a' })
+      expect(port.sendCalls).toHaveLength(callsAfterDrain)
+      expect(handle.entriesFull().active).toHaveLength(0)
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
   })
 
   it('drain 时挂起 checked reject；出站批迟到回执安全吸收', async () => {
@@ -446,14 +445,15 @@ describe('u1-api tombstone 判重（D5②）', () => {
   })
 
   it('cancelled tombstone 防复活：cancel 确认帧丢失窗口内 resync 重报不重投', () => {
-    const port = makeMockPort({ isIdle: () => false })
+    const port = makeMockPort()
     const handle = createDelivery(port)
 
-    handle.send(textMsg('m1'), { id: 'u-1' })
-    handle.cancel('u-1')
+    handle.send(textMsg('m1'), { id: 'u-1' }) // 受理即出站 → in-flight
+    handle.cancel('u-1') // 两段式首调：标记待收回
+    handle.cancel('u-1') // 收回确认 → cancelled tombstone
 
     handle.send(textMsg('m1'), { id: 'u-1' }) // resync 重报已撤销消息
-    expect(port.sendCalls).toHaveLength(0)
+    expect(port.sendCalls).toHaveLength(1) // 重报被吞（仅首拍一次）
     expect(handle.entriesFull().active).toHaveLength(0)
 
     handle.dispose()

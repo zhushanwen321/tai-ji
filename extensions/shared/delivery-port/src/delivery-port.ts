@@ -212,9 +212,8 @@ function createKernelAssembly(deps: KernelAssemblyDeps): { kernel: ReturnType<ty
    */
   const kernelPort: KernelPort = {
     supportedPayloads: ["custom"],
-    // 内核接口必填成员；on-accept 模式内核 busy gate 短路旁路（delivery.ts flush/
-    // scheduleFlush 均先判 on-accept），恒不被消费。提交侧挂起判定 = compacting
-    // 事件标记（见 send 第二道防线与放行泵预检），不走本探测。
+    // 内核接口必填成员；内核受理即出站不读忙闲探测，恒不被消费。提交侧挂起判定 =
+    // compacting 事件标记（见 send 第二道防线与放行泵预检），不走本探测。
     isIdle: () => host.isIdle(),
     subscribeSettled: (cb) => host.onAgentSettled(cb),
     send(msg: DeliveryMessage, intent: DeliveryIntent) {
@@ -257,7 +256,6 @@ function createKernelAssembly(deps: KernelAssemblyDeps): { kernel: ReturnType<ty
 
   const kernelConfig: DeliveryConfigWithWarn = {
     intent: "interrupt-at-turn-boundary",
-    dispatchMode: "on-accept",
     store,
     // details-id 凭据判定：state.deliveredIds 由 message_end 边沿增量维护（事件与
     // entry 写入同栈——收到事件 = entry 已持久），O(1) 且锚定磁盘事实。
@@ -731,7 +729,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
     }
   }
 
-  /** 滑动窗口：每次新攒批成员到达重置窗口尾（账本内核 mergeWindowMs 滑动语义同源）。 */
+  /** 滑动窗口：每次新攒批成员到达重置窗口尾。 */
   function armMergeTimer(): void {
     clearMergeTimer();
     mergeTimer = setTimeout(() => {

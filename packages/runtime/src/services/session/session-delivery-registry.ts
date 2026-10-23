@@ -5,8 +5,8 @@
  * 职责四面（unified-delivery §3.6 逐行）：
  * 1. **受理即出站**（§3.6 退役行）：文本受理即 `prompt(streamingBehavior=timing)` 出站
  *    ——pi 唯一队列忙时带 streamingBehavior 的 prompt 直接入队不拒（源码核实
- *    agent-session.js:1515-1524），无本地排队语义。内核装配 `dispatchMode:'on-accept'`
- *    （忙闲门禁与合批窗口旁路）；v2 bash / settling 持有判定随队列退役；**compaction
+ *    agent-session.js:1515-1524），无本地排队语义。内核装配即受理即出站（忙闲门禁与
+ *    合批窗口不存在的唯一形态）；v2 bash / settling 持有判定随队列退役；**compaction
  *    持有保留**——pi 硬拒绝一切 prompt（agent-session.js:1498-1500）是唯一提交侧等待
  *    状态，等 compaction_end 边沿重提。
  * 2. **port 适配**（内核对外的唯一接口 DeliveryPort）：send = 真正的 pi 交接点——ensureActive
@@ -1504,15 +1504,13 @@ export function createSessionDeliveryRegistry(
   ): Parameters<typeof createDelivery>[0] {
     return {
       supportedPayloads: ['text'],
-      // port.isIdle：v3 on-accept 下内核忙闲门禁旁路（scheduleFlush 不再读它），保留
-      // 读 view 供内核接口契约与诊断范围；投递决策的唯一判定源 = holdReasonOf（仅
-      // compaction/revoking）。
+      // port.isIdle：内核受理即出站不读忙闲探测，保留读 view 供内核接口契约与诊断
+      // 范围；投递决策的唯一判定源 = holdReasonOf（仅 compaction/revoking）。
       isIdle: () => {
         const s = viewOf(sessionId)
         return !!s && !s.isGenerating && !s.isCompacting && !s.isBashRunning
       },
-      // 在途判定已收归内核自持（D2 自镜像拆除：busy gate 内查 active 表，port 不再
-      // 承担 hasPendingMessages 同步数据源）。
+      // 在途判定内核自持（active 表），port 不承担 hasPendingMessages 同步数据源。
       subscribeSettled: (cb) =>
         deps.subscribeAgentSettled((sid) => {
           if (sid === sessionId) cb()
@@ -1525,10 +1523,10 @@ export function createSessionDeliveryRegistry(
           throw new Error(`[session-delivery] unsupported payload kind: ${msg.payload.kind}`)
         }
         const images = msg.payload.images
-        // v3 受理即出站：生产提交全走 sendChecked（单条登记直投）+ 内核 on-accept 忽略
-        // 合批窗口——本口常态收单条。splitComposed 保留作防御：handle.send 公开通路的
-        // 普通队列在 in-flight 往返窗内积压多条时，内核仍会以 BATCH_SEP 拼批出站（内核
-        // doSend 批量路径与 dispatchMode 正交）——拆段保证用户消息逐条进 transcript、
+        // v3 受理即出站：生产提交全走 sendChecked（单条登记直投）、内核无合批窗口
+        // ——本口常态收单条。splitComposed 保留作防御：handle.send 公开通路的普通
+        // 队列在 in-flight 往返窗内积压多条时（在途防重 / deferred / retain 留守），
+        // 内核 doSend 仍会以 BATCH_SEP 拼批出站——拆段保证用户消息逐条进 transcript、
         // 可单条撤销（v2 拆分契约原样保留，触发点收窄为该防御场景）。
         const parts = splitComposed(msg.payload.content, state, handle)
         for (let i = 0; i < parts.length; i += 1) {
@@ -1576,10 +1574,6 @@ export function createSessionDeliveryRegistry(
     const handle = createDelivery(buildPort(sessionId, state, handleRef), {
       // 默认意图：turn 边界抢占（D3）；pi 词汇映射在 toStreamingBehavior
       intent: 'interrupt-at-turn-boundary',
-      // v3 受理即出站（§3.6 / §3.5.6）：忙闲门禁与合批窗口旁路——pi 唯一队列忙时入队
-      // 不拒（agent-session.js:1515-1524），受理即 prompt(streamingBehavior) 出站；
-      // compaction 持有在 port.send 实现侧（promptAwaitingCompaction）保留。
-      dispatchMode: 'on-accept',
       // 磁盘 outbox（§3.8 波 4）：内核行为契约 = 受理前 persist / 终局 ack / forget 失败
       // discard；store 缺席时字段不带（v2 逐字节等价）。
       ...(store !== undefined ? { store } : {}),
@@ -1602,7 +1596,7 @@ export function createSessionDeliveryRegistry(
     // port 闭包持有 state，任何拷贝都会让后续写入不可见）
     const rt: SessionRuntime = Object.assign(state, { handle })
     // segments 快照剪枝（MF-1-2 防泄漏：条目离场 = 终态 delivered/cancelled 或重建清场，
-    // requeue 不离场故快照跨回收轮保留）。在途镜像半边已随 D2 拆除（内核 busy gate 内查）。
+    // requeue 不离场故快照跨回收轮保留）。在途镜像半边不设（在途判定内核自持 active 表）。
     handle.onChange(() => {
       const active = handle.entriesFull().active
       if (state.segmentsByEntry.size > 0) {
