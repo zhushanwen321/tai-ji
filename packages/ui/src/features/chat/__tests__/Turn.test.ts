@@ -988,6 +988,71 @@ describe('run 类型分组: Turn 组块接线（三路径 + PR-6）', () => {
     // 两次成员数 = 4 个窗口内已完成 + running = 5
     expectGroupNodeStable(wrapper, node1, 5)
   })
+
+  // S-3（dev-0.11.6-review-residue）：takeover 态下组内非末位成员 running→error（无 endTime）
+  // 时旧键组（base/length/末成员 ref/durationMs/hasRunning/miles）全不变 → v-memo 命中旧
+  // vnode，组头失败 chip 与成员行状态滞旧（takeover 态全局 failedCount 归 0，组头 chip 是该态
+  // 唯一失败信号）。键组补 header.failedCount + 逐成员 ref 指纹后该形态正确失效重渲染。
+  it('S-3 组块 v-memo deps 完整性：takeover 态非末位成员 running→error（无 endTime）→ 失败 chip 与成员行即时更新', async () => {
+    // 同一 exec 组 3 成员 [b0(已完成), r1(running→error), r2(末位 running 保持)]；未变化成员
+    // （b0/r2）跨两次 turn 复用同一对象引用（immutable 更新纪律：只替换 r1 的 ToolCall 对象）。
+    const b0: ToolCall = { id: 'b0', toolName: 'bash', input: { command: 'cmd-0' }, status: 'completed', startTime: NOW, endTime: NOW + 500 }
+    const r2: ToolCall = { id: 'r2', toolName: 'bash', input: { command: 'cmd-r2' }, status: 'running', startTime: NOW + 2000 }
+    // r1 无 endTime（end_not_received 形态）：running→error 前后 durationMs 均按 0 计
+    const r1Of = (status: ToolCall['status']): ToolCall => ({
+      id: 'r1', toolName: 'bash', input: { command: 'cmd-r1' }, status, startTime: NOW + 1000,
+    })
+    const makeTakeoverTurn = (r1: ToolCall): MessageTurn => {
+      const toolCalls = [b0, r1, r2]
+      const contentBlocks: ContentBlock[] = toolCalls.map((t) => ({ type: 'toolCall', refId: t.id }))
+      contentBlocks.push({ type: 'text', refId: 'text' })
+      return {
+        index: 1,
+        user: { id: 'u1', role: 'user', content: 'hi', status: 'complete', timestamp: NOW },
+        assistants: [
+          {
+            id: 'a1', role: 'assistant', content: '最终回复', status: 'streaming', timestamp: NOW,
+            toolCalls, contentBlocks,
+          },
+        ],
+        isStreaming: true,
+        hasFoldable: true,
+      }
+    }
+    const mountS3 = (turn: MessageTurn) =>
+      mount(Turn, {
+        props: { turn, sessionId: SID, isSessionActive: true, isLastTurn: true },
+        global: {
+          provide: mockChatProvide({ isTakeover: () => true }),
+          stubs: {
+            UserBubble: true,
+            TurnMeta: true,
+            TurnSummary: true,
+            ChangeSetCard: true,
+            MarkdownRenderer: { props: ['content'], template: '<div class="stub-md" />' },
+          },
+        },
+      })
+    const wrapper = mountS3(makeTakeoverTurn(r1Of('running')))
+    // 初始：组内 0 失败 → 失败 chip 不渲染（takeover 全展开，组头恒在）
+    expect(wrapper.find('[data-testid="run-group-header"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="run-group-failed"]').exists()).toBe(false)
+    // 展开组让成员行进 DOM（成员行状态由逐成员 ref 指纹覆盖，chip 由 failedCount 覆盖）
+    await wrapper.find('[data-testid="run-group-header"]').trigger('click')
+    const memberRow = (i: number) => wrapper.findAllComponents({ name: 'ToolRow' })[i]
+    expect(memberRow(1).props('tool')).toMatchObject({ id: 'r1', status: 'running' })
+    // 非末位成员 r1 running→error（无 endTime），b0/r2 保持同引用
+    await wrapper.setProps({ turn: makeTakeoverTurn(r1Of('error')) })
+    // 组头失败 chip 出现且计数正确（键组缺 failedCount 时此处滞旧：chip 不出现）
+    const chip = wrapper.find('[data-testid="run-group-failed"]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('含 1 次失败')
+    // 成员行 r1 状态翻转为 error（键组缺逐成员 ref 指纹时此处滞旧：仍 running）
+    expect(memberRow(1).props('tool')).toMatchObject({ id: 'r1', status: 'error' })
+    // 未变化成员 b0/r2 状态不受影响（同引用复用）
+    expect(memberRow(0).props('tool')).toMatchObject({ id: 'b0', status: 'completed' })
+    expect(memberRow(2).props('tool')).toMatchObject({ id: 'r2', status: 'running' })
+  })
 })
 
 // ═════════════════════════════════════════════════════════════════

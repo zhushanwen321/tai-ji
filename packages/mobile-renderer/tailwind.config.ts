@@ -26,20 +26,6 @@ export default {
         'loader-spin': {
           to: { transform: 'rotate(360deg)' },
         },
-        // session status icons（方案 C 优化版 v3）
-        wiggle: {
-          '0%, 100%': { transform: 'rotate(-6deg)' },
-          '50%': { transform: 'rotate(6deg)' },
-        },
-        'pulse-strong': {
-          '0%, 100%': { opacity: '1', transform: 'scale(1)' },
-          '50%': { opacity: '0.65', transform: 'scale(0.92)' },
-        },
-        // ask-user inline overlay 入场（覆盖 composer 位置时滑入，对齐 demo v2 slideUp）
-        'ask-user-slide-up': {
-          from: { opacity: '0', transform: 'translateY(8px)' },
-          to: { opacity: '1', transform: 'translateY(0)' },
-        },
         // ForkNotice 反馈行入场（spec §3：从 -4px translateY 淡入，200ms ease）
         'notice-in': {
           from: { opacity: '0', transform: 'translateY(-4px)' },
@@ -49,9 +35,6 @@ export default {
       animation: {
         blink: 'blink 1s step-end infinite',
         'loader-spin': 'loader-spin 1.4s linear infinite',
-        'ask-user-slide-up': 'ask-user-slide-up var(--duration-slow) var(--ease)',
-        wiggle: 'wiggle 1.2s ease-in-out infinite',
-        'pulse-strong': 'pulse-strong 1.4s ease-in-out infinite',
         'notice-in': 'notice-in 200ms var(--ease)',
       },
     },

@@ -6,18 +6,27 @@
  * - PrimitiveRouter 渲染 card/columns/group 时经 getPrimitiveContainer 查表：
  *   未注册 → 回退 AnsiText（降级 SSOT，不静默空白）；barrel 加载注册后 → 路由到真实容器组件
  *
- * 顺序约束 [重要]：本文件不得静态 import primitives barrel（../primitives/index）——
- * barrel 加载即调用 registerPrimitiveContainers 填充模块级 Map，会让「未注册回退」用例
- * 失真。注册用例放在文件末尾、用动态 import() 触发注册（同文件内 vitest 顺序执行，
- * 模块状态共享，回退用例必须先跑）。
+ * 状态约束 [重要]：本文件不得静态 import primitives barrel（../primitives/index）——
+ * barrel 加载即调用 registerPrimitiveContainers 填充模块级 Map，且 ES 模块缓存使注册
+ * 只随模块首次加载发生一次；若静态加载先于测试执行，beforeEach 清空后动态 import 只会
+ * 拿到缓存模块（不重放注册），「barrel 加载命中」用例将失真。用例顺序不构成约束：
+ * 文件级 beforeEach 调 resetPrimitiveContainers 恢复初始空态，「未注册回退」用例的
+ * 前置由 reset 自建（--sequence.shuffle 下双绿）；「加载命中」用例在自身测试体内
+ * （即自身 reset 之后）动态 import barrel 触发注册并断言。
  *
  * 运行：cd packages/ui && npx vitest run src/rendering-protocol/__tests__/PrimitiveRouter.test.ts
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import PrimitiveRouter from '../primitives/PrimitiveRouter.vue'
-import { getPrimitiveContainer } from '../primitives/container-registry'
+import { getPrimitiveContainer, resetPrimitiveContainers } from '../primitives/container-registry'
 import type { GuiComponent } from '@zhushanwen/extension-protocol'
+
+// 每用例恢复注册表初始空态：两类用例（未注册回退 / barrel 加载命中）共享模块级 Map，
+// 注册一经发生不可逆，前置状态必须各自自建（顺序无关性见文件头注释）。
+beforeEach(() => {
+  resetPrimitiveContainers()
+})
 
 describe('container-registry：barrel 未加载（独立使用场景）', () => {
   it('getPrimitiveContainer 对三种容器类型均返回 undefined', () => {
