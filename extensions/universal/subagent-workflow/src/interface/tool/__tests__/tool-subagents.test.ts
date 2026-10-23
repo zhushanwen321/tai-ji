@@ -276,7 +276,7 @@ describe("schema 契约：一跳扁平 + 成员对象 tasks 必填 + 常驻", ()
     expect(singleMaxItems(fanOutSrc, "fan-out.js @pi-meta")).toBe(20);
   });
 
-  it("常驻（2026-10-23 二次裁决：先收起后转回常驻）：不写 exposure 字段（SDK 缺省 direct）", () => {
+  it("常驻（2026-10-23 二次裁决：先收起后转回常驻）：不写 exposure 字段（SDK 缺省 direct，pi-semantics PS-91）", () => {
     const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     expect(tool.exposure).toBeUndefined();
     expect(TOOL_SRC).not.toContain('exposure: "deferred"');

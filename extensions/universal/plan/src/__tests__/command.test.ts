@@ -28,7 +28,8 @@ import type { PlanAbortControllers } from "../state.js";
 import { createPlanCtx, freshPendingSelect, MAX_PLAN_REQUIREMENT_LENGTH, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
-// 对齐 pi 实装注册档位：plan = direct 常驻（tool.ts 注册零 exposure 字段，pi 默认 direct）；
+// 对齐 pi 实装注册档位：plan = direct 常驻（tool.ts 注册零 exposure 字段，pi 默认 direct，
+// pi-semantics PS-91）；
 // tool_search = model-only + defaultActive:false 注册（pi tool-search/index.js:11）——
 // model-only 档但注册不进默认激活集，恢复集点名它 = 未 opt-in 的独立 pi 常驻激活它
 const TOOL_SEARCH = "tool_search";

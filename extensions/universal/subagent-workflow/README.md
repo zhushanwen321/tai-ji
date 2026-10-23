@@ -33,15 +33,9 @@ Pi 的 subagent + workflow 合并包：任务委派 + 多 agent 编排（chain /
 - 运行级 `agent` / `model` / `thinkingLevel` 是成员未显式指定时的缺省值，成员级值优先
 - `slug`（批次标签）、`tokens` / `time`（整批预算）为整批可选参数
 
-## 工具激活（deferred）
+## 工具激活
 
-`workflow-script` 工具注册为 `exposure: "deferred"`——不占常驻工具声明，由 pi 内置 `tool_search` 工具检索命中后按需激活。taiji 宿主内开箱即用（宿主启动时已激活 `tool_search`）；独立 pi 使用需在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）开启：
-
-```json
-{ "defaultTools": ["+tool_search"] }
-```
-
-`+` 前缀是增量修饰（保留 read/bash/edit/write 默认集）。未开启 `tool_search` 时该工具对模型不可见。`subagent_batch` 为常驻注册，无需 `tool_search`。
+七个工具分两档：`subagent_start` / `subagent_batch` / `workflow_run` / `workflow-script` 为 direct 常驻——注册不声明 `exposure` 字段（pi SDK 缺省 `direct`），工具声明随会话常驻、对模型默认可见，独立 pi 开箱即用；`subagent_manage` / `subagent_message` / `workflow_control` 为 deferred——不占常驻工具声明，由 pi 内置 `tool_search` 工具检索命中后按需激活，独立 pi 使用需在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）加 `"defaultTools": ["+tool_search"]`（`+` 前缀是增量修饰，保留 read/bash/edit/write 默认集），未开启 `tool_search` 时这些工具对模型不可见。
 
 ## 内置 Agents
 

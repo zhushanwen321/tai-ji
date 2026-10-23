@@ -99,6 +99,17 @@ function makeScript(name: string, sourceCode: string) {
   return { name, source: "saved", path: `/abs/${name}.js`, sourceCode, available: true, meta: {} };
 }
 
+// exposure 注册终态锚（C-ext-05，2026-10-23 ADR-0136）：workflow-script direct 常驻 =
+// 注册时不写 exposure 字段（SDK 缺省 direct，pi-semantics PS-91）——误写 "deferred" 会把
+// workflow-script 从模型默认可见集收走（tool_search 才可激活），此处红。
+describe("workflow-script exposure 注册终态（C-ext-05）", () => {
+  it("direct 常驻：不写 exposure 字段（SDK 缺省 direct）", () => {
+    const tool = captureScriptExecuteTool();
+    expect(tool.name).toBe("workflow-script");
+    expect(tool.exposure).toBeUndefined();
+  });
+});
+
 /** 清单脚本 stub（source 显式覆盖以覆盖 saved/tmp 两种标签形态）。 */
 function makeListScript(name: string, source: "saved" | "tmp", description: string) {
   return { name, source, path: `/abs/${name}.js`, sourceCode: "// x", available: true, meta: { description } };

@@ -125,6 +125,13 @@ describe("registerPlanTool", () => {
     expect((pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0].name).toBe("plan");
   });
 
+  it("exposure 注册终态（C-ext-05，2026-10-23 ADR-0136）：direct 常驻 = 不写 exposure 字段（SDK 缺省 direct，pi-semantics PS-91）", () => {
+    const { pi } = setup();
+    const tool = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0] as { exposure?: string };
+    // 误写 "deferred" 会把 plan 入口从模型默认可见集收走（tool_search 才可激活），此处红
+    expect(tool.exposure).toBeUndefined();
+  });
+
   it("declares executionMode 'sequential'（D-B1-4：action 就地突变共享 PlanState，串行声明消除同批并行交错）", () => {
     const { pi } = setup();
     const tool = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0] as { executionMode?: string };
