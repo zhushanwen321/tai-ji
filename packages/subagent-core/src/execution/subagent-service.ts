@@ -4,7 +4,7 @@
 // 上游：subagent-tool（execute/query/cancel）、TUI（onChange/collectRecords）。
 // session_start 时经 initSession 注入 pi；modelRegistry/entries 归 ModelConfigService.initModel。
 
-import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../orchestration/models/types.ts";
+import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../shared/agent-call-types.ts";
 // [V2 决策 3] lifecycle-manager idle timer：record 终态化/取消的 disarm 面
 // 路径防误杀）——[R3] 消费已随终态写侧迁 service/record-lifecycle.ts；[R4]
 // DEFAULT_IDLE_TIMEOUT_MS 消费（assertIdleTimeoutMsSafe 错误文案基准）已随 run 域

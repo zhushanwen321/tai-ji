@@ -11,8 +11,7 @@
 // SAR 构造）——掏空只删 run() 内部编排，构造签名与公共部分不变。model 解析归
 // service resolveIdentity（W2 迁移清单⑧，不双轨）。
 
-import type { AgentRunner } from "../../orchestration/models/ports.ts";
-import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
+import type { AgentRunner, AgentCallOpts, AgentResult } from "../../shared/agent-call-types.ts";
 import type { AgentEvent } from "../../shared/agent-event.ts";
 import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 import type { SubagentService } from "../subagent-service.ts";

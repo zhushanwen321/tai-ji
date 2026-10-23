@@ -27,7 +27,7 @@ import {
   type SessionView as SdkSessionView,
 } from "@zhushanwen/subagent-engine-sdk";
 
-import type { AgentCallOpts } from "../../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../../shared/agent-call-types.ts";
 import { getHostServices } from "../../../core/host-services.ts";
 import { CANCEL_SETTLE_GRACE_WINDOW_MS, resolveArmedReceiptTimeoutMs } from "./armed-receipt-config.ts";
 import { getLogger } from "../../../core/logger.ts";

@@ -30,7 +30,7 @@ import { getLogger } from "../../core/logger.ts";
 
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 
-import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../shared/agent-call-types.ts";
 import { SLUG_MAX_LENGTH } from "../../shared/run-vocabulary.ts";
 // [D8 派发期对称校验] pi 引擎模型目录分类裁决（创建期同源消费 model-catalog；
 // orchestration → shared 叶子方向，无环）。

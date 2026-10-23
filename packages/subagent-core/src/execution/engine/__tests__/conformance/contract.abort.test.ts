@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { AgentCallOpts } from "../../../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../../../shared/agent-call-types.ts";
 import { EngineClient } from "../../client/engine-client.ts";
 import { RemoteEngine } from "../../client/remote-engine.ts";
 import type { RunContext } from "../../port.ts";
