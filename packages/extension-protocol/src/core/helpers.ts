@@ -235,8 +235,8 @@ export function isGuiRenderResult(value: unknown): value is GuiRenderResult {
  * pi 通用形状（非 extension 领域结构），renderResult 文本兜底的共用内核。
  */
 export function firstContentText(result: { content: Array<{ type: string; text?: string }> }): string {
-	const first = result.content[0]
-	return first?.type === 'text' ? (first.text ?? '') : ''
+  const first = result.content[0]
+  return first?.type === 'text' ? (first.text ?? '') : ''
 }
 
 // ── toolResult 读侧检查式 helper（details.summary / content 文本；renderResult 入参
@@ -250,11 +250,11 @@ export function firstContentText(result: { content: Array<{ type: string; text?:
  * 手抄取值函数（历史 8 处手抄 + 2 处 as 断言已收编）。
  */
 export function readDetailsSummary(result: unknown): string | undefined {
-	if (result === null || typeof result !== 'object') return undefined
-	const details = (result as Record<string, unknown>).details
-	if (details === null || typeof details !== 'object') return undefined
-	const summary = (details as Record<string, unknown>).summary
-	return typeof summary === 'string' && summary !== '' ? summary : undefined
+  if (result === null || typeof result !== 'object') return undefined
+  const details = (result as Record<string, unknown>).details
+  if (details === null || typeof details !== 'object') return undefined
+  const summary = (details as Record<string, unknown>).summary
+  return typeof summary === 'string' && summary !== '' ? summary : undefined
 }
 
 /**
@@ -264,16 +264,16 @@ export function readDetailsSummary(result: unknown): string | undefined {
  * 内化取值检查，调用方不再各自包装 contentText。
  */
 export function resultContentText(result: unknown): string {
-	if (result === null || typeof result !== 'object') return ''
-	const content = (result as Record<string, unknown>).content
-	if (!Array.isArray(content)) return ''
-	return firstContentText({ content: content as Array<{ type: string; text?: string }> })
+  if (result === null || typeof result !== 'object') return ''
+  const content = (result as Record<string, unknown>).content
+  if (!Array.isArray(content)) return ''
+  return firstContentText({ content: content as Array<{ type: string; text?: string }> })
 }
 
 /** 文本首行（按首个换行切分；无换行返回原文）。折叠态一行摘要形态的共用切分。 */
 export function firstLine(text: string): string {
-	const idx = text.indexOf('\n')
-	return idx === -1 ? text : text.slice(0, idx)
+  const idx = text.indexOf('\n')
+  return idx === -1 ? text : text.slice(0, idx)
 }
 
 // ── 内部工具 ──

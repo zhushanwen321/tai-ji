@@ -71,7 +71,7 @@ import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
  *   - **bundle / staged 打包形态**（2026-10-03 B′ 修复）：esbuild 自包含 bundle 把
  *     core inline、staged 布局无 node_modules ⇒ resolve 必败（实证：pi-host 日志全天
  *     202 条 'Cannot find module … workflows/README.md'，内置 6 workflow + 10 agent
- *     整体不可发现、`subagents` 批量工具报 'Built-in workflow fan-out is not available'）。
+ *     整体不可发现、`subagent_batch` 批量工具报 'Built-in workflow fan-out is not available'）。
  *     此时回退到 staged scope 根（见 stagedScopeRootFromModuleUrl）——仅当回退也不
  *     成立（异常布局/解析器不可用）才降级为不注入并 warn。
  */

@@ -412,19 +412,19 @@ describe("cross-package contract: pi-ai validateToolArguments 真实 SDK 冒烟�
 			ctx.skip();
 			return;
 		}
-		const batchTool = swTool(mod, "subagents", mod.SubagentsParams);
+		const batchTool = swTool(mod, "subagent_batch", mod.SubagentsParams);
 		expect(
-			validateToolArguments(batchTool, toolCall({ tasks: [{ task: "t", agent: "/abs/a.md" }] }, "subagents")),
+			validateToolArguments(batchTool, toolCall({ tasks: [{ task: "t", agent: "/abs/a.md" }] }, "subagent_batch")),
 		).toEqual({ tasks: [{ task: "t", agent: "/abs/a.md" }] });
 
 		let message = "";
 		try {
-			validateToolArguments(batchTool, toolCall({ tasks: ["legacy string element"] }, "subagents"));
+			validateToolArguments(batchTool, toolCall({ tasks: ["legacy string element"] }, "subagent_batch"));
 			expect.unreachable("legacy string element must be rejected");
 		} catch (err) {
 			message = err instanceof Error ? err.message : String(err);
 		}
-		expect(message).toMatch(/^Validation failed for tool "subagents"/);
+		expect(message).toMatch(/^Validation failed for tool "subagent_batch"/);
 
 		// maxItems = 20（与 fan-out 模板 @pi-meta 同值）在 pi 消费链端到端生效：
 		// 21 个成员在工具声明面即拒，不再漏到 runWorkflow 入口才被 ajv 拒（少一轮可避免的重试）
@@ -432,12 +432,12 @@ describe("cross-package contract: pi-ai validateToolArguments 真实 SDK 冒烟�
 		try {
 			validateToolArguments(
 				batchTool,
-				toolCall({ tasks: Array.from({ length: 21 }, (_, i) => ({ task: `t${i}` })) }, "subagents"),
+				toolCall({ tasks: Array.from({ length: 21 }, (_, i) => ({ task: `t${i}` })) }, "subagent_batch"),
 			);
 			expect.unreachable("21 members must be rejected by the tool declaration (maxItems = 20)");
 		} catch (err) {
 			overflowMessage = err instanceof Error ? err.message : String(err);
 		}
-		expect(overflowMessage).toMatch(/^Validation failed for tool "subagents"/);
+		expect(overflowMessage).toMatch(/^Validation failed for tool "subagent_batch"/);
 	});
 });

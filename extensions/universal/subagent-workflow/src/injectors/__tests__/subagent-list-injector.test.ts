@@ -39,11 +39,11 @@ describe("SUBAGENT_DISPATCH_SHARED_RULES 无条件停下四条正向默认", () 
 		expect(RULES).toContain("isolate a failed member onto a different model");
 	});
 
-	it("覆盖六个现行注册工具名（批量工具名保持 subagents，本设计不改名）", () => {
+	it("覆盖六个现行注册工具名（批量工具名 subagent_batch，2026-10-23 改名）", () => {
 		expect(RULES).toContain("subagent_start");
 		expect(RULES).toContain("subagent_manage");
 		expect(RULES).toContain("subagent_message");
-		expect(RULES).toContain("subagents");
+		expect(RULES).toContain("subagent_batch");
 		expect(RULES).toContain("workflow_run");
 		expect(RULES).toContain("workflow_control");
 	});

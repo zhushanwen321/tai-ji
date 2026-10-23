@@ -165,7 +165,7 @@ v6 审查发现「被选中」出现三种视觉语言，统一为二分：
 
 **检查**：看到 `background: var(--accent)` + 前景元素，前景应该是 `--accent-fg`，不是 `--neutral-fg`。
 
-六主题令牌契约（实底必有前景令牌）：`--accent-fg` / `--danger-fg` / `--success-fg` 对各自实底配对齐全，组件实底前景一律走对应 `-fg` 令牌、禁止写死颜色；对比度六主题全过 WCAG AA 4.5:1 正文线（数值表见 §4.4，单测 contrast-tokens.test.ts 实底前景场景同线断言）。`--warn` 不设 `-fg`：warn 只以圆点、软底、描边、文字色出现，不提供实底用法（中间调黄配任何实底字都过不了 AA），新代码不得给 warn 加实底。
+六主题令牌契约（实底必有前景令牌）：`--accent-fg` / `--danger-fg` / `--success-fg` 对各自实底配对齐全，组件实底前景一律走对应 `-fg` 令牌、禁止写死颜色。对比度分线断言（数值表见 §4.4，单测 contrast-tokens.test.ts 实底前景场景同线断言）：`--accent-fg` / `--success-fg` 为深字公式，六主题全过 WCAG AA 4.5:1 正文线；`--danger-fg` 为亮字（`var(--neutral-fg)`，2026-10-23 裁决——中明度 danger 实底上任何亮字数学上过不了 4.5:1，旧深字公式压线凑 AA 致红底暗红字视觉发闷已废弃），按 WCAG 1.4.11 图形组件线 3:1 断言（对齐 destructive 按钮既有先例）。`--warn` 不设 `-fg`：warn 只以圆点、软底、描边、文字色出现，不提供实底用法（中间调黄配任何实底字都过不了 AA），新代码不得给 warn 加实底。`--success-fg` 不随 danger 改亮字：success 底明度更高，亮字仅 2.18:1 连组件线都不过，保留深字公式。
 
 #### 3.5.2 信号编排：空间分离 + 异常优先 + 常态归零
 
@@ -293,13 +293,16 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 /* 状态色（水墨降饱和：饱和度/明度 +15~20%，保留水墨感不艳）*/
 --success: #78a87e;  --warn: #b79c54;  --danger: #bf6b6b;
 --info:    #6d99a5;  --reasoning: #8e85ab;
---danger-fg: color-mix(in oklch, var(--danger) 12%, #160b0b);
-/* danger 实色上的文字（demo tokens.css 同公式浓度 12%；暗色族 color-mix 中的
-   var(--danger) 每元素解析，随各自 --danger 自动跟随——Chromium 实测行为；
+--danger-fg: var(--neutral-fg);
+/* danger 实色上的文字（2026-10-23 裁决：暗色族亮字——旧公式 danger 12% 混深底产出
+   暗红褐，红底暗红字视觉发闷（vision 真机验收三轮判 FAIL）已废弃；中明度 danger
+   实底上亮字按 WCAG 1.4.11 图形组件线 3:1 断言（实测 玄 3.04 / 黛蓝 3.16 / 暖墨 3.07），
+   对齐 destructive 按钮先例（--destructive-foreground 即本令牌）；
    亮色族由 [data-theme="light"] 块覆盖为白字 #ffffff，青墨/朱印继承该覆盖）*/
 --success-fg: color-mix(in oklch, var(--success) 12%, #160b0b);
-/* success 实色上的文字（与 --danger-fg 同公式同浓度 12%；消费点 = OAuthDialog 授权成功
-   图标实底；亮色族由 [data-theme="light"] 块覆盖为白字 #ffffff，青墨/朱印继承该覆盖）*/
+/* success 实色上的文字（深字公式保留，不随 --danger-fg 改亮字：--success 明度高于
+   --danger，亮字形态仅 2.18:1 连组件线 3:1 都不过，深字 6.24:1 过 AA 正文线；
+   消费点 = OAuthDialog 授权成功图标实底；亮色族由 [data-theme="light"] 块覆盖为白字 #ffffff，青墨/朱印继承该覆盖）*/
 --danger-text: color-mix(in oklch, var(--danger) 78%, var(--neutral-fg));
 /* danger 小字提亮档：暗底小字号 danger 原色 ~4.2:1 不足 AA 正文线，混入前景 22% 提亮
    过线（消费点 = 套餐浮层窗口百分比文字）；环形/进度填充保留 --danger 原色不上提亮。
@@ -335,13 +338,13 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 | 青墨 | 亮 | `#92663a` | 10.62:1 |
 | 朱印 | 亮 | `#9a6b40` | 10.50:1 |
 
-实底前景对比度（`-fg` 对各自实底；暗色族 `-fg` = `color-mix(in oklch, 基色 12%, #160b0b)` 公式派生，亮色族 = `#ffffff` 白字覆盖。单测 contrast-tokens.test.ts 实底前景场景按同模型断言统一 ≥4.5:1 WCAG AA 正文线）：
+实底前景对比度（`-fg` 对各自实底；accent-fg / success-fg = `color-mix(in oklch, 基色 12%, #160b0b)` 深字公式派生，亮色族 = `#ffffff` 白字覆盖，按 ≥4.5:1 WCAG AA 正文线断言；danger-fg = `var(--neutral-fg)` 亮字（2026-10-23 裁决，见上方令牌注释），按 ≥3:1 WCAG 1.4.11 图形组件线断言。单测 contrast-tokens.test.ts 实底前景场景同线断言）：
 
 | 主题 | 族 | `--accent-fg` / `--accent` | `--danger-fg` / `--danger` | `--success-fg` / `--success` |
 |---|---|---|---|---|
-| 玄 | 暗 | 7.38:1 | 4.60:1 | 6.24:1 |
-| 黛蓝 | 暗 | 6.30:1 | 4.60:1 | 6.24:1 |
-| 暖墨 | 暗 | 8.87:1 | 4.60:1 | 6.24:1 |
+| 玄 | 暗 | 7.38:1 | 3.04:1 | 6.24:1 |
+| 黛蓝 | 暗 | 6.30:1 | 3.16:1 | 6.24:1 |
+| 暖墨 | 暗 | 8.87:1 | 3.07:1 | 6.24:1 |
 | 皓 | 亮 | 4.86:1 | 5.22:1 | 4.84:1 |
 | 青墨 | 亮 | 5.44:1 | 5.22:1 | 4.84:1 |
 | 朱印 | 亮 | 5.86:1 | 5.85:1 | 4.84:1 |

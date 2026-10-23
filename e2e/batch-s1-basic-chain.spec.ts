@@ -1,5 +1,5 @@
 /**
- * BATCH S1 批量基本链（E2E-BATCH-01）—— subagents 双任务并行 → 一条 notifyDone 收齐。
+ * BATCH S1 批量基本链（E2E-BATCH-01）—— subagent_batch 双任务并行 → 一条 notifyDone 收齐。
  *
  * 登记：E2E-BATCH-01（docs/testing/e2e-map.json，R2 按改动范围 on-diff，serial 空载串行，
  * L3 真实 LLM）。本 spec 是 2026-09-22 丢失剧本的重建产物（W1 介质归位触发义务，
@@ -92,7 +92,7 @@ const TASKS = [
 ]
 
 const MAIN_PROMPT =
-  `Dispatch exactly ${TASKS.length} background subagent tasks in ONE call using the \`subagents\` tool ` +
+  `Dispatch exactly ${TASKS.length} background subagent tasks in ONE call using the \`subagent_batch\` tool ` +
   `(do NOT do the tasks yourself, do NOT use any other tool). ` +
   `tasks = ${JSON.stringify(TASKS)} ` +
   `After the tool call returns, reply with only the word DISPATCHED. [${MAIN_MARKER}]`
@@ -318,7 +318,7 @@ test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + 
     }, 's1-main-send', 30_000)
     expect(sendReply.type, '主 prompt message.send 应被接受').not.toBe('error')
 
-    // 主 turn（LLM 调 subagents 工具后即收尾——批量是后台通知型工具）
+    // 主 turn（LLM 调 subagent_batch 工具后即收尾——批量是后台通知型工具）
     const mainDone = await waitUntil(() => sub.events.filter((e) => e.type === 'message.complete').length > 0, MAIN_TURN_TIMEOUT_MS)
     if (!mainDone) {
       writeDiag(testInfo, 'batch-s1-main-turn.json', {
@@ -327,7 +327,7 @@ test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + 
         runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
       })
     }
-    expect(mainDone, `主 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内 message.complete（真实 LLM 未调 subagents 工具？查 diag）`).toBe(true)
+    expect(mainDone, `主 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内 message.complete（真实 LLM 未调 subagent_batch 工具？查 diag）`).toBe(true)
     await page.screenshot({ path: testInfo.outputPath('s1-dispatched.png'), fullPage: true })
 
     // ── W1 介质锚 ① + 通知等待（拆出 settleS1Anchors）──

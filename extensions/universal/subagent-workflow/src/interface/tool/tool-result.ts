@@ -1,5 +1,5 @@
 /**
- * subagent-workflow tool 结果的公共类型（workflow_run / workflow_control / subagents /
+ * subagent-workflow tool 结果的公共类型（workflow_run / workflow_control / subagent_batch /
  * workflow-script 四个 tool 共用）。
  *
  * 此前两文件各自 `export interface ToolResult`（同目录同名异形，`details` 必填/可空
@@ -21,7 +21,7 @@ export interface ToolTextContent {
 /**
  * 一次 run 启动回执的公共字段（两侧 details 各自扩展工具特有字段与判别式）。
  *
- * `status` 取并集：`subagents` 只有一个动作、启动即返回，收窄为 `"running"`；
+ * `status` 取并集：`subagent_batch` 只有一个动作、启动即返回，收窄为 `"running"`；
  * workflow_run 的 actionRun 另有 `not_found` / `invalid_args` 两态。
  */
 export interface RunStartDetails {

@@ -719,7 +719,7 @@ export function setupWorkflowDomain(
     // 让位，run journal 恒缺 armed 帧（真机 wf-1790034646281-w7tp4f 实证链，R2 裁决）。
     get workflowAgentDispatch() { return createLazy(resolveDeps, "workflowAgentDispatch"); },
     // [dmg-r2-5] 宿主会话锚必须随 lazyDeps 转发（workflowAgentDispatch 同款先例）：
-    // workflow tool / subagents tool 的 run action 以 lazyDeps 为 deps 启动 run，漏本
+    // workflow tool / subagent_batch tool 的 run action 以 lazyDeps 为 deps 启动 run，漏本
     // 成员则 run-created 帧不落 rootSessionId（可选成员静默放行）——runtime 网关
     // 失去目录级隔离之外的精确归属二次校验锚（防串会话防线削弱）。
     get getSessionRootId() { return createLazy(resolveDeps, "getSessionRootId"); },

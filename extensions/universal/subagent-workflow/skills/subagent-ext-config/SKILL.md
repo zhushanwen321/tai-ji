@@ -66,11 +66,11 @@ config.json 位于 pi agent 目录下的 `subagents/config.json`，随环境不�
 
 | 优先级 | 来源 |
 |------|------|
-| 1 | `subagent_start` 调用的 `engine` 字段（单次指定；`subagents` 批量工具无此字段） |
+| 1 | `subagent_start` 调用的 `engine` 字段（单次指定；`subagent_batch` 批量工具无此字段） |
 | 2 | agent `.md` frontmatter 的 `engine` 字段 |
 | 3 | config.json 的 `defaultEngine` |
 
-三层（调用字段 / agent frontmatter / 全局缺省）任一指定了引擎，运行期就按该引擎执行——**不可用即结构化失败，不换目标**：probe 失败一律报 `engine_probe_failed`（含逐项 check 摘要与恢复指引），id 未注册报 `engine_not_found`；要换引擎只能由调用方显式指定——`subagent_start` 改传 `engine` 字段，`subagents` 批量派发改 agent frontmatter 或 config `defaultEngine`。三层全缺时落内置缺省 `pi`（免探）。
+三层（调用字段 / agent frontmatter / 全局缺省）任一指定了引擎，运行期就按该引擎执行——**不可用即结构化失败，不换目标**：probe 失败一律报 `engine_probe_failed`（含逐项 check 摘要与恢复指引），id 未注册报 `engine_not_found`；要换引擎只能由调用方显式指定——`subagent_start` 改传 `engine` 字段，`subagent_batch` 批量派发改 agent frontmatter 或 config `defaultEngine`。三层全缺时落内置缺省 `pi`（免探）。
 
 ## 生效时机与 probe 缓存
 
@@ -82,7 +82,7 @@ config.json 位于 pi agent 目录下的 `subagents/config.json`，随环境不�
 改完配置后：
 
 1. **新建 session**（必须——当前 session 不重读配置）。
-2. 让主 agent 派一个 subagent（例：用 `subagents` 工具发一个成员的简单批量 `{"tasks":[{"task":"<任务>"}]}`，或用 `subagent_start` 派单任务并直接传 `engine` 字段）。
+2. 让主 agent 派一个 subagent（例：用 `subagent_batch` 工具发一个成员的简单批量 `{"tasks":[{"task":"<任务>"}]}`，或用 `subagent_start` 派单任务并直接传 `engine` 字段）。
 3. taiji composer **任务托盘**（task tray）的 Subagents 面板看该项最左的引擎 icon（pi / zcode）——这是统一验证面。
 4. journal 落点 `~/.taiji-dev/engines/<engineId>/` **仅适用非 pi 引擎**（zcode 分支建 journal）；pi 分支不建 journal，pi 任务以 icon 为验证面。
 

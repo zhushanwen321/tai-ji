@@ -43,7 +43,7 @@ export type ExecutionStatus = "running" | "idle";
  *   "tool"     — 主 agent 经 subagent 工具手动派发（现状全部 record）；
  *   "workflow" — workflow 脚本内 agent() 调用派发（生产写入方 W2 executeWorkflowAgent 接线）。
  * 缺省语义 = "tool"：存量 record / 未传字段的 entry 反序列化产物一律视为手动派发，
- * 四个派生视图消费方（subagents tool list / renderer 侧栏计数 / renderer 后台工作指示 /
+ * 四个派生视图消费方（subagent_manage action:'list' / renderer 侧栏计数 / renderer 后台工作指示 /
  * TUI /subagents）对缺省 record 的可见性与历史行为完全一致（零迁移）。
  */
 export type RecordOrigin = "tool" | "workflow";

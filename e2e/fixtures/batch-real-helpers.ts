@@ -154,6 +154,35 @@ export async function waitUntil(pred: () => boolean, deadlineMs: number, interva
   return pred()
 }
 
+/**
+ * 派发主回合 turn 等待（message.send 后等 message.complete 帧到齐）：超时先落 diag
+ * 归因（已见事件型 + runtime 日志尾 + 控制台错误）再断言失败——失败归因纪律
+ * （禁不归因重试）。命中后清空事件缓冲隔离下一断言范围。diag 落点与失败文案差异
+ * 由调用方注入（batch-window-lifecycle / batch-zcode-shared-lifecycle 共用）。
+ */
+export async function awaitMainTurnComplete(opts: {
+  /** 监听 WS 的事件累积缓冲 */
+  events: WsFrame[]
+  timeoutMs: number
+  /** dataDir（runtime 日志尾 diag 载荷的取数根） */
+  dataDir: string
+  consoleErrors: string[]
+  diag: (name: string, data: Record<string, unknown>) => void
+  diagName: string
+  foundMessage: string
+}): Promise<void> {
+  const done = await waitUntil(() => opts.events.filter((e) => e.type === 'message.complete').length > 0, opts.timeoutMs)
+  if (!done) {
+    opts.diag(opts.diagName, {
+      seen: [...new Set(opts.events.map((e) => String(e.type)))],
+      runtimeLogsTail: readRuntimeLogs(opts.dataDir).slice(-DIAG_LOG_TAIL_CHARS),
+      consoleErrors: opts.consoleErrors,
+    })
+  }
+  expect(done, opts.foundMessage).toBe(true)
+  opts.events.length = 0
+}
+
 /** 递归列 suffix 匹配文件（depth 防失控）。 */
 export function listFilesRecursive(root: string, suffix: string, depth = 0, acc: string[] = []): string[] {
   if (depth > MAX_SCAN_DEPTH || !fs.existsSync(root)) return acc

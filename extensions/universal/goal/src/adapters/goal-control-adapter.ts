@@ -378,9 +378,6 @@ export function registerGoalControlTool(pi: ExtensionAPI, session: GoalSession):
 	pi.registerTool({
 		name: "goal_control",
 		label: "Goal Control",
-		// deferred（tool-declaration-slimming D4）：不常驻声明，tool_search 命中即激活；
-		// 迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
-		exposure: "deferred",
 		description: `管理当前会话的目标（goal）。目标用于追踪需要完成验证的复杂工作。动作：create（创建）| complete（完成）| report_blocked（阻塞报告）——各参数必填性与用法见 schema 字段说明，触发纪律见 guidelines。
 
 控制权归属：pause/resume 和 budget 变更由用户经 /goal 命令控制，你不能修改。`,

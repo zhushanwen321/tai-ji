@@ -153,9 +153,6 @@ export function registerCompactContextTool(
 	pi.registerTool({
 		name: "compact_context",
 		label: "compact_context",
-		// deferred（tool-declaration-slimming D4）：不常驻声明，tool_search 命中即激活；
-		// 迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
-		exposure: "deferred",
 		description: TOOL_DESCRIPTION,
 		parameters: CompactContextParams,
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {

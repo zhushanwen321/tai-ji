@@ -8,9 +8,9 @@
  * 断言语义来源（两段叠加，以 W1 新介质为准）：
  * - 场景编排 = 原始场景 S3（e2e-map E2E-BATCH-03 note）：坏 agent 路径 partial /
  *   subagent_message 拒绝（workflow-origin 域边界拒绝 + list inspect 指引 + 恢复句
- *   "To get these results, re-dispatch via the subagents tool."）/ 非法成员 agent 入口拒绝
+ *   "To get these results, re-dispatch via the subagent_batch tool."）/ 非法成员 agent 入口拒绝
  *   （subagent-tool-interface-refactor §4.3：S3c 随 `agents` 参数删除退役，改测成员对象
- *   非法 agent——非 `^/` 绝对路径——在 subagents 工具入口被拒）。
+ *   非法 agent——非 `^/` 绝对路径——在 subagent_batch 工具入口被拒）。
  * - 持久介质断言 = W1 设计（w1-run-record-journal-authority，历史设计档案已随 .tmp 清理，git 可追溯）§4.2 场景 1
  *   （介质归位）+ D7 终态双维度语义：
  *   ① S3a partial：fan-out 脚本返回 status=partial（脚本层失败），但 run 自身正常完成——
@@ -18,7 +18,7 @@
  *      结论」与「run 自身怎么死的 = outcome:failed」在通知侧可区分）；
  *   ② v2 条目每实体两条（registered/settled）且 settled 数 === registered 数
  *      （每注册实体必有终态——W1 D4 恢复语义的静息面）；
- *   ③ S3c 入口拒绝：非法成员 agent 在 subagents 工具入口被拒——零 run journal
+ *   ③ S3c 入口拒绝：非法成员 agent 在 subagent_batch 工具入口被拒——零 run journal
  *      （拒绝先于 run 创建，早于旧 `agents` 错配的模板入口 fail-fast 层级）、零成员派发。
  *
  * 可复用登记声明：本 spec 是 E2E-BATCH-03 的可复用真机资产（后续触碰批量失败行为时
@@ -69,7 +69,7 @@ import path from 'node:path'
 
 const MAIN_MARKER = 'BATCH-S3-MAIN-5310'
 const BAD_AGENT_PATH = '/nonexistent/broken-agent-5313.md'
-/** S3c 非法成员 agent（非 `^/` 绝对路径——相对路径在 subagents 工具入口被拒，
+/** S3c 非法成员 agent（非 `^/` 绝对路径——相对路径在 subagent_batch 工具入口被拒，
  *  subagent-tool-interface-refactor §3.1.2 成员对象 agent pattern）。 */
 const INVALID_MEMBER_AGENT_PATH = 'relative-agent-5316.md'
 /** S3c 入口拒绝后的复核静默窗（主 turn complete 已意味着工具调用被拒且模型收到
@@ -77,7 +77,7 @@ const INVALID_MEMBER_AGENT_PATH = 'relative-agent-5316.md'
 const NO_RUN_SETTLE_MS = 3_000
 /** message 域边界拒绝文案锚（subagent-actions-core.ts，U4 §1.4 D7 域边界）。 */
 const REJECT_BOUNDARY_SNIPPET = 'workflow-origin record'
-const REJECT_REDIPATCH_SNIPPET = 're-dispatch via the subagents tool'
+const REJECT_REDIPATCH_SNIPPET = 're-dispatch via the subagent_batch tool'
 
 const GOOD_AGENT_MD = `---
 name: s3-fixture-echo-agent
@@ -251,7 +251,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
       },
     ]
     const prompt =
-      `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagents\` tool. ` +
+      `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagent_batch\` tool. ` +
       `tasks = ${JSON.stringify(tasks)} ` +
       `(each member object carries its own "agent" field, in dispatch order — the second path is intentionally broken; do not fix it). ` +
       `After the tool call returns, reply with only the word DISPATCHED. [${MAIN_MARKER}]`
@@ -365,7 +365,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
     }
     expect(rejectArrived, `subagent_message 工具结果应含域边界拒绝文案 "${REJECT_BOUNDARY_SNIPPET}"（workflow-origin record 不进 message 通道）`).toBe(true)
     const sessionTextAll = fs.readFileSync(s.sessionFile, 'utf8')
-    expect(sessionTextAll.includes(REJECT_REDIPATCH_SNIPPET), '拒绝文案应含恢复指引 "re-dispatch via the subagents tool"').toBe(true)
+    expect(sessionTextAll.includes(REJECT_REDIPATCH_SNIPPET), '拒绝文案应含恢复指引 "re-dispatch via the subagent_batch tool"').toBe(true)
     await s.page.screenshot({ path: testInfo.outputPath('s3b-rejected.png'), fullPage: true })
     console.log('[batch-s3b] PASS：message 域边界拒绝')
   })
@@ -374,7 +374,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
     test.setTimeout(300_000)
     const s = shared!
     // 成员对象形状（§3.1.2 终态）：非法 agent 走成员对象 agent 字段——相对路径
-    // 不匹配 schema `^/` pattern，在 subagents 工具入口被拒（旧 S3c 的 `agents`
+    // 不匹配 schema `^/` pattern，在 subagent_batch 工具入口被拒（旧 S3c 的 `agents`
     // 数量错配 fail-fast 随该参数退役；拒绝层级早于旧模板入口，run 不创建）。
     const tasks = [
       { task: 'Reply with a one-line summary ending with the exact token BATCH-S3C-1-5314.' },
@@ -384,7 +384,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
       },
     ]
     const prompt =
-      `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagents\` tool. ` +
+      `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagent_batch\` tool. ` +
       `tasks = ${JSON.stringify(tasks)} ` +
       `(the second member's agent path is INTENTIONALLY invalid — it is not an absolute path; ` +
       `do not fix it and do not retry with a different path — call the tool exactly as specified, once). ` +

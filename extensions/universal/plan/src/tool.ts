@@ -1382,9 +1382,6 @@ export function registerPlanTool(
   pi.registerTool({
     name: "plan",
     label: "Plan Mode",
-    // deferred（tool-declaration-slimming D4）：不常驻声明，tool_search 命中即激活；
-    // 迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
-    exposure: "deferred",
     // 串行声明（D-B1-4）：全部 action 就地突变共享 PlanState，声明串行消除并行交错类
     //（A1 死锁机理的调度半边）。pi 声明粒度是工具级——同批任一 sequential 工具
     // 使整批工具顺序执行。pi 实装锚点（1.0.0 复核）：dist/core/extensions/types.d.ts
