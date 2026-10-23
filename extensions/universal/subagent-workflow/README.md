@@ -9,12 +9,12 @@ Pi 的 subagent + workflow 合并包：任务委派 + 多 agent 编排（chain /
 | `subagent_start` | —（单动作） | `task` + `slug`（≤35 字符）必填，`agent`（.md 绝对路径，缺省 general-purpose）、`model`、`engine`、`fork`、`worktree`、`maxTurns`、`idleTimeoutMs` 等 start 场景可选字段 |
 | `subagent_manage` | `list` / `cancel` / `close`（3 个） | `cancel` / `close`：`subagentId` 必填 |
 | `subagent_message` | `message` / `fork-from`（2 个） | `message`：`subagentId` + `text` 必填；`fork-from`：`sourceSubagentId` 必填 |
-| `subagents` | —（单动作，批量派发，常驻） | `tasks` 必填（成员对象数组，每元素 `{task, agent?, model?, thinkingLevel?}` 为一次派发，全部并行、结果一条通知收尾），可选运行级 `agent` / `model` / `thinkingLevel`（成员缺省值）与 `slug`、`tokens`、`time`；run 级状态控制走 `workflow_control`。形状与示例见「批量派发（`subagents`）」节 |
+| `subagent_batch` | —（单动作，批量派发，常驻） | `tasks` 必填（成员对象数组，每元素 `{task, agent?, model?, thinkingLevel?}` 为一次派发，全部并行、结果一条通知收尾），可选运行级 `agent` / `model` / `thinkingLevel`（成员缺省值）与 `slug`、`tokens`、`time`；run 级状态控制走 `workflow_control`。形状与示例见「批量派发（`subagent_batch`）」节 |
 | `workflow_run` | —（单动作） | `name`（`.js` 绝对路径）+ 可选 `args` / 预算，见「Workflow 生命周期」节 |
 | `workflow_control` | `status` / `abort` / `resume`（3 个） | `status`：可选 `runId`（带 = 单 run 成员表视图）；`abort` / `resume`：`runId` 必填，见「Workflow 生命周期」节 |
 | `workflow-script` | `generate` / `lint` / `save` / `delete` / `list`（5 个） | `generate`：`script` + `name`（可选 `description`）；`save`：`name`（可 `newName` 改名）；`lint` / `delete`：`name` |
 
-### 批量派发（`subagents`）
+### 批量派发（`subagent_batch`）
 
 `tasks` 是成员对象数组，每个元素一次派发；全部成员并行执行，run 收尾时一条通知带回全部结果：
 
@@ -41,7 +41,7 @@ Pi 的 subagent + workflow 合并包：任务委派 + 多 agent 编排（chain /
 { "defaultTools": ["+tool_search"] }
 ```
 
-`+` 前缀是增量修饰（保留 read/bash/edit/write 默认集）。未开启 `tool_search` 时该工具对模型不可见。`subagents` 为常驻注册，无需 `tool_search`。
+`+` 前缀是增量修饰（保留 read/bash/edit/write 默认集）。未开启 `tool_search` 时该工具对模型不可见。`subagent_batch` 为常驻注册，无需 `tool_search`。
 
 ## 内置 Agents
 
@@ -109,7 +109,7 @@ Workflow run 有两类结束形态：**终局**（`done`，outcome 区分 done /
 
 ## 从旧版本升级
 
-批量工具 `subagents` 的 `tasks` 从字符串数组改为成员对象数组；旧参数 `agents`（逗号分隔执行者串）与 `aggregate`（结果归约开关）已从工具移除。旧写法对照：
+批量工具 `subagent_batch` 的 `tasks` 从字符串数组改为成员对象数组；旧参数 `agents`（逗号分隔执行者串）与 `aggregate`（结果归约开关）已从工具移除。旧写法对照：
 
 | 旧写法 | 新写法 |
 |--------|--------|

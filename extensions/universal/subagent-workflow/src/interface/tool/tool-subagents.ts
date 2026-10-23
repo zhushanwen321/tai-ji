@@ -70,7 +70,7 @@ import type { RunStartDetails, WorkflowToolResult } from "./tool-result.ts";
 /**
  * 本工具的固定执行体（内置模板）脚本名。
  *
- * 常量而非参数：subagents tool 的契约就是「把 tasks 透传给 fan-out 模板」——参数化会让
+ * 常量而非参数：subagent_batch tool 的契约就是「把 tasks 透传给 fan-out 模板」——参数化会让
  * 工具的语义随脚本漂移（对照 D3「执行管道唯一」）。脚本按名经 registry 解析
  * （内置名优先链与 workflow_run actionRun 同一条，见 plan U2「复刻既有加载路径」）。
  */
@@ -140,7 +140,7 @@ function subagentsStartupText(
 function assertNoLegacyBatchFields(params: SubagentsToolParams): void {
   if (!("agents" in params || "aggregate" in params)) return;
   throw new Error(
-    "subagents no longer accepts 'agents'/'aggregate' — batch members are objects now.\n" +
+    "subagent_batch no longer accepts 'agents'/'aggregate' — batch members are objects now.\n" +
     'Correct (per-member executor): {"tasks":[{"task":"...","agent":"/abs/a.md"},{"task":"...","agent":"/abs/b.md"}]}\n' +
     'Correct (one executor for every member): {"tasks":[{"task":"..."}],"agent":"/abs/a.md"}\n' +
     "'aggregate' is removed: reduce the results into one conclusion yourself after the batch returns.",
@@ -171,7 +171,7 @@ function assertBatchModelsInCatalog(params: SubagentsToolParams): void {
   const modelService = getModelConfigService();
   if (modelService === null) {
     throw new Error(
-      "Model catalog unavailable (model service not initialized) — subagents cannot verify explicit member models (fail-closed). " +
+      "Model catalog unavailable (model service not initialized) — subagent_batch cannot verify explicit member models (fail-closed). " +
       "Recovery: retry after the session has fully started (session_start injects the model registry), " +
       "or omit the model params to inherit defaults.",
     );
@@ -203,7 +203,7 @@ export async function runSubagentsBatch(
   const tasks = params.tasks;
   if (!Array.isArray(tasks) || tasks.length === 0) {
     throw new Error(
-      'subagents requires \'tasks\' parameter (non-empty array of member objects). Correct: {"tasks":[{"task":"..."}]}',
+      'subagent_batch requires \'tasks\' parameter (non-empty array of member objects). Correct: {"tasks":[{"task":"..."}]}',
     );
   }
 
@@ -212,7 +212,7 @@ export async function runSubagentsBatch(
   for (const [index, member] of tasks.entries()) {
     if (typeof member.task !== "string" || member.task.trim() === "") {
       throw new Error(
-        `subagents member[${index}] 'task' must be a non-empty prompt. ` +
+        `subagent_batch member[${index}] 'task' must be a non-empty prompt. ` +
         'Correct: {"tasks":[{"task":"<complete self-contained prompt>"}]}',
       );
     }

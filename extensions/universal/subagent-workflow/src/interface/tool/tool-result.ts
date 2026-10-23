@@ -1,5 +1,5 @@
 /**
- * subagent-workflow tool 结果的公共类型（workflow_run / workflow_control / subagents /
+ * subagent-workflow tool 结果的公共类型（workflow_run / workflow_control / subagent_batch /
  * workflow-script 四个 tool 共用）。
  *
  * 此前两文件各自 `export interface ToolResult`（同目录同名异形，`details` 必填/可空
