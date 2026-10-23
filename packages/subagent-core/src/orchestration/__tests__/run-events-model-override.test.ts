@@ -26,8 +26,8 @@ import {
   INITIAL_RUN_EVENT_FOLD,
   latestModelOverride,
   parseRecordStreamLine,
-} from "../orchestration/run-events.ts";
-import type { ModelOverrideEvent, WorkflowRunEvent } from "../orchestration/run-events.ts";
+} from "../run-events.ts";
+import type { ModelOverrideEvent, WorkflowRunEvent } from "../run-events.ts";
 
 // ── 夹具 ─────────────────────────────────────────────────────────────────────
 

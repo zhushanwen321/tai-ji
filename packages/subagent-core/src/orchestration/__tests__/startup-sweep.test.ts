@@ -24,10 +24,10 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { readRunTerminalManifest } from "../persistence/manifest-store.ts";
+import { readRunTerminalManifest } from "../../execution/persistence/manifest-store.ts";
 import { RUN_EVENTS_SUFFIX } from "../../shared/run-vocabulary.ts";
-import { createRunEventJournal, type WorkflowRunEventInput } from "../../orchestration/run-events.ts";
-import { startupSweep, type SweepLogChannel } from "../../orchestration/startup-sweep.ts"; // [D1 拆边 Class C] 实现已上移 orchestration/
+import { createRunEventJournal, type WorkflowRunEventInput } from "../run-events.ts";
+import { startupSweep, type SweepLogChannel } from "../startup-sweep.ts"; // [D1 拆边 Class C] 实现已上移 orchestration/
 
 /** mock 日志通道（按方法名断言级别落位——规格 6 签名的级别结构承载位）。 */
 function makeLog(): SweepLogChannel {

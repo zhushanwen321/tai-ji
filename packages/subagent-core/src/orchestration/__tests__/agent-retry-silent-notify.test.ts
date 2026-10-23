@@ -18,19 +18,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   setRunEventJournalDirForTest,
-} from "../../orchestration/terminal-actions.ts";
+} from "../terminal-actions.ts";
 import {
   dispatchAgentSettled,
-} from "../../orchestration/terminal-actions.ts";
-import { executeAgentCall } from "../../orchestration/execute-agent-call.ts";
-import { AgentCall } from "../../orchestration/models/agent-call.ts";
-import { Budget } from "../../orchestration/models/budget.ts";
-import { RunRuntime } from "../../orchestration/models/run-runtime.ts";
-import { Trace } from "../../orchestration/models/trace.ts";
-import type { AgentResult } from "../../orchestration/models/types.ts";
-import { WorkflowRun } from "../../orchestration/models/workflow-run.ts";
-import type { WorkerHandle } from "../../orchestration/worker-handle.ts";
-import { createRunEventJournal } from "../../orchestration/run-events.ts";
+} from "../terminal-actions.ts";
+import { executeAgentCall } from "../execute-agent-call.ts";
+import { AgentCall } from "../models/agent-call.ts";
+import { Budget } from "../models/budget.ts";
+import { RunRuntime } from "../models/run-runtime.ts";
+import { Trace } from "../models/trace.ts";
+import type { AgentResult } from "../models/types.ts";
+import { WorkflowRun } from "../models/workflow-run.ts";
+import type { WorkerHandle } from "../worker-handle.ts";
+import { createRunEventJournal } from "../run-events.ts";
 
 // ── harness ──────────────────────────────────────────────────
 

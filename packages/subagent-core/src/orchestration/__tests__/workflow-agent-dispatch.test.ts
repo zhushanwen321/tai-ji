@@ -40,32 +40,32 @@ const { loggerMock } = vi.hoisted(() => ({
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { EngineSdkError } from "@zhushanwen/subagent-engine-sdk";
-import { trySettleLegacyClosed } from "../persistence/execution-record.ts";
-import { createRecord } from "../persistence/execution-record.ts";
-import { createNotifyHost } from "../notify/notify-host.ts";
-import { ModelConfigService } from "../assembly/model-config-service.ts";
-import type { RecordStore } from "../persistence/record-store.ts";
-import { SubagentStream } from "../assembly/stream-sink.ts";
-import { SAR_UNATTACHED_PARENT_RUN_ID } from "../assembly/subprocess-agent-runner.ts";
-import { SubagentService } from "../subagent-service.ts";
-import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
-import type { SubagentRecordEntryV2 } from "../persistence/record-entry.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
+import { trySettleLegacyClosed } from "../../execution/persistence/execution-record.ts";
+import { createRecord } from "../../execution/persistence/execution-record.ts";
+import { createNotifyHost } from "../../execution/notify/notify-host.ts";
+import { ModelConfigService } from "../../execution/assembly/model-config-service.ts";
+import type { RecordStore } from "../../execution/persistence/record-store.ts";
+import { SubagentStream } from "../../execution/assembly/stream-sink.ts";
+import { SAR_UNATTACHED_PARENT_RUN_ID } from "../../execution/assembly/subprocess-agent-runner.ts";
+import { SubagentService } from "../../execution/subagent-service.ts";
+import type { AgentCallOpts, AgentResult } from "../models/types.ts";
+import type { SubagentRecordEntryV2 } from "../../execution/persistence/record-entry.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../../execution/persistence/record-entry.ts";
 import { resetCoreForTests } from "../../core/host-services.ts";
-import { clearEngines, registerEngine } from "../engine/registry.ts";
-import type { EngineCapabilities } from "../engine/types.ts";
-import type { EnginePort } from "../engine/port.ts";
-import type { ExecutionRecord } from "../domain/record-model.ts";
-import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "./helpers/fake-engine-port.ts";
-import { CTX_MODEL as ctxModel, emptyRegistry } from "./helpers/model-registry-mock.ts";
-import { makePi, type PiMock } from "./helpers/pi-mock.ts";
+import { clearEngines, registerEngine } from "../../execution/engine/registry.ts";
+import type { EngineCapabilities } from "../../execution/engine/types.ts";
+import type { EnginePort } from "../../execution/engine/port.ts";
+import type { ExecutionRecord } from "../../execution/domain/record-model.ts";
+import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "../../execution/__tests__/helpers/fake-engine-port.ts";
+import { CTX_MODEL as ctxModel, emptyRegistry } from "../../execution/__tests__/helpers/model-registry-mock.ts";
+import { makePi, type PiMock } from "../../execution/__tests__/helpers/pi-mock.ts";
 // [D3 协议版 P6] armed 消费写入 journal 记录端到端用例：journal 注入点（orchestration/pump 公共
 // 测试钩子）+ journal 读回（run-events 唯一实装）。
 import {
   dispatchRunTrigger,
   setRunEventJournalDirForTest,
-} from "../../orchestration/terminal-actions.ts";
-import { createRunEventJournal, type WorkflowRunEvent } from "../../orchestration/run-events.ts";
+} from "../terminal-actions.ts";
+import { createRunEventJournal, type WorkflowRunEvent } from "../run-events.ts";
 
 // ── 辅助：service 构造（notify-gate / routing 测试同款范式）──
 

@@ -18,15 +18,15 @@ const { loggerMock } = vi.hoisted(() => ({
     error: vi.fn(),
   },
 }));
-vi.mock("../core/logger.ts", () => ({
+vi.mock("../../core/logger.ts", () => ({
   getLogger: () => loggerMock,
 }));
 
-import { handleWorkerMessage } from "../orchestration/worker-message-pump.ts";
-import type { LifecycleDeps, WorkerHandlers } from "../orchestration/models/ports.ts";
-import { Trace } from "../orchestration/models/trace.ts";
-import type { AgentResult } from "../orchestration/models/types.ts";
-import type { WorkflowRun } from "../orchestration/models/workflow-run.ts";
+import { handleWorkerMessage } from "../worker-message-pump.ts";
+import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
+import { Trace } from "../models/trace.ts";
+import type { AgentResult } from "../models/types.ts";
+import type { WorkflowRun } from "../models/workflow-run.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 

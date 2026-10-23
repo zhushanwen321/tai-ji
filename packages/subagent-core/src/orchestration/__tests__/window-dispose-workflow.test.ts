@@ -11,21 +11,21 @@
 // 权威源：技术设计 §3.1 机制 2/3、§3.3 决策 1、§5 U2 + ADR-0079。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AgentCall } from "../../../orchestration/models/agent-call.ts";
-import { Budget } from "../../../orchestration/models/budget.ts";
-import { RunRuntime } from "../../../orchestration/models/run-runtime.ts";
-import { Trace } from "../../../orchestration/models/trace.ts";
+import { AgentCall } from "../models/agent-call.ts";
+import { Budget } from "../models/budget.ts";
+import { RunRuntime } from "../models/run-runtime.ts";
+import { Trace } from "../models/trace.ts";
 import type {
   AgentResult,
   ExecutionTraceNode,
-} from "../../../orchestration/models/types.ts";
-import { WorkflowRun } from "../../../orchestration/models/workflow-run.ts";
-import type { LifecycleDeps } from "../../../orchestration/models/ports.ts";
-import type { WorkerHandle } from "../../../orchestration/worker-handle.ts";
+} from "../models/types.ts";
+import { WorkflowRun } from "../models/workflow-run.ts";
+import type { LifecycleDeps } from "../models/ports.ts";
+import type { WorkerHandle } from "../worker-handle.ts";
 import {
   dispatchRunCreated,
   finalizeRun,
-} from "../../../orchestration/terminal-actions.ts";
+} from "../terminal-actions.ts";
 import {
   resetWorkflowWindowEngineStatesForTest,
   resolveWorkflowWindowEnginePort,
@@ -33,15 +33,15 @@ import {
   setWorkflowWindowEngineGateway,
   workflowWindowEngineState,
   type EngineRouteResult,
-} from "../routing.ts";
-import * as registryModule from "../registry.ts";
-import { clearEngines, registerEngine } from "../registry.ts";
+} from "../../execution/engine/routing.ts";
+import * as registryModule from "../../execution/engine/registry.ts";
+import { clearEngines, registerEngine } from "../../execution/engine/registry.ts";
 import type {
   EngineCapabilities,
   ProbeReport,
   SessionView,
-} from "../types.ts";
-import type { EnginePort, EngineRunResult, RunContext } from "../port.ts";
+} from "../../execution/engine/types.ts";
+import type { EnginePort, EngineRunResult, RunContext } from "../../execution/engine/port.ts";
 
 // ── 替身 ─────────────────────────────────────────────────────
 

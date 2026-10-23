@@ -9,8 +9,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { AgentCallOpts } from "../orchestration/models/types.ts";
-import { resolveAgentOpts } from "../orchestration/agent-opts-resolver.ts";
+import type { AgentCallOpts } from "../models/types.ts";
+import { resolveAgentOpts } from "../agent-opts-resolver.ts";
 
 describe("M2 append-content probe (design.json TC1)", () => {
   it("schema + agent 时 appendSystemPrompt 只含 SO 指令内容（非路径、非 agent 正文）", () => {

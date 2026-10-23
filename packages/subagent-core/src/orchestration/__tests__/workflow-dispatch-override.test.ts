@@ -28,14 +28,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { loggerMock } = vi.hoisted(() => ({
   loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-vi.mock("../core/logger.ts", () => ({ getLogger: () => loggerMock }));
+vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 // [F1-18] scanRunEvents 调用计数（透传包装，行为零变化）——负缓存用例的观测点：
 // 派发链上该模块路径的全部消费者（覆盖重建 / 成员复用绑定）共享同一计数，按
 // runId 过滤归因。
 const { scanCalls } = vi.hoisted(() => ({ scanCalls: [] as string[] }));
-vi.mock("../execution/persistence/run-event-journal.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../execution/persistence/run-event-journal.ts")>();
+vi.mock("../../execution/persistence/run-event-journal.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../execution/persistence/run-event-journal.ts")>();
   return {
     ...actual,
     scanRunEvents: async (runId: string, journalDir?: string) => {
@@ -45,23 +45,23 @@ vi.mock("../execution/persistence/run-event-journal.ts", async (importOriginal) 
   };
 });
 
-import { ModelConfigService } from "../execution/assembly/model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../execution/assembly/model-resolver.ts";
-import { createRecord, trySettleLegacyClosed } from "../execution/persistence/execution-record.ts";
-import type { RecordStore } from "../execution/persistence/record-store.ts";
-import type { ExecutionRecord, ModelOverride } from "../execution/domain/record-model.ts";
-import { SubagentService } from "../execution/subagent-service.ts";
-import { clearEngines } from "../execution/engine/registry.ts";
-import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "../execution/__tests__/helpers/fake-engine-port.ts";
-import { CTX_MODEL } from "../execution/__tests__/helpers/model-registry-mock.ts";
-import { makePi, type PiMock } from "../execution/__tests__/helpers/pi-mock.ts";
-import { dispatchRunTrigger, setRunEventJournalDirForTest } from "../orchestration/terminal-actions.ts";
-import { createRunEventJournal } from "../orchestration/run-events.ts";
-import { resumeRun } from "../orchestration/resume-run.ts";
-import type { LifecycleDeps } from "../orchestration/models/ports.ts";
-import type { AgentCallOpts } from "../orchestration/models/types.ts";
-import type { SubagentRecordEntryV2 } from "../execution/persistence/record-entry.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../execution/persistence/record-entry.ts";
+import { ModelConfigService } from "../../execution/assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../../execution/assembly/model-resolver.ts";
+import { createRecord, trySettleLegacyClosed } from "../../execution/persistence/execution-record.ts";
+import type { RecordStore } from "../../execution/persistence/record-store.ts";
+import type { ExecutionRecord, ModelOverride } from "../../execution/domain/record-model.ts";
+import { SubagentService } from "../../execution/subagent-service.ts";
+import { clearEngines } from "../../execution/engine/registry.ts";
+import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "../../execution/__tests__/helpers/fake-engine-port.ts";
+import { CTX_MODEL } from "../../execution/__tests__/helpers/model-registry-mock.ts";
+import { makePi, type PiMock } from "../../execution/__tests__/helpers/pi-mock.ts";
+import { dispatchRunTrigger, setRunEventJournalDirForTest } from "../terminal-actions.ts";
+import { createRunEventJournal } from "../run-events.ts";
+import { resumeRun } from "../resume-run.ts";
+import type { LifecycleDeps } from "../models/ports.ts";
+import type { AgentCallOpts } from "../models/types.ts";
+import type { SubagentRecordEntryV2 } from "../../execution/persistence/record-entry.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../../execution/persistence/record-entry.ts";
 
 // ============================================================
 // helpers
@@ -435,7 +435,7 @@ describe("workflow 派发链覆盖消费（U4b）", () => {
       workerHost: {
         start: vi.fn(
           () =>
-            ({ postMessage: vi.fn(), terminate: vi.fn(async () => {}) }) as unknown as import("../orchestration/worker-handle.ts").WorkerHandle,
+            ({ postMessage: vi.fn(), terminate: vi.fn(async () => {}) }) as unknown as import("../worker-handle.ts").WorkerHandle,
         ),
       },
       runner: { run: vi.fn(async () => ({ content: "" })) },

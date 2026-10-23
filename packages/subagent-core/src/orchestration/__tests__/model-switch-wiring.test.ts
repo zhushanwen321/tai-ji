@@ -41,29 +41,29 @@ const routingMock = vi.hoisted(() => ({
   resolveWorkflowWindowEnginePort: vi.fn(),
   disposeWorkflowWindowEngineState: vi.fn(),
 }));
-vi.mock("../execution/engine/routing.ts", () => ({
+vi.mock("../../execution/engine/routing.ts", () => ({
   resolveWorkflowWindowEnginePort: routingMock.resolveWorkflowWindowEnginePort,
   disposeWorkflowWindowEngineState: routingMock.disposeWorkflowWindowEngineState,
 }));
 
-import type { SubagentRecord } from "../execution/assembly/types.ts";
-import { RecordEngineIdentityError } from "../execution/engine/common/session-view-service.ts";
-import { DEFAULT_ENGINE_ID } from "../execution/engine/registry.ts";
-import { createRecord } from "../execution/persistence/execution-record.ts";
-import type { ExecutionRecord } from "../execution/domain/record-model.ts";
+import type { SubagentRecord } from "../../execution/assembly/types.ts";
+import { RecordEngineIdentityError } from "../../execution/engine/common/session-view-service.ts";
+import { DEFAULT_ENGINE_ID } from "../../execution/engine/registry.ts";
+import { createRecord } from "../../execution/persistence/execution-record.ts";
+import type { ExecutionRecord } from "../../execution/domain/record-model.ts";
 import {
   MODEL_SWITCH_MEMBER_LIST_LIMIT,
   assertRunNotTerminalForSwitch,
   listAcceptedMemberRunIdsForSwitch,
   resolveMemberEnginePortForSwitch,
-} from "../execution/service/model-switch-wiring.ts";
-import type { SetModelCapableEnginePort } from "../execution/service/run-model-switch-aggregate.ts";
+} from "../../execution/service/model-switch-wiring.ts";
+import type { SetModelCapableEnginePort } from "../../execution/service/run-model-switch-aggregate.ts";
 import {
   createRunEventJournal,
   type RunEventJournal,
   type WorkflowRunEventInput,
-} from "../orchestration/run-events.ts";
-import { setRunEventJournalDirForTest } from "../orchestration/terminal-actions.ts";
+} from "../run-events.ts";
+import { setRunEventJournalDirForTest } from "../terminal-actions.ts";
 
 // ============================================================
 // ① assertRunNotTerminalForSwitch —— journal fold 直驱

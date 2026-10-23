@@ -20,18 +20,18 @@
 // worker-message-pump.ts resolveRunEventJournal 的 VITEST 防线）。
 import { describe, expect, it, vi } from "vitest";
 
-import { runWorkflow } from "../../orchestration/lifecycle.ts";
-import { RunRuntime } from "../../orchestration/models/run-runtime.ts";
-import { Trace } from "../../orchestration/models/trace.ts";
-import { Budget } from "../../orchestration/models/budget.ts";
-import type { RunSpec } from "../../orchestration/models/run-spec.ts";
-import type { LifecycleDeps } from "../../orchestration/models/ports.ts";
-import type { WorkerHandle } from "../../orchestration/worker-handle.ts";
+import { runWorkflow } from "../lifecycle.ts";
+import { RunRuntime } from "../models/run-runtime.ts";
+import { Trace } from "../models/trace.ts";
+import { Budget } from "../models/budget.ts";
+import type { RunSpec } from "../models/run-spec.ts";
+import type { LifecycleDeps } from "../models/ports.ts";
+import type { WorkerHandle } from "../worker-handle.ts";
 import {
   dispatchRunCreated,
   finalizeRun,
-} from "../../orchestration/terminal-actions.ts";
-import { WorkflowRun } from "../../orchestration/models/workflow-run.ts";
+} from "../terminal-actions.ts";
+import { WorkflowRun } from "../models/workflow-run.ts";
 
 // ── harness ──────────────────────────────────────────────────
 

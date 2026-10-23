@@ -12,7 +12,7 @@
 // 纯函数测试：不依赖 Pi 运行时、不 spawn 进程、不 mock。只 import 被测函数。
 import { describe, expect, it } from "vitest";
 
-import { formatSchemaInstruction } from "../../orchestration/agent-opts-resolver.ts";
+import { formatSchemaInstruction } from "../agent-opts-resolver.ts";
 
 describe("formatSchemaInstruction", () => {
   // ── 指令文本契约 ──────────────────────────────────────────────

@@ -25,21 +25,21 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { findRunSettlementEvidence } from "../persistence/run-state-evidence.ts";
+import { findRunSettlementEvidence } from "../../execution/persistence/run-state-evidence.ts";
 import { RUN_EVENTS_SUFFIX } from "../../shared/run-vocabulary.ts";
-import { createRunEventJournal } from "../../orchestration/run-events.ts";
+import { createRunEventJournal } from "../run-events.ts";
 import {
   setRunEventJournalDirForTest,
-} from "../../orchestration/terminal-actions.ts";
-import { RecordStore } from "../persistence/record-store.ts";
-import { runPendingReconcileSweepForService } from "../registry-reconcile/sweep-binding.ts";
-import type { ReconcileSweepBinding } from "../registry-reconcile/sweep-binding.ts";
+} from "../terminal-actions.ts";
+import { RecordStore } from "../../execution/persistence/record-store.ts";
+import { runPendingReconcileSweepForService } from "../../execution/registry-reconcile/sweep-binding.ts";
+import type { ReconcileSweepBinding } from "../../execution/registry-reconcile/sweep-binding.ts";
 import {
   resolvePiWorkflowRunsDir,
   setPiWorkflowRootSessionId,
   clearPiWorkflowRootSessionId,
   listWorkflowRunsDirs,
-} from "../assembly/workflow-state-root.ts";
+} from "../../execution/assembly/workflow-state-root.ts";
 
 let tmpDir: string;
 /** 合法 sid fixture（树内分区键；形态须过 shared isPiSessionId）。 */

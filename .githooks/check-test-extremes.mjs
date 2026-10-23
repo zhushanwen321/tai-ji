@@ -61,7 +61,7 @@ const STOCK = {
   'packages/subagent-core/src/execution/__tests__/execute-nesting.test.ts': null,
   'packages/subagent-core/src/execution/engine/__tests__/conformance/engine-crash.test.ts': null,
   'packages/subagent-core/src/execution/engine/__tests__/conformance/static-spawn-guard.test.ts': null,
-  'packages/subagent-core/src/execution/engine/__tests__/rebuild-sample-fixture.test.ts': null,
+  'packages/subagent-core/src/orchestration/__tests__/rebuild-sample-fixture.test.ts': null,
   'packages/subagent-engine-sdk/src/__tests__/cli-entry.test.ts': null,
   'packages/ui/src/features/chat/__tests__/markdown-filepath.test.ts': null,
   'packages/ui/src/features/chat/__tests__/markdown-renderer-incremental.test.ts': null,

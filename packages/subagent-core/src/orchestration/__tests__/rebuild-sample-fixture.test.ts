@@ -36,27 +36,27 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runWorkflow } from "../../../orchestration/lifecycle.ts";
-import { resumeRun } from "../../../orchestration/resume-run.ts";
+import { runWorkflow } from "../lifecycle.ts";
+import { resumeRun } from "../resume-run.ts";
 import {
   interruptRun,
   isRunSettled,
   setRunEventJournalDirForTest,
-} from "../../../orchestration/terminal-actions.ts";
-import type { WorkflowRunEvent } from "../../../orchestration/run-events.ts";
-import { runEventJournalPathIn, scanRunEvents } from "../../../execution/persistence/run-event-journal.ts";
-import { WorkerHostImpl } from "../../../orchestration/worker-host.ts";
-import type { LifecycleDeps, AgentRunner } from "../../../orchestration/models/ports.ts";
-import type { AgentResult } from "../../../orchestration/models/types.ts";
-import type { RunSpec } from "../../../orchestration/models/run-spec.ts";
-import type { WorkflowRun } from "../../../orchestration/models/workflow-run.ts";
+} from "../terminal-actions.ts";
+import type { WorkflowRunEvent } from "../run-events.ts";
+import { runEventJournalPathIn, scanRunEvents } from "../../execution/persistence/run-event-journal.ts";
+import { WorkerHostImpl } from "../worker-host.ts";
+import type { LifecycleDeps, AgentRunner } from "../models/ports.ts";
+import type { AgentResult } from "../models/types.ts";
+import type { RunSpec } from "../models/run-spec.ts";
+import type { WorkflowRun } from "../models/workflow-run.ts";
 
 // ── fixture 锚点（renderer 消费方目录；领地内交付物）──────────────
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_DIR = resolve(
   HERE,
-  "../../../../../renderer/src/components/panel/workflow-viz/__tests__/fixtures",
+  "../../../../renderer/src/components/panel/workflow-viz/__tests__/fixtures",
 );
 const RESUME_FIXTURE = join(FIXTURE_DIR, "resume-generation.record.jsonl");
 

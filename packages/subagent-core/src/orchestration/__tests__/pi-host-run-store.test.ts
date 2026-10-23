@@ -26,13 +26,13 @@ import type { LogLevel } from "../../core/logger.ts";
 import { configureCore, resetCoreForTests, type HostServices } from "../../core/host-services.ts";
 
 import { RUN_EVENTS_SUFFIX } from "../../shared/run-vocabulary.ts";
-import { createRunEventJournal, type WorkflowRunEventInput } from "../../orchestration/run-events.ts";
-import { adoptInterruptedRun } from "../../orchestration/run-registry.ts";
+import { createRunEventJournal, type WorkflowRunEventInput } from "../run-events.ts";
+import { adoptInterruptedRun } from "../run-registry.ts";
 import {
   setRunEventJournalDirForTest,
-} from "../../orchestration/terminal-actions.ts";
+} from "../terminal-actions.ts";
 import { readRunTerminalManifest } from "../../execution/persistence/manifest-store.ts";
-import { createPiHostRunEnumeration } from "../assembly/pi-host-run-store.ts";
+import { createPiHostRunEnumeration } from "../../execution/assembly/pi-host-run-store.ts";
 
 /** 落 running 形态 record 流（run-created + agent-started 两帧——fold = running，
  *  无 run-settled 帧）。枚举候选 = 本写入方落出的 <runId>.record.jsonl 文件族。 */

@@ -16,14 +16,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   handleScriptError,
   handleWorkerMessage,
-} from "../orchestration/worker-message-pump.ts";
+} from "../worker-message-pump.ts";
 import {
   dispatchRunCreated,
   isRunSettled,
   settledRecordOf,
-} from "../orchestration/terminal-actions.ts";
-import type { LifecycleDeps, WorkerHandlers } from "../orchestration/models/ports.ts";
-import type { WorkflowRun } from "../orchestration/models/workflow-run.ts";
+} from "../terminal-actions.ts";
+import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
+import type { WorkflowRun } from "../models/workflow-run.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 

@@ -8,8 +8,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { AgentCallOpts } from "../orchestration/models/types.ts";
-import { resolveAgentOpts } from "../orchestration/agent-opts-resolver.ts";
+import type { AgentCallOpts } from "../models/types.ts";
+import { resolveAgentOpts } from "../agent-opts-resolver.ts";
 
 describe("resolveAgentOpts schema prompt wording + M2 content passthrough", () => {
   it("schema 提供时 appendSystemPrompt 含 SO 指令内容（TC1 措辞锁）", () => {
