@@ -1910,5 +1910,51 @@
       "test": "extensions/universal/provider-live-sync/src/__tests__/pi-semantics-catalog-injection.test.ts"
     },
     "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-89",
+    "claim": "promptSnippet 渲染 = selectedTools ∩ 有 snippet（构建不限 exposure）：pi 1.0.0 系统提示词工具文字清单（promptSections.tools）只列「当前激活集 selectedTools 中在 _toolPromptSnippets 有 snippet」的工具名；_toolPromptSnippets 从全量注册工具表 definitionRegistry 构建、无 exposure 过滤——deferred 工具激活前不进 selectedTools 故不渲染，经 tool_search / setActiveTools 激活后当轮即按 snippet 渲染进系统提示词。taiji 消费 = subagent-workflow 转收起工具（subagent_manage / subagent_message / workflow_control）注册保留 promptSnippet 的「激活当轮即见名可调」前提（ADR-0136 2026-10-23 补记发现链路）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "_toolPromptSnippets 构建（全量 definitionRegistry，不限 exposure）",
+        "note": ":2802-2807 —— new Map(definitionRegistry.values().map(...)) 从注册表全量构建，仅按 promptSnippet 规范化后非空过滤，无 exposure 条件【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/system-prompt.js",
+        "symbol": "系统提示词 tools 段 visibleTools 过滤",
+        "note": ":82 visibleTools = selectedTools.filter((name) => !!toolSnippets[name])——snippet 缺失即不渲染，selectedTools 即当前激活集【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费方：subagent-workflow 转收起工具注册断言注释（extensions/universal/subagent-workflow/src/interface/tool/subagent-tool.ts / tool-workflow.ts）。pi 升级时重验：grep dist/core/agent-session.js '_toolPromptSnippets = new Map'（是否仍全量构建、无 exposure 过滤）+ grep dist/core/system-prompt.js 'visibleTools'（是否仍按激活集 ∩ snippet 过滤）"
+    },
+    "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-90",
+    "claim": "tool_search 检索语料含工具名、候选含非活跃 deferred：检索文档由 createToolSearchDocument 生成——语料 = 工具名原文 + 下划线转空格变体 + description + schema 参数名/描述 + namespace 三字段，按工具名检索可命中；候选集 = getAllTools() 中 exposure ∈ {codemode, deferred} 且不在当前激活集（deferred 注册即入候选、激活后退场），Okapi BM25 排名（同分保持文档序）取 limit。「workflow_run 常驻 description 指名引用 workflow_control → 按名检索即达」是高置信经验（名字原文在语料）而非构造性保证——排名受其他候选得分与 limit 影响，发现链路承诺不得写「必然首位命中」（ADR-0136 2026-10-23 补记发现链路的 pi 行为前提）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/extensions/tool-search/tool.js",
+        "symbol": "createToolSearchDocument（检索语料构建）",
+        "note": ":84-89 —— :85 parts = [tool.name, tool.name.replaceAll(\"_\", \" \"), tool.description] 起始，后续并入 schemaText（参数名/描述）与 namespace 三字段【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/extensions/tool-search/tool.js",
+        "symbol": "isSearchable / searchAndLoad（候选集过滤 + BM25 排名）",
+        "note": ":140-142 isSearchable = exposure === 'codemode' || 'deferred'；:147-151 searchAndLoad —— :149 candidates = getAllTools().filter(isSearchable && !active.includes(name))（非活跃 deferred 全入候选），:151 new Bm25Ranker().rank(query, documents, limit)【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费方：workflow_run 常驻 description 指名引用 workflow_control 的发现链路断言（extensions/universal/subagent-workflow/src/interface/tool/tool-workflow.ts 注册注释 + docs/adr/decisions.md ADR-0136 2026-10-23 补记）。pi 升级时重验：grep dist/extensions/tool-search/tool.js 'parts = \\[tool.name'（语料是否仍含工具名）+ grep 'isSearchable'（候选是否仍含 deferred）"
+    },
+    "verifiedWith": "1.0.0"
   }
 ]

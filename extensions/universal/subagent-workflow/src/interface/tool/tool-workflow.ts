@@ -358,7 +358,11 @@ export function registerWorkflowTool(
     // deferred（2026-10-23 裁决，ADR-0136 补记）：不常驻声明，tool_search 命中即激活；
     // 检索入口 = 启动迁移写入的 +tool_search 条目（runtime pi-codemode-settings）。
     // workflow_run 常驻 description 指名道姓引用本工具，模型有 run 控制需求时按名
-    // 检索即达；promptSnippet 保留——激活后进系统提示词工具文字清单
+    // 检索即达（BM25 排名高置信经验、非构造性保证；pi@1.0.0 实装锚：检索语料含
+    // 工具名 = dist/extensions/tool-search/tool.js:85、候选含非活跃 deferred = :149，
+    // 语义登记 pi-semantics.json PS-90）；promptSnippet 保留——激活后进系统提示词
+    // 工具文字清单（实装锚：构建不限 exposure = dist/core/agent-session.js:2802-2807、
+    // 渲染 = 激活集 ∩ 有 snippet = dist/core/system-prompt.js:82，登记 PS-89）
     exposure: "deferred",
     description:
       "Control workflow runs: status (without runId = list runs; with runId = that run's member table), abort (stop a run), resume (continue an interrupted run).\n" +

@@ -231,7 +231,9 @@ A subagent MAY call \`subagent_start\` itself (environment shows "Depth: N/10"; 
     // deferred（2026-10-23 裁决，ADR-0136 补记）：不常驻声明，tool_search 命中即激活；
     // 检索入口 = 启动迁移写入的 +tool_search 条目（runtime pi-codemode-settings）。
     // promptSnippet 保留——激活后进系统提示词工具文字清单（pi 只渲染 selectedTools
-    // ∩ 有 snippet），模型激活当轮即见名可调
+    // ∩ 有 snippet；pi@1.0.0 实装锚：构建不限 exposure = dist/core/agent-session.js:2802-2807、
+    // 渲染过滤 = dist/core/system-prompt.js:82，语义登记 pi-semantics.json PS-89），
+    // 模型激活当轮即见名可调
     exposure: "deferred",
     promptSnippet: "List, cancel, or close subagents",
     // D1 单源化终态：字段级功能语义（合法值/缺省/拒绝条件）在 schema 字段说明一处；
