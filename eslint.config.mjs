@@ -214,6 +214,17 @@ export default [
       'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
+  // [2026-10 归档边缘输入修复] ArchiveService 三操作编排服务：零消息 session 空归档 +
+  // 符号链接 cwd realpath 归一 + 主文件真值分桶重定位（docs/todo/archive-edge-inputs-
+  // failfast 条目 26/27）入列后净代码行 516 微超 500。归档入口的定位/归一/空形态判定与
+  // 三操作编排同链内聚，拆分属独立重构任务——「微超即提额，保留软上限告警」先例
+  // （pi-provider-store / server.ts）同型。
+  {
+    files: ['packages/runtime/src/services/archive/archive-service.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 540, skipBlankLines: true, skipComments: true }],
+    },
+  },
   // [HISTORICAL] 复杂度债务偿还产物：
   // 以下文件因行为保持提取（helper 签名/花括号/JSDoc 开销）代码行超 max-lines 阈值。
   // 职责内聚（每文件均为单一子系统的高复杂度函数原地拆解，cyclo 已全部 ≤12），

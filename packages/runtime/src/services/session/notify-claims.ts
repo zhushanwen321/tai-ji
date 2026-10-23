@@ -11,8 +11,9 @@
  * - **顺序不变量（设计 D2）**：arm/disarm/兑现/respond 转移在 runtime 单线程事件循环内顺序执行。
  * - **调用序约定**：session 死亡汇聚点必须先 `onSessionDeath(...)` 取 respond 素材、后
  *   `clearSession(sessionId)`（反序会使死亡批量查无记录）——该序列的唯一实装 =
- *   session-manager-handler 导出的 `settleClaimsOnDeath`（组合根 speakSessionDeath 与
- *   handleArchive 共调），新死亡发声点一律经它、禁手抄；shutdown warn 在 `dispose()` 前读 `count()`。
+ *   session-manager-handler 导出的 `settleClaimsOnDeath`（组合根 speakSessionDeath 消费：
+ *   delete / forceQuit / 非 respawn 链 exit / 熔断 / 'archive' 处置登记五点全部经它），
+ *   新死亡发声点一律经它、禁手抄；shutdown warn 在 `dispose()` 前读 `count()`。
  *
  * 状态机（设计 D2 表；「删除」= 记录移除）：
  * ```

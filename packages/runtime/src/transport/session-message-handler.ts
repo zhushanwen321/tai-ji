@@ -555,6 +555,9 @@ export class SessionMessageHandler {
     try {
       // 同步段（搬移 + 簿记骨架）在 reply 前完成；压缩在后台异步（service 内部派发）。
       // 广播（archiveCount 角标）由 service 步骤 5 发出，先于本 reply。
+      // completion-watch 债权收尾不经本 handler：归档 teardown 发 'archive' 死亡处置登记，
+      // 组合根对该值统一 speakSessionDeath(sid, 'exit')——与 agent 工具 archive_session
+      // 入口同判（archive-watch-settlement-gap 条目 28）。
       const result = await archive.archive(sessionId)
       return this.ctx.reply(ws, msg.id, 'session.archive', { sessionId: result.sessionId })
     } catch (e) {

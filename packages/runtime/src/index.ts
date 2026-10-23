@@ -741,12 +741,13 @@ async function main(): Promise<void> {
   // ── notify-once（设计 U3 + 偏差 D-1：ClaimLedger 组合根接线）─────────────
   // 职责范围：respond 写回通道 / settle 兑现路径（agentSettledListeners）/ 终局死亡发声
   //（五汇聚点：delete·forceQuit·非 respawn 链 exit·熔断四点经本组合根 speakSessionDeath，
-  // 第五点 archive（session-manager 工具路径）由 SessionManagerHandler.handleArchive 发声——
-  // 五点共用 settleClaimsOnDeath 同一收尾实装）/ 父死亡批量 orphan（触发器②）/
-  // shutdown 非零 warn（D7b）。（TTL 清扫已随 ADR-0122 防御机制清查退役——claimLedger
-  // 消费点全集仅：组合根直调 settle/orphanByParent/markInjected/disarmDeliveryFailed/count/
-  // dispose 六方法 + 经 settleClaimsOnDeath 的 onSessionDeath/clearSession + 经
-  // deliverRespondTargets 的 onRespond，无定时回收路径。）
+  // 第五点 archive 由归档 teardown 的 'archive' 死亡处置登记经下方订阅到达本组合根发声
+  //——GUI 侧栏归档与 agent 工具 archive_session 两入口同判，五点共用 settleClaimsOnDeath
+  // 同一收尾实装）/ 父死亡批量 orphan（触发器②）/ shutdown 非零 warn（D7b）。（TTL 清扫
+  // 已随 ADR-0122 防御机制清查退役——claimLedger 消费点全集仅：组合根直调 settle/
+  // orphanByParent/markInjected/disarmDeliveryFailed/count/dispose 六方法 + 经
+  // settleClaimsOnDeath 的 onSessionDeath/clearSession + 经 deliverRespondTargets 的
+  // onRespond，无定时回收路径。）
   // 订阅顺序硬约束：pm.onSessionExit 订阅须先于下方
   // `new SessionService` 的 exit 清理路径（按订阅序分发，本路径排前才能读到 session 内存态）。
   // 前向引用（sessionService/sessionStore）为 createAdapter 同款「声明在后、调用在运行期」模式。
@@ -854,14 +855,21 @@ async function main(): Promise<void> {
 
   // 死亡处置汇聚点（session-lifecycle：delete 在 pm.destroySession 之前立 latch，检查点①；
   // restore 清场 'suppress' 静默）。'delete' 即时发声关闭条目 + clearSession（检查点①语义不动，
-  // 发声覆盖 active/scanned 两分支）；suppressedDeaths 抑制标（供随后的 removeSessionEntry
-  // 销毁回调查过即消）**仅在 detail.hasDestroySink = 必有销毁回调时立**——scanned/未找到
-  // throw 等不在册路径无销毁回调消费点（btw 活线在册，onLineTerminated → removeSessionEntry
-  // 同样消费标），无差别立标 = stale id 无界滞留（审查 unreasonable#3）；
-  // 'delete' 已发声关闭条目，销毁回调即便迟到对空账本也是幂等空转（标记原收益仅省一次空批查询）。
+  // 发声覆盖 active/scanned 两分支）；'archive'（归档 teardown，archive-service
+  // teardownForArchive——GUI 侧栏归档与 agent 工具 archive_session 两入口共用执行体）以
+  // 'exit' 发声收尾 completion-watch 债权（会话退场的事实陈述，挂起 watch 统一收 'exited'），
+  // 收尾回到本单一汇聚点、不再依赖各入口自觉调用；suppressedDeaths 抑制标（供随后的
+  // removeSessionEntry 销毁回调查过即消）**仅在 detail.hasDestroySink = 必有销毁回调时立**——
+  // scanned/未找到 throw 等不在册路径无销毁回调消费点（btw 活线在册，onLineTerminated →
+  // removeSessionEntry 同样消费标），无差别立标 = stale id 无界滞留（审查 unreasonable#3）；
+  // 'delete'/'archive' 已发声关闭条目，销毁回调即便迟到对空账本也是幂等空转（标记原收益仅省
+  // 一次空批查询）。
   subscribeSessionDeathDisposition((sessionId, disposition, detail) => {
     if (disposition === 'delete') {
       speakSessionDeath(sessionId, 'delete')
+    }
+    if (disposition === 'archive') {
+      speakSessionDeath(sessionId, 'exit')
     }
     if (detail.hasDestroySink) {
       suppressedDeaths.add(sessionId)
@@ -1148,7 +1156,7 @@ async function main(): Promise<void> {
   })
   // notify-once D5 销毁汇聚点（追加式列表的第二订阅者）：
   // - 同步 exit 链路径（exitChainLegs 同步标）→ 跳过——respawn 终态事件随后裁决（stash 在挂）；
-  // - suppressedDeaths 已标（在册 'delete' 已发声 / restore 清场 'suppress' 非终局）→ 跳过；
+  // - suppressedDeaths 已标（在册 'delete'/'archive' 已发声 / restore 清场 'suppress' 非终局）→ 跳过；
   //   非在册 'delete'（scanned / 冷线）无销毁回调、本分支结构性不可达——「delete 漏标
   //   误发声」无可达面（unreasonable#3 判据修复：hasDestroySink = 在册）；唯一残留标
   //  （adapter.detach 抛错致删除整体失败）被后续销毁消费时，对 'delete' 已清空的账本幂等空转无害；
@@ -1474,8 +1482,10 @@ async function main(): Promise<void> {
 
   // ── ArchiveService（session-archive 设计 D5，u-rpc-wiring 组合根接线）──────────
   // deps 逐项对齐 delete 活跃分支原语（session-lifecycle.ts delete 方法体）：归档的杀 pi
-  // 编排与删除同链（userStopped 清理 → suppress 处置登记先于杀进程 → btw 级联 → detach/
-  // destroy/摘除 → 收殓在途后台任务）；purge 的残树处置 / 插件 KV tombstone / 画布解绑
+  // 编排与删除同链（userStopped 清理 → 'archive' 处置登记先于杀进程——组合根对该值
+  // speakSessionDeath('exit') 收尾 completion-watch 债权（GUI 与 agent 工具两入口同判）→
+  // btw 级联 → detach/destroy/摘除 → 收殓在途后台任务）；purge 的残树处置 / 插件 KV
+  // tombstone / 画布解绑
   // 复用 delete 同名原语；trash 经 sessionStore（与 cascade 生产装配同源，G4 语义——失败
   // 原样上抛保持可恢复形态）。getActiveSession 映射 getSession（IManagedSessionView 含
   // cwd/sessionFilePath/isGenerating，ArchiveService 消费的最小字段集）。
@@ -1484,7 +1494,7 @@ async function main(): Promise<void> {
     getActiveSession: (sid) => sessionService.getSession(sid),
     findScannedSession: (sid) => sessionService.findScannedSession(sid),
     disposeUserStopped: (sid) => userStoppedGate.disposeForDelete(sid),
-    fireSuppressDisposition: (sid, hasDestroySink) => fireDeathDisposition(sid, 'suppress', { hasDestroySink }),
+    fireArchiveDisposition: (sid, hasDestroySink) => fireDeathDisposition(sid, 'archive', { hasDestroySink }),
     closeAllBtwLines: (mainSid, cwd) => btwService.closeAllForMain(mainSid, cwd),
     detachSession: (sid) => sessionService.detachSession(sid),
     destroyPiSession: (sid) => pm.destroySession(sid),

@@ -16,7 +16,7 @@
  * （archive-self-heal.ts，七行表覆盖全部中间态）。
  */
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { zstdCompressSync, zstdDecompressSync, constants as zlibConstants } from 'node:zlib'
 import { basename, join } from 'node:path'
 import type { ArchiveErrorCode, ArchiveLedger, ArchiveLedgerStaging, ArchiveSummary, SessionSummary } from '@taiji/shared'
@@ -86,11 +86,12 @@ export interface ArchiveServiceDeps { // oe-exempt:20261020:framework:服务依�
   /** userStopped 标记清理（delete 活跃分支步骤 ①，userStoppedGate.disposeForDelete）。 */
   disposeUserStopped(sessionId: string): void
   /**
-   * 死亡处置登记（步骤 ②，fireDeathDisposition(sid, 'suppress', …)——先于任何杀进程，
-   * 防 pi 的 exit 事件被组合根按崩溃路径响应产生伪造死亡通知；hasDestroySink = 在册
-   * 判据，同 delete）。
+   * 死亡处置登记（步骤 ②，fireDeathDisposition(sid, 'archive', …)——先于任何杀进程，
+   * 防 pi 的 exit 事件被组合根按崩溃路径响应产生伪造死亡通知；组合根对该值统一
+   * speakSessionDeath(sid, 'exit') 收尾 completion-watch 债权——GUI 侧栏归档与 agent
+   * 工具 archive_session 两入口同经本登记到达汇聚点。hasDestroySink = 在册判据，同 delete）。
    */
-  fireSuppressDisposition(sessionId: string, hasDestroySink: boolean): void
+  fireArchiveDisposition(sessionId: string, hasDestroySink: boolean): void
   /** 级联停止名下 btw 线（步骤 ③ + purge 步骤 ④，closeAllForMain——返回关闭的线 vid 清单）。 */
   closeAllBtwLines(mainSid: string, cwd: string): Promise<string[]>
   /** detach 活跃 session（步骤 ④）。 */
@@ -207,12 +208,30 @@ export class ArchiveService {
     // 定位：活跃（内存 Map）优先，其次扫描态（磁盘）。
     const active = this.deps.getActiveSession(sessionId)
     const scanned = this.deps.findScannedSession(sessionId)
-    const cwd = active?.cwd ?? scanned?.cwd
-    const mainPath = active?.sessionFilePath ?? scanned?.filePath
-    if (cwd === undefined || mainPath === undefined) {
+    const rawCwd = active?.cwd ?? scanned?.cwd
+    const locatedMainPath = active?.sessionFilePath ?? scanned?.filePath
+    if (rawCwd === undefined || locatedMainPath === undefined) {
       throw new Error(`Session ${sessionId} not found (不在内存 Map 且磁盘无主文件，无归档对象)`)
     }
-    const originalFile = basename(mainPath)
+    // cwd realpath 归一（archive-edge-inputs-failfast 条目 27）：pi 落盘分桶按 spawn 子进程
+    // process.cwd() 的内核解析真值编码（macOS /var → /private/var，pi dist 实装
+    // getDefaultSessionDirPath 同 encodeCwd 公式），归档入口持有的 cwd 可能是未解析符号
+    // 链接路径——归一后归档单元目录与簿记 cwd 才与 pi 的 sessions 分桶同编码；恢复侧
+    // sessionOriginalPath 按簿记 cwd 原样推导（realpath 后存），两侧同编码即往返一致。
+    // cwd 已被删除（worktree 清理）时 realpath ENOENT——保持原样（无可对齐的分桶真值，
+    // 编码维持调用方事实）。
+    const cwd = realpathOrSelf(rawCwd)
+    const originalFile = basename(locatedMainPath)
+    // 主文件在场判定 + 未解析路径修正（条目 26/27）：
+    // - locatedMainPath 缺席磁盘且 realpath 分桶存在同名主文件 → 定位源携带的是未解析
+    //   cwd 派生路径，改用分桶真值为搬移源；
+    // - 两侧都缺席 = 零消息 session（pi 首次 flush 前主文件未落盘，规则 #6）→ 空归档
+    //   语义：成功返回，跳过主文件搬移与压缩任务（无内容可压），簿记 name 回退 sessionId。
+    let mainPath: string | undefined = locatedMainPath
+    if (!existsSync(mainPath)) {
+      const resolvedCandidate = sessionOriginalPath(this.sessionsRoot, cwd, originalFile)
+      mainPath = existsSync(resolvedCandidate) ? resolvedCandidate : undefined
+    }
     const unitDir = archiveUnitDir(this.archiveRoot, cwd)
     // 门 3：目标盘写失败（建桶目录失败即映射 archive_io_error——后续搬移/簿记写入同映射）。
     try {
@@ -225,8 +244,10 @@ export class ArchiveService {
     // 留置的 btw/ 域，与主 session 退场状态矛盾）。活跃分支五步复刻 delete（D5 步骤 2）。
     await this.teardownForArchive(sessionId, cwd, active !== undefined)
 
-    // 搬移（顺序固定，D5 步骤 3）：旁挂六类 → 主文件 → 附件三目录（源缺失跳过）。
-    this.moveAssetsToUnit(sessionId, mainPath, unitDir, originalFile)
+    // 搬移（顺序固定，D5 步骤 3）：旁挂六类 → 主文件（零消息形态跳过）→ 附件三目录
+    //（源缺失跳过）。旁挂枚举锚定定位路径——sidecar 由 taiji 按 sessionFilePath 写入
+    //（persistCreateSidecars 族），零消息形态下主文件虽未落盘、旁挂可在场。
+    this.moveAssetsToUnit(sessionId, locatedMainPath, mainPath, unitDir, originalFile)
 
     // 读归档目录内明文提取名称（尾读有界）+ 写簿记骨架（D5 步骤 4）。
     const stagingLedger = this.writeStagingLedger(sessionId, unitDir, originalFile, cwd)
@@ -235,10 +256,14 @@ export class ArchiveService {
     this.deps.invalidateScanCache()
     this.deps.broadcastSessionList()
 
-    // 后台压缩任务（reply 后异步执行；经在途任务表串行化）。
-    void this.queueCompression(stagingLedger, unitDir).catch((e: unknown) => {
-      this.deps.warn(`[archive] 后台压缩任务失败（条目保持 staging 态，启动自愈重试）(sessionId=${sessionId}): ${toMessage(e)}`)
-    })
+    // 后台压缩任务（reply 后异步执行；经在途任务表串行化）。零消息空归档不派发——
+    // runCompression 对缺席明文的形态是幂等跳过，直接不排队省一次空转与误导性 warn，
+    // 条目保持 staging（空单元的稳定态；自愈行 1 对无明文无压缩体的条目不重排）。
+    if (mainPath !== undefined) {
+      void this.queueCompression(stagingLedger, unitDir).catch((e: unknown) => {
+        this.deps.warn(`[archive] 后台压缩任务失败（条目保持 staging 态，启动自愈重试）(sessionId=${sessionId}): ${toMessage(e)}`)
+      })
+    }
     return { sessionId }
   }
 
@@ -246,10 +271,12 @@ export class ArchiveService {
    * 归档前活跃 session 退场五步（D5 步骤 2，复刻 delete 分支；非活跃 session 只跑
    * btw 级联停止）：
    * ① userStopped 清理（标记与收敛环定时器随退场清理；恢复后是新进程无标记语义）；
-   * ② 死亡处置登记 suppress——先于任何杀进程（防 exit 事件被组合根按崩溃路径响应；
-   *   disposition = 'suppress'（非终局杀，组合根标记静默 + 销毁回调跳过，不产生伪造
-   *   死亡通知；intentional destroy 的 exit 被 process-manager clientToId 反查拦截，
-   *   R2 探针核实见 runlog）；
+   * ② 死亡处置登记 archive——先于任何杀进程（防 exit 事件被组合根按崩溃路径响应）；
+   *   disposition = 'archive'（终局退场）：组合根对该值统一 speakSessionDeath(sid,
+   *   'exit') 收尾 completion-watch 债权（archive-watch-settlement-gap 条目 28——GUI
+   *   侧栏归档与 agent 工具 archive_session 两入口同经本登记到达单一汇聚点），并立
+   *   suppressedDeaths 抑制标使随后的销毁回调查过即消（intentional destroy 的 exit
+   *   被 process-manager clientToId 反查拦截，双通道不产生伪造死亡通知）；
    * ③ 级联停止名下 btw 线（closeAllForMain 原语；线 jsonl 留置主树 btw/ 域，D8）；
    * ④ detach + 终止 pi 进程 + 内存 Map 摘除（「停止并归档」语义，D13）；
    * ⑤ 收殓在途后台任务（先于一切搬移动作——base-tool-enhance 后台任务在主 turn 结束
@@ -258,7 +285,7 @@ export class ArchiveService {
   private async teardownForArchive(sessionId: string, cwd: string, isActive: boolean): Promise<void> {
     if (isActive) {
       this.deps.disposeUserStopped(sessionId)
-      this.deps.fireSuppressDisposition(sessionId, true)
+      this.deps.fireArchiveDisposition(sessionId, true)
     }
     await this.closeBtwLinesQuietly(sessionId, cwd)
     if (isActive) {
@@ -276,14 +303,18 @@ export class ArchiveService {
 
   /**
    * 搬移归档物到单元目录（D5 步骤 3，顺序固定）：旁挂六类 → 主文件 → 附件三目录
-   * （源缺失跳过）。任一步失败统一映射 archive_io_error。
+   * （源缺失跳过；主文件缺席 = 零消息空归档形态，跳过主文件搬移）。任一步失败统一
+   * 映射 archive_io_error。旁挂枚举锚定定位路径 sidecarBase（sidecar 写点 = 定位源
+   * 路径），主文件搬移源 = mainPath（未解析路径修正后的分桶真值，正常形态两者同一路径）。
    */
-  private moveAssetsToUnit(sessionId: string, mainPath: string, unitDir: string, originalFile: string): void {
+  private moveAssetsToUnit(sessionId: string, sidecarBase: string, mainPath: string | undefined, unitDir: string, originalFile: string): void {
     try {
-      for (const sidecar of existingSidecars(mainPath)) {
+      for (const sidecar of existingSidecars(sidecarBase)) {
         renameSync(sidecar, join(unitDir, basename(sidecar)))
       }
-      renameSync(mainPath, join(unitDir, originalFile))
+      if (mainPath !== undefined) {
+        renameSync(mainPath, join(unitDir, originalFile))
+      }
       for (const domain of ASSET_DOMAINS) {
         const source = assetDomainSourceDir(sessionId, domain, this.dataDir)
         if (!existsSync(source)) continue
@@ -298,12 +329,15 @@ export class ArchiveService {
 
   /**
    * 写 staging 簿记骨架（D5 步骤 4）：读归档目录内明文提取名称（尾读有界）+ 字节数
-   * + 原子写入。写入失败映射 archive_io_error。
+   * + 原子写入。写入失败映射 archive_io_error。零消息空归档（单元内无明文——主文件
+   * 从未落盘）：name 回退 sessionId（登记倾向方案——列表可辨识且幂等重入走门 2 的
+   * archive_already_archived），rawBytes 记 0。
    */
   private writeStagingLedger(sessionId: string, unitDir: string, originalFile: string, cwd: string): ArchiveLedgerStaging {
     const plainPath = archivePlainMainPath(unitDir, originalFile)
-    const name = extractSessionName(plainPath) ?? ''
-    const rawBytes = statSync(plainPath).size
+    const plainExists = existsSync(plainPath)
+    const name = plainExists ? (extractSessionName(plainPath) ?? '') : sessionId
+    const rawBytes = plainExists ? statSync(plainPath).size : 0
     const stagingLedger: ArchiveLedgerStaging = {
       sessionId,
       name,
@@ -729,6 +763,19 @@ export class ArchiveService {
 /** 回滚事件名（D9 双回滚行：restoring → restore_rollback_to_staging | restore_rollback_to_archived）。 */
 function rollbackEventOf(state: 'staging' | 'archived'): 'restore_rollback_to_staging' | 'restore_rollback_to_archived' {
   return state === 'staging' ? 'restore_rollback_to_staging' : 'restore_rollback_to_archived'
+}
+
+/**
+ * cwd 符号链接归一（条目 27）：解析为内核真值路径（与 pi 子进程 process.cwd() 同源
+ * 的编码基准）。路径不存在（cwd 已被删除）时返回原串——realpathSync 对缺席路径抛
+ * ENOENT，归档对「目录已消失」形态维持调用方事实不另造编码。
+ */
+function realpathOrSelf(cwd: string): string {
+  try {
+    return realpathSync(cwd)
+  } catch {
+    return cwd
+  }
 }
 
 function sha256Hex(buf: Buffer): string {

@@ -1,6 +1,6 @@
 # 归档债权收尾两入口不对称：GUI 归档路径不收尾 completion-watch
 
-状态：未解决（2026-10-21 登记；dev-merge branch-review dmg-r3-3，缺口基线既有、非 session-manager-archive-delete 分支引入——该分支的 agent 工具路径已收尾，本登记为 GUI 路径的存量缺口）
+状态：已解决（2026-10-23 just-do-it 批次 2 条目 28 按登记长期方案修复）：`SessionDeathDisposition` 增 `'archive'` 值，归档 teardown（archive-service teardownForArchive → fireArchiveDisposition）改发该值；组合根对该值统一 `speakSessionDeath(sid, 'exit')` 并照立 suppressedDeaths 抑制标——GUI 侧栏归档与 agent 工具 archive_session 两入口同判，收尾回到单一汇聚点；session-manager-handler.handleArchive 的手动收尾已删除（JSDoc 缺口登记随之清除）。测试锚定：archive-service 处置探针 + session-lifecycle-death-disposition GUI 触发用例 + session-manager-handler 汇聚点收尾用例
 
 ## 现状
 

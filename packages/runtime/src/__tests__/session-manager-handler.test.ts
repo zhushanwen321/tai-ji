@@ -10,7 +10,7 @@
  * - u8: 子会话 project 归属继承父会话
  * - notify-once watch 桥：单键寻址三分支 + respond 前二次归属校验；无 notifyId 降级 once 日志
  * - session-manager-archive-delete U3: delete/archive 终局双 action（扩展归属校验 /
- *   archiveService 停用象限 / 归档成功后三步收尾）
+ *   archiveService 停用象限 / 归档成功经 'archive' 处置登记到组合根汇聚点收尾）
  *
  * 运行：pnpm --filter @taiji/runtime exec vitest run session-manager-handler
  */
@@ -19,7 +19,8 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { SessionManagerHandler } from '../transport/session-manager-handler.js'
 import type { SessionManagerHandlerOptions } from '../transport/session-manager-handler.js'
-import { deliverRespondTargets } from '../transport/session-manager-handler.js'
+import { deliverRespondTargets, settleClaimsOnDeath } from '../transport/session-manager-handler.js'
+import { fireDeathDisposition, subscribeSessionDeathDisposition } from '../services/session/session-lifecycle.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import { ArchiveError } from '../services/archive/archive-service.js'
 import type { ArchiveService } from '../services/archive/archive-service.js'
@@ -1123,9 +1124,9 @@ describe('SessionManagerHandler', () => {
   })
 
   // ─── session-manager-archive-delete U3：delete/archive 终局双 action ────────────
-  // 覆盖验收条款①-⑤：归档成功三步收尾（watch 收 'exited' + 双债全消）/ 归档失败债权零损伤 /
-  // delete 成功回包与死亡发声共存 / 越权·已归档·扫描态·统一文案四类归属判定 / ArchiveError
-  // code additive 透传。
+  // 覆盖验收条款①-⑤：归档成功经 'archive' 处置登记到汇聚点收尾（watch 收 'exited' +
+  // 双债全消）/ 归档失败债权零损伤 / delete 成功回包与死亡发声共存 / 越权·已归档·扫描态·
+  // 统一文案四类归属判定 / ArchiveError code additive 透传。
   describe('session-manager-archive-delete U3: delete/archive 终局双 action', () => {
     const VALID_NID = 'sm-12345678-1234-4234-8234-123456789014'
     const LIFETIME_NID = 'sm-12345678-1234-4234-8234-123456789015'
@@ -1224,21 +1225,35 @@ describe('SessionManagerHandler', () => {
       expect(opts.claims!.getClaim('sid-parent', VALID_NID)).toBeUndefined()
     })
 
-    it('archive 成功：双债全消 + 双 watch 收 exited + claims 清账 + 回包（验收①）', async () => {
+    it('archive 成功：处置登记经汇聚点收尾——双 watch 收 exited + claims 清账 + 回包（验收①，条目 28 单一汇聚点）', async () => {
+      // 收尾不经 handler（条目 28：归档 teardown 发 'archive' 处置登记 → 组合根统一
+      // speakSessionDeath('exit')）。mock archive 复刻真实 ArchiveService 的登记动作
+      // （真实登记器 fire），本测试以组合根同款订阅消费——watch 收 'exited' 证明
+      // 「GUI 侧栏归档与 agent 工具 archive_session 两入口同判」的汇聚点链路成立。
       const archive = vi.fn().mockImplementation(async () => {
-        // 时序不变量锚：收尾必须在 archive() resolve 之后——此刻双债仍在册
+        // 时序不变量锚：处置登记在归档前置三门之后——此刻（三门已过）双债仍在册
         expect(opts.claims!.getClaim('sid-parent', VALID_NID)?.state).toBe('injected')
         expect(opts.claims!.getClaim('sid-parent', LIFETIME_NID)?.kind).toBe('lifetime')
+        fireDeathDisposition('s1', 'archive', { hasDestroySink: true })
         return { sessionId: 's1' }
       })
       const opts = makeArchiveFixture(archive)
       const handler = new SessionManagerHandler(opts)
-
-      await handler.handle('req-arch', 'sid-parent', 'archive', { sessionId: 's1' })
+      const unsubscribe = subscribeSessionDeathDisposition((sessionId, disposition) => {
+        // 组合根 index.ts 同款消费形态（speakSessionDeath 三步委托 settleClaimsOnDeath）
+        if (disposition === 'archive') {
+          settleClaimsOnDeath(opts.claims!, sessionId, 'exit', handler.watchRespond, () => undefined)
+        }
+      })
+      try {
+        await handler.handle('req-arch', 'sid-parent', 'archive', { sessionId: 's1' })
+      } finally {
+        unsubscribe()
+      }
 
       expect(archive).toHaveBeenCalledWith('s1')
       const mock = opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>
-      // 三步收尾：双 watch 各收一条 'exited'（同 deathSeq 批，fulfillsN 只计 kind=claim）
+      // 汇聚点收尾：双 watch 各收一条 'exited'（同 deathSeq 批，fulfillsN 只计 kind=claim）
       expect(mock).toHaveBeenCalledTimes(3)
       expect(mock.mock.calls[0]).toEqual([
         'sid-parent',

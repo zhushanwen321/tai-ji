@@ -63,8 +63,9 @@ import { EventInterpreter } from '../../services/session/event-interpreter.js'
 import { createClaimLedger } from '../../services/session/notify-claims.js'
 import type { ClaimLedger, DeathBatch, DeathCause } from '../../services/session/notify-claims.js'
 import type { ArchiveService } from '../../services/archive/archive-service.js'
-import { SessionManagerHandler, deliverRespondTargets, collectStderrTail } from '../../transport/session-manager-handler.js'
+import { SessionManagerHandler, deliverRespondTargets, settleClaimsOnDeath, collectStderrTail } from '../../transport/session-manager-handler.js'
 import type { SessionManagerHandlerOptions } from '../../transport/session-manager-handler.js'
+import { fireDeathDisposition, subscribeSessionDeathDisposition } from '../../services/session/session-lifecycle.js'
 import {
   agentSidecarPath,
   invalidateScanDirCache,
@@ -635,7 +636,13 @@ async function runRealToolChain(options: RealChainOptions): Promise<RealToolChai
     deathCalls.push({ sessionId, cause })
     return rawOnSessionDeath(sessionId, cause)
   }
+  // 组合根同款 'archive' 处置消费（index.ts subscribeSessionDeathDisposition →
+  // speakSessionDeath('exit') 的三步委托）——handleArchive 收尾已并入该汇聚点，mock
+  // 层接线同形使 deathCalls 观测面与生产链路一致。handler 构造晚于本声明（下方），
+  // 订阅在其后接线（闭包直捕 handler）。
+  let unsubscribeDisposition: () => void = () => {}
   const cleanup = (): void => {
+    unsubscribeDisposition()
     claims.dispose()
     process.env.TAIJI_AGENT_DATA_DIR = savedDataDir
     rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
@@ -685,6 +692,11 @@ async function runRealToolChain(options: RealChainOptions): Promise<RealToolChai
       archive: async (id: string) => {
         archiveCalls.push(id)
         gone.add(id)
+        // 生产 ArchiveService 的死亡处置登记同款（teardownForArchive →
+        // fireArchiveDisposition → fireDeathDisposition('archive')）——组合根订阅
+        // （下方 unsubscribe 处接线）统一 speakSessionDeath('exit') 收尾，fake 层复刻
+        // 该触发点使收尾链路与生产同形。
+        fireDeathDisposition(id, 'archive', { hasDestroySink: true })
         return { sessionId: id }
       },
     } as unknown as ArchiveService
@@ -713,6 +725,11 @@ async function runRealToolChain(options: RealChainOptions): Promise<RealToolChai
         return true
       },
       broadcastSessionList: () => {},
+    })
+    unsubscribeDisposition = subscribeSessionDeathDisposition((sessionId, disposition) => {
+      if (disposition === 'archive') {
+        settleClaimsOnDeath(claims, sessionId, 'exit', handler.watchRespond, () => undefined)
+      }
     })
     let handling: Promise<void> = Promise.resolve()
     const interpreter = new EventInterpreter(parentSessionId, {
@@ -839,8 +856,10 @@ describe.skipIf(!REAL_PI_READY)(`session-manager full e2e real LLM${REAL_PI_READ
       // 4. 归档后 getSummary 查无该子会话（fake 执行体的 gone 态）
       expect(chain.sessionService.getSummary(chain.childId), '归档后 getSummary 应查无该子会话').toBeUndefined()
 
-      // 5. claims 收尾路径：onSessionDeath(childId,'exit') 被执行 + 预置 lifetime 债权被终结（查无）
-      expect(chain.deathCalls, 'handleArchive 应执行 onSessionDeath(childId, exit) 收尾').toEqual([{ sessionId: chain.childId, cause: 'exit' }])
+      // 5. claims 收尾路径（条目 28 汇聚点形态）：归档 teardown 的 'archive' 处置登记 →
+      //    组合根同款订阅 settleClaimsOnDeath → onSessionDeath(childId,'exit') 被执行 +
+      //    预置 lifetime 债权被终结（查无）
+      expect(chain.deathCalls, '归档处置登记应经汇聚点执行 onSessionDeath(childId, exit) 收尾').toEqual([{ sessionId: chain.childId, cause: 'exit' }])
       expect(chain.claims.getClaim(chain.parentSessionId, chain.lifetimeNotifyId ?? ''), '归档收尾后预置 lifetime 债权应被终结').toBeUndefined()
     } finally {
       await fx.dispose().catch(() => {})

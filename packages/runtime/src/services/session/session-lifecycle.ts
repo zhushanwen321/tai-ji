@@ -68,6 +68,10 @@ import { normalizeInactiveSessionFileIfNeeded, readEffectiveModelFromState, seed
 //   随后 removeSessionEntry 的销毁回调查无记录自然静默（幂等空转）。
 // - 'suppress'：非终局杀（restore 清场——同 id 随即重开）——组合根标记静默，
 //   销毁回调据此跳过，不产生伪造死亡通知（respawn/restore 链静默同族）。
+// - 'archive'：终局退场（归档 teardown，archive-service teardownForArchive）——组合根
+//   收到即 onSessionDeath('exit')+clearSession 发声，收尾父 agent 挂起的 completion-watch
+//   债权（GUI 侧栏归档与 agent 工具 archive_session 两入口同经本登记到达单一汇聚点，
+//   不再依赖各入口自觉调用）；抑制标同 'delete' 形态照立，销毁回调查过即消。
 // destroyAll 刻意不经本登记：
 // 后者随进程内存消亡，均无销毁回调需抑制。
 // detail.hasDestroySink（审查 unreasonable#3）：本次处置之后**是否必有 removeSessionEntry
@@ -76,7 +80,7 @@ import { normalizeInactiveSessionFileIfNeeded, readEffectiveModelFromState, seed
 // 镜像 detach → removeSessionEntry 收尾序，同样消费标）⇒ 有消费点；scanned / 未找到
 // throw / 冷线（从未注册，终结扇出早退）不在册 ⇒ 无销毁回调，无差别立标 = stale id
 // 无界滞留。
-export type SessionDeathDisposition = 'delete' | 'suppress'
+export type SessionDeathDisposition = 'delete' | 'suppress' | 'archive'
 
 /** 处置详情（fire 点按控制流判定，订阅方消费——判定归属在发起方，不靠订阅侧同图反推）。 */
 export interface SessionDeathDispositionDetail {

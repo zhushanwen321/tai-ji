@@ -1,6 +1,6 @@
 # 归档两个边缘输入形态 fail-fast 报错（零消息 session / 符号链接 cwd）
 
-状态：未解决（2026-10-20 登记；suppress 真机探针跑测时发现，均为安全失败形态，无数据丢失）
+状态：已解决（2026-10-23 just-do-it 批次 2 条目 26/27 修复）：零消息 session 按登记倾向方案空归档成功（簿记 name 回退 sessionId、rawBytes 0、不派发压缩任务，重复归档走门 2 archive_already_archived）；符号链接 cwd 归档入口 realpathSync 归一分桶 + 主文件按真值分桶重定位，簿记 cwd 存 realpath 真值（恢复两侧同编码，往返一致测试锚定）。恢复空归档单元仍报 archive_corrupted（staging 明文缺失形态）——零消息会话无内容可恢复，属接受的边缘；已知外观残留：空归档条目在归档列表恒显 staging「压缩中」标注（renderer 侧无空归档形态区分，未随本修复处理）
 
 ## 现状
 

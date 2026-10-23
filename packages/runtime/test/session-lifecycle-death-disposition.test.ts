@@ -6,25 +6,32 @@
  * 用例钉住 fire 时点与判据取值，防未来 delete 控制流改动（分支挪动 / fire 提前或后移）
  * 让判据与真实消费点再度脱钩。
  *
+ * 另含 'archive' 处置登记探针（archive-watch-settlement-gap 条目 28）：GUI 侧栏归档
+ * 路径（session.archive RPC → ArchiveService.archive）经真实登记器触发 disposition=
+ * 'archive'——组合根订阅侧同判消费（speakSessionDeath('exit') 收尾 completion-watch），
+ * 收尾回到单一汇聚点。
+ *
  * Mock 策略同 session-lifecycle-trash-error-chain.test.ts：唯一 mock = infra trash（防真
  * 移文件）；SessionLifecycle / PiSessionStore 真实实例，仅 spy 目录列举与刷新面。
  *
  * 运行：cd packages/runtime && npx vitest run test/session-lifecycle-death-disposition.test.ts
  */
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // import 即生效：本 import 须保持为第一个本地 import——helper 求值时注册 infra trash
 // mock，其后的本地 import 才不会捕获未 mock 的真实 trash（ESM 按序求值）
 import { makeSessionLifecycleFixture, scannedEntry, trashMock } from './helpers/session-lifecycle-fixture.js'
-import { setBtwCascadeOps, subscribeSessionDeathDisposition } from '../src/services/session/session-lifecycle.js'
+import { fireDeathDisposition, setBtwCascadeOps, subscribeSessionDeathDisposition } from '../src/services/session/session-lifecycle.js'
+import { ArchiveService, type ArchiveServiceDeps } from '../src/services/archive/archive-service.js'
+import { encodeCwd } from '@taiji/shared/paths'
 import type { IPiEngine } from '../src/services/ports/pi-engine.js'
 
 /** 捕获到的一次死亡处置 fire（detail.hasDestroySink 是本文件的断言本体） */
 interface DispositionFire {
   sessionId: string
-  disposition: 'delete' | 'suppress'
+  disposition: 'delete' | 'suppress' | 'archive'
   hasDestroySink: boolean
 }
 
@@ -109,5 +116,73 @@ describe('delete 立标判据 hasDestroySink（unreasonable#3 回归防线）', 
     } finally {
       setBtwCascadeOps(null)
     }
+  })
+})
+
+describe("'archive' 处置登记（条目 28：GUI 归档路径的收尾触发点）", () => {
+  let archiveFires: DispositionFire[] = []
+  let unsubscribeArchive: () => void = () => {}
+  let archiveRoot: string
+
+  beforeEach(() => {
+    trashMock.mockReset().mockResolvedValue(undefined)
+    archiveFires = []
+    // 组合根同款订阅侧（index.ts subscribeSessionDeathDisposition 消费 'archive' →
+    // speakSessionDeath('exit')；本文件只记录，收尾三步的闭环在 session-manager-handler
+    // 与 archive-service 两侧测试锚定）。
+    unsubscribeArchive = subscribeSessionDeathDisposition((sessionId, disposition, detail) => {
+      archiveFires.push({ sessionId, disposition, hasDestroySink: detail.hasDestroySink })
+    })
+    archiveRoot = mkdtempSync(join(tmpdir(), 'archive-disposition-'))
+  })
+
+  afterEach(() => {
+    unsubscribeArchive()
+    rmSync(archiveRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('GUI 归档路径（session.archive → ArchiveService.archive）触发 disposition=archive、hasDestroySink=true，且先于杀进程（检查点①）', async () => {
+    // GUI 侧栏归档按钮的唯一 runtime 半边 = handleSessionArchive 薄调
+    // archiveService.archive()——收尾触发点全在归档执行体内，本用例直驱真实
+    // ArchiveService（deps 面 fake，处置登记经真实登记器 fireDeathDisposition）。
+    const calls: string[] = []
+    const sid = 'sess-gui-arch'
+    const sessionsRoot = join(archiveRoot, 'agent', 'sessions')
+    const cwd = join(archiveRoot, 'proj') // 真实存在（realpath 可解析）
+    const bucket = join(sessionsRoot, encodeCwd(cwd))
+    mkdirSync(bucket, { recursive: true })
+    const mainPath = join(bucket, `2026-10-23T00-00-00-000Z_${sid}.jsonl`)
+    writeFileSync(mainPath, `${JSON.stringify({ type: 'session', id: sid, cwd, timestamp: '2026-10-23T00:00:00.000Z' })}\n`)
+    const deps: ArchiveServiceDeps = {
+      isGenerating: () => false,
+      getActiveSession: (s) => (s === sid ? { cwd, sessionFilePath: mainPath } : undefined),
+      findScannedSession: () => undefined,
+      disposeUserStopped: () => {},
+      // 生产接线同款（index.ts：fireArchiveDisposition → fireDeathDisposition('archive')）
+      fireArchiveDisposition: (s, hasDestroySink) => { calls.push(`archive-disp:${s}`); fireDeathDisposition(s, 'archive', { hasDestroySink }) },
+      closeAllBtwLines: async () => [],
+      detachSession: (s) => { calls.push(`detach:${s}`) },
+      destroyPiSession: async (s) => { calls.push(`destroy:${s}`) },
+      removeSessionEntry: () => {},
+      reapBackgroundTasks: async () => {},
+      clearRemovedSessionData: () => {},
+      unbindCanvas: () => {},
+      trash: async () => {},
+      trashDirectory: async () => {},
+      invalidateScanCache: () => {},
+      broadcastSessionList: () => {},
+      getSessionSummary: () => undefined,
+      warn: () => {},
+    }
+    const service = new ArchiveService(deps, { dataDir: archiveRoot, archiveRoot: join(archiveRoot, 'agent', 'archive'), agentDir: join(archiveRoot, 'agent'), sessionsRoot })
+
+    await service.archive(sid)
+
+    // GUI 路径触发处置收尾：组合根订阅侧收到 'archive'（hasDestroySink=true——活跃在册，
+    // 随后必有 removeSessionEntry 销毁回调消费抑制标）。
+    expect(archiveFires).toEqual([{ sessionId: sid, disposition: 'archive', hasDestroySink: true }])
+    // 检查点①：处置登记先于任何杀进程（detach/destroy）。
+    expect(calls.indexOf(`archive-disp:${sid}`)).toBeLessThan(calls.indexOf(`detach:${sid}`))
+    expect(calls.indexOf(`archive-disp:${sid}`)).toBeLessThan(calls.indexOf(`destroy:${sid}`))
   })
 })
