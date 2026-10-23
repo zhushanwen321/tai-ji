@@ -123,6 +123,11 @@
 - [ ] **条目 63（S-11 注释清理）** 4 处注释按现行事实改写：`packages/core/src/transport/api/domains/file.ts:18` + `packages/runtime/src/services/file-service.ts:92`（showIgnored 已退役）、`TurnSummary.test.ts:166`、`fork-entry-behavior.test.ts`。来源同上。
 - [ ] **条目 64（scanDegradedFlag 退役）** `packages/runtime/src/infra/pi/session-file-utils.ts`：`scanDegradedFlag`（定义 :1134-1139，置位 :1251-1252/:1262-1264）零消费方。摘除旗标本体与置位/复位逻辑（`scanPiSessionsFromDisk` 降级判定改写，确认无其它依赖该旗标的分支），相关测试同步更新。来源 scan-degraded-flag-retirement。验收：全仓 grep `scanDegradedFlag` 零命中，runtime 包测试绿。
 
+### T15 裁决转入批（2026-10-23 用户裁决，need-design 条目 8/13 转入）
+
+- [ ] **条目 65（sweep owner 判活加固）** subagent-control sweep 判活只有 `isPidAlive(pid)`、instanceId 恒等于 runtimePid，pid 复用时误判 owner 活着跳过收割。加固二选一（实施时定并记录选型理由）：boot id / 进程启动时间二元组（mac/linux 可得，Windows 不可得维持保守跳过）或连接探活（断连信号即事实，对齐 ADR-0122）。硬约束：宁不杀勿误杀——只减少漏清、绝不引入误清。验收：pid 复用场景单测不再误判（登记被收割）+ owner 存活不误清回归 + Windows 保守跳过不变。来源：用户裁决（/tmp/need-design-2026-10-23-justdoit.md 项 1）；登记 docs/todo/subagent-control-delivery-residue.md §5。
+- [ ] **条目 66（pi 引擎 provider 目录注入）** pi 引擎配置目录回落 `~/.pi/agent` 与 taiji 主会话（`<dataDir>/agent/`）不同源，settings 配的 provider 对 pi 引擎派发不生效。裁决原则：taiji 派发的 pi 即 taiji 专用，参数一切由 taiji 控制；系统独立安装的 pi 不受影响。实施：注入 `PI_CODING_AGENT_DIR=<dataDir>/agent`——① `ENV_WHITELIST_PREFIXES`（packages/shared/src/constants.ts，SSOT）加 `PI_` 前缀准入或专用条目；② runtime 派发 pi 引擎处（engine-inspect-package.ts:197-210 EngineClient 构造）补 baseEnv/identityEnv，值动态推导禁写死；③ 与 C-proc-09 出站契约核对（新注入值属 runtime→引擎方向，不属出站剥离范围）；④ engine-query.ts:45-48 注释假设同批修正；⑤ 两形态（runtime 派发 / pi 会话内 extension 派发）均落 taiji 目录。附带可选项（provider CRUD 追加 zcode 同步调用）维持不做。验收：派发进程 env 含注入值且 pi 实际读该目录 models.json/auth.json（单测或探针）+ 独立 pi CLI 直跑行为不变 + ENV WHITELIST SSOT 检查与 check_spawn_env_boundary.py 过。来源：用户裁决（同上）；登记 docs/todo/engine-default-provider-setting.md「新发现」节。
+
 ## 不派发项（注记）
 
 - dev-0.11.4 S-12（几何变更在 e2e-visual 像素基线范围内）：CI 的 PR 期 L1 固定环节自动跑，红则按基线重录流程处置，无需现在动作。
