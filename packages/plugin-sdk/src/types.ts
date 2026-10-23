@@ -62,6 +62,14 @@ export type {
 export { PROTOCOL_VERSION } from '@zhushanwen/extension-protocol'
 
 /**
+ * 业务能力词常量 re-export（provider-plugin-access D3）：定义源 = @taiji/shared 的
+ * plugin-capability-map.ts（能力词与其放行模块集同地单源），本包值 re-export 供插件
+ * 作者在 manifest taijiPlugin.capabilities 声明消费。PROTOCOL_VERSION 值 re-export 同先例。
+ */
+export { PluginCapabilityConstants } from '@taiji/shared/plugin-capability-map'
+export type { PluginCapability } from '@taiji/shared/plugin-capability-map'
+
+/**
  * 插件描述域类型（manifest/descriptor 契约范围）
  *
  * 分层标注（IF2）：
@@ -81,6 +89,28 @@ export interface TaijiManifest {
   activationEvents: string[]
   trustLevel?: 'trusted' | 'sandbox'
   permissions?: string[]
+  /**
+   * 业务能力声明（provider-plugin-access D3，词表 = PluginCapabilityConstants）：
+   * network.http / fs.read-user-data / crypto / process.spawn。授权时机在安装——装上
+   * 即授予声明的能力，运行时不做逐次审批；未知词由安装期校验检出（放行计算
+   * resolveAllowedModules 返回 unknown 清单，不静默忽略）。
+   */
+  capabilities?: string[]
+  /**
+   * fs.read-user-data 的读取路径白名单（家目录相对路径，如
+   * 'Library/Application Support/Trae CN/User/globalStorage/storage.json'）。仅在声明
+   * fs.read-user-data 时有意义；与能力词是两个独立机制（路径边界由 fork 侧路径检查
+   * 承载，不互相顶替）。
+   */
+  readPaths?: string[]
+  /**
+   * 命名空间显式声明（provider-plugin-access D4，形如 'wool-workbuddy'）：插件经
+   * providers.write/delete/credential 触达 provider 条目的边界。安装期与「包名去 npm
+   * scope、去 plugin- 前缀」的推导值绑定校验（validateNamespaceBinding），不一致拒绝
+   * 安装（NAMESPACE_MISMATCH）；校验通过后 ns 从包名推导，不落盘——包名即唯一事实源。
+   * 仅 provider 插件需要声明；缺省 = 无绑定校验（非 provider 插件常态）。
+   */
+  namespace?: string
   contributes?: PluginContributes
   /** 插件来源，由 registry 扫描时自动设置，manifest 中声明无效 */
   source?: PluginSource
