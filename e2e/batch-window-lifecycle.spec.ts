@@ -36,6 +36,7 @@ import {
 import {
   applyRealTrackGate,
   attachConsoleCapture,
+  awaitMainTurnComplete,
   cleanupRealTrackApp,
   countEngineShellProcesses,
   countMemberSleeperProcesses,
@@ -200,16 +201,15 @@ test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）
         payload: { sessionId: sid, content },
       }, wsId, 30_000)
       expect(sendReply.type, '派发 prompt 应被接受').not.toBe('error')
-      const done = await waitUntil(() => sub.events.filter((e) => e.type === 'message.complete').length > 0, MAIN_TURN_TIMEOUT_MS)
-      if (!done) {
-        writeDiag(`batch-wl-${wsId}-turn.json`, {
-          seen: [...new Set(sub.events.map((e) => String(e.type)))],
-          runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-          consoleErrors: consoleCap.errors,
-        })
-      }
-      expect(done, `派发 turn（${wsId}）未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagent_batch 工具？）`).toBe(true)
-      sub.events.length = 0
+      await awaitMainTurnComplete({
+        events: sub.events,
+        timeoutMs: MAIN_TURN_TIMEOUT_MS,
+        dataDir,
+        consoleErrors: consoleCap.errors,
+        diag: writeDiag,
+        diagName: `batch-wl-${wsId}-turn.json`,
+        foundMessage: `派发 turn（${wsId}）未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagent_batch 工具？）`,
+      })
     }
     await dispatch(longSid, DISPATCH_PROMPT_LONG, 'wl-dispatch-long', listeners[0]!)
     await dispatch(shortSid, DISPATCH_PROMPT_SHORT, 'wl-dispatch-short', listeners[1]!)

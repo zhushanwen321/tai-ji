@@ -1,45 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock typebox before importing tool
-vi.mock("typebox", () => ({
-  Type: {
-    Object: (props: Record<string, unknown>) => ({ type: "object", properties: props }),
-    String: (opts?: Record<string, unknown>) => ({ type: "string", ...opts }),
-    Optional: (schema: unknown) => schema,
-    Array: (item: unknown, opts?: Record<string, unknown>) => ({ type: "array", items: item, ...opts }),
-  },
-  Static: class {},
-}));
-
-vi.mock("@earendil-works/pi-ai", () => ({
-  StringEnum: (values: readonly string[]) => ({ type: "string", enum: [...values] }),
-}));
-
-// Mock execution-notice.js (statically imported since 06-u1)
-vi.mock("../execution-notice.js", async () => {
-  // GOAL_FAILURE_RECOVERY 与真实实现同文案——completeResultText 在 failure 断言里消费它
-  const { GOAL_FAILURE_RECOVERY } = await vi.importActual<typeof import("../execution-notice.js")>("../execution-notice.js");
-  return {
-    handlePlanComplete: vi.fn(),
-    GOAL_FAILURE_RECOVERY,
-  };
-});
-
-// Mock 执行方式检测（D10）：单测里不扫真实目录（~/.agents/skills 等本机路径），
-// skill 选项用例显式注入 fixture；专用 exec-skills.test.ts 覆盖真实扫描。
-// importActual 展开：只覆写 detectExecSkills，其余导出（含 enter.ts re-export 的
-// resolveSkills 执行门禁）走真实现——mock 罩全模块会把它一并变 undefined
-vi.mock("@zhushanwen/pi-exec-skills", async () => {
-  const actual = await vi.importActual<typeof import("@zhushanwen/pi-exec-skills")>(
-    "@zhushanwen/pi-exec-skills",
-  );
-  return { ...actual, detectExecSkills: vi.fn(() => []) };
-});
-
-// Mock widget (imported by abort)
-vi.mock("../widget.js", () => ({
-  updatePlanWidget: vi.fn(),
-}));
+// 共享 mock 布景（typebox / pi-ai / execution-notice / exec-skills / widget）：
+// 首行 import 保证注册先于 ../tool.js 加载
+import "./test-setup-mocks";
 
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
@@ -55,9 +18,9 @@ import { createPlanCtx, DEFAULT_PLAN_STATE } from "../state.js";
 import { listTemplates } from "../templates.js";
 import { buildPlanSummary, PLAN_ACTIONS, registerPlanTool, validateAction } from "../tool.js";
 import { updatePlanWidget } from "../widget.js";
+import { ALL_TOOL_NAMES, createExecCapture, createTestCtx } from "./test-setup";
 
 /** Build a fake pi + ctx and capture the execute callback from registerTool. */
-const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 // D4 回归锚素材（对齐 pi 实装注册档位）：plan = direct 常驻（tool.ts 注册零 exposure
 // 字段，pi 默认 direct）；tool_search = model-only + defaultActive:false 注册（pi tool-search/
 // index.js:11）——model-only 档但注册不进默认激活集（agent-session _isDefaultActive：
@@ -75,9 +38,10 @@ const DEFAULT_ACTIVE_TOOLS = ALL_TOOL_NAMES.filter((n) => n !== "plan");
 function setup() {
   // 单 ctx 对象（D-B4-3）：sessions/controllers 别名 = planCtx 两表（同对象），用例断言不变
   const planCtx = createPlanCtx();
-  let executeFn: (id: string, p: Record<string, unknown>, sig?: AbortSignal, upd?: unknown, ctx?: unknown) => Promise<unknown>;
+  const ctx = createTestCtx();
+  const { registerTool, exec } = createExecCapture(ctx);
   const pi = {
-    registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
+    registerTool,
     appendEntry: vi.fn(),
     setActiveTools: vi.fn(),
     getActiveTools: vi.fn(() => [...DEFAULT_ACTIVE_TOOLS]),
@@ -91,17 +55,6 @@ function setup() {
   } as unknown as Parameters<typeof registerPlanTool>[0];
   registerPlanTool(pi, planCtx);
 
-  const ctx = {
-    sessionId: "test-session",
-    cwd: "/tmp/test-project",
-    // D4 三路分流的 ctx 形态字段：默认 TUI（原生 select 路径），GUI 用例覆写 mode
-    hasUI: true,
-    mode: "tui" as const,
-    isProjectTrusted: () => true,
-    sessionManager: { getSessionId: () => "test-session", getLeafId: () => null, getEntries: () => [] },
-    ui: { select: vi.fn(), notify: vi.fn() },
-  };
-
   // 默认前置：已批准态（approved --approve--> dispatching 重选执行方式，consumers.md §三B）——
   // complete 的审批闸口（D1 边表）要求先过 review 流程；用例可在返回后覆写 sessions
   planCtx.states.set("test-session", {
@@ -113,8 +66,6 @@ function setup() {
     docs: [{ fileName: "design.md", absPath: "/tmp/test-project/.tmp/plans/auth/design.md", sourceSkill: "", version: 1 }],
   });
 
-  const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
-    executeFn!("tc0", params, signal, undefined, ctx);
   return { pi, planCtx, sessions: planCtx.states, controllers: planCtx.controllers, ctx, exec };
 }
 

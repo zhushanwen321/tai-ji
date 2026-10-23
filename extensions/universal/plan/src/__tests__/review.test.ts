@@ -1,47 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock typebox before importing tool（形态照 tool.test.ts）
-vi.mock("typebox", () => ({
-  Type: {
-    Object: (props: Record<string, unknown>) => ({ type: "object", properties: props }),
-    String: (opts?: Record<string, unknown>) => ({ type: "string", ...opts }),
-    Optional: (schema: unknown) => schema,
-    Array: (item: unknown, opts?: Record<string, unknown>) => ({ type: "array", items: item, ...opts }),
-  },
-  Static: class {},
-}));
-
-vi.mock("@earendil-works/pi-ai", () => ({
-  StringEnum: (values: readonly string[]) => ({ type: "string", enum: [...values] }),
-}));
-
-vi.mock("../execution-notice.js", async () => {
-  const { GOAL_FAILURE_RECOVERY } = await vi.importActual<typeof import("../execution-notice.js")>("../execution-notice.js");
-  return {
-    handlePlanComplete: vi.fn(),
-    GOAL_FAILURE_RECOVERY,
-  };
-});
+// 共享 mock 布景（typebox / pi-ai / execution-notice / exec-skills / widget）：
+// 首行 import 保证注册先于 ../tool.js 加载
+import "./test-setup-mocks";
 
 // 条目 7 降级锚：unknown-decision 的版本错配 warn 留痕经 extension-logger，捕获断言要点
 const { loggerWarn } = vi.hoisted(() => ({ loggerWarn: vi.fn() }));
 vi.mock("@zhushanwen/pi-extension-logger", () => ({
   getLogger: () => ({ warn: loggerWarn, error: vi.fn() }),
 }));
-
-vi.mock("../widget.js", () => ({
-  updatePlanWidget: vi.fn(),
-}));
-
-// Mock 执行方式检测（D10）：审批用例不扫真实目录，skill 选项恒空。
-// importActual 展开：只覆写 detectExecSkills，其余导出（含 enter.ts re-export 的
-// resolveSkills 执行门禁）走真实现——mock 罩全模块会把它一并变 undefined
-vi.mock("@zhushanwen/pi-exec-skills", async () => {
-  const actual = await vi.importActual<typeof import("@zhushanwen/pi-exec-skills")>(
-    "@zhushanwen/pi-exec-skills",
-  );
-  return { ...actual, detectExecSkills: vi.fn(() => []) };
-});
 
 import { handlePlanComplete } from "../execution-notice.js";
 import { PLAN_REVIEW_MARKER } from "@zhushanwen/extension-protocol";

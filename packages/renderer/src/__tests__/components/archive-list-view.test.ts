@@ -79,6 +79,18 @@ function mountList(
   })
 }
 
+/**
+ * 两段确认态实底红样式断言（行级 purge 钮与批量钮同款）：底色 bg-danger + 悬停压色
+ * hover:bg-danger（vision 验收缺陷回归锚点：确认态须抵消 ghost variant 的
+ * hover:bg-surface-hover——点击后指针悬停在钮上，灰底曾覆盖红底）+ 实底前景语义
+ * 令牌 text-danger-fg（token 层修复后的终态：--danger-fg 暗色族即亮字）。
+ */
+function expectConfirmDangerStyle(btn: { classes(): string[] }): void {
+  expect(btn.classes()).toContain('bg-danger')
+  expect(btn.classes()).toContain('hover:bg-danger')
+  expect(btn.classes()).toContain('text-danger-fg')
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   // projectId → 项目名解析数据源（proj-1 → taiji 项目）；默认项目（id 常量）恒在
@@ -174,13 +186,7 @@ describe('ArchiveListView 行交互（D10 悬停双钮 + 事件）', () => {
     const btn = wrapper.find('[data-testid="archive-row-purge-btn"]')
 
     await btn.trigger('click')
-    expect(btn.classes()).toContain('bg-danger')
-    // 悬停压色（vision 验收缺陷回归锚点）：确认态须带 hover:bg-danger 抵消 ghost
-    // variant 的 hover:bg-surface-hover（点击后指针悬停在钮上，灰底曾覆盖红底）
-    expect(btn.classes()).toContain('hover:bg-danger')
-    // 实底前景语义令牌（token 层修复后的终态）：字色走 text-danger-fg
-    //（2026-10-23 裁决后 --danger-fg 暗色族即亮字，不再绕道 text-neutral-fg）
-    expect(btn.classes()).toContain('text-danger-fg')
+    expectConfirmDangerStyle(btn)
     expect(btn.attributes('title')).toBe('确认彻底删除？')
     expect(wrapper.emitted('purge')).toBeUndefined()
 
@@ -254,9 +260,7 @@ describe('ArchiveListView 时间筛选行（mono 短码档位 + 总体积 + 批�
 
     await btn.trigger('click')
     expect(btn.text()).toBe('确认删除 1 项？')
-    expect(btn.classes()).toContain('bg-danger')
-    expect(btn.classes()).toContain('hover:bg-danger') // 同行级钮：确认态悬停压色
-    expect(btn.classes()).toContain('text-danger-fg') // 同行级钮：实底前景语义令牌（token 层修复后即亮字）
+    expectConfirmDangerStyle(btn) // 同行级钮：确认态实底红（悬停压色 + 实底前景字色）
     expect(wrapper.emitted('purgeBatch')).toBeUndefined()
 
     await btn.trigger('click')

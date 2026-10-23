@@ -1,37 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock typebox / pi-ai before importing tool（形态照 review.test.ts）
-vi.mock("typebox", () => ({
-  Type: {
-    Object: (props: Record<string, unknown>) => ({ type: "object", properties: props }),
-    String: (opts?: Record<string, unknown>) => ({ type: "string", ...opts }),
-    Optional: (schema: unknown) => schema,
-    Array: (item: unknown, opts?: Record<string, unknown>) => ({ type: "array", items: item, ...opts }),
-  },
-  Static: class {},
-}));
-
-vi.mock("@earendil-works/pi-ai", () => ({
-  StringEnum: (values: readonly string[]) => ({ type: "string", enum: [...values] }),
-}));
-
-vi.mock("../execution-notice.js", async () => {
-  const { GOAL_FAILURE_RECOVERY } = await vi.importActual<typeof import("../execution-notice.js")>("../execution-notice.js");
-  return {
-    handlePlanComplete: vi.fn(),
-    GOAL_FAILURE_RECOVERY,
-  };
-});
-
-vi.mock("../widget.js", () => ({ updatePlanWidget: vi.fn() }));
-// importActual 展开：只覆写 detectExecSkills（不扫真实目录），其余导出（含 enter.ts
-// re-export 的 resolveSkills 执行门禁）走真实现——mock 罩全模块会把它一并变 undefined
-vi.mock("@zhushanwen/pi-exec-skills", async () => {
-  const actual = await vi.importActual<typeof import("@zhushanwen/pi-exec-skills")>(
-    "@zhushanwen/pi-exec-skills",
-  );
-  return { ...actual, detectExecSkills: vi.fn(() => []) };
-});
+// 共享 mock 布景（typebox / pi-ai / execution-notice / exec-skills / widget）：
+// 首行 import 保证注册先于 ../tool.js 加载
+import "./test-setup-mocks";
 
 import {
   isPlanReviewRequest,

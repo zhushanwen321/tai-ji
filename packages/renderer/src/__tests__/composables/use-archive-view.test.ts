@@ -92,6 +92,21 @@ beforeEach(() => {
   apiMocks.list.mockResolvedValue([])
 })
 
+/**
+ * 主区摘要视图布景（openSummary 呈现该条目）+ purge 成功回复与列表刷新 mock 置备，
+ * 返回条目与导航 store 供删除编排与离开断言（单条 purgeArchiveEntry / 批量
+ * purgeArchivesBatch 的 selected 联动用例同布景）。
+ */
+function stageSummaryViewForPurge(purgeReply: Record<string, unknown>) {
+  const archive = makeArchive()
+  useArchiveView().openSummary(archive)
+  const navigation = useNavigationStore()
+  expect(navigation.current.view).toBe('archive')
+  apiMocks.purgeArchive.mockResolvedValue(purgeReply)
+  apiMocks.listArchives.mockResolvedValue([])
+  return { archive, navigation }
+}
+
 describe('openSummary / refreshArchives（D11 摘要视图入口 + D10 列表拉取）', () => {
   it('openSummary：登记 selected + navigation.push({view:"archive"})', () => {
     const { openSummary } = useArchiveView()
@@ -324,14 +339,11 @@ describe('purgeArchiveEntry（D5 步骤 7：keep-all 保守分支显式上报）
   })
 
   it('keep-all 分支（keptSubagentsDir 携带）：warning toast 含残留目录指引；主区呈现该条目时同步离开', async () => {
-    const { purgeArchiveEntry, openSummary } = useArchiveView()
-    const archive = makeArchive()
-    openSummary(archive)
-    const navigation = useNavigationStore()
-    expect(navigation.current.view).toBe('archive')
-
-    apiMocks.purgeArchive.mockResolvedValue({ sessionId: 'arc-1', keptSubagentsDir: '/data/ext-sessions/arc-1/subagents' })
-    apiMocks.listArchives.mockResolvedValue([])
+    const { purgeArchiveEntry } = useArchiveView()
+    const { archive, navigation } = stageSummaryViewForPurge({
+      sessionId: 'arc-1',
+      keptSubagentsDir: '/data/ext-sessions/arc-1/subagents',
+    })
 
     await purgeArchiveEntry(archive)
 
@@ -452,14 +464,8 @@ describe('purgeArchivesBatch（筛选行批量彻底删除：串行循环 + 结�
   })
 
   it('主区 selected 落在被删集合：清空选中 + 导航回 chat（对齐单条 purge 编排）', async () => {
-    const { purgeArchivesBatch, openSummary } = useArchiveView()
-    const archive = makeArchive()
-    openSummary(archive)
-    const navigation = useNavigationStore()
-    expect(navigation.current.view).toBe('archive')
-
-    apiMocks.purgeArchive.mockResolvedValue({ sessionId: 'arc-1' })
-    apiMocks.listArchives.mockResolvedValue([])
+    const { purgeArchivesBatch } = useArchiveView()
+    const { archive, navigation } = stageSummaryViewForPurge({ sessionId: 'arc-1' })
 
     await purgeArchivesBatch([archive, makeArchive('arc-2')])
 

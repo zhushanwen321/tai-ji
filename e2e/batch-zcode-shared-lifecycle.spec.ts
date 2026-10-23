@@ -31,6 +31,7 @@ import {
 import {
   applyRealTrackGate,
   attachConsoleErrorCapture,
+  awaitMainTurnComplete,
   cleanupRealTrackApp,
   listFilesRecursive,
   openMainListenWs,
@@ -129,16 +130,15 @@ test('ZSL (batch real): zcode 双任务同 pid（V4 懒加载单例回归）+ ta
       payload: { sessionId: sid, content: prompt },
     }, 'zsl-dispatch', 30_000)
     expect(sendReply.type, '派发 prompt 应被接受').not.toBe('error')
-    const done = await waitUntil(() => sub.events.filter((e) => e.type === 'message.complete').length > 0, MAIN_TURN_TIMEOUT_MS)
-    if (!done) {
-      writeDiag('batch-zsl-dispatch-turn.json', {
-        seen: [...new Set(sub.events.map((e) => String(e.type)))],
-        runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-        consoleErrors: consoleCap.errors,
-      })
-    }
-    expect(done, `派发 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（主 LLM 未调 workflow tool？）`).toBe(true)
-    sub.events.length = 0
+    await awaitMainTurnComplete({
+      events: sub.events,
+      timeoutMs: MAIN_TURN_TIMEOUT_MS,
+      dataDir,
+      consoleErrors: consoleCap.errors,
+      diag: writeDiag,
+      diagName: 'batch-zsl-dispatch-turn.json',
+      foundMessage: `派发 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（主 LLM 未调 workflow tool？）`,
+    })
 
     // ── V4 断言范围①：r1 在途，zcode 引擎进程出现（懒加载——首个任务触发 spawn） ──
     const up1 = await waitUntil(() => zcodeProcessSnapshot().pids.size > zcBase.pids.size, PROC_TIMEOUT_MS)

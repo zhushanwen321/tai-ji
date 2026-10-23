@@ -1,21 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// 共享 mock 布景（typebox / pi-ai / exec-skills / widget + node:fs 全桩）：
+// 首行 import 保证注册先于 ../command.js 加载
+import { setFsReadFileSync } from "./test-setup-fs-mock";
+import "./test-setup-mocks";
+
 // --template 直传注入的全文 fixture（vi.hoisted：vi.mock 工厂引用需先于模块体初始化）
 const TEMPLATE_FILE_FIXTURE = vi.hoisted(() => "# retro skeleton\n\n## Implementation Steps\n- step one\n");
 
-// Mock dependencies before importing
-vi.mock("node:fs", () => ({
-  mkdirSync: vi.fn(),
-  readdirSync: vi.fn(() => []),
-  statSync: vi.fn(),
-  existsSync: vi.fn(() => false),
-  // --template 直传的全文内嵌读取（v2b：prompts 分支消费）
-  readFileSync: vi.fn(() => TEMPLATE_FILE_FIXTURE),
-}));
-
-vi.mock("../widget.js", () => ({
-  updatePlanWidget: vi.fn(),
-}));
+// --template 直传的全文内嵌读取（v2b：prompts 分支消费）——覆写共享 fs 桩的空串默认
+setFsReadFileSync(() => TEMPLATE_FILE_FIXTURE);
 
 import * as fs from "node:fs";
 import * as os from "node:os";

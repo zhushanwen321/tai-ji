@@ -182,54 +182,70 @@ async function purgeArchiveEntry(archive: ArchiveSummary): Promise<void> {
  * 落在失败条目时保留选中与摘要视图（与单条 purgeArchiveEntry 失败分支同编排——失败
  * 显式上报后用户经摘要视图与列表行重试，不清选中不踢回 chat）。
  */
+/** 批量 purge 逐条统计（结果 toast 分流与 selected 联动判定共用同一口径）。 */
+interface BatchPurgeStats {
+  ok: number
+  kept: number
+  failed: number
+  firstFailure: string | null
+  failedSessionIds: Set<string>
+}
+
+/**
+ * [purgeArchivesBatch 拆分] 串行逐条 purge 与计数归集：archive_not_found 幂等达成按
+ * 成功口径吸收；其余失败不中断整批，首条真实失败登记原因文案。循环内全部异常在
+ * 逐条 catch 吸收，函数不抛（batchPurging 复位由调用方 finally 承担）。
+ */
+async function purgeEachArchive(entries: ArchiveSummary[]): Promise<BatchPurgeStats> {
+  const stats: BatchPurgeStats = { ok: 0, kept: 0, failed: 0, firstFailure: null, failedSessionIds: new Set() }
+  for (const entry of entries) {
+    try {
+      const reply = await sessionApi.purgeArchive(entry.sessionId)
+      stats.ok += 1
+      if (reply.keptSubagentsDir !== undefined) stats.kept += 1
+    } catch (e) {
+      const key = archiveErrorKey('purge', e)
+      if (key === 'archive.error.notFound') {
+        // archive_not_found（映射 archive-error-text.ts:30）：幂等达成，按成功口径吸收
+        stats.ok += 1
+      } else {
+        stats.failed += 1
+        stats.failedSessionIds.add(entry.sessionId)
+        if (stats.firstFailure === null) {
+          stats.firstFailure = t(key ?? 'archive.entry.purgeFailed', { msg: toErrorMessage(e) })
+        }
+      }
+    }
+  }
+  return stats
+}
+
 async function purgeArchivesBatch(entries: ArchiveSummary[]): Promise<void> {
   const { info: toastInfo, warning: toastWarning } = useToast()
   const store = useArchiveStore()
   if (store.batchPurging || entries.length === 0) return
   store.batchPurging = true
-  let ok = 0
-  let kept = 0
-  let failed = 0
-  let firstFailure: string | null = null
-  const failedSessionIds = new Set<string>()
+  let stats: BatchPurgeStats
   try {
-    for (const entry of entries) {
-      try {
-        const reply = await sessionApi.purgeArchive(entry.sessionId)
-        ok += 1
-        if (reply.keptSubagentsDir !== undefined) kept += 1
-      } catch (e) {
-        const key = archiveErrorKey('purge', e)
-        if (key === 'archive.error.notFound') {
-          // archive_not_found（映射 archive-error-text.ts:30）：幂等达成，按成功口径吸收
-          ok += 1
-        } else {
-          failed += 1
-          failedSessionIds.add(entry.sessionId)
-          if (firstFailure === null) {
-            firstFailure = t(key ?? 'archive.entry.purgeFailed', { msg: toErrorMessage(e) })
-          }
-        }
-      }
-    }
+    stats = await purgeEachArchive(entries)
   } finally {
     store.batchPurging = false
   }
   // 局部快照一次读取：闭包内 TS 无法跨箭头函数保持 store.selected 的非空收窄，
   // 提取常量后判定与成员匹配共用同一值（同步代码段内选中态不会变化）
   const selectedId = store.selected?.sessionId ?? null
-  if (selectedId !== null && !failedSessionIds.has(selectedId) && entries.some((e) => e.sessionId === selectedId)) {
+  if (selectedId !== null && !stats.failedSessionIds.has(selectedId) && entries.some((e) => e.sessionId === selectedId)) {
     store.selectArchive(null)
     useNavigationStore().push({ view: 'chat' })
   }
   void refreshArchives()
-  if (failed > 0) {
+  if (stats.failed > 0) {
     // failed > 0 ⟹ 首个真实失败已登记原因（同一判别分支计数），?? '' 仅为类型收窄
-    toastWarning(t('archive.entry.batchPurgePartial', { ok, failed, msg: firstFailure ?? '' }))
-  } else if (kept > 0) {
-    toastWarning(t('archive.entry.batchPurgeKept', { count: ok, kept }))
+    toastWarning(t('archive.entry.batchPurgePartial', { ok: stats.ok, failed: stats.failed, msg: stats.firstFailure ?? '' }))
+  } else if (stats.kept > 0) {
+    toastWarning(t('archive.entry.batchPurgeKept', { count: stats.ok, kept: stats.kept }))
   } else {
-    toastInfo(t('archive.entry.batchPurgeSuccess', { count: ok }))
+    toastInfo(t('archive.entry.batchPurgeSuccess', { count: stats.ok }))
   }
 }
 
