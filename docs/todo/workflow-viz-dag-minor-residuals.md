@@ -9,6 +9,6 @@
 3. **同列垂直 sequence 边折线穿卡片**（`packages/renderer/src/components/panel/workflow-viz/dag/layout.ts`）：同列相邻节点的垂直边走中位竖线时可能穿过中间增高节点（实例行增高后暴露）。修复方向 = 垂直边路由对途经节点 x 区间做避让侧道。
 4. **callId 未命中回退 `calls?.[0]`**（`packages/renderer/src/components/panel/workflow-viz/overlay/WorkflowVizOverlayHost.vue`）：实例行点击上抛的 callId 在 byNode 清单未命中时回退取首个 call，应显式空态（no-op）而非静默换目标。
 
-## 关联工具缺陷（登记备查）
+## 关联工具缺陷（已修复）
 
-review-fix-loop workflow 的 state 对账缺陷：聚合器把「延续未修」条目写成无 title/severity 的空壳（state.json S-1/S-2/S-3/S-5），后续 clean 轮 reconcile 无法匹配关闭 → 连续 3 轮 clean 后误判 stuck 终态。实质审查已收敛（R4 报告明确 must-fix 无、4 条为 minor 延续项）。修复方向 = 聚合器延续条目继承上轮 title/severity 字段。
+review-fix-loop workflow 的 state 对账缺陷：聚合器把「延续未修」条目写成无 title/severity 的空壳（state.json S-1/S-2/S-3/S-5），后续 clean 轮 reconcile 无法匹配关闭 → 连续 3 轮 clean 后误判 stuck 终态。已修复（2026-10-23，双版本单源化收编）：zcode 版延续条目无条件字段覆盖改为 `inheritCarryoverFields`（title 锁定 + severity 采信显式）+ `refreshTrackedFields`（内容字段非空刷新），实装在 `packages/subagent-core/workflows/src/review-fix-loop.shared.ts`（双平台产物共用单源段，经 `pnpm build:workflows` 构建拼入两侧）；pi 内置版同款修复先于此（inheritCarryoverFields，utils 旧实装）已上线。

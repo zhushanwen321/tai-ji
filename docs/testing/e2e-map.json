@@ -989,8 +989,13 @@
       "summary": "review-fix-loop（pi 版工作流实装）循环协议单测锁 + 双实现锁步检查：ES3 fixer 结果校验（disputed 申述豁免记账 / deferred 仅 minor）/ 调度单遍归类 / fixer 文档契约",
       "scope": [
         "packages/subagent-core/workflows/review-fix-loop.js",
+        "packages/subagent-core/workflows/review-fix-loop.dwf.ts",
         "packages/subagent-core/workflows/review-fix-loop-utils.cjs",
-        "packages/subagent-core/workflows/review-fix-loop-utils.d.cts"
+        "packages/subagent-core/workflows/review-fix-loop-utils.d.cts",
+        "packages/subagent-core/workflows/src/**",
+        "packages/subagent-core/scripts/build-review-fix-loop.mjs",
+        "packages/subagent-core/src/__tests__/review-fix-loop-shared.test.ts",
+        "packages/subagent-core/src/__tests__/review-fix-loop-build.test.ts"
       ],
       "layer": "L1",
       "assets": [
@@ -1001,10 +1006,10 @@
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "node scripts/check-rfl-parity.mjs && cd packages/subagent-core && npx vitest run src/__tests__/review-fix-loop-utils.test.ts src/__tests__/review-fix-loop-script.test.ts",
+      "run": "node scripts/check-rfl-parity.mjs && cd packages/subagent-core && npx vitest run src/__tests__/review-fix-loop-utils.test.ts src/__tests__/review-fix-loop-script.test.ts src/__tests__/review-fix-loop-shared.test.ts src/__tests__/review-fix-loop-build.test.ts",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态：循环协议行为由 utils/script 两测试件零 token 锁定（含 disputed 通道用例，经 run 命令执行，不重复登记为 asset——共享基建目录防聚合泛化）；与 zcode 原生版（仓外 ~/.zcode/workflows/review-fix-loop.dwf.ts）的语义同源由 check-rfl-parity.mjs 机器锁步（结构骨架 = 调度层 7 项标记 + 问题清单层两侧共有标记 normIssueId/titlesCompatible/TITLE_MATCH_MIN + planReviewerOrder 行为对账 + 排列不变量，zcode 副本缺失时 SKIP；问题清单层仅结构标记锁步——延续合并 title 权威 / title 可选性 / 复活模型的两侧语义差异以检查脚本头部登记清单为准）。真机验证 = 真实 PR 流水线 run（2026-09-23 PR #19 四轮：disputed 通道协议在 R4 首跑收敛，maxRounds 收窄下 round-2 复核 16/16 fixed）"
+      "note": "R2 态：循环协议行为由 utils/script/shared 三测试件零 token 锁定（含 disputed 通道用例与 contentRepairLoop mock-ctx 全路径，经 run 命令执行，不重复登记为 asset——共享基建目录防聚合泛化）。双版本同源保障两层：① 单源生成管线（2026-10-23 起）——zcode 产物（workflows/review-fix-loop.dwf.ts，构建同步 ~/.zcode saved）与 pi 产物（review-fix-loop.js）由 workflows/src/（shared 机制段 + 双壳模板）经 scripts/build-review-fix-loop.mjs 拼装，产物一致性由 review-fix-loop-build.test.ts 机器锁定；② check-rfl-parity.mjs 机器锁步（结构骨架 = 调度层 7 项标记 + 问题清单层两侧共有标记 normIssueId/titlesCompatible/TITLE_MATCH_MIN + planReviewerOrder 行为对账 + 排列不变量，zcode 副本缺失时 SKIP；问题清单层语义差异以检查脚本头部登记清单为准——D1 延续条目 title 权威已随单源化对齐：inheritCarryoverFields 单源段两侧共用）。真机验证 = 真实 PR 流水线 run（2026-09-23 PR #19 四轮：disputed 通道协议在 R4 首跑收敛，maxRounds 收窄下 round-2 复核 16/16 fixed）"
     },
     {
       "id": "E2E-ZCODE-01",
