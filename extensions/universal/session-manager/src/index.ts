@@ -190,7 +190,8 @@ interface SessionToolConfig<S extends TObject> {
 	/**
 	 * 可见性档位（ADR-0136 名单句）：缺省 = deferred（七件套）；显式 "direct" =
 	 * 常驻声明（create_managed_session 例外，2026-10-23 裁决）。direct 形态不写
-	 * exposure 字段（与 SDK 缺省及全仓常驻工具惯例一致），helper 条件展开实现。
+	 * exposure 字段（与 SDK 缺省及全仓常驻工具惯例一致，pi-semantics PS-91），
+	 * helper 条件展开实现。
 	 */
 	exposure?: "deferred" | "direct"
 	/**
@@ -233,7 +234,7 @@ function registerSessionTool<S extends TObject>(pi: ExtensionAPI, cfg: SessionTo
 		// 现行登记一致——除 create_managed_session（direct 常驻，2026-10-23 裁决）外
 		// 不常驻声明，tool_search 命中即激活；检索入口 = 启动迁移写入的 +tool_search
 		// 条目（runtime pi-codemode-settings）。direct 档不写 exposure 字段（与 SDK
-		// 缺省等价），条件展开避免传显式 undefined
+		// 缺省等价，pi-semantics PS-91），条件展开避免传显式 undefined
 		...(cfg.exposure !== "direct" ? { exposure: "deferred" as const } : {}),
 		promptSnippet: cfg.promptSnippet,
 		description: cfg.description,

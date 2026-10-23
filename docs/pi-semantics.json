@@ -1956,5 +1956,28 @@
       "note": "消费方：workflow_run 常驻 description 指名引用 workflow_control 的发现链路断言（extensions/universal/subagent-workflow/src/interface/tool/tool-workflow.ts 注册注释 + docs/adr/decisions.md ADR-0136 2026-10-23 补记）。pi 升级时重验：grep dist/extensions/tool-search/tool.js 'parts = \\[tool.name'（语料是否仍含工具名）+ grep 'isSearchable'（候选是否仍含 deferred）"
     },
     "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-91",
+    "claim": "registerTool 不写 exposure 字段时 SDK 按缺省 \"direct\" 常驻声明：ToolDefinition.exposure 可选且注释自述 Default: \"direct\"，实装 _getToolExposure = definition.exposure ?? \"direct\"——注册参数缺该字段即按 direct 档参与激活与声明判定（direct 注册即激活、声明给模型，五档分级语义见 PS-79）。taiji 常驻工具「注册时不写 exposure 字段（SDK 缺省 direct）」的注册形态（C-ext-05，ADR-0136）以本条为 pi 侧行为锚：四处注册断言 expect(tool.exposure).toBeUndefined() 锁的是注册参数形态而非 pi 侧缺省值——pi 升级若改缺省值（direct → 其他档），缺字段的常驻工具会静默变为不激活/不声明而四处测试仍绿，由本条登记人工重验拦截",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/extensions/types.d.ts",
+        "symbol": "ToolDefinition.exposure",
+        "note": ":464-466 —— 注释 How the model reaches the tool. Default: \"direct\". See {@link ToolExposure}. + exposure?: ToolExposure（声明侧缺省值）【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "_getToolExposure",
+        "note": ":1102-1104 return this._toolDefinitions.get(name)?.definition.exposure ?? \"direct\"（实装侧兜底；消费点 :1069 getAllTools 装载 / :1111 / :1124 / :1137 getExposure）【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费方：goal_control（extensions/universal/goal）、schedule / schedule_control（extensions/universal/scheduler）、compact_context（extensions/universal/smart-context）、create_managed_session（extensions/universal/session-manager，direct 档经条件展开不写字段）的注册断言与 JSDoc 注释。与 PS-79 分工：PS-79 登记 ToolExposure 五档分级与 setActiveTools 声明语义，本条登记「缺字段 = direct 缺省」本身。pi 升级时重验：grep dist/core/agent-session.js '_getToolExposure'（?? 兜底值是否仍为 direct）+ types.d.ts exposure 注释 Default 值是否漂移"
+    },
+    "verifiedWith": "1.0.0"
   }
 ]
