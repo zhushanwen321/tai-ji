@@ -219,4 +219,9 @@ export const CREATE_DERIVED_CALLERS: readonly CreateDerivedCaller[] = [
     passedBindingFields: ['spawnSource', 'parentAgentSessionId', 'projectId'],
   },
   { file: 'services/handoff-service.ts', semantic: 'handoff', passedBindingFields: ['projectId'] },
+  // 羊毛管理专用会话（wool-manager withManageSession）：宿主直接创建的 hidden 命令会话
+  //（wool-manage-<family>，跑管理动作即回收）——零绑定字段（不传 launchPresetId/
+  // projectId/spawnSource 等任何绑定字段，options 仅 hidden 标记），归 user-facing 通道
+  //（宿主直连创建，非 agent 派发、非承接继承）。
+  { file: 'services/wool-manager.ts', semantic: 'user-facing', passedBindingFields: [] },
 ]
