@@ -144,14 +144,11 @@ export const RUN_EVENTS_SUFFIX = ".record.jsonl";
 export const SLUG_MAX_LENGTH = 35;
 
 /**
- * [D1 Class B1] run journal 事件词表（**词表本体**下沉；事件载荷接口仍留
- * orchestration/run-events.ts，因为它们引用 workflow 侧 AgentResult——那是待归位的
- * 同名类型）。
- *
- * 为什么先下沉词表：journal 实现要搬到 `execution/persistence/`（Class B2），行校验
- * 需要 `RUN_EVENT_TYPES` 这个**值**；值不能反向依赖 orchestration（值依赖环检查禁），
- * 而事件接口只作**类型**导入即可（类型边被值依赖环检查忽略）。故词表下沉、接口留原位，
- * B2 才成立。
+ * [D1] run journal 事件词表（值权威在本文件）。run 事件载荷契约（信封 + 事件
+ * 接口 + journal 接口形态）同居 shared 层：权威在 `shared/run-event-contracts.ts`，
+ * journal 实装（`execution/persistence/run-event-journal.ts`）按类型同层导入；
+ * orchestration/run-events.ts 保留 re-export 壳（状态机 / fold 与 barrel 消费零改动）。
+ * 值依赖环检查只拦值边——事件接口的类型导入不构成反向依赖。
  */
 export const RUN_EVENT_TYPES = [
   "run-created",

@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { getLogger } from "../../core/logger.ts";
 import { JsonlEventStream } from "../../shared/jsonl-event-stream.ts";
 import { ALL_RUN_OUTCOMES, RUN_EVENTS_SUFFIX, RUN_EVENT_TYPES } from "../../shared/run-vocabulary.ts";
-import type { RunEventJournal, WorkflowRunEvent, WorkflowRunEventInput } from "../../orchestration/run-events.ts";
+import type { RunEventJournal, WorkflowRunEvent, WorkflowRunEventInput } from "../../shared/run-event-contracts.ts";
 // 【D1 拆边 Class C 第 3 步】默认 journal 目录的模块锚推导（原 terminal-actions 依赖，
 // 随目录解析集群一并迁入；assembly 叶子方向，persistence → assembly 既有先例）。
 // [session-store-layout-inversion D2/D3] 模块锚 = 进程级当前 rootSessionId 绑定的
