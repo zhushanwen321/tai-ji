@@ -174,6 +174,9 @@ describe('ArchiveListView 行交互（D10 悬停双钮 + 事件）', () => {
 
     await btn.trigger('click')
     expect(btn.classes()).toContain('bg-danger')
+    // 悬停压色（vision 验收缺陷回归锚点）：确认态须带 hover:bg-danger 抵消 ghost
+    // variant 的 hover:bg-surface-hover（点击后指针悬停在钮上，灰底曾覆盖红底）
+    expect(btn.classes()).toContain('hover:bg-danger')
     expect(btn.attributes('title')).toBe('确认彻底删除？')
     expect(wrapper.emitted('purge')).toBeUndefined()
 
@@ -248,6 +251,7 @@ describe('ArchiveListView 时间筛选行（mono 短码档位 + 总体积 + 批�
     await btn.trigger('click')
     expect(btn.text()).toBe('确认删除 1 项？')
     expect(btn.classes()).toContain('bg-danger')
+    expect(btn.classes()).toContain('hover:bg-danger') // 同行级钮：确认态悬停压色
     expect(wrapper.emitted('purgeBatch')).toBeUndefined()
 
     await btn.trigger('click')

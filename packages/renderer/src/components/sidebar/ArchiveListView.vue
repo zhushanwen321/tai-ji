@@ -78,7 +78,7 @@
         data-testid="archive-batch-purge-btn"
         class="ml-auto inline-flex h-[22px] shrink-0 items-center gap-[5px] rounded-[var(--radius-xs)] px-[7px] font-mono text-[length:var(--text-2xs)] transition-colors disabled:cursor-default disabled:opacity-40"
         :class="batchConfirming
-          ? 'bg-danger [font-weight:var(--fw-mid)] text-danger-fg'
+          ? 'bg-danger [font-weight:var(--fw-mid)] text-danger-fg hover:bg-danger'
           : 'text-danger hover:bg-danger-soft'"
         @click="onBatchPurgeClick"
       >
@@ -184,7 +184,7 @@
                 class="relative size-[18px] rounded-sm after:absolute after:inset-[-3px] after:content-[''] disabled:cursor-default disabled:opacity-40"
                 :disabled="purgingSessionId === entry.sessionId"
                 :class="purgeConfirmingId === entry.sessionId
-                  ? 'bg-danger text-danger-fg'
+                  ? 'bg-danger text-danger-fg hover:bg-danger'
                   : 'text-neutral-dim hover:bg-surface-hover hover:text-danger'"
                 :title="purgeConfirmingId === entry.sessionId ? t('archive.entry.purgeConfirm') : t('archive.entry.purge')"
                 @click.stop="onPurgeClick(entry)"
