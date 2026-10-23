@@ -31,7 +31,7 @@
 
 ### 3. zcode 引擎成员校验 async 化（listModels 协议方法）
 
-状态：已裁决立项（2026-10-23：按推荐路线出设计），设计进行中（产物 `.tmp/need-design-batch/`）。
+状态：设计完成（2026-10-23 裁决立项 → 设计产物 `.tmp/need-design-batch/zcode-listmodels-async-design.md`，待实施排期）。设计期关键事实修正：引擎协议 listModels 方法已存在、两引擎 server 均已应答，缺口仅在宿主侧 RemoteEngine 不发帧——选型 = 复用既有帧（probe 捎带否决）、union 签名保同步消费方保形、RPC 失败放行 + per-engine 一次性 warn。详见来源登记状态行。
 
 来源：engine-remote-membership-face.md（本登记唯一未决主体）。
 
@@ -43,15 +43,13 @@
 
 ### 4. scheduler 定时任务结果感知通道
 
-状态：现状核实进行中（2026-10-23 用户裁决）：待核实「注入消息是否已统一走 pending-notifications 统一通道、该通道能否感知投递成功与发送给 LLM 成功」；用户已在另一独立会话实施 scheduler 迁移，核实 main 现状后重评残余缺口。smart-context / steering mode 两豁免结论已裁决确认（见 unified-delivery-exempt-eval.md），scheduler 迁移线由本条承接。
+状态：现状核实完成（2026-10-23，报告 `.tmp/need-design-batch/scheduler-channel-verification.md`），**不可关闭**。核实结论：统一通道已建成（delivery-port 为 custom 车道唯一执行者，bash / session-manager / workflow / notifier 四条提交链全部接入；pending-notifications 是登记/收取层，与投递端口上下游分工），可感知「受理回执 + 送达凭据（消息进入 LLM 请求上下文、已写盘、轮次真实起步）」，不感知「LLM 成功产出响应」。**scheduler 不在通道内、迁移未落地**：用户所述「已由独立会话实施」经实码核实未找到（main HEAD / 全部分支 / 未提交改动 / 兄弟 worktree 均无 scheduler 迁移痕迹），现仍裸 `pi.sendMessage` steer 直投，失败静默缺口原样存在，compaction isIdle 小修也未实施。迁移实施必办项：幂等键改每轮唯一 + 失败语义二选一（详见来源登记）。待用户指认迁移真实落点或确认迁移仍待实施。
 
 来源：scheduler-result-awareness-channel.md。
 
 问题：scheduler 经扩展 API sendMessage 注入 owner session 后无投递结果感知（返回 `Promise<void>`），失败静默。
 
-候选方向：迁移到 session-manager 的 send_to_session + 通知通道（`extensions/universal/scheduler/src/backend.ts:57`）。登记判断为「架构级换通道，独立立项设计」。
-
-开放问题：立项排期；若上游 pi 给 sendMessage 提供结果回执，按新事实重评。
+候选方向：迁移到统一投递通道（delivery-port），注入参数逐字一致；架构级换通道，独立立项设计。
 
 ### 5. dev 实例 runtime 慢启动被健康检查误杀
 
@@ -120,13 +118,11 @@
 
 裁决点：是否启动判据 ① 的 notify-once 域改道设计（退役的前置）。
 
-### 12. pi 1.0.0 idle+triggerTurn 注入 entry 双写真伪核实
+### 12. pi 1.0.0 idle+triggerTurn 注入 entry 双写：已证伪 pi 上游成因，待复现归因
 
-状态：核实进行中（2026-10-23 用户裁决：先核实现象是否真实存在——node_modules 实装代码级核实 + 零 token 探针，产物 `.tmp/need-design-batch/`；核实为真后再裁决渲染侧是否按 details.deliveryId 判重去重）。
+状态：核实完成（2026-10-23）——pi 1.0.0 单次 sendMessage 在 idle 态不双写（代码写点穷尽 + 四时点零 token 探针均恰 1 条 entry），「pi 内部时序竞态」假设作废；若「同一通知落两条」真实出现，候选成因在 taiji delivery-port 侧重放链（重放判重窗口内二次调用 / 两次投递不同 deliveryId，推断未实证）。处置：渲染侧按 details.deliveryId 判重去重方向保留，再复现时记录重复条目 deliveryId 与 settled/流式状态归因后定。详见来源登记。
 
 来源：unified-delivery-residuals.md 项 4。
-
-问题：pi 上游形态——idle 态 triggerTurn 注入的 entry 双写（同轮次消息重复进 session jsonl）；port 层 sendMessage 恰一次已实证，疑 pi 内部时序竞态。上游核验归 pi-boundary-reliability 附录 B 登记线。
 
 ## 二、低优先债（正式 deferred 登记，不重报）
 

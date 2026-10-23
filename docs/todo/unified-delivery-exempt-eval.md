@@ -1,6 +1,6 @@
 # 统一消息投递重构：豁免类（scheduler / smart-context）迁移评估
 
-状态：已裁决（2026-10-23）：smart-context=不迁（确认）；steering mode=维持 one-at-a-time 不覆写（确认）；scheduler=迁移——本文件「一、scheduler」节的「不迁」结论作废（用户裁决推翻），迁移已由独立会话实施，现状核实与残余缺口承接于 [need-design.md](need-design.md) scheduler 条目（来源 [scheduler-result-awareness-channel.md](scheduler-result-awareness-channel.md)）。
+状态：已裁决（2026-10-23）：smart-context=不迁（确认）；steering mode=维持 one-at-a-time 不覆写（确认）；scheduler=迁移（用户裁决推翻本文件评估结论）。**迁移落地核实（2026-10-23，实码）**：用户所述「已由独立会话实施」未在 main 实码找到——main HEAD / 全部分支 / 未提交改动 / 兄弟 worktree 均无 scheduler 迁移痕迹，scheduler 现仍裸 `pi.sendMessage` steer 直投；迁移与残余缺口承接于 [need-design.md](need-design.md) scheduler 条目（来源 [scheduler-result-awareness-channel.md](scheduler-result-awareness-channel.md)）。
 
 评估依据：unified-delivery 设计（设计档案已随 .tmp 清理；§9 非目标 5 / §3.9 / 附录 C）+ impl-plan 单元 u6-exempt-eval（A17）；port 接口以 u2 已交付实装为准（`extensions/shared/delivery-port`）。全部现状陈述以本仓实码与 pi 实装（`node_modules/@earendil-works/pi-coding-agent/dist`）为依据。
 

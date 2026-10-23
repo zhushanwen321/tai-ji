@@ -22,7 +22,9 @@
 - 疑点：respawn 恢复后 renderer 重订阅 / topic 快照链缺口（`session-message-handler.ts:830` 附近）。D3 验收者立场未修复，待独立排查。
 - 触发：排队排查；复现证据（截图 s0-s10 与 summary.jsonl）为 dev-flow 过程产物，已随 .tmp 清理，复现需按本条现象重新真机构造。
 
-## 4. pi 1.0.0 idle+triggerTurn 注入 entry 双写（pi 上游形态，真伪核实中）
+## 4. pi 1.0.0 idle+triggerTurn 注入 entry 双写（pi 上游已证伪，成因为 taiji 侧候选、待复现归因）
 
-- 现象：pi 1.0.0 空闲 + triggerTurn 注入时同一通知在 transcript 可能落两条 custom_message（port 层 sendMessage 恰一次已实证，pi 内部时序竞态）——非本次改动引入（pi 上游形态）。
-- 2026-10-23 用户裁决：先核实该现象是否真实存在（node_modules 实装 + 探针），核实产物 `.tmp/need-design-batch/`；核实为真后再裁决渲染侧是否按 details.deliveryId 判重去重。上游核验归 pi-boundary-reliability 附录 B 登记线。
+- 原现象：pi 1.0.0 空闲 + triggerTurn 注入时同一通知在 transcript 可能落两条 custom_message（port 层 sendMessage 恰一次已实证，疑 pi 内部时序竞态）。
+- 核实结论（2026-10-23，已核实：代码级写点穷尽 + 四时点零 token 探针——settled 边界同步注入 / 纯 idle 延迟注入 / 流式中 steer 注入 / settled 边界同 tick 双注入，全部恰 1 条 entry）：**pi 1.0.0 单次 sendMessage({triggerTurn:true}) 在 idle 态不产生双写**，custom_message 写点穷尽三处（agent-session.js :743 / :1786 / boundary draft taiji 场景不经）且五分支互斥单次调用不可达两次——「pi 内部时序竞态」假设作废。核实报告与探针产物 = `.tmp/need-design-batch/`（会话产物，git 外）。
+- 候选成因（推断，未复现实证）：若「同一通知落两条」真实出现，成因在 taiji delivery-port 侧——①重放差集判重源是扫描 entries 的 deliveryId，而 pi 存在「sendMessage 已返回但 entry 未写盘」的合法窗口（settled 边界 deferred / 流式中入队），窗口内触发重放会对同一 deliveryId 第二次 sendMessage；②同一通知两次投递生成了不同 deliveryId。判别法 = 数重复条目的 `details.deliveryId` 是否相同。
+- 处置：渲染侧按 details.deliveryId 判重去重的方向保留；再复现时先记录重复条目的 deliveryId 与当时 settled/流式状态，在上述两候选间定论后处置。

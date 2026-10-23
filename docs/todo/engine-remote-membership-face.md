@@ -1,24 +1,24 @@
-# TODO：zcode 远程形态偏好层成员校验面（async listModels 经引擎进程 RPC）
+# TODO：zcode 远程形态偏好层成员校验（async listModels 经引擎进程 RPC）
 
 ## 状态
 
-已裁决立项（2026-10-23 用户裁决：按推荐路线出设计）：设计进行中，产物 `.tmp/need-design-batch/`。拆分登记（2026-10-16 真机测试后改写；同日 headersApplied 项已由 ADR-0143 关闭）：①枚举面缺口未解决（本登记唯一未决主体）；②GLM plan 通道 headersApplied 已关闭——根因 = taiji headless spawn 恒落 host-account 模式（非 ZCode.app 自身 bug，当日初判「ZCode 自身 bug」已作废，见文末附录），ADR-0143 standalone 补丁 + 元数据键供给真机验证通过。前提修复已落地：ADR-0142 补齐 RemoteEngine `translateModelRef`（manifest 声明表快照）+ 引擎侧 account 直通大小写归一。
+设计完成（2026-10-23 用户裁决按推荐路线立项，设计产物 `.tmp/need-design-batch/zcode-listmodels-async-design.md`，待实施排期）。**登记前提修正（设计期实码核实）**：引擎协议 `listModels` 方法已存在——v1 十个正向方法之一（`packages/subagent-engine-sdk/src/protocol/methods.ts`），zcode/pi 两引擎 server 均已应答（`zcode-subagent-cli/src/server.ts` / `pi-subagent-cli/src/server.ts`），conformance 测试已覆盖帧往返；缺口仅在宿主侧：`RemoteEngine.listModels` 直读 manifest 快照四态映射、从不发帧。选型结论：复用既有独立 listModels 帧（probe 捎带不采用——ProbeReport 无 models 字段需三处扩协议，且 probe 缓存语义会让清单随缓存冻结，复制「快照陈旧」缺陷）；首启延迟顾虑被时序实证消解（probe 先于 identity 解析，成员校验 RPC 只是已建连接上的单帧往返）；签名迁移 = union 返回类型（同步消费方按无静态枚举降级保形，因 pi 扩展 system prompt hook 是同步的）；错误语义 = RPC 失败放行 + per-engine 一次性 warn（含恢复动作），不回落快照。拆分登记（2026-10-16 真机测试后改写；同日 headersApplied 项已由 ADR-0143 关闭）：①模型枚举数据缺口未解决（本登记唯一未决主体）；②GLM plan 通道 headersApplied 已关闭——根因 = taiji headless spawn 恒落 host-account 模式（非 ZCode.app 自身 bug，当日初判「ZCode 自身 bug」已作废，见文末附录），ADR-0143 standalone 补丁 + 元数据键供给真机验证通过。前提修复已落地：ADR-0142 补齐 RemoteEngine `translateModelRef`（manifest 声明表快照）+ 引擎侧 account 直通大小写归一。
 
 ## 问题
 
-ADR-0137 的偏好层降级语义（engineDefaults 翻译后不在引擎清单 → 跳过偏好走引擎缺省 + warn）依赖 `EnginePort.listModels()` 提供成员校验清单。远程形态（staged 引擎 cli descriptor → RemoteEngine 代理）的 `listModels()` 只读 manifest 注册期静态快照，而 zcode 声明 `modelCatalog: {dynamic: true, models: []}` → 四态映射返回 null = 「无枚举面」→ `resolveEngineModelWithTranslation` 的成员校验放行。
+ADR-0137 的偏好层降级语义（engineDefaults 翻译后不在引擎清单 → 跳过偏好走引擎缺省 + warn）依赖 `EnginePort.listModels()` 提供成员校验清单。远程形态（staged 引擎 cli descriptor → RemoteEngine 代理）的 `listModels()` 只读 manifest 注册期静态快照，而 zcode 声明 `modelCatalog: {dynamic: true, models: []}` → 四态映射返回 null = 「无枚举数据」→ `resolveEngineModelWithTranslation` 的成员校验放行。
 
-后果：engineDefaults 里存了失效值（provider 被删/退役/拼写漂移）时，远程形态不会降级，偏好值直穿引擎侧首败报错（`model_not_available` + 恢复指引）。2026-10-16 实际事故中本机毒值 `zai-coding-plan/GLM-5.3-Flash` 已被用户裁决的新缺省覆盖，但**通用防护**仅在「有枚举面的引擎/形态」达成。
+后果：engineDefaults 里存了失效值（provider 被删/退役/拼写漂移）时，远程形态不会降级，偏好值直穿引擎侧首败报错（`model_not_available` + 恢复指引）。2026-10-16 实际事故中本机毒值 `zai-coding-plan/GLM-5.3-Flash` 已被用户裁决的新缺省覆盖，但**通用防护**仅在「能提供枚举数据的引擎/形态」达成。
 
 ## 为什么当时不修
 
-async listModels（经引擎进程 RPC 取实时清单）需要：EnginePort 签名变更（sync → `| Promise`）+ 引擎协议新增方法（protocol/SDK/engine-server 三面）+ engine-development-guide 协议契约同步——改动面数倍于本次修复，且派发身份解析期引入引擎进程首启延迟（shared-service 单例约一次性数百 ms）。按「最小修复 + 显式登记边界」取舍（ADR-0142 边界段）。
+async listModels（经引擎进程 RPC 取实时清单）需要：EnginePort 签名变更（sync → `| Promise`）+ 引擎协议新增方法（protocol/SDK/engine-server 三个方向）+ engine-development-guide 协议契约同步——改动量数倍于本次修复，且派发身份解析期引入引擎进程首启延迟（shared-service 单例约一次性数百 ms）。按「最小修复 + 显式登记边界」取舍（ADR-0142 边界段）。
 
 ## 修复方向（裁决后实施）
 
 1. 引擎协议新增 listModels 查询方法（或复用 probe 应答捎带清单），RemoteEngine.listModels 改 async RPC，zcode 引擎进程内实装已有 `listZcodeModels`（合并视图实时枚举，零额外成本）。
 2. `resolveEngineModelWithTranslation` 成员校验改 await。
-3. engine-development-guide 协议面文档同 commit 更新（协议方法语义 + capability 声明）。
+3. engine-development-guide 协议文档同 commit 更新（协议方法语义 + capability 声明）。
 4. 届时 ADR-0137 偏好层降级语义在全部部署形态达成，ADR-0142 边界段随之改写。
 
 ## 附录：GLM plan 通道 headersApplied（2026-10-16 真机 A/B 对照；已由 ADR-0143 关闭，根因见文末结论）
