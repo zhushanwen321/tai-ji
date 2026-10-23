@@ -53,6 +53,32 @@ describe("buildGoalControlSummary", () => {
 		);
 	});
 
+	it("report_blocked reason 含换行 → summary 归一单行（S-1）", () => {
+		const details = { action: "report_blocked", goalId: "g1", status: "blocked" } as GoalControlDetails;
+		const summary = buildGoalControlSummary(
+			{ action: "report_blocked", reason: "第一行\n第二段\n\n尾行" } as never,
+			details,
+		);
+		expect(summary).toBe("Blocked: 第一行 第二段 尾行");
+	});
+
+	it("report_blocked reason 含 emoji 超长 → 截断不劈代理对（S-3）", () => {
+		const details = { action: "report_blocked", goalId: "g1", status: "blocked" } as GoalControlDetails;
+		// "x🎉" = 3 个 UTF-16 码元；UTF-16 slice(0,40) 会在第 40 码元处劈开 🎉 的代理对。
+		// 码点口径：50 码点 > 40 → 保留前 40 码点 = 20 组完整 "x🎉"
+		const summary = buildGoalControlSummary(
+			{ action: "report_blocked", reason: "x🎉".repeat(25) } as never,
+			details,
+		);
+		expect(summary).not.toContain("\n");
+		// Array.from 按码点切分后，孤立代理项表现为单码元的代理字符
+		const loneSurrogates = Array.from(summary).filter(
+			(ch) => ch.length === 1 && /[\uD800-\uDFFF]/.test(ch),
+		);
+		expect(loneSurrogates).toHaveLength(0);
+		expect(summary).toBe(`Blocked: ${"x🎉".repeat(20)}…`);
+	});
+
 	it("report_blocked 无 reason → 省略后缀", () => {
 		const details = { action: "report_blocked", goalId: "g1", status: "blocked" } as GoalControlDetails;
 		expect(buildGoalControlSummary({ action: "report_blocked" } as never, details)).toBe("Blocked");

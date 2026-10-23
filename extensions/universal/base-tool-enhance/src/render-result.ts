@@ -54,6 +54,15 @@ export function buildBashOutputSummary(
 /** 收起态摘要中失败 reason 的保留长度（超长截断加省略号）。 */
 const KILL_REASON_SUMMARY_CHARS = 80;
 
+/** reason 归一单行 + 码点安全截断到上限（超长补省略号；与 goal/todo/plan 的摘要 helper
+ *  同语义：换行/连续空白折叠为单空格，Array.from 按码点切分，emoji 代理对不劈半——
+ *  details.summary 单行契约见 extension-conventions.md）。 */
+function clipSummaryText(text: string, max: number): string {
+	const line = text.replace(/\s+/g, " ").trim();
+	const chars = Array.from(line);
+	return chars.length > max ? chars.slice(0, max).join("") + "…" : line;
+}
+
 /** bash_kill 摘要：killed=true → `Killed task <id>`；killed=false（正常返回的失败形态）
  *  → `Kill failed: <reason>`。 */
 export function buildBashKillSummary(args: { task_id: string }, result: ToolResultLike): string {
@@ -61,10 +70,7 @@ export function buildBashKillSummary(args: { task_id: string }, result: ToolResu
 	if (parsed === undefined) return "Done";
 	if (parsed.killed === true) return `Killed task ${args.task_id}`;
 	const reason = typeof parsed.reason === "string" ? parsed.reason : "unknown";
-	const clipped = reason.length > KILL_REASON_SUMMARY_CHARS
-		? `${reason.slice(0, KILL_REASON_SUMMARY_CHARS)}…`
-		: reason;
-	return `Kill failed: ${clipped}`;
+	return `Kill failed: ${clipSummaryText(reason, KILL_REASON_SUMMARY_CHARS)}`;
 }
 
 // ── TUI renderResult ─────────────────────────────────

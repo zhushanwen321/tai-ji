@@ -149,8 +149,21 @@ export interface GoalControlDetails {
 /** 收起态摘要中 reason 的保留长度（超长截断加省略号）。 */
 const BLOCKED_REASON_SUMMARY_CHARS = 40;
 
+/** 多行文本 → 单行摘要文本（换行与连续空白折叠为单空格；plan tool.ts 同模式）。
+ *  details.summary 单行契约见 extension-conventions.md「Tool result details.summary 约定」
+ *  （自由文本 reason 可含 \n，截断前先归一）。 */
+function toSingleLine(text: string): string {
+	return text.replace(/\s+/g, " ").trim();
+}
+
+/** 码点安全截断到上限（超长补省略号；Array.from 按码点切分，emoji 代理对不劈半）。 */
+function elide(text: string, max: number): string {
+	const chars = Array.from(text);
+	return chars.length > max ? chars.slice(0, max).join("") + "…" : text;
+}
+
 /** 收起态一行摘要：create → slug；complete → goalId（complete 的 details 无 slug）；
- *  report_blocked → reason 首段（超长加省略号）。 */
+ *  report_blocked → reason 归一单行后码点安全截断（超长加省略号）。 */
 export function buildGoalControlSummary(
 	params: GoalControlParamsT,
 	details: GoalControlDetails,
@@ -161,11 +174,9 @@ export function buildGoalControlSummary(
 		case "complete":
 			return `Goal completed: ${details.goalId}`;
 		case "report_blocked": {
-			const reason = params.reason?.trim() ?? "";
+			const reason = toSingleLine(params.reason ?? "");
 			if (reason === "") return "Blocked";
-			return reason.length > BLOCKED_REASON_SUMMARY_CHARS
-				? `Blocked: ${reason.slice(0, BLOCKED_REASON_SUMMARY_CHARS)}…`
-				: `Blocked: ${reason}`;
+			return `Blocked: ${elide(reason, BLOCKED_REASON_SUMMARY_CHARS)}`;
 		}
 		default:
 			return "Done";

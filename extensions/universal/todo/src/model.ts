@@ -362,6 +362,13 @@ export interface TodoSummaryParams {
 /** update text 进摘要的保留长度（码点安全截断 + 省略号） */
 const SUMMARY_TEXT_MAX_CHARS = 40;
 
+/** 多行文本 → 单行摘要文本（换行与连续空白折叠为单空格；plan tool.ts 同模式）。
+ *  details.summary 单行契约见 extension-conventions.md「Tool result details.summary 约定」
+ *  （自由文本 text 可含 \n，截断前先归一）。 */
+function toSingleLine(text: string): string {
+	return text.replace(/\s+/g, " ").trim();
+}
+
 /** 逐 status 计数（list 摘要行用；completed 口径与 todoProgress 同源） */
 function countByStatus(todos: readonly Todo[]): Record<Todo["status"], number> {
 	const counts: Record<Todo["status"], number> = { pending: 0, in_progress: 0, completed: 0 };
@@ -369,10 +376,10 @@ function countByStatus(todos: readonly Todo[]): Record<Todo["status"], number> {
 	return counts;
 }
 
-/** 单条 update 的摘要片段：status 优先（`#1 → completed`）；纯 text 更新显示截断后的新文本 */
+/** 单条 update 的摘要片段：status 优先（`#1 → completed`）；纯 text 更新显示归一单行后截断的文本 */
 function todoUpdatePart(u: { id: number; status?: string; text?: string }): string {
 	if (u.status !== undefined) return `#${u.id} → ${u.status}`;
-	const chars = Array.from((u.text ?? "").trim());
+	const chars = Array.from(toSingleLine(u.text ?? ""));
 	const shown = chars.length > SUMMARY_TEXT_MAX_CHARS
 		? chars.slice(0, SUMMARY_TEXT_MAX_CHARS).join("") + "…"
 		: chars.join("");
@@ -424,9 +431,9 @@ function todoUpdateSummary(params: TodoSummaryParams): string {
 	return `Updated ${todoUpdatePart({ id: params.id ?? 0, status: params.status, text: params.text })}`;
 }
 
-/** delete 摘要：单 id 与多 id 两种形态 */
+/** delete 摘要：单 id 与多 id 两种形态；ids 先去重（同条目重复触发不重复列出，S-2） */
 function todoDeleteSummary(params: TodoSummaryParams): string {
-	const ids = params.ids ?? [];
+	const ids = [...new Set(params.ids ?? [])];
 	if (ids.length === 0) return "";
 	return ids.length === 1
 		? `Deleted #${ids[0]}`
