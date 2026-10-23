@@ -38,22 +38,22 @@ function makeCtx(entries: unknown[], idle: boolean) {
 	};
 }
 
-function makeOptions(bg = false) {
+function makeOptions() {
 	const logger = {
 		warn: () => {},
 		debug: () => {},
 	};
-	return { component: "test", logger, hasRunningBackground: () => bg };
+	return { component: "test", logger };
 }
 
-describe("createPiDeliveryPortHost 接线（八端口逐成员）", () => {
-	it("appendEntry / readSessionEntries / isIdle / hasRunningBackground 透传", () => {
+describe("createPiDeliveryPortHost 接线（七端口逐成员）", () => {
+	it("appendEntry / readSessionEntries / isIdle 透传", () => {
 		const { pi, appended } = makePi();
 		const entries = [{ type: "message" }];
 		const host = createPiDeliveryPortHost(
 			pi as never,
 			makeCtx(entries, false) as never,
-			makeOptions(true),
+			makeOptions(),
 		);
 
 		host.appendEntry("custom_x", { a: 1 });
@@ -61,7 +61,9 @@ describe("createPiDeliveryPortHost 接线（八端口逐成员）", () => {
 
 		expect(host.readSessionEntries()).toBe(entries);
 		expect(host.isIdle()).toBe(false);
-		expect(host.hasRunningBackground()).toBe(true);
+		// [subagent-observability §3.3.7③] hasRunningBackground 已随攒批窗退役删除，
+		// 接线面不再含该成员（结构断言：host 对象无此键）。
+		expect("hasRunningBackground" in host).toBe(false);
 	});
 
 	it("sendMessage 注入恒携带 triggerTurn: true，deliverAs 透传", () => {
@@ -122,7 +124,7 @@ describe("createPiDeliveryPortHost 接线（八端口逐成员）", () => {
 		const host = createPiDeliveryPortHost(
 			pi as never,
 			makeCtx([], true) as never,
-			{ component: "probe", logger, hasRunningBackground: () => false },
+			{ component: "probe", logger },
 		);
 		expect(host.logger).toBe(logger);
 	});

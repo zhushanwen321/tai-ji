@@ -34,7 +34,6 @@ import { createBashOverrideToolDefinition } from "./bash-tool.ts";
 import { handleTaskExit, refreshPiReference } from "./background/notify.ts";
 import { installProcessExitGuard } from "./background/process-exit-guard.ts";
 import { reconcilePendingEntries } from "./background/pending-reconcile.ts";
-import { countActiveTasks } from "./background/task-store.ts";
 import { resolveTaijiDataDir } from "./background/registry.ts";
 import { setOnTaskExit } from "./background/exit-collector.ts";
 import { setupToolErrorAudit } from "./tool-error-audit.ts";
@@ -75,7 +74,8 @@ export default function baseToolEnhanceExtension(pi: ExtensionAPI): void {
 			createPiDeliveryPortHost(pi, ctx, {
 				component: "base-tool-enhance",
 				logger,
-				hasRunningBackground: () => countActiveTasks() > 0,
+				// [subagent-observability §3.3.7③] 原 hasRunningBackground（攒批条件谓词）
+				// 已随攒批窗整机制退役删除——投递边沿即投，装配宿主无合批控制面。
 			}),
 		).recover();
 		return runSessionStartMaintenance(pi, ctx, event.reason);

@@ -448,6 +448,9 @@ function toOutcome(result: SpawnRunResult): AgentOutcome {
   return {
     content: result.content,
     ...(result.failureKind !== undefined ? { failureKind: result.failureKind } : {}),
+    // [subagent-observability §3.3.8] 失败分类透传上协议（CollectedOutcome.failure
+    // 产出链闭合——run 终局成员交付结算 failedMembers[].cause 点拼的数据源）。
+    ...(result.failure !== undefined ? { failure: result.failure } : {}),
     ...(result.parsedOutput !== undefined ? { parsedOutput: result.parsedOutput } : {}),
     ...(result.usage !== undefined
       ? { usage: toOutcomeUsage(result) }

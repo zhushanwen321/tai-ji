@@ -45,7 +45,7 @@ import {
 type RecordedEnvelope = {
   id: string | undefined;
   payload: { kind: string; customType: string; content: string; display: boolean; details?: unknown };
-  opts: { merge?: boolean } | undefined;
+  opts: { collectKey?: string[] } | undefined;
 };
 
 function makeFakePort() {
@@ -156,15 +156,16 @@ describe("BgNotifier 主路径 — port.deliver（envelope 构造 + flush 转发
     expect(host.sendMessageCalls).toHaveLength(0);
   });
 
-  it("hasRunningBackground=false → merge 缺省直通；=true → merge:true 进端口 60s 窗口", () => {
+  it("deliver opts 无 merge 字段（攒批窗退役 §3.3.7③——边沿即投，collectKey 保留）", () => {
     host.hasRunningBackground.mockReturnValue(false);
     notifier.notify(notifyRecord("bg-merge-false"));
     // collectKey：无 round = 完成通知，世代首个申报判据命中（result-collect 设计 §3.3）
-    expect(fake.envelopes[0]!.opts).toEqual({ merge: false, collectKey: ["bg-merge-false"] });
+    expect(fake.envelopes[0]!.opts).toEqual({ collectKey: ["bg-merge-false"] });
 
     host.hasRunningBackground.mockReturnValue(true);
     notifier.notify(notifyRecord("bg-merge-true"));
-    expect(fake.envelopes[1]!.opts).toEqual({ merge: true, collectKey: ["bg-merge-true"] });
+    // 有无活跃后台任务不再影响投递选项（窗口机制已删——提交方无合批控制面）
+    expect(fake.envelopes[1]!.opts).toEqual({ collectKey: ["bg-merge-true"] });
   });
 
   it("flushPendingNotifications → port.flush 转发（窗口缓冲提前出站的强制投递口）", () => {
@@ -293,7 +294,6 @@ describe("BgNotifier.flushPendingNotifications — 直发兜底单通道 trigger
   it("未注入 isIdle 时不 gate，缺席直发保持立即发送行为（向后兼容旧 host）", () => {
     const legacyHost: NotifierHost = {
       sendMessage: (message, options) => host.sendMessage(message, options),
-      hasRunningBackground: () => false,
     };
     const legacyNotifier = createNotifier(legacyHost);
     legacyNotifier.notify(notifyRecord("bg-legacy-1"));
@@ -419,7 +419,7 @@ describe("BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile �
     return (host.sendMessageCalls[0]!.message as { content: string }).content;
   }
 
-  it("running（轮次通知）+ sessionFile → 末尾追加 \\n\\n 空行分隔的指针行", () => {
+  it("running（轮次通知）+ sessionFile → 末尾追加 \\n\\n 空行分隔的指针行（§3.3.7① 事实化文案）", () => {
     notifier.notify({
       id: "sa-ptr-1", status: "running", agent: "w", round: 1, result: "round1 text",
       sessionFile: "/tmp/sessions/child-1.jsonl",
@@ -427,7 +427,7 @@ describe("BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile �
     });
 
     expect(sentContent()).toBe(
-      'Subagent "w" (sa-ptr-1) finished a round. Reply:\nround1 text' +
+      'Subagent "w" (sa-ptr-1) round 1 completed. Reply:\nround1 text' +
       "\n\nFull transcript: /tmp/sessions/child-1.jsonl",
     );
   });
@@ -464,7 +464,7 @@ describe("BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile �
       startedAt: 1, endedAt: 2,
     });
 
-    expect(sentContent()).toBe('Subagent "w" (sa-ptr-4) finished a round. Reply:\nround2 text');
+    expect(sentContent()).toBe('Subagent "w" (sa-ptr-4) round 2 completed. Reply:\nround2 text');
   });
 
   it("cancelled → 不追加指针行（即使 sessionFile 有值）", () => {
@@ -647,27 +647,27 @@ describe("BgNotifier — dispose / revive 生命周期（port 形态：无内核
   });
 });
 
-// ─── U3_UNIT：合批窗口判定透传（合批合成在内核出站点，形态由 port 套件锁定） ──
+// ─── U3_UNIT：提交选项透传（攒批窗退役后无 merge 字段——§3.3.7③ 行为锁改写） ──
 
 describe("U3_UNIT: createNotifier unit verification", () => {
-  it("hasRunningBackground=true → merge:true 透传端口（60s 窗口攒批判定跟随提交方语义）；flush 转发端口", () => {
+  it("deliver opts 无 merge 字段（边沿即投）；flush 转发端口", () => {
     const fake = makeFakePort();
     configureNotifyDomain({ getDeliveryPort: () => fake.handle });
     const host: NotifierHost = {
       sendMessage: () => {},
-      hasRunningBackground: () => true,
       isIdle: () => true,
     };
     const notifier = createNotifier(host);
     notifier.notify(notifyRecord("u3-merge-1", { result: "r1" }));
     notifier.notify(notifyRecord("u3-merge-2", { result: "r2" }));
 
-    // 两条都带 merge:true 进端口（攒批成员——窗口内不注入的合成时机由端口承载）
+    // 两条都进端口且无合批选项（NotiferHost 已无 hasRunningBackground 成员——
+    // 接口面收敛由编译期承载）
     expect(fake.envelopes).toHaveLength(2);
-    expect(fake.envelopes[0]!.opts).toEqual({ merge: true, collectKey: ["u3-merge-1"] });
-    expect(fake.envelopes[1]!.opts).toEqual({ merge: true, collectKey: ["u3-merge-2"] });
+    expect(fake.envelopes[0]!.opts).toEqual({ collectKey: ["u3-merge-1"] });
+    expect(fake.envelopes[1]!.opts).toEqual({ collectKey: ["u3-merge-2"] });
 
-    // flushPendingNotifications → 端口 flush（窗口缓冲提前出站）
+    // flushPendingNotifications → 端口 flush（缓冲条目出站的强制口）
     notifier.flushPendingNotifications();
     expect(fake.flush).toHaveBeenCalledTimes(1);
     notifier.dispose();

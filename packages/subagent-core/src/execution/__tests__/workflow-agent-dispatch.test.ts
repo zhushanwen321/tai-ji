@@ -529,8 +529,7 @@ describe("D6 toNotifyRecord origin gate", () => {
     const pi = makePi();
     const host = createNotifyHost({
       getPi: () => pi,
-      listRunning: () => [],
-      getIsIdle: () => undefined,
+            getIsIdle: () => undefined,
     });
 
     const base = createRecord("sa-d6", {

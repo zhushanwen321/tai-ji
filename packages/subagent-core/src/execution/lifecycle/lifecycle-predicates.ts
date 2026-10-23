@@ -49,7 +49,8 @@ export function hasLiveProcessHandle(recordId: string): boolean {
  *
  * [u7a 补挂后现状] arm 链已复活（chat 轮终 armIdleKeepalive——轮终保活，超时 =
  * [U5] idleTimeoutRecycle 进程回收），本谓词生产可真：closeSubagent 的「无在跑轮」
- * 分流（Path A timer armed）与 notify 合批 hasRunningBackground 消费。
+ * 分流（Path A timer armed）消费（notify 合批 hasRunningBackground 消费方已随
+ * 攒批窗退役删除——subagent-observability §3.3.7③）。
  */
 export function hasArmedIdleTimer(record: ExecutionRecord): boolean {
   return hasIdleTimer(record.id);

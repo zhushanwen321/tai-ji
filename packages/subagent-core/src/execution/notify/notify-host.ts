@@ -2,19 +2,17 @@
 // （notifyComplete / notifyClosed / piAdapter / toNotifyRecord / emitPendingRegister /
 // emitPendingUnregister + notifier 实例持有）整体搬移至此（行为逐字节等价：搬移 +
 // 依赖注入，不重写逻辑）。变化原因：改通知文案 / dedup 身份 / 放行检查 / pending 注册
-// 注销协议，只改本文件；Service 只保留编排与依赖注入（getPi / listRunning / isIdle）。
+// 注销协议，只改本文件；Service 只保留编排与依赖注入（getPi / isIdle）。
 
 import { displayAgentName } from "../../shared/agent-ref.ts";
 import { isLegacyClosedSettled, snapshot } from "../persistence/execution-record.ts";
-import { hasIdleTimer } from "../lifecycle/lifecycle-manager.ts";
-import { hasLiveProcessHandle, hasArmedIdleTimer, isResumable } from "../lifecycle/lifecycle-predicates.ts";
+import { hasArmedIdleTimer, isResumable } from "../lifecycle/lifecycle-predicates.ts";
 // [§1.4 (b)] pi 通知通道 best-effort 执行（stale 分诊 + 留痕不冒泡）。
 import { bestEffortPiCall } from "../assembly/best-effort.ts";
 import type { BgNotifier, NotifierHost } from "./notifier.ts";
 import { createNotifier } from "./notifier.ts";
 import type { BgNotifyRecord } from "./notifier.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
-import type { RecordSnapshot } from "../assembly/types.ts";
 
 /** Pi ExtensionAPI 的最小接口（duck-typed）——原定义于 subagent-service.ts，随通知簇
  *  （piAdapter / emitPending* 的依赖）搬移至此并导出（Service 的 session 注入参数仍引用）。
@@ -39,8 +37,6 @@ export interface PiLike {
 export interface NotifyHostDeps {
   /** 当前 pi session handle（session_start 注入 / shutdown 置 null）。 */
   getPi: () => PiLike | null;
-  /** store 的 running record 快照（piAdapter.hasRunningBackground 用）。 */
-  listRunning: () => RecordSnapshot[];
   /** 主 agent isIdle 查询（ctx.isIdle，initSession 注入；未注入时 undefined）。 */
   getIsIdle: () => (() => boolean) | undefined;
 }
@@ -108,16 +104,6 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
         bestEffortPiCall(deps.getPi(), "notifier sendMessage", (active) => {
           active.sendMessage(message, options);
         });
-      },
-      hasRunningBackground: () => {
-        // [M3] 「在跑的 background 工作」= 有活进程且非等待续聊（idle timer armed）。
-        // 轮终收尾 idle 的 record（timer armed、无在跑轮——[modeless 波1] 全 record
-        // 轮终形态）不计入。
-        // 旧判定 `mode === "background"` 对这两类恒 true → 轮次完成通知恒挂 60s 合并窗口
-        // （notifier MERGE_WINDOW_MS），主 agent 的续聊回复固定延迟 60s 送达，持续对话（G1）失效。
-        return deps.listRunning().some(
-          (r) => r.mode === "background" && hasLiveProcessHandle(r.id) && !hasIdleTimer(r.id),
-        );
       },
       isIdle: () => deps.getIsIdle()?.() ?? true,
       // [must-fix #4 / D8] settled 边沿订阅，与 isIdle 同源（session_start 注入的 pi）。
@@ -205,6 +191,15 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
       epoch: record.epoch,
       // SP-1: closedReason 透传给 notifier（L2 原因，供通知文案按需展示）。
       closedReason: record.closedReason,
+      // [subagent-observability §3.3.7①] 轮收条事实透传（轮应答文案五分支判定输入
+      // ——failure/停因/接管三态；缺省 = 轮收条缺席的迁移期回落帧，文案回落旧形态）。
+      ...(record.lastRound?.failure !== undefined ? { lastRoundFailure: record.lastRound.failure } : {}),
+      ...(record.lastRound?.engineStopReason !== undefined
+        ? { lastRoundStopReason: record.lastRound.engineStopReason }
+        : {}),
+      ...(record.lastRound?.promptDisposition !== undefined
+        ? { lastRoundDisposition: record.lastRound.promptDisposition }
+        : {}),
       // [modeless 波1] sessionFile 全体透传：通知末尾追加 Full transcript 指针行
       //（全文恢复通道，见 notifier.buildLlmContent）。万物可续——每个 record 都要
       // 能被 message/fork 定位（旧「仅 chatMode 透传」随 chatMode 消亡）。

@@ -43,15 +43,8 @@ export interface DeliveryEnvelope { // oe-exempt:20261017:framework:统一投递
   id?: string;
 }
 
-/** deliver 提交选项（缺省值表 §3.4：通知域 = steer + retain + 合批 + details-id）。 */
+/** deliver 提交选项（§3.4：通知域 = steer + retain + details-id；攒批窗已删，无合批选项）。 */
 export interface DeliveryDeliverOptions { // oe-exempt:20261017:framework:统一投递对外 API 契约（deliver 提交选项面）
-  /**
-   * 合批窗口判定覆盖。缺省 = 「默认通道（subagent-bg-notify）且宿主有活跃后台任务」
-   * 时进 60s 滑动窗口攒批；外部通道（workflow-result / managed-session-notify 等）
-   * 恒逐条（批组隔离 [u9] 规则，merge:true 不得覆盖——窗口合批形态 {batch,items}
-   * 对外部通道无消费契约）。显式 merge:false 可让默认通道条目跳过窗口立即提交。
-   */
-  merge?: boolean;
   /**
    * 失败保留策略（内核首败处置）。缺省 "retain"（留账：下一边沿 / compaction 唤醒 /
    * session_start 重放重投——通知域无人值守语义）；显式 "forget" = 首败即弃（discard
@@ -186,8 +179,6 @@ export interface DeliveryPortHost { // oe-exempt:20261017:framework:pi 能力注
   onSessionCompact(handler: () => void): () => void;
   /** compaction 失败/中止边沿（标记同样复位 + 唤醒——失败也要重投尝试，失败可见性归日志）。 */
   onSessionCompactFailed(handler: () => void): () => void;
-  /** 攒批条件谓词（有活跃后台任务 = hasRunningBackground）。 */
-  hasRunningBackground(): boolean;
   /** 分桶诊断与降级 warn 出口（extensionLogger——落 session JSONL 不进 LLM +
    *  TAIJI_AGENT_DEBUG 落日志盘）。 */
   logger: DeliveryPortLogger;
@@ -201,25 +192,24 @@ export interface DeliveryPortHost { // oe-exempt:20261017:framework:pi 能力注
  */
 export interface DeliveryPortHandle { // oe-exempt:20261017:framework:进程级槽交付的端口句柄契约（消费方读槽面）
   /**
-   * 唯一提交入口（§3.4 端点形态）：受理前 appendEntry 落投递日志 → 缓冲（攒批路径）
-   * 或内核 send（直通路径）→ 受理结果同步返回。fire-and-forget 语义：调用方忽略
-   * 返回值不受影响；rejected 条目由调用方裁决重试（幂等键未登记，重提合法）。
+   * 唯一提交入口（§3.4 端点形态）：受理前 appendEntry 落投递日志 → 提交缓冲 →
+   * 边沿即投放行（攒批窗已删 §3.3.7③）→ 受理结果同步返回。fire-and-forget 语义：
+   * 调用方忽略返回值不受影响；rejected 条目由调用方裁决重试（幂等键未登记，重提合法）。
    */
   deliver(envelope: DeliveryEnvelope, opts?: DeliveryDeliverOptions): DeliveryDeliverResult;
   /**
    * session_start 差集重放：扫投递日志 −
-   * （对话记录已送达 ∪ ack）差集 → 重入队 → 立即尝试投递。重放条目若满足攒批
-   * 条件经窗口合并投出（合并形态与直通路径一致）。幂等：可
-   * 重复调用，差集为空零动作。
+   * （对话记录已送达 ∪ ack）差集 → 重入队 → 边沿即投。重放同组多成员经分组放行
+   * 仍产合法批形态（保留边界）。幂等：可重复调用，差集为空零动作。
    *
    * @returns 重放条数。
    */
   recover(): number;
   /** 分桶计数快照（副本）。 */
   metrics(): DeliveryPortMetrics;
-  /** 强制投递尝试（窗口缓冲提前出站 + 内核 flush——外部重触发口）。 */
+  /** 强制投递尝试（缓冲条目出站 + 内核 flush——外部重触发口）。 */
   flush(): void;
-  /** 销毁：清窗口 timer + 内核 dispose + 退订全部事件订阅 + 摘进程级槽绑定。 */
+  /** 销毁：内核 dispose + 退订全部事件订阅 + 摘进程级槽绑定。 */
   dispose(): void;
   /**
    * collect 面（result-collect 设计 §3.1② 端口挂起面，方法语义以该节为准）。
@@ -239,7 +229,7 @@ export interface DeliveryPortHandle { // oe-exempt:20261017:framework:进程级�
    * 以等待结束后的最终回填为准（诚实缺省，不虚构终态）。
    */
   consume(): CollectedEntry[];
-  /** 解散等待集；未收挂起条目直通内核 flush（跳过 60s 合批窗口，恢复 push）。 */
+  /** 解散等待集；未收挂起条目直通内核 flush（边沿即投，恢复 push）。 */
   collectRelease(): void;
   /** 挂起条目到达回调订阅（事件驱动唤醒等待器，无轮询）；返回退订函数。 */
   onCollectArrival(cb: () => void): () => void;

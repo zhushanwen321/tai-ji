@@ -691,7 +691,6 @@ describe("[U5] notifyId epoch 防撞：epoch>0 → `id:epoch:round`（epoch=0 �
     notifyPorts.configureNotifyDomain({ getDeliveryPort: () => fakePort });
     const notifier2 = createNotifier({
       sendMessage: () => {}, // port 主投不经此端口；仅缺席直发兜底消费
-      hasRunningBackground: () => false,
       isIdle: () => true,
     });
     // epoch=0（缺省）→ 旧格式 `id:round`（磁盘投递日志零迁移）

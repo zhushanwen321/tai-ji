@@ -31,12 +31,11 @@ type SentMessage = {
 	details?: unknown;
 };
 
-function makeHost(init: { entries?: unknown[]; idle?: boolean; bg?: boolean } = {}) {
+function makeHost(init: { entries?: unknown[]; idle?: boolean } = {}) {
 	const entries: unknown[] = init.entries ?? [];
 	const sent: Array<{ message: SentMessage; options: { deliverAs: string; triggerTurn: boolean } }> = [];
 	const callLog: string[] = [];
 	const idle = { value: init.idle ?? true };
-	const bg = { value: init.bg ?? false };
 	const sendThrows = { value: false };
 	const warn = vi.fn();
 	const debug = vi.fn();
@@ -89,7 +88,6 @@ function makeHost(init: { entries?: unknown[]; idle?: boolean; bg?: boolean } = 
 				handlers.session_compact_failed = handlers.session_compact_failed.filter((h) => h !== handler);
 			};
 		},
-		hasRunningBackground: () => bg.value,
 		logger: { warn, debug },
 	};
 	const fireAll = (list: Array<() => void>): void => {
@@ -119,7 +117,6 @@ function makeHost(init: { entries?: unknown[]; idle?: boolean; bg?: boolean } = 
 		sent,
 		callLog,
 		idle,
-		bg,
 		sendThrows,
 		warn,
 		debug,
@@ -154,7 +151,7 @@ describe("四步对位（受理前落盘 → 注入 → message_end 命中 → a
 	});
 
 	it("直通路径：outbox 落盘先于 sendMessage；命中后 ack 落盘且重放差集清零", () => {
-		const h = makeHost({ bg: false });
+		const h = makeHost();
 		const port = createDeliveryPort(h.host);
 		const receipt = port.deliver(defaultEnvelope({ id: "n-1" }));
 		expect(receipt).toEqual({ kind: "accepted", id: "n-1" });
@@ -187,14 +184,14 @@ describe("四步对位（受理前落盘 → 注入 → message_end 命中 → a
 	});
 
 	it("followUp 档透传 deliverAs", () => {
-		const h = makeHost({ bg: false });
+		const h = makeHost();
 		const port = createDeliveryPort(h.host);
 		port.deliver(defaultEnvelope({ id: "n-2", timing: "followUp" }));
 		expect(h.sent[0].options.deliverAs).toBe("followUp");
 	});
 
 	it("缺省 id 内部生成且注入 details 携带同一 id", () => {
-		const h = makeHost({ bg: false });
+		const h = makeHost();
 		const port = createDeliveryPort(h.host);
 		const receipt = port.deliver(defaultEnvelope());
 		expect(receipt.kind).toBe("accepted");
@@ -214,7 +211,7 @@ describe("幂等（同 id 重提交 swallowed）", () => {
 	});
 
 	it("缓冲成员同 id 重提交 swallowed", () => {
-		const h = makeHost({ bg: true });
+		const h = makeHost();
 		const port = createDeliveryPort(h.host);
 		expect(port.deliver(defaultEnvelope({ id: "dup-1" })).kind).toBe("accepted");
 		expect(port.deliver(defaultEnvelope({ id: "dup-1" }))).toEqual({ kind: "swallowed", reason: "already-seen" });
@@ -223,7 +220,7 @@ describe("幂等（同 id 重提交 swallowed）", () => {
 	});
 
 	it("直通条目已终局后跨实例同 id 提交不重投（判重三级：持久终局播种）", () => {
-		const h = makeHost({ bg: false });
+		const h = makeHost();
 		const first = createDeliveryPort(h.host);
 		first.deliver(defaultEnvelope({ id: "done-1" }));
 		h.injectAndEmit(h.sent[0].message); // 送达 + ack
@@ -254,9 +251,9 @@ describe("幂等（同 id 重提交 swallowed）", () => {
 	});
 });
 
-// ─── 合批窗口与批组隔离 ─────────────────────────────────────
+// ─── 边沿即投与批组隔离（subagent-observability §3.3.7③ 攒批窗退役后行为锁）──
 
-describe("提交侧合批（60s 滑动窗口）与批组隔离", () => {
+describe("边沿即投与批组隔离（攒批窗已删）", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		vi.setSystemTime(T0);
@@ -265,106 +262,71 @@ describe("提交侧合批（60s 滑动窗口）与批组隔离", () => {
 		vi.useRealTimers();
 	});
 
-	it("默认通道 + 活跃后台 → 进窗口不注入；60s 到期合成一条批消息", () => {
-		const h = makeHost({ bg: true });
+	it("默认通道边沿即投：落盘受理后立即注入（单条无批 wrapper），无窗口等待", () => {
+		const h = makeHost();
 		const port = createDeliveryPort(h.host);
 		port.deliver(defaultEnvelope({ id: "b-1", payload: { kind: "custom", customType: DEFAULT_NOTIFY_CUSTOM_TYPE, content: "first", display: true, details: { k: 1 } } }));
-		port.deliver(defaultEnvelope({ id: "b-2", payload: { kind: "custom", customType: DEFAULT_NOTIFY_CUSTOM_TYPE, content: "second", display: true, details: { k: 2 } } }));
-		expect(h.sent).toHaveLength(0); // 窗口内不注入
-		expect(h.outboxEntries()).toHaveLength(2); // 受理前已逐条落盘
+		// 边沿即投：无 60s 窗口——落盘受理后同步出站
+		expect(h.sent).toHaveLength(1);
+		expect(h.outboxEntries()).toHaveLength(1); // 受理前已落盘
+		expect(h.sent[0].message.customType).toBe(DEFAULT_NOTIFY_CUSTOM_TYPE);
+		expect((h.sent[0].message.details as Record<string, unknown>)["batch"]).toBeUndefined();
 
-		vi.advanceTimersByTime(60_000);
-		expect(h.sent).toHaveLength(1); // 一次 sendMessage
-		const msg = h.sent[0].message;
-		expect(msg.customType).toBe(DEFAULT_NOTIFY_CUSTOM_TYPE);
-		expect(msg.details).toMatchObject({ batch: true });
-		// 批展平逐条对位：items 序 = 成员序，deliveryId 各自携带
-		const items = (msg.details as { items: Array<Record<string, unknown>> }).items;
-		expect(items).toHaveLength(2);
-		expect(items[0]).toMatchObject({ k: 1, deliveryId: "b-1" });
-		expect(items[1]).toMatchObject({ k: 2, deliveryId: "b-2" });
-
-		// message_end 批命中 → 逐条 ack
-		h.injectAndEmit(msg);
-		const ackIds = h.ackEntries().map((a) => (a["data"] as { id: string }).id).sort();
-		expect(ackIds).toEqual(["b-1", "b-2"]);
-	});
-
-	it("滑动窗口：窗口内新到达重置窗口尾", () => {
-		const h = makeHost({ bg: true });
-		const port = createDeliveryPort(h.host);
-		port.deliver(defaultEnvelope({ id: "s-1" }));
-		vi.advanceTimersByTime(59_000);
-		port.deliver(defaultEnvelope({ id: "s-2" }));
-		vi.advanceTimersByTime(59_000);
-		expect(h.sent).toHaveLength(0); // 重置后未到期
-		vi.advanceTimersByTime(1_000);
+		// message_end 命中 → ack
+		h.injectAndEmit(h.sent[0].message);
+		const ackIds = h.ackEntries().map((a) => (a["data"] as { id: string }).id);
+		expect(ackIds).toEqual(["b-1"]);
+		// 无第二批：窗口机制已删，定时器不存在
+		vi.advanceTimersByTime(120_000);
 		expect(h.sent).toHaveLength(1);
 	});
 
-	it("外部通道逐条批组隔离：立即单独注入，不进窗口批", () => {
-		const h = makeHost({ bg: true });
+	it("同组多成员近同时到达 → 分组放行合成一条批消息（保留边界：pumpDirect/commitAsBatch 批形态）", () => {
+		const h = makeHost();
+		const port = createDeliveryPort(h.host);
+		// 同步段连续提交：首条触发的 pump 已取走首条，第二条在新一轮 pump 与首条
+		// 内核注入的 merge-commit hold 窗内聚合——同通道批形态仍合法（保留边界断言）
+		port.deliver(defaultEnvelope({ id: "g-1", payload: { kind: "custom", customType: DEFAULT_NOTIFY_CUSTOM_TYPE, content: "one", display: true, details: { k: 1 } } }));
+		port.deliver(defaultEnvelope({ id: "g-2", payload: { kind: "custom", customType: DEFAULT_NOTIFY_CUSTOM_TYPE, content: "two", display: true, details: { k: 2 } } }));
+		expect(h.sent.length).toBeGreaterThanOrEqual(1);
+		expect(h.sent.length).toBeLessThanOrEqual(2);
+		// 全部条目都出站（不丢）
+		const deliveredIds = h.sent
+			.flatMap((s) => {
+				const details = s.message.details as { batch?: boolean; items?: Array<Record<string, unknown>>; deliveryId?: string };
+				return details.batch === true ? (details.items ?? []).map((i) => i.deliveryId) : [details.deliveryId];
+			})
+			.sort();
+		expect(deliveredIds).toEqual(["g-1", "g-2"]);
+		// 出站消息恒单通道（批组隔离不变量）
+		for (const s of h.sent) expect(s.message.customType).toBe(DEFAULT_NOTIFY_CUSTOM_TYPE);
+	});
+
+	it("外部通道逐条批组隔离：立即单独注入，与默认通道不混批", () => {
+		const h = makeHost();
 		const port = createDeliveryPort(h.host);
 		const wf = { kind: "custom" as const, customType: "workflow-result", content: "workflow done", display: true, details: { runId: "r-1" } };
 		expect(port.deliver({ id: "wf-1", payload: wf })).toEqual({ kind: "accepted", id: "wf-1" });
 		expect(h.sent).toHaveLength(1); // 外部通道立即逐条
 		expect(h.sent[0].message.details).toEqual({ runId: "r-1", deliveryId: "wf-1" }); // 无 batch wrapper
 
-		port.deliver(defaultEnvelope({ id: "bg-1" })); // 默认通道照常进窗口
-		expect(h.sent).toHaveLength(1);
-		vi.advanceTimersByTime(60_000);
+		port.deliver(defaultEnvelope({ id: "bg-1" })); // 默认通道边沿即投
 		expect(h.sent).toHaveLength(2);
-		expect(h.sent[1].message.customType).toBe(DEFAULT_NOTIFY_CUSTOM_TYPE); // 批只含默认通道成员
+		expect(h.sent[1].message.customType).toBe(DEFAULT_NOTIFY_CUSTOM_TYPE); // 各自通道出站
+		expect((h.sent[1].message.details as Record<string, unknown>)["batch"]).toBeUndefined();
+		// 外部通道消息不含默认通道成员（无混批）
+		expect(JSON.stringify(h.sent[0].message.details)).not.toContain("bg-1");
 	});
 
-	it("单成员窗口到期按单条注入（无 batch wrapper）", () => {
-		const h = makeHost({ bg: true });
+	it("flush() 幂等放行缓冲条目（空缓冲 no-op 不报错）", () => {
+		const h = makeHost();
 		const port = createDeliveryPort(h.host);
-		port.deliver(defaultEnvelope({ id: "solo-1" }));
-		vi.advanceTimersByTime(60_000);
-		expect(h.sent).toHaveLength(1);
-		expect(h.sent[0].message.details).not.toMatchObject({ batch: true });
-		expect(h.sent[0].message.details).toEqual({ outcome: "completed", deliveryId: "solo-1" });
-	});
-
-	it("merge:false 覆写让默认通道跳过窗口立即提交", () => {
-		const h = makeHost({ bg: true });
-		const port = createDeliveryPort(h.host);
-		port.deliver(defaultEnvelope({ id: "nm-1" }), { merge: false });
-		expect(h.sent).toHaveLength(1);
-	});
-
-	it("merge:true 对外部通道不生效（结构性逐条）：立即单条注入无 batch wrapper", () => {
-		const h = makeHost({ bg: true });
-		const port = createDeliveryPort(h.host);
-		const wf = { kind: "custom" as const, customType: "workflow-result", content: "workflow done", display: true, details: { runId: "r-9" } };
-		expect(port.deliver({ id: "wf-m1", payload: wf }, { merge: true })).toEqual({ kind: "accepted", id: "wf-m1" });
-		// 显式 merge:true 不把外部通道条目放进窗口：立即单条注入
-		expect(h.sent).toHaveLength(1);
-		expect(h.sent[0].message.customType).toBe("workflow-result");
-		expect((h.sent[0].message.details as Record<string, unknown>)["batch"]).toBeUndefined();
-		// 窗口到期后无第二批投出（条目从未进 mergeBuffer）
-		vi.advanceTimersByTime(60_000);
-		expect(h.sent).toHaveLength(1);
-	});
-
-	it("flush() 立即放行窗口缓冲", () => {
-		const h = makeHost({ bg: true });
-		const port = createDeliveryPort(h.host);
+		port.flush(); // 空缓冲 no-op
+		expect(h.sent).toHaveLength(0);
 		port.deliver(defaultEnvelope({ id: "f-1" }));
-		port.flush();
+		expect(h.sent).toHaveLength(1); // 边沿已投
+		port.flush(); // 已出站，无重复注入
 		expect(h.sent).toHaveLength(1);
-	});
-
-	it("窗口活跃期到达的外部通道条目单独出站，缓冲成员不随后泄露", () => {
-		const h = makeHost({ bg: true });
-		const port = createDeliveryPort(h.host);
-		port.deliver(defaultEnvelope({ id: "bg-first" })); // 进缓冲
-		port.deliver({ id: "wf-x", payload: { kind: "custom", customType: "managed-session-notify", content: "session died", display: true } });
-		// 外部通道条目独立注入（缓冲成员未入内核——隔离由「缓冲在端口、不在内核」保证）
-		expect(h.sent).toHaveLength(1);
-		expect(h.sent[0].message.customType).toBe("managed-session-notify");
-		expect((h.sent[0].message.details as Record<string, unknown>)["batch"]).toBeUndefined();
 	});
 });
 
@@ -380,7 +342,7 @@ describe("compaction 等待降级与事件唤醒", () => {
 	});
 
 	it("before_compact 置标记 → 缓冲挂起不注入（落盘已完成）；session_compact 复位唤醒重投", () => {
-		const h = makeHost({ bg: false, idle: false });
+		const h = makeHost({ idle: false });
 		const port = createDeliveryPort(h.host);
 		h.fireBeforeCompact(); // compaction 开始边沿（事件标记置位，非 isIdle 判定）
 		const receipt = port.deliver(defaultEnvelope({ id: "c-1" }));
@@ -397,7 +359,7 @@ describe("compaction 等待降级与事件唤醒", () => {
 	});
 
 	it("session_compact_failed 边沿同样复位唤醒", () => {
-		const h = makeHost({ bg: false, idle: false });
+		const h = makeHost({ idle: false });
 		const port = createDeliveryPort(h.host);
 		h.fireBeforeCompact();
 		port.deliver(defaultEnvelope({ id: "c-2" }));
@@ -407,7 +369,7 @@ describe("compaction 等待降级与事件唤醒", () => {
 	});
 
 	it("run 活跃（isIdle=false）未 compaction → 照常注入（steer 入 pi 队列不拒）", () => {
-		const h = makeHost({ bg: false, idle: false }); // run 活跃：无 before_compact，标记 false
+		const h = makeHost({ idle: false }); // run 活跃：无 before_compact，标记 false
 		const port = createDeliveryPort(h.host);
 		const receipt = port.deliver(defaultEnvelope({ id: "run-1" }));
 		expect(receipt).toEqual({ kind: "accepted", id: "run-1" });
@@ -416,7 +378,7 @@ describe("compaction 等待降级与事件唤醒", () => {
 	});
 
 	it("持有期内 settled 边沿只做无谓尝试，仍挂起（无双重注入）", () => {
-		const h = makeHost({ bg: false, idle: false });
+		const h = makeHost({ idle: false });
 		const port = createDeliveryPort(h.host);
 		h.fireBeforeCompact();
 		port.deliver(defaultEnvelope({ id: "c-3" }));
@@ -427,7 +389,7 @@ describe("compaction 等待降级与事件唤醒", () => {
 	});
 
 	it("注入 throw → 内核 retain 留账 + settleRejected 计数；恢复后 settled 边沿重投", () => {
-		const h = makeHost({ bg: false, idle: true });
+		const h = makeHost({ idle: true });
 		h.sendThrows.value = true;
 		const port = createDeliveryPort(h.host);
 		expect(port.deliver(defaultEnvelope({ id: "t-1" })).kind).toBe("accepted");
@@ -455,12 +417,12 @@ describe("失败保留策略（onFailure 覆写）", () => {
 	});
 
 	it("显式 forget 首败即弃（真注入 throw）：discard 终局列落盘、settled 边沿不重投、重放不复活", () => {
-		const h = makeHost({ bg: false });
+		const h = makeHost();
 		h.sendThrows.value = true; // 注入通道全程 throw
 		const port = createDeliveryPort(h.host);
 		expect(port.deliver(defaultEnvelope({ id: "fg-1" }), { onFailure: "forget" }).kind).toBe("accepted");
 		// 提交链两段：首投被 commitAsBatch 注入门禁 hold（设计内等待，不计首败、无终局落盘）
-		// → 窗口结束 kernel.flush() 重提 → 真注入 throw（首败语义生效）：forget → discard。
+		// → kernel.flush() 重提 → 真注入 throw（首败语义生效）：forget → discard。
 		// settleRejected=1 锚定 discard 由真注入失败触发（hold 路径不计数）。
 		expect(h.sent).toHaveLength(0);
 		expect(port.metrics().settleRejected).toBe(1);
@@ -479,12 +441,12 @@ describe("失败保留策略（onFailure 覆写）", () => {
 		expect(h.sent).toHaveLength(0);
 	});
 
-	it("提交窗 hold 拒不计首败：forget 条目不被 discard、留册，窗口结束重提送达成功", () => {
-		const h = makeHost({ bg: false });
+	it("提交窗 hold 拒不计首败：forget 条目不被 discard、留册，重提送达成功", () => {
+		const h = makeHost();
 		const port = createDeliveryPort(h.host);
-		// 默认通道 bg=false → 直通 → commitAsBatch 提交窗：首投被注入门禁 hold（设计内等待）
+		// 边沿即投仍经 commitAsBatch 提交窗：首投被注入门禁 hold（设计内等待）
 		expect(port.deliver(defaultEnvelope({ id: "hd-1" }), { onFailure: "forget" }).kind).toBe("accepted");
-		// 窗口结束 kernel.flush() 重提 → 送达成功（旧实现此处 hold 被误计首败 → discard 永久丢弃）
+		// kernel.flush() 重提 → 送达成功（旧实现此处 hold 被误计首败 → discard 永久丢弃）
 		expect(h.sent).toHaveLength(1);
 		expect(h.sent[0].message.details).toMatchObject({ deliveryId: "hd-1" });
 		expect(h.ackEntries()).toHaveLength(0); // 无 discard 终局（条目全程未失败）
@@ -497,11 +459,9 @@ describe("失败保留策略（onFailure 覆写）", () => {
 	});
 
 	it("提交窗 hold 拒对 retain 条目同样不计首败：留守不重复计数，重提送达正常终局", () => {
-		const h = makeHost({ bg: true });
+		const h = makeHost();
 		const port = createDeliveryPort(h.host);
-		port.deliver(defaultEnvelope({ id: "hd-r" })); // 缺省 retain
-		expect(h.sent).toHaveLength(0); // 窗口缓冲期不注入
-		vi.advanceTimersByTime(60_000); // 窗口到期 → commitAsBatch 提交（首投 hold 留守）→ kernel.flush 重提
+		port.deliver(defaultEnvelope({ id: "hd-r" })); // 缺省 retain——边沿即投经 commitAsBatch（首投 hold 留守）→ kernel.flush 重提
 		expect(h.sent).toHaveLength(1);
 		expect(port.metrics().settleRejected).toBe(0); // hold 不重复计入失败
 		const firstFailWarns = h.warn.mock.calls.filter((c) => String(c[0]).includes("first-failure"));
@@ -510,8 +470,8 @@ describe("失败保留策略（onFailure 覆写）", () => {
 		expect(h.ackEntries()[0]!["data"]).toEqual({ v: 2, id: "hd-r" }); // ack（无 outcome = 非 discard）
 	});
 
-	it("缺省（不传 onFailure）：首投经提交窗 hold 留守（设计内等待）；窗口外重投遇真注入 throw → retain 留账，恢复后边沿重投", () => {
-		const h = makeHost({ bg: false, idle: true });
+	it("缺省（不传 onFailure）：首投经提交窗 hold 留守（设计内等待）；重投遇真注入 throw → retain 留账，恢复后边沿重投", () => {
+		const h = makeHost({ idle: true });
 		h.sendThrows.value = true;
 		const port = createDeliveryPort(h.host);
 		expect(port.deliver(defaultEnvelope({ id: "rt-1" })).kind).toBe("accepted");
@@ -534,19 +494,21 @@ describe("session_start 差集重放", () => {
 		vi.useRealTimers();
 	});
 
-	it("崩溃在注入前：新实例 recover 重投（默认通道合批形态）且 replayReplays 计数", () => {
-		const h = makeHost({ bg: true });
+	it("崩溃在注入前：新实例 recover 重投（同组重放批形态）且 replayReplays 计数", () => {
+		const h = makeHost();
 		const first = createDeliveryPort(h.host);
 		first.deliver(defaultEnvelope({ id: "r-1", payload: { kind: "custom", customType: DEFAULT_NOTIFY_CUSTOM_TYPE, content: "one", display: true } }));
 		first.deliver(defaultEnvelope({ id: "r-2", payload: { kind: "custom", customType: DEFAULT_NOTIFY_CUSTOM_TYPE, content: "two", display: true } }));
-		first.dispose(); // 崩溃：进程消亡，outbox entry 留在 session 文件
+		first.dispose(); // 崩溃：进程消亡，outbox entry 留在 session 文件（首实例边即投的 sent 不算送达——无 message_end）
 
 		const second = createDeliveryPort(h.host); // respawn 后 session_start 重新装配
+		const sentBefore = h.sent.length;
 		expect(second.recover()).toBe(2);
 		expect(second.metrics().recoveryReplays).toBe(2);
-		// 重放合并投出（账本 recover→attemptDeliver 形态）：一条批消息
-		expect(h.sent).toHaveLength(1);
-		const items = (h.sent[0].message.details as { items: Array<Record<string, unknown>> }).items;
+		// 重放同组两条一起放行 → 分组放行批形态（保留边界断言）：一条批消息
+		expect(h.sent.length).toBe(sentBefore + 1);
+		const replayMsg = h.sent[h.sent.length - 1].message;
+		const items = (replayMsg.details as { items: Array<Record<string, unknown>> }).items;
 		expect(items.map((i) => i.deliveryId).sort()).toEqual(["r-1", "r-2"]);
 	});
 
@@ -580,7 +542,7 @@ describe("session_start 差集重放", () => {
 	});
 
 	it("重放幂等：recover 二次调用零动作（在途条目不重复入账）", () => {
-		const h = makeHost({ bg: false });
+		const h = makeHost();
 		const first = createDeliveryPort(h.host);
 		first.deliver(defaultEnvelope({ id: "ri-1" }));
 		first.dispose();
@@ -596,7 +558,7 @@ describe("session_start 差集重放", () => {
 
 describe("受理前落盘（耐久承诺）", () => {
 	it("appendEntry 抛错 → rejected(persist-failed)，不注入、id 不登记（可重试）", () => {
-		const h = makeHost({ bg: false });
+		const h = makeHost();
 		let fail = false;
 		const host = h.host;
 		const orig = host.appendEntry;

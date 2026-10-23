@@ -48,8 +48,10 @@ describe("场景 21：跨天 resume 预算按累计活跃段折算（非 started
 
       const summary = await waitForScenarioSettled(sd.runs, RUN_ID);
       // 账本折算不被 startedAt 墙钟误判耗尽：正常终局而非 time_limited
-      expect(summary.reason).toBe("completed");
+      //（[subagent-observability §3.3.8 行为反转连带] B 失败成员传导 run 终局——
+      // reason 落部分失败/全失败档，本测试锁的是预算折算语义，非 reason 具体值）
       expect(summary.reason).not.toBe("time_limited");
+      expect(["completed", "partially_succeeded", "failed"]).toContain(summary.reason);
 
       // B 失败恰 1 次派发（无重试轨迹）+ C 派发一次
       const names = sd.faux.dispatches.map((d) => d.opts["agent"]);

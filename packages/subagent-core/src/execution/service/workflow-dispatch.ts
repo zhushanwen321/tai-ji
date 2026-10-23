@@ -848,6 +848,9 @@ function outcomeToWorkflowResult(outcome: AgentOutcome): WorkflowAgentResult {
   return {
     content: outcome.content,
     ...(outcome.failureKind !== undefined ? { failureKind: outcome.failureKind } : {}),
+    // [subagent-observability §3.3.8] 失败分类透传（AgentOutcome.failure → call.result
+    // → run 终局成员交付结算 failedMembers[].cause 点拼数据源）。
+    ...(outcome.failure !== undefined ? { failure: outcome.failure } : {}),
     parsedOutput: outcome.parsedOutput,
     usage: outcome.usage,
     durationMs: outcome.durationMs,

@@ -84,6 +84,7 @@ import type {
   DoneReason,
   WorkerLogEntry,
 } from "./models/types.ts";
+import type { FailedMemberReport, PartialMemberReport } from "./run-events.ts";
 
 const logger = getLogger("subagents");
 const runEventLogger = getLogger("run-event-dispatch");
@@ -727,7 +728,18 @@ export function dispatchAgentSettled(run: WorkflowRun, call: AgentCall, aborted:
     );
     return;
   }
-  const outcome: RunOutcome = aborted ? "cancelled" : result.error === undefined ? "done" : "failed";
+  // call 级 outcome 值域 = done/failed/cancelled 三值（run 级词表收窄——run-vocabulary
+  // 注释明示）。[subagent-observability §3.3.8] closeOutInFlightCalls 的 call 枚举补
+  // cancelled：被 run 终局收尾的成员（IN_FLIGHT_CALL_CANCELLED_MSG 固定取消文案）
+  // 判 cancelled 不判 failed——「未交付且非失败」，UC-16 取消不产生 partially_succeeded
+  // 的成员面语义（若让位窗口内补写 settled 帧，取消成员不得冒充失败）。
+  const outcome: RunOutcome = aborted
+    ? "cancelled"
+    : result.error === undefined
+      ? "done"
+      : result.error === IN_FLIGHT_CALL_CANCELLED_MSG
+        ? "cancelled"
+        : "failed";
   const errorCode: RunErrorCode | undefined =
     outcome === "failed" ? (result.failureKind ?? "unknown") : undefined;
   const stderrTeePath = outcome === "failed" ? result.stderrTeePath : undefined;
@@ -800,12 +812,16 @@ export function dispatchAgentRetrying(
  * 字段与 record run-settled 帧同源同构；`reason` 是帧载荷的诊断文本（非
  * DoneReason——DoneReason 由 {@link runSettledOutcomeToDoneReason} 从
  * (outcome, errorCode) 联合派生，五处统一派生源）。
+ * [subagent-observability §3.3.8] failedMembers/partialMembers = 成员交付结算明细
+ * （帧同源透传；cancelled 族终局不产失败成员——UC-16）。
  */
 export interface RunSettlementRecord { // oe-exempt:20260929:framework:settlement record domain contract per design D15
   outcome: RunOutcome;
   errorCode?: RunErrorCode;
   reason?: string;
   settledAt: number;
+  failedMembers?: FailedMemberReport[];
+  partialMembers?: PartialMemberReport[];
 }
 
 /** 进程内终局记录注册表（key = runId；两个记源——活体 dispatch 链 terminal 写入 journal 记录
@@ -823,11 +839,15 @@ export function settlementRecordOfRunSettledFrame(frame: {
   errorCode?: RunErrorCode;
   reason?: string;
   ts: number;
+  failedMembers?: FailedMemberReport[];
+  partialMembers?: PartialMemberReport[];
 }): RunSettlementRecord {
   return {
     outcome: frame.outcome,
     ...(frame.errorCode !== undefined ? { errorCode: frame.errorCode } : {}),
     ...(frame.reason !== undefined ? { reason: frame.reason } : {}),
+    ...(frame.failedMembers !== undefined ? { failedMembers: frame.failedMembers } : {}),
+    ...(frame.partialMembers !== undefined ? { partialMembers: frame.partialMembers } : {}),
     settledAt: frame.ts,
   };
 }
@@ -898,6 +918,121 @@ export interface FinalizeRunOptions { // oe-exempt:20260929:framework:finalize o
    * 恢复先例：只发 unregister、不发 onRunDone）。
    */
   notifyDone?: boolean;
+}
+
+// ── [subagent-observability §3.3.8] 成员交付结算派生 ────────────────────────
+
+/**
+ * 单成员结算形态（成员交付债的收敛面）：
+ * - `delivered`：成功交付（done 且无 error）；
+ * - `failed`：失败成员（done 且 result.error 非取消文案）——进 failedMembers[].cause；
+ * - `cancelled`：被 run 终局收尾的成员（in-flight 被 closeOutInFlightCalls 收尾 /
+ *   尚未 settled 的在途）——不进失败成员（UC-16：取消不产生 partially_succeeded，
+ *   「未交付且非失败」）。
+ */
+type MemberSettlement = "delivered" | "failed" | "cancelled";
+
+/** 失败 cause 的点拼（`"<class>.<kind>"`）：failure（FailureCause）优先，回落
+ *  error 前缀引擎协议码（`engine.<code>`），再回落 "unknown"（保守可诊断）。 */
+export function memberFailureCauseOf(result: AgentResult): string {
+  if (result.failure !== undefined) {
+    return `${result.failure.class}.${result.failure.kind}`;
+  }
+  const error = result.error;
+  if (error !== undefined) {
+    const sep = error.indexOf(": ");
+    if (sep > 0) {
+      return `engine.${error.slice(0, sep)}`;
+    }
+  }
+  return "unknown";
+}
+
+/**
+ * 成员集合 → 交付结算派生（[subagent-observability §3.3.8] run 级 outcome 从
+ * 「result.error 有无」改为成员交付债结算集合的派生物）：
+ * - 全部成功交付 → done；
+ * - 存在失败且存在非失败 → partially_succeeded（第五值）；
+ * - 全部失败 → failed；
+ * - 空成员集 → undefined（空成员集 = 脚本层判定，回落 DoneReason 路径）。
+ *
+ * 失败成员明细随派生产出（failedMembers[].cause 点拼）；cancelled 成员（UC-16
+ * 取消收尾）不进失败明细——「未交付且非失败」按部分交付路径计（部分交付明细
+ * partialMembers 由 u5 产物契约校验填充，本派生恒缺省）。被接管成员无
+ * agent-settled（in-flight）同样判 cancelled——「任务从未执行，无双跑风险」。
+ */
+export function deriveRunOutcomeFromMembers(run: WorkflowRun): {
+  outcome: RunOutcome;
+  failedMembers?: FailedMemberReport[];
+} | undefined {  const calls = [...run.state.calls.values()];
+  if (calls.length === 0) return undefined;
+  let delivered = 0;
+  let failed = 0;
+  const failedMembers: FailedMemberReport[] = [];
+  for (const call of calls) {
+    const settlement = memberSettlementOf(call);
+    if (settlement === "delivered") {
+      delivered += 1;
+      continue;
+    }
+    if (settlement === "failed") {
+      failed += 1;
+      // result 契约：done ⟹ result 已设置（AgentCall.markDone 前置）；防御分支
+      // 不可达时按 unknown 出报告（不产半截成员行）。
+      failedMembers.push({
+        taskIndex: call.id,
+        cause: call.result !== undefined ? memberFailureCauseOf(call.result) : "unknown",
+      });
+    }
+    // cancelled：不计数、不进明细（UC-16）
+  }
+  if (failed === 0) {
+    return { outcome: "done" };
+  }
+  if (delivered === 0) {
+    return { outcome: "failed", failedMembers };
+  }
+  return { outcome: "partially_succeeded", failedMembers };
+}
+
+/** 单 call 的结算形态判定（IN_FLIGHT_CALL_CANCELLED_MSG = run 终局收尾写点的固定
+ *  取消文案——closeOutInFlightCalls 收尾的成员判 cancelled 不判 failed，UC-16）。 */
+export function memberSettlementOf(call: AgentCall): MemberSettlement {
+  if (call.status !== "done") return "cancelled";
+  const result = call.result;
+  if (result === undefined) return "cancelled";
+  if (result.error === undefined) return "delivered";
+  return result.error === IN_FLIGHT_CALL_CANCELLED_MSG ? "cancelled" : "failed";
+}
+
+/**
+ * [subagent-observability §3.3.8] run 终局吸收成员交付：在 DoneReason 合成记录上
+ * 叠加成员集合派生。两级优先序（run 级终局优先于成员集合派生）：
+ * - run 自身终局族：budget_limited/time_limited/cancelled（UC-16：取消不产生
+ *   partially_succeeded）与**脚本层失败**（run.state.error 有值——worker error /
+ *   replay mismatch / 脚本 throw，harness 系统层失败，成员无责）均不被覆盖；
+ * - completed / 无 state.error 的 failed 才做成员派生——成员失败传导 run 终局
+ *   （行为反转登记：现状成员失败完全不传导）。脚本吞掉成员失败的正常收尾
+ *   （fan-out allSettled 语义）在此升格 partially_succeeded/failed（场景 2 主场景）。
+ * 空成员集回落原合成（脚本层判定）。settling 中双终局竞窗由状态机 terminal ×
+ * 任意 fail-fast 承担（先到事实者胜）；interrupted 非终局不派生（resume 后再派生）。
+ */
+export function settleMembersIntoFinalSettlement(run: WorkflowRun, record: RunSettlementRecord): RunSettlementRecord {
+  if (record.outcome !== "done" && record.outcome !== "failed") return record;
+  // budget_limited 是 run 级终局码（dispatchFinalRunSettle 恒等映射，run-vocabulary
+  // 注释明示「为什么此刻被判终局」的 harness 系统层裁决）——与 cancelled/time_limited
+  // 同入优先族，不被成员集合覆盖。
+  if (record.errorCode === "budget_limited") return record;
+  if (run.state.error !== undefined) return record;
+  const derived = deriveRunOutcomeFromMembers(run);
+  if (derived === undefined) return record;
+  return {
+    ...record,
+    outcome: derived.outcome,
+    ...(derived.failedMembers !== undefined && derived.failedMembers.length > 0
+      ? { failedMembers: derived.failedMembers }
+      : {}),
+  };
 }
 
 /**
@@ -1178,6 +1313,10 @@ export async function settleRunAccounting(
     outcome: record.outcome,
     ...(record.errorCode !== undefined ? { errorCode: record.errorCode } : {}),
     ...(record.reason !== undefined ? { reason: record.reason } : {}),
+    // [subagent-observability §3.3.8] 成员交付结算明细随帧落 record（runtime 派生
+    // 视图与 wf-done 通知的载荷源；cancelled 族终局无失败成员——字段缺省）。
+    ...(record.failedMembers !== undefined ? { failedMembers: record.failedMembers } : {}),
+    ...(record.partialMembers !== undefined ? { partialMembers: record.partialMembers } : {}),
     artifactsDir: resolveRunEventJournal(opts?.journalDir).dir,
     ts: record.settledAt,
   });
@@ -1208,7 +1347,9 @@ export async function settleRunAccounting(
  *  原语（[D2] 映射表：time_limited 直判 outcome、budget_limited = failed + 同名
  *  终局码）。返回终局记录（RunSettlementRecord）——finalizeRun coda 的派生源。 */
 async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneReason): Promise<RunSettlementRecord> {
-  const record = composeFinalSettlement(run, doneReason);
+  // [subagent-observability §3.3.8] 成员交付结算派生先于帧构造（run 级终局优先级
+  // 在 settleMembersIntoFinalSettlement 内裁决——cancelled 族不被成员集合覆盖）。
+  const record = settleMembersIntoFinalSettlement(run, composeFinalSettlement(run, doneReason));
   if (doneReason === "aborted") {
     await dispatchRunTrigger(run, {
       type: "cancel-requested",

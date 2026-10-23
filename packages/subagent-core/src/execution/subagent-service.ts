@@ -194,7 +194,6 @@ export class SubagentService {
    *  notifyBatch 已删——成功轮完成通知收敛为 notifyComplete 单通道。 */
   private readonly notifyHost: NotifyHost = createNotifyHost({
     getPi: () => this.pi,
-    listRunning: () => this.store.listRunning(),
     getIsIdle: () => this.isIdleFn,
   });
 
