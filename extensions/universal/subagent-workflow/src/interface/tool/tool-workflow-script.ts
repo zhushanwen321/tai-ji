@@ -213,8 +213,6 @@ export function registerWorkflowScriptTool(
   pi.registerTool({
     name: "workflow-script",
     label: "Workflow Script",
-    // tool-declaration-slimming U-C1 R1 裁决：低频脚本管理侧延迟加载（defer 名单工具）。
-    exposure: "deferred",
     description:
       "Manage workflow scripts: generate (AI creates tmp script), lint (static check), " +
       "save (tmp→permanent), delete, list. Before generating a new script, use action:list " +

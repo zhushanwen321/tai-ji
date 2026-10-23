@@ -276,10 +276,10 @@ describe("schema 契约：一跳扁平 + 成员对象 tasks 必填 + 常驻", ()
     expect(singleMaxItems(fanOutSrc, "fan-out.js @pi-meta")).toBe(20);
   });
 
-  it("常驻（§3.3.4）：零 exposure: \"deferred\" 残留（SDK 默认 direct 即常驻声明）", () => {
+  it("deferred（2026-10-23 可见性重划，反转 §3.3.4 常驻裁决）：不常驻声明，tool_search 命中即激活", () => {
     const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
-    expect(tool.exposure).not.toBe("deferred");
-    expect(TOOL_SRC).not.toContain('exposure: "deferred"');
+    expect(tool.exposure).toBe("deferred");
+    expect(TOOL_SRC).toContain('exposure: "deferred"');
   });
 
   it("slug 走 SLUG_MAX_LENGTH 上界（schema 第一道关卡 + 运行时第二道）", () => {

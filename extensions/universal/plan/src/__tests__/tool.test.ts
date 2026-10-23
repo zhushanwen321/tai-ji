@@ -82,7 +82,8 @@ function setup() {
     getAllTools: vi.fn(() =>
       [...ALL_TOOL_NAMES, TOOL_SEARCH].map((n) => ({
         name: n,
-        exposure: n === "plan" ? "deferred" : n === TOOL_SEARCH ? "model-only" : "direct",
+        // plan 已转 direct 常驻（2026-10-23 裁决）；tool_search 保持 model-only 布景
+        exposure: n === TOOL_SEARCH ? "model-only" : "direct",
       })),
     ),
   } as unknown as Parameters<typeof registerPlanTool>[0];

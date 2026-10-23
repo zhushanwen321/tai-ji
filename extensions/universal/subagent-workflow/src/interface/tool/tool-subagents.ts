@@ -306,10 +306,12 @@ export function registerSubagentsTool(
   pi.registerTool({
     name: "subagents",
     label: "Subagents (batch)",
-    // 常驻（subagent-tool-interface-refactor §3.3.4）：成员对象形状与成员级模型是
-    // 首调正确性的关键，schema 必须第一轮可见（deferred 不进声明集，guidelines 不
-    // 注入——ADR-0136 的 defer 名单据此移出 `subagents`）。不写 exposure 字段 =
-    // SDK 默认 "direct"，与 start/manage/message/run/control 五个常驻工具同惯例。
+    // deferred（2026-10-23 用户裁决，反转 2026-10-22 ADR-0156 决策 3 的常驻裁决——
+    // 削减常驻声明预算优先于成员对象形状首调可见性；登记 ADR-0136 补记）：
+    // 不常驻声明，tool_search 命中即激活；检索入口 = 启动迁移写入的 +tool_search
+    // 条目（runtime pi-codemode-settings）。promptSnippet 保留——激活后进系统
+    // 提示词工具文字清单，模型激活当轮即见名可调
+    exposure: "deferred",
     description:
       "Spawn multiple subagents in ONE call, collect all results together — for N INDEPENDENT tasks.\n" +
       "Each member is a one-shot batch member: you cannot message or continue it (re-dispatch instead). Results arrive as ONE notification when the whole batch settles (not per member).\n" +

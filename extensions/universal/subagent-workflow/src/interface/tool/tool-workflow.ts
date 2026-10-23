@@ -355,6 +355,11 @@ export function registerWorkflowTool(
   pi.registerTool({
     name: "workflow_control",
     label: "Workflow Control",
+    // deferred（2026-10-23 裁决，ADR-0136 补记）：不常驻声明，tool_search 命中即激活；
+    // 检索入口 = 启动迁移写入的 +tool_search 条目（runtime pi-codemode-settings）。
+    // workflow_run 常驻 description 指名道姓引用本工具，模型有 run 控制需求时按名
+    // 检索即达；promptSnippet 保留——激活后进系统提示词工具文字清单
+    exposure: "deferred",
     description:
       "Control workflow runs: status (without runId = list runs; with runId = that run's member table), abort (stop a run), resume (continue an interrupted run).\n" +
       "Runs are one-shot (no pause): stop early with abort; for a settled run start a new one via `workflow_run`.",

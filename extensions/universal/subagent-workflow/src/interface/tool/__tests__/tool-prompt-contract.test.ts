@@ -435,8 +435,7 @@ describe("subagents 批量声明契约（成员对象 + 启动文案锚 + 常驻
     expect(TOOL_SUBAGENTS_SRC).not.toContain("Do NOT poll");
   });
 
-  it("常驻 + 工具名不变（§3.3.4 / 附录 B 边界）", () => {
-    expect(TOOL_SUBAGENTS_SRC).not.toContain('exposure: "deferred"');
+  it("工具名不变 + 档位 deferred（2026-10-23 可见性重划，反转 §3.3.4 常驻）", () => {
     expect(TOOL_SUBAGENTS_SRC).toContain('name: "subagents"');
     // 零改名断言：第二目标（subagent_batch）不在主干出现任何条件形态
     expect(TOOL_SUBAGENTS_SRC).not.toContain("subagent_batch");

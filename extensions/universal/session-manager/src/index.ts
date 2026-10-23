@@ -188,6 +188,12 @@ interface SessionToolConfig<S extends TObject> {
 	label: string
 	description: string
 	/**
+	 * 可见性档位（ADR-0136 名单句）：缺省 = deferred（七件套）；显式 "direct" =
+	 * 常驻声明（create_managed_session 例外，2026-10-23 裁决）。direct 形态不写
+	 * exposure 字段（与 SDK 缺省及全仓常驻工具惯例一致），helper 条件展开实现。
+	 */
+	exposure?: "deferred" | "direct"
+	/**
 	 * 识别层（session-manager-archive-delete 四层信息协议）：系统提示词 Available tools
 	 * 清单的一行片段。deferred 工具激活前不在活跃集、带不带都不进清单；激活后带
 	 * snippet 者进清单（pi SDK 1.0.0 system-prompt 工具清单机制：visibleTools =
@@ -223,10 +229,12 @@ function registerSessionTool<S extends TObject>(pi: ExtensionAPI, cfg: SessionTo
 	pi.registerTool({
 		name: cfg.name,
 		label: cfg.label,
-		// deferred（tool-declaration-slimming D4）：session-manager 工具族（八件套，与
-		// ADR-0136 现行登记一致）整体不常驻声明，tool_search
-		// 命中即激活；迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
-		exposure: "deferred",
+		// deferred（tool-declaration-slimming D4）：session-manager 工具族与 ADR-0136
+		// 现行登记一致——除 create_managed_session（direct 常驻，2026-10-23 裁决）外
+		// 不常驻声明，tool_search 命中即激活；检索入口 = 启动迁移写入的 +tool_search
+		// 条目（runtime pi-codemode-settings）。direct 档不写 exposure 字段（与 SDK
+		// 缺省等价），条件展开避免传显式 undefined
+		...(cfg.exposure !== "direct" ? { exposure: "deferred" as const } : {}),
 		promptSnippet: cfg.promptSnippet,
 		description: cfg.description,
 		parameters: cfg.parameters,
@@ -267,6 +275,9 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "create_managed_session",
 		label: "Create Managed Session",
+		// direct 常驻（2026-10-23 裁决，ADR-0136 补记）：创建入口模型默认可见，
+		// 其余七件保持 deferred
+		exposure: "direct",
 		promptSnippet:
 			"Create a new managed child session in a working directory, optionally with an initial prompt.",
 		description: `Create a new managed child session in a working directory, optionally with an initial prompt.
