@@ -33,12 +33,13 @@ export interface SessionStoreLike {
  */
 export interface EnsureStreamSubDeps {
   /**
-   * [u4b 收窄] handler 内 chatApi 的唯一用法是 streamSubscribe（ensureStreamSubscription
-   * 是订阅建立入口，不做 RPC）。宽→窄收窄对既有消费方结构兼容（完整 ChatApiPort 满足
-   * Pick 子集）。
+   * [u4b 收窄 → chat-flow-consistency D4 扩员] handler 内 chatApi 成员：streamSubscribe
+   * （订阅建立）+ getHistory（D4 终态处理失败恢复：权威 idle 到达而本地有 streaming 残留时
+   * 拉一次权威历史走 reconcileHistory）。宽→窄收窄对既有消费方结构兼容（完整 ChatApiPort
+   * 满足 Pick 子集）。
    * [投递所有权内核 u3b] getCompactQueue 成员已随 defer flush/S1/timer/熔断退役摘除。
    */
-  chatApi: Pick<ChatApiPort, 'streamSubscribe'>
+  chatApi: Pick<ChatApiPort, 'streamSubscribe' | 'getHistory'>
   /**
    * [session-dead 第三环] error = 操作失败；warning = 需用户处置的信号（与 error 语义区分，
    * 壳侧 useToast().warning 对接）。

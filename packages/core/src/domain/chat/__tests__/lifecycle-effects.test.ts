@@ -162,7 +162,11 @@ describe('createLifecycleEffects.markSessionDead（exited core 序列）', () =>
     const unsub = vi.fn()
     const streamSubscribe = vi.fn(() => unsub)
     const deps: EnsureStreamSubDeps = {
-      chatApi: { streamSubscribe },
+      // [chat-flow-consistency D4 扩员] getHistory 形状补齐（本用例不触发）
+      chatApi: {
+        streamSubscribe,
+        getHistory: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
+      },
       toast: { error: vi.fn(), warning: vi.fn() },
       t: (k: string) => k,
     }

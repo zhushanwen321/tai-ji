@@ -120,11 +120,11 @@ export interface TerminalMessagePatchOptions {
  * error 类收尾 reason（终态取向 error 的 FinalizeReason 子集）。
  * 类型谓词 isErrorFinalizeReason 收窄后 REASON_FALLBACK_ERROR_TEXT[reason] 恒 string。
  */
-export type ErrorFinalizeReason = Extract<FinalizeReason, 'error' | 'stream_error' | 'disconnect' | 'restart'>
+export type ErrorFinalizeReason = Extract<FinalizeReason, 'error' | 'stream_error' | 'disconnect' | 'restart' | 'stalled'>
 
 /** reason 是否终态取向 error（类型谓词；与 ErrorFinalizeReason 成员一一对应）。 */
 export function isErrorFinalizeReason(reason: FinalizeReason): reason is ErrorFinalizeReason {
-  return reason === 'error' || reason === 'stream_error' || reason === 'disconnect' || reason === 'restart'
+  return reason === 'error' || reason === 'stream_error' || reason === 'disconnect' || reason === 'restart' || reason === 'stalled'
 }
 
 /**
@@ -146,6 +146,9 @@ export const REASON_FALLBACK_ERROR_TEXT: Record<ErrorFinalizeReason, string> = {
   stream_error: '输出流中断，回复不完整。',
   disconnect: '与运行时的连接已断开，回复已中断。重新连接后可继续。',
   restart: '运行时已重启，回复已中断。重新连接后可继续。',
+  // chat-flow-consistency D4：终态消息处理半途失败的本地残留定格文案。收尾后紧随一次
+  // getHistory 拉权威，reconcile 成功即被真实内容替换（本条仅在拉取失败时停留可见）。
+  stalled: '回复已中断（内容可能不完整）。正在恢复完整内容…',
 }
 
 /** 单条消息的终态 patch（纯函数；status/usage/error/content/endedAt 条件展开，语义见 {@link TerminalMessagePatchOptions}）。 */

@@ -1304,3 +1304,134 @@ describe('消息投递可靠性：bash 投递回执（验收⑦a-⑦d）', () =>
     f.dispose()
   })
 })
+
+describe('chat-flow-consistency D4 终态处理失败恢复（occupancy idle × 本地 streaming 残留）', () => {
+  beforeEach(() => {
+    resetChatModuleStateForTest()
+  })
+
+  /** 权威历史 reply（getHistory 生产形态：pi 落盘 entry 派生消息，piEntryId 权威锚） */
+  function authoritativeHistoryReply() {
+    const now = Date.now()
+    return {
+      messages: [
+        { id: 'e-user-1', piEntryId: 'e-user-1', role: 'user', content: 'hi', status: 'complete', timestamp: now },
+        { id: 'e-assistant-1', piEntryId: 'e-assistant-1', role: 'assistant', content: '权威完整内容', status: 'complete', timestamp: now + 1 },
+      ] as Message[],
+      truncated: false,
+      loadedTurns: 1,
+      totalTurnsEstimate: 1,
+    }
+  }
+
+  /**
+   * 注入「终态处理失败」形态（任务书 A4 验收形态）：message.complete 帧副作用链抛错——
+   * 走 ensureStreamSubscription 的 dispatch 错误隔离点（catch 吞掉只 warn，缺陷 5 现状
+   * 半执行入口），终态帧被吞、本地 streaming 残留在场。
+   */
+  function injectCompleteHandlerFailure(f: Fixture): void {
+    const realApply = f.chatStore.applyMessageEvent
+    vi.spyOn(f.chatStore, 'applyMessageEvent').mockImplementation((sid, m) => {
+      if (m.type === 'message.complete') throw new Error('injected terminal-frame handler failure')
+      realApply(sid, m)
+    })
+  }
+
+  it('主形态：complete 处理抛错后权威 idle 到达 → 两步收尾（stalled 定格 + getHistory 拉权威），最终消息列表与权威一致、无永久工作中态', async () => {
+    const f = makeFixture()
+    await f.useChat.send('s-d4', textToSegments('hi'))
+    f.emit('s-d4', msg('s-d4', 'message.message_start', { messageId: 'm1' }))
+    expect(f.chatStore.isGenerating('s-d4')).toBe(true)
+    injectCompleteHandlerFailure(f)
+    f.emit('s-d4', msg('s-d4', 'message.complete', { stopReason: 'end_turn' }))
+    // 处理失败形态在场：终态帧被吞、本地 streaming 残留（缺陷 5 现状形态）
+    expect(f.chatStore.isGenerating('s-d4')).toBe(true)
+    f.chatApi.getHistory.mockResolvedValue(authoritativeHistoryReply())
+
+    f.emit('s-d4', msg('s-d4', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
+
+    // 第一步收尾生效（无永久工作中态）
+    expect(f.chatStore.isGenerating('s-d4')).toBe(false)
+    // 第二步拉权威（每回合至多一次）
+    expect(f.chatApi.getHistory).toHaveBeenCalledTimes(1)
+    expect(f.chatApi.getHistory).toHaveBeenCalledWith('s-d4')
+    await vi.waitFor(() => {
+      const messages = f.chatStore.getMessages('s-d4')
+      // 最终消息列表与权威一致：乐观 user 气泡经合并判据被权威 user 副本去重，
+      // stalled 定格的 error assistant 被权威 assistant 替换（先收尾 → 保护段为空 → 基线接管）
+      expect(messages).toHaveLength(2)
+      expect(messages.some((m) => m.role === 'assistant' && m.status === 'streaming')).toBe(false)
+      expect(messages.some((m) => m.role === 'assistant' && m.error)).toBe(false)
+      expect(messages.find((m) => m.role === 'assistant')?.content).toBe('权威完整内容')
+    })
+    f.dispose()
+  })
+
+  it('stalled 定格形态：收尾后残留 assistant 转 error 终态 + 设计定稿中断文案（拉取前窗口）', async () => {
+    const f = makeFixture()
+    await f.useChat.send('s-d4m', textToSegments('hi'))
+    f.emit('s-d4m', msg('s-d4m', 'message.message_start', { messageId: 'm1' }))
+    injectCompleteHandlerFailure(f)
+    f.emit('s-d4m', msg('s-d4m', 'message.complete', { stopReason: 'end_turn' }))
+    // getHistory 挂起不 settle：锁存「收尾已做、拉取未回」的定格窗口形态
+    f.chatApi.getHistory.mockImplementation(() => new Promise(() => {}))
+
+    f.emit('s-d4m', msg('s-d4m', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
+
+    const lastAssistant = [...f.chatStore.getMessages('s-d4m')].reverse().find((m) => m.role === 'assistant')
+    expect(lastAssistant?.status).toBe('error')
+    expect(lastAssistant?.error).toContain('回复已中断')
+    expect(lastAssistant?.error).toContain('正在恢复完整内容')
+    f.dispose()
+  })
+
+  it('正常路径零触发：complete 正常收尾后 idle 帧到达不拉权威（每回合至多一次拉取契约）', async () => {
+    const f = makeFixture()
+    await f.useChat.send('s-d4n', textToSegments('hi'))
+    f.emit('s-d4n', msg('s-d4n', 'message.message_start', { messageId: 'm1' }))
+    f.emit('s-d4n', msg('s-d4n', 'message.complete', { stopReason: 'end_turn' }))
+    expect(f.chatStore.isGenerating('s-d4n')).toBe(false)
+
+    f.emit('s-d4n', msg('s-d4n', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
+
+    expect(f.chatApi.getHistory).not.toHaveBeenCalled()
+    const messages = f.chatStore.getMessages('s-d4n')
+    expect(messages.some((m) => m.role === 'assistant' && m.error)).toBe(false)
+    f.dispose()
+  })
+
+  it('负路径：occupancy 非 idle（generating / bash 在途）到达时本地 streaming 在场不触发恢复', async () => {
+    const f = makeFixture()
+    await f.useChat.send('s-d4g', textToSegments('hi'))
+    f.emit('s-d4g', msg('s-d4g', 'message.message_start', { messageId: 'm1' }))
+
+    f.emit('s-d4g', msg('s-d4g', 'session.occupancy', { turn: 'generating', compacting: false, bash: false }))
+    expect(f.chatApi.getHistory).not.toHaveBeenCalled()
+    expect(f.chatStore.isGenerating('s-d4g')).toBe(true)
+
+    f.emit('s-d4g', msg('s-d4g', 'session.occupancy', { turn: 'idle', compacting: false, bash: true }))
+    expect(f.chatApi.getHistory).not.toHaveBeenCalled()
+    expect(f.chatStore.isGenerating('s-d4g')).toBe(true)
+    f.dispose()
+  })
+
+  it('降级：权威拉取失败仅 warn 留痕——本地已收尾无永久工作中态，不沿订阅回调逆传', async () => {
+    const f = makeFixture()
+    await f.useChat.send('s-d4f', textToSegments('hi'))
+    f.emit('s-d4f', msg('s-d4f', 'message.message_start', { messageId: 'm1' }))
+    injectCompleteHandlerFailure(f)
+    f.emit('s-d4f', msg('s-d4f', 'message.complete', { stopReason: 'end_turn' }))
+    f.chatApi.getHistory.mockRejectedValue(new Error('transport down'))
+
+    expect(() =>
+      f.emit('s-d4f', msg('s-d4f', 'session.occupancy', { turn: 'idle', compacting: false, bash: false })),
+    ).not.toThrow()
+    expect(f.chatStore.isGenerating('s-d4f')).toBe(false)
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const lastAssistant = [...f.chatStore.getMessages('s-d4f')].reverse().find((m) => m.role === 'assistant')
+    expect(lastAssistant?.status).toBe('error')
+    expect(lastAssistant?.error).toContain('回复已中断')
+    f.dispose()
+  })
+})

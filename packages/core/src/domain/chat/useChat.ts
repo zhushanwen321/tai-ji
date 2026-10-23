@@ -18,7 +18,7 @@
  *
  * abort：调 api.chat.abort（方法存在，中断流转 DEFERRED G-025）。
  */
-import type { Segment, ServerMessage, ServerMessageUnion, CompactErrorCode, MessageBlockedCode } from '@taiji/shared'
+import type { Segment, ServerMessage, ServerMessageUnion, CompactErrorCode, MessageBlockedCode, Message } from '@taiji/shared'
 import { segmentsToPrompt, restoreRevokedDraft, markerLiteral, MESSAGE_BLOCKED_CODE } from '@taiji/shared'
 import {
   subscribeSession,
@@ -32,6 +32,7 @@ import { isVirtualKey } from './lru'
 import { disposeImageCacheForSession } from './image-cache'
 import { toErrorMessage } from '../../utils/error-message'
 import { randomUuid } from '../../utils/random-uuid'
+import { isDevMode } from '../../platform/dev-mode'
 import type { EnsureStreamSubDeps, SessionStoreLike, UseChatDeps } from './use-chat-types'
 import type { DeliveryFrameEntry, DeliveryCancelReply, DeliverySubmitReply } from './api-port'
 import type { RevokeMessageErrorCode } from '@taiji/shared'
@@ -619,16 +620,70 @@ function handleSessionCompacted(sid: string, chat: ChatStoreInstance): void {
   chat.setCompactingReason(sid, undefined)
 }
 
+/** occupancy 三维全 idle 判定（D4 触发条件与下方 pendingSend 兜底共用的单一谓词）：
+ * turn=idle ∧ 非 compacting ∧ 非 bash = runtime 权威宣告无任何维度在途。 */
+function isFullyIdleOccupancy(payload: ServerMessage<'session.occupancy'>['payload']): boolean {
+  return payload.turn === 'idle' && !payload.compacting && !payload.bash
+}
+
+/** 本地 streaming 残留判定（D4 触发条件第二支）：∃ streaming assistant ∨ ∃ running
+ * toolCall——一次遍历同查两形态（message 已终态而 toolCall 仍 running 的半执行残留
+ * 同属「实际已结束却永远工作中」）。 */
+function hasStreamingResidue(messages: Message[]): boolean {
+  return messages.some(
+    (m) =>
+      (m.role === 'assistant' && m.status === 'streaming')
+      || (m.toolCalls?.some((tc) => tc.status === 'running') ?? false),
+  )
+}
+
+/**
+ * [chat-flow-consistency §3.3 D4 / 缺陷 5] 终态处理失败恢复（设计定稿两步形态）。
+ *
+ * 触发 = 三维全 idle 派生视图到达 且 本地存在 streaming assistant / running toolCall：
+ * 权威帧宣告回合已结束，本地却挂着「工作中」实体——终态消息处理半途失败的确定性矛盾
+ * （message.complete 帧的副作用链在 ensureStreamSubscription 的 dispatch 错误隔离点被
+ * 吞掉只 warn；事实驱动：锚定 idle 帧与本地残留两个确定性事实，不建时间推测兜底）。
+ * 两步按序：
+ * ① finalizeSession('stalled') 收尾残留（半成品定格、状态复位）——先收尾是合并保护的
+ *   要求：直接拉历史会被 mergeBaselineWithLive 尾部保护段把 streaming 实体保下来与权威
+ *   版本双显；先收尾使本地转终态，reconcile 后被权威版本自然替换（单显、内容正确）。
+ * ② 拉一次 getHistory 走 reconcileHistory 以真实落盘内容接管——本场景正是「恢复场景读盘」
+ *   的合法用途（ADR-0097 原则 4），回合往往实际成功完成，拉回真实内容优于停留在中断提示。
+ * fire-and-forget：拉取失败仅 warn 留痕（best-effort 对齐 handleRevokeMessage 同款降级——
+ * 本地已收尾无「永远工作中」残留，对话流由下次切入/刷新的既有主动拉收敛）。
+ * 频率契约：正常路径残留在 message.complete 已收尾，本编排零触发；恢复后残留实体已终态，
+ * 同帧重放（WS 重连 stateSnapshot 回放）不满足触发条件——每回合至多一次拉取。
+ */
+function recoverStalledSession(sid: string, chat: ChatStoreInstance, deps: EnsureStreamSubDeps): void {
+  // 触发可观测（设计 D4 三档裁决「简单设计档」：dev 日志留痕，生产日志可感知频率出现
+  // 时升级处置 = 修消息处理链而非加兜底）
+  if (isDevMode()) {
+    console.warn(`[useChat] occupancy idle but local streaming residue remains for session ${sid} — finalizing as stalled, pulling authoritative history`)
+  }
+  chat.finalizeSession(sid, 'stalled')
+  void deps.chatApi
+    .getHistory(sid)
+    .then((history) => {
+      chat.reconcileHistory(sid, history.messages, historyWindowFromReply(history))
+    })
+    .catch((e) => {
+      console.warn(`[useChat] stalled recovery history pull failed for session ${sid}:`, e)
+    })
+}
+
 /** [u5b / D1+D3 → u3b/D7 简化] occupancy 派生视图消费（state topic：live 广播 + subscribeSession 的
  * stateSnapshot 回放同路径到达——WS 重连 resubscribeAll / 切回 session 时快照恢复，G4）。
  * 写入 chat store 派生视图分区（sessionPhase 单一数据源；send-route 的 UI 预测消费）。
  * [HISTORICAL → u3b 退役] defer 队列 flush 触发（「全 idle 且队列非空」→ 投递）已随 defer
  * 队列整体退役：投递时机由 runtime 内核驱动（occupancy 边沿是内核 lane 再判定的触发源，
- * renderer 只渲染派生视图）。本 handler 只保留派生视图写入。 */
+ * renderer 只渲染派生视图）。本 handler 保留派生视图写入 + idle 兜底清 pendingSend +
+ * [chat-flow-consistency D4] 终态处理失败恢复（recoverStalledSession，见其注释）。 */
 function handleSessionOccupancy(
   sid: string,
   chat: ChatStoreInstance,
   msg: ServerMessage<'session.occupancy'>,
+  deps: EnsureStreamSubDeps,
 ): void {
   chat.setOccupancy(sid, { turn: msg.payload.turn, compacting: msg.payload.compacting, bash: msg.payload.bash })
   // [u5a 收尾扩展 / #12 对称路径] 权威帧兜底乐观态：三维全 idle 的权威派生视图到达 = runtime
@@ -642,13 +697,14 @@ function handleSessionOccupancy(
   // 到达时 pendingSend 已被 message_start 清（幂等无副作用）。
   // （main 侧 u5a 原含的 defer flush 路径已随 defer 队列退役不合并——投递时机由 runtime
   // 内核驱动，见文件头 [HISTORICAL → u3b 退役] 注。）
-  if (
-    msg.payload.turn === 'idle'
-    && !msg.payload.compacting
-    && !msg.payload.bash
-    && chat.isPendingSend(sid)
-  ) {
+  const fullyIdle = isFullyIdleOccupancy(msg.payload)
+  if (fullyIdle && chat.isPendingSend(sid)) {
     chat.clearPendingSend(sid)
+  }
+  // [chat-flow-consistency §3.3 D4] 权威 idle 与本地 streaming 残留矛盾 = 终态处理失败的
+  // 确定性信号 → 两步恢复（收尾 + 拉权威），见 recoverStalledSession 注释。
+  if (fullyIdle && hasStreamingResidue(chat.getMessages(sid))) {
+    recoverStalledSession(sid, chat, deps)
   }
 }
 
@@ -755,7 +811,7 @@ function handleSessionFrame(
       break
     }
     case 'session.occupancy': {
-      handleSessionOccupancy(sid, chat, msg)
+      handleSessionOccupancy(sid, chat, msg, deps)
       break
     }
     // [投递所有权内核 u3b / D7] 内核条目状态快照：队列区/气泡 morph 的单一数据源

@@ -65,9 +65,12 @@ function makeFixture(): Fixture {
   const subscribeRpc = vi.fn().mockResolvedValue({ snapshot: [], stateSnapshot: [], lastSeq: 0 })
   setSubscriptionPorts({ subscribe: subscribeRpc, replay: vi.fn() })
   const deps: EnsureStreamSubDeps = {
-    // [u4b 收窄] EnsureStreamSubDeps.chatApi = Pick<ChatApiPort, 'streamSubscribe'>，
-    // 只注入消费方（excess property check 不放行多余键）
-    chatApi: { streamSubscribe },
+    // [u4b 收窄 → chat-flow-consistency D4 扩员] chatApi = Pick<ChatApiPort, 'streamSubscribe' | 'getHistory'>，
+    // 只注入消费方（excess property check 不放行多余键）；getHistory 本文件用例不触发，mock 补齐形状
+    chatApi: {
+      streamSubscribe,
+      getHistory: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
+    },
     // [session-dead 第三环] warning：defer 重投熔断提示的注入点（本用例不触发）
     toast: { error: vi.fn(), warning: vi.fn() },
     t: (k: string) => k,

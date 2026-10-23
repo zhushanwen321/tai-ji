@@ -79,7 +79,11 @@ function makeFixture(): Fixture {
   setSubscriptionPorts({ subscribe: subscribeRpc, replay: vi.fn() })
   const unsubscribeRpc = vi.fn().mockResolvedValue(undefined)
   const deps: EnsureStreamSubDeps = {
-    chatApi: { streamSubscribe },
+    // [chat-flow-consistency D4 扩员] getHistory 形状补齐（本文件用例不触发）
+    chatApi: {
+      streamSubscribe,
+      getHistory: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
+    },
     toast: { error: vi.fn(), warning: vi.fn() },
     t: (k: string) => k,
   }
