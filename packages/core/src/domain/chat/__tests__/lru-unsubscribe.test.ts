@@ -14,6 +14,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope } from 'vue'
 import type { ServerMessage } from '@taiji/shared'
+import { createSessionLiveState } from '@taiji/core/domain/session'
 import { createChatStore } from '../store'
 import type { ChatStoreInstance } from '../store'
 import {
@@ -80,6 +81,7 @@ function makeFixture(): Fixture {
   const unsubscribeRpc = vi.fn().mockResolvedValue(undefined)
   const deps: EnsureStreamSubDeps = {
     chatApi: { streamSubscribe },
+    liveState: createSessionLiveState(),
     toast: { error: vi.fn(), warning: vi.fn() },
     t: (k: string) => k,
   }

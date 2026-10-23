@@ -20,6 +20,7 @@ import { effectScope } from 'vue'
 import { textToSegments } from '@taiji/shared'
 import type { Segment, ServerMessage } from '@taiji/shared'
 import { createChatStore } from '../store'
+import { createSessionLiveState } from '@taiji/core/domain/session'
 import {
   createUseChat,
   resetChatModuleStateForTest,
@@ -61,6 +62,7 @@ function makeFixture(): Fixture {
     writeSegments: vi.fn().mockResolvedValue(undefined),
     getChatStore: () => chatStore,
     getSessionStore: () => ({ applySnapshot: vi.fn(), revive: vi.fn() }),
+    getLiveStateStore: () => createSessionLiveState(),
     toast,
     t: (k: string, p?: Record<string, unknown>) => (p ? `${k}:${JSON.stringify(p)}` : k),
   }

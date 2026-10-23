@@ -6,10 +6,12 @@
  * 上层（panel/useComposerModelThinking、features/useNewTaskFlow）不再直调 @/api。
  *
  * 两种态的统一处理：
- * - session 已建态：直接调 RPC + 更新 sessionStore.applySnapshot（modelId 与
- *   thinkingLevel 均写回执生效值——U6 弃乐观写：pi 钳制档位 / pattern 引擎静默换模时
- *   回执 ≠ 请求值，显示值从第一毫秒起就是真值）——立即生效，不依赖广播到达——未发消息的
- *   session 可能无 streamSubscription，广播会丢。
+ * - session 已建态：直接调 RPC + 写状态层 `applyLiveState`（modelId 与 thinkingLevel 均写
+ *   回执生效值——U6 弃乐观写：pi 钳制档位 / pattern 引擎静默换模时回执 ≠ 请求值，显示值从
+ *   第一毫秒起就是真值）——立即生效，不依赖广播到达——未发消息的 session 可能无
+ *   streamSubscription，广播会丢。
+ *   [W1 会话架构四层分离] 写入目标是状态层（按会话 id 寄存），**不再按 id 类别分流**：
+ *   btw 线 vid 与主会话走同一个 apply 入口（旧实现 btw 分支 + 专用 store 已删除）。
  * - landing 延迟态（useNewTaskFlow）：session 尚未 create，无法调 RPC。本 composable
  *   不处理 pending 记录（那是 useNewTaskFlow 的状态机职责），只暴露「session 已建后 apply」
  *   的能力，供 submitFirstMessage 在 create session 后调用，消除 useNewTaskFlow 与
@@ -22,29 +24,25 @@
  * 回执写，不破坏该 watch 链。
  */
 import { model as modelApi, session as sessionApi } from '@/api'
-import { isBtwVirtualId, type ProviderId } from '@taiji/shared'
-import { useSessionStore } from '@/stores/session'
-import { useBtwSessionStateStore } from '@/stores/btw-session-state'
+import type { ProviderId } from '@taiji/shared'
+import { useSessionLiveStateStore } from '@/stores/session-live-state'
 
 export function useModel() {
-  const sessionStore = useSessionStore()
-  const btwSessionState = useBtwSessionStateStore()
+  const liveState = useSessionLiveStateStore()
 
   /**
-   * 切换回执显示态写入（U6 生效值）。btw vid 分支：线是 hidden 会话，
-   * sessionStore.applySnapshot 对列表外 id 静默丢弃——回执改写 btw 线态 store
-   * （显示解析经 resolveComposerSessionState 消费），落点按 id 类别分流。
+   * 切换回执显示态写入（U6 生效值）。
+   *
+   * [W1 会话架构四层分离] 统一写状态层 `applyLiveState`——状态按会话 id 寄存，与「是否在
+   * 侧栏列表」无关。旧实现的「btw 虚拟 id 分流」（btw 线写专用 store、主会话写
+   * sessionStore.applySnapshot）已删除：两条路径合并为一个 reducer（设计 §3.3 删除清单）。
    */
   function applySwitchReceipt(sessionId: string, patch: { modelId?: string; thinkingLevel?: string }): void {
-    if (isBtwVirtualId(sessionId)) {
-      btwSessionState.applyModelState(sessionId, patch)
-      return
-    }
-    sessionStore.applySnapshot(sessionId, patch)
+    liveState.applyLiveState(sessionId, patch)
   }
 
   /**
-   * 切换 session 的模型：调 runtime model.switch RPC，以回执生效值写 sessionStore。
+   * 切换 session 的模型：调 runtime model.switch RPC，以回执生效值写状态层。
    *
    * 回执消费（U6/C-pi-13，与 setThinkingLevel 同标准）：reply 的 provider/modelId 是
    * pi 实际生效值（runtime set→get_state 读回；pi pattern 引擎静默换模——事故 A 形态——
@@ -68,7 +66,7 @@ export function useModel() {
   }
 
   /**
-   * 设置 session 的思考等级：调 runtime session.setThinkingLevel RPC，以回执生效值写 store。
+   * 设置 session 的思考等级：调 runtime session.setThinkingLevel RPC，以回执生效值写状态层。
    *
    * level 是前端 7 级枚举字符串（off/minimal/low/medium/high/xhigh/max，
    * 集合来源 @taiji/shared PI_THINKING_LEVELS）。

@@ -16,6 +16,7 @@ import type { Ref } from 'vue'
 import {
   createChatStore,
   createSessionFlow,
+  createSessionLiveState,
   createSessionStore,
   createUseChat,
   createUseSession,
@@ -95,6 +96,9 @@ const sessionApiPort: SessionApiPort = {
 
 const chatStore = createChatStore()
 const sessionStore = createSessionStore()
+// [W1 会话架构四层分离] 会话运行时状态层（core 纯 factory，与 createSessionStore 同位置组装）：
+// modelId / thinkingLevel 的唯一权威落点——按会话 id 寄存，与列表成员资格无关。
+const liveStateStore = createSessionLiveState()
 
 // [投递所有权内核 u3b] 原本地 compact defer 队列（CompactQueueLike 内存实现 + flush 逐条
 // 提交）已随 core defer 队列状态机整体退役：UseChatDeps 不再有 getCompactQueue 成员，
@@ -126,6 +130,7 @@ function buildUseChatDeps(): UseChatDeps {
     ...coreChannelDeps(),
     getChatStore: () => chatStore,
     getSessionStore: () => sessionStore as SessionStoreLike,
+    getLiveStateStore: () => liveStateStore,
   }
 }
 
@@ -187,6 +192,7 @@ const noop = (): void => {}
 //   ?? noop 解析）：移动壳无 new-task flow 活跃取消面 / 文件树 / 未读体系（未读属 W4）
 const subDeps: EnsureStreamSubDeps = {
   chatApi: chatApiPort,
+  liveState: liveStateStore,
   toast: errorBarToast,
   t,
 }
@@ -230,6 +236,8 @@ const useSessionInstance = createUseSession({
     disposeChat: (sid) => useChatInstance.disposeSession(sid),
     invalidateStatus: noop,
     browserDestroy: noop,
+    // [W1 会话架构四层分离] 状态层条目显式清退（只挂真删除；归档不挂——同 core 契约）
+    clearLiveState: (sid) => liveStateStore.removeLiveState(sid),
   },
   // D2/U5：sessionEntry 端口束注入——切入链 12 步的订阅/LRU 步在移动壳生效（对齐桌面）
   sessionEntry,
@@ -289,7 +297,16 @@ export async function createMobileTask(input: MobileNewTaskInput): Promise<Sessi
 // 仅暴露组件/测试实际消费的符号；useSessionInstance 与两个 api 端口是文件内组装细节，
 // 去 export 防「导出清单 = 公开 API」的假象（外部断链由本文件 import 图自证）。
 
-export { chatStore, sessionStore, useChatInstance }
+export { chatStore, liveStateStore, sessionStore, useChatInstance }
+
+/**
+ * 会话运行时状态读口（[W1] 状态层薄壳的移动形态）：
+ * `modelId` / `thinkingLevel` 读状态层，缓存缺失返回 undefined（显式未知——视图显示
+ * 显式未知占位，不回退列表种子字段/其他会话的值）。
+ */
+export function liveStateOf(id: string): { modelId?: string; thinkingLevel?: string } | undefined {
+  return liveStateStore.liveStateOf(id)
+}
 
 /**
  * 队列条目取消（remote-use D7/U10）：delivery.cancel RPC 透传（本文件 chatApiPort

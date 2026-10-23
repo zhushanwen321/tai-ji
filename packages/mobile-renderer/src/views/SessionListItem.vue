@@ -3,8 +3,10 @@
 // MobileSessionList 消费本组件渲染等价）。纯渲染组件，数据经 props 传入，无 app-runtime 依赖。
 //
 // 渲染 SessionSummary 自带字段：label + 状态点/状态文案 + 时间 + 模型/思考档只读标签
-// （A5：modelId/thinkingLevel 数据已在 SessionSummary，移动补渲染——V11 与桌面设置一致；
-// thinkingLevel 显示原始值，移动壳无 models 列表消费方，不做 id→展示名映射）。
+// （A5；thinkingLevel 显示原始值，移动壳无 models 列表消费方，不做 id→展示名映射）。
+// [W1 会话架构四层分离] 模型/思考档改读**状态层**（app-runtime.liveStateOf，按会话 id
+// 寄存的运行时事实）；SessionSummary 同名字段降级为初始种子，状态层缺失 = 显式未知，
+// 不回退种子/其他会话的值（设计 §2.4 I5）。
 // 状态点 = 派生态（remote-use A14/U20）：derivedStatus prop 由 MobileSessionList 经 core
 // deriveSessionStatus 按参数化输入计算（occupancy + subagent 运行态 + meta；blockingOverlay
 // 移动恒 false，D9② 白名单）——与桌面侧栏同源 9 态，替代原 SessionStatus 6 态直渲染。
@@ -16,6 +18,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { DerivedStatus } from '@taiji/core'
 import type { SessionSummary } from '@taiji/shared'
+import { liveStateOf } from '../shell/app-runtime'
 
 const props = defineProps<{ item: SessionSummary; active: boolean; derivedStatus: DerivedStatus }>()
 
@@ -66,10 +69,15 @@ function formatTime(ts: number): string {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
-/** 模型/思考档只读标签（A5）：modelId 必有；thinkingLevel 可选，有值以「 · 」分隔 */
-const modelLine = computed(() =>
-  props.item.thinkingLevel ? `${props.item.modelId} · ${props.item.thinkingLevel}` : props.item.modelId,
-)
+/**
+ * 模型/思考档只读标签（A5）：状态层 modelId 为显示门槛；thinkingLevel 可选，
+ * 有值以「 · 」分隔。状态层缺失 → 空串（显式未知：行内不显示模型标签，不猜测）。
+ */
+const modelLine = computed(() => {
+  const live = liveStateOf(props.item.id)
+  if (!live?.modelId) return ''
+  return live.thinkingLevel ? `${live.modelId} · ${live.thinkingLevel}` : live.modelId
+})
 
 function onOpen(): void {
   emit('open', props.item.id)

@@ -68,6 +68,7 @@ import { closeWorkflowVizOverlayForSession } from '@/components/panel/workflow-v
 import { getBtwVirtualIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useChat, ensureStreamSubscription } from '@/composables/features/chat/useChat'
+import { useSessionLiveStateStore } from '@/stores/session-live-state'
 import { useTtsPlayer } from '@/composables/features/chat/useTtsPlayer'
 import { invalidateStatusCache } from '@/composables/features/chat/useSessionDerivations'
 import { browserDestroy as browserDestroyIpc } from '@/lib/ipc'
@@ -216,6 +217,9 @@ export function useSidebar() {
     // session 时关 overlay（数据范围——事件流缓存 + 活跃锚——由 clearWorkflow/store.clearSession 收尾）。
     closeWorkflowOverlay: (sid) => closeWorkflowVizOverlayForSession(sid),
     clearForkNotices: (sid) => useForkNoticeFeed().clearSession(sid),
+    // [W1 会话架构四层分离] 状态层条目显式清退（只挂真删除；归档不挂——归档恢复后
+    // 已缓存状态仍在，见 core SessionCleanupHooks.clearLiveState 契约）
+    clearLiveState: (sid) => useSessionLiveStateStore().removeLiveState(sid),
   }
 
   const flow: NewTaskFlowPort = {

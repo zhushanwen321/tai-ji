@@ -124,23 +124,27 @@ export function createSessionStore() {
   )
 
   /**
-   * 应用 owner 快照——session store 数据写入口（W13 收敛为唯一入口：原标签更新 /
-   * 模型状态局部更新 / 整表载入三个写入口全部删除，D7：renderer 零派生）。
+   * 应用 owner 快照——session store（导航列表）数据写入口（W13 收敛为唯一入口）。
+   *
+   * [W1 会话架构四层分离] 本 store 降级为**导航视图**（分组 / 排序 / 侧栏可见项），只托管
+   * 描述字段（label / status / projectId / cwd 等）。运行时状态（modelId / thinkingLevel /
+   * tokenCount）已迁状态层（domain/session/live-state，唯一写入口 applyLiveState）——
+   * 本入口**不再写**这三个字段（设计 §3.3 删除清单）。
    *
    * 两种快照粒度，均以 runtime owner 实例为权威：
    * - 整表：config.sessions 广播 / session.list RPC 的全量分组派生视图，直接替换 groups 真源
-   *   （整表语义，含分组增删与重排——单条快照无法表达）；
-   * - 单 session：session.renamed / state_changed 广播 + 乐观更新本地入参，按 D1b 整字段
-   * 覆盖合并进既有条目（未知 id 静默跳过）。
+   *   （整表语义，含分组增删与重排——单条快照无法表达）。**不触碰状态层**（刷新 / 归档 /
+   *   项目过滤不得清掉已缓存状态，设计 I3）；
+   * - 单 session：session.renamed 广播 + 乐观更新本地入参，按 D1b 整字段覆盖合并进既有条目
+   *   （未知 id 静默跳过）。只写描述字段。
    *
    * 乐观更新形态：本地入参只带乐观字段（如 rename 先显示 { label }），权威确认经 runtime
-   * 广播回流（config.sessions 整表 / state_changed 单条），同一入口重复写入幂等。
+   * 广播回流（config.sessions 整表），同一入口重复写入幂等。
    *
-   * [W15 检查] 磁盘占位值检查已在 mergeViewSnapshot 落地（扫描来源快照的 modelId:''/
-   * tokenCount:0 占位值不覆盖实例/广播真值——#2 空串覆盖事故的最后防线，详该函数注释）。
-   * 历史：三入口时代 setGroups 整表覆盖曾把实例广播入列表的真值抹回磁盘扫描的空串
-   * （updateSessionState 局部更新正是当时为避开此坑而设），W13 收敛单入口 + 本检查
-   * 后按来源分流根治。
+   * [过渡语义] SessionSummary 的 modelId / thinkingLevel / tokenCount 字段**保留**（W1 不动
+   * shared 类型）：列表载荷里的同名字段降级为「初始种子」（移动壳 / PlanQuotaFloatPanel 等
+   * 消费方改读状态层，读不到即显式未知），状态层才是权威。后续波次（W2 权威拉取）落地种子化
+   * 拉取路径后可按需从 SessionSummary 删字段。
    */
   function applySnapshot(id: string, snapshot: SessionViewSnapshot): void
   function applySnapshot(listSnapshot: { groups: SessionGroup[] }): void
@@ -181,35 +185,20 @@ export function createSessionStore() {
   }
 
   /**
-   * D1b 合并：view 快照字段整字段覆盖到 SessionSummary 条目——显式提供的字段（值 !==
-   * undefined）直接覆盖，含显式空值（owner 声明空即空，''/0 与真值一视同仁）；undefined =
-   * 快照未涉及，保留现值。SessionViewSnapshot 的 view-ready 字段中 session store 只托管
-   * 列表展示字段（label/status/modelId/thinkingLevel/tokenCount）；
-   * pendingMessageCount/commands 等归各自消费 store（W15+ 收敛对象），不在本 store 落盘
-   *（usagePercent/inputTokens/contextLimit 已随 D1 协议收敛从 SessionViewSnapshot 删除）。
+   * D1b 合并（[W1] 描述字段子集）：view 快照字段整字段覆盖到 SessionSummary 条目——显式提供
+   * 的字段（值 !== undefined）直接覆盖，含显式空值（owner 声明空即空）；undefined = 快照未
+   * 涉及，保留现值。
    *
-   * [W15 检查] 磁盘占位值检查（#2 空串覆盖事故最后防线）：仅 source === 'scan' 的快照生效——
-   * 扫描读不出 modelId/tokenCount，其 ''/0 是占位值而非权威空值，target 已有非空真值时跳过
-   * 覆盖。与 owner 快照空值语义**按来源分流、不混用**（D1b 两条规则并存）：owner 快照
-   * （缺省来源）的显式空值是权威声明（如 sessionName 空 = 未命名，wire 形态 label:''），
-   * 必须整字段覆盖（TC-4b 锁定）；检查只拦扫描占位，不拦 owner 权威空。历史踩坑：setGroups
-   * 全量覆盖曾把真值抹成空串（见 applySnapshot 注释），本检查是该事故路径的结构性收敛。
+   * [W1 会话架构四层分离] 只写**描述字段**：label / status（owner 权威；projectId 不在
+   * SessionViewSnapshot 内，走整表快照 / updateProjectId）。
+   * modelId / thinkingLevel / tokenCount 三个运行时状态字段的写入分支已删除——它们属于状态层
+   * （domain/session/live-state），列表成员资格不得成为状态写入判据（设计 §1.3 根因一）。
+   * 同批删除 W15「扫描占位值检查」的状态字段部分（检查对象已不在本函数范围）。
    */
   function mergeViewSnapshot(target: SessionSummary, snapshot: SessionViewSnapshot | undefined): void {
     if (!snapshot) return
-    // W15：来源分流——仅扫描来源快照的占位空值触发检查（判定不依赖魔法值，靠显式标记）。
-    const isScan = snapshot.source === 'scan'
     if (snapshot.label !== undefined) target.label = snapshot.label
     if (snapshot.status !== undefined) target.status = snapshot.status
-    // 检查条件 = 快照值是占位空 && target 有非空真值可保；target 本身也是占位（同为 ''/0）时
-    // 覆盖与否等值，走覆盖分支保持行为单一。
-    if (snapshot.modelId !== undefined && !(isScan && snapshot.modelId === '' && target.modelId !== '')) {
-      target.modelId = snapshot.modelId
-    }
-    if (snapshot.thinkingLevel !== undefined) target.thinkingLevel = snapshot.thinkingLevel
-    if (snapshot.tokenCount !== undefined && !(isScan && snapshot.tokenCount === 0 && target.tokenCount !== 0)) {
-      target.tokenCount = snapshot.tokenCount
-    }
   }
 
   /** 更新 session 归属 project（乐观更新，setProject RPC 后调用；广播全量覆盖幂等）。 */

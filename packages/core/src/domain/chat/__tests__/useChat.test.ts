@@ -24,6 +24,7 @@ import { effectScope, nextTick, toRaw } from 'vue'
 import { segmentsToText, textToSegments } from '@taiji/shared'
 import type { Message, Segment, ServerMessage } from '@taiji/shared'
 import { createChatStore } from '../store'
+import { createSessionLiveState } from '@taiji/core/domain/session'
 import { createUseChat, resetChatModuleStateForTest } from '../useChat'
 import { getExecutingBash as getExecutingBashForTest } from '../bash-effects'
 import { provideDevMode, __resetDevModeForTesting } from '../../../platform/dev-mode'
@@ -53,6 +54,7 @@ interface Fixture {
   }
   chatStore: ReturnType<typeof createChatStore>
   sessionStore: { applySnapshot: ReturnType<typeof vi.fn>; revive: ReturnType<typeof vi.fn> }
+  liveState: ReturnType<typeof createSessionLiveState>
   toast: { error: ReturnType<typeof vi.fn>; warning: ReturnType<typeof vi.fn> }
   writeSegments: ReturnType<typeof vi.fn>
   restoreDraft: ReturnType<typeof vi.fn>
@@ -89,6 +91,8 @@ function makeFixture(): Fixture {
     cancelDelivery: vi.fn().mockResolvedValue({ clientUuid: 'u-x', cancelled: false }),
   }
   const sessionStore = { applySnapshot: vi.fn(), revive: vi.fn() }
+  // [W1] 状态层：session.* 状态帧的落点（真实 core factory，非 mock）
+  const liveState = createSessionLiveState()
   const toast = { error: vi.fn(), warning: vi.fn() }
   const restoreDraft = vi.fn()
   const deps: UseChatDeps = {
@@ -96,6 +100,7 @@ function makeFixture(): Fixture {
     writeSegments: vi.fn().mockResolvedValue(undefined),
     getChatStore: () => chatStore,
     getSessionStore: () => sessionStore,
+    getLiveStateStore: () => liveState,
     toast,
     restoreDraft,
     t: (k: string, p?: Record<string, unknown>) => (p ? `${k}:${JSON.stringify(p)}` : k),
@@ -106,6 +111,7 @@ function makeFixture(): Fixture {
     chatApi,
     chatStore,
     sessionStore,
+    liveState,
     toast,
     restoreDraft,
     writeSegments: deps.writeSegments as unknown as ReturnType<typeof vi.fn>,
@@ -226,14 +232,13 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
-  it('session.state_changed → sessionStore.applySnapshot(modelId/thinkingLevel)', async () => {
+  it('session.state_changed → 状态层 applyLiveState(modelId/thinkingLevel)（W1：不经导航列表）', async () => {
     const f = makeFixture()
     await f.useChat.send('s7', textToSegments('hi'))
     f.emit('s7', msg('s7', 'session.state_changed', { modelId: 'gpt-4', thinkingLevel: 'high' }))
-    expect(f.sessionStore.applySnapshot).toHaveBeenCalledWith('s7', {
-      modelId: 'gpt-4',
-      thinkingLevel: 'high',
-    })
+    expect(f.liveState.liveStateOf('s7')).toEqual({ modelId: 'gpt-4', thinkingLevel: 'high' })
+    // 导航列表不承载状态字段写入
+    expect(f.sessionStore.applySnapshot).not.toHaveBeenCalled()
     f.dispose()
   })
 

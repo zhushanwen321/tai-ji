@@ -34,6 +34,7 @@ import { resetChatModuleStateForTest as resetChatModuleState } from '@taiji/core
 import { chat as chatApi, session as sessionApi } from '@/api'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
+import { useSessionLiveStateStore } from '@/stores/session-live-state'
 import { useToast } from '@/composables/useToast'
 import { composerInjectionStore } from '@/composables/panel/composer-injection-store'
 import i18n from '@/i18n'
@@ -85,6 +86,8 @@ const tFn = i18n.global.t as (key: string, params?: Record<string, unknown>) => 
 function rendererSubDeps(): EnsureStreamSubDeps {
   return {
     chatApi: chatApiPort,
+    // [W1 会话架构四层分离] session.* 状态帧落状态层（按会话 id 寄存，无列表命中判据）
+    liveState: useSessionLiveStateStore(),
     toast: useToast(),
     t: tFn,
   }
@@ -125,6 +128,7 @@ export function useChat() {
     // 模式的固有后果（pinia 类型系统局限，非运行时风险）。
     getChatStore: () => useChatStore() as unknown as ChatStoreInstance,
     getSessionStore: () => useSessionStore(),
+    getLiveStateStore: () => useSessionLiveStateStore(),
     toast: useToast(),
     t: tFn,
   } satisfies UseChatDeps)

@@ -157,6 +157,13 @@ export interface SessionCleanupHooks {
    * 承担，本 hook 只做 UI 关闭编排。
    */
   closeWorkflowOverlay?(sid: string): void
+  /**
+   * [W1 会话架构四层分离] 状态层条目释放（可选 hook：**会话删除**是唯一清退时机——设计
+   * §2.4 I3「状态条目生命周期独立于列表，只有会话删除才移除」）。
+   * 只挂 deleteSession / deleteFolder（真删除）；**归档不挂**（归档是前端退场，恢复后状态
+   * 仍在——设计 §7 验收项 3 明确归档后已缓存状态保留），也不随列表刷新/过滤触发。
+   */
+  clearLiveState?(sid: string): void
 }
 
 /**
@@ -526,6 +533,9 @@ export function createUseSession(deps: UseSessionDeps) {
     await api.remove(id)
     const wasActive = store.getActiveId() === id
     cleanupSessionState(id)
+    // [W1] 状态层条目显式清退（不随列表差集推断，设计 §3.3「删除会话：显式清除」；
+    // 归档不走此处——归档后恢复会话时已缓存状态应仍在，见 SessionCleanupHooks.clearLiveState）
+    hooks.clearLiveState?.(id)
     if (wasActive) {
       const next = store.getList()[0]
       if (next) {
@@ -590,6 +600,7 @@ export function createUseSession(deps: UseSessionDeps) {
     const res = await api.removeByCwd(cwd)
     for (const sid of res.deleted) {
       cleanupSessionState(sid)
+      hooks.clearLiveState?.(sid) // [W1] 批量删除同属真删除：状态条目显式清退
     }
     if (wasActiveInFolder) {
       const next = store.getList()[0]

@@ -14,6 +14,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope } from 'vue'
 import type { ServerMessage } from '@taiji/shared'
+import { createSessionLiveState } from '@taiji/core/domain/session'
 import { createChatStore } from '../store'
 import {
   ensureStreamSubscription,
@@ -68,6 +69,8 @@ function makeFixture(): Fixture {
     // [u4b 收窄] EnsureStreamSubDeps.chatApi = Pick<ChatApiPort, 'streamSubscribe'>，
     // 只注入消费方（excess property check 不放行多余键）
     chatApi: { streamSubscribe },
+    // [W1] 状态层（本用例不触达 session.* 状态帧，注入真实 factory 保持契约形状）
+    liveState: createSessionLiveState(),
     // [session-dead 第三环] warning：defer 重投熔断提示的注入点（本用例不触发）
     toast: { error: vi.fn(), warning: vi.fn() },
     t: (k: string) => k,
