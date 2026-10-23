@@ -295,13 +295,22 @@ describe("RemoteEngine run 帧映射", () => {
     await bare.cleanup();
   });
 
-  it("[B-U-1] ctx.sessionRootId → client.ensureConnected(根 id)（engine_open 归属键权威源贯通）", async () => {
+  it("[B-U-1] ctx.sessionRootId → client.ensureConnected({rootSessionId})（engine_open 归属键权威源贯通）+ [S-10] recordId = resume.recordId ?? taskId", async () => {
     const fixture = makeEngine();
     const spy = vi.spyOn(fixture.client, "ensureConnected");
     const { ctx } = makeCtx({ sessionRootId: "root-sess-connect" });
     await fixture.engine.run({ prompt: "p" }, ctx);
-    expect(spy).toHaveBeenCalledWith("root-sess-connect");
+    expect(spy).toHaveBeenCalledWith({ rootSessionId: "root-sess-connect", recordId: ctx.taskId });
     await fixture.cleanup();
+
+    // 续聊轮：record 锚沿用原 record（resume.recordId 优先于新 taskId）
+    const resumed = makeEngine();
+    const resumedSpy = vi.spyOn(resumed.client, "ensureConnected");
+    const { ctx: ctxResume } = makeCtx({ sessionRootId: "root-sess-connect" });
+    ctxResume.resume = { recordId: "rec-original" };
+    await resumed.engine.run({ prompt: "p2" }, ctxResume);
+    expect(resumedSpy).toHaveBeenCalledWith({ rootSessionId: "root-sess-connect", recordId: "rec-original" });
+    await resumed.cleanup();
   });
 
   it("[Option C] wire ctx.sessionDir = getSubagentSessionDir(env 同源推导)；ctx 显式注入优先", async () => {

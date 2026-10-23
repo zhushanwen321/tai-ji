@@ -48,8 +48,14 @@ vi.mock('@taiji/core/domain/drawer', async (importOriginal) => {
   }
 })
 
+// 面板聚焦 sid（可变桩——空串早退用例置 null；getter 访问时解包，贴近真实 store 语义）
+const panelFocusedSid = ref<string | null>('main-1')
 vi.mock('@/stores/panel', () => ({
-  usePanelStore: () => ({ focusedSessionId: ref('main-1') }),
+  usePanelStore: () => ({
+    get focusedSessionId() {
+      return panelFocusedSid.value
+    },
+  }),
 }))
 
 // chat store readers 面（M3 D6 降级位读口）：本文件不测降级，恒 false 桩。
@@ -64,6 +70,24 @@ const recordsFixture = reactive([
   { subagentId: 'sa-3', sessionFile: '/3.jsonl', agent: 'reviewer', slug: 'rev', task: 't3', status: 'running', model: 'p/c', engine: undefined },
 ])
 const drawerTabsFixture = reactive({ tabs: [] as string[], active: null as string | null })
+// tab 方法桩 = 模级共享实例（useSubagentStore() 每次调用返回新对象，fn 内联在工厂里
+// 会逐调用新建、调用计数不可断言——空串早退用例需跨调用断言 store 编排零触发）。
+const openDrawerTabMock = vi.fn((_sid: string, vid: string) => {
+  if (!drawerTabsFixture.tabs.includes(vid)) drawerTabsFixture.tabs.push(vid)
+  drawerTabsFixture.active = vid
+})
+const activateDrawerTabMock = vi.fn((_sid: string, vid: string) => {
+  if (drawerTabsFixture.tabs.includes(vid)) drawerTabsFixture.active = vid
+})
+const closeDrawerTabMock = vi.fn((_sid: string, vid: string) => {
+  const idx = drawerTabsFixture.tabs.indexOf(vid)
+  if (idx === -1) return drawerTabsFixture.active
+  drawerTabsFixture.tabs.splice(idx, 1)
+  if (drawerTabsFixture.active === vid) {
+    drawerTabsFixture.active = drawerTabsFixture.tabs[Math.min(idx, drawerTabsFixture.tabs.length - 1)] ?? null
+  }
+  return drawerTabsFixture.active
+})
 vi.mock('@/stores/subagent', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/stores/subagent')>()
   return {
@@ -72,22 +96,9 @@ vi.mock('@/stores/subagent', async (importOriginal) => {
       getRecordsBySession: (_sid: string) => recordsFixture,
       isStreamingSubagent: () => false,
       drawerTabsOf: () => drawerTabsFixture,
-      openDrawerTab: vi.fn((_sid: string, vid: string) => {
-        if (!drawerTabsFixture.tabs.includes(vid)) drawerTabsFixture.tabs.push(vid)
-        drawerTabsFixture.active = vid
-      }),
-      activateDrawerTab: vi.fn((_sid: string, vid: string) => {
-        if (drawerTabsFixture.tabs.includes(vid)) drawerTabsFixture.active = vid
-      }),
-      closeDrawerTab: vi.fn((_sid: string, vid: string) => {
-        const idx = drawerTabsFixture.tabs.indexOf(vid)
-        if (idx === -1) return drawerTabsFixture.active
-        drawerTabsFixture.tabs.splice(idx, 1)
-        if (drawerTabsFixture.active === vid) {
-          drawerTabsFixture.active = drawerTabsFixture.tabs[Math.min(idx, drawerTabsFixture.tabs.length - 1)] ?? null
-        }
-        return drawerTabsFixture.active
-      }),
+      openDrawerTab: openDrawerTabMock,
+      activateDrawerTab: activateDrawerTabMock,
+      closeDrawerTab: closeDrawerTabMock,
     }),
   }
 })
@@ -129,7 +140,7 @@ vi.mock('vue-i18n', () => ({
 
 import SubagentTab from '../SubagentTab.vue'
 import { useSubagentStore } from '@/stores/subagent'
-import { closeDrawerIfTabsEmpty } from '@taiji/core/domain/drawer'
+import { closeDrawerIfTabsEmpty, openSubagent, clearSubagentSelection } from '@taiji/core/domain/drawer'
 
 /** store 通道关闭（不经编排层——验证空态渲染路径；测试内调用——需 active pinia）。 */
 function closeViaStore(sessionId: string, vid: string): void {
@@ -154,6 +165,9 @@ async function select(vid: string): Promise<void> {
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // 共享桩计数清零（跨用例调用计数断言前提；只清记录不动实现）
+  vi.clearAllMocks()
+  panelFocusedSid.value = 'main-1'
   drawerTabsFixture.tabs = []
   drawerTabsFixture.active = null
   drawerState.selectedSubagentId.value = null
@@ -269,5 +283,51 @@ describe('SubagentTab 二级 tab 编排（subagent-detail-tabs）', () => {
     await select('subagent:main-1:sa-1')
     expect([...drawerTabsFixture.tabs]).toEqual(['subagent:main-1:sa-2', 'subagent:main-1:sa-1'])
     expect(drawerTabsFixture.active).toBe('subagent:main-1:sa-1')
+  })
+
+  it('空串早退（S-5）：focusedSessionId 为空串时 activate/close 不触 store 编排与 core 同步', async () => {
+    const { useSubagentDrawerTabs } = await import('@/composables/panel/useSubagentDrawerTabs')
+    const stopStream = vi.fn()
+    const tabsApi = useSubagentDrawerTabs({
+      selectedSubagentId: drawerState.selectedSubagentId,
+      labelOf: (vid) => vid,
+      stopStream,
+    })
+    // 前置：正常聚焦下开两个 tab（active = sa-2），随后失焦（focusedSessionId → null
+    // → computed '' ）——早退判据的触发形态
+    await select('subagent:main-1:sa-1')
+    await select('subagent:main-1:sa-2')
+    panelFocusedSid.value = null
+    tabsApi.activate('subagent:main-1:sa-1')
+    tabsApi.close('subagent:main-1:sa-2')
+    await nextTick()
+    await nextTick()
+    // store 编排零触发：'' 键不建退化分区（clearSession 按真实 sid 释放、永不回收）
+    expect(activateDrawerTabMock).not.toHaveBeenCalled()
+    expect(closeDrawerTabMock).not.toHaveBeenCalled()
+    expect(drawerTabsFixture.tabs).toEqual(['subagent:main-1:sa-1', 'subagent:main-1:sa-2'])
+    expect(drawerTabsFixture.active).toBe('subagent:main-1:sa-2')
+    // core 选中同步（openSubagent）与空态收敛编排（清选中/停流/关抽屉）同样被早退挡住
+    expect(openSubagent).not.toHaveBeenCalled()
+    expect(clearSubagentSelection).not.toHaveBeenCalled()
+    expect(stopStream).not.toHaveBeenCalled()
+    expect(closeDrawerIfTabsEmpty).not.toHaveBeenCalled()
+  })
+
+  it('关空定向清除（N-1）：close 至空态时 clearSubagentSelection 以 focused sid 调用（键与 tab 分区同源）', async () => {
+    const { useSubagentDrawerTabs } = await import('@/composables/panel/useSubagentDrawerTabs')
+    const tabsApi = useSubagentDrawerTabs({
+      selectedSubagentId: drawerState.selectedSubagentId,
+      labelOf: (vid) => vid,
+      stopStream: vi.fn(),
+    })
+    await select('subagent:main-1:sa-1')
+    tabsApi.close('subagent:main-1:sa-1')
+    await nextTick()
+    // 定向清除：传 focusedSid（显式分区键），不再走「清除 = current 绑定分区」的
+    // 隐式 current == focused 不变量
+    expect(clearSubagentSelection).toHaveBeenCalledTimes(1)
+    expect(clearSubagentSelection).toHaveBeenCalledWith('main-1')
+    expect(drawerState.selectedSubagentId.value).toBeNull()
   })
 })
