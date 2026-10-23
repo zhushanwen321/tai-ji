@@ -44,7 +44,7 @@ export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
  *  执行的是一次性 workflow run（record 快照为 workflow-record entry），故与 'workflow'
  *  同集合——单收录是零 runtime 改动的唯一全对解（D1 裁决：进 SUBAGENT 集合会误触发
  *  subagent-record 失效分支，双收录则两分支双打）。旧名 'subagents' 保留（历史会话
- *  toolCall 渲染依赖——2026-10-22 至改名日落盘的会话按旧名渲染）。 */
+ *  toolCall 渲染依赖——工具出生（2026-09-16）至改名日落盘的会话按旧名渲染）。 */
 export const WORKFLOW_TOOL_NAMES: ReadonlySet<string> = new Set([
   'workflow',
   'subagents',
