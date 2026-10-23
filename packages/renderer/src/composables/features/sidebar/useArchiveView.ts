@@ -215,11 +215,10 @@ async function purgeArchivesBatch(entries: ArchiveSummary[]): Promise<void> {
   } finally {
     store.batchPurging = false
   }
-  if (
-    store.selected !== null &&
-    !failedSessionIds.has(store.selected.sessionId) &&
-    entries.some((e) => e.sessionId === store.selected?.sessionId)
-  ) {
+  // 局部快照一次读取：闭包内 TS 无法跨箭头函数保持 store.selected 的非空收窄，
+  // 提取常量后判定与成员匹配共用同一值（同步代码段内选中态不会变化）
+  const selectedId = store.selected?.sessionId ?? null
+  if (selectedId !== null && !failedSessionIds.has(selectedId) && entries.some((e) => e.sessionId === selectedId)) {
     store.selectArchive(null)
     useNavigationStore().push({ view: 'chat' })
   }

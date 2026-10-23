@@ -86,11 +86,7 @@
       >
         <Check v-if="batchConfirming" class="size-[12px]" />
         <Trash2 v-else class="size-[12px]" />
-        <span>{{ batchPurging
-          ? t('archive.entry.batchPurging')
-          : batchConfirming
-            ? t('archive.entry.batchPurgeConfirm', { count: visibleArchives.length })
-            : t('archive.entry.batchPurgeLabel', { count: visibleArchives.length }) }}</span>
+        <span>{{ batchPurgeLabel }}</span>
       </Button>
     </div>
 
@@ -304,6 +300,13 @@ const totalDiskSizeLabel = computed(() =>
 
 /** 批量清理钮可见性：筛选生效（非「全」）且有可见条目（空档无操作对象，不渲染）。 */
 const batchPurgeVisible = computed(() => filterKey.value !== 'all' && visibleArchives.value.length > 0)
+
+/** 批量清理钮文案三态（优先级：在途「删除中…」> 确认「确认删除 N 项？」> 待发「N 项」）。 */
+const batchPurgeLabel = computed(() => {
+  if (props.batchPurging) return t('archive.entry.batchPurging')
+  if (batchConfirming.value) return t('archive.entry.batchPurgeConfirm', { count: visibleArchives.value.length })
+  return t('archive.entry.batchPurgeLabel', { count: visibleArchives.value.length })
+})
 
 // 确认态随钮卸载复位：后台归档域广播触发 refreshArchives 可让可见集空→非空翻转
 // （钮 v-if 卸载后带确认态重现），两段确认会退化为首击即执行不可恢复删除——
