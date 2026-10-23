@@ -210,7 +210,7 @@ function extractHistoryFileChanges(toolCalls: ToolCall[]): FileChange[] {
 // ── message entry 体 → Message（迁移自 convertSinglePiMessage）───────────────
 
 /** message entry 的 content 数组元素（宽形态，读取点运行时检查）。 */
-interface PiContentPart {
+export interface PiContentPart {
   type: string
   text?: string
   thinking?: string
@@ -223,7 +223,7 @@ interface PiContentPart {
 }
 
 /** content parts 归集产物（按 part kind 分派收集的中间态，构造 Message 用）。 */
-interface CollectedContent {
+export interface CollectedContent {
   /** text part 累加合并后的纯文本（多次 text part 拼接） */
   textContent: string
   thinking: ThinkingBlock[]
@@ -241,7 +241,7 @@ interface CollectedContent {
 }
 
 /** body.content 宽形态归一：数组原样透传，非数组包成单 text part（null → ''）。 */
-function normalizeContentParts(body: PiMessageBody): PiContentPart[] {
+export function normalizeContentParts(body: PiMessageBody): PiContentPart[] {
   return Array.isArray(body.content)
     ? (body.content as PiContentPart[])
     : [{ type: 'text', text: body.content != null ? String(body.content) : '' }]
@@ -293,8 +293,14 @@ function collectImagePart(part: PiContentPart, acc: CollectedContent): void {
   if (img.data !== '' || img.mimeType !== '') acc.imageParts.push(img)
 }
 
-/** 逐 part 分派收集（text/thinking/toolCall/image 四类，其余 kind 忽略）。 */
-function collectContentParts(
+/**
+ * 逐 part 分派收集（text/thinking/toolCall/image 四类，其余 kind 忽略）。
+ *
+ * [chat-flow-consistency D3] 导出共享给 live 定稿重建路径（effects/registry message_end
+ * assistant 分支）——本函数是 reload 侧权威转换，live 重建复用同一实现使「live ≡ reload」
+ * 构造性保持（两通路同一派生规则，无副本分叉）。
+ */
+export function collectContentParts(
   parts: PiContentPart[],
   baseId: string,
   body: PiMessageBody,
@@ -330,8 +336,12 @@ function fileChangesField(body: PiMessageBody, toolCalls: ToolCall[]): { fileCha
   return fc.length > 0 ? { fileChanges: fc } : {}
 }
 
-/** Extract usage from pi assistant messages (input/output token counts)。 */
-function usageField(body: PiMessageBody): { usage?: { inputTokens: number; outputTokens: number } } {
+/**
+ * Extract usage from pi assistant messages (input/output token counts)。
+ * [chat-flow-consistency D3] 导出共享给 live 定稿重建路径（与 collectContentParts 同理，
+ * live 重建按载荷写入 usage 与 reload 同源同值）。
+ */
+export function usageField(body: PiMessageBody): { usage?: { inputTokens: number; outputTokens: number } } {
   if (body.role !== 'assistant') return {}
   const u = body.usage
   if (!isLooseRecord(u)) return {}

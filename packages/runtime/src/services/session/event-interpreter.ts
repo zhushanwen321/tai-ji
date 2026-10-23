@@ -759,6 +759,18 @@ export class EventInterpreter {
       case 'noop':
         return true
       case 'message':
+        // [chat-flow-consistency D3 定位升级] assistant 帧附加 messageId——必须在 send 之前
+        // 改写 payload（后写则帧已发出、前端收不到锚点）。翻译层同步附加：message 帧无 hook
+        // 延迟、捕获时机无竞态；currentMessageId = message_start 翻译产物（assistantTurnStart
+        // 的 a-uuid），与前端 live 气泡 id 同一 id 空间——前端定稿重建 / textFinalized 定位
+        // 升级为「id 锚定优先、位置兜底」。user/toolResult/custom 帧不带。
+        if (ev.message.type === 'message.message_end') {
+          const anchorPayload = ev.message.payload as { entry?: unknown; messageId?: string }
+          const anchorEntry = anchorPayload?.entry as { message?: { role?: unknown } } | undefined
+          if (anchorEntry?.message?.role === 'assistant' && this.currentMessageId !== undefined) {
+            anchorPayload.messageId = this.currentMessageId
+          }
+        }
         this.opts.send(ev.message)
         // pi1-disposition-chat-flow U4⑤（D7③ stdout 单一通路）：message_end 的 onPiEvent
         // 观测登记点——bridge 转发链退役后插件事件感知唯一通路 = 本 stdout 触发点族
@@ -991,6 +1003,11 @@ export class EventInterpreter {
   private async handleToolCallStart(ev: PiTranslatedEvent & { kind: 'tool-call-start' }): Promise<void> {
     const { toolCallId, toolName } = ev
     let input = ev.input
+    // [chat-flow-consistency C1] 锚点捕获前移：在任何 await 之前同步读 currentMessageId。
+    // hook 是异步的——迟到形态下（帧后置于下一回合 message_start）await 期间 turn-start
+    // 可能已把 currentMessageId 改写为新回合 id，await 后再读会把迟到帧错锚到新回合；
+    // 事件到达时刻的归属事实必须在此刻捕获（前端三级定位的 ② 级精确锚点依赖此保证）。
+    const messageIdAtEvent = this.currentMessageId
 
     let blocked = false
     if (this.opts.executeHooks) {
@@ -1036,7 +1053,7 @@ export class EventInterpreter {
     ev.entry.arguments = isPlainRecord(input) ? input : {}
     const contentIndex = this.toolCallContentIndex.get(toolCallId)
     if (contentIndex !== undefined) ev.entry.contentIndex = contentIndex
-    if (this.currentMessageId !== undefined) ev.entry.messageId = this.currentMessageId
+    if (messageIdAtEvent !== undefined) ev.entry.messageId = messageIdAtEvent
 
     this.opts.send({
       type: 'message.tool_call_start',

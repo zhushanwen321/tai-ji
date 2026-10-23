@@ -17,7 +17,6 @@
 import { shallowRef, type ShallowRef } from 'vue'
 import type { Message } from '@taiji/shared'
 import type { FinalizeReason } from './store-types'
-import { readUsage } from './readers'
 import { randomUuid } from '../../utils/random-uuid'
 
 /** messages ref 的结构类型（兼容 Vue Ref 与裸 { value } 结构）。 */
@@ -87,19 +86,25 @@ export function truncateMessagesFrom(
 }
 
 /**
- * W4 H4：历史去重合并到列表头部（模块级，从 chat.ts 移入控制行数）。
  * 终态消息 patch（message.complete 双通道单源，S4-A6 收敛）。
  *
  * 为什么在此导出：message.complete 的两条消费链——registry 的 streaming 收尾分支与
  * message.complete 追加分支——对同一气泡应用同一组终态字段
- * （status / usage / error / content 条件展开），此前靠注释「finalizeMessages 双通道同语义」
+ * （status / error / content 条件展开），此前靠注释「finalizeMessages 双通道同语义」
  * 人肉同步。本函数把该不变量结构化：任一分支的终态字段演化只需改这一处。
+ *
+ * [chat-flow-consistency D3 规则 5] usage / endedAt 覆盖已退役：定稿重建（registry
+ * message_end assistant 分支）按每条消息的 entry 载荷写入各自的 usage 与 endedAt，
+ * 逐条载荷回填是唯一承担——complete 若再把回合级 usage 覆盖到末位 assistant，turn 聚合
+ * （deriveTurnAggregates 逐条求和）会把末位双计。异常路径（断连/丢帧未重建）的收尾
+ * 时刻由 streaming-state-machine 的幂等兜底（endedAt 缺失时写 Date.now）承担，
+ * 本函数不再写入。
  *
  * 只做字段 patch，不含通道各自的命中检查（streaming 收尾 vs timeoutIds 打标实体）与
  * 外层检查留在调用方。
  */
 export interface TerminalMessagePatchOptions {
-  /** 末位 assistant 索引（usage 回填 / content 覆盖 / error 写入只作用于末位，turn 级聚合） */
+  /** 末位 assistant 索引（content 覆盖 / error 写入只作用于末位，turn 级聚合） */
   lastAssistantIdx: number
   /** stopReason === 'error'（终态取向 error vs complete） */
   isErrorStop: boolean
@@ -107,13 +112,6 @@ export interface TerminalMessagePatchOptions {
   errorMessage: string | undefined
   /** 权威最终 content（runtime 从 pi agent_end 提取；非空才覆盖客户端累积值） */
   finalContent: string | undefined
-  /** complete 原始 payload（usage 回填读值） */
-  payload: Record<string, unknown>
-  /**
-   * 收尾时刻（epoch ms，本轮产出结束）——只写末位 assistant 的 Message.endedAt。
-   * 时钟由调用方注入（本函数保持纯函数），缺省读取侧回退 timestamp（旧行为）。
-   */
-  endedAt: number
 }
 
 /**
@@ -151,24 +149,17 @@ export const REASON_FALLBACK_ERROR_TEXT: Record<ErrorFinalizeReason, string> = {
   stalled: '回复已中断（内容可能不完整）。正在恢复完整内容…',
 }
 
-/** 单条消息的终态 patch（纯函数；status/usage/error/content/endedAt 条件展开，语义见 {@link TerminalMessagePatchOptions}）。 */
+/** 单条消息的终态 patch（纯函数；status/error/content 条件展开，语义见 {@link TerminalMessagePatchOptions}）。 */
 export function terminalMessagePatch(m: Message, i: number, opts: TerminalMessagePatchOptions): Message {
-  const { lastAssistantIdx, isErrorStop, errorMessage, finalContent, payload, endedAt } = opts
-  // 仅最后一条 assistant 回填 usage + content（turn 级聚合，回填到非末 assistant 语义错位）
-  const usage = i === lastAssistantIdx ? readUsage(payload) : undefined
+  const { lastAssistantIdx, isErrorStop, errorMessage, finalContent } = opts
   const shouldOverrideContent = i === lastAssistantIdx && finalContent !== undefined && finalContent.length > 0
   return {
     ...m,
     status: isErrorStop ? 'error' : 'complete',
-    ...(usage ? { usage } : {}),
     // isErrorStop 时 error 字段必非空（追加形态不变量）：errorMessage 缺失/空串按
     // reason='error' 兜底（terminalMessagePatch 只有 isErrorStop 布尔，reason 语义恒 'error'）
     ...(i === lastAssistantIdx && isErrorStop ? { error: errorMessage || REASON_FALLBACK_ERROR_TEXT.error } : {}),
     ...(shouldOverrideContent ? { content: finalContent } : {}),
-    // 产出结束时刻：只标末位 assistant（turn 级聚合的时间轴右端；中间段真实结束时刻
-    // live 不可知，保持缺省由消费侧回退 timestamp——reload 侧由 entry 时间戳补齐）。
-    // 幂等：已有值时不被后续 patch 覆盖。
-    ...(i === lastAssistantIdx ? { endedAt: m.endedAt ?? endedAt } : {}),
   }
 }
 
