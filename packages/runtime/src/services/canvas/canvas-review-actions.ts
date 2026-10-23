@@ -18,11 +18,14 @@ import { edgeOf, eventData, eventOf, fail, isTrunkEdge, truncate, type CanvasDom
 export const DEFAULT_REVIEW_MAX_ROUNDS = 5
 
 /** 轮次完成判据（一轮 = 一循环：发起 → reviewer 报告写回 → 处置）：当前轮已有报告
- * 条目 = 已完成。尚无条目 = 本轮未完成——再发起是同一轮的重发（GUI 双跳的第二跳：
- * user 发起 → 回推 → agent run 再发起），不推进轮次、不消耗轮次预算（maxRounds 按
- * 完成的审查循环计数——设计 §3.1:173 GUI 链路一次循环计一轮，R1 全面审语义由此保持）。 */
+ * 写回 = 已完成——写回事实（lastRunRound）覆盖零发现轮（空 entries / 条目全畸形被
+ * 丢弃也是审查结论，条目存在性判不了完成）；条目存在判据保留覆盖旧事件流（无
+ * lastRunRound 字段的历史数据重放）。尚无写回 = 本轮未完成——再发起是同一轮的重发
+ * （GUI 双跳的第二跳：user 发起 → 回推 → agent run 再发起），不推进轮次、不消耗
+ * 轮次预算（maxRounds 按完成的审查循环计数——设计 §3.1:173 GUI 链路一次循环计一轮，
+ * R1 全面审语义由此保持）。 */
 function roundHasReport(review: NonNullable<CanvasDomainState['review']>): boolean {
-  return review.entries.some((e) => e.round === review.round)
+  return review.lastRunRound === review.round || review.entries.some((e) => e.round === review.round)
 }
 
 export function applyReviewRequest(
@@ -99,6 +102,9 @@ export function applyReviewAppend(
   validateEntryIds(draft, params)
   validateSupportRatings(draft, params.entries)
   upsertReviewEntries(draft, params)
+  // 「本轮 run 已完成写回」的事实字段（零发现轮 = 空 entries 也落）：置位在聚合上、
+  // 事实随 review-append 主事件（data = params）落盘——重放同分支再置位，直写 ≡ 重放。
+  draft.review.lastRunRound = params.round
   draft.updatedAt = at
   events.push(eventOf('review-append', actor, at, eventData({ ...params })))
   return `审查报告 R${params.round} 写回 ${params.entries.length} 条条目`

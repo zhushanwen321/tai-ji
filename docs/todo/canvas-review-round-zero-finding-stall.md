@@ -1,6 +1,6 @@
 # 画布审查循环零发现轮永不完成（轮次推进与 max-rounds 停回保护失灵）
 
-状态：未解决（2026-10-16 dev-merge branch-review 第 3 轮登记，dmg-r3-1，minor）
+状态：已解决（2026-10-23：`ReviewReport` 增 `lastRunRound` 事实字段，随 review-append 主事件落盘（直写 ≡ 重放）；`roundHasReport` 据此对零发现轮成立；扩展侧 `runReviewRound` 零发现（空 entries / 全 dropped）也写回。测试锁定：runtime `canvas-review-loop.test.ts` 零发现轮三用例 + extension `review.test.ts` 全 dropped 用例）
 
 ## 现状
 

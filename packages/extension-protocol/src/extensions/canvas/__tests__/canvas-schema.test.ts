@@ -123,6 +123,7 @@ describe('U1 schema 往返：CanvasState 全量快照', () => {
       status: 'max-rounds',
       round: 3,
       maxRounds: 3,
+      lastRunRound: 3,
       entries: [
         {
           id: 're1',

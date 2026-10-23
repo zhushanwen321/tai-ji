@@ -1,6 +1,6 @@
 # canvas-service.ts 直用 node:fs/node:path 未登记 runtime-layering 基线债清单
 
-状态：未解决（2026-10-16 dev-merge branch-review 第 3 轮登记，dmg-r3-2，minor）
+状态：已解决（2026-10-23：runtime-layering.md §3 ④ 基线债清单已补 `canvas/canvas-service.ts` 条目——fs 使用点按实装逐项登记（events.jsonl appendFileSync 与重放读侧 / canvas.json atomicWrite 与读侧 / exports writeFileSync / 启动扫描 readdirSync / 画布与 exports 目录 mkdirSync / 碰撞预检 existsSync），gen-stats-store 同族存储落盘形态，随 ports 收编统一迁移）
 
 ## 现状
 

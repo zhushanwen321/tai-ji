@@ -251,8 +251,9 @@ describe("runReviewRound（编排主体）", () => {
     });
     expect(outcome.round).toBe(1);
     expect(capturedTask).toContain("R1 全面审查");
-    // 全 clean 轮：零条目不写回（append 不被调用）
-    expect(append.calls).toHaveLength(0);
+    // 零发现轮也写回（空 entries 的 review-append）：写回本身是「本轮 run 已完成」的
+    // 落盘事实（runtime lastRunRound），缺它轮次永不推进、maxRounds 预算不消耗
+    expect(append.calls).toEqual([{ canvasId: "c1", round: 1, entries: [] }]);
   });
 
   it("R2 run（runtime 已推进 round=2）→ 报告标 R2，scope 收窄 + 上轮处置表进 task", async () => {
@@ -281,7 +282,30 @@ describe("runReviewRound（编排主体）", () => {
     expect(capturedTask).toContain("R2 复审");
     expect(capturedTask).toContain("只审处置表");
     expect(capturedTask).toContain("[rv-1]");
-    expect(append.calls).toHaveLength(0);
+    expect(append.calls).toEqual([{ canvasId: "c1", round: 2, entries: [] }]);
+  });
+
+  it("全 dropped（reviewer 条目全畸形被丢弃）→ 同样以空 entries 写回（零发现轮 = 完成轮，事实照常落盘）", async () => {
+    const append = makeAppend();
+    const dispatch: ReviewerDispatchPort = {
+      executeAndAwait: async () => ({
+        parsedOutput: {
+          entries: [
+            { id: "rv-x", dimension: "style", severity: "must-fix", targetId: "n1", note: "词表外维度" },
+            "not-an-object",
+          ],
+        },
+      }),
+    };
+    const outcome = await runReviewRound({
+      state: makeState(),
+      dispatch,
+      appendWriteBack: append.append,
+    });
+    expect(outcome.appended).toBe(0);
+    expect(outcome.dropped).toBe(2);
+    expect(outcome.summary).toContain("写回 0 条");
+    expect(append.calls).toEqual([{ canvasId: "c1", round: 1, entries: [] }]);
   });
 
   it("reviewer 执行失败（error 信封）→ 显式 throw（review_dispatch_failed + 恢复动作）", async () => {

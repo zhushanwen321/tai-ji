@@ -125,8 +125,9 @@ export function isCanvasStateReply(v: unknown): v is CanvasState {
 }
 
 /** 本轮审查轮次：run 链路的 read 发生在 review-request 之后，review.round 已是本轮
- * 轮次（runtime 侧一轮 = 一循环：当前轮无报告条目时再发起不推进轮次——GUI 双跳的
- * 第二跳与重发都不虚增轮次）；从未审查（read 无 review 聚合）= R1。 */
+ * 轮次（runtime 侧一轮 = 一循环：当前轮无报告写回时再发起不推进轮次——GUI 双跳的
+ * 第二跳与重发都不虚增轮次；零发现轮的写回也算完成）；从未审查（read 无 review
+ * 聚合）= R1。 */
 export function currentReviewRound(state: CanvasState): number {
   return state.review?.round ?? 1;
 }
@@ -218,9 +219,10 @@ export async function runReviewRound(input: {
     );
   }
   const { entries, dropped } = collectValidEntries(input.state.canvasId, round, result.parsedOutput ?? result.content);
-  if (entries.length > 0) {
-    await input.appendWriteBack({ canvasId: input.state.canvasId, round, entries });
-  }
+  // 零发现轮也写回（空 entries 的 review-append）：写回本身就是「本轮 run 已完成」的
+  // 落盘事实（runtime 侧落 review.lastRunRound），跳过会使零发现轮永不推进轮次、
+  // maxRounds 预算永不消耗（max-rounds 停回保护对该形态失灵）。
+  await input.appendWriteBack({ canvasId: input.state.canvasId, round, entries });
   const parsedSummary = recordOf(result.parsedOutput)?.summary;
   const summary =
     (typeof parsedSummary === "string" ? parsedSummary : "") ||
