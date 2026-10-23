@@ -134,7 +134,7 @@ jobs:
       # npm 产物契约 gate 已前移为独立 fail-fast job（npm-contract-gate），此处不再重复。
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-artifacts
           merge-multiple: true
