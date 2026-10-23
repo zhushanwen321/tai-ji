@@ -29,10 +29,12 @@ import { SUBAGENT_DOT_RULES, subagentDotClass } from '@/lib/subagent-bucket'
 import { WORKFLOW_TONE_BY_OUTCOME, workflowStatusLabel, workflowToneClass } from '@/components/panel/tray/tray-tone'
 
 /**
- * WorkflowRunOutcome 词表快照（与 shared/src/workflow.ts:92 四值联合同步的本地锚）：
+ * WorkflowRunOutcome 词表快照（与 shared/src/workflow.ts 词表联合同步的本地锚）：
  * 词表真扩值时 satisfies 编译红先行；此处快照同步扩值后与映射键域比对即恢复双向覆盖。
+ * [subagent-observability §3.3.8] partially_succeeded 第五值（u-foundation 落词表，
+ * u8 同批同步本快照——u4 场景 2 GUI 呈现核对项承接独立档视觉定稿）。
  */
-const OUTCOME_SNAPSHOT = ['done', 'failed', 'cancelled', 'time_limited'] as const satisfies readonly WorkflowRunOutcome[]
+const OUTCOME_SNAPSHOT = ['done', 'failed', 'cancelled', 'time_limited', 'partially_succeeded'] as const satisfies readonly WorkflowRunOutcome[]
 
 const sorted = (values: readonly string[]): string[] => [...values].sort()
 
@@ -64,11 +66,12 @@ describe('WORKFLOW_TONE_BY_OUTCOME 全集锁（[W2 D8] workflow tone 三分）',
     expect(sorted(Object.keys(WORKFLOW_TONE_BY_OUTCOME))).toEqual(sorted(OUTCOME_SNAPSHOT))
   })
 
-  it('四值三分行为（[D2] 后）：done 绿 / failed 红 / cancelled 与 time_limited 同落中性暗', () => {
+  it('四值三分行为（[D2] 后）：done 绿 / failed 红 / cancelled 与 time_limited 同落中性暗；[subagent-observability §3.3.8] partially_succeeded 独立档初值 = 中性暗（视觉定稿归 u4）', () => {
     expect(WORKFLOW_TONE_BY_OUTCOME.done).toBe('bg-success')
     expect(WORKFLOW_TONE_BY_OUTCOME.failed).toBe('bg-danger')
     expect(WORKFLOW_TONE_BY_OUTCOME.cancelled).toBe('bg-neutral-dim opacity-50')
     expect(WORKFLOW_TONE_BY_OUTCOME.time_limited).toBe('bg-neutral-dim opacity-50')
+    expect(WORKFLOW_TONE_BY_OUTCOME.partially_succeeded).toBe('bg-neutral-dim opacity-50')
   })
 
   it('workflowToneClass：done 读 outcome 四值驱动，running 恒 accent（不读 reason）；[D2] interrupted 暂停态走中性暗专属条目', () => {
@@ -92,16 +95,17 @@ describe('WORKFLOW_TONE_BY_OUTCOME 全集锁（[W2 D8] workflow tone 三分）',
 })
 
 describe('中文显示名词表单源（[W2 D8] WORKFLOW_RUN_OUTCOME_LABELS 消费接线）', () => {
-  it('逐值显示名断言（[D2] 后：成功/失败/已取消/已超时——shared 常量为唯一权威，消费方零翻译）', () => {
+  it('逐值显示名断言（[D2] 后：成功/失败/已取消/已超时/部分成功——shared 常量为唯一权威，消费方零翻译）', () => {
     expect(WORKFLOW_RUN_OUTCOME_LABELS.done).toBe('成功')
     expect(WORKFLOW_RUN_OUTCOME_LABELS.failed).toBe('失败')
     expect(WORKFLOW_RUN_OUTCOME_LABELS.cancelled).toBe('已取消')
     expect(WORKFLOW_RUN_OUTCOME_LABELS.time_limited).toBe('已超时')
+    expect(WORKFLOW_RUN_OUTCOME_LABELS.partially_succeeded).toBe('部分成功')
   })
 
-  it('「已取消」（主动）与「已超时」（预算超时）禁混用锚：四值显示名两两互异', () => {
+  it('「已取消」（主动）与「已超时」（预算超时）禁混用锚：显示名两两互异（[subagent-observability §3.3.8] 扩第五值后同锚）', () => {
     const labels = Object.values(WORKFLOW_RUN_OUTCOME_LABELS)
-    expect(sorted(labels)).toEqual(sorted(['成功', '失败', '已取消', '已超时']))
+    expect(sorted(labels)).toEqual(sorted(['成功', '失败', '已取消', '已超时', '部分成功']))
     expect(new Set(labels).size).toBe(labels.length)
   })
 
@@ -122,9 +126,16 @@ describe('SUBAGENT_DOT_RULES 全集锁（[W2 D8] 状态点规则按 status 分�
     expect(sorted(Object.keys(SUBAGENT_DOT_RULES))).toEqual(sorted(SUBAGENT_STATUS_ALL))
   })
 
-  it('失败红先于完成绿兜底：running+failed 与 idle+failed 均红点', () => {
+  it('失败红先于完成绿兜底：running+failed 与 idle+failed 均红点（[subagent-observability u8] 迁移期回落分支——旧推断存储值 + legacy closed 注入族，新判据主锚在 subagent-bucket.test.ts 四形态）', () => {
     expect(subagentDotClass(subagent({ subagentId: 'r1', status: 'running', stopReason: 'failed' }))).toBe('bg-danger')
     expect(subagentDotClass(subagent({ subagentId: 'r2', status: 'idle', stopReason: 'failed' }))).toBe('bg-danger')
+  })
+
+  it('[subagent-observability u8] 失败红点新判据锚：lastRound.failure 主导（failure 非空且非 user.cancelled → 红；user.cancelled / 被接管 → 中性暗；stop 停因无失败分类 → 绿兜底）', () => {
+    expect(subagentDotClass(subagent({ subagentId: 'n1', status: 'idle', lastRound: { engineStopReason: 'error', failure: { class: 'provider', kind: 'rate_limited', retryable: 'conditional', raw: 'rpm 101/100' } } }))).toBe('bg-danger')
+    expect(subagentDotClass(subagent({ subagentId: 'n2', status: 'idle', lastRound: { engineStopReason: 'aborted', failure: { class: 'user', kind: 'cancelled', retryable: false, raw: 'user aborted' } } }))).toBe('bg-neutral-dim opacity-50')
+    expect(subagentDotClass(subagent({ subagentId: 'n3', status: 'idle', lastRound: { promptDisposition: 'handled' } }))).toBe('bg-neutral-dim opacity-50')
+    expect(subagentDotClass(subagent({ subagentId: 'n4', status: 'idle', lastRound: { engineStopReason: 'stop', result: 'ok' } }))).toBe('bg-success')
   })
 
   it('中断族中性暗：cancelled / interrupted / interrupted-by-restart / interrupted-by-parent', () => {

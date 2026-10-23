@@ -100,6 +100,23 @@
           :title="t('panel.sideDrawer.subagentStopReason')"
           data-testid="subagent-stop-reason"
         >{{ subagentMeta.stopReason }}</span>
+        <!-- 轮收条失败分类（subagent-observability §3.4 u8）：lastRound.failure 事实展示
+             ——class.kind 点拼原文，tone 与托盘红点同源（user.cancelled 中性，其余 danger）；
+             lastRound 通道缺省（u3 runtime 产出前恒 undefined）不占位 -->
+        <span
+          v-if="lastRoundFailure"
+          class="shrink-0 truncate max-w-[180px] font-mono text-[length:var(--text-3xs)]"
+          :class="failureCauseToneClass(lastRoundFailure)"
+          :title="t('panel.sideDrawer.subagentLastRoundFailure', { cause: failureCauseLabel(lastRoundFailure) })"
+          data-testid="subagent-lastround-failure"
+        >{{ failureCauseLabel(lastRoundFailure) }}</span>
+        <!-- 被接管（§3.3.1 P6 第三形态）：prompt 未启动 run——无停因无成败，中性标注 -->
+        <span
+          v-if="lastRoundHandled"
+          class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim opacity-70"
+          :title="t('panel.sideDrawer.subagentHandledPrompt')"
+          data-testid="subagent-lastround-handled"
+        >handled</span>
         <!-- 模型标签（subagent-model-switch §7.1 入口层）：chat 域成员与 agentcall 视图的
              workflow 成员均可切换（ModelSelectPopover 复用；提交走 subagent.setModel，
              回执写状态禁乐观写）；标签读取规则四分支合成见 modelDisplay。agentcall 视图
@@ -252,6 +269,7 @@ import MessageStream from './MessageStream.vue'
 import Composer from './Composer.vue'
 import { COMPOSER_BAND_CLASS } from './composer-band'
 import { isSubagentComposerEligible } from '@/composables/panel/subagent-composer-lane'
+import { failureCauseLabel, failureCauseToneClass } from '@/lib/subagent-bucket'
 import ModelSelectPopover from './ModelSelectPopover.vue'
 import { PopoverTrigger } from '@/components/ui/popover'
 import { DEFAULT_ENGINE_ID } from '@/constants/engine-icons'
@@ -418,6 +436,11 @@ const engineBadgeTitle = computed<string>(() => {
 /** 当前选中 subagent 的 record（三段式虚拟 id 才有；agentcall 两段式返回 null）＝ chatMeta——
  *  对话流加载 / coarse 提示 / 回填桥的 chat 域消费键（模型切换消费 switchRecord，范围更宽）。 */
 const currentRecord = chatMeta
+
+// 轮收条事实展示（subagent-observability §3.4 u8）：失败分类标签（tone 与托盘红点同源）
+// + 被接管标注（§3.3.1 P6 第三形态——prompt 未启动 run，无停因无成败）
+const lastRoundFailure = computed(() => currentRecord.value?.lastRound?.failure)
+const lastRoundHandled = computed(() => currentRecord.value?.lastRound?.promptDisposition === 'handled')
 
 // 对话流数据编排（loadError 兜底态 + 加载/停止；recordEngine 供 coarse 提示与兜底判断复用）
 const { loadError, loadSubagentData, stopSubagentStream, recordEngine } = useSubagentTabData({

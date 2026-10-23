@@ -219,7 +219,8 @@ export const useSubagentStore = defineStore('subagent', () => {
    * 该 session 是否有 subagent 仍在 running（供 derivedStatus 计算 hasBackgroundWork）。
    *
    * [two-state-convergence D2 判据单一化] 占用判据 = subagent-bucket 的严格口径 SSOT
-   * （isRunningProjection：running + result=∅ + resumable≠true）——本函数是 import
+   * （isRunningProjection：running 且 stopReason=∅——轮收条已写 = 本轮不在途的等价
+   * 信号，subagent-observability §3.3.3）——本函数是 import
    * wrapper，禁止在此重组判据字段。历史背景（review findings-confirmation #8）：v4 轮终
    * 迁移故意回写 status='running'（可冷路径 resume）但已携带本轮 result，「已有轮终信号
    * 的 running」不是后台真在跑，不算 working——否则 subagent 完成注入后 derivedStatus
@@ -314,7 +315,8 @@ export const useSubagentStore = defineStore('subagent', () => {
    * 指定 subagent 是否「真在流活动中」——虚拟 session working 判定 [review round2 R1-遗留-1]。
    *
    * [two-state-convergence D2 判据单一化] 本函数 = 占用判据 SSOT（isRunningProjection）
-   * 的单 record wrapper：running + result=∅ + resumable≠true（轮终 running-resumable
+   * 的单 record wrapper：running 且 stopReason=∅（轮收条已写 = 本轮不在途，
+   * subagent-observability §3.3.3；轮终 running-resumable
    * 不是后台真在跑，见 hasRunning 注释）。与 isRunning 的分工（两口径并存是刻意设计）：
    * isRunning（宽松，running 即 true）供 SubagentTab 决定是否订阅增量流——resumable 续轮
    * 仍有真实流活动，收紧会断数据通路；本函数（窄口径）供 MessageStream 虚拟 session

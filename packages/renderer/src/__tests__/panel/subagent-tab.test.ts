@@ -462,6 +462,71 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     wrapper.unmount()
   })
 
+  // ── 轮收条事实展示（subagent-observability §3.4 u8：lastRound.failure + 被接管标注）──
+
+  it('轮收条失败分类：lastRound.failure 在场 → 标题栏渲染 class.kind 点拼（danger 色档）', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [
+      makeRecord({
+        status: 'idle',
+        lastRound: {
+          engineStopReason: 'error',
+          failure: { class: 'provider', kind: 'rate_limited', retryable: 'conditional', raw: 'rpm 101/100' },
+        },
+      }),
+    ])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    const failure = wrapper.find('[data-testid="subagent-lastround-failure"]')
+    expect(failure.exists()).toBe(true)
+    expect(failure.text()).toBe('provider.rate_limited')
+    expect(failure.classes()).toContain('text-danger')
+    wrapper.unmount()
+  })
+
+  it('轮收条失败分类：user.cancelled → 渲染但落中性档（用户主动中止非失败）', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [
+      makeRecord({
+        status: 'idle',
+        lastRound: {
+          engineStopReason: 'aborted',
+          failure: { class: 'user', kind: 'cancelled', retryable: false, raw: 'user aborted' },
+        },
+      }),
+    ])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    const failure = wrapper.find('[data-testid="subagent-lastround-failure"]')
+    expect(failure.exists()).toBe(true)
+    expect(failure.classes()).toContain('text-neutral-dim')
+    expect(failure.classes()).not.toContain('text-danger')
+    wrapper.unmount()
+  })
+
+  it('被接管（promptDisposition=handled）→ handled 标注渲染；lastRound 缺省 → 两元素均不渲染', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [
+      makeRecord({ status: 'idle', lastRound: { promptDisposition: 'handled' } }),
+    ])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    expect(wrapper.find('[data-testid="subagent-lastround-handled"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="subagent-lastround-failure"]').exists()).toBe(false)
+    wrapper.unmount()
+
+    // lastRound 通道缺省（u3 runtime 产出前恒 undefined）→ 均不占位
+    const wrapper2 = mountTab()
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle' })])
+    await settle(wrapper2)
+    expect(wrapper2.find('[data-testid="subagent-lastround-handled"]').exists()).toBe(false)
+    expect(wrapper2.find('[data-testid="subagent-lastround-failure"]').exists()).toBe(false)
+    wrapper2.unmount()
+  })
+
   it('空态：未选中 subagent 时渲染空态占位（首屏冒烟）', () => {
     const wrapper = mountTab()
     expect(wrapper.find('[data-testid="drawer-subagent-empty"]').exists()).toBe(true)

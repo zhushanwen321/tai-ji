@@ -384,6 +384,56 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
     expect(row.attributes('title')).toBe(`${fullPath} · review-changes`)
   })
 
+  it('subagent：lastRound.failure 在场 → meta 行渲染 class.kind 失败标签（user.cancelled 中性档；缺省不占位）', async () => {
+    trayState.subagentEnded = [
+      makeSubagent({
+        subagentId: 'sub-f1',
+        status: 'idle',
+        lastRound: {
+          engineStopReason: 'error',
+          failure: { class: 'provider', kind: 'rate_limited', retryable: 'conditional', raw: 'rpm 101/100' },
+        },
+      }),
+    ]
+    wrapper = mountPanel('subagent')
+    await flushPromises()
+    // 失败 record 落「已结束」桶（默认显示「进行中」）——先切桶再断言行渲染
+    await wrapper.find('[data-testid="tray-panel-tab-ended"]').trigger('click')
+    await flushPromises()
+
+    const failure = wrapper.find('[data-testid="tray-subagent-failure"]')
+    expect(failure.exists()).toBe(true)
+    expect(failure.text()).toBe('provider.rate_limited')
+    expect(failure.classes()).toContain('text-danger')
+
+    // user.cancelled：标签照渲染但落中性档（用户主动中止非失败）
+    trayState.subagentEnded = [
+      makeSubagent({
+        subagentId: 'sub-f2',
+        status: 'idle',
+        lastRound: { engineStopReason: 'aborted', failure: { class: 'user', kind: 'cancelled', retryable: false, raw: 'user aborted' } },
+      }),
+    ]
+    wrapper.unmount()
+    wrapper = mountPanel('subagent')
+    await flushPromises()
+    await wrapper.find('[data-testid="tray-panel-tab-ended"]').trigger('click')
+    await flushPromises()
+    const cancelled = wrapper.find('[data-testid="tray-subagent-failure"]')
+    expect(cancelled.exists()).toBe(true)
+    expect(cancelled.classes()).toContain('text-neutral-dim')
+    expect(cancelled.classes()).not.toContain('text-danger')
+
+    // lastRound 缺省（u3 runtime 产出前恒 undefined）→ 不占位
+    trayState.subagentEnded = [makeSubagent({ subagentId: 'sub-f3', status: 'idle' })]
+    wrapper.unmount()
+    wrapper = mountPanel('subagent')
+    await flushPromises()
+    await wrapper.find('[data-testid="tray-panel-tab-ended"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="tray-subagent-failure"]').exists()).toBe(false)
+  })
+
   it('workflow：行渲染 scriptName/slug/进度 N-M/耗时（done 行无 spinner，状态点替代）', async () => {
     trayState.workflowRunning = [
       makeWorkflow({ runId: 'wf-1', status: 'running' }),
