@@ -106,6 +106,7 @@ export const meta = {
     'run record 两成员 outcome=done 且 canary 摘要落盘',
     'mock.requests 出现 ≥3 条 model=mock-sub-a 请求（1 段 A + ≥2 段 B，孙进程打到 mock 的铁证）',
     '两段主轮都以 message.complete 收尾（主 agent 控制组吃到各自队列步）',
+    '终局 run 的 subagent.setModel 被拒绝：failures 含该 runId 且 reason 含「已终局」（判终局断言执法，2026-10-23 D1-U3 直读改写后的行为锚）',
   ],
   notProvable: [
     'UI 面：workflow overlay / 托盘面板 / subagent 详情（A 通道，归后续 UI 剧本）',
@@ -396,6 +397,34 @@ export async function run(ctx) {
       2,
     ).slice(0, 120_000),
   )
+
+  // ══ 段 C：setModel 对终局 run 拒绝 ═══════════════════════════
+  // B② 已实证 run status=done（journal 存在 run-settled 帧）。此时 run 级 setModel
+  // 必须被拒绝（failures 含该 runId，reason 指向「已终局…不可切换」）——终局 run 的
+  // 模型覆盖改写是被判终局断言拦截的（assertRunNotTerminalForSwitch，直读 findRunSettledEvent）。
+  let setReply = null
+  let setErr = ''
+  try {
+    setReply = await protocol.call(
+      'subagent.setModel',
+      { runId: run.runId, provider: topo.providerId, modelId: SUB_MODEL },
+      { replyType: 'subagent.modelSet', timeoutMs: 60_000 },
+    )
+  } catch (e) {
+    setErr = String(e?.message ?? e)
+  }
+  const failure = (setReply?.failures ?? []).find((f) => f.runId === run.runId)
+  // 拒绝到达的两种合法形态（capabilities/model.md 三形态判别 + 宿主分型码透传）：
+  // ① 回执 failures 组件含已终局 reason；② RPC error（subagent_model_switch_failed 分型）message 含已终局文案
+  const rejectedViaFailures = Boolean(failure) && /已终局/.test(String(failure?.reason ?? ''))
+  const rejectedViaRpcError = /subagent_model_switch_failed/.test(setErr) && /已终局/.test(setErr)
+  ev.assert('C① 终局 run 的 setModel 被拒绝（failures 组件或 RPC error 含已终局语义）', rejectedViaFailures || rejectedViaRpcError, {
+    channel: 'B',
+    expected: `failures 含 runId=${run.runId} 且 reason 含「已终局」，或 RPC error（subagent_model_switch_failed）含「已终局」文案`,
+    actual: setErr
+      ? `RPC error: ${setErr.slice(0, 300)}`
+      : JSON.stringify({ members: setReply?.members, failures: setReply?.failures, summary: setReply?.summary }).slice(0, 400),
+  })
 
   log(`done sidA=${sidA} sidB=${sidB} childOk=${childOk.length} child404=${child404.length}`)
   return { uncovered, gotchas }
