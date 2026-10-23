@@ -47,8 +47,17 @@ const LARGE_PROBE_BYTES = 200 * 1024 * 1024;
 const token = process.env.GITCODE_TOKEN;
 const repo = process.env.GITCODE_REPO;
 
+/**
+ * 错误文案脱敏：git 子进程失败时原生 message 内嵌完整 push URL（含认证段
+ * `https://<user>:<token>@`），直接打印会把令牌泄漏进终端/会话记录。所有错误
+ * 输出收口（die / record 的 detail）必须过本函数。
+ */
+function redactSecrets(s) {
+  return String(s).replace(/(https:\/\/[^:/\s@]+:)[^@\s]+(@)/g, '$1***$2');
+}
+
 function die(msg) {
-  console.error(`\n[FAIL] ${msg}`);
+  console.error(`\n[FAIL] ${redactSecrets(msg)}`);
   process.exit(1);
 }
 
@@ -56,7 +65,7 @@ function die(msg) {
 // 关键分支不再只靠人工真发布验证）。token/repo 在模块加载时读 env（测试先设 env 再动态 import）。
 export {
   apiCall, assetList, buildExistingAssetMap, checkEnv, createRelease,
-  diffNameSets, fetchUploadTarget, verifyUploadedAssets,
+  diffNameSets, fetchUploadTarget, redactSecrets, verifyUploadedAssets,
 }
 
 // env 校验收进 main()：vitest import 纯函数导出时不再因缺 token die（CLI 行为不变）
@@ -486,7 +495,7 @@ async function runProbe({ large, skipRepo }) {
   const results = [];
   const record = (name, ok, detail) => {
     results.push({ name, ok, detail });
-    console.log(`[${ok ? 'PASS' : 'FAIL'}] ${name}${detail ? ` —— ${detail}` : ''}`);
+    console.log(`[${ok ? 'PASS' : 'FAIL'}] ${name}${detail ? ` —— ${redactSecrets(detail)}` : ''}`);
   };
 
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
