@@ -256,8 +256,10 @@ export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt
    */
   promptDisposition?: "started" | "queued" | "handled";
   /**
-   * [u3 事实字段] 观察性事实（谓词未满足、「SO 未调用」等——§3.3.10 观察降级通道，
-   * 不改写 failure）。undefined = 无观察项。
+   * [u3 事实字段] 观察性事实（引擎侧摘要，如「SO 未调用」——§3.3.10 分源表述：
+   * 观察降级落此处，不改写 failure）。undefined = 无观察项。注意承载分源：交付
+   * 谓词缺项在 worker 脚本侧执行，不经本字段——落脚本结果 observations / run
+   * 终局帧 partialMembers / workflow_control 成员行 missingDeliverables 三面。
    */
   observations?: string[];
   /**

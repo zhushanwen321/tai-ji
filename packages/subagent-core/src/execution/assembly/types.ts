@@ -498,7 +498,12 @@ export interface SubagentListLastRound {
   usage?: AgentUsageTotal;
   /** 重试尝试计数（auto_retry_start 帧数）。 */
   retryAttempts?: number;
-  /** 观察性事实（谓词未满足等降级通道）。undefined = 无观察项。 */
+  /**
+   * 观察性事实（引擎侧摘要，如「SO 未调用」——§3.3.10 分源表述：观察降级落此处，
+   * 不改写 failure）。undefined = 无观察项。注意承载分源：交付谓词缺项在 worker
+   * 脚本侧执行，不经本字段——落脚本结果 observations / run 终局帧 partialMembers /
+   * workflow_control 成员行 missingDeliverables 三面。
+   */
   observations?: string[];
   /**
    * 引擎子进程 stderr tee 文件绝对路径（失败轮诊断引用——AgentOutcome.stderrTeePath
