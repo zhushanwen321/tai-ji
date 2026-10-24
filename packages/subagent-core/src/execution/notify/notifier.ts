@@ -280,6 +280,12 @@ function buildRoundReplyContent(record: BgNotifyRecord): string {
       ` Error: ${record.error ?? "(no error text)"}\n\n${ROUND_REPLY_RECOVERY_TAIL}${transcriptTail(record)}`
     );
   }
+  if (record.error !== undefined) {
+    // ③' 迁移期回落：轮失败但轮收条分类缺席（旧格式 record / 合成失败）——如实出
+    // 失败形态，禁落 ⑤「completed」把失败轮包装成成功应答（判定输入 = error 字段
+    // 非空；分类事实在场时走 ③ 结构化文案）。
+    return `Subagent "${agent}" (${id})${roundLabel} failed: ${record.error}\n\n${FAILURE_RECOVERY_TAIL}${transcriptTail(record)}`;
+  }
   if (record.result == null || record.result === "") {
     // ④ 正常轮空正文（UC-15：空输出不是异常——简短事实，不谎报结果）
     return `Subagent "${agent}" (${id})${roundLabel} completed with no text output (the round finished; tool-only turns produce no reply text).${transcriptTail(record)}`;

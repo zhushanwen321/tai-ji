@@ -763,21 +763,22 @@ export class ConversationContinuation {
       this.drain();
       return;
     }
-    // dedup key = id:epoch:round（notifier notifyId 构造段口径；epoch=0 恒旧格式
-    // record:round）：round 已随簿记 +1，失败轮通知与上一轮成功通知天然分离（60s 窗不吞）。
-    // [collect 退役] 原 sync 成员失败入批分流（isCollectMember → routeRecord）随批
-    // 机制删除——失败统一单发（独立载荷 + 恢复指引，可达性 [T2-③/LC-1]）。
+    // [subagent-observability §3.3.7①] 失败轮应答 = 轮应答五分支通道：载荷带
+    // status:"running" + lastRound 事实字段（failure/engineStopReason 已随轮终簿记
+    // 落盘）→ buildRoundReplyContent 分支③按失败分类点拼 + 恢复指引构造正文。
+    // 原载荷 status:"closed" 使五分支判定在本路径结构性不可达（旧式 error 文案）；
+    // 仍走直投通道不经 route(record)——其正文读 record.result = 前值，直复用会以
+    // 旧正文冒充失败通知。dedup key = id:epoch:round（与成功轮应答天然分离）。
     const notify: BgNotifyRecord = {
       id: record.id,
-      // status:"closed" + outcome:"failed" 载荷 = buildLlmContent 的失败文案形态
-      // `Subagent "agent" (id) failed: <error>`——载荷只是通知文案载体，record 实态
-      // 保持可续聊 [two-state-convergence U4/D3]（容器未被销毁，轮终已翻 idle 展示等续聊）。
-      status: "closed",
-      closedReason: "gc",
-      outcome: "failed",
+      status: "running",
       agent: record.agent,
       ...(record.model !== undefined ? { model: record.model } : {}),
       error: `round did not complete: ${reason}. ${FAILURE_RECOVERY_TAIL}`,
+      ...(record.lastRound?.failure !== undefined ? { lastRoundFailure: record.lastRound.failure } : {}),
+      ...(record.lastRound?.engineStopReason !== undefined
+        ? { lastRoundStopReason: record.lastRound.engineStopReason }
+        : {}),
       startedAt: record.startedAt,
       endedAt: Date.now(),
       round: record.round,

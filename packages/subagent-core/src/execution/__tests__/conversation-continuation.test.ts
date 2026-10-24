@@ -567,7 +567,7 @@ describe("ConversationContinuation — 轮末分流（D7）与通知侧", () => 
     expect(calls.notified.length).toBe(0); // 成功通知经 route（record.result 权威），非独立载荷
   });
 
-  it("失败轮：lastError 簿记（failed outcome）+ 独立载荷失败通知（不经 route）+ round 同样 +1（dedup 分离）", async () => {
+  it("失败轮：lastError 簿记（failed outcome）+ 轮应答通道失败通知（五分支载体，不经 route）+ round 同样 +1（dedup 分离）", async () => {
     const record = makeRecord({ id: "sa-fail", round: 1 });
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
@@ -575,10 +575,11 @@ describe("ConversationContinuation — 轮末分流（D7）与通知侧", () => 
     cont.onRunSettled(makeOutcome({ content: "", error: "engine_crashed: child died" }));
 
     await vi.waitFor(() => expect(calls.notified.length).toBe(1));
-    // 失败通知：独立构造载荷（closed+failed 形态——正文 = 失败摘要 + 恢复指引）
+    // 失败通知：轮应答载体（[subagent-observability §3.3.7①] status:"running" +
+    // lastRound 事实字段 → buildRoundReplyContent 五分支判定）；本用例合成 outcome
+    // 无分类事实 → 走 ③' 迁移期回落（error 字段判失败形态），不落 ⑤ completed。
     const notify = calls.notified[0]!;
-    expect(notify.status).toBe("closed");
-    expect(notify.outcome).toBe("failed");
+    expect(notify.status).toBe("running");
     expect(notify.error).toContain("round did not complete: engine_crashed: child died");
     expect(notify.error).toContain("Recovery");
     expect(notify.error).toContain("action:'message'");
