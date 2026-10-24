@@ -70,8 +70,8 @@ describe('formatAge 相对时间分档', () => {
 const NOW = 1_000_000_000_000
 
 const SESSIONS: SessionSummary[] = [
-  { id: 'sess-alpha', label: 'alpha 设计讨论', cwd: '/p/a', status: 'idle', lastActiveAt: NOW - 60_000, modelId: 'm', tokenCount: 0, surface: 'sidebar' },
-  { id: 'sess-beta', label: 'beta review', cwd: '/p/b', status: 'idle', lastActiveAt: NOW - 3 * 3_600_000, modelId: 'm', tokenCount: 0, surface: 'sidebar' },
+  { id: 'sess-alpha', label: 'alpha 设计讨论', cwd: '/p/a', status: 'idle', lastActiveAt: NOW - 60_000, surface: 'sidebar' },
+  { id: 'sess-beta', label: 'beta review', cwd: '/p/b', status: 'idle', lastActiveAt: NOW - 3 * 3_600_000, surface: 'sidebar' },
 ]
 
 describe('buildSessionCandidates 删 hasSessionId 参（D1/D7）', () => {

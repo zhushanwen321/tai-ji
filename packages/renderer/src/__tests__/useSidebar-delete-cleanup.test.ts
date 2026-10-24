@@ -140,7 +140,7 @@ import { registerSessionCleanup, __clearSessionCleanupRegistryForTest } from '@/
 import { openBrowser, getOverlayControlState, _resetOverlayForTest } from '@taiji/core/domain/overlay'
 
 function makeSummary(id: string): SessionSummary {
-  return { id, label: id, cwd: '/proj', status: 'idle', lastActiveAt: 1, modelId: 'm1', tokenCount: 0 }
+  return { id, label: id, cwd: '/proj', status: 'idle', lastActiveAt: 1 }
 }
 
 // seed pinia session store（ADR-0059：useSessionStore 单例）
