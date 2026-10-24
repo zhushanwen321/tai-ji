@@ -155,7 +155,7 @@ describe('useTrayCounts 计数口径与谓词边界（D2）', () => {
     const subagentStore = useSubagentStore()
     subagentStore.applyRecords(SID, [
       makeSubagent({ subagentId: 'a-running', status: 'running' }),
-      // 死亡纳管态（W4 adoptEngineDeath：running + stopReason='failed'）→ 不落进行中
+      // 轮收条已写的轮终（running + stopReason='failed'）→ 不落进行中（占用判据 = running && 无停因）
       makeSubagent({ subagentId: 'a-dead', status: 'running', stopReason: 'failed' }),
       makeSubagent({ subagentId: 'a-idle', status: 'idle' }),
     ])

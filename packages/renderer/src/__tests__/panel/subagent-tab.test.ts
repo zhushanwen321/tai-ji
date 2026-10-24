@@ -429,7 +429,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     wrapper.unmount()
   })
 
-  it('停因词：W4 新型（[U5/D4] adoptEngineDeath：running + stopReason=failed）→ 有值即渲染', async () => {
+  it('停因词：轮收条已写的轮终（running + stopReason=failed，迁移期回落值）→ 有值即渲染', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [
       makeRecord({
         status: 'running',

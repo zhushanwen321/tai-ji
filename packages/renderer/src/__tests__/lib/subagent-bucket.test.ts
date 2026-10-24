@@ -60,7 +60,7 @@ describe('isRunningProjection 占用谓词（白盒：G2「正在跑」严格口
     expect(isRunningProjection(makeRecord('running'))).toBe(true)
   })
 
-  it('[U6 终态判据] running + stopReason 在场（W4 新型 failed / A-lite 轮终 completed）→ false（stopReason 子句排除）', () => {
+  it('[U6 终态判据] running + stopReason 在场（轮收条已写：legacy failed 值 / A-lite 轮终 completed）→ false（stopReason 子句排除）', () => {
     expect(isRunningProjection(makeRecord('running', { stopReason: 'failed' }))).toBe(false)
     expect(isRunningProjection(makeRecord('running', { stopReason: 'completed' }))).toBe(false)
   })
@@ -161,8 +161,10 @@ describe('[P1 门] 形态 × 判据矩阵全量（8 现实形态，two-state-con
       occupied: true,
     },
     {
-      // 形态 3：R3 补 W4 新型（[U5/D4] adoptEngineDeath：running + error + failed + result=∅）
-      name: "3 W4 死亡纳管新型（running + result=∅ + stopReason='failed'）",
+      // 形态 3：轮收条已写在途残留（running + error + stopReason='failed' + result=∅）。
+      // 「failed」为 legacy 停因值：引擎死亡走正常轮终 error 停因 + 失败事实入账，
+      // 无独立死亡纳管写点；stopReason 子句按「轮收条已写 = 本轮不在途」排除。
+      name: "3 轮收条已写残留（running + result=∅ + stopReason='failed'）",
       rec: makeRecord('running', { stopReason: 'failed', error: 'engine died' }),
       occupied: false,
     },

@@ -468,8 +468,8 @@ function close(): void {
   emit('close')
 }
 
-// ── header 状态 pill（文案单源：outcome 四值 = shared LABELS；interrupted 复用
-// tray「已中断（可续跑）」词源；running/done 缺省为本域文案）──
+// ── header 状态 pill（文案单源：outcome 五值 = shared WORKFLOW_RUN_OUTCOME_LABELS；
+// interrupted 复用 tray「已中断（可续跑）」词源；running/done 缺省为本域文案）──
 
 const pillLabel = computed(() => {
   const run = props.run

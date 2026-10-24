@@ -112,25 +112,26 @@ interface TraceRow {
 }
 
 /**
- * 停止着色映射（D9 全枚举）：cancelled → 取消（中性）色；failed/time_limited → 失败色系；
- * interrupted（暂停态，无 outcome）→ 中性停止色。非停止在途 = accent 蓝脉冲（不叠加）。
- * [subagent-observability §3.3.8] partially_succeeded 是 run 级聚合形态（call 级实际
- * 值域三值，core run-vocabulary 注释明示）——本表只着色 ask 步骤行（call 级），到达即
- * 数据异常，fail-visible 抛出不静默着色。
+ * 停止着色映射（D9 全枚举）：failed/time_limited → 失败色系；done/cancelled/
+ * partially_succeeded/undefined → 中性停止色；interrupted（暂停态，无 outcome）→
+ * 中性停止色。非停止在途 = accent 蓝脉冲（不叠加）。
+ * [subagent-observability §3.3.8] partially_succeeded 是 run 级聚合形态（成员交付债
+ * 结算集合的派生物，run 级 outcome 五值之一，本表 :run-outcome 输入即 run.outcome）：
+ * 本表着色对象是 call 级行，run 级部分成功不是该行的失败形态，落中性档。该输入可达——
+ * run 已终局而成员行无 settled 帧时投影保持 running（stoppedInFlight 判据只看
+ * runStatus + call.status），着色输入即 run 级 outcome。
  */
 function stoppedColorOf(runStatus: WorkflowRunStatus, outcome: WorkflowRunOutcome | undefined): string {
   if (runStatus === 'interrupted') return 'text-neutral-mid'
   switch (outcome) {
-    case 'cancelled':
-      return 'text-neutral-mid'
     case 'failed':
     case 'time_limited':
       return 'text-danger'
     case 'done':
+    case 'cancelled':
+    case 'partially_succeeded':
     case undefined:
       return 'text-neutral-mid'
-    case 'partially_succeeded':
-      throw new Error(`unreachable outcome: ${outcome} (run-level aggregate never appears on ask rows)`)
   }
 }
 
