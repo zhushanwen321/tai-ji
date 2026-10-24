@@ -1,4 +1,72 @@
 {
   "version": 1,
-  "plugins": []
+  "plugins": [
+    {
+      "packageName": "@zhushanwen/plugin-wool-qoder",
+      "pluginId": "zhushanwen__plugin-wool-qoder",
+      "displayName": "Qoder (Wool)",
+      "description": "taiji plugin for the Qoder (Alibaba) wool provider family — local credential extraction, PAT fallback, account/quota status, model catalog refresh.",
+      "pluginVersion": "0.1.0",
+      "piExtensionVersion": "0.2.0",
+      "family": {
+        "id": "wool-qoder",
+        "displayName": "Qoder",
+        "vendor": "阿里",
+        "credentialSource": "ide-extract",
+        "modelCount": 12
+      },
+      "capabilities": [
+        "network.http",
+        "fs.read-user-data",
+        "crypto",
+        "process.spawn"
+      ],
+      "readPaths": [
+        "Library/Application Support/com.qodercn.app.stable/auth.v1.dat"
+      ]
+    },
+    {
+      "packageName": "@zhushanwen/plugin-wool-trae",
+      "pluginId": "zhushanwen__plugin-wool-trae",
+      "displayName": "Trae (Wool)",
+      "description": "taiji plugin for the Trae wool provider family — storage.json credential extraction, account status, model catalog refresh.",
+      "pluginVersion": "0.1.0",
+      "piExtensionVersion": "0.2.0",
+      "family": {
+        "id": "wool-trae",
+        "displayName": "Trae",
+        "vendor": "字节",
+        "credentialSource": "ide-extract",
+        "modelCount": 12
+      },
+      "capabilities": [
+        "network.http",
+        "fs.read-user-data",
+        "crypto"
+      ],
+      "readPaths": [
+        "Library/Application Support/Trae CN/User/globalStorage/storage.json"
+      ]
+    },
+    {
+      "packageName": "@zhushanwen/plugin-wool-workbuddy",
+      "pluginId": "zhushanwen__plugin-wool-workbuddy",
+      "displayName": "WorkBuddy",
+      "description": "taiji plugin for the WorkBuddy (Tencent) wool provider family — OAuth authorization, account/check-in status, daily check-in, model catalog refresh.",
+      "pluginVersion": "0.1.0",
+      "piExtensionVersion": "0.2.0",
+      "family": {
+        "id": "wool-workbuddy",
+        "displayName": "WorkBuddy",
+        "vendor": "腾讯",
+        "credentialSource": "oauth",
+        "modelCount": 17
+      },
+      "capabilities": [
+        "network.http",
+        "crypto"
+      ],
+      "readPaths": []
+    }
+  ]
 }
