@@ -144,12 +144,14 @@ function makeProviderEntries(ids: string[]): ProviderEntriesFake {
   }
 }
 
-/** piExtensionInstaller port fake（U7 双产物接线用例）：记录 installForCatalogEntry 入参。 */
+/** piExtensionInstaller port fake（U7/U4 双产物接线用例）：记录 install/uninstall 入参。 */
 function makePiExtensionInstaller(): {
   installForCatalogEntry: ReturnType<typeof vi.fn<(entry: { packageName: string; piExtensionVersion: string }) => Promise<{ installedVersion: string }>>>
+  uninstallForCatalogEntry: ReturnType<typeof vi.fn<(packageName: string) => Promise<void>>>
 } {
   return {
     installForCatalogEntry: vi.fn(async () => ({ installedVersion: '0.2.0' })),
+    uninstallForCatalogEntry: vi.fn(async () => {}),
   }
 }
 
@@ -864,5 +866,59 @@ describe('PluginService 卸载编排', () => {
 
     // 卸载编排等第一次安装完成才开始（同一把锁）
     expect(events.indexOf('uninstall-provider-cleanup')).toBeGreaterThan(events.indexOf('install-end:locking-plugin'))
+  })
+
+  it('双产物插件卸载：条目清理与 pi 扩展成员卸载一并执行（S23「卸载后扩展与条目一并清理」）', async () => {
+    const providerEntries = makeProviderEntries(['wool-workbuddy', 'wool-workbuddy-extra'])
+    const piExtensionInstaller = makePiExtensionInstaller()
+    const { service, registry } = buildService({ providerEntries, piExtensionInstaller })
+    await writePluginDir('zhushanwen__plugin-wool-workbuddy', pkgJson('@zhushanwen/plugin-wool-workbuddy', { namespace: 'wool-workbuddy' }))
+    await registry.scan()
+
+    await service.uninstallPlugin('zhushanwen__plugin-wool-workbuddy')
+
+    // 扩展侧：包名交端口（家族推导在实现内——pi-wool-workbuddy 由 wool 域单测覆盖）
+    expect(piExtensionInstaller.uninstallForCatalogEntry).toHaveBeenCalledWith('@zhushanwen/plugin-wool-workbuddy')
+    // 条目侧：命名空间前缀扫描清理照旧
+    expect(providerEntries.delete).toHaveBeenCalledWith('wool-workbuddy')
+    // 插件侧：目录拆除 + 注册表移除
+    expect(existsSync(join(pluginsDir, 'zhushanwen__plugin-wool-workbuddy'))).toBe(false)
+    expect(registry.getDescriptor('zhushanwen__plugin-wool-workbuddy')).toBeUndefined()
+  })
+
+  it('pi 扩展成员卸载失败 → warn 不阻断：插件目录与注册表照常清理（卸载不抛）', async () => {
+    const piExtensionInstaller = makePiExtensionInstaller()
+    piExtensionInstaller.uninstallForCatalogEntry.mockRejectedValue(
+      new Error('扩展卸载失败：npm uninstall failed。请到扩展管理页重试卸载'),
+    )
+    const { service, registry } = buildService({ piExtensionInstaller })
+    await writePluginDir('zhushanwen__plugin-wool-qoder', pkgJson('@zhushanwen/plugin-wool-qoder', { namespace: 'wool-qoder' }))
+    await registry.scan()
+
+    await expect(service.uninstallPlugin('zhushanwen__plugin-wool-qoder')).resolves.toBeDefined()
+
+    expect(piExtensionInstaller.uninstallForCatalogEntry).toHaveBeenCalledWith('@zhushanwen/plugin-wool-qoder')
+    // 插件侧清理完成（扩展残留走扩展管理页手动移除的恢复路径）
+    expect(existsSync(join(pluginsDir, 'zhushanwen__plugin-wool-qoder'))).toBe(false)
+    expect(registry.getDescriptor('zhushanwen__plugin-wool-qoder')).toBeUndefined()
+  })
+
+  it('包内 package.json 缺 name（异常包）→ 跳过扩展卸载，卸载照常完成', async () => {
+    const piExtensionInstaller = makePiExtensionInstaller()
+    const { service, registry } = buildService({ piExtensionInstaller })
+    // parseManifest 只校验 taijiPlugin manifest 不校验 name——name 缺失的包可入注册表
+    await writePluginDir('nameless-plugin', JSON.stringify({
+      version: '1.0.0',
+      main: 'index.js',
+      taijiPlugin: { manifestVersion: 1, namespace: 'wool-qoder' },
+    }))
+    await writeFile(join(pluginsDir, 'nameless-plugin', 'index.js'), 'export default {}', 'utf-8')
+    await registry.scan()
+    expect(registry.getDescriptor('nameless-plugin')).toBeDefined()
+
+    await service.uninstallPlugin('nameless-plugin')
+
+    expect(piExtensionInstaller.uninstallForCatalogEntry).not.toHaveBeenCalled()
+    expect(existsSync(join(pluginsDir, 'nameless-plugin'))).toBe(false)
   })
 })

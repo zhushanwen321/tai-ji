@@ -261,3 +261,31 @@ describe('installForCatalogEntry（U7 接线：v2-plugins 清单条目 → 家�
     })).rejects.toMatchObject({ code: 'family_unknown' })
   })
 })
+
+describe('uninstallForCatalogEntry（U4 接线：包名 → 家族推导 → 卸载；plugin-service.uninstallPlugin 消费）', () => {
+  it('plugin-wool-<family> 包名推导家族 → uninstallExtension 以 pi-wool-<family> 包名执行', async () => {
+    const deps = makeDeps()
+    const installer = new WoolExtensionInstaller(deps)
+
+    await installer.uninstallForCatalogEntry('@zhushanwen/plugin-wool-workbuddy')
+
+    expect(vi.mocked(deps.extensionService.uninstallExtension)).toHaveBeenCalledWith('@zhushanwen/pi-wool-workbuddy')
+  })
+
+  it('非 plugin-wool-* 包名（单产物插件）→ no-op 不触碰扩展目录', async () => {
+    const deps = makeDeps()
+    const installer = new WoolExtensionInstaller(deps)
+
+    await installer.uninstallForCatalogEntry('@acme/some-other-plugin')
+
+    expect(vi.mocked(deps.extensionService.uninstallExtension)).not.toHaveBeenCalled()
+  })
+
+  it('plugin-wool- 前缀但家族不在词表 → no-op（卸载侧包名事实源 = 磁盘 package.json，非清单，无 guard 契约可违反）', async () => {
+    const deps = makeDeps()
+    const installer = new WoolExtensionInstaller(deps)
+
+    await expect(installer.uninstallForCatalogEntry('@zhushanwen/plugin-wool-nosuch')).resolves.toBeUndefined()
+    expect(vi.mocked(deps.extensionService.uninstallExtension)).not.toHaveBeenCalled()
+  })
+})

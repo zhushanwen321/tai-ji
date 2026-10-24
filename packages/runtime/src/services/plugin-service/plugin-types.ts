@@ -122,9 +122,15 @@ export interface IPluginServiceDeps {
    * wool-manifest 资产解析、版本配对校验（VERSION_PAIR_MISMATCH）与
    * extensionService.installExtension 钉版安装。缺省时双产物条目只装插件侧（warn
    * 留痕——测试与独立仓联调环境常态；生产组合根必注入，缺省 = S23 扩展侧断链）。
+   *
+   * 卸载侧（U4 卸载编排，D6「完整移除 = 条目 + 插件 + pi 扩展」）：uninstallPlugin
+   * 在插件目录删除前以包内 package.json 的包名调用 uninstallForCatalogEntry——家族
+   * 推导在实现方内做（plugin-service 不持 wool 域知识），非羊毛形态包名 = 单产物
+   * 插件，实现方 no-op。
    */
   piExtensionInstaller?: {
     installForCatalogEntry(entry: { packageName: string; piExtensionVersion: string }): Promise<{ installedVersion: string }>
+    uninstallForCatalogEntry(packageName: string): Promise<void>
   }
   /**
    * 文件软删除 port（结构匹配 ITrash.trashFile）。组合根注入 infra adapter（trash）；

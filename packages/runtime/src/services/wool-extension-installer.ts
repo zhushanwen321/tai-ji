@@ -303,6 +303,22 @@ export class WoolExtensionInstaller {
     return this.installPiExtension(family, entry.piExtensionVersion)
   }
 
+  /**
+   * 从包名出发的卸载编排（PluginService.uninstallPlugin 的接线入口，U4 双产物卸载
+   * 编排，与 installForCatalogEntry 同构）：包名推导家族 → uninstallPiExtension。
+   *
+   * 包名推导 miss 与安装侧 family_unknown 拒绝不对称，有意为之：安装侧的包名来自
+   * v2-plugins 清单条目（guard 契约保证 plugin-wool-* 才携带 piExtensionVersion），
+   * 推导 miss = 清单损坏，必须结构化拒绝；卸载侧的包名来自插件目录内 package.json
+   * （ns 不落盘，D11——卸载期唯一事实源），推导 miss 的唯一含义 = 非羊毛插件 =
+   * 无扩展成员可卸，静默 no-op。
+   */
+  async uninstallForCatalogEntry(packageName: string): Promise<void> {
+    const family = woolFamilyFromCatalogPackageName(packageName)
+    if (!family) return
+    return this.uninstallPiExtension(family)
+  }
+
   /** 钉版本安装 + 扫描确认（installPiExtension 正常路径与时点差自愈路径共用段）。 */
   private async installEntry(entry: WoolManifestFamily): Promise<{ installedVersion: string }> {
     // 钉版本安装（npm + isValidPiExtension 校验 + 失败回滚全在既有链内）。

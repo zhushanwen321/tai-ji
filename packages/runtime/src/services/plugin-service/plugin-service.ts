@@ -591,6 +591,13 @@ export class PluginService implements IPluginService {
       // 之前——namespace 事实源 = 插件目录内 package.json，删盘后无从推导。
       await this.cleanupProviderEntriesFor(descriptor)
 
+      // U4 双产物卸载编排（provider-plugin-access D6/S23：完整移除 = 条目 + 插件 +
+      // pi 扩展）：plugin-wool-<family> 形态包名的插件连带卸载 pi 扩展成员
+      // （pi-wool-<family>）。同样放在磁盘删除之前——包名事实源 = 插件目录内
+      // package.json。失败降级 warn 不阻断插件侧清理（镜像上方 deactivate 失败继续
+      // 清理的卸载语义），残留可到扩展管理页手动移除。
+      await this.uninstallPiExtensionMemberFor(descriptor)
+
       // F2-③：sandbox 子进程真杀。deactivate 只 postMessage 不 terminate（fork 宿主的
       // 进程复用设计），但 uninstall 后插件目录即删，复用无意义且泄漏进程。
       // terminateProcess 内置 SIGTERM→2s→SIGKILL 升级链。trusted Worker 共享
@@ -734,6 +741,39 @@ export class PluginService implements IPluginService {
       return undefined
     }
     return binding.namespace
+  }
+
+  /**
+   * U4 双产物卸载编排的扩展侧接线：读插件目录 package.json 取包名 → piExtensionInstaller
+   * 端口卸载（家族推导在端口实现内，plugin-service 不持 wool 域知识——与 installForCatalogEntry
+   * 同构的卸载侧）。三类跳过/降级：端口未接线（测试与联调环境常态，warn 留痕）、
+   * 包名读不出（目录/文件不可读或包名缺失，warn 留痕——磁盘异常态，扩展残留可在
+   * 扩展管理页手动移除）、端口卸载失败（warn 留痕不阻断——镜像 deactivate 失败继续
+   * 清理的卸载语义，插件目录拆除不等扩展侧）。非羊毛插件经端口 no-op（家族推导
+   * miss = 无扩展成员可卸），无感知。
+   */
+  private async uninstallPiExtensionMemberFor(descriptor: PluginDescriptor | undefined): Promise<void> {
+    if (!descriptor) return
+    const installer = this.deps.piExtensionInstaller
+    if (!installer) {
+      console.warn(`[plugin-service] no piExtensionInstaller configured; pi extension member uninstall skipped for ${descriptor.pluginId}`)
+      return
+    }
+    let packageName: string | undefined
+    try {
+      const raw = await readFile(join(this.pluginDirOf(descriptor), 'package.json'), 'utf-8')
+      const pkg = JSON.parse(raw) as { name?: unknown }
+      if (typeof pkg.name === 'string' && pkg.name.length > 0) packageName = pkg.name
+    } catch {
+      console.warn(`[plugin-service] cannot read package.json for ${descriptor.pluginId}; pi extension member uninstall skipped`)
+      return
+    }
+    if (packageName === undefined) return
+    try {
+      await installer.uninstallForCatalogEntry(packageName)
+    } catch (err: unknown) {
+      console.warn(`[plugin-service] pi extension member uninstall failed for ${packageName}:`, toErrorMessage(err))
+    }
   }
 
   /**
