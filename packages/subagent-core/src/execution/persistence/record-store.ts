@@ -146,6 +146,7 @@ import {
   derivedManifestRecord,
   detectIdentity,
   identityFromFold,
+  identityFromFoldSource,
   isFreshCache,
   manifestToSubagent,
   projectFoldToLight,
@@ -1787,6 +1788,23 @@ export class RecordStore {
     // 均已退场）。fold 取一次，收条（stopReason/endedAt）与统计（round/turns/
     // totalTokens/endedAt）共用同一折叠态。
     const fold = this.eventStreamFace?.foldOf(base.id);
+    // [S3b origin 补齐] identity entry 命中时 origin/parentRunId 两域从 fold 补齐：
+    // identity entry 写点（subagent-workflow appendSubagentIdentityEntry，载荷源 =
+    // SUBAGENT_IDENTITY_ENV）不携带 origin/parentRunId（env 键表无此二键），而身份
+    // 基底命中即权威（上方两级判据）——workflow 成员收尾出内存后冷查重建会拿到
+    // origin=undefined，D7 域边界检查（messageHandler record.origin === "workflow"）
+    // 不命中，成员被误续聊（S3b 真机实证）。fold 的 record-created 帧由宿主 register
+    // 恒写 origin（buildCreatedEventPayload 二值载荷），是这两域唯一可靠重建源；
+    // 归一复用 identityFromFoldSource 单源（JSON 值不裸收）。补齐谓词收窄为
+    // "workflow"：tool 来源 undefined 与 "tool" 读侧同义（缺省语义），保持 undefined
+    // 即零行为变化；workflow 是唯一被 origin 门槛消费的值（D7 检查 + D1 过滤）。
+    if (base.origin === undefined) {
+      const foldIdentity = identityFromFoldSource(fold);
+      if (foldIdentity?.origin === "workflow") {
+        base.origin = "workflow";
+        base.parentRunId = base.parentRunId ?? foldIdentity.parentRunId;
+      }
+    }
     const state = stateMarkerFromFold(fold);
     const entry = buildFileCacheEntry(base, file, stamps, state, this.eventsStampOfId(base.id));
     // [U7 / §3.2.7 统计口径单基准] 统计域换源折叠 + [subagent-model-switch §6.2]

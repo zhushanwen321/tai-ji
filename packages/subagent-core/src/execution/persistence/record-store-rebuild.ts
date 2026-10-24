@@ -668,7 +668,14 @@ interface FoldIdentityFields {
   stepIndex: number | undefined;
 }
 
-function identityFromFoldSource(fold: RecordEventFoldState | undefined): FoldIdentityFields | undefined {
+/**
+ * fold 身份域归一（record-store 补齐 origin 消费单源——[S3b origin 补齐] 见
+ * record-store.probeAndCache）：record-created 必需标量校验 + optional 域安全读取。
+ * identity entry 写点（subagent-workflow session-lifecycle appendSubagentIdentityEntry）
+ * 载荷缺 origin/parentRunId 期，fold（record-created 帧，宿主 register 恒写 origin）
+ * 是这两域唯一可靠的重建源——归一判据单源，禁止调用方裸读 fold.identity 裸收 JSON 值。
+ */
+export function identityFromFoldSource(fold: RecordEventFoldState | undefined): FoldIdentityFields | undefined {
   const identity = fold?.identity;
   if (identity === undefined) return undefined; // 残文件/全坏行形态（record-events 注释）
   if (

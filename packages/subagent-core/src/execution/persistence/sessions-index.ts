@@ -41,7 +41,7 @@ const logger = getLogger("subagents");
 export const INDEX_FILENAME = "sessions-index.json";
 
 /** 索引格式版本。schema 变更必须递增：低版本文件整体丢弃（空索引，下轮 dirty 重写自愈）；高版本整体忽略（higherVersion，不重写）。 */
-export const INDEX_VERSION = 3;
+export const INDEX_VERSION = 4;
 
 /** 两次成功落盘的最小墙钟间隔（节流：overlay 打开期间的高频扫描不放大磁盘写）。 */
 export const INDEX_WRITE_MIN_INTERVAL_MS = 60_000;
@@ -82,9 +82,12 @@ export interface SessionsIndexEntry {
   model: string | undefined;
   thinkingLevel: string | undefined;
   /**
-   * 来源身份（H2 S3 修复：light→索引→重建往返补全）。undefined 表示缺失
-   * （旧索引文件/origin 缺省 = "tool" 语义），可选字段不升 INDEX_VERSION——
-   * 对齐 rootSessionId/parentRecordId 先例（宽容检查 + 序列化自然缺省）。
+   * 来源身份（H2 S3 修复：light→索引→重建往返补全）。undefined = "tool" 语义。
+   * v4：identity entry 写点（appendSubagentIdentityEntry）缺 origin/parentRunId 期
+   * 产的旧条目 origin 不可信（探测侧未做 fold 补齐），升版作废旧索引一次性重探
+   * （probeAndCache 补齐后新条目 origin 维度在位）——此前「可选字段不升版本」的
+   * 宽容裁决只适用于读侧容忍的缺省域，不适用于本域（D7 域边界检查消费 origin，
+   * 误缺即安全漏洞，见 record-store.probeAndCache [S3b origin 补齐]）。
    */
   origin?: RecordOrigin;
   /** origin="workflow" 时所属 workflow run id（undefined = 缺失/tool 来源）。 */
@@ -122,7 +125,7 @@ export interface SessionsIndexNegativeEntry {
 }
 
 /** 磁盘 JSON 格式版本（唯一写点 = 索引重建；读侧按 it 拒旧格式）。 */
-export const SESSIONS_INDEX_VERSION = 3;
+export const SESSIONS_INDEX_VERSION = 4;
 
 /** 磁盘 JSON 顶层结构（key = jsonl basename 不含路径）。 */
 export interface SessionsIndexFile {

@@ -1979,3 +1979,95 @@ describe("[④ 纯索引水位] manifest 水位（写侧嵌入 + 读侧校验）
     expect(ids).toEqual(["sa-wm-fresh", "sa-wm-legacy"]);
   });
 });
+
+// ============================================================
+// [S3b origin 补齐] identity entry 写点缺 origin 期的冷查重建保真
+//
+// 背景：subagent-workflow appendSubagentIdentityEntry（子进程 session_start hook）
+// 写成员 session.jsonl 的 identity entry 载荷缺 origin/parentRunId（env 键表
+// SUBAGENT_IDENTITY_ENV 无此二键），而探测身份基底 = identity entry 命中即权威
+// （probeAndCache 两级判据），fold（record-created 帧，宿主 register 恒写 origin）
+// 不参与——workflow 成员收尾出内存后冷查重建 origin=undefined，D7 域边界检查
+// （messageHandler record.origin === "workflow"）不命中，成员被误续聊
+//（S3b 真机实证：subagent_message 返回 delivered:true 并成功 round 2）。
+// ============================================================
+describe("[S3b origin 补齐] identity entry 缺 origin 时从 fold 补齐", () => {
+  let rootDir: string;
+  let tmpDir: string;
+
+  beforeEach(() => {
+    rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-store-origin-"));
+    tmpDir = path.join(rootDir, "sessions");
+    fs.mkdirSync(tmpDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** 手写 record 事件文件（宿主 register 产物形态：record-created 帧恒带 origin 二值）。 */
+  function writeRecordEvents(recordsDir: string, id: string, origin: "workflow" | "tool", parentRunId?: string): void {
+    fs.mkdirSync(recordsDir, { recursive: true });
+    const frames = [
+      JSON.stringify({
+        type: "record-created", seq: 1, ts: 5000, id, agent: "w", task: "t", slug: "s",
+        origin, ...(parentRunId !== undefined ? { parentRunId } : {}),
+        rootSessionId: "sess-A", depth: 0, mode: "background", startedAt: 5000,
+      }),
+    ];
+    fs.writeFileSync(
+      path.join(recordsDir, `${id}.events`),
+      `${JSON.stringify({ type: "record-events", id })}\n${frames.join("\n")}\n`,
+      "utf-8",
+    );
+  }
+
+  it("identity entry 无 origin（现行子进程 hook 产物）+ fold record-created origin=workflow → 补齐 origin + parentRunId", () => {
+    // getSessionsDir = rootDir 本身（既有测试同款：session 文件直接落 tmpDir 根）
+    const sessionFile = path.join(tmpDir, "wf-member.jsonl");
+    writeSessionJsonl(sessionFile, {
+      id: "sa-wf-1", agent: "w", mode: "background", task: "t",
+      startedAt: 5000, rootSessionId: "sess-A",
+    });
+    const recordsDir = path.join(rootDir, "records");
+    writeRecordEvents(recordsDir, "sa-wf-1", "workflow", "wf-run-1");
+    const store = new RecordStore(() => tmpDir, undefined, undefined, () => recordsDir);
+    // collectRecords 先行（候选定位兜底腿 = 同一装配单点；同时热 idToFile 索引——
+    // findLightById 在索引未热时按契约返回 undefined，真机 S3b 时点索引已由 session
+    // 期扫描热起，冷查第一优先走它）
+    // includeWorkflow:true——collectRecords 缺省排除 workflow 来源（D1 派生视图过滤），
+    // 补齐生效的构造性证据：不传该参时本 record 恰好被过滤为不可见。
+    const listed = store
+      .collectRecords(100, "all", "sess-A", true)
+      .find((r) => r.id === "sa-wf-1");
+    expect(listed?.origin, "workflow 成员冷查重建必须保真 origin（D7 域边界检查的输入）").toBe("workflow");
+    expect(listed?.parentRunId).toBe("wf-run-1");
+    const found = store.findLightById("sa-wf-1");
+    expect(found?.origin).toBe("workflow");
+    expect(found?.parentRunId).toBe("wf-run-1");
+  });
+
+  it("tool 来源（fold origin=tool）→ 补齐谓词收窄，origin 保持 undefined（零行为变化）", () => {
+    const sessionFile = path.join(tmpDir, "tool-member.jsonl");
+    writeSessionJsonl(sessionFile, {
+      id: "sa-tool-1", agent: "w", mode: "background", task: "t",
+      startedAt: 5000, rootSessionId: "sess-A",
+    });
+    const recordsDir = path.join(rootDir, "records");
+    writeRecordEvents(recordsDir, "sa-tool-1", "tool");
+    const store = new RecordStore(() => tmpDir, undefined, undefined, () => recordsDir);
+    const found = store.findLightById("sa-tool-1");
+    expect(found?.origin, "tool 来源 undefined 与 'tool' 读侧同义，维持 undefined 即现状语义").toBeUndefined();
+  });
+
+  it("identity entry 与 fold 均无 origin（纯 identity entry 形态）→ undefined 维持（补齐无源不硬造）", () => {
+    const sessionFile = path.join(tmpDir, "plain-member.jsonl");
+    writeSessionJsonl(sessionFile, {
+      id: "sa-plain-1", agent: "w", mode: "background", task: "t",
+      startedAt: 5000, rootSessionId: "sess-A",
+    });
+    const store = new RecordStore(() => rootDir, undefined, undefined, () => path.join(rootDir, "records"));
+    const found = store.findLightById("sa-plain-1");
+    expect(found?.origin).toBeUndefined();
+  });
+});
