@@ -157,16 +157,15 @@ type RunSettledFrame = Extract<WorkflowRunEvent, { type: "run-settled" }>;
 export { runSettledOutcomeToDoneReason } from "@zhushanwen/subagent-core";
 
 /**
- * 终局记录（record run-settled 帧载荷的进程内派生视图——与 core 侧
- * RunSettlementRecord 同构）。reason/errorCode 直取帧载荷；DoneReason 由
- * runSettledOutcomeToDoneReason 联合派生（不在本形状内预计算）。
+ * 终局记录（record run-settled 帧载荷的进程内派生视图）。形状单源 = core
+ * {@link settlementRecordOfRunSettledFrame} 的返回类型（含成员交付结算明细
+ * failedMembers/partialMembers——[subagent-observability §3.3.8] 终局帧与通知
+ * 携带成员结算明细）；DoneReason 由 runSettledOutcomeToDoneReason 联合派生
+ * （不在本形状内预计算）。壳侧两个读者（{@link JsonlRunStore.settledRecordOf}
+ * 的通知载荷链与 noteRebuiltSettlement 的终局记录注册表）经同一 core 映射器
+ * 生产，形状构造性归一。
  */
-export interface RunSettlementRecord {
-  outcome: RunOutcome;
-  errorCode?: RunSettledFrame["errorCode"];
-  reason?: string;
-  settledAt: number;
-}
+export type RunSettlementRecord = ReturnType<typeof settlementRecordOfRunSettledFrame>;
 
 // ── record 流读原语（严格解析 + 完整性拒绝）────────────────────
 
@@ -765,11 +764,12 @@ export class JsonlRunStore implements RunStore {
   }
 
   /**
-   * 终局记录查询（record run-settled 帧派生视图）：生产消费方 = 通知载荷链
-   * （runSettledEffects——载荷源帧直取）。miss = 无终局帧（未终局，或流读失败
-   * 降级——调用方按「不可判定」处置：通知跳过 + error 留痕，不回退兜底）。
-   * 流损坏（RecordStreamCorruptionError）与 IO 错误同走 miss + warn（通知链
-   * 不是恢复侧，保守 miss 可诊断；恢复侧的拒绝语义在 loadAll）。
+   * 终局记录查询（record run-settled 帧派生视图，映射经 core
+   * settlementRecordOfRunSettledFrame 单源）：生产消费方 = 通知载荷链
+   * （runSettledEffects——载荷源帧直取，成员结算明细随帧透传）。miss = 无终局帧
+   * （未终局，或流读失败降级——调用方按「不可判定」处置：通知跳过 + error 留痕，
+   * 不回退兜底）。流损坏（RecordStreamCorruptionError）与 IO 错误同走 miss + warn
+   * （通知链不是恢复侧，保守 miss 可诊断；恢复侧的拒绝语义在 loadAll）。
    */
   settledRecordOf(runId: string): RunSettlementRecord | undefined {
     let events: readonly WorkflowRunEvent[];
@@ -785,12 +785,10 @@ export class JsonlRunStore implements RunStore {
     }
     const settled = lastRunSettledEvent(events);
     if (settled === undefined) return undefined;
-    return {
-      outcome: settled.outcome,
-      ...(settled.errorCode !== undefined ? { errorCode: settled.errorCode } : {}),
-      ...(settled.reason !== undefined ? { reason: settled.reason } : {}),
-      settledAt: settled.ts,
-    };
+    // 帧载荷 → 终局记录经 core 映射器单源（与 noteRebuiltSettlement 的注册表读者
+    // 同一构造）：成员交付结算明细 failedMembers/partialMembers 随帧透传进通知
+    // 载荷链（[subagent-observability §3.3.8] 终局帧与通知携带成员结算明细）。
+    return settlementRecordOfRunSettledFrame(settled);
   }
 
   /**
