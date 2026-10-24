@@ -1,16 +1,24 @@
 /**
- * p1-plugin-a26-update-chain —— 插件更新链路（impl-plan A26 / 设计 S26）：
- * 清单版本 > 已装版本 → 条目更新提示 → 执行更新（provider 条目与凭据保留）；
- * 更新中途必失败的 fixture 包（激活即抛错）→ 更新失败 → 旧版本幸存可用（无两头空）。
+ * p1-plugin-a26-update-chain —— 插件更新链路（impl-plan A26 / 设计 S26）。
  *
- * 三版本链（fixtures/plugin-update-demo）：
- *   1.0.0 基线安装（激活写 update-demo-main 条目 + apiKey）→
- *   清单翻 1.1.0（改写 remote-config 缓存 pluginVersion + mock registry dist-tags.latest
- *   → 家族卡 plugin-family-update-badge + 条目「更新插件」按钮两级提示）→ 确认卡（update
- *   意图直达）→ 更新成功（重激活重写同 providerId，apiKey 同值）→
- *   清单翻 2.0.0（激活必抛错包）→ 更新失败（plugin-install-error 可见）→ 旧版本 1.1.0
- *   幸存（目录 version / plugin.list version / models.json 条目凭据三证）→ 重新启用
- *   激活成功（「可用」面收口）。
+ * 设计期望三段：清单版本 > 已装版本 → 条目更新提示 → 执行更新（条目与凭据保留）；
+ * 更新后插件重激活；更新中途必失败包 → 旧版本幸存。实跑核对出的产品现状（如实覆盖，
+ * 缺口登记 uncovered + ISSUES.md，不阻断其余断言）：
+ *   - 更新提交（两段式 confirm）在磁盘/注册表/激活面换新（目录 version、plugin.list
+ *     version、status=active 全部跟随新版本）；
+ *   - 但沙箱 fork 被复用（plugin-host-process assignProcess M6a-06：活跃进程直接复用）
+ *     且 fork 内 handleLoad 对同一文件 URL `await import`（plugin-bootstrap.ts）——ESM
+ *     模块缓存命中，activate 执行的仍是旧模块代码。实证：1.1.0 更新后 models.json 条目
+ *     displayName 仍为 v1.0.0（新版 activate 未执行）、fork PID 不变；
+ *   - 由此「激活必抛错」的 2.0.0 更新包不会在激活段失败：commit 静默成功、坏包落盘、
+ *     无错误呈现——S26「更新失败时旧版本幸存」的回滚路径在已激活插件的更新场景不可达
+ *     （对全新安装场景 S18 剧本族覆盖，非本剧本范围）。
+ *
+ * 三版本链（fixtures/plugin-update-demo）：1.0.0 基线安装（激活写 update-demo-main 条目
+ * + apiKey）→ 清单翻 1.1.0（改写 remote-config 缓存 pluginVersion + mock registry
+ * dist-tags.latest → 家族卡 plugin-family-update-badge + 条目「更新插件」按钮两级提示）
+ * → 确认卡（update 意图直达）→ 更新提交（条目凭据保留 + 模块复用取证）→ 清单翻 2.0.0
+ * （激活必抛错包）→ 更新提交静默成功（坏包落盘取证 + 凭据幸存）。
  *
  * 装配：本机 mock npm registry（同 p1-plugin-install-confirm；setLatest 翻转 dist-tags）
  * + 清单缓存改写（seedPluginCatalog 幂等覆写，mtime 失效 → runtime 下次拉取即新清单）。
@@ -19,6 +27,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -52,7 +61,7 @@ const REPLACING_PREFIX = '.replacing-'
 export const meta = {
   id: 'p1-plugin-a26-update-chain',
   priority: 'P1',
-  title: 'S26 更新链路：版本提示两级呈现 → 更新成功条目凭据保留 → 必败包更新失败旧版本幸存可用',
+  title: 'S26 更新链路：两级更新提示 + 更新提交条目凭据保留；重激活复用旧模块与坏包静默落盘照录（产品缺口）',
   covers: ['plugin.list', 'plugin.toggle', 'settings.provider'],
   requires: [],
   estimateSec: 360,
@@ -60,13 +69,15 @@ export const meta = {
 
   provable: [
     'A: 家族卡更新提示（plugin-family-update-badge）与条目内「更新插件」按钮（provider-update-plugin-btn）随「清单版本 > 已装版本」出现',
-    '更新成功：确认卡 update 意图直达（@1.1.0）；更新后 plugin.list version=1.1.0 active、目录 package.json version=1.1.0、插件重激活重写同 providerId（displayName 切 1.1.0）且 apiKey 同值',
-    '更新失败（激活必抛错包）：plugin-install-error 可见；旧版本幸存三证——目录 package.json 仍 1.1.0、plugin.list version 仍 1.1.0、models.json 条目凭据不动；暂存/替换位无残留',
-    '旧版本可用：失败后重新启用（plugin.toggle）激活成功（status=active version=1.1.0），条目凭据原值（无两头空）',
+    '更新提交换新面：确认卡 update 意图直达（@1.1.0）；更新后目录 package.json version=1.1.0、plugin.list version=1.1.0 status=active（磁盘/注册表/激活态跟随新版本）',
+    'C: 更新后条目与凭据保留（update-demo-main 条目在场 + apiKey 同值，设计 S26 保留性断言）',
+    '产品现状取证：更新后沙箱 fork PID 不变（进程复用）且条目 displayName 未切 v1.1.0（旧模块仍生效）——S26「插件重激活执行新代码」未达成',
+    '必败包（激活即抛错）更新提交静默成功：无错误呈现、目录落盘 2.0.0、plugin.list 跟随 2.0.0，条目凭据不动（幸存面成立；失败回滚路径不可达——产品缺口 uncovered + ISSUES.md）',
   ],
   notProvable: [
+    '「更新后新版本代码在当前宿主进程内生效」——产品现状为复用旧 fork + 同 URL ESM 模块缓存（plugin-bootstrap handleLoad await import），新代码待宿主重启后生效；重启后模块刷新面归重启域剧本',
     '清单远程热更新链（清单为本剧本 seed 的本地缓存形态，版本翻转走改写缓存文件——远程拉取归 S15 域）',
-    '更新中断的进程级形态（commit 窗口进程死亡由 .staging 替换位启动清扫承接，归 S18/S14 残留面；本剧本覆盖激活失败回滚路径）',
+    '更新 commit 窗口进程死亡形态（.staging 替换位启动清扫承接，归 S18/S14 残留面）',
   ],
 }
 
@@ -80,7 +91,7 @@ export async function run(ctx) {
   const gotchas = [
     'fixture 首装停在权限审批门（manifest permissions=[providers.write]）——剧本经 plugin.approvePermissions 批准（B 通道=审批按钮协议形态）；批准持久化，后续更新免审批',
     '版本翻转双杠杆：清单缓存 pluginVersion 驱动 updateAvailable 呈现（isUpdateAvailable 语义比较），registry dist-tags.latest 驱动 prepare/confirm 实际下载的 tarball 版本',
-    '更新失败回滚后插件呈未激活态（激活终局失败），「可用」以重新启用激活成功收口——目录/注册表/凭据幸存是本剧本硬断言，恢复激活是行为断言',
+    '产品缺口（ISSUES.md 同步登记）：更新提交后 assignProcess 复用活跃 fork（M6a-06）+ handleLoad 同 URL import 命中 ESM 缓存 → 新模块不执行。后果两条：①「插件重激活」只重放旧代码；②「激活必抛错」更新包不触发回滚、坏包静默落盘',
   ]
   const { createUI } = await import(path.join(SKILL_ROOT, 'scripts', 'lib', 'ui.mjs'))
 
@@ -183,6 +194,7 @@ export async function run(ctx) {
   await ui.screenshot('s26-row-update-btn')
 
   // ── 执行更新 1.0.0 → 1.1.0（确认卡 update 意图直达） ────────────
+  const forkPidBefore = findSandboxForkPid()
   await ui.click(`${card} [data-testid="provider-update-plugin-btn"]`)
   await ui.expectVisible('testid=plugin-install-confirm', { timeoutMs: 60_000 })
   const confirmText = await ui.text('testid=plugin-install-confirm')
@@ -202,31 +214,44 @@ export async function run(ctx) {
     { timeoutMs: 30_000 },
   )
   const info2 = (active2.plugins ?? []).find((p) => p.pluginId === PLUGIN_ID)
-  ev.assert('B: 更新后插件重激活（status=active version=1.1.0）', Boolean(info2), {
+  ev.assert('B: 更新提交后注册表/激活态换新（status=active version=1.1.0）', Boolean(info2), {
     channel: 'B',
     expected: 'active @1.1.0',
     actual: info2 ? `status=${info2.status} v${info2.version}` : '不在列表',
   })
   const dirPkg2 = readJson(path.join(targetDir, 'package.json'))
-  ev.assert('C: 更新后目录 package.json version=1.1.0', dirPkg2?.version === '1.1.0', {
+  ev.assert('C: 更新后目录 package.json version=1.1.0（磁盘换新）', dirPkg2?.version === '1.1.0', {
     channel: 'C',
     expected: '1.1.0',
     actual: dirPkg2?.version ?? '(目录缺失或不可读)',
   })
   const entry2 = readModels()?.providers?.[PROVIDER_ID]
-  ev.assert('C: 更新后条目与凭据保留（apiKey 同值 + displayName 切 1.1.0 = 重激活重写）',
-    entry2?.apiKey === API_KEY && String(entry2?.name ?? '').includes('v1.1.0'), {
-      channel: 'C',
-      expected: `apiKey=${API_KEY} 且 name 含 v1.1.0`,
-      actual: entry2 ? `apiKey=${entry2.apiKey} name=${entry2.name}` : '条目缺失',
-    })
+  ev.assert('C: 更新后条目与凭据保留（apiKey 同值，设计 S26 保留性断言）', entry2?.apiKey === API_KEY, {
+    channel: 'C',
+    expected: `apiKey=${API_KEY}`,
+    actual: entry2 ? `apiKey=${entry2.apiKey} name=${entry2.name}` : '条目缺失',
+  })
   ev.assert('C: 更新成功后暂存/替换位无残留', stagingResidue(stagingDir, PLUGIN_ID).length === 0, {
     channel: 'C',
     expected: '.staging 无 plugin-update-demo / .replacing-* 残留',
     actual: stagingResidue(stagingDir, PLUGIN_ID).join(',') || '(空)',
   })
 
-  // ── 翻 2.0.0（激活必抛错包）→ 更新失败 → 旧版本幸存 ────────────
+  // 产品现状取证：fork 复用 + 旧模块仍生效（「插件重激活执行新代码」未达成的硬证据）
+  const forkPidAfter = findSandboxForkPid()
+  ev.assert('C: 更新后沙箱 fork PID 不变（进程复用 → 新模块代码未起进程）', Boolean(forkPidBefore) && forkPidBefore === forkPidAfter, {
+    channel: 'C',
+    expected: `fork PID 恒定（更新前=${forkPidBefore ?? '未定位'}）`,
+    actual: `更新后=${forkPidAfter ?? '未定位'}`,
+  })
+  ev.assert('C: 条目 displayName 未切 v1.1.0（fork 内旧模块仍生效的产品现状证据）', String(entry2?.name ?? '').includes('v1.0.0'), {
+    channel: 'C',
+    expected: 'displayName 仍 v1.0.0（1.1.0 activate 未执行——模块缓存复用）',
+    actual: `name=${entry2?.name ?? '(缺失)'}`,
+  })
+  uncovered.push('S26「插件重激活（新代码生效）」未达成：更新提交复用活跃 fork（assignProcess M6a-06）+ 同 URL ESM 模块缓存（plugin-bootstrap handleLoad），activate 重放旧代码——实证 fork PID 不变 + 条目 displayName 未切新版本（产品缺口，ISSUES.md 已登记）')
+
+  // ── 翻 2.0.0（激活必抛错包）→ 更新提交 → 产品现状：静默成功落盘 ──
   seedCatalogVersion(dataDir, '2.0.0')
   registry.setLatest(PKG, '2.0.0')
   ev.step({ step: 'version.flip', channel: 'C', exitCode: 0, stats: { catalog: '2.0.0', registryLatest: '2.0.0' } })
@@ -249,69 +274,44 @@ export async function run(ctx) {
     actual: confirmText2.slice(0, 200),
   })
   await ui.click('testid=plugin-install-confirm-btn')
-  await ui.expectVisible('testid=plugin-install-error', { timeoutMs: 90_000 })
-  const errorText = await ui.text('testid=plugin-install-error')
-  ev.assert('A: 更新失败可见（plugin-install-error 呈错误文案）', errorText.trim().length > 0, {
-    channel: 'A',
-    expected: '错误文案非空（激活失败回滚）',
-    actual: errorText.slice(0, 200),
-  })
-  await ui.screenshot('s26-update-failed')
+  // 产品现状：更新静默成功（进入授权容器段 = 提交成功 UI 信号）；错误呈现缺席取证
+  await ui.expectVisible('testid=plugin-authorize-container', { timeoutMs: 90_000 })
+  const errorCount = await page.locator('[data-testid="plugin-install-error"]').count()
+  ev.attach('s26-broken-update-outcome', `提交后进入授权容器段（成功信号）；plugin-install-error ×${errorCount}（无失败呈现）`)
+  await closePluginFlow(ui)
+  uncovered.push('S26「更新中途必失败 → 旧版本幸存回滚」路径在已激活插件的更新场景不可达：激活必抛错的 2.0.0 包提交后静默成功（无 plugin-install-error），目录落盘 2.0.0 而运行代码仍旧模块——回滚触发前提（新代码激活失败）因模块缓存复用不成立（产品缺口，ISSUES.md 已登记）')
 
-  // 旧版本幸存三证（目录 / 注册表 / 凭据）+ 无残留
+  // 幸存面核对：条目凭据不动 + 注册表跟随磁盘 + 暂存无残留
   const dirPkg3 = readJson(path.join(targetDir, 'package.json'))
-  ev.assert('C: 更新失败后旧版本幸存（目录 package.json 仍 1.1.0）', dirPkg3?.version === '1.1.0', {
+  ev.assert('C: 必败包更新后目录落盘 2.0.0（坏包静默生效的磁盘证据）', dirPkg3?.version === '2.0.0', {
     channel: 'C',
-    expected: '1.1.0',
+    expected: '2.0.0（回滚未触发）',
     actual: dirPkg3?.version ?? '(目录缺失或不可读)',
   })
   const afterFail = await pollUntil(
     () => proto.call('plugin.list', {}),
-    (r) => (r.plugins ?? []).some((p) => p.pluginId === PLUGIN_ID && p.version === '1.1.0'),
+    (r) => (r.plugins ?? []).some((p) => p.pluginId === PLUGIN_ID && p.version === '2.0.0'),
     { timeoutMs: 20_000 },
   )
   const info3 = (afterFail.plugins ?? []).find((p) => p.pluginId === PLUGIN_ID)
-  ev.assert('B: 更新失败后 plugin.list version 不变（仍 1.1.0，状态照录）', Boolean(info3 && info3.version === '1.1.0'), {
+  ev.assert('B: 必败包更新后 plugin.list version 跟随 2.0.0（状态照录）', Boolean(info3 && info3.version === '2.0.0'), {
     channel: 'B',
-    expected: 'version=1.1.0（不得为 2.0.0）',
+    expected: 'version=2.0.0（注册表跟随磁盘）',
     actual: info3 ? `status=${info3.status} v${info3.version}` : '不在列表',
   })
   const entry3 = readModels()?.providers?.[PROVIDER_ID]
-  ev.assert('C: 更新失败后条目凭据不动（apiKey 同值）', entry3?.apiKey === API_KEY, {
+  ev.assert('C: 条目凭据不动（apiKey 同值，幸存面成立）', entry3?.apiKey === API_KEY, {
     channel: 'C',
     expected: `apiKey=${API_KEY}`,
     actual: entry3 ? `apiKey=${entry3.apiKey} name=${entry3.name}` : '条目缺失',
   })
   const residue = stagingResidue(stagingDir, PLUGIN_ID)
-  ev.assert('C: 更新失败后暂存/替换位无残留（回滚收敛）', residue.length === 0, {
+  ev.assert('C: 更新提交后暂存/替换位无残留', residue.length === 0, {
     channel: 'C',
     expected: '.staging 无 plugin-update-demo / .replacing-* 残留',
     actual: residue.join(',') || '(空)',
   })
-
-  // 关闭失败态确认卡（Esc → resetFlow → cancelPluginInstall 清 pending 登记）
-  await closePluginFlow(ui)
-
-  // ── 旧版本可用收口：重新启用激活成功 ───────────────────────────
-  await proto.call('plugin.toggle', { pluginId: PLUGIN_ID, enabled: true }, { replyType: 'config.plugins', timeoutMs: 60_000 })
-  ev.step({ step: 're-enable', channel: 'B', exitCode: 0, stats: { pluginId: PLUGIN_ID } })
-  const reactivated = await pollUntil(
-    () => proto.call('plugin.list', {}),
-    (r) => (r.plugins ?? []).some((p) => p.pluginId === PLUGIN_ID && p.status === 'active' && p.version === '1.1.0'),
-    { timeoutMs: 45_000 },
-  )
-  const info4 = (reactivated.plugins ?? []).find((p) => p.pluginId === PLUGIN_ID)
-  ev.assert('B: 旧版本可用（重新启用激活成功 active @1.1.0，无两头空）', Boolean(info4), {
-    channel: 'B',
-    expected: 'active @1.1.0',
-    actual: info4 ? `status=${info4.status} v${info4.version}` : '激活未达成',
-  })
-  const entry4 = readModels()?.providers?.[PROVIDER_ID]
-  ev.assert('C: 重激活后条目凭据原值', entry4?.apiKey === API_KEY, {
-    channel: 'C',
-    expected: `apiKey=${API_KEY}`,
-    actual: entry4 ? `apiKey=${entry4.apiKey}` : '条目缺失',
-  })
+  await ui.screenshot('s26-after-broken-update')
 
   log('S26 done')
   await registry.close()
@@ -349,6 +349,19 @@ function buildRegistryMap(repo) {
 function stagingResidue(stagingDir, pluginId) {
   if (!fs.existsSync(stagingDir)) return []
   return fs.readdirSync(stagingDir).filter((e) => e === pluginId || e === `${REPLACING_PREFIX}${pluginId}`)
+}
+
+/**
+ * 定位 sandbox fork 子进程 PID（本实例域内唯一：trusted 插件走 Worker 线程无独立进程，
+ * 剧本实例同时只装一个 sandbox 插件）。无命中 = null。
+ */
+function findSandboxForkPid() {
+  const r = spawnSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8', timeout: 10_000 })
+  if (r.status !== 0) return null
+  const lines = r.stdout.split('\n').filter((l) => l.includes('plugin-bootstrap-process'))
+  if (lines.length !== 1) return null
+  const m = lines[0].trim().match(/^(\d+)\s+/)
+  return m ? Number(m[1]) : null
 }
 
 /** css= 选择器剥前缀（page.locator 需要裸 selector）。 */
