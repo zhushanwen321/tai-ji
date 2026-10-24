@@ -149,10 +149,18 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
   // 与基线 uuidv7 是两个永不相等的 id 空间（mutations.ts prependHistory 同款论证），
   // 不会被误判已确认。
   const baselineIds = new Set<string>()
-  for (const m of baseline) {
-    if (m.piEntryId !== undefined) baselineIds.add(m.piEntryId)
+  // [turn-key 身份保留 2026-10-24] 基线下标反查表（首次出现优先——entry id/id 在基线内唯一，
+  // 防御性取首）：供命中分区消息回查自己对应的基线副本下标，见函数尾「身份保留」。
+  const baselineIdxByEntryId = new Map<string, number>()
+  const baselineIdxById = new Map<string, number>()
+  baseline.forEach((m, i) => {
+    if (m.piEntryId !== undefined) {
+      baselineIds.add(m.piEntryId)
+      if (!baselineIdxByEntryId.has(m.piEntryId)) baselineIdxByEntryId.set(m.piEntryId, i)
+    }
     baselineIds.add(m.id)
-  }
+    if (!baselineIdxById.has(m.id)) baselineIdxById.set(m.id, i)
+  })
   // [steer-bubble Gate B 修复 2026-08-30] user 文本多重集判据（第三判据）：
   // AC-2 实跑暴露的结构性竞态——pi 文件（基线源）对「message_end(user) 帧已落盘但帧
   // 仍在途」的消息领先于 live 帧流，此时 overlay（乐观/路径 1 投递插入，身份判据结构性
@@ -179,12 +187,15 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
     else baselineUserIdxByText.set(t, [i])
   })
   const consumedBaselineIdx = new Set<number>()
-  const consumeBaselineUserText = (t: string): boolean => {
-    if (!t) return false
+  // 返回值从 boolean 改为「被消费的基线副本下标 | null」（[turn-key 身份保留]：调用方
+  // 据此把分区已建立的消息 id 带到合并结果，见函数尾）。
+  const consumeBaselineUserText = (t: string): number | null => {
+    if (!t) return null
     const q = baselineUserIdxByText.get(t)
-    if (!q || q.length === 0) return false
-    consumedBaselineIdx.add(q.shift()!)
-    return true
+    if (!q || q.length === 0) return null
+    const idx = q.shift()!
+    consumedBaselineIdx.add(idx)
+    return idx
   }
   const identityConfirmed = (m: Message): boolean =>
     (m.piEntryId !== undefined && baselineIds.has(m.piEntryId)) || baselineIds.has(m.id)
@@ -192,10 +203,24 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
   // 新 overlay 错配到基线旧副本上，AC-2b 同文本双投递场景实测暴露）：
   // 'identity' = 前轮合并注入的基线派生视图；'text' = 与基线副本文本同源的 dup overlay；
   // false = 未确认（live-only 候选）。
+  // matchedBaselineIdx[i] = 分区第 i 条消息对应的基线副本下标（identity/text 命中才有值），
+  // 与 confirmKinds 同一次正序遍历产出（文本多重集消费序不变）。
   type ConfirmKind = 'identity' | 'text' | false
-  const confirmKinds: ConfirmKind[] = partition.map((m) => {
-    if (identityConfirmed(m)) return 'identity'
-    if (m.role === 'user' && consumeBaselineUserText(userMessageText(m))) return 'text'
+  const matchedBaselineIdx: Array<number | undefined> = []
+  const confirmKinds: ConfirmKind[] = partition.map((m, i) => {
+    if (identityConfirmed(m)) {
+      matchedBaselineIdx[i] =
+        (m.piEntryId !== undefined ? baselineIdxByEntryId.get(m.piEntryId) : undefined)
+        ?? baselineIdxById.get(m.id)
+      return 'identity'
+    }
+    if (m.role === 'user') {
+      const idx = consumeBaselineUserText(userMessageText(m))
+      if (idx !== null) {
+        matchedBaselineIdx[i] = idx
+        return 'text'
+      }
+    }
     return false
   })
 
@@ -230,9 +255,37 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
   const a = Math.min(protectedUserIdx.length, k)
   const alignedIdx = new Set(protectedUserIdx.slice(0, a))
   const keptTail = protectedSeg.filter((_, i) => !alignedIdx.has(i))
+  // [turn-key 身份保留 2026-10-24] 命中分区消息的已建立 id 带到合并结果：基线副本内容权威
+  // 不变，id 改用分区版本（identity 命中 = piEntryId/id 对应；text 命中 = 文本多重集配对，
+  // 配对序与上方去重消费完全一致，不引入第二套配对）。
+  //
+  // 为什么（缺陷背景，A8 三次复现）：分区 live 消息 id（user = 投递标记 clientUuid、
+  // assistant = a-<uuid>）与盘上 entry 派生 id（uuidv7 截短形态）是两个不相交空间
+  // （turn-expansion.ts 头注释同款论证）。本函数原实现一律以基线副本替换已确认消息，
+  // 任何 hydrated reconcile（重连对账 refreshHistory / 终态恢复 recoverStalledSession /
+  // 撤回后刷新）都会把整个分区换成 entry id 空间——turnStableId（M5 stable-key = 首条
+  // 消息 id）随之全变，turn-expansion 展开分区按旧 id 记录的展开态被静默挂空（C4 两段式
+  // 契约的「驻留期 turn 稳定 id 不变，手动展开保持」对 live-id 消息失守）：已展开回合
+  // 折叠、展开点击写旧 key 读新 key 恒 false。身份保留后，驻留期 reconcile 不再换 id，
+  // 展开态跨 reconcile 稳定；走盘重载（分区已空、无对应可保留）id 空间切换与 C4 显式
+  // 重置语义不受影响。
+  const adoptIdByBaselineIdx = new Map<number, string>()
+  partition.forEach((m, i) => {
+    const idx = matchedBaselineIdx[i]
+    if (idx !== undefined) adoptIdByBaselineIdx.set(idx, m.id)
+  })
   // 步骤③：respawn 提示条拣回重插（见函数头注释与 restoreRespawnNotices——不拣回则
   // 任何切入 reconcile 都会清掉 liveOnly 提示条）
-  return restoreRespawnNotices(partition, [...baseline.map((m) => ({ ...m })), ...keptTail])
+  return restoreRespawnNotices(
+    partition,
+    [
+      ...baseline.map((m, i) => {
+        const pid = adoptIdByBaselineIdx.get(i)
+        return pid !== undefined && pid !== m.id ? { ...m, id: pid } : { ...m }
+      }),
+      ...keptTail,
+    ],
+  )
 }
 
 /**

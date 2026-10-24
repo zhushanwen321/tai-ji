@@ -186,10 +186,11 @@ describe('createChatStore factory', () => {
           ])
           const msgs = sut.store.getMessages(sid)
           expect(msgs).toHaveLength(4)
-          // overlay 全剔（无客户端 id 残留）+ 每条文本恰一次（无双计）
-          expect(msgs.some((m) => m.id.startsWith('u-'))).toBe(false)
+          // 每条文本恰一次（无双计）。overlay 全剔语义 = 消费其基线副本（内容随基线权威）；
+          // [turn-key 身份保留] 后副本沿用分区已建立的客户端 id（id 不再换空间）
           expect(msgs.filter((m) => m.content === '注意用中文')).toHaveLength(1)
           expect(msgs.filter((m) => m.content === '顺便看下配置')).toHaveLength(1)
+          expect(msgs.map((m) => m.id)).toEqual(['ent-m1', 'ent-a1', 'u-ov1', 'u-ov2'])
         })
 
         it('部分滞后 n>k>0：快照在两次落盘之间取得 → s1_ov 剔、s2_ov 留（方向不能倒）', () => {
@@ -208,8 +209,9 @@ describe('createChatStore factory', () => {
             baselineUser('ent-s1', '第一条'),
           ])
           const msgs = sut.store.getMessages(sid)
-          // 正序-尾窗对齐：s1_ov ↔ s1_real 剔除、s2_ov 保留（快照全缺它）
-          expect(msgs.map((m) => m.id)).toEqual(['ent-m1', 'ent-a1', 'ent-s1', 'u-s2'])
+          // 正序-尾窗对齐：s1_ov ↔ s1_real 剔除、s2_ov 保留（快照全缺它）。
+          // [turn-key 身份保留] 被剔除的 s1_ov 以其已建立 id 显示基线副本
+          expect(msgs.map((m) => m.id)).toEqual(['ent-m1', 'ent-a1', 'u-s1', 'u-s2'])
           expect(msgs.filter((m) => m.content === '第一条')).toHaveLength(1) // 无双计
           expect(msgs.filter((m) => m.content === '第二条')).toHaveLength(1) // 不丢
           // 方向断言：倒序对齐（D3 不采用项）会把 s2_ov 错配 s1_real——上面两条恰捕获
@@ -233,7 +235,8 @@ describe('createChatStore factory', () => {
           ])
           const msgs = sut.store.getMessages(sid)
           expect(msgs).toHaveLength(4)
-          expect(msgs.some((m) => m.id.startsWith('u-'))).toBe(false) // overlay 被基线版本覆盖
+          // overlay 被基线版本覆盖（内容权威）；[turn-key 身份保留] id 沿用分区已建立 id
+          expect(msgs.map((m) => m.id)).toEqual(['ent-m1', 'ent-a1', 'u-s1', 'ent-s2'])
           expect(msgs.filter((m) => m.content === '第一条')).toHaveLength(1)
           expect(msgs.filter((m) => m.content === '第二条')).toHaveLength(1)
         })
@@ -330,7 +333,10 @@ describe('createChatStore factory', () => {
           const msgs = sut.store.getMessages(sid)
           // 修复前：k=0 → a=0 → overlay 保留 → 'AC2-R3-PROMPT' 双计（前端 2 条 / pi 1 条）
           expect(msgs.filter((m) => m.content === 'AC2-R3-PROMPT')).toHaveLength(1)
-          expect(msgs.some((m) => m.id === 'u-p')).toBe(false)
+          // [turn-key 身份保留] 文本命中的 overlay 被基线副本替换（无双计），但分区已建立的
+  // 消息 id（live clientUuid）带到合并结果——piEntryId 仍随基线副本（后续 reconcile 身份命中）
+          const merged = msgs.find((m) => m.content === 'AC2-R3-PROMPT')
+          expect(merged).toMatchObject({ id: 'u-p', piEntryId: 'ent-p' })
           // streaming 实体保留（live-only，基线没有进行中副本）
           expect(msgs.some((m) => m.id === 'a-tool' && m.status === 'streaming')).toBe(true)
         })
@@ -356,7 +362,45 @@ describe('createChatStore factory', () => {
           // 基线 1 条 + overlay 1 条 = 恰两条（次条落盘后下一轮 reconcile 收敛为基线版）
           expect(msgs.filter((m) => m.content === '同文本')).toHaveLength(2)
           expect(msgs.some((m) => m.id === 'u-t2')).toBe(true)
-          expect(msgs.some((m) => m.id === 'u-t1')).toBe(false)
+          // [turn-key 身份保留] u-t1 的文本命中副本以分区已建立 id 显示（不再换成基线 id），
+          // piEntryId 仍随基线副本
+          const t1 = msgs.find((m) => m.id === 'u-t1')
+          expect(t1).toMatchObject({ piEntryId: 'ent-t1' })
+        })
+
+        it('[turn-key 身份保留] hydrated reconcile 不换 live 消息 id（turn-expansion key 稳定性）', () => {
+          const sid = 's1'
+          // 首轮切入：基线注入（entry id 空间）
+          sut.store.hydrate(sid, [baselineUser('ent-m0', '早问'), completeAssistant('ent-a0', '早答')])
+          // live 期新增 turn（live id 空间：user = 投递标记 clientUuid、assistant = a-<uuid>）
+          sut.store.setMessages(sid, [
+            baselineUser('ent-m0', '早问'),
+            completeAssistant('ent-a0', '早答'),
+            overlayUser('u-live-1', '新问'),
+            completeAssistant('a-live-1', '新答'),
+          ])
+          // hydrated reconcile（重连对账 / 终态恢复 / 驻留切回共用通路）：基线已含 live turn 落盘副本
+          sut.store.reconcileHistory(sid, [
+            baselineUser('ent-m0', '早问'),
+            completeAssistant('ent-a0', '早答'),
+            baselineUser('ent-live-1', '新问'),
+            completeAssistant('ent-live-a1', '新答'),
+          ])
+          const msgs = sut.store.getMessages(sid)
+          // 内容随基线权威（4 条、无重复）。user 命中（文本配对）保留分区已建立 id——
+          // turnStableId = user.id（M5 stable-key）稳定，turn-expansion 展开态跨 reconcile 不挂空；
+          // assistant 无配对键，维持基线副本 id（turn key 不依赖它）
+          expect(msgs.map((m) => m.id)).toEqual(['ent-m0', 'ent-a0', 'u-live-1', 'ent-live-a1'])
+          // 身份随基线补全：命中副本带 piEntryId，下一轮 reconcile 走 identity 命中同 id 不变
+          expect(msgs[2]).toMatchObject({ piEntryId: 'ent-live-1' })
+          // 二次 reconcile（幂等）：user id 仍稳定
+          sut.store.reconcileHistory(sid, [
+            baselineUser('ent-m0', '早问'),
+            completeAssistant('ent-a0', '早答'),
+            baselineUser('ent-live-1', '新问'),
+            completeAssistant('ent-live-a1', '新答'),
+          ])
+          expect(sut.store.getMessages(sid).map((m) => m.id)).toEqual(['ent-m0', 'ent-a0', 'u-live-1', 'ent-live-a1'])
         })
 
         it('dup overlay 透明跳过：文本确认副本位于 streaming assistant 之前 → streaming 仍受保护', () => {

@@ -232,24 +232,25 @@ describe('chat store respawn 提示条 reconcile 保留（crash-resilience D7 �
     store.setMessages(sid, [...store.getMessages(sid), userMsg('u-1', '继续')])
     store.reconcileHistory(sid, [userMsg('m1'), userMsg('pi-u1', '继续')], { truncated: true, loadedTurns: 2, totalTurnsEstimate: 2 })
     const msgs = store.getMessages(sid)
-    // u-1 overlay 与基线 pi-u1 文本同源被去重；横幅锚定 m1 之后、pi-u1 之前（真实时序）
-    expect(msgs.map((m) => m.id)).toEqual(['m1', msgs[1]!.id, 'pi-u1'])
+    // u-1 overlay 与基线 pi-u1 文本同源被去重（内容随基线权威）；[turn-key 身份保留]
+    // 分区已建立 id（u-1）带到合并结果；横幅锚定 m1 之后、该消息之前（真实时序）
+    expect(msgs.map((m) => m.id)).toEqual(['m1', msgs[1]!.id, 'u-1'])
     expect(msgs[1]!.content).toBe('恢复横幅')
   })
 
-  it('前驱为 live-only overlay（reconcile 后被基线去重）：锚未命中 aIdx=-1 → 退化为尾部追加，仍恰好一条', () => {
+  it('前驱为 live-only overlay（reconcile 后被基线去重，id 保留）：锚命中 → 原时序位锚定，仍恰好一条', () => {
     const sid = 's6'
     store.hydrate(sid, [userMsg('m1')], { truncated: true, loadedTurns: 1, totalTurnsEstimate: 2 })
     // 崩溃前用户已发消息（live overlay，尚未落盘），恢复横幅在其后追加（真实时序：overlay → notice）
     store.setMessages(sid, [userMsg('m1'), userMsg('u-1', '继续')])
     store.appendRespawnNotice(sid, 'restored', '恢复横幅')
-    // reconcile：u-1 已落盘进基线（pi-u1 同文本）→ overlay 被文本判据去重；
-    // 提示条前驱 u-1 不在合并结果 → 锚未命中（aIdx=-1）→ 尾部追加（可见性优先）
+    // reconcile：u-1 已落盘进基线（pi-u1 同文本）→ overlay 被文本判据去重（内容随基线权威）；
+    // [turn-key 身份保留] 合并结果沿用分区已建立 id（u-1）→ 提示条前驱锚命中 → 原时序位锚定
     store.reconcileHistory(sid, [userMsg('m1'), userMsg('pi-u1', '继续')], { truncated: true, loadedTurns: 2, totalTurnsEstimate: 2 })
     const msgs = store.getMessages(sid)
     expect(msgs).toHaveLength(3)
-    // id 序列锚定：u-1 被去重不在结果（前驱消失 → 锚未命中），提示条尾部追加
-    expect(msgs.map((m) => m.id)).toEqual(['m1', 'pi-u1', msgs[2]!.id])
+    // id 序列锚定：u-1 的 id 在结果中保留（去重只换内容不换身份），提示条锚其之后
+    expect(msgs.map((m) => m.id)).toEqual(['m1', 'u-1', msgs[2]!.id])
     expect(msgs[2]!.id.startsWith('sys-')).toBe(true)
     expect(msgs[2]!.customType).toBe(PI_RESPAWN_NOTICE_CUSTOM_TYPE)
     expect(msgs[2]!.liveOnly).toBe(true)
