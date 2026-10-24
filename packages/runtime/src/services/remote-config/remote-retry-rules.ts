@@ -138,17 +138,14 @@ export function setRetryRulesCustom(
  * setRetryRulesCustom 同为本文件写侧）。
  */
 export async function syncRetryRulesRemote(): Promise<{ refreshed: boolean; reason?: string }> {
-  const path = retryRulesExtConfigPath()
-  const existed = existsSync(path)
-  // 拉取先行（4h 节流 + ETag + fail-safe 链内建；失败也走缓存/基线，不阻断下方补写）。
-  const { data, refreshed, reason } = await refreshRemoteConfig('retry-rules', isRetryRulesRemoteConfig)
-  if (!existed) {
-    // [G1] 缺席即补写（effectiveRules = 编译期基线 ⊕ 可用远程层刚拉取结果）。
-    writeRetryRulesExtConfig({ version: 1, customRules: [], effectiveRules: computeEffectiveRules([]) })
-    return { refreshed: true }
-  }
-  if (!data || !refreshed) return { refreshed: false, ...(reason !== undefined ? { reason } : {}) }
+  // 拉取先行（4h 节流 + ETag + fail-safe 链内建；失败也走缓存/基线，不阻断下方重算）。
+  const { refreshed, reason } = await refreshRemoteConfig('retry-rules', isRetryRulesRemoteConfig)
+  // [§3.3.12 G1/G1b] effectiveRules 是 runtime 拥有的**派生段**（extension 判定唯一消费
+  // 面，用户只编辑 customRules）——每次同步无条件重算落盘（编译期基线 ⊕ 可用远程层 ⊕
+  // 现有 customRules），与文件在场/远程命中均无关。幂等写、单写方纪律不变；extension
+  // startupConfig 在启动早期建的占位文件（空 effectiveRules）由此被覆盖，基线规则
+  // 默认生效（a8d 实测缺口：仅缺席补写会被该占位机制旁路）。
   const current = readRetryRulesExtConfig()
   writeRetryRulesExtConfig({ version: 1, customRules: current.customRules, effectiveRules: computeEffectiveRules(current.customRules) })
-  return { refreshed: true }
+  return refreshed ? { refreshed: true } : { refreshed: false, ...(reason !== undefined ? { reason } : {}) }
 }

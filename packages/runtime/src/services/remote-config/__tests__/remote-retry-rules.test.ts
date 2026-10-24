@@ -134,6 +134,18 @@ describe('syncRetryRulesRemote 远程生效落盘', () => {
     expect(raw.effectiveRules.map((r: RetryableErrorRule) => r.id)).toContain('remote-a')
   })
 
+  it('[G1b] extension startupConfig 占位文件（空 effectiveRules）→ 同步无条件重算补基线', async () => {
+    // 真实启动顺序：extension taiji.startupConfig 在 t<2s 先建占位（空 effectiveRules）
+    writeExtConfig({ version: 1, customRules: [], effectiveRules: [] })
+    mockRemoteFetch({ version: 1, rules: [builtinRule('remote-b')] })
+    const mod = await loadFresh()
+    await mod.syncRetryRulesRemote()
+    const raw = JSON.parse(readFileSync(EXT_CONFIG_PATH(), 'utf-8'))
+    expect(raw.customRules).toEqual([])
+    expect(raw.effectiveRules.length).toBeGreaterThan(0) // 占位被派生段覆盖
+    expect(raw.effectiveRules.map((r: RetryableErrorRule) => r.id)).toContain('remote-b')
+  })
+
   it('ext-config 在场：refreshed 时 effectiveRules 重算落盘，customRules 保留', async () => {
     writeExtConfig({
       version: 1,
