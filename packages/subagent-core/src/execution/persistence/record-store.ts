@@ -42,8 +42,8 @@
 // | markResurrected(record, wasClosed) | 磁盘终态位翻回活态（acquire-first + 内存翻回 + register，单 try 域原子收敛，任一步失败响亮抛错，D3c） | `.alive` 写（writeSync）先 → 内存翻回 + register（无磁盘终态位清理——磁盘终态由事件流折叠判定，翻回由 record-reopened 帧表达） |
 // | acquireWriteLease(sessionFile, id) | store 内部 acquire 动作（writeAliveMarker 唯一包装；spawn 侧 sessionFile 回填挂钩用，D3a 时机①，U2b 消费） | `.alive` 写（失败响亮抛错） |
 //
-// ── legacy 例外原语（workflow D7 例外族 / 监督器放弃专用；新调用面禁用）──
-// | markFinalized(record, reason) | closed 终态化（仅 workflow D7 例外族 / 监督器放弃族消费——引擎死亡走正常轮终 error 停因，无独立死亡写点；副作用编排 abort/kill/disarm/CAS/promote 留调用方） | binding 快照（updateRecordBinding，best-effort）→ entry/archive → 终态 manifest writeSync → `.alive` 删（`.state` 收条已退场——磁盘终态由事件流 record-settled 帧判定） |
+// ── legacy 例外原语（workflow D7 例外族专用；新调用面禁用）──
+// | markFinalized(record, reason) | closed 终态化（仅 workflow D7 例外族消费——引擎死亡走正常轮终 error 停因，无独立死亡写点；副作用编排 abort/kill/disarm/CAS/promote 留调用方） | binding 快照（updateRecordBinding，best-effort）→ entry/archive → 终态 manifest writeSync → `.alive` 删（`.state` 收条已退场——磁盘终态由事件流 record-settled 帧判定） |
 // | markCancelled(record) | cancelled 终态化（仅 workflow D7 例外族 abort 路径；tombstone endedAt） | 同 markFinalized 写序（legacyTerminalWrite 共用编排，恒返回 true） |
 //
 // ── [永久会话模型 / u-foundation 骨架] 新意图原语（设计 subagent-permanent-session-model.md

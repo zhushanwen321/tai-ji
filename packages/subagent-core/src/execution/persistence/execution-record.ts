@@ -12,7 +12,8 @@
 //                   的原始缺陷已由「identity 字段创建时一次确定」的收拢本身消解，
 //                   undefined 是合法缺席语义而非丢失）
 //   updateFromEvent 唯一事件更新入口（薄委托 SDK reducer 单源，见下）
-//   completeLegacyClosed 唯一 legacy 终态冻结入口（D7 例外族 / 监督器放弃，W4 sunset）
+//   completeLegacyClosed 唯一 legacy 终态冻结入口（workflow D7 例外族——settleWorkflowRecord
+//   收尾 / doFinalizeRecord 编排性收尾；旧监督器放弃支已随 924ace33f 清退，W4 sunset）
 //   project/snapshot 唯一派生视图入口（两路径字段一致）
 //
 // reducer 单源（subagent-observability §3.3.5 双 reducer 合一）：updateFromEvent 的唯一
@@ -549,7 +550,8 @@ export function markReconstructedStatus(
 }
 
 /**
- * 意图原语：legacy closed 终态冻结（D7 例外族 / 监督器放弃的终态写点）。
+ * 意图原语：legacy closed 终态冻结（workflow D7 例外族的终态写点；旧监督器放弃
+ * 支已随 924ace33f 清退）。
  * 冻结状态（写 endedAt/agentResult/result/error/outcome）。
  * 不修改 turns/totalTokens——已由 updateFromEvent 累积，本函数只读不重置。
  *
@@ -655,7 +657,7 @@ export function deriveOutcome(
  *
  * 桥接不变量（两态迁移，U2 起）：旧 closed 终态读形态 ⟺ idle ∧ closedReason 有值。
  * markSettled/markRoundIdle 产出的轮间 idle 不携带 closedReason（新侧语义——settle
- * 不是终态），不命中本谓词；旧终态遗留（D7 例外族终态、监督器放弃、v1 数据、manifest
+ * 不是终态），不命中本谓词；旧终态遗留（D7 例外族终态、v1 数据、manifest
  * 读侧）命中。
  *
  * [W2 D5 兼容位] closedReason 是读侧兼容位（设计 D5：随 W4 sunset 退役），本谓词是
