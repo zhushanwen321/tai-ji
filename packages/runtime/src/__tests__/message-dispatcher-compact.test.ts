@@ -4,22 +4,27 @@
  * 锁定（SSOT §3.3.4 dispatcher compact 改三件事）：
  * - TC5: compact 方法零广播——成功/失败/busy 预检路径均不广播 session.compacting/compacted/compactionSummary
  *        （compaction 生命周期由 interpreter 从 compaction_start/compaction_end 唯一编排，P-dedup by construction）
- * - busy 预检补 isCompacting：并发 compact 重入（isCompacting=true）→ 抛错 + 零广播
- * - busy 预检 isBashRunning/isGenerating：仍生效，抛错 + 零广播
- * - catch 只复位 isCompacting + 传播 RPC error（零广播，失败提示归 interpreter）
+ * - busy 预检补 compacting：并发 compact 重入（occupancy.compacting=true）→ 抛错 + 零广播
+ * - busy 预检 bash/turn 占用（occupancy.bash / isGeneratingTurn）：仍生效，抛错 + 零广播
+ * - catch 只复位 compacting + 传播 RPC error（零广播，失败提示归 interpreter）
+ *
+ * [chat-flow-consistency D1] 原 IManagedSessionView 派生三布尔（isGenerating/isCompacting/
+ * isBashRunning）已删，busy 预检改为读 occupancy 四维状态字（bash 维 / isGeneratingTurn(turn) /
+ * compacting 维）——测试占用态经转移原语构造（fixture 直写禁令对测试同样生效）。
  *
  * 运行：npx vitest run src/__tests__/message-dispatcher-compact.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MessageDispatcher } from '../services/session/message-dispatcher.js'
+import { applySessionOccupancyTransition } from '../services/session/event-interpreter.js'
 import type { IDispatcherSessionOps } from '../services/session/session-internal.js'
-import type { IManagedSessionView } from '../services/session/types.js'
+import type { IManagedSessionView, SessionOccupancyTransition } from '../services/session/types.js'
 import type { IMessageBus } from '../services/message-bus/message-bus.js'
 import type { IPiEngine, IProcessManager } from '../services/ports/pi-engine.js'
 import type { ServerMessage } from '@taiji/shared'
 import type { WorkspaceService } from '../services/workspace/workspace-service.js'
 
-function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManagedSessionView {
+function makeMockSession(): IManagedSessionView {
   return {
     id: 's1',
     cwd: '/test',
@@ -29,21 +34,24 @@ function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManaged
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-        bashRunToken: undefined,
-    ...overrides,
+    bashRunToken: undefined,
   }
 }
 
 interface MockOpts {
-  isBashRunning?: boolean
-  isGenerating?: boolean
-  isCompacting?: boolean
+  /** busy 预检占用态的转移序列（经转移原语构造，禁止 fixture 直写 occupancy） */
+  busyTransitions?: SessionOccupancyTransition[]
   compactResult?: unknown
   compactError?: Error
 }
 
 function makeMocks(opts: MockOpts = {}) {
-  const session = makeMockSession({})
+  const session = makeMockSession()
+  // 占用态经转移原语构造（publish 传 null：本文件只捕获 dispatcher 自身的广播，
+  // occupancy state 帧不参与断言）
+  for (const transition of opts.busyTransitions ?? []) {
+    applySessionOccupancyTransition(session, null, transition)
+  }
 
   const compactFn = opts.compactError
     ? vi.fn(async () => { throw opts.compactError! })
@@ -78,7 +86,7 @@ const COMPACTION_TYPES = ['session.compacting', 'session.compacted', 'message.co
 describe('MessageDispatcher compact —— 零广播（M4 事件驱动）', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('TC5-成功: compact 成功 → 零 compaction 广播（interpreter 唯一源）+ client.compact 调用 + isCompacting 不置位', async () => {
+  it('TC5-成功: compact 成功 → 零 compaction 广播（interpreter 唯一源）+ client.compact 调用 + compacting 不置位', async () => {
     const { dispatcher, compactFn, session, broadcasts } = makeMocks()
 
     await dispatcher.compact('s1')
@@ -92,8 +100,8 @@ describe('MessageDispatcher compact —— 零广播（M4 事件驱动）', () =
     expect(compactionBroadcasts).toHaveLength(0)
   })
 
-  it('TC5-busy预检补isCompacting: isCompacting=true → 抛错 + 零广播（防并发 compact 重入）', async () => {
-    const { dispatcher, compactFn, broadcasts } = makeMocks({ isCompacting: true })
+  it('TC5-busy预检补compacting: occupancy.compacting=true → 抛错 + 零广播（防并发 compact 重入）', async () => {
+    const { dispatcher, compactFn, broadcasts } = makeMocks({ busyTransitions: ['compacting-start'] })
 
     await expect(dispatcher.compact('s1')).rejects.toThrow(/compaction already running/)
     expect(compactFn).not.toHaveBeenCalled()
@@ -102,8 +110,8 @@ describe('MessageDispatcher compact —— 零广播（M4 事件驱动）', () =
     expect(compactionBroadcasts).toHaveLength(0)
   })
 
-  it('TC5-busy预检: isBashRunning=true → 抛错 + 零广播', async () => {
-    const { dispatcher, broadcasts } = makeMocks({ isBashRunning: true })
+  it('TC5-busy预检: occupancy.bash=true → 抛错 + 零广播', async () => {
+    const { dispatcher, broadcasts } = makeMocks({ busyTransitions: ['bash-start'] })
 
     await expect(dispatcher.compact('s1')).rejects.toThrow(/bash running/)
 
@@ -111,8 +119,8 @@ describe('MessageDispatcher compact —— 零广播（M4 事件驱动）', () =
     expect(compactionBroadcasts).toHaveLength(0)
   })
 
-  it('TC5-busy预检: isGenerating=true → 抛错 + 零广播', async () => {
-    const { dispatcher, broadcasts } = makeMocks({ isGenerating: true })
+  it('TC5-busy预检: turn=generating（isGeneratingTurn）→ 抛错 + 零广播', async () => {
+    const { dispatcher, broadcasts } = makeMocks({ busyTransitions: ['generating'] })
 
     await expect(dispatcher.compact('s1')).rejects.toThrow(/agent generating/)
 
@@ -120,7 +128,7 @@ describe('MessageDispatcher compact —— 零广播（M4 事件驱动）', () =
     expect(compactionBroadcasts).toHaveLength(0)
   })
 
-  it('TC5-catch: client.compact reject → 传播 error + 零广播 + isCompacting 复位', async () => {
+  it('TC5-catch: client.compact reject → 传播 error + 零广播 + compacting 复位', async () => {
     const { dispatcher, session, broadcasts } = makeMocks({ compactError: new Error('pi compact failed') })
 
     await expect(dispatcher.compact('s1')).rejects.toThrow('pi compact failed')

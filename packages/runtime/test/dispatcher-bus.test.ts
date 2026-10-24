@@ -12,7 +12,9 @@
  * - hook blocked → bus.publish(message.error)
  * - hook error → bus.publish(message.error)
  * - abort failure → bus.publish(message.error)
- * - abort success → bus.publish(message.complete)
+ * - abort success（三分型型1: 有回合可中止）→ bus.publish(message.complete)；
+ *   idle 入口（型3）/ 用户压缩取消（型2）→ no-op 零广播
+ * - abort convergence（型1）→ 终态 reason 'Convergence abort (auto)'
  * - sendBash ensureActive fail → bus.publish(message.error)
  * - sendBash busy → bus.publish(send.rejected)
  * - sendBash start → bus.publish(message.bashStart)
@@ -185,13 +187,28 @@ describe('message-dispatcher bus integration', () => {
     }))
   })
 
-  it('abort success → bus.publish(message.complete{stopReason:aborted})', async () => {
-    const { dispatcher, messageBus } = makeMocks()
+  it('abort success（型1: turn=generating 有回合可中止）→ bus.publish(message.complete{stopReason:aborted})', async () => {
+    // [chat-flow-consistency abort 入口三分型] 成功路径收尾只在型 1（入口快照 turn ∈
+    // {dispatching, generating}）发生：stopped 终态 + complete{aborted} 广播。
+    // 旧用例在 idle 入口断言广播——三分型后 idle/settling 入口为型 3 no-op（见下一条）。
+    const { dispatcher, messageBus, svc } = makeMocks({ isGenerating: true })
     await dispatcher.abort('s1')
+    expect(svc.persistSessionOutcome).toHaveBeenCalledWith('s1', 'stopped', 'User aborted')
     expect(messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({
       type: 'message.complete',
       payload: expect.objectContaining({ sessionId: 's1', stopReason: 'aborted' }),
     }))
+  })
+
+  it('abort 已空闲（型3: turn=idle 无回合可中止）→ no-op：零 stopped 终态 + 零 message.complete', async () => {
+    // 三分型：idle/settling 入口 pi 侧 abort 幂等 no-op——done 终态已写不覆盖（覆盖即谎报
+    // 「回合被中止」）、无流式实体可收尾不广播 complete、occupancy 不动；队列对账照跑。
+    const { dispatcher, svc, messageBus } = makeMocks()
+    await dispatcher.abort('s1')
+    expect(svc.persistSessionOutcome).not.toHaveBeenCalled()
+    const types = messageBus.publish.mock.calls.map(([, m]) => (m as { type: string }).type)
+    expect(types).not.toContain('message.complete')
+    expect(types).not.toContain('message.error')
   })
 
   // ── [compaction-cancel] 压缩期中止（composer 发送位「终止压缩」钮，2026-10 用户裁决）──
@@ -220,10 +237,12 @@ describe('message-dispatcher bus integration', () => {
     }))
   })
 
-  it('abort 压缩期但 source=convergence → 不走压缩取消语义（收敛环保持 stopped 终态）', async () => {
-    // 压缩取消语义仅限 source='user'（composer/sidebar 停止路径）；收敛环/静默 abort 的
-    // 诊断终态不受按钮形态变化影响。
-    const { dispatcher, svc } = makeMocks({ isCompacting: true })
+  it('abort source=convergence（型1: turn=generating）→ 终态 reason 写 Convergence abort (auto)', async () => {
+    // [U2 + abort 三分型] 收敛环掐的是 runtime 自动收敛的补发 turn，终态 reason 不得谎报
+    // 用户操作语义（'Convergence abort (auto)' ≠ 'User aborted'）。压缩取消语义仅限
+    // source='user'——收敛环在压缩期（无回合可中止）落型 3 no-op，可观测行为与用户停止
+    // 同型（零终态零广播），旧用例锁的「压缩期 convergence 写 stopped」已随三分型退役。
+    const { dispatcher, svc } = makeMocks({ isGenerating: true })
     await dispatcher.abort('s1', 'convergence')
     expect(svc.persistSessionOutcome).toHaveBeenCalledWith('s1', 'stopped', 'Convergence abort (auto)')
   })

@@ -33,14 +33,14 @@ interface HarnessView {
   id: string
   cwd: string
   lastActiveAt: number
-  occupancy: IManagedSessionView['occupancy']
+  occupancy: NonNullable<IManagedSessionView['occupancy']>
 }
 
 /** occupancy 字面量助手（U1 派生三布尔退役后，占用态以四维状态字表达） */
 function occ(
   turn: 'idle' | 'generating',
   extra?: Partial<{ compacting: boolean; bash: boolean; handingOff: boolean }>,
-): IManagedSessionView['occupancy'] {
+): NonNullable<IManagedSessionView['occupancy']> {
   return { turn, compacting: false, bash: false, handingOff: false, ...extra }
 }
 
