@@ -555,6 +555,9 @@ function printReport({ out, err, root, keepDays, keepDaysSrc, listing, sources, 
     const entry = plan.entries.find((a) => a.name === name)
     out.write(`  - ${name}（形态=${entry.form}，mtime 主语=${entry.cond3.mtimeSource}）\n`)
   }
+  // 点检记录确认行对两个形态都打印：dry-run 是默认形态且点检记录已先落盘
+  // （main 先写文件再打报告）——操作者看不到确认会误判未生成而重跑或漏交验收凭据
+  if (recordPath) out.write(`[sweep] 点检记录已写入 ${recordPath}\n`)
   if (!applied) {
     out.write('[sweep] dry-run：未执行任何删除（只读点检）。真实删除加 --apply；prod 树还须 --allow-prod。\n')
     return
@@ -568,7 +571,6 @@ function printReport({ out, err, root, keepDays, keepDaysSrc, listing, sources, 
     }
     err.write('[sweep] 环境故障：失败集合 F 非空 → 本轮判环境故障、整轮重来（重跑时点检与删除清单重新求值，不重放本次冻结清单）。\n')
   }
-  if (recordPath) out.write(`[sweep] 点检记录已写入 ${recordPath}\n`)
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
