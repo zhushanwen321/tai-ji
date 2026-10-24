@@ -76,8 +76,8 @@ export interface ReconcileSweepDeps {
   lookupRecordState: (id: string) => SupervisedRecordState;
   /**
    * [F2] workflow run 状态判据（type=workflow 及畸形条目的收尾依据）。生产装配查
-   * 共享判定核（service-binding → persistence/run-state-evidence 的
-   * findRunSettlementEvidence）。
+   * 共享判定核（execution/registry-reconcile/sweep-binding.ts →
+   * persistence/run-state-evidence 的 findRunSettlementEvidence）。
    * 缺省（未注入）= workflow/畸形条目无收尾通道，保守跳过（skippedNonSubagent）。
    */
   lookupWorkflowRunState?: (runId: string) => SupervisedRecordState;
@@ -198,9 +198,12 @@ function appendUnregisterEntry(
 /** closedReason → pending reason（直通载体；未知值交 pending-notifications 解析通道——
  *  mapReasonToStatus 历史六值通道对词表外值落 unknown（fail-visible，§3.3.11④ 后缺省
  *  方向已反转，原 default=completed 的注释补偿假设退役）、新权威通道
- *  resolveSettlementReason 按 §3.3.6 解析表解析。reason 不参与计数。） */
+ *  resolveSettlementReason 按 §3.3.6 解析表解析。reason 不参与计数。）
+ *  [subagent-observability §3.3.11④] closedReason 缺失（无事实可依）缺省 no_result
+ *  不产 completed——现行判据链下该缺省不可达（isLegacyClosedSettled 守卫要求
+ *  closedReason 非空），缺省方向钉住 fail-open 废除宣言（守卫演化防线）。 */
 function closedReasonToPendingReason(closedReason: string | undefined): string {
-  return closedReason ?? "completed";
+  return closedReason ?? "no_result";
 }
 
 // ── 差集读取（独立轻量实现，不复用 session-pending 的 per-file 增量游标——sweep

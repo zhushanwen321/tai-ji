@@ -1,12 +1,15 @@
 /**
  * LLM 重试规则域（类型 + 校验 + 判定管线纯函数 SSOT，subagent-observability §3.3.12）。
  *
- * 三个消费方共用同一套语义（llm-retry / network-proxy 域同款纪律）：
+ * 四个消费方共用同一套语义（llm-retry / network-proxy 域同款纪律）：
  * - runtime 写侧：ext-config 落盘校验 + 合并视图（编译期基线 ⊕ 远程覆盖 ⊕ 用户自定义）；
  * - settings 展示与表单：内置预设展示 + 自定义规则编辑校验（SystemRetryRulesSection）；
  * - retry-rules extension（pi 孙进程）：message_end 判定管线。extension bundle 自包含
  *   不 import shared 运行时代码（network-proxy 同款惯例：结构类型本地声明 + 行为镜像
- *   锁定测试），本模块是匹配与判定语义 SSOT——复制体漂移时以本文件为准。
+ *   锁定测试），本模块是匹配与判定语义 SSOT——复制体漂移时以本文件为准；
+ * - pi-subagent-cli 失败分类侧（收尾边沿分类码表消费）：行为镜像复制体位于
+ *   packages/pi-subagent-cli/src/retry-rules-classification.ts（自声明镜像 SSOT，
+ *   output-collector.test.ts 锁行为一致）。
  *
  * 判定管线两层序（设计定稿，UC-23 走查缺陷修复）：
  *   第一层按 verdict 排除——non_retryable 规则优先于 retryable/conditional（先排除再放行，
@@ -536,7 +539,18 @@ export function appendRetryMarker(errorMessage: string): string {
  * - pi-ai 原生词表（node_modules @earendil-works/pi-ai dist/utils/retry.js 1.0.0）：
  *   RETRYABLE 命中 `rate.?limit` / `too many requests` / `429` / `5xx` 等；
  *   NON_RETRYABLE 命中 `insufficient_quota` / `out of budget` / `quota exceeded` /
- *   `billing` / `available balance` 等——预设只登记 pi 词表不命中或语义需要排除的键。
+ *   `billing` / `available balance` 等。
+ * - 基线条目按消费角色分三类（复核时按类判断条目价值，勿按单一口径误删）：
+ *   ① 分类登记档——匹配键命中时 errorMessage 文本必含 pi RETRYABLE 词表字面量
+ *   （provider 行为保证：zhipu-1302/1305 = HTTP 429、generic-429/5xx、
+ *   kimi-overloaded/kimi-rate-limit），pi 原生已判可重试，改写是冗余动作；条目的
+ *   独立价值在分类登记（class/kind/verdict 供收尾边沿失败分类）与 settings 展示，
+ *   删之即砍断 §3.3.12「一次登记覆盖两个消费方」的分类数据链；
+ *   ② pi 词表不命中的改写键——pi 判定不了或判错方向的形态（zhipu 窗口/账户码族、
+ *   tier-limit-window、generic-account-4xx、generic-rpm-limit、kimi-quota/kimi-504
+ *   语义收窄档），改写判定依赖这些键生效；
+ *   ③ 显式排除档——pi NON_RETRYABLE 词表已判 false 的形态（generic-quota-exhausted、
+ *   opencode-subscription-limit），登记为第一层排除防用户自定义可重试规则击穿。
  * - 智谱 BigModel（openai 兼容，业务码走 body JSON）：1302/1305 瞬态限流可重试；
  *   1308/1310/1316/1317 限额重置窗口（conditional）；1113/1309/1311/1313-1321 账户/套餐
  *   动作（non_retryable——429 不全可重试硬约束的账户侧）。

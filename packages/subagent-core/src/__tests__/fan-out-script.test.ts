@@ -1,6 +1,6 @@
 // fan-out.js workflow 脚本行为契约直测（u-fanout-template 单元：成员对象化 + 通知
-// 截断 + 全员失败收尾语义，各用例自述为准。原引用「设计 D4/D5/D9」为历史设计稿
-// 决策编号，现行设计文档与 impl-plan 均无对应——git 可追溯）。
+// 截断 + 全员失败收尾语义，各用例自述为准；源码注释与行为描述同批去历史设计稿
+// D 编号——现行锚点见 subagent-observability §3.3.10，历史编号 git 可追溯）。
 //
 // 测试方法（同 review-fix-loop-script.test.ts 先例）：fan-out.js 是 pi worker 模板
 // 脚本——顶层执行 + 顶层 return，不可作为 ES module import。用 AsyncFunction 在

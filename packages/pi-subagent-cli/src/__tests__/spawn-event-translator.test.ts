@@ -25,6 +25,7 @@ import { createReplayRecord, type AgentEvent } from "@zhushanwen/subagent-engine
 
 import { parseSpawnLine, type SdkEvent } from "../spawn-event-adapter.ts";
 import { createSdkEventTranslator, type SdkTranslatorOpts } from "../spawn-event-translator.ts";
+import { classificationMatchInputs } from "../retry-rules-classification.ts";
 import type { TurnBudgetExhaustion } from "../turn-limiter.ts";
 
 /**
@@ -358,6 +359,34 @@ describe("[subagent-observability §3.3.1] 收尾边沿停因事实优先（表�
 
     expect(errored?.rawStopReason).toBe("throttled");
     expect(errored?.diagnostics).toEqual([{ type: "bedrock_response_failure", timestamp: 1 }]);
+  });
+
+  it("重试后再失败：结构化输入与最终失败帧同帧绑定，不携带先前尝试的 diagnostics（§3.3.2 死因错标防线）", () => {
+    let errored: import("../spawn-event-translator.ts").EngineRoundErrorFact | undefined;
+    const h = makeHarness({
+      onErroredEnd: (fact) => { errored = fact; },
+    });
+    // 尝试 1：error 停因带 diagnostics A（结构化码表可命中的 error.code 形态）
+    h.feed(errorLine({
+      rawStopReason: "error",
+      diagnostics: [{ type: "response_failure", error: { name: "APIError", message: "1311: insufficient balance", code: "1311" } }],
+    }));
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: true, reason: "retryable" }));
+    h.feed(JSON.stringify({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 10, errorMessage: "1311" }));
+    // 尝试 2：最终失败帧不带 diagnostics（最终死因文本与尝试 1 不同）
+    h.feed(errorLine({ errorMessage: "1211: permission denied" }));
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: false, reason: "error" }));
+
+    // 收尾边沿结构化事实属「最后一条停因帧」：旧尝试 diagnostics 不再留存
+    expect(errored?.diagnostics).toBeUndefined();
+    expect(errored?.rawStopReason).toBeUndefined();
+    expect(errored?.errorMessage).toBe("1211: permission denied");
+    // 分类输入不再合成 A 帧结构化文本（码表不按旧尝试死因分类）
+    const inputs = classificationMatchInputs(errored!);
+    expect(inputs).toEqual(["1211: permission denied"]);
+    expect(JSON.stringify(inputs)).not.toContain("1311");
   });
 
   it("重试恢复：失败尝试（willRetry=true）不判终；成功响应清除未消费 error 事实 → 干净收尾", () => {

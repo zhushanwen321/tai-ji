@@ -51,8 +51,9 @@ export interface FinalizeDeps {
    * [F-5 修复] record 终态化的宿主侧收尾钩子（recordId；best-effort，抛错由调用方
    * 在闭包内自行兜底）。[永久会话模型] 现行调用点（recordLifecycle.finalizeRecord →
    * doFinalizeRecord 的全部生产入口）：workflow-origin D7 例外族（settleOneShotOutcome
-   * 成功/失败/abort 终态化 + finalizeFailed / finalizeAborted 的 workflow 分支）+
-   * 监督器放弃（finalizeClosed）。旧 finalizeEngineOutcome 兜底（引擎死亡不可接管
+   * 成功/失败/abort 终态化 + finalizeFailed / finalizeAborted 的 workflow 分支）——
+   * 旧「监督器放弃（finalizeClosed）」支已随轮次活性监督器整机清退删除。旧
+   * finalizeEngineOutcome 兜底（引擎死亡不可接管
    * 形态的终态化）已删——引擎死亡现走 Continuation 失败分支收尾（settleRoundFailed，
    * idle 可恢复不终态化），不经本钩子。旧「全部 closed 终态必经路径」口径已失效：tool-origin 轮终走
    * settle/markRoundIdle 不终态化（万物可续 G1），close = 收尾落定（consumePendingArchive）、

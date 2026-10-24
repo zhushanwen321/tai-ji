@@ -3,10 +3,12 @@
 // [U1 / record 持久化收敛 §3.1] RecordStore 意图级操作 API 对外接口专属测试。
 //
 // 覆盖（验收条款 A1/A5/A6）：
-//   - A1 九意图原语齐备（register/appendEvent/markRoundStarted/markRoundIdle/
-//     markFinalized/markCancelled/adoptEngineDeath/markResurrected，
+//   - A1 八意图原语齐备（register/appendEvent/markRoundStarted/markRoundIdle/
+//     markFinalized/markCancelled/markResurrected/markSettledOut，
 //     [collect 退役] 原 markBatchFinalized 已删；[u-arch] 原 markArchived 更名
-//     markSettledOut 随意图机制退役收尾）+ acquireWriteLease（A6）；
+//     markSettledOut 随意图机制退役收尾；[subagent-observability u3 退役] 原
+//     adoptEngineDeath 已随判定事实化删除，同下方 fns 数组注记口径）
+//     + acquireWriteLease（A6）；
 //   - A5 markResurrected D3c 三中间形态（(ii) acquire 后中断 / (iii) 全成 /
 //     acquire 失败）+ running 候选接管形态（跳删终态位仍 acquire）；
 //   - §3.4 失败语义：`.state` 写失败 → 零持久化副作用、record 留 running 形态。

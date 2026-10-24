@@ -739,7 +739,6 @@ export default {
     retryRulesDesc: '限流类 provider 错误自动进入 pi 原生重试循环；规则分内置预设（远程热更新）与自定义两层，判定先排除不可重试项再按自定义 > 远程 > 内置放行',
     retryRulesBuiltinToggle: '内置预设（{n} 条）',
     retryRulesBuiltinEmpty: '暂无内置预设',
-    retryRulesCustomTitle: '自定义规则',
     retryRulesCustomHint: '命中的错误按裁决处理：retryable 追加可重试标记触发重试；non_retryable / conditional 本机制不改写该类错误（不自动追加标记，pi 自身的重试行为不受影响——展示口径见等待提示）',
     retryRulesAddRule: '添加规则',
     retryRulesRemove: '移除',

@@ -82,10 +82,15 @@ export function isPartialTerminal(ds: RunDisplayState): boolean {
 }
 
 /**
- * 展示态 → 语义色调（run 域色档单表）。
+ * 展示态 → 语义色调（角色注：**非生产色呈现路径**）。
  *
- * 与 `format.ts` 的 `statusColorToken`（trace 节点 / 通知域用）保持同档：running =
- * warning、interrupted = muted、失败族 = error、成功终局 = success；两处**输入词汇不同**
+ * [F1-26 诚实披露] 本函数当前生产零调用点，仅 display-state.test.ts 以表驱动用例
+ * 消费（第五值档位的测试锁定对拍表）——run 域的真实色呈现走 {@link formatRunBadge}
+ * 内联色分支（各分支硬编码 token），不在本表取色：调整 run 域色档须改
+ * formatRunBadge（或让后者改调本函数取色实现单表——行为重构归实现方裁决）。
+ * 档位口径与 `format.ts` 的 `statusColorToken`（trace 节点 / phase 行 / L1 行用，
+ * 通知域走同文件 statusGlyph）保持一致：running = warning、interrupted = muted、
+ * 失败族 = error、成功终局 = success；两处**输入词汇不同**
  *（本表吃 RunDisplayState，那张吃 StatusText），故各自成表但档位口径一致。
  * [§3.3.8 消费链①] partially_succeeded 独立档 = warning（进行中同色系——「未全成
  * 也不算败」的中间态语义，与失败族 error / 成功 success 区分；独立档色调实施期

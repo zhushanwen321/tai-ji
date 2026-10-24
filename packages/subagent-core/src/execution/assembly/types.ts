@@ -629,8 +629,11 @@ export interface SubagentRecord {
   closedReason?: ClosedReason;
   /**
    * 展示维度（永久会话模型 §3.2.1，U2 additive 派生视图）：上一轮为什么停。内存源经
-   * recordToSubagent 派生视图、entry 重建经 readEntryTerminalFields 映射（存量 entry
-   * closed→idle 时同步从 closedReason 迁移）；undefined = 从未收尾 / 旧数据。
+   * recordToSubagent 派生视图；磁盘重建走 v2 条目链（record-store-rebuild.ts
+   * v2PairToRecord / projectFoldToLight——v2 条目契约不承载 closedReason，停因随
+   * journal fold 事实恢复）；legacy closed（存量 entry）的展示归一由 runtime 侧
+   * subagent-status.ts derivedStopReason（deriveClosedDisplay 派生）承接。
+   * undefined = 从未收尾 / 旧数据。
    */
   stopReason?: StopReason;
   /**

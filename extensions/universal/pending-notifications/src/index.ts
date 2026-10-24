@@ -259,6 +259,9 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 			debugLog("warn", "listener: pending:unregister parse failed", data);
 			return;
 		}
+		if (parsed.reasonMalformed) {
+			debugLog("warn", "listener: pending:unregister reason missing/malformed (emit-side contract breach) → settled no_result", data);
+		}
 
 		debugLog("debug", "listener: pending:unregister parsed", parsed);
 
@@ -576,18 +579,25 @@ function parseRegisterEvent(data: unknown): ParsedRegister | null {
 interface ParsedUnregister {
 	id: string;
 	reason: string;
+	/** reason 缺失/非 string（emit 方违约的畸形 data）——缺省 no_result 结清时置位，
+	 *  调用点 debugLog warn 留痕（[subagent-observability §3.3.11④]）。 */
+	reasonMalformed?: boolean;
 }
 
 /** 解析 pending:unregister 事件 data（容错缺失/类型错误字段）。
- *  T2 通知由 subagent-workflow 自有通道 bg-notify-render 承担，不经本事件。 */
+ *  T2 通知由 subagent-workflow 自有通道 bg-notify-render 承担，不经本事件。
+ *  [subagent-observability §3.3.11④] reason 缺失/非 string（emit 方漏传的违约
+ *  形态）缺省 no_result 不产 completed——无事实可依不产假成功结清，与
+ *  resolveSettlementReason / resolveSettlement 缺省方向一致；畸形经调用点
+ *  warn 留痕。 */
 function parseUnregisterEvent(data: unknown): ParsedUnregister | null {
 	if (typeof data !== "object" || data === null) return null;
 	const d = data as Record<string, unknown>;
 	if (typeof d.id !== "string") return null;
-	return {
-		id: d.id,
-		reason: typeof d.reason === "string" ? d.reason : "completed",
-	};
+	if (typeof d.reason !== "string") {
+		return { id: d.id, reason: "no_result", reasonMalformed: true };
+	}
+	return { id: d.id, reason: d.reason };
 }
 
 /** 将事件 reason 映射为 pending:unregister entry 的 status 字段（落盘契约组成部分）。

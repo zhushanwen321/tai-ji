@@ -1062,7 +1062,12 @@ function saveTraceToFile(run: WorkflowRun, ctx: ExtensionContext): void {
 function traceHeaderLines(run: WorkflowRun): string[] {
   const lines: string[] = [];
   lines.push(`# Workflow Trace: ${run.spec.scriptName} (${run.runId})`, "");
-  lines.push(`Status: ${displayStatusOf(run)} | Started: ${run.meta.startedAt ?? "-"} | Duration: ${formatElapsed(run.meta.startedAt)}`);
+  // [§3.3.8 终局失真同型面] Status 行随终局原因后缀（与完成通知 `done (${reason})`
+  // 同形，workflow-notify）——部分交付 run（partially_succeeded）的导出 trace 归档件
+  // 与全成功 run 可区分；done 缺 reason（旧格式 run）同徽标口径不带后缀。
+  const ds = runDisplayStateOf(run);
+  const statusText = ds.doneReason !== undefined ? `${ds.status} (${ds.doneReason})` : ds.status;
+  lines.push(`Status: ${statusText} | Started: ${run.meta.startedAt ?? "-"} | Duration: ${formatElapsed(run.meta.startedAt)}`);
   const budget = run.state.budget;
   lines.push(`Budget: ${budget.usedTokens}/${budget.maxTokens ?? "unlimited"} tokens, $${budget.usedCost.toFixed(BUDGET_COST_DECIMALS)}`, "");
   return lines;

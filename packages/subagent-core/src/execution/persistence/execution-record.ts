@@ -459,10 +459,11 @@ export function getTotalUsage(record: ExecutionRecord): AgentUsageTotal | undefi
  * 目标恒为 legacy closed 形态（idle + closedReason/stopReason 双写，桥接不变量
  * 「closed ⟺ idle ∧ closedReason≠undefined」的写侧半边）。
  *
- * 写侧生产者仅剩两处（types.ts ExecutionStatus 头注登记）：workflow D7 例外族
- * （settleWorkflowRecord 收尾单点）与监督器放弃产出（service-binding giveUp）；
- * 读侧对偶 = isLegacyClosedSettled 单一谓词。轮收尾（非终态）走 store.markSettled
- * （不写 closedReason），与本原语语义分界清晰。
+ * 写侧生产者唯一：workflow D7 例外族的 settleWorkflowRecord 收尾单点（本文件
+ * settleWorkflowRecord 内 CAS 抢锁）；旧第二生产者「监督器放弃产出（giveUp）」已随
+ * 轮次活性监督器整机清退删除（commit 924ace33f，service-binding → sweep-binding
+ * 改名同批）。读侧对偶 = isLegacyClosedSettled 单一谓词。轮收尾（非终态）走
+ * store.markSettled（不写 closedReason），与本原语语义分界清晰。
  *
  * @param closedReason 旧终态 L2 原因（同时镜像进 stopReason 展示位）。
  *   缺省 "gc"（通用完成/失败）。

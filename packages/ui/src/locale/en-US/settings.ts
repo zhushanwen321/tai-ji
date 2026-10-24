@@ -740,7 +740,6 @@ export default {
     retryRulesDesc: 'Throttling-class provider errors enter pi\'s native retry loop automatically. Rules split into builtin presets (remote hot-updated) and custom layer; non-retryable rules exclude first, then custom > remote > builtin wins',
     retryRulesBuiltinToggle: 'Builtin presets ({n})',
     retryRulesBuiltinEmpty: 'No builtin presets',
-    retryRulesCustomTitle: 'Custom rules',
     retryRulesCustomHint: 'Matched errors follow the verdict: retryable appends a retryable marker to trigger retry; non_retryable / conditional are left untouched by this mechanism (no marker appended; pi\'s own retry behavior is unaffected — see wait hints for why)',
     retryRulesAddRule: 'Add rule',
     retryRulesRemove: 'Remove',

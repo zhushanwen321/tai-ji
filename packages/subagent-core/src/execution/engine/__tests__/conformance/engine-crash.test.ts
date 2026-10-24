@@ -8,8 +8,10 @@
 //
 //   引擎进程被外部信号终止（SIGTERM）→ 在途 run 终态 **failed**（EngineSdkError
 //   engine_crashed，message = "…exited unexpectedly: signal SIGTERM…" + stderr 尾
-//   400 字符）→ core 上层（subagent-service adoptResumableAfterEngineDeath，W4）
-//   据此走「failed 如实 + record 保持 resumable + 监督器接管」，禁 completed 谎报。
+//   400 字符）→ core 上层 = Continuation 失败分支收尾 settleRoundFailed（idle 可
+//   恢复 + 失败通知，禁 completed 谎报）——原 adopt 链（adoptResumableAfterEngineDeath：
+//   failed 如实 + record 保持 resumable + 监督器接管）已随 subagent-observability
+//   u3 §3.3.3 退役删除（run-orchestration-write-lease.test.ts 头注退役注记为锚）。
 //
 // 对照既有语义：
 //   - 引擎侧：`pi-subagent-cli/src/spawn-runner.ts`「signal 退出 = 异常路径」

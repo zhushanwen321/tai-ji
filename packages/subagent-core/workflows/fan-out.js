@@ -149,7 +149,7 @@ if (tasks.some((m) => m !== null && typeof m === "object" && m.deliverables !== 
   }
 }
 
-// scriptPath 锚定检查（worker 宿主契约的显式前提，D1 加固）：workerData.scriptPath 是
+// scriptPath 锚定检查（worker 宿主契约的显式前提，加固点）：workerData.scriptPath 是
 // 本脚本真实路径的唯一定位点，也是 resume 重建的锚——缺席或为空串即 fail-fast
 // （空串 = record 流为 scriptPath 载荷落地前的旧格式，resume 重建无锚可恢复），
 // 不回退 cwd——消除从用户目录误加载代码的路径侧。
@@ -315,7 +315,7 @@ for (let i = 0; i < rawResults.length; i++) {
   }
 }
 if (failedCount === tasks.length) {
-  // 全部成员失败 → run failed（终态通知带 NOT task completion 指引，D9）
+  // 全部成员失败 → run failed（终态通知带 NOT task completion 指引）
   throw new Error("fan-out: all tasks failed (" + failedCount + "/" + tasks.length + ")");
 }
 log("fan-out 收集完成：ok=" + (tasks.length - failedCount) + " failed=" + failedCount);
@@ -357,14 +357,14 @@ const aggregateFailed = aggregateOut !== undefined &&
   typeof aggregateOut !== "string" &&
   typeof aggregateOut.error === "string";
 
-// ── 通知体积：results 序列化前保序截断（D5）─────────────────────
+// ── 通知体积：results 序列化前保序截断 ─────────────────────
 // 壳侧 MAX_RESULT_LENGTH 机制在 workflow-notify.ts（通知序列化预算）；模板侧只做保序截断：
 // taskIndex/status/fullReportPath/error（归因与恢复侧）恒完整，summary（体积大头）
 // 先让出、task 文本次之；截断发生置 outcome 顶层 truncated: true
 const RESULTS_BUDGET_CHARS = 8000;
 
 /** 单条映射：keepTask=false 丢 task 文本、keepSummary=false 丢 summary；
- *  taskIndex/status/fullReportPath/error（归因与恢复侧，D9）与 observations
+ *  taskIndex/status/fullReportPath/error（归因与恢复侧）与 observations
  *  （交付缺项观察，§3.3.10 归因侧）恒完整。
  *  task 用 delete 而非不写 key，保持与最小条目形态相同的 key 插入顺序。 */
 function projectEntry(r, keepTask, keepSummary) {
