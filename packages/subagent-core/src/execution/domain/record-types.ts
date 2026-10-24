@@ -22,12 +22,15 @@
  *   running = 本轮有任务在途；idle = 无任务在途，随时可接下一条 message。
  *
  * 「上一轮为什么停」由 {@link StopReason} 承载（纯展示 + 排障；U6 起 stopReason
- * 参与 isOccupied 占用判定——`running && stopReason === undefined`，W4 死亡纳管态
- * 靠它排除）；旧 running 的隐性子态（resumable/纳管态）由「idle + transcriptRef 在」统一表达。
+ * 参与 isOccupied 占用判定——`running && stopReason === undefined`，带停因的 running
+ * 不算占用；原「W4 死亡纳管态靠它排除」措辞随 adoptEngineDeath 写点退役删除，
+ * 登记见 record-store.ts:179）；旧 running 的隐性子态（resumable）由「idle + transcriptRef 在」统一表达。
  *
  * [U2 桥接不变量 → U5 后现状] 旧「closed 终态」读判据 = `idle && closedReason !==
- * undefined`（读侧兼容位）：写侧只剩 workflow D7 例外族与监督器放弃继续产出
- * （out-of-scope 维持现状）；收尾动作（U5）走 markSettled 只写 stopReason 不写
+ * undefined`（读侧兼容位）：写侧只剩 workflow D7 例外族继续产出
+ *（trySettleLegacyClosed ← settleWorkflowRecord 收尾单点；completeLegacyClosed ←
+ * doFinalizeRecord 编排性收尾）——旧监督器放弃支已随轮次活性监督器整机清退删除
+ *（out-of-scope 维持现状）；收尾动作（U5）走 markSettled 只写 stopReason 不写
  * closedReason（不终态化），close 收尾写入 journal 记录走 markSettledOut（不动占用位）——
  * closedReason 不再由 cancel/close/编排性关闭产出。
  *
@@ -54,9 +57,10 @@ export type RecordOrigin = "tool" | "workflow";
  * [U2 桥接期地位 → W2/V3 后现状] 终态概念已删除（{@link ExecutionStatus} 两态），
  * 本枚举退役为**读侧兼容位**：值域完整并入 {@link StopReason}（旧 7 值 = 旧 closed
  * 的展示迁移）。写侧遗留终态原语（trySettleLegacyClosed / completeLegacyClosed——
- * workflow D7 例外族 + 监督器放弃两个生产者）继续写本字段 + stopReason 双写，
- * 消费方（deriveOutcome/notifier 等）零改动；本字段随读侧谓词 isLegacyClosedSettled
- * 一并在 W4 sunset 退役。
+ * 均只服务 workflow D7 例外族：settleWorkflowRecord 收尾单点 / doFinalizeRecord
+ * 编排性收尾；旧监督器放弃支已随轮次活性监督器清退删除）继续写本字段 +
+ * stopReason 双写，消费方（deriveOutcome/notifier 等）零改动；本字段随读侧谓词
+ * isLegacyClosedSettled 一并在 W4 sunset 退役。
  *
  * 值语义（历史）：
  *   parent-shutdown  — 父进程 session_shutdown 时回收子进程
@@ -182,7 +186,7 @@ export type StopReason =
   | "completed"
   | "failed";
 
-/** StopReason 的 4 个新展示值（运行时检查与枚举完整性测试锚；值域见类型注释）。 */
+/** 宿主中断/重开事实词 4 值（§3.3.3 三层词表成员，口径同上方类型注释「宿主中断族」——受成员同 commit 登记纪律约束，非展示词；运行时检查与枚举完整性测试锚；值域见类型注释）。 */
 export const NEW_STOP_REASONS = [
   "interrupted",
   "interrupted-by-restart",
@@ -208,7 +212,7 @@ export const LEGACY_INFERRED_STOP_REASONS = ["completed", "failed"] as const sat
 /**
  * StopReason 全枚举（运行时检查用——防御性解析外部输入时校验成员资格）。
  * = CLOSED_REASONS（6 个可写终态原因）+ disconnected（读侧兜底产出，不写入，
- * 见 CLOSED_REASONS 注释）+ NEW_STOP_REASONS（4 新展示值）+ ROUND_TERMINAL_STOP_REASONS
+ * 见 CLOSED_REASONS 注释）+ NEW_STOP_REASONS（4 宿主中断/重开事实词）+ ROUND_TERMINAL_STOP_REASONS
  * （3 引擎原值）+ LEGACY_INFERRED_STOP_REASONS（2 迁移期旧值，退役条件见注释），
  * 共 16 值。
  * 完整性由 execution/domain/__tests__/record-types.test.ts 断言（值数 + 成员逐一）。

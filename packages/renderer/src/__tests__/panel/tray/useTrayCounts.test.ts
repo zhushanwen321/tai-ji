@@ -2,7 +2,8 @@
  * useTrayCounts 数据范围测试（u-tray-native，设计 docs/design/composer-task-tray.md §3.3 D2/D13，已删除 git 可追溯）。
  *
  * 三视角（TEST-STRATEGY §3）：
- * - 构建者（白盒）：三件计数口径与谓词边界——running+stopReason（死亡纳管态）不落进行中、
+ * - 构建者（白盒）：三件计数口径与谓词边界——running+stopReason（带停因 running）不落
+ *   进行中（原「死亡纳管态」措辞随 adoptEngineDeath 写点退役，登记见 record-store.ts:179）、
  *   archived 归已结束（[两视图裁决 2026-09-16]）、workflow running 计入进行中、bash 两视图由
  *   background-task-bucket SSOT 谓词派生；D13 首次拉取触发与 retry 调用序；错误态/加载态暴露面
  * - 使用者（黑盒）：本文件是纯逻辑面（无 DOM）；用户可见断言在 tray-native-panel.test.ts

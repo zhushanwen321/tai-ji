@@ -233,16 +233,17 @@ export interface AgentCallOpts {
 // AgentCallOpts / AgentResult 留守本地（宿主侧 SSOT——SDK 版 AgentCallOpts 是引擎侧
 // 子集，字段裁决见 SDK contract-types 注释）。
 //
-// AgentFailureKind 语义守恒（最高优先约束，core 侧权威说明——SDK 侧为简版）：
-// - stale_context：pi session context 被 compact/cancel/替换——重试无意义（同 call
-//   再次失败），不重试。
-// - schema_deterministic：确定性 schema 失败（SO tool 从未调用 / gate 终止 /
-//   不可满足 schema）——同 schema 重试必同结果，不重试。
-// - unknown：其余一切失败（瞬态 provider 错误、spawn 失败等）——**默认可重试**。
-//   unknown（含字段缺省）= 可重试；仅 stale_context 与 schema_deterministic 两态
-//   维持不重试特判。词表归属（产出侧单点识别）：识别词表保留在产出侧
-//   execution/engine/inproc pi 引擎目录/output-collector.ts 包内——词表漂移的失效模式
-//   是 failureKind=unknown → 保守重试（安全默认），不再是静默漏诊。
+// AgentFailureKind = 历史解析兼容残留（@deprecated 终态，权威说明在 SDK
+// contract-types AgentOutcome.failureKind，本处 core 侧同口径——[subagent-observability
+// §3.4，ADR-0158]）：新写入方失败分类一律产 FailureCause（class×kind 封闭矩阵），
+// 「可重试」判定的现行承载 = FailureCause.retryable 三态 + retry-rules extension
+// verdict（§3.3.2 硬规则③）——execute-agent-call 重试矩阵已删（失败单次即终态），
+// 本词表不再有任何重试判定点。三值保留作旧 record 帧与历史 journal 的解析兼容：
+// stale_context（pi session context 被 compact/cancel/替换）/ schema_deterministic
+// （确定性 schema 失败）/ unknown（其余一切失败）。产出侧残留 = pi 引擎
+// output-collector（packages/pi-subagent-cli/）[D5-③ 改轨] 引擎送达错误码前缀确定性
+// 分诊（恒 unknown/undefined）；子串分类器 classifyFailureKind 不再参与 outcome
+// 生产路径（仅存量跨包测试 import 词表谓词）。
 export type {
   AgentFailureKind,
   AgentOutcomeUsage as AgentUsage,
@@ -259,13 +260,16 @@ export interface AgentResult {
  /** Raw text output from the agent. */
   content: string;
  /**
- * [D5-③] 失败分诊结构化标签（AgentFailureKind）。产出侧唯一识别点 =
- * execution/engine/inproc pi 引擎目录/output-collector.ts（collectResult 对最终 error
- * 分类后写入，经 agent-result-mapper / AgentOutcome 透传到本形态）；消费侧
- * execute-agent-call 读本字段分诊，不再扫 error 文案子串。
+* [D5-③ 改轨] 失败分诊结构化标签（AgentFailureKind，历史解析兼容残留——@deprecated
+ * 终态口径见 AgentFailureKind 守恒块与 SDK contract-types AgentOutcome.failureKind）。
+ * 产出侧残留 = pi 引擎 output-collector（packages/pi-subagent-cli/）引擎送达错误码
+ * 前缀确定性分诊（恒 unknown/undefined）——非「collectResult 对最终 error 分类」
+ * （子串分类器 classifyFailureKind 已不参与 outcome 生产路径）；经 agent-result-mapper /
+ * AgentOutcome 透传到本形态。消费侧按字段透传（terminal-actions 作 RunErrorCode，
+ * 缺省兜底 "unknown"）。
  *
- * 仅在 error !== undefined 时有意义（成功时缺省）；缺省视为 unknown = 可重试
- * （语义守恒，见 AgentFailureKind）。
+ * 仅在 error !== undefined 时有意义（成功时缺省）；缺省 = undefined（字段缺位），
+ * 不承载重试判定（重试判定在 FailureCause.retryable 三态，见下方 failure 字段）。
  */
   failureKind?: AgentFailureKind;
  /**
