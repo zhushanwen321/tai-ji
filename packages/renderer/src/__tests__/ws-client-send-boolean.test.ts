@@ -36,7 +36,6 @@ describe('ws-client.send 壳侧 import 冒烟（W4 fast-fail 主覆盖在 core i
       kind: 'mock',
       storage: { get: async () => null, set: async () => {}, remove: async () => {} },
       webSocket: { create: () => ws },
-      ipc: null,
     }
     providePlatform(platform)
     connect('ws://test', { auth: 'skip' })

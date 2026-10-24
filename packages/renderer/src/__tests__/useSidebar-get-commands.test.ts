@@ -32,7 +32,7 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
     getContext: vi.fn(() => Promise.resolve({ inputTokens: 0, contextLimit: 0, usagePercent: 0 })),
     rename: vi.fn(() => Promise.resolve()),
     remove: vi.fn(() => Promise.resolve()),
-    create: vi.fn(() => Promise.resolve({ id: 'mock', label: 'mock', cwd: '/proj', status: 'idle', lastActiveAt: 1, modelId: 'm1', tokenCount: 0 })),
+    create: vi.fn(() => Promise.resolve({ id: 'mock', label: 'mock', cwd: '/proj', status: 'idle', lastActiveAt: 1 })),
     setThinkingLevel: vi.fn(() => Promise.resolve()),
   },
   chat: { getHistory: vi.fn(() => Promise.resolve([])), streamSubscribe: vi.fn(() => () => {}) },

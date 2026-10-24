@@ -40,7 +40,7 @@ describe('T3: useSessionDerivations 注入 extensionUIStore.hasPendingBlockingOv
     extensionUIStore.addRequest(sessionId, {
       sessionId,
       requestId: 'r1',
-      method: 'select',
+      dialogKind: 'select',
       form: true,
     })
     // 响应式：computed 应重算为 waiting
@@ -73,7 +73,7 @@ describe('scheduler 表单 pending → derivedStatus waiting（form 键判定联
     extensionUIStore.addRequest(sessionId, {
       sessionId,
       requestId: 'r-sc',
-      method: 'select',
+      dialogKind: 'select',
       form: true,
       scheduleCreate: true,
       scheduleDraft: { kind: 'recurring', schedule: '0 9 * * *', prompt: 'p', models: [] },

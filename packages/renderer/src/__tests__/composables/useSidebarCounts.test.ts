@@ -63,7 +63,7 @@ describe('useSidebarCounts sessionCount（tab 计数口径）', () => {
   }
 
   function seedSessions(sessions: SessionSummary[]): void {
-    useSessionStore().applySnapshot({ groups: [{ cwd: '/proj', sessions }] } satisfies SessionGroup[])
+    useSessionStore().applySnapshot({ groups: [{ cwd: '/proj', sessions }] satisfies SessionGroup[] })
   }
 
   beforeEach(() => {

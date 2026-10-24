@@ -773,7 +773,7 @@ describe('subagent composer 挂载门（chatCapable，subagent-composer 2026-10-
 
   it('chatCapable=true：挂 composer 带（.composer-band 同壳）+ 只读提示行消失', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle', chatCapable: true })])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     const band = wrapper.find('[data-testid="drawer-subagent-composer-band"]')
@@ -785,7 +785,7 @@ describe('subagent composer 挂载门（chatCapable，subagent-composer 2026-10-
 
   it('chatCapable 缺省（未刷新旧帧语义 = 不支持）：不挂带，回退只读提示', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle' })])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     expect(wrapper.find('[data-testid="drawer-subagent-composer-band"]').exists()).toBe(false)
@@ -794,7 +794,7 @@ describe('subagent composer 挂载门（chatCapable，subagent-composer 2026-10-
 
   it('chatCapable=false（引擎声明不支持）：不挂带', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle', chatCapable: false })])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     expect(wrapper.find('[data-testid="drawer-subagent-composer-band"]').exists()).toBe(false)

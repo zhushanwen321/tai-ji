@@ -99,7 +99,7 @@ function mountPanel(sessionId: string | null) {
 const formReq: ExtensionUIRequest = {
   sessionId: 's1',
   requestId: 'req-1',
-  method: 'select',
+  dialogKind: 'select',
   form: true,
   formQuestions: [{ type: 'choice', header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
 }

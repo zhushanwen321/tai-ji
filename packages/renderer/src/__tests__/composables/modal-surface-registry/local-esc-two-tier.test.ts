@@ -295,7 +295,7 @@ function makeGroups(): SessionGroup[] {
     {
       cwd: '/p',
       sessions: [
-        { id: 's1', label: '会话 1', cwd: '/p', status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0 } as SessionGroup['sessions'][number],
+        { id: 's1', label: '会话 1', cwd: '/p', status: 'idle', lastActiveAt: 1 },
       ],
     },
   ]

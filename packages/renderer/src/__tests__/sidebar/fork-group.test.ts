@@ -55,7 +55,7 @@ function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
     status: 'idle',
     lastActiveAt: Date.now(),
     ...overrides,
-  } as SessionSummary
+  }
 }
 
 function mountList(sessions: SessionSummary[], activeId: string | null = null) {
@@ -151,10 +151,12 @@ describe('R2: 分支会话仍在扁平列表各占一行', () => {
   })
 
   it('hover 详情卡展示「fork 自 <父名>」血缘行（demo .sess-pop：行首图标 + 立即开）', async () => {
-    const branch = makeSession({ id: 'sess-branch', label: '探索方案 A', parentSession: PARENT_FILE, parentLabel: '主线会话' })
+    // 生产接线还原：parentLabel 只经 :parent-label prop 注入（SessionList.parentLabelOf 反查），
+    // session 对象不持该字段——shared SessionSummary 无 parentLabel，展示期注入不污染实体
+    const branch = makeSession({ id: 'sess-branch', label: '探索方案 A', parentSession: PARENT_FILE })
     const wrapper = mount(SessionItem, {
       attachTo: document.body,
-      props: { session: branch, active: false, status: 'done' as never },
+      props: { session: branch, parentLabel: '主线会话', active: false, status: 'done' as never },
     })
     // demo @mouseenter=openCard 立即开（无延迟定时），pointerenter 后同步渲染
     await wrapper.find('.session-item').trigger('pointerenter')
