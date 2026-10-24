@@ -10,7 +10,10 @@
 //      + 与 extension-protocol SETTLEMENT_REASONS 的跨包对拍（词表漂移防线）；
 //   ② RunOutcome 五值（含 partially_succeeded 第五值，§3.3.8）+ 双包对账的 core
 //      侧成员集合（runtime workflow-outcome-vocab-parity 断言的 core 输入面）；
-//   ③ RunDoneReason 六值镜像与 DoneReason 权威一致（镜像漂移防线）；
+//   ③ DoneReason 三词表跨词表对拍（core 权威 ALL_DONE_REASONS ≡ core 镜像
+//      RunDoneReason ≡ shared WORKFLOW_DONE_REASON_ALL——三份字面量任一侧单独
+//      扩缩值即红；runtime vocab-parity 测试族只对账 status/outcome 轴，不覆盖
+//      DoneReason 轴）；
 //   ④ runSettledOutcomeToDoneReason 对 partially_succeeded 的恒等映射行（折叠成
 //      failed 即丢「部分成功」终局原因——runtime 派生视图 reason 依赖本行）。
 //
@@ -19,15 +22,15 @@
 import { describe, expect, it } from "vitest";
 
 import { SETTLEMENT_REASONS } from "@zhushanwen/extension-protocol";
+import { WORKFLOW_DONE_REASON_ALL } from "@taiji/shared";
 
+import { ALL_DONE_REASONS, type DoneReason } from "../../orchestration/models/types.ts";
 import {
   ALL_RUN_OUTCOMES,
   ALL_SETTLEMENT_REASONS,
   runSettledOutcomeToDoneReason,
   type ResolvedSettlementReason,
   type RunDoneReason,
-  type RunOutcome,
-  type SettlementReason,
 } from "../run-vocabulary.ts";
 
 describe("SettlementReason 结清枚举（§3.3.6 封闭五值）", () => {
@@ -40,11 +43,6 @@ describe("SettlementReason 结清枚举（§3.3.6 封闭五值）", () => {
       "no_result",
     ]);
     expect(new Set(ALL_SETTLEMENT_REASONS).size).toBe(ALL_SETTLEMENT_REASONS.length);
-  });
-
-  it("类型面收窄：SettlementReason 五值与常量逐成员一致（运行时镜像断言）", () => {
-    const all: readonly SettlementReason[] = [...ALL_SETTLEMENT_REASONS];
-    expect(all).toEqual([...ALL_SETTLEMENT_REASONS]);
   });
 
   it("解析缺省 unknown 在 ResolvedSettlementReason 值域（fail-visible——词表外 reason 不落五值，不产假成功）", () => {
@@ -80,28 +78,49 @@ describe("RunOutcome 枚举完整性（§3.3.8 第五值）", () => {
     ]);
   });
 
-  it("类型面收窄：RunOutcome 五值与常量逐成员一致", () => {
-    const all: readonly RunOutcome[] = [...ALL_RUN_OUTCOMES];
-    expect(all).toEqual([...ALL_RUN_OUTCOMES]);
-  });
-
   it("interrupted 不在 outcome 词表（[D2] 移出入 lifecycle 暂停态——回归锚保持）", () => {
     expect(ALL_RUN_OUTCOMES).not.toContain("interrupted");
   });
 });
 
-describe("RunDoneReason 镜像与映射行", () => {
-  it("六值镜像含 partially_succeeded（与 core DoneReason 权威、shared WorkflowDoneReason 三份同批扩值）", () => {
-    const reasons: readonly RunDoneReason[] = [
-      "completed",
-      "failed",
+describe("DoneReason 三词表跨词表对拍（core 权威 ≡ core 镜像 ≡ shared）", () => {
+  // 三份字面量物理独立（core DoneReason 编排层权威 / RunDoneReason shared 层镜像 /
+  // shared WorkflowDoneReason wire 契约——core↔shared 依赖方向不允许物理单源），
+  // 编译锁只能锁各自联合与常量的内部一致，跨词表漂移只能靠本对拍抓：任一侧单独
+  // 扩缩值即红，强迫三份同批显式重审。
+  it("core ALL_DONE_REASONS ≡ shared WORKFLOW_DONE_REASON_ALL 逐成员一致（值级对拍）", () => {
+    expect([...ALL_DONE_REASONS].sort()).toEqual([...WORKFLOW_DONE_REASON_ALL].sort());
+    expect(new Set(ALL_DONE_REASONS).size).toBe(ALL_DONE_REASONS.length);
+    expect(new Set(WORKFLOW_DONE_REASON_ALL).size).toBe(WORKFLOW_DONE_REASON_ALL.length);
+  });
+
+  it("封闭六值快照（任一词表单独扩缩值即本用例红——三份同批显式重审）", () => {
+    const six = [
       "aborted",
       "budget_limited",
-      "time_limited",
+      "completed",
+      "failed",
       "partially_succeeded",
+      "time_limited",
     ];
-    expect(reasons).toHaveLength(6);
+    expect([...ALL_DONE_REASONS].sort()).toEqual(six);
+    expect([...WORKFLOW_DONE_REASON_ALL].sort()).toEqual(six);
   });
+
+  it("镜像联合值域双向一致（编译锚消费：收窄/扩值漏跟任一方向漂移即编译红）", () => {
+    // 编译锚①：ALL_DONE_REASONS 值域 ⊆ RunDoneReason（镜像联合收窄即本行编译红）。
+    const mirrorTyped: readonly RunDoneReason[] = ALL_DONE_REASONS;
+    // 编译锚②：RunDoneReason 联合 ⊆ DoneReason 值域（镜像单独扩值漏跟权威即编译红）。
+    type RunDoneReasonWithinAuthority = [RunDoneReason] extends [DoneReason]
+      ? true
+      : ["RunDoneReason 镜像扩值须与 DoneReason 权威同批（run-vocabulary 三词表对拍锚）"];
+    const mirrorCoverage: RunDoneReasonWithinAuthority = true;
+    expect(mirrorTyped).toHaveLength(ALL_DONE_REASONS.length);
+    expect(mirrorCoverage).toBe(true);
+  });
+});
+
+describe("RunDoneReason 映射行", () => {
 
   it("runSettledOutcomeToDoneReason：partially_succeeded 恒等映射（折叠成 failed 即丢部分成功终局原因）", () => {
     expect(runSettledOutcomeToDoneReason("partially_succeeded")).toBe("partially_succeeded");

@@ -69,11 +69,6 @@ function voidRoundFinalChain(promise: Promise<void>, what: string): void {
   });
 }
 
-// [T2-③/LC-1] 失败恢复指引尾段：定义在 notify/notifier.ts（notifier 与本文件
-// 互相消费——尾段放 notifier 侧保持依赖方向单一：本文件已 import notifier）。
-import { FAILURE_RECOVERY_TAIL } from "../notify/notifier.ts";
-export { FAILURE_RECOVERY_TAIL };
-
 /** [U4 / §3.2.3] reopen 降级首轮的历史摘要 prompt（模板单点，单测锁定 §3.2.3 摘要
  *  来源契约：binding 快照域 task/agent/round/totalTokens/turns + 上一轮 result）。
  *  用户消息附在摘要之后（指令首见即达的弱模型友好形态，与 wrapForkFromPrompt 同思路
@@ -770,12 +765,15 @@ export class ConversationContinuation {
     // 原载荷 status:"closed" 使五分支判定在本路径结构性不可达（旧式 error 文案）；
     // 仍走直投通道不经 route(record)——其正文读 record.result = 前值，直复用会以
     // 旧正文冒充失败通知。dedup key = id:epoch:round（与成功轮应答天然分离）。
+    // error 字段 = 失败摘要原文（与轮终簿记 record-store-rounds 的 reason 落盘纪律
+    // 一致，不嵌恢复指引——五分支正文尾部是恢复指引的唯一承载点，error 再嵌即成
+    // 双段指引且措辞分叉）。
     const notify: BgNotifyRecord = {
       id: record.id,
       status: "running",
       agent: record.agent,
       ...(record.model !== undefined ? { model: record.model } : {}),
-      error: `round did not complete: ${reason}. ${FAILURE_RECOVERY_TAIL}`,
+      error: `round did not complete: ${reason}`,
       ...(record.lastRound?.failure !== undefined ? { lastRoundFailure: record.lastRound.failure } : {}),
       ...(record.lastRound?.engineStopReason !== undefined
         ? { lastRoundStopReason: record.lastRound.engineStopReason }

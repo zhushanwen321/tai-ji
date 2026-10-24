@@ -616,10 +616,10 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
 
     cont.onMessage("continue after io error");
 
-    // 失败通知（独立载荷——失败原因 + 恢复指引可达宿主）
+    // 失败通知（独立载荷——error = 失败原因原文；恢复指引由轮应答五分支尾部单点
+    // 承载一次，不在 error 字段重复嵌入——notifier-round-facts.test.ts 锁定）
     await vi.waitFor(() => expect(calls.notified).toHaveLength(1));
     expect(calls.notified[0]!.error).toContain("git worktree failed: disk full");
-    expect(calls.notified[0]!.error).toContain("Recovery");
     expect(calls.dispatched).toHaveLength(0); // 派发作废
   });
 

@@ -476,9 +476,10 @@ export interface SubagentListItem {
 /**
  * [subagent-observability §3.3.6] list 条目的 lastRound 载荷形状——shared
  * SubagentLastRound 的结构镜像（wire 形状 SSOT = @taiji/shared；core 读模型按
- * 既有纪律不 import shared 主入口，跨包形状一致由 runtime 投影产出侧 + 对拍测试
- * 锚定）。停因是引擎/宿主原值（completed/failed 是派生展示词，不经本通道——
- * list 的 outcome 字段承载展示词）。
+ * 既有纪律不 import shared 主入口，跨包形状一致由对拍测试锚定：
+ * src/execution/__tests__/subagent-list-last-round-parity.test.ts——shared 键集
+ * ⊆ core 键集 + 已登记偏差清单）。停因是引擎/宿主原值（completed/failed 是派生
+ * 展示词，不经本通道——list 的 outcome 字段承载展示词）。
  * [有意偏差] stderrTeePath 为 core list 证据链字段（evidence 装配供源）——shared
  * 侧（renderer lastRound 展示通道）暂不承载，出现透传需求时 shared 同批加字段。
  */

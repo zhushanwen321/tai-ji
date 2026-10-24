@@ -453,6 +453,75 @@ describe('refreshRecordEntries：拉取与发布', () => {
     expect(publish).toHaveBeenCalledTimes(3)
   })
 
+  it('lastRound 比对位：仅 lastRound 变化的投影也触发 publish（漏比对 = wire 永不下发新轮收条）', async () => {
+    // [subagent-observability u3 F4] 构造「除 lastRound 外全字段相等」的两轮投影：
+    // 第二轮收条与前轮同 stopReason/turns/totalTokens/resultSummary，仅多
+    // promptDisposition——发布去重层缺 lastRound 比对位时判全等 → 不发布 → 红点
+    // 判据失真。事件驱动链（report → fold → 投影 → 发布门）全真，不经 entry 面。
+    const dir = mkdtempSync(join(tmpdir(), 'session-records-lastround-'))
+    const recordsDir = getSubagentRecordsDir('s1', dir)
+    mkdirSync(recordsDir, { recursive: true })
+    const eventsPath = join(recordsDir, 'sa-lr.events')
+    const header = { type: 'record-events', id: 'sa-lr' }
+    const created = { type: 'record-created', seq: 1, ts: 1000, id: 'sa-lr', agent: 'worker', task: 't', slug: 's', origin: 'tool', rootSessionId: 's1', depth: 0, mode: 'background', startedAt: 1000 }
+    // 两轮收条事实字段刻意同值（stopReason/turns/totalTokens/resultSummary）——
+    // 第二轮仅多 promptDisposition（lastRound 的键）。
+    const roundIdle1 = { type: 'record-round-idle', seq: 2, ts: 2000, round: 1, stopReason: 'stop', turns: 2, totalTokens: 500, resultSummary: 'round reply' }
+    const reopened = { type: 'record-reopened', seq: 3, ts: 3000, epoch: 2, round: 0 }
+    const roundStarted = { type: 'record-round-started', seq: 4, ts: 3100, round: 2, epoch: 2 }
+    const roundIdle2 = { type: 'record-round-idle', seq: 5, ts: 4000, round: 2, stopReason: 'stop', turns: 2, totalTokens: 500, resultSummary: 'round reply', promptDisposition: 'queued' }
+    writeFileSync(eventsPath, [header, created, roundIdle1].map((l) => JSON.stringify(l)).join('\n') + '\n')
+    interface WireMember {
+      subagentId: string
+      status: string
+      turns?: number
+      lastRound?: { turns?: number; result?: string; promptDisposition?: string }
+    }
+    const membersOf = (frame: unknown): WireMember =>
+      ((frame as { payload: { subagents: WireMember[] } }).payload.subagents ?? []).find((r) => r.subagentId === 'sa-lr')!
+    try {
+      piAgentDirRef.dir = dir
+      const { records, publish } = makeRecords({
+        sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: join(dir, 's1.jsonl'), cwd: dir }]) } as unknown as ISessionStore,
+      })
+      registerSession(records)
+      writeFileSync(join(dir, 's1.jsonl'), '{}\n')
+
+      expect(routeJournalReport('s1', {
+        domain: 'record',
+        fileKey: 'sa-lr',
+        events: [created, roundIdle1],
+        sessionId: 's1',
+        emittedAt: Date.now(),
+      })).toBe(true)
+      const subMsgs = () => publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.subagents')
+      expect(subMsgs().length).toBeGreaterThanOrEqual(1)
+      const first = membersOf(subMsgs()[0]![1])
+      expect(first.lastRound).toEqual({ turns: 2, result: 'round reply' })
+
+      // 第二轮：仅 lastRound.promptDisposition 新增（其余投影字段全等）→ 必须发布
+      writeFileSync(eventsPath, [reopened, roundStarted, roundIdle2].map((l) => JSON.stringify(l)).join('\n') + '\n', { flag: 'a' })
+      expect(routeJournalReport('s1', {
+        domain: 'record',
+        fileKey: 'sa-lr',
+        events: [reopened, roundStarted, roundIdle2],
+        sessionId: 's1',
+        emittedAt: Date.now(),
+      })).toBe(true)
+      const frameCount = subMsgs().length
+      const second = membersOf(subMsgs()[frameCount - 1]![1])
+      // 「仅 lastRound 变化」的构造前提钉住（其余字段与首轮逐项相等）
+      expect(second.status).toBe(first.status)
+      expect(second.turns).toBe(first.turns)
+      expect(second.lastRound).toEqual({ turns: 2, result: 'round reply', promptDisposition: 'queued' })
+      // 发布锚：比对位删除（漏比对）时本断言红——wire 永不下发新轮收条
+      expect(frameCount).toBeGreaterThanOrEqual(2)
+    } finally {
+      piAgentDirRef.dir = ''
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
   it('engine 域同值新引用不重复发布（字段级浅比较——引用比较会把每轮重解析误判为变化）', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)

@@ -581,8 +581,10 @@ describe("ConversationContinuation — 轮末分流（D7）与通知侧", () => 
     const notify = calls.notified[0]!;
     expect(notify.status).toBe("running");
     expect(notify.error).toContain("round did not complete: engine_crashed: child died");
-    expect(notify.error).toContain("Recovery");
-    expect(notify.error).toContain("action:'message'");
+    // error 字段 = 失败摘要原文（不嵌恢复指引）——恢复指引由 notifier 五分支正文尾部
+    // 单点承载，error 再嵌即成双段指引（双拼防线锚）。
+    expect(notify.error).not.toContain("Recovery:");
+    expect(notify.error).not.toContain("action:'message'");
     // dedup key = record:round：round 已随簿记 +1 → 失败通知与上一轮成功通知 key 分离
     expect(record.round).toBe(2);
     expect(notify.round).toBe(2);

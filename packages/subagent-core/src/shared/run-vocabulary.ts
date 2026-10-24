@@ -18,9 +18,10 @@ import type { AgentFailureKind, EngineProtocolErrorCode } from "@zhushanwen/suba
  * 终局原因词表（`DoneReason` 的 shared 侧镜像）。
  *
  * 为什么在这里重声明而不是 import：`DoneReason` 定义在 `orchestration/models/types.ts`
- * （编排层），shared 是更低层，import 它会把依赖方向倒置。两侧由
- * `packages/runtime/test/workflow-status-vocab-parity.test.ts` 一族的词表断言与
- * `run-vocabulary` 的映射测试共同钉住值级一致。
+ * （编排层），shared 是更低层，import 它会把依赖方向倒置。两侧值级一致由
+ * `src/shared/__tests__/run-vocabulary.test.ts` 的「DoneReason 三词表跨词表对拍」
+ * 钉住（core ALL_DONE_REASONS ≡ shared WORKFLOW_DONE_REASON_ALL 值级对拍 + 镜像
+ * 联合双向编译锚——runtime vocab-parity 测试族只对账 status/outcome 轴）。
  *
  * [subagent-observability §3.3.8] 增 partially_succeeded：run 终局吸收成员交付的
  * 独立档——存在失败且存在非失败成员（或无失败但部分交付）时 run 不折进 failed

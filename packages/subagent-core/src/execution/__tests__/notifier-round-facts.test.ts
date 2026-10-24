@@ -53,11 +53,16 @@ describe("[§3.3.7①] 轮应答正文五分支事实化", () => {
     notifier.dispose();
   });
 
-  /** 取唯一一条已投递正文。 */
-  function sentContent(): string {
-    expect(fake.contents).toHaveLength(1);
-    return fake.contents[0]!;
-  }
+/** 取唯一一条已投递正文。 */
+function sentContent(): string {
+  expect(fake.contents).toHaveLength(1);
+  return fake.contents[0]!;
+}
+
+/** 子串出现次数（恢复指引「恰好一段」断言的计数原语）。 */
+function countOccurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
 
   it("③ 失败轮：失败摘要 + FailureCause 点拼 + 恢复指引；transcript 指针在场", () => {
     notifier.notify(roundRecord({
@@ -70,6 +75,11 @@ describe("[§3.3.7①] 轮应答正文五分支事实化", () => {
     expect(content).toContain("failed (provider.rate_limited)");
     expect(content).toContain("429 too many requests");
     expect(content).toContain("Recovery: re-send your message");
+    // 恢复指引恰好一段（载荷 error 嵌尾 + 正文尾段 = 双段指引的双拼防线锚）；
+    // ③ 支正文统一走轮应答指引（ROUND_REPLY_RECOVERY_TAIL），不混旧收尾语义词。
+    expect(countOccurrences(content, "Recovery: re-send your message")).toBe(1);
+    expect(content).not.toContain("action:'close'");
+    expect(content).not.toContain("action:'list'");
     expect(content).toContain("Full transcript: /tmp/s.jsonl");
     expect(content).not.toContain("finished a round");
   });
@@ -105,8 +115,23 @@ describe("[§3.3.7①] 轮应答正文五分支事实化", () => {
     expect(content).toContain("failed (engine.engine_aborted)");
     expect(content).toContain("engine aborted abnormally");
     expect(content).toContain("Recovery: re-send your message");
+    expect(countOccurrences(content, "Recovery: re-send your message")).toBe(1);
     expect(content).toContain("Full transcript: /tmp/s.jsonl");
     expect(content).not.toContain("was aborted");
+  });
+
+  it("③' 迁移期回落（轮失败、分类事实缺席）：失败摘要 + 恢复指引恰好一段（error 原文不嵌尾）", () => {
+    // settleRoundFailed 载荷 error = 失败摘要原文（指引由五分支尾部单点承载）——
+    // 本支若 error 嵌尾即 FAILURE_RECOVERY_TAIL 双拼，单次计数是双拼防线锚。
+    notifier.notify(roundRecord({
+      result: "",
+      error: "round did not complete: engine_crashed: child died",
+      sessionFile: "/tmp/s.jsonl",
+    }));
+    const content = sentContent();
+    expect(content).toContain("failed: round did not complete: engine_crashed: child died");
+    expect(countOccurrences(content, "Recovery: re-send your message")).toBe(1);
+    expect(content).toContain("Full transcript: /tmp/s.jsonl");
   });
 
   it("① 被接管轮（promptDisposition=handled）：接管事实——引擎未执行，无成败词", () => {

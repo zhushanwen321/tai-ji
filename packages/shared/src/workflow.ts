@@ -35,8 +35,10 @@ export type WorkflowRunStatus = 'running' | 'interrupted' | 'done'
  * done 终态原因（WorkflowRun 不变式 I2：done 时必有 reason）。
  * [subagent-observability §3.3.8] 增 partially_succeeded（run 终局吸收成员交付的
  * 独立档——「一半成功」与全败不可分辨即故障 B 的反方向失真，不入失败族折叠）。
- * 与 core DoneReason（低层镜像 RunDoneReason）值级对齐，漂移由 runtime 词表断言族
- * 与 shared WORKFLOW_DONE_REASON_ALL 锚定。
+ * 与 core DoneReason（低层镜像 RunDoneReason）值级对齐，漂移由 core
+ * run-vocabulary.test.ts 的「DoneReason 三词表跨词表对拍」钉住（core
+ * ALL_DONE_REASONS ≡ shared WORKFLOW_DONE_REASON_ALL 值级对拍 + 镜像联合双向
+ * 编译锚）。
  */
 export type WorkflowDoneReason =
   | 'completed'

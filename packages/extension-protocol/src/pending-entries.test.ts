@@ -14,7 +14,6 @@ import {
   resolveSettlementReason,
   type MappedPendingStatus,
   type ResolvedSettlementReason,
-  type SettlementReason,
 } from './pending-entries'
 
 const reg = (id: string, extra: Record<string, unknown> = {}) => ({
@@ -354,9 +353,6 @@ describe('SettlementReason 结清枚举（subagent-observability §3.3.6 新权�
   it('封闭五值锁定（与 subagent-core run-vocabulary ALL_SETTLEMENT_REASONS 同源词表）', () => {
     expect([...SETTLEMENT_REASONS]).toEqual(['completed', 'failed', 'cancelled', 'lost', 'no_result'])
     expect(new Set(SETTLEMENT_REASONS).size).toBe(SETTLEMENT_REASONS.length)
-    // 类型面收窄镜像：联合五值与常量逐成员一致
-    const all: readonly SettlementReason[] = [...SETTLEMENT_REASONS]
-    expect(all).toEqual([...SETTLEMENT_REASONS])
     // 解析缺省不在五值内（fail-visible 的缺省独立位）
     const parsed: ResolvedSettlementReason = 'unknown'
     expect(parsed).toBe('unknown')

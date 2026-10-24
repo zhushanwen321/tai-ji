@@ -37,7 +37,6 @@
 // 收条未写确认对半更新窗同样让位，重复启动不重复追加。
 
 import { readdir, readFile } from "node:fs/promises";
-import { renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Dirent } from "node:fs";
 
@@ -51,8 +50,9 @@ import { resolveSessionStoreBase } from "../execution/assembly/store-base.ts";
 import { manifestSnapshotInFlight } from "../execution/persistence/record-store-rebuild.ts";
 import { createRecordEventStream } from "../execution/persistence/record-events.ts";
 import type { ManifestRecord } from "../execution/persistence/manifest-store.ts";
-import { MANIFEST_INDENT_SPACES } from "../execution/persistence/manifest-store.ts";
+import { MANIFEST_INDENT_SPACES, withEventsWatermark } from "../execution/persistence/manifest-store.ts";
 import { isProcessAlive, readAliveMarker } from "../execution/persistence/alive-store.ts";
+import { writeAtomicFileSync } from "../shared/atomic-write.ts";
 import type { RecordEvent } from "../execution/persistence/record-events.ts";
 import type { SweepLogChannel } from "./startup-sweep.ts";
 
@@ -162,18 +162,22 @@ function sweptEvidence(manifest: ManifestRecord): string {
   return parts.join("; ");
 }
 
-/** manifest 快照原子刷新（tmp + rename——半写不可见，读侧要么旧要么新）。 */
+/**
+ * manifest 快照原子刷新（统一原语 writeAtomicFileSync——tmp+rename 半写不可见，
+ * tmp 名走 core 统一约定 `<目标>.tmp.<pid>.<seq>-<rand>`，崩溃残留可被
+ * listStaleTmpFiles 反查）+ 事件文件水位嵌入（withEventsWatermark——manifest
+ * 全部 record 侧写点统一嵌事件文件（`<id>.events`）stat 戳的纪律在本写点不缺席；
+ * 清点写序是 manifest 先刷、收条后落，嵌的是收条追加前的事件文件戳——收条
+ * append 失败的崩溃窗内读侧校验恰好通过，正常路径收条落盘后水位过期由读侧
+ * 按设计回落事件流重建）。
+ */
 function writeManifestAtomic(recordsDir: string, id: string, manifest: ManifestRecord): void {
   const target = join(recordsDir, `${id}.json`);
-  const tmp = `${target}.swept-tmp`;
-  try {
-    writeFileSync(tmp, JSON.stringify(manifest, null, MANIFEST_INDENT_SPACES), "utf-8");
-    renameSync(tmp, target);
-  } finally {
-    // rename 成功后 tmp 已不存在；失败路径 force 删残留（ENOENT 容忍——不吞主错误，
-    // rename 失败原因经 finally 后原样上抛给调用方 warn 通道）。
-    rmSync(tmp, { force: true });
-  }
+  // encoding 缺省 utf8（原语缺省与原 writeFileSync "utf-8" 显式形态等价）。
+  writeAtomicFileSync(
+    target,
+    JSON.stringify(withEventsWatermark(recordsDir, manifest), null, MANIFEST_INDENT_SPACES),
+  );
 }
 
 /**
