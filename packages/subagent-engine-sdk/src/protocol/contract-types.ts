@@ -591,6 +591,21 @@ export interface AgentOutcome {
    * 旧引擎/无重试缺省不落键。
    */
   retryAttempts?: number;
+  /**
+   * [subagent-observability §3.3.1/§3.3.3] 本轮被人类接管收尾的标注（引擎判定链
+   * prompt-ack 命中 handled 时产出，值恒 "handled"）。宿主轮收条
+   * lastRound.promptDisposition 的数据源——被接管轮不产失败分类、结清走 no_result、
+   * 通知走接管分支、run 聚合按未交付非失败计。additive 可选（宪法判据③同
+   * engineStopReason 先例）：旧引擎缺省 = 无接管标注，零行为差。
+   */
+  promptDisposition?: "handled";
+  /**
+   * [subagent-observability §3.3.2/§3.3.10] 观察性事实数组（引擎产出侧摘要，如
+   * 「结构化输出未调用」/交付谓词缺项）。宿主轮收条 lastRound.observations 的
+   * 数据源——查询出口 list lastRound.observations 直读。additive 可选：旧引擎
+   * 缺省不落键。
+   */
+  observations?: string[];
 }
 
 // ============================================================
