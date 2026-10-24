@@ -1,0 +1,15 @@
+{
+  "name": "plugin-confirm-demo",
+  "version": "1.0.0",
+  "description": "verify-taiji fixture: install confirm-card informed-consent surface (S27)",
+  "displayName": "Confirm Demo",
+  "type": "module",
+  "taijiPlugin": {
+    "manifestVersion": 1,
+    "main": "index.js",
+    "activationEvents": ["onStartupFinished"],
+    "trustLevel": "sandbox",
+    "capabilities": ["network.http"],
+    "readPaths": ["Documents/taiji-verify-confirm-demo.json"]
+  }
+}

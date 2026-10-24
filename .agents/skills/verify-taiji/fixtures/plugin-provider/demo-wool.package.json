@@ -1,0 +1,21 @@
+{
+  "name": "demo-wool",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "displayName": "DemoWool",
+  "description": "verify-taiji D3 acceptance fixture plugin (provider-plugin-access S1/S5/S6/S7): never reports credential status",
+  "taijiPlugin": {
+    "manifestVersion": 1,
+    "main": "index.js",
+    "activationEvents": ["onStartupFinished"],
+    "namespace": "demo-wool",
+    "capabilities": [],
+    "readPaths": [],
+    "permissions": [
+      "plugin.views.update",
+      "plugin.commands.register",
+      "plugin.commands.invoke.result"
+    ]
+  }
+}

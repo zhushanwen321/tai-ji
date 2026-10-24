@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "packageName": "demo-wool",
+      "pluginId": "demo-wool",
+      "displayName": "DemoWool",
+      "description": "verify-taiji D3 acceptance demo family (plugin physically pre-seeded into <dataDir>/plugins/demo-wool by the scenario fixture)",
+      "pluginVersion": "0.1.0",
+      "family": {
+        "id": "demo-wool",
+        "displayName": "DemoWool",
+        "vendor": "演示厂商",
+        "credentialSource": "ide-extract",
+        "modelCount": 3
+      },
+      "capabilities": [],
+      "readPaths": []
+    },
+    {
+      "packageName": "demo-wool-b",
+      "pluginId": "demo-wool-b",
+      "displayName": "DemoWoolB",
+      "description": "verify-taiji demo family B (not installed — exercises the install-hint face of the family card)",
+      "pluginVersion": "0.1.0",
+      "family": {
+        "id": "demo-wool-b",
+        "displayName": "DemoWoolB",
+        "vendor": "演示厂商乙",
+        "credentialSource": "oauth",
+        "modelCount": 5
+      },
+      "capabilities": ["network.http"],
+      "readPaths": []
+    },
+    {
+      "packageName": "demo-wool-c",
+      "pluginId": "demo-wool-c",
+      "displayName": "DemoWoolC",
+      "description": "verify-taiji demo family C (not installed — exercises the install-hint face of the family card)",
+      "pluginVersion": "0.1.0",
+      "family": {
+        "id": "demo-wool-c",
+        "displayName": "DemoWoolC",
+        "vendor": "演示厂商丙",
+        "credentialSource": "oauth",
+        "modelCount": 7
+      },
+      "capabilities": [],
+      "readPaths": []
+    }
+  ]
+}

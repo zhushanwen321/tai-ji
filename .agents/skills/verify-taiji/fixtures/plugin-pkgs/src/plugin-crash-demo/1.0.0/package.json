@@ -1,0 +1,13 @@
+{
+  "name": "plugin-crash-demo",
+  "version": "1.0.0",
+  "description": "verify-taiji fixture: sandbox plugin used to inject fork crash (S13)",
+  "displayName": "Crash Demo",
+  "type": "module",
+  "taijiPlugin": {
+    "manifestVersion": 1,
+    "main": "index.js",
+    "activationEvents": ["onStartupFinished"],
+    "trustLevel": "sandbox"
+  }
+}

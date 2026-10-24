@@ -1,0 +1,16 @@
+{
+  "name": "plugin-update-demo",
+  "version": "2.0.0",
+  "description": "verify-taiji fixture: plugin update chain (S26) v2.0.0 broken-on-activate (update failure path)",
+  "displayName": "Update Demo",
+  "type": "module",
+  "taijiPlugin": {
+    "manifestVersion": 1,
+    "main": "index.js",
+    "activationEvents": ["onStartupFinished"],
+    "trustLevel": "sandbox",
+    "namespace": "update-demo",
+    "capabilities": ["network.http"],
+    "readPaths": ["Documents/taiji-verify-update-demo.json"]
+  }
+}

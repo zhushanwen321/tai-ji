@@ -1,0 +1,14 @@
+{
+  "name": "plugin-neighbor-stress",
+  "version": "1.0.0",
+  "description": "verify-taiji fixture: install/uninstall neighbor-invariant stress plugin (S14)",
+  "displayName": "Neighbor Stress",
+  "type": "module",
+  "taijiPlugin": {
+    "manifestVersion": 1,
+    "main": "index.js",
+    "activationEvents": ["onStartupFinished"],
+    "trustLevel": "sandbox",
+    "namespace": "neighbor-stress"
+  }
+}
