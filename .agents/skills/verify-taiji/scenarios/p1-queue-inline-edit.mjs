@@ -179,7 +179,7 @@ export async function run(ctx) {
   // ── 段 1：主回合 + 回合中连发 3 条入队 ────────────────────────
   const since0 = p.events.length
   const host = await p.send(sid, MSG_HOST, { clientUuid: uuidOf() })
-  ev.assert('B: 主回合消息 direct 车道（idle 会话）', host.reply?.lane === 'direct', {
+  ev.assert('B: 主回合消息 direct 投递路径（idle 会话）', host.reply?.lane === 'direct', {
     channel: 'B', expected: 'lane=direct', actual: JSON.stringify(host.reply ?? {}),
   })
   // [产品缺口 workaround，2026-10-24 探针实证] session.delivery topic 接线唯一入口 =
@@ -198,7 +198,7 @@ export async function run(ctx) {
   const q = []
   for (const [tag, msg] of [['Q2', MSG_Q2], ['Q3', MSG_Q3], ['Q4', MSG_Q4]]) {
     const r = await p.send(sid, msg, { clientUuid: uuidOf() })
-    ev.assert(`B: 回合中提交 ${tag} 判 steer 车道`, r.reply?.lane === 'steer', {
+    ev.assert(`B: 回合中提交 ${tag} 判 steer 投递路径`, r.reply?.lane === 'steer', {
       channel: 'B', expected: 'lane=steer', actual: JSON.stringify(r.reply ?? {}),
     })
     q.push(r)

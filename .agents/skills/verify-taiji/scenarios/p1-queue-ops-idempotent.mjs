@@ -177,7 +177,7 @@ export async function run(ctx) {
   // ── 段 1：主回合 + 回合中连发 5 条 + 折叠口径 ──────────────────
   const since0 = p.events.length
   const host = await p.send(sid, MSG_HOST, { clientUuid: uuidOf() })
-  ev.assert('B: 主回合消息 direct 车道', host.reply?.lane === 'direct', {
+  ev.assert('B: 主回合消息 direct 投递路径', host.reply?.lane === 'direct', {
     channel: 'B', expected: 'lane=direct', actual: JSON.stringify(host.reply ?? {}),
   })
   // [产品缺口 workaround] 同 p1-queue-inline-edit：首订阅早于内核创建 → session.delivery
@@ -192,7 +192,7 @@ export async function run(ctx) {
   const q = []
   for (const [i, msg] of MSGS.entries()) {
     const r = await p.send(sid, msg, { clientUuid: uuidOf() })
-    ev.assert(`B: 回合中提交 E${i + 2} 判 steer 车道`, r.reply?.lane === 'steer', {
+    ev.assert(`B: 回合中提交 E${i + 2} 判 steer 投递路径`, r.reply?.lane === 'steer', {
       channel: 'B', expected: 'lane=steer', actual: JSON.stringify(r.reply ?? {}),
     })
     q.push(r)

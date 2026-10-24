@@ -17,7 +17,7 @@
 
 ## How to get to it (user POV)
 
-- 活跃 session 的 composer 输入区：输入文本 → ⏎ 或点「发送」；流式中按钮变「停止」；流式中再输入 → ⏎ 走 steer 车道。
+- 活跃 session 的 composer 输入区：输入文本 → ⏎ 或点「发送」；流式中按钮变「停止」；流式中再输入 → ⏎ 走 steer 投递路径。
 
 ## Driving it with browser-automation (CDP)
 

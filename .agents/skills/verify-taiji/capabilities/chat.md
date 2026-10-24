@@ -105,7 +105,7 @@ const reply = await p.call('delivery.submit',
 2. **faux 队列逐轮出队**：每发一轮消耗一个 step；脚本耗尽后「发了但永远不回复」——
    看起来像挂死，实际是脚本用完了。多轮剧本要排足 step（含 abort/steer 的额外轮）。
 3. **不要用 `message.send` 验 composer 链路**：composer 走 `delivery.submit`；用错 RPC 会绕过
-   内核车道判定与队列气泡，`chat.steer` 的断言也就失效了。
+   内核投递路径判定与队列气泡，`chat.steer` 的断言也就失效了。
 4. **user 文本会回显**：faux 回复若与输入同文（或 mock 回显），`getByText` 会双匹配；让回复文本
    与输入不同。
 5. **首条消息前没有 session 文件**：C 证据只能在 assistant 到达后取（规则 #6）。
@@ -360,7 +360,7 @@ await p.call('message.abort', { sessionId: sid }, { replyType: 'message.status' 
 
 ---
 
-## chat.steer · 流式中追加（steer 车道）
+## chat.steer · 流式中追加（steer 投递路径）
 
 - **通道**：B（`delivery.submit` 回执 `lane='steer'`）+ A（回合不被打断、追加内容进入当前回合；
   队列气泡可能一闪）
@@ -419,7 +419,7 @@ const reply = await p.call('delivery.submit',
 ### 证不了
 
 - 「steer 文本被模型真的采纳」（faux 不读上下文；只能证明投递与历史落位）。
-- **followUp 车道**（`intent='after-run'`）当前无用户可达入口（见 Gotcha 3），标不可达。
+- **followUp 投递路径**（`intent='after-run'`）当前无用户可达入口（见 Gotcha 3），标不可达。
 
 ### Gotchas
 

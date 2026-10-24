@@ -64,7 +64,7 @@ export const meta = {
   ],
   notProvable: [
     '收起/展开动画与计时视觉形态（impl-plan A1b，L4 人工检查；本剧本只断状态字与计时数值变化）',
-    'Alt+Enter followUp 车道分流语义（delivery.submit payload 无 intent 字段，线上与 Enter 痕迹相同——chat.steer Gotcha 3）',
+    'Alt+Enter followUp 投递路径分流语义（delivery.submit payload 无 intent 字段，线上与 Enter 痕迹相同——chat.steer Gotcha 3）',
     '工具间隙注入形态（faux 长回合无工具调用，插话实际在回合收尾链被消费；工具间隙注入归 p1-tool-call-render 族）',
     '插话文本被模型采纳（faux 不读上下文，只能证明投递与历史落位）',
   ],
@@ -205,7 +205,7 @@ export async function run(ctx) {
       actual: `first="${metaFirst.slice(0, 120)}" second="${metaSecond.slice(0, 120)}"`,
     })
 
-    // ── 段 2：回合中插话（steer 车道 + 队列可见 + 不收起） ──
+    // ── 段 2：回合中插话（steer 投递路径 + 队列可见 + 不收起） ──
     const sinceSubmit = protocol.events.length
     const interject = await protocol.send(sid, INTERJECT)
     const reply = interject.reply ?? {}
