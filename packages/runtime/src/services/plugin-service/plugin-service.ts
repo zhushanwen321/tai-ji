@@ -105,6 +105,26 @@ export class PluginService implements IPluginService {
   /** 注入的外部依赖 */
   private deps: IPluginServiceDeps
 
+  /**
+   * providerEntries port 是否已接线（组合根装配自检消费）：port 缺省时卸载编排静默
+   * 跳过 models.json 条目清理（cleanupProviderEntriesFor 的 warn 降级分支），孤儿的
+   * apiKey 条目残留只有在生产装配路径才可能发生——测试轨显式注入 port 不会暴露漏接，
+   * 组合根构造后经本探测 fail-fast（provider-plugin-access U7/S14）。
+   */
+  get hasProviderEntries(): boolean {
+    return this.deps.providerEntries !== undefined
+  }
+
+  /**
+   * piExtensionInstaller port 是否已接线（组合根装配自检消费，与 hasProviderEntries
+   * 同构）：port 缺省时双产物条目只装插件侧（installPiExtensionMember 的 warn 降级
+   * 分支），pi 扩展成员缺失只有在生产装配路径才可见——对话时报「模型不存在」而非
+   * 安装时失败。组合根构造后经本探测 fail-fast（provider-plugin-access U7/S23）。
+   */
+  get hasPiExtensionInstaller(): boolean {
+    return this.deps.piExtensionInstaller !== undefined
+  }
+
   /** taiji 配置根（~/.taiji/），plugin/session-data 持久化根。组合根注入。 */
   private readonly configDir: string
 
@@ -1054,8 +1074,9 @@ export class PluginService implements IPluginService {
 
   /**
    * 两段式安装第二段（确认停点之后）：暂存单步 rename 换入 → 扫描 → 激活 → 安装
-   * 登记（installed.json）→ 广播。激活失败自动回滚（S18：正式目录/暂存/installed.json/
-   * 注册表/列表五处无残留；更新场景旧版本幸存）。
+   * 登记（installed.json）→ 广播 → pi 扩展成员安装（双产物条目，U7/D6）。激活失败
+   * 自动回滚（S18：正式目录/暂存/installed.json/注册表/列表五处无残留；更新场景旧
+   * 版本幸存）；扩展成员安装失败整体报失败（插件已落盘事实保留，重试安装幂等自愈）。
    */
   async confirmPluginInstall(pluginId: string): Promise<InstallResult> {
     return this.withInstallLock(async () => {
@@ -1067,9 +1088,47 @@ export class PluginService implements IPluginService {
         }
       }
       const result = await this.commitAndActivate(pending.prepared)
-      if (result.success) this.pendingPrepares.delete(pluginId)
-      return result
+      if (!result.success) return result
+      this.pendingPrepares.delete(pluginId)
+      const extensionResult = await this.installPiExtensionMember(pending.preview)
+      return extensionResult ?? result
     })
+  }
+
+  /**
+   * pi 扩展成员安装（provider-plugin-access U7/D6 双产物安装编排的接线）：按清单条目
+   * 判定双产物——条目携带 piExtensionVersion（guard 契约：仅双产物条目携带）→ 调端口
+   * 安装，失败整体报失败（fail-fast：静默成功 = 对话链在很远的下游报「模型不存在」，
+   * 排障成本远高于此刻失败）。三类跳过（不误伤单产物插件）：端口未配置（测试/联调，
+   * warn 留痕）、清单不可得（fail-safe 链尾 config undefined——无法判定双产物 ≠ 必为
+   * 双产物，跳过 + warn；清单恢复后重试安装自愈）、条目无 piExtensionVersion（单产物）。
+   */
+  private async installPiExtensionMember(preview: PluginInstallPreview): Promise<InstallResult | undefined> {
+    const installer = this.deps.piExtensionInstaller
+    if (!installer) {
+      console.warn(`[plugin-service] no piExtensionInstaller configured; pi extension member skipped for ${preview.packageName}`)
+      return undefined
+    }
+    const load = await this.catalogService.load()
+    const entry = load.config?.plugins.find((p) => p.packageName === preview.packageName)
+    if (!entry) {
+      console.warn(`[plugin-service] catalog has no entry for ${preview.packageName}; pi extension member skipped`)
+      return undefined
+    }
+    if (entry.piExtensionVersion === undefined) {
+      return undefined
+    }
+    try {
+      await installer.installForCatalogEntry({ packageName: entry.packageName, piExtensionVersion: entry.piExtensionVersion })
+      return undefined
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      console.warn(`[plugin-service] pi extension member install failed for ${entry.packageName}:`, detail)
+      return {
+        success: false,
+        error: `插件已安装，但配套 pi 扩展成员安装失败：${detail}。请重试安装（幂等覆盖；扩展侧恢复后即自愈）`,
+      }
+    }
   }
 
   /** 两段式安装取消：清暂存与 pending 登记（用户取消路径，S27「未确认不落盘」）。 */
