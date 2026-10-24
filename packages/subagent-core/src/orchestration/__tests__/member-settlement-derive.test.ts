@@ -130,6 +130,68 @@ describe("[§3.3.8 场景 2] run 终局吸收成员交付：partially_succeeded 
   });
 });
 
+describe("[§3.3.8/§3.3.10 联动] 部分交付支：脚本层交付校验事实接入 run 结算", () => {
+  it("无失败 + 脚本层部分交付事实 → done 升格 partially_succeeded + partialMembers 帧明细", () => {
+    const run = makeRunWithMembers([OK, OK]);
+    run.state.scriptResult = {
+      status: "ok",
+      results: [],
+      partialMembers: [{ taskIndex: 1, missing: ['file:/abs/report.md (not readable (ENOENT))'] }],
+    };
+    const record = settleMembersIntoFinalSettlement(run, BASE_RECORD);
+    expect(record.outcome).toBe("partially_succeeded");
+    expect(record.partialMembers).toEqual([
+      { taskIndex: 1, missing: ['file:/abs/report.md (not readable (ENOENT))'] },
+    ]);
+    expect(record.failedMembers).toBeUndefined();
+  });
+
+  it("部分失败 + 部分交付并存 → partially_succeeded 携带 failedMembers 与 partialMembers 双明细", () => {
+    const run = makeRunWithMembers([OK, FAIL, OK]);
+    run.state.scriptResult = {
+      status: "partial",
+      partialMembers: [{ taskIndex: 2, missing: ["structured_output (no valid structured output)"] }],
+    };
+    const record = settleMembersIntoFinalSettlement(run, BASE_RECORD);
+    expect(record.outcome).toBe("partially_succeeded");
+    expect(record.failedMembers).toEqual([{ taskIndex: 1, cause: "provider.rate_limited" }]);
+    expect(record.partialMembers).toEqual([
+      { taskIndex: 2, missing: ["structured_output (no valid structured output)"] },
+    ]);
+  });
+
+  it("无部分交付事实（scriptResult 缺 partialMembers 载荷）→ done 不升格、帧无 partialMembers", () => {
+    const run = makeRunWithMembers([OK, OK]);
+    run.state.scriptResult = { status: "ok", results: [] };
+    const record = settleMembersIntoFinalSettlement(run, BASE_RECORD);
+    expect(record.outcome).toBe("done");
+    expect(record.partialMembers).toBeUndefined();
+  });
+
+  it("畸形 partialMembers 条目（taskIndex 非整数 / missing 非字符串数组）fail-visible 丢弃——不进终局帧", () => {
+    const run = makeRunWithMembers([OK, OK]);
+    run.state.scriptResult = {
+      status: "ok",
+      partialMembers: [
+        { taskIndex: "0", missing: ["x"] }, // taskIndex 非数字
+        { taskIndex: 1, missing: "not-an-array" }, // missing 非数组
+      ],
+    };
+    const record = settleMembersIntoFinalSettlement(run, BASE_RECORD);
+    expect(record.outcome).toBe("done");
+    expect(record.partialMembers).toBeUndefined();
+  });
+
+  it("脚本层失败（run.state.error）优先——不消费 partialMembers、不升格", () => {
+    const run = makeRunWithMembers([OK, OK]);
+    run.state.error = "fan-out: all tasks failed (2/2)";
+    run.state.scriptResult = { partialMembers: [{ taskIndex: 0, missing: ["x"] }] };
+    const record = settleMembersIntoFinalSettlement(run, { ...BASE_RECORD, outcome: "failed" });
+    expect(record.outcome).toBe("failed");
+    expect(record.partialMembers).toBeUndefined();
+  });
+});
+
 describe("[§3.3.8/UC-16] run 级终局优先于成员集合派生", () => {
   it("UC-16：run 主动取消（cancelled）不被成员派生覆盖——不产生 partially_succeeded", () => {
     const run = makeRunWithMembers([OK, CLOSEOUT_CANCELLED]); // 1 成功 + 1 被取消收尾

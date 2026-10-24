@@ -326,9 +326,10 @@ function listLastRoundOf(r: SubagentRecord): SubagentListLastRound | undefined {
  *  [subagent-observability §3.3.6 查询入口补全] 轮收条事实字段：lastRound（引擎停因
  *  原值/失败分类/接管三态/正文摘要/turns/usage——消费方先读事实，outcome 展示词保留
  *  为兼容读侧）+ lastError（§3.3.5 派生——最后一个非空轮失败）+ swept 失联标注
- *  （§3.3.4 清点附注随 lastRound 走）。budget 分轴结构位已入类型契约（缺省不落键
- *  ——预算持久化产出侧接线归 u5，§3.3.9）；evidence 取证指针同（stderrTeePath 死链
- *  成因排查为设计待验证项，指针通道随其落地）。
+ *  （§3.3.4 清点附注随 lastRound 走）。budget 分轴结构位已入类型契约（list 侧产出
+ *  待预算轴持久化落地——见类型注释）；evidence 取证指针随查询漏斗附加（record-store
+ *  attachListEvidence：eventsFile + lastSeq；stdout 日志路径随 stderrTeePath 死链
+ *  成因排查项一并落）。
  */
 export function recordToListItem(r: SubagentRecord): SubagentListItem {
   const lastRound = listLastRoundOf(r);
@@ -348,6 +349,9 @@ export function recordToListItem(r: SubagentRecord): SubagentListItem {
     ...(lastRound !== undefined ? { lastRound } : {}),
     ...(lastRound?.swept !== undefined ? { swept: lastRound.swept } : {}),
     ...(r.lastError !== undefined ? { lastError: r.lastError } : {}),
+    // [§3.3.6] 取证指针（record-store attachListEvidence 查询漏斗附加——透传；
+    // undefined = 事件流未接线 / 存量形态，缺省不落键）。
+    ...(r.evidence !== undefined ? { evidence: r.evidence } : {}),
     origin: r.origin,
     parentRunId: r.parentRunId,
   };

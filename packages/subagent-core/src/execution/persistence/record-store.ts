@@ -189,7 +189,7 @@ import { reconstructFromFile } from "./session-reconstructor.ts";
 import type { IdentityHeaderRecon } from "./session-reconstructor.ts";
 import type { ClosedReason, StopReason, TranscriptRef } from "../domain/record-types.ts";
 import type { ExecutionRecord, ModelOverride } from "../domain/record-model.ts";
-import type { AgentEvent, RecordSnapshot, SubagentRecord } from "../assembly/types.ts";
+import type { AgentEvent, RecordSnapshot, SubagentListEvidence, SubagentRecord } from "../assembly/types.ts";
 // [U4a / D3b (a″)] findForeignLiveInstance：孤儿恢复的活实例跳过判据——现查探针
 // 替代重建时 externalInstance 缓存（pid 单判据 + self-pid 排除，比缓存更新鲜）。
 import { writeAliveMarker, removeAliveMarker, findForeignLiveInstance } from "./alive-store.ts";
@@ -1134,8 +1134,32 @@ export class RecordStore {
     this.mergeManifestRecords(byId, rootSessionFilter);
     this.mergeMemoryRecords(byId, rootSessionFilter);
     this.rebuildMissingManifests(byId);
+    // [subagent-observability §3.3.6] evidence 取证指针附加（查询漏斗单点——list
+    // 与 run 下钻两条查询路径同源）。
+    this.attachListEvidence(byId);
 
     return byId;
+  }
+
+  /**
+   * [subagent-observability §3.3.6] list 条目 evidence 取证指针附加（mergedRecords
+   * 查询漏斗单点）：eventsFile = `<recordsDir>/<id>.events`（D3 落点推导——recordsDir
+   * 与 manifest 同目录接线，record-events.recordEventsPath）；lastSeq = fold 水位
+   * （eventStreamFace.foldOf——已接受事件最高 seq）。附加在浅拷贝上（磁盘源 light 是
+   * scanFile 缓存条目，原地写会污染缓存复用对象）。
+   * 缺席语义（类型注释同步）：事件面未接线（无 manifestDir 的纯内存测试形态）或
+   * 无事件流事实（fold lastSeq = 0——entry-only / manifest-only 存量）= evidence
+   * 缺省，不产指向不存在文件的指针。
+   */
+  private attachListEvidence(byId: Map<string, SubagentRecord>): void {
+    const recordsDir = this.getManifestDir?.();
+    if (recordsDir === undefined) return;
+    for (const [id, rec] of byId) {
+      const lastSeq = this.eventStreamFace?.foldOf(id).lastSeq ?? 0;
+      if (lastSeq <= 0) continue;
+      const evidence: SubagentListEvidence = { eventsFile: recordEventsPath(recordsDir, id), lastSeq };
+      byId.set(id, { ...rec, evidence });
+    }
   }
 
   /** mergedRecords 源 1.7（主 session entry 源，[U7 / B-restart store 面]）。行为保持：

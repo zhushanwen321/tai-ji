@@ -309,6 +309,30 @@ describe("RecordStore", () => {
   // ============================================================
 
   // ============================================================
+  // evidence 取证指针附加（[subagent-observability §3.3.6] 查询漏斗单点）
+  // ============================================================
+  describe("collectRecords evidence 取证指针", () => {
+    it("事件面接线的 store：collectRecords 附加 eventsFile（D3 落点）+ lastSeq（fold 水位）", () => {
+      const recordsDir = path.join(rootDir, "records");
+      fs.mkdirSync(recordsDir, { recursive: true });
+      const store = new RecordStore(() => tmpDir, undefined, undefined, () => recordsDir);
+      // register 写 record-created 事件（D3 表行 1）→ fold lastSeq ≥ 1
+      store.register(makeRecord({ id: "ev-1", mode: "background", startedAt: 1000 }));
+      const found = store.collectRecords(100).find((r) => r.id === "ev-1");
+      expect(found?.evidence).toBeDefined();
+      expect(found?.evidence?.eventsFile).toBe(recordEventsPath(recordsDir, "ev-1"));
+      expect(found?.evidence?.lastSeq).toBeGreaterThanOrEqual(1);
+    });
+
+    it("事件面未接线（无 manifestDir 纯内存形态）→ evidence 缺省（不产死指针）", () => {
+      const store = new RecordStore(() => tmpDir);
+      store.register(makeRecord({ id: "ev-2", mode: "background", startedAt: 1000 }));
+      const found = store.collectRecords(100).find((r) => r.id === "ev-2");
+      expect(found?.evidence).toBeUndefined();
+    });
+  });
+
+  // ============================================================
   // compareRecords 排序稳定性（内存 running record）
   // ============================================================
   describe("compareRecords 排序", () => {

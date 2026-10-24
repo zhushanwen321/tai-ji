@@ -22,6 +22,7 @@ import {
   type RunMemberView,
 } from "../run-member-view.ts";
 import { Budget } from "../models/budget.ts";
+import type { AgentCall } from "../models/agent-call.ts";
 import { Trace } from "../models/trace.ts";
 import type { ExecutionTraceNode } from "../models/types.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
@@ -46,6 +47,24 @@ function makeRecord(overrides: Partial<RunMemberRecordView> & { stepIndex: numbe
 
 function makeNode(overrides: Partial<ExecutionTraceNode> & { stepIndex: number }): ExecutionTraceNode {
   return { agent: "fan-out-0", task: "t", model: "default", status: "running", ...overrides };
+}
+
+/** 构造带 calls / 自定义 budget 的 run（budget 四轴派生测试用——派生纯函数只读声明值）。 */
+function makeRunWithState(
+  calls: Map<number, AgentCall>,
+  budgetOpts: ConstructorParameters<typeof Budget>[0] = {},
+): WorkflowRun {
+  return WorkflowRun.reconstruct(
+    "wf-mv",
+    { scriptSource: "async function execute() {}", args: {}, scriptName: "fan-out", scriptPath: "/fake/fan-out.js" },
+    { budget: new Budget(budgetOpts), calls, trace: Trace.fromArray([]), errorLogs: [] },
+    { startedAt: new Date(T0).toISOString() },
+  );
+}
+
+/** 预算声明轴的 call 形态（派生只读 opts——真实 AgentCall 的方法面与本测试无关）。 */
+function callWithOpts(opts: { prompt: string; maxTurns?: number; timeoutMs?: number }): AgentCall {
+  return { id: 0, opts, status: "done", attempts: 1 } as unknown as AgentCall;
 }
 
 // ── state 映射 ───────────────────────────────────────────────
@@ -322,6 +341,59 @@ describe("runMemberViews — record 行字段回落链与 now 耗时", () => {
     const runWithLabel = makeRun([makeNode({ stepIndex: 0, status: "running", agent: "fan-out-2" })]);
     const agentFallback = runMemberViews(runWithLabel, { records: [makeRecord({ stepIndex: 0, status: "running", agent: "" })], now: NOW });
     expect(agentFallback[0]!.agent).toBe("fan-out-2");
+  });
+});
+
+// ── budget 四轴分轴显式（§3.3.6/§3.3.9）──────────────────────
+
+describe("runMemberViews — budget 四轴分轴显式", () => {
+  it("per-call 轴取同 stepIndex call opts（maxTurns/timeoutMs）；run 级轴取 state.budget 声明值", () => {
+    const run = makeRunWithState(
+      new Map([[0, callWithOpts({ prompt: "t", maxTurns: 5, timeoutMs: 60_000 })]]),
+      { maxTokens: 1000, maxTimeMs: 120_000 },
+    );
+    const views = runMemberViews(run, { records: [makeRecord({ stepIndex: 0, status: "running", startedAt: T0 })], now: NOW });
+    expect(views[0]!.budget).toEqual({
+      maxTurns: 5,
+      timeoutMs: 60_000,
+      budgetTokens: 1000,
+      budgetTimeMs: 120_000,
+    });
+  });
+
+  it("未声明轴 = null（显式无界）：无 call 的 stepIndex 两轴 null；budget 未设轴 null", () => {
+    const run = makeRunWithState(new Map(), { maxTokens: 1000 });
+    const views = runMemberViews(run, { records: [makeRecord({ stepIndex: 3, status: "running", startedAt: T0 })], now: NOW });
+    expect(views[0]!.budget).toEqual({
+      maxTurns: null,
+      timeoutMs: null,
+      budgetTokens: 1000,
+      budgetTimeMs: null,
+    });
+  });
+
+  it("<=0 与未传同语义（执法点「不限」）→ null；trace 兜底行同样附加 budget", () => {
+    const run = makeRunWithState(
+      new Map([[0, callWithOpts({ prompt: "t", maxTurns: 0, timeoutMs: -1 })]]),
+      { maxTokens: 0 },
+    );
+    const views = runMemberViews(run, { now: NOW }); // 无 records → trace 兜底行为空集
+    expect(views).toEqual([]);
+
+    // trace 兜底行（stepIndex 0）也附加 budget（声明事实不随行来源变化）
+    const runWithNode = WorkflowRun.reconstruct(
+      "wf-mv",
+      { scriptSource: "async function execute() {}", args: {}, scriptName: "fan-out", scriptPath: "/fake/fan-out.js" },
+      {
+        budget: new Budget({ maxTokens: 0 }),
+        calls: new Map([[0, callWithOpts({ prompt: "t", maxTurns: 0, timeoutMs: -1 })]]),
+        trace: Trace.fromArray([makeNode({ stepIndex: 0, status: "completed" })]),
+        errorLogs: [],
+      },
+      { startedAt: new Date(T0).toISOString() },
+    );
+    const fallbackViews = runMemberViews(runWithNode, { now: NOW });
+    expect(fallbackViews[0]!.budget).toEqual({ maxTurns: null, timeoutMs: null, budgetTokens: null, budgetTimeMs: null });
   });
 });
 

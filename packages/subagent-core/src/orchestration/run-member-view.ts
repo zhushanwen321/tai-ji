@@ -93,9 +93,14 @@ export interface RunMemberView { // oe-exempt:20261022:framework:设计 §3.1.3 
    */
   failure?: string;
   /**
-   * [§3.3.6/§3.3.9 budget 分轴显式] 四轴预算结构（null = 显式无界）。结构位随本
-   * 单元入契约；产出侧接线归 u5（预算显式传参生效 + 持久化落地后填实值——此前
-   * 缺省不落键 = 任务级默认无超时的如实表达，规则 19）。
+   * [§3.3.6/§3.3.9 budget 分轴显式] 四轴预算结构（null = 该轴生效上界无界）。
+   * 事实源（runMemberViews 派生——本类型不单独产词）：maxTurns/timeoutMs = 同
+   * stepIndex call 的 AgentCallOpts 显式传参（callId = stepIndex 单源，
+   * dispatchAgentCall 落 AgentCall.opts）；budgetTokens/budgetTimeMs = run 级声明轴
+   * （run.state.budget.maxTokens/maxTimeMs——fresh run 从 spec 构造、重建 run 从
+   * run-created 帧恢复，两形态同源，resume-run-rebuild.ts 同款注释锚）。
+   * 生产输出恒在场（runMemberViews 逐行附加）；类型保持 optional 仅为兼容既有
+   * 测试/消费方的字面量构造形态。
    */
   budget?: {
     maxTurns: number | null;
@@ -147,7 +152,34 @@ export function runMemberViews(
     if (rows.has(stepIndex)) continue;
     rows.set(stepIndex, memberViewFromTraceNode(node, options.now));
   }
+  // [§3.3.6/§3.3.9 budget 分轴显式] 四轴预算逐行附加（record 行与 trace 兜底行同域
+  // ——预算是 run/call 的声明事实，不随行来源变化）。
+  for (const view of rows.values()) {
+    view.budget = budgetViewOf(run, view.stepIndex);
+  }
   return [...rows.values()].sort((a, b) => a.stepIndex - b.stepIndex);
+}
+
+/**
+ * 单成员行 budget 四轴派生（[§3.3.6/§3.3.9] 分轴显式——§3.3.9 执法点（引擎进程内
+ * limiter）的声明值镜像）：
+ * - maxTurns/timeoutMs：同 stepIndex call 的 AgentCallOpts 显式传参（callId =
+ *   stepIndex 单源）；call 缺席（重建形态 calls 未恢复该条）= 未声明 = null；
+ * - budgetTokens/budgetTimeMs：run 级声明轴（run.state.budget.maxTokens/maxTimeMs，
+ *   fresh run 从 spec 构造 / 重建 run 从 run-created 帧恢复——两形态同源）。
+ * 值语义与执法点一致：未传 / <=0 = 不限（AgentCallOpts 预算语义对齐注释），
+ * 映射为 null（显式无界）。
+ */
+function budgetViewOf(run: WorkflowRun, stepIndex: number): NonNullable<RunMemberView["budget"]> {
+  const call = run.state.calls.get(stepIndex);
+  const positiveOr = (v: number | undefined): number | null =>
+    typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+  return {
+    maxTurns: positiveOr(call?.opts.maxTurns),
+    timeoutMs: positiveOr(call?.opts.timeoutMs),
+    budgetTokens: positiveOr(run.state.budget.maxTokens),
+    budgetTimeMs: positiveOr(run.state.budget.maxTimeMs),
+  };
 }
 
 // ── 拆分 helper ───────────────────────────────────────────────

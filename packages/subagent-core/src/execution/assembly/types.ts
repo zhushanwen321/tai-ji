@@ -633,6 +633,13 @@ export interface SubagentRecord {
    */
   lastRound?: SubagentListLastRound;
   /**
+   * [subagent-observability §3.3.6] 取证指针（查询漏斗 mergedRecords 单点附加，
+   * 见 record-store.attachListEvidence）：eventsFile（`<recordsDir>/<id>.events`，
+   * D3 落点推导）+ lastSeq（fold 水位 = 已接受事件最高 seq）。undefined = 事件流
+   * 未接线（纯内存形态）/ 无事件流事实（entry-only / manifest-only 存量）。
+   */
+  evidence?: SubagentListEvidence;
+  /**
    * [§3.3.5 派生 lastError] 最后一个非空轮失败（内存源 = record.lastError；磁盘
    * 重建路径事实不可得时缺省——errors 数组的持久化权威 = agent 事件流，见
    * ExecutionRecord.errors）。

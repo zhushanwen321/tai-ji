@@ -1307,4 +1307,17 @@ describe("recordToListItem 轮收条事实字段（subagent-observability u3）"
     expect("lastError" in legacy).toBe(false);
     expect("swept" in legacy).toBe(false);
   });
+
+  it("evidence 取证指针透传（查询漏斗附加——recordToListItem 只透传）；无指针的存量形态不落键", () => {
+    const withEvidence = recordToListItem(
+      makeRec({
+        id: "bg-ev-1",
+        evidence: { eventsFile: "/records/bg-ev-1.events", lastSeq: 7 },
+      }),
+    );
+    expect(withEvidence.evidence).toEqual({ eventsFile: "/records/bg-ev-1.events", lastSeq: 7 });
+
+    const noEvidence = recordToListItem(makeRec({ id: "bg-ev-2" }));
+    expect("evidence" in noEvidence).toBe(false);
+  });
 });

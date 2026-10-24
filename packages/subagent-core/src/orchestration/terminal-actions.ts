@@ -957,9 +957,9 @@ export function memberFailureCauseOf(result: AgentResult): string {
  * - 空成员集 → undefined（空成员集 = 脚本层判定，回落 DoneReason 路径）。
  *
  * 失败成员明细随派生产出（failedMembers[].cause 点拼）；cancelled 成员（UC-16
- * 取消收尾）不进失败明细——「未交付且非失败」按部分交付路径计（部分交付明细
- * partialMembers 由 u5 产物契约校验填充，本派生恒缺省）。被接管成员无
- * agent-settled（in-flight）同样判 cancelled——「任务从未执行，无双跑风险」。
+ * 取消收尾）不进失败明细——「未交付且非失败」按部分交付路径计。
+ * 被接管成员无 agent-settled（in-flight）同样判 cancelled——「任务从未执行，无
+ * 双跑风险」。
  */
 export function deriveRunOutcomeFromMembers(run: WorkflowRun): {
   outcome: RunOutcome;
@@ -1006,6 +1006,46 @@ export function memberSettlementOf(call: AgentCall): MemberSettlement {
 }
 
 /**
+ * [subagent-observability §3.3.10/UC-11] 脚本层部分交付事实提取：fan-out 交付校验
+ * 在 worker 脚本内执行（§3.3.10「成员交付结算前校验」的模板侧落点），部分交付成员
+ * 清单随脚本返回 outcome.partialMembers 传回宿主（run.state.scriptResult，handleReturn
+ * 先于终局派生写点）。本函数把 unknown 形态的脚本产物收敛为结构化报告——逐条校验
+ * （taskIndex 非负整数 + missing 字符串数组），畸形条目 warn 留痕后丢弃（fail-visible，
+ * 不让脚本侧脏数据进终局帧）；全部畸形/载荷缺席 = undefined（无部分交付事实）。
+ */
+function partialMembersFromScriptResult(scriptResult: unknown): PartialMemberReport[] | undefined {
+  if (typeof scriptResult !== "object" || scriptResult === null) return undefined;
+  const raw = (scriptResult as { partialMembers?: unknown }).partialMembers;
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    logger.warn(
+      `[workflow] scriptResult.partialMembers ignored: expected an array, got ${typeof raw}`,
+    );
+    return undefined;
+  }
+  const reports: PartialMemberReport[] = [];
+  for (const item of raw) {
+    const missing = typeof item === "object" && item !== null
+      ? (item as { missing?: unknown }).missing
+      : undefined;
+    const taskIndex = typeof item === "object" && item !== null
+      ? (item as { taskIndex?: unknown }).taskIndex
+      : undefined;
+    if (
+      typeof taskIndex !== "number" || !Number.isInteger(taskIndex) || taskIndex < 0 ||
+      !Array.isArray(missing) || missing.some((m) => typeof m !== "string")
+    ) {
+      logger.warn(
+        `[workflow] scriptResult.partialMembers entry ignored (malformed): ${JSON.stringify(item)?.slice(0, 200)}`,
+      );
+      continue;
+    }
+    reports.push({ taskIndex, missing: missing as string[] });
+  }
+  return reports.length > 0 ? reports : undefined;
+}
+
+/**
  * [subagent-observability §3.3.8] run 终局吸收成员交付：在 DoneReason 合成记录上
  * 叠加成员集合派生。两级优先序（run 级终局优先于成员集合派生）：
  * - run 自身终局族：budget_limited/time_limited/cancelled（UC-16：取消不产生
@@ -1016,6 +1056,12 @@ export function memberSettlementOf(call: AgentCall): MemberSettlement {
  *   （fan-out allSettled 语义）在此升格 partially_succeeded/failed（场景 2 主场景）。
  * 空成员集回落原合成（脚本层判定）。settling 中双终局竞窗由状态机 terminal ×
  * 任意 fail-fast 承担（先到事实者胜）；interrupted 非终局不派生（resume 后再派生）。
+ *
+ * [subagent-observability §3.3.8/§3.3.10 联动] 部分交付支：产物契约校验事实在
+ * worker 脚本侧产出（§3.3.10 模板侧落点），经 run.state.scriptResult.partialMembers
+ * 接入本结算——存在部分交付事实时 run-settled 帧携带 partialMembers（明细：
+ * [{taskIndex, missing[]}]，部分交付成员不进 failedMembers、无 cause），派生 outcome
+ * 为 done 时升格 partially_succeeded（「无失败但存在部分交付」聚合规则支）。
  */
 export function settleMembersIntoFinalSettlement(run: WorkflowRun, record: RunSettlementRecord): RunSettlementRecord {
   if (record.outcome !== "done" && record.outcome !== "failed") return record;
@@ -1026,12 +1072,18 @@ export function settleMembersIntoFinalSettlement(run: WorkflowRun, record: RunSe
   if (run.state.error !== undefined) return record;
   const derived = deriveRunOutcomeFromMembers(run);
   if (derived === undefined) return record;
+  const partialMembers = partialMembersFromScriptResult(run.state.scriptResult);
   return {
     ...record,
-    outcome: derived.outcome,
+    // 「无失败但存在部分交付 → partially_succeeded」（§3.3.8 聚合规则第四支）——
+    // done 升格；failed/partially_succeeded 派生形态不被部分交付事实改档。
+    outcome: derived.outcome === "done" && partialMembers !== undefined
+      ? "partially_succeeded"
+      : derived.outcome,
     ...(derived.failedMembers !== undefined && derived.failedMembers.length > 0
       ? { failedMembers: derived.failedMembers }
       : {}),
+    ...(partialMembers !== undefined ? { partialMembers } : {}),
   };
 }
 
