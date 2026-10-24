@@ -183,10 +183,14 @@ const devRoot = path.join(os.homedir(), '.taiji-dev')
 const dataDir = await (async () => {
   const explicit = flag('data-dir') ?? process.env.TAIJI_VERIFY_DATA_DIR
   if (!explicit) return path.join(devRoot, `verify-${runId}`)
+  // run.mjs 由 spawnSync 无 shell 直跑，'~' 前缀不会被 shell 展开——先手动展开成 homedir 绝对路径，
+  // 再交给仓库权威校验器；否则 dev-instance-lib.mjs 的 path.resolve 会把 '~' 相对 cwd 解析成
+  // <worktree>/~/... 而被树内校验拒绝。
+  const expanded = explicit.startsWith('~') ? path.join(os.homedir(), explicit.slice(1)) : explicit
   const { resolveCustomDataDir } = await import(
     pathToFileURL(path.join(repo, 'apps/electron/scripts/dev-instance-lib.mjs')).href
   )
-  return resolveCustomDataDir(explicit)
+  return resolveCustomDataDir(expanded)
 })()
 const dataDirBase = path.basename(dataDir)
 if (!dataDir.startsWith(`${devRoot}${path.sep}`) || !dataDirBase.startsWith('verify-')) {
