@@ -11,9 +11,9 @@
  *   段 A subagent——主队 step0 派发 subagent_start(model=mockllm/mock-sub-a)、step1 收尾、
  *     step2 完成通知轮；成员队 step0 吐 canary 文本。
  *   段 B workflow——主队 step3 派发 workflow_run(fanout-canary, model 覆盖)、step4 收尾、
- *     step5+ 通知/闲置备用轮；成员队 step1-8 全部是合法终局 structured-output 调用
- *     （两成员并发共享同一 model-keyed 队列，任何交错步都必须能独立收敛，否则
- *     schema_deterministic 失败——2026-10-21 探针实测教训）。
+ *     step5+ 通知/闲置备用轮；成员队 step1-4 = [SO, SO, stop, stop] 奇偶形态（两成员
+ *     并发共享同一 model-keyed 队列，任意交错序下每成员 SO→stop 干净收尾——终态边沿
+ *     语义见 memberQueue 注释，2026-10-24 实测修正）。
  *   段 B 开始前条件等待主队游标 ≥3（pending() 轮询，防段 A 通知轮未消费导致段 B 主轮错步）。
  *
  * 断言通道：B（getSubagents / getWorkflows / message.complete）+ C（canary 落盘、
@@ -32,13 +32,22 @@ const SUB_MODEL = 'mock-sub-a'
 const SUB_CANARY = 'GRANDCHILD_MOCK_CANARY_9c1d'
 const WF_CANARY_PREFIX = 'FANOUT_MEMBER_STEP_'
 
-/** 成员队 step0：段 A 的 canary 文本步；step1-8：段 B 的合法终局 structured-output 步。 */
+/** 成员队 step0：段 A 的 canary 文本步；step1-4：段 B 的 [SO, SO, stop, stop] 奇偶形态。 */
 const memberQueue = [
   { text: SUB_CANARY, stopReason: 'stop' },
-  ...Array.from({ length: 8 }, (_, i) => ({
+  // [2026-10-24 终态边沿语义] 成员轮成败判定只产自引擎收尾边沿（设计 §3.3.1 聚合
+  // 不变量 2，output-collector.ts collectOutcome）——成员队列必须以 stop 步收尾：
+  // 纯 toolUse 队列让成员引擎永不停轮、直到队列耗尽 404，收尾边沿=错误 → 成员
+  // failed（parsedOutput 已产出也不豁免，旧「SO 边沿结算、收尾错误是噪音」形态
+  // 已废除）。[SO, SO, stop, stop] 奇偶形态：前 2 位置全 SO、后 2 位置全 stop，
+  // 两成员共享同一 per-model 游标时任意请求交错序下，每成员第 1 请求落 SO 位、
+  // 第 2 请求落 stop 位（引擎干净停 → success + engineStopReason=stop → delivered）。
+  ...Array.from({ length: 2 }, (_, i) => ({
     toolCalls: [{ name: 'structured-output', args: { summary: `${WF_CANARY_PREFIX}${i}_CANARY` } }],
     stopReason: 'toolUse',
   })),
+  { text: 'done', stopReason: 'stop' },
+  { text: 'done', stopReason: 'stop' },
 ]
 
 export const meta = {
