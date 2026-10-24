@@ -31,8 +31,18 @@ const GITCODE_MANIFEST_ASSET_NAME = 'wool-manifest.json'
 const MANIFEST_FETCH_TIMEOUT_MS = 10_000
 
 /** 家族 id 词表（与 pi-wool-shared types.ts WOOL_FAMILY_IDS 对齐）。 */
-export const WOOL_FAMILY_IDS = ['qoder', 'trae', 'workbuddy'] as const // oe-exempt:20261024:wip:分步提交中间态——wiring 接线属后续单元/集成阶段，30 天内接线或删除
+export const WOOL_FAMILY_IDS = ['qoder', 'trae', 'workbuddy'] as const
 export type WoolFamilyId = (typeof WOOL_FAMILY_IDS)[number]
+
+/** v2-plugins.json 清单条目包名 → 家族 id（`@scope/plugin-wool-<family>` → family）。 */
+export function woolFamilyFromCatalogPackageName(packageName: string): WoolFamilyId | undefined {
+  const slash = packageName.indexOf('/')
+  const withoutScope = slash >= 0 ? packageName.slice(slash + 1) : packageName
+  const PREFIX = 'plugin-wool-'
+  if (!withoutScope.startsWith(PREFIX)) return undefined
+  const family = withoutScope.slice(PREFIX.length)
+  return (WOOL_FAMILY_IDS as readonly string[]).includes(family) ? (family as WoolFamilyId) : undefined
+}
 
 /** 凭据来源两值（家族固有属性，清单承载）。 */
 export type WoolCredentialsSource = 'ide-extract' | 'oauth'
@@ -165,10 +175,12 @@ export class WoolExtensionInstaller {
   /**
    * 资产清单拉取（热更新通道保留，只承载资产解析）：github 权威源 + gitcode 国内备源
    * 双通道并发（github 成功恒用 github 结果——镜像存在滞后窗口，先到先得会装旧版）；
-   * 显式 manifestUrl = 单源语义。
+   * 显式 manifestUrl = 单源语义。成功结果进内存缓存（同一编排内重复拉取零网络）；
+   * `force: true` 跳过缓存强制重拉（版本配对不一致时的时点差自愈通道，D6），
+   * 重拉成功后覆盖缓存（新清单即新权威）。
    */
-  async fetchManifest(): Promise<WoolManifestFetchResult> {
-    if (this.manifestCache) {
+  async fetchManifest(options?: { force?: boolean }): Promise<WoolManifestFetchResult> {
+    if (!options?.force && this.manifestCache) {
       return { ok: true, manifest: this.manifestCache.manifest, fetchedAt: this.manifestCache.fetchedAt }
     }
     const fetchFn = this.deps.fetchFn ?? ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => fetch(input, init))
@@ -252,15 +264,47 @@ export class WoolExtensionInstaller {
     if (!entry) {
       throw new WoolExtensionInstallError('family_absent', `资产清单中没有 ${family} 家族条目。请升级 taiji 或等待清单更新后重试`)
     }
-    // 版本配对校验（D6）：资产清单版本 ≠ 清单配对版本 → 拒绝（两清单热更新时点差可自愈
-    // ——稍后重试；配对字段损坏不可自愈——等清单维护方修复）。
     if (entry.version !== piExtensionVersion) {
+      // 时点差自愈（D6）：内存缓存可能落后于热更新后的远端清单——绕过缓存强制重拉
+      // 一次再判；重拉后配对一致 = 时点差已收敛，用刷新条目继续安装（用户一次重试
+      // 即自愈）；重拉失败或仍不一致 = 配对不一致成立，拒绝并保留恢复指引。
+      const refetched = await this.fetchManifest({ force: true })
+      if (refetched.ok) {
+        const refreshed = refetched.manifest.families[family]
+        if (refreshed && refreshed.version === piExtensionVersion) {
+          return this.installEntry(refreshed)
+        }
+      }
       throw new WoolExtensionInstallError(
         VERSION_PAIR_MISMATCH,
         `插件与扩展版本不匹配：清单配对要求 pi 扩展 ${woolExtensionPkgName(family)}@${piExtensionVersion}，` +
           `资产清单当前为 @${entry.version}。请稍后重试（清单热更新后自愈）；持续出现请等待清单维护方修复配对`,
       )
     }
+    return this.installEntry(entry)
+  }
+
+  /**
+   * 从 v2-plugins.json 清单条目出发的安装编排（PluginService.confirmPluginInstall 成功
+   * 后的接线入口，U7 双产物安装编排）：包名推导家族（`@scope/plugin-wool-<family>`）
+   * → 复用 installPiExtension 的配对校验与钉版安装。条目携带 piExtensionVersion 即
+   * 双产物条目（plugin-catalog guard 契约）；包名非 plugin-wool-* 形态 = 清单指向
+   * 未知家族，结构化拒绝——静默跳过 = 扩展缺失、对话链断链复发。
+   */
+  async installForCatalogEntry(entry: { packageName: string; piExtensionVersion: string }): Promise<{ installedVersion: string }> {
+    const family = woolFamilyFromCatalogPackageName(entry.packageName)
+    if (!family) {
+      throw new WoolExtensionInstallError(
+        'family_unknown',
+        `清单条目 ${entry.packageName} 携带 piExtensionVersion 但包名不含 plugin-wool- 前缀，` +
+          '无法推导 pi 扩展家族。请检查 v2-plugins.json 清单条目',
+      )
+    }
+    return this.installPiExtension(family, entry.piExtensionVersion)
+  }
+
+  /** 钉版本安装 + 扫描确认（installPiExtension 正常路径与时点差自愈路径共用段）。 */
+  private async installEntry(entry: WoolManifestFamily): Promise<{ installedVersion: string }> {
     // 钉版本安装（npm + isValidPiExtension 校验 + 失败回滚全在既有链内）。
     await this.deps.extensionService.installExtension(`npm:${entry.pkg}@${entry.version}`)
     const extensions = await this.deps.extensionService.scanExtensions()

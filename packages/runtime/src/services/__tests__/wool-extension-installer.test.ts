@@ -160,3 +160,104 @@ describe('WoolExtensionInstaller（D6 双产物安装编排·扩展侧）', () =
     expect(await installer.scanInstalledVersion('workbuddy')).toBeUndefined()
   })
 })
+
+describe('fetchManifest 缓存与时点差自愈（D6：清单热更新后重试自愈）', () => {
+  it('成功结果进内存缓存：第二次 fetchManifest 不发网络', async () => {
+    const fetchFn = vi.fn(async () => jsonOk(MANIFEST))
+    const installer = new WoolExtensionInstaller({ extensionService: makeDeps().extensionService, manifestUrl: 'https://fixture.test/m.json', fetchFn })
+
+    await installer.fetchManifest()
+    await installer.fetchManifest()
+
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('force: true 跳过缓存强制重拉，重拉成功后覆盖缓存', async () => {
+    const refreshed: WoolAssetManifest = {
+      ...MANIFEST,
+      families: { ...MANIFEST.families, workbuddy: { ...MANIFEST.families.workbuddy!, version: '0.3.0' } },
+    }
+    let call = 0
+    const fetchFn = vi.fn(async () => jsonOk(call++ === 0 ? MANIFEST : refreshed))
+    const installer = new WoolExtensionInstaller({ extensionService: makeDeps().extensionService, manifestUrl: 'https://fixture.test/m.json', fetchFn })
+
+    await installer.fetchManifest()
+    const second = await installer.fetchManifest({ force: true })
+    expect(second.ok).toBe(true)
+    if (second.ok) expect(second.manifest.families.workbuddy?.version).toBe('0.3.0')
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    // 重拉后的新清单成为缓存：第三次无 force 读取不再发网络
+    await installer.fetchManifest()
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
+  it('时点差自愈：缓存清单落后 → mismatch 触发强制重拉 → 新清单配对一致 → 安装成功', async () => {
+    // 第一跳（缓存填充）回旧清单 0.1.9；mismatch 后 force 重拉回新清单 0.2.0（模拟
+    // v2-plugins 配对权威先行热更新、wool-manifest 随后跟上的时点差窗口关闭）。
+    const refreshed: WoolAssetManifest = {
+      ...MANIFEST,
+      families: { ...MANIFEST.families, qoder: { ...MANIFEST.families.qoder!, version: '0.2.0' } },
+    }
+    let call = 0
+    const fetchFn = vi.fn(async () => jsonOk(call++ === 0 ? MANIFEST : refreshed))
+    const deps = makeDeps({ fetchFn })
+    vi.mocked(deps.extensionService.scanExtensions).mockResolvedValue([
+      { name: '@zhushanwen/pi-wool-qoder', version: '0.2.0', enabled: true },
+    ])
+    const installer = new WoolExtensionInstaller(deps)
+
+    const result = await installer.installPiExtension('qoder', '0.2.0')
+
+    expect(result).toEqual({ installedVersion: '0.2.0' })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(deps.extensionService.installExtension)).toHaveBeenCalledWith('npm:@zhushanwen/pi-wool-qoder@0.2.0')
+  })
+
+  it('时点差未收敛：强制重拉后仍不一致 → VERSION_PAIR_MISMATCH（原文案保留）', async () => {
+    const deps = makeDeps()
+    const installer = new WoolExtensionInstaller(deps)
+
+    await expect(installer.installPiExtension('workbuddy', '0.3.0')).rejects.toMatchObject({
+      code: VERSION_PAIR_MISMATCH,
+      message: expect.stringContaining('清单热更新后自愈'),
+    })
+    // 首拉（缓存填充）+ mismatch 强制重拉 = 2 次网络；安装未执行（不落半成品）
+    expect(vi.mocked(deps.fetchFn!)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(deps.extensionService.installExtension)).not.toHaveBeenCalled()
+  })
+})
+
+describe('installForCatalogEntry（U7 接线：v2-plugins 清单条目 → 家族推导 → 钉版安装）', () => {
+  it('plugin-wool-<family> 包名推导家族 → 配对校验 + 安装', async () => {
+    const deps = makeDeps()
+    const installer = new WoolExtensionInstaller(deps)
+
+    const result = await installer.installForCatalogEntry({
+      packageName: '@zhushanwen/plugin-wool-workbuddy',
+      piExtensionVersion: '0.2.0',
+    })
+
+    expect(result).toEqual({ installedVersion: '0.2.0' })
+    expect(vi.mocked(deps.extensionService.installExtension)).toHaveBeenCalledWith('npm:@zhushanwen/pi-wool-workbuddy@0.2.0')
+  })
+
+  it('非 plugin-wool-* 包名（清单指向未知家族）→ family_unknown 结构化拒绝，不安装', async () => {
+    const deps = makeDeps()
+    const installer = new WoolExtensionInstaller(deps)
+
+    await expect(installer.installForCatalogEntry({
+      packageName: '@acme/some-other-plugin',
+      piExtensionVersion: '1.0.0',
+    })).rejects.toMatchObject({ code: 'family_unknown' })
+    expect(vi.mocked(deps.extensionService.installExtension)).not.toHaveBeenCalled()
+  })
+
+  it('plugin-wool- 前缀但家族不在词表 → family_unknown', async () => {
+    const installer = new WoolExtensionInstaller(makeDeps())
+
+    await expect(installer.installForCatalogEntry({
+      packageName: '@zhushanwen/plugin-wool-nosuch',
+      piExtensionVersion: '1.0.0',
+    })).rejects.toMatchObject({ code: 'family_unknown' })
+  })
+})

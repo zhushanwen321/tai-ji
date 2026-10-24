@@ -39,6 +39,15 @@ vi.mock('../src/infra/installers/npm-installer.js', () => ({
   },
 }))
 
+// Mock remote-config 清单链（U7 双产物接线后 confirmPluginInstall 会查 v2-plugins 清单）：
+// 默认回「无缓存且未刷新」（fail-safe 链尾 → config undefined → 跳过扩展安装），防既有
+// 用例触真实网络/真实 ~/.taiji 缓存；双产物用例经 refreshRemoteConfigMock 注入 fixture 清单。
+const refreshRemoteConfigMock = vi.fn()
+vi.mock('../src/services/remote-config/remote-config-fetch.js', () => ({
+  refreshRemoteConfig: (...args: unknown[]) => refreshRemoteConfigMock(...args),
+  loadRemoteConfig: vi.fn(),
+}))
+
 // 延迟 import：vi.mock 会被提升到 import 之前，故此处能拿到 mocked 版本。
 const { downloadPackageTarball } = await import('../src/infra/installers/npm-installer.js')
 const { NpmPluginInstaller } = await import('../src/infra/installers/plugin-installer-adapter.js')
@@ -56,6 +65,7 @@ let pluginsDir: string
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  refreshRemoteConfigMock.mockResolvedValue({ data: undefined, refreshed: false, reason: 'no-cache' })
   // 安装/卸载编排会落 warn（激活失败回滚、清理跳过等），测试不依赖控制台输出
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -134,7 +144,19 @@ function makeProviderEntries(ids: string[]): ProviderEntriesFake {
   }
 }
 
-function buildService(opts?: { providerEntries?: ProviderEntriesFake }): {
+/** piExtensionInstaller port fake（U7 双产物接线用例）：记录 installForCatalogEntry 入参。 */
+function makePiExtensionInstaller(): {
+  installForCatalogEntry: ReturnType<typeof vi.fn<(entry: { packageName: string; piExtensionVersion: string }) => Promise<{ installedVersion: string }>>>
+} {
+  return {
+    installForCatalogEntry: vi.fn(async () => ({ installedVersion: '0.2.0' })),
+  }
+}
+
+function buildService(opts?: {
+  providerEntries?: ProviderEntriesFake
+  piExtensionInstaller?: ReturnType<typeof makePiExtensionInstaller>
+}): {
   service: InstanceType<typeof PluginService>
   registry: InstanceType<typeof PluginRegistry>
   broker: { send: ReturnType<typeof vi.fn>; broadcast: ReturnType<typeof vi.fn>; sendError: ReturnType<typeof vi.fn> }
@@ -145,6 +167,7 @@ function buildService(opts?: { providerEntries?: ProviderEntriesFake }): {
     configDir: tmpDir,
     pluginInstaller: newInstaller(),
     ...(opts?.providerEntries ? { providerEntries: opts.providerEntries } : {}),
+    ...(opts?.piExtensionInstaller ? { piExtensionInstaller: opts.piExtensionInstaller } : {}),
   })
   return { service, registry, broker }
 }
@@ -660,6 +683,85 @@ describe('PluginService 两段式安装编排', () => {
     // 有锁：first 完成后 second 才开始；无锁时 two start 会插在 first end 之前
     expect(events[0]).toBe('start:first-plugin')
     expect(events.indexOf('start:second-plugin')).toBeGreaterThan(events.indexOf('end:first-plugin'))
+  })
+})
+
+describe('PluginService 双产物安装编排（U7/D6：confirm 成功后接 pi 扩展成员安装）', () => {
+  const WOOL_ENTRY = {
+    packageName: '@zhushanwen/plugin-wool-workbuddy',
+    pluginId: 'zhushanwen__plugin-wool-workbuddy',
+    displayName: 'WorkBuddy',
+    pluginVersion: '1.0.0',
+    piExtensionVersion: '0.2.0',
+  }
+
+  function mockCatalog(entries: unknown[]): void {
+    refreshRemoteConfigMock.mockResolvedValue({ data: { version: 1, plugins: entries }, refreshed: true })
+  }
+
+  it('清单条目携带 piExtensionVersion（双产物）→ confirm 成功后调 piExtensionInstaller 安装扩展成员', async () => {
+    const piExtensionInstaller = makePiExtensionInstaller()
+    const { service } = buildService({ piExtensionInstaller })
+    mockCatalog([WOOL_ENTRY])
+    mockDownloadWrites(pkgJson('@zhushanwen/plugin-wool-workbuddy', { namespace: 'wool-workbuddy' }))
+    mockActivation(service, 'ACTIVE')
+
+    await service.preparePluginInstall('@zhushanwen/plugin-wool-workbuddy')
+    const result = await service.confirmPluginInstall('zhushanwen__plugin-wool-workbuddy')
+
+    expect(result.success).toBe(true)
+    expect(piExtensionInstaller.installForCatalogEntry).toHaveBeenCalledWith({
+      packageName: '@zhushanwen/plugin-wool-workbuddy',
+      piExtensionVersion: '0.2.0',
+    })
+  })
+
+  it('单产物条目（无 piExtensionVersion）→ 跳过扩展安装，confirm 成功', async () => {
+    const piExtensionInstaller = makePiExtensionInstaller()
+    const { service } = buildService({ piExtensionInstaller })
+    mockCatalog([{ ...WOOL_ENTRY, piExtensionVersion: undefined }])
+    mockDownloadWrites(pkgJson('@zhushanwen/plugin-wool-workbuddy', { namespace: 'wool-workbuddy' }))
+    mockActivation(service, 'ACTIVE')
+
+    await service.preparePluginInstall('@zhushanwen/plugin-wool-workbuddy')
+    const result = await service.confirmPluginInstall('zhushanwen__plugin-wool-workbuddy')
+
+    expect(result.success).toBe(true)
+    expect(piExtensionInstaller.installForCatalogEntry).not.toHaveBeenCalled()
+  })
+
+  it('清单不可得（fail-safe 链尾）→ 跳过扩展安装不误伤（warn 留痕），confirm 成功', async () => {
+    const piExtensionInstaller = makePiExtensionInstaller()
+    const { service } = buildService({ piExtensionInstaller })
+    // 默认 refreshRemoteConfigMock = { data: undefined }（beforeEach 设置）
+    mockDownloadWrites(pkgJson('@zhushanwen/plugin-wool-workbuddy', { namespace: 'wool-workbuddy' }))
+    mockActivation(service, 'ACTIVE')
+
+    await service.preparePluginInstall('@zhushanwen/plugin-wool-workbuddy')
+    const result = await service.confirmPluginInstall('zhushanwen__plugin-wool-workbuddy')
+
+    expect(result.success).toBe(true)
+    expect(piExtensionInstaller.installForCatalogEntry).not.toHaveBeenCalled()
+  })
+
+  it('扩展成员安装失败 → confirm 整体报失败（插件已落盘事实保留），错误含恢复指引', async () => {
+    const piExtensionInstaller = makePiExtensionInstaller()
+    piExtensionInstaller.installForCatalogEntry.mockRejectedValue(
+      new Error('资产清单不可达。请检查网络后重试'),
+    )
+    const { service } = buildService({ piExtensionInstaller })
+    mockCatalog([WOOL_ENTRY])
+    mockDownloadWrites(pkgJson('@zhushanwen/plugin-wool-workbuddy', { namespace: 'wool-workbuddy' }))
+    mockActivation(service, 'ACTIVE')
+
+    await service.preparePluginInstall('@zhushanwen/plugin-wool-workbuddy')
+    const result = await service.confirmPluginInstall('zhushanwen__plugin-wool-workbuddy')
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('pi 扩展成员')
+    expect(result.error).toContain('重试安装')
+    // 插件侧已落盘事实保留（不回滚——重试安装幂等覆盖）
+    expect(existsSync(join(pluginsDir, 'zhushanwen__plugin-wool-workbuddy', 'package.json'))).toBe(true)
   })
 })
 

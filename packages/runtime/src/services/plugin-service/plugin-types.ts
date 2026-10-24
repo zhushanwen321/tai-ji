@@ -42,6 +42,9 @@ export type {
   UiDialogOptions,
   HookEntry,
   Phase2AgentAPI,
+  ProviderWriteParams,
+  ProviderCredentialReply,
+  PluginUiEventPayload,
 } from 'taiji-plugin-sdk'
 export { PermissionConstants } from 'taiji-plugin-sdk'
 
@@ -111,6 +114,17 @@ export interface IPluginServiceDeps {
   providerEntries?: {
     listIds(): Promise<string[]>
     delete(providerId: string): Promise<void>
+  }
+  /**
+   * pi 扩展安装 port（provider-plugin-access U7/D6 双产物安装编排的接线点）：清单条目
+   * 携带 piExtensionVersion（双产物条目标记）时，confirmPluginInstall 成功后调用——
+   * 实现方（wool-extension-installer 的 WoolExtensionInstaller，组合根注入）负责
+   * wool-manifest 资产解析、版本配对校验（VERSION_PAIR_MISMATCH）与
+   * extensionService.installExtension 钉版安装。缺省时双产物条目只装插件侧（warn
+   * 留痕——测试与独立仓联调环境常态；生产组合根必注入，缺省 = S23 扩展侧断链）。
+   */
+  piExtensionInstaller?: {
+    installForCatalogEntry(entry: { packageName: string; piExtensionVersion: string }): Promise<{ installedVersion: string }>
   }
   /**
    * 文件软删除 port（结构匹配 ITrash.trashFile）。组合根注入 infra adapter（trash）；
