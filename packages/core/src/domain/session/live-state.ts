@@ -30,7 +30,7 @@ import { reactive } from 'vue'
  * 字段缺省 = 该维尚未观测到（显式未知，不是「空值」）。
  */
 export interface SessionLiveState { // oe-exempt:20261023:framework:类型契约先行——状态层契约为双壳（renderer/mobile）+ core deps 共同消费面，D1 单元即消费方
-  /** 当前模型复合串 "provider/modelId"（与 SessionSummary.modelId 同格式） */
+  /** 当前模型复合串 "provider/modelId"（与 session.getState reply / session.state_changed 的 modelId 同口径） */
   modelId?: string
   /** 思考等级（PI_THINKING_LEVELS 值域）；缺省 = 尚未观测 */
   thinkingLevel?: string

@@ -16,7 +16,9 @@
  *    工作区历史判据（usage=nav-filter / workspace-history）② 抑制类只读判别
  *    （usage=suppression，W4b 收编后判别器 = session.list {surface:'btw'} 拉取缓存，
  *    入口 = renderer btw-line-membership 模块）③ 其余一律禁止（含任何状态写入判据）。
- *    三形态 pattern：属性访问 `\.surface\b` + 对象键 `\bsurface\s*:` + 标识符
+ *    四形态 pattern：属性访问 `\.surface\b` + 对象键 `\bsurface\s*:`（含可选声明形态
+ *    `surface\s*\??\s*:`——与 hidden 侧同规格，设计 §3.3.8 末句「与 hidden 检查的双
+ *    pattern + 同名排除规格对称」；防 `surface?:` 逃过对象键形态）+ 标识符
  *    `isKnownBtwLine|ensureBtwLineMembership|refreshBtwLineMembership|noteBtwLinesPulled`
  *    （抑制读取点经拉取缓存成员判别，naive `\.surface\b` 会漏掉；已退役的
  *    surfaceBySessionId/isBtwSession 标识符随派生表删除不再作为 pattern）。命中必须 ⊆
@@ -131,10 +133,13 @@ export const HIDDEN_PATTERNS = [/\bhidden\s*\??\s*:/, /\.hidden\b/]
  * 非会话 hidden 同名名列白名单（唯一登记处；键 = `file:line`，值 = 同名理由）。
  * 基线来源 = 本脚本实测（设计 §5-W5 判据 2 记载 R3 基线 12 处为「用法行」口径；
  * 可选声明形态纳入后实测含 7 处类型声明行——按「数量以脚本输出为准」全部登记）。
- * 会话 hidden 承载点（shared/session.ts / runtime interfaces·types·lifecycle·
- * btw-service / protocol.ts session.create / session-service / session-message-handler）
- * 一律不得进本表——那些是退场对象，归 u-w5b 收尾的 3 处（protocol.ts:642、
- * session-service.ts 兼容委托、session-message-handler.ts）以红点形态暴露。
+ *
+ * 终态（2026-10-24 同步修复登记）：会话语义 hidden 的承载/写点已随 W5 字段退场与
+ * u-w5b 协议收缩整体删除（五处类型 + 内部 CreateOptions.hidden + 协议
+ * session.create.hidden + session-service 兼容委托形参 + session-message-handler
+ * 透传三处均已删），当前 scope 内 hidden 命中全部为非会话同名列（插件 headerAction /
+ * document.hidden / canvas 布局 opts.hidden / locale 键）。规则保留：会话语义 hidden
+ * 承载点一律不得进本表（那些是退场对象，出现即新写入点、须先删除再合入）。
  */
 export const HIDDEN_ALLOWLIST = new Map([
   // 插件 headerAction 的 hidden（入口整体不渲染语义；与「会话隐藏」同形不同义）
@@ -164,17 +169,19 @@ export const HIDDEN_ALLOWLIST = new Map([
 ])
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 检查②：surface 读取点白名单（三形态 pattern + 清单 + 同名排除）
+// 检查②：surface 读取点白名单（四形态 pattern + 清单 + 同名排除）
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 三形态：属性访问 + 对象键 + 标识符（拉取缓存成员判别入口与抑制读取点经标识符命中）。
+ * 四形态：属性访问 + 对象键（含可选声明形态 `surface\s*\??\s*:`——与 hidden 检查的双
+ * pattern + 同名排除规格对称，设计 §3.3.8 末句；防 `surface?:` 逃过对象键形态）+ 标识符
+ * （拉取缓存成员判别入口与抑制读取点经标识符命中）。
  * W4b 收编：原派生表标识符（surfaceBySessionId / isBtwSession）随该表删除，替换为
  * btw-line-membership 模块的四个出口（唯一成员判别入口——新读取点必须经它，禁另起口径）。
  */
 export const SURFACE_PATTERNS = [
   /\.surface\b/,
-  /\bsurface\s*:/,
+  /\bsurface\s*\??\s*:/,
   /\bisKnownBtwLine\b/,
   /\bensureBtwLineMembership\b/,
   /\brefreshBtwLineMembership\b/,
@@ -225,7 +232,7 @@ export const SURFACE_READ_POINTS = new Map([
   ['packages/runtime/src/services/session/session-scanner.ts:59', 'nav-filter'],
   ['packages/renderer/src/components/panel/command-popover-symbols.ts:69', 'nav-filter'],
   // 用途①：工作区历史判据（读注册后记录 lifecycle.get(id).surface，不读 options）
-  ['packages/runtime/src/services/session/session-lifecycle.ts:703', 'workspace-history'],
+  ['packages/runtime/src/services/session/session-lifecycle.ts:676', 'workspace-history'],
   // 用途②：抑制类只读判别（W4b 收编后判别器 = session.list {surface:'btw'} 拉取缓存，
   // 入口 = btw-line-membership 模块；原 session.surfaces 派生表已按协议收缩删除）
   ['packages/renderer/src/composables/effects/useCompletionNotify.ts:59', 'suppression'],
@@ -262,6 +269,18 @@ export const SURFACE_WRITE_SIDE_FILES = new Set([
   'packages/runtime/src/transport/message-broker.ts',
   'packages/runtime/src/transport/session-message-handler.ts',
   'packages/shared/src/protocol.ts',
+  // 以下 4 个文件 = 对象键 pattern 补可选声明形态（`surface\s*\??\s*:`，与 hidden 侧对称，
+  // 设计 §3.3.8 末句）后实测新暴露的载体行（2026-10-24 同步修复登记；补齐前这些行使
+  // 「surface 载体已被机器看住」的声称范围缺角，新增 `surface?: X` 形态可绕过登记）：
+  // §3.3.4 四处载体之一：SessionSummary.surface 声明（shared/session.ts:79）
+  'packages/shared/src/session.ts',
+  // §3.3.4 四处载体之二：IManagedSessionView.surface 声明（types.ts:139）
+  'packages/runtime/src/services/session/types.ts',
+  // session.list facade 形参（session-service.ts:1022）+ initializeManagedSession 的
+  // surface 形参（:1533，btw 直注册链签名透传——§3.3.4 点名三处签名之一）
+  'packages/runtime/src/services/session/session-service.ts',
+  // renderer 侧 session.list 端口形参（domains/session.ts:68，查询侧过滤参数载体）
+  'packages/core/src/transport/api/domains/session.ts',
 ])
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -387,7 +406,7 @@ function makeSampleTree(root) {
     writeFileSync(abs, content, 'utf8')
   }
   write('packages/demo/src/clean.ts', [
-    '// 绿样本：与 hidden/surface 三形态均不沾边的普通代码',
+    '// 绿样本：与 hidden / surface 各形态均不沾边的普通代码',
     'export const keep = (n: number) => n + 1',
     "export const label = 'sidebar'",
   ].join('\n'))
@@ -407,11 +426,12 @@ function makeSampleTree(root) {
     'export const b = (s: { hidden?: boolean }) => s.hidden === true',
     'export const c = (o: { hidden?: boolean }) => o.hidden',
   ].join('\n'))
-  // 红样本②：surface 未登记读取点（三形态各一）
+  // 红样本②：surface 未登记读取点（四形态各一：属性访问 / 对象键 / 对象键可选声明 / 标识符）
   write('packages/demo/src/red-surface.ts', [
     'export const d = (s: { surface?: string }) => s.surface === 1',
     "export const e = { surface: 'btw' }",
     'export const f = isKnownBtwLine',
+    'export const g = (s: { surface?: string }) => 1',
   ].join('\n'))
   // 红样本③：ALLOWLIST 同行号漂移（登记行写错 → 命中落清单外）
   write('packages/demo/src/red-drift.ts', 'export const g = { hidden: true }\n')
@@ -444,7 +464,7 @@ function selftest() {
     }
     const results = [
       expectRed('packages/demo/src/red-hidden.ts', [1, 2, 3], 'hidden 三形态未登记命中即红'),
-      expectRed('packages/demo/src/red-surface.ts', [1, 2, 3], 'surface 三形态未登记命中即红'),
+      expectRed('packages/demo/src/red-surface.ts', [1, 2, 3, 4], 'surface 四形态未登记命中即红'),
       expectRed('packages/demo/src/red-drift.ts', [1], 'ALLOWLIST 行号漂移命中即红'),
       expectRed('packages/demo/src/red-string.ts', [1, 2], '字符串字面量内注释形态（https:// 的 // 与 /* 块注释态）不截断该行、后续命中即红'),
       expectGreen('packages/demo/src/clean.ts', '合法用法不红'),

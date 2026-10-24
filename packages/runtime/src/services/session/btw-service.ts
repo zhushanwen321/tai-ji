@@ -312,7 +312,7 @@ function isInsideSessionBtwDir(target: string, mainSid: string): boolean {
 export class BtwService {
   /**
    * 线注册表（键 = 线 pi 真实会话 id，W4a 键统一；消费方 listLines(mainSid) 过滤，
-   * 注册表即 D4 关联投影）。并入 SessionLifecycle.sessions 后的同一键空间：线既在本表
+   * 注册表即 D4 关联投影）。与 SessionLifecycle.sessions 同一键空间（未物理合并）：线既在本表
    * 持线自身运行态（threadDir/snapshotKind/client/contractRounds 等），又以同一 piId
    * 经 registerSession 进 lifecycle 活跃注册表（通用会话记录）。
    */

@@ -2512,7 +2512,7 @@ export interface ServerMessageMapBase {
   'session.getMessageCount': { sessionId: string; count: number }
   // session.getState reply（权威拉取与冷读，W2，设计 §3.2）：modelId / thinkingLevel 两维。
   // 冷会话 usage / commands 恒为显式未知（不伪造、不用列表种子兜底，§3.2 过渡形态声明）。
-  // modelId = 'provider/modelId' 复合串（与 SessionSummary.modelId 同格式）。
+  // modelId = 'provider/modelId' 复合串（与 session.state_changed / session.thinkingLevelSet 的同一字段同口径）。
   // thinkingLevel 用 string 而非 ThinkingLevel 联合：冷读值来自会话 JSONL 的
   // thinking_level_change entry（pi 写入的自由串），与 session.state_changed /
   // session.thinkingLevelSet 的同一字段同口径（那两处亦为 string）——收窄联合会让冷读
@@ -2520,10 +2520,13 @@ export interface ServerMessageMapBase {
   // （显式未知，禁编码为 0/空串）。
   // 无 updatedAt（§3.4.1：代码无「快照应用时刻」事实源，加即假语义）。
   'session.getState': { sessionId: string; modelId?: string; thinkingLevel?: string }
-  // session.list reply（W4b 通用查询，设计 §3.3.1）：与 config.sessions 查询侧同形
-  // （{ groups: SessionGroup[] }）——侧栏/搜索/抽屉三处消费方复用 applySnapshot({groups})
-  // 整表替换语义，不为查询侧另写落地路径。btw 线条目与主会话条目同形（id = 线 pi 真实
-  // 会话 id，W4a 键统一后唯一键；surface='btw'；label = btw-<序号> 可区分形态，§3.4.3）。
+  // session.list reply（W4b 通用查询，设计 §3.3.1）：与 config.sessions 同形
+  // （{ groups: SessionGroup[] }），目的是与广播侧保持同一 owner 派生口径。当前消费方
+  // 为搜索（显式 {surface:'sidebar'}）、抽屉（{surface:'btw', mainSessionId}）与抑制类
+  // 成员判别（renderer btw-line-membership 拉取缓存），均扁平化消费、不经
+  // applySnapshot；侧栏仍走 config.sessions（§10.2 不切）。btw 线条目与主会话条目同形
+  // （id = 线 pi 真实会话 id，W4a 键统一后唯一键；surface='btw'；label = btw-<序号>
+  // 可区分形态，§3.4.3）。
   // 无 archiveCount（角标 = 广播侧 config.sessions 的归档视图语义，查询侧不承载）。
   'session.list': { groups: SessionGroup[] }
   // session.importCandidates / session.import reply（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：
@@ -3727,16 +3730,19 @@ export interface ReplyPayloadMap {
  *
  * 合并语义 = D1b 整字段覆盖：字段值非 undefined 即覆盖现值，含显式空值（owner 声明空即空）；
  * undefined = 快照未涉及该字段，保留现值。W15 起按来源分流（SessionDataSource）：磁盘扫描
- * 来源快照（source='scan'）的占位空值（modelId:''/tokenCount:0）在 core 合并侧被检查，
- * 不覆盖已知真值；owner 来源（缺省）显式空值仍正常覆盖——两条空值语义并存不混用。
+ * 来源快照（source='scan'）的占位空值在 core 合并侧被检查、不覆盖已知真值——该检查的
+ * **状态字段部分（modelId / tokenCount）已随三状态字段删除同批删除**（当前合并函数只写
+ * label / status，无状态字段可检；owner 来源显式空值仍正常覆盖，两条空值语义并存不混用）。
  *
- * 字段 → runtime 来源对照（W12 后 publish payload）：
+ * 字段 → runtime 来源对照（当前实况；W12 后 publish payload）：
  * - label：session.renamed（pi 改名）/ config.sessions（整表 SessionSummary.label）
  * - status：SessionStatus 六态（session.exited → dead 等）
- * - modelId / thinkingLevel：session.state_changed
- * - pendingMessageCount：pi 队列深度（steering + followUp 条数和，与 get_state 同公式同源）
- * - commands：session.commands（pi 扩展命令清单，形状与广播 payload 一致）
- * - tokenCount：SessionSummary.tokenCount（磁盘扫描占位值 0，检查对象）
+ *
+ * 仅以上两字段由本 DTO 承载并落 `SessionSummary`。`modelId` / `thinkingLevel` /
+ * `tokenCount` / `pendingMessageCount` / `commands` 五字段**自 W1 起无生产写入口、亦无读取方**（状态归
+ * live-state 状态层，设计 §1.3 根因一 / §3.4.2；pendingMessageCount 的真实载体是 runtime
+ * queue_update 帧）——类型里保留仅为历史兼容，**新代码不得写入**（类型层裁剪处置见同步修复
+ * 登记 M2-4）。
  *
  * [HISTORICAL] usagePercent/inputTokens/contextLimit 三字段已删（D1 协议收敛，context-consistency
  * Phase 1，2026-08）：state_changed 帧不再携带 usage，context 用量经 context.update 帧直达各自
@@ -3756,12 +3762,12 @@ export interface SessionViewSnapshot {
   pendingMessageCount?: number
   /** slash 命令清单（Composer 补全数据源）。 */
   commands?: ServerMessageMap['session.commands']['commands']
-  /** 累计 token 数（SessionSummary 同名字段；磁盘扫描占位值 0 是 W15 检查对象）。 */
+  /** 累计 token 数（无生产写入口：SessionSummary.tokenCount 已随三状态字段删除，W15 占位值检查同批删——仅历史兼容保留，新代码不得写入）。 */
   tokenCount?: number
   /**
-   * 快照数据来源（W15 检查判定依据）：'scan' = 磁盘扫描占位快照（modelId/tokenCount
-   * 的空值是占位，core mergeViewSnapshot 检查其不覆盖已知真值）；缺省 = owner
-   * （runtime 实例广播 / 乐观更新，D1b 整字段覆盖含显式空值）。
+   * 快照数据来源（W15 分流标记）：'scan' = 磁盘扫描来源快照；缺省 = owner（runtime 实例
+   * 广播 / 乐观更新，D1b 整字段覆盖含显式空值）。其「扫描占位空值不覆盖已知真值」检查的
+   * 状态字段部分已随三状态字段删除同批删除（core mergeViewSnapshot 当前只写 label/status）。
    */
   source?: SessionDataSource
 }

@@ -193,8 +193,6 @@ import { readLogKeepDays } from '@taiji/shared'
 import { getSessionBtwDir, getSessionStoreDir } from '@taiji/shared/paths'
 import { encodeCwd } from '@taiji/shared/session-store-paths'
 
-/** v4 UUID 形态（族④ 主会话 tempId 残留的名字特征）。 */
-const V4_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const MS_PER_DAY = 86_400_000
 const OLD_DAYS = 30
 

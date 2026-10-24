@@ -1,7 +1,7 @@
 /**
  * check-session-hidden-surface.mjs 单测（会话架构四层分离 W5，设计 §3.3.7 / §3.3.8 /
  * §5-W5 判据第 2 层）：
- * hidden 双形态 pattern（含可选声明形态）+ surface 三形态 pattern 的扫描/剥离/判定逻辑
+ * hidden 双形态 pattern（含可选声明形态）+ surface 四形态 pattern 的扫描/剥离/判定逻辑
  * 机器锁定。fixture 全部落 tmpdir（rootDir 注入 collectHits / findViolations），
  * 不依赖真实仓库状态——按 check-publish-surface.test.mjs 惯例。
  *
@@ -11,7 +11,7 @@
  *   同一行后续的 hidden/surface 命中仍计（设计 §3.3.8「清单外命中即红」的漏报通道封堵）；
  * - scope fail-closed：packages/ 不可读或无 src 目录时上抛，拒绝「什么都没扫」报绿；
  * - hidden 三形态（对象键/属性访问/可选声明）未登记即红、登记即绿；
- * - surface 三形态（属性访问/对象键/标识符）未登记即红；
+ * - surface 四形态（属性访问/对象键/对象键可选声明/标识符）未登记即红；
  * - 读取点清单（READ_POINTS，usage 三值词表）/ 载体文件（WRITE_SIDE_FILES）/
  *   同名排除（SAME_NAME_EXCLUDE）/ buildSessionSummary 透传行排除的判定；
  * - import 行（含多行 import）不计命中。
@@ -161,19 +161,21 @@ describe('hidden 检查：双形态 pattern + ALLOWLIST', () => {
   })
 })
 
-describe('surface 检查：三形态 pattern + 清单判定', () => {
-  it('属性访问 / 对象键 / 标识符三形态未登记命中即红', () => {
+describe('surface 检查：四形态 pattern + 清单判定', () => {
+  it('属性访问 / 对象键 / 对象键可选声明 / 标识符四形态未登记命中即红', () => {
     const root = makeRepo({
       'packages/demo/src/red.ts': [
         'export const a = (s: { surface?: string }) => s.surface',
         "export const b = { surface: 'btw' }",
         'export const c = isKnownBtwLine',
+        'export const d = (s: { surface?: string }) => 1',
       ].join('\n'),
     })
     expect(violationsOf(root)).toEqual([
       'packages/demo/src/red.ts:1',
       'packages/demo/src/red.ts:2',
       'packages/demo/src/red.ts:3',
+      'packages/demo/src/red.ts:4',
     ])
   })
 

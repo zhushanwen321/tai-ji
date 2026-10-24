@@ -191,10 +191,17 @@ describe('§7 验收项 12②：{surface:"sidebar"} 与侧栏口径（config.ses
     { cwd: '/repo/b', sessions: [sidebarSummary(randomUUID(), '/repo/b', 200)] },
   ]
 
+  /**
+   * 侧栏口径来源（建模 scanner.listPersistedSessions——config.sessions 广播与 session.list
+   * 查询两侧的同一 owner；message-broker.ts:261 buildSessionListMsg 广播的 groups 即本来源
+   * 的直出产物，未经 surface 过滤与分组重组）。
+   */
+  const sidebarCaliberSource = (): SessionGroup[] => SIDEBAR_GROUPS.map((g) => ({ cwd: g.cwd, sessions: [...g.sessions] }))
+
   function makeService(): SessionListQueryService {
     return new SessionListQueryService({
       // 侧栏口径 = scanner.listPersistedSessions（与 config.sessions 广播同源同 owner）
-      listSidebarGroups: () => SIDEBAR_GROUPS.map((g) => ({ cwd: g.cwd, sessions: [...g.sessions] })),
+      listSidebarGroups: sidebarCaliberSource,
       listBtwLines: () => [lineRecord(randomUUID(), randomUUID(), 10)],
       isLineGenerating: () => false,
     })
@@ -212,8 +219,11 @@ describe('§7 验收项 12②：{surface:"sidebar"} 与侧栏口径（config.ses
 
   it('机器比对（④ 告警形态）：真实服务两口径偏差为空', () => {
     const svc = makeService()
-    const broadcast = svc.list({ surface: 'sidebar' }) // 广播口径（config.sessions 过滤后同源）
-    const list = svc.list({ surface: 'sidebar' }) // 查询口径
+    // 广播口径 = owner 直出（message-broker.ts:261 buildSessionListMsg 的 groups 同源：
+    // sessionService.listPersistedSessions 产物）——不是查询口径的自调用
+    const broadcast = sidebarCaliberSource()
+    // 查询口径 = session.list {surface:'sidebar'} 经 SessionListQueryService 的派生结果
+    const list = svc.list({ surface: 'sidebar' })
     expect(twoCaliberDeviation(broadcast, list)).toEqual([])
   })
 

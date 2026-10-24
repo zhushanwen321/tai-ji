@@ -8,8 +8,9 @@
  * 与既有覆盖的分工（本文件只补 D3 验收视角的缺口，不重复单元层断言）：
  * - `src/services/session/__tests__/session-state-query.test.ts`（u-w2）项6-a/b/c/d/e 已
  *   覆盖：冷读零 spawn（boom 形态进程表）、活会话标量快照 undefined → 字段缺省、只就绪
- *   一维、client 已退出回落冷读。其进程表 mock 未定义 ensureActive/ensureProcess（隐式
- *   undefined），且未断言冷读定位缝的调用形态。
+ *   一维、client 已退出回落冷读。其进程表 mock 的 ensureActive 未定义（隐式 undefined）、
+ *   ensureProcess 等 spawn 形态是 boom + spawnCalls 记录而非 vi.fn（不可做零调用计数断言），
+ *   且未断言冷读定位缝的调用形态。
  * - `src/services/session/__tests__/session-state-projection-query-wiring.test.ts` 已覆盖
  *   接线层 getClient（禁 ensureActive）与埋点接 logger。
  * - `src/transport/__tests__/session-message-handler-get-state.test.ts` 已覆盖 handler
