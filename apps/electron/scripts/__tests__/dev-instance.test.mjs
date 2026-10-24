@@ -78,8 +78,10 @@ describe('deriveParams 端口派生', () => {  it('fnv1a 稳定且 32bit 无符�
     const names = Array.from({ length: 20 }, (_, i) => `worktree-${i}`)
     const params = names.map((n) => deriveParams(n, '/tmp/instances'))
     for (const p of params) {
+      // 上界 1723：blocked 端口确定性 +1 顺延（1719/1720/1723 在 vite 段内，顺延最多
+      // 越过原上界 3 个端口位），非 blocked 命中仍 ≤1719
       expect(p.vitePort).toBeGreaterThanOrEqual(1420)
-      expect(p.vitePort).toBeLessThan(1720)
+      expect(p.vitePort).toBeLessThan(1724)
       expect(p.cdpPort).toBeGreaterThanOrEqual(9222)
       expect(p.cdpPort).toBeLessThan(9522)
       // runtime offset 步进 10（段宽 10：3210+offset..+9 与相邻实例段不重叠）；
@@ -87,6 +89,13 @@ describe('deriveParams 端口派生', () => {  it('fnv1a 稳定且 32bit 无符�
       expect(p.portOffset).toBeGreaterThanOrEqual(100)
       expect(p.portOffset).toBeLessThanOrEqual(490)
       expect((p.portOffset - 100) % 10).toBe(0)
+    }
+    // blocked 端口回归（A3 验收实证）：verify-A3 原派生 vitePort=1719（WHATWG bad port，
+    // undici fetch / Chromium 导航连接前即拒），确定性顺延后必须不在清单内
+    const blocked = new Set([1719, 1720, 1723, 2049, 3659, 4045, 5060, 5061, 6000, 6566,
+      6665, 6666, 6667, 6668, 6669, 6697, 6699])
+    for (const name of ['verify-A3', 'verify-A1a', 'verify-A2', 'verify-A10a', 'main', 'dev-0.9.19']) {
+      expect(blocked.has(deriveParams(name, '/tmp/instances').vitePort)).toBe(false)
     }
     // dataDir 按名隔离（instancesDir 注入生效）
     expect(params[0].dataDir).toBe('/tmp/instances/worktree-0')
