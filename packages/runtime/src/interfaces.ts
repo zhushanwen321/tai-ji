@@ -104,11 +104,6 @@ export interface IEventAdapter {
 
 /** Session create 选项（SessionService.create / SessionLifecycle.create 共用）。 */
 export interface SessionCreateOptions {
-  /**
-   * 隐藏 session（公共 session）：scanner listAll 过滤，不进 sidebar 列表。
-   * 用于 landing 态命令源等内部场景。
-   */
-  hidden?: boolean
   /** Launch preset id（设计文档 §4.1），绑定到新 session 并解析为 pi 启动参数。 */
   presetId?: string
   /**

@@ -4320,6 +4320,36 @@
       "owner": "apps/electron",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
       "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）（四段门控 describe：mac 三段另叠加 MAC_SUITE_READY 判据；单测层保留 bash -n 语法 3 条 + CLI 工具可用性 2 条）。触发条件 = 升级脚本本体 diff 命中。断言本质 = 升级脚本对真实 DMG / bash / 磁盘满的组合行为（18 条门控用例断言体零改动，文件级 60s 预算只辖门控组）；serial=真 的理由 = 真 hdiutil/ditto/bash 子进程，重执行用例 3-12s。run 命令唯一正确入口 = test:main script（vitest 直跑因 config 上浮 no tests found，见 TEST-STRATEGY.md 已知坑）。CI test-main job 已带 env=1。"
+    },
+    {
+      "id": "E2E-PIPE-18",
+      "summary": "W5 会话字段退场机器检查与存量清扫脚本组（session-identity-visibility-state）：check-session-hidden-surface（hidden 字段退场双形态检查——类型级 grep + ALLOWLIST + surface 三形态 + usage 三值词表，自带样本树 selftest）+ sweep-orphan-session-dirs（ext-sessions 存量磁盘孤儿清扫——三条件 + trashDirectory 端口镜像 + 失败集合留痕 + 点检记录 + --selftest 六形态，禁触真实数据目录）",
+      "scope": [
+        "scripts/check-session-hidden-surface.mjs",
+        "scripts/sweep-orphan-session-dirs.mjs",
+        "scripts/__tests__/check-session-hidden-surface.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-session-hidden-surface.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/sweep-orphan-session-dirs.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-session-hidden-surface.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-session-hidden-surface.mjs --selftest && node scripts/sweep-orphan-session-dirs.mjs --selftest && npx vitest run scripts/__tests__/check-session-hidden-surface.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：当前执行形态 = 本表 run 三条（两个 selftest 实跑 exit 0 + vitest 单测）；脚本尚未接入 pre-commit / CI 触发器（接入属后续集成步骤，接入时以本表 run 为执行口径）。非恒绿证明由 check 脚本自带 selftest（样本树期望红/绿各形态）与 sweep --selftest（六形态 + 边界 + prod 护栏 + 纯函数）承载。补登原因（dmg-r1-4 同型）：新脚本落入 scripts/ 与 scripts/__tests__/ 看护目录，零登记被 e2e-map --staged 门禁拦截，随修复同批补登。"
     }
   ]
 }

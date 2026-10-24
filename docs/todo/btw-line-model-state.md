@@ -1,33 +1,28 @@
-# btw 线模型/思考档显示态无权威数据通路（renderer 回执近似已落地）
+# btw 线模型/思考档显示态（已关闭：权威拉取 + 状态层统一接管）
 
-状态：部分解决（2026-10-23：渲染层状态通路已由「会话运行时状态层」统一接管，权威拉取（`session.getState` 冷读）仍待 W2；2026-10-11 登记）
+状态：已解决（2026-10-24 定案：渲染层状态通路由「会话运行时状态层」统一接管〔W1〕，权威拉取 `session.getState` 冷读落地〔W2〕；登记于 2026-10-11）
 
-## 现状
+## 现状（终态）
 
-- 旁路线（btw vid）是 hidden 会话（`BtwService` 注册 `hidden: true`，`SessionScanner.listAll` 过滤），不进 renderer sessionStore 列表。
-  - 历史（W1 前）：`session.state_changed` / `session.thinkingLevelSet` 广播经
-    `handleSessionStateChanged` → `sessionStore.applySnapshot(vid, …)` 对列表外 id 静默丢弃。
-  - 现状（W1 后）：状态帧写会话状态层（按 id 寄存），列表成员资格不再是写入判据。
-  - 仍无任何按 vid 拉取线模型态的 RPC（`session.getContext` 只覆盖用量）。
-- 渲染层状态通路（2026-10-23「会话架构四层分离」W1 已落地）：状态按会话 id 寄存于
+- btw 线是 `surface: 'btw'` 会话：`BtwService` 注册 `surface: 'btw'`，`SessionScanner.listAll`
+  以 `surface === 'sidebar'` 正向谓词过滤（W5 起 `hidden` 字段已完整退场，读取点登记于
+  docs/constraints.json C-data-28），线不进 renderer sessionStore 侧栏列表。
+- 线的模型/思考档显示走与其他会话同一条状态通路：状态按会话 id 寄存于
   `createSessionLiveState`（core）/ `useSessionLiveStateStore`（renderer 薄壳），
   `session.state_changed` / `session.thinkingLevelSet` 帧与切换回执同走 `applyLiveState`
-  ——**不再有 btw 专用 store，也不再「回退主会话当前值」**（缺失即显式未知）。
-  原 `btw-session-state` store / `resolveComposerSessionState` / `bindMainSid` 已整体删除
-  （数据源登记表 #63 退役、#76 替代）。
-- 仍然存在的缺口 = 下面两条（都属「权威拉取」通道，W2 范围）：推送帧只覆盖「本端发生过的
-  变更」，进程重启 / 从未切换过的线没有本地缓存，显示显式未知直到下一次状态帧到达。
+  ——btw 专用 store 与「回退主会话当前值」的兜底均已删除（缺失即显式未知）。
+- 冷线（进程重启 / 从未切换过）的显示值由 `session.getState { sessionId }` 冷读补上：
+  活会话读 replicated states 快照，冷会话读线自己的会话文件（`extractLatestModelFromJsonl`，
+  activePath 裁剪），全程不 spawn 进程。renderer 在打开视图 / 缓存缺失 / 重连时拉取并喂
+  同一 `applyLiveState` reducer——「live ≡ reload」对线成立。
 
-## 已知缺口（近似态覆盖不到的形态）
+## 关闭理由
 
-1. **pi 侧静默换模不回显**：pi pattern 引擎运行中把请求模型换成同族条目（事故 A 形态）无 renderer 回执，线显示滞留旧值直到用户再次切换。
-2. **重启后冷线无缓存**：线切过模型 → 重启（renderer 状态层清空）→ 重开线，状态层无条目 → 显示**显式未知**（W1 语义：不回退猜测）。真实值以线会话文件 model_change entry 为准，需 W2 的 `session.getState` 冷读补上。
+原登记的两个缺口均已消除：
 
-## 长期方向（裁决后实施）
+1. ~~pi 侧静默换模不回显~~——状态判定锚定事实源（拉取/回执），无本地缓存的线经冷读读到
+   会话文件真值；pi 静默换模的下一次拉取即收敛（不回退猜测）。
+2. ~~重启后冷线无缓存~~——`session.getState` 冷读即为此形态的权威路径。
 
-权威通路二选一（拉为主、推补充，ADR-0097 口径）：
-
-- **拉**：`session.getState { sessionId }`（活会话读 replicated states 快照 / 冷会话读会话文件最新 model_change entry，不 spawn 进程），renderer 在打开视图 / 缓存缺失 / 重连时拉取并喂会话状态层（`applyLiveState` 同一 reducer）；
-- **推**：状态帧通路已在 W1 打通（同一 `applyLiveState` 入口）；剩余工作只是让推送覆盖不到的场景由拉取收敛。
-
-涉及 shared 协议类型 + runtime + renderer 三层，宜走 tech-design 小设计包，不入 UI 打磨散修。
+原「权威通路二选一」的裁决 = 两条都走且同源：拉为真值通道（ADR-0097），推为性能提示，
+两条通路共用同一 reducer，无第二套状态容器。
