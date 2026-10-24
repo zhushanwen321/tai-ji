@@ -480,7 +480,7 @@ export function buildDocsMdNameIndex(skipped) {
   const names = new Set()
   // timeout：控制范围单请求秒级上界（git index.lock 竞争等异常不给 pre-commit 无界挂起）；
   // 超时 spawnSync 返回 status null → 走下方回退分支，与 git 不可用同路径降级
-  const res = spawnSync('git', ['ls-files', '-z', '--', '*.md'], { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000 })
+  const res = spawnSync('git', ['ls-files', '-z', '--', '*.md'], { cwd: PROJECT_ROOT, env: repoIndexEnv(), encoding: 'utf-8', timeout: 30_000 })
   if (res.status === 0 && typeof res.stdout === 'string') {
     for (const f of res.stdout.split('\0')) {
       if (f) names.add(path.basename(f))
@@ -805,13 +805,25 @@ export function extractDataOwnerAnnotations(text) {
   return out
 }
 
+/** 全仓索引扫描专用环境：剥掉 GIT_INDEX_FILE。
+ *  pathlist 提交（git commit -- <paths>，dev-flow deferredCommits 代提交协议的命令形态）
+ *  期间 git 给钩子设 GIT_INDEX_FILE = 只含本次提交路径的临时 next-index；本检查器的两个
+ *  全仓不变量扫描（文档名索引 / @data-owner 注解采集）若继承它，范围会缩窄成本次提交的
+ *  文件子集——注解在别的单元文件里时误报「悬空」（2026-10-24 D1 代提交实测：#77 注解在
+ *  u-w4a 的文件、u-w2 提交时假阳）。剥掉后 git 落回仓库真实索引，全仓语义恢复。 */
+function repoIndexEnv() {
+  const env = { ...process.env }
+  delete env.GIT_INDEX_FILE
+  return env
+}
+
 /** git grep 采集全仓注解（索引级毫秒级；无 git 上下文降级 available:false）。
  *  timeout：控制范围单请求秒级上界，超时（status null）按 git 不可用同路径降级显形。 */
 function collectDataOwnerAnnotations() {
   const res = spawnSync(
     'git',
     ['grep', '-h', '-o', '-E', '@data-owner[[:space:]]+#[0-9]+', '--', 'packages', 'apps', 'extensions'],
-    { cwd: PROJECT_ROOT, encoding: 'utf-8', maxBuffer: 32 * 1024 * 1024, timeout: 30_000 },
+    { cwd: PROJECT_ROOT, env: repoIndexEnv(), encoding: 'utf-8', maxBuffer: 32 * 1024 * 1024, timeout: 30_000 },
   )
   if (res.status === 1) return { available: true, entries: new Set() } // 有 git、零命中
   if (res.status !== 0 || typeof res.stdout !== 'string') return { available: false, entries: new Set() }
