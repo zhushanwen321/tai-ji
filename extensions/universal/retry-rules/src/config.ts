@@ -32,6 +32,19 @@ const VERDICTS: readonly string[] = ["retryable", "non_retryable", "conditional"
 const OPERATORS: readonly string[] = ["equals", "contains", "exists"];
 const SOURCES: readonly string[] = ["custom", "remote", "builtin"];
 
+/**
+ * per-class kind 合法值域（镜像 shared RETRY_RULE_KINDS_BY_CLASS；权威 =
+ * sdk FAILURE_CAUSE_KINDS_BY_CLASS / FailureCause 判别联合）。engine 透传族是
+ * `engine_${string}` 开放前缀面不进本表，校验走前缀形态判定。值级对账由
+ * __tests__/config.test.ts 锁定（复制体漂移即红）。
+ */
+export const KINDS_BY_CLASS: Readonly<Record<string, readonly string[]>> = {
+	provider: ["rate_limited", "protocol_unsupported"],
+	harness: ["turn_budget_exhausted", "timeout"],
+	agent: ["no_deliverable"],
+	user: ["cancelled"],
+};
+
 // 常量导出面仅供镜像锁定测试做值级对账（__tests__/config.test.ts），bundle 体积不受影响
 export const ID_MAX_LEN = 64;
 export const NAME_MAX_LEN = 120;
@@ -122,6 +135,32 @@ function collectMatchErrors(match: unknown, label: string): string[] {
 	return errors;
 }
 
+/**
+ * kind 字段校验（镜像 shared collectKindErrors：值域闭合面按 class 归属判定）：
+ * class ∈ KINDS_BY_CLASS → kind ∈ 该 class 词表；class="engine" → engine_ 前缀开放面；
+ * class 缺失/非法时不单独判 kind 值域（class 自身错误已收集）。
+ */
+function collectKindErrors(kind: unknown, failureClass: unknown): string[] {
+	if (kind === undefined) return [];
+	if (typeof kind !== "string" || kind === "") {
+		return [`失败分类细分（kind）必须是非空字符串: ${JSON.stringify(kind) ?? String(kind)}`];
+	}
+	if (failureClass === "engine") {
+		if (!kind.startsWith("engine_")) {
+			return [`engine 类规则的 kind 必须以 engine_ 开头（如 engine_aborted）: ${kind}`];
+		}
+		return [];
+	}
+	const allowed = typeof failureClass === "string" ? KINDS_BY_CLASS[failureClass] : undefined;
+	if (allowed === undefined) return [];
+	if (!allowed.includes(kind)) {
+		return [
+			`kind 必须是该分类的合法值之一（${allowed.join(" / ")}）: ${kind}——请修正 kind 或改选匹配的分类（class）`,
+		];
+	}
+	return [];
+}
+
 /** 单条规则校验（镜像 shared validateRetryRuleFields；source 字段同时域校验）。 */
 export function validateRetryRuleFields(rule: unknown): RetryRulesValidationResult {
 	if (!isRecord(rule)) {
@@ -141,6 +180,7 @@ export function validateRetryRuleFields(rule: unknown): RetryRulesValidationResu
 	if (typeof failureClass !== "string") {
 		errors.push("失败分类（class）不能为空，请选择该错误所属的分类");
 	}
+	errors.push(...collectKindErrors(rule["kind"], failureClass));
 	if (typeof source !== "string" || !SOURCES.includes(source)) {
 		errors.push(`规则出处（source）必须是 custom / remote / builtin 之一: ${JSON.stringify(source) ?? String(source)}`);
 	}

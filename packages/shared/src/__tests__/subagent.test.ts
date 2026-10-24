@@ -82,17 +82,20 @@ describe('SubagentRecord.lastRound wire 契约（u-foundation F4——字段存�
 
   it('FailureCause 类型自 shared re-export 可达（sdk 权威的 type-only 通道——renderer 红点判据数据源）', () => {
     // 红点判据（红 = lastRound.failure 非空且非 user.cancelled）的判别输入形态：
-    // failure 存在 + kind !== 'cancelled'。
-    const failure: FailureCause = { class: 'user', kind: 'cancelled', retryable: false, raw: 'cancel' }
-    const isRed = failure !== undefined && failure.kind !== 'cancelled'
-    expect(isRed).toBe(false)
+    // failure 存在 + kind !== 'cancelled'。判据经函数形参表达——判据消费的 wire
+    // 值是全类联合，字面常量会被 TS 按 class 判别立即收窄、对 provider 类产生
+    // 无重叠误报。
+    const isRedOf = (failure: FailureCause | undefined): boolean =>
+      failure !== undefined && failure.kind !== 'cancelled'
+    const userCancel: FailureCause = { class: 'user', kind: 'cancelled', retryable: false, raw: 'cancel' }
+    expect(isRedOf(userCancel)).toBe(false)
     const providerFailure: FailureCause = {
       class: 'provider',
       kind: 'rate_limited',
       retryable: true,
       raw: 'r',
     }
-    expect(providerFailure !== undefined && providerFailure.kind !== 'cancelled').toBe(true)
+    expect(isRedOf(providerFailure)).toBe(true)
   })
 
   it('被接管轮形态：engineStopReason 无值 + promptDisposition=handled + 无 failure（§3.3.1 第三形态的契约承载）', () => {

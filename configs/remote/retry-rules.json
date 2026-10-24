@@ -1,4 +1,15 @@
 {
   "version": 1,
-  "rules": []
+  "rules": [
+    {
+      "id": "tier-limit-window",
+      "name": "tier 限额窗口（tier_limit_exceeded）",
+      "verdict": "conditional",
+      "match": [{ "kind": "pattern", "pattern": "tier_limit_exceeded" }],
+      "class": "provider",
+      "kind": "rate_limited",
+      "httpStatusClass": 400,
+      "waitHint": "等待错误信息中的限额重置时间（resets）后可恢复"
+    }
+  ]
 }

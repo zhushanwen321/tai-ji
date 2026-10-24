@@ -19,6 +19,14 @@ import {
 } from "@zhushanwen/subagent-engine-sdk";
 import type { ReplayRecordView } from "@zhushanwen/subagent-engine-sdk";
 
+import {
+  classificationMatchInputs,
+  deriveKindForRule,
+  findClassificationRule,
+  loadRetryRulesForClassification,
+  verdictToRetryable,
+  type RetryRuleClassificationView,
+} from "./retry-rules-classification.ts";
 import type { EngineRoundErrorFact } from "./spawn-event-translator.ts";
 import type { PromptAckResult } from "./prompt-ack.ts";
 import type { TurnBudgetExhaustion } from "./turn-limiter.ts";
@@ -30,12 +38,16 @@ import type { TurnBudgetExhaustion } from "./turn-limiter.ts";
 /**
  * Stale context 检测模式（P1-5；W4b 对齐 pi 0.84.x 真实文案）。
  * 命中时分诊 failureKind="stale_context"——重试只会再次失败。
+ *
+ * abort 词登记 pi 实装精确字面量（pi-ai dist/utils/abort.js 模块常量 "The operation
+ * was aborted"），不收裸词 "aborted"——裸词子串会把任何携带 aborted 字样的动态错误
+ * （如 provider 的 "request aborted while busy"）误诊为 stale context（枚举清理项 P8）。
  */
 export const STALE_CONTEXT_PATTERNS = [
   "ctx is stale",
   "stale after session replacement",
   "context canceled",
-  "aborted",
+  "the operation was aborted",
 ] as const;
 
 /** 判断错误信息是否表示 stale/canceled pi session context。 */
@@ -184,6 +196,14 @@ export interface FailureCauseInput {
    * 结构化承载。undefined = 事实缺席（极端竞窗，轮失败事实不受影响）。
    */
   turnBudget?: TurnBudgetExhaustion;
+  /**
+   * [subagent-observability §3.3.2/§3.3.12] 分类码表（ext-config effectiveRules 段，
+   * 与 message_end 改写判定同文件同数据的两个消费方）——provider 业务码层的精确
+   * class/kind/verdict 裁决。undefined = 配置缺席/坏形状（安全缺省，回落内置 HTTP
+   * 语义层 + 兜底文案）。collectOutcome 生产路径经 loadRetryRulesForClassification
+   * 读取；纯函数测试可直接注入。
+   */
+  retryRules?: readonly RetryRuleClassificationView[];
 }
 
 /**
@@ -191,9 +211,11 @@ export interface FailureCauseInput {
  * 下游只读不可替换）。cause 优先级严格递减：provider 事实 > harness 预算/契约 >
  * agent 行为 > engine 崩溃 > unknown（未分类形态不产 FailureCause，落引擎停因原值）。
  *
- * 内置分层（u1 范围）：status→class 的 HTTP 语义层（稳定）+ pi 兜底文案词表；
- * provider→code→class 精确词表归 remote-config 域（§3.3.12，随 W6）——4xx 业务码
- * 的类别修正（如 tier_limit_exceeded→rate_limited）随该域落地。
+ * 分层序（stopReason=error 支）：① provider→code→class 码表（remote-config 域，
+ * retryRules 注入——分类与改写共用的同一份 ext-config 数据，§3.3.12；业务码层命中即
+ * 按规则 class/kind/verdict 裁决，码表硬约束「retryable 必须由 provider 业务码层
+ * 裁决」的结构承载）；② 未命中 → status→class 的 HTTP 语义层（引擎内置，稳定）+
+ * pi 兜底文案词表；③ 皆未命中 → 不产（保守 unknown，不猜）。
  */
 export function classifyFailureCause(input: FailureCauseInput, nowMs: number = Date.now()): FailureCause | undefined {
   const { terminalError } = input;
@@ -228,7 +250,30 @@ export function classifyFailureCause(input: FailureCauseInput, nowMs: number = D
     }
     return { class: "engine", kind: "engine_aborted", retryable: false, raw };
   }
-  // stopReason=error：机读主通道（status 前缀）→ 内置 HTTP 语义层。
+  // stopReason=error：① provider 业务码层（分类码表消费，结构化输入优先——见
+  // classificationMatchInputs）。
+  const retryRules = input.retryRules;
+  if (retryRules !== undefined && retryRules.length > 0) {
+    const hit = findClassificationRule(classificationMatchInputs(terminalError), retryRules);
+    if (hit !== undefined) {
+      const kind = deriveKindForRule(hit);
+      if (kind !== undefined) {
+        // class×kind 组合合法性由运行时 guard 保证（narrowClassificationRule 的词表
+        // 校验 / deriveKindForRule 只产合法缺省）——断言是对该 guard 的收口。
+        const base = {
+          class: hit.class,
+          kind,
+          retryable: verdictToRetryable(hit.verdict),
+          raw,
+        } as FailureCause;
+        // retryAfterMs 文本兜底通道对原始错误文本提取（规则的 waitHint 是展示文本
+        // 非时间值，不参与提取）。
+        const retryAfterMs = extractRetryAfterMsFromText(raw, nowMs);
+        return retryAfterMs !== undefined ? { ...base, retryAfterMs } : base;
+      }
+    }
+  }
+  // ② 机读主通道（status 前缀）→ 内置 HTTP 语义层。
   const statusMatch = PROVIDER_STATUS_PREFIX_PATTERN.exec(raw);
   if (statusMatch?.[1] !== undefined) {
     const status = Number(statusMatch[1]);
@@ -542,13 +587,22 @@ export function collectOutcome(
   let error = args.error;
   const observations: string[] = [];
   let failure: FailureCause | undefined;
+  // [subagent-observability §3.3.9 事实位收口] 预算耗尽事实在场即失败事实——事实位
+  // 优先于调用方 success 声明（limiter abort 与迟到终态赛跑的收集侧配套：abort 权威
+  // 产点的事实位在场时，轮不得以 success 落账）。
+  if (args.turnBudgetExhausted === true) success = false;
   if (!success) {
     // ① 真实失败事实：分类只从收尾边沿结构化事实产出（一次产出，下游只读）。
+    // 分类码表只在错误停因形态读取（低频路径直读 ext-config——aborted/预算支不消费
+    // 规则，零读盘）。
     failure = classifyFailureCause({
       ...(args.terminalError !== undefined ? { terminalError: args.terminalError } : {}),
       ...(args.turnBudgetExhausted === true ? { turnBudgetExhausted: true } : {}),
       // [§3.3.9/UC-10] limiter 耗尽事实（{used, limit}）→ cause.budget。
       ...(args.turnBudget !== undefined ? { turnBudget: args.turnBudget } : {}),
+      ...(args.terminalError?.stopReason === "error"
+        ? { retryRules: loadRetryRulesForClassification() }
+        : {}),
     });
   } else if (args.promptHandledNoRun === true) {
     // ②-A 被接管轮：回执层成功，无执行、无失败、无停因——不写 FailureCause。

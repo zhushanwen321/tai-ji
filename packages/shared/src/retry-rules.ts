@@ -13,9 +13,10 @@
  *   账户类错误永不误重试，不区分 source）；第二层同 verdict 内按 source 序
  *   custom > remote > builtin（用户显式意图压过热更新压过随发版基线），命中即断。
  *
- * 条目统一 schema = {匹配键, class, verdict, waitHint 来源}（§3.3.12 简洁审定稿）：
- * 同一 provider 错误码事实一次登记覆盖两个消费方——收尾边沿失败分类读 class（§3.3.2
- * 分类码表，本单元只定 schema 不接线）、message_end 改写判定读 verdict/match。
+ * 条目统一 schema = {匹配键, class, kind, verdict, waitHint 来源}（§3.3.12 简洁审定稿）：
+ * 同一 provider 错误码事实一次登记覆盖两个消费方——收尾边沿失败分类读 class/kind/verdict
+ * （§3.3.2 分类码表，分类侧与改写侧消费同一 ext-config 文件的 effectiveRules 段）、
+ * message_end 改写判定读 verdict/match。
  *
  * 执行语义：retryable = 改写触发 pi 原生重试；non_retryable 与 conditional = 不改写
  * （conditional 单独成态仅为 settings 展示解释「为什么不自动重试」——等不到的人/账户
@@ -23,6 +24,7 @@
  * （探针硬约束：追加式非替换式，原文保留无信息丢失——§3.3.12 改写落盘约束）。
  */
 
+import type { AssertMutuallyAssignable, FailureCause } from '@zhushanwen/subagent-engine-sdk'
 import type { FailureCauseClass } from './subagent.js'
 
 // ───────────────────────── 词表 ─────────────────────────
@@ -71,6 +73,42 @@ export type RetryRuleMatchOperator = 'equals' | 'contains' | 'exists'
 
 export const RETRY_RULE_MATCH_OPERATORS = ['equals', 'contains', 'exists'] as const satisfies readonly RetryRuleMatchOperator[]
 
+// ───────────────────────── kind 词表（分类侧消费域） ─────────────────────────
+
+/**
+ * per-class kind 合法值域（运行时校验域）。权威 = sdk
+ * FAILURE_CAUSE_KINDS_BY_CLASS（@zhushanwen/subagent-engine-sdk contract-types）；
+ * shared 对 sdk 仅 type-only 引用（发布边界纪律），本表是校验用值副本——漂移由
+ * RETRY_RULE_KINDS_BY_CLASS_LOCK 编译锁双向拦截（sdk 判别联合扩值/改值而本表未同步
+ * 即 tsc 红）。engine 透传族是 `engine_${string}` 开放前缀面（无闭合枚举）不进本表，
+ * 校验走前缀形态判定（validateRetryRuleFields）。
+ */
+export const RETRY_RULE_KINDS_BY_CLASS = {
+  provider: ['rate_limited', 'protocol_unsupported'],
+  harness: ['turn_budget_exhausted', 'timeout'],
+  agent: ['no_deliverable'],
+  user: ['cancelled'],
+} as const
+
+/**
+ * kind 词表编译锁（双向）：本表各 class 元组 ↔ sdk FailureCause 判别联合对应 kind 联合。
+ * 导出面 = 锁消费锚（测试防删断言；sdk 侧 FAILURE_CAUSE_KIND_VOCAB_LOCK 同款先例）。
+ */
+export const RETRY_RULE_KINDS_BY_CLASS_LOCK: AssertMutuallyAssignable<
+  {
+    provider: (typeof RETRY_RULE_KINDS_BY_CLASS)['provider'][number]
+    harness: (typeof RETRY_RULE_KINDS_BY_CLASS)['harness'][number]
+    agent: (typeof RETRY_RULE_KINDS_BY_CLASS)['agent'][number]
+    user: (typeof RETRY_RULE_KINDS_BY_CLASS)['user'][number]
+  },
+  {
+    provider: Extract<FailureCause, { class: 'provider' }>['kind']
+    harness: Extract<FailureCause, { class: 'harness' }>['kind']
+    agent: Extract<FailureCause, { class: 'agent' }>['kind']
+    user: Extract<FailureCause, { class: 'user' }>['kind']
+  }
+> = true
+
 // ───────────────────────── 域常量（校验合法域，唯一依据） ─────────────────────────
 
 export const RETRY_RULES_DOMAIN = {
@@ -104,6 +142,12 @@ export interface RetryableErrorRule { // oe-exempt:20261026:framework:重试规�
   match: RetryRuleMatch[]
   /** FailureCause 分类值（收尾边沿失败分类消费，§3.3.2 同源对齐；改写判定不消费）。 */
   class: FailureCauseClass
+  /**
+   * FailureCause kind 细分（可选——收尾边沿失败分类消费；缺省时分类侧按 class+verdict
+   * 显式推导表落 kind）。值域 = {@link RETRY_RULE_KINDS_BY_CLASS} 该 class 的闭合面；
+   * class="engine" 时走 `engine_${string}` 开放前缀面（校验见 validateRetryRuleFields）。
+   */
+  kind?: FailureCause['kind']
   /** 纯溯源标注（settings 分组/检索展示用），不参与判定。 */
   httpStatusClass?: RetryRuleHttpStatusClass
   /** 展示/观测用等待提示（如「窗口重置后可重试」），不参与执行——实际退避归 pi 原生机制。 */
@@ -225,6 +269,38 @@ function collectMatchErrors(match: unknown, label: string): string[] {
 }
 
 /**
+ * kind 字段校验（值域闭合面按 class 归属判定）：
+ * - class ∈ {@link RETRY_RULE_KINDS_BY_CLASS} 闭合面 → kind 必须 ∈ 该 class 词表；
+ * - class="engine" → `engine_${string}` 开放前缀面（kind 必须以 engine_ 开头）；
+ * - class 缺失或不在五值词表 → kind 不单独判值域（class 自身的错误已收集，避免双重报错
+ *   让用户对着一条改不了的字段修）。
+ * 文案含该 class 的合法值清单（错误 → 恢复动作闭环）。
+ */
+function collectKindErrors(kind: unknown, failureClass: unknown): string[] {
+  if (kind === undefined) return []
+  if (typeof kind !== 'string' || kind === '') {
+    return [`失败分类细分（kind）必须是非空字符串: ${JSON.stringify(kind) ?? String(kind)}`]
+  }
+  if (failureClass === 'engine') {
+    if (!kind.startsWith('engine_')) {
+      return [`engine 类规则的 kind 必须以 engine_ 开头（如 engine_aborted）: ${kind}`]
+    }
+    return []
+  }
+  const allowed =
+    typeof failureClass === 'string'
+      ? RETRY_RULE_KINDS_BY_CLASS[failureClass as keyof typeof RETRY_RULE_KINDS_BY_CLASS]
+      : undefined
+  if (allowed === undefined) return []
+  if (!(allowed as readonly string[]).includes(kind)) {
+    return [
+      `kind 必须是该分类的合法值之一（${allowed.join(' / ')}）: ${kind}——请修正 kind 或改选匹配的分类（class）`,
+    ]
+  }
+  return []
+}
+
+/**
  * 单条规则校验（settings 自定义规则写侧、远程域 guard 与基线数据共用同一域）。
  * 错误逐项收集，文案面向用户且含修复动作（llm-retry / network-proxy 域同款）。
  * source 不在表单面（settings 固定写 custom / 远程读侧归一 remote），由组装方填。
@@ -247,6 +323,7 @@ export function validateRetryRuleFields(rule: unknown): RetryRulesValidationResu
   if (typeof failureClass !== 'string') {
     errors.push('失败分类（class）不能为空，请选择该错误所属的分类')
   }
+  errors.push(...collectKindErrors(rule['kind'], failureClass))
   errors.push(...collectMatchErrors(match, '匹配条件'))
   if (rule['httpStatusClass'] !== undefined) {
     const c = rule['httpStatusClass']
@@ -524,6 +601,21 @@ export const RETRY_RULES_BASELINE: readonly RetryableErrorRule[] = [
     waitHint: '需充值/续订/账户动作后恢复，重试无效',
     source: 'builtin',
   },
+  {
+    // 场景 1 基线条目（subagent-observability §4 场景 1：软限流死因穿透）：400 +
+    // tier_limit_exceeded + resets 文本 = 限额窗口形态（非协议错误）——分类侧读本条
+    // class/kind/verdict 产出 provider.rate_limited / conditional，retryAfterMs 由
+    // 错误文本 resets 字样提取（文本兜底通道）。
+    id: 'tier-limit-window',
+    name: 'tier 限额窗口（tier_limit_exceeded）',
+    verdict: 'conditional',
+    match: [{ kind: 'pattern', pattern: 'tier_limit_exceeded' }],
+    class: 'provider',
+    kind: 'rate_limited',
+    httpStatusClass: 400,
+    waitHint: '等待错误信息中的限额重置时间（resets）后可恢复',
+    source: 'builtin',
+  },
   // ── 大类级兜底（判定点拿不到 provider 标识，provider 归属挂在预设分组注释而非规则字段）──
   {
     id: 'generic-429',
@@ -609,10 +701,12 @@ export const RETRY_RULES_BASELINE: readonly RetryableErrorRule[] = [
   },
   // ── 成员限流文本（探针实测 pi 词表 0 命中的高价值形态）──
   {
+    // tier_limit_exceeded 单列（tier-limit-window 条目，conditional 语义）——本条只收
+    // RPM 并发限流文本；判定序数组内先于它声明的 tier-limit-window 会先命中即断。
     id: 'generic-rpm-limit',
     name: 'RPM 并发限流文本（rpm limit exceeded）',
     verdict: 'retryable',
-    match: [{ kind: 'pattern', pattern: 'rpm limit exceeded|tier_limit_exceeded' }],
+    match: [{ kind: 'pattern', pattern: 'rpm limit exceeded' }],
     class: 'provider',
     httpStatusClass: 429,
     waitHint: '瞬时限流，等待窗口重置后可恢复（错误文本含 resets 时间）',

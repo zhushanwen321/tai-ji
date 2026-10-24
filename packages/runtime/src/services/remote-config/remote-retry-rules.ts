@@ -131,20 +131,18 @@ export function setRetryRulesCustom(
  * （4h 节流 + ETag + fail-safe 链内建）→ 重算 effectiveRules 段落盘（extension 下轮
  * 判定热重载吃到）。
  *
- * [§3.3.12 G1 基线默认生效] ext-config 缺席（新机器 / 从未打开 settings）时**首次调用
- * 即补写基线落盘**（effectiveRules = 编译期基线 ⊕ 可用远程覆盖，customRules 空）——
- * 基线规则是功能默认生效面（「可重试错误不再被判死」），文件名缺席不得等于功能缺席；
- * 补写先于远程命中判定（拉取失败/无变化也补），单一写方纪律不变（本函数与
- * setRetryRulesCustom 同为本文件写侧）。
+ * 基线默认生效语义：ext-config 缺席（新机器 / 从未打开 settings）时首次同步即补写
+ * 基线落盘（effectiveRules = 编译期基线 ⊕ 可用远程覆盖，customRules 空）——基线规则
+ * 是功能默认生效面（「可重试错误不再被判死」），文件缺席不等于功能缺席。
  */
 export async function syncRetryRulesRemote(): Promise<{ refreshed: boolean; reason?: string }> {
   // 拉取先行（4h 节流 + ETag + fail-safe 链内建；失败也走缓存/基线，不阻断下方重算）。
   const { refreshed, reason } = await refreshRemoteConfig('retry-rules', isRetryRulesRemoteConfig)
-  // [§3.3.12 G1/G1b] effectiveRules 是 runtime 拥有的**派生段**（extension 判定唯一消费
-  // 面，用户只编辑 customRules）——每次同步无条件重算落盘（编译期基线 ⊕ 可用远程层 ⊕
-  // 现有 customRules），与文件在场/远程命中均无关。幂等写、单写方纪律不变；extension
+  // effectiveRules 是 runtime 拥有的**派生段**（extension 判定唯一消费面，用户只编辑
+  // customRules）——每次同步无条件重算落盘（编译期基线 ⊕ 可用远程层 ⊕ 现有
+  // customRules），与文件在场/远程命中均无关：幂等写、单写方纪律不变；extension
   // startupConfig 在启动早期建的占位文件（空 effectiveRules）由此被覆盖，基线规则
-  // 默认生效（a8d 实测缺口：仅缺席补写会被该占位机制旁路）。
+  // 默认生效。
   const current = readRetryRulesExtConfig()
   writeRetryRulesExtConfig({ version: 1, customRules: current.customRules, effectiveRules: computeEffectiveRules(current.customRules) })
   return refreshed ? { refreshed: true } : { refreshed: false, ...(reason !== undefined ? { reason } : {}) }

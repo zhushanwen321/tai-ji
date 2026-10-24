@@ -103,6 +103,30 @@ describe('setRetryRulesCustom 写侧（唯一写方）', () => {
     expect(existsSync(EXT_CONFIG_PATH())).toBe(false)
   })
 
+  it('kind 词表外值拒绝不写盘（per-class 闭合值域——分类侧消费域的写入侧防线）', async () => {
+    const mod = await loadFresh()
+    const badKind = mod.setRetryRulesCustom([{ ...builtinRule('bad-kind'), kind: 'turn_budget_exhausted', source: 'custom' }])
+    expect(badKind.ok).toBe(false)
+    if (!badKind.ok) expect(badKind.errors.join(';')).toContain('rate_limited / protocol_unsupported')
+    expect(existsSync(EXT_CONFIG_PATH())).toBe(false)
+    // 合法 kind 放行
+    const goodKind = mod.setRetryRulesCustom([{ ...builtinRule('good-kind'), kind: 'rate_limited', source: 'custom' }])
+    expect(goodKind).toEqual({ ok: true })
+  })
+
+  it('远程 payload kind 词表外 → guard 整体拒用（停留在基线，坏远程配置最坏后果不落盘）', async () => {
+    mockRemoteFetch({
+      version: 1,
+      rules: [{ ...builtinRule('remote-bad-kind'), kind: 'no_such_kind' }],
+    })
+    const mod = await loadFresh()
+    const result = await mod.syncRetryRulesRemote()
+    // 拉取失败（guard 拒用）不阻断同步：effectiveRules 仍落基线（无 remote-bad-kind）
+    expect(result.refreshed).toBe(false)
+    const raw = JSON.parse(readFileSync(EXT_CONFIG_PATH(), 'utf-8'))
+    expect(raw.effectiveRules.map((r: RetryableErrorRule) => r.id)).not.toContain('remote-bad-kind')
+  })
+
   it('自定义 id 与内置层重叠拒绝（错误信息含恢复动作）', async () => {
     const mod = await loadFresh()
     const result = mod.setRetryRulesCustom([{ ...builtinRule('generic-429'), source: 'custom' }])

@@ -25,7 +25,7 @@ export type RetryRuleMatch =
 	| { kind: "pattern"; pattern: string }
 	| { kind: "jsonPath"; path: string; operator: "equals" | "contains" | "exists"; value?: string };
 
-/** 单条重试判定规则（class 字段为分类码表共用 schema 位——判定管线不消费，§3.3.12 条目 schema）。 */
+/** 单条重试判定规则（class/kind 字段为分类码表共用 schema 位——判定管线不消费，§3.3.12 条目 schema）。 */
 export interface RetryableErrorRule { // oe-exempt:20261026:framework:ext-config 契约的 bundle 自包含复制体声明（SSOT=shared，镜像锁定测试锚定）
 
 	id: string;
@@ -33,6 +33,8 @@ export interface RetryableErrorRule { // oe-exempt:20261026:framework:ext-config
 	verdict: RetryRuleVerdict;
 	match: RetryRuleMatch[];
 	class: string;
+	/** FailureCause kind 细分（可选，值域校验镜像 shared validateRetryRuleFields——判定管线不消费）。 */
+	kind?: string;
 	httpStatusClass?: number;
 	waitHint?: string;
 	source: RetryRuleSource;

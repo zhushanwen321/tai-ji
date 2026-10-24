@@ -46,6 +46,40 @@ describe('verdict 词表封闭', () => {
   })
 })
 
+describe('kind 字段校验（per-class 闭合值域，分类侧消费域）', () => {
+  it('class 词表内的合法 kind 放行', () => {
+    expect(validateRetryRuleFields(rule({ kind: 'rate_limited' }))).toEqual({ ok: true })
+    expect(validateRetryRuleFields(rule({ class: 'harness', kind: 'turn_budget_exhausted' }))).toEqual({ ok: true })
+    expect(validateRetryRuleFields(rule({ class: 'user', kind: 'cancelled' }))).toEqual({ ok: true })
+  })
+
+  it('词表外 kind 拒绝且消息含该 class 的合法值清单（错误 → 恢复动作闭环）', () => {
+    const result = validateRetryRuleFields(rule({ kind: 'turn_budget_exhausted' as never }))
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors.join(';')).toContain('rate_limited / protocol_unsupported')
+    }
+  })
+
+  it('engine 类走开放前缀面：engine_ 前缀放行、非前缀拒绝', () => {
+    expect(validateRetryRuleFields(rule({ class: 'engine', kind: 'engine_aborted' }))).toEqual({ ok: true })
+    const bad = validateRetryRuleFields(rule({ class: 'engine', kind: 'aborted' as never }))
+    expect(bad.ok).toBe(false)
+    if (!bad.ok) expect(bad.errors.join(';')).toContain('engine_')
+  })
+
+  it('kind 缺省合法（可选字段——分类侧按 class+verdict 推导表落 kind）', () => {
+    expect(rule({}).kind).toBeUndefined()
+    expect(validateRetryRuleFields(rule({}))).toEqual({ ok: true })
+  })
+
+  it('class 缺失/非法时不单独判 kind 值域（class 自身错误已收集，不重复报错）', () => {
+    const noClass = validateRetryRuleFields({ ...rule({}), class: undefined, kind: 'rate_limited' })
+    expect(noClass.ok).toBe(false)
+    if (!noClass.ok) expect(noClass.errors.join(';')).not.toContain('kind')
+  })
+})
+
 describe('validateRetryRuleFields 错误信封', () => {
   it('合法规则通过', () => {
     expect(validateRetryRuleFields(rule({}))).toEqual({ ok: true })
@@ -261,6 +295,23 @@ describe('基线数据与 payload guard', () => {
   it('内置基线含第一层排除档（non_retryable）与业务码可重试档', () => {
     expect(RETRY_RULES_BASELINE.some((r) => r.verdict === 'non_retryable')).toBe(true)
     expect(RETRY_RULES_BASELINE.some((r) => r.verdict === 'retryable' && r.id.startsWith('zhipu-'))).toBe(true)
+  })
+
+  it('tier-limit-window 基线条目在场且形态 = 场景 1 分类码表（400 tier_limit_exceeded → rate_limited/conditional）', () => {
+    const entry = RETRY_RULES_BASELINE.find((r) => r.id === 'tier-limit-window')
+    expect(entry).toMatchObject({
+      verdict: 'conditional',
+      class: 'provider',
+      kind: 'rate_limited',
+      httpStatusClass: 400,
+    })
+    expect(entry?.match).toEqual([{ kind: 'pattern', pattern: 'tier_limit_exceeded' }])
+    expect(entry?.waitHint).toContain('resets')
+    // tier_limit_exceeded 文本只由 conditional 条目承接（generic-rpm-limit 已收窄为
+    // rpm limit exceeded 专用——同一文本两档 verdict 会靠数组序隐式决胜，码表卫生拒绝）
+    expect(
+      RETRY_RULES_BASELINE.filter((r) => r.match.some((m) => m.kind === 'pattern' && m.pattern.includes('tier_limit_exceeded'))).map((r) => r.id),
+    ).toEqual(['tier-limit-window'])
   })
 
   it('remote payload guard：合法通过、非法整体拒用', () => {

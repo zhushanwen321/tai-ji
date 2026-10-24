@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clearConfigCache } from "@zhushanwen/pi-llm-shared";
 
-import { RETRY_RULES_DOMAIN } from "@taiji/shared";
+import { RETRY_RULES_DOMAIN, RETRY_RULE_KINDS_BY_CLASS } from "@taiji/shared";
 
 import {
 	DEFAULT_RETRY_RULES_EXT_CONFIG,
@@ -19,6 +19,7 @@ import {
 	isDangerousRetryPattern,
 	isRetryRulesExtConfig,
 	JSON_PATH_MAX_LEN,
+	KINDS_BY_CLASS,
 	loadRetryRulesConfig,
 	MATCH_COUNT_MAX,
 	MATCH_VALUE_MAX_LEN,
@@ -92,6 +93,22 @@ describe("validateRetryRuleFields（镜像 shared 域）", () => {
 		expect(isDangerousRetryPattern("(.+)*")).toBe(true);
 		expect(isDangerousRetryPattern("(?:a|b+)+")).toBe(true);
 		expect(isDangerousRetryPattern('"code"\\s*:\\s*"?(?:1308|1310)"?')).toBe(false);
+	});
+
+	it("kind 字段校验（镜像 shared collectKindErrors：per-class 闭合值域 + engine 前缀开放面）", () => {
+		expect(validateRetryRuleFields({ ...VALID_RULE, kind: "rate_limited" }).ok).toBe(true);
+		expect(validateRetryRuleFields({ ...VALID_RULE, class: "engine", kind: "engine_aborted" }).ok).toBe(true);
+		const wrongKind = validateRetryRuleFields({ ...VALID_RULE, kind: "turn_budget_exhausted" });
+		expect(wrongKind.ok).toBe(false);
+		if (!wrongKind.ok) expect(wrongKind.errors.join(";")).toContain("rate_limited / protocol_unsupported");
+		const badEngine = validateRetryRuleFields({ ...VALID_RULE, class: "engine", kind: "aborted" });
+		expect(badEngine.ok).toBe(false);
+		if (!badEngine.ok) expect(badEngine.errors.join(";")).toContain("engine_");
+		expect(validateRetryRuleFields({ ...VALID_RULE, kind: undefined }).ok).toBe(true);
+	});
+
+	it("kind 词表值级对账 = shared RETRY_RULE_KINDS_BY_CLASS（SSOT 镜像防线）", () => {
+		expect(KINDS_BY_CLASS).toEqual(RETRY_RULE_KINDS_BY_CLASS);
 	});
 
 	it("域常量值级对账 = shared RETRY_RULES_DOMAIN（SSOT 镜像防线：shared 侧调值本测试即红，强制同步复制体）", () => {
