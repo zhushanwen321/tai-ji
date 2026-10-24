@@ -4,7 +4,8 @@
  * 类型与校验语义 SSOT = packages/shared/src/retry-rules.ts（subagent-observability
  * §3.3.12）——extension bundle 自包含不 import shared 运行时代码（network-proxy 同款
  * 惯例：结构类型本地声明 + 行为镜像锁定测试），本文件是复制体；漂移时以 shared 为准，
- * __tests__/config.test.ts 锁两侧行为一致。
+ * __tests__/config.test.ts 锁两侧行为一致 + 域常量值级对账（import shared
+ * RETRY_RULES_DOMAIN，仅测试面消费、不进 bundle——复制体常量漂移即红）。
  *
  * 配置文件 = <agentDir>/config/retry-rules-ext-config.json（llm-shared getConfigPath
  * 推导；写入侧 = taiji runtime RMW——内置基线 ⊕ 远程覆盖 ⊕ 用户自定义的合并权威在
@@ -31,17 +32,18 @@ const VERDICTS: readonly string[] = ["retryable", "non_retryable", "conditional"
 const OPERATORS: readonly string[] = ["equals", "contains", "exists"];
 const SOURCES: readonly string[] = ["custom", "remote", "builtin"];
 
-const ID_MAX_LEN = 64;
-const NAME_MAX_LEN = 120;
-const PATTERN_MAX_LEN = 200;
-const JSON_PATH_MAX_LEN = 128;
-const MATCH_VALUE_MAX_LEN = 256;
-const WAIT_HINT_MAX_LEN = 200;
-const MATCH_COUNT_MAX = 8;
-const RULES_MAX = 200;
+// 常量导出面仅供镜像锁定测试做值级对账（__tests__/config.test.ts），bundle 体积不受影响
+export const ID_MAX_LEN = 64;
+export const NAME_MAX_LEN = 120;
+export const PATTERN_MAX_LEN = 200;
+export const JSON_PATH_MAX_LEN = 128;
+export const MATCH_VALUE_MAX_LEN = 256;
+export const WAIT_HINT_MAX_LEN = 200;
+export const MATCH_COUNT_MAX = 8;
+export const RULES_MAX = 200;
 /** HTTP 状态大类合法区间（4xx/5xx 语义码段；镜像 shared RetryRuleHttpStatusClass 校验域）。 */
-const HTTP_STATUS_CLASS_MIN = 400;
-const HTTP_STATUS_CLASS_MAX = 599;
+export const HTTP_STATUS_CLASS_MIN = 400;
+export const HTTP_STATUS_CLASS_MAX = 599;
 
 /** 校验结果信封：ok 或面向用户的错误清单（每条含修复动作，逐项收集不短路）。 */
 export type RetryRulesValidationResult = { ok: true } | { ok: false; errors: string[] };

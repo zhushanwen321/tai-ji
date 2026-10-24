@@ -9,14 +9,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clearConfigCache } from "@zhushanwen/pi-llm-shared";
 
+import { RETRY_RULES_DOMAIN } from "@taiji/shared";
+
 import {
 	DEFAULT_RETRY_RULES_EXT_CONFIG,
+	HTTP_STATUS_CLASS_MAX,
+	HTTP_STATUS_CLASS_MIN,
+	ID_MAX_LEN,
 	isDangerousRetryPattern,
 	isRetryRulesExtConfig,
+	JSON_PATH_MAX_LEN,
 	loadRetryRulesConfig,
+	MATCH_COUNT_MAX,
+	MATCH_VALUE_MAX_LEN,
+	NAME_MAX_LEN,
 	normalizeRetryRulesConfig,
+	PATTERN_MAX_LEN,
+	RULES_MAX,
 	validateRetryRuleFields,
+	WAIT_HINT_MAX_LEN,
 } from "../config.ts";
+import { TEXT_MAX_LEN } from "../rules.ts";
 
 const { loggerMock } = vi.hoisted(() => ({
 	loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -79,6 +92,22 @@ describe("validateRetryRuleFields（镜像 shared 域）", () => {
 		expect(isDangerousRetryPattern("(.+)*")).toBe(true);
 		expect(isDangerousRetryPattern("(?:a|b+)+")).toBe(true);
 		expect(isDangerousRetryPattern('"code"\\s*:\\s*"?(?:1308|1310)"?')).toBe(false);
+	});
+
+	it("域常量值级对账 = shared RETRY_RULES_DOMAIN（SSOT 镜像防线：shared 侧调值本测试即红，强制同步复制体）", () => {
+		expect({
+			patternMaxLen: PATTERN_MAX_LEN,
+			idMaxLen: ID_MAX_LEN,
+			nameMaxLen: NAME_MAX_LEN,
+			jsonPathMaxLen: JSON_PATH_MAX_LEN,
+			matchValueMaxLen: MATCH_VALUE_MAX_LEN,
+			waitHintMaxLen: WAIT_HINT_MAX_LEN,
+			matchCountMax: MATCH_COUNT_MAX,
+			customRulesMax: RULES_MAX,
+			textMaxLen: TEXT_MAX_LEN,
+			httpStatusClassMin: HTTP_STATUS_CLASS_MIN,
+			httpStatusClassMax: HTTP_STATUS_CLASS_MAX,
+		}).toEqual(RETRY_RULES_DOMAIN);
 	});
 });
 

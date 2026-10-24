@@ -46,8 +46,8 @@ export interface RetryRulesExtConfig { // oe-exempt:20261026:framework:ext-confi
 	effectiveRules: RetryableErrorRule[];
 }
 
-/** 域常量（镜像 shared RETRY_RULES_DOMAIN 判定侧字段）。 */
-const TEXT_MAX_LEN = 8192;
+/** 域常量（镜像 shared RETRY_RULES_DOMAIN.textMaxLen；导出仅供镜像锁定测试值级对账）。 */
+export const TEXT_MAX_LEN = 8192;
 
 /** SOURCE 判定序（两层序第二层）：custom > remote > builtin。 */
 const SOURCE_ORDER: readonly RetryRuleSource[] = ["custom", "remote", "builtin"];
