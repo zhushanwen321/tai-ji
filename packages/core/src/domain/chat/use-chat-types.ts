@@ -20,7 +20,7 @@ import type { SessionLiveState } from '@taiji/core/domain/session'
  * （renderer pinia 薄壳 / mobile core factory）自动满足。
  *
  * 为什么状态写入不经导航列表（会话架构四层分离 W1，设计 §2.4 I2/I3/I4）：
- * 状态键 = 会话 id，与「是否出现在侧栏列表」无关——btw 线（runtime hidden 注册）、
+ * 状态键 = 会话 id，与「是否出现在侧栏列表」无关——btw 线（runtime 注册，surface='btw'）、
  * 任意列表外 id 与主会话走**同一条**写入路径，无 `isBtwVirtualId` / hidden 判据。
  */
 export interface SessionLiveStateLike {

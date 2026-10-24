@@ -3416,6 +3416,62 @@
           "hook": "check-subagent-core-value-cycles.mjs"
         }
       ]
+    },
+    {
+      "id": "C-data-28",
+      "summary": "surface 只读判别白名单（会话架构四层分离 I2，W4a 登记抑制类、W5 登记用途①）：`surface` 只允许三个用途——① 导航过滤与工作区历史判据（W5 与 hidden 停写同批切换并登记：session-scanner.ts:59 与 command-popover-symbols.ts:69 两处过滤点 usage=nav-filter、session-lifecycle.ts:703 工作区历史判据 usage=workspace-history，均取 `surface === 'sidebar'` 正向谓词，未知枚举值不泄漏进侧栏；:703 读注册后记录 lifecycle.get(id).surface，不读 options?.surface——生产 create 路径永不传 surface，读 options 会使全部生产 create 停记工作区历史）② 抑制类只读判别（本条登记的 4 个读取点，usage=suppression）③ 其余一律禁止（含任何状态写入判据）。抑制类判别器唯一来源 = `session.surfaces` 派生视图消息 + renderer 只读派生表 surfaceBySessionId（core domain/session/surface-by-session.ts，整表替换）；登记清单（逐条 文件:行 + 抑制语义 + 为何无构造性替代）：⑴ packages/renderer/src/composables/effects/useCompletionNotify.ts（线完成不进全局通知：提示音与 sidebar 未读标记都是主视图范围——已删线的 id 会成为永久死标记条目，线的完成反馈走 drawer badge 逐线通道）⑵ packages/renderer/src/components/panel/tray/useTrayCounts.ts（线内派生的 subagent/workflow 任务不上抛托盘：线是完整会话、其分区有真实记录——语义抑制本体，不是性能优化）⑶ packages/renderer/src/composables/effects/useForkNoticeEffect.ts（线不显示 fork 反馈行：fork 反馈是主视图范围语义）⑷ packages/renderer/src/composables/panel/useBtwTabData.ts（btw 簿记订阅壳的 ui-request / requests-invalidated 路由判别：线 dialog 族请求走 drawer 内联确认条、不进主视图 CompanionBand 模态——旧 isBtwVirtualId 前缀判别随 vid 退役后唯一可用的成员判据；W4a 键切换把该路由点从「前缀判别」转为「派生表判别」，故同在清单内）。useTrayCounts.ts 另有 3 处纯性能防护分支（首次拉取/retry）已删判别器（代价 = 多几次空 RPC + 线分区派生值改变，线不进托盘汇总范围、不可见，已接受）——不在清单内、也不得回加。可执行检查（C-proc-28 形态，已由 scripts/check-session-hidden-surface.mjs 实装；pre-commit 接线待 hidden 残留收尾（u-w5b）后同批挂 install-hooks.sh；清单外命中即红）：① 标识符形态 surfaceBySessionId|isBtwSession 对 packages 各包 src（排除 __tests__ 与 *.test.* 与注释行与 import 行）——命中必须 ⊆ 本清单抑制类四条 + core 派生表本体；② 属性访问 \\.surface\\b + 对象键 \\bsurface\\s*: 同范围——命中必须 ⊆ 读取点清单（用途① 三处 + 抑制类四条，行级登记带 usage）+ runtime 注册表写入侧载体文件（registerSession 形参/记录字段/透传/CreateOptions.surface 管道/btw 直注册链/scannedToSummary 缺省/session.surfaces 广播组装/协议与 mock 载体）+ buildSessionSummary 的 surface: s.surface 透传行（同名列排除族）；非会话 surface 同名载体（modal-surface-registry 族/浮层 surface id/canvas 渐焦 surface/tailwind token）按文件级排除并逐条附理由。默认拒绝 + 白名单登记：新增 surface 读取点先登记再合入（载体文件内新增读取点不被行级捕获，由登记纪律与 CR 覆盖——已接受的检查粒度取舍）。",
+      "scope": [
+        "packages/runtime/src/services/session/session-scanner.ts",
+        "packages/renderer/src/components/panel/command-popover-symbols.ts",
+        "packages/runtime/src/services/session/session-lifecycle.ts",
+        "packages/renderer/src/composables/effects/useCompletionNotify.ts",
+        "packages/renderer/src/components/panel/tray/useTrayCounts.ts",
+        "packages/renderer/src/composables/effects/useForkNoticeEffect.ts",
+        "packages/renderer/src/composables/panel/useBtwTabData.ts",
+        "packages/core/src/domain/session/surface-by-session.ts",
+        "docs/constraints.json"
+      ],
+      "authority": [
+        "architecture/data-source-registry.md"
+      ],
+      "dimensions": [
+        "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check-session-hidden-surface.mjs"
+        },
+        {
+          "type": "review",
+          "agent": "review-data-governance"
+        }
+      ]
+    },
+    {
+      "id": "C-data-29",
+      "summary": "会话 hidden 字段退场机器检查（W5，设计 §3.3.7/§3.3.8）：会话语义的 hidden 在 packages 各包 src（排除 __tests__/ *.test.* 与注释行与 import 行）只允许出现在 scripts/check-session-hidden-surface.mjs 文件内 ALLOWLIST 登记的同名列——插件 headerAction 的 hidden（入口整体不渲染）/ document.hidden / canvas 布局 opts.hidden / locale 键 hidden 等与「会话隐藏」同形不同义，逐条附理由；双形态 pattern = 对象键 \\bhidden\\s*:（含可选声明 hidden\\s*\\??\\s*:）+ 属性访问 \\.hidden\\b，清单外命中即红。承载点删除以「删类型即编译错」驱动（五处类型 SessionSummary / SessionCreateOptions / registerSession 签名 / BtwLineRecord / IManagedSessionView + 内部 CreateOptions.hidden 同批删）；残留收尾 = protocol.ts session.create.hidden 协议字段 + session-service.ts initializeManagedSession 兼容委托 hidden 形参 + session-message-handler.ts 透传点（协议收缩单元删除后本检查转全绿，删除前以红点形态暴露属设计内）。ALLOWLIST 基线以脚本实测为准（设计记载 R3 基线 12 处为用法行口径；可选声明形态纳入后实测 19 处含类型声明行，按「数量以脚本输出为准」登记，历轮口径漂移不是基线错）。",
+      "scope": [
+        "packages/shared/src/session.ts",
+        "packages/shared/src/protocol.ts",
+        "packages/runtime/src/interfaces.ts",
+        "packages/runtime/src/services/session/**",
+        "packages/runtime/src/transport/session-message-handler.ts",
+        "scripts/check-session-hidden-surface.mjs",
+        "docs/constraints.json"
+      ],
+      "authority": [
+        "architecture/data-source-registry.md"
+      ],
+      "dimensions": [
+        "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check-session-hidden-surface.mjs"
+        }
+      ]
     }
   ]
 }

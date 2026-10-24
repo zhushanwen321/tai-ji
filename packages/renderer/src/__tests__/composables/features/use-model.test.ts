@@ -10,7 +10,7 @@
  * - RPC 失败不写 store（显示保持旧真值，无乐观写路径）。
  *
  * [W1 会话架构四层分离] 回执写入目标是**状态层**（stores/session-live-state，按会话 id
- * 寄存）；导航列表不再承载状态字段——本文件同时反向锁定「btw 线 vid 与主会话同一条路径」。
+ * 寄存）；导航列表不再承载状态字段——本文件同时反向锁定「btw 线与主会话同一条路径」。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/features/use-model.test.ts
  */
@@ -96,14 +96,14 @@ describe('useModel.setThinkingLevel 回执消费（U6 弃乐观写）', () => {
     expect(liveStore.liveStateOf('s1')).toEqual({ modelId: 'p/m', thinkingLevel: 'low' })
   })
 
-  it('[W1] 列表外的会话 id（btw 线 vid）同样写状态层——无 id 类别分支', async () => {
+  it('[W1] 列表外的会话 id（btw 线 session id）同样写状态层——无 id 类别分支', async () => {
     const liveStore = useSessionLiveStateStore()
-    setThinkingLevelMock.mockResolvedValue({ sessionId: 'btw:pi-x', level: 'high' })
+    setThinkingLevelMock.mockResolvedValue({ sessionId: 'pi-x', level: 'high' })
 
     const { setThinkingLevel } = useModel()
-    await setThinkingLevel('btw:pi-x', 'max')
+    await setThinkingLevel('pi-x', 'max')
 
-    expect(liveStore.liveStateOf('btw:pi-x')).toEqual({ thinkingLevel: 'high' })
+    expect(liveStore.liveStateOf('pi-x')).toEqual({ thinkingLevel: 'high' })
   })
 })
 

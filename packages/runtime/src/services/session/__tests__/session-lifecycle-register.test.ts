@@ -74,11 +74,11 @@ describe('SessionLifecycle.registerSession（S3 写点归位）', () => {
   it('注册成功：构造完整 session 记录（含 adapter 句柄 + modelOverride 优先）并返回', async () => {
     const env = makeEnv()
     const session = await env.lifecycle.registerSession(
-      's1', env.client, '/repo', '测试', '/repo/s1.jsonl', true, 'parent-1', 'entry-9', 'ov/m1',
+      's1', env.client, '/repo', '测试', '/repo/s1.jsonl', 'parent-1', 'entry-9', 'ov/m1',
     )
     expect(session).toMatchObject({
       id: 's1', cwd: '/repo', label: '测试', modelId: 'ov/m1',
-      sessionFilePath: '/repo/s1.jsonl', hidden: true,
+      sessionFilePath: '/repo/s1.jsonl', surface: 'sidebar',
       parentSession: 'parent-1', forkEntryId: 'entry-9',
       isGenerating: false, isCompacting: false, isBashRunning: false,
     })
@@ -149,7 +149,11 @@ describe('SessionLifecycle.registerSession（S3 写点归位）', () => {
     const withSid: ServerMessage = { type: 'message.delta', payload: { sessionId: 's7' } } as unknown as ServerMessage
     send!(withSid)
     expect(env.busPublish).toHaveBeenCalledWith('s7', withSid)
-    expect(env.broadcastGlobal).not.toHaveBeenCalled()
+    // send 闭包自身不触达 broadcastGlobal（带 sid 走 publish）。注：registerSession 汇聚点
+    // 另有 session.surfaces 全局广播（W4a 判别器通道，无 sid 的全局注册事实帧——rule-7
+    // 登记例外，先例 session.forkNotice），该帧不走 send 闭包、由
+    // session-surfaces-broadcast.test.ts 覆盖，不计入本兜底断言。
+    expect(env.broadcastGlobal.mock.calls.filter(([m]) => (m as ServerMessage).type !== 'session.surfaces')).toEqual([])
 
     const noSid: ServerMessage = { type: 'message.delta', payload: {} } as unknown as ServerMessage
     send!(noSid)

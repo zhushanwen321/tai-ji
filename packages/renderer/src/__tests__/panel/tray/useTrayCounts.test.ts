@@ -21,6 +21,7 @@ import { mount } from '@vue/test-utils'
 import { computed, defineComponent, h, nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { dispatchGlobal, dispatchCrossSession } from '@taiji/core/transport/api'
+import { applySurfacesFrame, __resetSurfaceTableForTest } from '@taiji/core'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useSessionStore } from '@/stores/session'
@@ -131,6 +132,7 @@ function data(): UseTrayCountsReturn {
 }
 
 beforeEach(() => {
+  __resetSurfaceTableForTest() // surface 派生表逐用例清零（W4a 判别器）
   setActivePinia(createPinia())
   vi.clearAllMocks()
   apiMocks.getSubagents.mockResolvedValue({ subagents: [], oversize: false })
@@ -423,14 +425,17 @@ describe('useTrayCounts 错误态与加载态暴露面（面板 retry 判据）'
 })
 
 describe('P-invisible·任务托盘：D9③ 派生视图抑制（btw 线不映射 subagent/workflow）', () => {
-  it('btw vid 挂托盘：线 owner 分区有派生记录仍构造性归零 + 不发首次拉取 RPC；bash（线自身任务）照常', async () => {
-    const vid = 'btw:line-tray-1'
-    // 线 owner 分区真实灌入派生记录（生产 = loadSubagents(vid) / 广播路径落分区）
-    useSubagentStore().applyRecords(vid, [makeSubagent({ subagentId: 'a-line', status: 'running' })])
+  it('btw 线挂托盘：线 owner 分区有派生记录仍构造性归零；bash（线自身任务）照常', async () => {
+    const lineId = 'line-tray-1'
+    // W4a 判别器 = session.surfaces 只读派生表（isBtwSession；登记于 constraints.json
+    // C-data-28 抑制类清单）——线 session id 以 surface:'btw' 登记进表。
+    applySurfacesFrame({ entries: [{ sessionId: lineId, surface: 'btw' }] })
+    // 线 owner 分区真实灌入派生记录（生产 = loadSubagents(线 id) / 广播路径落分区）
+    useSubagentStore().applyRecords(lineId, [makeSubagent({ subagentId: 'a-line', status: 'running' })])
     // 种数据（applyRecords 已私有化，直写分区 ref）
     const workflowStore = useWorkflowStore()
     workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(
-      vid,
+      lineId,
       [makeWorkflow({ runId: 'wf-line', status: 'running' })],
     )
     // bash = 线自身后台命令（非派生虚拟键，抑制面不覆盖）
@@ -438,16 +443,18 @@ describe('P-invisible·任务托盘：D9③ 派生视图抑制（btw 线不映�
       tasks: [makeTask({ taskId: 't-line' })], loaded: true, corrupted: false, fetchFailed: false,
     })
 
-    mountHarness(vid)
+    mountHarness(lineId)
 
     expect(data().counts.value.subagent).toEqual({ running: 0, ended: 0, total: 0 })
     expect(data().counts.value.workflow).toEqual({ running: 0, ended: 0, total: 0 })
     expect(data().lists.subagent.running.value).toHaveLength(0)
     expect(data().lists.workflow.running.value).toHaveLength(0)
     expect(data().counts.value.bash.total).toBe(1) // 边界：bash 不在派生抑制面
-    // 首次拉取被抑制（对线 vid 的 getSubagents/getWorkflows 零消费方 → 不发无效 RPC）
-    expect(apiMocks.getSubagents).not.toHaveBeenCalledWith(vid)
-    expect(apiMocks.getWorkflows).not.toHaveBeenCalledWith(vid)
+    // W4a 已接受代价：3 处纯性能防护分支（首次拉取/retry）删判别器——对线会话多发几次
+    // 空 RPC（hasBackgroundWork/deriveStatus/loadError 对线派生值改变，线不进托盘汇总
+    // 范围、不可见；§6 取舍表）。此处断言「拉了但行集仍归零」的新形态。
+    expect(apiMocks.getSubagents).toHaveBeenCalledWith(lineId)
+    expect(apiMocks.getWorkflows).toHaveBeenCalledWith(lineId)
   })
 })
 

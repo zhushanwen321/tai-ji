@@ -110,10 +110,12 @@ describe('W09 单通道确定性验收（02 §4 V1）', () => {
     send({ type: 'message.status', payload: { sessionId: 's-v1', status: 'thinking' } })
 
     // 单次序列化：send 回调 → bus.publish（seq + ring + 定向推送）是唯一出口，
-    // broker.broadcast 路径已删（D1-2），全程 stringify 计数 = 1
+    // broker.broadcast 路径已删（D1-2），全程 stringify 计数 = 1。
+    // 注：registerSession 汇聚点的 session.surfaces 全局广播（W4a 判别器通道）发生在
+    // stringifySpy.mockClear() 之前且不经 send 回调——本断言的对象是 send 层转发路径，
+    // 全局注册事实帧（rule-7 登记例外，先例 session.forkNotice）不在单通道管辖范围。
     expect(stringifySpy).toHaveBeenCalledTimes(1)
-    expect(broker.broadcast).not.toHaveBeenCalled()
-    expect(broadcasts).toHaveLength(0)
+    expect(broadcasts.filter((m) => m.type !== 'session.surfaces')).toHaveLength(0)
     // 订阅者收到 1 条带 seq 的消息
     expect(online.sent).toHaveLength(1)
     const parsed = JSON.parse(online.sent[0]!) as ServerMessage & { seq?: number }

@@ -4,7 +4,7 @@ import { handleCompletion, __resetDebounceForTest } from '../useCompletionNotify
 import * as sound from '../useCompletionSound'
 import * as markers from '../../useSessionMarkers'
 import { useBackgroundWork } from '../../features/chat/useBackgroundWork'
-import { getSettingsStore, provideSettingsStore, createSettingsStore } from '@taiji/core'
+import { getSettingsStore, provideSettingsStore, createSettingsStore, applySurfacesFrame, __resetSurfaceTableForTest } from '@taiji/core'
 
 vi.mock('../useCompletionSound', () => ({
   // playSuccess/playError 现在是 async + 接受可选声音名参数
@@ -24,6 +24,7 @@ vi.mock('../../features/chat/useBackgroundWork', () => ({
 }))
 
 beforeEach(() => {
+  __resetSurfaceTableForTest() // surface 派生表逐用例清零（W4a 判别器）
   setActivePinia(createPinia())
   provideSettingsStore(createSettingsStore())
   vi.clearAllMocks()
@@ -184,14 +185,24 @@ describe('useCompletionNotify', () => {
 })
 
 describe('[M4-a] P-invisible·通知侧：btw 线完成不进全局通知（D9③ 派生视图收窄）', () => {
-  it('btw vid 完成 → 无提示音 + 不落 sidebar 未读标记；主会话同输入对照照常', () => {
-    handleCompletion('btw:line-notify-1', 'stop', 'other-sid')
+  it('btw 线完成 → 无提示音 + 不落 sidebar 未读标记；主会话同输入对照照常', () => {
+    // W4a 判别器 = session.surfaces 只读派生表（isBtwSession；旧 isBtwVirtualId 前缀判别
+    // 随 vid 退役）——线 session id 以 surface:'btw' 登记进表。
+    applySurfacesFrame({ entries: [{ sessionId: 'line-notify-1', surface: 'btw' }] })
+    handleCompletion('line-notify-1', 'stop', 'other-sid')
     expect(sound.playSuccess).not.toHaveBeenCalled()
     expect(markers.markUnread).not.toHaveBeenCalled() // 不写 taiji:session-markers（防已删线死条目）
 
-    // 对照：主会话完成不受抑制（既有行为回归）
+    // 对照：主会话完成不受抑制（既有行为回归；表外 id = 非线）
     handleCompletion('s1', 'stop', 'other-sid')
     expect(sound.playSuccess).toHaveBeenCalledOnce()
     expect(markers.markUnread).toHaveBeenCalledWith('s1')
+  })
+
+  it('W4a：表外/未知 id 判非线（失败方向 = 偶发全局通知，不猜成线）', () => {
+    applySurfacesFrame({ entries: [{ sessionId: 'line-known', surface: 'btw' }] })
+    handleCompletion('never-seen-line', 'stop', 'other-sid')
+    expect(sound.playSuccess).toHaveBeenCalledOnce() // 表外不抑制
+    expect(markers.markUnread).toHaveBeenCalledWith('never-seen-line')
   })
 })

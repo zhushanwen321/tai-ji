@@ -20,6 +20,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { effectScope, nextTick } from 'vue'
 import { createPinia, setActivePinia, storeToRefs } from 'pinia'
 import * as events from '@taiji/core/transport/api'
+import { applySurfacesFrame, __resetSurfaceTableForTest } from '@taiji/core'
 import type { ServerMessage, SessionGroup, SessionSummary } from '@taiji/shared'
 import {
   bindForkNoticeEffect,
@@ -71,6 +72,9 @@ beforeEach(() => {
   setActivePinia(createPinia())
   scope?.stop()
   resetForkNoticeFeed()
+  // W4a 判别器：ForkNotice suppress 读口 = session.surfaces 只读派生表（isBtwSession；
+  // 登记于 docs/constraints.json C-data-28 抑制类清单）——逐用例清零 + 按线播种。
+  __resetSurfaceTableForTest()
   scope = effectScope()
   scope.run(() => {
     bindForkNoticeEffect()
@@ -156,16 +160,18 @@ describe('fork 分支角标（V7：产生 → 读后清除 → 切会话保持�
 })
 
 describe('ForkNotice suppress（btw 流）', () => {
-  it('notice 推给 btw vid → notices(vid) 构造性空；主会话同型推送照常可见', () => {
-    pushForkNoticeAsk('btw:line-fn-1', 'new-branch-1', '旁路提问预览')
+  it('notice 推给 btw 线 → notices(线 id) 构造性空；主会话同型推送照常可见', () => {
+    // W4a 判别器 = surface 派生表（isBtwSession）：线 session id 以 surface:'btw' 登记
+    applySurfacesFrame({ entries: [{ sessionId: 'line-fn-1', surface: 'btw' }] })
+    pushForkNoticeAsk('line-fn-1', 'new-branch-1', '旁路提问预览')
     pushForkNoticeAsk('main-fn-1', 'new-branch-2', '主分支预览')
 
     const feed = useForkNoticeFeed()
-    expect(feed.notices('btw:line-fn-1')).toHaveLength(0) // btw 流 suppress（D4）
+    expect(feed.notices('line-fn-1')).toHaveLength(0) // btw 流 suppress（D4）
     expect(feed.notices('main-fn-1')).toHaveLength(1) // 主会话行为不变（回归对照）
 
     // suppress 对交互幂等：dismiss/clear 对空表零动作不抛
-    expect(() => feed.dismissNotice('btw:line-fn-1', 1)).not.toThrow()
-    expect(() => feed.clearSession('btw:line-fn-1')).not.toThrow()
+    expect(() => feed.dismissNotice('line-fn-1', 1)).not.toThrow()
+    expect(() => feed.clearSession('line-fn-1')).not.toThrow()
   })
 })

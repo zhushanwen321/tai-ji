@@ -178,8 +178,8 @@ describe('session.state_changed 事件 → 状态层同步（W1：不经导航�
     expect(liveStore.liveStateOf('sc-2')).toEqual({ modelId: 'openai/gpt-4', thinkingLevel: 'low' })
   })
 
-  it('[W1] 侧栏列表之外的会话 id（btw 线 vid）状态帧同样落地（无列表命中判据）', async () => {
-    const vid = 'btw:pi-line-sync'
+  it('[W1] 侧栏列表之外的会话 id（btw 线 session id）状态帧同样落地（无列表命中判据）', async () => {
+    const vid = 'pi-line-sync' // 线 session id（W4a 后 = pi 真实 id）
     const chat = useChat()
     await chat.send(vid, textToSegments('触发订阅'))
 

@@ -3,8 +3,8 @@
  *
  * 对账对象 = 三消费方读的复合谓词 `isOpen ∧ activeTab ∈ {'subagent','btw'} ∧ 选中 id`：
  *   ① getViewedVids（chat LRU 驱逐豁免，selection/viewed-vids.ts）
- *   ② btw-replay 触发范围（useViewedBtwVid，renderer stores/btw-replay.ts 直接 watch）
- *   ③ useBtwTabData 视口命中（isViewingBtwVid / useBtwViewKey）
+ *   ② btw-replay 触发范围（useViewedBtwSession，renderer stores/btw-replay.ts 直接 watch）
+ *   ③ useBtwTabData 视口命中（isViewingBtwSession / useBtwViewKey）
  * 三者必须同值同变（读取单一源 = selection/predicates.ts）——任何拼装漂移 = 查看中的
  * btw 线 / agentcall 分区被静默驱逐（数据丢失类回归）或回放误停。
  *
@@ -20,11 +20,11 @@ import { bindDrawerSessionId, getBoundSessionId } from '../control'
 import {
   bindViewedVidPanels,
   getViewedVids,
-  isViewingBtwVid,
+  isViewingBtwSession,
   setBtwView,
   useBtwViewKey,
-  useViewedBtwVid,
-  viewedBtwVidFor,
+  useViewedBtwSession,
+  viewedBtwSessionFor,
   viewedSubagentVidFor,
 } from '../selection'
 import { openDrawerTab, openSubagent, setDrawerTab, closeDrawer, _resetDrawerForTest } from '../coordination'
@@ -37,19 +37,19 @@ function focusSession(s: string | null): void {
 }
 
 /** 三消费方同值对账（btw 族）：豁免集 ↔ 回放触发源 ↔ 视口命中，一次断言三读数一致 */
-async function assertBtwReadingsAgree(vid: string, expected: string | null): Promise<void> {
+async function assertBtwReadingsAgree(sessionId: string, expected: string | null): Promise<void> {
   await nextTick() // 真实事件序：写入后过一个 flush，再读三消费方
   // ① chat LRU 豁免（getViewedVids）
-  expect(getViewedVids().has(vid)).toBe(expected !== null)
-  // ② btw-replay 触发源（useViewedBtwVid——renderer watch 的就是它）
-  expect(useViewedBtwVid().value).toBe(expected)
-  // ③ useBtwTabData 视口命中（isViewingBtwVid）+ 视口三元组 key（useBtwViewKey）
-  expect(isViewingBtwVid(vid)).toBe(expected !== null)
+  expect(getViewedVids().has(sessionId)).toBe(expected !== null)
+  // ② btw-replay 触发源（useViewedBtwSession——renderer watch 的就是它）
+  expect(useViewedBtwSession().value).toBe(expected)
+  // ③ useBtwTabData 视口命中（isViewingBtwSession）+ 视口三元组 key（useBtwViewKey）
+  expect(isViewingBtwSession(sessionId)).toBe(expected !== null)
   const key = useBtwViewKey().value
   if (expected === null) {
-    expect(key === '' || !key.includes(vid)).toBe(true)
+    expect(key === '' || !key.includes(sessionId)).toBe(true)
   } else {
-    expect(key).toBe(`${getBoundSessionId() ?? ''}\u0000${vid}`)
+    expect(key).toBe(`${getBoundSessionId() ?? ''}\u0000${sessionId}`)
   }
 }
 
@@ -63,7 +63,7 @@ beforeEach(() => {
 
 describe('三消费方复合谓词不变量（真实事件序对账，selection-invariants）', () => {
   it('开 btw → 选线 → 切 tab → 切回 → 关 drawer：每步三读数同值', async () => {
-    const V = 'btw:pi-1'
+    const V = 'pi-line-1'
     focusSession('A')
     panels.value = ['A']
 
@@ -92,7 +92,7 @@ describe('三消费方复合谓词不变量（真实事件序对账，selection-
   })
 
   it('切 session（焦点换分区）→ 三读数随分区换显；A 的查看态在 A 分区不受影响', async () => {
-    const V = 'btw:pi-a'
+    const V = 'pi-line-a'
     focusSession('A')
     panels.value = ['A', 'B']
     openDrawerTab('btw')
@@ -102,10 +102,10 @@ describe('三消费方复合谓词不变量（真实事件序对账，selection-
     // 切到 B（B 无查看态）：三消费方读当前分区 → 同落；per-sid 读（①豁免链的读取路径）不受影响
     focusSession('B')
     await nextTick()
-    expect(useViewedBtwVid().value).toBe(null)
-    expect(isViewingBtwVid(V)).toBe(false)
+    expect(useViewedBtwSession().value).toBe(null)
+    expect(isViewingBtwSession(V)).toBe(false)
     expect(useBtwViewKey().value).toBe('')
-    expect(viewedBtwVidFor('A')).toBe(V) // A 分区查看态保留（getViewedVids 仍豁免 A）
+    expect(viewedBtwSessionFor('A')).toBe(V) // A 分区查看态保留（getViewedVids 仍豁免 A）
     expect(getViewedVids()).toEqual(new Set([V]))
 
     // 切回 A：三读数同恢复
@@ -139,7 +139,7 @@ describe('三消费方复合谓词不变量（真实事件序对账，selection-
   })
 
   it('两族混合（A 看 btw、B 看 subagent）：复合谓词互不挤占，per-sid 读各自命中', async () => {
-    const B = 'btw:pi-a'
+    const B = 'pi-line-a'
     const S = 'subagent:B:s1'
     focusSession('A')
     openDrawerTab('btw')
@@ -149,9 +149,9 @@ describe('三消费方复合谓词不变量（真实事件序对账，selection-
     panels.value = ['A', 'B']
     await nextTick()
 
-    expect(viewedBtwVidFor('A')).toBe(B)
+    expect(viewedBtwSessionFor('A')).toBe(B)
     expect(viewedSubagentVidFor('A')).toBe(null)
-    expect(viewedBtwVidFor('B')).toBe(null)
+    expect(viewedBtwSessionFor('B')).toBe(null)
     expect(viewedSubagentVidFor('B')).toBe(S)
     expect(getViewedVids()).toEqual(new Set([B, S]))
   })

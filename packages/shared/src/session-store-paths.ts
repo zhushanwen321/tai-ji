@@ -29,9 +29,9 @@ export const SESSION_STORE_DIR_SEGMENT = 'ext-sessions'
 
 /**
  * pi 会话 id 同域校验正则（镜像 runtime pi-paths.ts 的 `PI_SESSION_ID_PATTERN`）：
- * 首尾字母数字，中间允许 `[A-Za-z0-9._-]`；真 sid 永不含 `:`，btw 虚拟 id
- * `btw:<sid>` 含冒号必拒。字面量一致性由 scripts/check-artifact-dir-formula-sync.mjs
- * 三方对拍守护。
+ * 首尾字母数字，中间允许 `[A-Za-z0-9._-]`；真 sid 永不含 `:`，带冒号的虚拟 id
+ * （旧 btw 两段式 / subagent 三段式 / agentcall 两段式）必拒。字面量一致性由
+ * scripts/check-artifact-dir-formula-sync.mjs 三方对拍守护。
  */
 const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
 

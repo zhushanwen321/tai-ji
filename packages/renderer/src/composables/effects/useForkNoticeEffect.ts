@@ -26,7 +26,7 @@
 import { onScopeDispose, readonly, shallowRef, watch, type DeepReadonly, type Ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { ServerMessage, SessionGroup } from '@taiji/shared'
-import { isBtwVirtualId } from '@taiji/shared'
+import { applySurfacesFrame, isBtwSession } from '@taiji/core'
 import * as events from '@taiji/core/transport/api'
 import { useSessionStore } from '@/stores/session'
 import {
@@ -86,7 +86,9 @@ export function useForkNoticeFeed(): {
     // [M4-a / btw-question D4] ForkNotice suppress（btw 流渲染）：线是 fork 产物
     //（header.parentSession 指向源）但关联只删不显——fork 反馈行/分支追踪状态不进 btw 流
     //（读口单点抑制：MessageStream 全部消费方经本函数；dismiss/clear 对空表幂等）。
-    if (isBtwVirtualId(sessionId)) return readonly([])
+    // W4a 判别器 = session.surfaces 只读派生表（isBtwSession，登记于 docs/constraints.json
+    // C-data-28 抑制类清单；旧 isBtwVirtualId 前缀判别随 vid 退役）。
+    if (isBtwSession(sessionId)) return readonly([])
     return readonly(feedMap.value.get(sessionId) ?? [])
   }
 
@@ -212,6 +214,16 @@ export function bindForkNoticeEffect(): void {
   const { groups } = storeToRefs(sessionStore)
   const groupsRef: Ref<SessionGroup[]> = groups
 
+  // W4a 判别器通道（设计 §3.3.6）：session.surfaces 全局帧 → renderer 只读派生表
+  // surfaceBySessionId 整表替换（applySurfacesFrame 收敛）。无 sid 帧，route-inbound 走
+  // global 通道（L9 warn 对 session.* 无 sid 帧的既有接受形态，forkNotice/handoffComplete
+  // 同族，不新造豁免）；mock 模式（VITE_MOCK）帧由 core transport/mock 直发同一 global
+  // 通道，两条到达路径同一收敛点。订阅挂 App setup（本函数调用点）——先于 WS 连接提交，
+  // sendInitialState 冷启动段不丢。与 forkNotice 同范式（effect 层全局订阅）。
+  const unsubSurfaces = events.onGlobalType('session.surfaces', (msg) => {
+    applySurfacesFrame((msg as ServerMessage<'session.surfaces'>).payload)
+  })
+
   // RV1：订阅 session.forkNotice 全局广播（payload 无 sessionId，routeInbound 走 global 通道）。
   // 收到后按 srcSessionId 把 ForkNotice 插入对应 session 的对话流（transient feed）。
   const unsubForkNotice = events.onGlobalType('session.forkNotice', (msg) => {
@@ -242,6 +254,7 @@ export function bindForkNoticeEffect(): void {
 
   onScopeDispose(() => {
     unsubForkNotice()
+    unsubSurfaces()
     resetForkBranchState()
   })
 }

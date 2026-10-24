@@ -34,7 +34,7 @@ export function useModel() {
    * 切换回执显示态写入（U6 生效值）。
    *
    * [W1 会话架构四层分离] 统一写状态层 `applyLiveState`——状态按会话 id 寄存，与「是否在
-   * 侧栏列表」无关。旧实现的「btw 虚拟 id 分流」（btw 线写专用 store、主会话写
+   * 侧栏列表」无关。旧实现的「btw 分流」（btw 线写专用 store、主会话写
    * sessionStore.applySnapshot）已删除：两条路径合并为一个 reducer（设计 §3.3 删除清单）。
    */
   function applySwitchReceipt(sessionId: string, patch: { modelId?: string; thinkingLevel?: string }): void {

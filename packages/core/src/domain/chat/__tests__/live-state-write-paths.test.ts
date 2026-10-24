@@ -3,7 +3,7 @@
  *
  * 锁定设计 §2.4 I2/I4 与 §7 验收项 2/5：
  * - `session.state_changed` / `session.thinkingLevelSet` 写**状态层**（按 sessionId 寄存），
- *   不再经导航列表命中（applySnapshot）——侧栏列表之外的会话 id（btw 线 vid、任意不在
+ *   不再经导航列表命中（applySnapshot）——侧栏列表之外的会话 id（btw 线 session id、任意不在
  *   列表的 id）与主会话走同一个 apply 函数，无 `isBtwVirtualId` / hidden 分支；
  * - 导航列表不被状态帧触碰（列表只承载描述字段）；
  * - `session.renamed` 仍写导航列表（label 是展示字段）。
@@ -103,15 +103,15 @@ describe('session 状态帧 → 状态层（无列表命中判据）', () => {
     resetChatModuleStateForTest()
   })
 
-  it('侧栏列表之外的会话 id（btw 线 vid）收到 state_changed：状态层更新（验收项 2 核心）', async () => {
+  it('侧栏列表之外的会话 id（btw 线 session id）收到 state_changed：状态层更新（验收项 2 核心）', async () => {
     const f = makeFixture()
-    const vid = 'btw:pi-line-1'
-    await f.useChat.send(vid, SEGMENTS)
+    const sessionId = 'pi-line-1'
+    await f.useChat.send(sessionId, SEGMENTS)
 
-    f.emit(vid, frame(vid, 'session.state_changed', { modelId: 'p/line-model', thinkingLevel: 'low' }))
+    f.emit(sessionId, frame(sessionId, 'session.state_changed', { modelId: 'p/line-model', thinkingLevel: 'low' }))
 
     // 状态层按 id 寄存：与主会话完全同一条路径
-    expect(f.liveState.liveStateOf(vid)).toEqual({ modelId: 'p/line-model', thinkingLevel: 'low' })
+    expect(f.liveState.liveStateOf(sessionId)).toEqual({ modelId: 'p/line-model', thinkingLevel: 'low' })
     // 导航列表不再承载状态字段写入（唯一写入口是状态层）
     expect(f.sessionStore.applySnapshot).not.toHaveBeenCalled()
     f.dispose()
@@ -120,20 +120,20 @@ describe('session 状态帧 → 状态层（无列表命中判据）', () => {
   it('btw 线与主会话走同一个 apply 函数（无 isBtwVirtualId 分支，验收项 5）', async () => {
     const f = makeFixture()
     const main = 'main-s1'
-    const vid = 'btw:pi-line-2'
+    const sessionId = 'pi-line-2'
     await f.useChat.send(main, SEGMENTS)
-    await f.useChat.send(vid, SEGMENTS)
+    await f.useChat.send(sessionId, SEGMENTS)
 
     f.emit(main, frame(main, 'session.state_changed', { modelId: 'p/main' }))
-    f.emit(vid, frame(vid, 'session.state_changed', { modelId: 'p/line' }))
+    f.emit(sessionId, frame(sessionId, 'session.state_changed', { modelId: 'p/line' }))
 
     const applySpy = vi.spyOn(f.liveState, 'applyLiveState')
     f.emit(main, frame(main, 'session.thinkingLevelSet', { level: 'high' }))
-    f.emit(vid, frame(vid, 'session.thinkingLevelSet', { level: 'high' }))
+    f.emit(sessionId, frame(sessionId, 'session.thinkingLevelSet', { level: 'high' }))
     // 同一签名、同一入口被调用两次（入参形状相同，仅 id 不同）
     expect(applySpy.mock.calls).toEqual([
       [main, { thinkingLevel: 'high' }],
-      [vid, { thinkingLevel: 'high' }],
+      [sessionId, { thinkingLevel: 'high' }],
     ])
     f.dispose()
   })

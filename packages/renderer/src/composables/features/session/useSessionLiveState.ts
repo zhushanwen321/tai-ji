@@ -9,7 +9,7 @@
  * - 按 sessionId 读状态层，**缓存缺失返回 undefined**（显式未知）；
  * - 不回退主会话 / 默认模型 / 其他会话的值（ADR-0122 事实驱动：无事实即未知）；
  * - 与导航列表无关——列表刷新 / 项目过滤 / 归档不影响输出；侧栏列表之外的会话
- *   （btw 线 vid 等）与主会话同一条路径。
+ *   （btw 线等）与主会话同一条路径。
  *
  * 形式：`useSessionLiveState(sessionIdRef)` 返回 `{ liveState, modelId, thinkingLevel }`，
  * 三者在 computed 内读状态层 Map（响应式依赖自动收集）。`sessionId` 为 null（landing 态）

@@ -490,20 +490,20 @@ export function useExtensionUI(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// btw 内联确认条草稿分键表（D7⑤ 提交态 per-vid 隔离的模块级载体）——确认条编排本体
+// btw 内联确认条草稿分键表（D7⑤ 提交态 per-line 隔离的模块级载体）——确认条编排本体
 // （D8 降级路径：请求合并排序 / 降档表单 / 提交回路）在 panel/useBtwInteraction.ts，
 // 本模块只承载草稿状态本体：终结清理入口挂在本模块失效链（invalidated 订阅）与
 // 快照差集修剪（retainOnly diff）两路，故状态留此与挂起请求生命周期同文件管理。
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 确认条草稿（四组提交态）——按 `${vid}:${requestId}` 分键保存（D7⑤ per-vid/表单实例双隔离） */
+/** 确认条草稿（四组提交态）——按 `${sessionId}:${requestId}` 分键保存（D7⑤ per-line/表单实例双隔离） */
 export type BtwBarDraft = { sel: Record<string, string[]>; text: Record<string, string>; planComment: string; dialogSelect: string; dialogText: string }
 
 export const emptyBtwBarDraft = (): BtwBarDraft => ({ sel: {}, text: {}, planComment: '', dialogSelect: '', dialogText: '' })
 
-// taste:allow-no-data-owner W24-EX（btw-question M3-c 行内豁免，登记表⑧已落定（2026-09-22，阶段 3 审查 U2 修复随批）——EX-A：`btwBarDrafts` 分键草稿 Map，D7⑤ 挂起表单提交态 per-vid 隔离的持久草稿本体）：
+// taste:allow-no-data-owner W24-EX（btw-question M3-c 行内豁免，登记表⑧已落定（2026-09-22，阶段 3 审查 U2 修复随批）——EX-A：`btwBarDrafts` 分键草稿 Map，D7⑤ 挂起表单提交态 per-line 隔离的持久草稿本体）：
 // 确认条草稿分键表（用户输入暂存、终结即删，非 GUI 数据本体；D7⑤ 切走切回不丢的模块级载体）
 export const btwBarDrafts = reactive(new Map<string, BtwBarDraft>())
 
 /** 终结清理：应答送达 / 失效 / 快照修剪三支共用（幂等） */
-export function clearBtwBarDrafts(vid: string, requestIds: readonly string[]): void { for (const rid of requestIds) btwBarDrafts.delete(`${vid}:${rid}`) }
+export function clearBtwBarDrafts(sessionId: string, requestIds: readonly string[]): void { for (const rid of requestIds) btwBarDrafts.delete(`${sessionId}:${rid}`) }

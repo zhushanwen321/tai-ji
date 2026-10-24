@@ -83,7 +83,7 @@ describe('delete 立标判据 hasDestroySink（unreasonable#3 回归防线）', 
     expect(svc.removeSessionEntry).not.toHaveBeenCalled()
   })
 
-  it('btw 活线（在册 vid + ops 注入 → closeLine 终结扇出的销毁回调存在）→ hasDestroySink true，走 closeLine 不落主会话清理侧', async () => {
+  it('btw 活线（在册线 session id + ops 注入 → closeLine 终结扇出的销毁回调存在）→ hasDestroySink true，走 closeLine 不落主会话清理侧', async () => {
     const { lifecycle, svc } = makeSessionLifecycleFixture()
     // 组合根同款注入点（setBtwCascadeOps，官方「测试注入 fake / 置 null 复位」语义）：
     // 本用例钉审查 finding 1 的回退形态——判据若改回 `session !== undefined && !isBtwLine`
@@ -92,17 +92,18 @@ describe('delete 立标判据 hasDestroySink（unreasonable#3 回归防线）', 
     // removeSessionEntry（组合根镜像主会话 delete 收尾序），fake ops 只钉 delete 分支形态。
     const closeLine = vi.fn().mockResolvedValue(true)
     const closeAllForMain = vi.fn().mockResolvedValue(undefined)
-    setBtwCascadeOps({ closeLine, closeAllForMain })
+    // W4a：判别器 = registry 成员查询（getLine 注入；键 = 线 session id = piId）
+    const getLine = vi.fn((id: string) => (id === 's-line' ? { mainSid: 's-main' } : undefined))
+    setBtwCascadeOps({ closeLine, closeAllForMain, getLine })
     try {
-      // vid 两段式（btw:<piSessionId>，第二段禁冒号）——registerSession 接受 vid 在册
-      await lifecycle.registerSession('btw:s-line', {} as unknown as IPiEngine, '/p', 'label', tmpFile)
+      await lifecycle.registerSession('s-line', {} as unknown as IPiEngine, '/p', 'label', tmpFile)
 
-      await lifecycle.delete('btw:s-line')
+      await lifecycle.delete('s-line')
 
-      expect(fires).toEqual([{ sessionId: 'btw:s-line', disposition: 'delete', hasDestroySink: true }])
+      expect(fires).toEqual([{ sessionId: 's-line', disposition: 'delete', hasDestroySink: true }])
       // btw 直删分支形态：单入口 closeLine（删线文件），不落主会话 trash/sidecar 清理侧，
       // 也不经 lifecycle 直调 removeSessionEntry（那是 onLineTerminated 扇出的事）
-      expect(closeLine).toHaveBeenCalledWith('btw:s-line', { deleteSessionFile: true })
+      expect(closeLine).toHaveBeenCalledWith('s-line', { deleteSessionFile: true })
       expect(closeAllForMain).not.toHaveBeenCalled()
       expect(trashMock).not.toHaveBeenCalled()
       expect(svc.removeSessionEntry).not.toHaveBeenCalled()

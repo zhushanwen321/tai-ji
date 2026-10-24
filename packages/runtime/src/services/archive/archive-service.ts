@@ -91,7 +91,7 @@ export interface ArchiveServiceDeps { // oe-exempt:20261020:framework:服务依�
    * 判据，同 delete）。
    */
   fireSuppressDisposition(sessionId: string, hasDestroySink: boolean): void
-  /** 级联停止名下 btw 线（步骤 ③ + purge 步骤 ④，closeAllForMain——返回关闭的线 vid 清单）。 */
+  /** 级联停止名下 btw 线（步骤 ③ + purge 步骤 ④，closeAllForMain——返回关闭的线 sessionId 清单）。 */
   closeAllBtwLines(mainSid: string, cwd: string): Promise<string[]>
   /** detach 活跃 session（步骤 ④）。 */
   detachSession(sessionId: string): void
@@ -585,8 +585,8 @@ export class ArchiveService {
     // 整删已回收，幂等重入安全）。
     try {
       const closedLines = await this.deps.closeAllBtwLines(sessionId, ledger.cwd)
-      for (const vid of closedLines) {
-        this.deps.unbindCanvas(vid)
+      for (const lineSessionId of closedLines) {
+        this.deps.unbindCanvas(lineSessionId)
       }
     } catch (e: unknown) {
       this.deps.warn(`[archive] btw 线级联删除失败，继续彻底删除 (sessionId=${sessionId}): ${toMessage(e)}`)

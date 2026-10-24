@@ -2,7 +2,7 @@
  * 状态层选择器测试（会话架构四层分离 W0/W1：composer 读状态层，缺失即显式未知）。
  *
  * 覆盖设计 §7 验收项 2/3/7 的渲染层半边：
- * - 项 2：侧栏列表之外的会话 id（btw 线 vid / 任意不在列表的 id）写入状态层后，
+ * - 项 2：侧栏列表之外的会话 id（btw 线 session id / 任意不在列表的 id）写入状态层后，
  *   composer 的选择器 `createSessionLiveStateSelector` 立即可读到；
  * - 项 3：整表刷新 / 归档 / 项目过滤（导航列表变化）不影响选择器输出；
  * - 项 7：线内切换不影响主会话、主会话切换不影响线（按 id 隔离，无回退合并）；
@@ -35,7 +35,7 @@ function group(cwd: string, sessions: SessionSummary[]): SessionGroup {
 }
 
 const MAIN = 'main-s1'
-const LINE = 'btw:pi-line-1'
+const LINE = 'pi-line-1' // 线 session id（W4a 后 = pi 真实 id）
 
 function makeFixture() {
   const live = createSessionLiveState()

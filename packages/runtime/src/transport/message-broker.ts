@@ -253,13 +253,27 @@ export class ServerMessageBroker implements IMessageBroker {
     // archiveCount（session-archive 设计 D5 协议变更点）：归档角标随广播帧即时——计数 =
     // 归档列表条目数（listArchiveEntries 过滤 .restoring，与 config.archives 列表同数据源，
     // 角标与「已归档 (N)」头恒一致）。广播频度 = 用户动作级（create/delete/rename/归档域操作），
-    // 每帧一次目录扫描可接受；archiveService 未注入时字段缺省（协议 optional）。
+    // 每帧一次目录扫描可接受；archiveService 未注入时字段缺省（协议 optional 字段语义）。
     const archiveCount = this.services.archiveService?.listArchiveEntries().length
     return {
       type: 'config.sessions',
       id: this.nextPushId(),
       payload: { groups: this.services.sessionService.listPersistedSessions(), ...(archiveCount !== undefined ? { archiveCount } : {}) },
     }
+  }
+  /**
+   * session.surfaces 消息构造（W4a 判别器通道，设计 §3.3.6）：注册表 surface 事实的全量
+   * 派生视图。数据源 = 活跃注册表（getActiveSessionIds × getSession(id).surface）——与
+   * session-lifecycle 注册后广播、sendInitialState 冷启动段同一公式（surface 的单一 owner
+   * = 注册表；IManagedSessionView.surface 由 W3 落地，create 缺省 'sidebar'、btw 线显式
+   * 'btw'）。全量两字段条目，百级会话 ≈ 几十 KB 量级；触发点低频（注册/rekey + 新连接）。
+   */
+  private buildSurfacesMsg(): ServerMessage {
+    const entries: ServerMessageMap['session.surfaces']['entries'] = []
+    for (const id of this.services.sessionService.getActiveSessionIds()) {
+      entries.push({ sessionId: id, surface: this.services.sessionService.getSession(id)?.surface ?? 'sidebar' })
+    }
+    return { type: 'session.surfaces', id: this.nextPushId(), payload: { entries } }
   }
   /**
    * app.info 消息构造（sendInitialState 首推）。
@@ -383,6 +397,13 @@ export class ServerMessageBroker implements IMessageBroker {
       {
         label: 'config.sessions',
         run: () => this.send(ws, this.buildSessionListMsg()),
+      },
+      {
+        // session.surfaces（W4a 判别器通道冷启动段，设计 §3.3.6）：注册表 surface 事实
+        // 全量派生视图——renderer 只读派生表的冷启动填充源（广播通道的同公式构造，
+        // 见 buildSurfacesMsg）。全局帧无 sessionId（rule-7 登记例外）。
+        label: 'session.surfaces',
+        run: () => this.send(ws, this.buildSurfacesMsg()),
       },
       {
         label: 'config.providers/model.list',

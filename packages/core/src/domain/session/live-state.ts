@@ -3,12 +3,13 @@
  *
  * 为什么独立成层（会话架构四层分离 W1，设计 §2.4 / §3.3「状态层」）：
  * 现状把「侧栏列表成员资格」当成了状态写入判据——`sessionStore.applySnapshot` 按
- * `list.find(id)` 落位，列表外的会话（btw 线是 runtime `hidden: true` 注册，不进
- * SessionScanner.listAll）状态帧被静默丢弃，只能靠另一套 btw 专用 store + 「回退主会话
+ * `list.find(id)` 落位，列表外的会话（btw 线是 runtime `surface: 'btw'` 注册，被
+ * SessionScanner.listAll 的 `surface === 'sidebar'` 正向谓词滤掉）状态帧被静默丢弃，
+ * 只能靠另一套 btw 专用 store + 「回退主会话
  * 当前值」补偿，补偿本身违反 ADR-0122（事实驱动：无事实应显式未知）。
  *
  * 本层把状态从展示容器里剥出来：
- * - 键 = 会话 id（主会话 / btw 线 vid / 任意 id 同一个键空间，**无 sid 类别判据**）；
+ * - 键 = 会话 id（主会话 / btw 线 / 任意 id 同一个键空间，**无 sid 类别判据**）；
  * - 唯一写入口 `applyLiveState(id, patch)`，字段级合并（patch 未提供的维度保留现值）；
  * - 读口 `liveStateOf(id)`，缓存缺失返回 `undefined`（显式未知，禁止回退其他会话的值）；
  * - 条目生命周期独立于导航列表：整表刷新 / 项目过滤 / 归档**不得**触碰（I3），

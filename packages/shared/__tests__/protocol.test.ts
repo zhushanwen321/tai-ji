@@ -414,10 +414,10 @@ describe('btw.* 3 帧登记完整性（D6，M2-a）', () => {
     }
   })
 
-  it('BtwThreadInfo 含可选 reclaimImminent（D1 回收提醒数据源；可选防破坏既有消费——BU3 runtime 半）', () => {
+  it('BtwThreadInfo 只含 sessionId（W5 协议收缩：reclaimImminent 随闲置回收机制退役删除）', () => {
     const block = extractBlock('export interface BtwThreadInfo {')
-    expect(block).toMatch(/vid: string/)
-    expect(block).toMatch(/reclaimImminent\?: boolean/)
+    expect(block).toMatch(/sessionId: string/) // W4a 键统一：vid → sessionId
+    expect(block).not.toMatch(/reclaimImminent/) // ADR-0122 清查收尾：wire 字段与 runtime/renderer 两半同批删
   })
 
   it('三帧在 ClientMessageMap / ServerMessageMapBase / ReplyPayloadMap 全登记（ack 必回）', () => {
@@ -429,30 +429,30 @@ describe('btw.* 3 帧登记完整性（D6，M2-a）', () => {
     }
   })
 
-  it('request payload 形状：create/list 只带 mainSid、remove 只带 vid', () => {
+  it('request payload 形状：create/list 只带 mainSid、remove 只带 sessionId', () => {
     const createPayload: ClientMessageMap['btw.create'] = { mainSid: 's-main' }
     expect(createPayload.mainSid).toBe('s-main')
     const listPayload: ClientMessageMap['btw.list'] = { mainSid: 's-main' }
     expect(Object.keys(listPayload)).toEqual(['mainSid'])
-    const removePayload: ClientMessageMap['btw.remove'] = { vid: 'btw:pi-1' }
-    expect(Object.keys(removePayload)).toEqual(['vid'])
+    const removePayload: ClientMessageMap['btw.remove'] = { sessionId: 'pi-1' }
+    expect(Object.keys(removePayload)).toEqual(['sessionId'])
   })
 
-  it('reply payload 形状：create 带 vid/mainSid/forkState（三值域）、list 带 threads、remove 回显 vid', () => {
+  it('reply payload 形状：create 带 sessionId/mainSid/forkState（三值域）、list 带 threads、remove 回显 sessionId', () => {
     const states: BtwForkState[] = ['full', 'truncated', 'none']
     expect(states).toHaveLength(3)
-    const createReply: ServerMessageMapBase['btw.create'] = { vid: 'btw:pi-1', mainSid: 's-main', forkState: 'none' }
+    const createReply: ServerMessageMapBase['btw.create'] = { sessionId: 'pi-1', mainSid: 's-main', forkState: 'none' }
     expect(createReply.forkState).toBe('none')
-    const threads: BtwThreadInfo[] = [{ vid: 'btw:pi-1' }]
+    const threads: BtwThreadInfo[] = [{ sessionId: 'pi-1' }]
     const listReply: ServerMessageMapBase['btw.list'] = { mainSid: 's-main', threads }
-    expect(listReply.threads[0].vid).toBe('btw:pi-1')
-    const removeReply: ServerMessageMapBase['btw.remove'] = { vid: 'btw:pi-1' }
-    expect(removeReply.vid).toBe('btw:pi-1')
+    expect(listReply.threads[0].sessionId).toBe('pi-1')
+    const removeReply: ServerMessageMapBase['btw.remove'] = { sessionId: 'pi-1' }
+    expect(removeReply.sessionId).toBe('pi-1')
   })
 
   it('ReplyPayloadMap：create/list payload 消费型、remove ack 型 void', () => {
-    const createReply: ReplyPayloadMap['btw.create'] = { vid: 'btw:pi-1', mainSid: 's-main', forkState: 'full' }
-    expect(createReply.vid).toBe('btw:pi-1')
+    const createReply: ReplyPayloadMap['btw.create'] = { sessionId: 'pi-1', mainSid: 's-main', forkState: 'full' }
+    expect(createReply.sessionId).toBe('pi-1')
     const listReply: ReplyPayloadMap['btw.list'] = { mainSid: 's-main', threads: [] }
     expect(listReply.threads).toEqual([])
     const removeAck: ReplyPayloadMap['btw.remove'] = undefined as void
@@ -461,7 +461,7 @@ describe('btw.* 3 帧登记完整性（D6，M2-a）', () => {
 
   it('forkState 回显型：分支三态在 ServerMessageMapBase create reply 内联可达（pill 数据源）', () => {
     for (const forkState of ['full', 'truncated', 'none'] as const) {
-      const reply: ServerMessageMapBase['btw.create'] = { vid: 'v', mainSid: 'm', forkState }
+      const reply: ServerMessageMapBase['btw.create'] = { sessionId: 'v', mainSid: 'm', forkState }
       expect(reply.forkState).toBe(forkState)
     }
   })

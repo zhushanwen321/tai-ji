@@ -1,25 +1,29 @@
 <!--
   BtwPanel —— drawer btw tab 内容面板（btw-question D7，M3-a）。
 
-  形态（D7）：线列表（消费 btw.list threads）+ 当前线完整对话界面（MessageStream
-  :session-id=vid + Composer variant=panel :show-btw=false——show-btw 实例开关防 drawer 内
-  Composer 递归出 btw 入口，prop 声明归 M3-b，本处只写调用处）+ fork pill（D3 口径）。
+  形态（D7）：线列表（W4b 起消费 session.list {surface:'btw', mainSessionId} 的 SessionSummary，
+  btw.list 退役）+ 当前线完整对话界面（MessageStream
+  :session-id=线 session id + Composer variant=panel :show-btw=false——show-btw 实例开关防
+  drawer 内 Composer 递归出 btw 入口，prop 声明归 M3-b，本处只写调用处）+ fork pill（D3 口径）。
 
   焦点绑定（D7 六条的面板侧）：
   - ①线归属创建时的主会话（关联在 runtime 注册表/目录布局，面板不展示血缘）；
-  - ②线列表 = 当前焦点主会话的线（:session-id=panelSessionId → btw.list{mainSid} 拉取）；
+  - ②线列表 = 当前焦点主会话的线（:session-id=panelSessionId → session.list{surface:'btw',
+    mainSessionId} 拉取；btw 线进通用列表，btw.list 随 W4b 退役）；
   - ③切走主会话线照常后台运行（面板随 drawer 分区切走即不展示，生命周期归 M4-a）；
-  - ④切回恢复面板（选中线存 core drawer 分区 selectedBtwVid，切回保留；列表重新拉取）；
-  - ⑤挂起表单提交态 per-vid 隔离归 M3-c（本单元不触及交互闭环）；
+  - ④切回恢复面板（选中线存 core drawer 分区 selectedBtwSessionId，切回保留；列表重新拉取）；
+  - ⑤挂起表单提交态 per-line 隔离归 M3-c（本单元不触及交互闭环）；
   - ⑥删除主会话级联归 M4-a（本面板不自行清理，走 deleteSession 编排）。
 
   数据编排（M3-a 形态；M3-b 落 useBtwTabData 后可下沉同构 composable）：
   - per-main-session 状态（线列表/加载态/fork pill 记录）经 useSessionScopedState Map 分区
     （ADR-0049），异步回写一律 updateFor(capturedSid)——焦点切走后迟到响应只写旧分区；
-  - 选中线不自持副本：唯一源 = core drawer 分区 selectedBtwVid（getViewedVids 的 D5
+  - 选中线不自持副本：唯一源 = core drawer 分区 selectedBtwSessionId（getViewedVids 的 D5
     豁免读同一字段，防双源漂移）；写入仅在 props.sessionId 仍为当前焦点时发生；
-  - fork pill 数据源 = btw.create reply.forkState（创建期一次性，进程内记录；btw.list
-    threads 刻意不含 forkState，结构上不可能跨重启回填——D3 pill 口径）。
+  - fork pill 数据源 = btw.create reply.forkState（创建期一次性，进程内记录；session.list
+    条目刻意不含 forkState，结构上不可能跨重启回填——D3 pill 口径）。
+  - chip 标签 = 线 label（`btw-<序号>` 可区分形态，§3.4.3 W4b 重定义——旧形态全部同名
+    basename(cwd) 只能靠截断 sessionId 区分）。
 -->
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="drawer-btw-tab">
@@ -94,28 +98,30 @@
         >
           <Button
             v-for="thread in state.threads"
-            :key="thread.vid"
+            :key="thread.id"
             variant="ghost"
             class="h-6 shrink-0 rounded-sm border px-2 font-mono text-[length:var(--text-2xs)] duration-[var(--duration-fast)] ease-[var(--ease-out)]"
             :class="
-              thread.vid === selectedVid
+              thread.id === selectedSessionId
                 ? 'border-border bg-surface-hover text-neutral-fg hover:bg-surface-hover'
                 : 'border-border bg-bg-input text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'
             "
-            :aria-pressed="thread.vid === selectedVid"
+            :aria-pressed="thread.id === selectedSessionId"
             data-testid="btw-thread-chip"
-            :data-vid="thread.vid"
-            @click="selectThread(thread.vid)"
+            :data-session-id="thread.id"
+            @click="selectThread(thread.id)"
           >
             <!-- badge 待处理态 per-line 挂点（D8 终态机驱动；聚合范围 = composer btw 按钮 Σ） -->
             <span
-              v-if="isBtwPending(thread.vid)"
+              v-if="isBtwPending(thread.id)"
               class="size-1.5 shrink-0 rounded-full bg-warn"
               data-testid="btw-thread-pending"
               :title="t('btw.interaction.pendingLabel')"
             />
-            <!-- 标签截断对齐 demo .itab-lbl 口径：max-w 128px 省略 + Button title 显全名（spec §3.4） -->
-            <span class="min-w-0 max-w-[128px] truncate">{{ shortVid(thread.vid) }}</span>
+            <!-- 标签截断对齐 demo .itab-lbl 口径：max-w 128px 省略 + Button title 显全名（spec §3.4）。
+                 W4b label 重定义（§3.4.3）：chip 标签 = 线 label（`btw-<序号>` 可区分形态，
+                 runtime/mock 两侧同口径合成；旧形态 = 截断显示 pi 真实 id）。 -->
+            <span class="min-w-0 max-w-[128px] truncate" :title="thread.label">{{ thread.label }}</span>
           </Button>
         </div>
         <Button
@@ -141,9 +147,9 @@
           <span>{{ forkPillText }}</span>
         </div>
         <MessageStream
-          v-if="selectedVid"
+          v-if="selectedSessionId"
           class="min-h-0 flex-1"
-          :session-id="selectedVid"
+          :session-id="selectedSessionId"
           data-testid="btw-stream"
         />
         <!-- composer band 壳（与 Panel.vue 主面板同壳，类链单一来源 composer-band.ts）：
@@ -151,13 +157,13 @@
              同宽同缘」），composer 不再贴边满宽；band gap-1.5 承接交互降档行行距，
              无交互时带内仅 composer（空闲几何与主面板一致）。
              M3-c 交互闭环（D8 降级路径唯一形态：drawer 内联确认条，富表单降档；五类请求
-             按 vid 路由本面板，主视图三模态面零浮出）。Guard 为无 DOM 渲染哨兵，包全部
+             按线 session id 路由本面板，主视图三模态面零浮出）。Guard 为无 DOM 渲染哨兵，包全部
              风险渲染——异常由 onErrorCaptured 在本组件收尾（return false 不外溢主面板，
              P2 隔离），错误条 + 重试在 Guard 外恒可达。 -->
         <!-- composer 带跟 chat 档位（chat-font-scope）：主面板 composer 恒在 main-area
              chat scope 内，btw 线的 composer + 内联确认条同语义（对话流配套输入区，
              非 drawer chrome）——上方 MessageStream 已自挂同款 scope。 -->
-        <div v-if="selectedVid" :class="COMPOSER_BAND_CLASS" data-fs-scope="chat" data-testid="btw-interaction">
+        <div v-if="selectedSessionId" :class="COMPOSER_BAND_CLASS" data-fs-scope="chat" data-testid="btw-interaction">
           <BtwInteractionGuard :key="interactionKey">
             <!-- 终态机失效支行内提示（失效支单入口 invalidateBtwRequests——事件帧一路：badge 清 + 表单撤下 + 本提示同拍收尾，D-B2-3） -->
             <div v-if="expiredNotice" class="flex items-center gap-1.5 rounded bg-danger-soft px-2.5 py-1.5 text-[length:var(--text-2xs)] text-danger" data-testid="btw-request-expired">
@@ -238,8 +244,8 @@
             <Button variant="ghost" class="ml-auto h-5 shrink-0 rounded px-1.5 text-[length:var(--text-2xs)]" data-testid="btw-interaction-retry" @click="retryInteraction">{{ t('common.retry') }}</Button>
           </div>
           <Composer
-            v-if="selectedVid"
-            :session-id="selectedVid"
+            v-if="selectedSessionId"
+            :session-id="selectedSessionId"
             variant="panel"
             :show-btw="false"
             data-testid="btw-composer"
@@ -256,22 +262,23 @@ import { useI18n } from 'vue-i18n'
 import { GitFork, MessagesSquare, Plus, TriangleAlert } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { btw } from '@/api'
+import { btw, session } from '@/api'
 import { isBtwPending } from '@/composables/panel/btw-pending-bookkeeping'
 import { useBtwPanelSurface } from '@/composables/panel/useBtwTabData'
 import { useBtwInteraction } from '@/composables/panel/useBtwInteraction'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { setBtwView, useBtwSelection, getBoundSessionId } from '@taiji/core/domain/drawer'
-import { isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
-import type { ServerMessageMap } from '@taiji/shared'
+import type { ServerMessageMap, SessionSummary } from '@taiji/shared'
 import MessageStream from '@/components/panel/MessageStream.vue'
 import Composer from '@/components/panel/Composer.vue'
 import { COMPOSER_BAND_CLASS } from '@/components/panel/composer-band'
 
-// btw 具名类型走 indexed-access（shared 包出口选择性 re-export 未挂具名——M2-a 登记的
-// SegmentsMetadataEntry 同款惯例，SSOT = shared protocol.ts）
+// btw.create 的 forkState 走 indexed-access（shared 包出口选择性 re-export 未挂具名——
+// M2-a 登记的 SegmentsMetadataEntry 同款惯例，SSOT = shared protocol.ts）
 type BtwForkState = ServerMessageMap['btw.create']['forkState']
-type BtwThreadInfo = ServerMessageMap['btw.list']['threads'][number]
+// W4b：线条目类型 = session.list 通用查询的 SessionSummary（btw 线进通用列表，
+// 原 btw.list reply 条目类型随该消息退役）
+type BtwThreadInfo = SessionSummary
 
 const props = defineProps<{
   /** 当前焦点主会话 id（PanelContainer 透传 panelSessionId）；null=无会话（入口禁用 + 空态） */
@@ -281,8 +288,9 @@ const props = defineProps<{
 const { t } = useI18n()
 
 /** per-main-session 面板状态（ADR-0049 Map 分区；切 sid 不丢、切回恢复，异步回写用 updateFor） */
-// @data-owner #44 —— #44 btw 线列表的 renderer 面板消费分区（btw.list 拉取 reply 喂入，
-// 与 useBtwTabData badge 分区各自拉取各自收敛；权威源/唯一写入口见登记表主表 #44 行，非第二写方）
+// @data-owner #44 —— #44 btw 线列表的 renderer 面板消费分区（session.list
+// {surface:'btw', mainSessionId} 拉取 reply 喂入，与 useBtwTabData badge 分区各自拉取
+// 各自收敛；权威源/唯一写入口见登记表主表 #44 行，非第二写方）
 interface BtwPanelState {
   threads: BtwThreadInfo[]
   loading: boolean
@@ -291,7 +299,7 @@ interface BtwPanelState {
   loadSeq: number
   creating: boolean
   createError: string | null
-  /** vid → 创建期 forkState（一次性元信息，仅进程内；btw.list 不携带故不可回填） */
+  /** 线 session id → 创建期 forkState（一次性元信息，仅进程内；session.list 条目不携带故不可回填） */
   forkPills: Record<string, BtwForkState>
 }
 
@@ -313,16 +321,11 @@ const state = computed(() => scoped.current.value)
  *  迁出后的落点；D5 豁免/视口命中经复合谓词 selection/predicates.ts 读同一字段；与 props.sessionId
  *  同分区前提由系统不变量保证——PanelContainer 绑定 focusedSessionId 与 leaf.sessionId 同值，
  *  SubagentTab selectedSubagentId 同款耦合）。null=未选中（列表仅展示）。 */
-const { selectedBtwVid } = useBtwSelection()
-const selectedVid = computed(() => selectedBtwVid.value ?? null)
+const { selectedBtwSessionId } = useBtwSelection()
+const selectedSessionId = computed(() => selectedBtwSessionId.value ?? null)
 
 function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
-}
-
-/** 线列表短名：映射即 extract（M1-a 工厂；非 btw 形态兜底原样展示） */
-function shortVid(vid: string): string {
-  return isBtwVirtualId(vid) ? extractBtwPiSessionId(vid) : vid
 }
 
 /** 拉取线列表：回写 captured 分区（updateFor），焦点切走后迟到响应不污染新分区 */
@@ -335,7 +338,11 @@ async function loadThreads(captured: string): Promise<void> {
     s.loadError = null
   })
   try {
-    const threads = await btw.list(captured)
+    // W4b：线列表 = session.list { surface:'btw', mainSessionId }（btw 进通用列表，
+    // btw.list 退役）——reply 与 config.sessions 同形，扁平化即该主会话名下线列表
+    // （组内按 createdAt 升序，最新线在末位 → autoSelect 选最新）。
+    const groups = await session.listSessions({ surface: 'btw', mainSessionId: captured })
+    const threads = groups.flatMap((g) => g.sessions)
     scoped.updateFor(captured, (s) => {
       if (s.loadSeq !== seq) return // 同分区旧响应丢弃（重试双击/watch 连触乱序检查）
       s.loading = false
@@ -358,9 +365,9 @@ function autoSelect(captured: string, threads: BtwThreadInfo[]): void {
     setBtwView(undefined)
     return
   }
-  const current = selectedBtwVid.value
-  if (current && threads.some((th) => th.vid === current)) return
-  setBtwView(threads[threads.length - 1].vid)
+  const current = selectedBtwSessionId.value
+  if (current && threads.some((th) => th.id === current)) return
+  setBtwView(threads[threads.length - 1].id)
 }
 
 /** 选中写入前置：setBtwView 落「按绑定 sid 分区」的 btw 内容域选中态——仅当面板焦点与绑定
@@ -370,8 +377,8 @@ function canWriteSelection(captured: string): boolean {
   return sidRef.value === captured && getBoundSessionId() === captured
 }
 
-function selectThread(vid: string): void {
-  setBtwView(vid)
+function selectThread(sessionId: string): void {
+  setBtwView(sessionId)
 }
 
 /** 新建线（空态 Primary / 头部按钮共用）：create reply 即 pill 数据源（D3 一次性口径） */
@@ -386,12 +393,15 @@ async function createThread(): Promise<void> {
     const reply = await btw.create(captured)
     scoped.updateFor(captured, (s) => {
       s.creating = false
-      s.forkPills[reply.vid] = reply.forkState
-      if (!s.threads.some((th) => th.vid === reply.vid)) {
-        s.threads = [...s.threads, { vid: reply.vid }]
+      s.forkPills[reply.sessionId] = reply.forkState
+      if (!s.threads.some((th) => th.id === reply.sessionId)) {
+        // 新建线即时入列（不等下次拉取）：条目字段与 session.list 合成同口径——
+        // label 暂缺（序号由下次拉取按创建次序定），先以 sessionId 占位渲染，
+        // 下一次拉取（抽屉活动触发）即替换为权威条目。
+        s.threads = [...s.threads, { id: reply.sessionId, label: reply.sessionId, cwd: captured, status: 'idle', lastActiveAt: Date.now() }]
       }
     })
-    if (canWriteSelection(captured)) setBtwView(reply.vid)
+    if (canWriteSelection(captured)) setBtwView(reply.sessionId)
   } catch (e) {
     scoped.updateFor(captured, (s) => {
       s.creating = false
@@ -416,9 +426,9 @@ watch(
 
 /** fork pill 三态文案（仅当前选中线有创建期记录时渲染；跨重启不回填故重开无线索即无 pill） */
 const forkPillText = computed(() => {
-  const vid = selectedVid.value
-  if (!vid) return null
-  const fs = state.value.forkPills[vid]
+  const sessionId = selectedSessionId.value
+  if (!sessionId) return null
+  const fs = state.value.forkPills[sessionId]
   if (!fs) return null
   if (fs === 'none') return t('btw.pill.none')
   if (fs === 'truncated') return t('btw.pill.truncated')
@@ -443,7 +453,7 @@ const {
   submitForm,
   submitPlan,
   cancelActive,
-} = useBtwInteraction(selectedVid)
+} = useBtwInteraction(selectedSessionId)
 
 // ── M3-c：失效提示 / 运行期错误边界（编排下沉 useBtwPanelSurface，
 //    规则：全部风险渲染在 Guard slot 内求值，异常由 surface 注册的 onErrorCaptured 在
@@ -456,5 +466,5 @@ const {
   interactionKey,
   retryInteraction,
   BtwInteractionGuard,
-} = useBtwPanelSurface(selectedVid)
+} = useBtwPanelSurface(selectedSessionId)
 </script>

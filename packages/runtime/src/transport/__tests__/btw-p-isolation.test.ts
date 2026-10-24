@@ -8,7 +8,7 @@
  * （文件→applyEntry 回放等价），两侧合起来构成 P-isolation 全断言。
  *
  * 断言范围（双通道：transient 直传 + stream 入 ring——分区语义与帧类型无关，载体选型见下）：
- * 1. 两线（btw vid）并发交错流式 100 帧（transient `message.text_delta`）：各自订阅者
+ * 1. 两线（btw 线 session id）并发交错流式 100 帧（transient `message.text_delta`）：各自订阅者
  *    只收自己的帧（sessionId + 内容标记双零泄漏）；无关会话订阅者零帧；
  * 2. stream 类帧（`message.stream_error`，payload {sessionId,content} 精确契约）5+3：
  *    per-session seq 1..N 单调无缺口（分区独立计数）+ ring 快照（重放侧）只含本线帧；
@@ -57,9 +57,9 @@ const streamFrame = (sessionId: string, i: number): ServerMessage => ({
   payload: { sessionId, content: `${sessionId}#${i}` },
 })
 
-const VID_A = 'btw:thread-alpha'
-const VID_B = 'btw:thread-beta'
-const VID_C = 'btw:thread-gamma'
+const VID_A = 'thread-alpha'
+const VID_B = 'thread-beta'
+const VID_C = 'thread-gamma'
 
 describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus 半边，fixture 层）', () => {
   it('并发交错 100+100 帧（transient 直传面）：各自订阅者零串扰 + 无关会话零帧', async () => {
@@ -72,9 +72,9 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     bus.subscribe(VID_C, c.client)
 
     // 微任务让步制造真实交错（两路发布并发推进，而非先 A 后 B 的顺序写）
-    const stream = async (vid: string, n: number): Promise<void> => {
+    const stream = async (sessionId: string, n: number): Promise<void> => {
       for (let i = 0; i < n; i++) {
-        bus.publish(vid, transientDelta(vid, i))
+        bus.publish(sessionId, transientDelta(sessionId, i))
         if (i % 16 === 0) await Promise.resolve()
       }
     }
@@ -88,7 +88,7 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     // 分区断言①：sessionId 恒为订阅方自己
     expect(fa.every(m => sidOf(m) === VID_A)).toBe(true)
     expect(fb.every(m => sidOf(m) === VID_B)).toBe(true)
-    // 分区断言②：内容标记零泄漏（对方 vid 的标记不出现在本方任何帧）
+    // 分区断言②：内容标记零泄漏（对方线 id 的标记不出现在本方任何帧）
     expect(fa.some(m => JSON.stringify(m).includes(VID_B))).toBe(false)
     expect(fb.some(m => JSON.stringify(m).includes(VID_A))).toBe(false)
     // 分区断言③：transient 不分配 seq（直传语义）——两线均无 seq 字段
@@ -105,9 +105,9 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     bus.subscribe(VID_A, a.client)
     bus.subscribe(VID_B, b.client)
 
-    const stream = async (vid: string, n: number): Promise<void> => {
+    const stream = async (sessionId: string, n: number): Promise<void> => {
       for (let i = 0; i < n; i++) {
-        bus.publish(vid, streamFrame(vid, i))
+        bus.publish(sessionId, streamFrame(sessionId, i))
         if (i % 4 === 0) await Promise.resolve()
       }
     }
@@ -151,8 +151,8 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     const liveA = makeClient()
     bus.subscribe(mainA, liveA.client)
 
-    bus.publish(mainA, { type: 'btw.list', id: 'push_1', payload: { mainSid: mainA, threads: [{ vid: 'btw:t1' }] } })
-    bus.publish(mainB, { type: 'btw.list', id: 'push_2', payload: { mainSid: mainB, threads: [{ vid: 'btw:t2' }] } })
+    bus.publish(mainA, { type: 'btw.list', id: 'push_1', payload: { mainSid: mainA, threads: [{ sessionId: 't1' }] } })
+    bus.publish(mainB, { type: 'btw.list', id: 'push_2', payload: { mainSid: mainB, threads: [{ sessionId: 't2' }] } })
 
     // live 面：A 只收到 mainA 的线列表，B 的广播不外溢
     const gotA = liveA.frames()
@@ -166,7 +166,7 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     const stateFrames = subB.stateSnapshot.filter(m => m.type === 'btw.list')
     expect(stateFrames).toHaveLength(1)
     expect(payload(stateFrames[0]!).mainSid).toBe(mainB)
-    expect(payload(stateFrames[0]!).threads).toEqual([{ vid: 'btw:t2' }])
+    expect(payload(stateFrames[0]!).threads).toEqual([{ sessionId: 't2' }])
     expect(lateB.frames()).toHaveLength(0) // state 类不补发 live
   })
 })

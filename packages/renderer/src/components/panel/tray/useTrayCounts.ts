@@ -42,8 +42,8 @@
  *   inversion D4 隔离化）：**native 直连 canvas store**（经 useCanvasSync 的单条订阅——
  *   首拉 + `canvas.updated` 失效重拉在订阅链内收敛，本数据面只读 store 清单投影）。
  *   画布按归属会话隔离（runtime 清单只返回本会话画布）：本件计数 = 本会话画布；
- *   btw 线（vid）托盘构造性归零（[D9③ 抑制执行点③]——画布已是会话维度资源，vid 非
- *   合法归属分区键，线内画布经线 owner 会话托盘承载）。计数口径 = 未收敛即进行中
+ *   btw 线托盘构造性归零（[D9③ 抑制执行点③]——画布已是会话维度资源，线内画布经线
+ *   owner 会话托盘承载）。计数口径 = 未收敛即进行中
  *   （生长中 / 审查中都在活动），converged 终态落已结束；阶段徽标（生长中/审查中/已收敛）
  *   是面板行的派生展示值，不在数据面建第二词表。
  *
@@ -69,7 +69,7 @@ import { filterBackgroundTasks } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
-import { isBtwVirtualId } from '@taiji/shared'
+import { isBtwSession } from '@taiji/core'
 
 /** built-in 三件（任务域面板类型 / TrayNativePanel 分桶键 / retry 分派键） */
 export type TrayTaskKind = 'bash' | 'subagent' | 'workflow'
@@ -213,13 +213,16 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
 
   // ── subagent：origin 过滤（workflow 派发 record 归 workflow 面板）→ 两视图分桶 ──
   // excludeOrigin 选项式（S1 判据单源化，与 hasRunning 同形态；禁止内联 filter 第二判据）
-  // [M4-a / D9③ 派生视图收窄·任务托盘抑制执行点①] btw 线（sessionId=vid，drawer 内 Composer
-  // 同样挂载本托盘）不派生虚拟任务：subagent/workflow-run 两件按线 owner 分区读，
-  // 在此构造性归零——派生过程仅在消息流工具调用中可见，托盘不为线内派生提供 opener
-  //（对齐 zcode）。bash（线自身后台命令）与 session件（真实子会话）非派生虚拟键，照常。
+  // [M4-a / D9③ 派生视图收窄·任务托盘抑制执行点①] btw 线（drawer 内 Composer 同样挂载
+  // 本托盘）不派生虚拟任务：subagent/workflow-run 两件按线 owner 分区读，在此构造性
+  // 归零——派生过程仅在消息流工具调用中可见，托盘不为线内派生提供 opener（对齐 zcode）。
+  // bash（线自身后台命令）与 session件（真实子会话）非派生虚拟键，照常。
+  // W4a 判别器 = session.surfaces 只读派生表（isBtwSession，登记于 docs/constraints.json
+  // C-data-28 抑制类清单——语义抑制本体、非性能优化，故保留判别器；旧 isBtwVirtualId
+  // 前缀判别随 vid 退役）。
   const derivedSuppressed = computed(() => {
     const sid = normalizedSid.value
-    return sid !== null && isBtwVirtualId(sid)
+    return sid !== null && isBtwSession(sid)
   })
   const subagentRecords = computed(() => {
     if (derivedSuppressed.value) return []
@@ -272,9 +275,9 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   // ── canvas（第 5 件，u-tray-entry）：native 直连 canvas store（per-session 分区读）──
   // 订阅生命周期归 useCanvasSync（模块级单条订阅 + per-session 分流，见其文件头）：首拉与
   // canvas.updated 失效重拉在订阅链内收敛，本数据面只读清单投影、零新协议。[D9③ 抑制
-  // 执行点③] btw 线（vid）托盘构造性归零——画布按归属会话隔离（D4）后已是会话维度资源，
-  // vid 非合法归属分区键（线内画布经线 owner 会话托盘承载）。进行中 = 未收敛（生长中 /
-  // 审查中都在活动），已结束 = converged 终态（回看资产）。
+  // 执行点③] btw 线托盘构造性归零——画布按归属会话隔离（D4）后已是会话维度资源，
+  // 线内画布经线 owner 会话托盘承载。进行中 = 未收敛（生长中 / 审查中都在活动），
+  // 已结束 = converged 终态（回看资产）。
   const canvasStore = useCanvasSync(normalizedSid)
   const canvasEntries = computed<CanvasListEntry[]>(() => {
     if (derivedSuppressed.value) return []
@@ -317,9 +320,12 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   watch(
     normalizedSid,
     (sid) => {
-      // [D9③ 抑制] btw 线不发首次拉取（getSubagents/getWorkflows 对线 vid 零消费方——
-      // 行集已构造性归零，拉取只是无效 RPC）。
-      if (!sid || isBtwVirtualId(sid)) return
+      // [D9③ 抑制·性能防护分支] W4a 删除判别器：旧实现对 btw 线 vid 跳过首次拉取
+      // （线 vid 零消费方）。键切换后判别器来源只剩派生表查询，而本分支是纯性能优化
+      // （行集仍由 derivedSuppressed 构造性归零，拉取只是无效 RPC）——不为一个性能
+      // 优化保留判别器：代价 = 对线会话多发几次空 RPC + hasBackgroundWork/deriveStatus/
+      // loadError 对线派生值改变（线不进托盘汇总范围、不可见，已接受，§6 取舍表）。
+      if (!sid) return
       void subagentStore.loadSubagents(sid)
       void workflowStore.loadWorkflows(sid)
     },
@@ -330,13 +336,12 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   async function retry(kind: TrayTaskKind): Promise<void> {
     const sid = normalizedSid.value
     if (!sid) return
+    // W4a：两处 retry 分支的 btw 判别器同上方首次拉取分支一并删除（性能防护，代价已接受）。
     if (kind === 'subagent') {
-      if (isBtwVirtualId(sid)) return // D9③ 抑制范围同口径（retry 不绕过构造性归零）
       await subagentStore.loadSubagents(sid)
       return
     }
     if (kind === 'workflow') {
-      if (isBtwVirtualId(sid)) return
       await workflowStore.loadWorkflows(sid)
       return
     }

@@ -28,7 +28,7 @@ import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Message, SegmentsMetadataFile } from '@taiji/shared'
-import { HISTORY_BUDGET, isBtwVirtualId } from '@taiji/shared'
+import { HISTORY_BUDGET } from '@taiji/shared'
 // paths.ts 是 Node-only 模块，刻意不从 shared barrel 导出（见 shared/src/index.ts L32 注释），
 // Node 端从子路径 import
 import { getAttachmentsDir } from '@taiji/shared/paths'
@@ -348,12 +348,13 @@ export interface SessionHistoryReaderDeps {
   /** session 存储端口（rebuildHistoryFromEntries 重建 / 尾读与全量文件读的转换链）。 */
   sessionStore: ISessionStore
   /**
-   * [btw-question 重载链修复] btw vid → 线会话文件绝对路径（组合根接 BtwService 注册表读
-   * ——rebuildFromDisk 启动重建的内存派生视图，late-bound 闭包）。缺省/返回 undefined =
-   * 注册表无此线（离线尾读按异常态 warn 后返回空页，见 tailReadBtwOffline）。
-   * 缺省注入（未接线构造）= btw vid 尾读恒空 + warn，主会话路径零影响。
+   * [btw-question 重载链修复] btw 线 session id → 线会话文件绝对路径（组合根接 BtwService
+   * 注册表成员查询——rebuildFromDisk 启动重建的内存派生视图，late-bound 闭包）。返回
+   * undefined = 注册表无此线（离线尾读按异常态 warn 后返回空页，见 tailReadBtwOffline）。
+   * W4a 后本注入兼作「是否 btw 线」的成员查询判别器（tailReadOffline 分支判据）。
+   * 缺省注入（未接线构造）= btw 线尾读恒空 + warn，主会话路径零影响。
    */
-  resolveBtwThreadFile?: (btwVid: string) => string | undefined
+  resolveBtwThreadFile?: (sessionId: string) => string | undefined
 }
 
 /**
@@ -579,14 +580,16 @@ export class SessionHistoryReader {
    * 已知边界：turn 计数/字节预算在 collect 阶段按原始行计算（含旧分支行）→ 分支
    * session 的窗口可能欠填、totalTurnsEstimate 偏大（设计 D3 允许的降级面，内容正确性优先）。
    *
-   * [btw-question 重载链修复] btw vid 分支先于通用链：线目录在 G4 隔离边界侧
+   * [btw-question 重载链修复] btw 线分支先于通用链：线目录在 G4 隔离边界侧
    *（`agent/btw/<encodeCwd>/<mainSid>/`，构造性不在 sessions/ 扫描范围），通用链的
-   * scanSessions 对 btw vid 必 miss → 静默空（重启后线视图空态的根因）。分支收窄在
-   * isBtwVirtualId 判定内，非 btw 路径逐字节原行为；cursor 翻页离线路径同走本方法，
-   * btw 线「加载更早」一并生效。
+   * scanSessions 对 btw 线必 miss → 静默空（重启后线视图空态的根因）。分支收窄在
+   * 注册表成员查询内（W4a：resolveBtwThreadFile 注入即 BtwService.getLine 成员查询，
+   * 键 = 线 session id = piSessionId——旧 isBtwVirtualId 前缀判别对 piId 形态恒 false，
+   * 随键切换同批替换，设计 §3.3.6 迁移表），非 btw 路径逐字节原行为；cursor 翻页离线
+   * 路径同走本方法，btw 线「加载更早」一并生效。
    */
   private async tailReadOffline(sessionId: string, query?: HistoryWindowQuery): Promise<HistoryWindowResult> {
-    if (isBtwVirtualId(sessionId)) {
+    if (this.deps.resolveBtwThreadFile?.(sessionId) !== undefined) {
       return await this.tailReadBtwOffline(sessionId, query)
     }
     return await getHistoryTailFromFile(
@@ -604,22 +607,22 @@ export class SessionHistoryReader {
    *
    * 异常态口径（与「合法空线」区分）：合法空线 = 文件在场但无 turn（tailReadHistory 静默
    * 空页）；异常态 = 线文件缺失（pi 从未 flush 的分支②回落线被删 / 目录被外部清理 /
-   * 注册表与磁盘不一致）——轻量 warn 留痕含 vid 与期望路径 + 恢复动作，不做 UI 错误条
+   * 注册表与磁盘不一致）——轻量 warn 留痕含线 session id 与期望路径 + 恢复动作，不做 UI 错误条
    * （renderer 侧空历史另有对等 warn，btw-replay）。
    */
-  private async tailReadBtwOffline(vid: string, query?: HistoryWindowQuery): Promise<HistoryWindowResult> {
+  private async tailReadBtwOffline(sessionId: string, query?: HistoryWindowQuery): Promise<HistoryWindowResult> {
     const emptyPage: HistoryWindowResult = { messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }
-    const file = this.deps.resolveBtwThreadFile?.(vid)
+    const file = this.deps.resolveBtwThreadFile?.(sessionId)
     if (!file) {
       console.warn(
-        `[session-history] btw line history unavailable: no registry entry for ${vid} — ` +
+        `[session-history] btw line history unavailable: no registry entry for ${sessionId} — ` +
         'expected a rebuilt line (rebuildFromDisk); verify <dataDir>/agent/btw/ layout, or reopen/delete the line in the btw panel',
       )
       return emptyPage
     }
     if (!existsSync(file)) {
       console.warn(
-        `[session-history] btw line session file missing for ${vid}: ${file} — ` +
+        `[session-history] btw line session file missing for ${sessionId}: ${file} — ` +
         'the line never flushed (pi lazy write) or was removed; send a message to re-establish it, or close the line',
       )
       return emptyPage

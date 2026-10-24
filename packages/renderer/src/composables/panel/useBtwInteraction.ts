@@ -11,8 +11,8 @@
  * 实施计划偏差表。提交回路契约与降级态同源：走 D8 终态机表（useBtwTabData 簿记）；
  * 投递失败可重试（仅限未送达/未终结 requestId）；已终结 requestId 的应答丢弃并提示失效。
  *
- * 并发：本编排只读 vid 分区（store 分区 + 模块级簿记），主视图三模态范围读主 sid 分区
- * ——两面同屏互不抢占、提交态按表单实例/vid 隔离（S9b）。
+ * 并发：本编排只读线 session id 分区（store 分区 + 模块级簿记），主视图三模态范围读主 sid 分区
+ * ——两面同屏互不抢占、提交态按表单实例/线 session id 隔离（S9b）。
  */
 import { computed, watch, type Ref } from 'vue'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
@@ -180,16 +180,16 @@ function scheduleResultJson(d: BtwScheduleDraft): string {
 /**
  * 接线 drawer 内联确认条（BtwPanel setup 同步调用）。
  *
- * 数据范围三通道合并：store 族（form + planReview，useExtensionUI vid 分区）∪ dialog 族
+ * 数据范围三通道合并：store 族（form + planReview，useExtensionUI 线分区）∪ dialog 族
  * （模块级簿记 FIFO）——按 receivedAt 取最早呈现（并发有序），respond 后自然晋升下一条。
  */
-export function useBtwInteraction(vidRef: Ref<string | null>) {
+export function useBtwInteraction(sessionIdRef: Ref<string | null>) {
   ensureBtwPendingBookkeeping()
-  const ui = useExtensionUI(vidRef, () => true)
+  const ui = useExtensionUI(sessionIdRef, () => true)
 
   const active = computed<BtwBarRequest | null>(() => {
-    const vid = vidRef.value
-    if (!vid) return null
+    const sessionId = sessionIdRef.value
+    if (!sessionId) return null
     const cands: BtwBarRequest[] = []
     const form = ui.currentFormRequest.value
     if (form) {
@@ -199,7 +199,7 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
     if (plan) {
       cands.push({ kind: 'planReview', requestId: plan.requestId, receivedAt: plan.receivedAt ?? 0 })
     }
-    const dialog = firstBtwDialogReq(vid)
+    const dialog = firstBtwDialogReq(sessionId)
     if (dialog) {
       cands.push({ kind: 'dialog', requestId: dialog.requestId, receivedAt: dialog.receivedAt, dialog })
     }
@@ -207,20 +207,20 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
     return cands.reduce((best, c) => (c.receivedAt < best.receivedAt ? c : best))
   })
 
-  // ── 提交态草稿（D7⑤「挂起表单提交态 per-vid 隔离，切走切回不丢」，U2 修复）──
-  // 分键 = `${vid}:${requestId}`，模块级保存（组件卸载/切线/切主会话均不清）；
+  // ── 提交态草稿（D7⑤「挂起表单提交态 per-line 隔离，切走切回不丢」，U2 修复）──
+  // 分键 = `${sessionId}:${requestId}`，模块级保存（组件卸载/切线/切主会话均不清）；
   // 仅在请求终结时清：应答送达（respondActive 成功支）/ 失效（invalidated 订阅）/
   // 快照差集修剪（subscribe retainOnly diff）。active 切换零清理——watch 只负责在
   // 激活新分键时补建空草稿（幂等，不删旧键）。载体 = useExtensionUI 模块级 btwBarDrafts
   // （终结清理入口挂其失效链/快照修剪两路，与编排层无环单向依赖）。
-  const draftKeyOf = (a: BtwBarRequest | null, vid: string | null): string | null => a && vid ? `${vid}:${a.requestId}` : null
+  const draftKeyOf = (a: BtwBarRequest | null, sessionId: string | null): string | null => a && sessionId ? `${sessionId}:${a.requestId}` : null
   watch(
-    () => draftKeyOf(active.value, vidRef.value),
+    () => draftKeyOf(active.value, sessionIdRef.value),
     (key) => { if (key !== null && !btwBarDrafts.has(key)) btwBarDrafts.set(key, emptyBtwBarDraft()) },
     { immediate: true },
   )
   const curDraft = computed<BtwBarDraft | null>(() => {
-    const key = draftKeyOf(active.value, vidRef.value)
+    const key = draftKeyOf(active.value, sessionIdRef.value)
     return key === null ? null : (btwBarDrafts.get(key) ?? null)
   })
   /** 模板绑定侧（v-model 写入当前分键草稿；无活动请求时为只读空表，写入无副作用） */
@@ -306,10 +306,10 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
    *  removeRequest），badge 派生公式随之自动回落，无需第二簿记出账 */
   function respondActive(result: boolean | string | null): void {
     const a = active.value
-    const vid = vidRef.value
-    if (!a || !vid) return
-    const key = `${vid}:${a.requestId}`
-    if (a.kind === 'dialog') { if (respondBtwDialog(vid, a.requestId, result)) btwBarDrafts.delete(key); return }
+    const sessionId = sessionIdRef.value
+    if (!a || !sessionId) return
+    const key = `${sessionId}:${a.requestId}`
+    if (a.kind === 'dialog') { if (respondBtwDialog(sessionId, a.requestId, result)) btwBarDrafts.delete(key); return }
     if (ui.respond(a.requestId, result)) {
       btwBarDrafts.delete(key)
     }

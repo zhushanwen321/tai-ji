@@ -4,15 +4,16 @@
  * 这是跨层协议级约定（runtime session-service / renderer store / ui chat 块 / drawer tab 都消费），
  * 故归属 shared（平台无关 SSOT）。store（renderer）与 ui 组件均从此 import，禁止重复定义。
  *
- * 三种结构：
+ * 两种结构（W4a 身份统一后）：
  * - subagent 三段式 `subagent:<mainSessionId>:<subagentId>`：chat-lru 的 isVirtualKeyOf 据此前缀
  *   联动清理；MessageStream.forceWorking 据此判定 running 强制 streaming 显示。
  * - agent call 两段式 `agentcall:<agentCallSessionId>`：快照只读视图，不带 mainSession 命名空间，
  *   清理走 workflowStore.mainSessionAgentCalls 映射（isVirtualKeyOf 不覆盖此前缀）。
- * - btw 两段式 `btw:<piSessionId>`（第三家族，btw-question D2）：第二段直接内嵌 btw 线的
- *   pi 会话 id——映射即 extract（extractBtwPiSessionId 去前缀即真 sid），无独立映射层，
- *   关联不靠 id 前缀解析。vid 仅是 runtime/前端路由 key、不直传 pi（pi id 正则禁冒号——
- *   真 sid 永不含 `:`、虚拟 id 永含 `:`，命名空间构造性分离零冲突）。
+ *
+ * **btw 两段式（`btw:<piSessionId>`）已随 W4a 身份统一退役**：btw 线是 runtime 注册的真会话，
+ * 以 pi 真实会话 id 作唯一键（注册表 / bus / chatStore 分区 / 磁盘同一 id）——虚拟 id 工厂
+ * 第三家族（btwVirtualId / isBtwVirtualId / extractBtwPiSessionId / BTW_PREFIX）整体删除，
+ * 不保留 alias（一个会话一个 id，I1；验收项 9「不存在 btw 专用翻译函数」）。
  *
  * INVAR-1.1（subagent 派生键形态契约，强制化）：任何写入 messages 的 subagent key 必须经
  * subagentVirtualId 工厂（生产方值域断言 fail-fast），且结构校验恰好 2 冒号 3 段非空。
@@ -37,21 +38,13 @@ const SUBAGENT_REST_SEGMENT_COUNT = 2
  * INVAR-1.1：任何写入 messages 的 subagent key 必须经此工厂，恰好 2 冒号 3 段非空。
  *
  * 生产方值域断言（INVAR-1.1 强制化，fail-fast throw；S-R4-2 防误接线）：
- * - 中段（mainSessionId = owner 会话的 piSessionId）禁 `btw:` 前缀——btw 线注册的
- *   sessionId 是 btw vid，误传即产出 `subagent:btw:<y>:<s>` 四段键（结构校验必拒、
- *   静默解析 mainSid="btw" 的歧义路径封死）。btw 线名下派生应传线 piSessionId：
- *   `extractBtwPiSessionId(btwVid)`——映射即 extract（D9③ 键中段位约定）。
- * - 中段禁冒号（`btw:` 前缀必含冒号，该检查同时兜住其余误传形态，保证产物恰好
- *   2 冒号 3 段、恒过 isSubagentVirtualId 结构校验）；第三段 subagentId 同规则
- *   （非空 + 禁冒号，INVAR-1.1 三段非空）。
+ * - 中段禁冒号（`btw:` 前缀必含冒号，该检查同时兜住误传虚拟 id 的形态，保证产物恰好
+ *   2 冒号 3 段、恒过 isSubagentVirtualId 结构校验）；
+ * - 中段非空（mainSessionId = owner 会话的 piSessionId——btw 线名下派生传线 piSessionId，
+ *   W4a 键统一后即线的注册 id 本身）；
+ * - 第三段 subagentId 同规则（非空 + 禁冒号，INVAR-1.1 三段非空）。
  */
 export function subagentVirtualId(mainSessionId: string, subagentId: string): string {
-  if (mainSessionId.startsWith(BTW_PREFIX)) {
-    throw new Error(
-      `[INVAR-1.1] subagentVirtualId: 中段禁 btw: 前缀（btw vid 误接线），收到 "${mainSessionId}"；` +
-        `btw 线名下派生请传线 piSessionId（extractBtwPiSessionId）`,
-    )
-  }
   if (mainSessionId.includes(':')) {
     throw new Error(`[INVAR-1.1] subagentVirtualId: 中段（owner piSessionId）禁冒号，收到 "${mainSessionId}"`)
   }
@@ -111,51 +104,9 @@ export function isAgentCallVirtualId(sessionId: string): boolean {
   return sessionId.startsWith(AGENTCALL_PREFIX)
 }
 
-/** 从虚拟 session ID 提取 agent call 的 pi session ID */
+/** 从 agent call 虚拟 session ID 提取 agent call 的 pi session ID */
 export function extractAgentCallSessionId(virtualId: string): string {
   return virtualId.slice(AGENTCALL_PREFIX.length)
-}
-
-// ── btw 两段式（第三家族，btw-question D2）──
-
-/** btw 虚拟 session ID 前缀 */
-export const BTW_PREFIX = 'btw:'
-
-/**
- * 构造 btw 虚拟 session ID：`btw:<piSessionId>`（两段式，工厂第三家族）。
- *
- * 第二段直接内嵌 btw 线的 pi 会话 id——映射即 extract（extractBtwPiSessionId
- * 去前缀即真 sid），无独立映射层（D2：关联不靠 id 前缀解析，三段式不采用）。
- * 值域断言：piSessionId 非空且禁冒号（与 pi assertValidSessionId 同款——真 sid
- * 永不含 `:`，虚拟 id 永含 `:`，命名空间构造性分离；嵌套 btw vid 必含冒号被拒）。
- */
-export function btwVirtualId(piSessionId: string): string {
-  if (!piSessionId) {
-    throw new Error('[btw] btwVirtualId: 第二段（piSessionId）不得为空')
-  }
-  if (piSessionId.includes(':')) {
-    throw new Error(`[btw] btwVirtualId: 第二段须为线 pi session id，禁冒号（禁止二次嵌套虚拟 id），收到 "${piSessionId}"`)
-  }
-  return `${BTW_PREFIX}${piSessionId}`
-}
-
-/**
- * 判断 sessionId 是否为合法 btw 虚拟 session（两段结构校验：恰好 1 冒号 2 段非空）。
- * 排除 `btw:` 空尾与 `btw:a:b` 多段嵌套；与 subagent 三段式构造性互斥
- * （三段键必含 2 冒号，不以 btw: 开头；以 btw: 开头的键必不可能通过 subagent 校验）。
- */
-export function isBtwVirtualId(sessionId: string): boolean {
-  if (!sessionId.startsWith(BTW_PREFIX)) return false
-  const rest = sessionId.slice(BTW_PREFIX.length)
-  return rest.length > 0 && !rest.includes(':')
-}
-
-/**
- * 从 btw 虚拟 session ID 提取线的 pi session ID（映射即 extract，D2 / D9③
- * 键中段位约定：btw 线派生 subagent 键的中段 = 本函数结果，而非 btw vid 整体）。
- */
-export function extractBtwPiSessionId(virtualId: string): string {
-  return virtualId.slice(BTW_PREFIX.length)
 }
 
 // ── 虚拟 id → 底层真实 session id 解析（renderer 数据链进 runtime RPC 前的规整）──
@@ -164,24 +115,25 @@ export function extractBtwPiSessionId(virtualId: string): string {
  * 解析虚拟 session id 为底层真实 pi session id。
  *
  * 背景（fileSearch vid 修复，方案 A）：runtime file.search 等服务只登记真实 pi session
- * （sessionService.getSummary 查 lifecycle 注册表），vid 直传必 session_not_found。
+ * （sessionService.getSummary 查 lifecycle 注册表），虚拟 id 直传必 session_not_found。
  * 「vid 只做前端路由 key，需要真实 id 的 RPC 由调用方先解析」是现行契约（agentcall D4
  * 先例：历史拉取走 getAgentCallHistory(mainSid, acsId) 显式双参数）——本函数是该解析的
  * 跨层单一实现（renderer useChatViewDeps / sessionCwdOf 等数据链消费）。
  *
- * 规则：
+ * 规则（W4a 键统一后）：
  * - 真实 id（无冒号）→ 原样返回（直通）
  * - `subagent:<mainSid>:<subId>` → mainSid（三段式自带归属命名空间，ownerSessionId 不消费）
- * - `btw:<piSid>` → piSid（两段式映射即 extract——线自身就是真实 pi session，runtime
- *   hidden 注册；线 cwd = 主会话 cwd，链接解析语义一致）
  * - `agentcall:<acsId>` → ownerSessionId（两段式无归属命名空间，挂载链显式传入；
  *   acsId 是 agent call 自身的 subagent session id，不在 runtime session 注册表）
  * - 其余带冒号的未知形态 → undefined（fail-safe：不把未知 vid 传给 runtime RPC）
+ *
+ * **btw 分支已随 W4a 身份统一删除**：btw 线以 pi 真实会话 id 注册（无 `btw:` 前缀第二套
+ * 键），线的 id 本身就是真实 id、直通本函数第一分支——映射即 extract 的旧 btw 分支
+ * （`btw:<piSid>` → piSid）失去服务对象。
  */
 export function resolveVirtualSessionId(virtualId: string, ownerSessionId?: string): string | undefined {
   if (!virtualId.includes(':')) return virtualId
   if (isSubagentVirtualId(virtualId)) return extractMainSessionId(virtualId)
-  if (isBtwVirtualId(virtualId)) return extractBtwPiSessionId(virtualId)
   if (isAgentCallVirtualId(virtualId)) return ownerSessionId || undefined
   return undefined
 }
