@@ -857,7 +857,7 @@ describe("completeLegacyClosed", () => {
 // isLegacyClosedSettled（[W2/V3 D5] 桥接判据单一谓词——历史 9 处手抄的权威实现）
 // ============================================================
 describe("isLegacyClosedSettled（桥接判据单一谓词）", () => {
-  it("命中：idle ∧ closedReason 有值（旧 closed 终态遗留——D7 例外族/监督器放弃/v1 数据）", () => {
+  it("命中：idle ∧ closedReason 有值（旧 closed 终态遗留——D7 例外族/v1 数据）", () => {
     const r = makeRecord({ closedReason: "gc" });
     r.status = "idle";
     expect(isLegacyClosedSettled(r)).toBe(true);

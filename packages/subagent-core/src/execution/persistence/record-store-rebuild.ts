@@ -913,8 +913,9 @@ export function terminalManifestRecord(record: ExecutionRecord): ManifestRecord 
 /**
  * [U2 两态桥接 + U8 / §3.2.8] 旧 status 三态（session-reader 兼容契约）的派生单点。
  * 判定序（先命中先出）：
- *   1. idle ∧ closedReason 有值（桥接不变量「旧 closed 终态」读形态——workflow D7
- *      例外族与监督器放弃仍产出）→ cancelled（reason='cancelled'）/ closed 二分；
+ *   1. idle ∧ closedReason 有值（桥接不变量「旧 closed 终态」读形态——现役生产者仅
+ *      workflow D7 例外族（旧监督器放弃支已随 924ace33f 清退））→
+ *      cancelled（reason='cancelled'）/ closed 二分；
  *   2. 其余（running / 轮间 idle（markSettled 无 closedReason）/ close 收尾
  *      record）→ running
  *      （session-reader 视角的活跃成员，§3.2.8 行为变化声明：可续聊 record =

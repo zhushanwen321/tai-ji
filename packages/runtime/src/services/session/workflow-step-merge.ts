@@ -83,8 +83,9 @@ function genericStopText(stopReason: string | undefined): string {
  * gc 是双语义值按 error 分叉：写侧 D7 例外族（subagent-core run-orchestration.ts
  * settleOneShotOutcome / record-lifecycle.ts finalizeFailed）workflow origin 成功与失败
  * settle 均写 closed/"gc"，成败由 error 区分（成功 result.error 空、失败恒带错误文本）；
- * 与 outcome 权威派生 deriveOutcome 的 error-truthy 判定同构（监督器放弃等其余 gc 写入
- * 点恒带非空 error，落 failed 分支不受影响）。
+ * 与 outcome 权威派生 deriveOutcome 的 error-truthy 判定同构（历史 gc 写入点恒带
+ * 非空 error——旧监督器放弃支已随 924ace33f 监督器整机清退删除——落 failed 分支
+ * 不受影响）。
  *
  * 中断族必须可见不可静默隐形（run 进行中宿主崩溃/重启是 ① 的设计目标场景）；error 非空时
  * record.error 恒优先（真实错误文本），填充仅兜 error 空。
