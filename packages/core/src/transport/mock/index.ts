@@ -30,6 +30,7 @@ import type {
   SkillInfo, AgentInfo, PluginInfo, SetProviderData,
   PluginUiSnapshotPayload,
   PluginEventPayload, PluginListAvailableReply, PluginCatalogReply,
+  PluginPrepareInstallReply, PluginConfirmInstallReply,
   SkillDirConfig, FileNode, RecommendedExtension, SubagentRecord, WorkflowRunRecord,
   SystemPromptConfig,
   WorkflowRunEventsReply,
@@ -1915,6 +1916,20 @@ const pluginImpl = {
   async getPluginCatalog(): Promise<PluginCatalogReply> {
     await sleep(TIMING.ack)
     return { entries: [] }
+  },
+  // 两段式安装（U4/U6）：mock 无安装基建（无 registry / 暂存 / manifest），prepare 返回
+  // 空声明的最小知情面（确认卡展示「无声明」即 mock 模式的真实形态）、confirm 演示成功
+  //——三段流（家族卡 → 确认卡 → 授权）在 mock 模式可走通，无真实落盘。
+  async preparePluginInstall(packageSpec: string): Promise<PluginPrepareInstallReply> {
+    await sleep(TIMING.ack)
+    return { pluginId: packageSpec, packageName: packageSpec, version: '0.0.0', capabilities: [], readPaths: [], permissions: [] }
+  },
+  async confirmPluginInstall(_pluginId: string): Promise<PluginConfirmInstallReply> {
+    await sleep(TIMING.ack)
+    return { success: true }
+  },
+  async cancelPluginInstall(_pluginId: string): Promise<void> {
+    await sleep(TIMING.ack)
   },
 }
 

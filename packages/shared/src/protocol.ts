@@ -264,6 +264,10 @@ export type ClientMessageType =
   // 插件清单域（provider-plugin-access U5）：listAvailable = 清单 service 组装的可安装
   // 视图（含本地安装状态比对）；catalog = 清单原始目录条目。均无参只读，reply 同名。
   | 'plugin.listAvailable' | 'plugin.catalog'
+  // 两段式安装（provider-plugin-access U4/U6）：prepare = 下载校验解压至暂存并返回
+  // 确认卡知情面（停在确认停点，S27）；confirm = 提交落盘并激活；cancel = 清暂存
+  //（未确认不发生安装落盘）。reply：prepare/confirm 同名（payload 消费型），cancel pong ack。
+  | 'plugin.prepareInstall' | 'plugin.confirmInstall' | 'plugin.cancelInstall'
   | 'plugin.config.get' | 'plugin.config.set'
   | 'plugin.uiResponse'
   | 'plugin.mountPoints.sync'
@@ -719,6 +723,30 @@ export interface PluginCatalogReply {
   entries: PluginCatalogEntry[]
 }
 
+/**
+ * plugin.prepareInstall reply（provider-plugin-access U4/U6）：两段式安装第一段的
+ * 确认卡知情面——暂存解压物 manifest 声明的全量透传（展示物 = 提交阶段校验物，同源），
+ * 宿主全量展示后由用户确认（D3 知情第一层，S27）。结构对齐 runtime
+ * PluginService.PluginInstallPreview 与 core SettingsTransport.PluginInstallPreview。
+ */
+export interface PluginPrepareInstallReply {
+  /** 安全化目录名（@scope/pkg → scope__pkg），= 安装后 registry pluginId 与 installed.json key */
+  pluginId: string
+  packageName: string
+  version: string
+  capabilities: string[]
+  readPaths: string[]
+  permissions: string[]
+  /** manifest 声明的命名空间（未声明时省略——非 provider 插件常态） */
+  namespace?: string
+}
+
+/** plugin.confirmInstall reply：两段式安装第二段提交结果（失败携带文案，UI 可见不静默）。 */
+export interface PluginConfirmInstallReply {
+  success: boolean
+  error?: string
+}
+
 
 // ── ClientMessage discriminated union ───────────────────────────
 
@@ -1056,6 +1084,11 @@ export interface ClientMessageMap {
   // 插件清单域（provider-plugin-access U5）：无参只读，reply 同名。
   'plugin.listAvailable': Record<string, never>
   'plugin.catalog': Record<string, never>
+  // 两段式安装（provider-plugin-access U4/U6）：packageSpec = npm 包名（scoped 形态原样
+  // 保留）；pluginId = prepare 回包知情面的 pluginId（安全化目录名，两段间路由键）。
+  'plugin.prepareInstall': { packageSpec: string }
+  'plugin.confirmInstall': { pluginId: string }
+  'plugin.cancelInstall': { pluginId: string }
   'file.read': { path: string; sessionId?: string }
   'file.tree': { sessionId: string }
   'file.tree.expand': { sessionId: string; path: string }
@@ -1551,6 +1584,9 @@ export type ServerMessageType =
   | 'plugin.invoke'
   // 插件清单域 reply（provider-plugin-access U5）：与 request 同名（payload 消费型）。
   | 'plugin.listAvailable' | 'plugin.catalog'
+  // 两段式安装 reply（provider-plugin-access U4/U6）：prepare/confirm 与 request 同名
+  //（payload 消费型——确认卡知情面 / 提交结果）；cancel ack 型走 pong，不占下行帧。
+  | 'plugin.prepareInstall' | 'plugin.confirmInstall'
   // plugin:headerActionUpdate：headerAction 可变字段（badge/tooltip/disabled）下行帧
   //（AP-1）。必带 sessionId——渲染端按 (sessionId, headerActionId) 写对应会话分区；
   // 经 broker 全局广播直发（同上不入 ring）。
@@ -2427,6 +2463,9 @@ export interface ServerMessageMapBase {
   // 插件清单域 reply（provider-plugin-access U5，与 request 同名）。
   'plugin.listAvailable': PluginListAvailableReply
   'plugin.catalog': PluginCatalogReply
+  // 两段式安装 reply（provider-plugin-access U4/U6，与 request 同名——payload 消费型）。
+  'plugin.prepareInstall': PluginPrepareInstallReply
+  'plugin.confirmInstall': PluginConfirmInstallReply
   // plugin:headerActionUpdate：headerAction 可变字段下行帧（AP-1；必带 sessionId，
   // 渲染端按 (sessionId, headerActionId) 写会话分区）。payload 契约见 HeaderActionUpdatePayload。
   'plugin:headerActionUpdate': HeaderActionUpdatePayload
@@ -3560,6 +3599,11 @@ export interface ReplyPayloadMap {
   // 插件清单域（provider-plugin-access U5）：无参只读，reply 与 request 同名。
   'plugin.listAvailable': ServerMessageMap['plugin.listAvailable']
   'plugin.catalog': ServerMessageMap['plugin.catalog']
+  // 两段式安装（provider-plugin-access U4/U6）：prepare/confirm 同名 reply（payload
+  // 消费型——确认卡知情面 / 提交结果）；cancel ack 型走 pong。
+  'plugin.prepareInstall': ServerMessageMap['plugin.prepareInstall']
+  'plugin.confirmInstall': ServerMessageMap['plugin.confirmInstall']
+  'plugin.cancelInstall': ServerMessageMap['pong']
   'plugin.config.get': ServerMessageMap['plugin:config']
   'plugin.config.set': ServerMessageMap['plugin:config']
   'plugin.mountPoints.sync': ServerMessageMap['pong']

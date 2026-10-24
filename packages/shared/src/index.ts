@@ -58,6 +58,9 @@ export type {
   // provider-plugin-access D9（u-protocol 补登记）：plugin:event 广播载荷 + plugin.invoke
   // reply 信封（core plugin 域 invokePlugin/onPluginEvent 跨包具名消费）
   PluginEventPayload, PluginInvokeReply,
+  // 两段式安装 reply（provider-plugin-access U4/U6）：确认卡知情面 + 提交结果
+  //（core plugin 域 preparePluginInstall/confirmPluginInstall 跨包具名消费）
+  PluginPrepareInstallReply, PluginConfirmInstallReply,
 } from './protocol'
 // 消息撤回（U3）：__taiji_nav__ 信令命令名常量——U4 runtime 编排跨包消费；
 // 本文件对 protocol.ts 是显式 allowlist（非 export *），漏登记会使常量对下游不可达。

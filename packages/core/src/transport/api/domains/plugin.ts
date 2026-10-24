@@ -12,7 +12,7 @@
  *
  * 依赖方向：events（订阅）+ command（类型化请求/动作原语）。
  */
-import type { PluginEventPayload, PluginInfo, PluginInvokeReply, PluginCatalogReply, PluginListAvailableReply, PluginUiSnapshotPayload } from '@taiji/shared'
+import type { PluginEventPayload, PluginInfo, PluginInvokeReply, PluginCatalogReply, PluginListAvailableReply, PluginPrepareInstallReply, PluginConfirmInstallReply, PluginUiSnapshotPayload } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import * as pending from '../pending'
 import { command } from '../request'
@@ -106,4 +106,28 @@ export function listAvailablePlugins(): Promise<PluginListAvailableReply> {
 /** 清单原始目录条目（provider-plugin-access U5：含家族元数据与安装知情面声明）。 */
 export function getPluginCatalog(): Promise<PluginCatalogReply> {
   return command('plugin.catalog', {}, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+// ── 两段式安装（provider-plugin-access U4/U6：确认停点对接 Provider 页安装确认卡，S27）──
+
+/**
+ * 两段式安装第一段：下载校验解压至暂存并返回确认卡知情面（停在确认停点——未确认
+ * 不发生安装落盘）。失败（下载/校验/NAMESPACE_MISMATCH）经统一 error envelope reject，
+ * 消费方（PluginProviderFlow）按 message/code 分流提示。
+ */
+export function preparePluginInstall(packageSpec: string): Promise<PluginPrepareInstallReply> {
+  return command('plugin.prepareInstall', { packageSpec }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
+ * 两段式安装第二段（确认停点之后）：暂存换入 → 扫描 → 激活 → 安装登记；激活失败
+ * 自动回滚（S18）。域内失败经 error 字段返回（success=false），请求级失败 reject。
+ */
+export function confirmPluginInstall(pluginId: string): Promise<PluginConfirmInstallReply> {
+  return command('plugin.confirmInstall', { pluginId }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 两段式安装取消：清暂存与 pending 登记（未确认不发生安装落盘）。reply pong ack。 */
+export async function cancelPluginInstall(pluginId: string): Promise<void> {
+  await command('plugin.cancelInstall', { pluginId }, RPC_BACKSTOP_TIMEOUT_MS)
 }

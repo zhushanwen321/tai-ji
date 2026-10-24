@@ -357,9 +357,9 @@ describe('PluginMessageHandler — 落空语义与 handles 清单', () => {
     expect(pluginService.getDiscoveredPlugins).not.toHaveBeenCalled()
   })
 
-  it('handles 清单含全部 17 个 plugin.* type', () => {
+  it('handles 清单含全部 20 个 plugin.* type', () => {
     const { handler } = makeHandler()
-    expect(handler.handles).toHaveLength(17)
+    expect(handler.handles).toHaveLength(20)
     expect(handler.handles).toEqual(expect.arrayContaining([
       'plugin.list', 'plugin.toggle', 'plugin.uninstall', 'plugin.approvePermissions', 'plugin.revokePermissions',
       'plugin.denyPermissions',
@@ -368,6 +368,8 @@ describe('PluginMessageHandler — 落空语义与 handles 清单', () => {
       // provider-plugin-access D9/D8/U5：plugin.invoke 业务方法调用、plugin.uiEvent 输入
       // 值回传、清单域两个无参只读 RPC
       'plugin.invoke', 'plugin.uiEvent', 'plugin.listAvailable', 'plugin.catalog',
+      // provider-plugin-access U4/U6：两段式安装（prepare 确认停点 / confirm 提交 / cancel 清暂存）
+      'plugin.prepareInstall', 'plugin.confirmInstall', 'plugin.cancelInstall',
     ]))
   })
 })

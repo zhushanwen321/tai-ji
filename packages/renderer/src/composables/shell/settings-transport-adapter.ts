@@ -25,16 +25,6 @@ import { config, model, extension, settings, quota, preset, usage, session, plug
  * 构造 SettingsTransport 实现：逐方法转发 @/api 门面八元（VITE_MOCK 感知）。
  * 订阅函数（on*）返回取消函数；请求函数签名与 @/api 对齐。
  */
-/**
- * 两段式安装 domain 面的结构类型（provider-plugin-access U6）：安装 WS 帧 / domain 方法
- * 尚未落定，接口 optional 成员按实装存在性条件挂载——不预设实装、不伪造成功。
- */
-type OptionalInstallDomain = Partial<
-  Pick<SettingsTransport, 'preparePluginInstall' | 'confirmPluginInstall' | 'cancelPluginInstall'>
->
-
-/** 安装 domain 实装面（缺席时下方 typeof 判定跳过挂载）。 */
-const installDomain = plugin as unknown as OptionalInstallDomain
 
 export function createSettingsTransport(): SettingsTransport {
   return {
@@ -166,20 +156,14 @@ export function createSettingsTransport(): SettingsTransport {
     onAuthError: (h) => config.onAuthError(h),
 
     // ── 插件 Provider 来源（provider-plugin-access U6）──
-    // 两段式安装三方法按 domain 实装存在与否条件挂载：通道未落定 = 接口 optional 成员缺省
-    // （Provider 页据此显示「安装通道未就绪」），不伪造成功、不静默。
     listAvailablePlugins: () => plugin.listAvailablePlugins(),
     invokePlugin: (pluginId, method, params) => plugin.invokePlugin(pluginId, method, params),
     onPluginEvent: (h) => plugin.onPluginEvent(h),
     sendPluginUiEvent: (payload) => plugin.sendPluginUiEvent(payload),
-    ...(typeof installDomain.preparePluginInstall === 'function'
-      ? { preparePluginInstall: (spec: string) => installDomain.preparePluginInstall!(spec) }
-      : {}),
-    ...(typeof installDomain.confirmPluginInstall === 'function'
-      ? { confirmPluginInstall: (pluginId: string) => installDomain.confirmPluginInstall!(pluginId) }
-      : {}),
-    ...(typeof installDomain.cancelPluginInstall === 'function'
-      ? { cancelPluginInstall: (pluginId: string) => installDomain.cancelPluginInstall!(pluginId) }
-      : {}),
+    // 两段式安装（U4/U6 wire 通路）：plugin domain 三方法 → WS 帧 → runtime 两段式
+    // 编排（确认停点对接 Provider 页安装确认卡，S27）。
+    preparePluginInstall: (packageSpec) => plugin.preparePluginInstall(packageSpec),
+    confirmPluginInstall: (pluginId) => plugin.confirmPluginInstall(pluginId),
+    cancelPluginInstall: (pluginId) => plugin.cancelPluginInstall(pluginId),
   }
 }

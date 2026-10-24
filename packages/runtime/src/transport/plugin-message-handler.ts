@@ -23,6 +23,9 @@ export class PluginMessageHandler {
     // provider-plugin-access D9/D8/U5：plugin.invoke 业务方法调用、plugin.uiEvent 输入
     // 值回传、清单域两个无参只读 RPC。
     'plugin.invoke', 'plugin.uiEvent', 'plugin.listAvailable', 'plugin.catalog',
+    // provider-plugin-access U4/U6：两段式安装（prepare 确认停点 → confirm 提交 /
+    // cancel 清暂存），确认停点对接 Provider 页安装确认卡（S27）。
+    'plugin.prepareInstall', 'plugin.confirmInstall', 'plugin.cancelInstall',
   ]
 
   async handlePluginMessage(msg: ClientMessage, ws: WsType): Promise<void> {
@@ -57,6 +60,7 @@ type PluginHandledType =
   | 'plugin.executeCommand' | 'plugin.config.get' | 'plugin.config.set' | 'plugin.install' | 'plugin.uiResponse'
   | 'plugin.mountPoints.sync' | 'plugin.ui.snapshot'
   | 'plugin.invoke' | 'plugin.uiEvent' | 'plugin.listAvailable' | 'plugin.catalog'
+  | 'plugin.prepareInstall' | 'plugin.confirmInstall' | 'plugin.cancelInstall'
 
 /** 按 type 字面量收窄 ClientMessage（查表 key = 运行时 guard，与原 switch narrowing 同构）。 */
 type PluginMsgOf<K extends ClientMessageType> = Extract<ClientMessage, { type: K }>
@@ -248,6 +252,37 @@ async function handlePluginCatalog(ctx: PluginHandlerContext, msg: PluginMsgOf<'
 }
 
 /**
+ * 两段式安装第一段（provider-plugin-access U4/U6）：下载校验解压至暂存并返回确认卡
+ * 知情面（停在确认停点，S27——未确认不发生安装落盘）。失败抛带 code 领域错误
+ *（NAMESPACE_MISMATCH / PLUGIN_PREPARE_FAILED），经 transport 全局 catch 转 error
+ * envelope（前端按 code 分流提示）。
+ */
+async function handlePluginPrepareInstall(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.prepareInstall'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  const packageSpec = msg.payload.packageSpec
+  if (typeof packageSpec !== 'string' || packageSpec === '') {
+    return ctx.sendError(ws, 'invalid_params', 'Missing packageSpec', msg.id)
+  }
+  const preview = await pluginService.preparePluginInstall(packageSpec)
+  return ctx.reply(ws, msg.id, 'plugin.prepareInstall', preview)
+}
+
+/**
+ * 两段式安装第二段（确认停点之后，U4）：暂存单步 rename 换入 → 扫描 → 激活 → 登记；
+ * 激活失败自动回滚（S18）。域内失败（无 pending / 提交失败）经 InstallResult.error
+ * 返回不抛错，前端按 success=false 分流提示。
+ */
+async function handlePluginConfirmInstall(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.confirmInstall'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  const result = await pluginService.confirmPluginInstall(msg.payload.pluginId)
+  return ctx.reply(ws, msg.id, 'plugin.confirmInstall', result)
+}
+
+/** 两段式安装取消（U4/U6）：清暂存与 pending 登记（未确认不发生安装落盘，S27）。reply pong ack。 */
+async function handlePluginCancelInstall(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.cancelInstall'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  await pluginService.cancelPluginInstall(msg.payload.pluginId)
+  return ctx.reply(ws, msg.id, 'pong', {})
+}
+
+/**
  * plugin.* 分发表（形态 2 表驱动分发）：key = ClientMessageType 字面量，值 = 该 case 的
  * 处理函数（msg 参数按该 key 收窄）。主函数只留查表 + 落空（未命中行为与原 switch 无
  * default 一致）。
@@ -275,4 +310,7 @@ const PLUGIN_CASE_HANDLERS: { readonly [K in PluginHandledType]: (
   'plugin.uiEvent': handlePluginUiEvent,
   'plugin.listAvailable': handlePluginListAvailable,
   'plugin.catalog': handlePluginCatalog,
+  'plugin.prepareInstall': handlePluginPrepareInstall,
+  'plugin.confirmInstall': handlePluginConfirmInstall,
+  'plugin.cancelInstall': handlePluginCancelInstall,
 }

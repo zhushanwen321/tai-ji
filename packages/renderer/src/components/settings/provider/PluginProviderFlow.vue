@@ -166,11 +166,10 @@
 /**
  * PluginProviderFlow —— 家族卡 + 授权挂载位容器 + 安装引导 + 安装确认卡（U6）。
  *
- * 安装通路现状（主 agent 裁决 dwfq-27efec2b-1）：两段式安装的 WS 帧 / handler 注册 /
- * plugin domain 方法 / mock stub 由 u-wool-host 追加交付。本组件按 IPluginService 已
- * 交付的方法形态（preparePluginInstall / confirmPluginInstall / cancelPluginInstall）
- * 经运行时 guard 窄化消费（resolvePluginInstallPort）——通路未落定时确认卡入口显示
- * 降级提示，不崩溃；落定后零改动生效。
+ * 安装通路（两段式，U4/U6）：经 resolvePluginInstallPort 消费 SettingsTransport 的
+ * 三方法（preparePluginInstall / confirmPluginInstall / cancelPluginInstall）——
+ * adapter 直连 plugin domain，WS 帧转发 runtime 两段式编排；确认停点对接本组件
+ * 确认卡（S27：capabilities/readPaths 全量展示，未确认不落盘）。
  */
 import { computed, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'

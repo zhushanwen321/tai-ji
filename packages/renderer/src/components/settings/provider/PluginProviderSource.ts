@@ -99,9 +99,10 @@ export interface PluginInstallPort { // oe-exempt:20261024:framework:ports/SDK �
 }
 
 /**
- * 运行时 guard：seam 的两段式安装成员实装与否（安装 WS 帧 / domain 方法由 u-wool-host
- * 追加交付，主 agent 裁决 dwfq-27efec2b-1）。三成员齐备返回端口；缺失返回 null →
- * 调用点呈「通道未就绪」可见降级，不崩溃（落定后零改动生效）。
+ * 运行时窄化：SettingsTransport 的安装三成员为 optional（接口契约形态），齐备时
+ * 收窄成可调用端口返回（两段式安装 wire 通路：adapter → plugin domain → WS 帧 →
+ * runtime 两段式编排，S27 确认停点）。缺失返回 null → 调用点呈「通道未就绪」
+ * 可见降级，不崩溃。
  */
 export function resolvePluginInstallPort(): PluginInstallPort | null {
   const transport = getSettingsTransport()
