@@ -67,9 +67,20 @@ export function findScannedSessionFileById(sessionId: string): string | undefine
  * 内存注册表的寻址方式。
  *
  * 遍历规约对齐 `BtwService.rebuildFromDisk`（设计 D7）：一级目录名须过
- * `isPiSessionId`（结构性拦截外部 junk 目录），线文件名 = `<piSessionId>.jsonl`
- * （pi 落盘命名，header.id 即文件名主干——rebuildFromDisk 的 session id 派生同源）。
- * 不枚举时（存储树根不存在/不可读）返回 undefined，不抛。
+ * `isPiSessionId`（结构性拦截外部 junk 目录）。线文件名两种形态都命中：
+ * - `<piSessionId>.jsonl` 精确名（历史落盘形态；header.id 即文件名主干——
+ *   rebuildFromDisk 的 session id 派生同源）；
+ * - `<fileTimestamp>_<piSessionId>.jsonl` 时间戳前缀形态——**pi forkFrom 的实盘命名**
+ *   （node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js 的
+ *   forkFrom：`join(dir, `${fileTimestamp}_${newSessionId}.jsonl`)`，fileTimestamp =
+ *   ISO 时间戳把 `:`/`.` 替换为 `-`；实证文件名如
+ *   `2026-10-24T13-00-44-583Z_01a16dff-….jsonl`）。只认精确名会让重启后的线寻址
+ *   结构性失败（session.getState 报 SESSION_NOT_FOUND），故两种都兼容。
+ *
+ * 多条命中（同 id 的精确名与时间戳前缀文件并存、或多个时间戳文件）取**最新 mtime**：
+ * 同一 piSessionId 的多个文件只可能有一个是当前有效内容（pi 对已建线是 append 同一
+ * 文件、不另起新文件），最新 mtime = 最后一次写入的那个，防止读到被取代的旧副本。
+ * 不枚举时（存储树根不存在/不可读、mainSid 目录无 btw 子目录）返回 undefined，不抛。
  */
 export function findBtwLineFileByPiSessionId(piSessionId: string): string | undefined {
   const root = getSessionStoreDir()
@@ -80,6 +91,8 @@ export function findBtwLineFileByPiSessionId(piSessionId: string): string | unde
   } catch {
     return undefined
   }
+  // 命中候选跨 mainSid 目录汇总（同 id 多条命中时下方按 mtime 取最新，故不提前返回）
+  let best: { path: string; mtimeMs: number } | undefined
   for (const mainSid of sidDirs) {
     if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(mainSid)) continue // isPiSessionId 同款正则（避免 import 环）
     let isDir = false
@@ -89,8 +102,27 @@ export function findBtwLineFileByPiSessionId(piSessionId: string): string | unde
       continue
     }
     if (!isDir) continue
-    const candidate = join(root, mainSid, 'btw', `${piSessionId}.jsonl`)
-    if (existsSync(candidate)) return candidate
+    const btwDir = join(root, mainSid, 'btw')
+    let lineFiles: string[]
+    try {
+      lineFiles = readdirSync(btwDir)
+    } catch {
+      continue // 该 mainSid 无 btw 子目录 / 不可读：本条路径无候选
+    }
+    for (const name of lineFiles) {
+      // 两种命名都命中（见函数头）：精确名，或 `_<piSessionId>.jsonl` 后缀（时间戳前缀
+      // 形态）。后缀匹配而非 startsWith(piSessionId)：只认「前缀_」这一方向，防
+      // `<piSessionId>_其他.jsonl` 形态误命中。
+      if (name !== `${piSessionId}.jsonl` && !name.endsWith(`_${piSessionId}.jsonl`)) continue
+      const filePath = join(btwDir, name)
+      let mtimeMs: number
+      try {
+        mtimeMs = statSync(filePath).mtimeMs
+      } catch {
+        continue // 列举与 stat 之间被删的竞态残影：当作不存在
+      }
+      if (!best || mtimeMs > best.mtimeMs) best = { path: filePath, mtimeMs }
+    }
   }
-  return undefined
+  return best?.path
 }

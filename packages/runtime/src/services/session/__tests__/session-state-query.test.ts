@@ -16,7 +16,7 @@
  * 显式覆盖并还原），不触真实数据目录。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, appendFileSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, appendFileSync, writeFileSync, readFileSync, rmSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { IProcessManager } from '../../ports/pi-engine.js'
@@ -106,9 +106,11 @@ function writeJsonl(filePath: string, lines: string[]): void {
  *   L     label taiji:revoked     ← 步骤 3 撤回 u1：leaf = u1.parentId = tlA，label 挂成新叶
  *   mcD   model_change D          ← 步骤 5「主会话再切 D」（只在主文件，不进线文件）
  *
- * 线文件（`<dataDir>/ext-sessions/<mainSid>/btw/<linePiId>.jsonl`）= 步骤 4 fork 的
- * **逐字节复制源文件全部非 header entry**（保留 id/parentId，只换 header），故线文件 =
- * 上面 s1..L 七条（不含 mcD）。
+ * 线文件（`<dataDir>/ext-sessions/<mainSid>/btw/<fileTimestamp>_<linePiId>.jsonl`）= 步骤 4
+ * fork 的**逐字节复制源文件全部非 header entry**（保留 id/parentId，只换 header），故线文件 =
+ * 上面 s1..L 七条（不含 mcD）。文件名采 **pi forkFrom 实盘命名**（session-manager.js：
+ * `${fileTimestamp}_${newSessionId}.jsonl`，fileTimestamp = ISO 时间戳的 `:`/`.`→`-`）——
+ * 布局定位寻址必须命中该形态（精确名 `<linePiId>.jsonl` 是历史形态，同样须命中）。
  *
  * 关键形态（设计 §10.1「为何这步是门的判定器」）：线文件的物理尾是 L，而 L 的 parentId
  * 是 tlA——**活跃路径 = [s1, mcA, tlA, L] 命中 A/high，被撤 B 分支（mcB，parentId=a1）在
@@ -129,7 +131,9 @@ function seedForkFixture(dataDir: string): { mainSid: string; linePiId: string; 
   // W4a 键统一：线 id = pi 真实会话 id（旧 `btw:<piId>` 两段式已退役）
   const cwdGroup = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2' // encodeCwd('/tmp/proj')
   const mainFile = join(dataDir, 'agent', 'sessions', cwdGroup, `${mainSid}.jsonl`)
-  const lineFile = join(dataDir, 'ext-sessions', mainSid, 'btw', `${linePiId}.jsonl`)
+  // pi forkFrom 实盘命名：`<fileTimestamp>_<piSessionId>.jsonl`（fileTimestamp = ISO 时间戳
+  // 的 `:`/`.` 替换为 `-`；实证文件名如 2026-10-24T13-00-44-583Z_<uuid>.jsonl）
+  const lineFile = join(dataDir, 'ext-sessions', mainSid, 'btw', `2026-10-24T13-00-44-583Z_${linePiId}.jsonl`)
 
   const trunk = [
     headerLine(mainSid, '/tmp/proj'),
@@ -474,5 +478,70 @@ describe('SessionStateQuery.getState', () => {
   it('btw 线：两级都未命中（线文件不在磁盘）→ SESSION_NOT_FOUND，不猜路径', async () => {
     const { query } = makeQuery({ pm: makeProcessTable() })
     await expect(query.getState('55555555-5555-4555-8555-555555555555')).rejects.toMatchObject({ code: 'SESSION_NOT_FOUND' })
+  })
+})
+
+// ── findBtwLineFileByPiSessionId 命名形态直测（重启后布局兜底寻址）──────────────────
+//
+// 覆盖 pi forkFrom 实盘命名修复：定位器须同时命中两种文件名形态，防「重启后线寻址
+// 结构性失败 → session.getState(线) 恒 SESSION_NOT_FOUND」回归（D3 真机验收 A11 缺陷 1）。
+
+describe('findBtwLineFileByPiSessionId 命名形态', () => {
+  let dataDir: string
+  let origDataDir: string | undefined
+
+  /** 在 `<dataDir>/ext-sessions/<mainSid>/btw/` 下写一个（可为空的）线文件并返回路径 */
+  function writeLineFile(mainSid: string, fileName: string): string {
+    const file = join(dataDir, 'ext-sessions', mainSid, 'btw', fileName)
+    writeJsonl(file, [headerLine('77777777-7777-4777-8777-777777777777', '/tmp/proj')])
+    return file
+  }
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'u-w2-btw-locate-'))
+    origDataDir = process.env.TAIJI_AGENT_DATA_DIR
+    process.env.TAIJI_AGENT_DATA_DIR = dataDir
+  })
+
+  afterEach(() => {
+    if (origDataDir === undefined) delete process.env.TAIJI_AGENT_DATA_DIR
+    else process.env.TAIJI_AGENT_DATA_DIR = origDataDir
+    rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('时间戳前缀命名（pi forkFrom 实盘形态）命中', () => {
+    const linePiId = '22222222-2222-4222-8222-222222222222'
+    const file = writeLineFile('11111111-1111-4111-8111-111111111111', `2026-10-24T13-00-44-583Z_${linePiId}.jsonl`)
+
+    expect(findBtwLineFileByPiSessionId(linePiId)).toBe(file)
+  })
+
+  it('精确命名（历史形态 <piSessionId>.jsonl）同样命中（双形态兼容）', () => {
+    const linePiId = '22222222-2222-4222-8222-222222222222'
+    const file = writeLineFile('11111111-1111-4111-8111-111111111111', `${linePiId}.jsonl`)
+
+    expect(findBtwLineFileByPiSessionId(linePiId)).toBe(file)
+  })
+
+  it('同 id 多条命中（精确名 + 时间戳前缀）取最新 mtime 的文件', () => {
+    const linePiId = '22222222-2222-4222-8222-222222222222'
+    const old = writeLineFile('11111111-1111-4111-8111-111111111111', `${linePiId}.jsonl`)
+    const fresh = writeLineFile('11111111-1111-4111-8111-111111111111', `2026-10-24T13-00-44-583Z_${linePiId}.jsonl`)
+    // mtime 造差：old 置为过去，fresh 保持刚落盘的 now
+    const past = new Date(Date.now() - 60_000)
+    utimesSync(old, past, past)
+
+    expect(findBtwLineFileByPiSessionId(linePiId)).toBe(fresh)
+  })
+
+  it('反向后缀形态（<piSessionId>_其他.jsonl）不命中（只认「前缀_」方向）', () => {
+    const linePiId = '22222222-2222-4222-8222-222222222222'
+    writeLineFile('11111111-1111-4111-8111-111111111111', `${linePiId}_2026-10-24T13-00-44-583Z.jsonl`)
+
+    expect(findBtwLineFileByPiSessionId(linePiId)).toBeUndefined()
+  })
+
+  it('线文件不存在 → undefined（不猜路径、不抛）', () => {
+    expect(findBtwLineFileByPiSessionId('22222222-2222-4222-8222-222222222222')).toBeUndefined()
   })
 })
