@@ -16,8 +16,9 @@ import type { ExecutionRecord } from "../domain/record-model.ts";
 
 /** Pi ExtensionAPI 的最小接口（duck-typed）——原定义于 subagent-service.ts，随通知簇
  *  （piAdapter / emitPending* 的依赖）搬移至此并导出（Service 的 session 注入参数仍引用）。
- *  subagent-service 直接调 pi.sendMessage 发 background 完成通知（BgNotifier 滑动窗口合并），
- *  不委托 pending-notifications EventBus 中继——后者只管 registry 不参与通知发送。 */
+ *  subagent-service 直接调 pi.sendMessage 发 background 完成通知（BgNotifier 边沿即投，
+ *  判重由投递日志按 notifyId 承载），不委托 pending-notifications EventBus 中继——
+ *  后者只管 registry 不参与通知发送。 */
 export interface PiLike {
   appendEntry(customType: string, data?: unknown): void;
   events: { emit(channel: string, data: unknown): void };
@@ -221,17 +222,18 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
     /** [C-1] close 归档提示通知（设计 D2：正文空/本轮增量 + sessionFile 指针行）。
      *
      *  与 notifyComplete 的差异只在 dedup 身份与轮次统计：归档提示必须与最后一轮的
-     *  轮次通知区分（轮次通知 key=`id:round`），否则同 key 被 60s dedup 吞——close 后
-     *  父 agent 永远收不到带指针行的归档提示（审查 C-1）。故 round 置 undefined（key
-     *  回退为裸 id），轮数改经 totalRounds 进文案 "completed after N rounds."（C-2）。
+     *  轮次通知区分（轮次通知 key=`id:round`），否则同 key 被投递日志按 notifyId 永久
+     *  判重吞——close 后父 agent 永远收不到带指针行的归档提示（审查 C-1）。故 round 置
+     *  undefined（key 回退为裸 id），轮数改经 totalRounds 进文案
+     *  "completed after N rounds."（C-2）。
      *
      *  close 归档语义调用（archiveRecord——markArchived 成功后；[modeless 波1] 全
      *  record 归档均提示，旧 chatMode 门随字段消亡删除——万物可续下「已收起」对
      *  任何 record 都是有信息的：record 仍在，可寻回复活）。cancel 走 cancelBackground
      *  自己的注销发射，不经本方法。幂等性：两条 close 路径均由 closeSubagent 的
      *  status 分流检查（幂等 no-op）/ CAS 抢锁保证只执行一次，本方法自身不重复发送；
-     *  迟到的轮次收尾 .then 通知与轮次通知同 key=`id:round`，60s 窗内仍被吞，不构成
-     *  第三条。 */
+     *  迟到的轮次收尾 .then 通知与轮次通知同 key=`id:round`，被投递日志按同 key 永久
+     *  判重吞，不构成第三条。 */
     /** @param emptyBody true = 归档提示正文置空串（D2 路径②）。W16 P-1 修复后
      *  close 终态的 doneResult.text 改用 record.result 保真（close 终态
      *  subagent-record entry 的 result 不抹空轮终真实值），「正文空」不再由合成空

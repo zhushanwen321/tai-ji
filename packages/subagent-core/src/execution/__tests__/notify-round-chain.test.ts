@@ -52,12 +52,12 @@ import type { RecordStore } from "../persistence/record-store.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import { SubagentService } from "../subagent-service.ts";
 
-// ─── fake 投递端口（port.deliver 消费方：同 id 幂等吞 + merge 判定分流）────────
+// ─── fake 投递端口（port.deliver 消费方：同 id 幂等吞 + 边沿即投注入）────────
 //
 // 波 2 改写对位：原「投递内核等价桩」（dedupe / busy gate / 合批窗口）随内核队列
-// 持有退役——port 形态下受理即入 pi 原生队列（忙时不拒），合批窗口在端口侧。
-// 本文件断言范围只需三片：幂等键判重（同 id:round 吞）、merge 判定透传（hasRunning-
-// Background 的 M3 判据回归锚）、非 merge 条目受理即注入（观察侧 = pi.sendMessage）。
+// 持有退役——port 形态下受理即入 pi 原生队列（忙时不拒）。[§3.3.7③] 攒批窗退役
+// 后无 merge 维度（替身保留恒 false 的 merge 位仅作形态存证），本文件断言范围
+// 两片：幂等键判重（同 id:round 吞）、全部条目受理即注入（观察侧 = pi.sendMessage）。
 
 type FakePortRecord = { id: string; merge: boolean };
 
@@ -86,8 +86,8 @@ function makeFakePort(inject: (message: unknown) => void) {
       return { kind: "accepted", id };
     },
     flush() {
-      // merge:true 条目在真实 port 走 60s 窗口；本文件对 merge 条目的断言范围是
-      // 「不立即注入」（窗口判定透传锚），无到期出站断言，flush 直通为空。
+      // [§3.3.7③] 攒批窗退役后无挂起条目（全部边沿即投），flush 仅保留强制出站
+      // 转发语义——本替身无缓冲，直通为空。
     },
   };
   return { handle, records };
@@ -295,7 +295,7 @@ describe("首轮闭环独有断言范围（迁自壳 first-round-closure-service
     expect(pi.sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("[M3 busy 对照] 真在跑的 background 工作（镜像活进程 + 无 timer）→ merge:true 透传端口（窗口判定），非 merge 条目受理即注入", async () => {
+  it("[M3 busy 对照] 真在跑的 background 工作（镜像活进程 + 无 timer）不推迟投递（边沿即投），同 key 重提由投递日志判重吞", async () => {
     // fake port 装配：非 merge 条目受理即注入 pi.sendMessage（真实 port 直通形态）
     currentFakePort = makeFakePort((message) => {
       pi.sendMessage(message as never, { triggerTurn: true });

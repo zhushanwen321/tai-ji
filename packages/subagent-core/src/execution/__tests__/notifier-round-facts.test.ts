@@ -86,9 +86,27 @@ describe("[§3.3.7①] 轮应答正文五分支事实化", () => {
     expect(content).not.toContain("finished a round");
   });
 
-  it("② 中止轮（aborted 停因、无 failure）：同样落中止分支", () => {
+  it("② 中止轮迁移期回落（aborted 停因、无 failure 分类事实）：维持取消文案", () => {
     notifier.notify(roundRecord({ result: "", lastRoundStopReason: "aborted" }));
     expect(sentContent()).toContain("was aborted (aborted)");
+  });
+
+  it("取消支判据事实优先：aborted 停因但带 engine 失败分类 → 走失败分支全文案（分类与恢复指引不丢，§3.3.7①）", () => {
+    notifier.notify(roundRecord({
+      result: "",
+      error: "engine aborted abnormally",
+      lastRoundStopReason: "aborted",
+      lastRoundFailure: { class: "engine", kind: "engine_aborted", retryable: false, raw: "engine aborted abnormally" },
+      sessionFile: "/tmp/s.jsonl",
+    }));
+    const content = sentContent();
+    // 失败分支（③）：失败摘要 + cause 点拼 + 恢复指引 + transcript 指针；
+    // 不再被 aborted 停因吸进中止简短文案（修复前 = 「was aborted (aborted)」丢分类）。
+    expect(content).toContain("failed (engine.engine_aborted)");
+    expect(content).toContain("engine aborted abnormally");
+    expect(content).toContain("Recovery: re-send your message");
+    expect(content).toContain("Full transcript: /tmp/s.jsonl");
+    expect(content).not.toContain("was aborted");
   });
 
   it("① 被接管轮（promptDisposition=handled）：接管事实——引擎未执行，无成败词", () => {

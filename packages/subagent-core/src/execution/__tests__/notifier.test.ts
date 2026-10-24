@@ -14,8 +14,9 @@
 //     settled/compaction 边沿驱动——pi-delivery-port 套件「注入 throw → retain 留账；
 //     恢复后 settled 边沿重投」已对位）；
 //   - ledger 未 bind 降级留痕 → port 缺席直发降级留痕（warn 文案 + 量级限流）；
-//   - mergeHold 合批 join → merge 选项透传端口（合批合成在内核出站点，形态由
-//     pi-delivery-port 套件「60s 到期合成一条批消息」锁定）。
+//   - 攒批窗退役（§3.3.7③）：deliver opts 无 merge 字段——全部条目边沿即投，判重
+//     由投递日志按 notifyId 承载（合法批形态仅剩内核面：recover 重放 / collectRelease
+//     直通 / compaction 唤醒，pi-delivery-port 套件锁定）。
 //
 // 测试方法：主路径注入 fake port（getDeliveryPort 槽访问器），缺席路径观察 mock
 // host 的 sendMessage（直发兜底唯一形态 = { triggerTurn: true }，G4 字节锁定）。

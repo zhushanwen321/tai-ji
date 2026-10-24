@@ -153,7 +153,8 @@ export interface BgNotifyRecord {
   endedAt: number | undefined;
   /**
    * 对话轮次计数（仅 idle 有意义）。dedup key 按 `id:round` 去重——对话模式每轮 round
-   * 不同，60s 内多轮不被吞；首轮前 round 恒定（0/undefined），key 同旧 id 行为不变。
+   * 不同，多轮通知互不命中投递日志按 key 的判重；首轮前 round 恒定（0/undefined），
+   * key 同旧 id 行为不变。
    */
   round?: number;
   /** [MF#1] worktree 模式下子 agent 改动的 patch 路径（worktree 外，cleanup 后留存）。
@@ -251,7 +252,10 @@ export const ROUND_REPLY_RECOVERY_TAIL =
  * 轮收条如实呈现，不再硬编码 `finished a round`（文案说谎是故障 B 的呈现面）。
  * 判定序（先特殊后一般，输入 = BgNotifyRecord 轮事实字段，数据源 record.lastRound）：
  *   ① 被接管轮（promptDisposition=handled）：回执层成功 + 引擎未执行——简短事实；
- *   ② 中止轮（user.cancelled / aborted 停因）：「本轮被中止」+ 中止来源；
+ *   ② 中止轮（取消支——失败分类事实优先）：user.cancelled 写「本轮被中止 + 用户
+ *      取消」；迁移期回落 = 旧引擎 aborted 停因且无 failure 事实（分类不可得，维持
+ *      取消文案）；带 failure 事实的中止轮（engine_aborted / turn_budget_exhausted，
+ *      §3.3.1 三源判别）不走本支——落 ③ 失败分支，失败分类与恢复指引不丢；
  *   ③ 失败轮（failure 非空非 user.cancelled）：失败摘要 + cause 点拼 + 恢复指引；
  *   ④ 正常轮空正文：「本轮完成，无文本输出」（UC-15 空值语义——不告警不谎报）；
  *   ⑤ 正常轮：结果正文（多轮与 one-shot 同形）。
@@ -261,8 +265,11 @@ function buildRoundReplyContent(record: BgNotifyRecord): string {
   const id = record.id;
   const roundLabel = record.round != null ? ` round ${record.round}` : "";
   const failure = record.lastRoundFailure;
+  // [§3.3.1 取消支判据事实优先] 有 failure 事实时以分类为准（user = 取消族，其余
+  // class = 失败轮）；仅旧引擎 aborted 停因而无分类事实时回落取消文案（迁移期回落）。
   const isCancelledRound =
-    failure?.class === "user" || record.lastRoundStopReason === "aborted";
+    failure?.class === "user" ||
+    (failure === undefined && record.lastRoundStopReason === "aborted");
   if (record.lastRoundDisposition === "handled") {
     // ① 被接管（§3.3.1 第三形态：回执层成功 + 轮终事实词——引擎未执行，无成败）
     return `Subagent "${agent}" (${id})${roundLabel} was taken over by an extension before the engine ran it (prompt disposition: handled) — the round never executed; re-dispatch if the work is still needed.${transcriptTail(record)}`;
@@ -295,11 +302,12 @@ function buildRoundReplyContent(record: BgNotifyRecord): string {
 }
 
 /** transcript 指针行（cancelled/gc-failed 不追加的对齐判据同样适用于轮应答——
- *  中止/接管轮无成功结果可读，指针无意义；失败/正常轮追加）。 */
+ *  中止/接管轮无成功结果可读，指针无意义；失败/正常轮追加。取消判据与
+ *  buildRoundReplyContent 的取消支同口径——事实优先，迁移期回落 aborted 停因）。 */
 function transcriptTail(record: BgNotifyRecord): string {
   const cancelledLike =
     record.lastRoundFailure?.class === "user" ||
-    record.lastRoundStopReason === "aborted" ||
+    (record.lastRoundFailure === undefined && record.lastRoundStopReason === "aborted") ||
     record.lastRoundDisposition === "handled";
   return !cancelledLike && record.sessionFile ? `\n\nFull transcript: ${record.sessionFile}` : "";
 }
@@ -366,7 +374,7 @@ function buildLlmContent(record: BgNotifyRecord): string {
  * 保持与旧 BgNotifier 类相同的公共 API，避免消费方（subagent-service）改动范围过大。
  */
 export interface BgNotifier {
-  /** 入队一条完成通知（去重 + 合批窗口合并）。dispose 后短路。 */
+  /** 入队一条完成通知（边沿即投，判重由投递日志按 notifyId 承载）。dispose 后短路。 */
   notify(record: BgNotifyRecord): void;
   /** 立即 flush（session_shutdown 调用，防丢失）。 */
   flushPendingNotifications(): void;
