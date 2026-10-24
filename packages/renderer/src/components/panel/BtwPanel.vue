@@ -269,6 +269,9 @@ import { useBtwPanelSurface } from '@/composables/panel/useBtwTabData'
 import { useBtwInteraction } from '@/composables/panel/useBtwInteraction'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { useSessionStore } from '@/stores/session'
+import { useChatStore } from '@/stores/chat'
+import { ensureStreamSubscription } from '@/composables/features/chat/useChat'
+import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { setBtwView, useBtwSelection, getBoundSessionId } from '@taiji/core/domain/drawer'
 import type { ServerMessageMap, SessionSummary } from '@taiji/shared'
 import MessageStream from '@/components/panel/MessageStream.vue'
@@ -288,6 +291,13 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+
+// 线视图激活时的通道建立依赖（见下方 selectedSessionId watch 的为何注释）：chat/session
+// store + core 状态层拉取入口（useSidebar 代理 core.refreshLiveState——与主会话切入链
+// 步 13、重连对账同一个入口，缓存缺失门控 + fire-and-forget 语义不变）。
+const chatStore = useChatStore()
+const sessionStore = useSessionStore()
+const { refreshLiveState } = useSidebar()
 
 /** per-main-session 面板状态（ADR-0049 Map 分区；切 sid 不丢、切回恢复，异步回写用 updateFor） */
 // @data-owner #44 —— #44 btw 线列表的 renderer 面板消费分区（session.list
@@ -325,6 +335,26 @@ const state = computed(() => scoped.current.value)
  *  SubagentTab selectedSubagentId 同款耦合）。null=未选中（列表仅展示）。 */
 const { selectedBtwSessionId } = useBtwSelection()
 const selectedSessionId = computed(() => selectedBtwSessionId.value ?? null)
+
+// ── [W2 缺陷修复] 线视图激活 = 流订阅建立 + 状态层拉取（与主会话切入链步 5/13 等同）──
+// 为何在此触发：btw 线视图不走 selectSession 切入链——线是 drawer 内的旁路呈现，主会话
+// 焦点不变、runtime 不 switch，切入链步 5 ensureStreamSubscription 与步 13
+// refreshLiveState 对线 id 零覆盖；bindSessionStreamSync 只 watch 侧栏
+// sessionStore.list（线 surface='btw' 不在列表内），同样零覆盖。本组件是线视图唯一载体
+// （MessageStream/Composer 按 selectedSessionId 装配），「选中线变化 + 挂载即选中」
+// （drawer 重开恢复选中，D7④）= 线被激活为当前视图的全部形态，故在此补与切入链等同的
+// 两件事（语义不变：缓存缺失门控 + fire-and-forget；实现复用既有入口，不新造第二套）。
+watch(
+  selectedSessionId,
+  (sid) => {
+    if (!sid) return
+    // 步 5 等同：先建订阅（线消息帧写入 chatStore 分区的唯一聚合点），再谈状态拉取
+    ensureStreamSubscription(sid, chatStore, sessionStore)
+    // 步 13 等同：打开视图时机（缓存缺失门控在 core refreshLiveState 内；fire-and-forget）
+    void refreshLiveState(sid)
+  },
+  { immediate: true },
+)
 
 function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -401,7 +431,7 @@ function selectThread(sessionId: string): void {
 function optimisticThreadCwd(captured: string, existing: BtwThreadInfo[]): string {
   const fromLines = existing.find((th) => th.cwd)?.cwd
   if (fromLines) return fromLines
-  const main = useSessionStore().list.find((s) => s.id === captured)
+  const main = sessionStore.list.find((s) => s.id === captured)
   return main?.cwd ?? ''
 }
 

@@ -17,6 +17,10 @@
  * （session-id / variant / show-btw）落使用者可见部分，对话流渲染本身归 MessageStream 既有测试族。
  * i18n 由 vitest-i18n-setup 全局 mock（t 从 zh-CN 取真实文案，断言中文文案无需另行 mock）。
  *
+ * [W2 缺陷修复] 线视图激活用例另局部 mock 两个入口（断言锚点，其余成员保真）：
+ * useSidebar（只取 refreshLiveState——core 状态层拉取对账入口，缓存缺失门控在 core 侧
+ * live-state-pull.test.ts 锁定）与 useChat.ensureStreamSubscription（线消息帧订阅建立）。
+ *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/btw-panel.test.ts
  */
 // helper import 必须先于项目内模块（@/api mock factory 在模块图加载期执行，TDZ 约束同 composer-mount 各消费文件）
@@ -33,11 +37,25 @@ import {
 } from '@taiji/core/domain/drawer'
 import BtwPanel from '@/components/panel/BtwPanel.vue'
 import { useSessionStore } from '@/stores/session'
+import { useChatStore } from '@/stores/chat'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import type { ServerMessageMap, SessionSummary } from '@taiji/shared'
 
 // btw 具名类型走 indexed-access（shared 包出口未挂具名，SSOT = shared protocol.ts）
 type BtwForkState = ServerMessageMap['btw.create']['forkState']
+
+// ── [W2 缺陷修复] 线视图激活的两个入口 mock（断言锚点）────────────────────
+// useSidebar 只被 BtwPanel 消费（本文件模块图内无其他 import 方），整模块替换为
+// refreshLiveState 单键 spy；useChat 保真展开、只替换 ensureStreamSubscription。
+const refreshLiveStateSpy = vi.hoisted(() => vi.fn())
+const ensureStreamSubscriptionSpy = vi.hoisted(() => vi.fn())
+vi.mock('@/composables/features/sidebar/useSidebar', () => ({
+  useSidebar: () => ({ refreshLiveState: refreshLiveStateSpy }),
+}))
+vi.mock('@/composables/features/chat/useChat', async (importActual) => {
+  const actual = await importActual<typeof import('@/composables/features/chat/useChat')>()
+  return { ...actual, ensureStreamSubscription: ensureStreamSubscriptionSpy }
+})
 
 // ── @/api 门面局部 mock：只替换 btw 域（三元消费方 = 本面板唯一数据入口）──
 vi.mock('@/api', (importActual) => composerApiModuleActualWithBtw(importActual))
@@ -396,7 +414,69 @@ describe('BtwPanel 内联确认条表单降档（M3-c 行为范围，useBtwInter
     // choice 题降档带 Other 单行输入（allowOther 缺省 true）；text 题降档 = 单行输入
     expect(bar.find('[data-testid="btw-form-other"]').exists()).toBe(true)
     expect(bar.find('[data-testid="btw-form-text"]').exists()).toBe(true)
-    // 提交门：choice/text 均未作答 → Submit 禁用（降档口径逐题可答判定）
-    expect(bar.find('[data-testid="btw-form-submit"]').attributes('disabled')).toBeDefined()
+  // 提交门：choice/text 均未作答 → Submit 禁用（降档口径逐题可答判定）
+  expect(bar.find('[data-testid="btw-form-submit"]').attributes('disabled')).toBeDefined()
+  })
+})
+
+// ── [W2 缺陷修复] 线视图激活（D3 真机验收 A11 缺陷 2 的回归防线）───────────
+//
+// 缺陷形态：打开冷线时模型 chip 恒显占位符「…」（liveStateOf(线)=null）、全量 WS 帧
+// session.getState=0 / session.subscribe 仅主会话——btw 线视图不走 selectSession 切入链
+// （步 5 ensureStreamSubscription + 步 13 refreshLiveState 对线零覆盖），bindSessionStreamSync
+// 也只 watch 侧栏 sessionStore.list（线 surface='btw' 不在列表内）。修复 = BtwPanel 选中线
+// 激活点补两件事；本组锁定该接线（缓存缺失门控语义在 core live-state-pull.test.ts）。
+
+describe('BtwPanel 线视图激活：状态层拉取 + 流订阅建立', () => {
+  it('打开线视图（挂载即自动选中最新线）→ 对该线触发状态层拉取 + 流订阅建立', async () => {
+    apiMock.list.mockResolvedValue(btwLineGroups({ id: 'pi-1' }, { id: 'pi-2' }))
+    const wrapper = mountPanel(MAIN_A)
+    await settle(wrapper)
+
+    // 自动选中最新线 pi-2（D7②）→ 通道建立两件事都按该线 id 触发
+    expect(wrapper.find('[data-testid="btw-stream"]').attributes('session-id')).toBe('pi-2')
+    expect(ensureStreamSubscriptionSpy).toHaveBeenCalledWith('pi-2', useChatStore(), useSessionStore())
+    expect(refreshLiveStateSpy).toHaveBeenCalledWith('pi-2')
+  })
+
+  it('点 chip 切线 → 通道建立跟随新选中线（订阅/拉取按线 id 逐线建立）', async () => {
+    apiMock.list.mockResolvedValue(btwLineGroups({ id: 'pi-1' }, { id: 'pi-2' }))
+    const wrapper = mountPanel(MAIN_A)
+    await settle(wrapper)
+    ensureStreamSubscriptionSpy.mockClear()
+    refreshLiveStateSpy.mockClear()
+
+    await wrapper.find('[data-testid="btw-thread-chip"][data-session-id="pi-1"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="btw-stream"]').attributes('session-id')).toBe('pi-1')
+    expect(ensureStreamSubscriptionSpy).toHaveBeenCalledWith('pi-1', useChatStore(), useSessionStore())
+    expect(refreshLiveStateSpy).toHaveBeenCalledWith('pi-1')
+  })
+
+  it('新建线即选中 → 通道建立覆盖创建期路径（create reply 选中新线）', async () => {
+    apiMock.list.mockResolvedValue([])
+    apiMock.create.mockResolvedValue({ sessionId: 'pi-9', mainSid: MAIN_A, forkState: 'none' })
+    const wrapper = mountPanel(MAIN_A)
+    await settle(wrapper)
+    ensureStreamSubscriptionSpy.mockClear()
+    refreshLiveStateSpy.mockClear()
+
+    await wrapper.find('[data-testid="btw-empty-new"]').trigger('click')
+    await settle(wrapper)
+
+    expect(wrapper.find('[data-testid="btw-stream"]').attributes('session-id')).toBe('pi-9')
+    expect(ensureStreamSubscriptionSpy).toHaveBeenCalledWith('pi-9', useChatStore(), useSessionStore())
+    expect(refreshLiveStateSpy).toHaveBeenCalledWith('pi-9')
+  })
+
+  it('空态（无选中线）不触发通道建立（无线可激活）', async () => {
+    apiMock.list.mockResolvedValue([])
+    const wrapper = mountPanel(MAIN_A)
+    await settle(wrapper)
+
+    expect(wrapper.find('[data-testid="btw-stream"]').exists()).toBe(false)
+    expect(ensureStreamSubscriptionSpy).not.toHaveBeenCalled()
+    expect(refreshLiveStateSpy).not.toHaveBeenCalled()
   })
 })

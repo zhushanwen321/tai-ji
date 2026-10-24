@@ -302,6 +302,16 @@ export function useSidebar() {
   const selectSession = core.selectSession
 
   /**
+   * refreshLiveState —— 代理 core（[W2 权威拉取与冷读] 状态层拉取对账入口）。
+   *
+   * 主路径触发点 = core 12 步切入链步 13（打开视图时机）与本文件 onConnected（重连
+   * 时机）；btw 线视图激活点（BtwPanel 选中线）经本出口复用同一入口——线不走
+   * selectSession 切入链（drawer 旁路呈现，主会话焦点不变），两件事（缓存缺失门控 +
+   * fire-and-forget 语义）由 core 单点保证，壳不另造第二套。
+   */
+  const refreshLiveState = core.refreshLiveState
+
+  /**
    * restoreSession —— 显式重开 dead session（重新 spawn pi）。
    * 编排对齐 selectSession，但切入 RPC 用 sessionApi.restoreSession（显式重新 spawn，区别于
    * switchSession 的「内存已有则纯切换」语义）替代。壳侧职责收缩为：restore RPC 前置取消 flow
@@ -514,6 +524,7 @@ export function useSidebar() {
     focusedSession,
     selectSession,
     restoreSession,
+    refreshLiveState,
     newSession,
     retryHistory,
     loadSessions,
