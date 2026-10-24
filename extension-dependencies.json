@@ -623,7 +623,7 @@
         {
           "package": "@zhushanwen/pi-llm-shared",
           "type": "package",
-          "reason": "代码层静态 import loadConfig（src/config.ts:23 读 retry-rules-ext-config.json，llm-shared getConfigPath 推导 + mtime 热重载契约）"
+          "reason": "代码层静态 import loadConfig（src/config.ts:24 读 retry-rules-ext-config.json，llm-shared getConfigPath 推导 + mtime 热重载契约）"
         }
       ]
     }
