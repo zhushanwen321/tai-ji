@@ -160,6 +160,11 @@ export async function run(ctx) {
     '走盘重载换 thinking 块 id 空间（turn-expansion.ts 头注释）——live ≡ reload 对比按每回合计数+预览序列，不按块 id',
     'reload 段用 page.reload 重建 renderer：chat store 清空后走 hydrate 全量基线接管（useSidebar.reconcileHistory 适配层），与 app 级重启（p0-session-persistence）互补',
     '同实例内 LRU 驻留切回是增量 reconcile 非走盘重载——必须整页 reload 才触发 hydrate 全量重建',
+    '虚拟列表会卸载滚出视口的回合（p0-chat-stream 已登记同族形态）：逐回合「展开→即时抓本回合 thinking 行」，禁全部展开后全局 capture（多次实跑校准）',
+    // 2026-10-24 两轮实跑（run5/run6）+ 三次 CDP 探针的定性结论：live 段最后一轮展开后思考行
+    // 不渲染是产品疑点（productSuspicion 上报主 agent），已排除面与疑点域登记如下——
+    '[产品疑点定性] 多轮 session 最后一轮 live 展开失败已排除：数据层（chat store contentBlocks=[thinking,text] + thinking 数组带实时时间戳 + textFinalized=true，complete 后 400ms 内即就位）、faux 载荷（JSONL 三轮 parts 同构 [thinking,text]）、窗口切片（trace-window.ts:188-192 池显式含 thinking、W=4）、lastTurn disabled（单轮 lastTurn live 点击展开正常）、交互方法（同一 page.click 路径单轮成功）。疑点域 = 展开态清除机制（run3 证据：轮 1 展开成功后其思考行也在 20s 后消失，指向全局性重置——候选 turn-expansion.ts clearSession 的走盘重载触发条件 + useSidebar refreshHistory 编排）或最后一轮 visibleBlocks 派生走折叠分支。reload（page.reload）后同操作恢复正常。',
+    '[设计内差异] live 侧思考行预览含「持续了 Nms」时长段（实时链路 thinking_start/end 时间戳填充），reload 侧无（持久化 thinking part 无时间戳，ThinkingRow.vue:49-53 已声明的降级分支）——两侧预览全等比对会假失败，对比口径按计数+哨兵',
   ]
   const THINK1 = meta.faux.responses[0].thinking
   const THINK3 = meta.faux.responses[2].thinking
@@ -328,17 +333,23 @@ export async function run(ctx) {
   await ev.shot(page, 'reload-expanded-turn3')
   ev.attach('reload-expanded-previews', JSON.stringify({ turn1: rex1, turn2: reload2, turn3: rex3 }, null, 2))
 
-  const perTurn = (ex, snap2) => ({
-    thinkTurnCount: ex.ok ? ex.previews.length : -1,
-    preview: ex.ok ? (ex.previews[0] ?? '') : '',
-    plainTurnCount: snap2.length === 1 ? snap2[0].thinkingCount : -1,
+  // 对比口径：每回合 thinking 行计数 + 哨兵命中（预览全文不作全等比对——live 侧含
+  // 「持续了 Nms」时长段、reload 侧无，是 ThinkingRow.vue:49-53 已声明的设计内降级差异）
+  const perTurn = (ex, sentinel) => ({
+    count: ex.ok ? ex.previews.length : -1,
+    sentinelHit: ex.ok ? ex.previews.some((p) => p.includes(sentinel)) : false,
   })
-  const liveShape = { turn1: perTurn(ex1, live2), turn3: perTurn(ex3, live2) }
-  const reloadShape = { turn1: perTurn(rex1, reload2), turn3: perTurn(rex3, reload2) }
-  const equivOk =
-    JSON.stringify(liveShape) === JSON.stringify(reloadShape) &&
-    rex1.ok && rex3.ok &&
-    live2.length === 1 && live2[0].thinkingCount === 0 && reload2.length === 1 && reload2[0].thinkingCount === 0
+  const liveShape = {
+    turn1: perTurn(ex1, 'THINK1-FORM-A8'),
+    turn2Count: live2.length === 1 ? live2[0].thinkingCount : -1,
+    turn3: perTurn(ex3, 'THINK3-FORM-A8'),
+  }
+  const reloadShape = {
+    turn1: perTurn(rex1, 'THINK1-FORM-A8'),
+    turn2Count: reload2.length === 1 ? reload2[0].thinkingCount : -1,
+    turn3: perTurn(rex3, 'THINK3-FORM-A8'),
+  }
+  const equivOk = JSON.stringify(liveShape) === JSON.stringify(reloadShape) && rex1.ok && rex3.ok
   ev.assert(
     'A: reload 后每回合 thinking 行计数与预览内容 ≡ live（live ≡ reload 不变量）',
     equivOk,

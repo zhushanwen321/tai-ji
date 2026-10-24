@@ -473,6 +473,12 @@ function readToken(dataDir) {
 }
 
 function randomUuid() {
-  // 幂等键只要求进程内唯一 + 形态稳定，不要求密码学强度
-  return `verify-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  // clientUuid 必须是协议合法 uuid 形态（shared MSG_ID_TAG_RE：8-4-4-4-12 hex——
+  // delivery 标记 `<!--taiji:msg:...-->` 的身份段按它提取，非 uuid 形态的 id 会让
+  // 送达回执（confirmByMessageEnd）永远匹配不上、条目卡 in-flight）。
+  // crypto.randomUUID 即 8-4-4-4-12 hex；幂等键语义不变（进程内唯一 + 形态稳定）。
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  // 兜底：手工拼 hex 形态（Node ≥ 22 恒走上一分支，此行仅防御非 Node 环境）
+  const hex = (n) => Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+  return `${hex(8)}-${hex(4)}-${hex(4)}-${hex(4)}-${hex(12)}`
 }

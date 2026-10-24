@@ -91,6 +91,15 @@ async function pollBodyHtml(ui, predicate, { timeoutMs = 30_000, intervalMs = 40
   return html
 }
 
+/** 协议等待失败的完整证据（ProtocolError 的 evidence 含 recentFrames 摘要）。 */
+function waitErrorDetail(e) {
+  return JSON.stringify(
+    { message: String(e?.message ?? e), hint: e?.hint, evidence: e?.evidence },
+    null,
+    2,
+  ).slice(0, 4_000)
+}
+
 /** 事件流中按条件找帧（已在队列中的历史帧，非等待）。 */
 function findEvent(protocol, predicate, { since = 0 } = {}) {
   for (let i = protocol.events.length - 1; i >= since; i--) {
@@ -109,6 +118,8 @@ export async function run(ctx) {
     'TAIJI_AGENT_DEV_SETTLING_DELAY_MS 经 TAIJI_ 前缀 env 白名单透传 main→runtime（shared/constants.ts ENV_WHITELIST_PREFIXES），无需额外接线',
     '延迟窗口副作用：新回合已 generating 时首个（陈旧的）idle 帧可能随后到达——时序断言只比 message_start#2 与首个 idle 帧先后，终态断言等末次 idle',
     '追问文本在队列行 preview 中也出现——回流断言以队列行离场为前置（先 expectGone 再查 body html），防双匹配',
+    'session.delivery topic 接线时序坑（2026-10-24 实测，同 p1-turn-interject-collapse）：建会即订阅的会话在首次 submit 前无内核运行时 → topic onChange 永不挂、零帧广播；首次 submit 后补一次 subscribe 重跑 sync 即接线（产品侧 wiring 瑕疵已报 productSuspicions）',
+    'A2 的追问开新 run（pi 已内部沉降、disposition=started）→ 有自己的 run 级 message.complete——与 A1a（steer 并入同一 run、整 run 一次 complete）形态不同，勿混用断言',
   ]
   const FOLLOWUP = '回合结束瞬间追问-SETTLING-FOLLOWUP-2a4c'
 
@@ -128,6 +139,12 @@ export async function run(ctx) {
     // ── 段 1：长回合（occupancy generating 观察） ───────────
     const since1 = protocol.events.length
     await protocol.send(sid, '开始长回合 SETTLING-START')
+
+    // session.delivery topic 接线前置（同 p1-turn-interject-collapse 实测结论）：建会即订阅
+    // 时无内核运行时 → topic onChange 未挂；首次 submit 已建运行时，补一次 subscribe 完成接线
+    //（等价「切走再切回」用户路径；产品侧 wiring 瑕疵已报 productSuspicions）。
+    await protocol.subscribe(sid)
+    ev.step({ step: 'protocol.resubscribe', channel: 'B', exitCode: 0, stats: { purpose: 'delivery-topic wiring' } })
     let generatingSeen = false
     try {
       await protocol.waitFor(
@@ -192,7 +209,7 @@ export async function run(ctx) {
         { timeoutMs: 15_000, since: sinceSubmit, sessionId: sid },
       )
     } catch (e) {
-      ev.attach('delivery-frame-miss', String(e?.message ?? e).slice(0, 500))
+      ev.attach('delivery-frame-miss', waitErrorDetail(e))
     }
     const firstEntry = firstEntryFrame
       ? (firstEntryFrame.payload.entries ?? []).find((x) => x.clientUuid === followup.clientUuid)
@@ -226,8 +243,11 @@ export async function run(ctx) {
         { timeoutMs: 30_000, since: sinceSubmit, sessionId: sid },
       )
     } catch (e) {
-      ev.attach('turn2-start-miss', String(e?.message ?? e).slice(0, 500))
+      ev.attach('turn2-start-miss', waitErrorDetail(e))
     }
+    // complete#2 的等待游标必须在后续任何等待之前捕获（首跑实测：idle 帧等待 1.2s 期间
+    // complete#2 已入队，事后再取 events.length 会越过它 → 永远等不到）
+    const sinceEnd2 = protocol.events.length
     ev.assert('B: 追问受理即开新回合（message_start#2 到达）', Boolean(start2), {
       channel: 'B',
       expected: 'message.message_start（新 assistant）',
@@ -243,7 +263,7 @@ export async function run(ctx) {
         { timeoutMs: 30_000, since: sinceSubmit, sessionId: sid },
       )
     } catch (e) {
-      ev.attach('idle-frame-miss', String(e?.message ?? e).slice(0, 500))
+      ev.attach('idle-frame-miss', waitErrorDetail(e))
     }
     const acceptanceBeforeIdle = Boolean(start2 && idle1 && start2.receivedAt < idle1.receivedAt)
     ev.assert('B: 新回合受理先于空闲宣告（message_start#2 < 首个 idle 帧）', acceptanceBeforeIdle, {
@@ -262,13 +282,12 @@ export async function run(ctx) {
       ].join('\n'),
     )
 
-    // 新回合完成（faux 轮 2）
-    const sinceAfterStart2 = protocol.events.length
+    // 新回合完成（faux 轮 2）——游标 = start2 后即时快照（见上方注释）
     let end2 = null
     try {
-      end2 = await protocol.waitTurnEnd(sid, { since: Math.max(0, sinceAfterStart2 - 1), timeoutMs: 60_000 })
+      end2 = await protocol.waitTurnEnd(sid, { since: sinceEnd2, timeoutMs: 60_000 })
     } catch (e) {
-      ev.attach('turn2-end-miss', String(e?.message ?? e).slice(0, 800))
+      ev.attach('turn2-end-miss', waitErrorDetail(e))
     }
     ev.assert('B: 新回合 message.complete 到达（受理闭环，不丢）', end2?.type === 'message.complete' && end2.ok, {
       channel: 'B',
@@ -285,21 +304,32 @@ export async function run(ctx) {
       )
       deliveredOk = Boolean(frameEvt)
     } catch (e) {
-      ev.attach('delivery-delivered-miss', String(e?.message ?? e).slice(0, 500))
+      ev.attach('delivery-delivered-miss', waitErrorDetail(e))
     }
     ev.assert('B: 追问条目终态 delivered', deliveredOk, {
       channel: 'B', expected: "state='delivered'", actual: `delivered=${deliveredOk}`,
     })
 
-    // 末次 idle 落定：complete#2 之后的 idle 帧（回合二自身的延迟沉降）
+    // 末次 idle 落定：complete#2 之后的 idle 帧（回合二自身的延迟沉降）。
+    // 判据用事件数组位置而非 receivedAt 毫秒——complete 与 idle 同毫秒到达时（首跑复跑
+    // 实测出现）严格大于比较恒假；indexOf 位置序与到达序一致。
+    const complete2Idx = (() => {
+      for (let i = protocol.events.length - 1; i >= 0; i--) {
+        const e = protocol.events[i]
+        if (e.type === 'message.complete' && e.payload?.sessionId === sid && e.receivedAt === (end2?.at ?? -1)) return i
+      }
+      return -1
+    })()
     let finalIdle = null
     try {
       finalIdle = await protocol.waitFor(
-        (e) => e.type === 'session.occupancy' && e.payload?.turn === 'idle' && e.receivedAt > (end2?.at ?? Date.now()),
+        (e) =>
+          e.type === 'session.occupancy' && e.payload?.turn === 'idle'
+          && (complete2Idx === -1 || protocol.events.indexOf(e) > complete2Idx),
         { timeoutMs: 30_000, sessionId: sid },
       )
     } catch (e) {
-      ev.attach('final-idle-miss', String(e?.message ?? e).slice(0, 500))
+      ev.attach('final-idle-miss', waitErrorDetail(e))
     }
     ev.assert('B: 末次 occupancy idle 落定（延迟注入不破坏终态收敛）', Boolean(finalIdle), {
       channel: 'B', expected: 'complete#2 后 idle 帧', actual: finalIdle ? `at=${new Date(finalIdle.receivedAt).toISOString()}` : '未等到',
@@ -331,6 +361,25 @@ export async function run(ctx) {
       expected: '追问原文 + 回复哨兵均在 history',
       actual: `followup=${histText.includes('SETTLING-FOLLOWUP-2a4c')} ack=${histText.includes('SETTLING-ACK-5d81')}`,
     })
+
+    // 事件时间线附件（窗口时序归因证据）
+    {
+      const keyFrames = []
+      for (const e of protocol.events) {
+        if (e.type === 'message.complete' || e.type === 'message.message_start' || e.type === 'session.occupancy') {
+          const brief = e.type === 'message.complete'
+            ? `stop=${String(e.payload?.stopReason)}`
+            : e.type === 'session.occupancy'
+              ? `turn=${String(e.payload?.turn)}`
+              : ''
+          keyFrames.push(`${e.type}@${new Date(e.receivedAt).toISOString().slice(11, 23)} ${brief}`)
+        }
+        if (e.type === 'session.delivery') {
+          keyFrames.push(`session.delivery@${new Date(e.receivedAt).toISOString().slice(11, 23)} entries=${JSON.stringify(e.payload?.entries ?? [])}`)
+        }
+      }
+      ev.attach('event-timeline', `frames total=${protocol.events.length}\n${keyFrames.join('\n')}`.slice(0, 20_000))
+    }
 
     log(`done sid=${sid} followupUuid=${followup.clientUuid} lane=${String(fReply.lane)}`)
   } finally {

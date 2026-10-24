@@ -10,8 +10,9 @@
  *   （useTurnElapsed 秒级 tick）→ 段 2 插话——B：delivery.submit 回执 lane='steer' +
  *   session.delivery 帧条目（lane steer / state queued|in-flight）；A：队列区行可见
  *   （queue-item-<clientUuid>）且当前回合仍工作中（D2：插话不使工作回合收起）→
- *   段 3 回合结束——pi 收尾链消费 steering 消息自动开新回合：B：条目 delivered +
- *   message.complete#2（新回合 assistant）；A：插话文本回流对话流（user 气泡）、
+ *   段 3 回合结束——pi 在同一 run 内消费 steering 消息自动开新回合（2026-10-24 实测：
+ *   message_start#2 先于 run 级 complete 到达，一个 run 只发一次 complete）：B：条目
+ *   delivered + 第二个 assistant message_start；A：插话文本回流对话流（user 气泡）、
  *   队列行离场、旧回合转已工作 → 段 4 负路径——空闲态直发：lane='direct'，无队列行。
  *
  * 不在本剧本（impl-plan A1 拆行）：收起动画与计时视觉形态（A1b，L4 人工）；
@@ -57,7 +58,7 @@ export const meta = {
     'A：长回合进行中 turn-meta 为工作中（工作回合未收起），elapsed 计时秒级增长',
     'B：回合中插话 delivery.submit 回执 lane=steer，session.delivery 帧出现该条目（state queued|in-flight）',
     'A：插话后队列区渲染该条目行（queue-item-<clientUuid>），当前回合仍工作中不收起（D2）',
-    'B：回合结束后条目转 delivered，pi 自动续跑开新回合（message.complete 第二次到达）',
+    'B：回合结束后条目转 delivered，pi 自动续跑开新回合（第二个 assistant message_start——同一 run 内回流，一个 run 一次 complete，2026-10-24 实测校准）',
     'A：插话文本回流对话流（user 气泡出现），队列行离场，旧回合转已工作',
     'B：负路径——空闲态（occupancy idle 帧观察到）直发回执 lane=direct，不经队列',
   ],
@@ -79,6 +80,50 @@ async function pollBodyHtml(ui, predicate, { timeoutMs = 30_000, intervalMs = 40
     await new Promise((r) => setTimeout(r, intervalMs))
   }
   return html
+}
+
+/** 协议等待失败的完整证据（ProtocolError 的 evidence 含 recentFrames 摘要，只 attach
+ *  message 会丢——区分「慢」与「死」的关键信息）。 */
+function waitErrorDetail(e) {
+  return JSON.stringify(
+    { message: String(e?.message ?? e), hint: e?.hint, evidence: e?.evidence },
+    null,
+    2,
+  ).slice(0, 4_000)
+}
+
+/** 事件时间线附件（type@时刻 + 关键载荷摘要）——失败归因与「有没有第二个回合」判定的
+ *  直接证据；逐帧 dump 会超长，摘要按 type 分桶计数 + 端到端关键帧逐条列。 */
+function attachTimeline(ev, protocol, sid, name) {
+  const byType = new Map()
+  const keyFrames = []
+  for (const e of protocol.events) {
+    const t = e.type
+    byType.set(t, (byType.get(t) ?? 0) + 1)
+    if (
+      t === 'message.complete' || t === 'message.error' || t === 'message.message_start'
+      || (t === 'session.occupancy') || t === 'session.exited' || t === 'session.deliveryHandled'
+    ) {
+      const brief =
+        t === 'message.complete'
+          ? `stop=${String(e.payload?.stopReason)} retry=${String(e.payload?.willRetry)}`
+          : t === 'session.occupancy'
+            ? `turn=${String(e.payload?.turn)}`
+            : t === 'message.message_start'
+              ? `mid=${String(e.payload?.messageId)}`
+              : ''
+      keyFrames.push(`${t}@${new Date(e.receivedAt).toISOString().slice(11, 23)} ${brief} sid=${e.payload?.sessionId === sid ? 'match' : String(e.payload?.sessionId ?? '-')}`)
+    }
+    if (t === 'session.delivery') {
+      keyFrames.push(
+        `session.delivery@${new Date(e.receivedAt).toISOString().slice(11, 23)} entries=${JSON.stringify(e.payload?.entries ?? [])}`,
+      )
+    }
+  }
+  ev.attach(
+    name,
+    `frames total=${protocol.events.length}\nbyType: ${JSON.stringify(Object.fromEntries(byType))}\n\nkey frames:\n${keyFrames.join('\n')}`.slice(0, 30_000),
+  )
 }
 
 /** 条件轮询首回合 turn-meta 的 HTML 直到变化（计时增长判据：工作态下秒级 tick 必然改写
@@ -108,6 +153,9 @@ export async function run(ctx) {
     '协议建 session 不改变 renderer 激活态：A 断言前必须点侧栏会话行激活（css=.session-item）',
     '插话文本在队列行 preview 中也出现——「回流对话流」断言必须以队列行已离场为前置（先 expectGone 再查 body html），否则双匹配',
     'elapsed 计时 tick 依赖 document 可见（useTurnElapsed visibilitychange 停表）——TAIJI_DEV_BACKGROUND=1 的 showInactive 窗口仍算 visible，实测可观测增长',
+    'session.delivery topic 接线时序坑（2026-10-24 实测）：topic 唯一装配点 = session.subscribe，且以非创建性 getDelivery 解析句柄——建会即订阅的会话在首次 submit 前无内核运行时，onChange 永不挂、整会话零 session.delivery 帧；首次 submit 后补一次 subscribe 重跑 sync 即接线（等价「切走再切回」用户路径）。产品侧 wiring 瑕疵已报 productSuspicions',
+    'steer 消费形态（2026-10-24 实测）：pi 在同一 run 内消费 steering 消息——第二个 assistant message_start 先于 run 级 message.complete 到达；一个 run 只发一次 complete，「等第二次 complete」断言必假失败',
+    'turn 索引 1-based（message-turns.ts index: i + 1）：首回合是 turn-1/turn-meta-1，不是 turn-0',
   ]
   const INTERJECT = '插话内容-INTERJECT-91ab-请不打断当前回合'
 
@@ -129,12 +177,21 @@ export async function run(ctx) {
     const send1 = await protocol.send(sid, '开始长回合演示 TURN1-START')
     ev.step({ step: 'chat.send.turn1', channel: 'B', exitCode: 0, stats: { clientUuid: send1.clientUuid } })
 
+    // session.delivery topic 接线前置：topic 唯一装配点 = session.subscribe，且以非创建性
+    // getDelivery 解析句柄（session-delivery-topic.ts resolveHandle）——本会话建会即订阅
+    //（无投递运行时 → sync 早退、onChange 未挂）；首次 submit 已创建内核运行时，这里补一次
+    // subscribe 重跑 sync 完成接线（此后 onChange → session.delivery 帧对全部订阅者广播）。
+    // 该缺口是产品侧 wiring 瑕疵（详见 report productSuspicions），此处按「切走再切回」的
+    // 等价用户路径走通主链。
+    await protocol.subscribe(sid)
+    ev.step({ step: 'protocol.resubscribe', channel: 'B', exitCode: 0, stats: { purpose: 'delivery-topic wiring' } })
+
     // 等回合进入工作态：turn-meta 首行渲染且状态字=工作中（assistant 已到仍生成）
-    const workingHtml = await pollBodyHtml(ui, (h) => h.includes('工作中'), { timeoutMs: 40_000 })
+    const workingHtml = await pollBodyHtml(ui, (h) => h.includes('>工作中<'), { timeoutMs: 40_000 })
     const workingSeen = workingHtml.includes('工作中')
     ev.assert('A: 回合进行中 turn-meta 工作中（未收起）', workingSeen, {
       channel: 'A',
-      expected: 'body html 含「工作中」',
+      expected: 'body html 含渲染标签 >工作中<（dev 模板注释含「已工作」字样，裸 substring 会误报）',
       actual: `hit=${workingSeen} len=${workingHtml.length}`,
     })
     await ev.shot(await ctx.instance.page(), 'turn1-working')
@@ -178,7 +235,7 @@ export async function run(ctx) {
       )
       deliveryEntry = (frameEvt.payload.entries ?? []).find((x) => x.clientUuid === interject.clientUuid)
     } catch (e) {
-      ev.attach('delivery-frame-miss', String(e?.message ?? e).slice(0, 500))
+      ev.attach('delivery-frame-miss', waitErrorDetail(e))
     }
     ev.assert('B: session.delivery 帧含插话条目（lane=steer）', deliveryEntry?.lane === 'steer', {
       channel: 'B',
@@ -194,11 +251,15 @@ export async function run(ctx) {
       expected: `queue-item-${interject.clientUuid} 出现`,
       actual: `hit=${queueRowSeen}`,
     })
+    // 状态字断言锚定「渲染标签形态」（>工作中<）：dev 模式 DOM 保留组件模板注释，
+    // TurnMeta 注释正文提及「已工作」，裸 substring 判定恒误报（2026-10-24 实测）
     const stillWorkingHtml = queueRowSeen ? queueHtml : await ui.html('css=body')
-    ev.assert('A: 插话后当前回合仍工作中（D2 不收起）', stillWorkingHtml.includes('工作中') && !stillWorkingHtml.includes('已工作'), {
+    const swWorking = stillWorkingHtml.includes('>工作中<')
+    const swWorked = stillWorkingHtml.includes('>已工作<')
+    ev.assert('A: 插话后当前回合仍工作中（D2 不收起）', swWorking && !swWorked, {
       channel: 'A',
-      expected: '工作中 在场 / 已工作 不在场',
-      actual: `working=${stillWorkingHtml.includes('工作中')} worked=${stillWorkingHtml.includes('已工作')}`,
+      expected: '>工作中< 在场 / >已工作< 不在场',
+      actual: `working=${swWorking} worked=${swWorked}`,
     })
     await ev.shot(await ctx.instance.page(), 'interject-queued-working')
 
@@ -211,19 +272,35 @@ export async function run(ctx) {
     })
     ev.step({ step: 'chat.wait.turn1', channel: 'B', exitCode: end1.ok ? 0 : 1, stats: { stopReason: end1.payload?.stopReason ?? null } })
 
-    // 回流：插话被 pi 收尾链消费 → user entry 落 transcript → 条目 delivered → 新回合 assistant
-    // 新回合 complete（faux 轮 2）
-    const sinceAfter1 = protocol.events.length
-    let end2 = null
+    // 回流形态（2026-10-24 实测校准）：插话被 pi 在同一 run 内消费（message_start#2 先于
+    // run 级 message.complete 到达——一个 run 只发一次 complete，不按 LLM 调用拆分）。
+    // 「自动开新回合」的 B 信号 = 第二个 assistant message_start（承载插话 user 消息后的
+    // 新 assistant 轮）+ 条目 delivered + history 落位，而非第二次 complete。
+    let startCount = 0
+    let secondStart = null
     try {
-      end2 = await protocol.waitTurnEnd(sid, { since: sinceAfter1, timeoutMs: 60_000 })
+      // 自 turn1 发送起数第二个 message_start（第一个 = 长回合同轮起点）
+      for (const e of protocol.events) {
+        if (e.type === 'message.message_start' && e.payload?.sessionId === sid) startCount += 1
+      }
+      if (startCount >= 2) {
+        secondStart = protocol.events.filter((e) => e.type === 'message.message_start' && e.payload?.sessionId === sid)[1] ?? null
+      } else {
+        secondStart = await protocol.waitFor(
+          (e) => {
+            const n = protocol.events.filter((x) => x.type === 'message.message_start' && x.payload?.sessionId === sid).length
+            return e.type === 'message.message_start' && n >= 2
+          },
+          { timeoutMs: 30_000, since: protocol.events.length, sessionId: sid },
+        )
+      }
     } catch (e) {
-      ev.attach('turn2-end-miss', String(e?.message ?? e).slice(0, 800))
+      ev.attach('turn2-start-miss', waitErrorDetail(e))
     }
-    ev.assert('B: 队列回流自动开新回合（第二次 message.complete）', end2?.type === 'message.complete' && end2.ok, {
+    ev.assert('B: 队列回流自动开新回合（第二个 assistant message_start）', Boolean(secondStart), {
       channel: 'B',
-      expected: '插话消费后新 assistant 轮完成',
-      actual: end2 ? `${end2.type} stop=${end2.payload?.stopReason ?? 'n/a'}` : '未等到第二次 complete',
+      expected: '插话消费后新 assistant 轮启动（无需再发消息触发）',
+      actual: secondStart ? `at=${new Date(secondStart.receivedAt).toISOString()}` : '未等到第二个 message_start',
     })
 
     // B：条目终态 delivered（session.delivery 帧条件等待）
@@ -235,7 +312,7 @@ export async function run(ctx) {
       )
       deliveredOk = Boolean(frameEvt)
     } catch (e) {
-      ev.attach('delivery-delivered-miss', String(e?.message ?? e).slice(0, 500))
+      ev.attach('delivery-delivered-miss', waitErrorDetail(e))
     }
     ev.assert('B: 插话条目终态 delivered（不丢）', deliveredOk, {
       channel: 'B',
@@ -265,11 +342,11 @@ export async function run(ctx) {
       actual: `turns=${turnCount}`,
     })
     // 旧回合转已工作（完成态收起 = 派生态；此处回合均已结束）
-    const doneHtml = await pollBodyHtml(ui, (h) => h.includes('已工作'), { timeoutMs: 15_000 })
-    ev.assert('A: 回合完成态渲染（已工作 + 计时定格）', doneHtml.includes('已工作'), {
+    const doneHtml = await pollBodyHtml(ui, (h) => h.includes('>已工作<'), { timeoutMs: 15_000 })
+    ev.assert('A: 回合完成态渲染（已工作 + 计时定格）', doneHtml.includes('>已工作<'), {
       channel: 'A',
-      expected: '已工作 状态字出现',
-      actual: `hit=${doneHtml.includes('已工作')}`,
+      expected: '>已工作< 渲染标签出现',
+      actual: `hit=${doneHtml.includes('>已工作<')}`,
     })
     await ev.shot(await ctx.instance.page(), 'after-backfill-done')
 
@@ -283,6 +360,8 @@ export async function run(ctx) {
     })
 
     // ── 段 4：负路径——空闲态直发不排队（原 A6） ────────────
+    // 事件时间线（在负路径改变事件流前落盘：插话消费/二次回合/帧全貌的归因证据）
+    attachTimeline(ev, protocol, sid, 'event-timeline-before-negative')
     let idleSeen = false
     try {
       await protocol.waitFor(
@@ -291,7 +370,7 @@ export async function run(ctx) {
       )
       idleSeen = true
     } catch (e) {
-      ev.attach('idle-frame-miss', String(e?.message ?? e).slice(0, 500))
+      ev.attach('idle-frame-miss', waitErrorDetail(e))
     }
     ev.assert('B: 空闲态观察到（occupancy turn=idle 帧）', idleSeen, {
       channel: 'B', expected: "session.occupancy {turn:'idle'}", actual: `idle=${idleSeen}`,

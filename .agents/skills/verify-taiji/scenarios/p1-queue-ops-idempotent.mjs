@@ -24,8 +24,15 @@
  * - 投递日志磁盘面：<dataDir>/delivery-outbox/<sessionId 编码>.jsonl，行形态
  *   {"t":"record"|"ack","id":...}，终态行单调累积（无重复终态行 = 无重复投递的磁盘证据）。
  */
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+
+/**
+ * clientUuid 必须用协议契约形态 `u-<uuid>`（同 p1-queue-inline-edit 注：lib 缺省
+ * `verify-*` 形态不构成合法 marker 身份段，edit/cancel 收回路径会误收养）。
+ */
+const uuidOf = () => `u-${crypto.randomUUID()}`
 
 // ── 哨兵（互不为子串） ───────────────────────────────────────────────────────
 const S_HOST = 'A11-HOST-h3f2'
@@ -169,7 +176,7 @@ export async function run(ctx) {
 
   // ── 段 1：主回合 + 回合中连发 5 条 + 折叠口径 ──────────────────
   const since0 = p.events.length
-  const host = await p.send(sid, MSG_HOST)
+  const host = await p.send(sid, MSG_HOST, { clientUuid: uuidOf() })
   ev.assert('B: 主回合消息 direct 车道', host.reply?.lane === 'direct', {
     channel: 'B', expected: 'lane=direct', actual: JSON.stringify(host.reply ?? {}),
   })
@@ -184,7 +191,7 @@ export async function run(ctx) {
 
   const q = []
   for (const [i, msg] of MSGS.entries()) {
-    const r = await p.send(sid, msg)
+    const r = await p.send(sid, msg, { clientUuid: uuidOf() })
     ev.assert(`B: 回合中提交 E${i + 2} 判 steer 车道`, r.reply?.lane === 'steer', {
       channel: 'B', expected: 'lane=steer', actual: JSON.stringify(r.reply ?? {}),
     })

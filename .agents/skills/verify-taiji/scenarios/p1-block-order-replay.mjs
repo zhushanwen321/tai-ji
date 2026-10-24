@@ -149,6 +149,7 @@ export async function run(ctx) {
     '两个连续 bash 工具走 run-group 分组（groupToolRuns），且组默认折叠（RunGroupBlock groupCollapsed=ref(true)）：要见成员 block-tool-* 行必须再点 run-group-header（两段式展开）',
     'HTML 子串断言用完整属性形态（data-testid="run-group"）：裸 "run-group" 会撞 CSS 类 trace-run-group 假阳性',
     '块 id 归一后比对（block-thinking-<id> 的实时 id 与载荷派生 id 不同源，finalized-rebuild 注释在案）；等价断言比块类序列 + 哨兵命中，不比运行时 id',
+    '发送走 composer 真实用户路径而非协议直发：协议直发（delivery.submit 非渲染进程发起）的 user 气泡 live 呈现间歇缺失（message_end(user) 回执 ① 标记未命中派生视图 → ③ 内核标记守卫静默消费，registry.ts:134）——乐观气泡仅 composer 路径创建，UI 发送规避并更贴近用户路径',
   ]
   const USER_SENTINEL = 'BLOCK-ORDER-USER-Q1'
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-block-order-'))
@@ -163,9 +164,13 @@ export async function run(ctx) {
     await ui.click('css=.session-item', { timeoutMs: 30_000 })
     ev.step({ step: 'ui.activate', channel: 'A', exitCode: 0, stats: { sid } })
 
-    // ── 段 1：发送 + 轮完成 ──────────────────────────────────
+    // ── 段 1：发送（真实用户路径：composer 逐字输入 + ⏎）+ 轮完成 ──
+    // 协议直发（delivery.submit 非渲染进程发起）的 user 气泡 live 呈现存在间歇缺失
+    //（message_end(user) 回执 ① 未命中 → ③ 内核标记守卫静默消费，registry.ts:134——
+    // 乐观气泡只有 composer 路径创建），归属断言依赖用户气泡在场，故走 UI 发送。
     const since = protocol.events.length
-    await protocol.send(sid, `请按 kitchen-sink 顺序演示：先思考、再跑两个工具（一成一败）、最后总结。${USER_SENTINEL}`)
+    await ui.type('role=textbox', `请按 kitchen-sink 顺序演示：先思考、再跑两个工具（一成一败）、最后总结。${USER_SENTINEL}`, { timeoutMs: 30_000 })
+    await ui.press('Enter')
     const end = await protocol.waitTurnEnd(sid, { since, timeoutMs: 180_000 })
     ev.assert('B: 混合轮（thinking+工具+文本）正常完成', end.ok === true, {
       channel: 'B', expected: 'message.complete 非 error', actual: `${end.type} stop=${end.payload?.stopReason ?? ''}`,
@@ -226,9 +231,20 @@ export async function run(ctx) {
       return { uncovered, gotchas }
     }
 
-    const liveStructure = await extractTurnBlocks(page, USER_SENTINEL)
+    // 条件轮询抽取（expand 后 Vue 重渲染瞬间 user 气泡子树可能暂不在 DOM——单次读取有竞态，
+    // 等待「哨兵与块同 turn」状态出现，10s 预算）
+    let liveStructure = []
+    let liveTurn
+    {
+      const deadline = Date.now() + 10_000
+      while (Date.now() < deadline) {
+        liveStructure = await extractTurnBlocks(page, USER_SENTINEL)
+        liveTurn = liveStructure.find((t) => t.hasUserSentinel && t.blockKinds.length > 0)
+        if (liveTurn) break
+        await new Promise((r) => setTimeout(r, 400))
+      }
+    }
     ev.attach('live-turn-structure', JSON.stringify(liveStructure, null, 2))
-    const liveTurn = liveStructure.find((t) => t.hasUserSentinel && t.blockKinds.length > 0)
     ev.assert('A: 块与用户哨兵同 turn（归属正确）', Boolean(liveTurn), {
       channel: 'A',
       expected: '含用户哨兵的 turn 同时含全部内容块（一 turn 一归属）',
@@ -301,7 +317,17 @@ export async function run(ctx) {
       reloadExpanded.html.includes('block-tool-') || reloadExpanded.html.includes('data-testid="run-group"')
     ev.assert('A: reload 后展开交互可用', reloadExpandOk, { channel: 'A', expected: '展开后块锚点进 DOM', actual: `ok=${reloadExpandOk}` })
 
-    const reloadStructure = await extractTurnBlocks(page, USER_SENTINEL)
+    let reloadStructure = []
+    if (reloadExpandOk) {
+      const deadline = Date.now() + 10_000
+      while (Date.now() < deadline) {
+        reloadStructure = await extractTurnBlocks(page, USER_SENTINEL)
+        if (reloadStructure.some((t) => t.hasUserSentinel && t.blockKinds.length > 0)) break
+        await new Promise((r) => setTimeout(r, 400))
+      }
+    } else {
+      reloadStructure = await extractTurnBlocks(page, USER_SENTINEL)
+    }
     ev.attach('reload-turn-structure', JSON.stringify(reloadStructure, null, 2))
     const norm = (struct) =>
       JSON.stringify(

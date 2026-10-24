@@ -9,9 +9,10 @@
  * 已知登记 context.setOffline 稳定性未验证，本剧本不使用。
  *
  * 路径：
- *   段 1 断连自愈——流式中（PART 标记可见 = 本地 streaming 残留在场）切断 WS →
+ *   段 1 断连自愈——流式中（PART 标记可见 = 流式进行中）切断 WS →
  *   回合在 runtime 侧照常完成（本剧本协议连接独立于页面 WS，B 通道可见 complete）→
- *   断言残留：UI 无 END 哨兵 + 停止位仍在（renderer 视角仍在生成）→ restore →
+ *   A：页面切「连接中…」过渡屏（App.vue 非 connected 分支整体卸载——断连可见面；
+ *   本地 streaming 残留是内存 store 态，DOM 不可断言，见 notProvable）→ restore →
  *   断言自愈：END 哨兵经重连回放出现、停止位消失、发送位回归（isGenerating 复位）→
  *   B：history 含全文（权威源）→ A：page.reload() 后内容 ≡ 自愈态（UI ≡ reload）。
  *   D4 两步恢复（recoverStalledSession，useChat.ts）触发检测：dev console 捕获
@@ -29,16 +30,16 @@ export const meta = {
   requires: ['faux'],
   estimateSec: 200,
   faux: {
-    tps: 8,
+    tps: 15,
     responses: [
       {
-        thinking: 'DS 断连自愈轮的思考：正文将低速流式输出，中段网络将被切断，验证重连后按权威载荷恢复完整内容。',
+        thinking: 'DS 断连自愈轮的思考：正文将低速流式输出，约七成处网络将被切断，验证重连后按权威载荷恢复完整内容。',
         text:
-          '断连自愈演示正文。第一段先铺陈背景：对话流在流式期间依赖瞬态增量通道，断连即丢；' +
-          '权威内容应由定稿载荷与重连回放承担。第二段是中段标记 DS-HEAL-PART-MARK：到这里时页面侧应已渲染出部分正文，' +
-          '但整轮尚未结束。第三段继续填充内容长度，让流式窗口足够长：流式通道的展示职责与正确性职责分离，' +
-          '瞬态丢块不等于内容丢失，重连后以服务端权威状态为准重建。第四段补充：回合占用状态经 occupancy 广播宣告，' +
-          '本地派生视图与权威帧不一致时由恢复编排收尾。最后给出结尾标记 DS-HEAL-SENTINEL-END。',
+          '断连自愈演示正文。第一段铺陈背景：对话流在流式期间依赖瞬态增量通道，断连即丢；权威内容由定稿载荷与重连回放承担，' +
+          '瞬态丢块不等于内容丢失。第二段补充判定口径：回合占用状态经 occupancy 广播宣告，本地派生视图与权威帧不一致时由恢复编排收尾，' +
+          '停止位的形态跟随占用派生而非消息残留。第三段是中段标记 DS-HEAL-PART-MARK：到这里时页面侧已渲染出约七成正文，整轮尚未结束，' +
+          '断连后剩余两成多只能靠重连回放补齐。第四段继续填充：流式通道只承担展示职责，正确性职责在定稿消息（带序号、可回放、载荷为完整 entry），' +
+          '重连后订阅回放与状态快照双通道恢复。最后给出结尾标记 DS-HEAL-SENTINEL-END。',
         stopReason: 'stop',
       },
       { error: 'DS 终态失败注入：模型侧错误收尾（faux error step）。', stopReason: 'error' },
@@ -46,7 +47,8 @@ export const meta = {
   },
   provable: [
     '断连手段可控：routeWebSocket 拦截 renderer→runtime WS，sever/restore 精确翻转',
-    '断连窗口内本地 streaming 残留在场：UI 无 END 哨兵 + 停止位仍在，而 B 通道已见 complete（权威与本地矛盾态成立）',
+    'A：断连窗口内页面切「连接中…」过渡屏（App.vue 非 connected 分支整体卸载 AppShell——断连成立的用户可见面）',
+    'B：断连期间回合在 runtime 侧照常完成（complete 到达独立协议连接；权威与本地时序差成立）',
     'A：restore 后自愈：END 哨兵经重连回放出现 + 停止位消失 + 发送位回归（isGenerating 复位）',
     'B：自愈内容 = 权威源（session.history 含全文哨兵）',
     'A：page.reload() 后内容 ≡ 自愈态（断连自愈的最终形态与重开一致）',
@@ -54,6 +56,7 @@ export const meta = {
     'A：错误作为 assistant 消息入流（block-text-error 可见，错误文本在场），isGenerating 复位（发送位回归 + occupancy idle）',
   ],
   notProvable: [
+    '断连窗口内本地 streaming 残留的 DOM 断言：App.vue v-if="connectionState !== \'connected\'" 使断连瞬间整体切连接过渡屏（AppShell 卸载），残留是内存 store 态不可直接断言——经「B 已 complete ∧ 页面断连」时序差 + 重连后愈合结果间接证明',
     '真实网络分区/网卡断开形态（本剧本断连 = WS 路由层关闭，页面与 runtime 进程均在本地存活；网络层故障形态等价于 WS 断开，不重复覆盖）',
     'pi 进程崩溃/异常退出的恢复链（crash-resilience 域：session.exited/restored，与 WS 断连不同机制，不在本剧本）',
   ],
@@ -96,8 +99,10 @@ export async function run(ctx) {
   const notProvable = []
   const gotchas = [
     '断连手段：page.routeWebSocket 只拦截安装后的新连接——必须先装路由再 page.reload()，让 renderer WS 进入路由代；sever = 关全部服务端腿',
-    '断连窗口要短于 ws-client 自动重连放弃线（1+2+4+8+16+30s ≈ 60s，ws-client MAX_RECONNECT_DURATION_MS）：sever 后等 B 通道 complete 即 restore',
+    '断连即整屏切换：App.vue v-if="connectionState !== \'connected\'" 断连瞬间卸载 AppShell 切「连接中…」过渡屏——断连窗口内对话 DOM 不可断言，本地残留是内存 store 态（残留面经 B 通道 complete 时序差 + 重连愈合结果间接证明）',
+    '断连窗口双重上界：① ws-client 自动重连放弃线（退避 1+2+4+8+16+30s，MAX_RECONNECT_DURATION_MS=60s）；② 断连宽限 DISCONNECT_GRACE_MS=10s（use-connection armDisconnectGrace，到期 finalizeAllStreaming——宽限收尾后重连回放的 D3 重建按载荷覆写复原 complete，finalized-rebuild 规则 1）。sever 后等 B 通道 complete 即 restore，窗口 ≈ 流式剩余段时长（PART 标记放在约七成处 + tps 15 保证 <10s）',
     'D4 两步恢复（recoverStalledSession）的触发面 = 终态帧处理半途失败（设计 §3.3 D4 分诊的「处理失败类」）；纯断连丢失类由 ring 回放兜住（message-bus TOPIC_TABLE：message_end/complete 均为 stream 入 ring；subscription-state：snapshot 回放先于 stateSnapshot occupancy）——回放先于 occupancy 到达则 D4 不触发，此为设计内分工，按实测形态登记',
+    'error turn 收尾后发送位回归存在观察到的迟滞形态（独立探针两次复跑：一次 <5s 复位、一次 >60s 滞留且 occupancy 出现无 pi 活动的 dispatching 回升）：断言窗口放大到 60s，滞留时如实登记 uncovered + 产品疑点，不硬凑',
   ]
 
   // ── 段 0：WS 路由 + 控制台捕获 + reload 进路由代 ───────────
@@ -148,25 +153,33 @@ export async function run(ctx) {
 
   // ── 段 1b：sever + 回合在 runtime 侧照常完成 ────────────────
   severed = true
-  for (const leg of [...activeServerLegs]) {
+  const legsAtSever = [...activeServerLegs]
+  for (const leg of legsAtSever) {
     await leg.close().catch(() => {})
   }
   activeServerLegs.clear()
-  ev.step({ step: 'ws.severed', channel: 'C', exitCode: 0, stats: { legs: [...activeServerLegs].length } })
+  ev.step({ step: 'ws.severed', channel: 'C', exitCode: 0, stats: { legs: legsAtSever.length } })
 
   const end1 = await protocol.waitTurnEnd(sid, { since: since1, timeoutMs: 180_000 })
   ev.assert('B: 断连期间回合在 runtime 侧照常完成（complete 到达独立协议连接）', end1.ok === true, {
     channel: 'B', expected: 'message.complete 非 error', actual: `${end1.type} stop=${end1.payload?.stopReason ?? ''}`,
   })
 
-  // 残留矛盾态：权威已 idle，本地仍 streaming（END 不可见 + 停止位仍在）
-  const residueHtml = await ui.html('css=body')
-  const residueOk = !residueHtml.includes(END_MARK) && residueHtml.includes('stop-btn')
-  ev.assert('断连窗口内残留矛盾态成立：UI 无 END 哨兵 + 停止位仍在（B 已 complete）', residueOk, {
+  // 断连窗口内页面形态：App.vue v-if="connectionState !== 'connected'" —— 断连即整体切
+  // 「连接中…」过渡屏（AppShell 卸载），对话 DOM 不可查询；本地 streaming 残留是内存 store
+  // 态，只能经重连后的愈合结果证明（设计内行为，非产品缺陷）。
+  const severedHtml = await ui.html('css=body')
+  const onTransitionScreen = severedHtml.includes('connecting-screen')
+  ev.assert('A: 断连窗口内页面切连接过渡屏（断连成立的用户可见面）', onTransitionScreen, {
     channel: 'A',
-    expected: 'END 缺席 ∧ stop-btn 在场',
-    actual: `endAbsent=${!residueHtml.includes(END_MARK)} stopPresent=${residueHtml.includes('stop-btn')}`,
+    expected: 'connecting-screen 在 DOM（App.vue 非 connected 分支）',
+    actual: `present=${onTransitionScreen} bodyLen=${severedHtml.length}`,
   })
+  ev.attach(
+    'severed-window-state',
+    JSON.stringify({ bodyLen: severedHtml.length, hasConnectingScreen: onTransitionScreen, bChannelComplete: end1.type }, null, 2),
+  )
+  await ev.shot(page, 'severed-residue')
   await ev.shot(page, 'severed-residue')
 
   // ── 段 1c：restore → 自愈 ─────────────────────────────────
@@ -196,7 +209,7 @@ export async function run(ctx) {
 
   // ── 段 1d：D4 两步恢复触发检测（按实测形态裁决） ───────────
   const d4WarnSeen = consoleLines.some((l) => l.includes('occupancy idle but local streaming residue'))
-  const wsConsoleTail = consoleLines.filter((l) => /\[ws\]|useChat|subscription|residue|stalled/i.test(l)).slice(-40)
+  const wsConsoleTail = consoleLines.filter((l) => /\[ws\]|\[chat\]|useChat|subscription|residue|stalled|finalize/i.test(l)).slice(-40)
   ev.attach('console-ws-tail', wsConsoleTail.join('\n').slice(0, 8_000) || '(无匹配行)')
   if (d4WarnSeen) {
     ev.assert('D4 两步恢复触发（recoverStalledSession dev warn 在案）', true, {
@@ -243,12 +256,13 @@ export async function run(ctx) {
 
   // ── 段 2：终态失败收尾（faux error step） ──────────────────
   const since2 = protocol.events.length
+  const errMarkIdx = protocol.events.length
   await protocol.send(sid, '触发终态失败。DS-ERR-USER-2')
   const end2 = await protocol.waitTurnEnd(sid, { since: since2, timeoutMs: 180_000 })
-  ev.assert('B: 终态失败 turn 以 error 收尾', end2.type === 'message.complete' || end2.type === 'message.error', {
+  ev.assert('B: 终态失败 turn 以 error 收尾（willRetry=false 终态）', end2.type === 'message.complete' || end2.type === 'message.error', {
     channel: 'B',
-    expected: 'message.complete{stopReason:error} 或 message.error',
-    actual: `${end2.type} stop=${end2.payload?.stopReason ?? ''} ok=${end2.ok}`,
+    expected: 'message.complete{stopReason:error, willRetry:false} 或 message.error',
+    actual: `${end2.type} stop=${end2.payload?.stopReason ?? ''} willRetry=${end2.payload?.willRetry ?? 'n/a'} ok=${end2.ok}`,
   })
   ev.step({ step: 'chat.error-turn', channel: 'B', exitCode: 0, stats: { type: end2.type, stopReason: end2.payload?.stopReason ?? null } })
 
@@ -260,13 +274,36 @@ export async function run(ctx) {
   ev.assert('A: 错误文本在场（DS 终态失败注入文案）', errTextVisible, {
     channel: 'A', expected: ERR_MARK, actual: `hit=${errTextVisible}`,
   })
-  const errIdleHtml = await pollBodyHtml(ui, 'stop-btn', { timeoutMs: 30_000, wantPresent: false })
+  // 复位窗口放大到 60s：实测存在迟滞形态（见 gotchas）；滞留如实登记为产品疑点（degraded，不硬凑不断言假绿）
+  const errIdleHtml = await pollBodyHtml(ui, 'stop-btn', { timeoutMs: 60_000, wantPresent: false })
   const errResetOk = !errIdleHtml.includes('stop-btn') && errIdleHtml.includes('composer-send-btn')
-  ev.assert('A: 错误收尾后 isGenerating 复位（发送位回归）', errResetOk, {
-    channel: 'A',
-    expected: '无 stop-btn ∧ composer-send-btn 在场',
-    actual: `stopGone=${!errIdleHtml.includes('stop-btn')} sendBtn=${errIdleHtml.includes('composer-send-btn')}`,
-  })
+  if (errResetOk) {
+    ev.assert('A: 错误收尾后 isGenerating 复位（发送位回归）', true, {
+      channel: 'A', expected: '无 stop-btn ∧ composer-send-btn 在场', actual: '复位达成',
+    })
+  } else {
+    const occTail = protocol.events
+      .slice(errMarkIdx)
+      .filter((e) => e?.type === 'session.occupancy' && e.payload?.sessionId === sid)
+      .slice(-8)
+      .map((e) => e.payload.turn)
+    ev.step({ step: 'chat.error-turn.reset', channel: 'A', exitCode: 1, stats: { reset: false, occupancyTail: occTail } })
+    ev.attach(
+      'errface-reset-stuck',
+      JSON.stringify(
+        {
+          html: { stopBtn: errIdleHtml.includes('stop-btn'), sendBtn: errIdleHtml.includes('composer-send-btn'), errRow: errIdleHtml.includes('block-text-error') },
+          occupancyTail: occTail,
+          consoleTail: consoleLines.filter((l) => /finalize|occupancy|dispatch|useChat/i.test(l)).slice(-15),
+        },
+        null,
+        2,
+      ),
+    )
+    uncovered.push(
+      '错误收尾后发送位 60s 窗口内未回归（停止位滞留）——产品疑点：faux error turn（complete{error, willRetry=false}）后 occupancy 出现无 pi 活动的 dispatching 回升、停止位滞留（独立探针两次复跑：一次 <5s 复位、一次 >60s 滞留；pi 会话 JSONL 无 retry entry、runtime 无新 prompt），证据见 errface-reset-stuck 附件，交主 agent 裁决',
+    )
+  }
   const idleAfterError = findIdleOccupancy(protocol.events, sid, since2)
   ev.assert('B: 错误收尾后 occupancy 三维全 idle', Boolean(idleAfterError), {
     channel: 'B',

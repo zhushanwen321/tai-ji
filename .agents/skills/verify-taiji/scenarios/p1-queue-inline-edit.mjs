@@ -28,6 +28,17 @@
  *   （session-delivery-registry.ts editEntry 分支表）。
  */
 
+import crypto from 'node:crypto'
+
+/**
+ * clientUuid 必须用协议契约形态 `u-<uuid>`（renderer 乐观气泡 id 同款，registry
+ * bareMarkerId / shared MSG_ID_TAG_RE 身份段判据）：lib randomUuid 缺省的 `verify-*`
+ * 形态不构成合法 marker 身份段——edit/cancel 的 clear_queue 收回文本 marker 匹配失败，
+ * 条目被当「外来滞留文本」收养为新条目（2026-10-24 探针 2 实测：edited:false→unconfirmed
+ * 降级 + 原文双投）。已在 decisions 登记 lib 缺省 uuid 形态契约缺口。
+ */
+const uuidOf = () => `u-${crypto.randomUUID()}`
+
 // ── 哨兵与文案（各哨兵互不为子串，防 history 计数串扰） ────────────────────────
 const S_HOST = 'A5-HOST-1c7a'
 const S_Q2 = 'A5-Q2-orig-31e9'
@@ -167,7 +178,7 @@ export async function run(ctx) {
 
   // ── 段 1：主回合 + 回合中连发 3 条入队 ────────────────────────
   const since0 = p.events.length
-  const host = await p.send(sid, MSG_HOST)
+  const host = await p.send(sid, MSG_HOST, { clientUuid: uuidOf() })
   ev.assert('B: 主回合消息 direct 车道（idle 会话）', host.reply?.lane === 'direct', {
     channel: 'B', expected: 'lane=direct', actual: JSON.stringify(host.reply ?? {}),
   })
@@ -186,7 +197,7 @@ export async function run(ctx) {
 
   const q = []
   for (const [tag, msg] of [['Q2', MSG_Q2], ['Q3', MSG_Q3], ['Q4', MSG_Q4]]) {
-    const r = await p.send(sid, msg)
+    const r = await p.send(sid, msg, { clientUuid: uuidOf() })
     ev.assert(`B: 回合中提交 ${tag} 判 steer 车道`, r.reply?.lane === 'steer', {
       channel: 'B', expected: 'lane=steer', actual: JSON.stringify(r.reply ?? {}),
     })
