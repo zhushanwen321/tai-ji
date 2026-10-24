@@ -7,13 +7,14 @@ services 层 infra 直接 import 检查（C-comm-03）——落实 runtime 三�
   value import（排除 import type）中 from 路径含 /infra/ 且目标模块不在白名单 → 违规。
   import type 豁免（与 check_no_service_cycle.py 同理：接口依赖不造成运行时耦合）。
 
-白名单（受控例外）：
-  文档登记四类：logger / pi-paths / git-status-parser / ignore-parser
-  现状基线（2026-08-22 首次接入时登记）：session-file-utils / session-entry-mapper /
-    pi-provider-store / session-attach-assert / message-converter / file-change-reconciler
-  ——基线模块待专项收编（经 port 或明确豁免理由后更新本清单），新增 infra value import 直接拦。
-  session-binding-fields（2026-08-26 登记）：绑定字段注册表 SSOT（sidecar-binding-sync 设计），
-    纯声明数据 + 纯函数，自 session-file-utils 抽出（同族受控例外，随 R3 一并收编）。
+白名单（受控例外，分两个集合，判定取并集）：
+  文档登记模块 = docs/architecture/runtime-layering.md §3「跨切面例外」表登记的全部模块；
+    权威表与机器对账（§3 表 ↔ DOCUMENTED_MODULES 双向一致，漂移即红）见
+    check_layering_registry_sync.py——本 docstring 不手抄模块清单与数量（历次增补均由
+    行内注释单独登记，手抄数必然滞后）。
+  现状基线债 = BASELINE_MODULES 集合本身（见下方定义，每项的登记日期与收编理由随条目
+    行内注释）——待专项收编（经 port 或明确豁免理由后逐项移除），新增 infra value import
+    直接拦。
 
 退出码: 0 通过 / 2 违规
 """

@@ -11,7 +11,7 @@
  *   第一毫秒起就是真值）——立即生效，不依赖广播到达——未发消息的 session 可能无
  *   streamSubscription，广播会丢。
  *   [W1 会话架构四层分离] 写入目标是状态层（按会话 id 寄存），**不再按 id 类别分流**：
- *   btw 线 vid 与主会话走同一个 apply 入口（旧实现 btw 分支 + 专用 store 已删除）。
+ *   btw 线（pi 真实会话 id）与主会话走同一个 apply 入口（旧实现 btw 分支 + 专用 store 已删除）。
  * - landing 延迟态（useNewTaskFlow）：session 尚未 create，无法调 RPC。本 composable
  *   不处理 pending 记录（那是 useNewTaskFlow 的状态机职责），只暴露「session 已建后 apply」
  *   的能力，供 submitFirstMessage 在 create session 后调用，消除 useNewTaskFlow 与

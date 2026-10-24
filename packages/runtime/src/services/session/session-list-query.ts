@@ -2,15 +2,16 @@
  * session-list-query —— `session.list` 通用查询的条目合成（会话架构四层分离 W4b，
  * 设计 §3.3.1 / §5-W4b）。
  *
- * 为什么独立于 SessionScanner：scanner 的 `listAll` 以 `!s.hidden` 过滤 btw 线
- * （W3 双写期线的 active 腿防线，`config.sessions` 全量广播必须保持该口径——28 处
+ * 为什么独立于 SessionScanner：scanner 的 `listAll` 以 `surface === 'sidebar'` 正向谓词
+ * 过滤 btw 线（`config.sessions` 全量广播必须保持该口径——28 处
  * 广播调用点零改动），故侧栏分组结构性不含线条目；`session.list` 的调用方（抽屉 /
  * 搜索 / 抑制类成员判别）要的恰是含线的视图。本模块在同一查询入口上按
  * surface / mainSessionId 两参数派生，不改 scanner、不改广播语义。
  *
  * 取数来源（注册表即权威，无第二事实源）：
- * - 侧栏口径 = `scanner.listPersistedSessions()`（活跃非 hidden + 磁盘扫描合并分组，
- *   与 `config.sessions` 广播同源——同 owner 派生保证两口径不会各自演化）；
+ * - 侧栏口径 = `scanner.listPersistedSessions()`（活跃 + 磁盘扫描合并分组后按
+ *   `surface === 'sidebar'` 过滤，与 `config.sessions` 广播同源——同 owner 派生保证
+ *   两口径不会各自演化）；
  * - 线口径 = `BtwService.listAllLines()`（registry 内存投影；启动时 rebuildFromDisk
  *   从 `<root>/<mainSid>/btw/*.jsonl` 重建，冷线不 spawn 即在线）。
  *
