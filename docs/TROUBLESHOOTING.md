@@ -125,6 +125,19 @@ lsof -i :3210 -P | grep LISTEN                     # 端口占用
 lsof -i :3210-3220 -P | grep LISTEN | awk '{print $2}' | sort -u   # 清理残留进程前先定位 PID
 ```
 
+### 3.1 dev 实例 vite 端口「ready 但 Electron 判未就绪」死循环
+
+症状：装配日志里 vite 已打印 `ready in N ms / Local: http://localhost:<port>/`，Electron 主进程仍报
+`Vite dev server ... did not become ready within 30000ms` 后退出。
+
+判定：派生端口（`dev-instance-lib.mjs` deriveParams，1420+hash%300）落在 WHATWG fetch spec
+「bad port」清单（undici fetch 与 Chromium 导航一致，连接发起前即拒）。实测撞点 = 1719
+（h323hostcall）。探针：`node -e "fetch('http://localhost:1719').catch(e => console.log(e.cause))"`
+输出 `Error: bad port` 即命中。
+
+恢复：deriveParams 已对清单端口确定性 +1 顺延（2026-10-24 修复）；旧实例名仍命中时换
+`TAIJI_DEV_INSTANCE_NAME=<新名>` 重派端口段。
+
 ### 4. Extension 相关问题
 
 builtin pi extensions（数量与分组以 `packages/shared/src/mandatory-extensions.json` 为 SSOT）随应用打包内置，不经过 npm 安装：

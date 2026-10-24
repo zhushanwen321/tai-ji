@@ -38,7 +38,7 @@
 |------|-----------|---------|
 | 应用启动与进程编排 | Electron 窗口创建、runtime 子进程拉起、WS 握手、renderer 加载、单实例锁 | `apps/electron/main/` + `packages/runtime/src/server.ts` |
 | 会话创建与首发 | 新建任务旅程（Landing → 选目录 → 首发提交）、模式选择（landing 第三 chip，模式 id 创建时锁定）、pi 进程绑定 | `useSidebar` / `SessionService`（testing 01） |
-| 对话发送与流式渲染 | composer 输入三态、发送、流式 delta 回显、错误作为 assistant 消息入流、isGenerating 重置 | composer / `run-send-stream`（testing 02/03） |
+| 对话发送与流式渲染 | composer 发送位内容驱动双形态（有内容=发送±队列角标 / 无内容=停止·禁用占位，spinner 最高优先）、发送、流式 delta 回显、错误作为 assistant 消息入流、occupancy 四维状态机驱动收起时机（工作态回合不收起 + 计时持续、回合结束定格）、回合中插话入队与回流开新回合、settling 窗口追问即时受理（steer）、队列区原位编辑（✎ 编辑保位 / × 撤销回填）与反复操作幂等 | composer / `run-send-stream`（testing 02/03）+ verify-taiji p1-turn-interject-collapse / p1-settling-steer-delivery / p1-send-button-matrix / p1-queue-inline-edit / p1-queue-ops-idempotent（chat-flow-consistency 交付） |
 | pi RPC 适配 | EventAdapter 协议翻译、session-pool、sendCommand success 检查、pi stdout tee 落盘 | `packages/runtime/src/` pi 适配层 |
 | session 持久化与恢复 | pi session 文件延迟写入、live ≡ reload（同一 applyEntry reducer）、重开一致、全 entry 类型 | entry reducer 链（关键规则 9） |
 | per-session 隔离 | 消息 sessionId 路由三层过滤、ADR-0049 Map 分区、updateFor(capturedSid) | `useSessionScopedState` 工厂（ADR-0049） |
