@@ -149,7 +149,7 @@ beforeEach(() => {
 })
 
 describe('挂载/切会话主动拉取（broadcast 时序竞争规则：必拉不依赖广播）', () => {
-  it('挂载即主动拉取 btw.list(mainSid)，线列表落当前分区', async () => {
+  it("挂载即主动拉取 session.list {surface:'btw', mainSessionId}，线列表落当前分区", async () => {
     sessionListMock.listSessions.mockResolvedValue(groupsOf(line('t1', 1), line('t2', 2)))
     const w = mountHost(SID_A)
     await settle(w)
@@ -301,7 +301,7 @@ describe('虚拟 key 清理登记（M3-b 登记结构；deleteSession 消费方�
     // 等观察点在册（threads 派生视图到位 = syncWatchedLines 登记完成，与未读 watch 基线
     // 同拍）：per-线未读观察以「首次见到的分区长度」为基线（产品语义：初始快照内的消息
     // 不算新未读），setMessages 必须落在登记之后，否则会被基线吞掉且无重算路径。
-    // 到达手段 = settle 的 macrotask 边界：refresh 链（btw.list mock resolve → threads
+    // 到达手段 = settle 的 macrotask 边界：refresh 链（session.list mock resolve → threads
     // 写分区 → 登记）是纯微任务链（链路各环节已核实无真实 timer），微任务清空是事件
     // 循环的构造性保证，负载只影响墙钟不影响到达——不依赖轮询窗口。
     await settle(w)

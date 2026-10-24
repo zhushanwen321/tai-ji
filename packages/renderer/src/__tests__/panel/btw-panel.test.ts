@@ -357,7 +357,7 @@ describe('BtwPanel 内联确认条表单降档（M3-c 行为范围，useBtwInter
     apiMock.list.mockResolvedValue(btwLineGroups({ id: 'pi-1' }))
     const wrapper = mountPanel(MAIN_A)
     await settle(wrapper)
-    // 自动选中唯一线（latest = pi-1）→ 交互区挂载到该 vid
+    // 自动选中唯一线（latest = pi-1）→ 交互区挂载到该线 session id
     expect(wrapper.find('[data-testid="btw-stream"]').attributes('session-id')).toBe('pi-1')
 
     // 驱动侧 = 生产 bus 订阅的等价写入（store 是 pending SSOT，addRequest 与
