@@ -140,13 +140,16 @@ export function seedPluginCatalog(dataDir, entries) {
 /**
  * 家族清单条目构造器（单产物 provider 插件形态）。
  * namespace = 插件命名空间（= family.id，条目行与清单家族的前缀匹配键）。
+ * piExtensionVersion 传入 = 双产物条目（A23a：plugin-catalog guard 允许该字段出现，
+ * plugin-service.installPiExtensionMember 按它判定需装 pi 扩展成员）。
  */
-export function catalogEntry({ packageName, pluginId, displayName, namespace, version, capabilities = [], readPaths = [] }) {
+export function catalogEntry({ packageName, pluginId, displayName, namespace, version, piExtensionVersion, capabilities = [], readPaths = [] }) {
   return {
     packageName,
     pluginId,
     displayName,
     pluginVersion: version,
+    ...(piExtensionVersion !== undefined ? { piExtensionVersion } : {}),
     family: {
       id: namespace,
       displayName,

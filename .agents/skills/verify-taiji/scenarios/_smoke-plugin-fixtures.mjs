@@ -31,7 +31,9 @@ seedPluginFixtures(dataDir0, [
     displayName: 'Smoke Echo',
     description: 'smoke fixture for S3 infra',
     namespace: 'smoke-echo',
-    permissions: ['plugin.commands.register', 'providers.write', 'plugin.event'],
+    // invoke.result 是命令结果回传的 Worker→host RPC（缺它 = result 被 fail-closed 拒，
+    // host 侧 pending 挂到超时——2026-10-24 d3-r3-smoke 首跑归因）
+    permissions: ['plugin.commands.register', 'plugin.commands.invoke.result', 'providers.write', 'plugin.event'],
     activateBody: `
   await api.commands.register({ id: 'ping', title: 'ping' }, (args) => ({ pong: true, echo: args ?? null }))
   await api.providers.write({ providerId: 'echo-prov', apiKey: '${ALPHA_KEY}', displayName: 'Smoke Echo Provider', models: [{ id: 'smoke-model' }] })
@@ -44,7 +46,7 @@ seedCatalogCache(dataDir0, [
     packageName: '@smoke/plugin-echo',
     displayName: 'Smoke Echo (catalog)',
     version: '0.1.0',
-    family: { id: 'echo', displayName: 'SmokeEcho', vendor: 'verify', credentialSource: 'oauth', modelCount: 1 },
+    family: { id: 'smoke-echo', displayName: 'SmokeEcho', vendor: 'verify', credentialSource: 'oauth', modelCount: 1 },
   }),
 ])
 
@@ -64,7 +66,7 @@ export async function run(ctx) {
 
   // ① 权限批准 + 插件被发现且激活
   const states = await approveAndAwaitActive(protocol, ev, {
-    'smoke__plugin-echo': ['plugin.commands.register', 'providers.write', 'plugin.event'],
+    'smoke__plugin-echo': ['plugin.commands.register', 'plugin.commands.invoke.result', 'providers.write', 'plugin.event'],
   })
   ev.assert('① fixture 插件激活（sandbox fork，status=active）', states['smoke__plugin-echo']?.status === 'active', {
     channel: 'B', expected: 'active', actual: JSON.stringify(states),
