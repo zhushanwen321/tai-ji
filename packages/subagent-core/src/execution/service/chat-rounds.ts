@@ -832,8 +832,8 @@ export class ChatRounds {
    * ② 通知时延契约：settleRoundSuccess/settleRoundFailed 在本方法返回后立即发轮终通
    * 知，await 收割会把通知钉在引擎进程回收时延上（2026-10-25 实测：runtime transport
    * 的 engine_close 宽限上界 CONTROL_CLOSE_GRACE_MS=3s，engine_closed 迟到时通知恒
-   * 迟 3s——失败轮通知 <1s 预算被资源回收时延击穿，登记 docs/todo/
-   * failure-notify-injection-latency-3s.md）。收割是资源回收面，通知是用户可见时延面
+   * 迟 3s——失败轮通知 <1s 预算被资源回收时延击穿，排查与修复记录见 git 提交
+   * 2ed6f5133）。收割是资源回收面，通知是用户可见时延面
    * ，两者无数据依赖，不得互相阻塞。
    */
   async finalizeRoundToIdle(

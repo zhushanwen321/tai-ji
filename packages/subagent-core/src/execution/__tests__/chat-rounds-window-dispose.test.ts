@@ -342,7 +342,7 @@ describe("[§1.4 (a)] 轮终收尾句柄就绪等待（finalizeRoundToIdle × wa
 // dispose 挂起时失败轮 settle 链照常走完（簿记落 idle + 失败通知发出）——收割是
 // 资源回收面，通知是用户可见时延面，两者无数据依赖不得互相阻塞（2026-10-25 实测
 // 根因：await 收割把失败轮通知钉在 runtime transport 的 engine_close 3s 宽限上，
-// docs/todo/failure-notify-injection-latency-3s.md）。
+// 排查与修复记录见 git 提交 2ed6f5133）。
 
 /** dispose 可挂起的窗口实例替身：dispose 进入后停在门上（测试手动放行）；
  *  可注入失败轮应答（error outcome → settleRoundFailed 分支）。 */

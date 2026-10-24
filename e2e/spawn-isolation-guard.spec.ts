@@ -1,8 +1,8 @@
 /**
  * 真机批次播种隔离 guard（mock 层零启动零 token）——锁 seedRealCredentials 的播种契约：
- * 真机 e2e 的 pi 进程不得依赖宿主全局环境（登记 docs/todo/e2e-pi-settings-npm-double-load.md
- * 恢复动作 2 的仓库侧隔离：隔离落点 = 播种产物，spawn 构造侧的 --no-extensions /
- * PI_CODING_AGENT_DIR 已由 pi-rpc 与 pi-subagent-cli 的单测分别锁定，此处不重复）。
+ * 真机 e2e 的 pi 进程不得依赖宿主全局环境（隔离落点 = 播种产物；spawn 构造侧的
+ * --no-extensions / PI_CODING_AGENT_DIR 已由 pi-rpc 与 pi-subagent-cli 的单测分别锁定，
+ * 此处不重复）。
  *
  * 三条契约（每条对应一个宿主环境泄漏面）：
  * 1. settings.json 播种最小子集——不带宿主 packages 清单（settings packages 通道；

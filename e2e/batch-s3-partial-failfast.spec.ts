@@ -358,13 +358,17 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
       `\`subagent_message\` tool before replying. Do not summarize, do not simulate the result.`
     let rejectArrived = false
     for (let round = 1; round <= 2 && !rejectArrived; round += 1) {
-      const offsetBefore = fs.statSync(s.sessionFile).size
       await sendAndWaitTurn(testInfo, round === 1 ? basePrompt : retryPrompt, `s3b-send-r${round}`, MAIN_TURN_TIMEOUT_MS)
       s.sessionFile = await locateSessionFile(path.join(s.dataDir, 'agent'))
       rejectArrived = await waitUntil(
         () => {
-          const text = fs.readFileSync(s.sessionFile, 'utf8')
-          return text.length > offsetBefore && text.slice(offsetBefore).includes(REJECT_BOUNDARY_SNIPPET)
+          // 结构锚定 = 全文件含域边界拒绝文案（拒绝 toolResult 的 isError 帧落盘）。
+          // 不用「发送前 offset 增量窗口」判定：S3b 上下文逼近 compaction 阈值时
+          // session 文件可能被重写轮转（size 骤减），offsetBefore 恒大于文件长度
+          // → slice 后恒空、判定永假——2026-10-25 真机实测拒绝 toolResult 已在盘
+          // 而判定未命中即此形态。全文件扫描无误判面：进入下一轮的前提 = 前轮
+          // 未产生拒绝文案（第一轮失败形态 = LLM 未调工具，session 内无 snippet）。
+          return fs.readFileSync(s.sessionFile, 'utf8').includes(REJECT_BOUNDARY_SNIPPET)
         },
         round === 1 ? JSONL_FLUSH_TIMEOUT_MS : JSONL_FLUSH_TIMEOUT_MS * 2,
       )
