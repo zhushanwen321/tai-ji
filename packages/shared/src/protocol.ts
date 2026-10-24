@@ -3741,8 +3741,8 @@ export interface ReplyPayloadMap {
  * 仅以上两字段由本 DTO 承载并落 `SessionSummary`。`modelId` / `thinkingLevel` /
  * `tokenCount` / `pendingMessageCount` / `commands` 五字段**自 W1 起无生产写入口、亦无读取方**（状态归
  * live-state 状态层，设计 §1.3 根因一 / §3.4.2；pendingMessageCount 的真实载体是 runtime
- * queue_update 帧）——类型里保留仅为历史兼容，**新代码不得写入**（类型层裁剪处置见同步修复
- * 登记 M2-4）。
+ * queue_update 帧）——类型里保留仅为历史兼容，**新代码不得写入**（是否从类型层裁剪这五个
+ * 字段留待后续协议收缩项裁决；未决前不得写入）。
  *
  * [HISTORICAL] usagePercent/inputTokens/contextLimit 三字段已删（D1 协议收敛，context-consistency
  * Phase 1，2026-08）：state_changed 帧不再携带 usage，context 用量经 context.update 帧直达各自

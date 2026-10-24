@@ -13,7 +13,8 @@
  *
  * per-session 隔离：session 已建态按 sessionId 查真值（经 deps.getSessionState，非读全局 active），
  * split panel 下两个 Composer 各读各的 session 状态，不串读。底层数据已 per-session
- * （SessionSummary.modelId/thinkingLevel + applySnapshot(id,...)），此处只接对数据源。
+ * （live-state 状态层按 sessionId 寄存，经 deps.getSessionState 读取；applySnapshot 只承载
+ * label/status 描述字段），此处只接对数据源。
  *
  * landing 态（sessionId=null）session 尚未 create，无法调 model.switch / setThinkingLevel RPC。
  * 选定值记入 pendingModel + localThinkingLevel，首发提交时经 resolveLaunchConfig 终值随
@@ -402,8 +403,9 @@ export function useComposerModelThinking(
       // 置于 RPC 成功后、clearArmedIfOwner 之前：RPC 失败 = 本次切换未生效，landing 粘滞
       // 默认不指向切换失败的模型（与 armed「失败清」防线同向）
       recordLastUsed(targetModelId)
-      // [u3·D3 规则 5「成功清」] 时序依据（D3 证据②）：applySnapshot 在 switchModel 内同步
-      // 执行，watch flush 微任务于 applySnapshot 时刻入队，本 await 续段晚于 flush——
+      // [u3·D3 规则 5「成功清」] 时序依据（D3 证据②）：applyLiveState（壳层 useModel 回执写，
+      // 非 applySnapshot——后者只承载 label/status 描述字段）在 switchModel 内同步执行，
+      // watch flush 微任务于写入时刻入队，本 await 续段晚于 flush——
       // watch 回调总是先跑。故此处只对「回调未能消费」的残留 token 生效（pi 静默换模 /
       // re-select 同模型），清除后陈旧 token 不再被后续无关触发延迟消费（chip 突跳伪恢复）。
       clearArmedIfOwner(callId)

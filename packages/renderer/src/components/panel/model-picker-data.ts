@@ -31,7 +31,7 @@ export interface PickerGroupRef {
 
 /**
  * 拆出裸 modelId：selected 可能是 "provider/modelId" 复合串
- * （SessionSummary.modelId / config.defaults.defaultModel 均为此格式），
+ * （live-state 状态层 / config.defaults.defaultModel / composer 暂存值均可能为此格式），
  * 但 ModelInfo.id 是裸 modelId。匹配列表项时取 `/` 后段。
  */
 export function bareModelId(v: string): string {

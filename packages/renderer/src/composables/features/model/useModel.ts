@@ -48,7 +48,7 @@ export function useModel() {
    * pi 实际生效值（runtime set→get_state 读回；pi pattern 引擎静默换模——事故 A 形态——
    * 时生效值 ≠ 请求值），显示值从第一毫秒起就是真值，禁用请求值乐观写。
    * RPC 失败时不写 store（显示保持旧真值）；state_changed 广播收敛兜底保留不变。
-   * 写入 "provider/modelId" 复合串（与 SessionSummary.modelId 同格式）。
+   * 写入 "provider/modelId" 复合串（与 session.state_changed / session.getState reply 的 modelId 同口径）。
    *
    * 调用方职责区分：
    * - session 已建（Composer 工具条切换）：直传 sessionId + provider + modelId
