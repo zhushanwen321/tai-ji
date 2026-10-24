@@ -8,7 +8,7 @@
  * install 旧版本 → registry.reload → removeDescriptor（清新版残留）→
  * registerDescriptors 回填旧版 descriptor → reactivatePreviousVersionAfterRollback
  * 重激活旧版本，失败以 plugin-install-error 呈现（不静默成功）。回滚与幸存面成立，
- * 但重激活未达 active（照录，uncovered + ISSUES.md）：2.0.0 激活段起的 fork 在
+ * 重激活达 active（回滚分支重激活前 terminate 残留沙箱，commit 6557a0683）：2.0.0 激活段起的 fork 在
  * activate 抛错后未 terminate，重激活复用该存活 fork，同 URL ESM 缓存重放必抛错
  * 代码——旧版本即时可用降级为重启后 onStartupFinished 恢复。
  *
@@ -71,7 +71,7 @@ export const meta = {
     '更新提交换新面：确认卡 update 意图直达（@1.1.0）；更新后目录 package.json version=1.1.0、plugin.list version=1.1.0 status=active（磁盘/注册表/激活态跟随新版本）',
     'C: 更新后条目与凭据保留（update-demo-main 条目在场 + apiKey 同值，设计 S26 保留性断言）',
     '重激活真实生效：更新提交终止旧沙箱 fork → 新 fork 执行 1.1.0 activate——fork PID 更替 + 条目 displayName 切 v1.1.0（S26「插件重激活执行新代码」达成）',
-    '必败包（激活即抛错）更新失败可见 + 回滚旧版本幸存：plugin-install-error 呈现（不再静默成功）；回滚后目录 package.json 与 plugin.list version 回 1.1.0（旧版本幸存），条目凭据保留、暂存无残留；重激活未达 active（status 停 discovered）照录——B1 残余缺口 uncovered + ISSUES.md',
+    '必败包（激活即抛错）更新失败可见 + 回滚旧版本幸存且即时可用：plugin-install-error 呈现（不再静默成功）；回滚后目录 package.json 与 plugin.list version 回 1.1.0（旧版本幸存），条目凭据保留、暂存无残留；重激活达 active（回滚分支重激活前 terminate 残留沙箱，commit 6557a0683）',
   ],
   notProvable: [
     '清单远程热更新链（清单为本剧本 seed 的本地缓存形态，版本翻转走改写缓存文件——远程拉取归 S15 域）',
@@ -305,12 +305,12 @@ export async function run(ctx) {
     expected: 'version=1.1.0（registerDescriptors 回填旧版 descriptor）',
     actual: info3 ? `status=${info3.status} v${info3.version}` : '不在列表',
   })
-  ev.assert('C: 回滚后插件状态照录 status=discovered（重激活未达 active——B1 残余缺口取证；产品修复后本断言 fail 提示改写为 active 正向断言）', Boolean(info3 && info3.status === 'discovered'), {
+  ev.assert('C: 回滚后插件重激活达 active（旧版本即时可用——回滚分支重激活前 terminate 残留沙箱，commit 6557a0683）', Boolean(info3 && info3.status === 'active'), {
     channel: 'C',
-    expected: 'discovered（产品现状：重激活复用 2.0.0 激活段残留 fork，同 URL ESM 缓存重放必抛错代码 → UNLOADED）',
+    expected: 'active（重激活新 fork 装旧代码，S26「旧版本幸存可用」即时成立）',
     actual: info3 ? `status=${info3.status}` : '不在列表',
   })
-  uncovered.push('S26「更新失败 → 旧版本幸存可用（重激活非等重启）」未完全达成：回滚与幸存面成立（错误呈现 + 磁盘/注册表回 1.1.0 + 凭据保留），但重激活未达 active——2.0.0 激活段起的 sandbox fork 在 activate 抛错后未 terminate，回滚分支缺 terminate 步骤，重激活 assignProcess 复用该存活 fork，handleLoad 同 URL 命中 ESM 缓存重放 2.0.0 必抛错代码 → 重激活失败停 UNLOADED（plugin.list status=discovered）；旧版本即时可用降级为重启后 onStartupFinished 恢复（产品缺口，ISSUES.md 已登记）')
+
   const forkPidRollback = findSandboxForkPid()
   ev.assert('C: 回滚后沙箱 fork PID 与 1.1.0 更新段不同（2.0.0 激活段所起进程存活并被重激活复用——模块缓存污染的进程载体）', Boolean(forkPidRollback) && Boolean(forkPidAfter) && forkPidRollback !== forkPidAfter, {
     channel: 'C',
