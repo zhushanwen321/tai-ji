@@ -68,7 +68,7 @@ describe("mapToWorkflowAgentResult (D-A10)", () => {
     }
   });
 
-  it("failureKind 缺省（成功路径/上游未写）→ 不落键（消费侧视为 unknown = 可重试）", () => {
+  it("failureKind 缺省（成功路径/上游未写）→ 不落键（消费侧按字段透传，RunErrorCode 缺省兜底 unknown）", () => {
     const result = mapToWorkflowAgentResult(minimalResult);
     expect(result.failureKind).toBeUndefined();
     expect("failureKind" in result).toBe(false);

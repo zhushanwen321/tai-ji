@@ -87,8 +87,8 @@ export function isEngineSpawnDeliveryErrorMsg(msg: string | undefined): boolean 
 }
 
 /**
- * [M2 D3/D10] 错误文案 → 结构化失败分诊标签（产出侧唯一识别点，
- * 送达错误码在前 > stale > schema_deterministic）。
+ * [M2 D3/D10] 错误文案 → 结构化失败分诊标签——历史解析兼容词表谓词
+ * （@deprecated 见下）。
  *
  * @deprecated [subagent-observability §3.3.2] 子串分诊已退役（8 案例 collapse 的直接
  * 原因——业务规则依赖 IO 文案形态而非事实结构）：u1 起 collectOutcome 的失败分类

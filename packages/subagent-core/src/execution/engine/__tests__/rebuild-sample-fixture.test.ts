@@ -5,7 +5,9 @@
  * run-event journal，无帧手工编造），供 u5 的 gantt-segments fixture 单测消费：
  * - rebuild 样本：worker 崩溃后 rebuild 重派——同 taskIndex 两帧 agent-started、
  *   帧间无 run 级转移帧（隐式代际边界），且含重放代际重落的 phase-started 帧
- *   （「重落的 phase-started 不参与锚定」断言的样本载体）与 ≥1 个带重试的 call。
+ *   （「重落的 phase-started 不参与锚定」断言的样本载体）与 1 个带 agent-retrying
+ *   历史帧的 call（该帧为存量 fixture 的采集时点产物——现行引擎失败单次即终态
+ *   [ADR-0122]，该帧型已不产生，journal 词表兼容保留）。
  * - resume 样本：run 中断后 resume 重派——同 taskIndex 两帧 agent-started，帧间
  *   恰有 run-interrupted / run-resumed 转移帧各一。
  *
@@ -106,9 +108,11 @@ function recordPathOf(runId: string): string {
 
 /**
  * 按 prompt 分流的 runner mock（AgentRunner port）：
- * - script 参数（failingPrompt 指定的 call）首次返回一般性失败 → 引擎重试矩阵
- *   落 agent-retrying 帧 → 第二次成功（execute-agent-call：result.error 非空且
- *   attempts < 3 可重试；缺省 failureKind = unknown = 可重试）。
+ * - failingPrompt 指定的 call：脚本化失败注入——首次返回 result.error 非空，之后
+ *   每次立即成功。现行引擎不会对同一 call 产生第二次真实调用：execute-agent-call
+ *   失败单次即终态（[ADR-0122] 不自动重试，agent-retrying 帧不再落盘），失败
+ *   settled 结果进回放集（含失败的 done 保留回放）——rebuild/resume 重放对已
+ *   settled call 回话历史结果、不真实重派；本文件现有用例也未启用此参数。
  * - hungPrompt 指定的 call 首次派发永不返回（模拟在途中崩溃/中断）；重放代际
  *   第 2 次调用立即成功——重建后的重放由此确定性穿过崩溃点。
  */
