@@ -37,7 +37,8 @@ export type RunDoneReason =
   | "partially_succeeded";
 
 /**
- * run 终局形态词表（四值，[D2] 词表变更登记后的形态——workflow-run-resume-revision）。
+ * run 终局形态词表（五值：done/failed/cancelled/time_limited/partially_succeeded——
+ * [D2] 词表变更登记形态 + [subagent-observability §3.3.8] 第五值）。
  *
  * 与 DoneReason（completed/failed/aborted/budget_limited/time_limited，五因单
  * 维度）的关系：outcome 是终态正交化后的「run 自身怎么死的」维度（harness 系统
@@ -46,7 +47,7 @@ export type RunDoneReason =
  * aborted 在本词表命名为 cancelled（对齐 D5 词表；DoneReason 存量词表不动，映射
  * 归 journal 写入方实现）。
  *
- * [D2] 词表变更登记（现行四值与重构前四值的差异，逐条显式登记）：
+ * [D2] 词表变更登记（现行值域与重构前四值的差异，逐条显式登记）：
  * 1. **completed → done 改名**：与 shared `WorkflowRunStatus` 终局值 'done' 统一
  *    字面量——status 域与 outcome 域的成功/终局值同词，派生视图链无需两套叫法；
  * 2. **interrupted 移出 outcome（入 lifecycle 暂停态）**：「终局了却又没死透」的
@@ -90,8 +91,10 @@ export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
  *   （engine_ 前缀、core 不解释文案的 passthrough 契约）。显式并列
  *   EngineProtocolErrorCode 而非只留模板面——固定词表是该 union 的权威枚举源，
  *   SDK 侧词表演进（含非 engine_ 前缀的新码）自动跟进；
- * - 失败分类：AgentFailureKind（stale_context / schema_deterministic / unknown，
- *   产出侧 classifyFailureKind 词表，经 orchestration/models/types.ts re-export）。
+ * - 失败分类：AgentFailureKind（stale_context / schema_deterministic / unknown——
+ *   已 @deprecated（ADR-0158：FailureCause 五维判别联合替换），保留为历史帧解析
+ *   兼容；新写入方失败分类 = FailureCause，产出侧分类器 classifyFailureKind 已
+ *   退役。类型经 orchestration/models/types.ts re-export）。
  *
  * unknown 是合法成员：分类不出来的失败照记事件（词表漂移的失效模式 = 保守
  * 可诊断，不是拒记）。

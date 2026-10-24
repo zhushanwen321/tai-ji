@@ -70,6 +70,7 @@ import {
   toSettledEntryData,
 } from "./record-entry-write.ts";
 import type { StopReason } from "../domain/record-types.ts";
+import type { SettlementReason } from "../../shared/run-vocabulary.ts";
 import { permanentSessionStatusMachine } from "../domain/record-status-machine.ts";
 import type { ExecutionRecord, RoundFacts } from "../domain/record-model.ts";
 import type { AgentEvent } from "../assembly/types.ts";
@@ -312,45 +313,62 @@ function failureOf(outcome: RoundSettlementOutcome): FailureCause | undefined {
 }
 
 /**
- * [subagent-observability §3.3.3 派生展示词] 旧 stopReason 展示位的迁移期值（§3.4
- * 双写：帧并行产出旧值与新事实字段，消费方先读事实、缺省回落旧值）：
+ * [subagent-observability §3.3.3 停因事实化] 轮终停因写入值（内存展示位 rec.stopReason
+ * 与 record-round-idle 帧 stopReason 同源）：
  *   - 被接管轮（promptDisposition=handled）→ undefined（引擎未执行无停因，且
- *     「正常收尾」派生判据要求引擎停因 stop——本形态构造性不满足，不派生）；
- *   - 引擎停因事实在场 → 派生：stop 且无失败分类 = completed（「正常收尾」），
- *     否则 failed（error/aborted 停因或携带失败分类）；
- *   - 事实缺席（u1 判定链接线前）→ 回落旧写入判据（failed 轮=failed / 其余=
- *     completed）——写侧过渡锚，退役条件 = §3.4 迁移完删旧值（同批删
- *     LEGACY_INFERRED_STOP_REASONS 成员与回落分支）。
+ *     「正常收尾」派生判据要求引擎停因 stop——本形态构造性不满足）；
+ *   - 引擎停因事实在场 → 写引擎原值（stop/error/aborted——停因只存事实，
+ *     ROUND_TERMINAL_STOP_REASONS 为轮终写入值域）；
+ *   - 事实缺席（旧引擎无停因上报）→ 回落旧推断值（failed 轮=failed / 其余=
+ *     completed，LEGACY_INFERRED_STOP_REASONS）——迁移期回落，退役条件 =
+ *     §3.4 迁移完删旧值（同批删 LEGACY_INFERRED_STOP_REASONS 成员与回落分支）。
  */
-function legacyStopReasonDisplay(outcome: RoundSettlementOutcome): StopReason | undefined {
+function roundStopReasonOf(outcome: RoundSettlementOutcome): StopReason | undefined {
   if (outcome.promptDisposition === "handled") return undefined;
-  if (outcome.engineStopReason !== undefined) {
-    return outcome.engineStopReason === "stop" && failureOf(outcome) === undefined
-      ? "completed"
-      : "failed";
-  }
+  if (outcome.engineStopReason !== undefined) return outcome.engineStopReason;
   return outcome.kind === "failed" ? "failed" : "completed";
 }
 
-/** 轮收条事实快照组装（ExecutionRecord.lastRound 载体——只收事实字段，缺省不落键）。 */
-function roundFactsOf(outcome: RoundSettlementOutcome): RoundFacts | undefined {
+/**
+ * [subagent-observability §3.3.6 结清解析] pending 结清 reason（与轮终展示位同源的
+ * 事实优先级，防「展示词落 failed、结清落 completed」的分裂）：
+ *   handled → no_result；failure.class=user → cancelled（用户中止非失败，§3.3.1
+ *   三源判别取消支）；其余 failure 在场 → failed；引擎停因 error/aborted（无失败
+ *   分类的异常中止）→ failed；回落按 kind（failed 轮=failed / 成功=completed）。
+ */
+function roundSettlementReasonOf(outcome: RoundSettlementOutcome): SettlementReason {
+  if (outcome.promptDisposition === "handled") return "no_result";
+  const failure = failureOf(outcome);
+  if (failure?.class === "user") return "cancelled";
+  if (failure !== undefined) return "failed";
+  if (outcome.engineStopReason === "error" || outcome.engineStopReason === "aborted") return "failed";
+  return outcome.kind === "failed" ? "failed" : "completed";
+}
+
+/** 轮收条事实快照组装（ExecutionRecord.lastRound 载体——只收事实字段，缺省不落键）。
+ *  turns = 收条时点的累计轮数（调用方传 rec.turnCount 定格——live 计数器在下一轮
+ *  会推进，收条值只能随收条快照）。 */
+function roundFactsOf(outcome: RoundSettlementOutcome, turns: number): RoundFacts | undefined {
   const failure = failureOf(outcome);
   const facts: RoundFacts = {
     ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
     ...(failure !== undefined ? { failure } : {}),
     ...(outcome.promptDisposition !== undefined ? { promptDisposition: outcome.promptDisposition } : {}),
+    turns,
     ...(outcome.usage !== undefined ? { usage: outcome.usage } : {}),
     ...(outcome.retryAttempts !== undefined ? { retryAttempts: outcome.retryAttempts } : {}),
     ...(outcome.observations !== undefined ? { observations: outcome.observations } : {}),
+    ...(outcome.stderrTeePath !== undefined ? { stderrTeePath: outcome.stderrTeePath } : {}),
   };
   return Object.keys(facts).length > 0 ? facts : undefined;
 }
 
 /**
  * [W1 / D3 表行 4] record-round-idle 帧载荷组装（markRoundIdleImpl 拆出）：轮终收条
- * ——停因（迁移期双写：旧展示位 stopReason + 事实字段 engineStopReason/failure/
- * promptDisposition/usage/retryAttempts/observations，§3.4）+ 轮统计快照 + result
- * 摘要锚 + 失败原因原文；`.state` sidecar 已退场，本事件帧是轮终收条的唯一承载。
+ * ——停因（引擎原值优先 + 迁移期回落，与内存展示位同源见 roundStopReasonOf；事实
+ * 字段 engineStopReason/failure/promptDisposition/usage/retryAttempts/observations
+ * 并行产出，§3.4）+ 轮统计快照 + result 摘要锚 + 失败原因原文；`.state` sidecar 已
+ * 退场，本事件帧是轮终收条的唯一承载。
  * 摘要锚与 record-settled 同款截断（summarizeResultForJournal 单源）——承接 v1 轮终
  * result 显示信号（U8b），本轮 rec.result 已在②定稿。error 原文锚（W1 终态同步
  * F2-2 裁决）：失败轮承载 outcome.reason——v1 rec.error 显示信号的 journal 承接；
@@ -369,7 +387,8 @@ function buildRoundIdleEvent(
     // 轮终时点的累计轮数（[② 读侧换源] ——revive 水合 round 的折叠源，原 binding
     // round 快照的承载接替；③ increment 已在上方法簿记③完成）。
     round: rec.round ?? 0,
-    // [u3 §3.4 迁移期双写] 旧展示位（被接管轮无停因不落键）+ 事实字段并行产出。
+    // [u3 §3.3.3] 停因展示位（引擎原值优先 / 迁移期回落，被接管轮无停因不落键——
+    // 同 roundStopReasonOf）+ 事实字段并行产出。
     ...(stopReason !== undefined ? { stopReason } : {}),
     ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
     ...(failureOf(outcome) !== undefined ? { failure: failureOf(outcome) } : {}),
@@ -377,6 +396,9 @@ function buildRoundIdleEvent(
     ...(outcome.usage !== undefined ? { usage: outcome.usage } : {}),
     ...(outcome.retryAttempts !== undefined ? { retryAttempts: outcome.retryAttempts } : {}),
     ...(outcome.observations !== undefined ? { observations: outcome.observations } : {}),
+    // [§3.3.6 evidence 取证指针] 失败轮的引擎诊断 tee 路径随收条帧落盘（仅诊断引用
+    // ——文件受引擎侧轮转清理管辖，读侧不假设其永存）。
+    ...(outcome.stderrTeePath !== undefined ? { stderrTeePath: outcome.stderrTeePath } : {}),
     turns: rec.turnCount,
     totalTokens: rec.totalTokens,
     resultSummary: summarizeResultForJournal(nextResult),
@@ -426,31 +448,26 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   rec.status = "idle";
   rec.closedReason = undefined;
   rec.round = (rec.round ?? 0) + 1;
-  // ⑩ [subagent-observability §3.3.3 停因事实化] 轮终停因：事实优先（引擎原值经
-  // 派生展示词进旧展示位——迁移期双写，见 legacyStopReasonDisplay；被接管轮无停因
-  // 不写）。status 已翻 idle（U4 翻边）；中断族走 markSettled interrupted 族不经本
-  // 原语，值域无冲突。endedAt 内存位不写（终态冻结信号，写了会击穿方法头 A3 断言
+  // ⑩ [subagent-observability §3.3.3 停因事实化] 轮终停因：停因只存事实——引擎原值
+  // 直接写入（见 roundStopReasonOf；被接管轮无停因不写；旧引擎无事实回落派生展示词，
+  // 迁移期回落）。status 已翻 idle（U4 翻边）；中断族走 markSettled interrupted 族不经
+  // 本原语，值域无冲突。endedAt 内存位不写（终态冻结信号，写了会击穿方法头 A3 断言
   // ——同 record 跨轮轮终第二次即抛错；对齐 markSettled「非终态不写 endedAt」先例），
   // 收条时间戳只进磁盘侧。轮收条事实快照随⑩同点写入（内存读侧权威源，下轮轮始
   // 不清——「上一轮怎么收尾」跨轮可见）。
-  rec.stopReason = legacyStopReasonDisplay(outcome);
-  rec.lastRound = roundFactsOf(outcome);
+  rec.stopReason = roundStopReasonOf(outcome);
+  rec.lastRound = roundFactsOf(outcome, rec.turnCount);
   persistRoundSettleDiskFace(rec, id);
   // ⑦ `.alive` 保留——无删除动作（D3a 跨轮延续，见方法头）。
   // ⑧ pending 结清发射点②（已接线 SubagentService 装配点；未注入时跳过——纯内存
   // 测试形态 no-op）。[subagent-observability §3.3.6 结清枚举新写入方] 按轮终事实产
-  // SettlementReason 字面量：failed = 轮失败结清（含预算/超时轮失败）/ completed =
-  // 轮正常收尾兑现 / no_result = 被接管（引擎未执行无果——细因经轮收条
-  // promptDisposition 披露）。旧恒发字面量 "running"（词表外，mapReasonToStatus 历史直
-  // 落 completed 的 fail-open 形态）随本写入方退役——映射侧显式映射兜底由 u1 落地
-  // （pending-entries REASON_STATUS_MAP running → completed）。
-  const settlementReason =
-    outcome.promptDisposition === "handled"
-      ? "no_result"
-      : outcome.kind === "failed"
-        ? "failed"
-        : "completed";
-  ctx.emitPendingUnregister(id, settlementReason);
+  // SettlementReason 字面量（事实优先级见 roundSettlementReasonOf）：failed = 轮失败
+  // 结清（含预算/超时轮失败）/ cancelled = 用户中止 / completed = 轮正常收尾兑现 /
+  // no_result = 被接管（引擎未执行无果——细因经轮收条 promptDisposition 披露）。旧恒
+  // 发字面量 "running"（词表外，mapReasonToStatus 历史直落 completed 的 fail-open 形态）
+  // 随本写入方退役——映射侧显式映射兜底由 u1 落地（pending-entries REASON_STATUS_MAP
+  // running → completed）。
+  ctx.emitPendingUnregister(id, roundSettlementReasonOf(outcome));
   // ⑨ entry 上报（best-effort 过程面）→ [W1 / D2 停写写点] reportRecordTransition
   // 不再落 v1 快照 entry，只做引擎域回填感知（record-bound 帧）。
   ctx.reportRecordTransition(rec);

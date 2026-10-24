@@ -807,6 +807,7 @@ export class RunOrchestration {
         ...(result.promptDisposition !== undefined ? { promptDisposition: result.promptDisposition } : {}),
         ...(result.usage !== undefined ? { usage: result.usage } : {}),
         ...(result.observations !== undefined ? { observations: result.observations } : {}),
+        ...(result.stderrTeePath !== undefined ? { stderrTeePath: result.stderrTeePath } : {}),
       });
     } else {
       // [U5] 失败轮 settle（不终态化——旧一次性销毁退役，失败轮同样可续聊）。
@@ -822,6 +823,9 @@ export class RunOrchestration {
         ...(result.promptDisposition !== undefined ? { promptDisposition: result.promptDisposition } : {}),
         ...(result.usage !== undefined ? { usage: result.usage } : {}),
         ...(result.observations !== undefined ? { observations: result.observations } : {}),
+        // [§3.3.6 evidence 取证指针] 失败轮的引擎诊断 tee 路径随轮收条落盘
+        // （AgentResult.stderrTeePath ← settlementFactsOf 透传——list evidence 供源）。
+        ...(result.stderrTeePath !== undefined ? { stderrTeePath: result.stderrTeePath } : {}),
       });
     }
     // [subagent-observability §3.3.7② one-shot 通道放行] 非 workflow origin 的一次性

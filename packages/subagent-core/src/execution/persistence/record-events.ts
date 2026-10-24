@@ -221,11 +221,11 @@ export interface RecordRoundStartedEvent extends RecordEventEnvelope { // oe-exe
  * 对应现状写点（D3 表行 4）：markRoundIdle（.state 写点）。.state 降级为本事件
  * 的落盘物化派生视图（D2 sidecar 裁决表 .state 行）。
  *
- * [subagent-observability u3 §3.3.3/§3.4 迁移期双写] 帧格式双轨：`stopReason`
- * （旧展示位，迁移期写派生展示词 completed/failed）与事实字段
- * `engineStopReason`/`failure`/`promptDisposition`（引擎原值 + 失败分类 + 接管三态）
- * 并行产出——消费方先读事实、缺省回落旧值；迁移完删旧值（§3.4）。历史帧解析按
- * 解析词表纪律放行（旧帧只有 stopReason，事实字段缺席）。
+ * [subagent-observability §3.3.3] 帧停因事实链：`engineStopReason`/`failure`/
+ * `promptDisposition` 承载引擎原值 + 失败分类 + 接管三态；`stopReason` 与内存
+ * rec.stopReason 同源（写点 = roundStopReasonOf——引擎原值优先，旧引擎无事实时
+ * 回落 kind 派生展示词，被接管轮不写）。消费方先读事实字段、缺省回落本值；历史帧
+ * 解析按解析词表纪律放行（旧帧只有 stopReason，事实字段缺席）。
  */
 export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "record-round-idle";
@@ -234,8 +234,8 @@ export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt
    *  落盘轮计数）。 */
   round: number;
   /**
-   * 轮终停因——迁移期旧展示位（derived 展示词 completed/failed；u3 判定链接线后
-   * 引擎事实走 engineStopReason 字段，本值退役条件 = §3.4 迁移完删旧值）。
+   * 轮终停因（与 rec.stopReason 同源——引擎原值 stop/error/aborted 优先，旧引擎
+   * 无事实回落派生展示词；详见本帧头注）。
    * undefined = 无停因可言的轮终（被接管轮——引擎未执行，§3.3.1 P6 第三形态）。
    */
   stopReason?: StopReason;
@@ -296,6 +296,12 @@ export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt
    * W1 终态同步 F2-2 裁决）。resultSummary 的失败摘要句是兼容形态，本字段是权威。
    */
   error?: string;
+  /**
+   * [§3.3.6 evidence 取证指针] 失败轮的引擎子进程 stderr tee 文件绝对路径（可选——
+   * 成功轮引擎不上报；仅诊断引用，文件受引擎侧轮转与过期清理管辖，读侧不假设
+   * 其永存）。additive 可选字段，旧帧缺席零迁移。
+   */
+  stderrTeePath?: string;
 }
 
 /**

@@ -83,7 +83,8 @@ export class ResurrectDeniedError extends Error {}
 /**
  * ClosedReason 中 6 个可写终态原因（运行时检查用——防御性解析外部输入时校验成员资格）。
  * disconnected 是历史数据读侧兜底、现行链路无写点（sidecar 读侧已退场），不在本清单；
- * StopReason 全枚举 = 本清单 + disconnected + NEW_STOP_REASONS + ROUND_TERMINAL_STOP_REASONS。
+ * StopReason 全枚举 = 本清单 + disconnected + NEW_STOP_REASONS + ROUND_TERMINAL_STOP_REASONS
+ * + LEGACY_INFERRED_STOP_REASONS（2 迁移期旧值），共 16 值（见 STOP_REASONS 注释）。
  */
 export const CLOSED_REASONS: readonly ClosedReason[] = [
   'parent-shutdown',

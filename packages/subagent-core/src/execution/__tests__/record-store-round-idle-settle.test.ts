@@ -273,10 +273,12 @@ describe("markRoundIdle 正常轮终磁盘侧（A-lite 簿记⑩⑪）", () => {
 
 // ============================================================
 // [subagent-observability §3.3.3/§3.3.6] markRoundIdle 轮收条事实化：
-//   - 停因事实优先（引擎原值 engineStopReason 在场 → 旧展示位走派生展示词）；
+//   - 停因只存事实（引擎原值 engineStopReason 在场 → 展示位写引擎原值；旧引擎无
+//     事实回落派生展示词，迁移期回落）；
 //   - 失败分类/接管三态/usage 事实快照（帧 + rec.lastRound 内存读侧双承载）；
 //   - 被接管轮（promptDisposition=handled）：无停因、无失败分类、空正文、结清 no_result；
-//   - pending 结清枚举新写入方（completed/failed/no_result 按轮终事实，旧 "running" 退役）；
+//   - pending 结清枚举新写入方（completed/failed/cancelled/no_result 按轮终事实，
+//     旧 "running" 退役）；
 //   - 失败事实入账走 SDK appendErrorFact 单点（errors 只追加 + lastError 派生——u2 移交收编）。
 // ============================================================
 describe("markRoundIdle 轮收条事实化（subagent-observability u3）", () => {
@@ -314,7 +316,7 @@ describe("markRoundIdle 轮收条事实化（subagent-observability u3）", () =
     return idles.at(-1);
   };
 
-  it("引擎停因事实在场：帧事实字段 + rec.lastRound 快照 + 旧展示位派生（error → failed）+ 结清 failed", () => {
+  it("引擎停因事实在场：停因存引擎原值（error）+ 帧事实字段 + rec.lastRound 快照 + 结清 failed", () => {
     const record = makeRecord("bg-fact-error", { sessionFile });
     record.turnCount = 6;
     store.register(record);
@@ -334,13 +336,13 @@ describe("markRoundIdle 轮收条事实化（subagent-observability u3）", () =
       }),
     ).toBe(true);
 
-    // 事实字段：帧并行产出（§3.4 迁移期双写）。
+    // 事实字段：帧并行产出（§3.4）。
     const frame = readIdleFrame("bg-fact-error");
     expect(frame?.engineStopReason).toBe("error");
     expect(frame?.failure).toMatchObject({ class: "provider", kind: "rate_limited", retryable: "conditional" });
-    // 旧展示位 = 事实派生（引擎停因 error → failed——非旧写入判据「没报错=completed」）。
-    expect(record.stopReason).toBe("failed");
-    expect(frame?.stopReason).toBe("failed");
+    // 停因展示位 = 引擎原值（停因只存事实——不再写推断值 completed/failed）。
+    expect(record.stopReason).toBe("error");
+    expect(frame?.stopReason).toBe("error");
     // 事实快照（内存读侧权威源——recordToSubagent/list 消费）。
     expect(record.lastRound).toMatchObject({
       engineStopReason: "error",
@@ -370,7 +372,8 @@ describe("markRoundIdle 轮收条事实化（subagent-observability u3）", () =
     // 构造性不满足，stopReason 不写。
     expect(record.stopReason).toBeUndefined();
     expect(record.result).toBe("");
-    expect(record.lastRound).toEqual({ promptDisposition: "handled" });
+    // 收条快照恒带轮数事实（F1-46：turns 随收条定格——本用例 record 零 turn）。
+    expect(record.lastRound).toEqual({ promptDisposition: "handled", turns: 0 });
     const frame = readIdleFrame("bg-handled");
     expect(frame?.stopReason).toBeUndefined();
     expect(frame?.engineStopReason).toBeUndefined();
@@ -380,7 +383,7 @@ describe("markRoundIdle 轮收条事实化（subagent-observability u3）", () =
     expect(settlements).toEqual([{ id: "bg-handled", reason: "no_result" }]);
   });
 
-  it("正常收尾事实：engineStopReason=stop 且无失败分类 → 展示词 completed + 结清 completed（旧展示位=事实派生）", () => {
+  it("正常收尾事实：engineStopReason=stop 且无失败分类 → 停因存引擎原值 stop + 结清 completed", () => {
     const record = makeRecord("bg-fact-stop", { sessionFile });
     store.register(record);
 
@@ -394,7 +397,7 @@ describe("markRoundIdle 轮收条事实化（subagent-observability u3）", () =
       }),
     ).toBe(true);
 
-    expect(record.stopReason).toBe("completed");
+    expect(record.stopReason).toBe("stop");
     expect(record.lastRound).toMatchObject({
       engineStopReason: "stop",
       retryAttempts: 0,
@@ -402,8 +405,168 @@ describe("markRoundIdle 轮收条事实化（subagent-observability u3）", () =
     expect(record.lastRound?.usage?.output).toBe(2);
     const frame = readIdleFrame("bg-fact-stop");
     expect(frame?.engineStopReason).toBe("stop");
-    expect(frame?.stopReason).toBe("completed");
+    expect(frame?.stopReason).toBe("stop");
     expect(frame?.usage).toMatchObject({ output: 2 });
     expect(settlements).toEqual([{ id: "bg-fact-stop", reason: "completed" }]);
+  });
+
+  it("[§3.3.6 结清不分裂] kind=success + 引擎停因 error（无失败分类）→ 停因 error + 结清 failed（修复前结清落 completed 与停因展示分裂）", () => {
+    const record = makeRecord("bg-split-error", { sessionFile });
+    store.register(record);
+
+    expect(
+      store.markRoundIdle("bg-split-error", {
+        kind: "success",
+        content: "partial text",
+        engineStopReason: "error",
+      }),
+    ).toBe(true);
+
+    // 展示位与结清同源（引擎停因事实 error = 失败轮，两处一致落 failed 语义）。
+    expect(record.stopReason).toBe("error");
+    expect(settlements).toEqual([{ id: "bg-split-error", reason: "failed" }]);
+  });
+
+  it("[§3.3.6 结清不分裂] 用户中止轮（failure=user.cancelled + 停因 aborted）→ 停因 aborted + 结清 cancelled（中止非失败）", () => {
+    const record = makeRecord("bg-user-cancel", { sessionFile });
+    store.register(record);
+
+    expect(
+      store.markRoundIdle("bg-user-cancel", {
+        kind: "failed",
+        reason: "user abort",
+        engineStopReason: "aborted",
+        failure: { class: "user", kind: "cancelled", retryable: false, raw: "user abort" },
+      }),
+    ).toBe(true);
+
+    expect(record.stopReason).toBe("aborted");
+    expect(settlements).toEqual([{ id: "bg-user-cancel", reason: "cancelled" }]);
+  });
+
+  it("旧引擎回落（无引擎停因事实）：kind 派生展示词（failed 轮=failed / 成功轮=completed）+ 结清随 kind", () => {
+    const failedRecord = makeRecord("bg-legacy-failed", { sessionFile });
+    store.register(failedRecord);
+    expect(store.markRoundIdle("bg-legacy-failed", { kind: "failed", reason: "legacy boom" })).toBe(true);
+    expect(failedRecord.stopReason).toBe("failed");
+    expect(settlements).toEqual([{ id: "bg-legacy-failed", reason: "failed" }]);
+
+    expect(store.markRoundStarted("bg-legacy-failed")).toBe(true);
+    expect(store.markRoundIdle("bg-legacy-failed", { kind: "success", content: "legacy ok" })).toBe(true);
+    expect(failedRecord.stopReason).toBe("completed");
+    // settlements 跨轮累积（beforeEach 清空，两轮结清都在场）。
+    expect(settlements).toEqual([
+      { id: "bg-legacy-failed", reason: "failed" },
+      { id: "bg-legacy-failed", reason: "completed" },
+    ]);
+  });
+});
+
+// ============================================================
+// [subagent-observability §3.3.6 F1-39/F1-42/F1-46] list 证据链组合（store 层两路）：
+//   - 内存写点路：collectRecords 漏斗条目 evidence（eventsFile/lastSeq/stderrTeePath）
+//     + lastRound.turns 收条定格；
+//   - 磁盘重建路（新 store 实例 = 模拟重启）：fold 恢复 evidence/lastRound（含
+//     stderrTeePath 诊断引用）；
+//   - getFullRecord 富化源不产 evidence（全量重建也不恢复 lastRound）——listHandler
+//     富化合并职责的输入侧事实锁定。
+// ============================================================
+describe("list 证据链组合（F1-39/F1-42/F1-46 store 层）", () => {
+  let tmpDir: string;
+  let sessionsDir: string;
+  let manifestDir: string;
+  let sessionFile: string;
+  let store: RecordStore;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "round-evidence-"));
+    sessionsDir = path.join(tmpDir, "sessions");
+    manifestDir = path.join(tmpDir, "records");
+    store = makeStore(sessionsDir, manifestDir);
+    sessionFile = path.join(sessionsDir, "2026-01-01_uuid.jsonl");
+    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  const EVENTS_FILE = (id: string) => path.join(manifestDir, `${id}.events`);
+  const TEE_PATH = "/logs/pi-2026-10-23-sa-tee.jsonl";
+
+  function settleFailedRound(id: string, turnCount: number): void {
+    const record = makeRecord(id, { sessionFile });
+    record.turnCount = turnCount;
+    store.register(record);
+    expect(
+      store.markRoundIdle(id, {
+        kind: "failed",
+        reason: "429: tier_limit_exceeded",
+        engineStopReason: "error",
+        stderrTeePath: TEE_PATH,
+      }),
+    ).toBe(true);
+  }
+
+  it("内存写点路：漏斗条目 evidence 三字段在场 + lastRound.turns 收条定格；getFullRecord 不产 evidence", () => {
+    settleFailedRound("bg-ev-mem", 6);
+
+    const items = store.collectRecords(20, "all", undefined, false);
+    const mem = items.find((r) => r.id === "bg-ev-mem");
+    expect(mem).toBeDefined();
+    // evidence：journal 物理定位 + fold 水位 + 引擎诊断 tee 路径（最近轮收条透传）。
+    expect(mem?.evidence).toEqual({
+      eventsFile: EVENTS_FILE("bg-ev-mem"),
+      lastSeq: expect.any(Number),
+      stderrTeePath: TEE_PATH,
+    });
+    expect(mem?.evidence?.lastSeq).toBeGreaterThan(0);
+    // 收条自身轮终值（F1-46：markRoundIdle 时点定格，非 live 计数器）。
+    expect(mem?.lastRound).toMatchObject({ engineStopReason: "error", turns: 6, stderrTeePath: TEE_PATH });
+
+    // getFullRecord（内存 recordToSubagent 投影）：lastRound 直读在场、evidence 不产
+    // （附加只发生在 mergedRecords 漏斗——listHandler 富化合并的输入侧事实）。
+    const full = store.getFullRecord("bg-ev-mem");
+    expect(full?.evidence).toBeUndefined();
+    expect(full?.lastRound).toMatchObject({ engineStopReason: "error", turns: 6 });
+  });
+
+  it("磁盘重建路（新 store 实例）：fold 恢复 evidence/lastRound（含诊断 tee 路径）；磁盘 full 不带 evidence", () => {
+    settleFailedRound("bg-ev-disk", 15);
+
+    const revivedStore = makeStore(sessionsDir, manifestDir);
+    const items = revivedStore.collectRecords(20, "all", undefined, false);
+    const disk = items.find((r) => r.id === "bg-ev-disk");
+    expect(disk).toBeDefined();
+    expect(disk?.evidence).toEqual({
+      eventsFile: EVENTS_FILE("bg-ev-disk"),
+      lastSeq: expect.any(Number),
+      stderrTeePath: TEE_PATH,
+    });
+    // 轮收条事实随 fold 重建恢复（收条帧 turns 快照 + 诊断引用透传）。
+    expect(disk?.lastRound).toMatchObject({ engineStopReason: "error", turns: 15, stderrTeePath: TEE_PATH });
+
+    // 磁盘全量重建（buildRecord）不恢复轮收条快照/证据——listHandler 富化时从漏斗
+    // 条目补缺（F1-39 合并职责的另一半输入侧事实）。
+    const diskFull = revivedStore.getFullRecord("bg-ev-disk");
+    expect(diskFull?.evidence).toBeUndefined();
+  });
+
+  it("无失败轮诊断指针的形态：evidence 不落 stderrTeePath 键（成功轮引擎不上报）", () => {
+    const record = makeRecord("bg-ev-ok", { sessionFile });
+    record.turnCount = 2;
+    store.register(record);
+    expect(
+      store.markRoundIdle("bg-ev-ok", { kind: "success", content: "done", engineStopReason: "stop" }),
+    ).toBe(true);
+
+    const items = store.collectRecords(20, "all", undefined, false);
+    const ok = items.find((r) => r.id === "bg-ev-ok");
+    expect(ok?.evidence).toEqual({
+      eventsFile: EVENTS_FILE("bg-ev-ok"),
+      lastSeq: expect.any(Number),
+    });
+    expect("stderrTeePath" in (ok?.evidence ?? {})).toBe(false);
+    expect(ok?.lastRound).toMatchObject({ engineStopReason: "stop", turns: 2 });
   });
 });

@@ -504,11 +504,13 @@ describe("one-shot 轮收条事实透传（settle 调用点 → markRoundIdle）
     expect(record!.result).toBe("");
     expect(record!.stopReason).toBeUndefined();
     // 轮收条事实快照：接管三态 + usage 快照（AgentUsageTotal 词形——total 派生四项和）
-    // + 观察性事实（协议侧 contextTokens/turns 不进快照，轮数由轮终帧承载）。
+    // + 观察性事实（协议侧 contextTokens 不进快照）+ 收条轮数定格（F1-46：turns 随
+    // 收条快照恒在场——被接管轮零 turn）。
     expect(record!.lastRound).toEqual({
       promptDisposition: "handled",
       usage: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, total: 4 },
       observations: ["structured output was not invoked"],
+      turns: 0,
     });
     // 结清：被接管 = no_result（修复前 = completed，§3.3.6）。
     expect(settlements).toEqual([{ id: record!.id, reason: "no_result" }]);
@@ -533,7 +535,8 @@ describe("one-shot 轮收条事实透传（settle 调用点 → markRoundIdle）
     const result = await pending;
     const record = store.getMutable(result.sessionId ?? "");
     expect(record!.status).toBe("idle");
-    expect(record!.stopReason).toBe("failed");
+    // 停因存引擎原值（§3.3.3 事实化写侧——引擎停因 error 在场即写原值，不再派生 failed）。
+    expect(record!.stopReason).toBe("error");
     expect(record!.lastRound).toMatchObject({
       engineStopReason: "error",
       usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, cost: 0, total: 7 },

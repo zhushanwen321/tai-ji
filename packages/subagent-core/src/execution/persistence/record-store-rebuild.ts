@@ -592,8 +592,7 @@ export function projectFoldToLight(
 /**
  * [subagent-observability §3.3.6] 轮终收条帧 → lastRound 读模型（fold 重建路径与
  * fold 直查通道共用的纯派生单点）。result 取收条帧 resultSummary 摘要锚（空串 =
- * 无文本输出——§3.3.3 空正文语义）；turns 取帧累计轮数快照；事实字段（engineStopReason/
- * failure/promptDisposition/usage/retryAttempts/observations）直读透传。
+ * 无文本输出——§3.3.3 空正文语义）；turns 取帧累计轮数快照；事实字段（engineStopReason/failure/promptDisposition/usage/retryAttempts/observations/stderrTeePath）直读透传。
  * undefined = fold 缺席或无轮终收条（从未收尾 / 存量旧帧）。
  */
 export function lastRoundFromFold(
@@ -610,6 +609,7 @@ export function lastRoundFromFold(
     ...(receipt.usage !== undefined ? { usage: receipt.usage } : {}),
     ...(receipt.retryAttempts !== undefined ? { retryAttempts: receipt.retryAttempts } : {}),
     ...(receipt.observations !== undefined ? { observations: receipt.observations } : {}),
+    ...(receipt.stderrTeePath !== undefined ? { stderrTeePath: receipt.stderrTeePath } : {}), // [§3.3.6] 诊断引用透传（仅引用不假设永存）。
     ...(receipt.swept !== undefined ? { swept: receipt.swept } : {}),
   };
 }
@@ -1153,8 +1153,9 @@ function hydrateRoundFactsAndError(record: ExecutionRecord, fold: RecordEventFol
       ...(isRoundTerminalStopReason(idle.engineStopReason) ? { engineStopReason: idle.engineStopReason } : {}),
       ...(idle.failure !== undefined ? { failure: idle.failure } : {}),
       ...(idle.promptDisposition !== undefined ? { promptDisposition: idle.promptDisposition } : {}),
-      ...(idle.usage !== undefined ? { usage: idle.usage } : {}),
-      ...(idle.retryAttempts !== undefined ? { retryAttempts: idle.retryAttempts } : {}),
+      // [F1-46] 收条轮终轮数随水合恢复（live 值下一轮会推进，回落会漂移上一轮收条）。
+      ...(idle.turns !== undefined ? { turns: idle.turns } : {}), ...(idle.stderrTeePath !== undefined ? { stderrTeePath: idle.stderrTeePath } : {}),
+      ...(idle.usage !== undefined ? { usage: idle.usage } : {}), ...(idle.retryAttempts !== undefined ? { retryAttempts: idle.retryAttempts } : {}),
       ...(idle.observations !== undefined ? { observations: idle.observations } : {}),
     };
     if (Object.keys(facts).length > 0) record.lastRound = facts;
