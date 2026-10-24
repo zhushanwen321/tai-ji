@@ -35,8 +35,10 @@ import * as sessionApi from '@taiji/core/transport/api/domains/session'
 import { onGlobalType } from '@taiji/core/transport/api'
 import { registerSessionCleanup } from '@taiji/core/foundation/use-session-scoped-state'
 import { createComposerInjectionStore } from '@taiji/core/domain/composer/context'
+// 队列编辑锚定判定（chat-flow-consistency D6：单锚定不变式 core 下沉，桌面 composer-shell 同源）
+import { clearQueueEdit, startQueueEdit, type QueueEditAnchorPartition, type QueueEditStartOutcome } from '@taiji/core/domain/composer'
 import { showErrorBar } from './error-bar'
-import type { DeliveryCancelReply, Segment, SessionSummary } from '@taiji/shared'
+import type { DeliveryCancelReply, DeliveryEditReply, DeliveryPeekReply, Segment, SessionSummary } from '@taiji/shared'
 import { i18n } from '../i18n'
 
 // vue-i18n 的 t 复杂重载收窄为 (key, params?) => string（对齐 renderer useChat.ts tFn 形态）
@@ -213,7 +215,15 @@ const useSessionInstance = createUseSession({
     getHistory: (sid) => chatApiPort.getHistory(sid),
     isHydrated: (sid) => chatStore.isHydrated(sid),
     hydrate: (sid, messages) => chatStore.hydrate(sid, messages),
-    reconcileHistory: (sid, messages, window) => chatStore.reconcileHistory(sid, messages, window),
+    reconcileHistory: (sid, messages, window) => {
+      // [chat-flow-consistency C4 两段式契约] 磁盘重载基线接管点清 turn 展开分区（移动壳
+      // turnExpansionMap 同构桌面 turn-expansion store 的重置侧）：本映射是切入链全部
+      // history 写入通路的单点，未 hydrate（首次切入 / LRU 驱逐后切回）= 走盘重载形态，
+      // 重载换 id 空间，显式清替代静默键失配；已 hydrate（驻留期切回 reconcile 刷新）不清，
+      // 展开保持。门与 store.reconcileHistory 内部的 hydrate 分支同源。
+      if (!chatStore.isHydrated(sid)) turnExpansionMap.delete(sid)
+      chatStore.reconcileHistory(sid, messages, window)
+    },
     clearHistoryError: (sid) => chatStore.clearHistoryError(sid),
     markHistoryFailed: (sid) => chatStore.markHistoryFailed(sid),
   },
@@ -301,6 +311,25 @@ export function cancelDelivery(sessionId: string, clientUuid: string): Promise<D
 }
 
 /**
+ * 条目全文取回（chat-flow-consistency D6）：✎ 编辑预填只读通道（QueueStrip 消费）。
+ * 直调 core transport chat 域（chatApiPort 无 peek/edit 成员——端口面不扩，移动壳直引
+ * 与 cancelDelivery 透传形态平行）。
+ */
+export function peekDelivery(sessionId: string, clientUuid: string): Promise<DeliveryPeekReply> {
+  return chatApi.peekDelivery(sessionId, clientUuid)
+}
+
+/** 原位编辑（chat-flow-consistency D6）：发送侧替换条目内容且排队位置保持不变（MobileComposer 消费）。 */
+export function editDelivery(
+  sessionId: string,
+  clientUuid: string,
+  content: string,
+  segments?: Segment[],
+): Promise<DeliveryEditReply> {
+  return chatApi.editDelivery(sessionId, clientUuid, content, segments)
+}
+
+/**
  * 取消全文回输入框的一次性注入通道（remote-use D7/U10，core composer injection factory
  * 平台无关单例——桌面 renderer composer-injection-store 同范式）：QueueStrip（写入侧，
  * 取消应答全文）与 MobileComposer（消费侧，insertTextAtCursor 光标插入）跨组件树共享。
@@ -308,6 +337,43 @@ export function cancelDelivery(sessionId: string, clientUuid: string): Promise<D
  * 图片粘贴降级文本），cancel reply segments 的 chip 恢复面在移动壳为零，零丢失。
  */
 export const composerInjectionStore = createComposerInjectionStore()
+
+// ── 队列编辑锚定（chat-flow-consistency D6 移动壳最小形态）────────────────────────
+// 锚定 = 队列条目 ✎ 编辑时草稿记住来源条目 id，发送走 delivery.edit 原位替换。分区实现
+// 沿 turnExpansionMap 同款（模块级 Map + registerSessionCleanup——桌面是 useSessionScopedState
+// 分区，平台差异在容器、判定逻辑 core queue-edit-anchor 双壳同源）。会话删除随 cleanup 清理
+//（Q4 裁决 1：锚定随草稿分区存活，切走留在分区、切回恢复）。
+// 登记条目 #76（data-source-registry §1）：会话队列编辑锚定分区
+// @data-owner #76
+const queueEditAnchorMap = new Map<string, QueueEditAnchorPartition>()
+
+registerSessionCleanup((sid) => {
+  queueEditAnchorMap.delete(sid)
+})
+
+function anchorPartitionOf(sid: string): QueueEditAnchorPartition {
+  let p = queueEditAnchorMap.get(sid)
+  if (!p) {
+    p = { clientUuid: null }
+    queueEditAnchorMap.set(sid, p)
+  }
+  return p
+}
+
+/** ✎ 编辑登记（单锚定不变式：started / already-editing-same / conflict——Q4 三裁决）。 */
+export function beginQueueEdit(sid: string, clientUuid: string): QueueEditStartOutcome {
+  return startQueueEdit(anchorPartitionOf(sid), clientUuid)
+}
+
+/** 解除锚定（放弃编辑 / 发送完成 / 条目离场共用）。 */
+export function clearQueueEditFor(sid: string): void {
+  clearQueueEdit(anchorPartitionOf(sid))
+}
+
+/** 当前锚定的条目 id（null = 非编辑态；MobileComposer 发送分流读口）。 */
+export function queueEditAnchorOf(sid: string): string | null {
+  return anchorPartitionOf(sid).clientUuid
+}
 
 /**
  * 测试后门命名空间（生产代码禁止消费，对齐 companion-bridge __testing 先例）：

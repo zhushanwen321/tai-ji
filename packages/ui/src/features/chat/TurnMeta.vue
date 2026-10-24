@@ -107,6 +107,14 @@
           class="inline-flex shrink-0 items-center rounded-sm bg-[color-mix(in_oklch,var(--warn)_12%,transparent)] px-2 py-px font-mono text-[length:var(--text-xs)] text-warn tabular-nums"
           data-testid="turn-meta-folded-failed"
         >{{ t('panel.message.noticeFoldFailedTag', { count: foldedFailCount }) }}</span>
+        <!-- [chat-flow-consistency U9 / S2] 交接文档标签：turn 锚是交接指令提示行时，
+             其后 assistant 回合（交接文档）挂此标签——文档照常展示，标签只标注来源
+             （chipn 形态对齐思考/工具计数 chip，中性不染色）。 -->
+        <span
+          v-if="isHandoffDoc"
+          data-testid="turn-meta-handoff-doc"
+          class="badge inline-flex shrink-0 items-center rounded-sm border border-hairline bg-bg-input px-2 py-px font-mono text-[length:var(--text-xs)] text-neutral-mid tabular-nums"
+        >{{ t('panel.message.handoffDocTag') }}</span>
         <!-- chevron 紧跟耗时（展开/收起 trace 入口），在 badge 之前 -->
         <ChevronRight
           v-if="turn.hasFoldable && !isWorkingTurn"
@@ -135,6 +143,7 @@ import { useI18n } from 'vue-i18n'
 import { Button } from '../../primitives/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '../../primitives/hover-card'
 import type { FoldedNoticeRow, FoldedNoticeType, MessageTurn } from '@taiji/core/domain/chat'
+import { isHandoffDocTurn } from '@taiji/core/domain/chat'
 import {
   FOLDED_TYPE_DESC_KEY,
   FOLDED_TYPE_ICON,
@@ -192,6 +201,10 @@ const statusLabel = computed(() => {
   if (!props.isWorkingTurn) return t('panel.message.worked')
   return t('panel.message.working')
 })
+
+/** 交接文档回合（chat-flow-consistency U9 / S2）：判定 SSOT 在 core isHandoffDocTurn
+ *  （turn 锚是交接指令提示行）——纯派生值，随 turn 对象引用不变而稳定。 */
+const isHandoffDoc = computed(() => isHandoffDocTurn(props.turn))
 
 // ── settle 收纳态（specs/chat/system-notices.md §3.3 / §3.5）────────────────────────
 // 折叠分段标签只在落成态渲染：工作态维持「工作中」（临时外部行/聚合行由 Turn.vue 按工作态

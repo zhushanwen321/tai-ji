@@ -113,9 +113,6 @@ function makeSessionView(overrides: Partial<IManagedSessionView> = {}): IManaged
     lastActiveAt: 0,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
     bashRunToken: undefined,
     ...overrides,
   }
@@ -496,13 +493,13 @@ describe('fetchCurrentSystemPrompt 编排（常驻扩展现取通道）', () => 
     await expect(traceSync.fetchCurrentSystemPrompt(SID)).rejects.toMatchObject({ code: 'session_not_active' })
   })
 
-  it('busy 预检：isGenerating → throw code=session_busy（命令会排队，预检拒绝更诚实）', async () => {
-    const { traceSync } = makeEnv({ active: true, sessionRecord: makeSessionView({ isGenerating: true }) })
+  it('busy 预检：turn generating → throw code=session_busy（命令会排队，预检拒绝更诚实）', async () => {
+    const { traceSync } = makeEnv({ active: true, sessionRecord: makeSessionView({ occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } }) })
     await expect(traceSync.fetchCurrentSystemPrompt(SID)).rejects.toMatchObject({ code: 'session_busy' })
   })
 
-  it('busy 预检：isCompacting → 同拒（sendPrompt 预检互斥口径）', async () => {
-    const { traceSync } = makeEnv({ active: true, sessionRecord: makeSessionView({ isCompacting: true }) })
+  it('busy 预检：compacting → 同拒（sendPrompt 预检互斥口径）', async () => {
+    const { traceSync } = makeEnv({ active: true, sessionRecord: makeSessionView({ occupancy: { turn: 'idle', compacting: true, bash: false, handingOff: false } }) })
     await expect(traceSync.fetchCurrentSystemPrompt(SID)).rejects.toMatchObject({ code: 'session_busy' })
   })
 

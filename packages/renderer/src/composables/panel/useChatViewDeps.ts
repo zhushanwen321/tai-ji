@@ -233,7 +233,6 @@ export function useChatViewDeps(
 
     // ── 操作回调 ──
     toggleExpand: (turnKey: string): void => turnExpansion.toggle(turnKey),
-    collapse: (turnKey: string): void => turnExpansion.collapse(turnKey),
     setTakeover: (turnKey: string, on: boolean): void => turnExpansion.setTakeover(turnKey, on),
     abortBash: (sid: string): void => {
       // core abortBash 仅按 session 取消（api-port 单参），不区分消息

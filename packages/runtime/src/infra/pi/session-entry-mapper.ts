@@ -1,4 +1,44 @@
 /**
+ * 重启中断尾部形态判定（design-session-lifecycle 缺陷 4 方向 A，用户已裁决）。
+ *
+ * 证据链（pi 落盘时序，dist 实锚见该设计文档）：pi 只在 message_end 时把整条消息同步落盘
+ * （appendMessage → appendFileSync 整行追加），流式输出期间零落盘。因此：
+ * - 正常完成的回合，尾部必为**无 toolCall 的 assistant entry**（模型输出终稿后 turn 才结束；
+ *   abort 落盘 stopReason=aborted 的完整 assistant，同形态不触发）；
+ * - 中断（内容损失）三形态可判定：尾部 message = user（assistant 未产出）/ 带 toolCall 的
+ *   assistant（工具结果丢失）/ toolResult（下一轮 assistant 丢失）。
+ * - 零损失窗口（最后 assistant 已落盘、turn 未收尾）不可判定也无需标记。
+ *
+ * 「从尾向前找最后一个 message entry」而非看文件最后一条：合法非回合 entry（custom/
+ * client-msg-id 映射、label、usage、compaction）可落在回合内容之后，跳过它们才对齐
+ * 「回合内容尾部」语义；一路扫不到 message entry（纯 header/纯 custom）= 无回合不标。
+ *
+ * 联合判定的「会话未附着」半边不在本函数——由调用方限定在 getHistory 离线路径构造性保证
+ * （活跃会话走 RPC 路径不调本函数；RPC 失败降级文件读同样不得调用，防活会话生成中误标）。
+ *
+ * 性质 = 推断（两个确定性事实的推导，非中断事件直接记录），误标风险由未附着事实排除活会话。
+ * 返回 true = 建议前端渲染中断提示条；保守原则：形态不可判一律 false（宁可漏标不误标）。
+ */
+export function isInterruptedTail(entries: PiSessionEntry[]): boolean {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]
+    if (entry?.type !== 'message') continue
+    const msg = entry.message as { role?: unknown; content?: unknown } | undefined
+    const role = msg?.role
+    if (role === 'user') return true
+    if (role === 'assistant') {
+      // content parts 含 toolCall → 工具已发起未归（toolResult 丢失）；否则 = 终稿已落盘（含 abort 的完整落盘形态）
+      const parts = Array.isArray(msg?.content) ? (msg.content as Array<{ type?: unknown }>) : []
+      return parts.some((p) => p?.type === 'toolCall' || p?.type === 'tool_use')
+    }
+    if (role === 'toolResult') return true
+    // system / bashExecution / 未知 role：非回合产出尾部，零内容损失形态，不标
+    return false
+  }
+  return false
+}
+
+/**
  * mapSessionEntries — session entry → 伪消息映射的共享单点（converter M1）。
  *
  * 把 pi session JSONL entry 数组映射为三类产物，供 RPC/文件两条历史读取链路共用：

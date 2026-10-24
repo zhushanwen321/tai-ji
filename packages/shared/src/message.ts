@@ -757,6 +757,14 @@ export interface Message {
    *  shared.Message 是聚合类型含非 custom 消息，故 optional——
    *  仅 false 隐藏，undefined/true 都显示（undefined 来自无 customType 的普通消息或旧数据）。 */
   display?: boolean
+  /**
+   * 交接指令行标记（chat-flow-consistency U9 / 特殊流程 S2）：该消息原是 user entry，
+   * 内容逐字等于 HANDOFF_PROMPT_TEMPLATE（runtime handoff turn 的固定 prompt）→
+   * reducer 派生段转为 system 提示行（「交接指令（内部）」），原文携带在 text 供悬停
+   * 详情展示。live 帧与 reload 重放经同一转换点（convertMessageBody），识别恒一致。
+   * 分组层据此作 turn 锚（其后 assistant 回合挂「交接文档」标签）。undefined = 普通消息。
+   */
+  handoffInstruction?: { text: string }
   /** Bash 执行结果（composer-bash-execute）。system 消息有值：实时经 message.bashResult
    *  effect 创建 system 消息，历史经 converter 还原为 system 消息，统一走 BashOutputBlock 渲染。
    *  与 toolCall 互斥（bash 不走工具链）。 */

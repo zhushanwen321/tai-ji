@@ -20,6 +20,7 @@ import { ref, type Ref } from 'vue'
 
 /**
  * session.history 响应的窗口契约字段（[u6] 三字段必填——与 shared protocol SSOT 对齐）。
+ * [U8 重启中断标记] interrupted 可选（离线读取判定的中断形态标记，出不出场由 runtime 决定）。
  */
 export interface HistoryWindowReply {
   /** true = 窗口外仍有历史（「加载更早」顶部条显隐的唯一依据） */
@@ -28,6 +29,8 @@ export interface HistoryWindowReply {
   loadedTurns: number
   /** session 的 turn 总数估计（读到头为精确值，窗口截断时为下界） */
   totalTurnsEstimate: number
+  /** [U8] true = 文件尾部为中断形态（重启打断的回合）；缺省 = 无判定（活会话/翻页） */
+  interrupted?: boolean
 }
 
 /** 历史加载窗口状态（u4b session.history 双预算截断契约的 store 侧派生视图） */
@@ -38,17 +41,24 @@ export interface HistoryWindow {
   loadedTurns: number
   /** session 的 turn 总数估计（读到头为精确值，窗口截断时为下界） */
   totalTurnsEstimate: number
+  /**
+   * [U8 重启中断标记] true = 最近一次 hydrate/reconcile 判定会话尾部为中断形态（渲染
+   * 尾部中断提示条的依据）；undefined = 无判定（活会话 / 游标翻页 / 旧 runtime）。
+   * 随 window 对象整体覆盖写入，清理复用 historyWindows 分区生命周期（disposeSession/LRU）。
+   */
+  interrupted?: boolean
 }
 
 /**
  * 历史响应 → 窗口状态归一（getHistory 消费方共用一份，防散点缺省处理漂移）。
- * [u6] 三字段必填（shared protocol SSOT 对齐），无回落逻辑。
+ * [u6] 三字段必填（shared protocol SSOT 对齐），无回落逻辑。interrupted 出场才透传。
  */
 export function historyWindowFromReply(reply: HistoryWindowReply): HistoryWindow {
   return {
     truncated: reply.truncated,
     loadedTurns: reply.loadedTurns,
     totalTurnsEstimate: reply.totalTurnsEstimate,
+    ...(reply.interrupted !== undefined && { interrupted: reply.interrupted }),
   }
 }
 

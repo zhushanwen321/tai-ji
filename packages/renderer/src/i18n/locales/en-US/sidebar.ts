@@ -99,6 +99,11 @@ export default {
     // counts unfinished children (non-green: active / error / stopped / dead), hence "unfinished"
     // rather than "running".
     childCount: '{n} child session unfinished | {n} child sessions unfinished',
+    // Handed-off badge (chat-flow-consistency U9 / S8): persistent small badge on the source
+    // session after a completed handoff (badge body) + hover title ({target} = target session
+    // display name, falling back to the target id prefix when the target is deleted).
+    handoffBadge: 'Handed off',
+    handedOffTo: 'Handed off to {target}',
   },
   sessionList: {
     // R6.2 anchored groups (2026-10-11): section header + in-group empty hint; the old

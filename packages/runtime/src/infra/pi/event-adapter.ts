@@ -1027,7 +1027,26 @@ function tryTranslateFormSelect(
  * [HISTORICAL] options 透传修复：pi select 严格传 string[]（types.ts select 签名 +
  * rpc-mode.js 原样透传），旧代码把 rawOptions 断言为 Array<{label,value}> 后 .map(o=>o.label)
  * 对 string 元素调 .label 产出 undefined[]——普通 select 在前端是坏的。改为 .map(String) 透传。
+ *
+ * [chat-flow-consistency U9 / S4] permission 等待判定键：title 首行为
+ * PERMISSION_APPROVAL_TITLE（pi-permission 扩展审批 select 的固定 title 首行，
+ * extensions/universal/permission approval.ts buildApprovalFieldSet/formatTitle 单点构造）
+ * 的 select → payload 附加 permission: true。先例 = planReview 键（runtime 检测 marker
+ * 后附加，renderer extension-ui store 消费）——同款机制不新发明。消费链：renderer
+ * hasPendingBlockingOverlay 判定键扩 permission → deriveStatus waiting → 侧栏警示点对
+ * 未水合会话（chat 分区无消息、toolCall running 输入不可见）同样生效。
  */
+const PERMISSION_APPROVAL_TITLE = '[pi-permission] Approval required'
+
+/** permission 审批 select 判定：select 方法 + title 首行精确匹配（title 可多行，首行恒为标记串）。 */
+function isPermissionApprovalSelect(method: string, title: unknown): boolean {
+  return (
+    method === 'select' &&
+    typeof title === 'string' &&
+    (title.split('\n', 1)[0] ?? '') === PERMISSION_APPROVAL_TITLE
+  )
+}
+
 function translatePlainDialogRequest(
   event: PiExtensionUiRequestEvent,
   sid: string,
@@ -1047,6 +1066,9 @@ function translatePlainDialogRequest(
     default: event.default as string | undefined,
     level: event.level as 'info' | 'warn' | 'error' | undefined,
     prefill: method === 'editor' ? (event.prefill as string | undefined) : undefined,
+    // [chat-flow-consistency U9 / S4] permission 等待判定键（条件落键——帧上不出现 undefined
+    // 值键，planReview expectTurn 同纪律）；非 pi-permission 形态不落键，行为回落现状
+    ...(isPermissionApprovalSelect(method, event.title) ? { permission: true } : {}),
   }
   return dialogRequestEvents(dialogMethod, requestId, sid, requestPayload)
 }

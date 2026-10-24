@@ -68,6 +68,7 @@ import { closeWorkflowVizOverlayForSession } from '@/components/panel/workflow-v
 import { getBtwVirtualIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useChat, ensureStreamSubscription } from '@/composables/features/chat/useChat'
+import { useTurnExpansionStore } from '@/stores/turn-expansion'
 import { useTtsPlayer } from '@/composables/features/chat/useTtsPlayer'
 import { invalidateStatusCache } from '@/composables/features/chat/useSessionDerivations'
 import { browserDestroy as browserDestroyIpc } from '@/lib/ipc'
@@ -157,7 +158,17 @@ export function useSidebar() {
     isHydrated: (sid) => chat.isHydrated(sid),
     hydrate: (sid, messages) => chat.hydrate(sid, messages),
     // [u4d] window 透传 store reconcile——截断窗口状态 SSOT 在 chat store（N1 setHistoryTruncated 退役）
-    reconcileHistory: (sid, messages, window) => chat.reconcileHistory(sid, messages, window),
+    reconcileHistory: (sid, messages, window) => {
+      // [chat-flow-consistency C4 两段式契约] 磁盘重载基线接管点清展开分区：本映射是
+      // use-session 全部「history 写入 store」通路的编排单点（切入链步 9 / refreshHistory /
+      // retryHistory），其中走盘重载形态 = 未 hydrate（首次切入 / LRU 驱逐后切回——store.
+      // reconcileHistory 内部此门走 hydrate 全量基线接管）。turn 稳定 id 在 live 与盘上两侧
+      // 不相交（pi 事件不带 entry id），重载后键失配本就回落收起——此处显式清分区把「静默
+      // 失配」变「可断言重置」（内存卫生）。驻留期切回（已 hydrate → 增量 reconcile）不清，
+      // 手动展开保持——「内存驻留期间保持、磁盘重载后重置」两段契约的重置侧落点。
+      if (!chat.isHydrated(sid)) useTurnExpansionStore().clearSession(sid)
+      chat.reconcileHistory(sid, messages, window)
+    },
     clearHistoryError: (sid) => chat.clearHistoryError(sid),
     markHistoryFailed: (sid) => chat.markHistoryFailed(sid),
   }
@@ -461,7 +472,7 @@ export function useSidebar() {
 
   /**
    * WS 连接建立/重连入口：首次 initApp；重连 fire-and-forget 刷新 workspace/extension +
-   * 聚焦 session 的 subagent/workflow 列表。
+   * 聚焦 session 的 subagent/workflow 列表 + 对话流历史对账。
    */
   async function onConnected(): Promise<void> {
     if (!hasConnectedBefore) {
@@ -481,6 +492,11 @@ export function useSidebar() {
     if (sid) {
       void useSubagentStore().loadSubagents(sid)
       void useWorkflowStore().loadWorkflows(sid)
+      // [U8 桌面重连对账] 对话流历史对账（对齐移动壳 App.vue connected 边沿既有模式）：
+      // 断连窗口内 ring 回放覆盖不足或失败时，桌面对话流缺内容且无自愈——core
+      // refreshHistory 单一编排点（未 hydrate no-op / 失败静默 warn，旧数据仍在）。
+      // 首连分支不挂（initApp → 切入链步 9 已承担首次回填），只补重连分支。
+      void core.refreshHistory(sid)
     }
   }
 

@@ -1038,7 +1038,7 @@ const chatImpl = {
    * （fixture 无窗口概念，恒返回全量——与 truncated=false 一致）；类型引 real 域 HistoryQuery
    *（G4 锚定，杜绝内联形状漂移）。
    */
-  async getHistory(sessionId: string, _query?: realChatDomain.HistoryQuery): Promise<{ messages: Message[]; truncated: boolean; loadedTurns: number; totalTurnsEstimate: number }> {
+  async getHistory(sessionId: string, _query?: realChatDomain.HistoryQuery): Promise<realChatDomain.HistoryResult> {
     await sleep(TIMING.ack)
     const messages = (fixtureMessages[sessionId] ?? []).map((m) => ({ ...m }))
     return { messages, truncated: false, loadedTurns: messages.filter((m) => m.role === 'user').length, totalTurnsEstimate: messages.filter((m) => m.role === 'user').length }
@@ -1217,6 +1217,27 @@ const chatImpl = {
   async resyncDelivery(sessionId: string, _clientUuids: string[]): Promise<ServerMessageMap['delivery.resync']> {
     await sleep(TIMING.ack)
     return { sessionId, deduped: [] }
+  },
+
+  /**
+   * peek / edit mock（chat-flow-consistency D6）：同「不伪造投递事实」哲学——mock 无服务端
+   * 内核（submitDelivery 帧是呈现模拟，无条目持有语义），peek 如实答 found=false、edit 如实
+   * 答 not-found；编辑发送链据此走「按普通新消息发出」的降级通路（mock 模式下 ✎ 编辑 =
+   * 编辑草稿后正常发送，行为连贯不阻塞）。
+   */
+  async peekDelivery(_sessionId: string, clientUuid: string): Promise<ServerMessageMap['delivery.peek']> {
+    await sleep(TIMING.ack)
+    return { clientUuid, found: false }
+  },
+
+  async editDelivery(
+    _sessionId: string,
+    clientUuid: string,
+    _content: string,
+    _segments?: Segment[],
+  ): Promise<ServerMessageMap['delivery.edit']> {
+    await sleep(TIMING.ack)
+    return { clientUuid, edited: false, reason: 'not-found' }
   },
 
   // [u5a/MF-1-8 退役] `steer` / `followUp` mock 镜像已删除（连同其 queue_update 镜像链，见上方注）：

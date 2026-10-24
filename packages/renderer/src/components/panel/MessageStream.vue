@@ -4,9 +4,10 @@
     读 chat store 按 sessionId 分区的消息 → groupTurns 分回合 → 渲染 Turn 列表。
     auto-scroll（spec §8.5 + G2-007）：stickToBottom 判定，上滚脱离锚定不强制拉回，
     滚动离底超过一屏显「回到最新」胶囊（决策 12，未读条件已退役），点胶囊平滑滚回并恢复锚定。
-    用户主动发送（composer 直发 / steer·followUp 投递 / defer flush / 编辑重发）例外：
-    尾部新增 user 消息时强制回底重锚定（feat-new-message-to-bottom，见
-    useMessageStreamFollowTriggers 触发矩阵末行）。
+    用户主动发送（composer 直发 / followUp / 编辑重发）例外：提交序号递增时强制回底重锚定
+    （feat-new-message-to-bottom，[chat-flow-consistency F1] 判据 = chat store 提交序号——
+    morph 回执重建 / 外来直发不动序号，不再强拉回底，见 useMessageStreamFollowTriggers
+    触发矩阵末行）。
     空 session 显示欢迎语（G2-004 空态收敛）。
 
     [cw wave w3] 虚拟滚动由手写协调循环切到 virtua/vue <Virtualizer>。
@@ -31,6 +32,8 @@
       class="message-stream relative flex-1 overflow-y-auto px-[30px]"
       :style="{ overflowAnchor: 'none' }"
       @wheel="onWheel"
+      @touchstart.passive="onTouchStart"
+      @touchmove.passive="onTouchMove"
     >
     <!-- 顶缘渐焦（demo chat spec 裁决 4B）：滚动容器第一个子元素挂载（sticky 钉顶 + 负 margin
          净高 0 不参与布局，不扰动 virtua 测量），自驱动离顶（scrollTop>4）显隐 + 容器顶部 mask，
@@ -149,6 +152,20 @@
              dev 断言（COMPACTING/EXECUTING_BASH 高度常量漂移检测）随行迁入组件内部。 -->
         <ActivityStrip :session-id="sessionId" :executing-bash="executingBash" :subagent-thinking="subagentThinking" />
 
+        <!-- [U8 重启中断提示条] 轻量提示行（文档流 block，Virtualizer 之后 = 最后一个回合
+             下方）：显隐 = chat store 截断窗口状态 interrupted 位（runtime getHistory 离线读取
+             判定文件尾部为中断形态——design-session-lifecycle 缺陷 4 方向 A，推断性质由
+             「会话未附着」事实排除活会话误标）。随 hydrate 重建（重开再现属合理——历史事实
+             非瞬态），清理复用 historyWindows 分区生命周期。 -->
+        <div
+          v-if="tailInterrupted"
+          class="content-col flex items-start gap-2 py-1"
+          data-testid="stream-interrupted-notice"
+        >
+          <CircleAlert class="mt-[2px] size-[13px] shrink-0 text-warn" aria-hidden="true" />
+          <span class="text-[length:var(--text-xs)] leading-[1.5] text-warn">{{ t('panel.message.interruptedNotice') }}</span>
+        </div>
+
         <!-- ForkNotice 反馈行（transient，RV1）。文档流 block（Virtualizer 之后），多条通知垂直堆叠；
              宽度约束在 ForkNotice 根（content-col），与对话流内容列对齐。 -->
         <div
@@ -238,7 +255,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, provide, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown, Sparkles } from '@lucide/vue'
+import { ChevronDown, CircleAlert, Sparkles } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { EdgeFade } from '@/components/ui/edge-fade'
 import { Virtualizer, type VirtualizerHandle } from 'virtua/vue'
@@ -257,8 +274,7 @@ import { toRenderItemsIncremental, createTurnRenderCache } from '@/composables/l
 import type { TurnRenderCache } from '@/composables/logic/messageTurns'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { useSubagentThinking } from '@/composables/panel/useSubagentThinking'
-// [w6 chat-ui-and-shell T6] chat 展示组件迁 @taiji/ui/features/chat，壳层经
-// ChatViewDeps inject token 注入 store/composable 依赖（TD3 inject 裁决）。
+// [w6 chat-ui-and-shell T6] chat 展示组件迁 @taiji/ui/features/chat，壳层经 ChatViewDeps inject token 注入依赖（TD3 裁决）。
 // [u4d] TruncatedHistoryBar 同源：历史预算截断顶部条。
 import { Turn, SystemNotice, BashOutputBlock, TurnRail, ChatViewDepsKey, TruncatedHistoryBar } from '@taiji/ui'
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
@@ -303,13 +319,16 @@ const chat = useChatStore()
 const { loadingMore, showLoadMore, handleLoadMore, isPrepend, onScrollOffset, loadMoreError, topBarReservedHeight, slowLine } =
   useLoadMoreHistory(() => props.sessionId, () => streamItems.value.length)
 
-// [u8-pi-respawn] 恢复提示条重试（crash-resilience D7 熔断后的用户出口）——实现见
-// composables/panel/useSessionRespawnRetry.ts（会话生命周期关注点，自容器组件拆出）。
+// [u8-pi-respawn] 恢复提示条重试（crash-resilience D7 熔断后的用户出口）——实现见 useSessionRespawnRetry.ts（会话生命周期关注点，自容器组件拆出）。
 const { onRespawnRetry } = useSessionRespawnRetry(() => props.sessionId)
 
 /** [u4d] 顶部条「已加载最近 N 轮」的 N：store 截断窗口状态 loadedTurns；无记录回落 0
  *  （showLoadMore 为 false 时条不渲染，值无关）。 */
 const loadedTurns = computed(() => chat.getHistoryWindow(props.sessionId)?.loadedTurns ?? 0)
+
+/** [U8 重启中断提示条] 尾部中断标记：store 截断窗口状态 interrupted 位（runtime 离线读取
+ *  判定文件尾部为中断形态后随 hydrate/reconcile 写入）；undefined = 无判定不渲染。 */
+const tailInterrupted = computed(() => chat.getHistoryWindow(props.sessionId)?.interrupted === true)
 
 /** 当前 session 的消息（getMessages 兼容接口：内部 unwrap 内层 ShallowRef 容器，
  *  Map.get + 内层 .value 依赖均被 computed track，响应性不变）。 */
@@ -410,8 +429,7 @@ const lastUserTurnIdx = computed(() => {
   return -1
 })
 
-// [RD-2#1] slot 表达式前置求值（canEdit/isLastTurn/key/preview 在此算好，模板零派生表达式；
-// 单项抛错降级 broken 占位行）：1:1 派生视图 streamItems，:data 与 pin/rail 两基准下标空间不变。
+// [RD-2#1] slot 表达式前置求值（canEdit/isLastTurn/key/preview 算好，模板零派生；单项抛错降级 broken 占位行）：1:1 派生视图 streamItems，:data 与 pin/rail 两基准下标空间不变。
 const streamViewItems = computed(() =>
   buildStreamViewItems(streamItems.value, lastUserTurnIdx.value, lastRenderTurn.value),
 )
@@ -447,11 +465,9 @@ const { pinnedIndexes } = useStreamingPin({
 /** [cw wave w3] auto-scroll follow 状态机（D1/D2/D7）：onScroll 复合判据
  *  （INVAR-M4-2′）/ onWheel 恒即时脱离 / followIfStuck rAF 重读 guard。virta 单一 scrollTop owner。 */
 // [U4 护栏⑦] dev-only 贴底跟随断言包装（生产透传零开销；spec 详见 usePinBottomGuard.ts 头注释）。
-// [D2 数学不变量] endOffset = tailEl 实测总高（含尾部贴底呼吸 spacer，见 tailEl 内注释）：
-// 滚动容器纵向 padding（pt 令牌）参与 virtua viewportSize 扣除与 scrollToIndex 落点公式——
-// viewportSize 按 content-box 测量随 padding 自动重算，落点偏差由 BOTTOM_THRESHOLD 吸收
-// （改任一纵向 padding 必复核 useVirtuaFollow D2 推导并真机复验贴底）。
-const { stickToBottom, showJumpButton, onScroll, onWheel, followIfStuck, followToBottom, onSessionRebuild, notifyRoActivity } =
+// [D2 数学不变量] endOffset = tailEl 实测总高：纵向 padding 参与 viewportSize 扣除与落点
+// 公式，偏差由 BOTTOM_THRESHOLD 吸收（改任一纵向 padding 必复核 D2 推导并真机复验贴底）。
+const { stickToBottom, showJumpButton, onScroll, onWheel, onTouchStart, onTouchMove, followIfStuck, followToBottom, onSessionRebuild, notifyRoActivity, refreshDistanceSnapshot } =
   usePinBottomGuard({
     follow: useVirtuaFollow({
       vlistRef,
@@ -462,17 +478,17 @@ const { stickToBottom, showJumpButton, onScroll, onWheel, followIfStuck, followT
     isStreaming: () => lastRenderTurn.value?.isStreaming ?? false,
   })
 
-// [D3/D5] 跟随触发编排（RO 兜底网 + store watch，useMessageStreamScroll 继任；≤300 行规范拆出）。
-// followToBottomForce：用户主动发送（尾部新增 user 消息）强制回底重锚定（feat-new-message-to-bottom）。
-// [决策 12] isPrepend 不再传入：前插抑制窗的标记门控随未读标记链路退役（isPrepend 仍服务
-// Virtualizer :shift 与触顶续载，见 useLoadMoreHistory）。
+// [D3/D5] 跟随触发编排（触发语义见 useMessageStreamFollowTriggers 头注释）：[F1] 提交序号
+// 递增强制回底；[F2] RO/条数 watch 喂脱离态几何快照（guard 在原语内聚）。
 const { contentWrapEl, tailEl, tailHeight } = useMessageStreamFollowTriggers({
   messages: currentMessages,
+  submitSeq: () => chat.getSubmitSeq(props.sessionId),
   lastRenderTurn,
   scrollEl,
   followIfStuck,
   notifyRoActivity,
   followToBottomForce: () => followToBottom(true),
+  refreshDistanceSnapshot,
 })
 
 /* TurnRail（w4 wave IF4）：状态 + 事件路由下沉 useMessageStreamRail（script ≤300 行规范）。

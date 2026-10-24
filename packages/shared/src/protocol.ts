@@ -222,6 +222,9 @@ export type ClientMessageType =
   // [u5a 部分保留] send.rejected 条目仍保留：runtime bash 通道 busy 时 publish（reserveBashSlot，
   // bash 通道属设计 §1.3 Out of Scope）——renderer handler 已删，frames 面仅此一处生产路径。
   | 'delivery.submit' | 'delivery.cancel' | 'delivery.drain' | 'delivery.resync'
+  // delivery.peek / delivery.edit（chat-flow-consistency D6 队列区原位编辑）：✎ 编辑预填的
+  // 只读取回通道 + 发送侧原位替换原语（收回-保序重投是 runtime 编排内部细节，上层不可见）。
+  | 'delivery.peek' | 'delivery.edit'
   | 'message.bash' | 'message.abortBash'
   | 'config.getProviders' | 'config.setProvider' | 'config.deleteProvider' | 'config.setToolPermissions'
   | 'config.refreshProviderCatalogs' | 'config.setProviderCatalogWatch'
@@ -834,6 +837,15 @@ export interface ClientMessageMap {
   // delivered/cancelled，renderer 据此丢弃本地残留）；存留条目的权威状态经 session.delivery
   // 全量快照帧恢复（last-value 单源，reply 不重复携带，防双源分叉）。
   'delivery.resync': { sessionId: string; clientUuids: string[] }
+  // delivery.peek（chat-flow-consistency D6）：✎ 编辑预填的只读取回通道——返回条目全文 +
+  // segments 快照（队列行 preview 是截断文本，禁止当全文消费）。found=false = 条目已不在
+  // 内核活跃集（已投递 / 已撤销 / runtime 重启），前端提示后放弃本次编辑（锚定随之解除）。
+  'delivery.peek': { sessionId: string; clientUuid: string }
+  // delivery.edit（chat-flow-consistency D6）：发送侧原位替换——语义 = 替换指定条目内容且
+  // 排队位置保持不变（条目 id 不变）；收回-全部-保序重投是 runtime 编排内部细节，上层不可
+  // 依赖。content/segments 形态与 delivery.submit 一致（segments 快照随替换更新，后续撤销
+  // 回草稿取新快照）。
+  'delivery.edit': { sessionId: string; clientUuid: string; content: string; segments?: Segment[] }
   'config.getProviders': Record<string, never>
   // 进入 Settings Provider 页时触发远程模型目录刷新（无参：刷新列表内全部 catalog provider）
   'config.refreshProviderCatalogs': Record<string, never>
@@ -1445,6 +1457,8 @@ export type ServerMessageType =
   // delivery.* 四 RPC 的 reply 帧（投递所有权内核 D5，u-contracts）：与 request 同名
   //（backgroundTask 域 / session.subscribe 同款 payload 消费型同名模式，ADR-0046 配对）。
   | 'delivery.submit' | 'delivery.cancel' | 'delivery.drain' | 'delivery.resync'
+  // delivery.peek / delivery.edit 的 reply 帧（chat-flow-consistency D6）：与 request 同名。
+  | 'delivery.peek' | 'delivery.edit'
   | 'message.file_changes'
   | 'message.changeSetInvalidated'
   | 'message.customStart'
@@ -2188,6 +2202,37 @@ export interface DeliveryResyncReply {
 }
 
 /**
+ * delivery.peek 的 reply（chat-flow-consistency D6）：✎ 编辑预填取回通道。
+ * found=true 时 content = 条目全文（出站标记已在 runtime 出站层剥离，与 cancel reply 同口径）、
+ * segments = 提交时上网的快照（无快照的条目不带）；found=false = 条目已不在内核活跃集
+ * （已投递 / 已撤销 / runtime 重启），前端提示后放弃本次编辑。
+ */
+export interface DeliveryPeekReply {
+  clientUuid: string
+  found: boolean
+  /** 条目全文（found=true 恒携带；runtime 契约承诺非空文本）。 */
+  content?: string
+  /** 提交时随 delivery.submit 上网的原始 segments 快照（无提交快照的条目不带）。 */
+  segments?: Segment[]
+}
+
+/**
+ * delivery.edit 的 reply（chat-flow-consistency D6 + design-queue-delivery Q3 回执四值词表）。
+ * edited=true = 原位替换完成（条目 id 与排队位置不变，内容已按新文本保序重投/留守待投）。
+ * edited=false 四值 reason（前端处置同构：修改内容按普通新消息发出不丢，仅 toast 分型）：
+ * - 'delivered'：条目已进 transcript（真投递完成）。
+ * - 'unconfirmed'：投递状态未确认（注入悬空窗口 / 收回失败 / runtime 无权威证据）——用户
+ *   裁决采纳的第四值，回执如实化（既未编辑成功也未确定送达）。
+ * - 'cancelled'：条目已被撤销终结（含并发撤销他径兑现）。
+ * - 'not-found'：runtime 无此条目（重启 / drain / id 不曾存在）。
+ */
+export interface DeliveryEditReply {
+  clientUuid: string
+  edited: boolean
+  reason?: 'delivered' | 'unconfirmed' | 'cancelled' | 'not-found'
+}
+
+/**
  * 计划产物文档元数据（plan 模式重设计 D1）。
  * 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 同形（值形状镜像惯例）——
  * PlanLifecycleState 已 type-only 直引 extension-protocol（D2 裁决：plan 状态机处
@@ -2480,6 +2525,9 @@ export interface ServerMessageMapBase {
   'delivery.cancel': DeliveryCancelReply
   'delivery.drain': DeliveryDrainReply
   'delivery.resync': DeliveryResyncReply
+  // delivery.peek / delivery.edit（chat-flow-consistency D6 队列区原位编辑）：reply 同名配对。
+  'delivery.peek': DeliveryPeekReply
+  'delivery.edit': DeliveryEditReply
   // session.subscribe（wave:runtime-wiring）：session.subscribe RPC 的 reply payload（IF6 契约）。
   // snapshot：订阅时刻 bus ring 内当前事件序列（元素为带 seq 的 ServerMessage），renderer 据此 reconcile。
   // stateSnapshot：全部 state topic 的 last-value 数组拷贝——快照来源清单不在此枚举，以
@@ -2961,6 +3009,9 @@ export interface ServerMessageMapBase {
   // truncated=true 表示窗口外仍有历史；loadedTurns=本次返回的完整 turn 数；
   // totalTurnsEstimate=session 的 turn 总数估计（读到头为精确值，窗口截断时为下界）。
   // [u6] legacy historyTruncated 字段已退役（偏差表 D7 登记项完成：与 truncated 同值并存的双轨收尾）。
+  // [U8 重启中断标记] interrupted：可选，true = 离线读取判定文件尾部为中断形态
+  // （design-session-lifecycle 缺陷 4 方向 A：pi 落盘尾部形态 + 会话未附着联合判定，
+  // 推断性质）。活跃路径与游标翻页不出场（undefined）；旧前端忽略，向后兼容。
   'session.history': {
     sessionId: string
     session?: SessionSummary
@@ -2968,6 +3019,7 @@ export interface ServerMessageMapBase {
     truncated: boolean
     loadedTurns: number
     totalTurnsEstimate: number
+    interrupted?: boolean
   }
   // session.switched：session.switch 的成功 reply（wave:perf-w20 R-11 瘦身——switch reply 不再
   // 无条件全量 getHistory 塞 messages，被驱逐 session 切回走显式 session.history RPC（全量），
@@ -3647,6 +3699,9 @@ export interface ReplyPayloadMap {
   'delivery.cancel': ServerMessageMap['delivery.cancel']
   'delivery.drain': ServerMessageMap['delivery.drain']
   'delivery.resync': ServerMessageMap['delivery.resync']
+  // delivery.peek / delivery.edit（chat-flow-consistency D6）：reply 同名（payload 消费型）。
+  'delivery.peek': ServerMessageMap['delivery.peek']
+  'delivery.edit': ServerMessageMap['delivery.edit']
   // rollingRestart.status（crash-forensics-and-watchdog §3.3 D5，u7b）：只读查询 reply
   //（payload 消费型；与 request 同名——session.subscribe / backgroundTask.list 同款模式）。
   'rollingRestart.status': ServerMessageMap['rollingRestart.status']

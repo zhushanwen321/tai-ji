@@ -51,17 +51,21 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
     const followIfStuck = vi.fn()
     const followToBottomForce = vi.fn()
     const notifyRoActivity = vi.fn()
+    const refreshDistanceSnapshot = vi.fn()
+    const submitSeq = ref(0)
 
     let api!: ReturnType<typeof useMessageStreamFollowTriggers>
     const Harness = defineComponent({
       setup() {
         api = useMessageStreamFollowTriggers({
           messages: computed(() => messages.value),
+          submitSeq: () => submitSeq.value,
           lastRenderTurn: computed(() => lastRenderTurn.value),
           scrollEl,
           followIfStuck,
           followToBottomForce,
           notifyRoActivity,
+          refreshDistanceSnapshot,
         })
         return () => h('div', { ref: api.contentWrapEl }, [h('div', { ref: api.tailEl })])
       },
@@ -78,6 +82,8 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
       lastRenderTurn,
       followIfStuck,
       followToBottomForce,
+      refreshDistanceSnapshot,
+      submitSeq,
       notifyRoActivity,
       wrapRo,
       scrollRo,
@@ -164,55 +170,77 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
   })
 
   // ── 用户主动发送 → 强制回底重锚定（feat-new-message-to-bottom，触发矩阵末行）──
-  // 语义分层：本文件只验「触发判定」（尾部新增 user 消息 → followToBottomForce）；
-  // force 原语本身的完整重置面（无视 stickToBottom / NaN 快照 / 开收敛抑制窗）已在
-  // use-virtua-follow.test.ts W1TC8 覆盖。
-  it('尾部追加 user 消息（直发/steer·followUp 投递共同形态）→ followToBottomForce', async () => {
-    const { messages, followToBottomForce } = mountTriggers()
+  // [chat-flow-consistency F1] 语义分层：本文件只验「触发判定」（提交序号递增 →
+  // followToBottomForce）；force 原语本身的完整重置面（无视 stickToBottom / NaN 快照 / 开收敛
+  // 抑制窗）已在 use-virtua-follow.test.ts W1TC8 覆盖。旧「尾部新增 user 消息」watch 已删除：
+  // morph 回执重建复用 user 消息身份尾插命中旧 watch 强拉回底——序号判据结构性排除。
+  it('提交序号递增（用户主动发送，submitNewMessage 单点 +1）→ followToBottomForce', async () => {
+    const { submitSeq, followToBottomForce } = mountTriggers()
 
-    // 基线：对话进行中（assistant 尾，模拟流式中用户上滑阅读后发送）
-    messages.value = [msg('u1', '第一问'), msg('a1', '回答中', 'assistant')]
     await nextTick()
-    expect(followToBottomForce).not.toHaveBeenCalled() // assistant 尾不触发
+    expect(followToBottomForce).not.toHaveBeenCalled() // 基线：无提交
 
-    // 尾部追加 user 消息 = appendUser 唯一共同落点（composer 直发 / drainN 投递同形态）
-    messages.value = [...messages.value, msg('u2', '补充一句')]
+    submitSeq.value += 1
     await nextTick()
     expect(followToBottomForce).toHaveBeenCalledTimes(1)
   })
 
-  it('尾部追加 assistant / system 消息 → 不 force（仍走 followIfStuck 矩阵）', async () => {
-    const { messages, followToBottomForce } = mountTriggers()
+  it('morph 回执重建（user 消息尾插但提交序号不动）→ 不 force（旧 watch 的误拉回底形态已消除）', async () => {
+    const { messages, submitSeq, followToBottomForce } = mountTriggers()
 
-    messages.value = [msg('u1', '第一问'), msg('s1', '系统提示', 'system'), msg('a1', '回答', 'assistant')]
+    // 验收形态（impl-plan U4「morph 回执不再强拉回底」）：用户上翻阅读中，steer 插话
+    // 注入回执到达——user-delivery 复用原 clientUuid 尾插 user 消息，submitSeq 不变。
+    messages.value = [msg('u1', '第一问'), msg('a1', '回答中', 'assistant')]
+    await nextTick()
+    messages.value = [...messages.value, msg('u2', '插话回执重建', 'user')] // 尾插 user 消息
+    await nextTick()
+
+    expect(submitSeq.value).toBe(0)
+    expect(followToBottomForce).not.toHaveBeenCalled()
+  })
+
+  it('提交序号递减（session 切换读到另一分区更小值）→ 不 force', async () => {
+    const { submitSeq, followToBottomForce } = mountTriggers()
+
+    submitSeq.value = 5
+    await nextTick()
+    expect(followToBottomForce).toHaveBeenCalledTimes(1) // 前置递增正常触发（对照）
+    followToBottomForce.mockClear()
+
+    submitSeq.value = 2 // 切 session 后 watch 源读到新分区值（更小）
     await nextTick()
 
     expect(followToBottomForce).not.toHaveBeenCalled()
   })
 
-  it('load-more 前插（尾部身份不变）→ 不 force', async () => {
-    const { messages, followToBottomForce } = mountTriggers()
+  // ── [chat-flow-consistency F2] 脱离态几何快照刷新调用点接线 ──
+  it('F2: wrap RO 高度变化 → refreshDistanceSnapshot 与 follow 同点触发', async () => {
+    const { api, wrapRo, followIfStuck, refreshDistanceSnapshot } = mountTriggers()
 
-    messages.value = [msg('u1', '最近一问')]
-    await nextTick()
-    expect(followToBottomForce).toHaveBeenCalledTimes(1) // 初始尾 user 建快照即触发（等同向会话打开强滚）
+    stubTailHeight(api, 30)
+    wrapRo.dispatch([{ contentRect: { height: 0 } as DOMRectReadOnly }]) // tail 分量高度变化
+    await vi.advanceTimersByTimeAsync(16)
 
-    // 前插更早历史：尾部仍是 u1（role:id 快照不变）→ 不触发
-    messages.value = [msg('u0', '更早一问'), ...messages.value]
-    await nextTick()
-    expect(followToBottomForce).toHaveBeenCalledTimes(1)
+    expect(refreshDistanceSnapshot).toHaveBeenCalledTimes(1)
+    expect(followIfStuck).toHaveBeenCalledTimes(1)
   })
 
-  it('末条 user 消息同 id 对象替换（segments 回填）→ 不 force', async () => {
-    const { messages, followToBottomForce } = mountTriggers()
+  it('F2: 纯宽度变化（高度未变）→ 不喂快照刷新（与跟随 no-op 同门）', async () => {
+    const { wrapRo, refreshDistanceSnapshot } = mountTriggers()
 
-    messages.value = [msg('u1', '第一问')]
-    await nextTick()
-    expect(followToBottomForce).toHaveBeenCalledTimes(1)
+    wrapRo.dispatch([{ contentRect: { height: 0 } as DOMRectReadOnly }])
+    await vi.advanceTimersByTimeAsync(16)
 
-    // 同 id 换新对象（回填 badge segments 等场景）→ 快照不变 → 不触发
-    messages.value = [{ ...msg('u1', '第一问'), content: [{ type: 'text', text: '第一问' }] }]
+    expect(refreshDistanceSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('F2: messages.length watch → refreshDistanceSnapshot 与 followIfStuck 同点触发', async () => {
+    const { messages, followIfStuck, refreshDistanceSnapshot } = mountTriggers()
+
+    messages.value.push(msg('m1', '你好'))
     await nextTick()
-    expect(followToBottomForce).toHaveBeenCalledTimes(1)
+
+    expect(refreshDistanceSnapshot).toHaveBeenCalledTimes(1)
+    expect(followIfStuck).toHaveBeenCalledTimes(1)
   })
 })

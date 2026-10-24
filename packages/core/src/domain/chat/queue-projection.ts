@@ -9,7 +9,7 @@
  * - lane ≠ 'direct'：direct 车道乐观气泡原位保留待确认（送达回执抵消 inflight 占位），
  *   不进队列区；
  * - state ≠ 'delivered'：已入 transcript（reducer 权威）的条目队列区隐去；
- * - queued / in-flight / failed 三态可见（排队中/投递中/重试耗尽），保持帧序
+ * - queued / in-flight / failed 三态可见（排队中/投递中/发送未确认），保持帧序
  *   （= 内核 FIFO 发送序）。
  *
  * 消费方（防第二定义点）：桌面 useQueueRows（composer 队列区行派生）+ ActivityStrip

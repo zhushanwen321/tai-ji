@@ -57,11 +57,16 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
 
   /**
    * 该 session 是否有阻塞型交互 overlay 请求 pending（核心查询，对称 subagent.ts hasRunning）。
-   * 判定键（D12 拓宽）：form 键 + planReview 键——两者都是「agent 阻塞等用户应答」的挂起
-   * 形态，同计入侧栏 waiting 态（多 session 下后台 session 的 plan 审批挂起可见，F15）。
+   * 判定键（D12 拓宽 + chat-flow-consistency U9 / S4 再拓宽）：form 键 + planReview 键 +
+   * permission 键——三者都是「agent 阻塞等用户应答」的挂起形态，同计入侧栏 waiting 态
+   * （多 session 下后台 session 的 plan 审批 / 工具审批挂起可见，F15）。
    * - form 键：全部表单族帧（新 form / legacy askUser / scheduleCreate marker）由 runtime
    *   event-adapter 分支统一产出（归一上移 runtime 后 store 记录原生带 form 键）
    * - planReview 键：runtime event-adapter 检测 PLAN_REVIEW_MARKER 后附加（plan 审批挂起）
+   * - permission 键：runtime event-adapter 检测 title 首行「[pi-permission] Approval
+   *   required」的 select 后附加（工具审批挂起）——补齐未水合会话的等待可见性缺口
+   *   （chat 分区无消息时 toolCall running 输入不可见，此前侧栏回退 done；permission 键经
+   *   extension.dialog 跨会话分区（crossSession 路由）命中， waiting 联动自动）
    * 消费方（经本 getter 扩义自动联动）：① deriveStatus waiting 状态点判定源
    * （useSessionDerivations）；②原 TurnProgressBar warn 豁免消费方已随 remove-turn-progress-bar
    * 移除（getAwaitingUser 回调——scheduler 确认等待同样 block turn，漏接则等待超 10min 被误挂
@@ -73,7 +78,10 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
    */
   function hasPendingBlockingOverlay(sessionId: string): boolean {
     return getRequestsBySession(sessionId).some(
-      (r) => r.form === true || (r as { planReview?: unknown }).planReview === true,
+      (r) =>
+        r.form === true ||
+        (r as { planReview?: unknown }).planReview === true ||
+        (r as { permission?: unknown }).permission === true,
     )
   }
 

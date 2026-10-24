@@ -29,10 +29,7 @@ function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManaged
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
+        bashRunToken: undefined,
     ...overrides,
   }
 }
@@ -46,11 +43,7 @@ interface MockOpts {
 }
 
 function makeMocks(opts: MockOpts = {}) {
-  const session = makeMockSession({
-    isBashRunning: opts.isBashRunning ?? false,
-    isGenerating: opts.isGenerating ?? false,
-    isCompacting: opts.isCompacting ?? false,
-  })
+  const session = makeMockSession({})
 
   const compactFn = opts.compactError
     ? vi.fn(async () => { throw opts.compactError! })
@@ -92,8 +85,8 @@ describe('MessageDispatcher compact —— 零广播（M4 事件驱动）', () =
 
     // client.compact 调用（RPC 触发保留）
     expect(compactFn).toHaveBeenCalledWith(undefined)
-    // dispatcher 不置位 isCompacting（置位归 interpreter 的 compaction_start 事件）
-    expect(session.isCompacting).toBe(false)
+    // dispatcher 不置位 compacting（置位归 interpreter 的 compaction_start 事件；[D1] 读口迁移）
+    expect(session.occupancy?.compacting).toBe(false)
     // 零 compaction 广播
     const compactionBroadcasts = broadcasts.filter((m) => COMPACTION_TYPES.includes(m.type))
     expect(compactionBroadcasts).toHaveLength(0)
@@ -136,6 +129,6 @@ describe('MessageDispatcher compact —— 零广播（M4 事件驱动）', () =
     const compactionBroadcasts = broadcasts.filter((m) => COMPACTION_TYPES.includes(m.type))
     expect(compactionBroadcasts).toHaveLength(0)
     // finally 兜底复位（对 false 无害，防 transport 级失败 session 卡死）
-    expect(session.isCompacting).toBe(false)
+    expect(session.occupancy?.compacting).toBe(false)
   })
 })

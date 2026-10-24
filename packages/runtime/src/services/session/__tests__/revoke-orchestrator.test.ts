@@ -50,11 +50,8 @@ function makeView(overrides: Partial<IManagedSessionView> = {}): IManagedSession
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
     bashRunToken: undefined,
-    occupancy: { turn: 'idle', compacting: false, bash: false },
+    occupancy: { turn: 'idle', compacting: false, bash: false, handingOff: false },
     ...overrides,
   }
 }
@@ -398,8 +395,8 @@ describe('③ no-mapping 双分支', () => {
 })
 
 describe('④ hold try/finally 全路径释放（A11 硬契约：提前 return 后 hold 已释）', () => {
-  it('busy 提前 return（isGenerating）→ hold 已释放（再次置位成功）', async () => {
-    const h = makeHarness({ view: { isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } } })
+  it('busy 提前 return（turn generating）→ hold 已释放（再次置位成功）', async () => {
+    const h = makeHarness({ view: { occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } } })
     const reply = await h.revoke('e2')
     expect(reply).toEqual({ sessionId: SID, revoked: false, error: 'busy' })
     expect(h.registry.beginRevokeHold(SID)).toBe(true)
@@ -444,8 +441,7 @@ describe('⑤ compaction_end 边沿不提前投递（A11：hold 窗口内判定�
     const p = h.revoke('e2')
     await h.flush()
 
-    // 撤回窗口内新 compaction 开始：view 置 compacting
-    const compactingSpy = vi.spyOn(h.view, 'isCompacting', 'get').mockReturnValue(true)
+    // 撤回窗口内新 compaction 开始：view 置 compacting（[D1] 读口迁移：occupancy.compacting）
     h.view.occupancy = { ...h.view.occupancy!, compacting: true }
 
     // revoking 窗口内新提交（② 快照之后 → 不被编排 cancel，A11 场景形态；compacting
@@ -454,7 +450,6 @@ describe('⑤ compaction_end 边沿不提前投递（A11：hold 窗口内判定�
     await h.flush()
 
     // compaction_end 边沿：compacting 复位——正常（无 revoking）会在此边沿后投递
-    compactingSpy.mockReturnValue(false)
     h.view.occupancy = { ...h.view.occupancy!, compacting: false }
     await vi.advanceTimersByTimeAsync(1_500)
 
@@ -527,7 +522,6 @@ describe('⑦ revoking 进 hold 判定 + 与 compacting 叠加', () => {
     const t = standardTree()
     h.setTree(t.entries, t.leafId)
 
-    vi.spyOn(h.view, 'isCompacting', 'get').mockReturnValue(true)
     h.view.occupancy = { ...h.view.occupancy!, compacting: true }
     expect(h.registry.beginRevokeHold(SID)).toBe(true)
 
@@ -535,7 +529,6 @@ describe('⑦ revoking 进 hold 判定 + 与 compacting 叠加', () => {
     await h.flush()
 
     // 第一个 hold 源释放（compaction_end 边沿）——revoking 仍持有
-    vi.spyOn(h.view, 'isCompacting', 'get').mockReturnValue(false)
     h.view.occupancy = { ...h.view.occupancy!, compacting: false }
     await vi.advanceTimersByTimeAsync(1_200)
     expect(h.promptCalls).toHaveLength(0)

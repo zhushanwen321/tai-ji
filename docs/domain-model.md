@@ -1,6 +1,6 @@
 # taiji 领域模型登记
 
-> **本文件定位**：领域聚合、不变量与状态机的登记处（统一语言词条在 [CONTEXT.md](CONTEXT.md)）。当前登记域：**画布（problem-solve canvas，聚合与不变量，2026-10）**；**状态机基建与五域状态机（run / 画布节点 / plan / goal / permanent-session + 归档单元，2026-10，见下「状态机基建」节）**；**session 存储归档域（归档单元聚合 + 不变量 + 转移表，2026-10，见下「session 存储归档域」节）**。
+> **本文件定位**：领域聚合、不变量与状态机的登记处（统一语言词条在 [CONTEXT.md](CONTEXT.md)）。当前登记域：**画布（problem-solve canvas，聚合与不变量，2026-10）**；**状态机基建与六域状态机（run / 画布节点 / plan / goal / permanent-session + 归档单元 + session occupancy turn，2026-10，见下「状态机基建」节）**；**session 存储归档域（归档单元聚合 + 不变量 + 转移表，2026-10，见下「session 存储归档域」节）**。
 >
 ## 状态机基建（@zhushanwen/state-machine）
 
@@ -22,8 +22,21 @@
 | goal 目标状态 | active / paused / blocked / complete / budget_limited / cancelled（后三 terminal） | `GOAL_MACHINE`（extensions/universal/goal/src/engine/goal.ts；`transitionStatus` 保形包装对外） | throw |
 | permanent-session 两态 | running / idle（词表与 ExecutionStatus satisfies 双向锁定） | `permanentSessionStatusMachine`（packages/subagent-core/src/execution/domain/record-status-machine.ts） | result——表外拒绝经域内原语转 return false（两态 CAS 语义保形） |
 | 归档单元（session 归档子域，基建首个新消费者） | staging / archived / restoring | `archiveEntryMachine`（packages/runtime/src/services/archive/archive-entry-machine.ts） | throw——对外错误码由服务层承载 |
+| session occupancy turn 维（对话回合进行阶段，chat-flow-consistency D1 承接 ADR-0152 第 5 条 session 域立项） | idle / dispatching / generating / settling（无 terminal——回合状态可任意重入） | `SESSION_TURN_MACHINE`（packages/runtime/src/services/session/event-interpreter.ts） | throw（词表外事件在枚举类型层拦截 + 机器定义期自检兜底；**全组合合法表**形态——每事件 × 每状态一行、幂等 no-op 也是行，表外仅词表外值可达，详见下「session occupancy turn 状态机」节） |
 
-边界登记：session / background-task 两个域尚无转移表（显式化各自独立立项，ADR-0152）；core 的 streaming-state-machine.ts 是消费顺序 factory 深模块、非转移表状态机，不属本基建范畴；归档子域的聚合与不变量登记见下「session 存储归档域」节（本节只登记其状态机实现载体）。
+边界登记：background-task 域尚无转移表（显式化独立立项，ADR-0152）；core 的 streaming-state-machine.ts 是消费顺序 factory 深模块、非转移表状态机，不属本基建范畴；归档子域的聚合与不变量登记见下「session 存储归档域」节（本节只登记其状态机实现载体）。
+
+## session occupancy turn 状态机（chat-flow-consistency D1，2026-10）
+
+session 的会话占用（occupancy）是四维结构：turn 维（状态机，见上表 `SESSION_TURN_MACHINE`）+ compacting / bash / handingOff 三个与 turn 正交的两态布尔维（ADR-0080 先例：两态域布尔判定比表级 fail-fast 更早更严，不建机器）。唯一写入口 = `applySessionOccupancyTransition`（event-interpreter.ts），内部编排「turn 机器 transition + 布尔维 patch」一次合并写；值变化才广播 `session.occupancy` state 帧（全等去重）。原「同点双写」的派生三布尔（isGenerating/isCompacting/isBashRunning）已删除，消费方一律从 occupancy 派生（`isGeneratingTurn` = turn ∈ {dispatching, generating} 单点定义；「回合进行中」判定集合 = shared `ACTIVE_TURN_PHASES`，含 settling——投递判定、发送位预测、活动条、前端回合判定统一引用）。
+
+- **事件词表与挂点**（词表派发点静态审计锁定每项必有派发点）：dispatching（投递受理出站）/ generating（message_start）/ settling（agent_end）/ idle（agent_settled + abort 型 1 + 异常兜底）/ reject-other（prompt 真失败收尾）/ full-reset（进程死亡四维全复位）；compacting± / bash±（压缩与 bash 窗口）/ handingOff±（交接编排在途，挂点 handoff-service：编排开始置位、cleanupInflight 统一复位）。announce-idle 事件退出词表（宣告语义归广播层原语 `announceSessionOccupancy`，跳过全等去重强制广播）；abort-stall 两死行与 u5a 退役的转正行已删（派发点审计防死行复发）。
+- **不变量**：
+  1. occupancy 四维唯一合法写点 = 转移原语（绕开直写在编译期红）；session 记录不存任何平行忙闲布尔
+  2. turn 维转移行为 = 全组合合法表（绝对式幂等 patch 保形：任何状态收任何事件都写事件目标值，乱序/重复事件不产生错误状态——读侧零回归是迁移约束）
+  3. abort 链的 idle 转移只允许在型 1（入口快照 turn ∈ {dispatching, generating}，有回合被中止）内调用；压缩取消与收尾窗口不写终态、不广播、不动 turn
+  4. 终态 sidecar 写入纪律 = 第一终态优先（persistSessionOutcome 统一层：已有 done/error/stopped 则跳过；willRetry=true 的 attempt 级中间失败跳过终态写入、settling 转移保留）
+- **穷举与审计**：`generateTableTests` 全组合穷举（4 态 × 6 事件）+ 词表派发点静态审计 + 退役词零残留断言（session-turn-machine.test.ts）。
 
 ## 画布域
 > 机制纪律：不变量与状态机转移表的实现单点在 runtime CanvasService（`packages/runtime/src/services/canvas/`）——renderer / extension 侧不复制领域规则，全部写操作经唯一入口 `mutate`（契约 = `packages/extension-protocol/src/extensions/canvas/`，agent 工具面 = `extensions/taiji/canvas/`，GUI 写通道 = WS RPC `canvas.mutate`）。

@@ -53,10 +53,11 @@ import type { ISessionStore } from '../ports/session.js'
 import type { WorkspaceService } from '../workspace/workspace-service.js'
 import { toErrorMessage, errorWithCode, MODEL_NOT_CONFIGURED, SESSION_NOT_FOUND } from '../../utils/errors.js'
 import { createForkedSessionFile, resolveEntryIdByTimestamp } from './session-fork.js'
-// session-dead-structural-fixes D2/D4：转移原语（宣告帧 announce-idle 行）+ userStopped 门面
+// session-dead-structural-fixes D2/D4：occupancy 宣告原语 + userStopped 门面
 //（restore 标记检测 / delete 清理 / 收敛环）。event-interpreter 是唯一无环的兄弟依赖方向
 //（session-service 值导入本文件与本文件引用的两者，反向 import 成环）。
-import { applySessionOccupancyTransition, userStoppedGate } from './event-interpreter.js'
+import { announceSessionOccupancy, applySessionOccupancyTransition, userStoppedGate } from './event-interpreter.js'
+import { isGeneratingTurn } from './types.js'
 // restore 附着辅助（F2/F3 归一化 + U2/D1 生效值播种 + get_state 共用解析）——
 // 自本文件迁出（max-lines 行数合规），函数体逐字节等价，见 restore-seeding.ts。
 import { normalizeInactiveSessionFileIfNeeded, readEffectiveModelFromState, seedRestoreMetaOverride } from './restore-seeding.js'
@@ -436,19 +437,20 @@ export class SessionLifecycle implements ISessionRegistry {
       // W10：inputTokens/tokenCount 退化为恒 0 派生基线（types 必填字段保留）——真值由
       // usage 实例快照持有，读点（getInputTokens / toSummary.tokenCount）从实例派生，
       // 任何路径不再直写这两个字段（旧外部 setter / applyContextUpdate 直写已删）。
-      tokenCount: 0, inputTokens: 0, isGenerating: false, isCompacting: false, isBashRunning: false, bashRunToken: undefined,
+      // [chat-flow-consistency D1] 派生三布尔已删（读口 = occupancy 派生），构造点同步收缩。
+      tokenCount: 0, inputTokens: 0, bashRunToken: undefined,
       // occupancy 初值 = 全 idle（session-occupancy-send-closure D3 转移 #10 respawn 衔接）：
       // create/fork/restore（respawn）三入口共用本注册汇聚点，pi 重 spawn 后无活跃 run，
-      // idle 起步成立（与上方三 flag 全 false 同语义）。idle 的 renderer 可观测性由下方
+      // idle 起步成立。idle 的 renderer 可观测性由下方
       // 显式宣告帧保证（写 state 快照 + 重订阅回放），不依赖「无帧 = idle 缺省」假设。
-      occupancy: { turn: 'idle', compacting: false, bash: false },
+      occupancy: { turn: 'idle', compacting: false, bash: false, handingOff: false },
       adapter, sessionFilePath,
       hidden,
       parentSession,
       forkEntryId,
     }
     this.sessions.set(id, session)
-    // occupancy idle 宣告帧（session-dead-structural-fixes D2：收编为转移原语 announce-idle
+    // occupancy idle 宣告帧（session-dead-structural-fixes D2 收编、chat-flow-consistency D1 起归广播层
     // 行，Gate B V6b 反例修复）：原语对该行合并/派生均为 no-op、跳过全等去重强制广播当前
     // 投影（对象初值即 idle，「转移」的全等去重会短路广播，而本帧职责恰恰是「宣告」），
     // 广播走原语既有 state-topic 通路（实时广播 + 快照写入/重订阅回放双腿随通路保留，
@@ -465,7 +467,7 @@ export class SessionLifecycle implements ISessionRegistry {
     //    restore RPC resolve 之后），无竞态。
     // [合并修正 2026-09] 删除此处我方 crash-resilience 的裸 publish 残留——对方
     // session-dead-structural-fixes D2 已将其收编为下方 applySessionOccupancyTransition
-    // ('announce-idle') 原语行（state-topic 通路双腿：实时广播 + 快照回放），两份并存
+    // 宣告原语（state-topic 通路双腿：实时广播 + 快照回放），两份并存
     // 会双发同一宣告帧（occupancy-runtime registerSession 用例的 publish 次数哨兵拦截）。
     // D5 ① injected 接线（crash-forensics §3.3 D5）：injected = 该 session 装有会上报
     // in-flight 的 extension（subagent-workflow），errsShape 的 absent-report 形态以此
@@ -480,7 +482,8 @@ export class SessionLifecycle implements ISessionRegistry {
       // best-effort 降级：injected 写失败仅退化为 errsShape 判「无在途」（errs-safe 方向），不打断注册主链。
       console.error(`[session-lifecycle] mirror setInjected failed (sessionId=${id}):`, e)
     }
-    applySessionOccupancyTransition(session, this.registerDeps.getMessageBus(), 'announce-idle')
+    // [chat-flow-consistency D1] 宣告事件退出转移词表（宣告语义归广播层原语，不进机器）
+    announceSessionOccupancy(session, this.registerDeps.getMessageBus())
     // 注册事件同步直发（sessions.set 之后——订阅者可经 Registry 读到条目）：S3 期订阅者
     // = Facade（组装根接线），按迁移前体内顺序执行 registerReplicatedStates →
     // ensureRecordEntriesCache → reconciler 对账（fire-and-forget）。
@@ -1012,6 +1015,20 @@ export class SessionLifecycle implements ISessionRegistry {
    * 段间顺序与失败语义的权威在 session-content-cascade.ts 文件头。
    */
   async delete(sessionId: string): Promise<void> {
+    // [U8 生成中拒绝门] 与归档门同款（archive-service 门 1）：isGenerating = turn ∈
+    // {dispatching, generating}（不含 settling——settling 定稿 entry 已落盘，杀 pi 无内容
+    // 损失），判定读口与归档门同源（[chat-flow-consistency D1] 派生布尔读口迁移 =
+    // isGeneratingTurn(occupancy.turn)，唯一权威 = applySessionOccupancyTransition 原语）。
+    // 杀 pi 会丢尾部未落盘 entry；不采用自动 abort
+    // （删除语义 = 数据全弃，显式拒绝 + 可操作文案优于静默多步编排）。位置 = 在册判定
+    // 之前、disposeForDelete 之后：门拒绝时不留 userStopped 清理副作用，btw 分支在门后
+    // 不受影响（虚拟线无独立 pi 生成态语义，isGenerating 读不到 → 门短路放行）。
+    if (isGeneratingTurn(this.get(sessionId)?.occupancy?.turn)) {
+      throw errorWithCode(
+        `会话正在生成中，无法删除；请先停止生成或等待完成 (sessionId=${sessionId})`,
+        'delete_generating',
+      )
+    }
     // D4 清理路径：delete = 彻底删除，userStopped 标记随 session 一起清理（收敛环定时器
     // 一并停——active 分支的 removeSessionEntry 只停环不清标记，本调用补齐标记清理）。
     // 两分支共用（非 active 分支不经过 removeSessionEntry 也必须清）。

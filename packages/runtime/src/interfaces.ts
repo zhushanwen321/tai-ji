@@ -220,7 +220,7 @@ export interface ISessionService {
    * 覆盖默认预算（缺省回落 HISTORY_BUDGET）。cursor 未命中返回空页 + truncated=false
    * （翻页到头，不报错）。
    */
-  getHistory(sessionId: string, query?: { cursor?: string; limitTurns?: number; maxBytes?: number }): Promise<{ messages: Message[]; truncated: boolean; loadedTurns: number; totalTurnsEstimate: number }>
+  getHistory(sessionId: string, query?: { cursor?: string; limitTurns?: number; maxBytes?: number }): Promise<{ messages: Message[]; truncated: boolean; loadedTurns: number; totalTurnsEstimate: number; interrupted?: boolean }>
   /**
    * 获取 session 派生的 subagent 列表（从主 session JSONL 的 subagent toolCall/toolResult 提取）。
    * 纯磁盘读取，不依赖 pi 进程活跃。文件不存在或无 subagent 调用时返回空数组。

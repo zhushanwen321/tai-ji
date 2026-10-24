@@ -10,6 +10,8 @@
 import type {
   DeliveryCancelReply,
   DeliveryDrainReply,
+  DeliveryEditReply,
+  DeliveryPeekReply,
   DeliveryResyncReply,
   DeliverySubmitReply,
   Message,
@@ -39,6 +41,11 @@ export interface HistoryResult {
   loadedTurns: number
   /** [u4b] session 的 turn 总数估计（读到头为精确值，窗口截断时为下界） */
   totalTurnsEstimate: number
+  /**
+   * [U8 重启中断标记] 可选，true = runtime 离线读取判定文件尾部为中断形态（design-
+   * session-lifecycle 缺陷 4 方向 A）。活跃路径与游标翻页不出场（undefined）。
+   */
+  interrupted?: boolean
 }
 
 /**
@@ -72,6 +79,7 @@ export async function getHistory(sessionId: string, query?: HistoryQuery): Promi
     truncated: reply.truncated,
     loadedTurns: reply.loadedTurns,
     totalTurnsEstimate: reply.totalTurnsEstimate,
+    ...(reply.interrupted !== undefined && { interrupted: reply.interrupted }),
   }
 }
 
@@ -158,6 +166,35 @@ export function drainDelivery(sessionId: string): Promise<DeliveryDrainReply> {
  */
 export function resyncDelivery(sessionId: string, clientUuids: string[]): Promise<DeliveryResyncReply> {
   return sendCommand('delivery.resync', { sessionId, clientUuids }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
+ * 条目全文取回（delivery.peek，chat-flow-consistency D6）：✎ 编辑预填的只读通道——返回
+ * 活跃条目全文 + segments 快照（队列行 preview 是截断文本，禁止当全文消费），条目本身不动。
+ * found=false = 条目已不在内核活跃集（已投递 / 已撤销 / runtime 重启），调用方提示后放弃
+ * 本次编辑并解除锚定。
+ */
+export function peekDelivery(sessionId: string, clientUuid: string): Promise<DeliveryPeekReply> {
+  return sendCommand('delivery.peek', { sessionId, clientUuid }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
+ * 原位编辑（delivery.edit，chat-flow-consistency D6）：发送侧替换指定条目内容且排队位置
+ * 保持不变（条目 id 不变）。edited=false 四值 reason（delivered / unconfirmed / cancelled /
+ * not-found）见 shared DeliveryEditReply——前端处置同构：修改内容按普通新消息发出不丢，
+ * 仅 toast 分型。segments 形态与 submitDelivery 一致（undefined 时不带键）。
+ */
+export function editDelivery(
+  sessionId: string,
+  clientUuid: string,
+  content: string,
+  segments?: Segment[],
+): Promise<DeliveryEditReply> {
+  return sendCommand(
+    'delivery.edit',
+    { sessionId, clientUuid, content, ...(segments && segments.length > 0 ? { segments } : {}) },
+    RPC_BACKSTOP_TIMEOUT_MS,
+  )
 }
 
 // [MF-1-8 终态] `steer` / `followUp` 客户端封装已删除：u3b 把发送链收敛到 delivery.submit

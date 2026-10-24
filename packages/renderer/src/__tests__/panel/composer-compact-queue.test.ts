@@ -10,7 +10,7 @@
  *   流程，见 composer-send-button-states.test.ts）——排队提交改由 ⏎ 承担（本文件 TC11/
  *   TC18 的 Enter 路径不变：内核 queued 车道 + compaction-end flush）。
  * - 队列区：数据源 = session.delivery 帧派生视图（core getDeliveryProjectionRef），真 QueueBubble
- *   渲染 → 行可见 + 状态 chip（排队中/投递中/发送失败）
+ *   渲染 → 行可见 + 状态 chip（排队中/投递中/发送未确认）
  * - × 撤销：真 QueueBubble 点击 → useQueueRows.onCancelEntry → delivery.cancel RPC；
  *   成功回草稿（cancel reply 全文 + segments → ComposerInput.setText）
  * - failed 行重试钮：点击 → delivery.resync 单条重报
@@ -261,11 +261,11 @@ describe('Composer 队列区单源渲染 + 撤销 / 重试（u3c/D7 + V9/V10）'
 
   it('failed 行 → 重试钮可见；点击 → delivery.resync 单条重报', async () => {
     const wrapper = mountComposer({ sessionId: 's1' })
-    setProjection('s1', [{ clientUuid: 'u-f', preview: '重试耗尽的文本', state: 'failed', lane: 'queued' }])
+    setProjection('s1', [{ clientUuid: 'u-f', preview: '未确认送达的文本', state: 'failed', lane: 'queued' }])
     await wrapper.vm.$nextTick()
 
     // DOM：红色标识 + 重试钮
-    expect(wrapper.find('[data-testid="queue-state-u-f"]').text()).toBe('发送失败')
+    expect(wrapper.find('[data-testid="queue-state-u-f"]').text()).toBe('发送未确认')
     const retry = wrapper.find('[data-testid="queue-retry-u-f"]')
     expect(retry.exists()).toBe(true)
 

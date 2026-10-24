@@ -19,13 +19,16 @@
  *
  * 核心不变量（INVAR-M4-2′，取代旧 INVAR-M4-2 的「wheel-only + onScroll 只单向翻真」）：
  * **stickToBottom = false（脱离锚定）只由用户输入信号驱动——① onWheel deltaY<0（滚轮上滑，
- * 恒即时生效，不受任何抑制窗约束）；② onScroll 复合判据（offset 递减 ∧ 距底 > BOTTOM_THRESHOLD，
+ * 恒即时生效，不受任何抑制窗约束）；② onTouchMove 上滑（[chat-flow-consistency F3] 触屏
+ * 升格同 wheel 免抑制窗）；③ onScroll 复合判据（offset 递减 ∧ 距底 > BOTTOM_THRESHOLD，
  * 覆盖滚动条拖拽 / 键盘 PageUp·Home 等不产生 wheel 事件的上滑路径）。force 强滚 / session
- * 重建后的收敛抑制窗内暂停判据②的翻 false（lastOffset 快照照常维护、恢复分支照常生效）。
+ * 重建后的收敛抑制窗内暂停判据③的翻 false（lastOffset 快照照常维护、恢复分支照常生效）。
  * 「任何程序性跟随不得把用户扯回底部」的核心保护不变：跟随一律走 followIfStuck 的
  * rAF 内重读 stickToBottom guard；force 只有两个合法来源，均为用户显式意图——①点「回到最新」
- * 胶囊；②用户主动发送消息的重锚定（feat-new-message-to-bottom：尾部新增 user 消息时脱离态
- * 也必须回底，业界聊天通用行为；触发判定在 useMessageStreamFollowTriggers，force 不改本单元
+ * 胶囊；②用户主动发送消息的重锚定（[chat-flow-consistency F1] 判据改为消费 chat store 的
+ * per-session 提交序号（submitNewMessage 受理确认单点递增）——「尾部新增 user 消息」的
+ * 数据变化推断 watch 已删除：morph 回执重建 / 外来直发复用 user 消息身份尾插但不动序号，
+ * 不再误触发强拉回底；触发判定在 useMessageStreamFollowTriggers，force 不改本单元
  * 状态机语义）。**
  *
  * 「回到最新」胶囊浮现语义（ui-optimize-unified 决策 12，N11）：滚动离底超过一屏即浮现
@@ -34,6 +37,10 @@
  * 容器上下 padding 28px，量级同为一屏，见 MessageStream D2 数学不变量注释）。旧
  * 未读标记（非贴底 ∧ 有未读新内容才浮现）状态链已随本决策退役：回看历史（无新内容）
  * 也恒有回底入口。点击 force 回底时同步清零距离快照 → 胶囊即时消失，不等 scroll 回声。
+ * [chat-flow-consistency F2] 快照的时间性修复：用户脱离后静止时无 scroll 事件、快照冻结，
+ * 流式增长再多屏胶囊也不浮现——refreshDistanceSnapshot 让脱离态快照随内容高度变化即时
+ * 重算（contentWrap RO / messages.length watch 两个调用点喂入；贴底态 guard 防跟随增长拍
+ * 胶囊闪烁）。
  *
  * 程序性写入回声的逐路径安全性（设计 D7② 推导）：
  * - follow 原语写入：目标恒为底部方向 → offset 递增 → 判据②第一合取不命中；
@@ -98,6 +105,10 @@ export function useVirtuaFollow(opts: {
   showJumpButton: ComputedRef<boolean>
   onScroll: (offset: number) => void
   onWheel: (e: WheelEvent) => void
+  /** [F3] 触屏信号入口：touchstart 记触点 Y（容器 @touchstart.passive 接线） */
+  onTouchStart: (e: TouchEvent) => void
+  /** [F3] 触屏信号入口：上滑 touchmove 立即脱离（容器 @touchmove.passive 接线） */
+  onTouchMove: (e: TouchEvent) => void
   followIfStuck: () => void
   /** smooth 仅「回到最新」胶囊点击传递（决策 12「点击平滑回底」）；挂载首滚 / session 切换 / 自动跟随保持即时 */
   followToBottom: (force?: boolean, smooth?: boolean) => void
@@ -105,6 +116,8 @@ export function useVirtuaFollow(opts: {
   onSessionRebuild: () => void
   /** D7② RO 活动信号入口：U2 的 contentWrapEl ResizeObserver 回调喂入（重置 120ms 静默计时） */
   notifyRoActivity: () => void
+  /** [F2] 脱离态几何快照刷新（RO / 条数 watch 调用点喂入；贴底态 guard 内聚） */
+  refreshDistanceSnapshot: () => void
 } {
   const { vlistRef, onStickChange } = opts
 
@@ -204,6 +217,59 @@ export function useVirtuaFollow(opts: {
       stickToBottom.value = false
       onStickChange?.(false)
     }
+  }
+
+  // ── [chat-flow-consistency F3] touch 信号族（与 wheel 同类：纯用户输入信号）────────
+  // 触屏上滑（touchmove 方向向上）立即脱离锚定：与 wheel 同款免抑制窗（收敛抑制窗补偿的
+  // 对象是程序性滚动回声，用户手指事件结构性不属回声）。覆盖移动壳触屏滚动路径。
+  // 滚动条拖拽路径的权衡登记维持设计报告 F3 原案：抑制窗 ≤1500ms 且路径窄（force 后 1.5s
+  // 内用滚动条上滑且全程无 wheel/touch），探针 P-F3（滚动条 mousedown 是否派发 DOM 事件）
+  // 需真机核实后才有升格依据，本版不引入 mousedown 信号。
+  /** 最近一次 touchstart / touchmove 的触点 Y（touchmove 增量方向判定基准） */
+  let lastTouchY = 0
+
+  /** touchstart：记录触点 Y 起点（touchmove 的增量基准）。 */
+  function onTouchStart(e: TouchEvent): void {
+    const y = e.touches[0]?.clientY
+    if (typeof y === 'number') lastTouchY = y
+  }
+
+  /**
+   * touchmove：触点 Y 递减（手指上滑）→ 脱离锚定，恒即时生效（同 wheel 免抑制窗）。
+   * 下滑不改 stickToBottom——回底由 onScroll 恢复分支处理（与 wheel 下行同语义）。
+   */
+  function onTouchMove(e: TouchEvent): void {
+    const y = e.touches[0]?.clientY
+    if (typeof y !== 'number') return
+    const prev = lastTouchY
+    lastTouchY = y
+    if (y < prev) {
+      stickToBottom.value = false
+      onStickChange?.(false)
+    }
+  }
+
+  /**
+   * [chat-flow-consistency F2] 脱离态几何快照刷新：读当前 scrollSize/offset/viewportSize
+   * 重算距底与视口两快照——不滚动、无定时（几何事实驱动的即时重算）。
+   * 调用点 = contentWrap RO 回调与 messages.length watch（useMessageStreamFollowTriggers）：
+   * 用户脱离后静止时无 scroll 事件，流式增长期快照原本冻结、「回到最新」胶囊不浮现；本方法
+   * 让快照随内容高度变化即时更新（距底超一屏即现）。
+   * 贴底态 guard（仅 !stickToBottom 刷新）：贴底期跟随 rAF 落地前距底瞬时增大，无 guard 会让
+   * 胶囊在每次内容增长拍闪烁（跟随写入与 scroll 回声随后把快照拉回 0）。
+   */
+  function refreshDistanceSnapshot(): void {
+    if (stickToBottom.value) return
+    const v = vlistRef.value
+    // vlistRef null（首帧未挂载 / session 切换 dispose）→ 无测量可读，跳过
+    if (!v) return
+    // scrollSize=0（空列表 / 重建期回声）：无滚动空间即无「离底」，快照清零（同 onScroll 边界2）
+    if (v.scrollSize === 0) {
+      distanceFromBottom.value = 0
+      return
+    }
+    distanceFromBottom.value = v.scrollSize - v.scrollOffset - v.viewportSize
+    viewportHeight.value = v.viewportSize
   }
 
   /**
@@ -349,9 +415,12 @@ export function useVirtuaFollow(opts: {
     showJumpButton,
     onScroll,
     onWheel,
+    onTouchStart,
+    onTouchMove,
     followIfStuck,
     followToBottom,
     onSessionRebuild,
     notifyRoActivity,
+    refreshDistanceSnapshot,
   }
 }

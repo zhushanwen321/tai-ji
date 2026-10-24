@@ -91,13 +91,12 @@ describe('A2-MF-C：deliverText 挂 skill 注入', () => {
       // prompt mock 执行时点读取 session 视图：前移置位后此处必须已是 dispatching
       occupancyAtPrompt = {
         turn: (h.view as unknown as { occupancy?: { turn: string } }).occupancy?.turn,
-        isGenerating: h.view.isGenerating,
       }
       return {}
     })
     await h.registry.sendDirect('s1', '内容')
     // prompt 执行时点：dispatching 已写入（旧实现此点仍是 idle——置位在 prompt 之后）
-    expect(occupancyAtPrompt).toEqual({ turn: 'dispatching', isGenerating: true })
+    expect(occupancyAtPrompt).toEqual({ turn: 'dispatching' })
   })
 
   it('[RT-4#10] prompt 失败按拒绝分型定终态：processing 拒绝 → idle（v3 busy 分型重试退役）', async () => {

@@ -12,7 +12,7 @@
  * 在 isExpanded(idx) 读取时建立对 `partition.get(idx)` 的依赖，expand/collapse mutate 时
  * 依赖失效重算（TC-w1-7 / TC-w1-9 契约保持）。
  *
- * null sid 语义：所有写方法 no-op（不污染空串分区），isExpanded/hasAnyExpanded 返回 false。
+ * null sid 语义：所有写方法 no-op（不污染空串分区），isExpanded 返回 false。
  * 与 w1 的 null sid no-op 契约一致。
  */
 import type { Ref } from 'vue'
@@ -29,12 +29,8 @@ export function useTurnExpansion(sessionId: Ref<string | null>): {
   isExpanded: (turnKey: TurnKey) => boolean
   toggle: (turnKey: TurnKey) => void
   expand: (turnKey: TurnKey) => void
-  collapse: (turnKey: TurnKey) => void
   isTakeover: (turnKey: TurnKey) => boolean
   setTakeover: (turnKey: TurnKey, on: boolean) => void
-  expandAll: (turnKeys: TurnKey[]) => void
-  collapseAll: (turnKeys: TurnKey[]) => void
-  hasAnyExpanded: (turnKeys: TurnKey[]) => boolean
 } {
   const store = useTurnExpansionStore()
 
@@ -59,11 +55,8 @@ export function useTurnExpansion(sessionId: Ref<string | null>): {
       const s = sid()
       if (s !== null) store.expand(s, turnKey)
     },
-    /** 设为折叠。null sid 时 no-op */
-    collapse: (turnKey: TurnKey): void => {
-      const s = sid()
-      if (s !== null) store.collapse(s, turnKey)
-    },
+    // [chat-flow-consistency C3] 包装层 collapse 已随 ChatViewDeps.collapse（Turn.vue onComplete
+    // 接线）退役删除——唯一消费方消失即死导出，store 层 collapse 保留（store 测试与清理链用）。
     /** 查询「展开全部」接管态。null sid 返回 false（D6/TC2，窗口级语义，驱动 computeTraceWindow） */
     isTakeover: (turnKey: TurnKey): boolean => {
       const s = sid()
@@ -73,21 +66,6 @@ export function useTurnExpansion(sessionId: Ref<string | null>): {
     setTakeover: (turnKey: TurnKey, on: boolean): void => {
       const s = sid()
       if (s !== null) store.setTakeover(s, turnKey, on)
-    },
-    /** 批量展开。null sid 时 no-op */
-    expandAll: (turnKeys: TurnKey[]): void => {
-      const s = sid()
-      if (s !== null) store.expandAll(s, turnKeys)
-    },
-    /** 批量折叠。null sid 时 no-op */
-    collapseAll: (turnKeys: TurnKey[]): void => {
-      const s = sid()
-      if (s !== null) store.collapseAll(s, turnKeys)
-    },
-    /** 任一 turn 处于展开态。null sid 返回 false */
-    hasAnyExpanded: (turnKeys: TurnKey[]): boolean => {
-      const s = sid()
-      return s !== null && store.hasAnyExpanded(s, turnKeys)
     },
   }
 }

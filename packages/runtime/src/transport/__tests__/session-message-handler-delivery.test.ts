@@ -67,11 +67,8 @@ function makeSession(overrides: Partial<IManagedSessionView> = {}): IManagedSess
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
-    occupancy: { turn: 'idle', compacting: false, bash: false },
+        bashRunToken: undefined,
+    occupancy: { turn: 'idle', compacting: false, bash: false, handingOff: false },
     ...overrides,
   }
 }
@@ -296,7 +293,7 @@ describe('delivery.submit 受理 + 帧装配（D1/D5/D9②）', () => {
   })
 
   it('持有态（compacting 中）：lane=queued + state=queued（V9 队列态可撤的帧形态）', async () => {
-    const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
+    const h = makeHarness({ session: { occupancy: { turn: 'idle', compacting: true, bash: false, handingOff: false } } })
     subscribeLive(h)
 
     await h.handler.handleSessionMessage(
@@ -309,7 +306,7 @@ describe('delivery.submit 受理 + 帧装配（D1/D5/D9②）', () => {
   })
 
   it('生成中（generating）：lane=steer（lane 判定单一实现归 runtime 内核，D1）', async () => {
-    const h = makeHarness({ session: { isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } } })
+    const h = makeHarness({ session: { occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } } })
     subscribeLive(h)
 
     await h.handler.handleSessionMessage(
@@ -387,7 +384,7 @@ function makePiClient() {
 
 describe('帧数据源 = 内核派生视图（D9②：cancelled 不映射 / tombstone 不泄漏）', () => {
   it('活跃全量 + delivered 映射 + cancelled 不映射（真实内核三态同帧）', async () => {
-    const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
+    const h = makeHarness({ session: { occupancy: { turn: 'idle', compacting: true, bash: false, handingOff: false } } })
     subscribeLive(h)
 
     for (const [uuid, content] of [[UUID_A, 'msg-A'], [UUID_B, 'msg-B'], [UUID_C, 'msg-C']] as const) {
@@ -499,7 +496,7 @@ describe('session.delivery state topic（D5：last-value / 不入 ring / 重连�
   })
 
   it('last-value：同 session 多帧只留最新（stateSnapshot 单条）+ 不入 ring', async () => {
-    const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
+    const h = makeHarness({ session: { occupancy: { turn: 'idle', compacting: true, bash: false, handingOff: false } } })
     // 先经真实入口装配（D4-4 后帧只经 onChange 产生，last-value 收敛才有帧可收敛）
     subscribeLive(h)
 
@@ -515,7 +512,7 @@ describe('session.delivery state topic（D5：last-value / 不入 ring / 重连�
   })
 
   it('session.subscribe reply 的 stateSnapshot 含 delivery 帧（切 session/重连队列区恢复装配侧，V5）', async () => {
-    const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
+    const h = makeHarness({ session: { occupancy: { turn: 'idle', compacting: true, bash: false, handingOff: false } } })
 
     await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'A', clientUuid: UUID_A }), WS)
     await h.handler.handleSessionMessage(msg('session.subscribe', { sessionId: SID }), WS)
@@ -530,7 +527,7 @@ describe('session.delivery state topic（D5：last-value / 不入 ring / 重连�
 
 describe('delivery.cancel（V9/V10：queued 可撤 / 不可撤不谎报）', () => {
   it('queued 撤销成功：cancelled:true + 全文回草稿（剥标记）+ 帧移除该条目', async () => {
-    const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
+    const h = makeHarness({ session: { occupancy: { turn: 'idle', compacting: true, bash: false, handingOff: false } } })
     subscribeLive(h)
 
     await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: MARKED_CONTENT, clientUuid: UUID_A }), WS)
@@ -546,7 +543,7 @@ describe('delivery.cancel（V9/V10：queued 可撤 / 不可撤不谎报）', () 
   })
 
   it('[S5] 带尾换行的排队消息 cancel 回草稿：尾换行保留（D5-3/P5 剥除不动其他字符）', async () => {
-    const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
+    const h = makeHarness({ session: { occupancy: { turn: 'idle', compacting: true, bash: false, handingOff: false } } })
     subscribeLive(h)
 
     // 用户原文以换行结尾（多行输入末尾空行）：内核尾附标记后 cancel → 草稿须保留该尾换行
@@ -561,7 +558,7 @@ describe('delivery.cancel（V9/V10：queued 可撤 / 不可撤不谎报）', () 
   })
 
   it('不可撤（未知 uuid）：cancelled:false + reason，条目不动（§3.4 反馈面，不谎报成功）', async () => {
-    const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
+    const h = makeHarness({ session: { occupancy: { turn: 'idle', compacting: true, bash: false, handingOff: false } } })
     subscribeLive(h)
 
     await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'A', clientUuid: UUID_A }), WS)
@@ -581,7 +578,7 @@ describe('delivery.cancel（V9/V10：queued 可撤 / 不可撤不谎报）', () 
 
 describe('delivery.drain（V11：全量回收回草稿 + 空条目集帧形态）', () => {
   it('返回全部条目全文（发送序，剥标记）+ 帧 entries: []', async () => {
-    const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
+    const h = makeHarness({ session: { occupancy: { turn: 'idle', compacting: true, bash: false, handingOff: false } } })
     subscribeLive(h)
 
     await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'first', clientUuid: UUID_A }), WS)
@@ -631,7 +628,7 @@ describe('delivery.resync（D5：判重去重 + 单源恢复）', () => {
 describe('帧单发收敛（D4-4：首配快照一次 + 同一变更恰好一帧 + 无变更零帧）', () => {
   // held 场景（compacting）不 pump，变更帧数确定无迁移噪声；类型标注保留字面量推断
   const held: Parameters<typeof makeHarness>[0] = {
-    session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } },
+    session: { occupancy: { turn: 'idle', compacting: true, bash: false, handingOff: false } },
   }
 
   it('订阅首配快照恰好一帧：订阅前的内核变更不丢（全量派生视图补齐），且订阅前零帧白发', async () => {
@@ -730,7 +727,7 @@ describe('delivery 域防御路径', () => {
   })
 
   it('releaseDeliveryTopic（session 销毁清理）：解绑后不再发帧；重装收敛到 session.subscribe 唯一入口（D4-4）', async () => {
-    const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
+    const h = makeHarness({ session: { occupancy: { turn: 'idle', compacting: true, bash: false, handingOff: false } } })
     subscribeLive(h)
 
     await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'A', clientUuid: UUID_A }), WS)

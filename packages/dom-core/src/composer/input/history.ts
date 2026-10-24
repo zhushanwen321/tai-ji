@@ -24,6 +24,7 @@
  */
 import { computed, reactive, type Ref } from 'vue'
 import { useSessionScopedState } from '@taiji/core/foundation/use-session-scoped-state'
+import type { Segment } from '@taiji/shared'
 import type { ComposerNavState, HistoryDeps } from './types'
 
 /**
@@ -40,8 +41,8 @@ export function useComposerHistory(
   isBrowsing: Ref<boolean>
   /** 按 sid 显式读 browsing 态（session 切换 watch 回调时刻 sid.value 已是新值，isBrowsing 读不到旧分区） */
   isBrowsingFor: (sid: string) => boolean
-  /** 按 sid 显式读进 browsing 前保存的草稿（用户真实输入；browsing 态 getText() 已被历史条目替换） */
-  getSavedDraft: (sid: string) => string
+  /** 按 sid 显式读进 browsing 前保存的草稿 segments 快照（用户真实输入；browsing 态输入区已被历史条目替换） */
+  getSavedSegments: (sid: string) => Segment[]
 } {
   /**
    * 派生历史（倒序、去重连续相同文本）。
@@ -60,7 +61,7 @@ export function useComposerHistory(
    */
   const navState = useSessionScopedState<ComposerNavState>(
     sessionIdRef,
-    () => reactive<ComposerNavState>({ browsing: false, index: 0, savedDraft: '' }),
+    () => reactive<ComposerNavState>({ browsing: false, index: 0, savedSegments: [] }),
   )
 
   const isBrowsing = computed(() => navState.current.value.browsing)
@@ -76,10 +77,13 @@ export function useComposerHistory(
     return browsing
   }
 
-  /** 按 sid 显式读进 browsing 前保存的草稿（用户真实输入）。 */
-  function getSavedDraft(sid: string): string {
-    let saved = ''
-    navState.updateFor(sid, (s) => { saved = s.savedDraft })
+  /**
+   * 按 sid 显式读进 browsing 前保存的草稿（用户真实输入的 segments 快照，含全部 chip
+   * 类型——browsing 态输入区已被历史条目替换，getText()/getSegments() 都读不到原值）。
+   */
+  function getSavedSegments(sid: string): Segment[] {
+    let saved: Segment[] = []
+    navState.updateFor(sid, (s) => { saved = s.savedSegments })
     return saved
   }
 
@@ -104,12 +108,11 @@ export function useComposerHistory(
     const s = navState.current.value
 
     if (!s.browsing) {
-      const draft = deps.getText()
       if (h.length === 0) {
         return false
       }
       navState.update((st) => {
-        st.savedDraft = draft
+        st.savedSegments = deps.getSegments()
         st.browsing = true
         st.index = 0
       })
@@ -143,11 +146,19 @@ export function useComposerHistory(
         st.index = newIndex
       })
       isSettingText = true
-      deps.setText(h[newIndex] ?? s.savedDraft, 'end')
+      const entry = h[newIndex]
+      if (entry !== undefined) {
+        deps.setText(entry, 'end')
+      } else {
+        // index 越界兜底（历史派生缩短）：退回恢复草稿，与「↓ 已在最近」同语义（segments 快照结构化回填）
+        deps.restoreSegments(s.savedSegments)
+      }
       isSettingText = false
     } else {
+      // ↓ 退回最近条目 = 恢复草稿：走 segments 快照结构化回填（text 重建 + chip 还原，
+      // U8 单点），不再 setText 纯文本——纯文本形态会把 chip 序列化成标记污染文本
       isSettingText = true
-      deps.setText(s.savedDraft, 'end')
+      deps.restoreSegments(s.savedSegments)
       isSettingText = false
       navState.update((st) => {
         st.browsing = false
@@ -156,5 +167,5 @@ export function useComposerHistory(
     return true
   }
 
-  return { handleArrowUp, handleArrowDown, resetBrowsing, isBrowsing, isBrowsingFor, getSavedDraft }
+  return { handleArrowUp, handleArrowDown, resetBrowsing, isBrowsing, isBrowsingFor, getSavedSegments }
 }

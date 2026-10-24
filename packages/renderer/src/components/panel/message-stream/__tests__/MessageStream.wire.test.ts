@@ -90,7 +90,8 @@ function makeTurn(over: Partial<MessageTurn> = {}): MessageTurn {
 }
 
 /** [w6] ui Turn 展开态经 deps 注入：stateful mock（reactive Set）驱动展开/收起契约
- *  （真实 useTurnExpansion 逻辑在 renderer 壳 useChatViewDeps 内，组件层只经 isExpanded/toggleExpand/collapse 消费）。
+ *  （真实 useTurnExpansion 逻辑在 renderer 壳 useChatViewDeps 内，组件层只经 isExpanded/toggleExpand
+ *  消费；[chat-flow-consistency C3] deps.collapse 已随 onComplete 接线退役删除）。
  *  [M5 stable-key] key 为 turnStableId(turn)（string，首条消息 id），非 turn.index。 */
 const expandedTurns = reactive(new Set<string>())
 function statefulExpandDeps() {
@@ -100,7 +101,6 @@ function statefulExpandDeps() {
       if (expandedTurns.has(key)) expandedTurns.delete(key)
       else expandedTurns.add(key)
     },
-    collapse: (key: string) => expandedTurns.delete(key),
   }
 }
 
@@ -157,16 +157,12 @@ describe('Turn.vue 接线 useTurnExpansion（w1）', () => {
     expect(wrapper.find('.chev').classes()).toContain('rotate-90')
   })
 
-  it('TC-w4-2: 完成态自动收起（isSessionActive true→false 触发 useTurnElapsed.onComplete → deps.collapse）', async () => {
-    // 关键：先让 isExpanded=true（手动展开），才能区分两条路径——
-    //   showTrace = sessionActive || isExpanded(idx)。
-    //   若不预先展开，sessionActive true→false 时 showTrace 直接 false，与 onComplete 是否调用无关，
-    //   测试无法捕捉 onComplete 回归（即使把 onComplete 改 no-op 测试仍过）。
-    //   预先 isExpanded=true 后：onComplete 正确触发 collapse → isExpanded 转 false → showTrace=false；
-    //   若 onComplete 未触发 → isExpanded 仍 true → showTrace=false||true=true（trace 仍在，测试能捕捉）。
-    //
-    // sessionActive=true 时 turn-meta button :disabled（Turn.vue），无法用点击触发 toggle，
-    // 故直接预置 expandedTurns（makeTurn() 默认 index=1 → 稳定 key 'u1'）。
+  it('TC-w4-2 [C3 退役]: 会话结束降沿不清手动展开态（onComplete collapse 已退役，收起纯派生）', async () => {
+    // [chat-flow-consistency C3] 旧契约（isSessionActive true→false 触发 onComplete →
+    // deps.collapse 清手动展开）已退役：工作回合的收起由派生完成（isWorkingTurn 翻 false →
+    // showTrace = isExpanded），显式 collapse 的唯一净效果是清挂载回合的手动展开态（有害无益）。
+    // 新契约（design-stream-presentation C3 验收断言）：手动展开的回合在会话结束降沿保持展开。
+    // 预置 expandedTurns（makeTurn() 默认稳定 key 'u1'）后降沿——展开必须原样保留。
     expandedTurns.add('u1')
     const wrapper = mount(Turn, {
       props: {
@@ -183,15 +179,12 @@ describe('Turn.vue 接线 useTurnExpansion（w1）', () => {
     // sessionActive=true → showTrace = true || true = true（thinking+text 都渲染）
     expect(wrapper.find('.trace').exists()).toBe(true)
     expect(wrapper.findAllComponents({ name: 'Block' }).length).toBe(2)
-    // 对话结束：isSessionActive true→false → useTurnElapsed watch 触发 onComplete → deps.collapse(1)
-    //   → isExpanded(1) 变 false → showTrace = false || false = false → thinking/tool 内容隐藏
-    await wrapper.setProps({ isSessionActive: false })
-    // [block-rendering M0] trace 容器恒渲染，折叠态仅 text 恒渲染（thinking 隐藏）
+    // 对话结束：isSessionActive true→false——不再有 onComplete collapse；手动展开保持
     expect(wrapper.find('.trace').exists()).toBe(true)
-    expect(wrapper.findAllComponents({ name: 'Block' }).length).toBe(1)
-    // 回归检查：collapse 确实被调用（expandedTurns 已被 onComplete 路径复位）。
-    // 若 onComplete 被改成 no-op，此处仍为 true，测试会失败（捕捉回归）。
-    expect(expandedTurns.has('u1')).toBe(false)
+    await wrapper.setProps({ isSessionActive: false })
+    // 手动展开态保持：isExpanded('u1') 仍 true → showTrace 仍 true（thinking 可回看）
+    expect(wrapper.findAllComponents({ name: 'Block' }).length).toBe(2)
+    expect(expandedTurns.has('u1')).toBe(true)
   })
 
   it('TC-w4-7: 展开态隔离 —— 两个 Turn（不同稳定 key）展开互不影响', async () => {

@@ -103,3 +103,40 @@ describe('turn-expansion store takeover API (window wave TC5/TC6/TC7, ADR-0049)'
     expect(store.isTakeover('s2', 'turn-1')).toBe(true)
   })
 })
+
+/**
+ * [chat-flow-consistency C4 两段式契约] 手动展开态的清除边界（设计裁决：内存驻留期间保持、
+ * 磁盘重载后重置）。两段各有明确依据：驻留期 turn 稳定 id（首条消息 id）不变，切走再切回
+ * （LRU 未驱逐，走 reconcileHistory 增量刷新）展开保持；任何走盘重载（LRU 驱逐后切回 /
+ * 首次切入）换 id 空间（live u-id 与盘上 entry 派生 id 不相交），接管点（ChatHydratePort.
+ * hydrate 适配层，桌面 useSidebar / 移动壳 app-runtime，接线测试见
+ * useSidebar-hydrate-turn-expansion.test.ts）显式调 clearSession 重置。
+ */
+describe('turn-expansion store 两段式契约（C4：驻留保持 / 重载重置）', () => {
+  it('驻留保持：切走再切回（无清理动作）后手动展开态原样保留', () => {
+    const store = useTurnExpansionStore()
+    store.expand('s1', 'turn-live-id')
+    // 模拟驻留期切走再切回：store 不发生任何清理（isHydrated 会话走 reconcileHistory，
+    // 不经过 hydrate 接管点）——分区与展开标记原样
+    expect(store.isExpanded('s1', 'turn-live-id')).toBe(true)
+  })
+
+  it('重载重置：hydrate 接管点调 clearSession 后展开态显式归零（同 takeover 一并清）', () => {
+    const store = useTurnExpansionStore()
+    store.expand('s1', 'turn-live-id')
+    store.setTakeover('s1', 'turn-live-id', true)
+    // 磁盘重载基线接管点的契约动作（与 session 销毁共用同一清理入口）
+    store.clearSession('s1')
+    expect(store.isExpanded('s1', 'turn-live-id')).toBe(false)
+    expect(store.isTakeover('s1', 'turn-live-id')).toBe(false)
+  })
+
+  it('重载重置按 sid 精确：其他会话的驻留展开态不受影响', () => {
+    const store = useTurnExpansionStore()
+    store.expand('s1', 'turn-live-id')
+    store.expand('s2', 'turn-live-id')
+    store.clearSession('s1')
+    expect(store.isExpanded('s1', 'turn-live-id')).toBe(false)
+    expect(store.isExpanded('s2', 'turn-live-id')).toBe(true)
+  })
+})

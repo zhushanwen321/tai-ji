@@ -408,7 +408,9 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 ### 统一投递（unified delivery，v3）
 
-全部消息发送的统一投递服务：**一个内核 + 两个薄适配 + 唯一队列在 pi**。内核 = `packages/session-delivery/`（v3：条目状态机 / 判重 / 送达凭据 / DeliveryStore 端口，零 pi 依赖零 fs 知识）；两个薄适配 = runtime 适配（`packages/runtime/src/services/session/session-delivery-registry.ts`，文本车道：提交入口 + 在途登记 + 撤销编排 + GUI 状态源）与 pi 内投递端口 DeliveryPort（`extensions/shared/delivery-port/`，custom 车道唯一执行者：通知提交 + 投递日志 + 回执 + 重启重放）。**唯一队列 = pi 原生 steer / followUp 队列**（每 session 一份）——文本 `prompt(streamingBehavior)` 与通知 `sendMessage(deliverAs)` 同队 FIFO，忙时入队不拒；两档注入时机由 pi 队列原生出队承载，taiji 侧零时机代码。renderer 只提交（`delivery.submit`）与渲染（`session.delivery` 状态帧），不做投递判定。
+全部消息发送的统一投递服务：**一个内核 + 两个薄适配 + 唯一队列在 pi**。内核 = `packages/session-delivery/`（v3：条目状态机 / 判重 / 送达凭据 / DeliveryStore 端口，零 pi 依赖零 fs 知识）；两个薄适配 = runtime 适配（`packages/runtime/src/services/session/session-delivery-registry.ts`，文本投递路径：提交入口 + 在途登记 + 撤销编排 + GUI 状态源）与 pi 内投递端口 DeliveryPort（`extensions/shared/delivery-port/`，custom 通知投递路径唯一执行者：通知提交 + 投递日志 + 回执 + 重启重放）。**唯一队列 = pi 原生 steer / followUp 队列**（每 session 一份）——文本 `prompt(streamingBehavior)` 与通知 `sendMessage(deliverAs)` 同队 FIFO，忙时入队不拒；两档注入时机由 pi 队列原生出队承载，taiji 侧零时机代码。renderer 只提交（`delivery.submit`）与渲染（`session.delivery` 状态帧），不做投递判定。
+
+**投递方式判定（lane，runtime 单点）**：每条消息的投递路径判定 = runtime `laneOf`（session-delivery-registry.ts），判定源 = occupancy 派生——「回合进行中」（turn ∈ `ACTIVE_TURN_PHASES` = dispatching / generating / settling，shared 单点常量）→ steer；持有期（压缩窗口 / 撤回编排 / 交接在途 handingOff）→ queued（持有结束后自动投出）；其余空闲 → direct（立即成为对话流气泡）。settling（收尾中）纳入「回合进行中」由探针 P1 实测背书（pi settling 窗口 steer 受理正确）——回合结束瞬间的追问与生成中的行为一致，进队列区。
 
 **envelope（投递信封）**：投递请求统一包装——payload（判别联合 text / custom）+ timing + 幂等键 id + 提交选项（merge 合批 / onFailure 失败处置 / 通知域另有 collectKey 收取关联键）。机制统一、差异只在提交选项缺省值（text 缺省 forget 失败即弃 + 逐条；custom 缺省 retain 留账重投 + 合批）与端点能力（cancel / drain 管控面仅 runtime 端点）。
 
@@ -422,15 +424,15 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 **送达凭据（deliveryProof）**：判定「送达了」的证据来源，三档申报——`marker`（文本裸标记）/ `details-id`（通知：port 注入前把条目 id 统一写入消息 `details.deliveryId`，批形态逐项展平）/ `acceptance`（受理即算送达的保守档）。SSOT 在 [decisions.md ADR-0074](adr/decisions.md)。
 
-**裸标记（bare marker）/ 投递身份（delivery identity）**：文本车道机制不变——出站文本尾附 `<!--taiji:msg:<uuid>-->` 为逐消息身份；判定权威 = `DELIVERY_MARKER_ID_RE`（session-delivery-registry.ts）；出站尾附锚口径见 [decisions.md ADR-0077](adr/decisions.md)。
+**裸标记（bare marker）/ 投递身份（delivery identity）**：文本投递路径机制不变——出站文本尾附 `<!--taiji:msg:<uuid>-->` 为逐消息身份；判定权威 = `DELIVERY_MARKER_ID_RE`（session-delivery-registry.ts）；出站尾附锚口径见 [decisions.md ADR-0077](adr/decisions.md)。
 
-**对账器（Reconciler，文本车道保留）**：registry 侧既有组件，事件触发（`delivery.cancel` 复用同一路径为撤销入口）执行对账，处置 = `clear_queue` 全收后按裸标记三分（reclaim 重投 / rebuild 重建记账 / adopt 收养）。通知域**无运行中对账**（全链路事件驱动 + 崩溃重放，ADR-0122）。
+**对账器（Reconciler，文本投递路径保留）**：registry 侧既有组件，事件触发（`delivery.cancel` 复用同一路径为撤销入口）执行对账，处置 = `clear_queue` 全收后按裸标记三分（reclaim 重投 / rebuild 重建记账 / adopt 收养）。通知域**无运行中对账**（全链路事件驱动 + 崩溃重放，ADR-0122）。
 
 **重放（replay）**：崩溃恢复的唯一机制——重启后按投递日志差集把未送达条目重新入队。文本 = runtime 磁盘 outbox（`<getDataDir()>/delivery-outbox/<sessionId>.jsonl`）启动 loadUndelivered + reattach transcript 判重；通知 = DeliveryPort 的 session_start 差集扫描（outbox − delivered − ack）。运行中被 `clear_queue` 牵连清除的通知运行中不可恢复（扩展范围无队列事实源），悬置至重启重放。
 
 **已完结 id 索引**：判重的内存缓存（已完结条目 id 集合），由 DeliveryStore 终局记录在启动 / 重放时构建（loadTerminalIds）；判重顺序 = 在途条目 → 内存索引 → 持久记录。撤销防复活凭据在持久终局记录（v2 的 tombstone 独立机制退役）。
 
-**投递日志（delivery journal）**：通知车道耐久侧 = 待投记录 / 已投回执两列 session entry（port 经 appendEntry 写，schema v2 + v1 账本存量兼容读）；持久化承诺先于投递尝试（受理前落盘）。
+**投递日志（delivery journal）**：通知投递路径耐久侧 = 待投记录 / 已投回执两列 session entry（port 经 appendEntry 写，schema v2 + v1 账本存量兼容读）；持久化承诺先于投递尝试（受理前落盘）。
 
 **持久化存储端口（DeliveryStore）**：内核 v3 端口——`persist / ack / discard / loadUndelivered / loadTerminalIds / hasTerminal`。两实现：runtime 半区 = 磁盘 outbox（fs 注入，内核零 fs 知识）；port 半区 = session entry（persist 为 no-op，落盘由提交层 appendEntry 前置兑现防双写）。
 

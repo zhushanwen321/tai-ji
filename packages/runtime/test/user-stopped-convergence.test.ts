@@ -236,7 +236,7 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
   function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManagedSessionView {
     return {
       id: 's1', cwd: '/test', label: 'test', modelId: 'm1', createdAt: 1, lastActiveAt: 1,
-      tokenCount: 0, inputTokens: 0, isGenerating: false, isCompacting: false, isBashRunning: false,
+      tokenCount: 0, inputTokens: 0,
       bashRunToken: undefined,
       ...overrides,
     }

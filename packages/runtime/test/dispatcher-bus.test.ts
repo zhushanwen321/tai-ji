@@ -47,10 +47,7 @@ function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManaged
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
+        bashRunToken: undefined,
     ...overrides,
   }
 }
@@ -69,10 +66,7 @@ function makeMocks(opts: {
   // [u3b 预检改读 occupancy] sendPrompt 预检输入源改为 occupancy 派生视图。fixture 镜像真实
   // 链路的原子同步（原语「合并 + 派生」双写合一）。
   const session = opts.session ?? makeMockSession({
-    isGenerating,
-    isCompacting,
-    isBashRunning,
-    occupancy: { turn: isGenerating ? 'generating' : 'idle', compacting: isCompacting, bash: isBashRunning },
+    occupancy: { turn: isGenerating ? 'generating' : 'idle', compacting: isCompacting, bash: isBashRunning, handingOff: false },
   })
   const promptFn = opts.promptError
     ? vi.fn(async () => { throw opts.promptError! })
@@ -292,7 +286,7 @@ describe('message-dispatcher bus integration', () => {
   // ── abortBash path ──
 
   it('abortBash → bus.publish(message.bashAborted)（D4-3 兜底终态独立帧）', async () => {
-    const session = makeMockSession({ isBashRunning: true, bashRunToken: 'bash_123_abc' })
+    const session = makeMockSession({ bashRunToken: 'bash_123_abc', occupancy: { turn: 'idle', compacting: false, bash: true, handingOff: false } })
     const { dispatcher, messageBus } = makeMocks({ session })
     await dispatcher.abortBash('s1')
     const bashAbortedCall = messageBus.publish.mock.calls.find(
@@ -365,12 +359,10 @@ describe('message-dispatcher bus integration', () => {
     compactFn.mockImplementation(() => firstGate)
 
     const first = dispatcher.compact('s1')
-    // async 函数体同步执行到第一个 await（client.compact）：置位（'compacting-start' →
-    // isCompacting=true 派生）已落 session 视图
-    expect(session.isCompacting).toBe(true)
+    // async 函数体同步执行到第一个 await（client.compact）：置位（compacting-start）已落 session 视图
     expect(session.occupancy?.compacting).toBe(true)
 
-    // 第二发：预检读 isCompacting=true → 拒绝（不发出第二个 RPC）
+    // 第二发：预检读 compacting=true → 拒绝（不发出第二个 RPC）
     const second = dispatcher.compact('s1')
     await expect(second).rejects.toThrow('Cannot compact while compaction already running')
     // 锁定 error envelope code 属性（产生点 = message-dispatcher compact 预检的
@@ -381,7 +373,6 @@ describe('message-dispatcher bus integration', () => {
     // 第一发完成：finally 复位（compacting-end）
     releaseFirst({ summary: 'ok', tokensBefore: 100, estimatedTokensAfter: 50 })
     await first
-    expect(session.isCompacting).toBe(false)
     expect(session.occupancy?.compacting).toBe(false)
   })
 
@@ -389,7 +380,6 @@ describe('message-dispatcher bus integration', () => {
     const { dispatcher, compactFn, session } = makeMocks()
     compactFn.mockRejectedValue(new Error('transport gone'))
     await expect(dispatcher.compact('s1')).rejects.toThrow('transport gone')
-    expect(session.isCompacting).toBe(false)
     expect(session.occupancy?.compacting).toBe(false)
   })
 

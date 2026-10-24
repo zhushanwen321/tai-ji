@@ -38,9 +38,17 @@
       />
     </template>
 
-    <!-- user 区：UserBubble 子组件 -->
+    <!-- user 区：UserBubble 子组件。
+         [chat-flow-consistency U9 / S2] 交接指令提示行（锚位带 handoffInstruction 的
+         system 行）不渲染 user 气泡——折叠为 SystemNotice 提示行（「交接指令（内部）」，
+         悬停显指令原文），其后的 assistant 回合即交接文档（TurnMeta 挂「交接文档」标签）。 -->
+    <SystemNotice
+      v-if="turn.user && isHandoffInstructionNotice(turn.user)"
+      :message="turn.user"
+      data-testid="turn-handoff-instruction"
+    />
     <UserBubble
-      v-if="turn.user"
+      v-else-if="turn.user"
       :turn="turn"
       :session-id="sessionId"
       :can-edit="canEdit"
@@ -268,6 +276,7 @@ import {
   deriveFoldedNoticeRows,
   deriveTurnAggregates,
   isBashCompleteNotice,
+  isHandoffInstructionNotice,
   turnStableId,
 } from '@taiji/core/domain/chat'
 import type { ToolCall } from '@taiji/shared'
@@ -435,7 +444,7 @@ const emit = defineEmits<{
 }>()
 
 const deps = useChatViewDeps()
-const { collapse, getChangeSetStatus, isActive, setTakeover } = deps
+const { getChangeSetStatus, isActive, setTakeover } = deps
 
 /** 最后一条 assistant */
 const lastAssistant = computed(() => {
@@ -451,8 +460,14 @@ const isStreaming = computed(() => props.turn.isStreaming)
 const sessionActive = computed(() => props.isSessionActive ?? props.turn.isStreaming)
 /**
  * 本 turn 是否为「工作 turn」（D1：折叠作用域降到 turn 级）。
+ * [chat-flow-consistency D2] 判定放宽为 `sessionActive ∧ (isLastTurn ∨ isStreaming)`：
+ * 插话回流开出新回合后，旧回合的 assistant 在定稿收尾（回合级 message.complete）前仍是
+ * streaming——旧回合保持工作展开态与计时，与新回合双工作态并存（期望形态），complete 到达
+ * 两者同时落定（收起为纯派生态：isWorkingTurn 翻 false → showTrace = isExpanded = false）。
  */
-const isWorkingTurn = computed(() => sessionActive.value && (props.isLastTurn ?? false))
+const isWorkingTurn = computed(
+  () => sessionActive.value && ((props.isLastTurn ?? false) || isStreaming.value),
+)
 
 /**
  * trace 窗口化编排 + 渲染单元（run 分组）派生（useTurnTrace，从本组件 script 拆出——
@@ -537,14 +552,14 @@ function onToggleTakeover(): void {
 
 /**
  * 整 turn 墙钟 live 计时 + 整 turn 生成 token 总量（聚合事实在 core deriveTurnAggregates）。
+ * [chat-flow-consistency C3] onComplete collapse 接线已退役：工作回合的收起由派生完成
+ * （isWorkingTurn 翻 false → showTrace = isExpanded），显式 collapse 的唯一净效果是清挂载
+ * 回合的手动展开态（有害无益）——手动展开态的唯一清除路径 = 磁盘重载基线接管点清分区
+ * （turn-expansion 两段式契约）与 session 销毁清分区。
  */
 const { elapsed, startedAt, endedAt, isLive, generatedTokens } = useTurnElapsed(
   () => turnAggregates.value,
   () => isTurnRunning.value,
-  () => sessionActive.value,
-  () => {
-    collapse(turnStableId(props.turn))
-  },
 )
 
 /** 变更集卡（W10） */

@@ -20,6 +20,15 @@ export * from './bash-effects'
 export * from './effect-types'
 export * from './truncate-tool-output'
 export { dispatchMessageEvent } from './effects/registry'
+// [chat-flow-consistency 缺陷 3/7] liveOnly 提示行文案注入口（core 无 i18n——renderer 装配层
+// 经 configureChatNoticeText 注入翻译，词条 panel.message.chatNotice.*）
+export {
+  configureChatNoticeText,
+  chatNoticeText,
+  resetChatNoticeTextForTest,
+  TRUNCATED_STOP_REASONS,
+  type ChatNoticeKey,
+} from './effects/notice-text'
 // [投递所有权内核 u3b] session.delivery 派生视图消费口（D7——队列区/气泡 morph 单一数据源，
 // u3c QueueBubble 单源化消费；响应式读口 getDeliveryProjectionRef）
 // findDeliveryEntry：撤回「在途条目」判定谓词（[MF-1-4] UserBubble / useChat 共享单点）

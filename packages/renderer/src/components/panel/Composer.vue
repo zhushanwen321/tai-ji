@@ -54,12 +54,19 @@
         <!-- QueueBubble（v6 §8.5：内嵌 composer-box 顶部，去独立卡片/pulse/标签/chevron，
              仅 border-b 分隔）——6 区第 1 位。
              [u3c/D7 单源化] 行数据 = session.delivery 状态帧派生视图（useQueueRows），
-             × 撤销 → delivery.cancel、failed 行重试 → delivery.resync -->
+             × 撤销 → delivery.cancel、failed 行重试 → delivery.resync、
+             +N 展开/重试全部 → 同一 useQueueRows 编排（Q2/Q5） -->
         <QueueBubble
           :rows="queueRows"
           :hint="queueHint"
+          :expanded="queueExpanded"
+          :editing-client-uuid="editingQueueClientUuid"
           @cancel="onCancelQueueEntry"
+          @edit="onEditQueueEntry"
+          @abandon-edit="onAbandonQueueEdit"
           @retry="onRetryQueueEntry"
+          @retry-all="onRetryAllQueueFailed"
+          @toggle-expand="toggleQueueExpanded"
         />
         <!-- Staging 模式 banner（fork/handoff 统一，demo .mode-banner 形态对齐）：composer-box 顶缘
              整条横幅，图标染 accent = 模式在途唯一染色点（标题粗体中性 fg，描述 fg-2，× 中性）。
@@ -487,6 +494,10 @@ const {
   onSend,
   // [u3c] 队列条目撤销/回收的文本回草稿（useQueueRows 的 restoreDraft 注入）
   restoreToDraft,
+  // [D6] 队列编辑锚定：编辑入口 / 放弃编辑 / 编辑态（提示条显隐，chat-flow-consistency）
+  beginQueueEntryEdit,
+  abandonQueueEdit,
+  editingQueueClientUuid,
   isActiveTurn,
   sendButtonState,
   sendButtonBadge,
@@ -502,9 +513,21 @@ const {
 } = shell
 
 // [u3c/D7] 队列区行（session.delivery 帧派生视图）+ 撤销/重试编排（行数约束拆出 useQueueRows；
-// 依赖 shell 的 restoreToDraft，故在解构后调用）
-const { rows: queueRows, hint: queueHint, onCancelEntry: onCancelQueueEntry, onRetryEntry: onRetryQueueEntry } =
-  useQueueRows(sessionIdRef, { restoreDraft: restoreToDraft })
+// 依赖 shell 的 restoreToDraft，故在解构后调用）。expanded/toggle = +N 展开开关（Q2，
+// per-session 分区持有）；onRetryAllFailed = 重试全部失败项（Q5）
+const {
+  rows: queueRows,
+  hint: queueHint,
+  expanded: queueExpanded,
+  toggleExpanded: toggleQueueExpanded,
+  onCancelEntry: onCancelQueueEntry,
+  onEditEntry: onEditQueueEntry,
+  onRetryEntry: onRetryQueueEntry,
+  onRetryAllFailed: onRetryAllQueueFailed,
+} = useQueueRows(sessionIdRef, { restoreDraft: restoreToDraft, beginEdit: beginQueueEntryEdit })
+
+/** 放弃编辑（D6 提示条按钮）：解除锚定但草稿文本保留（shell 单点实现）。 */
+const onAbandonQueueEdit = abandonQueueEdit
 
 // composer-box 聚焦态 + 聚焦环视觉（v6 §6.1 .focused）：从本组件拆出（script 行数约束，
 // 见 composer-focus-ring.ts）；依赖 shell 的 boxClass/staging，故在解构后调用

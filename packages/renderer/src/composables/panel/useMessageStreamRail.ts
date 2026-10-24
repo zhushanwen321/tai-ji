@@ -4,11 +4,11 @@
  * 职责：
  * - railTurns：派生 renderItems 中所有 turn（rail 节点列表数据源）。
  * - activeTurnIndex：按 virta scrollOffset 精确定位当前激活 turn 下标（viewport indicator 跟随滚动）。
- * - 事件路由：onJump（滚动定位）/ onToggle / onExpandAll / onCollapseAll，全部经 useTurnExpansion
+ * - 事件路由：onJump（滚动定位）/ onToggle，全部经 useTurnExpansion
  *   与 Turn.vue 共享同一 session 展开态（同一 session Map key）。
  *
  * 索引空间注意：rail 内部用 railTurns 数组下标（0-based），Turn.vue 用 props.turn（稳定 key
- * 经 turnStableId 派生，M5 stable-key）。toggle/expandAll/collapseAll 把下标转 turn 稳定 key
+ * 经 turnStableId 派生，M5 stable-key）。toggle 把下标转 turn 稳定 key
  * 再传 useTurnExpansion，保证 Map key 一致（string key 不随消息插删漂移）。
  *
  * 提取至此（composables/panel 既有范式）：MessageStream.vue script setup ≤300 行规范 + rail 关注点单一可复用。

@@ -6,13 +6,16 @@
  *   的条目（帧序 = 内核 FIFO 发送序），preview 直用帧值（runtime 装配已剥标记截断，
  *   帧契约测试 session-message-handler-delivery 断言无标记——显示层不二次加工）
  * - foldQueueRows：队列区折叠口径唯一定义点——failed 行置顶且恒可见（重试入口不折叠），
- *   「+N」只计被折叠的非 failed 行（§3.4 重试耗尽行必须可操作）
- * - hint：按占用分档的行 hover 文案（compacting > bash > settling > 默认，消费 chat store
- *   sessionPhase 同一真值）
+ *   「+N」只计被折叠的非 failed 行（§3.4 失败行必须可操作）；opts.expanded = true 时全部
+ *   行可见（+N 展开开关的展开态，Q2）
+ * - hint：按占用分档的行 hover 文案（compacting > bash > 交接 > settling > 默认，消费
+ *   chat store sessionPhase 同一真值）
  * - onCancelEntry：delivery.cancel RPC → 成功且携带全文则交 restoreDraft 回草稿；
  *   三个失败域各自出声各自文案（RPC 异常 = 撤销失败 / 回草稿抛错 = 恢复失败 /
- *   cancelled=true 但 content 缺失 = 原文未取回），不可撤（cancelled=false）同样出声
- * - onRetryEntry：delivery.resync 单条重报（§3.4 重试耗尽行），失败出声
+ *   cancelled=true 但 content 缺失 = 原文未取回），不可撤（cancelled=false）同样出声；
+ *   会话级撤销单飞（Q10）：本会话已有在途取消时忽略后续点击（UX 防抖，正确性不依赖）
+ * - onRetryEntry / onRetryAllFailed：delivery.resync 单条 / 批量重报（§3.4 失败行 + Q5
+ *   重试全部按显示序一次 RPC），失败出声
  *
  * [HISTORICAL] 前身（compact-defer-composer-queue u1）：useDeferQueueRows 读本地 useCompactQueue
  * 分区（peek/mode 过滤/remove），队列状态机已随投递所有权内核整体退役（设计 §3.1 删除范围）。
@@ -116,11 +119,13 @@ describe('useQueueRows · 单源派生视图过滤（D7）', () => {
     expect(phaseMock).not.toHaveBeenCalled()
   })
 
-  it('hint 分档：compacting > bash > settling（turn 非 idle）> 默认', () => {
+  it('hint 分档：compacting > bash > 交接（handingOff）> settling（turn 非 idle）> 默认', () => {
     phaseMock.mockReturnValue({ compacting: true, bash: true, turn: 'idle' })
     expect(setup('s1').hint.value).toBe('等待上下文压缩完成后发送')
     phaseMock.mockReturnValue({ compacting: false, bash: true, turn: 'idle' })
     expect(setup('s1').hint.value).toBe('等待命令执行结束后发送')
+    phaseMock.mockReturnValue({ compacting: false, bash: false, handingOff: true, turn: 'generating' })
+    expect(setup('s1').hint.value).toBe('交接中，结束后投递')
     phaseMock.mockReturnValue({ compacting: false, bash: false, turn: 'settling' })
     expect(setup('s1').hint.value).toBe('等待当前回合结束后发送')
     phaseMock.mockReturnValue({ compacting: false, bash: false, turn: 'idle' })
@@ -182,6 +187,30 @@ describe('foldQueueRows · 折叠口径唯一定义点（failed 置顶恒可见�
 
   it('空输入 → 空可见 + 零溢出', () => {
     expect(foldQueueRows([])).toEqual({ visible: [], overflowCount: 0 })
+  })
+
+  it('expanded=true → 全部行可见（failed 置顶序保持）+ 溢出归零（Q2 +N 展开开关）', () => {
+    const rows = [
+      { clientUuid: 'f1', preview: 'm1', state: 'failed' as const },
+      { clientUuid: 'q1', preview: 'm2', state: 'queued' as const },
+      { clientUuid: 'q2', preview: 'm3', state: 'queued' as const },
+      { clientUuid: 'q3', preview: 'm4', state: 'queued' as const },
+      { clientUuid: 'q4', preview: 'm5', state: 'in-flight' as const },
+    ]
+    const { visible, overflowCount } = foldQueueRows(rows, { expanded: true })
+    expect(visible.map((r) => r.clientUuid)).toEqual(['f1', 'q1', 'q2', 'q3', 'q4'])
+    expect(overflowCount).toBe(0)
+  })
+
+  it('expanded 缺省 → 折叠行为逐字节不变（既有调用方与测试零改动锚）', () => {
+    const rows = [
+      { clientUuid: 'q1', preview: 'm1', state: 'queued' as const },
+      { clientUuid: 'q2', preview: 'm2', state: 'queued' as const },
+      { clientUuid: 'q3', preview: 'm3', state: 'queued' as const },
+      { clientUuid: 'q4', preview: 'm4', state: 'queued' as const },
+    ]
+    expect(foldQueueRows(rows)).toEqual(foldQueueRows(rows, {}))
+    expect(foldQueueRows(rows)).toEqual(foldQueueRows(rows, { expanded: false }))
   })
 })
 
@@ -269,6 +298,32 @@ describe('useQueueRows · × 撤销（V9/V10：delivery.cancel）', () => {
     expect(deliveryMock.cancelDelivery).not.toHaveBeenCalled()
     expect(toastMock.error).not.toHaveBeenCalled()
   })
+
+  it('会话级撤销单飞（Q10）：在途取消未完成时第二次点击被忽略（不发第二条 cancel RPC）', async () => {
+    let resolveFirst: ((v: { cancelled: boolean; content?: string }) => void) | undefined
+    deliveryMock.cancelDelivery.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveFirst = resolve }),
+    )
+    const { onCancelEntry } = setup('s1')
+
+    const first = onCancelEntry('u-20')
+    const second = onCancelEntry('u-21') // 在途窗口内的连点：忽略（UX 防抖）
+    resolveFirst!({ cancelled: true, content: '第一条' })
+    await Promise.all([first, second])
+
+    expect(deliveryMock.cancelDelivery).toHaveBeenCalledTimes(1)
+    expect(deliveryMock.cancelDelivery).toHaveBeenCalledWith('s1', 'u-20')
+  })
+
+  it('会话级撤销单飞（Q10）：在途取消完成后复位，后续点击正常受理', async () => {
+    const { onCancelEntry } = setup('s1')
+    await onCancelEntry('u-22')
+    expect(deliveryMock.cancelDelivery).toHaveBeenCalledTimes(1)
+    // 复位断言（finally 复位不泄漏）：第二次点击发出第二条 RPC
+    await onCancelEntry('u-23')
+    expect(deliveryMock.cancelDelivery).toHaveBeenCalledTimes(2)
+    expect(deliveryMock.cancelDelivery).toHaveBeenLastCalledWith('s1', 'u-23')
+  })
 })
 
 describe('useQueueRows · failed 行重试（delivery.resync 单条重报，§3.4）', () => {
@@ -294,5 +349,47 @@ describe('useQueueRows · failed 行重试（delivery.resync 单条重报，§3.
     const { onRetryEntry } = setup(null)
     await onRetryEntry('u-8')
     expect(deliveryMock.resyncDelivery).not.toHaveBeenCalled()
+  })
+})
+
+describe('useQueueRows · 重试全部失败项（Q5：一次 resync 按显示序传全部 failedIds）', () => {
+  it('failed ≥2 → resyncDelivery(sid, failedIds)（failed 组内保持帧序），成功静默', async () => {
+    setProjection('s1', [
+      entry('q1', 'queued', 'queued'),
+      entry('f2', 'failed', 'queued', '失败二'),
+      entry('f1', 'failed', 'queued', '失败一'),
+    ])
+    const { onRetryAllFailed } = setup('s1')
+    await onRetryAllFailed()
+    expect(deliveryMock.resyncDelivery).toHaveBeenCalledWith('s1', ['f2', 'f1'])
+    expect(toastMock.error).not.toHaveBeenCalled()
+  })
+
+  it('无 failed → no-op（组件层按 failedCount ≥2 控制入口，本层双保险）', async () => {
+    setProjection('s1', [entry('q1', 'queued', 'queued')])
+    const { onRetryAllFailed } = setup('s1')
+    await onRetryAllFailed()
+    expect(deliveryMock.resyncDelivery).not.toHaveBeenCalled()
+  })
+
+  it('重试全部 RPC 失败 → toast「重试失败：{原因}」', async () => {
+    setProjection('s1', [entry('f1', 'failed', 'queued')])
+    deliveryMock.resyncDelivery.mockRejectedValueOnce(new Error('rpc down'))
+    const { onRetryAllFailed } = setup('s1')
+    await onRetryAllFailed()
+    expect(toastMock.error).toHaveBeenCalledWith('重试失败：rpc down')
+  })
+})
+
+describe('useQueueRows · +N 展开开关（Q2：per-session 分区持有展开态）', () => {
+  it('toggleExpanded 切换 expanded；不同会话分区互不影响（ADR-0049 分区语义）', () => {
+    const a = setup('s1')
+    const b = setup('s2')
+    expect(a.expanded.value).toBe(false)
+    a.toggleExpanded()
+    expect(a.expanded.value).toBe(true)
+    expect(b.expanded.value).toBe(false) // s2 分区独立
+    a.toggleExpanded()
+    expect(a.expanded.value).toBe(false)
   })
 })

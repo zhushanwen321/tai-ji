@@ -83,6 +83,9 @@ import { isDevMode } from '../../../platform/dev-mode'
 // 归位 effects/user-delivery.ts；① 前身（defer 分区 FIFO 文本匹配）与 queue_update 计数路径
 // （countDrained/drainN）已随内核整体退役（设计 §3.1 删除范围），git 可追溯。
 import { confirmKernelDeliveryOnMessageEnd, hasKernelDeliveryMarker } from './user-delivery'
+// [chat-flow-consistency 缺陷 3/7] 停止提示行与截断提示行的文案 i18n 键出口（core 无 i18n，
+// renderer 装配层注入翻译——见 notice-text.ts 文件头）
+import { chatNoticeText, TRUNCATED_STOP_REASONS, type ChatNoticeKey } from './notice-text'
 // [TODO @i18n-migration] core/i18n 落地后恢复 i18n.global.t 调用（§0.3 列为后续迁移）。
 // compactionSummary（W6）/ branchSummary（D13 renderer-deepening）均已 entry 化：两者的
 // summary 兜底收敛到 reducer（compaction 中文 fallback「上下文已压缩」/ branchSummary
@@ -269,6 +272,64 @@ function appendFallbackErrorBubble(
 }
 
 /**
+ * [chat-flow-consistency 缺陷 1 方案 B] attempt 级收尾（消息级局部定格）。
+ *
+ * willRetry=true 的 message.complete 是「attempt 级终态」而非「回合级终态」——当前
+ * streaming assistant 消息级定格为中性中断态（非红条、非错误呈现），但**不经
+ * finalizeSession**（不清 pendingSend、不清 retryStates、不动 timer——回合仍在重试，
+ * 回合保持「进行中」呈现，RetryIndicator 横幅是中间失败唯一提示点）。
+ *
+ * 定格语义（复用 finalizeMessages 非 error 收尾口径）：content 保留、endedAt 补写、
+ * running toolCall → 'end_not_received'（attempt 已死不会再有内容；不保留 streaming 态
+ * ——「最后一条 streaming assistant」定位会被旧气泡抢占）。status 落 'complete'（中性，
+ * 错误文案只住 retryStates 横幅，不双显）。
+ */
+function finalizeAttemptAssistant(messages: MessageEffectContext['messages'], sid: string): boolean {
+  const prev = messages.value.get(sid)?.value ?? []
+  const lastIdx = findLastAssistantIndex(prev)
+  if (lastIdx < 0 || prev[lastIdx].status !== 'streaming') return false
+  const now = Date.now()
+  const next = prev.map((m) => {
+    if (m.role !== 'assistant' || m.status !== 'streaming') return m
+    return {
+      ...m,
+      status: 'complete' as const,
+      content: m.content,
+      toolCalls: m.toolCalls?.map((tc) =>
+        tc.status !== 'running' ? tc : { ...tc, status: 'end_not_received' as const, endTime: now },
+      ),
+      // 产出结束时刻补写（与 finalizeStreamingMessage 的非 error 分支对齐；已写过则幂等不动）
+      ...(m.role === 'assistant' && m.endedAt === undefined ? { endedAt: now } : {}),
+    }
+  })
+  commitMessages(messages, sid, next)
+  return true
+}
+
+/**
+ * [chat-flow-consistency 缺陷 3/7] liveOnly 提示行追加（stream_warn 先例形态）：
+ * id `s-<uuid>`、liveOnly: true、分组归 turn 内 notice 不切断回合（W3 消费）；pi 无对应
+ * entry、重开即消失——live ≠ reload 差异与 stream_warn 同型（W2 已裁决豁免等价性断言）。
+ *
+ * @param dedupeKey 提示行幂等锚：末位消息已是 liveOnly 行且携带同一键时跳过——
+ *   complete{aborted} 双通道到达（缺陷 9：runtime 必达广播 + pi 自发翻译帧，消费方幂等
+ *   契约）防重复追加两行。
+ */
+function appendTurnNoticeLine(
+  messages: MessageEffectContext['messages'],
+  sid: string,
+  key: ChatNoticeKey,
+): void {
+  const prev = messages.value.get(sid)?.value ?? []
+  const last = prev[prev.length - 1]
+  if (last?.role === 'system' && last.liveOnly === true && last.content === chatNoticeText(key)) return
+  commitMessages(messages, sid, [
+    ...prev,
+    { id: `s-${randomUuid()}`, role: 'system', content: chatNoticeText(key), status: 'complete', timestamp: Date.now(), liveOnly: true },
+  ])
+}
+
+/**
  * [b05 候选1 收敛] error / stream_error 终态 handler 骨架（原两 handler 逐行近似复制，
  * 仅差 reason 与错误字段来源，参数化收敛）：prev 读取 → hasStreaming 探测 →
  * finalizeSession → 无前置 streaming entity 时追加兜底纯 error 气泡。
@@ -389,6 +450,14 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // 单映射（与 dispatch 安全网共用；原先 handler 内独立推导一套）。
     const { reason, errorText: errorMessage } = deriveTerminalFrameParams('message.complete', payload)
     const isErrorStop = reason === 'error'
+    // [chat-flow-consistency 缺陷 1 方案 B] willRetry=true = pi 自动重试的中间失败、回合并
+    // 未结束（attempt 级终态）：走「attempt 收尾」路径——消息级定格、**不调** finalizeSession、
+    // 不追加 error 气泡、不把 streaming 气泡 error 化（错误文案只住 RetryIndicator 横幅，
+    // 单点分工不双显）。截断提示（缺陷 7）同样不触发——中间失败无终态呈现。
+    if (isErrorStop && readBool(payload, 'willRetry')) {
+      finalizeAttemptAssistant(messages, sid)
+      return
+    }
     // [HISTORICAL] pi turn 失败（stopReason='error'）时 runtime event-adapter 从 agent_end 提取
     // errorMessage 放进本 payload。曾经过往 handler 只读 stopReason/content/usage 把它丢弃——
     // 秒败 turn（如模型 400 拒绝首请求）content 为空，气泡仅剩一个空 error 态，用户完全不可见。
@@ -428,6 +497,25 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     if (isErrorStop && !changed) {
       // [M2 形态统一] 错误文本只住 error 字段，content 空（无崩溃前正文）
       appendFallbackErrorBubble(messages, sid, prev, errorMessage || REASON_FALLBACK_ERROR_TEXT.error)
+    }
+    // [chat-flow-consistency 缺陷 3] dispatching 窗口点停止：complete{aborted} 无实体可收尾
+    // （changed=false，用户消息可能已入 pi transcript 但无任何 streaming 实体）→ 追加 liveOnly
+    // 停止提示行（「已停止：回复尚未开始」），消除「乐观气泡孤挂、无回复无说明」的静默形态。
+    // 幂等防双通道重复（缺陷 9：runtime 必达广播 + pi 自发翻译帧，末位已是本提示则跳过）。
+    if (reason === 'aborted' && !changed) {
+      appendTurnNoticeLine(messages, sid, 'stoppedBeforeStart')
+    }
+    // [chat-flow-consistency 缺陷 7] 终态截断提示：max_tokens（输出半截）/content_filter
+    // （内容被安全过滤拒绝）按正常完成收尾但实为异常截断——追加 liveOnly 截断提示行
+    // （白名单不含 end_turn/tool_use，零行为变化）。
+    // 实施期核实点 V4 结论（已核实）：pi 1.0.0 AssistantMessage 落盘携带 stopReason
+    // （pi-ai dist/types.d.ts:386 必填）——entry 化的载荷前提成立，但 apply-entry 重放链
+    // 当前不消费该字段（PiMessageBody 未声明、reducer 无分支），升级 entry 化须改
+    // apply-entry-convert（chat-flow-consistency U3 已验收领地）+ 等价性测试族口径，
+    // 本期维持设计钦点的 liveOnly 最简档；entry 化升级随跨单元裁决另行处理（deviations 登记）。
+    const finalStopReason = readString(payload, 'stopReason')
+    if (finalStopReason !== undefined && TRUNCATED_STOP_REASONS.has(finalStopReason)) {
+      appendTurnNoticeLine(messages, sid, finalStopReason === 'max_tokens' ? 'truncatedMaxTokens' : 'truncatedContentFilter')
     }
     // 统一收尾（finalizeSession 幂等：entity 已改则 no-op，只清 pendingSend + timer）
     // 此处 message status 已改终态 → finalizeSession 内走「只补 toolCall 收尾」分支。

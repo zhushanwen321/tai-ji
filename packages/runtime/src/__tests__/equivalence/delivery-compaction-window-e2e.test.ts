@@ -77,10 +77,8 @@ function makeView(id: string, cwd: string, label: string): IManagedSessionView {
     lastActiveAt: Date.now(),
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
     // 压缩窗口前提：runtime 权威 occupancy 派生视图的压缩标志（生产 = compaction_start 置位）
-    isCompacting: true,
-    isBashRunning: false,
+    occupancy: { turn: 'idle', compacting: true, bash: false, handingOff: false },
     bashRunToken: undefined,
     sessionFilePath: undefined,
   }

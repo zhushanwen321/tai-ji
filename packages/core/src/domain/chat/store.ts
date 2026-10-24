@@ -387,6 +387,21 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    */
   const inflightCounts = ref<Map<string, number>>(new Map())
   /**
+   * [chat-flow-consistency F1] per-session 提交序号（Map 分区，对齐 inflightCounts 惯例，
+   * 不可变写保证响应式）。
+   *
+   * 语义 = 「本 session 已受理的用户提交」事实计数器：submitNewMessage 编排单点（send /
+   * followUp / editAndResend 三通路共同上提点）在受理确认 + 气泡上屏后 +1。它是「用户主动
+   * 发送」事实的产生处标记（事实在产生处带上标记直接传递），对话流滚动跟随的 force 回底
+   * 判据从「数据变化推断」（尾部新增 user 消息 watch）改为消费本序号递增——morph 回执重建、
+   * 外来直发（画布回推等运行时注入）复用 user 消息身份尾插但不动本序号，不再误触发强拉回底。
+   *
+   * 只递增不复位（单调计数，无配额语义）；无记录 = 0。清理挂点：disposeSession 分区整体
+   * 销毁（会话已删除，序号无后续消费方）。LRU 驱逐不清理（驱逐重进后序号延续，避免
+   * 「回退 → 误判递增」的假触发面）。
+   */
+  const submitSeqs = ref<Map<string, number>>(new Map())
+  /**
    * [W21] per-session reducer state（实时 feed 喂入 reducer 的累积态，buffer 活容器形态）。
    *
    * 实时路径（message_end / tool_call_end 重构 entry）与文件重放（get_entries →
@@ -759,6 +774,18 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     inflightCounts.value = next
   }
 
+  // ── 提交序号（[chat-flow-consistency F1]，语义见 submitSeqs 声明处）──
+
+  /** 提交序号 +1（submitNewMessage 受理确认后调用，全部用户提交路径的单点）。 */
+  function bumpSubmitSeq(sessionId: string): void {
+    submitSeqs.value = new Map(submitSeqs.value).set(sessionId, getSubmitSeq(sessionId) + 1)
+  }
+
+  /** 读 per-session 提交序号（watch 源；无记录 = 0）。 */
+  function getSubmitSeq(sessionId: string): number {
+    return submitSeqs.value.get(sessionId) ?? 0
+  }
+
   /**
    * [W21] 重构 entry 喂 per-session reducer state（buffer.feed）——实时 feed 与文件重放
    * （hydrate 链的 replayEntries）喂同一个 reducer。
@@ -1102,7 +1129,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   const truncateFrom = (sessionId: string, messageId: string, inclusive: boolean): void => truncateMessagesFrom(messages, sessionId, messageId, inclusive)
 
   /** 清理指定 session 的全部 per-session 状态（deleteSession 调用，S3）：Map 分区
-   * messages/retryStates/inflightCounts/compactingReasons/occupancies/historyWindows + Set
+   * messages/retryStates/inflightCounts/compactingReasons/occupancies/historyWindows/submitSeqs + Set
    * 分区 hydrated/pendingSend/handingOffSessions/failedHistory/respawnPending +
    * changeSetStatuses（前缀过滤）/ entryStates / executingBash / streaming flag 惰性缓存 /
    * subagent chunk 分区状态机 + LRU 时序记录。背景见 ./README.md。 */
@@ -1115,7 +1142,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     // 避免 TS 将不同 Map 元素推断为具体联合类型导致 new Map(ref.value) 不兼容。
     // inflightCounts（[steer-bubble D4]）：disposeSession 同步清 inflight——确认基线随分区
     // 销毁作废（与 LRU 驱逐的刻意豁免不同，见 lruEvictDeps 处声明注释）。
-    const mapRefs: { value: Map<string, unknown> }[] = [messages, retryStates, inflightCounts, compactingReasons, occupancies, historyWindows]
+    const mapRefs: { value: Map<string, unknown> }[] = [messages, retryStates, inflightCounts, compactingReasons, occupancies, historyWindows, submitSeqs]
     const setRefs: { value: Set<string> }[] = [hydrated, pendingSend, handingOffSessions, failedHistory, respawnPending]
     for (const ref of mapRefs) {
       if (ref.value.has(sessionId)) {
@@ -1158,6 +1185,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     handingOffSessions,
     retryStates,
     inflightCounts,
+    // [chat-flow-consistency F1] 提交序号分区 ref（readers 面；watch 源值载体）
+    submitSeqs,
     changeSetStatuses,
     failedHistory,
     hydrated,
@@ -1190,6 +1219,9 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     incrementInflight,
     decrementInflight,
     clearInflight,
+    // [chat-flow-consistency F1] 提交序号（bump 归 ops 面，get/submitSeqs ref 归 readers 面）
+    bumpSubmitSeq,
+    getSubmitSeq,
     applyMessageEvent,
     isGenerating,
     isActive,
@@ -1264,12 +1296,14 @@ export type ChatStoreReaders = Pick<
   | 'failedHistory' | 'hydrated' | 'inflightCounts'
   | 'occupancies'
   | 'historyWindows'
+  | 'submitSeqs'
   | 'getMessages' | 'getRetryState' | 'getChangeSetStatus'
   | 'isHydrated' | 'isGenerating' | 'isActive'
   | 'isCompacting' | 'getCompactingReason' | 'isHandingOff'
   | 'sessionPhase' | 'isPendingSend'
   | 'isRespawnPending'
   | 'getInflight'
+  | 'getSubmitSeq'
   | 'getHistoryWindow'
   | 'isSubagentStreamDegraded'
 >
@@ -1298,6 +1332,7 @@ export type ChatStoreOps = Pick<
   | 'applyFileChanges' | 'disposeSession' | 'markStreamingBashError'
   | 'touchLru' | 'evictIfNeeded' | 'evictSessionWithVirtual' | 'evictVirtualKey'
   | 'incrementInflight' | 'decrementInflight' | 'clearInflight'
+  | 'bumpSubmitSeq'
   | 'setHistoryWindow' | 'clearHistoryWindow'
   | 'testInternals'
 >

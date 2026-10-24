@@ -75,10 +75,7 @@ function makeView(id: string, cwd: string, label: string): IManagedSessionView {
     lastActiveAt: Date.now(),
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
+        bashRunToken: undefined,
     sessionFilePath: undefined,
   }
 }

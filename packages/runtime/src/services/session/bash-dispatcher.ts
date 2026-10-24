@@ -16,6 +16,7 @@
  * isBashRunning 复位的边沿源——等待者由 500ms 轮询收编为事件驱动）。
  */
 import type { IPiEngine } from '../ports/pi-engine.js'
+import { isGeneratingTurn } from './types.js'
 import type { PendingBashResultData, IManagedSessionView } from './types.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
 import { toErrorMessage } from '../../utils/errors.js'
@@ -194,7 +195,10 @@ export class BashDispatcher {
   ): { activeSession: IManagedSessionView | undefined; myToken: string | undefined } | null {
     const activeSession = this.deps.getSessionByClient(client)
     if (activeSession) {
-      if (activeSession.isCompacting || activeSession.isBashRunning) {
+      // [chat-flow-consistency D1] 派生布尔读口迁移：isCompacting ≡ occupancy.compacting、
+      // isBashRunning ≡ occupancy.bash（bash↔bash / bash↔compact 互斥语义不变）。
+      const occ = activeSession.occupancy
+      if (occ?.compacting === true || occ?.bash === true) {
         console.warn(`[bash-dispatcher] sendBash preemptive reject (busy), sid=${sessionId}`)
         const rejectMsg = { type: 'send.rejected' as const, payload: { sessionId, reason: 'busy' as const, message: 'Agent 正在处理' } }
         this.bus?.publish(sessionId, rejectMsg)
@@ -255,7 +259,8 @@ export class BashDispatcher {
       timestamp: Date.now(),
       ...(result.fullOutputPath !== undefined && { fullOutputPath: result.fullOutputPath }),
     }
-    if (activeSession?.isGenerating) {
+    // [chat-flow-consistency D1] 活跃 run 判定读口迁移：isGenerating ≡ isGeneratingTurn(occupancy.turn)。
+    if (activeSession && isGeneratingTurn(activeSession.occupancy?.turn)) {
       activeSession.pendingBashResults = [...(activeSession.pendingBashResults ?? []), bashResultData]
     } else {
       this.publishBashResult(sessionId, bashResultData)
@@ -376,9 +381,9 @@ export class BashDispatcher {
       throw new Error(`Session ${sessionId} not found`)
     }
     const activeSession = this.deps.getSessionByClient(client)
-    // 检查：isBashRunning（runtime 在等待）→ 放行；否则（空闲 session 的重复/误触取消）
-    // 短路 { sent: false }，由调用方回执真实化。
-    if (!activeSession?.isBashRunning) return { sent: false }
+    // 检查：bash 维置位（runtime 在等待）→ 放行；否则（空闲 session 的重复/误触取消）
+    // 短路 { sent: false }，由调用方回执真实化。[chat-flow-consistency D1] 读口迁移。
+    if (activeSession?.occupancy?.bash !== true) return { sent: false }
     // sent = abort_bash 是否发出且 pi 确认（sendCommand 对 success:false reject，resolve =
     // pi 已执行 abort）。失败不提前 return：兜底 bashAborted 广播必须照发（T8b 既有契约）。
     let sent = true

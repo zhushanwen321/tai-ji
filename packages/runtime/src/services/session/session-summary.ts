@@ -8,6 +8,7 @@
  */
 import type { SessionStatus, SessionSummary } from '@taiji/shared'
 import type { IGitInfoReader } from '../ports/git-info.js'
+import { isGeneratingTurn } from './types.js'
 import type { IManagedSessionView } from './types.js'
 import type { ManagedSession } from './session-internal.js'
 import type { SessionReplicatedStates } from './session-state-projection.js'
@@ -25,7 +26,9 @@ export function buildSessionSummary(
     // R1：复用 WorkspaceDetector 检测 .bare workspace（带缓存），填 isBareWorkspace
     // 供前端 Landing.vue 派生「新建 worktree」动作项显隐。
     isBareWorkspace: detectBareWorkspaceCached(s.cwd),
-    status: s.isGenerating ? ('active' as SessionStatus) : ('idle' as SessionStatus),
+    // [chat-flow-consistency D1] active 判定读口迁移：isGenerating ≡ isGeneratingTurn(turn)
+    //（dispatching+generating 两段；settling 不算 active——收尾中的回合侧栏已可视为结束前夜）。
+    status: isGeneratingTurn(s.occupancy?.turn) ? ('active' as SessionStatus) : ('idle' as SessionStatus),
     lastActiveAt: s.lastActiveAt, modelId: s.modelId,
     thinkingLevel: s.thinkingLevel,
     // W10：tokenCount 派生自 usage 实例快照（context 占用口径——事件链路三条路径的

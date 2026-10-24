@@ -28,12 +28,16 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { useToast } from '@/composables/useToast'
 import { handleCompletion } from '@/composables/effects/useCompletionNotify'
 import { consumeForcedExit } from '@/composables/effects/forced-exit-marks'
-import { createLifecycleEffects } from '@taiji/core'
+import { configureChatNoticeText, createLifecycleEffects } from '@taiji/core'
 import type { LifecycleEffects, InboundEffects } from '@taiji/core'
 import { subagentVirtualId, isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 import type { PiEntry, PiToolCallEntryForm, ServerMessageMap, SubagentRecord } from '@taiji/shared'
 
 const t = i18n.global.t
+
+// [chat-flow-consistency 缺陷 3/7] liveOnly 提示行文案注入（core 键出口 → 本模块 i18n 翻译；
+// 模块加载期注入，恒先于任何 WS 消息到达；词条 = panel.message.chatNotice.*）
+configureChatNoticeText((key) => t('panel.message.chatNotice.' + key))
 
 // ── [T4 回流修复 / remote-use D5 接线] 恢复窗口编排 ──
 //

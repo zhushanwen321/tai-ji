@@ -56,9 +56,12 @@ import type {
 } from '@zhushanwen/session-delivery'
 import type { Segment } from '@taiji/shared'
 import { markerLiteral, MSG_ID_TAG_RE, SKILL_MARKER_TAG } from '@taiji/shared'
+// [chat-flow-consistency D1 采用 2] 「回合进行中」判定集合唯一函数读口（settling 纳入 steer）
+import { isActiveTurnPhase } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import type { IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
+import { isGeneratingTurn } from './types.js'
 import { LateBoundSkillSource, SkillInjector } from './skill-injector.js'
 import { publishSkillNotices } from './skill-notice-publisher.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
@@ -159,6 +162,31 @@ export interface DeliveryCancelOutcome {
   reason?: string
 }
 
+/** 条目取回结果（delivery.peek reply 的 runtime 侧形状，chat-flow-consistency D6） */
+export interface DeliveryPeekOutcome {
+  /** false = 条目已不在内核活跃集（已投递 / 已撤销 / runtime 重启），前端放弃本次编辑 */
+  found: boolean
+  /** 条目全文（found=true 恒携带；含出站标记，WS 出站层剥除——cancel reply 同口径） */
+  content?: string
+  /** 提交时持有的原始 segments 快照（无快照条目不带） */
+  segments?: Segment[]
+}
+
+/**
+ * 原位编辑结果（delivery.edit reply 的 runtime 侧形状，chat-flow-consistency D6 +
+ * design-queue-delivery Q3 回执四值词表）：edited=false 四值 reason 见 shared
+ * DeliveryEditReply 注释（delivered / unconfirmed / cancelled / not-found）。
+ */
+export type DeliveryEditOutcome = { edited: true } | { edited: false; reason: 'delivered' | 'unconfirmed' | 'cancelled' | 'not-found' }
+
+/** 编辑入参（delivery.edit request 的 runtime 侧形状） */
+export interface DeliveryEditInput {
+  /** 替换后的全文（出站裸标记由本层按原条目身份重新附加，调用方不拼投递标记） */
+  content: string
+  /** 替换后的 segments 快照（undefined 时不更新既有快照——纯文本编辑不清 chips 快照） */
+  segments?: Segment[]
+}
+
 /** 对账触发点（设计 D3；watchdog 定时触发点已随 ADR-0122 防御机制清查退役，全事件驱动） */
 export type ReconcileTrigger =
   | 'agent-settled'
@@ -186,6 +214,18 @@ export interface SessionDeliveryRegistry {
   attachSegments(sessionId: string, clientUuid: string, segments: readonly Segment[]): void
   /** 单条撤销（delivery.cancel）：queued 本地移除；投递中走 clear_queue 收回-重投路径 */
   cancel(sessionId: string, clientUuid: string): Promise<DeliveryCancelOutcome>
+  /**
+   * 条目全文取回（delivery.peek，chat-flow-consistency D6）：✎ 编辑预填的只读通道——
+   * 返回活跃条目全文 + segments 快照，条目本身不动。undefined = 条目不在活跃集
+   * （已投递 / 已撤销 / runtime 重启 / session 无投递运行时）。
+   */
+  peek(sessionId: string, clientUuid: string): DeliveryPeekOutcome | undefined
+  /**
+   * 原位编辑（delivery.edit，chat-flow-consistency D6）：替换指定条目内容且排队位置保持
+   * 不变（条目 id 不变）。收回-全部-保序重投是本编排内部细节（复用对账器 disposeCleared
+   * 路径），上层不可依赖。回执四值见 DeliveryEditOutcome（Q3 分支表 + unconfirmed 第四值）。
+   */
+  edit(sessionId: string, clientUuid: string, input: DeliveryEditInput): Promise<DeliveryEditOutcome>
   /** 全量回收（delivery.drain，forceQuit 专用）：返回全部条目全文（含 segments 快照）供草稿恢复 + 尽力清空 pi 槽位 */
   drain(sessionId: string): Array<{ clientUuid: string; content: string; segments?: Segment[] }>
   /** 断连重报判重（delivery.resync）：返回命中终态判重记录（含 transcript 回执证据）的 uuid */
@@ -349,23 +389,32 @@ function holdEdgeTick(): Promise<void> {
  * 任务书退役清单只列 bash 持有；目标 5「撤销编排行为不变」以本标志为承重——revoke
  * 编排窗口内新提交仍走排队等待；设计 §3.6 已在 v7 将 revoking 移出退役清单，与本保留裁决一致）。
  */
-type HoldReason = 'compacting' | 'revoking'
+type HoldReason = 'compacting' | 'revoking' | 'handoff'
 
 /**
- * 持有判定（唯一判定源，读 runtime 权威 occupancy 派生视图）：compaction 持有唯一保留
- * （view.isCompacting = 手动压缩窗口派生视图，生产 = session.compaction_start 置位）。
+ * 持有判定（唯一判定源，读 runtime 权威 occupancy 派生视图）：compaction 持有
+ * （occupancy.compacting = 手动压缩窗口，生产 = session.compaction_start 置位）+
+ * handoff 持有（chat-flow-consistency §6 R1 裁决：occupancy.handingOff = 交接编排
+ * 在途——交接期新消息不 steer 注入交接 turn（上下文污染防护，special-flows 缺陷 3），
+ * 交接完成后自动投出；挂点生产 = handoff-service 的 handingOff-start/end 转移）。
  */
 function holdReasonOf(view: IManagedSessionView | undefined): HoldReason | null {
   if (!view) return null // 无视图（测试/异常装配）按可投，投递阶段 ensureActive 失败可见
-  if (view.isCompacting) return 'compacting'
+  // [chat-flow-consistency D1] 派生布尔读口迁移：isCompacting ≡ occupancy?.compacting。
+  if (view.occupancy?.compacting === true) return 'compacting'
+  if (view.occupancy?.handingOff === true) return 'handoff'
   return null
 }
 
-/** lane 判定（D1）：不可投 → 'queued'；活跃 run → 'steer'；其余 → 'direct'。 */
+/**
+ * lane 判定（D1）：不可投 → 'queued'；活跃 run → 'steer'；其余 → 'direct'。
+ * [chat-flow-consistency D1 采用 2] 「回合进行中」判定集合 = shared ACTIVE_TURN_PHASES
+ * 单点（dispatching/generating/settling）——settling 纳入 steer 排队由该集合单点生效
+ * （探针 P1 已实测 settling 窗口 pi steer 受理正确，p1-result.md）。
+ */
 function laneOf(view: IManagedSessionView | undefined): DeliveryLane {
   if (holdReasonOf(view) !== null) return 'queued'
-  const turn = view?.occupancy?.turn ?? 'idle'
-  return turn === 'generating' || turn === 'dispatching' ? 'steer' : 'direct'
+  return isActiveTurnPhase(view?.occupancy?.turn ?? 'idle') ? 'steer' : 'direct'
 }
 
 /** intent → pi streamingBehavior（pi 词汇封闭在本层）：非流式时 pi 忽略该参数（PS-66 旁证）。 */
@@ -437,6 +486,17 @@ interface RuntimeState {
    * （收回文本 = 兑现终结）。随 runtime state 存活，dispose 即弃。
    */
   pendingRevoke: Set<string>
+  /**
+   * 兑现移交表（chat-flow-consistency Q1，读即消费/一次性取出）：撤销意图被他径
+   * 兑现（settleRevokedEntry / onPiDisconnected）时，兑现点把全文 + segments 快照
+   * 写入本表；发起方的 cancel 应答链（revokeInFlight 各分支 / cancel 入口
+   * already-final）查表命中即消费并返回 cancelled:true 携带全文——并发撤销（双行
+   * 连点 / 与对账器同帧）不再因「目标被另一路径收回」丢文本。零新增 wire
+   * （DeliveryCancelOutcome 既有 content/segments 字段承载）。残留上界 = 该 session
+   * 的并发撤销数（个位数），dispose 随 runtime 整体丢弃，磁盘零持久化，不设清理
+   * 通道（发起方应答通道死亡 = 事件通道同样死亡，净残留无消费方亦无害）。
+   */
+  redeemedRevokes: Map<string, { content: string; segments?: Segment[] }>
   /**
    * 扩展命令 name 清单快照（pi1-disposition-chat-flow D2①，pi 句柄附着时经 get_commands
    * 拉取，pi respawn 后随 watchClient 重新拉取）。undefined = 未就绪或拉取失败。
@@ -784,7 +844,7 @@ export function createSessionDeliveryRegistry(
    *   streamingBehavior（intent 映射），pi 忙时入队不拒（agent-session.js:1515-1524）
    *   ——processing 拒绝仅剩「无 behavior 直投（sendDirect，新 session 必 idle 无竞态）
    *   撞 runtime 不知情幽灵 turn」的异常形态，按真失败首败即停显式上报，不再反转
-   *   occupancy + steer 重试（'reject-processing' 转移行随之零消费，表驱动行保留无害）。
+   *   occupancy（转移行随之零消费，词表派发点审计覆盖）。
    *
    * 返回值（pi1-disposition-chat-flow D1①）：响应 `data.disposition`（pi 1.0 权威去向
    * 判定：handled=被扩展命令接管 / queued=排队 / started=即将开跑；pi < 1.0 或 mock 无
@@ -1430,6 +1490,10 @@ export function createSessionDeliveryRegistry(
         id: args.id,
         lane: args.lane,
         receiptAnchor: args.receiptAnchor ?? 'marker',
+        // 受理失败留守（第 11 条）：文本投递首败转 failed 留守（队列区一行 + 重试
+        // 入口，与断连未确认双呈现同构），不再静默移除；checked 通路显式放行 failed
+        //（waiter reject 照常 = 调用方已收失败回执，条目同时留守供 UI 处置）。
+        onFailure: 'failed',
         ...(args.unmarked === true ? { unmarked: true } : {}),
       })
     } catch (e) {
@@ -1444,7 +1508,7 @@ export function createSessionDeliveryRegistry(
    *    禁止回退到字符串判别）；
    * ② 条目已不在 active 且 tombstone 终态 = cancelled（cancel/drain 已终结该条目）。
    * 刻意取「双信号」而非单信号：终态被后续操作改写时，判据退回「按真实失败处理」——
-   * 宁可多播一个错误，不可吞掉真失败（受理失败 / 重试耗尽必须仍可见）。
+   * 宁可多播一个错误，不可吞掉真失败（受理失败 / 断连未确认必须仍可见）。
    */
   function isUserReclaimRejection(rt: SessionRuntime, id: string, e: unknown): boolean {
     if (!(e instanceof DeliveryReclaimError)) return false
@@ -1453,7 +1517,7 @@ export function createSessionDeliveryRegistry(
     return full.tombstones.some((t) => t.id === id && t.state === 'cancelled')
   }
 
-  /** 投递终态失败（受理失败 / 重试耗尽）：日志 + 用户可见部分（老协议无帧消费时的兜底通道）。 */
+  /** 投递失败上报（两成因：受理失败 send 首败 / 断连未确认）：日志 + 用户可见错误气泡。 */
   function onDeliveryFailure(sessionId: string, rt: SessionRuntime, id: string, e: unknown): void {
     const message = e instanceof Error ? e.message : String(e)
     if (isUserReclaimRejection(rt, id, e)) {
@@ -1505,10 +1569,13 @@ export function createSessionDeliveryRegistry(
     return {
       supportedPayloads: ['text'],
       // port.isIdle：内核受理即出站不读忙闲探测，保留读 view 供内核接口契约与诊断
-      // 范围；投递决策的唯一判定源 = holdReasonOf（仅 compaction/revoking）。
+      // 范围；投递决策的唯一判定源 = holdReasonOf（compaction/revoking/handoff）。
+      // [chat-flow-consistency D1] 派生三布尔已删：读口 = occupancy 派生（语义逐字等价
+      // ——原 !isGenerating 即 turn ∉ {dispatching, generating}）。
       isIdle: () => {
         const s = viewOf(sessionId)
-        return !!s && !s.isGenerating && !s.isCompacting && !s.isBashRunning
+        const occ = s?.occupancy
+        return !!s && !isGeneratingTurn(occ?.turn) && occ?.compacting !== true && occ?.bash !== true
       },
       // 在途判定内核自持（active 表），port 不承担 hasPendingMessages 同步数据源。
       subscribeSettled: (cb) =>
@@ -1562,6 +1629,7 @@ export function createSessionDeliveryRegistry(
       piCompactingBlocked: false,
       revoking: false,
       pendingRevoke: new Set(),
+      redeemedRevokes: new Map(),
       unmarkedEntryIds: new Set(),
       reconciling: false,
       lastReconcileAt: 0,
@@ -1577,7 +1645,8 @@ export function createSessionDeliveryRegistry(
       // 磁盘 outbox（§3.8 波 4）：内核行为契约 = 受理前 persist / 终局 ack / forget 失败
       // discard；store 缺席时字段不带（v2 逐字节等价）。
       ...(store !== undefined ? { store } : {}),
-      // D9⑤ 记账口径：'delivered' 由确认路径驱动；'rejected' 为重试耗尽通知（仅记账）。
+      // D9⑤ 记账口径：'delivered' 由确认路径驱动；'rejected' 为失败终局通知（受理失败
+      // / 断连未确认，仅记账）。
       // notify-once D2 桥接（P9 帧序：内核同栈触发，先于 settled 帧）：meta 原样透传给
       // 债权侧（ClaimLedger），缺席（未注入）零行为变化。
       onSettled: (msg, outcome) => {
@@ -1684,12 +1753,20 @@ export function createSessionDeliveryRegistry(
       rt.submitted.set(bareMarkerId(id), { id, text })
       // 受理口径（D9⑤ 锁定）：submit 同步返回受理回执（lane + 条目态），不等底层受理——
       // 内核 sendChecked 的 settle 时点与送达正交（受理 ≠ 送达，调用方不被投递阻塞）。
-      // 失败（受理失败，首败即停）经 fail-fast 出口广播 + 日志（条目由内核移除，ADR-0122）。
-      // 回执锚恒申报 'marker'（D1 申报制）：普通消息出站文本尾附裸标记，送达以 message_end
-      // 回执命中为准；无标记条目（message_end 永不命中），终局 = deliverOne 的 disposition
-      // 受理终局或断连事件——不申报 'acceptance'（受理 ≠ 终局，命令可能尚未执行）。
+      // 失败（受理失败）按 failed 留守策略收尾（第 11 条）：条目转 failed 留守（队列区
+      // 一行 + 重试入口），本出口的 waiter reject 广播 message.error（与断连 E4 双呈现
+      // 同构）。回执锚恒申报 'marker'（D1 申报制）：普通消息出站文本尾附裸标记，送达以
+      // message_end 回执命中为准；无标记条目（message_end 永不命中），终局 = deliverOne
+      // 的 disposition 受理终局或断连事件——不申报 'acceptance'（受理 ≠ 终局，命令可能
+      // 尚未执行）。
       void rt.handle
-        .sendChecked(message, { id, lane, receiptAnchor: 'marker', ...(unmarked ? { unmarked: true } : {}) })
+        .sendChecked(message, {
+          id,
+          lane,
+          receiptAnchor: 'marker',
+          onFailure: 'failed',
+          ...(unmarked ? { unmarked: true } : {}),
+        })
         .catch((e: unknown) => onDeliveryFailure(sessionId, rt, id, e))
       // [G3③] 受理回执携带命令标志（内核 D2 识别结果随受理回执返回，向后兼容可选字段）：
       // 前端据此对命令条目不挂 30s 空窗计时器（U2⑤）。
@@ -1715,11 +1792,48 @@ export function createSessionDeliveryRegistry(
         return { cancelled: true, content: payloadText(first.entry.payload), ...(segmentsSnapshot !== undefined ? { segments: segmentsSnapshot } : {}) }
       }
       if (first.kind === 'not-found') return { cancelled: false, reason: 'not found' }
-      if (first.kind === 'already-final') return { cancelled: false, reason: `already ${first.tombstone.state}` }
+      if (first.kind === 'already-final') {
+        if (first.tombstone.state === 'cancelled') {
+          // 他径已兑现为 cancelled（Q1 窄缝：RPC 到达与首次 handle.cancel 之间被对账
+          // 器/断连兑现）：查移交表命中即按撤销成功应答（消费移交全文）
+          const redeemed = rt.redeemedRevokes.get(clientUuid)
+          if (redeemed) {
+            rt.redeemedRevokes.delete(clientUuid)
+            rt.pendingRevoke.delete(clientUuid)
+            return {
+              cancelled: true,
+              content: redeemed.content,
+              ...((segmentsSnapshot ?? redeemed.segments) !== undefined
+                ? { segments: (segmentsSnapshot ?? redeemed.segments) as Segment[] }
+                : {}),
+            }
+          }
+        }
+        return { cancelled: false, reason: `already ${first.tombstone.state}` }
+      }
       // 投递中（在 pi 槽位）：登记撤销待收回（意图 SSOT）后复用对账回收-重投路径——
       // clear_queue 全收 → 目标条目回草稿，其余条目保持相对序自动重投（D3 / §3.1 场景 D）
       rt.pendingRevoke.add(clientUuid)
       return await revokeInFlight(sessionId, rt, clientUuid, segmentsSnapshot)
+    },
+    peek(sessionId, clientUuid) {
+      // 只读取回（chat-flow-consistency D6）：活跃条目全文 + segments 快照，条目本身不动。
+      // 无运行时 / 条目不在活跃集 = undefined（前端提示后放弃本次编辑）。
+      const rt = runtimes.get(sessionId)
+      if (!rt) return undefined
+      const entry = rt.handle.entriesFull().active.find((e) => e.id === clientUuid)
+      if (!entry) return undefined
+      const segments = peekSegments(rt, clientUuid)
+      return {
+        found: true,
+        content: payloadText(entry.payload),
+        ...(segments !== undefined ? { segments } : {}),
+      }
+    },
+    async edit(sessionId, clientUuid, input) {
+      const rt = runtimes.get(sessionId)
+      if (!rt) return { edited: false, reason: 'not-found' }
+      return await editEntry(sessionId, rt, clientUuid, input)
     },
     drain(sessionId) {
       const rt = runtimes.get(sessionId)
@@ -1752,18 +1866,44 @@ export function createSessionDeliveryRegistry(
       // failed → queued 的唯一入口是内核 requeue（types.ts 状态机迁移表）——重投入队首并
       // 立即 flush 出站（on-accept 受理即出站；compaction 持有由 waitDeliverable 拦截）。
       // 其余活跃条目（queued/in-flight）行为不变（它们在队列里，重报不改变状态）。
+      // 重试前 transcript 预检（第 11 条穷举 1）：受理失败的歧义性——首败时文本可能已进
+      // transcript 未及回执。预检命中 = 确定性送达事实（getEntries 回执，非时间逻辑）：
+      // confirmDelivered 记账（failed → delivered，事实终结失败猜测）+ 计入 deduped 应答
+      // （renderer 据此隐去该行）而非重投——顺带覆盖断连 failed 重试的同类残余双发风险。
+      // 读取失败（texts null）保守判未送达 = 全部重投（必达优先于去重，与 rebuild 同口径）。
       const retryIds = clientUuids.filter((id) => activeStateById.get(id) === 'failed')
+      const preConfirmed: string[] = []
       if (retryIds.length > 0) {
-        const requeued = rt.handle.requeue(retryIds)
-        rt.handle.flush()
-        warn(`resync: retry ${requeued} failed entry(ies) as user-requested, sid=`, sessionId, retryIds)
+        const texts = await readTranscriptUserTexts(sessionId, rt)
+        const toRequeue: string[] = []
+        for (const id of retryIds) {
+          const needle = markerLiteral(bareMarkerId(id))
+          if (texts !== null && texts.some((t) => t.includes(needle))) {
+            rt.handle.confirmDelivered(id)
+            rt.submitted.delete(bareMarkerId(id))
+            preConfirmed.push(id)
+          } else {
+            toRequeue.push(id)
+          }
+        }
+        const requeued = toRequeue.length > 0 ? rt.handle.requeue(toRequeue) : 0
+        if (requeued > 0) {
+          rt.handle.flush()
+          warn(`resync: retry ${requeued} failed entry(ies) as user-requested, sid=`, sessionId, toRequeue)
+        }
+        if (preConfirmed.length > 0) {
+          warn(`resync: ${preConfirmed.length} failed entry(ies) already in transcript — delivered, not requeued, sid=`, sessionId, preConfirmed)
+        }
       }
       const unknown = clientUuids.filter((id) => !finalIds.has(id) && !activeStateById.has(id))
-      if (unknown.length === 0) return clientUuids.filter((id) => finalIds.has(id))
+      if (unknown.length === 0) {
+        const deduped = clientUuids.filter((id) => finalIds.has(id))
+        return [...new Set([...deduped, ...preConfirmed])]
+      }
       // 判重表已清空（runtime 重启 reattach）+ 未知条目：判重锚回落 transcript 标记扫描
       // （D5②），全量读取一次供全部重报 id 复用
       const texts = await readTranscriptUserTexts(sessionId, rt)
-      const deduped: string[] = []
+      const deduped: string[] = [...preConfirmed]
       for (const id of clientUuids) {
         if (finalIds.has(id)) {
           deduped.push(id)
@@ -1774,7 +1914,7 @@ export function createSessionDeliveryRegistry(
         if (texts !== null && texts.some((t) => t.includes(needle))) deduped.push(id)
         else warn('resync: unknown uuid not in kernel nor transcript (kept on renderer), sid=', sessionId, id)
       }
-      return deduped
+      return [...new Set(deduped)]
     },
     entries(sessionId) {
       return runtimes.get(sessionId)?.handle.entriesFull()
@@ -1877,6 +2017,11 @@ export function createSessionDeliveryRegistry(
    * clear_queue 全收 → 三分处置（目标 exclude 沉默回草稿；其余撤销待收回条目一并兑现）
    * → transcript 校验（delivered 事实优先）→ 收回命中即终态撤销。pendingRevoke 登记
    * 在 cancel 入口维护，本函数各出口负责对应清集。
+   *
+   * 应答链三处查兑现移交表（Q1）：目标被他径（另一 revokeInFlight / 对账器 /
+   * onPiDisconnected）兑现时，移交表已含全文——命中即消费并返回 cancelled:true，
+   * 并发撤销不丢文本。transcript 命中分支例外：delivered 事实优先于撤销意图（既有
+   * 定稿口径），命中时同步清掉移交表残留（防后续 cancel 应答误报撤销成功）。
    */
   async function revokeInFlight(
     sessionId: string,
@@ -1901,8 +2046,24 @@ export function createSessionDeliveryRegistry(
     await disposeCleared(sessionId, rt, [...cleared.steering, ...cleared.followUp], exclude)
     if (await transcriptHasMarker(sessionId, rt, clientUuid)) {
       rt.pendingRevoke.delete(clientUuid) // delivered 事实 > cancel 意图（D-3 口径）→ 意图了结
+      rt.redeemedRevokes.delete(clientUuid) // delivered 事实优先：清移交表残留（Q1）
       rt.handle.confirmDelivered(clientUuid)
       return { cancelled: false, reason: '已投递不可撤' }
+    }
+    const redeemed = rt.redeemedRevokes.get(clientUuid)
+    if (redeemed) {
+      // 他径已兑现（Q1 移交表命中）：消费移交全文，按撤销成功应答（cancelled=true
+      // 携带全文）——segments 优先用发起方入口快照（时序上更早、与本次点击同源），
+      // 缺失时用兑现点移交的快照。
+      rt.redeemedRevokes.delete(clientUuid)
+      rt.pendingRevoke.delete(clientUuid)
+      return {
+        cancelled: true,
+        content: redeemed.content,
+        ...((segmentsSnapshot ?? redeemed.segments) !== undefined
+          ? { segments: (segmentsSnapshot ?? redeemed.segments) as Segment[] }
+          : {}),
+      }
     }
     if (!hasMarkerFor([...cleared.steering, ...cleared.followUp], clientUuid)) {
       // 目标文本不在收回集（既不在槽位、也不在 transcript）：留守原态 + 意图留守，
@@ -1917,14 +2078,44 @@ export function createSessionDeliveryRegistry(
       rt.submitted.delete(bareMarkerId(clientUuid)) // 撤销即出册（R2-A2，同 cancel 主路径）
       return { cancelled: true, content: payloadText(second.entry.payload), ...(segmentsSnapshot !== undefined ? { segments: segmentsSnapshot } : {}) }
     }
+    if (second.kind === 'already-final' && second.tombstone.state === 'cancelled') {
+      // 他径已兑现为 cancelled 终态（对账器/断连同帧兑现）：查移交表，命中即按撤销
+      // 成功应答（Q1）；未命中维持失败口径（条目已终结、全文已不可考——该形态只在
+      // 移交表写入前发生，见顺序可达性论证）
+      const redeemedFinal = rt.redeemedRevokes.get(clientUuid)
+      if (redeemedFinal) {
+        rt.redeemedRevokes.delete(clientUuid)
+        rt.pendingRevoke.delete(clientUuid)
+        return {
+          cancelled: true,
+          content: redeemedFinal.content,
+          ...((segmentsSnapshot ?? redeemedFinal.segments) !== undefined
+            ? { segments: (segmentsSnapshot ?? redeemedFinal.segments) as Segment[] }
+            : {}),
+        }
+      }
+    }
     return { cancelled: false, reason: '已投递不可撤' }
   }
 
-  /** 撤销兑现终结（dmg-r1-2）：文本已确认离场（收回/蒸发）→ 本地终态 + 出意图集 + 出册。 */
+  /**
+   * 撤销兑现终结（dmg-r1-2）：文本已确认离场（收回/蒸发）→ 本地终态 + 出意图集 + 出册。
+   * 兑现时把全文 + segments 快照写入移交表（Q1）：发起方的 cancel 应答查表命中即
+   * 返回 cancelled:true 携带全文——他径兑现不再让并发撤销方拿到「已投递不可撤」。
+   * peek 必须先于 handle.cancel：onChange 剪枝在 cancel 内同步发生（终态条目离场 →
+   * 快照出表），先持引用后取消之即丢。
+   */
   function settleRevokedEntry(rt: SessionRuntime, id: string): void {
     rt.pendingRevoke.delete(id)
+    const segments = peekSegments(rt, id)
     const result = rt.handle.cancel(id) // cancelRequested 短路终态 cancelled；waiter reject 走回收语义（无错误气泡）
-    if (result.kind === 'cancelled') rt.submitted.delete(bareMarkerId(id))
+    if (result.kind === 'cancelled') {
+      rt.submitted.delete(bareMarkerId(id))
+      rt.redeemedRevokes.set(id, {
+        content: payloadText(result.entry.payload),
+        ...(segments !== undefined ? { segments } : {}),
+      })
+    }
   }
 
   /** 无 client（pi 未附着）时的撤销收尾：transcript 不可读 → 本地终结（未投递即撤销）。 */
@@ -1940,10 +2131,160 @@ export function createSessionDeliveryRegistry(
       rt.submitted.delete(bareMarkerId(clientUuid)) // 撤销即出册（R2-A2，同 cancel 主路径）
       return { cancelled: true, content: payloadText(second.entry.payload), ...(segmentsSnapshot !== undefined ? { segments: segmentsSnapshot } : {}) }
     }
+    if (second.kind === 'already-final' && second.tombstone.state === 'cancelled') {
+      // 他径已兑现为 cancelled（Q1：断连 onPiDisconnected 兑现在先，cancel 应答后到）
+      // ——查移交表命中即按撤销成功应答
+      const redeemed = rt.redeemedRevokes.get(clientUuid)
+      if (redeemed) {
+        rt.redeemedRevokes.delete(clientUuid)
+        rt.pendingRevoke.delete(clientUuid)
+        return {
+          cancelled: true,
+          content: redeemed.content,
+          ...((segmentsSnapshot ?? redeemed.segments) !== undefined
+            ? { segments: (segmentsSnapshot ?? redeemed.segments) as Segment[] }
+            : {}),
+        }
+      }
+    }
     // 非撤销终结（delivered 等）或条目已消失：意图一并了结防残留（无条目可留守）
     rt.pendingRevoke.delete(clientUuid)
     warn('cancel: pi not attached and entry not cancellable, sid=', sessionId, clientUuid)
     return { cancelled: false, reason: '已投递不可撤' }
+  }
+
+  // ── 原位编辑编排（chat-flow-consistency D6 + design-queue-delivery Q3 分支表）──────
+
+  /**
+   * 编辑后的 payload 构造：出站标记形态与原条目保持一致——edit 不重判 isUnmarkedEntry
+   *（条目身份锚随 id，改写文本不得翻转回执锚形态）：unmarked 在册条目（命令/技能，submit
+   * 与重放两写点登记）替换后仍不尾附标记；普通条目按原身份重新附加（withDeliveryMarker
+   * 读写同形，收回-重投的 classifyClearedText/rebuild 判据继续命中）。
+   */
+  function editPayloadFor(rt: SessionRuntime, id: string, content: string): DeliveryPayload {
+    const unmarked = rt.unmarkedEntryIds.has(id)
+    return { kind: 'text', content: unmarked ? content : withDeliveryMarker(content, id) }
+  }
+
+  /** 编辑后 segments 快照更新（undefined = 纯文本编辑不触碰既有 chips 快照；有值时磁盘补记同 attachSegments）。 */
+  function updateEditSegments(rt: SessionRuntime, id: string, segments: Segment[] | undefined): void {
+    if (!segments || segments.length === 0) return
+    rt.segmentsByEntry.set(id, [...segments])
+    rt.storeSegments?.(id, segments)
+  }
+
+  /**
+   * 替换后同步 submitted 出站记录（submit 写侧同形：`submitted.set(bareMarkerId(id), { id,
+   * text })`）。payload 换新后旧记录的 text 会让 splitComposed 段定位（record.text 精确
+   * 子串匹配）在重投批上 miss → 降级整条投递（撤销粒度丢失）；身份承接（classifyClearedText
+   * 的 marker→record.id）不受文本影响，但两消费同表，记录必须与 payload 同源。
+   */
+  function recordEditSubmission(rt: SessionRuntime, id: string, payload: DeliveryPayload): void {
+    rt.submitted.set(bareMarkerId(id), { id, text: payloadText(payload) })
+  }
+
+  /**
+   * 原位编辑（Q3 分支表，判定链与 cancel 收回链同构、按序短路）：
+   * 1. 终态基线：无条目 → not-found；cancelled → cancelled；delivered → delivered
+   *   （终态短路先于收回——不向已终局条目发 clear_queue）。
+   * 2. queued（非出站批留守）/ failed（留守行）：直接内核替换，无收回——queued 位置不动
+   *   （保位），failed 追加 requeue（编辑即重发的心理模型，E7）。queued 且在出站批内挂起
+   *   （受理即出站下持有期的常态）内核拒绝 → 跌落分支 3（unconfirmed 收场）。
+   * 3. 收回路径（in-flight 在槽位 / queued 挂起跌落）：unmarked 条目无投递身份锚（收回
+   *   文本无法与条目对账，收养重投会换 id 双出场）→ unconfirmed；普通条目 clear_queue 全收：
+   *   - 目标在收回集：先替换 payload（own 重投的出站文本 = 新内容），再 disposeCleared
+   *     （exclude 空 = 目标与其余条目一起按收回文本序 own 重投——保位语义；E2 撤销竞态时
+   *     pendingRevoke 兑现优先，处置后按实际状态答 cancelled）；
+   *   - 不在收回集：transcript 权威判定——命中 = delivered（真已注入），miss = 注入悬空
+   *     窗口 / 批内挂起 → unconfirmed（用户裁决采纳的第四值，回执如实化）。
+   * 收回失败（pi 卡死）/ pi 未附着：无法确认原文本状态 → unconfirmed（不留守重试——
+   * edit 的用户意图由降级新消息承载，原条目由对账器兜底，与 cancel 的留守重试语义分界）。
+   * 保序口径承继 D3①：重投相对序 = 收回文本序（disposeCleared own 通路既有语义），跨车道
+   * 交错时与内核 active 序可能短暂错位——E1 已登记的收回-重投窗口瞬态，不新增机制。
+   */
+  async function editEntry(
+    sessionId: string,
+    rt: SessionRuntime,
+    clientUuid: string,
+    input: DeliveryEditInput,
+  ): Promise<DeliveryEditOutcome> {
+    const stateBefore = entryStateOf(rt, clientUuid)
+    if (stateBefore === undefined) return { edited: false, reason: 'not-found' }
+    if (stateBefore === 'cancelled') return { edited: false, reason: 'cancelled' }
+    if (stateBefore === 'delivered') return { edited: false, reason: 'delivered' }
+
+    // 分支 2：queued / failed 先试直接替换（无收回）。queued 的可达形态 = 非出站批留守
+    //（deferred 设计内等待窗）；**出站批内挂起（受理即出站下持有期的常态——port.send 在
+    // waitDeliverable 挂起、出站文本已在 attemptSend 同步段定格）内核拒绝**，跌落下方
+    // 收回路径判定收场（pi 槽位无该文本 + transcript miss → unconfirmed：修改内容按普通
+    // 新消息发出不丢，原条目按定格文本照常投递——挂起窗口内替换在结构上不可达，
+    // 与设计分支表「queued 直接替换」的偏差随 deviations 登记）。
+    if (stateBefore === 'queued' || stateBefore === 'failed') {
+      const payload = editPayloadFor(rt, clientUuid, input.content)
+      if (rt.handle.edit(clientUuid, payload)) {
+        recordEditSubmission(rt, clientUuid, payload)
+        updateEditSegments(rt, clientUuid, input.segments)
+        if (stateBefore === 'failed') {
+          // failed 行编辑即重发（E7）：requeue 进队首立即出站（compaction 持有由
+          // waitDeliverable 拦截，与 resync 重试同路径）
+          if (rt.handle.requeue([clientUuid]) > 0) rt.handle.flush()
+        }
+        return { edited: true }
+      }
+      if (stateBefore === 'failed') {
+        // failed 拒绝 = 他径同帧终态（failed 必不在出站批）：按处置后实际状态应答
+        const after = entryStateOf(rt, clientUuid)
+        if (after === 'cancelled') return { edited: false, reason: 'cancelled' }
+        if (after === 'delivered') return { edited: false, reason: 'delivered' }
+        if (after === undefined) return { edited: false, reason: 'not-found' }
+        return { edited: false, reason: 'unconfirmed' }
+      }
+      // queued 拒绝 = 出站批内挂起 → 落入收回路径（clear_queue 收不到挂起文本 →
+      // transcript miss → unconfirmed，见分支 3）
+    }
+
+    // 分支 3：收回路径（in-flight 在槽位文本 / queued 出站批内挂起的跌落判定）
+    if (rt.unmarkedEntryIds.has(clientUuid)) {
+      return { edited: false, reason: 'unconfirmed' }
+    }
+    const client = rt.client
+    const primitive = client ? queuePrimitive(client) : null
+    if (!primitive) return { edited: false, reason: 'unconfirmed' }
+    const cleared = await primitive.clearQueue().catch((e: unknown) => {
+      warn('edit: clear_queue failed, sid=', sessionId, e)
+      return null
+    })
+    if (cleared === null) return { edited: false, reason: 'unconfirmed' }
+    const clearedTexts = [...cleared.steering, ...cleared.followUp]
+    const targetInCleared = hasMarkerFor(clearedTexts, clientUuid)
+    if (targetInCleared) {
+      // 替换先于处置：own 重投（requeue + flush 同步链）的出站文本必须是新 payload
+      const payload = editPayloadFor(rt, clientUuid, input.content)
+      if (rt.handle.edit(clientUuid, payload)) {
+        recordEditSubmission(rt, clientUuid, payload)
+        updateEditSegments(rt, clientUuid, input.segments)
+      } else {
+        warn('edit: kernel rejected replacement after reclaim, sid=', sessionId, clientUuid)
+      }
+    }
+    // 收回文本全量三分处置（exclude 空：目标在收回集时随 own 通路重投；E2 竞态时目标由
+    // settledRevokes 通路兑现撤销——两个用户操作的终局都准确）
+    if (clearedTexts.length > 0) {
+      await disposeCleared(sessionId, rt, clearedTexts)
+    }
+    if (!targetInCleared) {
+      // 目标不在收回集：transcript 权威判定（已注入 = delivered；miss = 悬空窗口）
+      if (await transcriptHasMarker(sessionId, rt, clientUuid)) {
+        return { edited: false, reason: 'delivered' }
+      }
+      return { edited: false, reason: 'unconfirmed' }
+    }
+    // 目标在收回集：按处置后的实际状态应答
+    const after = entryStateOf(rt, clientUuid)
+    if (after === 'queued' || after === 'in-flight' || after === 'failed') return { edited: true }
+    if (after === 'delivered') return { edited: false, reason: 'delivered' }
+    if (after === 'cancelled') return { edited: false, reason: 'cancelled' }
+    return { edited: false, reason: 'not-found' }
   }
 
   return registry

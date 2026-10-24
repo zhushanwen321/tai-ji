@@ -252,6 +252,8 @@ export class SessionMessageHandler {
     'delivery.cancel': (msg, ws) => this.handleDeliveryCancel(msg, ws),
     'delivery.drain': (msg, ws) => this.handleDeliveryDrain(msg, ws),
     'delivery.resync': (msg, ws) => this.handleDeliveryResync(msg, ws),
+    'delivery.peek': (msg, ws) => this.handleDeliveryPeek(msg, ws),
+    'delivery.edit': (msg, ws) => this.handleDeliveryEdit(msg, ws),
     // backgroundTask 域（background-task-sidebar D3，u-runtime-rpc）：后台命令拉取/详情/终止 3 RPC。
     // 变更广播不经此处（SessionService 组装的 onTasksChanged → bus.publish 单向推送）。
     'backgroundTask.list': (msg, ws) => this.handleBackgroundTaskList(msg, ws),
@@ -744,14 +746,17 @@ export class SessionMessageHandler {
     // cursor=turn 边界锚点 entryId 时返回锚点之前的最近窗口（活跃/离线共用语义）；
     // cursor 未命中 → 空页 + truncated=false（翻页到头，不报错）。
     // [u6] legacy historyTruncated 字段退役（偏差表 D7 关闭：与 truncated 同值并存的双轨收敛）。
+    // [U8 重启中断标记] interrupted 可选透传（离线最新窗口判定文件尾部中断形态；
+    // 活跃/翻页路径 service 不产出该字段）。
     const { sessionId, cursor, limitTurns, maxBytes } = msg.payload
-    const { messages, truncated, loadedTurns, totalTurnsEstimate } = await this.ctx.sessionService.getHistory(sessionId, { cursor, limitTurns, maxBytes })
+    const { messages, truncated, loadedTurns, totalTurnsEstimate, interrupted } = await this.ctx.sessionService.getHistory(sessionId, { cursor, limitTurns, maxBytes })
     return this.ctx.reply(ws, msg.id, 'session.history', {
       sessionId,
       messages,
       truncated,
       loadedTurns,
       totalTurnsEstimate,
+      ...(interrupted !== undefined && { interrupted }),
     })
   }
 
@@ -1369,6 +1374,44 @@ export class SessionMessageHandler {
     // 首配快照帧 + reattach 变更的 onChange 帧（无变更零帧，D4-4）。
     const deduped = await registry.resync(sessionId, clientUuids)
     return this.ctx.reply(ws, msg.id, 'delivery.resync', { sessionId, deduped })
+  }
+
+  /** 条目全文取回（chat-flow-consistency D6）：✎ 编辑预填只读通道，条目不动。 */
+  private async handleDeliveryPeek(msg: Extract<ClientMessage, { type: 'delivery.peek' }>, ws: WsType): Promise<void> {
+    const { sessionId, clientUuid } = msg.payload
+    const registry = this.requireDeliveryRegistry(ws, msg, sessionId)
+    if (!registry) return
+    if (typeof sessionId !== 'string' || sessionId === '' || typeof clientUuid !== 'string' || clientUuid === '') {
+      return this.ctx.sendError(ws, 'invalid_payload', 'delivery.peek requires non-empty sessionId and clientUuid', msg.id, { sessionId })
+    }
+    const outcome = registry.peek(sessionId, clientUuid)
+    if (!outcome) {
+      return this.ctx.reply(ws, msg.id, 'delivery.peek', { clientUuid, found: false })
+    }
+    // content 剥除出站裸标记（编辑预填是用户侧文本——cancel reply 同口径，单点剥离）
+    const content = outcome.content !== undefined ? stripDeliveryMarkers(outcome.content) : undefined
+    return this.ctx.reply(ws, msg.id, 'delivery.peek', {
+      clientUuid,
+      found: true,
+      ...(content !== undefined ? { content } : {}),
+      ...(outcome.segments !== undefined ? { segments: outcome.segments } : {}),
+    })
+  }
+
+  /** 原位编辑（chat-flow-consistency D6）：发送侧替换条目内容且排队位置保持不变。 */
+  private async handleDeliveryEdit(msg: Extract<ClientMessage, { type: 'delivery.edit' }>, ws: WsType): Promise<void> {
+    const { sessionId, clientUuid, content, segments } = msg.payload
+    const registry = this.requireDeliveryRegistry(ws, msg, sessionId)
+    if (!registry) return
+    if (typeof sessionId !== 'string' || sessionId === '' || typeof clientUuid !== 'string' || clientUuid === '' || typeof content !== 'string' || content.trim() === '') {
+      return this.ctx.sendError(ws, 'invalid_payload', 'delivery.edit requires non-empty sessionId, clientUuid and content', msg.id, { sessionId })
+    }
+    // segments 快照随替换更新（仅接受数组形态，同 delivery.submit 的 JSON 防御先例）
+    const outcome = await registry.edit(sessionId, clientUuid, {
+      content,
+      ...(Array.isArray(segments) && segments.length > 0 ? { segments } : {}),
+    })
+    return this.ctx.reply(ws, msg.id, 'delivery.edit', { clientUuid, ...outcome })
   }
 
   // ── 消息撤回（message-revoke 设计 §3.3 D2，U4）────────────────────────────

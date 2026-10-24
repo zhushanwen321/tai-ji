@@ -70,6 +70,8 @@ export interface ChatHydratePort {
     truncated: boolean
     loadedTurns: number
     totalTurnsEstimate: number
+    /** [U8 重启中断标记] 可选，true = 离线读取判定文件尾部为中断形态 */
+    interrupted?: boolean
   }>
   /** 该 session 是否已 hydrate（幂等检查：已回填不重复拉取） */
   isHydrated(sessionId: string): boolean
@@ -80,8 +82,9 @@ export interface ChatHydratePort {
    * 防 pi entries 不含进行中消息导致的 delta 断链——见 chat store reconcileHistory 注释）。
    * [u4d] window（可选）随刷新写入截断窗口状态——truncated 必须与分区当前内容同步
    * （窗口响应把分区截回尾窗时 truncated=true，「加载更早」顶部条重显）。
+   * [U8] interrupted 可选随 window 透传（离线判定的中断形态标记，渲染尾部提示条依据）。
    */
-  reconcileHistory(sessionId: string, messages: Message[], window?: { truncated: boolean; loadedTurns: number; totalTurnsEstimate: number }): void
+  reconcileHistory(sessionId: string, messages: Message[], window?: { truncated: boolean; loadedTurns: number; totalTurnsEstimate: number; interrupted?: boolean }): void
   /** 清历史加载失败态（retryHistory 先清再拉） */
   clearHistoryError(sessionId: string): void
   /** 标记历史加载失败（landing 显重试出口，不永久卡住） */

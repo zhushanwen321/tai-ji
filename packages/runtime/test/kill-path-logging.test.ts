@@ -99,10 +99,7 @@ function makeMockSession(): IManagedSessionView {
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: true,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
+        bashRunToken: undefined,
   }
 }
 

@@ -57,6 +57,8 @@ import {
 } from '@/stores/btw-session-state'
 import { usePresetStore } from '@/stores/preset'
 import { getSettingsStore } from '@taiji/core'
+import { useQueueEditAnchor } from '@/composables/panel/useQueueEditAnchor'
+import { useRestoreToDraft } from '@/composables/panel/useRestoreToDraft'
 import { useChat } from '@/composables/features/chat/useChat'
 import { useNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 // 显示侧与 submit 侧 getSupportedLevels 的主路径唯一实现（F5；例外 = core flow.ts
@@ -384,6 +386,26 @@ export function useComposerShell(params: ComposerShellParams) {
   // ── 已附上下文 chip 行（core context/context-chips）──
   const { attachedItems, refreshAttachedItems, onRemoveContextChip } = useComposerContextChips(inputRef)
 
+  // ── 撤销回填 / 编辑预填共用落草稿（拆 useRestoreToDraft——script 行数上限）──
+  const { restoreToDraft } = useRestoreToDraft({
+    draft,
+    inputRef,
+    sessionIdRef,
+    restoreSegments,
+    restoreInput,
+    composerInjectionStore,
+  })
+
+  // ── 队列编辑锚定（chat-flow-consistency D6；实现拆 useQueueEditAnchor——script 行数上限）──
+  const { editingQueueClientUuid, beginQueueEntryEdit, abandonQueueEdit, sendWithQueueEdit } = useQueueEditAnchor({
+    sessionIdRef,
+    draft,
+    attachedItems,
+    restoreToDraft,
+    isSubagentLane,
+    laneSend,
+  })
+
   // ── composer-box 拖拽落位（core input/dragdrop；pasteImage 注入 handleImagePaste）──
   const { onDragOver, onDragLeave, onDrop } = useComposerDragDrop(inputRef, composerBoxRef, refreshAttachedItems, sessionIdRef, {
     pasteImage: handleImagePaste,
@@ -562,42 +584,12 @@ export function useComposerShell(params: ComposerShellParams) {
     isSending,
     flow,
     localThinkingLevel,
-    send: laneSend,
+    // [D6] 锚定编辑分流包装：锚定活 → delivery.edit 原位替换；无锚定/离场透传 laneSend 普通发送
+    send: sendWithQueueEdit,
     compact: laneCompact,
     toastError,
     t: t as (key: string, params?: Record<string, unknown>) => string,
   })
-
-  /**
-   * [u3c / D7] 队列条目撤销（×）的文本回输入区——delivery.cancel reply 的全文 + segments
-   * 快照落回草稿（ADR-0043 Segment[] 模型）。
-   *
-   * 空输入（无文本且无 chip）→ restoreSegments 整段恢复（text + image/file/skill/session chip，
-   * 与发送失败回滚同通路）；已有输入 → 追加不覆盖：走 composerInjectionStore 单值槽位 +
-   * '\n\n' 累积语义（与 useSidebarSessionActions 的 forceQuit 回收同款）——用户正在输入的内容
-   * 不丢（此前 forceQuit 路径已验证的取舍）。无 segments 快照（纯文本提交 / rebuild / adopt
-   * 条目，runtime 不带键）→ 纯文本落草稿。注入通道不携带 segments，追加分支只回文本
-   * （已登记 deviations）。
-   */
-  function restoreToDraft(payload: { text: string; segments?: Segment[] }): void {
-    const text = payload.text
-    const segments = payload.segments
-    const currentText = (inputRef.value?.getText() ?? draft.value).trim()
-    const hasChips = (inputRef.value?.getSegments() ?? []).some((s) => s.type !== 'text')
-    if (currentText.length === 0 && !hasChips) {
-      if (segments && segments.length > 0) restoreSegments(segments)
-      else if (text.trim()) restoreInput(text)
-      return
-    }
-    const sid = sessionIdRef.value
-    if (!sid || !text.trim()) return
-    const pendingText = composerInjectionStore.pendingInjection.value?.text
-    composerInjectionStore.requestInjection({
-      target: 'current',
-      sessionId: sid,
-      text: pendingText ? `${pendingText}\n\n${text}` : text,
-    })
-  }
 
   // ── Composer 命令动作表（composer-pi-shortcuts U1③组装；分发链「动作表」分支消费）──
   // enabledModels = settingsStore.models 经 enabled 兜底过滤（与 ModelSelectPopover 双保险
@@ -702,6 +694,12 @@ export function useComposerShell(params: ComposerShellParams) {
     onSend,
     // [u3c] 队列条目撤销回草稿（useQueueRows 的行撤销 handler 注入本回调）
     restoreToDraft,
+    // [D6] 队列编辑锚定：beginQueueEntryEdit = ✎ 入口（单锚定判定 + peek 预填）；
+    // abandonQueueEdit = 放弃编辑（解除锚定草稿保留）；editingQueueClientUuid = 编辑态
+    // （提示条显隐，帧驱动活性 watch 单写点维护）
+    beginQueueEntryEdit,
+    abandonQueueEdit,
+    editingQueueClientUuid,
     // composer 命令动作表（composer-pi-shortcuts：分发链「动作表」分支消费）
     shortcutActions,
     // 发送位形态（chat-flow-consistency D5 内容驱动双形态）：

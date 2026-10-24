@@ -1059,6 +1059,12 @@ export function createUseChat(deps: UseChatDeps) {
     // 跳过 inflight 记账（回执已消费，记账永无抵消配额——泄漏）。判定谓词复用
     // findDeliveryEntry 单一实现（[MF-1-4] 禁内联 find 漂移）。
     chat.appendUser(sid, segments, clientUuid)
+    // [chat-flow-consistency F1] 提交序号 +1（提交事实在产生处标记）：本函数是 send /
+    // followUp / editAndResend 三通路的共同上提点（F-D 提交编排单点），此处递增即覆盖全部
+    // 用户提交路径。对话流滚动跟随的 force 回底 watch 消费本序号（不再从「尾部新增 user
+    // 消息」数据变化推断）——morph 回执重建 / 外来直发复用 user 消息身份尾插但不动本序号，
+    // 不再误触发强拉回底。递增置于受理确认后（与气泡上屏同点），RPC 失败路径不产生序号。
+    chat.bumpSubmitSeq(sid)
     if (findDeliveryEntry(sid, clientUuid)?.state !== 'delivered') {
       chat.incrementInflight(sid, 1)
     }

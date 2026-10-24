@@ -110,7 +110,7 @@
 </template>
 
 <script setup lang="ts">
-import { GitBranch, Layers, Info, ArrowRight, SquareTerminal } from '@lucide/vue'
+import { GitBranch, Layers, Info, ArrowRight, ArrowLeftRight, SquareTerminal } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { onUnmounted, ref, type Component } from 'vue'
 import {
@@ -218,6 +218,18 @@ interface NoticeView {
 const notice: NoticeView = finalizeDetail(resolveNotice(props.message))
 
 function resolveNotice(message: Message): NoticeView {
+  // [chat-flow-consistency U9 / S2] 交接指令行（handoff turn 的固定 prompt 被 reducer
+  // 转为系统行）：主体短语「交接指令（内部）」，指令原文只进悬停详情（background-bash
+  // 命令原文同款）。字段判定（reducer 派生段唯一写点），content 兜底不再单独分支——
+  // 本行恒带 handoffInstruction（识别与转换同点），原文取字段值。
+  if (message.handoffInstruction) {
+    return {
+      icon: ArrowLeftRight,
+      iconClass: ICON_NEUTRAL_CLASS,
+      text: t('panel.message.handoffInstruction'),
+      detail: { label: t('panel.message.handoffInstructionLabel'), body: message.handoffInstruction.text },
+    }
+  }
   // background-bash 结构化行（D2 + 方案 A 短语化）：details 经 shared 单点防御解析命中 →
   // 终态短语主体 + exit/耗时 meta；命令原文只进悬停详情。解析 null（旧 session 无
   // details / 第三方写入畸形载荷）→ 落下方兜底原文行（content 原文含全部信息，无需恢复动作）。
@@ -226,11 +238,17 @@ function resolveNotice(message: Message): NoticeView {
   if (message.compactionSummary) {
     const tokens = message.compactionSummary.tokensBefore
     // tokens 从主文案拆出为钉右 meta（D3）：主文案只留短语，数字进等宽 meta 供扫读对齐
+    // [chat-flow-consistency U9 / S6] 摘要全文悬停详情：compactionSummary.summary 非空时
+    // 挂悬停（label「压缩摘要」+ 全文 + 复制，NoticeDetail 基建复用）——摘要两侧同源已在
+    // 消息数据（live 帧 / reload 派生同一构造核心），此处纯渲染入口补齐。summary 缺失
+    // （reducer fallback「上下文已压缩」形态）不挂（无内容可显）。
+    const summary = message.compactionSummary.summary
     return {
       icon: Layers,
       iconClass: ICON_NEUTRAL_CLASS,
       text: t('panel.message.compacted'),
       meta: tokens !== undefined ? t('panel.message.compactedTokens', { tokens: formatTokens(tokens) }) : undefined,
+      ...(summary ? { detail: { label: t('panel.message.compactionSummaryLabel'), body: summary } } : {}),
     }
   }
   if (message.branchSummary) {

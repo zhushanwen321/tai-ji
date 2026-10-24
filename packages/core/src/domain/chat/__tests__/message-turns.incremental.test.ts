@@ -226,7 +226,7 @@ describe('toRenderItemsIncremental —— ② 末位追加只重建末位 turn',
     expect(turnOf(r2[1]).index).toBe(2)
   })
 
-  it('上次末位 turn 的 streaming 态过期被校正：追加新 turn 后旧末位 isStreaming 翻 false（不可变替换）', () => {
+  it('[D2] 插话回流开新 turn 后旧末位 streaming 回合保持 isStreaming=true（双工作态，对象不可变替换）', () => {
     const cache = createTurnRenderCache()
     const u1 = makeMsg({ id: 'u1', role: 'user' })
     const a1s = makeMsg({ id: 'a1', role: 'assistant', content: 'r', status: 'streaming' })
@@ -234,11 +234,29 @@ describe('toRenderItemsIncremental —— ② 末位追加只重建末位 turn',
     expect(turnOf(r1[0]).isStreaming).toBe(true)
     const u2 = makeMsg({ id: 'u2', role: 'user' })
     const r2 = toRenderItemsIncremental([u1, a1s, u2], false, cache)
-    // turn1 不再是末位：isStreaming 校正为 false，对象不可变替换（ assistants 引用保留）
-    expect(turnOf(r2[0]).isStreaming).toBe(false)
-    expect(turnOf(r2[0])).not.toBe(turnOf(r1[0]))
+    // [chat-flow-consistency D2] isStreaming = 回合内末位 assistant 是否 streaming，不再以
+    // 末位回合短路：turn1 的 a1s 仍 streaming（到回合级 message.complete 才收尾）→ 保持 true
+    // —— 双工作态并存（期望形态）。期望值未变（复用判定命中）→ turn 对象引用恒等（零 churn），
+    // assistants 引用保留。
+    expect(turnOf(r2[0]).isStreaming).toBe(true)
+    expect(turnOf(r2[0])).toBe(turnOf(r1[0]))
     expect(turnOf(r2[0]).assistants).toBe(turnOf(r1[0]).assistants)
     expect(r2).toEqual(toRenderItems([u1, a1s, u2], false))
+  })
+
+  it('[D2] 旧回合定稿收尾（assistant status 翻 complete，新对象替换）→ isStreaming 翻 false', () => {
+    const cache = createTurnRenderCache()
+    const u1 = makeMsg({ id: 'u1', role: 'user' })
+    const a1s = makeMsg({ id: 'a1', role: 'assistant', content: 'r', status: 'streaming' })
+    const u2 = makeMsg({ id: 'u2', role: 'user' })
+    const a2s = makeMsg({ id: 'a2', role: 'assistant', content: 'r2', status: 'streaming' })
+    toRenderItemsIncremental([u1, a1s, u2, a2s], false, cache)
+    // 旧回合 message.complete 到达（a1s 换 complete 新对象——不可变纪律）：双工作态解除
+    const a1done = makeMsg({ id: 'a1', role: 'assistant', content: 'r', status: 'complete' })
+    const r3 = toRenderItemsIncremental([u1, a1done, u2, a2s], false, cache)
+    expect(turnOf(r3[0]).isStreaming).toBe(false)
+    expect(turnOf(r3[1]).isStreaming).toBe(true)
+    expect(r3).toEqual(toRenderItems([u1, a1done, u2, a2s], false))
   })
 
   it('hasFoldable 随成员变化重算：追加带 thinking 的 assistant 后末位 turn hasFoldable=true', () => {
@@ -609,27 +627,85 @@ describe('groupRenderInput 分组规则 v2 —— R4 inline notice 归 turn 内�
     expect(t.notices?.map((m) => m.id)).toEqual(['bash-1', 'bash-2']) // notice 不出 static 项
   })
 
-  it('R4 liveOnly 健康警告（stream_warn 形态）归当前 turn 内部（liveOnly 由 W2 打标，此处只读）', () => {
+  it('[C6] liveOnly 健康警告独立成项：开放 turn 期间到达先缓冲，该 turn 关闭后随其后输出（不切断 turn）', () => {
+    // w1 在 a1 与 a2 之间到达（turn 开放期）→ 缓冲；u2 关闭 turn → w1 落位独立 systemNotice，
+    // 位置 = 旧 turn 之后、新 turn 之前（时序位置，不归入任何 turn 的 notices）
     const items = toRenderItems([
       makeMsg({ id: 'u1', role: 'user', content: 'q' }),
       makeMsg({ id: 'a1', role: 'assistant', content: 'r1', status: 'streaming' }),
       liveWarnMsg('w1'),
       makeMsg({ id: 'a2', role: 'assistant', content: 'r2' }),
+      makeMsg({ id: 'u2', role: 'user', content: 'q2' }),
+      makeMsg({ id: 'a3', role: 'assistant', content: 'r3' }),
     ])
-    expect(items.map((i) => i.kind)).toEqual(['turn'])
-    expect(turnOf(items[0]).assistants.map((m) => m.id)).toEqual(['a1', 'a2'])
-    expect(turnOf(items[0]).notices?.map((m) => m.id)).toEqual(['w1'])
+    expect(items.map((i) => i.kind)).toEqual(['turn', 'systemNotice', 'turn'])
+    // 不切断 turn：a1/a2 仍同回合（w1 到达不改任何消息归属判定）
+    const t1 = turnOf(items[0])
+    expect(t1.assistants.map((m) => m.id)).toEqual(['a1', 'a2'])
+    expect(t1.notices).toBeUndefined() // liveOnly 不再 inline 归 turn
+    if (items[1].kind !== 'systemNotice') throw new Error('expected systemNotice')
+    expect(items[1].message.id).toBe('w1')
   })
 
-  it('R4 退化：无当前 turn 时 inline notice 退化为独立 static 项（现状兜底保留）', () => {
+  it('[C6] 无开放 turn 时 liveOnly 立即落位独立 systemNotice 项', () => {
+    const items = toRenderItems([
+      liveWarnMsg('w0'),
+      makeMsg({ id: 'u1', role: 'user', content: 'q' }),
+      makeMsg({ id: 'a1', role: 'assistant', content: 'r' }),
+    ])
+    expect(items.map((i) => i.kind)).toEqual(['systemNotice', 'turn'])
+    if (items[0].kind !== 'systemNotice') throw new Error('expected systemNotice')
+    expect(items[0].message.id).toBe('w0')
+    expect(turnOf(items[1]).notices).toBeUndefined()
+  })
+
+  it('R4 退化：无当前 turn 时 inline notice 退化为独立 static 项（bash 兜底保留；liveOnly 同形态恒独立，见 [C6]）', () => {
     const items = toRenderItems([
       bashMsg('bash-0'), // 首条，无当前 turn
-      liveWarnMsg('w0'), // 同上（systemNotice 兜底 kind）
+      liveWarnMsg('w0'), // 同上（[C6] 无开放 turn → 立即独立 systemNotice）
       makeMsg({ id: 'u1', role: 'user', content: 'q' }),
       makeMsg({ id: 'a1', role: 'assistant', content: 'r' }),
     ])
     expect(items.map((i) => i.kind)).toEqual(['bashExecution', 'systemNotice', 'turn'])
     expect(turnOf(items[2]).notices).toBeUndefined() // 有当前 turn 后不再退化
+  })
+
+  it('[C6] 多条 liveOnly 缓冲按到达序落位；bash inline notice 与 liveOnly 各走各路', () => {
+    const items = toRenderItems([
+      makeMsg({ id: 'u1', role: 'user', content: 'q' }),
+      makeMsg({ id: 'a1', role: 'assistant', content: 'r1' }),
+      liveWarnMsg('w1'),
+      bashMsg('bash-1'),
+      liveWarnMsg('w2'),
+      makeMsg({ id: 'u2', role: 'user', content: 'q2' }),
+      makeMsg({ id: 'a2', role: 'assistant', content: 'r2' }),
+    ])
+    // bash-1 inline 归 turn1（规则 4a 不变）；w1/w2 缓冲，u2 关闭 turn 后按到达序落位
+    expect(items.map((i) => i.kind)).toEqual(['turn', 'systemNotice', 'systemNotice', 'turn'])
+    expect(turnOf(items[0]).notices?.map((m) => m.id)).toEqual(['bash-1'])
+    if (items[1].kind !== 'systemNotice' || items[2].kind !== 'systemNotice') {
+      throw new Error('expected systemNotice ×2')
+    }
+    expect(items[1].message.id).toBe('w1')
+    expect(items[2].message.id).toBe('w2')
+  })
+
+  it('[C6] liveOnly 缓冲下增量路径与全量路径逐步等价（尾部快车道跨缓冲形态）', () => {
+    const cache = createTurnRenderCache()
+    const u1 = makeMsg({ id: 'u1', role: 'user', content: 'q1' })
+    const a1 = makeMsg({ id: 'a1', role: 'assistant', content: 'r1' })
+    const steps: Message[][] = [
+      [u1, a1],
+      // w1 到达（turn 开放 → 缓冲，无渲染项变化——恒等复用形态）
+      [u1, a1, liveWarnMsg('w1')],
+      // w2 到达（同上）
+      [u1, a1, liveWarnMsg('w1'), liveWarnMsg('w2')],
+      // u2 关闭 turn → w1/w2 落位独立项（结构变化）
+      [u1, a1, liveWarnMsg('w1'), liveWarnMsg('w2'), makeMsg({ id: 'u2', role: 'user', content: 'q2' })],
+    ]
+    for (const step of steps) {
+      expect(toRenderItemsIncremental(step, false, cache)).toEqual(toRenderItems(step, false))
+    }
   })
 
   it('R4 notice 挂入 trigger turn：边界后的 bash 归触发 turn 的 notices（不另起 static）', () => {
@@ -681,10 +757,13 @@ describe('groupRenderInput 分组规则 v2 —— 纯函数等价性（W6 等价
   })
 
   it('richFixture 全类型行为锚定（快照式断言：turn 结构 + trigger/notice 归属）', () => {
+    // [C6] w1（liveOnly）不再 inline 归 turn：u1 turn 开放期到达 → 缓冲，n1 边界开新组时
+    // 落位独立 systemNotice（时序位置 = u1 turn 之后、n1 trigger turn 之前）
     const items = toRenderItems(richFixture())
     expect(items.map((i) => i.kind)).toEqual([
       'turn', // a0 自启
-      'turn', // u1 锚：a1/bash-1/a1b/w1 inline
+      'turn', // u1 锚：a1/bash-1/a1b inline（w1 已缓冲）
+      'systemNotice', // w1 独立成项（缓冲在 u1 turn 关闭后落位）
       'turn', // n1 触发：bash-2 notice + a2
       'turn', // u2 锚（n2/n3 空边界折叠）：h1 透明，a3 inline
       'systemNotice', // c1 可见 system 边界
@@ -692,16 +771,18 @@ describe('groupRenderInput 分组规则 v2 —— 纯函数等价性（W6 等价
     ])
     const t2 = turnOf(items[1])
     expect(t2.assistants.map((m) => m.id)).toEqual(['a1', 'a1b'])
-    expect(t2.notices?.map((m) => m.id)).toEqual(['bash-1', 'w1'])
-    const t3 = turnOf(items[2])
+    expect(t2.notices?.map((m) => m.id)).toEqual(['bash-1'])
+    if (items[2].kind !== 'systemNotice') throw new Error('expected systemNotice')
+    expect(items[2].message.id).toBe('w1')
+    const t3 = turnOf(items[3])
     expect(t3.trigger).toBe('bg-notify')
     expect(t3.assistants.map((m) => m.id)).toEqual(['a2'])
     expect(t3.notices?.map((m) => m.id)).toEqual(['bash-2'])
-    const t4 = turnOf(items[3])
+    const t4 = turnOf(items[4])
     expect(t4.trigger).toBeUndefined() // n2/n3 折叠，u2 开正常锚 turn
     expect(t4.assistants.map((m) => m.id)).toEqual(['a3'])
     expect(t4.notices).toBeUndefined()
-    const t5 = turnOf(items[5])
+    const t5 = turnOf(items[6])
     expect(t5.user).toBeNull()
     expect(t5.trigger).toBeUndefined()
   })
@@ -1202,11 +1283,15 @@ describe('toRenderItemsIncremental —— ⑥ 尾部快车道形态②（尾部 
     expect(turnOf(r2[0]).assistants[0]).toBe(a1)
     expect(turnOf(r2[0]).notices?.map((m) => m.id)).toEqual(['bash-1'])
     expect(r2).toEqual(toRenderItems(s2, false))
+    // [C6] liveOnly 到达：不再 inline 进 notices（签名不变 → 末位 turn 引用恒等复用），
+    // 走独立 systemNotice 项（数组结束 closeTurn 后缓冲落位）
     const w1 = liveWarnMsg('w1')
     const s3 = [u1, a1, b1, w1]
     const r3 = toRenderItemsIncremental(s3, false, cache)
-    expect(turnOf(r3[0]).notices?.map((m) => m.id)).toEqual(['bash-1', 'w1'])
+    expect(turnOf(r3[0]).notices?.map((m) => m.id)).toEqual(['bash-1'])
+    expect(turnOf(r3[0])).toBe(turnOf(r2[0])) // liveOnly 不改 turn 签名 → 零 churn 复用
     expect(r3).toEqual(toRenderItems(s3, false))
+    expect(r3.map((i) => i.kind)).toEqual(['turn', 'systemNotice'])
   })
 
   it('append 挂起空 trigger turn 被新消息填实：trigger turn 产出正确，前位 turn 引用复用', () => {

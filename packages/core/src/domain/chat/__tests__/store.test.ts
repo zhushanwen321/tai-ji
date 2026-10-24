@@ -654,6 +654,55 @@ describe('createChatStore factory', () => {
     })
   })
 
+  // ── [chat-flow-consistency F1] 提交序号：store 层语义（递增单调 / 分区隔离 / 生命周期）。
+  //    调用方接线（submitNewMessage 受理确认单点 +1 / 跟随触发 watch 消费）归 useChat 与
+  //    renderer 触发编排测试 ──
+  describe('submitSeq 提交序号（F1 契约层：用户主动发送的事实计数器）', () => {
+    it('无记录 = 0；bump 单调递增（只增不复位）', () => {
+      const sid = 's1'
+      expect(sut.store.getSubmitSeq(sid)).toBe(0)
+      sut.store.bumpSubmitSeq(sid)
+      expect(sut.store.getSubmitSeq(sid)).toBe(1)
+      sut.store.bumpSubmitSeq(sid)
+      expect(sut.store.getSubmitSeq(sid)).toBe(2)
+    })
+
+    it('per-session 分区隔离（A/B session 序号互不干扰）', () => {
+      sut.store.bumpSubmitSeq('sa')
+      sut.store.bumpSubmitSeq('sa')
+      sut.store.bumpSubmitSeq('sb')
+      expect(sut.store.getSubmitSeq('sa')).toBe(2)
+      expect(sut.store.getSubmitSeq('sb')).toBe(1)
+    })
+
+    it('disposeSession 后序号清空；其他 session 不受影响', () => {
+      sut.store.bumpSubmitSeq('s1')
+      sut.store.bumpSubmitSeq('sb')
+      sut.store.disposeSession('s1')
+      expect(sut.store.getSubmitSeq('s1')).toBe(0)
+      expect(sut.store.getSubmitSeq('sb')).toBe(1)
+    })
+
+    it('响应式：getSubmitSeq 读建立依赖，bump 触发下游 effect 重跑（watch 触发源的响应性前提）', () => {
+      const sid = 's1'
+      let runCount = 0
+      let seen = -1
+      const scope = effectScope()
+      scope.run(() => {
+        effect(() => {
+          seen = sut.store.getSubmitSeq(sid)
+          runCount++
+        })
+      })
+      expect(runCount).toBe(1)
+      expect(seen).toBe(0)
+      sut.store.bumpSubmitSeq(sid)
+      expect(runCount).toBe(2)
+      expect(seen).toBe(1)
+      scope.stop()
+    })
+  })
+
   describe('isGenerating 派生（D-3 per-session 惰性派生，判定与旧全 Map scan 等价）', () => {
     it('空 session isGenerating=false', () => {
       expect(sut.store.isGenerating('empty')).toBe(false)

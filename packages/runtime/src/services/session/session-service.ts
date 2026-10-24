@@ -1304,9 +1304,9 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.projection.handleTurnUsageSideEffects(sessionId)
   }
 
-  /** agent_end 副作用（isGenerating 复位 + sidecar 兜底 + session_end 终态；语义注释随实现迁 session-state-projection.ts）。 */
-  handleTurnEndSideEffects(sessionId: string, stopReason?: string): void {
-    this.projection.handleTurnEndSideEffects(sessionId, stopReason)
+  /** agent_end 副作用（settling 转移 + sidecar 兜底 + session_end 终态，willRetry 中间失败跳终态；语义注释随实现迁 session-state-projection.ts）。 */
+  handleTurnEndSideEffects(sessionId: string, stopReason?: string, willRetry?: boolean): void {
+    this.projection.handleTurnEndSideEffects(sessionId, stopReason, willRetry)
   }
 
   /**
@@ -1321,10 +1321,21 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 写 session_end 终态 entry（W4，ADR 0042）。
    * 3 个终态点复用：正常完成（handleTurnEndSideEffects）/ abort（message-dispatcher）/ 进程崩溃（onSessionExit）。
    * sessionFilePath 不存在时静默跳过（首 turn 前崩溃 / pi 延迟写入窗口）。
+   *
+   * [chat-flow-consistency 第一终态优先下沉（design-turn-statemachine 缺陷 2 方案 2）]
+   * 写入前检查已有终态（done/error/stopped 任一在侧）则跳过——三个终态写点统一继承该纪律，
+   * 进程退出链（onSessionExit）保留既有内联检查（条目已删不能走内部 get，语义同构双实现）。
+   * 这是 abort 与 pi 自发 agent_end 并发（stopped/done 写入顺序不定）的竞态兜底：先写者赢
+   * ——done 先写则 abort 跳过（回合自然完成）；stopped 先写则 done 跳过（对齐进程退出链
+   * 既有裁决「abort reason 更具诊断价值」）。实施期核实点 V3 已核实：restore/fork 附着成功
+   * 后均删 `.meta.json` 旧 sidecar（session-lifecycle attachRestoreFile / fork 链），重开
+   * 新周期不受旧终态拦截，统一层粒度安全。
    */
   persistSessionOutcome(sessionId: string, outcome: SessionOutcome, reason?: string): void {
     const session = this.lifecycle.get(sessionId)
     if (!session?.sessionFilePath) return
+    const existing = this.sessionStore.extractSessionOutcome(session.sessionFilePath)
+    if (existing === 'done' || existing === 'error' || existing === 'stopped') return
     this.sessionStore.persistSessionEnd(session.sessionFilePath, outcome, reason)
   }
 

@@ -39,6 +39,8 @@ export type {
   // 跨包具名消费（core chat 域 / renderer 队列区）经本出口。
   DeliveryFrameEntry, DeliverySubmitReply, DeliveryCancelReply,
   DeliveryDrainReplyEntry, DeliveryDrainReply, DeliveryResyncReply,
+  // delivery.peek / delivery.edit（chat-flow-consistency D6 队列区原位编辑）：reply 具名类型
+  DeliveryPeekReply, DeliveryEditReply,
   // 消息撤回（message revoke，U3）：revokeMessage RPC 的错误码闭集 + reply 判别 union
   RevokeMessageErrorCode, SessionRevokeMessageReply,
   // workflow 可视化（workflow-visualization U2 协议冻结）：两条拉取 RPC 的错误码

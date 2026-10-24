@@ -105,6 +105,7 @@ import { PiRetrySettings } from './infra/pi/pi-retry-settings.js'
 import { EventAdapter } from './infra/pi/event-adapter.js'
 import { FileChangeDiffAdapter } from './infra/pi/file-change-diff-adapter.js'
 import { EventInterpreter, applySessionOccupancyTransition } from './services/session/event-interpreter.js'
+import { isGeneratingTurn } from './services/session/types.js'
 import { join, resolve, isAbsolute } from 'node:path'
 import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
@@ -922,11 +923,13 @@ async function main(): Promise<void> {
       // EventInterpreterOptions.onCompactionContextRewritten）。与 onGenStats 同模式：
       // 闭包引用下方声明的 genStatsService，createAdapter 仅在 session 创建后调用，引用恒就绪。
       onCompactionContextRewritten: (sid) => genStatsService.markContextRewritten(sid),
-      // W3：agent_end 副作用——isGenerating 复位（W1 后 label 直写兜底已随机制删除）。
-      // 原 attachUsageListener agent_end 分支迁移至此。不迁移则 session 永远 busy（下条消息被拒）。
+      // W3：agent_end 副作用——occupancy 'settling' 转移（W1 后 label 直写兜底已随机制删除）。
+      // 原 attachUsageListener agent_end 分支迁移至此。
       // W4：转发 stopReason 用于 session_end 终态判定（'error'→error，其余→done）。
-      onTurnFinalize: (sid, stopReason) => {
-        sessionService.handleTurnEndSideEffects(sid, stopReason)
+      // [chat-flow-consistency willRetry 分层] willRetry=true（pi 自动重试中间失败）跳过终态
+      // sidecar 写入（settling 转移保留——attempt 间隙真实阶段就是 settling）。
+      onTurnFinalize: (sid, stopReason, willRetry) => {
+        sessionService.handleTurnEndSideEffects(sid, stopReason, willRetry)
       },
       // D4（rename-session-three-modes 显示侧扇出修复）：session_info_changed 事件到达时
       // ① label 回写（session_info_changed 事件路径唯一写方，toSummary/config.sessions 读
@@ -1179,6 +1182,8 @@ async function main(): Promise<void> {
   const handoffService = new HandoffService({
     sessionService,
     broker: server,
+    // [chat-flow-consistency R1] handingOff 维 state-topic 广播通道（session.occupancy 帧）
+    messageBus,
     broadcastSessionList: () => server.broadcastSessionList(),
     nextPushId: () => server.nextPushId(),
   })
@@ -1492,9 +1497,10 @@ async function main(): Promise<void> {
   // tombstone / 画布解绑
   // 复用 delete 同名原语；trash 经 sessionStore（与 cascade 生产装配同源，G4 语义——失败
   // 原样上抛保持可恢复形态）。getActiveSession 映射 getSession（IManagedSessionView 含
-  // cwd/sessionFilePath/isGenerating，ArchiveService 消费的最小字段集）。
+  // cwd/sessionFilePath/occupancy，ArchiveService 消费的最小字段集）。
+  // [chat-flow-consistency D1] isGenerating 供给端迁移：isGeneratingTurn(occupancy.turn)。
   const archiveService = new ArchiveService({
-    isGenerating: (sid) => sessionService.getSession(sid)?.isGenerating ?? false,
+    isGenerating: (sid) => isGeneratingTurn(sessionService.getSession(sid)?.occupancy?.turn),
     getActiveSession: (sid) => sessionService.getSession(sid),
     findScannedSession: (sid) => sessionService.findScannedSession(sid),
     disposeUserStopped: (sid) => userStoppedGate.disposeForDelete(sid),
@@ -1533,7 +1539,8 @@ async function main(): Promise<void> {
    */
   const resolveBtwMain = (mainSid: string): { cwd: string; mainTurnActive: boolean } | undefined => {
     const active = sessionService.getSession(mainSid)
-    if (active) return { cwd: active.cwd, mainTurnActive: active.isGenerating }
+    // [chat-flow-consistency D1] 读口迁移：mainTurnActive ≡ isGeneratingTurn(occupancy.turn)。
+    if (active) return { cwd: active.cwd, mainTurnActive: isGeneratingTurn(active.occupancy?.turn) }
     const scanned = sessionService.findScannedSession(mainSid)
     return scanned ? { cwd: scanned.cwd, mainTurnActive: false } : undefined
   }

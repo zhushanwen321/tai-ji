@@ -24,11 +24,17 @@ import * as mockChat from '@taiji/core/transport/mock'
 export type DeliveryCancel = typeof realChat.cancelDelivery
 export type DeliveryDrain = typeof realChat.drainDelivery
 export type DeliveryResync = typeof realChat.resyncDelivery
+export type DeliveryPeek = typeof realChat.peekDelivery
+export type DeliveryEdit = typeof realChat.editDelivery
 
 export interface DeliverySurface {
   cancelDelivery: DeliveryCancel
   drainDelivery: DeliveryDrain
   resyncDelivery: DeliveryResync
+  /** 条目全文取回（chat-flow-consistency D6）：✎ 编辑预填只读通道 */
+  peekDelivery: DeliveryPeek
+  /** 原位编辑（chat-flow-consistency D6）：发送侧替换条目内容且排队位置保持不变 */
+  editDelivery: DeliveryEdit
 }
 
 const isMock = import.meta.env.VITE_MOCK === 'true'

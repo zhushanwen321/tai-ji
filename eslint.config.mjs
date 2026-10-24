@@ -206,7 +206,28 @@ export default [
       'max-lines': ['warn', { max: 540, skipBlankLines: true, skipComments: true }],
     },
   },
-  // events-projection：session/workflow 事件派生视图聚合点（entry 批 + journal 推送双源
+  // [chat-flow-consistency U4] message-turns：chat 域分组纯函数 SSOT（分组规则 v2 全量/增量
+  // 双路 + 尾部快车道三车道 + D5 边界聚合），基线 499 行贴软上限。本次 C6 liveOnly 独立成项
+  // （规则 4 拆分 + liveOnly 缓冲落位函数 + 各关闭点 flush 接线）净增 26 行折算 525，按
+  // 「微超即提额，保留软上限告警」先例（pi-provider-store / transport server）提额，长期
+  // 应拆分（分组规则分支体已函数化，再拆属独立重构任务）。
+  {
+    files: ['packages/core/src/domain/chat/message-turns.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 540, skipBlankLines: true, skipComments: true }],
+    },
+  },
+    // [chat-flow-consistency U1] effects/registry：message.* 广播 effect 注册表（每事件一
+  // handler 的表驱动聚合点，行数随事件数线性增长）。willRetry 两级终态分层 + 停止/截断提示
+  // 行（D1）净增 28 行折算 528，按「微超即提额，保留软上限告警」先例（message-turns /
+  // pi-provider-store / transport server 同型）提额，handler 内聚体再拆属独立重构任务。
+  {
+    files: ['packages/core/src/domain/chat/effects/registry.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 560, skipBlankLines: true, skipComments: true }],
+    },
+  },
+// events-projection：session/workflow 事件派生视图聚合点（entry 批 + journal 推送双源
   // 单点合并）。降级派生视图升级路径恢复（W-P2 重构回归修复）净增 9 行代码，509 > 500 微超
   // 即提额（先例 pi-provider-store / server.ts「微超即提额，保留软上限告警」同型）——
   // 再拆属独立重构任务。

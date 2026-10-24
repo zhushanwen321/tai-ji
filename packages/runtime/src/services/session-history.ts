@@ -32,7 +32,7 @@ import type { ISessionStore } from './ports/session.js'
 import { isEnoent } from '../utils/errors.js'
 import { parseJsonl, type JsonlParseOptions } from '../utils/jsonl.js'
 import { warnOnce } from '../utils/warn-once.js'
-import { applyEntryEndTimes, mapSessionEntries } from '../infra/pi/session-entry-mapper.js'
+import { applyEntryEndTimes, mapSessionEntries, isInterruptedTail } from '../infra/pi/session-entry-mapper.js'
 import type { PiSessionEntry } from '../infra/pi/pi-protocol.js'
 import { forEachReversedLineChunk } from '../utils/history-reverse-read.js'
 
@@ -210,6 +210,12 @@ export interface HistoryWindowResult {
   truncated: boolean
   loadedTurns: number
   totalTurnsEstimate: number
+  /**
+   * [U8 重启中断标记·方向 A] 尾部中断形态判定（仅最新窗口请求且经 tailReadHistory 离线
+   * 读出时可能置位；true = 文件尾部为中断三形态之一）。活跃路径与游标翻页恒 undefined——
+   * 判定只对「会话未附着 + 读的是文件尾」成立（RPC 失败降级路径不得透传，防活会话误标）。
+   */
+  interrupted?: boolean
 }
 
 /** [HISTORICAL] N1 修复期旧名，= HistoryWindowResult 别名（保留既有 import 兼容）。 */
@@ -478,7 +484,7 @@ export async function tailReadHistory(
   maxTurns: number = HISTORY_BUDGET.RECENT_TURNS,
   query?: HistoryWindowQuery,
 ): Promise<TailReadResult> {
-  const emptyPage = { messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }
+  const emptyPage: TailReadResult = { messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }
   // 规则 #6：文件不存在（ENOENT，pi 延迟落盘常态）空页 + warn；其余 stat 失败
   //（EACCES/EIO 等）原样上抛——压成空页会把「读不了」伪装成「历史为空」假成功
   //（RT-5#4，与上方 getHistoryFromFilePath 的 statSync 预检同款分级；打开期竞态由
@@ -503,10 +509,15 @@ export async function tailReadHistory(
 
   // AC-5 turn 外扩（D14）：若窗口首条是孤立 toolResult（窗口外有对应 assistant），
   // convertHistory 内部 warn 丢弃（不额外拉取，外扩逻辑在 convertHistory 处理）。
+  // [U8 重启中断标记] 仅最新窗口请求（无 cursor——cursor 翻页返回锚前区域，尾部不是文件
+  // 尾）做尾部形态判定；判定读窗口 entries（活跃路径裁剪前，convertWindowEntries 内裁剪
+  // 依据 = 文件最后 entry，与判定「从尾向前找最后 message entry」互不干扰）。
+  const interrupted = query?.cursor === undefined ? isInterruptedTail(loaded.entries) : undefined
   return {
     messages: convertWindowEntries(loaded.entries, sessionStore),
     truncated: loaded.truncated,
     loadedTurns: loaded.loadedTurns,
     totalTurnsEstimate: loaded.totalTurnsEstimate,
+    ...(interrupted !== undefined && { interrupted }),
   }
 }

@@ -165,19 +165,25 @@ export type DeliveryReceiptAnchor = 'marker' | 'acceptance' | 'details-id'
 
 /**
  * 失败保留策略（v3）：port.send 失败（首败，ADR-0122 无内核自动重试）时条目的处置。
- * - 'forget'：首败即停 + 显式上报后从内核移除（runtime 文本车道现状；重试决策归
+ * - 'forget'：首败即停 + 显式上报后从内核移除（缺省 text 现状；重试决策归
  *   消费方——人看页面通知可重发）。store 已 persist 的记录同步 discard（失败条目
  *   无判重语义，防重启后被 loadUndelivered 复活成死条目）。
  * - 'retain'：失败条目留守——内存态转回 queued 等下一 settled 边沿 / 外部 flush
  *   重入队（事件驱动，无定时器）；store 记录保留（不 ack 不 discard），重启后经
  *   loadUndelivered 重入队（通知车道无人值守语义，与账本现状同构）。
+ * - 'failed'（chat-flow-consistency 第 11 条）：受理失败条目转 **failed 终态留守**——
+ *   不自动重投（无 retain 的边沿重投，等用户处置：resync 重试 / cancel 撤销）、
+ *   不 store.discard（重启后经 loadUndelivered 重放，重放带 transcript 判重防线），
+ *   与断连 failInFlight 的 failed 同态同出路（队列区一行 + 重试入口双呈现）。
  *
  * 缺省按载荷类型：custom = 'retain' / text = 'forget'（§3.4 提交选项缺省值表：
- * 交互在席 vs 无人值守），提交方可显式覆写。sendChecked 挂起条目恒 'forget'（同步
- * 失败回执契约与 retain 重投矛盾——调用方已收到失败，重投会产生「失败但送达」的
- * 矛盾观测；显式申报 retain 时按 forget 处置并一次性 warn）。
+ * 交互在席 vs 无人值守），提交方可显式覆写。sendChecked 挂起条目缺省/显式 'retain'
+ * 按 'forget' 处置（同步失败回执契约与 retain 边沿重投矛盾——调用方已收到失败，
+ * 自动重投会产生「失败但送达」的矛盾观测；一次性 warn）；显式 'failed' 放行——
+ * waiter reject 是受理口径通知，failed 留守是条目状态，两者不矛盾（failed 不自动
+ * 重投，「失败但送达」观测不存在）。
  */
-export type DeliveryFailurePolicy = 'forget' | 'retain'
+export type DeliveryFailurePolicy = 'forget' | 'retain' | 'failed'
 
 /**
  * 送达凭据检查函数（v3，'details-id' 凭据的判定承载形态）：判定「对话记录中是否已
@@ -327,6 +333,8 @@ export type DeliveryLane = 'direct' | 'steer' | 'queued'
  * - in-flight/queued → cancelled：用户撤销（delivery.cancel）
  * - in-flight → failed：断连事件驱动的未确认终局（failInFlight，ADR-0122——pi 连接
  *   断开时结果未知，显式失败交用户处置）
+ * - queued → failed：出站投递受理失败（onFailure='failed'，chat-flow-consistency
+ *   第 11 条——文本投递受理失败留守 failed 行，与断连未确认同出路，等用户处置）
  * - failed → queued：用户重试（resync 单条重报）；failed → cancelled：用户移除
  * 帧派生视图四态差异：cancelled 不进 session.delivery 帧（D5③），协议侧帧 state 无此值。
  */

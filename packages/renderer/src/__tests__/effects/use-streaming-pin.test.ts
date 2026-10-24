@@ -224,6 +224,44 @@ describe('useStreamingPin · 回归：streaming 变化与释放', () => {
   })
 })
 
+// ── [chat-flow-consistency D2] 双工作态并存期：全部 streaming turn 都入钉住集合 ──
+
+describe('useStreamingPin · D2 双工作态：多 streaming turn 并存期都恒挂载', () => {
+  it('双工作态过渡期（插话回流开新回合、旧回合未收尾）→ 两个 streaming turn 都入 pinnedIndexes', () => {
+    // idx=0 旧回合仍 streaming（D2：非末位不再短路），idx=2 新回合 streaming
+    const { pinnedIndexes } = setup({
+      items: [
+        turnItem(1, 'k0', true),
+        turnItem(2, 'k1', false),
+        turnItem(3, 'k2', true),
+      ],
+    })
+    expect(pinnedIndexes!.value).toEqual([0, 2])
+  })
+
+  it('streaming turn 与末尾 system item 共存 + 双工作态 → 只钉 turn 项下标', () => {
+    const { pinnedIndexes } = setup({
+      items: [
+        turnItem(1, 'k0', true),
+        turnItem(2, 'k1', false),
+        turnItem(3, 'k2', true),
+        systemItem('bash-1'),
+      ],
+    })
+    expect(pinnedIndexes!.value).toEqual([0, 2])
+  })
+
+  it('非 streaming 回合不入集合（与末位地位无关——isStreaming 是唯一判据）', () => {
+    const { pinnedIndexes } = setup({
+      items: [
+        turnItem(1, 'k0', false),
+        turnItem(2, 'k1', true),
+      ],
+    })
+    expect(pinnedIndexes!.value).toEqual([1])
+  })
+})
+
 // ── W2TC4-W2TC6: pinnedIndexes virtua 路径（多项固定输出，[pin-identity U1] 迁移为 turnKey 语义） ──
 
 describe('useStreamingPin · W2TC4-W2TC6: pinnedIndexes virtua 路径（editingTurnKey）', () => {

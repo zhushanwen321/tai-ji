@@ -32,8 +32,11 @@
  * 用 sessionList 恢复侧栏）。
  */
 import type { IMessageBroker } from '../interfaces.js'
+import type { IMessageBus } from './message-bus/message-bus.js'
 import type { SessionService } from './session/session-service.js'
 import type { IPiEngine } from './ports/pi-engine.js'
+// [chat-flow-consistency R1 裁决] handingOff 第四维置位/复位经 occupancy 转移原语（唯一写点）
+import { applySessionOccupancyTransition } from './session/event-interpreter.js'
 import { projectHandoffTurnEnd } from '../infra/pi/event-adapter.js'
 import { buildHandoffPrompt, sanitizeReply } from './handoff-prompt.js'
 import { wrapWithXmlTag } from './handoff-formatter.js'
@@ -51,6 +54,13 @@ function nonEmptyStr(v: string | undefined): string | undefined {
 interface HandoffServiceOpts {
   sessionService: SessionService
   broker: IMessageBroker
+  /**
+   * [chat-flow-consistency R1] occupancy state-topic 广播通道（session.occupancy 帧走
+   * bus.publish = 实时广播 + 快照写入/重订阅回放双路径，与转移原语的其余挂点同通路）。
+   * handingOff 维置位/复位经转移原语消费（缺省 null = 静默跳过广播，状态照写——与原语
+   * 其他挂点的 null-safe 惯例一致）。
+   */
+  messageBus?: IMessageBus | null
   /**
    * 广播 session 列表（与 session-message-handler 的 create/fork/delete/rename 一致）。
    *
@@ -234,6 +244,15 @@ export class HandoffService {
         reject: (err: Error) => finalize('reject', err),
         srcClient,
       })
+      // [chat-flow-consistency R1 裁决] handingOff 维置位（'handingOff-start'）：交接编排
+      // 在途 = occupancy 第四维权威态（与 turn 维正交——handoff turn 在跑时 turn=generating
+      // 与 handingOff=true 并存，互不替代）。置位与 inflight 注册同点（在途窗口起点）；
+      // laneOf 读该维挂 queued（交接期新消息暂存，交接完成后自动投出）。四维独立写无顺序
+      // 依赖（s9a：handingOff 先置、turn 后到无竞态）。复位唯一收束点 = cleanupInflight。
+      const startedSession = this.opts.sessionService.getSession(srcSessionId)
+      if (startedSession) {
+        applySessionOccupancyTransition(startedSession, this.opts.messageBus ?? null, 'handingOff-start')
+      }
     })
 
     // B1（wave:perf-w08 删除）：原此处广播 session.handoffStarted 到源 session 对话流。
@@ -396,6 +415,13 @@ export class HandoffService {
    * 清理 inflight 句柄（clearTimeout + clearInterval + detach + Map.delete）。
    * runHandoff 的 finally 块 + agentEndPromise 内 finalize（W4）+ abortHandoff 经
    * reject→finalize 三处调用，保证成功 / 失败 / 抛错 / abort / settle 路径都清理。
+   *
+   * [chat-flow-consistency R1] handingOff 维统一复位点：inflight 条目生命周期与「handoff
+   * 在途」精确同界（条目存在 ⇔ 源 session 正在跑 handoff turn），occupancy.handingOff 的
+   * 复位与条目移除同点收束——complete / abort / 超时 / 源 pi 退出（onExit 探测）全部 settle
+   * 路径必经 finalize→cleanupInflight，单点复位消灭散点漏复位（对应前端 handingOffSessions
+   * Set 的广播丢失悬挂缺陷，special-flows 缺陷 9）。源 pi 进程死亡链的四维全复位由
+   * session-service onSessionExit 的 'full-reset' 行兜底（本复位先行幂等无害）。
    */
   private cleanupInflight(srcSessionId: string): void {
     const entry = this.inflight.get(srcSessionId)
@@ -404,5 +430,11 @@ export class HandoffService {
     entry.detachExitWatcher()
     entry.detachListener()
     this.inflight.delete(srcSessionId)
+    // handingOff 维复位（'handingOff-end'）：session 已由 runHandoff 第 4 步 ensureActive，
+    // 内存实例必在；防御性判空（实例先被删的异常时序）安全跳过。
+    const srcSession = this.opts.sessionService.getSession(srcSessionId)
+    if (srcSession) {
+      applySessionOccupancyTransition(srcSession, this.opts.messageBus ?? null, 'handingOff-end')
+    }
   }
 }

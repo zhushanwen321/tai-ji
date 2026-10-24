@@ -42,7 +42,7 @@ const OPS_FIELDS = new Set([
   'prependHistory', 'applySubagentStreamDelta', 'finalizeSubagentStream',
   'applySubagentStreamChunk', 'applySubagentStreamState', 'requestSubagentStreamState',
   'sealSubagentStream', 'markSubagentStreamDegraded', 'clearSubagentChunkState', 'clearSubagentChunkStateForSession',
-  'applySubagentEntries', 'appendUser',
+  'applySubagentEntries', 'appendUser', 'bumpSubmitSeq',
   'applyMessageEvent', 'finalizeSession',
   'finalizeAllStreaming', 'resetTransientStates', 'addPendingSend',
   'clearPendingSend', 'markSessionError', 'setHandingOff',
