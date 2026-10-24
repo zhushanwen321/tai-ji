@@ -604,3 +604,23 @@ TAIJI_DEV_BACKGROUND=1 TAIJI_FAUX_SCRIPT=... TAIJI_EXTENSION_PATHS=... \
 5. **thinking 完成态在 reload 后只有 header + 预览**：`ThinkingRow` 收起是 `v-if`，reload 后不会
    自动展开；比对 thinking 全文需要点开。
 6. **label 不持久**（landing 建会话）：reload 断言里不要比 label（见 `session.create` Gotcha 3）。
+
+## chat.queue-delivery · 队列投递域（chat-flow-consistency 交付，2026-10-24）
+
+**新增能力点**（剧本在 `scenarios/`，登记见 [P0-P1-COVERAGE.md](P0-P1-COVERAGE.md) §五）：
+
+- **队列区原位编辑**（✎ 编辑）：锚定分区 `useQueueEditAnchor`（ADR-0049 #76）+ delivery.edit 回执四值 `delivered/unconfirmed/cancelled/not-found`（Q3 如实化）；× 清除 = delivery.cancel + 草稿回填（V9/V10 既有行为）。剧本 `p1-queue-inline-edit`。
+- **队列操作幂等**：编辑/取消/清除/重发/+N 展开收起/重试全部（resync）反复操作后 delivery.peek 投影一致。剧本 `p1-queue-ops-idempotent`。
+- **回合中插话与收起时机**：occupancy 四维状态机（shared `isActiveTurnPhase`）驱动——工作态回合不收起、计时持续；插话入队、回流自动开新回合。剧本 `p1-turn-interject-collapse`。
+- **settling 窗口投递**：ACTIVE_TURN_PHASES 含 settling，窗口内追问 steer 即时受理；确定性窗口 = dev 开关 `TAIJI_AGENT_DEV_SETTLING_DELAY_MS=2500`（runner 经 meta.env 透传）。剧本 `p1-settling-steer-delivery`。
+- **块序定稿重建**：message_end(assistant) 按载荷整条重建（id 锚定优先/位置兜底三级定位），reload ≡ live 块序。剧本 `p1-block-order-replay`。
+- **思考形态**：GLM end.content 全文思考 + 空思考条目轮，UI 思考块唯一性 + reload 等价。剧本 `p1-thinking-event-form`。
+- **断连自愈结果面**：WS 断连（routeWebSocket）重连后残留收尾 + 权威接管 + UI ≡ reload；D4 recoverStalledSession 专属触发面（终态帧处理链半途抛错）黑盒不可达，剧本 `p1-disconnect-selfheal` 按实测登记 notProvable。
+
+### Gotchas（本批实测新增）
+
+1. **协议直发 user 消息 live 气泡可能间歇缺失**（registry 守卫静默消费竞态，docs/todo/rpc-direct-send-user-bubble.md）——协议直发剧本断言 user 原文在场会假失败，改走 composer 真实用户路径（p1-block-order-replay 先例）或登记重试。
+2. **clientUuid 必须是 `u-<8-4-4-4-12 hex>` 合法 marker 身份段**（shared MSG_ID_TAG_RE）——lib randomUuid 已修；自拼形态会使 edit/cancel 的 marker 匹配失败（条目被收养为新条目 + unconfirmed）。
+3. **队列编辑替换输入用「聚焦 → Meta+a 全选 → 直接键入」**——禁「全选→Backspace」：空草稿边沿解除锚定 watch，Enter 走普通发送降级。
+4. **turn-meta 索引 1-based**（message-turns index=i+1）；dev 模式 DOM 保留组件模板注释，裸 substring 判「已工作/已工作过」恒误报（读渲染标签文本需过滤注释节点）。
+5. **建会即订阅 + 首个 submit 前的会话**：session.delivery topic 由 registry 的 onRuntimeCreated 创建事件补接线（2026-10-24 修复前需补一次 subscribe；旧产物剧本保留该绕行，帧断言仍有效）。
