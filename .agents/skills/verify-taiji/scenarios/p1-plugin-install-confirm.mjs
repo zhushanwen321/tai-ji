@@ -59,8 +59,14 @@ export const meta = {
   ],
 }
 
+// 实例 env（mock registry 证书 + 预载注入）：runner 以 cwd=worktree 根直跑本剧本，
+// process.cwd() 即 repo 锚（.agents 是跨 workspace 符号链接，import.meta 路径不可用）。
+// runner 在 import 完成后才读 meta.env，此处赋值时序成立。
+meta.env = registryEnv(process.cwd())
+
 export async function run(ctx) {
   const { protocol, ui, ev, log, dataDir } = ctx
+  const page = await ctx.instance.page()
   const uncovered = []
   const gotchas = [
     'registry 地址注入走 NODE_OPTIONS --require 预载（NPM_* 不在 main→runtime env 白名单）；tarball 走 HTTPS localhost（validateUrlHost 拒非 https 与私网 IP host，localhost 含字母可过）',
@@ -97,7 +103,7 @@ export async function run(ctx) {
   ])
   ev.step({ step: 'catalog.seed', channel: 'C', exitCode: 0, stats: { entries: 1 } })
 
-  await openPluginFlow(ui)
+  await openPluginFlow(ui, page)
   await ui.expectVisible('testid=plugin-family-grid')
   await ui.click('testid=plugin-family-card')
   await ui.expectVisible('testid=plugin-install-confirm', { timeoutMs: 60_000 })
@@ -105,7 +111,7 @@ export async function run(ctx) {
 
   const confirmShot = await ui.screenshot('s27-confirm-card')
   ev.attach('s27-confirm-card', confirmShot)
-  const fields1 = await assertConfirmFields(ui, MANIFEST)
+  const fields1 = await assertConfirmFields(ui, page, MANIFEST)
   ev.attach('s27-confirm-card-fields', JSON.stringify(fields1, null, 2))
   ev.assert('A: 确认卡全量展示 capabilities 与 readPaths（与 fixture manifest 同源）', true, {
     channel: 'A',
@@ -142,15 +148,15 @@ export async function run(ctx) {
   // 取消：清暂存 + 退回家族卡
   await ui.click('testid=plugin-install-cancel')
   await ui.expectVisible('testid=plugin-family-grid', { timeoutMs: 15_000 })
-  const stagingGone = await pollUntil(
+  const stagingCleaned = await pollUntil(
     () => fs.existsSync(path.join(stagingDir, PLUGIN_ID)),
     (exists) => !exists,
     { timeoutMs: 10_000 },
   )
-  ev.assert('C: 取消后暂存目录已清理', !fs.existsSync(stagingGone ? path.join(stagingDir, PLUGIN_ID) : stagingDir), {
+  ev.assert('C: 取消后暂存目录已清理', !stagingCleaned, {
     channel: 'C',
     expected: '.staging/plugin-confirm-demo 不存在',
-    actual: fs.existsSync(path.join(stagingDir, PLUGIN_ID)) ? '暂存残留' : '已清理',
+    actual: stagingCleaned ? '暂存残留' : '已清理',
   })
   ev.assert('C: 取消后正式目录仍不出现', !fs.existsSync(targetDir), {
     channel: 'C',
@@ -162,7 +168,7 @@ export async function run(ctx) {
   // ── 路径②：包名直装 → 确认卡 → 确认 → 提交激活 ─────────────────
   await directInstallToConfirm(ui, PKG)
   ev.step({ step: 'prepare.via-direct-spec', channel: 'A', exitCode: 0, stats: { spec: PKG } })
-  const fields2 = await assertConfirmFields(ui, MANIFEST)
+  const fields2 = await assertConfirmFields(ui, page, MANIFEST)
   ev.attach('s27-direct-confirm-fields', JSON.stringify(fields2, null, 2))
   ev.assert('A: 直装路径确认卡同一知情面', true, {
     channel: 'A',

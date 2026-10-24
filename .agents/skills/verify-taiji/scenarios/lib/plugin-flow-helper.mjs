@@ -16,12 +16,13 @@
 /**
  * 打开 Provider 页并进入插件接入流程（家族卡段）。
  * settings 模态若未打开，先点 sidebar-settings。
+ * @param page 原始 Playwright page（runner 的 ui 代理把所有属性都变成异步方法，
+ *   裸 locator 需求走 ctx.instance.page()）
  */
-export async function openPluginFlow(ui, opts = {}) {
+export async function openPluginFlow(ui, page, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 20_000
   // 设置页可能已停留在 provider 页（重复进入场景）——按可见性判定，不盲点
-  const providerVisible = await ui
-    .page
+  const providerVisible = await page
     .locator('[data-testid="settings-nav-provider"]')
     .first()
     .isVisible()
@@ -52,7 +53,7 @@ export async function directInstallToConfirm(ui, packageSpec, opts = {}) {
  * 断言确认卡知情面字段（逐项文本含断言；items 顺序按渲染序）。
  * 返回各字段的实际文本（供证据 attach）。
  */
-export async function assertConfirmFields(ui, { capabilities = [], readPaths = [], permissions = [] }) {
+export async function assertConfirmFields(ui, page, { capabilities = [], readPaths = [], permissions = [] }) {
   const actual = {}
   const fieldAsserts = [
     ['plugin-confirm-capabilities', 'capabilities', capabilities],
@@ -60,7 +61,7 @@ export async function assertConfirmFields(ui, { capabilities = [], readPaths = [
     ['plugin-confirm-permissions', 'permissions', permissions],
   ]
   for (const [testid, label, expectedItems] of fieldAsserts) {
-    const loc = ui.page.locator(`[data-testid="${testid}"]`)
+    const loc = page.locator(`[data-testid="${testid}"]`)
     const count = await loc.count()
     if (expectedItems.length === 0 && count === 0) {
       actual[label] = '(未声明，字段不渲染)'

@@ -34,7 +34,7 @@ seedPluginFixtures(dataDir0, [
     permissions: ['plugin.commands.register', 'providers.write', 'plugin.event'],
     activateBody: `
   await api.commands.register({ id: 'ping', title: 'ping' }, (args) => ({ pong: true, echo: args ?? null }))
-  await api.providers.write({ providerId: 'smoke-echo-prov', apiKey: '${ALPHA_KEY}', displayName: 'Smoke Echo Provider', models: [{ id: 'smoke-model' }] })
+  await api.providers.write({ providerId: 'echo-prov', apiKey: '${ALPHA_KEY}', displayName: 'Smoke Echo Provider', models: [{ id: 'smoke-model' }] })
 `,
   }),
 ])
@@ -44,7 +44,7 @@ seedCatalogCache(dataDir0, [
     packageName: '@smoke/plugin-echo',
     displayName: 'Smoke Echo (catalog)',
     version: '0.1.0',
-    family: { id: 'smoke-echo', displayName: 'SmokeEcho', vendor: 'verify', credentialSource: 'oauth', modelCount: 1 },
+    family: { id: 'echo', displayName: 'SmokeEcho', vendor: 'verify', credentialSource: 'oauth', modelCount: 1 },
   }),
 ])
 
@@ -81,14 +81,14 @@ export async function run(ctx) {
   await pollUntil(() => {
     try {
       const models = JSON.parse(fs.readFileSync(path.join(dataDir, 'agent', 'models.json'), 'utf8'))
-      return Boolean(models.providers?.['smoke-echo-prov'])
+      return Boolean(models.providers?.['echo-prov'])
     } catch {
       return false
     }
-  }, { timeoutMs: 20_000, label: 'models.json 落盘 smoke-echo-prov' })
+  }, { timeoutMs: 20_000, label: 'models.json 落盘 echo-prov' })
   const models = JSON.parse(fs.readFileSync(path.join(dataDir, 'agent', 'models.json'), 'utf8'))
-  ev.assert('③ C: providers.write 落盘 models.json（本命名空间条目 + apiKey）', models.providers?.['smoke-echo-prov']?.apiKey === ALPHA_KEY, {
-    channel: 'C', expected: `apiKey=${ALPHA_KEY}`, actual: JSON.stringify(models.providers?.['smoke-echo-prov'] ?? null).slice(0, 200),
+  ev.assert('③ C: providers.write 落盘 models.json（本命名空间条目 + apiKey）', models.providers?.['echo-prov']?.apiKey === ALPHA_KEY, {
+    channel: 'C', expected: `apiKey=${ALPHA_KEY}`, actual: JSON.stringify(models.providers?.['echo-prov'] ?? null).slice(0, 200),
   })
 
   // ④ 清单缓存种子 → listAvailable

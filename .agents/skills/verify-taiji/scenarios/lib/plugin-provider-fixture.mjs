@@ -86,7 +86,7 @@ export function seedPluginProviderFixture(dataDir) {
  * 实例名/数据目录都在 verify-d3-s1 家族内，与常驻实例隔离（SKILL §1）。
  */
 export async function launchFixtureInstance({ repo, ev, tag }) {
-  const { createInstance } = await import('../scripts/lib/instance.mjs')
+  const { createInstance } = await import('../../scripts/lib/instance.mjs')
   const dataDir = path.join(os.homedir(), '.taiji-dev', `verify-d3-s1-${tag}-${Date.now().toString(36)}`)
   const instance = createInstance({ repo, name: `verify-d3-s1-${tag}`, dataDir, background: true })
   const seeded = seedPluginProviderFixture(dataDir)
