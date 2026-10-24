@@ -7,6 +7,9 @@
 - `plugin.statusbar`（P2，**现行实现已退役**，见下）
 - `plugin.mountpoints`（P2）
 
+另有文末「Provider 插件化」一节：2026-10-24 D3 交付的插件 Provider 接入功能面（清单驱动家族卡 /
+安装生命周期 / 凭据命名空间 / 条目扩展区交互），15 个场景剧本索引、共享设施与坑登记见该节。
+
 > **先分清三个「扩展」概念**，本文件只讲第 3 个：
 > 1. **pi extension**（`@zhushanwen/pi-*`，跑在 pi 子进程内，注册工具/slash 命令）→ 归
 >    `extension.load` / `interaction.*`；
@@ -341,3 +344,81 @@ bridge 的 `plugin:statusBarUpdate` / `plugin:statusSetUpdate` / `extension:stat
 - `contribution-unavailable` 的 reason 是运行时中文拼接串（weak-anchor）：断言只做
   「包含 `挂载点`」+ testid，不做全等；i18n 化之后要放宽。
 - 别把「pi extension 的 tools 不可用」归到这里——那是 `extension.load` 的范围。
+
+---
+
+## Provider 插件化 · 插件 Provider 接入（2026-10-24 D3 交付登记）
+
+上面四节是插件体系的既有四个 capability id。本节登记 provider-plugin-access 交付新增的插件 Provider
+功能面：sandbox 插件经远程清单出现在 Provider 页「插件 Provider」家族卡，安装确认后以自身命名空间向
+`models.json` 写 provider 条目（`providers.write`），并在条目扩展区挂载位（`provider.detail-extra` /
+`provider.authorize`，ProviderRowCard 容器内消费）推送 guiTree 交互树（text-input / action-bar /
+凭据状态标记）。
+
+涉及 capability：`plugin.list` `plugin.toggle`（既有，见上）+ `plugin.invoke`（宿主 → 插件方法调用）、
+`plugin.listAvailable`（远程清单读取，fail-safe 链见坑 3）。后两个 id 是 D3 剧本 `covers` 的实测引用，
+**尚未录入 API-CONTRACT §6**，登记随维护 pass 补录。
+
+### 剧本索引（15 个，全部实跑交付；verdict 证据与矩阵行见 P0-P1-COVERAGE.md 第六节）
+
+| 剧本 | 场景 | verdict（断言数） | 覆盖要点 |
+|---|---|---|---|
+| `p1-plugin-a1-family-cards` | A1 家族卡 | pass（16） | 「添加供应商 ▾」三入口并列（`add-menu-builtin/custom/plugin`）；`plugin.listAvailable` 清单与本地已装比对 → 家族卡两态（已装徽标 / 「需要先安装插件」引导）；卡数 = 清单条目数 |
+| `p1-plugin-a5-no-status-guessing` | A5 状态默认态 | pass（15） | 从不上报状态的插件条目零标记（`provider-plugin-status` 零 DOM 条件轮询）+ 状态点非失效配色 + 常驻「重新授权」按钮（D5） |
+| `p1-plugin-a6-detail-sections` | A6 条目两区 | pass（15） | 唯一 `provider-detail-extra-boundary` 分界；宿主字段不溢入插件区、插件哨兵串不溢入宿主区；`plugin.ui.snapshot` 与渲染同源 |
+| `p1-plugin-a7-text-input` | A7 输入回传 | pass（14） | `gui-text-input-field-<id>` 原生 input change 即回传；确认命令（`gui-action-bar-item-<id>` → `plugin.executeCommand`）触发重推；插件重推 value 回显覆盖本地镜像（输入状态保持） |
+| `p1-plugin-crash` | A13 崩溃隔离 | pass（19） | SIGKILL sandbox fork → `plugin:crashed` 广播 + `plugin.list status=crashed` + crash journal 三证；builtin 邻居与宿主 RPC 不受影响；崩溃 toast 呈现（4s 消失窗）；管理面对 crashed 插件零呈现的缺口照录（不判失败） |
+| `p1-plugin-a14-install-neighbors` | A14 邻居不变量（连续装卸 + 重启） | pass（51） | 安装/卸载 5 轮（中途重启）：邻居 provider 条目与凭据零污染、无孤儿条目（命名空间前缀全清含 apiKey）、插件目录 / `.staging` / installed.json 无残留、启动日志无 warn 洪水 |
+| `p1-plugin-a26-update-chain` | A26 更新链 | degraded（28） | 清单版本翻转 → 家族卡更新徽标两级提示 → 两段式确认提交：磁盘/注册表/激活面换新、条目凭据保留；degraded 根因 = 坑 4①（更新后旧模块缓存复用，「激活必失败包 → 旧版本幸存」路径对已激活插件不可达） |
+| `p1-plugin-a23a-dual-artifact` | A23a 双产物闭环 | pass（24） | 清单条目 `piExtensionVersion` 双产物：安装 → 插件目录 + installed.json + pi 扩展（npm 布局）+ settings.json packages[] + models.json 条目五处落盘；`plugin.uninstall` 卸载五处完整清除 |
+| `p1-plugin-install-confirm` | A27 安装确认知情面 | pass（21） | 确认卡提交前全量展示 capabilities 与 readPaths（展示物与暂存解压物 manifest 同源核对）；未确认不落盘（取消清暂存、正式目录不出现）；清单安装与包名直装双路径 |
+| `p1-plugin-a15-manifest-unreachable` | A15 清单不可达 | pass（17） | fail-safe 链两态：曾拉取后远程不可用 → 回退缓存渲染；从未拉取（删缓存文件）→ 空态 + 重试入口；两态下既有 provider 管理均不受影响 |
+| `p1-plugin-a16-invalid-tree` | A16 非法树降级 | pass（16） | 插件推送含 3 类非法组件的 guiTree：快照保真（runtime 不改写不拒绝）→ 渲染端降级（未知 type / 裸字符串 → ansi-text 序列化；props 非对象单条丢弃 + console.warn）不断链、不白屏；其他 provider 条目照常 |
+| `p1-plugin-a17-status-report` | A17 状态上报 | pass（18） | 凭据状态双通道：`plugin:event`（channel `provider.credentialStatus`）推送 → 标记出现；推送丢失后重新展开拉取（invoke getStatus）收敛到新文案；未上报条目零标记（S5 语义同页复认） |
+| `p1-plugin-a25-mount-isolation` | A25 同挂载位隔离 | pass（16） | 双插件交替推送：快照分区键 `global:<mountId>:<pluginId>` 正交；行卡只渲染自己插件的分区；交替重推互不覆盖，UI 与快照同源 |
+| `p1-plugin-a21-credential-deny` | A21 凭据越权 | pass（16） | 跨命名空间回读 → NAMESPACE_MISMATCH；未声明 network.http 能力 → PERMISSION_DENIED（能力前提先于命名空间检查）；正向对照（自己命名空间 + 已声明能力）成功回读；两个拒绝 reply 均无凭据外泄 |
+| `p1-plugin-a19-oauth-interrupt` | A19 OAuth 中断 | pass（30） | 宿主 OAuth 通道（非插件授权 UI）三段：关授权页取消可重发起、浏览器回调拒绝 auth.error 可理解、回调端口 53692 预占文案含恢复动作；每段无残留监听、auth.json 无凭据残留 |
+
+A10b（provider 写侧回归）复用既有剧本 `p0-settings-provider`，不另立剧本；D3 复跑证据见
+P0-P1-COVERAGE.md P0-13 行。
+
+### 共享设施（写插件 Provider 剧本前必读）
+
+| 设施 | 作用 |
+|---|---|
+| `scenarios/lib-plugin-fixtures.mjs` | launch 前 seed：fixture 插件目录写入 `<dataDir>/plugins/`（`PluginRegistry.scan` 发现，external 一律 sandbox fork）+ 清单 envelope 写入 `<dataDir>/remote-config/v2-plugins.json`（见坑 3）；`pluginFixture` 生成零 import 纯 ESM 插件（动作全走 ctx.api 的 RPC） |
+| `scenarios/lib/plugin-provider-fixture.mjs` | fixture 实例装配（`launchFixtureInstance`）、多插件 seed、权限预批（`plugin.approvePermissions` 落盘后免审批）、Provider 页打开与条目展开驱动 |
+| `scenarios/lib/plugin-flow-helper.mjs` | 插件 Provider 流程 UI 助手：`openPluginFlow` / `directInstallToConfirm` / `assertConfirmFields` / `closePluginFlow`（设置 → Provider → 添加供应商 → 家族卡 / 直装 → 确认卡的锚点链见文件头） |
+| `scenarios/lib/mock-npm-registry.mjs` | 本机 HTTPS mock npm registry（固定端口 47820，自签证书）：packument + tarball 两端点；registry 地址经 NODE_OPTIONS 预载注入（NPM_* 不在 main→runtime env 白名单），证书经 NODE_EXTRA_CA_CERTS 信任 |
+| `fixtures/plugin-provider/` | demo 插件夹具（`demo-wool`：getStatus 恒 null、从不 events.report——A5/A6/A7 的「未上报」契约源）与 demo 清单 |
+| `fixtures/plugin-pkgs/` | npm tarball 夹具（`npm pack` 产物）、自签证书、registry 预载脚本、wool-manifest 本地清单（A23a 经 opt-in fetch 拦截折到本地文件，走真实版本配对校验） |
+
+### Gotchas（D3 实跑登记，写插件 Provider 剧本前必读）
+
+1. **action-bar 命令执行器是容器级 provide，不是 app 级**：条目扩展区 action-bar 的命令活在插件
+   fork（不在宿主命令表），`ProviderRowCard.vue` 在容器内
+   `provide(ACTION_EXECUTOR_KEY, createPluginActionExecutor(...))` 直发 `plugin.executeCommand`，
+   覆盖 app 级 pi 扩展命令执行器（源码注释同文）。插件树内 action-bar 断言失败先查容器 provide
+   是否随条目组件生效，不要去 app 级命令表找插件命令。
+2. **fixture 插件 manifest 不声明 `permissions` 时 `providers.write` 被拒（激活必败）**：sandbox
+   插件权限走 `plugin-permission-map` 直申通道，manifest `permissions` 必须声明完整 RPC 方法名
+   （如 `providers.write`）；不声明 = 该 RPC 恒拒（PERMISSION_DENIED，fail-closed），activate 即调
+   写侧的 fixture 会激活失败。声明了 = 首次激活停在权限审批门，需 `plugin.approvePermissions`
+   批准（批准落盘 `permissions.json`，后续轮次与重启后免审批）——装配序列见
+   `lib-plugin-fixtures.mjs` 的 `pluginFixture` / `waitPluginActive`。
+3. **清单缓存 seed 形态（`remote-config/v2-plugins.json` 的 checkedAt 4h 节流窗）**：清单读取链
+   （`remote-config-fetch`）每次先读 `<dataDir>/remote-config/v2-plugins.json` 缓存 envelope，
+   `checkedAt` 在 4h 节流窗内不发网络直接返回缓存。推论：launch 前 seed 清单 = 确定性注入
+   （runtime 直读缓存，不发网络）；把 `checkedAt` 拨旧到窗外 = 强制走网络。当前 GitHub main 尚无
+   `configs/remote/v2-plugins.json`（404 与网络失败同走 fail-safe 回退分支）——远程清单发布后，
+   依赖「远程 404」作断网前提的剧本（A15）会按剧本头注释的演化路径改用网络层手段。
+4. **已知产品缺陷两条（D3 实跑登记，产品代码未改动；全文见 skill-data 侧
+   `provider-plugin-access.acceptance/ISSUES.md`）**：
+   ① **（P1）插件更新提交后新模块代码不生效**——重激活复用旧 sandbox fork（`assignProcess` 对
+   活跃进程直接复用）+ 同 URL ESM 模块缓存（`handleLoad` 的 `await import` 命中缓存），更新后
+   磁盘/注册表/激活面已是新版本，但旧代码继续执行：版本显示与实际行为漂移，且「激活必失败的
+   更新包 → 旧版本幸存」回滚路径对已激活插件的更新不可达（A26 剧本 degraded 判定的根因）；
+   ② **（P2）`plugin.listAvailable` 的 stale/available 判据未透出 RPC**——service 层已算出
+   `{ available, stale, reason }`，runtime / core / renderer 逐层丢弃只留 `plugins` 数组：设计
+   「清单可能不是最新」提示无数据源、「拉取失败」与「确实为空」在 UI 同为空态块（A15 剧本的
+   相关断言列 notProvable 并指向本条）。
