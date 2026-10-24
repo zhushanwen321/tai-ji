@@ -231,10 +231,12 @@ export async function run(ctx) {
     channel: 'A', expected: `草稿含 ${S_Q2}`, actual: draft1.slice(0, 120),
   })
 
+  // 全选后直接键入（不按 Backspace）：选区替换在首个字符输入时完成，草稿不经「空」边沿。
+  // 若先删空再输入，会触发 useQueueEditAnchor「清空草稿解除锚定」watch（Q4 路径 2）→
+  // 锚定被清 → Enter 走普通新消息降级（产品行为正确，驱动不得造出该形态）。
   await ui.click('role=textbox')
   await ui.press('Meta+a')
-  await ui.press('Backspace')
-  await ui.type('role=textbox', MSG_EDIT)
+  await (await instance.page()).keyboard.type(MSG_EDIT)
   await ui.press('Enter')
 
   await ui.expectGone('testid=queue-edit-banner', { timeoutMs: 15_000 })
@@ -258,8 +260,8 @@ export async function run(ctx) {
   ev.step({ step: 'queue.edit', channel: 'B', exitCode: 0, stats: { editedId: e2, order: editIds } })
 
   const peek2 = await p.call('delivery.peek', { sessionId: sid, clientUuid: e2 }, { timeoutMs: 30_000 })
-  ev.assert('B: delivery.peek 复核编辑后全文', peek2.found === true && String(peek2.content ?? '').includes(S_EDIT), {
-    channel: 'B', expected: `{found:true, content 含 ${S_EDIT}}`, actual: JSON.stringify(peek2).slice(0, 200),
+  ev.assert('B: delivery.peek 复核编辑后全文（替换语义：含新哨兵、不含原哨兵）', peek2.found === true && String(peek2.content ?? '').includes(S_EDIT) && !String(peek2.content ?? '').includes(S_Q2), {
+    channel: 'B', expected: `content 含 ${S_EDIT} 且不含 ${S_Q2}`, actual: JSON.stringify(peek2).slice(0, 200),
   })
   const html2 = await pollHtml(ui, (h) => h.includes(`queue-item-${e2}`) && h.includes(S_EDIT))
   ev.assert('A: 队列行原位显示编辑后文本', html2.includes(`queue-item-${e2}`) && html2.includes(S_EDIT) && !html2.includes(S_Q2), {

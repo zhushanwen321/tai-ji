@@ -145,7 +145,7 @@ async function pollHistory(p, sid, predicate, { timeoutMs = 150_000, intervalMs 
 }
 
 export async function run(ctx) {
-  const { protocol: p, ev, log, ui, repo, dataDir } = ctx
+  const { protocol: p, ev, log, ui, instance, repo, dataDir } = ctx
   const uncovered = []
   const gotchas = [
     '折叠口径在 QueueBubble 内经 foldQueueRows 计算：收起显 3 行；点 +N 全显（overflowCount 归零 → queue-expand 消隐、queue-collapse 出现）',
@@ -242,10 +242,10 @@ export async function run(ctx) {
   ev.assert('A: E2 编辑态——banner 出现 + peek 预填原文', draftE2.includes(S_E2), {
     channel: 'A', expected: `草稿含 ${S_E2}`, actual: draftE2.slice(0, 120),
   })
+  // 全选后直接键入（不 Backspace 清空——空草稿边沿会解除编辑锚定，见 p1-queue-inline-edit 同注）
   await ui.click('role=textbox')
   await ui.press('Meta+a')
-  await ui.press('Backspace')
-  await ui.type('role=textbox', MSG_EDIT2)
+  await (await instance.page()).keyboard.type(MSG_EDIT2)
   await ui.press('Enter')
   await ui.expectGone('testid=queue-edit-banner', { timeoutMs: 15_000 })
   ev.assert('A: E2 编辑提交后 banner 消失', true, { channel: 'A', expected: '消失', actual: '已消失' })
