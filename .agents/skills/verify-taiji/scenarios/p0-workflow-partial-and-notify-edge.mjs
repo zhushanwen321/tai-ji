@@ -12,21 +12,28 @@
  *     零交错竞态）：成功成员 mock-sub-a 队列 = [structured-output 步, stop 收尾步]（干净收尾
  *     → delivered）；失败成员 mock-sub-b 空队列 = 首请求即「剧本耗尽」404（真实 provider 错误
  *     形态 → failed，cause=provider.protocol_unsupported）。run 终局派生 partially_succeeded。
- *   段 2（A6 场景 6）——主队 step3 派发 subagents 双成员批量（one-shot 域，成员继承
- *     engineDefaults.pi = mock-sub-a 共享队列）、step4 收尾、step5-7 通知触发轮/闲置备用；
- *     成员队 = [SO_A, SO_B, stop×4]：均衡交错 → 双 delivered；spawn 斜交（一成员第二请求
- *     先于另一成员首请求）→ 后到成员 stop 收尾无 SO 交付 → agent.no_deliverable。
- *     两种形态都恒产 2 条同组完成通知（失败轮应答如实，§3.3.7①），A6 断言对两者成立。
- *   段 2 开始前条件等待主队游标 ≥3（waitMainQueueConsumed，fail-fast 形态同范本）。
+ *   段 2（A6 场景 6）——主队 step3 在一个 assistant 步里发两条 subagent_start（background
+ *     单成员，设计场景 6②「2 个近同时完成的 background 成员」原文形态）、step4 收尾、
+ *     step5-7 通知触发轮/闲置备用。成员对象带成员级 model：成员 A 走 mock-sub-a、成员 B 走
+ *     mock-sub-c，各 1 步文本终局 → 双成员确定性完成 → 2 条同组（subagent-bg-notify）
+ *     完成通知同窗到达。
+ *     **为什么不用 subagents 批量**：批量 = 内置 fan-out 模板 = workflow origin，而
+ *     notify-host.toNotifyRecord 对 `record.origin === "workflow"` 一律返回 undefined
+ *     （单漏斗 origin gate 全静默）——fan-out 成员轮应答放行判据缺口已登记 u4 deviations，
+ *     批量成员构造性不发通知（2026-10-24 a2a6 首跑实测 0 条 + 源码核实）。
+ *   段 2 开始前条件等待主队游标恰为 3（waitMainQueueConsumed，fail-fast 形态同范本）。
  *
- * 断言通道：B（getWorkflows / message.customStart 通知事件）+ C（workflow runs record journal、
- * mock.requests 成员模型请求 = 孙进程真的打到 mock 的铁证）。本剧本刻意不碰 UI。
+ * 断言通道：B（getSubagents / message.customStart 通知事件）+ C（workflow runs record journal、
+ * subagents records 树、mock.requests 成员模型请求 = 孙进程真的打到 mock 的铁证）。
+ * 本剧本刻意不碰 UI。
  *
  * 通知消费表面的可观测锚（源码核实）：
  *   - 通知注入 = pi custom message（customType=subagent-bg-notify）→ runtime event-adapter
  *     广播 `message.customStart`（payload 带 sessionId/customType/details）→ protocol.events
  *     带 receivedAt（剧本进程墙钟）；
- *   - 成员轮终锚 = record journal agent-settled 帧的 ts（EventEnvelope，引擎写侧 epoch ms）；
+ *   - 轮终锚 = 通知 details.endedAt（notify-host.toNotifyRecord 在派生视图边界物化：
+ *     running 载荷 `endedAt = snap.endedAt ?? Date.now()`——构造时刻 ≈ 轮终时刻；
+ *     旧攒批窗会把它与投递时刻拉开 60s+，故 delta 是该机制的判据）；
  *   - 攒批窗退役后 deliver 边沿即投：每条 deliver 同步经 pumpDirect 泵出（extensions/shared/
  *     delivery-port/src/delivery-port.ts routeAcceptedDelivery），两条独立到达的通知恒产两条
  *     单条消息；真 {batch:true} 批消息只产自保留边界路径（recover 重放 / collectRelease 直通 /
@@ -42,14 +49,16 @@ const WORKFLOW_SCRIPT = path.join(SKILL_ROOT, 'fixtures', 'workflows', 'fanout-p
 const MAIN_MODEL = 'mock-1'
 const SUB_MODEL = 'mock-sub-a'
 const SUB_MODEL_B = 'mock-sub-b'
+/** 段 2 第二成员专属模型（成员级 model 覆盖 → 独立 per-model 游标，双成员零交错竞态）。 */
+const SUB_MODEL_C = 'mock-sub-c'
 /** 段 1 成功成员的交付 canary（structured-output summary）。 */
 const PARTIAL_OK_CANARY = 'PARTIAL_MEMBER_OK_CANARY'
-/** 段 2 双成员的交付 canary（哪个成员拿哪步不定，断言只要求至少一个标记落 record）。 */
+/** 段 2 双成员的交付 canary（各成员独立队列，两个标记都必须落 record/通知）。 */
 const NOTIFY_EDGE_CANARY_A = 'NOTIFY_EDGE_MEMBER_A_CANARY'
 const NOTIFY_EDGE_CANARY_B = 'NOTIFY_EDGE_MEMBER_B_CANARY'
 
 /**
- * 段 1 成功成员队列（mock-sub-a，本段独立游标）：SO 交付步 + stop 收尾步。
+ * 段 1 成功成员队列（mock-sub-a）：SO 交付步 + stop 收尾步。
  * 成员轮成败只产自引擎收尾边沿（pi-subagent-cli output-collector.ts collectOutcome）：
  * SO 调用后引擎还会继续请求，必须有 stopReason:'stop' 步让引擎干净停
  * （engineStopReason=stop → delivered）；纯 toolUse 队列会消费到耗尽 404 → 收尾错误 → failed。
@@ -59,19 +68,11 @@ const partialOkQueue = [
   { stopReason: 'stop' },
 ]
 /**
- * 段 2 成员队列（mock-sub-a，两成员共享游标）：前 2 位全 SO、后 4 位全 stop。
- * 均衡交错（A1,B1,A2,B2）→ 双成员各 [SO, stop] 双 delivered；spawn 斜交（一成员的
- * 第二请求先于另一成员首请求）→ 斜交成员连吃 2 个 SO 后 stop 收尾 delivered，后到成员
- * 首请求即 stop → 无 SO 交付 → agent.no_deliverable 失败。两种形态都恒产 2 条同组通知。
+ * 段 2 成员队列（每成员独立 model 队列）：background 单成员是 chat 形态（无 schema），
+ * 一轮文本回复即干净收尾（stopReason stop）→ 轮终 → 完成通知。
  */
-const notifyEdgeMemberQueue = [
-  { toolCalls: [{ name: 'structured-output', args: { summary: NOTIFY_EDGE_CANARY_A } }], stopReason: 'toolUse' },
-  { toolCalls: [{ name: 'structured-output', args: { summary: NOTIFY_EDGE_CANARY_B } }], stopReason: 'toolUse' },
-  { stopReason: 'stop' },
-  { stopReason: 'stop' },
-  { stopReason: 'stop' },
-  { stopReason: 'stop' },
-]
+const notifyEdgeQueueA = [{ text: `${NOTIFY_EDGE_CANARY_A}`, stopReason: 'stop' }]
+const notifyEdgeQueueB = [{ text: `${NOTIFY_EDGE_CANARY_B}`, stopReason: 'stop' }]
 
 export const meta = {
   id: 'p0-workflow-partial-and-notify-edge',
@@ -109,27 +110,47 @@ export const meta = {
         { text: 'partial workflow 已派发，等待收尾通知（PARTIAL-WF-DISPATCHED）。', stopReason: 'stop' },
         { text: 'partial-parent-notified', stopReason: 'stop' },
         {
-          text: '批量派两个一次性后台成员（段 2）：',
+          text: '派两个后台成员（段 2）：',
+          // 同一 assistant 步两条 subagent_start = 一次 turn 内注销 ≥2 个同组 pending 的
+          // 制造面（设计场景 6②「2 个近同时完成的 background 成员」原文形态）。
           toolCalls: [
             {
-              name: 'subagents',
+              name: 'subagent_start',
               args: {
-                tasks: ['通知边沿 A 路：报出你剧本里的 canary', '通知边沿 B 路：报出你剧本里的 canary'],
+                task: '通知边沿 A 路：报出你剧本里的 canary',
+                slug: 'notify-edge-a',
+                model: `mockllm/${SUB_MODEL}`,
+                fork: false,
+              },
+            },
+            {
+              name: 'subagent_start',
+              args: {
+                task: '通知边沿 B 路：报出你剧本里的 canary',
+                slug: 'notify-edge-b',
+                model: `mockllm/${SUB_MODEL_C}`,
+                fork: false,
               },
             },
           ],
           stopReason: 'toolUse',
         },
-        { text: '批量已派发，等待成员完成通知（NOTIFY-EDGE-BATCH-DISPATCHED）。', stopReason: 'stop' },
+        { text: '两个后台成员已派发，等待完成通知（NOTIFY-EDGE-BATCH-DISPATCHED）。', stopReason: 'stop' },
         { text: 'batch-parent-notified-1', stopReason: 'stop' },
         { text: 'batch-parent-notified-2', stopReason: 'stop' },
+        { text: 'batch-parent-notified-3', stopReason: 'stop' },
         { text: 'parent-idle-final', stopReason: 'stop' },
       ],
-      // 段 1 成功成员 + 段 2 两成员共享 mock-sub-a 游标（段 2 在段 1 之后顺序消费）；
-      // mock-sub-b 是段 1 失败成员的专属队列：空队列 = 首请求即 404 耗尽（失败注入点）。
-      [`mockllm/${SUB_MODEL}`]: [...partialOkQueue, ...notifyEdgeMemberQueue],
+      // 段 1 成功成员 + 段 2 成员 A 共享 mock-sub-a 游标（段 2 在段 1 之后顺序消费）；
+      // mock-sub-b 是段 1 失败成员的专属队列：空队列 = 首请求即 404 耗尽（失败注入点）；
+      // mock-sub-c 是段 2 成员 B 的专属队列（成员级 model 隔离，零交错竞态）。
+      [`mockllm/${SUB_MODEL}`]: [...partialOkQueue, ...notifyEdgeQueueA],
       [`mockllm/${SUB_MODEL_B}`]: [],
+      [`mockllm/${SUB_MODEL_C}`]: [...notifyEdgeQueueB],
     },
+    // 成员模型必须全部注册进 provider 模型清单 + enabledModels（ensureLlm 按 actors 写
+    // models.json；显式 model 会过 assertModelInCatalog 目录校验，缺一即工具拒单）。
+    models: [MAIN_MODEL, SUB_MODEL, SUB_MODEL_B, SUB_MODEL_C],
     mainModel: MAIN_MODEL,
     subModel: SUB_MODEL,
   },
@@ -139,13 +160,16 @@ export const meta = {
     'A2③ record journal run-settled 帧 outcome=partially_succeeded 且 failedMembers 恰含 1 条 {taskIndex, cause}（cause 为 class.kind 点拼形态，预期 provider.protocol_unsupported）',
     'A2③ 成员结算对账：agent-settled 恰 1 × done + 1 × failed；成功成员 canary 落 record',
     'A2④ 铁证：mock 收到 ≥2 条成员模型有效请求（200）+ 恰 1 条失败成员的耗尽 404（失败注入确实命中 provider 通道）',
-    'A6⑤ 即时单条：成员轮终（journal agent-settled ts）→ 完成通知事件到达（message.customStart receivedAt）时差 ≤1s',
-    'A6⑥ 同组批注到达：≥2 条同组（subagent-bg-notify）通知在同一观测窗到达，每条 details 为可解析的单条形态（消费表面不因窗口删除报错）',
+    'A6 派发受理：同一 assistant 步的两条 subagent_start 都被受理（getSubagents 出现 ≥2 条 record，模型 = 各自派发参数）',
+    'A6⑤ 即时单条：轮终（通知 details.endedAt）→ 完成通知事件到达（message.customStart receivedAt）时差 ≤1s（2 条通知各自满足）',
+    'A6⑥ 同组批注到达：≥2 条同组（subagent-bg-notify）通知在同一观测窗到达（同 turn 注销两条 pending），每条 details 为可解析的单条形态（消费表面不因窗口删除报错）',
+    'A6⑥ 双成员交付 canary 都在通知 details / subagents records 树（交付面旁证）',
     '两段主轮都以 message.complete 收尾；段 2 前主队游标衔接 fail-fast（游标恰 3，越位 = 通知主体集合漂移即归因失败）',
-    'A2/A6 通知主体集合（§3.3.7② 防双发）：脚本编排 run 恰 1 条 wf-done、零条成员轮应答；one-shot 批量恰 N 条成员轮应答、零条 wf-done',
+    'A2/A6 通知主体集合（§3.3.7② 防双发）：脚本编排 run 恰 1 条 wf-done、零条成员轮应答；subagent_start 单成员恰各 1 条成员轮应答、零条 wf-done',
   ],
   notProvable: [
     'UI 面：workflow overlay / 托盘面板 / 通知气泡渲染（A 通道，归 UI 剧本）',
+    'fan-out / subagents 批量成员轮应答（§3.3.7② one-shot 放行在 fan-out 域的判据缺口）：notify-host.toNotifyRecord 对 record.origin==="workflow" 一律返回 undefined（单漏斗 origin gate 全静默，u4 deviations 登记）——批量成员构造性不发轮应答，本剧本 A6 的通知面按设计场景 6② 用 background 单成员（subagent_start）制造',
     '真 {batch:true} 批消息形态（buildBatchPayload 产物）：边沿即投后 pumpDirect 逐条泵出（每条 deliver 同步泵），单实例剧本内不可确定性生产；批形态保留边界（recover 重放 / collectRelease 直通 / compaction 唤醒 / 内核留存合并）由 u4 行为锁测试与下一条的 recover 支承载',
     'recover 重放支（kill/重启后 journal 差集重放产批形态）由 u4 行为锁测试承载（delivery-port.test.ts recover 重放断言），本剧本不覆盖',
     'mock 回复无真实模型语义：编排质量、真实耗时与 token 成本',
@@ -159,6 +183,36 @@ function readTextFile(p) {
   } catch {
     return ''
   }
+}
+
+/** 递归读目录下所有文本文件（体积上限保护；subagents records/sessions 树证据用）。 */
+function readTreeText(root, maxBytes = 4_000_000) {
+  let total = 0
+  const parts = []
+  const walk = (dir, depth = 0) => {
+    if (depth > 6 || total > maxBytes) return
+    let entries = []
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      if (total > maxBytes) return
+      const full = path.join(dir, e.name)
+      if (e.isDirectory()) {
+        walk(full, depth + 1)
+        continue
+      }
+      const st = fs.statSync(full, { throwIfNoEntry: false })
+      if (!st || st.size > 2_000_000) continue
+      const text = readTextFile(full)
+      total += text.length
+      parts.push(`# ${path.relative(root, full)}\n${text}`)
+    }
+  }
+  if (fs.existsSync(root)) walk(root)
+  return parts.join('\n')
 }
 
 /**
@@ -195,7 +249,7 @@ async function waitForEventCount(protocol, predicate, minCount, since, timeoutMs
 
 /**
  * 条件轮询 record journal：等目录下 record.jsonl 里谓词命中的帧数 ≥minCount。
- * 返回全部解析成功的帧（供断言复用），超时返回 null。
+ * 返回全部解析成功的帧（供断言复用），超时返回 null——调用方必须归一为 []。
  */
 async function waitForRecordFrames(recDir, predicate, minCount, timeoutMs) {
   const deadline = Date.now() + timeoutMs
@@ -241,9 +295,11 @@ function readRecordText(recDir) {
  * 通知 details 的单条形态防御解析（判据对齐 shared parseBgNotifyDetails 的
  * BgNotifyRecord 必需字段，剧本内手工实现不 import TS）：id/status/agent/startedAt
  * 齐全 = 单条形态；batch=true + items 数组 = 批形态（本剧本预期不出现，出现则如实报告）。
+ * 轮终收尾 idle 的通知 status = 'running'（notify-host 载荷派生视图语义），故 status 词表
+ * 按 BgNotifyRecord 全集收：done/failed/cancelled/closed/running。
  */
 function parseNotifyDetailsShape(details) {
-  if (!details || typeof details !== 'object') return { form: 'unparsed' }
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return { form: 'unparsed' }
   if (details.batch === true && Array.isArray(details.items)) {
     return { form: 'batch', items: details.items.length }
   }
@@ -253,7 +309,14 @@ function parseNotifyDetailsShape(details) {
     typeof details.agent === 'string' && details.agent.length > 0 &&
     typeof details.startedAt === 'number'
   return ok
-    ? { form: 'single', id: details.id, status: details.status, agent: details.agent }
+    ? {
+        form: 'single',
+        id: details.id,
+        status: details.status,
+        agent: details.agent,
+        startedAt: details.startedAt,
+        endedAt: typeof details.endedAt === 'number' ? details.endedAt : undefined,
+      }
     : { form: 'unparsed' }
 }
 
@@ -268,9 +331,9 @@ export async function run(ctx) {
     '孙进程 faux 不可达（--no-extensions + 白名单扩展集），mock-http 是执行域唯一零 token 通道（SSOT：capabilities/env.md Gotchas + probes/faux-grandchild.mjs）',
     '成员轮成败只产自引擎收尾边沿（pi-subagent-cli output-collector.ts collectOutcome，设计 §3.3.1 聚合不变量 2）：SO 调用后引擎还会继续请求，成员队列必须在 SO 步之后给 stopReason:"stop" 收尾步——纯 toolUse 队列会让成员一直消费到队列耗尽 404，收尾边沿=错误 → 成员判 failed（parsedOutput 已产出也一样，「done 吞失败」旧语义已废除）',
     '段 1 失败注入 = 失败成员专属空队列（mock-sub-b，per-call model 指定）：首请求即「剧本耗尽」404 = 真实 provider 错误形态，cause 落 provider.protocol_unsupported。共享游标下用「队列位置」注入失败有交错竞态（一成员第二请求可能先于另一成员首请求），per-model 队列结构性消除',
-    '段 2 两成员共享 mock-sub-a 游标（subagents 批量无 per-task model），存在两种合法交错：均衡（A1,B1,A2,B2）→ 双 delivered；spawn 斜交（一成员第二请求先于另一成员首请求）→ 斜交成员连吃 2 个 SO 后 stop 收尾，后到成员首请求即 stop → agent.no_deliverable 失败。两种形态都恒产 2 条同组完成通知（失败轮应答如实，§3.3.7①），本剧本 A6 断言对两者都成立、不断言段 2 成员成败',
-    'mock-http 的 stopReason:"error" 步不会产 provider 级错误轮：mock server 把 error 文本写成正文 + finish stop（lib/mock-llm.mjs planFrames），成员照常收尾——provider 级错误轮在本通道只能以队列耗尽 404 形态注入',
-    'A6⑤ 测量口径：轮终锚 = record journal agent-settled 帧 ts（引擎写侧 epoch ms）；通知到达锚 = protocol.events 的 message.customStart receivedAt（剧本进程墙钟）。两者同机时钟直接可比，差值含 pi 注入 + runtime 广播 + WS 转发 + 剧本轮询的链路噪声（数百 ms 量级）；1s 预算的判据本质 = 不出现攒批窗退役前 60s 量级的无上界推迟',
+    '段 2 双成员用成员级 model 隔离队列（subagent_start 的 model 参数 → mock-sub-a / mock-sub-c 各自 per-model 游标）——双成员确定性完成，A6 可对「2 条成功轮应答」做确定性期待',
+    '段 2 不用 subagents 批量：批量 = 内置 fan-out 模板 = workflow origin，notify-host.toNotifyRecord 对 record.origin==="workflow" 一律返回 undefined（单漏斗 origin gate 全静默；fan-out 成员放行判据缺口 = u4 deviations 登记）→ 批量成员构造性零通知（2026-10-24 a2a6 首跑实测：subagents tasks 传纯字符串还被 fan-out 旧格式迁移 throw 拒单，双因叠加）。设计场景 6② 的原文形态 = 2 个 background 单成员，即两条 subagent_start',
+    'A6⑤ 测量口径：轮终锚 = 通知 details.endedAt（notify-host.toNotifyRecord 在派生视图边界物化：running 载荷 endedAt = snap.endedAt ?? Date.now()，构造时刻 ≈ 轮终时刻）；到达锚 = protocol.events 的 message.customStart receivedAt（剧本进程墙钟）。两者同机时钟直接可比，差值含 pi 注入 + runtime 广播 + WS 转发 + 剧本轮询的链路噪声（数百 ms 量级）；1s 预算的判据本质 = 不出现攒批窗退役前 60s 量级的无上界推迟（旧窗把构造与投递拉开）',
     'A6⑥ 的「同批」断言口径：边沿即投后每条 deliver 同步经 pumpDirect 泵出，两条独立到达的通知恒产两条单条消息（delivery-port.ts routeAcceptedDelivery 源码核实）；真 {batch:true} 批消息只产自保留边界路径（recover 重放 / collectRelease 直通 / compaction 唤醒 / 内核留存合并），单实例剧本内不可确定性编排——本剧本断言「同组两条通知同窗全部到达 + 逐条单条形态可解析」，批形态兼容读的事实判据 = shared parseBgNotifyDetails 保留 {batch:true, items} 展开分支（消费存量 session 数据），由 u4 行为锁测试锁定',
     '成员 outcome 收敛之后的意外请求会命中「剧本耗尽」HTTP 404（预期形态）；铁证断言只计 200，404 单列 stats（段 1 的 1 条 404 是失败注入本体，单独断言）',
     'models.json 的 apiKey 必须是字面量（pi 把 $VAR 当 env 模板、!cmd 当命令）',
@@ -285,7 +348,7 @@ export async function run(ctx) {
     return { uncovered: ['workflow 夹具缺失，剧本中止', ...uncovered], gotchas }
   }
 
-  // 装配自检：models.json 里的 mock provider 指向本机 mock 服务（含双成员模型）；孙进程缺省模型 = 成员演员
+  // 装配自检：models.json 里的 mock provider 指向本机 mock 服务（含全部成员模型）；孙进程缺省模型
   const topo = instance.llm
   const modelsJson = JSON.parse(readTextFile(path.join(dataDir, 'agent', 'models.json')) || '{}')
   const provider = modelsJson.providers?.[topo.providerId]
@@ -295,9 +358,9 @@ export async function run(ctx) {
     expected: `baseUrl=${topo.baseUrl} api=openai-completions`,
     actual: `baseUrl=${provider?.baseUrl ?? '<缺>'} api=${provider?.api ?? '<缺>'}`,
   })
-  ev.assert('装配：双成员模型都在 provider 模型清单（mock-sub-a + mock-sub-b）', providerModelIds.includes(SUB_MODEL) && providerModelIds.includes(SUB_MODEL_B), {
+  ev.assert('装配：成员模型都在 provider 模型清单（mock-sub-a/b/c）', [SUB_MODEL, SUB_MODEL_B, SUB_MODEL_C].every((m) => providerModelIds.includes(m)), {
     channel: 'C',
-    expected: `models 含 ${SUB_MODEL} 与 ${SUB_MODEL_B}`,
+    expected: `models 含 ${SUB_MODEL} / ${SUB_MODEL_B} / ${SUB_MODEL_C}`,
     actual: providerModelIds.join(', ') || '<缺>',
   })
   const subCfg = JSON.parse(readTextFile(path.join(dataDir, 'agent', 'subagents', 'config.json')) || '{}')
@@ -366,10 +429,11 @@ export async function run(ctx) {
   // A2③：record journal 对账（C 通道）。run-settled 帧的 outcome 与 failedMembers 是
   // §3.3.8 的权威落盘面；agent-settled 帧对账成员结算集合（恰 1 done + 1 failed）。
   const recDir1 = path.join(dataDir, 'ext-sessions', String(sid1), 'workflow', 'runs')
-  const frames1 = await waitForRecordFrames(recDir1, (f) => f.type === 'run-settled', 1, 180_000)
+  // waitForRecordFrames 超时返回 null（不是空数组）——统一归一为 []，防后续 .filter/.find 崩溃。
+  const frames1 = (await waitForRecordFrames(recDir1, (f) => f.type === 'run-settled', 1, 180_000)) ?? []
   const recordText1 = readRecordText(recDir1)
   ev.step({
-    step: 'workflow.record.partial', channel: 'C', exitCode: frames1 ? 0 : 1,
+    step: 'workflow.record.partial', channel: 'C', exitCode: frames1.length > 0 ? 0 : 1,
     stats: { frames: frames1.length, runSettled: frames1.filter((f) => f.type === 'run-settled').length, agentSettled: frames1.filter((f) => f.type === 'agent-settled').length },
   })
   const settledFrame = frames1.find((f) => f.type === 'run-settled') ?? null
@@ -449,7 +513,7 @@ export async function run(ctx) {
     actual: `consumed=${queue.consumed}`,
   })
   // A2③ 补：脚本编排 run 的通知主体集合（§3.3.7②）——恰 1 条 wf-done（workflow-result），
-  // 零条成员轮应答（subagent-bg-notify；one-shot 轮应答不进脚本编排 run，防双发）。
+  // 零条成员轮应答（subagent-bg-notify；workflow origin 回注全静默，防双发）。
   // 游标「恰 3」已证明通知轮发生过，此处事件必在队列，无等待竞态。
   const sameSession = (sid) => (e) => e.payload?.sessionId === undefined || e.payload?.sessionId === sid
   const wfDone1 = protocol.events.slice(since1).filter((e) => e.type === 'message.customStart' && e.payload?.customType === 'workflow-result' && sameSession(sid1)(e))
@@ -459,7 +523,7 @@ export async function run(ctx) {
     expected: 'message.customStart（workflow-result）× 1',
     actual: `${wfDone1.length} 条`,
   })
-  ev.assert('A2 通知主体集合：脚本编排 run 不产 one-shot 成员轮应答（subagent-bg-notify × 0，防双发）', bgNotify1.length === 0, {
+  ev.assert('A2 通知主体集合：脚本编排 run 不产成员轮应答（subagent-bg-notify × 0，workflow origin 回注静默）', bgNotify1.length === 0, {
     channel: 'B',
     expected: 'message.customStart（subagent-bg-notify）× 0',
     actual: `${bgNotify1.length} 条`,
@@ -479,7 +543,7 @@ export async function run(ctx) {
 
   // 派发前取事件游标：通知只可能在派发后到达，游标前的帧不混入观测窗。
   const since2 = protocol.events.length
-  await protocol.send(sid2, 'dispatch a two-member background batch (段 2)')
+  await protocol.send(sid2, 'dispatch two background members (段 2)')
   const end2 = await protocol.waitTurnEnd(sid2, { since: since2, timeoutMs: 180_000 })
   ev.assert('A6 派发主轮完成（message.complete 非 error）', end2.type === 'message.complete' && end2.ok, {
     channel: 'B',
@@ -493,8 +557,33 @@ export async function run(ctx) {
     actual: `messages=${(hist2.messages ?? []).length}`,
   })
 
+  // 派发受理判据（早期归因锚）：同一 assistant 步的两条 subagent_start 都必须被受理——
+  // getSubagents 出现 ≥2 条 record 且模型 = 各自派发参数。工具拒单（模型不在目录 / slug 非法等）
+  // 时这里立即红，不让后续「零通知」观测超时承担归因噪音。
+  const deadlineSubs = Date.now() + 30_000
+  let subs = []
+  while (Date.now() < deadlineSubs) {
+    const reply = await protocol.call('session.getSubagents', { sessionId: sid2 }, { timeoutMs: 60_000 })
+    subs = reply.subagents ?? []
+    if (subs.length >= 2) break
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  const subModels = subs.map((s) => String(s.model ?? ''))
+  ev.step({ step: 'subagent.observe', channel: 'B', exitCode: subs.length >= 2 ? 0 : 1, stats: { count: subs.length, models: subModels.join(','), statuses: subs.map((s) => s.status).join(',') } })
+  ev.assert('A6 派发受理：两条 subagent_start 都被受理（≥2 条 record）', subs.length >= 2, {
+    channel: 'B',
+    expected: 'session.getSubagents ≥2 条 record（30s 内）',
+    actual: `count=${subs.length}（空 = 工具拒单：检查 model 是否在目录 / slug 是否合法）`,
+  })
+  ev.assert('A6 成员模型 = 各自派发参数（mock-sub-a + mock-sub-c 成员级 model 隔离）', subModels.some((m) => m.includes(SUB_MODEL)) && subModels.some((m) => m.includes(SUB_MODEL_C)), {
+    channel: 'B',
+    expected: `record.model 含 ${SUB_MODEL} 与 ${SUB_MODEL_C}`,
+    actual: subModels.join(', ') || '<缺>',
+  })
+  ev.attach('subagent-records', JSON.stringify(subs, null, 2).slice(0, 60_000))
+
   // 通知观测窗：等 ≥2 条同组（subagent-bg-notify）完成通知事件（message.customStart）。
-  // 批量派发的完成通知走默认通道组（subagent-bg-notify），与 wf-done（workflow-result）分通道。
+  // 两条 subagent_start 在同一 turn 派发 = 一次 turn 内注销 ≥2 个同组 pending。
   const isGroupNotify = (e) =>
     e.type === 'message.customStart' &&
     e.payload?.customType === 'subagent-bg-notify' &&
@@ -505,10 +594,10 @@ export async function run(ctx) {
     step: 'notify.observe', channel: 'B', exitCode: notifyEvents ? 0 : 1,
     stats: { count: notifyShapes.length, forms: notifyShapes.map((s) => s.form).join(','), statuses: notifyShapes.map((s) => s.status ?? '-').join(',') },
   })
-  ev.assert('A6⑥ 同组批注到达：≥2 条 subagent-bg-notify 通知在同一观测窗到达', Boolean(notifyEvents) && notifyShapes.length >= 2, {
+  ev.assert('A6⑥ 同组批注到达：≥2 条 subagent-bg-notify 通知在同一观测窗到达（同 turn 注销两条 pending）', Boolean(notifyEvents) && notifyShapes.length >= 2, {
     channel: 'B',
-    expected: 'message.customStart（customType=subagent-bg-notify）× ≥2（成员成败两种交错形态下都恒产 2 条）',
-    actual: notifyEvents ? `${notifyShapes.length} 条（forms=${notifyShapes.map((s) => s.form).join(',')}, statuses=${notifyShapes.map((s) => s.status ?? '-').join(',')})` : '观测窗内未到齐（120s）',
+    expected: 'message.customStart（customType=subagent-bg-notify）× ≥2（双 background 成员确定性完成 → 2 条轮应答）',
+    actual: notifyEvents ? `${notifyShapes.length} 条（forms=${notifyShapes.map((s) => s.form).join(',')}, statuses=${notifyShapes.map((s) => s.status ?? '-').join(',')}）` : '观测窗内未到齐（120s）',
   })
   // 消费表面不变的形态级判据：每条通知 details 可按单条形态解析（parseBgNotifyDetails 的
   // 必需字段判据）——批兼容读分支（{batch:true, items}）是存量数据兼容面，本剧本通道下
@@ -527,54 +616,55 @@ export async function run(ctx) {
     ).slice(0, 120_000),
   )
 
-  // A6⑤：即时性测量。轮终锚 = 段 2 run record journal 的 agent-settled 帧 ts（引擎写侧，
-  // 失败成员同样有 settled 帧）；通知到达锚 = customStart receivedAt（剧本进程）。
-  // 逐通知取与最近轮终 ts 的差，全部 ≤1s。
-  const recDir2 = path.join(dataDir, 'ext-sessions', String(sid2), 'workflow', 'runs')
-  const frames2 = await waitForRecordFrames(recDir2, (f) => f.type === 'agent-settled', 2, 60_000)
-  const settledTs = frames2.filter((f) => f.type === 'agent-settled' && typeof f.ts === 'number').map((f) => f.ts)
-  const recordText2 = readRecordText(recDir2)
-  ev.step({
-    step: 'notify.timing', channel: 'C', exitCode: settledTs.length >= 2 ? 0 : 1,
-    stats: { settledTs: settledTs.join(','), notifyAt: notifyShapes.map((s) => s.receivedAt).join(',') },
-  })
+  // A6⑤：即时性测量。轮终锚 = 通知 details.endedAt（notify-host 在派生视图边界物化，
+  // running 载荷 endedAt = snap.endedAt ?? Date.now()，构造时刻 ≈ 轮终时刻）；到达锚 =
+  // customStart receivedAt（剧本进程）。逐通知算 delta，全部 ≤1s（旧攒批窗会拉到 60s+）。
   const deltas = []
   let maxDelta = -1
-  for (const n of (notifyEvents ?? [])) {
-    let min = Infinity
-    for (const t of settledTs) min = Math.min(min, Math.abs(n.receivedAt - t))
-    deltas.push(min)
-    if (min > maxDelta) maxDelta = min
+  for (const n of notifyShapes) {
+    const d = typeof n.endedAt === 'number' ? n.receivedAt - n.endedAt : NaN
+    deltas.push(d)
+    if (Number.isFinite(d) && d > maxDelta) maxDelta = d
   }
+  ev.step({
+    step: 'notify.timing', channel: 'C', exitCode: maxDelta >= 0 && maxDelta <= 1_000 ? 0 : 1,
+    stats: { deltas: deltas.map((d) => (Number.isFinite(d) ? `${d}ms` : 'n/a')).join(','), notifyAt: notifyShapes.map((s) => s.receivedAt).join(',') },
+  })
   ev.assert(
-    'A6⑤ 即时单条：每条完成通知距成员轮终 ≤1s（journal ts → customStart receivedAt）',
-    settledTs.length >= 2 && deltas.length >= 2 && maxDelta >= 0 && maxDelta <= 1_000,
+    'A6⑤ 即时单条：每条完成通知距轮终 ≤1s（details.endedAt → customStart receivedAt）',
+    notifyShapes.length >= 2 && deltas.every((d) => Number.isFinite(d) && Math.abs(d) <= 1_000),
     {
       channel: 'C',
-      expected: 'max(每条通知 receivedAt 与最近 agent-settled ts 的差) ≤ 1000ms',
-      actual: `settledTs=${settledTs.length} 帧, deltas=${deltas.map((d) => (Number.isFinite(d) ? `${d}ms` : 'n/a')).join(',')}（轮终锚=record journal agent-settled.ts，到达锚=message.customStart receivedAt，同机时钟）`,
+      expected: '每条通知 |receivedAt − details.endedAt| ≤ 1000ms',
+      actual: `deltas=${deltas.map((d) => (Number.isFinite(d) ? `${d}ms` : 'n/a(endedAt 缺)')).join(',')}（轮终锚=details.endedAt，到达锚=message.customStart receivedAt，同机时钟）`,
     },
   )
-  // 交付面旁证：至少一个成员的 canary 落 record（均衡交错 → 两个标记都在；
-  // 斜交形态 → 只有先到成员的标记在——断言取 ≥1 并集，形态差异已在 gotchas 登记）。
-  const canaryHits = [NOTIFY_EDGE_CANARY_A, NOTIFY_EDGE_CANARY_B].filter((c) => recordText2.includes(c))
-  ev.assert('A6⑥ 成员交付 canary 落 record（A/B 标记至少一个；均衡交错下两个都在）', canaryHits.length >= 1, {
-    channel: 'C',
-    expected: `record 含 ${NOTIFY_EDGE_CANARY_A} / ${NOTIFY_EDGE_CANARY_B} 至少一个（均衡交错 = 两个）`,
-    actual: `hits=${canaryHits.join(',') || '<无>'}`,
-  })
-  ev.attach('workflow-records-notify-edge', recordText2.slice(0, 200_000))
-  // A6 补：one-shot 批量（subagents 工具）的通知主体 = 各成员轮应答，不双发 wf-done
-  // （§3.3.7② 走查补「防双发」）。此处已在通知观测 + journal 轮询之后数秒，run 终局
-  // 通知（若实现误发）已到达，无迟到竞窗。
-  const wfDone2 = protocol.events.slice(since2).filter((e) => e.type === 'message.customStart' && e.payload?.customType === 'workflow-result' && (e.payload?.sessionId === undefined || e.payload?.sessionId === sid2))
-  ev.assert('A6 通知主体集合：one-shot 批量不双发 wf-done（workflow-result × 0）', wfDone2.length === 0, {
+
+  // A6⑥ 交付面旁证：两个成员 canary 都要落通知 details（轮应答正文带结果）与
+  // subagents records 树（C 通道落盘）。任一缺失 = 成员派发/交付链异常。
+  const notifyDetailsText = JSON.stringify((notifyEvents ?? []).map((e) => e.payload?.details ?? {}))
+  const subagentsTree = readTreeText(path.join(dataDir, 'ext-sessions', String(sid2), 'subagents'))
+  ev.assert('A6⑥ 双成员交付 canary 都在通知 details（A/B 两个标记）', notifyDetailsText.includes(NOTIFY_EDGE_CANARY_A) && notifyDetailsText.includes(NOTIFY_EDGE_CANARY_B), {
     channel: 'B',
-    expected: 'message.customStart（workflow-result）× 0（成员轮应答即通知主体）',
+    expected: `通知 details 含 ${NOTIFY_EDGE_CANARY_A} 与 ${NOTIFY_EDGE_CANARY_B}`,
+    actual: `hitA=${notifyDetailsText.includes(NOTIFY_EDGE_CANARY_A)} hitB=${notifyDetailsText.includes(NOTIFY_EDGE_CANARY_B)}`,
+  })
+  ev.assert('A6⑥ 双成员交付 canary 落 subagents records 树（C 通道）', subagentsTree.includes(NOTIFY_EDGE_CANARY_A) && subagentsTree.includes(NOTIFY_EDGE_CANARY_B), {
+    channel: 'C',
+    expected: `subagents 树含 ${NOTIFY_EDGE_CANARY_A} 与 ${NOTIFY_EDGE_CANARY_B}`,
+    actual: `bytes=${subagentsTree.length} hitA=${subagentsTree.includes(NOTIFY_EDGE_CANARY_A)} hitB=${subagentsTree.includes(NOTIFY_EDGE_CANARY_B)}`,
+  })
+  ev.attach('subagents-tree', subagentsTree.slice(0, 120_000))
+
+  // A6 补：subagent_start 单成员派发不是 run 通道，不产 wf-done（workflow-result × 0）。
+  const wfDone2 = protocol.events.slice(since2).filter((e) => e.type === 'message.customStart' && e.payload?.customType === 'workflow-result' && (e.payload?.sessionId === undefined || e.payload?.sessionId === sid2))
+  ev.assert('A6 通知主体集合：subagent_start 单成员派发不产 wf-done（workflow-result × 0）', wfDone2.length === 0, {
+    channel: 'B',
+    expected: 'message.customStart（workflow-result）× 0（非 run 通道）',
     actual: `${wfDone2.length} 条`,
   })
 
-  // ══ 铁证总账：全剧本成员模型有效请求（段 1 成功成员 2 + 段 2 两成员至多 4）══════
+  // ══ 铁证总账：全剧本成员模型有效请求（段 1 成功成员 2 + 段 2 两成员各 1）══════════
   const allRequests = instance.mockLlm?.requests ?? []
   const childOk = allRequests.filter((r) => r.model !== MAIN_MODEL && r.status === 200)
   const childFail = allRequests.filter((r) => r.model !== MAIN_MODEL && r.status !== 200)
@@ -588,7 +678,7 @@ export async function run(ctx) {
       models: [...new Set(allRequests.map((r) => r.model))].join(','),
     },
   })
-  ev.assert('铁证：mock 收到 ≥4 条成员模型有效请求（200；段 1 成功成员 2 + 段 2 ≥2）', childOk.length >= 4, {
+  ev.assert('铁证：mock 收到 ≥4 条成员模型有效请求（200；段 1 成功成员 2 + 段 2 两成员各 1）', childOk.length >= 4, {
     channel: 'C',
     expected: '≥4 × 成员模型 status=200',
     actual: `${childOk.length} 条 200（models=${[...new Set(childOk.map((r) => r.model))].join(',')}）+ ${childFail.length} 条非 200（段 1 失败注入 1 条 + 意外收尾轮）`,

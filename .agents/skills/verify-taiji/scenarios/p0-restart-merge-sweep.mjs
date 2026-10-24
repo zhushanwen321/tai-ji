@@ -19,13 +19,25 @@
  *     注：装配器 spawn 的 concurrently 子树是独立进程组（dev-instance.mjs launch detached），
  *     SIGKILL 装配器不波及子树——必须整树逐 PID 杀，这正是「宿主暴死」的模拟形态。
  *   段 3 重启——同 name + 同 data-dir 重新 createInstance + launch + waitReady（三条就绪判据）。
- *   段 4 断言①③——就绪后（会话激活前）立即查 getSubagents：lastRound.engineStopReason=
- *     interrupted-by-restart + lastRound.swept 在场 + 无在途占用。此时点查询本身就是
- *     「清点是启动一次性扫描、不等会话激活」的证据（无时间窗断言的正面半边）。
- *   段 5 断言②——session.switch 触发 reattach（runtime respawn pi → extension session_start
- *     → initSession → 注册对账 sweep）→ 主 session JSONL 出现 pending:unregister
- *     且 reason=lost（结清枚举权威词；status 走历史六值映射通道如实落 unknown，见 gotchas）。
+ *   段 4 断言①（C 通道主证据）——就绪后（会话激活前）≤10s 内三件磁盘/日志事实同时成立：
+ *     manifest 快照 idle+interrupted-by-restart、record 事件文件的轮收条帧（停因 +
+ *     swept 附注）、runtime 日志 startup sweep (records) 结果行。此段的观测面全部是
+ *     磁盘事实，不依赖会话激活；同时记录一次激活前 getSubagents 探测（仅作查询面
+ *     观测证据 attach，不作断言——新代际未激活会话的查询面语义见 gotchas）。
+ *   段 5 断言①②③（激活后，B/C 同窗）——session.switch 触发 reattach（runtime respawn
+ *     pi → extension session_start → initSession → 注册对账 sweep），≤45s 内双事实：
+ *     getSubagents 的 record.stopReason=interrupted-by-restart + 无在途占用（①②③ B 位），
+ *     主 session JSONL 出现 pending:unregister 且 reason=lost（②）。
  *   段 6 终态证据 + 收尾（dispose 重启后实例 + 删自建 data-dir）。
+ *
+ * wire 面事实（源码核实，断言位置依据）：
+ *   - record 事件帧（C 位）：<recordsDir>/<sa-id>.events 的 record-round-idle 帧携带
+ *     stopReason=interrupted-by-restart + swept={at,evidence}（record-restart-sweep.ts 唯一
+ *     停因实参 + 清点附注落点）——swept 硬断言的权威事实位；
+ *   - runtime wire（B 位）：session.getSubagents 的 SubagentRecord.lastRound **按设计不含
+ *     swept**（events-projection-last-round.ts 头注：swept 附注不进 wire，失联标注经
+ *     record.stopReason 宿主中断族值呈现）——故 B 位只断言 record.stopReason。
+ *
  *
  * 实装锚（断言依据，均为源码核实事实）：
  *   - record 侧清点 = packages/subagent-core/src/orchestration/record-restart-sweep.ts
@@ -54,8 +66,7 @@ const SWEEP_DEADLINE_MS = 10_000
 const SETTLE_DEADLINE_MS = 45_000
 
 /** mock-http 剧本（model-keyed）：主队派发两步 + 成员队长在途单步。 */
-function buildResponses() {
-  return {
+function buildResponses() {  return {
     [`mockllm/${MAIN_MODEL}`]: [
       {
         text: '派一个子任务去核对：',
@@ -189,6 +200,35 @@ function readRecordManifest(dataDir, sid, recordId) {
   }
 }
 
+/** record 事件文件路径（与 manifest 同主名：<sa-id>.events）。 */
+function recordEventsFile(dataDir, sid, recordId) {
+  return path.join(dataDir, 'ext-sessions', String(sid), 'subagents', 'records', `${recordId}.events`)
+}
+
+/**
+ * 读取 record 事件文件里的失联轮收条帧（record-round-idle + 停因 interrupted-by-restart
+ * + swept 附注）。事件文件 = JSONL（首行 header，坏行宽容跳过——与产品 parseRecordEventFileLine
+ * 同纪律）。返回最后一次命中的帧（append-only 取尾）；无命中返回 null。
+ */
+function readSweepRoundIdleFrame(dataDir, sid, recordId) {
+  let hit = null
+  for (const line of readTextFile(recordEventsFile(dataDir, sid, recordId)).split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed.length === 0 || !trimmed.includes('"record-round-idle"')) continue
+    let frame
+    try {
+      frame = JSON.parse(trimmed)
+    } catch {
+      continue // 截断行/坏行跳过（产品侧同款纪律）
+    }
+    const stopReason = frame?.stopReason ?? frame?.engineStopReason
+    if (frame?.type === 'record-round-idle' && stopReason === 'interrupted-by-restart' && frame?.swept !== undefined) {
+      hit = frame
+    }
+  }
+  return hit
+}
+
 export const meta = {
   id: 'p0-restart-merge-sweep',
   priority: 'P0',
@@ -210,16 +250,17 @@ export const meta = {
   provable: [
     '造在途：record 出现且轮在途（running 且轮收条未写）+ manifest 快照 running + pending:register 在册 + mock 收到成员模型 200 请求',
     'kill -9 自建实例进程树（精确 PID：装配器 PID + pgrep -P 递归后代，逐个 SIGKILL）后 vite/cdp/runtime 端口全释放',
-    '同 data-dir 重启就绪后（会话激活前）record 轮收条已补失联：停因 interrupted-by-restart（record.stopReason / manifest，engineStopReason 双轨核对）且 swept 附注在场',
-    '清点命中记录从占用判据摘除：getSubagents 无「running 且轮收条未写」条目',
+    '激活前三件磁盘事实（就绪后 ≤10s 同时成立）：manifest 快照 idle+interrupted-by-restart；record 事件文件 record-round-idle 帧（停因 interrupted-by-restart + swept={at,evidence}）；runtime 日志 startup sweep (records) 结果行',
+    '激活后 wire 呈现：getSubagents 的 record.stopReason=interrupted-by-restart（runtime wire 按设计不含 lastRound.swept）',
+    '清点命中记录从占用判据摘除：激活后 getSubagents 无「running 且轮收条未写」条目',
     'pending 债结清 lost：session.switch 触发 reattach 对账后主 session JSONL 出现该 id 的 pending:unregister 且 reason=lost',
-    '无时间窗：①③在就绪后 10s 内成立（启动一次性扫描）、②在 switch 后 45s 内成立（pi spawn 真实成本 + session_start 链内毫秒级对账）',
-    'C 通道双证：manifest 快照 idle + interrupted-by-restart；runtime 日志出现 startup sweep (records) 结果行',
+    '无时间窗：激活前磁盘事实在就绪后 10s 内成立（启动一次性扫描）；结清与 wire 断言在 switch 后 45s 内成立（pi spawn 真实成本 + session_start 链内毫秒级对账）',
   ],
   notProvable: [
     'record 会话本体续聊可跑通（设计场景 3 的 resume 锚点重建引擎）——独立验收面，本剧本不派后续轮',
     'run 级中断收编（run-interrupted / interrupted run 收编）——本剧本只派 subagent record，不派 workflow run',
     '「孤儿引擎进程存活仍判失联」变体（本剧本整树 SIGKILL，无 pi 孤儿残留形态；swept.evidence 的 aliveWriter=dead 即本形态证据）',
+    'wire lastRound.swept 不进 wire（events-projection-last-round.ts 设计裁决：失联标注经 record.stopReason 宿主中断族值呈现）——swept 硬断言取 record 事件帧（C），wire 面不断言 swept',
     'mock 回复无真实模型语义：编排质量、真实耗时与 token 成本',
   ],
 }
@@ -231,8 +272,9 @@ export async function run(ctx) {
     '装配器 spawn 的 concurrently 子树是独立进程组（dev-instance.mjs detached）——SIGKILL 装配器 PID 不波及子树，必须先 pgrep -P 递归收集后代再逐 PID SIGKILL；这正是宿主暴死（无优雅链）的模拟形态',
     '双实例并存的端口安全：自建实例用独立 name（端口按 name hash 派生独立段）+ 独立 data-dir；runner 主实例闲置不触碰（生命周期归 runner）',
     'pending:unregister 落盘形态（实装核实）：data.reason=lost 是结清枚举 SettlementReason 的权威词（sweep-binding lostSettlementOf 直通）；data.status 走历史六值映射通道 mapReasonToStatus，词表无 lost 键 → 如实落 unknown（fail-visible，REASON_STATUS_MAP 无该键 + sweep-binding.test 锚定）——本剧本断言 reason=lost 为准，status 值照录不断言为 lost',
-    '失联停因的 wire 落位是迁移期双轨（实装核实）：sweep 补写帧停因只落 record-round-idle 的 stopReason 展示位（record-restart-sweep.ts SWEPT_STOP_REASON 唯一停因实参）+ manifest.stopReason（lost 结清判据源），engineStopReason 事实位仅 u1 引擎判定链产出——故断言取「record.stopReason ∨ lastRound.engineStopReason」任一命中，actual 里两位照录',
-    '无时间窗的 N 值构成：①③ 的 10s 覆盖「waitReady 三判据通过 → 启动段扫描完成」的观测余量（清点在 runtime 启动段、先于任何 pi spawn）；② 的 45s 覆盖 session.switch 触发 pi 进程重新 spawn 的启动成本（SKILL.md 给 30s 量级）+ session_start 链内毫秒级同步对账（reconcile-sweep.ts 头注）——产品侧无定时器/稳定窗/宽限窗（record-restart-sweep.ts / reconcile-sweep.ts 头注），N 是观测上限不是产品宽限窗',
+    '激活前查询面语义（2026-10-24 a3/a3b 两轮实测）：未激活会话的 session.getSubagents 可读性取决于首次读取时点——a3 在就绪后立即轮询 10s 全空（首次读取早于 sweep 补写，投影缓存停在在途态，未激活期间无推送源刷新），a3b 先等磁盘事实成立（214ms）再首次查询即返回 idle+interrupted-by-restart（found=true）——疑为未激活投影缓存不随磁盘后续变化刷新的边缘形态（读通道未始终返回当前真值，激活后自愈）；故激活前清点证据一律走磁盘（manifest / 事件帧 / 日志），查询面断言与②同窗放 switch 之后，探测结果 attach 到 pre-activation-getsubagents-probe 供归因（不作断言）',
+    'wire lastRound 不含 swept（设计裁决，events-projection-last-round.ts 头注「swept 附注不进 wire，失联标注经 record.stopReason 宿主中断族值呈现」）：swept 附注的硬断言位 = record 事件帧 `<sa-id>.events` 的 record-round-idle 帧，wire 面只断言 record.stopReason=interrupted-by-restart；lastRound.engineStopReason 对清点 record 同样缺省（sweep 补写帧只落迁移期展示位 stopReason）',
+    '无时间窗的 N 值构成：激活前三件磁盘事实的 10s 覆盖「waitReady 三判据通过 → 启动段扫描完成」的观测余量（清点在 runtime 启动段、先于任何 pi spawn）；② 的 45s 覆盖 session.switch 触发 pi 进程重新 spawn 的启动成本（SKILL.md 给 30s 量级）+ session_start 链内毫秒级同步对账（reconcile-sweep.ts 头注）——产品侧无定时器/稳定窗/宽限窗（record-restart-sweep.ts / reconcile-sweep.ts 头注），N 是观测上限不是产品宽限窗',
     '同 worktree 双实例启动会各跑一遍幂等 preSteps（bundle-extensions 等）：产物目录共享但运行中实例不受影响（多数据目录实例共存是 dev 常态）',
   ]
 
@@ -415,71 +457,78 @@ export async function run(ctx) {
     })
     protoB = await instanceB.protocol()
 
-    // ══ 段 4：断言①③——就绪后（会话激活前）清点已补失联 + 占用摘除 ══
-    // 此查询时点本身就是「清点是启动一次性扫描、不等会话激活」的证据（无时间窗正面半边）。
-    // 停因事实的 wire 落位（实装核实，迁移期双轨）：sweep 补写帧停因落 stopReason
-    // （迁移期展示位，record-restart-sweep.ts 唯一停因实参）+ manifest.stopReason
-    // （findAdoptedStopReasonSync 的结清判据源）；lastRound.engineStopReason（引擎
-    // 事实位）仅 u1 判定链产出、sweep 补写帧不落 → 判据取两停因位任一命中。
-    const sweptStopReasonOf = (record) =>
-      record?.stopReason === 'interrupted-by-restart' || record?.lastRound?.engineStopReason === 'interrupted-by-restart'
-    const sweptView = await pollUntil(async () => {
-      try {
-        const reply = await protoB.call('session.getSubagents', { sessionId: sid }, { timeoutMs: 30_000 })
-        const record = (reply.subagents ?? []).find((r) => r.slug === SLUG)
-        if (!record) return null
-        const sweptAnnotated = sweptStopReasonOf(record) && Boolean(record.lastRound?.swept)
-        const notOccupied = !(record.status === 'running' && record.stopReason === undefined)
-        if (sweptAnnotated && notOccupied) return { record, at: Date.now() }
-        return null
-      } catch {
-        return null
-      }
+    // ══ 段 4：断言①（C 通道主证据）——就绪后（会话激活前）清点事实已落盘 ══
+    // 观测面全部是磁盘/日志事实（不依赖会话激活）：manifest 快照、record 事件文件的
+    // 失联轮收条帧、runtime 日志清点结果行。此段同时证明「清点是启动一次性扫描、
+    // 不等会话激活」（无时间窗正面半边）。
+    const diskSweepView = await pollUntil(() => {
+      const manifest = readRecordManifest(selfDataDir, sid, recordId)
+      const frame = readSweepRoundIdleFrame(selfDataDir, sid, recordId)
+      const logLine = readRuntimeLogs(selfDataDir).split('\n').filter((l) => l.includes('[subagents] startup sweep (records):')).pop() ?? ''
+      const manifestOk = manifest?.executionStatus === 'idle' && manifest?.stopReason === 'interrupted-by-restart'
+      const logOk = /swept [1-9]\d* interrupted record/.test(logLine)
+      if (!manifestOk || !frame || !logOk) return null
+      return { manifest, frame, logLine, at: Date.now() }
     }, SWEEP_DEADLINE_MS)
-    const elapsedSweep = sweptView ? sweptView.at - tReady0 : SWEEP_DEADLINE_MS
-    const recordAfter = sweptView?.record ?? null
+    const elapsedSweep = diskSweepView ? diskSweepView.at - tReady0 : SWEEP_DEADLINE_MS
+    const manifestAfter = diskSweepView?.manifest ?? readRecordManifest(selfDataDir, sid, recordId)
+    const frameAfter = diskSweepView?.frame ?? readSweepRoundIdleFrame(selfDataDir, sid, recordId)
+    const sweepLogLine = diskSweepView?.logLine ?? ''
     ev.step({
-      step: 'sweep.assert', channel: 'B', exitCode: sweptView ? 0 : 1,
-      stats: { elapsedMs: elapsedSweep, lastRound: recordAfter?.lastRound ?? null, status: recordAfter?.status, stopReason: recordAfter?.stopReason ?? '(缺)' },
+      step: 'sweep.disk.assert', channel: 'C', exitCode: diskSweepView ? 0 : 1,
+      stats: {
+        elapsedMs: elapsedSweep,
+        manifest: manifestAfter ? { executionStatus: manifestAfter.executionStatus, stopReason: manifestAfter.stopReason } : null,
+        frame: frameAfter ? { round: frameAfter.round, stopReason: frameAfter.stopReason, engineStopReason: frameAfter.engineStopReason ?? null, swept: frameAfter.swept } : null,
+        logLine: sweepLogLine || null,
+      },
     })
-    ev.assert('① record 轮收条补失联：停因 interrupted-by-restart 且 swept 附注在场', Boolean(recordAfter) && sweptStopReasonOf(recordAfter) && Boolean(recordAfter?.lastRound?.swept), {
-      channel: 'B',
-      expected: 'record.stopReason（或 lastRound.engineStopReason）=interrupted-by-restart + lastRound.swept={at,evidence}',
-      actual: recordAfter
-        ? JSON.stringify({ stopReason: recordAfter.stopReason, engineStopReason: recordAfter.lastRound?.engineStopReason, swept: recordAfter.lastRound?.swept })
-        : '就绪后 10s 内 getSubagents 未见收编形态',
-    })
-    ev.assert('③ 占用计数归零：清点命中记录从占用判据摘除（无 running 且轮收条未写的条目）', (() => {
-      if (!recordAfter) return false
-      return !(recordAfter.status === 'running' && recordAfter.stopReason === undefined)
-    })(), {
-      channel: 'B',
-      expected: 'record 非「running 且 stopReason 缺失」（占用判据 isOccupied=false）',
-      actual: `status=${recordAfter?.status ?? '(无 record)'} stopReason=${recordAfter?.stopReason ?? '(缺)'}`,
-    })
-    ev.assert('④a 无时间窗：清点在重启就绪后立即完成（≤10s，启动一次性扫描）', Boolean(sweptView) && elapsedSweep <= SWEEP_DEADLINE_MS, {
-      channel: 'B',
-      expected: `就绪后 ≤${SWEEP_DEADLINE_MS / 1000}s 内①③成立（清点先于任何 pi spawn，不等会话激活）`,
-      actual: sweptView ? `elapsedMs=${elapsedSweep}` : `10s 内未成立（超时上限 ${SWEEP_DEADLINE_MS}ms）`,
-    })
-
-    // C 通道双证：manifest 终态 + runtime 日志清点结果行
-    const manifestAfter = readRecordManifest(selfDataDir, sid, recordId)
-    ev.assert('C 通道：manifest 快照已刷 idle + interrupted-by-restart（sweep 命中三写之一）', manifestAfter?.executionStatus === 'idle' && manifestAfter?.stopReason === 'interrupted-by-restart', {
+    ev.assert('①a 失联停因（C 位）：manifest 快照 idle + interrupted-by-restart', manifestAfter?.executionStatus === 'idle' && manifestAfter?.stopReason === 'interrupted-by-restart', {
       channel: 'C',
       expected: 'executionStatus=idle 且 stopReason=interrupted-by-restart',
-      actual: JSON.stringify(manifestAfter)?.slice(0, 300) ?? '(文件缺失)',
+      actual: manifestAfter ? JSON.stringify({ executionStatus: manifestAfter.executionStatus, stopReason: manifestAfter.stopReason }) : '(manifest 缺失)',
     })
-    const sweepLogLine = readRuntimeLogs(selfDataDir).split('\n').filter((l) => l.includes('[subagents] startup sweep (records):')).pop() ?? ''
-    ev.assert('C 通道：runtime 日志出现 record 侧清点结果行（swept ≥1）', /swept [1-9]\d* interrupted record/.test(sweepLogLine), {
+    ev.assert('①b swept 附注（C 位）：record 事件文件轮收条帧带 swept={at,evidence}', Boolean(frameAfter?.swept) && typeof frameAfter?.swept?.at === 'number' && String(frameAfter?.swept?.evidence ?? '').includes('manifest='), {
+      channel: 'C',
+      expected: 'record-round-idle 帧 stopReason=interrupted-by-restart 且 swept={at:number,evidence 含 manifest=}',
+      actual: frameAfter
+        ? JSON.stringify({ type: frameAfter.type, stopReason: frameAfter.stopReason, engineStopReason: frameAfter.engineStopReason ?? null, swept: frameAfter.swept })
+        : '事件文件无命中的 record-round-idle 帧',
+    })
+    ev.assert('①c 清点执行事实（C 位）：runtime 日志 startup sweep (records) 结果行 swept ≥1', /swept [1-9]\d* interrupted record/.test(sweepLogLine), {
       channel: 'C',
       expected: '「[subagents] startup sweep (records): swept N interrupted record(s)」且 N≥1',
       actual: sweepLogLine || '(无结果行——无命中时不落行)',
     })
-    ev.attach('record-after-sweep', JSON.stringify(recordAfter ?? {}, null, 2).slice(0, 20_000))
+    ev.assert('④a 无时间窗：激活前三件磁盘事实在就绪后立即成立（≤10s，启动一次性扫描）', Boolean(diskSweepView) && elapsedSweep <= SWEEP_DEADLINE_MS, {
+      channel: 'C',
+      expected: `就绪后 ≤${SWEEP_DEADLINE_MS / 1000}s 内 manifest + 事件帧 + 日志三事实同时成立（不依赖会话激活）`,
+      actual: diskSweepView ? `elapsedMs=${elapsedSweep}` : `10s 内未同时成立（超时上限 ${SWEEP_DEADLINE_MS}ms）`,
+    })
     ev.attach('manifest-after-sweep', JSON.stringify(manifestAfter ?? {}, null, 2))
+    ev.attach('sweep-round-idle-frame', JSON.stringify(frameAfter ?? {}, null, 2))
 
-    // ══ 段 5：断言②——session.switch 触发 reattach 对账，pending 结清 lost ══
+    // 激活前查询面探测（观测证据，不作断言）：新代际里会话未激活时 getSubagents 的
+    // 可读性形态——供「查询面语义 vs 产品缺口」归因（a3 实测为空）。
+    let preActivationProbe = null
+    try {
+      const reply = await protoB.call('session.getSubagents', { sessionId: sid }, { timeoutMs: 30_000 })
+      preActivationProbe = {
+        ok: true,
+        found: reply.found ?? null,
+        count: (reply.subagents ?? []).length,
+        records: (reply.subagents ?? []).map((r) => ({ subagentId: r.subagentId, status: r.status, stopReason: r.stopReason ?? null })),
+      }
+    } catch (e) {
+      preActivationProbe = { ok: false, error: String(e?.message ?? e).slice(0, 500) }
+    }
+    ev.step({ step: 'pre-activation.probe', channel: 'B', exitCode: preActivationProbe.ok ? 0 : 1, stats: preActivationProbe })
+    ev.attach('pre-activation-getsubagents-probe', JSON.stringify(preActivationProbe, null, 2))
+
+    // ══ 段 5：断言①②③（激活后 B/C 同窗）——reattach 对账 + 查询面呈现 ══
+    // 同一窗口轮询两条事实：JSONL 的 lost 注销行（②C）+ getSubagents 的 wire 呈现
+    // （①B：record.stopReason；③B：无在途占用）。后者的时点不承担「无时间窗」证明，
+    // 那是段 4 磁盘事实的职责。
     const tSwitch = Date.now()
     let switched = false
     try {
@@ -488,29 +537,60 @@ export async function run(ctx) {
     } catch (e) {
       ev.step({ step: 'session.switch', channel: 'B', exitCode: 1, stats: { error: e instanceof Error ? e.message : String(e) } })
     }
-    const lostLine = switched
-      ? await pollUntil(() => {
+    let lastQueryError = ''
+    const settledView = switched
+      ? await pollUntil(async () => {
           const line = findPendingLine(sessionFile, 'unregister', recordId)
-          return line?.data?.reason === 'lost' ? line : null
+          const lostOk = line?.data?.reason === 'lost'
+          let record = null
+          try {
+            const reply = await protoB.call('session.getSubagents', { sessionId: sid }, { timeoutMs: 30_000 })
+            record = (reply.subagents ?? []).find((r) => r.subagentId === recordId) ?? null
+          } catch (e) {
+            lastQueryError = String(e?.message ?? e).slice(0, 300)
+            return null
+          }
+          const wireOk = record?.stopReason === 'interrupted-by-restart'
+          const notOccupied = record !== null && !(record.status === 'running' && record.stopReason === undefined)
+          if (lostOk && wireOk && notOccupied) return { record, line, at: Date.now() }
+          return null
         }, SETTLE_DEADLINE_MS)
       : null
-    const elapsedSettle = lostLine ? Date.now() - tSwitch : SETTLE_DEADLINE_MS
+    const elapsedSettle = settledView ? settledView.at - tSwitch : SETTLE_DEADLINE_MS
+    const lostLine = settledView?.line ?? (switched ? findPendingLine(sessionFile, 'unregister', recordId) : null)
+    const recordAfter = settledView?.record ?? null
     ev.step({
-      step: 'settle.assert', channel: 'C', exitCode: lostLine ? 0 : 1,
-      stats: { switched, elapsedMs: elapsedSettle, unregister: lostLine?.data ?? null },
+      step: 'settle.assert', channel: 'B', exitCode: settledView ? 0 : 1,
+      stats: {
+        switched, elapsedMs: elapsedSettle,
+        unregister: lostLine?.data ?? null,
+        record: recordAfter ? { status: recordAfter.status, stopReason: recordAfter.stopReason ?? null, lastRound: recordAfter.lastRound ?? null } : null,
+        lastQueryError: lastQueryError || null,
+      },
     })
-    ev.assert('② pending 结清 lost：reattach 对账落 pending:unregister 且 reason=lost', Boolean(lostLine), {
+    ev.assert('①d 失联停因（B 位）：激活后 getSubagents 的 record.stopReason=interrupted-by-restart', recordAfter?.stopReason === 'interrupted-by-restart', {
+      channel: 'B',
+      expected: 'record.stopReason=interrupted-by-restart（runtime wire 呈现位；lastRound.swept 按设计不进 wire）',
+      actual: recordAfter ? `stopReason=${recordAfter.stopReason ?? '(缺)'} lastRound=${JSON.stringify(recordAfter.lastRound ?? null)}` : (lastQueryError || 'switch 后 45s 内未查到该 record'),
+    })
+    ev.assert('③ 占用计数归零：清点命中记录从占用判据摘除（无 running 且轮收条未写的条目）', recordAfter !== null && !(recordAfter.status === 'running' && recordAfter.stopReason === undefined), {
+      channel: 'B',
+      expected: 'record 非「running 且 stopReason 缺失」（占用判据 isOccupied=false）',
+      actual: recordAfter ? `status=${recordAfter.status} stopReason=${recordAfter.stopReason ?? '(缺)'}` : '未查到该 record',
+    })
+    ev.assert('② pending 结清 lost：reattach 对账落 pending:unregister 且 reason=lost', Boolean(lostLine) && lostLine?.data?.reason === 'lost', {
       channel: 'C',
       expected: `主 session JSONL 含 pending:unregister 且 data.id=${recordId}、data.reason=lost（status 如实照录）`,
       actual: lostLine
         ? JSON.stringify(lostLine.data)
         : `switch=${switched}，${SETTLE_DEADLINE_MS / 1000}s 内未见 lost 注销行（sessionFile=${sessionFile || '(未定位)'}）`,
     })
-    ev.assert('④b 无时间窗：结清在首次 reattach 即到位（≤45s，含 pi spawn 真实成本）', Boolean(lostLine) && elapsedSettle <= SETTLE_DEADLINE_MS, {
-      channel: 'C',
-      expected: `switch 后 ≤${SETTLE_DEADLINE_MS / 1000}s 内 reason=lost 到位（pi respawn 30s 量级 + 链内毫秒级对账，无重试窗）`,
-      actual: lostLine ? `elapsedMs=${elapsedSettle}` : `超时上限 ${SETTLE_DEADLINE_MS}ms`,
+    ev.assert('④b 无时间窗：结清与 wire 呈现均在首次 reattach 后到位（≤45s，含 pi spawn 真实成本）', Boolean(settledView) && elapsedSettle <= SETTLE_DEADLINE_MS, {
+      channel: 'B',
+      expected: `switch 后 ≤${SETTLE_DEADLINE_MS / 1000}s 内②+①d+③同时成立（pi respawn 30s 量级 + 链内毫秒级对账，无重试窗）`,
+      actual: settledView ? `elapsedMs=${elapsedSettle}` : `超时上限 ${SETTLE_DEADLINE_MS}ms${lastQueryError ? `；最近查询错误：${lastQueryError}` : ''}`,
     })
+    ev.attach('record-after-sweep', JSON.stringify(recordAfter ?? {}, null, 2).slice(0, 20_000))
     ev.attach('unregister-line', JSON.stringify(lostLine ?? { note: '未出现' }, null, 2))
 
     // 终态快照：重启后 list 全量 + session 树幸存（record 会话本体保留）
