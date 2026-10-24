@@ -75,7 +75,26 @@ def staged_removed_paths():
 def path_to_pattern(rel_path):
     """旧路径 → 残留引用正则：去扩展名字面串，`.` 匹配 `.` 或 `\\.`（正则转义形态同判）。"""
     stem = re.sub(r"\.[^./]+$", "", rel_path)
-    return re.escape(stem).replace("\\.", "\\\\.")
+    # 替换产物 `\\?\\.`（ERE）= 可选前置反斜杠 + 字面点，普通 `foo.ts` 与源码正则
+    # 转义 `foo\\.ts` 同判；写成 `\\\\.`（字面反斜杠 + 任意字符）会让含点 stem
+    # （如 X.test.ts 去扩展名后的 X.test）的普通形态永不命中。
+    return re.escape(stem).replace("\\.", "\\\\?\\.")
+
+
+def self_check_pattern():
+    """匹配口径探针（纯内存，毫秒级）：stem 含点的路径（如 X.test.ts）构造出的
+    pattern 必须普通形态与正则转义形态同判（文件头「匹配口径」的机器化）。检查器
+    自身口径破损 = 防线静默失效，与被检查对象同类故障，须 fail-fast。"""
+    pattern = path_to_pattern("pkg/dir/Example.test.ts")
+    for label, sample in [
+        ("普通形态", 'ref "pkg/dir/Example.test.ts"'),
+        ("正则转义形态", 'ref "pkg/dir/Example\\.test.ts"'),
+    ]:
+        if not re.search(pattern, sample):
+            print(f"[path-ref-drift] 匹配口径自检失败：{label}样例 {sample!r} 未被 "
+                  f"pattern {pattern!r} 命中；禁止改 path_to_pattern 的同判口径绕过，"
+                  "确需调整先同步文件头「匹配口径」声明与本探针")
+            sys.exit(2)
 
 
 def points_at_sibling_only(line, old):
@@ -104,6 +123,8 @@ def main():
     if not removed:
         print("[path-ref-drift] OK：staged 无删除/移动文件，跳过路径残留检查")
         return
+
+    self_check_pattern()
 
     hits = []
     for old in removed:
