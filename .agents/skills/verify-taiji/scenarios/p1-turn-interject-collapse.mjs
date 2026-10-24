@@ -21,12 +21,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-/** 长回合正文（~500 字符；与哨兵区分，结尾带可等哨兵） */
+/** 长回合正文（~750 字符；faux 3-5 字符/chunk、TPS=6 限速 → ≈30s 流式窗口，
+ *  覆盖段 1/段 2 全部中途态断言的轮询预算） */
 const LONG_TEXT = [
   '长回合流式演示正文。这段文字的唯一作用是被 faux 按 3-5 字符切块、以每秒若干块的速度',
-  '逐字吐出，从而把一个 assistant 回合拉长到二十秒量级，给插话与队列观察留出确定窗口。',
-  '内容本身无意义，验收断言只看计时与队列形态。'.repeat(6),
-  '流水继续填充段落以保证窗口长度：观测者在此期间应看到回合保持工作态、计时持续增长。',
+  '逐字吐出，从而把一个 assistant 回合拉长到半分钟量级，给插话与队列观察留出确定窗口。',
+  '内容本身无意义，验收断言只看计时与队列形态。'.repeat(16),
+  '流水继续填充段落以保证窗口长度：观测者在此期间应看到回合保持工作态、计时持续增长、',
+  '队列区出现插话条目行，而当前回合不因插话提前收起。'.repeat(6),
   'TURN1-STREAM-END',
 ].join('')
 
@@ -79,14 +81,15 @@ async function pollBodyHtml(ui, predicate, { timeoutMs = 30_000, intervalMs = 40
   return html
 }
 
-/** 条件轮询 turn-meta-0 的 HTML 直到变化（计时增长判据：工作态下秒级 tick 必然改写 elapsed；
- *  读 innerHTML 而非 innerText——虚拟列表可视窗口裁剪下 innerText 对裁剪元素返回空）。 */
+/** 条件轮询首回合 turn-meta 的 HTML 直到变化（计时增长判据：工作态下秒级 tick 必然改写
+ *  elapsed；读 innerHTML 而非 innerText——虚拟列表可视窗口裁剪下 innerText 对裁剪元素返回空。
+ *  turn 索引 1-based（message-turns.ts index: i + 1），首回合 = turn-meta-1）。 */
 async function pollTurnMetaChange(ui, first, { timeoutMs = 10_000, intervalMs = 300 } = {}) {
   const deadline = Date.now() + timeoutMs
   let html = first
   while (Date.now() < deadline) {
     try {
-      html = await ui.html('testid=turn-meta-0')
+      html = await ui.html('testid=turn-meta-1')
     } catch {
       /* 元素瞬时未挂载：保留上次采样继续轮询 */
     }
@@ -136,12 +139,12 @@ export async function run(ctx) {
     })
     await ev.shot(await ctx.instance.page(), 'turn1-working')
 
-    // 计时增长：采样 turn-meta-0 HTML 并条件等待其变化（秒级 tick 必改写 elapsed）
-    const metaFirst = await ui.html('testid=turn-meta-0')
+    // 计时增长：采样首回合 turn-meta（索引 1-based）HTML 并条件等待其变化（秒级 tick 必改写 elapsed）
+    const metaFirst = await ui.html('testid=turn-meta-1')
     const { changed, html: metaSecond } = await pollTurnMetaChange(ui, metaFirst)
     ev.assert('A: elapsed 计时持续增长（两次采样文本变化）', changed, {
       channel: 'A',
-      expected: 'turn-meta-0 内容随秒级 tick 改变',
+      expected: 'turn-meta-1 内容随秒级 tick 改变',
       actual: `first="${metaFirst.slice(0, 120)}" second="${metaSecond.slice(0, 120)}"`,
     })
 

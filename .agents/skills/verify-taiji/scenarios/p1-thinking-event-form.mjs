@@ -120,7 +120,7 @@ function shapeOf(snapshot, sentinel) {
 /** 点击含哨兵回合的 .turn-meta 展开该回合，并轮询该回合内出现含 thinking 哨兵的 .trace-think 行。 */
 async function expandTurnAndWait(page, snapshot, textSentinel, thinkSentinel) {
   const turn = snapshot.find((t) => t.text.includes(textSentinel))?.turn
-  if (!turn) return { ok: false, reason: `未找到含 ${textSentinel} 的回合` }
+  if (!turn) return { ok: false, reason: `未找到含 ${textSentinel} 的回合`, previews: [] }
   await page.click(`[data-testid="${turn}"] .turn-meta`)
   const deadline = Date.now() + 20_000
   while (Date.now() < deadline) {
@@ -130,7 +130,23 @@ async function expandTurnAndWait(page, snapshot, textSentinel, thinkSentinel) {
     if (previews.some((p) => p.includes(thinkSentinel))) return { ok: true, turn, previews }
     await new Promise((r) => setTimeout(r, 400))
   }
-  return { ok: false, reason: `展开后未等到含 ${thinkSentinel} 的 thinking 行`, turn }
+  // 失败路径诊断：容器在不在 DOM、meta 按钮形态、trace 块现状（定位「没展开」vs「展开了没思考行」）
+  const diag = await page
+    .$$eval(`[data-testid="${turn}"]`, (els) => {
+      if (els.length === 0) return { containerInDom: false }
+      const el = els[0]
+      const meta = el.querySelector('.turn-meta')
+      return {
+        containerInDom: true,
+        metaDisabled: meta ? meta.hasAttribute('disabled') : null,
+        metaAria: meta ? meta.getAttribute('aria-expanded') : null,
+        traceThinkCount: el.querySelectorAll('.trace-think').length,
+        traceBlkCount: el.querySelectorAll('.trace-blk').length,
+        textHead: (el.textContent ?? '').slice(0, 200),
+      }
+    })
+    .catch((e) => ({ evalError: String(e) }))
+  return { ok: false, reason: `展开后未等到含 ${thinkSentinel} 的 thinking 行`, turn, previews: [], diag }
 }
 
 export async function run(ctx) {

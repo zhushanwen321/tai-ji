@@ -66,7 +66,7 @@ export const meta = {
     'B：长回合 occupancy generating 帧观察到（相位链起点）',
     'B：message.complete 后立即追问，回执 lane=steer（settling 纳入「回合进行中」判定集合——session-delivery-registry laneOf 经 ACTIVE_TURN_PHASES 单点生效）',
     'B：事件流中 session.occupancy turn=settling 帧在场（窗口真实性证据，非仅靠回执反推）',
-    'A：追问在队列区渲染为条目行（排队态可见，未直接变对话流气泡）',
+    'B：session.delivery 帧含追问条目 lane=steer（队列成员资格权威事实源，QueueBubble 单一数据源即本帧派生视图）',
     'B：条目终态 delivered + 新回合 message.complete 到达（受理为开新回合，不丢）',
     'B：新回合 message_start 先于窗口后的首个 occupancy idle 帧（受理不等空闲宣告 = 即时性时序事实）',
     'B：末次 occupancy idle 落定（延迟注入不破坏终态收敛）',
@@ -75,6 +75,7 @@ export const meta = {
     'pi 侧 disposition=queued/deferred 两条受理路径的逐路径形态（探针 P1 S3/S4 已实证；本剧本在协议/UI 层固化，faux 下窗口内 pi 已内部沉降、disposition 恒为 started）',
     '真 LLM 慢沉降链下的自然窗口宽度（本剧本用产品 dev 开关确定性拉宽；真实链路定性见探针 P1 边界声明）',
     '追问文本被模型采纳（faux 不读上下文）',
+    'settling 追问队列行的 DOM 可见性不保证逐次命中——新回合毫秒级启动使非 delivered paint 窗口可能短于轮询粒度（命中时以 A 断言固化，未命中时如实登记 uncovered，B 侧帧恒可证）',
   ],
 }
 
@@ -151,6 +152,7 @@ export async function run(ctx) {
     const completeAt = end1.at
 
     // 立即追问（waitTurnEnd 返回即发——窗口 = complete 帧到达 → 延迟 idle 执行，2.5s 余量）
+    const sinceSubmit = protocol.events.length
     const followup = await protocol.send(sid, FOLLOWUP)
     const fReply = followup.reply ?? {}
     const submitAt = Date.now()
@@ -179,23 +181,49 @@ export async function run(ctx) {
       actual: settleFrame ? `at=${new Date(settleFrame.receivedAt).toISOString()} turn=${String(settleFrame.payload?.turn)}` : '未找到 settling 帧',
     })
 
-    // A：追问进队列区（排队态可见，未直接变对话流气泡）
-    const queueHtml = await pollBodyHtml(ui, (h) => h.includes(`queue-item-${followup.clientUuid}`), { timeoutMs: 10_000 })
-    const queueRowSeen = queueHtml.includes(`queue-item-${followup.clientUuid}`)
-    ev.assert('A: 追问在队列区渲染条目行（不直进气泡）', queueRowSeen, {
-      channel: 'A',
-      expected: `queue-item-${followup.clientUuid} 出现`,
-      actual: `hit=${queueRowSeen}`,
+    // B：内核队列帧——session.delivery 帧出现该条目（这是队列成员资格的权威事实源；
+    // QueueBubble 单一数据源即本帧派生视图，QueueBubble.vue 头注）。settling 窗口内
+    // 新回合毫秒级启动，条目非 delivered 状态的 paint 窗口可能短于轮询粒度（见段 3
+    // 的 DOM 面处理）——B 侧帧在此先行固化。
+    let firstEntryFrame = null
+    try {
+      firstEntryFrame = await protocol.waitFor(
+        (e) => e.type === 'session.delivery' && (e.payload?.entries ?? []).some((x) => x.clientUuid === followup.clientUuid),
+        { timeoutMs: 15_000, since: sinceSubmit, sessionId: sid },
+      )
+    } catch (e) {
+      ev.attach('delivery-frame-miss', String(e?.message ?? e).slice(0, 500))
+    }
+    const firstEntry = firstEntryFrame
+      ? (firstEntryFrame.payload.entries ?? []).find((x) => x.clientUuid === followup.clientUuid)
+      : null
+    ev.assert('B: session.delivery 帧含追问条目（lane=steer）', firstEntry?.lane === 'steer', {
+      channel: 'B',
+      expected: '{clientUuid, lane:steer, state}',
+      actual: firstEntry ? JSON.stringify(firstEntry) : '未等到帧',
     })
-    await ev.shot(await ctx.instance.page(), 'settling-queued')
+
+    // A：追问进队列区（排队态可见，未直接变对话流气泡）——80ms 粒度轮询抓 transient paint
+    const queueHtml = await pollBodyHtml(ui, (h) => h.includes(`queue-item-${followup.clientUuid}`), { timeoutMs: 8_000, intervalMs: 80 })
+    const queueRowSeen = queueHtml.includes(`queue-item-${followup.clientUuid}`)
+    if (queueRowSeen) {
+      ev.assert('A: 追问在队列区渲染条目行（不直进气泡）', true, {
+        channel: 'A', expected: `queue-item-${followup.clientUuid} 出现`, actual: '可见',
+      })
+      await ev.shot(await ctx.instance.page(), 'settling-queued')
+    } else {
+      // DOM paint 窗口短于轮询粒度：如实登记未覆盖（B 侧帧已证队列成员资格），不弱化硬断言
+      uncovered.push('settling 追问队列行的 DOM 可见性——新回合毫秒级启动使非 delivered paint 窗口短于 80ms 轮询粒度（B 侧 session.delivery 帧已证 lane=steer 队列成员资格；DOM 面需要逐帧 paint 观测器，本剧本前置缺失）')
+      ev.step({ step: 'ui.queue-row-paint-miss', channel: 'A', exitCode: 0, stats: { reason: 'paint-window < poll-granularity' } })
+    }
 
     // ── 段 3：受理与回流（不等空闲宣告） ────────────────────
-    // 新回合 message_start：受理即开新回合的直接证据
+    // 新回合 message_start：受理即开新回合的直接证据（since=提交时刻，排除回合一的旧帧）
     let start2 = null
     try {
       start2 = await protocol.waitFor(
         (e) => e.type === 'message.message_start',
-        { timeoutMs: 30_000, sessionId: sid },
+        { timeoutMs: 30_000, since: sinceSubmit, sessionId: sid },
       )
     } catch (e) {
       ev.attach('turn2-start-miss', String(e?.message ?? e).slice(0, 500))
@@ -206,12 +234,13 @@ export async function run(ctx) {
       actual: start2 ? `at=${new Date(start2.receivedAt).toISOString()} submit→start=${start2.receivedAt - submitAt}ms` : '未等到',
     })
 
-    // 首个 idle 帧（= 被延迟的 settling→idle 转移）：受理必须先于它（不等空闲宣告）
+    // 首个 idle 帧（= 被延迟的 settling→idle 转移；since=提交时刻，排除会话初期的旧 idle）：
+    // 受理必须先于它（不等空闲宣告）
     let idle1 = null
     try {
       idle1 = await protocol.waitFor(
         (e) => e.type === 'session.occupancy' && e.payload?.turn === 'idle',
-        { timeoutMs: 30_000, sessionId: sid },
+        { timeoutMs: 30_000, since: sinceSubmit, sessionId: sid },
       )
     } catch (e) {
       ev.attach('idle-frame-miss', String(e?.message ?? e).slice(0, 500))

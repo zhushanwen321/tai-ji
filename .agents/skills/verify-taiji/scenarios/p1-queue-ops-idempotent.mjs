@@ -173,6 +173,10 @@ export async function run(ctx) {
   ev.assert('B: 主回合消息 direct 车道', host.reply?.lane === 'direct', {
     channel: 'B', expected: 'lane=direct', actual: JSON.stringify(host.reply ?? {}),
   })
+  // [产品缺口 workaround] 同 p1-queue-inline-edit：首订阅早于内核创建 → session.delivery
+  // topic 不接线；首次 submit 已建内核，二次 subscribe（renderer 切回/重连真实通路）触发
+  // 接线。缺口登记 productSuspicions。
+  await p.subscribe(sid)
   await p.waitFor((e) => e.type === 'message.message_start', { sessionId: sid, since: since0, timeoutMs: 60_000 })
   ev.assert('B: 主回合已开跑（message_start）', true, {
     channel: 'B', expected: 'message_start 广播', actual: '收到',

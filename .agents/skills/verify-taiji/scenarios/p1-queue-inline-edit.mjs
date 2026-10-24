@@ -171,6 +171,14 @@ export async function run(ctx) {
   ev.assert('B: 主回合消息 direct 车道（idle 会话）', host.reply?.lane === 'direct', {
     channel: 'B', expected: 'lane=direct', actual: JSON.stringify(host.reply ?? {}),
   })
+  // [产品缺口 workaround，2026-10-24 探针实证] session.delivery topic 接线唯一入口 =
+  // session.subscribe（session-delivery-topic.ts sync：内核运行时已存在才挂 onChange）；
+  // 首订阅（本剧本与 renderer 激活时序同款）早于首次 submit（内核尚不存在）→ 之后内核
+  // 变更永不发帧（协议侧与 renderer 队列区双盲，探针 PHASE1 实测 0 帧 + queue-bubble 不
+  // 渲染）。首次 submit 已建内核，这里二次 subscribe 触发接线（= renderer 切回会话/重连
+  // 的真实通路，非 mock）——此后 bus.publish 对全部订阅者可见，renderer 队列区同源恢复
+  // （探针 PHASE2 实测）。缺口登记 productSuspicions，主 agent 裁决。
+  await p.subscribe(sid)
   await p.waitFor((e) => e.type === 'message.message_start', { sessionId: sid, since: since0, timeoutMs: 60_000 })
   ev.assert('B: 主回合已开跑（message.message_start）', true, {
     channel: 'B', expected: 'message_start 广播', actual: '收到',

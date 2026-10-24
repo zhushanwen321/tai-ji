@@ -63,6 +63,37 @@ async function pollBodyHtml(ui, needle, { timeoutMs = 30_000, intervalMs = 400, 
   return html
 }
 
+/**
+ * 两段式展开：① 点 turn-meta 展开钮（trace 折叠态 → 全量 flatBlocks）；② 若工具走 run-group
+ * 分组，再点 run-group-header（组默认折叠，成员 block-tool-* 行 v-if=groupExpanded 才渲染）。
+ * 返回展开后的 body HTML 与过程统计。
+ */
+async function expandTraceWithGroup(ui, ev) {
+  let traceClicked = false
+  let groupClicked = false
+  try {
+    await ui.click('css=[data-testid^="turn-meta-"] button.turn-meta', { timeoutMs: 10_000 })
+    traceClicked = true
+  } catch (e) {
+    ev.attach('trace-expand-miss', String(e?.message ?? e).slice(0, 400))
+  }
+  let html = traceClicked ? await pollBodyHtml(ui, 'data-testid="run-group"', { timeoutMs: 15_000, wantPresent: false }) : await ui.html('css=body')
+  // trace 展开后：run-group 在场则组头再点一次（组默认折叠）；无分组则等 block-tool-
+  if (html.includes('data-testid="run-group"')) {
+    try {
+      await ui.click('testid=run-group-header', { timeoutMs: 8_000 })
+      groupClicked = true
+    } catch (e) {
+      ev.attach('group-expand-miss', String(e?.message ?? e).slice(0, 400))
+    }
+    if (groupClicked) html = await pollBodyHtml(ui, 'block-tool-', { timeoutMs: 15_000 })
+  } else if (traceClicked) {
+    html = await pollBodyHtml(ui, 'block-tool-', { timeoutMs: 15_000 })
+  }
+  ev.step({ step: 'ui.expand', channel: 'A', exitCode: traceClicked ? 0 : 1, stats: { traceClicked, groupClicked } })
+  return { html, traceClicked, groupClicked }
+}
+
 /** 抽取按 turn 分组的块结构（page.evaluate；块 id 归一为类前缀，消除运行时 id 差异）。 */
 async function extractTurnBlocks(page, userSentinel) {
   return page.evaluate(
@@ -73,13 +104,15 @@ async function extractTurnBlocks(page, userSentinel) {
         if (id === 'block-text') return 'text'
         if (id === 'block-text-error') return 'text-error'
         if (id === 'run-group') return 'run-group'
-        return id
+        return null // 结构壳（block-scroll-* 滚动容器等）不计入块序
       }
-      const turns = [...document.querySelectorAll('[data-testid^="turn-"]')]
+      const turns = [...document.querySelectorAll('[data-testid^="turn-"]')].filter((el) =>
+        /^turn-\d+$/.test(el.getAttribute('data-testid') ?? ''),
+      )
       return turns.map((turnEl) => {
-        const blocks = [...turnEl.querySelectorAll('[data-testid^="block-"], [data-testid="run-group"]')].map((el) =>
-          kindOf(el.getAttribute('data-testid') ?? ''),
-        )
+        const blocks = [...turnEl.querySelectorAll('[data-testid^="block-"], [data-testid="run-group"]')]
+          .map((el) => kindOf(el.getAttribute('data-testid') ?? ''))
+          .filter((k) => k !== null)
         const text = turnEl.textContent ?? ''
         return {
           turnId: turnEl.getAttribute('data-testid') ?? '',
@@ -113,7 +146,8 @@ export async function run(ctx) {
   const uncovered = []
   const gotchas = [
     '完成态 trace 折叠是设计内行为（use-turn-trace showTrace = isWorkingTurn || isExpanded）：工具块断言前必须点 turn-meta 展开钮（Button.turn-meta，disabled = isWorkingTurn || !hasFoldable）',
-    '两个连续 bash 工具会走 run-group 分组（groupToolRuns）：块序断言对 tool 与 run-group 前缀均兼容',
+    '两个连续 bash 工具走 run-group 分组（groupToolRuns），且组默认折叠（RunGroupBlock groupCollapsed=ref(true)）：要见成员 block-tool-* 行必须再点 run-group-header（两段式展开）',
+    'HTML 子串断言用完整属性形态（data-testid="run-group"）：裸 "run-group" 会撞 CSS 类 trace-run-group 假阳性',
     '块 id 归一后比对（block-thinking-<id> 的实时 id 与载荷派生 id 不同源，finalized-rebuild 注释在案）；等价断言比块类序列 + 哨兵命中，不比运行时 id',
   ]
   const USER_SENTINEL = 'BLOCK-ORDER-USER-Q1'
@@ -161,30 +195,24 @@ export async function run(ctx) {
     // ── 段 2：完成态默认折叠 ─────────────────────────────────
     const collapsedHtml = settledHtml
     const collapsedOk =
-      !collapsedHtml.includes('block-tool-') && !collapsedHtml.includes('run-group') && !collapsedHtml.includes('block-thinking-')
+      !collapsedHtml.includes('block-tool-') &&
+      !collapsedHtml.includes('data-testid="run-group"') &&
+      !collapsedHtml.includes('block-thinking-')
     ev.assert('A: 完成态 trace 默认折叠（工具/思考块不进 DOM）', collapsedOk, {
       channel: 'A',
-      expected: '折叠态仅末位 text 正文，无 block-tool- / run-group / block-thinking-',
-      actual: `tool=${collapsedHtml.includes('block-tool-')} group=${collapsedHtml.includes('run-group')} thinking=${collapsedHtml.includes('block-thinking-')}`,
+      expected: '折叠态仅末位 text 正文，无 block-tool- / data-testid="run-group" / block-thinking-',
+      actual: `tool=${collapsedHtml.includes('block-tool-')} group=${collapsedHtml.includes('data-testid="run-group"')} thinking=${collapsedHtml.includes('block-thinking-')}`,
     })
     await ev.shot(page, 'collapsed-default')
 
-    // ── 段 3：展开 + 块序 ────────────────────────────────────
-    let expandClicked = false
-    try {
-      await ui.click('css=[data-testid^="turn-meta-"] button.turn-meta', { timeoutMs: 10_000 })
-      expandClicked = true
-    } catch (e) {
-      ev.attach('expand-click-miss', String(e?.message ?? e).slice(0, 400))
-    }
-    ev.step({ step: 'ui.expand', channel: 'A', exitCode: expandClicked ? 0 : 1, stats: { expandClicked } })
-
-    const expandedHtml = await pollBodyHtml(ui, 'block-tool-', { timeoutMs: 15_000 })
-    const expandedOk = expandedHtml.includes('block-tool-') || expandedHtml.includes('run-group')
+    // ── 段 3：两段式展开（trace 展开钮 → run-group 组头） ────
+    const expanded = await expandTraceWithGroup(ui, ev)
+    const expandedHtml = expanded.html
+    const expandedOk = expanded.html.includes('block-tool-') || expanded.html.includes('data-testid="run-group"')
     ev.assert('A: 展开后工具块锚点进 DOM（block-tool-* / run-group）', expandedOk, {
       channel: 'A',
-      expected: 'block-tool- 或 run-group 出现',
-      actual: `tool=${expandedHtml.includes('block-tool-')} group=${expandedHtml.includes('run-group')}`,
+      expected: 'block-tool- 或 data-testid="run-group" 出现',
+      actual: `tool=${expandedHtml.includes('block-tool-')} group=${expandedHtml.includes('data-testid="run-group"')}`,
     })
     if (!expandedOk) {
       uncovered.push('展开交互后工具块锚点未现（turn-meta 展开钮命中但块未渲染，现场见展开后截图与 probe）')
@@ -203,7 +231,7 @@ export async function run(ctx) {
     const liveTurn = liveStructure.find((t) => t.hasUserSentinel && t.blockKinds.length > 0)
     ev.assert('A: 块与用户哨兵同 turn（归属正确）', Boolean(liveTurn), {
       channel: 'A',
-      expected: `turn-${liveStructure.length - 1} 同时含用户哨兵与块`,
+      expected: '含用户哨兵的 turn 同时含全部内容块（一 turn 一归属）',
       actual: liveStructure.map((t) => `${t.turnId}:${t.blockKinds.join('>')}`).join(' | ').slice(0, 300),
     })
     if (!liveTurn) {
@@ -223,12 +251,13 @@ export async function run(ctx) {
     ev.assert('A: 工具块数量 = 2（成功 + 失败）', toolCount === 2, {
       channel: 'A', expected: '2 个 block-tool-*', actual: `count=${toolCount} kinds=[${order.kinds.join(',')}]`,
     })
-    // 失败块可见：失败工具默认展开（ToolRow failed 终态默认展开，错误输出立即可见）
-    const failVisible = liveTurn.hasToolFail || expandedHtml.includes('run-group-failed')
+    // 失败块可见：失败工具默认展开（ToolRow failed 终态默认展开，错误输出立即可见）；
+    // 组头失败徽标（run-group-failed）在组折叠态即在场
+    const failVisible = liveTurn.hasToolFail || expandedHtml.includes('data-testid="run-group-failed"')
     ev.assert('A: 失败块可见（失败工具输出 / run-group 失败徽标）', failVisible, {
       channel: 'A',
-      expected: 'body 含 BLOCK-ORDER-TOOL-FAIL-STDERR 或 run-group-failed',
-      actual: `failOut=${liveTurn.hasToolFail} badge=${expandedHtml.includes('run-group-failed')}`,
+      expected: 'body 含 BLOCK-ORDER-TOOL-FAIL-STDERR 或 data-testid="run-group-failed"',
+      actual: `failOut=${liveTurn.hasToolFail} badge=${expandedHtml.includes('data-testid="run-group-failed"')}`,
     })
     await ev.shot(page, 'expanded-block-order')
 
@@ -257,22 +286,19 @@ export async function run(ctx) {
     ev.assert('A: reload 后会话内容在场（正文哨兵）', reloadedHtml.includes('BLOCK-ORDER-TEXT-END'), {
       channel: 'A', expected: 'BLOCK-ORDER-TEXT-END', actual: `hit=${reloadedHtml.includes('BLOCK-ORDER-TEXT-END')}`,
     })
-    // reload 后 trace 又回折叠态：先断言折叠，再展开，取同构快照
+    // reload 后 trace 又回折叠态：先断言折叠，再两段式展开，取同构快照
     const reloadedCollapsed =
-      !reloadedHtml.includes('block-tool-') && !reloadedHtml.includes('run-group') && !reloadedHtml.includes('block-thinking-')
+      !reloadedHtml.includes('block-tool-') &&
+      !reloadedHtml.includes('data-testid="run-group"') &&
+      !reloadedHtml.includes('block-thinking-')
     ev.assert('A: reload 后完成态默认折叠（与 live 同语义）', reloadedCollapsed, {
       channel: 'A',
       expected: '折叠态无块锚点',
-      actual: `tool=${reloadedHtml.includes('block-tool-')} group=${reloadedHtml.includes('run-group')} thinking=${reloadedHtml.includes('block-thinking-')}`,
+      actual: `tool=${reloadedHtml.includes('block-tool-')} group=${reloadedHtml.includes('data-testid="run-group"')} thinking=${reloadedHtml.includes('block-thinking-')}`,
     })
-    let reloadExpandOk = false
-    try {
-      await ui.click('css=[data-testid^="turn-meta-"] button.turn-meta', { timeoutMs: 10_000 })
-      const h = await pollBodyHtml(ui, 'block-tool-', { timeoutMs: 15_000 })
-      reloadExpandOk = h.includes('block-tool-') || h.includes('run-group')
-    } catch (e) {
-      ev.attach('reload-expand-miss', String(e?.message ?? e).slice(0, 300))
-    }
+    const reloadExpanded = await expandTraceWithGroup(ui, ev)
+    const reloadExpandOk =
+      reloadExpanded.html.includes('block-tool-') || reloadExpanded.html.includes('data-testid="run-group"')
     ev.assert('A: reload 后展开交互可用', reloadExpandOk, { channel: 'A', expected: '展开后块锚点进 DOM', actual: `ok=${reloadExpandOk}` })
 
     const reloadStructure = await extractTurnBlocks(page, USER_SENTINEL)

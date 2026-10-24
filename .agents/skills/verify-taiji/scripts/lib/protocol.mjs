@@ -125,7 +125,17 @@ export async function createProtocol(options) {
     if (frame.type === 'auth.result') return // 握手由 open 阶段消费
     if (frame.id !== undefined && frame.id !== null) {
       const p = pending.get(frame.id)
-      if (!p) return // 无关 reply（如 keepalive ping 的 pong）
+      if (!p) {
+        // 带 id 但不匹配任何在途 RPC = 服务端 push 帧：state topic（session.delivery /
+        // session.occupancy 等）与 broadcast 用 message-broker nextPushId() 的 `push_<n>` id，
+        // 区别于 RPC reply 的配对 id（lib RPC id = `rpc-*`、keepalive = `ka-*`，无碰撞）。
+        // 按广播帧入 events，否则状态帧被当「无关 reply」静默丢弃、waitFor 永远观测不到
+        // （2026-10-24 p1-queue-inline-edit 首跑实测：session.delivery 全部被丢）。
+        if (frame.type === 'error') return // 无匹配在途 RPC 的 error envelope 无从归因，不入 events
+        pushEvent(frame)
+        notifyFrame()
+        return
+      }
       pending.delete(frame.id)
       clearTimeout(p.timer)
       if (frame.type === 'error') {
