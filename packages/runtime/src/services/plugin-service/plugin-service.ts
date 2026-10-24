@@ -1238,8 +1238,13 @@ export class PluginService implements IPluginService {
       // 条目（清新版激活失败残留）——不回填则 activatePlugin 开头 descriptor 缺失直接
       // no-op，重激活沦为死路径（旧版本幸存但进程内不可用，只剩重启恢复）
       this.activator.registerDescriptors(this.registry.getAllDescriptors())
-      // R-1 回滚分支进程态语义：旧沙箱已终结，best-effort 重激活恢复的旧版本（S26
-      // 「旧版本幸存可用」即时成立；新 fork 装旧代码，模块缓存同样干净）
+      // R-1 回滚分支进程态语义：旧沙箱已在提交段终结，但新版激活段可能又起了一个
+      // fork（activate 抛错不 terminate，A26 真机实证）——不终结则重激活 assignProcess
+      // 复用坏进程 + 同 URL ESM 缓存重放必抛错代码，重激活停 discovered（D6 ISSUES
+      // 问题 3）。与提交段对称：重激活前先终结残留沙箱。
+      await terminateStaleSandboxWorker(this.host, prepared.dirName)
+      // best-effort 重激活恢复的旧版本（S26「旧版本幸存可用」即时成立；新 fork 装
+      // 旧代码，模块缓存同样干净）
       await reactivatePreviousVersionAfterRollback(this.activator, this.host, prepared.dirName)
       this.broadcastPluginList()
       return {

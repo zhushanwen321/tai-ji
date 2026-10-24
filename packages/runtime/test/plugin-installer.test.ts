@@ -715,6 +715,9 @@ describe('PluginService 两段式安装编排', () => {
     // 回滚分支对恢复的旧版本 best-effort 重激活（S26「旧版本幸存可用」的进程态语义：
     // 旧沙箱已终结，旧代码在新 fork 中重新激活，而非依赖被终结的旧进程）
     expect(vi.mocked(service.activator.activatePlugin)).toHaveBeenCalledTimes(2)
+    // D6 问题 3：新版激活段起的坏 fork 在回滚重激活前也要终结（不终结则重激活复用
+    // 坏进程 + ESM 缓存重放必抛错代码，停 discovered——与提交段 terminate 对称）
+    expect(terminate).toHaveBeenCalledTimes(2)
     // D6 B1：回滚分支 removeDescriptor 后必须 registerDescriptors 回填（reload 恢复的
     // 旧版 descriptor），否则 activatePlugin 开头 descriptor 缺失静默 no-op = 重激活死路径。
     // 行为判据 = 回滚后 descriptors 表含本插件（activatePlugin 的 no-op 前置不再成立）
