@@ -184,7 +184,7 @@ export async function run(ctx) {
   const uncovered = []
   const gotchas = [
     '孙进程 faux 不可达（--no-extensions + 白名单扩展集），mock-http 是执行域唯一零 token 通道（SSOT：capabilities/env.md Gotchas + probes/faux-grandchild.mjs）',
-    '成员队列每一步都必须是合法终局 structured-output 调用：两成员并发共享同一 model-keyed 队列，交错消费下「文本步」会让某成员命中 schema_deterministic 失败（探针实测教训）',
+    '成员队列必须是 [SO, SO, stop, stop] 奇偶形态：成员轮成败判定只产自引擎收尾边沿（§3.3.1 聚合不变量 2）——纯 toolUse 队列让成员耗尽 404 收尾被判 failed（2026-10-24 a4 复跑实测修正，memberQueue 注释载明）',
     'mock-http 游标是 per-model 单游标（mock server 进程持有，按请求到达序推进）不是 per-pi-进程：本剧本主队跨两段顺序消费、成员队跨两段共用，靠「段 B 前等主队游标 ≥3」衔接（API-CONTRACT L2）',
     '成员 outcome=done 之后的收尾轮会命中「剧本耗尽」HTTP 404（预期形态）；铁证断言只计 200，404 单列 stats',
     'models.json 的 apiKey 必须是字面量（pi 把 $VAR 当 env 模板、!cmd 当命令）',
