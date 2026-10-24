@@ -944,10 +944,13 @@ export default [
   // 拆分需引入新的 ctx 注入边界（文件头既有裁决：属独立重构任务）。落地时 eslint 实测
   // 折算 660，按先例取整提额 665 保留软上限告警（control-server 1060 / session-service
   // 665 提额先例同型），超限即再暴露。
+  // [runtime-composition-root 修复 2ea7e12c2] 组合根装配自检 getter（hasProviderEntries /
+  // hasPiExtensionInstaller）与 pi 扩展成员安装编排（installPiExtensionMember）入列，
+  // eslint 实测折算 695，按先例取整提额 700 保留软上限告警，超限即再暴露。
   {
     files: ['packages/runtime/src/services/plugin-service/plugin-service.ts'],
     rules: {
-      'max-lines': ['warn', { max: 665, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 700, skipBlankLines: true, skipComments: true }],
     },
   },
   // preset-service 是 pi-presets.json 读盘 coerce 家族唯一入口（presets 逐项 / prompt 段级 /
