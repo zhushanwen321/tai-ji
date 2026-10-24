@@ -210,7 +210,7 @@ export const meta = {
   provable: [
     '造在途：record 出现且轮在途（running 且轮收条未写）+ manifest 快照 running + pending:register 在册 + mock 收到成员模型 200 请求',
     'kill -9 自建实例进程树（精确 PID：装配器 PID + pgrep -P 递归后代，逐个 SIGKILL）后 vite/cdp/runtime 端口全释放',
-    '同 data-dir 重启就绪后（会话激活前）record 轮收条已补失联：lastRound.engineStopReason=interrupted-by-restart 且 swept 附注在场',
+    '同 data-dir 重启就绪后（会话激活前）record 轮收条已补失联：停因 interrupted-by-restart（record.stopReason / manifest，engineStopReason 双轨核对）且 swept 附注在场',
     '清点命中记录从占用判据摘除：getSubagents 无「running 且轮收条未写」条目',
     'pending 债结清 lost：session.switch 触发 reattach 对账后主 session JSONL 出现该 id 的 pending:unregister 且 reason=lost',
     '无时间窗：①③在就绪后 10s 内成立（启动一次性扫描）、②在 switch 后 45s 内成立（pi spawn 真实成本 + session_start 链内毫秒级对账）',
@@ -231,6 +231,7 @@ export async function run(ctx) {
     '装配器 spawn 的 concurrently 子树是独立进程组（dev-instance.mjs detached）——SIGKILL 装配器 PID 不波及子树，必须先 pgrep -P 递归收集后代再逐 PID SIGKILL；这正是宿主暴死（无优雅链）的模拟形态',
     '双实例并存的端口安全：自建实例用独立 name（端口按 name hash 派生独立段）+ 独立 data-dir；runner 主实例闲置不触碰（生命周期归 runner）',
     'pending:unregister 落盘形态（实装核实）：data.reason=lost 是结清枚举 SettlementReason 的权威词（sweep-binding lostSettlementOf 直通）；data.status 走历史六值映射通道 mapReasonToStatus，词表无 lost 键 → 如实落 unknown（fail-visible，REASON_STATUS_MAP 无该键 + sweep-binding.test 锚定）——本剧本断言 reason=lost 为准，status 值照录不断言为 lost',
+    '失联停因的 wire 落位是迁移期双轨（实装核实）：sweep 补写帧停因只落 record-round-idle 的 stopReason 展示位（record-restart-sweep.ts SWEPT_STOP_REASON 唯一停因实参）+ manifest.stopReason（lost 结清判据源），engineStopReason 事实位仅 u1 引擎判定链产出——故断言取「record.stopReason ∨ lastRound.engineStopReason」任一命中，actual 里两位照录',
     '无时间窗的 N 值构成：①③ 的 10s 覆盖「waitReady 三判据通过 → 启动段扫描完成」的观测余量（清点在 runtime 启动段、先于任何 pi spawn）；② 的 45s 覆盖 session.switch 触发 pi 进程重新 spawn 的启动成本（SKILL.md 给 30s 量级）+ session_start 链内毫秒级同步对账（reconcile-sweep.ts 头注）——产品侧无定时器/稳定窗/宽限窗（record-restart-sweep.ts / reconcile-sweep.ts 头注），N 是观测上限不是产品宽限窗',
     '同 worktree 双实例启动会各跑一遍幂等 preSteps（bundle-extensions 等）：产物目录共享但运行中实例不受影响（多数据目录实例共存是 dev 常态）',
   ]
@@ -401,8 +402,8 @@ export async function run(ctx) {
     await instanceA.dispose().catch(() => {})
     instanceB = createInstance({ repo, name: instanceName, dataDir: selfDataDir, llm: llmOptions, background: true })
     await instanceB.launch()
-    const tReady0 = Date.now()
     const readyB = await instanceB.waitReady({ timeoutMs: 240_000 })
+    const tReady0 = Date.now() // ④a 计时起点 = 就绪时刻（不含 launch/waitReady 自身耗时）
     ev.step({
       step: 'B.relaunch.ready', channel: 'C', exitCode: 0,
       stats: { pid: instanceB.pid, dataDir: selfDataDir, readyMs: readyB.elapsedMs, dataDirKept: fs.existsSync(selfDataDir) },
@@ -416,12 +417,18 @@ export async function run(ctx) {
 
     // ══ 段 4：断言①③——就绪后（会话激活前）清点已补失联 + 占用摘除 ══
     // 此查询时点本身就是「清点是启动一次性扫描、不等会话激活」的证据（无时间窗正面半边）。
+    // 停因事实的 wire 落位（实装核实，迁移期双轨）：sweep 补写帧停因落 stopReason
+    // （迁移期展示位，record-restart-sweep.ts 唯一停因实参）+ manifest.stopReason
+    // （findAdoptedStopReasonSync 的结清判据源）；lastRound.engineStopReason（引擎
+    // 事实位）仅 u1 判定链产出、sweep 补写帧不落 → 判据取两停因位任一命中。
+    const sweptStopReasonOf = (record) =>
+      record?.stopReason === 'interrupted-by-restart' || record?.lastRound?.engineStopReason === 'interrupted-by-restart'
     const sweptView = await pollUntil(async () => {
       try {
         const reply = await protoB.call('session.getSubagents', { sessionId: sid }, { timeoutMs: 30_000 })
         const record = (reply.subagents ?? []).find((r) => r.slug === SLUG)
         if (!record) return null
-        const sweptAnnotated = record.lastRound?.engineStopReason === 'interrupted-by-restart' && Boolean(record.lastRound?.swept)
+        const sweptAnnotated = sweptStopReasonOf(record) && Boolean(record.lastRound?.swept)
         const notOccupied = !(record.status === 'running' && record.stopReason === undefined)
         if (sweptAnnotated && notOccupied) return { record, at: Date.now() }
         return null
@@ -435,10 +442,12 @@ export async function run(ctx) {
       step: 'sweep.assert', channel: 'B', exitCode: sweptView ? 0 : 1,
       stats: { elapsedMs: elapsedSweep, lastRound: recordAfter?.lastRound ?? null, status: recordAfter?.status, stopReason: recordAfter?.stopReason ?? '(缺)' },
     })
-    ev.assert('① record 轮收条补失联：lastRound 停因 interrupted-by-restart 且 swept 附注在场', Boolean(recordAfter?.lastRound?.swept) && recordAfter?.lastRound?.engineStopReason === 'interrupted-by-restart', {
+    ev.assert('① record 轮收条补失联：停因 interrupted-by-restart 且 swept 附注在场', Boolean(recordAfter) && sweptStopReasonOf(recordAfter) && Boolean(recordAfter?.lastRound?.swept), {
       channel: 'B',
-      expected: 'lastRound.engineStopReason=interrupted-by-restart + lastRound.swept={at,evidence}',
-      actual: recordAfter ? JSON.stringify({ engineStopReason: recordAfter.lastRound?.engineStopReason, swept: recordAfter.lastRound?.swept }) : '就绪后 10s 内 getSubagents 未见收编形态',
+      expected: 'record.stopReason（或 lastRound.engineStopReason）=interrupted-by-restart + lastRound.swept={at,evidence}',
+      actual: recordAfter
+        ? JSON.stringify({ stopReason: recordAfter.stopReason, engineStopReason: recordAfter.lastRound?.engineStopReason, swept: recordAfter.lastRound?.swept })
+        : '就绪后 10s 内 getSubagents 未见收编形态',
     })
     ev.assert('③ 占用计数归零：清点命中记录从占用判据摘除（无 running 且轮收条未写的条目）', (() => {
       if (!recordAfter) return false
