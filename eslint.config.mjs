@@ -941,12 +941,13 @@ export default [
   // 同型）。提额而非 off：保留 555 软上限告警，超限即再暴露。
   // [provider-plugin-access U4] 两段式安装编排（prepare/confirm/cancel/提交回滚/
   // 卸载 provider 清理）为设计钦定的本 facade 聚合（设计文件地图指定 plugin-service.ts），
-  // 拆分需引入新的 ctx 注入边界（文件头既有裁决：属独立重构任务）——提额 630 保留
-  // 软上限告警（control-server 1060 / session-service 650 提额先例同型）。
+  // 拆分需引入新的 ctx 注入边界（文件头既有裁决：属独立重构任务）。落地时 eslint 实测
+  // 折算 660，按先例取整提额 665 保留软上限告警（control-server 1060 / session-service
+  // 665 提额先例同型），超限即再暴露。
   {
     files: ['packages/runtime/src/services/plugin-service/plugin-service.ts'],
     rules: {
-      'max-lines': ['warn', { max: 630, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 665, skipBlankLines: true, skipComments: true }],
     },
   },
   // preset-service 是 pi-presets.json 读盘 coerce 家族唯一入口（presets 逐项 / prompt 段级 /
