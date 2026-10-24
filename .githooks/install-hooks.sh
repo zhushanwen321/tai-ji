@@ -2746,7 +2746,7 @@ fi
 #   的 pre-commit 执行点）
 #   staged 命中 packages/<任意包>/src 下 .ts/.tsx/.vue 或检查脚本自身（含其单测）时
 #   触发：scripts/check-session-hidden-surface.mjs —— 全仓扫描两族判据（hidden 同名
-#   白名单 + surface 三形态读取点清单，清单外命中即红，ALLOWLIST/READ_POINTS 为唯一
+#   白名单 + surface 四形态读取点清单，清单外命中即红，ALLOWLIST/READ_POINTS 为唯一
 #   登记处）。触发范围与脚本扫描范围同构（packages/*/src 全域 glob——目录清单式触发
 #   范围必有洞，同 record-write-surface / session-census 段教训）。触发范围天然含
 #   staged 删除（scope 内文件被删 = 清单条目消失，同样必须红）：单独 staged 删除
