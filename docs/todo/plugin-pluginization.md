@@ -71,7 +71,7 @@ composer 图标/入口  →  对话流（行内呈现）  →  drawer 一级 tab
 
 ## 相关文档
 
-- [docs/plugins/architecture.md](../../plugins/architecture.md) — 插件架构总览
-- [docs/plugins/extension-points.md](../../plugins/extension-points.md) — 三层扩展点全量盘点
-- [docs/plugins/renderer-pluginization-scan.md](../../plugins/renderer-pluginization-scan.md) — renderer 扫描报告（24 候选）
+- [docs/plugins/architecture.md](../plugins/architecture.md) — 插件架构总览
+- [docs/plugins/extension-points.md](../plugins/extension-points.md) — 三层扩展点全量盘点
+- [docs/plugins/renderer-pluginization-scan.md](../plugins/renderer-pluginization-scan.md) — renderer 扫描报告（24 候选）
 - `docs/todo/plugin/` — 分域全链路分析（subagent / workflow / scheduler）
