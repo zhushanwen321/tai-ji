@@ -861,6 +861,9 @@ function outcomeToWorkflowResult(outcome: AgentOutcome): WorkflowAgentResult {
     // [D5 诊断引用登记] 失败伴随的 stderr tee 路径透传（引擎终态应答 → call.result
     // → dispatchAgentSettled 载荷；上报判据见 AgentOutcome.stderrTeePath 注释）。
     ...(outcome.stderrTeePath !== undefined ? { stderrTeePath: outcome.stderrTeePath } : {}),
+    // [subagent-observability §3.3.3] 轮终停因引擎原值透传（call.result → 成员轮收条
+    // lastRound.engineStopReason 数据源，与 one-shot 域同源）。
+    ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
     toolCalls: outcome.toolCalls,
   };
 }

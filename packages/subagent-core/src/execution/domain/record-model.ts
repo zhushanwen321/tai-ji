@@ -25,6 +25,7 @@ import type {
   AgentUsageTotal,
   ErrorFact,
   FailureCause,
+  EngineStopReason,
   ModelRef,
   ToolCall,
   Turn,
@@ -137,6 +138,18 @@ export interface AgentResult { // oe-exempt:20260930:framework:领域值对象�
    * 最终 error 分类后写入；缺省 = unknown（可重试）。type-only 引用零运行时依赖。
    */
   failureKind?: AgentFailureKind;
+  /**
+   * [subagent-observability §3.3.8/§3.3.3] 失败分类（AgentOutcome.failure 透传——
+   * 收尾边沿一次产出）。settleOneShotOutcome 消费：随轮收条 rec.lastRound.failure
+   * 落盘，list/通知消费方读事实分类；缺省 = 未分类（旧格式 / 合成结果放行）。
+   */
+  failure?: FailureCause;
+  /**
+   * [subagent-observability §3.3.3] 轮终停因引擎原值（AgentOutcome.engineStopReason
+   * 透传）。settleOneShotOutcome 消费：「正常收尾」派生判据（stop 且无失败分类 =
+   * completed）的事实输入；缺省 = 事实缺席，宿主回落派生展示词。
+   */
+  engineStopReason?: EngineStopReason;
   sessionId: string;
   toolCalls: ToolCall[];
   usage?: AgentUsageTotal;

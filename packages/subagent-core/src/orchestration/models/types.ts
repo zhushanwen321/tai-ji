@@ -16,6 +16,7 @@
  */
 
 import type {
+  EngineStopReason,
   AgentFailureKind,
   AgentOutcomeUsage as AgentUsage,
   FailureCause,
@@ -293,6 +294,12 @@ export interface AgentResult {
  * worker-message-pump dispatchAgentSettled 读本字段填 agent-settled 事件载荷。
  */
   stderrTeePath?: string;
+ /**
+ * [subagent-observability §3.3.3] 轮终停因引擎原值（AgentOutcome.engineStopReason
+ * 协议透传，经 outcomeToWorkflowResult / outcomeToAgentResult 到本形态）。成员/one-shot
+ * 轮收条 lastRound.engineStopReason 的数据源；缺省 = 事实缺席（旧格式放行）。
+ */
+  engineStopReason?: EngineStopReason;
  /**
  * Pi session ID for the subagent process (uuidv7).
  * Present when pi emits a session header (default in --mode json).

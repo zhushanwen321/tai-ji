@@ -794,10 +794,22 @@ export class RunOrchestration {
       // [U2b] 轮终簿记①-⑪归属 store.markRoundIdle（`.alive` 跨轮保留；[W4 发射点②]
       // pending 注销已随 store 簿记⑧统一发射；⑩⑪ A-lite stopReason 展示位 +
       // `.state` 收条/binding 快照——正常轮终后宿主崩溃 revive 水合不归零）。
-      this.deps.getStore().markRoundIdle(record.id, { kind: "success", content: result.text });
+      this.deps.getStore().markRoundIdle(record.id, {
+        kind: "success",
+        content: result.text,
+        // [§3.3.3] 引擎停因原值随轮收条落盘（正常收尾派生判据的事实输入）。
+        ...(result.engineStopReason !== undefined ? { engineStopReason: result.engineStopReason } : {}),
+      });
     } else {
       // [U5] 失败轮 settle（不终态化——旧一次性销毁退役，失败轮同样可续聊）。
-      this.deps.getStore().markRoundIdle(record.id, { kind: "failed", reason: result.error ?? "round failed" });
+      // [§3.3.3] 失败分类与引擎停因原值随轮收条落盘（判定链事实不再止步于 reason
+      // 串——list lastRound.failure / 通知文案点拼消费方的数据源）。
+      this.deps.getStore().markRoundIdle(record.id, {
+        kind: "failed",
+        reason: result.error ?? "round failed",
+        ...(result.failure !== undefined ? { failure: result.failure } : {}),
+        ...(result.engineStopReason !== undefined ? { engineStopReason: result.engineStopReason } : {}),
+      });
     }
     // [subagent-observability §3.3.7② one-shot 通道放行] 非 workflow origin 的一次性
     // 成员（executeAndAwait 域——G9 核实的现役调用点 canvas reviewer 等）轮终后发
@@ -828,6 +840,11 @@ export class RunOrchestration {
       sessionId: outcome.sessionId ?? record.id,
       toolCalls: [],
       ...(outcome.parsedOutput !== undefined ? { parsedOutput: outcome.parsedOutput } : {}),
+      // [subagent-observability §3.3.3] 收尾边沿事实透传（failure/engineStopReason
+      // → settleOneShotOutcome → 轮收条 rec.lastRound——one-shot 域与 workflow 域
+      // 同源，判定分类与「正常收尾」派生判据不因执行域丢失）。
+      ...(outcome.failure !== undefined ? { failure: outcome.failure } : {}),
+      ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
     };
   }
 

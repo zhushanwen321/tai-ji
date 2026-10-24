@@ -462,6 +462,9 @@ function toOutcome(result: SpawnRunResult): AgentOutcome {
     // [D5 诊断引用写入 journal 记录] 失败伴随的 stderr tee 路径透传上协议（spawn-runner 装配，
     // 判据见 AgentOutcome.stderrTeePath 注释）。
     ...(result.stderrTeePath !== undefined ? { stderrTeePath: result.stderrTeePath } : {}),
+    // [subagent-observability §3.3.3] 轮终停因引擎原值透传上协议（CollectedOutcome
+    // 收尾边沿事实 → 宿主轮收条 lastRound.engineStopReason 数据源）。
+    ...(result.engineStopReason !== undefined ? { engineStopReason: result.engineStopReason } : {}),
     toolCalls: result.toolCalls.map((tc) => ({
       name: tc.toolName,
       input: tc.args === undefined ? "" : JSON.stringify(tc.args),

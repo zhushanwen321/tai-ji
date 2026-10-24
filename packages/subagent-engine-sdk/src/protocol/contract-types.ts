@@ -525,6 +525,10 @@ export interface WorktreeHandle {
  * 一次引擎执行的终态（协议 run 终态应答的 outcome 载荷）。锚定 core
  * orchestration AgentResult 并追加引擎层字段（engineId / exitCode）。
  */
+/** [subagent-observability §3.3.3] 轮终停因引擎原值三态（引擎收尾边沿事实；宿主
+ *  ROUND_TERMINAL_STOP_REASONS 词表的协议侧同源镜像）。 */
+export type EngineStopReason = "stop" | "error" | "aborted";
+
 export interface AgentOutcome {
   content: string;
   /** 失败分诊标签。产出侧 = 引擎；缺省 = unknown = 可重试。 */
@@ -572,6 +576,14 @@ export interface AgentOutcome {
    * 仅诊断引用——文件受引擎侧尺寸轮转与过期清理管辖，读侧不得假设其永存。
    */
   stderrTeePath?: string;
+  /**
+   * [subagent-observability §3.3.3] 轮终停因引擎原值（收尾边沿事实一次产出，值域
+   * 三态与宿主 ROUND_TERMINAL_STOP_REASONS 同源）。宿主 one-shot 轮收条
+   * rec.lastRound.engineStopReason 的数据源——「正常收尾」派生判据（stop 且无失败
+   * 分类 = completed）依赖本事实。additive 可选（宪法判据③同 stderrTeePath 先例）：
+   * 旧引擎缺省 = 宿主回落派生展示词，零行为差。
+   */
+  engineStopReason?: EngineStopReason;
 }
 
 // ============================================================
