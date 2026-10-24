@@ -142,7 +142,7 @@ describe('injected 接线（D5 ①：registerSession 汇聚点按 spawn 注入�
     // staged 布局（npm 名 pi-subagent-workflow）+ dev 源码目录两种真实路径形态
     await service.initializeManagedSession(
       SID, {} as unknown as IPiEngine, '/project', 'label', '/project/s.jsonl',
-      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined,
       ['/apps/electron/resources/extensions/@zhushanwen/pi-subagent-workflow', '/repo/extensions/universal/subagent-workflow'],
     )
 
@@ -158,7 +158,7 @@ describe('injected 接线（D5 ①：registerSession 汇聚点按 spawn 注入�
 
     await service.initializeManagedSession(
       SID, {} as unknown as IPiEngine, '/project', 'label', '/project/s.jsonl',
-      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined,
       ['/apps/electron/resources/extensions/@zhushanwen/pi-session-manager', '/repo/extensions/universal/plan'],
     )
 
