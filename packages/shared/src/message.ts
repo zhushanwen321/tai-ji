@@ -589,7 +589,9 @@ const WORKFLOW_DONE_REASON_OUTCOME: Record<WorkflowDoneReason, WorkflowResultOut
   time_limited: 'failed',
   // [subagent-observability §3.3.8] 部分成功 = 存在失败成员但非全败——不落 failed
   // 计数（夸大失败数）也不落 completed（吞失败成分，即本设计反对的 done 吞失败）。
-  // neutral 初值；「部分成功」独立档呈现与计数档裁决归 u4 消费链①实施核对。
+  // 「部分成功」独立档呈现已落（u4，f64d98dbe）：TUI display-state.ts 独立档 +
+  // GUI WORKFLOW_RUN_OUTCOME_LABELS 档 + runtime 消费链 Set 单源对账；计数档 = 本表
+  // neutral（中立计数）。
   partially_succeeded: 'neutral',
 }
 

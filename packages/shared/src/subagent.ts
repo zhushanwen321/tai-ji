@@ -219,7 +219,7 @@ export interface SubagentRecord {
   /**
    * 展示维度（永久会话模型 §3.2.1，U8 下行派生视图）：上一轮为什么停。值域 =
    * subagent-core StopReason 全枚举 16 值：closedReason 沿用族 7 值（6 个可写终态
-   * 原因 + disconnected 读侧兜底）+ 展示值 4 个（interrupted / interrupted-by-restart /
+   * 原因 + disconnected 读侧兜底）+ 宿主中断/重开事实词 4 个（interrupted / interrupted-by-restart /
    * interrupted-by-parent / reopened）+ 引擎原值 3 个（stop / error / aborted——
    * ADR-0158 停因事实化，轮终写点引擎停因在场即写原值）+ 迁移期旧推断值 2 个
    * （completed / failed——历史帧解析放行与旧引擎无停因上报时的回落产出）。
