@@ -337,3 +337,99 @@ describe("[§1.4 (a)] 轮终收尾句柄就绪等待（finalizeRoundToIdle × wa
     expect(getPi.mock.results[0]?.value).toBe(newPi);
   });
 });
+
+// ── [fire-and-forget 收割] 轮终收尾不 await 窗口引擎收割（通知时延契约）：
+// dispose 挂起时失败轮 settle 链照常走完（簿记落 idle + 失败通知发出）——收割是
+// 资源回收面，通知是用户可见时延面，两者无数据依赖不得互相阻塞（2026-10-25 实测
+// 根因：await 收割把失败轮通知钉在 runtime transport 的 engine_close 3s 宽限上，
+// docs/todo/failure-notify-injection-latency-3s.md）。
+
+/** dispose 可挂起的窗口实例替身：dispose 进入后停在门上（测试手动放行）；
+ *  可注入失败轮应答（error outcome → settleRoundFailed 分支）。 */
+class HangingDisposePort extends FakeWindowEnginePort {
+  /** dispose 是否已进入（挂起链真实启动的证明——回归场景被实际执行的判据）。 */
+  disposeEntered = false;
+  /** 通知是否已在 dispose 放行前发出（settle 链不被收割阻塞的观察面）。 */
+  private releaseDispose: () => void = () => {};
+  private readonly disposeGate = new Promise<void>((resolve) => {
+    this.releaseDispose = resolve;
+  });
+  /** 非 undefined 时 run 应答带 error（走失败轮 settle 分支）。 */
+  failWith: string | undefined;
+
+  override async dispose(): Promise<void> {
+    this.disposeEntered = true;
+    await this.disposeGate;
+    this.disposed += 1;
+  }
+
+  override run(task: AgentCallOpts, ctx: RunContext): Promise<EngineRunResult> {
+    this.runCalls.push({ task, ctx });
+    const handle: EngineHandle = {
+      data: { v: 1, engineId: this.id, sessionRef: {}, adapterVersion: "fake-1" },
+    };
+    if (this.failWith !== undefined) {
+      const failed: AgentOutcome = {
+        content: "",
+        engineId: this.id,
+        sessionId: `session-${this.id}`,
+        sessionFile: this.sessionFile,
+        error: this.failWith,
+      };
+      return Promise.resolve({ handle, outcome: failed });
+    }
+    return super.run(task, ctx);
+  }
+
+  /** 测试尾cleanup：放行挂起的 dispose（防悬挂 promise 泄漏出用例）。 */
+  release(): void {
+    this.releaseDispose();
+  }
+}
+
+describe("[fire-and-forget 收割] 轮终通知不被窗口引擎 dispose 时延阻塞", () => {
+  it("dispose 挂起期间失败轮 settle 链照常完成（簿记落 idle + 失败通知发出）", async () => {
+    const ports: HangingDisposePort[] = [];
+    setWorkflowWindowEngineGateway({
+      processModelOf: () => "per-window",
+      createPort: (engineId) => {
+        const port = new HangingDisposePort(engineId);
+        port.sessionFile = path.join(dataDir, `hang-${ports.length + 1}.jsonl`);
+        port.failWith = "engine boom (hanging dispose regression)";
+        ports.push(port);
+        return port;
+      },
+    });
+    registerEngine("pi", () => new HangingDisposePort("pi-registry"));
+    const record = makeRunningRecord("sa-notify-not-gated");
+    const notifySpy = vi.fn();
+    const chatRounds = makeChatRounds(record, {
+      // 通知面窄替身（本用例只观察失败轮直投通道 notifyRecord → notify）。
+      getNotifyHost: (() => ({
+        notifyComplete: vi.fn(),
+        notify: notifySpy,
+        emitPendingUnregister: vi.fn(),
+      })) as unknown as ChatRoundsDeps["getNotifyHost"],
+    });
+
+    chatRounds.startFirstChatRound(record, { task: "round-1", slug: "chat-window" });
+
+    // 收割链已启动（dispose 进入并挂起）——回归场景真实在场的证明：修复前
+    // finalizeRoundToIdle await 本挂起链，下方通知断言必然超时红。
+    await vi.waitFor(() => {
+      expect(ports[0]).toBeDefined();
+      expect(ports[0]!.disposeEntered).toBe(true);
+    });
+    // dispose 仍挂起（门未放行）的同时，失败轮 settle 链已走完：
+    // 簿记落 idle + 失败通知发出（通知不被资源回收时延阻塞的核心断言）。
+    expect(record.status).toBe("idle");
+    expect(record.round).toBe(1);
+    expect(notifySpy).toHaveBeenCalledTimes(1);
+    const notifyPayload = notifySpy.mock.calls[0]?.[0] as { id: string; error?: string } | undefined;
+    expect(notifyPayload?.id).toBe(record.id);
+    expect(notifyPayload?.error).toContain("engine boom");
+
+    ports[0]!.release();
+    await vi.waitFor(() => expect(ports[0]!.disposed).toBe(1));
+  });
+});
