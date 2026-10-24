@@ -4374,6 +4374,28 @@
    "serial": false,
    "run": "cd packages/subagent-core && pnpm vitest run src/execution/__tests__/subagent-list-last-round-parity.test.ts",
    "owner": "packages/subagent-core"
+  },
+  {
+   "id": "E2E-SPAWNISOL-01",
+   "summary": "真机批次 spawn 隔离契约 guard（mock 层零 token）：settings 播种剥 packages/skills 且凭据继承（认证不破坏）、discovery.json 空态在盘（缺失即回落 preset 全默认勾选——宿主扩展/ skill 目录经 discovery 源进真机 argv 的缺口，batch-s3 现场实证）、schema 与 runtime discovery-store v2 形态对齐",
+   "scope": [
+    "e2e/fixtures/batch-real-helpers.ts",
+    "packages/runtime/src/infra/pi/discovery-store.ts",
+    "packages/pi-rpc/src/spawn-args.ts",
+    "packages/pi-subagent-cli/src/spawn-args.ts"
+   ],
+   "layer": "L1",
+   "assets": [
+    {
+     "kind": "spec",
+     "ref": "e2e/spawn-isolation-guard.spec.ts"
+    }
+   ],
+   "trigger": "on-diff",
+   "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+   "serial": false,
+   "run": "npx playwright test e2e/spawn-isolation-guard.spec.ts --project=electron",
+   "owner": "e2e"
   }
  ]
 }

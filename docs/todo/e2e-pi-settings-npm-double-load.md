@@ -1,6 +1,6 @@
 # e2e 真机链路：宿主全局 settings 的 npm 版 pi-subagent-workflow 同进程双载
 
-状态：待用户裁决（2026-10-24 登记；A11 第三轮批次 S3b 失败根因已核实为下述双载——实证仅 S3b 一条，s1/WRR-A6 的同族归因为推断级未核实，见现象节分档）。
+状态：根因修正 + 隔离修复已落地，待 S3b 真机复跑确认后关闭（2026-10-25 复核）。**原登记根因（npm 版与 staged 版同进程双载）经 2026-10-25 逐项核实不成立**：真机两条 pi spawn 链恒带 `--no-extensions`（packages/pi-rpc/src/spawn-args.ts:168 主链 + packages/pi-subagent-cli/src/spawn-args.ts:81 孙链，单测锁定），pi 1.0.0 实装下该 flag 结构性屏蔽 settings packages 清单（dist/core/resource-loader.js:403-404——`noExtensions` 时 settings 解析结果不进加载集；探针实证：宿主 agentDir 无 `-ne` 加载 14 扩展含 npm 版，带 `-ne` 加载 0 扩展），且真机 `PI_CODING_AGENT_DIR` 已隔离播种（settings packages 为空）。核实中定位的真实缺口：真机播种不含 discovery.json → runtime 回落「preset 全默认勾选」→ 宿主 `~/.pi/agent/extensions` 经 discovery 源进真机 `--extension` 白名单（S3b 现场 argv 实证：pi-statusline / xyz-agent-bridge 两个宿主扩展进真机进程）。修复已落地：`seedRealCredentials` 增补 discovery 空态播种（v2 schema 三 kind 全空）+ e2e/spawn-isolation-guard.spec.ts 三契约锁定（播种剥 packages/skills 凭据继承 / discovery 空态在盘 / schema 漂移拦截；playwright electron 3 passed）。S3b 失败的真实机制载体待复跑判归：宿主扩展污染已结构性切断，复跑 PASS 即关闭；仍 FAIL 则按新证据重新归因。s1/WRR-A6 同族归因仍为推断级，随复跑一并复核。
 
 ## 现象
 

@@ -115,7 +115,33 @@ export function seedRealCredentials(
     path.join(dst, 'settings.json'),
     JSON.stringify({ defaultProvider, defaultModel, retry: source['retry'] ?? { enabled: false } }, null, JSON_INDENT),
   )
+  writeEmptyDiscoveryConfig(dst)
   opts.extraSeed?.(dst)
+}
+
+/**
+ * 播种 discovery.json 空态（v2 schema，三 kind 全空）：结构性切断 discovery 源的宿主目录
+ * 勾选。discovery.json 缺失时 runtime 回落「全部 preset 目录默认勾选」（discovery-store
+ * DEFAULT_DISCOVERY），宿主自定义扩展目录（如 ~/.pi/agent/extensions 下的用户扩展）会被
+ * 六源发现的 discovery 源收进 pi spawn 的 --extension 白名单——真机批次因此加载宿主个人
+ * 扩展，与「用户扩展/skill 清单不进 e2e」的播种纪律冲突（batch-s3 现场实证：宿主
+ * pi-statusline / xyz-agent-bridge 进了真机 argv）。
+ *
+ * schema 形态对齐 runtime discovery-store v2（version:2 + skill/agent/extension 各
+ * { projectPaths, globalPaths }）；形态漂移由 e2e/spawn-isolation-guard.spec.ts 断言拦截。
+ * 全空文件被保留（不被当脏数据删除），runtime 读回即空勾选，不回落默认。
+ */
+function writeEmptyDiscoveryConfig(agentDir: string): void {
+  const emptyPaths = { projectPaths: [] as string[], globalPaths: [] as string[] }
+  fs.writeFileSync(
+    path.join(agentDir, 'discovery.json'),
+    JSON.stringify({
+      version: 2,
+      skill: { ...emptyPaths },
+      agent: { ...emptyPaths },
+      extension: { ...emptyPaths },
+    }, null, JSON_INDENT),
+  )
 }
 
 // ── 诊断落盘（两种落点现状共用核心） ──────────────────────────────────────
