@@ -220,7 +220,7 @@ export async function run(ctx) {
   } else {
     // 回放先行 = 设计内分工（丢失类由 ring 回放兜住，D4 只接处理失败类）：
     // 本剧本黑盒手段制造不出「终态帧处理半途失败」，该子面如实登记（uncovered → degraded，不硬凑）
-    const line = 'D4 两步恢复专属触发面（recoverStalledSession，useChat.ts:658）：黑盒断连场景由 ring 回放先行收尾（message_end/complete 为 stream 类入 ring，subscription-state snapshot 回放先于 stateSnapshot occupancy 到达），残留先被回放解决、D4 不触发——「处理失败类」触发需终态帧处理链半途抛错，faux/routeWebSocket 均无法注入，未验证'
+    const line = 'D4 两步恢复专属触发面（recoverStalledSession，useChat.ts:658）：黑盒断连场景由 ring 回放先行收尾（message_end/complete 为 stream 类入 ring，subscription-state snapshot 回放先于 stateSnapshot occupancy 到达），残留先被回放解决、D4 不触发——「处理失败类」触发需终态帧处理链半途抛错，属装配能力边界：routeWebSocket 只能拦/改/丢帧、不能使页面内已 bundle 的 handler 抛错，CDP console 也触不到 bundle 内部闭包，黑盒注入不可达；该子面的机制级覆盖由单元层锚定（useChat.test.ts D4 组 spyOn 注入），真机形态的归宿（永久豁免 / 补注入路径）待主 agent 裁决'
     uncovered.push(line)
     ev.assert('断连自愈（残留收尾 + 权威接管）经重连回放达成（机制中立终态断言）', healedHtml.includes(END_MARK) && isGeneratingReset, {
       channel: 'A',

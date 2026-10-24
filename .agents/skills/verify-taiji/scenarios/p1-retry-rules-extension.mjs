@@ -26,18 +26,25 @@
  * 剧本控制的面 = 模型 id 字面量（ensureLlm 的 llm.models / engineDefaults.pi 可自由命名）。
  *
  * 三段设计（同一实例、同一 mock server、两个独立 session）：
- *   前置：config.setRetryConfig 开启 pi 原生重试（enabled=true, maxRetries=2,
- *     baseDelayMs=0 零退避）——mock-http 装配默认 retry.enabled=false（ensureLlm 防剧本
- *     耗尽慢速重放），不开则改写永远不触发重试。
+ *   段 0 前置（基线可达性）：config.setRetryConfig 开启 pi 原生重试（enabled=true,
+ *     maxRetries=2, baseDelayMs=0 零退避）——mock-http 装配默认 retry.enabled=false
+ *     （ensureLlm 防剧本耗尽慢速重放），不开则改写永远不触发重试；再用
+ *     config.setRetryRules([])（settings 空保存产品路径）让 runtime 落盘 ext-config
+ *     基线（runtime 对缺失文件跳过落盘——config-service.ts:277，a8 首跑根因）。
  *   段 1 规则生效链：主队 step0 派发成员（模型 mockllm/mock-sub-tier_limit_exceeded，
  *     成员队 = 空数组 → 每次请求 404 耗尽）→ 断言成员模型请求 ≥2 次（初错 + ≥1 重试，
- *     maxRetries=2 预期 3）+ 改写标记持久化进子会话树（`[taiji-retry:` + 原文保留）。
+ *     maxRetries=2 预期 3）+ 孙进程 raw mirror 出现 auto_retry_start 帧（pi 原生重试
+ *     真实发生的最原始证据；record 轮收条 retryAttempts 当前断供，见 gotchas）+
+ *     改写标记持久化进子会话树（`[taiji-retry:` + 原文保留）。
  *   段 1.5 settings round-trip：config.setRetryRules 写一条自定义规则 → RPC 读回一致 →
- *     直读 ext-config 文件断言形状（version/customRules/effectiveRules + custom source
- *     条目 + builtin 基线在 effectiveRules）→ setRetryRules([]) 删除恢复。
- *   段 2 停用回落：config.setRetryConfig 关闭（enabled=false, maxRetries=0）→ 再派成员
- *     （同模型同错误形态）→ 断言只 1 次错误请求（改写仍发生但 pi 前置门拦截——§3.3.12
- *     停用通道语义：停用复用 pi 原生 retry 配置，门在改写词表判定之前）。
+ *     config.retryRules 广播帧（条件轮询）→ 直读 ext-config 文件断言形状
+ *     （version/customRules/effectiveRules + custom source 条目 + builtin 基线）→
+ *     setRetryRules([]) 删除恢复。
+ *   段 2 停用回落（主队 step3 紧接段 1 通知轮，中间无备用纯文本步——a8 首跑错步教训）：
+ *     config.setRetryConfig 关闭（enabled=false, maxRetries=0）→ 再派成员（同模型同
+ *     错误形态）→ 断言只 1 次错误请求 + 原始事件流无 auto_retry_start（改写仍发生但
+ *     pi 前置门拦截——§3.3.12 停用通道语义：停用复用 pi 原生 retry 配置，门在改写
+ *     词表判定之前）。
  *   段间衔接：等主队游标 ≥3（p0-subagent-workflow-dispatch 同款 fail-fast 形态）。
  *
  * 断言通道：B（config.* RPC 回执 / getSubagents record）+ C（mock.requests 计数、
@@ -66,7 +73,13 @@ const CUSTOM_RULE = {
   source: 'custom',
 }
 
-/** 主队队列：段 1（step0-3）+ 段 2（step4-7），两段共用同一 per-model 游标（mock-http 坑 2）。 */
+/**
+ * 主队队列：段 1（step0-2）+ 段 2（step3-5）+ 尾部备用（step6-7），两段共用同一
+ * per-model 游标（mock-http 坑 2）。段 2 派发**紧接**段 1 通知轮（step2→step3）：
+ * 段间没有多余纯文本步——a8 首跑实测教训：备用步夹在两段之间时，段 2 首轮会吃掉
+ * 备用文本步（无 toolCall）→ 成员根本没派发（history 无 RETRY-OFF-DISPATCHED、
+ * record 查无、计数 0）。备用步只能落在队列尾部（p0 同款：段间衔接等游标即消费完）。
+ */
 const mainQueue = [
   {
     text: '派一个子任务去核对重试规则：',
@@ -85,7 +98,6 @@ const mainQueue = [
   },
   { text: 'RETRY-ON-DISPATCHED 成员已派发，等待结果通知。', stopReason: 'stop' },
   { text: 'retry-on-notified', stopReason: 'stop' },
-  { text: 'retry-on-idle', stopReason: 'stop' },
   {
     text: '再派一个子任务核对停用回落：',
     toolCalls: [
@@ -104,6 +116,7 @@ const mainQueue = [
   { text: 'RETRY-OFF-DISPATCHED 成员已派发，等待结果通知。', stopReason: 'stop' },
   { text: 'retry-off-notified', stopReason: 'stop' },
   { text: 'retry-off-idle', stopReason: 'stop' },
+  { text: 'parent-idle-final', stopReason: 'stop' },
 ]
 
 export const meta = {
@@ -134,14 +147,17 @@ export const meta = {
     models: [MAIN_MODEL, SUB_MODEL],
   },
   provable: [
-    'retry 配置经产品通道生效：config.setRetryConfig 开启（回读 enabled=true）与停用（回读 enabled=false）',
+    'retry 配置经产品通道生效：config.setRetryConfig 开启（回读 enabled=true 且 settings.json retry 段落盘）与停用（回读 enabled=false）',
+    '基线规则落盘前提：config.setRetryRules([])（settings 空保存）后 ext-config 文件在场，effectiveRules 含 generic-rpm-limit（runtime 语义：文件不在场跳过落盘）',
     '段 1 规则生效链：成员模型收到 ≥2 次请求（第一次 404 错误 + ≥1 次重试；maxRetries=2 预期 3 次）',
+    '段 1 原生重试的直接证据：孙进程 stdout raw mirror 出现 auto_retry_start 帧（pi 原生重试循环真实发生）',
+    '段 1 record 轮收条 turns=3（3 次请求各计一轮 = 初错 + 2 次重试）',
     '改写标记持久化：子会话树含 [taiji-retry: 标记且原始 404 错误文本保留在前段（追加式非替换式）',
     '错误形态按预期注入：成员请求全部为 404 + body type=mock_llm_script_exhausted（模型 id 字面量进入 errorMessage 的载体）',
-    'settings round-trip：config.setRetryRules 写入 → RPC 读回 customRules 含 source=custom 条目',
+    'settings round-trip：config.setRetryRules 写入 → RPC 读回 customRules 含 source=custom 条目 + config.retryRules 广播帧到达',
     'ext-config 磁盘事实：retry-rules-ext-config.json 存在、version=1、customRules/effectiveRules 形状合法、effectiveRules 含 custom 条目与 builtin 基线（generic-rpm-limit）',
     '删除恢复：config.setRetryRules([]) 后 RPC 读回空且文件 effectiveRules 不再含 custom 条目',
-    '段 2 停用回落：pi 原生门关闭（enabled=false/maxRetries=0）后同一错误形态只 1 次请求（改写被前置门拦截，不触发重试）',
+    '段 2 停用回落：pi 原生门关闭（enabled=false/maxRetries=0）后同一错误形态只 1 次请求且原始事件流无 auto_retry_start（改写被前置门拦截，不触发重试）',
     '两段成员 record 都走到终态（重试耗尽后失败如实分类，档 A 回落）',
   ],
   notProvable: [
@@ -150,7 +166,9 @@ export const meta = {
     '指数退避节奏：baseDelayMs=0 短路退避换验收速度；退避由 pi 原生承担（探针 auto_retry_start delayMs 已实证）',
     'remote 覆盖层（configs/remote/retry-rules.json 拉取 + remote source 合并）：需真实远端通道，本剧本只覆盖编译期基线（builtin）与 custom 层',
     'conditional / non_retryable verdict 的运行时 keep 路径：错误形态选型为 retryable（generic-rpm-limit）；两层序排除语义由 shared/extension 单测对拍覆盖',
-    '轮收条 failure 的 class/kind 分类值断言（§3.3.2 分类码表消费面，归 W1 域验收）',
+    'record 轮收条 retryAttempts（P5 重试计数）：当前实装断供（AgentResult 无该字段 → settleOneShotOutcome 不透传），属生产缺口；raw mirror 的 auto_retry_start 已从更原始的面证明重试发生，字段修复后本剧本可切回 record 断言',
+    '轮收条 failure 的 class/kind 分类值断言（§3.3.2 分类码表消费面，归 W1 域验收；a8 首跑实测 404 归 protocol_unsupported 即该域形态）',
+    'ext-config 文件缺失态的基线行为边界：runtime 对缺失文件跳过落盘（config-service.ts:277 注释语义「文件不在场 = 无生效通道，首次 settings 保存写点自然并入」）——默认未保存过 settings 的用户基线规则不生效，本剧本以「已保存过设置页的用户」为前置（段 0 落盘），缺口本身单列上报不进剧本断言',
     'mock 回复无真实模型语义：编排质量、工具选择、真实耗时与 token 成本',
   ],
 }
@@ -236,17 +254,101 @@ async function waitRecordTerminal(protocol, sessionId, slug, timeoutMs) {
   return { records, record }
 }
 
+/**
+ * 读孙进程 stdout 原始事件镜像（runtime 侧落盘 <dataDir>/logs/pi-subagent-<date>-
+ * <recordId>.jsonl；镜像读取侧 = infra/subagent-control/mirror.ts，写入器 =
+ * pi-subagent-cli/src/raw-mirror.ts）。这是「pi 到底 emit 了什么」的最原始证据面——
+ * 不依赖 core/runtime 的任何字段透传。
+ */
+/** 列出 logs 下全部孙进程 raw mirror 文件（兜底通道；按 recordId 匹配失败时用文件集差分）。 */
+function listRawMirrorFiles(dataDir) {
+  const logDir = path.join(dataDir, 'logs')
+  if (!fs.existsSync(logDir)) return []
+  return fs
+    .readdirSync(logDir)
+    .filter((f) => f.startsWith('pi-subagent-') && f.endsWith('.jsonl'))
+    .map((f) => path.join(logDir, f))
+}
+
+function findRawMirrorFiles(dataDir, recordId) {
+  const safe = String(recordId ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
+  if (safe === '') return []
+  return listRawMirrorFiles(dataDir).filter((f) => path.basename(f).includes(safe))
+}
+
+/** 读镜像文件文本（多文件按文件名序拼接）。 */
+function readRawMirrorText(files) {
+  return files.map((f) => readTextFile(f)).join('\n')
+}
+
+/** 计数原始事件流里的某类帧（JSONL 逐行 `"type":"<name>"`）。 */
+function countEventType(text, type) {
+  return [...text.matchAll(new RegExp(`"type"\\s*:\\s*"${type}"`, 'g'))].length
+}
+
+/**
+ * 条件轮询 raw mirror：文件在场且谓词满足（原始流写盘实时，record 终态后应就位）。
+ * 匹配策略：优先按 recordId（文件名含之）；找不到时退化为「全部镜像文件」——调用方
+ * 用 `exclude` 传段前文件快照做差分（段 2 场景），段 1 无旧文件可直接用全集。
+ */
+async function waitRawMirror(dataDir, recordId, predicate, timeoutMs, exclude = []) {
+  const excluded = new Set(exclude)
+  const deadline = Date.now() + timeoutMs
+  let files = []
+  let text = ''
+  while (Date.now() < deadline) {
+    files = findRawMirrorFiles(dataDir, recordId)
+    if (files.length === 0) files = listRawMirrorFiles(dataDir).filter((f) => !excluded.has(f))
+    text = readRawMirrorText(files)
+    if (files.length > 0 && predicate(text)) return { files, text }
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  return { files, text }
+}
+
+/** 读 <dataDir>/logs 下指定前缀的日志文本（诊断附件：扩展 argv / 孙进程 stderr）。 */
+function readLogsByPrefix(dataDir, prefixes) {
+  const logDir = path.join(dataDir, 'logs')
+  if (!fs.existsSync(logDir)) return ''
+  return fs
+    .readdirSync(logDir)
+    .filter((f) => prefixes.some((p) => f.startsWith(p)))
+    .map((f) => `# ${f}\n${readTextFile(path.join(logDir, f))}`)
+    .join('\n')
+}
+
+/** 条件轮询文件内容满足谓词（原子写窗口内可能读到空/半截：重读不盲等）。 */
+async function waitFileParsed(filePath, predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  let parsed = null
+  while (Date.now() < deadline) {
+    const raw = readTextFile(filePath)
+    if (raw !== '') {
+      try {
+        parsed = JSON.parse(raw)
+        if (predicate(parsed)) return parsed
+      } catch {
+        /* 半截 JSON：重读 */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 300))
+  }
+  return parsed
+}
+
 export async function run(ctx) {
   const { protocol, ev, log, dataDir, repo, instance } = ctx
   const uncovered = []
   const gotchas = [
+    'a8 首跑根因（铁证①②红）：ext-config 文件在段 1 期间不存在 → extension 读侧回落空集 → 无规则可判 → 不改写 → 404 文本对 pi 词表 0 命中 → 不重试。runtime 对缺失文件跳过落盘（config-service.ts:277「文件不在场 = 无生效通道，首次 settings 保存写点自然并入」）——本剧本段 0 经 config.setRetryRules([])（settings 空保存产品路径）显式落盘基线，缺口本身单列上报',
     '错误形态选型：mock-llm 无 HTTP 429/500 注入通道（仅 400/404 + 200 step.error 文本——后者是 stopReason=stop 的正常消息，进不了 message_end 的 error 判定）；唯一可控错误文本面 = 404 耗尽 body 内嵌的模型 id 字面量。选 tier_limit_exceeded（基线规则 generic-rpm-limit）而非 429：pi-ai RETRYABLE 词表含 429/500/timeout 等宽词表（node_modules retry.js 实装逐词核对），429 嵌 id 会被原生词表直接命中，无法区分「taiji 规则改写触发」与「pi 原生词表兜底」；tier_limit_exceeded 对 pi 双词表 0 命中——改写是重试唯一触发源',
     'mock-http 装配默认 retry.enabled=false（lib/instance.mjs ensureLlm 防剧本耗尽慢速重放）——断言①前必须经 config.setRetryConfig 产品通道开启；停用回落（段 2）即回到该默认语义',
-    '热重载边界：extension 侧 loadConfig 为读时刷新（mtime+size，llm-shared 契约），message_end 判定点每次直读文件——写 ext-config 后无需等待窗口，下一轮判定即生效；在途退避不中断（重试状态机由 pi 持有）。本剧本 setRetryRules 写后未再派成员（round-trip 位于两段之间），未消费该窗口',
+    '热重载边界：extension 侧 loadConfig 为读时刷新（mtime+size，llm-shared 契约），message_end 判定点每次直读文件——写 ext-config 后无需等待窗口，下一轮判定即生效；在途退避不中断（重试状态机由 pi 持有）。本剧本写盘后立即派成员，未依赖任何等待窗口',
     '成员请求全部 HTTP 404 是设计内形态（错误注入即「剧本耗尽」）——与 p0 剧本「404 = 耗尽噪音、铁证只计 200」口径相反，本剧本计数必须含 404',
     'provider 层重试默认 0（llm-retry.ts「provider.maxRetries 未设 = 0」）——若 models.json 显式配 provider.maxRetries>0，pi-ai 会在 message_end 之前重试，污染「改写触发」归因',
-    '主队游标 per-model 共享（mock-http README 坑 2）——段 2 消息发送前等主队游标 ≥3 衔接（p0 同款 fail-fast）',
+    '主队游标 per-model 共享（mock-http README 坑 2）——段 2 派发步紧接段 1 通知轮（中间无备用纯文本步；a8 首跑实测：备用步夹在两段之间会被段 2 首轮吃掉，成员不派发），衔接等游标 ≥3',
     '重试次数语义：agent-session.js:787 门为 _retryAttempt >= maxRetries——maxRetries=2 预期 3 次请求；断言给 ≥2 容差（off-by-one 漂移不误红），实际值看 stats',
+    'retryAttempts 断言通道（a8b 实测裁决）：record 轮收条 retryAttempts 当前断供——引擎侧 spawn-runner.ts:573-577 已在 retryAttempts>0 时随 outcome 上报，但 core 的 AgentResult（subagent-core/src/execution/domain/record-model.ts:129-160）无该字段、settleOneShotOutcome 的 markRoundIdle 也未透传 → record jsonl 恒缺键（P5 计账消费缺口，单列上报）。本剧本改走孙进程 stdout raw mirror（<dataDir>/logs/pi-subagent-<date>-<recordId>.jsonl）的 auto_retry_start 帧计数——pi 输出的最原始镜像，独立探针实测 pi 1.0.0 --mode rpc 输出该帧（requests=3 / auto_retry_start=2）',
   ]
 
   // ══ 装配自检 ══════════════════════════════════════════════════
@@ -294,6 +396,61 @@ export async function run(ctx) {
     actual: JSON.stringify(retryOnReply?.config ?? retryOnReply ?? {}).slice(0, 300),
   })
   ev.step({ step: 'retry.enable', channel: 'B', exitCode: 0, stats: { enabled: retryOnReply?.config?.enabled, maxRetries: retryOnReply?.config?.maxRetries, baseDelayMs: retryOnReply?.config?.baseDelayMs } })
+
+  // ══ 段 0：基线规则落盘（settings 空保存产品路径） ═══════════════
+  // a8 首跑根因修复：ext-config 文件不在场时 extension 读侧回落空集（DEFAULT_RETRY_RULES_EXT_CONFIG）
+  // → 基线规则不生效 → 不改写 → 404 文本对 pi 词表 0 命中 → 不重试。runtime 对缺失
+  // 文件跳过落盘（config-service.ts:277「文件不在场 = 无生效通道，首次 settings 保存
+  // 写点自然并入」）。这里走 config.setRetryRules([])——等价用户在设置页点一次保存
+  // （无自定义规则），runtime 写 effectiveRules = 基线合并视图。
+  const extConfigPath = path.join(dataDir, 'agent', 'config', 'retry-rules-ext-config.json')
+  const settingsPath = path.join(dataDir, 'agent', 'settings.json')
+  let seedReply = null
+  try {
+    seedReply = await protocol.call('config.setRetryRules', { customRules: [] }, { replyType: 'config.retryRules', timeoutMs: 60_000 })
+  } catch (e) {
+    ev.assert('段 0：config.setRetryRules([]) 基线落盘（settings 空保存）', false, {
+      channel: 'B',
+      expected: '回执 customRules=[]',
+      actual: `RPC error: ${String(e?.message ?? e).slice(0, 300)}`,
+    })
+    return { uncovered: ['基线落盘失败，段 1/段 2 未执行（规则恒空集，改写不会发生）'], gotchas }
+  }
+  ev.assert('段 0：settings 空保存回执 customRules 为空', Array.isArray(seedReply?.customRules) && seedReply.customRules.length === 0, {
+    channel: 'B',
+    expected: 'customRules=[]',
+    actual: JSON.stringify(seedReply?.customRules ?? []).slice(0, 200),
+  })
+  // 孙进程读取面：settings.json 的 retry 段必须落盘（pi 重试门读它，不是 RPC 回执）。
+  const settingsAfter = await waitFileParsed(settingsPath, (p) => p?.retry?.enabled === true, 15_000)
+  ev.assert('段 0：settings.json retry 段落盘（enabled=true, maxRetries=2——孙进程重试门读取面）', settingsAfter?.retry?.enabled === true && settingsAfter?.retry?.maxRetries === 2, {
+    channel: 'C',
+    expected: 'retry={enabled:true, maxRetries:2, baseDelayMs:0}',
+    actual: JSON.stringify(settingsAfter?.retry ?? null).slice(0, 300),
+  })
+  // ext-config 落盘：effectiveRules = 基线合并视图（extension 判定唯一消费段）。
+  const seededConfig = await waitFileParsed(
+    extConfigPath,
+    (p) => p?.version === 1 && Array.isArray(p?.effectiveRules) && p.effectiveRules.some((r) => r.id === BASELINE_RULE_ID),
+    15_000,
+  )
+  ev.assert('段 0：ext-config 基线落盘（effectiveRules 含 generic-rpm-limit，extension 判定段在场）', seededConfig?.effectiveRules?.some((r) => r.id === BASELINE_RULE_ID) === true, {
+    channel: 'C',
+    expected: `effectiveRules 含 ${BASELINE_RULE_ID}`,
+    actual: (seededConfig?.effectiveRules ?? []).map((r) => r.id).join(',') || `文件缺失或形状非法：${extConfigPath}`,
+  })
+  ev.attach('ext-config-seeded', JSON.stringify(seededConfig ?? null, null, 2).slice(0, 40_000))
+  // 诊断附件：runtime 日志中的扩展 argv 行（孙进程白名单池的输入面——若段 1 仍不重试，
+  // 此附件用于判定「扩展是否进孙进程」与「规则是否命中」的分叉）。
+  const runtimeLog = readLogsByPrefix(dataDir, ['runtime-'])
+  ev.attach(
+    'runtime-extension-argv',
+    runtimeLog
+      .split('\n')
+      .filter((l) => l.includes('--extension') || l.includes('pi-retry-rules'))
+      .join('\n') || '(runtime 日志无 --extension / pi-retry-rules 行)',
+  )
+  ev.attach('pi-task-stderr', readLogsByPrefix(dataDir, ['pi-task-stderr-']).slice(0, 80_000) || '(无 pi-task-stderr-*.log)')
 
   // ══ 段 1：规则生效链（改写 → pi 原生重试） ════════════════════
   const createdA = await protocol.call('session.create', { cwd: repo, label: 'p1-retry-on' }, { timeoutMs: 120_000 })
@@ -385,6 +542,31 @@ export async function run(ctx) {
     expected: `${EXHAUSTED_ERROR_TYPE} 在 ${RETRY_MARKER_PREFIX} 之前（原文保留在前段）`,
     actual: `exhaustedAt=${diskTextA.indexOf(EXHAUSTED_ERROR_TYPE)} markerAt=${diskTextA.indexOf(RETRY_MARKER_PREFIX)}`,
   })
+  // 铁证③：孙进程 stdout 原始事件流出现 auto_retry_start/completed（pi 原生重试循环
+  // 真实发生的直接证据）。裁决：不走 record 轮收条 retryAttempts —— a8b 实测该字段
+  // 当前断供（AgentResult 无 retryAttempts，spawn-runner 产出后被 core 映射链丢弃，
+  // 见 gotchas）；raw mirror（<dataDir>/logs/pi-subagent-*.jsonl）是 pi 输出的最原始
+  // 镜像，不受任何字段透传影响。独立探针已实证 pi 1.0.0 --mode rpc 输出该帧。
+  const mirrorA = await waitRawMirror(
+    dataDir,
+    recA.record?.subagentId,
+    (t) => countEventType(t, 'auto_retry_start') >= 1,
+    60_000,
+  )
+  const retryStartsA = countEventType(mirrorA.text, 'auto_retry_start')
+  const retryEndsA = countEventType(mirrorA.text, 'auto_retry_end')
+  ev.assert('铁证③：孙进程原始事件流在盘（raw mirror 文件存在）', mirrorA.files.length > 0, {
+    channel: 'C',
+    expected: `logs/pi-subagent-*-${recA.record?.subagentId}.jsonl 存在`,
+    actual: mirrorA.files.length > 0 ? mirrorA.files.map((f) => path.basename(f)).join(',') : `未找到（logs 目录：${fs.existsSync(path.join(dataDir, 'logs')) ? fs.readdirSync(path.join(dataDir, 'logs')).slice(0, 20).join(',') : '缺失'}）`,
+  })
+  ev.assert('铁证③：原始事件流出现 auto_retry_start（pi 原生重试真实发生，预期 2 次 = maxRetries）', retryStartsA >= 1, {
+    channel: 'C',
+    expected: 'auto_retry_start ≥1（maxRetries=2 预期 2）',
+    actual: `auto_retry_start=${retryStartsA} auto_retry_end=${retryEndsA}`,
+  })
+  ev.step({ step: 'native.retry.frames', channel: 'C', exitCode: 0, stats: { autoRetryStart: retryStartsA, autoRetryEnd: retryEndsA } })
+  ev.attach('raw-mirror-A', mirrorA.text.slice(0, 160_000))
   ev.attach('subagents-disk-A', diskTextA.slice(0, 120_000))
 
   // ══ 段间衔接：等段 1 通知轮把主队游标推到 step3（p0 同款 fail-fast） ══
@@ -411,6 +593,10 @@ export async function run(ctx) {
   // effectiveRules 断言走 ext-config 文件直读）。
   let setRulesReply = null
   let setRulesErr = ''
+  // 广播截点必须在 RPC 之前取：runtime handler 先 reply 再 broadcast（两次 ws.send），
+  // reply 帧 resolve 时广播帧可能还在同一 tick 之后到达——直接同步快照会漏帧
+  // （a8 首跑实测：config.retryRules 帧未入 events，但写侧断言全绿）。改条件轮询。
+  const sinceBroadcast = protocol.events.length
   try {
     setRulesReply = await protocol.call('config.setRetryRules', { customRules: [CUSTOM_RULE] }, { replyType: 'config.retryRules', timeoutMs: 60_000 })
   } catch (e) {
@@ -428,30 +614,30 @@ export async function run(ctx) {
     actual: `builtinRules=${(setRulesReply?.builtinRules ?? []).length}`,
   })
   // 保存成功后广播 config.retryRules（retry-rules-config-message-handler.ts:40-44）。
-  ev.assert('round-trip 广播：config.retryRules 帧到达（多窗口同步通道）', protocol.events.some((e) => e.type === 'config.retryRules'), {
+  // 条件轮询等待（删掉 a8 首跑的同步快照断言——那是采集时机缺陷，不是广播缺失）。
+  let broadcastOk = false
+  let broadcastSeen = ''
+  try {
+    const evt = await protocol.waitFor((e) => e.type === 'config.retryRules', { since: sinceBroadcast, timeoutMs: 15_000 })
+    broadcastOk = true
+    broadcastSeen = JSON.stringify(evt.payload ?? {}).slice(0, 200)
+  } catch (e) {
+    broadcastSeen = String(e?.message ?? e).slice(0, 300)
+  }
+  ev.assert('round-trip 广播：config.retryRules 帧到达（多窗口同步通道）', broadcastOk, {
     channel: 'B',
-    expected: "events 含 config.retryRules",
-    actual: `types=${[...new Set(protocol.events.map((e) => e.type))].filter((t) => t.startsWith('config.')).join(',') || '<无>'}`,
+    expected: 'since 截点后 events 出现 config.retryRules',
+    actual: broadcastOk ? broadcastSeen : `未等到（${broadcastSeen}）`,
   })
 
   // ext-config 文件直读（断言④）：runtime 写侧与 extension 读侧共 <dataDir>/agent/config/
   // retry-rules-ext-config.json（remote-retry-rules.ts RETRY_RULES_CONFIG_REL ↔ llm-shared
-  // getConfigPath('retry-rules') 契约一致）。
-  const extConfigPath = path.join(dataDir, 'agent', 'config', 'retry-rules-ext-config.json')
-  const extConfigDeadline = Date.now() + 15_000
-  let extConfig = null
-  while (Date.now() < extConfigDeadline) {
-    const raw = readTextFile(extConfigPath)
-    if (raw !== '') {
-      try {
-        extConfig = JSON.parse(raw)
-        if (Array.isArray(extConfig?.effectiveRules) && extConfig.effectiveRules.some((r) => r.id === CUSTOM_RULE.id)) break
-      } catch {
-        /* 原子写窗口内可能读到空/半截：轮询重读 */
-      }
-    }
-    await new Promise((r) => setTimeout(r, 300))
-  }
+  // getConfigPath('retry-rules') 契约一致；extConfigPath 在段 0 已声明）。
+  const extConfig = await waitFileParsed(
+    extConfigPath,
+    (p) => p?.version === 1 && Array.isArray(p?.effectiveRules) && p.effectiveRules.some((r) => r.id === CUSTOM_RULE.id),
+    15_000,
+  )
   ev.assert('ext-config 磁盘事实：文件存在且形状合法（version=1 + customRules/effectiveRules 数组）', extConfig?.version === 1 && Array.isArray(extConfig?.customRules) && Array.isArray(extConfig?.effectiveRules), {
     channel: 'C',
     expected: 'version=1 + customRules[] + effectiveRules[]',
@@ -527,6 +713,9 @@ export async function run(ctx) {
   await protocol.subscribe(sidB)
   ev.step({ step: 'session.create.B', channel: 'B', exitCode: 0, stats: { sessionId: sidB } })
 
+  // 段 2 前的 raw mirror 文件快照（段 2 断言用文件集差分，防 recordId 语义漂移）。
+  const mirrorFilesBefore = listRawMirrorFiles(dataDir)
+
   const seg2Start = (instance.mockLlm?.requests ?? []).length
   const sinceB = protocol.events.length
   await protocol.send(sidB, 'dispatch one subagent (p1-retry-rules-extension 段 2, retry off)')
@@ -566,6 +755,21 @@ export async function run(ctx) {
     expected: `恰好 1 × model=${SUB_MODEL}（对照段 1 的 ≥2）`,
     actual: `${memberSegB.length} 条`,
   })
+  // 停用态原始事件流应无 auto_retry_start（与段 1 的 ≥1 成对照）。先断镜像文件在盘
+  // （否则「0 帧」是假绿）。
+  const mirrorB = await waitRawMirror(dataDir, recB.record?.subagentId, () => true, 30_000, mirrorFilesBefore)
+  const retryStartsB = countEventType(mirrorB.text, 'auto_retry_start')
+  ev.assert('停用回落：段 2 原始事件流在盘（raw mirror 存在，防假绿前提）', mirrorB.files.length > 0, {
+    channel: 'C',
+    expected: `logs/pi-subagent-*-${recB.record?.subagentId}.jsonl 存在`,
+    actual: mirrorB.files.length > 0 ? mirrorB.files.map((f) => path.basename(f)).join(',') : '<未找到>',
+  })
+  ev.assert('停用回落：段 2 原始事件流无 auto_retry_start（门关闭后 pi 未进入重试循环）', retryStartsB === 0, {
+    channel: 'C',
+    expected: 'auto_retry_start = 0（对照段 1 的 ≥1）',
+    actual: `auto_retry_start=${retryStartsB}`,
+  })
+  ev.attach('raw-mirror-B', mirrorB.text.slice(0, 80_000))
 
   log(`done sidA=${sidA} sidB=${sidB} segA=${memberSegA.length} segB=${memberSegB.length}`)
   return { uncovered, gotchas }
