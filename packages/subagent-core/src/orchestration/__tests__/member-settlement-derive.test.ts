@@ -17,7 +17,7 @@ import type { RunSettlementRecord } from "../terminal-actions.ts";
 import {
   deriveRunOutcomeFromMembers,
   settleMembersIntoFinalSettlement,
-} from "../terminal-actions.ts";
+} from "../run-member-settlement.ts";
 
 const BASE_OPTS: AgentCallOpts = { prompt: "task", agent: "member-agent" };
 

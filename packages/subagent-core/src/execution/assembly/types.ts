@@ -458,17 +458,6 @@ export interface SubagentListItem {
    */
   lastError?: string;
   /**
-   * [§3.3.6/§3.3.9 budget 分轴显式] 四轴预算结构（null = 显式无界）。u3 交付结构位
-   * 与缺省形态；list 侧产出待预算轴持久化裁决（record 层无预算轴字段），见
-   * recordToListItem 同批注释。缺省全 null = 任务级默认无超时的如实表达（规则 19）。
-   */
-  budget?: {
-    maxTurns: number | null;
-    timeoutMs: number | null;
-    budgetTokens: number | null;
-    budgetTimeMs: number | null;
-  };
-  /**
    * [§3.3.3/§3.3.4 失联标注（清点结果）] 宿主重启失联清点命中的轮收条附注（swept
    * 标记 + evidence 摘要——恢复动作 = 查 evidence 指针；续聊即重建，或重新派发）。
    * undefined = 非清点命中轮。

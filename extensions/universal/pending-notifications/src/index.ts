@@ -592,9 +592,10 @@ function parseUnregisterEvent(data: unknown): ParsedUnregister | null {
  *  权威单点在 protocol pending-entries（ext-simplify-17 D10）——本函数是对 protocol
  *  导出的类型收窄包装（PendingStatus 枚举留在本包，protocol 不引 extension 侧类型），
  *  既有调用点零改动；bte 对账写侧同引 protocol 单点，两侧映射不再可能漂移。
- *  词表演化背景（U5 / §3.2.5 通知词表对齐）见 protocol 实现处 JSDoc。 */
+ *  词表演化背景（U5 / §3.2.5 通知词表对齐）见 protocol 实现处 JSDoc；unknown 缺省
+ *  成员两侧词表同批收录，收窄赋值成立无需断言。 */
 function mapReasonToStatus(reason: string): PendingStatus {
-	return mapReasonToStatusImpl(reason) as PendingStatus;
+	return mapReasonToStatusImpl(reason);
 }
 
 /** 格式化 active 列表为可读文本 */

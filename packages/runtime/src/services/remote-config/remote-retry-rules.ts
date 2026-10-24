@@ -36,6 +36,9 @@ import { loadRemoteConfig, refreshRemoteConfig } from './remote-config-fetch.js'
 /** ext-config 文件相对路径（与 extension 侧 llm-shared getConfigPath('retry-rules') 契约一致）。 */
 const RETRY_RULES_CONFIG_REL = join('config', 'retry-rules-ext-config.json')
 
+/** JSON 落盘缩进（全仓 JSON_INDENT = 2 约定，与 remote-config-fetch 同款）。 */
+const JSON_INDENT = 2
+
 function retryRulesExtConfigPath(): string {
   return join(getPiAgentDir(), RETRY_RULES_CONFIG_REL)
 }
@@ -95,7 +98,7 @@ function computeEffectiveRules(customRules: RetryableErrorRule[]): RetryableErro
 function writeRetryRulesExtConfig(config: RetryRulesExtConfig): void {
   const path = retryRulesExtConfigPath()
   withFileLockSync(path, () => {
-    atomicWrite(path, `${JSON.stringify(config, null, 2)}\n`)
+    atomicWrite(path, `${JSON.stringify(config, null, JSON_INDENT)}\n`)
   })
 }
 

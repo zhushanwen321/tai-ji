@@ -326,10 +326,11 @@ function listLastRoundOf(r: SubagentRecord): SubagentListLastRound | undefined {
  *  [subagent-observability §3.3.6 查询入口补全] 轮收条事实字段：lastRound（引擎停因
  *  原值/失败分类/接管三态/正文摘要/turns/usage——消费方先读事实，outcome 展示词保留
  *  为兼容读侧）+ lastError（§3.3.5 派生——最后一个非空轮失败）+ swept 失联标注
- *  （§3.3.4 清点附注随 lastRound 走）。budget 分轴结构位已入类型契约（list 侧产出
- *  待预算轴持久化落地——见类型注释）；evidence 取证指针随查询漏斗附加（record-store
- *  attachListEvidence：eventsFile + lastSeq；stdout 日志路径随 stderrTeePath 死链
- *  成因排查项一并落）。
+ *  （§3.3.4 清点附注随 lastRound 走）。list 条目不落 budget 键（record 层为事实库、
+ *  不存派发配置——键缺席 = 本读取侧不承载预算信息，不等于无界；预算触顶事实看
+ *  轮收条停因 harness.turn_budget_exhausted，§3.3.6 读取侧分源）；evidence 取证指针
+ *  随查询漏斗附加（record-store attachListEvidence：eventsFile + lastSeq；stdout 日志
+ *  路径随 stderrTeePath 死链成因排查项一并落）。
  */
 export function recordToListItem(r: SubagentRecord): SubagentListItem {
   const lastRound = listLastRoundOf(r);
