@@ -1309,7 +1309,13 @@ function handleMessageEnd(event: PiMessageEndEvent, sid: string): PiTranslatedEv
     )
     return [{ kind: 'noop' }]
   }
-  const tsMs = typeof msg.timestamp === 'number' ? msg.timestamp : Date.now()
+  // [chat-flow-consistency D3 修正] 合成 entry.timestamp = 到达时刻（≈ pi appendMessage 落盘
+  // 时刻），不用 msg.timestamp——pi 的 message 级 timestamp 是消息开始时刻（faux 更早：播种
+  // 即预创建），而 JSONL entry 级 timestamp 是追加时刻（≈ 产出结束，session-entry-mapper
+  // applyEntryEndTimes 的 reload 回填语义）。live 帧自称落盘 entry 镜像，timestamp 必须与
+  // 持久化 entry 同义，否则定稿重建写出的 endedAt ≈ 开始时刻（回合定格恒 1s + 区间倒挂，
+  // A1b 验收判定项 4 实证）——live ≡ reload 的同源对齐由此恢复。
+  const tsMs = Date.now()
   const entry: PiMessageEntry = {
     type: 'message',
     parentId: null,
