@@ -16,6 +16,10 @@ verify-taiji 场景 `p0-subagent-round-failure-facticity`（A1）两轮实测：
 
 时延在「record idle 广播 → subagent-bg-notify custom entry 广播」之间：notifier.notify → delivery.send（notify-ports）→ runtime 投递（session-delivery-registry，RECONCILE_MIN_INTERVAL_MS=200 非解释项）→ 父 pi 会话注入 → custom entry 广播。嫌疑焦点 = 父 pi 会话的注入时机（turn boundary 等待？extension 注入通道的轮询/事件粒度？）。
 
+## 新增对照证据（2026-10-24 a2a6 验收实测）
+
+成功路径（背景单成员 `subagent_start` 完成通知）：`details.endedAt → message.customStart 到达` 实测 **80ms / 95ms**（a2a6 两轮断言），≤1s 预算通过。失败路径（同域、同通道、settleRoundFailed 的直投载荷）：稳定 ~3s。两条通道差异只在「哪条结算分支构造通知」——时延嫌疑收窄到**失败通知分支的载荷/投递链**（settleRoundFailed 直投 vs 成功分支 notifyComplete→route），不是 poi 注入面/实例负载的通用时延。
+
 ## 排查入口
 
 1. 在注入执行方（delivery-port → pi 侧注入）两端加时间戳探针跑一轮 A1，二分定位 3s 落在哪一跳；
