@@ -301,7 +301,7 @@ export function collectHits(rootDir = REPO_ROOT, roots = scanRoots(rootDir)) {
       }
       let inImport = false
       codeLines(text).forEach((line, idx) => {
-        // import / export...from 行是声明不是用法（标识符形态的 isBtwSession 等会命中
+        // import / export...from 行是声明不是用法（标识符形态的 isKnownBtwLine 等会命中
         // import 行）——跳过；多行 import 以 from 子句结束为界
         if (inImport) {
           if (/\bfrom\s+['"]/.test(line)) inImport = false
@@ -411,7 +411,7 @@ function makeSampleTree(root) {
   write('packages/demo/src/red-surface.ts', [
     'export const d = (s: { surface?: string }) => s.surface === 1',
     "export const e = { surface: 'btw' }",
-    'export const f = surfaceBySessionId',
+    'export const f = isKnownBtwLine',
   ].join('\n'))
   // 红样本③：ALLOWLIST 同行号漂移（登记行写错 → 命中落清单外）
   write('packages/demo/src/red-drift.ts', 'export const g = { hidden: true }\n')
