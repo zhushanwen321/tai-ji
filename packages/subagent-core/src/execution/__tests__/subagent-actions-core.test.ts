@@ -1321,3 +1321,114 @@ describe("recordToListItem 轮收条事实字段（subagent-observability u3）"
     expect("evidence" in noEvidence).toBe(false);
   });
 });
+
+// ============================================================
+// listHandler 组合链：证据与轮收条事实（subagent-observability F1-39/F1-42/F1-46）
+// ============================================================
+// 断言走 listHandler 全链（collectRecords 漏斗条目 × getFullRecord 富化合并），
+// 不只直调 recordToListItem——evidence 只附加在 collectRecords 的 mergedRecords
+// 浅拷贝上（attachListEvidence 单点），富化替换丢漏斗产物即在本层拦截。
+describe("listHandler 组合链：evidence/lastRound/lastError 两路在场（F1-39）", () => {
+  it("内存路：富化对象不带 evidence 时从漏斗条目保留（修复前全链丢失的回归锚）", () => {
+    const funneled = makeRec({
+      id: "bg-mem-1",
+      status: "running",
+      lastError: "provider 500: upstream error",
+      lastRound: { engineStopReason: "error" },
+      evidence: { eventsFile: "/records/bg-mem-1.events", lastSeq: 3 },
+    });
+    // 内存富化形态（recordToSubagent 投影）：lastRound/lastError 直读在场，evidence 不产。
+    const full = makeRec({
+      id: "bg-mem-1",
+      status: "running",
+      lastError: "provider 500: upstream error",
+      lastRound: { engineStopReason: "error" },
+    });
+    const r = listHandler(
+      makeService({
+        collectRecords: vi.fn(() => [funneled]),
+        getFullRecord: vi.fn(() => full),
+      }),
+      { includeFinished: true },
+    );
+    expect(r.response.items).toHaveLength(1);
+    expect(r.response.items[0].evidence).toEqual({
+      eventsFile: "/records/bg-mem-1.events",
+      lastSeq: 3,
+    });
+    expect(r.response.items[0].lastRound).toMatchObject({ engineStopReason: "error" });
+    expect(r.response.items[0].lastError).toBe("provider 500: upstream error");
+  });
+
+  it("磁盘路：全量重建 full 无 lastRound/evidence（buildRecord 形态）→ 漏斗条目 fold 派生事实补缺；lastError 取 full", () => {
+    // 漏斗 light 形态（扫描探测路径 projectFoldToLight 派生）：lastRound 带收条帧
+    // turns 快照与 stderrTeePath、evidence 漏斗附加；在途形态 light.turns = 0。
+    const funneled = makeRec({
+      id: "bg-disk-1",
+      status: "running",
+      turns: 0,
+      lastRound: {
+        engineStopReason: "error",
+        turns: 6,
+        stderrTeePath: "/logs/pi-2026-10-23-bg-disk-1.jsonl",
+      },
+      evidence: {
+        eventsFile: "/records/bg-disk-1.events",
+        lastSeq: 12,
+        stderrTeePath: "/logs/pi-2026-10-23-bg-disk-1.jsonl",
+      },
+    });
+    // 磁盘全量重建 full 形态（buildRecord）：lastError 透传，lastRound/evidence 不恢复。
+    const full = makeRec({
+      id: "bg-disk-1",
+      status: "running",
+      turns: 14,
+      lastError: "429: tier_limit_exceeded",
+    });
+    const r = listHandler(
+      makeService({
+        collectRecords: vi.fn(() => [funneled]),
+        getFullRecord: vi.fn(() => full),
+      }),
+      { includeFinished: true },
+    );
+    const item = r.response.items[0];
+    expect(item.evidence).toEqual({
+      eventsFile: "/records/bg-disk-1.events",
+      lastSeq: 12,
+      stderrTeePath: "/logs/pi-2026-10-23-bg-disk-1.jsonl",
+    });
+    expect(item.lastRound).toMatchObject({
+      engineStopReason: "error",
+      turns: 6,
+      stderrTeePath: "/logs/pi-2026-10-23-bg-disk-1.jsonl",
+    });
+    expect(item.lastError).toBe("429: tier_limit_exceeded");
+  });
+});
+
+describe("listLastRoundOf turns 语义（F1-46：收条自身轮终值优先）", () => {
+  it("收条快照 turns 在场时不被 live 计数器覆盖（下一轮轮始起累加的 r.turns 不漂移上一轮收条）", () => {
+    const item = recordToListItem(
+      makeRec({
+        id: "bg-turns-1",
+        status: "running",
+        turns: 9, // live 计数器（新一轮已推进）
+        lastRound: { engineStopReason: "stop", turns: 6 }, // 上一轮收条定格
+      }),
+    );
+    expect(item.lastRound?.turns).toBe(6);
+  });
+
+  it("旧快照（无 turns 字段）回落 live r.turns（兼容存量 RoundFacts 形态）", () => {
+    const item = recordToListItem(
+      makeRec({
+        id: "bg-turns-2",
+        status: "idle",
+        turns: 4,
+        lastRound: { engineStopReason: "stop" },
+      }),
+    );
+    expect(item.lastRound?.turns).toBe(4);
+  });
+});

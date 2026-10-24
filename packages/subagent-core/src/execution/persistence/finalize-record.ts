@@ -256,7 +256,10 @@ export async function doFinalizeRecord(
  *     被接管轮：engineStopReason 无值 + result 空正文 + 不写 FailureCause，§3.3.1 P6）。
  *   - usage / retryAttempts — 轮收条 usage 快照（最终尝试值）与重试计数（P5 计账）。
  *   - observations — 观察性事实（§3.3.10 降级通道，不改写 failure）。
- * fact 字段缺席时 markRoundIdle 行为与接线前逐字节一致（存量生产链零迁移）。
+ *   - stderrTeePath — 失败轮的引擎诊断 tee 路径（AgentOutcome.stderrTeePath 透传，
+ *     随轮收条事实落盘 → list evidence 装配；仅诊断引用，读侧不假设文件永存）。
+ * fact 字段缺席 = 旧引擎形态——停因展示词回落轮成败判据派生（failed 轮 = failed /
+ * 其余 = completed），轮终簿记与结清照常（结清按轮终事实产 completed/failed/no_result）。
  */
 export type RoundSettlementOutcome =
   | {
@@ -267,6 +270,7 @@ export type RoundSettlementOutcome =
       usage?: AgentUsageTotal;
       retryAttempts?: number;
       observations?: string[];
+      stderrTeePath?: string;
     }
   | {
       kind: "failed";
@@ -277,6 +281,7 @@ export type RoundSettlementOutcome =
       usage?: AgentUsageTotal;
       retryAttempts?: number;
       observations?: string[];
+      stderrTeePath?: string;
     };
 
 /**

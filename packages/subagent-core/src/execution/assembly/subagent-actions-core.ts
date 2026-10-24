@@ -301,16 +301,20 @@ export function mapExternalState(status: ExecutionStatus): ExternalState {
 
 /**
  * [subagent-observability §3.3.6 查询入口补全] list 条目的 lastRound 载荷组装：
- * 事实快照（RoundFacts——markRoundIdle 写点产出）直读透传 + 正文摘要/累计轮数从
- * 聚合字段派生（快照不重复存储——RoundFacts 语义；turns = 收条时点的累计 turn 数，
- * 与 record-round-idle 帧 turns 同源）。undefined = 尚无已完成的轮（首轮在途/存量）。
+ * 事实快照（RoundFacts——markRoundIdle 写点产出）直读透传 + 正文摘要从聚合字段
+ * 派生（快照不重复存储——RoundFacts 语义）。turns 取收条自身快照（lastRound.turns
+ * = markRoundIdle 时点定格的累计轮数；live r.turns 是计数器、下一轮轮始起继续
+ * 累加，会覆盖出「上一轮收条读到新轮轮数」的漂移——快照优先，live 值仅作旧快照
+ * 无 turns 字段的兼容回落）。undefined = 尚无已完成的轮（首轮在途/存量）。
  */
 function listLastRoundOf(r: SubagentRecord): SubagentListLastRound | undefined {
-  if (r.lastRound === undefined) return undefined;
+  const lastRound = r.lastRound;
+  if (lastRound === undefined) return undefined;
   return {
-    ...r.lastRound,
+    ...lastRound,
     ...(r.result !== undefined ? { result: summarizeResultForJournal(r.result) } : {}),
-    ...(r.turns !== undefined ? { turns: r.turns } : {}),
+    // 收条自身轮终值优先；live r.turns 仅作旧快照（无 turns 字段）的兼容回落。
+    ...(lastRound.turns === undefined && r.turns !== undefined ? { turns: r.turns } : {}),
   };
 }
 
@@ -329,8 +333,8 @@ function listLastRoundOf(r: SubagentRecord): SubagentListLastRound | undefined {
  *  （§3.3.4 清点附注随 lastRound 走）。list 条目不落 budget 键（record 层为事实库、
  *  不存派发配置——键缺席 = 本读取侧不承载预算信息，不等于无界；预算触顶事实看
  *  轮收条停因 harness.turn_budget_exhausted，§3.3.6 读取侧分源）；evidence 取证指针
- *  随查询漏斗附加（record-store attachListEvidence：eventsFile + lastSeq；stdout 日志
- *  路径随 stderrTeePath 死链成因排查项一并落）。
+ *  随查询漏斗附加（record-store attachListEvidence：eventsFile + lastSeq + stderrTeePath
+ *  ——引擎诊断 tee 路径仅诊断引用，文件受引擎侧轮转清理管辖，读侧不假设其永存）。
  */
 export function recordToListItem(r: SubagentRecord): SubagentListItem {
   const lastRound = listLastRoundOf(r);
@@ -455,9 +459,19 @@ export function listHandler(
   // collectRecords 磁盘源是 light（无 totalTokens/model 等）：SubagentListItem 对
   // LLM 消费方暴露 totalTokens/model，逐项 getFullRecord 补全（per-file 缓存，仅首次
   // 全量解析；显式 tool 调用非渲染热路径，成本可接受）。
-  const items: SubagentListItem[] = all.map((r) =>
-    recordToListItem(service.queries.getFullRecord(r.id) ?? r),
-  );
+  // [F1-39 证据链] 富化替换不得丢查询漏斗产物：evidence 只附加在 collectRecords 的
+  // mergedRecords 浅拷贝上（attachListEvidence 单点），getFullRecord（内存 recordToSubagent
+  // / 磁盘 buildRecord 全量重建）不产 evidence；磁盘全量重建也不恢复轮收条快照
+  // lastRound（fold 派生视图只随扫描 light 恢复）。合并序 = full 优先、漏斗条目补缺。
+  const items: SubagentListItem[] = all.map((r) => {
+    const full = service.queries.getFullRecord(r.id) ?? r;
+    const merged: SubagentRecord = {
+      ...full,
+      ...(r.evidence !== undefined ? { evidence: r.evidence } : {}),
+      ...(full.lastRound === undefined && r.lastRound !== undefined ? { lastRound: r.lastRound } : {}),
+    };
+    return recordToListItem(merged);
+  });
   const running = items.filter((i) => i.status === "running").length;
 
   return { response: { running, items } };

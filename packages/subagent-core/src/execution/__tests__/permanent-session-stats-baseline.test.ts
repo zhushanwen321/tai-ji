@@ -299,7 +299,7 @@ describe("U7①b 冷复活轮收条事实与 lastError 恢复（§3.3.6/§3.3.5�
     expect(view.lastError).toBe("429: tier_limit_exceeded");
   });
 
-  it("成功收条（旧帧无事实字段形态）→ lastError 不伪造、lastRound 不落空壳、统计水合照常", async () => {
+  it("成功收条（旧帧无事实字段形态）→ lastError 不伪造、lastRound 只恢复帧上事实（收条轮数）、统计水合照常", async () => {
     const child = path.join(sessionsDir, "child.jsonl");
     writeIdentityChild(child, "bg-ok-facts");
     const stream = createRecordEventStream(() => manifestDir);
@@ -318,9 +318,10 @@ describe("U7①b 冷复活轮收条事实与 lastError 恢复（§3.3.6/§3.3.5�
     const rec = piRecord("bg-ok-facts", child);
     store2.markResurrected(rec, true);
 
-    // 旧帧无事实字段（迁移期回落帧形态）→ lastRound 不落空壳（与写侧 roundFactsOf
-    // 同判据）、lastError 不伪造（无失败事实）；统计维度水合不受影响。
-    expect(rec.lastRound).toBeUndefined();
+    // 旧帧无引擎事实字段（迁移期回落帧形态）→ lastRound 不伪造事实（无停因/失败
+    // 分类等键），只恢复帧上承载的收条轮数（F1-46：turns 是收条帧事实，水合与写侧
+    // roundFactsOf 同判据透传）；lastError 不伪造（无失败事实）；统计维度水合不受影响。
+    expect(rec.lastRound).toEqual({ turns: 3 });
     expect(rec.lastError).toBeUndefined();
     expect(rec.turnCount).toBe(3);
     expect(rec.round).toBe(1);

@@ -43,7 +43,7 @@
 // | acquireWriteLease(sessionFile, id) | store 内部 acquire 动作（writeAliveMarker 唯一包装；spawn 侧 sessionFile 回填挂钩用，D3a 时机①，U2b 消费） | `.alive` 写（失败响亮抛错） |
 //
 // ── legacy 例外原语（workflow D7 例外族 / 监督器放弃专用；新调用面禁用）──
-// | markFinalized(record, reason) | closed 终态化（仅 workflow D7 例外族 / 监督器放弃 / 引擎死亡不可接管兜底消费；副作用编排 abort/kill/disarm/CAS/promote 留调用方） | binding 快照（updateRecordBinding，best-effort）→ entry/archive → 终态 manifest writeSync → `.alive` 删（`.state` 收条已退场——磁盘终态由事件流 record-settled 帧判定） |
+// | markFinalized(record, reason) | closed 终态化（仅 workflow D7 例外族 / 监督器放弃族消费——引擎死亡走正常轮终 error 停因，无独立死亡写点；副作用编排 abort/kill/disarm/CAS/promote 留调用方） | binding 快照（updateRecordBinding，best-effort）→ entry/archive → 终态 manifest writeSync → `.alive` 删（`.state` 收条已退场——磁盘终态由事件流 record-settled 帧判定） |
 // | markCancelled(record) | cancelled 终态化（仅 workflow D7 例外族 abort 路径；tombstone endedAt） | 同 markFinalized 写序（legacyTerminalWrite 共用编排，恒返回 true） |
 //
 // ── [永久会话模型 / u-foundation 骨架] 新意图原语（设计 subagent-permanent-session-model.md
@@ -590,8 +590,13 @@ export class RecordStore {
    *      空窗）；⑧ pending 注销发射点②（进程已死，从活跃后代差集移除——经
    *      setPendingUnregister 注入，未注入时跳过）；⑨ reportRecordTransition（entry
    *      携带新 round 与本轮 result）；
-   *      ⑩ [A-lite] stopReason 展示位（成功轮 completed / 失败轮 failed——status 已
-   *      idle，endedAt 不写）；⑪ [A-lite / U7] 轮终磁盘面（锚分派对齐 markSettled：
+   *      ⑩ [subagent-observability §3.3.3 停因事实化] stopReason 写引擎原值（stop/
+   *      error/aborted 优先；旧引擎无停因上报回落推断值 failed/completed——迁移期
+   *      回落，被接管轮不写——status 已 idle，endedAt 不写）+ rec.lastRound 轮收条
+   *      事实快照（RoundFacts：停因/失败分类/接管三态/收条轮数 turns/usage/重试计数/
+   *      观察项/诊断 tee 路径——下轮轮始不清）；结清发射按轮终事实产 SettlementReason
+   *      （completed/failed/cancelled/no_result，roundSettlementReasonOf——簿记⑧同点）；
+   *      ⑪ [A-lite / U7] 轮终磁盘面（锚分派对齐 markSettled：
    *      pi 腿 binding 快照 / zcode 腿锚键 binding 快照——轮终停因由 record-round-idle
    *      事件帧承载，正常轮终后
    *      宿主崩溃 revive 水合 turns/tokens 不归零）；⑫ [B2] 轮终派生 manifest 投影
@@ -1145,8 +1150,11 @@ export class RecordStore {
    * [subagent-observability §3.3.6] list 条目 evidence 取证指针附加（mergedRecords
    * 查询漏斗单点）：eventsFile = `<recordsDir>/<id>.events`（D3 落点推导——recordsDir
    * 与 manifest 同目录接线，record-events.recordEventsPath）；lastSeq = fold 水位
-   * （eventStreamFace.foldOf——已接受事件最高 seq）。附加在浅拷贝上（磁盘源 light 是
-   * scanFile 缓存条目，原地写会污染缓存复用对象）。
+   * （eventStreamFace.foldOf——已接受事件最高 seq；journal seq 区间 = [1, lastSeq]，
+   * append-only 单流下界恒 1）；stderrTeePath = 最近轮收条携带的引擎诊断 tee 路径
+   * （rec.lastRound 事实透传——仅诊断引用，文件受引擎侧轮转清理管辖，读侧不假设
+   * 其永存）。附加在浅拷贝上（磁盘源 light 是 scanFile 缓存条目，原地写会污染缓存
+   * 复用对象）。
    * 缺席语义（类型注释同步）：事件面未接线（无 manifestDir 的纯内存测试形态）或
    * 无事件流事实（fold lastSeq = 0——entry-only / manifest-only 存量）= evidence
    * 缺省，不产指向不存在文件的指针。
@@ -1157,7 +1165,11 @@ export class RecordStore {
     for (const [id, rec] of byId) {
       const lastSeq = this.eventStreamFace?.foldOf(id).lastSeq ?? 0;
       if (lastSeq <= 0) continue;
-      const evidence: SubagentListEvidence = { eventsFile: recordEventsPath(recordsDir, id), lastSeq };
+      const evidence: SubagentListEvidence = {
+        eventsFile: recordEventsPath(recordsDir, id),
+        lastSeq,
+        ...(rec.lastRound?.stderrTeePath !== undefined ? { stderrTeePath: rec.lastRound.stderrTeePath } : {}),
+      };
       byId.set(id, { ...rec, evidence });
     }
   }

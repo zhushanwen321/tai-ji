@@ -479,6 +479,8 @@ export interface SubagentListItem {
  * 既有纪律不 import shared 主入口，跨包形状一致由 runtime 投影产出侧 + 对拍测试
  * 锚定）。停因是引擎/宿主原值（completed/failed 是派生展示词，不经本通道——
  * list 的 outcome 字段承载展示词）。
+ * [有意偏差] stderrTeePath 为 core list 证据链字段（evidence 装配供源）——shared
+ * 侧（renderer lastRound 展示通道）暂不承载，出现透传需求时 shared 同批加字段。
  */
 export interface SubagentListLastRound {
   /** 引擎停因原值（string 跨进程契约；undefined = 无停因——被接管轮）。 */
@@ -497,16 +499,31 @@ export interface SubagentListLastRound {
   retryAttempts?: number;
   /** 观察性事实（谓词未满足等降级通道）。undefined = 无观察项。 */
   observations?: string[];
+  /**
+   * 引擎子进程 stderr tee 文件绝对路径（失败轮诊断引用——AgentOutcome.stderrTeePath
+   * 事实透传）。仅诊断引用：文件受引擎侧轮转与过期清理管辖，读侧不得假设其永存。
+   * undefined = 成功轮 / 引擎未上报。
+   */
+  stderrTeePath?: string;
   /** 失联清点附注（清点写点落键）。undefined = 非清点命中轮。 */
   swept?: { at: number; evidence: string };
 }
 
-/** [§3.3.6] list 条目 evidence 取证指针（journal 事件文件 + fold 水位）。 */
+/** [§3.3.6] list 条目 evidence 取证指针（journal 事件文件 + fold 水位 + 引擎诊断 tee 路径）。 */
 export interface SubagentListEvidence {
   /** record 事件文件绝对路径（journal 落盘事实源——seq 区间读侧的物理定位）。 */
   eventsFile?: string;
-  /** fold 水位 = 已接受事件的最高 seq（journal seq 区间上界；0 = 空流）。 */
+  /**
+   * fold 水位 = 已接受事件的最高 seq（journal seq 区间 [1, lastSeq] 的上界——
+   * append-only 单流下界恒 1；0 = 空流）。
+   */
   lastSeq?: number;
+  /**
+   * 引擎子进程 stderr tee 文件绝对路径（最近轮收条携带的失败诊断引用——仅诊断
+   * 引用：文件受引擎侧轮转与过期清理管辖，读侧不得假设其永存）。
+   * undefined = 无失败轮 / 引擎未上报。
+   */
+  stderrTeePath?: string;
 }
 
 /** background 启动的内层响应（挂在 SubagentToolResult.bgResponse）。 */
@@ -624,7 +641,8 @@ export interface SubagentRecord {
   /**
    * [subagent-observability §3.3.6] 取证指针（查询漏斗 mergedRecords 单点附加，
    * 见 record-store.attachListEvidence）：eventsFile（`<recordsDir>/<id>.events`，
-   * D3 落点推导）+ lastSeq（fold 水位 = 已接受事件最高 seq）。undefined = 事件流
+   * D3 落点推导）+ lastSeq（fold 水位 = 已接受事件最高 seq）+ stderrTeePath（最近
+   * 轮收条的引擎诊断 tee 路径，仅诊断引用不假设文件永存）。undefined = 事件流
    * 未接线（纯内存形态）/ 无事件流事实（entry-only / manifest-only 存量）。
    */
   evidence?: SubagentListEvidence;
@@ -691,9 +709,11 @@ export interface SubagentRecord {
    */
   worktree?: boolean;
   /**
-   * 对话轮次计数（modeless 波1 起全 record 语义）。round 仅在内存维护
-   * （doFinalizeRoundToIdle 递增），跨重启不恢复（round 无磁盘持久化）；
-   * 非 idle record 为 undefined。内存源由 recordToSubagent 从 ExecutionRecord.round 派生视图。
+   * 对话轮次计数（modeless 波1 起全 record 语义）。随轮次事件帧持久化
+   * （round-started 携带 / round-idle 推进 / reopened 归零），跨重启由
+   * projectFoldToLight（磁盘重建）/ hydrateReviveBaseline（冷复活水合）从事件流
+   * 折叠恢复。undefined = 尚无轮次事件（新 record 首轮运行前）。内存源由
+   * recordToSubagent 从 ExecutionRecord.round 派生视图。
    */
   round?: number;
   /**
