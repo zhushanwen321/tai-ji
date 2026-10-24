@@ -25,7 +25,11 @@ import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useSessionStore } from '@/stores/session'
 import { useTrayCounts } from '@/components/panel/tray/useTrayCounts'
-import { __resetBtwLineMembershipForTest, noteBtwLinesPulled } from '@/composables/panel/btw-line-membership'
+import {
+  __resetBtwLineMembershipForTest,
+  isKnownBtwLine,
+  noteBtwLinesPulled,
+} from '@/composables/panel/btw-line-membership'
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
@@ -461,6 +465,57 @@ describe('P-invisible·任务托盘：D9③ 派生视图抑制（btw 线不映�
     // 范围、不可见；§6 取舍表）。此处断言「拉了但行集仍归零」的新形态。
     expect(apiMocks.getSubagents).toHaveBeenCalledWith(lineId)
     expect(apiMocks.getWorkflows).toHaveBeenCalledWith(lineId)
+  })
+
+  it('在途竞态：补拉未回时切回已缓存线会话，旧 sid 的迟到回写不得解除抑制（时效守卫回归）', async () => {
+    const lineId = 'line-tray-race'
+    const lineSubagent = makeSubagent({ subagentId: 'a-race', status: 'running' })
+    const lineWorkflow = makeWorkflow({ runId: 'wf-race', status: 'running' })
+    // 首次拉取对 lineId 返回线的派生记录（与下方预种一致——D13 拉取 watch 切到 lineId
+    // 时会用 RPC 结果覆盖分区，两边同内容保证覆盖幂等，判别力只剩 derivedSuppressed）
+    apiMocks.getSubagents.mockImplementation(async (sid: string) => ({
+      subagents: sid === lineId ? [lineSubagent] : [],
+      oversize: false,
+    }))
+    apiMocks.getWorkflows.mockImplementation(async (sid: string) => ({
+      workflows: sid === lineId ? [lineWorkflow] : [],
+      oversize: false,
+    }))
+    // 挂载 sid = SID（未缓存主会话）→ watch 内 ensure 触发 session.list 全量拉取并挂起
+    // （在途补拉）；此时把焦点切到已缓存线会话（同步命中路径），旧 sid 的 Promise 续写
+    // 随后才到达——回写前无 sid 时效守卫会把 derivedSuppressed 覆写为 false，线的派生
+    // 任务漏进托盘计数（knownLines 写入不触发 watch 重算，错误状态无自纠触发点）。
+    let resolveListSessions!: (groups: SessionGroup[]) => void
+    apiMocks.listSessions.mockImplementation(
+      () =>
+        new Promise<SessionGroup[]>((resolve) => {
+          resolveListSessions = resolve
+        }),
+    )
+    const wrapper = mountHarness(SID)
+    await vi.waitFor(() => expect(apiMocks.listSessions).toHaveBeenCalledTimes(1))
+    expect(apiMocks.listSessions).toHaveBeenCalledWith({ surface: 'btw' })
+
+    // 线 owner 分区预种派生记录（拉取未覆盖前也有数据，中间态断言才有判别力）
+    useSubagentStore().applyRecords(lineId, [lineSubagent])
+    // 种数据（applyRecords 已私有化，直写分区 ref）
+    const workflowStore = useWorkflowStore()
+    workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(lineId, [lineWorkflow])
+    // 缓存预热（= 抽屉打开时拉取产物喂入）后切焦点：同步命中，抑制立即生效
+    noteBtwLinesPulled([lineId])
+    await wrapper.setProps({ sessionId: lineId })
+    expect(data().counts.value.subagent.total).toBe(0)
+    expect(data().counts.value.workflow.total).toBe(0)
+
+    // 旧 sid（SID，非线）的在途补拉此时才落表（快照替换：lineId 出缓存）——续写到达时
+    // 焦点已不是 SID，时效守卫跳过回写，derivedSuppressed 保持 true
+    resolveListSessions([])
+    await vi.waitFor(() => expect(isKnownBtwLine(lineId)).toBe(false))
+    await nextTick()
+    expect(data().counts.value.subagent).toEqual({ running: 0, ended: 0, total: 0 })
+    expect(data().counts.value.workflow).toEqual({ running: 0, ended: 0, total: 0 })
+    expect(data().lists.subagent.running.value).toHaveLength(0)
+    expect(data().lists.workflow.running.value).toHaveLength(0)
   })
 })
 

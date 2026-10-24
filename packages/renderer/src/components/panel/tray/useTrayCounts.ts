@@ -226,7 +226,13 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   watch(
     normalizedSid,
     async (sid) => {
-      derivedSuppressed.value = sid !== null && (isKnownBtwLine(sid) || (await ensureBtwLineMembership(sid)))
+      const suppressed = sid !== null && (isKnownBtwLine(sid) || (await ensureBtwLineMembership(sid)))
+      // 时效守卫：回写前校验 sid 仍是当前焦点会话。在途补拉期间从「未缓存主会话」切回
+      // 「已缓存线会话」时，旧 sid 的 Promise 续写会把 derivedSuppressed 覆写为 false
+      // （线的 subagent/workflow 派生任务漏进托盘计数），且 knownLines 写入不触发本
+      // watch、无自纠触发点，错误状态会停留到下次会话切换。只用当前焦点 sid 的判定结果回写。
+      if (sid !== normalizedSid.value) return
+      derivedSuppressed.value = suppressed
     },
     { immediate: true },
   )
