@@ -56,7 +56,7 @@ scheduler 是全仓唯一「数据面已完全插件化、内容渲染已用通�
 ```
 
 - entry 类型常量：`packages/extension-protocol/src/extensions/scheduler/types.ts:65`（`'pi-scheduler:task'`），op 联合类型同文件 `:91`。
-- 这是唯一持久化面：调度器状态无独立文件，全部是 session JSONL 的 custom entry（event sourcing + 折叠恢复）。撤销（`taiji:revoked`）后靠 pi 活跃路径裁剪重建，`scheduler-manager/index.ts:33-40` 登记三侧同构字面量。
+- 这是唯一持久化面：调度器状态无独立文件，全部是 session JSONL 的 custom entry（event sourcing + 折叠恢复）。撤销（`taiji:revoked`）后靠 pi 活跃路径裁剪重建，`scheduler-manager/index.ts:87` 的 `REVOKED_SIGNAL_CUSTOM_TYPE`（注释 `:85-90` 说明三侧同串）。
 - 展示侧另有独立通道（不进对话流、不进 entry）：`widget.ts:150-152` `setSchedulerWidget` → `setWidgetDual(ctx, 'scheduler', ...)`（`packages/extension-protocol/src/core/helpers.ts:105-121`）→ GUI 分支 `guiSetWidget`（`:65-78`，单行 NUL marker + JSON）。
 
 ### 1.2 中转侧（runtime）
@@ -343,7 +343,7 @@ scheduler 在本层固定点 = **0**（既不声明、也不渲染、也不在�
 | L4-10 | `OverlayContent` 判别联合加员 | `core/domain/overlay/types.ts:55-59` | 新增 kind 必须改 core 类型 |
 | L4-11 | `openSchedulerOverlay` | `core/domain/overlay/coordination.ts:67-69` | 专用协调函数 |
 | L4-12 | `isValidContent` 的 scheduler 分支 | `coordination.ts:22-24` | 校验分支写死 |
-| L4-13 | `overlay/index.ts` 导出清单 | `core/domain/overlay/index.ts:18-27` | 每 opener 一条导出 |
+| L4-13 | `overlay/index.ts` 导出清单 | `core/domain/overlay/index.ts:19-27` | 每 opener 一条导出 |
 | L4-14 | `OverlayContentKind` 四员 | `shared/src/ipc-payloads.ts:289` | 跨进程词表（browser:overlay-state IPC 契约四方共用） |
 | L4-15 | 壳开合三类判定 | `WorkflowVizOverlayHost.vue:122-131` | `isWorkflowOpen`/`isSchedulerOpen`/`isCanvasOpen` + OR |
 | L4-16 | `overlaySessionId` 派生（canvas 特判） | `WorkflowVizOverlayHost.vue:135-139` | 会话归属派生 |
@@ -591,7 +591,7 @@ scheduler 在本层固定点 = **0**（既不声明、也不渲染、也不在�
 - [ ] `core/domain/overlay/coordination.ts` 增 `openOverlayTab(tabId, sessionId, params?)`；`openSchedulerOverlay` / `openCanvasOverlay` 改为它的薄壳（保留导出，避免一次改所有调用点）。
 - [ ] `core/domain/overlay/types.ts:40-42` 的 `SchedulerOverlayPayload` 改为 `OverlayTabPayload { tabId; sessionId; params? }` 的别名（保留原导出名）。
 - [ ] `coordination.ts:22-24` 的 `isValidContent` 改为「tabId 非空 + sessionId 非空」（scheduler 分支保留兼容）。
-- [ ] `core/domain/overlay/index.ts:18-27` 补 `openOverlayTab` 导出。
+- [ ] `core/domain/overlay/index.ts:19-27` 补 `openOverlayTab` 导出。
 - 验收：`core/domain/overlay/__tests__/coordination.test.ts`（现有 scheduler 用例保持绿）+ `types.test.ts`。
 - 回滚点：旧函数为薄壳，调用方零改动即可回退。
 
