@@ -25,6 +25,9 @@ export default {
     modelCount: '{count} models available',
     emptyCatalog: 'Catalog is empty: no installable provider plugins',
     catalogLoading: 'Loading plugin catalog…',
+    // S15 two states (R-2 wire fields): stale = cache-fallback hint; unavailable = no cache and fetch failed (error state)
+    staleHint: 'Catalog may be outdated (last fetch was not confirmed fresh)',
+    catalogUnavailable: 'Plugin catalog unreachable: no local cache and the fetch failed — check your network and retry',
     retry: 'Retry',
     focusMissing: 'Target plugin is not in the catalog (it may have been removed); reopen this page',
     channelUnavailable: 'Install channel unavailable: update to a version that supports plugin install, then retry',

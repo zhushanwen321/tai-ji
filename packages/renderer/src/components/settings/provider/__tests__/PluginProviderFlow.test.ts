@@ -7,7 +7,8 @@
  *  - S7：text-input 输入经 plugin.uiEvent 回传（demo 插件树；值走 (pluginId, viewId, componentId, 'change', value)）
  *  - 取消不落盘：确认停点取消 → cancelPluginInstall（S27「未确认不发生安装落盘」）
  *
- * mock 策略：vi.mock('@/api') 把 plugin 域替成可控 mock；ViewHost 数据源经
+ * mock 策略：插件来源通道经 provideSettingsTransport(makeSettingsTransportStub) seam
+ * 注入（[C3] 禁直连门面——不 mock @/api）；ViewHost 数据源经
  * VIEW_HOST_SOURCE_KEY 注入内存表（不打运输层）。Dialog 走 Teleport，断言经 document.body。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/settings/provider
@@ -165,6 +166,50 @@ describe('PluginProviderFlow S1：家族卡（第三来源类型）', () => {
     expect(texts[2]).toContain('12 个可用模型')
     // 已安装家族显式徽标（区别于待安装的「需要先安装插件」提示）
     expect(queryAll('plugin-family-installed')).toHaveLength(1)
+  })
+})
+
+describe('PluginProviderFlow S15 两态（R-2 wire 字段 available/stale 的 UI 消费）', () => {
+  it('S15① stale=true → 「清单可能不是最新」提示条 + 重试（缓存清单仍可浏览）', async () => {
+    pluginMock.listAvailablePlugins.mockResolvedValue({ plugins: FAMILIES, available: true, stale: true, reason: 'network' })
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    const stale = query('plugin-catalog-stale')
+    expect(stale).not.toBeNull()
+    expect(stale?.textContent).toContain('清单可能不是最新')
+    // 缓存清单照常呈现
+    expect(queryAll('plugin-family-card')).toHaveLength(3)
+    // 提示条自带重试入口，可再次拉取
+    const retryCalls = pluginMock.listAvailablePlugins.mock.calls.length
+    query('plugin-catalog-stale-retry')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(pluginMock.listAvailablePlugins.mock.calls.length).toBeGreaterThan(retryCalls)
+  })
+
+  it('S15② available=false → 整页报错文案（与「缓存为空」区分）+ 重试', async () => {
+    pluginMock.listAvailablePlugins.mockResolvedValue({ plugins: [], available: false, stale: false, reason: 'network' })
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    const error = query('plugin-catalog-error')
+    expect(error).not.toBeNull()
+    expect(error?.textContent).toContain('插件清单不可达')
+    expect(queryAll('plugin-family-card')).toHaveLength(0)
+    expect(query('plugin-catalog-retry')).not.toBeNull()
+  })
+
+  it('available=true 且缓存清单为空 → 空态文案（不是报错态——两态可区分）', async () => {
+    pluginMock.listAvailablePlugins.mockResolvedValue({ plugins: [], available: true, stale: false })
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    expect(query('plugin-catalog-error')).toBeNull()
+    const empty = query('plugin-family-empty')
+    expect(empty?.textContent).toContain('清单为空')
   })
 })
 

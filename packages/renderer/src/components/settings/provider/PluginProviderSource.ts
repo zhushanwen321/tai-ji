@@ -7,9 +7,9 @@
  *    ADR-0097/D5），plugin:event 的凭据状态上报作增量提示（推补充——丢失由下一次
  *    展开拉取收敛，不建推送补偿）；宿主只做展示映射，不推断状态（D5）。
  *
- * 状态形态判定（对齐 useWool 先例）：插件来源是**设置域全局状态**（无 sessionId 归属），
- * 非 per-session 状态——模块级单例 + refCount 物理订阅（ADR-0049 例外清单形态，
- * 判定见本注释）。多组件共享单条 plugin:event 订阅与同一快照。
+ * 状态形态判定：插件来源是**设置域全局状态**（无 sessionId 归属），非 per-session
+ * 状态——模块级单例 + refCount 物理订阅（ADR-0049 例外清单形态，判定见本注释）。
+ * 多组件共享单条 plugin:event 订阅与同一快照。
  *
  * 通道约定（与插件侧的共同契约，首个使用方 = wool 系插件包）：
  *  - 状态上报 channel = 'provider.credentialStatus'，payload = CredentialStatusPayload
@@ -157,8 +157,12 @@ export function createPluginActionExecutor(pluginId: () => string | null): Actio
 export type PluginProviderSourceReturn = {
   /** 清单可安装视图（家族卡 + 安装/更新状态；未拉取/失败为空数组） */
   catalog: Ref<PluginCatalogItem[]>
-  /** 清单是否已成功拉取至少一次（S15 两态提示判定：loaded && 空 = 缓存清单为空） */
+  /** 清单是否已成功拉取至少一次（空态 vs 加载态判定） */
   catalogLoaded: Ref<boolean>
+  /** S15①：缓存兜底生效且本次非确认新鲜（「清单可能不是最新」提示判据，R-2 wire 字段） */
+  catalogStale: Ref<boolean>
+  /** S15②：无缓存且拉取失败（整页报错态判据——与「缓存清单为空」区分，R-2 wire 字段） */
+  catalogUnavailable: Ref<boolean>
   /** 拉取清单（fail-safe 链在 runtime，本层失败保持现状 + warn） */
   refreshCatalog: () => Promise<void>
   /** 已知凭据状态（undefined = 未上报/未拉取——宿主不显示任何标记，D5/S5） */
@@ -170,8 +174,9 @@ export type PluginProviderSourceReturn = {
    */
   pullStatus: (pluginId: string, providerId: string) => Promise<void>
   /**
-   * providerId → 清单家族条目（命中 = 插件来源条目；含 pluginId / updateAvailable /
-   * capabilities 等组件层消费字段）。清单未拉到或未命中返回 undefined。
+   * providerId → 插件来源条目（识别两源，S15②/D4）：① 清单家族前缀（family.id）；
+   * ② 清单外兜底 = 本地已装条目的 manifest namespace 前缀（清单不可达时管理入口
+   * 不断，R-2 本地回退条目携带 namespace）。两源都未命中返回 undefined。
    */
   entryOfProvider: (providerId: string) => PluginCatalogItem | undefined
 }
@@ -183,6 +188,10 @@ const statusMap = ref(new Map<string, CredentialStatusPayload>())
 const catalog = ref<PluginCatalogItem[]>([])
 // taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构）：清单首次拉取完成标记（空态判定）。
 const catalogLoaded = ref(false)
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构）：S15 两态元数据（R-2 wire 字段）。
+const catalogStale = ref(false)
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构）：S15 两态元数据（R-2 wire 字段，同上）。
+const catalogUnavailable = ref(false)
 
 let refCount = 0
 let unsubscribeEvent: (() => void) | null = null
@@ -232,22 +241,32 @@ export function usePluginProviderSource(): PluginProviderSourceReturn {
   return {
     catalog,
     catalogLoaded,
+    catalogStale,
+    catalogUnavailable,
     refreshCatalog,
     statusOf: (providerId) => statusMap.value.get(providerId),
     pullStatus,
     entryOfProvider: (providerId) =>
-      catalog.value.find((entry) => entry.family !== undefined && providerMatchesNamespace(providerId, entry.family.id)),
+      // 识别源①：清单家族前缀（D1，含家族元数据与 updateAvailable 增强）
+      catalog.value.find((entry) => entry.family !== undefined && providerMatchesNamespace(providerId, entry.family.id)) ??
+      // 识别源②（S15② 清单外兜底，D4）：已装条目按 manifest namespace 前缀识别——
+      // 清单不可达时「重新授权 / 更新插件」入口不断（无家族元数据，updateAvailable 缺省）
+      catalog.value.find((entry) => entry.namespace !== undefined && providerMatchesNamespace(providerId, entry.namespace)),
   }
 }
 
-/** 拉取清单（listAvailable；失败保持现状 + warn，UI 层按空态/重试呈现，S15）。 */
+/** 拉取清单（listAvailable；失败保持现状 + warn，UI 层按两态元数据/重试呈现，S15）。 */
 async function refreshCatalog(): Promise<void> {
   try {
     const reply = await getSettingsTransport().listAvailablePlugins()
     catalog.value = reply.plugins
     catalogLoaded.value = true
+    // S15 两态元数据（R-2 wire 字段）：stale =「清单可能不是最新」提示判据；
+    // available=false = 无缓存且拉取失败（整页报错态，与「缓存清单为空」区分）
+    catalogStale.value = reply.stale === true
+    catalogUnavailable.value = reply.available === false
   } catch (e) {
-    // 辅助域降级（对齐 useWool.pull 惯例）：失败保持现状（首拉失败 = 空清单空态），不向上抛。
+    // 辅助域降级：失败保持现状（首拉失败 = 空清单空态），不向上抛。
     console.warn('[plugin-provider-source] listAvailable failed (kept current catalog):', e)
   }
 }
@@ -274,4 +293,6 @@ export function _resetPluginProviderSourceForTest(): void {
   statusMap.value = new Map()
   catalog.value = []
   catalogLoaded.value = false
+  catalogStale.value = false
+  catalogUnavailable.value = false
 }

@@ -158,6 +158,17 @@ export interface PluginDescriptor {
    * 仅在声明 fs.read-user-data 时有意义。
    */
   readPaths?: string[]
+  /**
+   * 包名透传（package.json name，scan 装配）：清单不可达时 listAvailable 的本地已装
+   * 条目回退（S15②）与卸载编排的包名事实源。registry scan 是唯一装配点。
+   */
+  packageName?: string
+  /**
+   * 命名空间声明透传（manifest taijiPlugin.namespace，provider-plugin-access D4；
+   * 安装期已做包名推导绑定校验）：清单不可达时 renderer 条目识别的第二数据源
+   * （S15②本地回退条目按 namespace 前缀识别）。
+   */
+  namespace?: string
   engines: { 'taiji': string }
   pluginPath: string
   /** 插件来源：built-in（随应用分发）或 external（用户安装） */

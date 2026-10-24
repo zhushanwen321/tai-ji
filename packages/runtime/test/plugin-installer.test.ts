@@ -65,7 +65,7 @@ let pluginsDir: string
 
 beforeEach(async () => {
   vi.clearAllMocks()
-  refreshRemoteConfigMock.mockResolvedValue({ data: undefined, refreshed: false, reason: 'no-cache' })
+  refreshRemoteConfigMock.mockResolvedValue({ data: undefined, refreshed: false, reason: 'network' })
   // 安装/卸载编排会落 warn（激活失败回滚、清理跳过等），测试不依赖控制台输出
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -660,6 +660,63 @@ describe('PluginService 两段式安装编排', () => {
     expect(registry.getDescriptor('direct-plugin')).toBeDefined()
     expect(Object.keys(await readInstalledJson())).toEqual(['direct-plugin'])
     expect(broker.broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'config.plugins' }))
+  })
+
+  // ── R-1（2026-10-24 裁决）：更新链先 terminate 旧沙箱进程再激活（进程即模块边界）──
+  // 单测层断言机制（terminate 先于 activatePlugin 的调用顺序 + trusted 跳过 + 回滚
+  // 重激活）；真 fork 的「新代码生效 / PID 变化」终验归真机 a26 剧本（本层不 spawn）。
+
+  it('R-1：已激活插件更新 → commit 后、activatePlugin 前 terminate 旧 sandbox fork', async () => {
+    const { service } = buildService()
+    await writePluginDir('upgradable', pkgJson('upgradable', { version: '1.0.0' }))
+    mockDownloadWrites(pkgJson('upgradable', { version: '2.0.0' }))
+    mockActivation(service, 'ACTIVE')
+    const terminate = vi.spyOn(service.host, 'terminateWorker').mockResolvedValue(undefined)
+    vi.spyOn(service.host, 'getWorkerHandle').mockReturnValue({ workerId: 'sandbox-42', postMessage: vi.fn() })
+
+    const result = await service.installPlugin('upgradable')
+
+    expect(result.success).toBe(true)
+    expect(terminate).toHaveBeenCalledTimes(1)
+    expect(terminate).toHaveBeenCalledWith('sandbox-42')
+    // 顺序 = 缺陷本体：terminate 必须先于激活（否则 assignProcess 复用旧 fork + ESM
+    // 模块缓存，更新后仍跑旧代码）
+    expect(terminate.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(service.activator.activatePlugin).mock.invocationCallOrder[0]!,
+    )
+  })
+
+  it('R-1：trusted 共享 Worker（非 sandbox- 前缀）→ 不 terminate（镜像卸载侧跳过判定）', async () => {
+    const { service } = buildService()
+    mockDownloadWrites(pkgJson('trusted-plugin'))
+    mockActivation(service, 'ACTIVE')
+    const terminate = vi.spyOn(service.host, 'terminateWorker').mockResolvedValue(undefined)
+    vi.spyOn(service.host, 'getWorkerHandle').mockReturnValue({ workerId: 'worker-7', postMessage: vi.fn() })
+
+    const result = await service.installPlugin('trusted-plugin')
+
+    expect(result.success).toBe(true)
+    expect(terminate).not.toHaveBeenCalled()
+  })
+
+  it('R-1：必败包更新（激活失败）→ 旧沙箱终结 + 回滚可达 + 旧版本重激活', async () => {
+    const { service } = buildService()
+    await writePluginDir('upgradable', pkgJson('upgradable', { version: '1.0.0' }))
+    mockDownloadWrites(pkgJson('upgradable', { version: '2.0.0' }))
+    mockActivation(service, 'CRASHED')
+    const terminate = vi.spyOn(service.host, 'terminateWorker').mockResolvedValue(undefined)
+    vi.spyOn(service.host, 'getWorkerHandle').mockReturnValue({ workerId: 'sandbox-9', postMessage: vi.fn() })
+
+    const result = await service.installPlugin('upgradable')
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('rolled back')
+    expect(terminate).toHaveBeenCalledWith('sandbox-9')
+    // 回滚分支对恢复的旧版本 best-effort 重激活（S26「旧版本幸存可用」的进程态语义：
+    // 旧沙箱已终结，旧代码在新 fork 中重新激活，而非依赖被终结的旧进程）
+    expect(vi.mocked(service.activator.activatePlugin)).toHaveBeenCalledTimes(2)
+    const oldPkg = JSON.parse(await readFile(join(pluginsDir, 'upgradable', 'package.json'), 'utf-8')) as { version: string }
+    expect(oldPkg.version).toBe('1.0.0')
   })
 
   it('串行锁：并发两次安装严格串行（第二次等待第一次完成才开始下载）', async () => {

@@ -99,12 +99,16 @@ export function onPluginEvent(handler: (payload: PluginEventPayload) => void): (
   })
 }
 
-/** 清单可安装视图（provider-plugin-access U5）：附本地安装状态比对（installed / installedVersion / updateAvailable）。 */
+/**
+ * 清单可安装视图（provider-plugin-access U5）：附本地安装状态比对（installed / installedVersion / updateAvailable）。
+ * reply 本体携带拉取元数据 available / stale / reason（S15①② 两态呈现判据，R-2 裁决
+ * 2026-10-24）——runtime 侧组装，本域原样透传。
+ */
 export function listAvailablePlugins(): Promise<PluginListAvailableReply> {
   return command('plugin.listAvailable', {}, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
-/** 清单原始目录条目（provider-plugin-access U5：含家族元数据与安装知情面声明）。 */
+/** 清单原始目录条目（provider-plugin-access U5：含家族元数据与安装知情面声明）；元数据透传同 listAvailablePlugins。 */
 export function getPluginCatalog(): Promise<PluginCatalogReply> {
   return command('plugin.catalog', {}, RPC_BACKSTOP_TIMEOUT_MS)
 }

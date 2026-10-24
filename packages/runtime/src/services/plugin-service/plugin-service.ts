@@ -11,7 +11,8 @@ import { PluginRpcServer } from './plugin-rpc-server.js'
 import { PluginHost } from './plugin-host.js'
 import { PluginActivator } from './plugin-activator.js'
 import { registerAllRpcMethods } from './plugin-rpc-setup.js'
-import { PluginCatalogService, installedVersionsFromDescriptors } from './plugin-catalog.js'
+import { PluginCatalogService, installedEntriesFromDescriptors, installedVersionsFromDescriptors } from './plugin-catalog.js'
+import { terminateStaleSandboxWorker, reactivatePreviousVersionAfterRollback } from './plugin-update-activation.js'
 import { bootstrapPluginService } from './plugin-lifecycle.js'
 import { ActiveSessionResolver, SessionEventDispatch, sessionInfoFromSummary } from './api/session-api.js'
 import type { CommandRegistration } from './api/commands-api.js'
@@ -185,6 +186,9 @@ export class PluginService implements IPluginService {
    */
   private readonly catalogService = new PluginCatalogService({
     getInstalledVersions: async () => installedVersionsFromDescriptors(this.registry.getAllDescriptors()),
+    // S15② 本地已装条目回退（R-2 裁决）：清单不可达时 listAvailable 用已装插件构造
+    // 条目，renderer 按 namespace 前缀识别插件条目——管理入口不随清单故障消失
+    getInstalledEntries: async () => installedEntriesFromDescriptors(this.registry.getAllDescriptors()),
   })
 
   /**
@@ -918,16 +922,20 @@ export class PluginService implements IPluginService {
     )
   }
 
-  /** 清单可安装视图（provider-plugin-access U5，plugin.listAvailable 的 runtime 侧）。 */
+  /**
+   * 清单可安装视图（provider-plugin-access U5，plugin.listAvailable 的 runtime 侧）。
+   * R-2 裁决（2026-10-24）：service 返回的拉取元数据（available/stale/reason，S15①②
+   * 两态呈现判据）原样透传进 reply 本体出 wire，不再丢弃。
+   */
   async listAvailablePlugins(): Promise<PluginListAvailableReply> {
-    const { reply } = await this.catalogService.listAvailable()
-    return reply
+    const { reply, available, stale, reason } = await this.catalogService.listAvailable()
+    return { ...reply, available, stale, ...(reason !== undefined ? { reason } : {}) }
   }
 
-  /** 清单原始目录条目（provider-plugin-access U5，plugin.catalog 的 runtime 侧）。 */
+  /** 清单原始目录条目（provider-plugin-access U5，plugin.catalog 的 runtime 侧）；元数据透传同 listAvailablePlugins。 */
   async getPluginCatalog(): Promise<PluginCatalogReply> {
-    const { reply } = await this.catalogService.catalog()
-    return reply
+    const { reply, available, stale, reason } = await this.catalogService.catalog()
+    return { ...reply, available, stale, ...(reason !== undefined ? { reason } : {}) }
   }
 
   /** plugin:event 广播 id 单调计数（碰撞面见 createPluginEventIdGenerator） */
@@ -1186,9 +1194,16 @@ export class PluginService implements IPluginService {
   }
 
   /**
-   * 提交段编排（直通与 confirm 共用）：commit 换入 → reload 注册表 → 激活 →
-   * installed.json 登记 → 广播。激活失败回滚：删刚换入目录（更新场景旧版本由
-   * rollbackInstall 恢复）+ 重扫注册表 + 移除 activator 侧残留描述符。
+   * 提交段编排（直通与 confirm 共用）：commit 换入 → 终结旧沙箱进程 → reload 注册表
+   * → 激活 → installed.json 登记 → 广播。激活失败回滚：删刚换入目录（更新场景旧版本
+   * 由 rollbackInstall 恢复）+ 重扫注册表 + 移除 activator 侧残留描述符 + 旧版本
+   * best-effort 重激活。
+   *
+   * R-1 裁决（2026-10-24，缺陷 2）：激活前先 terminateWorker 已存在的 sandbox 子进程
+   * （进程即模块边界）——assignProcess 对存活 fork 恒命中复用分支（M6a-06），且
+   * plugin-bootstrap 按 URL `await import` 命中 ESM 模块缓存，不换进程则更新后仍跑
+   * 旧代码、激活必败包也静默「成功」（S26 重激活与 S18 更新回滚双双失效，a26 真机
+   * 实证）。trusted 共享 Worker 跳过判定镜像 uninstallPlugin。
    *
    * 激活成败判定用 getState 终态（activatePlugin 吞错不抛——doActivatePlugin 全部
    * 失败路径 settleActivationFailure 后正常 resolve），非 ACTIVE 即失败。
@@ -1200,6 +1215,10 @@ export class PluginService implements IPluginService {
     }
     const commit = await installer.commitInstall(prepared)
     if (!commit.success) return commit
+
+    // R-1：换入成功即终结旧沙箱进程（首装无进程，getWorkerHandle 未命中 no-op）——
+    // 新激活 fork 新进程装新代码，模块缓存随进程边界失效
+    await terminateStaleSandboxWorker(this.host, prepared.dirName)
 
     await this.registry.reload()
     this.activator.registerDescriptors(this.registry.getAllDescriptors())
@@ -1215,6 +1234,9 @@ export class PluginService implements IPluginService {
       await installer.rollbackInstall(prepared)
       await this.registry.reload()
       this.activator.removeDescriptor(prepared.dirName)
+      // R-1 回滚分支进程态语义：旧沙箱已终结，best-effort 重激活恢复的旧版本（S26
+      // 「旧版本幸存可用」即时成立；新 fork 装旧代码，模块缓存同样干净）
+      await reactivatePreviousVersionAfterRollback(this.activator, this.host, prepared.dirName)
       this.broadcastPluginList()
       return {
         success: false,

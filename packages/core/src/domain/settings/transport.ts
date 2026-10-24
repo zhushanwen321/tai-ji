@@ -397,8 +397,10 @@ export interface SettingsTransport {
    * 两段式安装（S27 确认停点）：prepare 下载校验解压至暂存并返回知情面，confirm 提交落盘
    * 并激活，cancel 清理暂存（未确认不发生安装落盘）。
    *
-   * optional = 通道未落定的宿主实现可省略，消费方（Provider 页）以「方法存在与否」
-   * 判定安装入口可用性并显式降级，不崩溃。
+   * optional 为宿主实现兼容差异的契约形态（wire 已完整实装：protocol.ts 三帧 +
+   * runtime 两段式编排 + real adapter 无条件挂载；stub 缺省以覆盖降级路径用例），
+   * 非「通道未实装」——消费方（Provider 页 resolvePluginInstallPort）以「方法存在
+   * 与否」判定安装入口可用性并显式降级（channelUnavailable 文案），不崩溃。
    */
   preparePluginInstall?(packageSpec: string): Promise<PluginInstallPreview>
   confirmPluginInstall?(pluginId: string): Promise<PluginInstallResult>

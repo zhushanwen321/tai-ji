@@ -20,6 +20,7 @@ import {
   isPluginCatalogConfig,
   listAvailablePlugins,
   validatePluginCatalogConfig,
+  type CatalogInstalledEntry,
 } from '../src/services/plugin-service/plugin-catalog.js'
 
 let dataDir: string
@@ -286,8 +287,24 @@ describe('listAvailablePlugins（数据组装 + 本地已装版本比对）', ()
 })
 
 describe('PluginCatalogService（service 层编排）', () => {
-  function makeService(installed: ReadonlyMap<string, string> = new Map()) {
-    return new PluginCatalogService({ getInstalledVersions: async () => installed })
+  function makeService(
+    installed: ReadonlyMap<string, string> = new Map(),
+    installedEntries?: ReadonlyArray<CatalogInstalledEntry>,
+  ) {
+    return new PluginCatalogService({
+      getInstalledVersions: async () => installed,
+      ...(installedEntries !== undefined
+        ? { getInstalledEntries: async () => installedEntries }
+        : {}),
+    })
+  }
+
+  const INSTALLED_ENTRY = {
+    pluginId: 'zhushanwen__plugin-wool-workbuddy',
+    displayName: 'WorkBuddy',
+    packageName: '@zhushanwen/plugin-wool-workbuddy',
+    pluginVersion: '0.1.0',
+    namespace: 'wool-workbuddy',
   }
 
   it('listAvailable：清单可用 + 本地比对组装（available=true）', async () => {
@@ -301,13 +318,49 @@ describe('PluginCatalogService（service 层编排）', () => {
     expect(out.reply.plugins[0]).toMatchObject({ installed: true, installedVersion: '1.0.0', updateAvailable: true })
   })
 
-  it('listAvailable：无缓存 + 断网 → available=false + 空清单（S15② 报错态）', async () => {
+  it('R-2：拉取元数据（available/stale/reason）组装进 reply 本体（wire 面即元数据载体）', async () => {
+    await loadCatalogModule()
+    // 无缓存 + 断网 → available=false（报错态判据；本测试先断失败态，成功拉取后缓存
+    // 落盘，「无缓存」分支在同 dataDir 内不可复现）
+    mockFetch(0).mockRejectedValue(new Error('offline'))
+    const failed = await makeService().listAvailable({ force: true })
+    expect(failed.reply).toMatchObject({ available: false, stale: false, reason: 'network' })
+
+    // 拉取成功 → available=true / stale=false / reason 缺省（exact-optional 不落 undefined）
+    mockFetch(200, VALID_CATALOG)
+    const ok = await makeService().listAvailable()
+    expect(ok.reply).toMatchObject({ available: true, stale: false })
+    expect(ok.reply.reason).toBeUndefined()
+
+    // 有缓存 + 断网 force → stale=true（提示态判据）
+    mockFetch(0).mockRejectedValue(new Error('offline'))
+    const stale = await makeService().listAvailable({ force: true })
+    expect(stale.reply).toMatchObject({ available: true, stale: true, reason: 'network' })
+  })
+
+  it('S15② 本地已装条目回退：available=false → reply.plugins = 已装条目（installed=true，带 namespace；无 updateAvailable——无清单基线不猜测）', async () => {
+    await loadCatalogModule()
+    mockFetch(0).mockRejectedValue(new Error('offline'))
+    const out = await makeService(new Map(), [INSTALLED_ENTRY]).listAvailable()
+    expect(out.available).toBe(false)
+    expect(out.reply.available).toBe(false)
+    expect(out.reply.plugins).toHaveLength(1)
+    expect(out.reply.plugins[0]).toMatchObject({
+      pluginId: INSTALLED_ENTRY.pluginId,
+      packageName: INSTALLED_ENTRY.packageName,
+      namespace: 'wool-workbuddy',
+      installed: true,
+      installedVersion: '0.1.0',
+    })
+    expect(out.reply.plugins[0].updateAvailable).toBeUndefined()
+  })
+
+  it('S15② 回退端口缺失 → available=false 且 reply.plugins 为空（旧装配形态）', async () => {
     await loadCatalogModule()
     mockFetch(0).mockRejectedValue(new Error('offline'))
     const out = await makeService().listAvailable()
     expect(out.available).toBe(false)
     expect(out.reply.plugins).toEqual([])
-    expect(out.reason).toBe('network')
   })
 
   it('listAvailable：断网缓存兜底 → available=true + stale=true（S15① 提示态）', async () => {
@@ -320,12 +373,22 @@ describe('PluginCatalogService（service 层编排）', () => {
     expect(out.reply.plugins).toHaveLength(2)
   })
 
-  it('catalog：返回清单原始条目（含家族元数据）', async () => {
+  it('catalog：返回清单原始条目（含家族元数据）+ 元数据进 reply 本体', async () => {
     await loadCatalogModule()
     mockFetch(200, VALID_CATALOG)
     const out = await makeService().catalog()
     expect(out.available).toBe(true)
     expect(out.reply.entries).toEqual(VALID_CATALOG.plugins)
     expect(out.reply.entries[1].family).toEqual(DUAL_ARTIFACT_ENTRY.family)
+    expect(out.reply.available).toBe(true)
+  })
+
+  it('catalog：无缓存 → 已装条目回退（S15② 同构语义）', async () => {
+    await loadCatalogModule()
+    mockFetch(0).mockRejectedValue(new Error('offline'))
+    const out = await makeService(new Map(), [INSTALLED_ENTRY]).catalog()
+    expect(out.available).toBe(false)
+    expect(out.reply.entries).toHaveLength(1)
+    expect(out.reply.entries[0]).toMatchObject({ pluginId: INSTALLED_ENTRY.pluginId, installed: true })
   })
 })

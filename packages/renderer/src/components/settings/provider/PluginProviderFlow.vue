@@ -63,13 +63,35 @@
           >{{ t('pluginProvider.flow.installHint') }}</span>
         </div>
 
-        <!-- 清单空/失败态（S15 语义：runtime fail-safe 链已降级，宿主呈现重试入口） -->
+        <!-- S15① 陈旧提示条（R-2 wire 字段 stale：缓存兜底生效、数据可浏览但非确认新鲜） -->
+        <div
+          v-if="source.catalogStale.value"
+          data-testid="plugin-catalog-stale"
+          class="flex items-center justify-between gap-2 rounded-sm bg-warn-soft px-2.5 py-1.5"
+        >
+          <p class="text-[length:var(--text-3xs)] text-warn">{{ t('pluginProvider.flow.staleHint') }}</p>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid="plugin-catalog-stale-retry"
+            :disabled="catalogRefreshing"
+            @click="onRetryCatalog"
+          >{{ t('pluginProvider.flow.retry') }}</Button>
+        </div>
+
+        <!-- 清单空/失败态（S15② R-2 wire 字段 available：无缓存且拉取失败 = 报错态，
+             与「缓存清单为空」区分呈现；宿主始终提供重试入口） -->
         <div
           v-if="!familyEntries.length"
           data-testid="plugin-family-empty"
           class="flex flex-col items-center gap-2 px-2 py-8 text-center"
         >
-          <p class="text-[length:var(--text-sm)] text-neutral-mid">
+          <p
+            v-if="source.catalogUnavailable.value"
+            data-testid="plugin-catalog-error"
+            class="text-[length:var(--text-sm)] text-danger"
+          >{{ t('pluginProvider.flow.catalogUnavailable') }}</p>
+          <p v-else class="text-[length:var(--text-sm)] text-neutral-mid">
             {{ source.catalogLoaded.value ? t('pluginProvider.flow.emptyCatalog') : t('pluginProvider.flow.catalogLoading') }}
           </p>
           <Button

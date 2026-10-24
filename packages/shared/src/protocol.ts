@@ -613,9 +613,12 @@ export interface PluginViewPayloadBase {
   guiTree: unknown[]
   updatedAt: number
   /**
-   * 全量替换代际：同一 (scope, viewId) 下单调递增，renderer 见新 generation 时整体
-   * 替换旧树（不做增量 merge）。推送丢失由按 scope 定向拉快照收敛（ADR-0097 拉为主、
-   * 推补充），快照条目携带同一 generation。
+   * 全量替换代际：同一 (scope, viewId) 下单调标记，清除后从 1 重新起算（runtime
+   * 快照存储分配）。消费端**不做代际比较门控**——帧到达即整体替换旧树（不做增量
+   * merge）：WS 有序传输 + 快照回放与实时帧同函数写入已保证时序，「清除后重起算」
+   * 与代际比较门控冲突（重起的 generation=1 会被旧门控丢弃）。generation 的承重
+   * 语义是「全量替换证据字段」；推送丢失由按 scope 定向拉快照收敛（ADR-0097
+   * 拉为主、推补充），快照条目携带同一 generation。
    */
   generation: number
   /** 会话域归属：分区键 session:<sessionId>。与 mountId 互斥（恰好其一） */
@@ -644,8 +647,9 @@ export interface PluginUiSnapshotPayload {
 /**
  * plugin:event 载荷（provider-plugin-access D9）：插件 → renderer 的业务事件上报
  * （插件侧经宿主 RPC notify `plugin.event` 转发广播）。首个消费方 = 凭据状态上报
- * （D5：插件是凭据有效性的权威，宿主只做展示映射）。channel 为插件自命的开放
- * 字符串；payload 形状由插件自定（unknown 透传，宿主不解释）。
+ * （D5：插件是凭据有效性的权威，宿主只做展示映射）。channel 为插件自命字符串，
+ * 上限 256 字节（PLUGIN_EVENT_CHANNEL_MAX_BYTES，超限 INVALID_ARGS 结构化拒绝）；
+ * payload 形状由插件自定（unknown 透传，宿主不解释）。
  */
 export interface PluginEventPayload {
   pluginId: string
@@ -699,11 +703,26 @@ export interface PluginCatalogEntry {
   capabilities?: string[]
   /** manifest 读取路径声明（家目录相对路径；安装确认卡知情展示，D3） */
   readPaths?: string[]
+  /**
+   * 命名空间（provider-plugin-access D4）：仅本地已装条目回退（S15② available=false
+   * 时合并已装插件构造条目）携带——renderer 条目识别的第二数据源（清单不可达时按
+   * namespace 前缀识别插件条目，S15「已装 provider 的管理不受影响」）。清单条目
+   * 不带（家族归属已由 family.id 承载）。
+   */
+  namespace?: string
 }
 
 /**
  * plugin.listAvailable reply（清单 service 组装的可安装视图）：条目附本地安装状态
  * 比对结果（比对基准 = 插件目录内 package.json 的 version，唯一事实）。
+ *
+ * available/stale/reason（provider-plugin-access S15①②，R-2 裁决 2026-10-24）：
+ * 清单拉取元数据随 reply 本体下发，UI 两态呈现的数据源——
+ * - available=false = 无缓存且拉取失败：plugins 为本地已装条目回退，UI 整页报错
+ *   （与「缓存清单为空」区分呈现，不再是同形空态）；
+ * - stale=true = 有缓存兜底但本次非「确认新鲜」路径（网络失败 / guard 拒绝）：
+ *   UI 显示「清单可能不是最新」提示条；
+ * - reason = 未刷新原因（network / invalid / throttled），排障可见。
  */
 export interface PluginListAvailableReply {
   plugins: Array<
@@ -716,11 +735,26 @@ export interface PluginListAvailableReply {
       updateAvailable?: boolean
     }
   >
+  /** 清单可用（有缓存或本次拉取成功）；false = 无缓存且拉取失败（S15② 报错态判据） */
+  available?: boolean
+  /** 缓存兜底生效且本次非确认新鲜（S15①「清单可能不是最新」提示判据） */
+  stale?: boolean
+  /** 未刷新原因（remote-config fail-safe 链产出；排障可见，UI 不消费） */
+  reason?: string
 }
 
-/** plugin.catalog reply（清单原始目录条目，含家族元数据） */
+/**
+ * plugin.catalog reply（清单原始目录条目，含家族元数据）。available/stale/reason
+ * 语义与 PluginListAvailableReply 对齐（同一清单拉取链产出）。
+ */
 export interface PluginCatalogReply {
   entries: PluginCatalogEntry[]
+  /** 清单可用（有缓存或本次拉取成功）；false = 无缓存且拉取失败（S15② 报错态判据） */
+  available?: boolean
+  /** 缓存兜底生效且本次非确认新鲜（S15①「清单可能不是最新」提示判据） */
+  stale?: boolean
+  /** 未刷新原因（remote-config fail-safe 链产出；排障可见，UI 不消费） */
+  reason?: string
 }
 
 /**

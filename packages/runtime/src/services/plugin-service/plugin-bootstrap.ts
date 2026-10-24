@@ -27,6 +27,10 @@ import type {
 import { PluginRpcErrorCodes } from './plugin-types.js'
 import { PluginRpcClient } from './plugin-rpc-client.js'
 import { createRequireInterceptor, createEnvProxy } from './plugin-sandbox.js'
+// fs-guard 复用（F1-9 接线）：CJS 通道在 env 被空 Proxy 替换前解码放行清单——与
+// ESM loader 消费同一 env 键与同一解码原语（default import 取 module.exports 整体，
+// interop 安全同 plugin-sandbox 的 .cjs 消费形态）
+import fsGuard from './plugin-fs-guard.cjs'
 import { errorWithCode } from '../../utils/errors.js'
 import { createToolApi } from './tool-api.js'
 import { createHookApi, executeHookRequest, disposePluginHooks } from './hook-api.js'
@@ -422,7 +426,8 @@ function createStateStorageProxy(
  * 初始化 sandbox 环境：拦截 require 调用和替换 process.env。
  *
  * 在 sandbox 模式的 Worker/子进程中于 load 阶段调用（handleMessage load 分支），
- * 确保后续插件代码的 require 受到 BLOCKED_BUILTINS 和路径边界约束。
+ * 确保后续插件代码的 require 受到有效黑名单（基线按 TAIJI_PLUGIN_ALLOWED_MODULES
+ * 能力放行集过滤，F1-9）和路径边界约束。
  * 导出供 plugin-bootstrap-process.ts 复用（子进程版与 Worker 版同一实现）。
  */
 /**
@@ -435,7 +440,12 @@ type ModuleWithResolveFilename = typeof Module & {
 }
 
 export function initSandbox(pluginDir: string): void {
-  const interceptor = createRequireInterceptor(pluginDir)
+  // F1-9 裁决（2026-10-24）：CJS require 拦截接入能力词表——在 process.env 被空 Proxy
+  // 替换前读 TAIJI_PLUGIN_ALLOWED_MODULES（宿主 buildPluginCapabilityForkEnv 编码注入，
+  // 与 ESM loader 消费同一 env 同一解码，声明能力在两条加载通道一致生效）。缺失/
+  // 解析失败 → 空放行（基线全拦，fail-closed 向后兼容无能力声明的插件）。
+  const allowedModules = fsGuard.parseStringArrayEnv(process.env[fsGuard.ENV_ALLOWED_MODULES_KEY])
+  const interceptor = createRequireInterceptor(pluginDir, allowedModules)
 
   // F1 配套：dev 模式（tsx）下本模块经 ESM 加载（fork 子进程无全局 require），
   // 改为顶层 `import { Module } from 'node:module'` 获取构造器——node:module 的
@@ -443,10 +453,12 @@ export function initSandbox(pluginDir: string): void {
   // 生产 CJS bundle 中 esbuild 将该 import 编译为 require('node:module') 解构，等价。
   const ModuleApi = Module as ModuleWithResolveFilename
   const _originalResolveFilename = ModuleApi._resolveFilename
-  // S-36（spec §5 待验证检查点）：CJS 混用路径的真实存在性未证实——sandbox 插件
-  // 加载主通路走 ESM loader 边界，尚未观察到插件代码走 CJS require。保留拦截器但
-  // 加一次性监控日志作观察信号：首次有 CJS require 经过本 patch（无论 interceptor
-  // 放行还是拒绝）即输出，之后静默。观察期至 ~2026-11，无命中再删除拦截器（减法）。
+  // CJS 拦截保留裁决（S-36 观察期收尾，登记 docs/todo/test-single-layer-cleanup.md；
+  // 原「观察期至 ~2026-11 无命中再删除」的减法方向被 F1-9 裁决推翻）：ESM hooks 不
+  // 覆盖 CJS require，本 patch 是 CJS 通道内置模块拦截的唯一防线——删除即任何 CJS
+  // 依赖 require('fs') 直接成功。拦截器已接入能力词表（F1-9：声明能力的模块两条
+  // 加载通道一致生效），永久保留；本一次性日志降级为首命中诊断信号（通道真实存在
+  // 的可观测证据），不再承载删除决策。
   // fork 子进程的 console 输出经 stdio 管道进 runtime 日志，可见性足够。
   let interceptionLogged = false
   ModuleApi._resolveFilename = function (
@@ -457,7 +469,7 @@ export function initSandbox(pluginDir: string): void {
     if (!interceptionLogged) {
       interceptionLogged = true
       console.log(
-        `[plugin-sandbox] CJS require interception active for plugin dir: ${pluginDir} — spec gate S1-W3 usage monitor (observation window ends ~2026-11)`,
+        `[plugin-sandbox] CJS require interception active for plugin dir: ${pluginDir} (capability-aware since F1-9; first-hit diagnostic)`,
       )
     }
     interceptor(request, resolved)

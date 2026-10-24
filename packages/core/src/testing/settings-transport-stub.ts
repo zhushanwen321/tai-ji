@@ -22,7 +22,8 @@ import type { SettingsTransport } from '../domain/settings/transport'
  * `const transport: SettingsTransport` 全量字面量承担（新 seam 方法缺失/改名在此报错）。
  */
 export type SettingsTransportStubOverrides = {
-  // NonNullable：契约含 optional 方法（插件两段式安装三成员：实装落定前缺省），
+  // NonNullable：契约含 optional 方法（插件两段式安装三成员为宿主实现兼容差异的
+  // optional 契约形态，非「未实装」——wire 已完整实装，stub 缺省以覆盖降级路径用例），
   // Parameters<F | undefined> 不满足函数约束——先剥 undefined 再取实参表
   [K in keyof SettingsTransport]?: NonNullable<SettingsTransport[K]> extends (...args: infer A) => unknown
     ? (...args: A) => unknown
@@ -205,8 +206,9 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     setExtensionAutoUpgrade: vi.fn(async () => {}),
 
     // ── 插件 Provider 来源（provider-plugin-access U6）：读/调/订阅 + 输入回传中性默认。
-    //    两段式安装三方法刻意不挂（optional 成员缺省 = 通道未落定态，Provider 页显示降级
-    //    提示）；用例需覆盖确认卡时经 overrides 注入三个 vi.fn。──
+    //    两段式安装三方法刻意不挂（optional 契约形态的 stub 缺省 = 覆盖降级路径用例：
+    //    Provider 页呈 channelUnavailable 可见降级；real adapter 无条件挂载）；用例需
+    //    覆盖确认卡时经 overrides 注入三个 vi.fn。──
     listAvailablePlugins: vi.fn(async () => ({ plugins: [] })),
     invokePlugin: vi.fn(async () => null),
     onPluginEvent: makeUnsubscribeStub(),

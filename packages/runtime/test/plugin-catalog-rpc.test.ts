@@ -6,8 +6,9 @@
  *   → 本地已装版本）+ 清单条目组装（remote-config 层 mock 注入 fixture 清单）→
  *   listAvailablePlugins 返回可安装视图（installed 比对 / updateAvailable）；
  *   getPluginCatalog 返回原始条目。
- * - 无缓存且拉取失败（fail-safe 链尾）：available=false → reply 空清单（S15②，UI
- *   整页报错语义的 runtime 侧形态）。
+ * - 无缓存且拉取失败（fail-safe 链尾）：available=false → 本地已装条目回退（S15②
+ *   R-2 终态——管理入口不随清单故障消失；空清单形态仅回退端口缺失时出现，见
+ *   plugin-catalog.test.ts）。
  * - core domain 方法（invokePlugin / listAvailablePlugins / getPluginCatalog 的
  *   WS 帧面）与 mock 域同步由 message-handler 帧测试 + G4 类型锚定（tsc 编译期）
  *   承载；本文件覆盖 runtime 段往返。
@@ -114,13 +115,28 @@ describe('plugin.listAvailable RPC 通路（U5+F3）', () => {
     })
   })
 
-  it('fail-safe 链尾（无缓存且拉取失败）→ 空清单（available=false 语义的 runtime 形态，S15②）', async () => {
+  it('fail-safe 链尾（无缓存且拉取失败）→ available=false + 本地已装条目回退（S15②，R-2：管理入口不随清单故障消失）', async () => {
     refreshRemoteConfigMock.mockResolvedValue({ data: undefined, refreshed: false, reason: 'network' })
     const service = wiredService()
 
     const reply = await service.listAvailablePlugins()
 
-    expect(reply.plugins).toEqual([])
+    // R-2 终态：available=false 不再是空清单——descriptor 装配的本地已装条目回退
+    // （installed=true + installedVersion），renderer 按 namespace 前缀识别插件条目。
+    // 本文件 DESCRIPTORS fixture 未带 displayName/packageName/namespace，回退条目按
+    // 既有装配语义落 undefined / pluginId 兜底（生产 descriptor 三者恒有值）
+    expect(reply.available).toBe(false)
+    expect(reply.reason).toBe('network')
+    expect(reply.plugins).toEqual([
+      {
+        packageName: 'wool-workbuddy',
+        pluginId: 'wool-workbuddy',
+        displayName: undefined,
+        pluginVersion: '1.0.0',
+        installed: true,
+        installedVersion: '1.0.0',
+      },
+    ])
   })
 })
 

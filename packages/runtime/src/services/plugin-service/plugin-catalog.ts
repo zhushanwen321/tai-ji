@@ -159,6 +159,52 @@ export interface PluginCatalogLoadResult { // oe-exempt:20261024:framework:ports
   reason?: RemoteRefreshOutcome<unknown>['reason']
 }
 
+/**
+ * 本地已装条目（S15② 本地回退的数据源，R-2 裁决 2026-10-24）：清单不可达时
+ * listAvailable 用已装插件构造条目，renderer 按 namespace 前缀识别插件条目——
+ * 「重新授权 / 更新插件」入口不随清单故障消失（S15「已装 provider 的管理不受影响」，
+ * D5 目标 3）。事实源 = registry descriptor（scan 唯一装配点）。
+ */
+export interface CatalogInstalledEntry { // oe-exempt:20261024:framework:ports/SDK 契约类型——接口先立、单实现常态（映射表/端口单一数据源）
+  pluginId: string
+  displayName: string
+  packageName: string
+  pluginVersion: string
+  /** manifest 声明命名空间（provider 插件才有；renderer 条目第二识别源） */
+  namespace?: string
+}
+
+/**
+ * 已装条目 → 可安装视图条目（installed=true；无清单基线，不带 updateAvailable——
+ * 版本比对需要清单版本，清单不可达时不猜测，S26 更新提示等待清单恢复）。
+ */
+export function installedEntriesToCatalogEntries(
+  entries: ReadonlyArray<CatalogInstalledEntry>,
+): PluginListAvailableReply['plugins'] {
+  return entries.map((entry) => ({
+    packageName: entry.packageName,
+    pluginId: entry.pluginId,
+    displayName: entry.displayName,
+    pluginVersion: entry.pluginVersion,
+    ...(entry.namespace !== undefined ? { namespace: entry.namespace } : {}),
+    installed: true,
+    installedVersion: entry.pluginVersion,
+  }))
+}
+
+/** PluginRegistry descriptors → 本地已装条目（S15② 回退数据源；与 installedVersionsFromDescriptors 同构的装配纯函数）。 */
+export function installedEntriesFromDescriptors(
+  descriptors: ReadonlyArray<{ pluginId: string; displayName: string; version: string; packageName?: string; namespace?: string }>,
+): CatalogInstalledEntry[] {
+  return descriptors.map((d) => ({
+    pluginId: d.pluginId,
+    displayName: d.displayName,
+    packageName: d.packageName ?? d.pluginId,
+    pluginVersion: d.version,
+    ...(d.namespace !== undefined ? { namespace: d.namespace } : {}),
+  }))
+}
+
 function toLoadResult(outcome: RemoteRefreshOutcome<PluginCatalogConfig>): PluginCatalogLoadResult {
   // stale = 有数据兜底但本次不是「确认新鲜」路径（节流/304 视为新鲜；网络失败与
   // guard 拒绝意味着远端状态未知，数据可能是过期缓存）
@@ -230,11 +276,15 @@ export function toCatalogReply(config: PluginCatalogConfig): PluginCatalogReply 
 /**
  * 插件清单 service：清单加载与本地安装状态比对的编排入口（RPC 接线归 u-protocol，
  * 复审 F3）。registry 依赖走端口注入，不与 PluginRegistry 实现耦合。
+ * getInstalledEntries（可选）= S15② 本地回退数据源；缺省时 available=false 的
+ * reply 为空清单（单测与旧装配形态）。
  */
 export class PluginCatalogService implements PluginInstalledVersionsPort {
-  private readonly deps: PluginInstalledVersionsPort
+  private readonly deps: PluginInstalledVersionsPort & {
+    getInstalledEntries?: () => Promise<ReadonlyArray<CatalogInstalledEntry>>
+  }
 
-  constructor(deps: PluginInstalledVersionsPort) {
+  constructor(deps: PluginInstalledVersionsPort & { getInstalledEntries?: () => Promise<ReadonlyArray<CatalogInstalledEntry>> }) {
     this.deps = deps
   }
 
@@ -242,9 +292,18 @@ export class PluginCatalogService implements PluginInstalledVersionsPort {
     return this.deps.getInstalledVersions()
   }
 
-  /** 拉取并返回清单（fail-safe 链语义见 PluginCatalogLoadResult）。 */
+  /** 拉取清单（fail-safe 链语义见 PluginCatalogLoadResult）。 */
   async load(options?: { force?: boolean }): Promise<PluginCatalogLoadResult> {
     return refreshPluginCatalog(options)
+  }
+
+  /** reply 本体的拉取元数据（S15①② renderer 两态呈现的数据源，R-2 裁决）。 */
+  private replyMeta(load: PluginCatalogLoadResult): Pick<PluginListAvailableReply, 'available' | 'stale' | 'reason'> {
+    return {
+      available: load.config !== undefined,
+      stale: load.stale,
+      ...(load.reason !== undefined ? { reason: load.reason } : {}),
+    }
   }
 
   /** plugin.catalog：清单原始目录条目（available/stale/reason 语义与 listAvailable 对齐）。 */
@@ -255,8 +314,11 @@ export class PluginCatalogService implements PluginInstalledVersionsPort {
     reason?: RemoteRefreshOutcome<unknown>['reason']
   }> {
     const load = await this.load(options)
+    const entries = load.config !== undefined
+      ? load.config.plugins
+      : await this.installedFallbackEntries()
     return {
-      reply: toCatalogReply(load.config ?? { version: CATALOG_VERSION, plugins: [] }),
+      reply: { entries, ...this.replyMeta(load) },
       available: load.config !== undefined,
       stale: load.stale,
       reason: load.reason,
@@ -265,7 +327,8 @@ export class PluginCatalogService implements PluginInstalledVersionsPort {
 
   /**
    * plugin.listAvailable：可安装视图（附本地安装状态比对）。
-   * available=false（无缓存且拉取失败）时 reply 为空清单，UI 按 available 整页报错（S15②）。
+   * available=false（无缓存且拉取失败）时 reply 携带本地已装条目回退（S15②：管理
+   * 入口不随清单故障消失）；回退条目不带 updateAvailable（无清单基线，不猜测）。
    */
   async listAvailable(options?: { force?: boolean }): Promise<{
     reply: PluginListAvailableReply
@@ -278,11 +341,20 @@ export class PluginCatalogService implements PluginInstalledVersionsPort {
     // 端口 reject 时整体失败由调用方按 RPC 错误处置
     const load = await this.load(options)
     const installedVersions = await this.getInstalledVersions()
+    const plugins = load.config !== undefined
+      ? listAvailablePlugins(load.config.plugins, installedVersions).plugins
+      : await this.installedFallbackEntries()
     return {
-      reply: listAvailablePlugins(load.config?.plugins ?? [], installedVersions),
+      reply: { plugins, ...this.replyMeta(load) },
       available: load.config !== undefined,
       stale: load.stale,
       reason: load.reason,
     }
+  }
+
+  /** 本地已装条目回退（S15②）：端口缺失 → 空清单（旧装配形态，单测常态）。 */
+  private async installedFallbackEntries(): Promise<PluginListAvailableReply['plugins']> {
+    if (this.deps.getInstalledEntries === undefined) return []
+    return installedEntriesToCatalogEntries(await this.deps.getInstalledEntries())
   }
 }

@@ -23,6 +23,9 @@ export default {
     modelCount: '{count} 个可用模型',
     emptyCatalog: '清单为空：没有可安装的 Provider 插件',
     catalogLoading: '正在加载插件清单…',
+    // S15 两态（R-2 wire 字段）：stale = 缓存兜底提示；unavailable = 无缓存且拉取失败（报错态）
+    staleHint: '清单可能不是最新（上次拉取未确认新鲜）',
+    catalogUnavailable: '插件清单不可达：无本地缓存且拉取失败，请检查网络后重试',
     retry: '重试',
     focusMissing: '目标插件不在清单中（可能已被移除），请重新打开页面',
     channelUnavailable: '安装通道未就绪：请更新到支持插件安装的版本后重试',

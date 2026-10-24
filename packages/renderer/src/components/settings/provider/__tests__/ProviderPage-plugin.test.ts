@@ -8,9 +8,12 @@
  *  - S17：plugin:event 状态上报 → 状态点与文案变化；重新展开 → invoke getStatus 拉取补齐
  *  - 条目动作：重新授权 / 更新插件 → 打开插件流程并带 focus（直达目标段）
  *
- * mock 策略：vi.mock('@/api') 替 config + plugin 域；ViewHost 数据源经 VIEW_HOST_SOURCE_KEY
- * 注入内存表；PluginProviderFlow 以探针 stub 记录 open/focus（流程内部行为由
- * PluginProviderFlow.test.ts 覆盖）。ProviderTemplatePicker 走真实组件（S1 菜单断言对象）。
+ * mock 策略：插件来源通道经 provideSettingsTransport(makeSettingsTransportStub) seam
+ * 注入（[C3] 禁直连门面——不 mock @/api 门面 plugin 域，见 :190 行内注释）；
+ * vi.mock('@/api') 仅替 config 域（供非 seam 消费方）；ViewHost 数据源经
+ * VIEW_HOST_SOURCE_KEY 注入内存表；PluginProviderFlow 以探针 stub 记录 open/focus
+ * （流程内部行为由 PluginProviderFlow.test.ts 覆盖）。ProviderTemplatePicker 走真实组件
+ * （S1 菜单断言对象）。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/settings/provider
  */
@@ -343,5 +346,44 @@ describe('条目动作：重新授权 / 更新插件', () => {
     expect(wrapper.find('[data-testid="provider-plugin-badge"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="provider-detail-extra-boundary"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="provider-reauthorize-btn"]').exists()).toBe(false)
+  })
+})
+
+describe('S15② 清单不可达：已装条目经 namespace 兜底识别（清单外第二识别源，F1-26）', () => {
+  it('available=false 本地回退条目（无 family、带 namespace）→ 插件徽标 / 重新授权 / 扩展区可见', async () => {
+    // 上线首日形态（R-3：v2-plugins.json 未发布 GitHub main，清单恒走无缓存失败分支）：
+    // runtime 返回本地已装条目回退（installed=true + namespace），条目识别不依赖清单家族元数据
+    pluginMock.listAvailablePlugins.mockResolvedValue({
+      plugins: [
+        {
+          packageName: '@zhushanwen/plugin-wool-trae',
+          pluginId: 'wool-trae',
+          displayName: 'Trae',
+          pluginVersion: '1.2.0',
+          namespace: 'wool-trae',
+          installed: true,
+          installedVersion: '1.2.0',
+        },
+      ],
+      available: false,
+      stale: false,
+      reason: 'network',
+    })
+    wrapper = mountPage([PLUGIN_PROVIDER])
+    await flushPromises()
+    await expandRow('wool-trae')
+
+    expect(wrapper.find('[data-testid="provider-plugin-badge"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="provider-detail-extra-boundary"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="provider-reauthorize-btn"]').exists()).toBe(true)
+    // 清单不可达 → 无清单版本基线，更新入口缺省（不猜测），重新授权常驻（D5）
+    expect(wrapper.find('[data-testid="provider-update-plugin-btn"]').exists()).toBe(false)
+
+    // 重新授权入口可用：带 focus 打开插件流程
+    await wrapper.find('[data-testid="provider-reauthorize-btn"]').trigger('click')
+    await flushPromises()
+    const flow = wrapper.findComponent(FlowStub)
+    expect(flow.props('open')).toBe(true)
+    expect(flow.props('focus')).toEqual({ pluginId: 'wool-trae', intent: 'authorize' })
   })
 })

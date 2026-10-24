@@ -288,6 +288,45 @@ describe('S1-W3: CJS interceptor boundary (/, file:, bare-name resolved)', () =>
   })
 })
 
+describe('F1-9: CJS require 拦截接入能力词表（computeBlockedBuiltins）', () => {
+  // 探针四判定（F1-10 修复契约）：声明 network.http 后 https 由拒变放行、fs 拒
+  // （CJS 通道恒拦，只读执法形态待裁决）、vm 永久拒、os 免声明放行。
+  // 与「CJS interceptor boundary」同层：拦截器纯函数 in-process，无进程无时钟。
+  let pluginDir = ''
+
+  beforeAll(() => {
+    pluginDir = realpathSync(mkdtempSync(join(tmpdir(), 'taiji-plugin-sandbox-cjs-cap-')))
+  })
+
+  afterAll(() => {
+    if (pluginDir) rmSync(pluginDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('声明 network.http（allowed=http,https,net,dns,tls）→ https 放行、fs 拒、vm 永久拒、os 免声明放行', () => {
+    const interceptor = createRequireInterceptor(pluginDir, ['http', 'https', 'net', 'dns', 'tls'])
+    // 正例：声明能力对应的模块放行（含 node: 前缀形态，M6a-01 剥离对称）
+    expect(interceptor('https', 'node:https')).toBe('https')
+    expect(interceptor('node:https', 'node:https')).toBe('node:https')
+    // 反例：fs 系 CJS 通道恒拦（模块级放行 = 完整 fs，与 fs.read-user-data 只读
+    // 子集承诺冲突——执法形态待裁决，fail-closed）
+    expect(() => interceptor('fs', 'node:fs')).toThrowError(/is blocked/)
+    expect(() => interceptor('fs/promises', 'node:fs/promises')).toThrowError(/is blocked/)
+    // 反例：vm 永久封禁，allowed 注入也不放行（fail-closed 免疫）
+    expect(() => interceptor('vm', 'node:vm')).toThrowError(/is blocked/)
+    // 对照：os 不在基线黑名单，免声明放行（D3 裁决移出）
+    expect(interceptor('os', 'node:os')).toBe('os')
+    // 基线未放行的其余模块仍拦（能力声明只放行映射集）
+    expect(() => interceptor('child_process', 'node:child_process')).toThrowError(/is blocked/)
+  })
+
+  it('未声明能力（allowed 缺省空集）→ https 拒（基线全拦，fail-closed 向后兼容）', () => {
+    const interceptor = createRequireInterceptor(pluginDir)
+    expect(() => interceptor('https', 'node:https')).toThrowError(/is blocked/)
+    expect(() => interceptor('fs', 'node:fs')).toThrowError(/is blocked/)
+    expect(interceptor('path', 'node:path')).toBe('path')
+  })
+})
+
 describe('S1-W3: BLOCKED_BUILTINS SSOT 防退化', () => {
   it('plugin-sandbox.ts 导出与 plugin-blocked-builtins.cjs 数据源逐元素相等', () => {
     // 直接 require 真实 .cjs（绕过 plugin-sandbox.ts 的 import），抓「TS 侧改回内联」漂移
@@ -485,8 +524,81 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`S-36: CJS 拦截一次性监控日�
         `[plugin-sandbox] CJS require interception active for plugin dir: ${pluginDir}`,
       )
       expect(result.monitorCalls[0]).toContain(
-        'spec gate S1-W3 usage monitor (observation window ends ~2026-11)',
+        'capability-aware since F1-9; first-hit diagnostic',
       )
+    } finally {
+      tsxTsconfig.dispose()
+    }
+  }, 30_000)
+
+  // F1-9 正反例（fork 级接线）：真实 initSandbox 消费 TAIJI_PLUGIN_ALLOWED_MODULES env
+  // （宿主 buildPluginCapabilityForkEnv 注入形态）→ 声明 network.http 后 CJS require('https')
+  // 放行、require('fs') 恒拒（CJS 通道只读执法待裁决）、require('vm') 永久拒。
+  it('F1-9 接线：initSandbox 读 TAIJI_PLUGIN_ALLOWED_MODULES → https 放行 / fs / vm 拒', async () => {
+    const tsxTsconfig = createTsxPathsTsconfig()
+    try {
+      const workDir = mkdtempSync(join(tmpdir(), 'f19-cjs-cap-'))
+      const pluginDir = join(workDir, 'plugin')
+      mkdirSync(pluginDir)
+      const fixturePath = join(workDir, 'fixture.cjs')
+      writeFileSync(
+        fixturePath,
+        [
+          "'use strict'",
+          '// F1-9 fixture：initSandbox（env 已注入放行清单）→ 逐模块 try require 回传结果',
+          `const { initSandbox } = require(${JSON.stringify(PLUGIN_BOOTSTRAP_TS)})`,
+          `initSandbox(${JSON.stringify(pluginDir)})`,
+          'const tryRequire = (name) => {',
+          '  try { require(name); return "ok" }',
+          '  catch (e) { return e && e.code === "PERMISSION_DENIED" ? "PERMISSION_DENIED" : "other:" + String(e && e.code) }',
+          '}',
+          'process.stdout.write("F19_RESULT:" + JSON.stringify({',
+          '  https: tryRequire("https"),',
+          '  fs: tryRequire("fs"),',
+          '  vm: tryRequire("vm"),',
+          '  os: tryRequire("os"),',
+          '}))',
+          '',
+        ].join('\n'),
+      )
+
+      const result = await new Promise<Record<string, string>>((resolveP, reject) => {
+        const child = fork(fixturePath, [], {
+          execPath: process.execPath,
+          execArgv: ['--import', 'tsx'],
+          cwd: RUNTIME_ROOT,
+          env: {
+            ...process.env,
+            TSX_TSCONFIG_PATH: tsxTsconfig.tsconfigPath,
+            // 宿主注入形态：JSON 数组字符串（buildPluginCapabilityForkEnv 编码）
+            TAIJI_PLUGIN_ALLOWED_MODULES: JSON.stringify(['http', 'https', 'net', 'dns', 'tls']),
+          },
+          stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+        })
+        let stdout = ''
+        let stderr = ''
+        child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
+        child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
+        child.on('error', reject)
+        child.on('close', (code) => {
+          const line = stdout.split('\n').find((l) => l.startsWith('F19_RESULT:'))
+          if (code !== 0 || !line) {
+            reject(new Error(`fixture exited ${code}. stdout=${stdout} stderr=${stderr}`))
+            return
+          }
+          try {
+            resolveP(JSON.parse(line.slice('F19_RESULT:'.length)) as Record<string, string>)
+          } catch (e) {
+            reject(new Error(`fixture result parse failed: ${(e as Error).message}`))
+          }
+        })
+      })
+      rmSync(workDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+
+      expect(result.https).toBe('ok')
+      expect(result.fs).toBe('PERMISSION_DENIED')
+      expect(result.vm).toBe('PERMISSION_DENIED')
+      expect(result.os).toBe('ok')
     } finally {
       tsxTsconfig.dispose()
     }

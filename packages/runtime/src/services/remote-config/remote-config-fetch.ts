@@ -42,11 +42,13 @@ interface RemoteCacheEnvelope { // oe-exempt:20261019:framework:taiji 远程配�
 }
 
 /** 域拉取结果：data = 本次可用数据（缓存优先语义）；refreshed = 本次发生了网络刷新且
- * 内容有变化（消费方据此触发合并写盘等下游动作）；reason = 未刷新原因（排障可见）。 */
+ * 内容有变化（消费方据此触发合并写盘等下游动作）；reason = 未刷新原因（排障可见）。
+ * 「无缓存且拉不到」不设独立 reason——「无数据」由 data===undefined 表达，reason
+ * 恒取真实未刷新原因（network / invalid / throttled）。 */
 export interface RemoteRefreshOutcome<T> { // oe-exempt:20261019:framework:taiji 远程配置域内形状/依赖注入面——接口先立单实现常态（本仓架构偏好），W3 quota-fetchers 域将复用同族形状
   data: T | undefined
   refreshed: boolean
-  reason?: 'throttled' | 'network' | 'invalid' | 'no-cache'
+  reason?: 'throttled' | 'network' | 'invalid'
 }
 
 function remoteCachePath(domain: RemoteConfigDomain): string {
@@ -172,7 +174,7 @@ async function applyRemotePayload<T>(
  *   （refreshed: true，下游触发合并写盘）。
  * - 200 + guard 拒绝：整体拒用（不部分采纳），warn + 返回旧缓存数据。
  * - 网络失败/超时：warn + 返回旧缓存数据。
- * - 全链无数据（无缓存且拉不到）：data undefined（reason: no-cache）。
+ * - 全链无数据（无缓存且拉不到）：data undefined，reason 取真实未刷新原因（network / invalid）。
  */
 export async function refreshRemoteConfig<T>(
   domain: RemoteConfigDomain,

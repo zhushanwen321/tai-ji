@@ -25,6 +25,9 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { deriveNamespace, NAMESPACE_MISMATCH } from '@taiji/shared/plugin-namespace'
 import type { PluginRpcServer, RpcDispatchContext } from './plugin-service/plugin-rpc-server.js'
+// 能力词经 shared SSOT 常量引用（与 manifest 校验/放行计算同一词表——裸字面量在词表
+// 改值时会静默失配为 credential 恒拒，常量引用让失配在编译期可见）
+import { PluginCapabilityConstants } from '@taiji/shared/plugin-capability-map'
 import { errorWithCode } from '../utils/errors.js'
 
 /** 三方法的 wire 方法名（插件 RPC 线协议，自由 method 字符串）。 */
@@ -209,7 +212,7 @@ async function handleProviderCredential(deps: ProviderWriteProxyDeps, params: Re
       'PERMISSION_DENIED',
     )
   }
-  if (!manifest.capabilities.includes('network.http')) {
+  if (!manifest.capabilities.includes(PluginCapabilityConstants.NETWORK_HTTP)) {
     throw errorWithCode(
       `PERMISSION_DENIED: providers.credential requires the 'network.http' capability in the ` +
         `plugin manifest (plaintext credentials only serve network actions). ` +

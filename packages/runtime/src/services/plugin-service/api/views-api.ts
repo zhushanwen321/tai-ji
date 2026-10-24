@@ -82,8 +82,10 @@ export function registerViewRpcHandlers(
     // 取通道身份（sandbox fork 与 pluginId 一对一，宿主注册，不可伪造——消息体自报值
     // 任何安全判定不得引用，plugin-rpc-server.RpcIdentity 契约）；trusted 多插件共享
     // Worker 无唯一归属（identity.pluginId === undefined）→ 回落载荷自报（trusted 同
-    // 进程对等体互不设防是既有设计语义）。会话域键不含插件维度，保持载荷自报（与
-    // pluginId 进条目数据的既有行为一致）。
+    // 进程对等体互不设防是既有设计语义）。会话域沿用既有取值路径：传给 handleViewUpdate
+    // 的是 globalPluginId（身份优先值）——sandbox 通道该值经 overwriteSandboxPluginId
+    // 在 dispatch 前已覆写为通道身份（值即通道身份），trusted Worker 回落分支保持载荷
+    // 自报；两域同源，不存在「会话域自报 / 全局域身份」的来源差异。
     const identityPluginId = dispatchCtx?.identity?.pluginId
     const globalPluginId = identityPluginId !== undefined
       ? identityPluginId

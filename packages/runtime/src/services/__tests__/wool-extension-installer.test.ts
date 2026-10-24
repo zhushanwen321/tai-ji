@@ -98,6 +98,24 @@ describe('WoolExtensionInstaller（D6 双产物安装编排·扩展侧）', () =
     })
   })
 
+  it('缺省双通道双败 → unreachable，message 聚合 github/gitcode 两通道 detail', async () => {
+    // 双败聚合分支（fetchManifest 缺省路径 :201-209）：错误信封拼装两通道原因——
+    // 排障时用户能看到「哪条通道、各自败因」，单源用例触不到本分支
+    const fetchFn = vi.fn(async () => new Response('boom', { status: 503 }))
+    const installer = new WoolExtensionInstaller({ extensionService: makeDeps().extensionService, fetchFn })
+
+    const err = await installer.installPiExtension('workbuddy', '0.2.0').then(
+      () => { throw new Error('expected rejection') },
+      (e: unknown) => e as Error & { code?: string },
+    )
+
+    expect(err.code).toBe('unreachable')
+    expect(err.message).toContain('github：HTTP 503')
+    expect(err.message).toContain('gitcode：HTTP 503')
+    // github 直拉 1 次 + gitcode releases 首跳即败 1 次（两跳完整路径只在成功时走满）
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
   it('清单坏形状 → bad_shape', async () => {
     const deps = makeDeps({ fetchFn: vi.fn(async () => jsonOk({ schemaVersion: 2 })) })
     const installer = new WoolExtensionInstaller(deps)
