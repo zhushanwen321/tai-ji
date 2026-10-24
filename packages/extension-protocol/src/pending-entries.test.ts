@@ -8,7 +8,9 @@ import {
   collectActivePendingIds,
   mapReasonToStatus,
   MAPPED_PENDING_STATUSES,
+  MAPPED_REASON_KEYS,
   SETTLEMENT_REASONS,
+  SETTLEMENT_REASON_KEYS,
   resolveSettlementReason,
   type MappedPendingStatus,
   type ResolvedSettlementReason,
@@ -28,6 +30,11 @@ const unreg = (id: string) => ({
 const unregStatus = (id: string, status: unknown) => ({
   customType: 'pending:unregister',
   data: { id, reason: 'fixture', status },
+})
+
+const unregReason = (id: string, reason: unknown) => ({
+  customType: 'pending:unregister',
+  data: { id, reason },
 })
 
 describe('PENDING_*_ENTRY_TYPE 常量（落盘契约字符串锁定）', () => {
@@ -136,6 +143,67 @@ describe('字段映射视图（MF-2-1 单点：register 首见 type + 注销 sta
     expect(fields.unregisterStatuses.has('bad-1')).toBe(false)
     expect(fields.unregisterStatuses.has('bad-2')).toBe(false)
     expect(fields.unregisterStatuses.size).toBe(1)
+  })
+})
+
+describe('unregisterSettlements（结清视图：注销 reason 事实经 resolveSettlementReason 解析，§3.3.6 权威通道）', () => {
+  it('读 reason 事实解析结清值：五值同名直通 + 历史 reason 按解析表映射', () => {
+    const cases: Array<[string, string, ResolvedSettlementReason]> = [
+      ['bg-1', 'no_result', 'no_result'],
+      ['bg-2', 'lost', 'lost'],
+      ['bg-3', 'completed', 'completed'],
+      ['bg-4', 'failed', 'failed'],
+      ['bg-5', 'cancelled', 'cancelled'],
+      ['bg-6', 'expired', 'no_result'],
+      ['bg-7', 'time_limited', 'failed'],
+      ['bg-8', 'aborted', 'cancelled'],
+    ]
+    const scan = scanPendingEntries(cases.flatMap(([id, reason]) => [reg(id), unregReason(id, reason)]))
+    for (const [id, , expected] of cases) {
+      expect(scan.unregisterSettlements.get(id)).toBe(expected)
+    }
+  })
+
+  it('词表外 reason 解析 unknown 照常入视图（fail-visible 透传）；缺 reason 的注销条目不入视图（不虚构）', () => {
+    const scan = scanPendingEntries([
+      unregReason('bg-1', 'some-future-reason'),
+      { customType: 'pending:unregister', data: { id: 'bg-2', status: 'completed' } },
+      unreg('bg-3'),
+    ])
+    expect(scan.unregisterSettlements.get('bg-1')).toBe('unknown')
+    expect(scan.unregisterSettlements.has('bg-2')).toBe(false)
+    expect(scan.unregisterSettlements.has('bg-3')).toBe(false)
+  })
+
+  it('同 id 多条注销取末次 string reason；非 string reason 不抹除前值', () => {
+    const scan = scanPendingEntries([
+      unregReason('bg-1', 'completed'),
+      unregReason('bg-1', 'failed'),
+      unregReason('bg-2', 'lost'),
+      unregReason('bg-2', 42),
+    ])
+    expect(scan.unregisterSettlements.get('bg-1')).toBe('failed')
+    expect(scan.unregisterSettlements.get('bg-2')).toBe('lost')
+  })
+
+  it('空串 id 不入结清视图（与 status 视图同口径）', () => {
+    const scan = scanPendingEntries([unregReason('', 'completed')])
+    expect(scan.unregisterSettlements.size).toBe(0)
+  })
+
+  it('scanPendingFields 投影携带结清视图；legacy status 视图并行保留（双通道并存）', () => {
+    const fields = scanPendingFields([
+      reg('bg-1', { type: 'workflow' }),
+      unregReason('bg-1', 'no_result'),
+      reg('bg-2', { type: 'bash' }),
+      unregStatus('bg-2', 'completed'),
+    ])
+    // 结清视图（reason 事实）：no_result 真值可达——status 旧通道下该形态恒 unknown
+    expect(fields.unregisterSettlements.get('bg-1')).toBe('no_result')
+    expect(fields.unregisterStatuses.has('bg-1')).toBe(false)
+    // legacy 视图（status 副档）：unregReason 形态无 status 字段故缺席；status 形态照常
+    expect(fields.unregisterStatuses.get('bg-2')).toBe('completed')
+    expect(fields.unregisterSettlements.get('bg-2')).toBe('unknown') // reason='fixture' 词表外
   })
 })
 
@@ -339,26 +407,19 @@ describe('SettlementReason 结清枚举（subagent-observability §3.3.6 新权�
     expect(resolveSettlementReason('')).toBe('unknown')
   })
 
-  it('两通道键集一致性：REASON_STATUS_MAP 与结清解析表对同一 reason 全量可解析（无漏登记键）', () => {
-    // 防两表漂移：历史通道认识的每个 reason，结清通道都必须给出非 unknown 的显式
-    // 解析（gc/disconnected/running 例外——其结清语义就是 no_result/unknown 显式值，
-    // 属「显式映射为缺省语义值」而非「漏登记」）。
-    const legacyReasons = [
-      'completed', 'failed', 'cancelled', 'expired', 'time_limited', 'budget_limited',
-      'aborted', 'interrupted', 'interrupted-by-restart', 'interrupted-by-parent',
-      'reopened', 'stopped', 'exited', 'deleted', 'orphaned',
-      'running', 'closed', 'parent-shutdown', 'parent-fork', 'parent-new',
-      'user-close', 'disconnected', 'gc',
-    ]
-    for (const reason of legacyReasons) {
-      // 每个历史通道认识的 reason 在结清通道都有显式登记（值可为 unknown 的仅 gc——
-      // 其 legacy 值也是 unknown，语义一致）
-      expect(() => resolveSettlementReason(reason)).not.toThrow()
-      expect(resolveSettlementReason(reason)).not.toBe('')
+  it('两通道键集对拍：结清解析表键集 = legacy reason 键集 ∪ 结清五值同名键（结构性防漏登记）', () => {
+    // 键集漂移静态防线：任一登记表增删键而另一侧未同批跟随时本断言变红（缺登记键
+    // 在消费侧解析为 unknown——fail-visible 可见但属漏登记缺陷信号）。键集常量派生
+    // 自两张映射表本身（无第二份手工词表），对拍对象是登记表实况而非测试夹具。
+    const expected = new Set<string>([...MAPPED_REASON_KEYS, ...SETTLEMENT_REASONS])
+    expect(SETTLEMENT_REASON_KEYS).toEqual(expected)
+    // 前提事实防恒真：两键集非空、且五值中 completed/failed/cancelled 与 legacy
+    // 键同名直通——结清键集严格大于 legacy 键集（lost/no_result 为新增成员）。
+    expect(MAPPED_REASON_KEYS.size).toBeGreaterThan(0)
+    expect(SETTLEMENT_REASON_KEYS.size).toBe(MAPPED_REASON_KEYS.size + 2)
+    for (const key of MAPPED_REASON_KEYS) {
+      expect(SETTLEMENT_REASON_KEYS.has(key)).toBe(true)
     }
-    // gc 双通道一致性：legacy 与结清通道都落 unknown/no_result 的诚实缺省族
-    expect(mapReasonToStatus('gc')).toBe('unknown')
-    expect(resolveSettlementReason('gc')).toBe('no_result')
   })
 })
 

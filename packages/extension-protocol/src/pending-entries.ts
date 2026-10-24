@@ -46,6 +46,14 @@ export interface PendingEntriesScan {
    * 末次合法值（后条非法不抹除前条合法值）。
    */
   unregisterStatuses: Map<string, MappedPendingStatus>
+  /**
+   * 注销条目结清视图（subagent-observability §3.3.6 债权结清新权威通道）：id →
+   * 结清枚举（封闭五值 + 词表外解析缺省 unknown）。读注销 entry 的 reason 事实经
+   * resolveSettlementReason 解析（不经 mapReasonToStatus 旧映射）；string reason
+   * 一律解析（fail-visible 值照常入视图），非 string reason 视为畸形不入视图；
+   * 同 id 多条注销取末次带 string reason 的值（后条畸形不抹除前值）。
+   */
+  unregisterSettlements: Map<string, ResolvedSettlementReason>
 }
 
 /**
@@ -63,6 +71,7 @@ export function scanPendingEntries(entries: readonly unknown[]): PendingEntriesS
     unregisteredIds: new Set(),
     registerTypes: new Map(),
     unregisterStatuses: new Map(),
+    unregisterSettlements: new Map(),
   }
   const seenRegisterIds = new Set<string>()
   for (const raw of entries) {
@@ -80,10 +89,19 @@ export function scanPendingEntries(entries: readonly unknown[]): PendingEntriesS
     } else if (entry.customType === PENDING_UNREGISTER_ENTRY_TYPE) {
       if (typeof data.id === 'string') {
         scan.unregisteredIds.add(data.id)
-        const status = data.status
-        // 字段视图同跳过空串 id；status 仅收词表成员（不虚构终态）
-        if (data.id !== '' && typeof status === 'string' && MAPPED_PENDING_STATUSES.has(status)) {
-          scan.unregisterStatuses.set(data.id, status as MappedPendingStatus)
+        if (data.id !== '') {
+          const status = data.status
+          // 字段视图跳过空串 id；status 仅收词表成员（不虚构终态）
+          if (typeof status === 'string' && MAPPED_PENDING_STATUSES.has(status)) {
+            scan.unregisterStatuses.set(data.id, status as MappedPendingStatus)
+          }
+          // 结清视图读 reason 事实（§3.3.6 权威通道，不经 status 旧映射档）：词表外
+          // reason 解析为 unknown 照常入视图（fail-visible 诚实标注），非 string reason
+          // 是畸形 data 不入视图（不抹除前值）。
+          const reason = data.reason
+          if (typeof reason === 'string') {
+            scan.unregisterSettlements.set(data.id, resolveSettlementReason(reason))
+          }
         }
       }
     }
@@ -91,21 +109,23 @@ export function scanPendingEntries(entries: readonly unknown[]): PendingEntriesS
   return scan
 }
 
-/** scanPendingFields 的结果：collect 链路消费的字段映射投影（首见 type + 注销 status）。 */
+/** scanPendingFields 的结果：collect 链路消费的字段映射投影（首见 type + 注销 status 视图 + 注销结清视图）。 */
 export interface PendingFieldsScan {
   registerTypes: Map<string, string>
   unregisterStatuses: Map<string, MappedPendingStatus>
+  /** 注销结清视图（§3.3.6 权威通道，见 {@link PendingEntriesScan.unregisterSettlements}）。 */
+  unregisterSettlements: Map<string, ResolvedSettlementReason>
 }
 
 /**
  * collect 终局回填的字段视图（MF-2-1 单点入口）：scanPendingEntries 产物中
- * register 首见 type + 全部注销 status 的 MAPPED 成员投影。消费方（delivery-port
- * 快照基线 / pending-notifications consume 后回填）按 id 查表补 type/outcome，
- * 查无保持 undefined（诚实缺省，不虚构终态）。
+ * register 首见 type + 全部注销 status 的 MAPPED 成员投影 + 注销 reason 事实的
+ * 结清解析投影。消费方（delivery-port 快照基线 / pending-notifications consume 后
+ * 回填）按 id 查表补 type/outcome，查无保持 undefined（诚实缺省，不虚构终态）。
  */
 export function scanPendingFields(entries: readonly unknown[]): PendingFieldsScan {
-  const { registerTypes, unregisterStatuses } = scanPendingEntries(entries)
-  return { registerTypes, unregisterStatuses }
+  const { registerTypes, unregisterStatuses, unregisterSettlements } = scanPendingEntries(entries)
+  return { registerTypes, unregisterStatuses, unregisterSettlements }
 }
 
 /**
@@ -233,6 +253,13 @@ export function mapReasonToStatus(reason: string): MappedPendingStatus {
 }
 
 /**
+ * REASON_STATUS_MAP 键集（历史 reason 词表，派生自映射表本身）。消费方：双通道
+ * 键集对拍测试（与 SETTLEMENT_REASON_KEYS 的包含关系断言，键集漂移静态防线）。
+ * string 元素类型：对任意落盘/事件 reason 做成员判定，窄化前的原始值。
+ */
+export const MAPPED_REASON_KEYS: ReadonlySet<string> = new Set(Object.keys(REASON_STATUS_MAP))
+
+/**
  * MappedPendingStatus 的值集（MF-1-5 词表单源）：由 REASON_STATUS_MAP 派生——映射表
  * 演化（新增 reason / 改映射目标）时值集构造性跟随，无第二份手工词表可漂移。消费方
  * （delivery-port / pending-notifications 读取侧）按成员资格判定落盘 status 合法性时
@@ -334,3 +361,11 @@ const SETTLEMENT_REASON_MAP: Readonly<Record<string, ResolvedSettlementReason>> 
 export function resolveSettlementReason(reason: string): ResolvedSettlementReason {
   return SETTLEMENT_REASON_MAP[reason] ?? 'unknown'
 }
+
+/**
+ * SETTLEMENT_REASON_MAP 键集（结清解析词表，派生自映射表本身）。消费方：双通道
+ * 键集对拍测试——键集关系 = 本键集 ⊇ MAPPED_REASON_KEYS（历史 reason 保留解析）
+ * 且 = MAPPED_REASON_KEYS ∪ 结清五值同名键（lost/no_result 新增、其余直通），
+ * 任一侧登记表增删键而另一侧未同批跟随时对拍断言变红。
+ */
+export const SETTLEMENT_REASON_KEYS: ReadonlySet<string> = new Set(Object.keys(SETTLEMENT_REASON_MAP))

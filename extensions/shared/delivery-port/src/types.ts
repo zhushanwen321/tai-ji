@@ -16,7 +16,7 @@
 // 的 extensions 侧同位形态）；内核包零 pi 词汇的纪律由 session-delivery 自守。
 
 import type { CustomPayload, DeliveryFailurePolicy } from "@zhushanwen/session-delivery";
-import type { MappedPendingStatus } from "@zhushanwen/extension-protocol";
+import type { MappedPendingStatus, SettlementReason } from "@zhushanwen/extension-protocol";
 
 // ─── envelope ───────────────────────────────────────────────
 
@@ -77,17 +77,20 @@ export type DeliveryDeliverResult =
 /**
  * 收取条目（collect 面返回给等待器的单条结果；字段来源设计 §3.1③ 字段来源表）：
  * id = 收取展开键（单债权条目 = 生产方申报的操作 id；managed 合批条目逐键展开，
- * 每键一条、载荷共享）；type 与 outcome 与 pending 词表对齐（protocol
- * mapReasonToStatus 单一权威点，不建第三套终态词表）——两字段的两条填充路径：
- * collectArm 快照收取（ready / unregistered-no-entry，端口按日志基线填）与消费方
- * 终局回填（consume 条目，等待结束后按 session entries 现算填，见 consume 时序
- * 契约）；content/details = 通知载荷原样；note 标记特殊态说明（如 managed 域「注销
+ * 每键一条、载荷共享）；type 与 pending 词表对齐；outcome 是不透明终态标注值
+ * （消费方按原文呈现，不做词表分支判断），值域两通道：
+ * - 结清五值 + 解析缺省 unknown（SettlementReason ∪ 'unknown'）——消费方回填通道
+ *   读注销 entry 的 reason 事实经 resolveSettlementReason 结清解析
+ *   （subagent-observability §3.3.6 权威通道）；
+ * - legacy status 值（expired / time_limited / aborted 等历史终态）——collectArm
+ *   快照通道读注销 entry 落盘的 status 副档（mapReasonToStatus 映射产物）。
+ * content/details = 通知载荷原样；note 标记特殊态说明（如 managed 域「注销
  * 无条目分支完结，无独立载荷快照」）。
  */
 export interface CollectedEntry { // oe-exempt:20261017:framework:collect 批量收取对外契约（收取条目形态）
   id: string;
   type?: string;
-  outcome?: MappedPendingStatus;
+  outcome?: MappedPendingStatus | SettlementReason;
   content?: string;
   details?: unknown;
   note?: string;

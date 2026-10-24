@@ -608,11 +608,12 @@ const pendingRegister = (id: string, type = "bash") => ({
 	data: { id, type, name: `task ${id}`, registeredAt: T0, sessionId: "s-1" },
 });
 
-/** pending unregister entry fixture（status = 写侧 mapReasonToStatus 已映射落盘值）。 */
-const pendingUnregister = (id: string, status: string) => ({
+/** pending unregister entry fixture（reason = 写侧真实原因词，status = mapReasonToStatus
+ *  映射落盘的 legacy 副档——生产 listener 双字段同写，结清解析以 reason 为权威）。 */
+const pendingUnregister = (id: string, reason: string, status: string) => ({
 	type: "custom",
 	customType: "pending:unregister",
-	data: { id, reason: "fixture", status },
+	data: { id, reason, status },
 });
 
 const managedEnvelope = (id: string, overrides: Partial<Envelope> = {}): Envelope => ({
@@ -765,23 +766,25 @@ describe("collectArm 五态快照", () => {
 		expect(h.sent).toHaveLength(1);
 	});
 
-	it("unregistered-no-entry：曾注册已注销且无日志条目 → 按 unregister status 定 outcome（三形态：死亡跨批 / 例外1 / 防御分支的 status 值变体）", () => {
-		// 写侧 mapReasonToStatus 落盘值：exited/orphaned → cancelled（死亡跨批・例外1）、
-		// stopped → aborted（例外1 掐断）、reopened → completed（防御分支收尾）
-		const cases: Array<{ id: string; status: string }> = [
-			{ id: "k-death", status: "cancelled" },
-			{ id: "k-orph", status: "cancelled" },
-			{ id: "k-stop", status: "aborted" },
-			{ id: "k-defn", status: "completed" },
+	it("unregistered-no-entry：曾注册已注销且无日志条目 → 按 unregister reason 结清解析定 outcome（三形态：死亡跨批 / 例外1 / 防御分支收尾）", () => {
+		// 写侧 listener 双字段同写：reason = 真实原因词（结清权威通道）、status = legacy
+		// 副档。exited/orphaned → cancelled（死亡跨批・例外1）、stopped → cancelled
+		// （中止族——legacy status 副档为 aborted，结清视图以五值为准）、reopened →
+		// completed（防御分支收尾）
+		const cases: Array<{ id: string; reason: string; status: string }> = [
+			{ id: "k-death", reason: "exited", status: "cancelled" },
+			{ id: "k-orph", reason: "orphaned", status: "cancelled" },
+			{ id: "k-stop", reason: "stopped", status: "aborted" },
+			{ id: "k-defn", reason: "reopened", status: "completed" },
 		];
 		const h = makeHost({
-			entries: [...cases.map((c) => pendingRegister(c.id)), ...cases.map((c) => pendingUnregister(c.id, c.status))],
+			entries: [...cases.map((c) => pendingRegister(c.id)), ...cases.map((c) => pendingUnregister(c.id, c.reason, c.status))],
 		});
 		const port = createDeliveryPort(h.host);
 		const snap = port.collectArm(cases.map((c) => c.id));
 		expect(snap.map((s) => s.state)).toEqual(["unregistered-no-entry", "unregistered-no-entry", "unregistered-no-entry", "unregistered-no-entry"]);
 		expect(snap[0]!.entry).toMatchObject({ outcome: "cancelled", note: expect.any(String) });
-		expect(snap[2]!.entry).toMatchObject({ outcome: "aborted" });
+		expect(snap[2]!.entry).toMatchObject({ outcome: "cancelled" });
 		expect(snap[3]!.entry).toMatchObject({ outcome: "completed" });
 		// 无处可写终局（该键不属任何日志条目）：零 ack entry
 		expect(h.ackEntries()).toHaveLength(0);

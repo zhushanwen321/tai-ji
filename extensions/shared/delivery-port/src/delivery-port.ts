@@ -79,6 +79,7 @@ import type {
 import {
   scanPendingEntries,
   type MappedPendingStatus,
+  type ResolvedSettlementReason,
 } from "@zhushanwen/extension-protocol";
 
 import {
@@ -327,7 +328,7 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
   ): Omit<CollectedEntry, "id"> {
     return {
       type: pending.registerTypes.get(key),
-      outcome: pending.unregisterStatus.get(key),
+      outcome: pending.unregisterSettlements.get(key) ?? pending.unregisterStatus.get(key),
       content: rec.payload.content,
       details: rec.payload.details,
     };
@@ -369,7 +370,7 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
           state: "unregistered-no-entry",
           entry: {
             type: pending.registerTypes.get(key),
-            outcome: pending.unregisterStatus.get(key),
+            outcome: pending.unregisterSettlements.get(key) ?? pending.unregisterStatus.get(key),
             note: UNREGISTERED_NO_ENTRY_NOTE,
           },
         });
@@ -883,6 +884,9 @@ interface PendingBaseline {
   unregisteredIds: Set<string>;
   /** 注销条目 id → status（写侧经 mapReasonToStatus 已映射落盘；畸形不收）。 */
   unregisterStatus: Map<string, MappedPendingStatus>;
+  /** 注销条目 id → 结清五值（§3.3.6 权威通道 resolveSettlementReason——快照收取与
+   *  工具侧回填同源读此视图，legacy status 视图仅为对账副档）。 */
+  unregisterSettlements: Map<string, ResolvedSettlementReason>;
 }
 
 function scanPendingBaseline(entries: readonly unknown[]): PendingBaseline {
@@ -896,6 +900,7 @@ function scanPendingBaseline(entries: readonly unknown[]): PendingBaseline {
     registerTypes: scan.registerTypes,
     unregisteredIds: scan.unregisteredIds,
     unregisterStatus: scan.unregisterStatuses,
+    unregisterSettlements: scan.unregisterSettlements,
   };
 }
 

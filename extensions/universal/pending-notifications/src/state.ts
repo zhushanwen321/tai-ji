@@ -127,9 +127,9 @@ export function computeCollectWaitKeys(entries: unknown[], currentSessionId: str
 
 /**
  * collect 终局回填的字段视图单点在 protocol scanPendingFields（register 首见
- * type + 注销 status 的 MAPPED 成员，与 delivery-port 快照基线同一映射规则，
- * MF-2-1；回填时序背景见 index.ts collectResults 回填段）——本文件不持有
- * 字段映射实现。
+ * type + 注销 status 视图 + 注销 reason 事实的结清视图——回填 outcome 读结清视图
+ * （§3.3.6 权威通道），与 delivery-port 快照基线同一扫描规则，MF-2-1；回填时序
+ * 背景见 index.ts collectResults 回填段）——本文件不持有字段映射实现。
  */
 
 /**

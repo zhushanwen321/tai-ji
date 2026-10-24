@@ -6,7 +6,8 @@
 //
 // 锁定面：
 //   ① SettlementReason 结清枚举封闭五值（completed/failed/cancelled/lost/no_result，
-//      §3.3.6）+ 解析缺省 unknown 的 fail-visible 类型面（词表外 reason 不落五值）；
+//      §3.3.6）+ 解析缺省 unknown 的 fail-visible 类型面（词表外 reason 不落五值）
+//      + 与 extension-protocol SETTLEMENT_REASONS 的跨包对拍（词表漂移防线）；
 //   ② RunOutcome 五值（含 partially_succeeded 第五值，§3.3.8）+ 双包对账的 core
 //      侧成员集合（runtime workflow-outcome-vocab-parity 断言的 core 输入面）；
 //   ③ RunDoneReason 六值镜像与 DoneReason 权威一致（镜像漂移防线）；
@@ -16,6 +17,8 @@
 // 纯常量/纯函数断言，零 fs / 零 timer——不触碰真实数据目录。
 
 import { describe, expect, it } from "vitest";
+
+import { SETTLEMENT_REASONS } from "@zhushanwen/extension-protocol";
 
 import {
   ALL_RUN_OUTCOMES,
@@ -55,6 +58,14 @@ describe("SettlementReason 结清枚举（§3.3.6 封闭五值）", () => {
     expect(ALL_SETTLEMENT_REASONS).toContain("lost");
     expect(ALL_SETTLEMENT_REASONS).toContain("no_result");
     expect("lost").not.toBe("no_result");
+  });
+
+  it("双包词表对拍：core ALL_SETTLEMENT_REASONS 与 extension-protocol SETTLEMENT_REASONS 逐成员一致（词表漂移跨包防线）", () => {
+    // core 是结清产值权威写侧、protocol 是落盘 reason 的解析权威通道——两侧各自
+    // 持同值字面量（依赖方向 core → protocol，protocol 不反向引 core），漂移只能
+    // 靠本对拍抓：任一侧增删/改名成员即红，强迫同批登记。
+    expect([...ALL_SETTLEMENT_REASONS]).toEqual([...SETTLEMENT_REASONS]);
+    expect(new Set(ALL_SETTLEMENT_REASONS).size).toBe(new Set(SETTLEMENT_REASONS).size);
   });
 });
 

@@ -412,6 +412,41 @@ describe("collect_results tool", () => {
 		]);
 	});
 
+	it("[结清五值回填 §3.3.6] 注销 reason 事实经结清解析回填 outcome：completed/failed/cancelled/lost/no_result 分别可达", async () => {
+		// 回填权威 = 结清视图（reason 事实 → resolveSettlementReason），不经
+		// mapReasonToStatus 旧映射——lost/no_result 在旧 status 副档恒落 unknown，
+		// 本用例五值逐一可达即锁定断层修复（真 listener 落盘 → 全链路回填）。
+		const cases: Array<[string, string]> = [
+			["ok-1", "completed"],
+			["ok-2", "failed"],
+			["ok-3", "cancelled"],
+			["ok-4", "lost"],
+			["ok-5", "no_result"],
+		];
+		for (const [id] of cases) setup.entries.push(makeRegisterEntry(id));
+		setup.port.collectArm.mockReturnValue(cases.map(([id]) => ({ id, state: "waiting" })));
+
+		const promise = runCollect(setup, { ids: cases.map(([id]) => id) });
+		const arrivalCb = setup.port.onCollectArrival.mock.calls[0][0] as () => void;
+		// 真实 listener 落盘注销 entry：reason 事实 + mapReasonToStatus 的 status 副档
+		// （lost/no_result 的 status 落 unknown——旧映射通道下 outcome 恒 unknown 的缺陷形态）
+		for (const [id, reason] of cases) setup.handlers.pendingUnregister!({ id, reason });
+		// 端口 consume 真实返回形态（MF-1-6）：只含载荷，type/outcome 归回填
+		setup.port.consume.mockReturnValueOnce(cases.map(([id]) => ({ id, content: `payload-${id}` })));
+
+		arrivalCb();
+		const res = await promise;
+
+		expect(res.details.collected).toEqual(
+			cases.map(([id, outcome]) => ({
+				id,
+				type: "workflow",
+				outcome,
+				content: `payload-${id}`,
+			})),
+		);
+	});
+
 	it("超时路径：已收部分进 collected、未完成进 stillOpen（诚实返回，不抛错）", async () => {
 		setup.entries.push(makeRegisterEntry("fast"), makeRegisterEntry("slow"));
 		setup.port.collectArm.mockReturnValue([

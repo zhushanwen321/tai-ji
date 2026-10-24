@@ -526,22 +526,24 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 		});
 	}
 
-	/** type/outcome 缺失回填（设计 §3.1③ 字段来源表：type 与 pending:register 的
-	 * type 对齐、outcome 与 pending:unregister 的 status 对齐；MF-1-6：端口 consume
-	 * 只返回 {id, content, details}，终态字段统一由本处单遍扫描回填）：「等待中
-	 * 同步到达」的挂起条目在端口 consume 时点，生产方的注销 entry 尚未落盘
-	 * （managed flushBatch 的 deliver 与 unregisterPending 同步段相邻、deliver 先
-	 * 行；端口 consume 由到达回调在 deliver 栈内同步触发），outcome 恒取空。await
-	 * 恢复后生产方同步栈已完成（注销 entry 已落盘），按本 session entries 现算回填；
-	 * 注销不在册的条目保持 undefined（诚实缺省，不虚构终态）。快照收取条目
-	 * （ready / unregistered-no-entry）的 type/outcome 已由端口 collectArm 填充，
-	 * 回填只补缺不覆盖。 */
+	/** type/outcome 缺失回填（设计 §3.1③ 字段来源表 + §3.3.6 结清权威）：type 与
+	 *  pending:register 的 type 对齐；outcome 读注销 entry 的 reason 事实经
+	 *  resolveSettlementReason 结清解析（封闭五值 + 词表外 unknown fail-visible，
+	 *  protocol scanPendingFields 单点投影），不经 mapReasonToStatus 旧映射——
+	 *  no_result/lost 等新写入方 reason 在旧 status 副档恒落 unknown，结清视图才载
+	 *  真值。「等待中同步到达」的挂起条目在端口 consume 时点，生产方的注销 entry
+	 *  尚未落盘（managed flushBatch 的 deliver 与 unregisterPending 同步段相邻、
+	 *  deliver 先行；端口 consume 由到达回调在 deliver 栈内同步触发），outcome 恒取
+	 *  空。await 恢复后生产方同步栈已完成（注销 entry 已落盘），按本 session entries
+	 *  现算回填；注销不在册的条目保持 undefined（诚实缺省，不虚构终态）。快照收取
+	 *  条目（ready / unregistered-no-entry）的 type/outcome 已由端口 collectArm 填充，
+	 *  回填只补缺不覆盖。 */
 	function backfillCollectFields(ctx: ExtensionContext, collected: CollectedEntry[]): void {
 		if (!collected.some((c) => c.outcome === undefined || c.type === undefined)) return;
 		const fields = scanPendingFields(ctx.sessionManager.getEntries());
 		for (const c of collected) {
 			if (c.type === undefined) c.type = fields.registerTypes.get(c.id);
-			if (c.outcome === undefined) c.outcome = fields.unregisterStatuses.get(c.id);
+			if (c.outcome === undefined) c.outcome = fields.unregisterSettlements.get(c.id);
 		}
 	}
 }
