@@ -235,7 +235,7 @@ describe('PlanReviewBar 分支公式（D4 单源：ready ⇔ 挂起注册表，p
     busSlot.current!.emit({
       kind: 'ui-request',
       sessionId: SID,
-      request: { requestId: 'au-1', pluginId: 'p', kind: 'select', method: 'select', title: 't', askUser: true, askUserQuestions: [] },
+      request: { requestId: 'au-1', pluginId: 'p', kind: 'select', dialogKind: 'select', title: 't', askUser: true, askUserQuestions: [] },
     } as never)
     await flushAsync()
 
