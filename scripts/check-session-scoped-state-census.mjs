@@ -47,7 +47,8 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'test-re
  * [branch-review-minors 清算，dev-0.11.2 线] 新增 useLoadMoreHistory.ts（ADR-0049 存量迁移：
  * slowLine/loadMoreError 等实例级 + watch(sessionId) 复位态转 Map 分区，updateFor 捕获 sid）。
  * [chat-flow-consistency D1 补提交] +2：useQueueEditAnchor.ts（U6 锚定分区自 composer-shell
- * 拆出成独立 composable）、useQueueRows.ts（U7 桌面撤销单飞 cancellingId 分区）。 */
+ * 拆出成独立 composable）、useQueueRows.ts（U7 桌面撤销单飞 cancelling 分区——
+ * QueueUiPartition.cancelling 存撤销中条目 clientUuid）。 */
 export const CENSUS_SNAPSHOT = {
   'packages/core/src/domain/bottom-drawer/control.ts': 1,
   'packages/core/src/domain/drawer/control.ts': 1,

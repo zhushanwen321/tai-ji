@@ -27,10 +27,9 @@ export type SessionTurnPhase = 'idle' | 'dispatching' | 'generating' | 'settling
  * 视为回合未结束。单一常量即单一判定源——投递判定、发送位预测、活动条、前端回合判定
  * 不各自维护相位子集，新增消费方声明即用。
  *
- * 值校准状态：按设计定稿值落地。探针 P1（settling 窗口 pi prompt(steer) 受理实测，
- * 结果文件 .tmp/tech-design/probes/p1-result.md）实施时点结论未出——若探针失败触发
- * 降级路径（settling 回退 direct 投递），本集合须缩窄为 ['dispatching', 'generating']
- * （设计探针清单登记的降级形态），校准由消费方单元（U1 laneOf）同批执行。
+ * 值校准：探针 P1 实测通过（settling 窗口 pi prompt(steer) 三条受理路径全部正确受理、
+ * 毫秒级自动开新回合，结果文件 .tmp/tech-design/probes/p1-result.md），集合维持设计
+ * §3.3 D1 定稿值 ['dispatching', 'generating', 'settling']，条件降级路径不再适用。
  */
 export const ACTIVE_TURN_PHASES = ['dispatching', 'generating', 'settling'] as const
 

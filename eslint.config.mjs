@@ -219,7 +219,8 @@ export default [
   },
     // [chat-flow-consistency U1] effects/registry：message.* 广播 effect 注册表（每事件一
   // handler 的表驱动聚合点，行数随事件数线性增长）。willRetry 两级终态分层 + 停止/截断提示
-  // 行（D1）净增 28 行折算 528，按「微超即提额，保留软上限告警」先例（message-turns /
+  // 行（D1）有效行 483→528（净增 45 行，与 message-turns 注释同口径），按「微超即提额，
+  // 保留软上限告警」先例（message-turns /
   // pi-provider-store / transport server 同型）提额，handler 内聚体再拆属独立重构任务。
   {
     files: ['packages/core/src/domain/chat/effects/registry.ts'],

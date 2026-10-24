@@ -410,7 +410,7 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 全部消息发送的统一投递服务：**一个内核 + 两个薄适配 + 唯一队列在 pi**。内核 = `packages/session-delivery/`（v3：条目状态机 / 判重 / 送达凭据 / DeliveryStore 端口，零 pi 依赖零 fs 知识）；两个薄适配 = runtime 适配（`packages/runtime/src/services/session/session-delivery-registry.ts`，文本投递路径：提交入口 + 在途登记 + 撤销编排 + GUI 状态源）与 pi 内投递端口 DeliveryPort（`extensions/shared/delivery-port/`，custom 通知投递路径唯一执行者：通知提交 + 投递日志 + 回执 + 重启重放）。**唯一队列 = pi 原生 steer / followUp 队列**（每 session 一份）——文本 `prompt(streamingBehavior)` 与通知 `sendMessage(deliverAs)` 同队 FIFO，忙时入队不拒；两档注入时机由 pi 队列原生出队承载，taiji 侧零时机代码。renderer 只提交（`delivery.submit`）与渲染（`session.delivery` 状态帧），不做投递判定。
 
-**投递方式判定（lane，runtime 单点）**：每条消息的投递路径判定 = runtime `laneOf`（session-delivery-registry.ts），判定源 = occupancy 派生——「回合进行中」（turn ∈ `ACTIVE_TURN_PHASES` = dispatching / generating / settling，shared 单点常量）→ steer；持有期（压缩窗口 / 撤回编排 / 交接在途 handingOff）→ queued（持有结束后自动投出）；其余空闲 → direct（立即成为对话流气泡）。settling（收尾中）纳入「回合进行中」由探针 P1 实测背书（pi settling 窗口 steer 受理正确）——回合结束瞬间的追问与生成中的行为一致，进队列区。
+**投递方式判定（lane，runtime 单点）**：每条消息的投递路径判定 = runtime `laneOf`（session-delivery-registry.ts），判定源 = occupancy 派生——「回合进行中」（turn ∈ `ACTIVE_TURN_PHASES` = dispatching / generating / settling，shared 单点常量）→ steer；持有期 → queued（持有结束后自动投出），其中压缩窗口（occupancy.compacting）与交接在途（occupancy.handingOff）来自 occupancy 派生，撤回编排走 registry 私有 revoking 标志（session-delivery-registry.ts `currentHold`，不进 occupancy 派生视图通道）、同归 queued 非 occupancy 派生；其余空闲 → direct（立即成为对话流气泡）。settling（收尾中）纳入「回合进行中」由探针 P1 实测背书（pi settling 窗口 steer 受理正确）——回合结束瞬间的追问与生成中的行为一致，进队列区。
 
 **envelope（投递信封）**：投递请求统一包装——payload（判别联合 text / custom）+ timing + 幂等键 id + 提交选项（merge 合批 / onFailure 失败处置 / 通知域另有 collectKey 收取关联键）。机制统一、差异只在提交选项缺省值（text 缺省 forget 失败即弃 + 逐条；custom 缺省 retain 留账重投 + 合批）与端点能力（cancel / drain 管控面仅 runtime 端点）。
 

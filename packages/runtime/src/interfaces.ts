@@ -357,9 +357,10 @@ export interface ISessionService {
   hasActiveSession(sessionId: string): boolean
   getSummary(sessionId: string): SessionSummary | undefined
   /**
-   * 取活跃 session 的运行时状态视图（isGenerating / isCompacting / isBashRunning /
-   * lastActiveAt 等可写字段；未激活/不存在返回 undefined）。sd-u5 起 delivery 装配
-   * 经此读 isIdle 判定标志；字段可写语义见 IManagedSessionView 注释。
+   * 取活跃 session 的运行时状态视图（occupancy 四维 / lastActiveAt 等可写字段；
+   * 未激活/不存在返回 undefined）。isGenerating 等忙闲判定从 occupancy 派生
+   * （chat-flow-consistency D1 派生布尔已删，读口 = types.ts isGeneratingTurn）。
+   * sd-u5 起 delivery 装配经此读 isIdle 判定标志；字段可写语义见 IManagedSessionView 注释。
    */
   getSession(sessionId: string): IManagedSessionView | undefined
   /**

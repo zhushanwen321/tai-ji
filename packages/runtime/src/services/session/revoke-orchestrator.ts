@@ -241,9 +241,9 @@ function locateTarget(
 
 /**
  * ① 空闲判定（D8 busy 触发点：turn 活跃 / compacting / settling / bash）。
- * [审计候选 13] 收敛为 occupancy 三维公式：isGenerating/isCompacting/isBashRunning 三布尔
- * 与 occupancy 同源同点写入（applySessionOccupancyTransition 转移表每行 flags+patch 原子派生，
- * C-data-19 禁绕开直写），四路 OR 与三维公式等价——留一份判定式，不留第二份镜像。
+ * 判定式 = occupancy 直接读取（chat-flow-consistency D1 后 occupancy 是四维唯一存储，
+ * 原 isGenerating/isCompacting/isBashRunning 派生布尔已删——审计候选 13「留一份判定式，
+ * 不留第二份镜像」由删除镜像完成），不另设平行标志。
  */
 function isOccupiedForRevoke(view: IManagedSessionView | undefined): boolean {
   if (!view) return false // 无视图（测试/异常装配）按空闲——与 holdReasonOf 同款宽容，后续 ensureActive 失败可见
