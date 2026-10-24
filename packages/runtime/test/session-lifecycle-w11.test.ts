@@ -30,7 +30,7 @@ import type { IEventAdapter } from '../src/interfaces.js'
 import type { SessionSummary } from '@taiji/shared'
 
 function makeSummary(id: string): SessionSummary {
-  return { id, label: 'test', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now(), modelId: 'p/m', tokenCount: 0 }
+  return { id, label: 'test', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now() }
 }
 
 /** switchSession mock：记录 pi 实际收到的附着路径（W1 后 = 原文件路径本身）。 */

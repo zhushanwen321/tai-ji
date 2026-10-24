@@ -159,27 +159,32 @@ describe('mock session domain', () => {
     expect(r.deleted).toContain(forked.id)
   })
 
-  it('create/fork override 生效范围（G4 锚定后 mock 补齐）：override 落 summary 可断言 + fork 血缘/继承', async () => {
-    // create 四参 override：presetId→launchPresetId / projectId / modelOverride→modelId / thinkingOverride→thinkingLevel
+  it('create/fork override 生效范围（G4 锚定后 mock 补齐）：描述类 override 落 summary + fork 血缘/继承', async () => {
+    // [W3] modelOverride / thinkingOverride 两参保留签名全等（G4 参数契约）但不再落
+    // SessionSummary——三状态字段（modelId/thinkingLevel/tokenCount）已从 SessionSummary
+    // 删除（状态归 live-state 状态层，列表只承载导航；mock 无状态层，override 终值经
+    // composer launchConfig 解析链呈现）。描述类 override 照常落 summary 可断言。
     const created = await session.create('/tmp/ov', 'ov-src', 'preset-x', 'proj-x', 'test/model-x', 'high')
     expect(created.launchPresetId).toBe('preset-x')
     expect(created.projectId).toBe('proj-x')
-    expect(created.modelId).toBe('test/model-x')
-    expect(created.thinkingLevel).toBe('high')
+    expect(created).not.toHaveProperty('modelId')
+    expect(created).not.toHaveProperty('thinkingLevel')
     // server-push 同源的 list 快照可断言（fixture 已带 override）
     const groups = await session.list()
     const found = groups.flatMap((g) => g.sessions).find((s) => s.id === created.id)
-    expect(found).toMatchObject({ modelId: 'test/model-x', projectId: 'proj-x', launchPresetId: 'preset-x', thinkingLevel: 'high' })
-    // fork：override 覆盖（ADR-0056 Staging Mode）+ projectId 继承父归属 + 血缘键
-    // parentSession 用源 sessionId（FR-20 fallback 键形态：mock 无 sessionFile）+ forkEntryId
+    expect(found).toMatchObject({ projectId: 'proj-x', launchPresetId: 'preset-x' })
+    expect(found).not.toHaveProperty('modelId')
+    expect(found).not.toHaveProperty('thinkingLevel')
+    // fork：projectId 继承父归属 + 血缘键（parentSession 用源 sessionId——FR-20
+    // fallback 键形态：mock 无 sessionFile）+ forkEntryId；状态类 override 不落条目
     const forked = await session.fork(created.id, {
       label: 'ov-fork',
       modelOverride: 'test/model-y',
       thinkingOverride: 'low',
       piEntryId: 'pi-entry-1',
     })
-    expect(forked.modelId).toBe('test/model-y')
-    expect(forked.thinkingLevel).toBe('low')
+    expect(forked).not.toHaveProperty('modelId')
+    expect(forked).not.toHaveProperty('thinkingLevel')
     expect(forked.projectId).toBe('proj-x')
     expect(forked.parentSession).toBe(created.id)
     expect(forked.forkEntryId).toBe('pi-entry-1')
@@ -740,27 +745,111 @@ describe('mock 门面导出', () => {
   })
 })
 
-// ── mock btw 域（btw-question D6，M2-a）─────────────────────────────────────
-describe('mock btw 域（D6 3 控制帧）', () => {
-  it('create：vid 形态 btw:* + mainSid 回显 + forkState 恒 full（mock 无 fork 面，显式登记偏差）', async () => {
+// ── mock btw 域（btw-question D6，M2-a；线枚举随 W4b 退役，改走 session.listSessions）──
+/** SessionGroup[] → SessionSummary[] 扁平（保序；本文件 W4b 组共用） */
+function flattenBtwGroups(groups: Awaited<ReturnType<typeof session.listSessions>>): Array<{ id: string; label: string; cwd: string; surface?: string }> {
+  return groups.flatMap((g) => g.sessions)
+}
+
+describe('mock btw 域（D6 控制帧）', () => {
+  it('create：sessionId 形态（W4a 后 = pi 真实 id 形态 mock-btw-N）+ mainSid 回显 + forkState 恒 full（mock 无 fork 面，显式登记偏差）', async () => {
     const r = await btw.create('btw-main-a')
-    expect(r.vid).toMatch(/^btw:/)
+    expect(r.sessionId).toMatch(/^mock-btw-/)
     expect(r.mainSid).toBe('btw-main-a')
     expect(r.forkState).toBe('full')
   })
 
-  it('list 按 mainSid 分区枚举 + remove 后即消失 + 跨主会话隔离 + 未命中 vid no-op', async () => {
-    const first = await btw.create('btw-main-b')
-    const second = await btw.create('btw-main-b')
-    expect(first.vid).not.toBe(second.vid)
-    expect((await btw.list('btw-main-b')).map((t) => t.vid)).toEqual([first.vid, second.vid])
-    // 隔离：另一主会话无线（注册表按 mainSid 分区，不串台）
-    expect(await btw.list('btw-main-c')).toEqual([])
-    // 关线生效
-    await btw.remove(first.vid)
-    expect((await btw.list('btw-main-b')).map((t) => t.vid)).toEqual([second.vid])
-    // 未命中 vid 不抛（mock v1 不模拟失败口径）
-    await expect(btw.remove('btw:ghost')).resolves.toBeUndefined()
+  it('remove 后即出册 + 未命中 id no-op（线枚举经 session.list {surface:"btw"} 断言，见下组）', async () => {
+    const line = await btw.create('btw-main-remove')
+    // 建线即在 session.list 的 btw 口径内
+    const before = flattenBtwGroups(await session.listSessions({ surface: 'btw' }))
+    expect(before.map((s) => s.id)).toContain(line.sessionId)
+    await btw.remove(line.sessionId)
+    const after = flattenBtwGroups(await session.listSessions({ surface: 'btw' }))
+    expect(after.map((s) => s.id)).not.toContain(line.sessionId)
+    // 未命中 id 不抛（mock v1 不模拟失败口径）
+    await expect(btw.remove('ghost-line')).resolves.toBeUndefined()
+  })
+})
+
+// ── mock session.list 通用查询（W4b，设计 §5-W4b mock 侧合成方向）────────────────────
+describe('mock session.list 通用查询（W4b btw 进通用列表）', () => {
+  it('{surface:"btw", mainSessionId} 只返回该主会话名下的线（含负例：他主会话的线不得混入）', async () => {
+    const mainA = 'btw-query-main-a'
+    const mainB = 'btw-query-main-b'
+    const a1 = await btw.create(mainA)
+    const a2 = await btw.create(mainA)
+    const b1 = await btw.create(mainB)
+
+    const lines = flattenBtwGroups(await session.listSessions({ surface: 'btw', mainSessionId: mainA }))
+    expect(lines.map((s) => s.id)).toEqual([a1.sessionId, a2.sessionId])
+    // 负例：B 主会话的线不得出现在 A 的查询结果里（过滤参数写反时全绿的兜底断言）
+    expect(lines.map((s) => s.id)).not.toContain(b1.sessionId)
+    // 全部条目 surface 恒 'btw'（侧栏条目不得混入）
+    expect(lines.every((s) => s.surface === 'btw')).toBe(true)
+  })
+
+  it('线条目合成：label = btw-<序号>（§3.4.3）+ cwd = 主会话 fixture cwd；孤儿 mainSid 取占位不留空', async () => {
+    // fixture 主会话（s1 cwd = /Users/dev/Code/taiji）：cwd 取所属主会话 fixture 值
+    const f1 = await btw.create('s1')
+    const f2 = await btw.create('s1')
+    const fixtureLines = flattenBtwGroups(await session.listSessions({ surface: 'btw', mainSessionId: 's1' }))
+      .filter((s) => s.id === f1.sessionId || s.id === f2.sessionId)
+    expect(fixtureLines.map((s) => [s.id, s.label, s.cwd])).toEqual([
+      [f1.sessionId, 'btw-1', '/Users/dev/Code/taiji'],
+      [f2.sessionId, 'btw-2', '/Users/dev/Code/taiji'],
+    ])
+
+    // 孤儿 mainSid（fixture 无该主会话）：cwd = 约定占位 `<mock>/btw-<线 sessionId>`，不留空
+    const orphan = await btw.create('btw-query-orphan-main')
+    const orphanEntry = flattenBtwGroups(await session.listSessions({ surface: 'btw', mainSessionId: 'btw-query-orphan-main' }))[0]
+    expect(orphanEntry.id).toBe(orphan.sessionId)
+    expect(orphanEntry.cwd).toBe(`<mock>/btw-${orphan.sessionId}`)
+    expect(orphanEntry.label).toBe('btw-1')
+  })
+
+  it('{surface:"sidebar"} 与 config.sessions 查询/广播口径逐条一致（项 12② 的 mock 侧镜像）', async () => {
+    const viaList = await session.list()
+    const viaSidebarQuery = await session.listSessions({ surface: 'sidebar' })
+    expect(viaSidebarQuery).toEqual(viaList)
+    // 侧栏口径不含任何 btw 线条目
+    expect(flattenBtwGroups(viaSidebarQuery).some((s) => s.surface === 'btw')).toBe(false)
+  })
+
+  it('无参 = 全量：侧栏条目 + 全部线条目并存', async () => {
+    const all = flattenBtwGroups(await session.listSessions({}))
+    const sidebarCount = flattenBtwGroups(await session.listSessions({ surface: 'sidebar' })).length
+    const btwCount = flattenBtwGroups(await session.listSessions({ surface: 'btw' })).length
+    expect(all.length).toBe(sidebarCount + btwCount)
+  })
+
+  it('供数来源等价（收编⑤ 数据层面）：session.surfaces 派生视图的 btw 成员 ≡ session.list{surface:"btw"} 的 id 集合', async () => {
+    // W4b 收编（§5-W4b 四步之①⑤）：3 个抑制读取点将从 session.surfaces 只读派生表改读
+    // session.list {surface:'btw'} 拉取缓存做成员判别。切换等价的数据层判据 = 两个来源
+    // 对同一注册表事实给出的线成员集合一致（同 owner 派生：mockBtwThreads 同时驱动
+    // pushSurfaces 广播与 buildBtwLineEntries 合成）——成员一致则抑制判别结果一致。
+    const a1 = await btw.create('btw-equiv-main-a')
+    const a2 = await btw.create('btw-equiv-main-a')
+    const b1 = await btw.create('btw-equiv-main-b')
+
+    // 捕获最近一帧 session.surfaces 广播（create 后 pushSurfaces 重播）
+    let entries: Array<{ sessionId: string; surface: string }> = []
+    const off = events.onGlobalType('session.surfaces', (msg) => {
+      entries = (msg as { payload: { entries: Array<{ sessionId: string; surface: string }> } }).payload.entries
+    })
+    await btw.remove(b1.sessionId) // 触发一次重播，确保 entries 为最新
+    off()
+
+    const inScope = (id: string): boolean => id === a1.sessionId || id === a2.sessionId || id === b1.sessionId
+    const surfacesBtwIds = new Set(
+      entries.filter((e) => e.surface === 'btw').map((e) => e.sessionId).filter(inScope),
+    )
+    const listBtwIds = new Set(
+      flattenBtwGroups(await session.listSessions({ surface: 'btw' })).map((s) => s.id).filter(inScope),
+    )
+    // b1 已 remove：两来源都不含它（关线同拍出册）
+    expect(listBtwIds).toEqual(new Set([a1.sessionId, a2.sessionId]))
+    expect(surfacesBtwIds).toEqual(listBtwIds)
   })
 })
 

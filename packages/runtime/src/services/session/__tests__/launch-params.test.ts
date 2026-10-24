@@ -425,7 +425,7 @@ function makeL2Env() {
     getReplaceSystemPrompt: vi.fn(() => undefined),
     getLaunchPresetOptions: vi.fn(async () => undefined),
     toSummary: vi.fn((s: IManagedSessionView): SessionSummary => ({
-      id: s.id, label: 'test', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now(), modelId: 'p/m', tokenCount: 0,
+      id: s.id, label: 'test', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now(),
     })),
     notifySessionCreated: vi.fn(),
     findScannedSession: vi.fn(() => undefined),
@@ -599,7 +599,6 @@ function makeP2Env(userPresetsFile?: unknown) {
     getReplaceSystemPrompt: () => undefined,
     toSummary: (s: IManagedSessionView): SessionSummary => ({
       id: s.id, label: 'test', cwd: s.cwd, status: 'idle', lastActiveAt: Date.now(),
-      modelId: s.modelId, tokenCount: 0,
       // launchPresetId 已收编进 IManagedSessionView（types.ts），直接读
       launchPresetId: s.launchPresetId,
     }),
@@ -736,11 +735,14 @@ describe('⛔ 探针 P2（D3 前提）：出厂 builtin:full 与无 preset 路�
       const bareSummary = await bareEnv.lifecycle.create(bareEnv.cwd, 't', {})
 
       // meta 面：preset 路径 launchPresetId='builtin:full'，无 preset 路径 undefined；
-      // 其余 meta（modelId/thinkingLevel）两路径一致（全局默认播种）
+      // 其余 meta（modelId/thinkingLevel）两路径一致（全局默认播种）——W3 起三状态
+      // 字段不在 SessionSummary 上，同值断言改读 lifecycle 注册表记录（双写缓存同源）。
       expect(presetSummary.launchPresetId).toBe('builtin:full')
       expect(bareSummary.launchPresetId).toBeUndefined()
-      expect(presetSummary.modelId).toBe(bareSummary.modelId)
-      expect(presetSummary.thinkingLevel).toBe(bareSummary.thinkingLevel)
+      const presetRecord = presetEnv.lifecycle.get(presetSummary.id)
+      const bareRecord = bareEnv.lifecycle.get(bareSummary.id)
+      expect(presetRecord?.modelId).toBe(bareRecord?.modelId)
+      expect(presetRecord?.thinkingLevel).toBe(bareRecord?.thinkingLevel)
       // sidecar 面：.preset.json 写入条件 = presetId 存在（preset 写 / bare 不写）；
       // V9-④ 从根源修复后 create 路径携 skipJsonlExistsGuard 放行检查（.jsonl 未 flush 也落盘）
       expect(presetEnv.persistPresetBinding).toHaveBeenCalledWith(presetEnv.sessionFile, 'builtin:full', { skipJsonlExistsGuard: true })

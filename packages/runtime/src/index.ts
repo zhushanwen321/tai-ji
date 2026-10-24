@@ -65,7 +65,7 @@ import type { IProviderCredentialResolver } from './services/ports/provider-cred
 import { PresetService } from './services/preset-service.js'
 import { ModelService } from './services/model-service.js'
 
-import { mandatoryExtensions, isBtwVirtualId } from '@taiji/shared'
+import { mandatoryExtensions } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
 import { getDataDir, getDefaultSessionDir } from '@taiji/shared/paths'
 // startupSweep：启动收编扫描 core 装配单点（挂点见 main() 内 registerRuntimeInstance
@@ -879,10 +879,12 @@ async function main(): Promise<void> {
       fileChangeDiff,
       onExtensionUIRequest: (requestId, sid, method, payload) => {
         server.registerExtensionTimeout(sid, requestId, method, payload)
-        // [BU2 / D1 闲置豁免生产通道·置位推送] btw 线（sid=vid）的挂起交互请求 →
+        // [BU2 / D1 闲置豁免生产通道·置位推送] btw 线的挂起交互请求 →
         // setPendingInteraction(true)（豁免不计闲置）；解除 = 终态派生（respond/expired/失效
-        // 清空中转 pending 表 → BtwService.idleTick 经 hasPendingUiRequests 见空即解除）。
-        if (isBtwVirtualId(sid)) btwService.setPendingInteraction(sid, true)
+        // 清空中转 pending 表 → hasPendingUiRequests 见空即解除）。
+        // W4a 判别器 = registry 成员查询（getLine，键 = 线 session id = piSessionId；旧
+        // isBtwVirtualId 前缀判别对 piId 形态恒 false，随键切换同批替换，§3.3.6 迁移表）。
+        if (btwService.getLine(sid) !== undefined) btwService.setPendingInteraction(sid, true)
       },
       // session-manager 请求路由：fire-and-forget 调 server.handleSessionManagerRequest
       //（由 SessionManagerHandler 异步处理并回写 pi response）。
@@ -1400,14 +1402,14 @@ async function main(): Promise<void> {
   // ── BtwService（btw-question D1/D2/D3 + B2 授权接线，M2-b）──
   // 六项依赖按 BtwServiceDeps docstring 归位组合根：线进程复用同一 pm（出站 env 经
   // rpc-client start → buildOutboundChildEnv 统一武装，C-proc-09，无新增进程创建点）；
-  // registerSession 走 SessionService 的 lifecycle 兼容委托（hidden:true 透传 = active
-  // 路径防线）；源文件解析 = 活跃 ?? 扫盘（与 resolveSessionFilePath 同源）；pi 二进制与
+  // registerSession 走 SessionService 的 lifecycle 兼容委托（W3 起 surface:'btw' 同链
+  // 透传；hidden 形参已随 W5 字段退场删除，此处传 undefined）；源文件解析 = 活跃 ?? 扫盘（与 resolveSessionFilePath 同源）；pi 二进制与
   // pm 同 effectiveRoot 锚点。
   // 线状态变化广播（onThreadStateChanged 消费）：发该主会话线列表 state 帧
   //（typeKey 'btw'，buildBtwThreadListPayload 防漂移）。best-effort：失败留痕不打断主链
   //（恢复通道 = btw.list RPC 拉取兜底）。
-  const publishBtwThreadList = (vid: string): void => {
-    const rec = btwService.getLine(vid)
+  const publishBtwThreadList = (sessionId: string): void => {
+    const rec = btwService.getLine(sessionId)
     if (!rec) return
     try {
       messageBus.publish(rec.mainSid, {
@@ -1417,7 +1419,7 @@ async function main(): Promise<void> {
       })
     } catch (e) {
       // best-effort 广播降级：推送失败不影响主流程，前端经 btw.list RPC 拉取兜底（拉为主）
-      console.error(`[btw] thread-list broadcast failed (vid=${vid}) — pull fallback via btw.list RPC remains available:`, e)
+      console.error(`[btw] thread-list broadcast failed (sessionId=${sessionId}) — pull fallback via btw.list RPC remains available:`, e)
     }
   }
   const btwService = new BtwService({
@@ -1432,8 +1434,14 @@ async function main(): Promise<void> {
       getExtensionPaths: (cwd) => sessionService.getExtensionPaths(cwd),
       getReplaceSystemPrompt: () => sessionService.getReplaceSystemPrompt(),
     }),
-    registerSession: (id, client, cwd, label, sessionFilePath, hidden) =>
-      sessionService.initializeManagedSession(id, client, cwd, label, sessionFilePath, hidden),
+    // W3 surface 落地：btw 直注册链第二处签名（dep 类型 → 本 adapter →
+    // initializeManagedSession 三处同批扩参）。线不经 create 链路，surface 必须
+    // 经本链显式传到 registerSession 尾部——只改 registerSession 尾部传不到线，
+    // 线会以缺省 'sidebar' 注册。
+    // W5：dep 类型、registerSession 与兼容委托的 hidden 形参已随字段退场全部删除，
+    // 本 adapter 不再传 hidden 占位（协议字段 session.create.hidden 同批收缩）。
+    registerSession: (id, client, cwd, label, sessionFilePath, surface) =>
+      sessionService.initializeManagedSession(id, client, cwd, label, sessionFilePath, undefined, undefined, undefined, undefined, undefined, surface),
     resolveMainSessionFile: (mainSid) =>
       sessionService.getSession(mainSid)?.sessionFilePath ?? sessionService.findScannedSession(mainSid)?.filePath,
     resolvePiCommand: () => findPiExecutable(effectiveRoot),
@@ -1443,22 +1451,22 @@ async function main(): Promise<void> {
     // lifecycle 收尾：planned kill 抑制 exit 回调，Map 条目/总线分区/插件数据不自清——
     // 在此镜像主会话 delete 的收尾序（detach → removeSessionEntry → 插件 sessionData 真删）。
     // 冷线（从未注册）getSession 空 → 三步全幂等零动作；失效路径（闲置回收）不经过本回调。
-    onLineTerminated: (vid) => {
-      if (!sessionService.getSession(vid)) return
-      sessionService.detachSession(vid)
-      sessionService.removeSessionEntry(vid)
-      clearRemovedSessionData(vid)
+    onLineTerminated: (sessionId) => {
+      if (!sessionService.getSession(sessionId)) return
+      sessionService.detachSession(sessionId)
+      sessionService.removeSessionEntry(sessionId)
+      clearRemovedSessionData(sessionId)
     },
     onThreadStateChanged: publishBtwThreadList,
     // [BU2] 交互中转 pending 快照（respond/expired/失效三终态共同落点，server 薄委托）。
-    hasPendingUiRequests: (vid) => server.getPendingUiRequests(vid).length > 0,
+    hasPendingUiRequests: (sessionId) => server.getPendingUiRequests(sessionId).length > 0,
     // [BU6 / V6·⑤a] D9⑤ 行为契约注入生产 trace（运行期可达；最终裁决角色 对账单测层见
     // btw-contract-inject.test.ts，system-prompt-trace 对账/豁免结论见本轮 deviations）。
     traceContractInjection: (t) => {
-      logger.info(`[btw] contract injection: vid=${t.vid} round=${t.round} carrier=${t.carrier} contract=${t.contract}`)
+      logger.info(`[btw] contract injection: sessionId=${t.sessionId} round=${t.round} carrier=${t.carrier} contract=${t.contract}`)
     },
   })
-  // B3 ensure 链分支（D1⑥/V5 回收后续问）：ensureActive 对 btw vid 转 ensureProcess。
+  // B3 ensure 链分支（D1⑥/V5 回收后续问）：ensureActive 对 btw 线转 ensureProcess。
   sessionService.setBtwService(btwService)
   // [M4-a / btw-question D4 消费方① + D9④] 级联接线 + 启动重建：
   // ① delete/deleteByCwd 的级联支线经模块槽注入（BtwService 两原语结构性满足窄接口）；

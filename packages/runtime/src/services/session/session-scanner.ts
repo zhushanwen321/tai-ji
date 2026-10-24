@@ -48,12 +48,15 @@ export class SessionScanner {
       .map(s => this.scannedToSummary(s))
 
     const result = [...active, ...persisted]
-      // 隐藏 session（公共 session）不进 sidebar 列表。**两路径的 hidden 语义不同（防误信）**：
-      // active 路径（内存 Map）的 hidden 标记在 IManagedSessionView，本过滤真实生效；
-      // persisted 路径（磁盘扫描）**无 hidden 字段**（ScannedSessionMeta/ScannedSession 均未承载，
-      // 不经 toSummary 透传）——其条目恒过本过滤，本过滤**不是**磁盘路径的隐藏防线。
-      // 磁盘路径的隐藏靠目录隔离构造性成立（如 btw 线落 btw/ 根，不在 sessions/ 扫描范围）。
-      .filter(s => !s.hidden)
+      // sidebar 归属过滤（W5：hidden 停写同批切换为 surface 正向谓词，读取点登记于
+      // docs/constraints.json C-data-28 清单，usage=nav-filter）：仅 `surface === 'sidebar'`
+      // 的条目进列表。**两路径的 surface 语义（防误信）**：
+      // active 路径（内存 Map）的 surface 标记在 IManagedSessionView，btw 线恒 'btw'
+      // （三条写路径 createLine / ensureProcess / rebuildFromDisk 保证），本过滤真实生效；
+      // persisted 路径（磁盘扫描）的 surface 由 scannedToSummary 显式缺省 'sidebar'
+      // （磁盘路径只见得到主会话——线目录不在扫描范围，E-13），其条目恒过本过滤。
+      // 谓词取正向：未知枚举值不泄漏进侧栏。
+      .filter(s => s.surface === 'sidebar')
       .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
     this.pruneGitCache(result)
     return result
@@ -86,11 +89,10 @@ export class SessionScanner {
       isBareWorkspace: detectBareWorkspaceCached(s.cwd),
       status: (outcome ?? 'idle') as SessionStatus,
       lastActiveAt: s.lastModified,
-      // modelId 来自 scanSessionMeta 第七读的反向读 JSONL 真源（scan 占位语义）。
-      // source:'scan' 标记让合并侧（core mergeViewSnapshot 检查）能按来源分流——扫描占位
-      // 空值不覆盖实例/广播真值（#2 空串覆盖事故防线）；owner 快照的显式空值不受此检查。
-      modelId: s.modelId ?? '',
-      tokenCount: 0,
+      // W3 surface 落地：磁盘条目显式缺省 'sidebar'（磁盘路径只见得到主会话——
+      // 线目录不在扫描范围，E-13）。W5 两处过滤点切 surface === 'sidebar' 正向谓词，
+      // 缺该显式缺省 = 全部冷会话从侧栏消失（验收项 10① 集合等价断言兜底该失效形态）。
+      surface: 'sidebar',
       source: 'scan',
       sessionFile: s.filePath,
       parentSession: s.parentSession,
@@ -104,7 +106,6 @@ export class SessionScanner {
       // 透传 agent binding（scanSessionMeta 第六读，同缓存契约）。
       spawnSource: s.spawnSource,
       parentAgentSessionId: s.parentAgentSessionId,
-      thinkingLevel: s.thinkingLevel,
     }
   }
 }

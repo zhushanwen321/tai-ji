@@ -22,8 +22,6 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
     cwd: '/work/a',
     status: 'idle',
     lastActiveAt: 0,
-    modelId: '',
-    tokenCount: 0,
     ...overrides,
   }
 }
@@ -51,11 +49,11 @@ describe('createSessionLiveState（状态层按会话 id 寄存，ADR-0049 分�
     const live = createSessionLiveState()
 
     // btw 线（runtime hidden 注册）与任意不在侧栏列表的 id 走同一入口、同一形状
-    live.applyLiveState('btw:line-1', { modelId: 'p/line', thinkingLevel: 'low' })
+    live.applyLiveState('pi-line-1', { modelId: 'p/line', thinkingLevel: 'low' })
     live.applyLiveState('not-in-sidebar', { modelId: 'p/ghost' })
     live.applyLiveState('main-1', { modelId: 'p/main' })
 
-    expect(live.liveStateOf('btw:line-1')).toEqual({ modelId: 'p/line', thinkingLevel: 'low' })
+    expect(live.liveStateOf('pi-line-1')).toEqual({ modelId: 'p/line', thinkingLevel: 'low' })
     expect(live.liveStateOf('not-in-sidebar')).toEqual({ modelId: 'p/ghost' })
     expect(live.liveStateOf('main-1')).toEqual({ modelId: 'p/main' })
   })
@@ -73,7 +71,7 @@ describe('createSessionLiveState（状态层按会话 id 寄存，ADR-0049 分�
     const live = createSessionLiveState()
     const nav = createSessionStore()
 
-    const s1 = makeSession({ id: 's1', modelId: '', cwd: '/a', projectId: 'p1' })
+    const s1 = makeSession({ id: 's1', cwd: '/a', projectId: 'p1' })
     const s2 = makeSession({ id: 's2', cwd: '/b' })
     nav.applySnapshot({ groups: [group('/a', [s1]), group('/b', [s2])] })
 

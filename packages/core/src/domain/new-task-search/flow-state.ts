@@ -113,10 +113,11 @@ const currentSession: Ref<SessionSummary | null> = ref(null)
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：landing 态待定 cwd 单例 ref（同上）
 const pendingCwd: Ref<string | null> = ref(null)
 /**
- * landing 态用户选定但尚未透传的模型（"provider/modelId" 复合串，与 SessionSummary.modelId 同格式）。
- * landing 态 session 尚未 create，无需调 model.switch。记 pendingModel 供 Composer 显示，
- * 首发提交时经 resolveLaunchConfig 终值随 create payload 快照透传（D5，无 post-create apply）。
- * null=未选，Composer 侧经 resolveLaunchConfig 解析链兜底。
+ * landing 态用户选定但尚未透传的模型（"provider/modelId" 复合串，与 composer
+ * 模型 chip 同格式）。landing 态 session 尚未 create，无需调 model.switch。记
+ * pendingModel 供 Composer 显示，首发提交时经 resolveLaunchConfig 终值随 create
+ * payload 快照透传（D5，无 post-create apply）。null=未选，Composer 侧经
+ * resolveLaunchConfig 解析链兜底。
  */
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：landing 态待定 model 单例 ref（同上）
 const pendingModel: Ref<string | null> = ref(null)

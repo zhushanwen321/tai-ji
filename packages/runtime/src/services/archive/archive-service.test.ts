@@ -86,7 +86,7 @@ function makeFixture(): Fixture {
     findScannedSession: (sid) => scanned.get(sid),
     disposeUserStopped: (sid) => { calls.push(`userStopped:${sid}`) },
     fireSuppressDisposition: (sid, hasDestroySink) => { calls.push(`suppress:${sid}:${hasDestroySink}`) },
-    closeAllBtwLines: async (sid) => { calls.push(`btw:${sid}`); return [] },
+    closeAllBtwLines: async (sid) => { calls.push(`lines:${sid}`); return [] },
     detachSession: (sid) => { calls.push(`detach:${sid}`) },
     destroyPiSession: async (sid) => { calls.push(`destroy:${sid}`) },
     removeSessionEntry: (sid) => { calls.push(`removeEntry:${sid}`) },
@@ -160,8 +160,6 @@ function summaryOf(sid: string, cwd: string): SessionSummary {
     cwd,
     status: 'idle',
     lastActiveAt: 1,
-    modelId: '',
-    tokenCount: 0,
   }
 }
 
@@ -186,8 +184,8 @@ function scanPersistedSummary(sessionsRoot: string, sid: string): SessionSummary
         cwd: header.cwd,
         status: 'idle',
         lastActiveAt: statSync(filePath).mtimeMs,
-        modelId: '',
-        tokenCount: 0,
+        // W3：磁盘扫描条目显式缺省 surface 'sidebar'（与 scannedToSummary 同口径）
+        surface: 'sidebar',
         source: 'scan',
         sessionFile: filePath,
       }
@@ -255,7 +253,7 @@ describe('ArchiveService.archive', () => {
     expect(ledger.rawBytes).toBe(originalContent.byteLength)
     // scanned 分支编排：无 suppress/detach；btw 级联停止（活跃/非活跃共用，D8——
     // 不停止则线进程继续写留置域）+ 收殓 + 缓存失效 + 广播。
-    expect(f.calls).toEqual([`btw:${sid}`, `reap:${sid}`, 'invalidateScan', 'broadcast'])
+    expect(f.calls).toEqual([`lines:${sid}`, `reap:${sid}`, 'invalidateScan', 'broadcast'])
   })
 
   it('活跃 session：杀 pi 前置五步复刻 delete 分支（suppress 登记先于 detach/destroy）', async () => {
@@ -271,7 +269,7 @@ describe('ArchiveService.archive', () => {
     const prefix = [
       `userStopped:${sid}`,
       `suppress:${sid}:true`,
-      `btw:${sid}`,
+      `lines:${sid}`,
       `detach:${sid}`,
       `destroy:${sid}`,
       `removeEntry:${sid}`,
@@ -496,7 +494,7 @@ describe('ArchiveService.purgeArchive', () => {
     // 编排序（D5 步骤 1-7）。
     const idxTrash = f.calls.findIndex((c) => c.startsWith('treeTrash:'))
     expect(idxTrash).toBeGreaterThan(f.calls.indexOf(`tombstone:${sid}`))
-    expect(f.calls).toContain(`btw:${sid}`)
+    expect(f.calls).toContain(`lines:${sid}`)
     expect(f.calls).toContain(`unbind:${sid}`)
     // 残树整树软删 + 压缩体进废纸篓。
     expect(f.treeTrashed).toEqual([join(f.storeRoot, sid)])

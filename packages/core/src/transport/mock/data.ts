@@ -42,9 +42,6 @@ export const fixtureSessions: SessionSummary[] = [
     gitIsWorktree: true,
     status: 'active',
     lastActiveAt: NOW - 2 * HOUR,
-    modelId: 'Anthropic/claude-sonnet-4.5',
-    thinkingLevel: 'medium',
-    tokenCount: 12_300,
   },
   {
     id: 's2',
@@ -54,8 +51,6 @@ export const fixtureSessions: SessionSummary[] = [
     gitIsWorktree: true,
     status: 'active',
     lastActiveAt: NOW - 30 * MINUTE,
-    modelId: 'Anthropic/claude-sonnet-4.5',
-    tokenCount: 5_400,
   },
   {
     id: 's3',
@@ -64,8 +59,6 @@ export const fixtureSessions: SessionSummary[] = [
     gitBranch: 'main',
     status: 'idle',
     lastActiveAt: NOW - 5 * DAY,
-    modelId: 'OpenAI/gpt-5',
-    tokenCount: 8_700,
     // [u7a] 非默认模式会话：调度模式（builtin:session-dispatch）≠ 全局默认 builtin:full
     // → composer 只读 chip 与流顶声明行的渲染断言锚点。同时是下方 3 个子会话的父节点。
     launchPresetId: BUILTIN_PRESET_IDS.SESSION_DISPATCH,
@@ -76,8 +69,6 @@ export const fixtureSessions: SessionSummary[] = [
     cwd: '/Users/dev/Code/work-project',
     status: 'active',
     lastActiveAt: NOW - 4 * MINUTE,
-    modelId: 'Anthropic/claude-sonnet-4.5',
-    tokenCount: 820,
   },
   {
     id: 's5',
@@ -87,8 +78,6 @@ export const fixtureSessions: SessionSummary[] = [
     gitIsWorktree: true,
     status: 'idle',
     lastActiveAt: NOW - 60 * MINUTE,
-    modelId: 'Anthropic/claude-sonnet-4.5',
-    tokenCount: 2_400,
   },
   // ── [u7a] 调度模式派发的子会话（parentAgentSessionId → s3）──────────────────────
   // 三支状态覆盖托盘 session 面板分支：c1 运行中（active + running toolCall）、
@@ -99,8 +88,6 @@ export const fixtureSessions: SessionSummary[] = [
     cwd: '/Users/dev/Code/work-project',
     status: 'active',
     lastActiveAt: NOW - 5 * MINUTE,
-    modelId: 'Anthropic/claude-sonnet-4.5',
-    tokenCount: 1_800,
     spawnSource: 'agent',
     parentAgentSessionId: 's3',
   },
@@ -110,8 +97,6 @@ export const fixtureSessions: SessionSummary[] = [
     cwd: '/Users/dev/Code/work-project',
     status: 'done',
     lastActiveAt: NOW - 12 * MINUTE,
-    modelId: 'Anthropic/claude-sonnet-4.5',
-    tokenCount: 4_200,
     spawnSource: 'agent',
     parentAgentSessionId: 's3',
   },
@@ -121,8 +106,6 @@ export const fixtureSessions: SessionSummary[] = [
     cwd: '/Users/dev/Code/work-project',
     status: 'error',
     lastActiveAt: NOW - 25 * MINUTE,
-    modelId: 'Anthropic/claude-sonnet-4.5',
-    tokenCount: 900,
     spawnSource: 'agent',
     parentAgentSessionId: 's3',
   },
@@ -365,8 +348,6 @@ export const e2eTestSession: SessionSummary = {
   cwd: E2E_SAMPLE_CWD,
   status: 'active',
   lastActiveAt: Date.now(),
-  modelId: 'Anthropic/claude-sonnet-4.5',
-  tokenCount: 0,
 }
 
 let createSeq = 0
@@ -381,8 +362,6 @@ export function createSession(cwd?: string, label?: string): SessionSummary {
     cwd: cwd ?? '/Users/dev/Code/taiji',
     status: 'active',
     lastActiveAt: Date.now(),
-    modelId: 'Anthropic/claude-sonnet-4.5',
-    tokenCount: 0,
   }
   return session
 }

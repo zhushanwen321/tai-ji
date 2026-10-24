@@ -51,7 +51,7 @@ beforeEach(() => {
 })
 
 function makeSummary(id: string): SessionSummary {
-  return { id, label: id, cwd: '/proj', status: 'idle', lastActiveAt: 1, modelId: 'm1', tokenCount: 0 }
+  return { id, label: id, cwd: '/proj', status: 'idle', lastActiveAt: 1 }
 }
 
 function makeGroups(ids: string[]): SessionGroup[] {

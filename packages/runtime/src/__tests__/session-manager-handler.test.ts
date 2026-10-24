@@ -91,8 +91,6 @@ function makeSessionSummary(overrides: Partial<SessionSummary> = {}): SessionSum
     cwd: '/test/cwd',
     status: 'active',
     lastActiveAt: Date.now(),
-    modelId: 'openai/gpt-4',
-    tokenCount: 0,
     // 归属校验默认材料：测试中发起方一律 'sid-parent'，目标 s1 默认是其 managed child
     spawnSource: 'agent',
     parentAgentSessionId: 'sid-parent',
@@ -125,10 +123,14 @@ async function runListScenario(
 /** status 场景装配单源：mock getSummary → handle(status) → opts（mock 调用断言用）+ respond payload */
 async function runStatusScenario(
   summary: SessionSummary,
+  recordModelId?: string,
 ): Promise<{ opts: SessionManagerHandlerOptions; response: Record<string, unknown> }> {
   const opts = makeMockOptions({
     sessionService: makeMockSessionService({
       getSummary: vi.fn().mockReturnValue(summary),
+      // W3：handler 的 modelId 读点从 summary 改到 lifecycle 注册表记录
+      // （IManagedSessionView.modelId 双写缓存），scenario 经 recordModelId 接线同值记录。
+      getSession: vi.fn().mockReturnValue(recordModelId === undefined ? undefined : { id: summary.id, modelId: recordModelId }),
     }),
   })
   const handler = new SessionManagerHandler(opts)
@@ -166,10 +168,13 @@ describe('SessionManagerHandler', () => {
 
   describe('U4-A1: create 分支完整链路', () => {
     it('四步串行时序：create → broadcastSessionList → respond({sessionId,status,modelId})', async () => {
-      const session = makeSessionSummary({ id: 'new-session', modelId: 'openai/gpt-4' })
+      const session = makeSessionSummary({ id: 'new-session' })
       const opts = makeMockOptions({
         sessionService: makeMockSessionService({
           create: vi.fn().mockResolvedValue(session),
+          // W3：respond 的 modelId 读点从 create 返回值改到 lifecycle 注册表记录
+          // （IManagedSessionView.modelId 双写缓存），测试同步接线同值记录。
+          getSession: vi.fn().mockReturnValue({ id: 'new-session', modelId: 'openai/gpt-4' }),
         }),
       })
       const handler = new SessionManagerHandler(opts)
@@ -479,7 +484,7 @@ describe('SessionManagerHandler', () => {
     })
 
     it('status → {status, modelId}', async () => {
-      const { opts } = await runStatusScenario(makeSessionSummary({ status: 'active', modelId: 'openai/gpt-4' }))
+      const { opts } = await runStatusScenario(makeSessionSummary({ status: 'active' }), 'openai/gpt-4')
       expect(opts.sendExtensionUiResponse).toHaveBeenCalledWith(
         'sid-parent',
         'req-1',
@@ -655,12 +660,12 @@ describe('SessionManagerHandler', () => {
 
   describe('U4-A5: modelId 从 state.model 组装', () => {
     it('status 返回 modelId', async () => {
-      const { response } = await runStatusScenario(makeSessionSummary({ modelId: 'anthropic/claude-3' }))
+      const { response } = await runStatusScenario(makeSessionSummary(), 'anthropic/claude-3')
       expect(response.modelId).toBe('anthropic/claude-3')
     })
 
     it('modelId 为空时不在 respond 中出现', async () => {
-      const { response } = await runStatusScenario(makeSessionSummary({ modelId: '' }))
+      const { response } = await runStatusScenario(makeSessionSummary(), '')
       expect(response.modelId).toBeUndefined()
     })
   })
@@ -783,6 +788,8 @@ describe('SessionManagerHandler', () => {
         sessionService: makeMockSessionService({
           getSummary: vi.fn().mockReturnValue(undefined),
           create: vi.fn().mockResolvedValue(makeSessionSummary({ id: 'child-3' })),
+          // W3：respond 的 modelId 读点从 create 返回值改到 lifecycle 注册表记录。
+          getSession: vi.fn().mockReturnValue({ id: 'child-3', modelId: 'openai/gpt-4' }),
         }),
       })
       const handler = new SessionManagerHandler(opts)

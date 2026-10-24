@@ -71,7 +71,7 @@ function makeFixture(): Fixture {
       {
         cwd: '/fixture',
         sessions: [
-          { id: 's1', label: 'fixture session', cwd: '/fixture', status: 'active', lastActiveAt: 1, modelId: 'm', tokenCount: 0 },
+          { id: 's1', label: 'fixture session', cwd: '/fixture', status: 'active', lastActiveAt: 1 },
         ],
       },
     ],

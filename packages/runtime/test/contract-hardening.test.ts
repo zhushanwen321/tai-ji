@@ -118,7 +118,7 @@ function makeLifecycleEnv() {
     getLaunchPresetOptions: vi.fn(async () => undefined),
     toSummary: vi.fn((s: IManagedSessionView): SessionSummary => ({
       id: s.id, label: `label-${s.id}`, cwd: '/tmp', status: 'active',
-      lastActiveAt: Date.now(), modelId: 'p/m', tokenCount: 0,
+      lastActiveAt: Date.now(),
     })),
     findScannedSession: vi.fn((): ScannedSession | undefined => undefined),
     fetchAndBroadcastContext: vi.fn(async () => undefined),

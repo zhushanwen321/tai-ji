@@ -181,7 +181,7 @@ function makeLifecycleEnv() {
     getLaunchPresetOptions: vi.fn(async () => undefined),
     toSummary: vi.fn((s: IManagedSessionView): SessionSummary => ({
       id: s.id, label: s.label, cwd: s.cwd, status: 'active',
-      lastActiveAt: 1, modelId: 'p/m', tokenCount: 0,
+      lastActiveAt: 1,
     })),
     findScannedSession: vi.fn((id: string): ScannedSession | undefined => {
       const filePath = currentSourceFile.value

@@ -34,8 +34,6 @@ function makeSummary(overrides: Partial<SessionSummary> & Pick<SessionSummary, '
     label: `会话-${overrides.id}`,
     cwd: '/tmp/project',
     status: 'idle',
-    modelId: 'test-model',
-    tokenCount: 0,
     lastActiveAt: 0,
     ...overrides,
   }
@@ -76,7 +74,8 @@ describe('MobileChatHeader 聊天头部模型标签（u13/A5）', () => {
   })
 
   it('[W1] 状态层未观测：显式未知，头部不渲染（不回退 SessionSummary 种子字段）', () => {
-    testState.list.value = [makeSummary({ id: 's-1', modelId: 'seed-model', thinkingLevel: 'high' })]
+    // W3：SessionSummary 种子字段已删（三状态字段退役），「显式未知」用例不再给种子
+    testState.list.value = [makeSummary({ id: 's-1' })]
     const wrapper = mountHeader('s-1')
     expect(wrapper.find('[data-testid="mobile-chat-header"]').exists()).toBe(false)
     wrapper.unmount()

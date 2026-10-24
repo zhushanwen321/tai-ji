@@ -46,8 +46,6 @@ function makeSummary(
     label: `会话-${overrides.id}`,
     cwd: '/tmp/project',
     status: 'idle',
-    modelId: 'test-model',
-    tokenCount: 0,
     ...overrides,
   }
 }

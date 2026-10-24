@@ -34,7 +34,7 @@ function assistantMsg(id: string, overrides: Partial<Message> = {}): Message {
 }
 
 function session(id: string, lastActiveAt: number): SessionGroup['sessions'][number] {
-  return { id, label: `会话-${id}`, cwd: '/tmp/project', status: 'idle', modelId: 'm', tokenCount: 0, lastActiveAt }
+  return { id, label: `会话-${id}`, cwd: '/tmp/project', status: 'idle', lastActiveAt }
 }
 
 describe('A13 sessionsInRuntimeGroupOrder：组序恒等（runtime 权威序唯一定义点）', () => {

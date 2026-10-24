@@ -96,7 +96,7 @@ export type { Segment } from './segments'
 export { segmentsToText, textToSegments, segmentsToPrompt, normalizeContent, normalizeSegmentOrder, needsBoundarySpace } from './segments'
 export type { SegmentsMetadataFile, SegmentsMetadataEntry } from './message-metadata'
 export type {
-  SessionStatus, SessionSummary, SessionGroup,
+  SessionStatus, SessionSummary, SessionGroup, SessionSurface,
 } from './session'
 // session 归档域共享契约（session-archive 设计 §7 D3 簿记 schema + D5 RPC 消息，
 // 实施计划 u-foundation：ArchiveSummary / 簿记 schema 与解析校验 / 三 RPC payload /
@@ -326,7 +326,7 @@ export type {
   ImportCandidatesRequest, ImportCandidatesReply, ImportCandidate, ImportCandidateDir,
   ImportRequest, ImportReply,
 } from './import-session'
-// 虚拟 session ID 工厂（subagent 三段式 / agent call 两段式 / btw 两段式）——跨层协议级 key 约定 SSOT
+// 虚拟 session ID 工厂（subagent 三段式 / agent call 两段式）——跨层协议级 key 约定 SSOT
 export {
   SUBAGENT_PREFIX,
   subagentVirtualId,
@@ -337,10 +337,6 @@ export {
   agentCallVirtualId,
   isAgentCallVirtualId,
   extractAgentCallSessionId,
-  BTW_PREFIX,
-  btwVirtualId,
-  isBtwVirtualId,
-  extractBtwPiSessionId,
   resolveVirtualSessionId,
 } from './virtual-session-id'
 // 终端实例编号格式谓词（`term:<sid>:<seq>`，terminal-multi-instance §0.5 P7 精确前缀口径）——

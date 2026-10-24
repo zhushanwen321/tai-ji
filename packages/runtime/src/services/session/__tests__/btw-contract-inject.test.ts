@@ -37,14 +37,14 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function createLine(): Promise<{ vid: string; file: string }> {
+async function createLine(): Promise<{ sessionId: string; file: string }> {
   h.deps.resolveMainSessionFile = vi.fn(() => undefined)
   const file = writeSessionFile(join(fx, 'thread'), 'sid-c1.jsonl', {
     type: 'session', version: 3, id: 'sid-c1', timestamp: 't', cwd: CWD,
   }, [])
   h.state = { sessionId: 'sid-c1', sessionFile: file }
   const res = await svc.createLine({ mainSid: MAIN_SID, cwd: CWD })
-  return { vid: res.vid, file: res.sessionFilePath }
+  return { sessionId: res.sessionId, file: res.sessionFilePath }
 }
 
 describe('P-contract-inject：线会话建立时注入一次', () => {
@@ -64,32 +64,34 @@ describe('P-contract-inject：线会话建立时注入一次', () => {
   })
 
   it('trace 断言：create 轮 round=1 恰一条（carrier + 契约文本可断言）', async () => {
-    const { vid } = await createLine()
+    const { sessionId } = await createLine()
     expect(h.traces).toEqual([
-      { vid, round: 1, carrier: 'append-system-prompt', contract: BTW_BEHAVIOR_CONTRACT },
+      { sessionId, round: 1, carrier: 'append-system-prompt', contract: BTW_BEHAVIOR_CONTRACT },
     ])
   })
 
   it('重附着轮再注入一次（每会话建立一次，含重附着轮——D9⑤）', async () => {
-    const { vid } = await createLine()
+    const { sessionId } = await createLine()
     // 进程引用摘除（闲置回收已随 ADR-0122 退役；重附着由进程死亡/重启场景触发）
-    const rec = svc.getLine(vid)!
+    const rec = svc.getLine(sessionId)!
     rec.client = undefined
 
-    await svc.ensureProcess(vid)
+    await svc.ensureProcess(sessionId)
 
-    expect(h.traces.map(t => [t.vid, t.round])).toEqual([[vid, 1], [vid, 2]])
+    expect(h.traces.map(t => [t.sessionId, t.round])).toEqual([[sessionId, 1], [sessionId, 2]])
     // 新一轮 spawn options 同样携带契约（进程重建 ⇒ prompt 期载体随之重建）
     expect(h.spawned[1].options.appendSystemPrompt).toBe(BTW_BEHAVIOR_CONTRACT)
   })
 
   it('契约不进注册表字段 / 不经 registerSession 参数（model-only，UI 面不可见的结构侧）', async () => {
-    const { vid } = await createLine()
-    const rec = svc.getLine(vid)!
+    const { sessionId } = await createLine()
+    const rec = svc.getLine(sessionId)!
     // 摘除 client（fake 自引用循环）后序列化——断言注册表数据字段不含契约文本
     expect(JSON.stringify({ ...rec, client: undefined })).not.toContain(BTW_BEHAVIOR_CONTRACT)
-    // registerSession 只收 6 参（id/client/cwd/label/file/hidden）——契约无传输通道
+    // registerSession 收 6 参（id/client/cwd/label/file/surface——W5 hidden 形参已删，
+    // btw 显式传 'btw'）——契约无传输通道（surface 是展示归属非契约载体）
     expect(h.registered[0].argc).toBe(6)
+    expect(h.registered[0].surface).toBe('btw')
     expect(JSON.stringify(h.registered[0])).not.toContain(BTW_BEHAVIOR_CONTRACT)
   })
 

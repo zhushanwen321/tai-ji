@@ -26,8 +26,6 @@ function makeItem(overrides: Partial<SessionSummary> & Pick<SessionSummary, 'id'
     label: `会话-${overrides.id}`,
     cwd: '/tmp/project',
     status: 'idle',
-    modelId: 'test-model',
-    tokenCount: 0,
     lastActiveAt: new Date(2001, 1, 3).getTime(),
     ...overrides,
   }
@@ -84,7 +82,7 @@ describe('SessionListItem 会话列表行（u13/A5）', () => {
 
   it('A5 模型标签：状态层 modelId 可见（行内独立 testid）', () => {
     liveStateOf.mockImplementation((id: string) => (id === 's-1' ? { modelId: 'claude-opus-4' } : undefined))
-    const wrapper = mountItem(makeItem({ id: 's-1', modelId: 'seed-model' }))
+    const wrapper = mountItem(makeItem({ id: 's-1' }))
     // 状态层权威：显示状态层值而非列表种子字段
     expect(wrapper.get('[data-testid="mobile-session-model-line"]').text()).toBe('claude-opus-4')
     wrapper.unmount()
@@ -104,7 +102,7 @@ describe('SessionListItem 会话列表行（u13/A5）', () => {
   })
 
   it('[W1] 状态层缺失 → 模型标签显式未知（空串，不回退 SessionSummary 种子字段）', () => {
-    const wrapper = mountItem(makeItem({ id: 's-unobserved', modelId: 'seed-model', thinkingLevel: 'high' }))
+    const wrapper = mountItem(makeItem({ id: 's-unobserved' }))
     expect(wrapper.get('[data-testid="mobile-session-model-line"]').text()).toBe('')
     wrapper.unmount()
   })

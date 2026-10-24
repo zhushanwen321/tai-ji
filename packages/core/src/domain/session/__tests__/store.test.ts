@@ -17,8 +17,6 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
     cwd: '/work/a',
     status: 'idle',
     lastActiveAt: 0,
-    modelId: '',
-    tokenCount: 0,
     ...overrides,
   }
 }
@@ -133,42 +131,44 @@ describe('createSessionStore', () => {
 
   // ── [W1 会话架构四层分离] 状态字段不再由导航列表承载 ──────────────────
   // 设计 §3.3 删除清单：applySnapshot 不再写 modelId / thinkingLevel / tokenCount。
-  // 状态权威 = domain/session/live-state（唯一写入口 applyLiveState）；列表载荷里的同名
-  // 字段是「初始种子」而非写入目标。以下用例反向锁定「状态帧经列表写不进来」。
+  // 状态权威 = domain/session/live-state（唯一写入口 applyLiveState）。
+  // [W3] 三状态字段已从 SessionSummary 类型删除（状态归状态层，列表只承载导航）——
+  // 原「列表条目带种子字段」的断言形态随之退役：不变量反向锁定为「状态帧里的同名
+  // 字段落不进列表条目」（条目上无该属性）。以下用例维持该锁定。
 
   it('TC-W1-1: 单条快照带状态字段 → 列表条目不被写入（列表只托管描述字段）', () => {
     const store = createSessionStore()
-    const s1 = makeSession({ id: 's1', modelId: 'seed/model', thinkingLevel: 'low', tokenCount: 7 })
+    const s1 = makeSession({ id: 's1' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
     store.applySnapshot('s1', { modelId: 'state/model', thinkingLevel: 'high', tokenCount: 999 })
     const after = store.list.value[0]
-    expect(after.modelId).toBe('seed/model')
-    expect(after.thinkingLevel).toBe('low')
-    expect(after.tokenCount).toBe(7)
+    // W3：条目上不再存在三状态字段（类型级删除），状态帧写入目标 = 状态层而非列表
+    expect(after).not.toHaveProperty('modelId')
+    expect(after).not.toHaveProperty('thinkingLevel')
+    expect(after).not.toHaveProperty('tokenCount')
+    expect(after.label).toBe('s1')
   })
 
   it('TC-W1-2: 列表外 id 的单条快照不写入任何条目（状态层才是列表外 id 的落点）', () => {
     const store = createSessionStore()
-    const s1 = makeSession({ id: 's1', modelId: 'seed/model' })
+    const s1 = makeSession({ id: 's1' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
-    // btw 线 vid（runtime hidden 注册，不进侧栏列表）——列表不新增条目、不抛错
-    store.applySnapshot('btw:pi-line-1', { modelId: 'line/model', label: 'x' })
+    // btw 线 session id（runtime hidden 注册，不进侧栏列表）——列表不新增条目、不抛错
+    store.applySnapshot('pi-line-1', { modelId: 'line/model', label: 'x' })
     expect(store.list.value.map((s) => s.id)).toEqual(['s1'])
-    expect(store.list.value[0].modelId).toBe('seed/model')
   })
 
-  it('TC-W1-3: 整表刷新不改写状态字段之外的行为，也不新增/删除状态容器', () => {
+  it('TC-W1-3: 整表刷新只替换列表条目（描述字段随载荷），不涉及状态容器', () => {
     const store = createSessionStore()
-    const s1 = makeSession({ id: 's1', label: 'a', status: 'idle', modelId: 'seed/m1' })
+    const s1 = makeSession({ id: 's1', label: 'a', status: 'idle' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
-    // 归档 / 项目过滤 / 刷新都只是整表替换：列表条目随载荷（种子字段原样保留）
-    const next = makeSession({ id: 's1', label: 'a', status: 'done', modelId: 'seed/m2' })
+    // 归档 / 项目过滤 / 刷新都只是整表替换：列表条目随载荷
+    const next = makeSession({ id: 's1', label: 'a', status: 'done' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [next] }] })
     expect(store.list.value[0].status).toBe('done')
-    expect(store.list.value[0].modelId).toBe('seed/m2')
 
     // 状态层不受影响（此处只验证列表侧语义：列表 ≠ 状态容器，W1 后不变量见 live-state.test.ts）
     store.applySnapshot({ groups: [] })
@@ -177,7 +177,7 @@ describe('createSessionStore', () => {
 
   it('TC-4d: 单 session 快照 undefined → 整条静默跳过（描述字段全保留）', () => {
     const store = createSessionStore()
-    const s1 = makeSession({ id: 's1', label: 'old', status: 'active', modelId: 'seed/m1', tokenCount: 9 })
+    const s1 = makeSession({ id: 's1', label: 'old', status: 'active' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
     // 防御路径：广播 payload 缺失时快照可为 undefined
@@ -185,8 +185,6 @@ describe('createSessionStore', () => {
     const after = store.list.value[0]
     expect(after.label).toBe('old')
     expect(after.status).toBe('active')
-    expect(after.modelId).toBe('seed/m1')
-    expect(after.tokenCount).toBe(9)
   })
 
   it('TC-4c: 乐观更新形态——本地入参只带乐观字段，权威广播回流幂等收敛', () => {
@@ -282,16 +280,16 @@ describe('createSessionStore', () => {
     store.applySnapshot({
       groups: [{
         cwd: '/a',
-        sessions: [makeSession({ id: 's1', label: '原名', modelId: 'provider/m1', status: 'active' })],
+        sessions: [makeSession({ id: 's1', label: '原名', status: 'active' })],
       }],
     })
 
     store.markDead('s1')
     const dead = store.list.value.find((s) => s.id === 's1')
     expect(dead?.status).toBe('dead')
-    // 局部快照只带 status：label/modelId 等托管字段原样保留（不被 undefined 覆盖）
+    // 局部快照只带 status：label 等托管字段原样保留（不被 undefined 覆盖）
+    // （W3 起 modelId 等三状态字段不在 SessionSummary 上，「不吞字段」断言收敛到描述字段）
     expect(dead?.label).toBe('原名')
-    expect(dead?.modelId).toBe('provider/m1')
 
     store.revive('s1')
     expect(store.list.value.find((s) => s.id === 's1')?.status).toBe('idle')

@@ -551,7 +551,10 @@ export class SessionManagerHandler {
     return {
       sessionId: session.id,
       status: 'created',
-      modelId: session.modelId || undefined,
+      // W3：SessionSummary.modelId 已删（三状态字段退役，状态归状态层），创建时生效
+      // 模型改读 lifecycle 注册表记录的同名双写缓存字段（IManagedSessionView.modelId，
+      // 值与原 summary 派生逐字一致）。
+      modelId: this.opts.sessionService.getSession(session.id)?.modelId || undefined,
       willNotify: claimArmed,
       lifetimeNotifyId,
     }
@@ -737,7 +740,10 @@ export class SessionManagerHandler {
 
     return {
       status: summary.status,
-      modelId: summary.modelId || undefined,
+      // W3：SessionSummary.modelId 已删（三状态字段退役），改读 lifecycle 注册表记录的
+      // 同名双写缓存字段（IManagedSessionView.modelId；summary 本就只覆盖活跃会话，
+      // getSession 同范围，值与原派生逐字一致）。
+      modelId: this.opts.sessionService.getSession(sessionId)?.modelId || undefined,
       // D6 undeliveredResults 事实计数（按被管理子会话分桶；claims 停用象限恒 0）
       undeliveredResults: this.opts.claims?.undeliveredCount(sessionId) ?? 0,
     }

@@ -19,8 +19,6 @@ describe('SessionSummary 类型扩展（U4-A7）', () => {
       cwd: '/test',
       status: 'active',
       lastActiveAt: Date.now(),
-      modelId: 'openai/gpt-4',
-      tokenCount: 0,
       spawnSource: 'agent',
     }
     expect(summary.spawnSource).toBe('agent')
@@ -33,8 +31,6 @@ describe('SessionSummary 类型扩展（U4-A7）', () => {
       cwd: '/test',
       status: 'active',
       lastActiveAt: Date.now(),
-      modelId: 'openai/gpt-4',
-      tokenCount: 0,
       parentAgentSessionId: 'parent-session-123',
     }
     expect(summary.parentAgentSessionId).toBe('parent-session-123')
@@ -47,8 +43,6 @@ describe('SessionSummary 类型扩展（U4-A7）', () => {
       cwd: '/workspace',
       status: 'idle',
       lastActiveAt: Date.now(),
-      modelId: 'anthropic/claude-3',
-      tokenCount: 100,
       spawnSource: 'agent',
       parentAgentSessionId: 'parent-agent-session',
     }
@@ -63,8 +57,6 @@ describe('SessionSummary 类型扩展（U4-A7）', () => {
       cwd: '/workspace',
       status: 'active',
       lastActiveAt: Date.now(),
-      modelId: 'openai/gpt-4',
-      tokenCount: 50,
     }
     expect(summary.spawnSource).toBeUndefined()
     expect(summary.parentAgentSessionId).toBeUndefined()
@@ -77,16 +69,14 @@ describe('SessionSummary 类型扩展（U4-A7）', () => {
       cwd: '/test',
       status: 'active',
       lastActiveAt: Date.now(),
-      modelId: 'openai/gpt-4',
-      tokenCount: 100,
       // 所有现有可选字段
       gitBranch: 'main',
       gitIsWorktree: false,
       isBareWorkspace: false,
-      thinkingLevel: 'high',
       sessionFile: '/path/to/session.jsonl',
       projectId: 'proj-1',
-      hidden: false,
+      // W3 surface 落地：展示归属（'sidebar' 主会话 / 'btw' 旁路提问线）
+      surface: 'btw',
       source: 'scan',
       parentSession: '/path/to/parent.jsonl',
       forkEntryId: 'entry-1',
@@ -103,15 +93,12 @@ describe('SessionSummary 类型扩展（U4-A7）', () => {
     expect(summary.label).toBe('test')
     expect(summary.cwd).toBe('/test')
     expect(summary.status).toBe('active')
-    expect(summary.modelId).toBe('openai/gpt-4')
-    expect(summary.tokenCount).toBe(100)
     expect(summary.gitBranch).toBe('main')
     expect(summary.gitIsWorktree).toBe(false)
     expect(summary.isBareWorkspace).toBe(false)
-    expect(summary.thinkingLevel).toBe('high')
     expect(summary.sessionFile).toBe('/path/to/session.jsonl')
     expect(summary.projectId).toBe('proj-1')
-    expect(summary.hidden).toBe(false)
+    expect(summary.surface).toBe('btw')
     expect(summary.source).toBe('scan')
     expect(summary.parentSession).toBe('/path/to/parent.jsonl')
     expect(summary.forkEntryId).toBe('entry-1')
@@ -131,8 +118,6 @@ describe('SessionSummary 类型扩展（U4-A7）', () => {
         cwd: '/test',
         status,
         lastActiveAt: Date.now(),
-        modelId: 'openai/gpt-4',
-        tokenCount: 0,
       }
       expect(summary.status).toBe(status)
     }
