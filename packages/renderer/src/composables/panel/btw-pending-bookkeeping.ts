@@ -17,7 +17,7 @@
  * createUiResponseTransport）与 stores/chat，上述任何一条依赖都会构成
  * store → composable/壳层 → stores/chat 的环。
  * 订阅壳（bus 事件 → 入账）与 transport 应答（respondBtwDialog——送达才出队）在
- * useBtwTabData；虚拟 key 清理登记（btwVirtualKeysByMain 族）同在 useBtwTabData
+ * useBtwTabData；虚拟 key 清理登记（`btwSessionKeysByMain` 族）同在 useBtwTabData
  * （其处置链需要 stores/chat/workflow/subagent）。
  *
  * 入账：bus 'ui-request'（订阅壳 = useBtwTabData.ensureBtwPendingBookkeeping）写 dialog
