@@ -395,7 +395,10 @@ export async function run(ctx) {
 
     // ══ 段 3：同 data-dir 重启（自建实例 B） ═════════════════════
     await protoA.close().catch(() => {})
-    await instanceA.dispose().catch(() => {}) // A 已死：SIGTERM 命中 ESRCH 容忍；主要收 A 的 mock server
+    // A 已死：dispose 的 SIGTERM 命中 ESRCH 容忍；显式先关 A 的 mock server（防吊住进程），
+    // dispose 内部的 stop 会再次 close（幂等 no-op）。
+    await instanceA.mockLlm?.close().catch(() => {})
+    await instanceA.dispose().catch(() => {})
     instanceB = createInstance({ repo, name: instanceName, dataDir: selfDataDir, llm: llmOptions, background: true })
     await instanceB.launch()
     const tReady0 = Date.now()
@@ -505,7 +508,7 @@ export async function run(ctx) {
     try {
       const finalReply = await protoB.call('session.getSubagents', { sessionId: sid }, { timeoutMs: 30_000 })
       ev.attach('final-subagents', JSON.stringify(finalReply.subagents ?? [], null, 2).slice(0, 40_000))
-      ev.assert('⑥ record 会话本体保留：subagents 树与 record 条目仍在（非删除式收编）', fs.existsSync(path.join(selfDataDir, 'ext-sessions', String(sid), 'subagents')) && (finalReply.subagents ?? []).some((r) => r.subagentId === recordId), {
+      ev.assert('record 会话本体保留：subagents 树与 record 条目仍在（清点是簿记收编非删除）', fs.existsSync(path.join(selfDataDir, 'ext-sessions', String(sid), 'subagents')) && (finalReply.subagents ?? []).some((r) => r.subagentId === recordId), {
         channel: 'C',
         expected: 'ext-sessions/<sid>/subagents/ 树存在 + list 含该 recordId',
         actual: `tree=${fs.existsSync(path.join(selfDataDir, 'ext-sessions', String(sid), 'subagents'))} listHit=${(finalReply.subagents ?? []).some((r) => r.subagentId === recordId)}`,
