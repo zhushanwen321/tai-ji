@@ -66,6 +66,7 @@ import {
   noteRebuiltSettlement,
   settlementRecordOfRunSettledFrame,
   type AgentResult,
+  type AgentCallOpts,
   type Budget,
   type ExecutionTraceNode,
   type RunEventLineIssue,
@@ -277,6 +278,11 @@ interface CallDraft {
   phase?: string;
   startedAtIso: string;
   attempts: number;
+  /**
+   * agent-started 帧 input 载荷解析出的声明入参（[U13] 载荷；预算派生
+   * budgetViewOf 消费 maxTurns/timeoutMs）。undefined = 旧格式帧 / 载荷不可解析。
+   */
+  opts?: AgentCallOpts;
   /** 有 settled 帧 = done；无 = 在途（running）。 */
   result?: AgentResult;
   settledOutcome?: RunOutcome;
@@ -343,12 +349,32 @@ function collectRunCallDrafts(events: readonly WorkflowRunEvent[]): Map<number, 
         ...(event.phase !== undefined ? { phase: event.phase } : {}),
         startedAtIso: new Date(event.ts).toISOString(),
         attempts: event.attempt,
+        ...(event.input !== undefined ? { opts: parseStartedInputOpts(event.input) } : {}),
       });
     } else if (event.type === "agent-settled") {
       applySettledToRunDraft(drafts, event);
     }
   }
   return drafts;
+}
+
+/**
+ * agent-started 帧 input 载荷 → AgentCallOpts（core resume-run-rebuild
+ * parseAgentInput 的壳侧镜像——写点同源 canonical 序列化，两侧行为等价由
+ * record-mode 测试锁定）。不可解析/非对象 = 流被篡改或写入器 bug：warn 留痕
+ * 回落 undefined（opts 占位形态，预算派生按未声明处理——宁缺不误报）。
+ */
+function parseStartedInputOpts(input: string): AgentCallOpts | undefined {
+  try {
+    const parsed: unknown = JSON.parse(input);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as AgentCallOpts;
+    }
+  } catch (err) {
+    logger.debug("[workflow] run-store: agent-started input JSON.parse failed", err);
+  }
+  logger.warn("[workflow] run-store: agent-started input payload is not parseable opts — call opts rebuilt as placeholder");
+  return undefined;
 }
 
 /** [collectRunCallDrafts 拆分] agent-settled 归并（无 started 行时占位兜底成行）。 */
@@ -397,9 +423,9 @@ function draftsToExecutionTraceNodes(drafts: Map<number, CallDraft>): ExecutionT
 }
 
 /** [foldRecordStreamToRun 拆分] 中间形态 → AgentCall（直接构造 done/running 终态，
- * bypass markRunning/markDone 状态机检查——重建已知良好持久态的既定先例；opts 最小
- * 形态：record 流现行载荷不携带入参全文，重建聚合的 opts 仅满足 AgentCallOpts
- * 契约形状，prompt 占位空串）。 */
+ * bypass markRunning/markDone 状态机检查——重建已知良好持久态的既定先例；opts =
+ * agent-started 帧 input 载荷恢复的声明入参（预算派生 budgetViewOf 消费），旧格式
+ * 帧 / 载荷不可解析回落占位 {prompt:""}（core draftsToReplayCalls 同款回落）。 */
 function draftsToAgentCalls(
   drafts: Map<number, CallDraft>,
   sharedNodes: Map<number, ExecutionTraceNode>,
@@ -408,7 +434,7 @@ function draftsToAgentCalls(
   const calls = new Map<number, AgentCall>();
   for (const d of drafts.values()) {
     const linked = sharedNodes.get(d.taskIndex) ?? nodes.find((n) => n.stepIndex === d.taskIndex)!;
-    const call = new AgentCall(d.taskIndex, { prompt: "" }, linked);
+    const call = new AgentCall(d.taskIndex, d.opts ?? { prompt: "" }, linked);
     call.attempts = d.attempts;
     call.status = d.settledOutcome === undefined ? "running" : "done";
     if (d.result !== undefined) {

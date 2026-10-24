@@ -23,6 +23,7 @@ import {
 } from "../run-member-view.ts";
 import { Budget } from "../models/budget.ts";
 import type { AgentCall } from "../models/agent-call.ts";
+import type { AgentCallOpts } from "../models/types.ts";
 import { Trace } from "../models/trace.ts";
 import type { ExecutionTraceNode } from "../models/types.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
@@ -53,12 +54,16 @@ function makeNode(overrides: Partial<ExecutionTraceNode> & { stepIndex: number }
 function makeRunWithState(
   calls: Map<number, AgentCall>,
   budgetOpts: ConstructorParameters<typeof Budget>[0] = {},
+  recoveredCallOpts?: Map<number, AgentCallOpts>,
 ): WorkflowRun {
   return WorkflowRun.reconstruct(
     "wf-mv",
     { scriptSource: "async function execute() {}", args: {}, scriptName: "fan-out", scriptPath: "/fake/fan-out.js" },
     { budget: new Budget(budgetOpts), calls, trace: Trace.fromArray([]), errorLogs: [] },
-    { startedAt: new Date(T0).toISOString() },
+    {
+      startedAt: new Date(T0).toISOString(),
+      ...(recoveredCallOpts !== undefined && recoveredCallOpts.size > 0 ? { recoveredCallOpts } : {}),
+    },
   );
 }
 
@@ -394,6 +399,54 @@ describe("runMemberViews — budget 四轴分轴显式", () => {
     );
     const fallbackViews = runMemberViews(runWithNode, { now: NOW });
     expect(fallbackViews[0]!.budget).toEqual({ maxTurns: null, timeoutMs: null, budgetTokens: null, budgetTimeMs: null });
+  });
+
+  it("重派集窗口（calls miss）：budget 回落 meta.recoveredCallOpts 的声明值——已声明上界不显示为显式无界；record 行与 trace 兜底行同域", () => {
+    // 重建形态：重派集成员 calls 不建条目、声明入参经 agent-started input 载荷恢复进
+    // meta（resume-run-rebuild）；行来源两形态（record 行 / trace 兜底行）走同一回落。
+    const recovered = new Map<number, AgentCallOpts>([[2, { prompt: "t", maxTurns: 7, timeoutMs: 30_000 }]]);
+    const run = WorkflowRun.reconstruct(
+      "wf-mv",
+      { scriptSource: "async function execute() {}", args: {}, scriptName: "fan-out", scriptPath: "/fake/fan-out.js" },
+      {
+        budget: new Budget({ maxTokens: 800 }),
+        calls: new Map(),
+        trace: Trace.fromArray([makeNode({ stepIndex: 2, status: "running" })]),
+        errorLogs: [],
+      },
+      { startedAt: new Date(T0).toISOString(), recoveredCallOpts: recovered },
+    );
+    const expected = { maxTurns: 7, timeoutMs: 30_000, budgetTokens: 800, budgetTimeMs: null };
+
+    const traceRow = runMemberViews(run, { now: NOW }); // 无 records → trace 兜底行
+    expect(traceRow[0]!.budget).toEqual(expected);
+
+    const recordRow = runMemberViews(run, {
+      records: [makeRecord({ stepIndex: 2, status: "running", startedAt: T0 })],
+      now: NOW,
+    });
+    expect(recordRow[0]!.budget).toEqual(expected);
+  });
+
+  it("worker 重派后 calls 条目优先于陈旧恢复表；恢复表未覆盖的 stepIndex 仍 = 未声明 null", () => {
+    const run = makeRunWithState(
+      new Map([[0, callWithOpts({ prompt: "t", maxTurns: 5 })]]),
+      { maxTokens: 100 },
+      new Map<number, AgentCallOpts>([
+        [0, { prompt: "stale", maxTurns: 9 }], // 陈旧条目：calls 已重建，须被真值覆盖
+        [3, { prompt: "t3", timeoutMs: 15_000 }], // calls miss 的回落条目
+      ]),
+    );
+    const views = runMemberViews(run, {
+      records: [
+        makeRecord({ stepIndex: 0, status: "running", startedAt: T0 }),
+        makeRecord({ stepIndex: 1, status: "running", startedAt: T0 }),
+      ],
+      now: NOW,
+    });
+    expect(views[0]!.budget).toEqual({ maxTurns: 5, timeoutMs: null, budgetTokens: 100, budgetTimeMs: null });
+    // stepIndex 1：calls 与恢复表皆无 → 未声明 = null（显式无界）
+    expect(views[1]!.budget).toEqual({ maxTurns: null, timeoutMs: null, budgetTokens: 100, budgetTimeMs: null });
   });
 });
 

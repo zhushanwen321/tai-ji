@@ -459,8 +459,8 @@ export interface SubagentListItem {
   lastError?: string;
   /**
    * [§3.3.6/§3.3.9 budget 分轴显式] 四轴预算结构（null = 显式无界）。u3 交付结构位
-   * 与缺省形态；产出侧接线归 u5（预算显式传参生效 + 持久化落地后填实值——此前
-   * 全 null = 任务级默认无超时的如实表达，规则 19）。
+   * 与缺省形态；list 侧产出待预算轴持久化裁决（record 层无预算轴字段），见
+   * recordToListItem 同批注释。缺省全 null = 任务级默认无超时的如实表达（规则 19）。
    */
   budget?: {
     maxTurns: number | null;

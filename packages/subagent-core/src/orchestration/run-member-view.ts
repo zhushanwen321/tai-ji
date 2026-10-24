@@ -96,7 +96,8 @@ export interface RunMemberView { // oe-exempt:20261022:framework:设计 §3.1.3 
    * [§3.3.6/§3.3.9 budget 分轴显式] 四轴预算结构（null = 该轴生效上界无界）。
    * 事实源（runMemberViews 派生——本类型不单独产词）：maxTurns/timeoutMs = 同
    * stepIndex call 的 AgentCallOpts 显式传参（callId = stepIndex 单源，
-   * dispatchAgentCall 落 AgentCall.opts）；budgetTokens/budgetTimeMs = run 级声明轴
+   * dispatchAgentCall 落 AgentCall.opts；calls miss 回落重建侧恢复的声明值
+   * meta.recoveredCallOpts）；budgetTokens/budgetTimeMs = run 级声明轴
    * （run.state.budget.maxTokens/maxTimeMs——fresh run 从 spec 构造、重建 run 从
    * run-created 帧恢复，两形态同源，resume-run-rebuild.ts 同款注释锚）。
    * 生产输出恒在场（runMemberViews 逐行附加）；类型保持 optional 仅为兼容既有
@@ -164,7 +165,9 @@ export function runMemberViews(
  * 单成员行 budget 四轴派生（[§3.3.6/§3.3.9] 分轴显式——§3.3.9 执法点（引擎进程内
  * limiter）的声明值镜像）：
  * - maxTurns/timeoutMs：同 stepIndex call 的 AgentCallOpts 显式传参（callId =
- *   stepIndex 单源）；call 缺席（重建形态 calls 未恢复该条）= 未声明 = null；
+ *   stepIndex 单源）；calls miss 时回落重建侧恢复的 agent-started 声明值
+ *   （meta.recoveredCallOpts——重派集成员 replay 重派前的窗口，resume-run-rebuild
+ *   从 input 载荷恢复）；两源皆无 = 未声明 = null；
  * - budgetTokens/budgetTimeMs：run 级声明轴（run.state.budget.maxTokens/maxTimeMs，
  *   fresh run 从 spec 构造 / 重建 run 从 run-created 帧恢复——两形态同源）。
  * 值语义与执法点一致：未传 / <=0 = 不限（AgentCallOpts 预算语义对齐注释），
@@ -172,11 +175,14 @@ export function runMemberViews(
  */
 function budgetViewOf(run: WorkflowRun, stepIndex: number): NonNullable<RunMemberView["budget"]> {
   const call = run.state.calls.get(stepIndex);
+  // calls 条目（AgentCall.opts 必有）优先；miss 才回落重建侧恢复表——worker 重派后
+  // dispatchAgentCall 落真值条目，陈旧恢复表自然失效。
+  const opts = call?.opts ?? run.meta.recoveredCallOpts?.get(stepIndex);
   const positiveOr = (v: number | undefined): number | null =>
     typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
   return {
-    maxTurns: positiveOr(call?.opts.maxTurns),
-    timeoutMs: positiveOr(call?.opts.timeoutMs),
+    maxTurns: positiveOr(opts?.maxTurns),
+    timeoutMs: positiveOr(opts?.timeoutMs),
     budgetTokens: positiveOr(run.state.budget.maxTokens),
     budgetTimeMs: positiveOr(run.state.budget.maxTimeMs),
   };
