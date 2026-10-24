@@ -105,7 +105,7 @@ describe('[B3] 全集覆盖矩阵（SUBAGENT_STATUS_ALL 每值都有显式占用
   /** 枚举 → 占用归属的显式断言表（决策记录：扩枚举须先评估再补键，缺键即红）。
    *  [U6] 类型收窄后全集 = 两态。 */
   const RUNNING_MATRIX: Record<SubagentStatus, boolean> = {
-    running: true, // 唯一「进行中类」值（W4 纳管态经 stopReason 子句排除，见 P1 矩阵）
+    running: true, // 唯一「进行中类」值（带停因 running 经 stopReason 子句自然排除，见 P1 矩阵；原「W4 纳管态」措辞随 adoptEngineDeath 写点退役删除，登记见 subagent-bucket.ts isRunningProjection 注释）
     idle: false, // 两态收尾：随时可续聊的空闲，不算在跑
   }
 
