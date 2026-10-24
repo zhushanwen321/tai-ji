@@ -227,6 +227,23 @@ describe('events.report 往返（D9 插件 → renderer 业务事件上报）', 
       },
     ])
   })
+
+  it('payload 超 PLUGIN_EVENT_PAYLOAD_MAX_BYTES 在入口拒绝（C-comm-14 全局广播通路入口防线，D5 F1-23）', async () => {
+    const broadcasts: PluginEventPayload[] = []
+    const server = new PluginRpcServer()
+    registerPluginEventRpcHandler(server, {
+      broadcast: (payload) => broadcasts.push(payload),
+    })
+    const loop = wireLoop(server)
+    const api = createAgentAPI(PLUGIN_ID)
+
+    const huge = 'x'.repeat(129 * 1024) // 129KB > 128KB 上限
+    await expect(api.events.report('huge-payload', { blob: huge })).rejects.toMatchObject({
+      code: 'PLUGIN_EVENT_PAYLOAD_TOO_LARGE',
+    })
+    await loop.settle()
+    expect(broadcasts).toEqual([]) // 超限不进广播
+  })
 })
 
 describe('views.onUiEvent 接收注册（D8 输入值回传）', () => {

@@ -4,7 +4,7 @@
  * 覆盖：
  * - store 直测：写入 / 同键覆盖 / `[null]` 清除语义（与渲染端 ViewHostStore.consumeWidget
  *   同构）/ snapshot 过滤（scope 二选一：sessionId / mountId+pluginId / viewId / 全量）/
- *   clearForSession / clearForMount / clearForPlugin / generation 单调分配（U2 全量替换代际）
+ *   clearForSession / clearForPlugin / generation 单调分配（U2 全量替换代际）
  * - 全链写入联动（真实 PluginService 装配）：plugin.ui.updateHeaderAction 与
  *   plugin.views.update 的校验出口处快照写入（广播独立成败不影响快照真值）+
  *   plugin.views.update 归属二选一校验（U2：都缺/都给 → INVALID_VIEW_SCOPE）+
@@ -120,7 +120,7 @@ describe('PluginUiSnapshotStore', () => {
     vi.restoreAllMocks()
   })
 
-  it('clearForSession 清该会话两族；clearForMount 清全局域分区；clearForPlugin 跨域按 pluginId 清并移除空分区', () => {
+  it('clearForSession 清该会话两族；clearForPlugin 跨域按 pluginId 清并移除空分区', () => {
     const store = new PluginUiSnapshotStore()
     store.setHeaderAction(headerAction())
     store.setHeaderAction(headerAction({ headerActionId: 'a2', sessionId: 's2', pluginId: 'p2' }))
@@ -132,11 +132,8 @@ describe('PluginUiSnapshotStore', () => {
     expect(store.snapshot().headerActions.map((h) => h.sessionId)).toEqual(['s2'])
     expect(store.snapshot().views.map((v) => v.viewId).sort()).toEqual(['flow', 'v2'])
 
-    // 精确分区清理（mountId + pluginId）
-    store.clearForMount('provider.authorize', 'p2')
-    expect(store.snapshot().views.map((v) => v.viewId)).toEqual(['v2'])
-
-    // clearForPlugin 跨会话/全局域清剩余 p2 条目
+    // clearForPlugin 跨会话/全局域清剩余 p2 条目（挂载位分区由插件维度清理链兜底——
+    // clearForMount 已随 D5 F1-15 裁决删除：零消费方，现实清理场景全部走 clearForPlugin）
     store.clearForPlugin('p2')
     expect(store.snapshot()).toEqual({ headerActions: [], views: [] })
   })

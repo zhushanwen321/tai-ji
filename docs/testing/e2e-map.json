@@ -4391,6 +4391,7 @@
         "packages/runtime/src/services/plugin-service/api/commands-executor.ts",
         "packages/runtime/src/services/plugin-service/plugin-host-actions.ts",
         "packages/runtime/src/services/plugin-service/plugin-rpc-setup.ts",
+        "packages/runtime/src/services/provider-write-proxy.ts",
         "packages/runtime/src/transport/plugin-message-handler.ts"
       ],
       "layer": "L2",
@@ -4447,7 +4448,8 @@
         "packages/runtime/src/services/plugin-service/plugin-bootstrap.ts",
         "packages/runtime/src/services/plugin-service/plugin-api-freeze.ts",
         "packages/runtime/src/services/plugin-service/api/providers-api.ts",
-        "packages/runtime/src/services/plugin-service/api/ui-api.ts"
+        "packages/runtime/src/services/plugin-service/api/ui-api.ts",
+        "packages/runtime/src/services/provider-write-proxy.ts"
       ],
       "layer": "L2",
       "assets": [

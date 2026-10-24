@@ -51,11 +51,6 @@ export const config = isMock ? mockApi.config : realConfig
 export const model = isMock ? mockApi.model : realModel
 export const extension = isMock ? mockApi.extension : realExtension
 export const plugin = isMock ? mockApi.plugin : realPlugin
-// 插件 Provider 来源消费侧（PluginProviderSource，D1/D5/D9）：插件域三方法具名转发，
-// mock / real 同构切换（两轨签名一致，mock 无插件运行时 = 空清单 + 恒空事件订阅骨架）。
-export const invokePlugin = isMock ? mockApi.plugin.invokePlugin : realPlugin.invokePlugin
-export const listAvailablePlugins = isMock ? mockApi.plugin.listAvailablePlugins : realPlugin.listAvailablePlugins
-export const onPluginEvent = isMock ? mockApi.plugin.onPluginEvent : realPlugin.onPluginEvent
 export const settings = isMock ? mockApi.settings : realSettings
 export const git = isMock ? mockApi.git : realGit
 export const file = isMock ? mockApi.file : realFile

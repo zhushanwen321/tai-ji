@@ -124,21 +124,6 @@ export class PluginUiSnapshotStore {
     this.views.delete(`session:${sessionId}`)
   }
 
-  /**
-   * 全局域挂载位清理（U2）：插件维度给定 = 精确分区；缺省 = 该挂载位全部插件的分区
-   * （挂载位退役 / 家族切换时防陈旧）。headerAction 无全局域形态，不涉及。
-   */
-  clearForMount(mountId: string, pluginId?: string): void {
-    if (pluginId !== undefined) {
-      this.views.delete(`global:${mountId}:${pluginId}`)
-      return
-    }
-    const prefix = `global:${mountId}:`
-    for (const key of this.views.keys()) {
-      if (key.startsWith(prefix)) this.views.delete(key)
-    }
-  }
-
   /** 插件维度清理（崩溃 / 禁用 / 卸载 / 重启用防陈旧）：遍历比对 pluginId。 */
   clearForPlugin(pluginId: string): void {
     for (const [sessionId, partition] of this.headerActions) {

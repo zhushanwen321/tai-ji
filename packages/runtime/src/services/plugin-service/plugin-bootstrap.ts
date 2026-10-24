@@ -453,25 +453,17 @@ export function initSandbox(pluginDir: string): void {
   // 生产 CJS bundle 中 esbuild 将该 import 编译为 require('node:module') 解构，等价。
   const ModuleApi = Module as ModuleWithResolveFilename
   const _originalResolveFilename = ModuleApi._resolveFilename
-  // CJS 拦截保留裁决（S-36 观察期收尾，登记 docs/todo/test-single-layer-cleanup.md；
-  // 原「观察期至 ~2026-11 无命中再删除」的减法方向被 F1-9 裁决推翻）：ESM hooks 不
-  // 覆盖 CJS require，本 patch 是 CJS 通道内置模块拦截的唯一防线——删除即任何 CJS
-  // 依赖 require('fs') 直接成功。拦截器已接入能力词表（F1-9：声明能力的模块两条
-  // 加载通道一致生效），永久保留；本一次性日志降级为首命中诊断信号（通道真实存在
-  // 的可观测证据），不再承载删除决策。
-  // fork 子进程的 console 输出经 stdio 管道进 runtime 日志，可见性足够。
-  let interceptionLogged = false
+  // CJS 拦截永久保留（D5 attempt3 F1-9 用户裁决 2026-10-24）：ESM hooks 不覆盖 CJS
+  // require，本 patch 是 CJS 通道内置模块拦截的唯一防线——删除即任何 CJS 依赖
+  // require('fs') 直接成功。拦截器已接入能力词表（声明能力的模块两条加载通道一致生效）。
+  // S-36 一次性监控日志随观察期机制一并移除（F1-23 用户裁决 2026-10-24：删监控留拦截——
+  // 「观察期无命中删拦截器」的减法终局已被保留裁决取代，监控失去存在理由；
+  // 登记条目 docs/todo/test-single-layer-cleanup.md 同步退役）。
   ModuleApi._resolveFilename = function (
     request: string,
     ...args: unknown[]
   ): string {
     const resolved = _originalResolveFilename.call(this, request, ...args) as string
-    if (!interceptionLogged) {
-      interceptionLogged = true
-      console.log(
-        `[plugin-sandbox] CJS require interception active for plugin dir: ${pluginDir} (capability-aware since F1-9; first-hit diagnostic)`,
-      )
-    }
     interceptor(request, resolved)
     return resolved
   }

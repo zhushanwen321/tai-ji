@@ -5,6 +5,7 @@
  * 包含：tool、hook、storage、notify、session、config、sessionData、ui、agent、workspace。
  */
 
+import { PLUGIN_EVENT_PAYLOAD_MAX_BYTES } from '@taiji/shared'
 import type { ProviderId, PluginViewScope, ViewSnapshotItem, PluginEventPayload } from '@taiji/shared'
 import type { PluginRpcServer } from './plugin-rpc-server.js'
 import type { PluginStorage } from './plugin-storage.js'
@@ -169,8 +170,20 @@ export function isAllowedOpenUrl(url: string): boolean {
   }
 }
 
-/** plugin.event 上报的 channel 长度上限（自命开放字符串，防超长入广播帧；帧大小兜底另有 broker 出站守卫） */
+/**
+ * plugin.event 上报的 channel 长度上限（自命开放字符串，防超长入广播帧）。
+ * payload 大小上限见 PLUGIN_EVENT_PAYLOAD_MAX_BYTES——两档都在 RPC 入口拒绝，不经广播端截断。
+ */
 const PLUGIN_EVENT_CHANNEL_MAX_BYTES = 256
+
+/**
+ * payload 字节上限 PLUGIN_EVENT_PAYLOAD_MAX_BYTES（SSOT = @taiji/shared constants，
+ * 与 OUTBOUND_FRAME_* 出站阈值族同居）：plugin:event 是全局广播通路（broadcastFn/
+ * broker.broadcast 直发 ws.send，不经 session push 双档检查），上限在 RPC 入口拒绝
+ * （序列化实测字节，error response 回插件）。超限错误码 PLUGIN_EVENT_PAYLOAD_TOO_LARGE
+ * （结构化，插件侧可据此降级为更小载荷重试）。
+ */
+const PLUGIN_EVENT_PAYLOAD_TOO_LARGE = 'PLUGIN_EVENT_PAYLOAD_TOO_LARGE'
 
 /**
  * 注册 plugin.event RPC handler（D9：插件 → renderer 的业务事件上报）。
@@ -178,7 +191,9 @@ const PLUGIN_EVENT_CHANNEL_MAX_BYTES = 256
  * pluginId 归属取通道身份优先（ctx.identity.pluginId——宿主注册时闭包捕获不可伪造，
  * sandbox 通道必有），trusted 共享 Worker 无唯一归属时回落 params.pluginId（trusted
  * 插件间互不设防是既有设计语义）。channel/payload 窄校验后经广播出线转发，handler
- * 本体不解释业务语义（payload unknown 透传，消费方自定）。
+ * 本体不解释业务语义（payload unknown 透传，消费方自定）；payload 超
+ * PLUGIN_EVENT_PAYLOAD_MAX_BYTES 在入口拒绝（本通路是全局广播，不经 session push
+ * 出站双档检查——C-comm-14 治理的入口防线）。
  */
 export function registerPluginEventRpcHandler(
   rpcServer: PluginRpcServer,
@@ -187,6 +202,13 @@ export function registerPluginEventRpcHandler(
   rpcServer.registerMethod(PLUGIN_EVENT_RPC_METHOD, async (params, ctx) => {
     const pluginId = ctx.identity?.pluginId ?? asString(params.pluginId, 'pluginId')
     const channel = asBoundedString(params.channel, 'channel', PLUGIN_EVENT_CHANNEL_MAX_BYTES)
+    const payloadBytes = Buffer.byteLength(JSON.stringify(params.payload ?? null), 'utf8')
+    if (payloadBytes > PLUGIN_EVENT_PAYLOAD_MAX_BYTES) {
+      throw errorWithCode(
+        `plugin:event payload too large: ${payloadBytes} bytes (limit ${PLUGIN_EVENT_PAYLOAD_MAX_BYTES}); shrink the payload or split the report`,
+        PLUGIN_EVENT_PAYLOAD_TOO_LARGE,
+      )
+    }
     deps.broadcast({ pluginId, channel, payload: params.payload })
     return { forwarded: true }
   })

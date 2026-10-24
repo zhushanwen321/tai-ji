@@ -168,15 +168,6 @@ describe('WoolExtensionInstaller（D6 双产物安装编排·扩展侧）', () =
     vi.mocked(deps.extensionService.uninstallExtension).mockRejectedValue(new Error('npm uninstall failed'))
     await expect(installer.uninstallPiExtension('workbuddy')).rejects.toBeInstanceOf(WoolExtensionInstallError)
   })
-
-  it('scanInstalledVersion：已装回版本，未装回 undefined', async () => {
-    const deps = makeDeps()
-    const installer = new WoolExtensionInstaller(deps)
-    expect(await installer.scanInstalledVersion('workbuddy')).toBe('0.2.0')
-
-    vi.mocked(deps.extensionService.scanExtensions).mockResolvedValue([])
-    expect(await installer.scanInstalledVersion('workbuddy')).toBeUndefined()
-  })
 })
 
 describe('fetchManifest 缓存与时点差自愈（D6：清单热更新后重试自愈）', () => {

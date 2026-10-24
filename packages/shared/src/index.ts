@@ -212,7 +212,7 @@ export type { ProviderApiType } from './constants'
 // renderer（浏览器）整包 import，import 本身安全（constants.ts 模块顶层无 process 访问），
 // 但 renderer 严禁调用（process 未定义 ReferenceError）；main / runtime 专用，
 // 完整警示见 constants.ts 内 JSDoc。
-export { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES, RING_BUDGET_BYTES, READ_PRECHECK_MAX_BYTES, BYTES_PER_MB, HISTORY_BUDGET, DEFAULT_LOG_KEEP_DAYS, readLogKeepDays, RUNTIME_PLANNED_EXIT_CODE } from './constants'
+export { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES, PLUGIN_EVENT_PAYLOAD_MAX_BYTES, RING_BUDGET_BYTES, READ_PRECHECK_MAX_BYTES, BYTES_PER_MB, HISTORY_BUDGET, DEFAULT_LOG_KEEP_DAYS, readLogKeepDays, RUNTIME_PLANNED_EXIT_CODE } from './constants'
 // Electron IPC 通道名 SSOT（u-foundation：全量 invoke / 推送通道常量——preload 与
 // main 两侧注册 import 消费，renderer 经 preload electronAPI 方法面间接使用）。
 export {

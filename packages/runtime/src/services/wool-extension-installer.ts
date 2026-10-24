@@ -348,11 +348,4 @@ export class WoolExtensionInstaller {
       )
     }
   }
-
-  /** 查询指定家族 pi 扩展的已装状态（已装 = enabled 且版本已知；未装 = undefined）。 */
-  async scanInstalledVersion(family: WoolFamilyId): Promise<string | undefined> {
-    const extensions = await this.deps.extensionService.scanExtensions()
-    const match = extensions.find((ext) => ext.name === woolExtensionPkgName(family))
-    return match !== undefined && match.enabled ? match.version : undefined
-  }
 }

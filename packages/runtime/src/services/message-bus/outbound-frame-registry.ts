@@ -108,6 +108,11 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 //   清除帧 payload 小，不触发检查）。
 // - plugin:uiRequest（plugin-service.ts:206）/ plugin:viewUpdate（:291）：插件动态 payload
 //   （dialog/html 字段无固定路径）——transient/stream 兜底覆盖（超限丢弃 + error 日志）。
+// - plugin:event（plugin-service.ts broadcastPluginEvent → broadcastOrBroker 全局广播通路）：
+//   不进本表双档检查（不经 session push/reply 通路），payload 上限在 plugin.event RPC
+//   入口拒绝——PLUGIN_EVENT_PAYLOAD_MAX_BYTES = 128KB（plugin-rpc-setup.ts，C-comm-14
+//   治理的入口防线，D5 F1-23 用户裁决 2026-10-24），超限 error response 回插件
+//   （PLUGIN_EVENT_PAYLOAD_TOO_LARGE），广播端无第二道检查（合法载荷远低于上限）。
 // - extension.ui_request（event-adapter.ts:526 统一产点，planReview 帧产点 :875）：交互请求
 //   帧不登记，selfReview ≤4KB 有界性由扩展写侧 truncateSelfReview 截断保证
 //   （PLAN_SELF_REVIEW_MAX_BYTES）。
