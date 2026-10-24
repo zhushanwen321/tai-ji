@@ -543,11 +543,12 @@ export function appendRetryMarker(errorMessage: string): string {
  * - 基线条目按消费角色分三类（复核时按类判断条目价值，勿按单一口径误删）：
  *   ① 分类登记档——匹配键命中时 errorMessage 文本必含 pi RETRYABLE 词表字面量
  *   （provider 行为保证：zhipu-1302/1305 = HTTP 429、generic-429/5xx、
- *   kimi-overloaded/kimi-rate-limit），pi 原生已判可重试，改写是冗余动作；条目的
+ *   kimi-overloaded/kimi-rate-limit、kimi-504（"504" 为 pi 词表 5xx 段字面量）），
+ *   pi 原生已判可重试，改写是冗余动作；条目的
  *   独立价值在分类登记（class/kind/verdict 供收尾边沿失败分类）与 settings 展示，
  *   删之即砍断 §3.3.12「一次登记覆盖两个消费方」的分类数据链；
  *   ② pi 词表不命中的改写键——pi 判定不了或判错方向的形态（zhipu 窗口/账户码族、
- *   tier-limit-window、generic-account-4xx、generic-rpm-limit、kimi-quota/kimi-504
+ *   tier-limit-window、generic-account-4xx、generic-rpm-limit、kimi-quota
  *   语义收窄档），改写判定依赖这些键生效；
  *   ③ 显式排除档——pi NON_RETRYABLE 词表已判 false 的形态（generic-quota-exhausted、
  *   opencode-subscription-limit），登记为第一层排除防用户自定义可重试规则击穿。
