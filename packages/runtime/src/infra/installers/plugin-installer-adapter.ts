@@ -33,6 +33,8 @@ import { toErrorMessage } from '../../utils/errors.js'
 const STAGING_DIR = '.staging'
 /** 更新提交时旧版本的暂存区移入位前缀（rollback/清扫按恢复语义消费）。 */
 const REPLACING_PREFIX = '.replacing-'
+/** scoped 包名中 `/` 的最早合法下标：`@` 占 index 0、scope 段至少 1 字符（`@s/pkg`）。 */
+const SCOPED_NAME_MIN_SLASH_INDEX = 2
 
 interface ExtractedPackageJson {
   name: string
@@ -217,7 +219,7 @@ function parseName(spec: string): string {
 function safePluginDirName(pkgName: string): string {
   if (pkgName.startsWith('@')) {
     const slash = pkgName.indexOf('/')
-    if (slash < 2) throw new Error(`Invalid scoped package name: "${pkgName}"`)
+    if (slash < SCOPED_NAME_MIN_SLASH_INDEX) throw new Error(`Invalid scoped package name: "${pkgName}"`)
     const scope = pkgName.slice(1, slash)
     const name = pkgName.slice(slash + 1)
     assertSafeSegment(scope)

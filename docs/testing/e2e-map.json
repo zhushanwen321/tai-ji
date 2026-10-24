@@ -4414,6 +4414,54 @@
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md",
       "note": "R2 态（2026-10-24 u-protocol 交付登记，防漏门禁补登）。ui 渲染层（TextInput 等）改动由 packages/ui 包内 vitest 子集与 A29 承接。"
+    },
+    {
+      "id": "E2E-PLUGINWIRE-01",
+      "summary": "能力放行宿主接线：激活链登记（descriptor → host.setPluginCapabilityEnv）→ sandbox fork env 含放行清单与 readPaths（D3 注入点）→ 未登记 fail-closed → 进程回收清除后重登记恢复（真实宿主链 PluginHost → PluginHostProcess）",
+      "scope": [
+        "packages/runtime/src/services/plugin-service/plugin-activator.ts",
+        "packages/runtime/src/services/plugin-service/plugin-host.ts",
+        "packages/runtime/src/services/plugin-service/plugin-host-process.ts",
+        "packages/runtime/src/services/plugin-service/plugin-registry.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-capability-wiring.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm --filter @taiji/runtime exec vitest run test/plugin-capability-wiring.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态（2026-10-24 D2 补登，U4 宿主接线测试）。capabilityEnvInputs 宿主写入口接线段断言；放行计算与 ESM loader 主池归 E2E-PLUGINPERM-01。"
+    },
+    {
+      "id": "E2E-PLUGINAPI-01",
+      "summary": "插件侧消费面契约：Phase2AgentAPI providers.write/delete/credential + ui.openUrl + events.report + views.onUiEvent 出站帧形态（pluginId 命名空间校验）+ plugin.ui.event 下行通知消费分发",
+      "scope": [
+        "packages/plugin-sdk/src/types.ts",
+        "packages/plugin-sdk/src/mock.ts",
+        "packages/runtime/src/services/plugin-service/plugin-bootstrap.ts",
+        "packages/runtime/src/services/plugin-service/plugin-api-freeze.ts",
+        "packages/runtime/src/services/plugin-service/api/providers-api.ts",
+        "packages/runtime/src/services/plugin-service/api/ui-api.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-provider-access-plugin-side.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm --filter @taiji/runtime exec vitest run test/plugin-provider-access-plugin-side.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态（2026-10-24 D2 补登，U6 插件侧出口 API 契约测试）。宿主侧三 RPC 注册与帧审计归 E2E-PLUGPROTO-01。"
     }
   ]
 }

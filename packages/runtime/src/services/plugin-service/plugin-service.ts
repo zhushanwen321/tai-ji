@@ -702,6 +702,7 @@ export class PluginService implements IPluginService {
       try {
         await store.delete(providerId)
       } catch (err: unknown) {
+        // best-effort 降级：单条清理失败 warn 留痕继续，条目残留可在重装/重卸时收敛（插件目录拆除不等它）
         console.warn(`[plugin-service] provider entry cleanup failed for '${providerId}' (ns=${ns}):`, toErrorMessage(err))
       }
     }
@@ -772,6 +773,7 @@ export class PluginService implements IPluginService {
     try {
       await installer.uninstallForCatalogEntry(packageName)
     } catch (err: unknown) {
+      // best-effort 降级：端口卸载失败 warn 留痕不阻断（插件目录拆除不等扩展侧，残留可在扩展管理页手动移除）
       console.warn(`[plugin-service] pi extension member uninstall failed for ${packageName}:`, toErrorMessage(err))
     }
   }

@@ -23,12 +23,6 @@ export interface PluginCapabilityForkEnvInput { // oe-exempt:20261024:framework:
   readPaths?: readonly string[]
 }
 
-/** fork env 键（值 = JSON 数组字符串；SSOT 在 plugin-fs-guard.cjs） */
-export const PLUGIN_CAPABILITY_ENV_KEYS = { // oe-exempt:20261024:wip:分步提交中间态——wiring 接线属后续单元/集成阶段，30 天内接线或删除
-  allowedModules: fsGuardModule.ENV_ALLOWED_MODULES_KEY,
-  readPaths: fsGuardModule.ENV_READ_PATHS_KEY,
-} as const
-
 /**
  * 按 manifest 能力声明构建 fork env 键值（buildPluginHostChildEnv 的 capabilityEnv 入参）。
  *

@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import type { WorkerHandle, RpcRequest, RpcResponse } from './plugin-types.js'
 import { PluginRpcServer } from './plugin-rpc-server.js'
 import { PluginHostProcess, type PluginPoolOptions } from './plugin-host-process.js'
+import type { PluginCapabilityForkEnvInput } from './plugin-fs-guard.js'
 // [crash-resilience §3.3 D6-⑤] plugin worker 崩溃取证：stderr 全量落盘 plugin-crash-*.log
 // + 崩溃时刻 runtime 内存快照（A8「plugin-crash log 有 worker stderr」断言的落盘出口）。
 // 采集器本体在 worker-stderr-collector.ts（独立模块可单测，本文件 max-lines 预算内）。
@@ -228,6 +229,15 @@ export interface PluginHostContract {
   loadPlugin(workerId: string, pluginId: string, pluginPath: string, trustLevel?: 'trusted' | 'sandbox'): Promise<void>
   terminateWorker(workerId: string): Promise<void>
   getWorkerHandle(pluginId: string): { workerId: string; postMessage(message: unknown): void } | undefined
+  /**
+   * 登记插件的能力声明（provider-plugin-access D3 宿主接线）：激活链在 assignWorker
+   * 前对 sandbox 插件调用，fork 时经 buildPluginCapabilityForkEnv 编码注入 env
+   * （TAIJI_PLUGIN_ALLOWED_MODULES / TAIJI_PLUGIN_READ_PATHS）。
+   * 可选方法：能力登记只在 fork 版宿主有语义（trusted Worker 线程无 ESM loader）；
+   * 宿主未实现 = 无放行清单 = loader 按基线黑名单全拦（fail-closed，mock 宿主/降级形态
+   * 不阻塞激活）。
+   */
+  setPluginCapabilityEnv?(pluginId: string, input: PluginCapabilityForkEnvInput): void
 }
 
 export class PluginHost implements PluginHostContract {
@@ -274,6 +284,16 @@ export class PluginHost implements PluginHostContract {
   /** 设置 Worker 生命周期回复的回调（activated/deactivated/error） */
   setReplyCallback(cb: ReplyCallback): void {
     this.onReply = cb
+  }
+
+  /**
+   * 能力声明登记转发（provider-plugin-access D3 宿主接线，契约方法实现）：登记落在
+   * 子进程宿主的 capabilityEnvInputs（fork env 注入点 PluginHostProcess.createProcess）。
+   * 惰性创建 processHost：登记只发生在激活链 sandbox 分支，随后 assignWorker 必然
+   * 需要该实例，早建无副作用（构造只分配空 Map）。
+   */
+  setPluginCapabilityEnv(pluginId: string, input: PluginCapabilityForkEnvInput): void {
+    this.ensureProcessHost().setPluginCapabilityEnv(pluginId, input)
   }
 
   /**

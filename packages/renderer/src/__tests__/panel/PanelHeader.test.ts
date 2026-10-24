@@ -157,12 +157,13 @@ describe('PanelHeader 折叠态 chrome 迁入（review MF-6）', () => {
 })
 
 describe('PanelHeader ExtensionHost panel.header 挂载点（review MF-6）', () => {
-  it('传 sessionId → ViewHost 挂载且 viewId/sessionId/empty 正确', () => {
+  it('传 sessionId → ViewHost 挂载且 viewId/scope/empty 正确', () => {
     const wrapper = mountHeader({ sessionId: 'sess-1' })
     const host = wrapper.findComponent(ViewHost)
     expect(host.exists()).toBe(true)
     expect(host.props('viewId')).toBe('panel.header')
-    expect(host.props('sessionId')).toBe('sess-1')
+    // U2 scope 联合归属：会话域 { kind: 'session', sessionId }（ViewHost.vue scope prop）
+    expect(host.props('scope')).toEqual({ kind: 'session', sessionId: 'sess-1' })
     expect(host.props('empty')).toBe('hidden')
   })
 

@@ -3596,6 +3596,9 @@ export interface ReplyPayloadMap {
   // plugin.invoke（provider-plugin-access D9）：reply 与 request 同名，PluginInvokeReply
   // 信封（result = 插件方法返回值）；请求级失败走统一 error envelope。
   'plugin.invoke': ServerMessageMap['plugin.invoke']
+  // plugin.uiEvent（provider-plugin-access D8）：值回传 fire-and-forget，reply pong ack
+  // （前端不读 payload）；未送达（WS 未 OPEN）由 command() 立即 reject，不留悬挂窗口。
+  'plugin.uiEvent': ServerMessageMap['pong']
   // 插件清单域（provider-plugin-access U5）：无参只读，reply 与 request 同名。
   'plugin.listAvailable': ServerMessageMap['plugin.listAvailable']
   'plugin.catalog': ServerMessageMap['plugin.catalog']

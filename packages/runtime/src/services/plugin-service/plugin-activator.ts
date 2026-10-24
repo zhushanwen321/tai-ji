@@ -264,6 +264,20 @@ export class PluginActivator {
       // 外部改写），helper 内已终一化状态并发出对应广播/侧写
       if (!(await this.gateOnPermissionApproval(pluginId, descriptor))) return
 
+      // 0.5 能力声明登记（provider-plugin-access D3 宿主接线）：sandbox fork 时按
+      // manifest 声明注入放行清单 env（TAIJI_PLUGIN_ALLOWED_MODULES /
+      // TAIJI_PLUGIN_READ_PATHS），必须在 assignWorker 之前——fork 只发生在
+      // assignProcess 内。每次激活重登记：宿主在进程回收时清除登记（capabilityEnvInputs），
+      // 崩溃重建/热重载后的激活经此重新登记，陈旧 manifest 能力不跨进程存活。
+      // trusted 走 Worker 线程无 ESM loader，无此语义不登记。宿主未实现该方法
+      // （mock/Worker 版语义）时跳过 = 无放行清单 = loader 基线黑名单全拦（fail-closed）。
+      if (descriptor.trustLevel === 'sandbox') {
+        host.setPluginCapabilityEnv?.(pluginId, {
+          capabilities: descriptor.capabilities ?? [],
+          ...(descriptor.readPaths ? { readPaths: descriptor.readPaths } : {}),
+        })
+      }
+
       // 1. 分配 Worker（sandbox 传 pluginDir：fork 子进程 env 注入 TAIJI_PLUGIN_SANDBOX_DIR，
       // ESM loader initialize() 在进程启动时读此 env 做路径边界判定）
       const workerId = await host.assignWorker(pluginId, descriptor.trustLevel, descriptor.pluginPath)

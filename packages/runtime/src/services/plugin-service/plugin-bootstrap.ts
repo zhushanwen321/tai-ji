@@ -20,6 +20,7 @@ import type {
   Phase2AgentAPI,
   PluginStateStorage,
   Disposable,
+  PluginUiEventPayload,
   RpcRequest,
   ToolExecuteHandler,
 } from './plugin-types.js'
@@ -39,6 +40,7 @@ import { createStorageApi } from './api/storage-api.js'
 import { createNotifyApi } from './api/notify-api.js'
 import { createCommandsApi } from './api/commands-api.js'
 import { createViewsApi } from './api/views-api.js'
+import { createProvidersApi } from './api/providers-api.js'
 import { freezeApiSurface } from './plugin-api-freeze.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
@@ -96,6 +98,62 @@ export function disposePluginTools(pluginId: string): void {
       toolHandlers.delete(toolKey)
     }
   }
+}
+
+// ── plugin.ui.event 值回传消费（provider-plugin-access D8 插件侧）───────────
+
+/** Worker 本地 uiEvent handler 注册表：pluginId → 该插件 views.onUiEvent 的全部订阅 */
+const uiEventHandlers = new Map<string, Set<(event: PluginUiEventPayload) => void>>()
+
+/**
+ * 宿主 → Worker 单向通知（PLUGIN_UI_EVENT_NOTIFY = 'plugin.ui.event'，方法名 SSOT 见
+ * plugin-rpc-setup.ts；Worker 入口不 import 主线程侧模块，字符串同源两处硬编码与
+ * ui-api 的 'plugin.ui.showSelect' 等先例同款）的模块级分发器：handleRpcMessage 已把
+ * 全部 notification 喂给 rpcClient.handleNotification，此处按方法名接住——广播给本
+ * Worker 全部插件 handler（sandbox fork 与插件一对一 = 精确投递；trusted 共享 Worker
+ * 通知载荷无 pluginId，广播是宿主 deliverUiEventToPlugin 按 workerId 定向语义的忠实
+ * 转译）。per-handler try/catch 与 PluginRpcClient.handleNotification 的 D6/W4 纪律
+ * 一致：单插件 handler 抛错不沿 handleMessage catch 升级 fatal_error 连坐整 Worker。
+ */
+rpcClient.onNotification('plugin.ui.event', (params: unknown) => {
+  const event = params as PluginUiEventPayload
+  for (const handlers of uiEventHandlers.values()) {
+    for (const handler of handlers) {
+      try {
+        handler(event)
+      } catch (e: unknown) {
+        // 错误隔离降级：单插件 handler 抛错仅留痕，不沿 handleMessage catch 升级 fatal_error 连坐整 Worker（D6/W4 纪律）
+        console.error('[plugin-bootstrap] uiEvent handler error:', toErrorMessage(e))
+      }
+    }
+  }
+})
+
+/** 注册 uiEvent handler（由 views.onUiEvent 调用），返回 Disposable 取消订阅 */
+export function registerUiEventHandler(
+  pluginId: string,
+  handler: (event: PluginUiEventPayload) => void,
+): Disposable {
+  let handlers = uiEventHandlers.get(pluginId)
+  if (!handlers) {
+    handlers = new Set()
+    uiEventHandlers.set(pluginId, handlers)
+  }
+  handlers.add(handler)
+  return {
+    dispose: () => {
+      handlers.delete(handler)
+      if (handlers.size === 0) uiEventHandlers.delete(pluginId)
+    },
+  }
+}
+
+/**
+ * 清理指定插件的全部本地 uiEvent handler（deactivate 分支消费）——与主线程
+ * togglePlugin(false) 对偶，禁用插件的输入回传订阅不再投递（handler 不残留）。
+ */
+export function disposePluginUiEventHandlers(pluginId: string): void {
+  uiEventHandlers.delete(pluginId)
 }
 
 if (parentPort) {
@@ -175,6 +233,9 @@ async function handleDeactivate(msg: Extract<HostToWorkerMessage, { type: 'deact
   // Fix-7：对偶清理本地 tool handler——与主线程清 toolRegistry 对称，
   // 禁用插件的工具 handler 不残留（迟到的 tool.execute 落「handler not found」）
   disposePluginTools(msg.pluginId)
+  // provider-plugin-access D8 对偶：uiEvent 订阅同口径清理——禁用插件的
+  // 输入值回传不再投递（handler 不残留）
+  disposePluginUiEventHandlers(msg.pluginId)
   post({ type: 'deactivated', pluginId: msg.pluginId })
 }
 
@@ -289,10 +350,12 @@ export function createAgentAPI(pluginId: string): Phase2AgentAPI {
     },
     notify: createNotifyApi(rpcClient, pluginId),
     sessions: createSessionApi(rpcClient, pluginId),
-    // S3-W2 events 显式降级：插件间事件总线从未实现（plugin.event.* 通知全仓无
-    // 生产方），SDK 已从 @stable 移到 @experimental。调用即抛 NOT_IMPLEMENTED
+    // S3-W2 events 显式降级：插件间事件总线（on/emit）从未实现（plugin.event.* 通知
+    // 全仓无生产方），SDK 已从 @stable 移到 @experimental。调用即抛 NOT_IMPLEMENTED
     //（带 issue 指引）——显式失败优于静默失效（G4：SDK 允诺的能力全部真实可用或显式报错）。
     // 需要订阅 session 生命周期的插件请用 api.sessions.onDidCreateSession（已实现）。
+    // report（provider-plugin-access D9）：插件 → renderer 业务事件上报，真实通路——
+    // 宿主 plugin.event RPC 校验后广播 'plugin:event' 帧（首个消费方 = 凭据状态上报）。
     events: {
       on: (event: string, _handler: (data: unknown) => void): Disposable => {
         throw errorWithCode(
@@ -311,6 +374,13 @@ export function createAgentAPI(pluginId: string): Phase2AgentAPI {
           PluginRpcErrorCodes.METHOD_NOT_FOUND,
         )
       },
+      // PLUGIN_EVENT_RPC_METHOD = 'plugin.event'（SSOT 见 plugin-rpc-setup.ts；
+      // Worker 入口不 import 主线程侧模块，同款字符串硬编码先例）。经 request 而非
+      // notify：channel 超长等宿主校验错误以 error response 回到插件侧可见。
+      report: (channel: string, payload: unknown) =>
+        rpcClient
+          .request('plugin.event', { pluginId, channel, payload })
+          .then(v => v as { forwarded: boolean }),
     },
     tools: createToolApi(rpcClient, pluginId),
     hooks: createHookApi(rpcClient, pluginId),
@@ -321,7 +391,16 @@ export function createAgentAPI(pluginId: string): Phase2AgentAPI {
     workspace: createWorkspaceApi(rpcClient, pluginId),
     // commands/views 两域（IF3）：handler 驻留 worker（commands），RPC 转发主线程（views）
     commands: createCommandsApi(rpcClient, pluginId),
-    views: createViewsApi(rpcClient, pluginId),
+    views: {
+      ...createViewsApi(rpcClient, pluginId),
+      // provider-plugin-access D8：输入组件值回传订阅（宿主 'plugin.ui.event' 单向
+      // 通知 → 模块级分发器，见 registerUiEventHandler 注释）
+      onUiEvent: (handler: (event: PluginUiEventPayload) => void): Disposable =>
+        registerUiEventHandler(pluginId, handler),
+    },
+    // providers 域（provider-plugin-access D4 插件侧）：凭据/模型目录受控读写转发，
+    // 宿主侧校验（命名空间 / 能力 / 身份）在 provider-write-proxy
+    providers: createProvidersApi(rpcClient, pluginId),
   }
   return freezeApiSurface(api)
 }

@@ -56,6 +56,7 @@ export function createMockAgentAPI(): Phase2AgentAPI {
     events: {
       on: () => mockDisposable,
       emit: () => {},
+      report: () => Promise.resolve({ forwarded: true }),
     },
     // Phase2
     tools: {
@@ -85,6 +86,16 @@ export function createMockAgentAPI(): Phase2AgentAPI {
       showInput: () => Promise.resolve(undefined),
       notify: noopVoid,
       updateHeaderAction: () => Promise.resolve({ updated: true }),
+      openUrl: () => Promise.resolve({ opened: true }),
+    },
+    providers: {
+      write: () => Promise.resolve({ written: true as const, providerId: 'mock-provider' }),
+      delete: () => Promise.resolve({ deleted: false, providerId: 'mock-provider' }),
+      credential: () =>
+        Promise.resolve({
+          providerId: 'mock-provider',
+          unsupported: 'command',
+        } as const),
     },
     agent: {
       setModel: () => Promise.resolve('mock-model'),
@@ -105,6 +116,7 @@ export function createMockAgentAPI(): Phase2AgentAPI {
     views: {
       update: () => Promise.resolve(),
       listMountPoints: () => Promise.resolve([]),
+      onUiEvent: () => mockDisposable,
     },
   }
 }

@@ -278,6 +278,10 @@ export class PluginRegistry {
       status: compatCompatible ? ('UNLOADED' as PluginState) : ('DEPS_MISSING' as PluginState),
       contributes: manifest.contributes ?? {} as PluginContributes,
       permissions: manifest.permissions ?? [],
+      // D3 宿主接线数据源：manifest 能力声明透传 descriptor（激活链据此登记 fork
+      // 放行清单）；scan 是 descriptor 唯一装配点，重扫即刷新（热重载/重装取新值）
+      capabilities: manifest.capabilities ?? [],
+      readPaths: manifest.readPaths,
       engines: { 'taiji': engineRange ?? '*' },
       pluginPath: entryPath,
       source,

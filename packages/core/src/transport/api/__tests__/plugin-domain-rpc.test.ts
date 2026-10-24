@@ -17,41 +17,12 @@ vi.mock('../request', () => ({
   command: (type: string, payload: unknown, timeoutMs: number) => mockCommand(type, payload, timeoutMs),
 }))
 
-const mockWsSend = vi.fn<(msg: unknown) => boolean>()
-vi.mock('../../ws-client', () => ({
-  send: (msg: unknown) => mockWsSend(msg),
-}))
-
-/** pending 手工展开路径（sendPluginUiEvent）的登记/拒绝捕获；其余导出保留真实实现 */
-let resolvePending: ((value: void) => void) | undefined
-let rejectPending: ((error: unknown) => void) | undefined
-const mockCreateCommandId = vi.fn(() => 'cmd-ui-event')
-const mockRegister = vi.fn((_id: string, _timeoutMs: number) => new Promise<void>((resolve, reject) => {
-  resolvePending = resolve
-  rejectPending = reject
-}))
-const mockReject = vi.fn((id: string, error: unknown) => {
-  rejectPending?.(error)
-})
-vi.mock('../pending', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../pending')>()
-  return {
-    ...actual,
-    createCommandId: () => mockCreateCommandId(),
-    register: (id: string, timeoutMs: number) => mockRegister(id, timeoutMs),
-    reject: (id: string, error: unknown) => mockReject(id, error),
-  }
-})
-
 import { invokePlugin, listAvailablePlugins, getPluginCatalog, sendPluginUiEvent } from '../domains/plugin'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  resolvePending = undefined
-  rejectPending = undefined
   mockCommand.mockResolvedValue({})
-  mockWsSend.mockReturnValue(true)
 })
 
 describe('plugin.invoke 域封装（D9）', () => {
@@ -91,23 +62,19 @@ describe('清单域封装（U5）', () => {
   })
 })
 
-describe('plugin.uiEvent 域封装（D8，手工 pending 展开）', () => {
-  it('发 plugin.uiEvent 帧（id + payload 原样）并等 pong settle', async () => {
+describe('plugin.uiEvent 域封装（D8，command 通道）', () => {
+  it('经 command 发 plugin.uiEvent 帧（payload 原样）并等 pong ack settle', async () => {
     const payload = { pluginId: 'wool-workbuddy', viewId: 'authorize', componentId: 'pat', event: 'change', value: 'token' }
-    const pendingCall = sendPluginUiEvent(payload)
-
-    expect(mockRegister).toHaveBeenCalledWith('cmd-ui-event', RPC_BACKSTOP_TIMEOUT_MS)
-    expect(mockWsSend).toHaveBeenCalledWith({ type: 'plugin.uiEvent', id: 'cmd-ui-event', payload })
-
-    resolvePending?.()
-    await expect(pendingCall).resolves.toBeUndefined()
+    await expect(sendPluginUiEvent(payload)).resolves.toBeUndefined()
+    expect(mockCommand).toHaveBeenCalledWith('plugin.uiEvent', payload, RPC_BACKSTOP_TIMEOUT_MS)
   })
 
-  it('send 返回 false（WS 未 OPEN）→ 立即 reject pending，不留 65s 悬挂窗口', async () => {
-    mockWsSend.mockReturnValue(false)
-    const pendingCall = sendPluginUiEvent({ pluginId: 'p', viewId: 'v', componentId: 'c', event: 'change', value: 1 })
-
-    expect(mockReject).toHaveBeenCalledTimes(1)
-    await expect(pendingCall).rejects.toMatchObject({ code: 'disconnected', notDelivered: true })
+  it('未送达（WS 未 OPEN）→ command 立即 reject 透传，不留 65s 悬挂窗口（语义实装在 request.ts command 本体，此处验证透传）', async () => {
+    mockCommand.mockRejectedValue(
+      Object.assign(new Error('transport unavailable (ws not open)'), { code: 'disconnected', notDelivered: true }),
+    )
+    await expect(
+      sendPluginUiEvent({ pluginId: 'p', viewId: 'v', componentId: 'c', event: 'change', value: 1 }),
+    ).rejects.toMatchObject({ code: 'disconnected', notDelivered: true })
   })
 })

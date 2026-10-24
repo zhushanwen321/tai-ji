@@ -14,10 +14,7 @@
  */
 import type { PluginEventPayload, PluginInfo, PluginInvokeReply, PluginCatalogReply, PluginListAvailableReply, PluginPrepareInstallReply, PluginConfirmInstallReply, PluginUiSnapshotPayload } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
-import * as pending from '../pending'
 import { command } from '../request'
-import { notDeliveredError } from '../../errors'
-import { send } from '../../ws-client'
 import * as events from '../events'
 
 export function onPlugins(handler: (plugins: PluginInfo[]) => void): () => void {
@@ -72,18 +69,11 @@ export async function invokePlugin(pluginId: string, method: string, params?: Re
 
 /**
  * 发送输入组件值回传（provider-plugin-access D8）：text-input 值变更即发
- * （fire-and-forget，插件侧始终持有最新值）。reply pong ack，await 只为等 RPC settle。
- * 'plugin.uiEvent' 未登记 ReplyPayloadMap（ack 帧），经底层 send + pending 手工展开
- * （command 的原始模板形态）——未送达（WS 未 OPEN）时立即 reject 该 pending
- * （与 request.ts 同纪律：不留 65s 悬挂窗口）。
+ * （fire-and-forget，插件侧始终持有最新值）。reply pong ack，await 只为等 RPC settle；
+ * 未送达（WS 未 OPEN）时 command 立即 reject（notDelivered，不留 65s 悬挂窗口）。
  */
 export async function sendPluginUiEvent(payload: { pluginId: string; viewId: string; componentId: string; event: string; value: unknown }): Promise<void> {
-  const id = pending.createCommandId()
-  const result = pending.register<void>(id, RPC_BACKSTOP_TIMEOUT_MS)
-  if (!send({ type: 'plugin.uiEvent', id, payload })) {
-    pending.reject(id, notDeliveredError('transport unavailable (ws not open)'))
-  }
-  await result
+  await command('plugin.uiEvent', payload, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 /**

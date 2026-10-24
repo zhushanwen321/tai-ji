@@ -947,10 +947,12 @@ export default [
   // [runtime-composition-root 修复 2ea7e12c2] 组合根装配自检 getter（hasProviderEntries /
   // hasPiExtensionInstaller）与 pi 扩展成员安装编排（installPiExtensionMember）入列，
   // eslint 实测折算 695，按先例取整提额 700 保留软上限告警，超限即再暴露。
+  // [D2 一致性修复 2026-10-24] 卸载编排入文件（provider 条目清理 / pi 扩展成员卸载接
+  // 线），eslint 实测折算 719，按先例取整提额 730 保留软上限告警，超限即再暴露。
   {
     files: ['packages/runtime/src/services/plugin-service/plugin-service.ts'],
     rules: {
-      'max-lines': ['warn', { max: 700, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 730, skipBlankLines: true, skipComments: true }],
     },
   },
   // preset-service 是 pi-presets.json 读盘 coerce 家族唯一入口（presets 逐项 / prompt 段级 /

@@ -29,7 +29,6 @@
 const REAL_FS = require('node:fs')
 const NODE_PATH = require('node:path')
 const NODE_OS = require('node:os')
-const { fileURLToPath } = require('node:url')
 
 /** 放行清单 env 键（loader 解码与宿主侧 plugin-fs-guard.ts 编码共用同一字面量） */
 const ENV_ALLOWED_MODULES_KEY = 'TAIJI_PLUGIN_ALLOWED_MODULES'
