@@ -40,12 +40,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@zhushanwen/pi-ext-guards": "workspace:*",
-    "@zhushanwen/pi-extension-logger": "workspace:*",
-    "@zhushanwen/pi-file-lock": "workspace:*",
     "@zhushanwen/pi-llm-shared": "workspace:*"
   },
   "devDependencies": {
+    "@taiji/shared": "workspace:*",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.9",
     "vitest": "^4.1.8"

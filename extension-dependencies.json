@@ -621,24 +621,9 @@
       "directory": "extensions/universal/retry-rules",
       "dependsOn": [
         {
-          "package": "@zhushanwen/pi-ext-guards",
-          "type": "package",
-          "reason": "代码层静态 import 守护原语"
-        },
-        {
-          "package": "@zhushanwen/pi-extension-logger",
-          "type": "package",
-          "reason": "代码层静态 import getLogger"
-        },
-        {
-          "package": "@zhushanwen/pi-file-lock",
-          "type": "package",
-          "reason": "ext-config 读改写并发锁"
-        },
-        {
           "package": "@zhushanwen/pi-llm-shared",
           "type": "package",
-          "reason": "LLM 共享工具函数"
+          "reason": "代码层静态 import loadConfig（src/config.ts:23 读 retry-rules-ext-config.json，llm-shared getConfigPath 推导 + mtime 热重载契约）"
         }
       ]
     }

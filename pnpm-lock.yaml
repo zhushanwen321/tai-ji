@@ -667,19 +667,13 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.0.0
         version: 1.0.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.0)(zod@3.25.76)
-      '@zhushanwen/pi-ext-guards':
-        specifier: workspace:*
-        version: link:../../shared/ext-guards
-      '@zhushanwen/pi-extension-logger':
-        specifier: workspace:*
-        version: link:../../shared/extension-logger
-      '@zhushanwen/pi-file-lock':
-        specifier: workspace:*
-        version: link:../../shared/file-lock
       '@zhushanwen/pi-llm-shared':
         specifier: workspace:*
         version: link:../../shared/llm-shared
     devDependencies:
+      '@taiji/shared':
+        specifier: workspace:*
+        version: link:../../../packages/shared
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
