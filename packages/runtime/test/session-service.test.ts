@@ -123,6 +123,7 @@ vi.mock('../src/services/session-history.js', () => ({
 // ── Mock 之后再 import 被测对象 ─────────────────────────────────────
 
 import { SessionService } from '../src/services/session/session-service.js'
+import { applySessionOccupancyTransition } from '../src/services/session/event-interpreter.js'
 import {
   createSessionDeliveryRegistry,
 } from '../src/services/session/session-delivery-registry.js'
@@ -711,7 +712,12 @@ describe('SessionService · dispatcher', () => {
     // session-message-handler 的 message.status reply 走 pending 通道，不触发
     // chat store 收尾逻辑——必须走流式 message.complete 广播。
     it('abort broadcasts message.complete with stopReason aborted', async () => {
-      setup.mountClient('sid-a')
+      const client = setup.mountClient('sid-a')
+      // [U1 迁移] abort 入口三分型（message-dispatcher.ts abort）：型 1「有回合可中止」
+      // 才写 stopped 终态 + 广播 complete{aborted}，判定读 occupancy（isGeneratingTurn）
+      // ——「有回合在跑」场景须先注册 session 并经转移原语置 generating（禁止直写字段）。
+      await setup.service.initializeManagedSession('sid-a', client as unknown as IPiEngine, tmpdir(), 'label')
+      applySessionOccupancyTransition(setup.service.getSession('sid-a')!, setup.messageBus, 'generating')
       await setup.service.abort('sid-a')
       const complete = findBroadcast(setup, 'message.complete')
       expect(complete?.payload).toMatchObject({ sessionId: 'sid-a', stopReason: 'aborted' })

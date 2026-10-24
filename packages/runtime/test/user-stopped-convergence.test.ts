@@ -17,6 +17,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   UserStoppedGate,
+  applySessionOccupancyTransition,
   userStoppedGate,
 } from '../src/services/session/event-interpreter.js'
 import { EventInterpreter } from '../src/services/session/event-interpreter.js'
@@ -185,6 +186,12 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
     abortBehavior?: 'ok' | 'rpc-timeout'
     /** U3 用例：pm.getClient 无条目（forceQuit 早退分支）。 */
     clientMissing?: boolean
+    /**
+     * [U1 迁移] abort 型 1 判定读 occupancy（isGeneratingTurn，message-dispatcher.ts:385）
+     * ——需要「有回合可中止」场景的用例置 true：经转移原语把 session 置 generating
+     * （occupancy 只能经 applySessionOccupancyTransition 写，fixture 禁止直写字段）。
+     */
+    turnOccupied?: boolean
   } = {}) {
     const session = opts.session ?? makeMockSession()
     const abortFn = opts.abortBehavior === 'rpc-timeout'
@@ -215,6 +222,11 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
       destroySession: vi.fn(async () => {}),
     } as unknown as IProcessManager
     const publish = vi.fn()
+    // [U1 迁移] 「有回合可中止」场景：occupancy 经转移原语置 generating（原语内广播
+    // session.occupancy 帧走同一 publish spy，abort 型 1 判定读该字段生效）。
+    if (opts.turnOccupied) {
+      applySessionOccupancyTransition(session, { publish }, 'generating')
+    }
     // [u2 投递所有权内核] 出站交接经内核适配层（dispatcher 只提交；交接异步在注册表）——
     // fixture 按真实组合根装配接内核；显式投递清标记（D4）落在适配层 deliverOne
     const deliveryRegistry = createSessionDeliveryRegistry({
@@ -275,21 +287,21 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
   })
 
   it('U2 修复：默认 abort（用户语义）→ persistSessionOutcome reason=User aborted', async () => {
-    const { dispatcher, persistSessionOutcome } = makeDispatcher()
+    const { dispatcher, persistSessionOutcome } = makeDispatcher({ turnOccupied: true })
     await dispatcher.abort('s1')
     expect(persistSessionOutcome).toHaveBeenCalledWith('s1', 'stopped', 'User aborted')
   })
 
   it('U2 修复：拦截链 abort（source=convergence）→ reason=Convergence abort (auto)，与用户 abort 可区分', async () => {
-    const { dispatcher, persistSessionOutcome } = makeDispatcher()
+    const { dispatcher, persistSessionOutcome } = makeDispatcher({ turnOccupied: true })
     await dispatcher.abort('s1', 'convergence')
     expect(persistSessionOutcome).toHaveBeenCalledWith('s1', 'stopped', 'Convergence abort (auto)')
   })
 
   it('U2 修复：aborted 完成帧广播两种 source 均保持不变（前端 no-op 契约）', async () => {
-    const user = makeDispatcher()
+    const user = makeDispatcher({ turnOccupied: true })
     await user.dispatcher.abort('s1')
-    const conv = makeDispatcher()
+    const conv = makeDispatcher({ turnOccupied: true })
     await conv.dispatcher.abort('s2', 'convergence')
     // 广播保持不变：两路都发 message.complete{stopReason:'aborted'}（U2 明确不动广播逻辑）
     expect(user.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'message.complete', payload: { sessionId: 's1', stopReason: 'aborted' } }))
@@ -299,7 +311,7 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
   it('U2 端到端：agent_start 挂点 re-abort 经 gate.abortSession 接线（source=convergence）→ 终态写收敛语义', async () => {
     // 锁定 session-service.ts gate.configure 接线语义：abortSession 闭包必须传
     // source='convergence'（生产唯一接线点——接线丢参即本用例红）。
-    const { dispatcher, persistSessionOutcome } = makeDispatcher()
+    const { dispatcher, persistSessionOutcome } = makeDispatcher({ turnOccupied: true })
     userStoppedGate.configure({ marks: store, abortSession: (sid) => dispatcher.abort(sid, 'convergence') })
     userStoppedGate.markUserStopped('s1', 'user_force_quit')
     // 旁路源开 turn → 拦截再 abort（生产通路：noteAgentStart → deps.abortSession）
