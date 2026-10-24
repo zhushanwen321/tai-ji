@@ -9,13 +9,16 @@
 // 纯函数直测（无 IO / 无时钟——成员集合从 WorkflowRun.state.calls 构造）。
 import { describe, expect, it } from "vitest";
 
+import { AgentCall } from "../models/agent-call.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
 import type { AgentCallOpts, AgentResult, ExecutionTraceNode } from "../models/types.ts";
 import { INITIAL_RUN_EVENT_FOLD } from "../run-events.ts";
 import { IN_FLIGHT_CALL_CANCELLED_MSG } from "../worker-message-pump-constants.ts";
 import type { RunSettlementRecord } from "../terminal-actions.ts";
 import {
+  ADOPTED_MEMBER_CAUSE,
   deriveRunOutcomeFromMembers,
+  memberSettlementOf,
   settleMembersIntoFinalSettlement,
 } from "../run-member-settlement.ts";
 
@@ -74,6 +77,13 @@ const CLOSEOUT_CANCELLED: AgentResult = {
   content: "",
   error: IN_FLIGHT_CALL_CANCELLED_MSG,
   sessionId: "s",
+};
+// [§3.3.1 P6] 被接管轮回执形态（output-collector collectOutcome ②-A 支）：回执层
+// 成功、引擎未执行——无 error、无失败分类、无停因、promptDisposition=handled。
+const ADOPTED: AgentResult = {
+  content: "",
+  sessionId: "s",
+  promptDisposition: "handled",
 };
 
 const BASE_RECORD: RunSettlementRecord = { outcome: "done", settledAt: 0 };
@@ -220,6 +230,102 @@ describe("[§3.3.8/UC-16] run 级终局优先于成员集合派生", () => {
     const run = makeRunWithMembers([OK, undefined]);
     const record = settleMembersIntoFinalSettlement(run, BASE_RECORD);
     expect(record.outcome).toBe("done");
+    expect(record.failedMembers).toBeUndefined();
+  });
+});
+
+describe("[§3.3.8 P6 定稿] 被接管成员的聚合与 resume 归属", () => {
+  /** 构造 done 态真实 AgentCall（memberSettlementOf 直测的形态还原——markRunning/markDone 状态机链）。 */
+  function doneCall(id: number, result: AgentResult): AgentCall {
+    const call = new AgentCall(id, BASE_OPTS, makeTraceNode(id));
+    call.markRunning();
+    call.markDone(result);
+    return call;
+  }
+
+  it("memberSettlementOf：被接管轮（promptDisposition=handled）判 cancelled 不判 delivered——回执层成功不冒充交付", () => {
+    expect(memberSettlementOf(doneCall(0, ADOPTED))).toBe("cancelled");
+    // 对照组：同形回执（无接管事实）判 delivered
+    expect(memberSettlementOf(doneCall(1, { content: "", sessionId: "s" }))).toBe("delivered");
+  });
+
+  it("部分被接管（1 交付 + 1 被接管）：被接管按「未交付且非失败」计——不进失败明细、run done", () => {
+    const derived = deriveRunOutcomeFromMembers(makeRunWithMembers([OK, ADOPTED]));
+    expect(derived!.outcome).toBe("done");
+    expect(derived!.failedMembers).toBeUndefined();
+  });
+
+  it("全部成员被接管（零交付零失败）→ run failed + 逐成员被接管明细（harness.member_adopted，不借用 agent.no_deliverable）", () => {
+    const derived = deriveRunOutcomeFromMembers(makeRunWithMembers([ADOPTED, ADOPTED]));
+    expect(derived!.outcome).toBe("failed");
+    expect(derived!.failedMembers).toEqual([
+      { taskIndex: 0, cause: ADOPTED_MEMBER_CAUSE },
+      { taskIndex: 1, cause: ADOPTED_MEMBER_CAUSE },
+    ]);
+    // 终局帧形态：done 合成记录被派生升格 failed + 明细（脚本正常收尾、成员全被接管）
+    const record = settleMembersIntoFinalSettlement(makeRunWithMembers([ADOPTED, ADOPTED]), BASE_RECORD);
+    expect(record.outcome).toBe("failed");
+    expect(record.failedMembers).toEqual([
+      { taskIndex: 0, cause: ADOPTED_MEMBER_CAUSE },
+      { taskIndex: 1, cause: ADOPTED_MEMBER_CAUSE },
+    ]);
+  });
+
+  it("混合失败 + 被接管：失败成员进明细，被接管成员按未交付计不泄漏进失败明细", () => {
+    const derived = deriveRunOutcomeFromMembers(makeRunWithMembers([OK, FAIL, ADOPTED]));
+    expect(derived!.outcome).toBe("partially_succeeded");
+    expect(derived!.failedMembers).toEqual([{ taskIndex: 1, cause: "provider.rate_limited" }]);
+  });
+
+  it("被接管与 closeOut 取消可区分：全 closeOut 取消（非接管）不触发全接管 failed 档", () => {
+    const derived = deriveRunOutcomeFromMembers(makeRunWithMembers([CLOSEOUT_CANCELLED, undefined]));
+    expect(derived!.outcome).toBe("done");
+    expect(derived!.failedMembers).toBeUndefined();
+  });
+});
+
+describe("[§3.3.8 cause 序列化 guard] 点拼无自由文本泄漏（F1-11/F1-56）", () => {
+  it("error 契约形态但前缀非协议码（含 ': ' 的自由文本）→ engine.unknown（fail-visible）", () => {
+    const run = makeRunWithMembers([
+      OK,
+      { content: "", error: "connect ECONNREFUSED 127.0.0.1:8080: connection refused", sessionId: "s" },
+    ]);
+    const derived = deriveRunOutcomeFromMembers(run);
+    expect(derived!.failedMembers).toEqual([{ taskIndex: 1, cause: "engine.unknown" }]);
+  });
+
+  it("无 ': ' 契约形态的 error → unknown（未分类标记，无 class 断言）", () => {
+    const derived = deriveRunOutcomeFromMembers(makeRunWithMembers([OK, FAIL_UNCLASSIFIED]));
+    expect(derived!.failedMembers).toEqual([{ taskIndex: 1, cause: "unknown" }]);
+  });
+
+  it("error_ 透传面前缀同样落 engine.<code>（SDK 透传契约）", () => {
+    const run = makeRunWithMembers([
+      OK,
+      { content: "", error: "engine_provider_timeout: upstream timed out", sessionId: "s" },
+    ]);
+    const derived = deriveRunOutcomeFromMembers(run);
+    expect(derived!.failedMembers).toEqual([{ taskIndex: 1, cause: "engine.engine_provider_timeout" }]);
+  });
+});
+
+describe("[§3.3.8 脚本层失败两形态分流] 成员明细的抑制边界（F1-60）", () => {
+  it("全成员失败 + 脚本 throw（fan-out 全败终局上报）：终局帧带全量 failedMembers 明细", () => {
+    const run = makeRunWithMembers([FAIL, FAIL_UNCLASSIFIED]);
+    run.state.error = "fan-out: all tasks failed (2/2)";
+    const record = settleMembersIntoFinalSettlement(run, { ...BASE_RECORD, outcome: "failed" });
+    expect(record.outcome).toBe("failed"); // harness 层裁决不被改档
+    expect(record.failedMembers).toEqual([
+      { taskIndex: 0, cause: "provider.rate_limited" },
+      { taskIndex: 1, cause: "unknown" },
+    ]);
+  });
+
+  it("存在未终局成员的脚本层失败（worker crash 形态）：成员无责——明细维持抑制", () => {
+    const run = makeRunWithMembers([FAIL, undefined]); // 第二成员在途（无 result）
+    run.state.error = "worker exited without result";
+    const record = settleMembersIntoFinalSettlement(run, { ...BASE_RECORD, outcome: "failed" });
+    expect(record.outcome).toBe("failed");
     expect(record.failedMembers).toBeUndefined();
   });
 });

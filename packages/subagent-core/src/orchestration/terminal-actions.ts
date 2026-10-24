@@ -718,7 +718,10 @@ export function dispatchAgentStarted(
 /** `agent-settled` 写入 journal 记录（引擎终态应答：call.result；attempt = call.attempts 终局尝试
  *  序号；signal abort = agent 粒度 cancelled——run 中止连带在途 agent 终止）。
  *  [D5 诊断引用写入 journal 记录] 失败时从 result.stderrTeePath 填充取证文件指针（成功/cancelled
- *  不带）。 */
+ *  不带）。
+ *  [subagent-observability §3.3.8 P6 定稿] 被接管轮（promptDisposition=handled——回执层成功
+ *  但引擎未执行）跳写本帧：resume 恢复计划按帧有无划分回放/重派集，无帧 = 重派集续聊重派
+ *  （任务从未执行，无双跑风险）；帧照写会被误当已提交结果回放（永不重派）。 */
 export function dispatchAgentSettled(run: WorkflowRun, call: AgentCall, aborted: boolean): void {
   const result = call.result;
   if (!result) {
@@ -728,6 +731,11 @@ export function dispatchAgentSettled(run: WorkflowRun, call: AgentCall, aborted:
       `agent-settled dropped: agent-started journaled but settled result missing ` +
         `(runId=${run.runId}, callId=${call.id}, status=${call.status})`,
     );
+    return;
+  }
+  // 被接管轮跳帧（P6 定稿）：debug 留痕（fail-visible——帧缺席是设计内形态，防误诊丢帧缺陷）。
+  if (result.promptDisposition === "handled") {
+    runEventLogger.debug(`agent-settled skipped: adopted round (runId=${run.runId}, callId=${call.id})`);
     return;
   }
   // call 级 outcome 值域 = done/failed/cancelled 三值（run 级词表收窄——run-vocabulary

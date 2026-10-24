@@ -450,6 +450,105 @@ describe("runMemberViews — budget 四轴分轴显式", () => {
   });
 });
 
+// ── 交付校验缺口与成员行渲染段（subagent-observability §3.3.6/§3.3.10 对齐）──
+
+describe("runMemberViews — 交付校验缺口事实（scriptResult.partialMembers 对齐成员行）", () => {
+  it("部分交付成员行携带 missingDeliverables（按 stepIndex 对齐）；畸形条目不入行", () => {
+    const run = makeRun();
+    run.state.scriptResult = {
+      status: "partial",
+      partialMembers: [
+        { taskIndex: 1, missing: ["file:/abs/report.md (not readable (ENOENT))"] },
+        { taskIndex: "2", missing: ["x"] }, // taskIndex 非数字 → 畸形丢弃
+      ],
+    };
+    const views = runMemberViews(run, {
+      records: [
+        makeRecord({ stepIndex: 0, outcome: "completed", endedAt: T0 + 1_000 }),
+        makeRecord({ stepIndex: 1, outcome: "completed", endedAt: T0 + 2_000 }),
+      ],
+      now: NOW,
+    });
+    expect(views[0]!.missingDeliverables).toBeUndefined(); // 全满足成员无缺口事实
+    expect(views[1]!.missingDeliverables).toEqual(["file:/abs/report.md (not readable (ENOENT))"]);
+  });
+
+  it("scriptResult 无 partialMembers 载荷 → 全行无缺口字段（缺省不写词）", () => {
+    const run = makeRun();
+    run.state.scriptResult = { status: "ok", results: [] };
+    const views = runMemberViews(run, {
+      records: [makeRecord({ stepIndex: 0, outcome: "completed", endedAt: T0 + 1_000 })],
+      now: NOW,
+    });
+    expect("missingDeliverables" in views[0]!).toBe(false);
+  });
+});
+
+describe("memberViewLine — 失败分类 / budget 上界 / 交付缺口渲染段（§3.3.6 成员行对齐）", () => {
+  it("failed 行缀 failure 点拼段 + error 尾缀；无失败事实行不产 failure 段", () => {
+    const withFailure = memberViewLine({
+      stepIndex: 1,
+      state: "failed",
+      agent: "explorer",
+      model: "m",
+      durationMs: 5_100,
+      failure: "provider.rate_limited",
+      lastError: "Request timed out.",
+    });
+    expect(withFailure).toContain("failure: provider.rate_limited");
+    expect(withFailure.endsWith("error: Request timed out.")).toBe(true);
+
+    const noFailure = memberViewLine({
+      stepIndex: 2,
+      state: "completed",
+      agent: "writer",
+      model: "m",
+      durationMs: 1_000,
+    });
+    expect(noFailure).not.toContain("failure:");
+  });
+
+  it("budget 段只渲染声明了生效上界的轴；全无界行与缺 budget 字段行不产段", () => {
+    const bounded = memberViewLine({
+      stepIndex: 0,
+      state: "running",
+      agent: "writer",
+      model: "m",
+      budget: { maxTurns: 5, timeoutMs: null, budgetTokens: 1000, budgetTimeMs: null },
+    });
+    expect(bounded).toContain("budget: maxTurns=5 budgetTokens=1000");
+
+    const unbounded = memberViewLine({
+      stepIndex: 0,
+      state: "running",
+      agent: "writer",
+      model: "m",
+      budget: { maxTurns: null, timeoutMs: null, budgetTokens: null, budgetTimeMs: null },
+    });
+    expect(unbounded).not.toContain("budget:");
+
+    const noBudgetField = memberViewLine({
+      stepIndex: 0,
+      state: "running",
+      agent: "writer",
+      model: "m",
+    });
+    expect(noBudgetField).not.toContain("budget:");
+  });
+
+  it("部分交付成员行缀 deliverables 缺口段", () => {
+    const line = memberViewLine({
+      stepIndex: 3,
+      state: "completed",
+      agent: "writer",
+      model: "m",
+      durationMs: 2_000,
+      missingDeliverables: ["file:/abs/a.md", "structured_output"],
+    });
+    expect(line).toContain("deliverables: 2 missing");
+  });
+});
+
 // ── 渲染预算（8K 截断）───────────────────────────────────────
 
 describe("truncateRunMemberViews — 总字符预算截断", () => {

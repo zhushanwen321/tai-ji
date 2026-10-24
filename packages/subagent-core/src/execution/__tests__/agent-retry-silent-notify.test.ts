@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  dispatchRunCreated,
   setRunEventJournalDirForTest,
 } from "../../orchestration/terminal-actions.ts";
 import {
@@ -160,5 +161,59 @@ describe("agent 失败重试期零通知（D7 反向面）", () => {
     // 零 agent-settled / run-settled 帧——终局 journal 帧（终局通知的单点判定源）
     // 只在 markDone 后写入 journal 记录，重试期结构性静默。
     await expect(journal.scan(run.runId)).resolves.toHaveLength(0);
+  });
+
+  it("journal 级：被接管轮（promptDisposition=handled）→ 跳写 agent-settled 帧（resume 落重派集，§3.3.8 P6）", async () => {
+    const run = makeRealRun("wf-adopted-skip-1");
+    await dispatchRunCreated(run); // 转移合法化——零帧归因于设计跳帧，非转移门拦截
+    const call = new AgentCall(
+      0,
+      { prompt: "调研 A", description: "research-a" },
+      {
+        stepIndex: 0,
+        agent: "research-a",
+        task: "调研 A",
+        model: "default",
+        status: "running",
+        startedAt: new Date().toISOString(),
+      },
+    );
+    call.markRunning();
+    // 被接管轮回执形态（output-collector ②-A 支）：回执层成功、引擎未执行
+    call.markDone({ content: "", sessionId: "s", promptDisposition: "handled" });
+
+    dispatchAgentSettled(run, call, false);
+    await flushMicrotasks();
+
+    const journal = createRunEventJournal(journalDir);
+    // 仅 run-created 一帧：被接管任务不得进 resume 回放集（帧缺席 = 重派集成员，任务续聊重派）
+    const events = await journal.scan(run.runId);
+    expect(events.map((e) => e.type)).toEqual(["run-created"]);
+  });
+
+  it("journal 级：对照——正常终局 call 仍写 agent-settled 帧（跳帧仅限被接管形态）", async () => {
+    const run = makeRealRun("wf-adopted-skip-2");
+    await dispatchRunCreated(run);
+    const call = new AgentCall(
+      0,
+      { prompt: "调研 A", description: "research-a" },
+      {
+        stepIndex: 0,
+        agent: "research-a",
+        task: "调研 A",
+        model: "default",
+        status: "running",
+        startedAt: new Date().toISOString(),
+      },
+    );
+    call.markRunning();
+    call.markDone({ content: "done", sessionId: "s" });
+
+    dispatchAgentSettled(run, call, false);
+    await flushMicrotasks();
+
+    const journal = createRunEventJournal(journalDir);
+    const events = await journal.scan(run.runId);
+    expect(events.at(-1)?.type).toBe("agent-settled");
   });
 });

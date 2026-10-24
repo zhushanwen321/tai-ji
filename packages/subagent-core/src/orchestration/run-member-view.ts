@@ -13,6 +13,7 @@
 
 import { TRACE_RESULT_MAX_CHARS } from "./models/trace.ts";
 import type { ExecutionTraceNode } from "./models/types.ts";
+import { partialMembersFromScriptResult } from "./run-member-settlement.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
 
 // ── 类型契约 ──────────────────────────────────────────────────
@@ -109,6 +110,14 @@ export interface RunMemberView { // oe-exempt:20261022:framework:设计 §3.1.3 
     budgetTokens: number | null;
     budgetTimeMs: number | null;
   };
+  /**
+   * [subagent-observability §3.3.6/§3.3.10 成员行对齐] 交付校验缺口事实（部分交付
+   * 成员的未满足 deliverable 清单）。事实源 = run.state.scriptResult.partialMembers
+   * 按 stepIndex 对齐（worker 脚本交付校验的宿主落点，与 run-settled 帧
+   * partialMembers 同源同解析）；undefined = 无交付校验缺口事实（未声明
+   * deliverables / 全满足 / 全不满足〔全缺走失败成员语义，不落本字段〕/ 脚本未返回）。
+   */
+  missingDeliverables?: string[];
 }
 
 // ── 单行派生 ──────────────────────────────────────────────────
@@ -155,10 +164,30 @@ export function runMemberViews(
   }
   // [§3.3.6/§3.3.9 budget 分轴显式] 四轴预算逐行附加（record 行与 trace 兜底行同域
   // ——预算是 run/call 的声明事实，不随行来源变化）。
+  const missingByStepIndex = missingDeliverablesByStepIndex(run);
   for (const view of rows.values()) {
     view.budget = budgetViewOf(run, view.stepIndex);
+    // [§3.3.6/§3.3.10 成员行对齐] 交付校验缺口逐行附加（脚本层交付校验事实，
+    // 与 run-settled 帧 partialMembers 同源）。
+    const missing = missingByStepIndex.get(view.stepIndex);
+    if (missing !== undefined) view.missingDeliverables = missing;
   }
   return [...rows.values()].sort((a, b) => a.stepIndex - b.stepIndex);
+}
+
+/**
+ * 脚本层交付校验缺口按 stepIndex 倒排（run.state.scriptResult.partialMembers →
+ * Map<taskIndex, missing[]>；解析复用结算模块单点——畸形条目 warn 留痕后丢弃，
+ * 缺席/全畸形 = 空 Map）。
+ */
+function missingDeliverablesByStepIndex(run: WorkflowRun): Map<number, string[]> {
+  const reports = partialMembersFromScriptResult(run.state.scriptResult);
+  const byIndex = new Map<number, string[]>();
+  if (reports === undefined) return byIndex;
+  for (const report of reports) {
+    byIndex.set(report.taskIndex, report.missing);
+  }
+  return byIndex;
 }
 
 /**
@@ -347,7 +376,11 @@ export interface MemberViewsBudget { // oe-exempt:20261022:framework:设计 §3.
 /**
  * 单成员行 → 单行渲染文本（成员表文本渲染与截断预算的同一度量单位——两侧同源
  * 防漂移）。列式对齐设计 §3.1.3 示例：`[0] running    writer  <model>  6.0s  turns: 4 · tool: bash`；
- * 终局行带 error 时缀 `error: <lastError>`（failed / cancelled 的取消文案均走此位）。
+ * 终局行带失败事实时先缀失败分类（`failure: <class>.<kind>`——§3.3.6 成员行对齐，
+ * 与终局事件 cause 同形）、原文 error 尾缀（`error: <lastError>`——failed / cancelled
+ * 的取消文案均走此位）；声明了生效上界的 budget 轴以 `budget: <axis>=<N> …` 段渲染
+ * （null 轴 = 显式无界不入行）；部分交付成员缀 `deliverables: N missing`（§3.3.10
+ * 交付校验结果，明细清单在 details 载荷 missingDeliverables）。
  */
 export function memberViewLine(view: RunMemberView): string {
   // 终端成员表列宽（`[idx] state agent model …` 对齐，与 tool 端 README 示例同形态）
@@ -362,13 +395,31 @@ export function memberViewLine(view: RunMemberView): string {
     view.model.padEnd(MODEL_COL),
   ];
   if (view.durationMs !== undefined) parts.push(`${(view.durationMs / MS_PER_SECOND).toFixed(1)}s`);
+  const boundedBudget = budgetLineSegment(view.budget);
+  if (boundedBudget !== undefined) parts.push(`budget: ${boundedBudget}`);
+  if (view.missingDeliverables !== undefined) {
+    parts.push(`deliverables: ${view.missingDeliverables.length} missing`);
+  }
   if (view.state === "running") {
     if (view.turns !== undefined) parts.push(`turns: ${view.turns}`);
     if (view.currentActivity !== undefined) parts.push(`· ${view.currentActivity}`);
-  } else if (view.lastError !== undefined) {
-    parts.push(`error: ${view.lastError}`);
+  } else {
+    if (view.failure !== undefined) parts.push(`failure: ${view.failure}`);
+    if (view.lastError !== undefined) parts.push(`error: ${view.lastError}`);
   }
   return parts.join(" ").trimEnd();
+}
+
+/** budget 四轴的行内段（仅声明了生效上界的轴；全无界 = undefined 不入行——
+ *  「null = 显式无界」的完整四轴结构在 details 载荷，行内只呈现生效约束）。 */
+function budgetLineSegment(budget: RunMemberView["budget"]): string | undefined {
+  if (budget === undefined) return undefined;
+  const axes: string[] = [];
+  if (budget.maxTurns !== null) axes.push(`maxTurns=${budget.maxTurns}`);
+  if (budget.timeoutMs !== null) axes.push(`timeoutMs=${budget.timeoutMs}`);
+  if (budget.budgetTokens !== null) axes.push(`budgetTokens=${budget.budgetTokens}`);
+  if (budget.budgetTimeMs !== null) axes.push(`budgetTimeMs=${budget.budgetTimeMs}`);
+  return axes.length > 0 ? axes.join(" ") : undefined;
 }
 
 /**

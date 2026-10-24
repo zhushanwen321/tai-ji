@@ -303,6 +303,13 @@ export interface AgentResult {
  /** [subagent-observability §3.3.3 P5] 本 run 内重试失败尝试计数（同 record-model 字段）。 */
   retryAttempts?: number;
  /**
+ * [subagent-observability §3.3.1/§3.3.8 P6] pi 接管三态（AgentOutcome.promptDisposition
+ * 协议透传，经 outcomeToWorkflowResult 到本形态）。handled = 本条 prompt 未启动任何
+ * run（被既有会话接管）——run 终局成员交付结算消费：被接管成员判 cancelled（未交付
+ * 且非失败），agent-settled 帧跳写（resume 落重派集）；缺省 = 事实缺席（旧格式放行）。
+ */
+  promptDisposition?: "started" | "queued" | "handled";
+ /**
  * Pi session ID for the subagent process (uuidv7).
  * Present when pi emits a session header (default in --mode json).
  * Can be used to locate the session JSONL file for post-run inspection (G-017)。

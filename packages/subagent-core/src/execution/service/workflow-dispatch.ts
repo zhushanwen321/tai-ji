@@ -911,6 +911,9 @@ function outcomeToWorkflowResult(outcome: AgentOutcome): WorkflowAgentResult {
     // lastRound.engineStopReason 数据源，与 one-shot 域同源）。
     ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
     ...(outcome.retryAttempts !== undefined ? { retryAttempts: outcome.retryAttempts } : {}),
+    // [subagent-observability §3.3.1/§3.3.8 P6] 接管三态透传（call.result → run 终局
+    // 成员交付结算：被接管成员判 cancelled + dispatchAgentSettled 跳帧 → resume 落重派集）。
+    ...(outcome.promptDisposition !== undefined ? { promptDisposition: outcome.promptDisposition } : {}),
     toolCalls: outcome.toolCalls,
   };
 }
