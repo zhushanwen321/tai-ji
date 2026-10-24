@@ -160,6 +160,7 @@ export function createSettingsTransport(): SettingsTransport {
     invokePlugin: (pluginId, method, params) => plugin.invokePlugin(pluginId, method, params),
     onPluginEvent: (h) => plugin.onPluginEvent(h),
     sendPluginUiEvent: (payload) => plugin.sendPluginUiEvent(payload),
+    executePluginCommand: (payload) => plugin.executePluginCommand(payload),
     // 两段式安装（U4/U6 wire 通路）：plugin domain 三方法 → WS 帧 → runtime 两段式
     // 编排（确认停点对接 Provider 页安装确认卡，S27）。
     preparePluginInstall: (packageSpec) => plugin.preparePluginInstall(packageSpec),

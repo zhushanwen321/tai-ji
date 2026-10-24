@@ -391,6 +391,8 @@ export interface SettingsTransport {
   onPluginEvent(h: (payload: PluginEventPayload) => void): () => void
   /** text-input 值回传（plugin.uiEvent；fire-and-forget，插件侧始终持有最新值） */
   sendPluginUiEvent(payload: PluginUiEventPayload): Promise<void>
+  /** 执行插件树 action-bar 命令（plugin.executeCommand；命令活在插件 fork，不在宿主命令表） */
+  executePluginCommand(payload: { pluginId: string; commandId: string; args?: Record<string, unknown> }): Promise<void>
   /**
    * 两段式安装（S27 确认停点）：prepare 下载校验解压至暂存并返回知情面，confirm 提交落盘
    * 并激活，cancel 清理暂存（未确认不发生安装落盘）。

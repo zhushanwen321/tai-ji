@@ -1905,6 +1905,10 @@ const pluginImpl = {
   async sendPluginUiEvent(_payload: { pluginId: string; viewId: string; componentId: string; event: string; value: unknown }): Promise<void> {
     await sleep(TIMING.ack)
   },
+  // executeCommand：mock 无插件 Worker 可执行，ack 型 stub（与 invokePlugin 同款降级形态）。
+  async executePluginCommand(_payload: { pluginId: string; commandId: string; args?: Record<string, unknown> }): Promise<void> {
+    await sleep(TIMING.ack)
+  },
   // plugin:event 订阅骨架：恒空（无生产方），与 onPlugins 同款订阅形态。
   onPluginEvent: (h: (payload: PluginEventPayload) => void) => pluginEventsSub.subscribe(h),
   // 清单域：mock 无远程清单基建（runtime remote-config 通道），恒空清单（UI 按

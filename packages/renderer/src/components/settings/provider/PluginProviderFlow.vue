@@ -182,8 +182,9 @@ import {
   Input,
 } from '@taiji/ui'
 import { ViewHost } from '@taiji/ui/extension-host'
-import { UI_EVENT_SENDER_KEY } from '@taiji/ui/rendering-protocol'
+import { ACTION_EXECUTOR_KEY, UI_EVENT_SENDER_KEY } from '@taiji/ui/rendering-protocol'
 import {
+  createPluginActionExecutor,
   createPluginUiEventSender,
   resolvePluginInstallPort,
   usePluginProviderSource,
@@ -263,6 +264,9 @@ const authorizeTitle = computed<string>(() =>
 // text-input 值回传出口（D8/S7）：挂载位容器同时掌握 pluginId + viewId，故在此 provide；
 // 原语只报 (componentId, event, value)。插件侧始终持有最新值（fire-and-forget）。
 provide(UI_EVENT_SENDER_KEY, createPluginUiEventSender(() => pendingAuthorizePluginId.value, AUTHORIZE_VIEW_ID))
+// action-bar 命令执行器（D7）：授权容器树内 action-bar 的命令活在插件 fork，容器 provide
+// 局部执行器直发 plugin.executeCommand（与 sender 同范式，覆盖 app 级 pi 扩展命令执行器）。
+provide(ACTION_EXECUTOR_KEY, createPluginActionExecutor(() => pendingAuthorizePluginId.value))
 
 watch(() => props.open, (open) => {
   if (!open) {

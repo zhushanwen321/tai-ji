@@ -194,6 +194,12 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
       [{ pluginId: 'probe-plugin', viewId: 'probe-view', componentId: 'probe-input', event: 'change', value: 'probe' }],
       (t, payload) => t.sendPluginUiEvent(payload),
     ),
+    executePluginCommand: fwd(
+      'plugin',
+      'executePluginCommand',
+      [{ pluginId: 'probe-plugin', commandId: 'probe-command' }],
+      (t, payload) => t.executePluginCommand(payload),
+    ),
     // 两段式安装三成员在 seam 上是 optional（通道未落定的宿主实现可省略）：矩阵以
     // 可选调用形态登记，domain 实装存在时（本用例 Proxy 恒返回 spy）必须逐条转发。
     preparePluginInstall: fwd('plugin', 'preparePluginInstall', ['probe-package'], (t, spec) =>

@@ -77,6 +77,17 @@ export async function sendPluginUiEvent(payload: { pluginId: string; viewId: str
 }
 
 /**
+ * 执行插件树内 action-bar 注册的命令（provider-plugin-access D7/S7）：action-bar 的
+ * commandId 是插件 fork 内经 plugin.commands.register 注册的命令，不在宿主
+ * CommandRegistry 表（那张表只收 pi 扩展 contribution），Provider 页容器直接经
+ * 本方法把 (pluginId, commandId) 发往 runtime commands-executor 执行链。
+ * reply pong ack，await 只为等 RPC settle。
+ */
+export async function executePluginCommand(payload: { pluginId: string; commandId: string; args?: Record<string, unknown> }): Promise<void> {
+  await command('plugin.executeCommand', payload, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
  * 订阅插件业务事件（provider-plugin-access D9）：插件经 runtime plugin.event RPC
  * 上报、宿主广播 'plugin:event' 帧（无 sessionId → global 通道）。首个消费方 =
  * 凭据状态上报（D5——拉取给已知事实，本订阅只作增量提示；推送丢失由下一次展开拉取

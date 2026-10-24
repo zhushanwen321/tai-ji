@@ -20,7 +20,7 @@
  */
 import { onScopeDispose, ref, type Ref } from 'vue'
 import type { PluginListAvailableReply } from '@taiji/shared'
-import type { UiEventSender } from '@taiji/ui/rendering-protocol'
+import type { ActionExecutor, UiEventSender } from '@taiji/ui/rendering-protocol'
 // [C3] settings 域的 WS 读写一律经 SettingsTransport seam（禁直连 @/api 门面 /
 // 禁深 import transport 域）；插件来源的四条通道 + 可选安装成员由 seam 承载
 import { getSettingsTransport } from '@taiji/core'
@@ -129,6 +129,25 @@ export function createPluginUiEventSender(pluginId: () => string | null, viewId:
       getSettingsTransport().sendPluginUiEvent({ pluginId: id, viewId, componentId, event, value }).catch((e: unknown) => {
         // 辅助通道降级：回传失败不阻断输入（插件侧持有次优值，下次输入覆盖），warn 可见
         console.warn(`[plugin-provider-source] uiEvent (${id}/${viewId}/${componentId}) failed:`, e)
+      })
+    },
+  }
+}
+
+/**
+ * 构造挂载位作用域的 action-bar 执行器（D7/S7 命令执行）：action-bar 的 commandId
+ * 是插件 fork 内注册的命令，不在宿主 CommandRegistry 表（那张表只收 pi 扩展
+ * contribution）——容器 provide 局部执行器直发 plugin.executeCommand，pluginId 取
+ * getter 跟随当前选中插件。app 级 ACTION_EXECUTOR_KEY（pi 扩展命令链）被此覆盖。
+ */
+export function createPluginActionExecutor(pluginId: () => string | null): ActionExecutor {
+  return {
+    execute(commandId, args) {
+      const id = pluginId()
+      if (id === null) return
+      getSettingsTransport().executePluginCommand({ pluginId: id, commandId, args }).catch((e: unknown) => {
+        // 辅助通道降级：命令失败不阻断页面（插件侧树不变，可重试），warn 可见
+        console.warn(`[plugin-provider-source] executeCommand (${id}/${commandId}) failed:`, e)
       })
     },
   }

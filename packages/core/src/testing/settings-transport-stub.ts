@@ -211,6 +211,7 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     invokePlugin: vi.fn(async () => null),
     onPluginEvent: makeUnsubscribeStub(),
     sendPluginUiEvent: vi.fn(async () => undefined),
+    executePluginCommand: vi.fn(async () => undefined),
 
     // ── 订阅（返回 no-op 取消函数）—— 订阅段单源 = makeSettingsSubscriptionStubs
     //    （键集漂移由其 Pick 标注 + 下方 SettingsTransport 标注双重报错）──

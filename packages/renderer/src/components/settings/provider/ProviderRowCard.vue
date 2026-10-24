@@ -185,10 +185,10 @@ import { PopoverTrigger } from '@/components/ui/popover'
 import ModelSelectPopover from '@/components/panel/ModelSelectPopover.vue'
 import { ProviderEditBody } from '@taiji/ui/features/settings'
 import { VIEW_HOST_SOURCE_KEY, ViewHost } from '@taiji/ui/extension-host'
-import { UI_EVENT_SENDER_KEY } from '@taiji/ui/rendering-protocol'
+import { ACTION_EXECUTOR_KEY, UI_EVENT_SENDER_KEY } from '@taiji/ui/rendering-protocol'
 import type { PluginViewScope, ProviderId, ProviderInfo, ProviderStatus, QuotaPreset } from '@taiji/shared'
 import { authBadgeClass, authBadgeTextKey } from './provider-badge'
-import { createPluginUiEventSender, type CredentialStatusPayload, type PluginEntryInfo } from './PluginProviderSource'
+import { createPluginActionExecutor, createPluginUiEventSender, type CredentialStatusPayload, type PluginEntryInfo } from './PluginProviderSource'
 
 /** 条目扩展区挂载位 id（core bootstrap 注册 + 本组件消费，同字面量即约定）。 */
 const DETAIL_EXTRA_MOUNT_ID = 'provider.detail-extra'
@@ -266,6 +266,9 @@ function detailExtraScope(): PluginViewScope | null {
 
 // text-input 值回传出口（D8/S7）：扩展区容器掌握 pluginId + viewId，故在此 provide。
 provide(UI_EVENT_SENDER_KEY, createPluginUiEventSender(() => props.pluginInfo?.pluginId ?? null, DETAIL_EXTRA_VIEW_ID))
+// action-bar 命令执行器（D7/S7）：扩展区 action-bar 的命令活在插件 fork（不在宿主命令表），
+// 容器 provide 局部执行器直发 plugin.executeCommand，覆盖 app 级 pi 扩展命令执行器。
+provide(ACTION_EXECUTOR_KEY, createPluginActionExecutor(() => props.pluginInfo?.pluginId ?? null))
 
 /**
  * 首次展开主动拉取（ADR-0155「拉为主」：挂载位首次渲染须能主动拉取，不能只依赖推送）。
