@@ -50,7 +50,9 @@ export interface SdkEvent {
      * [subagent-observability §3.3.2 结构化输入] pi 1.0.0 AssistantMessage.rawStopReason
      * （provider 原生 finish reason，如 anthropic 的 stop_reason / openai responses 的
      * status.incompleteReason——dist 各 api 层 6 处写入点）。接收侧原先窄化丢弃，u1 起
-     * 停止丢弃：随收尾边沿事实携带供分类兜底通道消费。
+     * 停止丢弃：随收尾边沿事实（EngineRoundErrorFact）原样携带——携带保留、消费点未接：
+     * 分类链（classifyFailureCause → classificationMatchInputs）只消费 diagnostics 与
+     * errorMessage，本字段当前零读取方、未上协议（设计未给其映射词表，不猜）。
      */
     rawStopReason?: string;
     /**
