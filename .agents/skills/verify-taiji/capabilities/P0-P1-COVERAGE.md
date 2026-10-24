@@ -139,3 +139,20 @@
    `interaction.plan-exec-choice`（无 plan-exec skill 时直通不弹表单）；后者低频工具默认
    deferred，验收先断言在场会假失败（`session_read` / `plan` / `schedule` 族 / `goal_control` /
    `compact_context` / `rename_session` 受影响，当前只在 `interaction.canvas` Gotcha 提了一句）。
+
+## 五、chat-flow-consistency 交付新增剧本（2026-10-24，D3 验收批次）
+
+> 本节是 chat-flow-consistency 设计交付的新增功能面剧本登记（八资产）；行为变化的既有矩阵行与能力文档（chat.md / session.md）增量回写随 D4 收尾执行。装配通道除注明外均为 faux。
+
+| 剧本 | 功能面 | verdict | 覆盖要点 |
+|---|---|---|---|
+| `p1-queue-inline-edit` | 队列区原位编辑与清除（✎ 编辑/锚定保位/× 清除） | ✅ pass（37 断言） | 排队可见、原位编辑提交保位、edit 回执分型、cancel 后条目消失宿主对话流不变 |
+| `p1-queue-ops-idempotent` | 队列反复操作幂等 | ✅ pass（47 断言） | 编辑/取消/清除/重发/+N 展开收起反复操作后 delivery.peek 投影一致、无重复投递 |
+| `p1-turn-interject-collapse` | 回合中插话排队与收起时机 | ✅ pass（29 断言） | 工作态回合不收起、计时持续（innerHTML 采样）、插话入队、回流开新回合、空闲直发负路径 |
+| `p1-settling-steer-delivery` | settling 窗口投递路径 | ✅ pass（25 断言） | settling 窗口追问即时受理开新回合（TAIJI_AGENT_DEV_SETTLING_DELAY_MS=2500 确定性窗口）；真 LLM 自然窗口宽度 notProvable |
+| `p1-block-order-replay` | 块序与展开回看 | ✅ pass（22 断言） | thinking→工具→文本块序、两段式展开（turn-meta → run-group-header）、reload 块序 ≡ live |
+| `p1-thinking-event-form` | GLM 思考形态与空条目轮 | ❌ fail（27 断言） | 核心验收点「无重复思考块」通过；fail 根因 = 多轮 session 最后一轮思考行 live 展开不可见（产品缺陷，专项排查中） |
+| `p1-disconnect-selfheal` | 断连自愈与终态失败收尾 | ⚠️ degraded（23 断言） | 自愈结果面（残留收尾+权威接管+UI≡reload）全验；D4 两步恢复专属触发面黑盒不可达（ring 回放先行收尾），诚实登记 notProvable |
+| `A10a`（节点脚本） | 发送位双形态状态矩阵 | ✅ pass（46 用例） | D1 16 格 + D2 16 格参数化 + spinner 优先级反转（组件测试 `composer-send-button-states.test.ts` 的 verify 节点封装） |
+
+**已知坑（剧本作者登记，驱动新剧本前必读）**：① 新建会话首订阅早于投递内核创建时 session.delivery 帧不发布（产品缺口已修，commit 7681f502e；旧产物剧本以「首次 submit 后补一次 subscribe」绕行，帧断言仍有效）；② protocol lib clientUuid 须为 `u-<8-4-4-4-12 hex>` 合法 marker 身份段（lib randomUuid 已修）；③ 编辑替换输入用「聚焦→Meta+a 全选→直接键入」，禁「全选→Backspace」（空草稿边沿会解除锚定走普通发送降级）；④ turn-meta 索引 1-based；dev 模式 DOM 保留模板注释，裸 substring 判「已工作」恒误报（读渲染标签文本需过滤注释）。
