@@ -1,7 +1,7 @@
 // Client → Runtime message types
 
 import type { ProviderInfo, SkillInfo, AgentInfo, ModelInfo, SkillDirConfig, ScannedSkillInfo, ScannedAgentInfo, BuiltinProviderTemplate, ProviderId } from './provider'
-import type { SessionGroup, SessionSummary, SessionStatus, SessionDataSource } from './session'
+import type { SessionGroup, SessionSummary, SessionStatus, SessionDataSource, SessionSurface } from './session'
 import type { FileChange, ChangeSetStatus, Message } from './message'
 // delivery 域帧 DTO（投递所有权内核 D7/ADR-0043）：segments 快照供草稿恢复
 import type { Segment } from './segments'
@@ -149,6 +149,17 @@ export type ClientMessageType =
   // 该会话的对话消息条数（用户+助手），runtime 流式计数 session JSONL，reply 同名
   //（payload 消费型，session.subscribe 模式）。拉取式（悬停时拉即最新），不做订阅/推送。
   | 'session.getMessageCount'
+  // 权威拉取与冷读（会话架构四层分离 W2，设计 §3.3.2/§3.3.3）：session.getState 拉该 session
+  // 的运行时状态（modelId / thinkingLevel）。活会话读 runtime 实例快照（与 session.state_changed
+  // 同一数据源），冷会话读会话文件（extractLatestModelFromJsonl）——全程不 spawn pi 进程。
+  // reply 同名 { sessionId, modelId?, thinkingLevel? }（无 updatedAt，§3.4.1）；字段缺省 =
+  // 该维尚未就绪（显式未知，不编码为 0/空串）；会话不存在 = 结构化错误 SESSION_NOT_FOUND。
+  | 'session.getState'
+  // session.list（会话架构四层分离 W4b，设计 §3.3.1/§3.3.5）：通用列表查询，btw 线进通用
+  // 列表的读取入口（取代 btw.list）。独立于 config.sessions——后者是「无参全量查询 + 全量
+  // 广播」双用消息（广播侧 28 处零参调用点无处传参），过滤参数只放纯查询消息上，避免同一
+  // type 的双语义。无参 = 全量（与 config.sessions 查询侧同形）。
+  | 'session.list'
   | 'session.compact' | 'session.rename' | 'session.fork' | 'session.setProject'
   // composer-gen-stats（D4）：session.getGenStats 拉该 session
   // 当前模型的速度/缓存命中率快照（恢复路径——切 session 主动拉取，规避 broadcast 早于订阅的时序竞争）。
@@ -338,7 +349,7 @@ export type ClientMessageType =
   // btw.*（btw-question 设计 D6，M2-a 协议根节点）：btw 旁路线 3 个控制帧——
   // create（建线 + fork 主会话当前进度）/ list { mainSid }（主会话名下线枚举）/
   // remove（关线销毁，单线级联）。ack 必回（ReplyPayloadMap 三帧全登记）。
-  // 发送复用 message.send（sessionId = btw vid）、帧族复用 message.*——**不设 btw.send /
+  // 发送复用 message.send（sessionId = btw 线 pi 真实会话 id）、帧族复用 message.*——**不设 btw.send /
   // btw.close**（D6 不采用项：与 message.send 双轨重复 / 与 remove 职责重叠；
   // __tests__/protocol.test.ts 负向检查锁定「恰好 3 帧、无 send/close」）。
   | 'btw.create' | 'btw.list' | 'btw.remove'
@@ -615,7 +626,6 @@ export interface ClientMessageMap {
   // auth：WS 传输层握手凭据（S1-W1）。token = Electron 主进程 spawn runtime 时生成的
   // 随机 32B hex（renderer 经 preload getRuntimeToken IPC / CLI 经 <dataDir>/runtime-token 文件获取）。
   'auth': { token: string }
-  // hidden:true 创建隐藏 session（公共 session），不进 sidebar 列表，仅供内部使用。
   // presetId：session 创建时锁定的 pi 启动预设 id（设计文档 §4.1）。runtime 写入 .preset.json sidecar，
   // restoreSession 据此重建 pi args。可选——省略时 runtime 用默认预设。透传链路见 wave3。
   // modelOverride / thinkingOverride：Landing Model/Thinking Chip 的覆盖值（设计文档 §5.2）。
@@ -628,7 +638,6 @@ export interface ClientMessageMap {
   'session.create': {
     cwd?: string
     label?: string
-    hidden?: boolean
     presetId?: string
     /** 归属 project id（D14 语义修正）：创建时归属当前 activeProject；空 = 默认项目兜底。 */
     projectId?: string
@@ -648,6 +657,13 @@ export interface ClientMessageMap {
   // session.deleteByCwd：批量删除指定 cwd（folder）下所有 session（folder 维度清理）。
   'session.deleteByCwd': { cwd: string }
   'config.sessions': Record<string, never>
+  // session.list（W4b 通用查询，设计 §3.3.1）：过滤参数只存在于本纯查询消息——
+  // config.sessions 是广播+查询双用消息（广播侧 28 处零参调用），不能承载过滤参数。
+  // - surface：展示归属过滤（'sidebar' 侧栏口径 / 'btw' 抽屉线口径；缺省不过滤）。
+  // - mainSessionId：btw 线归属主会话过滤（只对 surface='btw' 条目有意义；缺省不过滤）。
+  // 无参 = 全量（与 config.sessions 查询侧同形，供抽屉/调试用）。调用侧按口径显式传参
+  // （搜索显式传 {surface:'sidebar'}，不依赖无参默认语义）。
+  'session.list': { surface?: SessionSurface; mainSessionId?: string }
   'session.switch': { sessionId: string }
   'session.restore': { sessionId: string }
   'session.forceQuit': { sessionId: string }
@@ -673,6 +689,9 @@ export interface ClientMessageMap {
   // session.getMessageCount（悬停详情卡消息计数，通道 2）：reply 同名 { sessionId, count }。
   // 文件不存在（pi 延迟写入窗口）= count 0（非错误）；读文件失败走 error envelope。
   'session.getMessageCount': { sessionId: string }
+  // session.getState（权威拉取与冷读，W2）：按 sessionId 拉运行时状态。reply 同名
+  // { sessionId, modelId?, thinkingLevel? }；活/冷会话同一入口（I6），读状态不启动进程。
+  'session.getState': { sessionId: string }
   // session.getGenStats（D4）：生成指标恢复路径。
   // reply = session.stats_update payload 同形（无任何数据时 speed/cacheRatio 全 null + model 缺省）。
   'session.getGenStats': { sessionId: string }
@@ -1152,8 +1171,9 @@ export interface ClientMessageMap {
   'btw.create': { mainSid: string }
   /** btw.list：枚举主会话 mainSid 名下的 btw 线（drawer btw 面板线列表数据源，D4 关联枚举读）。 */
   'btw.list': { mainSid: string }
-  /** btw.remove：关线销毁（单线级联——线进程 + 派生资源；主删级联走 session.delete，不走本帧）。 */
-  'btw.remove': { vid: string }
+  /** btw.remove：关线销毁（单线级联——线进程 + 派生资源；主删级联走 session.delete，不走本帧）。
+   *  W4a 键统一：入参 vid → sessionId（线 pi 真实会话 id，注册表成员查询判存在）。 */
+  'btw.remove': { sessionId: string }
   // ── tts.*（ai-voice-tts 设计 §7.1，M0 四 RPC）──
   /** tts.getConfig：设置页首屏拉脱敏配置派生视图（每家只回 hasApiKey/providerKeyAvailable 两敏感布尔，永不回 Key 本体）。 */
   'tts.getConfig': Record<string, never>
@@ -1390,6 +1410,19 @@ export type ServerMessageType =
   | 'session.commands'
   // session.getMessageCount（悬停详情卡消息计数，通道 2）：同名 reply（sendCommand 按 id resolve）。
   | 'session.getMessageCount'
+  // session.getState（权威拉取与冷读，W2）：同名 reply（payload 消费型，sendCommand 按 id resolve）。
+  | 'session.getState'
+  // session.list（W4b 通用查询，设计 §3.3.1）：同名 reply（payload 消费型，sendCommand 按 id
+  // resolve）。与 config.sessions 同形（{ groups: SessionGroup[] }，无 archiveCount——
+  // 角标是广播侧语义，查询侧不承载），复用消费侧 applySnapshot({groups}) 整表替换路径。
+  | 'session.list'
+  // session.surfaces（会话架构四层分离 W4a，设计 §3.3.6）：注册表 surface 事实的全量派生视图
+  // （抑制类分支的判别器通道）。双通道：① 注册/rekey 后 broker.broadcast 全局广播；② 新连接
+  // sendInitialState 的 descriptor 段（冷启动全量）。**不走 state topic**（stateSnapshot 是
+  // per-session 机制，全局帧无单一归属会话——「所有会话级消息必须携带 sessionId」的登记例外，
+  // 先例 = session.forkNotice / D5-1 全局排除清单，非 btw.list）。renderer 侧 = 只读派生表
+  // surfaceBySessionId 整表替换（surface 是存储位置的函数、终身不可变，无失效逻辑）。
+  | 'session.surfaces'
   // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：reply 与 request
   // 同名（session.subscribe 模式，sendCommand 按 id resolve），payload 见 ServerMessageMapBase。
   | 'session.importCandidates' | 'session.import'
@@ -1825,18 +1858,17 @@ export type BtwForkState =
   | 'none'       // 分支②：源不存在/为空 → 回落无 fork 新建 spawn（pill「无快照」，不静默）
 
 /**
- * btw 线列表条目（btw.list reply / 状态广播共用）。刻意最小：只带线 vid——
+ * btw 线列表条目（btw.list reply / 状态广播共用）。刻意最小：只带线 sessionId——
  * forkState 是创建期一次性元信息，不进列表（进列表会在跨重启重开时回填 pill，违背 D3 口径）。
+ * W4a 键统一：字段名 vid → sessionId（线的 pi 真实会话 id；`btw:<piSessionId>` 两段式
+ * 虚拟 id 已随身份统一退役，不保留双字段过渡——单包发版无跨版本兼容负担）。
+ * W5：闲置回收机制残留（`reclaimImminent`，ADR-0122 清查收尾）随字段退场删除——runtime
+ * 半（BtwLineRecord 字段 / BtwServiceDeps.onWillReclaim 挂点 / 载荷映射）与 renderer 半
+ * （reclaimReminderSessionIds 表 + setter）已先行删除，wire 字段在此同批收缩。
  */
 export interface BtwThreadInfo {
-  /** 线虚拟 id（`btw:<piSessionId>` 两段式；工厂 SSOT = shared virtual-session-id.ts 的 btwVirtualId）。 */
-  vid: string
-  /**
-   * 回收提醒态（D1「回收前」提醒窗口，提前 1 拍置位；回收发生/用户续问后清）——
-   * runtime 置位/清除 + renderer useBtwTabData.syncReclaimReminders 消费（badge 待处理
-   * 数据源，读方按 `=== true` 判定）。**可选字段防破坏既有消费**（缺省 = 无提醒）。
-   */
-  reclaimImminent?: boolean
+  /** 线 session id（= 线 pi 真实会话 id；runtime 注册表 / chatStore 分区 / 磁盘同一键）。 */
+  sessionId: string
 }
 
 /**
@@ -2487,6 +2519,27 @@ export interface ServerMessageMapBase {
   //（runtime 流式计数 session JSONL，口径与 core 对话流 reducer 一致——toolResult/system/
   // custom 消息与 compaction/usage 等非对话 entry 不计入）；文件缺失（pi 延迟写入窗口）= 0。
   'session.getMessageCount': { sessionId: string; count: number }
+  // session.getState reply（权威拉取与冷读，W2，设计 §3.2）：modelId / thinkingLevel 两维。
+  // 冷会话 usage / commands 恒为显式未知（不伪造、不用列表种子兜底，§3.2 过渡形态声明）。
+  // modelId = 'provider/modelId' 复合串（与 SessionSummary.modelId 同格式）。
+  // thinkingLevel 用 string 而非 ThinkingLevel 联合：冷读值来自会话 JSONL 的
+  // thinking_level_change entry（pi 写入的自由串），与 session.state_changed /
+  // session.thinkingLevelSet 的同一字段同口径（那两处亦为 string）——收窄联合会让冷读
+  // 的合法 pi 值在类型层变成非法，逼出无谓的丢弃分支。字段缺省 = 该维尚未就绪
+  // （显式未知，禁编码为 0/空串）。
+  // 无 updatedAt（§3.4.1：代码无「快照应用时刻」事实源，加即假语义）。
+  'session.getState': { sessionId: string; modelId?: string; thinkingLevel?: string }
+  // session.list reply（W4b 通用查询，设计 §3.3.1）：与 config.sessions 查询侧同形
+  // （{ groups: SessionGroup[] }）——侧栏/搜索/抽屉三处消费方复用 applySnapshot({groups})
+  // 整表替换语义，不为查询侧另写落地路径。btw 线条目与主会话条目同形（id = 线 pi 真实
+  // 会话 id，W4a 键统一后唯一键；surface='btw'；label = btw-<序号> 可区分形态，§3.4.3）。
+  // 无 archiveCount（角标 = 广播侧 config.sessions 的归档视图语义，查询侧不承载）。
+  'session.list': { groups: SessionGroup[] }
+  // session.surfaces（W4a 判别器通道，设计 §3.3.6）：注册表 surface 事实的全量派生视图——
+  // entries 逐条 { sessionId, surface }（全量、非增量；renderer 只读派生表整表替换）。
+  // 广播触发点 = 注册/rekey 后（低频，用户动作级）；冷启动 = sendInitialState descriptor 段。
+  // 该帧是「所有会话级消息必须携带 sessionId」的登记例外（全局注册事实帧无单一归属会话）。
+  'session.surfaces': { entries: Array<{ sessionId: string; surface: SessionSurface }> }
   // session.importCandidates / session.import reply（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：
   // 与 ClientMessageMap 同名 request 一一对应；失败走 error envelope（code 见 ImportErrorCode）。
   'session.importCandidates': ImportCandidatesReply
@@ -3174,13 +3227,13 @@ export interface ServerMessageMapBase {
   'reattach:deferred': ReattachDeferredPayload
 
   // ── btw.*（btw-question D6 控制帧 reply；btw.list 兼作状态广播）──
-  /** btw.create reply：新建线的 vid + 归属主会话 + fork 快照状态（创建期 pill 数据源）。 */
-  'btw.create': { vid: string; mainSid: string; forkState: BtwForkState }
+  /** btw.create reply：新建线的 sessionId（pi 真实 id）+ 归属主会话 + fork 快照状态（创建期 pill 数据源）。 */
+  'btw.create': { sessionId: string; mainSid: string; forkState: BtwForkState }
   /** btw.list reply / 状态广播同形（state topic typeKey 'btw'，publish 于 mainSid 会话）：
    *  最新线列表全量快照（last-value 覆盖式，重连/切回构造性恢复）。 */
   'btw.list': { mainSid: string; threads: BtwThreadInfo[] }
-  /** btw.remove reply：ack 回显被关线 vid（ReplyPayloadMap 登记 void，消费侧不读 payload）。 */
-  'btw.remove': { vid: string }
+  /** btw.remove reply：ack 回显被关线 sessionId（ReplyPayloadMap 登记 void，消费侧不读 payload）。 */
+  'btw.remove': { sessionId: string }
 
   // ── tts.*（ai-voice-tts 设计 §7.1，四 RPC reply，payload 消费型）──
   /** tts.getConfig:result：脱敏配置派生视图（SanitizedTtsConfig 敏感信息只含两布尔，永不回 Key 本体）。 */
@@ -3376,6 +3429,12 @@ export interface ReplyPayloadMap {
   'session.getContext': ServerMessageMap['context.update']
   // session.getMessageCount：同名 reply（payload 消费型，悬停详情卡消息计数通道 2）。
   'session.getMessageCount': ServerMessageMap['session.getMessageCount']
+  // session.getState：同名 reply（payload 消费型——活/冷会话同一入口的权威拉取通道）。
+  'session.getState': ServerMessageMap['session.getState']
+  // session.list（W4b 通用查询，设计 §3.3.1）：同名 reply（payload 消费型）。与
+  // config.sessions 查询侧同形但不过滤广播语义——surface/mainSessionId 两过滤参数
+  // 只存在于 request 侧，reply 恒为分组结构。
+  'session.list': ServerMessageMap['session.list']
   // session.getGenStats：reply = session.stats_update payload 同形（payload 消费型；
   // D4 恢复路径，runtime 侧 modelId 解析降级链权威）。
   'session.getGenStats': ServerMessageMap['session.stats_update']
@@ -3634,9 +3693,9 @@ export interface ReplyPayloadMap {
   'terminal.write': ServerMessageMap['terminal.ack']
 
   // ── btw.*（btw-question D6 控制帧，M2-a）：ack 必回，三帧全部登记 ──
-  'btw.create': ServerMessageMap['btw.create'] // payload 消费型：vid + mainSid + forkState
+  'btw.create': ServerMessageMap['btw.create'] // payload 消费型：sessionId + mainSid + forkState
   'btw.list': ServerMessageMap['btw.list']     // payload 消费型：threads 线枚举
-  'btw.remove': void                           // ack 型：关线完成即 resolve（wire reply btw.remove 回显 vid）
+  'btw.remove': void                           // ack 型：关线完成即 resolve（wire reply btw.remove 回显 sessionId）
 
   // ── tts.*（ai-voice-tts 设计 §7.1，M0 四 RPC，全 payload 消费型）──
   'tts.getConfig': ServerMessageMap['tts.getConfig:result']

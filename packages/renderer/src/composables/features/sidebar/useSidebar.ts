@@ -65,7 +65,7 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { closeWorkflowVizOverlayForSession } from '@/components/panel/workflow-viz/overlay/workflow-viz-overlay'
 // [M4-a / btw-question D4 消费方①] deleteSession 级联的前端路径：枚举/处置/清映射三函数
 //（与 m7/agentcall 的 evictVirtualKeys 先例同构，登记结构在 useBtwTabData）。
-import { getBtwVirtualIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
+import { getBtwSessionIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useChat, ensureStreamSubscription } from '@/composables/features/chat/useChat'
 import { useSessionLiveStateStore } from '@/stores/session-live-state'
@@ -180,11 +180,11 @@ export function useSidebar() {
         chat.evictVirtualKey(acsVirtualId)
       }
       // [M4-a / btw-question D4 消费方① + D9④ 清派生键] deleteSession 级联的前端路径：
-      // **枚举先于清映射**（顺序约束）——主会话名下全部 btw 线逐线处置（vid 分区 +
+      // **枚举先于清映射**（顺序约束）——主会话名下全部 btw 线逐线处置（线分区 +
       // 派生 subagent/agentcall 键 + 两 store 记录分区，单入口幂等），随后清反查表
       //（主已删，映射无意义）。runtime 半边（杀线进程 + 删线目录）在 session-lifecycle
       // 的级联支线；失效路径（闲置回收/进程亡）不进本路径——分区保留待重载链回填（D9④）。
-      for (const btwVid of getBtwVirtualIdsByMain(sid)) disposeBtwLinePartitions(btwVid)
+      for (const lineSessionId of getBtwSessionIdsByMain(sid)) disposeBtwLinePartitions(lineSessionId)
       clearBtwVirtualKeyMapping(sid)
     },
     clearAgentCallMapping: (sid) => useWorkflowStore().clearAgentCallMapping(sid),
@@ -275,6 +275,9 @@ export function useSidebar() {
     hooks,
     flow,
     sessionEntry,
+    // [W2 权威拉取与冷读] 状态层：session.getState reply 的唯一落点（与状态消息 /
+    // 操作回执共用 applyLiveState 这一个 reducer，设计 §7 验收项 8）
+    liveState: useSessionLiveStateStore(),
   })
 
   /** 当前焦点 panel 绑定的 session（UI 高亮 SSOT）——代理 core.focusedSessionId */
@@ -485,6 +488,10 @@ export function useSidebar() {
     if (sid) {
       void useSubagentStore().loadSubagents(sid)
       void useWorkflowStore().loadWorkflows(sid)
+      // [W2 权威拉取与冷读] 重连时机：状态层缓存缺失时补拉（缓存缺失门控 + fire-and-forget，
+      // 与打开视图时机同一入口）。断连期间丢的 state_changed 帧由本次拉取收敛（ADR-0097：
+      // 推是提示、拉是真理通道）。
+      void core.refreshLiveState(sid)
     }
   }
 

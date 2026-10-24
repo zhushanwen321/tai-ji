@@ -29,6 +29,11 @@
 import { computed, onScopeDispose } from 'vue'
 import type { BatchDeleteResult, Message, SessionGroup, SessionSummary } from '@taiji/shared'
 import { triggerSessionCleanups } from '../../foundation/use-session-scoped-state'
+// [W2 权威拉取与冷读] 状态层契约（读口 liveStateOf + 唯一写口 applyLiveState）。core 侧
+// 拉取对账经此把 session.getState 的 reply 落进状态层——与状态消息（state_changed /
+// thinkingLevelSet）、操作回执（applySwitchReceipt）走**同一个** applyLiveState reducer
+// （设计 §7 验收项 8「三源经同一 reducer 合并」）。
+import type { SessionLiveStateStore } from './live-state.js'
 // [u4d] getHistory 响应 → 截断窗口状态归一（SSOT 在 domain/chat/truncated-window）；
 // [D6-⑨ 缺陷#2] toolResult 图片落盘编排（hydrate 通路统一收敛，见 reconcileFromReply）。
 // session→chat 单向依赖（chat 域不 import session 域，无环；truncated-window 同先例）；
@@ -206,6 +211,14 @@ export interface UseSessionDeps {
    * 成员级可选、缺省 no-op——headless 路径零新增步骤执行完整链，时序按 D4 统一链。
    */
   sessionEntry?: SessionEntryPort
+  /**
+   * [W2 权威拉取与冷读] 会话运行时状态层（按会话 id 寄存；唯一写口 applyLiveState）。
+   *
+   * 拉取对账（打开视图 / 重连）的落点：`session.getState` 的 reply 经 applyLiveState
+   * 写状态层，与状态消息、操作回执共用同一 reducer（设计 §7 验收项 8）。可选成员：
+   * 未注入（headless / 旧装配）时 refreshLiveState 整体跳过——不写任何容器。
+   */
+  liveState?: SessionLiveStateStore
 }
 
 // ── session.list server-push 订阅（#7 方案 A；listener 防重复注册）──
@@ -335,6 +348,39 @@ export function createUseSession(deps: UseSessionDeps) {
   }
 
   /**
+   * [W2 权威拉取与冷读] 状态层拉取对账（设计 §5-W2 的渲染层三时机）。
+   *
+   * 三时机 = ① **打开视图**（runEntryChain 切入链尾部）② **重连**（壳 onConnected 对
+   * 聚焦 session 调本方法）③ **缓存缺失**——③ 是前两个时机的门控而非独立触发点：状态层
+   * 无该 session 条目（显式未知）才发 RPC，有条目即跳过（不覆盖推送已更新的值）。
+   *
+   * 语义（ADR-0097 拉为真理通道 + ADR-0122 事实驱动）：
+   * - 活/冷会话由 runtime 同一入口分派（活读实例快照 / 冷读会话文件），本层不感知；
+   * - 失败静默不抛（断连 / SESSION_NOT_FOUND / 会话不存在）：显式未知保持，下次时机
+   *   重试——**不回退主会话 / 默认模型 / 其他会话的值**；
+   * - fire-and-forget：调用方（切入链 / 重连对账）不等 RPC 返回，不阻塞用户操作。
+   */
+  async function refreshLiveState(sessionId: string): Promise<void> {
+    const liveState = deps.liveState
+    const getState = deps.api.getState
+    if (!liveState || !getState) return
+    // 缓存缺失才拉（③）：已有条目 = 推送/回执已填，拉取只会覆盖同源值
+    if (liveState.liveStateOf(sessionId) !== undefined) return
+    try {
+      const state = await getState(sessionId)
+      // 键取**请求的** sessionId（不信任 reply 的 sessionId 回显：协议漂移时回显值可能
+      // 与请求不一致，落点必须是调用方已知的那个会话）
+      liveState.applyLiveState(sessionId, {
+        modelId: state.modelId,
+        thinkingLevel: state.thinkingLevel,
+      })
+    } catch (e) {
+      // 拉取失败 = 显式未知保持（不猜、不回退）；warn 留排查痕迹
+      console.warn(`[use-session] live state pull failed for ${sessionId}:`, e)
+    }
+  }
+
+  /**
    * 切入链主体（原壳 useSidebar.postLoadSession，D3 入 core）：统一链步 4-12。
    * 前置：switchSession 已成功 + activeId 已置——ensureStreamSubscription /
    * syncSessionToPanel 依赖当前 activeId 路由到正确 session 分区（ADR-0049 + 架构约定 #7）。
@@ -374,6 +420,8 @@ export function createUseSession(deps: UseSessionDeps) {
     if (panelSessionId) entry.touchRecency(panelSessionId)
     // 12. LRU 驱逐
     entry.evictLru(panelSessionId)
+    // 13. [W2] 状态层拉取对账（打开视图时机；缓存缺失门控 + fire-and-forget）
+    void refreshLiveState(id)
   }
 
   /**
@@ -647,5 +695,6 @@ export function createUseSession(deps: UseSessionDeps) {
     archiveSession,
     deleteFolder,
     loadSessions,
+    refreshLiveState,
   }
 }

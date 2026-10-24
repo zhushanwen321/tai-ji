@@ -98,6 +98,15 @@ BASELINE_MODULES = {
     # terminal-service / plugin-host-process 消费 buildOutboundChildEnv 组装子进程 env
     # （env-propagation-boundary 设计 C-proc-09），同族随 R3 收编
     "spawn-env",
+    # session-file-locator（2026-10-24，u-w2-getstate / session-identity-visibility-state）：
+    # getState 冷读三支定位（主会话两段扫描 + btw 线存储树布局兜底），自 session-file-utils
+    # 拆出（max-lines 软上限；本模块只做「按 id 找文件路径」一类事，与 sidecar IO / 扫描实现
+    # 各自单文件一概念）。fs 只读三支 + scanPiSessions force 全扫（spawn 风险点 3：禁
+    # withEphemeralPi），services 侧唯一消费方 = session-state-projection 的冷读 query deps
+    # （SessionStateQueryDeps 已留窄注入缝——locateMainSessionFileFromCache/Disk/
+    # locateBtwLineFile 三注入项 docstring 已注明生产绑定目标，端口收编随 R3）。同
+    # session-file-external-scan 族：max-lines 拆分 + 同族受控例外随 R3 收编。
+    "session-file-locator",
     # session-model-tail-read（2026-10-07，dmg-r1-5）：session JSONL 的 model_change 显式
     # 热切尾读提取器（subagent-model-switch §7.2「实际执行事实权威」），自 services 层
     # subagent-engine-history 手写尾读下沉收敛（pi entry 词汇合法持有点纪律）——扫描骨架
