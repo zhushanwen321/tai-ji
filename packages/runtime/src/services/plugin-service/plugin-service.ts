@@ -1234,6 +1234,10 @@ export class PluginService implements IPluginService {
       await installer.rollbackInstall(prepared)
       await this.registry.reload()
       this.activator.removeDescriptor(prepared.dirName)
+      // D6 B1：reload 后 descriptors 表是旧版内容，但 removeDescriptor 刚删掉了本插件
+      // 条目（清新版激活失败残留）——不回填则 activatePlugin 开头 descriptor 缺失直接
+      // no-op，重激活沦为死路径（旧版本幸存但进程内不可用，只剩重启恢复）
+      this.activator.registerDescriptors(this.registry.getAllDescriptors())
       // R-1 回滚分支进程态语义：旧沙箱已终结，best-effort 重激活恢复的旧版本（S26
       // 「旧版本幸存可用」即时成立；新 fork 装旧代码，模块缓存同样干净）
       await reactivatePreviousVersionAfterRollback(this.activator, this.host, prepared.dirName)

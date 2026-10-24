@@ -389,6 +389,16 @@ describe('PluginCatalogService（service 层编排）', () => {
     const out = await makeService(new Map(), [INSTALLED_ENTRY]).catalog()
     expect(out.available).toBe(false)
     expect(out.reply.entries).toHaveLength(1)
-    expect(out.reply.entries[0]).toMatchObject({ pluginId: INSTALLED_ENTRY.pluginId, installed: true })
+    // D6 B4：catalog reply 契约是裸 PluginCatalogEntry——回退条目剥掉
+    // installed/installedVersion（声明外字段不进 wire），PluginCatalogEntry 本体字段保留
+    expect(out.reply.entries[0]).toEqual({
+      pluginId: 'zhushanwen__plugin-wool-workbuddy',
+      packageName: '@zhushanwen/plugin-wool-workbuddy',
+      displayName: 'WorkBuddy',
+      namespace: 'wool-workbuddy',
+      pluginVersion: '0.1.0',
+    })
+    expect(out.reply.entries[0]).not.toHaveProperty('installed')
+    expect(out.reply.entries[0]).not.toHaveProperty('installedVersion')
   })
 })

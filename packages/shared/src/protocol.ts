@@ -649,7 +649,10 @@ export interface PluginUiSnapshotPayload {
  * （插件侧经宿主 RPC notify `plugin.event` 转发广播）。首个消费方 = 凭据状态上报
  * （D5：插件是凭据有效性的权威，宿主只做展示映射）。channel 为插件自命字符串，
  * 上限 256 字节（PLUGIN_EVENT_CHANNEL_MAX_BYTES，超限 INVALID_ARGS 结构化拒绝）；
- * payload 形状由插件自定（unknown 透传，宿主不解释）。
+ * payload 形状由插件自定（unknown 透传，宿主不解释），字节上限 128KB
+ * （PLUGIN_EVENT_PAYLOAD_MAX_BYTES，宿主 plugin.event RPC 入口序列化实测，超限
+ * PLUGIN_EVENT_PAYLOAD_TOO_LARGE 结构化拒绝——全局广播通路不经 session push
+ * 双档检查，入口拒绝即 C-comm-14 防线）。
  */
 export interface PluginEventPayload {
   pluginId: string

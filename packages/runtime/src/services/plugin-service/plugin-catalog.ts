@@ -314,9 +314,11 @@ export class PluginCatalogService implements PluginInstalledVersionsPort {
     reason?: RemoteRefreshOutcome<unknown>['reason']
   }> {
     const load = await this.load(options)
+    // 回退条目复用 listAvailable 的组装（installed/installedVersion 形态），本 reply
+    // 契约是裸 PluginCatalogEntry——剥掉声明外字段（D6 B4：wire 形状与声明一致）
     const entries = load.config !== undefined
       ? load.config.plugins
-      : await this.installedFallbackEntries()
+      : (await this.installedFallbackEntries()).map(({ installed: _installed, installedVersion: _v, ...entry }) => entry)
     return {
       reply: { entries, ...this.replyMeta(load) },
       available: load.config !== undefined,

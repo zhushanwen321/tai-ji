@@ -427,3 +427,82 @@ describe('S1-W3: BLOCKED_BUILTINS SSOT 防退化', () => {
   })
 })
 
+// D6 B3 恢复（原 S-36 describe 内的 F1-9 接线用例，8a4439914 连带删除）：真实
+// initSandbox 消费 TAIJI_PLUGIN_ALLOWED_MODULES env（宿主 buildPluginCapabilityForkEnv
+// 注入形态）→ 声明 network.http 后 CJS require('https') 放行、require('fs') 恒拒
+// （CJS 通道只读执法待裁决）、require('vm') 永久拒。initSandbox 修改全局
+// process.env / Module._resolveFilename，必须 fork 调用（进程退出即丢弃污染）。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`F1-9: CJS 通道能力词表 fork 级接线${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
+  const PLUGIN_BOOTSTRAP_TS = join(__dirname, '../src/services/plugin-service/plugin-bootstrap.ts')
+  const RUNTIME_ROOT = join(__dirname, '..')
+
+  it('initSandbox 读 TAIJI_PLUGIN_ALLOWED_MODULES → https 放行 / fs / vm 拒', async () => {
+    const tsxTsconfig = createTsxPathsTsconfig()
+    try {
+      const workDir = mkdtempSync(join(tmpdir(), 'f19-cjs-cap-'))
+      const pluginDir = join(workDir, 'plugin')
+      mkdirSync(pluginDir)
+      const fixturePath = join(workDir, 'fixture.cjs')
+      writeFileSync(
+        fixturePath,
+        [
+          "'use strict'",
+          '// F1-9 fixture：initSandbox（env 已注入放行清单）→ 逐模块 try require 回传结果',
+          `const { initSandbox } = require(${JSON.stringify(PLUGIN_BOOTSTRAP_TS)})`,
+          `initSandbox(${JSON.stringify(pluginDir)})`,
+          'const tryRequire = (name) => {',
+          '  try { require(name); return "ok" }',
+          '  catch (e) { return e && e.code === "PERMISSION_DENIED" ? "PERMISSION_DENIED" : "other:" + String(e && e.code) }',
+          '}',
+          'process.stdout.write("F19_RESULT:" + JSON.stringify({',
+          '  https: tryRequire("https"),',
+          '  fs: tryRequire("fs"),',
+          '  vm: tryRequire("vm"),',
+          '  os: tryRequire("os"),',
+          '}))',
+          '',
+        ].join('\n'),
+      )
+
+      const result = await new Promise<Record<string, string>>((resolveP, reject) => {
+        const child = fork(fixturePath, [], {
+          execPath: process.execPath,
+          execArgv: ['--import', 'tsx'],
+          cwd: RUNTIME_ROOT,
+          env: {
+            ...process.env,
+            TSX_TSCONFIG_PATH: tsxTsconfig.tsconfigPath,
+            // 宿主注入形态：JSON 数组字符串（buildPluginCapabilityForkEnv 编码）
+            TAIJI_PLUGIN_ALLOWED_MODULES: JSON.stringify(['http', 'https', 'net', 'dns', 'tls']),
+          },
+          stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+        })
+        let stdout = ''
+        let stderr = ''
+        child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
+        child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
+        child.on('error', reject)
+        child.on('close', (code) => {
+          const line = stdout.split('\n').find((l) => l.startsWith('F19_RESULT:'))
+          if (code !== 0 || !line) {
+            reject(new Error(`fixture exited ${code}. stdout=${stdout} stderr=${stderr}`))
+            return
+          }
+          try {
+            resolveP(JSON.parse(line.slice('F19_RESULT:'.length)) as Record<string, string>)
+          } catch (e) {
+            reject(new Error(`fixture result parse failed: ${(e as Error).message}`))
+          }
+        })
+      })
+      rmSync(workDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+
+      expect(result.https).toBe('ok')
+      expect(result.fs).toBe('PERMISSION_DENIED')
+      expect(result.vm).toBe('PERMISSION_DENIED')
+      expect(result.os).toBe('ok')
+    } finally {
+      tsxTsconfig.dispose()
+    }
+  }, 30_000)
+})
