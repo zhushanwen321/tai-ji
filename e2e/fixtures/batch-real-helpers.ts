@@ -428,9 +428,10 @@ export async function assertNotifyThreeChannels(opts: {
     'notifyDone 送达通道（custom_message × workflow-result）应恰 1 条（幂等键单次投递）',
   ).toBe(1)
   /** v2 投递日志/ack 条目计数（键 = data.id，data.v=2——journal.ts OutboxEntryDataV2/AckEntryDataV2）。 */
+  const DELIVERY_PORT_ENTRY_VERSION = 2
   const countDeliveryPortEntries = (customType: string): number =>
     extractCustomEntries(opts.sessionFile, customType)
-      .filter((d) => d['v'] === 2 && d['id'] === opts.notifyId).length
+      .filter((d) => d['v'] === DELIVERY_PORT_ENTRY_VERSION && d['id'] === opts.notifyId).length
   expect(
     countDeliveryPortEntries('delivery-port-outbox'),
     'notifyDone 投递日志 outbox 条目应恰 1 条（delivery-port v2 受理前落盘——写入/关闭各恰一次，BATCH-06 口径）',
