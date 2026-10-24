@@ -453,6 +453,10 @@ function buildTranslatorOpts(
   killChild: () => void,
   runEnd: RunEndState,
 ): SdkTranslatorOpts {
+  // [§3.3.1 P9 迟到终态顺序契约] abort 决已事实位：宿主取消（signal 置位）或 limiter
+  // 预算耗尽（直杀置位）任一在场 = abort 已裁决——此后到达的终态边沿按迟到处理。
+  const isAbortDecided = (): boolean =>
+    params.signal?.aborted === true || runEnd.turnBudgetExhausted === true;
   return {
     maxTurns: params.maxTurns,
     graceTurns: params.graceTurns,
@@ -469,16 +473,24 @@ function buildTranslatorOpts(
     },
     // [§3.3.1 三源判别] 宿主取消信号谓词（收尾边沿 host-cancel 支输入）。
     isHostAbortRequested: () => params.signal?.aborted === true,
+    // [§3.3.1 P9 迟到终态顺序契约] abort（宿主取消 / limiter 预算耗尽）已发生后到达的
+    // 终态边沿一律按迟到处理——终局以 abort 事实优先，不得翻成成功。谓词 = 两个 abort
+    // 事实位（宿主 signal 置位 / limiter 直杀置位）。
     // agent_end（非 willRetry，队列排空）= 轮收敛：不 kill（等 agent_settled 收割
     // 边界——pi 的 compact/收尾在 agent_end 后执行）。本回调只在干净停因路径触发
     //（错误停因走 onErroredEnd）——置位「end 与 settled 之间被杀」的 close 按 0 收尾。
     onAgentEnd: () => {
+      if (isAbortDecided()) return; // 迟到边沿：不置 clean（杀链 close 的非零码裁决轮终）
       runEnd.endedCleanly = true;
     },
     // [§3.3.1 settled 语义修正] settled = run 结束事实非成功证据：resolve 口径受收尾
-    // 边沿事实门控——错误停因在场 → 不 resolve(0)、不置 endedCleanly，kill 收割后
+    // 边沿事实门控——错误停因事实在场 → 不 resolve(0)、不置 endedCleanly，kill 收割后
     // close 按 128+signo 非零归一（第二条置 0 通路同点封堵）；干净轮维持 fast path。
     onAgentSettled: (snapshot) => {
+      // [§3.3.1 P9 迟到终态] abort 已发生 → 迟到 settled：不 resolve、不置 clean、
+      // 不记成功快照（快照会经收集侧回填轮数并参与防伪判据，迟到 settled 不是成功
+      // 锚点——终局由杀链 close 的非零码 + abort 事实位裁决）。
+      if (isAbortDecided()) return;
       runEnd.settledTurnCount = snapshot.turnsAtSettle;
       runEnd.settledStopReason = snapshot.stopReason;
       runEnd.settledAccounting = {
@@ -534,14 +546,35 @@ function collectRunResult(
   // [subagent-observability §3.3.1] 错误停因事实在场时死因事实优先于退出码裸文案
   //（结构化轮终事实的 errorMessage = provider 层真实死因）。
   const ackFailure = runEnd.promptAckFailure;
-  const success = exitCode === 0 && ackFailure === undefined;
+  // [subagent-observability §3.3.1 P4 静默空成功防伪] 退出 0 不再单独构成成功证据
+  //（pi 1.0.0 实装：stdin EOF → rpc-mode shutdown → 无条件 exit(0)，无 settled 的
+  // 0 退出可达）。成功公式 = 退出 0 ∧ 无送达失败 ∧ 无错误停因事实 ∧ 非未解释空轮——
+  // 未解释空轮 = 无 agent_settled 快照、无被接管标记（promptHandledNoRun——被接管
+  // 轮的空是「有解释的空」，见 p6 收条设计）、零轮：按失联语义记失败，不产假成功。
+  // 「end 与 settled 之间被杀」形态（endedCleanly=true 且有真实轮数）不受本判据影响
+  //（有轮 = 有工作证据，非空成功）。
+  const recordHasNoWork =
+    record.turnCount === 0 &&
+    record.turns.every((t) => t.text === "" && t.thinking === "" && t.toolCalls.length === 0);
+  const unexplainedEmptyExit =
+    exitCode === 0 &&
+    ackFailure === undefined &&
+    runEnd.settledTurnCount === undefined &&
+    runEnd.promptHandledNoRun !== true &&
+    recordHasNoWork;
+  const success =
+    exitCode === 0 && ackFailure === undefined && runEnd.terminalErrorFact === undefined && !unexplainedEmptyExit;
   const error = success
     ? undefined
-    : ackFailure !== undefined
-      ? describePromptAckFailure(ackFailure)
-      : runEnd.terminalErrorFact !== undefined
-        ? runEnd.terminalErrorFact.errorMessage
-        : buildExitErrorText(exitCode, runEnd.childErrorMessage);
+    : unexplainedEmptyExit
+      ? "pi child exited with code 0 without any agent activity (no agent_settled, zero turns): " +
+        "treating as lost contact, not success. Recovery: retry the run; if it reproduces, " +
+        "inspect the pi child stderr tee for the shutdown cause."
+      : ackFailure !== undefined
+        ? describePromptAckFailure(ackFailure)
+        : runEnd.terminalErrorFact !== undefined
+          ? runEnd.terminalErrorFact.errorMessage
+          : buildExitErrorText(exitCode, runEnd.childErrorMessage);
   if (ackFailure !== undefined) {
     // 送达失败路径同时发 error 事件（设计 §3.4.2：让 journal 有记录；既有退出码
     // 失败不加发，行为面不变）。

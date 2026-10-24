@@ -15,7 +15,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { FAILURE_CAUSE_CLOSED_KINDS, FAILURE_CAUSE_KIND_VOCAB_LOCK } from "../protocol/contract-types.ts";
+import {
+  FAILURE_CAUSE_CLOSED_KINDS,
+  FAILURE_CAUSE_KIND_VOCAB_LOCK,
+  FAILURE_CAUSE_KINDS_BY_CLASS,
+  FAILURE_CAUSE_KINDS_BY_CLASS_LOCK,
+} from "../protocol/contract-types.ts";
 import type { FailureCause, FailureCauseClass, FailureRetryability } from "../protocol/contract-types.ts";
 
 // ── ① class×kind 矩阵逐行可构造 ──────────────────────────────────────────────
@@ -28,12 +33,13 @@ describe("FailureCause class×kind 合法组合矩阵", () => {
       { class: "provider", kind: "protocol_unsupported", retryable: false, raw: "model has no API implementation" },
       // harness / agent / user 行
       { class: "harness", kind: "turn_budget_exhausted", retryable: false, raw: "turn budget exhausted" },
+      { class: "harness", kind: "timeout", retryable: false, raw: "host call timeout after 5000ms" },
       { class: "agent", kind: "no_deliverable", retryable: false, raw: "structured output was not called" },
       { class: "user", kind: "cancelled", retryable: false, raw: "cancel requested" },
       // engine 透传族（开放前缀面）
       { class: "engine", kind: "engine_crashed", retryable: false, raw: "engine exited 137" },
     ];
-    expect(matrix).toHaveLength(6);
+    expect(matrix).toHaveLength(7);
     for (const cause of matrix) {
       // 判别联合成员经收窄可达全部公共字段（构造成功即矩阵行成立）。
       expect(typeof cause.raw).toBe("string");
@@ -56,19 +62,26 @@ describe("FailureCause class×kind 合法组合矩阵", () => {
 describe("FAILURE_CAUSE_CLOSED_KINDS 闭合词表（新值同 commit 登记锚）", () => {
   it("编译锁消费点在场且恒 true（词表与联合漂移时 tsc 红，本断言防锁被删）", () => {
     expect(FAILURE_CAUSE_KIND_VOCAB_LOCK).toBe(true);
+    expect(FAILURE_CAUSE_KINDS_BY_CLASS_LOCK).toBe(true);
   });
 
-  it("恰为 5 个闭合成员（engine 透传族不进闭合表）", () => {
+  it("恰为 6 个闭合成员（engine 透传族不进闭合表）", () => {
     expect([...FAILURE_CAUSE_CLOSED_KINDS].sort()).toEqual([
       "cancelled",
       "no_deliverable",
       "protocol_unsupported",
       "rate_limited",
+      "timeout",
       "turn_budget_exhausted",
     ]);
     for (const kind of FAILURE_CAUSE_CLOSED_KINDS) {
       expect(kind.startsWith("engine_")).toBe(false);
     }
+  });
+
+  it("per-class kind 值域并集 = 闭合词表（FAILURE_CAUSE_KINDS_BY_CLASS 与闭合表对账）", () => {
+    const byClass = new Set(Object.values(FAILURE_CAUSE_KINDS_BY_CLASS).flat());
+    expect([...byClass].sort()).toEqual([...FAILURE_CAUSE_CLOSED_KINDS].sort());
   });
 });
 

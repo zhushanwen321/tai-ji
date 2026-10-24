@@ -52,9 +52,12 @@ const SPAWN_ERROR_EXIT_CODE = 127;
 /** run 收尾状态（轮收敛（agent_end/agent_settled）与 close 收尾共享的可变句柄）。 */
 export interface RunEndState {
   /**
-   * 轮终置位（agent_end / agent_settled / P6-A EOF 收割）：主动收割的 close 按成功口径
-   * （exit 0）收尾。[subagent-observability §3.3.1] 置位受事实门控——错误停因事实
-   * （terminalErrorFact）在场时保持 false（settled 不再是任何置 0 依据）。
+   * 轮终置位（队列排空后的轮终 agent_end / agent_settled）：主动收割的 close 按成功口径
+   * （exit 0）收尾。[subagent-observability §3.3.1] 置位受双重事实门控——① 错误停因事实
+   * （terminalErrorFact）在场时保持 false（settled 不再是任何置 0 依据）；② P3 队列
+   * 事实：follow-up/steer 队列非空的 agent_end 是中间边沿（run 将 continue），不置位，
+   * 仅队列排空后的轮终边沿置位。handled 短路（P6-A）不置位——其语义 = agent 终态
+   * 边沿到达，接管收割不是 agent 轮终边沿（解释标记走 promptHandledNoRun）。
    */
   endedCleanly: boolean;
   /**

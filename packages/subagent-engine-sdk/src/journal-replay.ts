@@ -400,6 +400,13 @@ export function updateFromEvent(record: ReplayRecordView, event: AgentEvent): vo
     case "armed":
       return;
 
+    // ── auto_retry：pi 原生重试边界帧（[subagent-observability §3.3.1 P5]）——
+    //    观测面（journal 留痕失败尝试轨迹），不进 record 派生视图：失败尝试的
+    //    turns/usage 切片与 retryAttempts 计数由引擎收尾快照一次产出（outcome
+    //    字段承载），reducer 写入会让失败尝试静默混进 turns 聚合，恰违背 P5 计账。
+    case "auto_retry":
+      return;
+
     default: {
       // 穷尽性检查：新增 AgentEvent variant 时编译期报错
       const _exhaustive: never = event;

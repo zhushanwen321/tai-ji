@@ -518,3 +518,116 @@ describe("[subagent-observability §3.3.9/UC-10] 预算显式化：limiter 管�
     }
   });
 });
+
+// [subagent-observability §3.3.1 P3 队列事实 + P5 journal 帧]
+//
+// P3：pi 1.0.0 _runAgentPrompt 循环（agent-session.js:1354-1368）——follow-up/steer
+// 队列非空时 agent_end 后 run 继续（agent.continue()），此刻 agent_end 是中间边沿；
+// 队列事实取自 queue_update 事件（_emitQueueUpdate 入队/出队逐帧刷新）。中间边沿不
+// 判终（onAgentEnd/onErroredEnd 都不发），轮终判定留给队列排空后的末边沿。
+// F1-32：auto_retry_start/end 边界帧翻译进 journal（{type:"auto_retry", phase, ...}），
+// 失败尝试轨迹不静默；帧为观测面，record 派生视图零写入（reducer no-op）。
+describe("[subagent-observability §3.3.1] P3 队列事实边沿门控 + auto_retry journal 帧", () => {
+  const queueLine = (steering: string[], followUp: string[] = []): string =>
+    JSON.stringify({ type: "queue_update", steering, followUp });
+  const stopLine = (): string =>
+    JSON.stringify({ type: "message_end", message: { usage: { input: 1 }, stopReason: "stop" } });
+  const errorLine = (): string =>
+    JSON.stringify({ type: "message_end", message: { stopReason: "error", errorMessage: "429: rate limited" } });
+
+  it("P3：队列非空的 agent_end = 中间边沿不判终；队列排空后的 agent_end 才触发 onAgentEnd", () => {
+    let agentEndSeen = 0;
+    let erroredSeen = false;
+    const h = makeHarness({
+      onAgentEnd: () => { agentEndSeen += 1; },
+      onErroredEnd: () => { erroredSeen = true; },
+    });
+    // steer 注入（workflow-hook deliverAs=steer 形态）→ 中间 run 完成
+    h.feed(queueLine(["follow-up task"]));
+    h.feed(stopLine());
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: false, reason: "end_turn" }));
+    expect(agentEndSeen).toBe(0); // 中间边沿：不置 clean、不判终
+    expect(erroredSeen).toBe(false);
+
+    // 队列排空（出队帧）→ 续 run 完成 → 末边沿判终
+    h.feed(queueLine([], []));
+    h.feed(stopLine());
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: false, reason: "end_turn" }));
+    expect(agentEndSeen).toBe(1);
+  });
+
+  it("P3 × 错误停因：中间边沿不产 onErroredEnd；续 run 恢复后末边沿干净收尾（旧失败不翻终局）", () => {
+    let errored: import("../spawn-event-translator.ts").EngineRoundErrorFact | undefined;
+    let agentEndSeen = 0;
+    const h = makeHarness({
+      onAgentEnd: () => { agentEndSeen += 1; },
+      onErroredEnd: (fact) => { errored = fact; },
+    });
+    // steer 在途 + 第一段 run 非重试错误结束（队列非空 → pi 会 continue）
+    h.feed(queueLine(["next step"]));
+    h.feed(errorLine());
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: false, reason: "error" }));
+    expect(errored).toBeUndefined(); // 中间边沿不判终（失败事实已由 error 事件入 journal）
+    expect(agentEndSeen).toBe(0);
+
+    // 续 run 成功（非 error 停因清除未消费 error 事实）→ 末边沿干净收尾
+    h.feed(queueLine([], []));
+    h.feed(stopLine());
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: false, reason: "end_turn" }));
+    expect(agentEndSeen).toBe(1);
+    expect(errored).toBeUndefined();
+  });
+
+  it("P3：末边沿错误停因仍照常判终（队列排空后的 error → onErroredEnd 通路不受门控影响）", () => {
+    let errored: import("../spawn-event-translator.ts").EngineRoundErrorFact | undefined;
+    const h = makeHarness({
+      onErroredEnd: (fact) => { errored = fact; },
+    });
+    h.feed(queueLine(["x"]));
+    h.feed(queueLine([], [])); // 入队即出队（续 run 消费后队列已空）
+    h.feed(errorLine());
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: false, reason: "error" }));
+    expect(errored).toMatchObject({ stopReason: "error", errorMessage: "429: rate limited" });
+  });
+
+  it("F1-32：auto_retry_start/end 翻译为 auto_retry journal 帧（边界事实字段原样承载）", () => {
+    const h = makeHarness();
+    h.feed(errorLine());
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: true, reason: "retryable" }));
+    h.feed(JSON.stringify({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 10, errorMessage: "429: rate limited" }));
+    h.feed(stopLine());
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: false, reason: "end_turn" }));
+    h.feed(JSON.stringify({ type: "auto_retry_end", success: true, attempt: 1 }));
+
+    expect(h.events).toContainEqual({
+      type: "auto_retry",
+      phase: "start",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 10,
+      errorMessage: "429: rate limited",
+    });
+    expect(h.events).toContainEqual({ type: "auto_retry", phase: "end", attempt: 1, success: true });
+  });
+
+  it("F1-32：auto_retry 帧对 record 零写入（观测面——失败尝试不混进 turns 聚合）", () => {
+    const h = makeHarness();
+    h.feed(errorLine());
+    h.feed(JSON.stringify({ type: "turn_end" }));
+    h.feed(JSON.stringify({ type: "agent_end", willRetry: true }));
+    h.feed(JSON.stringify({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 5, errorMessage: "boom" }));
+    h.feed(JSON.stringify({ type: "auto_retry_end", success: false, attempt: 1, finalError: "boom" }));
+
+    // 帧本身不产生 turn / usage / toolCall（P5 计账锚在引擎收尾快照，不依赖宿主消费）
+    expect(h.events.filter((e) => e.type === "auto_retry")).toHaveLength(2);
+    expect(h.record.turns).toHaveLength(1); // 仅失败尝试的 message_end 产出的 turn
+    expect(JSON.stringify(h.record)).not.toContain("auto_retry");
+  });
+});

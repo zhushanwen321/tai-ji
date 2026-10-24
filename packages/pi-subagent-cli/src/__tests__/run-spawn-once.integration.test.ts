@@ -31,7 +31,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   getActiveChild,
@@ -44,6 +44,35 @@ import {
 import type { AgentEvent, SpawnEngineChildOptions } from "@zhushanwen/subagent-engine-sdk";
 
 import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "./integration-gate.local.ts";
+
+// 测试环境隔离（分类码表读取链）：collectOutcome 失败分类直读 ext-config
+// （<PI_CODING_AGENT_DIR>/config/retry-rules-ext-config.json）。固定到 tmp fixture——
+// fixture 内置 shared 基线同款 tier-limit-window 条目，场景 1 判定断言走真实读取 +
+// 窄化 + 匹配全链（400 tier_limit_exceeded → rate_limited/conditional）；不 pin 则
+// 本机真实 pi 配置在场时用例行为分化。
+const RETRY_RULES_AGENT_DIR = fs.mkdtempSync(join(tmpdir(), "pi-agent-scene1-rules-"));
+fs.mkdirSync(join(RETRY_RULES_AGENT_DIR, "config"), { recursive: true });
+fs.writeFileSync(
+  join(RETRY_RULES_AGENT_DIR, "config", "retry-rules-ext-config.json"),
+  JSON.stringify({
+    version: 1,
+    customRules: [],
+    effectiveRules: [
+      {
+        id: "tier-limit-window",
+        name: "tier 限额窗口（tier_limit_exceeded）",
+        verdict: "conditional",
+        match: [{ kind: "pattern", pattern: "tier_limit_exceeded" }],
+        class: "provider",
+        kind: "rate_limited",
+        httpStatusClass: 400,
+        waitHint: "等待错误信息中的限额重置时间（resets）后可恢复",
+        source: "builtin",
+      },
+    ],
+  }),
+);
+process.env["PI_CODING_AGENT_DIR"] = RETRY_RULES_AGENT_DIR;
 
 /**
  * [D3] 武装态 schema 任务的扩展路径：native + schema run 必须携带 structured-output
@@ -488,6 +517,11 @@ afterEach(() => {
   killAllActiveChildren();
   spawnBoundary.current = undefined;
   spawnBoundary.waiters.length = 0;
+});
+
+// 分类码表 fixture 自建自删（测试纪律：mkdtemp 自建目录用后清理）
+afterAll(() => {
+  fs.rmSync(RETRY_RULES_AGENT_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 // ── 形态 B：真 spawn 冒烟（集成门控——本地默认跳过，CI / 按改动范围触发时真跑） ──
@@ -992,9 +1026,11 @@ describe("runSpawnOnce 集成（stub 子进程翻译/分诊）", () => {
 // ── [subagent-observability u1] 判定链事实化验收（场景 1 判定断言 / P5 计账 / P6 状态表） ──
 describe("subagent-observability 判定链事实化（§3.3.1 验收）", () => {
   /**
-   * 场景 1 判定断言（重演故障 B 死因形态）：provider 软限流错误轮——
-   * 429 + 业务码 + resets 未来时间戳（openai 兼容层 "<status>: <body>" 机读主通道 +
-   * 文本兜底通道双命中）。
+   * 场景 1 判定断言（设计 §4 原文形态，重演故障 A 死因）：provider 软限额错误轮——
+   * 400 + tier_limit_exceeded 业务码 + resets 未来时间戳（openai 兼容层
+   * "<status>: <body>" 机读主通道 + 文本兜底通道双命中）。400 + 业务码的类别修正由
+   * 分类码表（ext-config tier-limit-window 条目）裁决，不再落 status 层的
+   * protocol_unsupported。
    */
   function providerRateLimitScript(): FakePiScript {
     const resetsAt = new Date(Date.now() + 22 * 60 * 1000).toISOString();
@@ -1006,7 +1042,7 @@ describe("subagent-observability 判定链事实化（§3.3.1 验收）", () => 
           message: {
             usage: { input: 5, output: 0, cacheRead: 0, cacheWrite: 0 },
             stopReason: "error",
-            errorMessage: `429: {"error":{"code":"rate_limit_exceeded","message":"quota exceeded, resets ${resetsAt}"}}`,
+            errorMessage: `400: {"error":{"code":"tier_limit_exceeded","message":"usage limit reached, resets ${resetsAt}"}}`,
             rawStopReason: "throttled",
           },
         });
@@ -1017,7 +1053,7 @@ describe("subagent-observability 判定链事实化（§3.3.1 验收）", () => 
     };
   }
 
-  it("场景 1 判定断言：provider 软限流轮 → engineStopReason=error + failure 如实（rate_limited/conditional/retryAfterMs）", async () => {
+  it("场景 1 判定断言：400 tier_limit_exceeded 软限额轮 → 码表接线 rate_limited/conditional/retryAfterMs>0（ext-config 全链读取）", async () => {
     const h = makeStubHarness(providerRateLimitScript());
     const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
 
@@ -1025,9 +1061,10 @@ describe("subagent-observability 判定链事实化（§3.3.1 验收）", () => 
     expect(result.success).toBe(false);
     expect(result.engineStopReason).toBe("error");
     // 死因如实：终态文案 = provider 层真实错误文本（非退出码裸文案）
-    expect(result.error).toContain("429:");
-    expect(result.error).toContain("rate_limit_exceeded");
-    // 失败分类如实（收尾边沿一次产出）：机读主通道 status 层 + 文本兜底 resets 命中
+    expect(result.error).toContain("400:");
+    expect(result.error).toContain("tier_limit_exceeded");
+    // 失败分类如实（收尾边沿一次产出）：分类码表 tier-limit-window 命中（业务码层裁决）
+    // + 文本兜底 resets 提取
     expect(result.failure).toMatchObject({
       class: "provider",
       kind: "rate_limited",
@@ -1041,6 +1078,36 @@ describe("subagent-observability 判定链事实化（§3.3.1 验收）", () => 
     expect(serialized).not.toContain("schema_deterministic");
     expect(serialized).not.toContain("finished a round");
     expect(result.failureKind).toBeUndefined();
+  });
+
+  it("场景 1 负面回落：400 + 码表未命中业务码 → protocol_unsupported/retryable false（status 层兜底语义保持）", async () => {
+    const h = makeStubHarness({
+      getStateData: { ...SUCCESS_IDENTITY },
+      onPrompt: (child) => {
+        child.writeStdoutLine({
+          type: "message_end",
+          message: {
+            usage: { input: 5, output: 0, cacheRead: 0, cacheWrite: 0 },
+            stopReason: "error",
+            errorMessage: '400: {"error":{"code":"malformed_request","message":"field x is required"}}',
+            rawStopReason: "error",
+          },
+        });
+        child.writeStdoutLine({ type: "turn_end" });
+        child.writeStdoutLine({ type: "agent_end", willRetry: false, reason: "error" });
+        child.writeStdoutLine({ type: "agent_settled" });
+      },
+    });
+    const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
+
+    expect(result.success).toBe(false);
+    expect(result.engineStopReason).toBe("error");
+    expect(result.failure).toMatchObject({
+      class: "provider",
+      kind: "protocol_unsupported",
+      retryable: false,
+    });
+    expect(result.failure?.retryAfterMs).toBeUndefined();
   });
 
   it("P5 计账：重试轮 turns 排除失败尝试 + usage 记最终尝试值 + retryAttempts 计数", async () => {
@@ -1168,5 +1235,126 @@ describe("subagent-observability 判定链事实化（§3.3.1 验收）", () => 
     expect(result.turns).toBe(1);
     // P6 分派未 EOF（stdin 未被引擎终结——收割走 settled 杀链）
     expect(child.stdin.writableEnded).toBe(false);
+  });
+
+  // ── [F1-1/F1-30 P3 队列事实] follow-up 队列非空的 agent_end = 中间边沿 ──
+
+  it("P3 集成：steer 队列非空的 agent_end（中间边沿）后被杀 → 轮失败（不再折成 0 退出伪成功）", async () => {
+    const h = makeStubHarness({
+      getStateData: { ...SUCCESS_IDENTITY },
+      onPrompt: (child) => {
+        // steer 注入（workflow-hook deliverAs=steer 形态）→ 第一段 run 完成
+        //（pi _runAgentPrompt 循环：队列非空 → agent.continue() 继续，此 agent_end
+        // 是中间边沿非轮终）——随后无下文（宿主杀链 / 引擎死亡形态，测试显式 kill）。
+        child.writeStdoutLine({ type: "queue_update", steering: ["follow-up task"], followUp: [] });
+        child.writeStdoutLine({ type: "message_end", message: { usage: { input: 2, output: 1, cacheRead: 0, cacheWrite: 0 }, stopReason: "stop" } });
+        child.writeStdoutLine({ type: "turn_end" });
+        child.writeStdoutLine({ type: "agent_end", willRetry: false, reason: "end_turn" });
+      },
+    });
+    const runP = runSpawnOnce(baseParams(h), callbacksOf(h));
+    const child = await nextFakeChild();
+    child.kill("SIGKILL"); // 中间边沿后被杀（无 settled——修复前 endedCleanly 已置 → close 折 0 → 伪成功）
+    const result = await runP;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("137"); // SIGKILL 128+9 折算（非 0 退出）
+    await waitFor(() => h.stateChanges.some((s) => s.state === "exited"));
+    // 镜像上报是原始退出形态（信号杀死 code=null → 只带 signal 键）；run 级 137 由
+    // normalizeExitCode 折算（上一断言的 error 文案已证）
+    expect(h.stateChanges.find((s) => s.state === "exited")).toMatchObject({ signal: "SIGKILL", killed: true });
+  });
+
+  // ── [F1-29 P9 迟到终态] abort 已发生后到达的终态事件按迟到处理 ──
+
+  it("P9 集成：limiter 耗尽直杀后迟到的 agent_end/agent_settled 不翻成功——turn_budget_exhausted 失败", async () => {
+    // 时序确定性：limiter abort 在 turn_end 分派内同步触发 SIGKILL（kill 排宏任务
+    // close），已在 stdout 管道排队的迟到终态走微任务先于 close 送达——复现
+    // 「abort 与终态事件赛跑」窗口。
+    const h = makeStubHarness({
+      getStateData: { ...SUCCESS_IDENTITY },
+      onPrompt: (child) => {
+        child.writeStdoutLine({ type: "message_end", message: { usage: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0 }, stopReason: "stop" } });
+        child.writeStdoutLine({ type: "turn_end" }); // maxTurns=1 + grace 0 → 此边沿同步 abort
+        // 迟到终态（修复前：settled 无条件 resolve(0) + endedCleanly 置位 → 伪成功）
+        child.writeStdoutLine({ type: "agent_end", willRetry: false, reason: "end_turn" });
+        child.writeStdoutLine({ type: "agent_settled" });
+      },
+    });
+    const result = await runSpawnOnce(baseParams(h, { maxTurns: 1, graceTurns: 0 }), callbacksOf(h));
+
+    // 终局以 abort 事实优先：杀链 close 非零码 + harness 预算耗尽分类，不产成功
+    expect(result.success).toBe(false);
+    expect(result.failure).toMatchObject({
+      class: "harness",
+      kind: "turn_budget_exhausted",
+      retryable: false,
+      budget: { used: 1, limit: 1 },
+    });
+    expect(result.error).toContain("137");
+  });
+
+  // ── [F1-2/F1-28 P4 静默空成功防伪] exit 0 + 无 settle + 零轮 = 失联不判成功 ──
+
+  it("P4 集成：exit 0 且无任何 agent 事件（无 settled / 零轮 / 空正文）→ 失联语义失败", async () => {
+    const h = makeStubHarness({
+      getStateData: { ...SUCCESS_IDENTITY },
+      onPrompt: (child) => {
+        // pi 自退 / stdin EOF shutdown 形态：无任何 agent 事件直接 exit 0
+        //（rpc-mode shutdown 无条件 exit(0)，无 settled 的 0 退出可达）。
+        child.exit(0, null);
+      },
+    });
+    const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
+
+    expect(result.success).toBe(false); // 修复前：exitCode 0 && 无 ackFailure → 伪成功
+    expect(result.error).toContain("without any agent activity");
+    // 失联形态无失败事实可分类（不产推断），也无引擎停因
+    expect(result.failure).toBeUndefined();
+    expect(result.engineStopReason).toBeUndefined();
+  });
+
+  it("P4 对照：有真实轮数的 exit 0（end 与 settled 之间被杀）不受防伪影响——维持成功", async () => {
+    const h = makeStubHarness({
+      getStateData: { ...SUCCESS_IDENTITY },
+      onPrompt: (child) => {
+        child.writeStdoutLine({ type: "message_end", message: { usage: { input: 3, output: 2, cacheRead: 0, cacheWrite: 0 }, stopReason: "stop" } });
+        child.writeStdoutLine({ type: "turn_end" });
+        child.writeStdoutLine({ type: "agent_end", willRetry: false, reason: "end_turn" });
+        // 队列排空后的轮终 agent_end 已到达；settled 未到即被杀（收割窗内死亡）
+      },
+    });
+    const runP = runSpawnOnce(baseParams(h), callbacksOf(h));
+    const child = await nextFakeChild();
+    child.kill("SIGKILL");
+    const result = await runP;
+
+    expect(result.success).toBe(true); // 有轮 = 有工作证据，非「空成功」
+    expect(result.error).toBeUndefined();
+    expect(result.engineStopReason).toBe("stop");
+    expect(result.turns).toBe(1);
+  });
+
+  // ── [F1-36 P6-A 顺序契约] resolveChatRun 先于 EOF 收割（应答不等收割）──
+
+  it("P6-A 顺序契约：resolveChatRun 先行——EOF 后 pi 悬挂不退出，run 仍即时终态", async () => {
+    let stdinEndSeen = false;
+    const h = makeStubHarness({
+      getStateData: { ...SUCCESS_IDENTITY, isStreaming: false },
+      promptResponse: { success: true, data: { disposition: "handled" } },
+      onPrompt: () => {},
+      onStdinEnd: () => {
+        stdinEndSeen = true; // EOF 已收割，但 pi 悬挂不退出（收割链异常形态）
+      },
+    });
+    // 应答不等收割：resolve(0) 先行 → run 不依赖 close 即时终态（修复前若先 end()
+    // 后 resolve 的顺序颠倒 + pi 悬挂，run 挂到超时）
+    const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
+    const child = await nextFakeChild();
+
+    expect(stdinEndSeen).toBe(true);
+    expect(child.stdin.writableEnded).toBe(true);
+    expect(result.success).toBe(true); // 回执层成功（resolveChatRun(0) 已先行结算）
+    expect(result.promptDisposition).toBe("handled");
   });
 });

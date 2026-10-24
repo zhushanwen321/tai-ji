@@ -86,10 +86,17 @@ export function createHandledSettlement(
       if (runEnd.exitResolved === true) return; // 查询窗内 run 已结（赛跑短路）
       if (params.signal?.aborted === true) return;
       if (isStreaming !== false) return; // true = 在途继续等；undefined = 无应答不判定
-      // A 形态：立即轮终（事实判定，不引入超时——红线安全）。
+      // A 形态：立即轮终（事实判定，不引入超时——红线安全）。顺序契约（子设计
+      // enumeration-p6-disposition §4.2）：先结算应答（对齐 onAgentSettled——应答不等
+      // 收割），后 EOF 收割（pi 完整 shutdown 链：dispose → flush stdout → exit）。
+      // 不置 endedCleanly——其语义 = agent 终态边沿到达，handled 短路从未进 agent 循环，
+      // 不是 agent 轮终边沿；close(code=0) 经 normalizeExitCode(false, 0, null) 折算恒 0，
+      // 与先行 resolve(0) 口径一致。不置 settledTurnCount（无轮）——promptHandledNoRun
+      // 事实标记承载「有解释的空」，收集侧 P4 防伪按该标记豁免。
       runEnd.promptHandledNoRun = true;
-      runEnd.endedCleanly = true; // 回执层成功口径（A 支裁决：受理 success + EOF 退出 0）
-      child.stdin?.end(); // EOF → pi 完整 shutdown 链（dispose → flush stdout → exit）
+      runEnd.exitResolved = true;
+      runEnd.resolveChatRun?.(0);
+      child.stdin?.end();
     });
   };
 }

@@ -469,6 +469,11 @@ function toOutcome(result: SpawnRunResult): AgentOutcome {
     ...(result.retryAttempts !== undefined && result.retryAttempts > 0
       ? { retryAttempts: result.retryAttempts }
       : {}),
+    // [§3.3.1/§3.3.3 P6-A] 被接管轮标注透传上协议（宿主轮收条 lastRound.promptDisposition
+    // 数据源——被接管轮不产失败分类、结清走 no_result）。
+    ...(result.promptDisposition !== undefined ? { promptDisposition: result.promptDisposition } : {}),
+    // [§3.3.2/§3.3.10] 观察性事实透传上协议（宿主轮收条 lastRound.observations 数据源）。
+    ...(result.observations !== undefined ? { observations: result.observations } : {}),
     toolCalls: result.toolCalls.map((tc) => ({
       name: tc.toolName,
       input: tc.args === undefined ? "" : JSON.stringify(tc.args),

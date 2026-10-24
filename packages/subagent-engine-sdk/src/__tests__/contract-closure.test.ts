@@ -203,6 +203,7 @@ describe("契约类型运行时形状冒烟（必填缺失/多余字段在构造
       activity: { type: "activity" },
       error: { type: "error", message: "boom" },
       armed: { type: "armed", schemaEnvVar: "PI_WORKFLOW_SCHEMA", extensionPkg: "@zhushanwen/pi-structured-output" },
+      auto_retry: { type: "auto_retry", phase: "start", attempt: 1 },
     };
     // 运行时同源确认：键集 = 词表全集（不手写事件集合），逐成员 type 即词表成员
     expect(Object.keys(events).sort()).toEqual([...AGENT_EVENT_TYPE_NAMES].sort());

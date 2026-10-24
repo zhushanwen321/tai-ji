@@ -161,7 +161,22 @@ export type AgentEvent =
   | { type: EventName<"compaction"> }
   | { type: EventName<"activity"> }
   | { type: EventName<"error">; message: string }
-  | { type: EventName<"armed">; schemaEnvVar: string; extensionPkg: string };
+  | { type: EventName<"armed">; schemaEnvVar: string; extensionPkg: string }
+  | {
+      type: EventName<"auto_retry">;
+      /** start = 失败尝试结束即将重跑；end = 重试波次收束（成功或最终失败）。 */
+      phase: "start" | "end";
+      /** 重试波次序号（pi 原生 _retryAttempt，1 起）。 */
+      attempt: number;
+      /** start 独有：重试上限与退避等待（pi _prepareRetry 发射事实）。 */
+      maxAttempts?: number;
+      delayMs?: number;
+      /** start 携带被重试的错误文本；end 失败波携带最终错误（成功波缺省）。 */
+      errorMessage?: string;
+      /** end 独有：该波重试最终是否恢复（true = 后续尝试成功，false = 重试耗尽）。 */
+      success?: boolean;
+      finalError?: string;
+    };
 
 // ============================================================
 // 事件词表锁（AgentEvent ⟷ AGENT_EVENT_TYPE_NAMES 同源互证）
@@ -200,6 +215,7 @@ export const AGENT_EVENT_TYPE_NAMES = [
   "activity", // noop-safe: 纯活性信号，双侧 reducer 恒 no-op（协议语义见 AgentEvent 头注），丢弃零差异
   "error", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 lastError 诊断留痕，已写状态不回滚
   "armed", // noop-safe: 旧宿主无武装等待窗消费点（fail-fast 属宿主新增逻辑），丢弃仅缺武装留痕，schema 强制第一道防线（引擎自查断言）不受损
+  "auto_retry", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺重试边界留痕（journal 不可查失败尝试轨迹），轮成败判定与 turns/usage 计账不受损（P5 计账锚在引擎侧收尾快照，不依赖宿主消费本帧）
 ] as const satisfies readonly AgentEvent["type"][];
 
 /** 词表派生的事件名联合（编译锁②/③的词表侧源；schema enum 与测试取值同源）。 */
@@ -434,8 +450,8 @@ interface FailureCauseFields {
 /**
  * class×kind 合法组合矩阵（判别联合构造性成立——非法组合写不出来）：
  *   provider.rate_limited / provider.protocol_unsupported / harness.turn_budget_exhausted /
- *   agent.no_deliverable / user.cancelled / engine.*（`engine_${string}` 引擎自报透传族，
- *   开放前缀面——对齐 RunErrorCode 的 engine_ 透传契约，core 不解释文案）。
+ *   harness.timeout / agent.no_deliverable / user.cancelled / engine.*（`engine_${string}`
+ *   引擎自报透传族，开放前缀面——对齐 RunErrorCode 的 engine_ 透传契约，core 不解释文案）。
  *
  * kind 是封闭登记词表：新增成员同 commit 登记下方 {@link FAILURE_CAUSE_CLOSED_KINDS}
  * （解析词表纪律），漏登记由 {@link FAILURE_CAUSE_KIND_VOCAB_LOCK} 编译锁拦截。
@@ -444,13 +460,16 @@ export type FailureCause =
   | (FailureCauseFields & { class: "provider"; kind: "rate_limited" | "protocol_unsupported" })
   | (FailureCauseFields & {
       class: "harness";
-      kind: "turn_budget_exhausted";
+      kind: "turn_budget_exhausted" | "timeout";
       /**
        * [subagent-observability §3.3.9/UC-10] turn 预算耗尽事实（limiter abort 边沿
        * 一次产出）：used = abort 时轮数、limit = 显式 maxTurns 上界。undefined =
        * 极端竞窗下收尾边沿只有 aborted 停因而 limiter 快照缺席（防御性同判形态，
        * 事实不足不产结构——轮失败事实不受影响）。与 §3.3.6 查询侧 budget 分轴
-       * 结构（{maxTurns, ...}）同构的 {used, limit} 形态。
+       * 结构（{maxTurns, ...}）同构的 {used, limit} 形态。仅 turn_budget_exhausted
+       * 承载；timeout（§3.3.6 超时轮失败分类，宿主结算点产出——timeoutMs 墙钟预算
+       * 耗尽是宿主独有事实，引擎收尾边沿只有「宿主取消 vs 引擎异常」两源判别）
+       * 不落本字段。
        */
       budget?: { used: number; limit: number };
     })
@@ -467,6 +486,7 @@ export const FAILURE_CAUSE_CLOSED_KINDS = [
   "rate_limited",
   "protocol_unsupported",
   "turn_budget_exhausted",
+  "timeout",
   "no_deliverable",
   "cancelled",
 ] as const satisfies readonly Exclude<FailureCause["kind"], `engine_${string}`>[];
@@ -478,6 +498,42 @@ export const FAILURE_CAUSE_CLOSED_KINDS = [
 export const FAILURE_CAUSE_KIND_VOCAB_LOCK: AssertMutuallyAssignable<
   Exclude<FailureCause["kind"], `engine_${string}`>,
   (typeof FAILURE_CAUSE_CLOSED_KINDS)[number]
+> = true;
+
+/**
+ * per-class kind 合法值域（运行时可用——重试规则条目的 kind 字段按 class 校验的
+ * 唯一依据；消费方 = shared validateRetryRuleFields / retry-rules extension 侧镜像）。
+ * engine 透传族是 `engine_${string}` 开放前缀面（无闭合枚举），不进本表——engine 规则
+ * 的 kind 校验走前缀形态判定，由各消费方按 {@link FailureCause} 的 `engine_${string}`
+ * 契约自行落地。
+ *
+ * 词表编译锁：每个 class 的成员元组与 {@link FailureCause} 判别联合的对应 kind 联合
+ * 双向可赋值——判别联合扩值漏登本表（或本表多配联合外值）→ 对应行 tsc 红。
+ */
+export const FAILURE_CAUSE_KINDS_BY_CLASS = {
+  provider: ["rate_limited", "protocol_unsupported"],
+  harness: ["turn_budget_exhausted", "timeout"],
+  agent: ["no_deliverable"],
+  user: ["cancelled"],
+} as const;
+
+/**
+ * per-class 词表编译锁（双向）：本表各 class 成员元组 ↔ 判别联合对应 kind 联合。
+ * 任一 class 漏登/多配 → 本赋值 tsc 红，错误指向漏改侧。
+ */
+export const FAILURE_CAUSE_KINDS_BY_CLASS_LOCK: AssertMutuallyAssignable<
+  {
+    provider: (typeof FAILURE_CAUSE_KINDS_BY_CLASS)["provider"][number];
+    harness: (typeof FAILURE_CAUSE_KINDS_BY_CLASS)["harness"][number];
+    agent: (typeof FAILURE_CAUSE_KINDS_BY_CLASS)["agent"][number];
+    user: (typeof FAILURE_CAUSE_KINDS_BY_CLASS)["user"][number];
+  },
+  {
+    provider: Extract<FailureCause, { class: "provider" }>["kind"];
+    harness: Extract<FailureCause, { class: "harness" }>["kind"];
+    agent: Extract<FailureCause, { class: "agent" }>["kind"];
+    user: Extract<FailureCause, { class: "user" }>["kind"];
+  }
 > = true;
 
 /**

@@ -225,7 +225,10 @@ function handleToolExecutionUpdate(
  *   pendingErrorFact — 未消费的引擎 error 事实：stopReason=error/aborted 置位，后续
  *                      非 error 停因（重试恢复后的成功响应）清除——判据不依赖 record
  *                      lastError（reducer turn_end 会清空它，u2 归属）；
- *   rawStopReason / lastDiagnostics — 结构化输入停止丢弃（§3.3.2 分类机读通道）。
+ *   rawStopReason / lastDiagnostics — 结构化输入停止丢弃（§3.3.2 分类机读通道）；
+ *   queueNonEmpty — [§3.3.1 P3] follow-up/steer 队列事实（pi queue_update 事件逐帧
+ *                   刷新）：true = agent_end 后 run 将继续（_runAgentPrompt 循环
+ *                   agent.continue()），当前 agent_end 是中间边沿非轮终边沿。
  */
 interface ClosingEdgeState {
   lastStopReason: string | undefined;
@@ -237,6 +240,37 @@ interface ClosingEdgeState {
   retryAttempts: number;
   /** [P5 计账] 最近一次 auto_retry_start 边界处的 turnCount（失败尝试 turns 切片基）。 */
   failedAttemptTurnBase: number;
+  /** [P3 队列事实] 最近一条 queue_update 的「队列非空」事实（缺省 false = 空队列）。 */
+  queueNonEmpty: boolean;
+}
+
+/** pi queue_update 事件的队列事实判读（数组字段运行时 guard；缺字段按空队列）。 */
+function queueUpdateHasItems(raw: SdkEvent): boolean {
+  const steering = raw.steering;
+  const followUp = raw.followUp;
+  return (Array.isArray(steering) && steering.length > 0) || (Array.isArray(followUp) && followUp.length > 0);
+}
+
+/** auto_retry_start → journal 边界帧（[P5] 失败尝试轨迹可观测——不静默）。
+ *  pi 事件不携带失败尝试的 usage 切片（usage 只随 message_end 逐轮产出），故边界帧
+ *  只承载边界事实；失败尝试 usage 经 journal 内两边界帧之间的 message_end 帧可查。 */
+function emitAutoRetryFrame(raw: SdkEvent, phase: "start" | "end", agentEvent: AgentEventSink): void {
+  const attempt = typeof raw.attempt === "number" ? raw.attempt : 0;
+  agentEvent({
+    type: "auto_retry",
+    phase,
+    attempt,
+    ...(phase === "start"
+      ? {
+        ...(typeof raw.maxAttempts === "number" ? { maxAttempts: raw.maxAttempts } : {}),
+        ...(typeof raw.delayMs === "number" ? { delayMs: raw.delayMs } : {}),
+        ...(typeof raw.errorMessage === "string" ? { errorMessage: raw.errorMessage } : {}),
+      }
+      : {
+        ...(typeof raw.success === "boolean" ? { success: raw.success } : {}),
+        ...(typeof raw.finalError === "string" ? { finalError: raw.finalError } : {}),
+      }),
+  });
 }
 
 /** agent_end → 轮收敛分派（[§3.3.1] 停因事实优先：willRetry 只裁「是否最终 agent_end」，
@@ -257,6 +291,14 @@ function handleAgentEnd(
   // 判活 + no-progress timer + notifier steer 唤醒）未随迁移——本执行器口径是
   // 每 run 一进程，后台后代保活编排登记为协议化偏差。
   if (raw.willRetry === true) return;
+  // [subagent-observability §3.3.1 P3 队列事实] pi 1.0.0 _runAgentPrompt 循环
+  // （agent-session.js:1354-1368）：follow-up/steer 队列非空时 agent_end 后 run 继续
+  //（agent.continue()）——此刻的 agent_end 是中间边沿，不是轮终边沿。队列事实取自
+  // pi queue_update 事件（_emitQueueUpdate 在入队/出队两侧逐帧刷新，agent_end 时刻
+  // 的队列状态即在流上）。中间边沿不判终（onAgentEnd/onErroredEnd 都不发——终局
+  // 判定留给队列排空后的末边沿，以最新停因事实裁决；失败尝试已经 message_end 的
+  // error 事件入 journal，不静默）。
+  if (edge.queueNonEmpty) return;
   // [subagent-observability §3.3.1] 停因事实优先：错误停因（error/aborted）或存在
   // 未消费的引擎 error 事实 → onErroredEnd（失败收口），settled 门控在 spawn-runner
   // 同点覆盖（settled 不再是任何置 0 依据）。
@@ -394,6 +436,7 @@ export function createSdkEventTranslator(
     lastDiagnostics: undefined,
     retryAttempts: 0,
     failedAttemptTurnBase: 0,
+    queueNonEmpty: false,
   };
 
   // b. turnLimiter（spawn 版：abort = kill 子进程；steer 未接通，靠 WRAP_UP_HINT 补偿）
@@ -454,10 +497,21 @@ export function createSdkEventTranslator(
         // 计数随轮终快照上报（重试波次可见，失败尝试不再静默）。
         edge.retryAttempts += 1;
         edge.failedAttemptTurnBase = record.turnCount;
+        // [P5 journal 帧] 重试边界发帧入 journal（F1-32：失败尝试轨迹不静默——
+        // 事件经宿主 event journal 落盘，重试 usage 切片可经两边界帧之间查）。
+        emitAutoRetryFrame(raw, "start", agentEvent);
         return;
       case "auto_retry_end":
         // end 帧的成败事实已由 message_end（stopReason/errorMessage）承载——本边界
         // 无独立计账义务（retryAttempts 锚在 start 帧，finalError 即 lastErrorMessage）。
+        emitAutoRetryFrame(raw, "end", agentEvent);
+        return;
+      case "queue_update":
+        // [§3.3.1 P3 队列事实] pi queue_update（steer/followUp 入队与出队逐帧刷新）
+        // ——agent_end 的「中间边沿 vs 轮终边沿」判据事实源（pi 1.0.0 实装：
+        // agent-session.js _emitQueueUpdate 事件形状 {steering, followUp}）。
+        // 本地事实位，不翻译上协议（协议无 steer 通道，队列簿记不属 AgentEvent 词表）。
+        edge.queueNonEmpty = queueUpdateHasItems(raw);
         return;
       case "compaction_start":
         agentEvent({ type: "compaction" });
