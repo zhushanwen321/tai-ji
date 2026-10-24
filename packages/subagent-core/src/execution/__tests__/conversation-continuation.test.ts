@@ -591,6 +591,49 @@ describe("ConversationContinuation — 轮末分流（D7）与通知侧", () => 
     expect(calls.finalized[0]!.outcome).toEqual({ kind: "failed", reason: "engine_crashed: child died" });
   });
 
+  it("轮收条事实透传（§3.3.1/§3.3.3 settle 调用点）：接管三态 / usage 快照 / 观察性事实随轮终载荷下传（success/failed 两分支）", async () => {
+    // success 分支：被接管轮（promptDisposition=handled）——finalizeRoundOutcome 载荷
+    // 携带接管三态 + usage 快照（AgentUsageTotal 词形，total 派生四项和）+ 观察性事实；
+    // markRoundIdle 的 handled 分支（stopReason 不写 + 结清 no_result）由此载荷可达。
+    const record = makeRecord({});
+    const { host, calls } = makeHost(record);
+    const cont = new ConversationContinuation(record, host);
+    cont.onRunSettled(makeOutcome({
+      content: "",
+      promptDisposition: "handled",
+      usage: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 4, turns: 0 },
+      observations: ["structured output was not invoked"],
+    }));
+    await vi.waitFor(() => expect(calls.routed.length).toBe(1));
+    expect(calls.finalized[0]!.outcome).toEqual({
+      kind: "success",
+      content: "",
+      promptDisposition: "handled",
+      usage: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, total: 4 },
+      observations: ["structured output was not invoked"],
+    });
+
+    // failed 分支：事实字段同点下传（failure 分类 + usage + observations）。
+    const failRecord = makeRecord({ id: "sa-facts-fail" });
+    const fail = makeHost(failRecord);
+    const failCont = new ConversationContinuation(failRecord, fail.host);
+    failCont.onRunSettled(makeOutcome({
+      content: "",
+      error: "engine_boom",
+      failure: { class: "provider", kind: "rate_limited", retryable: "conditional", raw: "429" },
+      usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 7, turns: 1 },
+      observations: ["delivery predicate not satisfied"],
+    }));
+    await vi.waitFor(() => expect(fail.calls.notified.length).toBe(1));
+    expect(fail.calls.finalized[0]!.outcome).toEqual({
+      kind: "failed",
+      reason: "engine_boom",
+      failure: { class: "provider", kind: "rate_limited", retryable: "conditional", raw: "429" },
+      usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, cost: 0, total: 7 },
+      observations: ["delivery predicate not satisfied"],
+    });
+  });
+
   it("[U5] 成功分支：编排性关闭（settle idle + 放弃轮标记）后迟到应答被入口 status 检查拦截（不 route）", async () => {
     const record = makeRecord({});
     const { host, calls } = makeHost(record);

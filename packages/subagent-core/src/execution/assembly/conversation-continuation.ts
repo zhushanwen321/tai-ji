@@ -23,8 +23,6 @@
 
 import type {
   AgentOutcome,
-  EngineStopReason,
-  FailureCause,
   ResumeAnchor,
 } from "@zhushanwen/subagent-engine-sdk";
 
@@ -52,6 +50,9 @@ import { isAnchorResolvable, transcriptAnchorOf } from "./cold-lookup.ts";
 // [U5 / §3.2.5] worktree 续聊重建 outcome（三失败形态判别联合）。
 import type { WorktreeRebuildOutcome } from "../worktree/worktree-manager.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
+// settle 站点事实载荷单点（收尾边沿六字段条件收集——onRunSettled 分流与两 settle
+// 分支共用；usage 经 roundUsageSnapshot 适配轮收条词形）。
+import { settlementFactsOf, type SettlementFacts } from "../domain/record-model.ts";
 
 const logger = getLogger("subagents");
 
@@ -360,14 +361,11 @@ export class ConversationContinuation {
       return;
     }
     if (outcome.error !== undefined) {
-      // [subagent-observability §3.3.3] 收尾边沿事实随分流下传（failure/engineStopReason
-      // → 轮收条 rec.lastRound）——判定分类与「正常收尾」派生判据不因 chat 域载体丢失。
+      // [subagent-observability §3.3.3] 收尾边沿事实随分流下传（settlementFactsOf 六字段
+      // → 轮收条 rec.lastRound）——判定分类、「正常收尾」派生判据、接管三态、usage 快照
+      // 与观察性事实不因 chat 域载体丢失。
       voidRoundFinalChain(
-        this.settleRoundFailed(outcome.error, {
-          ...(outcome.failure !== undefined ? { failure: outcome.failure } : {}),
-          ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
-          ...(outcome.retryAttempts !== undefined ? { retryAttempts: outcome.retryAttempts } : {}),
-        }),
+        this.settleRoundFailed(outcome.error, settlementFactsOf(outcome)),
         "settleRoundFailed (onRunSettled)",
       );
       return;
@@ -715,9 +713,11 @@ export class ConversationContinuation {
     await this.host.finalizeRoundOutcome(record, {
       kind: "success",
       content: outcome.content,
-      // [§3.3.3] 引擎停因原值随轮收条落盘（正常收尾派生判据的事实输入）。
-      ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
-      ...(outcome.retryAttempts !== undefined ? { retryAttempts: outcome.retryAttempts } : {}),
+      // [§3.3.3/§3.3.1 P6] 收尾边沿事实（停因原值/重试计数/接管三态/usage 快照/
+      // 观察性事实）随轮收条落盘——「正常收尾」派生判据的事实输入；被接管轮的
+      // markRoundIdle handled 分支（stopReason 不写 + 结清 no_result + 通知接管
+      // 分支）由此可达。
+      ...settlementFactsOf(outcome),
     });
     // [u7a 生产补挂] 轮终簿记完成 = 「正在执行 → 保活」翻转边界（与旧 idle 相位帧
     //（H1 U6 已退役）同一时点语义：成功轮收敛进 idle 稳态，活句柄交 idle timer 保活）
@@ -752,15 +752,13 @@ export class ConversationContinuation {
    */
   private async settleRoundFailed(
     reason: string,
-    facts?: { failure?: FailureCause; engineStopReason?: EngineStopReason; retryAttempts?: number },
+    facts?: SettlementFacts,
   ): Promise<void> {
     const record = this.record;
     await this.host.finalizeRoundOutcome(record, {
       kind: "failed",
       reason,
-      ...(facts?.failure !== undefined ? { failure: facts.failure } : {}),
-      ...(facts?.engineStopReason !== undefined ? { engineStopReason: facts.engineStopReason } : {}),
-      ...(facts?.retryAttempts !== undefined ? { retryAttempts: facts.retryAttempts } : {}),
+      ...(facts ?? {}),
     });
     if (!notifyGateAllowsDelivery(record)) {
       this.drain();

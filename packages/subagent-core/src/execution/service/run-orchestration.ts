@@ -70,6 +70,7 @@ import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
 import { identityEnvelopeOf } from "../engine/port.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
 import type { SubagentModelSource } from "../domain/record-model.ts";
+import { settlementFactsOf } from "../domain/record-model.ts";
 import { resolveEngineModelWithTranslation } from "../engine/model-ref-translation.ts";
 import { getLogger } from "../../core/logger.ts";
 import { executeOptionsToEngineTaskSpec } from "../engine/host-task-spec.ts";
@@ -798,19 +799,29 @@ export class RunOrchestration {
         kind: "success",
         content: result.text,
         // [§3.3.3] 引擎停因原值随轮收条落盘（正常收尾派生判据的事实输入）。
+        // [§3.3.1 P6] 接管三态 / usage 快照 / 观察性事实同点透传——被接管轮的
+        // markRoundIdle handled 分支（stopReason 不写 + 结清 no_result + 通知接管
+        // 分支）由此可达。
         ...(result.engineStopReason !== undefined ? { engineStopReason: result.engineStopReason } : {}),
         ...(result.retryAttempts !== undefined ? { retryAttempts: result.retryAttempts } : {}),
+        ...(result.promptDisposition !== undefined ? { promptDisposition: result.promptDisposition } : {}),
+        ...(result.usage !== undefined ? { usage: result.usage } : {}),
+        ...(result.observations !== undefined ? { observations: result.observations } : {}),
       });
     } else {
       // [U5] 失败轮 settle（不终态化——旧一次性销毁退役，失败轮同样可续聊）。
       // [§3.3.3] 失败分类与引擎停因原值随轮收条落盘（判定链事实不再止步于 reason
-      // 串——list lastRound.failure / 通知文案点拼消费方的数据源）。
+      // 串——list lastRound.failure / 通知文案点拼消费方的数据源）；接管三态 /
+      // usage / observations 同点透传（RoundSettlementOutcome 两分支同构字段）。
       this.deps.getStore().markRoundIdle(record.id, {
         kind: "failed",
         reason: result.error ?? "round failed",
         ...(result.failure !== undefined ? { failure: result.failure } : {}),
         ...(result.engineStopReason !== undefined ? { engineStopReason: result.engineStopReason } : {}),
         ...(result.retryAttempts !== undefined ? { retryAttempts: result.retryAttempts } : {}),
+        ...(result.promptDisposition !== undefined ? { promptDisposition: result.promptDisposition } : {}),
+        ...(result.usage !== undefined ? { usage: result.usage } : {}),
+        ...(result.observations !== undefined ? { observations: result.observations } : {}),
       });
     }
     // [subagent-observability §3.3.7② one-shot 通道放行] 非 workflow origin 的一次性
@@ -842,12 +853,11 @@ export class RunOrchestration {
       sessionId: outcome.sessionId ?? record.id,
       toolCalls: [],
       ...(outcome.parsedOutput !== undefined ? { parsedOutput: outcome.parsedOutput } : {}),
-      // [subagent-observability §3.3.3] 收尾边沿事实透传（failure/engineStopReason
-      // → settleOneShotOutcome → 轮收条 rec.lastRound——one-shot 域与 workflow 域
-      // 同源，判定分类与「正常收尾」派生判据不因执行域丢失）。
-      ...(outcome.failure !== undefined ? { failure: outcome.failure } : {}),
-      ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
-      ...(outcome.retryAttempts !== undefined ? { retryAttempts: outcome.retryAttempts } : {}),
+      // [subagent-observability §3.3.1/§3.3.3/§3.3.10] 收尾边沿事实透传（failure/
+      // engineStopReason/retryAttempts/接管三态/usage 快照/观察性事实——单一构造器
+      // settlementFactsOf）→ settleOneShotOutcome → 轮收条 rec.lastRound——one-shot
+      // 域与 workflow 域同源，判定分类与「正常收尾」派生判据不因执行域丢失。
+      ...settlementFactsOf(outcome),
     };
   }
 

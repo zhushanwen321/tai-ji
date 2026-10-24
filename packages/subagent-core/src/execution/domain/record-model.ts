@@ -22,6 +22,8 @@
 
 import type {
   AgentFailureKind,
+  AgentOutcome,
+  AgentOutcomeUsage,
   AgentUsageTotal,
   ErrorFact,
   FailureCause,
@@ -120,6 +122,48 @@ export function isPiTranscriptRef(ref: TranscriptRef): ref is PiTranscriptRef {
   return ref.engine === "pi";
 }
 
+/**
+ * 协议 usage → 轮收条 usage 快照（AgentOutcomeUsage → AgentUsageTotal 单点适配）。
+ * 两域形状差异：协议终态带 contextTokens/turns、无 total；轮收条快照（AgentResult.usage
+ * / RoundSettlementOutcome.usage / RoundFacts.usage 同一词表）按 {@link AgentUsageTotal}
+ * 字段口径派生 total = 四项之和。contextTokens/turns 不进快照（轮收条轮数由轮终帧
+ * turns 字段承载）。settle 两调用点（one-shot / chat 轮）共用，防两处手写漂移。
+ */
+export function roundUsageSnapshot(usage: AgentOutcomeUsage): AgentUsageTotal {
+  const { input, output, cacheRead, cacheWrite, cost } = usage;
+  return { input, output, cacheRead, cacheWrite, cost, total: input + output + cacheRead + cacheWrite };
+}
+
+/**
+ * settle 站点事实载荷形状（全可选，缺省字段不落键）——{@link settlementFactsOf} 的
+ * 返回型，settleRoundFailed 的 facts 入参同型复用。
+ */
+export type SettlementFacts = Partial<{
+  failure: FailureCause;
+  engineStopReason: EngineStopReason;
+  retryAttempts: number;
+  promptDisposition: "started" | "queued" | "handled";
+  usage: AgentUsageTotal;
+  observations: string[];
+}>;
+
+/**
+ * 协议 AgentOutcome → settle 站点事实载荷单点（收尾边沿六字段条件收集；usage 经
+ * {@link roundUsageSnapshot} 适配轮收条词形）。消费站点：one-shot 域 outcomeToAgentResult
+ * 同构段与 chat 域 onRunSettled 失败分流 / settleRoundSuccess——多站点共用单构造器，
+ * 防逐字段手写漂移（漏字段 = 轮收条事实静默缺失）。
+ */
+export function settlementFactsOf(outcome: AgentOutcome): SettlementFacts {
+  return {
+    ...(outcome.failure !== undefined ? { failure: outcome.failure } : {}),
+    ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
+    ...(outcome.retryAttempts !== undefined ? { retryAttempts: outcome.retryAttempts } : {}),
+    ...(outcome.promptDisposition !== undefined ? { promptDisposition: outcome.promptDisposition } : {}),
+    ...(outcome.usage !== undefined ? { usage: roundUsageSnapshot(outcome.usage) } : {}),
+    ...(outcome.observations !== undefined ? { observations: outcome.observations } : {}),
+  };
+}
+
 /** 判别联合收窄检查：zcode 锚分支。 */
 export function isZcodeTranscriptRef(ref: TranscriptRef): ref is ZcodeTranscriptRef {
   return ref.engine === "zcode";
@@ -153,6 +197,19 @@ export interface AgentResult { // oe-exempt:20260930:framework:领域值对象�
   /** [subagent-observability §3.3.3 P5] 本 run 内 pi 原生重试的失败尝试计数
    *  （AgentOutcome.retryAttempts 透传；缺省 = 无重试/旧格式）。 */
   retryAttempts?: number;
+  /**
+   * [subagent-observability §3.3.1/§3.3.3] 本轮被接管收尾的标注（AgentOutcome.promptDisposition
+   * 透传；handled = 本条 prompt 未启动任何 run）。settleOneShotOutcome 消费：随轮收条
+   * rec.lastRound.promptDisposition 落盘——被接管轮结清走 no_result、通知走接管分支；
+   * 缺省 = 无接管事实。
+   */
+  promptDisposition?: "started" | "queued" | "handled";
+  /**
+   * [subagent-observability §3.3.2/§3.3.10] 观察性事实数组（AgentOutcome.observations
+   * 透传——引擎产出侧摘要，不改写 failure）。settleOneShotOutcome 消费：随轮收条
+   * rec.lastRound.observations 落盘；缺省 = 无观察项。
+   */
+  observations?: string[];
   sessionId: string;
   toolCalls: ToolCall[];
   usage?: AgentUsageTotal;
@@ -314,10 +371,12 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   // ── 永久会话模型新维度（§3.2.1；u-foundation 类型范围，U2 实装写点）──
   // 全部可选、缺省 undefined = 旧语义零迁移（现有 record 构造不破坏）。
   /**
-   * 展示维度：上一轮为什么停（旧 7 值 + 4 新展示值，见 {@link StopReason}）。
-   * undefined = 从未收尾 / 旧数据。展示+排障；U6 起参与 isOccupied 占用判定
-   * （`running && stopReason === undefined`——W4 死亡纳管态 stopReason=failed 据此
-   * 排除，[U5/D4] adoptEngineDeath 写点）。
+   * 展示维度：上一轮为什么停（值域见 {@link StopReason}——引擎原值 + 宿主中断族 +
+   * 旧推断值迁移位）。undefined = 从未收尾 / 旧数据 / 被接管轮（引擎未执行无停因）。
+   * 展示+排障；参与 isOccupied 占用判定（`running && stopReason === undefined`——
+   * 轮收条已写 = 本轮不在途的等价信号）。写入点 = markRoundIdle 轮终簿记（引擎死亡
+   * 走正常轮终——退出码非 0 → error 停因，无独立死亡写点）；在途期被轮始清点族清空
+   * （markRoundStarted / revive 格）。
    */
   stopReason?: StopReason;
   /**
