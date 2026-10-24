@@ -273,9 +273,10 @@ export class ConfigService implements IConfigService {
    * warn，无需额外 try/catch）。
    *
    * 域 3（retry-rules，subagent-observability §3.3.12）消费方在 pi 孙进程 extension
-   * （ext-config 文件读侧）——缓存落盘不直达，refreshed 且 ext-config 文件在场时由
-   * syncRetryRulesRemote 重写 effectiveRules 合并持久段；文件不在场 = 无生效通道，
-   * 跳过落盘（首次 settings 保存写点自然并入）。
+   * （ext-config 文件读侧）——缓存落盘不直达，syncRetryRulesRemote 每次同步无条件
+   * 重算并落盘 effectiveRules 派生段（编译期基线 ⊕ 可用远程覆盖 ⊕ 现有 customRules），
+   * 与远程命中 / ext-config 文件在场均无关：幂等写、单写方纪律；extension startupConfig
+   * 在启动早期建的占位文件（空 effectiveRules）由此被覆盖，基线规则默认生效。
    *
    * 返回实际发生模型合并写盘的 provider 列表供调用方决定是否广播（空 = 拉取失败/无变化/
    * 无同步对象，fail-safe 链内建在 sync 层）。

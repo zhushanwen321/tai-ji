@@ -1,28 +1,25 @@
-# 未激活会话投影缓存：首次读早于磁盘事实落定 → 陈旧在途态
+# 未激活会话事件投影（SessionEventProjection）缓存：首读建立后磁盘事实变化在激活前不可见
 
-状态：待裁决（2026-10-24 登记，a3 验收 §3.3.4 清点场景实测发现；归因级别 = 推断，见下）。
+状态：已修复（查询通道 mtime 对账失效已落地于 `session-records.ts` ensureProjection 缓存命中分支 + 两向单测；修复 commit：<待主 agent 提交后回填>）。登记来源：2026-10-24 a3 验收 §3.3.4 清点场景实测发现，D5 design-code-sync 审查定案。
 
 ## 现象
 
-宿主重启后，会话**未激活**（pi 未 spawn、extension 未运行）时对 `session.getSubagents` 的首次读取若早于 sweep 补写磁盘事实落定（实测 manifest 的 `completedAt` 比实例就绪晚约 5s），后续读请求持续返回陈旧在途态（`records=[]`）；激活（session.switch）后自愈，未激活态的后续读在清点完成后也可读到正确事实（a3b/a3c 两轮探测 `found=true, count=1`）。
+会话**未激活**（pi 未 spawn、extension 未运行）时对 `session.getSubagents` 的首读建立事件投影缓存后，磁盘事实的后续变化（如 manifest `completedAt` 补写）在该会话激活前对所有后续读不可见（持续返回陈旧在途态）；激活（session.switch）后自愈——journal 推送与 entry 游标增量通道接管失效。
 
-## 推断的机制（源码链路已核，未加探针实证那次失败的具体形态）
+## 触发来源
 
-`packages/runtime/src/services/session/events-projection.ts` 的 `SessionEventProjection`：投影缓存在首次读请求时建立，`ensureProjection` 的 `cache.projection !== null` 早退只做事件源升级（补源 + 冷读一次），不按磁盘 mtime/水位失效。未激活期间无 journal 推送源（pi 未 spawn），故首次读取落在清点补写帧之前的窗口时，缓存只装载了旧事实。
+启动清点写窗不在触发来源内：`startupSweep` 在 runtime 主链被 await、先于 WS `server.start()`，实例可接受读请求时清点必已落定，新实例不存在「首读早于清点补写」的读窗。真实触发来源 = 未激活期间绕过运行时事实喂入通道（journal 推送 / entry 游标增量）的磁盘写入：
 
-## 与原则的张力
+- 旧实例跨写：同一数据目录的前代 runtime 实例（或其 pi 进程）在事件投影建立后继续补写会话文件；
+- pi 侧重建路径写入：pi 进程对会话文件的重建 / 补写不经 runtime 事件投影喂入通道；
+- 启动清点被跳过形态：startupSweep 未覆盖或部分失败的 record 残留，后续由其他写方补写。
 
-ADR-0097「查询是真理通道：任何查询必须返回当前真值（缓存优先、磁盘兜底）」——本形态中缓存命中即返回、无磁盘兜底触发点。
+## 机制与修复（终态）
 
-## 修向候选（待裁决）
+`SessionEventProjection` 双源喂入在未激活期间双双缺席，`ensureProjection` 缓存命中早退无失效判定。修复 = 查询通道（`getSubagents` / `getWorkflows` / `resolveWorkflowRecordPath`）透传扫描 meta，缓存命中时对会话文件 mtime（`scanSessions` 的 `lastModified` = fstat.mtimeMs）核对：变化即旧实例 dispose + 重建（两源齐备，覆盖降级形态迟到升级语义），未变走缓存。职责边界：journal 推送 / entry 拉取通道各有自己的事实喂入链，不透传 meta 即不对账。
 
-1. 投影缓存命中时按记录目录 mtime / 事件水位做失效判定后再返回；
-2. 未激活会话的读请求旁路投影缓存，直接冷读磁盘。
-
-## 影响面
-
-竞态窗口为「实例就绪 → 清点写盘落定」之间的秒级窗口；窗口内读到的陈旧在途态会导致 UI 短暂显示在途、误判占用；窗口外自愈。a3 验收不受阻（清点事实证据走磁盘通道）。
+对齐 ADR-0097「查询是真理通道：任何查询必须返回当前真值」——缓存命中不是对账豁免；查询通道本就 force 扫描 meta，对账零额外 stat。两向判据有单测锁定（`session-records.test.ts` 的 mtime 失效用例组）：mtime 变 → 重建（次查询可见新事实）；mtime 未变 → 缓存（不重建）。
 
 ## 附：登记一项实现事实（非缺陷）
 
-wire `lastRound` 刻意不含 `swept`（`events-projection-last-round.ts` 头注裁决）——swept 附注只经 record 事件帧与 extension 工具面 list 条目可达；任何消费方不得依赖 `getSubagents` 拿到 swept。
+wire `lastRound` 刻意不含 `swept`（`events-projection-last-round.ts` 头注裁决）——swept 附注只经 record 事件帧与 extension 的 list 工具条目可达；任何消费方不得依赖 `getSubagents` 拿到 swept。

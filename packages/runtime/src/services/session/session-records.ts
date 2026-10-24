@@ -89,7 +89,7 @@ import { logger } from '../../infra/logger.js'
 import { discoverAndRegisterEngines, engineConversationCapable, engineModelTranslationTable } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
 import { getSubagentMessageResultsDir, translateByTableReverse } from '@zhushanwen/subagent-core'
 import { isStrictlyUnder } from '../../utils/path-utils.js'
-import type { ISessionStore } from '../ports/session.js'
+import type { ISessionStore, ScannedSessionMeta } from '../ports/session.js'
 import { toErrorMessage } from '../../utils/errors.js'
 import { withFileLockSync } from '../../utils/file-lock.js'
 import { atomicWrite } from '../../utils/fs-utils.js'
@@ -170,6 +170,14 @@ export interface RecordEntriesCache {
    * 单点合并。惰性创建（首个失效拉取 / 读 RPC / 对账触达时）；销毁随 cache。
    */
   projection: SessionEventProjection | null
+  /**
+   * 建投影时的会话文件 mtime（扫描 meta.lastModified，即 fstat.mtimeMs）；null =
+   * 建投影时会话文件不在册（pi 延迟写入窗口）。查询通道（getSubagents/getWorkflows）
+   * 的失效判据：命中缓存后与最新扫描值核对，变化即重建——未激活会话无 journal 推送、
+   * 无 entry 游标增量，磁盘事实（启动清点补写 / 旧实例跨写 / pi 侧重建写入）在激活前
+   * 唯一显形通道就是这次核对（查询是真理通道，ADR-0097）。
+   */
+  projectionSourceMtimeMs: number | null
   /**
    * [pull-push W0] 首次拉取未决标志：收到过 record 失效信号但尚未成功完成一轮拉取。
    * 置位 = invalidateRecordEntries 通过 customType 门；清除 = refreshRecordEntries 成功
@@ -601,6 +609,7 @@ export class SessionRecords {
       publishedWorkflows: new Map(),
       publishedPlanState: null,
       projection: null,
+      projectionSourceMtimeMs: null,
       awaitingFirstPull: false,
     }
     this.recordEntriesCaches.set(sessionId, cache)
@@ -626,20 +635,42 @@ export class SessionRecords {
    * 会话 meta 不可得（pi 延迟写入 / 测试窄 mock）→ 无事件源的 entry-only
    * 降级派生视图。
    */
-  private ensureProjection(sessionId: string, cache: RecordEntriesCache): SessionEventProjection {
+  private ensureProjection(
+    sessionId: string,
+    cache: RecordEntriesCache,
+    resolvedMeta?: ScannedSessionMeta,
+  ): SessionEventProjection {
     if (cache.projection !== null) {
+      // [查询真理通道失效（F1-51/F1-17）] 命中缓存不等于豁免对账（设计 §3.3.6，ADR-0097
+      // 「查询是真理通道：任何查询必须返回当前真值」）：未激活会话无 journal 推送、无
+      // entry 游标增量，磁盘事实（启动清点补写 / 旧实例跨写 / pi 侧重建路径写入）在
+      // 激活前唯一显形通道 = 查询时与会话文件 mtime 核对，变化即重建。调用方透传扫描
+      // meta 才核对（getSubagents/getWorkflows 等查询通道已 force 扫描，零额外 stat）；
+      // journal 推送 / entry 拉取通道各有自己的事实喂入链，不透传 = 跳过核对。
+      this.rebuildProjectionIfSourceChanged(sessionId, cache, resolvedMeta)
       // [降级闩死修复 2026-10-02；event-push-channel 重演] 事件源迟到升级：创建时
       // meta 不可得（pi flush 前窗口 / 磁盘扫描竞态）建出的目录缺席降级派生视图，推送
       // 对其恒拒（applyJournalReport 目录检查返回 false）——早退永久复用 = fold 通
       // 道对该 session 终身死亡（「icon 无 agent」形态）。meta 可得后整派生视图重建：
       // 事件源目录是构造期 readonly 注入，补源 = 换实例（entry 批重放 + attach 冷
-      // 读在新实例重演，fold 从磁盘事实源收敛）。
+      // 读在新实例重演，fold 从磁盘事实源收敛）。上方 mtime 重建已产出两源齐备实例时
+      // 本路径零成本早退。
       this.upgradeProjectionEventSources(sessionId, cache)
       return cache.projection
     }
-    const meta = this.deps.sessionStore
+    const meta = resolvedMeta ?? this.deps.sessionStore
       .scanSessions({ force: true })
       .find((s) => s.id === sessionId)
+    this.buildProjection(sessionId, cache, meta)
+    return cache.projection!
+  }
+
+  /** 投影构建单点（首建与 mtime 失效重建共用）：换实例语义（事件源目录构造期注入）+ mtime 登记。 */
+  private buildProjection(
+    sessionId: string,
+    cache: RecordEntriesCache,
+    meta: ScannedSessionMeta | undefined,
+  ): void {
     const projection = new SessionEventProjection({
       sessionId,
       recordsDir: getSubagentRecordsDir(sessionId, getConfigDir()),
@@ -655,7 +686,27 @@ export class SessionRecords {
     cache.projection = projection
     projection.attach()
     this.syncCacheFromProjection(cache, projection)
-    return projection
+    cache.projectionSourceMtimeMs =
+      meta !== undefined && typeof meta.lastModified === 'number' ? meta.lastModified : null
+  }
+
+  /**
+   * 查询通道 mtime 对账（rebuildProjectionIfSourceChanged：ensureProjection 缓存命中
+   * 分支内联）：会话文件 mtime 与建投影时登记值不一致（含降级投影首次对账 null→有值，
+   * 会话文件此间落盘）→ 旧实例 dispose + 重建换新（两源齐备，覆盖迟到升级语义——
+   * 降级期间会话文件已写入的 entry 也随冷读重读，原位补源会漏该批）。mtime 未变走
+   * 缓存；任一侧 mtime 未知（会话不在册 / 扫描 meta 无 lastModified）跳过，交由
+   * 各自事实喂入链收敛。
+   */
+  private rebuildProjectionIfSourceChanged(
+    sessionId: string,
+    cache: RecordEntriesCache,
+    meta: ScannedSessionMeta | undefined,
+  ): void {
+    if (meta === undefined || typeof meta.lastModified !== 'number') return
+    if (cache.projectionSourceMtimeMs !== null && cache.projectionSourceMtimeMs === meta.lastModified) return
+    cache.projection?.dispose()
+    this.buildProjection(sessionId, cache, meta)
   }
 
   /**
@@ -1104,7 +1155,8 @@ export class SessionRecords {
       }
     }
     const cache = this.ensureRecordEntriesCache(sessionId)
-    const projection = this.ensureProjection(sessionId, cache)
+    // target 透传 = mtime 对账素材（查询是真理通道，见 ensureProjection 注释）
+    const projection = this.ensureProjection(sessionId, cache, target)
     return {
       records: this.enhanceSubagentDetails(
         sessionId,
@@ -1320,7 +1372,8 @@ export class SessionRecords {
       return { records, oversize, found: true }
     }
     const cache = this.ensureRecordEntriesCache(sessionId)
-    const projection = this.ensureProjection(sessionId, cache)
+    // target 透传 = mtime 对账素材（同 getSubagents，查询是真理通道）
+    const projection = this.ensureProjection(sessionId, cache, target)
     // run 详情载荷增强（subagent-model-switch §9 transport 行）：run 级覆盖查询 +
     // 逐成员携带（最近生效值源 = 成员 SubagentRecord 的增强产物——先经
     // enhanceSubagentDetails 取成员派生值，再由 projectSubagentModelDetailIntoRuns
@@ -1422,7 +1475,8 @@ export class SessionRecords {
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
     if (!target) return undefined
     const cache = this.ensureRecordEntriesCache(sessionId)
-    const projection = this.ensureProjection(sessionId, cache)
+    // target 透传 = mtime 对账素材（同 getSubagents，查询是真理通道）
+    const projection = this.ensureProjection(sessionId, cache, target)
     return projection.sources.v2WorkflowRegistered.get(runId)?.recordPath
   }
 

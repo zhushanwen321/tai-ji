@@ -11,7 +11,7 @@
  *   importOriginal 保留），withFileLockSync/atomicWrite 真实执行。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, rmSync, truncateSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, truncateSync, utimesSync } from 'node:fs'
 import { logger } from '../../../infra/logger.js'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -1617,6 +1617,90 @@ describe('[W1] 读侧换源：磁盘 entry-only 派生视图 / v2 读派生视�
       // RPC 读侧同源：getSubagents 与已发布帧一致（读请求唯一数据源 = 派生视图）
       const rpc = await records.getSubagents('s1')
       expect(rpc.records[0]).toMatchObject({ subagentId: 'sa-1', status: 'idle', stopReason: 'completed' })
+    } finally {
+      rmSync(world.worldDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+})
+
+// ── 查询真理通道：未激活会话投影 mtime 失效（F1-51/F1-17）───────────────
+//
+// 验收对照（设计 §3.3.6，ADR-0097）：未激活会话（无 journal 推送、无 entry 游标增量）
+// 首次读建投影后，磁盘事实补写（启动清点落定形态）在激活前的可见性由「会话文件 mtime
+// 对账」承载——① mtime 变化 → 重建投影，次查询读到新事实；② mtime 未变 → 走缓存不重建。
+// scanSessions mock 返回真实 statSync mtimeMs（生产同式：lastModified = fstat.mtimeMs）；
+// mtime 经 fs.utimesSync 显式设定（写内容与 mtime 解耦，不依赖写入时刻的粒度）。
+describe('查询真理通道：未激活会话事件投影 mtime 失效（F1-51/F1-17）', () => {
+  /** 整数秒 mtime 基线/更新值（utimesSync 数字参数按秒解释，回读 mtimeMs 无粒度歧义）。 */
+  const MTIME_BASE_S = 1000
+  const MTIME_AFTER_S = 2000
+
+  function makeUnactivatedWorld(): {
+    world: ReturnType<typeof makeV2World>
+    records: SessionRecords
+    rewriteSessionFile: (entries: Array<Record<string, unknown>>, mtimeSeconds: number) => void
+  } {
+    const cwd = '/tmp/mtime-proj'
+    const world = makeV2World(cwd)
+    piAgentDirRef.dir = world.worldDir
+    const rewriteSessionFile = (entries: Array<Record<string, unknown>>, mtimeSeconds: number): void => {
+      writeFileSync(world.sessionFile, entries.map((e) => JSON.stringify(e)).join('\n') + '\n')
+      utimesSync(world.sessionFile, mtimeSeconds, mtimeSeconds)
+    }
+    rewriteSessionFile([
+      { type: 'session', id: 's1', cwd },
+      subagentRegisteredV2('sa-1'),
+    ], MTIME_BASE_S)
+    const { records } = makeRecords({
+      sessionStore: {
+        scanSessions: vi.fn(() => [{
+          id: 's1',
+          filePath: world.sessionFile,
+          cwd,
+          lastModified: statSync(world.sessionFile).mtimeMs,
+        }]),
+      } as unknown as ISessionStore,
+    })
+    return { world, records, rewriteSessionFile }
+  }
+
+  it('mtime 变化 → 重建投影：未激活会话首读建缓存后磁盘补写的新事实次查询可见', async () => {
+    const { world, records, rewriteSessionFile } = makeUnactivatedWorld()
+    try {
+      // 首读建事件投影：会话文件只有注册条目 → running 在途态（陈旧快照原缺陷形态）
+      const first = await records.getSubagents('s1')
+      expect(first.records[0]).toMatchObject({ subagentId: 'sa-1', status: 'running' })
+
+      // 磁盘事实补写（清点落定形态：settled 条目追加）+ 显式新 mtime
+      rewriteSessionFile([
+        { type: 'session', id: 's1', cwd: '/tmp/mtime-proj' },
+        subagentRegisteredV2('sa-1'),
+        subagentSettledV2('sa-1'),
+      ], MTIME_AFTER_S)
+
+      // 次查询：mtime 对账命中变化 → 投影重建 → 新事实可见
+      const second = await records.getSubagents('s1')
+      expect(second.records[0]).toMatchObject({ subagentId: 'sa-1', status: 'idle' })
+    } finally {
+      rmSync(world.worldDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('mtime 未变 → 走缓存不重建：盘上补写内容不进入读取结果（缓存仍是判定真值）', async () => {
+    const { world, records, rewriteSessionFile } = makeUnactivatedWorld()
+    try {
+      const first = await records.getSubagents('s1')
+      expect(first.records[0]).toMatchObject({ subagentId: 'sa-1', status: 'running' })
+
+      // 盘上内容已补写，但 mtime 显式设回首读时的值（未变）→ 对账判定缓存有效
+      rewriteSessionFile([
+        { type: 'session', id: 's1', cwd: '/tmp/mtime-proj' },
+        subagentRegisteredV2('sa-1'),
+        subagentSettledV2('sa-1'),
+      ], MTIME_BASE_S)
+
+      const second = await records.getSubagents('s1')
+      expect(second.records[0]).toMatchObject({ subagentId: 'sa-1', status: 'running' })
     } finally {
       rmSync(world.worldDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
