@@ -7,10 +7,19 @@
   "taijiPlugin": {
     "manifestVersion": 1,
     "main": "index.js",
-    "activationEvents": ["onStartupFinished"],
+    "activationEvents": [
+      "onStartupFinished"
+    ],
     "trustLevel": "sandbox",
     "namespace": "update-demo",
-    "capabilities": ["network.http"],
-    "readPaths": ["Documents/taiji-verify-update-demo.json"]
+    "capabilities": [
+      "network.http"
+    ],
+    "readPaths": [
+      "Documents/taiji-verify-update-demo.json"
+    ],
+    "permissions": [
+      "providers.write"
+    ]
   }
 }

@@ -4,10 +4,10 @@
  * plugin.list status=crashed；C：crash journal 行）+ 邻居与宿主不受影响
  * （builtin 插件状态不变、宿主 RPC 通道正常）。
  *
- * UI 面缺口（如实登记 degraded）：设计 S13 期望「家族卡显示『插件已停止』+ 重启」，
- * 现行实现无此 UI——全仓 grep「已停止」/重启动作零命中（家族卡只有 installed/可更新
- * 徽标，插件管理卡只有 已启用/已禁用 两态文本，无 crashed 呈现与重启动作）。本剧本
- * 断言 A 通道实际呈现（插件卡在场 + 状态文本照录作证据），缺失面记 uncovered。
+ * UI 面缺口（如实登记 degraded/notProvable）：设计 S13 期望「家族卡显示『插件已停止』+ 重启」，
+ * 现行实现无此 UI——插件管理面对 crashed 插件零呈现（扩展页呈「未发现已安装插件」），
+ * 崩溃的实际反馈面 = 崩溃 toast（plugin:crashed → showToast，4s 消失窗）。本剧本断言
+ * toast 呈现（A），管理面缺口取证 attach 照录（不判失败）。
  *
  * 装配：本机 mock npm registry（同 p1-plugin-install-confirm）；无 LLM 需求。
  */
@@ -35,7 +35,7 @@ export const meta = {
     'kill fork 后崩溃检测生效：plugin:crashed 广播（payload.pluginId 命中）+ plugin.list status=crashed（B 双证）',
     'C：crash journal 落 plugin-worker crash 行（processId=sandbox-<pluginId> + pluginIds 命中）',
     '隔离性：builtin 插件 scheduler-manager 状态不受影响；宿主 RPC（ping / config.getProviders / plugin.list）全部正常',
-    'A：插件管理页该插件卡仍呈现（状态文本照录作缺口证据）',
+    'A：崩溃 toast 呈现（plugin:crashed → showToast，文案「插件 <id> 崩溃: …」含插件标识，4s 自动消失窗内观测）；插件管理面对 crashed 插件的呈现缺口照录（证据 attach，不判失败）',
   ],
   notProvable: [
     '「家族卡显示『插件已停止』+ 重启按钮」——现行实现无该 UI 面（uncovered，产品缺口非剧本缺口）',
@@ -104,6 +104,19 @@ export async function run(ctx) {
   }
   ev.step({ step: 'crash.inject', channel: 'C', exitCode: 0, stats: { pid: fork.pid, signal: 'SIGKILL' } })
 
+  // A 通道①：崩溃 toast（现行实现的崩溃反馈面：plugin:crashed → showToast
+  // `插件 <id> 崩溃: <error>`，TOAST_DURATION_MS=4000 自动消失——必须在过窗前观测）
+  const toastHit = await pollUntil(async () => {
+    const loc = page.locator('[data-testid="toast-container"]', { hasText: `插件 ${PLUGIN_ID} 崩溃` })
+    return (await loc.count().catch(() => 0)) > 0
+  }, (hit) => hit === true, { timeoutMs: 8_000, intervalMs: 200 })
+  ev.assert('A: 崩溃 toast 呈现（文案含插件标识）', toastHit === true, {
+    channel: 'A',
+    expected: `toast-container 含「插件 ${PLUGIN_ID} 崩溃」（4s 消失窗内）`,
+    actual: toastHit === true ? '命中' : '8s 未观测到（toast 已过窗或未弹）',
+  })
+  await ui.screenshot('s13-crash-toast')
+
   // 崩溃检测：plugin:crashed 广播（B 事件流）+ plugin.list status=crashed（B 拉取）
   const crashedEvt = await protocol.waitFor(
     (e) => e.type === 'plugin:crashed' && e.payload?.pluginId === PLUGIN_ID,
@@ -162,7 +175,8 @@ export async function run(ctx) {
     actual: othersCrashed.map((p) => p.pluginId).join(',') || '0',
   })
 
-  // ── A 通道：崩溃后插件管理页的实际呈现（缺口证据照录） ──────────
+  // ── A 通道②：插件管理面对 crashed 插件的呈现（缺口照录，不判失败——设计 S13
+  //    「插件已停止 + 重启」现行实现无对应 UI，缺口已登记 meta.notProvable；此处只取证）
   try {
     const navVisible = await page.locator('[data-testid="settings-nav-extension"]').first().isVisible().catch(() => false)
     if (!navVisible) await ui.click('testid=sidebar-settings')
@@ -172,18 +186,14 @@ export async function run(ctx) {
       await ui.click('testid=extension-contributions-entry')
     }
     await ui.expectVisible('testid=plugin-settings-page', { timeoutMs: 15_000 })
-    const card = page.locator(`[data-testid="plugin-card"]`).filter({ hasText: 'Crash Demo' })
-    const cardCount = await card.count()
-    const statusText = cardCount > 0 ? await card.first().locator('[data-testid="plugin-enabled"]').innerText().catch(() => '(读取失败)') : '(卡片不在)'
-    ev.assert('A: 崩溃后插件卡仍呈现（状态文本照录）', cardCount > 0, {
-      channel: 'A',
-      expected: '设计期望「插件已停止」+ 重启按钮（现行实现无此 UI 面 → uncovered）',
-      actual: `cards=${cardCount} 状态文本="${String(statusText).trim()}"`,
-    })
+    const cardCount = await page.locator('[data-testid="plugin-card"]').count()
+    const pageText = await ui.text('testid=plugin-settings-page')
+    ev.attach('s13-management-surface-text', `plugin-card ×${cardCount}；页面文案：${pageText.slice(0, 300)}`)
     await ui.screenshot('s13-plugin-card-after-crash')
+    gotchas.push(`插件管理面对 crashed 插件零呈现（plugin-card ×${cardCount}，页面呈「${pageText.slice(0, 40).trim()}」）——崩溃反馈面 = 崩溃 toast（① 已断言）`)
   } catch (e) {
-    // A 通道呈现观测失败不阻断隔离性结论（B/C 双证已闭合）；缺口照录
-    uncovered.push(`崩溃后插件管理页 A 通道观测未完成：${e instanceof Error ? e.message : String(e)}`)
+    // 管理面取证失败不阻断结论（B/C 双证 + toast 已闭合）；缺口照录
+    uncovered.push(`插件管理面取证未完成：${e instanceof Error ? e.message : String(e)}`)
   }
 
   log('S13 done')

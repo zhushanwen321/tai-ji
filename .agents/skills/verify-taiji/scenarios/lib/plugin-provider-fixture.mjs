@@ -41,7 +41,7 @@ export const PAT_INPUT_ID = 'demo-pat'
 export const CONFIRM_ACTION_ID = 'demo-confirm'
 
 /** 与 fixture manifest permissions 逐字同集（完整 RPC 方法名直申通道）。 */
-const GRANTED_METHODS = [
+export const GRANTED_METHODS = [
   'plugin.views.update',
   'plugin.commands.register',
   'plugin.commands.invoke.result',

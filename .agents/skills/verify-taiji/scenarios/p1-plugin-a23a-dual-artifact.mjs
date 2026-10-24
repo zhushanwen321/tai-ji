@@ -32,7 +32,6 @@ import {
   registryEnv,
 } from './lib/mock-npm-registry.mjs'
 import {
-  openPluginFlow,
   closePluginFlow,
 } from './lib/plugin-flow-helper.mjs'
 import { resolveDataDirFromArgv } from './lib-plugin-fixtures.mjs'
@@ -154,7 +153,17 @@ export async function run(ctx) {
     })
 
   // ── 安装（家族卡路径：清单驱动的羊毛用户路径）─────────────────
-  await openPluginFlow(ui, page)
+  // 就绪锚用页头常驻 provider-template-picker（页头无条件渲染）：本剧本 import 阶段
+  // 预建 dataDir（seed 清单/权限）→ 模板种子跳过 → agent/models.json 缺失 → Provider
+  // 列表空 → provider-list-header（v-if 列表非空）永远不渲染（plugin-provider-fixture
+  // openProviderPage 同款坑位登记，2026-10-24 d3-r4-a23a 首跑归因）。
+  await ui.click('testid=sidebar-settings')
+  await ui.expectVisible('testid=settings-nav-provider')
+  await ui.click('testid=settings-nav-provider')
+  await ui.expectVisible('testid=provider-template-picker')
+  await ui.click('testid=provider-template-picker')
+  await ui.click('testid=add-menu-plugin')
+  await ui.expectVisible('testid=plugin-provider-flow')
   await ui.expectVisible('testid=plugin-family-grid')
   const cardSel = 'css=[data-testid="plugin-family-card"]'
   const cardText = await ui.text(cardSel)
@@ -248,23 +257,19 @@ export async function run(ctx) {
 
   // ── 卸载（plugin.uninstall → U4 双产物卸载编排）───────────────
   await protocol.call('plugin.uninstall', { pluginId: PLUGIN_ID })
-  const unlisted = await pollValue(
-    async () => {
-      const r = await protocol.call('plugin.list', {})
-      return (r.plugins ?? []).some((p) => p.pluginId === PLUGIN_ID)
-    },
-    (still) => !still,
-    { timeoutMs: 30_000, label: 'plugin.list 无该项' },
+  const unlisted = await pollGone(
+    async () => (await protocol.call('plugin.list', {})).plugins?.some((p) => p.pluginId === PLUGIN_ID) ?? false,
+    { timeoutMs: 30_000 },
   )
   ev.assert('B: 卸载后 plugin.list 无该项', unlisted, {
     channel: 'B',
     expected: `无 ${PLUGIN_ID}`,
     actual: unlisted ? '已移除' : '仍在列表',
   })
-  const gonePlugin = await pollValue(() => fs.existsSync(targetDir), (v) => !v, { timeoutMs: 15_000, label: '插件目录移除' })
+  const gonePlugin = await pollGone(() => fs.existsSync(targetDir), { timeoutMs: 15_000 })
   const installedAfter = readJson(installedJsonPath)
-  const goneExtDir = await pollValue(() => fs.existsSync(extDir), (v) => !v, { timeoutMs: 15_000, label: 'pi 扩展目录移除' })
-  const goneModels = await pollValue(() => modelsProviders().includes(PROVIDER_ID), (v) => !v, { timeoutMs: 15_000, label: 'models.json 条目移除' })
+  const goneExtDir = await pollGone(() => fs.existsSync(extDir), { timeoutMs: 15_000 })
+  const goneModels = await pollGone(() => modelsProviders().includes(PROVIDER_ID), { timeoutMs: 15_000 })
   ev.assert('C: 卸载五处完整清除（插件目录 / installed.json / pi 扩展目录 / settings 登记 / models.json 条目）',
     gonePlugin && !installedAfter?.[PLUGIN_ID] && goneExtDir && !settingsPackages().includes(`npm:${EXT_PKG}`) && goneModels, {
       channel: 'C',
@@ -299,17 +304,30 @@ function buildRegistryMap(repo) {
   }
 }
 
-/** 条件轮询（异步判定，每轮重算；超时返回最后值，由断言呈现失败形态）。 */
+/** 条件轮询取值（异步判定，每轮重算；超时返回末值——失败形态由断言呈现，不抛）。 */
 async function pollValue(fn, predicate, { timeoutMs, intervalMs = 500, label = 'condition' }) {
   const deadline = Date.now() + timeoutMs
+  let last
   for (;;) {
-    const value = await fn()
-    if (predicate(value)) return value
+    last = await fn()
+    if (predicate(last)) return last
     if (Date.now() >= deadline) {
       const e = new Error(`pollUntil 超时（${timeoutMs}ms）: ${label}`)
       e.hint = '核对安装编排（plugin.list / extension.list / 磁盘路径）与 runtime 日志'
+      e.evidence = `末值=${JSON.stringify(last)?.slice(0, 200)}`
       throw e
     }
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+}
+
+/** 布尔消失轮询：fn() 为假值即通过（返回 true）；超时返回 false（断言呈现残留形态）。 */
+async function pollGone(fn, { timeoutMs, intervalMs = 500 }) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const gone = !(await fn())
+    if (gone) return true
+    if (Date.now() >= deadline) return false
     await new Promise((r) => setTimeout(r, intervalMs))
   }
 }

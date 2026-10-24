@@ -7,8 +7,13 @@
   "taijiPlugin": {
     "manifestVersion": 1,
     "main": "index.js",
-    "activationEvents": ["onStartupFinished"],
+    "activationEvents": [
+      "onStartupFinished"
+    ],
     "trustLevel": "sandbox",
-    "namespace": "neighbor-stress"
+    "namespace": "neighbor-stress",
+    "permissions": [
+      "providers.write"
+    ]
   }
 }
