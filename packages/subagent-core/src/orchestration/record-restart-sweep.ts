@@ -94,7 +94,8 @@ async function listSubagentRecordsDirs(dataDir: string): Promise<string[]> {
     .map((ent) => getSessionSubagentRecordsDir(String(ent.name), base));
 }
 
-/** 收条统计与轮计数的 carry-forward 载体（上一收条值——缺帧诚实 0）。 */
+/** 收条统计与轮计数的 carry-forward 载体（上一收条值——缺帧诚实 0；round 维在
+ *  轮始帧处翻转为轮始轮数，见 {@link judgeEventTail} 头注）。 */
 interface LastReceiptStats { // oe-exempt:20261024:framework:清点收条内部汇总结构，仅 record-restart-sweep 单消费点（Rule of Three 未满，非 ports/SDK 契约）
   round: number;
   turns: number;
@@ -107,8 +108,13 @@ interface LastReceiptStats { // oe-exempt:20261024:framework:清点收条内部�
  *                    model-override）——在途形态成立；
  *   - "settled"    = 末帧是轮终/终局收条（round-idle / settled）——孤儿已自收尾，
  *                    manifest 快照只是半更新窗滞后，让位不补写。
- * 附带上一收条统计（swept 收条的 turns/totalTokens/round carry-forward——收条缺帧
- * 时诚实 0，与 run 侧收编统计口径一致）。
+ * 附带上一收条统计（swept 收条的 turns/totalTokens carry-forward——收条缺帧时
+ * 诚实 0，与 run 侧收编统计口径一致）。round 维在轮终/终局收条处取收条值，在
+ * 轮始帧处翻转为轮始轮数（markRoundStarted 写「已收尾轮数」）——补写轮终语义值 =
+ * 轮始轮数 + 1（对齐 markRoundIdle 递增后落帧），reopen（round 归零帧）后的首个
+ * 在途轮因此不再携带旧世代轮数。轮始帧是唯一的 round 翻转点：reopen 后尚未轮始的
+ * record 不刷 running 快照（markReopened 不写 manifest 派生视图），不进清点候选，
+ * 本判读不会被消费。
  */
 function judgeEventTail(events: readonly RecordEvent[]): {
   verdict: "in-flight" | "settled";
@@ -132,8 +138,10 @@ function judgeEventTail(events: readonly RecordEvent[]): {
         totalTokens: event.totalTokens,
       };
     } else if (event.type === "record-round-started") {
-      // 轮始帧 = 回到在途（续轮形态——轮终收条让位语义被轮始翻转覆盖）。
+      // 轮始帧 = 回到在途（续轮形态——轮终收条让位语义被轮始翻转覆盖）+ 在途轮
+      // 计数翻转为轮始轮数（补写轮终语义值的基准，见方法头注）。
       verdict = "in-flight";
+      lastReceipt.round = event.round;
     }
   }
   return { verdict, lastReceipt };

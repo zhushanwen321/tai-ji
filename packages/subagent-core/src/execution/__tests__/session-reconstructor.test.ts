@@ -143,6 +143,21 @@ describe("reconstructFromFile", () => {
       expect(rec!.result).toBe("first\n\nsecond");
     });
 
+    it("空正文（无 text block）→ result 空串保真（§3.3.3 空正文语义：空串 = 无文本输出，非异常）", () => {
+      writeJsonl([
+        headerLine(),
+        identityEntry({ id: "r1", agent: "w", mode: "background", task: "t", startedAt: 100 }),
+        assistantEntry([{ type: "toolCall", id: "tc-1", name: "bash", arguments: {} }], { ts: 1000 }),
+        toolResultEntry("tc-1", "bash", { text: "ok" }),
+        assistantEntry([], { ts: 2000 }),
+      ]);
+      const rec = reconstructFromFile(filePath);
+      expect(rec).toBeDefined();
+      expect(rec!.turnCount).toBeGreaterThan(0);
+      // 空串 = 已收尾但无文本输出；与「未产出」（undefined）可区分。
+      expect(rec!.result).toBe("");
+    });
+
     it("读出 identity 里的 rootSessionId", () => {
       writeJsonl([
         headerLine(),

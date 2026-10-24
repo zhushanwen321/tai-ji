@@ -154,6 +154,26 @@ describe("markRoundIdle 正常轮终磁盘侧（A-lite 簿记⑩⑪）", () => {
     expect(idle?.error).toBeUndefined();
   });
 
+  it("[§3.3.3 空正文语义] 空正文成功轮：resultSummary 键在场值空串（读侧可区分空串与缺席）", () => {
+    const record = makeRecord("bg-empty-body", { sessionFile });
+    store.register(record);
+
+    expect(store.markRoundIdle("bg-empty-body", { kind: "success", content: "" })).toBe(true);
+
+    // 内存侧空串保真（settleRoundResult 原样透传——空 = 无文本输出，非异常）。
+    expect(record.result).toBe("");
+    // 帧面键在场值空串——summarize 空串不再归一 undefined；旧帧键缺席仍 = 未记录。
+    const lines = fs
+      .readFileSync(path.join(manifestDir, "bg-empty-body.events"), "utf-8")
+      .trim()
+      .split("\n");
+    const idle = lines
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((e) => e.type === "record-round-idle");
+    expect(Object.keys(idle ?? {})).toContain("resultSummary");
+    expect(idle?.resultSummary).toBe("");
+  });
+
   it("失败轮（pi 锚）：收条 reason=failed + lastError + 内存 stopReason=failed + binding 快照在场", () => {
     const record = makeRecord("bg-fail", { sessionFile });
     record.turnCount = 1;

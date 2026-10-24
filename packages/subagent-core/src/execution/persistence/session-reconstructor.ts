@@ -510,7 +510,10 @@ function buildReconstructedRecord(
     model,
     thinkingLevel,
     endedAt: rebuilt.lastEntryTsMs,
-    result: resultText.length > 0 ? resultText : undefined,
+    // [subagent-observability §3.3.3 空正文语义] 空正文保真：空串 = 无文本输出
+    // （纯工具调用收尾），非异常——归一 undefined 会抹掉「已收尾无文本」与
+    // 「未产出」的区分。
+    result: resultText,
     error: rebuilt.lastError,
     eventLog,
   };

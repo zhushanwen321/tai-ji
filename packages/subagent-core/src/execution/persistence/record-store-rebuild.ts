@@ -48,9 +48,9 @@ import {
   IDENTITY_HEAD_BYTES,
 } from "./session-reconstructor.ts";
 import type { ClosedReason, ExecutionMode, ExecutionStatus, RecordOrigin, ZcodeTranscriptRef } from "../domain/record-types.ts";
-import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { ExecutionRecord, RoundFacts } from "../domain/record-model.ts";
 import type { SubagentRecord, SubagentListLastRound } from "../assembly/types.ts";
-import { CLOSED_REASONS as CLOSED_REASON_LIST } from "../domain/record-types.ts";
+import { CLOSED_REASONS as CLOSED_REASON_LIST, ROUND_TERMINAL_STOP_REASONS } from "../domain/record-types.ts";
 import { isZcodeTranscriptRef, isValidStopReason } from "../domain/record-model.ts";
 
 const logger = getLogger("subagents");
@@ -807,6 +807,9 @@ export function buildRecord(
       displayItems: getDisplayItems(base),
       result: base.result,
       error: base.error,
+      // [subagent-observability §3.3.5] lastError 随全量重建透传（session jsonl 的
+      // 错误事实扫描产物——错误事实只追加语义，跨轮可见）。
+      lastError: base.lastError,
       sessionFile: base.sessionFile,
       worktree: base.worktree,
     };
@@ -837,6 +840,7 @@ export function buildRecord(
       displayItems: [],
       result: undefined,
       error: undefined,
+      lastError: undefined,
       sessionFile: base.sessionFile,
       worktree: base.worktree,
     };
@@ -1102,7 +1106,8 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
  * [U7 / §3.2.7] revive 统计基线水合：事件流折叠（唯一事实源，[② 读侧换源] 后取代
  * binding 快照读侧）→ 内存 record 基线。max 合并防御调用方传入已带统计的形态
  * （水合只增不减——防归零覆盖的语义本体）；epoch 同款 max（跨重启单调防撞）；
- * lastAbandonedRound / transcriptRef 仅缺省回填（非空不覆盖，调用方冷查水合值优先）。
+ * lastAbandonedRound / transcriptRef / lastRound / lastError 仅缺省回填（非空不
+ * 覆盖，调用方冷查水合值优先）。
  *
  * fold 来源 = TerminalCtx.foldOf 注入位（调用时读事件流——事件流未接线的纯内存
  * 形态返回 undefined，本函数整体 no-op）。
@@ -1122,6 +1127,49 @@ function hydrateModelOverride(
   (record as MutableOverrideRecord).modelOverride = copyModelOverride(override);
 }
 
+/**
+ * [subagent-observability §3.3.6/§3.3.5] 轮收条事实与 lastError 水合（缺省回填，
+ * 非空不覆盖——与 transcriptRef 同构）：
+ *   - lastRound ← 最近轮终收条帧（fold.roundIdle）的事实字段。组装独立于
+ *     {@link lastRoundFromFold}：读模型字段集不同——record 内的 RoundFacts 只收
+ *     「派生不出来的事实」（result/turns 已在聚合字段上，不重复存储）。
+ *   - lastError ← 最新带失败原文的收条帧（新旧以 lastEvent 判定，另一帧作回落）
+ *     ——「最后一个非空轮失败」在 fold 单槽收条上的等价形。
+ *
+ * 数据源 = 既有事件帧，零数据格式变更。已知边界：跨「失败轮 → 成功轮」后更早
+ * 轮的失败原文 fold 不保留（单槽收条），此形态 lastError 以最近收条为准——完整
+ * 等价需事件流逐帧扫描或 fold 扩展失败事实槽。
+ */
+/** 帧上停因值的引擎三态收窄（历史/异常宽词表值不入 RoundFacts——值域检查归一，
+ *  isValidClosedReason 同款先例）。 */
+function isRoundTerminalStopReason(v: string | undefined): v is (typeof ROUND_TERMINAL_STOP_REASONS)[number] {
+  return v !== undefined && (ROUND_TERMINAL_STOP_REASONS as readonly string[]).includes(v);
+}
+
+function hydrateRoundFactsAndError(record: ExecutionRecord, fold: RecordEventFoldState): void {
+  const idle = fold.roundIdle;
+  if (record.lastRound === undefined && idle !== undefined) {
+    const facts: RoundFacts = {
+      ...(isRoundTerminalStopReason(idle.engineStopReason) ? { engineStopReason: idle.engineStopReason } : {}),
+      ...(idle.failure !== undefined ? { failure: idle.failure } : {}),
+      ...(idle.promptDisposition !== undefined ? { promptDisposition: idle.promptDisposition } : {}),
+      ...(idle.usage !== undefined ? { usage: idle.usage } : {}),
+      ...(idle.retryAttempts !== undefined ? { retryAttempts: idle.retryAttempts } : {}),
+      ...(idle.observations !== undefined ? { observations: idle.observations } : {}),
+    };
+    if (Object.keys(facts).length > 0) record.lastRound = facts;
+  }
+  if (record.lastError === undefined) {
+    // 最近帧带失败原文优先；最近帧无失败时回落另一收条槽（失败事实只追加不清空
+    // 的内存语义——成功收条不抹掉更早的失败原文）。
+    const newestIsSettled = fold.lastEvent?.type === "record-settled";
+    const newest = newestIsSettled ? fold.settled?.error : idle?.error;
+    const older = newestIsSettled ? idle?.error : fold.settled?.error;
+    const errorFact = newest ?? older;
+    if (errorFact !== undefined) record.lastError = errorFact;
+  }
+}
+
 export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordEventFoldState | undefined): void {
   if (fold === undefined) return;
   const stats = baselineStatisticsFromFold(fold);
@@ -1138,4 +1186,7 @@ export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordEvent
     record.transcriptRef = reopenedRef;
   }
   hydrateModelOverride(record, fold.modelOverride);
+  // [subagent-observability §3.3.6/§3.3.5] 轮收条事实与 lastError 随冷复活恢复
+  // （fold 是唯一事实源——重启后 record.lastRound/lastError 不再停在新进程缺省）。
+  hydrateRoundFactsAndError(record, fold);
 }

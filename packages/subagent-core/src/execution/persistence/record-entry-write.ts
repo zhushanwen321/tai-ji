@@ -116,7 +116,10 @@ export function toSettledEntryData(source: SettledEntrySource, endedAt: number):
 const SETTLED_RESULT_SUMMARY_MAX_CHARS = 200;
 
 export function summarizeResultForJournal(result: string | undefined): string | undefined {
-  if (result === undefined || result.length === 0) return undefined;
+  if (result === undefined) return undefined;
+  // 空串保真（[subagent-observability §3.3.3 空正文语义]）：空串 = 无文本输出
+  // （纯工具调用收尾），帧上键在场值空串——读侧可区分「空串」与「缺席」；旧帧
+  // 键缺席仍 = 未记录（不伪造空串）。
   return result.length <= SETTLED_RESULT_SUMMARY_MAX_CHARS
     ? result
     : `${result.slice(0, SETTLED_RESULT_SUMMARY_MAX_CHARS)}…`;

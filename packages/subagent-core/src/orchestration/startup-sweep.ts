@@ -1,8 +1,11 @@
 // src/orchestration/startup-sweep.ts
 //
-// runtime 启动收编扫描——core 装配单点（30 天定时器回收机制退役后的替代实装；
-// 决策与已接受代价登记见 docs/adr/decisions.md 启动扫描条目，规格出处 = 退役
-// 设计 §3.1 规格 1/3/5/6、§3.3 决策 1/3/6）。
+// runtime 启动收编扫描——core 装配单点（30 天定时器回收机制退役后的替代实装）。
+// 判定依据与已接受代价见下方「判僵尸依据」「收编形态」两段（当前形态：创建顺序
+// 契约判定、无时间窗；命中处置 = run-interrupted 转移帧一件直落；孤儿 pi 正常
+// 收尾与收编赛跑时收编帧可能抢先落在孤儿尾帧之前——fold 读侧保守停帧在
+// interrupted，读侧不崩坏，manifest 事实面完好、下次扫描以 manifest 为准让位，
+// 数据最终一致）。
 //
 // 为什么存在：崩溃恢复的第三层兜底原是 pi 进程内的 30 天 TTL 定时器（对超龄
 // running run 收编），但它跑在 pi 进程内，而 runtime 派生的 pi 在空闲态停止调度
@@ -30,8 +33,9 @@
 // 终态证据自愈补写）。
 //
 // 失败语义（规格 5 / 决策 6）：单 run 收编失败 = warn 留痕 + 继续其余；枚举整体
-// 失败（EACCES/EIO 等真 IO 故障——枚举读错分通道改造后该路径可达）= error 留痕。
-// 两条路径都不抛出：扫描是旁路维护，绝不放大为启动失败（本函数结构性不 reject）。
+// 失败（EACCES/EIO 等真 IO 故障——枚举读错分通道改造后该路径可达）= error 留痕
+// + 仅跳过 run 收编半边，record 失联清点半边照常执行（两半各自声明失败纪律）。
+// 各路径都不抛出：扫描是旁路维护，绝不放大为启动失败（本函数结构性不 reject）。
 //
 // 日志通道（规格 6 签名定形）：注入 SweepLogChannel 三方法结构对象——core 不
 // import runtime 类型，结构匹配即受；runtime 挂点直传自己的 logger（四方法对象
@@ -120,17 +124,19 @@ export async function startupSweep(
     recordsSwept: 0,
     errors: [],
   };
-  let runs: Array<{ runId: string; stateDir: string; status: string }>;
+  let runs: Array<{ runId: string; stateDir: string; status: string }> = [];
   try {
     runs = await createPiHostRunEnumeration(getDataDir).loadAll();
   } catch (err) {
     // 枚举整体失败（EACCES/EIO 等真 IO 故障经读错分通道上抛到达）：error 留痕
     // + 不阻断启动——僵尸修正不是启动的前置条件，fail-fast 会把磁盘 IO 抖动
     // 放大为应用不可用（规格 5 / 决策 6）。收编幂等，下次启动重试安全。
+    // [subagent-observability §3.3.4 两半解耦] run 半失败只跳过 run 收编——record
+    // 失联清点照常执行（两半各自声明失败纪律：run 侧整体失败 error 留痕，record
+    // 侧逐目录折进 errors 继续；run 枚举故障不得连坐 record 半边）。
     const message = toErrorMessage(err);
     log.error(`${LOG_PREFIX} failed (runtime continues): ${message}`);
     result.errors.push(message);
-    return result;
   }
   result.stateDirs = new Set(runs.map((run) => run.stateDir)).size;
   for (const run of runs) {
