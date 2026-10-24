@@ -3,7 +3,7 @@
 // ack）/ 幂等（同 id 重提交 swallowed）/ session_start 差集重放 / 外部通道逐条批组
 // 隔离 / compaction 等待降级与事件唤醒 / deliveryId 写入与批展平逐条对位。
 // fake host 全内存（无 fs——测试红线：禁触真实数据目录由构造性满足）；
-// fake timers 驱动 60s 合批窗口。
+// fake timers 驱动「无窗口定时器」负断言与 collect 等待时序（攒批窗已删 §3.3.7③）。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -689,7 +689,7 @@ describe("collect 挂起分流与收取（合批多键）", () => {
 		expect(collected.map((c) => c.id).sort()).toEqual(["k-a", "k-b"]);
 	});
 
-	it("collectRelease 解散等待集 + 未收挂起条目直通内核（跳过 60s 窗口，恢复 push）", () => {
+	it("collectRelease 解散等待集 + 未收挂起条目直通内核（边沿即投无窗口，恢复 push）", () => {
 		const h = makeHost({ entries: [pendingRegister("k-a")] });
 		const port = createDeliveryPort(h.host);
 		port.collectArm(["k-a"]);

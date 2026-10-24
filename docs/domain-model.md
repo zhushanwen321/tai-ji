@@ -120,7 +120,7 @@ session 存储域（SessionLifecycle 写、SessionScanner 读、文件系统为�
 
 subagent 体系的领域模型在「会话 + 轮 + 债权」框架下组织（permanent-session 模型，万物可续）：**record 是会话**不是任务——两态（running/idle）+ 归档 + 复活（归档唤醒续聊），没有也不需要任务终局（失败可续聊、成功也可续聊）；**轮**（round）是一次有边界的执行（一进程、一问一答），是成败判定与收条的承载单位；**债权**是一笔「等待这轮结果」的请求（派发即欠、轮终结清、失联也是结清形态，对齐 managed session 债权模型 ADR-0087）；**run** 是一次性编排，有终局（与 record 无终局不矛盾——run 终局由成员交付结算集合派生，见 [ADR-0159](adr/decisions.md)）。
 
-不变量（全部可核对，违反即缺陷；词表锚与枚举完整性测试 = `packages/subagent-engine-sdk/src/__tests__/failure-cause-vocabulary.test.ts` / `packages/subagent-core/src/execution/domain/__tests__/record-types.test.ts` / `src/shared/run-vocabulary.test.ts`）：
+不变量（全部可核对，违反即缺陷；词表锚与枚举完整性测试 = `packages/subagent-engine-sdk/src/__tests__/failure-cause-vocabulary.test.ts` / `packages/subagent-core/src/execution/domain/__tests__/record-types.test.ts` / `packages/subagent-core/src/shared/__tests__/run-vocabulary.test.ts`）：
 
 1. **record 事件流 append-only**，历史不可改写——派生层禁止反写事实源（失败事实只追加进轮级 `errors: ErrorFact[]`，`lastError` 由「最后一个非空轮失败」派生，`applyTurnEnd` 不清空）
 2. **轮成败判定只产自引擎收尾边沿**（看见 stopReason / exitCode / 引擎 error 事件的层）——最后一条 assistant 消息停因 ∈ {error, aborted} 或存在未消费引擎 error 事件 → 轮失败；`agent_settled` 是 run 结束信号不是成功证据，不构成任何置成功依据；aborted 三源判别（用户/run 取消 → user.cancelled；turn 预算耗尽 → harness.turn_budget_exhausted；其余引擎异常 → engine.*），禁止把中止一律记失败

@@ -154,7 +154,7 @@ export type ExecutionMode = "background";
  *                                    的轮收条补写复用本值，清点事实落轮收条附注）
  *     interrupted-by-parent        — 编排性关闭打断在途轮（宿主 session fork/new 自动收尾）
  *     reopened                     — 锚失效带历史重开（§3.2.3 reopen 降级，epoch+1 的首轮）
- *   归档族（ClosedReason 7 值沿用 + disconnected——历史帧解析放行的事实词）
+ *   归档族（ClosedReason 可写 6 值沿用 + disconnected 读侧兜底——历史帧解析放行的事实词）
  *   迁移期旧值（completed / failed——旧推断值存储位退役中）
  *     历史帧解析按解析词表纪律放行；写侧产出随 u3 判定链接线改引擎原值后，双写期
  *     并行产出结束即删（§3.4「迁移完删旧值」——删除时撞类型错/测试红有既定归宿：

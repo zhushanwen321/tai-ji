@@ -51,8 +51,8 @@
 // 不进投递内核）+ onCollectArrival 唤醒等待器；未命中 → push 现状零变化。挂起不独立
 // 持久化，投递日志即耐久层：崩溃后差集重放按未投递重投（push），收取过的条目写
 // collected 终局（ack outcome 扩值）构造性退出差集。等待器三 API（collectArm 五态
-// 快照 / consume 全键展开收取 / collectRelease 解散等待集 + 未收条目直通内核跳过
-// 合批窗口）。session 替换路径 abort 先于 dispose 归并中断语义；extension 重载在
+// 快照 / consume 全键展开收取 / collectRelease 解散等待集 + 未收条目直通内核
+// flush——边沿即投，攒批窗已删 §3.3.7③）。session 替换路径 abort 先于 dispose 归并中断语义；extension 重载在
 // collect 阻塞期不可达（设计 §3.1 [重绑] 登记），dispose 只做在途等待器 warn 留痕
 // 不变量检查，不定义唤醒与返回语义。
 //
@@ -274,7 +274,7 @@ interface CollectFaceDeps {
   /** 挂起条目收取时摘除失败策略项（deliver 登记的提交时选项不残留）。 */
   failurePolicies: Map<string, DeliveryFailurePolicy>;
   warn(msg: string, err?: unknown): void;
-  /** 解散等待集后未收条目的直通放行（进 pumpDirect 分组放行管线，跳过合批窗口）。 */
+  /** 解散等待集后未收条目的直通放行（进 pumpDirect 分组放行管线——边沿即投，攒批窗已删 §3.3.7③）。 */
   routeDirect(records: readonly JournalRecord[]): void;
 }
 
@@ -513,7 +513,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
   let idSeq = 0;
   /**
    * 显式覆写的失败保留策略（deliver opts.onFailure → submitToKernel 的单次传递）：
-   * 条目在提交缓冲期（合批窗口 / compaction 挂起）暂存 id → policy，提交内核时
+   * 条目在提交缓冲期（compaction 挂起等提交期悬置；攒批窗已删 §3.3.7③）暂存 id → policy，提交内核时
    * 消费并摘除。不进 JournalRecord / outbox schema（§3.7 耐久面行 schema 定形，
    * 策略是提交时选项非账目字段）。重放重建的条目不在册（缺省 retain）：forget
    * 条目首败即 discard 落终局列、不在重放差集；「首败前崩溃」的残留条目重放按
@@ -538,7 +538,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
 
   // ─── collect 挂起面（result-collect 设计 §3.1②；子系统实现见 createCollectFace）───
   // routeDirect = 解散等待集后未收条目的直通放行（进 pumpDirect 分组放行管线——
-  // 跳过 60s 合批窗口，不逐条唤醒泵）。
+  // 边沿即投，攒批窗已删 §3.3.7③，不逐条唤醒泵）。
   const collectFace = createCollectFace({
     host,
     state,

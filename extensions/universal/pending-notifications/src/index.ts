@@ -424,8 +424,8 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 		await awaitCollectArrivals(port, waitingIds, collected, timeoutMs, signal);
 
 		// 终局序列（设计 §3.1③）：consume 取走剩余已到达挂起条目（超时/abort 路径的
-		// 部分收取），collectRelease 解散等待集并把未收挂起条目直通内核 flush（跳过
-		// 合批窗口，恢复 push）。空等待路径不会走到这里（提前返回）。
+		// 部分收取），collectRelease 解散等待集并把未收挂起条目直通内核 flush（边沿
+		// 即投——攒批窗已删 §3.3.7③，恢复 push）。空等待路径不会走到这里（提前返回）。
 		collected.push(...port.consume());
 		port.collectRelease();
 
