@@ -7,7 +7,10 @@
  * 新 fork 执行新代码，条目 displayName 跟随新版本；激活必抛错包（2.0.0）触发回滚：
  * install 旧版本 → registry.reload → removeDescriptor（清新版残留）→
  * registerDescriptors 回填旧版 descriptor → reactivatePreviousVersionAfterRollback
- * 重激活旧版本，失败以 plugin-install-error 呈现（不静默成功）。
+ * 重激活旧版本，失败以 plugin-install-error 呈现（不静默成功）。回滚与幸存面成立，
+ * 但重激活未达 active（照录，uncovered + ISSUES.md）：2.0.0 激活段起的 fork 在
+ * activate 抛错后未 terminate，重激活复用该存活 fork，同 URL ESM 缓存重放必抛错
+ * 代码——旧版本即时可用降级为重启后 onStartupFinished 恢复。
  *
  * 三版本链（fixtures/plugin-update-demo）：1.0.0 基线安装（激活写 update-demo-main 条目
  * + apiKey）→ 清单翻 1.1.0（改写 remote-config 缓存 pluginVersion + mock registry
@@ -68,7 +71,7 @@ export const meta = {
     '更新提交换新面：确认卡 update 意图直达（@1.1.0）；更新后目录 package.json version=1.1.0、plugin.list version=1.1.0 status=active（磁盘/注册表/激活态跟随新版本）',
     'C: 更新后条目与凭据保留（update-demo-main 条目在场 + apiKey 同值，设计 S26 保留性断言）',
     '重激活真实生效：更新提交终止旧沙箱 fork → 新 fork 执行 1.1.0 activate——fork PID 更替 + 条目 displayName 切 v1.1.0（S26「插件重激活执行新代码」达成）',
-    '必败包（激活即抛错）更新失败可见 + 回滚旧版本幸存：plugin-install-error 呈现（不再静默成功）；回滚后目录 package.json 与 plugin.list 回 1.1.0 且 status=active（重激活非等重启，fork 再更替），条目凭据保留、暂存无残留',
+    '必败包（激活即抛错）更新失败可见 + 回滚旧版本幸存：plugin-install-error 呈现（不再静默成功）；回滚后目录 package.json 与 plugin.list version 回 1.1.0（旧版本幸存），条目凭据保留、暂存无残留；重激活未达 active（status 停 discovered）照录——B1 残余缺口 uncovered + ISSUES.md',
   ],
   notProvable: [
     '清单远程热更新链（清单为本剧本 seed 的本地缓存形态，版本翻转走改写缓存文件——远程拉取归 S15 域）',
