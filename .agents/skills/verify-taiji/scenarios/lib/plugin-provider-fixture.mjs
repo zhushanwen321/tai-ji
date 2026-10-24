@@ -87,8 +87,9 @@ export function seedPluginProviderFixture(dataDir) {
  */
 export async function launchFixtureInstance({ repo, ev, tag }) {
   const { createInstance } = await import('../../scripts/lib/instance.mjs')
-  const dataDir = path.join(os.homedir(), '.taiji-dev', `verify-d3-s1-${tag}-${Date.now().toString(36)}`)
-  const instance = createInstance({ repo, name: `verify-d3-s1-${tag}`, dataDir, background: true })
+  // 实例名/数据目录 verify-d3-r1 家族（D3 实跑批次命名，与常驻实例隔离；tag 区分四场景可并行）
+  const dataDir = path.join(os.homedir(), '.taiji-dev', `verify-d3-r1-${tag}-${Date.now().toString(36)}`)
+  const instance = createInstance({ repo, name: `verify-d3-r1-${tag}`, dataDir, background: true })
   const seeded = seedPluginProviderFixture(dataDir)
   ev.step({ step: 'fixture.seed', channel: 'C', exitCode: 0, stats: { dataDir, ...seeded } })
   await instance.launch()
