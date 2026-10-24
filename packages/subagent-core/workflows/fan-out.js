@@ -358,7 +358,7 @@ const aggregateFailed = aggregateOut !== undefined &&
   typeof aggregateOut.error === "string";
 
 // ── 通知体积：results 序列化前保序截断（D5）─────────────────────
-// 壳侧 MAX_RESULT_LENGTH 机制在 helpers.ts（通知序列化预算）；模板侧只做保序截断：
+// 壳侧 MAX_RESULT_LENGTH 机制在 workflow-notify.ts（通知序列化预算）；模板侧只做保序截断：
 // taskIndex/status/fullReportPath/error（归因与恢复侧）恒完整，summary（体积大头）
 // 先让出、task 文本次之；截断发生置 outcome 顶层 truncated: true
 const RESULTS_BUDGET_CHARS = 8000;
@@ -417,7 +417,8 @@ if (fitted.truncated) {
 if (partialMembers.length > 0) {
   outcome.partialMembers = partialMembers;
 }
-// partial 收尾提示只重派失败 taskIndex 对应的成员（§3.3.5 一次恢复查询 + 局部重派纪律）
+// partial 收尾提示只重派失败 taskIndex 对应的成员（subagent-tool-interface-refactor
+// §3.1.4 一次恢复查询 + 局部重派纪律）
 outcome.message = "fan-out 完成：" + tasks.length + " 任务（失败 " + failedCount + "）" +
   (failedCount > 0 ? "；只重派失败 taskIndex 对应的成员，勿全批重跑" : "") +
   (partialMembers.length > 0 ? "；部分交付 " + partialMembers.length + " 成员（缺项见 partialMembers）" : "") +

@@ -1132,7 +1132,8 @@ function hydrateModelOverride(
  * 非空不覆盖——与 transcriptRef 同构）：
  *   - lastRound ← 最近轮终收条帧（fold.roundIdle）的事实字段。组装独立于
  *     {@link lastRoundFromFold}：读模型字段集不同——record 内的 RoundFacts 只收
- *     「派生不出来的事实」（result/turns 已在聚合字段上，不重复存储）。
+ *     「派生不出来的事实」（result 正文经读侧 summarize 从聚合字段派生，不重复
+ *     存储；turns 收进快照——聚合字段 turnCount 是 live 计数器，收条值随收条定格）。
  *   - lastError ← 最新带失败原文的收条帧（新旧以 lastEvent 判定，另一帧作回落）
  *     ——「最后一个非空轮失败」在 fold 单槽收条上的等价形。
  *

@@ -316,7 +316,7 @@ describe("fan-out.js 失败语义（D4/G2：allSettled partial 收尾）", () =>
     expect(r.outcome.results[1].task).toBe(THREE_TASKS[1].task);
     // 三个成员都被派发（失败不阻断派发集合）
     expect(r.agentCalls).toHaveLength(3);
-    // §3.3.5 partial 收尾文案：指向失败 taskIndex 的局部重派，不是全批重跑
+    // subagent-tool-interface-refactor §3.1.4 partial 收尾文案：指向失败 taskIndex 的局部重派，不是全批重跑
     expect(r.outcome.message).toContain("taskIndex");
     expect(r.outcome.message).toContain("失败 1");
   });

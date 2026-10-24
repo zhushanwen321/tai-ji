@@ -33,10 +33,11 @@
 // 判据保守性（[F2] 按类型分流收尾）：
 //  - type=subagent → record 差集对账（lookupRecordState）；
 //  - type=workflow 及缺失/未知的畸形条目（normalizePendingType 归 workflow 的偏好）
-//    → workflow run 判据（lookupWorkflowRunState，生产装配查 WorkflowRun store 的
-//    run state 文件）：终态 ∪ 文件不存在 → 补注销；running → 跳过；全部行损坏
-//    （读不出 ≠ 不存在）由判据侧保守按 running 处理（宁挂着不处理不失明——误注销活跃
-//    workflow run 是事故方向）。deps 未注入该判据时维持旧保守跳过（向后兼容）。
+//    → workflow run 判据（lookupWorkflowRunState，生产装配经共享判定核
+//    findRunSettlementEvidence——journal run-settled 帧 ∨ manifest 终局条目）：
+//    终局证据 ∪ 证据缺席（视同不存在）→ 补注销；非终态/坏链/IO 故障由判定核
+//    保守侧按活跃处理跳过（宁挂着不处理不失明——误注销活跃 workflow run 是事故
+//    方向）。deps 未注入该判据时维持保守跳过（向后兼容）。
 //  - type=bash → 无 record/store 可查（bash 注册随进程退出注销，进程死亡窗口的
 //    丢失无补发通道）→ 保守跳过，显式偏差登记（impl-plan §5 #5）：挂着不处理的方向代价 =
 //    每孤儿 bash 注册 1 条静态虚报，无空转驱动源（goal 检查读侧过滤已使子 session

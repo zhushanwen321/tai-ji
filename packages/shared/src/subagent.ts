@@ -218,8 +218,11 @@ export interface SubagentRecord {
   closedReason?: string
   /**
    * 展示维度（永久会话模型 §3.2.1，U8 下行派生视图）：上一轮为什么停。值域 =
-   * 旧 closedReason 七值沿用 + 四个新展示值（interrupted / interrupted-by-restart /
-   * interrupted-by-parent / reopened），见 subagent-core types.ts StopReason。
+   * subagent-core StopReason 全枚举 16 值：closedReason 沿用族 7 值（6 个可写终态
+   * 原因 + disconnected 读侧兜底）+ 展示值 4 个（interrupted / interrupted-by-restart /
+   * interrupted-by-parent / reopened）+ 引擎原值 3 个（stop / error / aborted——
+   * ADR-0158 停因事实化，轮终写点引擎停因在场即写原值）+ 迁移期旧推断值 2 个
+   * （completed / failed——历史帧解析放行与旧引擎无停因上报时的回落产出）。
    * [U6 起参与占用资格判定（isOccupied = `running && stopReason === undefined`——
    * W4 死亡纳管态 stopReason=failed 据此排除）]：轮始清点族（markRoundStarted /
    * revive 格）在翻 running 时清除本字段——正在后台运行期上轮停因不可见是显式裁决的代价
@@ -311,11 +314,13 @@ export interface SubagentRecord {
  */
 export interface SubagentLastRound {
   /**
-   * 引擎停因原值（值域 = core StopReason 词表：引擎原值 stop/error/aborted + 宿主
-   * 中断族 interrupted / interrupted-by-restart / interrupted-by-parent + reopened 等）。
-   * string 而非字面量联合：跨进程契约 SSOT，core 词表扩值时读侧不因类型收窄丢字段
-   * （与 SubagentRecord.stopReason 同理由）。undefined = 无停因（被接管轮——引擎未
-   * 执行，无停因可言，§3.3.1 P6 第三形态）。
+   * 引擎停因原值（值域 = 引擎原值三态 stop / error / aborted，与 core RoundFacts
+   * 同名收窄一致；宿主中断族 interrupted / interrupted-by-restart /
+   * interrupted-by-parent 与 reopened 不经本字段——由顶层 stopReason 的终态/中断
+   * 帧承载）。string 而非字面量联合：跨进程契约 SSOT，core 词表扩值时读侧不因
+   * 类型收窄丢字段（与 SubagentRecord.stopReason 同理由）。undefined = 无停因
+   * （被接管轮——引擎未执行，无停因可言，§3.3.1 P6 第三形态；迁移期回落帧——
+   * 旧引擎无停因上报）。
    */
   engineStopReason?: string
   /**

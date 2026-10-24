@@ -538,11 +538,11 @@ export const FAILURE_CAUSE_KINDS_BY_CLASS_LOCK: AssertMutuallyAssignable<
 > = true;
 
 /**
- * @deprecated [subagent-observability §3.3.2] 三值分诊词表已由 {@link FailureCause}
- * 取代（class×kind 封闭矩阵 + retryable 三态）。本类型保留至判定链事实化接线
- * （u1：output-collector classifyFailureKind 退役 + AgentOutcome.failureKind 改轨）
- * 后删除——退役时 `RunErrorCode` 的 failureKind 成员族与 record 侧 failureKind
- * 字段同批清理（设计 §3.4 枚举清理项）。
+ * @deprecated [subagent-observability §3.3.2，ADR-0158 终态] 三值分诊词表已由
+ * {@link FailureCause} 取代（class×kind 封闭矩阵 + retryable 三态）。本类型保留为
+ * 历史解析兼容、不删——旧 record 帧与历史 journal 的 failureKind 解析仍依赖该
+ * 通道（设计 §3.4「历史解析兼容保留项」）；新写入方失败分类一律产 FailureCause，
+ * 产出侧分类器 classifyFailureKind 已退役。
  */
 export type AgentFailureKind = "stale_context" | "schema_deterministic" | "unknown";
 

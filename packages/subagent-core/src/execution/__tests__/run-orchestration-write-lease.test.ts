@@ -14,11 +14,10 @@
 //      result / closedReason 清除）+ `.alive` 不删 + pending:unregister 发射点②
 //      store 簿记⑧单点发射（恰好一次）；
 //   4. workflow 域（executeAndAwait → runAndFinalize → outcomeToAgentResult 主回填
-//      点）：sessionFile 回填后 `.alive` 存在且 pid=本进程；
-//   5. [U2b 修复轮/D2] adoptEngineDeath 收敛（adoptResumableAfterEngineDeath 三写
-//      error/result/stopReason 语义等价，真实 store 链）。轮始 markRoundStarted 接线
-//      的真实链用例在 conversation-continuation.test.ts 集成测试侧（续聊派发即清
-//      result 清除 + round 累加链不断）。
+//      点）：sessionFile 回填后 `.alive` 存在且 pid=本进程。
+//
+// 轮始 markRoundStarted 接线的真实链用例在 conversation-continuation.test.ts 集成
+// 测试侧（续聊派发即清 result 清除 + round 累加链不断）。
 //
 // 测试纪律：registerFakePiEngine 协议替身（conversation-continuation.test.ts 同源
 // setup 形态，真实 timers + vi.waitFor）；sessionFile/marker 全部落 mkdtemp 自建目录；
