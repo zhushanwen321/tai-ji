@@ -148,7 +148,7 @@ export interface RetryableErrorRule { // oe-exempt:20261026:framework:重试规�
    * class="engine" 时走 `engine_${string}` 开放前缀面（校验见 validateRetryRuleFields）。
    */
   kind?: FailureCause['kind']
-  /** 纯溯源标注（settings 分组/检索展示用），不参与判定。 */
+  /** 纯溯源标注，判定管线结构性不消费；settings 展示侧当前未消费（分组/检索能力未发生），保留为后续分组的声明位。 */
   httpStatusClass?: RetryRuleHttpStatusClass
   /** 展示/观测用等待提示（如「窗口重置后可重试」），不参与执行——实际退避归 pi 原生机制。 */
   waitHint?: string

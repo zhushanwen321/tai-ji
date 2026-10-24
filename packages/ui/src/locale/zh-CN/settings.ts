@@ -740,7 +740,7 @@ export default {
     retryRulesBuiltinToggle: '内置预设（{n} 条）',
     retryRulesBuiltinEmpty: '暂无内置预设',
     retryRulesCustomTitle: '自定义规则',
-    retryRulesCustomHint: '命中的错误按裁决处理：retryable 追加标记触发重试；non_retryable / conditional 不重试（展示口径见等待提示）',
+    retryRulesCustomHint: '命中的错误按裁决处理：retryable 追加可重试标记触发重试；non_retryable / conditional 本机制不改写该类错误（不自动追加标记，pi 自身的重试行为不受影响——展示口径见等待提示）',
     retryRulesAddRule: '添加规则',
     retryRulesRemove: '移除',
     retryRulesNamePlaceholder: '规则名称',

@@ -246,6 +246,8 @@ interface DraftRow {
   waitHint: string
   /** 原始 match 条件数（>1 = 行锁——单条件编辑器不覆盖多条件存量）。 */
   rawMatchCount: number
+  /** 加载读回的原始规则（锁定行保存时原样透传用；新增行无此字段）。 */
+  rawRule?: RetryableErrorRule
 }
 
 const builtinRules = ref<RetryableErrorRule[]>([])
@@ -276,6 +278,7 @@ function toDraftRow(rule: RetryableErrorRule): DraftRow {
     value: jp?.value ?? '',
     waitHint: rule.waitHint ?? '',
     rawMatchCount: rule.match.length,
+    rawRule: rule,
   }
 }
 
@@ -376,13 +379,27 @@ const saveAction = createExplicitSave<RetryableErrorRule[]>({
 })
 const saving = saveAction.saving
 
-/** 保存：逐条 shared 域校验 + 整单 id 去重，失败 toast 指向首错不发 RPC。 */
+/** 保存：逐条 shared 域校验 + 整单 id 去重，失败 toast 指向首错不发 RPC。
+ *  锁定行原样透传（row 保护 = 不可编辑，非不可持久化——写侧 customRules 整段替换，
+ *  载荷缺行 = 删除存量规则），不经单条件编辑面重建。 */
 async function onSave(): Promise<void> {
   if (saving.value) return
   const seen = new Set<string>()
   const rules: RetryableErrorRule[] = []
   for (const row of draft) {
-    if (isRowLocked(row)) continue
+    if (isRowLocked(row)) {
+      // 锁定行：字段不可编辑，读回值已过服务端域校验，原对象透传（不重跑表单校验）。
+      const raw = row.rawRule
+      if (raw !== undefined) {
+        if (seen.has(raw.id)) {
+          toastError(t('settings.system.retryRulesInvalidInput', { error: `id duplicated: ${raw.id}` }))
+          return
+        }
+        seen.add(raw.id)
+        rules.push(raw)
+      }
+      continue
+    }
     if (row.id !== '') {
       if (seen.has(row.id)) {
         toastError(t('settings.system.retryRulesInvalidInput', { error: `id duplicated: ${row.id}` }))

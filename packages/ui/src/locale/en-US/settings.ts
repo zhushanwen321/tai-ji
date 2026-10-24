@@ -741,7 +741,7 @@ export default {
     retryRulesBuiltinToggle: 'Builtin presets ({n})',
     retryRulesBuiltinEmpty: 'No builtin presets',
     retryRulesCustomTitle: 'Custom rules',
-    retryRulesCustomHint: 'Matched errors follow the verdict: retryable appends a marker to trigger retry; non_retryable / conditional never rewrite (see wait hints for why)',
+    retryRulesCustomHint: 'Matched errors follow the verdict: retryable appends a retryable marker to trigger retry; non_retryable / conditional are left untouched by this mechanism (no marker appended; pi\'s own retry behavior is unaffected — see wait hints for why)',
     retryRulesAddRule: 'Add rule',
     retryRulesRemove: 'Remove',
     retryRulesNamePlaceholder: 'Rule name',

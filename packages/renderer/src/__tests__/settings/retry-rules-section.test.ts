@@ -7,7 +7,8 @@
  *  - 保存 round-trip：添加规则 → 组装载荷（source:'custom'、单条件 match、waitHint 传参）
  *    → setRetryRules 调用 + 成功 toast（savedToastKey 通道）；
  *  - 保存校验拒绝：空正则 → setRetryRules 不被调 + 错误 toast（shared 域信封文案透传）；
- *  - 多条件存量规则行锁：编辑控件 disabled + 锁定提示；
+ *  - 多条件存量规则行锁：编辑控件 disabled + 锁定提示；锁定行保存原样透传
+ *    （多条件规则字段逐字保留——写侧 customRules 整段替换，载荷缺行 = 删除该规则）；
  *  - 停用等效文案在位（§3.3.12 停用通道登记：关闭上方卡开关 / maxRetries=0）。
  *
  * mock 策略：SettingsTransport seam 桩（同 llm-retry-section.test.ts）+ useToast mock。
@@ -164,25 +165,65 @@ describe('保存 round-trip（写侧）', () => {
 })
 
 describe('多条件存量规则行锁', () => {
+  /** 多条件 custom 存量规则（含可选字段——逐字保留断言的比对基准）。 */
+  function multiMatchRule(overrides: Partial<RetryableErrorRule> = {}): RetryableErrorRule {
+    return {
+      id: 'multi',
+      name: '多条件规则',
+      verdict: 'conditional',
+      match: [{ kind: 'pattern', pattern: 'a' }, { kind: 'jsonPath', path: 'error.code', operator: 'equals', value: '1302' }],
+      class: 'provider',
+      kind: 'rate_limited',
+      httpStatusClass: 429,
+      waitHint: '等窗口重置',
+      source: 'custom',
+      ...overrides,
+    }
+  }
+
   it('match 多条件行编辑控件 disabled + 锁定提示（防单条件编辑器丢条件）', async () => {
     configApiMock.getRetryRules.mockResolvedValue({
       builtinRules: [],
-      customRules: [
-        builtinRule({
-          id: 'multi',
-          source: 'custom',
-          match: [{ kind: 'pattern', pattern: 'a' }, { kind: 'pattern', pattern: 'b' }],
-        }),
-      ],
+      customRules: [multiMatchRule()],
     })
     const wrapper = mountSection()
     await flushPromises()
     const idInput = wrapper.find('[data-testid="retry-rules-id-0"]')
     expect((idInput.element as HTMLInputElement).disabled).toBe(true)
     expect(wrapper.find('[data-testid="retry-rules-locked-0"]').exists()).toBe(true)
+  })
+
+  it('锁定行保存原样透传：多条件 custom 规则经保存字段逐字保留（写侧 customRules 整段替换，载荷缺行 = 删除该规则）', async () => {
+    const rule = multiMatchRule()
+    configApiMock.getRetryRules.mockResolvedValue({ builtinRules: [], customRules: [rule] })
+    const wrapper = mountSection()
+    await flushPromises()
     await wrapper.find('[data-testid="retry-rules-save-btn"]').trigger('click')
     await flushPromises()
-    // 锁定行不参与组装：保存载荷不含该行（也意味着不会被单条件化覆盖）
-    expect(configApiMock.setRetryRules).toHaveBeenCalledWith([])
+    expect(configApiMock.setRetryRules).toHaveBeenCalledTimes(1)
+    const payload = configApiMock.setRetryRules.mock.calls[0][0] as RetryableErrorRule[]
+    expect(payload).toHaveLength(1)
+    // 逐字保留：不经单条件编辑面重建，读回原对象透传（match 两条件 + 可选字段全部在位）
+    expect(payload[0]).toEqual(rule)
+    expect(payload[0].match).toHaveLength(2)
+  })
+
+  it('锁定行与新增行混合保存：锁行原文与新编辑行同载荷', async () => {
+    const rule = multiMatchRule({ id: 'multi', name: '多条件规则' })
+    configApiMock.getRetryRules.mockResolvedValue({ builtinRules: [], customRules: [rule] })
+    const wrapper = mountSection()
+    await flushPromises()
+    await wrapper.find('[data-testid="retry-rules-add"]').trigger('click')
+    await setInput(wrapper, 'retry-rules-id-1', 'new-rule')
+    await setInput(wrapper, 'retry-rules-name-1', '新规则')
+    await setInput(wrapper, 'retry-rules-pattern-1', 'new-code')
+    await wrapper.find('[data-testid="retry-rules-save-btn"]').trigger('click')
+    await flushPromises()
+    expect(configApiMock.setRetryRules).toHaveBeenCalledTimes(1)
+    const payload = configApiMock.setRetryRules.mock.calls[0][0] as RetryableErrorRule[]
+    expect(payload).toHaveLength(2)
+    expect(payload[0]).toEqual(rule)
+    expect(payload[1].id).toBe('new-rule')
+    expect(payload[1].match).toEqual([{ kind: 'pattern', pattern: 'new-code' }])
   })
 })

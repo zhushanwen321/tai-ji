@@ -290,7 +290,8 @@ export class ConfigService implements IConfigService {
     })
     // 域 2 拉取（与域 1 同触发点；await 保证启动/进页路径在返回前完成落盘，读侧立即可见）
     await refreshRemoteConfig('quota-fetchers', isQuotaFetchersRemoteConfig)
-    // 域 3 拉取 + 生效落盘（同触发点；内部自带「无 ext-config 跳过」与 fail-safe 链）
+    // 域 3 拉取 + 生效落盘（同触发点；syncRetryRulesRemote 无条件重算落盘——ext-config
+    // 缺席即补写基线，不跳过；fail-safe 链内建在拉取层）
     await syncRetryRulesRemote()
     return { updatedProviders: result.updatedProviders }
   }
