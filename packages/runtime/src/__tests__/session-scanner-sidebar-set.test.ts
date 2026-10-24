@@ -6,9 +6,10 @@
  * - 正面：全部非 btw 会话**必须**在集合内（防「scannedToSummary 漏 surface 缺省 →
  *   磁盘条目整批消失」被单向负面断言 vacuously 放行——对空集合「btw 不在」恒真）。
  *
- * W5：hidden 停写同批，过滤点（session-scanner.ts listAll）切 `surface === 'sidebar'`
- * 正向谓词（读取点登记于 docs/constraints.json C-data-28，usage=nav-filter）。本测试
- * 锁定切换后行为等价的集合口径。
+ * 过滤点（session-scanner.ts listAll）切 `surface === 'sidebar'` 正向谓词随 W3
+ * `e57d1ada9` 落地（本测试同批创建；读取点登记于 docs/constraints.json C-data-28，
+ * usage=nav-filter，登记随 W5 `b2775435b` 的 hidden 停写同批建立）。本测试锁定切换后
+ * 行为等价的集合口径。
  *
  * 真实链路：PiSessionStore.scanSessions（真磁盘，TAIJI_AGENT_DATA_DIR 隔离 tmpdir）
  * → SessionScanner.listAll → listPersistedSessions；svc/gitInfoReader 为窄 mock。

@@ -48,9 +48,9 @@ export class SessionScanner {
       .map(s => this.scannedToSummary(s))
 
     const result = [...active, ...persisted]
-      // sidebar 归属过滤（W5：hidden 停写同批切换为 surface 正向谓词，读取点登记于
-      // docs/constraints.json C-data-28 清单，usage=nav-filter）：仅 `surface === 'sidebar'`
-      // 的条目进列表。**两路径的 surface 语义（防误信）**：
+      // sidebar 归属过滤（切换为 surface 正向谓词随 W3 `e57d1ada9` 落地、读取点登记随 W5
+      // `b2775435b` 的 hidden 停写同批建立于 docs/constraints.json C-data-28 清单，usage=nav-filter）：
+      // 仅 `surface === 'sidebar'` 的条目进列表。**两路径的 surface 语义（防误信）**：
       // active 路径（内存 Map）的 surface 标记在 IManagedSessionView，btw 线恒 'btw'
       // （三条写路径 createLine / ensureProcess / rebuildFromDisk 保证），本过滤真实生效；
       // persisted 路径（磁盘扫描）的 surface 由 scannedToSummary 显式缺省 'sidebar'

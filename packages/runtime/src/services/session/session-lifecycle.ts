@@ -668,7 +668,7 @@ export class SessionLifecycle implements ISessionRegistry {
 
     this.persistCreateBindings(session, presetId, options, presetClientOptions, createMetaOverride)
 
-    // 工作区历史判据（W5：hidden 停写同批切换）：读注册后记录的 surface，**不读
+    // 工作区历史判据（切换随 W3 `e57d1ada9` 落地、登记随 W5 `b2775435b` 的 hidden 停写同批建立）：读注册后记录的 surface，**不读
     // options?.surface**——生产 create 路径永不传 surface（协议无 surface 入参、
     // btw 线不经 createNew），读 options 会使全部生产 create 停记工作区历史。
     // 仅 sidebar 会话记录（btw 线的 cwd = 主会话 cwd，记录会污染最近工作区列表）。
