@@ -141,10 +141,9 @@ export function createSessionStore() {
    * 乐观更新形态：本地入参只带乐观字段（如 rename 先显示 { label }），权威确认经 runtime
    * 广播回流（config.sessions 整表），同一入口重复写入幂等。
    *
-   * [过渡语义] SessionSummary 的 modelId / thinkingLevel / tokenCount 字段**保留**（W1 不动
-   * shared 类型）：列表载荷里的同名字段降级为「初始种子」（移动壳 / PlanQuotaFloatPanel 等
-   * 消费方改读状态层，读不到即显式未知），状态层才是权威。后续波次（W2 权威拉取）落地种子化
-   * 拉取路径后可按需从 SessionSummary 删字段。
+   * [W3 终态] modelId / thinkingLevel / tokenCount 已随 W3 从 SessionSummary 删除（设计
+   * §3.4.2，删除写进 W3 完成判据）：列表载荷不再携带这三字段，运行时状态的唯一权威 =
+   * 状态层（domain/session/live-state，唯一写入口 applyLiveState），消费方只读状态层。
    */
   function applySnapshot(id: string, snapshot: SessionViewSnapshot): void
   function applySnapshot(listSnapshot: { groups: SessionGroup[] }): void

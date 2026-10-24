@@ -112,6 +112,7 @@ vi.mock('@/composables/features/command/useCommandStore', async () => {
   const storage = {
     get: async (key: string) => kv.get(key) ?? null,
     set: async (key: string, value: string) => { kv.set(key, value) },
+    remove: async (key: string) => { kv.delete(key) },
   }
   let instance: ReturnType<typeof createCommandStore> | null = null
   return {

@@ -385,7 +385,7 @@ describe('BtwPanel 内联确认条表单降档（M3-c 行为范围，useBtwInter
     store.addRequest('pi-1', {
       sessionId: 'pi-1',
       requestId: 'r-form-1',
-      method: 'select',
+      dialogKind: 'select',
       form: true,
       formQuestions: [
         {

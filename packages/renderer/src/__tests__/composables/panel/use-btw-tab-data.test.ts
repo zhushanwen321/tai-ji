@@ -429,7 +429,7 @@ describe('失效支与 badge 派生（事件帧失效一路：dialog FIFO 出队
     store.addRequest('t2', {
       sessionId: 't2',
       requestId: 'form-1',
-      method: 'select',
+      dialogKind: 'select',
       form: true,
     })
     expect(isBtwPending('t2')).toBe(true)

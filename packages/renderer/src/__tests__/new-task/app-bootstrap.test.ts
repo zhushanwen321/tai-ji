@@ -92,8 +92,6 @@ function mkSession(over: Partial<SessionSummary>): SessionSummary {
     cwd: over.cwd ?? '/repo',
     status: 'idle',
     lastActiveAt: over.lastActiveAt ?? 0,
-    modelId: 'm',
-    tokenCount: 0,
     ...over,
   }
 }

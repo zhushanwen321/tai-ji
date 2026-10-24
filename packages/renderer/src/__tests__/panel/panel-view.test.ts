@@ -114,8 +114,6 @@ function makeSession(id: string): SessionSummary {
     cwd: '/repo',
     status: 'idle',
     lastActiveAt: Date.now(),
-    modelId: 'test-model',
-    tokenCount: 0,
   }
 }
 

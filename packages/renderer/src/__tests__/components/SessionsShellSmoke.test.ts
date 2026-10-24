@@ -80,7 +80,7 @@ import { resetAppBootstrap } from '@/composables/features/sidebar/useSidebar'
 import { useSessionStore } from '@/stores/session'
 
 function summary(id: string, label: string, cwd = '/a'): SessionSummary {
-  return { id, label, cwd, status: 'idle', lastActiveAt: 1, modelId: '' }
+  return { id, label, cwd, status: 'idle', lastActiveAt: 1 }
 }
 
 describe('SessionsShellSm 首屏冒烟（TC-6 / 渲染 gate）', () => {

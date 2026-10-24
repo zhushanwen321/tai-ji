@@ -67,11 +67,11 @@ function seedSessions(): void {
       cwd: '/w',
       sessions: [
         {
-          id: FORK_SID, label: 'fork-child', cwd: '/w', status: 'done', lastActiveAt: 1, modelId: 'm', tokenCount: 0,
+          id: FORK_SID, label: 'fork-child', cwd: '/w', status: 'done', lastActiveAt: 1,
           sessionFile: '/root/dirA/2026-08-20T10-00-00_sid-fork-child.jsonl',
         },
         {
-          id: SRC_SID, label: 'fork-src', cwd: '/w', status: 'done', lastActiveAt: 2, modelId: 'm', tokenCount: 0,
+          id: SRC_SID, label: 'fork-src', cwd: '/w', status: 'done', lastActiveAt: 2,
           sessionFile: SRC_FILE,
         },
       ],

@@ -48,8 +48,6 @@ function session(overrides: Partial<SessionSummary>): SessionSummary {
     cwd: '/tmp/proj',
     status: 'active',
     lastActiveAt: Date.now(),
-    modelId: 'm-test',
-    tokenCount: 0,
     ...overrides,
   }
 }

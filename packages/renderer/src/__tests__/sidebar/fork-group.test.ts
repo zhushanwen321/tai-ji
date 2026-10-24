@@ -54,8 +54,6 @@ function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
     cwd: CWD,
     status: 'idle',
     lastActiveAt: Date.now(),
-    modelId: 'gpt-4',
-    tokenCount: 1000,
     ...overrides,
   } as SessionSummary
 }

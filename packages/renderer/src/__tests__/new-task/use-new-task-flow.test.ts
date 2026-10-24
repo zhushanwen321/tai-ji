@@ -33,8 +33,6 @@ const apiMock = vi.hoisted(() => ({
         cwd: cwd ?? '/repo',
         status: 'idle',
         lastActiveAt: Date.now(),
-        modelId: 'm',
-        tokenCount: 0,
         projectId: projectId || undefined,
       }),
   ),
@@ -111,8 +109,6 @@ function gitSession(over: Partial<SessionSummary> = {}): SessionSummary {
     gitBranch: over.gitBranch ?? 'main',
     status: 'idle',
     lastActiveAt: over.lastActiveAt ?? 100,
-    modelId: 'm',
-    tokenCount: 0,
   }
 }
 
@@ -191,7 +187,7 @@ describe('useNewTaskFlow 状态机', () => {
       // 模拟 runtime create 因 cwd 失效降级：返回的 session.cwd 与请求 cwd 不一致
       apiMock.create.mockResolvedValueOnce({
         id: 'fallback-s', label: 'x', cwd: '/home/user',
-        status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0,
+        status: 'idle', lastActiveAt: 1,
       })
       setGroups([gitSession({ id: 'hist', cwd: '/gone', lastActiveAt: 1 })])
       workspaceStoreMock.defaultCwd = '/gone'
@@ -222,7 +218,7 @@ describe('useNewTaskFlow 状态机', () => {
       // 不发 dirNotExist（否则用户看到「目录  已不存在…」空插值）。
       apiMock.create.mockResolvedValueOnce({
         id: 'home-s', label: 'x', cwd: '/home/user',
-        status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0,
+        status: 'idle', lastActiveAt: 1,
       })
       setGroups([])
       workspaceStoreMock.defaultCwd = undefined
@@ -331,8 +327,6 @@ describe('useNewTaskFlow 状态机', () => {
           gitBranch: 'main',
           status: 'idle',
           lastActiveAt: 100,
-          modelId: 'm',
-          tokenCount: 0,
         },
       ])
       const flow = useNewTaskFlow()
@@ -448,8 +442,6 @@ describe('useNewTaskFlow 状态机', () => {
           gitBranch: 'main',
           status: 'idle',
           lastActiveAt: 100,
-          modelId: 'm',
-          tokenCount: 0,
         },
       ])
       const flow = useNewTaskFlow()
@@ -554,8 +546,6 @@ describe('useNewTaskFlow 状态机', () => {
         isBareWorkspace: true,
         status: 'idle',
         lastActiveAt: 1,
-        modelId: 'm',
-        tokenCount: 0,
       })
       setGroups([gitSession({ id: 'hist', cwd: '/ws/feat-a', lastActiveAt: 1 })])
       workspaceStoreMock.defaultCwd = '/ws/feat-a'
@@ -581,8 +571,6 @@ describe('useNewTaskFlow 状态机', () => {
         isBareWorkspace: false,
         status: 'idle',
         lastActiveAt: 1,
-        modelId: 'm',
-        tokenCount: 0,
       })
       setGroups([gitSession({ id: 'hist', cwd: '/repo', lastActiveAt: 1 })])
       workspaceStoreMock.defaultCwd = '/repo'
@@ -602,8 +590,6 @@ describe('useNewTaskFlow 状态机', () => {
         gitBranch: 'main',
         status: 'idle',
         lastActiveAt: 1,
-        modelId: 'm',
-        tokenCount: 0,
       })
       setGroups([gitSession({ id: 'hist', cwd: '/repo', lastActiveAt: 1 })])
       workspaceStoreMock.defaultCwd = '/repo'
@@ -621,7 +607,7 @@ describe('useNewTaskFlow 状态机', () => {
 //    非法态检查覆盖，不再重复）──
 describe('create 透传归属 projectId（D14 语义修正，原 session-project-attribution 并入）', () => {
   function seedHistGroup(cwd: string): void {
-    setGroups([{ id: 'hist', label: 'hist', cwd, status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0 }])
+    setGroups([{ id: 'hist', label: 'hist', cwd, status: 'idle', lastActiveAt: 1 }])
   }
 
   it('命名 project 下新建任务 → create 第 4 参数携带 activeProjectId', async () => {

@@ -75,7 +75,7 @@ function setSession(id: string, launchPresetId?: string): void {
       cwd: '/repo',
       sessions: [{
         id, label: id, cwd: '/repo', status: 'idle',
-        lastActiveAt: 1, modelId: 'm', tokenCount: 0, launchPresetId,
+        lastActiveAt: 1, launchPresetId,
       }],
     }],
   })

@@ -24,8 +24,6 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
     cwd: '/work/a',
     status: 'idle',
     lastActiveAt: 0,
-    modelId: '',
-    tokenCount: 0,
     ...overrides,
   }
 }
@@ -42,7 +40,7 @@ function makeFixture() {
   const nav = createSessionStore()
   nav.applySnapshot({
     groups: [
-      group('/work/a', [makeSession({ id: MAIN, modelId: 'seed/main' })]),
+      group('/work/a', [makeSession({ id: MAIN })]),
     ],
   })
   const getSessionState = createSessionLiveStateSelector(live)

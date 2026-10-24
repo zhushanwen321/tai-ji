@@ -612,8 +612,6 @@ describe('panel cwd 接线（session cwd → project skill，ADR-0050 修订）'
       cwd: '/w/x',
       status: 'idle',
       lastActiveAt: Date.now(),
-      modelId: '',
-      tokenCount: 0,
     })
     getProjectSkillsMock.mockResolvedValue([skillInfo('proj-x', '/w/x/.agents/skills/proj-x/SKILL.md')])
     const wrapper = mountComposer()

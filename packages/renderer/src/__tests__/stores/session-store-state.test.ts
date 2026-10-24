@@ -28,8 +28,8 @@ function seedSession(): ReturnType<typeof useSessionStore> {
   const group: SessionGroup = {
     cwd: '/repo',
     sessions: [
-      { id: 's1', label: 'test', cwd: '/repo', status: 'idle', lastActiveAt: 100, modelId: 'old/x', thinkingLevel: 'medium', tokenCount: 0 },
-      { id: 's2', label: 'other', cwd: '/repo', status: 'idle', lastActiveAt: 100, modelId: 'openai/gpt-4', tokenCount: 0 },
+      { id: 's1', label: 'test', cwd: '/repo', status: 'idle', lastActiveAt: 100 },
+      { id: 's2', label: 'other', cwd: '/repo', status: 'idle', lastActiveAt: 100 },
     ],
   }
   store.applySnapshot({ groups: [group] })
@@ -43,7 +43,7 @@ describe('sessionStore.applySnapshot（单 session 快照合并）', () => {
     const s1 = store.list.find((s) => s.id === 's1')
     expect(s1?.label).toBe('新名')
     expect(s1?.status).toBe('idle') // 不变
-    expect(s1?.thinkingLevel).toBe('medium') // 种子字段不动
+    expect(s1?.cwd).toBe('/repo') // 其余描述字段不动
   })
 
   it('U12: 未知 sessionId 不抛错，groups 不变', () => {
@@ -69,15 +69,17 @@ describe('sessionStore.applySnapshot（单 session 快照合并）', () => {
     expect(s1?.label).toBe('test') // undefined 跳过，保留旧值
   })
 
-  // ── [W1 会话架构四层分离] 状态字段不再由列表承载（反向锁定）────────────────
+  // ── [W1 会话架构四层分离] 状态字段不再由列表承载（反向锁定；W3 起三字段已不在
+  //    SessionSummary 上，写入分支同批删除——本用例锁定无人把它们加回列表条目）────────
   it('W1: 单条快照的状态字段（modelId/thinkingLevel/tokenCount）不写入列表条目', () => {
     const store = seedSession()
     store.applySnapshot('s1', { modelId: 'anthropic/claude-4', thinkingLevel: 'max', tokenCount: 999 })
     const s1 = store.list.find((s) => s.id === 's1')
-    // 列表值 = 种子（整表载荷原样），不被状态快照改写
-    expect(s1?.modelId).toBe('old/x')
-    expect(s1?.thinkingLevel).toBe('medium')
-    expect(s1?.tokenCount).toBe(0)
+    // 列表条目只持描述字段；状态字段即使随快照传入也不落列表（W3 起类型上已无这三字段）
+    expect(s1).toMatchObject({ id: 's1', label: 'test', status: 'idle' })
+    expect(s1).not.toHaveProperty('modelId')
+    expect(s1).not.toHaveProperty('thinkingLevel')
+    expect(s1).not.toHaveProperty('tokenCount')
   })
 })
 
@@ -86,8 +88,8 @@ function seedIdleStore(): ReturnType<typeof useSessionStore> {
   const group: SessionGroup = {
     cwd: '/repo',
     sessions: [
-      { id: 's1', label: 'idle-session', cwd: '/repo', status: 'idle', lastActiveAt: 100, modelId: 'm/x', tokenCount: 0 },
-      { id: 's2', label: 'active-session', cwd: '/repo', status: 'active', lastActiveAt: 200, modelId: 'm/y', tokenCount: 0 },
+      { id: 's1', label: 'idle-session', cwd: '/repo', status: 'idle', lastActiveAt: 100 },
+      { id: 's2', label: 'active-session', cwd: '/repo', status: 'active', lastActiveAt: 200 },
     ],
   }
   store.applySnapshot({ groups: [group] })
