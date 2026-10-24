@@ -148,12 +148,15 @@ export async function seedDemoProvider(proto, dataDir, ev) {
   return entry
 }
 
-/** UI：打开设置 → Provider 页（testid 路径，settings.md capability 入口形态）。 */
+/** UI：打开设置 → Provider 页（testid 路径，settings.md capability 入口形态）。
+ *  就绪锚 = 页头常驻 provider-template-picker（页头无条件渲染）；provider-list-header
+ *  仅在 renderList.length>0 时渲染（ProviderPage.vue v-if），未 seed provider 的实例
+ *  （fixture dataDir 预建跳过模板种子 → models.json 缺失 → providers 空）永远等不到。 */
 export async function openProviderPage(ui) {
   await ui.click('testid=sidebar-settings')
   await ui.expectVisible('testid=settings-nav-provider')
   await ui.click('testid=settings-nav-provider')
-  await ui.expectVisible('testid=provider-list-header')
+  await ui.expectVisible('testid=provider-template-picker')
 }
 
 /** demo provider 行卡选择器（行名 = DEMO_ROW_NAME 子串匹配）。 */

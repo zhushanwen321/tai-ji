@@ -101,7 +101,12 @@ export async function run(ctx) {
     await ui.click('testid=sidebar-settings')
     await ui.expectVisible('testid=settings-nav-provider')
     await ui.click('testid=settings-nav-provider')
-    await ui.expectVisible('testid=provider-list-header')
+    // Provider 页就绪锚 = 页头常驻「+ 添加供应商」按钮（provider-template-picker，页头无条件渲染）。
+    // 不用 provider-list-header：它 v-if="renderList.length"（ProviderPage.vue），
+    // 而 fixture 实例 dataDir 在 launch 前被预建（seed 插件/清单）→ dev-instance-lib
+    // ensureInstanceDir 见目录已存在即跳过模板种子 → 无 agent/models.json → providers 空
+    // → 产品按设计渲染空状态、列表头不出现（2026-10-24 d3-r1-a1 首跑归因）。
+    await ui.expectVisible('testid=provider-template-picker')
     ev.step({ step: 'open-provider-page', channel: 'A', exitCode: 0, stats: {} })
 
     await ui.click('testid=provider-template-picker')
