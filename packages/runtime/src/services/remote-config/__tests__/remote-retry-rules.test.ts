@@ -121,12 +121,17 @@ describe('setRetryRulesCustom 写侧（唯一写方）', () => {
 })
 
 describe('syncRetryRulesRemote 远程生效落盘', () => {
-  it('ext-config 不在场：refreshed 但不落盘（无生效通道，首次 settings 保存自然并入）', async () => {
+  it('ext-config 不在场：补写基线落盘（§3.3.12 G1 基线默认生效——缺席不等于功能缺席）', async () => {
     mockRemoteFetch({ version: 1, rules: [builtinRule('remote-a')] })
     const mod = await loadFresh()
     const result = await mod.syncRetryRulesRemote()
     expect(result.refreshed).toBe(true)
-    expect(existsSync(EXT_CONFIG_PATH())).toBe(false)
+    expect(existsSync(EXT_CONFIG_PATH())).toBe(true)
+    const raw = JSON.parse(readFileSync(EXT_CONFIG_PATH(), 'utf-8'))
+    expect(raw.customRules).toEqual([])
+    // 基线规则在场（编译期基线 ⊕ 本次远程覆盖）
+    expect(raw.effectiveRules.length).toBeGreaterThan(0)
+    expect(raw.effectiveRules.map((r: RetryableErrorRule) => r.id)).toContain('remote-a')
   })
 
   it('ext-config 在场：refreshed 时 effectiveRules 重算落盘，customRules 保留', async () => {

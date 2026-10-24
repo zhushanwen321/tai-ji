@@ -300,6 +300,8 @@ export interface AgentResult {
  * 轮收条 lastRound.engineStopReason 的数据源；缺省 = 事实缺席（旧格式放行）。
  */
   engineStopReason?: EngineStopReason;
+ /** [subagent-observability §3.3.3 P5] 本 run 内重试失败尝试计数（同 record-model 字段）。 */
+  retryAttempts?: number;
  /**
  * Pi session ID for the subagent process (uuidv7).
  * Present when pi emits a session header (default in --mode json).

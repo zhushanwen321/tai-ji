@@ -799,6 +799,7 @@ export class RunOrchestration {
         content: result.text,
         // [§3.3.3] 引擎停因原值随轮收条落盘（正常收尾派生判据的事实输入）。
         ...(result.engineStopReason !== undefined ? { engineStopReason: result.engineStopReason } : {}),
+        ...(result.retryAttempts !== undefined ? { retryAttempts: result.retryAttempts } : {}),
       });
     } else {
       // [U5] 失败轮 settle（不终态化——旧一次性销毁退役，失败轮同样可续聊）。
@@ -809,6 +810,7 @@ export class RunOrchestration {
         reason: result.error ?? "round failed",
         ...(result.failure !== undefined ? { failure: result.failure } : {}),
         ...(result.engineStopReason !== undefined ? { engineStopReason: result.engineStopReason } : {}),
+        ...(result.retryAttempts !== undefined ? { retryAttempts: result.retryAttempts } : {}),
       });
     }
     // [subagent-observability §3.3.7② one-shot 通道放行] 非 workflow origin 的一次性
@@ -845,6 +847,7 @@ export class RunOrchestration {
       // 同源，判定分类与「正常收尾」派生判据不因执行域丢失）。
       ...(outcome.failure !== undefined ? { failure: outcome.failure } : {}),
       ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
+      ...(outcome.retryAttempts !== undefined ? { retryAttempts: outcome.retryAttempts } : {}),
     };
   }
 

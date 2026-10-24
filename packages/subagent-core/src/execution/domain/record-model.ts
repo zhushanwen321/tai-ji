@@ -150,6 +150,9 @@ export interface AgentResult { // oe-exempt:20260930:framework:领域值对象�
    * completed）的事实输入；缺省 = 事实缺席，宿主回落派生展示词。
    */
   engineStopReason?: EngineStopReason;
+  /** [subagent-observability §3.3.3 P5] 本 run 内 pi 原生重试的失败尝试计数
+   *  （AgentOutcome.retryAttempts 透传；缺省 = 无重试/旧格式）。 */
+  retryAttempts?: number;
   sessionId: string;
   toolCalls: ToolCall[];
   usage?: AgentUsageTotal;

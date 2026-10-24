@@ -864,6 +864,7 @@ function outcomeToWorkflowResult(outcome: AgentOutcome): WorkflowAgentResult {
     // [subagent-observability §3.3.3] 轮终停因引擎原值透传（call.result → 成员轮收条
     // lastRound.engineStopReason 数据源，与 one-shot 域同源）。
     ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
+    ...(outcome.retryAttempts !== undefined ? { retryAttempts: outcome.retryAttempts } : {}),
     toolCalls: outcome.toolCalls,
   };
 }

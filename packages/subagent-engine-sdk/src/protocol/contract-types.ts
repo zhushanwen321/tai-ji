@@ -584,6 +584,13 @@ export interface AgentOutcome {
    * 旧引擎缺省 = 宿主回落派生展示词，零行为差。
    */
   engineStopReason?: EngineStopReason;
+  /**
+   * [subagent-observability §3.3.3 P5] 本 run 内 pi 原生重试的失败尝试计数
+   * （auto_retry_start 帧数；引擎 >0 时上报）。宿主轮收条 lastRound.retryAttempts
+   * 的数据源——重试轨迹可观测（失败尝试不静默计入 turns/usage）。additive 可选：
+   * 旧引擎/无重试缺省不落键。
+   */
+  retryAttempts?: number;
 }
 
 // ============================================================

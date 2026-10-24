@@ -366,6 +366,7 @@ export class ConversationContinuation {
         this.settleRoundFailed(outcome.error, {
           ...(outcome.failure !== undefined ? { failure: outcome.failure } : {}),
           ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
+          ...(outcome.retryAttempts !== undefined ? { retryAttempts: outcome.retryAttempts } : {}),
         }),
         "settleRoundFailed (onRunSettled)",
       );
@@ -716,6 +717,7 @@ export class ConversationContinuation {
       content: outcome.content,
       // [§3.3.3] 引擎停因原值随轮收条落盘（正常收尾派生判据的事实输入）。
       ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
+      ...(outcome.retryAttempts !== undefined ? { retryAttempts: outcome.retryAttempts } : {}),
     });
     // [u7a 生产补挂] 轮终簿记完成 = 「正在执行 → 保活」翻转边界（与旧 idle 相位帧
     //（H1 U6 已退役）同一时点语义：成功轮收敛进 idle 稳态，活句柄交 idle timer 保活）
@@ -750,7 +752,7 @@ export class ConversationContinuation {
    */
   private async settleRoundFailed(
     reason: string,
-    facts?: { failure?: FailureCause; engineStopReason?: EngineStopReason },
+    facts?: { failure?: FailureCause; engineStopReason?: EngineStopReason; retryAttempts?: number },
   ): Promise<void> {
     const record = this.record;
     await this.host.finalizeRoundOutcome(record, {
@@ -758,6 +760,7 @@ export class ConversationContinuation {
       reason,
       ...(facts?.failure !== undefined ? { failure: facts.failure } : {}),
       ...(facts?.engineStopReason !== undefined ? { engineStopReason: facts.engineStopReason } : {}),
+      ...(facts?.retryAttempts !== undefined ? { retryAttempts: facts.retryAttempts } : {}),
     });
     if (!notifyGateAllowsDelivery(record)) {
       this.drain();

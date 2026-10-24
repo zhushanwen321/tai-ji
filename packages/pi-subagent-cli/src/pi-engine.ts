@@ -465,6 +465,10 @@ function toOutcome(result: SpawnRunResult): AgentOutcome {
     // [subagent-observability §3.3.3] 轮终停因引擎原值透传上协议（CollectedOutcome
     // 收尾边沿事实 → 宿主轮收条 lastRound.engineStopReason 数据源）。
     ...(result.engineStopReason !== undefined ? { engineStopReason: result.engineStopReason } : {}),
+    // [§3.3.3 P5] 重试失败尝试计数透传（>0 才上报——无重试不落键）。
+    ...(result.retryAttempts !== undefined && result.retryAttempts > 0
+      ? { retryAttempts: result.retryAttempts }
+      : {}),
     toolCalls: result.toolCalls.map((tc) => ({
       name: tc.toolName,
       input: tc.args === undefined ? "" : JSON.stringify(tc.args),

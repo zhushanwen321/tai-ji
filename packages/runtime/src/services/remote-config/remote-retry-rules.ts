@@ -128,16 +128,26 @@ export function setRetryRulesCustom(
 
 /**
  * 远程域刷新 + 生效落盘（config-service 远程同步挂点调用）：refreshRemoteConfig 拉取
- * （4h 节流 + ETag + fail-safe 链内建）→ 若 ext-config 文件在场且远程内容有变化，重写
- * effectiveRules 段（extension 下轮判定热重载吃到）。ext-config 不在场（用户从未打开
- * settings 且无自定义规则）时无需落盘——extension 读侧回落空集，远程热更在首次写点
- * （settings 保存）时自然并入。
+ * （4h 节流 + ETag + fail-safe 链内建）→ 重算 effectiveRules 段落盘（extension 下轮
+ * 判定热重载吃到）。
+ *
+ * [§3.3.12 G1 基线默认生效] ext-config 缺席（新机器 / 从未打开 settings）时**首次调用
+ * 即补写基线落盘**（effectiveRules = 编译期基线 ⊕ 可用远程覆盖，customRules 空）——
+ * 基线规则是功能默认生效面（「可重试错误不再被判死」），文件名缺席不得等于功能缺席；
+ * 补写先于远程命中判定（拉取失败/无变化也补），单一写方纪律不变（本函数与
+ * setRetryRulesCustom 同为本文件写侧）。
  */
 export async function syncRetryRulesRemote(): Promise<{ refreshed: boolean; reason?: string }> {
-  const { data, refreshed, reason } = await refreshRemoteConfig('retry-rules', isRetryRulesRemoteConfig)
-  if (!data || !refreshed) return { refreshed: false, ...(reason !== undefined ? { reason } : {}) }
   const path = retryRulesExtConfigPath()
-  if (!existsSync(path)) return { refreshed: true }
+  const existed = existsSync(path)
+  // 拉取先行（4h 节流 + ETag + fail-safe 链内建；失败也走缓存/基线，不阻断下方补写）。
+  const { data, refreshed, reason } = await refreshRemoteConfig('retry-rules', isRetryRulesRemoteConfig)
+  if (!existed) {
+    // [G1] 缺席即补写（effectiveRules = 编译期基线 ⊕ 可用远程层刚拉取结果）。
+    writeRetryRulesExtConfig({ version: 1, customRules: [], effectiveRules: computeEffectiveRules([]) })
+    return { refreshed: true }
+  }
+  if (!data || !refreshed) return { refreshed: false, ...(reason !== undefined ? { reason } : {}) }
   const current = readRetryRulesExtConfig()
   writeRetryRulesExtConfig({ version: 1, customRules: current.customRules, effectiveRules: computeEffectiveRules(current.customRules) })
   return { refreshed: true }
