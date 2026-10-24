@@ -21,7 +21,12 @@
 // 通知门（notifyGateAllowsDelivery）双闸消费：成功分支 route 前 + 失败分支独立
 // 载荷发出前（B#19 投递门照迁移），与 onRunSettled 的 status 终态侧正交双闸。
 
-import type { AgentOutcome, ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
+import type {
+  AgentOutcome,
+  EngineStopReason,
+  FailureCause,
+  ResumeAnchor,
+} from "@zhushanwen/subagent-engine-sdk";
 
 import { toErrorMessage } from "../../core/error-message.ts";
 import { getLogger } from "../../core/logger.ts";
@@ -355,7 +360,15 @@ export class ConversationContinuation {
       return;
     }
     if (outcome.error !== undefined) {
-      voidRoundFinalChain(this.settleRoundFailed(outcome.error), "settleRoundFailed (onRunSettled)");
+      // [subagent-observability §3.3.3] 收尾边沿事实随分流下传（failure/engineStopReason
+      // → 轮收条 rec.lastRound）——判定分类与「正常收尾」派生判据不因 chat 域载体丢失。
+      voidRoundFinalChain(
+        this.settleRoundFailed(outcome.error, {
+          ...(outcome.failure !== undefined ? { failure: outcome.failure } : {}),
+          ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
+        }),
+        "settleRoundFailed (onRunSettled)",
+      );
       return;
     }
     voidRoundFinalChain(this.settleRoundSuccess(outcome), "settleRoundSuccess (onRunSettled)");
@@ -698,7 +711,12 @@ export class ConversationContinuation {
    *  → closeAfterRound 归档消费（[U5] 顺序约束：通知送达后才归档）。 */
   private async settleRoundSuccess(outcome: AgentOutcome): Promise<void> {
     const record = this.record;
-    await this.host.finalizeRoundOutcome(record, { kind: "success", content: outcome.content });
+    await this.host.finalizeRoundOutcome(record, {
+      kind: "success",
+      content: outcome.content,
+      // [§3.3.3] 引擎停因原值随轮收条落盘（正常收尾派生判据的事实输入）。
+      ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
+    });
     // [u7a 生产补挂] 轮终簿记完成 = 「正在执行 → 保活」翻转边界（与旧 idle 相位帧
     //（H1 U6 已退役）同一时点语义：成功轮收敛进 idle 稳态，活句柄交 idle timer 保活）
     // ——arm 后推最新在途计数（D5 双谓词：保活不计在途）。失败轮不 arm（旧 idle
@@ -730,9 +748,17 @@ export class ConversationContinuation {
    * ②放弃轮标记命中——cancel 中断轮防双发；检查是入口一次性判定，覆盖不了簿记
    * await 链内的中途归档窗）。
    */
-  private async settleRoundFailed(reason: string): Promise<void> {
+  private async settleRoundFailed(
+    reason: string,
+    facts?: { failure?: FailureCause; engineStopReason?: EngineStopReason },
+  ): Promise<void> {
     const record = this.record;
-    await this.host.finalizeRoundOutcome(record, { kind: "failed", reason });
+    await this.host.finalizeRoundOutcome(record, {
+      kind: "failed",
+      reason,
+      ...(facts?.failure !== undefined ? { failure: facts.failure } : {}),
+      ...(facts?.engineStopReason !== undefined ? { engineStopReason: facts.engineStopReason } : {}),
+    });
     if (!notifyGateAllowsDelivery(record)) {
       this.drain();
       return;
