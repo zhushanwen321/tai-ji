@@ -233,6 +233,12 @@ export interface SessionDeliveryRegistry {
   /** 内核条目双视图（D9②；帧装配由 u3a 经 handle 派生视图消费） */
   entries(sessionId: string): DeliveryEntriesFull | undefined
   /**
+   * 运行时创建多播（chat-flow-consistency D3 修复）：ensureRuntime 新建运行时后逐个通知，
+   * 订阅返回退订函数。消费方 = session.delivery 帧发布器（sync 先于运行时存在被调用时，
+   * 靠本事件补接线——否则建会即订阅的会话整生命周期零帧）。可选：测试替身缺省零行为。
+   */
+  onRuntimeCreated?(cb: (sessionId: string) => void): () => void
+  /**
    * pi 文本队列镜像计数（queue_update 全量快照；§3.6 新增消费）：快照口径 = 文本镜像
    * 两数组（pi `_steeringMessages` / `_followUpMessages`），通知不在其内——GUI 队列区
    * 「pi 队列中等待」文本条目计数的数据源（通知不计入，§3.11 custom 条目不进帧）。
@@ -581,6 +587,7 @@ export function createSessionDeliveryRegistry(
   // 注册表（内核 handle 的投递队列 = delivery outbox + 适配层 pendingRevoke 等运行态；
   // 内存、非持久，session 删除时 dispose 清空）
   const runtimes = new Map<string, SessionRuntime>()
+  const runtimeCreatedListeners = new Set<(sessionId: string) => void>()
 
   function warn(...args: unknown[]): void {
     console.warn('[session-delivery]', ...args)
@@ -1690,7 +1697,19 @@ export function createSessionDeliveryRegistry(
     if (existing) return existing
     const rt = buildRuntime(sessionId)
     runtimes.set(sessionId, rt)
+    notifyRuntimeCreated(sessionId)
     return rt
+  }
+
+  /** 运行时创建多播（唯一创建点 ensureRuntime 触发；监听失败只 warn，不阻断投递主流程）。 */
+  function notifyRuntimeCreated(sessionId: string): void {
+    for (const cb of runtimeCreatedListeners) {
+      try {
+        cb(sessionId)
+      } catch (e) {
+        warn('onRuntimeCreated listener failed', sessionId, e)
+      }
+    }
   }
 
   /** 条目态查询（submit 回执用；活跃集 → tombstone）。 */
@@ -1718,6 +1737,10 @@ export function createSessionDeliveryRegistry(
     getDelivery(sessionId) {
       // 非创建性查询（MF-1-12）：无运行时返回 undefined，不引入 settled 订阅副作用
       return runtimes.get(sessionId)?.handle
+    },
+    onRuntimeCreated(cb) {
+      runtimeCreatedListeners.add(cb)
+      return () => runtimeCreatedListeners.delete(cb)
     },
     attachSegments(sessionId, clientUuid, segments) {
       const rt = runtimes.get(sessionId)

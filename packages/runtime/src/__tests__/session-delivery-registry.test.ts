@@ -1173,3 +1173,38 @@ describe('受理失败留守（第 11 条）：failed 行可重试（E3 与断�
     expect(h.promptCalls).toHaveLength(1) // 未重投
   })
 })
+
+describe('onRuntimeCreated 创建事件（chat-flow-consistency D3 修复）', () => {
+  it('运行时首次创建触发一次；复用与后续 submit 不再触发', async () => {
+    const h = makeHarness()
+    const seen: string[] = []
+    h.registry.onRuntimeCreated!((sid) => seen.push(sid))
+
+    h.registry.submit('s1', { content: '首条', clientUuid: 'u-a1000000-0000-4000-8000-000000000001' })
+    await h.flush()
+    expect(seen).toEqual(['s1'])
+
+    // 复用（运行时已存在）与再次 submit 均不触发——事件只承载「创建」这一确定性事实
+    h.registry.getOrCreateDelivery('s1')
+    h.registry.submit('s1', { content: '次条', clientUuid: 'u-a1000000-0000-4000-8000-000000000002' })
+    await h.flush()
+    expect(seen).toEqual(['s1'])
+  })
+
+  it('退订函数生效；监听抛错不阻断投递主流程', async () => {
+    const h = makeHarness()
+    const seen: string[] = []
+    const bad = vi.fn(() => {
+      throw new Error('listener boom')
+    })
+    const offGood = h.registry.onRuntimeCreated!((sid) => seen.push(sid))
+    h.registry.onRuntimeCreated!(bad)
+    offGood()
+
+    h.registry.submit('s1', { content: '唯一', clientUuid: 'u-a1000000-0000-4000-8000-000000000003' })
+    await h.flush()
+    expect(seen).toEqual([]) // 已退订
+    expect(bad).toHaveBeenCalledTimes(1) // 抛错监听被调用但被隔离
+    expect(h.promptCalls).toHaveLength(1) // 投递主流程不受影响
+  })
+})

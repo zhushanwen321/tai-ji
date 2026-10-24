@@ -441,6 +441,36 @@ describe('帧数据源 = 内核派生视图（D9②：cancelled 不映射 / tomb
     registry.disposeAll()
   })
 
+  it('首订阅早于运行时创建：sync 早退后靠 onRuntimeCreated 创建事件补接线（chat-flow-consistency D3 缺口回归）', async () => {
+    const bus = new MessageBus()
+    const sent: ServerMessage[] = []
+    const client = { readyState: 1, send: (raw: string) => sent.push(JSON.parse(raw) as ServerMessage) } as BusClient
+    bus.subscribe(SID, client)
+
+    const registry = createSessionDeliveryRegistry(
+      {
+        getSession: () => makeSession(),
+        ensureActive: async () => makePiClient() as unknown as IPiEngine,
+        subscribeAgentSettled: () => () => {},
+        recordWorkspace: vi.fn(),
+        getMessageBus: () => bus,
+      },
+      { inject: vi.fn(async (_c: IPiEngine, text: string) => ({ text, notices: [] })) } as unknown as SkillInjector,
+    )
+    const topic = new SessionDeliveryTopic({ getRegistry: () => registry, getBus: () => bus, nextPushId: () => 'push-t' })
+    // 建会即订阅形态：运行时尚不存在，sync 早退、零帧
+    topic.sync(SID)
+    expect(sent.filter((m) => m.type === 'session.delivery')).toHaveLength(0)
+
+    // 首个 delivery.submit 建运行时 → 创建事件补接线（无需再次 subscribe）→ onChange 发帧
+    registry.submit(SID, { content: 'msg-A', clientUuid: UUID_A })
+    await vi.advanceTimersByTimeAsync(1)
+    const frames = sent.filter((m) => m.type === 'session.delivery') as ServerMessage<'session.delivery'>[]
+    expect(frames.length).toBeGreaterThanOrEqual(1)
+    expect(frames[frames.length - 1]?.payload.entries.map((e) => e.clientUuid)).toContain(UUID_A)
+    registry.disposeAll()
+  })
+
   it('变更驱动而非轮询：无内核变更时推进 60s 零新帧（onChange 订阅侧）', async () => {
     const bus = new MessageBus()
     const sent: ServerMessage[] = []

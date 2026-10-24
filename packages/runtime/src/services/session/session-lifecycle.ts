@@ -56,7 +56,7 @@ import { createForkedSessionFile, resolveEntryIdByTimestamp } from './session-fo
 // session-dead-structural-fixes D2/D4：occupancy 宣告原语 + userStopped 门面
 //（restore 标记检测 / delete 清理 / 收敛环）。event-interpreter 是唯一无环的兄弟依赖方向
 //（session-service 值导入本文件与本文件引用的两者，反向 import 成环）。
-import { announceSessionOccupancy, applySessionOccupancyTransition, userStoppedGate } from './event-interpreter.js'
+import { announceSessionOccupancy, userStoppedGate } from './event-interpreter.js'
 import { isGeneratingTurn } from './types.js'
 // restore 附着辅助（F2/F3 归一化 + U2/D1 生效值播种 + get_state 共用解析）——
 // 自本文件迁出（max-lines 行数合规），函数体逐字节等价，见 restore-seeding.ts。
