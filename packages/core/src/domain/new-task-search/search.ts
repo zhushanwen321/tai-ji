@@ -4,8 +4,9 @@
  * [归位] 迁自 renderer composables/features/useSearch.ts（313 行），语义逐条等价。
  * C-W3-1 端口注入：isMock 改 deps.ports.isMock（替代 import.meta.env.VITE_MOCK）、
  * mockApi.search fixture 经 deps.ports.searchMock（SearchDataPort）、composerApi.getFileCandidates
- * 经 deps.ports.fileCandidates（FileCandidatesPort）、sessionApi.list 经 deps.ports.sessionList
- * （SessionListPort）。i18n.global.t 经 deps.ports.t（TranslatePort）。
+ * 经 deps.ports.fileCandidates（FileCandidatesPort）、session 列表经 deps.ports.sessionList
+ * （SessionListPort——W4b 起壳侧接 session.list {surface:'sidebar'} 通用查询，§3.3.1）。
+ * i18n.global.t 经 deps.ports.t（TranslatePort）。
  *
  * 数据流：SearchModal.watch(query) → debounce 120ms → query(q, ctx) →
  *   allSettled 并行查 4 源（命令内存 / file WS 直查 / session WS / 归档 WS）→
@@ -160,7 +161,8 @@ export function useSearch(
     return mapFileCandidatesToItems(filtered)
   }
 
-  /** session 源（WS + #17 超时 race + 源内子串过滤）：sessionList 全量跨项目 */
+  /** session 源（WS + #17 超时 race + 源内子串过滤）：sessionList 侧栏口径全量跨项目
+   *  （W4b 起端口背后 = session.list {surface:'sidebar'}，btw 线不进搜索口径，§3.3.1） */
   async function querySessionSource(q: string): Promise<SearchItem[]> {
     // #17：WS 超时 race
     const groups = await withWsTimeout(ports.sessionList())

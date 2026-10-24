@@ -295,7 +295,7 @@ vi.mock('@/api', () => ({
   project: { load: vi.fn(async () => ({ projects: [], activeProjectId: '' })), save: vi.fn(async () => {}) },
   chat: { send: vi.fn(), steer: vi.fn() },
   model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn() },
+  session: { setThinkingLevel: vi.fn(), listSessions: vi.fn().mockResolvedValue([]) },
   composer: { getMentionCandidates: vi.fn(async () => []), getFileCandidates: vi.fn(async () => []) },
   config: {
     getGlobalSkills: vi.fn(async () => []), getProjectSkills: vi.fn(async () => []),

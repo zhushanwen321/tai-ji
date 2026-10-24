@@ -273,12 +273,15 @@ describe('CommandPopover file query 过滤 + 路径展示（U7-U9）', () => {
 
 const NOW = Date.now()
 /** 跨 cwd 两组 session：alpha（1m 前，proj-a）/ beta（3h 前，proj-b）——验证全局降序 + 两行副行 */
+// W5 切换点（command-popover-symbols 的 nav-filter 改读 surface === 'sidebar'）：
+// fixture 条目须显式带 surface:'sidebar'（缺省 = 未知枚举值不泄漏进候选集，正向谓词语义）。
+// modelId/thinkingLevel/tokenCount 三状态字段已随 W3 从 SessionSummary 删除，不再种。
 const SESSION_GROUPS: SessionGroup[] = [
   { cwd: '/Users/x/proj-a', sessions: [
-    { id: 'sess-alpha', label: 'alpha 设计讨论', cwd: '/Users/x/proj-a', status: 'idle', lastActiveAt: NOW - 90_000, modelId: 'm', tokenCount: 0 },
+    { id: 'sess-alpha', label: 'alpha 设计讨论', cwd: '/Users/x/proj-a', status: 'idle', lastActiveAt: NOW - 90_000, surface: 'sidebar' },
   ] },
   { cwd: '/Users/x/proj-b', sessions: [
-    { id: 'sess-beta', label: 'beta review', cwd: '/Users/x/proj-b', status: 'idle', lastActiveAt: NOW - 3 * 3_600_000, modelId: 'm', tokenCount: 0 },
+    { id: 'sess-beta', label: 'beta review', cwd: '/Users/x/proj-b', status: 'idle', lastActiveAt: NOW - 3 * 3_600_000, surface: 'sidebar' },
   ] },
 ]
 

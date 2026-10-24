@@ -48,6 +48,7 @@
 import { ref } from 'vue'
 import { beforeEach, expect, vi } from 'vitest'
 import { defineComponent } from 'vue'
+import type { SessionGroup } from '@taiji/shared'
 import type { Component, ComponentObjectPropsOptions, Ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -140,26 +141,52 @@ export function composerApiModuleWithChat() {
 export const composerBtwApiSpy = { list: vi.fn(), create: vi.fn(), remove: vi.fn() }
 
 /**
- * btw 域 api spy 单例（importActual 合并形态的断言锚点）：btw 面 4 文件（btw-panel /
+ * btw 面 api spy 单例（importActual 合并形态的断言锚点）：btw 面 4 文件（btw-panel /
  * btw-overlay-routing / btw-panel-contract-invisible / composer-band-alignment）经
  * composerApiModuleActualWithBtw 注册后，用本单例播种 list 返回值 / 断言调用。
+ *
+ * W4b：`list` 成员现挂在 **session.listSessions** 上（btw 线进通用列表，btw.list 退役）——
+ * spy 单例名保留（多文件断言锚点），入参从 mainSid 变为 { surface:'btw', mainSessionId }、
+ * 返回值从 BtwThreadInfo[] 变为 SessionGroup[]（见 btwLineGroups 构造器）。
  */
 export const composerBtwApiMock = { list: vi.fn(), create: vi.fn(), remove: vi.fn() }
 
+/** W4b 线列表 reply 构造：session.list {surface:'btw'} → SessionGroup[]（单 cwd 组） */
+export function btwLineGroups(...lines: Array<{ id: string; label?: string }>): SessionGroup[] {
+  return [{
+    cwd: '/repo/main',
+    sessions: lines.map((l, i) => ({
+      id: l.id,
+      label: l.label ?? `btw-${i + 1}`,
+      cwd: '/repo/main',
+      status: 'idle' as const,
+      lastActiveAt: 0,
+      surface: 'btw' as const,
+    })),
+  }]
+}
+
 /**
  * '@/api' mock 工厂（importActual 合并形态）：btw 域替换为 composerBtwApiMock，
- * 门面其余域保真。注册形态 `vi.mock('@/api', composerApiModuleActualWithBtw)`。
+ * 线列表经 session.listSessions 接线（W4b），门面其余域保真。
+ * 注册形态 `vi.mock('@/api', composerApiModuleActualWithBtw)`。
  */
 export async function composerApiModuleActualWithBtw(
   importActual: <T = unknown>() => Promise<T>,
 ) {
-  const actual = await importActual<Record<string, object>>()
-  return { ...actual, btw: composerBtwApiMock }
+  const actual = await importActual<Record<string, object>>() as { session?: object }
+  return {
+    ...actual,
+    btw: composerBtwApiMock,
+    session: { ...actual.session, listSessions: composerBtwApiMock.list },
+  }
 }
 
 /**
  * '@/api' mock 工厂（chat + btw 组增量形态，btw-button 专用）：chat 组加 getHistory
- * 回放路径（空快照即可，drawer 选中线不走失败告警路径），btw 组为 badge 数据源。
+ * 回放路径（空快照即可，drawer 选中线不走失败告警路径）；**W4b 起 badge 数据源 =
+ * session.listSessions**（btw 线进通用列表，btw.list 退役——spy 单例名保留，接线改
+ * session 域）。
  */
 export function composerApiModuleWithChatAndBtw() {
   return {
@@ -168,7 +195,8 @@ export function composerApiModuleWithChatAndBtw() {
       ...composerChatApiGroup(),
       getHistory: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
     },
-    btw: composerBtwApiSpy,
+    session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })), listSessions: composerBtwApiSpy.list },
+    btw: { create: composerBtwApiSpy.create, remove: composerBtwApiSpy.remove },
   }
 }
 
@@ -200,7 +228,9 @@ export function composerApiModule() {
       save: vi.fn().mockResolvedValue(undefined),
     },
     model: { switchModel: vi.fn() },
-    session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
+    // W4b：session.listSessions 进公共 session 组（useBtwTabData badge 数据源——btw 线进
+    // 通用列表；缺省空列表 = 无名下线，mount Composer 的文件不再踩「未 mock 方法」降级路径）
+    session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })), listSessions: vi.fn().mockResolvedValue([]) },
     composer: {
       getMentionCandidates: vi.fn().mockResolvedValue([]),
       getFileCandidates: vi.fn().mockResolvedValue([]),
