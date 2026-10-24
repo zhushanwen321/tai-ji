@@ -102,7 +102,7 @@
 | **codemode** | **否**（对话主链完整可用） | 但**影响工具可用性**：`defaultTools` 的 `+codemode` 启动迁移是 `pi-codemode-settings.ts` 的唯一写点；迁移失败不阻塞启动（warn + 下次幂等补跑）。→ 不登记为阻断 |
 | **tool_search（工具延迟加载）** | **否**（模型回落 bash，行为等价于无此工具） | 但**影响「工具可不可用」的观测**：低频工具（`session_read`/`plan`/`schedule` 族等）**默认不在场**，需 `tool_search` 激活。→ 验收低频工具时若先断言工具在场会假失败，必须 `tool_search` 一次。**已登记到 `interaction.canvas` 的 Gotcha（deferred 六工具）** |
 | **fast-handoff** | **否**（手动新建 + 迁上下文可用） | 失败经 message.error 入流，不打 P0 链 |
-| **btw 旁路提问** | **否**（主对话链路完整） | 独立 pi 进程，有 `E2E-BTW-01` L3 真实进程层 |
+| **btw 旁路提问** | **否**（主对话链路完整） | 独立 pi 进程，有 `E2E-BTW-01` L3 真实进程层；冷线模型记忆 + 一个会话一个键全链走查有 `p1-btw-coldline-model-memory` 剧本（faux 零 token，51 断言） |
 | **session 导入** | **否** | 独立入口 |
 | **网络代理分流** | **否**（关闭 = 全直连基线） | `settings.network-proxy` 只覆盖设置页配置；**分流行为本身**需真实 LLM 才可验 → 登记 `unreachable`（无 mock 代理下的端到端证据） |
 | **canvas 画布** | **否**（回到无画布状态） | 六工具 deferred，需 `tool_search` 先激活 |
