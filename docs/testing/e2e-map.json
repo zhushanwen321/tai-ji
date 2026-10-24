@@ -4350,6 +4350,46 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态：当前执行形态 = 本表 run 三条（两个 selftest 实跑 exit 0 + vitest 单测）；check-session-hidden-surface.mjs 已接入 pre-commit（.githooks/install-hooks.sh 新增段——触发范围 = staged 命中 packages/<任意包>/src 下 .ts/.tsx/.vue 或检查脚本及其单测，执行 = 全仓扫描 + 脚本单测 vitest，清单外命中即红）；sweep-orphan-session-dirs.mjs（破坏性 fs 清扫，仅 --selftest 形态）未接入 pre-commit / CI——其生产执行属验收项 14 点检流程（人工触发 + 点检记录留痕），不进自动触发器。非恒绿证明由 check 脚本自带 selftest（样本树期望红/绿各形态）与 sweep --selftest（六形态 + 边界 + prod 护栏 + 纯函数）承载。补登原因（dmg-r1-4 同型）：新脚本落入 scripts/ 与 scripts/__tests__/ 看护目录，零登记被 e2e-map --staged 门禁拦截，随修复同批补登。"
+    },
+    {
+      "id": "E2E-PIPE-19",
+      "summary": "D3 脚本层验收资产（session-identity-visibility-state 设计 §7 项 1/6/9/11/12/13 的行为验收测试）：item1 fork 混合分支冷读（§10.1 六步序列离线等价物 + 负向对照）/ item6 getState 冷线零 spawn + 快照未就绪无 restore / item9 五类键容器行为点检 / item11 宿主不变量四族集合 diff / item12 session.list 功能+负例+两口径深等 / item13 createNew 三态 + 项 10 复跑。由 dev-flow verify 剧本（skill-data 下 .mjs）驱动，亦可直接 vitest 跑",
+      "scope": [
+        "packages/runtime/test/acceptance/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/acceptance/item1-fork-coldread.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/acceptance/item6-getstate-cold.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/acceptance/item9-key-containers.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/acceptance/item11-host-invariants.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/acceptance/item12-session-list.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/acceptance/item13-w5-behavior.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm -C packages/runtime exec vitest run test/acceptance/",
+      "owner": "packages/runtime/test/acceptance/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：真实运行形态 = dev-flow D3 verify 剧本逐节点驱动（剧本在 ~/.agents/skill-data/dev-flow/<slug>/<name>.verify/，node 直跑、退出码判定）；本表 run 为同资产的仓内直跑形态（D3 首批 7 节点全 exit 0 实跑证据）。fixture 全部 mkdtemp 隔离（禁触真实数据目录）。补登原因（dmg-r1-4 同型）：验收测试目录落 packages/runtime/test/ 看护目录（看护根源头 E2E-INTEG-19），零登记被 e2e-map --staged 门禁拦截，随修复同批补登。"
     }
   ]
 }
