@@ -48,7 +48,7 @@ import {
 } from '@taiji/ui/extension-host'
 import { __testing, useExtensionUI } from '@/composables/useExtensionUI'
 import { __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwTabData'
-import { applySurfacesFrame, __resetSurfaceTableForTest } from '@taiji/core'
+import { __resetBtwLineMembershipForTest, noteBtwLinesPulled } from '@/composables/panel/btw-line-membership'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useToast } from '@/composables/useToast'
@@ -165,10 +165,11 @@ beforeEach(() => {
   __clearSessionCleanupRegistryForTest()
   __testing.__resetExtensionBusSubscriptionForTesting()
   __resetBtwPendingBookkeepingForTest()
-  // W4a 判别器播种：btw 簿记订阅壳的 ui-request/requests-invalidated 路由判据 =
-  // session.surfaces 只读派生表（isBtwSession）——VID（线 session id）按线登记。
-  __resetSurfaceTableForTest()
-  applySurfacesFrame({ entries: [{ sessionId: VID, surface: 'btw' }] })
+  // W4b 收编判别器播种：btw 簿记订阅壳的 ui-request/requests-invalidated 路由判据 =
+  // session.list {surface:'btw'} 拉取缓存成员判别（btw-line-membership）——VID（线 session
+  // id）按线预热（等价抽屉拉取产物喂入）。
+  __resetBtwLineMembershipForTest()
+  noteBtwLinesPulled([VID])
   extMock.sendExtensionUIResponse.mockReturnValue(true)
   // 快照镜像 store 现态（真实 runtime 缓存 pending 并在快照回填——切走切回不被僵尸修剪误伤）
   extMock.getPendingRequests.mockImplementation(async (sid?: string) =>

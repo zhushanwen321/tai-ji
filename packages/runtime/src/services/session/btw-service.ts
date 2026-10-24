@@ -94,8 +94,8 @@ export type { BtwErrorCode } from './btw-error.js'
 // 挂点）已整体删除——线进程存续至显式关线（closeLine）或 runtime shutdown destroyAll。
 // W5 同批删除其余残留：BtwLineRecord.reclaimImminent 字段、BtwServiceDeps.onWillReclaim
 // 挂点、btw.list 载荷的 reclaimImminent 映射；协议字段 BtwThreadInfo.reclaimImminent
-// 与 renderer reclaimReminderVids 表的删除归后续协议收缩单元（shared/protocol.ts 与
-// renderer 线域文件不在本单元领地）。
+// 与 renderer reclaimReminderVids 表已由 u-w5b 协议收缩单元删除（shared/protocol.ts
+// BtwThreadInfo 整体随 W4b 线枚举帧退役，见 btw-message-handler.ts）。
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 类型
@@ -215,11 +215,6 @@ export interface BtwServiceDeps {
   /** 行为契约注入 trace（D9⑤；缺省 no-op）。 */
   traceContractInjection?(trace: BtwContractInjectionTrace): void
   /**
-   * 线状态变化广播驱动。组合根接「线列表 state 广播」（typeKey 'btw'）。缺省 no-op（测试零广播）。
-   * 入参 = 线 session id（W4a 键统一后 = piSessionId）。
-   */
-  onThreadStateChanged?(sessionId: string): void
-  /**
    * 交互中转 pending 快照：respond / expired / 失效三终态的共同落点 =
    * ExtensionTimeoutManager 的 per-session pending 表（respond → removeRequest、失效 →
    * invalidatePendingForSession），组合根经 server.getPendingUiRequests 薄委托注入。
@@ -337,7 +332,9 @@ export class BtwService {
     return this.registry.get(sessionId)
   }
 
-  /** 线列表枚举（btw.list{mainSid} 后端；BtwPanel 消费，不属于禁止的关联展示面——D4）。 */
+  /** 线列表枚举（按主会话过滤；session.list {surface:'btw', mainSessionId} 通用查询的
+   *  注册表数据源，W4b 起 drawer BtwPanel 与 badge 通道均经该查询消费——原 btw.list
+   *  {mainSid} 聚合消息已退役；关联展示面枚举读，D4）。 */
   listLines(mainSid: string): BtwLineRecord[] {
     const out: BtwLineRecord[] = []
     for (const rec of this.registry.values()) {

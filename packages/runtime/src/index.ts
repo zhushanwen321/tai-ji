@@ -15,7 +15,6 @@ import { REVOKED_SIGNAL_CUSTOM_TYPE } from './services/session/revoke-orchestrat
 import { BtwService } from './services/session/btw-service.js'
 // 线 spawn options 工厂（buildLineSpawnOptions 决策侧的可测提取，见该文件 docstring）。
 import { createBtwLineSpawnOptionsFactory } from './services/session/btw-line-spawn-options.js'
-import { buildBtwThreadListPayload } from './transport/btw-message-handler.js'
 // D8-3 迁移门与 create/restore spawn 同约束（组合根后台序列 setMigrationGate 注入，读侧在
 // btw-line-spawn-options 工厂——getMigrationGate 经下方 createBtwLineSpawnOptionsFactory 接线）。
 // [M4-a] setBtwCascadeOps：deleteSession/deleteByCwd 的 btw 级联支线注入点（session-lifecycle）；
@@ -1405,23 +1404,11 @@ async function main(): Promise<void> {
   // registerSession 走 SessionService 的 lifecycle 兼容委托（W3 起 surface:'btw' 同链
   // 透传；hidden 形参已随 W5 字段退场删除，此处传 undefined）；源文件解析 = 活跃 ?? 扫盘（与 resolveSessionFilePath 同源）；pi 二进制与
   // pm 同 effectiveRoot 锚点。
-  // 线状态变化广播（onThreadStateChanged 消费）：发该主会话线列表 state 帧
-  //（typeKey 'btw'，buildBtwThreadListPayload 防漂移）。best-effort：失败留痕不打断主链
-  //（恢复通道 = btw.list RPC 拉取兜底）。
-  const publishBtwThreadList = (sessionId: string): void => {
-    const rec = btwService.getLine(sessionId)
-    if (!rec) return
-    try {
-      messageBus.publish(rec.mainSid, {
-        type: 'btw.list',
-        id: server.nextPushId(),
-        payload: buildBtwThreadListPayload(btwService, rec.mainSid),
-      })
-    } catch (e) {
-      // best-effort 广播降级：推送失败不影响主流程，前端经 btw.list RPC 拉取兜底（拉为主）
-      console.error(`[btw] thread-list broadcast failed (sessionId=${sessionId}) — pull fallback via btw.list RPC remains available:`, e)
-    }
-  }
+  // W4b：原「线状态变化广播」（onThreadStateChanged → 线列表 state 帧 typeKey 'btw'）随
+  // btw.list 双通道退役整体删除——btw 线进通用列表（session.list {surface:'btw',
+  // mainSessionId}，设计 §3.3.1/§5-W4b），renderer drawer 线列表与 badge 通道均走拉取，
+  // create/remove 后不再 publish 零订阅方的线列表帧（该 dep 挂点本就零调用方，广播实际
+  // 只经 handler 侧发生，随协议收缩一并回收）。
   const btwService = new BtwService({
     processes: pm,
     // 线 launch 快照组装（preset 回落链 / skillPaths 回落 / 模型终态语义的决策侧
@@ -1457,7 +1444,6 @@ async function main(): Promise<void> {
       sessionService.removeSessionEntry(sessionId)
       clearRemovedSessionData(sessionId)
     },
-    onThreadStateChanged: publishBtwThreadList,
     // [BU2] 交互中转 pending 快照（respond/expired/失效三终态共同落点，server 薄委托）。
     hasPendingUiRequests: (sessionId) => server.getPendingUiRequests(sessionId).length > 0,
     // [BU6 / V6·⑤a] D9⑤ 行为契约注入生产 trace（运行期可达；最终裁决角色 对账单测层见
@@ -1593,8 +1579,9 @@ async function main(): Promise<void> {
     // u8（reply 通路对称接线）：reply 超限错误 envelope 的恢复指引携带 session 文件实路径，
     // 与上方 MessageBus（push 通路）共用同一 resolveSessionFilePath resolver 实例。
     replyGuardResolver: resolveSessionFilePath,
-    // btw 线三帧路由（btw-question M2-b，B1/B2 授权接线）：BtwService 窄接口 + 主会话解析
-    // 注入 BtwMessageHandler（assembleOptionalHandlers 装配 → buildRoutes 展开 handles）。
+    // btw 线两帧路由（btw-question M2-b，B1/B2 授权接线；W4b 线枚举帧退役后 create/remove
+    // 两帧）：BtwService 窄接口 + 主会话解析注入 BtwMessageHandler（assembleOptionalHandlers
+    // 装配 → buildRoutes 展开 handles）。
     btw: { service: btwService, resolveMain: resolveBtwMain },
     // [subagent-model-switch U6] subagent.setModel 路由依赖（§7.1.1 通道生产适配器，
     // 上方构造；缺席时 handler 恒回 unwired 可操作错误的兜底自此不可达）。

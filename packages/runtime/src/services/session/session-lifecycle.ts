@@ -528,38 +528,11 @@ export class SessionLifecycle implements ISessionRegistry {
         console.error(`[session-lifecycle] checkpoint btw exemption failed (sessionId=${id}):`, e)
       }
     }
-    // [W4a 判别器通道] session.surfaces 注册事实派生视图广播（设计 §3.3.6 commit 1，纯增量）：
-    // 注册/rekey 后（本汇聚点 = create/restore/fork/btw 直注册四路的唯一收敛点）全量重发。
-    // 全局帧无 sessionId——「所有会话级消息必须携带 sessionId」的登记例外（先例 =
-    // session.forkNotice / D5-1 全局排除清单，interfaces.ts IMessageBroker docstring 同述），
-    // 非 btw.list 的 state topic 形态。renderer 侧只读派生表整表替换（无差减/无单条目移除）。
-    // 派生公式与 message-broker.ts buildSurfacesMsg（sendInitialState 冷启动段）同源同表，
-    // 两处改动须同步。commit 1 上线时 renderer 读取点仍走旧判别器，无行为切换。
-    this.broadcastSurfacesTable()
+    // [W4b 收编] 原 session.surfaces 注册事实派生视图广播（W4a 判别器通道）已按协议收缩
+    // 删除：renderer 抑制类判别改读 session.list {surface:'btw'} 拉取缓存
+    // （设计 §5-W4b 四步之③——surfaceBySessionId 零读取方后广播帧删除），注册/rekey 后
+    // 不再全量重发该帧。
     return session
-  }
-
-  /**
-   * session.surfaces 全量派生视图（注册表 surface 事实的唯一投影）：逐会话
-   * { sessionId, surface }，经 registerDeps.broadcastGlobal 盲广播（全局通道）。
-   *
-   * best-effort：广播失败不打断注册主链（renderer 侧收敛路径 = 下一次注册广播 或
-   * sendInitialState 冷启动段；frame 丢失不损坏任何状态，surface 判别器只在
-   * 抑制类分支消费）。
-   */
-  private broadcastSurfacesTable(): void {
-    const entries: Array<{ sessionId: string; surface: SessionSurface }> = []
-    for (const [id, rec] of this.sessions) {
-      entries.push({ sessionId: id, surface: rec.surface ?? 'sidebar' })
-    }
-    try {
-      this.registerDeps.broadcastGlobal({ type: 'session.surfaces', payload: { entries } })
-    } catch (e: unknown) {
-      // best-effort 降级：广播失败不打断注册主链（残留形态 = 派生表晚一帧收敛，
-      // 下一次注册广播或 sendInitialState 冷启动段补上；surface 判别器只在抑制类
-      // 分支消费，丢一帧不损坏状态）。console.error 留痕可归因。
-      console.error('[session-lifecycle] session.surfaces broadcast failed:', e)
-    }
   }
 
   /**

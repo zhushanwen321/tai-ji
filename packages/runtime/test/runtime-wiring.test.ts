@@ -415,10 +415,10 @@ describe('wave:runtime-wiring · TC8 session.commands 激活发布（W12 快照�
     expect(publishCall[0]).toBe('s-cmd')
     expect(publishCall[1]).toMatchObject({ type: 'session.commands', payload: { sessionId: 's-cmd', commands } })
 
-    // broadcast 不再被调（session 级推送单通道）。注：registerSession 汇聚点的
-    // session.surfaces 全局帧（W4a 判别器通道，无 sid 的全局注册事实帧——rule-7 登记
-    // 例外，先例 session.forkNotice）是合法的全局广播，不在本单通道断言管辖范围。
-    expect(broadcast.mock.calls.filter(([m]) => (m as ServerMessage).type !== 'session.surfaces')).toEqual([])
+    // broadcast 不再被调（session 级推送单通道）。注：registerSession 汇聚点原
+    // session.surfaces 全局帧（W4a 判别器通道）已随 W4b 收编按协议收缩删除——
+    // 抑制类判别改读 session.list {surface:'btw'} 拉取缓存（设计 §5-W4b 四步之③）。
+    expect(broadcast.mock.calls).toEqual([])
   })
 })
 

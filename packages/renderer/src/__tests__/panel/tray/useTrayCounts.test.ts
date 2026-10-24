@@ -21,15 +21,15 @@ import { mount } from '@vue/test-utils'
 import { computed, defineComponent, h, nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { dispatchGlobal, dispatchCrossSession } from '@taiji/core/transport/api'
-import { applySurfacesFrame, __resetSurfaceTableForTest } from '@taiji/core'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useSessionStore } from '@/stores/session'
 import { useTrayCounts } from '@/components/panel/tray/useTrayCounts'
+import { __resetBtwLineMembershipForTest, noteBtwLinesPulled } from '@/composables/panel/btw-line-membership'
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
-import type { SessionSummary, ServerMessage, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
+import type { SessionGroup, SessionSummary, ServerMessage, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 
 // ── mock：bash 分区状态根（直接 mutate 模拟 list reply / 广播）──
 let partitionState: { tasks: BackgroundTaskEntry[]; loaded: boolean; corrupted: boolean; fetchFailed: boolean }
@@ -54,6 +54,8 @@ const apiMocks = vi.hoisted(() => ({
   // RT-4#8 起 API 返结构化形状 { subagents, oversize }（store 按此解构）
   getSubagents: vi.fn<(sessionId: string) => Promise<{ subagents: SubagentRecord[]; oversize?: boolean }>>(),
   getWorkflows: vi.fn<(sessionId: string) => Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean }>>(),
+  // W4b 收编：btw 线成员判别拉取入口（session.list {surface:'btw'}）
+  listSessions: vi.fn<(query: { surface?: string; mainSessionId?: string }) => Promise<SessionGroup[]>>(),
 }))
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api')>()
@@ -63,6 +65,7 @@ vi.mock('@/api', async (importOriginal) => {
       ...actual.session,
       getSubagents: apiMocks.getSubagents,
       getWorkflows: apiMocks.getWorkflows,
+      listSessions: apiMocks.listSessions,
     },
   }
 })
@@ -132,7 +135,9 @@ function data(): UseTrayCountsReturn {
 }
 
 beforeEach(() => {
-  __resetSurfaceTableForTest() // surface 派生表逐用例清零（W4a 判别器）
+  // W4b 收编：btw 线成员判别缓存逐用例清零（拉取缓存 = session.list {surface:'btw'}）
+  __resetBtwLineMembershipForTest()
+  apiMocks.listSessions.mockResolvedValue([])
   setActivePinia(createPinia())
   vi.clearAllMocks()
   apiMocks.getSubagents.mockResolvedValue({ subagents: [], oversize: false })
@@ -427,9 +432,10 @@ describe('useTrayCounts 错误态与加载态暴露面（面板 retry 判据）'
 describe('P-invisible·任务托盘：D9③ 派生视图抑制（btw 线不映射 subagent/workflow）', () => {
   it('btw 线挂托盘：线 owner 分区有派生记录仍构造性归零；bash（线自身任务）照常', async () => {
     const lineId = 'line-tray-1'
-    // W4a 判别器 = session.surfaces 只读派生表（isBtwSession；登记于 constraints.json
-    // C-data-28 抑制类清单）——线 session id 以 surface:'btw' 登记进表。
-    applySurfacesFrame({ entries: [{ sessionId: lineId, surface: 'btw' }] })
+    // W4b 收编判别器 = session.list {surface:'btw'} 拉取缓存成员判别（登记于
+    // constraints.json C-data-28 抑制类清单；旧 isBtwSession 派生表随收编删除）——线
+    // session id 经缓存预热（= 抽屉打开时拉取产物喂入，同步命中路径）。
+    noteBtwLinesPulled([lineId])
     // 线 owner 分区真实灌入派生记录（生产 = loadSubagents(线 id) / 广播路径落分区）
     useSubagentStore().applyRecords(lineId, [makeSubagent({ subagentId: 'a-line', status: 'running' })])
     // 种数据（applyRecords 已私有化，直写分区 ref）

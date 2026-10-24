@@ -823,33 +823,27 @@ describe('mock session.list 通用查询（W4b btw 进通用列表）', () => {
     expect(all.length).toBe(sidebarCount + btwCount)
   })
 
-  it('供数来源等价（收编⑤ 数据层面）：session.surfaces 派生视图的 btw 成员 ≡ session.list{surface:"btw"} 的 id 集合', async () => {
-    // W4b 收编（§5-W4b 四步之①⑤）：3 个抑制读取点将从 session.surfaces 只读派生表改读
-    // session.list {surface:'btw'} 拉取缓存做成员判别。切换等价的数据层判据 = 两个来源
-    // 对同一注册表事实给出的线成员集合一致（同 owner 派生：mockBtwThreads 同时驱动
-    // pushSurfaces 广播与 buildBtwLineEntries 合成）——成员一致则抑制判别结果一致。
+  it('抑制类成员判别唯一来源（收编落地）：session.list{surface:"btw"} 的 id 集合 = 注册表线全集，create/remove 同拍收敛', async () => {
+    // W4b 收编（§5-W4b 四步之①③）已落地：renderer 抑制类判别（btw-line-membership 模块）
+    // 唯一读 session.list {surface:'btw'} 拉取缓存——原 session.surfaces 广播帧与其
+    // 只读派生表已按协议收缩删除（mock pushSurfaces 同批删）。数据层判据 = 该查询返回的
+    // 线成员集合与 mock 线注册表（mockBtwThreads，create/remove 唯一写入口）逐条一致：
+    // 建线即入、关线即出（成员一致 ⇒ 抑制判别结果一致）。
     const a1 = await btw.create('btw-equiv-main-a')
     const a2 = await btw.create('btw-equiv-main-a')
     const b1 = await btw.create('btw-equiv-main-b')
 
-    // 捕获最近一帧 session.surfaces 广播（create 后 pushSurfaces 重播）
-    let entries: Array<{ sessionId: string; surface: string }> = []
-    const off = events.onGlobalType('session.surfaces', (msg) => {
-      entries = (msg as { payload: { entries: Array<{ sessionId: string; surface: string }> } }).payload.entries
-    })
-    await btw.remove(b1.sessionId) // 触发一次重播，确保 entries 为最新
-    off()
-
     const inScope = (id: string): boolean => id === a1.sessionId || id === a2.sessionId || id === b1.sessionId
-    const surfacesBtwIds = new Set(
-      entries.filter((e) => e.surface === 'btw').map((e) => e.sessionId).filter(inScope),
+    const listBtwIds = () => session.listSessions({ surface: 'btw' }).then((groups) =>
+      new Set(flattenBtwGroups(groups).map((s) => s.id).filter(inScope)),
     )
-    const listBtwIds = new Set(
-      flattenBtwGroups(await session.listSessions({ surface: 'btw' })).map((s) => s.id).filter(inScope),
-    )
-    // b1 已 remove：两来源都不含它（关线同拍出册）
-    expect(listBtwIds).toEqual(new Set([a1.sessionId, a2.sessionId]))
-    expect(surfacesBtwIds).toEqual(listBtwIds)
+
+    // 建线同拍入册：三源（两个主会话）全部在线
+    expect(await listBtwIds()).toEqual(new Set([a1.sessionId, a2.sessionId, b1.sessionId]))
+
+    await btw.remove(b1.sessionId) // 关线出册
+    // b1 已 remove：查询结果同拍不再含它
+    expect(await listBtwIds()).toEqual(new Set([a1.sessionId, a2.sessionId]))
   })
 })
 

@@ -26,7 +26,7 @@
 import { onScopeDispose, readonly, shallowRef, watch, type DeepReadonly, type Ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { ServerMessage, SessionGroup } from '@taiji/shared'
-import { applySurfacesFrame, isBtwSession } from '@taiji/core'
+import { isKnownBtwLine, refreshBtwLineMembership } from '@/composables/panel/btw-line-membership'
 import * as events from '@taiji/core/transport/api'
 import { useSessionStore } from '@/stores/session'
 import {
@@ -86,9 +86,11 @@ export function useForkNoticeFeed(): {
     // [M4-a / btw-question D4] ForkNotice suppress（btw 流渲染）：线是 fork 产物
     //（header.parentSession 指向源）但关联只删不显——fork 反馈行/分支追踪状态不进 btw 流
     //（读口单点抑制：MessageStream 全部消费方经本函数；dismiss/clear 对空表幂等）。
-    // W4a 判别器 = session.surfaces 只读派生表（isBtwSession，登记于 docs/constraints.json
-    // C-data-28 抑制类清单；旧 isBtwVirtualId 前缀判别随 vid 退役）。
-    if (isBtwSession(sessionId)) return readonly([])
+    // W4b 收编判别器 = session.list {surface:'btw'} 拉取缓存成员判别（isKnownBtwLine，
+    // 登记于 docs/constraints.json C-data-28 抑制类清单；旧 isBtwVirtualId 前缀判别随
+    // vid 退役、session.surfaces 派生表随 W4b 收编删除，设计 §5-W4b）。拉取时机 =
+    // 抽屉打开（面板拉取喂入）+ fork 事件到达时按需拉（见 bindForkNoticeEffect）。
+    if (isKnownBtwLine(sessionId)) return readonly([])
     return readonly(feedMap.value.get(sessionId) ?? [])
   }
 
@@ -214,21 +216,15 @@ export function bindForkNoticeEffect(): void {
   const { groups } = storeToRefs(sessionStore)
   const groupsRef: Ref<SessionGroup[]> = groups
 
-  // W4a 判别器通道（设计 §3.3.6）：session.surfaces 全局帧 → renderer 只读派生表
-  // surfaceBySessionId 整表替换（applySurfacesFrame 收敛）。无 sid 帧，route-inbound 走
-  // global 通道（L9 warn 对 session.* 无 sid 帧的既有接受形态，forkNotice/handoffComplete
-  // 同族，不新造豁免）；mock 模式（VITE_MOCK）帧由 core transport/mock 直发同一 global
-  // 通道，两条到达路径同一收敛点。订阅挂 App setup（本函数调用点）——先于 WS 连接提交，
-  // sendInitialState 冷启动段不丢。与 forkNotice 同范式（effect 层全局订阅）。
-  const unsubSurfaces = events.onGlobalType('session.surfaces', (msg) => {
-    applySurfacesFrame((msg as ServerMessage<'session.surfaces'>).payload)
-  })
-
   // RV1：订阅 session.forkNotice 全局广播（payload 无 sessionId，routeInbound 走 global 通道）。
   // 收到后按 srcSessionId 把 ForkNotice 插入对应 session 的对话流（transient feed）。
   const unsubForkNotice = events.onGlobalType('session.forkNotice', (msg) => {
     const payload = (msg as ServerMessage<'session.forkNotice'>).payload
     const { srcSessionId, newSessionId, branchName, preview } = payload
+    // W4b 收编（设计 §5-W4b ①「fork 事件到达时按需拉」）：源会话不在拉取缓存时补拉一次
+    // 全量线集合—— notices() 的读站点抑制读同一缓存，拉取落地后重算即抑制（拉取失败 =
+    // 显式未知，当次不抑制：失败方向 = 偶发显示一行 fork 反馈，可接受）。
+    if (!isKnownBtwLine(srcSessionId)) void refreshBtwLineMembership()
     // [P2 去重] fork-ask 在本地 pushForkNoticeAsk 已推 askedPrefix notice（带 preview）。
     // runtime 对每次 session.fork 都广播（含 fork-ask），此 newSessionId 已有 notice 时跳过
     // pushNotice（避免 forkedPrefix 重复）；registerFork 仍执行（RV2 分支追踪两边都需建立）。
@@ -254,7 +250,6 @@ export function bindForkNoticeEffect(): void {
 
   onScopeDispose(() => {
     unsubForkNotice()
-    unsubSurfaces()
     resetForkBranchState()
   })
 }

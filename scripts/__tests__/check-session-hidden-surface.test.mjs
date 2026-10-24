@@ -7,6 +7,9 @@
  *
  * 覆盖（对样本树跑出预期红/绿）：
  * - 注释剥离（块/行/Vue 模板）与测试文件/__tests__ 排除不计命中；
+ * - 字符串字面量内的注释起始形态（'https://' 的 // 与 '/*' 的块注释态）不截断该行，
+ *   同一行后续的 hidden/surface 命中仍计（设计 §3.3.8「清单外命中即红」的漏报通道封堵）；
+ * - scope fail-closed：packages/ 不可读或无 src 目录时上抛，拒绝「什么都没扫」报绿；
  * - hidden 三形态（对象键/属性访问/可选声明）未登记即红、登记即绿；
  * - surface 三形态（属性访问/对象键/标识符）未登记即红；
  * - 读取点清单（READ_POINTS，usage 三值词表）/ 载体文件（WRITE_SIDE_FILES）/
@@ -21,6 +24,7 @@ import {
   codeLines,
   collectHits,
   findViolations,
+  runCheck,
   HIDDEN_ALLOWLIST,
   SURFACE_READ_POINTS,
   SURFACE_WRITE_SIDE_FILES,
@@ -67,6 +71,20 @@ describe('codeLines：注释逐行剥离（行号保持原文件行号）', () =
     expect(lines[4]).toBe('')
     expect(lines[5]).toBe('const c = 3')
   })
+
+  it('字符串字面量内的注释起始形态不截断该行（https:// 的 // 与 /* 的块注释态）', () => {
+    const lines = codeLines([
+      "const v = link('https://x', { surface: 'btw' })",
+      'const w = f("/*", { hidden: true })',
+      "const u = g('a\\'b', { surface: 'x' }) // 行注释仍截断",
+      "const t = `a${'b'}c // not-comment`",
+    ].join('\n'))
+    expect(lines).toHaveLength(4)
+    expect(lines[0]).toBe("const v = link('https://x', { surface: 'btw' })")
+    expect(lines[1]).toBe('const w = f("/*", { hidden: true })')
+    expect(lines[2]).toBe("const u = g('a\\'b', { surface: 'x' }) ")
+    expect(lines[3]).toBe("const t = `a${'b'}c // not-comment`")
+  })
 })
 
 describe('collectHits：scope 与排除', () => {
@@ -76,7 +94,7 @@ describe('collectHits：scope 与排除', () => {
       'packages/demo/src/__tests__/skip.ts': 'export const hidden: boolean = true\n',
       'packages/demo/src/skip.test.ts': 'export const hidden: boolean = true\n',
       'packages/demo/src/commented.ts': '/**\n * hidden: true\n */\n// surface: btw\n',
-      'packages/demo/src/imports.ts': "import { isBtwSession } from '@taiji/core'\nimport {\n  a,\n  isBtwSession as x,\n} from 'mod'\nexport const ok = 1\n",
+      'packages/demo/src/imports.ts': "import { isKnownBtwLine } from '@taiji/core'\nimport {\n  a,\n  isKnownBtwLine as x,\n} from 'mod'\nexport const ok = 1\n",
       'apps/other/src/out-of-scope.ts': 'export const hidden: boolean = true\n',
     })
     const hits = collectHits(root)
@@ -85,6 +103,31 @@ describe('collectHits：scope 与排除', () => {
       'packages/demo/src/keep.ts:1',
       'packages/demo/src/keep.ts:2',
     ])
+  })
+
+  it('字符串字面量内的 // 与 /* 不吞该行后续命中（https:// 同行 surface 仍红）', () => {
+    const root = makeRepo({
+      'packages/demo/src/url.ts': [
+        "export const u = link('https://x', { surface: 'btw' })",
+        'export const v = f("/*", { hidden: true })',
+      ].join('\n'),
+    })
+    expect(violationsOf(root)).toEqual([
+      'packages/demo/src/url.ts:1',
+      'packages/demo/src/url.ts:2',
+    ])
+  })
+})
+
+describe('scope fail-closed：packages/ 缺失或为空时拒绝出绿（设计 §3.3.8）', () => {
+  it('packages/ 不可读时 collectHits 上抛（不得零命中假绿）', () => {
+    const root = makeRepo({ 'apps/other/src/x.ts': 'export const a = 1\n' })
+    expect(() => collectHits(root)).toThrow(/scope 缺失/)
+  })
+
+  it('packages/ 下无 src 目录时 runCheck 上抛（scope 为空）', () => {
+    const root = makeRepo({ 'packages/demo/README.md': 'x\n' })
+    expect(() => runCheck(root)).toThrow(/scope 为空/)
   })
 })
 
@@ -124,7 +167,7 @@ describe('surface 检查：三形态 pattern + 清单判定', () => {
       'packages/demo/src/red.ts': [
         'export const a = (s: { surface?: string }) => s.surface',
         "export const b = { surface: 'btw' }",
-        'export const c = surfaceBySessionId',
+        'export const c = isKnownBtwLine',
       ].join('\n'),
     })
     expect(violationsOf(root)).toEqual([

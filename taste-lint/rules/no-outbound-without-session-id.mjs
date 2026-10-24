@@ -27,8 +27,9 @@
  *   无 sessionId 形态（btw.remove reply { vid } 等）。
  *
  * 盲区（静态不可判定，放行）：payload / details / message 非对象字面量（变量、函数
- * 构造、spread 承载）——btw.list 的 buildBtwThreadListPayload(...) 构造 payload 无
- * sessionId 键，消费端走前端 global 通道（onGlobalType），是登记过的合法形态。
+ * 构造、spread 承载）——函数构造的 payload 无 sessionId 键时静态不可判定（先例：
+ * btw.list 的 buildBtwThreadListPayload(...)，该消息已随 W4b 退役），消费端走前端
+ * global 通道（onGlobalType），是登记过的合法形态。
  *
  * 误报豁免走行内登记注释 taste:allow-outbound-without-session-id（与
  * taste:allow-instance-level-session-state 同机制——通用静默豁免注释已被仓内

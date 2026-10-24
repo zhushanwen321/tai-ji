@@ -209,7 +209,9 @@ function handleMessageComplete(
   const panelStore = usePanelStore()
   const focusedSid =
     panelStore.panels.find((p) => p.id === panelStore.activePanelId)?.sessionId ?? null
-  handleCompletion(sessionId, payload.stopReason ?? 'stop', focusedSid, payload.willRetry)
+  // W4b 收编后 handleCompletion 异步（btw 线成员判别含按需补拉）——fire-and-forget：
+  // 完成事件处理链自身无调用方等待其返回（onMessageComplete 契约为 void）。
+  void handleCompletion(sessionId, payload.stopReason ?? 'stop', focusedSid, payload.willRetry)
 }
 
 /** 处理 session.subagents 事件（subagent 终态推送兜底，非活跃 session 也生效）。 */

@@ -56,7 +56,7 @@
  * useTrayCountsContext inject 消费外壳实例，**不自建实例**）。本文件不渲染 UI、不发任何
  * 写类 RPC（行内操作在面板组件内）。
  */
-import { computed, inject, watch } from 'vue'
+import { computed, inject, shallowRef, watch } from 'vue'
 import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
@@ -69,7 +69,7 @@ import { filterBackgroundTasks } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
-import { isBtwSession } from '@taiji/core'
+import { isKnownBtwLine, ensureBtwLineMembership } from '@/composables/panel/btw-line-membership'
 
 /** built-in 三件（任务域面板类型 / TrayNativePanel 分桶键 / retry 分派键） */
 export type TrayTaskKind = 'bash' | 'subagent' | 'workflow'
@@ -217,13 +217,19 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   // 本托盘）不派生虚拟任务：subagent/workflow-run 两件按线 owner 分区读，在此构造性
   // 归零——派生过程仅在消息流工具调用中可见，托盘不为线内派生提供 opener（对齐 zcode）。
   // bash（线自身后台命令）与 session件（真实子会话）非派生虚拟键，照常。
-  // W4a 判别器 = session.surfaces 只读派生表（isBtwSession，登记于 docs/constraints.json
-  // C-data-28 抑制类清单——语义抑制本体、非性能优化，故保留判别器；旧 isBtwVirtualId
-  // 前缀判别随 vid 退役）。
-  const derivedSuppressed = computed(() => {
-    const sid = normalizedSid.value
-    return sid !== null && isBtwSession(sid)
-  })
+  // W4b 收编判别器 = session.list {surface:'btw'} 拉取缓存成员判别（登记于
+  // docs/constraints.json C-data-28 抑制类清单——语义抑制本体、非性能优化，故保留判别器；
+  // 旧 isBtwVirtualId 前缀判别随 vid 退役、session.surfaces 派生表随 W4b 收编删除，
+  // 设计 §5-W4b 四步之①）。渲染路径同步读缓存；焦点切换（托盘事件）落空时按需补拉一次
+  // 再判（拉取失败 = 显式未知，当次不抑制——失败方向 = 偶发托盘派生，已接受）。
+  const derivedSuppressed = shallowRef(false)
+  watch(
+    normalizedSid,
+    async (sid) => {
+      derivedSuppressed.value = sid !== null && (isKnownBtwLine(sid) || (await ensureBtwLineMembership(sid)))
+    },
+    { immediate: true },
+  )
   const subagentRecords = computed(() => {
     if (derivedSuppressed.value) return []
     return subagentStore

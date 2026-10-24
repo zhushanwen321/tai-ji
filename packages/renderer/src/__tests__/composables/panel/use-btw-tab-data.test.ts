@@ -32,7 +32,6 @@ import {
   setBtwView,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
-import { applySurfacesFrame } from '@taiji/core'
 import {
   useBtwTabData,
   getBtwSessionIdsByMain,
@@ -48,6 +47,7 @@ import {
   firstBtwDialogReq,
 } from '@/composables/panel/btw-pending-bookkeeping'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
+import { __resetBtwLineMembershipForTest, noteBtwLinesPulled } from '@/composables/panel/btw-line-membership'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useSubagentStore } from '@/stores/subagent'
 import { useExtensionUIStore } from '@/stores/extension-ui'
@@ -141,9 +141,11 @@ beforeEach(() => {
   __resetBtwPendingBookkeepingForTest() // 模块级待处理簿记（含回收提醒集合 + 广播订阅）逐用例清零
   clearBtwVirtualKeyMapping(SID_A)
   clearBtwVirtualKeyMapping(SID_B)
-  // W4a 判别器播种：btw 簿记订阅壳的 ui-request/requests-invalidated 路由判据 =
-  // session.surfaces 只读派生表（isBtwSession）——本文件用例线 id（t*/line-*）按线登记。
-  applySurfacesFrame({ entries: [{ sessionId: 't1', surface: 'btw' }, { sessionId: 't2', surface: 'btw' }, { sessionId: 't3', surface: 'btw' }, { sessionId: 't4', surface: 'btw' }, { sessionId: 't5', surface: 'btw' }] })
+  // W4b 收编判别器播种：btw 簿记订阅壳的 ui-request/requests-invalidated 路由判据 =
+  // session.list {surface:'btw'} 拉取缓存成员判别（btw-line-membership）——本文件用例线
+  // id（t*/line-*）按线预热（等价于抽屉打开时的拉取产物喂入）。
+  __resetBtwLineMembershipForTest()
+  noteBtwLinesPulled(['t1', 't2', 't3', 't4', 't5'])
 })
 
 describe('挂载/切会话主动拉取（broadcast 时序竞争规则：必拉不依赖广播）', () => {

@@ -264,9 +264,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { btw, session } from '@/api'
 import { isBtwPending } from '@/composables/panel/btw-pending-bookkeeping'
+import { noteBtwLinesPulled } from '@/composables/panel/btw-line-membership'
 import { useBtwPanelSurface } from '@/composables/panel/useBtwTabData'
 import { useBtwInteraction } from '@/composables/panel/useBtwInteraction'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
+import { useSessionStore } from '@/stores/session'
 import { setBtwView, useBtwSelection, getBoundSessionId } from '@taiji/core/domain/drawer'
 import type { ServerMessageMap, SessionSummary } from '@taiji/shared'
 import MessageStream from '@/components/panel/MessageStream.vue'
@@ -348,6 +350,9 @@ async function loadThreads(captured: string): Promise<void> {
       s.loading = false
       s.threads = threads
     })
+    // W4b 收编：本拉取产物喂入抑制类成员判别缓存（同一 session.list 来源，不另起 RPC；
+    // merge 口径见 btw-line-membership 模块头——抽屉打开即是一条拉取时机，设计 §5-W4b ①）。
+    noteBtwLinesPulled(threads.map((th) => th.id))
     autoSelect(captured, threads)
   } catch (e) {
     scoped.updateFor(captured, (s) => {
@@ -381,6 +386,25 @@ function selectThread(sessionId: string): void {
   setBtwView(sessionId)
 }
 
+/**
+ * 即时入列条目的 cwd = 所属主会话 cwd（设计 §5-W4b「必填字段派生规则」：线 cwd = 主会话
+ * cwd——runtime `toLineSummary` 取 `BtwLineRecord.cwd`、btw-message-handler `createLine`
+ * 入参即 `resolveMain(mainSid).cwd`，mock `buildBtwLineEntries` 取主会话 fixture cwd，
+ * 三处同口径）。主会话 id 不是 cwd，写进该字段即类型化错值。
+ *
+ * 取数顺序（同分区优先：已拉取线条目的 cwd 就是主会话 cwd 的权威投影）：
+ * ① 同分区已拉取线条目（session.list 合成产物）；
+ * ② session store 的主会话 summary（侧栏列表权威持有 cwd）；
+ * ③ 都取不到 → 空串（该字段当前无模板 / useBtwPanelSurface 消费方，条目在下次拉取
+ *    （抽屉活动触发）即被权威条目整体替换；空串是显式未知，不伪装成任何路径）。
+ */
+function optimisticThreadCwd(captured: string, existing: BtwThreadInfo[]): string {
+  const fromLines = existing.find((th) => th.cwd)?.cwd
+  if (fromLines) return fromLines
+  const main = useSessionStore().list.find((s) => s.id === captured)
+  return main?.cwd ?? ''
+}
+
 /** 新建线（空态 Primary / 头部按钮共用）：create reply 即 pill 数据源（D3 一次性口径） */
 async function createThread(): Promise<void> {
   const captured = props.sessionId
@@ -396,9 +420,16 @@ async function createThread(): Promise<void> {
       s.forkPills[reply.sessionId] = reply.forkState
       if (!s.threads.some((th) => th.id === reply.sessionId)) {
         // 新建线即时入列（不等下次拉取）：条目字段与 session.list 合成同口径——
-        // label 暂缺（序号由下次拉取按创建次序定），先以 sessionId 占位渲染，
+        // label 暂缺（序号由下次拉取按创建次序定），先以 sessionId 占位渲染；
+        // cwd = 所属主会话 cwd（见 optimisticThreadCwd，§5-W4b 派生规则）。
         // 下一次拉取（抽屉活动触发）即替换为权威条目。
-        s.threads = [...s.threads, { id: reply.sessionId, label: reply.sessionId, cwd: captured, status: 'idle', lastActiveAt: Date.now() }]
+        s.threads = [...s.threads, {
+          id: reply.sessionId,
+          label: reply.sessionId,
+          cwd: optimisticThreadCwd(captured, s.threads),
+          status: 'idle',
+          lastActiveAt: Date.now(),
+        }]
       }
     })
     if (canWriteSelection(captured)) setBtwView(reply.sessionId)

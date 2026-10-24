@@ -150,10 +150,9 @@ describe('SessionLifecycle.registerSession（S3 写点归位）', () => {
     send!(withSid)
     expect(env.busPublish).toHaveBeenCalledWith('s7', withSid)
     // send 闭包自身不触达 broadcastGlobal（带 sid 走 publish）。注：registerSession 汇聚点
-    // 另有 session.surfaces 全局广播（W4a 判别器通道，无 sid 的全局注册事实帧——rule-7
-    // 登记例外，先例 session.forkNotice），该帧不走 send 闭包、由
-    // session-surfaces-broadcast.test.ts 覆盖，不计入本兜底断言。
-    expect(env.broadcastGlobal.mock.calls.filter(([m]) => (m as ServerMessage).type !== 'session.surfaces')).toEqual([])
+    // 原 session.surfaces 全局广播（W4a 判别器通道）已随 W4b 收编按协议收缩删除——
+    // 抑制类判别改读 session.list {surface:'btw'} 拉取缓存（设计 §5-W4b 四步之③）。
+    expect(env.broadcastGlobal.mock.calls).toEqual([])
 
     const noSid: ServerMessage = { type: 'message.delta', payload: {} } as unknown as ServerMessage
     send!(noSid)

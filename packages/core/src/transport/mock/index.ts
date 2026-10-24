@@ -2352,23 +2352,9 @@ export const preset: PresetDomain = presetImpl
 const mockBtwThreads = new Map<string, string[]>()
 let mockBtwSeq = 0
 
-/**
- * 广播 session.surfaces 全量派生视图（W4a 判别器通道 mock 侧，设计 §5-W4a mock 接线）：
- * entries 派生来源写死 = fixtureSessions（surface 'sidebar'）+ mockBtwThreads 全部线
- * （surface 'btw'，id 形态随 W4a 键切换同步改 piId 形态）。触发点 = mock btwImpl.create /
- * remove 后重播（与 runtime 注册/rekey 后 broker.broadcast 同触发语义）；**免初始段**
- * （mock 无 connect 钩子，启动时 mockBtwThreads 为空、空表即正确）。renderer 只读派生表
- * 经 events global 通道收敛（onGlobalType('session.surfaces')，与真实帧同一到达路径）。
- */
-function pushSurfaces(): void {
-  const entries: Array<{ sessionId: string; surface: 'sidebar' | 'btw' }> = [
-    ...fixtureSessions.map((s) => ({ sessionId: s.id, surface: 'sidebar' as const })),
-  ]
-  for (const threads of mockBtwThreads.values()) {
-    for (const lineSessionId of threads) entries.push({ sessionId: lineSessionId, surface: 'btw' })
-  }
-  events.dispatchGlobal({ type: 'session.surfaces', id: nextId('sf'), payload: { entries } })
-}
+// W4b 收编（设计 §5-W4b 四步之③）：原 mock 侧 session.surfaces 广播（pushSurfaces，W4a
+// 判别器通道 mock 接线）随该消息按协议收缩删除——renderer 抑制类判别改读 session.list
+// {surface:'btw'} 拉取缓存，create/remove 后不再重播派生视图帧。
 
 const btwImpl = {
   /**
@@ -2384,7 +2370,6 @@ const btwImpl = {
     const threads = mockBtwThreads.get(mainSid) ?? []
     threads.push(sessionId)
     mockBtwThreads.set(mainSid, threads)
-    pushSurfaces() // W4a：建线入册后重播 surface 派生视图（对齐 runtime 注册后广播）
     return { sessionId, mainSid, forkState: 'full' }
   },
 
@@ -2399,7 +2384,6 @@ const btwImpl = {
       const idx = threads.indexOf(sessionId)
       if (idx !== -1) {
         threads.splice(idx, 1)
-        pushSurfaces() // W4a：关线出册后重播 surface 派生视图（对齐 runtime 注册表事实）
         return
       }
     }

@@ -49,7 +49,7 @@ import { useChatStore } from '@/stores/chat'
 import { invalidateBtwRequests } from '@/composables/panel/btw-pending-bookkeeping'
 import { ensureBtwPendingBookkeeping, __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwTabData'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
-import { applySurfacesFrame } from '@taiji/core'
+import { __resetBtwLineMembershipForTest, noteBtwLinesPulled } from '@/composables/panel/btw-line-membership'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 
 // ── tray 数据范围替身：全无条目（三态「全无」→ 托盘不渲染，左簇位次断言无干扰）──
@@ -184,11 +184,10 @@ beforeEach(() => {
   _resetDrawerForTest()
   __clearSessionCleanupRegistryForTest()
   __resetBtwPendingBookkeepingForTest() // 模块级待处理簿记逐用例清零
-  // 待处理簿记的线判别 = session.surfaces 只读派生表（isBtwSession）——本文件线 id 按线登记
-  applySurfacesFrame({ entries: [
-    { sessionId: 't1', surface: 'btw' }, { sessionId: 't2', surface: 'btw' },
-    { sessionId: 'ta', surface: 'btw' }, { sessionId: 'tb', surface: 'btw' },
-  ] })
+  // 待处理簿记的线判别 = session.list {surface:'btw'} 拉取缓存成员判别
+  // （btw-line-membership，W4b 收编）——本文件线 id 按线预热（等价抽屉拉取产物喂入）。
+  __resetBtwLineMembershipForTest()
+  noteBtwLinesPulled(['t1', 't2', 'ta', 'tb'])
 })
 
 /** 经真实 bus 入账一条挂起 dialog 族请求（confirm——簿记五类之一；待处理徽点的活数据源） */

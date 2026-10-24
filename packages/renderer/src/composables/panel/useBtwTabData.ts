@@ -9,10 +9,10 @@
  * - **主动拉取，不依赖广播**（broadcast 时序竞争规则，AGENTS 架构约定）：挂载 / 切会话
  *   立即拉取；抽屉开合、btw tab 切换、选中线变化也重新拉取（新建线入册 / 关线剪枝 /
  *   新线观察挂载）。**W4b 起线列表数据源 = `session.list { surface:'btw', mainSessionId }`**
- *   （btw 线进通用列表，设计 §3.3.1/§5-W4b——`btw.list` 聚合消息随本波退役，其拉取 reply
+ *   （btw 线进通用列表，设计 §3.3.1/§5-W4b——原 btw.list 聚合消息已退役，其拉取 reply
  *   与 state 广播双通道一并取消）。badge 通道与 BtwPanel 各自拉取、各自收敛。
  * - **[回收提醒已删除]** 闲置回收机制已随 ADR-0122 整体退役（runtime 侧 `reclaimImminent`
- *   恒 false），其最后一处 feed = `btw.list` 帧的 `reclaimImminent` 字段；该帧随本波退役后
+ *   恒 false），其最后一处 feed = 已退役的 btw.list 帧的 `reclaimImminent` 字段；该帧退役后
  *   renderer 半（`reclaimReminderSessionIds` 表 + `setBtwReclaimReminder` +
  *   `isBtwPending` 第三分量）在 btw-pending-bookkeeping 一并删除——死表不留。
  * - **异步回写一律 `updateFor(capturedSid)`**（AGENTS 规则 8）：焦点切走后迟到响应只写
@@ -40,7 +40,8 @@
  */
 import { computed, defineComponent, onErrorCaptured, reactive, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
-import { disposeLruEntry, isVirtualKeyOf, isBtwSession } from '@taiji/core'
+import { disposeLruEntry, isVirtualKeyOf } from '@taiji/core'
+import { ensureBtwLineMembership, isKnownBtwLine, noteBtwLinesPulled } from '@/composables/panel/btw-line-membership'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { useChatStore } from '@/stores/chat'
 import { useWorkflowStore } from '@/stores/workflow'
@@ -182,21 +183,31 @@ let bookkeepingUnsubs: Array<() => void> | null = null
 export function ensureBtwPendingBookkeeping(): void {
   if (bookkeepingUnsubs) return
   const bus = getExtensionBus()
+  // W4b 收编判别器 = session.list {surface:'btw'} 拉取缓存成员判别（btw 线 dialog 请求
+  // 路由到面板内联确认条、不进主视图模态；登记于 docs/constraints.json C-data-28 抑制类
+  // 清单；旧 isBtwVirtualId 前缀判别随 vid 退役、session.surfaces 派生表随 W4b 收编删除，
+  // 设计 §5-W4b）。表外 = 非线，走主视图模态（原语义）。缓存命中同步判（抽屉拉取预热后
+  // 的常态，InternalEventBus 同步派发契约不受影响）；查找落空按需补拉一次再判（拉到即
+  // 入账，不猜；拉取失败 = 显式未知，当次不进簿记——失败方向 = 偶发主视图模态，可接受）。
+  const judgeLine = (sid: string, onLine: () => void): void => {
+    if (isKnownBtwLine(sid)) { onLine(); return }
+    void ensureBtwLineMembership(sid).then((isLine) => { if (isLine) onLine() })
+  }
   const offUiRequest = bus.on('ui-request', (e) => {
     const sid = e.sessionId
-    // W4a 判别器 = session.surfaces 只读派生表（isBtwSession——btw 线 dialog 请求路由到
-    // 面板内联确认条、不进主视图模态；登记于 docs/constraints.json C-data-28 抑制类清单，
-    // 旧 isBtwVirtualId 前缀判别随 vid 退役）。表外 = 非线，走主视图模态（原语义）。
-    if (!sid || !isBtwSession(sid) || !isBtwDialogRequest(e)) return
-    // 新请求顶掉既有失效提示（清除支之一：表单重新可达，提示失义）
-    clearBtwExpiredNotice(sid)
-    const r = e.request as { form?: unknown; planReview?: unknown }
-    if (r.form === true || r.planReview === true) return // store 族载荷在 extensionUIStore，不经本簿记
-    enqueueBtwDialogReq(sid, convertToDialogRequest(e))
+    if (!sid || !isBtwDialogRequest(e)) return
+    judgeLine(sid, () => {
+      // 新请求顶掉既有失效提示（清除支之一：表单重新可达，提示失义）
+      clearBtwExpiredNotice(sid)
+      const r = e.request as { form?: unknown; planReview?: unknown }
+      if (r.form === true || r.planReview === true) return // store 族载荷在 extensionUIStore，不经本簿记
+      enqueueBtwDialogReq(sid, convertToDialogRequest(e))
+    })
   })
   const offInvalidated = bus.on('requests-invalidated', (e) => {
-    if (!e.sessionId || !isBtwSession(e.sessionId)) return
-    invalidateBtwRequests(e.sessionId, e.requestIds, e.reason) // 事件路薄委托（失效支单入口）
+    if (!e.sessionId) return
+    const sid = e.sessionId
+    judgeLine(sid, () => invalidateBtwRequests(sid, e.requestIds, e.reason)) // 事件路薄委托（失效支单入口）
   })
   bookkeepingUnsubs = [offUiRequest, offInvalidated]
 }
@@ -246,7 +257,7 @@ export interface UseBtwTabDataReturn {
  * @param sidRef 焦点主会话 id（Composer 的 sessionId prop 包装 computed）
  */
 export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
-  ensureBtwPendingBookkeeping() // D8 终端机簿记：首个实例挂模块级永驻订阅
+  ensureBtwPendingBookkeeping() // D8 终态机簿记：首个实例挂模块级永驻订阅
   const chatStore = useChatStore()
 
   const scoped = useSessionScopedState<BtwTabState>(sidRef, () =>
@@ -412,6 +423,9 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
         }
       })
       if (!fresh) return // 旧响应：不触碰观察范围与登记范围（新响应各自负责）
+      // W4b 收编：本拉取产物喂入抑制类成员判别缓存（同一 session.list 来源，不另起 RPC；
+      // merge 口径见 btw-line-membership 模块头）。抽屉打开即是一条拉取时机（设计 §5-W4b ①）。
+      noteBtwLinesPulled(threads.map((th) => th.id))
       syncWatchedLines(captured, threads)
       reconcileBtwSessionKeys(
         captured,

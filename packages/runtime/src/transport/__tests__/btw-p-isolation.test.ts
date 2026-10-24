@@ -12,9 +12,9 @@
  *    只收自己的帧（sessionId + 内容标记双零泄漏）；无关会话订阅者零帧；
  * 2. stream 类帧（`message.stream_error`，payload {sessionId,content} 精确契约）5+3：
  *    per-session seq 1..N 单调无缺口（分区独立计数）+ ring 快照（重放侧）只含本线帧；
- * 3. transient 不入 ring（重放侧分区：迟到订阅者拿不到 transient 快照，分区构造性成立）；
- * 4. btw.list 状态广播（handler 广播面）按 mainSid 分区：各主会话订阅者只收自己的
- *    全量线列表，stateSnapshot('btw') 恢复侧同样分区。
+ * 3. transient 不入 ring（重放侧分区：迟到订阅者拿不到 transient 快照，分区构造性成立）。
+ * （W4b 起原第 4 条「btw.list 状态广播按 mainSid 分区」随该消息退役删除——线列表无
+ *  state 帧；state 类帧的分区/恢复语义由 message-bus-plan-state.test.ts 通用覆盖。）
  *
  * 运行：cd packages/runtime && npx vitest run src/transport/__tests__/btw-p-isolation.test.ts
  */
@@ -144,29 +144,4 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     expect(sub.lastSeq).toBe(0)
   })
 
-  it('btw.list 状态广播按 mainSid 分区：live 面只收本主会话，stateSnapshot 恢复侧同样分区', () => {
-    const bus = new MessageBus()
-    const mainA = 'main-sid-a'
-    const mainB = 'main-sid-b'
-    const liveA = makeClient()
-    bus.subscribe(mainA, liveA.client)
-
-    bus.publish(mainA, { type: 'btw.list', id: 'push_1', payload: { mainSid: mainA, threads: [{ sessionId: 't1' }] } })
-    bus.publish(mainB, { type: 'btw.list', id: 'push_2', payload: { mainSid: mainB, threads: [{ sessionId: 't2' }] } })
-
-    // live 面：A 只收到 mainA 的线列表，B 的广播不外溢
-    const gotA = liveA.frames()
-    expect(gotA).toHaveLength(1)
-    expect(gotA[0]?.type).toBe('btw.list')
-    expect(payload(gotA[0]!).mainSid).toBe(mainA)
-
-    // 恢复侧：mainB 迟到订阅经 stateSnapshot('btw') 只拿到自己的全量线列表
-    const lateB = makeClient()
-    const subB = bus.subscribe(mainB, lateB.client)
-    const stateFrames = subB.stateSnapshot.filter(m => m.type === 'btw.list')
-    expect(stateFrames).toHaveLength(1)
-    expect(payload(stateFrames[0]!).mainSid).toBe(mainB)
-    expect(payload(stateFrames[0]!).threads).toEqual([{ sessionId: 't2' }])
-    expect(lateB.frames()).toHaveLength(0) // state 类不补发 live
-  })
 })

@@ -9,8 +9,6 @@
  */
 export * from './store'
 export * from './live-state'
-// surface-by-session：session.surfaces 派生视图消息的 renderer 侧只读派生表（W4a 抑制类判别）
-export * from './surface-by-session'
 export * from './api-port'
 // panel-view：PanelView/derivePanelView（渲染视图派生契约，T3 renderer usePanelView 消费）
 export * from './panel-view'
