@@ -32,8 +32,9 @@ import {
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
 import BtwPanel from '@/components/panel/BtwPanel.vue'
+import { useSessionStore } from '@/stores/session'
 import { useExtensionUIStore } from '@/stores/extension-ui'
-import type { ServerMessageMap } from '@taiji/shared'
+import type { ServerMessageMap, SessionSummary } from '@taiji/shared'
 
 // btw 具名类型走 indexed-access（shared 包出口未挂具名，SSOT = shared protocol.ts）
 type BtwForkState = ServerMessageMap['btw.create']['forkState']
@@ -78,6 +79,13 @@ async function settle(wrapper: Awaited<ReturnType<typeof mountPanel>>) {
   await flushPromises()
   await nextTick()
   await nextTick()
+}
+
+/** 读面板内部线条目（<script setup> 的 state 经 wrapper.vm 代理可读，同
+ *  model-select-popover.test.ts 范式）——cwd 无 DOM 承载，白盒断言字段值。 */
+function optimisticEntry(wrapper: Awaited<ReturnType<typeof mountPanel>>): SessionSummary {
+  const state = (wrapper.vm as unknown as { state: { threads: SessionSummary[] } }).state
+  return state.threads[state.threads.length - 1]
 }
 
 enableAutoUnmount(afterEach)
@@ -219,6 +227,49 @@ describe('BtwPanel 新建线与 fork pill 三态（D3 口径）', () => {
     expect(wrapper.find('[data-testid="btw-thread-chip"][data-session-id="pi-9"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="btw-stream"]').attributes('session-id')).toBe('pi-9')
     expect(useBtwSelection().selectedBtwSessionId.value).toBe('pi-9')
+  })
+
+  it('即时入列条目 cwd = 所属主会话 cwd（§5-W4b 派生规则；不写主会话 id）', async () => {
+    // 主会话 summary 进 session store（侧栏列表权威持有 cwd）；线列表为空（空态新建）
+    useSessionStore().appendSession({
+      id: MAIN_A,
+      label: 'main-a',
+      cwd: '/repo/main',
+      status: 'idle',
+      lastActiveAt: 0,
+    })
+    apiMock.list.mockResolvedValue([])
+    apiMock.create.mockResolvedValue({ sessionId: 'pi-9', mainSid: MAIN_A, forkState: 'none' })
+
+    const wrapper = mountPanel(MAIN_A)
+    await settle(wrapper)
+    await wrapper.find('[data-testid="btw-empty-new"]').trigger('click')
+    await settle(wrapper)
+
+    const entry = optimisticEntry(wrapper)
+    expect(entry.id).toBe('pi-9')
+    // 设计 §5-W4b：线条目 cwd = 所属主会话 cwd（runtime toLineSummary / mock
+    // buildBtwLineEntries 同口径）。主会话 id 不得落进 cwd 字段。
+    expect(entry.cwd).toBe('/repo/main')
+    expect(entry.cwd).not.toBe(MAIN_A)
+    expect(entry.status).toBe('idle')
+    expect(typeof entry.lastActiveAt).toBe('number')
+  })
+
+  it('即时入列条目 cwd 兜底取同分区已拉取线条目 cwd（session store 无主会话时）', async () => {
+    // 无线列表先行拉取（其 cwd 即主会话 cwd 的权威投影）；session store 不播种主会话
+    apiMock.list.mockResolvedValue(btwLineGroups({ id: 'pi-1' }))
+    apiMock.create.mockResolvedValue({ sessionId: 'pi-9', mainSid: MAIN_A, forkState: 'none' })
+
+    const wrapper = mountPanel(MAIN_A)
+    await settle(wrapper)
+    await wrapper.find('[data-testid="btw-new-thread"]').trigger('click')
+    await settle(wrapper)
+
+    const entry = optimisticEntry(wrapper)
+    expect(entry.id).toBe('pi-9')
+    expect(entry.cwd).toBe('/repo/main')
+    expect(entry.cwd).not.toBe(MAIN_A)
   })
 
   it('创建失败：行内错误可见（含原因）+ 入口保持可用（P2 可恢复）', async () => {
