@@ -204,6 +204,20 @@ const llm = meta.llm ?? scenario.llm
 if (faux && llm) {
   throw new Error(`${String(meta.id)}: meta/scenario 同时声明 faux 与 llm（两条零 token 通道互斥）`)
 }
+// scenario 声明式实例 env（透传 createInstance options.env → dev-instance 子进程）：
+// 值必须是 string（spawn env 形态）。当前消费者 = settling 窗口类剧本注入产品侧
+// dev-only chaos 开关（TAIJI_AGENT_DEV_SETTLING_DELAY_MS，event-interpreter-settled-delay）。
+const scenarioEnv = meta.env ?? scenario.env
+if (scenarioEnv !== undefined) {
+  if (!scenarioEnv || typeof scenarioEnv !== 'object' || Array.isArray(scenarioEnv)) {
+    throw new Error(`${String(meta.id)}: meta.env 必须是 { [name]: string } 对象`)
+  }
+  for (const [k, v] of Object.entries(scenarioEnv)) {
+    if (typeof v !== 'string') {
+      throw new Error(`${String(meta.id)}: meta.env["${k}"] 必须是 string（spawn env 形态），实际 ${typeof v}`)
+    }
+  }
+}
 
 log(`runId=${runId} worktree=${worktree} instance=${instanceName} dataDir=${dataDir}`)
 log(`runDir=${runDir}`)
@@ -230,7 +244,7 @@ if (missingCovers.length > 0) {
   log(`warn: covers 缺文档 ${missingCovers.join(', ')}`)
 }
 
-const instance = createInstance({ repo, name: instanceName, dataDir, faux, llm, background: true })
+const instance = createInstance({ repo, name: instanceName, dataDir, faux, llm, env: scenarioEnv, background: true })
 let proto = null
 let ui = null
 let thrown = null
