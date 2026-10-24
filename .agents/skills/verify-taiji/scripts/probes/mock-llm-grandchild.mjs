@@ -6,7 +6,8 @@
  * - faux 通道不可达：孙进程 pi 由 `pi-subagent-cli` 恒带 `--no-extensions` spawn
  *   （`packages/pi-subagent-cli/src/spawn-args.ts`），扩展集只剩宿主白名单
  *   （`extensions/universal/subagent-workflow/src/host/pi-host.ts` 的
- *   `GRANDCHILD_EXTENSION_PKG_SEGMENTS` = structured-output），faux provider 注册
+ *   `GRANDCHILD_EXTENSION_NPM_PKG` = pi-structured-output，另经
+ *   `GRANDCHILD_EXCLUDED_PKG_SEGMENTS` 剔除名单收窄），faux provider 注册
  *   进不去 → `Model "faux/..." not found`。
  * - mock-http 通道的假设：孙进程继承 `PI_CODING_AGENT_DIR`
  *   （`packages/runtime/src/infra/subagent-control/engine-launch-env.ts`），因此读到同一份
