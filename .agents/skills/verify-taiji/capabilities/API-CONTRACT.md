@@ -325,7 +325,7 @@ process.exit(r.status ?? 1)
 `settings.network-proxy` · `settings.theme`
 
 ### plugin / extension
-`plugin.list` · `plugin.toggle` · `plugin.statusbar` · `plugin.mountpoints` · `extension.load`
+`plugin.list` · `plugin.toggle` · `plugin.statusbar` · `plugin.mountpoints` · `plugin.invoke` · `plugin.listAvailable` · `extension.load`
 
 ### render
 `render.markdown` · `render.shiki` · `render.html-preview` · `render.changeset` · `render.image`

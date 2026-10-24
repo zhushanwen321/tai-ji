@@ -357,7 +357,7 @@ bridge 的 `plugin:statusBarUpdate` / `plugin:statusSetUpdate` / `extension:stat
 
 涉及 capability：`plugin.list` `plugin.toggle`（既有，见上）+ `plugin.invoke`（宿主 → 插件方法调用）、
 `plugin.listAvailable`（远程清单读取，fail-safe 链见坑 3）。后两个 id 是 D3 剧本 `covers` 的实测引用，
-**尚未录入 API-CONTRACT §6**，登记随维护 pass 补录。
+已录入 API-CONTRACT §6（2026-10-25 维护 pass 补录）。
 
 ### 剧本索引（15 个，全部实跑交付；verdict 证据与矩阵行见 P0-P1-COVERAGE.md 第六节）
 
@@ -369,7 +369,7 @@ bridge 的 `plugin:statusBarUpdate` / `plugin:statusSetUpdate` / `extension:stat
 | `p1-plugin-a7-text-input` | A7 输入回传 | pass（14） | `gui-text-input-field-<id>` 原生 input change 即回传；确认命令（`gui-action-bar-item-<id>` → `plugin.executeCommand`）触发重推；插件重推 value 回显覆盖本地镜像（输入状态保持） |
 | `p1-plugin-crash` | A13 崩溃隔离 | pass（19） | SIGKILL sandbox fork → `plugin:crashed` 广播 + `plugin.list status=crashed` + crash journal 三证；builtin 邻居与宿主 RPC 不受影响；崩溃 toast 呈现（4s 消失窗）；管理面对 crashed 插件零呈现的缺口照录（不判失败） |
 | `p1-plugin-a14-install-neighbors` | A14 邻居不变量（连续装卸 + 重启） | pass（51） | 安装/卸载 5 轮（中途重启）：邻居 provider 条目与凭据零污染、无孤儿条目（命名空间前缀全清含 apiKey）、插件目录 / `.staging` / installed.json 无残留、启动日志无 warn 洪水 |
-| `p1-plugin-a26-update-chain` | A26 更新链 | degraded（28） | 清单版本翻转 → 家族卡更新徽标两级提示 → 两段式确认提交：磁盘/注册表/激活面换新、条目凭据保留；degraded 根因 = 坑 4①（更新后旧模块缓存复用，「激活必失败包 → 旧版本幸存」路径对已激活插件不可达） |
+| `p1-plugin-a26-update-chain` | A26 更新链 | pass（31） | 清单版本翻转 → 家族卡更新徽标两级提示 → 两段式确认提交：磁盘/注册表/激活面换新、条目凭据保留；正向 1.1.0 更新后沙箱 fork 进程更替（旧 fork terminate 再激活，新模块代码即时生效）+ displayName 切新版本；2.0.0 激活必败包 → `plugin-install-error` 呈现 + 回滚幸存（磁盘/注册表回 1.1.0、凭据保留、重激活达 active，非等宿主重启） |
 | `p1-plugin-a23a-dual-artifact` | A23a 双产物闭环 | pass（24） | 清单条目 `piExtensionVersion` 双产物：安装 → 插件目录 + installed.json + pi 扩展（npm 布局）+ settings.json packages[] + models.json 条目五处落盘；`plugin.uninstall` 卸载五处完整清除 |
 | `p1-plugin-install-confirm` | A27 安装确认知情面 | pass（21） | 确认卡提交前全量展示 capabilities 与 readPaths（展示物与暂存解压物 manifest 同源核对）；未确认不落盘（取消清暂存、正式目录不出现）；清单安装与包名直装双路径 |
 | `p1-plugin-a15-manifest-unreachable` | A15 清单不可达 | pass（17） | fail-safe 链两态：曾拉取后远程不可用 → 回退缓存渲染；从未拉取（删缓存文件）→ 空态 + 重试入口；两态下既有 provider 管理均不受影响 |
@@ -412,13 +412,13 @@ P0-P1-COVERAGE.md P0-13 行。
    （runtime 直读缓存，不发网络）；把 `checkedAt` 拨旧到窗外 = 强制走网络。当前 GitHub main 尚无
    `configs/remote/v2-plugins.json`（404 与网络失败同走 fail-safe 回退分支）——远程清单发布后，
    依赖「远程 404」作断网前提的剧本（A15）会按剧本头注释的演化路径改用网络层手段。
-4. **已知产品缺陷两条（D3 实跑登记，产品代码未改动；全文见 skill-data 侧
+4. **更新链的进程边界与清单两态元数据（D3 实跑发现的缺陷已修复，机制见 skill-data 侧
    `provider-plugin-access.acceptance/ISSUES.md`）**：
-   ① **（P1）插件更新提交后新模块代码不生效**——重激活复用旧 sandbox fork（`assignProcess` 对
-   活跃进程直接复用）+ 同 URL ESM 模块缓存（`handleLoad` 的 `await import` 命中缓存），更新后
-   磁盘/注册表/激活面已是新版本，但旧代码继续执行：版本显示与实际行为漂移，且「激活必失败的
-   更新包 → 旧版本幸存」回滚路径对已激活插件的更新不可达（A26 剧本 degraded 判定的根因）；
-   ② **（P2）`plugin.listAvailable` 的 stale/available 判据未透出 RPC**——service 层已算出
-   `{ available, stale, reason }`，runtime / core / renderer 逐层丢弃只留 `plugins` 数组：设计
-   「清单可能不是最新」提示无数据源、「拉取失败」与「确实为空」在 UI 同为空态块（A15 剧本的
-   相关断言列 notProvable 并指向本条）。
+   ① **沙箱 fork 复用 + 同 URL ESM 模块缓存 = 「换磁盘文件 ≠ 换运行代码」**——`assignProcess`
+   对同 id 活跃进程直接复用，`handleLoad` 的 `await import` 命中模块缓存；更新提交与回滚重激活
+   都必须先 terminate 旧 sandbox fork 再激活（进程即模块边界，宿主侧 `plugin-update-activation.ts`
+   承载）。排障信号：更新后版本号变了但行为还是旧的 = 进程没换。A26 剧本断言正向更新 fork PID
+   更替、激活必败包失败呈现、回滚重激活达 active；
+   ② **`plugin.listAvailable` reply 自 2026-10-24 R-2 修复起携带 `available/stale/reason` 三字段**，
+   renderer 按 stale 渲染提示条、按 available=false 区分报错态与空清单并回退本地已装条目——
+   判定「拉取失败 vs 确实为空」用 reply 字段，不要用 `catalogLoaded` 首拉标记推断。

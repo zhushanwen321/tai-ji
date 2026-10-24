@@ -15,17 +15,18 @@
  *   B：plugin.listAvailable → plugins=缓存 3 条目（回退缓存，缓存兜底语义）→
  *   A：家族卡网格 3 张（缓存清单渲染）→ demo 已装行展开正常（既有 provider 管理不受影响）→
  *   态② 从未拉取（删缓存文件后重开对话框强制重拉）：
- *   B：plugin.listAvailable → plugins=[]（全链无数据）→
+ *   B：plugin.listAvailable → available=false + 本地已装条目回退（R-2：demo-wool 带
+ *   namespace 在场 = 管理入口不断；builtin 条目同列；reason=network）→
  *   A：plugin-family-empty 空态 + plugin-catalog-retry 重试入口在场、家族卡 0 张 →
  *   A：demo 行收起后仍可再展开、宿主编辑体在场（既有 provider 管理不受影响）。
  *
  * 锚点事实（源码已核对）：fail-safe 链 = refreshRemoteConfig（remote-config-fetch.ts：
  * 网络失败回退缓存、无缓存 data undefined，链路恒成功不 reject；失败路径不落盘不更新
- * checkedAt——同实例删缓存文件即可切换两态）；plugin.listAvailable 的 RPC reply 只含
- * plugins（service 层的 available/stale/reason 在 runtime 侧被丢弃，UI 空态判定走
- * catalogLoaded + 空数组——S15①「清单可能不是最新」提示与 stale 判据未透出 UI，产品偏差
- * 记 ISSUES，本剧本不断言）；UI 空态 = PluginProviderFlow.vue 的 plugin-family-empty +
- * plugin-catalog-retry。
+ * checkedAt——同实例删缓存文件即可切换两态）；plugin.listAvailable 的 RPC reply 自
+ * 2026-10-24 R-2 修复起携带 available/stale/reason 三字段（runtime 透传，renderer 按
+ * stale 渲染提示条、按 available=false 区分报错态与空清单并回退本地已装条目）；本剧本
+ * 断言面维持 plugins 内容（两态 UI 渲染归 GUI 通道断言）；UI 空态 = PluginProviderFlow.vue
+ * 的 plugin-family-empty + plugin-catalog-retry。
  */
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -83,12 +84,12 @@ export const meta = {
     'C: 远程不可用前提探针——清单 URL non-ok（404）或 fetch 失败，fail-safe 回退缓存分支确定性命中',
     'B: 态① listAvailable 返回缓存 3 条目（网络失败 → 缓存兜底生效，demo-wool installed=true）',
     'A: 态① 家族卡 3 张（缓存清单渲染）+ demo 已装行展开正常（既有 provider 管理不受影响）',
-    'B: 态② 删缓存文件后 listAvailable 返回空清单（无缓存且拉不到 = 全链无数据）',
+    'B: 态② 删缓存文件后 listAvailable available=false + 本地已装条目回退（demo-wool 带 namespace，reason=network）',
     'A: 态② plugin-family-empty 空态 + plugin-catalog-retry 重试入口在场、家族卡 0 张（整页报错 + 重试）',
     'A: 态② demo 行仍可展开、宿主编辑体在场（既有 provider 管理不受影响）',
   ],
   notProvable: [
-    'S15① 的「清单可能不是最新」提示与 stale 判据——service 层 available/stale/reason 未透出 RPC（runtime 只透 reply.plugins），renderer 无从消费；产品偏差记 ISSUES',
+    'S15① 的「清单可能不是最新」提示条与 available=false 报错态的文案差异——reply 已携带 available/stale/reason（2026-10-24 R-2 透传），两态 UI 渲染断言归 PluginProviderFlow.test.ts 单测；本剧本锁定 fail-safe 降级链行为形态',
     '真实远程清单内容（探针只验不可达；远程数据正确性归 S1/S26）',
     '重试按钮点击后的成功恢复（需断网恢复时序，本剧本锁定两态降级形态本体）',
     '态② 的「从未拉取」首载文案（catalogLoading）——catalogLoaded 单例在态① 已置 true，重开对话框显示「清单为空」文案；空态块与重试入口是断言对象，文案差异不载义',
@@ -102,7 +103,7 @@ export async function run(ctx) {
     '「断网」在本剧本的确定形态 = 远程清单不可用（当前环境事实：GitHub main 无该文件，404 与网络失败走 remote-config-fetch 同一回退分支；探针 200 = 环境变了，fail 并提示）',
     'remote-config-fetch 的失败路径不落盘不更新 checkedAt——同实例删缓存文件即可连续复现两态',
     'listAvailable RPC 恒成功返回（fail-safe 不 reject）；「报错」的 UI 形态 = 家族卡空态块 + 重试按钮，不是 toast/dialog',
-    '态② 下插件来源识别失效（entryOfProvider 依赖清单）→ demo 行失去插件徽标属产品真实降级，管理动作（展开/编辑）不受影响',
+    '态② 插件来源识别走 R-2 本地回退（entryOfProvider 识别源② = 已装条目 namespace 前缀）→ demo 行插件徽标保留；本剧本不断言徽标，识别逻辑断言归 ProviderPage-plugin.test.ts',
     '行展开是切换语义（点行名 = 展开/收起切换）——「仍可展开」断言先收起再展开，不重复点击',
   ]
   const { createUI } = await import(path.join(SKILL_ROOT, 'scripts', 'lib', 'ui.mjs'))
@@ -165,10 +166,12 @@ export async function run(ctx) {
 
   const avail2 = await proto.call('plugin.listAvailable', {}, { timeoutMs: 30_000 })
   const plugins2 = avail2?.plugins ?? []
-  ev.assert('B: 态② listAvailable 返回空清单（无缓存且拉不到）', plugins2.length === 0, {
+  const demo2 = plugins2.find((p) => p.pluginId === DEMO_PLUGIN_ID)
+  ev.assert('B: 态② available=false + 本地已装条目回退（R-2：管理入口不断）',
+    avail2?.available === false && avail2?.reason === 'network' && demo2?.installed === true && demo2?.namespace === DEMO_PLUGIN_ID && plugins2.length >= 2, {
     channel: 'B',
-    expected: 'plugins=[]（全链无数据）',
-    actual: `count=${plugins2.length}`,
+    expected: 'available=false, reason=network, 回退条目含 demo-wool（installed=true + namespace）与 builtin 已装插件',
+    actual: `available=${avail2?.available} reason=${avail2?.reason} count=${plugins2.length} demo=${JSON.stringify(demo2)}`,
   })
   ev.attach('a15-state2-list-available', JSON.stringify(avail2, null, 2).slice(0, 2_000))
 

@@ -41,5 +41,5 @@ Preconditions:
 - 权限审批门：声明了 `providers.write` 等能力的插件首次激活停在审批，`plugin.approvePermissions` 批准落盘后免审批——seed 时不预批会卡在激活等待（[plugin.md](../capabilities/plugin.md) 坑 2）。
 - 清单读取有 `checkedAt` 4h 节流窗：launch 前 seed 缓存 envelope = 确定性注入；删缓存文件才是「从未拉取」断网前提，别等网络超时（坑 3）。
 - action-bar 命令执行器是容器级 provide（`ProviderRowCard` 容器内直发 `plugin.executeCommand`），宿主命令面板里没有这些命令——从条目扩展区按钮驱动，不从命令面板找（坑 1）。
-- 已知漂移：D3 交付实跑 `p1-plugin-a26-update-chain` verdict = degraded，根因 = 更新后重激活复用旧 sandbox fork + 同 URL ESM 模块缓存（坑 4①）。该根因已随 2026-10-24 终态同步修复（commit 成功后 terminate 旧 fork 再激活，`plugin-installer.test.ts` R-1 三用例承载），坑 4 登记与 A26 verdict 待剧本复跑后由维护 pass 更新；坑 4②（`listAvailable` stale/available 判据）同批已修复（reply 三字段透传 + renderer 两态消费），真机复验同样归剧本复跑。
+- 更新链的进程边界（坑 4）：sandbox fork 按插件 id 复用（存活即复用，deactivate 不 terminate）+ 同 URL ESM 模块缓存，意味着「换磁盘文件 ≠ 换运行代码」——更新提交与回滚重激活都必须先 terminate 旧 sandbox fork 再激活（进程即模块边界，宿主侧 `plugin-update-activation.ts` 已实现）。排障信号：更新后版本号变了但行为还是旧的 = 进程没换；`p1-plugin-a26-update-chain` 断言正向更新 fork PID 更替、回滚重激活达 active。
 - 真实凭据的 OAuth 全链路（WorkBuddy 扫码出话）不在本剧本集：`p1-plugin-a19-oauth-interrupt` 只验中断三段，全链路属设计验收 S2 / P-wool-e2e 真机剧本。
