@@ -82,6 +82,7 @@ const collectResults = (child: ReturnType<typeof fork>): Promise<ImportResult[]>
 function runInSandbox(
   pluginEntry: string,
   items: Array<{ label: string; url: string }>,
+  extraEnv: Record<string, string> = {},
 ): { child: ReturnType<typeof fork>; results: Promise<ImportResult[]> } {
   const child = fork(RUNNER_PATH, [], {
     execArgv: ['--import', LOADER_PATH],
@@ -89,6 +90,7 @@ function runInSandbox(
       ...process.env,
       // 宿主（plugin-host-process env 注入处）修正后的注入形态：dirname(pluginPath)
       TAIJI_PLUGIN_SANDBOX_DIR: dirname(pluginEntry),
+      ...extraEnv,
     },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   })
@@ -192,6 +194,43 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`S1-W3: sandbox escape regression (r
     // 界内 node_modules（合法依赖形态）：放行
     expect(okBare?.ok).toBe(true)
   }, TIMEOUT_MS)
+
+  it('CAP-PERM(单元): 放行 network.http 后 import node:vm 仍被拒（永久封禁不受放行清单影响）', async () => {
+    // provider-plugin-access D3：vm 属永久封禁 7 项，computeBlockedBuiltins 对
+    // allowed 含 vm 免疫；本用例以 network.http 的放行集（http/https/net/dns/tls）
+    // 注入 fork env，验证真 fork + 真 loader 下 https 放行生效、vm 仍拦。
+    // fixture 必须复制进 sandbox（仓库路径的 parentURL 出界 → loader 整体放行，
+    // 对齐 P-perm runFixture 的同款约束）。
+    pluginDir = mkdtempSync(join(tmpdir(), 'escape-plugin-'))
+    const fixtureEntry = join(pluginDir, 'vm-blocked.mjs')
+    writeFileSync(fixtureEntry, readFileSync(join(__dirname, 'plugin-perm-fixtures', 'vm-blocked.mjs'), 'utf-8'))
+    const { child, results } = runInSandbox(fixtureEntry, [
+      { label: 'vm-blocked', url: pathToFileURL(fixtureEntry).href },
+    ], {
+      // 与宿主 buildPluginCapabilityForkEnv 同形态的 JSON 数组编码
+      TAIJI_PLUGIN_ALLOWED_MODULES: JSON.stringify(['http', 'https', 'net', 'dns', 'tls']),
+      TAIJI_PLUGIN_READ_PATHS: '[]',
+    })
+    // fixture 顶层执行后经 fork IPC 回传 perm-result（vm/https 两项判定）
+    const permResult = await new Promise<{ label: string; out: Record<string, string | { ok: boolean }> }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('perm fixture did not respond in time')), TIMEOUT_MS)
+      child.on('message', (msg: unknown) => {
+        const m = msg as { type?: string; label?: string; out?: Record<string, string | { ok: boolean }> }
+        if (m?.type === 'perm-result' && m.label === 'vm-blocked') {
+          clearTimeout(timer)
+          resolve(m as { label: string; out: Record<string, string | { ok: boolean }> })
+        }
+      })
+    })
+    const all = await results
+    child.kill()
+    // runner 的 import 完成回执（fixture 模块本体加载成功 = 两个动态 import 都被捕获）
+    expect(all.find((r) => r.label === 'vm-blocked')?.ok).toBe(true)
+    // 放行生效对照面：node:https import 成功
+    expect(permResult.out.https).toBe('ok')
+    // 新增断言（设计 §4）：network.http 放行后 node:vm 仍被拒（PERMISSION_DENIED）
+    expect(permResult.out.vm).toBe('PERMISSION_DENIED')
+  }, TIMEOUT_MS)
 })
 
 describe('S1-W3: CJS interceptor boundary (/, file:, bare-name resolved)', () => {
@@ -253,7 +292,11 @@ describe('S1-W3: BLOCKED_BUILTINS SSOT 防退化', () => {
   it('plugin-sandbox.ts 导出与 plugin-blocked-builtins.cjs 数据源逐元素相等', () => {
     // 直接 require 真实 .cjs（绕过 plugin-sandbox.ts 的 import），抓「TS 侧改回内联」漂移
     const requireFromTest = createRequire(import.meta.url)
-    const source = requireFromTest(BLOCKED_BUILTINS_SOURCE) as { BLOCKED_BUILTINS: readonly string[] }
+    const source = requireFromTest(BLOCKED_BUILTINS_SOURCE) as {
+      BLOCKED_BUILTINS: readonly string[]
+      PERMANENTLY_BLOCKED_BUILTINS: readonly string[]
+      computeBlockedBuiltins: (allowed: readonly string[] | unknown) => readonly string[]
+    }
     expect([...BLOCKED_BUILTINS]).toEqual([...source.BLOCKED_BUILTINS])
     // 数据源非空且含关键高危模块（空数组会让所有黑名单检查静默失效）
     expect(source.BLOCKED_BUILTINS.length).toBeGreaterThan(0)
@@ -264,6 +307,79 @@ describe('S1-W3: BLOCKED_BUILTINS SSOT 防退化', () => {
     expect(source.BLOCKED_BUILTINS).toContain('dgram')
     expect(source.BLOCKED_BUILTINS).toContain('dns')
     expect(source.BLOCKED_BUILTINS).toContain('net')
+  })
+
+  it('D3 基线形态：16 项（os 移出）+ 永久封禁 7 项恒在基线', () => {
+    const requireFromTest = createRequire(import.meta.url)
+    const source = requireFromTest(BLOCKED_BUILTINS_SOURCE) as {
+      BLOCKED_BUILTINS: readonly string[]
+      PERMANENTLY_BLOCKED_BUILTINS: readonly string[]
+    }
+    // provider-plugin-access D3：os 移出基线（17 → 16）——os 免声明可用是
+    // fs.read-user-data 落地的前提（拼 IDE 配置路径需要 homedir()）
+    expect(source.BLOCKED_BUILTINS).toHaveLength(16)
+    expect(source.BLOCKED_BUILTINS).not.toContain('os')
+    // 永久封禁 7 项（vm/worker_threads/module/cluster/dgram/readline/v8）任何
+    // 能力词都不可放行——恒在基线
+    expect(source.PERMANENTLY_BLOCKED_BUILTINS).toEqual([
+      'cluster',
+      'dgram',
+      'readline',
+      'v8',
+      'vm',
+      'worker_threads',
+      'module',
+    ])
+    for (const name of source.PERMANENTLY_BLOCKED_BUILTINS) {
+      expect(source.BLOCKED_BUILTINS, name).toContain(name)
+    }
+  })
+
+  it('D3 放行计算：allowed 与基线交集放行；永久封禁对 allowed 免疫', () => {
+    const requireFromTest = createRequire(import.meta.url)
+    const source = requireFromTest(BLOCKED_BUILTINS_SOURCE) as {
+      BLOCKED_BUILTINS: readonly string[]
+      PERMANENTLY_BLOCKED_BUILTINS: readonly string[]
+      computeBlockedBuiltins: (allowed: readonly string[] | unknown) => readonly string[]
+    }
+    const { computeBlockedBuiltins, BLOCKED_BUILTINS, PERMANENTLY_BLOCKED_BUILTINS } = source
+
+    // 空放行 = 基线原样（无能力声明插件的 fail-closed 缺省）
+    expect(computeBlockedBuiltins([])).toEqual([...BLOCKED_BUILTINS])
+    expect(computeBlockedBuiltins(undefined)).toEqual([...BLOCKED_BUILTINS])
+
+    // network.http 全集放行后：5 个网络模块移出黑名单，其余基线保持
+    const httpAllowed = ['http', 'https', 'net', 'dns', 'tls']
+    const afterHttp = computeBlockedBuiltins(httpAllowed)
+    for (const name of httpAllowed) expect(afterHttp, name).not.toContain(name)
+    expect(afterHttp).toContain('fs')
+    expect(afterHttp).toContain('child_process')
+    expect(afterHttp).toHaveLength(16 - httpAllowed.length)
+
+    // 永久封禁免疫：allowed 注入 'vm' 也不放行（防 env 注入错误 / 词表演进误入）
+    expect(computeBlockedBuiltins(['vm'])).toContain('vm')
+    expect(computeBlockedBuiltins([...PERMANENTLY_BLOCKED_BUILTINS])).toEqual(
+      expect.arrayContaining([...PERMANENTLY_BLOCKED_BUILTINS]),
+    )
+    // 全部可放行项（基线 − 永久封禁）声明后：黑名单只剩永久封禁 7 项
+    const allReleasable = BLOCKED_BUILTINS.filter((n) => !PERMANENTLY_BLOCKED_BUILTINS.includes(n))
+    expect(computeBlockedBuiltins(allReleasable)).toEqual([...PERMANENTLY_BLOCKED_BUILTINS])
+  })
+
+  it('D3 词表对账：shared 能力词映射的放行集并集 = 基线可放行项（9 项，两侧不漂移）', async () => {
+    const requireFromTest = createRequire(import.meta.url)
+    const source = requireFromTest(BLOCKED_BUILTINS_SOURCE) as {
+      BLOCKED_BUILTINS: readonly string[]
+      PERMANENTLY_BLOCKED_BUILTINS: readonly string[]
+    }
+    const { resolveAllowedModules, PLUGIN_CAPABILITIES } = await import(
+      '@taiji/shared/plugin-capability-map'
+    )
+    const releasable = source.BLOCKED_BUILTINS.filter(
+      (n) => !source.PERMANENTLY_BLOCKED_BUILTINS.includes(n),
+    )
+    const fromCapabilityMap = resolveAllowedModules([...PLUGIN_CAPABILITIES]).allowed
+    expect([...fromCapabilityMap].sort()).toEqual([...releasable].sort())
   })
 
   it('ESM loader 消费同一数据源（源码含 require 引用，防回退为内联数组）', () => {

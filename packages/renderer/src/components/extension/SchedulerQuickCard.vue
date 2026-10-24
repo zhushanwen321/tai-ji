@@ -75,7 +75,7 @@
       >
         <ViewHost
           :view-id="SCHEDULER_MODAL_VIEW_ID"
-          :session-id="sessionId"
+          :scope="{ kind: 'session', sessionId }"
           :title="t('panel.header.schedulerPanelTitle')"
           empty="placeholder"
           class="min-h-0 flex-1 overflow-y-auto"

@@ -119,11 +119,13 @@ describe('E15：三方法 sessionId 必填（缺/非法 → INVALID_SESSION_ID�
     expect(exits.headerAction).toHaveLength(0)
   })
 
-  it('views.update：缺 sessionId → INVALID_SESSION_ID 且 handleViewUpdate 不触达', async () => {
+  it('views.update：归属都缺/都给 → INVALID_VIEW_SCOPE 且 handleViewUpdate 不触达（U2 二选一）', async () => {
     const { rpc, port } = buildRpc()
     const resp = await dispatch(rpc, port, 1, 'plugin.views.update', { pluginId: 'p1', viewId: 'v1', guiTree: [] })
-    expect(resp.error?.code).toBe('INVALID_SESSION_ID')
+    expect(resp.error?.code).toBe('INVALID_VIEW_SCOPE')
     expect(lastResponse(port).error?.message).toContain('sessionId')
+    const respBoth = await dispatch(rpc, port, 2, 'plugin.views.update', { pluginId: 'p1', viewId: 'v1', guiTree: [], sessionId: 's1', mountId: 'provider.authorize' })
+    expect(respBoth.error?.code).toBe('INVALID_VIEW_SCOPE')
   })
 
   it('sendMessage：缺 sessionId → INVALID_SESSION_ID（替换既有静默 no-op）', async () => {
@@ -148,7 +150,23 @@ describe('views.update 显式 sessionId 归属投递（D1）', () => {
     })
 
     expect(handleViewUpdate).toHaveBeenCalledTimes(1)
-    expect(handleViewUpdate).toHaveBeenCalledWith('p1', 'panel-p1-v1', [{ type: 'ansi-text', props: { lines: ['x'] } }], 'declared-session')
+    expect(handleViewUpdate).toHaveBeenCalledWith('p1', 'panel-p1-v1', [{ type: 'ansi-text', props: { lines: ['x'] } }], { kind: 'session', sessionId: 'declared-session' })
+  })
+
+  it('payload.mountId 直达 handleViewUpdate（U2 全局域：scope 联合形态分流）', async () => {
+    const rpc = new PluginRpcServer()
+    const port = createMockPort()
+    rpc.registerWorker('w1', port)
+    const handleViewUpdate = vi.fn()
+    registerViewRpcHandlers(rpc, { mountPoints: [], handleViewUpdate })
+
+    // 全局域归属：mountId 声明挂载位（无会话归属），handleViewUpdate 收 scope 联合
+    await dispatch(rpc, port, 1, 'plugin.views.update', {
+      pluginId: 'plug-a', viewId: 'flow', guiTree: [{ type: 'ansi-text', props: { lines: ['x'] } }], mountId: 'provider.authorize',
+    })
+
+    expect(handleViewUpdate).toHaveBeenCalledTimes(1)
+    expect(handleViewUpdate).toHaveBeenCalledWith('plug-a', 'flow', [{ type: 'ansi-text', props: { lines: ['x'] } }], { kind: 'global', mountId: 'provider.authorize', pluginId: 'plug-a' })
   })
 })
 

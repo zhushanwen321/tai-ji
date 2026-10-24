@@ -109,13 +109,11 @@ export interface PiSettings {
  *   - retry     = retry（LLM 重试配置域，pi-retry-settings 管理；域内嵌套键级
  *     merge 见 pi-retry-settings 的 D3 规则）
  *   - tools     = defaultTools（pi 默认工具集域，pi-codemode-settings 管理）
- *   - wool      = wool（羊毛 provider 域：家族接入态/签到开关/展示昵称，wool-manager 管理；
- *     pi 不消费该键，经 PiSettings 未知字段透传保活）
  *   - full      = 全部。**白名单仅一个调用点**：pi-maintenance.ts 启动迁移
  *     （无并发 pi 进程窗口）。新代码禁止使用 full scope（review checklist 项，
  *     见 docs/architecture/data-source-registry.md 跨进程文件登记表）。
  */
-export type SettingsFieldScope = 'model' | 'skills' | 'extension' | 'retry' | 'tools' | 'wool' | 'full'
+export type SettingsFieldScope = 'model' | 'skills' | 'extension' | 'retry' | 'tools' | 'full'
 
 /** 各 scope 覆盖的顶层字段（full 走全量，不在此表）。 */
 const SCOPE_FIELDS: Record<Exclude<SettingsFieldScope, 'full'>, readonly string[]> = {
@@ -124,7 +122,6 @@ const SCOPE_FIELDS: Record<Exclude<SettingsFieldScope, 'full'>, readonly string[
   extension: ['packages'],
   retry: ['retry'],
   tools: ['defaultTools'],
-  wool: ['wool'],
 }
 
 /**

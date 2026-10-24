@@ -323,7 +323,7 @@
         class="flex min-h-0 flex-1 flex-col overflow-y-auto p-4"
         data-testid="wfvz-overlay-scheduler-pane"
       >
-        <ViewHost :view-id="SCHEDULER_MODAL_VIEW_ID" :session-id="schedulerSessionId ?? ''" empty="hidden" />
+        <ViewHost :view-id="SCHEDULER_MODAL_VIEW_ID" :scope="{ kind: 'session', sessionId: schedulerSessionId ?? '' }" empty="hidden" />
       </div>
   </OverlayShell>
 </template>

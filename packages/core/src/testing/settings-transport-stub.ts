@@ -22,7 +22,11 @@ import type { SettingsTransport } from '../domain/settings/transport'
  * `const transport: SettingsTransport` 全量字面量承担（新 seam 方法缺失/改名在此报错）。
  */
 export type SettingsTransportStubOverrides = {
-  [K in keyof SettingsTransport]?: (...args: Parameters<SettingsTransport[K]>) => unknown
+  // NonNullable：契约含 optional 方法（插件两段式安装三成员：实装落定前缺省），
+  // Parameters<F | undefined> 不满足函数约束——先剥 undefined 再取实参表
+  [K in keyof SettingsTransport]?: NonNullable<SettingsTransport[K]> extends (...args: infer A) => unknown
+    ? (...args: A) => unknown
+    : never
 }
 
 /** 订阅方法统一桩形（模块内共用）：一键产出「调用返回 no-op 取消函数」的独立 vi.fn
@@ -37,7 +41,7 @@ export type SettingsSubscriptionStubs = Pick<
   | 'onProviders' | 'onModels' | 'onSkills' | 'onAgents' | 'onExtensions'
   | 'onSkillDirs' | 'onAgentDirs' | 'onExtensionDirs' | 'onDefaults' | 'onDefaultsWithSource'
   | 'onSkillCacheInvalidated' | 'onSystemPrompt' | 'onTerminalConfig' | 'onRetryConfig'
-  | 'onNetworkProxyConfig' | 'onWoolState' | 'onWoolAuthorizeUrl'
+  | 'onNetworkProxyConfig'
   | 'onAuthDeviceCode' | 'onAuthAuthUrl' | 'onAuthSuccess' | 'onAuthError'
 >
 
@@ -66,8 +70,6 @@ export function makeSettingsSubscriptionStubs(): SettingsSubscriptionStubs {
     onTerminalConfig: makeUnsubscribeStub(),
     onRetryConfig: makeUnsubscribeStub(),
     onNetworkProxyConfig: makeUnsubscribeStub(),
-    onWoolState: makeUnsubscribeStub(),
-    onWoolAuthorizeUrl: makeUnsubscribeStub(),
     onAuthDeviceCode: makeUnsubscribeStub(),
     onAuthAuthUrl: makeUnsubscribeStub(),
     onAuthSuccess: makeUnsubscribeStub(),
@@ -147,9 +149,6 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     getSubagentEngineConfig: vi.fn(async () => ({ engines: ['pi'], defaultEngine: 'pi', engineModels: {}, engineDefaults: {} })),
     getCachedQuota: vi.fn(async () => ({ data: null, lastFetchAt: null })),
     refreshQuota: vi.fn(async () => ({ data: null, lastFetchAt: null })),
-    // wool 中性桩：空快照（三家族未接入基线）+ ok ack（动作语义由 wool 域单测锚定）。
-    getWoolState: vi.fn(async () => ({ families: [], fetchedAt: 0 })),
-    runWoolAction: vi.fn(async () => ({ ok: true as const })),
     listPresets: vi.fn(async () => []),
     getDefaultPreset: vi.fn(async () => 'builtin:full'),
     fetchRecommendedExtensions: vi.fn(async () => []),
@@ -204,6 +203,14 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     cancelExtensionInstall: vi.fn(async () => {}),
     upgradeExtension: vi.fn(async () => {}),
     setExtensionAutoUpgrade: vi.fn(async () => {}),
+
+    // ── 插件 Provider 来源（provider-plugin-access U6）：读/调/订阅 + 输入回传中性默认。
+    //    两段式安装三方法刻意不挂（optional 成员缺省 = 通道未落定态，Provider 页显示降级
+    //    提示）；用例需覆盖确认卡时经 overrides 注入三个 vi.fn。──
+    listAvailablePlugins: vi.fn(async () => ({ plugins: [] })),
+    invokePlugin: vi.fn(async () => null),
+    onPluginEvent: makeUnsubscribeStub(),
+    sendPluginUiEvent: vi.fn(async () => undefined),
 
     // ── 订阅（返回 no-op 取消函数）—— 订阅段单源 = makeSettingsSubscriptionStubs
     //    （键集漂移由其 Pick 标注 + 下方 SettingsTransport 标注双重报错）──

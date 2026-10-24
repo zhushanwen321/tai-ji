@@ -385,19 +385,6 @@ export function clearProviderApiKey(providerId: string): void {
   upsertProvider(providerId, rest)
 }
 
-/**
- * 写入羊毛 provider 条目（凭据通道：wool-manager applyCredentials 落 models.json）。
- *
- * 语义契约（单条目全量覆写）：upsertProvider 覆写该 providerId 条目、其余条目保留；
- * 损坏降级态由 writeModels 防线承载（ModelsStoreCorruptedError 上抛，不落空基线）。
- *
- * 与 clearProviderApiKey 同款提取形态：upsertProvider 直调只允许出现在本文件
- * （C-proc-15 检查 B 白名单），组合根经 port 闭包装配调用本函数。
- */
-export function upsertWoolProviderEntry(providerId: string, entry: Record<string, unknown>): void {
-  upsertProvider(providerId, entry as PiProviderConfig)
-}
-
 export function getAllModels(): Array<PiModelDefinition & { providerId: string }> {
   const result: Array<PiModelDefinition & { providerId: string }> = []
   const models = readModels()

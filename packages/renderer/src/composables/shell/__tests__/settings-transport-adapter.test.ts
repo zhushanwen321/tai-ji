@@ -33,7 +33,6 @@ import type {
   SkillDirConfig,
   SystemPromptConfig,
   TerminalConfig,
-  WoolActionRequest,
 } from '@taiji/shared'
 import { apiConfigDomainMock } from '@/__tests__/helpers/api-facade-mock'
 
@@ -57,7 +56,6 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
   // ── 探针参数哨兵（值任意，只需类型合法；同一常量同时喂 call 与透传断言，防脱节）──
   const PROBE_PID = 'probe-provider' as ProviderId
   const PROBE_SOURCE: ProviderSource = 'pi'
-  const PROBE_WOOL_ACTION: WoolActionRequest = { action: 'detect', family: 'qoder' }
   const PROBE_RENAME_MODE: RenameMode = 'first-stop'
   const PROBE_RENAME_STYLE: RenameStyle = 'slug'
   const PROBE_DIRS: SkillDirConfig[] = [{ path: 'probe/dir', enabled: true, scope: 'project' }]
@@ -103,7 +101,8 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     | 'preset'
     | 'usage'
     | 'session'
-    | 'wool'
+    // provider-plugin-access U6：插件 Provider 来源域（清单 / invoke / 事件 / uiEvent / 安装）
+    | 'plugin'
 
   interface ForwardEntry {
     domain: FacadeDomain
@@ -180,11 +179,32 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     getSubagentEngineConfig: fwd('session', 'getSubagentEngineConfig', [], (t) => t.getSubagentEngineConfig()),
     getCachedQuota: fwd('quota', 'getCached', [PROBE_PID], (t, providerId) => t.getCachedQuota(providerId)),
     refreshQuota: fwd('quota', 'refreshQuota', [PROBE_PID], (t, providerId) => t.refreshQuota(providerId)),
-    getWoolState: fwd('wool', 'getState', [], (t) => t.getWoolState()),
-    runWoolAction: fwd('wool', 'action', [PROBE_WOOL_ACTION], (t, req) => t.runWoolAction(req)),
     listPresets: fwd('preset', 'list', [], (t) => t.listPresets()),
     getDefaultPreset: fwd('preset', 'getDefault', [], (t) => t.getDefaultPreset()),
     fetchRecommendedExtensions: fwd('extension', 'fetchRecommended', [], (t) => t.fetchRecommendedExtensions()),
+
+    // ── 插件 Provider 来源（provider-plugin-access U6）──
+    listAvailablePlugins: fwd('plugin', 'listAvailablePlugins', [], (t) => t.listAvailablePlugins()),
+    invokePlugin: fwd('plugin', 'invokePlugin', ['probe-plugin', 'getStatus', { providerId: 'probe-provider' }], (t, pluginId, method, params) =>
+      t.invokePlugin(pluginId, method, params),
+    ),
+    sendPluginUiEvent: fwd(
+      'plugin',
+      'sendPluginUiEvent',
+      [{ pluginId: 'probe-plugin', viewId: 'probe-view', componentId: 'probe-input', event: 'change', value: 'probe' }],
+      (t, payload) => t.sendPluginUiEvent(payload),
+    ),
+    // 两段式安装三成员在 seam 上是 optional（通道未落定的宿主实现可省略）：矩阵以
+    // 可选调用形态登记，domain 实装存在时（本用例 Proxy 恒返回 spy）必须逐条转发。
+    preparePluginInstall: fwd('plugin', 'preparePluginInstall', ['probe-package'], (t, spec) =>
+      t.preparePluginInstall?.(spec),
+    ),
+    confirmPluginInstall: fwd('plugin', 'confirmPluginInstall', ['probe-plugin'], (t, pluginId) =>
+      t.confirmPluginInstall?.(pluginId),
+    ),
+    cancelPluginInstall: fwd('plugin', 'cancelPluginInstall', ['probe-plugin'], (t, pluginId) =>
+      t.cancelPluginInstall?.(pluginId),
+    ),
 
     // ════════════════ 写（动作-ack）════════════════
     setProvider: fwd('config', 'setProvider', [PROBE_PID, PROBE_PROVIDER_DATA], (t, id, data) =>
@@ -297,8 +317,6 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     onSkillCacheInvalidated: fwd('config', 'onSkillCacheInvalidated', [probeHandler], (t, h) =>
       t.onSkillCacheInvalidated(h),
     ),
-    onWoolState: fwd('wool', 'onWoolState', [probeHandler], (t, h) => t.onWoolState(h)),
-    onWoolAuthorizeUrl: fwd('wool', 'onWoolAuthorizeUrl', [probeHandler], (t, h) => t.onWoolAuthorizeUrl(h)),
     onSystemPrompt: fwd('config', 'onSystemPrompt', [probeHandler], (t, h) => t.onSystemPrompt(h)),
     onTerminalConfig: fwd('config', 'onTerminalConfig', [probeHandler], (t, h) => t.onTerminalConfig(h)),
     onRetryConfig: fwd('config', 'onRetryConfig', [probeHandler], (t, h) => t.onRetryConfig(h)),
@@ -306,6 +324,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     onAuthAuthUrl: fwd('config', 'onAuthAuthUrl', [probeHandler], (t, h) => t.onAuthAuthUrl(h)),
     onAuthSuccess: fwd('config', 'onAuthSuccess', [probeHandler], (t, h) => t.onAuthSuccess(h)),
     onAuthError: fwd('config', 'onAuthError', [probeHandler], (t, h) => t.onAuthError(h)),
+    onPluginEvent: fwd('plugin', 'onPluginEvent', [probeHandler], (t, h) => t.onPluginEvent(h)),
   } satisfies Record<keyof SettingsTransport, ForwardEntry>
 
   it('SettingsTransport 接口清单全量方法逐条转发：目标 = @/api 门面对应导出，参数与返回值原样透传（防回退 core/transport 直连）', async () => {
@@ -339,7 +358,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
       preset: domainProxy('preset'),
       usage: domainProxy('usage'),
       session: domainProxy('session'),
-      wool: domainProxy('wool'),
+      plugin: domainProxy('plugin'),
     }))
     const { createSettingsTransport } = await import('../settings-transport-adapter')
     const transport = createSettingsTransport()
@@ -420,6 +439,8 @@ describe('settings-transport-adapter · discoverModels 模式感知 guard（S-13
       },
       model: { listModels: vi.fn(), onModels: vi.fn(() => () => {}) },
       extension: { onExtensions: vi.fn(() => () => {}) },
+      // plugin 域：空对象 = 两段式安装成员缺席（optional 不挂载；本组用例不触插件通道）
+      plugin: {},
     }))
     const { createSettingsTransport } = await import('../settings-transport-adapter')
     return { transport: createSettingsTransport(), discoverModels }

@@ -52,6 +52,12 @@ export type {
   // 引擎默认模型族（engine-provider-unification D5）：setSubagentEngineDefaultModel 的
   // reply 具名类型 + per-engine 模型清单条目（core api 域 / settings UI 跨包具名消费）
   SubagentEngineDefaultModelMutationReply, SubagentEngineModelInfo,
+  // 插件清单域（provider-plugin-access U5）：v2-plugins 清单条目 + listAvailable / catalog
+  // reply 具名类型（runtime plugin-catalog service ↔ core plugin 域跨包具名消费）
+  PluginProviderFamilyMeta, PluginCatalogEntry, PluginListAvailableReply, PluginCatalogReply,
+  // provider-plugin-access D9（u-protocol 补登记）：plugin:event 广播载荷 + plugin.invoke
+  // reply 信封（core plugin 域 invokePlugin/onPluginEvent 跨包具名消费）
+  PluginEventPayload, PluginInvokeReply,
 } from './protocol'
 // 消息撤回（U3）：__taiji_nav__ 信令命令名常量——U4 runtime 编排跨包消费；
 // 本文件对 protocol.ts 是显式 allowlist（非 export *），漏登记会使常量对下游不可达。
@@ -517,41 +523,8 @@ export {
 export { RUNTIME_INSTANCE_FILE } from './runtime-instance'
 export type { RuntimeInstanceRecord } from './runtime-instance'
 export { displayAgentName, displayWorkflowName } from './display-name'
-// 羊毛 provider 域（wool-provider 设计 D2/D6/D7：资产清单 schema + WS 帧 payload 形状 +
-// 向导状态机类型，SSOT；与羊毛扩展侧 wool-shared 管理协议的字段对齐注释见 ./wool 文件头）
-export type {
-  WoolAccountStatusView,
-  WoolActionErrorCode,
-  WoolActionReply,
-  WoolActionRequest,
-  WoolActionType,
-  WoolAssetManifest,
-  WoolAuthorizeUrlPayload,
-  WoolCatalogModelView,
-  WoolCatalogView,
-  WoolCredentialsData,
-  WoolCredentialsSource,
-  WoolDetectResultView,
-  WoolExtractStep,
-  WoolFamilyId,
-  WoolFamilyState,
-  WoolManifestErrorCode,
-  WoolManifestFamily,
-  WoolManifestFetchResult,
-  WoolOauthStep,
-  WoolRuntimeSnapshot,
-  WoolStepFailureCode,
-  WoolStepStatus,
-  WoolUninstallResult,
-  WoolWizardTemplate,
-} from './wool'
-export {
-  isWoolAccountStatusView,
-  isWoolAssetManifest,
-  isWoolCredentialsData,
-  isWoolDetectData,
-  isWoolFamilyId,
-  WOOL_ACTION_TYPES,
-  WOOL_FAMILY_FALLBACK_META,
-  WOOL_FAMILY_IDS,
-} from './wool'
+// 插件视图归属作用域（provider-plugin-access U2 分区键泛化）：scope 联合 + scope 串
+// 推导与 wire 形态检查——runtime 快照存储 / core 渲染缓存 / renderer bridge 三方共用
+// 的跨包契约（type 与可执行函数同源单模块）。
+export type { PluginViewScope, SessionViewScope, GlobalViewScope } from './plugin-view-scope'
+export { pluginViewScopeKey, pluginViewScopeFromWire } from './plugin-view-scope'

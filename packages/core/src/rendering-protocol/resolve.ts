@@ -37,6 +37,9 @@ export interface ResolvedRender {
  *  漏加此白名单 = 静默降级 ansi-text（编译期不可见），由 resolve.test.ts P5 断言检查。 */
 const BUILTIN_TYPES: ReadonlySet<string> = new Set([
   'card', 'stats-line', 'progress-bar', 'list-tree', 'columns', 'tab-bar', 'group', 'action-bar',
+  // provider-plugin-access D8：text-input 输入原语（渲染器在 @taiji/ui rendering-protocol
+  // primitives；漏加此白名单 = 静默降级 ansi-text，由 resolve.test.ts P5 同族断言检查）
+  'text-input',
 ])
 
 const JSON_INDENT = 2

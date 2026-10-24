@@ -195,23 +195,11 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
   private broker!: IMessageBroker
   private nextPushId: () => string
 
-  /**
-   * 羊毛 provider 聚合源（wool-provider D6 ③；setter 注入——WoolManager 依赖
-   * SessionService，构造顺序在本服务之后，组合根 index.ts 接线）。缺席/空输出时
-   * aggregateModelsWithScoped 对既有来源输出逐项等价（S9 零回归，对照单测锚定）。
-   */
-  private woolProviderSource?: { listWoolProviderInfos(): ProviderInfo[] }
-
   constructor(
     private readonly modelSource: IModelSource,
     pushIdFactory?: () => string,
   ) {
     this.nextPushId = pushIdFactory ?? (() => `push_${Date.now()}`)
-  }
-
-  /** 羊毛聚合源注入（组合根；wool-manager 生命周期恒覆盖 runtime 运行期，无清除方）。 */
-  setWoolProviderSource(source: { listWoolProviderInfos(): ProviderInfo[] }): void {
-    this.woolProviderSource = source
   }
 
   /** Wire runtime dependencies (called after all services are constructed). */
@@ -281,15 +269,12 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
    * 「内部读白名单」已有多调用方依赖）。纯数据变换，不访问注入依赖。
    */
   aggregateModelsWithScoped(providers: ProviderInfo[], scopedModels: string[]): ModelInfo[] {
-    // 羊毛条目并入（wool-provider D6 ③）：数据 = taiji 侧目录缓存（pi registry 是唯一
-    // 权威，本聚合只消费派生视图）。羊毛条目与既有 providers 走同一管道（enabled 过滤 +
-    // scoped 白名单同语义）；源缺席/空输出 = 纯既有输入，输出与并入前逐项等价（S9）。
-    const woolInfos = this.safeWoolInfos()
-    const merged = woolInfos.length > 0 ? [...providers, ...woolInfos] : providers
     // W2：runtime enabled 过滤——provider.enabled===false 时其下所有 model 不进结果；
     // model.enabled===false 时该 model 不进结果。缺省/true 视为启用（向上兼容存量）。
     // 过滤在 listProviders 读出 ProviderInfo 之后做，config.enabled !== false 语义统一在此处收敛。
-    const allModels = merged
+    // （羊毛聚合特例已随 D6 插件化退役移除——羊毛条目自身持久在 config.providers，
+    // providerId 即 wool-<family>，与既有来源同管道零特例。）
+    const allModels = providers
       .filter(p => p.enabled !== false)
       .flatMap(p =>
         p.models
@@ -313,20 +298,6 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
       if (m) result.push(m) // 解析不到模型的 scoped 条目静默跳过
     }
     return result
-  }
-
-  /**
-   * 羊毛聚合源安全读取（辅助链降级契约：羊毛缓存读取异常不得拖垮 model.list 核心
-   * 输出——失败回空数组 + warn，下一帧/动作后自愈）。
-   */
-  private safeWoolInfos(): ProviderInfo[] {
-    if (!this.woolProviderSource) return []
-    try {
-      return this.woolProviderSource.listWoolProviderInfos()
-    } catch (e) {
-      console.warn(`[model-service] wool provider aggregation failed (skipped this frame): ${toErrorMessage(e)}`)
-      return []
-    }
   }
 
   async discoverModelsFromApi(

@@ -29,6 +29,7 @@ import type {
   BashDispatchReceipt,
   SkillInfo, AgentInfo, PluginInfo, SetProviderData,
   PluginUiSnapshotPayload,
+  PluginEventPayload, PluginListAvailableReply, PluginCatalogReply,
   SkillDirConfig, FileNode, RecommendedExtension, SubagentRecord, WorkflowRunRecord,
   SystemPromptConfig,
   WorkflowRunEventsReply,
@@ -54,9 +55,6 @@ import type {
   UsageStatsResult,
   UiLocale,
   Segment,
-  WoolActionReply,
-  WoolActionRequest,
-  WoolRuntimeSnapshot,
   ArchiveSummary,
 } from '@taiji/shared'
 import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS, DELIVERY_PREVIEW_MAX_CHARS, QUOTA_PRESETS } from '@taiji/shared'
@@ -106,7 +104,6 @@ import type * as realBtwDomain from '../api/domains/btw'
 import type * as realUsageDomain from '../api/domains/usage'
 import type * as realTtsDomain from '../api/domains/tts'
 import type * as realSubagentDomain from '../api/domains/subagent'
-import type * as realWoolDomain from '../api/domains/wool'
 
 
 /** real 域形状单点（mock 锚定源；散函数模块的 namespace 类型即域接口） */
@@ -125,7 +122,6 @@ export type BtwDomain = typeof realBtwDomain
 export type UsageDomain = typeof realUsageDomain
 export type TtsDomain = typeof realTtsDomain
 export type SubagentDomain = typeof realSubagentDomain
-export type WoolDomain = typeof realWoolDomain
 
 
 /** 去 tuple 标签（Parameters 产 labeled tuple；参数名是修饰不是类型身份，归一后再比对）。导出：被导出的 SameTuple / DomainParamsExact 引用 */
@@ -1873,6 +1869,10 @@ export const extension = {
 
 const pluginsSub = makeMockSubscription((): PluginInfo[] => [])
 
+// plugin:event 订阅骨架（provider-plugin-access D9）：mock 无插件运行时、无事件生产方，
+// 恒空订阅（结构面与 real 同构，消费方可订阅但收不到帧——mock 无插件的真实形态）。
+const pluginEventsSub = makeMockSubscription((): PluginEventPayload => ({ pluginId: '', channel: '', payload: null }))
+
 const pluginImpl = {
   onPlugins: (h: (plugins: PluginInfo[]) => void) => pluginsSub.subscribe(h),
   // 插件权限审批/回收/拒绝（[G4 锚定补齐]：锚定前 mock 缺此族成员，门面三元下不可达）。
@@ -1888,10 +1888,33 @@ const pluginImpl = {
     await sleep(TIMING.ack)
   },
   // 插件 UI 快照拉取（ADR-0097 拉为主）：mock 无插件运行时，恒返空快照（渲染端按
-  // 「未推送」处理——headerAction 入口不渲染，与 mock 模式零插件的真实形态一致）
-  async getPluginUiSnapshot(_filter: { sessionId?: string; viewId?: string } = {}): Promise<PluginUiSnapshotPayload> {
+  // 「未推送」处理——headerAction 入口不渲染，与 mock 模式零插件的真实形态一致）。
+  // 过滤参数为 scope 二选一（U2：{ sessionId } 会话域 / { mountId, pluginId } 全局域）。
+  async getPluginUiSnapshot(_filter: { sessionId?: string; mountId?: string; pluginId?: string; viewId?: string } = {}): Promise<PluginUiSnapshotPayload> {
     await sleep(TIMING.ack)
     return { headerActions: [], views: [] }
+  },
+  // ── provider-plugin-access D9 / D8 / U5（mock 不支持项显式登记，非静默丢弃）──
+  // invoke / uiEvent：mock 无插件 Worker 可执行，ack 型 stub（invoke 返回 undefined——
+  // mock 模式下无插件业务方法可调，消费方拿到 undefined 与「插件返回 undefined」同形）。
+  async invokePlugin(_pluginId: string, _method: string, _params?: Record<string, unknown>): Promise<unknown> {
+    await sleep(TIMING.ack)
+    return undefined
+  },
+  async sendPluginUiEvent(_payload: { pluginId: string; viewId: string; componentId: string; event: string; value: unknown }): Promise<void> {
+    await sleep(TIMING.ack)
+  },
+  // plugin:event 订阅骨架：恒空（无生产方），与 onPlugins 同款订阅形态。
+  onPluginEvent: (h: (payload: PluginEventPayload) => void) => pluginEventsSub.subscribe(h),
+  // 清单域：mock 无远程清单基建（runtime remote-config 通道），恒空清单（UI 按
+  // 「清单为空」空态渲染，与 mock 模式无清单数据的真实形态一致）。
+  async listAvailablePlugins(): Promise<PluginListAvailableReply> {
+    await sleep(TIMING.ack)
+    return { plugins: [] }
+  },
+  async getPluginCatalog(): Promise<PluginCatalogReply> {
+    await sleep(TIMING.ack)
+    return { entries: [] }
   },
 }
 
@@ -2388,44 +2411,3 @@ const subagentImpl = {
 // [G4] 参数全等断言：mock subagent 任一方法少参/多参/错型在此行编译失败
 export type SubagentDomainParamsExact = AssertExact<DomainParamsExact<SubagentDomain, typeof subagentImpl>>
 export const subagent: SubagentDomain = subagentImpl
-
-// ── wool 域 mock（wool-provider D6 renderer 侧）──────────────────────────────
-// 与 real 域同接口（门面三元要求两侧同构）。行为：getState 回三家族未接入快照
-//（displayName 用家族名兜底——manifest 在 mock 语境不可达，与 runtime 未拉清单时同形态）；
-// action 恒回 ok（无编排链，动作语义由 real 轨单测锚定）；onWoolState no-op 取消。
-const woolImpl = {
-  async getState(): Promise<WoolRuntimeSnapshot> {
-    await sleep(TIMING.ack)
-    const now = Date.now()
-    return {
-      families: (['qoder', 'trae', 'workbuddy'] as const).map((family) => ({
-        family,
-        displayName: family,
-        vendor: '',
-        credentialsSource: family === 'workbuddy' ? ('oauth' as const) : ('ide-extract' as const),
-        riskNotice: '',
-        installed: false,
-        adopted: false,
-        autoCheckin: false,
-        account: null,
-        detect: null,
-        catalog: null,
-      })),
-      fetchedAt: now,
-    }
-  },
-  async action(_req: WoolActionRequest): Promise<WoolActionReply> {
-    await sleep(TIMING.ack)
-    return { ok: true }
-  },
-  onWoolState(_h: (snapshot: WoolRuntimeSnapshot) => void): () => void {
-    return () => {}
-  },
-  onWoolAuthorizeUrl(_h: (payload: { family: 'qoder' | 'trae' | 'workbuddy'; url: string }) => void): () => void {
-    return () => {}
-  },
-}
-
-// [G4] 参数全等断言：mock wool 任一方法少参/多参/错型在此行编译失败
-export type WoolDomainParamsExact = AssertExact<DomainParamsExact<WoolDomain, typeof woolImpl>>
-export const wool: WoolDomain = woolImpl

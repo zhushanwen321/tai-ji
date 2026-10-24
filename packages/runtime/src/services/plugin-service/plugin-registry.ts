@@ -47,6 +47,9 @@ export class PluginRegistry {
         continue
       }
       for (const entry of entries) {
+        // 辅助目录跳过：安装暂存区（.staging）等 dot 条目不是插件（scoped 包目录名
+        // 解耦后安装目录为 scope__pkg 一级形态，扫描口径与安装目录名对齐——U4）
+        if (entry.startsWith('.')) continue
         const fullPath = join(dir, entry)
         try {
           const st = await stat(fullPath)

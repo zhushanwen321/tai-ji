@@ -61,9 +61,6 @@ import { BtwMessageHandler } from './btw-message-handler.js'
 import { SubagentMessageHandler } from './subagent-message-handler.js'
 // BtwRoutingDeps（btw-question M2-b / B1 授权）：组合根构造 BtwService 后经 optional.btw 注入。
 import type { BtwRoutingDeps } from './btw-message-handler.js'
-// wool-provider D6：羊毛宿主编排 RPC（WoolManager 由组合根构造经 optional.wool 注入）。
-import { WoolMessageHandler } from './wool-message-handler.js'
-import type { WoolManager } from '../services/wool-manager.js'
 import type { MessageHandlerContext, ErrorDetails } from './message-context.js'
 import type { WorkspaceService } from '../services/workspace/workspace-service.js'
 import type { ProjectStore } from '../services/project/project-store.js'
@@ -165,8 +162,6 @@ export interface RuntimeServerOptionalServices {
    * 生产组合根恒注入，缺省语义服务存量测试装配）。
    */
   btw?: BtwRoutingDeps
-  /** 羊毛宿主编排（wool-provider D6 ②③）：wool.* 两帧路由依赖（缺省不装配，同 btw 语义）。 */
-  wool?: WoolManager
   /**
    * subagent / workflow run 执行模型切换的宿主消费端口（subagent-model-switch §7.1
    * 入口层）：SubagentMessageHandler 路由依赖。可选：未注入时 handler 恒装配、
@@ -249,9 +244,6 @@ export class RuntimeServer implements IMessageBroker {
   private canvasHandler!: CanvasMessageHandler
   /** btw 三帧 handler（btw-question M2-b）：optional.btw 注入时装配（可选批次）。 */
   private btwMessageHandler?: BtwMessageHandler
-
-  /** wool 两帧 handler（wool-provider D6）：optional.wool 注入时装配。 */
-  private woolMessageHandler?: WoolMessageHandler
 
   /** subagent 域 handler（subagent.setModel；gateway 未注入时 case 内回 unwired 错误，恒装配）。 */
   private subagentMessageHandler!: SubagentMessageHandler
@@ -501,7 +493,7 @@ export class RuntimeServer implements IMessageBroker {
    * usage / preset——按对应 service 是否注入条件装配，检查条件与原实现一致。
    */
   private assembleOptionalHandlers(messaging: MessageHandlerContext, optional: RuntimeServerOptionalServices): void {
-    const { workspace, project, worktree, terminal, quota, preset, btw, tts, wool } = optional
+    const { workspace, project, worktree, terminal, quota, preset, btw, tts } = optional
     if (this.gitService) {
       this.gitMessageHandler = new GitMessageHandler({
         ...messaging,
@@ -570,7 +562,6 @@ export class RuntimeServer implements IMessageBroker {
         ttsService: tts,
       })
     }
-    if (wool) this.woolMessageHandler = new WoolMessageHandler({ ...messaging, woolManager: wool })
     // UsageStatsService 构造参数有默认值 getSessionsDir()，无需外部注入
     this.usageMessageHandler = new UsageMessageHandler({
       ...messaging,
@@ -663,7 +654,6 @@ export class RuntimeServer implements IMessageBroker {
     const usageHandler = this.usageMessageHandler
     const presetHandler = this.presetMessageHandler
     const btwHandler = this.btwMessageHandler
-    const woolHandler = this.woolMessageHandler
     const entries = [
       ['ping', (msg, ws) => this.broker.reply(ws, msg.id, 'pong', {})],
       // u7c（crash-forensics D5）：滚动重启状态只读查询（与 request 同名 reply；provider
@@ -688,7 +678,6 @@ export class RuntimeServer implements IMessageBroker {
       ...(presetHandler ? presetHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => presetHandler.handlePresetMessage(msg, ws)] as const) : []),
       // btw 三帧（btw-question M2-b / D6）：create/list/remove → BtwMessageHandler。
       ...(btwHandler ? btwHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => btwHandler.handleBtwMessage(msg, ws)] as const) : []),
-      ...(woolHandler ? woolHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => woolHandler.handleWoolMessage(msg, ws)] as const) : []),
     ] as Array<[ClientMessageType, (msg: ClientMessage, ws: WsType) => Promise<unknown> | unknown]>
     // b26-F2：Map 构造对重复 key 后写覆盖——两 handler 的 handles 清单重叠时后者静默接管
     //（错误路由以合法形态运行，编译零信号）。装配期撞键 fail-fast，错误信息列出全部撞键名。

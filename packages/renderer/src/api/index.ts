@@ -34,7 +34,6 @@ import * as realUsage from '@taiji/core/transport/api/domains/usage'
 
 import * as realTts from '@taiji/core/transport/api/domains/tts'
 import * as realSubagent from '@taiji/core/transport/api/domains/subagent'
-import * as realWool from '@taiji/core/transport/api/domains/wool'
 
 import * as mockApi from '@taiji/core/transport/mock'
 
@@ -52,6 +51,11 @@ export const config = isMock ? mockApi.config : realConfig
 export const model = isMock ? mockApi.model : realModel
 export const extension = isMock ? mockApi.extension : realExtension
 export const plugin = isMock ? mockApi.plugin : realPlugin
+// 插件 Provider 来源消费侧（PluginProviderSource，D1/D5/D9）：插件域三方法具名转发，
+// mock / real 同构切换（两轨签名一致，mock 无插件运行时 = 空清单 + 恒空事件订阅骨架）。
+export const invokePlugin = isMock ? mockApi.plugin.invokePlugin : realPlugin.invokePlugin
+export const listAvailablePlugins = isMock ? mockApi.plugin.listAvailablePlugins : realPlugin.listAvailablePlugins
+export const onPluginEvent = isMock ? mockApi.plugin.onPluginEvent : realPlugin.onPluginEvent
 export const settings = isMock ? mockApi.settings : realSettings
 export const git = isMock ? mockApi.git : realGit
 export const file = isMock ? mockApi.file : realFile
@@ -79,9 +83,9 @@ export const usage = isMock ? mockApi.usage : realUsage
 export const tts = isMock ? mockApi.tts : realTts
 // subagent 域（subagent-model-switch §7.1 入口层）：setModel（chat 域 / run 级全切共用）。
 export const subagent = isMock ? mockApi.subagent : realSubagent
-// wool 域（wool-provider D6）：羊毛 provider 宿主编排（getState/action/onWoolState）。
-// mock 轨走 mockApi.wool（未接入快照 + ok ack，G4 类型锚定签名全等）；real 轨走真实 RPC。
-export const wool = isMock ? mockApi.wool : realWool
+// wool 域（wool-provider D6）：羊毛 provider 宿主编排随插件化迁移整体退役（provider-plugin-access
+// D6/U7）——管理动作在插件进程内执行，宿主通道 = providers.write/delete/credential（插件 RPC
+// 线协议，不经 renderer 门面）。本门面不再导出 wool 域。
 
 // search（⌘K 全局搜索）编排归 useSearchModalDeps（packages/renderer/src/composables/features/search/useSearchModalDeps.ts，D-026，#5）：
 // 该处判 VITE_MOCK 决定 mock 轨走 mockApi.search fixture / real 轨走真实 3 源聚合（命令/file/session domain）。

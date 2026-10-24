@@ -19,12 +19,23 @@
  */
 import type { SettingsTransport, DiscoverModelsRequest, DiscoverModelsResponse } from '@taiji/core/domain/settings'
 import type { ExtensionInfo, ProviderId } from '@taiji/shared'
-import { config, model, extension, settings, quota, preset, usage, session, wool } from '@/api'
+import { config, model, extension, settings, quota, preset, usage, session, plugin } from '@/api'
 
 /**
  * 构造 SettingsTransport 实现：逐方法转发 @/api 门面八元（VITE_MOCK 感知）。
  * 订阅函数（on*）返回取消函数；请求函数签名与 @/api 对齐。
  */
+/**
+ * 两段式安装 domain 面的结构类型（provider-plugin-access U6）：安装 WS 帧 / domain 方法
+ * 尚未落定，接口 optional 成员按实装存在性条件挂载——不预设实装、不伪造成功。
+ */
+type OptionalInstallDomain = Partial<
+  Pick<SettingsTransport, 'preparePluginInstall' | 'confirmPluginInstall' | 'cancelPluginInstall'>
+>
+
+/** 安装 domain 实装面（缺席时下方 typeof 判定跳过挂载）。 */
+const installDomain = plugin as unknown as OptionalInstallDomain
+
 export function createSettingsTransport(): SettingsTransport {
   return {
     // ══════════════════════ 读（请求-响应）══════════════════════
@@ -75,9 +86,6 @@ export function createSettingsTransport(): SettingsTransport {
     getSubagentEngineConfig: () => session.getSubagentEngineConfig(),
     getCachedQuota: (providerId) => quota.getCached(providerId),
     refreshQuota: (providerId) => quota.refreshQuota(providerId),
-    // wool（wool-provider D6）：羊毛向导与条目徽标数据源（wool 门面 = core wool domain）。
-    getWoolState: () => wool.getState(),
-    runWoolAction: (req) => wool.action(req),
     listPresets: () => preset.list(),
     getDefaultPreset: () => preset.getDefault(),
     fetchRecommendedExtensions: () => extension.fetchRecommended(),
@@ -148,8 +156,6 @@ export function createSettingsTransport(): SettingsTransport {
     onDefaults: (h) => config.onDefaults(h),
     onDefaultsWithSource: (h) => config.onDefaultsWithSource(h),
     onSkillCacheInvalidated: (h) => config.onSkillCacheInvalidated(h),
-    onWoolState: (h) => wool.onWoolState(h),
-    onWoolAuthorizeUrl: (h) => wool.onWoolAuthorizeUrl(h),
     onSystemPrompt: (h) => config.onSystemPrompt(h),
     onTerminalConfig: (h) => config.onTerminalConfig(h),
     onRetryConfig: (h) => config.onRetryConfig(h),
@@ -158,5 +164,22 @@ export function createSettingsTransport(): SettingsTransport {
     onAuthAuthUrl: (h) => config.onAuthAuthUrl(h),
     onAuthSuccess: (h) => config.onAuthSuccess(h),
     onAuthError: (h) => config.onAuthError(h),
+
+    // ── 插件 Provider 来源（provider-plugin-access U6）──
+    // 两段式安装三方法按 domain 实装存在与否条件挂载：通道未落定 = 接口 optional 成员缺省
+    // （Provider 页据此显示「安装通道未就绪」），不伪造成功、不静默。
+    listAvailablePlugins: () => plugin.listAvailablePlugins(),
+    invokePlugin: (pluginId, method, params) => plugin.invokePlugin(pluginId, method, params),
+    onPluginEvent: (h) => plugin.onPluginEvent(h),
+    sendPluginUiEvent: (payload) => plugin.sendPluginUiEvent(payload),
+    ...(typeof installDomain.preparePluginInstall === 'function'
+      ? { preparePluginInstall: (spec: string) => installDomain.preparePluginInstall!(spec) }
+      : {}),
+    ...(typeof installDomain.confirmPluginInstall === 'function'
+      ? { confirmPluginInstall: (pluginId: string) => installDomain.confirmPluginInstall!(pluginId) }
+      : {}),
+    ...(typeof installDomain.cancelPluginInstall === 'function'
+      ? { cancelPluginInstall: (pluginId: string) => installDomain.cancelPluginInstall!(pluginId) }
+      : {}),
   }
 }

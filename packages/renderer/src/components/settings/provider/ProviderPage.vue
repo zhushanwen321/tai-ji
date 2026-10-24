@@ -12,7 +12,7 @@
        空状态 / 列表 section）各自 mt-[16px]（rem gap 类在 14px html 基准下收缩为 demo 值
        的 87.5%，本页全部槽位走绝对 px）。 -->
   <div class="flex flex-col">
-    <!-- 页头（.page-head 形态与入口细节见 ProviderPageHeader.vue）：标题 + 导入/模板/羊毛三入口 + 目录过期提示 -->
+    <!-- 页头（.page-head 形态与入口细节见 ProviderPageHeader.vue）：标题 + 导入/模板(含插件 Provider)入口 + 目录过期提示 -->
     <ProviderPageHeader
       :import-disabled="importState !== 'idle'"
       :builtin-providers="builtinProviders"
@@ -20,7 +20,7 @@
       @import-select="onImportSelect"
       @template-select="onTemplateSelect"
       @custom="createAndExpand"
-      @open-wool="woolEntries.wizardOpen.value = true"
+      @plugin-provider="openPluginFlow()"
     />
 
     <!-- Scoped Model 配置区（模型白名单 + 有序列表）。容器 = GroupCard（demo .gcard 卡底
@@ -76,7 +76,9 @@
         </template>
         <div class="flex flex-col gap-[8px] p-[12px_16px]">
         <!-- 行卡（demo .prow 形态与展开体细节见 ProviderRowCard.vue）：父侧下发每行受控态，
-             动作经事件上抛回本页编排（乐观更新 / 手风琴 guard / OAuth 状态机均在本页单实例） -->
+             动作经事件上抛回本页编排（乐观更新 / 手风琴 guard / OAuth 状态机均在本页单实例）。
+             插件来源条目（D2/D5/D10）：清单家族前缀匹配命中 → 下发 pluginInfo（扩展区/动作）
+             + 插件上报的凭据状态（未上报 undefined → 零标记，宿主不猜测） -->
         <ProviderRowCard
           v-for="p in renderList"
           :key="p.id"
@@ -90,6 +92,8 @@
           :oauth-present="oauthPresenceStatus(p.id)"
           :oauth-supported="isOauthSupported(p.id)"
           :quota-presets="settingsStore.quotaPresets.value"
+          :plugin-info="pluginEntryOf(p.id)"
+          :credential-status="pluginSource.statusOf(p.id)"
           @toggle="toggleExpand"
           @toggle-enabled="onToggleEnabled(p, $event)"
           @set-default="onSetDefaultModel"
@@ -99,51 +103,16 @@
           @cancel="onBodyCancel"
           @oauth-login="onEditOauthLogin(p)"
           @oauth-logout="onEditOauthLogout(p)"
+          @reauthorize="onReauthorize"
+          @update-plugin="onUpdatePlugin"
         />
         </div>
       </GroupCard>
     </section>
 
-    <!-- 羊毛条目区（wool-provider D6 ③：已接入家族；数据 = wool 快照，不进 config.providers——S9 零回归） -->
-    <section v-if="woolEntries.adoptedFamilies.value.length" class="mt-[16px]">
-      <GroupCard>
-        <template #head>
-          <div data-testid="wool-entries-header" class="gc-head-text">
-            <h3 class="gc-title">{{ t('wool.listTitle') }}</h3>
-          </div>
-        </template>
-        <div class="flex flex-col gap-[8px] p-[12px_16px]">
-          <WoolEntryCard
-            v-for="f in woolEntries.adoptedFamilies.value"
-            :key="f.family"
-            :family="f"
-            :refreshing="woolEntries.runningActions.value.has(f.family)"
-            :checkin-running="woolEntries.runningActions.value.has(f.family)"
-            :uninstalling="woolEntries.uninstallingActions.value.has(f.family)"
-            @refresh="woolEntries.refreshEntry(f.family)"
-            @checkin="woolEntries.checkin(f.family)"
-            @update="woolEntries.updateEntry(f.family)"
-            @reauth="woolEntries.reauthorize(f.family)"
-            @uninstall="woolUninstallTarget = f.family"
-          />
-        </div>
-      </GroupCard>
-    </section>
-
-    <!-- 羊毛卸载确认弹窗（D3 三步编排入口：清除凭据与模型目录 + 卸载扩展 + 移除羊毛域状态，破坏性动作须确认） -->
-    <ConfirmDialog
-      v-model:open="woolUninstallDialogOpen"
-      variant="danger"
-      :title="t('wool.uninstallConfirmTitle', { name: woolUninstallName })"
-      :description="t('wool.uninstallConfirmDesc')"
-      :confirm-text="t('wool.uninstallConfirmBtn')"
-      :cancel-text="t('wool.cancel')"
-      :loading="woolEntries.uninstallingActions.value.has(woolUninstallTarget ?? '')"
-      @confirm="confirmWoolUninstall"
-    />
-
-    <!-- 羊毛接入向导（D6 ①/D7 两族模板） -->
-    <WoolWizard v-model:open="woolEntries.wizardOpen.value" />
+    <!-- 插件 Provider 接入流程（D1/D2/D3/D5）：家族卡 → 安装确认卡 → 授权挂载位容器。
+         焦点入口 = 条目区「重新授权」/「更新插件」（绕过家族选择直达目标段） -->
+    <PluginProviderFlow v-model:open="pluginFlowOpen" :focus="pluginFlowFocus" />
 
     <!-- dirty 检查确认弹窗（切换/收起/新建时拦截未保存改动） -->
     <ConfirmDialog
@@ -217,7 +186,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, Settings } from '@lucide/vue'
 import { useProviderCatalogsStale } from '@/composables/features/settings/useProviderCatalogsStale'
@@ -239,10 +208,14 @@ import { useApiKeyAutoEnable } from '@/composables/features/settings/useApiKeyAu
 import { useQuotaAutoEnableNotice } from '@/composables/features/settings/useQuotaAutoEnableNotice'
 import { useAccordionGuard } from '@/composables/features/settings/useAccordionGuard'
 import { useScopedModels } from '@/composables/features/settings/useScopedModels'
-import { useWoolEntries } from '@/composables/features/settings/useWoolEntries'
-import { WoolEntryCard, WoolWizard } from './WoolWizard'
 import ProviderPageHeader from './ProviderPageHeader.vue'
 import ProviderRowCard from './ProviderRowCard.vue'
+import PluginProviderFlow from './PluginProviderFlow.vue'
+import {
+  usePluginProviderSource,
+  type PluginEntryInfo,
+  type PluginFlowFocus,
+} from './PluginProviderSource'
 
 // ui 包组件 renderer 侧依赖由 AppShell 级 useSettingsShell 统一 provide（SETTINGS_TOAST_KEY /
 // QUOTA_CONFIGURE_FACTORY_KEY 已在壳层注入 SettingsModal 全子树，此处不再组件级重复 provide）
@@ -256,7 +229,6 @@ const { refreshQuotaPresets } = useSettings()
 // Scoped Models 白名单（乐观更新 + 失败回滚；RPC 失败 rethrow 由下方包装 handler 统一反馈）
 const { scopedRenderItems, selectableModels, addScopedModels, removeScopedModel, moveScopedModel } = useScopedModels()
 
-const woolEntries = useWoolEntries() // 羊毛条目区编排（D6 ③；快照数据在 useWool 单例）
 const props = defineProps<{ providers: ProviderInfo[] }>()
 
 const { t } = useI18n()
@@ -295,6 +267,15 @@ onMounted(async () => {
   // （列表停在挂载时快照），属用户可见辅助能力降级，warn 可见而非裸吞。
   transport.setProviderCatalogWatch(true).catch((e) => {
     console.warn('[settings] setProviderCatalogWatch(true) failed:', e)
+  })
+  // 插件清单（D1）：条目区识别插件来源条目 / 家族卡数据源。失败降级为「无插件条目识别」
+  // （条目管理不受影响），重试入口在插件流程内（S15）。清单到达后按 D5「页进入即拉」对
+  // 已识别的插件条目拉一次已知状态（拉为主，推送只作增量提示）。
+  void pluginSource.refreshCatalog().then(() => {
+    for (const p of props.providers) {
+      const entry = pluginSource.entryOfProvider(p.id)
+      if (entry !== undefined) void pluginSource.pullStatus(entry.pluginId, p.id)
+    }
   })
   void refreshQuotaPresets()
 })
@@ -405,6 +386,53 @@ const {
   onBodyCancel,
 } = useAccordionGuard(NEW_ID)
 
+// ── 插件 Provider 来源（D1/D2/D5）：清单数据源 + 条目扩展区接线 ──
+const pluginSource = usePluginProviderSource()
+const pluginFlowOpen = ref(false)
+const pluginFlowFocus = ref<PluginFlowFocus | undefined>(undefined)
+
+/** providerId → 插件来源条目信息（清单家族前缀匹配命中 = 插件条目；未命中 undefined）。 */
+function pluginEntryOf(providerId: ProviderId): PluginEntryInfo | undefined {
+  const entry = pluginSource.entryOfProvider(providerId)
+  if (entry === undefined) return undefined
+  return {
+    pluginId: entry.pluginId,
+    ...(entry.updateAvailable === true ? { updateAvailable: true } : {}),
+  }
+}
+
+/** 打开插件接入流程（focus 缺省 = 家族选择段起步）。 */
+function openPluginFlow(focus?: PluginFlowFocus): void {
+  pluginFlowFocus.value = focus
+  pluginFlowOpen.value = true
+}
+
+/** 条目「重新授权」（D5）：复用同一 provider.authorize 挂载位，插件可推与首次不同的树。 */
+function onReauthorize(providerId: string): void {
+  const entry = pluginSource.entryOfProvider(providerId)
+  if (entry === undefined) return
+  openPluginFlow({ pluginId: entry.pluginId, intent: 'authorize' })
+}
+
+/** 条目「更新插件」（S26）：两段式安装链重跑，直达确认卡。 */
+function onUpdatePlugin(providerId: string): void {
+  const entry = pluginSource.entryOfProvider(providerId)
+  if (entry === undefined) return
+  openPluginFlow({ pluginId: entry.pluginId, intent: 'update' })
+}
+
+/**
+ * 条目展开 → 拉凭据状态（D5 时序语义：getStatus 同步返回插件本地最近已知状态，
+ * 上游校验由插件异步执行后经 plugin:event 增量上报）。未展开/非插件条目不动。
+ */
+watch(expandedId, (id) => {
+  if (id === null || id === NEW_ID) return
+  const entry = pluginSource.entryOfProvider(id)
+  if (entry === undefined) return
+  void pluginSource.pullStatus(entry.pluginId, id)
+})
+
+
 // ── OAuth 编排（B-1：QuickSetup 与编辑体凭证区共用单实例状态机，[C4·尾项] 合并后单 module）──
 const oauth = useProviderOAuth({
   builtinProviders,
@@ -432,14 +460,6 @@ const deleteDialogOpen = computed({
     if (!open) deleteTarget.value = null
   },
 })
-
-// ── 羊毛卸载确认（状态与确认编排收在 useWoolEntries；解构别名保持模板引用名）──
-const {
-  uninstallTarget: woolUninstallTarget,
-  uninstallDialogOpen: woolUninstallDialogOpen,
-  uninstallName: woolUninstallName,
-  confirmUninstall: confirmWoolUninstall,
-} = woolEntries
 
 /** 动作错误（删除/启用失败时显示，非静默吞） */
 const actionError = ref('')

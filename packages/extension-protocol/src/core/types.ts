@@ -115,6 +115,24 @@ export interface GuiComponentProps {
     }[]
   }
 
+  /**
+   * 文本输入——GuiComponent 协议输入原语（provider-plugin-access D8：粘贴 PAT、
+   * 填回调地址）。值变更即经 plugin.uiEvent 回传（{ viewId, componentId: id,
+   * event, value }，插件侧始终持有最新值）；确认动作复用 action-bar 按钮点击——
+   * 「输入 + 确认」两者组合完成，无表单聚合原语（single-select / form 砍除）。
+   * 宿主只做形状校验（value 标量、深度 ≤ 2），业务校验归插件。渲染端缺
+   * uiEvent 出口时输入框禁用 + warn（TabBar 降级出声范式）。
+   */
+  'text-input': {
+    /** 组件 id（uiEvent 回传的 componentId，插件定位输入项的键） */
+    id: string
+    label?: string
+    placeholder?: string
+    /** 当前值（插件推树携带，宿主受控渲染——单值权威在插件侧） */
+    value?: string
+    multiline?: boolean
+  }
+
   /** 自定义组件——逃生口（仅限内置 extension 编译期注册） */
   'custom': {
     component: string

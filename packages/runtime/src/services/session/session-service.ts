@@ -931,8 +931,8 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async delete(sessionId: string): Promise<void> { return this.lifecycle.delete(sessionId) }
   async deleteByCwd(cwd: string): Promise<BatchDeleteResult> { return this.lifecycle.deleteByCwd(cwd) }
   /**
-   * 系统信令入口公开委托（羊毛管理编排 wool-manager 消费；revoke-orchestrator 走
-   * dispatcher deps 同一实现）。旁路契约（不经 hook / 不经内核）见 MessageDispatcher.sendSystemCommand。
+   * 系统信令入口公开委托（revoke-orchestrator 走 dispatcher deps 同一实现）。旁路契约
+   * （不经 hook / 不经内核）见 MessageDispatcher.sendSystemCommand。
    */
   async sendSystemCommand(sessionId: string, commandLine: string, requireCommand?: string): Promise<SystemCommandOutcome> {
     return this.dispatcher.sendSystemCommand(sessionId, commandLine, requireCommand)

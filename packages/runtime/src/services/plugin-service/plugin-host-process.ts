@@ -23,6 +23,7 @@ import { getCrashJournal } from '../../infra/crash-journal.js'
 import type { ProcessHandle } from './plugin-types.js'
 import { PluginRpcServer, type RpcIdentity } from './plugin-rpc-server.js'
 import { resolveAndValidateFile, dispatchHostRpcMessage, safeDispatchHostMessage, isRecordMessage } from './plugin-host.js'
+import { buildPluginCapabilityForkEnv, type PluginCapabilityForkEnvInput } from './plugin-fs-guard.js'
 
 /**
  * plugin-worker crash journal 行使用 schema 登记的扩展字段 processId/pid/signal/pluginIds
@@ -51,8 +52,16 @@ type ReplyCallback = (msg: unknown) => void
  * 不动（trusted/sandbox 插件兼容性属有意设计）——pass-all 前缀 '' 承载拷贝语义
  * （构建器步骤 1 对任意 key 放行，副本操作绝不 mutate 父对象，R1），仅在输出上叠加
  * 出站 deny 两键剔除（构建器末步兜底）+ 既有 ELECTRON_RUN_AS_NODE=1 注入。
+ *
+ * capabilityEnv（provider-plugin-access D3）：sandbox 插件的业务能力放行清单与
+ * readPaths（buildPluginCapabilityForkEnv 编码的 env 键值）——插件自身的授权范围
+ * 非宿主秘密，经同一构建器注入保持 deny 兜底语义（extras 不可覆盖 deny 两键）。
+ * 未传 = 无放行清单 → ESM loader 按基线黑名单全拦（fail-closed）。
  */
-export function buildPluginHostChildEnv(parentEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function buildPluginHostChildEnv(
+  parentEnv: NodeJS.ProcessEnv,
+  capabilityEnv?: Record<string, string>,
+): NodeJS.ProcessEnv {
   return buildOutboundChildEnv({
     parentEnv,
     prefixes: [''],
@@ -60,6 +69,7 @@ export function buildPluginHostChildEnv(parentEnv: NodeJS.ProcessEnv): NodeJS.Pr
       // 打包约束（AGENTS.md #12）：必须 process.execPath + ELECTRON_RUN_AS_NODE=1
       // （打包后无独立 node；node 环境该 env 无害被忽略）
       ELECTRON_RUN_AS_NODE: '1',
+      ...(capabilityEnv ?? {}),
     },
   })
 }
@@ -125,6 +135,13 @@ export class PluginHostProcess implements PluginHostProcessContract {
   /** pluginId → processId 反向索引（D2-5：getProcessHandle O(1)，替代全进程线性扫） */
   private pluginToProcess = new Map<string, string>()
 
+  /**
+   * sandbox 插件的能力声明登记（provider-plugin-access D3）：pluginId → manifest
+   * capabilities/readPaths。宿主 wiring 在激活链上登记；进程回收时同步清除（重建
+   * 后须重新登记——陈旧登记会让热更新后的旧 manifest 能力继续放行）。
+   */
+  private capabilityEnvInputs = new Map<string, PluginCapabilityForkEnvInput>()
+
   constructor(rpcServer: PluginRpcServer, options?: PluginPoolOptions) {
     this.rpcServer = rpcServer
     this.bootstrapPathOverride = options?.bootstrapPathOverride
@@ -140,6 +157,16 @@ export class PluginHostProcess implements PluginHostProcessContract {
   /** 设置生命周期回复的回调（activated/deactivated/error） */
   setReplyCallback(cb: ReplyCallback): void {
     this.onReply = cb
+  }
+
+  /**
+   * 登记插件的能力声明（provider-plugin-access D3 宿主入口）：fork sandbox 进程时
+   * 经 buildPluginCapabilityForkEnv 编码注入 env（TAIJI_PLUGIN_ALLOWED_MODULES /
+   * TAIJI_PLUGIN_READ_PATHS），ESM loader initialize 时读取。
+   * 未登记 = 无放行清单 = 基线黑名单全拦（fail-closed，向后兼容无能力声明插件）。
+   */
+  setPluginCapabilityEnv(pluginId: string, input: PluginCapabilityForkEnvInput): void {
+    this.capabilityEnvInputs.set(pluginId, input)
   }
 
   /**
@@ -273,6 +300,9 @@ export class PluginHostProcess implements PluginHostProcessContract {
       if (this.pluginToProcess.get(pid) === processId) {
         this.pluginToProcess.delete(pid)
       }
+      // 能力声明登记随进程回收清除（重建后由 wiring 重新登记；防热更新后旧 manifest
+      // 能力经陈旧登记继续放行——provider-plugin-access D3）
+      this.capabilityEnvInputs.delete(pid)
     }
   }
 
@@ -399,7 +429,14 @@ export class PluginHostProcess implements PluginHostProcessContract {
     // D6（docs/architecture/env-propagation-boundary.md §5-U4）：{...process.env} 全量拷贝对
     // trusted/sandbox 插件的兼容性属有意设计，拷贝拓扑不动——pass-all 前缀承载拷贝语义，
     // 仅经构建器叠加 deny 两键剔除（副本上删，R1）。
-    const env: NodeJS.ProcessEnv = buildPluginHostChildEnv(process.env)
+    // D3：sandbox 插件的 manifest 能力声明经 buildPluginCapabilityForkEnv 编码为 env
+    // 键值（放行清单 + readPaths），与 sandbox 目录同点注入；未登记插件不注入
+    // （loader 按基线黑名单全拦）。
+    const capInput = trustLevel === 'sandbox' ? this.capabilityEnvInputs.get(pluginId) : undefined
+    const env: NodeJS.ProcessEnv = buildPluginHostChildEnv(
+      process.env,
+      capInput ? buildPluginCapabilityForkEnv(capInput) : undefined,
+    )
     if (trustLevel === 'sandbox' && pluginPath) {
       env.TAIJI_PLUGIN_SANDBOX_DIR = pathDirname(pluginPath)
     }

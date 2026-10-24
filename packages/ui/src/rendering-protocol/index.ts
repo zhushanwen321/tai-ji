@@ -20,6 +20,10 @@ export { default as GuiComponentRenderer } from './GuiComponentRenderer.vue'
 // Actionbar.vue 内部 inject 同一 key——key symbol 必须跨包同一实例，故经 barrel 导出给消费方
 export { ACTION_EXECUTOR_KEY } from './action-executor-key'
 export type { ActionExecutor, ActionArgs } from './action-executor-key'
+// text-input 值回传注入契约（provider-plugin-access D8）：mount 点容器 provide（它同时掌握
+// pluginId + viewId），TextInput.vue inject 同一 key——key symbol 必须跨包同一实例
+export { UI_EVENT_SENDER_KEY } from './primitives/ui-event-sender-key'
+export type { UiEventSender } from './primitives/ui-event-sender-key'
 export {
   resolveComponent,
   type ResolvedRender,

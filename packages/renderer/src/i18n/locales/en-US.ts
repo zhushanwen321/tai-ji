@@ -15,7 +15,7 @@ import importSession from './en-US/importSession'
 import rollingRestart from './en-US/rollingRestart'
 import plan from './en-US/plan'
 import btw from './en-US/btw'
-import wool from './en-US/wool'
+import pluginProvider from './en-US/pluginProvider'
 import workflowViz from './en-US/workflow-viz'
 import canvas from './en-US/canvas'
 import find from './en-US/find'
@@ -53,6 +53,6 @@ export default {
   rollingRestart,
   plan,
   btw,
-  wool,
+  pluginProvider,
   find,
 }

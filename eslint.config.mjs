@@ -139,11 +139,6 @@ export default [
       // 设计文档指定单文件）。职责内聚（同一同步链的生成侧全量实装），拆分 = 按 zcode
       // 读侧 / 纯映射 / 编排三段重组，属独立重构任务。短期 override 避免阻塞，长期应拆分。
       'packages/runtime/src/services/zcode-provider-sync.ts',
-      // 羊毛域唯一编排中心（wool-provider D2/D3/D5/D6：清单拉取 + 安装/卸载编排 +
-      // 管理专用会话生命周期 + 三缓存 + 每日签到提醒定时器 + 会话错误分类，动作全经
-      // runAction 单入口分派）。职责内聚（同一编排状态机的全部动作），拆分 = 按动作族
-      // 重组类内聚状态，属独立重构任务。短期 override 避免阻塞，长期应拆分。
-      'packages/runtime/src/services/wool-manager.ts',
     ],
     rules: {
       'max-lines': 'off',
@@ -944,10 +939,14 @@ export default [
   // （hot-reload 回调 / crashed 路径）同址同构，抽 helper 或独立模块只省微弱行数且
   // 拆散三路广播的对称性——微超即提额先例（session-service 650 / engine-client 650
   // 同型）。提额而非 off：保留 555 软上限告警，超限即再暴露。
+  // [provider-plugin-access U4] 两段式安装编排（prepare/confirm/cancel/提交回滚/
+  // 卸载 provider 清理）为设计钦定的本 facade 聚合（设计文件地图指定 plugin-service.ts），
+  // 拆分需引入新的 ctx 注入边界（文件头既有裁决：属独立重构任务）——提额 630 保留
+  // 软上限告警（control-server 1060 / session-service 650 提额先例同型）。
   {
     files: ['packages/runtime/src/services/plugin-service/plugin-service.ts'],
     rules: {
-      'max-lines': ['warn', { max: 555, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 630, skipBlankLines: true, skipComments: true }],
     },
   },
   // preset-service 是 pi-presets.json 读盘 coerce 家族唯一入口（presets 逐项 / prompt 段级 /

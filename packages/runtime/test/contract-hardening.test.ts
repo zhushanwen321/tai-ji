@@ -970,8 +970,10 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
     await expectInvalid('plugin.workspace.findFiles', { pattern: 999 }, 'INVALID_PATTERN', 'pattern')
     await expectInvalid('plugin.views.update', { pluginId: 'p', viewId: 'v', sessionId: 's1', guiTree: 'not-array' }, 'INVALID_GUI_TREE', 'guiTree')
     await expectInvalid('plugin.views.update', { pluginId: 'p', guiTree: [] }, 'INVALID_VIEW_ID', 'viewId')
-    // [D1/u5b] sessionId 显式必填（E15）：缺失即拒，不再回落活跃会话猜测
-    await expectInvalid('plugin.views.update', { pluginId: 'p', viewId: 'v', guiTree: [] }, 'INVALID_SESSION_ID', 'sessionId')
+    // [U2] 归属二选一：sessionId / mountId 都缺（或都给）→ INVALID_VIEW_SCOPE，
+    // 不再回落活跃会话猜测
+    await expectInvalid('plugin.views.update', { pluginId: 'p', viewId: 'v', guiTree: [] }, 'INVALID_VIEW_SCOPE', 'sessionId')
+    await expectInvalid('plugin.views.update', { pluginId: 'p', viewId: 'v', sessionId: 's1', mountId: 'provider.authorize', guiTree: [] }, 'INVALID_VIEW_SCOPE', 'mountId')
   })
 
   it('CT-U1 畸形输入零写副作用：全部写通道未被调用、注册表零条目（不落盘不毒化）', async () => {

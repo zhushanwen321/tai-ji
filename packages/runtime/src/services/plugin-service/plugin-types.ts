@@ -103,6 +103,16 @@ export interface IPluginServiceDeps {
    */
   pluginInstaller?: import('../ports/plugin-installer.js').IPluginInstaller
   /**
+   * provider 条目存取 port（provider-plugin-access U4 卸载编排）：listIds 返回
+   * models.json 全部 providerId，delete 删除单条（实现走 setProvider 同一写策略链，
+   * 组合根接线，不在 plugin-service 内自建第二写入点——C-proc-15）。
+   * 缺省时卸载编排跳过 provider 条目清理（warn 留痕，插件目录删除不受影响）。
+   */
+  providerEntries?: {
+    listIds(): Promise<string[]>
+    delete(providerId: string): Promise<void>
+  }
+  /**
    * 文件软删除 port（结构匹配 ITrash.trashFile）。组合根注入 infra adapter（trash）；
    * session 真删除时 session-data 清理经 trash（mac 废纸篓 / 非 mac unlink），缺省 undefined
    * 时 SessionDataStore 回退直接 unlink（B5）。

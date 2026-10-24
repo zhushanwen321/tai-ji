@@ -70,6 +70,19 @@ function internals(service: PluginService): ServiceInternals {
   return service as unknown as ServiceInternals
 }
 
+/** 全方法 IPluginInstaller mock（U4 两段式接口；本文件卸载语境只消费 uninstall）。 */
+function makeInstaller(overrides: Partial<IPluginInstaller> = {}): IPluginInstaller {
+  return {
+    prepareInstall: vi.fn(),
+    commitInstall: vi.fn(),
+    rollbackInstall: vi.fn(),
+    discardReplaced: vi.fn(),
+    sweepStaging: vi.fn(),
+    uninstall: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  }
+}
+
 function createService(opts: {
   descriptor?: PluginDescriptor
   installer?: IPluginInstaller
@@ -90,10 +103,7 @@ function createService(opts: {
 
 describe('uninstallPlugin 四缺处置（F2）', () => {
   it('F2-①: uninstall 停止该插件的 fs.watch 热重载监听', async () => {
-    const installer: IPluginInstaller = {
-      install: vi.fn(),
-      uninstall: vi.fn().mockResolvedValue(undefined),
-    }
+    const installer: IPluginInstaller = makeInstaller()
     const { service, reg } = createService({ descriptor: makeDescriptor(), installer })
     const stopWatching = vi.spyOn(reg.activator, 'stopWatching')
 
@@ -102,25 +112,20 @@ describe('uninstallPlugin 四缺处置（F2）', () => {
     expect(stopWatching).toHaveBeenCalledWith('uninstall-plugin')
   })
 
-  it('F2-②: external 插件 uninstall 调 installer.uninstall(pluginId, pluginPath) 删除磁盘目录', async () => {
-    const installer: IPluginInstaller = {
-      install: vi.fn(),
-      uninstall: vi.fn().mockResolvedValue(undefined),
-    }
+  it('F2-②: external 插件 uninstall 调 installer.uninstall(pluginId, pluginDir) 删除磁盘插件目录', async () => {
+    const installer: IPluginInstaller = makeInstaller()
     const descriptor = makeDescriptor({ source: 'external', pluginPath: '/tmp/plugins/uninstall-plugin/index.js' })
     const { service } = createService({ descriptor, installer })
 
     await service.uninstallPlugin('uninstall-plugin')
 
     expect(installer.uninstall).toHaveBeenCalledTimes(1)
-    expect(installer.uninstall).toHaveBeenCalledWith('uninstall-plugin', '/tmp/plugins/uninstall-plugin/index.js')
+    // 删除靶 = 插件目录（pluginDirOf 按 main 后缀截取；按入口文件删会留目录残壳复活）
+    expect(installer.uninstall).toHaveBeenCalledWith('uninstall-plugin', '/tmp/plugins/uninstall-plugin')
   })
 
   it('F2-②检查: builtin 插件（source=built-in）不删磁盘（防破坏随应用分发的资源）', async () => {
-    const installer: IPluginInstaller = {
-      install: vi.fn(),
-      uninstall: vi.fn().mockResolvedValue(undefined),
-    }
+    const installer: IPluginInstaller = makeInstaller()
     const descriptor = makeDescriptor({ source: 'built-in' })
     const { service, registryMock } = createService({ descriptor, installer })
 
@@ -133,10 +138,9 @@ describe('uninstallPlugin 四缺处置（F2）', () => {
 
   it('F2-②容错: installer.uninstall 抛错不中断内存清理（registry/activator 拆除仍完成），收尾抛错（RT-6#6）', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const installer: IPluginInstaller = {
-      install: vi.fn(),
+    const installer: IPluginInstaller = makeInstaller({
       uninstall: vi.fn().mockRejectedValue(new Error('rm -rf failed: EPERM')),
-    }
+    })
     const descriptor = makeDescriptor({ source: 'external' })
     const { service, registryMock, reg } = createService({ descriptor, installer })
     const removeDescriptor = vi.spyOn(reg.activator, 'removeDescriptor')
@@ -162,7 +166,7 @@ describe('uninstallPlugin 四缺处置（F2）', () => {
   })
 
   it('F2-③: sandbox 插件 uninstall 时 terminate 其独占子进程（SIGTERM→SIGKILL 升级链入口）', async () => {
-    const installer: IPluginInstaller = { install: vi.fn(), uninstall: vi.fn().mockResolvedValue(undefined) }
+    const installer: IPluginInstaller = makeInstaller()
     const { service, reg } = createService({ descriptor: makeDescriptor(), installer })
     const terminateWorker = vi.fn().mockResolvedValue(undefined)
     // sandbox 句柄：workerId sandbox- 前缀（PluginHost.getWorkerHandle 从子进程宿主转调所得）
@@ -179,7 +183,7 @@ describe('uninstallPlugin 四缺处置（F2）', () => {
   })
 
   it('F2-③检查: trusted 共享 Worker 不 terminate（防误杀同线程其他插件）；无句柄时 no-op', async () => {
-    const installer: IPluginInstaller = { install: vi.fn(), uninstall: vi.fn().mockResolvedValue(undefined) }
+    const installer: IPluginInstaller = makeInstaller()
 
     // trusted 场景
     const trusted = createService({ descriptor: makeDescriptor({ trustLevel: 'trusted' }), installer })
@@ -199,7 +203,7 @@ describe('uninstallPlugin 四缺处置（F2）', () => {
   })
 
   it('F2-④: uninstall 后 activator 侧描述符/状态清空（防幽灵重激活）', async () => {
-    const installer: IPluginInstaller = { install: vi.fn(), uninstall: vi.fn().mockResolvedValue(undefined) }
+    const installer: IPluginInstaller = makeInstaller()
     const descriptor = makeDescriptor({ activationEvents: ['onStartupFinished'] })
     const { service, reg } = createService({ descriptor, installer })
 

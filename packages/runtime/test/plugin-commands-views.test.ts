@@ -289,6 +289,22 @@ describe('createViewsApi（worker 侧）', () => {
     await updatePromise
   })
 
+  it('update 全局域（U2）：mountId 归属透传（二选一由主线程校验）', async () => {
+    const api = createViewsApi(client, 'plug-demo')
+    const guiTree = [{ type: 'label', props: { text: 'hi' } }] as never[]
+
+    const updatePromise = api.update('flow', guiTree as never, { mountId: 'provider.authorize' })
+    const sent = port.messages[0] as { id: number; method: string; params: { pluginId: string; viewId: string; guiTree: unknown[]; mountId: string; sessionId?: string } }
+    expect(sent.method).toBe('plugin.views.update')
+    expect(sent.params.pluginId).toBe('plug-demo')
+    expect(sent.params.viewId).toBe('flow')
+    expect(sent.params.mountId).toBe('provider.authorize')
+    expect(sent.params.sessionId).toBeUndefined()
+
+    client.handleResponse({ jsonrpc: '2.0', id: sent.id, result: { updated: true } })
+    await updatePromise
+  })
+
   it('listMountPoints 发 RPC 并返回主线程结果', async () => {
     const api = createViewsApi(client, 'p1')
 
@@ -369,7 +385,7 @@ describe('PluginService 接线（commands/views RPC）', () => {
     expect(wrapper.response.result).toEqual(['view-x'])
   })
 
-  it('[D1/u5b] views.update 缺 sessionId → INVALID_SESSION_ID 拒绝，不走活跃会话猜测', async () => {
+  it('[U2] views.update 归属二选一：都缺/都给 → INVALID_VIEW_SCOPE 拒绝，不走活跃会话猜测', async () => {
     const broadcastFn = vi.fn()
     const { rpcServer, port } = wiredService({ broadcastFn })
 
@@ -380,12 +396,24 @@ describe('PluginService 接线（commands/views RPC）', () => {
       params: { pluginId: 'p1', viewId: 'v1', guiTree: [] },
     })
 
-    // 旧 ES2「无活跃 session 丢弃 + warning」路径已删除（D1 不采用④）：缺 sessionId 是
-    // 插件作者错误，显式 INVALID_SESSION_ID 拒绝 + 零广播（不猜测不投递）
+    // 旧 ES2「无活跃 session 丢弃 + warning」与 D1「缺 sessionId INVALID_SESSION_ID」均被
+    // U2 归属二选一取代：都缺（或都给）是插件作者错误，显式 INVALID_VIEW_SCOPE 拒绝 +
+    // 零广播（不猜测不投递）
     const wrapper = port.messages[0] as { response: { error?: { code?: string; message?: string } } }
-    expect(wrapper.response.error?.code).toBe('INVALID_SESSION_ID')
+    expect(wrapper.response.error?.code).toBe('INVALID_VIEW_SCOPE')
     expect(wrapper.response.error?.message).toContain('sessionId')
+    expect(wrapper.response.error?.message).toContain('mountId')
     expect(broadcastFn).not.toHaveBeenCalled()
+
+    // 都给同样拒绝
+    await rpcServer.dispatch('w1', {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'plugin.views.update',
+      params: { pluginId: 'p1', viewId: 'v1', guiTree: [], sessionId: 's1', mountId: 'provider.authorize' },
+    })
+    const wrapper2 = port.messages[1] as { response: { error?: { code?: string; message?: string } } }
+    expect(wrapper2.response.error?.code).toBe('INVALID_VIEW_SCOPE')
   })
 
   it('commands.register 经完整接线 → broadcastFn 收 plugin:commandRegistered', async () => {

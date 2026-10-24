@@ -100,6 +100,9 @@ resources/plugins/
 | `taijiPlugin.trustLevel` | 推荐 | 内置插件填 `"trusted"` |
 | `taijiPlugin.source` | 推荐 | 内置插件填 `"built-in"` |
 | `taijiPlugin.permissions` | 视情况 | 需要的权限列表。内置 trusted 插件可省略（默认全授权） |
+| `taijiPlugin.capabilities` | 视情况 | 业务能力声明（`network.http` / `fs.read-user-data` / `crypto` / `process.spawn`），安装即授予；见 §3.11 |
+| `taijiPlugin.readPaths` | 视情况 | `fs.read-user-data` 的读取路径白名单（家目录相对路径），见 §3.11 |
+| `taijiPlugin.namespace` | 视情况 | Provider 来源插件的命名空间（必须等于包名推导值），见 §3.11 |
 
 **激活事件类型：**
 
@@ -366,6 +369,36 @@ api.config.get(key: string): Promise<unknown>
 api.config.getAll(): Promise<Record<string, unknown>>
 api.config.set(key: string, value: unknown): Promise<void>
 ```
+
+### 3.11 Provider 来源接入（providers.* 三 RPC）
+
+插件可以作为 taiji 的模型来源（Provider）接入：家族元数据、授权流程、模型目录由插件提供，宿主提供 Provider 页的壳、`models.json` 落盘与「重新授权」入口。以下契约与 ADR-0159 同源。
+
+**manifest 相关字段**（`package.json` 的 `taijiPlugin`）：
+
+| 字段 | 说明 |
+|------|------|
+| `capabilities` | 业务能力词数组。词表：`network.http`（http/https/net/dns/tls）、`fs.read-user-data`（fs 只读子集 + `readPaths` 路径受限）、`crypto`（crypto）、`process.spawn`（child_process）。安装即授予，运行时不再逐次审批 |
+| `readPaths` | `fs.read-user-data` 的读取路径白名单（家目录相对路径）。与只读性是两个独立机制：路径边界由 fork 侧路径检查承担，只读性由 loader 的只读导出子集承担 |
+| `namespace` | provider 条目的命名空间（如 `wool-workbuddy`）。必须等于「包名去 npm scope、去 `plugin-` 前缀」的推导值（`@scope/plugin-wool-workbuddy` → `wool-workbuddy`），不匹配时安装拒绝（`NAMESPACE_MISMATCH`）。仅在提供 Provider 来源的插件上声明 |
+
+**三个宿主 RPC**（插件进程经 RPC 客户端调用，方法名即线协议）：
+
+| 方法 | 请求 | 成功回执 | 用途 |
+|------|------|---------|------|
+| `providers.write` | `{ providerId, apiKey, headers?, displayName?, models? }` | `{ written: true, providerId }` | 凭据与模型目录写入 `models.json`（复用宿主既有 `setProvider` 写策略链；`models` 元素为字符串或 `{ id, name?, api?, reasoning?, contextWindow?, enabled? }`） |
+| `providers.delete` | `{ providerId }` | `{ deleted: boolean, providerId }` | 卸载清理：删除本插件命名空间的 provider 条目 |
+| `providers.credential` | `{ providerId }` | `{ providerId, key, source, kind }` 或 `{ providerId, unsupported }` | 受控明文回读：查额度 / 查状态 / 401 复检 |
+
+**边界与错误码**：
+
+- `providerId` 必须等于 `namespace` 或以 `namespace-` 开头；越界 → `NAMESPACE_MISMATCH`（宿主不读盘、不调用凭据解析）。
+- `providers.credential` 的能力前提 = manifest 已声明 `network.http`；未声明 → `PERMISSION_DENIED`。
+- 三个方法只对**有唯一插件身份的 sandbox 通道**开放（trusted 共享 Worker 无唯一归属 → `PERMISSION_DENIED`）。
+- 载荷非法 → `INVALID_PAYLOAD`；条目尚无凭据 → `PROVIDER_CREDENTIAL_MISSING`。
+- `providers.credential` 的明文**只**回到发起本次调用的插件进程（定向 reply）：不广播、不落日志、不进快照；`unsupported` 表示条目存在但形态（`command` / 未定义 env 引用）不可解析，不要把形态标记当 key 使用。
+
+**凭据存储约定**：插件不得把凭据写入 `plugin.storage.*` / `plugin.sessionData.*`（明文 JSON 落盘）。凭据的唯一权威是 `models.json`（经 `providers.write` 写），插件按需经 `providers.credential` 回读；回读到的明文只用于联网动作，不写日志、不落插件存储、不转发给其他进程。`providers.credential` 回读的 `apiKey` 即宿主写入的生效凭据，插件无需自建第二份缓存。
 
 ---
 

@@ -20,12 +20,32 @@ import subprocess
 import sys
 
 # (旧路径, 引用文件前缀) → 理由。空表为常态；登记即声明「该引用不随迁移更新是有意为之」。
-PATH_REF_EXEMPT = {}
+PATH_REF_EXEMPT = {
+    # 退役守卫测试：断言已删除的羊毛界面/类型文件保持不存在（防复活），引用即测试语义本身
+    ("packages/renderer/src/components/settings/provider/WoolWizard/WoolWizard.vue",
+     "packages/renderer/src/components/settings/provider/__tests__/wool-retirement.test.ts"): "retirement-guard",
+    ("packages/renderer/src/components/settings/provider/WoolWizard/WoolEntryCard.vue",
+     "packages/renderer/src/components/settings/provider/__tests__/wool-retirement.test.ts"): "retirement-guard",
+    ("packages/renderer/src/composables/features/settings/useWool.ts",
+     "packages/renderer/src/components/settings/provider/__tests__/wool-retirement.test.ts"): "retirement-guard",
+    ("packages/renderer/src/composables/features/settings/useWoolEntries.ts",
+     "packages/renderer/src/components/settings/provider/__tests__/wool-retirement.test.ts"): "retirement-guard",
+    ("packages/renderer/src/composables/features/settings/useWoolWizard.ts",
+     "packages/renderer/src/components/settings/provider/__tests__/wool-retirement.test.ts"): "retirement-guard",
+    ("packages/renderer/src/i18n/locales/zh-CN/wool.ts",
+     "packages/renderer/src/components/settings/provider/__tests__/wool-retirement.test.ts"): "retirement-guard",
+    ("packages/renderer/src/i18n/locales/en-US/wool.ts",
+     "packages/renderer/src/components/settings/provider/__tests__/wool-retirement.test.ts"): "retirement-guard",
+    ("packages/shared/src/wool.ts",
+     "packages/shared/src/__tests__/wool.test.ts"): "retirement-guard",
+}
 
 SCAN_PATHSPEC = [
     ".",
     ":(exclude)docs",
     ":(exclude)pnpm-lock.yaml",
+    # 自排除：PATH_REF_EXEMPT 登记行含已删路径字面量，属登记数据非残留引用
+    ":(exclude).githooks/check_path_ref_drift.py",
 ]
 
 

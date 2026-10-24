@@ -67,7 +67,7 @@ import { ModelService } from './services/model-service.js'
 
 import { mandatoryExtensions, isBtwVirtualId } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
-import { getDataDir, getSessionStoreDir } from '@taiji/shared/paths'
+import { getDataDir } from '@taiji/shared/paths'
 // startupSweep：启动收编扫描 core 装配单点（挂点见 main() 内 registerRuntimeInstance
 // 之后的时序硬声明注释段）。
 import { startupSweep } from '@zhushanwen/subagent-core'
@@ -85,7 +85,7 @@ import { appendProcessEscapeLog, isContainedStreamError } from './infra/system/u
 import { trash, trashDirectory } from './infra/system/trash.js'
 
 import { ProcessManager } from './infra/pi/process-manager.js'
-import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver, cleanLeakedPackages, sanitizeInvalidProviders, isModelsStoreCorrupted, upsertWoolProviderEntry, removeProvider } from './infra/pi/pi-provider-store.js'
+import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver, cleanLeakedPackages, sanitizeInvalidProviders, isModelsStoreCorrupted } from './infra/pi/pi-provider-store.js'
 // engine-provider-unification u2：pi→zcode provider 启动同步接线（路径拼装 + D7 降级
 // 包装收敛在该模块——组合根 import 即执行 main()，降级分支抽独立模块才可单测，
 // run-extras-migration 同族先例）。
@@ -129,10 +129,9 @@ import { TerminalService } from './services/terminal/terminal-service.js'
 import { disposeTerminalPtysStep } from './services/terminal/dispose-terminal-ptys-step.js'
 import { QuotaService } from './services/quota-service.js'
 import { TtsService } from './services/tts-service.js'
-// wool-provider D6：羊毛宿主编排（清单/安装/管理专用会话/缓存/聚合源）；settings 羊毛域
-// 读写闭包消费 pi-settings-store（组合根 import infra 合法——services 层经 port 注入）。
-import { WoolManager, isWoolSettingsDomain, type WoolSettingsDomain } from './services/wool-manager.js'
-import { readSettings, updateSettingsFields } from './infra/pi/pi-settings-store.js'
+// providers.write/delete/credential 三 RPC 受控代理（provider-plugin-access D4）：命名空间
+// 前缀校验 + setProvider 写策略链 + credential resolver 唯一读通道，组合根装配。
+import { registerProviderWriteProxy, createPluginManifestReader } from './services/provider-write-proxy.js'
 // 三家 TTS driver 工厂与表单派生视图（ai-voice-tts u2，infra/tts 唯一装配出口）——组合根 import
 // infra 装配是 C-comm-03 的合法例外（services 层禁 infra，组合根不在此列）。
 import { createTtsDriver, getTtsFormModels } from './infra/tts/index.js'
@@ -1041,50 +1040,6 @@ async function main(): Promise<void> {
           // initLogger monkey-patch 自动落盘。
           console.warn('[runtime] resumeDecision.observe failed (isolated):', e)
         }
-        try {
-          // wool（D6 ③ 报错时刷新）：错误帧文本喂羊毛错误分类——401/未授权 → 条目失效
-          // 徽标（失败路径表「对话 401 分类」判定源）；模型不存在 → 触发一次清单重新
-          // 拉取（选择器缓存自动收敛）。旁路观察同 resumeDecision：单路径异常不炸
-          // interpret 批次。woolManager 为闭包前向引用（createAdapter 仅在 session 建立
-          // 时执行，引用恒就绪——sessionService 同款模式）。
-          for (const ev of events) {
-            if (ev.kind !== 'message') continue
-            if (ev.message.type !== 'message.stream_error' && ev.message.type !== 'message.error') continue
-            // payload 经运行时 guard 收窄（ServerMessage payload 判别联合宽形态，见
-            // protocol.ts 2263-2266 两帧 payload 字段名 content / message）。
-            const payload: unknown = ev.message.payload
-            if (payload === null || typeof payload !== 'object') continue
-            const record = payload as Record<string, unknown>
-            const text = typeof record.content === 'string'
-              ? record.content
-              : typeof record.message === 'string' ? record.message : undefined
-            if (text !== undefined) woolManager.noteSessionError(text)
-          }
-        } catch (e) {
-          // best-effort 降级（旁路观察同 resumeDecision）：分类失败只 warn 不炸 interpret
-          // 批次——分类缺席 = 失效徽标暂不点亮，下一动作/广播自愈。
-          console.warn('[runtime] wool session-error observe failed (isolated):', e)
-        }
-        try {
-          // wool（凭据通道 D2 授权 URL 拦截）：管理会话内 extension:notify 喂羊毛授权
-          // URL 观察器——authorize 编排在途时提取授权页 URL 并广播 wool.authorize_url
-          // （renderer 驱动浮层浏览器）。woolManager 只消费自家管理会话的 notify（合法
-          // 来源判定在其内部），普通会话通知零误报；旁路异常隔离同上。
-          for (const ev of events) {
-            if (ev.kind !== 'message') continue
-            if (ev.message.type !== 'extension:notify') continue
-            const payload: unknown = ev.message.payload
-            if (payload === null || typeof payload !== 'object') continue
-            const record = payload as Record<string, unknown>
-            if (typeof record.sessionId === 'string' && typeof record.message === 'string') {
-              woolManager.noteExtensionNotify(record.sessionId, record.message)
-            }
-          }
-        } catch (e) {
-          // best-effort 降级：拦截失败只 warn 不炸 interpret 批次——授权页 URL 缺席时
-          // 用户可关闭向导重开授权（authorize 动作回执仍正常落）。
-          console.warn('[runtime] wool extension-notify observe failed (isolated):', e)
-        }
         interpreter.interpret(events)
         try {
           resumeDecision.settle(sessionId)
@@ -1562,66 +1517,26 @@ async function main(): Promise<void> {
     return scanned ? { cwd: scanned.cwd, mainTurnActive: false } : undefined
   }
 
-  // ── wool-provider D6（宿主编排装配）──────────────────────────────────────
-  // WoolManager：羊毛域唯一编排入口（wool.getState/wool.action 两帧路由 + model.list
-  // 聚合源 + wool.state 广播）。settings 羊毛域读写经 pi-settings-store 'wool' scope 闭包
-  // （读侧坏形状回空域——接入态是辅助状态，损坏不阻断启动）；wool.state 是 payload 无
-  // sessionId 的纯全局帧（设置域全局状态，rollingRestart.status 同款），走
-  // broadcastServerMessage 通用全局通道。initialize = 启动恢复（目录缓存读盘 + 安装态扫描），
-  // fire-and-forget：两步失败均内部 warn 降级（不阻塞启动主链）。
-  const woolSettingsPort = {
-    read: (): WoolSettingsDomain => {
-      const raw: unknown = readSettings().wool
-      return isWoolSettingsDomain(raw) ? raw : {}
-    },
-    write: (data: WoolSettingsDomain): void => {
-      updateSettingsFields('wool', (settings) => {
-        settings.wool = data
-      })
-    },
-  }
-  const woolManager = new WoolManager({
-    sessionService,
-    extensionService,
-    settings: woolSettingsPort,
-    // models.json 羊毛条目 port（凭据通道 D2）：pi-provider-store 既有写入器闭包装配
-    //（writeEntry = upsertWoolProviderEntry 单条目全量覆写、其余条目保留；损坏降级态
-    // 拒入 ModelsStoreCorruptedError 由 writeModels 防线承载；deleteEntry 返回「删前
-    // 条目含非空 apiKey」供 credentialsCleared 判定）。services 层禁直连 infra，经 port
-    // 注入（clearApiKey 闭包同款先例；upsert 直调收进 pi-provider-store 具名函数，
-    // C-proc-15 检查 B 白名单形态）。
-    modelsEntry: {
-      readEntry: (providerId) => getProviderConfig(providerId) as Record<string, unknown> | undefined,
-      writeEntry: (providerId, entry) => {
-        upsertWoolProviderEntry(providerId, entry)
-      },
-      deleteEntry: (providerId) => {
-        const prev = getProviderConfig(providerId)
-        const hadApiKey = prev !== undefined && typeof prev.apiKey === 'string' && prev.apiKey.length > 0
-        if (prev !== undefined) removeProvider(providerId)
-        return hadApiKey
-      },
-      hasCredentials: (providerId) => {
-        const cfg = getProviderConfig(providerId)
-        return cfg !== undefined && typeof cfg.apiKey === 'string' && cfg.apiKey.length > 0
-      },
-    },
-    dataDir: getDataDir(),
-    broadcast: (msg) => server.broadcastServerMessage(msg),
-    // 管理会话 ext-sessions 树回收（命令-only 会话无 jsonl 主文件，delete 链对主文件缺失
-    // 是零动作——羊毛域经 sessionStore 整树软删自回收，ADR-0141 删除语义）
-    reclaimSessionTree: (sid) => {
-      // trashDirectory 是 async（废纸篓 AppleScript）；回收口契约 void——rejection 落 warn 不放大
-      sessionStore.trashDirectory(join(getSessionStoreDir(), sid)).catch((e: unknown) => {
-        console.warn(`[wool-manager] manage session tree reclaim failed (sid=${sid}): ${toErrorMessage(e)}`)
-      })
-    },
+  // ── wool 插件化退役收尾（provider-plugin-access D6/U7）──────────────────
+  // WoolManager 已随羊毛管理域插件化整体删除（管理动作在插件进程内执行，providers.*
+  // 受控通道见下方 provider-write-proxy 装配）。宿主保留两件：
+  // ① providers.write/delete/credential 三 RPC 注册（D4 受控读写代理：命名空间前缀
+  //    校验 + setProvider 写策略链 + credential resolver 唯一读通道）；
+  // ② wool-catalog.json 存量缓存一次性清理（目录权威已收敛进 models.json 条目，
+  //    存量文件是无消费方的孤儿——启动时 best-effort 删除，失败只 warn 不阻塞）。
+  registerProviderWriteProxy(pluginService.rpcServer, {
+    setProvider: (providerId, data) => configService.setProvider(providerId, data),
+    deleteProvider: (providerId) => configService.deleteProvider(providerId),
+    resolveProviderCredential: (providerId) => providerCredentialResolver.resolveProviderCredential(providerId),
+    readPluginManifest: createPluginManifestReader(pluginService.registry),
   })
-  modelService.setWoolProviderSource(woolManager)
-  void woolManager.initialize()
-  // D5 到点提醒：每日签到定时器（产品功能定时白名单形态——autoCheckin 开 = 经管理通道
-  // 自动执行；关 = 拉账号状态 + 广播使「今日未签到」徽标新鲜点亮，即到点提醒呈现载体）。
-  woolManager.startDailyCheckinTimer()
+  try {
+    const legacyCatalogPath = join(getDataDir(), 'wool-catalog.json')
+    if (fs.existsSync(legacyCatalogPath)) fs.unlinkSync(legacyCatalogPath)
+  } catch (e) {
+    // best-effort 一次性清理：存量文件已是无消费方的孤儿，删除失败只留痕，不阻塞启动。
+    console.warn(`[runtime] legacy wool-catalog.json cleanup failed (ignored): ${toErrorMessage(e)}`)
+  }
 
   const tServicesReady = performance.now()
   // [subagent-model-switch U6] 模型切换网关生产适配器（§7.1.1 通道）：出站点 prompt +
@@ -1687,8 +1602,6 @@ async function main(): Promise<void> {
     // btw 线三帧路由（btw-question M2-b，B1/B2 授权接线）：BtwService 窄接口 + 主会话解析
     // 注入 BtwMessageHandler（assembleOptionalHandlers 装配 → buildRoutes 展开 handles）。
     btw: { service: btwService, resolveMain: resolveBtwMain },
-    // wool 两帧路由（wool-provider D6）：WoolMessageHandler 装配 + buildRoutes 展开 handles。
-    wool: woolManager,
     // [subagent-model-switch U6] subagent.setModel 路由依赖（§7.1.1 通道生产适配器，
     // 上方构造；缺席时 handler 恒回 unwired 可操作错误的兜底自此不可达）。
     subagentModelSwitchGateway,
@@ -1723,8 +1636,6 @@ async function main(): Promise<void> {
     // dispose 是收尾双保险；shutdown 后不再有回收拍）。线会话文件
     // **不删**（退出不删，D5 裁决⑧）；线进程由下方 server.stop → destroyAll 统一杀（同一 pm）。
     btwService.dispose()
-    // wool（D5）：停每日签到提醒定时器（unref 已不阻塞退出，显式 dispose 同款收尾双保险）。
-    woolManager.dispose()
     console.log(`\n[runtime] received ${signal}, shutting down...`)
     try {
       shutdownStep('flush-stores')

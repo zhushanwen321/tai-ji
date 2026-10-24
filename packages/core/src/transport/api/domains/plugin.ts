@@ -12,9 +12,12 @@
  *
  * 依赖方向：events（订阅）+ command（类型化请求/动作原语）。
  */
-import type { PluginInfo, PluginUiSnapshotPayload } from '@taiji/shared'
+import type { PluginEventPayload, PluginInfo, PluginInvokeReply, PluginCatalogReply, PluginListAvailableReply, PluginUiSnapshotPayload } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
+import * as pending from '../pending'
 import { command } from '../request'
+import { notDeliveredError } from '../../errors'
+import { send } from '../../ws-client'
 import * as events from '../events'
 
 export function onPlugins(handler: (plugins: PluginInfo[]) => void): () => void {
@@ -27,11 +30,13 @@ export function onPlugins(handler: (plugins: PluginInfo[]) => void): () => void 
  * 拉取插件 UI 快照（headerAction 运行时状态 + 视图树，ADR-0097「拉为主、推补充」）。
  *
  * plugin:headerActionUpdate / plugin:viewUpdate 是 transient 推送（不入 ring、无重放），
- * renderer 重载/重连后的丢失由本拉取收敛：无过滤参数 = 全部会话（connected 边沿全量
- * 恢复）；sessionId/viewId 过滤 = 单分区（ViewHost 挂载发现分区缺失时自举补拉）。
+ * renderer 重载/重连后的丢失由本拉取收敛：无过滤参数 = 全部（connected 边沿全量恢复）；
+ * 过滤 = 单分区（ViewHost 挂载发现分区缺失时自举补拉）。过滤参数为 scope 二选一
+ * （provider-plugin-access U2 分区键泛化）：会话域 { sessionId }、全局域
+ * { mountId, pluginId }（Provider 页挂载位，插件维度必带），viewId 可组合做单视图补拉。
  */
 export function getPluginUiSnapshot(
-  filter: { sessionId?: string; viewId?: string } = {},
+  filter: { sessionId?: string; mountId?: string; pluginId?: string; viewId?: string } = {},
 ): Promise<PluginUiSnapshotPayload> {
   return command('plugin.ui.snapshot', filter, RPC_BACKSTOP_TIMEOUT_MS)
 }
@@ -50,4 +55,55 @@ export async function revokePermissions(pluginId: string): Promise<void> {
 /** 拒绝插件本次权限申请（不回收已授权限）。reply pong ack；无列表刷新广播。 */
 export async function denyPermissions(pluginId: string): Promise<void> {
   await command('plugin.denyPermissions', { pluginId }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+// ── provider-plugin-access D9 / D8 / U5：invoke、uiEvent、plugin:event 订阅、清单域 ──
+
+/**
+ * 调用插件注册的业务方法（provider-plugin-access D9）：runtime 复用 commands-executor
+ * 执行链（pending 登记 / 超时取值 / 同 handlerId 并发拒绝），路由键 = pluginId:method。
+ * reply = PluginInvokeReply 信封，本函数解包返回 result（unknown 透传）；请求级失败
+ * （插件不存在 / 方法未注册 / 超时）经统一 error envelope reject。
+ */
+export async function invokePlugin(pluginId: string, method: string, params?: Record<string, unknown>): Promise<unknown> {
+  const reply = await command('plugin.invoke', { pluginId, method, ...(params !== undefined ? { params } : {}) }, RPC_BACKSTOP_TIMEOUT_MS) as PluginInvokeReply
+  return reply.result
+}
+
+/**
+ * 发送输入组件值回传（provider-plugin-access D8）：text-input 值变更即发
+ * （fire-and-forget，插件侧始终持有最新值）。reply pong ack，await 只为等 RPC settle。
+ * 'plugin.uiEvent' 未登记 ReplyPayloadMap（ack 帧），经底层 send + pending 手工展开
+ * （command 的原始模板形态）——未送达（WS 未 OPEN）时立即 reject 该 pending
+ * （与 request.ts 同纪律：不留 65s 悬挂窗口）。
+ */
+export async function sendPluginUiEvent(payload: { pluginId: string; viewId: string; componentId: string; event: string; value: unknown }): Promise<void> {
+  const id = pending.createCommandId()
+  const result = pending.register<void>(id, RPC_BACKSTOP_TIMEOUT_MS)
+  if (!send({ type: 'plugin.uiEvent', id, payload })) {
+    pending.reject(id, notDeliveredError('transport unavailable (ws not open)'))
+  }
+  await result
+}
+
+/**
+ * 订阅插件业务事件（provider-plugin-access D9）：插件经 runtime plugin.event RPC
+ * 上报、宿主广播 'plugin:event' 帧（无 sessionId → global 通道）。首个消费方 =
+ * 凭据状态上报（D5——拉取给已知事实，本订阅只作增量提示；推送丢失由下一次展开拉取
+ * 收敛，不建推送补偿）。返回取消函数。
+ */
+export function onPluginEvent(handler: (payload: PluginEventPayload) => void): () => void {
+  return events.onGlobalType('plugin:event', (msg) => {
+    handler(msg.payload)
+  })
+}
+
+/** 清单可安装视图（provider-plugin-access U5）：附本地安装状态比对（installed / installedVersion / updateAvailable）。 */
+export function listAvailablePlugins(): Promise<PluginListAvailableReply> {
+  return command('plugin.listAvailable', {}, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 清单原始目录条目（provider-plugin-access U5：含家族元数据与安装知情面声明）。 */
+export function getPluginCatalog(): Promise<PluginCatalogReply> {
+  return command('plugin.catalog', {}, RPC_BACKSTOP_TIMEOUT_MS)
 }

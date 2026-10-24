@@ -15,7 +15,6 @@ import { computed } from 'vue'
 import { getSettingsStore, getSettingsTransport } from '@taiji/core'
 import { optimisticUpdate, refCell } from '@taiji/core/foundation/optimistic-update'
 import type { ScopedRenderItem, SelectableModel } from '@taiji/ui/features/settings'
-import { useWool } from './useWool'
 
 // 防重入：setScopedModels 是整列表覆写，in-flight 期间的新触发会拿含乐观值的快照当 old，
 // 双失败时回滚互相错位 → 模块级 busy 检查，操作进行中忽略新触发（对齐 ProviderPage.vue
@@ -24,33 +23,6 @@ let scopedMutationInFlight = false
 
 export function useScopedModels() {
   const settingsStore = getSettingsStore()
-  // 羊毛目录快照（已接入家族的 catalog.models）：白名单添加面板与白名单行渲染的羊毛
-  // 候选源——羊毛条目不进 config.providers 帧（provider 通用列表与 provider 级操作面
-  // 走 wool.action 专属通道，并入会产生重复卡与误操作面），不在此单独并入则白名单
-  // 非空用户永远无法把羊毛模型加进白名单（model.list 按白名单硬过滤 → 选择器只对
-  // 已加白名单者可见 → 死锁）。
-  const wool = useWool()
-
-  const woolSelectable = computed<SelectableModel[]>(() => {
-    const snap = wool.snapshot.value
-    if (!snap) return []
-    const out: SelectableModel[] = []
-    for (const f of snap.families) {
-      if (!f.adopted || !f.catalog?.models.length) continue
-      const providerId = `wool-${f.family}`
-      for (const m of f.catalog.models) {
-        out.push({
-          fullId: `${providerId}/${m.id}`,
-          providerId,
-          providerName: f.displayName,
-          modelId: m.id,
-          name: m.name,
-          apiKeySet: true,
-        })
-      }
-    }
-    return out
-  })
 
   // ── 渲染数据：scopedModels 字符串列表 → ScopedRenderItem[] ──
 
@@ -65,15 +37,8 @@ export function useScopedModels() {
 
       const providerId = fullId.substring(0, slashIdx)
       const modelId = fullId.substring(slashIdx + 1)
-      const woolModel = woolSelectable.value.find((w) => w.fullId === fullId)
       const provider = providers.find((p) => p.id === providerId)
       const model = provider?.models.find((m) => m.id === modelId)
-
-      // 羊毛模型行：凭据通道写入的 models.json 条目无 models 数组（目录在授权后才拉取），
-      // provider 命中但 model 必然找不到——目录快照是行渲染的权威源，缺失才标「已不存在」。
-      if (woolModel) {
-        return { scoped: fullId, modelName: woolModel.name ?? modelId, providerName: provider?.name ?? woolModel.providerName, apiKeySet: true, missing: false }
-      }
       if (!provider || !model) return { scoped: fullId, modelName: modelId, providerName: provider?.name ?? providerId, apiKeySet: provider?.apiKeySet ?? true, missing: !model }
 
       return {
@@ -103,7 +68,7 @@ export function useScopedModels() {
         })
       }
     }
-    return [...result, ...woolSelectable.value]
+    return result
   })
 
   // ── 操作函数（乐观更新协议：失败回滚 + rethrow）──

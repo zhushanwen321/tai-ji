@@ -400,7 +400,7 @@ export interface ISessionService {
   /**
    * 系统信令入口公开委托（MessageDispatcher.sendSystemCommand 同一实现；旁路契约
    * 见该方法的分流 D1 文档——不经 hook / 不经内核，fail-closed 探测）。
-   * 消费方 = revoke-orchestrator（deps 注入形态）与羊毛管理编排 wool-manager（本公开面）。
+   * 消费方 = revoke-orchestrator（deps 注入形态）。
    */
   sendSystemCommand(sessionId: string, commandLine: string, requireCommand?: string): Promise<{
     kind: 'sent' | 'extension-missing' | 'pi-reclaimed' | 'error'
@@ -765,12 +765,6 @@ export interface IModelService {
    * aggregateModels 公开单参签名，故独立命名。
    */
   aggregateModelsWithScoped(providers: ProviderInfo[], scopedModels: string[]): ModelInfo[]
-  /**
-   * 羊毛 provider 聚合源注入（wool-provider D6 ③）：组合根在 WoolManager 构造后
-   * 接线，aggregateModelsWithScoped 消费其 listWoolProviderInfos 并入输出。可选
-   * 方法——测试替身不实现即「无羊毛并入」基线形态（S9 零回归对照锚）。
-   */
-  setWoolProviderSource?(source: { listWoolProviderInfos(): ProviderInfo[] }): void
   discoverModelsFromApi(
     baseUrl: string,
     apiKey?: string,
@@ -847,6 +841,22 @@ export interface IPluginService {
   denyPermissions(pluginId: string): Promise<void>
   /** Execute a command contributed by a plugin（S3-W1：返回插件 handler 的执行结果） */
   executeCommand(pluginId: string, commandId: string, args?: Record<string, unknown>): Promise<unknown>
+  /**
+   * 调用插件注册的业务方法（provider-plugin-access D9，plugin.invoke）：复用
+   * commands-executor 执行链（pending 登记 / 超时取值 / 同 handlerId 并发拒绝），
+   * 路由键 = `${pluginId}:${method}`。返回插件方法的返回值（unknown 透传）。
+   */
+  invokePlugin(pluginId: string, method: string, params?: Record<string, unknown>): Promise<unknown>
+  /**
+   * 投递输入组件值回传给渲染该树的插件（provider-plugin-access D8，plugin.uiEvent）：
+   * 经 PLUGIN_UI_EVENT_NOTIFY 单向通知发往插件 Worker（fire-and-forget，插件侧始终
+   * 持有最新值）。插件不存在时 warn 丢弃（渲染树已随插件下线，无投递对象）。
+   */
+  deliverPluginUiEvent(pluginId: string, viewId: string, componentId: string, event: string, value: unknown): Promise<void>
+  /** 清单可安装视图（provider-plugin-access U5，plugin.listAvailable reply）。 */
+  listAvailablePlugins(): Promise<import('@taiji/shared').PluginListAvailableReply>
+  /** 清单原始目录条目（provider-plugin-access U5，plugin.catalog reply）。 */
+  getPluginCatalog(): Promise<import('@taiji/shared').PluginCatalogReply>
   /** Get plugin config value(s) */
   getPluginConfig(pluginId: string, key?: string): Promise<unknown>
   /** Set a plugin config value */
@@ -863,6 +873,12 @@ export interface IPluginService {
 
   /** Install a plugin from an npm package specifier */
   installPlugin(packageSpecifier: string): Promise<import('./services/ports/plugin-installer.js').InstallResult>
+  /** 两段式安装第一段：下载校验解压至暂存，返回确认卡知情面（manifest 声明全量，S27）；失败抛带 code 领域错误（如 NAMESPACE_MISMATCH） */
+  preparePluginInstall(packageSpecifier: string): Promise<import('./services/plugin-service/plugin-service.js').PluginInstallPreview>
+  /** 两段式安装第二段（确认停点之后）：暂存换入 → 扫描 → 激活 → 安装登记；激活失败自动回滚（S18） */
+  confirmPluginInstall(pluginId: string): Promise<import('./services/ports/plugin-installer.js').InstallResult>
+  /** 两段式安装：用户取消（清暂存与 pending 登记，未确认不发生安装落盘） */
+  cancelPluginInstall(pluginId: string): Promise<void>
   getToolSchemas?(): import('./services/plugin-service/plugin-types.js').ToolRegistration[]
   /**
    * pi 侧事件向插件钩子的投递（pi1-disposition-chat-flow D7②）：泛型 'onPiEvent' 键派发，

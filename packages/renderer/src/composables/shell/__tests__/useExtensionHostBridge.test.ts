@@ -298,7 +298,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(1)
     expect(transportSendSpy).toHaveBeenCalledWith({
       type: 'plugin.mountPoints.sync',
-      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar'] },
+      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'provider.authorize', 'provider.detail-extra'] },
     })
   })
 
@@ -317,7 +317,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
 
     expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(2)
     expect(syncCallsOf('plugin.mountPoints.sync').at(-1)).toEqual([
-      { type: 'plugin.mountPoints.sync', payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar'] } },
+      { type: 'plugin.mountPoints.sync', payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'provider.authorize', 'provider.detail-extra'] } },
     ])
   })
 
@@ -345,7 +345,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     await vi.advanceTimersByTimeAsync(200)
     expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(3)
     expect(syncCallsOf('plugin.mountPoints.sync').at(-1)).toEqual([
-      { type: 'plugin.mountPoints.sync', payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar'] } },
+      { type: 'plugin.mountPoints.sync', payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'provider.authorize', 'provider.detail-extra'] } },
     ])
   })
 })
@@ -579,9 +579,9 @@ describe('插件 UI 快照拉取（ADR-0097 拉为主：connected 全量恢复 +
   it('applyUiSnapshot：快照条目按实时帧形状逐条 emit（headerAction 帧 + widget 帧带 sessionId）', () => {
     const bus = new InternalEventBus()
     const headerFrames: unknown[] = []
-    const widgetFrames: Array<{ sessionId?: string; viewId: string; guiTree: unknown[] }> = []
+    const widgetFrames: Array<{ sessionId?: string; mountId?: string; viewId: string; guiTree: unknown[]; generation?: number }> = []
     bus.on('plugin:headerActionUpdate', (e) => headerFrames.push(e.headerAction))
-    bus.on('extension-widget', (e) => widgetFrames.push({ sessionId: e.sessionId, viewId: e.widget.viewId, guiTree: e.widget.guiTree }))
+    bus.on('extension-widget', (e) => widgetFrames.push({ sessionId: e.sessionId, mountId: e.mountId, viewId: e.widget.viewId, guiTree: e.widget.guiTree, generation: e.widget.generation }))
 
     applyUiSnapshot(bus, {
       headerActions: [{ pluginId: 'scheduler-manager', headerActionId: 'scheduler-manager.open', sessionId: 's1', badge: '2' }],
@@ -589,7 +589,24 @@ describe('插件 UI 快照拉取（ADR-0097 拉为主：connected 全量恢复 +
     })
 
     expect(headerFrames).toEqual([{ pluginId: 'scheduler-manager', headerActionId: 'scheduler-manager.open', sessionId: 's1', badge: '2' }])
-    expect(widgetFrames).toEqual([{ sessionId: 's1', viewId: 'scheduler.modal', guiTree: [{ type: 'ansi-text', props: { lines: ['x'] } }] }])
+    expect(widgetFrames).toEqual([{ sessionId: 's1', viewId: 'scheduler.modal', guiTree: [{ type: 'ansi-text', props: { lines: ['x'] } }], generation: undefined }])
+  })
+
+  it('applyUiSnapshot：全局域条目（U2）按 mountId 形态 emit + generation 透传', () => {
+    const bus = new InternalEventBus()
+    const widgetFrames: Array<{ sessionId?: string; mountId?: string; viewId: string; pluginId: string; generation?: number }> = []
+    bus.on('extension-widget', (e) => widgetFrames.push({ sessionId: e.sessionId, mountId: e.mountId, viewId: e.widget.viewId, pluginId: e.widget.pluginId, generation: e.widget.generation }))
+
+    applyUiSnapshot(bus, {
+      headerActions: [],
+      views: [
+        { mountId: 'provider.authorize', viewId: 'flow', pluginId: 'plug-a', guiTree: [{ type: 'ansi-text', props: { lines: ['auth'] } }], updatedAt: 1, generation: 4 },
+      ],
+    })
+
+    expect(widgetFrames).toEqual([
+      { sessionId: undefined, mountId: 'provider.authorize', viewId: 'flow', pluginId: 'plug-a', generation: 4 },
+    ])
   })
 
   it('WS connected 边沿发出无过滤全量拉取（plugin.ui.snapshot）；未连接不发送', async () => {
@@ -630,5 +647,29 @@ describe('插件 UI 快照拉取（ADR-0097 拉为主：connected 全量恢复 +
     const frame = snapshotCalls[0][0] as { type: string; payload: unknown }
     expect(frame.type).toBe('plugin.ui.snapshot')
     expect(frame.payload).toEqual({ sessionId: 's1', viewId: 'scheduler.modal' })
+  })
+
+  it('refreshViewInScope（U2 VIEW_HOST_SOURCE_KEY provide）：全局域按 (mountId, pluginId, viewId) 过滤补拉', async () => {
+    const provided = initBridge()
+    const viewSource = provided.find((p) => p.key === VIEW_HOST_SOURCE_KEY)?.value as
+      | { refreshViewInScope?: (scope: unknown, viewId: string) => void; getViewInScope?: unknown }
+      | undefined
+    expect(viewSource?.refreshViewInScope).toBeTypeOf('function')
+    expect(viewSource?.getViewInScope).toBeTypeOf('function')
+
+    connect('mock://extension-host-test', { auth: 'skip' })
+    await vi.advanceTimersByTimeAsync(200)
+    transportSendSpy.mockClear()
+
+    viewSource!.refreshViewInScope!({ kind: 'global', mountId: 'provider.authorize', pluginId: 'plug-a' }, 'flow')
+    await Promise.resolve()
+
+    const snapshotCalls = transportSendSpy.mock.calls.filter(
+      (c) => (c[0] as { type?: string } | undefined)?.type === 'plugin.ui.snapshot',
+    )
+    expect(snapshotCalls).toHaveLength(1)
+    const frame = snapshotCalls[0][0] as { type: string; payload: unknown }
+    expect(frame.type).toBe('plugin.ui.snapshot')
+    expect(frame.payload).toEqual({ mountId: 'provider.authorize', pluginId: 'plug-a', viewId: 'flow' })
   })
 })

@@ -269,7 +269,7 @@ export interface RpcErrorResponse {
   error: { code: number; message: string; data?: unknown }
 }
 
-export type RpcResponse = RpcSuccessResponse | RpcErrorResponse
+export type RpcResponse = RpcSuccessResponse | RpcErrorResponse // oe-exempt:20261024:framework:ports/SDK 契约类型——接口先立、单实现常态（映射表/端口单一数据源）
 
 export interface RpcNotification {
   jsonrpc: '2.0'
@@ -807,8 +807,13 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
     unregister(commandId: string): Promise<void>
   }
   readonly views: {
-    /** [D1/u5b] sessionId 显式必填（E15）：内容绑打开时所在会话，runtime 按它定向投递。 */
-    update(viewId: string, guiTree: GuiComponent[], opts: { sessionId: string }): Promise<void>
+    /**
+     * 推送视图树（全量替换语义）。归属二选一（provider-plugin-access U2 分区键泛化）：
+     * `{ sessionId }` 会话域（内容绑打开时所在会话，runtime 定向投递该会话）；
+     * `{ mountId }` 全局域（Provider 页等无会话挂载位，如 'provider.authorize'——
+     * 分区键自动并入本插件 id，多插件同挂载位互不覆盖）。都给或缺 → INVALID_VIEW_SCOPE。
+     */
+    update(viewId: string, guiTree: GuiComponent[], opts: { sessionId: string } | { mountId: string }): Promise<void>
     listMountPoints(): Promise<string[]>
   }
 }

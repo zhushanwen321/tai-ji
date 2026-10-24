@@ -170,7 +170,7 @@
           <ViewHost
             v-if="sessionId && density.slots.leftCluster === 'expanded'"
             view-id="composer.toolbar"
-            :session-id="sessionId"
+            :scope="{ kind: 'session', sessionId }"
             empty="hidden"
           />
         </div>

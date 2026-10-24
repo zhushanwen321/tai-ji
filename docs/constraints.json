@@ -2127,7 +2127,7 @@
     },
     {
       "id": "C-proc-14",
-      "summary": "provider 凭据读路径唯一通道：packages/runtime/src/** 生产代码（排除 *.test.ts 与 __tests__/）禁止在白名单外直查凭据（getApiKeyForProvider / readAuthCredentials / getProviderConfig(...).apiKey 这类模式），一律经 services/auth/provider-credential-resolver.ts（接口在 services/ports/）；由 scripts/check-provider-credential-reads.mjs 检查，白名单 = resolver 模块自身仅此一个文件（M2fg 收尾后基线清零，新增例外须过 review 改白名单）",
+      "summary": "provider 凭据读路径唯一通道：packages/runtime/src/** 生产代码（排除 *.test.ts 与 __tests__/）禁止在白名单外直查凭据（getApiKeyForProvider / readAuthCredentials / getProviderConfig(...).apiKey 这类模式），一律经 services/auth/provider-credential-resolver.ts（接口在 services/ports/）；由 scripts/check-provider-credential-reads.mjs 检查，白名单 = resolver 模块自身仅此一个文件（M2fg 收尾后基线清零，新增例外须过 review 改白名单）；插件 providers.credential 受控回读（services/provider-write-proxy.ts）同属本通道消费方——只经 resolver 取生效凭据，不自建第二解析链（不构成白名单例外）",
       "scope": [
         "packages/runtime/src/**"
       ],
@@ -2147,7 +2147,7 @@
     },
     {
       "id": "C-proc-15",
-      "summary": "models.json 写入点收敛：upsertProvider 直调只许白名单（setProvider 写入载体 provider-config-helper / importer 主路径 / legacy 与 extras 迁移链 / IConfigStore 实现与接口签名 pi-config-store + ports/config / pi-provider-store 定义文件本体含 clearProviderApiKey），新增直调点须接防线载体（applyProviderWritePolicy）或进白名单——堵防线载体被旁路的复发通道；与 C-proc-14 同属 scripts/check-provider-credential-reads.mjs 的姊妹检查",
+      "summary": "models.json 写入点收敛：upsertProvider 直调只许白名单（setProvider 写入载体 provider-config-helper / importer 主路径 / legacy 与 extras 迁移链 / IConfigStore 实现与接口签名 pi-config-store + ports/config / pi-provider-store 定义文件本体含 clearProviderApiKey），新增直调点须接防线载体（applyProviderWritePolicy）或进白名单——堵防线载体被旁路的复发通道；与 C-proc-14 同属 scripts/check-provider-credential-reads.mjs 的姊妹检查；插件 providers.write / providers.delete（services/provider-write-proxy.ts）经注入的 setProvider / deleteProvider 写策略链落盘，不是 upsertProvider 直调点（不进白名单，无需扩白名单）",
       "scope": [
         "packages/runtime/src/**"
       ],
@@ -3353,7 +3353,7 @@
     },
     {
       "id": "C-ext-32",
-      "summary": "模型可见性投喂单点 = provider-live-sync 包（extensions/universal/provider-live-sync/，投喂模块 src/catalog-bridge.ts）：taiji 侧目录缓存 → pi 进程注册表常驻条目的写入单点。新增模型数据来源（未来第三条缓存链、新目录源）时改该投喂模块的输入，禁止在其他扩展新开 registerProvider/registerNativeProvider/registerVirtualModel 常驻注入——注入修的是注册表这一事实源，消费方（--model 解析 / rpc set_model / rename / smart-context / permission / scheduler / subagent 校验 / provider 对账）零改动自动受益，新开注入点等于绕过单点、制造第二写入方。scheduler 的 ack 合成轮（src/ack-turn.ts 临时注册合成 provider、one-shot 注销）是执行通道覆写、非可见性投喂，语义不同不在禁列。机器执行点 = check_register_allowlist.py 调用点白名单（包粒度：provider-live-sync + scheduler 两包，测试目录排除）",
+      "summary": "模型可见性投喂单点 = provider-live-sync 包（extensions/universal/provider-live-sync/，投喂模块 src/catalog-bridge.ts）：taiji 侧目录缓存 → pi 进程注册表常驻条目的写入单点。新增模型数据来源（未来第三条缓存链、新目录源）时改该投喂模块的输入，禁止在其他扩展新开 registerProvider/registerNativeProvider/registerVirtualModel 常驻注入——注入修的是注册表这一事实源，消费方（--model 解析 / rpc set_model / rename / smart-context / permission / scheduler / subagent 校验 / provider 对账）零改动自动受益，新开注入点等于绕过单点、制造第二写入方。scheduler 的 ack 合成轮（src/ack-turn.ts 临时注册合成 provider、one-shot 注销）是执行通道覆写、非可见性投喂，语义不同不在禁列。机器执行点 = check_register_allowlist.py 调用点白名单（包粒度：provider-live-sync + scheduler 两包，测试目录排除）。豁免（provider-plugin-access D7）：羊毛 pi 扩展 pi-wool-<family>（独立仓 tai-ji-plugin）自行 registerProvider 注册自有 provider（providerId = wool-<family>），数据源 = models.json 条目（上游目录由 taiji 插件经 providers.write 的 models 字段写回），不参与 catalog-bridge 投喂链 → 属本条豁免；豁免边界 = 不得注册 wool-<family> 之外的 provider、不得向 taiji 目录缓存写入。主仓 extensions/ 无羊毛包（已迁独立仓），本脚本包粒度白名单维持 provider-live-sync + scheduler 两包不变",
       "scope": [
         "extensions/**"
       ],

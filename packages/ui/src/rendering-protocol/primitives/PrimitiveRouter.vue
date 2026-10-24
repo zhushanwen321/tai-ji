@@ -20,13 +20,14 @@ import StatsLine from './StatsLine.vue'
 import TabBar from './TabBar.vue'
 import ListTree from './ListTree.vue'
 import Actionbar from './Actionbar.vue'
+import TextInput from './TextInput.vue'
 import { getPrimitiveContainer, type PrimitiveContainerType } from './container-registry'
 import { GUI_CUSTOM_REGISTRY_KEY } from '../registry'
 import { resolveComponent } from '@taiji/core/rendering-protocol'
 
 const props = defineProps<{ component: GuiComponent }>()
 
-/** core resolveComponent 保证可渲染的 builtin type（ansi-text + 8 原语：7 布局 + 首个交互原语 action-bar）。 */
+/** core resolveComponent 保证可渲染的 builtin type（ansi-text + 9 原语：7 布局 + action-bar + text-input）。 */
 type RenderableBuiltinType = Exclude<GuiComponentType, 'custom'>
 
 /** 叶子原语（不递归、与 Router 无互引）——Router 静态 import 安全。
@@ -42,6 +43,7 @@ const BUILTIN_MAP: Record<LeafBuiltinType, Component> = {
   'tab-bar': TabBar,
   'list-tree': ListTree,
   'action-bar': Actionbar,
+  'text-input': TextInput,
 }
 
 /** custom 组件注册表（内置 extension 编译期注册）。默认空表。 */

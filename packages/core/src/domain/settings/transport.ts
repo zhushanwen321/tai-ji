@@ -64,10 +64,8 @@ import type {
   QuotaFetchFailureReason,
   ExtensionDiscoveredPayload,
   RecommendedExtension,
-  WoolRuntimeSnapshot,
-  WoolActionRequest,
-  WoolActionReply,
-  WoolAuthorizeUrlPayload,
+  PluginEventPayload,
+  PluginListAvailableReply,
 } from '@taiji/shared'
 
 /**
@@ -130,6 +128,38 @@ export interface QuotaSnapshot {
    * getCached 在上次查询失败时携带（失败态渲染 + 「查看上次成功数据」归 Phase B）。
    */
   reason?: QuotaFetchFailureReason
+}
+
+/**
+ * text-input 值回传载荷（provider-plugin-access D8）：连接口形状对齐
+ * `plugin.uiEvent` 帧（viewId 定位挂载视图，componentId 定位输入项）。
+ */
+export interface PluginUiEventPayload {
+  pluginId: string
+  viewId: string
+  componentId: string
+  event: string
+  value: unknown
+}
+
+/**
+ * 安装确认卡知情面（S27；结构对齐 runtime IPluginService.PluginInstallPreview）：
+ * prepare 阶段返回暂存解压物的 manifest 声明，宿主全量展示后由用户确认。
+ */
+export interface PluginInstallPreview {
+  pluginId: string
+  packageName: string
+  version: string
+  capabilities: string[]
+  readPaths: string[]
+  permissions: string[]
+  namespace?: string
+}
+
+/** confirm 提交结果（失败携带错误码 / 文案，UI 可见不静默）。 */
+export interface PluginInstallResult {
+  success: boolean
+  error?: string
 }
 
 /**
@@ -224,16 +254,6 @@ export interface SettingsTransport {
   getCachedQuota(providerId: string): Promise<QuotaSnapshot>
   /** 强制刷新额度（绕过 throttle，Settings 测试查询按钮专用；失败态不抛错） */
   refreshQuota(providerId: string): Promise<QuotaSnapshot>
-
-  // ── 羊毛 provider（wool-provider D6：向导与条目徽标数据源）──
-  /** 拉羊毛域全量运行态快照（family 安装/接入/账号/目录缓存视图；纯内存读） */
-  getWoolState(): Promise<WoolRuntimeSnapshot>
-  /**
-   * 触发宿主编排动作（install/detect/status/checkin/refresh/setAutoCheckin/authorize/
-   * extract/uninstall；词表见 shared WOOL_ACTION_TYPES）。
-   * 两态信封不 reject——ok=false 是设计内领域回执（error.code 分流恢复指引）。
-   */
-  runWoolAction(req: WoolActionRequest): Promise<WoolActionReply>
 
   // ── pi 启动预设 ──
   /** 全部预设（内置 + 自定义） */
@@ -362,6 +382,26 @@ export interface SettingsTransport {
   upgradeExtension(name: string): Promise<void>
   setExtensionAutoUpgrade(name: string, enabled: boolean): Promise<void>
 
+  // ── 插件 Provider 来源（provider-plugin-access U6：清单 / 业务方法 / 状态上报 / 输入回传）──
+  /** 插件清单可安装视图（Provider 页家族卡数据源 + 本地安装状态 / 可更新标记） */
+  listAvailablePlugins(): Promise<PluginListAvailableReply>
+  /** 调插件业务方法（plugin.invoke；reply.result 解包，请求级失败 reject） */
+  invokePlugin(pluginId: string, method: string, params?: Record<string, unknown>): Promise<unknown>
+  /** 订阅插件业务事件广播（plugin:event；凭据状态上报的增量提示通道，D5 拉为主推补充） */
+  onPluginEvent(h: (payload: PluginEventPayload) => void): () => void
+  /** text-input 值回传（plugin.uiEvent；fire-and-forget，插件侧始终持有最新值） */
+  sendPluginUiEvent(payload: PluginUiEventPayload): Promise<void>
+  /**
+   * 两段式安装（S27 确认停点）：prepare 下载校验解压至暂存并返回知情面，confirm 提交落盘
+   * 并激活，cancel 清理暂存（未确认不发生安装落盘）。
+   *
+   * optional = 通道未落定的宿主实现可省略，消费方（Provider 页）以「方法存在与否」
+   * 判定安装入口可用性并显式降级，不崩溃。
+   */
+  preparePluginInstall?(packageSpec: string): Promise<PluginInstallPreview>
+  confirmPluginInstall?(pluginId: string): Promise<PluginInstallResult>
+  cancelPluginInstall?(pluginId: string): Promise<void>
+
   // ══════════════════════ 订阅（on*，返回取消函数）══════════════════════
 
   // ── provider / 模型 / 目录 ──
@@ -379,11 +419,6 @@ export interface SettingsTransport {
   onDefaultsWithSource(h: (payload: { defaultModel: string; source?: string }) => void): () => void
   /** skill 缓存失效信号（scope='global' 全局重新拉取 / 'project' 按 cwd 路由） */
   onSkillCacheInvalidated(h: (payload: SkillCacheInvalidatedPayload) => void): () => void
-
-  // ── 羊毛 provider（wool-provider D6：状态变化广播，与 getState reply 同名同形）──
-  onWoolState(h: (snapshot: WoolRuntimeSnapshot) => void): () => void
-  /** 授权页 URL 一次性广播（authorize 编排在途；向导消费驱动浮层浏览器打开授权页） */
-  onWoolAuthorizeUrl(h: (payload: WoolAuthorizeUrlPayload) => void): () => void
 
   // ── system 设置项 ──
   onSystemPrompt(h: (cfg: SystemPromptConfig, corrupted: boolean) => void): () => void

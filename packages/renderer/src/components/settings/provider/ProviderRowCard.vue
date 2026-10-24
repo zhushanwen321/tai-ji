@@ -6,6 +6,10 @@
     状态全由父组件下发（真值在 settings store / 手风琴 guard / oauth 状态机，均在 ProviderPage
     单实例持有），本组件纯受控展示 + 动作上抛，不做 v-model——enabled 等值经父侧乐观更新链路回写，
     行卡不是真值源。新建态合成行（isNew）无开关/状态点/徽章/默认 pill/计数/删除。
+
+    插件来源扩展（provider-plugin-access D2/D5/D10）：pluginInfo 非空 = 插件来源条目——
+    展开体内含凭据状态行（插件上报，未上报零 DOM——D5/S5）、条目底部 detail-extra 插件
+    渲染区（挂载位 global:provider.detail-extra）与「重新授权」「更新插件」宿主动作。
   -->
   <div
     data-testid="provider-card"
@@ -37,6 +41,13 @@
         :aria-expanded="expanded"
         @click="emit('toggle', provider.id)"
       >{{ isNew ? t('settings.provider.newProvider') : provider.name }}</span>
+
+      <!-- 插件来源标记（D1 终态样例「WorkBuddy · 插件」：来源类型在列表可辨） -->
+      <span
+        v-if="!isNew && pluginInfo"
+        data-testid="provider-plugin-badge"
+        class="inline-flex h-[18px] shrink-0 items-center rounded-full bg-accent-soft px-[7px] text-[length:var(--text-2xs)] font-semibold text-accent"
+      >{{ t('pluginProvider.row.pluginBadge') }}</span>
 
       <!-- 认证方式徽章（demo .tag 形态：h18 / px7 / 圆角 999 / text-2xs / fw-mid；配色读 provider-badge） -->
       <span
@@ -103,6 +114,21 @@
          B-1：OAuth 态经 props/事件接线（useProviderOAuth 单实例在 ProviderPage 侧，事件
          上抛由页面驱动共享状态机——无双 listener） -->
     <div v-if="expanded" class="mt-[4px] border-t border-hairline pt-[12px]" data-testid="provider-expand-body">
+      <!-- 插件凭据状态行（D5/S17：插件上报的展示映射；undefined = 未上报 → 零 DOM，
+           宿主不猜测凭据状态、不显示任何失效标记——S5 负面断言对象） -->
+      <div
+        v-if="credentialStatus"
+        data-testid="provider-plugin-status"
+        class="mb-[8px] flex items-center gap-1.5 text-[length:var(--text-xs)]"
+        :class="credentialStatus.state === 'valid' ? 'text-success' : 'text-warn'"
+      >
+        <span
+          class="size-[7px] shrink-0 rounded-full"
+          :class="credentialStatus.state === 'valid' ? 'bg-success' : 'bg-warn'"
+        />
+        <span class="truncate">{{ credentialStatus.message ?? (credentialStatus.state === 'valid' ? t('pluginProvider.status.fallbackValid') : t('pluginProvider.status.fallbackInvalid')) }}</span>
+      </div>
+
       <ProviderEditBody
         :provider="isNew ? null : provider"
         :oauth-present="oauthPresent"
@@ -114,11 +140,43 @@
         @oauth-login="emit('oauth-login')"
         @oauth-logout="emit('oauth-logout')"
       />
+
+      <!-- 插件来源条目扩展（D2/D5/D10）：宿主区（上）与插件渲染区（下）两区边界清晰、
+           无字段重叠（S6）——detail-extra 为挂载位容器（无树时零 DOM，不占布局）。 -->
+      <template v-if="pluginInfo">
+        <div class="mt-[12px] border-t border-hairline pt-[12px]" data-testid="provider-detail-extra-boundary">
+          <p class="mb-[8px] text-[length:var(--text-2xs)] font-semibold text-neutral-mid">{{ t('pluginProvider.detailExtra.title') }}</p>
+          <ViewHost
+            :scope="{ kind: 'global', mountId: DETAIL_EXTRA_MOUNT_ID, pluginId: pluginInfo.pluginId }"
+            :view-id="DETAIL_EXTRA_VIEW_ID"
+            :title="t('pluginProvider.detailExtra.title')"
+            empty="hidden"
+          />
+        </div>
+
+        <!-- 宿主常驻动作（D5：重新授权按钮不判断是否失效，常驻；S26：更新插件次级动作） -->
+        <div class="mt-[12px] flex items-center justify-end gap-2">
+          <Button
+            v-if="pluginInfo.updateAvailable"
+            variant="ghost"
+            size="sm"
+            data-testid="provider-update-plugin-btn"
+            @click.stop="emit('update-plugin', provider.id)"
+          >{{ t('pluginProvider.actions.updatePlugin') }}</Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            data-testid="provider-reauthorize-btn"
+            @click.stop="emit('reauthorize', provider.id)"
+          >{{ t('pluginProvider.actions.reauthorize') }}</Button>
+        </div>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { inject, provide, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, Trash2 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
@@ -126,10 +184,18 @@ import { Switch } from '@/components/ui/switch'
 import { PopoverTrigger } from '@/components/ui/popover'
 import ModelSelectPopover from '@/components/panel/ModelSelectPopover.vue'
 import { ProviderEditBody } from '@taiji/ui/features/settings'
-import type { ProviderId, ProviderInfo, ProviderStatus, QuotaPreset } from '@taiji/shared'
+import { VIEW_HOST_SOURCE_KEY, ViewHost } from '@taiji/ui/extension-host'
+import { UI_EVENT_SENDER_KEY } from '@taiji/ui/rendering-protocol'
+import type { PluginViewScope, ProviderId, ProviderInfo, ProviderStatus, QuotaPreset } from '@taiji/shared'
 import { authBadgeClass, authBadgeTextKey } from './provider-badge'
+import { createPluginUiEventSender, type CredentialStatusPayload, type PluginEntryInfo } from './PluginProviderSource'
 
-defineProps<{
+/** 条目扩展区挂载位 id（core bootstrap 注册 + 本组件消费，同字面量即约定）。 */
+const DETAIL_EXTRA_MOUNT_ID = 'provider.detail-extra'
+/** 条目扩展区主视图 viewId 约定 = 挂载位 id（插件推树时用同名 viewId；跨仓契约）。 */
+const DETAIL_EXTRA_VIEW_ID = DETAIL_EXTRA_MOUNT_ID
+
+const props = defineProps<{
   /** 该行的 provider 数据（新建态为父侧合成行 sentinel） */
   provider: ProviderInfo
   /** 新建态合成行：无开关/状态点/徽章/默认 pill/计数/删除（原 p.id !== NEW_ID 分支） */
@@ -150,6 +216,10 @@ defineProps<{
   oauthSupported: boolean
   /** quota presets（settings store 快照，透传 ProviderEditBody 匹配展示；undefined → 编辑体回落编译期基线） */
   quotaPresets?: QuotaPreset[]
+  /** 插件来源条目信息（undefined = 非插件条目，无扩展区/状态行/宿主动作） */
+  pluginInfo?: PluginEntryInfo
+  /** 插件上报的凭据状态（undefined = 未上报/未拉取 → 无任何标记，D5/S5） */
+  credentialStatus?: CredentialStatusPayload
 }>()
 
 const emit = defineEmits<{
@@ -171,6 +241,10 @@ const emit = defineEmits<{
   'oauth-login': []
   /** ProviderEditBody OAuth 退出上抛（父侧移除 auth.json 凭证并刷新 presence） */
   'oauth-logout': []
+  /** 「重新授权」点击（D5：展开 provider.authorize 挂载位，payload = provider id） */
+  reauthorize: [providerId: string]
+  /** 「更新插件」点击（S26：两段式安装链重跑，payload = provider id） */
+  'update-plugin': [providerId: string]
 }>()
 
 const { t } = useI18n()
@@ -179,4 +253,33 @@ function statusDot(status: ProviderStatus): string {
   const map = { connected: 'bg-success', not_configured: 'bg-neutral-dim', error: 'bg-danger' }
   return map[status]
 }
+
+// ── 插件来源条目扩展区（D2/D5/D8）──
+
+/** 插件渲染区数据源（壳 provide；单测注入 mock——无注入时 view 恒空，点击退化为零 DOM）。 */
+const viewHostSource = inject(VIEW_HOST_SOURCE_KEY, null)
+/** 扩展区归属 scope（全局域：挂载位 + 插件维度；pluginInfo 缺失时占位不读）。 */
+function detailExtraScope(): PluginViewScope | null {
+  const pluginId = props.pluginInfo?.pluginId
+  return pluginId === undefined ? null : { kind: 'global', mountId: DETAIL_EXTRA_MOUNT_ID, pluginId }
+}
+
+// text-input 值回传出口（D8/S7）：扩展区容器掌握 pluginId + viewId，故在此 provide。
+provide(UI_EVENT_SENDER_KEY, createPluginUiEventSender(() => props.pluginInfo?.pluginId ?? null, DETAIL_EXTRA_VIEW_ID))
+
+/**
+ * 首次展开主动拉取（ADR-0155「拉为主」：挂载位首次渲染须能主动拉取，不能只依赖推送）。
+ * ViewHost 的 hidden 挂载点不自举拉取（无内容属常态），故由本组件在展开时拉一次；
+ * 推送丢失（renderer 重载 / 插件重启）由下一次展开收敛，不建推送补偿。
+ */
+watch(
+  () => [props.expanded, props.pluginInfo?.pluginId] as const,
+  ([expanded]) => {
+    if (!expanded) return
+    const scope = detailExtraScope()
+    if (scope === null) return
+    viewHostSource?.refreshViewInScope?.(scope, DETAIL_EXTRA_VIEW_ID)
+  },
+  { immediate: true },
+)
 </script>

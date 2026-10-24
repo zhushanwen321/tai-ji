@@ -20,6 +20,9 @@ export class PluginMessageHandler {
     'plugin.denyPermissions',
     'plugin.executeCommand', 'plugin.config.get', 'plugin.config.set', 'plugin.install', 'plugin.uiResponse',
     'plugin.mountPoints.sync', 'plugin.ui.snapshot',
+    // provider-plugin-access D9/D8/U5：plugin.invoke 业务方法调用、plugin.uiEvent 输入
+    // 值回传、清单域两个无参只读 RPC。
+    'plugin.invoke', 'plugin.uiEvent', 'plugin.listAvailable', 'plugin.catalog',
   ]
 
   async handlePluginMessage(msg: ClientMessage, ws: WsType): Promise<void> {
@@ -53,6 +56,7 @@ type PluginHandledType =
   | 'plugin.denyPermissions'
   | 'plugin.executeCommand' | 'plugin.config.get' | 'plugin.config.set' | 'plugin.install' | 'plugin.uiResponse'
   | 'plugin.mountPoints.sync' | 'plugin.ui.snapshot'
+  | 'plugin.invoke' | 'plugin.uiEvent' | 'plugin.listAvailable' | 'plugin.catalog'
 
 /** 按 type 字面量收窄 ClientMessage（查表 key = 运行时 guard，与原 switch narrowing 同构）。 */
 type PluginMsgOf<K extends ClientMessageType> = Extract<ClientMessage, { type: K }>
@@ -169,6 +173,81 @@ async function handlePluginUiSnapshot(ctx: PluginHandlerContext, msg: PluginMsgO
 }
 
 /**
+ * plugin.invoke（provider-plugin-access D9）：renderer → 插件业务方法调用。
+ * 执行链复用 commands-executor（invokeMethod，P-invoke）；reply 与请求同名——
+ * PluginInvokeReply 信封 { result }（返回值 unknown 透传），请求级失败（插件不存在 /
+ * 方法未注册 / 超时 / handler 抛错）走统一 error envelope，不占用信封。
+ */
+async function handlePluginInvoke(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.invoke'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  if (typeof msg.payload.method !== 'string' || msg.payload.method === '') {
+    return ctx.sendError(ws, 'INVALID_ARGS', 'Invalid params: "method" must be a non-empty string.', msg.id)
+  }
+  const result = await pluginService.invokePlugin(msg.payload.pluginId, msg.payload.method, msg.payload.params)
+  return ctx.reply(ws, msg.id, 'plugin.invoke', { result })
+}
+
+/**
+ * plugin.uiEvent 的 value 形状上限（D8 契约）：标量，深度 ≤ 2。
+ * 标量 = string | number | boolean | null；数组 / 普通对象最多嵌套两层，叶子必须是
+ * 标量。数字 2 来自协议注释（protocol.ts ClientMessageMap['plugin.uiEvent']）。
+ */
+const UI_EVENT_VALUE_MAX_CONTAINER_DEPTH = 2
+
+/**
+ * uiEvent value 形状校验（D8「宿主只做形状校验，业务校验归插件」）：
+ * 深度从容器层数计——root 容器 depth=2，子容器 depth=1，孙容器 depth=0 被拒。
+ * 与 executeCommand 的 args 标量检查同纪律：不让结构化数据走无界旁路进插件。
+ */
+function isShallowUiEventValue(value: unknown, depth: number = UI_EVENT_VALUE_MAX_CONTAINER_DEPTH): boolean {
+  if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return true
+  if (depth === 0) return false
+  if (Array.isArray(value)) return value.every((item) => isShallowUiEventValue(item, depth - 1))
+  if (typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).every((item) => isShallowUiEventValue(item, depth - 1))
+  }
+  return false
+}
+
+/**
+ * plugin.uiEvent（provider-plugin-access D8）：text-input 等输入组件的值回传。
+ * fire-and-forget：投递给渲染该树的插件 Worker（PLUGIN_UI_EVENT_NOTIFY 单向通知，
+ * 插件侧始终持有最新值），reply pong ack。宿主不解释 event 的业务含义、不做业务
+ * 校验，但入口做窄形状校验：路由字段非空字符串、value 标量且容器深度 ≤ 2（D8
+ * 契约）——坏值不投递，回结构化错误给渲染端（插件看不到非法形状）。
+ */
+async function handlePluginUiEvent(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.uiEvent'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  const { pluginId, viewId, componentId, event, value } = msg.payload
+  const routingFieldsValid =
+    typeof pluginId === 'string' && pluginId !== '' &&
+    typeof viewId === 'string' && viewId !== '' &&
+    typeof componentId === 'string' && componentId !== '' &&
+    typeof event === 'string' && event !== ''
+  if (!routingFieldsValid) {
+    return ctx.sendError(ws, 'INVALID_ARGS', 'Invalid params: "pluginId", "viewId", "componentId" and "event" must be non-empty strings.', msg.id)
+  }
+  if (!isShallowUiEventValue(value)) {
+    return ctx.sendError(
+      ws,
+      'INVALID_ARGS',
+      'Invalid uiEvent value: expected a scalar (string | number | boolean | null), or an array/object nested at most 2 levels with scalar leaves. Business validation belongs to the plugin.',
+      msg.id,
+    )
+  }
+  await pluginService.deliverPluginUiEvent(pluginId, viewId, componentId, event, value)
+  return ctx.reply(ws, msg.id, 'pong', {})
+}
+
+/** plugin.listAvailable（U5）：清单 service 组装的可安装视图（附本地安装状态比对）。 */
+async function handlePluginListAvailable(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.listAvailable'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  return ctx.reply(ws, msg.id, 'plugin.listAvailable', await pluginService.listAvailablePlugins())
+}
+
+/** plugin.catalog（U5）：清单原始目录条目（含家族元数据）。 */
+async function handlePluginCatalog(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.catalog'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  return ctx.reply(ws, msg.id, 'plugin.catalog', await pluginService.getPluginCatalog())
+}
+
+/**
  * plugin.* 分发表（形态 2 表驱动分发）：key = ClientMessageType 字面量，值 = 该 case 的
  * 处理函数（msg 参数按该 key 收窄）。主函数只留查表 + 落空（未命中行为与原 switch 无
  * default 一致）。
@@ -192,4 +271,8 @@ const PLUGIN_CASE_HANDLERS: { readonly [K in PluginHandledType]: (
   'plugin.uiResponse': handlePluginUiResponse,
   'plugin.mountPoints.sync': handlePluginMountPointsSync,
   'plugin.ui.snapshot': handlePluginUiSnapshot,
+  'plugin.invoke': handlePluginInvoke,
+  'plugin.uiEvent': handlePluginUiEvent,
+  'plugin.listAvailable': handlePluginListAvailable,
+  'plugin.catalog': handlePluginCatalog,
 }
