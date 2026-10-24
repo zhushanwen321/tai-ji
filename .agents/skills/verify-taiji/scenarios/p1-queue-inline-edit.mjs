@@ -5,12 +5,12 @@
  * 装配：faux + TAIJI_FAUX_TPS=3（低速率拉长主回合流式窗口，供回合中排队）。
  * 路径（A/B/C 三通道）：
  *   段 1 排队——协议发主回合消息（direct）→ message_start 后回合中连发 3 条（lane=steer）
- *     → B：session.delivery 帧出现 3 条非 direct 条目（帧序 = 提交序）→
+ *     → B：session.delivery 广播事件出现 3 条非 direct 条目（条目序 = 提交序）→
  *     A：queue-bubble + queue-item-<uuid> 三行可见、对话流仍只有主回合 1 轮。
  *   段 2 原位编辑（D6 真实用户路径）——hover 行 → 点 ✎（queue-edit-<uuid>）→
  *     A：queue-edit-banner 编辑态提示条出现 + peek 预填草稿（含原文哨兵）→
  *     全选替换输入新文 → Enter → B：同 clientUuid 条目 preview 换新（delivery.peek 全文
- *     复核）+ 帧序不变（保位）→ A：banner 消失、草稿清空、行仍在原位显示新文。
+ *     复核）+ 条目序不变（保位）→ A：banner 消失、草稿清空、行仍在原位显示新文。
  *   段 3 清除——UI × 撤一条（queue-cancel-<uuid>，行离场）+ 协议 delivery.cancel 撤一条
  *     （回执 cancelled:true 携全文）→ 回执四值负探针：对已撤销条目 delivery.edit →
  *     {edited:false, reason:'cancelled'}；对不存在 id → reason:'not-found'。
@@ -18,11 +18,12 @@
  *     B：history 中编辑后文本恰好出现 1 次（无重复投递）、被撤两条零出现、
  *     原第二条文本零出现（证明是替换而非补发）。
  *
- * 现行锚点事实（2026-10-24 源码核对）：
+ * 现行源码事实（2026-10-24 逐点核对）：
  * - QueueBubble.vue：queue-bubble / queue-item-<uuid> / queue-state-<uuid> /
  *   queue-edit-<uuid> / queue-cancel-<uuid> / queue-edit-banner / queue-edit-abandon；
  *   行动作钮 hover 揭示（opacity-0，pointer-events 未禁，hover 后可点）。
- * - 编辑锚定链 = useQueueEditAnchor.beginQueueEntryEdit（peek 预填 + 锚定登记）→
+ * - 编辑锚定链（useQueueEditAnchor 把输入框草稿绑定到被编辑队列条目的在编状态）=
+ *   beginQueueEntryEdit（peek 预填 + 锚定登记）→
  *   发送分流 sendWithQueueEdit → delivery.edit；banner 随锚定显隐。
  * - delivery.edit 回执四值 delivered/unconfirmed/cancelled/not-found
  *   （session-delivery-registry.ts editEntry 分支表）。
@@ -77,10 +78,10 @@ export const meta = {
     ],
   },
   provable: [
-    '回合中连发 3 条全部 lane=steer（B：delivery.submit 回执），session.delivery 帧非 direct 条目按提交序排列',
+    '回合中连发 3 条全部 lane=steer（B：delivery.submit 回执），session.delivery 广播事件非 direct 条目按提交序排列',
     'A：queue-bubble 可见，3 条 queue-item-<uuid> 行渲染，对话流仍只有主回合 1 轮',
     'D6 编辑链（真实用户路径）：✎ → queue-edit-banner 出现 + peek 预填草稿 → 替换文本 Enter → banner 消失、草稿清空',
-    'B：编辑后同 clientUuid 条目 preview/全文换新（delivery.peek 复核）且帧序不变（保位·id 不变）',
+    'B：编辑后同 clientUuid 条目 preview/全文换新（delivery.peek 复核）且条目序不变（保位·id 不变）',
     '清除双路：UI × 行离场；协议 delivery.cancel 回执 cancelled:true 携全文',
     'edit 回执负探针：已撤销条目 reason=cancelled、不存在 id reason=not-found',
     '收尾等价：history 中编辑后文本恰好 1 次、两条被撤文本 0 次、原第二条文本 0 次（替换而非补发，无重复投递）',
@@ -92,7 +93,7 @@ export const meta = {
   ],
 }
 
-/** 条目计数（帧内非 direct 且未 delivered = 队列区可见行口径，core deliveryQueueEntries 同谓词）。 */
+/** 条目计数（session.delivery 广播事件内非 direct 且未 delivered = 队列区可见行口径，core deliveryQueueEntries 同谓词）。 */
 function queueEntriesOf(framePayload) {
   return (framePayload?.entries ?? []).filter((e) => e.lane !== 'direct' && e.state !== 'delivered')
 }
@@ -185,7 +186,7 @@ export async function run(ctx) {
   // [产品缺口 workaround，2026-10-24 探针实证] session.delivery topic 接线唯一入口 =
   // session.subscribe（session-delivery-topic.ts sync：内核运行时已存在才挂 onChange）；
   // 首订阅（本剧本与 renderer 激活时序同款）早于首次 submit（内核尚不存在）→ 之后内核
-  // 变更永不发帧（协议侧与 renderer 队列区双盲，探针 PHASE1 实测 0 帧 + queue-bubble 不
+  // 变更永不发广播事件（协议侧与 renderer 队列区双盲，探针 PHASE1 实测 0 条 + queue-bubble 不
   // 渲染）。首次 submit 已建内核，这里二次 subscribe 触发接线（= renderer 切回会话/重连
   // 的真实通路，非 mock）——此后 bus.publish 对全部订阅者可见，renderer 队列区同源恢复
   // （探针 PHASE2 实测）。缺口登记 productSuspicions，主 agent 裁决。
@@ -210,7 +211,7 @@ export async function run(ctx) {
     { sessionId: sid, timeoutMs: 30_000 },
   )
   const entryIds = queueEntriesOf(frameEvt.payload).map((e) => e.clientUuid)
-  ev.assert('B: session.delivery 帧含 3 条队列条目且帧序 = 提交序', JSON.stringify(entryIds) === JSON.stringify(q.map((r) => r.clientUuid)), {
+  ev.assert('B: session.delivery 广播事件含 3 条队列条目且条目序 = 提交序', JSON.stringify(entryIds) === JSON.stringify(q.map((r) => r.clientUuid)), {
     channel: 'B', expected: q.map((r) => r.clientUuid).join(','), actual: entryIds.join(','),
   })
   framesSeen.push({ at: 'after-submit', entries: queueEntriesOf(frameEvt.payload) })
@@ -264,7 +265,7 @@ export async function run(ctx) {
     { sessionId: sid, timeoutMs: 30_000 },
   )
   const editIds = queueEntriesOf(frameEdit.payload).map((x) => x.clientUuid)
-  ev.assert('B: 编辑后同 id 条目 preview 换新且帧序不变（保位·id 不变）', JSON.stringify(editIds) === JSON.stringify([e2, e3, e4]), {
+  ev.assert('B: 编辑后同 id 条目 preview 换新且条目序不变（保位·id 不变）', JSON.stringify(editIds) === JSON.stringify([e2, e3, e4]), {
     channel: 'B', expected: [e2, e3, e4].join(','), actual: editIds.join(','),
   })
   framesSeen.push({ at: 'after-edit', entries: queueEntriesOf(frameEdit.payload) })

@@ -1,27 +1,27 @@
 /**
  * p1-queue-ops-idempotent —— chat-flow-consistency §4 A11（impl-plan 验收计划表 L3 行：
  * new:队列操作幂等与断连恢复；观测手段按 round-3 attackHints 登记项定为 delivery.peek
- * 只读通道 + delivery-outbox 投递日志磁盘面）。
+ * 只读通道 + delivery-outbox 投递日志磁盘落位）。
  *
  * 装配：faux + TAIJI_FAUX_TPS=3（低速率拉长主回合流式窗口）。
  * 路径（A/B/C 三通道）：
- *   段 1 入队——回合中连发 5 条（lane=steer）→ B：帧 5 条按提交序 → A：折叠口径
+ *   段 1 入队——回合中连发 5 条（lane=steer）→ B：session.delivery 广播事件按提交序含 5 条 → A：折叠口径
  *     （foldQueueRows：显前 3 + 「+2」）→ 点 +N 全显 5 行 → 收起回 3 + 「+2」。
  *   段 2 反复操作——✎ 编辑 E2（替换保位）→ ✎ E3 后「放弃编辑」（banner 消失、草稿
  *     保留，条目不动）→ × 清除 E4 → 协议 delivery.edit E5（edited:true）→
  *     delivery.resync 反复两次（活跃条目行为不变、终态条目入 deduped）。
  *   段 3 只读观测——delivery.peek 逐条复核内容（E2/E5 为编辑后文本、E3/E6 原文、
- *     E4 found:false）+ session.delivery 帧投影（活跃集合 = 预期集合且序不变）+
+ *     E4 found:false）+ session.delivery 广播事件派生视图（活跃集合 = 预期集合且序不变）+
  *     A：队列区行数与 +N 计数一致、宿主对话流仍 1 轮。
  *   段 4 收尾——waitTurnEnd + history 逐哨兵计数：留存条目各恰好 1 次（无重复投递）、
  *     被撤条目 0 次；C：delivery-outbox JSONL 终态行（ack）逐 id ≤1 条 + 全文 attach。
  *
- * 现行锚点事实（2026-10-24 源码核对）：
+ * 现行源码事实（2026-10-24 逐点核对）：
  * - foldQueueRows（useQueueRows.ts）：非 failed 行显前 QUEUE_VISIBLE_MAX=3，溢出 =
  *   「+N」（queue-expand / queue-collapse，aria-expanded 承载开关态）。
  * - delivery.resync（registry）：queued/in-flight 活跃条目行为不变；终态（含 cancelled）
  *   入 deduped 应答；failed → requeue 重投（faux 下不可达，见 notProvable）。
- * - 投递日志磁盘面：<dataDir>/delivery-outbox/<sessionId 编码>.jsonl，行形态
+ * - 投递日志磁盘落位：<dataDir>/delivery-outbox/<sessionId 编码>.jsonl，行形态
  *   {"t":"record"|"ack","id":...}，终态行单调累积（无重复终态行 = 无重复投递的磁盘证据）。
  */
 import crypto from 'node:crypto'
@@ -62,7 +62,7 @@ const LONG_TURN = Array.from(
 export const meta = {
   id: 'p1-queue-ops-idempotent',
   priority: 'P1',
-  title: 'A11 队列反复操作后宿主表面不变：编辑/放弃编辑/清除/重发/+N 展开收起 → peek 只读观测投影一致、对话流不变、无重复投递',
+  title: 'A11 队列反复操作后宿主表面不变：编辑/放弃编辑/清除/重发/+N 展开收起 → peek 只读观测视图一致、对话流不变、无重复投递',
   covers: [
     'env.launch', 'env.ready', 'env.isolation',
     'session.create', 'chat.send', 'chat.steer', 'chat.wait', 'session.history',
@@ -77,11 +77,11 @@ export const meta = {
     ],
   },
   provable: [
-    'B：回合中连发 5 条全部 lane=steer，session.delivery 帧按提交序含 5 条',
+    'B：回合中连发 5 条全部 lane=steer，session.delivery 广播事件按提交序含 5 条',
     'A：折叠口径——收起显 3 行 + 「+2」；点 +N 全显 5 行（queue-expand 消隐、queue-collapse 出现）；收起回 3 + 「+2」',
     'D6 编辑态生命周期：✎ E2 编辑提交（保位·id 不变）→ ✎ E3 放弃编辑（banner 消失、草稿保留、条目不动）',
     '清除与重发幂等：× E4 行离场；协议 delivery.edit E5 edited:true；delivery.resync 连续两次——活跃条目不入 deduped 且集合不变、终态 E4 入 deduped',
-    '只读观测（delivery.peek 通道）：E2/E5 为编辑后全文、E3/E6 为原文、E4 found:false；帧投影活跃集合 = {E2,E3,E5,E6} 且序不变',
+    '只读观测（delivery.peek 通道）：E2/E5 为编辑后全文、E3/E6 为原文、E4 found:false；广播事件派生视图活跃集合 = {E2,E3,E5,E6} 且序不变',
     'A：反复操作后宿主对话流不变（turn 计数仍 1、主回合哨兵在流），队列区行数与折叠计数一致',
     '收尾等价：history 中 E2 编辑后/E3/E5 编辑后/E6 各恰好 1 次、E4 与两条原文 0 次（无重复投递）；C：delivery-outbox 终态行逐 id ≤1 条',
   ],
@@ -93,7 +93,7 @@ export const meta = {
   ],
 }
 
-/** 帧内队列条目（core deliveryQueueEntries 同谓词：非 direct 且未 delivered）。 */
+/** session.delivery 广播事件内的队列条目（core deliveryQueueEntries 同谓词：非 direct 且未 delivered）。 */
 function queueEntriesOf(framePayload) {
   return (framePayload?.entries ?? []).filter((e) => e.lane !== 'direct' && e.state !== 'delivered')
 }
@@ -156,8 +156,8 @@ export async function run(ctx) {
   const uncovered = []
   const gotchas = [
     '折叠口径在 QueueBubble 内经 foldQueueRows 计算：收起显 3 行；点 +N 全显（overflowCount 归零 → queue-expand 消隐、queue-collapse 出现）',
-    '放弃编辑（queue-edit-abandon）只解除锚定：草稿保留、条目不动——之后须手工清草稿（Meta+a+Backspace），否则后续 Enter 会把草稿当新消息发出',
-    'delivery.resync 对 queued/in-flight 活跃条目是幂等 no-op（不入 deduped），只有终态条目入 deduped——「重发不产生重复」的断言锚',
+    '放弃编辑（queue-edit-abandon）只解除编辑锚定（useQueueEditAnchor 把草稿绑定到队列条目的在编状态）：草稿保留、条目不动——之后须手工清草稿（Meta+a+Backspace），否则后续 Enter 会把草稿当新消息发出',
+    'delivery.resync 对 queued/in-flight 活跃条目是幂等 no-op（不入 deduped），只有终态条目入 deduped——「重发不产生重复」断言的依据',
     'history 注入可能是合批形态（buildBatchPayload 以 \\n\\n---\\n\\n 拼接多条为一条 user 消息）——无重复投递断言按哨兵出现次数计，不按 user 消息条数计',
     '行动作钮 hover 揭示（opacity-0）：先 ui.hover(queue-item-<uuid>) 再点子按钮',
   ]
@@ -204,7 +204,7 @@ export async function run(ctx) {
     { sessionId: sid, timeoutMs: 30_000 },
   )
   const idsAll = queueEntriesOf(frameEvt.payload).map((e) => e.clientUuid)
-  ev.assert('B: 帧含 5 条队列条目且帧序 = 提交序', JSON.stringify(idsAll) === JSON.stringify(q.map((r) => r.clientUuid)), {
+  ev.assert('B: 广播事件含 5 条队列条目且条目序 = 提交序', JSON.stringify(idsAll) === JSON.stringify(q.map((r) => r.clientUuid)), {
     channel: 'B', expected: q.map((r) => r.clientUuid).join(','), actual: idsAll.join(','),
   })
   framesSeen.push({ at: 'after-submit', entries: queueEntriesOf(frameEvt.payload) })
@@ -261,7 +261,7 @@ export async function run(ctx) {
     { sessionId: sid, timeoutMs: 30_000 },
   )
   framesSeen.push({ at: 'after-edit-E2', entries: queueEntriesOf(frameEdit2.payload) })
-  ev.assert('B: E2 编辑后帧序不变（保位·id 不变）', JSON.stringify(queueEntriesOf(frameEdit2.payload).map((x) => x.clientUuid)) === JSON.stringify([e2, e3, e4, e5, e6]), {
+  ev.assert('B: E2 编辑后条目序不变（保位·id 不变）', JSON.stringify(queueEntriesOf(frameEdit2.payload).map((x) => x.clientUuid)) === JSON.stringify([e2, e3, e4, e5, e6]), {
     channel: 'B', expected: 'E2,E3,E4,E5,E6', actual: queueEntriesOf(frameEdit2.payload).map((x) => x.clientUuid).join(','),
   })
   ev.step({ step: 'queue.edit-E2', channel: 'B', exitCode: 0, stats: { editedId: e2 } })
@@ -327,13 +327,13 @@ export async function run(ctx) {
   })
   ev.step({ step: 'queue.resync', channel: 'B', exitCode: 0, stats: { rounds: 2, deduped: resync2.deduped ?? [] } })
 
-  // ── 段 3：只读观测（delivery.peek 通道 + 帧投影 + UI 面） ───────
+  // ── 段 3：只读观测（delivery.peek 通道 + 广播事件派生视图 + UI 通道） ───────
   const frameObs = await p.waitFor(
     (e) => e.type === 'session.delivery' && JSON.stringify(queueEntriesOf(e.payload).map((x) => x.clientUuid)) === JSON.stringify(liveIds),
     { sessionId: sid, timeoutMs: 30_000 },
   )
   framesSeen.push({ at: 'observation', entries: queueEntriesOf(frameObs.payload) })
-  ev.assert('B: 帧投影——反复操作后活跃集合 = {E2,E3,E5,E6} 且序不变', true, {
+  ev.assert('B: 广播事件派生视图——反复操作后活跃集合 = {E2,E3,E5,E6} 且序不变', true, {
     channel: 'B', expected: liveIds.join(','), actual: queueEntriesOf(frameObs.payload).map((x) => x.clientUuid).join(','),
   })
 
@@ -367,7 +367,7 @@ export async function run(ctx) {
   })
   await ui.screenshot('queue-after-ops')
 
-  // ── 段 4：收尾等价（history 逐哨兵计数 + 投递日志磁盘面） ────────
+  // ── 段 4：收尾等价（history 逐哨兵计数 + 投递日志磁盘落位） ────────
   const end1 = await p.waitTurnEnd(sid, { since: since0, timeoutMs: 240_000 })
   ev.assert('B: 主回合正常收尾', end1.ok, {
     channel: 'B', expected: 'message.complete 非 error', actual: `${end1.type} stop=${end1.payload?.stopReason ?? ''}`,

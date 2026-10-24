@@ -2,7 +2,7 @@
 
 > 骨架遵循 [API-CONTRACT §4](API-CONTRACT.md)：H2 即 capability id。
 > testid 权威源 = [docs/testing/01-chat-panel-composer.md](../../../../main/docs/testing/01-chat-panel-composer.md)
-> §3（对话流锚点）/ §4（send 全链时序）/ §5（流式帧表）；本文件只补「怎么驱动、断言什么、失败长什么样」。
+> §3（对话流锚点——本文件「锚点」均指断言用的 DOM 定位标记：testid 或文本特征）/ §4（send 全链时序）/ §5（流式事件序表）；本文件只补「怎么驱动、断言什么、失败长什么样」。
 > 组件实装：`packages/renderer/src/components/panel/{Composer,MessageStream,QueueBubble}.vue` +
 > `packages/ui/src/features/chat/{Turn,Block,TextRow,ThinkingRow,ToolRow,UserBubble}.vue`。
 
@@ -22,7 +22,7 @@
 
 ## chat.send · 发送一条消息
 
-- **通道**：A（user 气泡立即入流 / 发送位状态）+ B（`delivery.submit` 回执 + `session.delivery` 帧）
+- **通道**：A（user 气泡立即入流 / 发送位状态）+ B（`delivery.submit` 回执 + `session.delivery` 广播事件）
   + C（`agent/sessions/**` JSONL 的 user entry；`logs/pi-*.jsonl`）
 - **前置**：`requires` = faux|live；依赖 `session.create` `session.switch` `protocol.rpc` `chat.wait`
 - **用于**：`p0-chat-stream`（主）、`p0-session-create-first-message`、`p0-session-isolation`、
@@ -38,7 +38,7 @@
   lane: 'direct'|'steer'|'queued', isCommand? }`。
   失败经 `error` envelope（`message_blocked` / `invalid_payload`），**不走** reply。
 - **副作用点**：`chat.appendUser`（乐观气泡 `u-<uuid>`）→ 内核受理（落磁盘 outbox）→ 投递 pi
-  （`prompt`）→ `session.delivery` 全量快照帧 → turn 事件（`message.message_start` …）→
+  （`prompt`）→ `session.delivery` 全量快照广播事件 → turn 事件（`message.message_start` …）→
   pi 落 JSONL。
 
 ### 驱动
@@ -63,7 +63,7 @@ const reply = await p.call('delivery.submit',
 ### 断言（期望终态 / 失败信号）
 
 - **B 成功**：reply `state ∈ {queued, in-flight, delivered}`（idle 会话通常是 `in-flight` 或
-  `delivered`）、`lane='direct'`（idle）；随后 `session.delivery` 帧出现该 `clientUuid` 条目。
+  `delivered`）、`lane='direct'`（idle）；随后 `session.delivery` 广播事件出现该 `clientUuid` 条目。
 - **A 成功**：user 气泡立即出现（文本 = 输入原文）；发送位从 ↑ 变 spinner/停止态。
 - **C 成功**：pi JSONL 出现 user message entry（首条消息后文件才创建）。
 - **失败信号（具体形态）**：
@@ -78,7 +78,7 @@ const reply = await p.call('delivery.submit',
 ### 证据（A/B/C 各抓什么）
 
 - A：user 气泡截图 + `composer-box` 发送位 title/class。
-- B：`delivery.submit` reply 原文；之后的 `session.delivery` 帧（条目 state 演进）。
+- B：`delivery.submit` reply 原文；之后的 `session.delivery` 广播事件（条目 state 演进）。
 - C：`grep -c '"role":"user"' <sessionFile>`；`ext-sessions/<sid>/logs/pi-<date>.jsonl` 里的 prompt 行。
 
 ### 证不了
@@ -92,7 +92,7 @@ const reply = await p.call('delivery.submit',
 
    **composer 输入三态（P0「composer 输入三态」用例组，此前无 capability 承接）**：
 
-   | 态 | 触发 | 浮层锚点 | 断言要点 |
+   | 态 | 触发 | 浮层挂载点 | 断言要点 |
    |----|------|---------|---------|
    | slash | 输入 `/` 开头 | `CommandPopover`（portal 到 body） | 输入 `/` 后浮层出现；继续输入过滤；`cmd-popover-empty` 是「无匹配」不是失败 |
    | mention | 输入 `@` 或「+菜单 → 引用」 | 同上（`composer.getMentionCandidates()` 供数） | 候选来自 RPC，**空候选是合法态**（无 agent/skill 时） |
@@ -111,13 +111,13 @@ const reply = await p.call('delivery.submit',
 5. **首条消息前没有 session 文件**：C 证据只能在 assistant 到达后取（规则 #6）。
 6. **发送位无稳定 testid**：发送/停止/排队三态都靠 `title`（`发送 · ⏎` / `停止` / `排队发送 · ⏎`）
    与 `stop-btn` class 区分，title 会随状态/i18n 变 → 建议补 `composer-send-btn` / `composer-stop-btn`
-   （当前锚点缺口）。
+   （当前缺稳定 testid）。
 
 ---
 
 ## chat.stream · 流式渲染（thinking / 工具 / 文本 / 变更集）
 
-- **通道**：A（块级 DOM）+ B（`message.*` 帧序）+ C（pi JSONL 的 entry 序）
+- **通道**：A（块级 DOM）+ B（`message.*` 事件序）+ C（pi JSONL 的 entry 序）
 - **前置**：`requires` = faux（`TAIJI_FAUX_TPS` 用于中途态）；依赖 `chat.send` `session.create`
 - **用于**：`p0-chat-stream`（主）、`p0-markdown-render`（文本块宿主）、`p0-session-isolation`、
   `p1-tool-call-render`（工具块）
@@ -127,10 +127,10 @@ const reply = await p.call('delivery.submit',
 - **用户 POV**：发送后 assistant 回合内出现：thinking 行（「思考」+ 耗时）→ 工具行（`工具` + 工具名）
   → 文本块（逐字追加，streaming 光标）→ 变更集卡（有文件改动时）→ 回合收尾
   （turn-meta 从「工作中」转「已工作」+ token/耗时）。
-- **协议（帧序）**：`message.message_start` → `message.thinking_start` / `thinking_delta` /
+- **协议（事件序）**：`message.message_start` → `message.thinking_start` / `thinking_delta` /
   `thinking_end` → `message.tool_call_start` / `tool_call_update` / `tool_call_end` →
   `message.text_delta`（transient）→ `message.file_changes` → `message.complete`。
-  帧表 SSOT = `docs/testing/01` §5；代码 = `packages/core/src/domain/chat/chunk-processor.ts` +
+  事件序表 SSOT = `docs/testing/01` §5；代码 = `packages/core/src/domain/chat/chunk-processor.ts` +
   `effects/registry.ts`。
 - **副作用点**：`chatStore` 分区写入（`appendAssistantChunk`），thinking/tool/text 的 `contentBlocks`
   到达顺序；`message.complete` 回填 usage 并收敛 running toolCall。
@@ -167,7 +167,7 @@ expect css=.trace-tool 含工具名                        # tool 行（header �
 ### 证据（A/B/C 各抓什么）
 
 - A：流式中（TPS 低速）与完成态两张截图；`block-text` 文本、`.trace-tool` 文本、turn-meta 文本。
-- B：帧序清单（`type` + `receivedAt`，落 `frames.jsonl`）；`message.complete` 的
+- B：事件序清单（`type` + `receivedAt`，落 `frames.jsonl`）；`message.complete` 的
   `stopReason/usage/responseModel`。
 - C：`jq -r .type <sessionFile>` 的类型序列（message / toolResult / thinking 是否与 UI 一致）。
 
@@ -181,7 +181,7 @@ expect css=.trace-tool 含工具名                        # tool 行（header �
 1. **thinking 全文完成后不在 DOM**：`ThinkingRow` 的 `thinkingExpanded = working || !collapsed`，
    完成后收起走 `v-if`（全文卸载）。断言只断言 header（「思考」文案，恒在）+ `thinking-duration`；
    要看全文先点 header 展开。
-2. **thinking 没有专用 header testid**：根锚是 Block 壳的 `block-thinking-<thinkingId>`（id 只有运行时
+2. **thinking 没有专用 header testid**：根定位是 Block 壳的 `block-thinking-<thinkingId>`（id 只有运行时
    知道），稳定写法是 `[data-testid^="block-thinking-"]` 或文本「思考」（`panel.message.thinkingBlock`）。
 3. **工具块 header 是多个 span**（「工具」+ 工具名 + 摘要），跨 span 的 `getByText` 不可靠：
    先限定 `.trace-tool` 容器（或 `tool-block-header`）再断言工具名。
@@ -214,7 +214,7 @@ expect css=.trace-tool 含工具名                        # tool 行（header �
 ### 驱动
 
 ```js
-// 库用法（scenario 内，推荐）：先取 since 再 send，避免命中上一轮陈旧帧
+// 库用法（scenario 内，推荐）：先取 since 再 send，避免命中上一轮陈旧事件
 const since = p.events.length
 await p.send(sid, 'hello')
 const end = await p.waitTurnEnd(sid, { since, timeoutMs: 120_000 })
@@ -229,7 +229,7 @@ node .agents/skills/verify-taiji/scripts/vp.mjs chat.wait --data-dir <dir> --sid
 > **[HISTORICAL] `vp chat.wait` 的两个坑（2026-10-22 审查实测修复）**：
 > ① 旧实现「新开连接 subscribe 后立刻读 occupancy 快照」，在「send 已返回、pi 尚未 start」时
 > 读到 `idle` → 直接 `alreadyIdle:true` 返回，把**未开始**的 turn 判成已结束（实测
-> `wait 0.3s alreadyIdle=True lens=0`）。现行默认**必须观察到终态帧**才算结束；
+> `wait 0.3s alreadyIdle=True lens=0`）。现行默认**必须观察到终态事件**才算结束；
 > 只有显式 `--allow-idle` 才走旧快路径（并在输出标 `decidedBy: 'idle-snapshot'`）。
 > ② 旧实现恒返回 `ok:true`（即使 `message.complete.stopReason === 'error'`）→ codemode 会把
 > LLM 404 当成功。现行 `ok` 反映 turn 是否成功，失败时 exit 1。
@@ -239,24 +239,24 @@ node .agents/skills/verify-taiji/scripts/vp.mjs chat.wait --data-dir <dir> --sid
 ### 断言（期望终态 / 失败信号）
 
 - 期望：**该轮最后一次** `message.complete`（同一 sid）满足 `willRetry === false`，且其后无新的
-  `message_start`；正常路径一轮一帧。
+  `message_start`；正常路径一轮一条。
 
   **⚠️ 词表必须分清（wire vs pi 内部，两套值域不同）**：
 
   | 位置 | 值域 |
   |------|------|
-  | **wire 帧** `message.complete.stopReason`（本原语断言的对象） | `end_turn`（正常）· `tool_use`（工具段结束，后面会继续，不能当终态）· `aborted`（中止）· `error`（失败）· `max_tokens` · `content_filter` |
+  | **wire 侧** `message.complete.stopReason`（本原语断言的对象） | `end_turn`（正常）· `tool_use`（工具段结束，后面会继续，不能当终态）· `aborted`（中止）· `error`（失败）· `max_tokens` · `content_filter` |
   | **faux 脚本 / pi 内部** `AssistantMessage.stopReason`（写 `fixtures/faux-responses/*.json` 时用） | `stop` · `toolUse` · `length` · `error` · `aborted` |
 
   映射实现 = `packages/runtime/src/infra/pi/event-adapter.ts` 的 `STOP_REASON_MAP`
   （`stop→end_turn` / `toolUse→tool_use` / `length→max_tokens`）。
-  **[HISTORICAL] 不要把 pi 侧词表套到 wire 帧上**：早期文档在断言段写 `stopReason === 'endTurn'`
+  **[HISTORICAL] 不要把 pi 侧词表套到 wire 协议上**：早期文档在断言段写 `stopReason === 'endTurn'`
   或 `'toolUse'`，全仓无 `'endTurn'` 字面量（`grep -rn "'endTurn'" packages` 零命中）→ 断言恒假。
   同理 `'toolUse'` 在 wire 上是 `'tool_use'`；写成驼峰会让「工具段未结束」的判定永远不命中。
 - **失败信号（具体形态）**：
-  - 等到 `willRetry:true` 的 `message.complete`（中间失败帧）就当结束 → 下一轮断言全部错位。
-  - 等到超时但帧一直在推进（`message.tool_call_*` 持续）→ **慢，不是死**（用 `waitFor` 的
-    「最近 20 帧摘要」区分，API-CONTRACT §1.2）。
+  - 等到 `willRetry:true` 的 `message.complete`（中间失败事件）就当结束 → 下一轮断言全部错位。
+  - 等到超时但事件一直在推进（`message.tool_call_*` 持续）→ **慢，不是死**（用 `waitFor` 的
+    最近 20 条事件类型摘要区分，API-CONTRACT §1.2）。
   - 只收到 `message.error` → 错误已入流（UI 可见 `block-text-error`），检查 `errorMessage`。
   - 等到 `message.stream_error`（不是 complete）→ 流终止，`isStreaming` 已复位，但语义是「异常终止」；
     `session.exited` → pi 进程退出（会话 dead），后续必须 `session.restore`。
@@ -276,7 +276,7 @@ node .agents/skills/verify-taiji/scripts/vp.mjs chat.wait --data-dir <dir> --sid
 1. **`willRetry` 必须过滤**：pi 每次 attempt 失败都发 `agent_end`（`willRetry=true`），只有
    `willRetry=false` 才是回合终态。⚠️ `lib/protocol.mjs` 的 `waitTurnEnd` 的 `ok` **只判
    `stopReason !== 'error'`，不看 `willRetry`** —— faux 装配已关 retry（`seed-faux` 写
-   `retry.enabled=false`）所以 faux 下安全；真实模型/自动重试场景要自己再等一帧
+   `retry.enabled=false`）所以 faux 下安全；真实模型/自动重试场景要自己再等一条
    `willRetry=false` 的 `message.complete`。
 2. **`since` 必须在 `send` 之前捕获**：faux 极快时 `message.complete` 可能在 `send` resolve 前入队；
    先 `const since = p.events.length` 再 `p.send(...)` 再 `p.waitTurnEnd(sid, { since })`
@@ -336,7 +336,7 @@ await p.call('message.abort', { sessionId: sid }, { replyType: 'message.status' 
 ### 证据（A/B/C 各抓什么）
 
 - A：流式中（点停止前）、中止后各一张截图；`sendButtonState` 的 DOM title 前后。
-- B：`message.status` reply；`message.complete{aborted}` 帧；`session.occupancy` 前后帧。
+- B：`message.status` reply；`message.complete{aborted}` 事件；`session.occupancy` 前后两条事件。
 - C：`ext-sessions/<sid>/logs/pi-<date>.jsonl` 里的 abort 信号；`<sessionFile>` 尾部若有
   abort 记录（pi 侧形态）。
 
@@ -512,7 +512,7 @@ expect role=textbox 含原文                   # 草稿回填（restoreDraft）
 
 ## chat.reload-equiv · live ≡ reload 等价性（P0 核心证明）
 
-- **通道**：A（live 结束态 UI 与 reload 后 UI 逐项一致）+ B（`session.history` 与 live 帧序列同源）
+- **通道**：A（live 结束态 UI 与 reload 后 UI 逐项一致）+ B（`session.history` 与 live 事件序列同源）
   + C（pi JSONL entry 序）
 - **前置**：`requires` = faux（`TAIJI_FAUX_TPS` 可选）；依赖 `chat.send` `chat.stream` `chat.wait`
   `session.history` `session.persistence` `session.switch`
@@ -522,9 +522,9 @@ expect role=textbox 含原文                   # 草稿回填（restoreDraft）
 
 - **用户 POV**：发完一轮后关掉重开（或切走再切回），对话流长得一样：同样的块、同样的文本、
   同样的工具结果、同样的 usage 徽标。
-- **协议 / 机制**：单一 reducer 双路喂入——live 走 `applyEntryFrame`（每帧一条 entry），
+- **协议 / 机制**：单一 reducer 双路喂入——live 走 `applyEntryFrame`（每条事件喂一条 entry），
   reload 走 `replayEntries` fold；两条路径共用同一份派生段（`packages/core/src/domain/chat/apply-entry.ts`
-  头注：ADR-0062「实时帧与文件重放喂同一 reducer」）。`session.history` 由
+  头注：ADR-0062「实时事件与文件重放喂同一 reducer」）。`session.history` 由
   `convertPiHistory`（= lift + `replayEntries`）产出。
 - **副作用点**：切回已 hydrate 的会话会**主动** `refreshHistory`（`runEntryChain` 第 9 步）→
   `reconcileHistory`（基线替换 + 保留 streaming 尾部）。
@@ -582,7 +582,7 @@ TAIJI_DEV_BACKGROUND=1 TAIJI_FAUX_SCRIPT=... TAIJI_EXTENSION_PATHS=... \
 - A：live 结束态 + reload 后两张截图；按 turn 抽取的 DOM 文本快照（`attach('live-dom.txt')` /
   `attach('reload-dom.txt')`）。
 - B：`session.history` reply 的 messages 摘要（role/content 前 N 字/piEntryId/toolCalls 名）；
-  live 期间 `message.*` 帧类型序列。
+  live 期间 `message.*` 事件类型序列。
 - C：`<sessionFile>` 的 entry 类型序列与条数（与 B 的 messages 对账）。
 
 ### 证不了
@@ -609,18 +609,18 @@ TAIJI_DEV_BACKGROUND=1 TAIJI_FAUX_SCRIPT=... TAIJI_EXTENSION_PATHS=... \
 
 **新增能力点**（剧本在 `scenarios/`，登记见 [P0-P1-COVERAGE.md](P0-P1-COVERAGE.md) §五）：
 
-- **队列区原位编辑**（✎ 编辑）：锚定分区 `useQueueEditAnchor`（ADR-0049 #76）+ delivery.edit 回执四值 `delivered/unconfirmed/cancelled/not-found`（Q3 如实化）；× 清除 = delivery.cancel + 草稿回填（V9/V10 既有行为）。剧本 `p1-queue-inline-edit`。
-- **队列操作幂等**：编辑/取消/清除/重发/+N 展开收起/重试全部（resync）反复操作后 delivery.peek 投影一致。剧本 `p1-queue-ops-idempotent`。
+- **队列区原位编辑**（✎ 编辑）：锚定分区 `useQueueEditAnchor`（把输入框草稿绑定到被编辑队列条目的在编状态；ADR-0049 #76）+ delivery.edit 回执四值 `delivered/unconfirmed/cancelled/not-found`（Q3 如实化）；× 清除 = delivery.cancel + 草稿回填（V9/V10 既有行为）。剧本 `p1-queue-inline-edit`。
+- **队列操作幂等**：编辑/取消/清除/重发/+N 展开收起/重试全部（resync）反复操作后 delivery.peek 只读视图一致。剧本 `p1-queue-ops-idempotent`。
 - **回合中插话与收起时机**：occupancy 四维状态机（shared `isActiveTurnPhase`）驱动——工作态回合不收起、计时持续；插话入队、回流自动开新回合。剧本 `p1-turn-interject-collapse`。
 - **settling 窗口投递**：ACTIVE_TURN_PHASES 含 settling，窗口内追问 steer 即时受理；确定性窗口 = dev 开关 `TAIJI_AGENT_DEV_SETTLING_DELAY_MS=2500`（runner 经 meta.env 透传）。剧本 `p1-settling-steer-delivery`。
-- **块序定稿重建**：message_end(assistant) 按载荷整条重建（id 锚定优先/位置兜底三级定位），reload ≡ live 块序。剧本 `p1-block-order-replay`。
+- **块序定稿重建**：message_end(assistant) 按载荷整条重建（id 匹配优先/位置兜底三级定位），reload ≡ live 块序。剧本 `p1-block-order-replay`。
 - **思考形态**：GLM end.content 全文思考 + 空思考条目轮，UI 思考块唯一性 + reload 等价。剧本 `p1-thinking-event-form`。
-- **断连自愈结果面**：WS 断连（routeWebSocket）重连后残留收尾 + 权威接管 + UI ≡ reload；D4 recoverStalledSession 专属触发面（终态帧处理链半途抛错）黑盒不可达，剧本 `p1-disconnect-selfheal` 按实测登记 notProvable。
+- **断连自愈结果验收**：WS 断连（routeWebSocket）重连后残留收尾 + 权威接管 + UI ≡ reload；D4 recoverStalledSession 专属触发路径（终态事件处理链半途抛错）黑盒不可达，剧本 `p1-disconnect-selfheal` 按实测登记 notProvable。
 
 ### Gotchas（本批实测新增）
 
-1. **协议直发 user 消息 live 气泡可能间歇缺失**（registry 守卫静默消费竞态，docs/todo/rpc-direct-send-user-bubble.md）——协议直发剧本断言 user 原文在场会假失败，改走 composer 真实用户路径（p1-block-order-replay 先例）或登记重试。
+1. **协议直发 user 消息 live 气泡可能间歇缺失**（registry 防御机制静默消费竞态，docs/todo/rpc-direct-send-user-bubble.md）——协议直发剧本断言 user 原文在场会假失败，改走 composer 真实用户路径（p1-block-order-replay 先例）或登记重试。
 2. **clientUuid 必须是 `u-<8-4-4-4-12 hex>` 合法 marker 身份段**（shared MSG_ID_TAG_RE）——lib randomUuid 已修；自拼形态会使 edit/cancel 的 marker 匹配失败（条目被收养为新条目 + unconfirmed）。
 3. **队列编辑替换输入用「聚焦 → Meta+a 全选 → 直接键入」**——禁「全选→Backspace」：空草稿边沿解除锚定 watch，Enter 走普通发送降级。
 4. **turn-meta 索引 1-based**（message-turns index=i+1）；dev 模式 DOM 保留组件模板注释，裸 substring 判「已工作/已工作过」恒误报（读渲染标签文本需过滤注释节点）。
-5. **建会即订阅 + 首个 submit 前的会话**：session.delivery topic 由 registry 的 onRuntimeCreated 创建事件补接线（2026-10-24 修复前需补一次 subscribe；旧产物剧本保留该绕行，帧断言仍有效）。
+5. **建会即订阅 + 首个 submit 前的会话**：session.delivery topic 由 registry 的 onRuntimeCreated 创建事件补接线（2026-10-24 修复前需补一次 subscribe；旧产物剧本保留该绕行，事件断言仍有效）。
