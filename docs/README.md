@@ -23,6 +23,7 @@ docs/
 ├── adr/                   ← 架构决策记录（决策级「为什么」唯一家园；decisions.md 单文件 SSOT，沿用 ADR 编号）
 ├── architecture/          ← 全局架构与契约（分层/数据治理/跨模块协议；被取代设计即删，git 可追溯）
 ├── extensions/            ← pi 扩展跨包约定（开发指南/强约束/日志规范/术语表/adr/）
+├── plugins/               ← taiji 插件体系（架构总览 / 扩展点全量盘点 / 内置插件开发指南）
 ├── testing/               ← 测试手册（分层策略/手工冒烟清单/mock 盲区表）
 └── todo/                  ← 有效待办 + ext-simplify/ 待决策设计集
 ```
@@ -59,6 +60,9 @@ docs/
 - [architecture/README.md](./architecture/README.md) — 架构文档目录规范
 - [extensions/local-dev-guide.md](./extensions/local-dev-guide.md) — pi extension 本地开发调试
 - [extensions/gui-protocol-guide.md](./extensions/gui-protocol-guide.md) — extension GUI 协议接入
+- [plugins/architecture.md](./plugins/architecture.md) — **taiji 插件架构总览**（四层模型 / 贡献点契约 / 生命周期 / 数据流 / 与 pi extension 的分工）
+- [plugins/extension-points.md](./plugins/extension-points.md) — **扩展点全量盘点**（renderer / runtime / pi extension 三层逐点清单 + 缺口登记）
+- [plugins/built-in-plugin-guide.md](./plugins/built-in-plugin-guide.md) — 写一个内置插件的操作指南
 
 ## 禁止放入 docs/
 

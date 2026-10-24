@@ -90,13 +90,13 @@ resources/plugins/
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `name` | ✅ | 插件唯一标识，同时也是 pluginId。小写，短横线分隔 |
-| `version` | ✅ | 语义化版本号 |
-| `displayName` | ✅ | 展示名称，出现在 UI 中 |
-| `description` | ✅ | 一句话功能描述 |
-| `taijiPlugin.manifestVersion` | ✅ | 当前必须为 `1` |
-| `taijiPlugin.main` | ✅ | 入口文件路径（编译后的 `.js`，相对于 package.json） |
-| `taijiPlugin.activationEvents` | ✅ | 激活事件数组，见下表 |
+| `name` | 必填 | 插件唯一标识，同时也是 pluginId。小写，短横线分隔 |
+| `version` | 必填 | 语义化版本号 |
+| `displayName` | 必填 | 展示名称，出现在 UI 中 |
+| `description` | 必填 | 一句话功能描述 |
+| `taijiPlugin.manifestVersion` | 必填 | 当前必须为 `1` |
+| `taijiPlugin.main` | 必填 | 入口文件路径（编译后的 `.js`，相对于 package.json） |
+| `taijiPlugin.activationEvents` | 必填 | 激活事件数组，见下表 |
 | `taijiPlugin.trustLevel` | 推荐 | 内置插件填 `"trusted"` |
 | `taijiPlugin.source` | 推荐 | 内置插件填 `"built-in"` |
 | `taijiPlugin.permissions` | 视情况 | 需要的权限列表。内置 trusted 插件可省略（默认全授权） |
@@ -413,7 +413,7 @@ api.config.set(key: string, value: unknown): Promise<void>
 
 ### 5.1 使用 Map/Object 查找表替代 if/else 链
 
-**❌ 不推荐：**
+**不推荐：**
 
 ```typescript
 let priority: number
@@ -423,7 +423,7 @@ else if (key === 'workflow') priority = 15
 // ... 随 key 增多越来越难维护
 ```
 
-**✅ 推荐：**
+**推荐：**
 
 ```typescript
 const KEY_METADATA_MAP: Record<string, StatusKeyMetadata> = {
@@ -441,11 +441,11 @@ const meta = KEY_METADATA_MAP[key] ?? DEFAULT_METADATA
 所有注册操作（hooks、tools、事件监听等）返回的 `Disposable` 都应推入 `context.subscriptions`，确保插件停用时资源被正确清理：
 
 ```typescript
-// ✅ 推入 subscriptions
+// 正确：推入 subscriptions
 const disposable = await api.hooks.onPiEvent('session_start', handler)
 context.subscriptions.push(disposable)
 
-// ❌ 忘记推入 — 停用后 hook 仍然生效，可能导致错误
+// 错误：忘记推入 — 停用后 hook 仍然生效，可能导致错误
 const disposable = await api.hooks.onPiEvent('session_start', handler)
 // 忘记 push...
 ```
