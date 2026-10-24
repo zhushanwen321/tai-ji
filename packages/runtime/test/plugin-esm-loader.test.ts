@@ -44,6 +44,7 @@ const fsGuard = nodeRequire(GUARD_PATH) as {
   inlineReadBases(): string[]
   proxyExportNames(target: string): string[]
   buildProxyModuleSource(target: string): string
+  buildProxyObject(target: string, realFs: typeof import('node:fs')): Record<string, unknown>
   parseStringArrayEnv(raw: unknown): string[]
 }
 
@@ -334,6 +335,112 @@ describe('plugin-fs-guard readPaths 归一与代理源码模板（in-process：.
     expect(fsGuard.parseStringArrayEnv('{"a":1}')).toEqual([])
     expect(fsGuard.parseStringArrayEnv(undefined)).toEqual([])
     expect(fsGuard.parseStringArrayEnv('')).toEqual([])
+  })
+})
+
+describe('plugin-fs-guard buildProxyObject（in-process：CJS 只读代理对象，F1-24）', () => {
+  // 与源码模板 describe 同款 HOME 注入：configure 经 os.homedir() 推导家目录，
+  // buildProxyObject 的路径检查消费 inlineReadBases() 的 configure 后运行时状态
+  //（initSandbox 同款约束：先 configure 再产出代理）。代理对象与被代理的真实 fs
+  // 同进程（in-process 可直接行为断言，与「hooks 线程隔离只能断言模板结构」的
+  // ESM 面不同——这里补上两份行为代码的正反例）。
+  let homeDir = ''
+  let prevHome = ''
+  const realFs = nodeRequire('node:fs') as typeof import('node:fs')
+
+  const denyCodeOf = (run: () => unknown): string => {
+    try {
+      run()
+    } catch (e) {
+      return (e as { code?: string }).code ?? 'NO_CODE'
+    }
+    return 'LEAKED'
+  }
+
+  beforeEach(() => {
+    homeDir = realpathSync(mkdtempSync(join(tmpdir(), 'fs-guard-proxy-home-')))
+    prevHome = process.env.HOME ?? ''
+    process.env.HOME = homeDir
+    mkdirSync(join(homeDir, 'data'), { recursive: true })
+    writeFileSync(join(homeDir, 'data', 'in.txt'), 'inside-content')
+    writeFileSync(join(homeDir, 'data', 'out.txt'), 'outside-content')
+  })
+
+  afterEach(() => {
+    process.env.HOME = prevHome
+    rmSync(homeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('K1: 键集 === proxyExportNames(target)（fs 面 + 内嵌 promises 面逐键一致，防两份行为代码名单漂移）', () => {
+    fsGuard.configure({ readPaths: [] })
+    const proxy = fsGuard.buildProxyObject('fs', realFs)
+    expect(Object.keys(proxy).sort()).toEqual([...fsGuard.proxyExportNames('fs')].sort())
+    // fs 面内嵌 promises 命名空间键集 = fs/promises 面名单
+    const promisesFace = proxy.promises as Record<string, unknown>
+    expect(Object.keys(promisesFace).sort()).toEqual([...fsGuard.proxyExportNames('fs/promises')].sort())
+
+    const promisesDirect = fsGuard.buildProxyObject('fs/promises', realFs)
+    expect(Object.keys(promisesDirect).sort()).toEqual([...fsGuard.proxyExportNames('fs/promises')].sort())
+  })
+
+  it('K2: 读正反例——白名单内 readFileSync 成功；白名单外 PERMISSION_DENIED；写改 API 拒', () => {
+    fsGuard.configure({ readPaths: ['data/in.txt'] })
+    // 键集已由 K1 锁定 === proxyExportNames('fs')（即原生 fs 只读子集面），行为断言
+    // 按原生 fs 签名收窄类型
+    const proxy = fsGuard.buildProxyObject('fs', realFs) as typeof realFs
+    const inside = join(homeDir, 'data', 'in.txt')
+    const outside = join(homeDir, 'data', 'out.txt')
+
+    expect(proxy.readFileSync(inside, 'utf-8')).toBe('inside-content')
+    expect(denyCodeOf(() => proxy.readFileSync(outside, 'utf-8'))).toBe('PERMISSION_DENIED')
+    expect(denyCodeOf(() => proxy.writeFileSync(inside, 'x'))).toBe('PERMISSION_DENIED')
+
+    // constants / Stats 透传原生引用（instanceof 语义 = 同一构造器）
+    expect(proxy.constants).toBe(realFs.constants)
+    expect(proxy.Stats).toBe(realFs.Stats)
+  })
+
+  it('K3: open 只放读 flags——写 flags 拒；读 flags 打开后 fd 族读 API 可用', () => {
+    fsGuard.configure({ readPaths: ['data/in.txt'] })
+    const proxy = fsGuard.buildProxyObject('fs', realFs) as typeof realFs
+    const inside = join(homeDir, 'data', 'in.txt')
+
+    expect(denyCodeOf(() => proxy.openSync(inside, 'w'))).toBe('PERMISSION_DENIED')
+    expect(denyCodeOf(() => proxy.openSync(inside, realFs.constants.O_WRONLY))).toBe('PERMISSION_DENIED')
+
+    const fd = proxy.openSync(inside, 'r')
+    const buf = Buffer.alloc('inside-content'.length)
+    const bytes = proxy.readSync(fd, buf, 0, buf.length, 0)
+    proxy.closeSync(fd)
+    expect(bytes).toBe(buf.length)
+    expect(buf.toString('utf-8')).toBe('inside-content')
+  })
+
+  it('K4: promises 面——白名单内 readFile 成功；writeFile 拒；FileHandle 写方法拒（读 flags 打开后）', async () => {
+    fsGuard.configure({ readPaths: ['data/in.txt'] })
+    const proxy = fsGuard.buildProxyObject('fs', realFs)
+    const promisesFace = proxy.promises as Record<string, (...args: unknown[]) => Promise<unknown>>
+    const inside = join(homeDir, 'data', 'in.txt')
+
+    await expect(promisesFace.readFile(inside, 'utf-8')).resolves.toBe('inside-content')
+    await expect(promisesFace.writeFile(inside, 'x')).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+
+    const handle = (await promisesFace.open(inside, 'r')) as import('node:fs').promises.FileHandle
+    await expect(handle.write('x')).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+    await handle.close()
+  })
+
+  it('K5: fs/promises 直出面与 fs.promises 内嵌面同语义（读成 / 写拒）', async () => {
+    fsGuard.configure({ readPaths: ['data/in.txt'] })
+    const promisesDirect = fsGuard.buildProxyObject('fs/promises', realFs) as Record<string, (...args: unknown[]) => Promise<unknown>>
+    const inside = join(homeDir, 'data', 'in.txt')
+    const outside = join(homeDir, 'data', 'out.txt')
+
+    await expect(promisesDirect.readFile(inside, 'utf-8')).resolves.toBe('inside-content')
+    // 白名单外路径在包装的读 API 上同步抛（assertAllowedPath 先于 promise 创建，
+    // 与 ESM 模板 wrap 函数同构——await 调用点语义不变，异常仍归调用方 try/catch）
+    expect(denyCodeOf(() => promisesDirect.readFile(outside, 'utf-8'))).toBe('PERMISSION_DENIED')
+    await expect(promisesDirect.writeFile(inside, 'x')).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
   })
 })
 

@@ -289,8 +289,9 @@ describe('S1-W3: CJS interceptor boundary (/, file:, bare-name resolved)', () =>
 })
 
 describe('F1-9: CJS require 拦截接入能力词表（computeBlockedBuiltins）', () => {
-  // 探针四判定（F1-10 修复契约）：声明 network.http 后 https 由拒变放行、fs 拒
-  // （CJS 通道恒拦，只读执法形态待裁决）、vm 永久拒、os 免声明放行。
+  // 探针四判定（F1-10 修复契约）：声明 network.http 后 https 由拒变放行、fs 未声明拒
+  // （CJS 通道 fs 系只走 FS_PROXY_MODULES 两态放行——声明 fs.read-user-data 才放行，
+  // 由 Module._load patch 返回只读代理对象）、vm 永久拒、os 免声明放行。
   // 与「CJS interceptor boundary」同层：拦截器纯函数 in-process，无进程无时钟。
   let pluginDir = ''
 
@@ -307,8 +308,8 @@ describe('F1-9: CJS require 拦截接入能力词表（computeBlockedBuiltins）
     // 正例：声明能力对应的模块放行（含 node: 前缀形态，M6a-01 剥离对称）
     expect(interceptor('https', 'node:https')).toBe('https')
     expect(interceptor('node:https', 'node:https')).toBe('node:https')
-    // 反例：fs 系 CJS 通道恒拦（模块级放行 = 完整 fs，与 fs.read-user-data 只读
-    // 子集承诺冲突——执法形态待裁决，fail-closed）
+    // 反例：fs 未声明 → 拒（CJS 通道 fs 系只走只读代理放行——声明 fs.read-user-data
+    // 才两态放行，由 Module._load patch 返回代理对象，见 F1-24 fork 组）
     expect(() => interceptor('fs', 'node:fs')).toThrowError(/is blocked/)
     expect(() => interceptor('fs/promises', 'node:fs/promises')).toThrowError(/is blocked/)
     // 反例：vm 永久封禁，allowed 注入也不放行（fail-closed 免疫）
@@ -429,9 +430,9 @@ describe('S1-W3: BLOCKED_BUILTINS SSOT 防退化', () => {
 
 // D6 B3 恢复（原 S-36 describe 内的 F1-9 接线用例，8a4439914 连带删除）：真实
 // initSandbox 消费 TAIJI_PLUGIN_ALLOWED_MODULES env（宿主 buildPluginCapabilityForkEnv
-// 注入形态）→ 声明 network.http 后 CJS require('https') 放行、require('fs') 恒拒
-// （CJS 通道只读执法待裁决）、require('vm') 永久拒。initSandbox 修改全局
-// process.env / Module._resolveFilename，必须 fork 调用（进程退出即丢弃污染）。
+// 注入形态）→ 声明 network.http 后 CJS require('https') 放行、require('fs') 未声明拒
+// （CJS 通道 fs 系只走只读代理放行）、require('vm') 永久拒。initSandbox 修改全局
+// process.env / Module._resolveFilename / Module._load，必须 fork 调用（进程退出即丢弃污染）。
 describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`F1-9: CJS 通道能力词表 fork 级接线${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
   const PLUGIN_BOOTSTRAP_TS = join(__dirname, '../src/services/plugin-service/plugin-bootstrap.ts')
   const RUNTIME_ROOT = join(__dirname, '..')
@@ -504,5 +505,173 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`F1-9: CJS 通道能力词表 fork �
     } finally {
       tsxTsconfig.dispose()
     }
+  }, 30_000)
+})
+
+// F1-24（2026-10-24 裁决落地）：CJS 通道 fs.read-user-data 真进程正反例。声明能力
+// 的插件 require('fs') / require('fs/promises') 拿到只读代理对象（读白名单成功 /
+// 白名单外拒 / 写改 API 拒 / open 写 flags 拒 / FileHandle 写方法拒 / promises 面同
+// 语义）；未声明的对照插件 require('fs') 直接 PERMISSION_DENIED（fail-closed）。
+// fixture 与 F1-9 同形态：隔离子进程 require 真实 plugin-bootstrap.ts 调 initSandbox
+// （全局污染随进程退出丢弃）。判定本质 = 拦截器 + Module._load patch + fs 代理对象
+// 在真实子进程链路下的组合行为，无进程内完成信号可等，本地默认跳过（e2e-map 规则
+// 按 on-diff 触发）；判定面已由 plugin-esm-loader.test.ts 的 buildProxyObject 组与
+// plugin-sandbox.test.ts 的两态组在 in-process 层覆盖。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`F1-24: CJS 通道 fs 只读代理 fork 级接线${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
+  const PLUGIN_BOOTSTRAP_TS = join(__dirname, '../src/services/plugin-service/plugin-bootstrap.ts')
+  const RUNTIME_ROOT = join(__dirname, '..')
+
+  /** 组装 fixture 源码（公共壳：先捕获目标路径 env → initSandbox → body 判定 → stdout 回传） */
+  function buildF124Fixture(pluginDir: string, body: string): string {
+    return [
+      "'use strict'",
+      `const { initSandbox } = require(${JSON.stringify(PLUGIN_BOOTSTRAP_TS)})`,
+      '// initSandbox 会把 process.env 换成空 Proxy——目标路径必须在调用前捕获',
+      'const TARGET = process.env.TAIJI_F124_TARGET',
+      'const OUTSIDE = process.env.TAIJI_F124_OUTSIDE',
+      `initSandbox(${JSON.stringify(pluginDir)})`,
+      ';(async () => {',
+      body,
+      '})().catch((e) => {',
+      "  process.stdout.write('F124_RESULT:' + JSON.stringify({ fatal: String((e && e.stack) || e) }))",
+      '})',
+      '',
+    ].join('\n')
+  }
+
+  /**
+   * fork 隔离子进程跑 fixture（tsx 装配 + 临时目录自建自删），解析 F124_RESULT 行。
+   * setup（可选）在临时家目录内播种文件并返回 fork env（HOME / 能力 env / 目标路径——
+   * 目标路径依赖 homeDir 实际值，故 env 在播种后构建）。
+   */
+  async function runF124(
+    fixtureBody: string,
+    setup?: (homeDir: string) => Record<string, string>,
+  ): Promise<Record<string, string>> {
+    const tsxTsconfig = createTsxPathsTsconfig()
+    let workDir = ''
+    let homeDir = ''
+    let forkEnv: Record<string, string> = {}
+    try {
+      workDir = mkdtempSync(join(tmpdir(), 'f124-cjs-proxy-'))
+      const pluginDir = join(workDir, 'plugin')
+      mkdirSync(pluginDir)
+      const fixturePath = join(workDir, 'fixture.cjs')
+      writeFileSync(fixturePath, buildF124Fixture(pluginDir, fixtureBody))
+      if (setup) {
+        homeDir = mkdtempSync(join(tmpdir(), 'f124-home-'))
+        forkEnv = setup(homeDir)
+      }
+      return await new Promise<Record<string, string>>((resolveP, reject) => {
+        const child = fork(fixturePath, [], {
+          execPath: process.execPath,
+          execArgv: ['--import', 'tsx'],
+          cwd: RUNTIME_ROOT,
+          env: {
+            ...process.env,
+            TSX_TSCONFIG_PATH: tsxTsconfig.tsconfigPath,
+            ...forkEnv,
+          },
+          stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+        })
+        let stdout = ''
+        let stderr = ''
+        child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
+        child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
+        child.on('error', reject)
+        child.on('close', (code) => {
+          const line = stdout.split('\n').find((l) => l.startsWith('F124_RESULT:'))
+          if (code !== 0 || !line) {
+            reject(new Error(`fixture exited ${code}. stdout=${stdout} stderr=${stderr}`))
+            return
+          }
+          try {
+            resolveP(JSON.parse(line.slice('F124_RESULT:'.length)) as Record<string, string>)
+          } catch (e) {
+            reject(new Error(`fixture result parse failed: ${(e as Error).message}`))
+          }
+        })
+      })
+    } finally {
+      tsxTsconfig.dispose()
+      if (workDir) rmSync(workDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      if (homeDir) rmSync(homeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  }
+
+  it("声明 fs.read-user-data → require('fs') / require('fs/promises') 为只读代理（读白名单成 / 白名单外拒 / 写改与写 flags 拒 / FileHandle 写拒）", async () => {
+    const body = [
+      'const out = {}',
+      "const resultOf = (fn) => { try { return fn() } catch (e) { return (e && e.code) || 'ERR' } }",
+      "const fs = require('fs')",
+      'out.insideRead = resultOf(() => fs.readFileSync(TARGET, "utf-8"))',
+      'out.outsideRead = resultOf(() => fs.readFileSync(OUTSIDE, "utf-8"))',
+      'out.writeFileSync = resultOf(() => fs.writeFileSync(TARGET, "x"))',
+      'out.openWriteFlags = resultOf(() => { const fd = fs.openSync(TARGET, "w"); fs.closeSync(fd) })',
+      'out.openReadFlagsRead = resultOf(() => {',
+      '  const fd = fs.openSync(TARGET, "r")',
+      '  const buf = Buffer.alloc(14)',
+      '  const bytes = fs.readSync(fd, buf, 0, 14, 0)',
+      '  fs.closeSync(fd)',
+      '  return buf.toString("utf-8", 0, bytes)',
+      '})',
+      "const fsp = require('fs/promises')",
+      "out.promisesRead = await fsp.readFile(TARGET, 'utf-8').then((v) => v, (e) => (e && e.code) || 'ERR')",
+      "out.promisesWrite = await fsp.writeFile(TARGET, 'x').then(() => 'LEAKED', (e) => (e && e.code) || 'ERR')",
+      "out.handleWrite = await fsp.open(TARGET, 'r').then(async (h) => {",
+      '  try {',
+      "    await h.write('x')",
+      "    return 'LEAKED'",
+      '  } catch (e) {',
+      "    return (e && e.code) || 'ERR'",
+      '  } finally {',
+      '    await h.close()',
+      '  }',
+      "}, (e) => 'OPEN_FAILED:' + ((e && e.code) || 'ERR'))",
+      "process.stdout.write('F124_RESULT:' + JSON.stringify(out))",
+    ].join('\n')
+    // readPaths 家目录相对语义（'data/in.txt'）经 HOME 注入临时家目录（initSandbox
+    // 的 fsGuard.configure 经 os.homedir() 推导），与 P-perm 门控组同款约束
+    const result = await runF124(body, (homeDir) => {
+      mkdirSync(join(homeDir, 'data'), { recursive: true })
+      writeFileSync(join(homeDir, 'data', 'in.txt'), 'inside-content')
+      writeFileSync(join(homeDir, 'data', 'out.txt'), 'outside-content')
+      return {
+        HOME: homeDir,
+        TAIJI_PLUGIN_ALLOWED_MODULES: JSON.stringify(['fs', 'fs/promises']),
+        TAIJI_PLUGIN_READ_PATHS: JSON.stringify(['data/in.txt']),
+        TAIJI_F124_TARGET: join(homeDir, 'data', 'in.txt'),
+        TAIJI_F124_OUTSIDE: join(homeDir, 'data', 'out.txt'),
+      }
+    })
+
+    expect(result.insideRead).toBe('inside-content')
+    expect(result.outsideRead).toBe('PERMISSION_DENIED')
+    expect(result.writeFileSync).toBe('PERMISSION_DENIED')
+    expect(result.openWriteFlags).toBe('PERMISSION_DENIED')
+    // fd 族读 API（fd 只能来自受 flags 检查的 open）
+    expect(result.openReadFlagsRead).toBe('inside-content')
+    expect(result.promisesRead).toBe('inside-content')
+    expect(result.promisesWrite).toBe('PERMISSION_DENIED')
+    expect(result.handleWrite).toBe('PERMISSION_DENIED')
+    expect(JSON.stringify(result)).not.toContain('LEAKED')
+  }, 30_000)
+
+  it("未声明能力的对照插件 → require('fs') / require('fs/promises') 直接 PERMISSION_DENIED（fail-closed）；os 免声明不误伤", async () => {
+    const body = [
+      'const out = {}',
+      "try { require('fs'); out.fs = 'LEAKED' } catch (e) { out.fs = (e && e.code) || 'ERR' }",
+      "try { require('fs/promises'); out.fsPromises = 'LEAKED' } catch (e) { out.fsPromises = (e && e.code) || 'ERR' }",
+      "try { require('os'); out.os = 'ok' } catch (e) { out.os = (e && e.code) || 'ERR' }",
+      "process.stdout.write('F124_RESULT:' + JSON.stringify(out))",
+    ].join('\n')
+    const result = await runF124(body, (homeDir) => ({
+      HOME: homeDir,
+      TAIJI_PLUGIN_ALLOWED_MODULES: JSON.stringify([]),
+      TAIJI_PLUGIN_READ_PATHS: JSON.stringify([]),
+    }))
+    expect(result.fs).toBe('PERMISSION_DENIED')
+    expect(result.fsPromises).toBe('PERMISSION_DENIED')
+    expect(result.os).toBe('ok')
   }, 30_000)
 })

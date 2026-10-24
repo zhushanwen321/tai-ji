@@ -4,14 +4,20 @@
  * plugin-fs-guard.cjs —— fs.read-user-data 的路径检查与只读导出子集代理
  * （provider-plugin-access D3）
  *
- * 消费方 = plugin-esm-loader.cjs（fork 子进程，--import 注入）。**Node 的
- * customization hooks（resolve/load）运行在专用 hooks 线程**——其 globalThis 与
- * 主线程不同实例，实测（2026-10-24 探针）load hook 侧经 globalThis/process 向
- * 生成的代理模块传递代理对象全部不可见。因此本模块的职责收缩为「代理模块的
- * ESM 源码模板」：load hook 返回 format:'module' 的自包含源码，在**主线程**求值，
- * 其中 `import realFs from 'node:fs'` 的 parentURL 是 sentinel URL（非 file://）
- * → loader 自身放行 → 原生 fs 经 ESM 通道到手（initSandbox 的 CJS
- * _resolveFilename patch 天然不覆盖 ESM import）。
+ * 两条加载通道的只读执法共用本文件的名单常量与路径检查，消费方各取所需：
+ *   - plugin-esm-loader.cjs（fork 子进程，--import 注入）：**Node 的 customization
+ *     hooks（resolve/load）运行在专用 hooks 线程**——其 globalThis 与主线程不同
+ *     实例，实测（2026-10-24 探针）load hook 侧经 globalThis/process 向生成的代理
+ *     模块传递代理对象全部不可见。因此 ESM 通道取「代理模块的 ESM 源码模板」：
+ *     load hook 返回 format:'module' 的自包含源码，在**主线程**求值，其中
+ *     `import realFs from 'node:fs'` 的 parentURL 是 sentinel URL（非 file://）
+ *     → loader 自身放行 → 原生 fs 经 ESM 通道到手（initSandbox 的 CJS
+ *     _resolveFilename patch 天然不覆盖 ESM import）。
+ *   - plugin-bootstrap.ts initSandbox（同一 fork 子进程主线程）：CJS require 通道
+ *     取 buildProxyObject 直接构建的代理对象（Module._load patch 返回），与 ESM
+ *     模板同语义。行为代码两份是真实运行环境差异（模板源码求值 vs 主线程直接
+ *     持有对象），名单常量与本文件单一事实源共用，键集一致性由 in-process 测试
+ *     断言（两份行为代码名单漂移的机器防线）。
  *
  * D3 的两个独立机制在本文件各承载其一（不互相顶替）：
  *   - 路径边界：configure() 按 readPaths（家目录相对路径）在 hooks 线程归一为
@@ -385,6 +391,139 @@ function emitBuildLines(lines, varName, ref, isPromises) {
   lines.push(`${varName}.Dir = realFs.Dir`)
 }
 
+// ── CJS 只读代理对象（plugin-bootstrap.ts initSandbox 的 Module._load patch 消费）──
+
+/** 错误构造（与模板内联 sandboxError、loader/plugin-sandbox 的 errorWithCode 同形态：Error + code 字段） */
+function sandboxError(message) {
+  const err = new Error(message)
+  err.code = 'PERMISSION_DENIED'
+  return err
+}
+
+/**
+ * 白名单判定（与模板 isPathAllowed 同语义）：目标 realpath 归一；不存在时逐级取
+ * 最近存在祖先（ENOENT 语义保留），余下段拼回后与白名单前缀匹配（目录 readPath
+ * 覆盖子树）。数据源 = inlineReadBases()（configure 后的运行时状态，每次调用
+ * 现读）——调用方（initSandbox）必须先 configure 再产出代理对象。
+ */
+function isPathAllowed(targetPath) {
+  const target = resolveForCheck(targetPath)
+  if (target.broken) return false
+  const key = entryKey(target)
+  return inlineReadBases().some((base) => key === base || key.startsWith(base + NODE_PATH.sep))
+}
+
+/** 读 flags 判定（与模板 isReadFlags 同语义：'r' / 'rs' / O_RDONLY / O_RDONLY|O_SYNC） */
+function isReadFlags(realFs, flags) {
+  if (flags === undefined || flags === null || flags === 'r' || flags === 'rs') return true
+  return flags === realFs.constants.O_RDONLY || flags === (realFs.constants.O_RDONLY | realFs.constants.O_SYNC)
+}
+
+/**
+ * 构建 CJS 通道的只读代理对象（target = 'fs' | 'fs/promises'，realFs = 真实 fs 模块）。
+ *
+ * 行为语义与 buildProxyModuleSource 模板逐 API 对齐：READ_PATH_APIS /
+ * PROMISES_READ_APIS 逐 API 路径边界检查（assertAllowedPath）；DENIED_APIS /
+ * PROMISES_DENIED_APIS 逐 API 抛 PERMISSION_DENIED；open / openSync / promises.open
+ * 只放读 flags，promises.open 返回的 FileHandle 经 Proxy 拒绝写方法
+ * （HANDLE_DENIED_METHODS）；fs 面内嵌 promises 命名空间（同一 realFs.promises
+ * 数据源）；constants / Stats / Dirent / Dir 透传原生引用（instanceof 语义）。
+ * fd 族读 API 直接引用（fd 只能来自受 flags 检查的 open，同模板）。
+ *
+ * realFs 由调用方在 initSandbox patch 前捕获（顶部 import），保证是原生 fs——
+ * 本函数绝不自行 require('fs')（patch 生效后该 require 会拿到代理对象自身）。
+ */
+function buildProxyObject(target, realFs) {
+  const assertAllowedPath = function (api, value) {
+    if (typeof value !== 'string' || !isPathAllowed(value)) {
+      throw sandboxError(`Sandbox: fs.${api}('${String(value)}') is outside declared readPaths`)
+    }
+  }
+  const assertReadFlags = function (api, flags) {
+    if (!isReadFlags(realFs, flags)) {
+      throw sandboxError(`Sandbox: fs.${api} flags '${String(flags)}' is not a read flag (readonly subset)`)
+    }
+  }
+
+  /** 构建单面（fs 或 promises）代理对象（ref = 真实 fs / fs.promises 数据源） */
+  const buildSurface = function (ref, isPromisesFace) {
+    const surface = {}
+    const readApis = isPromisesFace ? PROMISES_READ_APIS : READ_PATH_APIS
+    for (const api of readApis) {
+      surface[api] = function (...args) {
+        assertAllowedPath(api, args[0])
+        return ref[api].apply(ref, args)
+      }
+    }
+
+    if (isPromisesFace) {
+      // promises.open：读 flags 限定 + FileHandle 写方法 Proxy 拒绝（与模板同构）
+      surface.open = async function open(path, flags, ...rest) {
+        assertAllowedPath('open', path)
+        assertReadFlags('open', flags)
+        const handle = await ref.open(path, flags, ...rest)
+        return new Proxy(handle, {
+          get(targetHandle, prop) {
+            if (typeof prop === 'string' && HANDLE_DENIED_METHODS.includes(prop)) {
+              return () => Promise.reject(sandboxError(`Sandbox: FileHandle.${prop} is denied (readonly subset of fs.read-user-data)`))
+            }
+            const value = Reflect.get(targetHandle, prop, targetHandle)
+            return typeof value === 'function' ? value.bind(targetHandle) : value
+          },
+        })
+      }
+      surface.opendir = async function opendir(path, options) {
+        assertAllowedPath('opendir', path)
+        if (options && typeof options === 'object' && 'flags' in options) assertReadFlags('opendir', options.flags)
+        return ref.opendir(path, options)
+      }
+      for (const api of PROMISES_DENIED_APIS) {
+        surface[api] = () => Promise.reject(sandboxError(`Sandbox: fs.promises.${api} is denied (readonly subset of fs.read-user-data)`))
+      }
+      return surface
+    }
+
+    surface.createReadStream = function (...args) {
+      assertAllowedPath('createReadStream', args[0])
+      const options = args[1]
+      if (options && typeof options === 'object' && 'flags' in options) assertReadFlags('createReadStream', options.flags)
+      return ref.createReadStream.apply(ref, args)
+    }
+    surface.open = function (...args) {
+      assertAllowedPath('open', args[0])
+      assertReadFlags('open', args[1])
+      return ref.open.apply(ref, args)
+    }
+    surface.openSync = function (...args) {
+      assertAllowedPath('openSync', args[0])
+      assertReadFlags('openSync', args[1])
+      return ref.openSync.apply(ref, args)
+    }
+    // fd 族读 API 直接引用（fd 只能来自受 flags 检查的 open）
+    for (const api of FD_READ_APIS) {
+      surface[api] = ref[api]
+    }
+    for (const api of DENIED_APIS) {
+      surface[api] = () => {
+        throw sandboxError(`Sandbox: fs.${api} is denied (readonly subset of fs.read-user-data)`)
+      }
+    }
+    // 类与常量透传（instanceof 语义）
+    surface.constants = realFs.constants
+    surface.Stats = realFs.Stats
+    surface.Dirent = realFs.Dirent
+    surface.Dir = realFs.Dir
+    return surface
+  }
+
+  if (target === 'fs/promises') return buildSurface(realFs.promises, true)
+
+  const proxy = buildSurface(realFs, false)
+  // fs 面内嵌 promises 命名空间（同一 realFs.promises 数据源，同模板 m.promises = pm）
+  proxy.promises = buildSurface(realFs.promises, true)
+  return proxy
+}
+
 /** 测试与 loader 侧共用：字符串数组形态 env 值的解码（非法/缺失 → 空数组 fail-closed） */
 function parseStringArrayEnv(raw) {
   if (typeof raw !== 'string' || raw.trim() === '') return []
@@ -403,5 +542,6 @@ module.exports = {
   inlineReadBases,
   proxyExportNames,
   buildProxyModuleSource,
+  buildProxyObject,
   parseStringArrayEnv,
 }

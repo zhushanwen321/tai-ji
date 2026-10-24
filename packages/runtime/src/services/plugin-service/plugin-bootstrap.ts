@@ -11,6 +11,7 @@
 
 import { parentPort } from 'node:worker_threads'
 import { Module } from 'node:module'
+import * as realFs from 'node:fs'
 import { dirname as pathDirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type {
@@ -26,10 +27,10 @@ import type {
 } from './plugin-types.js'
 import { PluginRpcErrorCodes } from './plugin-types.js'
 import { PluginRpcClient } from './plugin-rpc-client.js'
-import { createRequireInterceptor, createEnvProxy } from './plugin-sandbox.js'
-// fs-guard 复用（F1-9 接线）：CJS 通道在 env 被空 Proxy 替换前解码放行清单——与
-// ESM loader 消费同一 env 键与同一解码原语（default import 取 module.exports 整体，
-// interop 安全同 plugin-sandbox 的 .cjs 消费形态）
+import { createRequireInterceptor, createEnvProxy, FS_PROXY_MODULES } from './plugin-sandbox.js'
+// fs-guard 复用（F1-9 接线）：CJS 通道在 env 被空 Proxy 替换前解码放行清单与
+// readPaths——与 ESM loader 消费同一 env 键与同一解码原语（default import 取
+// module.exports 整体，interop 安全同 plugin-sandbox 的 .cjs 消费形态）
 import fsGuard from './plugin-fs-guard.cjs'
 import { errorWithCode } from '../../utils/errors.js'
 import { createToolApi } from './tool-api.js'
@@ -431,12 +432,13 @@ function createStateStorageProxy(
  * 导出供 plugin-bootstrap-process.ts 复用（子进程版与 Worker 版同一实现）。
  */
 /**
- * Node 文档外 API 的局部类型补全：CJS resolver 钩子 `_resolveFilename`
- * （@types/node 未声明，自 Node 0.x 起稳定存在；原实现经 require('node:module')
+ * Node 文档外 API 的局部类型补全：CJS resolver/loader 钩子 `_resolveFilename` 与
+ * `_load`（@types/node 未声明，自 Node 0.x 起稳定存在；原实现经 require('node:module')
  * 的 any 返回值隐式使用，此处显式声明收敛类型）。
  */
-type ModuleWithResolveFilename = typeof Module & {
+type ModuleWithSandboxHooks = typeof Module & {
   _resolveFilename: (this: unknown, request: string, ...args: unknown[]) => string
+  _load: (this: unknown, request: string, ...args: unknown[]) => unknown
 }
 
 export function initSandbox(pluginDir: string): void {
@@ -445,13 +447,18 @@ export function initSandbox(pluginDir: string): void {
   // 与 ESM loader 消费同一 env 同一解码，声明能力在两条加载通道一致生效）。缺失/
   // 解析失败 → 空放行（基线全拦，fail-closed 向后兼容无能力声明的插件）。
   const allowedModules = fsGuard.parseStringArrayEnv(process.env[fsGuard.ENV_ALLOWED_MODULES_KEY])
+  // F1-24（2026-10-24 裁决落地）：CJS 只读代理对象的 readPaths 配置。fsGuard 是本
+  // 进程独立的模块实例——ESM loader 的 hooks 线程侧 configure 与本实例互不相通，
+  // 主线程代理对象的路径检查消费本实例的 configure 状态，必须各自配置。与
+  // allowedModules 同窗口读取（process.env 被空 Proxy 替换前）。
+  fsGuard.configure({ readPaths: fsGuard.parseStringArrayEnv(process.env[fsGuard.ENV_READ_PATHS_KEY]) })
   const interceptor = createRequireInterceptor(pluginDir, allowedModules)
 
   // F1 配套：dev 模式（tsx）下本模块经 ESM 加载（fork 子进程无全局 require），
   // 改为顶层 `import { Module } from 'node:module'` 获取构造器——node:module 的
   // ESM 入口 re-export 同一 CJS 类对象，_resolveFilename monkey-patch 语义不变；
   // 生产 CJS bundle 中 esbuild 将该 import 编译为 require('node:module') 解构，等价。
-  const ModuleApi = Module as ModuleWithResolveFilename
+  const ModuleApi = Module as ModuleWithSandboxHooks
   const _originalResolveFilename = ModuleApi._resolveFilename
   // CJS 拦截永久保留（D5 attempt3 F1-9 用户裁决 2026-10-24）：ESM hooks 不覆盖 CJS
   // require，本 patch 是 CJS 通道内置模块拦截的唯一防线——删除即任何 CJS 依赖
@@ -466,6 +473,24 @@ export function initSandbox(pluginDir: string): void {
     const resolved = _originalResolveFilename.call(this, request, ...args) as string
     interceptor(request, resolved)
     return resolved
+  }
+
+  const _originalLoad = ModuleApi._load
+  // F1-24：fs.read-user-data 的 CJS 通道落地——拦截器放行的 fs / fs/promises 在本层
+  // 返回只读代理对象（plugin-fs-guard.cjs buildProxyObject，行为语义与 ESM 通道
+  // buildProxyModuleSource 模板对齐）。为什么必须 patch _load：_resolveFilename 只
+  // 控制解析标识符，替换插件实际拿到的模块对象只能在装载层；不调原 _load = 完整 fs
+  // 不进模块缓存（放行的名字绝不以原生形态出现）。realFs 是顶部 import 的原生引用
+  // （本 patch 装配前求值）——本 patch 生效后 bootstrap 代码不得新增 require('fs')：
+  // 声明该能力的插件进程内，patch 后的 require('fs') 都会拿到代理对象，而 bootstrap
+  // 自身无 fs 写需求。allowedModules 与上方 _resolveFilename patch 共享同一份（同一
+  // 能力声明两态语义：未声明在拦截器已拒，不到本层）。
+  ModuleApi._load = function (request: string, ...args: unknown[]): unknown {
+    const bareName = request.startsWith('node:') ? request.slice('node:'.length) : request
+    if (FS_PROXY_MODULES.includes(bareName) && allowedModules.includes(bareName)) {
+      return fsGuard.buildProxyObject(bareName as 'fs' | 'fs/promises', realFs)
+    }
+    return _originalLoad.call(this, request, ...args)
   }
 
   // 替换 process.env 为空 Proxy
