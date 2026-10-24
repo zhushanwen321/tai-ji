@@ -1,21 +1,23 @@
 // src/__tests__/spawn-event-translator.test.ts
 //
-// [U-A6] tool_execution_update → 工具执行期活性信号（设计 §3.3 决策 9 误杀面②）。
-//
-// 背景：pi 内置 bash 无默认超时，执行期以 100ms 节流推 tool_execution_update；该事件原被
-// 翻译 switch 的 default 丢弃 → 长工具调用（>30min 构建/测试）期间 workflow/chat 两域的
-// 无进展守护「刷新两路同时失明」→ 合法任务被判无进展取消。
-//
-// 本文件覆盖：
-//   - 到达形态核实：实装 pi rpc 形态的 tool_execution_update 行经 parseSpawnLine
-//     归 kind="event" 的 SdkEvent（不是别的包装）；字段形状含 partialResult；
-//   - 活性信号：onEvent 收到（core 刷新面消费）、onDelta 不收（硬约束① 不污染正文槽）；
-//   - 不污染聊天记录：record 不因活性信号多出正文/思考/工具条目（载体零写入）；
-//   - 节流：1s 内连续 update 只发一条，跨 1s 再发；
-//   - 硬约束②：静默工具（tool_start + 执行入口那条空 content 刷新，此后零 update）
-//     不持续产活性信号——楔死工具不会因本信号被续命（实装 pi bash.js:287 在 execute
-//     入口无条件发一条空 content update，故「静默」= 启动后零 update，非零 update）；
-//   - 既有翻译面零变化：tool_start / text_delta / turn_end 语义不受影响。
+// SdkEvent → AgentEvent 翻译器测试（createSdkEventTranslator 全分派面的单测锚）。
+// 覆盖面：
+//   - [U-A6] tool_execution_update → 工具执行期活性信号（设计 §3.3 决策 9 误杀面②）：
+//     到达形态核实（实装 pi rpc 行经 parseSpawnLine 归 SdkEvent）、onEvent 收 /
+//     onDelta 不收、record 零写入、1s 节流、静默工具不续命（pi 内置 bash 无默认超时，
+//     该事件被 default 丢弃曾致长工具调用期间无进展守护误杀——背景详见
+//     spawn-event-translator.ts handleToolExecutionUpdate 证据链注释）；
+//   - [codemode u5/D4] 嵌套工具调用事件过滤：parentToolCallId 同判同滤（live ≡ reload，
+//     嵌套 update 豁免——活性信号载体）；
+//   - tool_execution_end result.content 形状透传：text/image 逐块保留（派生视图提取源）；
+//   - [subagent-observability §3.3.1] 收尾边沿停因事实优先：error/aborted →
+//     onErroredEnd（结构化输入随事实携带）、重试恢复清除未消费 error 事实、aborted
+//     三源判别（host-cancel > turn-budget > engine）、干净停因 onAgentEnd + settled
+//     快照停因与 P5 计账；
+//   - [§3.3.9/UC-10] 预算显式化：maxTurns 管道生效 + {used, limit} 耗尽事实随收尾
+//     边沿带出（非 turn-budget 支无该事实）；
+//   - [§3.3.1 P3/P5] 队列事实边沿门控：queue_update 刷新、中间边沿不判终、auto_retry
+//     journal 帧（边界事实入 journal，record 零写入）。
 
 import { describe, expect, it, vi } from "vitest";
 

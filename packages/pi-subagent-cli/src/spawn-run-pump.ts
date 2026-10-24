@@ -93,8 +93,6 @@ export interface RunEndState {
    * retryAttempts）——collectRunResult 传给 collectOutcome 做 usage 切片与计数上报。
    */
   settledAccounting?: { finalAttemptTurnBase: number; retryAttempts: number };
-  /** [P5 计账] agent_settled 快照的停因（成功轮 = 非 error/aborted 停因记 "stop"）。 */
-  settledStopReason?: string;
   /**
    * [subagent-observability §3.3.1 turn-limiter 耗尽事实位] limiter abort 经
    * buildTranslatorOpts 的 abort 包装置位（didAbort 事实位镜像）——limiter abort

@@ -58,7 +58,11 @@ import {
   buildSpawnArgs,
   parseSpawnModelRef,
 } from "./spawn-args.ts";
-import { createSdkEventTranslator, type SdkTranslatorOpts } from "./spawn-event-translator.ts";
+import {
+  createSdkEventTranslator,
+  type EngineRoundErrorFact,
+  type SdkTranslatorOpts,
+} from "./spawn-event-translator.ts";
 import {
   createPromptRunCounters,
   createSessionIdentityTracker,
@@ -492,7 +496,6 @@ function buildTranslatorOpts(
       // 锚点——终局由杀链 close 的非零码 + abort 事实位裁决）。
       if (isAbortDecided()) return;
       runEnd.settledTurnCount = snapshot.turnsAtSettle;
-      runEnd.settledStopReason = snapshot.stopReason;
       runEnd.settledAccounting = {
         finalAttemptTurnBase: snapshot.finalAttemptTurnBase,
         retryAttempts: snapshot.retryAttempts,
@@ -546,13 +549,32 @@ function collectRunResult(
   // [subagent-observability §3.3.1] 错误停因事实在场时死因事实优先于退出码裸文案
   //（结构化轮终事实的 errorMessage = provider 层真实死因）。
   const ackFailure = runEnd.promptAckFailure;
+  // [subagent-observability §3.3.1 P9 迟到终态顺序契约 — 结算点 abort 事实核对] abort
+  // 已裁决（宿主 signal 置位 / limiter 直杀置位，与 buildTranslatorOpts 的 isAbortDecided
+  // 同判据）的 run 在结算点不得落 success：「agent_end 已置 clean、settled 未到」竞窗
+  //（含 queue_update 缺失退化形态下中间边沿置 clean 的扩大窗口）被宿主杀链终止时，
+  // close 经 endedCleanly 短路归 0（normalizeExitCode），退出码事实不承载取消事实——
+  // 此处补落宿主取消停因事实（abortSource=host-cancel → FailureCause user.cancelled），
+  // 与 turn-budget 支经 collectOutcome 事实位收口同口径。收尾边沿事实在场时以边沿为
+  // 权威（不覆盖）；settled 已完成的轮（settledTurnCount 在场 = settled 先于取消到达）
+  // 不补落——取消晚于完成不翻案。
+  const terminalErrorFact: EngineRoundErrorFact | undefined =
+    runEnd.terminalErrorFact ??
+    (params.signal?.aborted === true && runEnd.settledTurnCount === undefined
+      ? {
+        stopReason: "aborted",
+        errorMessage: hostCancelReasonText(params.signal),
+        abortSource: "host-cancel",
+      }
+      : undefined);
   // [subagent-observability §3.3.1 P4 静默空成功防伪] 退出 0 不再单独构成成功证据
   //（pi 1.0.0 实装：stdin EOF → rpc-mode shutdown → 无条件 exit(0)，无 settled 的
-  // 0 退出可达）。成功公式 = 退出 0 ∧ 无送达失败 ∧ 无错误停因事实 ∧ 非未解释空轮——
-  // 未解释空轮 = 无 agent_settled 快照、无被接管标记（promptHandledNoRun——被接管
-  // 轮的空是「有解释的空」，见 p6 收条设计）、零轮：按失联语义记失败，不产假成功。
-  // 「end 与 settled 之间被杀」形态（endedCleanly=true 且有真实轮数）不受本判据影响
-  //（有轮 = 有工作证据，非空成功）。
+  // 0 退出可达）。成功公式 = 退出 0 ∧ 无送达失败 ∧ 无错误停因事实（含取消竞窗补落）
+  // ∧ 非未解释空轮——未解释空轮 = 无 agent_settled 快照、无被接管标记
+  //（promptHandledNoRun——被接管轮的空是「有解释的空」，见 p6 收条设计）、零轮：按
+  // 失联语义记失败，不产假成功。「end 与 settled 之间被杀」且无 abort 事实的形态
+  //（endedCleanly=true 且有真实轮数，如外部杀死）不受本判据影响（有轮 = 有工作证据，
+  // 非空成功）；abort 已裁决的同窗被杀由上方取消事实收口，不落成功。
   const recordHasNoWork =
     record.turnCount === 0 &&
     record.turns.every((t) => t.text === "" && t.thinking === "" && t.toolCalls.length === 0);
@@ -563,17 +585,19 @@ function collectRunResult(
     runEnd.promptHandledNoRun !== true &&
     recordHasNoWork;
   const success =
-    exitCode === 0 && ackFailure === undefined && runEnd.terminalErrorFact === undefined && !unexplainedEmptyExit;
+    exitCode === 0 && ackFailure === undefined && terminalErrorFact === undefined && !unexplainedEmptyExit;
+  // 错误文案优先序：送达失败（tracker 结算事实）> 停因事实（收尾边沿 / 取消竞窗补落，
+  // 死因事实优先于推断与裸退出码）> 未解释空轮（失联推断）> 退出码裸文案。
   const error = success
     ? undefined
-    : unexplainedEmptyExit
-      ? "pi child exited with code 0 without any agent activity (no agent_settled, zero turns): " +
-        "treating as lost contact, not success. Recovery: retry the run; if it reproduces, " +
-        "inspect the pi child stderr tee for the shutdown cause."
-      : ackFailure !== undefined
-        ? describePromptAckFailure(ackFailure)
-        : runEnd.terminalErrorFact !== undefined
-          ? runEnd.terminalErrorFact.errorMessage
+    : ackFailure !== undefined
+      ? describePromptAckFailure(ackFailure)
+      : terminalErrorFact !== undefined
+        ? terminalErrorFact.errorMessage
+        : unexplainedEmptyExit
+          ? "pi child exited with code 0 without any agent activity (no agent_settled, zero turns): " +
+            "treating as lost contact, not success. Recovery: retry the run; if it reproduces, " +
+            "inspect the pi child stderr tee for the shutdown cause."
           : buildExitErrorText(exitCode, runEnd.childErrorMessage);
   if (ackFailure !== undefined) {
     // 送达失败路径同时发 error 事件（设计 §3.4.2：让 journal 有记录；既有退出码
@@ -589,12 +613,12 @@ function collectRunResult(
     // [F-1 信号解耦] schemaExpected 判定源 = task.schema 声明形态（schema 本体
     // 存在与否），与 env 派生/注入值不再同源——注入链路变化不影响检查期待。
     ...(params.schema !== undefined ? { schemaExpected: true } : {}),
-    // [subagent-observability §3.3.1] 收尾边沿结构化事实 + 三源判别事实位。
-    // turn-budget 事实位只在收尾边沿事实缺席时传入（limiter abort 是 SIGKILL 直杀
+    // [subagent-observability §3.3.1] 收尾边沿结构化事实（含取消竞窗补落）+ 三源判别
+    // 事实位。turn-budget 事实位只在停因事实缺席时传入（limiter abort 是 SIGKILL 直杀
     // 路径、结构上无停因事实；两者并存的矛盾输入以收尾边沿裁决为权威——分类
     // 单源不双裁）。
-    ...(runEnd.terminalErrorFact !== undefined ? { terminalError: runEnd.terminalErrorFact } : {}),
-    ...(runEnd.turnBudgetExhausted === true && runEnd.terminalErrorFact === undefined
+    ...(terminalErrorFact !== undefined ? { terminalError: terminalErrorFact } : {}),
+    ...(runEnd.turnBudgetExhausted === true && terminalErrorFact === undefined
       ? {
         turnBudgetExhausted: true,
         // [§3.3.9/UC-10] 耗尽事实（{used, limit}）随事实位传入——cause.budget。
@@ -640,10 +664,19 @@ function collectCancelledBeforeSpawn(
   signal: AbortSignal,
   startTime: number,
 ): SpawnRunResult {
-  const reason = signal.reason;
-  const error = reason instanceof Error && reason.message !== "" ? reason.message : "cancelled by host";
+  const error = hostCancelReasonText(signal);
   const outcome = collectOutcome(record, { startTime, success: false, error, sessionId: "", sessionFile: undefined });
   return { ...outcome, sessionId: undefined };
+}
+
+/**
+ * 宿主取消文案：cancel 通道的 signal.reason 承载（server.ts cancel →
+ * `controller.abort(new Error("cancelled by host: <reason>"))`）；reason 缺失/非
+ * Error/空串回落固定文案。取消终态装配（prepare 期短路与本文件取消竞窗补落）共用。
+ */
+function hostCancelReasonText(signal: AbortSignal | undefined): string {
+  const reason = signal?.reason;
+  return reason instanceof Error && reason.message !== "" ? reason.message : "cancelled by host";
 }
 
 export async function runSpawnOnce(

@@ -225,7 +225,11 @@ function handleToolExecutionUpdate(
  *   pendingErrorFact — 未消费的引擎 error 事实：stopReason=error/aborted 置位，后续
  *                      非 error 停因（重试恢复后的成功响应）清除——判据不依赖 record
  *                      lastError（reducer turn_end 会清空它，u2 归属）；
- *   rawStopReason / lastDiagnostics — 结构化输入停止丢弃（§3.3.2 分类机读通道）；
+ *   rawStopReason / lastDiagnostics — 结构化输入原样透传留证（§3.3.2 停止丢弃）：
+ *                      随收尾边沿事实携带上协议，供 journal 留证与下游查询；分类链
+ *                     （classifyFailureCause → classificationMatchInputs）只消费
+ *                      diagnostics 与 errorMessage，rawStopReason 不参与分类
+ *                     （设计未给其映射词表，不猜）；
  *   queueNonEmpty — [§3.3.1 P3] follow-up/steer 队列事实（pi queue_update 事件逐帧
  *                   刷新）：true = agent_end 后 run 将继续（_runAgentPrompt 循环
  *                   agent.continue()），当前 agent_end 是中间边沿非轮终边沿。
@@ -398,7 +402,8 @@ function accumulateMessageEnd(
   if (stopReason !== undefined) {
     edge.lastStopReason = stopReason;
     edge.lastErrorMessage = msg?.errorMessage;
-    // [§3.3.2 结构化输入停止丢弃] rawStopReason/diagnostics 原样留存（分类兜底通道）。
+    // [§3.3.2 结构化输入停止丢弃] 原样留存随收尾边沿事实透传：diagnostics 是分类的
+    // 结构化源（classificationMatchInputs 消费）；rawStopReason 仅留证，不参与分类。
     if (msg?.rawStopReason !== undefined) edge.rawStopReason = msg.rawStopReason;
     if (msg?.diagnostics !== undefined) edge.lastDiagnostics = msg.diagnostics;
   }

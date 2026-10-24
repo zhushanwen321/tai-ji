@@ -7,7 +7,7 @@
 // 进程边界换注入桩，被测逻辑全链真实执行：spawn-runner 编排 → spawn-run-pump →
 // spawn-event-translator → close 收尾 → outcome 收集。覆盖：事件翻译序列、握手
 // 身份回填、header 同值去重、schema env 派生（buildChildEnv）与武装断言、F-1
-// 确定性检查、退出码分诊、取消终态、armed 回执时序、env 污染不透传。
+// 确定性检查、退出码分诊、取消终态与取消竞窗收口、armed 回执时序、env 污染不透传。
 // fake 的 stdout/stderr 写入排微任务（保序交付）：真实子进程不可能在引擎写 stdin
 // 的同一同步块内应答——桩必须保持该异步边界，否则 get_state 应答会早于监听登记
 // 被丢弃（握手等满 2s 超时、身份回填丢失）。
@@ -16,7 +16,7 @@
 // （stdin JSONL 驱动 / stdout JSONL 事件流）。保留 OS × 引擎的组合事实：全链锚点
 // （stderr tee 落盘 + 镜像上报 + settled 收割 + active-children 注销）、V2 契约
 // （get_state 只回 sessionId → 3 轮耗尽 → close 后 LC-4 后缀反查落位）、abort →
-// SIGTERM → 128+signal 折算、真实 ENOENT（F4：从未启动不得判成功）。真进程存亡
+// SIGTERM 杀链 → 取消事实收口失败、真实 ENOENT（F4：从未启动不得判成功）。真进程存亡
 // 无完成信号可等、窗口随负载拉长——移出默认单测层（TAIJI_TEST_INTEGRATION 启用
 // 时真跑），默认组只保留形态 A 的进程内桩逻辑。
 //
@@ -633,17 +633,27 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
     }
   }, 20_000);
 
-  it("abort signal → SIGTERM → 128+signal 折算（143）异常退出口径", async () => {
+  it("abort signal → SIGTERM 杀链 → 取消事实收口失败（host-cancel 分类，取消事实优先于裸退出码）", async () => {
     const h = await makeRealHarness("hang");
     try {
       const controller = new AbortController();
       const runP = runSpawnOnce(baseParams(h, { signal: controller.signal }), callbacksOf(h));
-      setTimeout(() => controller.abort(), 150);
+      // reason 形态对齐生产取消通道（server.ts cancel → Error("cancelled by host: ...")）
+      setTimeout(() => controller.abort(new Error("cancelled by host: user stopped")), 150);
       const result = await runP;
       expect(result.success).toBe(false);
-      // POSIX 信号退出折算 = 128 + signo（SIGTERM=15 → 143）
-      expect(result.error).toBe("pi child exited with code 143");
-      expect(result.failureKind).toBe("unknown");
+      // 取消决定在结算点核对：真 pi 子进程被 SIGTERM 杀死（fake pi 不 trap →
+      // 128+signo=143 折算路径），abort 事实在场时 error = cancel 通道文案，
+      // 非退出码裸文案；分类 = user.cancelled（中止非失败）。
+      expect(result.error).toBe("cancelled by host: user stopped");
+      expect(result.engineStopReason).toBe("aborted");
+      expect(result.failure).toEqual({
+        class: "user",
+        kind: "cancelled",
+        retryable: false,
+        raw: "cancelled by host: user stopped",
+      });
+      expect(result.failureKind).toBeUndefined();
       expect(result.turns).toBe(0);
     } finally {
       restoreHarness(h);
@@ -668,7 +678,10 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
       expect(result.error).toContain("ENOENT"); // 原始 errno code 可诊断
       expect(result.error).toContain(ghostPi); // 失败的命令路径可诊断
       expect(result.error).toContain("127"); // 失败折算退出码
-      expect(result.failureKind).toBe("unknown"); // 不命中 stale 词表（可重试口径）
+      // [subagent-observability §3.3.2] 子串分诊退役：非引擎送达码前缀的失败不产
+      // failureKind（存量断言 "unknown" 属改轨前口径，门控默认跳过漏回扫——随本批对齐）
+      expect(result.failureKind).toBeUndefined();
+      expect(result.failure).toBeUndefined();
       expect(result.content).toBe("");
       expect(result.turns).toBe(0);
       // 子进程从未运行：无 pid 可上报（reportChildSpawned 的 pid 缺失检查）
@@ -1292,6 +1305,85 @@ describe("subagent-observability 判定链事实化（§3.3.1 验收）", () => 
       budget: { used: 1, limit: 1 },
     });
     expect(result.error).toContain("137");
+  });
+
+  // ── [宿主取消竞窗] agent_end 已置 clean、settled 未到窗口触发取消 ──
+  // 修复前形态：agent_end 置 endedCleanly → 被取消的杀链 close 经 normalizeExitCode
+  // 短路归 0 → success=true（被取消的 run 谎报成功——P4 防伪因有轮不触发）。修复后：
+  // 结算点核对 abort 事实（signal 置位 ∧ settled 未到），补落 host-cancel 停因事实
+  // → 失败终局 + FailureCause user.cancelled。
+
+  it("宿主取消竞窗：agent_end 后、settled 未到时取消（pi trap SIGTERM → shutdown(143)）→ 失败终局非成功", async () => {
+    const h = makeStubHarness({
+      getStateData: { ...SUCCESS_IDENTITY },
+      onPrompt: (child) => {
+        child.writeStdoutLine({ type: "message_end", message: { usage: { input: 3, output: 2, cacheRead: 0, cacheWrite: 0 }, stopReason: "stop" } });
+        child.writeStdoutLine({ type: "turn_end" });
+        child.writeStdoutLine({ type: "agent_end", willRetry: false, reason: "end_turn" });
+        // settled 未到——宿主取消在此窗口触发（pi 收尾/compact 阶段被停）
+      },
+    });
+    const controller = new AbortController();
+    const runP = runSpawnOnce(baseParams(h, { signal: controller.signal }), callbacksOf(h));
+    const child = await nextFakeChild();
+    // 宿主取消 → SDK spawn 信号通道 SIGTERM（stub 形态由测试模拟杀链落地）；pi 实装
+    // rpc-mode.js registerSignalHandlers trap SIGTERM → shutdown(143) → close(143, null)
+    controller.abort(new Error("cancelled by host: user stopped"));
+    child.exit(143, null);
+    const result = await runP;
+
+    expect(result.success).toBe(false);
+    // 死因事实优先：取消竞窗补落的停因事实文案（非退出码裸文案/非伪成功）
+    expect(result.error).toBe("cancelled by host: user stopped");
+    expect(result.engineStopReason).toBe("aborted");
+    expect(result.failure).toEqual({
+      class: "user",
+      kind: "cancelled",
+      retryable: false,
+      raw: "cancelled by host: user stopped",
+    });
+    expect(result.turns).toBe(1); // 有真实轮数（agent_end 前已完成一轮工作）
+  });
+
+  it("宿主取消竞窗（杀链升级信号形态）：close 信号折算被 endedCleanly 短路同样收口失败——判定锚 abort 事实非退出码", async () => {
+    const h = makeStubHarness({
+      getStateData: { ...SUCCESS_IDENTITY },
+      onPrompt: (child) => {
+        child.writeStdoutLine({ type: "message_end", message: { usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, stopReason: "stop" } });
+        child.writeStdoutLine({ type: "turn_end" });
+        child.writeStdoutLine({ type: "agent_end", willRetry: false, reason: "end_turn" });
+      },
+    });
+    const controller = new AbortController();
+    const runP = runSpawnOnce(baseParams(h, { signal: controller.signal }), callbacksOf(h));
+    const child = await nextFakeChild();
+    // 杀链升级（killPiProcess）：close(null, SIGKILL)——endedCleanly 短路后退出码为 0，
+    // 失败判定只能来自结算点的 abort 事实核对（退出码不承载取消事实的对照形态）
+    controller.abort(new Error("cancelled by host: user stopped"));
+    child.kill("SIGKILL");
+    const result = await runP;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("cancelled by host: user stopped");
+    expect(result.failure).toEqual({
+      class: "user",
+      kind: "cancelled",
+      retryable: false,
+      raw: "cancelled by host: user stopped",
+    });
+  });
+
+  it("携带取消信号的 run 正常完成 = 成功：settled 先于取消到达时成功口径不受信号污染", async () => {
+    // 对照面：signal 只在「abort 已裁决 ∧ settled 未到」时参与失败收口；settled 先行
+    // 完成的 run（settledTurnCount 在场）成功口径保持。取消竞窗补落不回溯已结算结果。
+    const h = makeStubHarness(successScript());
+    const controller = new AbortController();
+    const result = await runSpawnOnce(baseParams(h, { signal: controller.signal }), callbacksOf(h));
+    controller.abort(new Error("cancelled by host: late")); // run 终态已结算后的取消
+
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.failure).toBeUndefined();
   });
 
   // ── [F1-2/F1-28 P4 静默空成功防伪] exit 0 + 无 settle + 零轮 = 失联不判成功 ──

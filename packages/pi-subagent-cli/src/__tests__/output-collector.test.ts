@@ -1,8 +1,16 @@
 // src/__tests__/output-collector.test.ts
 //
-// 锁定 extractParsedOutput 纯函数契约——它被 collectOutcome 直接消费，决定
-// AgentResult.parsedOutput 字段。toUsageTotal / collectResponseText 已删除
-// （usage 汇总进 getTotalUsage，text 汇总进 getFullText，均在 execution-record.test 测）。
+// output-collector 纯函数层测试（collectOutcome 生产链的单测锚）。覆盖面：
+//   - extractParsedOutput / describeMissingParsedOutput：structured-output 产出的
+//     提取与三态缺产归因（F-1 → agent.no_deliverable 的摘要构造）；
+//   - classifyFailureCause：收尾边沿结构化事实的 FailureCause 分类全套（aborted
+//     三源判别 / turn-budget 事实位 / 码表两层序——provider 业务码层 → HTTP status
+//     语义层、场景 1 判定断言、retryAfterMs 文本兜底、未分类保守不产）；
+//   - classifyFailureKind 词表与 failureKind 改轨、M2 送达错误码分诊、
+//     describePromptAckFailure、stale 词表谓词与 F-R1 中和、MF-1 确定性失败标记；
+//   - loadRetryRulesForClassification：ext-config 读侧的安全缺省。
+// 结果字段（success/error/parsedOutput/usage/failure 等）由 collectOutcome 装配，
+// 域类型 = SDK AgentOutcome。
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as nodePath from "node:path";
