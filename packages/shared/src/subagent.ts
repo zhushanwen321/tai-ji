@@ -224,7 +224,9 @@ export interface SubagentRecord {
    * ADR-0158 停因事实化，轮终写点引擎停因在场即写原值）+ 迁移期旧推断值 2 个
    * （completed / failed——历史帧解析放行与旧引擎无停因上报时的回落产出）。
    * [U6 起参与占用资格判定（isOccupied = `running && stopReason === undefined`——
-   * W4 死亡纳管态 stopReason=failed 据此排除）]：轮始清点族（markRoundStarted /
+   * 带停因的 running 不算占用；原「W4 死亡纳管态 stopReason=failed 据此排除」措辞
+   * 随 adoptEngineDeath 写点退役删除，不再单列，登记见 record-store.ts:179）]：
+   * 轮始清点族（markRoundStarted /
    * revive 格）在翻 running 时清除本字段——正在后台运行期上轮停因不可见是显式裁决的代价
    * （two-state-convergence §3.1 注释 + D4 轮始清点族扩字段）；「为什么停」的一句话
    * 解释展示（G2）仅在非在途期可见。用 string 而非字面量联合：shared 是跨进程契约
@@ -347,8 +349,11 @@ export interface SubagentLastRound {
   /** 重试尝试计数（auto_retry_start 帧数，§3.3.1 P5 计账规则；无重试 = 0/undefined）。 */
   retryAttempts?: number
   /**
-   * 观察性事实（谓词未满足、「SO 未调用」等——§3.3.10：观察降级落此处，
-   * 不改写 failure）。缺省 = 无观察项。
+   * 观察性事实（引擎侧摘要，如「SO 未调用」——§3.3.10：观察降级落此处，
+   * 不改写 failure）。缺省 = 无观察项。注意承载分源：交付谓词缺项在 worker
+   * 脚本侧执行，不经本字段——落脚本结果 observations / run 终局帧
+   * partialMembers / workflow_control 成员行 missingDeliverables 三面
+   * （§3.3.10 分源表述）。
    */
   observations?: string[]
 }

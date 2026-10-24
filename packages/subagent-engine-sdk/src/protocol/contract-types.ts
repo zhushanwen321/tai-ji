@@ -588,7 +588,14 @@ export type EngineStopReason = "stop" | "error" | "aborted";
 
 export interface AgentOutcome {
   content: string;
-  /** 失败分诊标签。产出侧 = 引擎；缺省 = unknown = 可重试。 */
+  /**
+   * 失败分诊标签（历史解析兼容残留）。
+   * @deprecated [subagent-observability §3.4，ADR-0158] 新写入方失败分类一律产
+   * {@link FailureCause}（下方 failure 字段）；本字段随 {@link AgentFailureKind} 保留为
+   * 旧 record 帧与历史 journal 的解析兼容。产出侧残留仅引擎送达错误码前缀确定性分诊
+   * （pi 引擎 output-collector，[D5-③ 改轨]）；缺省 = undefined（字段缺位），
+   * 不承载重试判定（重试判定在 FailureCause.retryable 三态）。
+   */
   failureKind?: AgentFailureKind;
   /**
    * [subagent-observability §3.3.8] 失败分类（收尾边沿一次产出——CollectedOutcome.failure
@@ -658,9 +665,11 @@ export interface AgentOutcome {
   promptDisposition?: "handled";
   /**
    * [subagent-observability §3.3.2/§3.3.10] 观察性事实数组（引擎产出侧摘要，如
-   * 「结构化输出未调用」/交付谓词缺项）。宿主轮收条 lastRound.observations 的
+   * 「结构化输出未调用」）。宿主轮收条 lastRound.observations 的
    * 数据源——查询出口 list lastRound.observations 直读。additive 可选：旧引擎
-   * 缺省不落键。
+   * 缺省不落键。注意承载分源：交付谓词缺项（deliverables 未满足）在 worker 脚本
+   * 侧执行，不经本字段——落脚本结果 observations / run 终局帧 partialMembers /
+   * workflow_control 成员行 missingDeliverables 三面（§3.3.10 分源表述）。
    */
   observations?: string[];
 }

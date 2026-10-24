@@ -181,9 +181,12 @@ export interface AgentResult { // oe-exempt:20260930:framework:领域值对象�
   success: boolean;
   error?: string;
   /**
-   * [D5-③] 失败分诊结构化标签（类型 SSOT 在 orchestration/models/types.ts 的
-   * AgentFailureKind——消费语义「unknown=可重试」与其文档同源）。collectResult 对
-   * 最终 error 分类后写入；缺省 = unknown（可重试）。type-only 引用零运行时依赖。
+   * 失败分诊结构化标签（type-only 引用零运行时依赖）。
+   * @deprecated [subagent-observability §3.4，ADR-0158] 随 AgentFailureKind 保留为旧
+   * record 帧与历史 journal 的解析兼容；新写入方失败分类一律产 {@link FailureCause}
+   * （下方 failure 字段）。产出侧残留仅引擎送达错误码前缀确定性分诊
+   * （AgentOutcome.failureKind 透传）；缺省 = undefined（字段缺位），不承载重试判定
+   * （重试判定在 FailureCause.retryable 三态）。
    */
   failureKind?: AgentFailureKind;
   /**
@@ -232,8 +235,8 @@ export interface AgentResult { // oe-exempt:20260930:framework:领域值对象�
 
 /**
  * 轮收条事实快照（[subagent-observability §3.3.3] markRoundIdle 写点产出，附录在
- * {@link ExecutionRecord.lastRound}）——只承载「派生不出来的事实」：结果正文与轮数
- * 已在聚合字段 result 上（正文摘要由读侧 summarize 派生），不重复存储；turns 收进
+ * {@link ExecutionRecord.lastRound}）——只承载「派生不出来的事实」：结果正文已在
+ * 聚合字段 result 上（正文摘要由读侧 summarize 派生），不重复存储；turns 收进
  * 快照——聚合字段 turnCount 是 live 计数器（下一轮轮始起继续累加），收条自身的
  * 「轮终时点累计轮数」只能随收条定格（markRoundIdle 写点快照）。
  * 结构镜像 shared SubagentLastRound 的事实子集（wire 形状 SSOT = shared；core 读模型
