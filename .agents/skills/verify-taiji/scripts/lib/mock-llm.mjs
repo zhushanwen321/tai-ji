@@ -4,9 +4,10 @@
  *
  * 为什么需要它（事实链，实测）：
  * - faux 演员靠 pi extension 注册 `api: 'faux'` 的 provider；subagent/workflow 的**孙进程**
- *   由 `pi-subagent-cli` 以 `--no-extensions` spawn、扩展集只剩宿主白名单
+ *   由 `pi-subagent-cli` 以 `--no-extensions` spawn、扩展集 = 孙进程白名单解析
  *   （`extensions/universal/subagent-workflow/src/host/pi-host.ts` 的
- *   `GRANDCHILD_EXTENSION_PKG_SEGMENTS`），faux 扩展进不去 → 孙进程报
+ *   `resolveGrandchildExtensionPaths`：受管集减剔除名单 `GRANDCHILD_EXCLUDED_PKG_SEGMENTS`），
+ *   faux 扩展进不去 → 孙进程报
  *   `Model "faux/..." not found`（探针 `scripts/probes/faux-grandchild.mjs`）。
  * - 但孙进程继承 `PI_CODING_AGENT_DIR`（`packages/runtime/src/infra/subagent-control/engine-launch-env.ts`
  *   显式注入），因此它读同一份 `<agentDir>/models.json`——**自定义 openai-completions
