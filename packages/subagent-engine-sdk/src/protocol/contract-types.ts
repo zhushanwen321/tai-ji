@@ -437,7 +437,8 @@ export type FailureRetryability = true | false | "conditional";
  * FailureCause 公共字段面（class×kind 判别联合各成员共享）。
  *   retryable    — 三态（{@link FailureRetryability}）；429 不全可重试，禁止仅按
  *                  HTTP 状态码判可重试（provider 业务码层裁决，§3.3.2 码表硬约束）；
- *   retryAfterMs — 恢复等待毫秒（Retry-After 头 / 错误文本重置时间双通道提取），
+ *   retryAfterMs — 恢复等待毫秒（错误文本内重置时间字样提取——pi 消息模型不暴露
+ *                  HTTP 头，头通道结构性不可得，设计 §3.3.2 单文本通道），
  *                  皆无 → 缺省 unknown（undefined，不产假 0）；
  *   raw          — 分类输入的原始错误文本（取证链：分类不丢原文）。
  */

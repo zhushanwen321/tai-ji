@@ -862,7 +862,7 @@
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "（开发阶段手测链，已执行 PASS 2026-09-17 A5）a5-s5-collect-retire.sh（带 collect:'sync' 的存量式 start + 事件流批副作用断言；旧 session 可读由 u6 mock 层 24/24 覆盖）",
+      "run": "登记态 PASS（2026-09-17 A5 手测链已执行）。历史验收脚本 a5-s5-collect-retire.sh 已随 .tmp 清理（.tmp 不入 git，全仓无可执行脚本资产）——不跑；等价覆盖由 u4 行为锁（delivery-port.test.ts 边沿即投 + 批形态保留边界 + recover 重放）与 u6 mock 层（batch-finalized / record-store-rebuild 存量 entry 可读断言）承接",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态：触发范围 = collect 退役相关面（schema 退役留痕 / 存量 entry 读侧容忍派生视图 / session-reader 反查）改动。真机确认项 = pi 静默放行结论（typebox 无 additionalProperties——S5 期门实测：未知字段静默放行且不剥离，退役后语义等价原 async 缺省路径，迁移说明见 docs/CONTEXT.md fan-out 词条）；读侧容忍已有 mock 层检查（batch-finalized / rebuild-indexes / permanent-session-legacy-compat 改造后用例断言「存量 entry 可读」），真机层验旧 session 打开渲染不炸； 静默放行分支真机验证完成（u4 typebox 证据链一致）。"

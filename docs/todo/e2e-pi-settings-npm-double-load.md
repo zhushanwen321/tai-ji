@@ -1,10 +1,11 @@
 # e2e 真机链路：宿主全局 settings 的 npm 版 pi-subagent-workflow 同进程双载
 
-状态：待用户裁决（2026-10-24 登记，A11 第三轮批次 S3b 失败根因实锤）。
+状态：待用户裁决（2026-10-24 登记；A11 第三轮批次 S3b 失败根因已核实为下述双载——实证仅 S3b 一条，s1/WRR-A6 的同族归因为推断级未核实，见现象节分档）。
 
 ## 现象
 
-真 LLM e2e（`TAIJI_PI_LIVE=1` 批次）中 `batch-s3-partial-failfast` 的 S3b 断言「`subagent_message` 对 fan-out 成员续聊三类拒绝」失败：真机对 origin=workflow 的成员（registered 条目在盘可证）续聊返回 `delivered:true` 并成功 round 2（轮应答通知为证）；而源码 messageHandler、单测（54 用例绿）、staged bundle 三方均有该拒绝。
+- **实证（S3b，`batch-s3-partial-failfast`）**：真 LLM e2e（`TAIJI_PI_LIVE=1` 批次）S3b 断言「`subagent_message` 对 fan-out 成员续聊三类拒绝」失败：真机对 origin=workflow 的成员（registered 条目在盘可证）续聊返回 `delivered:true` 并成功 round 2（轮应答通知为证）；而源码 messageHandler、单测（54 用例绿）、staged bundle 三方均有该拒绝。
+- **同族疑似（推断级，未核实）**：同批次 s1（`batch-s1-basic-chain`：wf-done 300s 未达、journal 卡 1/2 agent-settled + uiRequestHandler 60s 周期重试抛错，两轮同形态）与 WRR-A6（`batch-window-reuse-recovery`：三轮三个不同失败点，全为成员执行层间歇卡滞）与本问题的同族归因是推断——成员 ask 执行层卡滞与双载污染的关联未经探针核实，仅见于 A11 工作流产物区 runlog；不得作为已证实范围引用，待双载问题修复后复跑归因。
 
 ## 根因（已核实）
 
