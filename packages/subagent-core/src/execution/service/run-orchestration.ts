@@ -605,7 +605,9 @@ export class RunOrchestration {
     // 不适用——pi 路由不插 taiji 级偏好，D6 不采用段）。
     const resolvedModel = isPiRoute
       ? undefined
-      : resolveEngineModelWithTranslation(
+      // [listModels 异步面] await：偏好层成员校验可能发协议 listModels 帧（dynamic
+      // 引擎活清单 RPC；显式/frontmatter 层不触清单，pi 路由不进本 helper）。
+      : await resolveEngineModelWithTranslation(
         route,
         opts.model,
         preIdentity.agentConfig?.model,
