@@ -16,6 +16,7 @@
     "src/__tests__/panel/context-capacity-quota.test.ts",
     "src/__tests__/panel/gen-stats-triggers.test.ts",
     "src/__tests__/panel/btw-overlay-routing.test.ts",
+    "src/composables/panel/__tests__/useTurnExpansion.test.ts",
     "src/**/*.d.ts",
     "../../apps/electron/preload/index.d.ts"
   ],

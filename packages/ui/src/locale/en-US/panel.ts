@@ -253,7 +253,7 @@ export default {
     // Turn.vue): dedicated key, not reusing traceFailed ("{count} failed" belongs to the
     // TraceCompactorRow compacted-row phrasing — different semantic domain)
     turnTriggerBgNotifyFailed: '{count} failed',
-    // [bg-notice-fold specs/chat/system-notices.md §3.3] settled-turn folded label: segmented by
+    // [bg-notice-fold] settled-turn folded label: segmented by
     // type (occurrence order deduped, "·" joined; elapsed stays as the single trailing number).
     // Managed session is the fourth member — its wording awaits user ruling (spec §6); the
     // fold-into-meta demo proposal lands for now

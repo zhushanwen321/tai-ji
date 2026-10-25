@@ -9,6 +9,8 @@
  *   落盘，杀 pi 无内容损失——与归档门口径一字不差）。
  * - 非活跃（scanned）会话：门短路放行，正常删除（deleteByCwd 逐个转调 delete，被门会话
  *   抛错进 failed 数组由既有 catch 承接，批删语义自洽——不另测批删）。
+ * - deleteByCwd 聚合（delete-generating-error-localization）：门拒绝会话的 code 透传进
+ *   failed[] 条目（renderer 据此查本地化词条），可删会话照常进 deleted。
  *
  * Mock 策略沿用 session-lifecycle-rename-inactive.test.ts / session-artifact-cascade.test.ts
  * 的 makeEnv 形态（svc/pm/sessionStore 全 mock，直接 new SessionLifecycle；活跃记录经真
@@ -29,11 +31,15 @@ import type { IConfigStore } from '../../ports/config.js'
 import type { ISessionStore } from '../../ports/session.js'
 import type { WorkspaceService } from '../../workspace/workspace-service.js'
 import type { ScannedSession } from '../types.js'
+import type { SessionSummary } from '@taiji/shared'
 
 const SID = 's-delete-gate'
 
 /** 构造最小 lifecycle 环境（delete 门路径）：svc 提供 getActiveSummaries（deleteByCwd 收集面）*/
-function makeEnv(scanned?: ScannedSession) {
+function makeEnv(
+  scanned?: ScannedSession,
+  opts?: { activeSummaries?: SessionSummary[]; scanResults?: ScannedSession[] },
+) {
   const svc: ILifecycleSessionOps = {
     findScannedSession: vi.fn(() => scanned ?? undefined),
     toSummary: vi.fn(),
@@ -44,7 +50,7 @@ function makeEnv(scanned?: ScannedSession) {
     fetchAndBroadcastContext: vi.fn(),
     removeSessionEntry: vi.fn(),
     notifySessionCreated: vi.fn(),
-    getActiveSummaries: vi.fn(() => []),
+    getActiveSummaries: vi.fn(() => opts?.activeSummaries ?? []),
   }
   const destroySession = vi.fn(async () => {})
   const pm = { destroySession } as unknown as IProcessManager
@@ -54,6 +60,7 @@ function makeEnv(scanned?: ScannedSession) {
     invalidateMetaCache: vi.fn(),
     invalidateScanCache: vi.fn(),
     refreshAll: vi.fn(),
+    scanSessions: vi.fn(() => opts?.scanResults ?? []),
   } as unknown as ISessionStore
   const registerDeps: ISessionRegisterDeps = {
     adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter,
@@ -127,6 +134,38 @@ describe('SessionLifecycle.delete 生成中拒绝门（U8）', () => {
       } as ScannedSession
       const { lifecycle } = makeEnv(scanned)
       await expect(lifecycle.delete(SID)).resolves.toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  // delete-generating-error-localization：deleteByCwd 聚合把门拒绝的 code 透传进 failed[]
+  // 条目（renderer 据此查 i18n 词条，不再插值 runtime 原文）；意外错误无 code 字段缺失回落
+  // 原文由 renderer 侧测试覆盖。
+  it('deleteByCwd：门拒绝会话进 failed[] 并透传 code=delete_generating，其余会话照常进 deleted', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'u8-delete-bycwd-'))
+    try {
+      const filePath = join(dir, 's-deletable.jsonl')
+      writeFileSync(filePath, '{"type":"session"}\n', 'utf-8')
+      const deletable: ScannedSession = {
+        id: 's-deletable', filePath, cwd: '/proj', timestamp: new Date().toISOString(),
+        name: 'bycwd', outcome: null, lastModified: Date.now(), size: 10,
+      } as ScannedSession
+      const { lifecycle } = makeEnv(deletable, {
+        // 收集面：生成中活跃会话（registerSession 后门拒绝）+ 同 cwd 的可删 scanned 会话
+        activeSummaries: [{ id: SID, cwd: '/proj' } as SessionSummary],
+        scanResults: [deletable],
+      })
+      await makeGeneratingSession(lifecycle, 'dispatching')
+
+      const res = await lifecycle.deleteByCwd('/proj')
+      expect(res.cwd).toBe('/proj')
+      expect(res.deleted).toEqual(['s-deletable'])
+      expect(res.failed).toHaveLength(1)
+      expect(res.failed[0]?.sessionId).toBe(SID)
+      expect(res.failed[0]?.code).toBe('delete_generating')
+      // error 原文保留——renderer 未命中码时的回落源，日志同源
+      expect(res.failed[0]?.error).toContain('生成中')
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }

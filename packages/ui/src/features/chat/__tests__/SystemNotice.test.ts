@@ -470,7 +470,7 @@ describe('SystemNotice D3 增强规格（U3）', () => {
     }
   })
 
-  it('主文案：text-sm + --fw-mid 字重 + fg 提色；静态外部行距 = 裁决三值（pt-[13px] pb-[19px]，specs/chat/system-notices.md §4）；inline 行保持 py-1.5；动效与内容列宽度不动', () => {
+  it('主文案：text-sm + --fw-mid 字重 + fg 提色；静态外部行距 = 裁决三值（pt-[13px] pb-[19px]）；inline 行保持 py-1.5；动效与内容列宽度不动', () => {
     const wrapper = mount(SystemNotice, { props: { message: compactionMessage(1000) } })
     const row = wrapper.find('.system-notice')
     // 静态外部行（缺省）：demo 权威间距（margin 10/16 + 行内 padding 3px 的合成视觉值）

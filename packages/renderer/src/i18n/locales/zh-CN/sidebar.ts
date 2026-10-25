@@ -20,6 +20,10 @@ export default {
   deleteFolderFailed: '删除文件夹会话失败：{msg}',
   // S3：带首个失败原因（error 占位符），让用户感知失败根因。zh-CN 无复数形态。
   deleteFolderPartialFailed: '{count} 个会话删除失败：{error}',
+  // failed[].code='delete_generating'（runtime delete 生成中拒绝门）的本地化短语，作
+  // deleteFolderPartialFailed 的 error 占位（替代 runtime 中文原文——原文对 en 用户不可读）。
+  // 封闭枚举新增码时同 commit 补词条 + useSidebarSessionActions 映射。
+  deleteFolderGenerating: '会话正在生成中，已跳过删除',
   renameFailed: '重命名失败：{msg}',
   retry: '重试',
   update: {

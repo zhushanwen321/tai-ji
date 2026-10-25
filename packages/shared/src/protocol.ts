@@ -536,7 +536,14 @@ export type TerminalEnvelopeCode = TerminalErrorCode | TerminalUnknownErrorCode
 export type BatchDeleteResult = {
   cwd: string
   deleted: string[]
-  failed: Array<{ sessionId: string; error: string }>
+  /**
+   * failed 条目的 `code` 是封闭枚举（机器可读错误码，renderer 据此查 i18n 词条而非插值
+   * runtime 原文——原文语言随 runtime 编译期定，en 用户不可读）。新码在此登记 + 同 commit
+   * 补 renderer 映射（useSidebarSessionActions DELETE_FAILED_I18N_KEYS）与双语词条：
+   *   - 'delete_generating'：会话正在生成中，删除被拒绝（runtime session-lifecycle delete
+   *     生成中拒绝门，session-lifecycle-delete-gate.test.ts）
+   */
+  failed: Array<{ sessionId: string; error: string; code?: string }>
 }
 
 /**
@@ -1304,7 +1311,8 @@ export const MESSAGE_BLOCKED_CODE: MessageBlockedCode = 'message_blocked'
 export type ServerMessageType =
   | 'session.created' | 'session.deleted' | 'session.deletedByCwd' | 'config.sessions' | 'session.history' | 'session.switched'
   | 'session.compacting' | 'session.compacted' | 'session.renamed' | 'session.forkNotice' | 'session.skillNotice' | 'session.handoffStarted' | 'session.handoffComplete' | 'session.handoffAborted' | 'session.setProject'
-  // session.occupancy（session-occupancy-send-closure P3）：占用三维快照广播（state topic，
+  // session.occupancy（session-occupancy-send-closure P3）：占用四维快照（turn/compacting/
+  // bash/handingOff）广播（state topic，
   // last-value 语义——重连/切回 session 自动恢复，不依赖广播时序），renderer sessionPhase 唯一数据源。
   | 'session.occupancy'
   // session.delivery（投递所有权内核 D5）：队列状态全量快照帧（state topic，last-value 语义，
@@ -2479,6 +2487,11 @@ export interface ServerMessageMapBase {
     // PLAN_REVIEW_MARKER select 通道，前端 C4 分流给 PlanReviewBar 不落 CompanionBand）。
     // 审批条文档清单由 usePlanState 派生视图链（session.planState）承载，本帧不携带 docs。
     planReview?: boolean
+    // permission 审批等待扩展（仅 dialogKind='select' 且 title 首行 = [pi-permission] Approval
+    // required 时存在；chat-flow-consistency U9/S4——runtime event-adapter 的
+    // isPermissionApprovalSelect 落键）。前端 extension-ui store 以本键计入侧栏 waiting 态
+    // （工具审批挂起可见，补齐未水合会话的等待可见性缺口）。
+    permission?: true
     // 统一提问表单扩展（仅 dialogKind='select' + form=true 时存在；ui-presentation-protocol D1：
     // UI_FORM_MARKER select 通道，前端 C4 分流给 FormOverlay 渲染类型化问题集）。
     // formQuestions 用 unknown[] 保持 shared 依赖最小化（与 askUserQuestions 同款先例），
@@ -2504,8 +2517,10 @@ export interface ServerMessageMapBase {
   // 在途两态布尔，与 compacting/bash 同型正交——handingOff 与 turn=generating 可并存（交接
   // turn 在跑，两维互不替代）。置位/复位 = U1 落地的 handingOff-start/end 转移行 +
   // handoff-service 编排接线（本帧契约根先行，帧值由 runtime 展开构造点随 U1 补齐）。
-  // 可选性 = 跨波落地的过渡形态：U1 落地前 runtime 不发本字段，消费方按未置位（false）处理；
-  // 落地后帧恒带四维。
+  // 可选性 = 跨波落地的过渡形态：U1 落地前 runtime 不发本字段，消费方按未置位（false）处理。
+  // U1 已落地（runtime 广播恒带四维：event-interpreter 广播点与 announceSessionOccupancy 均展开
+  // handingOff，runtime SessionOccupancy 必填）——收紧为必填 + IDLE_SESSION_PHASE 补 handingOff:false
+  // 待下次协议触碰顺带（收紧前消费方按 undefined ≡ false 处理仍正确）。
   'session.occupancy': { sessionId: string; turn: SessionTurnPhase; compacting: boolean; bash: boolean; handingOff?: boolean }
   // session.delivery（投递所有权内核 D5/D9②）：条目状态全量快照（展示派生视图），state topic
   // last-value 语义（message-bus 不入 ring，重连/切回经 stateSnapshot 回放自动恢复）。
@@ -2994,13 +3009,16 @@ export interface ServerMessageMapBase {
   // 时机：源 session 的 pi 跑完 handoff turn（HANDOFF_PROMPT_TEMPLATE）→ runtime 从 agent_end 提取
   // 文档文本 → 新建空白 session → 用 wrapWithXmlTag(doc) + reply 注入新 session 触发新 turn 之后。
   // agent-driven 模式下 doc 由 runtime 直接发给新 session pi（wave1 已实现），不再经广播回传前端——
-  // 广播 payload 仅通知前端复位源 session handingOff + 刷新列表 + 跳转新 session（selectSession 内部
-  // 自带 hydrate + 订阅 + 命令/上下文兜底拉取，前端不再手动 ensureStreamSubscription/send）。
+  // 广播 payload 通知前端刷新列表 + 跳转新 session（selectSession 内部自带 hydrate + 订阅 +
+  // 命令/上下文兜底拉取，前端不再手动 ensureStreamSubscription/send）；源 session handingOff
+  // 复位不经本帧——裁决表行后由 session.occupancy 帧第四维承担（handoff-service cleanupInflight
+  // 统一复位点广播 'handingOff-end'，useHandoffEffect 自述「不再写任何状态」）。
   // sourceLabel：交接来源 session 名称（可选，前端用于构造 handoff badge segment）。
   'session.handoffComplete': { srcSessionId: string; newSessionId: string; sourceLabel?: string }
   // session.handoffAborted：fast-handoff 中断后的广播（agent-driven 模式 wave2）。
   // 时机：用户取消进行中的 handoff（或 abort 兜底）→ runtime 调 handoffService.abortHandoff
-  // （内部 client.abort + 清 inflight）→ 广播此帧让前端复位源 session 的 handingOff 态。
+  // （内部 client.abort + 清 inflight）→ 广播此帧。当前前端零消费（裁决表行：旧订阅的唯一副作用
+  // handingOffSessions Set 复位已随平行存储退役移除）——广播本体保留为语义记录。
   // srcSessionId：被中断的源 session id（与 handoffComplete 的 srcSessionId 同义，统一字段名）。
   'session.handoffAborted': { srcSessionId: string }
   // session.history：session.history 的成功 reply（显式历史拉取 RPC；wave:perf-w20 后 switch

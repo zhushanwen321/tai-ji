@@ -138,7 +138,9 @@ const useChatInstance = createUseChat(buildUseChatDeps())
 /** per-session turn 展开分区：turnKey 展开集合（isTakeover/setTakeover 是 optional 字段，
  *  移动壳按 D10 不 provide，分区无接管态）。
  *  登记表主表 #54（声明处 @data-owner #54）——纯本地 UI 交互态（无 runtime 权威），
- *  写口 toggle / collapse 封闭于 createTurnExpansion，清理挂 registerSessionCleanup。
+ *  写口 toggle 封闭于 createTurnExpansion，清理挂 registerSessionCleanup。
+ *  [remote-use C3] collapse 写口已退役删除（会话结束 collapse 接线退役、ChatViewDeps.collapse
+ *  成员已删，手动展开清除仅两路径——grep 零调用方核实后删除）。
  */
 // @data-owner #54 —— 主表 #54 mobile 壳 turn 展开分区
 const turnExpansionMap = new Map<string, Set<string>>()
@@ -165,9 +167,6 @@ export function createTurnExpansion(sessionId: Ref<string>) {
       }
       if (p.has(turnKey)) p.delete(turnKey)
       else p.add(turnKey)
-    },
-    collapse: (turnKey: string): void => {
-      turnExpansionMap.get(sessionId.value)?.delete(turnKey)
     },
   }
 }

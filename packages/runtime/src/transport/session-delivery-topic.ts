@@ -58,7 +58,7 @@ const FRAME_STATE_OF: Readonly<Record<DeliveryEntryState, DeliveryFrameEntry['st
   cancelled: null,
 }
 
-/** 内核车道 → 帧车道（D1；同款编译期对齐表，三值全键）。 */
+/** 内核投递路径 → 帧投递路径（D1；同款编译期对齐表，三值全键）。 */
 const FRAME_LANE_OF: Readonly<Record<DeliveryLane, DeliveryFrameEntry['lane']>> = {
   direct: 'direct',
   steer: 'steer',
@@ -70,7 +70,7 @@ export function frameStateOf(state: DeliveryEntryState): DeliveryFrameEntry['sta
   return FRAME_STATE_OF[state]
 }
 
-/** 内核车道 → 帧车道（编译期对齐检查经 {@link FRAME_LANE_OF} 全键覆盖）。 */
+/** 内核投递路径 → 帧投递路径（编译期对齐检查经 {@link FRAME_LANE_OF} 全键覆盖）。 */
 export function frameLaneOf(lane: DeliveryLane): DeliveryFrameEntry['lane'] {
   return FRAME_LANE_OF[lane]
 }

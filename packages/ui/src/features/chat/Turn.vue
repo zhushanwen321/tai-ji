@@ -1,5 +1,5 @@
 <template>
-  <!-- split-justified: main 侧合并带入（turn 编排器，单语义域）；script 超 300 为存量（base 175 → 317），拆分属独立重构任务（长期方向：trace 窗口化编排抽 useTurnTrace composable） -->
+  <!-- split-justified: main 侧合并带入（turn 编排器，单语义域）；script 超 300 为存量——trace 窗口化编排已拆出 useTurnTrace composable（composables/use-turn-trace.ts）并被本组件消费，余量为主编排本体，不再规划拆分任务 -->
   <!--
     编排器 · Turn（message-stream 单个回合，W4 拆分后）。
     组合 UserBubble + TurnMeta + Block 三个子组件；hover actions 操作栏（TurnSummary）经 trace
@@ -24,7 +24,7 @@
     :class="isLastTurn ? '' : 'pb-5'"
     :data-testid="`turn-${turn.index}`"
   >
-    <!-- 收纳完成通知的临时外部行（specs/chat/system-notices.md §3.2 生命周期）：工作态按
+    <!-- 收纳完成通知的临时外部行：工作态按
          「现状外部形态」渲染在轮头行上方（inline 行距），settle 后消失——同一批通知在流内
          只出现一次（外部行与折叠标签不重复渲染）。bash 结构化行经 core isBashCompleteNotice
          判定过滤（判定单点不复制）；隐藏通知（subagent/workflow）无外部行。 -->
@@ -59,7 +59,7 @@
     <!-- trigger 起点行（W4·D3 + U6·D5 聚合增强；[bg-notice-fold] settle 后退役）：无 user 起点的
          后台续跑 turn 仅在工作态渲染聚合行（「N 个后台任务完成 · M 失败 ●●● · 已继续处理 · 耗时」
          ——视觉语言对齐 SystemNotice 元信息行）。落成态聚合行摘除，数据已随分组层收进轮头行
-         （TurnMeta 折叠分段标签 + 展开明细行，specs/chat/system-notices.md §3）。assistant
+         （TurnMeta 折叠分段标签 + 展开明细行）。assistant
          自启 turn（user:null 无 trigger）两者皆不渲染。 -->
     <div
       v-else-if="turn.trigger === 'bg-notify' && isWorkingTurn"
@@ -146,7 +146,7 @@
            trace--just-done = 轮次落完成瞬间的换块落位标记（200ms 淡入 + 4px 落位），仅刚落
            完成的轮次携带（justDone ref，见 script），历史轮不误标。 -->
       <div class="trace mt-[12px] flex flex-col text-[length:var(--text-md)]" :class="{ 'trace--live': isWorkingTurn, 'trace--just-done': justDone }">
-        <!-- 收纳完成通知展开明细行（specs/chat/system-notices.md §3.4）：展开区首行起逐条一行
+        <!-- 收纳完成通知展开明细行：展开区首行起逐条一行
              （低频查看区，行距紧凑、无横线装饰；成功弱档 dim / 失败 warn 不依赖 hover），
              其后才是本轮 trace。仅落成态展开时渲染（工作态通知还是外部行，无明细可看）。 -->
         <div
@@ -248,9 +248,10 @@
       />
     </div>
 
-    <!-- turn 内 notice（W4·D4）：bash 执行记录 / liveOnly 健康警告按到达序在 turn 内部末尾渲染
-         （不切断回合）。bashExecution 复用 BashOutputBlock（既有 bash 消费点，取消按钮经
-         abortBash 仍可用）；liveOnly（stream_warn）与其余 system notice 走 SystemNotice 弱化行。
+    <!-- turn 内 notice（W4·D4）：仅 bash 执行记录（inline），按到达序在 turn 内部末尾渲染
+         （不切断回合），复用 BashOutputBlock（既有 bash 消费点，取消按钮经 abortBash 仍可用）。
+         liveOnly（stream_warn）经 [chat-flow-consistency C6] 独立成 systemNotice static 项
+         （core 分组层规则 4b），由流层（ChatView static 分支）渲染，不进 turn.notices。
          wrapper 的 data-testid（turn-inline-bash / turn-inline-notice）是 W4 渲染契约——
          不落在子组件根上，避免覆盖 BashOutputBlock 自身的 bash-output-block testid。 -->
     <div
@@ -489,7 +490,7 @@ const {
 const thinkCount = computed(() => countThinking(props.turn))
 const toolCount = computed(() => countToolCalls(props.turn))
 
-// ── 收纳完成通知（specs/chat/system-notices.md §3）─────────────────────────────
+// ── 收纳完成通知
 // 明细行经 core deriveFoldedNoticeRows 单点派生（载荷解析 SSOT，渲染层零解析零回扫）；
 // 工作态临时外部行只取 bash 结构化行（隐藏通知无外部行形态——工作态走 D5 聚合行）。
 

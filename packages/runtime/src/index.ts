@@ -953,7 +953,7 @@ async function main(): Promise<void> {
       }),
       // [ADR-0047] ping 探测连续 3 次失败（180s）判定 pi 进程真死，触发 abort。
       // 复用 sessionService.abort → message-dispatcher.abort 完整路径（client.abort 成功/失败
-      // 均有兜底广播 + 复位 isGenerating）。.catch 防极端异常逃逸成 unhandledRejection
+      // 均有兜底广播 + occupancy turn 复位（isGeneratingTurn 派生自然翻 false））。.catch 防极端异常逃逸成 unhandledRejection
       //（abort 内部已 try/catch 广播终态）——逃逸异常必须留痕：pi 死而 abort 链也坏时，
       // 零诊断线索无法排障（b24-M4）。
       onSilentAbort: ({ sessionId: sid }) => {
@@ -964,7 +964,7 @@ async function main(): Promise<void> {
       // M4 compaction 事件驱动：interpreter 从 compaction_start/end 唯一编排广播（session.compacting /
       // message.compactionSummary / session.compacted）。[session-dead-structural-fixes D2 挂点迁移，
       // u3b] 原此处对三布尔的直写（布尔赋值）改调原语对应行（'compacting-start' /
-      // 'compacting-end'）：isCompacting 派生 + occupancy 合并 + state 帧广播原子完成——结构上
+      // 'compacting-end'）：occupancy.compacting 置位/复位 + 合并写 + state 帧广播原子完成——结构上
       // 消灭「只写布尔不写派生视图」的残留直写（interpreter #5/#6 的 onOccupancyTransition 通道
       // 调同一原语行，幂等去重）。
       onCompactingStateChange: (sid, v) => {
@@ -973,7 +973,7 @@ async function main(): Promise<void> {
       },
       // occupancy 挂点接线（session-dead-structural-fixes D2 挂点迁移，u3b）：interpreter 侧
       // 挂点（#2-#6 + turn-end 异常兜底）传封闭转移枚举值，经本闭包写 session 记录——原语
-      // 原子完成「合并三维 + 派生三布尔 + 幂等去重 + state 帧广播」（interpreter 不持有全量
+      // 原子完成「合并四维 + 幂等去重 + state 帧广播」（interpreter 不持有全量
       // occupancy，经 session 记录权威聚合，与上方 onCompactingStateChange 同构）。
       onOccupancyTransition: (transition) => {
         const s = sessionService.getSession(sessionId)
@@ -1020,7 +1020,7 @@ async function main(): Promise<void> {
       onAgentSettled: (sid) => {
         sessionService.flushPendingBashResults(sid)
         // [session-dead 2026-09-10] run 级联结束（pi _runAgentPrompt 的 finally 确定性 emit）→
-        // 复位 isGenerating。agent_end 在 retry / auto-compaction 续跑时会重发、post-run 尾段
+        // occupancy turn 复位（isGeneratingTurn 派生自然翻 false）。agent_end 在 retry / auto-compaction 续跑时会重发、post-run 尾段
         // 直接 settle 的收尾路径更不含 agent_end——只靠 agent_end 复位会让 processing 分支置的
         // true 残留（幽灵忙碌）。语义与竞态自愈论证见 handleAgentSettledSideEffects 注释。
         sessionService.handleAgentSettledSideEffects(sid)

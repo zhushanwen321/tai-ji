@@ -242,7 +242,7 @@ export class MessageDispatcher {
    * - **不经 runBeforeSendHook**：系统指令不是用户消息，不暴露给插件 veto/transform 改写侧
    *   （hook 的 transform 可破坏命令形态，D1 否决记录的第三缺陷）；
    * - **不经 registry.submit**：无裸标记尾附（标记会污染 command args 使 navigateTree throw）、
-   *   无内核条目、无车道判定——信令不被 hold/排队（撤回编排自持 revoking hold，若经内核
+   *   无内核条目、无投递路径判定——信令不被 hold/排队（撤回编排自持 revoking hold，若经内核
    *   提交会自锁死等）；
    * - **复用 ensureCommandAvailable 探测**（requireCommand 语义保留：命令未注册 fail-closed
    *   extension-missing，命令串不进模型）；
@@ -528,9 +528,9 @@ export class MessageDispatcher {
       console.error(`[message-dispatcher] forceQuitSession pre-terminal steps failed (sessionId=${sessionId}):`, e)
     } finally {
       // occupancy #10（D2 迁移，forceQuit/abort 超时收敛路径）：进程被强杀后 agent_settled /
-      // compaction_end 永不到达，'full-reset' 行三维全复位 + 三布尔派生同步复位（结构上不再有
-      // 「只复位一边」）——session.exited 广播前发，且必须在 removeSessionEntry（内部
-      // bus.clearSession）之前，否则帧送空集合。
+      // compaction_end 永不到达，'full-reset' 行四维全复位（turn 机器 idle 行 + compacting/
+      // bash/handingOff 布尔维全 false patch，结构上不再有「只复位一边」）——session.exited
+      // 广播前发，且必须在 removeSessionEntry（内部 bus.clearSession）之前，否则帧送空集合。
       runDestroyStepIsolated('full-reset', sessionId, () => {
         const exiting = this.svc.getSession(sessionId)
         if (exiting) applySessionOccupancyTransition(exiting, this.messageBus, 'full-reset')
@@ -599,8 +599,8 @@ export class MessageDispatcher {
 
     console.log('[message-dispatcher] compact: start, sessionId=' + sessionId + ', customInstructions=' + (customInstructions ? `"${customInstructions}"` : '(none)'))
 
-    // [W3 + M4] busy 预检：与 sendBash/sendMessage 的 isCompacting 拒绝对称 + 防并发 compact 重入。
-    // 补 isCompacting：A 置位（interpreter 从 compaction_start 事件）后，B 进来预检若无 isCompacting
+    // [W3 + M4] busy 预检：与 sendBash 预检的 occupancy.compacting 拒绝对称 + 防并发 compact 重入。
+    // 补 compacting 维：A 置位（interpreter 从 compaction_start 事件）后，B 进来预检若无 compacting
     // 看不到 A → 两个 client.compact RPC 并发 → 双 compaction 事件流。补上后事件层 P-dedup by construction 成立。
     //
     // 事件驱动（M4）：compaction 生命周期广播全删——由 interpreter 从 compaction_start/compaction_end

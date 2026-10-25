@@ -137,7 +137,8 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'session.subagentEntriesAppended': 'state',
   'session.workflowUpdate': 'state',
   'session.state_changed': 'state',
-  // occupancy（session-occupancy-send-closure P3）：占用三维快照。state topic last-value——
+  // occupancy（session-occupancy-send-closure P3）：占用四维快照（turn/compacting/bash/
+  // handingOff）。state topic last-value——
   // 断连重连 / 切回 session 经 stateSnapshot 回放恢复（G4），不依赖广播时序。
   'session.occupancy': 'state',
   // session.delivery（投递所有权内核 D5）：投递内核条目全量快照（队列区单一数据源 D7）。

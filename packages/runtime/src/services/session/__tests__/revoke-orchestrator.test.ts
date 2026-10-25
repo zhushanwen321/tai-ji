@@ -562,7 +562,7 @@ describe('⑧ 信令不污染（A6 单测路径：prompt 只收命令串、无�
     expect(cmd).toBe(`/${TAIJI_NAV_COMMAND} e2`)
     // 无标记尾附（不经内核 submit——withDeliveryMarker 尾附会污染 command args）
     expect(cmd).not.toContain('taiji:msg')
-    // 内核无信令条目（信令不进 FIFO / 不占车道）
+    // 内核无信令条目（信令不进 FIFO / 不占投递路径）
     const entries = h.registry.entries(SID)
     expect([...(entries?.active ?? []), ...(entries?.tombstones ?? [])].map((e) => e.id)).not.toContain(cmd)
   })
@@ -664,6 +664,18 @@ describe('撤回信号广播（插件镜像重建路径：与派生态失效恒�
     expect(h.invalidateSpy).toHaveBeenCalledTimes(1)
     expect(h.signalSpy).toHaveBeenCalledTimes(1)
     expect(h.signalSpy).toHaveBeenCalledWith(SID)
+  })
+})
+
+describe('① 空闲检查四维判定（handingOff 纳入 busy——交接期撤回拦截）', () => {
+  it('handingOff=true（turn idle，交接置位到 settle 窗口）→ busy，prompt 零调用', async () => {
+    const h = makeHarness({ view: { occupancy: { turn: 'idle', compacting: false, bash: false, handingOff: true } } })
+    const reply = await h.revoke('e2')
+    expect(reply).toEqual({ sessionId: SID, revoked: false, error: 'busy' })
+    expect(h.promptCalls).toHaveLength(0)
+    // hold 已释放（finally 覆盖 busy 提前 return——A11 硬契约）
+    expect(h.registry.beginRevokeHold(SID)).toBe(true)
+    h.registry.endRevokeHold(SID)
   })
 })
 

@@ -8,7 +8,7 @@
  *   占用期不再有 `/`·`!` 例外拒绝分支（命令文本与 idle 态同语义，bash/slash 检查不变）。
  *   [2026-10 用户裁决] 压缩期**发送位按钮**是「终止压缩」（stop，点击 → abort 中止压缩
  *   流程，见 composer-send-button-states.test.ts）——排队提交改由 ⏎ 承担（本文件 TC11/
- *   TC18 的 Enter 路径不变：内核 queued 车道 + compaction-end flush）。
+ *   TC18 的 Enter 路径不变：内核 queued 投递路径 + compaction-end flush）。
  * - 队列区：数据源 = session.delivery 帧派生视图（core getDeliveryProjectionRef），真 QueueBubble
  *   渲染 → 行可见 + 状态 chip（排队中/投递中/发送未确认）
  * - × 撤销：真 QueueBubble 点击 → useQueueRows.onCancelEntry → delivery.cancel RPC；
@@ -131,7 +131,7 @@ describe('Composer compact 期间发送（u3c/D1：统一提交，占用不拦�
     const wrapper = mountComposer({ sessionId: 's1' })
     await typeAndEnter(wrapper, 'hello')
 
-    // 统一提交：占用期不再本地判定车道（lane 归内核），提交链与 idle 同路径
+    // 统一提交：占用期不再本地判定投递路径（lane 归内核），提交链与 idle 同路径
     expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('hello'))
     // 输入已清空（clearInput → ComposerInput.clear）
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
@@ -214,7 +214,7 @@ describe('Composer 队列区单源渲染 + 撤销 / 重试（u3c/D7 + V9/V10）'
     expect(wrapper.text()).toContain('投递中')
   })
 
-  it('direct 车道与已 delivered 条目不出现在队列区（气泡原位 / 已入流）', async () => {
+  it('direct 投递路径与已 delivered 条目不出现在队列区（气泡原位 / 已入流）', async () => {
     const wrapper = mountComposer({ sessionId: 's1' })
     setProjection('s1', [
       { clientUuid: 'u-d', preview: 'direct 待确认气泡', state: 'in-flight', lane: 'direct' },

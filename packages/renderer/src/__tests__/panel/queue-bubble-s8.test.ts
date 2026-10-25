@@ -3,7 +3,7 @@
  *
  * 组件契约（组件头注为准）：纯 props 展示——
  * - rows: QueueRow[]（调用方经 useQueueRows 从 session.delivery 帧派生视图过滤而来：
- *   非 direct 车道且未 delivered）
+ *   非 direct 投递路径且未 delivered）
  * - hint: string（session 级占用分档 hover title）+ expanded?: boolean（+N 展开开关
  *   展开态，Q2——持有在 useQueueRows per-session 分区，Composer 传入）
  * - emit cancel(clientUuid)（× 撤销 → delivery.cancel）+ retry(clientUuid)（failed 行
@@ -33,7 +33,7 @@ import { nextTick } from 'vue'
 import QueueBubble from '@/components/panel/QueueBubble.vue'
 import type { QueueRow } from '@/composables/panel/useQueueRows'
 
-/** 队列行构造（state 三态；默认 queued 车道行） */
+/** 队列行构造（state 三态；默认 queued 投递路径行） */
 function row(clientUuid: string, preview: string, state: QueueRow['state'] = 'queued'): QueueRow {
   return { clientUuid, preview, state }
 }

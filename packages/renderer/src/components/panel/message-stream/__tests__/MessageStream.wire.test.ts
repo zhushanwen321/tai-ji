@@ -8,7 +8,7 @@
  * - TC-w4-1/2/7/8：mount Turn.vue + 真实 useTurnExpansion（无 mock，验端到端接线）
  * - TC-w4-3：mount TurnRail.vue smoke test（TurnRail props 契约：4 props + 2 emit）
  * - TC-w4-3b/4/6：useMessageStreamRail composable 单元测试（验事件路由 handler → useTurnExpansion，
- *   rail 下标→MessageTurn.index 映射）
+ *   rail 下标→turnStableId 稳定 key 映射）
  * - TC-w4-9：mount MessageStream.vue 首屏冒烟（验 MessageStream 模板真的引用 TurnRail + emit 接线）。
  *   真实 mount：壳 mock 经 message-stream-shell-mount 导入注册（useChat/useSidebar，store
  *   副作用隔离），用 chat store setMessages 注入
@@ -260,7 +260,7 @@ describe('Turn.vue 接线 useTurnExpansion（w1）', () => {
 
 /* ──────────────────────────────────────────────────────────────
  * TC-w4-3：TurnRail（w3）props 契约 smoke test（TurnRail props 契约：4 props + 2 emit）
- * TC-w4-3b/4/6：useMessageStreamRail composable 单元测试（验事件路由 → useTurnExpansion，rail 下标→MessageTurn.index 映射）
+ * TC-w4-3b/4/6：useMessageStreamRail composable 单元测试（验事件路由 → useTurnExpansion，rail 下标→turnStableId 稳定 key 映射）
  *
  * MessageStream.vue 整体 mount 的真接线性由 TC-w4-9（见文末 describe）覆盖：仅 mock useChat/
  * useSidebar（store 副作用隔离），用 chat store setMessages 注入消息让 railTurns 非空，
@@ -341,18 +341,19 @@ describe('MessageStream rail 接线（TurnRail props 契约 + useMessageStreamRa
     wrapper.unmount()
   })
 
-  it('TC-w4-4: onToggle(idx) → useTurnExpansion.toggle 翻转（rail 下标 → MessageTurn.index 映射正确）', () => {
+  it('TC-w4-4: onToggle(idx) → useTurnExpansion.toggle 翻转（rail 下标 → turnStableId 稳定 key 映射正确）', () => {
     // useMessageStreamRail 内部调 useTurnExpansion（per-instance Map）。
-    // 验证 rail onToggle 下标映射 → MessageTurn.index：railTurns[0].index=1，onToggle(0) 应翻转 index=1。
+    // 验证 rail onToggle 下标映射 → turnStableId 稳定 key：railTurns[0] 稳定 key 'u1'（user.id=u1），
+    // onToggle(0) 应调 toggle('u1')（M5 stable-key 后 Map key 是稳定 id 非数组 index；翻转 store 断言见 TC-w4-3b）。
     // 注：useTurnExpansion 是 per-instance（每次调用建自己的 Map），与 Turn.vue 内的调用不共享——
     //    这是 w1 既定设计（任务规范「直接 import 用，不重新实现」）。本测验证 rail handler 路由正确性。
     const { rail, wrapper } = mountRail()
-    // railTurns 下标 → MessageTurn.index 映射（这是 onToggle/expandAll 的路由核心）
+    // railTurns 下标 → turnStableId 稳定 key 映射（这是 onToggle 的路由核心：idx → turnStableId(turn)）
     expect(rail.railTurns.value).toHaveLength(3)
     expect(rail.railTurns.value[0].index).toBe(1)
     expect(rail.railTurns.value[1].index).toBe(2)
     expect(rail.railTurns.value[2].index).toBe(3)
-    // onToggle(0) 不抛错（railTurns[0].index=1 存在，调 useTurnExpansion.toggle(1)）
+    // onToggle(0) 不抛错（railTurns[0] 存在，调 useTurnExpansion.toggle('u1')——稳定 key 路由）
     expect(() => rail.onToggle(0)).not.toThrow()
     // 边界：onToggle 越界不抛错（railTurns[99] 不存在 → turnIdx undefined → no-op）
     expect(() => rail.onToggle(99)).not.toThrow()

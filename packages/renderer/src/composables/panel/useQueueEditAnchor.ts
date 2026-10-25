@@ -29,7 +29,7 @@ interface QueueEditAnchorDeps { // oe-exempt:20261024:framework:壳层装配契�
   attachedItems: Ref<unknown[]>
   /** 预填回调（壳层 restoreToDraft：空输入整段恢复含 chips / 非空追加不覆盖） */
   restoreToDraft: (payload: { text: string; segments?: Segment[] }) => void
-  /** subagent 车道（锚定编辑不适用，发送直通） */
+  /** subagent 通道（锚定编辑不适用，发送直通） */
   isSubagentLane: Ref<boolean>
   /** 普通发送（降级路径与无锚定路径的透传目标） */
   laneSend: (sid: string, segments: Segment[]) => Promise<boolean>
@@ -123,7 +123,7 @@ export function useQueueEditAnchor(deps: QueueEditAnchorDeps) {
    * edited=false 四值降级 = 内容按普通新消息发出（不丢）+ toast 分型（Q3 处置同构不变式）。
    * RPC 异常不上抛捕获（对齐 laneSend 契约外的异常语义）——由调用方 useComposerSend 的
    * catch 恢复草稿 + toast（内容不丢，重发时锚定存活则再次尝试保位）。
-   * subagent 车道 / 无锚定 / 锚定已离场（活性窄缝）：透传 laneSend 普通发送（锚定离场时
+   * subagent 通道 / 无锚定 / 锚定已离场（活性窄缝）：透传 laneSend 普通发送（锚定离场时
    * 顺手解除——活性 watch 的兜底同步点）。
    */
   function sendWithQueueEdit(sid: string, segments: Segment[]): Promise<boolean> {

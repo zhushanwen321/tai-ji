@@ -28,9 +28,9 @@
 
 ## session occupancy turn 状态机（chat-flow-consistency D1，2026-10）
 
-session 的会话占用（occupancy）是四维结构：turn 维（状态机，见上表 `SESSION_TURN_MACHINE`）+ compacting / bash / handingOff 三个与 turn 正交的两态布尔维（ADR-0080 先例：两态域布尔判定比表级 fail-fast 更早更严，不建机器）。唯一写入口 = `applySessionOccupancyTransition`（event-interpreter.ts），内部编排「turn 机器 transition + 布尔维 patch」一次合并写；值变化才广播 `session.occupancy` state 帧（全等去重）。原「同点双写」的派生三布尔（isGenerating/isCompacting/isBashRunning）已删除，消费方一律从 occupancy 派生（`isGeneratingTurn` = turn ∈ {dispatching, generating} 单点定义；「回合进行中」判定集合 = shared `ACTIVE_TURN_PHASES`，含 settling——投递判定、发送位预测、活动条、前端回合判定统一引用）。
+session 的会话占用（occupancy）是四维结构：turn 维（状态机，见上表 `SESSION_TURN_MACHINE`）+ compacting / bash / handingOff 三个与 turn 正交的两态布尔维（ADR-0080 先例：两态域布尔判定比表级 fail-fast 更早更严，不建机器）。唯一写入口 = `applySessionOccupancyTransition`（event-interpreter.ts），内部编排「turn 机器 transition + 布尔维 patch」一次合并写；值变化才广播 `session.occupancy` 状态事件（全等去重）。原「同点双写」的派生三布尔（isGenerating/isCompacting/isBashRunning）已删除，消费方一律从 occupancy 派生（`isGeneratingTurn` = turn ∈ {dispatching, generating} 单点定义；「回合进行中」判定集合 = shared `ACTIVE_TURN_PHASES`，含 settling——投递判定、发送位预测、前端回合判定引用判定集合；活动条（ActivityStrip）消费 sessionPhase 派生视图按阶段分行，不直接引用集合）。
 
-- **事件词表与挂点**（词表派发点静态审计锁定每项必有派发点）：dispatching（投递受理出站）/ generating（message_start）/ settling（agent_end）/ idle（agent_settled + abort 型 1 + 异常兜底）/ reject-other（prompt 真失败收尾）/ full-reset（进程死亡四维全复位）；compacting± / bash±（压缩与 bash 窗口）/ handingOff±（交接编排在途，挂点 handoff-service：编排开始置位、cleanupInflight 统一复位）。announce-idle 事件退出词表（宣告语义归广播层原语 `announceSessionOccupancy`，跳过全等去重强制广播）；abort-stall 两死行与 u5a 退役的转正行已删（派发点审计防死行复发）。
+- **事件词表与挂点**（词表派发点静态审计锁定每项必有派发点）：dispatching（投递受理出站）/ generating（message_start）/ settling（agent_end）/ idle（agent_settled + abort 型 1 + abort await 失败收尾 + 异常兜底 + handled 终局回落）/ reject-other（prompt 真失败收尾）/ full-reset（进程死亡四维全复位）；compacting± / bash±（压缩与 bash 窗口）/ handingOff±（交接编排在途，挂点 handoff-service：编排开始置位、cleanupInflight 统一复位）。announce-idle 事件退出词表（宣告语义归广播层原语 `announceSessionOccupancy`，跳过全等去重强制广播）；abort-stall 两死行与 reject-processing（随 u5a 忙闲门禁退役——processing 分型重试随忙闲门禁退役、转移行零消费）已删（派发点审计防死行复发，退役词清单一一对应 session-turn-machine.test.ts 静态审计 it.each 清单）。
 - **不变量**：
   1. occupancy 四维唯一合法写点 = 转移原语（绕开直写在编译期红）；session 记录不存任何平行忙闲布尔
   2. turn 维转移行为 = 全组合合法表（绝对式幂等 patch 保形：任何状态收任何事件都写事件目标值，乱序/重复事件不产生错误状态——读侧零回归是迁移约束）
@@ -39,7 +39,7 @@ session 的会话占用（occupancy）是四维结构：turn 维（状态机，�
 - **穷举与审计**：`generateTableTests` 全组合穷举（4 态 × 6 事件）+ 词表派发点静态审计 + 退役词零残留断言（session-turn-machine.test.ts）。
 
 ## 画布域
-> 机制纪律：不变量与状态机转移表的实现单点在 runtime CanvasService（`packages/runtime/src/services/canvas/`）——renderer / extension 侧不复制领域规则，全部写操作经唯一入口 `mutate`（契约 = `packages/extension-protocol/src/extensions/canvas/`，agent 工具面 = `extensions/taiji/canvas/`，GUI 写通道 = WS RPC `canvas.mutate`）。
+> 机制纪律：不变量与状态机转移表的实现单点在 runtime CanvasService（`packages/runtime/src/services/canvas/`）——renderer / extension 侧不复制领域规则，全部写操作经唯一入口 `mutate`（契约 = `packages/extension-protocol/src/extensions/canvas/`，agent 工具实现 = `extensions/taiji/canvas/`，GUI 写通道 = WS RPC `canvas.mutate`）。
 
 
 问题解决画布是 tech-design-wf 之前的方向规划层，一个独立限界上下文：与会话上下文经回推 prompt（文本防腐）交互、与 workflow 上下文无直接依赖（审查 subagent 只复用派发基建）、与计划上下文（plan）互不感知；对下游 tech-design-wf 经需求卡（requirement card）防腐对接。状态权威 = runtime CanvasService；持久化 = session 存储树域 8 `<dataDir>/ext-sessions/<ownerSessionId>/canvases/<canvasId>/` 下 `events.jsonl`（append-only 领域事件流，唯一权威）+ `canvas.json`（可由事件流全量重放推导的加速快照，写入顺序恒「先事件后快照」——快照允许滞后、永不超前）。归属即路径：一张画布恒归属创建它的 session（ownerSessionId），一个 session 可有多个画布（1:N）。
@@ -63,7 +63,7 @@ session 的会话占用（occupancy）是四维结构：turn 维（状态机，�
 9. 用户对节点内容的改动（patch / select / comment）在 mutate 事务内自动计算传播范围进待重审集合：一般改动 = 从该节点上溯到根的路径；换选 = 上溯路径 + 旧选中方案整个子树。dispatch 只在已 passed 的执行叶子上登记下游产物指针、decide-direction 只拍板画布方向元数据，均不改变可审内容，不进传播集
 10. 规划收敛终态的前置 = 待重审集合为空 + must-fix 清零 + 执行叶子全部 passed/dispatched（收敛确认与 export 均校验此不变量；export 另要求收敛确认已执行——converged 终态，GUI 与 agent 代执行两条表面同一前置）
 11. 唯一入口：图元素增删改、状态转移、评价、派发均经画布聚合根的操作（actor 字段区分 user / agent / review；per-action × actor 合法性矩阵在契约模块，表外组合 fail-fast）
-12. 一张画布有且仅有一个归属 session；画布的创建与访问校验归属（GUI 清单与 agent 工具面 canvas_list 按归属过滤，跨会话访问返回 `forbidden` 结构化拒绝）；session 删除级联删除其全部画布（画布落归属 session 的存储树内，随整树回收）
+12. 一张画布有且仅有一个归属 session；画布的创建与访问校验归属（GUI 清单与 agent 侧工具 canvas_list 按归属过滤，跨会话访问返回 `forbidden` 结构化拒绝）；session 删除级联删除其全部画布（画布落归属 session 的存储树内，随整树回收）
 
 **节点状态机**（生命周期 × 派发二维正交，禁止直写状态字段）：
 
@@ -110,7 +110,7 @@ session 存储域（SessionLifecycle 写、SessionScanner 读、文件系统为�
 1. **互斥存在**：同一 session 的主文件（sessions/ 树内 `.jsonl`）与归档单元（archive/ 树内 `.archive.json` / `.restoring` 簿记）不得同时存在于稳定态——恢复前冲突检测（`archive_restore_conflict`）与启动自愈（双存在归位）保证
 2. **压缩体消费前校验**：恢复与 purge 引用枚举两条路径消费压缩体前 sha256 校验必须通过（agent 引用只读簿记明文，不消费压缩体，不涉校验；purge 侧校验不过 = 引用状态不可知 → 级联 keep-all 保守保留，宁保留不误删）
 3. **列表派生**：归档列表条目恒等于 `archive/**/*.archive.json` 扫描结果——不允许存在独立登记渠道（`.restoring` 标记不在列表，恢复中条目对用户不可见）
-4. **扫描范围互斥**：归档目录永不进 SessionScanner 的 sessions 扫描范围（物理隔离，构造性保证——两根互不为对方子树）
+4. **扫描范围互斥**：归档目录永不进 SessionScanner 的 sessions 扫描范围（物理隔离，构造性保证——构造性 = 由结构本身保证、无需额外验证；两根互不为对方子树）
 
 **归档单元状态机**（`@zhushanwen/state-machine` 声明，实现载体登记见上「状态机基建」节；表外转移一律 fail-fast）：
 

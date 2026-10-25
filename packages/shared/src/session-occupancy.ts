@@ -5,8 +5,9 @@
  * 职责边界：本文件是 occupancy wire 域的形状 SSOT（protocol.ts 的 'session.occupancy'
  * 帧内联引用 SessionTurnPhase）与 turn 维「回合进行中」判定集合的唯一定义点。
  * 消费方（chat-flow-consistency U1/U2/U5 落地）：runtime laneOf 投递判定、发送位预测、
- * 活动条、前端回合判定统一引用 ACTIVE_TURN_PHASES——settling 纳入 steer 排队由该
- * 集合单点生效（设计 §3.3 D1 采用 2）。
+ * 前端回合判定引用 ACTIVE_TURN_PHASES——settling 纳入 steer 排队由该集合单点生效
+ * （设计 §3.3 D1 采用 2）；活动条（ActivityStrip）消费 sessionPhase 派生视图按相位分行，
+ * 不直接引用集合（grep 核实：packages/ui 全域零命中）。
  *
  * runtime 侧镜像类型 packages/runtime/src/services/session/types.ts SessionOccupancy
  * 的字段值域与本文件保持一致（广播帧由 updateSessionOccupancy 按字段展开构造）。
@@ -28,7 +29,7 @@ export type SessionTurnPhase = 'idle' | 'dispatching' | 'generating' | 'settling
  * 不各自维护相位子集，新增消费方声明即用。
  *
  * 值校准：探针 P1 实测通过（settling 窗口 pi prompt(steer) 三条受理路径全部正确受理、
- * 毫秒级自动开新回合，结果文件 .tmp/tech-design/probes/p1-result.md），集合维持设计
+ * 毫秒级自动开新回合——探针产物在工作流产物目录，不入仓库；结论如前内联），集合维持设计
  * §3.3 D1 定稿值 ['dispatching', 'generating', 'settling']，条件降级路径不再适用。
  */
 export const ACTIVE_TURN_PHASES = ['dispatching', 'generating', 'settling'] as const
@@ -43,9 +44,10 @@ export function isActiveTurnPhase(turn: SessionTurnPhase): boolean {
   return (ACTIVE_TURN_PHASES as readonly SessionTurnPhase[]).includes(turn)
 }
 
-/** session occupancy 的 renderer/core 派生视图三维形状（= 'session.occupancy' 帧去 sessionId；
- *  原 core dispatch/send-route.ts 定义，随 D5 六行预测表退役迁本文件——occupancy 形状 SSOT
- *  同点收敛）。 */
+/** session occupancy 的 renderer/core 派生视图形状（= 'session.occupancy' 帧去 sessionId，
+ *  现四维：turn × compacting/bash + 第四维 handingOff 过渡期可选——U1 已落地，runtime 广播
+ *  恒带，见 protocol.ts 'session.occupancy' 帧注；原 core dispatch/send-route.ts 定义，随 D5
+ *  六行预测表退役迁本文件——occupancy 形状 SSOT 同点收敛）。 */
 export type SessionPhase = Omit<ServerMessageMap['session.occupancy'], 'sessionId'>
 
 /** occupancy 缺省值（session 无 occupancy 记录时 = 全 idle；landing 无 session 同值）。 */

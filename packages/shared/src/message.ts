@@ -719,9 +719,13 @@ export interface Message {
    * 实标记；status 不动（sealed guard isLastAssistantStreaming 依赖 streaming 态定位
    * 工具事件属主，提前翻 complete 会丢 tool_execution_* 帧）。
    *
-   * 写入点唯一：core registry message.message_end（按位置标记——live 气泡 id 是 runtime
-   * 随机 a-uuid（event-adapter assistantTurnStart），与 pi entry 的原生 message.id 不相交，
-   * 无法按 id 匹配；pi 串行协议下 end 时刻的末条 streaming assistant 即属主）。
+   * 写入点唯一：core effects/finalized-rebuild.rebuildAssistantOnFinalize（registry
+   * message.message_end assistant 分支调用——定稿权威重建与打标共用同一次定位）。定位 =
+   * id 锚定优先：帧级 messageId 即 interpreter currentMessageId（runtime a-uuid，
+   * event-adapter assistantTurnStart，与 live 气泡同一 id 空间，构造性可匹配；
+   * chat-flow-consistency §6「D3 定位升级」裁决，wire 锚点见 protocol.ts
+   * message.message_end 帧注），锚点缺失（旧 runtime / 异常帧）时回退末条 streaming
+   * assistant 位置定位（升级前行为的兼容路径，pi 串行协议下即属主）。
    * reload 基线消息不设置（status 已是 complete，消费侧无需本字段）。
    */
   textFinalized?: boolean

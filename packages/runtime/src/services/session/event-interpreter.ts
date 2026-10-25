@@ -95,13 +95,16 @@ export const IDLE_SESSION_OCCUPANCY: SessionOccupancy = {
  *
  * 迁移收益三件：转移表即文档（本声明即行为权威）；定义期词表外事件拦截（新事件未声明即
  * 定义期 throw——原靠 TS 联合类型静态拦、运行时无拦）；`generateTableTests` 穷举测试替代
- * 人肉（见 session-turn-machine.test.ts，4 态 × 7 事件全组合）。
+ * 人肉（见 session-turn-machine.test.ts，4 态 × 6 事件全组合）。
  *
  * 只管 turn 维度：compacting/bash/handingOff 是正交两态布尔维（ADR-0080 先例，两态域
  * 布尔判定更严，不建机器），由原语层直接 patch（编排拆解见 applySessionOccupancyTransition）。
  * 挂点纪律（哪些链路允许发 'idle' 转移）：唯一合法来源 = agent_settled 副作用
- * （session-state-projection.ts）+ abort 型 1（有回合被中止，message-dispatcher）+ 异常兜底
- * （handleIsolatedEventError 的 settling 兜底、runAgentSettledEffects 的 idle 兜底）。
+ * （session-state-projection.ts）+ abort 型 1（有回合被中止，message-dispatcher）+ abort
+ * await 失败收尾（message-dispatcher——pi 已退出/流错误时 agent_settled 不会再到的必要复位）
+ * + 异常兜底（handleIsolatedEventError 的 settling 兜底、runAgentSettledEffects 的 idle 兜底）
+ * + handled 终局回落（session-delivery-registry settleDispatching——命令接管后输入已消费，
+ * 无回合要跑，dispatching 态直接回落 idle 终态事实）。
  *
  * 导出仅供测试消费（generateTableTests 穷举 + 词表派发点审计，session-turn-machine.test.ts）。
  */
@@ -278,7 +281,7 @@ export function applySessionOccupancyTransition(
  * 显式意图事件驱动——用户显式投递（consumeForExplicitDelivery）、会话删除
  * （disposeForDelete）、shutdown（disposeAll）。不做任何自动收敛：
    * 「settled 到达即清标记」会被同边沿的重投击穿——被掐 turn 的 settled 边沿正是文本
-   * 车道对账器的重投触发点（对账器为现行旁路 turn 源之一；custom 通知旁路源 = port
+   * 文本投递路径对账器的重投触发点（对账器为现行旁路 turn 源之一；custom 通知旁路源 = port
    * session_start 差集重放），清标记后同边沿重投开的新 turn 不再被拦；「窗满清标记」=
    * 时间窗猜事实（原 D4，已删）。
  *
@@ -477,11 +480,15 @@ export interface EventInterpreterOptions {
    */
   onSilentAbort?: (payload: { sessionId: string }) => void
   /**
-   * compaction 生命周期态切换（M4 事件驱动）—— interpreter 从 compaction_start/end 唯一置位/复位
-   * runtime active.isCompacting（sendPrompt/sendBash 预检互斥依据）。
+   * compaction 生命周期态切换（M4 事件驱动）—— interpreter 从 compaction_start/end 唯一触发
+   * runtime 占用置位/复位。
    *
-   * 组合根注入：(sid, v) => 写 sessionService.getSession(sid).isCompacting（与原 dispatcher 手动
-   * 路径置位对称）。事件驱动后 dispatcher 不再置位，复位责任转移到 interpreter（三路对称复位）。
+   * 组合根接线（index.ts）：(sid, v) => applySessionOccupancyTransition 'compacting-start' /
+   * 'compacting-end' 原语行（occupancy.compacting 置位/复位 + 合并写 + state 帧广播原子完成；
+   * 原 sessionService.getSession(sid).isCompacting 平行存储字段已随 chat-flow-consistency D1
+   * 删除，读口 = occupancy.compacting 派生）。本通道是「与原语 compacting± 行幂等的冗余通道」
+   * （u3c 裁决，勿新增使用——新挂点一律走 onOccupancyTransition 通道；sendPrompt busy 预检
+   * 已随「排队取代拒绝」退役，sendBash 预检读 occupancy.compacting，bash-dispatcher.ts）。
    */
   onCompactingStateChange?: (sessionId: string, isCompacting: boolean) => void
   /**
@@ -489,11 +496,11 @@ export interface EventInterpreterOptions {
    * 挂点（turn-start→'generating' / turn-end→'settling' / agent-settled→'idle' /
    * compaction-start→'compacting-start' / compaction-end→'compacting-end' / turn-end 处理
    * 异常兜底→'settling'）经本回调由组合根接线到 applySessionOccupancyTransition（封闭转移
-   * 枚举唯一入口：合并 occupancy 三维 + 派生三布尔 + 幂等比较 + 广播 state 帧）。
+   * 枚举唯一入口：合并 occupancy 四维 + 幂等比较 + 广播 state 帧）。
    *
    * 回调只传转移类型（封闭枚举值），合并/派生/去重在原语内——interpreter 是 per-session
-   * 实例但不持有全量 occupancy（bash/dispatching 维度由 dispatcher 侧挂点写入），必须经
-   * session 记录（权威聚合点）合并，否则会以 stale 维度广播错误三维。
+   * 实例但不持有全量 occupancy（bash/handoff 等维度由 dispatcher/handoff 侧挂点写入），必须经
+   * session 记录（权威聚合点）合并，否则会以 stale 维度广播错误的占用派生视图。
    * 未注入时（存量单测）no-op，不广播。
    */
   onOccupancyTransition?: (transition: SessionOccupancyTransition) => void

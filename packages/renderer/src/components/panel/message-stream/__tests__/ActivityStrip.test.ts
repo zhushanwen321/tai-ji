@@ -257,7 +257,7 @@ describe('ActivityStrip · 横线分隔行族形态（compacting 降级回归 + 
     setProjection(SID, [
       entry('u1', 'queued', 'queued'),
       entry('u2', 'in-flight', 'steer'),
-      // direct 车道的乐观气泡原位保留（不进队列区，D7），不计入
+      // direct（直发路径）的乐观气泡原位保留（不进队列区，D7），不计入
       entry('d1', 'in-flight', 'direct'),
       // 已送达：transcript 权威已入流，不计入
       entry('d2', 'delivered', 'steer'),

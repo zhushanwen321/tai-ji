@@ -49,9 +49,10 @@ import { isDevMode } from '../../../platform/dev-mode'
  *
  * 顺序不变量（C2 dev 断言）：message.* 非工具帧保持 pi 事件序同步投递（翻译全程无
  * hook await，唯一异步后置 = tool-call-start/end 的 hook 改写，event-interpreter
- * handleToolCallStart/End）——锚定命中位置应恒等于末条 streaming assistant；不一致即
- * 契约破坏信号（未来若给 message_end 接异步翻译点会第一时间显形），warn 不阻断
- * （损害被限定为「同气泡错挂」，与 D3 错挂降级声明同构）。
+ * handleToolCallStart/End）——末条 streaming assistant 在场时，锚定命中位置应恒等于它；
+ * 不一致即契约破坏信号（未来若给 message_end 接异步翻译点会第一时间显形），warn 不阻断
+ * （损害被限定为「同气泡错挂」，与 D3 错挂降级声明同构）。末条 streaming assistant 不在
+ * 场（断连收尾后锚定命中已终态气泡）是 D3 规则 1 声明的合法迟到定稿覆写，不触发断言。
  */
 export function rebuildAssistantOnFinalize(
   ctx: Pick<MessageEffectContext, 'messages'>,
@@ -77,8 +78,10 @@ export function rebuildAssistantOnFinalize(
   if (idx < 0) {
     idx = fallbackIdx
     if (idx < 0) return
-  } else if (idx !== fallbackIdx && isDevMode()) {
-    // C2 顺序不变量 dev 断言：锚定命中 ≠ 末条 streaming assistant = 帧序契约破坏信号
+  } else if (fallbackIdx >= 0 && idx !== fallbackIdx && isDevMode()) {
+    // C2 顺序不变量 dev 断言：锚定命中 ≠ 末条 streaming assistant = 帧序契约破坏信号。
+    // fallbackIdx < 0（断连收尾后已无 streaming 气泡）时锚定命中已终态气泡属 D3 规则 1
+    // 声明的合法迟到定稿覆写，不算契约破坏，不 warn。
     console.warn(
       `[effects] message_end(assistant) anchor/position mismatch (sid=${sid}, anchorIdx=${idx}, lastStreamingIdx=${fallbackIdx})` +
         ' — message.* frame order contract broken (async translation point added?); rebuild follows the anchor',

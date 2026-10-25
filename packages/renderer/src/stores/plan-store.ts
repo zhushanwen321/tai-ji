@@ -738,5 +738,5 @@ export const usePlanStore = defineStore('plan', () => {
 
 /** planReview 帧记录判定（runtime pending 快照的 payload 解包形态，planReview 标记在顶层）。 */
 function isPlanReviewFrameRecord(req: ExtensionUIRequest): boolean {
-  return (req as { planReview?: unknown }).planReview === true
+  return req.planReview === true
 }

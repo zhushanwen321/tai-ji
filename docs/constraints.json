@@ -392,7 +392,7 @@
     },
     {
       "id": "C-data-08",
-      "summary": "队列区单一数据源：队列状态帧 = `session.delivery`（内核条目派生视图：活跃态全量 + delivered 最近 50 条完整条目 + lane，cancelled 不进视图；renderer 队列区唯一取数口）；`queue_update` 帧降级为内核内部回执（不直驱 UI）；队列内容权威 = runtime 投递所有权内核（全部发送方只提交，车道判定不在消费侧）；taiji 扩展禁 sendUserMessage 直接注入 pi 队列，pi 槽位滞留的外来文本由对账器收养；送达确认与判重按裸标记 id 精确匹配（禁计数 FIFO、禁文本匹配）",
+      "summary": "队列区单一数据源：队列状态广播 = `session.delivery`（内核条目派生视图：活跃态全量 + delivered 最近 50 条完整条目 + lane，cancelled 不进视图；renderer 队列区唯一取数口）；`queue_update` 一条消息降级为内核内部回执（不直驱 UI）；队列内容权威 = runtime 投递所有权内核（全部发送方只提交，投递路径判定不在消费侧）；taiji 扩展禁 sendUserMessage 直接注入 pi 队列，pi 槽位滞留的外来文本由对账器收养；送达确认与判重按裸标记 id 精确匹配（禁计数 FIFO、禁文本匹配）",
       "scope": [
         "packages/renderer/src/**",
         "packages/core/src/**",
@@ -1673,7 +1673,7 @@
         "extensions/**"
       ],
       "authority": [
-        "architecture/pi-boundary-reliability.md#d2能力注册表--runtime-单点服务面离线同源--在线对账选定",
+        "architecture/pi-boundary-reliability.md",
         "adr/decisions.md#ADR-0064"
       ],
       "dimensions": [
@@ -2108,7 +2108,7 @@
     },
     {
       "id": "C-data-19",
-      "summary": "session 忙闲状态单写原语：runtime session 域的 isGenerating/isCompacting/isBashRunning 三布尔与 occupancy 派生视图的唯一写入口 = event-interpreter.ts 的 applySessionOccupancyTransition（封闭转移枚举 SessionOccupancyTransition + SESSION_OCCUPANCY_TRANSITIONS 表，转移表即文档；新增转移先扩枚举再登记派生行，原语内部经 SessionOccupancyStateStore 写视图完成派生）。三布尔为派生存储——IManagedSessionView 类型层 readonly 使绕开原语的直写在编译期红（TS2540）；occupancy 合并/全等去重/session.occupancy state-topic 广播由原语原子完成，禁止第二广播出口。执行方式 = review（本条 enforcement）+ 编译期 readonly（TS2540，主防线）；辅以 CR 阶段 grep 人工复核（`\\\\.isGenerating\\\\s*=|\\\\.isCompacting\\\\s*=|\\\\.isBashRunning\\\\s*=` 于 packages/runtime/src 生产代码应零命中；测试 fixture 的运行期置位/复位一律经原语，构造期对象字面量初始化除外）——grep 复核为人工步骤，暂无自动化挂钩。C-data-04 同族范式在 occupancy 域的实例（session-dead-structural-fixes D2）",
+      "summary": "session 忙闲状态单写原语：runtime session 域 occupancy 四维状态（turn: idle/dispatching/generating/settling × compacting/bash/handingOff 布尔维）的唯一写入口 = event-interpreter.ts 的 applySessionOccupancyTransition（声明式状态机 SESSION_TURN_MACHINE：defineStateMachine 全组合合法表 + generateTableTests 穷举测试，事件词表 6 项 dispatching/generating/settling/idle/reject-other/full-reset，表外转移 throw；session-turn-machine.test.ts 另含词表派发点静态审计与死行零残留断言）。turn 机器之外的布尔维经 'compacting-start'/'compacting-end'/'bash-start'/'bash-end'/'handingOff-start'/'handingOff-end' patch 同入口写入；幂等全等去重 + session.occupancy state-topic 广播由原语原子完成，宣告语义归广播层原语 announceSessionOccupancy（跳过全等去重强制宣告），禁止第二广播出口。原 isGenerating/isCompacting/isBashRunning 三布尔派生存储已删除（读口 = isGeneratingTurn 等派生函数），绕开原语无平行字段可写（结构性封闭）；执行方式 = review（本条 enforcement）+ 结构性封闭（无平行存储）；辅以 CR 阶段 grep 人工复核（`\\\\.isGenerating\\\\s*=|\\\\.isCompacting\\\\s*=|\\\\.isBashRunning\\\\s*=` 于 packages/runtime/src 生产代码应零命中——字段已不存在，命中即新平行存储；测试 fixture 的运行期置位一律经转移原语，构造期对象字面量初始化除外）——grep 复核为人工步骤，暂无自动化挂钩。C-data-04 同族范式在 occupancy 域的实例（session-turn-machine 声明式机器承接 session-dead-structural-fixes D2 与 ADR-0152 第 5 条）",
       "scope": [
         "packages/runtime/src/services/session/**"
       ],
@@ -2189,7 +2189,7 @@
     },
     {
       "id": "C-data-20",
-      "summary": "record 持久化写侧唯一入口：subagent record 状态（.alive 写权声明 / manifest 派生视图 / sessions-index 缓存 / subagent-record entry / .record-binding 锚键 sidecar）的写侧全部归 RecordStore 意图原语，store 外零直写。【2026-09-13 永久会话模型原语清单刷新】状态机两态化（running|idle，closed 终态与 ClosedReason 资格角色删除）后现役原语 = markSettled（轮收尾：内存翻 idle + stopReason，磁盘只写 binding 统计快照（锚分派 pi sessionFile 路径 / zcode 锚键路径，merge-or-create），终局由 record-settled 事件帧承载）/ markReopened（锚失效同 id 带历史重开）/ markSettledOut（close 终态写点：worktreeHandle 清句 + .alive release + manifest 派生视图，幂等恒 true）/ markResurrected / tryEnterRunning + 轮次族 markRoundStarted / markRoundIdle / markBatchFinalized / adoptEngineDeath / register / appendEvent / acquireWriteLease（.alive acquire 三时机唯一包装）；markFinalized / markCancelled 退役（@deprecated，仅 workflow-origin D7 例外族 finalizeFailed/finalizeAborted/settleOneShotOutcome 经 finalize-record 保留调用）。检查两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。settle/轮终收条由事件帧承载（markSettled → record-settled 帧；markRoundIdle 轮终停因 → record-round-idle 帧），终态权威 = 事件流折叠 stateMarkerFromFold（.state sidecar 读写两侧退场），磁盘写面 = 事件文件追加（事实源）+ binding writeSync + manifest writeSync。【W1 介质归位写侧刷新（ADR-0094，2026-09-26）】record 运行态的事实写 = 事件文件追加（RecordJournalWriteFace，record-store-rounds.ts——record-created/bound/round-started/round-idle/settled/reopened 六类事件 + 单调 seq，唯一写者 record-events.ts）；主 session 条目范围 = 每实体注册 + 终态两条 v2 小条目（register/archive/收编入口内置——register 与 archive 真终局写，reportRecordTransition 的 v1 全量快照写点退役，改落 record-bound 帧 + bound manifest 物化）；v1 快照唯一残余写点 = reportSubagentRecord（v1 实体孤儿纠偏兼容层，W4 sunset 退役）；state/manifest/.record-binding 均为 fold 物化派生视图（.alive 操作租约不计事实源）。检查两级不变，grep 门断言范围扩为 R1-R7（R2 加宽常量形态 + 白名单扩 rounds face；R3 workflow-record 三写点宿主白名单（worker-message-pump / lifecycle / 壳 jsonl-run-store）；R4 v1 快照派生视图构造器白名单（record-entry 定义 + store 兼容层）；R5 workflow-record v1 快照载荷形态全域拒绝；R6 eventLog/displayItems 死字节载荷全域拒绝；R7 .events 直写白名单（record-events / run-events））",
+      "summary": "record 持久化写侧唯一入口：subagent record 状态（.alive 写权声明 / manifest 派生视图 / sessions-index 缓存 / subagent-record entry / .record-binding 锚键 sidecar）的写侧全部归 RecordStore 意图原语，store 外零直写。【2026-09-13 永久会话模型原语清单刷新】状态机两态化（running|idle，closed 终态与 ClosedReason 资格角色删除）后现役原语 = markSettled（轮收尾：内存翻 idle + stopReason，磁盘只写 binding 统计快照（锚分派 pi sessionFile 路径 / zcode 锚键路径，merge-or-create），终局由一条 record-settled 事件承载）/ markReopened（锚失效同 id 带历史重开）/ markSettledOut（close 终态写点：worktreeHandle 清句 + .alive release + manifest 派生视图，幂等恒 true）/ markResurrected / tryEnterRunning + 轮次族 markRoundStarted / markRoundIdle / markBatchFinalized / adoptEngineDeath / register / appendEvent / acquireWriteLease（.alive acquire 三时机唯一包装）；markFinalized / markCancelled 退役（@deprecated，仅 workflow-origin D7 例外族 finalizeFailed/finalizeAborted/settleOneShotOutcome 经 finalize-record 保留调用）。检查两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。settle/轮终收条由事件流承载（markSettled → 一条 record-settled 事件；markRoundIdle 轮终停因 → 一条 record-round-idle 事件），终态权威 = 事件流折叠 stateMarkerFromFold（.state sidecar 读写两侧退场），磁盘写侧 = 事件文件追加（事实源）+ binding writeSync + manifest writeSync。【W1 介质归位写侧刷新（ADR-0094，2026-09-26）】record 运行态的事实写 = 事件文件追加（RecordJournalWriteFace，record-store-rounds.ts——record-created/bound/round-started/round-idle/settled/reopened 六类事件 + 单调 seq，唯一写者 record-events.ts）；主 session 条目范围 = 每实体注册 + 终态两条 v2 小条目（register/archive/收编入口内置——register 与 archive 真终局写，reportRecordTransition 的 v1 全量快照写点退役，改落一条 record-bound 事件 + bound manifest 物化）；v1 快照唯一残余写点 = reportSubagentRecord（v1 实体孤儿纠偏兼容层，W4 sunset 退役）；state/manifest/.record-binding 均为 fold 物化派生视图（.alive 操作租约不计事实源）。检查两级不变，grep 门断言范围扩为 R1-R7（R2 加宽常量形态 + 白名单扩 rounds face；R3 workflow-record 三写点宿主白名单（worker-message-pump / lifecycle / 壳 jsonl-run-store）；R4 v1 快照派生视图构造器白名单（record-entry 定义 + store 兼容层）；R5 workflow-record v1 快照载荷形态全域拒绝；R6 eventLog/displayItems 死字节载荷全域拒绝；R7 .events 直写白名单（record-events / run-events））",
       "scope": [
         "packages/subagent-core/src/**",
         "extensions/**"
@@ -2801,7 +2801,7 @@
     },
     {
       "id": "C-data-25",
-      "summary": "投递所有权单一所有者：全部发送方（composer / session_manager send / completion-backflow / plugin / landing 首发）一律经 runtime 投递所有权内核（`packages/session-delivery` 状态机 + `session-delivery-registry.ts` 适配层）提交；lane（direct/steer/queued）判定单一源 = runtime 权威 occupancy 派生视图（C-data-19）+ 内核队列态，renderer 与 extension 禁做投递车道判定（`resolveSendRoute` 仅为发送位 UI 预测）；条目终态以送达回执（`message_end(user)` 标记命中）为准——受理（prompt 受理 / 文本入 pi 槽位）≠ 送达，只拿受理的条目由对账器兜底；内核条目判重按裸标记 id 精确匹配、跨 runtime 重启回落 transcript 标记扫描；唯一登记豁免 = canvas 回推——失效提示语义非交互投递（runtime transport 层 WS mutate actor=user 成功腿对活跃绑定 session 直投 `client.prompt(text, undefined, 'followUp')`，通知文本只是 agent 重新 canvas_read 的触发器，画布状态权威在 events.jsonl、回推丢失不损状态），不经内核提交、at-most-once 丢失窗为设计已接受代价，丢失恢复 = 用户重试裁决 / agent 重开 enter，重新评估条件 = 通知承载离开画布即不可恢复的结果语义（详录 pi-boundary-reliability.md 附录 E canvas 回推豁免条目）",
+      "summary": "投递所有权单一所有者：全部发送方（composer / session_manager send / completion-backflow / plugin / landing 首发）一律经 runtime 投递所有权内核（`packages/session-delivery` 状态机 + `session-delivery-registry.ts` 适配层）提交；lane（direct/steer/queued）判定单一源 = runtime 权威 occupancy 派生视图（C-data-19）+ 内核队列态，renderer 与 extension 禁做投递路径判定（`resolveSendRoute` 仅为发送位 UI 预测）；条目终态以送达回执（`message_end(user)` 标记命中）为准——受理（prompt 受理 / 文本入 pi 槽位）≠ 送达，只拿受理的条目由对账器兜底；内核条目判重按裸标记 id 精确匹配、跨 runtime 重启回落 transcript 标记扫描；唯一登记豁免 = canvas 回推——失效提示语义非交互投递（runtime transport 层 WS mutate actor=user 成功路径对活跃绑定 session 直投 `client.prompt(text, undefined, 'followUp')`，通知文本只是 agent 重新 canvas_read 的触发器，画布状态权威在 events.jsonl、回推丢失不损状态），不经内核提交、at-most-once 丢失窗为设计已接受代价，丢失恢复 = 用户重试裁决 / agent 重开 enter，重新评估条件 = 通知承载离开画布即不可恢复的结果语义（详录 pi-boundary-reliability.md 附录 E canvas 回推豁免条目）",
       "scope": [
         "packages/session-delivery/src/**",
         "packages/runtime/src/**",
@@ -3038,7 +3038,7 @@
       ],
       "authority": [
         "adr/decisions.md#adr-0075-workflow-域四支柱平移与-schema-通道终态2026-09-21",
-        "adr/decisions.md#adr-0091-workflow-run-显式状态机转移表裁决--事件流权威投影2026-09-21"
+        "adr/decisions.md#adr-0091-workflow-run-显式状态机转移表裁决--事件流权威派生视图2026-09-21"
       ],
       "dimensions": [
         "extension-api",

@@ -151,7 +151,7 @@ describe('u2 检重与 lane 判定', () => {
     expect(extractMarkerIds(text)).toEqual(['3f2504e0-4f89-41d3-9a0c-0305e82c3301'])
   })
 
-  it('generating 提交 → lane=steer（活跃 run 车道），投递不被持有', async () => {
+  it('generating 提交 → lane=steer（活跃 run 投递路径），投递不被持有', async () => {
     const h = makeHarness({ view: { occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } } })
     const result = h.registry.submit('s1', { content: '补充', clientUuid: 'u-11111111-1111-4111-8111-111111111111' })
     expect(result.lane).toBe('steer')
@@ -181,7 +181,7 @@ describe('u2 检重与 lane 判定', () => {
   it('settling 窗口提交 → lane=steer（D1 判定集合：settling ∈ ACTIVE_TURN_PHASES，探针 P1 实测受理正确）', async () => {
     // chat-flow-consistency D1：settling 纳入「回合进行中」判定集合（shared
     // ACTIVE_TURN_PHASES 单点）——settling 窗口消息 steer 排队（当前轮结束后注入），
-    // 不再 direct 直投（pi 忙时入队不拒，受理可达性由探针 P1 实测锁定，p1-result.md）
+    // 不再 direct 直投（pi 忙时入队不拒，受理可达性由探针 P1 实测锁定）
     const h = makeHarness({ view: { occupancy: { turn: 'settling', compacting: false, bash: false, handingOff: false } } })
     const result = h.registry.submit('s1', { content: 'settling 窗口消息', clientUuid: 'u-33333333-3333-4333-8333-333333333333' })
     expect(result.lane).toBe('steer')
@@ -1206,5 +1206,58 @@ describe('onRuntimeCreated 创建事件（chat-flow-consistency D3 修复）', (
     expect(seen).toEqual([]) // 已退订
     expect(bad).toHaveBeenCalledTimes(1) // 抛错监听被调用但被隔离
     expect(h.promptCalls).toHaveLength(1) // 投递主流程不受影响
+  })
+})
+
+describe('error turn 收尾竞态：响应后 occupancy 写点退役（error-turn-dispatch-stall 根因修复）', () => {
+  it('响应帧晚于终局事件收尾（prompt 返回时 turn 已被事件链收成 idle）→ 不置 dispatching（修前滞留）', async () => {
+    // faux error turn 秒败形态：pi 在写出 prompt 响应帧之前已完成整个失败 turn 的事件流
+    //（turn-end → settling → agent_settled → idle）——runtime stdout 循环按序先分发事件帧
+    // 再分发响应帧，deliverOne 恢复执行时回合已被收尾。修前 markSessionActive 的空闲判定
+    // 通过 → 置 dispatching 且无任何后续事件复位（发送位滞留，A4 探针 >60s 形态）。
+    const h = makeHarness()
+    h.client.prompt.mockImplementation(async (text: string, images?: unknown, behavior?: unknown) => {
+      h.promptCalls.push([text, images, behavior])
+      // deliverOne 前置已置 dispatching；此处模拟事件链在响应帧分发前完成收尾
+      applySessionOccupancyTransition(h.view, null, 'idle')
+      return {}
+    })
+    h.registry.submit('s1', { content: '触发终态失败', clientUuid: 'u-eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' })
+    await h.flush()
+
+    // 修前此处为 dispatching（响应后写点把已收尾回合打回）；修后保持事件链的收尾终态
+    expect(h.view.occupancy?.turn).toBe('idle')
+  })
+
+  it('正常时序锚：受理前置 dispatching 保持到响应处理完（RPC 往返窗不呈 idle，RT-4#10）', async () => {
+    const h = makeHarness()
+    h.registry.submit('s1', { content: '正常投递', clientUuid: 'u-ffffffff-ffff-4fff-8fff-ffffffffffff' })
+    await h.flush()
+
+    // 前置 markDispatchingIfIdle 的置位在响应处理后保持（响应后无写点覆盖）；
+    // 后续占用演进归事件链（turn-start → generating，interpreter 挂点）
+    expect(h.view.occupancy?.turn).toBe('dispatching')
+  })
+
+  it('compaction 拒绝重试：边沿释放后重试 prompt 发起前补置 dispatching（受理前脉冲语义统一）', async () => {
+    const h = makeHarness({ promptError: new Error(PI_COMPACTING_MSG) })
+    h.registry.submit('s1', { content: '撞压缩窗口', clientUuid: 'u-99999999-9999-4999-8999-999999999999' })
+    await h.flush()
+    // 等待期不呈 dispatching（reject-other 收回 idle——挂起期的事实）
+    expect(h.view.occupancy?.turn).toBe('idle')
+
+    h.client.prompt.mockImplementation(async (text: string, images?: unknown, behavior?: unknown) => {
+      h.promptCalls.push([text, images, behavior])
+      // 重试 prompt 发起时刻：occupancy 已被补置位（markDispatchingIfIdle，受理前脉冲）
+      expect(h.view.occupancy?.turn).toBe('dispatching')
+      return {}
+    })
+    // pi 侧 compaction_end 事件 = 持有释放条件（D6 事件驱动）
+    h.emitPiEvent({ type: 'compaction_end', reason: 'manual', aborted: false, willRetry: false })
+    await vi.advanceTimersByTimeAsync(1200)
+    await h.flush()
+
+    expect(h.promptCalls.length).toBeGreaterThanOrEqual(2) // 重试达成
+    expect(h.view.occupancy?.turn).toBe('dispatching') // 响应处理完仍保持（无响应后写点）
   })
 })

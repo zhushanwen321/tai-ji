@@ -246,7 +246,7 @@ export default {
     // [system-notice-rendering-upgrade U6] 边界行失败分句（D5「· M 失败」，Turn.vue 消费）：
     // 专用键不复用 traceFailed（「含 {count} 次失败」属 TraceCompactorRow 收编行句式，两者语义域不同）
     turnTriggerBgNotifyFailed: '{count} 失败',
-    // [bg-notice-fold specs/chat/system-notices.md §3.3] settle 收纳后轮头行折叠标签：按类型
+    // [bg-notice-fold] settle 收纳后轮头行折叠标签：按类型
     // 分段（发生序去重，「·」连接，耗时沿用 elapsed 段单数字）。托管会话为第四成员，折叠词
     // 待用户裁决（spec §6），暂按 fold-into-meta demo 提案值落地
     noticeFoldedBash: '已处理后台任务',

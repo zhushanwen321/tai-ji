@@ -10,7 +10,7 @@
     「轮次分隔 = 纯留白无 hr」形态由该裁决覆盖）。
     （原「纯文本段无底色无边框」形态 = 用户裁决 2026-10-06，被 M3a demo 权威覆盖，登记于
     .tmp/ui-replica/reports/m3a-turn-skeleton.md 决策清单）
-    [bg-notice-fold specs/chat/system-notices.md §3] settle 收纳态：落成轮头行状态字换为
+    [bg-notice-fold] settle 收纳态：落成轮头行状态字换为
     折叠分段标签「已处理后台任务 · Subagent · Workflow」（发生序去重，各类型词悬停出解释卡，
     §3.5）+ 跨类型失败词标「N 项失败」；数据源 foldedRows = Turn.vue 经 core
     deriveFoldedNoticeRows 单点派生。工作态维持「工作中」（临时外部行/聚合行由 Turn 承担，
@@ -45,7 +45,7 @@
         <!-- 运行态指示 = 外层呼吸弧（demo run-ic 规格）；原 Loader2 spinner 已换（wave3 起
              chat 域 loader 统一呼吸弧，TurnMeta 是最后一处 Loader2 残留） -->
         <!-- 状态段（状态字 + elapsed）：状态字恒 text-neutral-dim；elapsed = demo .workmeta b
-             强调档（mid 色 + fw-mid）。settle 收纳态（specs/chat/system-notices.md §3.3）状态字
+             强调档（mid 色 + fw-mid）。settle 收纳态状态字
              换为折叠分段标签「已处理后台任务 · Subagent · Workflow」——分段按发生序去重，
              各类型词悬停出解释卡（§3.5，HoverCard 复用 SystemNotice 悬停详情原语）；落成瞬间
              （justDone）播一次性 notice-in 高亮。工作态与无收纳轮维持原状态字。 -->
@@ -100,7 +100,7 @@
           data-testid="turn-meta-tokens"
           class="tm-tokens ml-1.5 font-mono text-[length:var(--text-xs)] text-neutral-dim tabular-nums"
         >· {{ generatedTokensParts.before }}<span class="text-neutral-mid [font-weight:var(--fw-mid)]">{{ generatedTokens.toLocaleString() }}</span>{{ generatedTokensParts.after }}</span>
-        <!-- 收纳失败词标（specs/chat/system-notices.md §3.3）：warn 色胶囊「N 项失败」，不展开
+        <!-- 收纳失败词标：warn 色胶囊「N 项失败」，不展开
              也可扫到异常终态；段位在 chevron 之前（demo has-nt 行序：标签 → tokens → 词标 → chevron） -->
         <span
           v-if="foldedFailCount > 0"
@@ -177,8 +177,7 @@ const props = withDefaults(
     /** 本 turn 已上报的真实生成 token 总量（Σ usage.outputTokens）；0 不渲染。
      *  可选 + 默认 0：非可选类型经 withDefaults 会编译出 required:true，漏传即 Vue warn */
     generatedTokens?: number
-    /** 被收纳完成通知明细行（Turn.vue 经 core deriveFoldedNoticeRows 单点派生后下发；
-     *  specs/chat/system-notices.md §3.3 折叠分段标签 + §3.5 解释卡的数据源） */
+    /** 被收纳完成通知明细行（Turn.vue 经 core deriveFoldedNoticeRows 单点派生后下发） */
     foldedRows?: FoldedNoticeRow[]
     /** 落成瞬间一次性信号（Turn.vue justDone）——收纳标签切换时播一次 notice-in 高亮 */
     justDone?: boolean
@@ -206,7 +205,7 @@ const statusLabel = computed(() => {
  *  （turn 锚是交接指令提示行）——纯派生值，随 turn 对象引用不变而稳定。 */
 const isHandoffDoc = computed(() => isHandoffDocTurn(props.turn))
 
-// ── settle 收纳态（specs/chat/system-notices.md §3.3 / §3.5）────────────────────────
+// ── settle 收纳态
 // 折叠分段标签只在落成态渲染：工作态维持「工作中」（临时外部行/聚合行由 Turn.vue 按工作态
 // 渲染，外部行与收纳态不重复出现）。分段 = 发生序去重的类型词序列；失败词标跨类型累计。
 // 图标表 / i18n 键表 = ./folded-notice 展示映射单点（Turn 明细行同源）。

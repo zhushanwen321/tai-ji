@@ -51,7 +51,7 @@ import type { PresetResolution } from '../preset-service.js'
 import type { IConfigStore } from '../ports/config.js'
 import type { ISessionStore } from '../ports/session.js'
 import type { WorkspaceService } from '../workspace/workspace-service.js'
-import { toErrorMessage, errorWithCode, MODEL_NOT_CONFIGURED, SESSION_NOT_FOUND } from '../../utils/errors.js'
+import { toErrorMessage, errorCodeOf, errorWithCode, MODEL_NOT_CONFIGURED, SESSION_NOT_FOUND } from '../../utils/errors.js'
 import { createForkedSessionFile, resolveEntryIdByTimestamp } from './session-fork.js'
 // session-dead-structural-fixes D2/D4：occupancy 宣告原语 + userStopped 门面
 //（restore 标记检测 / delete 清理 / 收敛环）。event-interpreter 是唯一无环的兄弟依赖方向
@@ -493,8 +493,11 @@ export class SessionLifecycle implements ISessionRegistry {
     //   ① checkpoint 建档（session-service 的 upsert 挂点）→ **豁免**：本点采用「写-撤销」
     //      等价形态——upsert 在上方 emit 内同步发生，随后 removeSession 即达「从未建档」的
     //      post-condition（单线程同步序；崩溃恰落两调用之间的最坏后果 = 维持豁免前行为：
-    //      重启 reattach 白跑一趟）。撤销后无回写路径：reaper 搭车 refreshSessions 只更
-    //      **已存在**条目、不新增。不豁免的后果：btw 线目录不在 sessions/ 扫描面，
+    //      重启 reattach 白跑一趟）。撤销后无回写路径：checkpoint 条目只在注册汇聚点整条
+    //      写入（crash-forensics-hooks upsertSession），removeSession 摘除后无任何回写/
+    //      新增路径——周期刷新已随 ADR-0122 reaper 退役；保留的 refreshSessions 搭车接口
+    //      （当前无生产调用方，见 runtime-checkpoint.ts）语义上也只更**已存在**条目、
+    //      不新增。不豁免的后果：btw 线目录不在 sessions/ 扫描面，
     //      reattach 编排按 checkpoint 对 vid 走 restore → resolveRestoreTarget 构造性
     //      SESSION_NOT_FOUND → 台账噪音 + 无效恢复尝试。
     //      根修应在 session-service 订阅体内按 isBtwVirtualId 早退——该文件不入本单元领地，
@@ -1187,14 +1190,17 @@ export class SessionLifecycle implements ISessionRegistry {
       if (s.cwd === cwd) cwdSessions.add(s.id)
     }
     const deleted: string[] = []
-    const failed: Array<{ sessionId: string; error: string }> = []
+    const failed: Array<{ sessionId: string; error: string; code?: string }> = []
     for (const id of cwdSessions) {
       try {
         await this.delete(id)
         deleted.push(id)
       } catch (e) {
         console.warn(`[session-lifecycle] deleteByCwd: failed to delete ${id}`, toErrorMessage(e))
-        failed.push({ sessionId: id, error: toErrorMessage(e) })
+        // code 透传（errorWithCode 载体 = Error.code 属性，errorCodeOf 结构化提取）：门级
+        // 拒绝（如 delete_generating）带码给 renderer 查本地化词条；意外错误无码，字段
+        // undefined 经 JSON 序列化自然省略，wire 形态对存量消费方零变化。
+        failed.push({ sessionId: id, error: toErrorMessage(e), code: errorCodeOf(e) })
       }
     }
     return { cwd, deleted, failed }

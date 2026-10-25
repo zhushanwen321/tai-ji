@@ -9,7 +9,7 @@
  * - 节点高度：≥2 实例的调用点按 dagNodeHeight 增高（实例行画进节点），经
  *   nodeHeights 表传入布局；
  * - 边几何（正交路由）：锚点只取节点四条边的中点（4 个连线点）；顺序/数据流/条件
- *   = 源右中心→通道竖线→目标左中心的三段折线（同行退化直线），同通道并行边按车道
+ *   = 源右中心→通道竖线→目标左中心的三段折线（同行退化直线），同通道并行边按错开位
  *   错开不重合；loop-back 底边中点垂直进出（跨列两端下方无堆叠时四折点直连，被
  *   同列堆叠挡住才走侧向细道 + 底边下空隙带，同列 U 形折返，自环边不产出几何），
  *   任何段不穿节点；全部折点严格轴对齐（横竖两向不变量）；
@@ -221,7 +221,7 @@ describe('layoutEdges 正交路由（白盒）', () => {
     const [edge] = layoutEdges(d, layout.nodes)
     expect(edge.points).toHaveLength(4)
     expectAxisAligned(edge.points)
-    // 独占通道的边车道 = 默认中位（两锚点中位，竖线落在列间距带内）
+    // 独占通道的边错开位 = 默认中位（两锚点中位，竖线落在列间距带内）
     expect(edge.points[1].x).toBe((la.x + DAG_NODE_W + lc.x) / 2)
     expect(edge.points[1].x).toBe(edge.points[2].x)
   })
@@ -353,7 +353,7 @@ describe('layoutEdges 正交路由（白盒）', () => {
     expect(edge.labelY).toBe((la.y + la.h / 2 + lb.y + lb.h / 2) / 2)
   })
 
-  it('同通道并行边（fan-in）：竖线段按车道居中错开，不再重合成一根线', () => {
+  it('同通道并行边（fan-in）：竖线段按错开位居中错开，不再重合成一根线', () => {
     const { layout, geo, edges } = buildRoutedCanvas({
       phases: [{ name: 'p0', order: 0 }, { name: 'p1', order: 1 }],
       nodes: [
@@ -361,7 +361,7 @@ describe('layoutEdges 正交路由（白盒）', () => {
         node({ id: 'b', templateName: 'bb', phase: 'p0' }),
         node({ id: 'c', templateName: 'cc', phase: 'p0' }),
         // 目标列占位节点：把 f 排到第 4 行——三条边源行各不同且都不与 f 同行
-        //（同行退化为直线不进通道，测不到车道分配）
+        //（同行退化为直线不进通道，测不到错开分配）
         node({ id: 't0', templateName: 'pa', phase: 'p1' }),
         node({ id: 't1', templateName: 'pb', phase: 'p1' }),
         node({ id: 't2', templateName: 'pc', phase: 'p1' }),
@@ -380,7 +380,7 @@ describe('layoutEdges 正交路由（白盒）', () => {
     const laneXs = routed.map((le) => le.points[1].x)
     // 三根竖线 x 互不相同（默认中位竖线重合缺陷已修）
     expect(new Set(laneXs).size).toBe(3)
-    // 车道以默认中位为中心、按 LANE_STEP_PX 居中分布，且跟随源 y 序（横支互不交叉）
+    // 错开位以默认中位为中心、按 LANE_STEP_PX 居中分布，且跟随源 y 序（横支互不交叉）
     const midX = (la.x + DAG_NODE_W + lf.x) / 2
     const sorted = [...laneXs].sort((x, y) => x - y)
     expect(sorted[0]).toBeCloseTo(midX - LANE_STEP_PX, 6)

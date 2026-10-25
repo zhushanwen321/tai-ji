@@ -8,7 +8,7 @@
  * onFollowUp 在分支内消费 useChat 失败信号（false → restoreSegments 恢复草稿）。
  *
  * [退役] onSteer 与 submit() 包装已随 ADR-0046 message.steer 协议路径退役同批删除
- * （过度设计审计候选 8）：Enter 统一走 onSend→routeSteer（steer 车道判定在 runtime 内核），
+ * （过度设计审计候选 8）：Enter 统一走 onSend→routeSteer（steer 投递路径判定在 runtime 内核），
  * onSteer 生产调用方为 0；submit() 包装的 catch 对不抛错的 useChat 契约是 dead path 且
  * 生产调用方为 0。
  *

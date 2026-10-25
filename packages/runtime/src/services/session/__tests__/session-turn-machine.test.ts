@@ -197,15 +197,24 @@ describe('转移词表派发点静态审计（design-turn-statemachine 缺陷 6 
       ...SESSION_TURN_MACHINE.events,
       'compacting-start', 'compacting-end', 'bash-start', 'bash-end', 'handingOff-start', 'handingOff-end',
     ] as const
+    // 派发点判据 = 调用行形态：原语调用行（applySessionOccupancyTransition(）或其回调转发行
+    // （onOccupancyTransition?.(）与事件字面量同行。不判「同文件字面量同现」——词表定义文件
+    // （types.ts 的 union、event-interpreter.ts 的机器 events 表）天然含全部事件字面量，文件级
+    // 同现被结构性命中，审计恒绿（死行检不出，词表键漏写派发点时测试照绿）。回调转发行必须
+    // 同列为证据：generating 的唯一派发形态是转发链（interpreter 内 onOccupancyTransition?(
+    // 'generating') → 组合根 applySessionOccupancyTransition 接线，字面量不在接线行）。词表
+    // 定义行不含调用括号形态，结构性不构成证据（无需文件黑名单）。跨行调用的字面量行不计
+    // （保守方向：宁可误报逼人工核对，不漏报死行）；新增中转函数形态时把中转调用名加进本正则。
+    const dispatchRe = /applySessionOccupancyTransition\s*\(|onOccupancyTransition\s*\?\.\s*\(/
+    const dispatchLines = sourceFiles.flatMap((f) =>
+      readFileSync(f, 'utf8')
+        .split('\n')
+        .filter((line) => dispatchRe.test(line)),
+    )
     const missing: string[] = []
     for (const event of vocab) {
       const literal = `'${event}'`
-      const hit = sourceFiles.some((f) => {
-        const text = readFileSync(f, 'utf8')
-        if (!text.includes('applySessionOccupancyTransition')) return false
-        return text.includes(literal)
-      })
-      if (!hit) missing.push(event)
+      if (!dispatchLines.some((line) => line.includes(literal))) missing.push(event)
     }
     expect(missing).toEqual([])
   })
@@ -220,7 +229,7 @@ describe('死行零残留（D1 死行清理验收：删词表键后 grep 零命�
     'abort-stall-force-kill',
     'reject-processing',
     'announce-idle',
-  ])(' retired 词表键 %r 在 src 非测试代码零残留', (retired) => {
+  ])('退役词表键 %s 在 src 非测试代码零残留', (retired) => {
     // 生产代码零命中（测试 fixture 命中不算——测试可断言退役词的拒绝行为）。
     const hits = sourceFiles.filter((f) => readFileSync(f, 'utf8').includes(`'${retired}'`))
     expect(hits).toEqual([])

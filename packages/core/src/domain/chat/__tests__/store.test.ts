@@ -992,6 +992,26 @@ describe('createChatStore factory', () => {
     })
   })
 
+  describe('isHandingOff（[chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] occupancy 派生读口，顶替退役的 handoff controller Set 语义）', () => {
+    it('occupancy 帧带 handingOff:true → isHandingOff true；无记录/缺字段/清分区 → false', () => {
+      const sid = 's1'
+      // 无记录 = 缺省全 idle（handingOff undefined ≡ false）
+      expect(sut.store.isHandingOff(sid)).toBe(false)
+      // occupancy 帧（handoff-service 'handingOff-start' 广播形态）置位
+      sut.store.setOccupancy(sid, { turn: 'generating', compacting: false, bash: false, handingOff: true })
+      expect(sut.store.isHandingOff(sid)).toBe(true)
+      // sessionPhase 派生视图同源可读（useQueueRows hint 分档消费形态）
+      expect(sut.store.sessionPhase(sid).handingOff).toBe(true)
+      // 复位帧（'handingOff-end'，整帧替换）→ false
+      sut.store.setOccupancy(sid, { turn: 'idle', compacting: false, bash: false, handingOff: false })
+      expect(sut.store.isHandingOff(sid)).toBe(false)
+      // 断连收尾清分区 → 回落 false（clearIndependentTransient 覆盖路径）
+      sut.store.setOccupancy(sid, { turn: 'idle', compacting: false, bash: false, handingOff: true })
+      sut.store.clearOccupancy(sid)
+      expect(sut.store.isHandingOff(sid)).toBe(false)
+    })
+  })
+
   describe('disposeSession（清理全部 per-session ref）', () => {
     it('清 messages / hydrated / pendingSend / occupancy 分区', () => {
       const sid = 's1'

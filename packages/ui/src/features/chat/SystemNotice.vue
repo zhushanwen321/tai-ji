@@ -34,11 +34,12 @@
        branch / background-bash 结构化行 / 兜底原文行共用一套 DOM 结构——两端渐隐横线
        （transparent → --border-strong 18% → 82% → transparent）+ 13px/stroke 2.2 图标 +
        主体（短语 text-sm/fg/550）+ 可选钉右 mono meta（text-2xs/500/tabular-nums）。
-       行距（specs/chat/system-notices.md §4，2026-10 裁决三值 上 10 / 下 16 / 相邻 20——
+       行距（2026-10 裁决三值 上 10 / 下 16 / 相邻 20——
        修复「bottom 外部距离太短」）：静态外部行 = demo 权威形态 pt-[13px] pb-[19px]
        （demo margin 10/16 + 行内 padding 3px 的合成视觉值；相邻两行 32px，与本族连发
-       「独立事件保留间隔感」判据一致）；轮内 inline 行（工作态收纳通知的临时外部行 /
-       liveOnly 健康警告）维持现状 py-1.5（临时形态按「现状外部形态出现」，settle 即摘除）。
+       「独立事件保留间隔感」判据一致）；轮内 inline 行（工作态收纳通知的临时外部行）维持
+       现状 py-1.5（临时形态按「现状外部形态出现」，settle 即摘除；liveOnly 健康警告已随
+       [chat-flow-consistency C6] 独立成 static 项，走静态外部行距，不再 inline 消费）。
        三段 flex 居中结构 / content-col 宽度 / animate-notice-in 动效三项不动。
        方案 A 增补（主体有界 + 悬停详情）：主体只承载有界短语——无界载荷（background-bash
        命令原文 / 超 40 字符的兜底 system 原文）移入 HoverCard 悬停详情（只读 + 复制），
@@ -137,9 +138,10 @@ const { t } = useI18n()
 const props = withDefaults(
   defineProps<{
     message: Message
-    /** 轮内 inline 形态（specs/chat/system-notices.md §4）：工作态收纳通知的临时外部行 /
-     *  liveOnly 健康警告等轮内消费点——维持现状行距 py-1.5；缺省（静态外部行）= 裁决三值的
-     *  demo 权威间距 pt-[13px] pb-[19px]。 */
+    /** 轮内 inline 形态
+     *  （Turn.vue 工作态 bash 结构化行，唯一消费点）——维持现状行距 py-1.5；缺省（静态
+     *  外部行）= 裁决三值的 demo 权威间距 pt-[13px] pb-[19px]。liveOnly 健康警告已随
+     *  [chat-flow-consistency C6] 独立成 static 项，不属 inline 消费点。 */
     inline?: boolean
   }>(),
   { inline: false },

@@ -56,20 +56,6 @@ export function readDetail(payload: Record<string, unknown>, key: string): strin
   return undefined
 }
 
-/**
- * 读 message.complete.usage（event-adapter 生产端形状）。
- * payload.usage = { inputTokens, outputTokens, totalTokens }（见 event-adapter handleAgentEnd）。
- * shared.Usage 只需 { inputTokens, outputTokens }；totalTokens 舍弃（无字段承载）。
- */
-export function readUsage(payload: Record<string, unknown>): { inputTokens: number; outputTokens: number } | undefined {
-  const u = readRecord(payload, 'usage')
-  if (Object.keys(u).length === 0) return undefined
-  const inputTokens = readNumber(u, 'inputTokens')
-  const outputTokens = readNumber(u, 'outputTokens')
-  if (inputTokens === undefined || outputTokens === undefined) return undefined
-  return { inputTokens, outputTokens }
-}
-
 /** 读 message.compactionSummary payload */
 export function readCompactionSummary(payload: Record<string, unknown>): CompactionSummary {
   const summary: CompactionSummary = {}

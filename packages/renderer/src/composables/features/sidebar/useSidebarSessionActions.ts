@@ -32,6 +32,16 @@ import { markForcedExit, consumeForcedExit } from '@/composables/effects/forced-
 import { useI18n } from 'vue-i18n'
 import { archiveErrorKey } from './archive-error-text'
 
+/**
+ * folder 批删 failed[].code → i18n key 单点映射。code 是 runtime 定义的封闭枚举
+ * （SSOT = shared BatchDeleteResult 注释）：命中给本地化短语替代 runtime 原文作 toast
+ * error 占位（原文语言随 runtime 编译期定，en 用户不可读）；未知码/缺失回落原文
+ * （既有行为）。新码三处同 commit：shared 登记 + 此处补映射 + 双语词条。
+ */
+const DELETE_FAILED_I18N_KEYS: Record<string, string> = {
+  delete_generating: 'sidebar.deleteFolderGenerating',
+}
+
 /** useSidebarSessionActions 所需的注入依赖（来自 useSidebar + Sidebar.vue 本地 UI ref） */
 export interface UseSidebarSessionActionsOptions {
   selectSession: (id: string) => Promise<void>
@@ -46,7 +56,7 @@ export interface UseSidebarSessionActionsOptions {
    * cleanupSessionState 同族 + wasActive 回退）。
    */
   archiveSession: (id: string) => Promise<void>
-  deleteFolder: (cwd: string) => Promise<{ failed: Array<{ error?: string }> }>
+  deleteFolder: (cwd: string) => Promise<{ failed: Array<{ sessionId: string; error?: string; code?: string }> }>
   /** 归入项目（D14 语义修正，2026-08-04）：RPC + 乐观更新编排在 useSidebar。 */
   assignSessionToProject: (sessionId: string, projectId: string) => Promise<void>
   /** RenameSessionDialog 开关 ref（Sidebar.vue 本地 UI 状态） */
@@ -137,7 +147,11 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     try {
       const res = await deleteFolder(cwd)
       if (res.failed.length > 0) {
-        const firstError = res.failed[0]?.error ?? ''
+        // 首条 failed 的 code 命中封闭枚举 → error 占位插本地化短语；未命中/缺失 → 回落
+        // runtime 原文（既有行为）。混合失败以第一条为准，与既有 firstError 口径一致。
+        const first = res.failed[0]
+        const localizedKey = first?.code !== undefined ? DELETE_FAILED_I18N_KEYS[first.code] : undefined
+        const firstError = localizedKey !== undefined ? t(localizedKey) : first?.error ?? ''
         toastError(
           t('sidebar.deleteFolderPartialFailed', res.failed.length, {
             named: { count: res.failed.length, error: firstError },

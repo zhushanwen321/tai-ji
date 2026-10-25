@@ -91,8 +91,11 @@ export async function getHistory(sessionId: string, query?: HistoryQuery): Promi
  * runtime rpc-client 已检查空数组（rpc-client.ts:430 images.length>0 才组 piImages），
  * 故此处 images 为 undefined 时直接不传 images 键（保持既有 payload 形态不变）。
  *
- * options.clientUuid（session-occupancy-send-closure D2）：经 message.send RPC 参数透传，
- * runtime 拒绝时在 send.rejected 广播原样带回（renderer 兜底消歧）。undefined 时不带键，
+ * options.clientUuid（session-occupancy-send-closure D2）：经 message.send RPC 参数透传为
+ * 投递身份（内核条目 id / 出站裸标记身份源）——[u5a 注记] 前身「runtime 拒绝时经
+ * send.rejected 广播原样带回供 renderer 消歧」的消费路径已退役（内核排队取代拒绝，
+ * renderer handler 已删；send.rejected 现存唯一生产路径 = bash 通道 busy 的 reserveBashSlot，
+ * 见 protocol.ts message.send [u5a 注记] 与 frames 面注）。undefined 时不带键，
  * payload 形态与既有流量完全一致（归一模式对称 images）。
  */
 export function send(

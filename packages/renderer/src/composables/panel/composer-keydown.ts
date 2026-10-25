@@ -7,7 +7,7 @@
  * 本文件任何增行须先提取拆分。目录归属对齐
  * composer-shell.ts（同目录、文件名不带 use 前缀、导出函数带 use 前缀的既有约定）。
  *
- * ADR-0049 判定：不持有 per-session 状态（无按 sessionId 分区的 ref/Map/Set；sendRoute
+ * ADR-0049 判定：不持有 per-session 状态（无按 sessionId 分区的 ref/Map/Set；activeTurn
  * 等「当前 session 的 X」由调用方以 computed 只读注入，本文件只消费不存储），
  * 纯事件分派 → 普通 composable，无需 useSessionScopedState 工厂。
  *

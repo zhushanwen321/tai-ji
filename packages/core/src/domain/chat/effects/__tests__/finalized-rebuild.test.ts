@@ -168,6 +168,10 @@ describe('message_end(assistant) 定稿权威重建（D3）', () => {
   })
 
   it('R6: 中断态复原——已收尾气泡（error 文案在场）按载荷覆写，status 复原 complete、error 退役、isInterrupted 保留', () => {
+    // C2 断言只针对「末条 streaming 在场时锚定 ≠ 它」的真错挂：本场景（断连收尾后无
+    // streaming 气泡的合法迟到定稿覆写，D3 规则 1）不触发 anchor/position mismatch warn。
+    provideDevMode(true)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const ctx = makeCtx([
       {
         id: 'm-1', role: 'assistant', content: '', status: 'error', timestamp: 1000,
@@ -182,6 +186,8 @@ describe('message_end(assistant) 定稿权威重建（D3）', () => {
     expect(m.content).toBe('完整正文')
     expect(m.isInterrupted).toBe(true)
     expect(m.textFinalized).toBe(true)
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
   })
 
   it('R7: 工具补建置 running + 关联不变量 + tool_call_start 幂等衔接（规则 3）', () => {

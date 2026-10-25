@@ -82,7 +82,12 @@ import { isDevMode } from '../../../platform/dev-mode'
 // [投递所有权内核 u3b] message_end(user) 送达回执（内核标记 id 匹配，C-data-08 修订方向）
 // 归位 effects/user-delivery.ts；① 前身（defer 分区 FIFO 文本匹配）与 queue_update 计数路径
 // （countDrained/drainN）已随内核整体退役（设计 §3.1 删除范围），git 可追溯。
-import { confirmKernelDeliveryOnMessageEnd, hasKernelDeliveryMarker } from './user-delivery'
+// ③ 守卫降级（rpc-direct-send-user-bubble）：标记未命中派生视图且无记账的帧降级入流显示。
+import {
+  confirmKernelDeliveryOnMessageEnd,
+  degradeUnmatchedKernelDelivery,
+  hasKernelDeliveryMarker,
+} from './user-delivery'
 // [chat-flow-consistency 缺陷 3/7] 停止提示行与截断提示行的文案 i18n 键出口（core 无 i18n，
 // renderer 装配层注入翻译——见 notice-text.ts 文件头）
 import { chatNoticeText, TRUNCATED_STOP_REASONS, type ChatNoticeKey } from './notice-text'
@@ -130,8 +135,10 @@ function confirmUserDeliveryOnMessageEnd(
   }
   // ③ 外来直发（无内核标记 + 无记账）：交调用方入流。带标记帧属送达回执通道管辖——
   // ① 已消费，或「迟到重复回执」形态（派生视图已 delivered + 记账已归零）须静默防双插
-  //（E5c 场景），不按外来处理。
-  if (hasKernelDeliveryMarker(entry)) return true
+  //（E5c 场景），不按外来处理。管辖帧的显示承接（派生视图缺条目 + 无记账的形态——协议
+  // 直发遇上订阅/补齐时序缺口）由 degradeUnmatchedKernelDelivery 降级入流承担，不再
+  // 无条件静默丢弃（rpc-direct-send-user-bubble：静默 = live 消息缺失直到切回/刷新）。
+  if (hasKernelDeliveryMarker(entry)) return degradeUnmatchedKernelDelivery(ctx, sid, entry)
   return false
 }
 

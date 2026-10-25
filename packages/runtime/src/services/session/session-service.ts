@@ -687,9 +687,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       //（renderer 全量订阅覆盖 list 内全部 session，见 useSessionStreamSync）。
       // occupancy #10（session-dead-structural-fixes D2 挂点迁移，u3b；失败路径进程异常退出路径）：
       // 占用中 pi 死亡时 agent_settled / compaction_end 永不会发出（二者只从 pi run/compact
-      // finally 触发），'full-reset' 行兜底——turn/compacting/bash 三维全复位 + 三布尔派生同步
-      // 复位（结构上不再有「只复位一边」），否则重连 renderer 经 stateSnapshot 回放恢复的是
-      // 永久的占用派生视图。须在 removeSessionEntry（内部 bus.clearSession）之前。
+      // finally 触发），'full-reset' 行兜底——四维全复位（turn 机器 idle 行 + compacting/bash/
+      // handingOff 布尔维全 false patch，结构上不再有「只复位一边」），否则重连 renderer 经
+      // stateSnapshot 回放恢复的是永久的占用派生视图。须在 removeSessionEntry（内部
+      // bus.clearSession）之前。
       // 注意：此处 session 是 delete 前缓存的引用，removeSessionEntry 后 Map 条目已删除
       // 统一经 removeSessionEntry（触发 onSessionDelete 清 pendingReload 等残留）
       try {
@@ -1310,8 +1311,9 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
-   * agent_settled 副作用（run 级联结束 → isGenerating 复位；session-dead 2026-09-10 补丁，
-   * 语义注释随实现迁 session-state-projection.ts）。组合根 index.ts onAgentSettled 经本委托消费。
+   * agent_settled 副作用（run 级联结束 → occupancy 'idle' 转移，isGeneratingTurn 派生自然翻
+   * false；session-dead 2026-09-10 补丁，语义注释随实现迁 session-state-projection.ts）。
+   * 组合根 index.ts onAgentSettled 经本委托消费。
    */
   handleAgentSettledSideEffects(sessionId: string): void {
     this.projection.handleAgentSettledSideEffects(sessionId)

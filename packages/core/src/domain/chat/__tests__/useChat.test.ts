@@ -164,13 +164,13 @@ describe('createUseChat factory 行为', () => {
     }
   })
 
-  it('busy 期发送不转车道（B 策略退役）：统一 submit 照常提交，由内核判定 lane', async () => {
+  it('busy 期发送不改投递路径（B 策略退役）：统一 submit 照常提交，由内核判定 lane', async () => {
     const f = makeFixture()
     await f.useChat.send('s2', textToSegments('hi'))
     f.emit('s2', msg('s2', 'message.message_start', { messageId: 'a1' }))
     expect(f.chatStore.isActive('s2')).toBe(true)
     await f.useChat.send('s2', textToSegments('more'))
-    // 两次都走统一 submit；chatApi.send 零调用（车道判定在 runtime 内核）。
+    // 两次都走统一 submit；chatApi.send 零调用（投递路径判定在 runtime 内核）。
     // [u5a] 前身同时断言 chatApi.steer 零调用——该成员已随 u5a 删除，断言随之移除。
     expect(f.chatApi.submitDelivery).toHaveBeenCalledTimes(2)
     expect(f.chatApi.send).not.toHaveBeenCalled()
@@ -559,7 +559,7 @@ describe('统一 submit 的 inflight 占位闭环（u3b：占位保留服务 dir
     resetDeliveryProjectionForTest()
   })
 
-  it('send 乐观插入 → inflight +1；确认帧到达 → 抵消归零（direct 车道抵消机制保留，D7）', async () => {
+  it('send 乐观插入 → inflight +1；确认帧到达 → 抵消归零（direct 投递路径抵消机制保留，D7）', async () => {
     const f = makeFixture()
     await f.useChat.send('s30', textToSegments('hi'))
     expect(f.chatStore.getInflight('s30')).toBe(1)
@@ -619,7 +619,7 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     } as unknown as ServerMessage
   }
 
-  it('morph：steer 车道帧到达 → 乐观气泡移出对话流 + 派生视图落位（队列区数据）+ dispatching 占位回收', async () => {
+  it('morph：steer 投递路径帧到达 → 乐观气泡移出对话流 + 派生视图落位（队列区数据）+ dispatching 占位回收', async () => {
     const f = makeFixture()
     await f.useChat.send('m1', textToSegments('补充要求'))
     const bubbleId = f.chatStore.getMessages('m1').find((m) => m.role === 'user')!.id
@@ -632,12 +632,12 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     // 派生视图落位（单一数据源，u3c QueueBubble 消费）
     expect(getDeliveryProjection('m1')).toHaveLength(1)
     expect(getDeliveryProjection('m1')[0]).toMatchObject({ clientUuid: bubbleId, state: 'in-flight', lane: 'steer' })
-    // 非直发车道：dispatching 空窗占位回收（无「本条即将触发 message_start」语义）
+    // 非直发投递路径：dispatching 空窗占位回收（无「本条即将触发 message_start」语义）
     expect(f.chatStore.isPendingSend('m1')).toBe(false)
     f.dispose()
   })
 
-  it('direct 车道帧：气泡保持待确认（不 morph 不移除），派生视图照常落位', async () => {
+  it('direct 投递路径帧：气泡保持待确认（不 morph 不移除），派生视图照常落位', async () => {
     const f = makeFixture()
     await f.useChat.send('m2', textToSegments('直达消息'))
     const bubbleId = f.chatStore.getMessages('m2').find((m) => m.role === 'user')!.id
@@ -672,7 +672,7 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     const bubble = f.chatStore.getMessages('m4').find((m) => m.role === 'user')!
     const bubbleId = bubble.id
 
-    // 1) steer 车道帧 → morph（气泡移除 + 原段暂存）
+    // 1) steer 投递路径帧 → morph（气泡移除 + 原段暂存）
     f.emit('m4', deliveryFrame('m4', [{ clientUuid: bubbleId, state: 'in-flight', lane: 'steer' }]))
     expect(f.chatStore.getMessages('m4').some((m) => m.id === bubbleId)).toBe(false)
 
@@ -737,6 +737,19 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     // 前身：全 idle + 队列非空 → flush 投递；退役后 occupancy 只维护派生视图，无任何投递编排
     expect(f.toast.error).not.toHaveBeenCalled()
     expect(f.toast.warning).not.toHaveBeenCalled()
+    f.dispose()
+  })
+
+  it('occupancy 帧第四维 handingOff 透传派生视图（[chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] Set 退役后 membership 唯一通路）', async () => {
+    const f = makeFixture()
+    await f.useChat.send('m7', textToSegments('hi'))
+    f.emit('m7', msg('m7', 'session.occupancy', { turn: 'generating', compacting: false, bash: false, handingOff: true }))
+    // sessionPhase 派生视图带 handingOff（useQueueRows hint 交接分档 / isHandingOff 读口的唯一数据源）
+    expect(f.chatStore.sessionPhase('m7').handingOff).toBe(true)
+    expect(f.chatStore.isHandingOff('m7')).toBe(true)
+    // 复位帧（'handingOff-end' 整帧替换）→ false
+    f.emit('m7', msg('m7', 'session.occupancy', { turn: 'idle', compacting: false, bash: false, handingOff: false }))
+    expect(f.chatStore.sessionPhase('m7').handingOff).toBe(false)
     f.dispose()
   })
 })
@@ -1381,7 +1394,32 @@ describe('chat-flow-consistency D4 终态处理失败恢复（occupancy idle × 
     const lastAssistant = [...f.chatStore.getMessages('s-d4m')].reverse().find((m) => m.role === 'assistant')
     expect(lastAssistant?.status).toBe('error')
     expect(lastAssistant?.error).toContain('回复已中断')
-    expect(lastAssistant?.error).toContain('正在恢复完整内容')
+    expect(lastAssistant?.error).toContain('重新打开会话可恢复完整内容')
+    f.dispose()
+  })
+
+  it('拉取失败降级：getHistory reject → warn 留痕，stalled 定格文案保持完成时态 + 恢复动作指引（与设计 D4 降级登记一致）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const f = makeFixture()
+    await f.useChat.send('s-d4fail', textToSegments('hi'))
+    f.emit('s-d4fail', msg('s-d4fail', 'message.message_start', { messageId: 'm1' }))
+    injectCompleteHandlerFailure(f)
+    f.emit('s-d4fail', msg('s-d4fail', 'message.complete', { stopReason: 'end_turn' }))
+    f.chatApi.getHistory.mockRejectedValue(new Error('ws closed'))
+
+    f.emit('s-d4fail', msg('s-d4fail', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
+
+    await vi.waitFor(() => {
+      // 降级已发生：失败 warn 留痕
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('history pull failed'))).toBe(true)
+    })
+    // 定格文案与 REASON_FALLBACK_ERROR_TEXT.stalled 登记一致：完成时态 + 恢复动作指引，
+    // 无进行时态「正在恢复」（恢复已静默终止，收敛依赖下次切入/刷新的既有 reconcile）
+    const lastAssistant = [...f.chatStore.getMessages('s-d4fail')].reverse().find((m) => m.role === 'assistant')
+    expect(lastAssistant?.status).toBe('error')
+    expect(lastAssistant?.error).toBe('回复已中断（内容可能不完整）。重新打开会话可恢复完整内容。')
+    expect(lastAssistant?.error).not.toContain('正在恢复')
+    warnSpy.mockRestore()
     f.dispose()
   })
 

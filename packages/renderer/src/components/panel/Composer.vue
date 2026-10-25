@@ -2,13 +2,13 @@
 <template>
   <!--
     容器组件 · composer（panel/spec.md zone ④，draft-composer-states）。
-    发送位四态（u6b / D6 表）：send（↑ idle 直发）/ stop（■ turn 活跃 dispatching|generating 无 compacting；settling 单独；
-    **compacting 任意 turn 组合——中止压缩流程**）/ queue（↑ 时钟角标：bash、settling+bash，点击统一提交——排队 lane 由内核裁定）/
-    spinner（isSending）。staging 模式优先（fork/handoff）。
-    steer/followUp/queued 路由：⏎/Alt+⏎ 全部汇入统一发送分发器（D6，composer-shell
-    sendRoute——turn 活跃→steer、占用→queued、idle→direct），Alt+⏎ 在 steer 路由行保留
-    followUp 语义。**按钮形态与 Enter 车道分立**：压缩期按钮是「终止压缩」（中止入口），⏎ 仍走
-    内核 queued 排队（compaction-end flush）——两问题不混谈（2026-10 用户裁决）。
+    发送位内容驱动双形态（D5，判定源 composer-shell sendButtonState / sendButtonBadge /
+    sendButtonStopTarget）：输入框有内容 → 恒 send（↑ 发送；排队去向时叠加时钟角标——
+    角标判定 = isActiveTurnPhase ∨ compacting，bash 不参与）；无内容 → stop（■ 回合进行中/
+    收尾/压缩中，title 两档分型见 sendButtonStopTarget；bash 不触发停止，取消入口在其输出块）；
+    空闲无内容 → send 禁用占位（canSubmit 承担禁用）。模板优先级链 = spinner（isSending
+    提交在途）› staging（fork/handoff 横幅）› stop › send±角标。
+    ⏎/Alt+⏎ 统一提交（汇入统一发送分发器）；Alt 分流读 isActiveTurn（回合进行中 = 排队语义）。
     staging 优先（fork/handoff，与视觉层 boxClass/placeholder 优先级对齐）：staging 活跃时 ⏎/Alt+⏎
       均提交 staging（发送位也替换为 staging 发送按钮，streaming 中同样生效）；handoff 的
       streaming 拦截在 enterHandoffMode/handleHandoffSend（isSessionActive 检查）。
@@ -350,8 +350,8 @@ const props = withDefaults(
     /** btw 入口实例开关（D7，M3-b）：false 不出按钮（drawer 内 BtwPanel 的 Composer 传 false 防递归出 btw 入口；不传默认 true，主 panel 零改动） */
     showBtw?: boolean
     /**
-     * subagent 车道形态（subagent-composer 2026-10-18）：drawer subagent 详情页挂载时传 true。
-     * 消费面差异（发送/中止/占用分流在 composer-shell 车道层，本 prop 只管模板裁剪）：
+     * subagent 通道形态（subagent-composer 2026-10-18）：drawer subagent 详情页挂载时传 true。
+     * 消费面差异（发送/中止/占用分流在 composer-shell 通道层，本 prop 只管模板裁剪）：
      * 左簇（托盘/插件 toolbar 对 subagent 无数据面）与右簇指标/模型档位（模型入口在
      * SubagentTab 头部，单入口裁决）隐藏；四符号触发浮层抑制（@/#/$ 文本按字面发送）。
      */

@@ -209,7 +209,7 @@ export function deriveNotifySummary(hiddenNotifies: Message[]): NotifySummary | 
   return summary
 }
 
-// ── 完成通知收纳明细行（specs/chat/system-notices.md §3.4，bg-notice-fold-into-meta）──────
+// ── 完成通知收纳明细行
 // settle 收纳后 TurnMeta 展开区的逐条明细行数据。与 NotifySummary 同属「载荷解析聚合轴」：
 // 判据/字段读取全部收敛在解析单点（shared 三 parser + 上方 managed 解析），渲染层零解析。
 
@@ -308,7 +308,7 @@ function managedNoticeRow(msg: Message): FoldedNoticeRow | null {
 }
 
 /**
- * 被收纳完成通知消息列表 → 展开明细行（specs/chat/system-notices.md §3.4）。
+ * 被收纳完成通知消息列表 → 展开明细行
  * 输入 = MessageTurn.foldedNotices（分组层按到达序附着，消息原地搬家不复制不转换）；
  * 输出序 = 输入序（batch 形态原地展开成员序）。bash 消息解析失败时跳过（消息保持
  * 现状外部行渲染，不产生明细行——与「外部行是临时形态、失败降级回外部」一致）。

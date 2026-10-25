@@ -3,17 +3,15 @@
  *
  * 定位：迁自 renderer useComposerHistory.ts。shell 风格 ↑/↓ 翻阅已发送消息。
  *
- * ⚠️ 权威行为规格见 `.taiji-harness/2026-07-10-composer-history-navigation/spec.md`
- * （FR1 视觉行导航 + FR2 光标定位 + FR3 换行往返 + FR4 跨 session 草稿持久化）。
- *
  * [W2 改造]
  * - 原 import { useChatStore } from '@/stores/chat' + history computed 派生 → 删除，
  *   改 deps.getHistoryEntries 注入（clarify C1 D2）。core composer 域零跨域 import chat store（D4/AC10）。
  * - 原 import { useSessionScopedState } from '@/composables/useSessionScopedState'
  *   → import { useSessionScopedState } from '@taiji/core/foundation/use-session-scoped-state'（W1 已落地）。
- * - normalizeContent 仍 from @taiji/shared（core 允许依赖）。
+ * - 历史派生已上移壳层（renderer composer-shell 的 deriveHistoryFromChatStore 注入
+ *   getHistoryEntries），本文件自 @taiji/shared 仅 import type Segment。
  *
- * 状态机（详见 spec FR1 三阶段模型）：
+ * 状态机（FR1 三阶段模型，内联权威描述）：
  * - ↑（edit 态）：非首行移光标 → 首行非行首归位 → 首行行首进 browsing
  * - ↑（browsing + 未到最老）：index++ → 回填 H[index]
  * - ↑（browsing + 已在最老）：保持不动
@@ -150,8 +148,12 @@ export function useComposerHistory(
       if (entry !== undefined) {
         deps.setText(entry, 'end')
       } else {
-        // index 越界兜底（历史派生缩短）：退回恢复草稿，与「↓ 已在最近」同语义（segments 快照结构化回填）
+        // index 越界兜底（历史派生缩短）：退回恢复草稿（segments 快照结构化回填），
+        // 与「↓ 已在最近」同款收尾——同步退出 browsing（否则浏览态残留，↑ 失效一次）
         deps.restoreSegments(s.savedSegments)
+        navState.update((st) => {
+          st.browsing = false
+        })
       }
       isSettingText = false
     } else {

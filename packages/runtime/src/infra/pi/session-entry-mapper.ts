@@ -111,11 +111,12 @@ class MalformedTimestampTracker {
  *
  * 为什么需要独立回填步（而不在 reducer 里派生）：entry 时间戳是**持久化链路专有**数据——
  * pi 在 `appendMessage`（message_end 之后）才写 entry，故 entry.timestamp ≈ 该 assistant
- * 消息产出结束；而 live 链路的 message_end 帧不带 append 时刻（taiji 用消息体 timestamp
- * 合成 entry，见 event-adapter handleMessageEnd）。若把已回填字段进 reducer，live 侧
- * `Date.now()` 与 reload 侧 entry 时间戳的毫秒差会直接打穿 store 级 live≡reload 等价性断言
- * （apply-entry 两路喂入必须逐字节同构）。故保持 reducer 纯净，本函数只在历史转换产物上
- * 做一层展示字段回填，与 `backfillSegments` 同一层级（同为 reload 专属增强）。
+ * 消息产出结束；live 链路的合成 entry.timestamp 同义（= 运行时到达时刻 ≈ pi appendMessage
+ * 落盘时刻，见 event-adapter handleMessageEnd 的 [chat-flow-consistency D3 修正]）。若把
+ * 已回填字段进 reducer，live 侧 `Date.now()` 与 reload 侧 entry 时间戳的毫秒差会直接打穿
+ * store 级 live≡reload 等价性断言（apply-entry 两路喂入必须逐字节同构）。故保持 reducer
+ * 纯净，本函数只在历史转换产物上做一层展示字段回填，与 `backfillSegments` 同一层级
+ * （同为 reload 专属增强）。
  *
  * 语义与降级：
  * - 只处理 assistant 消息（user/system 无「产出结束」语义，不再让「已工作」时长被 system

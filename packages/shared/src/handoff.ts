@@ -19,9 +19,11 @@
  * （生成文档 / suggested skills / 不重复 artifact / 脱敏），改为适合直接作为
  * prompt 发送给 pi agent 的祈使句文本。
  *
- * 不再要求 agent 写文件到 temp 目录——runtime 只从 agent_end 事件提取文本
- * （extractFinalTextFromAgentEnd），写入的文件会被忽略，原指令只会浪费 agent
- * 一次工具调用。改为直接输出文档作回复。
+ * 不再要求 agent 写文件到 temp 目录——runtime 经 handoff-service 从 turn-end 终态帧
+ * 提取文本（event-adapter 的 projectHandoffTurnEnd 派生视图；原 extractFinalTextFromAgentEnd
+ * 直听 pi agent_end 的形态已随 pi1-disposition-chat-flow U3② 行为化改写——pi 出错自动重试
+ * 场景 stdout 流有多个 agent_end，首个失败轮即误判 handoff 终局），写入的文件会被忽略，
+ * 原指令只会浪费 agent 一次工具调用。改为直接输出文档作回复。
  */
 export const HANDOFF_PROMPT_TEMPLATE = `Write a handoff document summarising the current conversation so a fresh agent can continue the work. Output the document directly as your response.
 

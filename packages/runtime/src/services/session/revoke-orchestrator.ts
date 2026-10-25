@@ -49,7 +49,7 @@ export const REVOKED_SIGNAL_CUSTOM_TYPE = 'taiji:revoked'
 
 /** 编排依赖（窄注入，测试可 mock；组合根在 session-service 装配）。 */
 export interface RevokeOrchestratorDeps {
-  /** occupancy 空闲检查数据源（①——三维 turn/compacting/bash 的权威派生视图）。 */
+  /** occupancy 空闲检查数据源（①——四维 turn/compacting/bash/handingOff 的权威派生视图）。 */
   getSession(sessionId: string): IManagedSessionView | undefined
   /** pi 拉活（⑤ 数据范围 + ⑥ 信令前置交接共用；失败回 pi-reclaimed——D1/A10 无感拉活）。 */
   ensureActive(sessionId: string): Promise<IPiEngine>
@@ -240,15 +240,19 @@ function locateTarget(
 }
 
 /**
- * ① 空闲判定（D8 busy 触发点：turn 活跃 / compacting / settling / bash）。
- * 判定式 = occupancy 直接读取（chat-flow-consistency D1 后 occupancy 是四维唯一存储，
+ * ① 空闲判定（D8 busy 触发点：turn 活跃 / compacting / settling / bash / handingOff）。
+ * 判定式 = occupancy 四维直接读取（chat-flow-consistency D1 后 occupancy 是四维唯一存储，
  * 原 isGenerating/isCompacting/isBashRunning 派生布尔已删——审计候选 13「留一份判定式，
- * 不留第二份镜像」由删除镜像完成），不另设平行标志。
+ * 不留第二份镜像」由删除镜像完成），不另设平行标志。handingOff 纳入判定：交接编排
+ * 在途窗口（置位到 settle）内撤回暂存消息会与交接后的暂存投回路径交错（撤回回执与
+ * 投回竞态呈现），按 busy 拦截——chat-flow-consistency §6 只裁决交接期消息归属
+ * （暂存/投回），撤回互斥无显式裁决行，本判定按四维完整域执行（行为语义如有裁决
+ * 反转，回退点 = 本布尔分支）。
  */
 function isOccupiedForRevoke(view: IManagedSessionView | undefined): boolean {
   if (!view) return false // 无视图（测试/异常装配）按空闲——与 holdReasonOf 同款宽容，后续 ensureActive 失败可见
-  const occ = view.occupancy ?? { turn: 'idle' as const, compacting: false, bash: false }
-  return occ.turn !== 'idle' || occ.compacting || occ.bash
+  const occ = view.occupancy ?? { turn: 'idle' as const, compacting: false, bash: false, handingOff: false }
+  return occ.turn !== 'idle' || occ.compacting || occ.bash || occ.handingOff
 }
 
 export class RevokeOrchestrator {
@@ -268,7 +272,7 @@ export class RevokeOrchestrator {
       return { sessionId, revoked: false, error: 'busy' }
     }
     try {
-      // ① 空闲检查（同步、无 await——occupancy 三维 turn/compacting/bash）
+      // ① 空闲检查（同步、无 await——occupancy 四维 turn/compacting/bash/handingOff）
       if (isOccupiedForRevoke(this.deps.getSession(sessionId))) {
         return { sessionId, revoked: false, error: 'busy' }
       }

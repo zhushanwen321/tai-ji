@@ -177,14 +177,24 @@ function isExpanded(idx: number): boolean {
 
 /**
  * 查询指定 turn 的「实际渲染展开态」（toggle 图标 + data-expanded 依据）。
- * = 用户态展开 OR sessionActive 时的激活节点强制展开。
+ * = 用户态展开 OR [chat-flow-consistency D2] 工作展开态数据派生。
  *
- * sessionActive 时 trace 由父组件强制展开（不看 expandedTurns），激活节点必然展开，
- * toggle 此时禁用但图标方向需保持准确（ChevronUp=已展开），否则会出现「点不动的 ChevronDown」
- * 语义错误。非激活节点仍看 isExpanded（sessionActive 不强制展开非激活节点）。
+ * 工作展开态与流内 Turn 的 isWorkingTurn 同构（同一数据源判定，构造性一致）：
+ * sessionActive ∧（真末位 ∨ turn.isStreaming）——真末位覆盖 pending turn（还没有 streaming
+ * assistant 可依，占位钉在真末位）；isStreaming 覆盖双工作态期的 streaming 回合（插话回流
+ * 开新回合、旧回合未收尾，两个回合各显展开）。
+ *
+ * 不再看 activeTurnIndex（视口派生）：D1 末位判定时代「sessionActive 时激活节点必然展开」
+ * 的前提已随 D2 失效——上翻后视口激活节点可既非末位也非 streaming，流内实际折叠，图标若
+ * 强制显示已展开即与流内不一致。toggle 在 sessionActive 时禁用（:disabled），禁用态图标
+ * 如实反映折叠/展开，不承担可点性承诺。
  */
 function isTurnExpanded(idx: number): boolean {
-  return (props.sessionActive && idx === props.activeTurnIndex) || isExpanded(idx)
+  const turn = props.turns[idx]
+  if (turn != null && props.sessionActive && (idx === props.turns.length - 1 || turn.isStreaming)) {
+    return true
+  }
+  return isExpanded(idx)
 }
 
 /**

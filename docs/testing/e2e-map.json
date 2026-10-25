@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发范围的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为 mock 层 mock 全量）/ REAL（真实 app 启动层）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机层）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化残留：断连恢复等真实 app 层，原 reload 非破坏层已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程层） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写侧唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本组：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布范围一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域：cw 剧本族 mock 探针层 + 真 pi 全链路真机冒烟轨 + managed session 死亡通知真机层） / REMOTE（远程访问域：手机浏览器 LAN 直连真机/仿真验收） / TERMINAL（终端多实例真实 app 层：切换条多实例 / 实例级生命周期 / 编号不复用 / 世代重置与对账） / MCP（MCP 服务器管理域真机子集） / BTASK（bash 后台任务域：完成通知入账全链真机层） / DELIVERY（统一消息投递域：文本车道磁盘 outbox 崩溃恢复，mock 单测层 + kill -9 runtime 真实进程层双层口径；真机 collect 挂起收取链） / CTRL（subagent control 通道集成组：server × 真实引擎 × 假 pi） / NETPROXY（LLM 网络代理分流域：mock 代理/SOCKS5 工具自测 + 分流前提漂移探针 + extension 三连） / ARCHIVE（session 归档域：归档/恢复/彻底删除 mock 层行为用例） / INTEG（集成测试门控组：真进程 / 真实 IO 用例，门控 = TAIJI_TEST_INTEGRATION，本地默认跳过、CI 或按改动范围启用；id 序号按包顺序分配）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为 mock 层 mock 全量）/ REAL（真实 app 启动层）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机层）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化残留：断连恢复等真实 app 层，原 reload 非破坏层已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程层） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写侧唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本组：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布范围一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域：cw 剧本族 mock 探针层 + 真 pi 全链路真机冒烟轨 + managed session 死亡通知真机层） / REMOTE（远程访问域：手机浏览器 LAN 直连真机/仿真验收） / TERMINAL（终端多实例真实 app 层：切换条多实例 / 实例级生命周期 / 编号不复用 / 世代重置与对账） / MCP（MCP 服务器管理域真机子集） / BTASK（bash 后台任务域：完成通知入账全链真机层） / DELIVERY（统一消息投递域：文本投递路径磁盘 outbox 崩溃恢复，mock 单测层 + kill -9 runtime 真实进程层双层口径；真机 collect 挂起收取链） / CTRL（subagent control 通道集成组：server × 真实引擎 × 假 pi） / NETPROXY（LLM 网络代理分流域：mock 代理/SOCKS5 工具自测 + 分流前提漂移探针 + extension 三连） / ARCHIVE（session 归档域：归档/恢复/彻底删除 mock 层行为用例） / INTEG（集成测试门控组：真进程 / 真实 IO 用例，门控 = TAIJI_TEST_INTEGRATION，本地默认跳过、CI 或按改动范围启用；id 序号按包顺序分配）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发范围）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -2583,7 +2583,7 @@
       "run": "pnpm -C packages/runtime exec vitest run src/__tests__/infra/subagent-control && pnpm -C packages/pi-subagent-cli exec vitest run src/__tests__/prompt-ack.test.ts src/__tests__/spawn-runner-prompt-ack.test.ts src/__tests__/raw-mirror.test.ts",
       "owner": "packages/runtime",
       "authority": "docs/adr/decisions.md",
-      "note": "R2 态：M3 传输契约（EngineTransport / control 帧 / 通道树 / sweep / tee / raw mirror）与回执语义（prompt ack）的机器回归测试——真实引擎子进程 + 假 pi，零 GUI/真实 LLM；A13 真机层（E2E-BATCH-01/03/04）在有人窗口按改动范围跑"
+      "note": "R2 态：M3 传输契约（EngineTransport / control 消息 / 通道树 / sweep / tee / raw mirror）与回执语义（prompt ack）的机器回归测试——真实引擎子进程 + 假 pi，零 GUI/真实 LLM；A13 真机层（E2E-BATCH-01/03/04）在有人窗口按改动范围跑"
     },
     {
       "id": "E2E-PIPE-15",
@@ -2694,7 +2694,7 @@
       "serial": false,
       "run": "pnpm --filter @zhushanwen/subagent-core exec vitest run src/execution/__tests__/subagent-model-source-parity.test.ts",
       "owner": "packages/subagent-core",
-      "authority": "docs/todo/dev-0.11.4-review-residue.md"
+      "authority": "packages/shared/src/subagent.ts"
     },
     {
       "id": "E2E-BOUNDARY-01",
@@ -2767,7 +2767,7 @@
     },
     {
       "id": "E2E-DELIVERY-01",
-      "summary": "文本车道磁盘 outbox 崩溃恢复 mock 层（快速回归）：内核 DiskDeliveryStore 端口契约 + registry 全链（受理落盘 → 重启 → loadUndelivered + reattach 判重 → 未送达重入队 / 已送达不重投 / ack 终局行 / 撤销 cancelled + segments 回填 / 损坏行容错）",
+      "summary": "文本投递路径磁盘 outbox 崩溃恢复 mock 层（快速回归）：内核 DiskDeliveryStore 端口契约 + registry 全链（受理落盘 → 重启 → loadUndelivered + reattach 判重 → 未送达重入队 / 已送达不重投 / ack 终局行 / 撤销 cancelled + segments 回填 / 损坏行容错）",
       "scope": [
         "packages/session-delivery/src/**",
         "packages/runtime/src/services/session/**"
@@ -2792,7 +2792,7 @@
     },
     {
       "id": "E2E-DELIVERY-02",
-      "summary": "文本车道磁盘 outbox 崩溃恢复 kill -9 runtime 真实进程层：kill -9 runtime 进程 → 重启 → 在途未送达消息自动重新入队（真实场景判据，A13）",
+      "summary": "文本投递路径磁盘 outbox 崩溃恢复 kill -9 runtime 真实进程层：kill -9 runtime 进程 → 重启 → 在途未送达消息自动重新入队（真实场景判据，A13）",
       "scope": [
         "packages/runtime/src/services/session/**",
         "packages/runtime/src/index.ts",
@@ -3863,7 +3863,7 @@
       "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @zhushanwen/subagent-core exec vitest run src/execution/__tests__/terminal-write-latency.test.ts",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
-      "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）。触发条件 = scope 内终态写路径（record-settled 事件帧 + 终态 manifest 派生视图 + binding 快照）diff 命中。断言本质 = 终态双写性能水位的采样测量，数字经 console.info 落盘追踪、无阈值断言（负载态墙钟并行组无稳定上界，原 10ms→200ms 抬升阈值已随拆层退役；「双写发生且 persisted + 写序水位」逻辑断言留默认组）；serial=真 的理由 = N=100 真实磁盘同步写。"
+      "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）。触发条件 = scope 内终态写路径（record-settled 事件 + 终态 manifest 派生视图 + binding 快照）diff 命中。断言本质 = 终态双写性能水位的采样测量，数字经 console.info 落盘追踪、无阈值断言（负载态墙钟并行组无稳定上界，原 10ms→200ms 抬升阈值已随拆层退役；「双写发生且 persisted + 写序水位」逻辑断言留默认组）；serial=真 的理由 = N=100 真实磁盘同步写。"
     },
     {
       "id": "E2E-INTEG-32",

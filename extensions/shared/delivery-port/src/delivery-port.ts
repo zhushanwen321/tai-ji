@@ -2,7 +2,7 @@
 //
 // pi 半区投递端口主体（设计 .tmp/tech-design/unified-delivery.md §3.7 组件表）：
 // 把 pi 扩展运行时端口接线成 @zhushanwen/session-delivery v3 内核的 port 半区
-// 装配——custom 车道唯一执行者。与账本（notify-ledger）的四步生命周期逐条对位：
+// 装配——custom 投递路径唯一执行者。与账本（notify-ledger）的四步生命周期逐条对位：
 //   ① record（受理前落盘）→ deliver 入口 appendEntry（outbox，plain entry）；
 //   ② deliver（投递）→ 内核 on-accept 受理即出站 → pi.sendMessage 直达唯一队列
 //     （两档出队由 pi 原生 steer/followUp 队列承载，本端口零注入时机代码——提交

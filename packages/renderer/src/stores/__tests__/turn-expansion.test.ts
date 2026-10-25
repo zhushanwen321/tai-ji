@@ -108,20 +108,21 @@ describe('turn-expansion store takeover API (window wave TC5/TC6/TC7, ADR-0049)'
  * [chat-flow-consistency C4 两段式契约] 手动展开态的清除边界（设计裁决：内存驻留期间保持、
  * 磁盘重载后重置）。两段各有明确依据：驻留期 turn 稳定 id（首条消息 id）不变，切走再切回
  * （LRU 未驱逐，走 reconcileHistory 增量刷新）展开保持；任何走盘重载（LRU 驱逐后切回 /
- * 首次切入）换 id 空间（live u-id 与盘上 entry 派生 id 不相交），接管点（ChatHydratePort.
- * hydrate 适配层，桌面 useSidebar / 移动壳 app-runtime，接线测试见
+ * 首次切入）换 id 空间（live u-id 与盘上 entry 派生 id 不相交），接管点
+ * （ChatHydratePort.reconcileHistory 适配层——未 hydrate 走盘重载门，内部走 hydrate
+ * 全量基线接管；桌面 useSidebar / 移动壳 app-runtime，接线测试见
  * useSidebar-hydrate-turn-expansion.test.ts）显式调 clearSession 重置。
  */
 describe('turn-expansion store 两段式契约（C4：驻留保持 / 重载重置）', () => {
   it('驻留保持：切走再切回（无清理动作）后手动展开态原样保留', () => {
     const store = useTurnExpansionStore()
     store.expand('s1', 'turn-live-id')
-    // 模拟驻留期切走再切回：store 不发生任何清理（isHydrated 会话走 reconcileHistory，
-    // 不经过 hydrate 接管点）——分区与展开标记原样
+    // 模拟驻留期切走再切回：store 不发生任何清理（isHydrated 会话走 reconcileHistory 增量
+    // 刷新，未 hydrate 走盘重载门不开）——分区与展开标记原样
     expect(store.isExpanded('s1', 'turn-live-id')).toBe(true)
   })
 
-  it('重载重置：hydrate 接管点调 clearSession 后展开态显式归零（同 takeover 一并清）', () => {
+  it('重载重置：reconcileHistory 接管点调 clearSession 后展开态显式归零（同 takeover 一并清）', () => {
     const store = useTurnExpansionStore()
     store.expand('s1', 'turn-live-id')
     store.setTakeover('s1', 'turn-live-id', true)

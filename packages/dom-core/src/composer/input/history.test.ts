@@ -133,6 +133,24 @@ describe('useComposerHistory 状态机', () => {
     expect(isBrowsing.value).toBe(false)
   })
 
+  it('↓（browsing + index 越界兜底）：restoreSegments + 同步退出 browsing（与「↓ 已在最近」同款收尾）', () => {
+    // browsing 期间历史派生缩短（shell 层派生是动态的）→ 回填目标 H[newIndex] undefined → 越界兜底。
+    // 修复前兜底只回填不退 browsing：浏览态残留，↑ 失效一次、需多次 ↓ 或手动编辑才退出。
+    const entries = ref<string[]>(['msg1', 'msg2'])
+    const segments: Segment[] = [{ type: 'text', text: 'my draft' }]
+    const sidRef: Ref<string | null> = ref('s1')
+    const { deps, restoreCalls } = makeDeps(['msg1', 'msg2'], { getSegments: () => segments })
+    vi.mocked(deps.getHistoryEntries).mockImplementation(() => entries.value)
+    const scope = effectScope()
+    const api = scope.run(() => useComposerHistory(sidRef, deps))!
+    api.handleArrowUp() // index=0
+    api.handleArrowUp() // index=1（最老）
+    entries.value = [] // 历史派生清空 → H[0] 越界
+    api.handleArrowDown() // index=1 > 0 → newIndex=0 → 越界兜底分支
+    expect(restoreCalls).toEqual([segments])
+    expect(api.isBrowsing.value).toBe(false)
+  })
+
   it('↓（edit 态）：不响应，return false', () => {
     const { handleArrowDown } = setupHistory('s1', ['msg1'])
     expect(handleArrowDown()).toBe(false)

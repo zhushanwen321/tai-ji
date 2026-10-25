@@ -21,9 +21,11 @@
  *    失败现场隔离 + 返回 undefined（调用方退既有 lazy 恢复，不抛）。
  * 4. **失败现场**：`<runDir>/runtime-checkpoint-failed-<ts>.json` 保留最近 3 份（新失败
  *    覆盖最旧）。
- * 5. **风暴防护**：写只在生命周期事件与 reaper tick 发生（不在每次 touch 刷盘——D3 时效性
- *    裁决）；rename 同域失败幂等（ENOENT = 并发删除已隔离；EACCES = 原地残留静默，不重试
- *    不升级）；事件只记首次（进程内 once，防同一失败被反复记录）。
+ * 5. **风暴防护**：写只在 session 生命周期事件发生（不在每次 touch 刷盘——D3 时效性
+ *    裁决；原「reaper tick 搭车刷新」的驱动方已随 ADR-0122 空闲回收退役，refreshSessions
+ *    保留为无生产调用方的搭车刷新接口，见其方法注释）；rename 同域失败幂等（ENOENT =
+ *    并发删除已隔离；EACCES = 原地残留静默，不重试不升级）；事件只记首次（进程内 once，
+ *    防同一失败被反复记录）。
  *
  * **写失败可见性（code-harden RT-4#6，在契约 5 风暴防护之内的增强）**：写失败上报从
  * 「进程内 once、此后零日志」改为限流上报——首次失败立即 warn（保留 once 上报的首次
@@ -35,14 +37,17 @@
  * 读到旧版快照（漏恢复/多恢复，消费侧 staleness guard 已挡住「复活已删 session」），
  * 退化为既有 lazy 恢复；本增强解决的是诊断失真——停更可被发现、可归因。
  *
- * **时效性与 errs 方向（设计 D3 显式声明，实现口径必须一致）**：lastActivityAt 不在每次
- * touch 刷盘（写风暴），只搭 5min tick 的便车——checkpoint 值 ≤ 真实值，故消费侧算出的
- * idle = now − 值 **≥ 真实 idle**，过滤**偏「漏恢复」**（刚交互过但跨过阈值边界的 session
- * 被判更闲置而漏恢复），退化为现状 lazy（用户代价 = 一次手动触碰），不是偏「多恢复」。
- * 快照布尔的**反向形态**（诚实声明）：任务于 T 结束、T+≤5min 内崩溃时快照仍为 true，会
- * 多恢复一个真实已 idle 的 session——新 runtime 的 reaper 后续拍按 checkpoint 时间戳正常
- * 回收它（自收敛，无用户可见损害）。排查口径：持续多恢复且不自收敛 = 公式错误；偶发单次
- * 后自收敛 = 快照滞后。
+ * **时效性与 errs 方向（设计 D3 显式声明，实现口径必须一致；按 ADR-0122 reaper 退役后
+ * 现状更正，与 crash-forensics-and-watchdog.md D3 时效性裁决同口径）**：lastActivityAt
+ * 不在每次 touch 刷盘（写风暴），只在 session 生命周期事件随写更新（无周期刷新）——
+ * checkpoint 值 ≤ 真实值，故消费侧算出的 idle = now − 值 **≥ 真实 idle**，过滤**偏
+ * 「漏恢复」**（刚交互过但跨过阈值边界的 session 被判更闲置而漏恢复），退化为现状 lazy
+ * （用户代价 = 一次手动触碰），不是偏「多恢复」。快照布尔同此（诚实声明）：backgroundTasks
+ * / relayChildren 在 upsertSession 缺省 false 且无更新方，#2/#3 长时豁免当前在 checkpoint
+ * 面不生效（方向仍为漏恢复）。**反向形态**：注册时恰逢活跃（respawn/restore 活跃 session）
+ * 而此后转闲的 session，occupancy 快照停留 occupied 会多恢复一个真实已 idle 的 session
+ * （恢复动作本身 errs-safe：产出冗余 idle pi，无数据损害）。排查口径：持续多恢复且不自
+ * 收敛 = 公式错误；偶发单次后自收敛 = 快照滞后。
  *
  * **覆盖式写入（不 seed 磁盘旧文件）**：内存清单是本进程的活跃 session 真相，第一次写入即
  * 整份覆写。理由（设计 D3 「误配对」裁决的落地）：若 seed 旧文件，clean exit 残留的陈旧
@@ -91,8 +96,13 @@ export const WRITE_FAILURE_LEDGER_THRESHOLD = 3
 const CRASH_DIGEST_MAX_CHARS = 2048
 
 /**
- * 占用快照（豁免 #1 三维判定：turn ≠ idle / compacting / bash，任一命中即 'occupied'）。
- * 术语与既有实现对齐——生产方 = reaper 的 `ReclaimExemptions.isOccupied`。
+ * 占用快照（豁免 #1）：由 runtime occupancy（SessionOccupancy：turn/compacting/
+ * bash/handingOff，types.ts）归并出的二元占用值。**现行快照判定只投影三维
+ * turn/compacting/bash，handingOff 不参与快照投影**——设计登记见
+ * crash-forensics-and-watchdog.md「reattach 过滤门槛」节术语澄清「本文 occupancy 指
+ * 三维判定」。生产方 = crash-forensics-hooks 的 attach 挂点（upsertSession 快照写入，
+ * 归并式只读三维）；消费方 = startup-reattach `shouldReattachEntry` 真补集过滤公式
+ * （空闲回收 reaper 已随 ADR-0122 退役，本快照不再服务任何豁免层）。
  */
 export type CheckpointOccupancy = 'idle' | 'occupied'
 
@@ -147,8 +157,12 @@ export interface RuntimeCheckpointUpsert {
 }
 
 /**
- * reaper tick 搭车刷新输入（D3：只刷时效字段与豁免快照，**不新增/不复活条目**——
+ * 搭车刷新输入（D3：只刷时效字段与豁免快照，**不新增/不复活条目**——
  * 只更新内存清单中已存在的项，避免把未附着的候选写进 checkpoint）。
+ *
+ * 保留接口（ADR-0122 reaper 退役后现状）：原驱动方 reaper 5min tick 已随空闲回收整体
+ * 退役，本接口当前无生产调用方（仅单测），按设计登记保留为恢复周期刷新再接线时的
+ * 现成入口（crash-forensics-and-watchdog.md D3「时效性裁决」）。
  */
 export interface RuntimeCheckpointRefresh {
   /** pi session id。 */
@@ -301,7 +315,11 @@ export class RuntimeCheckpointStore {
   }
 
   /**
-   * reaper 5min tick 搭车刷新（D3 时效性裁决）：只更新**已存在**条目，一次落盘。
+   * 搭车刷新（D3 时效性裁决）：只更新**已存在**条目，一次落盘。
+   *
+   * **保留接口、当前无生产调用方**：原驱动方 reaper 5min tick 已随 ADR-0122 空闲回收
+   * 整体退役，checkpoint 条目此后只在注册汇聚点整条写入；本接口按设计登记保留，若后续
+   * 恢复周期刷新再接线即为现成入口（crash-forensics-and-watchdog.md D3「时效性裁决」）。
    *
    * 不新增条目（候选枚举与 checkpoint 同源 = getActiveSessionIds，未附着者不该进清单）；
    * 本拍未判定的字段保留现值（undefined = 不覆盖，区别于「判定为 false/idle」）。

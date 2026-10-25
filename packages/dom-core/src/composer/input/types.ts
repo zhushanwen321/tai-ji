@@ -11,6 +11,7 @@
  * deps 回调注入。注入字段：
  * - pasteImage：替代 handleImagePaste（走 writeSessionImage IPC），contenteditable/dragdrop 用
  * - getHistoryEntries：替代 chatStore.getMessages 派生，history 用
+ * - getSegments / restoreSegments：history browsing 态快照与结构化恢复（[U8 草稿 segments 化]，HistoryDeps）
  * - renderIcon：替代 createVNode/render 直调 + SLASH_ICON_COMPONENTS 查找，chip-commands 用（ADR-0058 边界：dom-core DOM API only，无 vue render）
  * - t：替代 i18n.global.t，chip-commands 用（× 按钮 aria-label）
  *

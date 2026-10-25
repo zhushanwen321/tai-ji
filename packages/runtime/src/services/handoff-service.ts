@@ -342,18 +342,6 @@ export class HandoffService {
   }
 
   /**
-   * 查询 handoff 是否进行中（idle pi reclamation D2 #4 豁免信号，u3a 只读访问器）。
-   *
-   * inflight Map 的条目生命周期与「handoff turn 在途」精确同界：runHandoff 第 5 步注册
-   * （prompt 受理前后、等 turn-end 终态帧），settle 各路（turn-end / timeout / abort / exit）
-   * 经 finalize 清理 + runHandoff finally 兜底清理——条目存在 ⇔ 源 session 正在跑
-   * handoff turn，正是 reaper 必须豁免的窗口（回收会杀掉正在生成 handoff 文档的 pi）。
-   */
-  hasInflightHandoff(sessionId: string): boolean {
-    return this.inflight.has(sessionId)
-  }
-
-  /**
    * 取消进行中的 handoff。
    *
    * 1. inflight 无记录 → no-op return false（幂等；返回 false 让 handler 区分 no-op）。
@@ -362,7 +350,8 @@ export class HandoffService {
    *    + Map.delete），让 runHandoff 的 agentEndPromise reject 'handoff aborted'。返回 true。
    *
    * W1：返回 boolean——handler 仅当真正 abort 了（inflight 有 entry）才广播
-   * session.handoffAborted，避免无 inflight 的 no-op 也广播导致前端误复位。
+   * session.handoffAborted（前端当前零消费，广播为语义记录保留；仅真实 abort 才广播，
+   * 避免 no-op 噪声帧）。
    *
    * @param srcSessionId 源 session id
    * @returns 是否真正执行了 abort（true=有 inflight 已中断；false=no-op，无 inflight）
@@ -419,8 +408,11 @@ export class HandoffService {
    * [chat-flow-consistency R1] handingOff 维统一复位点：inflight 条目生命周期与「handoff
    * 在途」精确同界（条目存在 ⇔ 源 session 正在跑 handoff turn），occupancy.handingOff 的
    * 复位与条目移除同点收束——complete / abort / 超时 / 源 pi 退出（onExit 探测）全部 settle
-   * 路径必经 finalize→cleanupInflight，单点复位消灭散点漏复位（对应前端 handingOffSessions
-   * Set 的广播丢失悬挂缺陷，special-flows 缺陷 9）。源 pi 进程死亡链的四维全复位由
+   * 路径必经 finalize→cleanupInflight，单点复位消灭散点漏复位（前端 handingOff 状态 = occupancy
+   * 派生读口；[chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] 前端 Set 平行存储退役后，
+   * 本复位经 occupancy 帧
+   * 即前端权威态更新，广播丢失悬挂缺陷不再有第二存储需要兜底，special-flows 缺陷 9）。源 pi
+   * 进程死亡链的四维全复位由
    * session-service onSessionExit 的 'full-reset' 行兜底（本复位先行幂等无害）。
    */
   private cleanupInflight(srcSessionId: string): void {

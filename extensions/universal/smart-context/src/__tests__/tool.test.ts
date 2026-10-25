@@ -115,7 +115,7 @@ describe("compact_context 工具（R2 降级态：fire-and-forget + 结果注入
 		await tools[0].execute("t1", {}, undefined, undefined, makeCtx());
 		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
 		const [message, options] = pi.sendMessage.mock.calls[0];
-		// D4①：nextTurn 化——custom role 消息 + 不自起 run 的投递车道
+		// D4①：nextTurn 化——custom role 消息 + 不自起 run 的投递路径
 		expect(message.customType).toBe("smart-context");
 		expect(message.details).toEqual({ source: "compact-complete" });
 		expect(options).toEqual({ triggerTurn: false, deliverAs: "nextTurn" });
@@ -125,7 +125,7 @@ describe("compact_context 工具（R2 降级态：fire-and-forget + 结果注入
 		expect(text).toContain("500K");
 		expect(text).toContain("24K");
 		expect(text).toContain("compacted multiple times");
-		// 旧车道（自起 run 的 user 消息）已退役：不再调用 sendUserMessage（mock 挂 spy，被调用即断言红）
+		// 旧投递路径（自起 run 的 user 消息）已退役：不再调用 sendUserMessage（mock 挂 spy，被调用即断言红）
 		expect(pi.sendUserMessage).not.toHaveBeenCalled();
 	});
 
@@ -138,7 +138,7 @@ describe("compact_context 工具（R2 降级态：fire-and-forget + 结果注入
 		expect(pi.sendMessage.mock.calls[0][0].content).toContain("回退");
 	});
 
-	it("onError → 注入失败消息带重试指引（display:true 失败必须用户可见 + nextTurn 车道不自起 run）", async () => {
+	it("onError → 注入失败消息带重试指引（display:true 失败必须用户可见 + nextTurn 投递路径不自起 run）", async () => {
 		const { pi, tools } = makePi();
 		registerCompactContextTool(pi);
 		const ctx = makeCtx((options) => options.onError(new Error("Nothing to compact")));

@@ -279,8 +279,8 @@ describe('U16：提交检查——staging 只看 isSending，非 staging 看「�
     wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', keyEvent('Enter'))
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
-    // [u3c/D1] 前身 isBusy（= isActive ∨ isSending）拦截占用期提交——该半边是 renderer 侧车道
-    // 判定的残留，随「renderer 只提交不判定」退役：提交检查只剩空输入与本地双发锁两类，
+    // [u3c/D1] 前身 isBusy（= isActive ∨ isSending）拦截占用期提交——该半边是 renderer 侧提交判定
+    // 的残留，随「renderer 只提交不判定」退役：提交检查只剩空输入与本地双发锁两类，
     // 占用期（streaming）Enter 照常走统一提交（u3b 收敛后 renderer 不再分 steer 路由，
     // lane 由内核判定），若被检查拦截 send 不会被调。
     expect(chatApi.send).toHaveBeenCalled()

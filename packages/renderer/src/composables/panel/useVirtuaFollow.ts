@@ -79,7 +79,11 @@ const BOTTOM_THRESHOLD = 40
  * 设计 v7 条件限定）。
  */
 const CONVERGENCE_RO_SILENCE_MS = 120
-/** D7② 收敛抑制窗硬上限：防长会话测量收敛长尾；RO 持续活跃的流式场景窗口恒取本上限 */
+/** D7② 收敛抑制窗硬上限：防长会话测量收敛长尾；RO 持续活跃的流式场景窗口恒取本上限。
+ * [时间平抑红线登记] 补偿根因见文件头「程序性写入回声的逐路径安全性」（D7② 推导节）：
+ * virtua 程序性滚动回声与估算→实测收敛风暴的负向补偿无法与用户上滑按单一 scroll 事件
+ * 区分。退役条件（重审触发）：virtua 提供程序性滚动标记（echo 可按事实区分）时，收敛
+ * 抑制窗整体退役（含本常量与 CONVERGENCE_RO_SILENCE_MS）。 */
 const CONVERGENCE_HARD_CAP_MS = 1500
 
 /**

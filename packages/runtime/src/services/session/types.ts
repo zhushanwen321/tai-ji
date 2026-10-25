@@ -9,7 +9,8 @@
  * 额外持有 adapter 等运行时句柄)。
  * 子模块经内部协议窄接口(ILifecycleSessionOps 等,见 session-internal.ts)
  * 只看到 IManagedSessionView,
- * 但拿到的是 ManagedSession 实例,可读写字段(lastActiveAt / isGenerating)。
+ * 但拿到的是 ManagedSession 实例,可读写字段(lastActiveAt);忙闲判定读 occupancy 派生
+ * (isGeneratingTurn / occupancy.compacting,见 IManagedSessionView 注)。
  */
 import type { ServerMessage, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
 import type { SessionManagerAction, CanvasMarkerAction } from '@zhushanwen/extension-protocol'
@@ -438,8 +439,8 @@ export type PiTranslatedEvent =
   | { kind: 'record-entry-appended'; customType: string }
   /**
    * compaction 生命周期开始（pi compaction_start{reason}）—— interpreter 编排：
-   * 广播 session.compacting{reason} + isCompacting 置位经 occupancy 转移原语
-   * 'compacting-start' 行（isCompacting 派生 + occupancy 合并 + state 帧广播原子完成）。
+   * 广播 session.compacting{reason} + compacting 置位经 occupancy 转移原语
+   * 'compacting-start' 行（occupancy.compacting 置位 + 合并写 + state 帧广播原子完成）。
    * onCompactingStateChange 回调通道为「与原语 compacting± 行幂等的冗余通道，勿新增使用」
    * （u3c 裁决：与 interpreter 内 onOccupancyTransition 通道汇入同一原语行，保留仅因
    * 删除牵连组合根接线与存量测试断言的接口级变更超出本单元领地——新挂点一律走
@@ -459,13 +460,13 @@ export type PiTranslatedEvent =
   | { kind: 'agent-settled' }
   /**
    * compaction 生命周期结束（pi compaction_end）—— interpreter 唯一驱动 compaction 全部前端态：
-   * - result 真值（成功）→ message.compactionSummary + applyContextUpdate + session.compacted + 复位 isCompacting
+   * - result 真值（成功）→ message.compactionSummary + applyContextUpdate + session.compacted + 复位 occupancy.compacting
    * - 无 errorMessage 真值（aborted）→ session.compacted（不带 error，前端 flush queue）+ 复位
    * - errorMessage 真值（failed）→ session.compacted{error} + message.error 对话流提示 + 复位
    *
    * 失败判据以 errorMessage 真值为准（非 aborted 字段、非 key 存在性）—— pi 三种 aborted:true
    * 形态在 errorMessage 真值层面一致（都 falsy）。result 类型暂 unknown（M5 契约清理时收紧，CQ1——事件路径宽松形状 PiCompactionResult 在 infra/pi/pi-protocol，services/session import 会违分层）。
-   * 孤儿 end 容错：overflow 早退路径无 preceding start，end handler 复位对「本来就 false 的 isCompacting」幂等无害。
+   * 孤儿 end 容错：overflow 早退路径无 preceding start，end handler 复位对「本来就 false 的 occupancy.compacting」幂等无害。
    */
   | { kind: 'compaction-end'; reason: string; result?: unknown; aborted: boolean; errorMessage?: string }
   /**

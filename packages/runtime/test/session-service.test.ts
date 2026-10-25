@@ -588,7 +588,7 @@ describe('SessionService · dispatcher', () => {
       await setup.service.initializeManagedSession('sid-1', client as unknown as IPiEngine, tmpdir(), 'label')
       await setup.service.sendMessage('sid-1', 'hello pi')
       await flushDelivery()
-      // [u2 投递所有权内核] 出站交接在适配层：正文 + 裸标记身份（D2），无图片、direct 车道
+      // [u2 投递所有权内核] 出站交接在适配层：正文 + 裸标记身份（D2），无图片、direct 投递路径
       expect(client.prompt).toHaveBeenCalledTimes(1)
       const [text, images] = client.prompt.mock.calls[0] as unknown as [string, unknown]
       expect(text).toContain('hello pi')
@@ -739,7 +739,7 @@ describe('SessionService · dispatcher', () => {
 
     // [MF-1-8 退役] steerMessage / followUpMessage 用例已删除：renderer/core 消费方经
     // delivery.submit 统一提交（u3b 内核化），dispatcher/sessionService 转发路径与协议条目
-    // message.steer / message.follow_up 同批退役——同语义覆盖由 sendMessage（steer 车道）
+    // message.steer / message.follow_up 同批退役——同语义覆盖由 sendMessage（steer 投递路径）
     // 与 useChat 提交链测试承接。
   })
 

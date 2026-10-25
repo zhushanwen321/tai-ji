@@ -591,23 +591,26 @@ export class SessionHistoryReader {
    *
    * [U8 重启中断标记] opts.detectInterrupted = 尾部中断形态判定开关（缺省 false）：只在
    * doGetHistory 分支 3（最新窗口 ∧ 无 RPC client）开启；其余降级调用点（活跃 RPC 失败
-   * fall-through）恒缺省，interrupted 不出场——判定性质 = 推断，「会话未附着」是它的
-   * 成立前提（design-session-lifecycle 缺陷 4 方向 A 联合判定）。
+   * fall-through，含附着 btw 线的 rekey 通道）恒缺省，interrupted 不出场——判定性质 = 推断，
+   * 「会话未附着」是它的成立前提（design-session-lifecycle 缺陷 4 方向 A 联合判定）。
    */
   private async tailReadOffline(
     sessionId: string,
     query?: HistoryWindowQuery,
     opts?: { detectInterrupted?: boolean },
   ): Promise<HistoryWindowResult> {
-    if (isBtwVirtualId(sessionId)) {
-      return await this.tailReadBtwOffline(sessionId, query)
-    }
-    const result = await getHistoryTailFromFile(
-      sessionId,
-      this.deps.sessionStore,
-      query?.limitTurns ?? HISTORY_BUDGET.RECENT_TURNS,
-      { cursor: query?.cursor, maxBytes: query?.maxBytes ?? HISTORY_BUDGET.MAX_BYTES },
-    )
+    // btw 分支与通用链同受下方剥除门禁：附着 btw 线（rekey 进共享 pm 后活跃，走
+    // getLatestWindow/getIncrementalHistory 的 RPC catch 降级到此处）同样不得透传
+    // interrupted——「会话未附着」是判定的成立前提，与线类型无关（F1 修复：早退分支
+    // 曾绕过剥除行，把 tailReadHistory 判出的 interrupted 原样出场）。
+    const result = isBtwVirtualId(sessionId)
+      ? await this.tailReadBtwOffline(sessionId, query)
+      : await getHistoryTailFromFile(
+          sessionId,
+          this.deps.sessionStore,
+          query?.limitTurns ?? HISTORY_BUDGET.RECENT_TURNS,
+          { cursor: query?.cursor, maxBytes: query?.maxBytes ?? HISTORY_BUDGET.MAX_BYTES },
+        )
     // 开关关闭时剥除（tailReadHistory 内 cursor 翻页本就不判，此处防未来判定面扩大后
     // 降级路径误透传；字段可选，剥除 = 不出场而非 false——消费方按「无判定」处理）
     return opts?.detectInterrupted === true ? result : { ...result, interrupted: undefined }

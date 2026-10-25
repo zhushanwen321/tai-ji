@@ -15,7 +15,8 @@
  * 字段绑定来源：
  * - chatStore（isActive/isHandingOff/getChangeSetStatus/isPendingSend）→ useChatStore
  * - useChat（abortBash/editAndResend/revokeMessage）→ createUseChat 薄包装
- * - useTurnExpansion（isExpanded/isTakeover/toggle/collapse/setTakeover）→ turn-expansion store per-session 分区
+ * - useTurnExpansion（isExpanded/isTakeover/toggle/setTakeover）→ turn-expansion store per-session 分区
+ *   （collapse 写口已随 [chat-flow-consistency C3] 会话结束 collapse 接线退役从包装层删除，装配链无消费）
  * - triggerEnterForkMode/triggerEnterHandoffMode → forkAsk/handoffAsk 回调
  * - useSideDrawer（open）→ openDrawer
  * - useFileTreeStore（selectFile）→ onFileClick

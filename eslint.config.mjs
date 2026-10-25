@@ -156,7 +156,7 @@ export default [
     },
   },
   // [M3 relay-spawn-transport u-m3-control] subagent control server：control 帧路由 /
-  // 通道台账 / 引擎 spawn 与按组收割 / fd3 raw mirror 接线的单点聚合文件（职责内聚，
+  // 通道登记 / 引擎 spawn 与按组收割 / fd3 raw mirror 接线的单点聚合文件（职责内聚，
   // 再拆属独立重构任务）。1051 行 > 500 软上限，提额保留软上限告警（先例同型）。
   // [2026-10-23 just-do-it 条目 65] owner start time 登记（cachedRuntimePidStartSec
   // 缓存 + pid 文件 runtimePidStartSec 字段）净增 7 行，1067 > 1060 微超即提额至 1080。
@@ -199,7 +199,7 @@ export default [
   // [2026-10-14 problem-solve-canvas U3] canvas 域接线再微超 8 行（520→540）：canvas 装配
   // 体已按拆分方向落 canvas-assembly.ts / canvas-message-handler.ts（领域 handler 自包含），
   // server.ts 剩余为组合点必要接线（import / 字段 / 装配调用 / 路由行 / marker 请求公共入口），
-  // 为本单元 17-handler 组合点的客观体量；再拆装配面属独立重构任务。
+  // 为本单元 17-handler 组合点的客观体量；再拆装配范围属独立重构任务。
   {
     files: ['packages/runtime/src/transport/server.ts'],
     rules: {
@@ -207,7 +207,7 @@ export default [
     },
   },
   // [chat-flow-consistency U4] message-turns：chat 域分组纯函数 SSOT（分组规则 v2 全量/增量
-  // 双路 + 尾部快车道三车道 + D5 边界聚合），基线 499 行贴软上限。本次 C6 liveOnly 独立成项
+  // 双路 + 尾部快路径三条路径 + D5 边界聚合），基线 499 行贴软上限。本次 C6 liveOnly 独立成项
   // （规则 4 拆分 + liveOnly 缓冲落位函数 + 各关闭点 flush 接线）净增 26 行折算 525，按
   // 「微超即提额，保留软上限告警」先例（pi-provider-store / transport server）提额，长期
   // 应拆分（分组规则分支体已函数化，再拆属独立重构任务）。
@@ -878,7 +878,7 @@ export default [
     },
   },
   // declarative-engine：quota fetcher 声明式执行引擎（5 家平台 fetcher 的受限原语解释器），
-  // 各平台 shape guard / 字段归口规则内聚于单一引擎体，按平台拆分引入引擎边界收益不抵成本。
+  // 各平台 shape guard / 字段归属规则内聚于单一引擎体，按平台拆分引入引擎边界收益不抵成本。
   // [gate static-gate 2026-10] 净代码行 519 > 500（base 上限），微超即提额先例
   // （session-service 634→650 同型）抬到 540。提额而非 off：保留软上限告警，超限即再暴露，勿再增行。
   {

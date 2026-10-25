@@ -9,7 +9,7 @@
  *   送达回执接管）。
  *
  * 派生视图过滤（`deliveryQueueEntries`）：lane ≠ 'direct' 且 state ≠ 'delivered'——
- * - direct 车道：乐观气泡原位保留待确认（送达回执抵消 inflight 占位，D7），不进队列区；
+ * - direct 投递路径：乐观气泡原位保留待确认（送达回执抵消 inflight 占位，D7），不进队列区；
  * - delivered：已入 transcript（reducer 权威），队列区隐去；
  * - queued / in-flight / failed：队列区一行（三态可见，G3「排队中/投递中」）。
  * 刷新/重连后队列区不丢：状态在 runtime 内核，state 帧重放即恢复（D7 效果项）。

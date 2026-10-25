@@ -37,7 +37,7 @@ import type { ArchiveService } from '../services/archive/archive-service.js'
 // BusClient（wave:bus-core）：ws 适配为 bus 订阅者的最小契约 { readyState, send }。
 // ws 库的 WebSocket 天然满足，但类型不完全一致，用 as unknown as BusClient 显式标记边界（R2）。
 import type { BusClient } from '../services/message-bus/types.js'
-// delivery 域（投递所有权内核 D5，u3a）：session.delivery state topic 装配 + 四 RPC。
+// delivery 域（投递所有权内核 D5，u3a）：session.delivery state topic 装配 + 六 RPC。
 // type-only：注册表由组合根经 server.setServices({ delivery }) 注入（与 SessionManagerHandler
 // 同一实例——sessionId 单例约束），transport 不构造它。
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
@@ -131,7 +131,7 @@ export interface SessionHandlerContext extends MessageHandlerContext {
    */
   genStatsService?: GenStatsService
   /**
-   * 投递所有权内核注册表（投递所有权内核 D5，u3a）：delivery.* 四 RPC 与 session.delivery
+   * 投递所有权内核注册表（投递所有权内核 D5，u3a）：delivery.* 六 RPC 与 session.delivery
    * state topic（帧装配数据源）共用。组合根经 server.setServices({ delivery }) 注入
    * （与 SessionManagerHandler 同一实例——registry 的 sessionId 单例约束）。
    * 可选：未注入时 delivery.* 报 delivery_unsupported 防御分支（组合根保证注入；
@@ -247,7 +247,7 @@ export class SessionMessageHandler {
     'message.abort': (msg, ws) => this.handleMessageAbort(msg, ws),
     'message.bash': (msg, ws) => this.handleMessageBash(msg, ws),
     'message.abortBash': (msg, ws) => this.handleMessageAbortBash(msg, ws),
-    // delivery 域（投递所有权内核 D5，u3a）：四 RPC（reply 与 request 同名，payload 消费型）。
+    // delivery 域（投递所有权内核 D5，u3a；D6 扩 peek/edit）：六 RPC（reply 与 request 同名，payload 消费型）。
     'delivery.submit': (msg, ws) => this.handleDeliverySubmit(msg, ws),
     'delivery.cancel': (msg, ws) => this.handleDeliveryCancel(msg, ws),
     'delivery.drain': (msg, ws) => this.handleDeliveryDrain(msg, ws),
@@ -313,7 +313,7 @@ export class SessionMessageHandler {
   }
 
   /**
-   * delivery 域可选注册表检查（四 RPC 共用）：缺省时回 delivery_unsupported error envelope
+   * delivery 域可选注册表检查（六 RPC 共用）：缺省时回 delivery_unsupported error envelope
    * 并返回 undefined（调用方早退）；命中返回注册表实例。
    */
   private requireDeliveryRegistry(ws: WsType, msg: { id?: string }, sessionId: string): SessionDeliveryRegistry | undefined {
@@ -1265,7 +1265,7 @@ export class SessionMessageHandler {
 
   // ── delivery 域（投递所有权内核 D5，u3a）────────────────────────────────
   //
-  // 四 RPC = 内核适配器（u2 registry）的协议范围：handler 只做「payload 校验 → 委托 →
+  // 六 RPC = 内核适配器（u2 registry）的协议范围：handler 只做「payload 校验 → 委托 →
   // reply」，lane 判定 / 队列收回 / 判重全在 registry（D1 单一判定源）。
   // 帧单发（msg-pipeline-debloat D4-4）：RPC 入口不再 sync()——内核每次真实变更经
   // onChange 内联同步发一帧（先于 reply 到达 renderer，reply 语义落地时 UI 状态已在位），

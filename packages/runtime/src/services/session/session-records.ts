@@ -1500,7 +1500,7 @@ export class SessionRecords {
       // [A1 接线] session cwd 作 project 扫描基准（D7）。
       const injection = await this.injector.inject(client, params.text, this.deps.getSessionCwd?.(sessionId))
       // 结果文件回执（同上）：messageHandler 同步拒绝（resurrect 守卫 / 无锚点 / 能力门）
-      // 与成功派发都经文件传回，失败抛分型错误 → WS error envelope → composer 车道
+      // 与成功派发都经文件传回，失败抛分型错误 → WS error envelope → composer 投递路径
       // toast + restoreSegments 恢复草稿（吞错会让 composer 把失败当成功，真机实测缺陷）。
       const messageRequestId = randomUUID()
       await client.prompt(`/subagents message ${params.subagentId} --req=${messageRequestId} ${encodeDirectiveText(injection.text)}`)

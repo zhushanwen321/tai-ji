@@ -145,6 +145,10 @@ watch(
 )
 
 async function onEditEntry(clientUuid: string): Promise<void> {
+  // 每次新尝试先清空上一次提示（不跨条目残留）；conflict 拦截提示随后与编辑条并存——
+  // 渲染门不按 editingClientUuid 抑制（原门在 conflict 场景恒 false：拦截只发生在锚定
+  // 在册时，提示被结构性吞掉，Q4「拦截 + 提示」缺反馈件）
+  editNotice.value = ''
   const outcome = beginQueueEdit(props.sessionId, clientUuid)
   if (outcome === 'already-editing-same') return
   if (outcome === 'conflict') {
@@ -173,6 +177,7 @@ async function onEditEntry(clientUuid: string): Promise<void> {
 /** 放弃编辑（提示条按钮）：解除锚定但草稿文本保留（放弃的是保位意图，不是文本）。 */
 function onAbandonEdit(): void {
   clearQueueEditFor(props.sessionId)
+  editNotice.value = ''
 }
 </script>
 
@@ -201,9 +206,10 @@ function onAbandonEdit(): void {
         @keydown.enter="onAbandonEdit"
       >{{ t('mobile.queueStrip.editingBannerAbandon') }}</span>
     </div>
-    <!-- 编辑相关提示行（conflict 拦截 / peek 失败 / 条目已离场；新尝试清空不跨条目残留） -->
+    <!-- 编辑相关提示行（conflict 拦截 / peek 失败 / 条目已离场；每次新尝试开头清空不跨条目
+         残留——conflict 提示与编辑条并存可见，门不按 editingClientUuid 抑制） -->
     <p
-      v-if="editNotice && !editingClientUuid"
+      v-if="editNotice"
       class="text-xs text-neutral-fg"
       role="status"
       data-testid="mobile-queue-edit-notice"

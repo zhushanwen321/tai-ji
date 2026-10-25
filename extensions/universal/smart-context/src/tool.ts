@@ -5,7 +5,7 @@
  * （R2 实测 2026-08-22：tool execute 内 await ctx.compact() 不可行——AgentSession.compact
  * 开头的 abort() 会中止当前 agent 循环，挂起的 Promise 永不兑现、session 无 toolResult。
  * 故走 §3.2 降级态：execute 立即返回"压缩已启动"，onComplete/onError 后经
- * sendSmartContextNotice 注入结果消息（nextTurn 车道，D4①——随下一次 prompt 注入，
+ * sendSmartContextNotice 注入结果消息（nextTurn 投递路径，D4①——随下一次 prompt 注入，
  * 不自起 run；此刻无进行中回合，compact 内部 abort 为 no-op）。
  * 压缩生成由 session_before_compact 接管 handler 完成（工具只触发，不生成）。
  *

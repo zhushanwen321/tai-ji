@@ -82,7 +82,7 @@ beforeEach(() => {
 describe('useQueueRows · 单源派生视图过滤（D7）', () => {
   it('只收「非 direct 且未 delivered」条目，帧序保持（内核 FIFO 发送序）', () => {
     setProjection('s1', [
-      entry('d1', 'in-flight', 'direct'), // direct 车道：乐观气泡原位保留 → 不进队列区
+      entry('d1', 'in-flight', 'direct'), // direct 投递路径：乐观气泡原位保留 → 不进队列区
       entry('q1', 'queued', 'queued', '排队消息'),
       entry('f1', 'in-flight', 'steer', '投递中消息'),
       entry('x1', 'delivered', 'steer'), // 已送达：transcript 已入流 → 隐去

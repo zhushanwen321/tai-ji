@@ -158,7 +158,8 @@ const { dispose: disposeSettings, refreshModels } = useSettings()
 // useForkBranchNotify diff 分支状态 → 状态变化反馈行）。App setup 是全局 effect 作用域，
 // onScopeDispose 随 App 卸载退订（单实例，与 events.onGlobalType 范式一致）。
 bindForkNoticeEffect()
-// fast-handoff：订阅 session.handoffComplete 广播 → 复位源 session handingOff 态 + 刷新列表 + 跳转新 session。
+// fast-handoff：订阅 session.handoffComplete 广播 → 刷新列表 + 跳转新 session（源 session
+// handingOff 复位经 session.occupancy 帧第四维承担，裁决表行——本订阅不写状态）。
 // 与 bindForkNoticeEffect 同范式（effect 层订阅，非 useChat switch）。onScopeDispose 随 App 卸载退订。
 bindHandoffEffect()
 // session 全量事件订阅编排：watch sessionStore.list，added → ensureStreamSubscription，removed → disposeSession。

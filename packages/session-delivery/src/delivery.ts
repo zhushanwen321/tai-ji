@@ -14,10 +14,12 @@
  * - queued → failed：出站投递受理失败留守（onFailure='failed'，chat-flow-consistency
  *   第 11 条——与断连未确认同出路，等用户处置）
  * - failed → queued：requeue（用户重试/resync 单条重报）
- * - [扩展①] queued → delivered：confirmDelivered 也接受 queued 态——服务 reattach
- *   场景 rebuild 直确认重建（D3②：适配器扫描 transcript 判 delivered 后 send 重建
- *   + confirmDelivered 一步落终态），以及出站批次在途时送达回执先于受理回执到达
- *   的竞态形态（message_end 比 RPC resolve 快，事实优先）。
+ * - [扩展①] queued/failed → delivered：confirmDelivered 也接受 queued 与 failed
+ *   态——queued 服务 reattach 场景 rebuild 直确认重建（D3②：适配器扫描 transcript
+ *   判 delivered 后 send 重建 + confirmDelivered 一步落终态），以及出站批次在途时
+ *   送达回执先于受理回执到达的竞态形态（message_end 比 RPC resolve 快，事实优先）；
+ *   failed 服务第 11 条受理失败的歧义性终结——迟到的送达回执 / resync 的 transcript
+ *   预检命中即确定性送达事实，行随事实消失。
  * - [扩展②] cancel 对 in-flight 两段式：首次调用只标记待收回（条目留守 in-flight，
  *   返回 reclaim-requested，适配器驱动 clear_queue 收回）；适配器收回确认后再次
  *   cancel(id) 终结为 cancelled + tombstone。收回失败不再调 → 条目留守原态
@@ -147,7 +149,7 @@ export interface DeliverySubmitOptions {
    * 缺省内部生成、不参与判重。
    */
   id?: string
-  /** 投递车道（D1）：适配器判定后传入记录；缺省 'direct'（既有调用方语义）。 */
+  /** 投递路径（D1）：适配器判定后传入记录；缺省 'direct'（既有调用方语义）。 */
   lane?: DeliveryLane
   /**
    * 送达回执锚申报（msg-pipeline-debloat D1 申报制；v3 三档，ADR-0074 词条扩展）：

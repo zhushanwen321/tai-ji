@@ -170,7 +170,7 @@ export function deriveHistoryFromChatStore(chatStore: ReturnType<typeof useChatS
 /**
  * 发送位形态派生工厂（chat-flow-consistency D5 内容驱动双形态；前身 = u5b/u6b「D6 发送路由 +
  * 发送位四态」工厂，行数治理拆出的纯派生块）。deps = 读取面注入：chat store 占用投影 /
- * sessionIdRef / subagent 车道两信号（车道占用覆盖，subagent-composer）/ activeView（本地乐观
+ * sessionIdRef / subagent 通道两信号（通道占用覆盖，subagent-composer）/ activeView（本地乐观
  * 并集源）/ hasInput（内容驱动分档依据）。
  */
 function createSendPhaseDerived(deps: {
@@ -192,7 +192,7 @@ function createSendPhaseDerived(deps: {
   const effectivePhase = computed<SessionPhase>(() => {
     const sid = deps.sessionIdRef.value
     if (!sid) return IDLE_SESSION_PHASE // landing（无 session）无 occupancy 记录 → 全 idle
-    // subagent 车道：占用只有「轮在飞 = generating」一态（无 bash/compacting/settling
+    // subagent 通道：占用只有「轮在飞 = generating」一态（无 bash/compacting/settling
     // 维度；occupancy 帧对虚拟 id 无投影，事实源 = subagent record 流状态）。
     if (deps.isSubagentLane.value) {
       return deps.laneStreaming.value ? { ...IDLE_SESSION_PHASE, turn: 'generating' as const } : IDLE_SESSION_PHASE
@@ -278,9 +278,9 @@ export function useComposerShell(params: ComposerShellParams) {
   const flow = useNewTaskFlow()
   const { info: toastInfo, error: toastError } = useToast()
   const { send, followUp, abort, compact, sendBash } = useChat()
-  // ── subagent 车道（subagent-composer 2026-10-18）：drawer subagent 详情页复用同一
+  // ── subagent 通道（subagent-composer 2026-10-18）：drawer subagent 详情页复用同一
   //    shell，发送/中止/占用三终端按虚拟 id 形状分流到 subagent-composer-lane（通道 =
-  //    session.subagentAction message/cancel 既有链路；包装体在 lane 文件）。主车道
+  //    session.subagentAction message/cancel 既有链路；包装体在 lane 文件）。主通道
   //    deps 逐成员透传原实现，非 vid 输入零变化。──
   const subagentLane = useSubagentComposerLane(sessionIdRef)
   const isSubagentLane = subagentLane.isLane
@@ -481,7 +481,7 @@ export function useComposerShell(params: ComposerShellParams) {
   })
 
   // ── bash 命令模式（core dispatch/bash；sendBash 注入）──
-  // subagent 车道禁 bash 分流（`!` 是普通消息文本——subagent 无 bash 通道）：sendBash
+  // subagent 通道禁 bash 分流（`!` 是普通消息文本——subagent 无 bash 通道）：sendBash
   // 包装为恒 false（bash.ts 失败信号契约 = 不分流继续普通提交链）。
   const composerBash = useComposerBash({
     draft,
@@ -494,7 +494,7 @@ export function useComposerShell(params: ComposerShellParams) {
   const isBashMode = computed(() => !isSubagentLane.value && composerBash.isBashMode.value)
 
   // ── 提交动作（core dispatch/submit）──
-  // subagent 车道：followUp = 直发（打断入队由 Continuation D2 统一语义承接）；abort =
+  // subagent 通道：followUp = 直发（打断入队由 Continuation D2 统一语义承接）；abort =
   // cancelSubagent（中止对象 = 当前轮，无压缩分型）。
   const { onFollowUp, onAbort } = useComposerSubmit({
     hasInput,
@@ -510,7 +510,7 @@ export function useComposerShell(params: ComposerShellParams) {
    * [u3c / D1 语义收窄] canSend = 「可提交」（hasInput ∧ ¬isSending 双发锁）——**占用不再拦截**：
    * lane 判定收归 runtime 内核（D1），settling/compacting/bash/turn 活跃期发送合法（内核排队/
    * 入槽），禁令只剩空输入与本地双发锁两类（toast 分型见 core dispatch/send 的 routeStaging）。
-   * [HISTORICAL] 前身 isBusy = isActive ∨ isSending——isActive 半边是 renderer 侧车道判定的残留
+   * [HISTORICAL] 前身 isBusy = isActive ∨ isSending——isActive 半边是 renderer 侧投递路径判定的残留
    * （占用即拦截），随 D1「renderer 只提交不判定」退役（u3b 收 core send.ts 的 canSend 语义，
    * 壳层派生同批收窄归 u3c）。
    * 仅约束普通 send；staging 发送不受本检查拦（fork-ask 对源只读，streaming 中合法）。 */
@@ -543,7 +543,7 @@ export function useComposerShell(params: ComposerShellParams) {
           : '',
     isSending.value && 'opacity-[0.55]',
   ])
-  /** placeholder 链：subagent 车道专用文案 > bash > steerHint > inputHint。
+  /** placeholder 链：subagent 通道专用文案 > bash > steerHint > inputHint。
    *  [HISTORICAL] staging 换文案档（forkHint/handoffHint）已随 staging banner 退役
    *  （demo placeholder 静态）；core visual.placeholder 派生保留但 renderer 不再消费。 */
   const placeholder = computed(() =>
@@ -595,7 +595,7 @@ export function useComposerShell(params: ComposerShellParams) {
   // enabledModels = settingsStore.models 经 enabled 兜底过滤（与 ModelSelectPopover 双保险
   // 同款：runtime aggregateModels 已过滤一遍，同源广播未过滤时兜底；序 = scopedModels 白名单
   // 重排的显示序，即模型循环序）。
-  // subagent 车道：模型/档位入口在头部（SubagentTab ModelSelectPopover，subagent.setModel
+  // subagent 通道：模型/档位入口在头部（SubagentTab ModelSelectPopover，subagent.setModel
   // 通道）——composer 键盘循环降级为空集（循环对空表天然 no-op，不再向 vid 会话发 model.switch）。
   const enabledModels = computed(() =>
     isSubagentLane.value ? [] : settingsStore.models.value.filter((m) => m.enabled !== false),

@@ -180,7 +180,7 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 
 **可靠性分级（结果语义 vs 交互注入）[MANDATORY]**：event handler 里发消息必须先分清两类语义——
 
-- **结果语义通知**（subagent 完成、scheduler 触发、未来 webhook 等终态/结果类）：**必须走确认式送达**——经 `extensions/shared/delivery-port` 的 `port.deliver`（受理前投递日志落 session entry + 幂等键 + details-id 送达凭据 + session_start 差集重放，at-least-once；文本车道经 session-delivery 内核）；**禁止**依赖 steer/nextTurn/followUp 内存队列的 at-most-once 投递（消费窗极窄，基线事故十余次完成仅送达 1 次）。约束登记 [docs/constraints.json](../constraints.json) C-ext-19，机器检查 `check_subagent_channels.py`（pre-commit + CI）。
+- **结果语义通知**（subagent 完成、scheduler 触发、未来 webhook 等终态/结果类）：**必须走确认式送达**——经 `extensions/shared/delivery-port` 的 `port.deliver`（受理前投递日志落 session entry + 幂等键 + details-id 送达凭据 + session_start 差集重放，at-least-once；文本投递路径经 session-delivery 内核）；**禁止**依赖 steer/nextTurn/followUp 内存队列的 at-most-once 投递（消费窗极窄，基线事故十余次完成仅送达 1 次）。约束登记 [docs/constraints.json](../constraints.json) C-ext-19，机器检查 `check_subagent_channels.py`（pre-commit + CI）。
 - **交互式注入**（非结果语义：实时 steer 用户意图、followUp 续推）：上表 deliverAs 两模式照常适用，不在禁令内——禁令对象是「结果语义的一次性通知」，不是交互式 steer。
 
 ## 模型引用解析 [MANDATORY]
@@ -198,7 +198,7 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 - **已知例外**：用户在 `models.json` 里给某个 catalog provider 手写的自定义模型，在该 provider 被目录投喂注入后从视图中被挤出（extension 层是映射替换语义，注入集就是该 provider 的最终可见集合）。该场景同样表现为「查不到模型」，但根因是注入集映射替换挤出用户配置、不是目录缓存缺数据——「补数据来源」对它无效。已接受边界（2026-10-20 用户裁决不立项修法；删掉手写条目即恢复），不按投喂缺口上报
 
 - **原因**：taiji 侧目录缓存 → pi 注册表常驻条目的写入单点 = provider-live-sync 包（`extensions/universal/provider-live-sync/`，投喂模块 `src/catalog-bridge.ts`）。注册表是事实源，全部消费方（`--model` 解析 / rpc `set_model` / rename / smart-context / permission 分类器 / scheduler / subagent 模型校验 / provider 对账）零改动即自动受益——扩展自行注入等于绕过单点、制造第二写入方，两侧数据各自演化后「展示可见 ≠ 执行可用」在该子集反向复现；静默降级扩大化则把投喂缺口转成用户侧无提示的能力失效
-- **守卫**：`check_register_allowlist.py` 拦截白名单外的 `registerProvider`/`registerNativeProvider`/`registerVirtualModel` 调用点（pre-commit，包粒度白名单 = provider-live-sync 投喂通道本体 + scheduler 的 ack 合成轮临时覆写，测试目录排除）
+- **检查**：`check_register_allowlist.py` 拦截白名单外的 `registerProvider`/`registerNativeProvider`/`registerVirtualModel` 调用点（pre-commit，包粒度白名单 = provider-live-sync 投喂通道本体 + scheduler 的 ack 合成轮临时覆写，测试目录排除）
 - **消费侧静默失败的基本盘**：扩展域解析失败统一 warn 日志，且 taiji 托管环境恒落盘（`TAIJI_AGENT_EXT_LOG=1`）——查不到模型时留痕可查，不靠 UI 提示
 - **约束登记**：[docs/constraints.json](../constraints.json) C-ext-32
 

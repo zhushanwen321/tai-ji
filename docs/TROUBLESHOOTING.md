@@ -464,9 +464,9 @@ grep "\[prompt-ack\]" <数据目录>/logs/*.log
 
 **恢复动作**：按错误文案内联的 `Recovery` 重跑任务；复现时保留 `outcome.error` 的诊断摘要 + 上述日志 + `engine_open`/`engine_opened` 时间点（runtime 日志 `[subagent-control] engine opened`）。`engine_prompt_rejected` 的 pi error 文本（busy / queue / extension takeover）由 pi 侧给出，不归结为 taiji 传输故障。
 
-### 32. 引擎 / 任务 pi 残留（组杀与启动 sweep）
+### 32. 引擎 / 任务 pi 残留（按进程组终止与启动 sweep）
 
-**机制**：托管态下控制面裁决统一走组杀（POSIX 负 pid 进程组 + 子孙递归兜底；Windows `taskkill /PID <pid> /T /F`），信号发出即返回，真实 exit 由 child exit 事件收尾——**pid 文件只在 exit 确认后删除**；杀链失败时 pid 文件保留给下次启动 sweep。连接关闭 → 该连接全部通道 fan-out 组杀；runtime 退出 → 引擎 stdin EOF → SDK `armEngineSelfDestruct` 自灭；runtime 异常死亡 → 下次启动 `sweepOrphanEnginePids` 对 owner 已死的引擎组立即收割（pid 复用防护：现持有者启动时间晚于登记则只删记录不杀）。
+**机制**：托管态下控制层裁决的进程终止统一走按进程组终止（POSIX 负 pid 进程组 + 子孙递归兜底；Windows `taskkill /PID <pid> /T /F`），信号发出即返回，真实 exit 由 child exit 事件收尾——**pid 文件只在 exit 确认后删除**；杀链失败时 pid 文件保留给下次启动 sweep。连接关闭 → 对该连接全部通道 fan-out 按进程组终止；runtime 退出 → 引擎 stdin EOF → SDK `armEngineSelfDestruct` 自灭；runtime 异常死亡 → 下次启动 `sweepOrphanEnginePids` 对 owner 已死的引擎组立即收割（pid 复用防护：现持有者启动时间晚于登记则只删记录不杀）。
 
 **取证**：
 
@@ -706,7 +706,7 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 ### 10. settled 事件先复位再广播：边沿回调内 isIdle 恒真（PS-07）
 
 - **pi 锚点**：`dist/core/agent-session.js:325-336`——`_emitAgentSettled` 首行复位 `_isAgentRunActive = false` 再发 agent_settled 事件
-- **机制**：settled 边沿驱动的通知通道不会撞上残留 busy 态——delivery-port 的注入链与文本车道对账器的 settled 边沿重投依赖此序；若 pi 未来调换次序，注入/重投时序需重验
+- **机制**：settled 边沿驱动的通知通道不会撞上残留 busy 态——delivery-port 的注入链与文本投递路径对账器的 settled 边沿重投依赖此序；若 pi 未来调换次序，注入/重投时序需重验
 - **处置建议**：探针检查（pi-semantics-agent-session.test.ts）；消费 settled 边沿的新代码可假定回调内 idle，但 pi 升级时此条目自动进重验清单（verifiedWith 门禁）
 
 ### 11. plain appendEntry（type=custom）不进 LLM 上下文（PS-09）

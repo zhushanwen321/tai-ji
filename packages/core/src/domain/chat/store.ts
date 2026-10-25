@@ -25,7 +25,6 @@ import {
 import { findLastAssistantIndex } from './chunk-processor'
 import { markBashError, clearExecutingBash } from './bash-effects'
 import { createChangeSetController } from './changeset'
-import { createHandoffController } from './handoff'
 import { createTruncatedWindowController, type HistoryWindow } from './truncated-window'
 import type {
   Message,
@@ -406,9 +405,9 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * Set 形态（布尔语义无载荷）对齐 failedHistory/hydrated；disposeSession 同点清理。
    */
   const respawnPending = ref<Set<string>>(new Set())
-  /** handingOff 瞬时态子域控制器（对称 compacting 子域），委托 chat-handoff.ts。设计见 ./README.md + chat-handoff.ts。 */
-  const handoff = createHandoffController()
-  const { handingOffSessions, isHandingOff, setHandingOff } = handoff
+  /** [chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] handingOff 瞬时态子域控制器已退役：membership 改读
+   *  occupancy 派生视图第四维（isHandingOff 读 occupancies，与 isCompacting 同型对称），
+   *  原 handingOffSessions Set / setHandingOff 平行存储删除。 */
   /** 按 sessionId 分区的自动重试态（W06-B，auto_retry_start/end） */
   const retryStates = ref<Map<string, RetryState>>(new Map())
   // [u5a 退役] `queueStates` 分区 + `getQueueState` / `clearQueueState` 已删除：唯一写方
@@ -431,7 +430,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * 1. 统一提交记账：appendUser 乐观插入 +1 / RPC 失败 catch 回滚 −1（挂 useChat
    *    submitNewMessage 调用点，不在 appendUser 内防双计）。
    * 2. 标记回执回收：message_end(user) 帧命中内核裸标记（送达回执主分支）即 −1；
-   *    ② 纯计数兜底（帧无标记/标记不命中派生视图时 inflight > 0）服务 direct 车道等
+   *    ② 纯计数兜底（帧无标记/标记不命中派生视图时 inflight > 0）服务 direct 投递路径等
    *    无回执命中形态，同一 −1 语义。
    *
    * 清零挂点（D4 生命周期完成）：abort（message.complete{stopReason:'aborted'}）与
@@ -497,11 +496,9 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   const streamingStateMachine = createStreamingStateMachine({
     messages,
     occupancies,
-    handingOffSessions,
     retryStates,
     pendingSend,
     clearOccupancy,
-    setHandingOff,
     subagentStreamPull: options.subagentStreamPull,
   })
 
@@ -957,8 +954,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
 
   /**
    * 多 session 统一收尾（断连 / runtime 重启兜底）：遍历瞬态 session，逐个调 resetTransientStates。
-   * 遍历范围是 messages.keys() ∪ occupancy 分区中 compacting 的 sid ∪ handingOffSessions ∪ retryStates ∪ pendingSend 并集
-   *（不能只遍历 messages——compacting/retry/pendingSend 可独立于消息存在）。详见 ./README.md。
+   * 遍历范围是 messages.keys() ∪ occupancy 分区中 compacting / handingOff 的 sid ∪ retryStates ∪ pendingSend 并集
+   *（不能只遍历 messages——compacting/handingOff/retry/pendingSend 可独立于消息存在）。详见 ./README.md。
    */
   function finalizeAllStreaming(reason: FinalizeReason): void {
     const candidateSids = streamingStateMachine.collectFinalizeCandidates()
@@ -1042,9 +1039,18 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   /**
+   * [chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] handingOff 派生读口（occupancy 第四维，与 isCompacting
+   * 同型对称）——原 createHandoffController/handingOffSessions Set 平行存储已退役，membership
+   * 唯一来源 = session.occupancy 帧（handoff-service 经转移原语置位/复位）。
+   */
+  function isHandingOff(sessionId: string): boolean {
+    return occupancies.value.get(sessionId)?.handingOff === true
+  }
+
+  /**
    * [u5b / D1] 写入 occupancy 派生视图（session.occupancy 帧驱动；useChat ensureStreamSubscription
    * handler 消费 live 广播与 stateSnapshot 回放同一入口——重连/切回自动恢复，G4）。
-   * 整体替换该 sid 分区（帧是全量三维快照，非 patch）。
+   * 整体替换该 sid 分区（帧是全量四维快照 turn/compacting/bash/handingOff，非 patch）。
    */
   function setOccupancy(sessionId: string, occupancy: SessionOccupancyState): void {
     occupancies.value = new Map(occupancies.value).set(sessionId, occupancy)
@@ -1085,7 +1091,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     return compactingReasons.value.get(sessionId)
   }
 
-  // isHandingOff / setHandingOff 委托 createHandoffController（chat-handoff.ts）。
+  // isHandingOff 读 occupancy 派生（见 isCompacting 旁定义；setHandingOff 已随
+  // handingOffSessions Set 退役删除——[chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行]）。
 
   /** 追加 system 提示行（与规则 #3「错误作为消息插入聊天流」一致：不用顶部 banner）。 */
   const appendSystemNotice = (sessionId: string, text: string): void => {
@@ -1183,7 +1190,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
 
   /** 清理指定 session 的全部 per-session 状态（deleteSession 调用，S3）：Map 分区
    * messages/retryStates/inflightCounts/compactingReasons/occupancies/historyWindows/submitSeqs + Set
-   * 分区 hydrated/pendingSend/handingOffSessions/failedHistory/respawnPending +
+   * 分区 hydrated/pendingSend/failedHistory/respawnPending +
    * changeSetStatuses（前缀过滤）/ entryStates / executingBash / streaming flag 惰性缓存 /
    * subagent chunk 分区状态机 + LRU 时序记录。背景见 ./README.md。 */
   function disposeSession(sessionId: string): void {
@@ -1196,7 +1203,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     // inflightCounts（[steer-bubble D4]）：disposeSession 同步清 inflight——确认基线随分区
     // 销毁作废（与 LRU 驱逐的刻意豁免不同，见 lruEvictDeps 处声明注释）。
     const mapRefs: { value: Map<string, unknown> }[] = [messages, retryStates, inflightCounts, compactingReasons, occupancies, historyWindows, submitSeqs]
-    const setRefs: { value: Set<string> }[] = [hydrated, pendingSend, handingOffSessions, failedHistory, respawnPending]
+    const setRefs: { value: Set<string> }[] = [hydrated, pendingSend, failedHistory, respawnPending]
     for (const ref of mapRefs) {
       if (ref.value.has(sessionId)) {
         const next = new Map(ref.value)
@@ -1235,7 +1242,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     messages,
     pendingSend,
     occupancies,
-    handingOffSessions,
     retryStates,
     inflightCounts,
     // [chat-flow-consistency F1] 提交序号分区 ref（readers 面；watch 源值载体）
@@ -1292,7 +1298,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     setCompactingReason,
     getCompactingReason,
     isHandingOff,
-    setHandingOff,
     appendSystemNotice,
     appendRespawnNotice,
     markRespawnPending,
@@ -1344,7 +1349,7 @@ export type ChatStoreInstance = ReturnType<typeof createChatStore>
  */
 export type ChatStoreReaders = Pick<
   ChatStoreInstance,
-  | 'messages' | 'pendingSend' | 'handingOffSessions'
+  | 'messages' | 'pendingSend'
   | 'retryStates' | 'changeSetStatuses'
   | 'failedHistory' | 'hydrated' | 'inflightCounts'
   | 'occupancies'
@@ -1378,7 +1383,7 @@ export type ChatStoreOps = Pick<
   | 'applySubagentEntries' | 'appendUser'
   | 'applyMessageEvent' | 'finalizeSession'
   | 'finalizeAllStreaming' | 'resetTransientStates' | 'addPendingSend'
-  | 'clearPendingSend' | 'markSessionError' | 'setHandingOff'
+  | 'clearPendingSend' | 'markSessionError'
   | 'setOccupancy' | 'clearOccupancy' | 'setCompactingReason'
   | 'appendSystemNotice' | 'appendRespawnNotice' | 'appendSubagentDirective' | 'truncateFrom'
   | 'markRespawnPending' | 'clearRespawnPending'

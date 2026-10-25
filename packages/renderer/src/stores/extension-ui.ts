@@ -78,10 +78,7 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
    */
   function hasPendingBlockingOverlay(sessionId: string): boolean {
     return getRequestsBySession(sessionId).some(
-      (r) =>
-        r.form === true ||
-        (r as { planReview?: unknown }).planReview === true ||
-        (r as { permission?: unknown }).permission === true,
+      (r) => r.form === true || r.planReview === true || r.permission === true,
     )
   }
 

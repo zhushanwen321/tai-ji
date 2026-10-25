@@ -198,7 +198,7 @@ session-delivery 缺口尚未炸的原因只是它从未走过 dev 线（npm 版
 **D6 pi-unified-hooks 进 changeset ignore**
 
 - `pi-unified-hooks`（deprecated，workspace 内、非 private）：deprecated 包不应再发版，显式加入 `.changeset/config.json` ignore——workspace 内包 ignore 有效，一行清偿。
-- 机制结论（登记于 C-proc-11，当前无非 workspace 发布面包，留作未来参照）：非 workspace 包不经 changesets 发布线（changesets 按包管理器 workspace 发现包），「给它写 changeset」「加 changeset ignore」对它都无效；防手滑 `npm publish`（全目录打包）的唯一机制层拦截是 `"private": true`（npm 拒绝 publish private 包）。曾有的非 workspace 特例 statusline 及其 private:true 措施已随 StatusBar 底栏退役删除（ADR-0141）。
+- 机制结论（登记于 C-proc-11，当前无非 workspace 包的发布情形，留作未来参照）：非 workspace 包不经 changesets 发布线（changesets 按包管理器 workspace 发现包），「给它写 changeset」「加 changeset ignore」对它都无效；防手滑 `npm publish`（全目录打包）的唯一机制层拦截是 `"private": true`（npm 拒绝 publish private 包）。曾有的非 workspace 特例 statusline 及其 private:true 措施已随 StatusBar 底栏退役删除（ADR-0141）。
 
 **D7 体积代价量化登记（四要素齐备）**
 
@@ -244,7 +244,7 @@ dev 线（release-npm-dev.yml）为条件化结构（与正式线不对称，刻
 | S4 | 全链路 tarball 实证 | 按 §3.4 完整步骤序构建 → `cd packages/subagent-core && npm pack --dry-run` | dry-run 清单含 `dist.bundle/index.cjs`；同法验证 extension-protocol / session-delivery 的 `dist` 非空 | G1、G2 |
 | S5 | CI 接线生效（真实 Actions run） | 推分支：①正常分支 → invariants 段新 step 绿；②含幽灵条目 `dist.worker/` 或反向覆盖形态（构建了不加 files）的分支 → CI 红 | 两次真实 run 的 job 结论分别绿/红，红 run 的日志含恢复指引；记录 invariants job 实际时长增量回填 D2 | G1、G2 |
 | S6 | dev 线缺口补全（本地等价 + 条件语义） | release-npm-dev.yml diff 审查：session-delivery build + core 两档 + 检查 step 均挂 `should_publish == 'true'` 条件、既有 `Build extension-protocol` 保持无条件；本地跑各 build 命令验证产出非空 + 检查绿；未准备 pre.json 的 dev-npm-* 分支 push → job conclusion 仍为 success | 三 step 条件挂载正确、命令产出实证、skip 分支不被新 step 误红 | G3 |
-| S6b | 发布面尾部风险清偿（u4 简化验收） | `.changeset/config.json` ignore 数组含 `@zhushanwen/pi-unified-hooks`（statusline private 断言已随该插件删除失效，ADR-0141） | 断言成立（单行改动，简化验收） | G3 |
+| S6b | 发布范围尾部风险清偿（u4 简化验收） | `.changeset/config.json` ignore 数组含 `@zhushanwen/pi-unified-hooks`（statusline private 断言已随该插件删除失效，ADR-0141） | 断言成立（单行改动，简化验收） | G3 |
 | S7 | 发布后终验（0.5.2） | 走 merge / prerelease skill 既有编排发布 → registry 下载 tarball → zsw 仓跑 vendor `--npm` 通道；干净目录 `npm install @zhushanwen/subagent-core@0.5.2` → require 主入口 + 4 条子入口（smoke 同口径） | tarball 实测含 `dist.bundle/index.cjs` 且 vendor 副本 `selfContainedIndex=true`；常规消费者升级路径不回归（require 全通） | G1–G3 闭环 |
 
 S7 是外部消费方（zsw）真实回归，作为发布后场景登记——发布编排本身不在本设计拆分内。S1–S4 本地可完整执行，S5 需真实 CI run，S6 的 workflow 生效侧在下次 dev 预发布（如近期无 dev 发布计划，以本地等价命令 + diff 审查为验收形态，如实登记）。

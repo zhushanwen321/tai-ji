@@ -1,10 +1,11 @@
 /**
- * useSidebar chatPort.hydrate 磁盘重载基线接管点清 turn-expansion 分区的接线测试
+ * useSidebar chatPort.reconcileHistory（未 hydrate 走盘重载门）清 turn-expansion 分区的接线测试
  * （chat-flow-consistency C4 两段式契约的「重载重置」侧；store 侧行为见
  * stores/__tests__/turn-expansion.test.ts 两段式契约 describe）。
  *
- * 锁定壳层接线这一件事：切入链步 9 的 hydrate 分支（未 hydrate 会话的走盘重载）在回填前
- * 调 turn-expansion store clearSession——turn 稳定 id 在 live 与盘上两侧不相交（pi 事件不带
+ * 锁定壳层接线这一件事：切入链步 9 的未 hydrate 走盘重载分支（经 reconcileFromReply 汇入
+ * ChatHydratePort.reconcileHistory 适配层）在回填前调 turn-expansion store clearSession——
+ * turn 稳定 id 在 live 与盘上两侧不相交（pi 事件不带
  * entry id），重载后键失配本就回落收起，显式清分区把「静默失配」变「可断言重置」。对偶侧
  * （驻留保持）：已 hydrate 会话切回走 refreshHistory → reconcileHistory 增量刷新，不经本
  * 接管点，手动展开保持。
@@ -73,7 +74,7 @@ beforeEach(() => {
   resetAppBootstrap()
 })
 
-describe('useSidebar chatPort.hydrate 清 turn-expansion 分区接线（C4 重载重置侧）', () => {
+describe('useSidebar chatPort.reconcileHistory 清 turn-expansion 分区接线（C4 重载重置侧）', () => {
   it('未 hydrate 会话切入（走盘重载）→ 展开分区被清（重置侧断言）', async () => {
     const expansion = useTurnExpansionStore()
     // 重载前的展开态（live 期 id；重载后 id 换空间，状态不应存活）

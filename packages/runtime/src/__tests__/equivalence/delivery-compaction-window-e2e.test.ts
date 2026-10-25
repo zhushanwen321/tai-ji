@@ -20,11 +20,11 @@
  * 在树且**顺序与提交序一致、各恰好一次**、各带自己的出站裸标记（D2 标记确认）→ 内核条目
  * 双终态 delivered（送达回执 message_end(user) 标记命中，D2 第二阶段）。
  *
- * 出站车道事实（两条都在压缩结束后出站，第二条的落点由 pi 当时状态决定，两条路径都合法）：
+ * 出站路径事实（两条都在压缩结束后出站，第二条的落点由 pi 当时状态决定，两条路径都合法）：
  * - pi 仍在 turn 1（faux TPS 节流制造流式窗口）→ prompt 带 steer 入 pi 队列 → turn 边界
  *   注入（v3 受理即出站的同一分支）；
  * - pi 已 idle → 直投开新 turn。
- * 断言只锚终态（顺序 / 唯一性 / 标记 / delivered），不锚中间车道——车道是 pi 状态函数。
+ * 断言只锚终态（顺序 / 唯一性 / 标记 / delivered），不锚中间路径——投递路径是 pi 状态函数。
  *
  * 环境约定照抄 equivalence 族（pi-fixture.ts）。faux LLM 层（L2.5）：被测语义是
  * 「压缩窗口的持有与释放按序投递」，非模型智能；门控 = 集成测试门控
@@ -194,8 +194,8 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`delivery compaction window e2e faux
       const replyB = registry.submit(targetSessionId!, { content: `${MARK_B} 第二条`, clientUuid: CLIENT_UUID_B })
 
       // 压缩窗口 = 不可投 → lane/state 双 queued（唯一判定源读 runtime 权威派生视图）
-      expect(replyA, `压缩中提交应落 queued 车道：${JSON.stringify(replyA)}`).toMatchObject({ clientUuid: CLIENT_UUID_A, lane: 'queued', state: 'queued' })
-      expect(replyB, `压缩中提交应落 queued 车道：${JSON.stringify(replyB)}`).toMatchObject({ clientUuid: CLIENT_UUID_B, lane: 'queued', state: 'queued' })
+      expect(replyA, `压缩中提交应落 queued 投递路径：${JSON.stringify(replyA)}`).toMatchObject({ clientUuid: CLIENT_UUID_A, lane: 'queued', state: 'queued' })
+      expect(replyB, `压缩中提交应落 queued 投递路径：${JSON.stringify(replyB)}`).toMatchObject({ clientUuid: CLIENT_UUID_B, lane: 'queued', state: 'queued' })
       const handle = registry.getOrCreateDelivery(targetSessionId!)
       expect(handle.depth(), '压缩中两条应全部持有在内核队列（depth = queued 计数）').toBe(2)
       // 在途登记表（A8 功能等价·受理登记）：压缩中提交的两条以 queued 态在册（GUI 状态帧

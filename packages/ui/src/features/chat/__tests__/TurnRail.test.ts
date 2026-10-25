@@ -300,6 +300,23 @@ describe('TurnRail (IF4)', () => {
     }
   })
 
+  it('TC-w3-11b [chat-flow-consistency D2]: 工作展开态数据派生——sessionActive 时 streaming 回合与真末位显示已展开，视口激活的非工作回合不谎报', () => {
+    // D2 双工作态形态：turns[1] streaming（插话回流后旧回合未收尾），turns[2] 真末位
+    // pending 占位（userOnly，无 streaming assistant）；用户上翻使视口激活节点 = 0。
+    const turns = [makeRailTurn(0), makeRailTurn(1, { isStreaming: true }), makeRailTurn(2, { userOnly: true })]
+    const wrapper = mount(TurnRail, {
+      props: defaultProps({ turns, activeTurnIndex: 0, sessionActive: true }),
+    })
+    const toggles = wrapper.findAll('[data-testid="rail-toggle"]')
+    // idx=0：视口激活但非末位非 streaming → 流内实际折叠，图标如实显示折叠
+    //（修复前 isTurnExpanded 以 activeTurnIndex 强制已展开，与流内不一致）
+    expect(toggles[0].attributes('data-expanded')).toBe('false')
+    // idx=1：streaming 回合 → 流内工作展开（Turn isWorkingTurn 同构判据），图标已展开
+    expect(toggles[1].attributes('data-expanded')).toBe('true')
+    // idx=2：真末位（占位 turn 尚无 streaming assistant）→ 流内强制展开，图标已展开
+    expect(toggles[2].attributes('data-expanded')).toBe('true')
+  })
+
   it('TC-w3-13: 节点含两行——user 行（User 图标）+ agent 行（Bot 图标）', () => {
     const wrapper = mount(TurnRail, { props: defaultProps() })
     const node = wrapper.findAll('[data-testid="rail-node"]')[0]

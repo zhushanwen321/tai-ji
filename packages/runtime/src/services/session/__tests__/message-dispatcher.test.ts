@@ -323,7 +323,7 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
  * 的断言强度平移到「排队承接」面（消息不丢 = 内核条目在册）。
  */
 describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () => {
-  it('turn=generating：零 send.rejected + 内核按 steer 车道即时投递（turn 边界注入，不等拒绝）', async () => {
+  it('turn=generating：零 send.rejected + 内核按 steer 投递路径即时投递（turn 边界注入，不等拒绝）', async () => {
 
     const h = makeHarness({
       sessionByClient: {

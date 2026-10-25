@@ -1,5 +1,5 @@
 /**
- * SessionDeliveryRegistry — runtime 侧统一投递内核适配（文本车道；统一消息投递重构设计
+ * SessionDeliveryRegistry — runtime 侧统一投递内核适配（文本投递路径；统一消息投递重构设计
  * §3.6：v2「本地队列持有 + 忙闲门禁」切换为 **v3 受理即出站**）。
  *
  * 职责四面（unified-delivery §3.6 逐行）：
@@ -10,14 +10,14 @@
  *    持有保留**——pi 硬拒绝一切 prompt（agent-session.js:1498-1500）是唯一提交侧等待
  *    状态，等 compaction_end 边沿重提。
  * 2. **port 适配**（内核对外的唯一接口 DeliveryPort）：send = 真正的 pi 交接点——ensureActive
- *    → skill 注入 → 三副作用置位（lastActiveAt + occupancy 'dispatching' + workspace.record
- *    best-effort）→ prompt(streamingBehavior)。**pi 词汇（streamingBehavior / clear_queue /
- *    queue_update）封闭在本文件**，内核包保持零依赖。
+ *    → skill 注入 → occupancy 'dispatching' 前置换位（prompt 发起前，仅空闲时）→
+ *    prompt(streamingBehavior) → 记账置位（lastActiveAt + workspace.record best-effort）。
+ *    **pi 词汇（streamingBehavior / clear_queue / queue_update）封闭在本文件**，内核包保持零依赖。
  * 3. **在途登记 + 两阶段回执**（§3.6 升级行 / D2）：受理登记（prompt 受理即 confirmAccepted
  *    转 in-flight）→ 送达 = pi `message_end(user)` 文本命中裸标记 → `confirmDelivered(id)`
  *    关闭；终局判重三级（在途 → 终局索引 → 持久记录，v3 内核）。在途登记表是 GUI
  *    session.delivery 状态帧的状态源（功能等价替换 v2 队列状态，帧装配在 transport 层保持）。
- * 4. **对账器 Reconciler**（D3，文本车道保留）：四触发点（agent_settled / compaction_end /
+ * 4. **对账器 Reconciler**（D3，文本投递路径保留）：四触发点（agent_settled / compaction_end /
  *    abort 完成 / pi restored，全事件驱动）→ 条件「空闲 + pi 槽位非空」→ `clear_queue` 全收
  *    → 三分处置（自有条目回队首重投 / 带标记无记录条目按 transcript 扫描重建 / 无标记
  *    外来文本收养）。撤销两段式编排（clear_queue 全收 + 三分处置 + transcript 校验）、
@@ -131,7 +131,7 @@ export interface DeliverySubmitInput {
   images?: Array<{ data: string; mimeType: string }>
   /** 客户端幂等 id（renderer 乐观气泡 id `u-<uuid>`；缺省由本层生成——老协议无 uuid 调用方） */
   clientUuid?: string
-  /** 投递意图（缺省 interrupt-at-turn-boundary；'after-run' = followUp 车道） */
+  /** 投递意图（缺省 interrupt-at-turn-boundary；'after-run' = followUp 投递路径） */
   intent?: DeliveryIntent
 }
 
@@ -278,10 +278,12 @@ export interface SessionDeliveryRegistry {
    */
   endRevokeHold(sessionId: string): void
   /**
-   * hold 解除边沿输入端口（MF-1-9 事件化）：持有判定读的外部维度（view.isBashRunning /
-   * view.isCompacting）复位后，由**转移执行方**调用本方法唤醒挂起的出站交接等待者
+   * hold 解除边沿输入端口（MF-1-9 事件化）：持有判定读的外部维度（occupancy.bash /
+   * occupancy.compacting）复位后，由**转移执行方**调用本方法唤醒挂起的出站交接等待者
    * （waitDeliverable 订阅边沿而非 500ms 轮询）。调用点 = dispatcher 的 bash-end /
-   * compacting-end 转移后；settling 边沿经 agent_settled 多播自达、revoking /
+   * compacting-end 转移后；settling 与 handoff 维释放边沿均经 agent_settled 多播自达
+   * （handoff turn 终局必经 agent_settled——handoff-service cleanupInflight 的
+   * handingOff-end 复位先于 settled 事件处理，时序构造性成立）、revoking /
    * piCompactingBlocked 为注册表内部标志自达，无需经本端口。无等待者时幂等 no-op。
    */
   notifyHoldRelease(sessionId: string): void
@@ -416,7 +418,8 @@ function holdReasonOf(view: IManagedSessionView | undefined): HoldReason | null 
  * lane 判定（D1）：不可投 → 'queued'；活跃 run → 'steer'；其余 → 'direct'。
  * [chat-flow-consistency D1 采用 2] 「回合进行中」判定集合 = shared ACTIVE_TURN_PHASES
  * 单点（dispatching/generating/settling）——settling 纳入 steer 排队由该集合单点生效
- * （探针 P1 已实测 settling 窗口 pi steer 受理正确，p1-result.md）。
+ * （探针 P1 已实测 settling 窗口 pi steer 受理正确——探针产物在工作流产物目录，不入
+ * 仓库，结论如前内联）。
  */
 function laneOf(view: IManagedSessionView | undefined): DeliveryLane {
   if (holdReasonOf(view) !== null) return 'queued'
@@ -756,25 +759,26 @@ export function createSessionDeliveryRegistry(
   }
 
   /**
-   * 三副作用置位（prompt 受理成功后，D-18 契约——内核状态机防回退，迟到写无害；§3.4+ 表，V8 验收锁定，禁止遗漏第三项）。
-   * occupancy = false（D1② handled 终局专用）：命令接管后输入已被消费、无回合要跑——
-   * 记账侧（lastActiveAt / workspace）照常，occupancy 不再置 dispatching（回落后的 idle
-   * 是终态事实，不得打回）。
+   * 记账置位（prompt 受理成功后，D-18 契约）：lastActiveAt + workspace.record best-effort。
+   *
+   * [occupancy 置位退役（error-turn-dispatch-stall 根因修复）] 原第二参数 occupancy=true 时
+   * 的「空闲即置 dispatching」分支已删除——该写点在 prompt **响应后**执行，与 pi 事件链
+   * （turn-end → settling → agent_settled → idle）无顺序契约：faux error turn 秒败形态下
+   * 响应帧晚于终局事件帧时，空闲判定会把**已被事件链收尾的回合**打回 dispatching，且该回合
+   * 已死、无任何后续事件复位（发送位滞留，A4 探针双跑一 <5s 一 >60s 的间歇根源）。
+   * dispatching 置位收敛为唯一形态 = **prompt 发起前**（受理前脉冲）：主路径 deliverOne 的
+   * markDispatchingIfIdle 前置换位（RT-4#10 RPC 往返窗不呈 idle 语义由此承担）+ compaction
+   * 拒绝重试循环 waitDeliverable 后的同款补置位。响应后的置位无合法语义——受理成功的事实
+   * 已由前置置位表达，turn 之后的占用演进归事件链权威（interpreter 挂点）。
    */
-  function markSessionActive(sessionId: string, occupancy = true): void {
+  function markSessionActive(sessionId: string): void {
     const view = viewOf(sessionId)
     if (!view) return
     view.lastActiveAt = Date.now()
-    // [D3①] occupancy 置位与 deliverOne 前置换位同一事实口径：仅空闲时置 dispatching
-    //（受理成功推进脉冲）；生成中出站保持 generating 不覆盖（原回合脉冲全程不错乱，
-    // ★3 修复的组成动作——命令 handled 终局后的 idle 回落不得被本置位打回 dispatching）。
-    if (occupancy && (view.occupancy?.turn ?? 'idle') === 'idle') {
-      applySessionOccupancyTransition(view, deps.getMessageBus(), 'dispatching')
-    }
     try {
       deps.recordWorkspace(view.cwd)
     } catch (e) {
-      // best-effort：record 失败仅 warn 不传播（isGenerating 已置位不回退）
+      // best-effort：record 失败仅 warn 不传播
       warn('workspace.record failed (non-blocking), sid=', sessionId, e)
     }
   }
@@ -885,6 +889,11 @@ export function createSessionDeliveryRegistry(
         state.piCompactingBlocked = true
         await waitDeliverable(sessionId, state)
         if (state.disposed) throw e
+        // [受理前脉冲统一] 重试 prompt 前补 dispatching 前置换位（与 deliverOne 主路径的
+        // markDispatchingIfIdle 同语义）：reject-other 已把 occupancy 收回 idle，等待边沿的
+        // 挂起期不呈 dispatching；重试受理成功即将开跑，RPC 往返窗内不呈 idle（RT-4#10）。
+        // dispatching 置位唯一形态 = prompt 发起前——响应后写点已退役（error-turn-dispatch-stall）。
+        markDispatchingIfIdle(sessionId)
       }
     }
   }
@@ -970,10 +979,12 @@ export function createSessionDeliveryRegistry(
    * 单条出站交接（port.send 的逐条实现 + sendDirect 共用）：
    * 抑制/撤销检查 → 持有等待（v3 仅 compaction/revoking——受理即出站无忙闲等待）→
    * 显式投递放行 → ensureActive → skill 注入 → prompt（compaction 拒绝等待重提）→
-   * 受理终局 → skillNotice → 记账置位。occupancy 置位先于 prompt 且仅空闲时置位
-   *（markDispatchingIfIdle）；lastActiveAt/workspace 记账晚于 prompt 受理
-   *（markSessionActive，成功才显示 working）。终局分派细则见 settleAcceptedEntry /
-   * settleDispatching 的 JSDoc。
+   * 受理终局 → skillNotice → 记账置位。occupancy 'dispatching' 置位 = prompt 发起前的
+   * markDispatchingIfIdle 前置换位（仅空闲时；RT-4#10 RPC 往返窗不呈 idle）——prompt
+   * 响应后的写点已退役（error-turn-dispatch-stall：响应帧晚于终局事件帧时会把已收尾
+   * 回合打回 dispatching 且无事件复位，根因见 markSessionActive 注释）；
+   * lastActiveAt/workspace 记账晚于 prompt 受理（markSessionActive）。终局分派细则见
+   * settleAcceptedEntry / settleDispatching 的 JSDoc。
    * entryId = 本段对应的内核条目 id（resolveOutboundEntryId 按 marker 定位直传；无标记
    * 命令段经活跃集全文匹配回身份）——撤销/抑制判定的唯一锚是条目身份，同文本多条互不
    * 误伤（V 裁决 R2-A2）。
@@ -1007,7 +1018,9 @@ export function createSessionDeliveryRegistry(
     settleAcceptedEntry(sessionId, state, handle, entryId, disposition)
     if (disposition === 'handled') settleDispatching(sessionId, 'idle')
     publishSkillNotices(deps.getMessageBus(), sessionId, text, injection.notices)
-    markSessionActive(sessionId, disposition !== 'handled')
+    // [occupancy 置位退役] 记账-only（dispatching 置位归 prompt 发起前的 markDispatchingIfIdle，
+    // 竞态根因见 markSessionActive 注释——handled 终局回落语义由上方 settleDispatching 承担）
+    markSessionActive(sessionId)
   }
 
   /**
@@ -1109,7 +1122,9 @@ export function createSessionDeliveryRegistry(
     if (!rt || rt.disposed || rt.reconciling) return
     const view = viewOf(sessionId)
     if (!view) return
-    // 触发条件①：空闲（settling 保守算非空闲——D10 / 检查点 4 口径，不抢占 post-run 窗口）
+    // 触发条件①：非持有（gate = holdReasonOf：compacting / handoff）。settling 持有已随
+    // u5a 本地队列退役（:389-396 登记与 :431 triggerOfHold 注释互证）——对账在 settling
+    // 期照常运行：pi 唯一队列忙时入队不拒，无 post-run 保守档。
     if (holdReasonOf(view) !== null) return
     const now = Date.now()
     if (now - rt.lastReconcileAt < RECONCILE_MIN_INTERVAL_MS) return
@@ -2222,7 +2237,7 @@ export function createSessionDeliveryRegistry(
    *     窗口 / 批内挂起 → unconfirmed（用户裁决采纳的第四值，回执如实化）。
    * 收回失败（pi 卡死）/ pi 未附着：无法确认原文本状态 → unconfirmed（不留守重试——
    * edit 的用户意图由降级新消息承载，原条目由对账器兜底，与 cancel 的留守重试语义分界）。
-   * 保序口径承继 D3①：重投相对序 = 收回文本序（disposeCleared own 通路既有语义），跨车道
+   * 保序口径承继 D3①：重投相对序 = 收回文本序（disposeCleared own 通路既有语义），跨投递路径
    * 交错时与内核 active 序可能短暂错位——E1 已登记的收回-重投窗口瞬态，不新增机制。
    */
   async function editEntry(
