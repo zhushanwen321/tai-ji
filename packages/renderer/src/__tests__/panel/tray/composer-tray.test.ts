@@ -223,8 +223,6 @@ function makeChild(overrides: Partial<SessionSummary> & { id: string }): Session
     cwd: '/Users/dev/Code/work-project',
     status: 'active',
     lastActiveAt: FIXED_NOW - 5 * 60_000,
-    modelId: 'Anthropic/claude-sonnet-4.5',
-    tokenCount: 0,
     spawnSource: 'agent',
     parentAgentSessionId: SID,
     ...overrides,

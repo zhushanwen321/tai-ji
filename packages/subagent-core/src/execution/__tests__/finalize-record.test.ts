@@ -617,16 +617,16 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     expect(deps.worktreeManager.cleanup).not.toHaveBeenCalled();
   });
 
-  it("轮终注销经 store 簿记⑧发射（setPendingUnregister 注入闭包，status=running）", async () => {
+  it("轮终结清经 store 簿记⑧发射（setPendingUnregister 注入闭包；[subagent-observability §3.3.6] 按轮终事实产 SettlementReason——成功轮 completed）", async () => {
     const { deps, store } = makeDeps();
-    // [B5/U5 收尾] 注销由 store.markRoundIdle 簿记⑧统一发射（SubagentService 构造点
+    // [B5/U5 收尾] 结清由 store.markRoundIdle 簿记⑧统一发射（SubagentService 构造点
     // 注入 emitPendingUnregister；调用方薄壳不再双轨重复发）。
     const unregisterSpy = vi.fn();
     store.setPendingUnregister(unregisterSpy);
     const record = makeMinimalRecord({ id: "rec-emit" });
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
-    expect(unregisterSpy).toHaveBeenCalledWith("rec-emit", "running");
+    expect(unregisterSpy).toHaveBeenCalledWith("rec-emit", "completed");
   });
 
   it("不调 completeLegacyClosed：record 不冻结（endedAt / agentResult 仍 undefined）", async () => {
@@ -694,13 +694,13 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     expect(record.result).toBe("round did not complete: engine_round_crashed: x");
   });
 
-  it("D7 成功轮 lastError 不混入正文：空 content 成功轮兜底 '(no output this round)'（旧 lastError 混入形态退役）", async () => {
+  it("D7 成功轮 lastError 不混入正文：空 content 成功轮 result 原样空串（[subagent-observability §3.3.3 空正文语义]——无文本输出非异常，占位制造退役；旧 lastError 混入形态退役）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-success-no-mix" });
     record.lastError = "stale error from previous round";
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "" });
-    expect(record.result).toBe("(no output this round)");
+    expect(record.result).toBe("");
     expect(record.result).not.toContain("stale error");
   });
 
@@ -716,7 +716,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     expect(record.result).not.toBe("DONE");
   });
 
-  it("C1TC10: chatMode 空增量轮占位——record.result 固定 (no output this round)，不含上一轮文本（D5）", async () => {
+  it("C1TC10: 空增量轮 result 原样空串、不含上一轮文本（[subagent-observability §3.3.3 空正文语义]——D5 判定保持：不沿用旧值冒充本轮回复）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-increment-empty" });
     store.register(record);
@@ -724,11 +724,11 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     record.result = "PREV-ROUND-TEXT";
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "" });
     // 空增量轮通知不含上一轮文本：沿用旧值会让父 agent 误读为原样重复回复（D5 判定）
-    expect(record.result).toBe("(no output this round)");
+    expect(record.result).toBe("");
     expect(record.result).not.toContain("PREV-ROUND-TEXT");
   });
 
-  it("C1TC11 [R2-1]: 首轮空文本成功完成 → record.result 补占位（非 undefined）——[modeless 波1] 统一 chat 占位语义", async () => {
+  it("C1TC11 [R2-1]: 首轮空文本成功完成 → result = 空串（非 undefined 的轮终信号保持——[subagent-observability §3.3.3 空正文语义]）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-oneshot-empty" });
     store.register(record);
@@ -736,21 +736,20 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     // result 前值 undefined
     record.result = undefined;
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "" });
-    // [R2-1] 轮终信号优先：占位非 undefined 是 renderer hasRunning 排除轮终 running 的
-    // 判据——保持 undefined 会让完成注入后末位 turn 永久「工作中」。
-    // [modeless 波1] 占位统一「(no output this round)」（one-shot 分支的 "(empty)"
-    // 随 chatMode 消亡——万物可续下空轮语义即「本轮无输出」）。
-    expect(record.result).toBe("(no output this round)");
+    // [R2-1] 轮终信号优先：result 非 undefined 是完成判据位——空串承载「本轮无文本
+    // 输出」的如实语义（占位制造已随空正文语义退役；「本轮完成，无文本输出」的人读
+    // 文案归通知侧 §3.3.7）。
+    expect(record.result).toBe("");
   });
 
-  it("C1TC11b [R2-1]: 空文本轮不沿用前值（本轮无输出即如实占位——[modeless 波1] 与 D5 判定同族）", async () => {
+  it("C1TC11b [R2-1]: 空文本轮不沿用前值（本轮无输出即如实空串——D5 判定同族）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-oneshot-cont" });
     store.register(record);
     // 上一轮真实产出（本轮 record.result 前值）
     record.result = "first round output";
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "" });
-    // 空增量轮统一占位：沿用旧值会让父 agent 误读为原样重复回复（D5 判定同款）
-    expect(record.result).toBe("(no output this round)");
+    // 空增量轮不沿用旧值：沿用会让父 agent 误读为原样重复回复（D5 判定同款）
+    expect(record.result).toBe("");
   });
 });

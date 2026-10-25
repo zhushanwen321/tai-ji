@@ -6,10 +6,11 @@
  *
  * 不变量：
  * - INV-1: cwd 非空串检查（store 层兜底，service 层主检查）
- * - INV-2: 最多保留 6 条，淘汰 lastUsedAt 最小者
+ * - INV-2: 最多保留 6 条，淘汰 lastUsedAt 最小者（pinned 条目豁免淘汰，INV-6）
  * - INV-3: 同 cwd 不重复，更新 lastUsedAt
  * - INV-4: 文件损坏返空，不抛
  * - INV-5: 路径从 configDir 动态推导，无硬编码
+ * - INV-6: pinned 条目免 LRU 淘汰（用户固定目录不随最新使用刷走）；pin 上限 MAX_PINNED
  */
 
 import { join, dirname } from 'node:path'
@@ -22,6 +23,8 @@ import { atomicWrite } from '../../utils/fs-utils.js'
 import { isEnoent } from '../../utils/errors.js'
 
 const MAX_RECORDS = 6
+/** pin 上限（用户裁决 2026-10-22）：已达上限的 setPinned(pin) 拒绝（service 层降级返回当前列表） */
+const MAX_PINNED = 5
 const FILE_NAME = 'recent-workspaces.json'
 const JSON_INDENT = 2
 
@@ -50,12 +53,16 @@ export class RecentWorkspacesStore {
 
   /**
    * 记录一次工作区使用。INV-1 兜底：空串静默跳过。
-   * INV-3：同 cwd 覆盖更新（WriteBackCache.set 语义）。
+   * INV-3：同 cwd 合并更新——WriteBackCache.set 是整值替换，必须 spread 旧值保留既有
+   * 字段（pinned），否则已固定目录被再次选用即静默失固定（固定标记被新对象抹掉）；
+   * cwd/lastUsedAt/label 三字段由本方法刷新。
    */
   record(cwd: string): void {
     if (!cwd || cwd.trim() === '') return
 
+    const prev = this.cache.get(PARTITION_KEY, cwd)
     this.cache.set(PARTITION_KEY, cwd, {
+      ...prev,
       cwd,
       lastUsedAt: Date.now(),
       label: basename(cwd),
@@ -66,18 +73,47 @@ export class RecentWorkspacesStore {
   }
 
   /**
-   * 返回最近工作区列表，按 lastUsedAt 倒序，≤6 条。
+   * 返回最近工作区列表：pinned 条目置前（组内 lastUsedAt 倒序，≤MAX_PINNED），其余按
+   * lastUsedAt 倒序（≤MAX_RECORDS）——两区独立上限（淘汰只作用于未 pinned 区），前端据此
+   * 分组展示（「已固定」区 + 最近区）。
    */
   list(): RecentWorkspaceRecord[] {
     const keys = this.cache.keys(PARTITION_KEY)
-    const records: RecentWorkspaceRecord[] = []
+    const pinned: RecentWorkspaceRecord[] = []
+    const recent: RecentWorkspaceRecord[] = []
     for (const key of keys) {
       const record = this.cache.get(PARTITION_KEY, key)
-      if (record) records.push(record)
+      if (!record) continue
+      if (record.pinned) pinned.push(record)
+      else recent.push(record)
     }
-    // 按 lastUsedAt 倒序
-    records.sort((a, b) => b.lastUsedAt - a.lastUsedAt)
-    return records.slice(0, MAX_RECORDS)
+    const byRecency = (a: RecentWorkspaceRecord, b: RecentWorkspaceRecord) => b.lastUsedAt - a.lastUsedAt
+    pinned.sort(byRecency)
+    recent.sort(byRecency)
+    return [...pinned, ...recent.slice(0, MAX_RECORDS)]
+  }
+
+  /**
+   * pin/unpin 条目（INV-6）。条目不存在（pin 只对列表已有项，UI 保证）no-op 返回当前列表。
+   * pin 时超 MAX_PINNED 上限 → 拒绝（返回 false），列表不变。
+   *
+   * @returns 是否生效（false = 超上限拒绝；调用方降级返回当前列表，RPC 契约恒 resolve）
+   */
+  setPinned(cwd: string, pinned: boolean): boolean {
+    const record = this.cache.get(PARTITION_KEY, cwd)
+    if (!record) return true
+    if (pinned && !record.pinned && this.pinnedCount() >= MAX_PINNED) return false
+    this.cache.set(PARTITION_KEY, cwd, { ...record, pinned })
+    return true
+  }
+
+  /** 当前 pinned 条目数（上限检查用）。 */
+  private pinnedCount(): number {
+    let n = 0
+    for (const key of this.cache.keys(PARTITION_KEY)) {
+      if (this.cache.get(PARTITION_KEY, key)?.pinned) n++
+    }
+    return n
   }
 
   /**
@@ -142,24 +178,24 @@ export class RecentWorkspacesStore {
   }
 
   /**
-   * INV-2：超过 MAX_RECORDS 时淘汰 lastUsedAt 最小者。
-   * 在每次 record 后调用。
+   * INV-2：未 pinned 条目超过 MAX_RECORDS 时淘汰其中 lastUsedAt 最小者（INV-6：pinned
+   * 条目豁免淘汰——用户固定目录不随最新使用刷走，两区独立上限）。在每次 record 后调用。
    */
   private trim(): void {
     const keys = this.cache.keys(PARTITION_KEY)
-    if (keys.length <= MAX_RECORDS) return
-
-    // 找 lastUsedAt 最小的 key
+    let unpinnedCount = 0
     let oldestKey = ''
     let oldestTime = Infinity
     for (const key of keys) {
       const record = this.cache.get(PARTITION_KEY, key)
-      if (record && record.lastUsedAt < oldestTime) {
+      if (!record || record.pinned) continue
+      unpinnedCount++
+      if (record.lastUsedAt < oldestTime) {
         oldestTime = record.lastUsedAt
         oldestKey = key
       }
     }
-    if (oldestKey) {
+    if (unpinnedCount > MAX_RECORDS && oldestKey) {
       this.cache.delete(PARTITION_KEY, oldestKey)
     }
   }

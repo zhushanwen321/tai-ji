@@ -18,22 +18,32 @@ const SHARED_WORKFLOW_RUN_OUTCOMES = [
   'failed',
   'cancelled',
   'time_limited',
+  'partially_succeeded',
 ] as const satisfies readonly WorkflowRunOutcome[]
 
 describe('outcome 词表双包值级等价（[W2 D5] core ≡ shared）', () => {
-  it('core ALL_RUN_OUTCOMES 与 shared 词表成员逐成员一致（[D2] 后四值——done/time_limited）', () => {
+  it('core ALL_RUN_OUTCOMES 与 shared 词表成员逐成员一致（[D2] 四值 + [subagent-observability §3.3.8] 第五值）', () => {
     expect([...ALL_RUN_OUTCOMES].sort()).toEqual([...SHARED_WORKFLOW_RUN_OUTCOMES].sort())
     expect(ALL_RUN_OUTCOMES).toContain('time_limited')
+    // [subagent-observability §3.3.8] partially_succeeded 双侧同批扩值（成员交付结算派生）
+    expect(ALL_RUN_OUTCOMES).toContain('partially_succeeded')
     // [D2] interrupted 已移出 outcome（入 status 三态）——词表不含
     expect(ALL_RUN_OUTCOMES).not.toContain('interrupted')
   })
 
-  it('四值全表快照（词表扩缩值时本用例红——两侧同步显式重审）', () => {
-    expect([...ALL_RUN_OUTCOMES].sort()).toEqual(['cancelled', 'done', 'failed', 'time_limited'])
+  it('五值全表快照（词表扩缩值时本用例红——两侧同步显式重审）', () => {
+    expect([...ALL_RUN_OUTCOMES].sort()).toEqual([
+      'cancelled',
+      'done',
+      'failed',
+      'partially_succeeded',
+      'time_limited',
+    ])
     expect([...SHARED_WORKFLOW_RUN_OUTCOMES].sort()).toEqual([
       'cancelled',
       'done',
       'failed',
+      'partially_succeeded',
       'time_limited',
     ])
   })

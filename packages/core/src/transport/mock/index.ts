@@ -33,6 +33,7 @@ import type {
   PluginPrepareInstallReply, PluginConfirmInstallReply,
   SkillDirConfig, FileNode, RecommendedExtension, SubagentRecord, WorkflowRunRecord,
   SystemPromptConfig,
+  RetryableErrorRule,
   WorkflowRunEventsReply,
   WorkflowDagReply,
   TerminalConfig,
@@ -57,8 +58,9 @@ import type {
   UiLocale,
   Segment,
   ArchiveSummary,
+  SessionSurface,
 } from '@taiji/shared'
-import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS, DELIVERY_PREVIEW_MAX_CHARS, QUOTA_PRESETS } from '@taiji/shared'
+import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS, DELIVERY_PREVIEW_MAX_CHARS, QUOTA_PRESETS, RETRY_RULES_BASELINE } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
 import { fixtureProviders, fixtureSkills, fixtureAgents, fixtureExtensions, toCandidate } from './settings-data'
 import { MOCK_MODELS, mockModelToInfo, FILE_CANDIDATES } from './composer-data'
@@ -239,6 +241,62 @@ function pushSessionList(): void {
   events.dispatchGlobal({ type: 'config.sessions', id: nextId('sl'), payload: { groups: buildGroups(), archiveCount: mockArchives.length } })
 }
 
+// ── session.list 通用查询 mock（W4b，设计 §5-W4b「mock 侧合成方向」）────────────────
+//
+// 合成规则（与 runtime SessionListQueryService 同口径——filter 语义是契约，两侧不得漂移）：
+// - 侧栏条目 = buildGroups()（fixtureSessions，与 config.sessions 广播同源同口径）；
+// - btw 条目 = 从 mockBtwThreads 合成（W4b 起线进通用列表，取代 btw.list 拉取）：
+//   id = 线 sessionId（mock-btw-N）；cwd = 所属主会话 fixture cwd，孤儿 mainSid
+//   （fixture 无该主会话）取约定占位 `<mock>/btw-<线 sessionId>` 不留空；
+//   label = `btw-<序号>`（§3.4.3 可区分形态，同一主会话名下按创建次序编号——与 runtime
+//   按 createdAt 编号同形态）；status / lastActiveAt 取 mock 静态值（无语义时钟，
+//   不做实时派生：status 恒 'idle'，lastActiveAt 取主会话 fixture 值、孤儿落常量）。
+// - 过滤：surface 取正向谓词（缺省 = 全量）；mainSessionId 只对线条目生效。
+// - {surface:'sidebar'} 结果 = buildGroups() 原样（与 config.sessions 广播逐条一致，
+//   验收项 12② 的 mock 侧镜像）；线条目按创建序追加进所属 cwd 组（flatten 后最新线在
+//   末位，与 runtime / 旧 btw.list 的 autoSelect 语义一致）。
+
+/** 孤儿 mainSid（fixture 无该主会话）的 btw 线 lastActiveAt 静态兜底（无语义时钟可派）。 */
+const MOCK_BTW_ORPHAN_LAST_ACTIVE_AT = 0
+
+function buildBtwLineEntries(query: { surface?: SessionSurface; mainSessionId?: string }): SessionSummary[] {
+  const out: SessionSummary[] = []
+  for (const [mainSid, lines] of mockBtwThreads) {
+    if (query.mainSessionId !== undefined && mainSid !== query.mainSessionId) continue
+    const main = fixtureSessions.find((s) => s.id === mainSid)
+    lines.forEach((sessionId, idx) => {
+      out.push({
+        id: sessionId,
+        label: `btw-${idx + 1}`,
+        // 孤儿 mainSid 占位（归档/删除主会话不清 mockBtwThreads 的形态）——不留空 cwd
+        cwd: main?.cwd ?? `<mock>/btw-${sessionId}`,
+        status: 'idle',
+        lastActiveAt: main?.lastActiveAt ?? MOCK_BTW_ORPHAN_LAST_ACTIVE_AT,
+        surface: 'btw',
+      })
+    })
+  }
+  return out
+}
+
+function buildSessionListGroups(query: { surface?: SessionSurface; mainSessionId?: string }): SessionGroup[] {
+  const wantSidebar = query.surface === undefined || query.surface === 'sidebar'
+  const wantBtw = query.surface === undefined || query.surface === 'btw'
+  const byCwd = new Map<string, SessionSummary[]>()
+  const order: string[] = []
+  const push = (s: SessionSummary): void => {
+    const bucket = byCwd.get(s.cwd)
+    if (bucket) bucket.push(s)
+    else {
+      byCwd.set(s.cwd, [s])
+      order.push(s.cwd)
+    }
+  }
+  if (wantSidebar) for (const g of buildGroups()) for (const s of g.sessions) push(s)
+  if (wantBtw) for (const s of buildBtwLineEntries(query)) push(s)
+  return order.map((cwd) => ({ cwd, sessions: byCwd.get(cwd) as SessionSummary[] }))
+}
+
 // ── session 归档域 mock（session-archive 设计 D5；行为对齐 real 域四函数签名）──────────
 // mock 无磁盘搬移/压缩/簿记，归档单元 = 内存 mockArchives 数组派生视图（不变量 3 的 mock
 // 同构：列表恒等于数组扫描）。archive 同步落 archived 态条目（mock 无后台压缩任务可过渡，
@@ -387,7 +445,7 @@ function emit(sessionId: string, msg: ServerMessageUnion): void {
 // [u5a 退役] mock 的 `queue_update` 镜像链（mockQueues / emitQueueUpdate /
 // emitDrainAssistantTurn + TIMING.steerDrain）已随 `chat.steer` / `chat.followUp` 删除——
 // 该链唯一职责是喂 QueueBubble 的 queue_update 快照（u3b 退役该消费路径，u3c 转 session.delivery
-// 单源），删除后 mock 轨的提交链路只剩 submitDelivery（与真实 runtime 同通道）。
+// 单源），删除后 mock 层的提交链路只剩 submitDelivery（与真实 runtime 同通道）。
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -444,7 +502,7 @@ function zcodeMockCandidates(): import('@taiji/shared').ImportCandidate[] {
 // ── 发现 B（create 幂等化）mock 面：clientUuid → 已建 session ─────────────────
 // 行为对齐 runtime create-idempotency（同 uuid 重试返回已建 session 不重复建号 +
 // TTL 保留 + 容量上限驱逐最老）；mock 无 spawn，登记清单即内存派生视图。保持签名/行为
-// 双同构，防 mock 轨（VITE_MOCK UI 开发）把真实面已修的重复建号 bug 重新演一遍。
+// 双同构，防 mock 层（VITE_MOCK UI 开发）把真实面已修的重复建号 bug 重新演一遍。
 const MOCK_CREATE_IDEMPOTENCY_TTL_MS = 600_000
 const MOCK_CREATE_IDEMPOTENCY_MAX_ENTRIES = 256
 // taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：create clientUuid 幂等去重表
@@ -476,8 +534,8 @@ function recordMockCreate(clientUuid: string, session: SessionSummary): void {
 
 const sessionImpl = {
   /**
-   * session trace 条目清单全量（session-trace，design D4）。mock 轨道无真实 JSONL/pi 进程，
-   * 恒返回 empty 快照（Trace 视图空态）；real 轨道走 runtime A1 混合路由。
+   * session trace 条目清单全量（session-trace，design D4）。mock 层道无真实 JSONL/pi 进程，
+   * 恒返回 empty 快照（Trace 视图空态）；真实进程层道走 runtime A1 混合路由。
    * 与 real domain 同接口（api/index 门面三元要求两侧同构）。
    */
   async getTraceEntries(sessionId: string): Promise<import('@taiji/shared').ServerMessageMap['session.traceEntries']> {
@@ -485,8 +543,8 @@ const sessionImpl = {
     return { sessionId, source: 'empty', entries: [], malformed: [] }
   },
   /**
-   * 现取当前 system prompt（session-trace §3.1 失败路径，C2）。mock 轨道无 pi 进程，
-   * 恒 reject session_not_active（与 real 轨道「非活跃 session」错误路径同形，供 UI
+   * 现取当前 system prompt（session-trace §3.1 失败路径，C2）。mock 层道无 pi 进程，
+   * 恒 reject session_not_active（与 真实进程层道「非活跃 session」错误路径同形，供 UI
    * 错误态演示）。与 real domain 同接口（api/index 门面三元要求两侧同构）。
    */
   async fetchCurrentSystemPrompt(sessionId: string): Promise<import('@taiji/shared').ServerMessageMap['session.currentSystemPrompt']> {
@@ -506,15 +564,29 @@ const sessionImpl = {
   },
 
   /**
+   * 通用列表查询（W4b，设计 §5-W4b mock 侧合成方向）：按 surface / mainSessionId 过滤。
+   * 侧栏条目 = buildGroups()（与 list()/config.sessions 广播同源）；btw 条目从
+   * mockBtwThreads 合成（线进通用列表——取代 btw.list；mock 的 btw.list 实现随本波退役）。
+   * 过滤/合成规则见文件头部 buildSessionListGroups 注释（与 runtime 同口径）。
+   */
+  async listSessions(query: { surface?: SessionSurface; mainSessionId?: string }): Promise<SessionGroup[]> {
+    await sleep(TIMING.ack)
+    return buildSessionListGroups(query)
+  },
+
+  /**
    * [G4 锚定 SessionDomain] 参数与 real 域 create 全等（含 override 四参 + clientUuid）。
-   * override 生效范围（对齐 real 关键语义，落 SessionSummary 可断言）：
+   * 生效范围（对齐 real 关键语义，落 SessionSummary 可断言）：
    * presetId → launchPresetId（real create 即锁预设进 summary）、projectId → projectId
-   * （D14 归属）、modelOverride → modelId、thinkingOverride → thinkingLevel（Landing Chip
-   * 覆盖值）。mock 无 pi/runtime，仅内存派生视图，不追求全仿真。
+   * （D14 归属）。modelOverride / thinkingOverride 两参保留（签名与 real 域全等，
+   * [G4] 参数契约）但**不再落 SessionSummary**——W3 起三状态字段（modelId /
+   * thinkingLevel / tokenCount）已从 SessionSummary 删除（状态归 live-state 状态层，
+   * 列表只承载导航），mock 无 live-state，override 终值经 composer launchConfig
+   * 解析链呈现，不回写列表条目。
    * clientUuid（发现 B）：同 uuid 幂等命中返回已建 session（不重复建号/不重复广播），
    * 见本文件 mockCreateByClientUuid 说明。
    */
-  async create(cwd?: string, label?: string, presetId?: string, projectId?: string, modelOverride?: string, thinkingOverride?: ThinkingLevel, clientUuid?: string): Promise<SessionSummary> {
+  async create(cwd?: string, label?: string, presetId?: string, projectId?: string, _modelOverride?: string, _thinkingOverride?: ThinkingLevel, clientUuid?: string): Promise<SessionSummary> {
     await sleep(TIMING.ack)
     if (clientUuid !== undefined) {
       const existing = dedupeMockCreate(clientUuid)
@@ -523,8 +595,6 @@ const sessionImpl = {
     const s = createSession(cwd, label)
     if (presetId !== undefined) s.launchPresetId = presetId
     if (projectId !== undefined) s.projectId = projectId
-    if (modelOverride !== undefined) s.modelId = modelOverride
-    if (thinkingOverride !== undefined) s.thinkingLevel = thinkingOverride
     if (clientUuid !== undefined) recordMockCreate(clientUuid, s)
     fixtureSessions.push(s)
     // 模拟 runtime create 后 broadcastSessionList（server-push 全量分组）
@@ -536,9 +606,10 @@ const sessionImpl = {
    * Mock fork：模拟 runtime 截断 + 新进程，返回新 session。
    * mock 模式无真实 JSONL 截断，仅创建空 session（历史由前端 selectSession 拉）。
    * [G4 锚定 SessionDomain] 类型锚定保证与 real 域 fork 签名全等（编译强制，不再靠注释承诺）。
-   * override 生效范围同 create（modelOverride → modelId / thinkingOverride → thinkingLevel，
-   * ADR-0056 Staging Mode 覆盖优先于源 preset）；血缘字段落 parentSession（FR-20 fallback 键：
-   * mock 无 sessionFile，恒用源 sessionId）+ forkEntryId；projectId 继承父归属（real fork 同语义）。
+   * override 两参（modelOverride / thinkingOverride）保留签名全等但不再落
+   * SessionSummary（W3 三状态字段删除，语义同 create）；血缘字段落 parentSession
+   * （FR-20 fallback 键：mock 无 sessionFile，恒用源 sessionId）+ forkEntryId；
+   * projectId 继承父归属（real fork 同语义）。
    */
   async fork(
     srcSessionId: string,
@@ -556,8 +627,6 @@ const sessionImpl = {
     const src = fixtureSessions.find((s) => s.id === srcSessionId)
     const cwd = src?.cwd
     const s = createSession(cwd, opts?.label)
-    if (opts?.modelOverride !== undefined) s.modelId = opts.modelOverride
-    if (opts?.thinkingOverride !== undefined) s.thinkingLevel = opts.thinkingOverride
     if (src?.projectId) s.projectId = src.projectId
     s.parentSession = srcSessionId
     if (opts?.piEntryId !== undefined) s.forkEntryId = opts.piEntryId
@@ -702,7 +771,7 @@ const sessionImpl = {
       fixtureSessions.unshift(session)
     }
     pushSessionList()
-    return session ?? { id: sessionId, label: `label-${sessionId}`, cwd: '/mock', status: 'idle', lastActiveAt: Date.now(), modelId: '', tokenCount: 0 }
+    return session ?? { id: sessionId, label: `label-${sessionId}`, cwd: '/mock', status: 'idle', lastActiveAt: Date.now() }
   },
 
   /** Mock 彻底删除：mockArchives 移除条目 + 广播（无 keep-all 分支可触发，恒干净删除）。 */
@@ -724,10 +793,13 @@ const sessionImpl = {
     return mockArchives.map((a) => ({ ...a }))
   },
 
-  /** 设置思考等级（mock：持久到 fixture session.thinkingLevel；回执生效值形状对齐协议修型 U6） */
+  /**
+   * 设置思考等级（mock：回执生效值形状对齐协议修型 U6）。
+   * W3 起 SessionSummary.thinkingLevel 字段已删（状态归 live-state 状态层，mock 无
+   * 状态层），不再持久到 fixture session；回执原样返回请求值（mock 无 pi，生效值 =
+   * 请求值回显，与 switchModel 同口径）。
+   */
   async setThinkingLevel(sessionId: string, level: string): Promise<{ sessionId: string; level: string }> {    await sleep(TIMING.ack)
-    const target = fixtureSessions.find((s) => s.id === sessionId)
-    if (target) target.thinkingLevel = level
     return { sessionId, level }
   },
 
@@ -822,9 +894,9 @@ const sessionImpl = {
 
   /**
    * Mock 子代理引擎配置视图（[G4 锚定补齐]：锚定前 mock 缺此成员）。mock 无 engines.json
-   * 基建，返回空清单 + 空 default（Settings「子代理」页 mock 轨展示空态）。
+   * 基建，返回空清单 + 空 default（Settings「子代理」页 mock 层展示空态）。
    * engine-provider-unification D5：engineModels/engineDefaults 显式空表/空偏好——与协议
-   * 缺省语义等价（optional 键缺失 = 空），mock 轨不带可用模型数据。
+   * 缺省语义等价（optional 键缺失 = 空），mock 层不带可用模型数据。
    */
   async getSubagentEngineConfig(): Promise<ServerMessageMap['session.subagentEngineConfig']> {
     await sleep(TIMING.ack)
@@ -839,7 +911,7 @@ const sessionImpl = {
 
   /**
    * Mock per-engine 默认模型偏好写入（engine-provider-unification D5）：回执 = 请求值回显
-   * （setSubagentDefaultEngine mock 同模式）；无持久化/无清单校验（mock 轨 engineModels 恒空，
+   * （setSubagentDefaultEngine mock 同模式）；无持久化/无清单校验（mock 层 engineModels 恒空，
    * 无校验数据源）。
    */
   async setSubagentEngineDefaultModel(
@@ -926,7 +998,7 @@ const sessionImpl = {
   /**
    * Mock importCandidates：source 显式判别（与 importSession 分支策略收敛，r-审查
    * P3——real 侧 resolveSource 未知 source 抛 import_source_missing，mock 否决式分支
-   * 曾把缺省/pi/未知合并返回空集不同构）：缺省/'pi' 恒空候选集（mock 轨道无外部
+   * 曾把缺省/pi/未知合并返回空集不同构）：缺省/'pi' 恒空候选集（mock 层道无外部
    * pi sessions 目录可扫）；'zcode' 返回硬编码 zcode 形态候选（sess_ 前缀
    * sessionId + dirLabel 聚合，驱动导入对话框两阶段视图 mock 模式开发）；其余字面量
    * （WS JSON 注入的类型外运行时值）抛 import_source_missing。不模拟 query 过滤——
@@ -1040,7 +1112,7 @@ const chatImpl = {
    * （fixture 无窗口概念，恒返回全量——与 truncated=false 一致）；类型引 real 域 HistoryQuery
    *（G4 锚定，杜绝内联形状漂移）。
    */
-  async getHistory(sessionId: string, _query?: realChatDomain.HistoryQuery): Promise<{ messages: Message[]; truncated: boolean; loadedTurns: number; totalTurnsEstimate: number }> {
+  async getHistory(sessionId: string, _query?: realChatDomain.HistoryQuery): Promise<realChatDomain.HistoryResult> {
     await sleep(TIMING.ack)
     const messages = (fixtureMessages[sessionId] ?? []).map((m) => ({ ...m }))
     return { messages, truncated: false, loadedTurns: messages.filter((m) => m.role === 'user').length, totalTurnsEstimate: messages.filter((m) => m.role === 'user').length }
@@ -1105,7 +1177,7 @@ const chatImpl = {
   // 让开发者能看到 loading 态（spinner + 取消按钮）。
   // 不模拟真实 shell 输出（与 send 的 mock 策略一致——只驱动 UI 状态机，不验证业务逻辑）。
   // happy path：普通命令 → exitCode:0 + '(mock) <command>'（保留原有行为，不破坏）。
-  // 回执（bash 投递可靠性契约）：mock 全分支都「已执行并收尾」→ settled（与 real 轨
+  // 回执（bash 投递可靠性契约）：mock 全分支都「已执行并收尾」→ settled（与 真实进程层
   // ChatApiPort.bash 同契约）。
   async bash(sessionId: string, command: string, excludeFromContext?: boolean): Promise<BashDispatchReceipt> {
     await sleep(TIMING.ack)
@@ -1219,6 +1291,27 @@ const chatImpl = {
   async resyncDelivery(sessionId: string, _clientUuids: string[]): Promise<ServerMessageMap['delivery.resync']> {
     await sleep(TIMING.ack)
     return { sessionId, deduped: [] }
+  },
+
+  /**
+   * peek / edit mock（chat-flow-consistency D6）：同「不伪造投递事实」哲学——mock 无服务端
+   * 内核（submitDelivery 帧是呈现模拟，无条目持有语义），peek 如实答 found=false、edit 如实
+   * 答 not-found；编辑发送链据此走「按普通新消息发出」的降级通路（mock 模式下 ✎ 编辑 =
+   * 编辑草稿后正常发送，行为连贯不阻塞）。
+   */
+  async peekDelivery(_sessionId: string, clientUuid: string): Promise<ServerMessageMap['delivery.peek']> {
+    await sleep(TIMING.ack)
+    return { clientUuid, found: false }
+  },
+
+  async editDelivery(
+    _sessionId: string,
+    clientUuid: string,
+    _content: string,
+    _segments?: Segment[],
+  ): Promise<ServerMessageMap['delivery.edit']> {
+    await sleep(TIMING.ack)
+    return { clientUuid, edited: false, reason: 'not-found' }
   },
 
   // [u5a/MF-1-8 退役] `steer` / `followUp` mock 镜像已删除（连同其 queue_update 镜像链，见上方注）：
@@ -1355,6 +1448,16 @@ const terminalSub = makeMockSubscription(() => ({ config: defaultTerminalConfig(
 // 网络代理配置订阅（llm-network-proxy U4：模拟 config.networkProxy 广播；初始推内存态）。
 const networkProxySub = makeMockSubscription(() => ({ config: cloneMockNetworkProxyConfig() }))
 
+// retry-rules mock 内存态（get/set/onRetryRules 消费；builtin 快照自 shared 基线）
+let mockRetryRulesCustom: RetryableErrorRule[] = []
+const retryRulesSub = makeMockSubscription(() => ({
+  builtinRules: structuredClone(RETRY_RULES_BASELINE) as RetryableErrorRule[],
+  customRules: structuredClone(mockRetryRulesCustom),
+}))
+function mockRetryRulesBuiltin(): RetryableErrorRule[] {
+  return structuredClone(RETRY_RULES_BASELINE) as RetryableErrorRule[]
+}
+
 const configImpl = {
   // 请求型：直接返 fixture 深拷贝（不依赖 sub）。
   // scoped-model D7：与真实门面同形返回 { providers, scopedModels }，scopedModels 与
@@ -1381,7 +1484,7 @@ const configImpl = {
     await sleep(TIMING.ack)
   },
   // quota presets 合并视图：mock 无 remote-config 层，返编译期基线（与 runtime
-  // listQuotaPresets() 的「远程 presets ?? 基线」同口径——mock 轨额度类型下拉非空）。
+  // listQuotaPresets() 的「远程 presets ?? 基线」同口径——mock 层额度类型下拉非空）。
   async listQuotaPresets(): Promise<QuotaPreset[]> {
     await sleep(TIMING.ack)
     return QUOTA_PRESETS
@@ -1500,7 +1603,7 @@ const configImpl = {
     defaultsSub.broadcast(`${provider}/${modelId}`)
   },
   /**
-   * 上报 UI 语言（u-locale-channel 的 mock 轨对齐）：ack 即成功，**不落盘**——mock 无真实
+   * 上报 UI 语言（u-locale-channel 的 mock 层对齐）：ack 即成功，**不落盘**——mock 无真实
    * 数据目录也无 extension 读取方，仅保证门面同构（ConfigDomainParamsExact 编译期锁定）。
    */
   async setUiLocale(_locale: UiLocale): Promise<void> {
@@ -1523,7 +1626,7 @@ const configImpl = {
   },
   /**
    * [G4 锚定 ConfigDomain] 返回类型补齐：real scanSkills 返回扫描结果 ScannedSkillInfo[]
-   * （锚定前 mock 返回 void，调用方读返回值在 mock 轨静默 undefined）。mock 无真实文件系统
+   * （锚定前 mock 返回 void，调用方读返回值在 mock 层静默 undefined）。mock 无真实文件系统
    * 扫描，返回空结果（空 sources 扫描的同形语义）；skillsSub 广播照旧驱动订阅演示。
    */
   async scanSkills(_sources: string[]): Promise<ScannedSkillInfo[]> {
@@ -1666,7 +1769,7 @@ const configImpl = {
   onTerminalConfig: (h: (config: TerminalConfig, corrupted: boolean) => void) =>
     terminalSub.subscribe((p) => h(p.config, p.corrupted)),
   // ── 重试配置（[G4 锚定补齐]：锚定前 mock 缺 getRetryConfig/setRetryConfig/onRetryConfig，
-  //    Settings 重试页在 mock 轨调用会 crash）──
+  //    Settings 重试页在 mock 层调用会 crash）──
   // mock 内存态 stub：get 恒 configured=false（无 config.json 条目的同形语义）、set 回显
   // configured=true；不持久化、不广播（onRetryConfig no-op）——登记 docs/TEST-STRATEGY.md §5。
   async getRetryConfig(): Promise<{ config: LlmRetryConfig; configured: boolean }> {
@@ -1679,6 +1782,22 @@ const configImpl = {
     return { config: mockRetryConfig, configured: true }
   },
   onRetryConfig: (_h: (payload: { config: LlmRetryConfig; configured: boolean }) => void) => () => {},
+  // ── 重试规则（subagent-observability §3.3.12：mock 内存态 stub，与 retry 域同构）——
+  // get 回内存态（builtin = shared RETRY_RULES_BASELINE 快照）、set 深拷贝后广播
+  // config.retryRules；不持久化（真实合并/落盘归 runtime remote-config 域 3）。
+  async getRetryRules(): Promise<{ builtinRules: RetryableErrorRule[]; customRules: RetryableErrorRule[] }> {
+    await sleep(TIMING.ack)
+    return { builtinRules: mockRetryRulesBuiltin(), customRules: mockRetryRulesCustom }
+  },
+  async setRetryRules(customRules: RetryableErrorRule[]): Promise<{ builtinRules: RetryableErrorRule[]; customRules: RetryableErrorRule[] }> {
+    await sleep(TIMING.ack)
+    mockRetryRulesCustom = structuredClone(customRules)
+    const view = { builtinRules: mockRetryRulesBuiltin(), customRules: structuredClone(mockRetryRulesCustom) }
+    retryRulesSub.broadcast(view)
+    return view
+  },
+  onRetryRules: (h: (payload: { builtinRules: RetryableErrorRule[]; customRules: RetryableErrorRule[] }) => void) =>
+    retryRulesSub.subscribe((p) => h(p)),
   // ── 网络代理（llm-network-proxy U4：mock 内存态 stub，与 real domains/config 同构；
   //    G4 参数全等断言强制五方法 + 订阅签名对齐）──
   // get 回内存态、set 深拷贝后广播 config.networkProxy；test 恒成功（message/耗时为演示值）；
@@ -1722,7 +1841,7 @@ let mockNetworkProxyConfig: NetworkProxyConfig = {
   rules: [],
   ipv4Only: [],
 }
-// 统计演示行（非零双通道示例，mock 轨统计卡可演示计数条；reset 清空）
+// 统计演示行（非零双通道示例，mock 层统计卡可演示计数条；reset 清空）
 let mockNetworkProxyStats: NetworkProxyStats[] = [
   { host: 'api.anthropic.com', proxied: 12, direct: 0 },
   { host: 'openrouter.ai', proxied: 4, direct: 8 },
@@ -2002,7 +2121,7 @@ export const search = {
    * 按查询过滤四类数据，空查询返回 recent + suggested。
    * W1 i18n-frontend-p2：返回 Section[] 带 kind 字段（recent/suggested/command/file/symbol/session），
    * 供 SearchModal kind-based 判定用（不再依赖中文字面量 s.label === '最近' 比较）。
-   * label 仍为本地化文案（mock 内联 zh-CN 默认值，real 轨 useSearch 统一走 i18n.t）。
+   * label 仍为本地化文案（mock 内联 zh-CN 默认值，真实进程层 useSearch 统一走 i18n.t）。
    */
   async query(q: string): Promise<Section[]> {
     await sleep(TIMING.ack)
@@ -2218,7 +2337,7 @@ export const quota: QuotaDomain = quotaImpl
 
 /* ── Usage mock（[C3] usage.getStats seam 收编配套：settings 页用量统计全 seam 可用）── */
 // mock 无 session JSONL 扫描，返回小型 fixture（2 条日级用量行）让 UsagePage 演示链路完整；
-// real 轨扫真实会话聚合。
+// 真实进程层扫真实会话聚合。
 const MOCK_USAGE_INPUT_TOKENS = 12_000
 const MOCK_USAGE_OUTPUT_TOKENS = 3_400
 const MOCK_USAGE_CACHE_READ_TOKENS = 8_000
@@ -2262,9 +2381,20 @@ const workspaceImpl = {
     // Mock record：模拟写入后返回最新列表（与 listRecent 一致，简化实现）
     return listRecentRecords()
   },
-  // detect：mock 恒返 not-repo（三态检测，real 轨驱动）
+  // detect：mock 恒返 not-repo（三态检测，真实进程层驱动）
   async detect(_cwd: string): Promise<import('@taiji/shared').ServerMessageMap['workspace.detected']> {
     return { mode: 'not-repo', wsRoot: '', barePath: '', repoRoot: '', defaultBranch: '' }
+  },
+  // setPinned：mock 无持久化，恒返回当前列表 + applied=true（E2E 只验 UI 链路）
+  async setPinned(
+    _cwd: string,
+    _pinned: boolean,
+  ): Promise<{ records: import('@taiji/shared').RecentWorkspaceRecord[]; degraded?: boolean }> {
+    return { records: listRecentRecords() }
+  },
+  // defaultSessionDir：mock 返回固定演示路径（真实路径由 runtime 动态推导）
+  async defaultSessionDir(): Promise<string> {
+    return '/tmp/taiji-mock/defaultSession'
   },
 }
 
@@ -2273,7 +2403,7 @@ export type WorkspaceDomainParamsExact = AssertExact<DomainParamsExact<Workspace
 export const workspace: WorkspaceDomain = workspaceImpl
 
 // project 域 mock 占位（D14，2026-08-04）：mock 模式无 runtime，project 列表回退默认空态。
-// 与 real 轨 api/domains/project.ts 签名同构（load/save），避免门面三元崩溃。
+// 与 真实进程层 api/domains/project.ts 签名同构（load/save），避免门面三元崩溃。
 const projectImpl = {
   async load(): Promise<import('@taiji/shared').ProjectStoreState> {
     return { projects: [], activeProjectId: '' }
@@ -2290,7 +2420,7 @@ export type ProjectDomainParamsExact = AssertExact<DomainParamsExact<ProjectDoma
 export const project: ProjectDomain = projectImpl
 
 // preset 域 mock（pi-launch-presets wave1）：返回内置预设目录 + 默认全工具模式 id。
-// 与 real 轨 api/domains/preset.ts 签名同构（list/getDefault/setDefault + CRUD），避免门面三元崩溃。
+// 与 真实进程层 api/domains/preset.ts 签名同构（list/getDefault/setDefault + CRUD），避免门面三元崩溃。
 // mock 无自定义预设持久化（CRUD 只改内存），但**内置目录必须非空**：模式可见性三态判定
 // （u5 设计 D5）把「presets 空 + 无错误」当「未加载 → 不渲染」，空列表会让非默认模式会话的
 // chip / 声明行永远落不到正常分支——[u7a] 补 DEFAULT_PRESETS 后 mock fixture 的
@@ -2327,41 +2457,44 @@ export type PresetDomainParamsExact = AssertExact<DomainParamsExact<PresetDomain
 export const preset: PresetDomain = presetImpl
 
 // ── btw 域 mock（btw-question D6，M2-a）─────────────────────────────────────
-// in-memory 线注册表（mainSid → 有序 vid 列表）：create 建线 / list 枚举 / remove 关线，
-// 与 real 域同接口（门面三元要求两侧同构）。vid 形态 = `btw:<piSessionId>` 两段式——生产方
-// 工厂 SSOT = shared virtual-session-id.ts 的 btwVirtualId；mock 不校验值域、不依赖工厂，
-// 字面形态仅驱动 UI 状态机（注册表按 mainSid 分区，多主会话互不串）。
+// in-memory 线注册表（mainSid → 有序线 session id 列表）：create 建线 / list 枚举 / remove
+// 关线，与 real 域同接口（门面三元要求两侧同构）。W4a 键统一：线 id = pi 真实会话 id形态
+// （`btw:<piSessionId>` 两段式虚拟 id 已退役）——mock 不校验值域、不依赖工厂，字面形态
+// 仅驱动 UI 状态机（注册表按 mainSid 分区，多主会话互不串）。
 // taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：mock btw 线注册表
 const mockBtwThreads = new Map<string, string[]>()
 let mockBtwSeq = 0
 
+// W4b 收编（设计 §5-W4b 四步之③）：原 mock 侧 session.surfaces 广播（pushSurfaces，W4a
+// 判别器通道 mock 接线）随该消息按协议收缩删除——renderer 抑制类判别改读 session.list
+// {surface:'btw'} 拉取缓存，create/remove 后不再重播派生视图帧。
+
 const btwImpl = {
   /**
-   * 建线：vid 递增 + 登记进 mainSid 名下。mock 无 pi fork 面，forkState 恒 'full'（分支①）
+   * 建线：线 session id 递增 + 登记进 mainSid 名下。mock 无 pi fork 面，forkState 恒 'full'（分支①）
    * ——truncated/none 两支的真实三分叉归 runtime BtwService（M1-b），显式登记非静默丢弃。
    */
   async create(mainSid: string): Promise<ServerMessageMap['btw.create']> {
     await sleep(TIMING.ack)
     mockBtwSeq += 1
-    const vid = `btw:mock-${mockBtwSeq}`
+    // W4a 键统一：线 session id = pi 真实 id 形态（mock 无 pi，用可读确定串；chatStore
+    // 分区键 / drawer 选中态 / data-session-id 选择器全按同一形态驱动）。
+    const sessionId = `mock-btw-${mockBtwSeq}`
     const threads = mockBtwThreads.get(mainSid) ?? []
-    threads.push(vid)
+    threads.push(sessionId)
     mockBtwThreads.set(mainSid, threads)
-    return { vid, mainSid, forkState: 'full' }
+    return { sessionId, mainSid, forkState: 'full' }
   },
 
-  /** 线枚举：该 mainSid 名下全量线列表（map 新对象——mock 惯例 fixture 快照隔离）。 */
-  async list(mainSid: string): Promise<ServerMessageMap['btw.list']['threads']> {
-    await sleep(TIMING.ack)
-    return (mockBtwThreads.get(mainSid) ?? []).map((vid) => ({ vid }))
-  },
+  // 线枚举（btw.list）已随 W4b 退役：线列表改走 session.list {surface:'btw', mainSessionId}
+  // （btw 进通用列表，设计 §5-W4b）——mock 与 real 域同批删除本成员，双门面保持同构。
 
   /** 关线：命中即移除；未命中 no-op resolve（mock 不模拟失败——v1 永远成功口径；
-   *  真实 runtime 对未知 vid 的语义由 M2-b handler 裁决，此处不预设）。 */
-  async remove(vid: string): Promise<void> {
+   *  真实 runtime 对未知线 id 的语义由 M2-b handler 裁决，此处不预设）。 */
+  async remove(sessionId: string): Promise<void> {
     await sleep(TIMING.ack)
     for (const threads of mockBtwThreads.values()) {
-      const idx = threads.indexOf(vid)
+      const idx = threads.indexOf(sessionId)
       if (idx !== -1) {
         threads.splice(idx, 1)
         return
@@ -2420,8 +2553,8 @@ const ttsImpl = {
   },
 
   /**
-   * mock 恒以 tts_not_configured 失败（与 real 轨「未配置」错误路径同形，供按钮/toast
-   * 状态机与错误码→i18n 映射在 mock 轨开发；真实合成链验收归 runtime 轨）。
+   * mock 恒以 tts_not_configured 失败（与 真实进程层「未配置」错误路径同形，供按钮/toast
+   * 状态机与错误码→i18n 映射在 mock 层开发；真实合成链验收归 runtime 层）。
    */
   async speak(_payload: { sessionId?: string; text: string }): Promise<ServerMessageMap['tts.speak:result']> {
     await sleep(TIMING.ack)

@@ -1,8 +1,8 @@
 /**
- * skill-reload real 轨共享 helper（skill-reload-survival / -askuser / -spawn-race /
+ * skill-reload 真实进程层共享 helper（skill-reload-survival / -askuser / -spawn-race /
  * workflow-disconnect-recovery 四 spec 共用）。
  * 来源设计：skill-reload-nondestructive §4（S1/S1b/S2）+
- * reload-closeout-reliability §4（A1 断言升级 / A2）；faux LLM 轨
+ * reload-closeout-reliability §4（A1 断言升级 / A2）；faux LLM 层
  * 装配复用 launch-app-real（L2.5，凭证无关零 token——选型理由见 e2e-map.json E2E-SKILLRELOAD-* note）。
  *
  * ── 各断言的「样本来源」（全部 grep/读源码核实，非推断）──
@@ -36,7 +36,7 @@
  *   触发 = 行中空白后 `/`（非换行空白 + `/`，空 query 合法——dom-core skill-trigger.test.ts 锁定语义）。
  * - 托盘：`[data-testid="tray-builtin-button"][data-kind="workflow"]` +
  *   `[data-testid="tray-builtin-count"]`（ComposerTray.vue:81/106-110；data-state running|idle）。
- * - 引擎 CLI 进程 marker：`pi-subagent-cli.mjs`（faux 轨 seedFauxDataDir 的 subagents/config.json
+ * - 引擎 CLI 进程 marker：`pi-subagent-cli.mjs`（faux 层 seedFauxDataDir 的 subagents/config.json
  *   command/args，launch-app-real.ts:185-193）；真实 pi 子进程 marker：bundled pi 二进制
  *   `resources/pi/`（findPiExecutable 缺省）。
  * - 项目 skill 目录 `<cwd>/.pi/skills` 进扫描集与 watch 集：services/skill-dirs.ts:39/95
@@ -121,7 +121,7 @@ export function writeGlobalSkill(dataDir: string, name: string, description: str
  */
 export function makeSurvivalProbeSource(scriptName: string, model: string, description: string): string {
   return [
-    `// ${scriptName} — skill-reload real 轨探针（e2e 运行期生成，非 repo fixture）`,
+    `// ${scriptName} — skill-reload 真实进程层探针（e2e 运行期生成，非 repo fixture）`,
     '/* @pi-meta',
     `name: ${scriptName}`,
     `description: ${description}`,

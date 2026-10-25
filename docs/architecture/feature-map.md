@@ -57,7 +57,7 @@
 | 清理挂点 | `packages/runtime/src/services/session/session-entry-removal.ts`（真删除汇聚点清理 `lastViewedAt` 条目） |
 | checkpoint 持久化 | `packages/runtime/src/services/session/runtime-checkpoint.ts`（`lastViewedAt` 条目字段，随 checkpoint 快照写入/读取） |
 | 过滤消费 | `packages/runtime/src/services/startup-reattach.ts` `shouldReattachEntry`（`lastViewedAt` 30min 窗口；活跃窗口常量 = 同文件 `REATTACH_ACTIVE_IDLE_MS` / `REATTACH_ACTIVE_VIEWED_MS`） |
-| 已退役面 | reaper 模块 / `reclaimManagedSession` / `TAIJI_RUNTIME_PI_RECLAIM_*` 阈值与环境旋钮 / real-pi 回收集成测试均不存在（ADR-0122 清查登记见 `docs/todo/defense-mechanism-cleanup.md`） |
+| 已退役项 | reaper 模块 / `reclaimManagedSession` / `TAIJI_RUNTIME_PI_RECLAIM_*` 阈值与环境旋钮 / real-pi 回收集成测试均不存在（ADR-0122 保留白名单段；清查登记原 defense-mechanism-cleanup.md 已删除，git 历史可追溯） |
 | 历史字段 | `packages/shared/src/crash-journal-schema.ts` 的 `reclaimed` 事件与 `idleMs` / `lastViewedAt` 字段保留，仅供旧 journal 解析，无新写入方 |
 
 ---

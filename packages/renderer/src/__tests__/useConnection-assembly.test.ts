@@ -54,7 +54,6 @@ function installTestPlatform(): void {
         return socket
       },
     },
-    ipc: null,
   })
 }
 

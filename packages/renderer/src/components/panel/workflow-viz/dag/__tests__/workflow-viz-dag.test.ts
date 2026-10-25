@@ -10,7 +10,8 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/workflow-viz/dag/__tests__/workflow-viz-dag.test.ts
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import type { WorkflowAgentCall, WorkflowDag, WorkflowDagNode } from '@taiji/shared'
 import WorkflowVizDag from '../WorkflowVizDag.vue'
@@ -52,6 +53,14 @@ function mountDag(dagInput: WorkflowDag | null = sampleDag(), props: Record<stri
   return mount(WorkflowVizDag, {
     props: { dag: dagInput, ...props },
   })
+}
+
+/** 解析 viewport transform（jsdom 下数值断言用，避免浮点字面量碎支）。 */
+function readViewport(wrapper: ReturnType<typeof mountDag>): { k: number; tx: number; ty: number } {
+  const raw = wrapper.find('[data-testid="wfvz-dag-viewport"]').attributes('transform') ?? ''
+  const m = raw.match(/translate\((-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\) scale\((\d+(?:\.\d+)?)\)/)
+  expect(m).not.toBeNull()
+  return { tx: Number(m?.[1]), ty: Number(m?.[2]), k: Number(m?.[3]) }
 }
 
 describe('WorkflowVizDag 画布（黑盒 DOM）', () => {
@@ -225,14 +234,6 @@ describe('WorkflowVizDag 节点级渲染边界与零节点形态', () => {
 })
 
 describe('WorkflowVizDag 视口 fit-to-view（2026-10 用户裁决：默认打开全图居中、四周 FIT_PAD_PX 留白）', () => {
-  /** 解析 viewport transform（jsdom 下数值断言用，避免浮点字面量碎支）。 */
-  function readViewport(wrapper: ReturnType<typeof mountDag>): { k: number; tx: number; ty: number } {
-    const raw = wrapper.find('[data-testid="wfvz-dag-viewport"]').attributes('transform') ?? ''
-    const m = raw.match(/translate\((-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\) scale\((\d+(?:\.\d+)?)\)/)
-    expect(m).not.toBeNull()
-    return { tx: Number(m?.[1]), ty: Number(m?.[2]), k: Number(m?.[3]) }
-  }
-
   it('无布局环境（jsdom clientWidth/Height 缺失）退化为 k=1 贴左上，渲染不破坏', () => {
     const wrapper = mountDag()
     expect(wrapper.find('[data-testid="wfvz-dag-viewport"]').attributes('transform')).toBe('translate(0,0) scale(1)')
@@ -291,6 +292,159 @@ describe('WorkflowVizDag 视口 fit-to-view（2026-10 用户裁决：默认打�
     expect(vp.k).toBeCloseTo((200 - 40) / 352, 6)
     expect(vp.ty).toBeCloseTo(20, 6)
   })
+
+  it('容器零尺寸挂载（overlay 过渡态）不 fit；持续 ResizeObserver 在 fit 态下就绪补 fit、后续尺寸变化追 fit', async () => {
+    // jsdom 无 ResizeObserver——stub 捕获回调手动派发（模拟挂载后布局就绪与容器变化）
+    const observers: { cb: ResizeObserverCallback; disconnected: boolean }[] = []
+    class FakeResizeObserver {
+      cb: ResizeObserverCallback
+      disconnected = false
+      constructor(cb: ResizeObserverCallback) {
+        this.cb = cb
+        observers.push(this)
+      }
+      observe(): void {}
+      disconnect(): void {
+        this.disconnected = true
+      }
+      unobserve(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    try {
+      const solo: WorkflowDag = {
+        phases: [{ name: 'solo', order: 0 }],
+        nodes: [node({ id: 'solo', phase: 'solo' })],
+        edges: [],
+        parallelGroups: [],
+        loops: [],
+      }
+      const wrapper = mountDag(solo)
+      const svg = wrapper.find('[data-testid="wfvz-dag-svg"]').element
+      // 挂载时零尺寸 → 不 fit（初始视口保持退化形态）+ 持续观察器已挂上
+      expect(readViewport(wrapper)).toEqual({ k: 1, tx: 0, ty: 0 })
+      expect(observers).toHaveLength(1)
+      // 布局就绪（宽 1000）→ 派发观察器回调 → 补 fit（DOM 更新经 nextTick 刷入）
+      Object.defineProperty(svg, 'clientWidth', { value: 1000, configurable: true })
+      observers[0]!.cb([], {} as ResizeObserver)
+      await nextTick()
+      const vp = readViewport(wrapper)
+      expect(vp.k).toBe(1)
+      expect(vp.tx).toBeCloseTo((1000 - 180) / 2, 6)
+      // 持续观察：观察器不断开，fit 态下后续容器变化（宽 2000）追 fit 重新居中
+      expect(observers[0]!.disconnected).toBe(false)
+      Object.defineProperty(svg, 'clientWidth', { value: 2000, configurable: true })
+      observers[0]!.cb([], {} as ResizeObserver)
+      await nextTick()
+      expect(readViewport(wrapper).tx).toBeCloseTo((2000 - 180) / 2, 6)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
+describe('WorkflowVizDag 视口 fit/free 状态机（fit 不追打：接管转 free、回到全景/切 run 回 fit）', () => {
+  /** 独子 DAG（单列宽 180，fit 数值断言口径与 fit-to-view 组一致）。 */
+  function soloDag(): WorkflowDag {
+    return {
+      phases: [{ name: 'solo', order: 0 }],
+      nodes: [node({ id: 'solo', phase: 'solo' })],
+      edges: [],
+      parallelGroups: [],
+      loops: [],
+    }
+  }
+
+  /** wheel 接管手势（jsdom getBoundingClientRect 全 0：指针画布坐标 = client 坐标）。 */
+  async function seizeByWheel(wrapper: ReturnType<typeof mountDag>): Promise<void> {
+    await wrapper.find('[data-testid="wfvz-dag-svg"]').trigger('wheel', { deltaY: -120, clientX: 300, clientY: 200 })
+  }
+
+  it('pan 接管：拖拽位移超阈值 → free 态（回到全景入口出现、提示角标让位、视口随 pan 平移）', async () => {
+    const wrapper = mountDag()
+    const svg = wrapper.find('[data-testid="wfvz-dag-svg"]')
+    await svg.trigger('pointerdown', { clientX: 0, clientY: 0 })
+    await svg.trigger('pointermove', { clientX: 60, clientY: 0 })
+    expect(wrapper.find('[data-testid="wfvz-dag-back-to-fit"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-dag-hint"]').exists()).toBe(false)
+    // 挂载零尺寸退化 tx=0、k=1 → pan 平移 = 起始 tx + 位移/k = 60
+    expect(readViewport(wrapper).tx).toBeCloseTo(60, 6)
+  })
+
+  it('pointerdown 未移动不算接管（位移低于阈值仍 fit 态，纯点击语义不受影响）', async () => {
+    const wrapper = mountDag()
+    const svg = wrapper.find('[data-testid="wfvz-dag-svg"]')
+    await svg.trigger('pointerdown', { clientX: 0, clientY: 0 })
+    // 位移 3 < PAN_THRESHOLD_PX(5)：pan.moved 不置位
+    await svg.trigger('pointermove', { clientX: 3, clientY: 0 })
+    expect(wrapper.find('[data-testid="wfvz-dag-back-to-fit"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wfvz-dag-hint"]').exists()).toBe(true)
+  })
+
+  it('wheel 接管 → free 态；free 态下容器尺寸变化不追 fit（自动 fit 停用）', async () => {
+    const observers: { cb: ResizeObserverCallback }[] = []
+    class FakeResizeObserver {
+      cb: ResizeObserverCallback
+      constructor(cb: ResizeObserverCallback) {
+        this.cb = cb
+        observers.push(this)
+      }
+      observe(): void {}
+      disconnect(): void {}
+      unobserve(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    try {
+      const wrapper = mountDag(soloDag())
+      const svg = wrapper.find('[data-testid="wfvz-dag-svg"]')
+      Object.defineProperty(svg.element, 'clientWidth', { value: 1000, configurable: true })
+      await seizeByWheel(wrapper)
+      expect(wrapper.find('[data-testid="wfvz-dag-back-to-fit"]').exists()).toBe(true)
+      // wheel 以指针为缩放中心改写视口（与 fit 形态可区分）
+      const seized = readViewport(wrapper)
+      expect(seized.tx).not.toBeCloseTo((1000 - 180) / 2, 6)
+      // 容器尺寸变化（宽 2000）→ free 态观察器回调 no-op（视口不动）
+      Object.defineProperty(svg.element, 'clientWidth', { value: 2000, configurable: true })
+      observers[0]!.cb([], {} as ResizeObserver)
+      await nextTick()
+      expect(readViewport(wrapper)).toEqual(seized)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('回到全景：free 态点击回 fit 态并 fit 一次（视口回全图居中、入口消失、提示角标回归）', async () => {
+    const wrapper = mountDag(soloDag())
+    Object.defineProperty(wrapper.find('[data-testid="wfvz-dag-svg"]').element, 'clientWidth', {
+      value: 1000,
+      configurable: true,
+    })
+    await seizeByWheel(wrapper)
+    expect(wrapper.find('[data-testid="wfvz-dag-back-to-fit"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="wfvz-dag-back-to-fit"]').trigger('click')
+    await nextTick()
+    const vp = readViewport(wrapper)
+    expect(vp.k).toBe(1)
+    expect(vp.tx).toBeCloseTo((1000 - 180) / 2, 6)
+    expect(wrapper.find('[data-testid="wfvz-dag-back-to-fit"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wfvz-dag-hint"]').exists()).toBe(true)
+  })
+
+  it('切 run 重置：free 态下 dag 引用变化 → 回 fit 态 + 新蓝图 fit（此前接管放弃）', async () => {
+    const wrapper = mountDag()
+    const svg = wrapper.find('[data-testid="wfvz-dag-svg"]')
+    Object.defineProperty(svg.element, 'clientWidth', { value: 1000, configurable: true })
+    await seizeByWheel(wrapper)
+    expect(wrapper.find('[data-testid="wfvz-dag-back-to-fit"]').exists()).toBe(true)
+    await wrapper.setProps({ dag: soloDag() })
+    const vp = readViewport(wrapper)
+    expect(vp.k).toBe(1)
+    expect(vp.tx).toBeCloseTo((1000 - 180) / 2, 6)
+    expect(wrapper.find('[data-testid="wfvz-dag-back-to-fit"]').exists()).toBe(false)
+  })
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('WorkflowVizDag 执行实例行（实际 agent 画进图，2026-10 用户裁决）', () => {

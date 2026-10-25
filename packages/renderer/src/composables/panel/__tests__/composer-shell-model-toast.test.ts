@@ -81,7 +81,7 @@ function shellParams(): ComposerShellParams {
     composerBoxRef: ref(null),
     draft: ref(''),
     isSending: ref(false),
-    drafts: { getDraft: () => '', saveDraft: vi.fn(), deleteDraft: vi.fn() },
+    drafts: { getDraft: () => [], saveDraft: vi.fn(), deleteDraft: vi.fn() },
     isActive: computed(() => false),
     cmdOpen: ref(false),
   }

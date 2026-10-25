@@ -117,7 +117,7 @@ function makeEnv(opts: {
     getReplaceSystemPrompt: vi.fn(() => undefined),
     getLaunchPresetOptions: vi.fn(async () => opts.resolution),
     toSummary: vi.fn((s: IManagedSessionView): SessionSummary => ({
-      id: s.id, label: s.label, cwd: s.cwd, status: 'active', lastActiveAt: 1, modelId: 'p/m', tokenCount: 0,
+      id: s.id, label: s.label, cwd: s.cwd, status: 'active', lastActiveAt: 1,
     })),
     notifySessionCreated: vi.fn(),
     findScannedSession: vi.fn(() => undefined),

@@ -12,7 +12,7 @@
     三类内容（browser 由 BrowserOverlay 承载，三壳互斥）；scheduler 内容下 run 相关 props 按无 run
     形态透传（run/dag/dagError = null，「运行」tab 由壳按 run 缺省禁用）；run
     派生视图从 workflowStore 分区按 runId 选中（recordsOf 响应式读，workflowUpdate 信号触发
-    的重新拉取经 store 自动到达）；节点六态/当前 phase/已用时长在本容器单处派生后经
+    的重新拉取经 store 自动到达）；节点七态/当前 phase/已用时长在本容器单处派生后经
     props 透传（壳与面板均为已派生输入，不自行判定）。
   - D10 回落动作序列（[2026-10-19] drawer workflow tab 删除，回落载体不再存在）：
     Guard emit fallback → 关 overlay（清瞬态）。重开 overlay（入口每次点击）即重试
@@ -174,7 +174,7 @@ const panelInput = computed<{ sessionId: string; runId: string; run: WorkflowRun
 
 // ── 派生输入（容器单处派生，壳/面板均消费已派生 props）────────────────────────
 
-/** D2 匹配单源（byNode + 未匹配列表一次派生；节点六态 / 未匹配分组 / 点击钻取共用，
+/** D2 匹配单源（byNode + 未匹配列表一次派生；节点七态 / 未匹配分组 / 点击钻取共用，
  *  避免三处各自调 matchInstancesToNodes 重复计算）。 */
 const matchResult = computed<WorkflowInstanceMatchResult | null>(() => {
   const dag = overlayDag.value
@@ -183,7 +183,7 @@ const matchResult = computed<WorkflowInstanceMatchResult | null>(() => {
   return matchInstancesToNodes(dag, run.agentCalls)
 })
 
-/** 节点六态映射（D2 蓝图-实例匹配 → D9 节点级派生；DAG 未就绪时 undefined = 画布解析中）。 */
+/** 节点七态映射（D2 蓝图-实例匹配 → D9 节点级派生；DAG 未就绪时 undefined = 画布解析中）。 */
 const nodeStates = computed<Record<string, WorkflowVizDagNodeStatus> | undefined>(() => {
   const dag = overlayDag.value
   const run = runRecord.value

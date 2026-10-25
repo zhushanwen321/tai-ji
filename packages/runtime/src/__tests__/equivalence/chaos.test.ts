@@ -22,9 +22,9 @@
  * 不依赖随机种子）；脏化信号 = toolResult 先于 owner assistant 到达 → 孤儿收集（applyEntry
  * 窗口局部配对语义，console.warn 为预期可观测噪声）。
  *
- * faux LLM 轨（L2.5 翻轨）：验证对象是帧链编排与投递层混沌收敛，非模型智能——语料 turn 的
+ * faux LLM 层（L2.5 迁组）：验证对象是帧链编排与投递层混沌收敛，非模型智能——语料 turn 的
  * 响应由 fauxResponses 脚本固定（bash toolCall + 文本回复，--approve 真实执行），断言语义与
- * 翻轨前一致。门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（SSOT = test-guard/integration-gate.ts：
+ * 迁组前一致。门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（SSOT = test-guard/integration-gate.ts：
  * 本地默认跳过、CI 或按改动范围触发时真跑）。
  */
 import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest'
@@ -41,7 +41,7 @@ import { EventInterpreter } from '../../services/session/event-interpreter.js'
 import { createChatStore } from '../../../../core/src/domain/chat/store.js'
 import { replayEntries, type ChatViewState, type PiEntry } from '../../../../core/src/domain/chat/apply-entry.js'
 
-/** 等 turn 完成的上限（faux 轨实际毫秒级；名义上限保留翻轨前余量口径防 flake） */
+/** 等 turn 完成的上限（faux 层实际毫秒级；名义上限保留迁组前余量口径防 flake） */
 const TURN_TIMEOUT_MS = 120_000
 /** 语料生成 = 冷启动 + 1 个带工具调用的 turn */
 const CORPUS_TIMEOUT_MS = 180_000

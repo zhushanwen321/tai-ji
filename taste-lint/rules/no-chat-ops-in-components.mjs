@@ -34,18 +34,19 @@
  */
 
 /** chat store ops 面字段清单（= ChatStoreOps 键集，与 ChatStoreReaders 互斥不重叠；
- *  排序同 store.ts facet，漂移由 scripts/check-chat-ops-sync.mjs 检查拦截） */
+ *  字段集与 store.ts ChatStoreOps 的集合等价由 scripts/check-chat-ops-sync.mjs 双向差集
+ *  拦截——只对集合不对顺序；清单内分组注释仅作阅读导航，顺序不约束） */
 const OPS_FIELDS = new Set([
   // 写操作
   'setChangeSetStatus', 'markChangeSetsSuperseded', 'markHistoryFailed',
   'clearHistoryError', 'hydrate', 'setMessages', 'reconcileHistory',
   'prependHistory', 'applySubagentStreamDelta', 'finalizeSubagentStream',
   'applySubagentStreamChunk', 'applySubagentStreamState', 'requestSubagentStreamState',
-  'sealSubagentStream', 'clearSubagentChunkState', 'clearSubagentChunkStateForSession',
-  'applySubagentEntries', 'appendUser',
+  'sealSubagentStream', 'markSubagentStreamDegraded', 'clearSubagentChunkState', 'clearSubagentChunkStateForSession',
+  'applySubagentEntries', 'appendUser', 'bumpSubmitSeq',
   'applyMessageEvent', 'finalizeSession',
   'finalizeAllStreaming', 'resetTransientStates', 'addPendingSend',
-  'clearPendingSend', 'markSessionError', 'setHandingOff',
+  'clearPendingSend', 'markSessionError',
   'setOccupancy', 'clearOccupancy', 'setCompactingReason',
   'appendSystemNotice', 'appendRespawnNotice', 'appendSubagentDirective', 'truncateFrom',
   'markRespawnPending', 'clearRespawnPending',

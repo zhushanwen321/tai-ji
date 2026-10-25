@@ -50,9 +50,14 @@ function mountComposer(sessionId: string | null) {
 }
 
 /** 输入注入参照 ui composer-input-get-text.test.ts：直接写 [role="textbox"] 的 innerHTML
- * （getSegments 从 DOM 遍历提取，与 input 事件无关）；纯文本产出 { type:'text', text } 段 */
+ * （getSegments 从 DOM 遍历提取，与 input 事件无关）；纯文本产出 { type:'text', text } 段。
+ * 写后补派发原生 input 事件（ComposerInput 模板 @input → emit('input')）：D5 内容驱动
+ * 双形态下 MobileComposer 的 hasInput 只由 input 事件驱动，发送按钮 !hasInput 时 disabled——
+ * 不派发事件按钮恒禁用，onSend 不可达。调用后需 await flushPromises() 让 disabled 绑定更新。 */
 function writeDraft(wrapper: ReturnType<typeof mountComposer>, text: string): void {
-  ;(wrapper.get('[role="textbox"]').element as HTMLDivElement).innerHTML = text
+  const el = wrapper.get('[role="textbox"]').element as HTMLDivElement
+  el.innerHTML = text
+  el.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
 function readDraft(wrapper: ReturnType<typeof mountComposer>): string {
@@ -81,6 +86,7 @@ describe('MobileComposer 发送失败契约（D6：false → 草稿回填 + 内�
     const wrapper = mountComposer('sid-idle')
     await flushPromises()
     writeDraft(wrapper, 'hello draft')
+    await flushPromises()
     await wrapper.get('[data-testid="mobile-composer-send"]').trigger('click')
     // 发送在途（send 未 resolve）：输入被清空
     writeDraft(wrapper, '')
@@ -106,6 +112,7 @@ describe('MobileComposer 发送失败契约（D6：false → 草稿回填 + 内�
     const wrapper = mountComposer('sid-idle')
     await flushPromises()
     writeDraft(wrapper, 'retry me')
+    await flushPromises()
     await wrapper.get('[data-testid="mobile-composer-send"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="mobile-composer-send-error"]').exists()).toBe(true)
@@ -125,6 +132,7 @@ describe('MobileComposer 发送失败契约（D6：false → 草稿回填 + 内�
     const wrapper = mountComposer('sid-a')
     await flushPromises()
     writeDraft(wrapper, 'lost in flight')
+    await flushPromises()
     await wrapper.get('[data-testid="mobile-composer-send"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="mobile-composer-send-error"]').exists()).toBe(true)
@@ -141,6 +149,7 @@ describe('MobileComposer 发送成功契约（D6：true → clear 照常）', ()
     const wrapper = mountComposer('sid-idle')
     await flushPromises()
     writeDraft(wrapper, 'hello mobile')
+    await flushPromises()
     await wrapper.get('[data-testid="mobile-composer-send"]').trigger('click')
     await flushPromises()
     expect(sendMock).toHaveBeenCalledTimes(1)

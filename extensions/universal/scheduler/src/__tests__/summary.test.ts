@@ -47,6 +47,13 @@ describe('buildScheduleSummary', () => {
     const r = toolResult({ task: { name: 'Odd', schedule: { mode: 'bogus' } } })
     expect(buildScheduleSummary(createParams, r)).toBe('Scheduled "Odd" · 5m')
   })
+
+  it('name / schedule 含换行 → 摘要归一单行（S-1）', () => {
+    const r = toolResult({ task: { name: 'Multi\nline', schedule: { mode: 'bogus' } } })
+    expect(buildScheduleSummary({ ...createParams, schedule: '5m\nextra' }, r)).toBe(
+      'Scheduled "Multi line" · 5m extra',
+    )
+  })
 })
 
 // ── buildScheduleControlSummary ──────────────────────

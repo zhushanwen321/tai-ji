@@ -80,6 +80,12 @@ const ALLOWLIST: readonly { key: string; reason: string }[] = [
   { key: 'panel.sideDrawer.subagentModelSourceTitle.frontmatter', reason: SUBAGENT_MODEL_SOURCE_REASON },
   { key: 'panel.sideDrawer.subagentModelSourceTitle.preference', reason: SUBAGENT_MODEL_SOURCE_REASON },
   { key: 'panel.sideDrawer.subagentModelSourceTitle.default', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  // chat-flow-consistency U1 停止/截断提示行：key 由 core notice-text.ts:40 动态组装
+  //（`panel.message.chatNotice.${key}`，ChatNoticeKey 闭集枚举）经 useMessageEffects.ts:40
+  // 的 translator 注入消费——静态字面扫描不可达，动态组装闭集登记于此。
+  { key: 'panel.message.chatNotice.stoppedBeforeStart', reason: 'core notice-text ChatNoticeKey 闭集动态组装（notice-text.ts:40 + useMessageEffects.ts:40 translator 注入）' },
+  { key: 'panel.message.chatNotice.truncatedMaxTokens', reason: 'core notice-text ChatNoticeKey 闭集动态组装（notice-text.ts:40 + useMessageEffects.ts:40 translator 注入）' },
+  { key: 'panel.message.chatNotice.truncatedContentFilter', reason: 'core notice-text ChatNoticeKey 闭集动态组装（notice-text.ts:40 + useMessageEffects.ts:40 translator 注入）' },
 ]
 
 /** 拍平嵌套 locale 对象为叶子 key 全路径 */

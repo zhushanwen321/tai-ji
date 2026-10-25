@@ -15,6 +15,7 @@
   批量:   python3 vue_rules_checker.py --batch <file1> <file2> ...
 """
 
+from __future__ import annotations
 import re
 import sys
 from pathlib import Path

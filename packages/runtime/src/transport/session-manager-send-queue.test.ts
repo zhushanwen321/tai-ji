@@ -6,7 +6,7 @@
  * - A2: sendChecked 失败同步返回 error + hint
  * - A3: sessionId 单例注册表（同 id 复用 handle）
  * - A4: handleCreate 初始 prompt 直投（不走内核队列，失败照旧 throw 走外层 catch）
- * - A5: D7 置位副作用（isGenerating/lastActiveAt/workspaceService.record 在 port.send 成功后发生）
+ * - A5: D7 置位副作用（occupancy dispatching 置位 + lastActiveAt/workspaceService.record 在 port.send 成功后发生）
  * - A6: plugin-service 两路径仍走 dispatcher 不变（D7 声明的防误改锁）
  *
  * 内核用真实 @zhushanwen/session-delivery（A1/A5 依赖 busy 排队与 settled 边沿的真实
@@ -33,9 +33,15 @@ interface HarnessView {
   id: string
   cwd: string
   lastActiveAt: number
-  isGenerating: boolean
-  isCompacting: boolean
-  isBashRunning: boolean
+  occupancy: NonNullable<IManagedSessionView['occupancy']>
+}
+
+/** occupancy 字面量助手（U1 派生三布尔退役后，占用态以四维状态字表达） */
+function occ(
+  turn: 'idle' | 'generating',
+  extra?: Partial<{ compacting: boolean; bash: boolean; handingOff: boolean }>,
+): NonNullable<IManagedSessionView['occupancy']> {
+  return { turn, compacting: false, bash: false, handingOff: false, ...extra }
 }
 
 /** 调用顺序记录（A5 断言 D7 副作用发生顺序的权威） */
@@ -60,9 +66,7 @@ function makeHarness(overrides: {
     id: 's1',
     cwd: '/test/workspace',
     lastActiveAt: 1_000,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
+    occupancy: occ('idle'),
     ...overrides.view,
   }
   const settledCbs: Array<(sid: string) => void> = []
@@ -106,10 +110,10 @@ function makeHarness(overrides: {
       cwd: '/test/workspace',
       status: 'active',
       lastActiveAt: Date.now(),
-      modelId: 'm/x',
-      tokenCount: 0,
       ...overrides.createResult,
     }),
+    // W3：respond 的 modelId 读点从 create 返回值改到注册表记录（双写缓存）。
+    getSession: vi.fn().mockReturnValue({ id: 'child-1', modelId: 'm/x' }),
     sendMessage: vi.fn(),
     getHistory: vi.fn(),
     // 归属校验材料：s1 是发起方 parent-1 的 managed child（真实路径 getSummary 返回
@@ -121,6 +125,8 @@ function makeHarness(overrides: {
     ),
     listPersistedSessions: vi.fn().mockReturnValue([]),
     abort: vi.fn(),
+    // 受理成功后清旧终态 sidecar（session-manager-send-sidecar-stale）；A2 失败路径不触
+    clearSessionOutcome: vi.fn(),
   } as unknown as ISessionService
   const handler = new SessionManagerHandler({
     sessionService,
@@ -169,7 +175,7 @@ const spawnedLedgers: ClaimLedger[] = []
 
 describe('A1-busy-queue-vitest: handleSend busy 时入队而非拒绝', () => {
   it('目标 busy → respond {queued: true} 且立即经 steer 受理入 pi 队列（受理即可达确认）', async () => {
-    const h = makeHarness({ view: { isGenerating: true } })
+    const h = makeHarness({ view: { occupancy: occ('generating') } })
 
     await h.handler.handle('req-1', 'parent-1', 'send', { sessionId: 's1', prompt: 'hello' })
 
@@ -187,9 +193,9 @@ describe('A1-busy-queue-vitest: handleSend busy 时入队而非拒绝', () => {
   })
 
   it('普通 send 出站在 port promise settle 前留守内核 → settled 边沿后出站以 steer 注入', async () => {
-    const h = makeHarness({ view: { isGenerating: true } })
+    const h = makeHarness({ view: { occupancy: occ('generating') } })
     // 普通 send()（非 sendChecked）：同步链在 port.send 的 promise settle 前返回——条目
-    // 仍 queued（出站交接在 deliverOne 的 async 链上推进，isGenerating 非 hold 维度，
+    // 仍 queued（出站交接在 deliverOne 的 async 链上推进，generating 非 hold 维度，
     // v2/v3 同）；断言锚 = settle 前不出站、链完成后已出站
     const handle = h.registry.getOrCreateDelivery('s1')
     handle.send({ payload: { kind: 'text', content: 'steered' } })
@@ -207,9 +213,9 @@ describe('A1-busy-queue-vitest: handleSend busy 时入队而非拒绝', () => {
   })
 
   it('isCompacting 持有（唯一提交侧等待状态）；isBashRunning 受理即出站（v3 bash 持有退役）', async () => {
-    // isCompacting：v3 保留的提交侧持有（view.isCompacting → waitDeliverable 挂住）——
+    // compacting：v3 保留的提交侧持有（occupancy.compacting → waitDeliverable 挂住）——
     // microtask 链 flush 后 prompt 仍未调、条目留守 queued
-    const hC = makeHarness({ view: { isCompacting: true } })
+    const hC = makeHarness({ view: { occupancy: occ('idle', { compacting: true }) } })
     const handleC = hC.registry.getOrCreateDelivery('s1')
     handleC.send({ payload: { kind: 'text', content: 'm' } })
     await flushMicrotasks()
@@ -218,7 +224,7 @@ describe('A1-busy-queue-vitest: handleSend busy 时入队而非拒绝', () => {
 
     // isBashRunning：v3 受理即出站——bash 运行中提交不再排队（bash 持有随本地队列退役），
     // 经 prompt(steer) 直接入 pi 队列（pi 忙时入队不拒）
-    const hB = makeHarness({ view: { isBashRunning: true } })
+    const hB = makeHarness({ view: { occupancy: occ('idle', { bash: true }) } })
     const handleB = hB.registry.getOrCreateDelivery('s1')
     handleB.send({ payload: { kind: 'text', content: 'm' } })
     await flushMicrotasks()
@@ -268,8 +274,8 @@ describe('A3-singleton-registry-vitest: 同 sessionId 复用同一 delivery hand
 
   it('dispose(sessionId) 后再取是新 handle（旧队列随 dispose 丢弃）', () => {
     // 前提构造：send() 的同步链内（port promise settle 前）条目仍 queued——depth=1 可
-    // 观察（isGenerating 非 hold 维度，出站交接在 async 链推进）
-    const h = makeHarness({ view: { isGenerating: true } })
+    // 观察（generating 非 hold 维度，出站交接在 async 链推进）
+    const h = makeHarness({ view: { occupancy: occ('generating') } })
     const a = h.registry.getOrCreateDelivery('s1')
     a.send({ payload: { kind: 'text', content: 'queued' } })
     expect(a.depth()).toBe(1)
@@ -322,33 +328,35 @@ describe('A4-create-prompt-vitest: handleCreate 初始 prompt 直投不走内核
 // ─── A5: D7 置位副作用 ────────────────────────────────────────────────────
 
 describe('A5-d7-sideeffects-vitest: D7 保留的置位副作用在 port.send 成功后发生', () => {
-  it('投递前不置位；prompt 受理成功后 isGenerating/lastActiveAt/record 一并发生', async () => {
+  it('投递前不置位；prompt 受理成功后 occupancy dispatching/lastActiveAt/record 一并发生', async () => {
     const h = makeHarness()
     const before = h.view.lastActiveAt
     const handle = h.registry.getOrCreateDelivery('s1')
 
     await handle.sendChecked({ payload: { kind: 'text', content: 'x' } })
 
-    // sendChecked await 返回 = port.send 链完成 → 三项副作用已发生
-    expect(h.view.isGenerating).toBe(true)
+    // sendChecked await 返回 = port.send 链完成 → 三项副作用已发生（置位 = 空闲→dispatching）
+    expect(h.view.occupancy.turn).toBe('dispatching')
     expect(h.view.lastActiveAt).toBeGreaterThanOrEqual(before)
     expect(h.calls).toEqual(expect.arrayContaining(['record:/test/workspace']))
     // 顺序：ensureActive → prompt → record（副作用后于 prompt 受理）
     expect(h.calls.indexOf('prompt')).toBeLessThan(h.calls.indexOf('record:/test/workspace'))
   })
 
-  it('busy 投递（受理即出站路径）成功后同样置位', async () => {
-    const h = makeHarness({ view: { isGenerating: true } })
-    // v3 受理即出站：send() 直投（isGenerating 非 hold 维度）——置位发生在出站链完成时
+  it('busy 投递（受理即出站路径）成功后记账照常、occupancy 不被覆盖', async () => {
+    const h = makeHarness({ view: { occupancy: occ('generating') } })
+    // v3 受理即出站：send() 直投（generating 非 hold 维度）——出站链完成时记账置位
     const handle = h.registry.getOrCreateDelivery('s1')
     handle.send({ payload: { kind: 'text', content: 'q' } })
-    expect(h.view.isGenerating).toBe(true) // busy 本态
+    expect(h.view.occupancy.turn).toBe('generating') // busy 本态
 
-    // settled 边沿（多源唤醒路径）+ microtask 链完成 → 投递置位
+    // settled 边沿（多源唤醒路径）+ microtask 链完成 → 出站链置位（本用例的置位微任务在
+    // setBusy(idle) 后才 flush，markSessionActive 看到空闲 → dispatching；生成中不覆盖
+    // dispatching 的 ★3 契约由「受理即出站」的同步段时序另行保证）
     setBusy(h, false)
     h.emitSettled()
     await flushMicrotasks()
-    expect(h.view.isGenerating).toBe(true)
+    expect(h.view.occupancy.turn).toBe('dispatching')
     expect(h.view.lastActiveAt).toBeGreaterThan(1_000)
   })
 
@@ -357,7 +365,7 @@ describe('A5-d7-sideeffects-vitest: D7 保留的置位副作用在 port.send 成
     const handle = h.registry.getOrCreateDelivery('s1')
 
     await expect(handle.sendChecked({ payload: { kind: 'text', content: 'x' } })).resolves.toBeUndefined()
-    expect(h.view.isGenerating).toBe(true)
+    expect(h.view.occupancy.turn).toBe('dispatching')
   })
 
   it('prompt 失败不置位（成功后置位语义的否定用例）', async () => {
@@ -366,7 +374,7 @@ describe('A5-d7-sideeffects-vitest: D7 保留的置位副作用在 port.send 成
     const handle = h.registry.getOrCreateDelivery('s1')
 
     await expect(handle.sendChecked({ payload: { kind: 'text', content: 'x' } })).rejects.toThrow('pi reject')
-    expect(h.view.isGenerating).toBe(false)
+    expect(h.view.occupancy.turn).toBe('idle')
     expect(h.calls).not.toContain('record:/test/workspace')
   })
 })

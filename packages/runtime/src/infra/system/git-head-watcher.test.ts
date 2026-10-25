@@ -181,7 +181,7 @@ describe('GitHeadWatcher watch 事件链（HEAD 目录 + 500ms debounce）', () 
 // ── 真实 fs.watch 事件到达链（集成门控组，见文件头分层说明） ────────────────────
 describe.skipIf(
   !INTEGRATION_TESTS_ENABLED,
-)(`GitHeadWatcher 真实 fs.watch 事件链（集成轨：真实 rename/写文件 → 事件到达）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
+)(`GitHeadWatcher 真实 fs.watch 事件链（集成组：真实 rename/写文件 → 事件到达）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`, () => {
   it('HEAD rename（原子写换 inode）触发 → 事件入 debounce 批次 → 500ms 到点放行受影响 cwd', { timeout: 30_000 }, async () => {
     const fx = makeRepo()
     const onGitEvent = vi.fn()

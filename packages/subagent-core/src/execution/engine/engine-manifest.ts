@@ -254,7 +254,9 @@ export function parseModelTranslation(id: string, raw: unknown): Record<string, 
       dropped += 1;
       continue;
     }
-    out[k] = val;
+    // 入库用 trim 后的键与值（S-6）：翻译查表按 trim 后的 ref 段比对，原始带空白
+    // 键永不匹配——校验与入库同形态，防「校验通过、查表落空」。
+    out[k.trim()] = val.trim();
   }
   if (dropped > 0) {
     logger.warn(

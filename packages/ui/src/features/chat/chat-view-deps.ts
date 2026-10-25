@@ -92,8 +92,6 @@ export interface ChatViewDeps {
   // ── 操作回调（触发 RPC / store action）──
   /** 切换 turn 展开/折叠（useTurnExpansion store action。key=turnStableId(turn)） */
   toggleExpand: (turnKey: string) => void
-  /** 折叠 turn（useTurnExpansion collapse，Turn.vue 完成自动收起用。key=turnStableId(turn)） */
-  collapse: (turnKey: string) => void
   /** 设/清「展开全部」接管态（useTurnExpansion setTakeover。key=turnStableId(turn)） */
   setTakeover: (turnKey: string, on: boolean) => void
   /** 中止 bash 执行（useChat.abortBash 经壳桥接；按 session 全量取消——bash 取消无消息粒度） */

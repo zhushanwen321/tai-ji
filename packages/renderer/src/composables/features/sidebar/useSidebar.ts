@@ -65,9 +65,11 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { closeWorkflowVizOverlayForSession } from '@/components/panel/workflow-viz/overlay/workflow-viz-overlay'
 // [M4-a / btw-question D4 消费方①] deleteSession 级联的前端路径：枚举/处置/清映射三函数
 //（与 m7/agentcall 的 evictVirtualKeys 先例同构，登记结构在 useBtwTabData）。
-import { getBtwVirtualIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
+import { getBtwSessionIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useChat, ensureStreamSubscription } from '@/composables/features/chat/useChat'
+import { useSessionLiveStateStore } from '@/stores/session-live-state'
+import { useTurnExpansionStore } from '@/stores/turn-expansion'
 import { useTtsPlayer } from '@/composables/features/chat/useTtsPlayer'
 import { invalidateStatusCache } from '@/composables/features/chat/useSessionDerivations'
 import { browserDestroy as browserDestroyIpc } from '@/lib/ipc'
@@ -157,7 +159,17 @@ export function useSidebar() {
     isHydrated: (sid) => chat.isHydrated(sid),
     hydrate: (sid, messages) => chat.hydrate(sid, messages),
     // [u4d] window 透传 store reconcile——截断窗口状态 SSOT 在 chat store（N1 setHistoryTruncated 退役）
-    reconcileHistory: (sid, messages, window) => chat.reconcileHistory(sid, messages, window),
+    reconcileHistory: (sid, messages, window) => {
+      // [chat-flow-consistency C4 两段式契约] 磁盘重载基线接管点清展开分区：本映射是
+      // use-session 全部「history 写入 store」通路的编排单点（切入链步 9 / refreshHistory /
+      // retryHistory），其中走盘重载形态 = 未 hydrate（首次切入 / LRU 驱逐后切回——store.
+      // reconcileHistory 内部此门走 hydrate 全量基线接管）。turn 稳定 id 在 live 与盘上两侧
+      // 不相交（pi 事件不带 entry id），重载后键失配本就回落收起——此处显式清分区把「静默
+      // 失配」变「可断言重置」（内存卫生）。驻留期切回（已 hydrate → 增量 reconcile）不清，
+      // 手动展开保持——「内存驻留期间保持、磁盘重载后重置」两段契约的重置侧落点。
+      if (!chat.isHydrated(sid)) useTurnExpansionStore().clearSession(sid)
+      chat.reconcileHistory(sid, messages, window)
+    },
     clearHistoryError: (sid) => chat.clearHistoryError(sid),
     markHistoryFailed: (sid) => chat.markHistoryFailed(sid),
   }
@@ -179,11 +191,11 @@ export function useSidebar() {
         chat.evictVirtualKey(acsVirtualId)
       }
       // [M4-a / btw-question D4 消费方① + D9④ 清派生键] deleteSession 级联的前端路径：
-      // **枚举先于清映射**（顺序约束）——主会话名下全部 btw 线逐线处置（vid 分区 +
+      // **枚举先于清映射**（顺序约束）——主会话名下全部 btw 线逐线处置（线分区 +
       // 派生 subagent/agentcall 键 + 两 store 记录分区，单入口幂等），随后清反查表
       //（主已删，映射无意义）。runtime 半边（杀线进程 + 删线目录）在 session-lifecycle
       // 的级联支线；失效路径（闲置回收/进程亡）不进本路径——分区保留待重载链回填（D9④）。
-      for (const btwVid of getBtwVirtualIdsByMain(sid)) disposeBtwLinePartitions(btwVid)
+      for (const lineSessionId of getBtwSessionIdsByMain(sid)) disposeBtwLinePartitions(lineSessionId)
       clearBtwVirtualKeyMapping(sid)
     },
     clearAgentCallMapping: (sid) => useWorkflowStore().clearAgentCallMapping(sid),
@@ -216,6 +228,9 @@ export function useSidebar() {
     // session 时关 overlay（数据范围——事件流缓存 + 活跃锚——由 clearWorkflow/store.clearSession 收尾）。
     closeWorkflowOverlay: (sid) => closeWorkflowVizOverlayForSession(sid),
     clearForkNotices: (sid) => useForkNoticeFeed().clearSession(sid),
+    // [W1 会话架构四层分离] 状态层条目显式清退（只挂真删除；归档不挂——归档恢复后
+    // 已缓存状态仍在，见 core SessionCleanupHooks.clearLiveState 契约）
+    clearLiveState: (sid) => useSessionLiveStateStore().removeLiveState(sid),
   }
 
   const flow: NewTaskFlowPort = {
@@ -271,6 +286,9 @@ export function useSidebar() {
     hooks,
     flow,
     sessionEntry,
+    // [W2 权威拉取与冷读] 状态层：session.getState reply 的唯一落点（与状态消息 /
+    // 操作回执共用 applyLiveState 这一个 reducer，设计 §7 验收项 8）
+    liveState: useSessionLiveStateStore(),
   })
 
   /** 当前焦点 panel 绑定的 session（UI 高亮 SSOT）——代理 core.focusedSessionId */
@@ -293,6 +311,16 @@ export function useSidebar() {
    * C-W3-4 时序前提（订阅先于 panel 载入，防 snapshot 回放丢失）由 core 链步 5→7 顺序保证。
    */
   const selectSession = core.selectSession
+
+  /**
+   * refreshLiveState —— 代理 core（[W2 权威拉取与冷读] 状态层拉取对账入口）。
+   *
+   * 主路径触发点 = core 12 步切入链步 13（打开视图时机）与本文件 onConnected（重连
+   * 时机）；btw 线视图激活点（BtwPanel 选中线）经本出口复用同一入口——线不走
+   * selectSession 切入链（drawer 旁路呈现，主会话焦点不变），两件事（缓存缺失门控 +
+   * fire-and-forget 语义）由 core 单点保证，壳不另造第二套。
+   */
+  const refreshLiveState = core.refreshLiveState
 
   /**
    * restoreSession —— 显式重开 dead session（重新 spawn pi）。
@@ -335,8 +363,22 @@ export function useSidebar() {
   }
 
   /**
-   * newSession——壳重编排（不代理 core.newSession：壳侧补 presetCwd ?? workspaceStore.defaultCwd
-   * 兜底，core 版无此回退）。委托 useNewTaskFlow.startFlow 进 landing。
+   * 当前选中 session 的 cwd（新建任务预填，用户裁决 2026-10-22「选中 session 后新建，
+   * 默认 cwd = 选中 session 的 cwd」）。必须在 startFlow 之前取：startFlow 内部强制清
+   * activeId（core flow.ts 不变量），landing 态再取恒空。
+   */
+  function activeSessionCwd(): string | undefined {
+    // 走未 cast 的 pinia store 实例（activeId 解包为 string | null）——cast 后的 sessionStore
+    // 类型层是 core factory 返回形态（activeId 为 Ref，未解包）。
+    const id = useSessionStore().activeId
+    if (!id) return undefined
+    return sessionStore.getList().find((s) => s.id === id)?.cwd
+  }
+
+  /**
+   * newSession——壳重编排（不代理 core.newSession：壳侧补 cwd 预填链，core 版无此回退）。
+   * 预填链（用户裁决 2026-10-22）：入口显式 cwd（目录行「+」）→ 当前选中 session 的 cwd
+   * → workspaceStore.defaultCwd。委托 useNewTaskFlow.startFlow 进 landing。
    * 延迟 create 终态：startFlow 恒不建 session（session 由首发提交 submitFirstMessage 创建并
    * 绑定），此处恒进 chat view 让 Panel 渲染 landing 空态，恒返回 null。返回类型保持
    * string | null 对齐 core NewTaskFlowPort 契约形状（当前调用方均不消费返回值）。
@@ -347,7 +389,7 @@ export function useSidebar() {
     newTaskInFlight = true
     try {
       const newTaskFlow = useNewTaskFlow()
-      const fallback = presetCwd ?? workspaceStore.defaultCwd
+      const fallback = presetCwd ?? activeSessionCwd() ?? workspaceStore.defaultCwd
       await newTaskFlow.startFlow(fallback)
       // 延迟 create（AC-1.7）：无 session 可选，进 chat view 让 Panel 渲染 landing 空态
       navigationPort.push({ view: 'chat' })
@@ -422,6 +464,8 @@ export function useSidebar() {
       await newSession()
       await loadSessions()
       await workspaceStore.load()
+      // 默认会话目录（landing「默认会话」固定入口）：启动拉取（失败降级空串隐藏入口，不阻断）
+      void workspaceStore.loadDefaultSessionDir()
       // 预填 cwd（G1.1「沿用最近 session 目录」）：取 sessionStore.list 中 lastActiveAt 最大者
       const sessions = sessionStore.getList()
       let recentCwd: string | undefined
@@ -445,7 +489,7 @@ export function useSidebar() {
 
   /**
    * WS 连接建立/重连入口：首次 initApp；重连 fire-and-forget 刷新 workspace/extension +
-   * 聚焦 session 的 subagent/workflow 列表。
+   * 聚焦 session 的 subagent/workflow 列表 + 对话流历史对账。
    */
   async function onConnected(): Promise<void> {
     if (!hasConnectedBefore) {
@@ -465,6 +509,19 @@ export function useSidebar() {
     if (sid) {
       void useSubagentStore().loadSubagents(sid)
       void useWorkflowStore().loadWorkflows(sid)
+      // [W2 权威拉取与冷读] 重连时机：状态层缓存缺失时补拉（缓存缺失门控 + fire-and-forget，
+      // 与打开视图时机同一入口）。断连期间丢的状态帧不由本次拉取收敛：状态层缓存跨重连不清
+      // （removeLiveState 只挂真删除路径），只要该 session 有过条目，门控（use-session.ts:368
+      // liveStateOf !== undefined 即 return）直接跳过。断连恢复的自愈通道是 state topic 的
+      // last-value 回放：session.state_changed 在 message-bus.ts:139 的 STATE_TYPE_KEY_MAP
+      // 登记为 'state'，subscription-state.ts:348 在重连应答里逐条回放 reply.stateSnapshot。
+      // 本 RPC 拉取只覆盖冷启动/无快照形态（条目从未被填过的会话）。
+      void core.refreshLiveState(sid)
+      // [U8 桌面重连对账] 对话流历史对账（对齐移动壳 App.vue connected 边沿既有模式）：
+      // 断连窗口内 ring 回放覆盖不足或失败时，桌面对话流缺内容且无自愈——core
+      // refreshHistory 单一编排点（未 hydrate no-op / 失败静默 warn，旧数据仍在）。
+      // 首连分支不挂（initApp → 切入链步 9 已承担首次回填），只补重连分支。
+      void core.refreshHistory(sid)
     }
   }
 
@@ -487,6 +544,7 @@ export function useSidebar() {
     focusedSession,
     selectSession,
     restoreSession,
+    refreshLiveState,
     newSession,
     retryHistory,
     loadSessions,

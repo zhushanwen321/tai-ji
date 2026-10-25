@@ -41,9 +41,9 @@ const authCbs = authEventCbs()
 
 const configMock = {
   // OAuth flow 启动（login）：默认成功
-  oauthLogin: vi.fn(async () => ({ started: true })),
+  oauthLogin: vi.fn(async (): Promise<{ started: boolean; error?: string }> => ({ started: true })),
   oauthCancel: vi.fn(async () => ({ cancelled: false })),
-  oauthLogout: vi.fn(async () => ({ ok: true })),
+  oauthLogout: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
   hasOAuth: vi.fn(async () => false),
   setProvider: vi.fn(async () => ({})),
   checkEnvVars: vi.fn(async () => ({})),

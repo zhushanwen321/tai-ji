@@ -1,6 +1,6 @@
-# 00 · 测试流程总览 + real 轨（总入口册）
+# 00 · 测试流程总览 + 真实进程层（总入口册）
 
-> 本册是测试手册的**总入口**：测试流程总览（双轨制 / Playwright harness / 公共前置 / E2E 常见坑）+ 文档索引 + real 轨全部内容（手工手册 RT-01~08 + 自动化 spec 范式）。
+> 本册是测试手册的**总入口**：测试流程总览（双轨制 / Playwright harness / 公共前置 / E2E 常见坑）+ 文档索引 + 真实进程层全部内容（手工手册 RT-01~08 + 自动化 spec 范式）。
 >
 > 策略依据见根 [TEST-STRATEGY.md](../TEST-STRATEGY.md)（测试分层 SSOT）。本册是操作落地。
 
@@ -8,7 +8,7 @@
 
 | 册 | 覆盖功能 | 合并自（旧路径，git 历史可查） |
 |----|---------|------|
-| [00-overview.md](./00-overview.md)（本册） | 总览（双轨制 / harness / 公共前置 / E2E 常见坑）+ 文档索引 + real 轨手工手册（RT-01~08）+ real 轨自动化 spec | 00-test-strategy-overview.md + README.md + 08-real-track-manual.md + 11-real-e2e-specs.md |
+| [00-overview.md](./00-overview.md)（本册） | 总览（双轨制 / harness / 公共前置 / E2E 常见坑）+ 文档索引 + 真实进程层手工手册（RT-01~08）+ 真实进程层自动化 spec | 00-test-strategy-overview.md + README.md + 08-real-track-manual.md + 11-real-e2e-specs.md |
 | [01-chat-panel-composer.md](./01-chat-panel-composer.md) | 新建任务（Landing）/ Composer（slash 浮层 + 三态）/ 对话流（流式 + 工具 + 变更集） | 01-new-task.md + 02-composer.md + 03-chat-flow.md |
 | [02-panels-sidebar.md](./02-panels-sidebar.md) | 文件树 / SideDrawer / 搜索浮层（⌘K）/ GUI 组件渲染 / Subagent-Workflow 面板 / 后台命令侧边栏 | 04-file-tree.md + 05-side-drawer.md + 06-search-modal.md + 07-gui-components.md + 09-subagent-workflow-panel.md + 14-background-task-sidebar.md |
 | [03-runtime-extensions.md](./03-runtime-extensions.md) | 系统提示词配置 / extension 层运行时测试体系 / 插件系统非 mock E2E / 自动升级验证 | 10-settings-system-prompt.md + 12-extension-runtime-testing.md + 13-plugin-e2e.md + update-e2e.md |
@@ -20,7 +20,7 @@
 图例：✅ = 可测且稳定 / ⚠️ = 有约束或待补 / ❌ = 不可测（需手工）；**已落地** = spec 文件存在于 `e2e/` 且能跑通。
 
 **我要测某个功能，从哪开始？**
-1. 读本册 §1-§8 理解双轨制（MOCK 轨 / 非 MOCK 轨 / dev 冒烟）和公共前置
+1. 读本册 §1-§8 理解双轨制（MOCK 层 / 非 MOCK 层 / dev 冒烟）和公共前置
 2. 找到对应功能所在册，按「MOCK 模式」或「Playwright E2E」章节操作
 3. 每个功能章都有：组件结构概述 / data-testid 清单 / 每步期望输入输出 / 可复制的测试代码；testid 以组件 template 内 data-testid 属性为准
 
@@ -47,7 +47,7 @@
 
 taiji 有**两条独立的测试轨道**，覆盖不同维度的 bug。缺任何一条都会漏 bug。
 
-### 1.1 MOCK 轨（renderer-only）
+### 1.1 MOCK 层（renderer-only）
 
 ```
 VITE_MOCK=true → renderer 走 core mock 门面（packages/core/src/transport/mock/，镜像 api 签名）
@@ -67,14 +67,14 @@ VITE_MOCK=true → renderer 走 core mock 门面（packages/core/src/transport/m
 - ❌ WS 连接生命周期（断连、重连、超时）
 - ❌ 文件系统真实读写（mock 返回固定内容）
 
-### 1.2 非 MOCK 轨（full stack）
+### 1.2 非 MOCK 层（full stack）
 
 ```
 pnpm run dev → 起 runtime 子进程 → 连 pi → 真实 session 文件读写
 ```
 
 **能测什么：**
-- ✅ 模块加载健康（堵住 MOCK 轨的盲区）
+- ✅ 模块加载健康（堵住 MOCK 层的盲区）
 - ✅ runtime ↔ pi RPC 协议真实字段
 - ✅ WS 生命周期
 - ✅ 文件系统真实读写
@@ -85,25 +85,25 @@ pnpm run dev → 起 runtime 子进程 → 连 pi → 真实 session 文件读�
 - CI 不稳定（pi 子进程、端口、文件系统）
 - 适合**手工冒烟** + **关键链路验证脚本**（独立 `verify-<system>.cjs`,放项目根或临时位置）
 
-### 1.3 dev 冒烟门禁（堵 MOCK 盲区的第三轨）
+### 1.3 dev 冒烟门禁（堵 MOCK 盲区的第三层）
 
 ```
 node scripts/dev-smoke.mjs（待建）→ chromium 加载 vite dev server → 0 错误即 pass
 ```
 
-**设计意图**：MOCK 轨 E2E 跑构建产物（`dist/main` + `dist/preload` + `renderer/dist`），不走 vite dev server，所以测不出「dev 启动时模块加载崩溃」。dev 冒烟专门补这个缺口——起 vite dev server，用 chromium headless 加载，断言 console 0 error。
+**设计意图**：MOCK 层 E2E 跑构建产物（`dist/main` + `dist/preload` + `renderer/dist`），不走 vite dev server，所以测不出「dev 启动时模块加载崩溃」。dev 冒烟专门补这个缺口——起 vite dev server，用 chromium headless 加载，断言 console 0 error。
 
-**现状**：`scripts/dev-smoke.mjs` 待建。在它落地前，**每次改完代码必须手工 `pnpm run dev` 确认能启动**（非 MOCK 轨），不能只信 E2E 全绿。
+**现状**：`scripts/dev-smoke.mjs` 待建。在它落地前，**每次改完代码必须手工 `pnpm run dev` 确认能启动**（非 MOCK 层），不能只信 E2E 全绿。
 
-### 1.4 三轨对照表
+### 1.4 三层对照表
 
 | 轨道 | 启动方式 | 覆盖维度 | 盲区 | 适用场景 |
 |------|---------|---------|------|---------|
-| MOCK 轨 | `pnpm run dev:mock` / `VITE_MOCK=true` E2E | renderer 渲染 + 交互 + 状态机 + mock 流式 | 模块加载副作用 / 真实协议 / WS 生命周期 | 日常开发、E2E 回归 |
-| 非 MOCK 轨 | `pnpm run dev` | 全链路（含 runtime/pi/文件系统） | 慢、环境敏感 | 手工冒烟、关键链路验证 |
+| MOCK 层 | `pnpm run dev:mock` / `VITE_MOCK=true` E2E | renderer 渲染 + 交互 + 状态机 + mock 流式 | 模块加载副作用 / 真实协议 / WS 生命周期 | 日常开发、E2E 回归 |
+| 非 MOCK 层 | `pnpm run dev` | 全链路（含 runtime/pi/文件系统） | 慢、环境敏感 | 手工冒烟、关键链路验证 |
 | dev 冒烟 | `node scripts/dev-smoke.mjs`（待建） | 模块加载健康 | 不测交互 | CI gate、PR 检查 |
 
-> **铁律**：MOCK 轨 E2E 全绿 ≠ 功能可用。必须配套非 MOCK 手工冒烟（或 dev 冒烟门禁）。这是 2026-06-30 事故的血泪教训。
+> **铁律**：MOCK 层 E2E 全绿 ≠ 功能可用。必须配套非 MOCK 手工冒烟（或 dev 冒烟门禁）。这是 2026-06-30 事故的血泪教训。
 
 ## 2. MOCK 模式如何启动
 
@@ -249,14 +249,14 @@ async function activateSession(
 > ⚠️ cwd 敏感：bash 工具 cwd 不跨调用持久，每条命令必须带 `cd <dir> &&`。
 
 ```bash
-# ── MOCK 轨：dev 交互 ──
+# ── MOCK 层：dev 交互 ──
 pnpm --filter @taiji/electron run dev:mock
 
-# ── 非 MOCK 轨：dev 交互（手工冒烟）──
+# ── 非 MOCK 层：dev 交互（手工冒烟）──
 pnpm dev
 
-# ── MOCK 轨：E2E 自动化 ──
-npx playwright test --project=electron           # 行为轨全量（visual/real 排除在外；裸跑不带 --project 会连 visual-chromium + electron-smoke 一起跑，smoke 用例随两个 project 各跑一遍）
+# ── MOCK 层：E2E 自动化 ──
+npx playwright test --project=electron           # 行为 mock 层全量（visual/real 排除在外；裸跑不带 --project 会连 visual-chromium + electron-smoke 一起跑，smoke 用例随两个 project 各跑一遍）
 npx playwright test --project=electron-smoke     # P0 smoke 子集（10 条 @p0-smoke，CI e2e-behavior job 同款命令；圈定 SSOT = playwright.config.ts grep 标签，归宿纪律见根 TEST-STRATEGY.md「e2e 资产归宿纪律」）
 npx playwright test e2e/file-tree.spec.ts        # 单文件
 npx playwright test --grep "E2E-1"               # 按用例名
@@ -369,7 +369,7 @@ pnpm run build:e2e   # 或删除 dist/ 强制 globalSetup 重建
 
 ## 7. E2E 覆盖现状
 
-覆盖现状以 `e2e/*.spec.ts` 为准（mock 轨 spec 全量在 `e2e/` 目录；real 轨半自动 spec 的运行方式与 bring-up 经验见 [00-overview.md](./00-overview.md)；real 轨手工测试入口见 [00-overview.md](./00-overview.md)）。
+覆盖现状以 `e2e/*.spec.ts` 为准（mock 层 spec 全量在 `e2e/` 目录；真实进程层半自动 spec 的运行方式与 bring-up 经验见 [00-overview.md](./00-overview.md)；真实进程层手工测试入口见 [00-overview.md](./00-overview.md)）。
 
 ## 8. 下一步
 
@@ -381,22 +381,22 @@ pnpm run build:e2e   # 或删除 dist/ 强制 globalSetup 重建
 - SideDrawer → [02-panels-sidebar.md](./02-panels-sidebar.md)
 - 搜索浮层 → [02-panels-sidebar.md](./02-panels-sidebar.md)
 - GUI 组件渲染 → [02-panels-sidebar.md](./02-panels-sidebar.md)
-- real 轨手工测试 → [00-overview.md](./00-overview.md)
-- real 轨 E2E 自动化 spec → [00-overview.md](./00-overview.md)
+- 真实进程层手工测试 → [00-overview.md](./00-overview.md)
+- 真实进程层 E2E 自动化 spec → [00-overview.md](./00-overview.md)
 - 插件系统非 mock 端到端验收 → [03-runtime-extensions.md](./03-runtime-extensions.md)
 
 ---
 
-# Part R-1 · real 轨手工测试（原 08-real-track-manual）
+# Part R-1 · 真实进程层手工测试（原 08-real-track-manual）
 
 
 > 本文不是自动化脚本，而是**结构化测试流程文档**。每个用例包含：前置条件 → 操作步骤 → 每步期望结果 → 验证点。
 > ai-agent（或人）照着步骤执行，每步对照期望结果判断 pass/fail。
 >
-> 为什么不用自动化脚本？real 轨依赖真实 runtime + pi + provider 配置 + 可能调 LLM，环境敏感、CI 不稳定。
+> 为什么不用自动化脚本？真实进程层依赖真实 runtime + pi + provider 配置 + 可能调 LLM，环境敏感、CI 不稳定。
 > 手工执行更灵活——可以观察中间状态、调试问题、跳过环境不可用的步骤。
 
-## 0. real 轨测试策略
+## 0. 真实进程层测试策略
 
 ### 0.1 自动化 vs 手工的分工
 
@@ -413,7 +413,7 @@ pnpm run build:e2e   # 或删除 dist/ 强制 globalSetup 重建
 一个 real 场景值得写自动化脚本，需同时满足：
 
 1. **断言表面确定性**——可预测、可精确比对。**注意**：触发可以依赖 LLM（flaky 时 skip 容忍），但断言不能依赖 LLM 输出风格（如 thinkingLevel 对输出长度的影响不可断言）；断言 pi 自己写的产物文件（session JSONL entry / workflow state JSONL）是最佳表面（见 11 §6）
-2. **依赖真实 runtime/文件系统/pi**——mock 轨覆盖不了
+2. **依赖真实 runtime/文件系统/pi**——mock 层覆盖不了
 3. **手工难以模拟**——如跨进程持久化需要两个 app 实例、真实协议透传需要真 pi 调 tool
 
 三条都满足才写自动化。否则走本文档手工执行。
@@ -512,7 +512,7 @@ pnpm run dev
 | 4 | 输出内容 | 含 `package.json` 的真实文件内容（非 mock 的「…文件内容…」） |
 | 5 | assistant 回复 | 基于 package.json 内容的合理回复 |
 
-**验证点**：tool 块的输出是**真实文件内容**（mock 轨是「…文件内容（mock）…」，real 轨是实际文件内容）。
+**验证点**：tool 块的输出是**真实文件内容**（mock 层是「…文件内容（mock）…」，真实进程层是实际文件内容）。
 
 ### RT-03: extension GUI 组件渲染（需安装 extension）
 
@@ -591,9 +591,9 @@ pnpm run dev
 | 4 | 打开 session A | 历史完整加载（thinking + tool + text + fileChanges） |
 | 5 | tool 块展开 | tool 输出内容仍在（持久化在 session JSONL 里） |
 
-## 3. 已知盲区（mock 轨测不到的）
+## 3. 已知盲区（mock 层测不到的）
 
-以下场景**只能通过 real 轨验证**，mock 轨的盲区：
+以下场景**只能通过 真实进程层验证**，mock 层的盲区：
 
 | 盲区 | 对应用例 | 说明 |
 |---|---|---|
@@ -607,10 +607,10 @@ pnpm run dev
 
 ## 4. 执行记录模板
 
-每次执行 real 轨测试时，复制以下模板记录结果：
+每次执行 真实进程层测试时，复制以下模板记录结果：
 
 ```markdown
-## real 轨测试执行记录
+## 真实进程层测试执行记录
 
 - 日期：YYYY-MM-DD
 - 执行者：ai-agent / 人工
@@ -633,15 +633,15 @@ pnpm run dev
 
 ---
 
-# Part R-2 · real 轨 E2E 自动化 spec（原 11-real-e2e-specs）
+# Part R-2 · 真实进程层 E2E 自动化 spec（原 11-real-e2e-specs）
 
 
-> real 轨手工测试清单见 [00-overview.md](./00-overview.md)（给 ai-agent 照着执行）。
-> 本文档是 real 轨的 **Playwright 自动化 spec**：真起 Electron app + 真实 runtime 子进程 + 真实 pi + 真实 LLM provider，断言真实表面（WS 广播、pi 自己写的 session JSONL、真实 DOM）。**零 mock**。
+> 真实进程层手工测试清单见 [00-overview.md](./00-overview.md)（给 ai-agent 照着执行）。
+> 本文档是 真实进程层的 **Playwright 自动化 spec**：真起 Electron app + 真实 runtime 子进程 + 真实 pi + 真实 LLM provider，断言真实表面（WS 广播、pi 自己写的 session JSONL、真实 DOM）。**零 mock**。
 
-## 1. 定位（与 mock 轨的区别）
+## 1. 定位（与 mock 层的区别）
 
-| 维度 | MOCK 轨（见 [00 总览](./00-overview.md)） | real 轨自动化（本文） |
+| 维度 | MOCK 层（见 [00 总览](./00-overview.md)） | 真实进程层自动化（本文） |
 |---|---|---|
 | renderer bundle | `VITE_MOCK=true` 构建 | `VITE_MOCK` 不传（real bundle） |
 | runtime / pi | 不起（`TAIJI_MOCK=1`） | 真起（main spawn runtime → runtime spawn pi） |
@@ -649,7 +649,7 @@ pnpm run dev
 | 断言表面 | mock fixture / 组件 DOM | 真实 WS 广播 / pi 产物文件 / 真实 DOM |
 | 失败处理 | 确定性 | flaky skip + diag 落盘 |
 
-**适用场景**：验证 mock 轨覆盖不到的盲区——真实协议透传（如 ask-user 的 `extension.ui_request`）、pi 子进程对 CLI 参数的真实消费（如 `--model x:thinkingLevel` 落盘 `thinking_level_change` entry）、真实 UI 交互闭环。
+**适用场景**：验证 mock 层覆盖不到的盲区——真实协议透传（如 ask-user 的 `extension.ui_request`）、pi 子进程对 CLI 参数的真实消费（如 `--model x:thinkingLevel` 落盘 `thinking_level_change` entry）、真实 UI 交互闭环。
 
 ## 2. 现有 spec 清单
 
@@ -659,7 +659,7 @@ pnpm run dev
 | `e2e/workflow-thinkinglevel-real.spec.ts` | TC1/TC2/TC3 | workflow agent() thinkingLevel 端到端：state 请求值 / pi 子进程 thinking_level_change / 完整跑通 | ✅ 3/3（需 LLM） |
 | `e2e/workspace-real.spec.ts` | 1 | 跨进程持久化 | ✅ 1/1 |
 | `e2e/workflow-disconnect-recovery.spec.ts` | A2 | WS 断开期间 run 完成 → 重连后收敛（传输兜底路径回归，水位结构性不触发场景）：恢复来源双断言 = `session.subscribe` reply 的 stateSnapshot 携带该 run 的 done workflowUpdate last-value 回放帧 + `session.getWorkflows` 主动拉取 RPC 返回终态记录；GUI 收敛（托盘 workflow 条目 data-state 回 idle ≤30s）；重连稳态无重复 done live 帧（断连且无订阅者时 publish 已完成、重连后 diff 恒空） | ✅ 2026-09-19 首跑全绿（reload-closeout-reliability u3b 执行，依赖 u1 送达水位对账已落地）：断连期间 run 完成 → 重连后 stateSnapshot 回放 done 帧 + `session.getWorkflows` 主动拉取终态 + GUI 托盘 data-state=idle ≤30s 收敛 + 稳态无重复 done live 帧 |
-| `e2e/btw-turn-isolation.spec.ts` | S7 | btw 双进程并发不变量（真实进程轨）：主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort/无 steer 注入 + 主会话 pi session JSONL 全文不含 btw 内容（滚动检查 = 全文扫描三问哨兵）+ 正面对照（btw 线文件含三问）。L3 真实 LLM 双凭证门（`TAIJI_PI_LIVE=1` + 本机 provider 凭证，缺一 skip 不 fail）；执行侧六要素（触发/预算/事件/断言/失败归档/重试禁令）SSOT = [e2e-map.json](./e2e-map.json) E2E-BTW-01 note，预算旋钮 = 主 prompt 的 bash `sleep 40` | ⬜ 资产已交付未执行（M4-b 剧本骨架，登记 E2E-BTW-01 R2；执行 = 阶段 5 验收 A7 行，空载串行，PR/merge/CI 不跑） |
+| `e2e/btw-turn-isolation.spec.ts` | S7 | btw 双进程并发不变量（真实进程层）：主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort/无 steer 注入 + 主会话 pi session JSONL 全文不含 btw 内容（滚动检查 = 全文扫描三问哨兵）+ 正面对照（btw 线文件含三问）。L3 真实 LLM 双凭证门（`TAIJI_PI_LIVE=1` + 本机 provider 凭证，缺一 skip 不 fail）；执行侧六要素（触发/预算/事件/断言/失败归档/重试禁令）SSOT = [e2e-map.json](./e2e-map.json) E2E-BTW-01 note，预算旋钮 = 主 prompt 的 bash `sleep 40` | ⬜ 资产已交付未执行（M4-b 剧本骨架，登记 E2E-BTW-01 R2；执行 = 阶段 5 验收 A7 行，空载串行，PR/merge/CI 不跑） |
 
 > [HISTORICAL] skill-reload 族原四 spec（登记 E2E-SKILLRELOAD-01/02/03/04）：2026-09-25 W5 skill 变更→pi reload 编排退役（ADR-0050 退役延伸），01/02/03 的被测对象（reload 非破坏化机制链）不复存在，随编排一并删除（登记同步移除）；04（`e2e/workflow-disconnect-recovery.spec.ts`，断连恢复场景）与 reload 无关保留，域 id E2E-SKILLRELOAD 维持稳定标识。共享装配与断言工具在 `e2e/fixtures/skill-reload-real-helpers.ts`。
 

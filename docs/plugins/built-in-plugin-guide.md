@@ -372,7 +372,7 @@ api.config.set(key: string, value: unknown): Promise<void>
 
 ### 3.11 Provider 来源接入（providers.* 三 RPC）
 
-插件可以作为 taiji 的模型来源（Provider）接入：家族元数据、授权流程、模型目录由插件提供，宿主提供 Provider 页的壳、`models.json` 落盘与「重新授权」入口。以下契约与 ADR-0159 同源。
+插件可以作为 taiji 的模型来源（Provider）接入：家族元数据、授权流程、模型目录由插件提供，宿主提供 Provider 页的壳、`models.json` 落盘与「重新授权」入口。以下契约与 ADR-0166 同源。
 
 **manifest 相关字段**（`package.json` 的 `taijiPlugin`）：
 
@@ -404,7 +404,7 @@ api.config.set(key: string, value: unknown): Promise<void>
 
 ## 4. 案例走读
 
-完整可运行的内置插件案例见 `resources/plugins/scheduler-manager/`（headerAction 入口 + overlay 树内容供给 + 命令通路，trusted 权限面收敛为 `sessions.readState` 单权限）。
+完整可运行的内置插件案例见 `resources/plugins/scheduler-manager/`（headerAction 入口 + overlay 树内容供给 + 命令通路，trusted 权限范围收敛为 `sessions.readState` 单权限）。
 
 
 ---

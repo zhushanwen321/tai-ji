@@ -11,6 +11,9 @@
  * - 元数据携带形态（发起时刻捕获，复用者共享同一份）
  * - dispose/clear 面（delete / keys 快照 / clear）
  * - fn 同步抛（无条目残留，异常上抛）
+ * - trailing 补拉形态（在途期间新触发不丢弃：settle 后自动补拉一轮、多次触发合并、
+ *   补拉期间再触发循环收敛、触发者拿首轮 promise、显式失效不补拉、补拉失败无
+ *   unhandled rejection）
  *
  * 运行：cd packages/core && pnpm vitest run src/foundation/create-inflight-dedup.test.ts
  * 禁止 node:test / tsx --test。
@@ -339,5 +342,146 @@ describe('U7a createInflightDedup: fn 同步抛', () => {
     expect(dedup.has('k')).toBe(true)
     d.resolve(3)
     void entry.promise.catch(() => {})
+  })
+})
+
+describe('U7a createInflightDedup: trailing 补拉形态', () => {
+  it('在途期间新触发：settle 后自动补拉一轮（fn 共两次），触发者拿首轮 promise', async () => {
+    const dedup = createInflightDedup<number>({ trailing: true })
+    const first = deferred<number>()
+    const second = deferred<number>()
+    let round = 0
+    const fn = vi.fn(() => {
+      round += 1
+      return round === 1 ? first.promise : second.promise
+    })
+
+    const entry = dedup.run('k', fn)
+    const trigger = dedup.run('k', fn) // 在途期间新触发（登记补拉）
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(trigger.promise).toBe(entry.promise) // 触发者复用首轮 promise，不等待补拉
+
+    first.resolve(10)
+    expect(await entry.promise).toBe(10)
+    await flushMicrotasks()
+    expect(fn).toHaveBeenCalledTimes(2) // settle 后自动补拉一轮
+    expect(dedup.has('k')).toBe(true) // 补拉轮登记为新 entry
+
+    second.resolve(20)
+    await flushMicrotasks()
+    expect(fn).toHaveBeenCalledTimes(2) // 补拉轮无新触发：不再补拉
+    expect(dedup.has('k')).toBe(false)
+  })
+
+  it('在途期间多次触发合并为一次补拉（标记是成员资格，非计数）', async () => {
+    const dedup = createInflightDedup<number>({ trailing: true })
+    let round = 0
+    const deferreds = [deferred<number>(), deferred<number>(), deferred<number>()]
+    const fn = vi.fn(() => {
+      round += 1
+      return deferreds[round - 1]!.promise
+    })
+
+    dedup.run('k', fn)
+    dedup.run('k', fn) // 触发 1
+    dedup.run('k', fn) // 触发 2
+    dedup.run('k', fn) // 触发 3
+    expect(fn).toHaveBeenCalledTimes(1)
+
+    deferreds[0]!.resolve(1)
+    await flushMicrotasks()
+    expect(fn).toHaveBeenCalledTimes(2) // 三次触发合并为一轮补拉
+
+    deferreds[1]!.resolve(2)
+    await flushMicrotasks()
+    expect(fn).toHaveBeenCalledTimes(2) // 补拉轮无新触发：不再补拉
+    expect(dedup.has('k')).toBe(false)
+  })
+
+  it('补拉期间再触发 → 补拉 settle 后继续补拉（循环收敛，do/while 手写形态等价）', async () => {
+    const dedup = createInflightDedup<number>({ trailing: true })
+    let round = 0
+    const deferreds = [deferred<number>(), deferred<number>(), deferred<number>()]
+    const fn = vi.fn(() => {
+      round += 1
+      return deferreds[round - 1]!.promise
+    })
+
+    dedup.run('k', fn)
+    dedup.run('k', fn) // 首轮在途触发（登记补拉）
+    deferreds[0]!.resolve(1)
+    await flushMicrotasks()
+    expect(fn).toHaveBeenCalledTimes(2) // 首轮 settle → 补拉轮发起
+
+    dedup.run('k', fn) // 补拉轮在途再触发（再登记补拉）
+    deferreds[1]!.resolve(2)
+    await flushMicrotasks()
+    expect(fn).toHaveBeenCalledTimes(3) // 补拉轮 settle → 继续补拉
+
+    deferreds[2]!.resolve(3) // 第三轮在途无新触发
+    await flushMicrotasks()
+    expect(fn).toHaveBeenCalledTimes(3)
+    expect(dedup.has('k')).toBe(false) // 收敛：无新触发不再补拉
+  })
+
+  it('首轮无触发：settle 后不补拉（trailing 不改变纯去重路径）', async () => {
+    const dedup = createInflightDedup<number>({ trailing: true })
+    const d = deferred<number>()
+    const fn = vi.fn(() => d.promise)
+
+    dedup.run('k', fn)
+    d.resolve(1)
+    await flushMicrotasks()
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(dedup.has('k')).toBe(false)
+  })
+
+  it('delete/clear 显式失效：同批清补拉标记，settle 后不补拉', async () => {
+    const dedup = createInflightDedup<number>({ trailing: true })
+    const d = deferred<number>()
+    const fn = vi.fn(() => d.promise)
+
+    dedup.run('k', fn)
+    dedup.run('k', fn) // 触发补拉
+    dedup.delete('k') // 显式失效（条目 + 补拉标记同批清）
+
+    d.resolve(1)
+    await flushMicrotasks()
+    expect(fn).toHaveBeenCalledTimes(1) // 不补拉
+    expect(dedup.has('k')).toBe(false)
+
+    // clear 形态同理
+    const d2 = deferred<number>()
+    dedup.run('k', () => d2.promise)
+    dedup.run('k', () => d2.promise)
+    dedup.clear()
+    d2.resolve(2)
+    await flushMicrotasks()
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(dedup.has('k')).toBe(false)
+  })
+
+  it('补拉轮 reject 不产生 unhandled rejection（新一轮清理链接管）', async () => {
+    const dedup = createInflightDedup<number>({ trailing: true })
+    const first = deferred<number>()
+    const second = deferred<number>()
+    let round = 0
+    const fn = vi.fn(() => {
+      round += 1
+      return round === 1 ? first.promise : second.promise
+    })
+
+    const entry = dedup.run('k', fn)
+    dedup.run('k', fn) // 触发补拉
+    first.resolve(1)
+    await entry.promise
+    await flushMicrotasks()
+    expect(fn).toHaveBeenCalledTimes(2)
+
+    // 补拉轮 reject：无任何调用方 attach 该 promise——清理链双分支接管，无 unhandled
+    second.reject(new Error('trailing round failed'))
+    await flushMicrotasks()
+    await flushMicrotasks()
+    expect(dedup.has('k')).toBe(false)
   })
 })

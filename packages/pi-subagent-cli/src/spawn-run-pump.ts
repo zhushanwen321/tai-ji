@@ -51,7 +51,14 @@ const SPAWN_ERROR_EXIT_CODE = 127;
 
 /** run 收尾状态（轮收敛（agent_end/agent_settled）与 close 收尾共享的可变句柄）。 */
 export interface RunEndState {
-  /** 轮终置位（agent_end / agent_settled）：主动收割的 close 按成功口径（exit 0）收尾。 */
+  /**
+   * 轮终置位（队列排空后的轮终 agent_end / agent_settled）：主动收割的 close 按成功口径
+   * （exit 0）收尾。[subagent-observability §3.3.1] 置位受双重事实门控——① 错误停因事实
+   * （terminalErrorFact）在场时保持 false（settled 不再是任何置 0 依据）；② P3 队列
+   * 事实：follow-up/steer 队列非空的 agent_end 是中间边沿（run 将 continue），不置位，
+   * 仅队列排空后的轮终边沿置位。handled 短路（P6-A）不置位——其语义 = agent 终态
+   * 边沿到达，接管收割不是 agent 轮终边沿（解释标记走 promptHandledNoRun）。
+   */
   endedCleanly: boolean;
   /**
    * child 'error' 事件的消息快照（spawn 失败形态：子进程从未运行）。error 事件
@@ -63,9 +70,10 @@ export interface RunEndState {
   /** agent_settled 的 run resolve 句柄（exitPromise executor 内落位）。 */
   resolveChatRun?: (code: number) => void;
   /**
-   * resolve 时刻的真实轮数快照（agent_settled 传出，见 SdkTranslatorOpts.onAgentSettled）。
-   * agent_settled 消费方随后按轮清零 record.turnCount（SP-9），收集侧以本快照恢复
-   * 成功 run 的真实轮数；undefined = agent_settled 未到达（失败路径），record 值即真实值。
+   * resolve 时刻的真实轮数快照（agent_settled 传出，见 SdkTranslatorOpts.onAgentSettled；
+   * [P5 计账] 已按失败尝试排除）。agent_settled 消费方随后按轮清零 record.turnCount
+   * （SP-9），收集侧以本快照恢复成功 run 的真实轮数；undefined = agent_settled 未到达
+   * （失败路径），record 值即真实值。
    */
   settledTurnCount?: number;
   /**
@@ -74,6 +82,46 @@ export interface RunEndState {
    * 错误码前缀终态——不是裸「子进程退出 137」）。undefined = 送达链路无失败。
    */
   promptAckFailure?: PromptAckResult;
+  /**
+   * [subagent-observability §3.3.1] 收尾边沿结构化轮终事实（translator onErroredEnd
+   * 落位）：错误停因 + errorMessage + aborted 三源判别产物。collectRunResult 据此
+   * 产出终态 error 文案（真实死因优先于退出码文案）与 FailureCause 分类输入。
+   */
+  terminalErrorFact?: import("./spawn-event-translator.ts").EngineRoundErrorFact;
+  /**
+   * [subagent-observability P5 计账] agent_settled 快照的剩余半面（失败尝试切片基 +
+   * retryAttempts）——collectRunResult 传给 collectOutcome 做 usage 切片与计数上报。
+   */
+  settledAccounting?: { finalAttemptTurnBase: number; retryAttempts: number };
+  /**
+   * [subagent-observability §3.3.1 turn-limiter 耗尽事实位] limiter abort 经
+   * buildTranslatorOpts 的 abort 包装置位（didAbort 事实位镜像）——limiter abort
+   * 是 SIGKILL 直杀路径，进程死前没有 message_end 停因可采，本位是三源判别的
+   * turn-budget 支事实载体（FailureCause harness.turn_budget_exhausted）。
+   */
+  turnBudgetExhausted?: boolean;
+  /**
+   * [subagent-observability §3.3.9/UC-10] limiter 耗尽事实（{used, limit}，abort 边沿
+   * 一次产出）：collectRunResult 随 turnBudgetExhausted 事实位传给 collectOutcome，
+   * cause.budget 结构化承载。undefined = 事实缺席（轮失败事实不受影响）。
+   */
+  turnBudgetExhaustion?: import("./turn-limiter.ts").TurnBudgetExhaustion;
+  /**
+   * [subagent-observability §3.3.1 P6-A] disposition=handled 且执行从未启动的确定性
+   * 立即轮终（isStreaming=false 判定后置位）：回执层成功口径 + engineStopReason 无值 +
+   * promptDisposition="handled"，无 FailureCause（无失败发生）。
+   */
+  promptHandledNoRun?: boolean;
+  /**
+   * [P6 事件位预筛] 已见任何 run 活动 SdkEvent（pump event 分支置位）——handled
+   * 结算的事件位短路门：事件在流 = 执行在途形态，继续等 settled，不做 get_state 查询。
+   */
+  sawAgentActivity?: boolean;
+  /**
+   * [P6 结算门] exitPromise 已结事实位（settled resolve / close finalizer 两处置位）——
+   * handled 结算与取消赛跑的短路判据。
+   */
+  exitResolved?: boolean;
 }
 
 /** session 身份回填状态机（三路写同源；get_state 监听表随行持有）。 */
@@ -231,6 +279,10 @@ function createLineConsumer(deps: StdoutPumpDeps): (line: string) => void {
         return;
       case "event":
         if (runCounters !== undefined) runCounters.lastEventType = parsed.event.type;
+        // [subagent-observability P6 事件位预筛] 任何 run 活动 SdkEvent 在流 = 执行在途
+        // 形态的事实信号（agent 事件流只在 run 执行期产生）——handled 结算的零成本
+        // 短路门置位（主判据仍 = get_state isStreaming 同步查询）。
+        deps.runEnd.sawAgentActivity = true;
         handleSdkEvent(parsed.event);
         return;
       case "response":
@@ -346,6 +398,9 @@ function createCloseFinalizer(
       // 保持 128+ 折算（异常路径判据）。child 'error'（spawn 失败，子进程从未
       // 运行）必须按失败码收尾——(code=null, signal=null) 落回 0 折算会把从未
       // 启动的 run 伪成功（F4）。resolveExit 无条件必达。
+      // [subagent-observability P6 结算门] exit 即将结算的事实位先行置位（handled
+      // 结算与 close 赛跑的短路判据）。
+      deps.runEnd.exitResolved = true;
       resolveExit(
         runEnd.childErrorMessage !== undefined
           ? SPAWN_ERROR_EXIT_CODE

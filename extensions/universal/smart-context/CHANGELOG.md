@@ -1,5 +1,11 @@
 # @zhushanwen/pi-smart-context
 
+## 0.4.2
+
+### Patch Changes
+
+- 318994f4a: The `compact_context` tool is now always declared to the model (resident) instead of being activated only through tool_search.
+
 ## 0.4.1
 
 ### Patch Changes

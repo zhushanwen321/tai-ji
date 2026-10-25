@@ -5,7 +5,7 @@
  * baseline: e2e/visual-baselines/shell.spec/shell-default.png（git tracked，Q3/D3；
  * 路径由 playwright.config.ts snapshotPathTemplate '{snapshotDir}/{testFileBaseName}/{arg}{ext}' 推导）。
  *
- * [基线环境无关性] 本轨渲染字体 = bundled webfont（Noto Sans SC Variable，fixture 统一注入，
+ * [基线环境无关性] 本组渲染字体 = bundled webfont（Noto Sans SC Variable，fixture 统一注入，
  * 见 fixtures/visual-server.ts）——本机与 CI runner 渲染同源，像素基线不含系统字体差异；
  * 环境一致性的锚 = 字体文件本身（@fontsource-variable/noto-sans-sc 锁定版本）。若未来变更
  * 字体（换族/升版本），基线须全量重录一次。

@@ -78,7 +78,10 @@ export default {
     // [HISTORICAL] 前身 mode-chip 单 key 标签（forkChip/handoffChip）+ placeholder 换文案
     // （forkHint/handoffHint）呈现通道已随 banner 形态退役（demo：图标染 accent 唯一染色点）
     forkBannerTitle: 'Fork 新分支',
-    forkBannerDesc: '当前输入将发到新分支，与主线隔离',
+    // [chat-flow-consistency U9 / S5] 补分叉点截断说明：锚点消息仍在流式时 pi 侧落盘不到它，
+    // 实际分叉点会回退到最后一条已落盘消息——文案以条件语气承载（锚点已完成时该半句不激活），
+    // 用户知情后自选等待或接受截断（不阻断）
+    forkBannerDesc: '当前输入将发到新分支，与主线隔离；所选消息仍在生成中时，分叉点将落在它之前最新完成的消息',
     handoffHint: '输入内容将作为新 session 的首条消息发送给 AI（可选）…（⏎ 交接并发送，Esc 退出）',
     handoffChip: '交接到新 session · 当前输入将发送到新会话',
     handoffSend: '交接并发送到新 session',
@@ -92,6 +95,15 @@ export default {
     // composer 命令动作表复制反馈（composer-pi-shortcuts 决策 4 / §3.5）
     copyLastReply: '已复制最后回复',
     copyLastReplyFailed: '复制失败',
+    // ✎ 队列编辑（chat-flow-consistency D6）：锚定判定反馈 + edit 回执四值分型
+    //（Q3 处置同构：失败形态的内容一律按普通新消息发出不丢，仅提示文案分型）
+    queueEditConflict: '正在编辑另一条消息，请先放弃编辑',
+    queueEditGone: '原消息已不在队列',
+    queueEditPeekFailed: '取回原文失败：{msg}',
+    queueEditDelivered: '原消息已投递，修改内容已作为新消息发送',
+    queueEditCancelled: '原消息已撤销，修改内容已作为新消息发送',
+    queueEditNotFound: '原消息已不在队列，修改内容已作为新消息发送',
+    queueEditUnconfirmed: '原消息投递状态未确认，修改内容已作为新消息发送',
   },
   message: {
     copy: '复制',
@@ -157,6 +169,16 @@ export default {
     itemRenderFailed: '本条渲染失败',
     itemRenderRetry: '重试',
     renderErrorToast: '界面渲染出现异常，已记录日志',
+    // [U8 重启中断提示条] 重启打断生成中回合后重开的尾部提示（runtime 尾部形态判定，
+    // 文案族对齐 D4 stalled「回复已中断」）
+    interruptedNotice: '上次会话在此处被中断，内容可能不完整',
+    // [chat-flow-consistency 缺陷 3/7] liveOnly 提示行文案（core 键注入，消费点 =
+    // effects/notice-text.ts configureChatNoticeText 注入）
+    chatNotice: {
+      stoppedBeforeStart: '已停止：回复尚未开始',
+      truncatedMaxTokens: '回复因达到长度上限被截断',
+      truncatedContentFilter: '回复因内容过滤被终止',
+    },
     // [RD-3#7] toast 在列上限溢出折叠摘要（droppedCount 的 UI 消费方）
     toastDropped: '还有 {count} 条通知未显示',
     toastDroppedDismiss: '关闭折叠通知提示',
@@ -166,6 +188,15 @@ export default {
     // tokens 从文案拆出为钉右 mono meta（compactedTokens 去括号）
     compacted: '已压缩上下文',
     compactedTokens: '{tokens} tokens',
+    // [chat-flow-consistency U9 / S6] 压缩摘要悬停详情标题（SystemNotice compaction 分支，
+    // body = AI 生成的上下文摘要全文，附复制按钮）
+    compactionSummaryLabel: '压缩摘要',
+    // [chat-flow-consistency U9 / S2] 交接回合呈现：handoff turn 的固定 prompt（内容 ===
+    // HANDOFF_PROMPT_TEMPLATE）折叠为系统行「交接指令（内部）」，原文进悬停详情；
+    // 其后 assistant 回合（交接文档）在 TurnMeta 挂标签
+    handoffInstruction: '交接指令（内部）',
+    handoffInstructionLabel: '指令原文',
+    handoffDocTag: '交接文档',
     branchCreated: '已创建分支（自 {from}）',
     branchCreatedNoFrom: '已创建分支',
     thinkCount: '思考 ×{count}',
@@ -215,7 +246,7 @@ export default {
     // [system-notice-rendering-upgrade U6] 边界行失败分句（D5「· M 失败」，Turn.vue 消费）：
     // 专用键不复用 traceFailed（「含 {count} 次失败」属 TraceCompactorRow 收编行句式，两者语义域不同）
     turnTriggerBgNotifyFailed: '{count} 失败',
-    // [bg-notice-fold specs/chat/system-notices.md §3.3] settle 收纳后轮头行折叠标签：按类型
+    // [bg-notice-fold] settle 收纳后轮头行折叠标签：按类型
     // 分段（发生序去重，「·」连接，耗时沿用 elapsed 段单数字）。托管会话为第四成员，折叠词
     // 待用户裁决（spec §6），暂按 fold-into-meta demo 提案值落地
     noticeFoldedBash: '已处理后台任务',
@@ -579,11 +610,13 @@ export default {
     // [D1] 按占用类型分档的 hover 文案（小时级 bash 等长占用下「等什么结束」可操作）
     pendingHintCompacting: '等待上下文压缩完成后发送',
     pendingHintBash: '等待命令执行结束后发送',
+    pendingHintHandingOff: '交接中，结束后投递',
     pendingHintSettling: '等待当前回合结束后发送',
-    // 内核条目态文案（G3：每条未送达消息有明确形态与状态）
+    // 内核条目态文案（G3：每条未送达消息有明确形态与状态；failed 统一「发送未确认」——
+    // 结果未确定（断连/受理失败两成因共用上界口径），行=状态、错误气泡=事件详情分层）
     stateQueued: '排队中',
     stateInFlight: '投递中',
-    stateFailed: '发送失败',
+    stateFailed: '发送未确认',
     cancelQueued: '撤销排队',
     cancelUnavailable: '消息已投递，无法撤销',
     cancelUnavailableWithReason: '无法撤销：{reason}',
@@ -592,7 +625,19 @@ export default {
     restoreDraftFailed: '已撤销，但恢复到输入框失败：{msg}',
     restoreContentMissing: '消息已撤销，但原文未能取回——请重新输入',
     retry: '重试发送',
+    // failed 行判重说明（行 hover title 第二行：重试入口不重复投递的保证，Q6）
+    retryDedupHint: '点重试会自动判重，不会重复投递',
     retryFailed: '重试失败：{msg}',
+    // 批量重试（Q5）与 +N 展开开关（Q2）
+    retryAll: '重试全部失败项',
+    expandQueued: '展开折叠的 {n} 条消息',
+    collapseQueued: '收起',
+    // ✎ 编辑（chat-flow-consistency D6：peek 预填 + 锚定登记，全行可用含 failed——E7）
+    editQueued: '编辑排队消息',
+    // 编辑态提示条（锚定在册渲染；条目离场由帧驱动自动解除 → 提示条随之消失）
+    editingBanner: '正在编辑排队消息 · 发送后原位替换',
+    editingBannerAbandon: '放弃编辑',
+    editingBannerAbandonHint: '解除保位并保留文本，可作为新消息发送',
   },
   contextChips: {
     removeFromContext: '从上下文移除',

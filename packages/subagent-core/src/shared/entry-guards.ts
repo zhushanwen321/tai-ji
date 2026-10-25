@@ -12,7 +12,7 @@
  * 层归属：Shared（无 Pi 依赖，仅 SLUG_MAX_LENGTH / MAX_TIMER_DELAY_MS 两个既有单源）。
  */
 
-import { SLUG_MAX_LENGTH } from "../orchestration/models/types.ts";
+import { SLUG_MAX_LENGTH } from "./run-vocabulary.ts";
 import { MAX_TIMER_DELAY_MS } from "./timer-delay.ts";
 
 /**

@@ -2,7 +2,7 @@
 /**
  * A2 场景：slug 标题风格 ×3 prompt。
  *
- * [保留真实 LLM 不 faux 化，2026-09-15 L2.5 翻轨登记] 本场景是全仓唯一真依赖模型
+ * [保留真实 LLM 不 faux 化，2026-09-15 L2.5 迁组登记] 本场景是全仓唯一真依赖模型
  * 智能的用例（标题生成质量抽查——faux 演员只会回放脚本，测不出风格遵从）。触发条件
  * （满足其一时人工跑）：rename prompt（llm.ts buildTitleMessages / systemPrompt）改动、
  * 默认模型切换、pi 版本 bump。正式登记归 e2e-map（阶段 3 收录）。

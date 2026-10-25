@@ -1,5 +1,5 @@
 /**
- * faux LLM 轨的测试专用 pi extension（pi 子进程内经 jiti 加载，勿 import 本文件——
+ * faux LLM 层的测试专用 pi extension（pi 子进程内经 jiti 加载，勿 import 本文件——
  * 它只作为 `--extension` 参数被 spawnPiFixture 注入）。
  *
  * 职责：把 pi-ai 的 fauxProvider 注册为 pi 的 native provider（pi.registerProvider 的
@@ -23,7 +23,7 @@
  *   子按派发时的 model 覆盖落到 b/c 槽位。行为差异全部由脚本步骤定义，模型本身无语义。
  * auth 恒 `{auth:{}}` 无需凭据（faux 实装），cost 恒 0，零网络——凭证无关/CI 可跑的机制基础。
  *
- * 双注册（e2e real 轨需求，2026-09-15）：同一 createFauxCore 实例同时挂两处——
+ * 双注册（e2e 真实进程层需求，2026-09-15）：同一 createFauxCore 实例同时挂两处——
  * ① pi.registerProvider（pi 主 loop 的 provider registry）；② pi-ai compat 的
  * apiProviderRegistry（registerApiProvider）。② 是给 extension 内经 llm-shared
  * callLLM → completeSimple 的调用方（rename-session 标题生成等）——compat 按

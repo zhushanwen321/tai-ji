@@ -252,7 +252,7 @@ describe('D10-C 混合插话（附C C1-C4）', () => {
   it('C3★ 消息在消费轮才消化 → 在消费轮 settle 通知（P9：受理回执先行 → 首次 settle 即兑现）', () => {
     const l = makeLedger()
     expect(l.arm({ parentSid: P, notifyId: 'sm-c3', kind: 'claim', sessionId: S })).toEqual({ ok: true })
-    // sendChecked 不经 busy gate：run 进行中即受理（回执帧先于 settled 帧，P9 FIFO）
+    // sendChecked 受理即出站：run 进行中即受理（回执帧先于 settled 帧，P9 FIFO）
     expect(l.markInjected(P, 'sm-c3')).toBe(true)
     expect(l.openWatch(P, 'sm-c3', 'w-sm-c3').action).toBe('wait') // extension 随工具结果开表
     const b = l.settle(S, 'done') // 消费轮的 settle = 兑现锚

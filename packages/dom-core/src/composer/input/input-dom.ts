@@ -357,8 +357,7 @@ function moveCaretToLinePoint(ctx: CaretTargetContext): VerticalMoveResult {
 /**
  * 视觉行上/下移动（模块级纯函数，preferred X 由调用方传入/写回）。
  *
- * ⚠️ 权威规则见 `.taiji-harness/2026-07-10-composer-history-navigation/spec.md` FR1 + FR5。
- * getClientRects + caretRangeFromPoint 坐标方案（sel.modify 对软换行 contenteditable 失效）。
+ * getClientRects + caretRangeFromPoint 坐标方案（sel.modify 对软换行 contenteditable 失效）——内联权威描述。
  *
  * 注意：document.caretRangeFromPoint 在 jsdom 未实现，多行分支由 renderer 行为测试覆盖。
  */

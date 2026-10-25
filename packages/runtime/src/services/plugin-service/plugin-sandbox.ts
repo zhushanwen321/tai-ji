@@ -11,7 +11,7 @@
  *
  * CJS 通道与 ESM loader（plugin-esm-loader.cjs）的执法分工：ESM hooks 不覆盖
  * CJS require，本拦截器是 CJS 通道的第一道防线（S-36 观察期结论 = 接线保留，
- * 登记 docs/todo/test-single-layer-cleanup.md）。fs 系两通道执法形态一致
+ * 原登记文档已退役、沿革见 git 历史）。fs 系两通道执法形态一致
  * （fs.read-user-data 的只读导出子集代理）：ESM 走 resolve 改写 sentinel + load
  * 短路返回代理模块源码；CJS 通道拦截器按能力声明两态放行——声明含 fs / fs/promises
  * → 放行（由 initSandbox 的 Module._load patch 返回只读代理对象，同语义），未声明

@@ -134,6 +134,18 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
    * 证据的入口载荷（D5-3 诊断引用写入 journal 记录的消费方）。
    */
   eventsJournalPath?: string;
+  /**
+   * [subagent-observability §3.3.8] 失败成员结算明细（终局帧同源透传：taskIndex +
+   * `"<class>.<kind>"` 点拼 cause，如 `provider.rate_limited`；无失败成员的终局
+   * 恒缺省）。类型经 RunSettlementRecord 索引访问——形状单源在 core
+   * settlementRecordOfRunSettledFrame。
+   */
+  failedMembers?: RunSettlementRecord["failedMembers"];
+  /**
+   * [subagent-observability §3.3.8/u5] 部分交付成员明细（终局帧同源透传：
+   * taskIndex + 未满足 deliverable 清单；无部分交付的终局恒缺省）。
+   */
+  partialMembers?: RunSettlementRecord["partialMembers"];
 }
 
 /**
@@ -213,8 +225,24 @@ function buildDoneNotifyContent(
 
   parts.push("");
   parts.push("--- Agent Trace ---");
+  // [subagent-observability §3.3.8] 成员结清事实随行呈现：failed 成员追加点拼
+  // cause、部分交付成员追加 missing 清单（终局帧同源）；无成员明细的终局行形态
+  // 不变（content 逐字节锚不受影响）。
+  const failedCauseOf = new Map(
+    (settlement.failedMembers ?? []).map((m) => [m.taskIndex, m.cause] as const),
+  );
+  const partialMissingOf = new Map(
+    (settlement.partialMembers ?? []).map((m) => [m.taskIndex, m.missing] as const),
+  );
   for (const node of traceNodes) {
-    parts.push(`[${node.stepIndex}] ${node.agent}: ${node.status}`);
+    let line = `[${node.stepIndex}] ${node.agent}: ${node.status}`;
+    const cause = failedCauseOf.get(node.stepIndex);
+    if (cause !== undefined) line += ` (${cause})`;
+    const missing = partialMissingOf.get(node.stepIndex);
+    if (missing !== undefined && missing.length > 0) {
+      line += ` (partial: missing ${missing.join(", ")})`;
+    }
+    parts.push(line);
   }
 
   // [D7] 产物指针段（主 agent 可操作的下一步入口：结果/证据在哪）。artifactsDir
@@ -262,6 +290,14 @@ function buildDoneNotifyDetails(
   };
   if (settlement.errorCode !== undefined) {
     baseDetails.errorCode = settlement.errorCode;
+  }
+  // [subagent-observability §3.3.8] 成员结算明细帧同源透传（无明细的终局恒缺省，
+  // 与帧缺省形态一致；消费方按扩张字段透传——errorCode 扩值域同款先例）。
+  if (settlement.failedMembers !== undefined) {
+    baseDetails.failedMembers = settlement.failedMembers;
+  }
+  if (settlement.partialMembers !== undefined) {
+    baseDetails.partialMembers = settlement.partialMembers;
   }
   if (settlement.outcome === "done" && run.state.scriptResult !== undefined && run.state.scriptResult !== null) {
     baseDetails.resultSummary = boundedPrettySerialize(run.state.scriptResult, MAX_RESULT_SUMMARY_LENGTH);

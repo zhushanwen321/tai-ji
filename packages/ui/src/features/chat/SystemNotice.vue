@@ -34,11 +34,12 @@
        branch / background-bash 结构化行 / 兜底原文行共用一套 DOM 结构——两端渐隐横线
        （transparent → --border-strong 18% → 82% → transparent）+ 13px/stroke 2.2 图标 +
        主体（短语 text-sm/fg/550）+ 可选钉右 mono meta（text-2xs/500/tabular-nums）。
-       行距（specs/chat/system-notices.md §4，2026-10 裁决三值 上 10 / 下 16 / 相邻 20——
+       行距（2026-10 裁决三值 上 10 / 下 16 / 相邻 20——
        修复「bottom 外部距离太短」）：静态外部行 = demo 权威形态 pt-[13px] pb-[19px]
        （demo margin 10/16 + 行内 padding 3px 的合成视觉值；相邻两行 32px，与本族连发
-       「独立事件保留间隔感」判据一致）；轮内 inline 行（工作态收纳通知的临时外部行 /
-       liveOnly 健康警告）维持现状 py-1.5（临时形态按「现状外部形态出现」，settle 即摘除）。
+       「独立事件保留间隔感」判据一致）；轮内 inline 行（工作态收纳通知的临时外部行）维持
+       现状 py-1.5（临时形态按「现状外部形态出现」，settle 即摘除；liveOnly 健康警告已随
+       [chat-flow-consistency C6] 独立成 static 项，走静态外部行距，不再 inline 消费）。
        三段 flex 居中结构 / content-col 宽度 / animate-notice-in 动效三项不动。
        方案 A 增补（主体有界 + 悬停详情）：主体只承载有界短语——无界载荷（background-bash
        命令原文 / 超 40 字符的兜底 system 原文）移入 HoverCard 悬停详情（只读 + 复制），
@@ -110,7 +111,7 @@
 </template>
 
 <script setup lang="ts">
-import { GitBranch, Layers, Info, ArrowRight, SquareTerminal } from '@lucide/vue'
+import { GitBranch, Layers, Info, ArrowRight, ArrowLeftRight, SquareTerminal } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { onUnmounted, ref, type Component } from 'vue'
 import {
@@ -137,9 +138,10 @@ const { t } = useI18n()
 const props = withDefaults(
   defineProps<{
     message: Message
-    /** 轮内 inline 形态（specs/chat/system-notices.md §4）：工作态收纳通知的临时外部行 /
-     *  liveOnly 健康警告等轮内消费点——维持现状行距 py-1.5；缺省（静态外部行）= 裁决三值的
-     *  demo 权威间距 pt-[13px] pb-[19px]。 */
+    /** 轮内 inline 形态
+     *  （Turn.vue 工作态 bash 结构化行，唯一消费点）——维持现状行距 py-1.5；缺省（静态
+     *  外部行）= 裁决三值的 demo 权威间距 pt-[13px] pb-[19px]。liveOnly 健康警告已随
+     *  [chat-flow-consistency C6] 独立成 static 项，不属 inline 消费点。 */
     inline?: boolean
   }>(),
   { inline: false },
@@ -218,6 +220,18 @@ interface NoticeView {
 const notice: NoticeView = finalizeDetail(resolveNotice(props.message))
 
 function resolveNotice(message: Message): NoticeView {
+  // [chat-flow-consistency U9 / S2] 交接指令行（handoff turn 的固定 prompt 被 reducer
+  // 转为系统行）：主体短语「交接指令（内部）」，指令原文只进悬停详情（background-bash
+  // 命令原文同款）。字段判定（reducer 派生段唯一写点），content 兜底不再单独分支——
+  // 本行恒带 handoffInstruction（识别与转换同点），原文取字段值。
+  if (message.handoffInstruction) {
+    return {
+      icon: ArrowLeftRight,
+      iconClass: ICON_NEUTRAL_CLASS,
+      text: t('panel.message.handoffInstruction'),
+      detail: { label: t('panel.message.handoffInstructionLabel'), body: message.handoffInstruction.text },
+    }
+  }
   // background-bash 结构化行（D2 + 方案 A 短语化）：details 经 shared 单点防御解析命中 →
   // 终态短语主体 + exit/耗时 meta；命令原文只进悬停详情。解析 null（旧 session 无
   // details / 第三方写入畸形载荷）→ 落下方兜底原文行（content 原文含全部信息，无需恢复动作）。
@@ -226,11 +240,17 @@ function resolveNotice(message: Message): NoticeView {
   if (message.compactionSummary) {
     const tokens = message.compactionSummary.tokensBefore
     // tokens 从主文案拆出为钉右 meta（D3）：主文案只留短语，数字进等宽 meta 供扫读对齐
+    // [chat-flow-consistency U9 / S6] 摘要全文悬停详情：compactionSummary.summary 非空时
+    // 挂悬停（label「压缩摘要」+ 全文 + 复制，NoticeDetail 基建复用）——摘要两侧同源已在
+    // 消息数据（live 帧 / reload 派生同一构造核心），此处纯渲染入口补齐。summary 缺失
+    // （reducer fallback「上下文已压缩」形态）不挂（无内容可显）。
+    const summary = message.compactionSummary.summary
     return {
       icon: Layers,
       iconClass: ICON_NEUTRAL_CLASS,
       text: t('panel.message.compacted'),
       meta: tokens !== undefined ? t('panel.message.compactedTokens', { tokens: formatTokens(tokens) }) : undefined,
+      ...(summary ? { detail: { label: t('panel.message.compactionSummaryLabel'), body: summary } } : {}),
     }
   }
   if (message.branchSummary) {

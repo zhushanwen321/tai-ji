@@ -2,9 +2,9 @@
 /**
  * dev 启动期冒烟门禁（W1 dev-smoke-gate）。
  *
- * 目标：堵 MOCK 轨 E2E 盲区——dev 启动期崩溃（CSS 变量引用错 / Tailwind 类名错 /
+ * 目标：堵 MOCK 层 E2E 盲区——dev 启动期崩溃（CSS 变量引用错 / Tailwind 类名错 /
  * import 路径错 / style.css 语法错 / Vue template compile 错）。这些崩溃在「只跑
- * MOCK 轨 E2E」时不会被触发（MOCK 轨依赖 build 产物，绕过 vite dev serve），
+ * MOCK 层 E2E」时不会被触发（MOCK 层依赖 build 产物，绕过 vite dev serve），
  * 也不被现有 vitest 单测覆盖（单测不挂载完整 AppShell）。
  *
  * 机制：VITE_MOCK=true spawn vite dev server（只起 vite，不起 electron）→ 轮询

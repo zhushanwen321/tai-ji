@@ -99,10 +99,7 @@ function makeMockSession(): IManagedSessionView {
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: true,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
+        bashRunToken: undefined,
   }
 }
 
@@ -122,6 +119,7 @@ function makeDispatcherMocks(_opts: { abortError?: Error } = {}) {
     getSessionByClient: vi.fn(() => session),
     detachSession: vi.fn(),
     persistSessionOutcome: vi.fn(),
+    clearSessionOutcome: vi.fn(),
     removeSessionEntry: vi.fn(),
     ensureActive: vi.fn(),
     getSession: vi.fn(() => undefined),
@@ -181,7 +179,7 @@ function makeLifecycleEnv() {
     getLaunchPresetOptions: vi.fn(async () => undefined),
     toSummary: vi.fn((s: IManagedSessionView): SessionSummary => ({
       id: s.id, label: s.label, cwd: s.cwd, status: 'active',
-      lastActiveAt: 1, modelId: 'p/m', tokenCount: 0,
+      lastActiveAt: 1,
     })),
     findScannedSession: vi.fn((id: string): ScannedSession | undefined => {
       const filePath = currentSourceFile.value

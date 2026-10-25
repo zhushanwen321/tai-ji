@@ -44,11 +44,24 @@ vi.mock('@taiji/core', async (importOriginal) => ({
   getSettingsStore: settingsMock.getSettingsStore,
 }))
 
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({
-    list: [{ id: 's1', modelId: 'zai-coding-cn/glm-5.3' }],
-  }),
-}))
+// [W1 会话架构四层分离] 当前会话模型读**状态层**（按会话 id 寄存），不再读 sessionStore.list
+// 条目（applySnapshot 已不写 modelId，列表查找会使「当前」判定恒 null）。选择器入口 =
+// useSessionLiveState（内部经 core createSessionLiveStateSelector 读 pinia 薄壳）——本处
+// mock composable 即覆盖整条读链。
+vi.mock('@/composables/features/session/useSessionLiveState', async () => {
+  const { computed } = await import('vue')
+  return {
+    useSessionLiveState: (sessionIdRef: { value: string | null }) => ({
+      liveState: computed(() =>
+        sessionIdRef.value === 's1' ? { modelId: 'zai-coding-cn/glm-5.3' } : undefined,
+      ),
+      modelId: computed(() =>
+        sessionIdRef.value === 's1' ? 'zai-coding-cn/glm-5.3' : undefined,
+      ),
+      thinkingLevel: computed(() => undefined),
+    }),
+  }
+})
 
 // ── 数据构造 ───────────────────────────────────────────────────────
 
@@ -177,14 +190,16 @@ describe('PlanQuotaFloatPanel', () => {
     expect(wrapper.find('[data-testid="plan-quota-item-kimi-coding"] [data-testid="plan-quota-current-tag"]').exists()).toBe(false)
   })
 
-  it('用量 ≥90% 的窗口转 danger 色', async () => {
+  it('用量 ≥90% 的窗口转 danger 色（环保持原色；百分比文字走提亮档 --danger-text）', async () => {
     const wrapper = mountFloat()
     await flushPromises()
 
-    const kimi5hFill = wrapper.find('[data-testid="plan-quota-bar-kimi-coding-0"] div')
-    expect(kimi5hFill.classes()).toContain('bg-danger')
-    const zai5hFill = wrapper.find('[data-testid="plan-quota-bar-zai-coding-cn-0"] div')
-    expect(zai5hFill.classes()).not.toContain('bg-danger')
+    const kimi5hRing = wrapper.find('[data-testid="plan-quota-ring-kimi-coding-0"]')
+    expect(kimi5hRing.classes()).toContain('text-danger')
+    const kimi5hPct = wrapper.find('[data-testid="plan-quota-cell-kimi-coding-0"] [data-testid="plan-quota-pct"]')
+    expect(kimi5hPct.classes()).toContain('text-[color:var(--danger-text)]')
+    const zai5hRing = wrapper.find('[data-testid="plan-quota-ring-zai-coding-cn-0"]')
+    expect(zai5hRing.classes()).not.toContain('text-danger')
   })
 
   it('collapsed=true 渲染收起把手（列表隐藏），点击把手发发展开事件', async () => {

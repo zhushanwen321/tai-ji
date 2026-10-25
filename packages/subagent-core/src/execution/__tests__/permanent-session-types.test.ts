@@ -118,8 +118,12 @@ describe("TranscriptRef 判别联合收窄守卫", () => {
 // ── ② StopReason 枚举完整性 ──────────────────────────────────────────────────
 
 describe("StopReason 枚举完整性", () => {
-  it("全枚举 = 旧 ClosedReason 7 值（6 写值 + disconnected 读侧兜底）+ 4 新展示值 + 2 正常轮终展示值，共 13 无重复", () => {
-    expect([...STOP_REASONS]).toHaveLength(13);
+  it("全枚举 = 旧 ClosedReason 7 值（6 写值 + disconnected 读侧兜底）+ 4 新展示值 + 3 引擎原值 + 2 迁移期旧值，共 16 无重复", () => {
+    // [subagent-observability §3.3.3] 轮收条事实化：引擎原值 stop/error/aborted 入
+    // 词表（轮终写入值域），completed/failed 降为迁移期旧值（历史帧解析放行，
+    // 迁移完删旧值）。枚举完整性锚已迁 execution/domain/__tests__/record-types.test.ts
+    // （词表文件同位）；本用例保留值数防线。
+    expect([...STOP_REASONS]).toHaveLength(16);
     // 无重复（重复成员会撑长度 + 稀释枚举语义）。
     expect(new Set(STOP_REASONS).size).toBe(STOP_REASONS.length);
     for (const reason of [
@@ -132,6 +136,8 @@ describe("StopReason 枚举完整性", () => {
       "disconnected",
       ...NEW_STOP_REASONS,
       ...ROUND_TERMINAL_STOP_REASONS,
+      "completed",
+      "failed",
     ] as const) {
       expect(STOP_REASONS).toContain(reason);
     }
@@ -146,18 +152,17 @@ describe("StopReason 枚举完整性", () => {
     ]);
   });
 
-  it("ROUND_TERMINAL_STOP_REASONS 恰为 2 个正常轮终展示值（A-lite）", () => {
-    expect([...ROUND_TERMINAL_STOP_REASONS]).toEqual(["completed", "failed"]);
+  it("ROUND_TERMINAL_STOP_REASONS 恰为 3 个引擎原值（[subagent-observability §3.3.3] 轮收条事实化——停因只存引擎事实）", () => {
+    expect([...ROUND_TERMINAL_STOP_REASONS]).toEqual(["stop", "error", "aborted"]);
   });
 
-  it("isValidStopReason：合法成员（含正常轮终 completed/failed）放行；垃圾值拒绝", () => {
+  it("isValidStopReason：合法成员（含迁移期旧值 completed/failed——历史帧解析放行）放行；垃圾值拒绝", () => {
     for (const reason of STOP_REASONS) {
       expect(isValidStopReason(reason)).toBe(true);
     }
-    // [A-lite 裁决翻转] completed/failed 原锁拒绝（派生 outcome 词汇不混入
-    // stopReason 词表）——区1-U1+区3-U1 一致性审查后 markRoundIdle 正常轮终
-    // 需要停因展示位（任务卡片 failed 状态词 + 排障「为什么停」），两词入值域
-    //（轮终翻边 idle——[two-state-convergence U4/D3]，见 types.ts StopReason 注释）。
+    // [A-lite 裁决翻转 → subagent-observability 迁移期] completed/failed 曾是正常轮终
+    // 展示位；轮收条事实化后为迁移期旧值（写侧产出随 u3 接线退役），历史帧解析词表
+    // 保留放行——迁移完删旧值（§3.4）时本断言随成员一并删除。
     expect(isValidStopReason("completed")).toBe(true);
     expect(isValidStopReason("failed")).toBe(true);
     expect(isValidStopReason("bogus")).toBe(false);

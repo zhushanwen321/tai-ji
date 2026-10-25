@@ -17,8 +17,6 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
     cwd: '/work/a',
     status: 'idle',
     lastActiveAt: 0,
-    modelId: '',
-    tokenCount: 0,
     ...overrides,
   }
 }
@@ -87,42 +85,34 @@ describe('createSessionStore', () => {
     expect(store.activeId.value).toBeNull()
   })
 
-  it('TC-4: applySnapshot 单 session 快照 undefined 跳过、未知 id 静默', () => {
+  it('TC-4: applySnapshot 单 session 描述字段——undefined 跳过、未知 id 静默', () => {
     const store = createSessionStore()
-    const s1 = makeSession({ id: 's1', label: 'old', modelId: 'm1', thinkingLevel: 'medium' })
+    const s1 = makeSession({ id: 's1', label: 'old', status: 'idle' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
     store.applySnapshot('s1', { label: '新名' })
     expect(store.list.value[0].label).toBe('新名')
 
-    // 快照未涉及的字段（undefined）保留现值：只给 modelId，thinkingLevel 不变
-    store.applySnapshot('s1', { modelId: 'm2' })
-    expect(store.list.value[0].modelId).toBe('m2')
-    expect(store.list.value[0].thinkingLevel).toBe('medium')
-
-    store.applySnapshot('s1', { thinkingLevel: 'low' })
-    expect(store.list.value[0].modelId).toBe('m2')
-    expect(store.list.value[0].thinkingLevel).toBe('low')
+    // 快照未涉及的字段（undefined）保留现值：只给 status，label 不变
+    store.applySnapshot('s1', { status: 'active' })
+    expect(store.list.value[0].status).toBe('active')
+    expect(store.list.value[0].label).toBe('新名')
 
     // 未知 id 静默无副作用
-    store.applySnapshot('nope', { modelId: 'm3', label: 'x' })
-    expect(store.list.value[0].modelId).toBe('m2')
+    store.applySnapshot('nope', { label: 'x', status: 'dead' })
     expect(store.list.value[0].label).toBe('新名')
+    expect(store.list.value[0].status).toBe('active')
   })
 
-  it('TC-4a: D1b 合并规则——owner 快照整字段覆盖（多字段一次到位）', () => {
+  it('TC-4a: D1b 合并规则——描述字段整字段覆盖（多字段一次到位）', () => {
     const store = createSessionStore()
-    const s1 = makeSession({ id: 's1', label: 'old', modelId: 'm1', thinkingLevel: 'low', tokenCount: 10 })
+    const s1 = makeSession({ id: 's1', label: 'old', status: 'idle' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
-    // state_changed 广播形态：modelId + thinkingLevel 同帧整字段覆盖
-    store.applySnapshot('s1', { modelId: 'm2', thinkingLevel: 'high' })
+    store.applySnapshot('s1', { label: '扫描名', status: 'done' })
     const after = store.list.value[0]
-    expect(after.modelId).toBe('m2')
-    expect(after.thinkingLevel).toBe('high')
-    // 未涉及字段保留
-    expect(after.label).toBe('old')
-    expect(after.tokenCount).toBe(10)
+    expect(after.label).toBe('扫描名')
+    expect(after.status).toBe('done')
 
     // status 也走同一合并路径（session.exited 类状态迁移）
     store.applySnapshot('s1', { status: 'dead' })
@@ -131,122 +121,75 @@ describe('createSessionStore', () => {
 
   it('TC-4b: D1b 合并规则——显式空值覆盖（owner 声明空即空，不保留旧真值）', () => {
     const store = createSessionStore()
-    const s1 = makeSession({ id: 's1', modelId: 'm1', thinkingLevel: 'high', tokenCount: 100 })
+    const s1 = makeSession({ id: 's1', label: '旧名' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
-    // owner 快照显式给空串/0 → 覆盖（与旧 patch 语义的差异点即在此：
-    // 磁盘扫描占位值的空检查归 W15，见下方 TC-W15 组）
-    store.applySnapshot('s1', { modelId: '', thinkingLevel: '', tokenCount: 0 })
-    const after = store.list.value[0]
-    expect(after.modelId).toBe('')
-    expect(after.thinkingLevel).toBe('')
-    expect(after.tokenCount).toBe(0)
-  })
-
-  // ── W15 磁盘占位值检查（D1b 按来源分流，双向断言）──────────────────
-  // 快照来源：source:'scan' = 磁盘扫描占位（检查生效）；缺省 = owner 权威（D1b 照常）。
-
-  it('TC-W15-1: 扫描来源快照的占位 modelId 空串不覆盖已知真值', () => {
-    const store = createSessionStore()
-    // 实例/广播已入真值（重开 session 后 state_changed 收敛的形态）
-    const s1 = makeSession({ id: 's1', modelId: 'provider/m-true', tokenCount: 42 })
-    store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
-
-    // 扫描来源快照带占位 modelId:''（source:'scan' 显式标记占位语义）→ 真值保留
-    store.applySnapshot('s1', { modelId: '', source: 'scan' })
-    expect(store.list.value[0].modelId).toBe('provider/m-true')
-  })
-
-  it('TC-W15-2: 扫描来源快照的占位 tokenCount 0 不覆盖已知真值', () => {
-    const store = createSessionStore()
-    const s1 = makeSession({ id: 's1', modelId: 'm1', tokenCount: 512 })
-    store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
-
-    store.applySnapshot('s1', { tokenCount: 0, source: 'scan' })
-    expect(store.list.value[0].tokenCount).toBe(512)
-
-    // 双字段同帧（scannedToSummary 产出形态）：占位 ''/0 都被检查，真值均保留
-    store.applySnapshot('s1', { modelId: '', tokenCount: 0, source: 'scan' })
-    expect(store.list.value[0].modelId).toBe('m1')
-    expect(store.list.value[0].tokenCount).toBe(512)
-  })
-
-  it('TC-W15-3: owner 快照的权威空值必须覆盖旧名/旧值（防检查扩大化）', () => {
-    const store = createSessionStore()
-    const s1 = makeSession({ id: 's1', label: '旧名', modelId: 'm1', tokenCount: 100 })
-    store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
-
-    // owner 权威空值（缺省来源，无 source:'scan'）：sessionName 空 = 未命名 = 权威空
-    // （label 空值语义沿用登记表 #1——pi sessionName 空 = 未命名合法态，wire 到快照层
-    // 为 label:''；label 实例已撤销，PR #185 MF1，语义不变）必须覆盖旧名——检查只对
-    // 扫描来源生效，不得把 owner 空值语义一并拦掉（D1b 两条规则不混用）。
+    // owner 权威空值（sessionName 空 = 未命名合法态，wire 到快照层为 label:''）覆盖
     store.applySnapshot('s1', { label: '' })
     expect(store.list.value[0].label).toBe('')
-
-    // owner 的 modelId:''/tokenCount:0 同理正常覆盖（与 TC-4b 同语义，此处锚定检查未扩大化）
-    store.applySnapshot('s1', { modelId: '', tokenCount: 0 })
-    expect(store.list.value[0].modelId).toBe('')
-    expect(store.list.value[0].tokenCount).toBe(0)
   })
 
-  it('TC-W15-4: owner 快照的 modelId 真值正常覆盖（不因检查误伤真值路径）', () => {
+  // ── [W1 会话架构四层分离] 状态字段不再由导航列表承载 ──────────────────
+  // 设计 §3.3 删除清单：applySnapshot 不再写 modelId / thinkingLevel / tokenCount。
+  // 状态权威 = domain/session/live-state（唯一写入口 applyLiveState）。
+  // [W3] 三状态字段已从 SessionSummary 类型删除（状态归状态层，列表只承载导航）——
+  // 原「列表条目带种子字段」的断言形态随之退役：不变量反向锁定为「状态帧里的同名
+  // 字段落不进列表条目」（条目上无该属性）。以下用例维持该锁定。
+
+  it('TC-W1-1: 单条快照带状态字段 → 列表条目不被写入（列表只托管描述字段）', () => {
     const store = createSessionStore()
-    const s1 = makeSession({ id: 's1', modelId: 'provider/m-old', thinkingLevel: 'low' })
+    const s1 = makeSession({ id: 's1' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
-    // state_changed 广播形态（owner）：真值照常整字段覆盖
-    store.applySnapshot('s1', { modelId: 'provider/m-new', thinkingLevel: 'high' })
+    store.applySnapshot('s1', { modelId: 'state/model', thinkingLevel: 'high', tokenCount: 999 })
     const after = store.list.value[0]
-    expect(after.modelId).toBe('provider/m-new')
-    expect(after.thinkingLevel).toBe('high')
+    // W3：条目上不再存在三状态字段（类型级删除），状态帧写入目标 = 状态层而非列表
+    expect(after).not.toHaveProperty('modelId')
+    expect(after).not.toHaveProperty('thinkingLevel')
+    expect(after).not.toHaveProperty('tokenCount')
+    expect(after.label).toBe('s1')
   })
 
-  it('TC-W15-5: 检查边界——扫描快照的非占位字段照常合并；target 同为占位时覆盖等值无害', () => {
+  it('TC-W1-2: 列表外 id 的单条快照不写入任何条目（状态层才是列表外 id 的落点）', () => {
     const store = createSessionStore()
-    const s1 = makeSession({ id: 's1', modelId: '', tokenCount: 0, status: 'idle' })
+    const s1 = makeSession({ id: 's1' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
-    // 检查只拦占位空值：扫描快照的非检查字段（label/status/thinkingLevel）与占位真值
-    // （如未来扫描能读出的非空 modelId）照常 D1b 覆盖
-    store.applySnapshot('s1', { label: '扫描名', status: 'done', thinkingLevel: 'high', modelId: 'scanned-true', source: 'scan' })
-    const after = store.list.value[0]
-    expect(after.label).toBe('扫描名')
-    expect(after.status).toBe('done')
-    expect(after.thinkingLevel).toBe('high')
-    expect(after.modelId).toBe('scanned-true')
-
-    // 覆盖后的非空 modelId 再次遭遇扫描占位快照 → 检查生效保留真值（与 TC-W15-1 同语义）
-    store.applySnapshot('s1', { modelId: '', source: 'scan' })
-    expect(store.list.value[0].modelId).toBe('scanned-true')
-
-    // target 的 modelId/tokenCount 本身是占位（''/0）时，扫描占位快照覆盖与否等值——
-    // 行为单一（走覆盖分支），用干净占位条目断言值不变即可
-    const s2 = makeSession({ id: 's2', modelId: '', tokenCount: 0 })
-    store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s2] }] })
-    store.applySnapshot('s2', { modelId: '', tokenCount: 0, source: 'scan' })
-    expect(store.list.value.find((s) => s.id === 's2')?.modelId).toBe('')
-    expect(store.list.value.find((s) => s.id === 's2')?.tokenCount).toBe(0)
+    // btw 线 session id（runtime hidden 注册，不进侧栏列表）——列表不新增条目、不抛错
+    store.applySnapshot('pi-line-1', { modelId: 'line/model', label: 'x' })
+    expect(store.list.value.map((s) => s.id)).toEqual(['s1'])
   })
 
-  it('TC-4d: 单 session 快照 undefined → 整条静默跳过（mergeViewSnapshot 空快照检查，托管字段全保留）', () => {
+  it('TC-W1-3: 整表刷新只替换列表条目（描述字段随载荷），不涉及状态容器', () => {
     const store = createSessionStore()
-    const s1 = makeSession({ id: 's1', label: 'old', modelId: 'm1', status: 'active', tokenCount: 9 })
+    const s1 = makeSession({ id: 's1', label: 'a', status: 'idle' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
-    // 调用方传 undefined 快照（如广播 payload 字段缺失的防御路径）：不抛、不产生任何
-    // 字段变化——五个托管字段（label/status/modelId/thinkingLevel/tokenCount）原样保留
-    // 防御路径：广播 payload 缺失时快照可为 undefined——经视图注入保持断言语义
+    // 归档 / 项目过滤 / 刷新都只是整表替换：列表条目随载荷
+    const next = makeSession({ id: 's1', label: 'a', status: 'done' })
+    store.applySnapshot({ groups: [{ cwd: '/a', sessions: [next] }] })
+    expect(store.list.value[0].status).toBe('done')
+
+    // 状态层不受影响（此处只验证列表侧语义：列表 ≠ 状态容器，W1 后不变量见 live-state.test.ts）
+    store.applySnapshot({ groups: [] })
+    expect(store.list.value).toEqual([])
+  })
+
+  it('TC-4d: 单 session 快照 undefined → 整条静默跳过（描述字段全保留）', () => {
+    const store = createSessionStore()
+    const s1 = makeSession({ id: 's1', label: 'old', status: 'active' })
+    store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
+
+    // 防御路径：广播 payload 缺失时快照可为 undefined
     ;(store.applySnapshot as (id: string, snapshot?: SessionViewSnapshot) => void)('s1', undefined)
     const after = store.list.value[0]
     expect(after.label).toBe('old')
     expect(after.status).toBe('active')
-    expect(after.modelId).toBe('m1')
-    expect(after.tokenCount).toBe(9)
   })
 
   it('TC-4c: 乐观更新形态——本地入参只带乐观字段，权威广播回流幂等收敛', () => {
     const store = createSessionStore()
-    const s1 = makeSession({ id: 's1', label: '旧名', modelId: 'm1' })
+    const s1 = makeSession({ id: 's1', label: '旧名' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
     // rename 乐观更新：applySnapshot 本地入参只带 label，UI 即时显示
@@ -254,17 +197,9 @@ describe('createSessionStore', () => {
     expect(store.list.value[0].label).toBe('乐观名')
 
     // config.sessions 权威整表回流：同一入口覆盖为 runtime 真值（重复写入幂等）
-    const authoritative = makeSession({ id: 's1', label: '权威名', modelId: 'm1' })
+    const authoritative = makeSession({ id: 's1', label: '权威名' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [authoritative] }] })
     expect(store.list.value[0].label).toBe('权威名')
-
-    // switchModel 回执写（U6 弃乐观写，回执后 applySnapshot 本地入参）：单字段快照立即生效，不依赖 state_changed 广播
-    store.applySnapshot('s1', { modelId: 'provider/m9' })
-    expect(store.list.value[0].modelId).toBe('provider/m9')
-    // state_changed 广播随后到达，同值收敛（幂等）
-    store.applySnapshot('s1', { modelId: 'provider/m9', thinkingLevel: 'max' })
-    expect(store.list.value[0].modelId).toBe('provider/m9')
-    expect(store.list.value[0].thinkingLevel).toBe('max')
   })
 
   it('TC-5: markDead / revive 状态切换（revive 仅 dead→idle）', () => {
@@ -345,16 +280,16 @@ describe('createSessionStore', () => {
     store.applySnapshot({
       groups: [{
         cwd: '/a',
-        sessions: [makeSession({ id: 's1', label: '原名', modelId: 'provider/m1', status: 'active' })],
+        sessions: [makeSession({ id: 's1', label: '原名', status: 'active' })],
       }],
     })
 
     store.markDead('s1')
     const dead = store.list.value.find((s) => s.id === 's1')
     expect(dead?.status).toBe('dead')
-    // 局部快照只带 status：label/modelId 等托管字段原样保留（不被 undefined 覆盖）
+    // 局部快照只带 status：label 等托管字段原样保留（不被 undefined 覆盖）
+    // （W3 起 modelId 等三状态字段不在 SessionSummary 上，「不吞字段」断言收敛到描述字段）
     expect(dead?.label).toBe('原名')
-    expect(dead?.modelId).toBe('provider/m1')
 
     store.revive('s1')
     expect(store.list.value.find((s) => s.id === 's1')?.status).toBe('idle')

@@ -11,13 +11,13 @@
 //   ⑤ dispose 幂等应答 + 进程随 stdin 关闭退出（自灭检查主判据的隐式验证）。
 // 驱动侧自持（不走 core EngineClient——对端语义互证靠帧形状与 SDK 判别检查对齐）。
 //
-// 分层（判据三档，docs/todo/test-single-layer-cleanup.md）：双真进程协议往返是
+// 分层（判据三档，docs/TEST-STRATEGY.md「新写测试判据」节）：双真进程协议往返是
 // 「代码 + OS 组合行为」（第三档——进程存亡 / stdio 排空没有「完成」信号可等，窗口
 // 在负载下无稳定上界），整文件拆分层：本地默认跳过，CI 或按改动范围触发时设
 // TAIJI_TEST_INTEGRATION=1 真跑（门控 SSOT = test-guard/integration-gate.ts）。
 // 保留的首条（initialize → run → 终态应答全链）即冒烟；resume 全链与迟到终态
 // stderr 分级两条链的逻辑面另有进程内覆盖（zcode-engine-resume.test.ts 引擎级
-// resume 链、session-channel.test.ts 分级日志机制层），bin 级形态在此门禁轨保留。
+// resume 链、session-channel.test.ts 分级日志机制层），bin 级形态在此门控层保留。
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

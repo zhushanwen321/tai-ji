@@ -5,8 +5,9 @@
  * 承载：凭据/名称/端点表单草稿（form，含 D7 headers/authHeader + B-1 authMethod）+ 凭据回显
  * （眼睛按钮按需 RPC，回显值不构成 dirty/不回写）+ headers 行编辑 CRUD + isDirty 快照对比（D13）
  * + save 持久化（D15b 校验 → 防线① catalog/custom 分体系
- * → transport.setProvider）+ **D8 广播并发对齐的调用点**（规则纯核 = provider-edit-reconcile.ts，
- * deep watch 退化为 reconcileBroadcast 的一个调用点）。
+ * → transport.setProvider）+ **provider 变化统一分流入口 reconcile（SG-8：id 变化重载表单 /
+ * 同 id 保留编辑态按广播对齐刷新）** + **D8 广播并发对齐的调用点**（规则纯核 =
+ * provider-edit-reconcile.ts，deep watch 退化为 reconcileBroadcast 的一个调用点）。
  *
  * 接口即测试入口（interface is the test surface）：行为矩阵见 provider-edit-form.test.ts
  * （并发对齐规则本体在 provider-edit-reconcile.test.ts 纯核矩阵）。
@@ -131,6 +132,15 @@ export interface ProviderEditFormDraft {
 }
 
 /**
+ * provider 变化统一分流结果（reconcile 入口的返回值，调用方按结果编排跨 module 动作）。
+ */
+export type ProviderEditReconcileOutcome =
+  /** id 变化（含打开/关闭/切换/新增态）：表单已重载（applyProvider 已执行），调用方继续编排 models/transient/snapshot 重置序 */
+  | 'reset'
+  /** 同 id 刷新：已按广播对齐规则处理（保留编辑态），无需重置序 */
+  | 'refreshed'
+
+/**
  * 表单 + dirty/快照 module（[C4] 3 组子 interface 之一）。
  */
 export interface ProviderEditFormModule {
@@ -195,6 +205,17 @@ export interface ProviderEditFormModule {
   syncHeadersFromRows(): void
   /** provider 切换/打开时的表单载入（含 apiKey 重置=「不变」；null = 新增态清空） */
   applyProvider(p: ProviderInfo | null): void
+  /**
+   * provider 变化统一分流入口（SG-8，取代 providerRef watcher 的「同 id 早退」契约）：
+   * - fresh 为 null 或 id ≠ 已载入 id → 表单重载（applyProvider）并返回 'reset'，
+   *   调用方继续编排跨 module 重置序（models/discover 重置与快照捕获在本 module 之外）
+   * - 同 id（新对象引用，无论来自 store 列表元素替换还是独立构造的 prop）→ 按广播
+   *   对齐规则 applyReconcile（保留编辑态刷新数据），返回 'refreshed'
+   * 分流判据 = 本 module 记录的已载入 provider id（applyProvider 时更新），不依赖
+   * 调用方数据源形态。幂等：同 fresh 重复调用无副作用（applyReconcile 非 dirty 重拍
+   * 对齐 + 快照重捕获同值；dirty 时 ignore/align 分支同判据复现）。
+   */
+  reconcile(fresh: ProviderInfo | null): ProviderEditReconcileOutcome
   /** 瞬态态重置（编辑/新增两分支共用）：明文开关、错误提示 */
   resetTransient(): void
   /** 记录当前 draft/localModels 为初始快照（provider 切换/打开后 + D8 重拍后调） */
@@ -243,6 +264,11 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   const actionErrorState = ref<ActionErrorState | null>(null)
   const actionError = computed<string>(() => actionErrorState.value?.message ?? '')
   const snapshot = ref<FormSnapshot | null>(null)
+  /**
+   * 当前表单已载入的 provider id（null = 新增态/未载入）——reconcile 分流判据（SG-8）。
+   * applyProvider 时同步更新；applyReconcile 只处理同 id 刷新，不触碰该值。
+   */
+  let loadedProviderId: string | null = null
 
   function setActionError(source: ActionErrorSource, message: string): void {
     actionErrorState.value = message ? { source, message } : null
@@ -312,6 +338,24 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     // 旧请求的迟到响应也拿不到写入资格（世代号已推进）。
     dropRevealed()
     headerRows.value = headerRowsFromHeaders(draft.headers)
+    loadedProviderId = p?.id ?? null
+  }
+
+  /**
+   * provider 变化统一分流（SG-8，契约见 ProviderEditFormModule.reconcile JSDoc）。
+   * 只分流表单侧动作：'reset' 时跨 module 编排（models/discover 重置 + 快照捕获）
+   * 留给调用方（useProviderEdit facade watcher）——models/discover 重置不在本 module
+   * 依赖内，且 watch(providers) 广播刷新恒走同 id 分支（applyReconcile），不得经本
+   * 入口分流（providerRef 已切新 id 而 form 尚未重载的 flush 窗口内会误入 'reset'
+   * 分支且无人编排残缺重置序）。
+   */
+  function reconcile(fresh: ProviderInfo | null): ProviderEditReconcileOutcome {
+    if (fresh === null || fresh.id !== loadedProviderId) {
+      applyProvider(fresh)
+      return 'reset'
+    }
+    applyReconcile(fresh)
+    return 'refreshed'
   }
 
   /**
@@ -582,6 +626,7 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     removeHeader,
     syncHeadersFromRows,
     applyProvider,
+    reconcile,
     resetTransient,
     captureSnapshot,
   }

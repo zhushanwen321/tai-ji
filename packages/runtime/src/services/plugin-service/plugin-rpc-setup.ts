@@ -397,7 +397,10 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
     getModel: () => {
       if (!deps.sessionService) return ''
       const active = ctx.activeSessionResolver.resolve()
-      return active?.modelId ?? ''
+      if (!active) return ''
+      // W3：SessionSummary.modelId 已删（三状态字段退役），改读 lifecycle 注册表记录的
+      // 同名双写缓存字段（IManagedSessionView.modelId，summary 派生本源于它）。
+      return deps.sessionService.getSession(active.id)?.modelId ?? ''
     },
     setModel: async (model: string) => {
       // U6 回执普查：返回 get_state 读回的生效模型复合串（pi pattern 换模时 ≠ 请求值）；
@@ -420,7 +423,10 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
     getThinkingLevel: () => {
       if (!deps.sessionService) return 'off'
       const active = ctx.activeSessionResolver.resolve()
-      return active?.thinkingLevel ?? 'off'
+      if (!active) return 'off'
+      // W3：SessionSummary.thinkingLevel 已删（三状态字段退役），改读 lifecycle
+      // 注册表记录的同名双写缓存字段（IManagedSessionView.thinkingLevel）。
+      return deps.sessionService.getSession(active.id)?.thinkingLevel ?? 'off'
     },
     setThinkingLevel: async (level: string) => {
       // U6 回执普查：返回 pi 钳制后的生效档（两条路径均 set→get_state→effective）；

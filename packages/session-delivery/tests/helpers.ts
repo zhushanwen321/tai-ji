@@ -56,42 +56,6 @@ export function customMsg(
 }
 
 /**
- * busy-park 合批测试脚手架（对齐 scheduler 真实装配：不配 mergeWindowMs，合批来自
- * busy park 队列积累 + settled 边沿 flush 整队出队）。port 初始 busy（idle 经
- * setIdle 翻转），subscribeSettled 捕获 settled 边沿回调（退订置空），fireSettled
- * 在翻转 idle 后手动触发边沿。
- */
-/** makeBusyParkPort 返回：port + idle 翻转 + settled 边沿触发。 */
-export interface BusyParkPortHandle {
-  port: ReturnType<typeof makeMockPort>
-  setIdle: (v: boolean) => void
-  fireSettled: () => void
-}
-
-export function makeBusyParkPort(): BusyParkPortHandle {
-  let idle = false
-  let settledCb: (() => void) | undefined
-  const port = makeMockPort({
-    isIdle: () => idle,
-    subscribeSettled: (cb) => {
-      settledCb = cb
-      return () => {
-        settledCb = undefined
-      }
-    },
-  })
-  return {
-    port,
-    setIdle: (v: boolean) => {
-      idle = v
-    },
-    fireSettled: () => {
-      settledCb!()
-    },
-  }
-}
-
-/**
  * per-message settled 断言：第 index 次终态回调的 msg 为该条原始消息引用
  * （非 clone、非 composed 合批消息）。
  */

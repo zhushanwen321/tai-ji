@@ -2,7 +2,7 @@
  * 假引擎子进程桩（in-process engine stub）——把 control server 的 spawn 面换成进程内
  * 可控替身，使「control 通道协议 + 进程治理编排」用例摆脱真实子进程。
  *
- * 判据归属（docs/todo/test-single-layer-cleanup.md 判据三档）：真子进程属第 ③ 档
+ * 判据归属（docs/TEST-STRATEGY.md「新写测试判据」节 判据三档）：真子进程属第 ③ 档
  * 「跨进程事实」——没有完成信号可等、负载下拉长无稳定上界。本桩把引擎侧行为搬回测试
  * 进程：启动输出、stdin 反应、退出与 error 全部由事件/promise 表达（第 ② 档，await 该
  * 信号等价同步语义），与负载无关。argv 语义与 fixtures/fake-engine-cli.mjs 逐条对齐

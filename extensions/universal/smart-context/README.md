@@ -10,7 +10,7 @@
   - cross-model：调用 pi 原生 `compact()` 仅换模型与凭证——split-turn / fileOps / previousSummary 原生组装
 - **3 档阈值提醒**（默认 400K/500K/600K）：`agent_settled` 越档检查，每档一次、多档合并、压缩后重置，nextTurn 投递（随下一次 prompt 注入，不自起 run）；已提醒档位经 `pi.appendEntry` 落在 session entries（`smart-context:fired`），reload / 进程重启后从 entries 重建，同一档不会重复提醒；措辞是数据投递不是指令
 - **排除模型**（精准 `provider/modelId` 匹配）：工具拒绝 + 不提醒 + 回落 pi 原生生成；切换跨界时注入一条可用性通知，downshift（切小窗模型将触线）时建议先压缩
-- **通知车道**：压缩结果 / 阈值提醒 / 模型切换四类通知统一走 nextTurn（custom role 随下次 prompt 注入，不自起 run）——工具压缩掐断的 turn 由 taiji runtime 在 `compaction_end` 判定后经投递内核追加续跑投递
+- **通知投递路径**：压缩结果 / 阈值提醒 / 模型切换四类通知统一走 nextTurn（custom role 随下次 prompt 注入，不自起 run）——工具压缩掐断的 turn 由 taiji runtime 在 `compaction_end` 判定后经投递内核追加续跑投递
 - **健壮性**：摘要收缩校验、max-tokens 截断 fail-closed、接管失败 3 次熔断（本 session 内停止接管）、transcript 回查指针、压缩后最近文件内容重注入（≤5 文件/50K）、多轮压缩降智提示（累计压缩 ≥2 次后附加）
 - **subagent 进程**自动静默（`TAIJI_AGENT_SUBAGENT` 标记）
 
@@ -32,15 +32,9 @@
 pi install npm:@zhushanwen/pi-smart-context
 ```
 
-## 工具激活（deferred）
+## 工具激活
 
-`compact_context` 工具为 `exposure: "deferred"`——不占常驻工具声明，由 pi 内置 `tool_search` 工具检索命中后按需激活。taiji 宿主内开箱即用（宿主启动时已激活 `tool_search`）；独立 pi 使用需在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）开启：
-
-```json
-{ "defaultTools": ["+tool_search"] }
-```
-
-`+` 前缀是增量修饰（保留 read/bash/edit/write 默认集）。未开启 `tool_search` 时该工具对模型不可见。
+`compact_context` 工具为 direct 常驻——注册不声明 `exposure` 字段（pi SDK 缺省 `direct`），工具声明随会话常驻、对模型默认可见，无需经 `tool_search` 检索激活，独立 pi 开箱即用。
 
 ## 配置
 

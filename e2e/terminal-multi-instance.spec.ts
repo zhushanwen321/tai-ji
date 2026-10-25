@@ -1,5 +1,5 @@
 /**
- * 终端多实例端到端验收 —— 真实 app 轨（L2，零 token，无任何 LLM 调用）。
+ * 终端多实例端到端验收 —— 真实 app 层（L2，零 token，无任何 LLM 调用）。
  *
  * 覆盖终端多实例设计 §4 T1-T13（来源设计档案已随 .tmp 清理，git 可追溯）中**可脚本化**的
  * 部分（逐条对应见各 test 标题的 T 号标注）：
@@ -35,7 +35,7 @@
  *   npx playwright test e2e/terminal-multi-instance.spec.ts
  *
  * 轨道自保护（沿用 workflow-disconnect-recovery.spec.ts 的 skip 门惯例）：当前 renderer
- * 产物是 mock bundle 时 skip 不 fail（real 轨需 real bundle）；`--list` 不受影响。
+ * 产物是 mock bundle 时 skip 不 fail（真实进程层需 real bundle）；`--list` 不受影响。
  */
 import { test, expect, type Page } from '@playwright/test'
 import { launchRealApp, waitForRuntime, wsRoundTrip, type WsFrame } from './fixtures/launch-app-real'
@@ -75,7 +75,7 @@ const T13_A2 = { cmd: 'echo T13B-$((32*2))', out: 'T13B-64' }
 
 // ── 轨道自保护门 ──────────────────────────────────────────────────────────
 
-/** 当前 renderer 产物是 mock bundle 时返回 skip 原因；否则 null（real 轨可跑）。 */
+/** 当前 renderer 产物是 mock bundle 时返回 skip 原因；否则 null（真实进程层可跑）。 */
 function mockBundleSkipReason(): string | null {
   if (!fs.existsSync(RENDERER_DIST_ASSETS)) return null
   const mockAsset = fs
@@ -85,7 +85,7 @@ function mockBundleSkipReason(): string | null {
   if (!mockAsset) return null
   return (
     `轨道自保护：当前 renderer 产物是 mock bundle（assets/${mockAsset} 含 mock fixture 标记），` +
-    '本终端多实例轨为真实 app 轨，需 real bundle——rebuild with: VITE_E2E=true pnpm run build:e2e（不传 VITE_MOCK）后再跑'
+    '本终端多实例套件为真实 app 层，需 real bundle——rebuild with: VITE_E2E=true pnpm run build:e2e（不传 VITE_MOCK）后再跑'
   )
 }
 
@@ -478,7 +478,7 @@ test('T2: 关闭隔离——关第二实例后其进程消失、条目回 1、�
       timeout: INSTANCE_SETTLE_TIMEOUT_MS,
     })
 
-    // 进程级断言（本轨的真机锚，补 u1 单测只验 mock pty.kill 调用的盲区）：终端 2 的 shell 进程
+    // 进程级断言（本组的真机锚，补 u1 单测只验 mock pty.kill 调用的盲区）：终端 2 的 shell 进程
     // 已消失，终端 1 的 shell 仍存活、PTY 集合恰好回到 1（关闭未波及终端 1）
     await expect
       .poll(() => isProcessAlive(pid2), { timeout: INSTANCE_SETTLE_TIMEOUT_MS, intervals: [200, 500, 1000] })
@@ -491,7 +491,7 @@ test('T2: 关闭隔离——关第二实例后其进程消失、条目回 1、�
     await runInTerminal(h.page, T2_MARK.cmd)
     await expectTerminalOutput(h.page, T2_MARK.out)
 
-    // 关闭沿滞留命令提示 / 三路径资源释放细节由 u2 单测承载（impl-plan §4.4 A2）；本轨锚用户可见部分
+    // 关闭沿滞留命令提示 / 三路径资源释放细节由 u2 单测承载（impl-plan §4.4 A2）；本组锚用户可见部分
     // + 真机进程级（上）与 activeElement（上）两处 L3 判据
   } finally {
     await teardownHarness(h)

@@ -198,12 +198,15 @@ describe('message_end role 白名单（handleMessageEnd）', () => {
 
       expect(sent).toHaveLength(1)
       expect(sent[0].type).toBe('message.message_end')
-      // entry 形状：type message / parentId null / timestamp 由 message.timestamp 派生 ISO /
-      // message 原样透传（reducer 输入 = 持久化 entry 同构）
-      expect(sent[0].payload).toEqual({
+      // entry 形状：type message / parentId null / message 原样透传（reducer 输入 = 持久化
+      // entry 同构）。timestamp = 到达时刻（live ≡ reload 同源语义，8e844eaa9）：pi message
+      // 级 timestamp 是消息开始时刻，JSONL entry 级是追加时刻，合成 entry 镜像后者
+      const payload = sent[0].payload as { sessionId: string; entry: { type: string; parentId: null; timestamp: string; message: unknown } }
+      expect(payload).toEqual({
         sessionId: SID,
-        entry: { type: 'message', parentId: null, timestamp: new Date(ts).toISOString(), message },
+        entry: { type: 'message', parentId: null, timestamp: expect.any(String), message },
       })
+      expect(Math.abs(Date.parse(payload.entry.timestamp) - Date.now())).toBeLessThan(5000)
     }
     expect(warnSpy).not.toHaveBeenCalled()
   })

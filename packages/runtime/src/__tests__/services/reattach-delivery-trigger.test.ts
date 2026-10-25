@@ -46,11 +46,8 @@ function makeView(): IManagedSessionView {
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
-    occupancy: { turn: 'idle', compacting: false, bash: false },
+        bashRunToken: undefined,
+    occupancy: { turn: 'idle', compacting: false, bash: false, handingOff: false },
   }
 }
 

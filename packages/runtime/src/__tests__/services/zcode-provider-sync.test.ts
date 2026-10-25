@@ -853,7 +853,7 @@ describe('deriveZcodeEngineModels：settings 模型清单派生', () => {
     expect(models[0]).toEqual({ id: 'anon/m1' })
   })
 
-  it('account 直通家族追加（engine-ref-translation D3）：无 apiKey 过滤、builtinModelIds 优先、与个人 id 去重个人优先', () => {
+  it('account 直通家族追加（engine-ref-translation D3）：无 apiKey 过滤、builtinModelIds 优先、模型级去重与个人 id 共存（S-1）', () => {
     writeRealProviderConfig(['with-key', 'account:bigmodel-individual-coding-plan'])
     writeCopy([{
       providerId: 'copy-only',
@@ -875,11 +875,72 @@ describe('deriveZcodeEngineModels：settings 模型清单派生', () => {
     expect(ids).toContain('with-key/real-model')
     expect(ids).toContain('copy-only/m1')
     expect(ids).toContain('account:zai-individual-coding-plan/Z-Model')
-    // account 家族枚举与个人 id 去重（个人表同名 id 在 → account 枚举让位：
-    // 目录模型不出条目，个人条目 real-model 照常在列）
+    // 模型级去重（S-1 统一判据，对齐引擎侧 preparer listZcodeModels 的 seen 语义）：
+    // 个人条目模型在列；内建模型与个人模型 id 不交叉 → 共存（不再按 providerId 整条让位）
     expect(ids).toContain('account:bigmodel-individual-coding-plan/real-model')
-    expect(ids.filter(id => id === 'account:bigmodel-individual-coding-plan/GLM-5.3' || id === 'account:bigmodel-individual-coding-plan/GLM-5.3-Flash')).toEqual([])
+    expect(ids).toContain('account:bigmodel-individual-coding-plan/GLM-5.3')
+    expect(ids).toContain('account:bigmodel-individual-coding-plan/GLM-5.3-Flash')
     expect(models.find(m => m.id === 'account:zai-individual-coding-plan/Z-Model')?.name).toBe('Z.AI Individual Coding Plan · Z-Model')
+  })
+
+  it('account 家族模型级交叉去重（S-1）：个人模型 id 与内建模型同名时恰出现一次（个人段先入）', () => {
+    // 个人 account 条目模型含 GLM-5.3（与内建同名）——模型级去重 = 内建同名模型让位，
+    // 内建独有模型（GLM-5.3-Flash）照常在列
+    writeFileSync(paths.realProviderConfigPath, JSON.stringify({
+      schemaVersion: 1,
+      config: {
+        providerOrder: ['account:bigmodel-individual-coding-plan'],
+        providerConfigRules: {
+          providerRules: [{
+            providerId: 'account:bigmodel-individual-coding-plan',
+            providerName: 'Personal Account',
+            config: {
+              access: { type: 'api-key', apiKey: 'k' },
+              personalModelIds: ['real-model', 'GLM-5.3'],
+              modelOrder: ['real-model', 'GLM-5.3'],
+            },
+          }],
+        },
+        modelConfigRules: { providerModelRules: [] },
+      },
+    }))
+    const catalogPath = join(root, 'derive-account-cross-catalog.json')
+    writeFileSync(catalogPath, JSON.stringify({
+      config: {
+        providerConfigRules: {
+          providerRules: [
+            { providerId: 'account:bigmodel-individual-coding-plan', config: { builtinModelIds: ['GLM-5.3', 'GLM-5.3-Flash'] } },
+          ],
+        },
+      },
+    }))
+    const models = deriveZcodeEngineModels({ ...paths, builtinCatalogPath: catalogPath })
+    const ids = models.map(m => m.id)
+    expect(ids.filter(id => id === 'account:bigmodel-individual-coding-plan/GLM-5.3')).toHaveLength(1)
+    expect(ids).toContain('account:bigmodel-individual-coding-plan/GLM-5.3-Flash')
+    expect(ids).toContain('account:bigmodel-individual-coding-plan/real-model')
+  })
+
+  it('account 家族清单判据（S-1 统一）：builtinModelIds 数组在位（含空）即用，缺键才回落 personalModelIds', () => {
+    // 空 builtin 数组在位 = 该家族本期无模型（不回落 personal——与引擎侧
+    // pushAccountFamilyRuleModels 的 Array.isArray 在位判定同语义）；缺 builtin 键才用 personal
+    writeCopy([])
+    const catalogPath = join(root, 'derive-account-empty-builtin-catalog.json')
+    writeFileSync(catalogPath, JSON.stringify({
+      config: {
+        providerConfigRules: {
+          providerRules: [
+            { providerId: 'account:empty-builtin', config: { builtinModelIds: [], personalModelIds: ['P-Should-Not-Appear'] } },
+            { providerId: 'account:no-builtin-key', config: { personalModelIds: ['P-Model'] } },
+          ],
+        },
+      },
+    }))
+    const models = deriveZcodeEngineModels({ ...paths, builtinCatalogPath: catalogPath })
+    const ids = models.map(m => m.id)
+    expect(ids).not.toContain('account:empty-builtin/P-Should-Not-Appear')
+    expect(ids.filter(id => id.startsWith('account:empty-builtin/'))).toEqual([])
+    expect(ids).toContain('account:no-builtin-key/P-Model')
   })
 })
 

@@ -8,7 +8,12 @@ import {
   collectActivePendingIds,
   mapReasonToStatus,
   MAPPED_PENDING_STATUSES,
+  MAPPED_REASON_KEYS,
+  SETTLEMENT_REASONS,
+  SETTLEMENT_REASON_KEYS,
+  resolveSettlementReason,
   type MappedPendingStatus,
+  type ResolvedSettlementReason,
 } from './pending-entries'
 
 const reg = (id: string, extra: Record<string, unknown> = {}) => ({
@@ -24,6 +29,11 @@ const unreg = (id: string) => ({
 const unregStatus = (id: string, status: unknown) => ({
   customType: 'pending:unregister',
   data: { id, reason: 'fixture', status },
+})
+
+const unregReason = (id: string, reason: unknown) => ({
+  customType: 'pending:unregister',
+  data: { id, reason },
 })
 
 describe('PENDING_*_ENTRY_TYPE 常量（落盘契约字符串锁定）', () => {
@@ -135,6 +145,67 @@ describe('字段映射视图（MF-2-1 单点：register 首见 type + 注销 sta
   })
 })
 
+describe('unregisterSettlements（结清视图：注销 reason 事实经 resolveSettlementReason 解析，§3.3.6 权威通道）', () => {
+  it('读 reason 事实解析结清值：五值同名直通 + 历史 reason 按解析表映射', () => {
+    const cases: Array<[string, string, ResolvedSettlementReason]> = [
+      ['bg-1', 'no_result', 'no_result'],
+      ['bg-2', 'lost', 'lost'],
+      ['bg-3', 'completed', 'completed'],
+      ['bg-4', 'failed', 'failed'],
+      ['bg-5', 'cancelled', 'cancelled'],
+      ['bg-6', 'expired', 'no_result'],
+      ['bg-7', 'time_limited', 'failed'],
+      ['bg-8', 'aborted', 'cancelled'],
+    ]
+    const scan = scanPendingEntries(cases.flatMap(([id, reason]) => [reg(id), unregReason(id, reason)]))
+    for (const [id, , expected] of cases) {
+      expect(scan.unregisterSettlements.get(id)).toBe(expected)
+    }
+  })
+
+  it('词表外 reason 解析 unknown 照常入视图（fail-visible 透传）；缺 reason 的注销条目不入视图（不虚构）', () => {
+    const scan = scanPendingEntries([
+      unregReason('bg-1', 'some-future-reason'),
+      { customType: 'pending:unregister', data: { id: 'bg-2', status: 'completed' } },
+      unreg('bg-3'),
+    ])
+    expect(scan.unregisterSettlements.get('bg-1')).toBe('unknown')
+    expect(scan.unregisterSettlements.has('bg-2')).toBe(false)
+    expect(scan.unregisterSettlements.has('bg-3')).toBe(false)
+  })
+
+  it('同 id 多条注销取末次 string reason；非 string reason 不抹除前值', () => {
+    const scan = scanPendingEntries([
+      unregReason('bg-1', 'completed'),
+      unregReason('bg-1', 'failed'),
+      unregReason('bg-2', 'lost'),
+      unregReason('bg-2', 42),
+    ])
+    expect(scan.unregisterSettlements.get('bg-1')).toBe('failed')
+    expect(scan.unregisterSettlements.get('bg-2')).toBe('lost')
+  })
+
+  it('空串 id 不入结清视图（与 status 视图同口径）', () => {
+    const scan = scanPendingEntries([unregReason('', 'completed')])
+    expect(scan.unregisterSettlements.size).toBe(0)
+  })
+
+  it('scanPendingFields 投影携带结清视图；legacy status 视图并行保留（双通道并存）', () => {
+    const fields = scanPendingFields([
+      reg('bg-1', { type: 'workflow' }),
+      unregReason('bg-1', 'no_result'),
+      reg('bg-2', { type: 'bash' }),
+      unregStatus('bg-2', 'completed'),
+    ])
+    // 结清视图（reason 事实）：no_result 真值可达——status 旧通道下该形态恒 unknown
+    expect(fields.unregisterSettlements.get('bg-1')).toBe('no_result')
+    expect(fields.unregisterStatuses.has('bg-1')).toBe(false)
+    // legacy 视图（status 副档）：unregReason 形态无 status 字段故缺席；status 形态照常
+    expect(fields.unregisterStatuses.get('bg-2')).toBe('completed')
+    expect(fields.unregisterSettlements.get('bg-2')).toBe('unknown') // reason='fixture' 词表外
+  })
+})
+
 describe('applyPendingDiff（差集本体：去重 + 全局抵消 + id 非法跳过）', () => {
   it('register 首见去重：同 id 重复只保留首见 data', () => {
     const scan = scanPendingEntries([reg('bt-1', { v: 1 }), reg('bt-1', { v: 2 }), reg('bt-1')])
@@ -230,9 +301,11 @@ describe('mapReasonToStatus（reason→status 落盘契约权威单点，D10）'
     expect(mapReasonToStatus('orphaned')).not.toBe('orphaned')
   })
 
-  it('禁扩词表：MappedPendingStatus 值域封闭在既有 6 终态（Record 全键锁定，加词即编译错）', () => {
+  it('禁扩词表：MappedPendingStatus 值域封闭在既有 6 终态 + 解析缺省 unknown（Record 全键锁定，加词即编译错）', () => {
     // D3 明令四个新 reason 不扩 MappedPendingStatus/PendingStatus——本断言的类型范围
-    // 是 Record<MappedPendingStatus, true> 全键字面量：值域长出第 7 个成员即 TS 编译失败
+    // 是 Record<MappedPendingStatus, true> 全键字面量：值域长出第 8 个成员即 TS 编译失败。
+    // [subagent-observability §3.3.11④] unknown 是解析缺省成员（fail-visible 废除
+    // fail-open 的承载位），非新终态。
     const fullVocabulary: Record<MappedPendingStatus, true> = {
       completed: true,
       failed: true,
@@ -240,6 +313,7 @@ describe('mapReasonToStatus（reason→status 落盘契约权威单点，D10）'
       expired: true,
       time_limited: true,
       aborted: true,
+      unknown: true,
     }
     const mapped = [
       mapReasonToStatus('stopped'),
@@ -252,15 +326,102 @@ describe('mapReasonToStatus（reason→status 落盘契约权威单点，D10）'
     }
   })
 
-  it('未知 reason 落 default 兜底 completed（未来新词不再静默误标口径的登记处）', () => {
-    expect(mapReasonToStatus('some-future-reason')).toBe('completed')
-    expect(mapReasonToStatus('')).toBe('completed')
+  it('词表外 reason 回填 unknown（fail-visible——default=completed 的 fail-open 方向废除）', () => {
+    // [subagent-observability 验收④] 未知 reason 不再落 completed（不产假成功）。
+    expect(mapReasonToStatus('some-future-reason')).toBe('unknown')
+    expect(mapReasonToStatus('')).toBe('unknown')
+  })
+
+  it('三组词表外字面量显式映射（§3.3.6：不再直落 default）', () => {
+    // markRoundIdle 轮终注销字面量（历史口径显式化——新写入方退役该字面量）
+    expect(mapReasonToStatus('running')).toBe('completed')
+    // doFinalize 编排性收尾
+    expect(mapReasonToStatus('closed')).toBe('cancelled')
+    // reconcile-sweep 直通族（closedReason 直通）：宿主侧打断族 → aborted
+    expect(mapReasonToStatus('parent-shutdown')).toBe('aborted')
+    expect(mapReasonToStatus('parent-fork')).toBe('aborted')
+    expect(mapReasonToStatus('parent-new')).toBe('aborted')
+    expect(mapReasonToStatus('disconnected')).toBe('aborted')
+    // 用户关闭族 → cancelled
+    expect(mapReasonToStatus('user-close')).toBe('cancelled')
+    // gc 通用终态无专属语义 → unknown（诚实缺省）
+    expect(mapReasonToStatus('gc')).toBe('unknown')
+  })
+})
+
+describe('SettlementReason 结清枚举（subagent-observability §3.3.6 新权威通道）', () => {
+  it('封闭五值锁定（与 subagent-core run-vocabulary ALL_SETTLEMENT_REASONS 同源词表）', () => {
+    expect([...SETTLEMENT_REASONS]).toEqual(['completed', 'failed', 'cancelled', 'lost', 'no_result'])
+    expect(new Set(SETTLEMENT_REASONS).size).toBe(SETTLEMENT_REASONS.length)
+    // 解析缺省不在五值内（fail-visible 的缺省独立位）
+    const parsed: ResolvedSettlementReason = 'unknown'
+    expect(parsed).toBe('unknown')
+    expect(SETTLEMENT_REASONS).not.toContain('unknown')
+  })
+
+  it('解析规则逐项锁定：同名直通 + 设计指定映射（expired→no_result、time_limited→failed、aborted→cancelled）', () => {
+    const cases: Array<[string, ResolvedSettlementReason]> = [
+      ['completed', 'completed'],
+      ['failed', 'failed'],
+      ['cancelled', 'cancelled'],
+      ['lost', 'lost'],
+      ['no_result', 'no_result'],
+      ['expired', 'no_result'],
+      ['time_limited', 'failed'],
+      ['budget_limited', 'failed'],
+      ['aborted', 'cancelled'],
+      ['interrupted', 'cancelled'],
+      ['interrupted-by-restart', 'cancelled'],
+      ['interrupted-by-parent', 'cancelled'],
+      ['reopened', 'completed'],
+      ['stopped', 'cancelled'],
+      ['exited', 'cancelled'],
+      ['deleted', 'cancelled'],
+      ['orphaned', 'cancelled'],
+    ]
+    for (const [reason, expected] of cases) {
+      expect(resolveSettlementReason(reason)).toBe(expected)
+    }
+  })
+
+  it('三组词表外字面量的结清解析（§3.3.6 处置语义）', () => {
+    // markRoundIdle "running"：轮终注销簿记不载成败事实 → no_result（无事实可依）
+    expect(resolveSettlementReason('running')).toBe('no_result')
+    // doFinalize "closed"：编排性收尾 → cancelled
+    expect(resolveSettlementReason('closed')).toBe('cancelled')
+    // reconcile-sweep 直通族：宿主打断/用户关闭 → cancelled；死因不可考/通用 → no_result
+    expect(resolveSettlementReason('parent-shutdown')).toBe('cancelled')
+    expect(resolveSettlementReason('parent-fork')).toBe('cancelled')
+    expect(resolveSettlementReason('parent-new')).toBe('cancelled')
+    expect(resolveSettlementReason('user-close')).toBe('cancelled')
+    expect(resolveSettlementReason('disconnected')).toBe('no_result')
+    expect(resolveSettlementReason('gc')).toBe('no_result')
+  })
+
+  it('词表外 reason 结清解析回填 unknown（fail-visible）', () => {
+    expect(resolveSettlementReason('some-future-reason')).toBe('unknown')
+    expect(resolveSettlementReason('')).toBe('unknown')
+  })
+
+  it('两通道键集对拍：结清解析表键集 = legacy reason 键集 ∪ 结清五值同名键（结构性防漏登记）', () => {
+    // 键集漂移静态防线：任一登记表增删键而另一侧未同批跟随时本断言变红（缺登记键
+    // 在消费侧解析为 unknown——fail-visible 可见但属漏登记缺陷信号）。键集常量派生
+    // 自两张映射表本身（无第二份手工词表），对拍对象是登记表实况而非测试夹具。
+    const expected = new Set<string>([...MAPPED_REASON_KEYS, ...SETTLEMENT_REASONS])
+    expect(SETTLEMENT_REASON_KEYS).toEqual(expected)
+    // 前提事实防恒真：两键集非空、且五值中 completed/failed/cancelled 与 legacy
+    // 键同名直通——结清键集严格大于 legacy 键集（lost/no_result 为新增成员）。
+    expect(MAPPED_REASON_KEYS.size).toBeGreaterThan(0)
+    expect(SETTLEMENT_REASON_KEYS.size).toBe(MAPPED_REASON_KEYS.size + 2)
+    for (const key of MAPPED_REASON_KEYS) {
+      expect(SETTLEMENT_REASON_KEYS.has(key)).toBe(true)
+    }
   })
 })
 
 describe('MAPPED_PENDING_STATUSES（值集单源导出，MF-1-5）', () => {
   it('Set 成员恰等于 MappedPendingStatus 联合（派生自 REASON_STATUS_MAP，无第二份词表）', () => {
-    // Record 全键字面量：MappedPendingStatus 长出第 7 个成员即编译错（同上「禁扩词表」手法）
+    // Record 全键字面量：MappedPendingStatus 长出第 8 个成员即编译错（同上「禁扩词表」手法）
     const fullVocabulary: Record<MappedPendingStatus, true> = {
       completed: true,
       failed: true,
@@ -268,6 +429,7 @@ describe('MAPPED_PENDING_STATUSES（值集单源导出，MF-1-5）', () => {
       expired: true,
       time_limited: true,
       aborted: true,
+      unknown: true,
     }
     expect(MAPPED_PENDING_STATUSES.size).toBe(Object.keys(fullVocabulary).length)
     for (const status of MAPPED_PENDING_STATUSES) {
@@ -276,5 +438,11 @@ describe('MAPPED_PENDING_STATUSES（值集单源导出，MF-1-5）', () => {
     // 词表外值不在集（消费方成员判定的拒收分支）
     expect(MAPPED_PENDING_STATUSES.has('active')).toBe(false)
     expect(MAPPED_PENDING_STATUSES.has('not-a-status')).toBe(false)
+  })
+
+  it('unknown 落盘 status 经字段视图放行（fail-visible：不可判读进入字段视图，不静默丢弃）', () => {
+    // 词表外 status 原先被 scan 拒收（视图缺值）；unknown 作为词表成员进入视图
+    const scan = scanPendingEntries([unregStatus('bt-1', 'unknown')])
+    expect(scan.unregisterStatuses.get('bt-1')).toBe('unknown')
   })
 })

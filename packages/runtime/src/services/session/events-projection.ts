@@ -49,32 +49,18 @@ import { join } from 'node:path'
 import type { SubagentJournalReport } from '@zhushanwen/extension-protocol'
 import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import {
-  ALL_RUN_OUTCOMES,
-  foldRunEventCheckpoint,
-  INITIAL_RUN_EVENT_FOLD,
-  RUN_EVENTS_SUFFIX,
-  RUN_EVENT_TYPES,
-  SUBAGENT_RECORD_CUSTOM_TYPE,
-  WORKFLOW_RECORD_CUSTOM_TYPE,
-  classifySubagentRecordEntryData,
-  classifyWorkflowRecordEntryData,
-  foldRecordEvents,
-  INITIAL_RECORD_EVENT_FOLD_STATE,
-  parseRecordEventFileLine,
-  readEventTail,
-  RECORD_EVENTS_SUFFIX,
-  type RecordCreatedEvent,
-  type RecordEvent,
-  type RecordEventFoldState,
-  type RunEventFoldCheckpoint,
-  type SubagentRecordRegisteredEntryData,
-  type SubagentRecordSettledEntryData,
-  type WorkflowRecordRegisteredEntryData,
-  type WorkflowRecordSettledEntryData,
-  type WorkflowRunEvent,
+  ALL_RUN_OUTCOMES, foldRunEventCheckpoint, INITIAL_RUN_EVENT_FOLD, RUN_EVENTS_SUFFIX,
+  RUN_EVENT_TYPES, SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE,
+  classifySubagentRecordEntryData, classifyWorkflowRecordEntryData, foldRecordEvents,
+  INITIAL_RECORD_EVENT_FOLD_STATE, parseRecordEventFileLine, readEventTail, RECORD_EVENTS_SUFFIX,
+  type RecordCreatedEvent, type RecordEvent, type RecordEventFoldState, type RunEventFoldCheckpoint,
+  type SubagentRecordRegisteredEntryData, type SubagentRecordSettledEntryData,
+  type WorkflowRecordRegisteredEntryData, type WorkflowRecordSettledEntryData, type WorkflowRunEvent,
 } from '@zhushanwen/subagent-core'
 
 import { mergeWorkflowStepRecords } from './workflow-step-merge.js'
+// [subagent-observability u3 F4] lastRound wire 产出单点（独立模块——本文件行数上限顶满）。
+import { resolveSubagentLastRound } from './events-projection-last-round.js'
 import { projectV2Workflow } from "./workflow-record-projection.js"
 
 // ── run journal 行解析（域无关 tail 原语的 run 域注入）─────────
@@ -406,6 +392,8 @@ export function projectV2Subagent(
     engine: binding.engine,
     engineHandle: binding.engineHandle,
     result: resolveSubagentResult(settled, roundIdle, settledEntry),
+    // [subagent-observability u3 F4] 轮收条事实 wire 透传（缺字段则红点判据走迁移期回落）。
+    lastRound: resolveSubagentLastRound(roundIdle),
   }
 }
 

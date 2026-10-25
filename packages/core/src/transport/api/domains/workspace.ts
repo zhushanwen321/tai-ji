@@ -43,3 +43,29 @@ export async function record(cwd: string): Promise<RecentWorkspaceRecord[]> {
 export async function detect(cwd: string): Promise<WorkspaceDetectReply> {
   return command('workspace.detect', { cwd }, RPC_BACKSTOP_TIMEOUT_MS)
 }
+
+/**
+ * pin/unpin 最近工作区条目并返回最新列表（runtime workspace.setPinned → workspace.recentList reply）。
+ *
+ * pinned 条目免 LRU 淘汰、弹层「已固定」区置顶（上限 5 条，runtime 拦截）。
+ * degraded=true = 超上限被拒 / 入参非法（列表未变，调用方提示用户）。
+ */
+export async function setPinned(
+  cwd: string,
+  pinned: boolean,
+): Promise<{ records: RecentWorkspaceRecord[]; degraded?: boolean }> {
+  return command('workspace.setPinned', { cwd, pinned }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
+ * 取默认会话目录（runtime 幂等 ensureDir 后返回绝对路径）。
+ * dir 为空串 = runtime ensure 失败（前端隐藏「默认会话」入口）。
+ */
+export async function defaultSessionDir(): Promise<string> {
+  const reply = await command(
+    'workspace.defaultSessionDir',
+    {},
+    RPC_BACKSTOP_TIMEOUT_MS,
+  )
+  return reply.dir
+}

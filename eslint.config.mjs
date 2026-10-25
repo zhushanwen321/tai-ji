@@ -156,12 +156,14 @@ export default [
     },
   },
   // [M3 relay-spawn-transport u-m3-control] subagent control server：control 帧路由 /
-  // 通道台账 / 引擎 spawn 与按组收割 / fd3 raw mirror 接线的单点聚合文件（职责内聚，
+  // 通道登记 / 引擎 spawn 与按组收割 / fd3 raw mirror 接线的单点聚合文件（职责内聚，
   // 再拆属独立重构任务）。1051 行 > 500 软上限，提额保留软上限告警（先例同型）。
+  // [2026-10-23 just-do-it 条目 65] owner start time 登记（cachedRuntimePidStartSec
+  // 缓存 + pid 文件 runtimePidStartSec 字段）净增 7 行，1067 > 1060 微超即提额至 1080。
   {
     files: ['packages/runtime/src/infra/subagent-control/control-server.ts'],
     rules: {
-      'max-lines': ['warn', { max: 1060, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 1080, skipBlankLines: true, skipComments: true }],
     },
   },
   // [M3 relay-spawn-transport u-m2-prompt-ack] pi 引擎 spawn runner：spawn/握手/帧泵/
@@ -204,7 +206,29 @@ export default [
       'max-lines': ['warn', { max: 550, skipBlankLines: true, skipComments: true }],
     },
   },
-  // events-projection：session/workflow 事件派生视图聚合点（entry 批 + journal 推送双源
+  // [chat-flow-consistency U4] message-turns：chat 域分组纯函数 SSOT（分组规则 v2 全量/增量
+  // 双路 + 尾部快路径三条路径 + D5 边界聚合），基线 499 行贴软上限。本次 C6 liveOnly 独立成项
+  // （规则 4 拆分 + liveOnly 缓冲落位函数 + 各关闭点 flush 接线）净增 26 行折算 525，按
+  // 「微超即提额，保留软上限告警」先例（pi-provider-store / transport server）提额，长期
+  // 应拆分（分组规则分支体已函数化，再拆属独立重构任务）。
+  {
+    files: ['packages/core/src/domain/chat/message-turns.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 540, skipBlankLines: true, skipComments: true }],
+    },
+  },
+    // [chat-flow-consistency U1] effects/registry：message.* 广播 effect 注册表（每事件一
+  // handler 的表驱动聚合点，行数随事件数线性增长）。willRetry 两级终态分层 + 停止/截断提示
+  // 行（D1）有效行 483→528（净增 45 行，与 message-turns 注释同口径），按「微超即提额，
+  // 保留软上限告警」先例（message-turns /
+  // pi-provider-store / transport server 同型）提额，handler 内聚体再拆属独立重构任务。
+  {
+    files: ['packages/core/src/domain/chat/effects/registry.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 560, skipBlankLines: true, skipComments: true }],
+    },
+  },
+// events-projection：session/workflow 事件派生视图聚合点（entry 批 + journal 推送双源
   // 单点合并）。降级派生视图升级路径恢复（W-P2 重构回归修复）净增 9 行代码，509 > 500 微超
   // 即提额（先例 pi-provider-store / server.ts「微超即提额，保留软上限告警」同型）——
   // 再拆属独立重构任务。
@@ -212,6 +236,17 @@ export default [
     files: ['packages/runtime/src/services/session/events-projection.ts'],
     rules: {
       'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // [2026-10 归档边缘输入修复] ArchiveService 三操作编排服务：零消息 session 空归档 +
+  // 符号链接 cwd realpath 归一 + 主文件真值分桶重定位（docs/todo/archive-edge-inputs-
+  // failfast 条目 26/27）入列后净代码行 516 微超 500。归档入口的定位/归一/空形态判定与
+  // 三操作编排同链内聚，拆分属独立重构任务——「微超即提额，保留软上限告警」先例
+  // （pi-provider-store / server.ts）同型。
+  {
+    files: ['packages/runtime/src/services/archive/archive-service.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 540, skipBlankLines: true, skipComments: true }],
     },
   },
   // [HISTORICAL] 复杂度债务偿还产物：
@@ -747,10 +782,25 @@ export default [
       'max-lines': 'off',
     },
   },
+  // [2026-10-25 gate static-gate 复测] dev-0.11.16 集成线（fix-chat-flow-order /
+  // refactor-subagent-workflow-solid 两轮合并）后折算 713 > 700 微超——按「微超即提额」
+  // （pi-provider-store 508→520 同型）提额 740 保留软上限告警；重建/派生视图轴再拆属
+  // 独立重构任务。
   {
     files: ['packages/subagent-core/src/execution/persistence/record-store-rebuild.ts'],
     rules: {
-      'max-lines': ['warn', { max: 700, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 740, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // [2026-10-25 gate static-gate 复测] retry-rules.ts：LLM 重试规则域 SSOT（类型 + 校验 +
+  // 判定管线纯函数，四消费方共用同一语义——runtime 写侧 / settings 表单 / 两处行为镜像
+  // 复制体的对拍锁定测试，拆开会造成判定语义双份）。dev-0.11.16 集成线合并后折算
+  // 506 > 500 微超，按「微超即提额，保留软上限告警」提额 520（pi-provider-store /
+  // preset-service 同型）；判定管线两层序与规则 schema 再拆属独立重构任务。
+  {
+    files: ['packages/shared/src/retry-rules.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
   // [W1 D4 双面证据判别 2026-09-26] record-store-terminal.ts：终局调和面增补收编
@@ -843,7 +893,7 @@ export default [
     },
   },
   // declarative-engine：quota fetcher 声明式执行引擎（5 家平台 fetcher 的受限原语解释器），
-  // 各平台 shape guard / 字段归口规则内聚于单一引擎体，按平台拆分引入引擎边界收益不抵成本。
+  // 各平台 shape guard / 字段归属规则内聚于单一引擎体，按平台拆分引入引擎边界收益不抵成本。
   // [gate static-gate 2026-10] 净代码行 519 > 500（base 上限），微超即提额先例
   // （session-service 634→650 同型）抬到 540。提额而非 off：保留软上限告警，超限即再暴露，勿再增行。
   {

@@ -260,6 +260,44 @@ describe('⑨ 孤儿 pi 收殓挂载（integrity-hardening §3.4 D4a）', () => 
   })
 })
 
+describe('① 迁移后 zcode provider 镜像触发（S-9，dev-0.11.7-review-residue）', () => {
+  it('迁移成功 → zcodeProviderMirrorSync 恰被调用一次（启动同步先于迁移执行，副本须重跑）', async () => {
+    const { deps } = makeDeps()
+    const zcodeProviderMirrorSync = vi.fn(async () => {})
+    await runStartupBackgroundInit({ ...deps, zcodeProviderMirrorSync })
+    expect(zcodeProviderMirrorSync).toHaveBeenCalledTimes(1)
+  })
+
+  it('迁移失败 → 不触发镜像（整体失败保留现状副本，下次启动同步对账）', async () => {
+    const { deps } = makeDeps()
+    h.migrateProviderConfig.mockRejectedValue(new Error('migration boom'))
+    const zcodeProviderMirrorSync = vi.fn(async () => {})
+    await runStartupBackgroundInit({ ...deps, zcodeProviderMirrorSync })
+    expect(zcodeProviderMirrorSync).not.toHaveBeenCalled()
+  })
+
+  it('镜像 reject → 只 warn，序列照常完成（fire-and-forget，migration gate 语义不变）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { deps, extensionService } = makeDeps()
+      const zcodeProviderMirrorSync = vi.fn(async () => { throw new Error('mirror boom') })
+      await expect(runStartupBackgroundInit({ ...deps, zcodeProviderMirrorSync })).resolves.toBeUndefined()
+      await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(
+        '[runtime] zcode provider mirror sync after migration failed:',
+        expect.any(Error),
+      ))
+      expect(extensionService.migrateBuiltinExtensions).toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('未注入 zcodeProviderMirrorSync → 不触发不炸（可选依赖，既有装配形态）', async () => {
+    const { deps } = makeDeps()
+    await expect(runStartupBackgroundInit(deps)).resolves.toBeUndefined()
+  })
+})
+
 describe('先 listen 后初始化（D8-1，index.ts 源码顺序断言）', () => {
   it('runStartupBackgroundInit 调用点位于 await server.start() 之后', () => {
     // 定位 packages/runtime/src/index.ts：cwd 可能是包根（cd packages/runtime）或仓库根。

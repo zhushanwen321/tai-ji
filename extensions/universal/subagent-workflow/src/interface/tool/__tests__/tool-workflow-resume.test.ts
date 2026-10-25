@@ -84,6 +84,18 @@ describe("actionResume", () => {
     expect(vi.mocked(resumeRun)).not.toHaveBeenCalled();
   });
 
+  it("runId 白名单外形态（路径穿越载荷）→ not-found 语义拒绝（journalDir 不构造，不触 resumeRun）", async () => {
+    // journalDir 由 runId 经 store.stateFilePath 拼出——含路径分隔符的入参在白名单
+    // 前置处按未知 id 语义拒绝（与 status 查无判定同一准入判据），不进入 core 读链。
+    await expect(
+      actionResume(
+        { action: "resume", runId: "../../escape" } as never,
+        makeDeps("/nonexistent") as never,
+      ),
+    ).rejects.toThrow(/Workflow run '\.\.\/\.\.\/escape' not found\./);
+    expect(vi.mocked(resumeRun)).not.toHaveBeenCalled();
+  });
+
   it("[§2.5 转发契约] args + journalDir 原样下传（判定在 core；journalDir = store 路径同目录，防双锚）", async () => {
     const recordPath = join(tmpDir, "wf-test.record.jsonl");
     const result = (await actionResume(

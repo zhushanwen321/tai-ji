@@ -165,6 +165,8 @@ v6 审查发现「被选中」出现三种视觉语言，统一为二分：
 
 **检查**：看到 `background: var(--accent)` + 前景元素，前景应该是 `--accent-fg`，不是 `--neutral-fg`。
 
+六主题令牌契约（实底必有前景令牌）：`--accent-fg` / `--danger-fg` / `--success-fg` 对各自实底配对齐全，组件实底前景一律走对应 `-fg` 令牌、禁止写死颜色。对比度分线断言（数值表见 §4.4，单测 contrast-tokens.test.ts 实底前景场景同线断言）：`--accent-fg` / `--success-fg` 为深字公式，六主题全过 WCAG AA 4.5:1 正文线；`--danger-fg` 为亮字（`var(--neutral-fg)`，2026-10-23 裁决——中明度 danger 实底上任何亮字数学上过不了 4.5:1，旧深字公式压线凑 AA 致红底暗红字视觉发闷已废弃），按 WCAG 1.4.11 图形组件线 3:1 断言（对齐 destructive 按钮既有先例）。`--warn` 不设 `-fg`：warn 只以圆点、软底、描边、文字色出现，不提供实底用法（中间调黄配任何实底字都过不了 AA），新代码不得给 warn 加实底。`--success-fg` 不随 danger 改亮字：success 底明度更高，亮字仅 2.18:1 连组件线都不过，保留深字公式。
+
 #### 3.5.2 信号编排：空间分离 + 异常优先 + 常态归零
 
 多个独立状态维度表达时：
@@ -243,7 +245,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 - **窗口壳**：`--bg-stage` `#111114`（ShellView .stage 引用；黛蓝 preset `#0e0f15` / 暖墨 preset `#100e0c` 各自落定，缝隙不再与他主题色相打架）。**亮色（皓族）**：`--bg-stage` `#dee3da`（TAIJI_PAPER 未定义独立 stage，取带青玉相浅色、与 accent `#43765d` 同族色相——分离感靠色相差而非压暗舞台，2026-10-17 用户裁决借 OpenDesign 舞台层策略；style.css `[data-theme=light]` 覆盖，避免泄漏暗色 #111114 形成黑框）
 - **内容层（沉底）**：`--surface` `#18181b`（对话流 / 右抽屉 / 底抽屉三张阅读卡同色共享）；`--bg-input` `#1d1d20` 为其内次级（代码块/文件 chip，亮于 surface 一小档保阶梯单调）
 - **框架层（浮起）**：`--bg` `#242428`（aside / composer / settings 内容区同层同色）；操作域浮起容器 `--bg-card` `#2d2d30` 亮于本层一档
-- **浮层**：`--bg-elevated` `#323236`（hover 详情卡 / popover；用户气泡 `--bubble-bg` 随本层派生——demo 暗族三主题 bubble 逐块等于 elevated、无独立档，亮族独立 `#fefefe`）；**2026-10-13 用户裁决 demo 方案 A 后该族已全迁 composer 同源档**（`--bg` + `--border` + shadow-2，elevated 比行高亮 surface-hover 亮会致 hover 行反向变暗，见 §5.12；本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面）；overlay 遮罩半透明黑（`bg-black/80`）全场最暗，遮罩上面板靠 border + shadow 分离
+- **浮层**：`--bg-elevated` `#323236`（hover 详情卡 / popover；用户气泡 `--bubble-bg` 随本层派生——demo 暗族三主题 bubble 逐块等于 elevated、无独立档，亮族独立 `#fefefe`）；**2026-10-13 用户裁决 demo 方案 A 后该族已全迁 composer 同源档**（`--bg` + `--border` + shadow-2，elevated 比行高亮 surface-hover 亮会致 hover 行反向变暗，见 §5.12；本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面）；overlay 遮罩半透明黑（`--scrim` token，真值 rgba(0,0,0,0.8)，`bg-scrim` 类消费）全场最暗，遮罩上面板靠 border + shadow 分离
 - 黛蓝/暖墨暗色 entry 按玄五层骨架 + 各自色相偏移推导（黛蓝 B>R、暖墨 R>B）；亮色族三主题（皓/青墨/朱印）bg 阶梯沿用宣纸镜像（surface 最亮、框架层深一档），青墨/朱印不覆写
 - **亮色（皓族）设置卡双层底**：`--bg-card` `#fcfbf9`（分组卡底，近白纸、亮于页底 `#eef1ea`）、`--surface-2` `#efede9`（分组卡头，= demo 亮族 `--card-head`；style.css `[data-theme=light]`）——「卡浮于底」层级在亮色族与暗色族同构（卡底亮于页底，卡头 = 页底色调档）
 
@@ -291,10 +293,22 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 /* 状态色（水墨降饱和：饱和度/明度 +15~20%，保留水墨感不艳）*/
 --success: #78a87e;  --warn: #b79c54;  --danger: #bf6b6b;
 --info:    #6d99a5;  --reasoning: #8e85ab;
---danger-fg: color-mix(in oklch, var(--danger) 12%, #160b0b);
-/* danger 实色上的文字（demo tokens.css 同公式浓度 12%；暗色族 color-mix 中的
-   var(--danger) 每元素解析，随各自 --danger 自动跟随——Chromium 实测行为；
+--danger-fg: var(--neutral-fg);
+/* danger 实色上的文字（2026-10-23 裁决：暗色族亮字——旧公式 danger 12% 混深底产出
+   暗红褐，红底暗红字视觉发闷（vision 真机验收三轮判 FAIL）已废弃；中明度 danger
+   实底上亮字按 WCAG 1.4.11 图形组件线 3:1 断言（实测 玄 3.04 / 黛蓝 3.16 / 暖墨 3.07），
+   对齐 destructive 按钮先例（--destructive-foreground 即本令牌）；
    亮色族由 [data-theme="light"] 块覆盖为白字 #ffffff，青墨/朱印继承该覆盖）*/
+--success-fg: color-mix(in oklch, var(--success) 12%, #160b0b);
+/* success 实色上的文字（深字公式保留，不随 --danger-fg 改亮字：--success 明度高于
+   --danger，亮字形态仅 2.18:1 连组件线 3:1 都不过，深字 6.24:1 过 AA 正文线；
+   消费点 = OAuthDialog 授权成功图标实底；亮色族由 [data-theme="light"] 块覆盖为白字 #ffffff，青墨/朱印继承该覆盖）*/
+--danger-text: color-mix(in oklch, var(--danger) 78%, var(--neutral-fg));
+/* danger 小字提亮档：暗底小字号 danger 原色 ~4.2:1 不足 AA 正文线，混入前景 22% 提亮
+   过线（消费点 = 套餐浮层窗口百分比文字）；环形/进度填充保留 --danger 原色不上提亮。
+   color-mix 中 var() 每元素解析，随各主题 --danger/--neutral-fg 自动跟随，主题块零重声明。
+   对比度实测（对浮层底 --bg，contrast-tokens.test.ts 同线断言 ≥4.5:1）：
+   玄 5.35 / 黛蓝 5.11 / 暖墨 5.33 / 皓·青墨 5.76 / 朱印 6.33 */
 
 /* soft 派生（自动跟随，主题切换无需单独覆盖）*/
 --success-soft:   color-mix(in oklch, var(--success) 12%, transparent);
@@ -323,6 +337,17 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 | 皓 | 亮 | `#96622f` | 10.65:1 |
 | 青墨 | 亮 | `#92663a` | 10.62:1 |
 | 朱印 | 亮 | `#9a6b40` | 10.50:1 |
+
+实底前景对比度（`-fg` 对各自实底；accent-fg / success-fg = `color-mix(in oklch, 基色 12%, #160b0b)` 深字公式派生，亮色族 = `#ffffff` 白字覆盖，按 ≥4.5:1 WCAG AA 正文线断言；danger-fg = `var(--neutral-fg)` 亮字（2026-10-23 裁决，见上方令牌注释），按 ≥3:1 WCAG 1.4.11 图形组件线断言。单测 contrast-tokens.test.ts 实底前景场景同线断言）：
+
+| 主题 | 族 | `--accent-fg` / `--accent` | `--danger-fg` / `--danger` | `--success-fg` / `--success` |
+|---|---|---|---|---|
+| 玄 | 暗 | 7.38:1 | 3.04:1 | 6.24:1 |
+| 黛蓝 | 暗 | 6.30:1 | 3.16:1 | 6.24:1 |
+| 暖墨 | 暗 | 8.87:1 | 3.07:1 | 6.24:1 |
+| 皓 | 亮 | 4.86:1 | 5.22:1 | 4.84:1 |
+| 青墨 | 亮 | 5.44:1 | 5.22:1 | 4.84:1 |
+| 朱印 | 亮 | 5.86:1 | 5.85:1 | 4.84:1 |
 
 ### 4.5 diff 着色（柔化 12%）
 
@@ -373,6 +398,10 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --shadow-2: 0 8px 24px rgba(0,0,0,0.4);
 --shadow-3: 0 12px 32px rgba(0,0,0,0.45);   /* 顶级浮层 */
 --shadow-glow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent);
+--shadow-drawer-left: -24px 0 48px rgba(0,0,0,0.4);  /* 定向左阴影：抽屉自右滑入的左侧落影（浓度与 shadow-2 同档；Tailwind 映射 shadow-drawer-left）*/
+
+/* 弹层遮罩（modal/overlay 背后全场最暗层；黑基六主题共用一值，demo .cmask 同值）*/
+--scrim: rgba(0,0,0,0.8);   /* Tailwind 映射 bg-scrim；消费点 = DialogContent overlay / SearchModal / workflow-viz OverlayShell */
 
 /* z-index 语义化（demo styles #8 梯队：sticky < popover < overlay < hovercard < modal < dialog < toast < banner）*/
 --z-sticky: 1;  --z-popover: 10;  --z-overlay: 20;  --z-hovercard: 500;
@@ -396,33 +425,35 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 
 机制：CSS 属性选择器覆盖——切换只写 `<html>` 的 `data-theme`（dark/light）与 `data-theme-preset` 两个属性，令牌值全部由 `packages/renderer/src/style.css` 的选择器块静态声明（派生色 `color-mix` 引用基色自动跟随）。
 
-**切换链路**：`applySystemToDom`（`packages/ui/src/features/settings/apply-system-to-dom.ts`）把 SystemSettings 外观偏好写入 DOM 槽位——`theme=system` 经 `matchMedia` 解析为 light/dark，`themePreset` 缺省 `cold-blue`；W4 壳侧 watch store 调用。主题列表渲染 = 设置页 AppearancePage（`packages/renderer/src/components/settings/appearance/AppearancePage.vue`）消费 `useTaijiThemes.ts` 的 `TAIJI_THEMES`（label/preset/swatch 预览色；令牌真值不在其中，真值唯一权威 = style.css，见 style.css 头注释）。
+**切换链路**：`applySystemToDom`（`packages/ui/src/features/settings/apply-system-to-dom.ts`）把 SystemSettings 外观偏好写入 DOM 槽位——`theme=system` 经 `matchMedia` 解析为 light/dark，`themePreset` 缺省为空串（= 玄/皓默认主题，无 preset 覆盖）；W4 壳侧 watch store 调用。主题列表渲染 = 设置页 AppearancePage（`packages/renderer/src/components/settings/appearance/AppearancePage.vue`）消费 `useTaijiThemes.ts` 的 `TAIJI_THEMES`（label/preset/swatch 预览色；令牌真值不在其中，真值唯一权威 = style.css，见 style.css 头注释）。
 
 **选择器块与覆盖范围**（按 style.css 现值，非默认主题按块内声明覆盖、块外继承族默认；派生公式 color-mix 中的 var() 每元素解析，preset 只覆盖基色即自动跟随）：
 
 | 主题 | 选择器块 | 覆盖变量数与构成 |
 |---|---|---|
 | 玄（暗·默认） | `:root` | 全部默认值，无独立块 |
-| 皓（亮·默认） | `[data-theme="light"]` | 54 = bg 阶梯 8 + bubble 1 + neutral 8（含 name、fg-2）+ border 3 + accent 3 + link-c/code-c 2 + md-code 1（7% 重声明）+ 状态 6（含 danger-fg 白字覆盖）+ 阴影 3 + chart 族 19（--bg-sunken 与 accent-soft/accent-ring/*-soft 派生公式继承 ：root 不重声明） |
+| 皓（亮·默认） | `[data-theme="light"]` | 55 = bg 阶梯 8 + bubble 1 + neutral 8（含 name、fg-2）+ border 3 + accent 3 + link-c/code-c 2 + md-code 1（7% 重声明）+ 状态 7（含 danger-fg / success-fg 白字覆盖）+ 阴影 3 + chart 族 19（--bg-sunken 与 accent-soft/accent-ring/*-soft 派生公式继承 ：root 不重声明） |
 | 黛蓝 / 暖墨 | `:root[data-theme-preset="dailan"/"nuanmo"]` | 39 = bg 阶梯 8（含 --bg-stage 各自落定）+ neutral 7（含 fg-2）+ accent 3 + link-c/code-c 2 + chart 族 19（不覆盖 border/状态色；--bg-sunken/--md-code 继承派生公式不重声明） |
 | 青墨 | `[data-theme="light"][data-theme-preset="qingmo"]` | 24 = accent 3 + link-c/code-c 2 + chart 族 19（宣纸底不换、只换颜料） |
 | 朱印 | `[data-theme="light"][data-theme-preset="zhuyin"]` | 25 = accent 3 + link-c/code-c 2 + danger 1（玫红错开）+ chart 族 19（其余状态色与 light 族默认同值不重声明；--danger-fg 继承 light 块白字覆盖不重声明） |
 
-**阴 · 暗色族（3 个）**——背景近中性，色相只做「依稀相」(S≤6%)，靠明度阶梯说话；彩色职能按 demo 终态三分（主行动青玉 / 链接正蓝 / 行内代码杏橘）：
+**阴 · 暗色族（3 个）**——背景近中性，色相只做「依稀相」(S≤6%)，靠明度阶梯说话；彩色职能按 demo 终态三分（主行动 / 链接正蓝 / 行内代码杏橘），默认玄的主行动 = 青玉，黛蓝/暖墨两 preset 按名义出彩（蓝 / 暖沙）：
 | 主题 | accent | 特色 |
 |---|---|---|
 | **太极·玄（默认）** | `#7fb89c` 青玉 | demo 终态职能分色锚点：主行动青玉 A9 / 链接正蓝 / 行内代码杏橘 W2 |
-| 太极·黛蓝 | `#7db2a9` 青玉 | 暗 · 依稀蓝相（bg/文字档全值随 demo，蓝相区分玄） |
-| 太极·暖墨 | `#a2b48b` 青玉暖 | 宣纸暖（bg/文字档全值随 demo，暖相区分玄） |
+| 太极·黛蓝 | `#8b9cc8` 黛蓝 | 暗 · 依稀蓝相（bg/文字档/accent 全值随 demo，蓝相区分玄） |
+| 太极·暖墨 | `#cbbc93` 暖沙 | 宣纸暖（bg/文字档/accent 全值随 demo，暖相区分玄） |
 
 **阳 · 亮色族（3 个）**——宣纸为底，彩色只做小面积 accent：
 | 主题 | accent | 特色 |
 |---|---|---|
-| **太极·皓** | `#43765d` 青玉深 | 亮 · 宣纸墨黑（青玉深颜料；elevated 纯白档） |
-| 太极·青墨 | `#40775f` 青玉 | 亮 · 宣纸花青（青玉系颜料） |
-| 太极·朱印 | `#4d7a63` 青玉 | 亮 · 宣纸朱砂（accent 青玉系；danger 玫红 `#b23855` 防撞色）|
+| **太极·皓** | `#43765d` 青玉深 | 亮 · 宣纸墨黑（默认主行动色 = 青玉深颜料；elevated 纯白档） |
+| 太极·青墨 | `#356b7a` 花青 | 亮 · 宣纸花青（accent 取花青颜料） |
+| 太极·朱印 | `#9c4335` 朱砂 | 亮 · 宣纸朱砂（accent 取朱砂压暗压灰档；danger 玫红 `#b23855` 防撞色）|
 
 **设计原理**：暗底彩色必须提亮才可读（提亮即荧光），故靠明度阶梯说话而非色相；亮底允许低饱和低明度「颜料 accent」。亮色族共用同一套宣纸阶梯，只换颜料不换纸。demo 终态把「主行动 / 链接 / 行内代码」三种职能拆为三个独立令牌（accent / link-c / code-c），色相冲突（青绿主色 vs 蓝链接）由令牌分治而非单色兼职。
+
+**名义出彩（2026-10-22 裁决）**：四套 preset 主题的 accent 按主题名义色相取值（黛蓝=蓝 / 暖墨=暖沙 / 青墨=花青 / 朱印=朱砂），修正 2026-10-10「align six-theme tokens」把六主题 accent 全家对齐青玉造成的名不副实（朱印承诺朱砂却渲染青玉绿）；两族默认（玄名义即青玉 / 皓名义为宣纸墨黑）继续承担产品主行动色青玉，名义与实现一致，保持不变。暗族 accent 取同色相提亮档配深字 `-fg`，亮族取压暗档配白字；`--chart-ink` 掺 accent 的 preset（青墨/朱印）随基色自动跟随，图表墨自此真正「掺花青 / 掺朱砂」。
 
 ---
 
@@ -508,7 +539,7 @@ pin:        不设（2026-10-04 用户裁决全链移除）
 - 静态容器只用一个表面色，**不叠加 border**
 - border 仅保留：浮起可交互容器（popover/dialog/composer）+ focus 态
 - drawer 内 header 分隔：去 `border-b`，改 `bg-surface-2` 浮起分层
-- drawer 与 main 间：D2 一体化（同 surface）+ SplitterResizeHandle 透明化（仅 hover/drag 显 accent）。〔2026-09-09〕弱投影 `--shadow-drawer` 已移除——drawer-area `overflow-hidden` 裁剪后代 box-shadow，从未实际可见
+- drawer 与 main 间：D2 一体化（同 surface）+ SplitterResizeHandle 透明化（仅 hover/drag 显 accent）。〔2026-09-09〕弱阴影 `--shadow-drawer` 已移除——drawer-area `overflow-hidden` 裁剪后代 box-shadow，从未实际可见
 - 行分隔 hairline：`--hairline`（0.05）
 
 ### 5.6 状态指示统一（§3.3 + §3.5.2）
@@ -580,7 +611,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **骨架行**：`height 10px + radius 999px`（胶囊条），3 行堆叠模拟列表（间距用标准 scale）
 - **骨架卡片**：`bg-card` 卡片 + 内部 shimmer 扫光
 - **loading 防闪**（SearchModal）：`LOADING_DELAY_MS=200`，开扫 200ms 后才显 spinner，防连续输入闪烁
-- **ToolBlock running**：呼吸弧 loader（13px，淡轨整圈 opacity 0.16 + accent 弧段 `pathLength=100`；三重动画 = 整体 1.15s/圈旋转 `cubic-bezier(.6,.1,.35,.9)` + 弧段 dasharray 16%↔54% 呼吸 2.3s ease-in-out + 弧段 150° 摆动同周期同相；`prefers-reduced-motion` 静态呈「淡轨整圈 + 固定相位弧段」），name 染 accent
+- **ToolBlock running**：呼吸弧 loader（13px，浅色轨道整圈 opacity 0.16 + accent 弧段 `pathLength=100`；三重动画 = 整体 1.15s/圈旋转 `cubic-bezier(.6,.1,.35,.9)` + 弧段 dasharray 16%↔54% 呼吸 2.3s ease-in-out + 弧段 150° 摆动同周期同相；`prefers-reduced-motion` 静态呈「浅色轨道整圈 + 固定相位弧段」），name 染 accent
 - **TaijiLogo 旋转**：8s（reduced-motion 停），`currentColor` 适配主题
 
 ### 5.11 内联反馈条（v6 不做全局 toast）
@@ -616,7 +647,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 **IME 检查**：Composer 的 `isComposing` 期间不拦截回车（中文/日文输入法 composing 态不发送）。
 
-**composer-bar popover 锚点范式**：absolute 相对 composer-bar，`bottom: calc(100% + 6px)`，`z-modal`，`bg-bg + border + shadow-2 + radius-lg`（2026-10-13 用户裁决 demo 方案 A：composer 同源底/边、仅靠投影浮起——旧 `bg-elevated + border-strong` 规格退役，elevated 容器下 surface-hover 行高亮反而更暗成反向对比度；CommandPopover 首发落地后 PopoverContent/HoverCardContent/SelectContent 原语默认类同批切换，全族浮层一致）。popover open 时触发按钮 `.bar-btn--active` = `accent-soft 底 + accent 字`（锁高亮）。
+**composer-bar popover 锚点范式**：absolute 相对 composer-bar，`bottom: calc(100% + 6px)`，`z-modal`，`bg-bg + border + shadow-2 + radius-lg`（2026-10-13 用户裁决 demo 方案 A：composer 同源底/边、仅靠阴影浮起——旧 `bg-elevated + border-strong` 规格退役，elevated 容器下 surface-hover 行高亮反而更暗成反向对比度；CommandPopover 首发落地后 PopoverContent/HoverCardContent/SelectContent 原语默认类同批切换，全族浮层一致）。popover open 时触发按钮 `.bar-btn--active` = `accent-soft 底 + accent 字`（锁高亮）。
 
 ### 5.13 标签族语义四分 + 空状态三要素〔2026-09-13 自 design-system.md 并入〕
 
@@ -810,7 +841,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 ### 8.1 阶段 0：测试基础设施（最先，为重构护航）
 
 - 启用 coverage + 设观察门槛
-- E2E 进 CI（mock 轨 + real 轨独立 job）
+- E2E 进 CI（mock 层 + 真实进程层独立 job）
 - 补建 dev-smoke 门禁
 - 重写 TEST-STRATEGY.md
 
@@ -868,7 +899,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | # | 裁决 | 决定 |
 |---|---|---|
 | D1 | 设置形态 | 全屏覆盖（FullSettingsOverlay） |
-| D2 | Drawer 模型 | 一体化生长 + 保留弱投影(0.16) |
+| D2 | Drawer 模型 | 一体化生长 + 保留弱阴影(0.16) |
 | D3 | tasks tab | 移除（goal/todo 回归对话流，删 HIDDEN_TOOL_NAMES） |
 | D4 | plugin 范围 | 补登记架构授权（v6-design 决策 #15） |
 | D8 | 选中态冲突 | 按组件类型二分（tab 型 bg-elevated / 列表项型 bg-surface+蓝字） |
@@ -887,7 +918,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | R10 | 列宽 | 整 turn 居中、气泡列内右浮 |
 | R11 | block icon | 14px |
 | R13 | SegmentedTab 圆角 | 12px（radius-lg） |
-| R14 | drawer 投影 | 弱投影 0.15-0.18 |
+| R14 | drawer 阴影 | 弱阴影 0.15-0.18 |
 | R22 | 圆角档位提升 | tr-git/fg-pill 等升 6px；tt-close 保留 3px 例外 |
 
 ### 9.3 文档裁决

@@ -18,7 +18,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ProviderTemplatePicker from '../provider/ProviderTemplatePicker.vue'
-import { brandColor } from '../provider/brand-colors.js'
+import { brandAvatarColors } from '../provider/brand-colors.js'
 import type { BuiltinProviderTemplate } from '@taiji/shared'
 
 function tpl(id: string, name: string, authMode: BuiltinProviderTemplate['authMode'], envVars: string[], modelCount = 3): BuiltinProviderTemplate {
@@ -178,19 +178,22 @@ describe('卡片网格 + 品牌色 + 认证 chip（TC4）', () => {
   })
 })
 
-describe('brandColor 纯函数（TC5）', () => {
-  it('色板内返回品牌色（openai → #10a37f）', () => {
-    expect(brandColor('openai')).toBe('#10a37f')
-    expect(brandColor('anthropic')).toBe('#d97757')
+describe('brandAvatarColors 纯函数（TC5）', () => {
+  it('色板内返回品牌色底 + 黑白前景按对比度择优（深底白字 / 中间调底深字）', () => {
+    expect(brandAvatarColors('openai')).toEqual({ backgroundColor: '#10a37f', color: '#000000' })
+    expect(brandAvatarColors('github-copilot')).toEqual({ backgroundColor: '#24292e', color: '#ffffff' })
   })
 
-  it('色板外 hash fallback（在 5 语义色集合内，值为 design-tokens CSS 变量）', () => {
-    const FALLBACKS = ['var(--neutral-ico)', 'var(--success)', 'var(--warn)', 'var(--danger)', 'var(--info)']
-    expect(FALLBACKS).toContain(brandColor('unknown-provider-foo'))
+  it('色板外 hash fallback = 语义 token 软底 + 同色文字（badge 范式，无实底无写死前景）', () => {
+    const style = brandAvatarColors('unknown-provider-foo')
+    const TOKENS = ['--neutral-mid', '--success', '--warn', '--danger', '--info']
+    const hit = TOKENS.find((t) => style.backgroundColor === `color-mix(in oklch, var(${t}) 14%, transparent)`)
+    expect(hit, `软底公式不在 5 token 集合内：${style.backgroundColor}`).toBeDefined()
+    expect(style.color).toBe(`var(${hit})`)
   })
 
   it('映射稳定：同 id 两次调用同结果', () => {
-    expect(brandColor('unknown-provider-foo')).toBe(brandColor('unknown-provider-foo'))
+    expect(brandAvatarColors('unknown-provider-foo')).toEqual(brandAvatarColors('unknown-provider-foo'))
   })
 })
 

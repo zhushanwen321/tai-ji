@@ -58,32 +58,30 @@ function fireVisibilityChange(): void {
  * mount 宿主组件驱动 useTurnElapsed（onUnmounted/watch 需组件实例）。
  * @param getAggregates 聚合事实 getter（测试直接给 TurnAggregates 或经 deriveTurnAggregates）
  * @param running 本 turn 是否进行中（驱动秒级 tick 与 isLive）
+ * [chat-flow-consistency C3] getIsSessionActive / onComplete 参数已随 Turn.vue 接线退役，
+ * mount 不再传入（签名双参）。
  */
 function mountElapsed(
   getAggregates: () => TurnAggregates,
   running: Ref<boolean>,
-  sessionActive?: Ref<boolean>,
 ) {
   const exposed = {} as {
     elapsed: Ref<string>
     isLive: Ref<boolean>
     generatedTokens: Ref<number>
   }
-  const collapses: number[] = []
   const Host = defineComponent({
     setup() {
       const result = useTurnElapsed(
         getAggregates,
         () => running.value,
-        sessionActive ? () => sessionActive.value : undefined,
-        () => collapses.push(1),
       )
       Object.assign(exposed, result)
       return () => null
     },
   })
   const wrapper = mount(Host)
-  return { wrapper, exposed, collapses }
+  return { wrapper, exposed }
 }
 
 beforeEach(() => {
@@ -325,27 +323,16 @@ describe('useTurnElapsed 可见性停表（Q1-7）', () => {
 })
 
 // ═════════════════════════════════════════════════════════════
-// 完成收起回调（isSessionActive 驱动，非 turn 进行中态驱动）
+// 完成收起回调退役（[chat-flow-consistency C3] 净删回归锁）
 // ═════════════════════════════════════════════════════════════
-describe('useTurnElapsed 完成收起回调', () => {
-  it('isSessionActive true→false 触发 onComplete（ask-user 期间会话仍活跃 → 不收起）', async () => {
-    const running = ref(true)
-    const sessionActive = ref(true)
-    const { wrapper, collapses } = mountElapsed(
-      () => ({ startedAt: T0, endedAt: 0, generatedTokens: 0 }),
-      running,
-      sessionActive,
-    )
-
-    // 会话仍活跃（工具阻塞 / ask-user 等待）→ 不收起
-    running.value = false
-    await nextTick()
-    expect(collapses).toHaveLength(0)
-
-    // 对话真正结束 → 收起一次
-    sessionActive.value = false
-    await nextTick()
-    expect(collapses).toHaveLength(1)
+// C3 退役 onComplete / getIsSessionActive 参数：工作回合的收起由派生完成（isWorkingTurn 翻
+// false → showTrace = isExpanded），显式 collapse 的唯一净效果是清挂载回合的手动展开态
+// （有害无益）。本 describe 只保留「签名收敛」断言——composable 不再接收/触发收起回调，
+// 回归保护点 = Turn.vue 侧的手动展开保持（turn-working.test.ts / Turn.test.ts 挂载族）。
+describe('useTurnElapsed 完成收起回调退役（C3）', () => {
+  it('签名双参收敛：不再暴露任何收起回调面（返回集 = elapsed/startedAt/endedAt/isLive/generatedTokens）', () => {
+    const { wrapper, exposed } = mountElapsed(() => ({ startedAt: T0, endedAt: 0, generatedTokens: 0 }), ref(true))
+    expect(Object.keys(exposed).sort()).toEqual(['elapsed', 'endedAt', 'generatedTokens', 'isLive', 'startedAt'])
     wrapper.unmount()
   })
 })

@@ -1,22 +1,24 @@
 /**
- * 合批 per-message settled 契约（探针 P1，设计 D1/B1）。
+ * per-message settled 契约（探针 P1，设计 D1/B1）。
  *
- * 锁死契约：批次受理后条目转 in-flight；送达回执（confirmDelivered 逐 id）落定后
+ * 锁死契约：条目受理后转 in-flight；送达回执（confirmDelivered 逐 id）落定后
  * onSettled 恰 N 次——每条消息各获一次终态回调，msg 为该条原始消息（非 composed
  * 合批消息），dedupeKey/outcome 各自正确。单消息批次行为与合批逐条同口径。
  *
  * [D9⑤ 口径升级] 'delivered' = 送达口径，仅 confirmDelivered 驱动回调；受理时点
  * 只转 in-flight 不回调（sendChecked promise 的受理 resolve 口径另锁于 inflight 套件）。
  *
- * 合批形态对齐 scheduler 真实装配（§4 物理数据流）：不配 mergeWindowMs，合批来自
- * busy park 队列积累 + settled 边沿 flush 整队出站（queued 全量成批）。
+ * 受理即出站下逐条即时出站（无合批窗口）；[已不可达用例删除登记] 原「busy park
+ * 队列积累 + settled 边沿 flush 整队成批」的两合批形态用例随忙闲门禁删除而不可达，
+ * 2026-10-23 投递域清理批次删除——per-message 契约改以逐条出站形态锁定
+ * （内核 doSend 对积累队列的成批拼接由 receipt-anchor / command-lane 套件覆盖）。
  */
 import { describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
 import type { DeliveryMessage } from '../src/types.js'
-import { expectSettledMsg, makeBusyParkPort, makeMockPort, setupFakeTimersSilencedWarn, textMsg } from './helpers.js'
+import { expectSettledMsg, makeMockPort, setupFakeTimersSilencedWarn, textMsg } from './helpers.js'
 
-describe('合批 per-message settled（P1）', () => {
+describe('per-message settled（P1）', () => {
   setupFakeTimersSilencedWarn()
 
   /** 断言第 index 条 settled 回调：原始消息引用 + dedupeKey + 终态 outcome。 */
@@ -32,37 +34,26 @@ describe('合批 per-message settled（P1）', () => {
     expect(onSettled.mock.calls[index]![1]).toBe(outcome)
   }
 
-  it('合批 2 条受理 → confirmDelivered 逐条 → onSettled 恰 2 次，各自原始消息/dedupeKey + delivered（按入队序）', () => {
-    let idle = false
-    let settledCb: (() => void) | undefined
+  it('2 条逐条出站受理 → confirmDelivered 逐条 → onSettled 恰 2 次，各自原始消息/dedupeKey + delivered', () => {
     const onSettled = vi.fn()
-    const { port, setIdle, fireSettled } = makeBusyParkPort()
+    const port = makeMockPort()
     const handle = createDelivery(port, { onSettled })
 
     const msgA = textMsg('check CI', { dedupeKey: 'task-a' })
     const msgB = textMsg('poll build', { dedupeKey: 'task-b' })
-    handle.send(msgA) // busy：park 入队（scheduler 投递形态，非 merge 窗口）
-    handle.send(msgB)
-    expect(port.sendCalls).toHaveLength(0)
+    handle.send(msgA, { id: 'sid-a' }) // 受理即出站：逐条即时投递
+    handle.send(msgB, { id: 'sid-b' })
+    expect(port.sendCalls).toHaveLength(2)
     expect(onSettled).not.toHaveBeenCalled()
-
-    setIdle(true)
-    fireSettled() // settled 边沿 → busy 复核通过 → flush 合批投出
-
-    // 投递形态不变：仍是一次 port.send、composed content join
-    expect(port.sendCalls).toHaveLength(1)
-    expect(port.sendCalls[0]!.msg.payload.content).toBe('check CI\n\n---\n\npoll build')
 
     // D9⑤：受理只转 in-flight，不触发 'delivered' 回调
-    expect(onSettled).not.toHaveBeenCalled()
     const active = handle.entriesFull().active
     expect(active.map((e) => e.state)).toEqual(['in-flight', 'in-flight'])
 
     // per-message 送达口径：confirmDelivered 逐 id 落定，每条各一次、msg 为原始消息
     // 引用（非 composed）
-    const ids = handle.entriesFull().active.map((e) => e.id)
-    handle.confirmDelivered(ids[0]!)
-    handle.confirmDelivered(ids[1]!)
+    handle.confirmDelivered('sid-a')
+    handle.confirmDelivered('sid-b')
 
     expect(onSettled).toHaveBeenCalledTimes(2)
     expectSettledEntry(onSettled, 0, msgA, 'delivered', 'task-a')
@@ -74,36 +65,30 @@ describe('合批 per-message settled（P1）', () => {
     handle.dispose()
   })
 
-  it('合批 2 条 port.send 失败 → 首败即停，onSettled 每条恰一次 rejected（ADR-0122）', () => {
-    let idle = false
-    let settledCb: (() => void) | undefined
+  it('2 条逐条出站 port.send 失败 → 首败即停，onSettled 每条恰一次 rejected（ADR-0122）', () => {
     const onSettled = vi.fn()
     const port = makeMockPort({
-      isIdle: () => idle,
       send: () => {
         throw new Error('pi dead')
       },
-      subscribeSettled: (cb) => {
-        settledCb = cb
-        return () => {}
-      },
     })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port, { onSettled })
+    try {
+      const msgA = textMsg('check CI', { dedupeKey: 'task-a' })
+      const msgB = textMsg('poll build', { dedupeKey: 'task-b' })
+      handle.send(msgA, { id: 'sid-a' })
+      handle.send(msgB, { id: 'sid-b' })
 
-    const msgA = textMsg('check CI', { dedupeKey: 'task-a' })
-    const msgB = textMsg('poll build', { dedupeKey: 'task-b' })
-    handle.send(msgA)
-    handle.send(msgB)
-
-    idle = true
-    settledCb!() // flush 合批投出 → 首败即停：每条一次 rejected，无重试
-    expect(onSettled).toHaveBeenCalledTimes(2)
-    expectSettledEntry(onSettled, 0, msgA, 'rejected', 'task-a')
-    expectSettledEntry(onSettled, 1, msgB, 'rejected', 'task-b')
-    expect(handle.depth()).toBe(0)
-    expect(handle.entriesFull().active).toHaveLength(0)
-
-    handle.dispose()
+      expect(onSettled).toHaveBeenCalledTimes(2)
+      expectSettledEntry(onSettled, 0, msgA, 'rejected', 'task-a')
+      expectSettledEntry(onSettled, 1, msgB, 'rejected', 'task-b')
+      expect(handle.depth()).toBe(0)
+      expect(handle.entriesFull().active).toHaveLength(0)
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
   })
 
   it('单消息批次：受理 in-flight → confirmDelivered 后 onSettled 恰一次，msg 即原始消息引用', () => {
@@ -112,7 +97,7 @@ describe('合批 per-message settled（P1）', () => {
     const handle = createDelivery(port, { onSettled })
 
     const msg = textMsg('solo', { dedupeKey: 'task-solo' })
-    handle.send(msg) // 空闲立即投（无合批）
+    handle.send(msg) // 受理即出站
 
     expect(port.sendCalls).toHaveLength(1)
     // D9⑤：受理不触发回调；条目 in-flight 等待送达回执

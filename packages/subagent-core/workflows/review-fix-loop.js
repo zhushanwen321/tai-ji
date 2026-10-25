@@ -1,4 +1,5 @@
 // review-fix-loop.js — 通用多批审查-修复循环（内置 workflow）
+// coverage-file-gate-exempt: 构建期壳模板——文件含字面 @@STITCH@@ 占位行且整体是脚本体（顶层 return），语法上不可 import；可执行语义只在与 shared 段拼接后的单文件脚本体内存在（该脚本体由 pi worker 承载）。行为验证由产物一致性门禁（review-fix-loop-build.test.ts）与双实现对账（scripts/check-rfl-parity.mjs）承担，单测无加载面
 //
 // 模式：多批（batch）串行，批内循环（round）：并行 review（4 个一批分批并行，
 // REVIEWER_BATCH）→ aggregate（去重合并 + 修复分组，独立 phase）→ fix（按分组
@@ -149,9 +150,7 @@ const {
   resolveRunRoot,
   computeOrigin,
   recordDormant,
-  inheritCarryoverFields,
   dormantRevivalTitle,
-  applyCarryoverRegression,
   filterActiveIds,
   filterDormantFromRecon,
   landScores,
@@ -179,6 +178,204 @@ const {
   buildFinalDoc,
   computeFixAttemptsMax,
 } = require(require("path").dirname(workerData.scriptPath) + "/review-fix-loop-utils.cjs");
+
+// ── 双平台单源机制段（review-fix-loop.shared.ts 经构建剥 TS 后拼入：CommitRepairReport 契约 /
+//    parsePorcelain / isValidRepairReport / wrapUntrustedText / buildRepairPrompt /
+//    buildRepairFailureMessage / inheritCarryoverFields / refreshTrackedFields / contentRepairLoop）。
+//    inheritCarryoverFields / applyCarryoverRegression 已从 utils.cjs 迁出（前者单源化，后者
+//    依赖单源版随模板迁入）——构建注入，勿手改本段 ──
+// review-fix-loop.shared.ts — review-fix-loop 双平台单源机制段（zcode / pi 产物共用）
+//
+// 单源纪律（对齐 zsw-skills build-workflows 管线）：本文件是唯一实现源，经
+// scripts/build-review-fix-loop.mjs 拼进两侧产物——zcode 产物（.dwf.ts）原文拼接，
+// pi 产物（review-fix-loop.js）经 TS 剥离后拼接。改本文件必须重跑构建，两产物
+// 不得手改（--check 拦截漂移）。
+//
+// 形态约束：TS 子集（类型注解/interface/泛型可用，enum/namespace 禁用——
+// transpileModule 剥离）；无 import/require（单文件自包含）；无字面 agent( 调用
+// （平台 agent 形态差异经 ctx 注入，zcode GUI 泳道分析依赖壳内字面调用点）。
+//
+// 承载机制（2026-10-23 收编，源自空壳缺陷 + 补修子循环双版本漂移治理）：
+// - inheritCarryoverFields / refreshTrackedFields：跨轮条目字段级安全合并
+//   （空壳缺陷修复——wf-1792073055433：聚合器延续条目无 title/severity 时
+//   旧 zcode 版无条件覆盖把已追踪字段抹成空壳，跨轮身份锚点断链）
+// - contentRepairLoop：统一 commit 的 content 补修子循环（commit 被 pre-commit
+//   拦截且恢复需改仓库内文件时：派补修 agent 按报错原文补全 → git status 快照
+//   差集对账 → 显式路径 add → 重跑同一 commit，上限 maxRepairs 次）
+// 设计依据：commit content 补修子循环 = 路线 B 数据流（2026-10-23 落地；原始登记文档已删，见 git 历史）。
+/** git status --porcelain 输出 → 路径数组。rename 行取新路径、剥引号包裹；
+ *  过滤 .review/ 与 .tmp/（脚本自持目录——差集对账不得把脚本自产文件算作补修改动）。
+ *  status 失败由壳在取 stdout 前抛错（commit 已跑通说明是有效 git 仓库，此处失败属异常，
+ *  不静默折叠成空快照）。 */
+function parsePorcelain(out) {
+    return out
+        .split("\n")
+        .map((s) => s.trimEnd())
+        .filter(Boolean)
+        .map((line) => {
+        let p = line.slice(3).trim().replace(/^"|"$/g, "");
+        const arrow = p.indexOf(" -> ");
+        if (arrow >= 0)
+            p = p.slice(arrow + 4).trim().replace(/^"|"$/g, "");
+        return p;
+    })
+        .filter((p) => !p.startsWith(".review/") && !p.startsWith(".tmp/"));
+}
+/** CommitRepairReport 字段级校验（repairedFiles 数组、note 非空字符串）。 */
+function isValidRepairReport(v) {
+    return (typeof v === "object" && v !== null && Array.isArray(v.repairedFiles) &&
+        typeof v.note === "string" && v.note.trim() !== "");
+}
+/** 不可信内容包裹（报错原文进 prompt 的注入隔离；格式与两版既有 wrapUntrusted 对齐）。 */
+function wrapUntrustedText(body) {
+    return [
+        "<<<不可信内容 开始>>>",
+        body,
+        "<<<不可信内容 结束>>>",
+    ].join("\n");
+}
+/** 补修 agent prompt（roundLabel 语境参数化；报错原文为恢复动作唯一权威源）。 */
+function buildRepairPrompt(roundLabel, errText, retryNote) {
+    return [
+        `workflow review-fix-loop ${roundLabel}——修复改动统一 commit 被提交前自动检查（pre-commit）拦截，环境恢复后重试仍失败（content 类：恢复需要修改仓库内文件，报错写明了具体动作）。`,
+        "你的职责 = 按报错写明的恢复动作完成内容补全（如补登记、补配套改动），使该 commit 重试可以通过。",
+        "",
+        "报错原文（权威源，恢复动作以它为准）：",
+        wrapUntrustedText(errText),
+        "",
+        "要求：",
+        "1. 只改报错原文写明的登记/配套文件（如 e2e-map 新增 rule、补 changeset 声明），恢复动作以报错原文为权威源；不碰其他文件，不改检查器本体。",
+        "2. 报错原文没有写明可改文件的恢复动作时不要臆测——返回 repairedFiles 空数组并在 note 说明。",
+        "3. 不 commit：工作流把补修文件 git add 后统一重试。",
+        '4. 返回严格 JSON：{ "repairedFiles": ["<补修涉及的全部文件>"], "note": "<一句补修说明>" }——repairedFiles 列全部你实际改动的文件（不只报错点名文件，供对账核对越权）。',
+        ...retryNote,
+    ].join("\n");
+}
+/** content 补修子循环终态文案（fix-failure 信息全集：次数/文件/note/末次报错/staged 位置/env 回复末段）。 */
+function buildRepairFailureMessage(r, envTail) {
+    const head = r.outcome === "invalid-return"
+        ? `补修 agent 结构化返回非法（回注重试后仍无效：${r.why}）；`
+        : r.outcome === "unrepairable"
+            ? `补修 agent 判定不可修（repairedFiles 为空，说明：${r.why}）；`
+            : "";
+    return (`${head}统一 git commit 补修 ${r.tries} 次仍被拦截（exit ${r.lastExitCode}）：${r.lastErr}` +
+        `；补修涉及文件（全部）：${r.allRepairFiles.join("、") || "（无）"}` +
+        `${r.note !== "" ? `；补修说明：${r.note}` : ""}` +
+        `；改动已 staged 未提交，人工检查 git status 后显式路径处置（环境恢复 agent 回复末段：${envTail}）`);
+}
+/**
+ * 延续/重报条目的身份锚点字段继承（空壳缺陷修复核心，wf-1792073055433）：
+ * - title：target 缺失侧才回填——已追踪条目的 title 是跨轮身份锚点（L2 标题对账依据），
+ *   锁定不覆盖，防聚合器空 title 把锚点抹掉；
+ * - severity：source 显式给出（非空且不同）才采信——本轮判定为准，空值不覆盖。
+ * 返回是否有变更（调用方可记 log）。
+ */
+function inheritCarryoverFields(target, source) {
+    let changed = false;
+    if (!target.title && typeof source.title === "string" && source.title) {
+        target.title = source.title;
+        changed = true;
+    }
+    if (typeof source.severity === "string" && source.severity && target.severity !== source.severity) {
+        target.severity = source.severity;
+        changed = true;
+    }
+    return changed;
+}
+/** 延续/重报条目的内容字段非空刷新（防空壳覆盖：source 字段非空才写 target，
+ *  旧无条件赋值会把已追踪条目的 evidence/files 抹成 undefined/空串）。
+ *  与 inheritCarryoverFields 分立：身份锚点字段（title/severity）与内容字段（files/
+ *  evidence/guidance）的合并方向不同——前者防覆盖，后者刷新但防空值。 */
+function refreshTrackedFields(target, source, fields) {
+    for (const f of fields) {
+        const v = source[f];
+        const nonEmpty = Array.isArray(v) ? v.length > 0 : typeof v === "string" && v !== "";
+        if (nonEmpty)
+            target[f] = v;
+    }
+}
+/**
+ * content 补修子循环（设计 commit-content-self-heal 路线 B；ctx 注入平台差异）。
+ *
+ * 数据流：报错原文 → 派补修 agent（prompt 以报错原文为权威源）→ 结构化校验（失败回注
+ * 原因重试一次，回注不消耗补修次数）→ 空申报 = 判不可修立即终止 → git status 前后快照
+ * 差集对账（未申报的新增脏文件以实际为准并入并披露，越权改动防线）→ 显式路径 add →
+ * 重跑同一 commit → 成功收工 / 仍败取最新报错回循环头。上限判定在循环头。
+ *
+ * askRepairAgent 异常不在此 catch（zcode 侧 provider 类失败由平台 stopped/resume 承接，
+ * 不进入脚本——设计 §3.1 契约节；pi 侧壳把失败信封转 undefined 走校验路径）。
+ */
+async function contentRepairLoop(ctx) {
+    let lastErr = ctx.initialErr;
+    let lastExitCode = ctx.initialExitCode;
+    let repairTries = 0;
+    const allRepairFiles = [];
+    let lastNote = "";
+    while (true) {
+        if (repairTries >= ctx.maxRepairs) {
+            return { outcome: "exhausted", tries: repairTries, allRepairFiles, note: lastNote, lastErr, lastExitCode, why: "" };
+        }
+        // before 快照（每次尝试派发前重取，对齐参照实装）
+        const before = new Set(await ctx.dirtyPaths());
+        const prompt = (retryNote) => buildRepairPrompt(ctx.roundLabel, lastErr, retryNote);
+        const firstAsk = await ctx.askRepairAgent(repairTries + 1, prompt([]));
+        // 计数立即 +1（先于任何判定——终态「尝试次数」即该值，不可修场景显示 1；回注重试不消耗次数）
+        repairTries += 1;
+        let report = isValidRepairReport(firstAsk) ? firstAsk : null;
+        if (report === null) {
+            const invalidWhy = "返回非对象，或 repairedFiles 非数组，或 note 非非空字符串";
+            ctx.log(`补修 agent 结构化返回无效（${invalidWhy}），回注失败原因重试一次`);
+            const retryAsk = await ctx.askRepairAgent(repairTries, prompt(["", `上一次返回被判为无效（原因：${invalidWhy}）。重新输出有效 JSON。`]));
+            if (!isValidRepairReport(retryAsk)) {
+                return { outcome: "invalid-return", tries: repairTries, allRepairFiles, note: lastNote, lastErr, lastExitCode, why: invalidWhy };
+            }
+            report = retryAsk;
+        }
+        // 补修 agent 判不可修（空申报）→ 立即终止（不空耗剩余次数）
+        if (report.repairedFiles.length === 0) {
+            return { outcome: "unrepairable", tries: repairTries, allRepairFiles, note: lastNote, lastErr, lastExitCode, why: report.note };
+        }
+        lastNote = report.note;
+        // after 快照差集对账：差集 = 补修期间新增脏文件；未申报文件以实际为准并入（越权改动防线）。
+        // 边界（与参照实装同款）：差集只覆盖新增脏文件——本轮修复改动已在 before 集合内不会被
+        // 误判；补修 agent 对既有脏/已暂存文件的未申报改动不进差集，靠申报文件恒被 add 兜底
+        const declared = [...new Set(report.repairedFiles
+                .filter((s) => typeof s === "string")
+                .map((s) => s.trim())
+                .filter(Boolean))];
+        const actualNew = (await ctx.dirtyPaths()).filter((f) => !before.has(f));
+        const undeclared = actualNew.filter((f) => !declared.includes(f));
+        if (undeclared.length > 0) {
+            ctx.log(`WARN: 补修 agent 申报与 git status 实际增量不一致（以实际为准并入并披露）：未申报 ${undeclared.join("、")}`);
+        }
+        const roundRepairFiles = [...new Set([...declared, ...actualNew])];
+        for (const f of roundRepairFiles)
+            if (!allRepairFiles.includes(f))
+                allRepairFiles.push(f);
+        await ctx.stageFiles(roundRepairFiles);
+        const commitRes = await ctx.retryCommit();
+        lastExitCode = commitRes.exitCode;
+        if (commitRes.exitCode === 0) {
+            ctx.log(`补修重试成功（第 ${repairTries} 次补修）：补修文件 ${allRepairFiles.join("、") || "（无）"}；报错首行：${lastErr.split("\n")[0] ?? ""}${lastNote !== "" ? `；补修说明：${lastNote}` : ""}`);
+            return { outcome: "repaired", tries: repairTries, allRepairFiles, note: lastNote, lastErr, lastExitCode, why: "" };
+        }
+        // 仍败 → 最新报错原文（≤4000 截断，同 initialErr 口径）进下一轮补修 prompt，回循环头次数检查
+        lastErr = (commitRes.stderr.trim() || commitRes.stdout.trim()).slice(0, 4000);
+        ctx.log(`补修重试仍被拦截（第 ${repairTries} 次补修后，exit ${commitRes.exitCode}）——回到补修循环头`);
+    }
+}
+
+
+// 「重报 → regressed」转移（自 utils.cjs 迁入：它内部调 inheritCarryoverFields 的单源版
+// （上方 shared 段），CJS utils 模块作用域无法引用本脚本顶层，故随模板迁移；语义不变。
+// 调用方门控（reconCount===0 且 status ∈ {fix-attempted, fixed}）在 merge 循环内。）
+function applyCarryoverRegression(tracked, entry, round) {
+  tracked.status = "regressed";
+  tracked.fixAttempts = (tracked.fixAttempts || 0) + 1;
+  tracked.openStreak = (tracked.openStreak || 0) + 1;
+  inheritCarryoverFields(tracked, entry);
+  tracked.history.push({ round, status: "regressed" });
+}
 
 // 结构化失败终判恢复指引：结构化返回是必须满足的前提（fail-fast，无降级通道），
 // 错误信息带恢复动作是要求而非兜底。两处终判分支共用（结构化 error / 结果无效），
@@ -1201,12 +1398,19 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     let agg = normalizeAggregatorResult(aggValue);
 
     if (!agg || typeof agg.must_fix !== "number") {
-      // 原 prompt 重试一次争取完整恢复（重试失败即终判，无 md 兜底——弱格式降级
-      // 通道已整体拆除）：numeric-only 兜底会丢 must_fix_ids 整条数据链（merge 跳过 /
-      // fixed 重报转 regressed 链断 / dormant 不落 / W5 门控退化），不可接受。
-      log("Aggregator JSON invalid (len=" + (typeof aggValue === "string" ? aggValue.length : 0) + ") — retrying once with the same prompt.");
+      // 重试一次争取完整恢复（重试失败即终判，无 md 兜底——弱格式降级通道已整体
+      // 拆除）：numeric-only 兜底会丢 must_fix_ids 整条数据链（merge 跳过 / fixed 重报
+      // 转 regressed 链断 / dormant 不落 / W5 门控退化），不可接受。重试回注失败原因
+      //（对齐 zcode 版聚合重试形态 + REVIEWER_RETRY_SUFFIX 同款逻辑：「报告已写好 +
+      // 结构化返回畸形」是最常见失败形态，回注后 agent 以已写报告为准重出 JSON，
+      // 同 prompt 盲重试对该场景命中率低）。
+      const retryReason = !agg ? "JSON 解析失败或返回非对象" : "缺少 must_fix 数字字段";
+      log("Aggregator JSON invalid (" + retryReason + ", len=" + (typeof aggValue === "string" ? aggValue.length : 0) + ") — retrying once with the failure reason fed back.");
       aggRaw = await agent({
-        prompt: aggPrompt,
+        prompt:
+          aggPrompt +
+          "\n\n[RETRY] Your previous response was judged invalid (reason: " + retryReason +
+          "). Re-output ONLY a valid response matching the required schema. If your aggregated report is already written, keep it unchanged and just return the valid structured response.",
         model: AGG_MODEL,
         schema: aggregatorSchema,
         description: "aggregate",
@@ -1844,13 +2048,70 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
             const stderrText2 = e2 && e2.stderr ? String(e2.stderr).trim() : "";
             const errMsg2 = (e2 && e2.message ? e2.message : String(e2)) + (stderrText2 ? " | stderr: " + stderrText2 : "");
             log("Unified git add/commit failed after env fix: " + errMsg2);
-            batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
-            state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
-            saveState(state);
-            terminated = "fix-failure";
-            finalMessage = "Batch " + batchIndex + " round " + round + ": 统一 commit 环境恢复重试后仍失败（改动在工作区/staged，未提交；恢复动作：人工检查 git status 后补提交或修 git 环境；环境恢复 agent 回复末段：" + envNote.slice(-200) + "）— " + errMsg2;
-            batchIndex = BATCHES.length + 1;
-            break;
+            // ── content 补修子循环（单源 shared 段 contentRepairLoop；设计 commit-content-self-heal
+            //    路线 B 的 pi 形态适配）：env 恢复重跑仍败 = 恢复需改仓库内文件——派补修 agent
+            //    按报错原文补全 → git status 快照差集对账 → 显式路径 add → 重跑同一 commit 计划，
+            //    上限 MAX_COMMIT_REPAIRS 次；终态信息全集（buildRepairFailureMessage）。
+            //    execFileSync 异常统一包 CmdResult（exitCode 取 e.status，非零缺失按 1——
+            //    spawn 类异常无 status）。补修 agent 走 ajv schema（平台校验+parse），
+            //    失败信封转 undefined 统一进 isValidRepairReport 校验路径。
+            const MAX_COMMIT_REPAIRS = 2;
+            const commitRepairSchema = {
+              type: "object",
+              properties: {
+                repairedFiles: { type: "array", items: { type: "string" } },
+                note: { type: "string", minLength: 1 },
+              },
+              required: ["repairedFiles", "note"],
+              additionalProperties: false,
+            };
+            const runGit = (args, timeoutMs) => {
+              try {
+                const out = require("child_process").execFileSync("git", args, { stdio: "pipe", encoding: "utf-8", timeout: timeoutMs });
+                return { exitCode: 0, stdout: typeof out === "string" ? out : String(out ?? ""), stderr: "" };
+              } catch (err) {
+                return {
+                  exitCode: typeof err.status === "number" ? err.status : 1,
+                  stdout: err.stdout ? String(err.stdout) : "",
+                  stderr: err.stderr ? String(err.stderr) : (err.message ? String(err.message) : ""),
+                };
+              }
+            };
+            const repairOutcome = await contentRepairLoop({
+              roundLabel: "Batch " + batchIndex + " round " + round,
+              maxRepairs: MAX_COMMIT_REPAIRS,
+              initialErr: errMsg2.slice(0, 4000),
+              initialExitCode: typeof e2.status === "number" ? e2.status : 1,
+              retryCommit: () => runGit(commitPlan.commitArgs, 60_000),
+              stageFiles: (ps) => runGit(["add", "--", ...ps], 30_000),
+              dirtyPaths: () => {
+                const st = runGit(["status", "--porcelain"], 30_000);
+                if (st.exitCode !== 0) {
+                  throw new Error("git status --porcelain 失败（exit " + st.exitCode + "）: " + st.stderr);
+                }
+                return parsePorcelain(st.stdout);
+              },
+              askRepairAgent: (attemptNo, prompt) =>
+                agent({
+                  prompt,
+                  description: "commit-content-fix-b" + batchIndex + "-r" + round + "-a" + attemptNo,
+                  model: MODEL,
+                  schema: commitRepairSchema,
+                  timeoutMs: 600_000,
+                  returnMeta: true,
+                }).then((raw) => (raw && !raw.error && raw.value !== undefined ? raw.value : undefined)),
+              log,
+            });
+            if (repairOutcome.outcome !== "repaired") {
+              batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
+              state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
+              saveState(state);
+              terminated = "fix-failure";
+              finalMessage = "Batch " + batchIndex + " round " + round + ": " + buildRepairFailureMessage(repairOutcome, envNote.slice(-200));
+              batchIndex = BATCHES.length + 1;
+              break;
+            }
+            log("Unified commit succeeded after content repair (" + repairOutcome.tries + " repair attempt(s), files: " + repairOutcome.allRepairFiles.join(", ") + ")");
           }
         }
       }

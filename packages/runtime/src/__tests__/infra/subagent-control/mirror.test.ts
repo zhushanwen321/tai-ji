@@ -168,18 +168,19 @@ describe('SubagentMirrorHub：seq 空洞 → degraded（显式标注，不静默
     const beforeGap = published.length
     hub.ingestBytes('ch-1', Buffer.from(encodeFrame(REC, 3, piLine({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '洞后' } })), 'utf8'))
 
-    // 停止发布：空洞帧与之后帧都不产 live 帧
-    expect(published.length).toBe(beforeGap)
+    // 停止发布 live 帧：空洞帧与之后帧都不产 entry/chunk（DC-8 降级广播是唯一新增帧）
+    expect(published.filter((p) => p.msg.type !== 'session.subagentStreamDegraded')).toHaveLength(beforeGap)
+    expect(published.filter((p) => p.msg.type === 'session.subagentStreamDegraded')).toHaveLength(1)
     const state = hub.getStreamStateByRecord(MAIN_SID, REC)
     expect(state).toEqual({ found: true, msgSeq: 1, lastDeltaSeq: 0, lines: ['前'], degraded: true })
     expect(warnings.some((w) => w.includes('[subagent-mirror] degraded') && w.includes(REC))).toBe(true)
     // 磁盘镜像是证据面：空洞帧照写（逐帧字节不丢）
     expect(logs.get(REC)?.chunks.map((b) => b.toString('utf8'))).toHaveLength(3)
 
-    // 另一 channel/record 的连续帧不受影响（隔离边界）
+    // 另一 channel/record 的连续帧不受影响（隔离边界；其 live chunk 照发）
     hub.ingestBytes('ch-2', Buffer.from(encodeFrame('rec-other', 0, piLine({ type: 'message_start', message: { role: 'assistant', content: [] } })), 'utf8'))
     hub.ingestBytes('ch-2', Buffer.from(encodeFrame('rec-other', 1, piLine({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '正常' } })), 'utf8'))
-    expect(published.length).toBe(beforeGap + 1)
+    expect(published.filter((p) => p.msg.type === 'subagent.stream_chunk')).toHaveLength(beforeGap + 1)
     expect(hub.getStreamStateByRecord('sess-mirror-other', 'rec-other')).toEqual({
       found: true,
       msgSeq: 1,
@@ -194,7 +195,9 @@ describe('SubagentMirrorHub：seq 空洞 → degraded（显式标注，不静默
     const line = piLine({ type: 'message_start', message: { role: 'assistant', content: [] } })
     hub.ingestBytes('ch-1', Buffer.from(encodeFrame(REC, 1, line), 'utf8'))
 
-    expect(published).toHaveLength(0)
+    // live 帧不发布（start 本身不产帧）；唯一发布 = DC-8 降级广播
+    expect(published.filter((p) => p.msg.type !== 'session.subagentStreamDegraded')).toHaveLength(0)
+    expect(published.filter((p) => p.msg.type === 'session.subagentStreamDegraded')).toHaveLength(1)
     expect(hub.getStreamStateByRecord(MAIN_SID, REC)).toEqual({
       found: false,
       msgSeq: 0,
@@ -205,6 +208,23 @@ describe('SubagentMirrorHub：seq 空洞 → degraded（显式标注，不静默
     expect(warnings.some((w) => w.includes('first frame seq mismatch') && w.includes(REC))).toBe(true)
     // 证据面不受降级影响：首达帧仍落盘
     expect(logs.get(REC)?.chunks.map((b) => b.toString('utf8'))).toEqual([`${line}\n`])
+  })
+
+  it('DC-8：markDegraded 发布 session.subagentStreamDegraded 广播（payload = 主 sid + recordId）恰一次（幂等）', () => {
+    const { hub, published } = makeHub()
+    hub.openChannel('ch-1', MAIN_SID)
+    hub.ingestBytes('ch-1', Buffer.from(encodeFrame(REC, 0, piLine({ type: 'message_start', message: { role: 'assistant', content: [] } })), 'utf8'))
+
+    // 空洞帧（跳过 seq 1）触发 markDegraded → 广播恰一条（sid = bus 路由键 = 主 sid）
+    hub.ingestBytes('ch-1', Buffer.from(encodeFrame(REC, 2, piLine({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'x' } })), 'utf8'))
+    const degradedFrames = published.filter((p) => p.msg.type === 'session.subagentStreamDegraded')
+    expect(degradedFrames).toHaveLength(1)
+    expect(degradedFrames[0].sid).toBe(MAIN_SID)
+    expect(degradedFrames[0].msg.payload).toEqual({ sessionId: MAIN_SID, recordId: REC })
+
+    // 幂等：降级后到达的后续帧不重发（markDegraded 早退，rec.degraded 已置）
+    hub.ingestBytes('ch-1', Buffer.from(encodeFrame(REC, 3, piLine({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'y' } })), 'utf8'))
+    expect(published.filter((p) => p.msg.type === 'session.subagentStreamDegraded')).toHaveLength(1)
   })
 
   it('畸形帧丢弃 + 计数告警（不抛出、不升连）；其后的 seq 断档按自然归因触发 degraded', () => {
@@ -248,17 +268,28 @@ describe('SubagentMirrorHub：通道生命周期', () => {
     expect(hub.recordCount).toBe(0)
   })
 
-  it('同 record 跨通道（同 rootSessionId）：首通道持有，dispose 仅释放 owner 通道', () => {
-    const { hub } = makeHub()
+  it('[S-8] 同 record 跨通道（同 rootSessionId）：各通道独立镜像（seq 各自从 0 连续）、查询取最新、dispose 只释放本通道', () => {
+    const { hub, warnings } = makeHub()
     hub.openChannel('ch-1', MAIN_SID)
     hub.ingestBytes('ch-1', Buffer.from(encodeFrame(REC, 0, piLine({ type: 'message_start', message: { role: 'assistant', content: [] } })), 'utf8'))
+    hub.ingestBytes('ch-1', Buffer.from(encodeFrame(REC, 1, piLine({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'from-ch1' } })), 'utf8'))
+    // 换代重连形态：ch-2 是新引擎进程，同一 record 的写侧计数器重新从 0 起——
+    // 身份键含 channelId 时这是两个独立镜像（不混串、不误降级）。
     hub.openChannel('ch-2', MAIN_SID)
-    hub.ingestBytes('ch-2', Buffer.from(encodeFrame(REC, 1, piLine({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'shared' } })), 'utf8'))
-    expect(hub.getStreamStateByRecord(MAIN_SID, REC)).toMatchObject({ lines: ['shared'] })
-    hub.disposeChannel('ch-2') // 非 owner：record 保留
-    expect(hub.getStreamStateByRecord(MAIN_SID, REC)).toBeDefined()
+    hub.ingestBytes('ch-2', Buffer.from(encodeFrame(REC, 0, piLine({ type: 'message_start', message: { role: 'assistant', content: [] } })), 'utf8'))
+    hub.ingestBytes('ch-2', Buffer.from(encodeFrame(REC, 1, piLine({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'from-ch2' } })), 'utf8'))
+    expect(warnings).toEqual([]) // 无 seq 断裂告警（两路各自连续）
+    expect(hub.recordCount).toBe(2)
+    // 查询面无 channel 维度：取最近登记（ch-2 = 当前活跃流）
+    expect(hub.getStreamStateByRecord(MAIN_SID, REC)).toMatchObject({ lines: ['from-ch2'] })
+
+    hub.disposeChannel('ch-2')
+    expect(hub.recordCount).toBe(1)
+    // ch-1 的镜像不因 ch-2 关闭被释放，也不延后（随本通道关闭即释放）
+    expect(hub.getStreamStateByRecord(MAIN_SID, REC)).toMatchObject({ lines: ['from-ch1'] })
     hub.disposeChannel('ch-1')
     expect(hub.getStreamStateByRecord(MAIN_SID, REC)).toBeUndefined()
+    expect(hub.recordCount).toBe(0)
   })
 })
 

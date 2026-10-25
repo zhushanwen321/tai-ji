@@ -34,11 +34,9 @@ function summary(id: string, label: string, cwd: string): SessionGroup['sessions
     id,
     label,
     cwd,
-    status: 'running',
+    status: 'idle',
     lastActiveAt: 0,
-    modelId: 'm',
-    tokenCount: 0,
-  } as SessionGroup['sessions'][number]
+  }
 }
 
 function userMessage(text: string): Message {

@@ -69,7 +69,7 @@ function modeResolution(replace: string, append: string): PresetResolution {
 }
 
 function makeSummary(id: string): SessionSummary {
-  return { id, label: 'test', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now(), modelId: 'p/m', tokenCount: 0 }
+  return { id, label: 'test', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now() }
 }
 
 /** 会话文件行集：header + u1 + a1（fork 树回溯用）。 */

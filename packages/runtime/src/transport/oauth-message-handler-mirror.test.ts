@@ -128,4 +128,25 @@ describe('OauthMessageHandler · 凭据域变更触发 zcode provider 镜像（M
 
     expect(replies.some(r => r.type === 'config.oauthLogoutReply')).toBe(true)
   })
+
+  it('镜像同步 throw（同步异常形态）→ logout 应答仍是单份 ok:true，不回第二份 ok:false（S-8）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { ctx, replies } = mockCtx({
+      // 同步 throw 而非 rejected promise：挪出主 try 前会走 catch 对同一 msg.id 回
+      // 第二份 ok:false；挪出后由 mirrorAfterCredentialMutation 内部捕获只 warn
+      providersMutatedSync: vi.fn((): Promise<void> => { throw new Error('sync throw') }),
+    })
+    const handler = new OauthMessageHandler(ctx)
+
+    const handled = await handler.handle(msg('config.oauthLogout', { providerId: 'anthropic' }), WS)
+
+    expect(handled).toBe(true)
+    const logoutReplies = replies.filter(r => r.type === 'config.oauthLogoutReply')
+    expect(logoutReplies).toHaveLength(1)
+    expect((logoutReplies[0].payload as { ok?: boolean }).ok).toBe(true)
+    expect(warn).toHaveBeenCalledWith(
+      '[oauth-message-handler] zcode provider mirror sync failed:',
+      'sync throw',
+    )
+  })
 })

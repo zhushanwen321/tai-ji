@@ -2,19 +2,19 @@
  * P-isolation 探针（btw-question 运行时断言探针表，M2-b 验收④）——两线并发流式，
  * MessageBus 分区无串扰。
  *
- * 口径：fixture/mock 轨（真 MessageBus + 内存 BusClient，零 pi 零 token，凭证无关）。
+ * 口径：fixture/mock 层（真 MessageBus + 内存 BusClient，零 pi 零 token，凭证无关）。
  * 覆盖 runtime 侧分区收尾点 = MessageBus.publish 的定向推送（per-session 订阅集合 +
  * per-session seq/ring/stateSnapshot）——renderer chatStore 分区回放半边归 M2-c
  * （文件→applyEntry 回放等价），两侧合起来构成 P-isolation 全断言。
  *
  * 断言范围（双通道：transient 直传 + stream 入 ring——分区语义与帧类型无关，载体选型见下）：
- * 1. 两线（btw vid）并发交错流式 100 帧（transient `message.text_delta`）：各自订阅者
+ * 1. 两线（btw 线 session id）并发交错流式 100 帧（transient `message.text_delta`）：各自订阅者
  *    只收自己的帧（sessionId + 内容标记双零泄漏）；无关会话订阅者零帧；
  * 2. stream 类帧（`message.stream_error`，payload {sessionId,content} 精确契约）5+3：
  *    per-session seq 1..N 单调无缺口（分区独立计数）+ ring 快照（重放侧）只含本线帧；
- * 3. transient 不入 ring（重放侧分区：迟到订阅者拿不到 transient 快照，分区构造性成立）；
- * 4. btw.list 状态广播（handler 广播面）按 mainSid 分区：各主会话订阅者只收自己的
- *    全量线列表，stateSnapshot('btw') 恢复侧同样分区。
+ * 3. transient 不入 ring（重放侧分区：迟到订阅者拿不到 transient 快照，分区构造性成立）。
+ * （W4b 起原第 4 条「btw.list 状态广播按 mainSid 分区」随该消息退役删除——线列表无
+ *  state 帧；state 类帧的分区/恢复语义由 message-bus-plan-state.test.ts 通用覆盖。）
  *
  * 运行：cd packages/runtime && npx vitest run src/transport/__tests__/btw-p-isolation.test.ts
  */
@@ -57,11 +57,11 @@ const streamFrame = (sessionId: string, i: number): ServerMessage => ({
   payload: { sessionId, content: `${sessionId}#${i}` },
 })
 
-const VID_A = 'btw:thread-alpha'
-const VID_B = 'btw:thread-beta'
-const VID_C = 'btw:thread-gamma'
+const VID_A = 'thread-alpha'
+const VID_B = 'thread-beta'
+const VID_C = 'thread-gamma'
 
-describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus 半边，fixture 轨）', () => {
+describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus 半边，fixture 层）', () => {
   it('并发交错 100+100 帧（transient 直传面）：各自订阅者零串扰 + 无关会话零帧', async () => {
     const bus = new MessageBus()
     const a = makeClient()
@@ -72,9 +72,9 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     bus.subscribe(VID_C, c.client)
 
     // 微任务让步制造真实交错（两路发布并发推进，而非先 A 后 B 的顺序写）
-    const stream = async (vid: string, n: number): Promise<void> => {
+    const stream = async (sessionId: string, n: number): Promise<void> => {
       for (let i = 0; i < n; i++) {
-        bus.publish(vid, transientDelta(vid, i))
+        bus.publish(sessionId, transientDelta(sessionId, i))
         if (i % 16 === 0) await Promise.resolve()
       }
     }
@@ -88,7 +88,7 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     // 分区断言①：sessionId 恒为订阅方自己
     expect(fa.every(m => sidOf(m) === VID_A)).toBe(true)
     expect(fb.every(m => sidOf(m) === VID_B)).toBe(true)
-    // 分区断言②：内容标记零泄漏（对方 vid 的标记不出现在本方任何帧）
+    // 分区断言②：内容标记零泄漏（对方线 id 的标记不出现在本方任何帧）
     expect(fa.some(m => JSON.stringify(m).includes(VID_B))).toBe(false)
     expect(fb.some(m => JSON.stringify(m).includes(VID_A))).toBe(false)
     // 分区断言③：transient 不分配 seq（直传语义）——两线均无 seq 字段
@@ -105,9 +105,9 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     bus.subscribe(VID_A, a.client)
     bus.subscribe(VID_B, b.client)
 
-    const stream = async (vid: string, n: number): Promise<void> => {
+    const stream = async (sessionId: string, n: number): Promise<void> => {
       for (let i = 0; i < n; i++) {
-        bus.publish(vid, streamFrame(vid, i))
+        bus.publish(sessionId, streamFrame(sessionId, i))
         if (i % 4 === 0) await Promise.resolve()
       }
     }
@@ -144,29 +144,4 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     expect(sub.lastSeq).toBe(0)
   })
 
-  it('btw.list 状态广播按 mainSid 分区：live 面只收本主会话，stateSnapshot 恢复侧同样分区', () => {
-    const bus = new MessageBus()
-    const mainA = 'main-sid-a'
-    const mainB = 'main-sid-b'
-    const liveA = makeClient()
-    bus.subscribe(mainA, liveA.client)
-
-    bus.publish(mainA, { type: 'btw.list', id: 'push_1', payload: { mainSid: mainA, threads: [{ vid: 'btw:t1' }] } })
-    bus.publish(mainB, { type: 'btw.list', id: 'push_2', payload: { mainSid: mainB, threads: [{ vid: 'btw:t2' }] } })
-
-    // live 面：A 只收到 mainA 的线列表，B 的广播不外溢
-    const gotA = liveA.frames()
-    expect(gotA).toHaveLength(1)
-    expect(gotA[0]?.type).toBe('btw.list')
-    expect(payload(gotA[0]!).mainSid).toBe(mainA)
-
-    // 恢复侧：mainB 迟到订阅经 stateSnapshot('btw') 只拿到自己的全量线列表
-    const lateB = makeClient()
-    const subB = bus.subscribe(mainB, lateB.client)
-    const stateFrames = subB.stateSnapshot.filter(m => m.type === 'btw.list')
-    expect(stateFrames).toHaveLength(1)
-    expect(payload(stateFrames[0]!).mainSid).toBe(mainB)
-    expect(payload(stateFrames[0]!).threads).toEqual([{ vid: 'btw:t2' }])
-    expect(lateB.frames()).toHaveLength(0) // state 类不补发 live
-  })
 })

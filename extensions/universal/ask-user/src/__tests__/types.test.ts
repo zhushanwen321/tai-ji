@@ -99,4 +99,16 @@ describe("buildAskUserSummary", () => {
 			`Asked 1 question: ${"q".repeat(60)}…`,
 		);
 	});
+
+	it("question 含换行 → 摘要归一单行（S-1）", () => {
+		expect(buildAskUserSummary([{ question: "Which DB?\nAnd region?", options: [] }])).toBe(
+			"Asked 1 question: Which DB? And region?",
+		);
+	});
+
+	it("header 含换行 → 摘要归一单行（单问 header 不经控制字符校验，S-1）", () => {
+		expect(
+			buildAskUserSummary([{ question: "Which DB?", header: "DB\nChoice", options: [] }]),
+		).toBe("Asked 1 question: DB Choice");
+	});
 });

@@ -43,17 +43,17 @@ core 派发 run（run.params.task + ctx.identity 信封；宿主侧构造单点 
 
 **为什么不是宿主级注入**：SDK 的 `EngineChildEnvOptions.identityEnv` 是**引擎宿主级**通道，而引擎宿主是长驻进程（每窗口一个），身份却是 per-run 的（子进程自己的 recordId / depth 每次 run 都不同）。宿主级钉值只能得到粗粒度值，无法承载本机制；身份必须随 run 参数走协议，由引擎在 spawn 时写回。
 
-### `PI_SUBAGENT_TASK` 截断与投影消费方（D2）
+### `PI_SUBAGENT_TASK` 截断与派生视图消费方（D2）
 
 `PI_SUBAGENT_TASK` 在写入点截断（`PI_SUBAGENT_TASK_MAX_CHARS = 2000`：前 2000 字符 + `…[truncated N chars]`；实现 = `spawn-runner.ts` 的 `applyContentIdentityKeys` / `truncateTaskForEnv`），目的是让控制帧与 execve env 不随任务正文线性膨胀。截断改变的是子 pi 写入 session 文件的 `subagent-identity` 条目 `data.task`，消费方按三层判定：
 
 | 消费层 | 截断后行为 | 判定 |
 |---|---|---|
-| manifest 主路径（父侧全文投影，收口点写入） | 收口后 manifest 命中：全文不变 | 无降级（时机限定：收口后；在途 run 与崩溃未收口 record 无 manifest） |
-| record 重建链（manifest 缺席：`session-reconstructor` / `record-store-rebuild`） | `record.task` = 前 2000 字符 + 截断标记（GUI 列表/详情展示与该路径检索用截断文本） | 可接受：展示/检索投影非正确性通路 |
+| manifest 主路径（父侧全文派生视图，收尾点写入） | 收尾后 manifest 命中：全文不变 | 无降级（时机限定：收尾后；在途 run 与崩溃未收尾 record 无 manifest） |
+| record 重建链（manifest 缺席：`session-reconstructor` / `record-store-rebuild`） | `record.task` = 前 2000 字符 + 截断标记（GUI 列表/详情展示与该路径检索用截断文本） | 可接受：展示/检索派生视图非正确性通路 |
 | session-reader P-fallback（manifest miss：`discovery/subagents.ts` 尾行 identity 富化 + `core/family.ts` 消费；`discovery/find.ts` 子串检索） | P-fallback 的 task 富化与子串检索只覆盖前 2000 字符 | 可接受：P-fallback 本身是降级路径，身份/路由字段不受影响 |
 
-LLM 可见渲染面（execution-tree 既有 50 字符上限）不变；全文恢复源 = pi session 首条 user 消息与父侧 manifest。该降级与重审基线（manifest 命中率 / P-fallback 触发次数 / 2000 字内外 query miss）登记于 relay-spawn-transport 设计 §3.7 已接受代价（P-5）。
+LLM 可见渲染范围（execution-tree 既有 50 字符上限）不变；全文恢复源 = pi session 首条 user 消息与父侧 manifest。该降级与重审基线（manifest 命中率 / P-fallback 触发次数 / 2000 字内外 query miss）登记于 relay-spawn-transport 设计 §3.7 已接受代价（P-5）。
 
 ## 4. 读者与失效后果
 

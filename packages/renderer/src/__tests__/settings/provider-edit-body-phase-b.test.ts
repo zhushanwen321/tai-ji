@@ -123,7 +123,6 @@ beforeEach(() => {
     kind: 'mock',
     storage: inMemoryStorage(),
     webSocket: { create: () => ({ readyState: 0, send: () => {}, close: () => {}, onopen: null, onclose: null, onmessage: null, onerror: null }) },
-    ipc: null,
   })
   provideSettingsTransport(makeTransport())
   setProviderSpy.mockClear()

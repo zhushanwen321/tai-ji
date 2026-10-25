@@ -19,13 +19,16 @@ import { findForeignLiveInstance } from "../persistence/alive-store.ts";
 // 检查 5 的「锚不可解析 → 引导 reopen」分流消费。
 import { isAnchorResolvable } from "./cold-lookup.ts";
 import { computeElapsedSeconds, projectOutcome } from "../persistence/execution-record.ts";
+// [subagent-observability §3.3.6] list lastRound.result 的摘要锚（journal 摘要同源
+// 截断——与轮收条帧 resultSummary 同一单源）。
+import { summarizeResultForJournal } from "../persistence/record-entry-write.ts";
 import { SLUG_MAX_LENGTH } from "../../shared/run-vocabulary.ts";
 import type { ModelInfo } from "./model-resolver.ts";
 import type { SubagentService } from "../subagent-service.ts";
 import { displayAgentName } from "../../shared/agent-ref.ts";
 import type { ExecutionStatus, ExternalState } from "../domain/record-types.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
-import type { BgResponse, CancelResponse, CloseResponse, ForkFromResponse, ListResponse, MessageResponse, SubagentListItem, SubagentRecord } from "./types.ts";
+import type { BgResponse, CancelResponse, CloseResponse, ForkFromResponse, ListResponse, MessageResponse, SubagentListItem, SubagentListLastRound, SubagentRecord } from "./types.ts";
 import { ResurrectDeniedError } from "../domain/record-types.ts";
 // [modeless 波1] message 资格 gate 的错误构造（文案/错误码/恢复指引单一权威，与
 // Continuation revive 翻边格写点②共用）+ 引擎路由裁决单点（engine 留痕缺省 = pi；
@@ -103,7 +106,7 @@ export interface StartHandlerInput {
   engine?: string;
   // [collect 退役] 原 collect 字段（sync 批通知路由选项）已随 collect 批机制整体删除：
   // pi 对未知字段静默放行（typebox 无 additionalProperties），存量调用形态的 collect
-  // 值到达此处即被忽略——批量编排走 `subagents` tool（fan-out 模板），完成通知恒为
+  // 值到达此处即被忽略——批量编排走 `subagent_batch` tool（fan-out 模板），完成通知恒为
   // 逐条 async 投递。
 }
 
@@ -296,14 +299,45 @@ export function mapExternalState(status: ExecutionStatus): ExternalState {
   }
 }
 
-/** SubagentRecord → SubagentListItem（state 两态主字段 + status 调试字段，duration 实时计算）。
+/**
+ * [subagent-observability §3.3.6 查询入口补全] list 条目的 lastRound 载荷组装：
+ * 事实快照（RoundFacts——markRoundIdle 写点产出）直读透传 + 正文摘要从聚合字段
+ * 派生（快照不重复存储——RoundFacts 语义）。turns 取收条自身快照（lastRound.turns
+ * = markRoundIdle 时点定格的累计轮数；live r.turns 是计数器、下一轮轮始起继续
+ * 累加，会覆盖出「上一轮收条读到新轮轮数」的漂移——快照优先，live 值仅作旧快照
+ * 无 turns 字段的兼容回落）。undefined = 尚无已完成的轮（首轮在途/存量）。
+ */
+function listLastRoundOf(r: SubagentRecord): SubagentListLastRound | undefined {
+  const lastRound = r.lastRound;
+  if (lastRound === undefined) return undefined;
+  return {
+    ...lastRound,
+    ...(r.result !== undefined ? { result: summarizeResultForJournal(r.result) } : {}),
+    // 收条自身轮终值优先；live r.turns 仅作旧快照（无 turns 字段）的兼容回落。
+    ...(lastRound.turns === undefined && r.turns !== undefined ? { turns: r.turns } : {}),
+  };
+}
+
+/**
+ * SubagentRecord → SubagentListItem（state 两态主字段 + status 调试字段，duration 实时计算）。
  *  parent 从 record.parentRecordId 派生（配合直接父检查）；[U5/D4] resumable 字段已
  *  退役（idle 即可续聊，state 主字段已并存表达）；outcome 一等终态语义（projectOutcome
  *  唯一出口），closedReason 退出对外 JSON（保留为 record 内部诊断字段），对外成败判读
  *  收尾到 outcome。
  *  agent 是 GUI/TUI list 共用的显示名——取 basename 短名（displayAgentName），
- *  完整路径保留在 record.agent（数据层）。 */
+ *  完整路径保留在 record.agent（数据层）。
+ *
+ *  [subagent-observability §3.3.6 查询入口补全] 轮收条事实字段：lastRound（引擎停因
+ *  原值/失败分类/接管三态/正文摘要/turns/usage——消费方先读事实，outcome 展示词保留
+ *  为兼容读侧）+ lastError（§3.3.5 派生——最后一个非空轮失败）+ swept 失联标注
+ *  （§3.3.4 清点附注随 lastRound 走）。list 条目不落 budget 键（record 层为事实库、
+ *  不存派发配置——键缺席 = 本读取侧不承载预算信息，不等于无界；预算触顶事实看
+ *  轮收条停因 harness.turn_budget_exhausted，§3.3.6 读取侧分源）；evidence 取证指针
+ *  随查询漏斗附加（record-store attachListEvidence：eventsFile + lastSeq + stderrTeePath
+ *  ——引擎诊断 tee 路径仅诊断引用，文件受引擎侧轮转清理管辖，读侧不假设其永存）。
+ */
 export function recordToListItem(r: SubagentRecord): SubagentListItem {
+  const lastRound = listLastRoundOf(r);
   return {
     subagentId: r.id,
     agent: displayAgentName(r.agent),
@@ -317,6 +351,12 @@ export function recordToListItem(r: SubagentRecord): SubagentListItem {
     sessionFile: r.sessionFile,
     parent: r.parentRecordId,
     outcome: projectOutcome(r),
+    ...(lastRound !== undefined ? { lastRound } : {}),
+    ...(lastRound?.swept !== undefined ? { swept: lastRound.swept } : {}),
+    ...(r.lastError !== undefined ? { lastError: r.lastError } : {}),
+    // [§3.3.6] 取证指针（record-store attachListEvidence 查询漏斗附加——透传；
+    // undefined = 事件流未接线 / 存量形态，缺省不落键）。
+    ...(r.evidence !== undefined ? { evidence: r.evidence } : {}),
     origin: r.origin,
     parentRunId: r.parentRunId,
   };
@@ -419,9 +459,19 @@ export function listHandler(
   // collectRecords 磁盘源是 light（无 totalTokens/model 等）：SubagentListItem 对
   // LLM 消费方暴露 totalTokens/model，逐项 getFullRecord 补全（per-file 缓存，仅首次
   // 全量解析；显式 tool 调用非渲染热路径，成本可接受）。
-  const items: SubagentListItem[] = all.map((r) =>
-    recordToListItem(service.queries.getFullRecord(r.id) ?? r),
-  );
+  // [F1-39 证据链] 富化替换不得丢查询漏斗产物：evidence 只附加在 collectRecords 的
+  // mergedRecords 浅拷贝上（attachListEvidence 单点），getFullRecord（内存 recordToSubagent
+  // / 磁盘 buildRecord 全量重建）不产 evidence；磁盘全量重建也不恢复轮收条快照
+  // lastRound（fold 派生视图只随扫描 light 恢复）。合并序 = full 优先、漏斗条目补缺。
+  const items: SubagentListItem[] = all.map((r) => {
+    const full = service.queries.getFullRecord(r.id) ?? r;
+    const merged: SubagentRecord = {
+      ...full,
+      ...(r.evidence !== undefined ? { evidence: r.evidence } : {}),
+      ...(full.lastRound === undefined && r.lastRound !== undefined ? { lastRound: r.lastRound } : {}),
+    };
+    return recordToListItem(merged);
+  });
   const running = items.filter((i) => i.status === "running").length;
 
   return { response: { running, items } };
@@ -490,7 +540,7 @@ export async function cancelHandler(
  * 都放行——idle → Continuation 派发新轮（锚失效自动 markReopened 降级，同 id 带
  * 历史重开）；在途轮存在 → D2 打断（abort + 入队）。真实拒绝情形（三类）：异进程占用
  *（ResurrectDeniedError 含 pid）/ 归属不匹配 / workflow 域边界（results are collected
- * by the workflow run——一次性成员不可续聊，重派走 `subagents` tool）。interrupt 输入字段
+ * by the workflow run——一次性成员不可续聊，重派走 `subagent_batch` tool）。interrupt 输入字段
  * 保留（[A4] 工具 schema 兼容范围——extensions subagent-tool-schema 仍声明该字段）但
  * 不参与分派（D2 统一打断语义）。
  *
@@ -532,7 +582,7 @@ export async function messageHandler(
       `subagent ${id} is a workflow-origin record — it is managed by its workflow script ` +
       `(results are collected by the workflow run, not by messaging). ` +
       `Recovery: use action:'list' with includeWorkflow:true to inspect it.` +
-      ` To get these results, re-dispatch via the subagents tool.`,
+      ` To get these results, re-dispatch via the subagent_batch tool.`,
     );
   }
 

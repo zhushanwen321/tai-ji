@@ -47,17 +47,23 @@ export function useSubagentDrawerTabs(deps: SubagentDrawerTabsDeps): {
 
   /** tab 点击 = 切激活 + 同步 core 选中态（sidebar 高亮/LRU 豁免谓词同源一致）。 */
   function activate(vid: string): void {
+    // 无聚焦 session 早退（与 watch 入口同款真值检查）：store 分区按 sid 惰性创建，
+    // '' 键是 clearSession（按真实 sid 释放）永不回收的退化分区。
+    if (!focusedSid.value) return
     subagentStore.activateDrawerTab(focusedSid.value, vid)
     openSubagent({ virtualId: vid })
   }
 
   /** tab 关闭；激活者关闭时 store 编排激活右邻/左邻，选中态同步（无剩余 = 停流 + 抽屉关空收敛）。 */
   function close(vid: string): void {
+    // 同 activate：空串 sid 早退，不触 store 分区与关空收敛编排。
+    if (!focusedSid.value) return
     const next = subagentStore.closeDrawerTab(focusedSid.value, vid)
     if (next === null) {
-      // 空态同步清 core 选中态：残留 vid 会在组件重挂载时经 watch immediate 复活已关闭
-      // tab 并拉流，且同值重选不触发 watch（无变化边沿）。
-      clearSubagentSelection()
+      // 空态同步清 core 选中态（定向传 focusedSid——与 tab 分区同键，不依赖
+      // 「绑定 current == focused」隐式不变量）：残留 vid 会在组件重挂载时经 watch
+      // immediate 复活已关闭 tab 并拉流，且同值重选不触发 watch（无变化边沿）。
+      clearSubagentSelection(focusedSid.value)
       deps.stopStream()
     } else {
       openSubagent({ virtualId: next })

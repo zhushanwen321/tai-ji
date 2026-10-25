@@ -58,7 +58,6 @@ function makeMocks() {
     getReplaceSystemPrompt: vi.fn(() => undefined),
     toSummary: vi.fn((s: IManagedSessionView): SessionSummary => ({
       id: s.id, cwd: s.cwd, label: 'repo', status: 'idle', lastActiveAt: 1,
-      modelId: 'test-model', tokenCount: 0,
     })),
     // S3-W2：创建入口收敛点（lifecycle 三处 return 前调用）
     notifySessionCreated: vi.fn(),
@@ -115,10 +114,17 @@ describe('W5: session-lifecycle create record 调用（homedir 过滤归位 serv
     expect(summary.cwd).toBe(homedir())
   })
 
-  it('hidden session → record 不被调用（既有不变式，回归防护）', async () => {
+  it('surface=btw 的 create → record 不被调用（W5 工作区历史判据切换，回归防护）', async () => {
     fsMock.existsSync.mockReturnValue(true)
     const { lifecycle, recordFn } = makeMocks()
-    await lifecycle.create('/repo', 'repo', { hidden: true })
+    await lifecycle.create('/repo', 'repo', { surface: 'btw' })
     expect(recordFn).not.toHaveBeenCalled()
+  })
+
+  it('surface 缺省（生产主路径）→ record 被调用', async () => {
+    fsMock.existsSync.mockReturnValue(true)
+    const { lifecycle, recordFn } = makeMocks()
+    await lifecycle.create('/repo', 'repo')
+    expect(recordFn).toHaveBeenCalledWith('/repo')
   })
 })

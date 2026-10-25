@@ -26,7 +26,7 @@
   <div
     v-if="open"
     data-testid="search-modal-overlay"
-    class="fixed inset-0 z-[var(--z-modal)] flex items-start justify-center bg-black/80 px-4 pt-[10vh] backdrop-blur-sm"
+    class="fixed inset-0 z-[var(--z-modal)] flex items-start justify-center bg-scrim px-4 pt-[10vh] backdrop-blur-sm"
     @click.self="onBackdropClick"
   >
     <div

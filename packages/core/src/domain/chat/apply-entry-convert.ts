@@ -23,6 +23,7 @@ import type {
 } from '@taiji/shared'
 import {
   findSkillDataBlockRange,
+  HANDOFF_PROMPT_TEMPLATE,
   MSG_ID_TAG_BARE_RE,
   parseSkillMarkers,
   parseSkillsFallbackBlocks,
@@ -210,7 +211,7 @@ function extractHistoryFileChanges(toolCalls: ToolCall[]): FileChange[] {
 // ── message entry 体 → Message（迁移自 convertSinglePiMessage）───────────────
 
 /** message entry 的 content 数组元素（宽形态，读取点运行时检查）。 */
-interface PiContentPart {
+export interface PiContentPart {
   type: string
   text?: string
   thinking?: string
@@ -223,7 +224,7 @@ interface PiContentPart {
 }
 
 /** content parts 归集产物（按 part kind 分派收集的中间态，构造 Message 用）。 */
-interface CollectedContent {
+export interface CollectedContent {
   /** text part 累加合并后的纯文本（多次 text part 拼接） */
   textContent: string
   thinking: ThinkingBlock[]
@@ -241,7 +242,7 @@ interface CollectedContent {
 }
 
 /** body.content 宽形态归一：数组原样透传，非数组包成单 text part（null → ''）。 */
-function normalizeContentParts(body: PiMessageBody): PiContentPart[] {
+export function normalizeContentParts(body: PiMessageBody): PiContentPart[] {
   return Array.isArray(body.content)
     ? (body.content as PiContentPart[])
     : [{ type: 'text', text: body.content != null ? String(body.content) : '' }]
@@ -293,8 +294,14 @@ function collectImagePart(part: PiContentPart, acc: CollectedContent): void {
   if (img.data !== '' || img.mimeType !== '') acc.imageParts.push(img)
 }
 
-/** 逐 part 分派收集（text/thinking/toolCall/image 四类，其余 kind 忽略）。 */
-function collectContentParts(
+/**
+ * 逐 part 分派收集（text/thinking/toolCall/image 四类，其余 kind 忽略）。
+ *
+ * [chat-flow-consistency D3] 导出共享给 live 定稿重建路径（effects/registry message_end
+ * assistant 分支）——本函数是 reload 侧权威转换，live 重建复用同一实现使「live ≡ reload」
+ * 构造性保持（两通路同一派生规则，无副本分叉）。
+ */
+export function collectContentParts(
   parts: PiContentPart[],
   baseId: string,
   body: PiMessageBody,
@@ -330,8 +337,12 @@ function fileChangesField(body: PiMessageBody, toolCalls: ToolCall[]): { fileCha
   return fc.length > 0 ? { fileChanges: fc } : {}
 }
 
-/** Extract usage from pi assistant messages (input/output token counts)。 */
-function usageField(body: PiMessageBody): { usage?: { inputTokens: number; outputTokens: number } } {
+/**
+ * Extract usage from pi assistant messages (input/output token counts)。
+ * [chat-flow-consistency D3] 导出共享给 live 定稿重建路径（与 collectContentParts 同理，
+ * live 重建按载荷写入 usage 与 reload 同源同值）。
+ */
+export function usageField(body: PiMessageBody): { usage?: { inputTokens: number; outputTokens: number } } {
   if (body.role !== 'assistant') return {}
   const u = body.usage
   if (!isLooseRecord(u)) return {}
@@ -365,6 +376,42 @@ function buildMessage(
 }
 
 /**
+ * 交接指令识别（chat-flow-consistency U9 / 特殊流程 S2，识别锚点 SSOT）：
+ * user entry 全文逐字等于 HANDOFF_PROMPT_TEMPLATE（runtime handoff turn 发送的固定
+ * prompt，@taiji/shared 单源）→ 命中。导出供 reducer 测试与分组层判定共用；发送值与
+ * 识别值同源同一常量，模板措辞不变则识别不漂移（措辞冻结约束见 shared/handoff 头注）。
+ * 纯文本内容相等判定（非启发式）：常量无动态成分（buildHandoffPrompt 恒返回原文）。
+ */
+export function isHandoffPromptText(text: string): boolean {
+  return text === HANDOFF_PROMPT_TEMPLATE
+}
+
+/**
+ * 交接指令行的派生段（S2 呈现）：user 气泡 → system 提示行（「交接指令（内部）」，
+ * 与 SystemNotice 行族同规格），原文携带在 content 与 handoffInstruction.text——渲染层
+ * 悬停详情展示原文；content 保留原文使识别前的兜底渲染路径（未知字段降级原文行）不丢信息。
+ * 分组层（message-turns）据此作 turn 锚，其后 assistant 回合挂「交接文档」标签。
+ */
+function deriveHandoffInstructionMessage(
+  body: PiMessageBody,
+  entryId: string | undefined,
+  baseId: string,
+  fallbackTs: number,
+  text: string,
+): Message {
+  return {
+    id: baseId,
+    role: 'system',
+    content: text,
+    status: 'complete',
+    timestamp: body.timestamp ?? fallbackTs,
+    // piEntryId 语义与 buildMessage 一致（fork 定位截断点用；交接指令行同样可作 fork 锚）
+    ...(entryId !== undefined && { piEntryId: entryId }),
+    handoffInstruction: { text },
+  }
+}
+
+/**
  * 转换单条 message entry 体为 taiji Message（user/assistant）。
  * 未知 role → warn + null（调用方跳过；迁移前 convertSinglePiMessage 同语义）。
  *
@@ -383,6 +430,16 @@ export function convertMessageBody(
     return null
   }
   const acc = collectContentParts(normalizeContentParts(body), baseId, body, fallbackTs)
+
+  // [chat-flow-consistency U9 / S2] 交接指令识别分叉（live 帧与 reload 重放同经本点——
+  // 「live ≡ reload」构造性保持，识别锚点 = 全文 === HANDOFF_PROMPT_TEMPLATE，见
+  // isHandoffPromptText）：命中 → 指令气泡折叠为 system 提示行（原文进悬停详情），
+  // 不走 user 派生（badge/segments 解析对固定模板无意义）。分组层据 handoffInstruction
+  // 字段把该行作 turn 锚，其后 assistant 回合挂「交接文档」标签（分组层判定同字段）。
+  if (body.role === 'user' && isHandoffPromptText(acc.textContent)) {
+    return deriveHandoffInstructionMessage(body, entryId, baseId, fallbackTs, acc.textContent)
+  }
+
   const msg = buildMessage(body, entryId, baseId, fallbackTs, acc)
 
   // For user messages, resolve skill markers back to segments（D7 兜底通道）。

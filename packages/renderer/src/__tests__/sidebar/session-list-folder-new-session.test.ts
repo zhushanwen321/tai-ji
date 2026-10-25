@@ -24,7 +24,7 @@ function makeGroups(): SessionGroup[] {
       cwd: '/p',
       sessions: [
         // 最小 session fixture（SessionItem 需 id/label/cwd/status）
-        { id: 's1', label: '会话 1', cwd: '/p', status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0 } as SessionGroup['sessions'][number],
+        { id: 's1', label: '会话 1', cwd: '/p', status: 'idle', lastActiveAt: 1 },
       ],
     },
   ]
@@ -115,8 +115,8 @@ describe('SessionList 目录行 + 按钮 vs 删除按钮检查差异', () => {
           {
             cwd: '/p',
             sessions: [
-              { id: 's1', label: '会话 1', cwd: '/p', status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0, projectId: 'p1' } as SessionGroup['sessions'][number],
-              { id: 's2', label: '会话 2', cwd: '/p', status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0, projectId: 'p2' } as SessionGroup['sessions'][number],
+              { id: 's1', label: '会话 1', cwd: '/p', status: 'idle', lastActiveAt: 1, projectId: 'p1' },
+              { id: 's2', label: '会话 2', cwd: '/p', status: 'idle', lastActiveAt: 1, projectId: 'p2' },
             ],
           },
         ],

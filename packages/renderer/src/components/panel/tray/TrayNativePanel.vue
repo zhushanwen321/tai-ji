@@ -153,6 +153,18 @@
                 <span v-if="record.turns !== undefined">{{ record.turns }} {{ t('panel.tray.turnsUnit') }}</span>
                 <span v-if="record.totalTokens !== undefined">· {{ formatTokens(record.totalTokens) }}</span>
                 <span v-if="record.elapsedSeconds !== undefined">· {{ formatSeconds(record.elapsedSeconds) }}</span>
+                <!-- 轮收条失败分类（subagent-observability §3.4 u8）：lastRound.failure 事实——
+                     class.kind 点拼原文，tone 与状态点红点判据同源（user.cancelled 中性，其余 danger）；
+                     lastRound 通道缺省（u3 runtime 产出前恒 undefined）不占位 -->
+                <template v-if="record.lastRound?.failure">
+                  <span aria-hidden="true">·</span>
+                  <span
+                    class="min-w-0 truncate max-w-[140px]"
+                    :class="failureCauseToneClass(record.lastRound.failure)"
+                    :title="failureCauseLabel(record.lastRound.failure)"
+                    data-testid="tray-subagent-failure"
+                  >{{ failureCauseLabel(record.lastRound.failure) }}</span>
+                </template>
               </div>
               <div class="mt-0.5 truncate pl-[42px] text-[length:var(--text-2xs)] leading-[1.3] text-neutral-mid">
                 {{ record.task }}
@@ -285,7 +297,7 @@ import { useTwoStepConfirm } from '@/composables/useTwoStepConfirm'
 import { useWorkflowAction } from '@/composables/features/workflow/useWorkflowAction'
 import { TRAY_BUCKETS, useTrayCountsContext } from '@/components/panel/tray/useTrayCounts'
 import type { TrayBucketValue } from '@/components/panel/tray/useTrayCounts'
-import { isRunningProjection, subagentDotClass } from '@/lib/subagent-bucket'
+import { failureCauseLabel, failureCauseToneClass, isRunningProjection, subagentDotClass } from '@/lib/subagent-bucket'
 import { workflowStatusLabel, workflowToneClass } from '@/components/panel/tray/tray-tone'
 import { backgroundTaskBucket, backgroundTaskStatusIcon } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry, BackgroundTaskIconState, BackgroundTaskStatusKey } from '@/lib/background-task-bucket'
@@ -503,7 +515,9 @@ function elapsedLabel(entry: BackgroundTaskEntry): string {
 /** 执行态判据 = SSOT 谓词（isRunningProjection），与计数/徽标同源不漂移 */
 const isRunningSubagent = isRunningProjection
 function completedAgentCount(record: WorkflowRunRecord): number {
-  return record.agentCalls.filter((call) => call.status === 'done' || call.status === 'failed').length
+  // 已收束计数（进度分母分子）：done/failed/cancelled 都是终态——cancelled（run 终局
+  // 收尾在途成员，§3.3.8）计入，防 run 取消后进度条永久不满格。
+  return record.agentCalls.filter((call) => call.status === 'done' || call.status === 'failed' || call.status === 'cancelled').length
 }
 function workflowPercent(record: WorkflowRunRecord): number {
   if (record.agentCalls.length === 0) return 0

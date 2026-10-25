@@ -179,12 +179,12 @@ afterEach(() => {
 const sameContentMap = () => ({ off: 'o', low: 'l', medium: 'm', high: 'h' })
 const fourLevels = ['off', 'low', 'medium', 'high']
 
-/** switchModel 手动可控调用：applyAndResolve 模拟壳层「applySnapshot 同步执行 + RPC resolve」时序 */
+/** switchModel 手动可控调用：applyAndResolve 模拟壳层「applyLiveState（壳层回执写状态层）同步执行 + RPC resolve」时序 */
 interface SwitchCall {
   provider: string
   modelId: string
   /**
-   * 先同步 applySnapshot(生效模型)（watch flush 微任务在此入队）再 resolve（await 续段
+   * 先同步 applyLiveState(生效模型)（壳层回执写状态层；watch flush 微任务在此入队）再 resolve（await 续段
    * 后入队）——对齐 D3 证据②时序：flush 总是先于 onModelSelect 的规则 5 续段。
    */
   applyAndResolve: (effectiveModelId: string) => void
@@ -193,7 +193,7 @@ interface SwitchCall {
 
 /**
  * armed/记忆套件 harness：响应式 sessionState / defaultModel / currentModel / providers
- * （既有 makeDeps 的 vi.fn 闭包非响应式，无法模拟 applySnapshot / defaultModel 晚到 /
+   * （既有 makeDeps 的 vi.fn 闭包非响应式，无法模拟 applyLiveState（壳层回执写状态层）/ defaultModel 晚到 /
  * providers 刷新——这些恰是 armed 序列族的驱动源）。
  */
 function mountMem(opts: {
@@ -205,10 +205,10 @@ function mountMem(opts: {
   supported?: Record<string, string[]>
   /**
    * [Gate B] 生产保真 setThinkingLevel：默认 no-op mock 不写 store，无法驱动「恢复回包
-   * applySnapshot({thinkingLevel})」的第二次 store 写——而跨写污染恰发生在 switchModel
+   * applyLiveState({thinkingLevel})（壳层回执写状态层）」的第二次 store 写——而跨写污染恰发生在 switchModel
    * 回包（写 modelId）与恢复回包（写 level）两次 store 写之间的 flush 上。true 时改为
-   * 可控 promise，resolveReply() 模拟回包：先 applySnapshot 写 store 再 resolve（与
-   * useModel.setThinkingLevel 的「await RPC → applySnapshot → resolve」序列同构）。
+   * 可控 promise，resolveReply() 模拟回包：先 applyLiveState 写状态层再 resolve（与
+   * useModel.setThinkingLevel 的「await RPC → applyLiveState → resolve」序列同构）。
    */
   realisticSetLevel?: boolean
   /** [U2a] launchData.presets 注入（resolve preset 档显示） */
@@ -247,7 +247,7 @@ function mountMem(opts: {
         new Promise<void>((resolve) => {
           setLevelCalls.push({
             level,
-            // 生产保真（useModel.setThinkingLevel 时序）：回包 → applySnapshot({thinkingLevel}) → resolve
+            // 生产保真（useModel.setThinkingLevel 时序）：回包 → applyLiveState({thinkingLevel}) → resolve
             resolveReply: () => {
               sessionRef.value = { modelId: sessionRef.value!.modelId, thinkingLevel: level }
               resolve()
@@ -965,7 +965,7 @@ describe('useComposerModelThinking · 记录 authored-only（onThinkingSelect �
 // ══════════ [U2a] 切换链零写入（authored-only 结构保证，原 Gate B 跨写污染检查已删）══════════
 // 历史背景（V4 档位记忆场景，真实 app 复现）：mem[flash]='low'、mem[glm-5.3]='max'，
 // 显式切走再切回后 mem[flash] 变 max——根因是「生效即记录」watch 在切模型回包链的
-// 两次 store 写（applySnapshot({modelId}) 与 applySnapshot({thinkingLevel})）之间的
+// 两次状态层写（applyLiveState({modelId}) 与 applyLiveState({thinkingLevel})）之间的
 // flush 上读到跨纪元错配快照并写穿。旧防线 = 纪元检查 + 第三形态检查（armed 在途判定）。
 //
 // [U2a] 处置（设计 D9「删除」类）：记录 watch 整体删除后，非 authored 值结构性不到达
@@ -991,13 +991,13 @@ describe('useComposerModelThinking · 切换链零写入（authored-only 结构�
 
   it('W1/切走已记忆模型：回包链两次 store 写之间的错配 flush 零写入，记忆双向保持', async () => {
     const h = mountCrossWrite()
-    // 切走 X → Y：回包 applySnapshot({modelId:'p/Y'})，level 仍 'l'（X 纪元遗留——
+    // 切走 X → Y：回包 applyLiveState({modelId:'p/Y'})，level 仍 'l'（X 纪元遗留——
     // 旧 watch 在此 flush 写 record(p/Y,'low') 污染，已结构性不可能）
     const p = h.result.onModelSelect({ modelId: 'Y', provider: 'p' as ProviderId })
     h.pending[0].applyAndResolve('p/Y')
     await nextTick()
     expect(lookup('p/Y')).toBe('max') // 预置值保持
-    // 恢复回包：applySnapshot({thinkingLevel:'x'})（consume 命中 mem[Y]='max' 恢复 'x'）
+    // 恢复回包：applyLiveState({thinkingLevel:'x'})（consume 命中 mem[Y]='max' 恢复 'x'）
     expect(h.setLevelCalls).toHaveLength(1)
     expect(h.setLevelCalls[0]!.level).toBe('x')
     h.setLevelCalls[0]!.resolveReply()
@@ -1017,7 +1017,7 @@ describe('useComposerModelThinking · 切换链零写入（authored-only 结构�
     h.setLevelCalls[0]!.resolveReply()
     await nextTick()
     await p1
-    // 切回 Y → X：回包 applySnapshot({modelId:'p/X'})，level 仍 'x'（Y 纪元的 max value——
+    // 切回 Y → X：回包 applyLiveState({modelId:'p/X'})，level 仍 'x'（Y 纪元的 max value——
     // 旧 watch 在此 flush 写 record(p/X,'max')，即真实 app 观测的 mem[flash] 被改写为 max）
     const p2 = h.result.onModelSelect({ modelId: 'X', provider: 'p' as ProviderId })
     h.pending[1].applyAndResolve('p/X')

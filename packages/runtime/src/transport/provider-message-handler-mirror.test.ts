@@ -147,6 +147,25 @@ describe('ProviderMessageHandler · mirrorAfterMutation write-through 触发链�
     expect(warnText).toContain('mirror write failed')
   })
 
+  it('镜像同步 throw（同步异常形态）→ handler 正常返回、配置写入应答照常（S-8 同族）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { ctx, replies } = mockCtx({
+      // 同步 throw 而非 rejected promise：触发点均在 reply 之后，未防护时会冒泡到
+      // server 层对同一 msg.id 补发 error envelope（成功 + 失败双回复）
+      providersMutatedSync: vi.fn((): Promise<void> => { throw new Error('sync throw') }),
+    })
+    const handler = new ProviderMessageHandler(ctx)
+
+    const handled = await handler.handle(msg('config.setProvider', { providerId: 'stepfun' }), WS)
+
+    expect(handled).toBe(true)
+    expect(replies.filter(r => r.type === 'config.providerUpdated')).toHaveLength(1)
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[provider-message-handler] zcode provider mirror sync failed:',
+      'sync throw',
+    )
+  })
+
   it('ctx 未注入（undefined，存量测试装配形态）→ 不调用不炸，配置写入照常应答', async () => {
     const { ctx, replies } = mockCtx()
     delete (ctx as { providersMutatedSync?: unknown }).providersMutatedSync

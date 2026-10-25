@@ -48,17 +48,24 @@ export class OauthMessageHandler {
       case 'config.oauthLogout': {
         // B-1 场景 C：退出登录——移除 auth.json 中该 provider 的凭证（先中止进行中 flow）。
         // 幂等（无凭证 no-op）；失败转 ok:false + error（错误消息指向重试动作）。
+        let loggedOut = false
         try {
           await this.ctx.authService.logout(msg.payload.providerId)
           this.ctx.reply(ws, msg.id, 'config.oauthLogoutReply', { ok: true })
-          // 凭据域变更（auth.json 该 provider 条目已删除）→ 镜像重跑：副本里不得残留
-          // 已退出登录 provider 的映射条目（短时 token 不再进副本，但可映射凭据判定变了）。
-          this.mirrorAfterCredentialMutation()
+          loggedOut = true
         } catch (error) {
           this.ctx.reply(ws, msg.id, 'config.oauthLogoutReply', {
             ok: false,
             error: `退出登录失败（凭证可能仍在）：${toErrorMessage(error)}。请重试；持续失败请检查磁盘后重启应用`,
           })
+        }
+        // 镜像触发在主 try 之外（S-8）：logout 已成功应答后，镜像同步的任何失败都不得
+        // 走上方 catch 对同一 msg.id 回第二份 ok:false——失败由 mirrorAfterCredentialMutation
+        // 内部自捕获只 warn（含同步 throw 形态）。
+        if (loggedOut) {
+          // 凭据域变更（auth.json 该 provider 条目已删除）→ 镜像重跑：副本里不得残留
+          // 已退出登录 provider 的映射条目（短时 token 不再进副本，但可映射凭据判定变了）。
+          this.mirrorAfterCredentialMutation()
         }
         return true
       }
@@ -72,8 +79,14 @@ export class OauthMessageHandler {
    * 同语义：fire-and-forget，实现内部自捕获错误只 warn，失败不阻断 OAuth 应答）。
    */
   private mirrorAfterCredentialMutation(): void {
-    this.ctx.providersMutatedSync?.().catch(err => {
+    try {
+      this.ctx.providersMutatedSync?.().catch(err => {
+        console.warn('[oauth-message-handler] zcode provider mirror sync failed:', err instanceof Error ? err.message : String(err))
+      })
+    } catch (err) {
+      // 同步 throw 同样只 warn 不上抛：调用点均已在 reply 之后，异常冒泡会被 server 层
+      // 对同一 msg.id 补发 error envelope（成功 + 失败双回复）
       console.warn('[oauth-message-handler] zcode provider mirror sync failed:', err instanceof Error ? err.message : String(err))
-    })
+    }
   }
 }

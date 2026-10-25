@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ENGINE_PROTOCOL_VERSION } from "@zhushanwen/subagent-engine-sdk";
 
@@ -95,6 +95,18 @@ describe("resolvePiAgentDir", () => {
   it("env 缺省 → 系统独立 pi 目录（os.homedir() 动态推导，不硬编码）", () => {
     expect(resolvePiAgentDir({})).toBe(path.join(os.homedir(), ".pi", "agent"));
     expect(resolvePiAgentDir({ PI_CODING_AGENT_DIR: "   " })).toBe(path.join(os.homedir(), ".pi", "agent"));
+  });
+
+  // 无参形态（读进程 env）= taiji 派发链注入的消费入口：宿主在引擎进程 env 注入
+  // PI_CODING_AGENT_DIR=<dataDir>/agent（原始登记文档 engine-default-provider-setting 已删、见 git 历史；
+  // 「新发现登记」节，2026-10-23 裁决），引擎进程内 resolvePiAgentDir() 读到托管目录。
+  it("无参形态读进程 env：宿主注入 <dataDir>/agent → 消费链读到托管目录", () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/taiji/hosted/data/agent");
+    try {
+      expect(resolvePiAgentDir()).toBe("/taiji/hosted/data/agent");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

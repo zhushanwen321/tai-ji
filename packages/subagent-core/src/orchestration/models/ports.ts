@@ -2,7 +2,9 @@
  * Workflow Extension — Engine Ports + 编排层共享类型
  *
  * 3 个注入 Port（AgentRunner / RunStore / WorkerHost）——Engine 定义、Infra 实现，
- * 是真需要 mock 测试的依赖（子进程/文件系统/线程）。
+ * 是真需要 mock 测试的依赖（子进程/文件系统/线程）。AgentRunner 权威已随
+ * D1 反向依赖收编下沉 shared/agent-call-types.ts，本文件保留 re-export
+ * （编排侧消费方与 barrel 导入路径零改动，壳只转发零镜像）。
  *
  * 编排层共享类型（WorkerHandlers / LifecycleDeps）——打破 lifecycle ↔
  * worker-message-pump 循环依赖：2 个 engine 函数文件各自独立，共用同一组
@@ -10,30 +12,15 @@
  *
  * 层归属：Engine。零 infra 依赖（反向边由包级值依赖环检查拦截）。
  */
-import type { AgentStreamSink } from "../../shared/agent-stream.ts";
-import type { AgentEvent } from "../../shared/agent-event.ts";
+import type { AgentRunner } from "../../shared/agent-call-types.ts";
+import type { AgentCallOpts, AgentResult } from "../../shared/agent-call-types.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import type { RunSpec } from "./run-spec.ts";
-import type { AgentCallOpts, AgentResult } from "./types.ts";
 import type { WorkflowRun } from "./workflow-run.ts";
 
-// ── Port 1: AgentRunner ───────────────────────────────────────
+// ── Port 1: AgentRunner（re-export 壳，权威在 shared/agent-call-types.ts）──
 
-/**
- * Agent 子进程执行 port。Infra 实现：SubprocessAgentRunner。
- *
- * run 执行单次 agent 调用（委托 SubagentService.executeWorkflowAgent，[H2 W4] 纯转调），
- * 返回结构化结果。signal 用于 abort 传播。
- *
- * onEvent（可选）：强类型 AgentEvent 回调，透传 service 派发路径（journal 转发/守护
- * 刷新源），生产 pump 侧恒 undefined。
- *
- * D-005: onEvent 签名从 raw Record<string,unknown> 升级为 AgentEvent——委托后不再有
- * raw JSONL 中间层（executeAndAwait 直接出 AgentEvent）。
- */
-export interface AgentRunner {
-  run(opts: AgentCallOpts, signal: AbortSignal, onEvent?: (event: AgentEvent) => void, stream?: AgentStreamSink): Promise<AgentResult>;
-}
+export type { AgentRunner } from "../../shared/agent-call-types.ts";
 
 // ── Port 2: RunStore ──────────────────────────────────────────
 

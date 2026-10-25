@@ -1,7 +1,7 @@
 /**
- * Tasks Drawer REAL E2E —— 真实 runtime + pi 子进程 + faux LLM 演员（L2.5 翻轨，2026-09-15）。
+ * Tasks Drawer REAL E2E —— 真实 runtime + pi 子进程 + faux LLM 演员（L2.5 迁组，2026-09-15）。
  *
- * 与 mock 轨的差异：
+ * 与 mock 层的差异：
  * - 不设 VITE_MOCK/TAIJI_MOCK → main spawn runtime → runtime spawn pi 子进程
  * - 真实 goal/todo extension 被 pi load（dev 装配下经 mandatory 源码目录加载），
  *   真实协议格式（__gui__ / ANSI widget）
@@ -16,15 +16,15 @@
  * - R3：goal_control 调用 → 协议格式含 __gui__ group（faux toolCall 脚本化）
  *
  * R2 的托盘断言来源（2026-09-16 composer-task-tray）：GUI 协议 widget 的渲染终点由对话流
- * widget pill 迁至 composer 任务托盘（设计 D3/D11），但 **mock 轨无法覆盖该链路**——mock 的
+ * widget pill 迁至 composer 任务托盘（设计 D3/D11），但 **mock 层无法覆盖该链路**——mock 的
  * `pushSession` 只调 `events.dispatchSession`（session 通道），而 ViewHostStore 的消费者
  * （ExtensionHost bridge）经 `onCrossSession` 订阅，route-inbound 的 crossSession 分发路径在
  * mock 下不存在（修复点在 packages/core/src/transport/mock/index.ts，出 u-e2e 领地）。
- * 故「extension:widgetGui → ViewHostStore → 托盘 icon/badge/面板」的端到端断言落在本 real 轨
+ * 故「extension:widgetGui → ViewHostStore → 托盘 icon/badge/面板」的端到端断言落在本 真实进程层
  * （真 runtime + 真 WS 帧 + 真 route-inbound），断言值取自真实 todo extension 的推送载荷。
  *
- * R1 的 source 断言语义变化（翻轨裁决）：原断言 `sourceInfo.source === 'npm:@zhushanwen/pi-goal'`
- * 绑定 npm 安装装配（symlink ~/.taiji-dev/npm）；faux 轨凭证无关装配下 mandatory 扩展经
+ * R1 的 source 断言语义变化（迁组裁决）：原断言 `sourceInfo.source === 'npm:@zhushanwen/pi-goal'`
+ * 绑定 npm 安装装配（symlink ~/.taiji-dev/npm）；faux 层凭证无关装配下 mandatory 扩展经
  * dev 源码目录以 --extension 显式注入（extension-resolver scanBundledExtensions dev 分支），
  * pi 对 --extension 注入的扩展报 `sourceInfo.source === 'cli'`（见下方 R1 断言；`source`
  * 仍为 'extension'）——保留「真实 extension 被 pi load」的契约语义，不绑定安装来源。
@@ -330,11 +330,11 @@ async function assertTodoTrayUi(page: Page, badge: string, todoCount: number): P
 /**
  * WS 驱动 + 监听广播事件。协议断言不走 UI 输入（real 模式**新建** session 需 OS 原生目录选择
  * dialog，不可自动化），改为 WS 发 prompt + 监听 runtime 广播的 tool_call_end 事件，验证真实
- * extension 返回的 __gui__ GuiComponent 格式（这是 real 轨独有的协议契约验证）。
+ * extension 返回的 __gui__ GuiComponent 格式（这是 真实进程层独有的协议契约验证）。
  *
  * 协议断言之后补一段 UI 断言：把该 session 在侧栏激活 → 托盘 widget 区渲染该 widget
  * （icon/badge 出现 + 面板内容渲染）。这是 widgetGui 消费端迁移（对话流 pill → 托盘）后
- * 唯一可达的端到端链路（mock 轨缺 crossSession 分发路径，见文件头「R2 的托盘断言来源」）。
+ * 唯一可达的端到端链路（mock 层缺 crossSession 分发路径，见文件头「R2 的托盘断言来源」）。
  */
 test('R2: todo tool 调用 → 协议格式含 __gui__ tab-bar 双段 + 托盘挂载', async () => {
   test.setTimeout(180_000)

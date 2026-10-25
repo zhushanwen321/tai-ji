@@ -18,6 +18,7 @@ staged 新增行禁词检查（C-ext-07 / C-proc-04 的行级增量拦截）。
 退出码: 0 通过 / 2 违规 / 3 无 staged 变更（视为通过，供非 commit 场景直跑）
 """
 
+from __future__ import annotations
 import re
 import subprocess
 import sys

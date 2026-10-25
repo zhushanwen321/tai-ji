@@ -63,8 +63,8 @@ afterAll(() => {
   if (privateTmp.root) rmSync(privateTmp.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
-// 超时预算在 vitest.config.ts 的 slow-sqlite 轨组级（testTimeout 30s，真实 sqlite I/O
-// 测试族共用，含本文件与 error-contract 族）；unit 轨保持 vitest 默认 5s。
+// 超时预算在 vitest.config.ts 的 slow-sqlite 组级（testTimeout 30s，真实 sqlite I/O
+// 测试族共用，含本文件与 error-contract 族）；单测层保持 vitest 默认 5s。
 
 const TOTAL_ROWS = 3 // 建库 2 行（sess_fix_a/​sess_fix_b）+ 1 条只存在于 -wal 的行（WALROW-PROOF）
 

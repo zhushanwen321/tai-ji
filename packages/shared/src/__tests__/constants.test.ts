@@ -45,6 +45,10 @@ describe('ENV_WHITELIST_PREFIXES ambient 名单（spec §7 最小暴露面）', 
     expect(ENV_WHITELIST_PREFIXES).not.toContain('GOOGLE_')
     expect(ENV_WHITELIST_PREFIXES).not.toContain('CLOUDSDK_')
   })
+
+  it('含 PI_（pi 域 env 整域准入——PI_CODING_AGENT_DIR / PI_WORKFLOW_SCHEMA 等 ambient 值随 spawn 链流转；目录权威值由派发链终态写入，本白名单只管 ambient 流转）', () => {
+    expect(ENV_WHITELIST_PREFIXES).toContain('PI_')
+  })
 })
 
 describe('AMBIENT_ENV_NAMES', () => {
@@ -120,12 +124,13 @@ describe('SUBAGENT_TOOL_NAMES / WORKFLOW_TOOL_NAMES 工具族键控集合（tool
   // 时新调用静默退化为普通工具块且无报错无红灯。本组断言把「新旧名成员在集」锁成常驻
   // 防线（首验由 i-a6 真机 DOM 断言一次性承载，此处承接持续锁，先例 =
   // SUBAGENT_RECORD_CUSTOM_TYPE 双侧字面量锁）。
-  it('新名五成员在集（D3 拆分后调用形态的键控锚，误删即红灯）', () => {
+  it('新名成员在集（D3 拆分后调用形态的键控锚，误删即红灯；subagent_batch = 2026-10-23 批量工具改名）', () => {
     expect(SUBAGENT_TOOL_NAMES.has('subagent_start'), 'subagent_start 不在集——新调用 agentgraph 渲染分类静默退化').toBe(true)
     expect(SUBAGENT_TOOL_NAMES.has('subagent_manage'), 'subagent_manage 不在集——同上').toBe(true)
     expect(SUBAGENT_TOOL_NAMES.has('subagent_message'), 'subagent_message 不在集——同上').toBe(true)
     expect(WORKFLOW_TOOL_NAMES.has('workflow_run'), 'workflow_run 不在集——workflow 调用 record 失效分流静默退化').toBe(true)
     expect(WORKFLOW_TOOL_NAMES.has('workflow_control'), 'workflow_control 不在集——同上').toBe(true)
+    expect(WORKFLOW_TOOL_NAMES.has('subagent_batch'), 'subagent_batch 不在集——批量新调用 record 失效分流静默退化').toBe(true)
   })
 
   it('旧名成员在集（历史会话 toolCall 渲染依赖，§4 影响面修正声明的保留裁决）', () => {
@@ -134,7 +139,8 @@ describe('SUBAGENT_TOOL_NAMES / WORKFLOW_TOOL_NAMES 工具族键控集合（tool
     expect(WORKFLOW_TOOL_NAMES.has('subagents')).toBe(true)
   })
 
-  it('SUBAGENT_TOOL_NAMES 刻意不含 subagents（批量派发跑 workflow run，双收录会误路由进 subagent 分支）', () => {
+  it('SUBAGENT_TOOL_NAMES 刻意不含批量派发新旧名（跑 workflow run，双收录会误路由进 subagent 分支）', () => {
     expect(SUBAGENT_TOOL_NAMES.has('subagents')).toBe(false)
+    expect(SUBAGENT_TOOL_NAMES.has('subagent_batch')).toBe(false)
   })
 })

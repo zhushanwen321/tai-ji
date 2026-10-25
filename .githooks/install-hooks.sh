@@ -164,14 +164,34 @@ if [ "$SKIP_ALL_CHECKS" = "1" ]; then
     exit 0
 fi
 
+# ============================================================================
+# [main 直提交守卫] 分支模型机器化（DEV-WORKFLOW.md §1/§6）：main 只经 GitHub PR
+#   合并与发布流程的版本 bump 推进，本地直接内容提交一律拦截。事故形态（2026-10-25）：
+#   dev-merge-gates 的 committer agent 把一轮分支审查修复误提交进 main worktree，
+#   把 main 从 e8b7bafbe 推到 94ea75386（事后 reset 恢复）——提示词级"提交前核实
+#   worktree"依赖 agent 遵守，此处改为确定性拦截。发布流程的三处 main 提交显式设
+#   TAIJI_ALLOW_MAIN_COMMIT=1 绕过（merge skill 阶段 4 / 4N.4 / 6.5.2 与
+#   prerelease-test.sh）；本地 merge commit 不拦（人工显式操作）。分支探测失败
+#   放行（|| true + 空串不等于 main）——守卫不制造新故障。
+# ============================================================================
+MAIN_GUARD_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+if [ "$MAIN_GUARD_BRANCH" = "main" ] && [ -z "$TAIJI_ALLOW_MAIN_COMMIT" ] && [ ! -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then
+    echo -e "${RED}[ERROR] 禁止直接向 main 提交（当前分支 = main，且非 merge commit、未设 TAIJI_ALLOW_MAIN_COMMIT）${NC}"
+    echo -e "${YELLOW}[FIX] main 只通过 GitHub PR 合并与发布流程版本 bump 推进（DEV-WORKFLOW.md §6）。确认是发布流程（merge skill 阶段 4 / 4N.4 / 6.5.2 或 prerelease-test.sh）→ 设 TAIJI_ALLOW_MAIN_COMMIT=1 后重试；否则 → cd 到目标 feat / dev worktree 再提交（agent workflow 误落 main 的典型形态）${NC}"
+    exit 1
+fi
+
 # 获取变更文件
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
-# [type-gate-coverage 2026-10-15] 前端域 = renderer + ui + mobile-renderer 三包。既有盲区 =
-# ui/mobile 的**测试文件**：renderer 默认 tsconfig 排除测试（typecheck-test 变体只含 renderer
-# 自己的测试），ui src 虽经 renderer include 传递覆盖，但 ui 测试文件（如 UserBubble.test 的
-# EditComposerProps 契约漂移 9 错存量）无任何编译期信号，mobile 全包同理。ESLint 与 vue-tsc
-# 两段同源本变量，随之扩大范围。
-FRONTEND_FILES=$(echo "$STAGED_FILES" | grep -E "^packages/(renderer|ui|mobile-renderer)/src/" || true)
+# [type-gate-coverage 2026-10-15] 前端域 = renderer + ui + mobile-renderer + core 四包。
+# 既有盲区 = ui/mobile 的**测试文件**：renderer 默认 tsconfig 排除测试（typecheck-test
+# 变体只含 renderer 自己的测试），ui src 虽经 renderer include 传递覆盖，但 ui 测试文件
+# （如 UserBubble.test 的 EditComposerProps 契约漂移 9 错存量）无任何编译期信号，
+# mobile 全包同理。ESLint 与 vue-tsc 两段同源本变量，随之扩大范围。
+# core 纳入：staged core 文件此前不触发任何门禁段——ESLint 段按根 flat config 的
+# core 规则块直查，vue-tsc 段经 renderer/ui/mobile import 传递覆盖 core 被引用源码
+#（未被引用文件的兜底 = CI typecheck job 的 TypeCheck - core 全量步）。
+FRONTEND_FILES=$(echo "$STAGED_FILES" | grep -E "^packages/(renderer|ui|mobile-renderer|core)/src/" || true)
 EXTENSION_FILES=$(echo "$STAGED_FILES" | grep -E "^extensions/.*\.ts$" | grep -vE "__tests__|\.test\.|/workflows/|/examples/|\.d\.ts$" || true)
 
 # ============================================================================
@@ -305,8 +325,9 @@ if [ -n "$FRONTEND_FILES" ]; then
                 exit 1
             fi
 
-            # 自动添加修复后的文件
-            FIXED_FILES=$(git diff --cached --name-only --diff-filter=M | grep -E "^packages/(renderer|ui|mobile-renderer)/src/" || true)
+            # 自动添加修复后的文件（与 FRONTEND_FILES 同域：core 文件同样会被 --fix 改写，
+            # 漏登记会令提交内容停留在修复前版本而检查按修复后版本通过）
+            FIXED_FILES=$(git diff --cached --name-only --diff-filter=M | grep -E "^packages/(renderer|ui|mobile-renderer|core)/src/" || true)
             if [ -n "$FIXED_FILES" ]; then
                 echo -e "${BLUE}[INFO] ESLint 自动修复了以下文件:${NC}"
                 echo "$FIXED_FILES" | sed 's/^/  - /'
@@ -1248,7 +1269,7 @@ fi
 #   - check_services_infra_import.py C-comm-03：services 禁白名单外 infra value import
 #   - check_infra_services_import.py C-comm-01：infra 禁白名单外 services value import（三层单向补向）
 #   - check_shared_node_builtin.py  C-state-05：shared 禁 node: 内置 import
-#   - check_runtime_meta_url.py     C-build-01：runtime 禁无 guard 的 import.meta.url / globalThis.__dirname
+#   - check_runtime_meta_url.py     C-build-01：runtime + noExternal workspace 包禁无 guard 的 import.meta 属性访问 / globalThis.__dirname
 #   - check_staged_forbidden_lines.py C-ext-07/C-proc-04：staged 新增行禁 extensions console.warn/error
 #                                    与无说明的 eslint-disable（行级增量，存量不拦）
 #   - check_layering_registry_sync.py S2②：runtime-layering §3 表行 ↔ 检查
@@ -2037,7 +2058,7 @@ if echo "$SUBAGENT_CORE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/ch
 fi
 
 # ============================================================================
-# subagent-core 包内值依赖环检查（C-data-26，§2.3 配套）
+# subagent-core 包内值依赖环检查（C-data-27，§2.3 配套）
 #   packages/subagent-core/** 或检查脚本自身变更时触发：
 #   scripts/check-subagent-core-value-cycles.mjs —— 值 import 图不得成环（类型擦除边
 #   豁免，仅提示）。与 H3 聚合边界检查互补：后者只看六聚合子图，本检查覆盖整包。
@@ -2047,11 +2068,11 @@ SUBAGENT_CORE_CYCLE_STAGED=$(git diff --cached --name-only -- packages/subagent-
 if echo "$SUBAGENT_CORE_CYCLE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/check-subagent-core-value-cycles\.mjs$"; then
     print_section "[subagent-core 包内值依赖环检查]"
     if [ ! -f "scripts/check-subagent-core-value-cycles.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-value-cycles.mjs（C-data-26 检查缺失）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-value-cycles.mjs（C-data-27 检查缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-subagent-core-value-cycles.mjs; then
-        echo -e "${RED}[ERROR] subagent-core 包内检出值依赖环（C-data-26）——按上方 SCC 成员与内部边处理（端口反转/装配注入/共享词汇下沉契约层）${NC}"
+        echo -e "${RED}[ERROR] subagent-core 包内检出值依赖环（C-data-27）——按上方 SCC 成员与内部边处理（端口反转/装配注入/共享词汇下沉契约层）${NC}"
         echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
@@ -2312,6 +2333,39 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     echo -e "${GREEN}[OK] 测试 flake 卫生检查通过${NC}"
 else
     echo -e "${YELLOW}[SKIP] 测试 flake 卫生检查已跳过${NC}"
+fi
+
+# ============================================================================
+# 单测层极端形态静态检查（判据权威 = docs/TEST-STRATEGY.md「新写测试判据」节）
+#   staged 命中测试文件（*.test.ts / *.test.mjs / *.spec.ts，排除 e2e/ 层与
+#   node_modules）时扫描四类信号：X1 真子进程调用未挂集成门控 / X2 显式
+#   timeout ≥5000ms / X3 waitFor 显式 timeout ≥1000ms / X4 performance.now
+#   断言素材。豁免 = 检查器内 EXEMPT 表（存量登记 + 合法例外，逐条带理由）。
+#   结果侧兜底 = CI 慢用例门禁 scripts/check-slow-tests.mjs。不设独立 SKIP_*
+#   开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+TEST_EXTREMES_CHECKER=".githooks/check-test-extremes.mjs"
+TEST_EXTREMES_STAGED=$(echo "$STAGED_FILES" | grep -E "\.test\.(ts|mjs)$|\.spec\.ts$" | grep -v "node_modules" | grep -v "^e2e/" || true)
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    print_section "[单测层极端形态检查]"
+    if [ ! -f "$TEST_EXTREMES_CHECKER" ]; then
+        echo -e "${RED}[ERROR] 找不到检查脚本 $TEST_EXTREMES_CHECKER${NC}"
+        exit 1
+    fi
+    if [ -n "$TEST_EXTREMES_STAGED" ]; then
+        # if ! 形态跑 checker：set -e 下非零退出会先于 EXIT_CODE=$? 捕获终止本 hook
+        if ! node "$TEST_EXTREMES_CHECKER"; then
+            echo ""
+            echo -e "${RED}[ERROR] 单测层极端形态检查失败${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}[OK] 单测层极端形态检查通过${NC}"
+    else
+        echo -e "${GREEN}[OK] staged 无测试文件，跳过极端形态扫描${NC}"
+    fi
 fi
 
 # ============================================================================
@@ -2709,6 +2763,44 @@ else
 fi
 
 # ============================================================================
+# 会话 hidden 退场 + surface 读取点白名单门禁（C-data-28 / C-data-29，E2E-PIPE-20
+#   的 pre-commit 执行点）
+#   staged 命中 packages/<任意包>/src 下 .ts/.tsx/.vue 或检查脚本自身（含其单测）时
+#   触发：scripts/check-session-hidden-surface.mjs —— 全仓扫描两族判据（hidden 同名
+#   白名单 + surface 四形态读取点清单，清单外命中即红，ALLOWLIST/READ_POINTS 为唯一
+#   登记处）。触发范围与脚本扫描范围同构（packages/*/src 全域 glob——目录清单式触发
+#   范围必有洞，同 record-write-surface / session-census 段教训）。触发范围天然含
+#   staged 删除（scope 内文件被删 = 清单条目消失，同样必须红）：单独 staged 删除
+#   检查脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的防线。全仓扫描毫秒
+#   级，无增量模式。退出码 0=合规 / 3=清单外命中 / 1=脚本自身异常，非零一律拦截。
+#   检查脚本或其单测 staged 时同跑 vitest 单测（e2e-map 段同款惯例）。
+#   不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+SESSION_HIDDEN_SURFACE_STAGED=$(git diff --cached --name-only -- '*.ts' '*.tsx' '*.vue' scripts/check-session-hidden-surface.mjs scripts/__tests__/check-session-hidden-surface.test.mjs)
+if echo "$SESSION_HIDDEN_SURFACE_STAGED" | grep -qE "^packages/[^/]+/src/.*\.(tsx?|vue)$|^scripts/(__tests__/)?check-session-hidden-surface(\.test)?\.mjs$"; then
+    print_section "[会话 hidden/surface 白名单检查]"
+    if [ ! -f "scripts/check-session-hidden-surface.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-session-hidden-surface.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-session-hidden-surface.mjs; then
+        echo -e "${RED}[ERROR] hidden/surface 清单外命中——按上方明细审阅语义：非会话同名命中附理由登记进 ALLOWLIST/SAME_NAME_EXCLUDE，会话读取点带 usage 登记进 READ_POINTS 后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${BLUE}[INFO] 运行 hidden/surface 检查脚本单测...${NC}"
+    if ! npx vitest run scripts/__tests__/check-session-hidden-surface.test.mjs --silent; then
+        echo -e "${RED}[ERROR] hidden/surface 检查脚本单测失败——按上方失败明细修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] hidden/surface 白名单检查通过（C-data-28 / C-data-29，E2E-PIPE-20）${NC}"
+else
+    echo -e "${GREEN}[OK] 无 packages/*/src 载体变更，跳过 hidden/surface 白名单检查${NC}"
+fi
+
+# ============================================================================
 # [skills-snapshot 尾部段] 实体快照（备份链 D3；失败非阻断）
 #   全部检查通过后对 workspace 根实体做快照（refs/skills-snapshot：临时 index +
 #   commit-tree，不碰工作树与真实 index）。失败仅日志放行本次提交，下次提交自动
@@ -2816,6 +2908,7 @@ echo -e "  ${GREEN}[+]${NC} subagent-service 聚合边界检查（H3/R5：聚合
 echo -e "  ${GREEN}[+]${NC} 文档-代码符号漂移检查（C-proc-10：①符号漂移 ②测试文档路径存在性 ③[G5] 源码注释悬空 docs 引用，含检查单测）"
 echo -e "  ${GREEN}[+]${NC} 消息流滚动跟随链路检查（C-state-11：滚动到底唯一原语 + 禁 findItemIndex(scrollSize) 模式）"
 echo -e "  ${GREEN}[+]${NC} 测试 flake 卫生检查（F5 scripts.test --no-bail + F3 recursive 删除 maxRetries）"
+echo -e "  ${GREEN}[+]${NC} 单测层极端形态检查（staged 测试文件：真进程未挂门控 / timeout≥5s / waitFor≥1s / 性能断言素材；EXEMPT 逐条登记）"
 echo -e "  ${GREEN}[+]${NC} Provider 凭据读取单通道检查（runtime 变更时触发：凭据直查禁令 + upsertProvider 直调清单，C-proc-14/15）"
 echo -e "  ${GREEN}[+]${NC} 数据布局字面量检查（C-pi-14：pi/ 兄弟布局引用回流拦截，豁免集中 LAYOUT_LITERAL_EXEMPT）"
 echo -e "  ${GREEN}[+]${NC} e2e-map SSOT 结构校验（登记表 + 调度脚本变更时触发：结构/幽灵 asset 强校验 + select 匹配逻辑单测）"

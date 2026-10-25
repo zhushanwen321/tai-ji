@@ -44,6 +44,31 @@ export default {
     // 彻底删除（悬停 danger 钮，两段确认）
     purge: '彻底删除',
     purgeConfirm: '确认彻底删除？',
+    // ── 时间筛选（互斥四档 + 全部；mono 短码 label 跨语言同形，title 为全称）──
+    filterAll: '全',
+    filterAllTitle: '全部归档',
+    filter1d: '1d',
+    filter1dTitle: '归档距今 1 天内',
+    filter23d: '2-3d',
+    filter23dTitle: '归档距今 2-3 天',
+    filter47d: '4-7d',
+    filter47dTitle: '归档距今 4-7 天',
+    filterOlder: '7d+',
+    filterOlderTitle: '归档距今超过 7 天',
+    // 筛选行容器 aria-label
+    filterTablistLabel: '按归档时间筛选',
+    // 头部总体积（title 说明口径：压缩后体积 = 磁盘实际占用；压缩中条目按原文件计）
+    totalSizeTitle: '当前筛选结果的磁盘占用（压缩后体积，压缩中的条目按原文件计）',
+    // 筛选档下无结果的空态（区别于「暂无归档会话」全量空态）
+    filterEmpty: '该时间范围内暂无归档',
+    // ── 批量清理（筛选行内联 danger 钮，两段确认；待发态文案精简为「N 项」——垃圾桶图标承载删除语义）──
+    batchPurgeAria: '删除所筛 {count} 项',
+    batchPurgeLabel: '{count} 项',
+    batchPurgeConfirm: '确认删除 {count} 项？',
+    batchPurging: '删除中…',
+    batchPurgeSuccess: '已彻底删除 {count} 个归档会话',
+    batchPurgeKept: '已彻底删除 {count} 个归档会话；{kept} 条的子代理记录因数据不可读已保守保留',
+    batchPurgePartial: '已彻底删除 {ok} 个、失败 {failed} 个；{msg}；列表已刷新，可重试剩余项',
     // 恢复编排 toast（useArchiveView；成功后切回会话列表）
     restoreSuccess: '已恢复「{name}」，已回到原项目分组',
     restoreFailed: '恢复失败：{msg}',

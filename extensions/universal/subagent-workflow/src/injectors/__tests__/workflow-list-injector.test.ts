@@ -194,7 +194,7 @@ describe("formatWorkflowList", () => {
 		// guide 段硬编码（锁文本）：期望值不插值生产常量——改写 WORKFLOW_LIST_GUIDE
 		// 即红灯，避免「两侧同源插值」下文案漂移无检查
 		expect(out).toBe(
-			`\n\n<available_workflows>\nThe following workflows are available. Do NOT call list to discover available workflows — they are listed below; use list only for running state. All listed workflows run directly via the workflow_run tool — do NOT use workflow-script generate for any listed workflow. For parameter details, read the <location> script file (script header has @pi-meta parameters + usage). For 2+ independent tasks dispatched together, prefer the \`subagents\` tool — it drives the fan-out workflow for you.\n  <workflow><name>chain</name><description>三步链</description><location>/workflows/chain.js</location></workflow>\n</available_workflows>`,
+			`\n\n<available_workflows>\nThe following workflows are available. Do NOT call list to discover available workflows — they are listed below; use list only for running state. All listed workflows run directly via the workflow_run tool — do NOT use workflow-script generate for any listed workflow. For parameter details, read the <location> script file (script header has @pi-meta parameters + usage). For 2+ independent tasks dispatched together, prefer the \`subagent_batch\` tool — it drives the fan-out workflow for you.\n  <workflow><name>chain</name><description>三步链</description><location>/workflows/chain.js</location></workflow>\n</available_workflows>`,
 		);
 	});
 

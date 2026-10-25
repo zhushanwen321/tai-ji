@@ -144,7 +144,7 @@ describe('matchQuotaPreset', () => {
 
 // 读取侧空态回落（dmg-r3-1）：settings-store 的 quotaPresets 初值是 `[]`（非 undefined），
 // `??` 只覆盖 undefined——空数组原样穿过回落表达式会让额度类型下拉与 matchedPreset 在
-// RPC 未回包 / 拉取失败 / mock 轨时永久为空（C-proc-21 禁静默空值）。
+// RPC 未回包 / 拉取失败 / mock 层时永久为空（C-proc-21 禁静默空值）。
 describe('resolveQuotaPresets', () => {
   it('空数组（store 初值 / RPC 失败未写）→ 回落编译期基线', () => {
     expect(resolveQuotaPresets([])).toBe(QUOTA_PRESETS)

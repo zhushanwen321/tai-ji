@@ -58,6 +58,8 @@ import { getSubagentService } from "@zhushanwen/subagent-core";
 import { MEMBER_VIEWS_MAX_CHARS, memberViewLine, runMemberViews, truncateRunMemberViews } from "@zhushanwen/subagent-core";
 import type { RunMemberRecordView, RunMemberView } from "@zhushanwen/subagent-core";
 import { ID_PREVIEW_LENGTH } from "../format/id-preview.ts";
+// runId 形态白名单（LLM 工具参数面的路径穿越防线；判定单点 = Infra store 的路径拼接处）
+import { isWorkflowRunId } from "../../jsonl-run-store.ts";
 import type { RunStartDetails, WorkflowToolResult } from "./tool-result.ts";
 import {
   acquireReentryGuard,
@@ -353,6 +355,15 @@ export function registerWorkflowTool(
   pi.registerTool({
     name: "workflow_control",
     label: "Workflow Control",
+    // deferred（2026-10-23 裁决，ADR-0136 补记）：不常驻声明，tool_search 命中即激活；
+    // 检索入口 = 启动迁移写入的 +tool_search 条目（runtime pi-codemode-settings）。
+    // workflow_run 常驻 description 指名道姓引用本工具，模型有 run 控制需求时按名
+    // 检索即达（BM25 排名高置信经验、非构造性保证；pi@1.0.0 实装锚：检索语料含
+    // 工具名 = dist/extensions/tool-search/tool.js:85、候选含非活跃 deferred = :149，
+    // 语义登记 pi-semantics.json PS-90）；promptSnippet 保留——激活后进系统提示词
+    // 工具文字清单（实装锚：构建不限 exposure = dist/core/agent-session.js:2802-2807、
+    // 渲染 = 激活集 ∩ 有 snippet = dist/core/system-prompt.js:82，登记 PS-89）
+    exposure: "deferred",
     description:
       "Control workflow runs: status (without runId = list runs; with runId = that run's member table), abort (stop a run), resume (continue an interrupted run).\n" +
       "Runs are one-shot (no pause): stop early with abort; for a settled run start a new one via `workflow_run`.",
@@ -595,11 +606,16 @@ function reservedKeyChannelError(err: ArgsValidationError): Error {
  * 从 ArgsValidationError.errors（ajv 错误数组）提取缺失的 required 参数名
  * （ajv required 错误携带 params.missingProperty）；非 required 错误 / errors 缺席
  * （畸形 schema 形态）返回空集——不猜不扩。
+ * 仅收集 instancePath === "" 的顶层缺失键：ajv 对嵌套对象内部的 required 缺失同样
+ * 产生 missingProperty（instancePath 指向真实位置如 /args/tasks/0），此处收进会把
+ * 嵌套缺参误解释成「顶层保留键通道被占用」——嵌套缺失归普通缺参原样透出分支。
  */
 function missingRequiredKeysOf(err: ArgsValidationError): string[] {
   const keys = new Set<string>();
   for (const e of err.errors ?? []) {
     if (e === null || typeof e !== "object") continue;
+    const instancePath = (e as Record<string, unknown>).instancePath;
+    if (instancePath !== "") continue;
     const params = (e as Record<string, unknown>).params;
     if (params === null || typeof params !== "object") continue;
     const missing = (params as Record<string, unknown>).missingProperty;
@@ -716,9 +732,14 @@ function runMemberHeaderLine(summary: RunSummary, memberCount: number, failedCou
  * record 流在」= 已终局且被 MAX_RETAINED_DONE_RUNS 逐出保留窗口；磁盘也无 =
  * 未知 id。超窗口的恢复动作 = 从该 run 的完成通知恢复结果（省略 runId 列全部不可用
  * ——列表同样不含已逐出 run）。
+ *
+ * 探测前先过 runId 形态白名单：runId 来自 LLM 工具参数（自由字符串），白名单外
+ * 形态（含路径分隔符 / `..`）拼 stateFile 路径会逃逸出 runs 目录，且存在性两文案
+ * 分叉可被当作文件存在性 oracle 探测——非法形态不触达磁盘，恒走「未知 id」分支
+ * （不新增可区分响应形态，不向调用方泄露形态检查的发生）。
  */
 function runNotFoundError(runId: string, deps: LauncherDeps): Error {
-  if (existsSync(deps.store.stateFilePath(runId))) {
+  if (isWorkflowRunId(runId) && existsSync(deps.store.stateFilePath(runId))) {
     return new Error(
       `Workflow run '${runId}' is settled and no longer in the in-memory retention window ` +
       `(the most recent ${MAX_RETAINED_DONE_RUNS} settled runs are kept). Recover its results from the run's completion ` +
@@ -825,6 +846,12 @@ export async function actionResume(
     throw new Error(
       "resume requires 'runId' parameter. Correct: {\"action\":\"resume\",\"runId\":\"<id>\"} (use action:\"status\" to find runId; args optional — must equal the original run's args)",
     );
+  }
+  // runId 形态白名单（路径穿越防线，与 status 查无判定同准入判据）：journalDir 由
+  // runId 经 store.stateFilePath 拼出，非法形态（含路径分隔符 / `..`）在进入 core
+  // resume 读链前按 not-found 语义拒绝，不让白名单外 id 参与路径拼接。
+  if (!isWorkflowRunId(runId)) {
+    throw runNotFoundError(runId, deps);
   }
   assertEntryTimeBudget(params.time);
   assertEntryTokenBudget(params.tokens);

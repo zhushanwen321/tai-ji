@@ -54,6 +54,10 @@ const workspaceStoreMock = vi.hoisted(() => ({
   records: [] as Array<{ cwd: string; lastUsedAt: number; label: string }>,
   defaultCwd: undefined as string | undefined,
   load: vi.fn(),
+  // 「默认会话」目录拉取（2026-10-22 initApp 编排新增；landing DirSelectPopover 入口数据源）
+  loadDefaultSessionDir: vi.fn(),
+  defaultSessionDir: '' as string,
+  setPinned: vi.fn(async () => true),
 }))
 
 vi.mock('@/stores/workspace', () => ({
@@ -62,13 +66,16 @@ vi.mock('@/stores/workspace', () => ({
 
 // useNewTaskFlow / useSidebar 均用真实实现（不 mock）——这是本测试的核心价值
 import { useSidebar, resetAppBootstrap } from '@/composables/features/sidebar/useSidebar'
-import { useNewTaskFlow, resetNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
+import { useNewTaskFlow, resetNewTaskFlow, __testing } from '@/composables/features/new-task/useNewTaskFlow'
 import { useSessionStore } from '@/stores/session'
 
 beforeEach(() => {
   setActivePinia(createPinia())
   resetNewTaskFlow()
   resetAppBootstrap()
+  // 壳层 cachedFlow 单例重置：cachedFlow 闭包捕获构造时的 pinia store 实例，setActivePinia
+  // 重建后旧引用漂移（clearActiveSession 清的是旧 store）——每个用例前强制重建。
+  __testing.__resetNewTaskFlowForTesting()
   vi.clearAllMocks()
   sessionCtrl.switchSession.mockResolvedValue(undefined)
   sessionCtrl.remove.mockResolvedValue(undefined)
@@ -85,8 +92,6 @@ function mkSession(over: Partial<SessionSummary>): SessionSummary {
     cwd: over.cwd ?? '/repo',
     status: 'idle',
     lastActiveAt: over.lastActiveAt ?? 0,
-    modelId: 'm',
-    tokenCount: 0,
     ...over,
   }
 }
@@ -141,6 +146,29 @@ describe('App 启动编排（initApp：连接建立后始终进 landing 落地�
     expect(flow.currentCwd.value).toBe('/b')
     // activeId 被清空（landing 态无 session 绑定，不变量强制）
     expect(useSessionStore().activeId).toBeNull()
+  })
+
+  it('新建任务预填链（用户裁决 2026-10-22）：选中 session 后 newSession → 默认 cwd = 选中 session 的 cwd（优先于 defaultCwd）', async () => {
+    // 载入历史 session（loadSessions 写入真实 sessionStore）
+    sessionCtrl.list.mockResolvedValue([
+      { cwd: '/b', sessions: [mkSession({ id: 'recent', cwd: '/b', lastActiveAt: 900 })] },
+    ])
+    // defaultCwd 故意与选中 session 的 cwd 不同——证明预填取的是选中 session 而非 defaultCwd
+    workspaceStoreMock.defaultCwd = '/zzz-default'
+    await useSidebar().initApp()
+
+    // 模拟用户在侧栏选中 session「recent」（initApp 的 landing 不变量清过 activeId，此处重新置位）
+    useSessionStore().activeId = 'recent'
+
+    // 点「新建任务」（无显式 cwd）→ 预填 = 选中 session 的 cwd
+    await useSidebar().newSession()
+    const flow = useNewTaskFlow()
+    expect(flow.state.value).toBe('landing')
+    expect(flow.currentCwd.value).toBe('/b')
+
+    // 对照：无选中 session（activeId 已被 startFlow 不变量清空）→ 回落 defaultCwd
+    await useSidebar().newSession()
+    expect(useNewTaskFlow().currentCwd.value).toBe('/zzz-default')
   })
 
   it('HMR/重连幂等：appBootstrapped 检查，第二次 initApp 直接 return 不重复编排', async () => {

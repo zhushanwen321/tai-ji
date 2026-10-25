@@ -28,9 +28,13 @@ import {
 
 import { EngineClient } from "../execution/engine/client/engine-client.ts";
 import { pidfilePath } from "../execution/engine/client/pid-file.ts";
-import { RuntimeControlClient } from "../execution/engine/client/transport/control-client.ts";
-import type {
-  ControlChannelHandlers,
+import {
+  RuntimeControlClient,
+  acquireRuntimeControlClient,
+} from "../execution/engine/client/transport/control-client.ts";
+import {
+  controlClientKey,
+  type ControlChannelHandlers,
 } from "../execution/engine/client/transport/control-shared.ts";
 import { mapControlError } from "../execution/engine/client/transport/control-shared.ts";
 import {
@@ -41,6 +45,7 @@ import type {
   EngineLaunchSpec,
   EngineTransportExitInfo,
 } from "../execution/engine/client/transport/types.ts";
+import { GLOBAL_SLOT_KEYS } from "../shared/global-slots.ts";
 
 const K = SUBAGENT_CONTROL_FRAME_KINDS;
 
@@ -406,6 +411,22 @@ describe("RuntimeEngineTransport：control 通道全链（验收①）", () => {
     await transportB.close();
   });
 
+  it("[S-10] openChannel identity.recordId → launch.recordId 上 wire；缺席不落键", async () => {
+    const server = await startServer();
+    const transport = makeTransport(server);
+    await transport.open(makeSpec({ recordId: "rec-123" }));
+    const withRecord = server.frames.find((f) => f.kind === K.engineOpen);
+    expect((withRecord?.launch as Record<string, unknown>).recordId).toBe("rec-123");
+    await transport.close();
+
+    const bare = makeTransport(server);
+    await bare.open(makeSpec());
+    const opens = server.frames.filter((f) => f.kind === K.engineOpen);
+    expect((opens.at(-1)?.launch as Record<string, unknown>).recordId).toBeUndefined();
+    expect(Object.hasOwn(opens.at(-1)?.launch as object, "recordId")).toBe(false);
+    await bare.close();
+  });
+
   it("[m-core-1] 跨 chunk 的 UTF-8 多字节字符不被撕裂（StringDecoder 按字符边界切分）", async () => {
     const server = await startServer();
     server.onEngineOpen = (socket, frame) => {
@@ -492,6 +513,53 @@ describe("RuntimeEngineTransport：control 通道全链（验收①）", () => {
     await again.open(makeSpec());
     expect(server.connectionCount).toBe(1);
     await again.close();
+  });
+});
+
+describe("共享客户端表：globalThis 槽承载（C-state-20 / S-7）", () => {
+  const SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.runtimeControlClients);
+
+  it("槽形态下 per-(socket, root) 复用键语义保留 + 表经 Symbol.for 槽可观察（跨模块实例共享）", async () => {
+    const server = await startServer();
+    const previousSlot = Reflect.get(globalThis, SLOT_KEY) as Map<string, RuntimeControlClient> | undefined;
+
+    const a = acquireRuntimeControlClient({ socketPath: server.socketPath, hostKind: "test", rootSessionId: "sess-slot" });
+    const b = acquireRuntimeControlClient({ socketPath: server.socketPath, hostKind: "test", rootSessionId: "sess-slot" });
+    expect(b).toBe(a); // 同 (socket, root) 键复用同一实例（一条连接）
+    const other = acquireRuntimeControlClient({ socketPath: server.socketPath, hostKind: "test", rootSessionId: "sess-slot-other" });
+    expect(other).not.toBe(a); // 不同根不同连接（R2A-N1 复用键语义）
+
+    // 表挂在 globalThis[Symbol.for(键)]（spawned-children.ts 同款槽纪律）：双包实例
+    // （workspace 源码 / npm dist / pi jiti）经同一槽看到同一张表，模块级 Map 会分裂。
+    const slot = Reflect.get(globalThis, SLOT_KEY) as Map<string, RuntimeControlClient>;
+    expect(slot).toBeInstanceOf(Map);
+    expect(slot.get(controlClientKey(server.socketPath, "sess-slot"))).toBe(a);
+
+    // 「另一实例化通道」形态：手工换入新 Map，acquire 必须写入槽中现有 Map（读槽
+    // 而非闭包模块级变量）——这是跨实例共享语义的构造性验证。
+    const manualSlot = new Map<string, RuntimeControlClient>();
+    Reflect.set(globalThis, SLOT_KEY, manualSlot);
+    try {
+      const viaOtherInstance = acquireRuntimeControlClient({
+        socketPath: server.socketPath,
+        hostKind: "test",
+        rootSessionId: "sess-slot-third",
+      });
+      expect(manualSlot.size).toBe(1);
+      expect(manualSlot.get(controlClientKey(server.socketPath, "sess-slot-third"))).toBe(viaOtherInstance);
+      viaOtherInstance.release(); // refs 归零 → dispose 自摘
+    } finally {
+      // 恢复原槽，避免污染后续用例的共享状态
+      if (previousSlot !== undefined) Reflect.set(globalThis, SLOT_KEY, previousSlot);
+      else Reflect.deleteProperty(globalThis, SLOT_KEY);
+    }
+
+    // 引用归零 → dispose → 自摘（槽内不再保留死实例）
+    a.release();
+    b.release();
+    other.release();
+    await waitFor(() => server.connectionCount === 0, "slot clients released");
+    expect(slot.has(controlClientKey(server.socketPath, "sess-slot"))).toBe(false);
   });
 });
 
@@ -840,7 +908,7 @@ describe("EngineClient：runtime transport 谓词接线（验收③④）", () =
       TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID: "spawn-temp-id",
     });
 
-    await client.ensureConnected("real-session-id-from-ctx");
+    await client.ensureConnected({ rootSessionId: "real-session-id-from-ctx" });
     expect(client.currentState).toBe("ready");
     const open = server.frames.find((f) => f.kind === K.engineOpen);
     expect((open?.launch as Record<string, unknown>).rootSessionId).toBe("real-session-id-from-ctx");
@@ -863,7 +931,7 @@ describe("EngineClient：runtime transport 谓词接线（验收③④）", () =
 
     // run 路径携带 per-run 权威根：旧通道不可换绑（runtime 侧 session 不一致即拒），
     // 换代重连 + 新 engine_open 用真根。
-    await client.ensureConnected("real-session-id-from-ctx");
+    await client.ensureConnected({ rootSessionId: "real-session-id-from-ctx" });
     expect(client.currentState).toBe("ready");
     const reopened = server.frames.filter((f) => f.kind === K.engineOpen);
     expect(reopened).toHaveLength(2);
@@ -871,6 +939,52 @@ describe("EngineClient：runtime transport 谓词接线（验收③④）", () =
     // 旧通道已发 engine_close（runtime 杀组回收）
     expect(server.frames.some((f) => f.kind === K.engineClose)).toBe(true);
     await client.dispose();
+  });
+
+  it("[DC-12] probe 携带权威根 → run 同根命中同一共享连接（单 open、零 rebind、无双 spawn）", async () => {
+    const server = await startServer();
+    wireEchoEngineProtocol(server);
+    const dataDir = mkdtempSync(join(tmpdir(), "u-m3-rt-dc12-"));
+    dataDirs.push(dataDir);
+    const client = makeHostedClient(server, dataDir, {
+      TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID: "spawn-temp-id",
+    });
+
+    // probe（生产链路 = RemoteEngine.probe({rootSessionId})，service 层权威根注入）：
+    // 与 run 用同一 (socket, root) 键 → 不再以 env temp 根另建一条连接。
+    await client.ensureConnected({ rootSessionId: "real-root" });
+    // run 同根 + record 锚：复用同一连接（无换代重连、无 engine_close grace 等待）。
+    await client.ensureConnected({ rootSessionId: "real-root", recordId: "run-1" });
+
+    const opens = server.frames.filter((f) => f.kind === K.engineOpen);
+    expect(opens).toHaveLength(1);
+    expect((opens[0]?.launch as Record<string, unknown>).rootSessionId).toBe("real-root");
+    expect(server.connectionCount).toBe(1);
+    expect(server.frames.some((f) => f.kind === K.engineClose)).toBe(false);
+    await client.dispose();
+  });
+
+  it("[S-10] run 的 record 锚 → launch.recordId 上 wire；probe 先行的 open 不携带该键", async () => {
+    const server = await startServer();
+    wireEchoEngineProtocol(server);
+    const dataDir = mkdtempSync(join(tmpdir(), "u-m3-rt-s10-"));
+    dataDirs.push(dataDir);
+    const client = makeHostedClient(server, dataDir);
+    await client.ensureConnected({ rootSessionId: "sess-s10", recordId: "rec-run-1" });
+    const open = server.frames.find((f) => f.kind === K.engineOpen);
+    expect((open?.launch as Record<string, unknown>).recordId).toBe("rec-run-1");
+    await client.dispose();
+
+    // probe 先行（无 run 上下文）：launch 不携带 recordId（wire 可选扩展，runtime
+    // 侧 `?? null` 登记 = 无树挂点，收割依赖进程组 + 连接 fan-out 结构性兜底）。
+    const serverProbe = await startServer();
+    wireEchoEngineProtocol(serverProbe);
+    const probeClient = makeHostedClient(serverProbe, dataDir);
+    await probeClient.ensureConnected({ rootSessionId: "sess-s10" });
+    const probeOpen = serverProbe.frames.find((f) => f.kind === K.engineOpen);
+    expect((probeOpen?.launch as Record<string, unknown>).recordId).toBeUndefined();
+    expect(Object.hasOwn(probeOpen?.launch as object, "recordId")).toBe(false);
+    await probeClient.dispose();
   });
 
   it("[R2A-N1] 单 control server + 双 EngineClient：pi run（真根）先 / zcode probe（env temp 根）后 → 无 session mismatch、无永久 unavailable", async () => {
@@ -884,7 +998,7 @@ describe("EngineClient：runtime transport 谓词接线（验收③④）", () =
     const zcode = makeHostedClient(server, dataDir, env, "zcode");
 
     // 顺序 A：pi run 先用真根建连。
-    await pi.ensureConnected("real-root");
+    await pi.ensureConnected({ rootSessionId: "real-root" });
     // zcode probe 无 run ctx → env 回落 temp 根。旧实现落到 pi 的共享连接上 →
     // engine_open_failed{session} → probe 永久 unavailable。
     await zcode.ensureConnected();
@@ -904,7 +1018,7 @@ describe("EngineClient：runtime transport 谓词接线（验收③④）", () =
     const piB = makeHostedClient(server, dataDir, env, "pi-b");
     const zcodeB = makeHostedClient(server, dataDir, env, "zcode-b");
     await zcodeB.ensureConnected();
-    await piB.ensureConnected("real-root-b");
+    await piB.ensureConnected({ rootSessionId: "real-root-b" });
     expect(piB.currentState).toBe("ready");
     expect(zcodeB.currentState).toBe("ready");
     expect(server.openFailures).toEqual([]);
@@ -931,8 +1045,8 @@ describe("EngineClient：runtime transport 谓词接线（验收③④）", () =
     // 并行两个 run：旧实现两次 rebind 各自起一代 connectOnce → 第三个 engine_open
     // 与误拆新 transport（transport_lost/unavailable）。单飞后只应有一次换绑 + 一次 open。
     await Promise.all([
-      client.ensureConnected("real-root"),
-      client.ensureConnected("real-root"),
+      client.ensureConnected({ rootSessionId: "real-root" }),
+      client.ensureConnected({ rootSessionId: "real-root" }),
     ]);
 
     const opens = server.frames.filter((f) => f.kind === K.engineOpen);
@@ -997,7 +1111,7 @@ describe("EngineClient：runtime transport 谓词接线（验收③④）", () =
       const runtimeDir = mkdtempSync(join(tmpdir(), "u-m3-rt-runtime-invalid-"));
       dataDirs.push(runtimeDir);
       const hosted = makeHostedClient(server, runtimeDir);
-      await expect(hosted.ensureConnected("real-session-id")).rejects.toSatisfy(
+      await expect(hosted.ensureConnected({ rootSessionId: "real-session-id" })).rejects.toSatisfy(
         (err: Error & { code?: string; recovery?: string; message?: string }) => {
           expect(err.code).toBe("engine_crashed");
           expect(err.message).toContain(controlCode);

@@ -147,7 +147,14 @@ function resolveCredentialValue(config: string, env?: Record<string, string>): s
 
 /**
  * auth.json 条目 → 生效明文 + 凭据形态（api_key 走配置值解析；oauth 取 access，pi 对 oauth
- * 不做配置值解析）。kind 是凭据域事实：oauth 的 access 是短时 token，消费方（如 zcode provider
+ * 不做配置值解析）。pi 实装锚点（S-6，断言权威源 = node_modules 实装版）：
+ * @earendil-works/pi-coding-agent@1.0.0 `dist/core/auth-storage.js`
+ * `ReadableFileAuthStorageBackend.read`（:207-217）——仅 `type === 'api_key'` 且 key
+ * 非空且非 command 形态才 `resolveConfigValue` 配置值解析；其余条目（含 oauth 及未知
+ * type）`structuredClone` 原样返回（access 不展开）。同文件 load 校验（:195-201）
+ * 锁定 oauth 条目形态 = `{ access, refresh, expires }` 三件套（expires + refresh 配对
+ * = 短时 token + 刷新凭据；刷新流程在 @earendil-works/pi-ai `dist/auth/oauth/*`）。
+ * kind 是凭据域事实：oauth 的 access 是短时 token，消费方（如 zcode provider
  * 同步）必须据此拒绝把 token 当静态 api-key 复制到外部通道。
  */
 function readAuthCredentialKey(credential: Credential): { key: string; kind: ProviderCredentialKind } | { unsupported: UnsupportedCredentialForm } | undefined {
@@ -156,8 +163,9 @@ function readAuthCredentialKey(credential: Credential): { key: string; kind: Pro
     return toReadKeyOutcome(resolveCredentialValue(credential.key, credential.env))
   }
   const access = credential.access
-  // 非 api_key 条目（oauth；auth.json 被外部改写时也可能是未知 type）一律按 'oauth' 处置：
-  // 保守方向 = 宁可 skip 也不把未知形态的 access 当静态 key 下发外部通道（fail-closed）。
+  // 非 api_key 条目（oauth；auth.json 被外部改写时也可能是未知 type）一律按 'oauth' 处置。
+  // 本分支是 taiji 侧独立的 fail-closed 保守判定（非 pi 语义——pi 的 read 对未知 type
+  // 条目同样原样返回、交消费方处置；taiji 不把未知形态的 access 当静态 key 下发外部通道）。
   return typeof access === 'string' && access !== '' ? { key: access, kind: 'oauth' } : undefined
 }
 

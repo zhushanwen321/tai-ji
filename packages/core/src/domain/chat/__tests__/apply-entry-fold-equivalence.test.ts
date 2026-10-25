@@ -9,7 +9,7 @@
  * 2. 输入纯度：entries 与 initial（含非空 initial 接续场景）均不被 mutable fold mutate；
  * 3. 长序列形态：500 条无 id entry 的 fold 正确性 + `e<N>` 确定性 id 全程唯一 + 0/1/2
  *    边界微用例（结构验证，不计时——性能画像归基准工具；数据量按「逻辑等价最小规模」
- *    缩档，判据见 docs/todo/test-single-layer-cleanup.md）。
+ *    缩档，判据见 docs/TEST-STRATEGY.md「新写测试判据」节）。
  *
  * 行为级具体断言（role 细分 / 回填字段 / 分组渲染）在 apply-entry.test.ts 与
  * apply-entry-equivalence.test.ts，本文件不重复。
@@ -20,6 +20,7 @@ import { describe, it, expect } from 'vitest'
 import { applyEntry, createInitialChatViewState, replayEntries } from '../apply-entry'
 import type { PiEntry } from '../apply-entry'
 import { msgEntry } from './helpers/fixtures'
+import { expectDerivedIdSequence } from './helpers/equivalence-asserts'
 
 // ── fixture（msgEntry 构造收敛到 helpers/fixtures.ts 单源；混合全类型序列仍为本文件
 //    手写字面量——它承载 fold 维度的序列形态语义，不跨文件共享）──────────
@@ -151,9 +152,7 @@ describe('replayEntries(mutable fold) ≡ reduce(applyEntry) 元断言', () => {
       const viaReduce = entries.reduce(applyEntry, createInitialChatViewState())
       expect(viaFold, `n=${n}`).toEqual(viaReduce)
       expect(viaFold.messages, `n=${n}`).toHaveLength(n)
-      expect(viaFold.messages.map((m) => m.id), `n=${n}`).toEqual(
-        Array.from({ length: n }, (_, i) => `e${i}`),
-      )
+      expectDerivedIdSequence(viaFold.messages, n)
     }
   })
 

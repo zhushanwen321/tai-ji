@@ -542,9 +542,10 @@ export class GenStatsService {
     // ② 内存映射（该 session 至少采样过一次 / 写 2 / 写 3 登记过）
     const mapped = this.modelBySid.get(sid)
     if (mapped) return mapped
-    // ③ replicated states 缓存值（getSummary 读 session.modelId 双写缓存——与
-    // publishStateChangedFromSnapshot 的 fallback 字段同源同值）
-    const cached = this.deps.sessionService.getSummary(sid)?.modelId
+    // ③ lifecycle 注册表记录的 modelId 双写缓存值（与 publishStateChangedFromSnapshot
+    // 的 fallback 字段同源同值）。W3 起 SessionSummary.modelId 已删（三状态字段退役），
+    // 读点从 getSummary 改到 getSession（IManagedSessionView.modelId，同一缓存字段）。
+    const cached = this.deps.sessionService.getSession(sid)?.modelId
     if (cached) return cached
     // ④ 全 null（model 缺省）
     return null

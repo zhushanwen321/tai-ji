@@ -36,13 +36,13 @@ function makeInputInstance(overrides: Partial<ComposerInputInstance> = {}): Comp
   } as unknown as ComposerInputInstance
 }
 
-/** mock DraftStore（ADR-0049：窄接口替代 Map<string,string>，spy 可断言调用） */
-function makeDraftStore(initial?: Map<string, string>): DraftStore & { _store: Map<string, string> } {
-  const store = initial ?? new Map<string, string>()
+/** mock DraftStore（ADR-0049：窄接口替代 Map；[U8 草稿 segments 化] 值 = Segment[]，spy 可断言调用） */
+function makeDraftStore(initial?: Map<string, Segment[]>): DraftStore & { _store: Map<string, Segment[]> } {
+  const store = initial ?? new Map<string, Segment[]>()
   return {
     _store: store,
-    getDraft: vi.fn((sid: string) => store.get(sid) ?? ''),
-    saveDraft: vi.fn((sid: string, text: string) => store.set(sid, text)),
+    getDraft: vi.fn((sid: string) => store.get(sid) ?? []),
+    saveDraft: vi.fn((sid: string, segments: Segment[]) => store.set(sid, segments)),
     deleteDraft: vi.fn((sid: string) => store.delete(sid)),
   }
 }
@@ -65,7 +65,7 @@ function setup(sessionId: string | null = 's1') {
 describe('useComposerRestore clearInput', () => {
   it('sid 非空：draft 置空 + drafts.deleteDraft(sid) + inputRef.clear()', () => {
     const c = setup('s1')
-    c.drafts.saveDraft('s1', '保留草稿')
+    c.drafts.saveDraft('s1', [{ type: 'text', text: '保留草稿' }])
     c.draft.value = '待发送'
     c.clearInput()
     expect(c.draft.value).toBe('')
@@ -77,7 +77,7 @@ describe('useComposerRestore clearInput', () => {
 
   it('sid=null：draft 置空 + 不调 deleteDraft + 仍调 inputRef.clear()', () => {
     const c = setup(null)
-    c.drafts.saveDraft('other', '其他 session 草稿')
+    c.drafts.saveDraft('other', [{ type: 'text', text: '其他 session 草稿' }])
     c.draft.value = 'x'
     c.clearInput()
     expect(c.draft.value).toBe('')

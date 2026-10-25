@@ -23,7 +23,7 @@
  * delivered → PROBE turn 的 assistant ACK message_end（run 定局）→ 队列清空（depth === 0）→
  * get_entries 校验 PROBE user entry 晚于长任务 user entry（下一 turn 开头注入的持久化证据）。
  *
- * 环境约定照抄 equivalence 族（pi-fixture.ts）。faux LLM 轨（L2.5 翻轨）：被测语义是
+ * 环境约定照抄 equivalence 族（pi-fixture.ts）。faux LLM 层（L2.5 迁组）：被测语义是
  * 「受理即出站入 pi 队列 → turn 边界注入 → 队列快照归零 → 送达回执关闭」，非模型智能
  * ——长任务的「长」由 TAIJI_FAUX_TPS 节流制造，PROBE turn 的 ACK 回复由脚本固定。
  * 门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（SSOT = test-guard/integration-gate.ts：
@@ -75,10 +75,7 @@ function makeView(id: string, cwd: string, label: string): IManagedSessionView {
     lastActiveAt: Date.now(),
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
+        bashRunToken: undefined,
     sessionFilePath: undefined,
   }
 }
@@ -121,7 +118,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`send queue e2e faux pi（集成测�
     let pump: ReturnType<typeof setInterval> | undefined
     try {
       // ── 1. 真实 pi rpc 子进程（目标 session，fixture 不负责建目录）──
-      // faux 轨：TPS 节流制造长任务流式窗口（spawn 前设置，finally 恢复）；
+      // faux 层：TPS 节流制造长任务流式窗口（spawn 前设置，finally 恢复）；
       // 队列 = [长计数文本（turn 1）, PROBE turn 的 ACK 回复（turn 2）]
       process.env.TAIJI_FAUX_TPS = FAUX_TPS
       const targetDir = join(dataRoot, 'target')
@@ -217,7 +214,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`send queue e2e faux pi（集成测�
         content: `${PROBE_MARK} The counting task is over now. Reply with exactly: ${ACK_MARK} and nothing else.`,
         clientUuid: PROBE_UUID,
       })
-      expect(submitReply, `受理回执应落 steer 车道（受理即出站，不排队）：${JSON.stringify(submitReply)}`).toMatchObject({
+      expect(submitReply, `受理回执应落 steer 投递路径（受理即出站，不排队）：${JSON.stringify(submitReply)}`).toMatchObject({
         clientUuid: PROBE_UUID,
         lane: 'steer',
         state: 'queued',

@@ -588,9 +588,37 @@ describe('migratePiSessionLogTree（rekey tee 迁移，session-store-layout-inve
     expect(existsSync(join(newTree, 'pi-2026-10-18.jsonl'))).toBe(true)
     expect(existsSync(join(newTree, 'pi-2026-10-18.1.gz'))).toBe(true)
     expect(existsSync(oldTree)).toBe(false) // 迁空后旧树目录清除
+    // 族④根因修复（W3.5）：仅 logs/ 且迁空 → 连父目录 <root>/sid-old/ 一起回收
+    expect(existsSync(join(dataDir, 'ext-sessions', 'sid-old'))).toBe(false)
   })
 
-  it('同名冲突跳过不覆盖（双方 boundary 行保留，warn 出声）', async () => {
+  it('族④安全条件反例：父目录有兄弟域 → 保留父目录 + warn 留痕（兄弟域数据不丢）', async () => {
+    logger = await loadLogger()
+    logger.initLogger(dataDir)
+    const oldTree = join(dataDir, 'ext-sessions', 'sid-old', 'logs')
+    const siblingDir = join(dataDir, 'ext-sessions', 'sid-old', 'subagents')
+    mkdirSync(oldTree, { recursive: true })
+    mkdirSync(siblingDir, { recursive: true })
+    writeFileSync(join(oldTree, 'pi-2026-10-18.jsonl'), '{"seg":1}\n')
+    writeFileSync(join(siblingDir, 'record.json'), '{"subagent":"record"}')
+
+    logger.migratePiSessionLogTree('sid-old', 'sid-new')
+    await logger.closeLogger()
+
+    // 文件迁到新树
+    const newTree = join(dataDir, 'ext-sessions', 'sid-new', 'logs')
+    expect(existsSync(join(newTree, 'pi-2026-10-18.jsonl'))).toBe(true)
+    // logs/ 迁空即收；父目录因兄弟域存在被保留（兄弟域数据零丢失）
+    expect(existsSync(oldTree)).toBe(false)
+    expect(existsSync(siblingDir)).toBe(true)
+    expect(readFileSync(join(siblingDir, 'record.json'), 'utf8')).toBe('{"subagent":"record"}')
+    // warn 留痕（不静默）：父目录保留的原因进 runtime 主日志
+    const mainLog = mainLogFiles().map((n) => readFileSync(join(logsDir(), n), 'utf8')).join('')
+    expect(mainLog).toContain('parent dir kept (sibling domains present')
+    expect(mainLog).toContain('sid-old')
+  })
+
+  it('同名冲突跳过不覆盖（双方 boundary 行保留，warn 出声；族④：logs/ 未迁空 → 父目录保留）', async () => {
     logger = await loadLogger()
     logger.initLogger(dataDir)
     const oldTree = join(dataDir, 'ext-sessions', 'sid-old', 'logs')
@@ -604,11 +632,54 @@ describe('migratePiSessionLogTree（rekey tee 迁移，session-store-layout-inve
     expect(readFileSync(join(newTree, 'pi-2026-10-18.jsonl'), 'utf8')).toBe('new\n') // 不覆盖
     expect(existsSync(oldTree)).toBe(true) // 冲突文件留旧树（不丢数据；skip warn 走
     // writeLogEntry 进 runtime log——落盘面依赖主日志初始化，本用例不锚定）
+    // 族④：logs/ 未迁空 = 安全条件② 不满足 → 父目录同留（连 logs/ 一起）
+    expect(existsSync(join(dataDir, 'ext-sessions', 'sid-old'))).toBe(true)
   })
 
   it('旧树无 logs 目录 → no-op 不抛', async () => {
     logger = await loadLogger()
     logger.initLogger(dataDir)
     expect(() => logger!.migratePiSessionLogTree('sid-none', 'sid-new')).not.toThrow()
+  })
+})
+
+describe('removeEphemeralSessionTree（族③根因修复，W3.5 / E-21）', () => {
+  it('ephemeral 树整树回收（含非空 logs/pi-<date>.jsonl——「只删空目录」会漏的形态）', async () => {
+    logger = await loadLogger()
+    logger.initLogger(dataDir)
+    const ephemeralId = 'ephemeral-1792810485505-dd91a183-5ff5-4b1e-bf4b-90a905f37a59'
+    const tree = join(dataDir, 'ext-sessions', ephemeralId)
+    mkdirSync(join(tree, 'logs'), { recursive: true })
+    writeFileSync(join(tree, 'logs', 'pi-2026-10-24.jsonl'), '{"type":"_spawn_boundary"}\n')
+
+    logger.removeEphemeralSessionTree(ephemeralId)
+
+    expect(existsSync(tree)).toBe(false) // 整树回收（含 tee 文件）
+    // 兄弟树不受影响
+    mkdirSync(join(dataDir, 'ext-sessions', 'real-sid', 'logs'), { recursive: true })
+    writeFileSync(join(dataDir, 'ext-sessions', 'real-sid', 'logs', 'pi-2026-10-24.jsonl'), 'x\n')
+    logger.removeEphemeralSessionTree(ephemeralId) // 幂等：树已不存在 → no-op 不抛
+    expect(existsSync(join(dataDir, 'ext-sessions', 'real-sid', 'logs', 'pi-2026-10-24.jsonl'))).toBe(true)
+  })
+
+  it('fail-safe：非 ephemeral- 前缀入参一律拒绝删除（防误删真实会话树）', async () => {
+    logger = await loadLogger()
+    logger.initLogger(dataDir)
+    const realTree = join(dataDir, 'ext-sessions', '66666666-7777-4888-8999-aaaaaaaaaaaa', 'logs')
+    mkdirSync(realTree, { recursive: true })
+    writeFileSync(join(realTree, 'pi-2026-10-24.jsonl'), '{"real":"session"}\n')
+
+    logger.removeEphemeralSessionTree('66666666-7777-4888-8999-aaaaaaaaaaaa')
+
+    expect(existsSync(realTree)).toBe(true) // 真实会话树零触碰
+    expect(readFileSync(join(realTree, 'pi-2026-10-24.jsonl'), 'utf8')).toBe('{"real":"session"}\n')
+  })
+
+  it('logger 未初始化（dataDirRoot 未知）→ no-op 不抛', async () => {
+    logger = await loadLogger() // 不调 initLogger
+    const tree = join(dataDir, 'ext-sessions', 'ephemeral-1-2', 'logs')
+    mkdirSync(tree, { recursive: true })
+    expect(() => logger!.removeEphemeralSessionTree('ephemeral-1-2')).not.toThrow()
+    expect(existsSync(tree)).toBe(true) // 无 dataDirRoot 时无从定位树，保持原状
   })
 })

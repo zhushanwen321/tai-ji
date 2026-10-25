@@ -188,6 +188,13 @@ export function withScheduleSummary<T extends ToolResultLike>(
   return { ...result, details: { ...details, summary } }
 }
 
+/** 多行文本 → 单行摘要文本（换行与连续空白折叠为单空格；plan tool.ts 同模式）。
+ *  details.summary 单行契约见 docs/extensions/extension-conventions.md
+ *  「Tool result details.summary 约定」（自由文本 name/schedule 可含 \n，进摘要前先归一）。 */
+function toSingleLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
 /** schedule（创建）摘要：`Scheduled "<name>" · <schedule>`；取消态与数据缺失时按形态降级。 */
 export function buildScheduleSummary(params: ScheduleParamsT, result: ToolResultLike): string {
   const details = asRecord(result.details)
@@ -197,8 +204,8 @@ export function buildScheduleSummary(params: ScheduleParamsT, result: ToolResult
   if (name === undefined) return 'Scheduled'
   const spec = asScheduleSpec(task.schedule)
   const kind = task.kind === 'once' || task.kind === 'recurring' ? (task.kind as TaskKind) : undefined
-  const scheduleText = spec !== undefined ? formatSchedule(spec, kind, 'en-US') : params.schedule
-  return `Scheduled "${name}" · ${scheduleText}`
+  const scheduleText = spec !== undefined ? formatSchedule(spec, kind, 'en-US') : toSingleLine(params.schedule)
+  return `Scheduled "${toSingleLine(name)}" · ${scheduleText}`
 }
 
 /** schedule_control 摘要：按 action 分支（toggle 按 enabled 目标态分 Paused/Resumed）。 */

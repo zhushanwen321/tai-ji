@@ -122,6 +122,7 @@ const statusText = computed(() => {
     case 'retrying': return t('panel.workflowViz.statusRetrying')
     case 'done': return t('panel.workflowViz.statusDone')
     case 'failed': return t('panel.workflowViz.statusFailed')
+    case 'cancelled': return t('panel.workflowViz.statusCancelled')
     default: {
       const exhaustive: never = view.value.status
       throw new Error(`unreachable derived status: ${String(exhaustive)}`)

@@ -7,10 +7,10 @@
  *    各跑一段 bash sleep）顺序执行——两任务在途期的 zcode 引擎进程（wrapper 落盘
  *    `<engineDataDir>/engines/zcode/` 特征）pid 恒同（双任务同 pid + 任务间不退）。
  *    「现状行为即通过标准」：改造未动 zcode spawn 形态（shared-service 透传 registry
- *    保形），本轨 = manifest 显式声明后的路由保形回归。
+ *    保形），本组 = manifest 显式声明后的路由保形回归。
  *  - A7/V7 taiji 退出杀引擎进程：app.close() 后 zcode 引擎进程随宿主退出（宽限窗内
  *    pid 消失——stdin EOF 自灭链/停机收割）。pi 薄壳的收尾回落已由
- *    batch-window-lifecycle（A1）/ batch-s4（A2）覆盖，本轨只验 zcode 面。
+ *    batch-window-lifecycle（A1）/ batch-s4（A2）覆盖，本组只验 zcode 面。
  *
  * 断言原始证据文档 = ps 进程表（/engines/zcode/ 特征，基线差分吸收环境常驻；
  * wrapper 进程 argv = node <engineDataDir>/engines/zcode/zcode-launcher.cjs，
@@ -31,6 +31,7 @@ import {
 import {
   applyRealTrackGate,
   attachConsoleErrorCapture,
+  awaitMainTurnComplete,
   cleanupRealTrackApp,
   listFilesRecursive,
   openMainListenWs,
@@ -129,16 +130,15 @@ test('ZSL (batch real): zcode 双任务同 pid（V4 懒加载单例回归）+ ta
       payload: { sessionId: sid, content: prompt },
     }, 'zsl-dispatch', 30_000)
     expect(sendReply.type, '派发 prompt 应被接受').not.toBe('error')
-    const done = await waitUntil(() => sub.events.filter((e) => e.type === 'message.complete').length > 0, MAIN_TURN_TIMEOUT_MS)
-    if (!done) {
-      writeDiag('batch-zsl-dispatch-turn.json', {
-        seen: [...new Set(sub.events.map((e) => String(e.type)))],
-        runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-        consoleErrors: consoleCap.errors,
-      })
-    }
-    expect(done, `派发 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（主 LLM 未调 workflow tool？）`).toBe(true)
-    sub.events.length = 0
+    await awaitMainTurnComplete({
+      events: sub.events,
+      timeoutMs: MAIN_TURN_TIMEOUT_MS,
+      dataDir,
+      consoleErrors: consoleCap.errors,
+      diag: writeDiag,
+      diagName: 'batch-zsl-dispatch-turn.json',
+      foundMessage: `派发 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（主 LLM 未调 workflow tool？）`,
+    })
 
     // ── V4 断言范围①：r1 在途，zcode 引擎进程出现（懒加载——首个任务触发 spawn） ──
     const up1 = await waitUntil(() => zcodeProcessSnapshot().pids.size > zcBase.pids.size, PROC_TIMEOUT_MS)

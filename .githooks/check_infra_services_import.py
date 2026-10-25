@@ -30,6 +30,7 @@ check_services_infra_import.py 只拦 services→infra，infra→services 方向
 退出码: 0 通过 / 2 违规
 """
 
+from __future__ import annotations
 import re
 import sys
 from pathlib import Path

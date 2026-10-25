@@ -259,6 +259,9 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 			debugLog("warn", "listener: pending:unregister parse failed", data);
 			return;
 		}
+		if (parsed.reasonMalformed) {
+			debugLog("warn", "listener: pending:unregister reason missing/malformed (emit-side contract breach) → settled no_result", data);
+		}
 
 		debugLog("debug", "listener: pending:unregister parsed", parsed);
 
@@ -424,8 +427,8 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 		await awaitCollectArrivals(port, waitingIds, collected, timeoutMs, signal);
 
 		// 终局序列（设计 §3.1③）：consume 取走剩余已到达挂起条目（超时/abort 路径的
-		// 部分收取），collectRelease 解散等待集并把未收挂起条目直通内核 flush（跳过
-		// 合批窗口，恢复 push）。空等待路径不会走到这里（提前返回）。
+		// 部分收取），collectRelease 解散等待集并把未收挂起条目直通内核 flush（边沿
+		// 即投——攒批窗已删 §3.3.7③，恢复 push）。空等待路径不会走到这里（提前返回）。
 		collected.push(...port.consume());
 		port.collectRelease();
 
@@ -464,8 +467,9 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 				case "ready":
 				case "unregistered-no-entry":
 					// 快照收取：ready = 日志条目已有终局的读侧快照（不写新终局）；
-					// unregistered-no-entry = 第四态无载荷有限信息形态（outcome 取注销
-					// status、note 说明来源，端口侧组装）。两态的 entry 契约在册。
+					// unregistered-no-entry = 第四态无载荷有限信息形态（outcome 由端口
+					// 按结清视图优先 + legacy status 兜底填充、note 说明来源，端口侧
+					// 组装）。两态的 entry 契约在册。
 					buckets.collected.push({ id: snap.id, ...(snap.entry ?? {}) });
 					break;
 				case "in-push-pipeline":
@@ -526,22 +530,27 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 		});
 	}
 
-	/** type/outcome 缺失回填（设计 §3.1③ 字段来源表：type 与 pending:register 的
-	 * type 对齐、outcome 与 pending:unregister 的 status 对齐；MF-1-6：端口 consume
-	 * 只返回 {id, content, details}，终态字段统一由本处单遍扫描回填）：「等待中
-	 * 同步到达」的挂起条目在端口 consume 时点，生产方的注销 entry 尚未落盘
-	 * （managed flushBatch 的 deliver 与 unregisterPending 同步段相邻、deliver 先
-	 * 行；端口 consume 由到达回调在 deliver 栈内同步触发），outcome 恒取空。await
-	 * 恢复后生产方同步栈已完成（注销 entry 已落盘），按本 session entries 现算回填；
-	 * 注销不在册的条目保持 undefined（诚实缺省，不虚构终态）。快照收取条目
-	 * （ready / unregistered-no-entry）的 type/outcome 已由端口 collectArm 填充，
-	 * 回填只补缺不覆盖。 */
+	/** type/outcome 缺失回填（设计 §3.1③ 字段来源表 + §3.3.6 结清权威）：type 与
+	 *  pending:register 的 type 对齐；outcome 与端口快照通道（delivery-port
+	 *  collectFieldsFor / collectArm）统一填充规则——注销结清视图优先（reason 事实
+	 *  经 resolveSettlementReason 结清解析，封闭五值 + 词表外 unknown fail-visible，
+	 *  protocol scanPendingFields 单点投影），legacy status 副档兜底。结清视图承载
+	 *  no_result/lost 等新写入方 reason 的真值（旧 status 副档恒落 unknown），兜底
+	 *  仅服务结清视图缺位的畸形 data（status 合法但 reason 非 string——注销 entry
+	 *  不入结清视图、status 副档在册），此时两通道同取 status 值保持一致；两视图
+	 *  皆缺位保持 undefined（诚实缺省，不虚构终态）。「等待中同步到达」的挂起条目
+	 *  在端口 consume 时点，生产方的注销 entry 尚未落盘（managed flushBatch 的
+	 *  deliver 与 unregisterPending 同步段相邻、deliver 先行；端口 consume 由到达
+	 *  回调在 deliver 栈内同步触发），outcome 恒取空。await 恢复后生产方同步栈已完成
+	 *  （注销 entry 已落盘），按本 session entries 现算回填；注销不在册的条目保持
+	 *  undefined。快照收取条目（ready / unregistered-no-entry）的 type/outcome 已由
+	 *  端口 collectArm 填充，回填只补缺不覆盖。 */
 	function backfillCollectFields(ctx: ExtensionContext, collected: CollectedEntry[]): void {
 		if (!collected.some((c) => c.outcome === undefined || c.type === undefined)) return;
 		const fields = scanPendingFields(ctx.sessionManager.getEntries());
 		for (const c of collected) {
 			if (c.type === undefined) c.type = fields.registerTypes.get(c.id);
-			if (c.outcome === undefined) c.outcome = fields.unregisterStatuses.get(c.id);
+			if (c.outcome === undefined) c.outcome = fields.unregisterSettlements.get(c.id) ?? fields.unregisterStatuses.get(c.id);
 		}
 	}
 }
@@ -574,27 +583,35 @@ function parseRegisterEvent(data: unknown): ParsedRegister | null {
 interface ParsedUnregister {
 	id: string;
 	reason: string;
+	/** reason 缺失/非 string（emit 方违约的畸形 data）——缺省 no_result 结清时置位，
+	 *  调用点 debugLog warn 留痕（[subagent-observability §3.3.11④]）。 */
+	reasonMalformed?: boolean;
 }
 
 /** 解析 pending:unregister 事件 data（容错缺失/类型错误字段）。
- *  T2 通知由 subagent-workflow 自有通道 bg-notify-render 承担，不经本事件。 */
+ *  T2 通知由 subagent-workflow 自有通道 bg-notify-render 承担，不经本事件。
+ *  [subagent-observability §3.3.11④] reason 缺失/非 string（emit 方漏传的违约
+ *  形态）缺省 no_result 不产 completed——无事实可依不产假成功结清，与
+ *  resolveSettlementReason / resolveSettlement 缺省方向一致；畸形经调用点
+ *  warn 留痕。 */
 function parseUnregisterEvent(data: unknown): ParsedUnregister | null {
 	if (typeof data !== "object" || data === null) return null;
 	const d = data as Record<string, unknown>;
 	if (typeof d.id !== "string") return null;
-	return {
-		id: d.id,
-		reason: typeof d.reason === "string" ? d.reason : "completed",
-	};
+	if (typeof d.reason !== "string") {
+		return { id: d.id, reason: "no_result", reasonMalformed: true };
+	}
+	return { id: d.id, reason: d.reason };
 }
 
 /** 将事件 reason 映射为 pending:unregister entry 的 status 字段（落盘契约组成部分）。
  *  权威单点在 protocol pending-entries（ext-simplify-17 D10）——本函数是对 protocol
  *  导出的类型收窄包装（PendingStatus 枚举留在本包，protocol 不引 extension 侧类型），
  *  既有调用点零改动；bte 对账写侧同引 protocol 单点，两侧映射不再可能漂移。
- *  词表演化背景（U5 / §3.2.5 通知词表对齐）见 protocol 实现处 JSDoc。 */
+ *  词表演化背景（U5 / §3.2.5 通知词表对齐）见 protocol 实现处 JSDoc；unknown 缺省
+ *  成员两侧词表同批收录，收窄赋值成立无需断言。 */
 function mapReasonToStatus(reason: string): PendingStatus {
-	return mapReasonToStatusImpl(reason) as PendingStatus;
+	return mapReasonToStatusImpl(reason);
 }
 
 /** 格式化 active 列表为可读文本 */

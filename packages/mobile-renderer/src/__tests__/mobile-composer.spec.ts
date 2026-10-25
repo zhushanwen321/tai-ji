@@ -1,6 +1,10 @@
 // MobileComposer 测试（remote-use U1.4c：中断键/发送键——发送正路 segments 形状 +
 // 空输入检查；图片粘贴降级链以真实 paste 事件驱动，断言落 DOM 观察点）。
 //
+// [chat-flow-consistency D5] 发送位改内容驱动双形态：有内容=发送（排队去向叠角标）、
+// 无内容+占用=停止、无内容+空闲=禁用占位（disabled 含 !hasInput）——发送/停止互斥分支
+// 由 showStop 判定（occupancy 派生 + 乐观投影），不再是 isActive 单信号。
+//
 // app-runtime 模块级 mock：隔离 core WS 依赖（测试禁触网络），直接断言组件层对
 // useChat.abort / useChat.send 的调用接线。MobileMessageStream 的 provide 链测试
 // 在 mobile-ui.spec.ts（不 mock，走真实 core store）。
@@ -10,10 +14,17 @@ import MobileComposer from '../views/MobileComposer.vue'
 import { i18n } from '../i18n'
 
 // vi.hoisted：mock 工厂被 hoist 到 import 前，工厂内引用的变量须经 vi.hoisted 创建
-const { abortMock, sendMock } = vi.hoisted(() => ({
+const { abortMock, sendMock, editDeliveryMock, anchorOfMock, clearForMock, sessionPhaseMock, errorBarMock } = vi.hoisted(() => ({
   abortMock: vi.fn<(sid: string) => Promise<void>>(),
   sendMock: vi.fn<(sid: string, segments: unknown[]) => Promise<void>>(),
+  editDeliveryMock: vi.fn<(sid: string, clientUuid: string, content: string) => Promise<unknown>>(),
+  anchorOfMock: vi.fn<(sid: string) => string | null>(),
+  clearForMock: vi.fn<(sid: string) => void>(),
+  sessionPhaseMock: vi.fn<(sid: string) => { turn: string; compacting: boolean; bash: boolean }>(),
+  errorBarMock: vi.fn<(message: string) => void>(),
 }))
+
+vi.mock('../shell/error-bar', () => ({ showErrorBar: errorBarMock }))
 
 vi.mock('../shell/app-runtime', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../shell/app-runtime')>()
@@ -21,15 +32,25 @@ vi.mock('../shell/app-runtime', async (importOriginal) => {
     ...actual,
     chatStore: {
       ...actual.chatStore,
-      // 组件模板按 isActive 分支渲染中断/发送键；sid-active 走中断分支，其余走发送分支
+      // 乐观窗成分（D5-4：本地 send 的乐观置位先于 occupancy 广播）：sid-active 投影
+      // dispatching → 无内容走停止分支，其余会话全 idle（sessionPhase 走真实现缺省）
       isActive: (sid: string) => sid === 'sid-active',
       getMessages: () => [],
+      // 相位可控注入（stopTarget 两档断言源）：缺省全 idle（与真实现缺省同值，存量用例
+      // 行为不变），专测 sid 由用例自行设定返回值
+      sessionPhase: (sid: string) =>
+        sessionPhaseMock(sid) ?? { turn: 'idle', compacting: false, bash: false },
     },
     useChatInstance: {
       ...actual.useChatInstance,
       abort: abortMock,
       send: sendMock,
     },
+    // 锚定编辑分流（chat-flow-consistency D6）：锚定读口/解除/原位编辑 RPC 可控注入
+    //（默认 null = 无锚定，存量用例发送路径不变）
+    queueEditAnchorOf: anchorOfMock,
+    clearQueueEditFor: clearForMock,
+    editDelivery: editDeliveryMock,
   }
 })
 
@@ -40,15 +61,19 @@ function mountComposer(sessionId: string | null) {
   })
 }
 
-describe('MobileComposer 中断键（remote-use-mobile D7（移动壳 v1 功能集裁定）中断行：isActive 时可见，点击调 useChat.abort）', () => {
+describe('MobileComposer 发送位双形态（D5 裁剪集：停止键/发送键/禁用占位）', () => {
   beforeEach(() => {
     abortMock.mockClear()
     sendMock.mockClear()
+    editDeliveryMock.mockClear()
+    anchorOfMock.mockReset()
+    clearForMock.mockClear()
     abortMock.mockResolvedValue(undefined)
     sendMock.mockResolvedValue(undefined)
+    anchorOfMock.mockReturnValue(null)
   })
 
-  it('isActive session 渲染中断键（不渲染发送键），点击调 abort(sessionId)', async () => {
+  it('乐观占用 session（isActive，无内容）渲染停止键（不渲染发送键），点击调 abort(sessionId)', async () => {
     const wrapper = mountComposer('sid-active')
     await flushPromises()
     expect(wrapper.find('[data-testid="mobile-composer-stop"]').exists()).toBe(true)
@@ -59,15 +84,20 @@ describe('MobileComposer 中断键（remote-use-mobile D7（移动壳 v1 功能�
     wrapper.unmount()
   })
 
-  it('非活跃 session 渲染发送键（不渲染中断键），输入文本后点击调 send(sessionId, segments) 并清空输入', async () => {
+  it('空闲 session 渲染发送键；输入文本（input 事件驱动 hasInput）后点击调 send(sessionId, segments) 并清空输入', async () => {
     const wrapper = mountComposer('sid-idle')
     await flushPromises()
     expect(wrapper.find('[data-testid="mobile-composer-stop"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="mobile-composer-send"]').exists()).toBe(true)
+    const sendBtn = wrapper.get('[data-testid="mobile-composer-send"]')
+    // 无内容 = 禁用态发送占位（D5：disabled 含 !hasInput，title 提示输入）
+    expect(sendBtn.attributes('disabled')).toBeDefined()
     // 输入注入参照 ui composer-input-get-text.test.ts：直接写 [role="textbox"] 的 innerHTML
-    //（getSegments 从 DOM 遍历提取，与 input 事件无关）；纯文本产出 { type:'text', text } 段
+    //（getSegments 从 DOM 遍历提取，与 input 事件无关）；再 trigger('input') 走组件真实
+    // onInput → 解析 segments + emit('input') → 组件 hasInput 置真解锁按钮。纯文本产出
+    // { type:'text', text } 段
     const editable = wrapper.get('[role="textbox"]')
     ;(editable.element as HTMLDivElement).innerHTML = 'hello mobile'
+    await editable.trigger('input')
     await wrapper.get('[data-testid="mobile-composer-send"]').trigger('click')
     await flushPromises()
     expect(sendMock).toHaveBeenCalledTimes(1)
@@ -77,9 +107,10 @@ describe('MobileComposer 中断键（remote-use-mobile D7（移动壳 v1 功能�
     wrapper.unmount()
   })
 
-  it('空输入点击发送键：segments 空 guard，组件层不发（sendMock 不被调）', async () => {
+  it('无内容点击发送键：禁用态拦截（disabled 含 !hasInput），组件层不发（sendMock 不被调）', async () => {
     const wrapper = mountComposer('sid-idle')
     await flushPromises()
+    expect(wrapper.get('[data-testid="mobile-composer-send"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-testid="mobile-composer-send"]').trigger('click')
     await flushPromises()
     expect(sendMock).not.toHaveBeenCalled()
@@ -153,6 +184,97 @@ describe('图片粘贴降级链（真实 paste 事件驱动）', () => {
     expect(wrapper.find('.image-chip').exists()).toBe(false)
     expect(execSpy).toHaveBeenCalledWith('insertText', false, 'plain note')
     expect(execSpy).not.toHaveBeenCalledWith('insertText', false, expectedFallbackText())
+    wrapper.unmount()
+  })
+})
+
+// ── 锚定编辑发送分流（chat-flow-consistency D6 移动壳）与 stopTarget 两档 ──
+//
+// 覆盖：onSend 锚定在册 → editDelivery 原位替换（成功无乐观气泡）/ edited=false 四值降级
+// （内容按普通新消息发出 + showErrorBar 分型）/ 清空草稿解除锚定 watch（Q4 解除路径 2，
+// sid 守卫）/ stopTarget compacting 与 settling 档（对齐桌面 sendButtonStopTarget 规则）。
+describe('锚定编辑发送分流 + stopTarget 两档（D6）', () => {
+  beforeEach(() => {
+    abortMock.mockClear()
+    sendMock.mockClear()
+    editDeliveryMock.mockClear()
+    anchorOfMock.mockReset()
+    clearForMock.mockClear()
+    sessionPhaseMock.mockReset()
+    errorBarMock.mockClear()
+    abortMock.mockResolvedValue(undefined)
+    sendMock.mockResolvedValue(undefined)
+    anchorOfMock.mockReturnValue(null)
+  })
+
+  /** 输入注入（复用上文 input 事件驱动手法）：写 innerHTML + trigger('input') */
+  async function typeInput(wrapper: ReturnType<typeof mountComposer>, text: string): Promise<void> {
+    const editable = wrapper.get('[role="textbox"]')
+    ;(editable.element as HTMLDivElement).innerHTML = text
+    await editable.trigger('input')
+  }
+
+  it('锚定在册 + editDelivery edited=true：原位替换收尾（无 send、锚定解除、输入清空）', async () => {
+    anchorOfMock.mockReturnValue('u-1')
+    editDeliveryMock.mockResolvedValue({ clientUuid: 'u-1', edited: true })
+    const wrapper = mountComposer('sid-edit')
+    await flushPromises()
+    await typeInput(wrapper, 'edited text')
+    await wrapper.get('[data-testid="mobile-composer-send"]').trigger('click')
+    await flushPromises()
+    expect(editDeliveryMock).toHaveBeenCalledWith('sid-edit', 'u-1', 'edited text')
+    expect(clearForMock).toHaveBeenCalledWith('sid-edit')
+    expect(sendMock).not.toHaveBeenCalled()
+    expect((wrapper.get('[role="textbox"]').element as HTMLDivElement).innerHTML).toBe('')
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['delivered', 'mobile.queueStrip.editDelivered'],
+    ['cancelled', 'mobile.queueStrip.editCancelled'],
+    ['not-found', 'mobile.queueStrip.editNotFound'],
+    [undefined, 'mobile.queueStrip.editUnconfirmed'],
+  ] as const)('edited=false（reason=%s）四值降级：错误条分型 + 内容按普通新消息发出', async (reason, noticeKey) => {
+    anchorOfMock.mockReturnValue('u-1')
+    editDeliveryMock.mockResolvedValue({ clientUuid: 'u-1', edited: false, reason })
+    const wrapper = mountComposer('sid-edit')
+    await flushPromises()
+    await typeInput(wrapper, 'still here')
+    await wrapper.get('[data-testid="mobile-composer-send"]').trigger('click')
+    await flushPromises()
+    expect(errorBarMock).toHaveBeenCalledWith(i18n.global.t(noticeKey))
+    expect(sendMock).toHaveBeenCalledWith('sid-edit', [{ type: 'text', text: 'still here' }])
+    expect(clearForMock).toHaveBeenCalledWith('sid-edit')
+    wrapper.unmount()
+  })
+
+  it('清空草稿解除锚定（Q4 解除路径 2）：同会话「有内容 → 空」边沿触发 clearQueueEditFor', async () => {
+    anchorOfMock.mockReturnValue('u-1')
+    const wrapper = mountComposer('sid-edit')
+    await flushPromises()
+    await typeInput(wrapper, 'draft')
+    ;(wrapper.get('[role="textbox"]').element as HTMLDivElement).innerHTML = ''
+    await wrapper.get('[role="textbox"]').trigger('input')
+    await flushPromises()
+    expect(clearForMock).toHaveBeenCalledWith('sid-edit')
+    wrapper.unmount()
+  })
+
+  it('无内容 + 压缩中（compacting）：停止键渲染且档位 = 终止压缩', async () => {
+    sessionPhaseMock.mockReturnValue({ turn: 'idle', compacting: true, bash: false })
+    const wrapper = mountComposer('sid-compacting')
+    await flushPromises()
+    const stop = wrapper.get('[data-testid="mobile-composer-stop"]')
+    expect(stop.attributes('aria-label')).toBe(i18n.global.t('mobile.composer.stopCompacting'))
+    wrapper.unmount()
+  })
+
+  it('无内容 + settling（收尾期）：停止键渲染且档位 = 回合中止（settlement 属活跃回合）', async () => {
+    sessionPhaseMock.mockReturnValue({ turn: 'settling', compacting: false, bash: false })
+    const wrapper = mountComposer('sid-settling')
+    await flushPromises()
+    const stop = wrapper.get('[data-testid="mobile-composer-stop"]')
+    expect(stop.attributes('aria-label')).toBe(i18n.global.t('mobile.composer.stop'))
     wrapper.unmount()
   })
 })

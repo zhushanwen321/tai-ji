@@ -16,6 +16,7 @@ import {
   resumeScenarioRun,
   scanScenarioEvents,
   seedCrashedRun,
+  settledCountByTaskIndex,
   waitForScenarioSettled,
 } from "./record-mode/scenario-kit.ts";
 
@@ -47,10 +48,7 @@ describe("场景 5：并行波次——在途丢弃重派不重不漏", () => {
 
       // 同一 callId 的成功结果不被重复写入：settled 帧每 taskIndex 恰一条
       const events = await scanScenarioEvents(env, RUN_ID);
-      const settledCount = new Map<number, number>();
-      for (const e of events) {
-        if (e.type === "agent-settled") settledCount.set(e.taskIndex, (settledCount.get(e.taskIndex) ?? 0) + 1);
-      }
+      const settledCount = settledCountByTaskIndex(events);
       expect(settledCount.size).toBe(4);
       expect([...settledCount.values()].every((n) => n === 1)).toBe(true);
     } finally {

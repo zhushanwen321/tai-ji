@@ -562,11 +562,12 @@ describe("SubagentService", () => {
           name: "general-purpose",
         }),
       );
-      // [U5] 失败轮 settle（markRoundIdle）簿记⑧注销（reason=running——进程已死从
-      // 活跃差集移除；旧 finalizeRecord emitUnregister(closed) 随终态化退役）
+      // [U5] 失败轮 settle（markRoundIdle）簿记⑧结清（[subagent-observability
+      // §3.3.6 结清枚举新写入方] reason=failed——轮失败结清按轮终事实产出；旧恒发
+      // 字面量 running 随写入方退役；旧 finalizeRecord emitUnregister(closed) 随终态化退役）
       expect(pi.events.emit).toHaveBeenCalledWith(
         "pending:unregister",
-        expect.objectContaining({ reason: "running" }),
+        expect.objectContaining({ reason: "failed" }),
       );
     });
 

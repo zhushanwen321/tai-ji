@@ -1,7 +1,8 @@
 /**
  * btw（旁路线）内容域选中态（display-containers §6.6① 五字段迁出，W0 还债）。
  *
- * 迁出来源 = DrawerControlState.selectedBtwVid（btw tab 当前查看的旁路线 vid）。
+ * 迁出来源 = DrawerControlState.selectedBtwVid（btw tab 当前查看的旁路线 session id，
+   W4a 键统一后 = pi 真实 id；字段名随键切换改名 selectedBtwSessionId）。
  * per-session 分区（useSessionScopedState，ADR-0049），键 = drawerSessionKey。
  * 写侧 = setBtwView（BtwPanel 选中线时写入）；读侧 = useBtwSelection（BtwPanel）+
  * 复合谓词 selection/predicates.ts（getViewedVids 的 D5 豁免 / btw-replay 触发范围 /
@@ -14,11 +15,12 @@ import { drawerSessionKey } from '../control'
 
 /** btw 选中态（per-session 分区） */
 export interface BtwSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费方即本批 D1 单元
-  /** btw tab 当前查看的旁路线 vid（`btw:<piSessionId>`，由 BtwPanel 选中线时写入）；undefined=未查看。
-   *  D5 chat-lru 查看态保护数据源之一（getViewedVids：isOpen + activeTab==='btw' + 本字段
-   *  三分量 → chat store 注入 evictIfNeeded，入口刷新该线 recency——查看中恒不落阈值驱逐）；
-   *  切走/关 drawer 不清（D7④ 切回恢复面板语义），复合谓词已含 isOpen/activeTab 双闸不泄漏豁免。 */
-  selectedBtwVid?: string
+  /** btw tab 当前查看的旁路线 session id（W4a 后 = 线 pi 真实会话 id，由 BtwPanel 选中线时写入）；
+   *  undefined=未查看。D5 chat-lru 查看态保护数据源之一（getViewedVids：isOpen +
+   *  activeTab==='btw' + 本字段三分量 → chat store 注入 evictIfNeeded，入口刷新该线
+   *  recency——查看中恒不落阈值驱逐）；切走/关 drawer 不清（D7④ 切回恢复面板语义），
+   *  复合谓词已含 isOpen/activeTab 双闸不泄漏豁免。 */
+  selectedBtwSessionId?: string
 }
 
 function createDefaultBtwSelection(): BtwSelectionState {
@@ -33,20 +35,21 @@ const selection = useSessionScopedState<BtwSelectionState>(
 
 /** btw 选中态视图（当前分区，切 session 自动跟随） */
 export function useBtwSelection(): {
-  selectedBtwVid: ComputedRef<string | undefined>
+  selectedBtwSessionId: ComputedRef<string | undefined>
   } {
   return {
-    selectedBtwVid: computed(() => selection.current.value.selectedBtwVid),
+    selectedBtwSessionId: computed(() => selection.current.value.selectedBtwSessionId),
   }
 }
 
 /**
- * 登记当前查看的 btw 线 vid（btw-question D7/D5，M3-a）：BtwPanel 选中线时写入 vid、
- * 清空选中/关线时传 undefined。纯字段写入（不切 tab 不开 drawer——面板本就挂在 btw tab
- * 上，由 openDrawerTab('btw') 入口负责），消费方 = 复合谓词（predicates.ts）。
+ * 登记当前查看的 btw 线 session id（btw-question D7/D5，M3-a）：BtwPanel 选中线时写入
+ * session id（W4a 后 = pi 真实 id）、清空选中/关线时传 undefined。纯字段写入（不切 tab
+ * 不开 drawer——面板本就挂在 btw tab 上，由 openDrawerTab('btw') 入口负责），消费方 =
+ * 复合谓词（predicates.ts）。
  */
-export function setBtwView(vid: string | undefined): void {
-  selection.current.value.selectedBtwVid = vid
+export function setBtwView(sessionId: string | undefined): void {
+  selection.current.value.selectedBtwSessionId = sessionId
 }
 
 /** 读取当前分区选中态（复合谓词同步读取用）。返回 reactive 分区对象本身 */

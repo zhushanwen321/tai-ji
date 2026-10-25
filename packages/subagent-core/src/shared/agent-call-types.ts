@@ -1,0 +1,422 @@
+/**
+ * Agent 调用契约族（shared 唯一权威）
+ *
+ * orchestration ↔ execution 两层共同消费的跨层契约类型，权威定义在本文件
+ * （D1 反向依赖收编决策一：契约类型归最低层，execution 侧直连本文件，
+ * 不再反向依赖 orchestration）。orchestration 侧经 re-export 壳消费
+ * （models/types.ts / models/ports.ts），barrel 与外部包深导入路径零改动。
+ *
+ * 零 orchestration/execution 内部依赖——仅 SDK 类型 + shared 端口契约
+ * （agent-event / agent-stream）。
+ *
+ * 核心内容：
+ * - DoneReason（completed/failed/aborted/budget_limited/time_limited/partially_succeeded）
+ *   （run 生命周期两态机词表已随 [D6(a)] 退役——生命周期判定唯一走
+ *   六态机 dispatchRunTrigger 链与终局记录注册表，聚合不持状态机词表）
+ * - AgentCallOpts / AgentResult（单次 agent 调用的输入/输出，宿主侧 SSOT）
+ * + AgentUsage / ToolCallEntry / AgentFailureKind（自 SDK re-export，S4 簇 3 收编）
+ * - ExecutionTraceNode / TracePatch / WorkerLogEntry（trace 数据）
+ * - AgentRunner（agent 子进程执行 port，自 models/ports.ts 随迁）
+ */
+
+import type {
+  EngineStopReason,
+  AgentFailureKind,
+  AgentOutcomeUsage as AgentUsage,
+  FailureCause,
+  ToolCallEntry,
+  // [§2.3 环解开] WorktreeHandle 的权威定义在 SDK（assembly/types.ts 只是 re-export）；
+  // 此前消费方经 assembly/types.ts 转手取它，构成 orchestration/models ↔
+  // execution/assembly 的文件级类型环。直接从 SDK 取，环自解。
+  WorktreeHandle,
+} from "@zhushanwen/subagent-engine-sdk";
+import type { AgentEvent } from "./agent-event.ts";
+import type { AgentStreamSink } from "./agent-stream.ts";
+
+// ── 终局原因 ─────────────────────────────────────────────────
+
+/**
+ * 终态原因。done 时必有（WorkflowRun 不变式）。
+ *
+ * [D6(a)] 原 run 两态机词表（running | done + 转移表）已整体退役：
+ * run 生命周期判定唯一走六态机 dispatchRunTrigger 链（terminal-actions）与
+ * 进程内终局记录注册表（isRunSettled / settledRecordOf），聚合快照不再携带
+ * 状态机词表。
+ */
+export type DoneReason =
+  | "completed"
+  | "failed"
+  | "aborted"
+  | "budget_limited"
+  | "time_limited"
+  | "partially_succeeded";
+
+export const ALL_DONE_REASONS: readonly DoneReason[] = [
+  "completed",
+  "failed",
+  "aborted",
+  "budget_limited",
+  "time_limited",
+  "partially_succeeded",
+] as const;
+
+/**
+ * DoneReason 的终止性判定（非正常完成）：通知/文案消费方区分「任务完成」与
+ * 「run 因异常收尾」（budget/time 耗尽或 abort 不是任务完成，模型可能把 done
+ * 当成功汇报——防偷懒收尾指令只对终止性 reason 追加）。
+ *
+ * 穷举 switch 无 default：DoneReason 新增成员时 tsc 强制在此显式归类，
+ * 消费方（壳 workflow-notify）不再持有本地词表镜像。
+ * [subagent-observability §3.3.8] partially_succeeded 归终止性（部分成功仍含
+ * 失败成员——模型把它当全成汇报即吞失败，终止性提示适用）。
+ */
+export function isTerminalDoneReason(reason: DoneReason): boolean {
+  switch (reason) {
+    case "completed":
+      return false;
+    case "failed":
+    case "aborted":
+    case "budget_limited":
+    case "time_limited":
+    case "partially_succeeded":
+      return true;
+  }
+}
+
+// ── Agent 调用 ────────────────────────────────────────────────
+
+
+
+/**
+ * 单次 agent 调用的任务声明（D6 任务形状合流后的单一形状）。
+ *
+ * [D6 合流裁决] 本类型 = 原 AgentCallOpts（workflow 调用方声明，18 字段）与原
+ * AgentTaskSpec（engine 中立任务声明，已删除）的合流形态，从模型脚本 agent() API
+ * 到 EnginePort.run 直达 pi 边界一次映射——SAR 链路上的 ExecuteOptions/AgentTaskSpec
+ * 中间态消除（设计 docs/design/dual-track（已删 git 可追溯）§3.3 D6 / 终态四）。
+ *
+ * 终态命名按变化原因裁定为 AgentCallOpts，理由：
+ *   - 字段演进的首要驱动轴是「调用方要表达的任务语义」（agent() API 是唯一生产写入方，
+ *     合流字段中 prompt/description/skill/skillPath/thinkingLevel 等多数派
+ *     已是调用方命名）；
+ *   - 原 AgentTaskSpec 的中立重命名层（task/slug/effort/persona）与调用方命名是
+ *     形式同构、语义同构的假差异（prompt≡task、slug=description 截断、effort≡thinkingLevel、
+ *     persona≡skillPath+appendSystemPrompt 平铺），按「消假差异」原则并入调用方命名；
+ *   - 持久化兼容反向锁定 prompt 形态：jsonl run 快照的 AgentCall.opts 与 worker 消息
+ *     opts 均以 prompt 字段落盘，改名会破坏旧快照重新加载。
+ *
+ * 引擎中立字段的并入方式（可选字段，原 AgentTaskSpec 独有字段去向）：
+ *   - graceTurns / idleTimeoutMs：可选并入；
+ *   - persona.agentRef：裁撤（无生产写入方、无消费者——pi 走 agent 字段解析身份）；
+ *   - requires：裁撤（P4 形状预留、无生产写入方；且并入需 import EngineCapabilities
+ *     形成 orchestration↔engine 类型环）。将来能力依赖声明下钻时在本形状上加回。
+ *
+ * D-12 仅重组执行编排，AgentCallOpts 形状保持兼容。
+ */
+export interface AgentCallOpts { // oe-exempt:20261023:framework:调用契约接口（自 orchestration/models 搬迁，单实现常态）
+ /** The task prompt to send to the agent. */
+  prompt: string;
+ /**
+ * Optional JSON schema for structured output.
+ * When provided, the schema is passed via PI_WORKFLOW_SCHEMA env to the subprocess,
+ * which activates the structured-output tool + turn_end hook.
+ * The tool's execute validates model output against the schema.
+ * On success, `parsedOutput` on the result is set to `tool_execution_end.result.details`
+ * (the validated, parsed data object — not the raw tool call args).
+ */
+  schema?: Record<string, unknown>;
+ /**
+ * Model to use (e.g. "router-openai/glm-5.1").
+ * When omitted, pi's default model is used.
+ */
+  model?: string;
+ /**
+ * Thinking level override (e.g. "high", "medium", "low").
+ * M2: Added to align with subagent path's ExecuteOptions.thinkingLevel.
+ * When omitted, agent .md frontmatter thinkingLevel is used (via resolveIdentity/getAgentConfig).
+ */
+  thinkingLevel?: string;
+ /** Scene name passed through to the worker for model-selection hints. */
+  scene?: string;
+ /**
+ * Wall-clock timeout in milliseconds. When > 0, aborts the subprocess
+ * if it runs longer than this, regardless of external signal.
+ * Per-call，归 AgentCall 实体（G-027）。
+ */
+  timeoutMs?: number;
+ /**
+  * Turn 上限（turn limiter 用）。
+  *
+  * [预算语义对齐] 未传或 <=0 = 不限 turn。pi 边界直出为 ExecuteOptions.maxTurns
+  * → runSpawn（D6 合流后无中间映射层）。
+  */
+  maxTurns?: number;
+ /**
+  * Turn limiter 的宽限轮数（原 AgentTaskSpec.graceTurns 并入）：超 maxTurns 后
+  * 允许继续的轮数（等待在途工具收尾）。pi 引擎消费；workflow agent() 无写入方，
+  * chat 域（ExecuteOptions.graceTurns 同名透传）经 host-task-spec 填充。
+  */
+  graceTurns?: number;
+ /**
+ * Skill name to load (e.g. "code-review"). Resolved to SKILL.md path
+ * and injected via --skill flag in the subprocess.
+ */
+  skill?: string;
+ /**
+ * Resolved absolute path to the skill directory or SKILL.md file.
+ * Set by agent-opts-resolver when opts.skill is present.
+ */
+  skillPath?: string;
+ /** Human-readable description for logging and debugging. */
+  description?: string;
+ /**
+ * Agent ref (absolute .md path). Resolved by resolveIdentity via getAgentConfig,
+ * which injects the agent's systemPrompt/model/tools/thinkingLevel. Not handled by
+ * resolveAgentOpts (single-responsibility: agent ref ownership belongs to resolveIdentity,
+ * M2 fix — previously overlapped causing double-injection + model-tier confusion).
+ */
+  agent?: string;
+ /**
+  * System prompt injection CONTENT (not file paths).
+  * Set by agent-opts-resolver: schema structured-output instruction string.
+  * Agent systemPrompt is NOT included here (handled by resolveIdentity/agentConfig).
+  * pi 边界直出为 ExecuteOptions.appendSystemPrompt（同名同义透传，D6 合流后无中间映射层）。
+  */
+  appendSystemPrompt?: string[];
+ /**
+  * Per-call 工作目录（ADR-029 决策 1）。传给 child_process.spawn 的 cwd option。
+  *
+ * 用于 worktree 隔离：传入 worktree 绝对路径，spawn 的 pi 子进程绑定到该目录，
+ * 其内部的 createAgentSession/ResourceLoader/bash 工具都在该目录运行。
+ * undefined 时 spawn 继承 workflow 进程的 cwd（向后兼容）。
+ */
+  cwd?: string;
+  /** Inherit parent session context (fork mode). Independent of worktree (file isolation). */
+  fork?: boolean;
+  /**
+   * fork-from 显式分叉源 session 文件（fork-from 断联恢复通道的唯一 lossless 载体）。
+   * 来源 = ExecuteOptions.forkFromSessionFile（host-task-spec 映射时的唯一改名点——
+   * 本形状起与 SDK 协议字段、引擎侧 SpawnRunParams.forkSource 三层同名，降低跨层
+   * 双名漂移风险）。区别于 fork:true（主 session 作分叉源）：本字段点名任意已有
+   * session 文件。chat 域唯一写入方 = fork-from action。
+   */
+  forkSource?: string;
+  /**
+   * 执行引擎 id（P4 D9 三层优先级的第一层：调用参数级，workflow step 显式指定）。
+   * 仅限「必须某引擎独有能力」的场景使用并注释原因（D9③ workflow 脚本不写死
+   * engine——环境差异由 frontmatter/全局默认承载）；透传链 worker-script-builder
+   * agent() → execute-agent-call → SAR 路由层。
+   */
+  engine?: string;
+  /** Filesystem isolation: when true, creates a new git worktree for the agent. Independent of fork.
+   * [D6 合流] 类型扩展为 boolean | WorktreeHandle（原 AgentTaskSpec.worktree 的超集）——
+   * WorktreeHandle 形态仅在 chat 域（复用外部已创建的 worktree）出现，workflow agent()
+   * 恒传 boolean。 */
+  worktree?: boolean | WorktreeHandle;
+  /** When true, agent() resolves {value, sessionFile, worktreePath, error} instead of a bare value.
+   * Worker-layer flag only — not consumed by any engine (dropped at the pi boundary). */
+  returnMeta?: boolean;
+ /**
+  * 空闲超时毫秒数（原 AgentTaskSpec.idleTimeoutMs 并入，全 record 生效的 idle GC
+  * 节奏——原「仅 conversation 模式」限定随 chatMode 消亡移除）。
+  * 优先级：参数 > env TAIJI_SUBAGENT_IDLE_TIMEOUT_MS > 默认 300000ms；显式 0/负 = 禁用
+  * idle GC。chat 域经 host-task-spec 填充。
+  */
+ idleTimeoutMs?: number;
+}
+
+// [S4 簇 3 收编] 以下三个契约类型本地定义已删除，自 @zhushanwen/subagent-engine-sdk
+// re-export（type-only，import 方路径零改动，结构等价由 protocol-closure.test.ts
+// 断言族检查）：
+//   - AgentUsage ← SDK AgentOutcomeUsage（SDK 改名消歧：core 的两个同名 AgentUsage
+//     分属 execution 与 orchestration 域，本处锚定 orchestration 域——AgentResult.usage
+//     字段型，FR-7 跨 turn 累积）；
+//   - ToolCallEntry（单次 tool 调用记录，FR-7 从 agent JSONL 流采）；
+//   - AgentFailureKind（失败分诊结构化标签，D5-③）。
+// AgentCallOpts / AgentResult 留守本文件（宿主侧 SSOT——SDK 版 AgentCallOpts 是引擎侧
+// 子集，字段裁决见 SDK contract-types 注释）。
+//
+// AgentFailureKind = 历史解析兼容残留（@deprecated 终态，权威说明在 SDK
+// contract-types AgentOutcome.failureKind，本处 core 侧同口径——[subagent-observability
+// §3.4，ADR-0158]）：新写入方失败分类一律产 FailureCause（class×kind 封闭矩阵），
+// 「可重试」判定的现行承载 = FailureCause.retryable 三态 + retry-rules extension
+// verdict（§3.3.2 硬规则③）——execute-agent-call 重试矩阵已删（失败单次即终态），
+// 本词表不再有任何重试判定点。三值保留作旧 record 帧与历史 journal 的解析兼容：
+// stale_context（pi session context 被 compact/cancel/替换）/ schema_deterministic
+// （确定性 schema 失败）/ unknown（其余一切失败）。产出侧残留 = pi 引擎
+// output-collector（packages/pi-subagent-cli/）[D5-③ 改轨] 引擎送达错误码前缀确定性
+// 分诊（恒 unknown/undefined）；子串分类器 classifyFailureKind 不再参与 outcome
+// 生产路径（仅存量跨包测试 import 词表谓词）。
+export type {
+  AgentFailureKind,
+  AgentOutcomeUsage as AgentUsage,
+  ToolCallEntry,
+} from "@zhushanwen/subagent-engine-sdk";
+
+/**
+ * 单次 agent 调用的结果（统一形态）。
+ *
+ * Engine 直接消费 SubprocessAgentRunner 返回值；callCache replay 时 worker
+ * 取 parsedOutput ?? content（见 worker-script-builder.ts 消息处理）。
+ */
+export interface AgentResult { // oe-exempt:20261023:framework:执行结果载荷契约接口（自 orchestration/models 搬迁，单实现常态）
+ /** Raw text output from the agent. */
+  content: string;
+ /**
+* [D5-③ 改轨] 失败分诊结构化标签（AgentFailureKind，历史解析兼容残留——@deprecated
+ * 终态口径见 AgentFailureKind 守恒块与 SDK contract-types AgentOutcome.failureKind）。
+ * 产出侧残留 = pi 引擎 output-collector（packages/pi-subagent-cli/）引擎送达错误码
+ * 前缀确定性分诊（恒 unknown/undefined）——非「collectResult 对最终 error 分类」
+ * （子串分类器 classifyFailureKind 已不参与 outcome 生产路径）；经 agent-result-mapper /
+ * AgentOutcome 透传到本形态。消费侧按字段透传（terminal-actions 作 RunErrorCode，
+ * 缺省兜底 "unknown"）。
+ *
+ * 仅在 error !== undefined 时有意义（成功时缺省）；缺省 = undefined（字段缺位），
+ * 不承载重试判定（重试判定在 FailureCause.retryable 三态，见下方 failure 字段）。
+ */
+  failureKind?: AgentFailureKind;
+ /**
+ * [subagent-observability §3.3.8] 失败分类（AgentOutcome.failure 协议透传，引擎收尾
+ * 边沿一次产出）。run 终局成员交付结算消费本字段点拼 `"<class>.<kind>"` 进
+ * failedMembers[].cause（场景 2 断言的数据源）；缺省 = 未分类（cause 回落 error
+ * 前缀协议码 / "unknown"）。
+ */
+  failure?: FailureCause;
+ /**
+ * Parsed structured output.
+ * Present when `schema` was provided and the output was valid JSON.
+ * Source: tool_execution_end.result.details（validated data object）。
+ */
+  parsedOutput?: unknown;
+ /** Token and cost usage accumulated across all assistant turns. */
+  usage?: AgentUsage;
+ /** Wall-clock duration in milliseconds. */
+  durationMs?: number;
+ /** True when the pi process exited with code 0. */
+  error?: string;
+ /**
+  * [D5 诊断引用写入 journal 记录] 失败时子进程 stderr tee 文件绝对路径（成功缺省）。
+  * 产出侧 = 引擎终态应答 AgentOutcome.stderrTeePath（SDK contract-types，上报判据
+  * 见彼处注释），经 workflow-dispatch outcomeToWorkflowResult 透传到本形态；消费侧
+  * worker-message-pump dispatchAgentSettled 读本字段填 agent-settled 事件载荷。
+  */
+  stderrTeePath?: string;
+ /**
+ * [subagent-observability §3.3.3] 轮终停因引擎原值（AgentOutcome.engineStopReason
+ * 协议透传，经 outcomeToWorkflowResult / outcomeToAgentResult 到本形态）。成员/one-shot
+ * 轮收条 lastRound.engineStopReason 的数据源；缺省 = 事实缺席（旧格式放行）。
+ */
+  engineStopReason?: EngineStopReason;
+ /** [subagent-observability §3.3.3 P5] 本 run 内重试失败尝试计数（同 record-model 字段）。 */
+  retryAttempts?: number;
+ /**
+ * [subagent-observability §3.3.1/§3.3.8 P6] pi 接管三态（AgentOutcome.promptDisposition
+ * 协议透传，经 outcomeToWorkflowResult 到本形态）。handled = 本条 prompt 未启动任何
+ * run（被既有会话接管）——run 终局成员交付结算消费：被接管成员判 cancelled（未交付
+ * 且非失败），agent-settled 帧跳写（resume 落重派集）；缺省 = 事实缺席（旧格式放行）。
+ */
+  promptDisposition?: "started" | "queued" | "handled";
+ /**
+ * Pi session ID for the subagent process (uuidv7).
+ * Present when pi emits a session header (default in --mode json).
+ * Can be used to locate the session JSONL file for post-run inspection (G-017)。
+ */
+  sessionId?: string;
+ /**
+ * Session JSONL 绝对路径（不含目录的文件名在 subagents 侧 AgentResult.sessionFile）。
+ * 由 mapToWorkflowAgentResult 从 subagents AgentResult 透传——让 workflow 编排层
+ * 继承 subagent 执行管道产出的 session 文件路径，overlay/GUI 可直接定位。
+ * 窗口期内可能 undefined（session 尚未创建成功）。
+ */
+  sessionFile?: string;
+ /**
+ * Absolute path of the git worktree used for filesystem isolation (set when
+ * worktree isolation is active). Injected by executeAndAwait from record.worktreeHandle.path.
+ *
+ * ⚠️ Diagnostic only, may not exist: executeAndAwait's finalizeRecord cleans up the
+ * worktree (git worktree remove --force) before returning, so by the time this field
+ * reaches the caller the directory has typically been deleted. Use it only for log/trace
+ * correlation (e.g. attributing a session jsonl to its worktree origin) — never as a cwd
+ * for a subsequent agent or filesystem operation (would ENOENT).
+ */
+  worktreePath?: string;
+ /** All tool calls collected from JSONL stream (FR-7). */
+  toolCalls?: ToolCallEntry[];
+}
+
+// ── Agent 执行 port（自 models/ports.ts Port 1 随迁）──────────
+
+/**
+ * Agent 子进程执行 port。Infra 实现：SubprocessAgentRunner。
+ *
+ * run 执行单次 agent 调用（委托 SubagentService.executeWorkflowAgent，[H2 W4] 纯转调），
+ * 返回结构化结果。signal 用于 abort 传播。
+ *
+ * onEvent（可选）：强类型 AgentEvent 回调，透传 service 派发路径（journal 转发/守护
+ * 刷新源），生产 pump 侧恒 undefined。
+ *
+ * D-005: onEvent 签名从 raw Record<string,unknown> 升级为 AgentEvent——委托后不再有
+ * raw JSONL 中间层（executeAndAwait 直接出 AgentEvent）。
+ */
+export interface AgentRunner { // oe-exempt:20261023:framework:Agent 执行 port 接口（自 models/ports 搬迁，单实现常态）
+  run(opts: AgentCallOpts, signal: AbortSignal, onEvent?: (event: AgentEvent) => void, stream?: AgentStreamSink): Promise<AgentResult>;
+}
+
+// ── Trace ─────────────────────────────────────────────────────
+
+/**
+ * 执行追踪节点（事件流 D-10 单一来源）。
+ */
+export interface ExecutionTraceNode { // oe-exempt:20261023:framework:追踪节点载荷契约接口（自 orchestration/models 搬迁，单实现常态）
+  stepIndex: number;
+  agent: string;
+  task: string;
+  model: string;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+ /** Phase name for TUI grouping. Set from explicit opts.phase or global _currentPhase. */
+  phase?: string;
+  startedAt?: string;
+  completedAt?: string;
+  result?: AgentResult;
+  error?: string;
+ /**
+ * Pi session ID (uuidv7) for the subagent process.
+ * Used to locate the session JSONL for post-run inspection.
+ */
+  sessionId?: string;
+ /**
+  * Session JSONL 绝对路径。finalizeCall 从 result.sessionFile 透传。
+  * 持久化到快照（serializeRun），跨 session 重新加载后保留。
+  */
+  sessionFile?: string;
+}
+
+// [H2 W3] `live?: ExecutionRecord` 字段已删除（设计 subagent-workflow-record-
+// unification.md D2：trace node 的 live 字段删除，只保留 result 终态摘要）。运行期
+// 实时进度改由 views 经 store 查询 collectRecordsByParentRunId(parentRunId) 订阅
+// 真实 record（origin:"workflow"），不再经 pump 旁路 progress record 挂载。
+
+/**
+ * Trace.update 用的 patch（字段全可选）。
+ *
+ * 不变式：只改单个 node 的 status/result/error/completedAt/sessionId。
+ * callId 不存在时 update 为 no-op（D-10）。
+ */
+export interface TracePatch { // oe-exempt:20261023:framework:追踪增量载荷契约接口（自 orchestration/models 搬迁，单实现常态）
+  status?: "pending" | "running" | "completed" | "failed" | "cancelled";
+  result?: AgentResult;
+  error?: string;
+  completedAt?: string;
+  sessionId?: string;
+  sessionFile?: string;
+}
+
+// ── Worker 诊断 ───────────────────────────────────────────────
+
+/**
+ * Worker console.* 捕获条目（run 级诊断，仅展示在 TUI widget，不泄漏到 input area）。
+ */
+export interface WorkerLogEntry { // oe-exempt:20261023:framework:worker 日志载荷契约接口（自 orchestration/models 搬迁，单实现常态）
+  level: "log" | "warn" | "error" | "info";
+  message: string;
+}

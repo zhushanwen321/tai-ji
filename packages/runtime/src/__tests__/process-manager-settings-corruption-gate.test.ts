@@ -110,6 +110,11 @@ vi.mock('../infra/logger.js', () => ({
   // signal-forensics（process-manager 退出链 import）的落点门：测试态恒 false——
   // 无落点不采样，exit 主链的 Map 清理/回调通知不受取证影响
   isPiCrashLogEnabled: () => false,
+  // 族③根因修复（W3.5）：withEphemeralPi finally 的 ephemeral 树回收——mock 面随
+  // process-manager import 面同步（本测试的 withEphemeralPi 在 spawn 前被门禁拒绝，
+  // 不走 finally，no-op 即可）
+  EPHEMERAL_SESSION_ID_PREFIX: 'ephemeral-',
+  removeEphemeralSessionTree: () => {},
 }))
 
 vi.mock('../infra/pi/find-pi-executable.js', () => ({ findPiExecutable: () => '/fake-tools/pi' }))
@@ -209,7 +214,7 @@ describe('pi 会话启动门禁 · 短命 pi（withEphemeralPi）', () => {
 // ── 5. 恢复链路同门禁（SessionLifecycle.restoreSession → createSession）──
 
 function makeSummary(id: string): SessionSummary {
-  return { id, label: 'test', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now(), modelId: 'p/m', tokenCount: 0 }
+  return { id, label: 'test', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now() }
 }
 
 function makeFakeAdapter(): IEventAdapter {

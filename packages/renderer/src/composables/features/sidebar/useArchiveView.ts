@@ -26,6 +26,7 @@ import type { ArchiveSummary } from '@taiji/shared'
 import { session as sessionApi } from '@/api'
 import * as events from '@taiji/core/transport/api'
 import { toErrorMessage } from '@taiji/core'
+import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
 import i18n from '@/i18n'
 import { useArchiveStore } from '@/stores/archive'
 import { useNavigationStore } from '@/stores/navigation'
@@ -38,40 +39,30 @@ const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => st
 /**
  * 拉取归档列表（config.archives；打开视图 / 归档域操作成功后对账 / 压缩完成帧触发）。
  * 失败置 listError 供归档列表重试入口（拉为主：列表 = 归档目录扫描派生，D9 不变量 3）。
- * in-flight 期间的新调用合并为完成后补拉一次（trailing）：帧到达密集时旧快照后到
- * 覆盖新快照的竞态由串行化收敛（多入口并发同样受益——openView 与恢复/删除后刷新）。
+ *
+ * in-flight 去重 + trailing 补拉经 createInflightDedup 单点工具（C-data-18，禁手写
+ * 同构实现）：同 key 在途的新触发复用在途 promise 并登记补拉，settle 后自动再拉一轮
+ * ——帧到达密集时旧快照后到覆盖新快照的竞态由串行化收敛（多入口并发同样受益：
+ * openView 与恢复/删除后刷新）。单键退化形态（固定 key 常量）。
  */
-let refreshInFlight: Promise<void> | null = null
-let refreshPending = false
-async function refreshArchives(): Promise<void> {
-  if (refreshInFlight) {
-    // 已有拉取在途：标记补拉，由在途任务完成后承接（不并发、不丢弃）。
-    refreshPending = true
-    await refreshInFlight
-    return
-  }
-  const run = (async () => {
+const archiveRefreshDedup = createInflightDedup<void>({ trailing: true })
+const ARCHIVES_REFRESH_KEY = 'config.archives'
+
+function refreshArchives(): Promise<void> {
+  const { promise } = archiveRefreshDedup.run(ARCHIVES_REFRESH_KEY, async () => {
+    const store = useArchiveStore()
+    store.loading = true
+    store.listError = null
     try {
-      do {
-        refreshPending = false
-        const store = useArchiveStore()
-        store.loading = true
-        store.listError = null
-        try {
-          const archives = await sessionApi.listArchives()
-          store.setArchives(archives)
-        } catch (e) {
-          store.listError = toErrorMessage(e)
-        } finally {
-          store.loading = false
-        }
-      } while (refreshPending)
+      const archives = await sessionApi.listArchives()
+      store.setArchives(archives)
+    } catch (e) {
+      store.listError = toErrorMessage(e)
     } finally {
-      refreshInFlight = null
+      store.loading = false
     }
-  })()
-  refreshInFlight = run
-  return run
+  })
+  return promise
 }
 
 /**
@@ -177,6 +168,88 @@ async function purgeArchiveEntry(archive: ArchiveSummary): Promise<void> {
 }
 
 /**
+ * 批量彻底删除（归档列表筛选行的「N 项」钮，两段确认后）：对传入条目**串行**循环
+ * session.purgeArchive（幂等 + runtime 侧 per-session 串行已内建，前端循环即承载批量
+ * 语义，不新增批量 RPC）。逐条独立 catch 经 archiveErrorKey('purge', e) 单点分流（与
+ * 单条 purgeArchiveEntry 同源，archive-error-text.ts 映射只读复用）——archive_not_found
+ * 幂等语义下目标已达成（归档已不存在，重试恒失败），计成功口径不入 failed（不触发
+ * 「可重试」误导指引；批量在途行级钮未禁用的并发删除 toast 噪声同此收敛）；其余失败
+ * 不中断整批（失败显式上报），结束统一 refreshArchives 一次（循环内不逐条刷新，避免
+ * N 次拉取）+ toast 按结果分流：全成功 info；含 keep-all 保守分支 warning 出声
+ * （keptSubagentsDir 携带，与单条 purgeArchiveEntry 同语义）；含失败 warning 汇总
+ * 成功/失败数并附首个失败原因文案。在途防重入：store.batchPurging 期间新触发直接
+ * 忽略。主区 selected 落在成功删除集合时与单条删除同编排：清空选中 + 导航回 chat；
+ * 落在失败条目时保留选中与摘要视图（与单条 purgeArchiveEntry 失败分支同编排——失败
+ * 显式上报后用户经摘要视图与列表行重试，不清选中不踢回 chat）。
+ */
+/** 批量 purge 逐条统计（结果 toast 分流与 selected 联动判定共用同一口径）。 */
+interface BatchPurgeStats {
+  ok: number
+  kept: number
+  failed: number
+  firstFailure: string | null
+  failedSessionIds: Set<string>
+}
+
+/**
+ * [purgeArchivesBatch 拆分] 串行逐条 purge 与计数归集：archive_not_found 幂等达成按
+ * 成功口径吸收；其余失败不中断整批，首条真实失败登记原因文案。循环内全部异常在
+ * 逐条 catch 吸收，函数不抛（batchPurging 复位由调用方 finally 承担）。
+ */
+async function purgeEachArchive(entries: ArchiveSummary[]): Promise<BatchPurgeStats> {
+  const stats: BatchPurgeStats = { ok: 0, kept: 0, failed: 0, firstFailure: null, failedSessionIds: new Set() }
+  for (const entry of entries) {
+    try {
+      const reply = await sessionApi.purgeArchive(entry.sessionId)
+      stats.ok += 1
+      if (reply.keptSubagentsDir !== undefined) stats.kept += 1
+    } catch (e) {
+      const key = archiveErrorKey('purge', e)
+      if (key === 'archive.error.notFound') {
+        // archive_not_found（映射 archive-error-text.ts:30）：幂等达成，按成功口径吸收
+        stats.ok += 1
+      } else {
+        stats.failed += 1
+        stats.failedSessionIds.add(entry.sessionId)
+        if (stats.firstFailure === null) {
+          stats.firstFailure = t(key ?? 'archive.entry.purgeFailed', { msg: toErrorMessage(e) })
+        }
+      }
+    }
+  }
+  return stats
+}
+
+async function purgeArchivesBatch(entries: ArchiveSummary[]): Promise<void> {
+  const { info: toastInfo, warning: toastWarning } = useToast()
+  const store = useArchiveStore()
+  if (store.batchPurging || entries.length === 0) return
+  store.batchPurging = true
+  let stats: BatchPurgeStats
+  try {
+    stats = await purgeEachArchive(entries)
+  } finally {
+    store.batchPurging = false
+  }
+  // 局部快照一次读取：闭包内 TS 无法跨箭头函数保持 store.selected 的非空收窄，
+  // 提取常量后判定与成员匹配共用同一值（同步代码段内选中态不会变化）
+  const selectedId = store.selected?.sessionId ?? null
+  if (selectedId !== null && !stats.failedSessionIds.has(selectedId) && entries.some((e) => e.sessionId === selectedId)) {
+    store.selectArchive(null)
+    useNavigationStore().push({ view: 'chat' })
+  }
+  void refreshArchives()
+  if (stats.failed > 0) {
+    // failed > 0 ⟹ 首个真实失败已登记原因（同一判别分支计数），?? '' 仅为类型收窄
+    toastWarning(t('archive.entry.batchPurgePartial', { ok: stats.ok, failed: stats.failed, msg: stats.firstFailure ?? '' }))
+  } else if (stats.kept > 0) {
+    toastWarning(t('archive.entry.batchPurgeKept', { count: stats.ok, kept: stats.kept }))
+  } else {
+    toastInfo(t('archive.entry.batchPurgeSuccess', { count: stats.ok }))
+  }
+}
+
+/**
  * 归档域编排函数集（多调用点等价闭包——store 走 pinia 单例，无实例态）。
  * 消费点：Sidebar（侧栏视图切换 + 事件接线）、ArchiveMainView（主区恢复编排）。
  */
@@ -189,6 +262,7 @@ export function useArchiveView() {
     closeSummary,
     restoreArchive,
     purgeArchiveEntry,
+    purgeArchivesBatch,
   }
 }
 

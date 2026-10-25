@@ -75,7 +75,7 @@ export const DEFAULT_FONT_SCALES: Required<FontScales> = {
   drawer: 'medium',
 }
 
-/** 配色主题：由 settings-shell spec §4 System 菜单定义，默认 cold-blue */
+/** 配色主题：由 settings-shell spec §4 System 菜单定义，默认为空串（= 玄/皓默认主题，无 preset 覆盖） */
 export type ColorTheme = string
 
 /**
@@ -90,7 +90,7 @@ export type ExtensionItem = ExtensionInfo
 export const DEFAULT_SYSTEM: SystemSettings = {
   locale: 'zh-CN',
   theme: 'dark',
-  themePreset: 'cold-blue',
+  themePreset: '',
   fontSize: 'medium',
   fontScales: { ...DEFAULT_FONT_SCALES },
   completionSound: true,

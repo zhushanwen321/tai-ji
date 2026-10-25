@@ -3,7 +3,7 @@
 // 锁定两个验收条款：
 //   1. onSubagents 消息写分区并渲染运行状态行——bootstrap effects.onSubagents 直挂
 //      applySubagentRecords（写 per-session Map 分区，不可变替换）→ 组件按活跃 sessionId
-//      读分区 → running 汇总状态行（idle 不计、死亡纳管态 running+stopReason 不计）。
+//      读分区 → running 汇总状态行（idle 不计、轮收条已写（stopReason 在场）不计）。
 //   2. 接线位在壳扩展层非 factory 内——effects.onSubagents 与组件模块导出 applySubagentRecords
 //      同源（直挂）；core lifecycle factory 产物不含 onSubagents（factory 不含 subagent 语义，
 //      D5 去留表口径的机器断言）。
@@ -89,7 +89,7 @@ describe('subagent 运行状态行（A9/U15）', () => {
     expect(text).not.toContain('finished')
   })
 
-  it('死亡纳管态（running + stopReason）不算在跑；无 running 记录时状态行不渲染', () => {
+  it('轮收条已写（stopReason 在场）不算在跑（[subagent-observability §3.3.3⑦] 占用信号语义；原「死亡纳管态」措辞随 adoptEngineDeath 写点退役）；无 running 记录时状态行不渲染', () => {
     applySubagentRecords('sid-dead-running', [
       record({ subagentId: 'bg-1', slug: 'adopted', status: 'running', stopReason: 'failed' }),
     ])

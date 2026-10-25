@@ -57,7 +57,7 @@ function setup(initialHtml = '', overrides: Partial<ContenteditableCallbacks> = 
 
 /** 输入链三回调零触发断言单源（onInput/onSlashTrigger/onFileTrigger——组词与空态检查的共同判别面）。 */
 function expectCoreInputCallbacksIdle(c: {
-  callbacks: Record<'onInput' | 'onSlashTrigger' | 'onFileTrigger', { not: { toHaveBeenCalled: () => void } }>
+  callbacks: Record<'onInput' | 'onSlashTrigger' | 'onFileTrigger', (...args: never[]) => unknown>
 }) {
   expect(c.callbacks.onInput).not.toHaveBeenCalled()
   expect(c.callbacks.onSlashTrigger).not.toHaveBeenCalled()

@@ -195,7 +195,7 @@ describe('承接清单① 常驻挂载订阅（M1 硬约束）', () => {
         requestId: 'pr-1',
         pluginId: '',
         kind: 'select',
-        method: 'select',
+        dialogKind: 'select',
         title: '\x00TAIJI_PLAN_REVIEW:',
         options: [JSON.stringify({ docs: [] })],
         planReview: true,

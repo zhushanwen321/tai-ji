@@ -10,13 +10,19 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { WorkflowRunRecord } from '@taiji/shared'
+import type { ServerMessageMap, WorkflowRunRecord } from '@taiji/shared'
 // '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（stores 链）求值
 import { apiProjectMock } from '../helpers/api-facade-mock'
 
 // ── mock api 域（workflow/subagent store 用 @/api/domains/session，useSidebar 用 @/api）──
 const listMock = vi.hoisted(() => vi.fn(() => Promise.resolve([])))
-const getWorkflowsMock = vi.hoisted(() => vi.fn(() => Promise.resolve([])))
+const getWorkflowsMock = vi.hoisted(
+  () =>
+    vi.fn(
+      (sessionId: string): Promise<ServerMessageMap['session.workflows']> =>
+        Promise.resolve({ sessionId, workflows: [] }),
+    ),
+)
 const getSubagentsMock = vi.hoisted(() => vi.fn(() => Promise.resolve([])))
 const getSubagentHistoryMock = vi.hoisted(() => vi.fn(() => Promise.resolve([])))
 
@@ -62,6 +68,8 @@ function makeWorkflow(id: string): WorkflowRunRecord {
     scriptName: `wf-${id}`,
     slug: '',
     status: 'running',
+    startedAt: '2026-01-01T00:00:00.000Z',
+    stateFilePath: '',
     agentCalls: [],
   }
 }
@@ -113,7 +121,7 @@ describe('U6: workflow store loadError（W2 / M1）', () => {
     const record1 = makeWorkflow('w1')
 
     // 先成功加载一条数据（形状对齐 [RT-4#8] 结构化返回 { workflows, oversize }）
-    getWorkflowsMock.mockResolvedValueOnce({ workflows: [record1], oversize: false })
+    getWorkflowsMock.mockResolvedValueOnce({ sessionId: sid, workflows: [record1], oversize: false })
     await store.loadWorkflows(sid)
     expect(store.getRecordsBySession(sid)).toHaveLength(1)
 

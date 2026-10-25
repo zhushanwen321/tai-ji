@@ -294,13 +294,30 @@ describe('FG5 chat store 块类型扩展', () => {
     expect(store.getMessages('sx')[0].toolCalls?.[0].detail).toEqual({ progress: 50 })
   })
 
-  it('complete.usage 回填 Message.usage（inputTokens/outputTokens）', () => {
+  it('complete.usage 不再回填消息（D3 规则 5 退役）；usage 由 message_end assistant 载荷承担', () => {
     const store = useChatStore()
     store.applyMessageEvent('sx', { type: 'message.message_start', payload: { sessionId: 'sx', messageId: 'a1' } })
     store.applyMessageEvent('sx', {
       type: 'message.complete',
       payload: { sessionId: 'sx', stopReason: 'complete', usage: { inputTokens: 120, outputTokens: 80, totalTokens: 200 } },
     })
+    // 回合级 complete.usage 不再覆盖末位 assistant（定稿重建按每条消息的 entry 载荷写入，
+    // 覆盖会把 turn 聚合值错误摊到单条消息——规则 5 退役锚）
+    expect(store.getMessages('sx')[0].usage).toBeUndefined()
+    // message_end(assistant) 帧载荷回填 usage（live 与 reload 同源同值，apply-entry-convert usageField）
+    store.applyMessageEvent('sx', {
+      type: 'message.message_end',
+      payload: {
+        sessionId: 'sx',
+        messageId: 'a1',
+        entry: {
+          type: 'message',
+          parentId: null,
+          timestamp: new Date(0).toISOString(),
+          message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }], usage: { input: 120, output: 80 }, stopReason: 'stop', timestamp: 0 },
+        },
+      },
+    } as never)
     expect(store.getMessages('sx')[0].usage).toEqual({ inputTokens: 120, outputTokens: 80 })
   })
 

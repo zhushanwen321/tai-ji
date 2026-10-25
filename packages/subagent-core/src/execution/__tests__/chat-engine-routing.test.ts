@@ -64,7 +64,7 @@ import { spawn } from "node:child_process";
 import type { EnginePort, RunContext } from "../engine/port.ts";
 import { resolveJournalPath } from "../engine/paths.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
-import type { AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../shared/agent-call-types.ts";
 import type {
   AgentEvent,
   AgentOutcome,

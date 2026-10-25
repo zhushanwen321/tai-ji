@@ -11,7 +11,7 @@
  * （useTrayCounts 的 retry + watch(sessionId) 首次拉取）。
  *
  * 依赖注入说明：useSidebar 的方法（selectSession/newSession/loadSessions/renameSession/
- * deleteSession/deleteFolder）由调用方注入——useSidebar 非单例（每次调用
+ * deleteFolder）由调用方注入——useSidebar 非单例（每次调用
  * createSessionStore + createUseSession 新建实例），不能在本 composable 内重复调用。
  * renameOpen/targetSessionId 是 RenameSessionDialog 的本地 UI ref，由 Sidebar.vue 创建并注入，
  * onRenameSession 设置这两个 ref 打开 dialog。useChat/useToast/useI18n/useSearchModalDeps/
@@ -32,6 +32,16 @@ import { markForcedExit, consumeForcedExit } from '@/composables/effects/forced-
 import { useI18n } from 'vue-i18n'
 import { archiveErrorKey } from './archive-error-text'
 
+/**
+ * folder 批删 failed[].code → i18n key 单点映射。code 是 runtime 定义的封闭枚举
+ * （SSOT = shared BatchDeleteResult 注释）：命中给本地化短语替代 runtime 原文作 toast
+ * error 占位（原文语言随 runtime 编译期定，en 用户不可读）；未知码/缺失回落原文
+ * （既有行为）。新码三处同 commit：shared 登记 + 此处补映射 + 双语词条。
+ */
+const DELETE_FAILED_I18N_KEYS: Record<string, string> = {
+  delete_generating: 'sidebar.deleteFolderGenerating',
+}
+
 /** useSidebarSessionActions 所需的注入依赖（来自 useSidebar + Sidebar.vue 本地 UI ref） */
 export interface UseSidebarSessionActionsOptions {
   selectSession: (id: string) => Promise<void>
@@ -40,14 +50,13 @@ export interface UseSidebarSessionActionsOptions {
   newSession: (cwd?: string) => Promise<string | null>
   loadSessions: () => void
   renameSession: (id: string, label: string) => Promise<void>
-  deleteSession: (id: string) => Promise<void>
   /**
    * 归档（session-archive D6/D14，u-renderer-entry）：SessionItem 悬停归档钮两段确认后
    * emit archive → 本 handler → useSidebar.archiveSession（core 编排：
    * cleanupSessionState 同族 + wasActive 回退）。
    */
   archiveSession: (id: string) => Promise<void>
-  deleteFolder: (cwd: string) => Promise<{ failed: Array<{ error?: string }> }>
+  deleteFolder: (cwd: string) => Promise<{ failed: Array<{ sessionId: string; error?: string; code?: string }> }>
   /** 归入项目（D14 语义修正，2026-08-04）：RPC + 乐观更新编排在 useSidebar。 */
   assignSessionToProject: (sessionId: string, projectId: string) => Promise<void>
   /** RenameSessionDialog 开关 ref（Sidebar.vue 本地 UI 状态） */
@@ -63,7 +72,6 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     newSession,
     loadSessions,
     renameSession,
-    deleteSession,
     archiveSession,
     deleteFolder,
     assignSessionToProject,
@@ -104,15 +112,6 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     renameOpen.value = true
   }
 
-  async function onDeleteSession(id: string): Promise<void> {
-    try {
-      await deleteSession(id)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      toastError(t('sidebar.deleteSessionFailed', { msg }))
-    }
-  }
-
   /**
    * 归档 session（session-archive D6/D13，u-renderer-entry）：悬停归档钮两段确认后经
    * SessionItem/SessionList emit 到此。成功 toast「已归档 "<名>"」（§5.1 成功路径；压缩
@@ -148,7 +147,11 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     try {
       const res = await deleteFolder(cwd)
       if (res.failed.length > 0) {
-        const firstError = res.failed[0]?.error ?? ''
+        // 首条 failed 的 code 命中封闭枚举 → error 占位插本地化短语；未命中/缺失 → 回落
+        // runtime 原文（既有行为）。混合失败以第一条为准，与既有 firstError 口径一致。
+        const first = res.failed[0]
+        const localizedKey = first?.code !== undefined ? DELETE_FAILED_I18N_KEYS[first.code] : undefined
+        const firstError = localizedKey !== undefined ? t(localizedKey) : first?.error ?? ''
         toastError(
           t('sidebar.deleteFolderPartialFailed', res.failed.length, {
             named: { count: res.failed.length, error: firstError },
@@ -304,7 +307,6 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     onNewSession,
     onNewSessionInFolder,
     onRenameSession,
-    onDeleteSession,
     onArchiveSession,
     onDeleteFolder,
     onAbortSession,

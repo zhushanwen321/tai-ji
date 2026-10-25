@@ -1,5 +1,11 @@
 # @zhushanwen/pi-scheduler
 
+## 0.11.2
+
+### Patch Changes
+
+- 318994f4a: The `schedule` and `schedule_control` tools are now always declared to the model (resident) instead of being activated only through tool_search.
+
 ## 0.11.1
 
 ### Patch Changes

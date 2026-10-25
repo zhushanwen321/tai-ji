@@ -31,6 +31,7 @@ import { BYTES_PER_MB } from '@taiji/shared'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import type { ISessionStore } from '../ports/session.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
+import { isGeneratingTurn } from './types.js'
 import type { IManagedSessionView } from './types.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
@@ -389,9 +390,10 @@ export class TraceSync {
       throw Object.assign(new Error(`Session ${sessionId} not active`), { code: 'session_not_active' })
     }
     // busy 预检只看明确的 busy 信号（生成/压缩中命令会排队导致超时）；sessions Map 无条目
-    //（恢复窗口/测试简化态）不拒——能否执行由 pi 决定
+    //（恢复窗口/测试简化态）不拒——能否执行由 pi 决定。
+    // [chat-flow-consistency D1] 派生布尔读口迁移：occupancy 派生，语义逐字等价。
     const active = this.deps.getSession(sessionId)
-    if (active?.isGenerating || active?.isCompacting) {
+    if (isGeneratingTurn(active?.occupancy?.turn) || active?.occupancy?.compacting === true) {
       throw Object.assign(new Error(`Session ${sessionId} is busy`), { code: 'session_busy' })
     }
     let baseline = await this.ensurePromptBaseline(sessionId, client)

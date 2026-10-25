@@ -309,6 +309,30 @@ describe("RecordStore", () => {
   // ============================================================
 
   // ============================================================
+  // evidence 取证指针附加（[subagent-observability §3.3.6] 查询漏斗单点）
+  // ============================================================
+  describe("collectRecords evidence 取证指针", () => {
+    it("事件面接线的 store：collectRecords 附加 eventsFile（D3 落点）+ lastSeq（fold 水位）", () => {
+      const recordsDir = path.join(rootDir, "records");
+      fs.mkdirSync(recordsDir, { recursive: true });
+      const store = new RecordStore(() => tmpDir, undefined, undefined, () => recordsDir);
+      // register 写 record-created 事件（D3 表行 1）→ fold lastSeq ≥ 1
+      store.register(makeRecord({ id: "ev-1", mode: "background", startedAt: 1000 }));
+      const found = store.collectRecords(100).find((r) => r.id === "ev-1");
+      expect(found?.evidence).toBeDefined();
+      expect(found?.evidence?.eventsFile).toBe(recordEventsPath(recordsDir, "ev-1"));
+      expect(found?.evidence?.lastSeq).toBeGreaterThanOrEqual(1);
+    });
+
+    it("事件面未接线（无 manifestDir 纯内存形态）→ evidence 缺省（不产死指针）", () => {
+      const store = new RecordStore(() => tmpDir);
+      store.register(makeRecord({ id: "ev-2", mode: "background", startedAt: 1000 }));
+      const found = store.collectRecords(100).find((r) => r.id === "ev-2");
+      expect(found?.evidence).toBeUndefined();
+    });
+  });
+
+  // ============================================================
   // compareRecords 排序稳定性（内存 running record）
   // ============================================================
   describe("compareRecords 排序", () => {
@@ -892,9 +916,11 @@ describe("RecordStore", () => {
     });
 
     it("[P4-② ⛔ two-state-convergence U5] W4 纳管态孤儿（failed/error 只在内存，entry-born 无锚）跨重启 → entry-only 纠偏 idle + interrupted-by-restart", () => {
-      // W4 新态 = adoptEngineDeath 纳管产物（[U5/D4] error/result/stopReason 三写、status
-      // 保持 running）——[W1/D2] 过程 entry 停写：failed/error 只在内存，跨重启后的 v2
-      // 注册条目结构上不承载它们，entry-only 纠偏恒落 interrupted-by-restart。
+      // [subagent-observability u3 退役注记] 原 W4 新态产点 adoptEngineDeath 写点已随
+      // 判定事实化退役删除（引擎死亡走正常轮终——error 停因 + 失败事实入账，跨轮
+      // 可见）；本用例锁定的「纳管态孤儿跨重启 → entry-only 纠偏 idle +
+      // interrupted-by-restart」归宿语义不变（[W1/D2] 过程 entry 停写：轮终事实只在
+      // 事件流/内存，v2 注册条目结构上不承载）。
       // 设计 D6a 登记：W4 跨重启归宿 = 孤儿纠偏 idle 等 revive（非 readopt——
       // isBootReadoptable 现状空转）。
       const mainFile = writeMainSession([
@@ -1951,5 +1977,97 @@ describe("[④ 纯索引水位] manifest 水位（写侧嵌入 + 读侧校验）
     const store = newWmStore();
     const ids = store.collectRecords(10, "all").map((r) => r.id).sort();
     expect(ids).toEqual(["sa-wm-fresh", "sa-wm-legacy"]);
+  });
+});
+
+// ============================================================
+// [S3b origin 补齐] identity entry 写点缺 origin 期的冷查重建保真
+//
+// 背景：subagent-workflow appendSubagentIdentityEntry（子进程 session_start hook）
+// 写成员 session.jsonl 的 identity entry 载荷缺 origin/parentRunId（env 键表
+// SUBAGENT_IDENTITY_ENV 无此二键），而探测身份基底 = identity entry 命中即权威
+// （probeAndCache 两级判据），fold（record-created 帧，宿主 register 恒写 origin）
+// 不参与——workflow 成员收尾出内存后冷查重建 origin=undefined，D7 域边界检查
+// （messageHandler record.origin === "workflow"）不命中，成员被误续聊
+//（S3b 真机实证：subagent_message 返回 delivered:true 并成功 round 2）。
+// ============================================================
+describe("[S3b origin 补齐] identity entry 缺 origin 时从 fold 补齐", () => {
+  let rootDir: string;
+  let tmpDir: string;
+
+  beforeEach(() => {
+    rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-store-origin-"));
+    tmpDir = path.join(rootDir, "sessions");
+    fs.mkdirSync(tmpDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** 手写 record 事件文件（宿主 register 产物形态：record-created 帧恒带 origin 二值）。 */
+  function writeRecordEvents(recordsDir: string, id: string, origin: "workflow" | "tool", parentRunId?: string): void {
+    fs.mkdirSync(recordsDir, { recursive: true });
+    const frames = [
+      JSON.stringify({
+        type: "record-created", seq: 1, ts: 5000, id, agent: "w", task: "t", slug: "s",
+        origin, ...(parentRunId !== undefined ? { parentRunId } : {}),
+        rootSessionId: "sess-A", depth: 0, mode: "background", startedAt: 5000,
+      }),
+    ];
+    fs.writeFileSync(
+      path.join(recordsDir, `${id}.events`),
+      `${JSON.stringify({ type: "record-events", id })}\n${frames.join("\n")}\n`,
+      "utf-8",
+    );
+  }
+
+  it("identity entry 无 origin（现行子进程 hook 产物）+ fold record-created origin=workflow → 补齐 origin + parentRunId", () => {
+    // getSessionsDir = rootDir 本身（既有测试同款：session 文件直接落 tmpDir 根）
+    const sessionFile = path.join(tmpDir, "wf-member.jsonl");
+    writeSessionJsonl(sessionFile, {
+      id: "sa-wf-1", agent: "w", mode: "background", task: "t",
+      startedAt: 5000, rootSessionId: "sess-A",
+    });
+    const recordsDir = path.join(rootDir, "records");
+    writeRecordEvents(recordsDir, "sa-wf-1", "workflow", "wf-run-1");
+    const store = new RecordStore(() => tmpDir, undefined, undefined, () => recordsDir);
+    // collectRecords 先行（候选定位兜底腿 = 同一装配单点；同时热 idToFile 索引——
+    // findLightById 在索引未热时按契约返回 undefined，真机 S3b 时点索引已由 session
+    // 期扫描热起，冷查第一优先走它）
+    // includeWorkflow:true——collectRecords 缺省排除 workflow 来源（D1 派生视图过滤），
+    // 补齐生效的构造性证据：不传该参时本 record 恰好被过滤为不可见。
+    const listed = store
+      .collectRecords(100, "all", "sess-A", true)
+      .find((r) => r.id === "sa-wf-1");
+    expect(listed?.origin, "workflow 成员冷查重建必须保真 origin（D7 域边界检查的输入）").toBe("workflow");
+    expect(listed?.parentRunId).toBe("wf-run-1");
+    const found = store.findLightById("sa-wf-1");
+    expect(found?.origin).toBe("workflow");
+    expect(found?.parentRunId).toBe("wf-run-1");
+  });
+
+  it("tool 来源（fold origin=tool）→ 补齐谓词收窄，origin 保持 undefined（零行为变化）", () => {
+    const sessionFile = path.join(tmpDir, "tool-member.jsonl");
+    writeSessionJsonl(sessionFile, {
+      id: "sa-tool-1", agent: "w", mode: "background", task: "t",
+      startedAt: 5000, rootSessionId: "sess-A",
+    });
+    const recordsDir = path.join(rootDir, "records");
+    writeRecordEvents(recordsDir, "sa-tool-1", "tool");
+    const store = new RecordStore(() => tmpDir, undefined, undefined, () => recordsDir);
+    const found = store.findLightById("sa-tool-1");
+    expect(found?.origin, "tool 来源 undefined 与 'tool' 读侧同义，维持 undefined 即现状语义").toBeUndefined();
+  });
+
+  it("identity entry 与 fold 均无 origin（纯 identity entry 形态）→ undefined 维持（补齐无源不硬造）", () => {
+    const sessionFile = path.join(tmpDir, "plain-member.jsonl");
+    writeSessionJsonl(sessionFile, {
+      id: "sa-plain-1", agent: "w", mode: "background", task: "t",
+      startedAt: 5000, rootSessionId: "sess-A",
+    });
+    const store = new RecordStore(() => rootDir, undefined, undefined, () => path.join(rootDir, "records"));
+    const found = store.findLightById("sa-plain-1");
+    expect(found?.origin).toBeUndefined();
   });
 });

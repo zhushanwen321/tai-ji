@@ -13,15 +13,17 @@
  *
  * [cw wave w4 + cr-fix] 固定挂载统一由 computed pinnedIndexes 输出（喂 virtua :keepMounted）。
  * [PR#116 review M3] 跨 session 重新固定由 computed pinnedIndexes 自动承接：pinnedIndexes 依赖
- * streamingTurnIdx（派生自 items / sessionId），session 切换导致 items 重建时 computed 自动重算，
+ * streamingTurnIdxs（派生自 items / sessionId），session 切换导致 items 重建时 computed 自动重算，
  * 无需 watch 副作用驱动（旧的空 watch 已删）。
  *
  * [pin-identity U1] 编辑固定挂载从「数组索引快照」改为「turn 稳定身份反查」（D1）：
  * 裸索引快照在 session 切换 /
  * 消息增删后过期（E-now-1 越界崩溃刷屏 / E-now-2 错固定他回合），身份（turnStableId）不过期——
  * 索引只在 pinnedIndexes 求值那一刻从当前 items 反查得出，固定挂载始终指向「正在编辑的那一回合」
- * 本身。streamingTurnIdx 维持位置派生不身份化（D5：「末回合在流式」本身即位置语义，computed
- * 同步派生恒 ≤ length-1，探针 P4）。输出前 clamp 过滤越界索引（D4 纵深防御：反查已结构性
+ * 本身。streaming 钉住维持位置派生不身份化（streaming 是回合级数据信号而非身份，computed
+ * 同步派生恒有界，探针 P4）；[chat-flow-consistency D2] 后钉住对象从「末位 streaming turn」
+ * 扩为「全部 streaming turn」——双工作态过渡期两回合都入钉住集合。输出前 clamp 过滤越界
+ * 索引（D4 纵深防御：反查已结构性
  * 消除本 bug，此过滤兜未来新增固定挂载来源的同类错误——virtua 对 keepMounted 越界无任何防御，
  * data[idx]=undefined 直传 slot 读 item.kind 即崩）。
  */
@@ -30,7 +32,7 @@ import { renderKey, type RenderItem } from '@/composables/logic/messageTurns'
 import type { SkillNoticeStreamItem } from '@/composables/panel/useSkillNoticeStream'
 
 export interface UseStreamingPinOptions {
-  /** 渲染项列表 getter（turn + system 穿插），用于定位最后一个 turn 的数组下标。
+  /** 渲染项列表 getter（turn + system 穿插），用于定位全部 streaming turn 的数组下标。
    *  [u5] 类型为 MessageStream 的 streamItems 基准（core RenderItem + skillNotice 拼接项）——
    *  pinnedIndexes 是 virtua :keep-mounted 的下标空间，必须与 :data 同一数组基准；
    *  本模块只消费 turn 项（kind==='turn' 窄化）与 items.length，notice 项天然兼容。 */
@@ -47,12 +49,12 @@ export interface UseStreamingPinOptions {
  * @param sessionId 当前 session id getter
  * @param editingTurnKey 编辑中的 turn 身份 turnStableId（可选，null 表示无编辑，virtua 多项固定挂载用）
  *
- * watch 最后一个 turn 的 isStreaming：true 时该 turn idx 进入 pinnedIndexes，false 时移除。
+ * watch streaming turn 的 isStreaming：true 时该 turn idx 进入 pinnedIndexes，false 时移除。
  * （当前固定挂载由 computed pinnedIndexes 派生，无 watch 副作用。）
- * lastTurnIdx 是 items 里最后一个 turn 的数组下标（bash system item 排在其后），
- * 固定挂载逻辑作用于 startIndex（startIndex 不超过 lastTurnIdx），保证 streaming turn 不滚出视口顶部。
+ * streamingTurnIdxs 是 items 里全部 streaming turn 的数组下标（[chat-flow-consistency D2]
+ * 双工作态并存期可为多项），保证 streaming turn 不滚出视口顶部。
  *
- * [cw wave w4] 返回 pinnedIndexes（virtua 多项固定挂载输出）：聚合「streaming turn idx」+
+ * [cw wave w4] 返回 pinnedIndexes（virtua 多项固定挂载输出）：聚合「全部 streaming turn idx」+
  * 「editing turn 身份反查 idx」去重 + clamp 越界，喂 virtua <Virtualizer :keepMounted>
  * （旧 pinStreaming 入参已于 w4 删除；[pin-identity U1] editing 从裸下标改身份反查）。
  */
@@ -64,40 +66,35 @@ export function useStreamingPin(options: UseStreamingPinOptions): {
 } {
   const { items } = options
 
-  /** items 里最后一个 turn 的数组下标（跳过末尾 system item，如 bash 消息） */
-  const lastTurnIdx = computed(() => {
+  /**
+   * 当前全部 streaming turn 的数组下标（[chat-flow-consistency D2 消费方核对] 双展开期
+   * 两回合都入钉住集合）：D2 放宽后 turn.isStreaming 不再以末位回合短路——插话回流开出
+   * 新回合时旧回合在定稿收尾前保持 streaming，双工作态并存期两个回合都必须恒挂载（各自
+   * 的 RO 断开即高度测量断链，bash↔streaming 共存防护的同一动机）。仍是位置派生不身份化
+   * （streaming 本身即位置无关的回合级信号，computed 同步派生恒有界），与 pinnedIndexes
+   * 消费方式不变。
+   */
+  const streamingTurnIdxs = computed<number[]>(() => {
+    const idxs: number[] = []
     const list = items.value
-    for (let i = list.length - 1; i >= 0; i -= 1) {
+    for (let i = 0; i < list.length; i += 1) {
       const item = list[i]
-      if (item && item.kind === 'turn') return i
+      if (item && item.kind === 'turn' && item.turn.isStreaming) idxs.push(i)
     }
-    return -1
+    return idxs
   })
-
-  /** 最后一个 turn（已跳过末尾 system item），用于读 isStreaming（避免对联合类型用可选链不收窄） */
-  const lastTurn = computed(() => {
-    const idx = lastTurnIdx.value
-    if (idx < 0) return null
-    const item = items.value[idx]
-    return item && item.kind === 'turn' ? item.turn : null
-  })
-
-  /** 当前 streaming turn 的数组下标（末 turn isStreaming 时 = lastTurnIdx，否则 -1）。
-   *  pinnedIndexes 消费此派生。 */
-  const streamingTurnIdx = computed(() =>
-    lastTurn.value?.isStreaming && lastTurnIdx.value >= 0 ? lastTurnIdx.value : -1,
-  )
 
   /**
    * virtua 多项固定挂载：聚合需恒在窗口内的项下标。
-   * - streaming turn idx（streamingTurnIdx，末 turn isStreaming 时有值，否则 -1）
+   * - 全部 streaming turn 下标（streamingTurnIdxs，双工作态并存期可为多项）
    * - editing turn 身份反查 idx（editingTurnKey 为 turnStableId，非 null 时对当前 items 反查）
    * 去重 + clamp。virtua 路径消费（<Virtualizer :keepMounted>）。
    */
   const pinnedIndexes = computed<number[]>(() => {
     const idxs: number[] = []
-    const streamIdx = streamingTurnIdx.value
-    if (streamIdx >= 0) idxs.push(streamIdx)
+    for (const streamIdx of streamingTurnIdxs.value) {
+      if (!idxs.includes(streamIdx)) idxs.push(streamIdx)
+    }
 
     // 编辑固定挂载按身份反查（[pin-identity D1]）：editingTurnKey 与 renderKey 同一身份空间
     // （`t-${turnStableId}`）。显式 null guard：null/undefined 即无编辑，直接不反查——
@@ -114,8 +111,8 @@ export function useStreamingPin(options: UseStreamingPinOptions): {
     }
 
     // clamp 纵深防御（[pin-identity D4]）：身份反查已结构性消除越界（反查自当前 items，命中
-    // 即有界），此过滤兜未来新增固定挂载来源违反纪律的同类错误（含 streamingTurnIdx 路径的理论
-    // 越界）——virtua 对越界索引无防御，越界/负值一律不出门（E3：极端时序最多少钉一项，防崩不治病）。
+    // 即有界），此过滤兜未来新增固定挂载来源违反纪律的同类错误（含 streamingTurnIdxs 路径的
+    // 理论越界）——virtua 对越界索引无防御，越界/负值一律不出门（E3：极端时序最多少钉一项，防崩不治病）。
     const len = items.value.length
     return idxs.filter((idx) => idx >= 0 && idx < len)
   })

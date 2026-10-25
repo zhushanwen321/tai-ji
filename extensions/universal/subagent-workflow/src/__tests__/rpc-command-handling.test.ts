@@ -476,6 +476,25 @@ describe("registerSubagentsCommand — RPC 分支 dispatch", () => {
     );
   });
 
+  it("RPC + cancel 成功（cancel 返回 true）→ --req 结果文件写 scope:ok 回执", async () => {
+    // [回执通道完整性] 成功路径必须写结果文件：runtime consume 侧把「文件不存在」
+    // 一律判回执缺失抛 handler_error——成功不写 = 取消效果达成但 5/5 确定性复现
+    // 回执缺失（todo subagent-cancel-receipt-race，条目 6）。消费侧宽容读：
+    // scope:'ok' 即成功。
+    const receipt = pinReceiptEnv();
+    ctx.cwd = receipt.cwd;
+    cancelMock.mockReturnValue(true);
+
+    try {
+      await runHandler("cancel bg-ok-1 --req=req-ok-1");
+
+      expect(readReceipt(receipt.agentDir, receipt.cwd, "req-ok-1")).toEqual({ scope: "ok" });
+      expect(ctx.ui.notify).toHaveBeenCalledWith("Cancelled subagent bg-ok-1", "info");
+    } finally {
+      receipt.dispose();
+    }
+  });
+
   it("RPC + cancel 无 id → Usage 提示 warning", async () => {
     await runHandler("cancel");
 
@@ -663,7 +682,7 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
 
   it("message 目标不存在（getRecordForAction throw）→ 错误经 --req 结果文件传回，不留痕、notify 不再走", async () => {
     // [结果回执契约 2026-10-18] messageHandler 同步拒绝经结果文件传回（scope:error →
-    // runtime 抛分型错误 → WS error envelope → composer 车道 toast + restoreSegments
+    // runtime 抛分型错误 → WS error envelope → composer 投递路径 toast + restoreSegments
     // 恢复草稿）；notify 只达 TUI/横幅不达回执面，旧 warning 通道已删
     const receipt = pinReceiptEnv();
     ctx.cwd = receipt.cwd;

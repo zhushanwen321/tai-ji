@@ -3,7 +3,7 @@
  *
  * 锁定行为（ADR-0065 / C-pi-14，设计 state-truth-sync-architecture.md §3.3 D8）：
  * 全部 mutation 类 RPC（改状态值且 renderer 有 store 副本，覆盖域 = session 配置状态 /
- * model / preset / config / mcp / subagent 六域）必须登记在 MUTATION_RPC_REGISTRY，并按 ADR-0065 两分支归类——
+ * model / preset / config / mcp / subagent / workspace 七域）必须登记在 MUTATION_RPC_REGISTRY，并按 ADR-0065 两分支归类——
  * 分支一（后端可变换请求值：pi 钳制/pattern 换模）reply 必须携带生效值字段且消费侧
  * 禁乐观写；分支二（后端原样存储）reply 携带回显字段或登记豁免理由，消费侧允许
  * 乐观写 + reply 权威覆盖 + 失败回滚。
@@ -175,6 +175,17 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     contract: 'echo-value',
     replyKey: 'config.retryConfig',
     effectiveFields: ['config'],
+  },
+  {
+    // 重试规则域（subagent-observability §3.3.12）：set 校验失败走错误信封不落盘；成功写
+    // ext-config（写侧 source 归一 custom + effectiveRules 合并持久段重算，确定性变换）——
+    // 归分支一；reply/broadcast 读回服务端组装视图（getBuiltinRetryRules + customRules 读回），
+    // customRules 即生效值（消费侧以服务端终态校准，network-proxy 同款）。
+    type: 'config.setRetryRules',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'config.retryRules',
+    effectiveFields: ['customRules'],
   },
   {
     // codemode 开关写（codemode 设计 D1/A1/D2）：后端按 D2 语义表规范化落盘（幂等不动 /
@@ -349,6 +360,29 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     contract: 'echo-value',
     replyKey: 'config.providerUpdated',
     effectiveFields: ['providerId'],
+  },
+  // ── 分支二（workspace 域）：最近工作区列表 mutation——两条共用 reply
+  // 'workspace.recentList' { records, degraded? }，写入 recent-workspaces.json 后回读
+  // list() 终态列表，前端据 reply 直接更新 store（workspace-message-handler 一次往返
+  // 热更新，无 reload 时序竞争）。degraded 是降级信封标记（入参非法 / 超 pin 上限拒绝），
+  // optional 不入 effectiveFields（同 mcp ok:false 错误信封先例）。──
+  {
+    // record：使用记账写（lastUsedAt/label 刷新 + LRU 淘汰），请求 cwd 原样存储（分支二），
+    // reply records = 写入 + 淘汰后的落盘终态列表。
+    type: 'workspace.record',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'workspace.recentList',
+    effectiveFields: ['records'],
+  },
+  {
+    // setPinned：pin/unpin 原样写 pinned 键（INV-6）；超 MAX_PINNED 拒绝（service 层
+    // 返回 false）→ 列表不变 + degraded 标记，拒绝可见性由 reply 终态列表承担（无变换面）。
+    type: 'workspace.setPinned',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'workspace.recentList',
+    effectiveFields: ['records'],
   },
   // ── 分支二：ack 豁免清单（reply 无回显字段，豁免理由逐条登记）──
   {
@@ -571,10 +605,12 @@ const REPLY_PAYLOAD_MAP_BLOCK = extractBlock('export interface ReplyPayloadMap {
 const SERVER_MESSAGE_MAP_BASE_BLOCK = extractBlock('export interface ServerMessageMapBase {')
 
 /** 谓词覆盖域（ADR-0065 范围边界）：session 配置状态 / model / preset / config / mcp /
- * subagent 六域（mcp 为 pi-mcp-management 设计纳入——add/update/remove 是 mcp.json 配置
+ * subagent / workspace 七域（mcp 为 pi-mcp-management 设计纳入——add/update/remove 是 mcp.json 配置
  * 状态 mutation；subagent 为 subagent-model-switch 设计纳入——setModel 是执行模型配置
- * mutation，renderer 持显示副本、回执含生效值字段） */
-const MUTATION_DOMAINS = ['session', 'model', 'preset', 'config', 'mcp', 'subagent'] as const
+ * mutation，renderer 持显示副本、回执含生效值字段；workspace 为最近工作区列表纳入——
+ * record/setPinned 改 recent-workspaces.json 持久化状态，renderer 持列表副本、reply
+ * 回写后终态列表） */
+const MUTATION_DOMAINS = ['session', 'model', 'preset', 'config', 'mcp', 'subagent', 'workspace'] as const
 
 /**
  * 改值动词形态（宽松 startsWith——宁可误红逼人显式归类，见文件头检查取向声明）。
@@ -585,7 +621,7 @@ const MUTATION_DOMAINS = ['session', 'model', 'preset', 'config', 'mcp', 'subage
  * 先 grep 本表避免漏配；误命中读类/动作类时以 excluded 显式登记排除理由（特性非缺陷）。
  */
 const MUTATION_VERB_PREFIXES = [
-  'set', 'rename', 'switch', 'create', 'update', 'delete', 'remove', 'recordUsage', 'import',
+  'set', 'rename', 'switch', 'create', 'update', 'delete', 'remove', 'record', 'import',
   'fork', 'handoff', 'clear', 'reset', 'toggle', 'enable', 'disable', 'add', 'abort', 'force',
 ] as const
 
@@ -826,6 +862,9 @@ describe('MUTATION_RPC_REGISTRY 清单检查（ADR-0065 / C-pi-14，D8 机器强
     // 设计内合法产出，同 mcp ok:false 错误信封不在断言范围）
     const subagentSetModelEffectiveModel: HasRequiredField<Extract<ServerMessageMap['subagent.modelSet'], { kind: 'effective' }>, 'effectiveModel'> = true
     const subagentSetModelEffectiveThinking: HasRequiredField<Extract<ServerMessageMap['subagent.modelSet'], { kind: 'effective' }>, 'effectiveThinkingLevel'> = true
+    // workspace 域（最近工作区列表）：echo-value 的 records 必需回显（degraded optional
+    // 是降级信封标记，不入契约）
+    const workspaceRecentListRecords: HasRequiredField<ServerMessageMap['workspace.recentList'], 'records'> = true
 
     const assertions = [
       modelSwitchProvider, modelSwitchModelId, thinkingLevel,
@@ -833,6 +872,7 @@ describe('MUTATION_RPC_REGISTRY 清单检查（ADR-0065 / C-pi-14，D8 机器强
       smartContextEnabledEcho, terminalConfigEcho, scopedModelsEffective,
       providerUpdatedEcho, mcpMutationEntry,
       subagentSetModelEffectiveModel, subagentSetModelEffectiveThinking,
+      workspaceRecentListRecords,
     ]
     expect(assertions, '类型断言清单意外为空——本用例失效，请检查').not.toHaveLength(0)
     expect(assertions.every(Boolean)).toBe(true)

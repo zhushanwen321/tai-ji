@@ -78,4 +78,36 @@ describe("rebuildRunFromRecord — fold 在途语义（中断恢复）", () => {
     // 回放集/重派集 call 条目（共享断言 = __tests__/helpers/replay-call-assert.ts）
     expectReplayedCallEntry(run.state.calls);
   });
+
+  it("[§3.3.6/§3.3.9 budget] 重派集成员声明入参挂 meta.recoveredCallOpts（calls miss 的预算回落源）；回放集不入表（真值在 calls）", () => {
+    const created = makeRunCreated();
+    const events: WorkflowRunEvent[] = [
+      // 回放集：input 载荷恢复进 calls 条目 opts（既有语义）。
+      { type: "agent-started", taskIndex: 0, agentName: "fan-out-0", attempt: 1, seq: 10, ts: T0 + 1_000, input: JSON.stringify({ prompt: "p0", maxTurns: 4, timeoutMs: 90_000 }) },
+      { type: "agent-settled", taskIndex: 0, attempt: 1, outcome: "done", durationMs: 5_000, result: { content: "result-0" }, seq: 11, ts: T0 + 6_000 },
+      // 重派集：started 无 settled——声明值只进 meta（重派前窗口 budgetViewOf 回落源）。
+      { type: "agent-started", taskIndex: 1, agentName: "fan-out-1", attempt: 1, seq: 12, ts: T0 + 7_000, input: JSON.stringify({ prompt: "p1", maxTurns: 6 }) },
+    ];
+
+    const run = rebuildRunFromRecord("wf-fold", created, events);
+    // 重派集不建 calls 条目（语义不变——worker 重跑脚本到断点处重新派发）
+    expect(run.state.calls.has(1)).toBe(false);
+    expect(run.meta.recoveredCallOpts?.get(1)).toEqual({ prompt: "p1", maxTurns: 6 });
+    // 回放集不入恢复表（calls 条目持真值，恢复表只收录 calls 缺席成员）
+    expect(run.meta.recoveredCallOpts?.has(0)).toBe(false);
+    expect(run.state.calls.get(0)?.opts).toEqual({ prompt: "p0", maxTurns: 4, timeoutMs: 90_000 });
+  });
+
+  it("[§3.3.6/§3.3.9 budget] 全员回放集（无重派集）不落 recoveredCallOpts 键；旧格式帧无 input 的重派集成员不入表", () => {
+    const created = makeRunCreated();
+    const events: WorkflowRunEvent[] = [
+      { type: "agent-started", taskIndex: 0, agentName: "fan-out-0", attempt: 1, seq: 13, ts: T0 + 1_000 },
+      { type: "agent-settled", taskIndex: 0, attempt: 1, outcome: "done", durationMs: 5_000, result: { content: "result-0" }, seq: 14, ts: T0 + 6_000 },
+      // 旧格式 started 帧（无 input 载荷）的重派集成员：无可恢复声明值，不入表（缺省不造键）
+      { type: "agent-started", taskIndex: 1, agentName: "fan-out-1", attempt: 1, seq: 15, ts: T0 + 7_000 },
+    ];
+
+    const run = rebuildRunFromRecord("wf-fold", created, events);
+    expect(run.meta.recoveredCallOpts).toBeUndefined();
+  });
 });

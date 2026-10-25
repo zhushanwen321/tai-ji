@@ -29,6 +29,40 @@ import type { EngineCapabilities } from "./types.ts";
 
 const logger = getLogger("subagents");
 
+/**
+ * pi 引擎 id（manifest `taiji.subagentEngine.id`）。不复用 routing 的
+ * DEFAULT_ENGINE_ID——那是「缺省引擎」语义（随配置演化），本处是「pi 引擎身份」
+ * 判定（见 piHostedAgentDirIdentityEnv）。
+ */
+const PI_ENGINE_ID = "pi";
+
+/** pi 上游配置目录 env 名（pi-coding-agent dist/config.js ENV_AGENT_DIR 实装值）。 */
+const PI_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
+
+/**
+ * pi 引擎的托管 agent 目录注入键（identityEnv L0 通道，宿主级基础设施键）。
+ *
+ * 背景（原始登记文档 engine-default-provider-setting「新发现登记」节已删、见 git 历史，2026-10-23
+ * 裁决）：pi 引擎回落 `~/.pi/agent` 与 taiji 主会话配置目录（`<dataDir>/agent/`）不同源，
+ * settings 配的 provider 对 pi 引擎派发不生效。裁决 = taiji 派发的 pi 参数一切由
+ * taiji 控制，注入托管目录对齐主会话链（主会话 spawn 侧终态强制写入同构：
+ * pi-rpc buildPiOutboundEnv 的 `env.PI_CODING_AGENT_DIR = piAgentDir`）。
+ *
+ * 消费链：EngineClient identityEnv → buildEngineChildEnv L0 最后写入（覆盖 baseEnv
+ * 继承的 ambient 值）→ 引擎 CLI 进程 env → 孙 pi 进程（SDK buildOutboundChildEnv
+ * 全量继承，deny 清单不含 PI_）读 pi 上游 getAgentDir() 吃到托管目录——settings
+ * 配的 provider / auth / defaultModel 全链生效。非 pi 引擎不注入（无 PI_ 域消费方，
+ * 出站契约「无消费证据不出站」纪律）。独立 pi CLI 直跑不经本链，回落 ~/.pi/agent
+ * 不受影响。
+ */
+export function piHostedAgentDirIdentityEnv(
+  engineId: string,
+  dataDir: string,
+): Record<string, string> | undefined {
+  if (engineId !== PI_ENGINE_ID) return undefined;
+  return { [PI_AGENT_DIR_ENV]: path.join(dataDir, "agent") };
+}
+
 /** 单个引擎包的检查产物。 */
 export type PackageInspection =
   | { status: "ok"; entry: DiscoveredEngine }
@@ -202,6 +236,8 @@ function buildManifestCliDescriptor(params: {
         hostKind,
         dataDir,
         envPrefixes,
+        // pi 引擎托管目录注入（见 piHostedAgentDirIdentityEnv；非 pi 引擎 = undefined 不注入）
+        identityEnv: piHostedAgentDirIdentityEnv(id, dataDir),
         // [W6 R3 MF-A] host/askUser 应答端不经构造参数注入——reverse-router 消费时
         // 经 host-ui-endpoint 槽现读（D3），本构造点无固化面。
         manifestDiagnostics: {

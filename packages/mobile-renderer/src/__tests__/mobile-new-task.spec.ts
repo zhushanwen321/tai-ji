@@ -19,8 +19,6 @@ const createdSession: SessionSummary = {
   cwd: '/repo/demo',
   status: 'idle',
   lastActiveAt: Date.now(),
-  modelId: '',
-  tokenCount: 0,
 }
 
 // vi.hoisted：mock 工厂被 hoist 到 import 前，工厂内引用的变量须经 vi.hoisted 创建

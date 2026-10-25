@@ -30,7 +30,7 @@ const ELECTRON_DIR = path.join(REPO_ROOT, 'apps/electron')
 const requireFromElectronDir = createRequire(path.join(ELECTRON_DIR, 'noop.js'))
 const ELECTRON_EXECUTABLE = requireFromElectronDir('electron') as string
 
-/** renderer 产物 assets 目录（main 进程 loadFile 目标；mock/real 轨共用同一 outDir）。 */
+/** renderer 产物 assets 目录（main 进程 loadFile 目标；mock/真实进程层共用同一 outDir）。 */
 export const RENDERER_DIST_ASSETS = path.join(REPO_ROOT, 'apps', 'electron', 'renderer', 'dist', 'assets')
 
 /**
@@ -45,9 +45,9 @@ export const MOCK_BUNDLE_MARKER = 'Promise 代码评审'
 /**
  * pre-flight：确认当前 renderer 产物是 mock bundle（real 产物在场即 fail-fast）。
  *
- * 与 launch-app-real.ts 的 assertRealRendererBundle 对称。背景：两条轨共用
+ * 与 launch-app-real.ts 的 assertRealRendererBundle 对称。背景：两种形态共用
  * apps/electron/renderer/dist（构建期 VITE_MOCK define）。e2e globalSetup 已做形态
- * 感知构建（按 argv 请求轨自动重建形态不符的产物），本 pre-flight 是运行期第二道
+ * 感知构建（按 argv 请求的构建形态自动重建形态不符的产物），本 pre-flight 是运行期第二道
  * 防线（混合信号运行 / 手工重建后的形态漂移）：若 renderer 走 real transport 链路
  * （无 mock 层/无 fixture session），所有 mock spec 的 session 断言会以 30s 超时呈现，
  * 失败信号不指向恢复动作。此处把该前置条件变成带恢复命令的响亮失败。
@@ -96,7 +96,7 @@ export async function launchApp(opts: { dataDir?: string } = {}): Promise<{
   // 该变量（打包模式注入，agent bash / Electron 宿主内可见）会让 electron 二进制
   // 退化成纯 node 模式，不认 --remote-debugging-port → 全部用例 electron.launch
   // `Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`。
-  // 构造性免疫该已知坑（排障记录见 docs/TROUBLESHOOTING.md「electron 轨在 agent bash 里全灭」条目）。
+  // 构造性免疫该已知坑（排障记录见 docs/TROUBLESHOOTING.md「electron 层在 agent bash 里全灭」条目）。
   const childEnv: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === 'string') childEnv[key] = value

@@ -29,7 +29,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { transcriptAnchorOf } from "../assembly/cold-lookup.ts";
 import { createRecord, updateFromEvent } from "../persistence/execution-record.ts";
+import { createRecordEventStream } from "../persistence/record-events.ts";
 import { RecordStore } from "../persistence/record-store.ts";
+import { recordToSubagent } from "../persistence/record-store-rebuild.ts";
 import { readRecordBinding, zcodeAnchorBasePath } from "../persistence/state-marker.ts";
 import { seedTerminalRecord } from "./helpers/seed-terminal-record.ts";
 import type { TranscriptRef } from "../domain/record-types.ts";
@@ -220,6 +222,109 @@ describe("U7① revive 前轮统计保留（事件流折叠基准）", () => {
     expect(found?.turns).toBe(0);
     expect(found?.totalTokens).toBe(0);
     expect(found?.round).toBeUndefined();
+  });
+});
+
+// ── ①b 冷复活轮收条事实与 lastError 恢复（subagent-observability §3.3.6/§3.3.5）──
+//
+// 设计 §3.3.6「list 条目带 lastError（复活后旧失败轮仍可见）」的持久化半边：
+// lastRound/lastError 经 hydrateReviveBaseline 从事件流折叠恢复——重启 → revive →
+// recordToSubagent 直读可见，不停在新进程缺省 undefined。
+
+describe("U7①b 冷复活轮收条事实与 lastError 恢复（§3.3.6/§3.3.5）", () => {
+  /** 播种 created 帧身份域（createRecord fixture 同款缺省）。 */
+  async function seedCreated(stream: ReturnType<typeof createRecordEventStream>, id: string): Promise<void> {
+    await stream.append(id, {
+      type: "record-created",
+      ts: 1,
+      id,
+      agent: "worker",
+      task: "t",
+      slug: "s",
+      origin: "tool",
+      rootSessionId: "root-1",
+      depth: 0,
+      mode: "background",
+      startedAt: 1,
+    });
+  }
+
+  it("失败轮收条播种 → markResurrected 水合 lastRound/lastError → recordToSubagent 直读可见", async () => {
+    const child = path.join(sessionsDir, "child.jsonl");
+    writeIdentityChild(child, "bg-facts");
+    const stream = createRecordEventStream(() => manifestDir);
+    await seedCreated(stream, "bg-facts");
+    await stream.append("bg-facts", {
+      type: "record-bound",
+      ts: 1,
+      sessionFile: child,
+      engine: "pi",
+      engineHandle: { sessionRef: { sessionFile: child }, poolKey: "shared" },
+      epoch: 0,
+    });
+    await stream.append("bg-facts", { type: "record-round-started", ts: 2, round: 0, epoch: 0 });
+    await stream.append("bg-facts", {
+      type: "record-round-idle",
+      ts: 900,
+      round: 1,
+      stopReason: "failed",
+      engineStopReason: "error",
+      failure: {
+        class: "provider",
+        kind: "rate_limited",
+        retryable: "conditional",
+        retryAfterMs: 1_320_000,
+        raw: "429: tier_limit_exceeded",
+      },
+      turns: 7,
+      totalTokens: 4200,
+      error: "429: tier_limit_exceeded",
+    });
+
+    const store2 = newStore();
+    const rec = piRecord("bg-facts", child); // createRecord 归零基线
+    expect(rec.lastRound).toBeUndefined();
+    expect(rec.lastError).toBeUndefined();
+    store2.markResurrected(rec, true);
+
+    // 轮收条事实 + lastError 恢复（fold 单源——水合后内存读侧权威源在场）。
+    expect(rec.lastRound).toMatchObject({
+      engineStopReason: "error",
+      failure: { kind: "rate_limited", retryable: "conditional" },
+    });
+    expect(rec.lastError).toBe("429: tier_limit_exceeded");
+    // 派生视图直读（list 消费链的输入形态——recordToSubagent 透传）。
+    const view = recordToSubagent(rec);
+    expect(view.lastRound).toMatchObject({ engineStopReason: "error" });
+    expect(view.lastError).toBe("429: tier_limit_exceeded");
+  });
+
+  it("成功收条（旧帧无事实字段形态）→ lastError 不伪造、lastRound 只恢复帧上事实（收条轮数）、统计水合照常", async () => {
+    const child = path.join(sessionsDir, "child.jsonl");
+    writeIdentityChild(child, "bg-ok-facts");
+    const stream = createRecordEventStream(() => manifestDir);
+    await seedCreated(stream, "bg-ok-facts");
+    await stream.append("bg-ok-facts", { type: "record-round-started", ts: 2, round: 0, epoch: 0 });
+    await stream.append("bg-ok-facts", {
+      type: "record-round-idle",
+      ts: 900,
+      round: 1,
+      stopReason: "completed",
+      turns: 3,
+      totalTokens: 120,
+    });
+
+    const store2 = newStore();
+    const rec = piRecord("bg-ok-facts", child);
+    store2.markResurrected(rec, true);
+
+    // 旧帧无引擎事实字段（迁移期回落帧形态）→ lastRound 不伪造事实（无停因/失败
+    // 分类等键），只恢复帧上承载的收条轮数（F1-46：turns 是收条帧事实，水合与写侧
+    // roundFactsOf 同判据透传）；lastError 不伪造（无失败事实）；统计维度水合不受影响。
+    expect(rec.lastRound).toEqual({ turns: 3 });
+    expect(rec.lastError).toBeUndefined();
+    expect(rec.turnCount).toBe(3);
+    expect(rec.round).toBe(1);
   });
 });
 

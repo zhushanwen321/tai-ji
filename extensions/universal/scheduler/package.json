@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-scheduler",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "type": "module",
   "main": "index.ts",
   "taiji": {
@@ -55,6 +55,7 @@
   },
   "dependencies": {
     "@zhushanwen/extension-protocol": "workspace:*",
+    "@zhushanwen/pi-delivery-port": "workspace:*",
     "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*",
     "@zhushanwen/pi-llm-shared": "workspace:*",

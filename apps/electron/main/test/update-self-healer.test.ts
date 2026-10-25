@@ -28,7 +28,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-// ── ps argv 校验注入点（单测层拆分层，docs/todo/test-single-layer-cleanup.md 第二波）──
+// ── ps argv 校验注入点（单测层拆分层，docs/TEST-STRATEGY.md「新写测试判据」节 第二波）──
 // isUpdaterInFlight 的 argv 加固用 execFileSync('ps', ...) 识别在途升级脚本。ps 语义
 // 本身是被测物：真 bash updater.sh 进程的正向回归锚点保留 1 条真进程用例；其余
 // 用例注入受控 ps command= 输出断言 argv 解析逻辑。默认透传真实 execFileSync，

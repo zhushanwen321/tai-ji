@@ -11,12 +11,14 @@
  * deps 回调注入。注入字段：
  * - pasteImage：替代 handleImagePaste（走 writeSessionImage IPC），contenteditable/dragdrop 用
  * - getHistoryEntries：替代 chatStore.getMessages 派生，history 用
+ * - getSegments / restoreSegments：history browsing 态快照与结构化恢复（[U8 草稿 segments 化]，HistoryDeps）
  * - renderIcon：替代 createVNode/render 直调 + SLASH_ICON_COMPONENTS 查找，chip-commands 用（ADR-0058 边界：dom-core DOM API only，无 vue render）
  * - t：替代 i18n.global.t，chip-commands 用（× 按钮 aria-label）
  *
  * 零 DOM 约束：本文件只定义类型，不触 DOM。
  */
 import type { Ref } from 'vue'
+import type { Segment } from '@taiji/shared'
 
 /**
  * HandleImagePasteResult —— pasteImage 回调返回类型（对齐 renderer useImageAttachment）。
@@ -127,13 +129,20 @@ export interface ChipCallbacks {
 import type { ComposerInputInstance } from '@taiji/core/domain/composer'
 export type { ComposerInputInstance }
 
-/** per-session 草稿存储窄接口（ADR-0049 迁移：Map<string,string> → useSessionScopedState 分区）。
- *  消费方只关心三个原子操作，不持有 Map 引用——分区容器由 Composer.vue 经工厂管理。 */
+/**
+ * per-session 草稿存储窄接口（ADR-0049 迁移：Map<string,string> → useSessionScopedState 分区）。
+ * 消费方只关心三个原子操作，不持有 Map 引用——分区容器由 Composer.vue 经工厂管理。
+ *
+ * [U8 草稿 segments 化] 值从纯文本 string 扩为 Segment[]（纯数据判别联合，内存 Map 直存，
+ * 同族先例 = orphan-draft 槽）：chips 结构（image/file/skill/session/subagent）随切走切回
+ * 保真——纯文本形态下 chips 被序列化成标记污染文本（skill 标记 / 图片裸路径），结构永久丢失。
+ * 空草稿 = 空数组（含「只含空 text 段」的归一形态，归一在 saveDraft 工厂内单点执行）。
+ */
 export interface DraftStore {
-  /** 读指定 session 的草稿（分区不存在返回空串 = 未保存语义） */
-  getDraft(sid: string): string
+  /** 读指定 session 的草稿（分区不存在返回空数组 = 未保存语义） */
+  getDraft(sid: string): Segment[]
   /** 写指定 session 的草稿（经 updateFor 操作分区，不读 sid.value 实时值） */
-  saveDraft(sid: string, text: string): void
+  saveDraft(sid: string, segments: Segment[]): void
   /** 删除指定 session 的草稿分区（发送成功后清理，防 Map 积累已发送 session 条目） */
   deleteDraft(sid: string): void
 }
@@ -160,6 +169,18 @@ export interface HistoryDeps {
   clear: () => void
   /** [W2 注入] 历史条目派生（替代 chatStore.getMessages 派生） */
   getHistoryEntries: (sessionId: string) => string[]
+  /**
+   * [U8 草稿 segments 化] 进 browsing 前抓取当前输入的 segments 快照（含全部 chip 类型）。
+   * 替代旧「getText 存 savedDraft」——setText 回填历史条目会经 replaceChildren 清掉 DOM
+   * chips（比切走会话更早的丢失点），纯文本快照救不回 chip 结构。
+   */
+  getSegments: () => Segment[]
+  /**
+   * [U8 草稿 segments 化] ↓ 退回最近条目时按 segments 快照恢复输入区（text 重建 + chip
+   * 还原，走 restoreSegmentsIntoInput 单点）。历史中间条目仍走 setText 纯文本（历史派生
+   * 本就是纯文本），仅恢复草稿这一步需要结构化回填。
+   */
+  restoreSegments: (segments: Segment[]) => void
 }
 
 /**
@@ -176,8 +197,8 @@ export interface ComposerNavState {
   browsing: boolean
   /** browsing 态指针：指向 history[index] */
   index: number
-  /** 进 browsing 前保存的草稿 */
-  savedDraft: string
+  /** [U8 草稿 segments 化] 进 browsing 前保存的草稿（segments 快照，含全部 chip 类型）。 */
+  savedSegments: Segment[]
 }
 
 /**

@@ -3,7 +3,8 @@
  *
  * 背景：attachUsageListener（第二条 pi 事件订阅）承载副作用，W3 迁移到中间事件链路：
  *   1. isGenerating 复位（agent_end）—— handleTurnEndSideEffects
- *   2. tokenCount 写入（turn_end + agent_end）—— applyContextUpdate 接收 totalTokens
+ *   2. 用量派生（turn_end + agent_end）—— applyContextUpdate 接收 totalTokens（W10 起
+ *      派生自 usage 实例快照；W3 起读点收敛到 getInputTokens）
  *   3. project sidecar 兜底 —— handleTurnUsageSideEffects / handleTurnEndSideEffects
  *
  * W1（数据源治理）改写：label 持久化不再经 turn_end/agent_end 兜底直写（机制已删），
@@ -12,9 +13,9 @@
  *
  * U7：副作用经中间事件链路保留（不走 attachUsageListener）
  *   - onTurnFinalize→handleTurnEndSideEffects：isGenerating=false
- *   - onContextUpdate 含 totalTokens→applyContextUpdate：tokenCount 写入
+ *   - onContextUpdate 含 totalTokens→applyContextUpdate：用量快照失效（不直写字段）
  * E2：完整 pi 事件流集成（message_start→...→turn_end→agent_end），断言终态
- *   isGenerating===false + tokenCount>0 + inputTokens>0
+ *   isGenerating===false + inputTokens>0
  *
  * Mock 边界与 session-service.test.ts 一致（pm/broker/extensionService 注入 mock，existsSync 真实）。
  */
@@ -325,16 +326,18 @@ describe('SessionService · W3 副作用迁移（U7）', () => {
     })
   })
 
-  // ── applyContextUpdate 接收 totalTokens（W10：tokenCount 改由 usage 实例快照派生）──
-  describe('applyContextUpdate 接收 totalTokens（W10：tokenCount 派生自 usage 快照）', () => {
-    it('tokenCount 不再被事件直写，派生自 usage 实例快照（事件链路 totalTokens 与 inputTokens 同值）', async () => {
+  // ── applyContextUpdate 接收 totalTokens（W10：用量改由 usage 实例快照派生）──
+  // [W3] SessionSummary.tokenCount 已删（三状态字段退役）——派生读点收敛到
+  // getInputTokens（同一 usage 实例快照，tokenCount 旧派生与之同源同值），断言同迁。
+  describe('applyContextUpdate 接收 totalTokens（W10：inputTokens 派生自 usage 快照）', () => {
+    it('inputTokens 不再被事件直写，派生自 usage 实例快照（事件链路 totalTokens 与 inputTokens 同值）', async () => {
       const { id, client } = await setup.seedSession()
-      // 初始 tokenCount=0（快照未播种）
-      expect(setup.service.getSummary(id)?.tokenCount).toBe(0)
+      // 初始 inputTokens=null（快照未播种；null = 无快照，非 0）
+      expect(setup.service.getInputTokens(id)).toBeNull()
 
-      // 事件到达：只失效，不直写 tokenCount
+      // 事件到达：只失效，不直写
       setup.service.applyContextUpdate(id, 25000, 30000)
-      expect(setup.service.getSummary(id)?.tokenCount).toBe(0)
+      expect(setup.service.getInputTokens(id)).toBeNull()
 
       // 快照播种（fetch get_session_stats 唯一数据写路径）后派生
       client.getSessionStats.mockResolvedValue({
@@ -342,7 +345,7 @@ describe('SessionService · W3 副作用迁移（U7）', () => {
       })
       setup.service.getScalarReplicatedStates(id)?.usage.refetch()
       await new Promise<void>(r => setTimeout(r, 0))
-      expect(setup.service.getSummary(id)?.tokenCount).toBe(25000)
+      expect(setup.service.getInputTokens(id)).toBe(25000)
     })
 
     it('inputTokens=0 时 applyContextUpdate 早退（不广播），快照派生值保持', async () => {
@@ -353,8 +356,7 @@ describe('SessionService · W3 副作用迁移（U7）', () => {
       setup.service.getScalarReplicatedStates(id)?.usage.refetch()
       await new Promise<void>(r => setTimeout(r, 0))
       setup.service.applyContextUpdate(id, 0, 0)
-      // inputTokens=0 检查早退；tokenCount/inputTokens 保持快照派生值
-      expect(setup.service.getSummary(id)?.tokenCount).toBe(18000)
+      // inputTokens=0 检查早退；快照派生值保持
       expect(setup.service.getInputTokens(id)).toBe(18000)
     })
   })
@@ -373,7 +375,7 @@ describe('SessionService · W3 E2：完整 pi 事件流集成', () => {
     setup = createSetup()
   })
 
-  it('全链路：message_start→text_delta→tool_execution_*→turn_end→agent_end → 终态 isGenerating=false + tokenCount>0 + inputTokens>0', async () => {
+  it('全链路：message_start→text_delta→tool_execution_*→turn_end→agent_end → 终态 isGenerating=false + inputTokens>0', async () => {
     // 用真实的 createAdapter 组合根装配（不走 mock adapterFactory）
     // 重新构造 service，注入真实 EventAdapter + EventInterpreter + 回调连线
     const { EventAdapter } = await import('../src/infra/pi/event-adapter.js')
@@ -458,7 +460,7 @@ describe('SessionService · W3 E2：完整 pi 事件流集成', () => {
       getState: vi.fn<() => Promise<Record<string, unknown> | undefined>>().mockResolvedValue({
         sessionId: piSid, sessionFile: `/fake/${piSid}.jsonl`,
       }),
-      // W10：get_session_stats 是 usage 唯一数据源——E2 断言的 inputTokens/tokenCount
+      // W10：get_session_stats 是 usage 唯一数据源——E2 断言的 inputTokens
       // 派生自 usage 实例快照（agent_end 事件 usage 与此快照口径同源，tokens 一致）。
       getSessionStats: vi.fn<() => Promise<unknown>>().mockResolvedValue({
         contextUsage: { tokens: 163500, contextWindow: 200000, percent: 81.75 },
@@ -518,9 +520,8 @@ describe('SessionService · W3 E2：完整 pi 事件流集成', () => {
     expect(finalSummary).toBeDefined()
     // 1. isGenerating 复位（agent_end onTurnFinalize → handleTurnEndSideEffects）
     expect(finalSummary!.status).toBe('idle')
-    // 2. tokenCount 派生（>0，usage 实例快照 inputTokens 派生视图，W10 事件直写已删）
-    expect(finalSummary!.tokenCount).toBeGreaterThan(0)
-    // 3. inputTokens 派生（>0，usage 实例快照读点）
+    // 2. inputTokens 派生（>0，usage 实例快照读点；W3 起 tokenCount 已随三状态字段
+    //    删除退役，本断言是同一快照的存活读点）
     expect(service2.getInputTokens(piSid)).toBeGreaterThan(0)
 
     // 附带验证：message.complete 已发布（EventAdapter handleAgentEnd → interpreter 转发；

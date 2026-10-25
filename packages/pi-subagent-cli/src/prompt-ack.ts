@@ -169,6 +169,15 @@ export function createPromptAckTracker(opts: {
   timeoutMs: number;
   diagnostics: () => PromptAckDiagnostics;
   onFailure: (result: PromptAckResult) => void;
+  /**
+   * [subagent-observability §3.3.1 P6] disposition=handled 接管信号回调（acked 结算后
+   * 触发一次）：handled =「本条 prompt 未启动任何 run」（pi 1.0.0 官方语义——handled
+   * 在 isStreaming 检查前短路、不进 _runAgentPrompt，而 agent_settled 只在该函数
+   * finally 发射 → 零终态事件、exitPromise 无 resolve 通路 = 挂起形态）。调用方在
+   * 此跑 P6 结算分派（结算门 → 事件位预筛 → get_state isStreaming 主判据 →
+   * 立即轮终/继续等）。缺省 = 无 P6 消费（既有装配兼容）。
+   */
+  onHandled?: () => void;
 }): PromptAckTracker {
   const { recordId, timeoutMs, diagnostics, onFailure } = opts;
 
@@ -259,6 +268,9 @@ export function createPromptAckTracker(opts: {
         const disposition = extractDisposition(data);
         logPromptAcked(disposition);
         settle({ kind: "acked", ...(disposition !== undefined ? { disposition } : {}) });
+        // [subagent-observability §3.3.1 P6] handled = 执行从未启动的接管信号：
+        // settle（回执层已结）之后触发 P6 结算分派——零终态事件挂起的唯一修复点。
+        if (disposition === "handled") opts.onHandled?.();
         return;
       }
       const detail = rejectionDetail(error);

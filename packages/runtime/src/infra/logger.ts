@@ -44,7 +44,7 @@
  *   sessionLog.end()
  *   await closeLogger()                     // shutdown：flush 所有写流后进程才可退出
  */
-import {createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, type WriteStream, unlinkSync} from 'node:fs'
+import {createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmdirSync, rmSync, statSync, type WriteStream, unlinkSync} from 'node:fs'
 import {dirname, join} from 'node:path'
 import { pipeline } from 'node:stream/promises'
 // [crash-resilience §3.3 D6-⑦] 保留天数两进程共读同一函数（env 覆盖 || 默认）——merge 裁决保留 shared SSOT 形态
@@ -545,8 +545,15 @@ export interface PiSessionLog {
  * （含 size 轮转 .N.gz）逐个 mv 到新树 logs/；同名冲突（新树已有同日文件，restore
  * 场景）跳过 + warn 不覆盖——两边都是 append-only 的 pi 输出，文件级合并在 logger
  * 层不做（交给排障者按 boundary 行人工拼接，双方 boundary 行都在）。
- * 旧树迁空后删除（防半空目录残留）。任一 fs 失败 best-effort 不抛（tee 迁移失败
- * 不阻断会话创建；失败形态 = 文件留旧树，同旧布局平铺语义，无数据丢失）。
+ * 旧树 logs/ 迁空后连父目录一起回收（族④根因修复，W3.5 / E-21：只删 logs/ 叶子会让
+ * `<root>/<oldId>/` 父目录永久留空——主会话每次 create 的 tempId 残留是 prod 实测
+ * 最大残留族）。**父目录回收安全条件（逐字遵守）**：仅当 dirname(from) 内除 logs/ 外
+ * 无任何其他条目、且 logs/ 已迁空时才 rmdir——**禁用 rmSync(dir, {recursive:true})**
+ * （会话树内还有 subagents/ / workflow/ / canvases/ / attachments/ / background-tasks/
+ * 等兄弟域，无条件删父目录会静默丢数据；兄弟树随会话删除走 ADR-0141 整树回收，本处
+ * 不越权）。任一条件不满足 → 保留父目录 + warn 留痕（不静默）。不新增删除清单。
+ * 任一 fs 失败 best-effort 不抛（tee 迁移失败不阻断会话创建；失败形态 = 文件留旧树，
+ * 同旧布局平铺语义，无数据丢失）。
  */
 export function migratePiSessionLogTree(oldSessionId: string, newSessionId: string): void {
   if (!logsDir || oldSessionId === newSessionId) return
@@ -555,6 +562,7 @@ export function migratePiSessionLogTree(oldSessionId: string, newSessionId: stri
   if (!fromDir || !toDir) return
   const from = dirname(fromDir)
   const to = dirname(toDir)
+  const parentDir = dirname(from) // <root>/<oldId>（族④回收目标）
   let entries: string[]
   try {
     entries = readdirSync(from)
@@ -588,7 +596,34 @@ export function migratePiSessionLogTree(oldSessionId: string, newSessionId: stri
   }
   try {
     const rest = readdirSync(from)
-    if (rest.length === 0) rmSync(from, { recursive: true, force: true })
+    if (rest.length > 0) {
+      // 安全条件② 不满足（logs/ 未迁空：rename 失败/同名冲突留文件，逐文件 warn 已发声）
+      // → 父目录同留 + 聚合 warn 留痕（不静默）
+      writeLogEntry('warn', '[logger] migratePiSessionLogTree: parent dir kept (logs not fully migrated)', {
+        parent: parentDir,
+        remaining: rest,
+      })
+      return
+    }
+    // logs/ 已迁空：rmdir 非递归（竞态下非空即 ENOTEMPTY 上抛，不会误删）
+    rmdirSync(from)
+    let siblings: string[]
+    try {
+      siblings = readdirSync(parentDir)
+    } catch {
+      return // 父目录已不存在（并发回收）→ 回收目标已达成
+    }
+    if (siblings.length === 0) {
+      // 安全条件① 成立（dirname(from) 内除 logs/ 外无任何条目）→ 连父目录一起回收
+      rmdirSync(parentDir)
+    } else {
+      // 安全条件① 不满足：会话树内还有兄弟域 → 保留父目录 + warn 留痕（不静默）；
+      // 兄弟域随会话删除走 ADR-0141 整树回收，此处禁越权删
+      writeLogEntry('warn', '[logger] migratePiSessionLogTree: parent dir kept (sibling domains present; removal follows ADR-0141 whole-tree reclaim)', {
+        parent: parentDir,
+        siblings,
+      })
+    }
   } catch (e) {
     // 清理失败不抛（半空目录无害）；留痕满足 no-silent-catch
     writeLogEntry('warn', '[logger] log tree cleanup ignored (best-effort)', { from, error: String(e) })
@@ -601,6 +636,40 @@ export function migratePiSessionLogTree(oldSessionId: string, newSessionId: stri
     if (readdirSync(oldTreeRoot).length === 0) rmSync(oldTreeRoot, { recursive: true, force: true })
   } catch (e) {
     writeLogEntry('warn', '[logger] temp-id tree shell cleanup ignored (best-effort)', { from: dirname(from), error: String(e) })
+  }
+}
+
+/**
+ * withEphemeralPi 生成的短命会话 id 前缀（族③根因修复的安全契约单点）：
+ * id 形态 = `<prefix><Date.now()>-<randomUuid()>`，现场生成、全局唯一——整棵 tee 树
+ * 皆该附着自建，无兄弟域共享风险。removeEphemeralSessionTree 以本前缀作 fail-safe
+ * （非此前缀的入参一律拒绝删除，防误删真实会话树）。
+ */
+export const EPHEMERAL_SESSION_ID_PREFIX = 'ephemeral-'
+
+/**
+ * 回收 withEphemeralPi 自建的 tee 树（族③根因修复，W3.5 / E-21）。
+ *
+ * 短命 pi（非活跃 session 改名等一次性附着）的 ephemeralId **从不 rekey**，tee 落
+ * `<root>/<ephemeralId>/logs/pi-<date>.jsonl` 后无人回收——残留形态是**非空树**
+ * （含 tee 文件，「只删空目录」的清理会漏掉它；开工前实证①已驱动非活跃 rename 原语
+ * 确认该形态）。id 由 withEphemeralPi 现场生成（EPHEMERAL_SESSION_ID_PREFIX + 时间戳
+ * + uuid，全局唯一），树内无兄弟域，故整树递归删；**fail-safe：非 ephemeral- 前缀的
+ * 入参一律拒绝**（静默丢数据是最高危失败形态）。logger 未初始化（dataDirRoot 未知）
+ * 时 no-op。best-effort：删除失败保留原地 + warn（残留由 W5 存量清扫承接），不抛——
+ * 清理不得阻断 rename 主路径。
+ */
+export function removeEphemeralSessionTree(ephemeralId: string): void {
+  if (dataDirRoot === undefined || !ephemeralId.startsWith(EPHEMERAL_SESSION_ID_PREFIX)) return
+  const treeDir = join(getSessionStoreDir(dataDirRoot), ephemeralId)
+  if (!existsSync(treeDir)) return
+  try {
+    rmSync(treeDir, { recursive: true, force: true })
+  } catch (e) {
+    writeLogEntry('warn', '[logger] removeEphemeralSessionTree: cleanup failed (tree stays; swept by W5 orphan sweep)', {
+      treeDir,
+      error: String(e),
+    })
   }
 }
 

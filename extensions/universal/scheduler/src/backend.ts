@@ -1,4 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import { getDeliveryPort } from '@zhushanwen/pi-delivery-port'
+import { getLogger } from '@zhushanwen/pi-extension-logger'
 import { filterActivePath } from '@zhushanwen/pi-session-path'
 
 import { replayFoldEntries, type SchedulerEntryLike } from './replay.js'
@@ -9,6 +11,8 @@ import type {
   SchedulerEntryOp,
   SchedulerProviderOverride,
 } from './types.js'
+
+const logger = getLogger('scheduler')
 
 // ── SchedulerBackend 接口 ──
 
@@ -33,7 +37,11 @@ interface SchedulerSendOptions {
  * 运行时协作后端抽象（依赖反转）。SchedulerRuntime 只依赖此接口：
  * 不触碰 session JSONL、不持有 pi。
  *
- * - sendMessage: 到期 dispatch 的消息注入（生产实现委托 pi.sendMessage）
+ * - sendMessage: 直发注入（生产实现委托 pi.sendMessage）。现行唯一调用方 = ack
+ *   触发器（ack-turn.ts，自有错误词表与自检机制，不随 dispatch 迁移投递端口）。
+ * - deliverDispatch: 到期 dispatch 的投递入口（unified-delivery 迁移，2026-10-25
+ *   裁决）——生产实现经投递端口 port.deliver，注入参数与直发逐字一致，失败语义
+ *   forget。详见方法注释。
  * - appendEntry: 按 op 写 TASK_ENTRY_TYPE custom entry（event sourcing）。
  *   生产实现委托 pi.appendEntry（同步落盘）。失败必须被调用方 try-catch（ER-APPEND-FAIL：
  *   runtime 捕获后 logger.warn + 不 rethrow，内存态已更新，at-least-once 已知恶化窗口）
@@ -55,6 +63,29 @@ interface SchedulerSendOptions {
  */
 export interface SchedulerBackend {
   sendMessage(msg: SchedulerMessage, opts?: SchedulerSendOptions): Promise<void>
+  /**
+   * 到期 dispatch 的投递入口（unified-delivery 迁移）。生产实现经投递端口
+   * port.deliver（getDeliveryPort 进程级槽，同 bash / session-manager / workflow /
+   * notifier 四条提交链接入形态）：
+   *
+   * - 注入参数逐字一致：port 内部对 steer 档条目调用 host.sendMessage，
+   *   形态与直发兜底完全相同（同 customType / content / display，
+   *   deliverAs steer 档 + triggerTurn 直唤参数），仅 details 追加端口送达凭据
+   *   deliveryId。
+   * - 失败语义 forget（2026-10-25 裁决）：受理后注入失败端口首败即弃（落 discard
+   *   终局，不重投）——重试由 scheduler 既有「failed 记账 + 下个 tick 重试」单通道
+   *   承载，避免双通道重投造成用户重复提醒。
+   * - 幂等键（idempotencyKey，必填）：调用方构造的每轮唯一键
+   *   `${taskId}:${dispatchEpoch}`——taskId 恒定，裸 taskId 会被端口按终局条目
+   *   永久判重吞掉（从第二轮起任务永不再提醒），epoch 必须含轮次维度。
+   *
+   * 返回语义：resolve = 已受理（accepted；swallowed = 同轮重复提交，消息已在
+   * 系统内，受理即记账）；throw = 端口拒收（rejected：persist-failed / disposed
+   * ——未受理未落账，幂等键未登记），调用方走 failed 记账，下个 tick 重试合法。
+   * port 缺席（装配异常窗口）：降级直发 pi.sendMessage（原路径逐字不变 + warn
+   * 留痕，at-most-once，仅覆盖装配异常窗口）。
+   */
+  deliverDispatch(msg: SchedulerMessage, opts: SchedulerSendOptions | undefined, idempotencyKey: string): Promise<void>
   appendEntry(op: SchedulerEntryOp): void
   getSessionFile(): string | undefined
   now(): number
@@ -181,6 +212,54 @@ export class PiSchedulerBackend implements SchedulerBackend {
   }
 
   async sendMessage(msg: SchedulerMessage, opts?: SchedulerSendOptions): Promise<void> {
+    await this.pi.sendMessage(msg, opts)
+  }
+
+  /**
+   * 到期 dispatch 的投递入口（unified-delivery 迁移；接口契约见 SchedulerBackend
+   * .deliverDispatch 注释）。port.deliver 同步返回受理回执：
+   * - accepted：受理即记账（受理前已落投递日志 outbox，注入直达 pi 唯一队列）。
+   *   注入期失败（受理后 sendMessage throw）不在此上抛——端口按 forget 首败即弃
+   *   （2026-10-25 裁决），该轮提醒丢失为已裁决代价（丢一轮 << 重投造成重复提醒）。
+   * - swallowed：同轮重复提交（幂等键命中在途/终局条目）——消息已在系统内，
+   *   按已受理返回（重复走 failed 记账会双通道重投）。
+   * - rejected（persist-failed / disposed）：未受理未落账——throw 给 runtime 走
+   *   既有 catch（模型恢复 + failed 记账 + 下个 tick 重试，单通道重试）。
+   *
+   * timing 恒 'steer'（scheduler-steer-direct-dispatch 投递模型：dispatch 只有
+   * steer 一档，端口翻译为 host.sendMessage 的 steer 档同参形态，
+   * 与直发兜底参数逐字一致）。
+   *
+   * 槽语义（同 bash notify.ts D17 形态）：getDeliveryPort() 在调用时点读进程级槽，
+   * session_start 重绑后指向当代端口实例；scheduler runtime 的 stale 检查
+   * （guardStaleCtx + isCtxStale）在 tick 层拦截旧代调用，本方法不再重复分诊。
+   */
+  async deliverDispatch(
+    msg: SchedulerMessage,
+    opts: SchedulerSendOptions | undefined,
+    idempotencyKey: string,
+  ): Promise<void> {
+    const port = getDeliveryPort()
+    if (port !== undefined) {
+      const receipt = port.deliver(
+        {
+          id: idempotencyKey,
+          timing: 'steer',
+          payload: { kind: 'custom', customType: msg.customType, content: msg.content, display: msg.display },
+        },
+        { onFailure: 'forget' },
+      )
+      if (receipt.kind === 'rejected') {
+        throw new Error(`scheduler dispatch rejected by delivery port (${receipt.reason}; key=${idempotencyKey})`)
+      }
+      return
+    }
+    // port 缺席（base-tool-enhance session_start 装配异常 / 版本混装窗口，生产不可达
+    // 常态）：直发兜底——与迁移前 sendMessage 原路径逐字一致（at-most-once），warn 即修复信号。
+    logger.warn(
+      'delivery port not bound - scheduler dispatch falls back to direct send (no dedupe / no durability; check base-tool-enhance session_start bindDeliveryPort wiring)',
+      { idempotencyKey },
+    )
     await this.pi.sendMessage(msg, opts)
   }
 

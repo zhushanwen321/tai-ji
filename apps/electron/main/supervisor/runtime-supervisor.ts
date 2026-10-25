@@ -36,12 +36,12 @@
  *
  * 依赖方向：runtime-supervisor → interfaces + 5 个子模块 + electron(BrowserWindow)
  */
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import type { ChildProcess } from 'node:child_process'
 import type { IRuntimeSupervisor } from '../interfaces.js'
 import { findAvailablePort, getPortOffset } from './port-discoverer.js'
 import { spawnRuntimeProcess, stopRuntimeProcess } from './process-control.js'
-import { waitForHealth } from './health-checker.js'
+import { waitForHealth, type WaitForHealthOptions } from './health-checker.js'
 import { writePortFile } from './port-file.js'
 import { RestartPolicy, MAX_RESTARTS } from './restart-policy.js'
 import { LivenessMonitor, LIVENESS_FAIL_THRESHOLD } from './liveness-probe.js'
@@ -69,6 +69,17 @@ interface RestartDecisionContext {
   /** runtime 退出码（process_exit 路径；null=信号杀死） */
   exitCode?: number | null
 }
+
+/**
+ * dev 形态 runtime 启动的健康检查重试上限（fix-dev-slowstart-healthcheck）。
+ *
+ * 量级依据：dev runtime 走 tsx 两段式启动（Electron main 内 tsx → spawn node+tsx 运行
+ * runtime 源码），冷编译高负载实测 60-90s；默认 HEALTH_RETRY_COUNT=30 次 × 200ms ≈ 6s
+ * 硬上限会把慢启动误判为超时 → stop() 清理半活 child（exit 143）。本值 1500 次 × 200ms
+ * = 300s，对实测值留 3-4 倍余量。prod 不放大上限——起不来是 prod 故障，6s 快失败
+ * 信号是特性（快速暴露问题，而非拖 300s）。
+ */
+export const DEV_HEALTH_RETRY_COUNT = 1500
 
 /**
  * 重启决策 reason 句子表（按 trigger 查——决策日志的「为什么」字段，对齐 u5b
@@ -317,8 +328,21 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     // [HISTORICAL] W5 改动 4：spawn 成功但 waitForHealth 可能失败（进程半活）。
     // 必须包 try-catch：失败时主动 stop() 清理半活 child，
     // 否则 child 引用残留 → 下次 start 幂等检查误判存活 → 返回死端口（应用假死）。
+    //
+    // fix-dev-slowstart-healthcheck：waitForHealth 参数形态——
+    // - aliveCheck：进程退出时立即失败（onRuntimeExit 已把 this.child 置 null），
+    //   不再对死进程等满重试上限；错误信息区分「超时」与「崩溃」（exit 143 可归因）。
+    // - dev 分档：tsx 冷编译 60-90s 远超默认 6s 上限（误杀根因），放大到
+    //   DEV_HEALTH_RETRY_COUNT；prod 保持默认——快失败信号是特性。
+    const healthOpts: WaitForHealthOptions = {
+      aliveCheck: () =>
+        this.child !== null && this.child.exitCode === null && !this.child.killed,
+    }
+    if (!app.isPackaged) {
+      healthOpts.retryCount = DEV_HEALTH_RETRY_COUNT
+    }
     try {
-      await waitForHealth(port)
+      await waitForHealth(port, healthOpts)
     } catch (e) {
       console.error(`[runtime] waitForHealth failed on port ${port}, cleaning up half-alive child`)
       // 复用 stop()：它会 markStopping + kill 进程树 + 清 child/port

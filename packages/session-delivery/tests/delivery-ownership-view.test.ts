@@ -1,11 +1,23 @@
 /**
  * u1 双视图派生（D9②/D5③）+ onChange 订阅 + TextPayload.images 透传（D9④）+
- * onSettled 口径时点（D9⑤：sendChecked 受理即 resolve，送达确认不阻塞 checked 返回）。
+ * onSettled 口径时点（D9⑤：sendChecked 受理即 resolve，送达确认不阻塞 checked 返回）+
+ * depth() 诊断口径。
+ *
+ * [已不可达用例删除登记] 原「images 合批」用例的 mergeWindowMs 配置前提随合批窗口
+ * 删除而不可达，2026-10-23 投递域清理批次删除——images 成批透传改以 deferred
+ * 积累形态锁定（内核 doSend 成批路径不变）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
 import { makeMockPort, textMsg } from './helpers.js'
 import type { DeliveryEntryState } from '../src/types.js'
+
+/** hold 拒 port（设计内等待）：条目受理前留守 queued 的构造器（warn 由用例自行静音）。 */
+function makeHoldPort(hold: () => boolean): ReturnType<typeof makeMockPort> {
+  return makeMockPort({
+    send: () => (hold() ? { accepted: false as const, deferred: 'merge-commit-hold' as const } : undefined),
+  })
+}
 
 describe('u1-view 双视图派生（D9②/D5③）', () => {
   beforeEach(() => {
@@ -16,42 +28,44 @@ describe('u1-view 双视图派生（D9②/D5③）', () => {
   })
 
   it('全量视图：活跃条目完整字段 + 全部 tombstone；派生视图 = 活跃全量 + delivered 最近 N 条', () => {
-    const port = makeMockPort()
+    const port = makeHoldPort(() => true)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port)
+    try {
+      // 3 条 delivered（hold 拒留守 queued 后直确认——扩展① rebuild 形态）
+      for (const id of ['u-1', 'u-2', 'u-3']) {
+        handle.send(textMsg(id), { id })
+        handle.confirmDelivered(id)
+      }
+      // 1 条 queued（hold 拒留守）
+      handle.send(textMsg('pending'), { id: 'u-4' })
 
-    // 3 条 delivered
-    for (const id of ['u-1', 'u-2', 'u-3']) {
-      handle.send(textMsg(id), { id })
-      handle.confirmDelivered(id)
+      // 全量视图（entriesFull）
+      const full = handle.entriesFull()
+      expect(full.active.map((e) => e.id)).toEqual(['u-4'])
+      expect(full.active[0]).toMatchObject({
+        id: 'u-4',
+        state: 'queued',
+        lane: 'direct',
+        payload: { kind: 'text', content: 'pending' },
+        createdAt: expect.any(Number),
+        updatedAt: expect.any(Number),
+      })
+      expect(full.tombstones.map((t) => t.id)).toEqual(['u-1', 'u-2', 'u-3'])
+
+      // 派生视图（projection）：活跃全量 + delivered 全部（3 < 默认窗口 50）
+      const proj = handle.projection()
+      expect(proj.entries.map((e) => e.id)).toEqual(['u-4', 'u-1', 'u-2', 'u-3'])
+      expect(proj.entries.map((e) => e.state)).toEqual<DeliveryEntryState[]>([
+        'queued',
+        'delivered',
+        'delivered',
+        'delivered',
+      ])
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
     }
-    // 1 条 queued（busy 留队）
-    ;(port as { idle: boolean }).idle = false
-    handle.send(textMsg('pending'), { id: 'u-4' })
-
-    // 全量视图（entriesFull）
-    const full = handle.entriesFull()
-    expect(full.active.map((e) => e.id)).toEqual(['u-4'])
-    expect(full.active[0]).toMatchObject({
-      id: 'u-4',
-      state: 'queued',
-      lane: 'direct',
-      payload: { kind: 'text', content: 'pending' },
-      createdAt: expect.any(Number),
-      updatedAt: expect.any(Number),
-    })
-    expect(full.tombstones.map((t) => t.id)).toEqual(['u-1', 'u-2', 'u-3'])
-
-    // 派生视图（projection）：活跃全量 + delivered 全部（3 < 默认窗口 50）
-    const proj = handle.projection()
-    expect(proj.entries.map((e) => e.id)).toEqual(['u-4', 'u-1', 'u-2', 'u-3'])
-    expect(proj.entries.map((e) => e.state)).toEqual<DeliveryEntryState[]>([
-      'queued',
-      'delivered',
-      'delivered',
-      'delivered',
-    ])
-
-    handle.dispose()
   })
 
   it('派生视图窗口恒 50：56 条 delivered 只保留最近 50 条完整条目', () => {
@@ -75,18 +89,21 @@ describe('u1-view 双视图派生（D9②/D5③）', () => {
   })
 
   it('cancelled 不进派生视图（D5③）；tombstone 全量视图可见', () => {
-    const port = makeMockPort({ isIdle: () => false })
+    const port = makeHoldPort(() => true)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port)
+    try {
+      handle.send(textMsg('kept'), { id: 'u-1' }) // hold 拒留守 queued
+      handle.send(textMsg('revoked'), { id: 'u-2' })
+      handle.cancel('u-2')
 
-    handle.send(textMsg('kept'), { id: 'u-1' })
-    handle.send(textMsg('revoked'), { id: 'u-2' })
-    handle.cancel('u-2')
-
-    const proj = handle.projection()
-    expect(proj.entries.map((e) => e.id)).toEqual(['u-1']) // cancelled 不进派生视图
-    expect(handle.entriesFull().tombstones.map((t) => t.id)).toEqual(['u-2']) // 判重表可见
-
-    handle.dispose()
+      const proj = handle.projection()
+      expect(proj.entries.map((e) => e.id)).toEqual(['u-1']) // cancelled 不进派生视图
+      expect(handle.entriesFull().tombstones.map((t) => t.id)).toEqual(['u-2']) // 判重表可见
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
   })
 
   it('快照防御性：修改 entries() 返回对象不影响内核状态', () => {
@@ -173,20 +190,25 @@ describe('u1-view onChange 订阅（state topic 装配）', () => {
   })
 
   it('drain 清空触发一次；dispose 后订阅清空不触发', () => {
-    const port = makeMockPort({ isIdle: () => false })
+    const port = makeHoldPort(() => true)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port)
     let changes = 0
-    handle.onChange(() => changes++)
+    try {
+      handle.onChange(() => changes++)
 
-    handle.send(textMsg('m1'), { id: 'u-1' })
-    expect(changes).toBe(1)
-    handle.drain()
-    expect(changes).toBe(2)
+      handle.send(textMsg('m1'), { id: 'u-1' }) // hold 拒留守：仅创建 1 次
+      expect(changes).toBe(1)
+      handle.drain()
+      expect(changes).toBe(2)
 
-    handle.dispose()
-    // dispose 后 handle 不再产生变更（send 短路）
-    handle.send(textMsg('m2'), { id: 'u-2' })
-    expect(changes).toBe(2)
+      handle.dispose()
+      // dispose 后 handle 不再产生变更（send 短路）
+      handle.send(textMsg('m2'), { id: 'u-2' })
+      expect(changes).toBe(2)
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })
 
@@ -224,24 +246,29 @@ describe('u1-view TextPayload.images 透传（D9④）', () => {
     handle.dispose()
   })
 
-  it('多条 text 合批：images 各条保序拼接（内核不剥离）', () => {
-    vi.useFakeTimers()
-    const port = makeMockPort()
-    const handle = createDelivery(port, { mergeWindowMs: 5000, mergeHoldActive: () => true })
+  it('多条 text 积累成批：images 各条保序拼接（内核不剥离）', () => {
+    let hold = true
+    const port = makeHoldPort(() => hold)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const handle = createDelivery(port)
+    try {
+      handle.send({ payload: { kind: 'text', content: 'a', images: [images[0]!] } }, { id: 'u-1' })
+      handle.send({ payload: { kind: 'text', content: 'b', images: [images[1]!] } }, { id: 'u-2' })
 
-    handle.send({ payload: { kind: 'text', content: 'a', images: [images[0]!] } }, { id: 'u-1', merge: true })
-    handle.send({ payload: { kind: 'text', content: 'b', images: [images[1]!] } }, { id: 'u-2', merge: true })
-    vi.advanceTimersByTime(5000)
+      // 窗口外触发（外部 flush）：积累队列成批出站
+      hold = false
+      handle.flush()
 
-    expect(port.sendCalls).toHaveLength(1)
-    expect(port.sendCalls[0]!.msg.payload).toEqual({
-      kind: 'text',
-      content: 'a\n\n---\n\nb',
-      images,
-    })
-
-    handle.dispose()
-    vi.useRealTimers()
+      expect(port.sendCalls).toHaveLength(3) // 2 次 hold 拒 + 1 次成批出站
+      expect(port.sendCalls[2]!.msg.payload).toEqual({
+        kind: 'text',
+        content: 'a\n\n---\n\nb',
+        images,
+      })
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
   })
 })
 
@@ -297,7 +324,7 @@ describe('u1-view D9⑤ 口径时点：sendChecked 受理即 resolve（送达确
   })
 })
 
-describe('u1-view v1 机制保持抽查（busy gate / dispose）', () => {
+describe('u1-view 机制保持抽查（dispose 短路）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -331,5 +358,29 @@ describe('u1-view v1 机制保持抽查（busy gate / dispose）', () => {
 
     sendResolve?.() // 迟到回执不炸
     await vi.advanceTimersByTimeAsync(0)
+  })
+})
+
+describe('u1-view depth 诊断（v1 口径：未受理条目数）', () => {
+  it('反映当前待投队列深度（受理转 in-flight 后不计）', () => {
+    let hold = true
+    const port = makeHoldPort(() => hold)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const handle = createDelivery(port)
+    try {
+      expect(handle.depth()).toBe(0)
+      handle.send(textMsg('m1')) // hold 拒留守
+      expect(handle.depth()).toBe(1)
+      handle.send(textMsg('m2'))
+      expect(handle.depth()).toBe(2)
+
+      hold = false
+      handle.flush()
+      expect(handle.depth()).toBe(0) // 受理转 in-flight 后不计
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
+    expect(handle.depth()).toBe(0)
   })
 })

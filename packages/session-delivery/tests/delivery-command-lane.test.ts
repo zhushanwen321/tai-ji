@@ -20,7 +20,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
 import type { DeliveryMessage } from '../src/types.js'
-import { makeBusyParkPort, makeMockPort, textMsg } from './helpers.js'
+import { makeMockPort, textMsg } from './helpers.js'
 
 function msg(content: string): DeliveryMessage {
   return { payload: { kind: 'text', content } }
@@ -90,31 +90,39 @@ describe('首败即停（ADR-0122 统一语义，backoff 自动重试链退役�
 
 describe('failInFlight：断连事件驱动的显式失败终局（ADR-0122）', () => {
   it('in-flight 条目转 failed（留守活跃集）+ onSettled rejected；queued 条目不触碰', async () => {
+    // 受理即出站下 queued 条目的构造 = custom 条目首败留守（retain 缺省，非终局）
     let sendResolve: (() => void) | undefined
     const port = makeMockPort({
-      send: () => new Promise<void>((resolve) => { sendResolve = resolve }),
+      send: (m) => {
+        if (m.payload.kind === 'custom') return { accepted: false as const, reason: 'transient' }
+        return new Promise<void>((resolve) => { sendResolve = resolve })
+      },
     })
     const settled: string[] = []
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port, {
       onSettled: (_m, outcome) => settled.push(outcome),
     })
-    // 第一条：受理 → in-flight（sendChecked 受理口径 resolve）
-    const p1 = handle.sendChecked(textMsg('msg1'), { id: 'e-1' })
-    sendResolve!()
-    await p1
-    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
-    // 第二条：busy 留守 queued（busy gate 关闸，不出站）
-    port.idle = false
-    handle.send(textMsg('msg2'), { id: 'e-2' })
-    expect(handle.entriesFull().active.find((e) => e.id === 'e-2')!.state).toBe('queued')
+    try {
+      // 第一条：受理 → in-flight（sendChecked 受理口径 resolve）
+      const p1 = handle.sendChecked(textMsg('msg1'), { id: 'e-1' })
+      sendResolve!()
+      await p1
+      expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
+      // 第二条：custom 首败留守 queued（retain，失败非终局）
+      handle.send({ payload: { kind: 'custom', customType: 'subagents:notify', content: 'msg2', display: true } }, { id: 'e-2' })
+      expect(handle.entriesFull().active.find((e) => e.id === 'e-2')!.state).toBe('queued')
 
-    const n = handle.failInFlight('pi connection lost')
-    expect(n).toBe(1)
-    const full = handle.entriesFull()
-    expect(full.active.find((e) => e.id === 'e-1')!.state).toBe('failed')
-    expect(full.active.find((e) => e.id === 'e-2')!.state).toBe('queued')
-    expect(settled).toEqual(['rejected'])
-    handle.dispose()
+      const n = handle.failInFlight('pi connection lost')
+      expect(n).toBe(1)
+      const full = handle.entriesFull()
+      expect(full.active.find((e) => e.id === 'e-1')!.state).toBe('failed')
+      expect(full.active.find((e) => e.id === 'e-2')!.state).toBe('queued')
+      expect(settled).toEqual(['rejected'])
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
   })
 
   it('failed 条目可经 requeue 重投（resync 用户重试通路）', async () => {
@@ -137,16 +145,22 @@ describe('failInFlight：断连事件驱动的显式失败终局（ADR-0122）',
   })
 
   it('幂等：无 in-flight 条目时 failInFlight 返回 0、零回调', () => {
+    // queued 条目构造 = custom 首败留守（retain，未受理不属 failInFlight 触达面）
+    const port = makeMockPort({ send: () => ({ accepted: false as const, reason: 'transient' }) })
     const settled: string[] = []
-    const port = makeMockPort()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port, {
       onSettled: (_m, outcome) => settled.push(outcome),
     })
-    port.idle = false // busy：条目留守 queued（未受理，不属 failInFlight 触达面）
-    handle.send(textMsg('msg1'))
-    expect(handle.failInFlight('pi connection lost')).toBe(0)
-    expect(settled).toEqual([])
-    handle.dispose()
+    try {
+      handle.send({ payload: { kind: 'custom', customType: 'subagents:notify', content: 'msg1', display: true } }, { id: 'e-1' })
+      expect(handle.entriesFull().active[0]!.state).toBe('queued')
+      expect(handle.failInFlight('pi connection lost')).toBe(0)
+      expect(settled).toEqual([])
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
   })
 })
 
@@ -226,31 +240,38 @@ describe('D2② 组批隔离：无标记条目不与普通条目拼为混合 com
     handle.dispose()
   })
 
-  it('doSend 混合队列：busy park 积累的无标记+普通条目 → 无标记条目单独出站，剩余普通条目合批语义不变（对照）', async () => {
-    const bp = makeBusyParkPort()
-    bp.setIdle(false) // busy：条目积累（busy park 合批窗口）
-    const handle = createDelivery(bp.port)
-    handle.send(msg('普通A'), { id: 'a-1' })
-    handle.send(msg('/todos'), { id: 'b-1', unmarked: true })
-    handle.send(msg('普通C'), { id: 'c-1' })
-    await vi.advanceTimersByTimeAsync(0)
-    expect(bp.port.sendCalls.length).toBe(0)
+  it('doSend 混合队列：deferred 积累的无标记+普通条目 → 无标记条目单独出站，剩余普通条目合批语义不变（对照）', async () => {
+    // hold 拒（设计内等待，非失败）积累队列：条目留守 queued 等窗口结束重提
+    let rejecting = true
+    const port = makeMockPort({
+      send: () => (rejecting ? { accepted: false as const, deferred: 'merge-commit-hold' as const } : undefined),
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const handle = createDelivery(port)
+    try {
+      handle.send(msg('普通A'), { id: 'a-1' })
+      handle.send(msg('/todos'), { id: 'b-1', unmarked: true })
+      handle.send(msg('普通C'), { id: 'c-1' })
+      await vi.advanceTimersByTimeAsync(0)
+      const attemptsAfterAccumulation = port.sendCalls.length
+      expect(attemptsAfterAccumulation).toBeGreaterThan(0)
 
-    bp.setIdle(true)
-    bp.fireSettled() // settled 边沿 → flush → doSend 组批
-    await vi.advanceTimersByTimeAsync(0)
-    // 隔离：第一批 = 队列中的无标记条目单独出站（裸文本）；条目受理后转 in-flight，
-    // busy gate 内查在途条目即关闸（设计内行为），第二批等下一边沿
-    expect(bp.port.sendCalls.length).toBe(1)
-    expect(composedOf(bp.port.sendCalls[0])).toBe('/todos')
-    expect(composedOf(bp.port.sendCalls[0])).not.toContain(BATCH_SEP)
+      // 窗口结束 → flush 整队出站：隔离生效，队列中的无标记条目单独出站（裸文本）
+      rejecting = false
+      handle.flush()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(port.sendCalls.length).toBe(attemptsAfterAccumulation + 2)
+      // 第 1 批 = 无标记条目单独出站；受理后 pump 级联 → 第 2 批 = 剩余普通条目合批
+      //（既有合批语义零变化）
+      expect(composedOf(port.sendCalls[attemptsAfterAccumulation])).toBe('/todos')
+      expect(composedOf(port.sendCalls[attemptsAfterAccumulation])).not.toContain(BATCH_SEP)
+      expect(composedOf(port.sendCalls[attemptsAfterAccumulation + 1])).toBe(`普通A${BATCH_SEP}普通C`)
 
-    expect(handle.confirmDelivered('b-1')).toBe(true) // 送达回执（message_end 命中模拟）
-    bp.fireSettled() // 下一边沿 → 剩余普通条目合批出站（既有合批语义零变化）
-    await vi.advanceTimersByTimeAsync(0)
-    expect(bp.port.sendCalls.length).toBe(2)
-    expect(composedOf(bp.port.sendCalls[1])).toBe(`普通A${BATCH_SEP}普通C`)
-    handle.dispose()
+      expect(handle.confirmDelivered('b-1')).toBe(true) // 送达回执（message_end 命中模拟）
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
   })
 })
 

@@ -11,9 +11,11 @@
  * [V7 验收基建，实施期裁决保留（设计 §4.2 开关保留策略已登记偏离默认理由）] dev-only 事件流延迟注入开关。
  *
  * 环境变量 TAIJI_AGENT_DEV_SETTLING_DELAY_MS 设置为正数（毫秒）时生效：agent_settled 事件
- * 延迟 N ms 再处理，用于在 dev 环境拉长 settling 窗口，构造 D2 行为变更（settling 预检
- * 拒绝入队）的正向验收场景（V7）。真实链路定性（设计 v3）：pi 与 provider 交互完全真实，
- * 本注入是时间维度的 chaos 延迟手法，非 mock、不替换任何依赖。
+ * 延迟 N ms 再处理，用于在 dev 环境拉长 settling 窗口，构造 chat-flow-consistency A2
+ * （settling 窗口发送：回合结束瞬间追问）等验收场景（原 V7 的「settling 预检拒绝入队」
+ * 场景已随 u5a 本地队列退役，见 session-delivery-registry.ts 不可投原因注释的 [u5a 退役]
+ * 登记，本开关保留服务主设计 A2 的 mock 时序注入）。真实链路定性（设计 v3）：pi 与
+ * provider 交互完全真实，本注入是时间维度的 chaos 延迟手法，非 mock、不替换任何依赖。
  *
  * 未设 / 非法值（非数字、≤0）→ 返回 null = 零行为差异（不带默认值进 prod）。
  * 纯内存延迟不落盘。export 供测试跟随（SR6 SSOT 惯例）。

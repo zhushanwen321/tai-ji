@@ -111,12 +111,14 @@ export function clearDeliveryProjection(sid: string): void {
     deliveryEntriesBySession.value = next
   }
   morphSegmentsBySession.delete(sid)
+  shownDirectMarkerIds.delete(sid)
 }
 
 /** 重置全部派生视图状态（仅供测试隔离；生产禁调——生产清理走 clearDeliveryProjection）。 */
 export function resetDeliveryProjectionForTest(): void {
   deliveryEntriesBySession.value = new Map()
   morphSegmentsBySession.clear()
+  shownDirectMarkerIds.clear()
 }
 
 /**
@@ -195,12 +197,104 @@ function extractUserContentText(entry: PiMessageEntry): string {
  * 帧文本是否携带内核投递标记（双形态 u-<uuid> / 裸 <uuid>，SSOT = MSG_ID_TAG_RE）。
  *
  * 消费方 = registry 的 ③ 外来直发判定：带标记帧属送达回执通道管辖（① 已消费，或
- * 「迟到重复回执」形态——派生视图已 delivered + 记账已归零，须静默而非按外来入流，否则
- * E5c 的重复确认帧场景双插）；只有无标记帧才是外来直发候选。
+ * 「迟到重复回执」形态——派生视图已 delivered + 记账已归零；管辖形态的去重与显示承接
+ * 见 degradeUnmatchedKernelDelivery）；只有无标记帧才是外来直发候选。
  */
 export function hasKernelDeliveryMarker(entry: PiMessageEntry): boolean {
   MSG_ID_TAG_RE_GLOBAL.lastIndex = 0
   return MSG_ID_TAG_RE_GLOBAL.test(extractUserContentText(entry))
+}
+
+// ── ③ 守卫降级（rpc-direct-send-user-bubble）──────────────────────────────
+
+/**
+ * 已显示直发标记分区（sid → 裸标记 id 集合；ADR-0049 per-session Map 分区，清理点 =
+ * clearDeliveryProjection / resetDeliveryProjectionForTest）。
+ *
+ * ③ 降级的去重锚：帧标记未命中派生视图（① miss）且无记账（② miss）时，该帧是
+ * 「回执通道管辖但显示责任无人承接」的形态——降级入流一次并把帧内标记登记于此；
+ * 后续同 id 帧经 hasShownMarker 命中即静默（防派生视图补齐后的迟到重复回执双插）。
+ * 非响应式核心记账：只在 ③ 降级判定读，无 GUI 直接消费方。
+ */
+// taste:allow-no-data-owner W24-EX-C（进程内流程状态——③ 降级去重的判定锚，无 GUI 直接消费方）
+const shownDirectMarkerIds = new Map<string, Set<string>>()
+
+/** 协议层 clientUuid 前缀（`u-<uuid>` 形态；与 runtime 侧 CLIENT_UUID_PREFIX 同源语义）。 */
+const CLIENT_UUID_PREFIX = 'u-'
+
+/** 协议层 clientUuid → 裸标记 id（`u-<uuid>` 剥前缀；裸 uuid / 内核收养 `m-` 形态原样）。 */
+function bareIdOfClientUuid(clientUuid: string): string {
+  return clientUuid.startsWith(CLIENT_UUID_PREFIX) ? clientUuid.slice(CLIENT_UUID_PREFIX.length) : clientUuid
+}
+
+/** 入流即登记已显示（裸 id 反推进分区）：③ 降级判定的去重锚（① 落点与 ③ 降级共用）。 */
+function markShownDirect(sid: string, clientUuid: string): void {
+  const partition = shownDirectMarkerIds.get(sid) ?? new Set<string>()
+  partition.add(bareIdOfClientUuid(clientUuid))
+  shownDirectMarkerIds.set(sid, partition)
+}
+
+/** ref 流中是否已有该裸标记 id 的气泡（appendUser 契约气泡 id = 入参 id 原样，双形态匹配）。 */
+function hasLocalBubbleForMarker(ctx: MessageEffectContext, sid: string, bareId: string): boolean {
+  return hasLocalBubble(ctx, sid, bareId) || hasLocalBubble(ctx, sid, `u-${bareId}`)
+}
+
+/**
+ * ③ 守卫降级（回执通道管辖帧的显示承接）：hasKernelDeliveryMarker 命中（带内核标记）
+ * 且 ① 未命中派生视图、② 无记账时的唯一入口——
+ *
+ * - 帧内标记 id 全部已显示（ref 气泡双形态命中 ∨ 本分区已登记）→ 静默消费返回 true
+ *   （「迟到重复回执」形态，E5c 防双插语义保留）；
+ * - 存在未显示 id → **降级入流一次**（剥标记原文 + trimEnd，与 ① 降级分支同一变换——
+ *   live ≡ reload 显示口径；appendUser 乐观气泡等价形态，status complete）并把帧内全部
+ *   标记登记进分区（整帧文本涵盖全部条目内容，同 id 条目不再重复入流——派生视图补齐
+ *   到达时条目本身不触发入流，唯一重复源是迟到重复回执帧），返回 true（帧消费终止，
+ *   权威喂 reducer 仍由调用方无条件承担）。
+ *
+ * 修前行为：③ 分支对带标记帧无条件静默消费——协议直发（非 composer，无乐观气泡/inflight
+ * 记账）遇上派生视图缺条目（订阅 sync 早退窗口等时序形态）时消息 live 不入流，切回/刷新
+ * 才经 history 重放补显（todo rpc-direct-send-user-bubble）。根因（订阅 sync 早退窗口）
+ * 已由 runtime onRuntimeCreated 接线修复（commit 7681f502e）；本降级修掉「守卫静默丢弃」
+ * 的显示缺口，使该时序形态下显示不依赖派生视图补齐时序。
+ */
+export function degradeUnmatchedKernelDelivery(
+  ctx: MessageEffectContext,
+  sid: string,
+  entry: PiMessageEntry,
+): boolean {
+  const text = extractUserContentText(entry)
+  MSG_ID_TAG_RE_GLOBAL.lastIndex = 0
+  const markers = [...text.matchAll(MSG_ID_TAG_RE_GLOBAL)].map((m) => m[2]!)
+  // 无标记（调用方 hasKernelDeliveryMarker 已判定，防御性不可达）：按静默消费处理
+  if (markers.length === 0) return true
+  const shown = shownDirectMarkerIds.get(sid)
+  const unshown = markers.filter(
+    (bare) => !shown?.has(bare) && !hasLocalBubbleForMarker(ctx, sid, bare),
+  )
+  // 迟到重复回执（全部 id 已在流）：静默防双插（E5c）
+  if (unshown.length === 0) return true
+  ctx.appendUser(
+    sid,
+    textToSegments(text.replace(DEFER_FLUSH_MARKER_RE_GLOBAL, '').trimEnd()),
+    unshown[0]!,
+  )
+  const partition = shown ?? new Set<string>()
+  for (const bare of markers) partition.add(bare)
+  shownDirectMarkerIds.set(sid, partition)
+  logUnmatchedDeliveryDegraded(sid, unshown)
+  return true
+}
+
+/** [R2-b04-3 同款] ③ 降级入流的 dev 计数/日志（生产零开销；显示承接频率观测）。 */
+let unmatchedDeliveryDegradedCount = 0
+function logUnmatchedDeliveryDegraded(sid: string, unshown: string[]): void {
+  if (!isDevMode()) return
+  unmatchedDeliveryDegradedCount++
+  console.warn(
+    `[user-delivery] ③ unmatched receipt degraded into stream (total=${unmatchedDeliveryDegradedCount}, sid=${sid},` +
+      ` markers=${unshown.join(',')})` +
+      ` — receipt missed projection match with no inflight accounting; frame text displayed as-is (marker stripped) instead of being silently dropped`,
+  )
 }
 
 /**
@@ -222,10 +316,10 @@ export function hasKernelDeliveryMarker(entry: PiMessageEntry): boolean {
  *   规则剥标记 + trimEnd（同一正则同一变换，live ≡ reload 构造性成立）。多标记帧整帧
  *   文本涵盖全部条目内容，逐条目入流同一整帧文本会重复，故按帧只入流一次、保留原 id 挂首个
  *   降级条目；已有段恢复的帧不再整帧文本入流（与已恢复段重复显示），其中无段条目
- *   （外来/reattach 混批形态，三重低频）的显示由基线派生视图兜底。[D4] 车道不参与豁免
+ *   （外来/reattach 混批形态，三重低频）的显示由基线派生视图兜底。[D4] 投递路径不参与豁免
  *   （原 `lane !== 'direct'` 整体豁免退役——它只对发送端成立，观看端 direct 外来消息
  *   因此无人显示，S4）：「双插」防御由 foreign 判定里的 hasLocalBubble 精确承接——
- *   发送端有本地同 id 气泡 → foreign=false 不入流；观看端无气泡（含 direct 车道）→
+ *   发送端有本地同 id 气泡 → foreign=false 不入流；观看端无气泡（含 direct 投递路径）→
  *   入流补显。
  * - ③ 其余（发送端本地气泡原位——foreign=false）→ 不动 ref（防双插）。
  * 共同收尾：派生视图转 delivered（幂等：已 delivered 命中即拒）+ inflight 占位回收（统一
@@ -290,13 +384,16 @@ export function confirmKernelDeliveryOnMessageEnd(
     // 不喂 reducer：transcript 权威已由调用方 applyEntryFrame 承担，appendUser 不写 sidecar）；
     // 保留原 id 传 hit.clientUuid（= 被移除乐观气泡的 id——morph key 同源），见函数头 [U8] 注释
     ctx.appendUser(sid, segments, hit.clientUuid)
+    // 入流即登记已显示（裸 id 反推）：迟到重复回执经 ③ 的 hasLocalBubble 双形态在 u- 形态
+    // 可命中，但内核收养 m- 形态气泡 id 无 u- 前缀、双形态都 miss——分区登记补齐该缺口。
+    markShownDirect(sid, hit.clientUuid)
     anySegments = true
   }
   if (!anySegments) {
     // [D4 foreign 入流豁免精确化] 谓词从 `lane !== 'direct' && foreign` 收敛为 `foreign`：
     // foreign 判定（收集阶段、appendUser 前取值）已含 hasLocalBubble 否定——发送端 direct
     // 有本地同 id 气泡 → foreign=false 不入流（原 lane 豁免防的双插由 id 判定精确承接，
-    // 语义不变）；观看端 foreign 无气泡（含 direct 车道）→ 入流补显（修前 direct 整体
+    // 语义不变）；观看端 foreign 无气泡（含 direct 投递路径）→ 入流补显（修前 direct 整体
     // 豁免 = S4 缺陷：外来消息无人负责显示，切走切回才补显）。取值时机锚定见
     // user-delivery.test.ts D4-AC6（appendUser 不得反噬同帧后续条目的 foreign 判定）。
     const degradeTarget = hits.find(({ foreign }) => foreign)
@@ -308,6 +405,8 @@ export function confirmKernelDeliveryOnMessageEnd(
         textToSegments(text.replace(DEFER_FLUSH_MARKER_RE_GLOBAL, '').trimEnd()),
         degradeTarget.hit.clientUuid,
       )
+      // 入流即登记已显示（同上：m- 形态气泡 id 无 u- 前缀，迟到重复回执的 ③ 判定靠分区兜住）
+      markShownDirect(sid, degradeTarget.hit.clientUuid)
     }
   }
   for (const { hit, foreign } of hits) {

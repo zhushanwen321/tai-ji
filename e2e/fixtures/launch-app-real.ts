@@ -7,7 +7,7 @@
  * - 保留 TAIJI_E2E=1 → window-factory 跳过 vite 轮询 + loadFile 构建产物 + showInactive
  * - 保留 TAIJI_AGENT_DATA_DIR → 隔离数据目录（临时）
  *
- * faux LLM 轨（L2.5 翻轨，2026-09-15）：`opts.faux` 提供即启用凭证无关装配——
+ * faux LLM 层（L2.5 迁组，2026-09-15）：`opts.faux` 提供即启用凭证无关装配——
  * 真 Electron 进程树 + 真 pi 子进程 + 真 extension 加载 + 假 LLM（faux 演员）。
  * 注入链（全部经 env 白名单/进程继承透传，零产品代码改动）：
  * - `<dataDir>/agent/settings.json` defaultProvider=faux / defaultModel=faux-1
@@ -47,15 +47,15 @@ const RUNTIME_PORT_POLL_INTERVAL_MS = 300
 
 // ── pre-flight：renderer 产物形态 ────────────────────────────────────────
 
-// 产物路径与 mock 标记串与 mock 轨 fixture 共享（launch-app.ts 导出，判据依据见其注释）：
-// 两条轨共用 apps/electron/renderer/dist，标记串是「当前产物是 mock 构建」的判据。
+// 产物路径与 mock 标记串与 mock 层 fixture 共享（launch-app.ts 导出，判据依据见其注释）：
+// 两种形态共用 apps/electron/renderer/dist，标记串是「当前产物是 mock 构建」的判据。
 import { RENDERER_DIST_ASSETS, MOCK_BUNDLE_MARKER } from './launch-app'
 
 /**
  * pre-flight：确认当前 renderer 产物是 real bundle（mock 产物在场即 fail-fast）。
  *
- * 背景：mock 轨与 real 轨共用 apps/electron/renderer/dist（构建期 VITE_MOCK define）。
- * e2e globalSetup 已做形态感知构建（按 argv 请求轨自动重建形态不符的产物），本
+ * 背景：mock 层与 真实进程层共用 apps/electron/renderer/dist（构建期 VITE_MOCK define）。
+ * e2e globalSetup 已做形态感知构建（按 argv 请求的构建形态自动重建形态不符的产物），本
  * pre-flight 是运行期第二道防线（混合信号运行 / 手工重建后的形态漂移）：real spec 的
  * UI 段撞上 mock bundle 会因 renderer 渲染 mock fixture 数据而超时（30s `locator.click`
  * 等不到 WS 建的 session），失败信号不指向恢复动作。此处把该前置条件变成带恢复命令的
@@ -81,7 +81,7 @@ function assertRealRendererBundle(): void {
   }
 }
 
-// ── faux LLM 轨装配 ─────────────────────────────────────────────────────
+// ── faux LLM 层装配 ─────────────────────────────────────────────────────
 
 /**
  * 声明式响应步骤（同构 pi-fixture.ts 的 ScriptedStep——SSOT 在
@@ -96,7 +96,7 @@ export interface FauxStep {
   error?: string
 }
 
-/** faux 轨装配选项 */
+/** faux 层装配选项 */
 export interface FauxOptions {
   /**
    * 响应步骤：统一队列（数组，逐轮 shift 消费）或 model-keyed 对象
@@ -108,7 +108,7 @@ export interface FauxOptions {
   tps?: number
 }
 
-/** faux 轨 spawn 的固定模型（spawn --model 与 settings.json default 同源） */
+/** faux 层 spawn 的固定模型（spawn --model 与 settings.json default 同源） */
 export const FAUX_MODEL_REF = 'faux/faux-1'
 
 /** 四演员清单（与 runtime fixtures faux-llm-ext.ts 注册的模型保持一致） */
@@ -123,7 +123,7 @@ const FAUX_ACTORS: Array<{ id: string; name: string; reasoning: boolean }> = [
 const FAUX_PROVIDER_EXT_DIR = path.join(REPO_ROOT, 'e2e', 'fixtures', 'faux-provider-ext')
 
 /**
- * 预置 faux 轨数据目录：settings.json + models.json + 响应脚本 + 子进程注入范围
+ * 预置 faux 层数据目录：settings.json + models.json + 响应脚本 + 子进程注入范围
  * （见文件头「注入链」）。settings/models 落 <dataDir>/agent/（runtime pi-paths
  * getPiAgentDir = <dataDir>/agent，同时是 RpcClient 注入 pi 的 PI_CODING_AGENT_DIR
  * ——runtime 门禁与 pi 模型解析同源）。
@@ -192,7 +192,7 @@ function seedFauxDataDir(dataDir: string, faux: FauxOptions): { scriptPath: stri
 export interface RealLaunchOptions {
   /** 覆盖数据目录（默认每次临时目录）；用于「重启」场景复用同一目录 */
   dataDir?: string
-  /** faux LLM 轨装配（提供即启用；凭证无关） */
+  /** faux LLM 层装配（提供即启用；凭证无关） */
   faux?: FauxOptions
 }
 
@@ -226,7 +226,7 @@ export async function launchRealApp(opts: RealLaunchOptions = {}): Promise<{
     fauxEnv.TAIJI_EXTENSION_PATHS = FAUX_PROVIDER_EXT_DIR
   }
 
-  // 子进程 env：继承 process.env 后剥离 ELECTRON_RUN_AS_NODE（与 launch-app.ts mock 轨同款
+  // 子进程 env：继承 process.env 后剥离 ELECTRON_RUN_AS_NODE（与 launch-app.ts mock 层同款
   // 构造性免疫）。该变量（打包模式注入，agent bash / Electron 宿主内可见）会让
   // electron 二进制退化成纯 node 模式，不认 --remote-debugging-port → 全部用例
   // electron.launch `Process failed to launch!` + `Electron: bad option`——剧本级
@@ -285,7 +285,7 @@ export async function waitForRuntime(dataDir: string, timeoutMs = RUNTIME_START_
   throw new Error(`runtime.port not found in ${dataDir} within ${timeoutMs}ms — runtime failed to start`)
 }
 
-// ── real 轨共享 helper（各 spec 原自带同款副本，L2.5 翻轨收尾到 fixture 层） ──
+// ── 真实进程层共享 helper（各 spec 原自带同款副本，L2.5 迁组收尾到 fixture 层） ──
 
 /**
  * 打开 WS 并完成 auth 握手（S1-W1 契约：连接后首条消息必须是 {type:'auth'}，token =
@@ -401,7 +401,7 @@ export async function openListenWs(port: number, sessionId?: string): Promise<{ 
 
 /**
  * 当前 spec 的 dataDir 推导（auth token 定位用）：module 级保存最近一次 launchRealApp
- * 的 dataDir。e2e real 轨每 spec 独立 dataDir，spec 内先 launch 再 WS 直连，module 级
+ * 的 dataDir。e2e 真实进程层每 spec 独立 dataDir，spec 内先 launch 再 WS 直连，module 级
  * 单值够用（workers=1 串行）。
  */
 let lastLaunchedDataDir = ''
@@ -433,7 +433,7 @@ export function readPiLogs(dataDir: string): string {
 /**
  * 等 runtime 的 extension 注入就绪（resolver 扫到 mandatory 包）。
  *
- * runtime.port 在 ready 时写入，早于 ensureMandatoryExtensions 的 npm 安装（faux 轨
+ * runtime.port 在 ready 时写入，早于 ensureMandatoryExtensions 的 npm 安装（faux 层
  * dev 装配下 mandatory 扩展走源码目录扫描，无 npm 安装等待，但仍以日志信号确认）。
  * 信号：runtime 日志最后一次 resolved N ≥ minCount。
  */

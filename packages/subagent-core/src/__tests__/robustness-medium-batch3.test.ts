@@ -19,7 +19,9 @@ function readSrc(relPath: string): string {
 // ── M2: AgentCallOpts has thinkingLevel ───────────────────────
 
 describe("M2: AgentCallOpts has thinkingLevel field", () => {
-  const src = readSrc(join("src", "orchestration", "models", "types.ts"));
+  // 探针读权威定义文件本体（D1 反向依赖收编决策一：AgentCallOpts 权威自
+  // orchestration/models/types.ts 下沉 shared/agent-call-types.ts，壳只转发无声明块）。
+  const src = readSrc(join("src", "shared", "agent-call-types.ts"));
 
   it("AgentCallOpts interface declares thinkingLevel", () => {
     // 找到 AgentCallOpts interface 块，断言含 thinkingLevel 字段

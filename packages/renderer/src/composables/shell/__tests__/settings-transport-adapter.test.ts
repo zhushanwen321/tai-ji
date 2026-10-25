@@ -29,6 +29,7 @@ import type {
   QuotaConfigurePayload,
   RenameMode,
   RenameStyle,
+  RetryableErrorRule,
   SetProviderData,
   SkillDirConfig,
   SystemPromptConfig,
@@ -75,6 +76,16 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     bell: false,
   }
   const PROBE_RETRY: LlmRetryConfig = { enabled: true, maxRetries: 1, baseDelayMs: 2 }
+  const PROBE_RETRY_RULES: RetryableErrorRule[] = [
+    {
+      id: 'probe-rule',
+      name: 'probe',
+      verdict: 'retryable',
+      class: 'provider',
+      source: 'custom',
+      match: [{ kind: 'pattern', pattern: 'probe' }],
+    },
+  ]
   const PROBE_NETWORK_PROXY: NetworkProxyConfig = {
     enabled: true,
     proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' },
@@ -161,6 +172,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     getSystemPrompt: fwd('config', 'getSystemPrompt', [], (t) => t.getSystemPrompt()),
     getTerminalConfig: fwd('config', 'getTerminalConfig', [], (t) => t.getTerminalConfig()),
     getRetryConfig: fwd('config', 'getRetryConfig', [], (t) => t.getRetryConfig()),
+    getRetryRules: fwd('config', 'getRetryRules', [], (t) => t.getRetryRules()),
     getNetworkProxyConfig: fwd('config', 'getNetworkProxyConfig', [], (t) => t.getNetworkProxyConfig()),
     getNetworkProxyStats: fwd('config', 'getNetworkProxyStats', ['all'], (t, range) => t.getNetworkProxyStats(range)),
     getWorktreeRootDir: fwd('settings', 'getWorktreeRootDir', [], (t) => t.getWorktreeRootDir()),
@@ -245,6 +257,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     setSystemPrompt: fwd('config', 'setSystemPrompt', [PROBE_SYSTEM_PROMPT], (t, cfg) => t.setSystemPrompt(cfg)),
     setTerminalConfig: fwd('config', 'setTerminalConfig', [PROBE_TERMINAL], (t, cfg) => t.setTerminalConfig(cfg)),
     setRetryConfig: fwd('config', 'setRetryConfig', [PROBE_RETRY], (t, cfg) => t.setRetryConfig(cfg)),
+    setRetryRules: fwd('config', 'setRetryRules', [PROBE_RETRY_RULES], (t, rules) => t.setRetryRules(rules)),
     setNetworkProxyConfig: fwd('config', 'setNetworkProxyConfig', [PROBE_NETWORK_PROXY], (t, cfg) =>
       t.setNetworkProxyConfig(cfg),
     ),
@@ -336,6 +349,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     onSystemPrompt: fwd('config', 'onSystemPrompt', [probeHandler], (t, h) => t.onSystemPrompt(h)),
     onTerminalConfig: fwd('config', 'onTerminalConfig', [probeHandler], (t, h) => t.onTerminalConfig(h)),
     onRetryConfig: fwd('config', 'onRetryConfig', [probeHandler], (t, h) => t.onRetryConfig(h)),
+    onRetryRules: fwd('config', 'onRetryRules', [probeHandler], (t, h) => t.onRetryRules(h)),
     onAuthDeviceCode: fwd('config', 'onAuthDeviceCode', [probeHandler], (t, h) => t.onAuthDeviceCode(h)),
     onAuthAuthUrl: fwd('config', 'onAuthAuthUrl', [probeHandler], (t, h) => t.onAuthAuthUrl(h)),
     onAuthSuccess: fwd('config', 'onAuthSuccess', [probeHandler], (t, h) => t.onAuthSuccess(h)),

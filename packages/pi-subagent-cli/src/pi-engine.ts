@@ -448,6 +448,9 @@ function toOutcome(result: SpawnRunResult): AgentOutcome {
   return {
     content: result.content,
     ...(result.failureKind !== undefined ? { failureKind: result.failureKind } : {}),
+    // [subagent-observability §3.3.8] 失败分类透传上协议（CollectedOutcome.failure
+    // 产出链闭合——run 终局成员交付结算 failedMembers[].cause 点拼的数据源）。
+    ...(result.failure !== undefined ? { failure: result.failure } : {}),
     ...(result.parsedOutput !== undefined ? { parsedOutput: result.parsedOutput } : {}),
     ...(result.usage !== undefined
       ? { usage: toOutcomeUsage(result) }
@@ -459,6 +462,18 @@ function toOutcome(result: SpawnRunResult): AgentOutcome {
     // [D5 诊断引用写入 journal 记录] 失败伴随的 stderr tee 路径透传上协议（spawn-runner 装配，
     // 判据见 AgentOutcome.stderrTeePath 注释）。
     ...(result.stderrTeePath !== undefined ? { stderrTeePath: result.stderrTeePath } : {}),
+    // [subagent-observability §3.3.3] 轮终停因引擎原值透传上协议（CollectedOutcome
+    // 收尾边沿事实 → 宿主轮收条 lastRound.engineStopReason 数据源）。
+    ...(result.engineStopReason !== undefined ? { engineStopReason: result.engineStopReason } : {}),
+    // [§3.3.3 P5] 重试失败尝试计数透传（>0 才上报——无重试不落键）。
+    ...(result.retryAttempts !== undefined && result.retryAttempts > 0
+      ? { retryAttempts: result.retryAttempts }
+      : {}),
+    // [§3.3.1/§3.3.3 P6-A] 被接管轮标注透传上协议（宿主轮收条 lastRound.promptDisposition
+    // 数据源——被接管轮不产失败分类、结清走 no_result）。
+    ...(result.promptDisposition !== undefined ? { promptDisposition: result.promptDisposition } : {}),
+    // [§3.3.2/§3.3.10] 观察性事实透传上协议（宿主轮收条 lastRound.observations 数据源）。
+    ...(result.observations !== undefined ? { observations: result.observations } : {}),
     toolCalls: result.toolCalls.map((tc) => ({
       name: tc.toolName,
       input: tc.args === undefined ? "" : JSON.stringify(tc.args),

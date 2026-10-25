@@ -1,5 +1,11 @@
 # @zhushanwen/pi-session-manager
 
+## 0.6.1
+
+### Patch Changes
+
+- 318994f4a: `create_managed_session` is now always declared to the model (resident); the other seven session tools remain deferred behind tool_search.
+
 ## 0.6.0
 
 ### Minor Changes

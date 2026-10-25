@@ -4,8 +4,9 @@
  * [归位] 迁自 renderer composables/features/useSearchJump.ts（166 行），语义逐条等价。
  * C-NT-3 裁决：command 分支（app/slash 分发）保留（command store 域内访问）、file 分支
  * fileApi.read 经 FileReadPort 注入（deps.ports.fileRead）、fileTreeStore.selectFile 经
- * FileTreePort.selectFile 注入（deps.fileTree）、session 分支 sessionApi.list 经
- * SessionListPort 注入（deps.ports.sessionList）+ selectSession 经 SessionSelectPort 注入
+ * FileTreePort.selectFile 注入（deps.fileTree）、session 分支的 session 列表经
+ * SessionListPort 注入（deps.ports.sessionList——W4b 起壳侧接 session.list
+ * {surface:'sidebar'}，§3.3.1）+ selectSession 经 SessionSelectPort 注入
  * （deps.ports.selectSession，C-W3-2）。JumpResult.drawerTab 意图返回（'detail'）保持——
  * 本域只返跳转意图，接收点（SearchModal）据 drawerTab 打开 SideDrawer。
  *
@@ -158,7 +159,8 @@ export function useSearchJump(deps: SearchDeps) {
 
   /**
    * 按 title（session.label）反查 session id。
-   * sessionList() 返回 SessionGroup[]，扁平化后按 label 匹配取 id。
+   * sessionList() 返回 SessionGroup[]（W4b 起端口背后 = session.list {surface:'sidebar'}），
+   * 扁平化后按 label 匹配取 id。
    */
   async function resolveSessionId(label: string): Promise<string | null> {
     const groups = await ports.sessionList()

@@ -39,6 +39,8 @@ export type {
   // 跨包具名消费（core chat 域 / renderer 队列区）经本出口。
   DeliveryFrameEntry, DeliverySubmitReply, DeliveryCancelReply,
   DeliveryDrainReplyEntry, DeliveryDrainReply, DeliveryResyncReply,
+  // delivery.peek / delivery.edit（chat-flow-consistency D6 队列区原位编辑）：reply 具名类型
+  DeliveryPeekReply, DeliveryEditReply,
   // 消息撤回（message revoke，U3）：revokeMessage RPC 的错误码闭集 + reply 判别 union
   RevokeMessageErrorCode, SessionRevokeMessageReply,
   // workflow 可视化（workflow-visualization U2 协议冻结）：两条拉取 RPC 的错误码
@@ -105,7 +107,7 @@ export type { Segment } from './segments'
 export { segmentsToText, textToSegments, segmentsToPrompt, normalizeContent, normalizeSegmentOrder, needsBoundarySpace } from './segments'
 export type { SegmentsMetadataFile, SegmentsMetadataEntry } from './message-metadata'
 export type {
-  SessionStatus, SessionSummary, SessionGroup,
+  SessionStatus, SessionSummary, SessionGroup, SessionSurface,
 } from './session'
 // session 归档域共享契约（session-archive 设计 §7 D3 簿记 schema + D5 RPC 消息，
 // 实施计划 u-foundation：ArchiveSummary / 簿记 schema 与解析校验 / 三 RPC payload /
@@ -149,6 +151,41 @@ export type {
 // LLM 重试配置域（类型 + D8 合法域常量 + 校验纯函数，renderer 表单与 runtime 写入侧共用）
 export type { LlmRetryConfig, LlmRetryProviderConfig } from './llm-retry'
 export { LLM_RETRY_DOMAIN, validateLlmRetryConfig } from './llm-retry'
+// LLM 重试规则域（subagent-observability §3.3.12：类型 + 校验 + 判定管线纯函数，SSOT；
+// retry-rules extension bundle 自包含复制同语义实现时以本出口为准）
+export type {
+  RetryRuleDecision,
+  RetryRuleMatch,
+  RetryRuleMatchOperator,
+  RetryRuleSource,
+  RetryRuleVerdict,
+  RetryableErrorRule,
+  RetryRulesExtConfig,
+  RetryRulesRemoteConfig,
+  RetryRulesValidationResult,
+  RetryRuleHttpStatusClass,
+} from './retry-rules'
+export {
+  appendRetryMarker,
+  DEFAULT_RETRY_RULES_EXT_CONFIG,
+  evaluateRetryRules,
+  extractJsonSegment,
+  isDangerousRetryPattern,
+  isRetryRulesExtConfig,
+  isRetryRulesRemoteConfig,
+  matchRetryRule,
+  mergeRetryRules,
+  RETRY_REWRITE_MARKER,
+  RETRY_REWRITE_MARKER_PREFIX,
+  RETRY_RULES_BASELINE,
+  RETRY_RULES_DOMAIN,
+  RETRY_RULE_HTTP_STATUS_CLASSES,
+  RETRY_RULE_KINDS_BY_CLASS,
+  RETRY_RULE_MATCH_OPERATORS,
+  RETRY_RULE_VERDICTS,
+  validateRetryRuleFields,
+  validateRetryRuleList,
+} from './retry-rules'
 // LLM 网络代理域（llm-network-proxy 设计 §5 U1：类型 + 校验 + 匹配语义纯函数，SSOT；
 // extension 侧 bundle 隔离复制同语义实现时以本出口为准）
 export type {
@@ -321,7 +358,22 @@ export * from './file-tree'
 export * from './local-file-url'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
-export type { SubagentRecord, SubagentStatus, SubagentModelSource, ClosedDisplayStatus, SubagentModelOverrideStatus, SubagentRecentEffectiveModel } from './subagent'
+// [subagent-observability §3.3.3⑤] FailureCause 族 = sdk 权威的 type-only re-export
+// （subagent.ts 内转出口；wire 载体 = SubagentRecord.lastRound.failure，renderer 红点
+// 判据与 u8 测试的数据源）。SubagentLastRound = 轮收条事实快照契约（F4）。
+export type {
+  SubagentRecord,
+  SubagentStatus,
+  SubagentModelSource,
+  ClosedDisplayStatus,
+  SubagentModelOverrideStatus,
+  SubagentRecentEffectiveModel,
+  SubagentLastRound,
+  FailureCause,
+  FailureCauseClass,
+  FailureRetryability,
+  AgentUsageTotal,
+} from './subagent'
 // 远程访问配置契约 SSOT（remote-access.json：main 写入侧与 runtime 握手热读侧共用；
 // 含 IPC 信封类型 RemoteAccessInfo/RemoteAccessToggleResult，main/preload/renderer
 // 三端共同 import；含无策略 shape 谓词（main/runtime 双侧 shape 判据单源）；
@@ -335,7 +387,7 @@ export type {
   ImportCandidatesRequest, ImportCandidatesReply, ImportCandidate, ImportCandidateDir,
   ImportRequest, ImportReply,
 } from './import-session'
-// 虚拟 session ID 工厂（subagent 三段式 / agent call 两段式 / btw 两段式）——跨层协议级 key 约定 SSOT
+// 虚拟 session ID 工厂（subagent 三段式 / agent call 两段式）——跨层协议级 key 约定 SSOT
 export {
   SUBAGENT_PREFIX,
   subagentVirtualId,
@@ -346,10 +398,6 @@ export {
   agentCallVirtualId,
   isAgentCallVirtualId,
   extractAgentCallSessionId,
-  BTW_PREFIX,
-  btwVirtualId,
-  isBtwVirtualId,
-  extractBtwPiSessionId,
   resolveVirtualSessionId,
 } from './virtual-session-id'
 // 终端实例编号格式谓词（`term:<sid>:<seq>`，terminal-multi-instance §0.5 P7 精确前缀口径）——
@@ -402,7 +450,9 @@ export { cleanTextForSpeech } from './speech-text'
 // SUBAGENT_STATUS_ALL：枚举值全集（B3 护栏，renderer bucket 测试的全集覆盖矩阵数据源）。
 // SUBAGENT_OUTCOME_PLACEHOLDER：③级占位文案（D6 三端锚点 SSOT 值，core 同值字面量 /
 // runtime 钉子断言 / renderer 思考行判据的消费入口）。
-export { deriveClosedDisplay, SUBAGENT_STATUS_ALL, SUBAGENT_OUTCOME_PLACEHOLDER } from './subagent'
+// SUBAGENT_MODEL_SOURCE_ALL：SubagentModelSource 值全集（S-9 双侧对拍锚点——与
+// subagent-core record-model.ts 的 SUBAGENT_MODEL_SOURCES 对拍，消费方 = core 对拍单测）。
+export { deriveClosedDisplay, SUBAGENT_STATUS_ALL, SUBAGENT_OUTCOME_PLACEHOLDER, SUBAGENT_MODEL_SOURCE_ALL } from './subagent'
 export type {
   WorkflowRunStatus,
   WorkflowDoneReason,
@@ -439,13 +489,20 @@ export type {
   WorkflowDag,
 } from './workflow'
 // [W2 D8] 状态中文显示名词表运行时常量（ALL = 值域全集 / LABELS = outcome → 中文
-// 显示名（成功/失败/已取消/已中断），通知渲染与 tray 文案消费它 / COVERAGE_LOCK =
+// 显示名（成功/失败/已取消/已超时/部分成功），通知渲染与 tray 文案消费它 / COVERAGE_LOCK =
 // WorkflowRunOutcome 联合 ⊆ ALL 的反向完备编译锁载体）——renderer 消费入口经此
 // 包根导出清单（tray-tone workflowStatusLabel / state-tone-lock 文案断言段）。
 export {
   WORKFLOW_RUN_OUTCOME_ALL,
   WORKFLOW_RUN_OUTCOME_LABELS,
   WORKFLOW_RUN_OUTCOME_COVERAGE_LOCK,
+} from './workflow'
+// [subagent-observability §3.3.8] done 终态原因值域对账锚（ALL = 六值全集 /
+// COVERAGE_LOCK = WorkflowDoneReason 联合 ⊆ ALL 的反向完备编译锁载体）——runtime
+// WORKFLOW_DONE_REASON_SET 扩值入对账（u4）与消费方全集遍历的数据源。
+export {
+  WORKFLOW_DONE_REASON_ALL,
+  WORKFLOW_DONE_REASON_COVERAGE_LOCK,
 } from './workflow'
 // [可视化 U2] workflow-visualization 协议冻结段的运行时常量（截断白名单五字段 /
 // 截断阈值 / 事件类型全集 + 反向完备编译锁）——消费入口经包根导出清单（同上先例）。
@@ -531,3 +588,13 @@ export { displayAgentName, displayWorkflowName } from './display-name'
 // 的跨包契约（type 与可执行函数同源单模块）。
 export type { PluginViewScope, SessionViewScope, GlobalViewScope } from './plugin-view-scope'
 export { pluginViewScopeKey, pluginViewScopeFromWire } from './plugin-view-scope'
+// session occupancy 域（chat-flow-consistency D1 契约根）：turn 相位值域 + 「回合进行中」
+// 判定集合与函数（laneOf 投递判定 / 发送位形态与角标 / Alt+⏎ 分流 / 活动条 / 前端回合判定
+// 统一引用）。形状 SSOT = ./session-occupancy，protocol.ts 的 'session.occupancy' 帧内联引用
+// 其类型；SessionPhase/IDLE_SESSION_PHASE 随 D5 六行预测表退役自 core send-route.ts 迁入。
+export type { SessionTurnPhase, ActiveTurnPhase, SessionPhase } from './session-occupancy'
+export { ACTIVE_TURN_PHASES, isActiveTurnPhase, IDLE_SESSION_PHASE } from './session-occupancy'
+// handoff 域（chat-flow-consistency U9 / 特殊流程 S2）：交接 prompt 固定模板常量——
+// runtime 发送侧（handoff-prompt）与 core 派生侧（交接回合识别，apply-entry-convert）
+// 同源引用，识别判定与发送值不漂移。措辞冻结约束见 ./handoff 头注。
+export { HANDOFF_PROMPT_TEMPLATE } from './handoff'

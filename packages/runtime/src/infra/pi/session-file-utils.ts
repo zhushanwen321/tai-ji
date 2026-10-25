@@ -31,11 +31,15 @@ import {
   readBindingSidecar,
   refreshScanDirCache,
   sessionMetaCache,
+  sessionScanDirCount,
   warnSidecarReadFailureOnce,
   _resetSidecarWarnDedupForTest,
   type PersistBindingSidecarOpts,
 } from './session-binding-sidecar-io.js'
-export { invalidateScanDirCache, persistBindingSidecar, readBindingSidecar, _resetSidecarWarnDedupForTest } from './session-binding-sidecar-io.js'
+// 按 id 定位 session 文件（getState 冷读三支）在 './session-file-locator.ts'（本文件顶
+// max-lines 软上限 + 一文件一概念）；不在此 re-export——那会构成本文件 ⇄ locator 的环
+// （locator 要 import 本文件的 scanPiSessions），消费方直接 import locator 模块。
+export { invalidateScanDirCache, persistBindingSidecar, readBindingSidecar, _resetSidecarWarnDedupForTest, sessionScanDirCount } from './session-binding-sidecar-io.js'
 // 残留清扫家族已拆出至 './session-residue-cleanup.ts'（max-lines 预算，先例同上）：
 // 本文件 isScannableSessionFile 消费 isTmpResidueFileName（候选侧过滤，RT-3#10 起精确
 // 后缀形态判定，与清扫侧/导入拒绝侧三消费点同一谓词），cleanup* 两函数经 re-export
@@ -982,6 +986,7 @@ export interface ScannedSessionMeta extends ModelBindingFields {
 /** 仅供测试重置缓存用（生产不调）。 */
 export function _resetSessionMetaCacheForTest(): void {
   sessionMetaCache.clear()
+  sessionScanDirCount.last = 0
 }
 
 /** 删除 session 时调用，清理 sessionMetaCache 中的 stale 条目（避免无界增长）。 */
@@ -1115,30 +1120,6 @@ export interface ScanSessionsOptions {
 // （session-store / import-service / 测试直接消费）。
 
 /**
- * 最近一轮 sessions 磁盘扫描是否降级不可信（BU5 旗标透出）。
- *
- * [session-store-layout-inversion] 原唯一消费方 = btw 孤儿补账的不可逆删除闸
- * （deps.isSessionScanDegraded），随启动孤儿补账模块退役而消失——
- * 旗标本体暂留（零消费方；退出清理与登记同步归后续登记单元），置位/复位语义不变。
- *
- * 置位时机（scanPiSessionsFromDisk 轮内）：
- * - 顶层 readdir 失败（EACCES/IO）→ 显式降级 return []——与「权威空」在返回值上不可区分，
- *   无旗标时消费方会把冷主会话全部误判「主已删」；
- * - 任一收录降级计数非零（statFail/dirFail/scanFail/badHeader/noHeader）→ 列表可能缺条目
- *   （含 cwd 分组子目录列举失败=整组缺失；单文件读取失败=恰可能遮住主会话文件）。
- *   方向取舍：宁漏删不误删——任一缺条目都可能触发 rm -rf 不可逆面，降级时消费方跳过、
- *   改下次启动重试（代价 = 残留目录暂时滞留，有 warn 留痕，可恢复）。
- * 复位时机：目录不存在（权威空）与全健康轮 → false。TTL 缓存轮不重算（旗标跟随最近一次
- * 真实磁盘扫描轮——启动首扫必为真实轮）。
- */
-/**
- * 旗标读写面（原消费方 = btw 孤儿补账闸，读 `.last`；该补账已随布局反转退役，当前零
- * 消费方）：导出可变快照对象 = 零访问器行（max-lines 软上限下的紧凑透出），写者唯一 =
- * 本文件；语义/置位复位时机见上方注释。
- */
-export const scanDegradedFlag = { last: false }
-
-/**
  * 扫描 pi 的 sessions 目录（按 cwd 分组的子目录结构）。
  * 返回扁平化的 session 列表。
  *
@@ -1223,21 +1204,22 @@ function scanSessionsDirEntry(sessionsDir: string, entry: string, results: Scann
     return
   }
   if (stat.isDirectory()) {
+    // sessionScanDirCount 计数点（写者唯一的另一处）：cwd 分组子目录逐一枚举
+    sessionScanDirCount.last += 1
     scanCwdGroupDir(entryPath, results, degraded)
   } else if (isScannableSessionFile(entry)) {
     collectSessionMetaIntoResults(entryPath, results, degraded)
   }
 }
 
-/** 轮末降级判定（[BU5] scanDegradedFlag.last 置位依据）：任一收录降级计数非零。 */
-function hasScanDegradation(degraded: ScanDegradedStats): boolean {
-  return degraded.badHeader > 0 || degraded.statFail > 0 || degraded.dirFail > 0 || degraded.scanFail > 0 || degraded.noHeader > 0
-}
-
 function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
-  if (!existsSync(sessionsDir)) { scanDegradedFlag.last = false; return [] } // 权威空（非读取降级）→ 入口复位；其余路径由轮末聚合覆盖
+  if (!existsSync(sessionsDir)) { sessionScanDirCount.last = 0; return [] } // 权威空（目录不存在）→ 计数入口复位：本支先于下方轮起始复位即 return，不复位则读方 findScannedSessionFileById 拿到上一轮残留计数
 
   const results: ScannedSessionMeta[] = []
+  // sessionScanDirCount 每轮起始复位（写者唯一的复位点）：随后逐 cwd 分组子目录累加，
+  // 读方 findScannedSessionFileById 依赖「调用前已复位」的时序读本轮值；顶层 readdir
+  // 失败支由本复位覆盖（提前 return 时读数已是 0），不重复置位。
+  sessionScanDirCount.last = 0
   // RT-3#1/#2：降级丢弃计数（degraded 显形）——各失败点计入，扫描轮末汇总打点，
   // 单条坏文件「侧栏少一条」可归因（结构与实现见 session-scan-degraded.ts）。
   const degraded: ScanDegradedStats = createDegradedStats()
@@ -1247,9 +1229,8 @@ function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
     entries = readdirSync(sessionsDir)
   } catch (e) {
     // L8: sessions 目录存在但不可读（权限/IO 故障）时，readdirSync 抛 EACCES 等异常。
-    // 原实现未保护会冒泡为进程级未捕获异常，此处降级为返回空数组（scan 容忍失败）。
-    // [BU5] 降级空与权威空返回值不可区分 → 旗标置位透出（消费方 = 不可逆删除闸）。
-    scanDegradedFlag.last = true
+    // 原实现未保护会冒泡为进程级未捕获异常，此处降级为返回空数组（scan 容忍失败，
+    // 降级经下方 console.error 留痕）。
     console.error(`[session-file-utils] scanPiSessions: failed to read sessions dir: ${sessionsDir}`, e)
     return []
   }
@@ -1259,9 +1240,6 @@ function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
   }
 
   logScanDegradedSummary(degraded)
-  // [BU5] 轮末降级旗标：任一收录降级 = 列表可能缺条目（语义与消费面见 scanDegradedFlag；
-  // 目录不存在的权威空由上方复位保持 false，顶层 readdir 失败在 catch 内置 true 提前返回）。
-  scanDegradedFlag.last = hasScanDegradation(degraded)
 
   results.sort((a, b) => b.lastModified - a.lastModified)
   return results

@@ -215,7 +215,7 @@ describe("[W6/偏差 #4 探针] goal 检查口径（无基准）× fork 残留�
     // 补发的 unregister entry 抵消 register）。
     const result = runReconcileSweep({
       sessionFile,
-      lookupRecordState: () => ({ terminal: true, closedReason: "completed" }),
+      lookupRecordState: () => ({ terminal: true, settlementReason: "completed" }),
       appendEntry: (customType, data) => {
         writeFileSync(sessionFile, `${JSON.stringify({ customType, data })}\n`, { flag: "a" });
       },

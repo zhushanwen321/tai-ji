@@ -630,7 +630,7 @@ describe("message_end 携带 error 的记账语义（现役 zcode 不产出，�
     });
   });
 
-  it("turn_end 在 message_end(error) 之后 → 瞬态清除（重放不残留记账）", async () => {
+  it("turn_end 在 message_end(error) 之后 → 失败记账存活（§3.3.5 轮终不清洗 lastError）", async () => {
     const eventsPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
     await writeJournal(eventsPath, [
       { type: "text_delta", delta: "recovered" },
@@ -647,8 +647,12 @@ describe("message_end 携带 error 的记账语义（现役 zcode 不产出，�
       },
     });
     const messages = await readSubagentHistoryMessages(record, dataDir);
-    // turn_end 清 lastError（瞬态恢复语义，C5 reducer 守护行为）——派生视图无 error 记账
+    // reducer 不再因 turn_end 清 lastError（§3.3.5 第 0 波②）——存活 lastError
+    // 落**末条** assistant 记账（status='error' + error 字段），失败不再被重放视图清洗
+    const lastAssistant = messages[messages.length - 1];
+    expect(lastAssistant?.status).toBe("error");
+    expect(lastAssistant?.error).toBe("transient");
+    // 记账只落末条——前面的 assistant 不被牵连
     expect(messages[1]?.status).toBe("complete");
-    expect(messages[1]?.error).toBeUndefined();
   });
 });

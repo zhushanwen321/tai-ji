@@ -19,11 +19,17 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { provideSettingsTransport } from '@taiji/core'
+import type { ServerMessageMap } from '@taiji/shared'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import { openRekaDropdown, pickRekaOption } from '../helpers/reka-select-harness'
 
+/** getSubagentEngineConfig 的 reply 契约（engineModels/engineDefaults 两 D5 扩展键 optional） */
+type SubagentEngineConfigReply = ServerMessageMap['session.subagentEngineConfig']
+
 const sessionApiMock = vi.hoisted(() => ({
-  getSubagentEngineConfig: vi.fn(async () => ({ engines: ['pi', 'zcode'], defaultEngine: 'zcode' })),
+  getSubagentEngineConfig: vi.fn(
+    async (): Promise<SubagentEngineConfigReply> => ({ engines: ['pi', 'zcode'], defaultEngine: 'zcode' }),
+  ),
   setSubagentDefaultEngine: vi.fn(async () => ({ engineId: 'pi' })),
   setSubagentEngineDefaultModel: vi.fn(async (engineId: string, modelRef: string) => ({ engineId, modelRef })),
 }))

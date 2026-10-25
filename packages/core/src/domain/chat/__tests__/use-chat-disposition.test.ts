@@ -20,6 +20,7 @@ import { effectScope } from 'vue'
 import { textToSegments } from '@taiji/shared'
 import type { Segment, ServerMessage } from '@taiji/shared'
 import { createChatStore } from '../store'
+import { createSessionLiveState } from '@taiji/core/domain/session'
 import {
   createUseChat,
   resetChatModuleStateForTest,
@@ -61,6 +62,7 @@ function makeFixture(): Fixture {
     writeSegments: vi.fn().mockResolvedValue(undefined),
     getChatStore: () => chatStore,
     getSessionStore: () => ({ applySnapshot: vi.fn(), revive: vi.fn() }),
+    getLiveStateStore: () => createSessionLiveState(),
     toast,
     t: (k: string, p?: Record<string, unknown>) => (p ? `${k}:${JSON.stringify(p)}` : k),
   }
@@ -225,12 +227,12 @@ describe('pi1-disposition-chat-flow U2：孤儿对账双分支与反向（U2② 
     f.dispose()
   })
 
-  it('分支重叠防御：命令条目 steer 车道 morph 后孤儿清除不误删其后消息、不重建幽灵气泡', async () => {
+  it('分支重叠防御：命令条目 steer 投递路径 morph 后孤儿清除不误删其后消息、不重建幽灵气泡', async () => {
     const f = makeFixture()
     f.chatApi.submitDelivery.mockResolvedValue({ ...COMMAND_REPLY })
     await f.useChat.send('s1', textToSegments('/todos'))
     const cmdId = f.chatStore.getMessages('s1').find((m) => m.role === 'user')!.id
-    // 帧1：steer 车道 → 既有 morph 分支把气泡移出（与孤儿对账相邻分支，操作域互斥）
+    // 帧1：steer 投递路径 → 既有 morph 分支把气泡移出（与孤儿对账相邻分支，操作域互斥）
     f.emit('s1', deliveryFrame('s1', [{ clientUuid: cmdId, state: 'in-flight', lane: 'steer' }]))
     expect(f.chatStore.getMessages('s1').some((m) => m.id === cmdId)).toBe(false)
     // morph 后用户继续发消息（其后内容不能被对账误删）

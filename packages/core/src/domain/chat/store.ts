@@ -25,7 +25,6 @@ import {
 import { findLastAssistantIndex } from './chunk-processor'
 import { markBashError, clearExecutingBash } from './bash-effects'
 import { createChangeSetController } from './changeset'
-import { createHandoffController } from './handoff'
 import { createTruncatedWindowController, type HistoryWindow } from './truncated-window'
 import type {
   Message,
@@ -149,10 +148,18 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
   // 与基线 uuidv7 是两个永不相等的 id 空间（mutations.ts prependHistory 同款论证），
   // 不会被误判已确认。
   const baselineIds = new Set<string>()
-  for (const m of baseline) {
-    if (m.piEntryId !== undefined) baselineIds.add(m.piEntryId)
+  // [turn-key 身份保留 2026-10-24] 基线下标反查表（首次出现优先——entry id/id 在基线内唯一，
+  // 防御性取首）：供命中分区消息回查自己对应的基线副本下标，见函数尾「身份保留」。
+  const baselineIdxByEntryId = new Map<string, number>()
+  const baselineIdxById = new Map<string, number>()
+  baseline.forEach((m, i) => {
+    if (m.piEntryId !== undefined) {
+      baselineIds.add(m.piEntryId)
+      if (!baselineIdxByEntryId.has(m.piEntryId)) baselineIdxByEntryId.set(m.piEntryId, i)
+    }
     baselineIds.add(m.id)
-  }
+    if (!baselineIdxById.has(m.id)) baselineIdxById.set(m.id, i)
+  })
   // [steer-bubble Gate B 修复 2026-08-30] user 文本多重集判据（第三判据）：
   // AC-2 实跑暴露的结构性竞态——pi 文件（基线源）对「message_end(user) 帧已落盘但帧
   // 仍在途」的消息领先于 live 帧流，此时 overlay（乐观/路径 1 投递插入，身份判据结构性
@@ -179,12 +186,15 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
     else baselineUserIdxByText.set(t, [i])
   })
   const consumedBaselineIdx = new Set<number>()
-  const consumeBaselineUserText = (t: string): boolean => {
-    if (!t) return false
+  // 返回值从 boolean 改为「被消费的基线副本下标 | null」（[turn-key 身份保留]：调用方
+  // 据此把分区已建立的消息 id 带到合并结果，见函数尾）。
+  const consumeBaselineUserText = (t: string): number | null => {
+    if (!t) return null
     const q = baselineUserIdxByText.get(t)
-    if (!q || q.length === 0) return false
-    consumedBaselineIdx.add(q.shift()!)
-    return true
+    if (!q || q.length === 0) return null
+    const idx = q.shift()!
+    consumedBaselineIdx.add(idx)
+    return idx
   }
   const identityConfirmed = (m: Message): boolean =>
     (m.piEntryId !== undefined && baselineIds.has(m.piEntryId)) || baselineIds.has(m.id)
@@ -192,10 +202,24 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
   // 新 overlay 错配到基线旧副本上，AC-2b 同文本双投递场景实测暴露）：
   // 'identity' = 前轮合并注入的基线派生视图；'text' = 与基线副本文本同源的 dup overlay；
   // false = 未确认（live-only 候选）。
+  // matchedBaselineIdx[i] = 分区第 i 条消息对应的基线副本下标（identity/text 命中才有值），
+  // 与 confirmKinds 同一次正序遍历产出（文本多重集消费序不变）。
   type ConfirmKind = 'identity' | 'text' | false
-  const confirmKinds: ConfirmKind[] = partition.map((m) => {
-    if (identityConfirmed(m)) return 'identity'
-    if (m.role === 'user' && consumeBaselineUserText(userMessageText(m))) return 'text'
+  const matchedBaselineIdx: Array<number | undefined> = []
+  const confirmKinds: ConfirmKind[] = partition.map((m, i) => {
+    if (identityConfirmed(m)) {
+      matchedBaselineIdx[i] =
+        (m.piEntryId !== undefined ? baselineIdxByEntryId.get(m.piEntryId) : undefined)
+        ?? baselineIdxById.get(m.id)
+      return 'identity'
+    }
+    if (m.role === 'user') {
+      const idx = consumeBaselineUserText(userMessageText(m))
+      if (idx !== null) {
+        matchedBaselineIdx[i] = idx
+        return 'text'
+      }
+    }
     return false
   })
 
@@ -230,9 +254,37 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
   const a = Math.min(protectedUserIdx.length, k)
   const alignedIdx = new Set(protectedUserIdx.slice(0, a))
   const keptTail = protectedSeg.filter((_, i) => !alignedIdx.has(i))
+  // [turn-key 身份保留 2026-10-24] 命中分区消息的已建立 id 带到合并结果：基线副本内容权威
+  // 不变，id 改用分区版本（identity 命中 = piEntryId/id 对应；text 命中 = 文本多重集配对，
+  // 配对序与上方去重消费完全一致，不引入第二套配对）。
+  //
+  // 为什么（缺陷背景，A8 三次复现）：分区 live 消息 id（user = 投递标记 clientUuid、
+  // assistant = a-<uuid>）与盘上 entry 派生 id（uuidv7 截短形态）是两个不相交空间
+  // （turn-expansion.ts 头注释同款论证）。本函数原实现一律以基线副本替换已确认消息，
+  // 任何 hydrated reconcile（重连对账 refreshHistory / 终态恢复 recoverStalledSession /
+  // 撤回后刷新）都会把整个分区换成 entry id 空间——turnStableId（M5 stable-key = 首条
+  // 消息 id）随之全变，turn-expansion 展开分区按旧 id 记录的展开态被静默挂空（C4 两段式
+  // 契约的「驻留期 turn 稳定 id 不变，手动展开保持」对 live-id 消息失守）：已展开回合
+  // 折叠、展开点击写旧 key 读新 key 恒 false。身份保留后，驻留期 reconcile 不再换 id，
+  // 展开态跨 reconcile 稳定；走盘重载（分区已空、无对应可保留）id 空间切换与 C4 显式
+  // 重置语义不受影响。
+  const adoptIdByBaselineIdx = new Map<number, string>()
+  partition.forEach((m, i) => {
+    const idx = matchedBaselineIdx[i]
+    if (idx !== undefined) adoptIdByBaselineIdx.set(idx, m.id)
+  })
   // 步骤③：respawn 提示条拣回重插（见函数头注释与 restoreRespawnNotices——不拣回则
   // 任何切入 reconcile 都会清掉 liveOnly 提示条）
-  return restoreRespawnNotices(partition, [...baseline.map((m) => ({ ...m })), ...keptTail])
+  return restoreRespawnNotices(
+    partition,
+    [
+      ...baseline.map((m, i) => {
+        const pid = adoptIdByBaselineIdx.get(i)
+        return pid !== undefined && pid !== m.id ? { ...m, id: pid } : { ...m }
+      }),
+      ...keptTail,
+    ],
+  )
 }
 
 /**
@@ -286,13 +338,13 @@ function restoreRespawnNotices(partition: Message[], merged: Message[]): Message
  *
  * [B9 agentcall LRU 联动] options.agentCallEvictionsOf：主 session 或 btw 分区 LRU 驱逐时
  * 查询应联动释放的 agentcall 虚拟分区（豁免已由实现侧应用；形参 = 被驱逐 sid 原形态——
- * 主会话 mainSid / btw 线 vid，D9③/M2-c 两形态共用同一回调）。renderer 装配点
+ * 主会话 mainSid / btw 线 session id，D9③/M2-c 两形态共用同一回调）。renderer 装配点
  * （stores/chat.ts → composables/features/chat/agentcall-lru-linkage.ts）注入 workflow
  * store 映射 ∖ viewedVids 组合查询；缺省不联动（core 单测 / 无装配环境保持旧行为）。
  * 依赖方向：core 不 import renderer store，回调经参数注入（对齐 LruEvictDeps 模式）。
  */
 export interface ChatStoreOptions {
-  /** [B9] 查询被驱逐 sid（mainSid / btw 线 vid）名下应联动释放的 agentcall virtualId（豁免已应用）；见 LruEvictDeps.agentCallEvictionsOf */
+  /** [B9] 查询被驱逐 sid（mainSid / btw 线 session id）名下应联动释放的 agentcall virtualId（豁免已应用）；见 LruEvictDeps.agentCallEvictionsOf */
   agentCallEvictionsOf?: (mainSid: string) => string[]
   /**
    * [B2 subagent-stream-chunk §4.3] subagent 流状态拉取执行器（core 不直接发 RPC，
@@ -353,9 +405,9 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * Set 形态（布尔语义无载荷）对齐 failedHistory/hydrated；disposeSession 同点清理。
    */
   const respawnPending = ref<Set<string>>(new Set())
-  /** handingOff 瞬时态子域控制器（对称 compacting 子域），委托 chat-handoff.ts。设计见 ./README.md + chat-handoff.ts。 */
-  const handoff = createHandoffController()
-  const { handingOffSessions, isHandingOff, setHandingOff } = handoff
+  /** [chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] handingOff 瞬时态子域控制器已退役：membership 改读
+   *  occupancy 派生视图第四维（isHandingOff 读 occupancies，与 isCompacting 同型对称），
+   *  原 handingOffSessions Set / setHandingOff 平行存储删除。 */
   /** 按 sessionId 分区的自动重试态（W06-B，auto_retry_start/end） */
   const retryStates = ref<Map<string, RetryState>>(new Map())
   // [u5a 退役] `queueStates` 分区 + `getQueueState` / `clearQueueState` 已删除：唯一写方
@@ -378,7 +430,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * 1. 统一提交记账：appendUser 乐观插入 +1 / RPC 失败 catch 回滚 −1（挂 useChat
    *    submitNewMessage 调用点，不在 appendUser 内防双计）。
    * 2. 标记回执回收：message_end(user) 帧命中内核裸标记（送达回执主分支）即 −1；
-   *    ② 纯计数兜底（帧无标记/标记不命中派生视图时 inflight > 0）服务 direct 车道等
+   *    ② 纯计数兜底（帧无标记/标记不命中派生视图时 inflight > 0）服务 direct 投递路径等
    *    无回执命中形态，同一 −1 语义。
    *
    * 清零挂点（D4 生命周期完成）：abort（message.complete{stopReason:'aborted'}）与
@@ -386,6 +438,21 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * 配额。LRU 驱逐与断连收尾**刻意不清**（D4 豁免，见 lruEvictDeps 处声明注释）。
    */
   const inflightCounts = ref<Map<string, number>>(new Map())
+  /**
+   * [chat-flow-consistency F1] per-session 提交序号（Map 分区，对齐 inflightCounts 惯例，
+   * 不可变写保证响应式）。
+   *
+   * 语义 = 「本 session 已受理的用户提交」事实计数器：submitNewMessage 编排单点（send /
+   * followUp / editAndResend 三通路共同上提点）在受理确认 + 气泡上屏后 +1。它是「用户主动
+   * 发送」事实的产生处标记（事实在产生处带上标记直接传递），对话流滚动跟随的 force 回底
+   * 判据从「数据变化推断」（尾部新增 user 消息 watch）改为消费本序号递增——morph 回执重建、
+   * 外来直发（画布回推等运行时注入）复用 user 消息身份尾插但不动本序号，不再误触发强拉回底。
+   *
+   * 只递增不复位（单调计数，无配额语义）；无记录 = 0。清理挂点：disposeSession 分区整体
+   * 销毁（会话已删除，序号无后续消费方）。LRU 驱逐不清理（驱逐重进后序号延续，避免
+   * 「回退 → 误判递增」的假触发面）。
+   */
+  const submitSeqs = ref<Map<string, number>>(new Map())
   /**
    * [W21] per-session reducer state（实时 feed 喂入 reducer 的累积态，buffer 活容器形态）。
    *
@@ -429,11 +496,9 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   const streamingStateMachine = createStreamingStateMachine({
     messages,
     occupancies,
-    handingOffSessions,
     retryStates,
     pendingSend,
     clearOccupancy,
-    setHandingOff,
     subagentStreamPull: options.subagentStreamPull,
   })
 
@@ -471,7 +536,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     return flag.value
   }
 
-  /** 活跃（派生）：`isActive(sid) ≡ isGenerating(sid) ∨ pendingSend.has(sid)`。驱动停止按钮 / steer guard / B 策略路由。 */
+  /** 活跃（派生）：`isActive(sid) ≡ isGenerating(sid) ∨ pendingSend.has(sid)`。现仅作乐观窗并集成分（停止按钮判定已迁 composer-shell effectivePhase——occupancy 投影 ∨ isActive 并集）；另驱动 steer guard / B 策略路由。 */
   function isActive(sessionId: string): boolean {
     return isGenerating(sessionId) || pendingSend.value.has(sessionId)
   }
@@ -759,6 +824,18 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     inflightCounts.value = next
   }
 
+  // ── 提交序号（[chat-flow-consistency F1]，语义见 submitSeqs 声明处）──
+
+  /** 提交序号 +1（submitNewMessage 受理确认后调用，全部用户提交路径的单点）。 */
+  function bumpSubmitSeq(sessionId: string): void {
+    submitSeqs.value = new Map(submitSeqs.value).set(sessionId, getSubmitSeq(sessionId) + 1)
+  }
+
+  /** 读 per-session 提交序号（watch 源；无记录 = 0）。 */
+  function getSubmitSeq(sessionId: string): number {
+    return submitSeqs.value.get(sessionId) ?? 0
+  }
+
   /**
    * [W21] 重构 entry 喂 per-session reducer state（buffer.feed）——实时 feed 与文件重放
    * （hydrate 链的 replayEntries）喂同一个 reducer。
@@ -877,8 +954,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
 
   /**
    * 多 session 统一收尾（断连 / runtime 重启兜底）：遍历瞬态 session，逐个调 resetTransientStates。
-   * 遍历范围是 messages.keys() ∪ occupancy 分区中 compacting 的 sid ∪ handingOffSessions ∪ retryStates ∪ pendingSend 并集
-   *（不能只遍历 messages——compacting/retry/pendingSend 可独立于消息存在）。详见 ./README.md。
+   * 遍历范围是 messages.keys() ∪ occupancy 分区中 compacting / handingOff 的 sid ∪ retryStates ∪ pendingSend 并集
+   *（不能只遍历 messages——compacting/handingOff/retry/pendingSend 可独立于消息存在）。详见 ./README.md。
    */
   function finalizeAllStreaming(reason: FinalizeReason): void {
     const candidateSids = streamingStateMachine.collectFinalizeCandidates()
@@ -962,9 +1039,18 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   /**
+   * [chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] handingOff 派生读口（occupancy 第四维，与 isCompacting
+   * 同型对称）——原 createHandoffController/handingOffSessions Set 平行存储已退役，membership
+   * 唯一来源 = session.occupancy 帧（handoff-service 经转移原语置位/复位）。
+   */
+  function isHandingOff(sessionId: string): boolean {
+    return occupancies.value.get(sessionId)?.handingOff === true
+  }
+
+  /**
    * [u5b / D1] 写入 occupancy 派生视图（session.occupancy 帧驱动；useChat ensureStreamSubscription
    * handler 消费 live 广播与 stateSnapshot 回放同一入口——重连/切回自动恢复，G4）。
-   * 整体替换该 sid 分区（帧是全量三维快照，非 patch）。
+   * 整体替换该 sid 分区（帧是全量四维快照 turn/compacting/bash/handingOff，非 patch）。
    */
   function setOccupancy(sessionId: string, occupancy: SessionOccupancyState): void {
     occupancies.value = new Map(occupancies.value).set(sessionId, occupancy)
@@ -980,8 +1066,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   /**
-   * [u5b / D1] sessionPhase —— occupancy 派生视图读口（P4 ActivityStrip / 发送位四态 /
-   * 发送分发器 getSendRoute 的单一数据源；语义命名面向消费方）。无记录（未收到任何帧 /
+   * [u5b / D1] sessionPhase —— occupancy 派生视图读口（P4 ActivityStrip / 发送位形态与
+   * 角标 / Alt+⏎ 分流的单一数据源；语义命名面向消费方）。无记录（未收到任何帧 /
    * 已断连收尾）= 全 idle 缺省。原 getOccupancy 读口已删（生产外部消费 0，同值双读口收敛本口）。
    */
   function sessionPhase(sessionId: string): SessionOccupancyState {
@@ -1005,7 +1091,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     return compactingReasons.value.get(sessionId)
   }
 
-  // isHandingOff / setHandingOff 委托 createHandoffController（chat-handoff.ts）。
+  // isHandingOff 读 occupancy 派生（见 isCompacting 旁定义；setHandingOff 已随
+  // handingOffSessions Set 退役删除——[chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行]）。
 
   /** 追加 system 提示行（与规则 #3「错误作为消息插入聊天流」一致：不用顶部 banner）。 */
   const appendSystemNotice = (sessionId: string, text: string): void => {
@@ -1102,8 +1189,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   const truncateFrom = (sessionId: string, messageId: string, inclusive: boolean): void => truncateMessagesFrom(messages, sessionId, messageId, inclusive)
 
   /** 清理指定 session 的全部 per-session 状态（deleteSession 调用，S3）：Map 分区
-   * messages/retryStates/inflightCounts/compactingReasons/occupancies/historyWindows + Set
-   * 分区 hydrated/pendingSend/handingOffSessions/failedHistory/respawnPending +
+   * messages/retryStates/inflightCounts/compactingReasons/occupancies/historyWindows/submitSeqs + Set
+   * 分区 hydrated/pendingSend/failedHistory/respawnPending +
    * changeSetStatuses（前缀过滤）/ entryStates / executingBash / streaming flag 惰性缓存 /
    * subagent chunk 分区状态机 + LRU 时序记录。背景见 ./README.md。 */
   function disposeSession(sessionId: string): void {
@@ -1115,8 +1202,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     // 避免 TS 将不同 Map 元素推断为具体联合类型导致 new Map(ref.value) 不兼容。
     // inflightCounts（[steer-bubble D4]）：disposeSession 同步清 inflight——确认基线随分区
     // 销毁作废（与 LRU 驱逐的刻意豁免不同，见 lruEvictDeps 处声明注释）。
-    const mapRefs: { value: Map<string, unknown> }[] = [messages, retryStates, inflightCounts, compactingReasons, occupancies, historyWindows]
-    const setRefs: { value: Set<string> }[] = [hydrated, pendingSend, handingOffSessions, failedHistory, respawnPending]
+    const mapRefs: { value: Map<string, unknown> }[] = [messages, retryStates, inflightCounts, compactingReasons, occupancies, historyWindows, submitSeqs]
+    const setRefs: { value: Set<string> }[] = [hydrated, pendingSend, failedHistory, respawnPending]
     for (const ref of mapRefs) {
       if (ref.value.has(sessionId)) {
         const next = new Map(ref.value)
@@ -1155,9 +1242,10 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     messages,
     pendingSend,
     occupancies,
-    handingOffSessions,
     retryStates,
     inflightCounts,
+    // [chat-flow-consistency F1] 提交序号分区 ref（readers 面；watch 源值载体）
+    submitSeqs,
     changeSetStatuses,
     failedHistory,
     hydrated,
@@ -1180,6 +1268,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
       streamingStateMachine.applySubagentStreamState(virtualId, recordId, response),
     requestSubagentStreamState: (virtualId: string, recordId: string) => streamingStateMachine.requestSubagentStreamState(virtualId, recordId),
     sealSubagentStream: (virtualId: string, recordId: string, msgSeq: number) => streamingStateMachine.sealSubagentStream(virtualId, recordId, msgSeq),
+    markSubagentStreamDegraded: (virtualId: string, recordId: string) => streamingStateMachine.markSubagentStreamDegraded(virtualId, recordId),
     isSubagentStreamDegraded: (virtualId: string, recordId: string) => streamingStateMachine.isSubagentStreamDegraded(virtualId, recordId),
     clearSubagentChunkState: (virtualId: string, recordId?: string) => streamingStateMachine.clearSubagentChunkState(virtualId, recordId),
     clearSubagentChunkStateForSession: (sessionId: string) => streamingStateMachine.clearSubagentChunkStateForSession(sessionId),
@@ -1189,6 +1278,9 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     incrementInflight,
     decrementInflight,
     clearInflight,
+    // [chat-flow-consistency F1] 提交序号（bump 归 ops 面，get/submitSeqs ref 归 readers 面）
+    bumpSubmitSeq,
+    getSubmitSeq,
     applyMessageEvent,
     isGenerating,
     isActive,
@@ -1206,7 +1298,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     setCompactingReason,
     getCompactingReason,
     isHandingOff,
-    setHandingOff,
     appendSystemNotice,
     appendRespawnNotice,
     markRespawnPending,
@@ -1258,17 +1349,19 @@ export type ChatStoreInstance = ReturnType<typeof createChatStore>
  */
 export type ChatStoreReaders = Pick<
   ChatStoreInstance,
-  | 'messages' | 'pendingSend' | 'handingOffSessions'
+  | 'messages' | 'pendingSend'
   | 'retryStates' | 'changeSetStatuses'
   | 'failedHistory' | 'hydrated' | 'inflightCounts'
   | 'occupancies'
   | 'historyWindows'
+  | 'submitSeqs'
   | 'getMessages' | 'getRetryState' | 'getChangeSetStatus'
   | 'isHydrated' | 'isGenerating' | 'isActive'
   | 'isCompacting' | 'getCompactingReason' | 'isHandingOff'
   | 'sessionPhase' | 'isPendingSend'
   | 'isRespawnPending'
   | 'getInflight'
+  | 'getSubmitSeq'
   | 'getHistoryWindow'
   | 'isSubagentStreamDegraded'
 >
@@ -1286,17 +1379,18 @@ export type ChatStoreOps = Pick<
   | 'clearHistoryError' | 'hydrate' | 'setMessages' | 'reconcileHistory'
   | 'prependHistory' | 'applySubagentStreamDelta' | 'finalizeSubagentStream'
   | 'applySubagentStreamChunk' | 'applySubagentStreamState' | 'requestSubagentStreamState'
-  | 'sealSubagentStream' | 'clearSubagentChunkState' | 'clearSubagentChunkStateForSession'
+  | 'sealSubagentStream' | 'markSubagentStreamDegraded' | 'clearSubagentChunkState' | 'clearSubagentChunkStateForSession'
   | 'applySubagentEntries' | 'appendUser'
   | 'applyMessageEvent' | 'finalizeSession'
   | 'finalizeAllStreaming' | 'resetTransientStates' | 'addPendingSend'
-  | 'clearPendingSend' | 'markSessionError' | 'setHandingOff'
+  | 'clearPendingSend' | 'markSessionError'
   | 'setOccupancy' | 'clearOccupancy' | 'setCompactingReason'
   | 'appendSystemNotice' | 'appendRespawnNotice' | 'appendSubagentDirective' | 'truncateFrom'
   | 'markRespawnPending' | 'clearRespawnPending'
   | 'applyFileChanges' | 'disposeSession' | 'markStreamingBashError'
   | 'touchLru' | 'evictIfNeeded' | 'evictSessionWithVirtual' | 'evictVirtualKey'
   | 'incrementInflight' | 'decrementInflight' | 'clearInflight'
+  | 'bumpSubmitSeq'
   | 'setHistoryWindow' | 'clearHistoryWindow'
   | 'testInternals'
 >

@@ -7,7 +7,7 @@
  *   - trends：跨 run 行
  *   - clean --older-than：默认干跑不删；--yes 删过期保留新 run
  *
- * 驱动方式（单测层拆分层，docs/todo/test-single-layer-cleanup.md 第二波）：
+ * 驱动方式（单测层拆分层，docs/TEST-STRATEGY.md「新写测试判据」节 第二波）：
  *   - 输出断言主通道 = 进程内加载 rfl.mjs（vi.resetModules + 动态 import，main 在
  *     import 时执行）——CLI 输出解析/渲染逻辑零子进程，高负载无 fork/exec 窗口；
  *   - 真 node 子进程（execFile）缩到 2 条冒烟（list 全链路 stdout + clean --yes

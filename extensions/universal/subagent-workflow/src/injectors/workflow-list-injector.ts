@@ -40,11 +40,11 @@ import { createResourceListInjector } from "./resource-list-injector.ts";
  *
  * 末句 = 批量入口的 pi 壳附加句（D5③）：条目侧 when/notFor 走 fan-out.js 的 @pi-meta
  * （宿主中立、双宿主共享，注入点只渲染 name/description/location，元数据经 read
- * <location> 取）；「subagents tool 是 fan-out 的执行体」是 pi 壳专属表述，故放这里
+ * <location> 取）；「subagent_batch tool 是 fan-out 的执行体」是 pi 壳专属表述，故放这里
  * 而不进模板 meta——zsw 宿主清单注入不会照搬本句。
  */
 export const WORKFLOW_LIST_GUIDE =
-	"The following workflows are available. Do NOT call list to discover available workflows — they are listed below; use list only for running state. All listed workflows run directly via the workflow_run tool — do NOT use workflow-script generate for any listed workflow. For parameter details, read the <location> script file (script header has @pi-meta parameters + usage). For 2+ independent tasks dispatched together, prefer the `subagents` tool — it drives the fan-out workflow for you.";
+	"The following workflows are available. Do NOT call list to discover available workflows — they are listed below; use list only for running state. All listed workflows run directly via the workflow_run tool — do NOT use workflow-script generate for any listed workflow. For parameter details, read the <location> script file (script header has @pi-meta parameters + usage). For 2+ independent tasks dispatched together, prefer the `subagent_batch` tool — it drives the fan-out workflow for you.";
 
 /**
  * 解析 workflow .js 文件的 meta（name + description），经 IF1 parseResourceMeta。

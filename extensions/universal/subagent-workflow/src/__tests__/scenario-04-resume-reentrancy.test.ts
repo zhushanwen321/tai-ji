@@ -21,6 +21,7 @@ import {
   resumeScenarioRun,
   scanScenarioEvents,
   seedCrashedRun,
+  settledCountByTaskIndex,
   simulateProcessDeath,
   THREE_CALL_SERIAL_SCRIPT,
   waitForScenarioSettled,
@@ -66,10 +67,7 @@ describe("场景 4：resume 可重入（kill 落点两分支）", () => {
       // 即证）；显式断言 run-resumed 恰 2 条 + 每 taskIndex settled 恰 1 条
       const events = await scanScenarioEvents(env, "wf-s4a");
       expect(events.filter((e) => e.type === "run-resumed")).toHaveLength(2);
-      const settledCount = new Map<number, number>();
-      for (const e of events) {
-        if (e.type === "agent-settled") settledCount.set(e.taskIndex, (settledCount.get(e.taskIndex) ?? 0) + 1);
-      }
+      const settledCount = settledCountByTaskIndex(events);
       expect([...settledCount.values()].every((n) => n === 1)).toBe(true);
       expect(settledCount.size).toBe(3);
     } finally {
@@ -109,10 +107,7 @@ describe("场景 4：resume 可重入（kill 落点两分支）", () => {
       expect(sd2.faux.dispatches[0]!.opts["agent"]).toBe("C");
 
       const events = await scanScenarioEvents(env, "wf-s4b");
-      const settledCount = new Map<number, number>();
-      for (const e of events) {
-        if (e.type === "agent-settled") settledCount.set(e.taskIndex, (settledCount.get(e.taskIndex) ?? 0) + 1);
-      }
+      const settledCount = settledCountByTaskIndex(events);
       expect(settledCount.get(2)).toBe(1); // C 成功结果恰写一次
       expect(events.filter((e) => e.type === "run-resumed")).toHaveLength(2);
     } finally {

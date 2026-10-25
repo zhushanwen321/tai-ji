@@ -39,6 +39,7 @@ A 类与权威侧（SSOT / shared paths.ts / SDK 同名常量）相等断言；B
   2 — 违规（SSOT 退化或定义点丢失或镜像漂移）
 """
 
+from __future__ import annotations
 import re
 import sys
 from pathlib import Path

@@ -5,7 +5,7 @@
  * extension 连接）→ hello（无独立 token——socket 文件权限即边界，ADR-0122 #10）→
  * engine_open（runtime 侧 spawn 真实引擎 CLI，POSIX detached 进程组 + kill 链）→
  * engine_frame 双向转发（引擎帧是不透明字符串载荷，本层不理解引擎协议语义）→
- * engine_close / exit → engine_closed + 组杀；连接断 → 该连接全部引擎组杀
+ * engine_close / exit → engine_closed + 按进程组终止；连接断 → 该连接全部引擎按进程组终止
  * （kill-on-disconnect：通道生命线即引擎生命线）。
  *
  * 模块级单例——组合根（index.ts）唯一装配点，process-manager（control env 注入侧）经
@@ -14,7 +14,7 @@
  * SubagentControlServer（dataDir 隔离 + 时间窗/上限注入小值）。
  *
  * 状态机（每连接，§3.4.3）：connected → hello → ready；engine_open → opening（占位
- * 先于 spawn）→ open；engine_closed/engine_close → 注销；socket close → 全通道组杀。
+ * 先于 spawn）→ open；engine_closed/engine_close → 注销；socket close → 全通道按进程组终止。
  * 无心跳（进程死亡由 socket close / exit 事件表达，ADR-0122 生死二态）。
  */
 import * as net from 'node:net'
@@ -69,10 +69,10 @@ import { ConnectionOutboundQueue } from './outbound-queue.js'
 import { ensurePrivateControlDir, writeEnginePidFileAtomically } from './pid-file.js'
 import type { SubagentTeeStreamState } from './subagent-tee.js'
 import { killEngineGroup } from './process-kill.js'
-import { sweepOrphanEnginePids, sweepStaleControlSockets } from './sweep.js'
+import { probeListenPathBeforeBind, sweepLegacyRelayChildren, sweepOrphanEnginePids, sweepStaleControlSockets } from './sweep.js'
 import { logger } from '../logger.js'
 import { findPiExecutable } from '../pi/find-pi-executable.js'
-import { isPidAlive } from '../../utils/protocol-background-task.js'
+import { isPidAlive, getProcessStartTimeSec } from '../../utils/protocol-background-task.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
 // ── 依赖注入（测试隔离用；生产全部走缺省推导）─────────────────────────────────
@@ -380,10 +380,18 @@ export class SubagentControlServer {
     assertSocketPathLength(this.socketPath)
     this.isUnixSocket = process.platform !== 'win32'
 
-    // 跨代残留 socket 清理（D7：扫 subagent-*.sock 全族，非只探当前 pid 路径）。
-    // win32 named pipe 是内核对象无文件残留；pipe 名含本 pid 不会撞活实例，跳过。
+    // 跨代残留 socket 清理（D7：扫 subagent-*.sock 全族 + 旧 relay 残片族，非只探
+    // 当前 pid 路径）。win32 named pipe 是内核对象无文件残留；pipe 名含本 pid 不会撞
+    // 活实例，跳过。
     if (this.opts.sweep !== false && this.isUnixSocket) {
       await sweepStaleControlSockets(this.dataDir, this.socketPath)
+    }
+
+    // listen 前定向探活本实例路径（S-9）：sweep 刻意 skip 它，留下「前代崩溃残片 +
+    // pid 复用 → bind 撞 EADDRINUSE 致命」窗口——死残片清理后 bind，活占用显式致命
+    // 冲突。探活失败留给 listen 原样报错（pid 复用 fail-fast 语义保留，本探活是前置补强）。
+    if (this.isUnixSocket) {
+      await probeListenPathBeforeBind(this.socketPath)
     }
 
     const server = net.createServer((conn) => {
@@ -410,10 +418,13 @@ export class SubagentControlServer {
     }
     logger.info(`[subagent-control] server listening at ${this.socketPath}`)
 
-    // 孤儿引擎收割（owner runtime 死 → 立即组杀；后台兜底不阻塞启动）
+    // 孤儿引擎收割 + 旧 relay 残片收割（owner runtime 死 → 立即按进程组终止；后台兜底不阻塞启动）
     if (this.opts.sweep !== false) {
       void sweepOrphanEnginePids(this.dataDir).catch((e) => {
         logger.warn('[subagent-control] orphan engine sweep failed (non-fatal):', e)
+      })
+      void sweepLegacyRelayChildren(this.dataDir).catch((e) => {
+        logger.warn('[subagent-control] legacy relay residue sweep failed (non-fatal):', e)
       })
     }
   }
@@ -427,7 +438,7 @@ export class SubagentControlServer {
     ensurePrivateControlDir(getControlEnginesDir(this.dataDir))
   }
 
-  /** 关停：全连接全通道组杀 + 关 server + 删 socket 文件。幂等（shutdown 与测试 afterEach 均可安全调用）。 */
+  /** 关停：全连接全通道按进程组终止 + 关 server + 删 socket 文件。幂等（shutdown 与测试 afterEach 均可安全调用）。 */
   async destroy(): Promise<void> {
     if (this.deinitialized) return
     this.deinitialized = true
@@ -494,7 +505,7 @@ export class SubagentControlServer {
       conn.out.flush()
     })
     socket.once('close', () => {
-      // kill-on-disconnect（D4/D7）：主 pi/extension 死亡 → 该连接全部引擎组杀
+      // kill-on-disconnect（D4/D7）：主 pi/extension 死亡 → 该连接全部引擎按进程组终止
       this.destroyConnection(conn, 'socket_closed')
     })
   }
@@ -733,7 +744,7 @@ export class SubagentControlServer {
     const child = this.spawnChildOrFail(conn, opening, launch, env)
     if (child === null) return
     if (opening.aborted || conn.destroyed) {
-      // spawn 与超时/断连的竞态：刚拿到的进程立即组杀，不回 engine_opened（迟到结果丢弃）
+      // spawn 与超时/断连的竞态：刚拿到的进程立即按进程组终止，不回 engine_opened（迟到结果丢弃）
       this.killGroup(child.pid, `late-spawn ${spec.engineId}`)
       return
     }
@@ -779,7 +790,7 @@ export class SubagentControlServer {
   ): ChildProcess | null {
     const spec = opening.spec
     try {
-      // POSIX detached:true（引擎 = 进程组长，组杀覆盖引擎 + 其 pi 子进程）；
+      // POSIX detached:true（引擎 = 进程组长，按进程组终止覆盖引擎 + 其 pi 子进程）；
       // Windows detached:false + windowsHide:true（树杀走 taskkill /T，D7）。
       // stdio[3] = raw mirror 通道（TAIJI_ENGINE_RAW_MIRROR=1 宣告；读取侧由
       // SubagentMirrorHub 接管——见 attachChildWiring 的 fd3 接线）。
@@ -807,8 +818,8 @@ export class SubagentControlServer {
       'Close idle engine channels before opening more.')
   }
 
-  /** 登记通道 + pid 文件（D7 形状：runtimePid/instanceId/hostKind 供 sweep owner 判定），
-   * 回 engine_opened 并挂子进程事件（spawn 已赢下竞态）。 */
+  /** 登记通道 + pid 文件（D7 形状：runtimePid/runtimePidStartSec/instanceId/hostKind 供
+   * sweep owner 判定），回 engine_opened 并挂子进程事件（spawn 已赢下竞态）。 */
   private openChannel(conn: ConnState, opening: PendingOpen, child: ChildProcess): void {
     const spec = opening.spec
     const channelId = `ch-${++this.channelSeq}`
@@ -893,6 +904,7 @@ export class SubagentControlServer {
         parentRecordId: spec.parentRecordId ?? null,
         depth: spec.depth ?? null,
         runtimePid: process.pid,
+        runtimePidStartSec: cachedRuntimePidStartSec(),
         instanceId: String(process.pid),
         hostKind: 'runtime-sidecar',
       })
@@ -902,7 +914,7 @@ export class SubagentControlServer {
     }
   }
 
-  /** open 超时（D8 三窗之一）：中止占位；spawn 已赢下竞态则连引擎一起组杀（open_timeout）。 */
+  /** open 超时（D8 三窗之一）：中止占位；spawn 已赢下竞态则连引擎一起按进程组终止（open_timeout）。 */
   private abortOpening(conn: ConnState, opening: PendingOpen): void {
     opening.aborted = true
     conn.pendingOpens.delete(opening.key)
@@ -968,7 +980,7 @@ export class SubagentControlServer {
     ctx.down.push(frame.line)
   }
 
-  /** engine_close（D4）：有界等待引擎退出（dispose 异步落盘窗），超时组杀；只影响本通道。 */
+  /** engine_close（D4）：有界等待引擎退出（dispose 异步落盘窗），超时按进程组终止；只影响本通道。 */
   private handleEngineClose(conn: ConnState, frame: ControlEngineCloseFrame): void {
     const ctx = this.ctxs.get(frame.channelId)
     if (ctx === undefined || ctx.conn !== conn) {
@@ -1086,10 +1098,10 @@ export class SubagentControlServer {
         clearTimeout(ctx.closeTimer)
         ctx.closeTimer = null
       }
-      // 日志分类与组杀判据解耦：
+      // 日志分类与按进程组终止的判据解耦：
       // - unexpectedForLog：非控制面裁决且非 engine_close（intentional）窗内退出 → 「意外退出」
       //   warn 口径（D7 两分）；
-      // - shouldKillGroup：只要 exit 且未经控制面裁决（killRequested）就组杀——组杀只收割
+      // - shouldKillGroup：只要 exit 且未经控制面裁决（killRequested）就按进程组终止——按进程组终止只收割
       //   残留子进程（负 pid 对已死组长仍有效），engine_close 窗内引擎自行退出同样要
       //   兜底其孤儿（不能因日志口径而失去兜底）。
       const unexpectedForLog = !ctx.killRequested && !ctx.intentionalClose
@@ -1117,7 +1129,7 @@ export class SubagentControlServer {
   }
 
   /**
-   * 通道组杀（D7）：POSIX 走负 pid 组杀（对已死组长仍有效）；Windows 引擎存活时按
+   * 通道按进程组终止（D7）：POSIX 走负 pid 按进程组终止（对已死组长仍有效）；Windows 引擎存活时按
    * 引擎 pid 树杀，引擎已死（无树可枚举）时回退到反向通道登记的 child pid 集合逐个
    * 树杀——否则存活 pi 子进程成为孤儿（m-rt-2/planner①）。
    */
@@ -1208,7 +1220,7 @@ export class SubagentControlServer {
   }
 
   /**
-   * 控制面裁决通道终止：预设终局归因 + 组杀。真实 exit 事件到达后 finalizeClosed 发
+   * 控制面裁决通道终止：预设终局归因 + 按进程组终止。真实 exit 事件到达后 finalizeClosed 发
    * engine_closed + 清 pid 文件（D7：确认 exit/kill 成功才删）；exit 已见过的（组长
    * 先死、组员残留的树杀路径）立即 finalize。
    */
@@ -1322,6 +1334,24 @@ function frameIdOf(key: string): string | number {
   return key !== '' && Number.isFinite(num) && String(num) === key ? num : key
 }
 
+// ── owner 身份登记（条目 65：pid + start time 二元组）─────────────────────────
+
+/**
+ * 本 runtime 进程 start time（epoch 秒）的进程级缓存——进程生命周期内不变，只读一次
+ * ps。登记进 pid 文件的 runtimePidStartSec 供 sweep owner 身份比对：pid 存活 + start
+ * time 不匹配 = pid 已被无关进程复用、原 owner 已死。ps 取不到（Windows / ps 不可用）
+ * = undefined → JSON 序列化自动省略该键（等同旧格式登记），sweep 侧按不可核实保守
+ * 跳过（维持既有形态，不引入 Windows 专属分支）。
+ */
+let runtimePidStartCache: { sec: number | undefined } | null = null
+
+function cachedRuntimePidStartSec(): number | undefined {
+  if (runtimePidStartCache === null) {
+    runtimePidStartCache = { sec: getProcessStartTimeSec(process.pid) }
+  }
+  return runtimePidStartCache.sec
+}
+
 function safeFindPi(projectRoot: string): string {
   try {
     return findPiExecutable(projectRoot)
@@ -1389,7 +1419,7 @@ export async function initControlServer(opts: InitControlServerOptions = {}): Pr
   state = { server, socketPath: server.listeningSocketPath }
 }
 
-/** 关停：全通道组杀 + server close + 删 socket 文件。未初始化时 no-op（幂等）。 */
+/** 关停：全通道按进程组终止 + server close + 删 socket 文件。未初始化时 no-op（幂等）。 */
 export async function deinitControlServer(): Promise<void> {
   const s = state
   if (s === null) return

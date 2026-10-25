@@ -9,11 +9,19 @@
  */
 
 import { homedir } from 'node:os'
+import { mkdirSync } from 'node:fs'
 import type { RecentWorkspaceRecord } from '@taiji/shared'
 import type { RecentWorkspacesStore } from './recent-workspaces-store.js'
 
 export class WorkspaceService {
-  constructor(private readonly store: RecentWorkspacesStore) {}
+  /**
+   * @param defaultSessionDirProvider 默认会话目录路径推导（组合根注入——T2.7 守卫本文件
+   *   零 session 词汇 import，路径函数名由组合根持有；缺省 = ''，入口隐藏）
+   */
+  constructor(
+    private readonly store: RecentWorkspacesStore,
+    private readonly defaultSessionDirProvider: () => string = () => '',
+  ) {}
 
   /**
    * 记录一次工作区使用。INV-1 主检查：空串/undefined/whitespace 静默跳过。
@@ -29,9 +37,40 @@ export class WorkspaceService {
   }
 
   /**
-   * 返回最近工作区列表，按 lastUsedAt 倒序，≤10 条。
+   * 返回最近工作区列表：pinned 置前（≤5）+ 其余按 lastUsedAt 倒序（≤6）。
    */
   list(): RecentWorkspaceRecord[] {
     return this.store.list()
+  }
+
+  /**
+   * pin/unpin 条目（INV-6）：透传 store。返回是否生效（false = 超 pin 上限被拒，列表不变；
+   * 调用方据此 degraded 标记，RPC 契约恒 resolve）。
+   */
+  setPinned(cwd: string, pinned: boolean): boolean {
+    if (!cwd || cwd.trim() === '') return false
+    const applied = this.store.setPinned(cwd, pinned)
+    if (!applied) {
+      console.warn(`[workspace-service] setPinned rejected (pin limit reached): cwd=${cwd}`)
+    }
+    return applied
+  }
+
+  /**
+   * 默认会话目录（<dataDir>/defaultSession/）：幂等 ensureDir 后返回绝对路径。
+   * 启动序列已 ensure 一次（用户裁决 2026-10-22），此处再 ensure 是自愈兜底（启动失败
+   * 残留 / --data-dir 切换后的新目录场景）；ensure 失败返回空串（前端隐藏「默认会话」
+   * 入口——返回不可用路径会让 create 落错目录，比缺入口更糟）。
+   */
+  defaultSessionDir(): string {
+    const dir = this.defaultSessionDirProvider()
+    if (!dir) return ''
+    try {
+      mkdirSync(dir, { recursive: true })
+      return dir
+    } catch (err) {
+      console.error('[workspace-service] ensure defaultSession dir failed:', err)
+      return ''
+    }
   }
 }

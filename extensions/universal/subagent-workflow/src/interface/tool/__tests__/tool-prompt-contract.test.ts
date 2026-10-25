@@ -166,6 +166,22 @@ describe("旧名残留负锚（U-B1）：声明侧源文件零旧工具名指引
     expect(SUBAGENT_TOOL_SRC).not.toContain('action:"start"');
     expect(SUBAGENT_TOOL_SRC).not.toContain('\\"action\\":\\"start\\"');
   });
+
+  it("零裸词旧名 subagents 作批量工具指称（错误文案主语 / 注入段枚举；2026-10-23 改名 subagent_batch 后补）", () => {
+    // backtick 负锚不覆盖裸词形态——注入段工具枚举裸名列旧名、错误文案旧名作主语
+    // 均为模型可见文案（改名当日实测漏网形态）。合法保留豁免（不在断言范围）：
+    // <available_subagents> XML 标签、interface/command/subagents.ts slash 命令路径、
+    // subagents* 标识符（camelCase 后缀）、guide 文案的自然语言复数指称（agent 实例）、
+    // 注释中的改名裁决叙述。
+    for (const [file, src] of DECLARATION_SOURCES) {
+      expect(src, `${file} 以裸词旧名指称批量工具（模型可见文案）`).not.toMatch(
+        /subagents (?:requires|no longer|cannot|member\[)|, subagents,/,
+      );
+    }
+    // 锚词不带引号段：tool-subagents.ts 的错误文案在单引号字符串内（\'tasks\' 转义形态）
+    expect(TOOL_SUBAGENTS_SRC).toContain("subagent_batch requires");
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("subagent_batch, workflow_run");
+  });
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -191,7 +207,7 @@ describe("旧名残留负锚（U-B1）：声明侧源文件零旧工具名指引
  *      交叉引用，D1 范围裁决②：保留原文）
  *  A9  Delegate FIRST —— 何时委派（原 description「When to delegate」段的承载点）
  *  A10 untrusted —— 注入防御（completion 即确认 + 不可信数据）
- *  A12 `subagents` tool —— 批量入口交叉引用
+ *  A12 `subagent_batch` tool —— 批量入口交叉引用（2026-10-23 改名，原 `subagents`）
  * schema 层（功能语义；required/enum/pattern/maxLength 由 structured-output
  * cross-package-contract 以真实 typebox 锁定）：
  *  A13 task description "Throws if missing or whitespace-only"（原 REQUIRED for
@@ -257,7 +273,8 @@ describe("subagent_start description — 锚词保留清单（D2/D3 契约）", 
     expect(guidelines).toContain("Never guess an id");
     // A8：defer 名单工具交叉引用保留原文（D1 范围裁决②；源码内是转义形态）
     expect(START_SECTION).toContain('session_read {\\"action\\":\\"result\\"');
-    expect(guidelines).toContain("`subagents` tool");
+    // A12：批量入口交叉引用（2026-10-23 改名 subagent_batch）
+    expect(guidelines).toContain("`subagent_batch` tool");
   });
 
   it("agent 字段通用化（防漂移）：description 不写死 agent 名，指向 <available_subagents>", () => {
@@ -280,7 +297,7 @@ describe("subagent_start description — 锚词保留清单（D2/D3 契约）", 
 
   it("勿等待纪律单源化（A17）：description/guidelines 零 poll 措辞，规则只在注入段说一次（D1）", () => {
     // 「结果自动通知送达、勿 bash sleep/busy-wait/poll 等待」是 subagent 组/
-    // subagents/workflow 组共享的调度纪律，收敛到 <available_subagents> 注入段说一次。
+    // subagent_batch/workflow 组共享的调度纪律，收敛到 <available_subagents> 注入段说一次。
     // completion 即确认的 subagent 特有语义由 A10 锚（untrusted）承接。
     expect(START_DESCRIPTION).not.toMatch(/bash sleep|busy-wait|bash-sleeping|polling/i);
     expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("busy-wait, or poll");
@@ -289,7 +306,7 @@ describe("subagent_start description — 锚词保留清单（D2/D3 契约）", 
 
   it("注入段工具名清单随拆分更新（D1 收敛点覆盖新名全集）", () => {
     expect(SUBAGENT_LIST_INJECTOR_SRC).toContain(
-      "(subagent_start, subagent_manage, subagent_message, subagents, workflow_run, workflow_control tools)",
+      "(subagent_start, subagent_manage, subagent_message, subagent_batch, workflow_run, workflow_control tools)",
     );
   });
 
@@ -403,13 +420,13 @@ describe("subagent runtime handler — 错误文案含纠正正例", () => {
 });
 
 // ══════════════════════════════════════════════════════════════
-// subagents 批量声明契约（subagent-tool-interface-refactor §3.1.2 成员对象 / §3.1.4
+// subagent_batch 批量声明契约（subagent-tool-interface-refactor §3.1.2 成员对象 / §3.1.4
 // 启动文案 / §3.3.4 常驻 / §3.3.5 无条件停下）——行为版断言在 tool-subagents.test.ts，
 // 本组锁源码文本锚（与 subagent_start 锚词做法同构：agent 决策时唯一可见的就是这些文案）。
-// 工具名保持 `subagents` 不变（改名属第二目标，附录 B）——零改名断言。
+// 工具名 subagent_batch（2026-10-23 改名裁决，反转原零改名条款）。
 // ══════════════════════════════════════════════════════════════
 
-describe("subagents 批量声明契约（成员对象 + 启动文案锚 + 常驻）", () => {
+describe("subagent_batch 批量声明契约（成员对象 + 启动文案锚 + 常驻）", () => {
   it("成员对象调用正例：tasks 元素是对象（task + 可选 agent/model/thinkingLevel）", () => {
     expect(TOOL_SUBAGENTS_SRC).toContain('{"tasks":[{"task":"<task 1>","agent":"/abs/a.md"},{"task":"<task 2>"}]');
     expect(TOOL_SUBAGENTS_SRC).toContain("member object");
@@ -435,11 +452,12 @@ describe("subagents 批量声明契约（成员对象 + 启动文案锚 + 常驻
     expect(TOOL_SUBAGENTS_SRC).not.toContain("Do NOT poll");
   });
 
-  it("常驻 + 工具名不变（§3.3.4 / 附录 B 边界）", () => {
+  it("改名 subagent_batch（2026-10-23 裁决，反转 §3.3.4 零改名）+ 常驻（同日二次裁决）", () => {
+    expect(TOOL_SUBAGENTS_SRC).toContain('name: "subagent_batch"');
+    // 旧注册名不在注册点出现（头注释的改名裁决叙述除外，其字面为 `subagent_batch`）
+    expect(TOOL_SUBAGENTS_SRC).not.toContain('name: "subagents"');
+    // 常驻终态：注册点零 deferred 声明
     expect(TOOL_SUBAGENTS_SRC).not.toContain('exposure: "deferred"');
-    expect(TOOL_SUBAGENTS_SRC).toContain('name: "subagents"');
-    // 零改名断言：第二目标（subagent_batch）不在主干出现任何条件形态
-    expect(TOOL_SUBAGENTS_SRC).not.toContain("subagent_batch");
   });
 
   it("schema 叶子承载成员对象形状权威（跨包契约 import 点）", () => {
@@ -572,8 +590,8 @@ describe("workflow_run promptGuidelines 契约（U1/TC4 拆分重排）", () => 
 // subagent start schema 退役契约（原 subagent-schema-collect.test.ts）
 // ══════════════════════════════════════════════════════════════
 
-describe("subagent start schema: collect param retired (批量入口 = subagents tool)", () => {
-  it("collect 字段已删（schema 层不可再自报：批量编排唯一入口是 `subagents` tool）", () => {
+describe("subagent start schema: collect param retired (批量入口 = subagent_batch tool)", () => {
+  it("collect 字段已删（schema 层不可再自报：批量编排唯一入口是 `subagent_batch` tool）", () => {
     const start = schemaData(SubagentStartParams, "SubagentStartParams");
     const manage = schemaData(SubagentManageParams, "SubagentManageParams");
     const message = schemaData(SubagentMessageParams, "SubagentMessageParams");

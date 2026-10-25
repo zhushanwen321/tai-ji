@@ -68,10 +68,7 @@ function makeSessionView(overrides: Partial<IManagedSessionView> = {}): IManaged
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
+        bashRunToken: undefined,
     ...overrides,
   }
 }
@@ -87,7 +84,7 @@ function makeEnv() {
     getLaunchPresetOptions: vi.fn(async () => undefined),
     toSummary: vi.fn((s: IManagedSessionView): SessionSummary => ({
       id: s.id, label: s.label, cwd: s.cwd, status: 'active',
-      lastActiveAt: 1, modelId: 'p/m', tokenCount: 0,
+      lastActiveAt: 1,
     })),
     findScannedSession: vi.fn(() => undefined),
     notifySessionCreated: vi.fn(),

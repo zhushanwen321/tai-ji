@@ -22,6 +22,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SessionStateProjection, type SessionStateProjectionDeps } from '../session-state-projection.js'
 import { MessageBus } from '../../message-bus/message-bus.js'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../replicated-states.config.js'
+import { isGeneratingTurn } from '../types.js'
 import type { IManagedSessionView } from '../types.js'
 import type { IPiEngine, IProcessManager } from '../../ports/pi-engine.js'
 import type { ServerMessage } from '@taiji/shared'
@@ -48,9 +49,6 @@ function makeSessionView(overrides: Partial<IManagedSessionView> = {}): IManaged
     lastActiveAt: 0,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
     bashRunToken: undefined,
     ...overrides,
   }
@@ -265,7 +263,7 @@ describe('副作用域：applyContextUpdate / handleTurn* / fetchAndBroadcastCon
   })
 
   it('handleTurnUsageSideEffects：turn_end project sidecar 兜底；session 不存在时跳过', () => {
-    const env = makeEnv({ session: makeSessionView({ id: 's1', isGenerating: false }) })
+    const env = makeEnv({ session: makeSessionView({ id: 's1' }) })
     env.projection.handleTurnUsageSideEffects('s1')
     expect(env.deps.tryPersistProjectBinding).toHaveBeenCalledTimes(1)
     expect(env.deps.tryPersistProjectBinding).toHaveBeenCalledWith(env.sessions.get('s1'))
@@ -273,10 +271,10 @@ describe('副作用域：applyContextUpdate / handleTurn* / fetchAndBroadcastCon
     expect(env.deps.tryPersistProjectBinding).toHaveBeenCalledTimes(1)
   })
 
-  it('handleTurnEndSideEffects：isGenerating 复位 + project sidecar 兜底 + stopReason outcome 映射（error/aborted/其余→done）', () => {
-    const env = makeEnv({ session: makeSessionView({ id: 's1', isGenerating: true }) })
+  it('handleTurnEndSideEffects：settling 转移 + project sidecar 兜底 + stopReason outcome 映射（error/aborted/其余→done；willRetry=true 跳终态）', () => {
+    const env = makeEnv({ session: makeSessionView({ id: 's1', occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } }) })
     env.projection.handleTurnEndSideEffects('s1')
-    expect(env.sessions.get('s1')!.isGenerating).toBe(false)
+    expect(isGeneratingTurn(env.sessions.get('s1')!.occupancy?.turn)).toBe(false)
     expect(env.deps.tryPersistProjectBinding).toHaveBeenCalledTimes(1)
     expect(env.deps.persistSessionOutcome).toHaveBeenCalledWith('s1', 'done')
 
@@ -286,11 +284,11 @@ describe('副作用域：applyContextUpdate / handleTurn* / fetchAndBroadcastCon
     expect(env.deps.persistSessionOutcome).toHaveBeenLastCalledWith('s1', 'stopped')
   })
 
-  it('handleAgentSettledSideEffects：run 级联结束 → isGenerating 复位；session 不存在时跳过（session-dead 幽灵忙碌兜底）', () => {
-    const env = makeEnv({ session: makeSessionView({ id: 's1', isGenerating: true }) })
+  it('handleAgentSettledSideEffects：run 级联结束 → idle 转移；session 不存在时跳过（session-dead 幽灵忙碌兜底）', () => {
+    const env = makeEnv({ session: makeSessionView({ id: 's1', occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } }) })
     env.projection.handleAgentSettledSideEffects('s1')
-    expect(env.sessions.get('s1')!.isGenerating).toBe(false)
-    // 只碰 isGenerating：不得写 session_end 终态 / sidecar（与 handleTurnEndSideEffects 的职责边界）
+    expect(isGeneratingTurn(env.sessions.get('s1')!.occupancy?.turn)).toBe(false)
+    // 只碰 turn 维（idle）：不得写 session_end 终态 / sidecar（与 handleTurnEndSideEffects 的职责边界）
     expect(env.deps.persistSessionOutcome).not.toHaveBeenCalled()
     expect(env.deps.tryPersistProjectBinding).not.toHaveBeenCalled()
 

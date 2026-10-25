@@ -5,7 +5,7 @@
 //   - **模型源 = 个人 provider 解析链**（engine-provider-unification D3 扩链）：
 //     taiji 同步副本 `<engineDataDir>/engines/zcode/pi-synced-provider-config.json`
 //     存在 → 读 merge(真实 `~/.zcode/v2/provider_config.json` 实时内容, 副本) 视图
-//     （D3 换轨版：真实条目优先、副本独有追加——与 appserver-launcher 拦截分支的
+//     （D3 切换版：真实条目优先、副本独有追加——与 appserver-launcher 拦截分支的
 //     内嵌 mergeProviderConfig 同规则，对账单测锁步；两消费方〔本文件校验链 / CLI
 //     Provider Registry〕看到同一视图，消除「校验放行 × CLI 拒载」分叉）；副本
 //     缺失 → 回落真实文件直读。副本是 runtime 启动段把 pi 侧 provider 映射落盘的
@@ -141,11 +141,11 @@ function readSourceConfig(absPath: string): SourceConfig {
 }
 
 // ============================================================
-// merge 视图（D3 换轨：真实文件实时内容 + taiji 同步副本——两消费方同一视图）
+// merge 视图（D3 切换：真实文件实时内容 + taiji 同步副本——两消费方同一视图）
 // ============================================================
 
 /**
- * merge(真实, 副本)——provider_config.json 的 D3 换轨合并视图，与 appserver-launcher
+ * merge(真实, 副本)——provider_config.json 的 D3 切换合并视图，与 appserver-launcher
  * 内嵌 mergeProviderConfig 同规则对账锁步（改任一侧须同步另一侧并跑对账单测）：
  *   - 副本非对象 → 原样返回 real（副本缺席回落语义——wrapper 侧更早短路回原文件
  *     字节，本分支是 TS 读链的等价回落）；
@@ -307,7 +307,7 @@ function resolvePersonalProviderSource(sources?: ZcodeSourcePaths, engineDataDir
 
 /**
  * 个人 provider 校验源路径解析（engine-provider-unification D3 锚点扩链；两消费方
- * 同锚——zcode-engine 的 ZCODE_ENG_PROVIDER_CONFIG env 赋值走本函数〔D3 换轨后
+ * 同锚——zcode-engine 的 ZCODE_ENG_PROVIDER_CONFIG env 赋值走本函数〔D3 切换后
  * 语义收窄 = taiji 同步副本路径；副本缺失回落真实路径〕，校验链读取走
  * readPersonalProviderView 的 merge 视图，禁止各自拼路径）。每次调用现读存在性
  * （无缓存）——副本落盘/删除对下一次解析即时生效。
@@ -779,7 +779,16 @@ function readCatalogProviderRules(catalog: unknown): readonly unknown[] {
   return Array.isArray(rules) ? rules : [];
 }
 
-/** [listAccountFamilyModels 拆分] 单条 account: 规则的模型清单展开（追加进 out）。 */
+/**
+ * [listAccountFamilyModels 拆分] 单条 account: 规则的模型清单展开（追加进 out）。
+ *
+ * 模型清单判据（S-1 统一基准形态）：`builtinModelIds` **数组在位即用（含空数组），
+ * 缺键才回落 `personalModelIds`**。对齐点 = runtime 侧
+ * `packages/runtime/src/services/zcode-provider-sync.ts` 的 readAccountFamilyRules
+ * （settings 清单派生，2026-10-23 起同判据——此前该侧为「builtin 非空才用」，空
+ * builtin 数组时两侧集合不同）。normalizeAccountModel / translatePiModelRefToZcode
+ * 的 `??` 取清单形态与本函数同判据。
+ */
 function pushAccountFamilyRuleModels(
   rule: unknown,
   out: Array<{ id: string; name?: string }>,

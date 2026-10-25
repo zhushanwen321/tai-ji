@@ -16,6 +16,7 @@ import type { Ref } from 'vue'
 import {
   createChatStore,
   createSessionFlow,
+  createSessionLiveState,
   createSessionStore,
   createUseChat,
   createUseSession,
@@ -32,11 +33,13 @@ import type {
 } from '@taiji/core'
 import * as chatApi from '@taiji/core/transport/api/domains/chat'
 import * as sessionApi from '@taiji/core/transport/api/domains/session'
-import { onGlobalType } from '@taiji/core/transport/api'
+import { command, onGlobalType, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 import { registerSessionCleanup } from '@taiji/core/foundation/use-session-scoped-state'
 import { createComposerInjectionStore } from '@taiji/core/domain/composer/context'
+// 队列编辑锚定判定（chat-flow-consistency D6：单锚定不变式 core 下沉，桌面 composer-shell 同源）
+import { clearQueueEdit, startQueueEdit, type QueueEditAnchorPartition, type QueueEditStartOutcome } from '@taiji/core/domain/composer'
 import { showErrorBar } from './error-bar'
-import type { DeliveryCancelReply, Segment, SessionSummary } from '@taiji/shared'
+import type { DeliveryCancelReply, DeliveryEditReply, DeliveryPeekReply, Segment, SessionSummary } from '@taiji/shared'
 import { i18n } from '../i18n'
 
 // vue-i18n 的 t 复杂重载收窄为 (key, params?) => string（对齐 renderer useChat.ts tFn 形态）
@@ -89,12 +92,24 @@ const sessionApiPort: SessionApiPort = {
   migrateImage: (p) => sessionApi.migrateImage(p),
   onConfigSessions: (handler) =>
     onGlobalType('config.sessions', (msg) => handler(msg.payload.groups)),
+  // [W2 权威拉取与冷读] session.getState 直发（对齐桌面 api/session-api-port.ts:51-54：
+  // 不经 session 域代理，经 command 原语直发）。移动壳缺此成员时 core use-session 的
+  // refreshLiveState 首行门控 `if (!liveState || !getState) return` 恒命中，三时机拉取
+  // 整体跳过，而状态层唯一写入方是 useChat 的 liveState dep（冷会话无 state_changed 帧，
+  // registerReplicatedStates 只在 onSessionRegistered 调）——模型/思考档标签恒空。
+  // reply 与 request 同名、payload 消费型；会话不存在 = SESSION_NOT_FOUND reject
+  // （core 侧显式未知保持，不回退其他会话的值）。
+  getState: (id: string) =>
+    command('session.getState', { sessionId: id }, RPC_BACKSTOP_TIMEOUT_MS),
 }
 
 // ── store / composable 单例（模块级；移动壳单实例应用）──────────────────
 
 const chatStore = createChatStore()
 const sessionStore = createSessionStore()
+// [W1 会话架构四层分离] 会话运行时状态层（core 纯 factory，与 createSessionStore 同位置组装）：
+// modelId / thinkingLevel 的唯一权威落点——按会话 id 寄存，与列表成员资格无关。
+const liveStateStore = createSessionLiveState()
 
 // [投递所有权内核 u3b] 原本地 compact defer 队列（CompactQueueLike 内存实现 + flush 逐条
 // 提交）已随 core defer 队列状态机整体退役：UseChatDeps 不再有 getCompactQueue 成员，
@@ -126,6 +141,7 @@ function buildUseChatDeps(): UseChatDeps {
     ...coreChannelDeps(),
     getChatStore: () => chatStore,
     getSessionStore: () => sessionStore as SessionStoreLike,
+    getLiveStateStore: () => liveStateStore,
   }
 }
 
@@ -136,7 +152,9 @@ const useChatInstance = createUseChat(buildUseChatDeps())
 /** per-session turn 展开分区：turnKey 展开集合（isTakeover/setTakeover 是 optional 字段，
  *  移动壳按 D10 不 provide，分区无接管态）。
  *  登记表主表 #54（声明处 @data-owner #54）——纯本地 UI 交互态（无 runtime 权威），
- *  写口 toggle / collapse 封闭于 createTurnExpansion，清理挂 registerSessionCleanup。
+ *  写口 toggle 封闭于 createTurnExpansion，清理挂 registerSessionCleanup。
+ *  [remote-use C3] collapse 写口已退役删除（会话结束 collapse 接线退役、ChatViewDeps.collapse
+ *  成员已删，手动展开清除仅两路径——grep 零调用方核实后删除）。
  */
 // @data-owner #54 —— 主表 #54 mobile 壳 turn 展开分区
 const turnExpansionMap = new Map<string, Set<string>>()
@@ -164,9 +182,6 @@ export function createTurnExpansion(sessionId: Ref<string>) {
       if (p.has(turnKey)) p.delete(turnKey)
       else p.add(turnKey)
     },
-    collapse: (turnKey: string): void => {
-      turnExpansionMap.get(sessionId.value)?.delete(turnKey)
-    },
   }
 }
 
@@ -187,6 +202,7 @@ const noop = (): void => {}
 //   ?? noop 解析）：移动壳无 new-task flow 活跃取消面 / 文件树 / 未读体系（未读属 W4）
 const subDeps: EnsureStreamSubDeps = {
   chatApi: chatApiPort,
+  liveState: liveStateStore,
   toast: errorBarToast,
   t,
 }
@@ -213,7 +229,15 @@ const useSessionInstance = createUseSession({
     getHistory: (sid) => chatApiPort.getHistory(sid),
     isHydrated: (sid) => chatStore.isHydrated(sid),
     hydrate: (sid, messages) => chatStore.hydrate(sid, messages),
-    reconcileHistory: (sid, messages, window) => chatStore.reconcileHistory(sid, messages, window),
+    reconcileHistory: (sid, messages, window) => {
+      // [chat-flow-consistency C4 两段式契约] 磁盘重载基线接管点清 turn 展开分区（移动壳
+      // turnExpansionMap 同构桌面 turn-expansion store 的重置侧）：本映射是切入链全部
+      // history 写入通路的单点，未 hydrate（首次切入 / LRU 驱逐后切回）= 走盘重载形态，
+      // 重载换 id 空间，显式清替代静默键失配；已 hydrate（驻留期切回 reconcile 刷新）不清，
+      // 展开保持。门与 store.reconcileHistory 内部的 hydrate 分支同源。
+      if (!chatStore.isHydrated(sid)) turnExpansionMap.delete(sid)
+      chatStore.reconcileHistory(sid, messages, window)
+    },
     clearHistoryError: (sid) => chatStore.clearHistoryError(sid),
     markHistoryFailed: (sid) => chatStore.markHistoryFailed(sid),
   },
@@ -230,9 +254,16 @@ const useSessionInstance = createUseSession({
     disposeChat: (sid) => useChatInstance.disposeSession(sid),
     invalidateStatus: noop,
     browserDestroy: noop,
+    // [W1 会话架构四层分离] 状态层条目显式清退（只挂真删除；归档不挂——同 core 契约）
+    clearLiveState: (sid) => liveStateStore.removeLiveState(sid),
   },
   // D2/U5：sessionEntry 端口束注入——切入链 12 步的订阅/LRU 步在移动壳生效（对齐桌面）
   sessionEntry,
+  // [W2 权威拉取与冷读] 状态层：session.getState reply 的唯一落点（与状态消息 /
+  // 操作回执共用 applyLiveState 这一个 reducer，设计 §7 验收项 8）。缺省不注入时
+  // refreshLiveState 整体跳过（缓存缺失门控拉取不生效），与上方 sessionApiPort.getState
+  // 成对缺失——冷会话模型/思考档标签恒空（对齐桌面 useSidebar 注入形态）。
+  liveState: liveStateStore,
 })
 
 // ── 新建任务（createSessionFlow 直组；手输路径是移动唯一形态）────────────────
@@ -289,7 +320,16 @@ export async function createMobileTask(input: MobileNewTaskInput): Promise<Sessi
 // 仅暴露组件/测试实际消费的符号；useSessionInstance 与两个 api 端口是文件内组装细节，
 // 去 export 防「导出清单 = 公开 API」的假象（外部断链由本文件 import 图自证）。
 
-export { chatStore, sessionStore, useChatInstance }
+export { chatStore, liveStateStore, sessionStore, useChatInstance }
+
+/**
+ * 会话运行时状态读口（[W1] 状态层薄壳的移动形态）：
+ * `modelId` / `thinkingLevel` 读状态层，缓存缺失返回 undefined（显式未知——视图显示
+ * 显式未知占位，不回退列表种子字段/其他会话的值）。
+ */
+export function liveStateOf(id: string): { modelId?: string; thinkingLevel?: string } | undefined {
+  return liveStateStore.liveStateOf(id)
+}
 
 /**
  * 队列条目取消（remote-use D7/U10）：delivery.cancel RPC 透传（本文件 chatApiPort
@@ -301,6 +341,25 @@ export function cancelDelivery(sessionId: string, clientUuid: string): Promise<D
 }
 
 /**
+ * 条目全文取回（chat-flow-consistency D6）：✎ 编辑预填只读通道（QueueStrip 消费）。
+ * 直调 core transport chat 域（chatApiPort 无 peek/edit 成员——端口面不扩，移动壳直引
+ * 与 cancelDelivery 透传形态平行）。
+ */
+export function peekDelivery(sessionId: string, clientUuid: string): Promise<DeliveryPeekReply> {
+  return chatApi.peekDelivery(sessionId, clientUuid)
+}
+
+/** 原位编辑（chat-flow-consistency D6）：发送侧替换条目内容且排队位置保持不变（MobileComposer 消费）。 */
+export function editDelivery(
+  sessionId: string,
+  clientUuid: string,
+  content: string,
+  segments?: Segment[],
+): Promise<DeliveryEditReply> {
+  return chatApi.editDelivery(sessionId, clientUuid, content, segments)
+}
+
+/**
  * 取消全文回输入框的一次性注入通道（remote-use D7/U10，core composer injection factory
  * 平台无关单例——桌面 renderer composer-injection-store 同范式）：QueueStrip（写入侧，
  * 取消应答全文）与 MobileComposer（消费侧，insertTextAtCursor 光标插入）跨组件树共享。
@@ -308,6 +367,44 @@ export function cancelDelivery(sessionId: string, clientUuid: string): Promise<D
  * 图片粘贴降级文本），cancel reply segments 的 chip 恢复面在移动壳为零，零丢失。
  */
 export const composerInjectionStore = createComposerInjectionStore()
+
+// ── 队列编辑锚定（chat-flow-consistency D6 移动壳最小形态）────────────────────────
+// 锚定 = 队列条目 ✎ 编辑时草稿记住来源条目 id，发送走 delivery.edit 原位替换。分区实现
+// 沿 turnExpansionMap 同款（模块级 Map + registerSessionCleanup——桌面是 useSessionScopedState
+// 分区，平台差异在容器、判定逻辑 core queue-edit-anchor 双壳同源）。会话删除随 cleanup 清理
+//（Q4 裁决 1：锚定随草稿分区存活，切走留在分区、切回恢复）。
+// 登记条目 #79（data-source-registry §1）：会话队列编辑锚定分区（合并时与 dev 侧既有
+// #76 会话运行时状态层撞号，registry 侧本条已改号 #79，代码注解随行）
+// @data-owner #79
+const queueEditAnchorMap = new Map<string, QueueEditAnchorPartition>()
+
+registerSessionCleanup((sid) => {
+  queueEditAnchorMap.delete(sid)
+})
+
+function anchorPartitionOf(sid: string): QueueEditAnchorPartition {
+  let p = queueEditAnchorMap.get(sid)
+  if (!p) {
+    p = { clientUuid: null }
+    queueEditAnchorMap.set(sid, p)
+  }
+  return p
+}
+
+/** ✎ 编辑登记（单锚定不变式：started / already-editing-same / conflict——Q4 三裁决）。 */
+export function beginQueueEdit(sid: string, clientUuid: string): QueueEditStartOutcome {
+  return startQueueEdit(anchorPartitionOf(sid), clientUuid)
+}
+
+/** 解除锚定（放弃编辑 / 发送完成 / 条目离场共用）。 */
+export function clearQueueEditFor(sid: string): void {
+  clearQueueEdit(anchorPartitionOf(sid))
+}
+
+/** 当前锚定的条目 id（null = 非编辑态；MobileComposer 发送分流读口）。 */
+export function queueEditAnchorOf(sid: string): string | null {
+  return anchorPartitionOf(sid).clientUuid
+}
 
 /**
  * 测试后门命名空间（生产代码禁止消费，对齐 companion-bridge __testing 先例）：

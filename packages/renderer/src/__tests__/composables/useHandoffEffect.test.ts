@@ -3,26 +3,29 @@
 /**
  * useHandoffEffect 单测 —— fast-handoff 全局订阅（agent-driven 模式 wave2 简化版）。
  *
- * bindHandoffEffect（wave2 简化后）只做两件事（复位 + 跳转）：
- * - 订阅 session.handoffComplete → setHandingOff(srcSessionId,false) + loadSessions().catch(warn)
+ * bindHandoffEffect（[chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] Set 退役后）只做一件事（刷新 + 跳转）：
+ * - 订阅 session.handoffComplete → loadSessions().catch(warn)
  *   .then(() => selectSession(newSessionId)).catch(warn)。
- * - 订阅 session.handoffAborted → setHandingOff(sessionId,false)。
- * onScopeDispose 时退订两个订阅。
+ * - session.handoffAborted 订阅已移除（唯一副作用是旧 handingOffSessions Set 复位；
+ *   handingOff membership 现归 occupancy 派生视图，复位 = runtime 'handingOff-end' 原语
+ *   经 session.occupancy 帧到达——本效果不再写任何状态）。
+ * onScopeDispose 时退订订阅。
  *
  * wave2 删除了所有 doc/reply 注入逻辑（appendUser / chatApi.send / ensureStreamSubscription /
  * disposeSession / hydrate 预标记 / 回滚）——这些都归 runtime HandoffService（newClient.prompt(doc)
  * 把文档注入新 session 触发新 turn）。广播 payload 因此移除 doc / reply 字段。
  *
  * 覆盖用例（AGENTS #5：每用例含用户可见/状态断言）：
- * - TC1 正常路径：handoffComplete → 复位源 handingOff + loadSessions + selectSession(NEW)
+ * - TC1 正常路径：handoffComplete → loadSessions + selectSession(NEW)；不写本地 handingOff 状态
+ *   （置位/复位权威在 runtime occupancy 帧，效果层零状态写）
  * - TC2 loadSessions 失败降级：loadSessions reject → console.warn('loadSessions failed') + selectSession 仍调
  * - TC3 selectSession 失败兜底：selectSession reject → console.warn('selectSession failed')（.catch 兜底，无 unhandled rejection）
- * - TC4 handoffAborted：复位源 handingOff，loadSessions/selectSession 不调
+ * - TC4 handoffAborted：订阅已移除 → 零副作用（loadSessions/selectSession 不调，occupancy 状态不动）
  * - TC5 scope.stop() 退订：广播不再触发任何副作用
  *
  * mock 策略（收窄，删除 wave1 时代的 doc 注入 mock）：
  * - vi.mock('@/composables/features/sidebar/useSidebar')：loadSessions / selectSession 用 vi.fn（可 reject 测失败路径）。
- * - events / useChatStore 用**真实**实现（验 setHandingOff 写 handingOffSessions Set 的真实副作用，
+ * - events / useChatStore 用**真实**实现（验 isHandingOff 读 occupancy 派生视图的真实读口，
  *   AGENTS #5 用户可见断言）。events 不 mock，用真实 dispatchGlobal 派发。
  *
  * 生命周期：bindHandoffEffect 用 effectScope 包裹（onScopeDispose 需 active scope），
@@ -33,7 +36,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { effectScope, nextTick } from 'vue'
+import { effectScope } from 'vue'
 
 // ── useSidebar mock：捕获 loadSessions/selectSession（不引入真实 useSidebar 的 30+ 依赖）──
 const sidebarMock = vi.hoisted(() => ({
@@ -94,19 +97,25 @@ function emitHandoffAborted(srcSessionId: string = SRC): void {
   events.dispatchGlobal({ type: 'session.handoffAborted', payload: { srcSessionId } } as unknown as ServerMessage)
 }
 
+/** 经权威通路（session.occupancy 帧）把源 session 置交接在途（裁决表行：membership 唯一来源）。 */
+function seedHandingOff(): void {
+  const chat = useChatStore()
+  chat.setOccupancy(SRC, { turn: 'idle', compacting: false, bash: false, handingOff: true })
+  expect(chat.isHandingOff(SRC)).toBe(true)
+}
+
 describe('useHandoffEffect.bindHandoffEffect', () => {
-  it('TC1 正常路径：handoffComplete → 复位源 handingOff + loadSessions + selectSession(NEW)', async () => {
+  it('TC1 正常路径：handoffComplete → loadSessions + selectSession(NEW)；不写本地 handingOff 状态', async () => {
     const chat = useChatStore()
-    // 模拟 handoff 触发态：源 session 标 handingOff=true（消除「正在交接…」反馈后应复位）
-    chat.setHandingOff(SRC, true)
-    expect(chat.isHandingOff(SRC)).toBe(true)
+    seedHandingOff()
 
     emitHandoffComplete()
     await vi.waitFor(() => { expect(sidebarMock.loadSessions).toHaveBeenCalledTimes(1) })
     await vi.waitFor(() => { expect(sidebarMock.selectSession).toHaveBeenCalledWith(NEW) })
 
-    // [复位] 源 session handingOff 已清（消除「正在交接…」反馈）
-    expect(chat.isHandingOff(SRC)).toBe(false)
+    // [§6 裁决表行] 效果层零状态写：handingOff 复位归 runtime 'handingOff-end' 原语（occupancy 帧），
+    // 本订阅只编排刷新 + 跳转——本地派生视图未被本效果改动
+    expect(chat.isHandingOff(SRC)).toBe(true)
     // loadSessions 调 1 次
     expect(sidebarMock.loadSessions).toHaveBeenCalledTimes(1)
     // 跳转到新 session
@@ -166,40 +175,36 @@ describe('useHandoffEffect.bindHandoffEffect', () => {
     warnSpy.mockRestore()
   })
 
-  it('TC4 handoffAborted：复位源 handingOff，loadSessions/selectSession 不调', async () => {
+  it('TC4 handoffAborted：订阅已移除（裁决表行）→ 零副作用，occupancy 状态不动', async () => {
     const chat = useChatStore()
-    chat.setHandingOff(SRC, true)
-    expect(chat.isHandingOff(SRC)).toBe(true)
+    seedHandingOff()
 
     emitHandoffAborted(SRC)
-    await nextTick()
+    await new Promise((r) => setTimeout(r, 0))
 
-    // [复位] 源 session handingOff 已清（用户取消或 abort 兜底）
-    expect(chat.isHandingOff(SRC)).toBe(false)
-    // handoffAborted 只复位，不刷新列表也不跳转
+    // [§6 裁决表行] handoffAborted 订阅随 Set 复位职责退役：无列表刷新、无跳转、状态不写
+    //（aborted 形态的 handingOff 复位由 runtime cleanupInflight 的 'handingOff-end' 原语
+    // 经 session.occupancy 帧承担）
+    expect(chat.isHandingOff(SRC)).toBe(true)
     expect(sidebarMock.loadSessions).not.toHaveBeenCalled()
     expect(sidebarMock.selectSession).not.toHaveBeenCalled()
   })
 
-  it('TC5 scope.stop() 退订：handoffComplete + handoffAborted 不再触发任何副作用', async () => {
+  it('TC5 scope.stop() 退订：handoffComplete 不再触发任何副作用', async () => {
     const chat = useChatStore()
+    seedHandingOff()
+
     // 先停 scope（触发 onScopeDispose → off 退订）
     scope!.stop()
     scope = null
-
-    // SRC 先标 handingOff=true 让它在 set 里——emit handoffAborted 后若订阅未退订会把它复位。
-    // 退订生效时 set 应仍含 SRC（未被复位）。handoffComplete 路径同理不再触发 loadSessions/selectSession。
-    chat.setHandingOff(SRC, true)
-    const handingOffBefore = new Set(chat.handingOffSessions)
 
     emitHandoffComplete()
     emitHandoffAborted(SRC)
     // 兜底等待，确认副作用从未发生
     await new Promise((r) => setTimeout(r, 0))
 
-    // 退订后广播不触发任何副作用：handingOffSessions Set 未变（SRC 仍含，未被复位）
+    // 退订后广播不触发任何副作用：handingOff 状态未变 + 无刷新/跳转
     expect(chat.isHandingOff(SRC)).toBe(true)
-    expect(chat.handingOffSessions).toEqual(handingOffBefore)
     expect(sidebarMock.loadSessions).not.toHaveBeenCalled()
     expect(sidebarMock.selectSession).not.toHaveBeenCalled()
   })

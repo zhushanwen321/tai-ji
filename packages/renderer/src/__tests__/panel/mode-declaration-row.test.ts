@@ -86,7 +86,7 @@ function setSession(id: string, launchPresetId?: string, launchPresetFallbackTo?
       cwd: '/repo',
       sessions: [{
         id, label: id, cwd: '/repo', status: 'idle',
-        lastActiveAt: 1, modelId: 'm', tokenCount: 0, launchPresetId, launchPresetFallbackTo,
+        lastActiveAt: 1, launchPresetId, launchPresetFallbackTo,
       }],
     }],
   })

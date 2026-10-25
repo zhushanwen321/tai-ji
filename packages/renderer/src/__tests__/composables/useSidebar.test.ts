@@ -138,10 +138,10 @@ vi.mock('@/composables/features/fork-handoff/useHandoffActions', () => ({
 import { useSidebar, resetAppBootstrap } from '@/composables/features/sidebar/useSidebar'
 
 function summary(id: string, cwd = '/a'): SessionSummary {
-  return { id, label: `label-${id}`, cwd, status: 'idle', lastActiveAt: 1, modelId: '' }
+  return { id, label: `label-${id}`, cwd, status: 'idle', lastActiveAt: 1 }
 }
 function group(sessions: SessionSummary[], cwd = '/a'): SessionGroup {
-  return { cwd, label: cwd, sessions }
+  return { cwd, sessions }
 }
 
 describe('useSidebar 接缝（TC-1..TC-4）', () => {

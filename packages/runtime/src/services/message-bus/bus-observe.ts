@@ -21,14 +21,14 @@
 import { logger } from '../../infra/logger.js'
 
 /**
- * GUI 状态派生视图五族白名单：state 类中「派生视图链直接承载 GUI 状态」的低频族（R11 域）。
+ * GUI 状态派生视图四族白名单：state 类中「派生视图链直接承载 GUI 状态」的低频族（R11 域）。
  * 这些类型的投递失败逐条落观测（状态迁移级频率，不构成噪声）；其余 state 类型走限频。
+ * （原第五族 'btw.list' 线列表状态帧随 W4b 该消息退役删除。）
  */
 const PROJECTION_STATE_TYPES: ReadonlySet<string> = new Set([
   'session.planState',
   'session.subagents',
   'session.workflowUpdate',
-  'btw.list',
   'session.commands',
 ])
 

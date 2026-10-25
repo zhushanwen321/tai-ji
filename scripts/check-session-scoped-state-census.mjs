@@ -45,7 +45,10 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'test-re
  * [quality-gates，main 线 5c190c7bb] 新增 BtwPanel.vue / useBtwTabData.ts 两处（非本设计引入，
  * 快照增量对账用注记——免翻 commit message 即可解释 21-13-6=2 差值）。
  * [branch-review-minors 清算，dev-0.11.2 线] 新增 useLoadMoreHistory.ts（ADR-0049 存量迁移：
- * slowLine/loadMoreError 等实例级 + watch(sessionId) 复位态转 Map 分区，updateFor 捕获 sid）。 */
+ * slowLine/loadMoreError 等实例级 + watch(sessionId) 复位态转 Map 分区，updateFor 捕获 sid）。
+ * [chat-flow-consistency D1 补提交] +2：useQueueEditAnchor.ts（U6 锚定分区自 composer-shell
+ * 拆出成独立 composable）、useQueueRows.ts（U7 桌面撤销单飞 cancelling 分区——
+ * QueueUiPartition.cancelling 存撤销中条目 clientUuid）。 */
 export const CENSUS_SNAPSHOT = {
   'packages/core/src/domain/bottom-drawer/control.ts': 1,
   'packages/core/src/domain/drawer/control.ts': 1,
@@ -65,6 +68,8 @@ export const CENSUS_SNAPSHOT = {
   'packages/renderer/src/composables/panel/composer-shell.ts': 1,
   'packages/renderer/src/composables/panel/useBtwTabData.ts': 1,
   'packages/renderer/src/composables/panel/useLoadMoreHistory.ts': 1,
+  'packages/renderer/src/composables/panel/useQueueEditAnchor.ts': 1,
+  'packages/renderer/src/composables/panel/useQueueRows.ts': 1,
   'packages/renderer/src/composables/panel/useSkillNoticeStream.ts': 1,
   'packages/renderer/src/stores/canvas.ts': 1, // session-store-layout-inversion u-canvas：canvas store 迁 ADR-0049 Map 分区范式
   'packages/renderer/src/stores/plan-store.ts': 1,

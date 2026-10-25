@@ -29,8 +29,9 @@
 import { getLogger } from "../../core/logger.ts";
 
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
+import type { FailureCause } from "@zhushanwen/subagent-engine-sdk";
 
-import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../shared/agent-call-types.ts";
 import { SLUG_MAX_LENGTH } from "../../shared/run-vocabulary.ts";
 // [D8 派发期对称校验] pi 引擎模型目录分类裁决（创建期同源消费 model-catalog；
 // orchestration → shared 叶子方向，无环）。
@@ -67,6 +68,9 @@ import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts"
 // [H2 W2 迁移步⑥] mergeRunSignals 提公共 helper（原 SAR 模块内直调）——workflow
 // 派发的 timeout+外部 signal 两源合流。
 import { mergeRunSignals, type MergedRunSignalHandle } from "../engine/common/run-signals.ts";
+// [subagent-observability §3.3.9] 宿主超时 abort 的 reason 标记（结算点判别「本次
+// abort 由 timeoutMs 到期触发」的事实输入）。
+import { HOST_TIMEOUT_ABORT_REASON } from "../engine/common/kill-chain.ts";
 import { identityEnvelopeOf } from "../engine/port.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
 import { DEFAULT_ENGINE_ID } from "../engine/registry.ts";
@@ -424,7 +428,7 @@ export class WorkflowDispatch {
     return undefined;
   }
 
-  /** [executeWorkflowAgent 阶段拆分] 八步迁移①：引擎路由（D2 单轨——统一经
+  /** [executeWorkflowAgent 阶段拆分] 八步迁移①：引擎路由（D2 单路——统一经
    *  routeEngineForHost：三层输入 + probe 检查 + pi 同步短路）+ Promise 决议。
    *
    *  [U2 pi-workflow-run-resource-model] probe 通道窗口实例改道：probe 与
@@ -447,7 +451,13 @@ export class WorkflowDispatch {
         agentEngine: agentConfig?.engine,
         globalDefaultEngine: modelService.getGlobalConfig().defaultEngine,
       },
-      probe: (engineId) => resolveWorkflowWindowEnginePort(parentRunId, engineId).probe(),
+      // [DC-12] probe 携带 service 层权威根（与 runCtx.sessionRootId 同源）：probe
+      // 与 run 命中同一 (socket, root) 共享连接，消「temp 根连接 + rebind」双 spawn。
+      probe: (engineId) => resolveWorkflowWindowEnginePort(parentRunId, engineId).probe(
+        this.sessionRootId !== null && this.sessionRootId !== ""
+          ? { rootSessionId: this.sessionRootId }
+          : undefined,
+      ),
       // [U2 pi-workflow-run-resource-model] pi 同步短路位的 piEngine 注入同样携带
       // parentRunId 窗口键：pi 请求经 routeEngineForHost 短路返回本 port，是成员任务
       // engine.run 的实际执行体——无窗口键会拿到 registry 只读代理，per-window 引擎
@@ -486,11 +496,14 @@ export class WorkflowDispatch {
    * 解析，D6 不采用段；下方 declaredModel 只看两层显式声明，与偏好层无关）。 */
   /**
    * [resolveWorkflowIdentity 拆分] 引擎感知 model 解析 + 来源标注判定：pi 路由不进
-   * 翻译 helper（modelSource = task 显式 ? explicit : default）；非 pi 经
-   * resolveEngineModelWithTranslation 四层解析（?? 链惰性求值——前两层任一在场时
-   * 不触盘读偏好），modelSource = resolvedModel?.source ?? "default"。
+   * 翻译 helper（modelSource 三层：task 显式 ? explicit : agent frontmatter ?
+   * frontmatter : default——S-2，与 run-orchestration.resolveIdentityForRoute 同构）；
+   * 非 pi 经 resolveEngineModelWithTranslation 四层解析（?? 链惰性求值——前两层任一
+   * 在场时不触盘读偏好），modelSource = resolvedModel?.source ?? "default"。
+   * [listModels 异步面 2026-10-25] async：偏好层成员校验可能发协议 listModels 帧
+   * （dynamic 引擎活清单 RPC；显式/frontmatter 层与 pi 路由不触清单）。
    */
-  private resolveWorkflowModel(
+  private async resolveWorkflowModel(
     route: EngineRouteResult,
     opts: AgentCallOpts,
     agentConfig: AgentConfig | undefined,
@@ -501,10 +514,12 @@ export class WorkflowDispatch {
     // 清单跳过走引擎缺省 + warn，两层失败语义分立见模块头）。?? 链惰性求值保形：
     // 前两层任一在场时不触盘读偏好。pi 路由不进 helper（偏好层不插层 + 无翻译面）。
     // [subagent-detail-model-info] 来源标注与解析同点判定：pi 路由 = task 显式 ?
-    // explicit : default（frontmatter/偏好层不适用——pi 链自解析）。
+    // (agent frontmatter ? frontmatter : default)（S-2：pi 链自解析虽不经 taiji 侧
+    // helper，但 agent .md 声明的模型同样被 pi 链消费，标注须与事实同构；偏好层
+    // 不适用——pi 路由不插 taiji 级偏好，D6 不采用段）。
     const resolvedModel = isPiRoute
       ? undefined
-      : resolveEngineModelWithTranslation(
+      : await resolveEngineModelWithTranslation(
         route,
         opts.model,
         agentConfig?.model,
@@ -513,7 +528,9 @@ export class WorkflowDispatch {
         "workflow-dispatch",
       );
     const modelSource: SubagentModelSource = isPiRoute
-      ? (opts.model !== undefined ? "explicit" : "default")
+      ? (opts.model !== undefined
+        ? "explicit"
+        : (agentConfig?.model !== undefined ? "frontmatter" : "default"))
       : (resolvedModel?.source ?? "default");
     return { engineModel: resolvedModel?.engineModel, modelSource };
   }
@@ -525,7 +542,9 @@ export class WorkflowDispatch {
     agentConfig: AgentConfig | undefined,
   ): Promise<ResolvedIdentity> {
     const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
-    const { engineModel, modelSource } = this.resolveWorkflowModel(route, opts, agentConfig);
+    // [listModels 异步面] await：偏好层成员校验可能发协议 listModels 帧（见
+    // resolveWorkflowModel 注释）。
+    const { engineModel, modelSource } = await this.resolveWorkflowModel(route, opts, agentConfig);
     // [subagent-detail-model-info] execOpts 盖章 modelSource——createRecordForMode
     // 经 opts 读取落 record（与下方 engineModel 覆写同形留痕）。
     execOpts.modelSource = modelSource;
@@ -594,13 +613,20 @@ export class WorkflowDispatch {
     }
     const overrideRef = `${override.ref.provider}/${override.ref.modelId}`;
     if (engine.id !== DEFAULT_ENGINE_ID) {
+      // restamp 经引擎翻译面（S-3）：override.ref 是 pi 词汇，record.model 经
+      // buildTaskSpec 直成 taskSpec.model 发引擎——restamp 未经翻译会呈现引擎从未
+      // 收到的 ref。翻译面缺席（成员未实装）时恒等透传，幂等。projected（展示用
+      // ModelInfo）保留 pi 词汇——UI 消费方以 pi 词汇统一展示，翻译只约束 restamp。
+      const engineRef = engine.translateModelRef !== undefined
+        ? engine.translateModelRef(overrideRef)
+        : overrideRef;
       const projected: ModelInfo = {
         id: override.ref.modelId,
         name: override.ref.modelId,
         provider: override.ref.provider,
         reasoning: false,
       };
-      (record as MutableStampRecord).model = overrideRef;
+      (record as MutableStampRecord).model = engineRef;
       return {
         model: projected,
         thinkingLevel: opts.thinkingLevel ?? identity.resolved.thinkingLevel,
@@ -774,10 +800,25 @@ export class WorkflowDispatch {
         eventsPath: journal.path,
       };
       const result = this.deps.outcomeToAgentResult(record, outcome);
+      // [subagent-observability §3.3.9/§3.3.6 宿主超时轮分类] 结算点是宿主知晓「本次
+      // abort 由 timeoutMs 到期触发」的唯一层（runSignal.signal.reason = 超时标记）；
+      // 引擎收尾边沿只有「宿主取消 vs 引擎异常」两源判别，超时轮被引擎记 user.cancelled
+      // （中性）。宿主在此改判 harness.timeout（结清 failed + 展示失败档），引擎收条
+      // 事实保持原样。timeoutMs 显式传入才生效（本点只改分类不改超时语义）。
+      const timeoutFailure = hostTimeoutFailureCause(runSignal.signal.reason, outcome);
+      if (timeoutFailure !== undefined && yieldsToTimeoutFact(result.failure)) {
+        result.failure = timeoutFailure;
+      }
       // D7 收尾（origin 分支在 settleOneShotOutcome 函数顶部；aborted 判外部 signal
       // ——timeout 的 abort 走失败 result 语义，不映射 cancelled）。
       await this.deps.settleOneShotOutcome(record, result, signal?.aborted === true);
-      return outcomeToWorkflowResult(outcome);
+      const wfResult = outcomeToWorkflowResult(outcome);
+      // [§3.3.9/§3.3.6] 宿主超时分类同步覆盖回脚本结果（call.result.failure → run 终局
+      // 成员交付结算 failedMembers[].cause 的点拼数据源，与 record 结算同判同词）。
+      if (timeoutFailure !== undefined && yieldsToTimeoutFact(wfResult.failure)) {
+        wfResult.failure = timeoutFailure;
+      }
+      return wfResult;
     } catch (err) {
       // swallow（不 re-throw）：脚本观察到合成 failed result 而非异常（引擎死亡
       // engine_crashed 同路）；record 由失败路径立即终态化（finalizeFailed CAS →
@@ -798,6 +839,33 @@ export class WorkflowDispatch {
 }
 
 // ── [H2 W2] workflow 域派发 helper（executeWorkflowAgent 专用，M3 语义逐项复刻）──
+
+/**
+ * [subagent-observability §3.3.9/§3.3.6] 宿主超时轮失败分类（纯函数——结算点接线见
+ * runWorkflowEngineTask）。merged signal 的 reason 携带超时标记（mergeRunSignals 的
+ * abort 定时器独有写入；外部 cancel 的 abort 不带标记）→ 命中即产出 harness.timeout，
+ * 未命中 = 非超时收敛（undefined，分类事实交还引擎收条）。raw 取引擎错误原文（分类
+ * 不丢原文），缺席时落超时事实描述 + 恢复动作指引。
+ */
+export function hostTimeoutFailureCause(signalReason: unknown, outcome: AgentOutcome): FailureCause | undefined {
+  if (signalReason !== HOST_TIMEOUT_ABORT_REASON) return undefined;
+  return {
+    class: "harness",
+    kind: "timeout",
+    retryable: false,
+    raw: outcome.error ?? "host call timeout (agent-call-timeout) — raise timeoutMs or reduce the task scope",
+  };
+}
+
+/**
+ * 宿主超时分类的覆盖判据（§3.3.2 cause 优先级：provider 事实 > harness 预算/契约 >
+ * agent 行为 > engine 崩溃）：provider/agent 是更高优先级的既有事实，不被宿主超时
+ * 分类覆盖；user.cancelled / engine.* 是引擎在缺超时事实下的误判与兜底（引擎不知道
+ * abort 由 timeoutMs 触发），由宿主改判。
+ */
+export function yieldsToTimeoutFact(failure: FailureCause | undefined): boolean {
+  return failure === undefined || failure.class === "user" || failure.class === "engine";
+}
 
 /** ExecutionRecord 去只读视图（盖章写侧的局部合法形态；本文件两处盖章点共用）。 */
 type MutableStampRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
@@ -830,6 +898,9 @@ function outcomeToWorkflowResult(outcome: AgentOutcome): WorkflowAgentResult {
   return {
     content: outcome.content,
     ...(outcome.failureKind !== undefined ? { failureKind: outcome.failureKind } : {}),
+    // [subagent-observability §3.3.8] 失败分类透传（AgentOutcome.failure → call.result
+    // → run 终局成员交付结算 failedMembers[].cause 点拼数据源）。
+    ...(outcome.failure !== undefined ? { failure: outcome.failure } : {}),
     parsedOutput: outcome.parsedOutput,
     usage: outcome.usage,
     durationMs: outcome.durationMs,
@@ -840,6 +911,13 @@ function outcomeToWorkflowResult(outcome: AgentOutcome): WorkflowAgentResult {
     // [D5 诊断引用登记] 失败伴随的 stderr tee 路径透传（引擎终态应答 → call.result
     // → dispatchAgentSettled 载荷；上报判据见 AgentOutcome.stderrTeePath 注释）。
     ...(outcome.stderrTeePath !== undefined ? { stderrTeePath: outcome.stderrTeePath } : {}),
+    // [subagent-observability §3.3.3] 轮终停因引擎原值透传（call.result → 成员轮收条
+    // lastRound.engineStopReason 数据源，与 one-shot 域同源）。
+    ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
+    ...(outcome.retryAttempts !== undefined ? { retryAttempts: outcome.retryAttempts } : {}),
+    // [subagent-observability §3.3.1/§3.3.8 P6] 接管三态透传（call.result → run 终局
+    // 成员交付结算：被接管成员判 cancelled + dispatchAgentSettled 跳帧 → resume 落重派集）。
+    ...(outcome.promptDisposition !== undefined ? { promptDisposition: outcome.promptDisposition } : {}),
     toolCalls: outcome.toolCalls,
   };
 }

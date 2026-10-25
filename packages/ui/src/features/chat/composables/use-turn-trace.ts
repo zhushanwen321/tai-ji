@@ -59,7 +59,8 @@ export interface BlockUnitProps { // oe-exempt:20261013:framework:类型契约�
  * trace 窗口化编排 + 渲染单元派生。
  *
  * @param turn 当前 MessageTurn getter（props.turn；computed 内经 getter 读，保持响应式追踪）
- * @param isWorkingTurn 工作 turn 判定 getter（Turn.vue isWorkingTurn：sessionActive && isLastTurn）
+ * @param isWorkingTurn 工作 turn 判定 getter（Turn.vue isWorkingTurn：sessionActive ∧
+ *   (isLastTurn ∨ turn.isStreaming)，[chat-flow-consistency D2] 放宽后双工作态并存）
  */
 export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boolean) {
   const { isExpanded, isTakeover } = useChatViewDeps()
@@ -87,8 +88,10 @@ export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boole
 
   /**
  * 实际渲染的块序列：
- * - 折叠态（!showTrace）：每个 assistant 的末位 text（按 assistantId 分组各取 flatIndex 最大者）。
- *   多 assistant turn 下每个 assistant 的最终回复默认可见（与 computeTraceWindow ①规则一致）；
+ * - 折叠态（!showTrace）：全 turn 唯一末位 text（flatIndex 最大者，不按 assistant 分组——
+ *   内联注释 :100 同款口径）。语义 = 回合结论摘要：多 assistant 回合折叠态只显示最后一条
+ *   assistant 的正文，是合理默认（折叠态追求高度最小）；若产品要「每个 assistant 的结论
+ *   都可见」，那是 computeTraceWindow ①语义的展开，无诉求不立项。
  *   computeTraceWindow 不参与折叠态（无 trace 细节）。
  * - 工作展开态（showTrace && isWorkingTurn）：traceWindow.visible（窗口切片结果，含各 assistant
  *   末位 text + 过程块；takeover=true 时 visible=全量）。
@@ -148,37 +151,45 @@ export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boole
   }
 
   /**
- * v-memo deps（按单元类型二选一，见模板注释）。
- * 组块六项 = [base, members.length, 末成员 block.ref, header.durationMs, hasRunning, miles]：
- * base 覆盖组类型切换；末成员 ref 覆盖 running→completed
- * 内容重组；length 覆盖成员增减 + 组头计数刷新（header.count 恒等于 members.length——core
- * buildRunGroup 字面赋值 count: members.length 且组块对象不可变，不另设 dep）；durationMs
- * 覆盖组头耗时刷新、hasRunning 覆盖组头执行态翻转；
- * miles（§3.6 里程碑徽标，序列化字符串）覆盖「首个 edit 完成 → 徽标入场」——该翻转可发生在
- * durationMs 不变（0ms 耗时成员）且 hasRunning 不变（同组仍有 running 成员）时，漏了它徽标
- * 会滞到下一个无关 dep 变化才渲染。miles 取 join 串而非数组引用：每次重组都是新数组，
- * 引用入键 v-memo 将永远失效（同 members 的处理）。
- * 不用整个 members 数组引用入 deps——每次重组都是新数组，v-memo 将永远失效。
- * 普通块七项 = W21 D-4 既有键清单 + textFinalized（chat-flow-text-color D1：mid-turn 气泡
- * 定稿标记落地时要触发重渲染翻白，不入键则 memo 命中旧 props、颜色滞留 streaming 灰到回合收尾）
- * + [actions-anchor] 锚标记：block.ref 即「身份+内容」——text 是 normalizeContent 字符串、
- * thinking/tool 是块对象引用（D-1 不可变语义下内容/status/id 变化 = 新对象替换，引用入键即
- * 覆盖 08 §3.3.1 键清单的 thinking.id / tool.id / content / tool.status）；working/streaming
- * 由 unitBlockProps 按 textFinalized 逐消息派生。锚标记覆盖操作栏插槽挂载点切换——流式追加/
- * 窗口变化使锚在 text 块间移动时，旧块摘插槽、新块挂插槽，漏了它被缓存的 vnode 不重渲染，
- * 插槽永远不跟着锚走。刻意不含 Block 本地折叠 ref（thinkingCollapsed/toolCollapsed）——
- * v-memo deps 在父组件渲染作用域求值，无法引用子组件私有 ref；折叠由 Block 自身响应式驱动
- * （实例经 :key 保活，v-memo 不 gate 子组件内部更新）。sessionId 不入键：跨 session 时
- * renderKey 不同 → Turn 实例整体重建，不存在同实例跨 session 复用。
- * deps 在父组件渲染作用域求值（assistantById 为 computed，此处取 .value）。
- */
+   * v-memo deps（按单元类型二选一，见模板注释）。
+   * 组块键 = [base, members.length, 逐成员 block.ref（map 展开）, header.durationMs,
+   * header.failedCount, hasRunning, miles]：base 覆盖组类型切换；逐成员 ref 覆盖任意成员
+   * 内容重组（末成员 running→completed 与非末位成员 running→error 同走对象替换——D-1 不可变
+   * 语义下 ref 引用即「身份+内容」，逐成员展开入键即全组内容指纹；不能取 join 串：成员 ref 是
+   * ToolCall 对象，字符串化全部坍缩成 [object Object]，换引用指纹不变）；length 覆盖成员增减 +
+   * 组头计数刷新（header.count 恒等于 members.length——core buildRunGroup 字面赋值
+   * count: members.length 且组块对象不可变，不另设 dep）；durationMs 覆盖组头耗时刷新；
+   * failedCount 覆盖组头失败 chip（takeover 态全局 failedCount 归 0，组头 chip 是该态唯一失败
+   * 信号；非末位成员 error 无 endTime 时 durationMs 不变、组内仍有 running 成员时 hasRunning
+   * 亦不变，缺了它 chip 滞旧）；hasRunning 覆盖组头执行态翻转；
+   * miles（§3.6 里程碑徽标，序列化字符串）覆盖「首个 edit 完成 → 徽标入场」——该翻转可发生在
+   * durationMs 不变（0ms 耗时成员）且 hasRunning 不变（同组仍有 running 成员）时，漏了它徽标
+   * 会滞到下一个无关 dep 变化才渲染。miles 取 join 串而非数组引用：每次重组都是新数组，
+   * 引用入键 v-memo 将永远失效（同 members 的处理）。
+   * 不用整个 members 数组引用入 deps——每次重组都是新数组，v-memo 将永远失效（展开逐成员
+   * ref 正是避开数组引用的形态；展开使键数组长度随成员数变化，Vue v-memo 比对含长度检查，
+   * 成员增减本就经 length dep 失效重渲染，长度变化不引入新行为）。
+   * 普通块七项 = W21 D-4 既有键清单 + textFinalized（chat-flow-text-color D1：mid-turn 气泡
+   * 定稿标记落地时要触发重渲染翻白，不入键则 memo 命中旧 props、颜色滞留 streaming 灰到回合收尾）
+   * + [actions-anchor] 锚标记：block.ref 即「身份+内容」——text 是 normalizeContent 字符串、
+   * thinking/tool 是块对象引用（D-1 不可变语义下内容/status/id 变化 = 新对象替换，引用入键即
+   * 覆盖 08 §3.3.1 键清单的 thinking.id / tool.id / content / tool.status）；working/streaming
+   * 由 unitBlockProps 按 textFinalized 逐消息派生。锚标记覆盖操作栏插槽挂载点切换——流式追加/
+   * 窗口变化使锚在 text 块间移动时，旧块摘插槽、新块挂插槽，漏了它被缓存的 vnode 不重渲染，
+   * 插槽永远不跟着锚走。刻意不含 Block 本地折叠 ref（thinkingCollapsed/toolCollapsed）——
+   * v-memo deps 在父组件渲染作用域求值，无法引用子组件私有 ref；折叠由 Block 自身响应式驱动
+   * （实例经 :key 保活，v-memo 不 gate 子组件内部更新）。sessionId 不入键：跨 session 时
+   * renderKey 不同 → Turn 实例整体重建，不存在同实例跨 session 复用。
+   * deps 在父组件渲染作用域求值（assistantById 为 computed，此处取 .value）。
+   */
   function unitMemoDeps(unit: TraceRenderUnit): unknown[] {
     if (isRunGroupBlock(unit)) {
       return [
         unit.base,
         unit.members.length,
-        unit.members[unit.members.length - 1].block.ref,
+        ...unit.members.map((m) => m.block.ref),
         unit.header.durationMs,
+        unit.header.failedCount,
         unit.hasRunning,
         unit.miles.join('|'),
       ]

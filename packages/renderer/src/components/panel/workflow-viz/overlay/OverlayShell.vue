@@ -37,7 +37,7 @@
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-[var(--z-dialog)] flex items-center justify-center bg-black/80 backdrop-blur-[2px]"
+    class="fixed inset-0 z-[var(--z-dialog)] flex items-center justify-center bg-scrim backdrop-blur-[2px]"
     data-testid="wfvz-overlay"
     @click.self="close"
     @pointerdown.stop

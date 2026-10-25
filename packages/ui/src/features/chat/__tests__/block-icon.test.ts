@@ -66,11 +66,11 @@ describe('block-icon.ts', () => {
     expect(Object.keys(BLOCK_ICON_LUCIDE)).toHaveLength(10)
   })
 
-  it('RUNNING_LOADER_SVG: 呼吸弧 loader（淡轨整圈 .ld-track + accent 弧段 .ld-arc pathLength=100，r=10）', () => {
+  it('RUNNING_LOADER_SVG: 呼吸弧 loader（浅色轨道整圈 .ld-track + accent 弧段 .ld-arc pathLength=100，r=10）', () => {
     expect(RUNNING_LOADER_SVG).not.toBe('')
     expect(RUNNING_LOADER_SVG).toContain('<svg')
     expect(RUNNING_LOADER_SVG).toContain('circle')
-    // 淡轨整圈（stroke 16% 透明度）+ 弧段（pathLength=100 归一，dasharray 呼吸/摆动由
+    // 浅色轨道整圈（stroke 16% 透明度）+ 弧段（pathLength=100 归一，dasharray 呼吸/摆动由
     // 全局 .ld-arc 类驱动——style.css 动画 SSOT 区）
     expect(RUNNING_LOADER_SVG).toContain('class="ld-track"')
     expect(RUNNING_LOADER_SVG).toContain('opacity="0.16"')

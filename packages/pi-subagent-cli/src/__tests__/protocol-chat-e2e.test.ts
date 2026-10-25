@@ -146,7 +146,7 @@ async function awaitReaped(host: FakeHost, recordId: string): Promise<void> {
 }
 
 // bin CLI chat 轮派发 + resume 锚 = 双真进程协议往返（代码 × OS 组合行为，无完成
-// 信号可等，窗口随负载拉长）——移出默认单测轨，集成门控启用时真跑。
+// 信号可等，窗口随负载拉长）——移出默认单测层，集成门控启用时真跑。
 describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
   `pi-subagent-cli chat 轮 run 派发形态 e2e（bin 真机 NDJSON 往返）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
   () => {

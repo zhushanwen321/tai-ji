@@ -15,7 +15,7 @@
  * 端到端（真实 activator → assignProcess → fork env → loader）由
  * scripts/verify-plugin-e2e.sh 的 SEC-A1/A2 场景覆盖。
  *
- * 2026-10-22 单测层整治（判据三档与处置通道见 docs/todo/test-single-layer-cleanup.md）：
+ * 2026-10-22 单测层整治（判据三档与处置通道见 docs/TEST-STRATEGY.md「新写测试判据」节）：
  * ESM loader 边界是「代码 + OS 组合行为」——真实 fork 子进程 + Node ESM loader hook
  * 的注册与拦截没有进程内的确定性完成信号（判据三档第 3 类），无法改写成纯逻辑，
  * 按处置通道「移 CI-only / 拆分层」门控：

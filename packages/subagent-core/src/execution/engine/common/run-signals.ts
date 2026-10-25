@@ -17,14 +17,14 @@ export interface MergedRunSignalHandle {
 }
 
 /**
- * D-A9 + [M3] 运行期 signal 合流：外部 signal（run 级 abort）+ per-call 墙钟 timeoutMs
- * + [M3] no-progress watchdog abort —— 任一 abort 都让返回 signal abort。
+ * D-A9 运行期 signal 合流：外部 signal（run 级 abort）+ per-call 墙钟 timeoutMs
+ * ——任一 abort 都让返回 signal abort。
  *
  * reason 语义保持 D-A9 原样：timeoutMs 到期 abort 带 HOST_TIMEOUT_ABORT_REASON 标记
- *（引擎合成终态时判别「宿主超时」vs「外部 cancel」）；外部 signal 与 watchdog 的
- * abort 不带标记（wireAbortSignal 只消费 abort 事实，不读 reason）。
+ *（引擎合成终态时判别「宿主超时」vs「外部 cancel」）；外部 signal 的 abort 不带
+ * 标记（wireAbortSignal 只消费 abort 事实，不读 reason）。
  *
- * 无任何信号源（timeoutMs 缺省/<=0 且无 watchdog）时原样返回 external signal（零新对象，
+ * 无任何信号源（timeoutMs 缺省/<=0）时原样返回 external signal（零新对象，
  * 既有行为逐点不变）。
  *
  * dispose 的必要性：merged signal 正常收敛（不 abort）时，桥接在外部 run 级 signal 上的
@@ -34,10 +34,9 @@ export interface MergedRunSignalHandle {
 export function mergeRunSignals(
   signal: AbortSignal,
   timeoutMs?: number,
-  noProgressSignal?: AbortSignal,
 ): MergedRunSignalHandle {
   const hasTimeout = timeoutMs !== undefined && timeoutMs > 0;
-  if (!hasTimeout && noProgressSignal === undefined) {
+  if (!hasTimeout) {
     return { signal, dispose: () => {} };
   }
 
@@ -77,7 +76,6 @@ export function mergeRunSignals(
     else source.addEventListener("abort", handler, { once: true });
   };
   bridge(signal);
-  if (noProgressSignal !== undefined) bridge(noProgressSignal);
 
   return { signal: controller.signal, dispose };
 }

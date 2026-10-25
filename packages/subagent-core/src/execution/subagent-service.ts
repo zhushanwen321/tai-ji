@@ -4,7 +4,7 @@
 // 上游：subagent-tool（execute/query/cancel）、TUI（onChange/collectRecords）。
 // session_start 时经 initSession 注入 pi；modelRegistry/entries 归 ModelConfigService.initModel。
 
-import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../orchestration/models/types.ts";
+import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../shared/agent-call-types.ts";
 // [V2 决策 3] lifecycle-manager idle timer：record 终态化/取消的 disarm 面
 // 路径防误杀）——[R3] 消费已随终态写侧迁 service/record-lifecycle.ts；[R4]
 // DEFAULT_IDLE_TIMEOUT_MS 消费（assertIdleTimeoutMsSafe 错误文案基准）已随 run 域
@@ -104,12 +104,15 @@ import { coldLookupForAction, type ColdLookupDeps } from "./assembly/cold-lookup
 import { resurrectClosed } from "./persistence/execution-record.ts";
 import type { MemberReviveOutcome } from "./service/workflow-dispatch.ts";
 // [subagent-model-switch §6.2 读取规则 / §7.5 覆盖持久化行（U4b 接线）] workflow 域
-// 覆盖的 miss 重建读侧（scanRunEvents——persistence 同层既有方向）与 run 覆盖事件的
-// 折叠单点（latestModelOverride）。后者是 execution → orchestration 的新增值导入：
-// 折叠语义消费方单点（run-events「消费方单点 latestModelOverride」）优先于拆边纪律
-// ——手写折叠即双轨；拆边批可后续整族收编（登记单元 deviations）。
-import { resolveRunEventJournal, scanRunEvents } from "./persistence/run-event-journal.ts";
-import { latestModelOverride } from "../orchestration/run-events.ts";
+// 覆盖的 miss 重建读侧（scanRunEvents）与 run 覆盖事件的折叠单点
+// （latestModelOverride）。折叠语义消费方单点（「消费方单点 latestModelOverride」）
+// 优先于拆边纪律——手写折叠即双轨；本体与 scanRunEvents 同在
+// persistence/run-event-journal.ts（同域读侧折叠原语），直连同址。
+import {
+  latestModelOverride,
+  resolveRunEventJournal,
+  scanRunEvents,
+} from "./persistence/run-event-journal.ts";
 // [H3/R4] 域 #6/#7/#12/#14/#15 聚合（run 域执行编排）+ [D-R4-1] 拆分的 workflow 族
 // 聚合（executeWorkflowAgent 派发链）+ [2026-09-13 design-code-sync] 拆出的 chat 域
 // 轮次编排聚合（Continuation 协作范围 + kickOffChatRound 族）——聚合组间零互调零
@@ -194,7 +197,6 @@ export class SubagentService {
    *  notifyBatch 已删——成功轮完成通知收敛为 notifyComplete 单通道。 */
   private readonly notifyHost: NotifyHost = createNotifyHost({
     getPi: () => this.pi,
-    listRunning: () => this.store.listRunning(),
     getIsIdle: () => this.isIdleFn,
   });
 

@@ -66,7 +66,7 @@ export interface DiskDeliveryStoreDeps { // oe-exempt:20261017:framework:磁盘 
 }
 
 /** 磁盘 outbox store：DeliveryStore 契约 + segments 补记扩展（registry 撤销回填通道）。 */
-export interface DiskDeliveryStore extends DeliveryStore { // oe-exempt:20261017:framework:DeliveryStore 端口的文本车道磁盘实现契约
+export interface DiskDeliveryStore extends DeliveryStore { // oe-exempt:20261017:framework:DeliveryStore 端口的文本投递路径磁盘实现契约
   /**
    * segments 快照补记（实现侧扩展，**非 DeliveryStore 端口成员**——内核不感知）：
    * 把提交侧 attachSegments 登记的原始快照追加为 meta 行，随记录跨重启存活；

@@ -72,6 +72,14 @@ export interface StartupBackgroundDeps {
    * 可选成员保证既有测试构造点不破；undefined = 跳过清扫（行为不变）。
    */
   sweepSpawnMarkerTmpResidue?: () => number
+  /**
+   * zcode provider 镜像同步触发面（S-9）：组合根注入 server 构造同源的
+   * createZcodeProviderMirrorSync 实例（单点串行化，latest-wins）。启动同步先于本序列
+   * 执行（index.ts 组合根顺序），legacy 迁移写入的 provider 配置不在其快照内——迁移
+   * 完成后必须触发镜像重跑，否则副本陈旧至下次 mutation/重启。fire-and-forget：失败
+   * 只 warn，不影响 migrationReady gate 语义。可选成员保证既有测试构造点不破。
+   */
+  zcodeProviderMirrorSync?: () => Promise<void>
 }
 
 /**
@@ -90,7 +98,7 @@ export async function runStartupBackgroundInit(deps: StartupBackgroundDeps): Pro
   // 在迁移完成前等待该 promise（日志块与 best-effort 容错见 startProviderMigration）。
   // 必须先于 setMigrationGate 启动（同步前缀立即执行），gate 在任何 WS 消息（macrotask）
   // 被处理前已就位——listen 后首个 session RPC 必然等到 gate。
-  const migrationReady = startProviderMigration(configStore, authStorage, credentialWriter)
+  const migrationReady = startProviderMigration(configStore, authStorage, credentialWriter, deps.zcodeProviderMirrorSync)
   setMigrationGate(migrationReady)
   await migrationReady
   const tMigA = performance.now()
@@ -287,6 +295,7 @@ function startProviderMigration(
   configStore: PiConfigStore,
   authStorage: AuthStorage,
   credentialWriter: CredentialWriter,
+  zcodeProviderMirrorSync?: () => Promise<void>,
 ): Promise<void> {
   return migrateProviderConfig(configStore, authStorage, credentialWriter).then(
     (migrationReport) => {
@@ -307,9 +316,18 @@ function startProviderMigration(
           console.warn('[runtime] all providers were disabled (enabled===false); pi does not support fully-disabled state. After migration all providers are available — please manually remove unwanted providers.')
         }
       }
+      // 迁移成果已落盘（含部分失败条目残留）→ 触发镜像重跑（S-9）：启动同步先于本序列
+      // 执行，迁移写入的条目不在启动同步快照内，不重跑则副本陈旧至下次 mutation/重启。
+      // fire-and-forget：镜像失败只 warn，migrationReady gate 语义不随镜像结果变化。
+      if (zcodeProviderMirrorSync) {
+        void zcodeProviderMirrorSync().catch((e) => {
+          console.warn('[runtime] zcode provider mirror sync after migration failed:', e)
+        })
+      }
     },
     (e) => {
       // best-effort 降级：provider config migration 失败不阻塞启动（旧配置保留，用户可在 Settings 手动修正）。
+      // 不触发镜像（迁移整体失败，副本保持现状，下次启动同步自动对账）。
       console.warn('[runtime] provider config migration failed:', e)
     },
   )

@@ -17,6 +17,7 @@ import type { NewTaskDeps } from '@taiji/ui'
 import { useNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { usePresetStore } from '@/stores/preset'
+import { useProjectStore } from '@/stores/project'
 import { usePiPresets } from '@/composables/features/settings/usePiPresets'
 import { useToast } from '@/composables/useToast'
 import { workspace as workspaceApi } from '@/api'
@@ -26,15 +27,20 @@ import { pickDirectory as ipcPickDirectory } from '@/lib/ipc'
 export function useNewTaskDeps(): NewTaskDeps {
   const workspaceStore = useWorkspaceStore()
   const presetStore = usePresetStore()
+  const projectStore = useProjectStore()
   const presetActions = usePiPresets()
   const { error: toastError } = useToast()
   const flow = useNewTaskFlow()
   // Ref 响应式：storeToRefs 取 ref 引用（直接 store.records 会被 pinia 解包成数组）
-  const { records } = storeToRefs(workspaceStore)
+  const { records, defaultSessionDir } = storeToRefs(workspaceStore)
   const { presets, defaultPresetId, openRequest } = storeToRefs(presetStore)
+  // orderedProjects 是 computed（渲染序 SSOT，与侧栏组序一致），storeToRefs 同样取其 ref 形态
+  const { orderedProjects, activeProjectId } = storeToRefs(projectStore)
   return {
     flow,
     recentWorkspaces: records,
+    setPinned: (cwd, pinned) => workspaceStore.setPinned(cwd, pinned),
+    defaultSessionDir,
     listBranches: worktreeApi.listBranches,
     createWorktree: worktreeApi.create,
     detectWorkspace: workspaceApi.detect,
@@ -46,6 +52,8 @@ export function useNewTaskDeps(): NewTaskDeps {
     presetOpenRequest: openRequest,
     loadPresets: () => presetActions.loadPresets(),
     setDefaultPreset: (presetId) => presetActions.setDefault(presetId),
+    projects: orderedProjects,
+    activeProjectId,
     toast: { error: toastError },
   }
 }

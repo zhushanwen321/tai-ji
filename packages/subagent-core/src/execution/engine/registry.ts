@@ -24,7 +24,7 @@ import { getLogger } from "../../core/logger.ts";
 import type { ModelCatalogEntry } from "@zhushanwen/subagent-engine-sdk";
 
 import type { EngineCapabilities } from "./types.ts";
-import type { EngineModelSelectorInput, EnginePort } from "./port.ts";
+import { staticModelListOf, type EngineModelSelectorInput, type EnginePort } from "./port.ts";
 import type { EngineProcessModel } from "./window-instances.ts";
 import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
@@ -85,7 +85,7 @@ export interface CliEngineDescriptor {
    * 不 throw（§3.5.3 代理形态：缺包/坏包的失败推迟到首次协议调用）。
    */
   portFactory: EngineFactory;
-  /** manifest 快照余项（modelCatalog/displayName/processModel；capabilities 已提升为直读字段）。 */
+  /** manifest 快照余项（modelCatalog/modelTranslation/displayName/processModel；capabilities 已提升为直读字段）。 */
   manifest?: Omit<EngineManifestSnapshot, "capabilities">;
   /**
    * 引擎包版本面（package.json `version`，发现器装配时盖章；L3 显式配置无
@@ -251,6 +251,12 @@ export class WindowScopeEngineError extends Error {
  * validateModel 的「catalog 省略 = 成员摘除」形态保形：RemoteEngine 构造器对省略
  * catalog 置 own undefined ——代理同样缺席该成员（消费方 `typeof engine.validateModel
  * !== "function"` 判定照常跳过校验）。
+ *
+ * [listModels 异步面 2026-10-25] RemoteEngine.listModels 对无静态枚举的 dynamic
+ * 引擎改走协议 RPC（连接级）——代理面绑定 staticModelListOf(descriptor.manifest)
+ * 纯快照映射（永不触碰连接：经代理 spawn = 无人登记的孤儿连接，正是本代理要拦的
+ * 形态；无静态枚举引擎按 null 降级，与快照时代语义保形）。活清单经窗口实例
+ * （resolveWorkflowWindowEnginePort / ChatRounds.resolveRoundEnginePort）取。
  */
 function readOnlyEngineProxy(id: string, descriptor: CliEngineDescriptor): EnginePort {
   const engine = descriptor.portFactory();
@@ -264,7 +270,7 @@ function readOnlyEngineProxy(id: string, descriptor: CliEngineDescriptor): Engin
     run: () => refuse("run"),
     read: () => refuse("read"),
     ...(engine.listModels !== undefined
-      ? { listModels: () => engine.listModels!() }
+      ? { listModels: () => staticModelListOf(descriptor.manifest?.modelCatalog) }
       : {}),
     ...(engine.validateModel !== undefined
       ? { validateModel: (modelRef: EngineModelSelectorInput) => engine.validateModel!(modelRef) }

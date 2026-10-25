@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-subagent-workflow",
-  "version": "9.8.0",
+  "version": "10.1.0",
   "type": "module",
   "main": "index.ts",
   "description": "Unified subagent execution and multi-agent workflow orchestration for Pi — spawned-process agent runtime with sync/background modes, stateful workflow management with persistence, state machine, and execution tracing.",
@@ -89,6 +89,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.9",
+    "proper-lockfile": "^4.1.2",
     "vitest": "^4.1.8"
   }
 }

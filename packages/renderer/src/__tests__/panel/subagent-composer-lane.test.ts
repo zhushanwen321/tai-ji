@@ -1,5 +1,5 @@
 /**
- * subagent composer 车道单测（subagent-composer 2026-10-18）。
+ * subagent composer 通道单测（subagent-composer 2026-10-18）。
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 构建者（白盒）：发送/中止终端到 session.subagentAction message/cancel 的参数映射
@@ -51,7 +51,7 @@ function makeRecord(overrides: Partial<SubagentRecord> = {}): SubagentRecord {
   }
 }
 
-describe('subagent composer 车道', () => {
+describe('subagent composer 通道', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
@@ -86,7 +86,7 @@ describe('subagent composer 车道', () => {
     expect(subagentAction).not.toHaveBeenCalled()
   })
 
-  it('isStreaming：record 在飞（running 且无轮终）= true；中止走 cancel 通道', async () => {
+  it('isStreaming：record 在途（running 且无轮终）= true；中止走 cancel 通道', async () => {
     const store = useSubagentStore()
     store.applyRecords(MAIN_SID, [makeRecord({ status: 'running' })])
     const lane = useSubagentComposerLane(computed(() => VID))
@@ -98,7 +98,7 @@ describe('subagent composer 车道', () => {
     expect(lane.isStreaming.value).toBe(false)
   })
 
-  it('ref 响应性：sessionId 切入虚拟 id 即上车道（切 tab 场景）', () => {
+  it('ref 响应性：sessionId 切入虚拟 id 即进入通道（切 tab 场景）', () => {
     const sid = ref<string | null>('real-session-id')
     const lane = useSubagentComposerLane(computed(() => sid.value))
     expect(lane.isLane.value).toBe(false)

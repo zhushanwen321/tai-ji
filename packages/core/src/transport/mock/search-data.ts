@@ -43,8 +43,8 @@ export const SEARCH_MOCK: Record<SearchType, SearchItem[]> = {
     { type: 'session', title: 'Workspace 双 Panel', sub: 'agent-skeleton · main' },
     { type: 'session', title: 'git 工作流打磨', sub: 'feat-gitflow · dev' },
   ],
-  // 归档搜索项 mock 轨留空：mock 归档数据是内存态（mockArchives），静态 fixture 不镜像；
-  // 归档搜索的真实轨覆盖（config.archives 拉取 + 名称/摘要匹配）由 core search 测试锁定。
+  // 归档搜索项 mock 层留空：mock 归档数据是内存态（mockArchives），静态 fixture 不镜像；
+  // 归档搜索的真实层覆盖（config.archives 拉取 + 名称/摘要匹配）由 core search 测试锁定。
   archive: [],
 }
 

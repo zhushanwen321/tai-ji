@@ -4,7 +4,7 @@
  * 目的：重构后验证三栏布局 / 侧栏折叠+session 切换 / 对话流 turn 结构是否行为保持。
  * 深度=D3 使用者视角（DOM 存在+可见+交互可触发），非状态机（vitest 集成测范围）、非视觉（S2 像素 diff 范围）。
  *
- * 数据流：复用 e2e/fixtures/launch-app.ts mock 轨（_electron.launch + 5 env 注入），
+ * 数据流：复用 e2e/fixtures/launch-app.ts mock 层（_electron.launch + 5 env 注入），
  * VITE_MOCK=true 让 renderer 自洽渲染（mockApi + useConnection mock 200ms 进 connected → App.vue 检查放行 AppShell）。
  * session list 含 e2eTestSession（id='e2e-files'，label='E2E 文件树测试'）与 s3（'API 性能优化'）。
  *

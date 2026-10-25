@@ -76,6 +76,18 @@
  * archive.ts bundle 隔离镜像，dmg-r2-1 防线）逐字比对——镜像漂移 = 归档簿记解析侧与 pi
  * 会话 id 权威域收窄口径分裂，穿越形态 id 一经簿记固化即流向 assets/ 分区与 purge 删除原语。
  *
+ * 【第九组断言（retry-rules ext-config 路径公式，dmg-r1-2）】同一相对路径
+ * `config/retry-rules-ext-config.json` 四处独立承载的逐字对拍：runtime 写侧
+ * `packages/runtime/src/services/remote-config/remote-retry-rules.ts` 的
+ * `RETRY_RULES_CONFIG_REL`（join 单引号形态）↔ 引擎读侧
+ * `packages/pi-subagent-cli/src/retry-rules-classification.ts` 同名常量（path.join
+ * 双引号形态）↔ extension 读侧 `extensions/shared/llm-shared/src/config.ts` 的
+ * getConfigPath 泛化公式（`join(getAgentDir(), "config", \`${pkg}-ext-config.json\`)`
+ * 模板形态，pkg 实参 = retry-rules extension 的 CONFIG_PKG）↔
+ * `extensions/universal/retry-rules/package.json` 的 taiji.startupConfig[0].path
+ * （extension 启动占位写点）。任一漂移 = runtime 写的 ext-config 与两侧读侧落点错位
+ * （retry-rules message_end 改写静默空转 + 引擎失败分类静默回落内置层）。
+ *
  * 形态照搬 scripts/check-capability-allowlist-sync.mjs（读源文件文本、零散文解析、
  * 提取失败一律 fail、`--self-test` 纯函数自检）。
  *
@@ -189,6 +201,26 @@ export const SR_DISCOVERY_SUBAGENTS_CONST = 'SUBAGENTS_DIRNAME'
 /** 镜像侧分区名校验正则常量名（与 shared 同名）。 */
 export const SR_DISCOVERY_PATTERN_CONST = 'PI_SESSION_ID_PATTERN'
 
+// ── 第九组对拍（retry-rules ext-config 路径公式，dmg-r1-2）符号 ──────────────
+/** runtime 写侧源文件（remote-config 域 retry-rules，ext-config 唯一写方）。 */
+export const RUNTIME_RETRY_RULES_SRC = join(
+  ROOT, 'packages', 'runtime', 'src', 'services', 'remote-config', 'remote-retry-rules.ts',
+)
+/** 引擎读侧源文件（pi-subagent-cli 失败分类读侧，行为镜像复制体）。 */
+export const ENGINE_RETRY_RULES_SRC = join(
+  ROOT, 'packages', 'pi-subagent-cli', 'src', 'retry-rules-classification.ts',
+)
+/** extension 读侧泛化公式源文件（llm-shared getConfigPath，<pkg>-ext-config.json 模板）。 */
+export const LLM_SHARED_CONFIG_SRC = join(ROOT, 'extensions', 'shared', 'llm-shared', 'src', 'config.ts')
+/** retry-rules extension 包清单（taiji.startupConfig 启动占位写点声明）。 */
+export const RETRY_RULES_EXT_PKG_JSON = join(ROOT, 'extensions', 'universal', 'retry-rules', 'package.json')
+/** 写侧 / 引擎读侧同名的 ext-config 相对路径常量名。 */
+export const RETRY_RULES_CONFIG_REL_CONST = 'RETRY_RULES_CONFIG_REL'
+/** 本域 pkg 名（extension 读侧 loadConfig 实参 = 文件名前缀，与包目录名一致）。 */
+export const RETRY_RULES_EXT_PKG_NAME = 'retry-rules'
+/** retry-rules extension 启动占位写点的声明位（JSON 路径，报错文案用）。 */
+export const RETRY_RULES_STARTUP_CONFIG_PATH = 'taiji.startupConfig[0].path'
+
 /** 函数体截取锚点（含 `export function` 前缀，避免匹配到调用点）。 */
 const SHARED_ANCHOR = `export function ${SHARED_FN}`
 const MIRROR_ANCHOR = `export function ${MIRROR_FN}`
@@ -300,6 +332,48 @@ export function extractViewSessionIdRegex(blockText) {
   const m = blockText.match(/(\/\^[^/\n]*\/)\.test\(resolved\.sessionId\)/)
   if (!m) return { error: `函数块内未找到 /^.../.test(resolved.sessionId) 校验正则字面量` }
   return { value: m[1] }
+}
+
+// ── 第九组（retry-rules 路径公式）提取器：runtime 写侧单引号 join / 引擎读侧双引号
+// path.join（带分号）两形态均收；泛化模板 / startupConfig path 各一。提取失败一律 fail。
+
+/**
+ * 从源文本提取 `const <name> = (path.)?join('<段1>', '<段2>')` 双段字面量（单/双引号
+ * 均收，分号可选——runtime 写侧与引擎读侧的声明形态）。返回 { configSeg, fileSeg }。
+ */
+export function extractConfigRelJoinSegments(text, constName) {
+  const m = text.match(
+    new RegExp(`const\\s+${constName}\\s*=\\s*(?:path\\.)?join\\((['"])([^'"]+)\\1,\\s*(['"])([^'"]+)\\3\\)\\s*;?`),
+  )
+  if (!m) return { error: `未找到 const ${constName} = (path.)join('<段1>', '<段2>') 形态（改名 / 公式形态变化？）` }
+  return { value: { configSeg: m[2], fileSeg: m[4] } }
+}
+
+/**
+ * 从 getConfigPath 函数块提取泛化公式 `join(getAgentDir(), '<段>', \`${param}<后缀>\`)`
+ * （模板字面量形态——llm-shared 读侧按 pkg 参数化）。返回 { configSeg, pkgParam, fileSuffix }。
+ */
+export function extractConfigPathTemplateSegments(blockText) {
+  const m = blockText.match(/join\(getAgentDir\(\),\s*(['"])([^'"]+)\1,\s*`\$\{(\w+)\}([^`]*)`\)/)
+  if (!m) {
+    return { error: `函数块内未找到 join(getAgentDir(), '<段>', \`\${pkg}<后缀>\`) 泛化公式形态（公式形态变化？）` }
+  }
+  return { value: { configSeg: m[2], pkgParam: m[3], fileSuffix: m[4] } }
+}
+
+/** 从 extension package.json 文本提取 taiji.startupConfig[0].path（JSON.parse 后取值，形态变化/缺失一律 error）。 */
+export function extractStartupConfigPath(pkgJsonText) {
+  let pkg
+  try {
+    pkg = JSON.parse(pkgJsonText)
+  } catch (e) {
+    return { error: `package.json 非法 JSON: ${e instanceof Error ? e.message : String(e)}` }
+  }
+  const startupPath = pkg?.taiji?.startupConfig?.[0]?.path
+  if (typeof startupPath !== 'string' || startupPath === '') {
+    return { error: `${RETRY_RULES_STARTUP_CONFIG_PATH} 缺失或非字符串（startupConfig 形态变化？）` }
+  }
+  return { value: startupPath }
 }
 
 // ── --self-test：纯函数轻量自检（不触真实仓库文件）────────────────────
@@ -603,6 +677,43 @@ const AGENT_NO_TEXT_PLACEHOLDER = '（此 turn 以工具调用结束，无文本
   }
 }
 
+/** 第九组（retry-rules 路径公式，dmg-r1-2）纯函数自检：双形态 join 常量 / 泛化模板 / startupConfig path 提取。 */
+function selfTestRetryRulesConfigFormula(assert) {
+  const runtimeText = `const ${RETRY_RULES_CONFIG_REL_CONST} = join('config', 'retry-rules-ext-config.json')`
+  const engineText = `const ${RETRY_RULES_CONFIG_REL_CONST} = path.join("config", "retry-rules-ext-config.json");`
+
+  const runtimeSegs = extractConfigRelJoinSegments(runtimeText, RETRY_RULES_CONFIG_REL_CONST)
+  assert(
+    runtimeSegs.value && runtimeSegs.value.configSeg === 'config' && runtimeSegs.value.fileSeg === 'retry-rules-ext-config.json',
+    'runtime 写侧单引号 join 双段提取',
+  )
+  const engineSegs = extractConfigRelJoinSegments(engineText, RETRY_RULES_CONFIG_REL_CONST)
+  assert(
+    engineSegs.value && engineSegs.value.configSeg === 'config' && engineSegs.value.fileSeg === 'retry-rules-ext-config.json',
+    '引擎读侧 path.join 双引号带分号形态提取',
+  )
+  assert(extractConfigRelJoinSegments('const OTHER = join("a", "b")', RETRY_RULES_CONFIG_REL_CONST).error !== undefined, '常量名不符报 error')
+  assert(
+    extractConfigRelJoinSegments(`const ${RETRY_RULES_CONFIG_REL_CONST} = join(cfgDir, 'x.json')`, RETRY_RULES_CONFIG_REL_CONST).error !== undefined,
+    '首段非字面量报 error（宁可误报不可漏报）',
+  )
+
+  const llmSharedBlock = `export function getConfigPath(pkgName: string): string {
+\treturn join(getAgentDir(), "config", \`\${pkgName}-ext-config.json\`);
+}`
+  const template = extractConfigPathTemplateSegments(llmSharedBlock)
+  assert(
+    template.value && template.value.configSeg === 'config' && template.value.pkgParam === 'pkgName' && template.value.fileSuffix === '-ext-config.json',
+    'getConfigPath 泛化模板三段提取（tab 缩进函数块内）',
+  )
+  assert(extractConfigPathTemplateSegments('return join(getAgentDir(), "config", file)').error !== undefined, '泛化公式非模板形态报 error')
+
+  const pkgJson = JSON.stringify({ taiji: { startupConfig: [{ path: 'config/retry-rules-ext-config.json' }] } })
+  assert(extractStartupConfigPath(pkgJson).value === 'config/retry-rules-ext-config.json', 'startupConfig path 提取')
+  assert(extractStartupConfigPath('{}').error !== undefined, 'startupConfig 缺席报 error')
+  assert(extractStartupConfigPath('{bad json').error !== undefined, '非法 JSON 报 error')
+}
+
 function selfTestCases(assert) {
   selfTestFormulaPairing(assert)
   selfTestTreePairing(assert)
@@ -611,6 +722,7 @@ function selfTestCases(assert) {
   selfTestSessionReaderView(assert)
   selfTestSessionReaderDiscovery(assert)
   selfTestArchiveMirrorFields(assert)
+  selfTestRetryRulesConfigFormula(assert)
 }
 
 if (process.argv.includes('--self-test')) runSelfTest('artifact-dir-formula-sync', selfTestCases)
@@ -1106,8 +1218,77 @@ function compareD7LiteralMirror(ledgerText, rendererText) {
   }
 }
 
+/**
+ * ⑨ retry-rules ext-config 路径公式四处对拍（第九组，dmg-r1-2）：同一相对路径
+ * `config/retry-rules-ext-config.json` 在 runtime 写侧（RETRY_RULES_CONFIG_REL）、
+ * 引擎读侧（同名常量）、extension 读侧（getConfigPath 泛化模板，pkg 实参 = 本域 pkg
+ * 名）与 extension startupConfig 声明四处独立承载，漂移 = runtime 写的 ext-config 与
+ * 两侧读侧落点错位（retry-rules message_end 改写静默空转 + 引擎失败分类静默回落
+ * 内置层），均无红灯——逐段逐字对拍。
+ */
+function compareRetryRulesConfigFormula(runtimeText, engineText, llmSharedText, extPkgJsonText) {
+  const llmSharedBlock = extractFunctionBlock(llmSharedText, 'export function getConfigPath')
+  if (llmSharedBlock.error) fail(`extension 读侧 getConfigPath 函数块提取失败: ${llmSharedBlock.error}`)
+  exitIfFailed('retry-rules 路径公式对拍：函数块提取失败，按上方 ✗ 修复后重跑')
+
+  const extracted = {
+    runtime: extractConfigRelJoinSegments(runtimeText, RETRY_RULES_CONFIG_REL_CONST),
+    engine: extractConfigRelJoinSegments(engineText, RETRY_RULES_CONFIG_REL_CONST),
+    llmShared: extractConfigPathTemplateSegments(llmSharedBlock.text),
+    startupPath: extractStartupConfigPath(extPkgJsonText),
+  }
+  for (const [label, r] of [
+    [`runtime 写侧 ${RETRY_RULES_CONFIG_REL_CONST}`, extracted.runtime],
+    [`引擎读侧 ${RETRY_RULES_CONFIG_REL_CONST}`, extracted.engine],
+    ['extension 读侧 getConfigPath 泛化公式', extracted.llmShared],
+    [`extension ${RETRY_RULES_STARTUP_CONFIG_PATH}`, extracted.startupPath],
+  ]) {
+    if (r.error) fail(`${label} 提取失败: ${r.error}`)
+  }
+  exitIfFailed('retry-rules 路径公式对拍：字面量提取失败，按上方 ✗ 修复后重跑')
+
+  const runtimeSegs = extracted.runtime.value
+  const engineSegs = extracted.engine.value
+  const template = extracted.llmShared.value
+  const startupPath = extracted.startupPath.value
+
+  // ① config 段三方一致（runtime 写侧 / 引擎读侧 / extension 读侧泛化公式）。
+  if (runtimeSegs.configSeg === engineSegs.configSeg && engineSegs.configSeg === template.configSeg) {
+    ok(`retry-rules 路径公式 config 段三方一致（'${runtimeSegs.configSeg}'，runtime 写侧 ↔ 引擎读侧 ↔ extension 读侧泛化公式）`)
+  } else {
+    fail(
+      `retry-rules 路径公式 config 段漂移: runtime='${runtimeSegs.configSeg}' vs 引擎='${engineSegs.configSeg}' vs extension='${template.configSeg}'` +
+        `——恢复动作：人工核对 ${RUNTIME_RETRY_RULES_SRC}、${ENGINE_RETRY_RULES_SRC} 的 ${RETRY_RULES_CONFIG_REL_CONST} 与 ${LLM_SHARED_CONFIG_SRC} 的 getConfigPath`,
+    )
+  }
+
+  // ② 文件段：runtime ≡ 引擎读侧 ≡ 泛化模板按本域 pkg 名实例化（模板后缀漂移 /
+  //    任一写死文件名漂移即红）。
+  const instantiated = `${RETRY_RULES_EXT_PKG_NAME}${template.fileSuffix}`
+  if (runtimeSegs.fileSeg === engineSegs.fileSeg && engineSegs.fileSeg === instantiated) {
+    ok(`retry-rules 路径公式文件段三方一致（'${runtimeSegs.fileSeg}'，写侧 ↔ 引擎读侧 ↔ 泛化模板 pkg='${RETRY_RULES_EXT_PKG_NAME}' 实例化）`)
+  } else {
+    fail(
+      `retry-rules 路径公式文件段漂移: runtime='${runtimeSegs.fileSeg}' vs 引擎='${engineSegs.fileSeg}' vs 泛化模板实例化='${instantiated}'` +
+        `——恢复动作：人工核对两侧 ${RETRY_RULES_CONFIG_REL_CONST} 字面量与 ${LLM_SHARED_CONFIG_SRC} 模板（pkg 名 '${RETRY_RULES_EXT_PKG_NAME}' 见 ${RETRY_RULES_EXT_PKG_JSON} 文件名前缀）`,
+    )
+  }
+
+  // ③ startupConfig 声明 ≡ '<config 段>/<文件段>'（extension 启动占位写点与运行时
+  //    读写公式同位——占位写错位置时 runtime 首次同步覆盖即落空位）。
+  const runtimeFormula = `${runtimeSegs.configSeg}/${runtimeSegs.fileSeg}`
+  if (startupPath === runtimeFormula) {
+    ok(`retry-rules startupConfig path 一致（'${startupPath}'，package.json ${RETRY_RULES_STARTUP_CONFIG_PATH} ↔ 运行时读写公式）`)
+  } else {
+    fail(
+      `retry-rules startupConfig path 漂移: package.json='${startupPath}' vs 运行时公式='${runtimeFormula}'` +
+        `——恢复动作：人工核对 ${RETRY_RULES_EXT_PKG_JSON} 的 ${RETRY_RULES_STARTUP_CONFIG_PATH} 与 ${RUNTIME_RETRY_RULES_SRC} 的 ${RETRY_RULES_CONFIG_REL_CONST}`,
+    )
+  }
+}
+
 function main() {
-  const [sharedText, storeText, mirrorText, runtimeText, registryText, handlerText, rootsText, ledgerText, runtimePathsText, sharedSchemaText, rendererText] = readSourcesOrFail([
+  const [sharedText, storeText, mirrorText, runtimeText, registryText, handlerText, rootsText, ledgerText, runtimePathsText, sharedSchemaText, rendererText, retryRulesRuntimeText, retryRulesEngineText, llmSharedText, retryRulesPkgJsonText] = readSourcesOrFail([
     [SHARED_PATHS_SRC, 'shared paths 源文件'],
     [SHARED_STORE_SRC, 'shared session-store-paths 源文件'],
     [SYSTEM_PROMPT_SRC, 'system-prompt 源文件'],
@@ -1119,6 +1300,10 @@ function main() {
     [RUNTIME_ARCHIVE_PATHS_SRC, 'runtime archive-paths 源文件'],
     [SHARED_ARCHIVE_SCHEMA_SRC, 'shared archive schema 源文件'],
     [RENDERER_ARCHIVE_REFERENCE_SRC, 'renderer 归档预检正文源文件'],
+    [RUNTIME_RETRY_RULES_SRC, 'runtime retry-rules 写侧源文件'],
+    [ENGINE_RETRY_RULES_SRC, '引擎 retry-rules 读侧源文件'],
+    [LLM_SHARED_CONFIG_SRC, 'llm-shared config 源文件'],
+    [RETRY_RULES_EXT_PKG_JSON, 'retry-rules extension package.json'],
   ])
 
   const { sharedBlock, mirrorBlock } = extractFormulaBlocksOrFail(sharedText, mirrorText)
@@ -1133,9 +1318,10 @@ function main() {
   compareSessionReaderView(storeText, handlerText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
   compareSessionReaderDiscovery(storeText, rootsText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
   compareArchiveMirror(sharedText, storeText, ledgerText, runtimePathsText, runtimeText, sharedSchemaText, rendererText)
+  compareRetryRulesConfigFormula(retryRulesRuntimeText, retryRulesEngineText, llmSharedText, retryRulesPkgJsonText)
 
   guardExit(
-    '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段 + 域 5 registry 镜像 + 域 6 session-view 镜像 + 域 9 discovery 镜像 + 域 10 归档镜像〔目录名/后缀/sessionId 正则/schema 字段级/D7 四字面〕逐字一致）',
+    '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段 + 域 5 registry 镜像 + 域 6 session-view 镜像 + 域 9 discovery 镜像 + 域 10 归档镜像〔目录名/后缀/sessionId 正则/schema 字段级/D7 四字面〕+ retry-rules 路径公式四处〔config 段/文件段/startupConfig path〕逐字一致）',
     '产物目录公式对拍未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
   )
 }

@@ -70,7 +70,7 @@ export function createSettingsStore() {
   // ADR-0021 §1 extension 加载路径配置（Phase 4）：与 skill/agent 同构，靠前 = 先加载。
   // extension 的「优先级」语义因资源类型而异（tool 靠前生效、hook 全部执行），故 UI 措辞用「加载顺序」。
   const extensionDirs = ref<SkillDirConfig[]>([])
-  // 默认模型（"provider/modelId" 复合串，与 SessionSummary.modelId 同格式）。
+  // 默认模型（"provider/modelId" 复合串，与 session.state_changed / session.getState reply 的 modelId 同格式）。
   // runtime 在连接 / model.switch / provider 增删时经 config.defaults 推送；
   // landing 态（无 active session）的 composer 模型选择器取它作 fallback。
   const defaultModel = ref('')

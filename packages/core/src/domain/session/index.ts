@@ -8,6 +8,7 @@
  * WorkUnit，旧 store/composable 保留至消费方全部迁移后删除（strangler 逐域绞杀）。
  */
 export * from './store'
+export * from './live-state'
 export * from './api-port'
 // panel-view：PanelView/derivePanelView（渲染视图派生契约，T3 renderer usePanelView 消费）
 export * from './panel-view'

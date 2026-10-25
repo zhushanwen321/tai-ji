@@ -16,7 +16,7 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { EngineClient } from "../client/engine-client.ts";
-import { RemoteEngine } from "../client/remote-engine.ts";
+import { RemoteEngine, type RemoteEngineManifestSnapshot } from "../client/remote-engine.ts";
 import { translateByTableReverse } from "../client/manifest-lookup.ts";
 import type { EngineCapabilities } from "../types.ts";
 
@@ -39,7 +39,9 @@ const FAKE_CAPS: EngineCapabilities = {
 
 const TABLE = { "zai-coding-cn": "account:bigmodel-individual-coding-plan" };
 
-function makeEngine(manifest: { modelTranslation?: Record<string, string> }): RemoteEngine {
+function makeEngine(manifest: {
+  modelTranslation?: Record<string, string> | null;
+}): RemoteEngine {
   const client = new EngineClient({
     engineId: "zcode",
     command: process.execPath,
@@ -48,10 +50,13 @@ function makeEngine(manifest: { modelTranslation?: Record<string, string> }): Re
     dataDir: tmpRoot,
     envPrefixes: [],
   });
+  // 正规解析链（parseModelTranslation）把 manifest JSON 的 null 归一 undefined，
+  // snapshot 类型不含 null；null 注入 = 模拟注入方绕过类型契约的运行时形态
+  // （S-15 防御面），构造器双判定兜住，此处 as 仅为构造该契约外形态。
   return new RemoteEngine({
     engineId: "zcode",
     client,
-    manifest: { capabilities: { ...FAKE_CAPS }, ...manifest },
+    manifest: { capabilities: { ...FAKE_CAPS }, ...manifest } as RemoteEngineManifestSnapshot,
     dataDir: tmpRoot,
     hostKind: "test",
   });
@@ -88,6 +93,11 @@ describe("RemoteEngine translateModelRef 形态映射（manifest modelTranslatio
 
   it("声明表缺席 → 成员摘除（消费方 typeof 探测缺席语义：恒等透传 + 生效回执 warn）", () => {
     const engine = makeEngine({});
+    expect(typeof engine.translateModelRef).toBe("undefined");
+  });
+
+  it("声明表为 null（JSON 合法形态）→ 等价省略：成员摘除（S-15：构造器判定未含 null 时 null 穿透查表）", () => {
+    const engine = makeEngine({ modelTranslation: null });
     expect(typeof engine.translateModelRef).toBe("undefined");
   });
 });

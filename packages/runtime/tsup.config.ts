@@ -34,12 +34,13 @@ export default defineConfig({
   // ══════════════════════════════════════════════════════════════
   // @taiji/shared：workspace 包（纯 TS 类型 + 工具函数），必须打包进 bundle，
   // 否则打包后 require('@taiji/shared') 找不到（runtime 子进程无 node_modules）
-  // @zhushanwen/subagent-core：双端复用的语义导出——barrel 的运行时无状态导出
-  // （startupSweep / model gateway 常量与摘要 / model ref 解析 / record 自定义类型 /
-  // session 记录读取）经条件 require 解析到该包 dist CJS（core dist 未 build 时打包
-  // 失败属预期，build 前置）+ engine/engine-discovery-scan 语义子入口（纯常量+纯函数，
-  // 设计 §3.3.1 例外条款）。禁止扩大消费方到 launcher/preparer/parser/EnginePort
-  // （依赖方向纪律）。
+  // @zhushanwen/subagent-core：双端复用的语义导出——runtime 源码以静态 import 消费
+  // barrel 与 engine/engine-discovery-scan 语义子入口（startupSweep / model gateway
+  // 常量与摘要 / model ref 解析 / record 自定义类型 / session 记录读取 + 纯常量+纯函数，
+  // 设计 §3.3.1 例外条款）；esbuild 按 exports 的 import 条件解析到 src TS 源码直接
+  // 内联编译进 bundle（产物内模块标记均为 subagent-core/src/*，该包 dist CJS 不是
+  // runtime 打包载体——require 条件只服务外部 CJS 消费方）。禁止扩大消费方到
+  // launcher/preparer/parser/EnginePort（依赖方向纪律）。
   // @earendil-works/pi-ai：能力注册表（pi-boundary-reliability U5）pi 同源档位计算——
   // 「根声明、runtime 不可 import」格局的首次反转，声明见 services/model-capability.ts 头注；
   // pin 与根 pin 双副本一致性由 D6 版本门禁机器保证

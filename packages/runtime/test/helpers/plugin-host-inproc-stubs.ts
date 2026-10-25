@@ -1,14 +1,14 @@
 /**
  * plugin 宿主（PluginHost / PluginHostProcess）in-process 注入桩。
  *
- * 背景（2026-10-22 单测层整治，判据与处置通道见 docs/todo/test-single-layer-cleanup.md）：
+ * 背景（2026-10-22 单测层整治，判据与处置通道见 docs/TEST-STRATEGY.md「新写测试判据」节）：
  * plugin 宿主族的单测原形态 fork 真实子进程 / 起真实 Worker 线程（判据 b+f 类）——进程
  * 启动与退出事件传播没有「完成」信号可等，CPU 满载下窗口无稳定上界，不满足单测层
  * 「只测逻辑、高负载下也极快」的定位。本 helper 把进程/线程边界换成同进程注入桩：
  * 被测逻辑（宿主的分配/复用/IPC 往返/崩溃分流/清理/幂等/误报防护）全部留在
  * PluginHost / PluginHostProcess 实装内，真实进程/线程生命周期行为（terminate →
  * exit code=1、SIGKILL → exit code=null、SIGTERM 宽限链）属「代码 + OS 组合行为」，
- * 归集成轨（TAIJI_TEST_INTEGRATION 门控，见 test-guard/integration-gate.ts）覆盖。
+ * 归集成组（TAIJI_TEST_INTEGRATION 门控，见 test-guard/integration-gate.ts）覆盖。
  *
  * 消息协议逐条对齐 test/fixtures/ 下三个 mock bootstrap（本桩只移植这些单测实际驱动的分支）：
  * - plugin-bootstrap-process.mock.cjs：load → loaded；rpc → response(result:null)；
@@ -19,11 +19,13 @@
  *   code=0，复现不了「运行中被终止」形态，故桩恒按常驻句柄语义 exit 1）
  *
  * 使用模式（vi.mock 声明留测试文件——模块路径相对测试文件解析；工厂内 await import
- * 本文件转发，免疫 vitest hoist 时序；先例：test/helpers/rpc-client-mock.ts）：
+ * 本文件转发，免疫 vitest hoist 时序；先例：test/helpers/rpc-client-mock.ts。下方示例
+ * specifier 按本文件所在目录书写——静态分析会把注释内的路径字面量当 import 解析，
+ * 从 helpers/ 目录出发写作 './helpers/…' 会解析到不存在的 helpers/helpers/ 路径）：
  *   vi.mock('node:child_process', async () =>
- *     (await import('./helpers/plugin-host-inproc-stubs')).childProcessModule())
+ *     (await import('./plugin-host-inproc-stubs')).childProcessModule())
  *   vi.mock('node:worker_threads', async () =>
- *     (await import('./helpers/plugin-host-inproc-stubs')).workerThreadsModule())
+ *     (await import('./plugin-host-inproc-stubs')).workerThreadsModule())
  *
  * spread 而非完全替换（importActual 保留其余导出）：宿主依赖图内其他模块可能消费这两个
  * 内置模块的其他导出，完全替换式 mock 会随依赖图扩张静默断联（rpc-client-mock 头注登记的

@@ -881,3 +881,75 @@ describe('D8/S8 调用点应用语义（watch → reconcileBroadcast → 机械�
     expect(savePayload().apiKey).toBe('sk-typed')
   })
 })
+
+describe('reconcile 分流入口（SG-8：provider 变化统一经 form.reconcile 分流）', () => {
+  it('id 变化 → "reset" + 表单重载（apiKey 清空、headerRows 重建）；快照重捕获留给调用方编排', () => {
+    const { form } = mountForm(makeProvider())
+
+    const outcome = form.reconcile(makeProvider({ id: 'p2' as ProviderInfo['id'], name: 'P2' }))
+
+    expect(outcome).toBe('reset')
+    expect(form.draft.name).toBe('P2')
+    expect(form.draft.apiKey).toBe('')
+    expect(form.headerRows.value).toEqual([{ key: 'X-Test', value: 'v1' }])
+    // reconcile 只做 form 侧动作：快照未重捕获（isDirty 相对旧基线为 true），由调用方
+    // （useProviderEdit watcher 的 'reset' 分支）编排 captureSnapshot 后归 false
+    expect(form.isDirty.value).toBe(true)
+    form.captureSnapshot()
+    expect(form.isDirty.value).toBe(false)
+  })
+
+  it('fresh=null（关闭弹窗）→ "reset" + 清空为新增态默认', () => {
+    const { form } = mountForm(makeProvider())
+    form.draft.name = 'P1-edited'
+
+    expect(form.reconcile(null)).toBe('reset')
+    expect(form.draft.name).toBe('')
+    expect(form.draft.apiKey).toBe('')
+  })
+
+  it('同 id 非 dirty → "refreshed" + 按 applyReconcile 重拍（编辑态不丢失、不虚报 dirty）', () => {
+    const { form } = mountForm(makeProvider())
+
+    const outcome = form.reconcile(makeProvider({ name: 'P1-broadcast' }))
+
+    expect(outcome).toBe('refreshed')
+    expect(form.draft.name).toBe('P1-broadcast')
+    expect(form.isDirty.value).toBe(false)
+  })
+
+  it('同 id dirty → "refreshed" + ignore 分支保留用户改动（不走重置）', () => {
+    const { form } = mountForm(makeProvider())
+    form.draft.apiKey = 'sk-typed'
+    form.draft.name = 'P1-user-edit'
+    expect(form.isDirty.value).toBe(true)
+
+    expect(form.reconcile(makeProvider({ name: 'P1-broadcast' }))).toBe('refreshed')
+    // 用户改动优先：apiKey 草稿与已编辑字段都不被重置/重拍
+    expect(form.draft.apiKey).toBe('sk-typed')
+    expect(form.draft.name).toBe('P1-user-edit')
+    expect(form.isDirty.value).toBe(true)
+  })
+
+  it('分流判据 = 已载入 id（非引用相等）：载入后 reconcile 同一对象 → "refreshed" 非 "reset"', () => {
+    const { form, providerRef } = mountForm(makeProvider())
+
+    // 同一引用（旧 watcher 契约下不会触发）；reconcile 判据是 loadedProviderId → 同 id 刷新
+    expect(form.reconcile(providerRef.value)).toBe('refreshed')
+    // 再 reconcile 同 id 新引用（独立构造的 prop，非 store 元素）同样走刷新分支
+    expect(form.reconcile(makeProvider({ name: 'P1-prop' }))).toBe('refreshed')
+    expect(form.draft.name).toBe('P1-prop')
+    expect(form.isDirty.value).toBe(false)
+  })
+
+  it('幂等：同 fresh 连续 reconcile → 无副作用累积（值稳定、不虚报 dirty）', () => {
+    const { form } = mountForm(makeProvider())
+    const fresh = makeProvider({ name: 'P1-broadcast' })
+
+    expect(form.reconcile(fresh)).toBe('refreshed')
+    expect(form.reconcile(fresh)).toBe('refreshed')
+
+    expect(form.draft.name).toBe('P1-broadcast')
+    expect(form.isDirty.value).toBe(false)
+  })
+})

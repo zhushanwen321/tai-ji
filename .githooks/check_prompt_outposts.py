@@ -34,9 +34,14 @@ MF-C（landing 首发同缺口）——注入器以「N 入口挂载」模式存
 A2 节登记并过评审——内部命令（cancel/workflows/__taiji_*__）与代理构造模板文本
 可豁免注入，用户内容必须挂 SkillInjector 后登记 injected。
 
-用法：无参（默认扫仓库根）| --root <dir>（自定扫描根，供测试 fixture 用）。
+用法：无参（默认仓库根，staged 交集扫描——pre-commit 形态，提交者对自己提交的面负责）
+| --root <dir>（自定扫描根，全量扫描该树——staged 集合来自真实仓库，与 fixture 树
+必然不相交，显式跳过交集；供测试 fixture 用）
+| --all（全量扫描模式，跳过 staged 交集——CI 无 staged 上下文，checkout 后 index
+与 HEAD 一致、staged 恒空集，不跳过则扫描面为空、检查退化为恒绿）。
 """
 
+from __future__ import annotations
 import argparse
 import os
 import re
@@ -253,19 +258,21 @@ def staged_files():
     return {p for p in out.stdout.decode("utf-8", errors="replace").split("\0") if p}
 
 
-def run(scan_root):
+def run(scan_root, staged_scope=True):
     if not validate_whitelist():
         return 1
     violations = []  # (rel_path, lineno, method, line)
     exempt_hits = []  # (rel_path, lineno)
     unreadable_dirs = []  # os.walk onerror 收集（不可读目录 = 漏扫面，须显形）
     files = sorted(iter_ts_files(scan_root, unreadable_dirs))
-    staged = staged_files()  # 扫描范围 = staged ∩ 规则树；提交者对自己提交的面负责
+    # staged 交集只在 staged_scope 时生效（pre-commit 形态）：--root 指向 fixture 树时
+    # staged 集合来自真实仓库、与 fixture 必然不相交；--all / CI 场景 staged 恒空集。
+    staged = staged_files() if staged_scope else None
     scanned = 0
 
     for path in files:
-        rel_repo = os.path.relpath(path, REPO_ROOT).replace(os.sep, "/")
         if staged is not None:
+            rel_repo = os.path.relpath(path, REPO_ROOT).replace(os.sep, "/")
             if rel_repo not in staged:
                 continue
             if not os.path.exists(path):  # staged 删除项无可扫描内容
@@ -318,15 +325,23 @@ def main():
     parser = argparse.ArgumentParser(description="用户内容出站点检查（A2 D-A2-3）")
     parser.add_argument(
         "--root",
-        default=REPO_ROOT,
-        help="扫描根目录（默认仓库根；测试 fixture 传 tmp 目录）",
+        default=None,
+        help="扫描根目录（默认仓库根；测试 fixture 传 tmp 目录，此时全量扫描该树）",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="全量扫描模式（跳过 staged 交集；CI 无 staged 上下文用）",
     )
     args = parser.parse_args()
-    scan_base = os.path.join(args.root, SCAN_ROOT)
+    root = args.root if args.root is not None else REPO_ROOT
+    # staged 交集仅对「默认仓库根 + 未显式要全量」的 pre-commit 形态生效
+    staged_scope = args.root is None and not args.all
+    scan_base = os.path.join(root, SCAN_ROOT)
     if not os.path.isdir(scan_base):
         print(f"[ERROR] 扫描根不存在: {scan_base}", file=sys.stderr)
         return 1
-    return run(scan_base)
+    return run(scan_base, staged_scope=staged_scope)
 
 
 if __name__ == "__main__":

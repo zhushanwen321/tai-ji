@@ -24,6 +24,7 @@ import type {
   NetworkProxyConfig,
   NetworkProxyStatsRange,
   NetworkProxyTestResult,
+  RetryableErrorRule,
   SourceDetectResult,
   ProviderSource,
   BuiltinProviderTemplate,
@@ -407,6 +408,27 @@ export async function setRetryConfig(config: LlmRetryConfig): Promise<{ config: 
 /** 订阅 LLM 重试配置广播（多窗口同步，同 terminal 范式）。 */
 export function onRetryConfig(handler: (payload: { config: LlmRetryConfig; configured: boolean }) => void): () => void {
   return events.onGlobalType('config.retryConfig', (msg) => {
+    handler(msg.payload)
+  })
+}
+
+// ── 重试规则域（subagent-observability §3.3.12；协议登记 = shared protocol.ts
+//    config.get/setRetryRules + config.retryRules 广播。runtime handler 接线在
+//    retry-rules-config-message-handler.ts，服务函数在 runtime remote-config 域 3）──
+
+/** 读取重试规则合并视图（builtinRules = 基线⊕远程内置层；customRules = 用户盘上态）。 */
+export async function getRetryRules(): Promise<ServerMessageMap['config.retryRules']> {
+  return command('config.getRetryRules', {}, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 保存重试规则用户自定义层（整体保存为显式按钮触发；校验失败 runtime 返回 error envelope）。 */
+export async function setRetryRules(customRules: RetryableErrorRule[]): Promise<ServerMessageMap['config.retryRules']> {
+  return command('config.setRetryRules', { customRules }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 订阅重试规则视图广播（保存成功后推回，多窗口同步）。 */
+export function onRetryRules(handler: (payload: ServerMessageMap['config.retryRules']) => void): () => void {
+  return events.onGlobalType('config.retryRules', (msg) => {
     handler(msg.payload)
   })
 }

@@ -5,7 +5,7 @@
  * 与 src/infra/system/trash.test.ts 的分工：那边 fs 全 mock 锁通道语义（mac argv
  * 形态 / 回落 / 结构化报错 / rmSync 调用参数）；本文件 fs 真实，验证 rmSync recursive
  * 对多层嵌套树真实删净。树规模保持小（单测只测逻辑、高负载下极快）——「大目录也快」
- * 属性能关切，不归单测层（2026-10-22 测试整治裁决，登记 docs/todo/test-single-layer-cleanup.md）。
+ * 属性能关切，不归单测层（2026-10-22 测试整治裁决，登记 docs/TEST-STRATEGY.md「新写测试判据」节）。
  *
  * 观察手段：platform mock 成 linux（任何宿主机都走降级分支，mac 本机也不例外）；
  * node:child_process 整模块 mock——非 mac 分支零子进程由断言兜底锁定。写删目标全部

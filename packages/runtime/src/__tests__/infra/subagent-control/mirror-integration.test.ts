@@ -3,7 +3,7 @@
  * 引擎桩在 fd3 写 `{v,recordId,seq,b64}` 帧 → server attachChildWiring 的 data 监听 →
  * SubagentMirrorHub → tee 帧发布 / getStreamStateByRecord / degraded / 通道关闭释放。
  *
- * 分层（判据三档，docs/todo/test-single-layer-cleanup.md）：引擎进程换进程内桩
+ * 分层（判据三档，docs/TEST-STRATEGY.md「新写测试判据」节）：引擎进程换进程内桩
  * （fake-engine.ts，spawn 注入；fd3 由桩的 stdio[3] 提供），镜像帧的到达/释放全部经
  * 状态查询与 publish 回执收尾——第 ② 档「异步但有确定性完成信号」，零真 spawn、
  * 零墙钟窗口。真引擎经 fd3 写镜像的跨进程形态不属本层（第 ③ 档）。

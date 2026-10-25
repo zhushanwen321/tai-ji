@@ -469,7 +469,7 @@ export function initSandbox(pluginDir: string): void {
   // require('fs') 直接成功。拦截器已接入能力词表（声明能力的模块两条加载通道一致生效）。
   // S-36 一次性监控日志随观察期机制一并移除（F1-23 用户裁决 2026-10-24：删监控留拦截——
   // 「观察期无命中删拦截器」的减法终局已被保留裁决取代，监控失去存在理由；
-  // 登记条目 docs/todo/test-single-layer-cleanup.md 同步退役）。
+  // 原登记文档（test 单层化清理清单）已整体退役，沿革见 git 历史）。
   ModuleApi._resolveFilename = function (
     request: string,
     ...args: unknown[]

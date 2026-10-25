@@ -68,7 +68,7 @@ function makeCreateEnv(opts?: { failGetStateOnce?: boolean }) {
     getReplaceSystemPrompt: vi.fn(() => undefined),
     toSummary: vi.fn((s: { id: string; label: string; cwd: string }): SessionSummary => ({
       id: s.id, label: s.label, cwd: s.cwd, status: 'active' as const,
-      lastActiveAt: 1, modelId: 'prov/model', tokenCount: 0,
+      lastActiveAt: 1,
     })),
     notifySessionCreated: vi.fn(),
     findScannedSession: vi.fn(() => undefined),
@@ -101,7 +101,7 @@ function makeCreateEnv(opts?: { failGetStateOnce?: boolean }) {
 function summaryOf(id: string): SessionSummary {
   return {
     id, label: 'L', cwd: '/w', status: 'idle',
-    lastActiveAt: 1, modelId: 'prov/model', tokenCount: 0,
+    lastActiveAt: 1,
   }
 }
 

@@ -539,6 +539,25 @@ describe("status {runId} 单 run 视图（成员表 + failed N/M + 查无两种�
     // 省略 runId 列全部不是超窗口的恢复动作（列表同样不含已逐出 run）
     expect(err.message).not.toContain("without runId");
   });
+
+  it("runId 白名单外形态（路径穿越载荷）→ 恒走未知 id 文案，不触达磁盘探测（存在性 oracle 关闭）", async () => {
+    // 预埋穿越目标文件：白名单缺位时 existsSync(join(journalDir, "../outside.record.jsonl"))
+    // 命中 → 「settled」分支泄露目标文件存在性；白名单前置后 store 零触达，恒「未知 id」。
+    const root = mkdtempSync(join(tmpdir(), "wf-status-traversal-"));
+    const journalDir = join(root, "journal");
+    mkdirSync(journalDir, { recursive: true });
+    writeFileSync(join(root, "outside.record.jsonl"), "{}\n", "utf-8");
+    try {
+      const tool = captureStatusTool(new Map(), journalDir);
+      const err = await tool
+        .execute("id", { action: "status", runId: "../outside" }, undefined, undefined, {})
+        .catch((e: unknown) => e as Error);
+      expect(err.message).toContain("Workflow run '../outside' not found.");
+      expect(err.message).not.toContain("settled and no longer in the in-memory retention window");
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -591,6 +610,60 @@ describe("workflow_run 保留键同名缺参双通道解释（§3.3.7）", () =>
 
     expect(err.message).toContain("Invalid args for workflow 'demo-wf'");
     expect(err.message).not.toContain("Channel note");
+  });
+
+  it("嵌套对象内 required 同名键（model）缺失 → 普通缺参原样透出，无 Channel note", async () => {
+    // [todo workflow-reserved-key-channel-nested-required，条目 7] ajv 对嵌套对象
+    // 内部的 required 缺失同样产生 params.missingProperty（instancePath 指向真实
+    // 位置如 /args/tasks/0）——提取时不过滤 instancePath 会把嵌套缺参误收进顶层
+    // 缺失清单，错误文案被附上不成立的「顶层键是 run 级覆盖」解释。
+    const nested = new ArgsValidationError(
+      "demo-wf",
+      `Invalid args for workflow 'demo-wf': 1 error(s)\n` +
+        `- /args/tasks/0: must have required property 'model'\n` +
+        `Read the workflow script file (location from <available_workflows>) for the parameter schema and usage.`,
+      [
+        {
+          instancePath: "/args/tasks/0",
+          message: "must have required property 'model'",
+          params: { missingProperty: "model" },
+        },
+      ],
+    );
+    const err = await runWorkflowCapturingError({ args: { tasks: [{}] } }, nested);
+
+    expect(err.message).toContain("Invalid args for workflow 'demo-wf'");
+    expect(err.message).toContain("/args/tasks/0: must have required property 'model'"); // 原缺参报错正常透出
+    expect(err.message).not.toContain("Channel note");
+  });
+
+  it("顶层 + 嵌套混合缺失 → Channel note 只解释顶层保留键，嵌套同名键不进解释", async () => {
+    // 顶层缺 slug（保留键）+ 嵌套缺 model（保留键同名）：收集器只收 instancePath === ""
+    // 的顶层键——解释文案锚 slug，model 不被顶层化污染。
+    const mixed = new ArgsValidationError(
+      "demo-wf",
+      `Invalid args for workflow 'demo-wf': 2 error(s)\n` +
+        `- : must have required property 'slug'\n` +
+        `- /args/tasks/0: must have required property 'model'\n` +
+        `Read the workflow script file (location from <available_workflows>) for the parameter schema and usage.`,
+      [
+        {
+          instancePath: "",
+          message: "must have required property 'slug'",
+          params: { missingProperty: "slug" },
+        },
+        {
+          instancePath: "/args/tasks/0",
+          message: "must have required property 'model'",
+          params: { missingProperty: "model" },
+        },
+      ],
+    );
+    const err = await runWorkflowCapturingError({}, mixed);
+
+    expect(err.message).toContain("Channel note");
+    expect(err.message).toContain('top-level "slug" on workflow_run is a run-level override');
+    expect(err.message).not.toContain('top-level "model"');
   });
 
   it("非 ArgsValidationError 的 runWorkflow 失败 → 原样传播（catch 不吞）", async () => {

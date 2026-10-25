@@ -28,6 +28,7 @@ export default {
     // DAG 画布
     dagCanvasLabel: '工作流结构图（DAG）',
     dagZoomHint: '滚轮缩放 · 拖拽平移',
+    dagBackToFit: '回到全景',
     dagLoading: '解析 workflow 结构…',
     dagRetryParse: '重试解析',
     dagErrorParseFailed: 'DAG 解析失败，已切换为列表视图',
@@ -71,6 +72,7 @@ export default {
     chipSettled: '已收束',
     statusDone: '完成',
     statusFailed: '失败',
+    statusCancelled: '已取消',
     attemptLabel: '尝试',
     eventsEmpty: '暂无事件记录',
     eventsNotFound: '该 run 无事件流记录',

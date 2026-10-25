@@ -485,7 +485,6 @@ describe('session 域 请求-响应', () => {
     mockCommand.mockResolvedValueOnce({ groups: [{ cwd: '/a' }] })
     await expect(session.list()).resolves.toEqual([{ cwd: '/a' }])
     expect(mockCommand).toHaveBeenCalledWith('config.sessions', {}, RPC_BACKSTOP_TIMEOUT_MS)
-
     // 仅 cwd：其余可选键全部省略
     mockCommand.mockResolvedValueOnce({ session: { id: 's1' } })
     await expect(session.create('/a')).resolves.toEqual({ id: 's1' })
@@ -500,6 +499,21 @@ describe('session 域 请求-响应', () => {
     mockCommand.mockResolvedValueOnce({ session: { id: 's3' } })
     await session.create('/a', 'L', 'preset-1', 'pj', 'p/m', 'high', 'u-create-1')
     expect(mockCommand.mock.calls[3][1]).toEqual({ cwd: '/a', label: 'L', presetId: 'preset-1', projectId: 'pj', modelOverride: 'p/m', thinkingOverride: 'high', clientUuid: 'u-create-1' })
+  })
+
+  it('listSessions（W4b 通用查询）：type=session.list + 过滤参数原样透传 + 解包 groups', async () => {
+    // 无参 = 全量（与 config.sessions 查询侧同形）
+    mockCommand.mockResolvedValueOnce({ groups: [{ cwd: '/a' }] })
+    await expect(session.listSessions({})).resolves.toEqual([{ cwd: '/a' }])
+    expect(mockCommand).toHaveBeenCalledWith('session.list', {}, RPC_BACKSTOP_TIMEOUT_MS)
+
+    // 显式过滤参数（调用侧显式传参，不依赖无参默认语义——搜索传 surface:'sidebar'、
+    // 抽屉传 surface:'btw' + mainSessionId）
+    mockCommand.mockResolvedValueOnce({ groups: [{ cwd: '/a', sessions: [{ id: 'l1', surface: 'btw' }] }] })
+    await expect(session.listSessions({ surface: 'btw', mainSessionId: 's-main' })).resolves.toEqual([
+      { cwd: '/a', sessions: [{ id: 'l1', surface: 'btw' }] },
+    ])
+    expect(mockCommand).toHaveBeenLastCalledWith('session.list', { surface: 'btw', mainSessionId: 's-main' }, RPC_BACKSTOP_TIMEOUT_MS)
   })
 
   it('switchSession / restoreSession / forceQuit / fork', async () => {
@@ -844,6 +858,18 @@ describe('workspace 域', () => {
     await expect(workspace.detect('/ws/proj')).resolves.toEqual(bareReply)
     expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['workspace.detect', { cwd: '/ws/proj' }])
   })
+
+  it('setPinned 解包 records + degraded 透传（pin 上限拒绝降级链路）', async () => {
+    mockCommand.mockResolvedValueOnce({ records: [{ cwd: '/a' }], degraded: true })
+    await expect(workspace.setPinned('/a', true)).resolves.toEqual({ records: [{ cwd: '/a' }], degraded: true })
+    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['workspace.setPinned', { cwd: '/a', pinned: true }])
+  })
+
+  it('defaultSessionDir 解包 dir（空串 = runtime ensure 失败，透传不吞）', async () => {
+    mockCommand.mockResolvedValueOnce({ dir: '/data/defaultSession' })
+    await expect(workspace.defaultSessionDir()).resolves.toBe('/data/defaultSession')
+    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['workspace.defaultSessionDir', {}])
+  })
 })
 
 // ── config 域 ──────────────────────────────────────────────────────────────
@@ -923,6 +949,18 @@ describe('config 域 请求-响应', () => {
     await expect(config.getRetryConfig()).resolves.toEqual(retry)
     mockCommand.mockResolvedValueOnce(retry)
     await expect(config.setRetryConfig({ maxRetries: 3 } as never)).resolves.toEqual(retry)
+  })
+
+  it('retry 规则视图（subagent-observability §3.3.12）：get/set 走对应 type + customRules 透传', async () => {
+    const view = { builtinRules: [{ id: 'b' }], customRules: [{ id: 'c' }] }
+    mockCommand.mockResolvedValueOnce(view)
+    await expect(config.getRetryRules()).resolves.toEqual(view)
+    expect(mockCommand).toHaveBeenLastCalledWith('config.getRetryRules', {}, RPC_BACKSTOP_TIMEOUT_MS)
+
+    const rules = [{ id: 'probe', name: 'p', verdict: 'retryable', class: 'provider', source: 'custom', match: [{ kind: 'pattern', pattern: 'x' }] }]
+    mockCommand.mockResolvedValueOnce(view)
+    await expect(config.setRetryRules(rules as never)).resolves.toEqual(view)
+    expect(mockCommand).toHaveBeenLastCalledWith('config.setRetryRules', { customRules: rules }, RPC_BACKSTOP_TIMEOUT_MS)
   })
 
   it('OAuth：login/cancel/logout/hasOAuth/checkEnvVars', async () => {
@@ -1085,6 +1123,19 @@ describe('config 域 订阅（onGlobalType 通道）', () => {
     expect(hRc).toHaveBeenCalledWith({ config: { maxRetries: 1 }, configured: false })
   })
 
+  it('onRetryRules 经 onGlobalType(config.retryRules) 解包 payload（subagent-observability §3.3.12）', () => {
+    const subs: Array<[string, (msg: { payload: unknown }) => void]> = []
+    mockOnGlobalType.mockImplementation((type, handler) => {
+      subs.push([type, handler])
+      return vi.fn()
+    })
+    const h = vi.fn(); config.onRetryRules(h)
+    const byType = Object.fromEntries(subs)
+    const view = { builtinRules: [{ id: 'b' }], customRules: [{ id: 'c' }] }
+    byType['config.retryRules']({ payload: view })
+    expect(h).toHaveBeenCalledWith(view)
+  })
+
   it('onNetworkProxyConfig 解包 payload.config（llm-network-proxy U1）', () => {
     const subs: Array<[string, (msg: { payload: unknown }) => void]> = []
     mockOnGlobalType.mockImplementation((type, handler) => {
@@ -1122,23 +1173,17 @@ describe('config 域 订阅（onGlobalType 通道）', () => {
   })
 })
 
-// ── btw 域（btw-question D6，M2-a）────────────────────────────────────────
-describe('btw 域 RPC 封装（D6 3 控制帧）', () => {
-  it('create：type/payload { mainSid } + reply 全字段透传（vid + mainSid + forkState）', async () => {
-    mockCommand.mockResolvedValueOnce({ vid: 'btw:pi-1', mainSid: 's-main', forkState: 'none' })
-    await expect(btw.create('s-main')).resolves.toEqual({ vid: 'btw:pi-1', mainSid: 's-main', forkState: 'none' })
+// ── btw 域（btw-question D6，M2-a；线枚举随 W4b 退役，改走 session.listSessions）──────
+describe('btw 域 RPC 封装（D6 控制帧）', () => {
+  it('create：type/payload { mainSid } + reply 全字段透传（sessionId + mainSid + forkState）', async () => {
+    mockCommand.mockResolvedValueOnce({ sessionId: 'pi-1', mainSid: 's-main', forkState: 'none' })
+    await expect(btw.create('s-main')).resolves.toEqual({ sessionId: 'pi-1', mainSid: 's-main', forkState: 'none' })
     expect(mockCommand).toHaveBeenCalledWith('btw.create', { mainSid: 's-main' }, RPC_BACKSTOP_TIMEOUT_MS)
   })
 
-  it('list：type/payload { mainSid } + 解包 threads（与 session.list 解包 groups 同模式）', async () => {
-    mockCommand.mockResolvedValueOnce({ mainSid: 's-main', threads: [{ vid: 'btw:pi-1' }, { vid: 'btw:pi-2' }] })
-    await expect(btw.list('s-main')).resolves.toEqual([{ vid: 'btw:pi-1' }, { vid: 'btw:pi-2' }])
-    expect(mockCommand).toHaveBeenCalledWith('btw.list', { mainSid: 's-main' }, RPC_BACKSTOP_TIMEOUT_MS)
-  })
-
-  it('remove：type/payload { vid }，ack 型（command 返回 void，完成即 resolve）', async () => {
-    await btw.remove('btw:pi-1')
-    expect(mockCommand).toHaveBeenCalledWith('btw.remove', { vid: 'btw:pi-1' }, RPC_BACKSTOP_TIMEOUT_MS)
+  it('remove：type/payload { sessionId }，ack 型（command 返回 void，完成即 resolve）', async () => {
+    await btw.remove('pi-1')
+    expect(mockCommand).toHaveBeenCalledWith('btw.remove', { sessionId: 'pi-1' }, RPC_BACKSTOP_TIMEOUT_MS)
   })
 })
 

@@ -107,17 +107,21 @@ describe("映射表（色调 / 徽标 / 失败族）", () => {
     [{ status: "done", reason: "aborted" }, "error", "error(✗ aborted)"],
     [{ status: "done", reason: "budget_limited" }, "error", "error(⚠ budget)"],
     [{ status: "done", reason: "time_limited" }, "error", "error(⚠ timeout)"],
+    // [subagent-observability §3.3.8 消费链①] partially_succeeded 独立档（不落失败族
+    // 红档——「一半成功」呈现为全败 = 故障 B 反方向失真；场景 2 TUI 呈现断言）
+    [{ status: "done", reason: "partially_succeeded" }, "warning", "warning(◐ partial)"],
   ] as const)("形态 %j → tone %s / badge %s", (shape, tone, badge) => {
     const ds = runDisplayStateOf(makeRun(shape as never));
     expect(runToneOf(ds)).toBe(tone);
     expect(formatRunBadge(ds, markingTheme)).toBe(badge);
   });
 
-  it("失败族判定只认 done + 非 completed", () => {
+  it("失败族判定只认 done + 非 completed、非 partially_succeeded（§3.3.8 独立档排除）", () => {
     expect(isFailedTerminal(runDisplayStateOf(makeRun({ status: "done", reason: "failed" })))).toBe(true);
     expect(isFailedTerminal(runDisplayStateOf(makeRun({ status: "done", reason: "completed" })))).toBe(false);
     expect(isFailedTerminal(runDisplayStateOf(makeRun({ status: "done" })))).toBe(false);
     expect(isFailedTerminal(runDisplayStateOf(makeRun()))).toBe(false);
+    expect(isFailedTerminal(runDisplayStateOf(makeRun({ status: "done", reason: "partially_succeeded" })))).toBe(false);
   });
 
   it("run 域徽标与 format.ts 的既有徽标逐字一致（同输入同输出，防两表漂移）", () => {

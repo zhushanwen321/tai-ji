@@ -12,7 +12,7 @@ function makeSystem(over: Partial<SystemSettings> = {}): SystemSettings {
   return {
     locale: 'zh-CN',
     theme: 'dark',
-    themePreset: 'cold-blue',
+    themePreset: '',
     fontSize: 'medium',
     ...over,
   } as SystemSettings
@@ -58,14 +58,14 @@ describe('applySystemToDom', () => {
     expect(setAttribute).toHaveBeenCalledWith('data-theme', 'dark')
   })
 
-  it('themePreset 写 data-theme-preset，缺省 cold-blue', () => {
+  it('themePreset 写 data-theme-preset，缺省空串', () => {
     applySystemToDom(makeSystem({ themePreset: 'warm-amber' }))
     expect(setAttribute).toHaveBeenCalledWith('data-theme-preset', 'warm-amber')
   })
 
-  it('themePreset 缺省回落 cold-blue', () => {
+  it('themePreset 缺省回落空串', () => {
     applySystemToDom(makeSystem({ themePreset: undefined }))
-    expect(setAttribute).toHaveBeenCalledWith('data-theme-preset', 'cold-blue')
+    expect(setAttribute).toHaveBeenCalledWith('data-theme-preset', '')
   })
 
   it('fontSize 写 dataset.fontSize，缺省 medium', () => {

@@ -8,7 +8,11 @@
  * 3. **流损坏 = 保守 miss + warn**（通知链不是恢复面；恢复面的拒绝语义在
  *    loadAll，见 record-mode 场景 18 用例）;
  * 4. **零快照写面**：save（终局前后）不产生任何 state 投影文件——磁盘上唯一
- *    持久件 = record 流。
+ *    持久件 = record 流；
+ * 5. **成员结算明细随帧透传**（[subagent-observability §3.3.8]）：帧含
+ *    failedMembers/partialMembers → settledRecordOf 逐字段保留——映射经 core
+ *    settlementRecordOfRunSettledFrame 单源，与 noteRebuiltSettlement 注册表
+ *    读者形状归一。
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -86,6 +90,30 @@ describe("壳 store 判终局唯一判法（[D1] record fold）", () => {
       errorCode: "budget_limited",
       reason: "budget exhausted",
       settledAt: ts,
+    });
+    await store.dispose();
+  });
+
+  it("成员结算明细保字段：run-settled 帧含 failedMembers/partialMembers → settledRecordOf 透传（[subagent-observability §3.3.8]）", async () => {
+    const store = new JsonlRunStore({ runsDir: tmpDir });
+    const ts = Date.now() - 500;
+    appendRecordLine("wf-route-members", {
+      type: "run-settled",
+      seq: 5,
+      ts,
+      outcome: "partially_succeeded",
+      reason: "member deliverables partially satisfied",
+      artifactsDir: tmpDir,
+      failedMembers: [{ taskIndex: 1, cause: "provider.rate_limited" }],
+      partialMembers: [{ taskIndex: 2, missing: ["report.md"] }],
+    });
+
+    expect(store.settledRecordOf("wf-route-members")).toEqual({
+      outcome: "partially_succeeded",
+      reason: "member deliverables partially satisfied",
+      settledAt: ts,
+      failedMembers: [{ taskIndex: 1, cause: "provider.rate_limited" }],
+      partialMembers: [{ taskIndex: 2, missing: ["report.md"] }],
     });
     await store.dispose();
   });

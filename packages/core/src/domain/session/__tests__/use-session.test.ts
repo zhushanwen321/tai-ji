@@ -23,7 +23,7 @@ import { setImageCacheWritePort, _resetImageCacheForTest } from '../../chat/imag
 
 /** 构造 SessionSummary 最小形状（类型收窄后字段由测试按需给全） */
 function summary(id: string, cwd = '/a'): SessionSummary {
-  return { id, label: `label-${id}`, cwd, status: 'idle', lastActiveAt: 1, modelId: '', tokenCount: 0 }
+  return { id, label: `label-${id}`, cwd, status: 'idle', lastActiveAt: 1 }
 }
 
 function makeHooks(log: string[]): SessionCleanupHooks & Record<string, ReturnType<typeof vi.fn>> {

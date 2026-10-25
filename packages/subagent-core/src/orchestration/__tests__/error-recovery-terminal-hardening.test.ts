@@ -358,14 +358,16 @@ describe("[OR-8] run done 时残留 in-flight call 收尾 cancelled", () => {
     // call 收尾为 done + 取消文案（不删除条目——保留调用痕迹）
     expect(call?.status).toBe("done");
     expect(call?.result?.error).toContain("Cancelled");
-    // trace 节点 failed + completedAt（快照/GUI 不再显示 running 步骤）
+    // [subagent-observability §3.3.8] trace 节点 cancelled + completedAt（快照/GUI
+    // 不再显示 running 步骤；取消收尾成员显示 cancelled 而非 failed——「未交付且
+    // 非失败」中性档，不冒充失败）
     const node = findByStep(run.state.trace, 1);
-    expect(node?.status).toBe("failed");
+    expect(node?.status).toBe("cancelled");
     expect(node?.error).toContain("Cancelled");
     expect(node?.completedAt).toBeDefined();
-    // 收尾后聚合侧无 running 形态（call 全 done、trace 全 failed——收尾先于终态）
+    // 收尾后聚合侧无 running 形态（call 全 done、trace 全 cancelled——收尾先于终态）
     expect(Array.from(run.state.calls.values()).map((c) => c.status)).toEqual(["done"]);
-    expect(run.state.trace.toArray().map((n) => n.status)).toEqual(["failed"]);
+    expect(run.state.trace.toArray().map((n) => n.status)).toEqual(["cancelled"]);
   });
 
   it("handleWorkerError 超限路径同样收尾（failed 快照一致）", async () => {
@@ -383,7 +385,8 @@ describe("[OR-8] run done 时残留 in-flight call 收尾 cancelled", () => {
     expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.state.calls.get(2)?.status).toBe("done");
     expect(run.state.calls.get(2)?.result?.error).toContain("Cancelled");
-    expect(findByStep(run.state.trace, 2)?.status).toBe("failed");
+    // [subagent-observability §3.3.8] 取消收尾成员 trace 显示 cancelled 而非 failed
+    expect(findByStep(run.state.trace, 2)?.status).toBe("cancelled");
   });
 
   it("closeOutInFlightCalls 对 pending 状态 call 补齐状态机（markRunning→markDone）", () => {

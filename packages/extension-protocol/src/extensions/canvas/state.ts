@@ -160,6 +160,13 @@ export interface ReviewReport { // oe-exempt:20261015:framework:画布域类型�
   round: number
   maxRounds: number
   entries: ReviewEntry[]
+  /**
+   * 最近一次报告写回（review-append）的轮次。零发现轮的完成事实：空 entries 也是
+   * 审查结论，条目存在性判不了「本轮 run 已完成」——轮次推进与 maxRounds 预算的
+   * 完成判定以本字段为准（有条目轮两条判据皆成立）。optional = 尚无任何写回 /
+   * 旧快照兼容（缺省按无写回处理，不阻碍既有数据重放）。
+   */
+  lastRunRound?: number
   /** 非 converged 终态的停回说明（聚合 2 不变量 2：max-rounds / escalated / stuck 必附）。 */
   stopNote?: string
   /** 恢复动作建议（停回说明的配套：升级裁决后可再发起）。 */

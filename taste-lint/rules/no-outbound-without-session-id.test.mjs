@@ -52,9 +52,9 @@ test('正例：publish 转发形态（message 是变量，静态盲区）→ 不
   expect(messages).toHaveLength(0);
 });
 
-test('正例：payload 函数构造（静态盲区，btw.list 同构）→ 不报', () => {
+test('正例：payload 函数构造（静态盲区，聚合消息同构）→ 不报', () => {
   const messages = lintTs(
-    "bus.publish(mainSid, { type: 'btw.list', payload: buildBtwThreadListPayload(svc, mainSid) });",
+    "bus.publish(mainSid, { type: 'x.list', payload: buildThreadListPayload(svc, mainSid) });",
   );
   expect(messages).toHaveLength(0);
 });
@@ -148,8 +148,8 @@ test('反例：多行调用形态（实装常见跨行 publish）缺 sessionId �
 test('豁免：调用点上一行登记注释 → 不报', () => {
   const messages = lintTs(
     [
-      '// taste:allow-outbound-without-session-id — btw.list 消费端走 onGlobalType global 通道',
-      "bus.publish(mainSid, { type: 'btw.list', payload: { threads } });",
+      '// taste:allow-outbound-without-session-id — 聚合消息消费端走 onGlobalType global 通道',
+      "bus.publish(mainSid, { type: 'x.list', payload: { threads } });",
     ].join('\n'),
   );
   expect(messages).toHaveLength(0);

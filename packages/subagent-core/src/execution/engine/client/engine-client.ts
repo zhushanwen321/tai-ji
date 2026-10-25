@@ -195,9 +195,16 @@ export class EngineClient {
   /**
    * 本次连接绑定的根 session id（run 路径 = RunContext.sessionRootId 权威值；
    * 未注入 = undefined，由 runtime transport 以 control env 回落）。启动期连接前
-   * 由 ensureConnected(rootSessionId) 写入，engine_open 据此携带归属键。
+   * 由 ensureConnected({rootSessionId}) 写入，engine_open 据此携带归属键。
    */
   private requestedRootSessionId: string | undefined;
+  /**
+   * [S-10] 本次通道的自申报 record id（launch.recordId wire 扩展，channel 树父链
+   * 挂点）。值源 = run 的 record 锚（ctx.resume?.recordId ?? ctx.taskId，RemoteEngine
+   * 注入）；仅在 open 消费（通道生命周期内不可变——同通道后续 run 复用首挂点，
+   * 该 run 的子孙收割依赖进程组 + 连接 fan-out 结构性兜底，与 probe 先行通道同形态）。
+   */
+  private requestedRecordId: string | undefined;
   private nextRequestId = 1;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly runRoutes = new Map<string, RunRoute>();
@@ -406,10 +413,15 @@ export class EngineClient {
    * 排查后重启宿主承接。[HISTORICAL] 原退避 1s/2s/4s × 3 次自动重建已删。
    * 版本协商越界 → engine_protocol_mismatch + 直接标记不可用。
    *
-   * [B-U-1 根会话权威] rootSessionId 可选：run 路径传 RunContext.sessionRootId
-   * （engine_open 归属键权威源）。连接已按 env 回落的旧根打开（如探针先于 run）
-   * 且当前无在途 run 时，换代重连让新的权威根生效；有在途 run 时保持旧连接并 warn
-   * （根会话在单 pi 进程生命周期内不变，跨根切换只可能来自宿主误用）。
+   * [B-U-1 根会话权威] bind.rootSessionId 可选：run 路径传 RunContext.sessionRootId
+   * （engine_open 归属键权威源；probe 路径传 service 层权威根——DC-12：probe 与
+   * run 命中同一 (socket, root) 共享连接，消双连接 + 3s close grace）。连接已按
+   * env 回落的旧根打开（如探针先于 run）且当前无在途 run 时，换代重连让新的权威根
+   * 生效；有在途 run 时保持旧连接并 warn（根会话在单 pi 进程生命周期内不变，跨根
+   * 切换只可能来自宿主误用）。
+   *
+   * [S-10] bind.recordId 可选：run 路径的 record 锚（ctx.resume?.recordId ??
+   * ctx.taskId），open 时随 launch 上 wire（channel 树父链挂点）；probe 路径无值。
    *
    * [R2A-N2 单飞] 连接与根换绑是同一个串行状态迁移：所有调用方在这里统一排队到
    * 一个 connectOrRebind promise（不区分「首连/换代」）。这样探针后并行两个 run
@@ -417,9 +429,12 @@ export class EngineClient {
    * transport）。排队返回后按最新权威根再判一次：根是在等待期间才到的（探针先到）
    * 就在本调用里补一次换代，而不是把旧根交给 run。
    */
-  async ensureConnected(rootSessionId?: string): Promise<void> {
-    if (rootSessionId !== undefined && rootSessionId.length > 0) {
-      this.requestedRootSessionId = rootSessionId;
+  async ensureConnected(bind?: { rootSessionId?: string; recordId?: string }): Promise<void> {
+    if (bind?.rootSessionId !== undefined && bind.rootSessionId.length > 0) {
+      this.requestedRootSessionId = bind.rootSessionId;
+    }
+    if (bind?.recordId !== undefined && bind.recordId.length > 0) {
+      this.requestedRecordId = bind.recordId;
     }
     for (;;) {
       this.assertConnectable();
@@ -550,6 +565,9 @@ export class EngineClient {
       // （探针 / standalone）传空串占位，由 runtime transport 以 control env 回落。
       // local 实现忽略（types.ts rootSessionId 注）。
       rootSessionId: this.requestedRootSessionId ?? "",
+      // [S-10] record 锚（launch.recordId，channel 树父链挂点）：run 触发的 open
+      // 携带；probe 先行 / 无 run 上下文的 open 缺席（undefined 不上 wire）。
+      ...(this.requestedRecordId !== undefined ? { recordId: this.requestedRecordId } : {}),
     });
 
     // initialize 握手（HANDSHAKE_TIMEOUT_MS；版本越界 → mismatch + 不可用）。

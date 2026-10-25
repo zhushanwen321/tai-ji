@@ -25,6 +25,7 @@
 import { RunRuntime } from "./run-runtime.ts";
 import type { RunSpec } from "./run-spec.ts";
 import type { RunExecutionSnapshot } from "./run-state.ts";
+import type { AgentCallOpts } from "./types.ts";
 // 类型边（编译期擦除，不构成值依赖环——run-event-journal 同款方向说明）：
 // 覆盖记账形状的权威定义在 run-events.ts（事件载荷与 meta 挂载值同一形状单源）。
 import type { WorkflowModelOverride } from "../run-events.ts";
@@ -63,6 +64,17 @@ export interface WorkflowRunMeta {
    * 本字段不回写事件流。
    */
   modelOverride?: WorkflowModelOverride;
+  /**
+   * [subagent-observability §3.3.6/§3.3.9 budget 分轴显式] 重建侧恢复的 call 声明
+   * 入参（agent-started 帧 input 载荷解析产物），键 = taskIndex。只收录重派集成员
+   * （崩溃时在途、result 缺省——calls Map 不建条目，见 resume-run-rebuild
+   * draftsToReplayCalls）：预算派生（run-member-view budgetViewOf）对 calls miss 的
+   * stepIndex 回落本表读声明值，「已声明上界」不因重建窗口显示为「显式无界」。
+   * 写点 = core rebuildRunFromRecord；fresh run 恒 undefined；worker 重派后
+   * dispatchAgentCall 落 calls 条目，calls 优先、本表退化为不被消费的陈旧数据。
+   * 纯展示派生视图——不参与派发/回放/终局判定。
+   */
+  recoveredCallOpts?: Map<number, AgentCallOpts>;
   /** Worker 线程错误计数（C.5；[ADR-0122] 后无生产写入方，旧 record 兼容读）。 */
   workerErrorCount?: number;
  /** 脚本错误计数（C.5；[ADR-0122] 后无生产写入方，旧 record 兼容读）。 */

@@ -14,8 +14,9 @@
  * (a) chunk 状态更新（原 applyChunk 逻辑）+ (b) 终态收尾（finalizeSession，替代原 useChat
  * setStreaming 的 lifecycle flag 翻转）。useChat 收到 message.* 只调 store.applyMessageEvent（单一入口），
  * 不再自己 switch message.*。session.*（compacting/compacted/renamed/state_changed/
- * thinkingLevelSet）涉及跨 store（sessionStore.applySnapshot），
- * 保留在 useChat。
+ * thinkingLevelSet）涉及跨 store，保留在 useChat：其中 renamed 走导航列表 applySnapshot
+ * （仅 label 展示字段），state_changed / thinkingLevelSet 走状态层 applyLiveState
+ * （帧路由见 useChat.ts handle* helper 与 :738）。
  *
  * 行为等价性：
  * - 状态更新顺序与原 applyChunk 逐 case 一致（handler 内先更新 chunk 状态，后收尾，
@@ -57,6 +58,8 @@ import type {
   ToolCall,
 } from '@taiji/shared'
 import { deriveToolResultOutputs, isPlainRecord, parseDiffStat } from '../apply-entry-utils'
+// [chat-flow-consistency D3/C1] 定稿重建与迟到帧定位实现体（独立模块，先例 entry-overlay）
+import { locateToolCallHost, rebuildAssistantOnFinalize } from './finalized-rebuild'
 import type { RetryState, FinalizeReason } from '../store-types'
 import type { MessageEffectContext, MessageEffectHandler } from '../effect-types'
 export type { MessageEffectContext, MessageEffectHandler } from '../effect-types'
@@ -80,7 +83,15 @@ import { isDevMode } from '../../../platform/dev-mode'
 // [投递所有权内核 u3b] message_end(user) 送达回执（内核标记 id 匹配，C-data-08 修订方向）
 // 归位 effects/user-delivery.ts；① 前身（defer 分区 FIFO 文本匹配）与 queue_update 计数路径
 // （countDrained/drainN）已随内核整体退役（设计 §3.1 删除范围），git 可追溯。
-import { confirmKernelDeliveryOnMessageEnd, hasKernelDeliveryMarker } from './user-delivery'
+// ③ 守卫降级（rpc-direct-send-user-bubble）：标记未命中派生视图且无记账的帧降级入流显示。
+import {
+  confirmKernelDeliveryOnMessageEnd,
+  degradeUnmatchedKernelDelivery,
+  hasKernelDeliveryMarker,
+} from './user-delivery'
+// [chat-flow-consistency 缺陷 3/7] 停止提示行与截断提示行的文案 i18n 键出口（core 无 i18n，
+// renderer 装配层注入翻译——见 notice-text.ts 文件头）
+import { chatNoticeText, TRUNCATED_STOP_REASONS, type ChatNoticeKey } from './notice-text'
 // [TODO @i18n-migration] core/i18n 落地后恢复 i18n.global.t 调用（§0.3 列为后续迁移）。
 // compactionSummary（W6）/ branchSummary（D13 renderer-deepening）均已 entry 化：两者的
 // summary 兜底收敛到 reducer（compaction 中文 fallback「上下文已压缩」/ branchSummary
@@ -125,8 +136,10 @@ function confirmUserDeliveryOnMessageEnd(
   }
   // ③ 外来直发（无内核标记 + 无记账）：交调用方入流。带标记帧属送达回执通道管辖——
   // ① 已消费，或「迟到重复回执」形态（派生视图已 delivered + 记账已归零）须静默防双插
-  //（E5c 场景），不按外来处理。
-  if (hasKernelDeliveryMarker(entry)) return true
+  //（E5c 场景），不按外来处理。管辖帧的显示承接（派生视图缺条目 + 无记账的形态——协议
+  // 直发遇上订阅/补齐时序缺口）由 degradeUnmatchedKernelDelivery 降级入流承担，不再
+  // 无条件静默丢弃（rpc-direct-send-user-bubble：静默 = live 消息缺失直到切回/刷新）。
+  if (hasKernelDeliveryMarker(entry)) return degradeUnmatchedKernelDelivery(ctx, sid, entry)
   return false
 }
 
@@ -267,6 +280,64 @@ function appendFallbackErrorBubble(
 }
 
 /**
+ * [chat-flow-consistency 缺陷 1 方案 B] attempt 级收尾（消息级局部定格）。
+ *
+ * willRetry=true 的 message.complete 是「attempt 级终态」而非「回合级终态」——当前
+ * streaming assistant 消息级定格为中性中断态（非红条、非错误呈现），但**不经
+ * finalizeSession**（不清 pendingSend、不清 retryStates、不动 timer——回合仍在重试，
+ * 回合保持「进行中」呈现，RetryIndicator 横幅是中间失败唯一提示点）。
+ *
+ * 定格语义（复用 finalizeMessages 非 error 收尾口径）：content 保留、endedAt 补写、
+ * running toolCall → 'end_not_received'（attempt 已死不会再有内容；不保留 streaming 态
+ * ——「最后一条 streaming assistant」定位会被旧气泡抢占）。status 落 'complete'（中性，
+ * 错误文案只住 retryStates 横幅，不双显）。
+ */
+function finalizeAttemptAssistant(messages: MessageEffectContext['messages'], sid: string): boolean {
+  const prev = messages.value.get(sid)?.value ?? []
+  const lastIdx = findLastAssistantIndex(prev)
+  if (lastIdx < 0 || prev[lastIdx].status !== 'streaming') return false
+  const now = Date.now()
+  const next = prev.map((m) => {
+    if (m.role !== 'assistant' || m.status !== 'streaming') return m
+    return {
+      ...m,
+      status: 'complete' as const,
+      content: m.content,
+      toolCalls: m.toolCalls?.map((tc) =>
+        tc.status !== 'running' ? tc : { ...tc, status: 'end_not_received' as const, endTime: now },
+      ),
+      // 产出结束时刻补写（与 finalizeStreamingMessage 的非 error 分支对齐；已写过则幂等不动）
+      ...(m.role === 'assistant' && m.endedAt === undefined ? { endedAt: now } : {}),
+    }
+  })
+  commitMessages(messages, sid, next)
+  return true
+}
+
+/**
+ * [chat-flow-consistency 缺陷 3/7] liveOnly 提示行追加（stream_warn 先例形态）：
+ * id `s-<uuid>`、liveOnly: true、分组归 turn 内 notice 不切断回合（W3 消费）；pi 无对应
+ * entry、重开即消失——live ≠ reload 差异与 stream_warn 同型（W2 已裁决豁免等价性断言）。
+ *
+ * @param dedupeKey 提示行幂等锚：末位消息已是 liveOnly 行且携带同一键时跳过——
+ *   complete{aborted} 双通道到达（缺陷 9：runtime 必达广播 + pi 自发翻译帧，消费方幂等
+ *   契约）防重复追加两行。
+ */
+function appendTurnNoticeLine(
+  messages: MessageEffectContext['messages'],
+  sid: string,
+  key: ChatNoticeKey,
+): void {
+  const prev = messages.value.get(sid)?.value ?? []
+  const last = prev[prev.length - 1]
+  if (last?.role === 'system' && last.liveOnly === true && last.content === chatNoticeText(key)) return
+  commitMessages(messages, sid, [
+    ...prev,
+    { id: `s-${randomUuid()}`, role: 'system', content: chatNoticeText(key), status: 'complete', timestamp: Date.now(), liveOnly: true },
+  ])
+}
+
+/**
  * [b05 候选1 收敛] error / stream_error 终态 handler 骨架（原两 handler 逐行近似复制，
  * 仅差 reason 与错误字段来源，参数化收敛）：prev 读取 → hasStreaming 探测 →
  * finalizeSession → 无前置 streaming entity 时追加兜底纯 error 气泡。
@@ -325,30 +396,12 @@ function deriveToolCallEndOverlay(message: PiMessageEntry['message']): {
   }
 }
 
+
 /**
- * 标记末条 streaming assistant 的文本已定稿（chat-flow-text-color D1）。
- *
- * 调用时机 = message.message_end（assistant role）当下：pi 串行协议下此刻该消息的
- * text_delta 已全部到达，此后不会再增长。live 气泡 id 是 runtime 随机 a-uuid
- * （event-adapter assistantTurnStart），与 pi entry 的原生 message.id 不相交，无法按
- * id 匹配——按位置标记：末条 status:'streaming' 且未标记的 assistant 即属主
- * （start/end 严格成对按序到达，同一时刻至多一个未标记的 streaming 气泡）。
- *
- * 为什么不改 status：sealed guard isLastAssistantStreaming（D-010）依赖末条 assistant
- * 处于 streaming 态定位 tool_execution_* 帧属主，提前翻 complete 会静默丢工具事件。
- * 消费方 = ui Turn.vue unitBlockProps（正文颜色/思考块渲染粒度按本字段派生）。
+ * [chat-flow-consistency D3/C1] message_end(assistant) 定稿重建与 tool_call_start 三级定位
+ * 的实现体归位 effects/finalized-rebuild.ts（entry-overlay / user-delivery 同款模块化先例，
+ * 注册表本体只留 handler 接线）——rebuildAssistantOnFinalize / locateToolCallHost。
  */
-function markStreamingAssistantTextFinalized(ctx: Pick<MessageEffectContext, 'messages'>, sid: string): void {
-  const prev = ctx.messages.value.get(sid)?.value ?? []
-  for (let i = prev.length - 1; i >= 0; i--) {
-    const m = prev[i]
-    if (m?.role !== 'assistant' || m.status !== 'streaming' || m.textFinalized) continue
-    const next = [...prev]
-    next[i] = { ...m, textFinalized: true }
-    commitMessages(ctx.messages, sid, next)
-    return
-  }
-}
 
 const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> = {
   // ── 主流式生命周期（chunk 创建/收尾 + isGenerating 派生）──
@@ -405,6 +458,14 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // 单映射（与 dispatch 安全网共用；原先 handler 内独立推导一套）。
     const { reason, errorText: errorMessage } = deriveTerminalFrameParams('message.complete', payload)
     const isErrorStop = reason === 'error'
+    // [chat-flow-consistency 缺陷 1 方案 B] willRetry=true = pi 自动重试的中间失败、回合并
+    // 未结束（attempt 级终态）：走「attempt 收尾」路径——消息级定格、**不调** finalizeSession、
+    // 不追加 error 气泡、不把 streaming 气泡 error 化（错误文案只住 RetryIndicator 横幅，
+    // 单点分工不双显）。截断提示（缺陷 7）同样不触发——中间失败无终态呈现。
+    if (isErrorStop && readBool(payload, 'willRetry')) {
+      finalizeAttemptAssistant(messages, sid)
+      return
+    }
     // [HISTORICAL] pi turn 失败（stopReason='error'）时 runtime event-adapter 从 agent_end 提取
     // errorMessage 放进本 payload。曾经过往 handler 只读 stopReason/content/usage 把它丢弃——
     // 秒败 turn（如模型 400 拒绝首请求）content 为空，气泡仅剩一个空 error 态，用户完全不可见。
@@ -415,9 +476,9 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // findLastAssistantIndex 收最后一条。一个 turn 可能产生多个 assistant 气泡
     // （工具调用气泡 + 文字总结气泡）：只转最后一条会让前面的 toolCall 气泡永远 streaming，
     // 内部 status 虽视觉无感（turn 整体收尾），但状态机不一致且影响后续定位逻辑。
-    // usage（W05-A turn 级聚合）只回填最后一条 assistant——回填到非末 assistant 语义错位。
+    // usage 已随 chat-flow-consistency D3 规则 5 退役出本 patch（逐条 message_end 载荷唯一承担）。
     // [W4] toolCall 终态收尾收敛到 finalizeSession 统一处（原局部 finalizeToolCalls 已删除，
-    // 避免两套映射漂移）。此处只改 message status + 回填 usage，toolCalls 保持原样传入；
+    // 避免两套映射漂移）。此处只改 message status（+ 权威 content 覆盖），toolCalls 保持原样传入；
     // 紧接着的 finalizeSession(sid, reason) 会把 running toolCall 按 reason 统一收尾。
     //
     // 权威 content 覆盖：runtime 从 pi agent_end 提取的完整文本 content（见
@@ -431,9 +492,10 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     const next = prev.map((m, i) => {
       if (m.role !== 'assistant' || m.status !== 'streaming') return m
       changed = true
-      // 终态字段 patch 单源（S4-A6）：
-      // usage/error/content/endedAt 只作用于末位 assistant，见 terminalMessagePatch 注释
-      return terminalMessagePatch(m, i, { lastAssistantIdx, isErrorStop, errorMessage, finalContent, payload, endedAt: Date.now() })
+      // 终态字段 patch 单源（S4-A6）：status/error/content 只作用于末位 assistant。
+      // [chat-flow-consistency D3 规则 5] usage/endedAt 不再经本 patch 回填——定稿重建
+      //（message_end assistant 分支）按逐条载荷唯一承担，回合级覆写会使 turn 聚合双计。
+      return terminalMessagePatch(m, i, { lastAssistantIdx, isErrorStop, errorMessage, finalContent })
     })
     if (changed) commitMessages(messages, sid, next)
     // 秒败 turn（message_start 丢失/未广播）无 streaming 气泡可收尾：错误信息必须以纯 error
@@ -443,6 +505,25 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     if (isErrorStop && !changed) {
       // [M2 形态统一] 错误文本只住 error 字段，content 空（无崩溃前正文）
       appendFallbackErrorBubble(messages, sid, prev, errorMessage || REASON_FALLBACK_ERROR_TEXT.error)
+    }
+    // [chat-flow-consistency 缺陷 3] dispatching 窗口点停止：complete{aborted} 无实体可收尾
+    // （changed=false，用户消息可能已入 pi transcript 但无任何 streaming 实体）→ 追加 liveOnly
+    // 停止提示行（「已停止：回复尚未开始」），消除「乐观气泡孤挂、无回复无说明」的静默形态。
+    // 幂等防双通道重复（缺陷 9：runtime 必达广播 + pi 自发翻译帧，末位已是本提示则跳过）。
+    if (reason === 'aborted' && !changed) {
+      appendTurnNoticeLine(messages, sid, 'stoppedBeforeStart')
+    }
+    // [chat-flow-consistency 缺陷 7] 终态截断提示：max_tokens（输出半截）/content_filter
+    // （内容被安全过滤拒绝）按正常完成收尾但实为异常截断——追加 liveOnly 截断提示行
+    // （白名单不含 end_turn/tool_use，零行为变化）。
+    // 实施期核实点 V4 结论（已核实）：pi 1.0.0 AssistantMessage 落盘携带 stopReason
+    // （pi-ai dist/types.d.ts:386 必填）——entry 化的载荷前提成立，但 apply-entry 重放链
+    // 当前不消费该字段（PiMessageBody 未声明、reducer 无分支），升级 entry 化须改
+    // apply-entry-convert（chat-flow-consistency U3 已验收领地）+ 等价性测试族口径，
+    // 本期维持设计钦点的 liveOnly 最简档；entry 化升级随跨单元裁决另行处理（deviations 登记）。
+    const finalStopReason = readString(payload, 'stopReason')
+    if (finalStopReason !== undefined && TRUNCATED_STOP_REASONS.has(finalStopReason)) {
+      appendTurnNoticeLine(messages, sid, finalStopReason === 'max_tokens' ? 'truncatedMaxTokens' : 'truncatedContentFilter')
     }
     // 统一收尾（finalizeSession 幂等：entity 已改则 no-op，只清 pendingSend + timer）
     // 此处 message status 已改终态 → finalizeSession 内走「只补 toolCall 收尾」分支。
@@ -504,6 +585,11 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     const blockId = readString(payload, 'thinkingId') ?? `th-${randomUuid()}`
     const contentIndex = readNumber(payload, 'contentIndex')
     updateStreamingAssistant(ctx, sid, findLastAssistantIndex, (m) => {
+      // [chat-flow-consistency D3 规则 6] 同 thinkingId 幂等：重复 start 不重复建块
+      // （生产实例 P3a 重复思考的伴随防御——重复投递的 start 造出第二段逐字相同思考；
+      // GLM 空思考条目轮的定稿前可见窗口由定稿重建收敛，本条只缩小窗口，正确性不依赖它）。
+      // fallback 随机 id 恒不在场，查重天然不影响缺省分支。
+      if ((m.thinking ?? []).some((t) => t.id === blockId)) return undefined
       const thinking = [...(m.thinking ?? []), { id: blockId, content: '', collapsed: true, startTime: Date.now() }]
       // push 到 contentBlocks（refId 复用 blockId，防两处分别 randomUUID 断链）。
       // 按 contentIndex 有序插入（§11 检查点 3），无 index 时退化为 append。
@@ -557,11 +643,21 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     }
     // goal_control create 的 input.objective 只在此刻可得（tool result details 不回传），提前提取。
     // [P4 s5 w2] tasks 域已删除（D5 存根过渡到期），objective 提取随 tasks store 一并移除。
-    updateStreamingAssistant(ctx, sid, findLastAssistantIndex, (m) => {
-      // push 到 contentBlocks（callId 复用，与 toolCalls[].id 一致）。
-      // 按 contentIndex 有序插入（§11 检查点 3），无 index 时退化为 append。
-      const toolCalls = [...(m.toolCalls ?? []), call]
-      const contentBlocks = insertContentBlockByIndex(m.contentBlocks ?? [], { type: 'toolCall', refId: callId, ...(entry.contentIndex !== undefined ? { contentIndex: entry.contentIndex } : {}) } satisfies ContentBlock)
+    // [chat-flow-consistency C1/D3] 定位三级（locateToolCallHost 注释）+ 同 callId 幂等：
+    // 已存在（含 D3 定稿重建补建的 running 条目）按帧校正不重插（帧携带工具开始执行时的
+    // 权威 input/toolName——hook 改写后值）；已终态（end 已回填）不倒退（attachRunningToolCall
+    // 同款判定先例：有 output 或 status error 即终态保持）。
+    const anchorMessageId = typeof entry.messageId === 'string' ? entry.messageId : undefined
+    updateStreamingAssistant(ctx, sid, (prev) => locateToolCallHost(prev, callId, anchorMessageId), (m) => {
+      const existingCalls = m.toolCalls ?? []
+      const existing = existingCalls.find((c) => c.id === callId)
+      if (existing && (existing.output !== undefined || existing.status === 'error')) return undefined
+      const toolCalls = existing
+        ? existingCalls.map((c) => (c === existing ? { ...c, toolName: call.toolName, input: call.input, status: 'running' as const } : c))
+        : [...existingCalls, call]
+      const contentBlocks = existing
+        ? m.contentBlocks
+        : insertContentBlockByIndex(m.contentBlocks ?? [], { type: 'toolCall', refId: callId, ...(entry.contentIndex !== undefined ? { contentIndex: entry.contentIndex } : {}) } satisfies ContentBlock)
       return { ...m, toolCalls, contentBlocks }
     })
   },
@@ -642,11 +738,14 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // deliveredToolResultIds 幂等承担（apply-entry applyToolResultMessage：同 toolCallId
     // 首次投递后二次 no-op），对齐 event-adapter handleMessageEnd「toolResult 与
     // tool_execution_end 的回填，去重/合并归 core store 的 reducer 接入层编排」的职责划分。
-    // [chat-flow-text-color D1] assistant 消息文本定稿事实标记：mid-turn 气泡的 status
-    // 要到回合级 message.complete 才收尾，UI 颜色若直接跟 status，长工具回合中已写完
-    // 的正文一直灰。此处按位置给 live 气泡打 textFinalized（status 不动，理由见 helper 注释）。
+    // [chat-flow-consistency D3] assistant 消息定稿权威重建：按 entry 载荷整条重建该气泡
+    // 的块序/思考/正文/工具集合/token/结束时刻（与重开路径同一转换函数），textFinalized
+    // 标记与重建共用同一次定位（C2 统一，历史「按位置单独扫描打标」已并入）。定位 = id
+    // 锚定优先、位置兜底（帧级 messageId 锚点，interpreter 附加；缺失回退位置）。重建不改
+    // status（streaming 保持到回合级 message.complete 统一收尾——sealed guard 与后续消息
+    // 定位依赖 streaming 态）。
     if ((entry as PiMessageEntry).message?.role === 'assistant') {
-      markStreamingAssistantTextFinalized(ctx, sid)
+      rebuildAssistantOnFinalize(ctx, sid, entry as PiMessageEntry, readString(payload, 'messageId'))
     }
     // [steer-bubble u1 / D1+D2] 路径 2：user role 的投递确认/兜底消费（reducer 喂入无条件
     // 保留在前——路径 2 只是 overlay 显示侧的补充裁决，异常路径不阻断权威喂入）。确认命中
@@ -910,7 +1009,7 @@ export function __clearUnhandledFrameTypeWarnForTest(): void {
  *
  * useChat.ensureStreamSubscription 收到任意 ServerMessage 后：
  * - message.* → 调本函数（经 store.applyMessageEvent 转发），注册表执行全部 effect
- * - session.* → useChat 保留处理（跨 store：sessionStore.applySnapshot 等）
+ * - session.* → useChat 保留处理（跨 store：状态层 applyLiveState / 导航列表 applySnapshot 等）
  *
  * 非 message.* 或未注册的 message.* type 直接 no-op（等价原 applyChunk 的 default return）。
  * [RD-1#9] 未注册 type 的 no-op 在 dev 下补一次/类型 warn（协议漂移零痕迹 → 可见）。

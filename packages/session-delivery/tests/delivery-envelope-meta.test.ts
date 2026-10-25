@@ -6,19 +6,21 @@
  * - sendChecked 申报 receiptAnchor:'acceptance'（agent 通路真实形态，见 runtime
  *   session-manager-handler notify send）→ 受理即 delivered，onSettled 收到**同一消息
  *   对象引用**，meta 原样完好（runtime 债权桥接据此锚定 armed→injected 受理回执）。
- * - busy park 合批两条（各自 notifyId，marker 锚）→ settled 边沿合批投出 → 逐条
- *   confirmDelivered → onSettled 恰 2 次，各自原始消息、各自 meta（per-message 透传
- *   不串键——合批不得把首条 meta 抹到全批）。
- * - 错误重试耗尽 rejected 终态 → meta 同样随原消息到达（失败路径也要能定位债权）。
+ * - deferred 积累两条（各自 notifyId，marker 锚）→ 窗口结束 flush 整队出站成批 →
+ *   逐条 confirmDelivered → onSettled 恰 2 次，各自原始消息、各自 meta（per-message
+ *   透传不串键——合批不得把首条 meta 抹到全批）。
+ * - 首败 rejected 终态 → meta 同样随原消息到达（失败路径也要能定位债权）。
  * - 无 meta 消息 → meta undefined（additive 字段零回归：不带 meta 的存量消息形态不变）。
  *
- * 内核对 meta 零读取零加工（本套件同时是「既有行为零回归」的一部分：现有 11 个测试
- * 文件在本字段加入后全绿，见包级 test 命令）。
+ * [已不可达用例删除登记] 原「busy park 合批两条」用例的 busy park 前提随忙闲门禁
+ * 删除而不可达，2026-10-23 投递域清理批次删除；积累队列成批改以 deferred
+ * 设计内等待形态构造（内核 doSend 成批路径不变）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { createDelivery } from '../src/delivery.js'
-import type { DeliveryPort } from '../src/types.js'
-import { makeBusyParkPort, makeMockPort, expectSettledMsg, textMsg } from './helpers.js'
+import type { DeliveryPort, SendReceipt } from '../src/types.js'
+import { makeMockPort, expectSettledMsg, textMsg } from './helpers.js'
 
 function makePort(overrides?: Partial<DeliveryPort>): ReturnType<typeof makeMockPort> {
   return makeMockPort(overrides)
@@ -50,21 +52,24 @@ describe('envelope additive meta（notifyId 穿 envelope）', () => {
     handle.dispose()
   })
 
-  it('busy park 合批 2 条（各自 notifyId）→ 逐条 confirmDelivered，per-message 回调各自 meta 不串键', () => {
+  it('deferred 积累 2 条（各自 notifyId）→ 整队成批出站 → 逐条 confirmDelivered，per-message 回调各自 meta 不串键', () => {
     const onSettled = vi.fn()
-    const { port, setIdle, fireSettled } = makeBusyParkPort()
+    const sendMock = vi.fn((): SendReceipt | void => ({ accepted: false, deferred: 'merge-commit-hold' }))
+    const port = makePort({ send: sendMock })
     const handle = createDelivery(port, { onSettled })
 
     const msgA = textMsg('claim A', { meta: { notifyId: 'sm-a' } })
     const msgB = textMsg('claim B', { meta: { notifyId: 'sm-b' } })
-    handle.send(msgA, { id: 'a' }) // busy → park 入队（marker 锚缺省）
-    handle.send(msgB, { id: 'b' })
+    handle.send(msgA, { id: 'a' }) // hold 拒（设计内等待）→ 条目留守 queued
+    handle.send(msgB, { id: 'b' }) // 同上，队列积累为 2 条
     expect(onSettled).not.toHaveBeenCalled()
 
-    setIdle(true)
-    fireSettled() // settled 边沿 → 合批投出
+    // 投递端窗口结束 → flush 整队出站：积累队列成批，物理合批仍是一次 port.send
+    sendMock.mockImplementation(() => undefined)
+    handle.flush()
 
-    expect(port.sendCalls).toHaveLength(1) // 物理合批仍是一次 port.send
+    const lastCall = port.sendCalls[port.sendCalls.length - 1]!
+    expect(lastCall.msg.payload.content).toBe('claim A\n\n---\n\nclaim B')
     expect(onSettled).not.toHaveBeenCalled() // 受理只转 in-flight（D9⑤ 送达口径）
     // 送达回执逐条驱动（marker 锚正规路径 = 外部 confirmDelivered）
     handle.confirmDelivered('a')

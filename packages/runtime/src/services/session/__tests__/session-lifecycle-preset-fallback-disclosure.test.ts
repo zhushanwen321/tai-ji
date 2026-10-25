@@ -56,14 +56,14 @@ function makePresetService(availableIds: readonly string[]): PresetService {
   } as unknown as PresetService
 }
 
-/** 真实 Summary 派生视图（git 端口 fake；replicated states 空 → tokenCount 走实例基线）。 */
+/** 真实 Summary 派生视图（git 端口 fake；W3 起三状态字段已删，无 states 读点）。 */
 const gitInfoReader = {
   readGitInfo: () => undefined,
   pruneStaleCache: () => {},
 } as unknown as IGitInfoReader
 
 function makeSummaryReal(s: IManagedSessionView): SessionSummary {
-  return buildSessionSummary(s, gitInfoReader, () => undefined)
+  return buildSessionSummary(s, gitInfoReader)
 }
 
 /** 会话文件行集：header（restore 归一化判定与附着断言的真实输入）。 */
