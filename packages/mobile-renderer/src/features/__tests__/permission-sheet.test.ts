@@ -68,15 +68,32 @@ describe('PermissionSheet（§6.18 无归属一等分支 + F8 审批面）', () 
   })
 
   it('作答上抛：approve 携带 pluginId+permissions、deny 携带 pluginId', async () => {
+    // approve 与 deny 各用独立 wrapper：submitting 防重 guard（mobile-action-notice-correctness
+    // 修复引入，§6.5 假成功窗口封堵同族）在提交后禁二次作答，同 wrapper 连点不再是合法用法
+    const approveWrapper = mountSheet({})
+    await flushPromises()
+    ;(bodyEl('permission-sheet-approve') as HTMLElement).click()
+    await flushPromises()
+    expect(approveWrapper.emitted('approve')).toEqual([[{ pluginId: 'tasks', permissions: ['fs.read', 'net.fetch'] }]])
+    approveWrapper.unmount()
+
+    const denyWrapper = mountSheet({})
+    await flushPromises()
+    ;(bodyEl('permission-sheet-deny') as HTMLElement).click()
+    await flushPromises()
+    expect(denyWrapper.emitted('deny')).toEqual([[{ pluginId: 'tasks' }]])
+    denyWrapper.unmount()
+  })
+
+  it('防重 guard：提交后 submitting 期内二次作答不再上抛', async () => {
     const wrapper = mountSheet({})
     await flushPromises()
     ;(bodyEl('permission-sheet-approve') as HTMLElement).click()
     await flushPromises()
-    expect(wrapper.emitted('approve')).toEqual([[{ pluginId: 'tasks', permissions: ['fs.read', 'net.fetch'] }]])
-
     ;(bodyEl('permission-sheet-deny') as HTMLElement).click()
     await flushPromises()
-    expect(wrapper.emitted('deny')).toEqual([[{ pluginId: 'tasks' }]])
+    expect(wrapper.emitted('approve')).toHaveLength(1)
+    expect(wrapper.emitted('deny')).toBeUndefined()
     wrapper.unmount()
   })
 
