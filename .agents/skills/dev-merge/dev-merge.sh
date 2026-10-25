@@ -76,10 +76,12 @@ if [[ ! -d "$DEV_DIR" ]]; then
 fi
 
 # ── 公共预检：两边 worktree 都必须干净（tracked 改动）──
+# 注意 set -e 交互：diff --quiet 的 rc==1（有未暂存改动）是本函数刻意放行的形态
+# （只拦 staged 与结构损坏），裸命令写法会被 set -e 静默杀死——必须经 || rc=$? 捕获。
 check_clean() {
   local dir="$1" label="$2"
-  git -C "$dir" diff --quiet 2>/dev/null
-  local rc=$?
+  local rc=0
+  git -C "$dir" diff --quiet 2>/dev/null || rc=$?
   if [ "$rc" -ge 2 ]; then
     die "$label git 状态读取失败（exit $rc）——多为 worktree 结构损坏（bare 误解析/登记缺失），先修复 git 链再重跑"
   fi

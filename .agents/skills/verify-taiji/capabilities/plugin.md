@@ -1,4 +1,4 @@
-# plugin · taiji 插件面（列表 / 启停 / 状态点位 / 挂载点）
+# plugin · taiji 插件能力（列表 / 启停 / 状态点位 / 挂载点）
 
 本文件覆盖四个 capability id：
 
@@ -141,7 +141,7 @@
 3. B 通道：再 `plugin.list` 确认 `plugins[i].enabled === false`（不依赖 UI 回显）。
 4. 再开 → 恢复「已启用」，且若该插件有 headerAction，按钮重新出现（见 `plugin.statusbar`
    的 headerAction 段）。
-5. 失败面（可选）：对不存在的 pluginId 发 `plugin.toggle` → 应得 error envelope，
+5. 失败情形（可选）：对不存在的 pluginId 发 `plugin.toggle` → 应得 error envelope，
    UI 不得停留在「已禁用」假象。
 
 ### 断言（期望终态 / 失败信号）
@@ -367,7 +367,7 @@ bridge 的 `plugin:statusBarUpdate` / `plugin:statusSetUpdate` / `extension:stat
 | `p1-plugin-a5-no-status-guessing` | A5 状态默认态 | pass（15） | 从不上报状态的插件条目零标记（`provider-plugin-status` 零 DOM 条件轮询）+ 状态点非失效配色 + 常驻「重新授权」按钮（D5） |
 | `p1-plugin-a6-detail-sections` | A6 条目两区 | pass（15） | 唯一 `provider-detail-extra-boundary` 分界；宿主字段不溢入插件区、插件哨兵串不溢入宿主区；`plugin.ui.snapshot` 与渲染同源 |
 | `p1-plugin-a7-text-input` | A7 输入回传 | pass（14） | `gui-text-input-field-<id>` 原生 input change 即回传；确认命令（`gui-action-bar-item-<id>` → `plugin.executeCommand`）触发重推；插件重推 value 回显覆盖本地镜像（输入状态保持） |
-| `p1-plugin-crash` | A13 崩溃隔离 | pass（19） | SIGKILL sandbox fork → `plugin:crashed` 广播 + `plugin.list status=crashed` + crash journal 三证；builtin 邻居与宿主 RPC 不受影响；崩溃 toast 呈现（4s 消失窗）；管理面对 crashed 插件零呈现的缺口照录（不判失败） |
+| `p1-plugin-crash` | A13 崩溃隔离 | pass（19） | SIGKILL sandbox fork → `plugin:crashed` 广播 + `plugin.list status=crashed` + crash journal 三证；builtin 邻居与宿主 RPC 不受影响；崩溃 toast 呈现（4s 消失窗）；管理界面（插件设置页）对 crashed 插件零呈现的缺口照录（不判失败） |
 | `p1-plugin-a14-install-neighbors` | A14 邻居不变量（连续装卸 + 重启） | pass（51） | 安装/卸载 5 轮（中途重启）：邻居 provider 条目与凭据零污染、无孤儿条目（命名空间前缀全清含 apiKey）、插件目录 / `.staging` / installed.json 无残留、启动日志无 warn 洪水 |
 | `p1-plugin-a26-update-chain` | A26 更新链 | pass（31） | 清单版本翻转 → 家族卡更新徽标两级提示 → 两段式确认提交：磁盘/注册表/激活面换新、条目凭据保留；正向 1.1.0 更新后沙箱 fork 进程更替（旧 fork terminate 再激活，新模块代码即时生效）+ displayName 切新版本；2.0.0 激活必败包 → `plugin-install-error` 呈现 + 回滚幸存（磁盘/注册表回 1.1.0、凭据保留、重激活达 active，非等宿主重启） |
 | `p1-plugin-a23a-dual-artifact` | A23a 双产物闭环 | pass（24） | 清单条目 `piExtensionVersion` 双产物：安装 → 插件目录 + installed.json + pi 扩展（npm 布局）+ settings.json packages[] + models.json 条目五处落盘；`plugin.uninstall` 卸载五处完整清除 |
@@ -432,4 +432,4 @@ P0-P1-COVERAGE.md P0-13 行。
    更替、激活必败包失败呈现、回滚重激活达 active；
    ② **`plugin.listAvailable` reply 自 2026-10-24 R-2 修复起携带 `available/stale/reason` 三字段**，
    renderer 按 stale 渲染提示条、按 available=false 区分报错态与空清单并回退本地已装条目——
-   判定「拉取失败 vs 确实为空」用 reply 字段，不要用 `catalogLoaded` 首拉标记推断。
+   判定「拉取失败 vs 确实为空」用 reply 字段，不要用 `catalogLoaded` 首次拉取标记推断。
