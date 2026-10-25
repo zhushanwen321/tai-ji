@@ -20,7 +20,7 @@
 //   ② workflow 路径 subprocess-agent-runner.run（route.engine.run 之前，非 pi 分支）。
 
 import { parseModelSelector } from "../../shared/model-ref.ts";
-import type { EngineModelSelectorInput, EnginePort } from "./port.ts";
+import { syncEngineModelList, type EngineModelSelectorInput, type EnginePort } from "./port.ts";
 import { DEFAULT_ENGINE_ID } from "./registry.ts";
 import { toErrorMessage } from "../../core/error-message.ts";
 
@@ -229,11 +229,15 @@ export function withCrossEngineHint(
 // 内部：引擎侧的失败安全读取
 // ============================================================
 
-/** 引擎可用清单（listModels 失败安全——校验错误路径不再叠加清单读取故障；null 契约按零清单）。 */
+/**
+ * 引擎可用清单（listModels 失败安全——校验错误路径不再叠加清单读取故障；null 契约按零清单）。
+ * [listModels 异步面] union 窄化：Promise 侧（dynamic 引擎协议 RPC 活清单）在同步
+ * 错误文案上下文不可达，按 null 降级（零清单，与快照 null 同形态）。
+ */
 function safeListModels(engine: EnginePort): string[] {
   if (typeof engine.listModels !== "function") return [];
   try {
-    return engine.listModels()?.map((m) => m.id) ?? [];
+    return syncEngineModelList(engine.listModels())?.map((m) => m.id) ?? [];
   } catch {
     return [];
   }

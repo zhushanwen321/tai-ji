@@ -68,15 +68,9 @@
 
 ### 6. subagent-core D1 反向值边收编
 
-状态：已裁决立项（2026-10-23：不留长期豁免，不能有反向依赖），收编设计进行中（产物 `.tmp/need-design-batch/`）。
+状态：已解决（2026-10-23 裁决不留长期豁免、全部消除；同日落地并经 refactor-subagent-workflow-solid 合入 dev-0.11.16——commit d2e3d377e「clear remaining production reverse edges (D1-U3)」+ c532de35d「enforce zero reverse dependency edges (D1-U4)」）——残余 1（subagent-service 值导入 latestModelOverride）落地形态 = execution 侧单源：本体迁 `execution/persistence/run-event-journal.ts`（与 scanRunEvents 同域的读侧折叠原语），原址 `orchestration/run-events.ts` 留壳 re-export（resume-run / barrel / 测试消费方零改动），subagent-service 直连新址、原豁免注记删除；残余 2（model-switch-wiring 值导入 projectRunRegistryEvents）消费消除：assertRunNotTerminalForSwitch 终局判法从 run-registry fold 派生视图改为直读 run-settled 帧（run-event-journal 新具名导出 findRunSettledEvent），错误文案逐字节不变；残余 3（entry-guards SLUG_MAX_LENGTH 改直连 shared/run-vocabulary.ts）= just-do-it 条目 55。固化：零反向边（值边与类型边同等拦截，生产与测试无豁免）为机器检查 check-subagent-core-value-cycles.mjs 判据二（约束 C-data-27，pre-commit + CI 双接线）。2026-10-25 复核：检查 0 反向边 / 0 值环、包测试 4129 通过 0 失败、tsc --noEmit 零错误。
 
-来源：subagent-core-d1-residual-edges.md（残余 1、2；残余 3 随手改已入 just-do-it 条目 55）。
-
-问题：D1（execution → orchestration 反向依赖拆边）后残留 2 条显式豁免反向值边：`execution/subagent-service.ts:116` 值导入 `orchestration/run-events.ts` 的 `latestModelOverride`（注释显式登记有意豁免）、`execution/service/model-switch-wiring.ts:15` 值导入 `orchestration/run-registry.ts` 的 `projectRunRegistryEvents`（无显式豁免注记）。
-
-候选方向：收进 execution 侧单源（或改经端口接口），兑现 D1 终态「反向边收窄为端口接口」；或经用户裁决登记为长期豁免。
-
-开放问题：登记原判断「低优先」，需裁决收编 or 长期豁免。
+来源：subagent-core-d1-residual-edges.md（已解决，本条即其终态；残余 3 随手改见 just-do-it 条目 55）。
 
 ### 7. workflow-viz 两项交互/算法设计
 
@@ -97,13 +91,7 @@
 
 ### 9. pi 内置版 review-fix-loop 补修子循环
 
-来源：dev-merge-gates-sibling-content-repair-gap.md（残留②；原文件保留作设计输入）。
-
-问题：`packages/subagent-core/workflows/review-fix-loop.js`（pi 内置版，npm 分发）的 commit content 类拦截同款缺口不在已实施的三份脚本改造批内。
-
-候选方向：复用原登记「确定方案」节的路线 B 数据流（补修子循环：上限 2 次 / 报错原文权威源 / 快照对账 / 显式路径 add / 同命令重跑），按 pi 平台形态适配。理由（登记原文）：发版载体不同（版本 bump + npm publish + 下游升级）、平台形态差异需独立适配与验证。
-
-开放问题：独立批次排期；npm 分发版本的发布窗口。
+状态：已解决——pi 内置版已随 2e6876e75（2026-10-23）落地补修子循环：pi 壳 commit 链含环境恢复 agent 重试 + contentRepairLoop（shared 单源段，zcode/pi 双壳同源），经 MF-1-1b e2e 归因链实跑证实（该用例即 pi 产物路径，环境恢复→补修子循环→结构化终止全链在实现中完好）。登记滞后销账；来源文档 dev-merge-gates-sibling-content-repair-gap.md 已删（三份脚本 + pi 内置版全部实施验证完毕，git 历史可追溯）。已知相邻差异（zcode 壳逐路径 add 单项失败仅跳过、pi 壳 add/commit 同 try 进恢复链）保留为双平台形态差异，不统一。
 
 ### 10. queue-hold 非生产形态物理删除
 
@@ -137,8 +125,8 @@
 - dev-0.11.7 S-16：翻译通道键集三处手写；runtime 测试按源码树相对路径读 zcode 包 package.json
 - dev-0.11.7 S-14：provider/oauth handler 领域失效判定仍在 transport 层（7+2 触发点），无结构收敛与枚举式检查——收敛方案需小设计
 - dev-0.11.8 S-15：`TAIJI_ENGINE_RAW_MIRROR` 字面量三处镜像无机器锁，真正修法 = `.githooks/check_env_whitelist_sync.py` 新增 rule-3 断言（独立加固改动、带自己的测试）
-- dev-0.11.7-review SG-7 其余 7 个设置页 `overflow: clip` 复核（见 just-do-it 验证活动节，属验证不属代码）
+- dev-0.11.7-review SG-7 其余 7 个设置页 `overflow: clip` 复核（属验证活动不属代码，原文见已删的 just-do-it 登记之 git 历史）
 
 ## 三、保留原文件的登记（非待办，不进本清单处置）
 
-以下文档为终态存档 / 条件触发观察 / 登记容器，无当前动作，保留原文件：defense-mechanism-cleanup（终态存档）、disconnect-window-dialog-loss（不修+重审触发）、long-stream-delta-double-count（观察不实施）、font-weight-dual-cjk-verification（挂起等反馈）、mcp-session-lifetime-apply（五项观察）、remote-use-shell-unification-reserved-divergences（真差异白名单容器）、system-prompt-trace-context-with-system（前瞻登记）、vitest-teardown-race-vendor-patch（等上游退役）、workflow-subtask-local-model-unsupported（不修+上游触发）、dev-merge-gates-sibling-content-repair-gap（残留条件触发 + pi 内置版设计输入）、engine-default-provider-setting（溯源保留；新发现节已裁决转 just-do-it）、e2e-spec-blind-wait-cleanup / zcode-provider-wiring-recheck / subagent-d5-nested-dispatch-verification / subagent-reload-replacement-window-recheck / terminal-multi-instance（验证活动与条件登记载体；产品口径已全部裁决落定）/ subagent-control-delivery-residue（验证活动与条件登记载体；sweep 判活加固已裁决转 just-do-it）、unified-delivery-exempt-eval（已裁决存档：smart-context 不迁 + steering mode 维持确认；scheduler 节结论作废、迁移线由本清单条目 4 承接）、unified-delivery-residuals（裁决容器）。
+以下文档为终态存档 / 条件触发观察 / 登记容器，无当前动作，保留原文件：disconnect-window-dialog-loss（不修+重审触发）、long-stream-delta-double-count（观察不实施）、font-weight-dual-cjk-verification（挂起等反馈）、mcp-session-lifetime-apply（五项观察）、remote-use-shell-unification-reserved-divergences（真差异白名单容器）、system-prompt-trace-context-with-system（前瞻登记）、vitest-teardown-race-vendor-patch（等上游退役）、workflow-subtask-local-model-unsupported（不修+上游触发）、e2e-spec-blind-wait-cleanup / zcode-provider-wiring-recheck / subagent-d5-nested-dispatch-verification / subagent-reload-replacement-window-recheck（验证活动与条件登记载体；产品口径已全部裁决落定）/ subagent-control-delivery-residue（验证活动与条件登记载体；sweep 判活加固已裁决转 just-do-it）、unified-delivery-exempt-eval（已裁决存档：smart-context 不迁 + steering mode 维持确认；迁移线由本清单条目 4 承接）、unified-delivery-residuals（裁决容器）。已删除的终态文档：just-do-it（68 条全部处置完毕，git 历史可追溯）、terminal-multi-instance（已实施；其「同族延期项」——浏览器多页面、浮层实例 tab 条——条件触发另立项，依赖实例编号先例）、engine-default-provider-setting（登记关闭，溯源见 git）、dev-merge-gates-sibling-content-repair-gap（全部实施，见条目 9）、defense-mechanism-cleanup（例外保留清单已并入 ADR-0122 保留白名单段）、review-fix-loop-autocommit-recovery-channel（MF-1-1b 已修，见 fix-review-fix-loop-defects 分支）。

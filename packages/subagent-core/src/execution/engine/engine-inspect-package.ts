@@ -42,7 +42,7 @@ const PI_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 /**
  * pi 引擎的托管 agent 目录注入键（identityEnv L0 通道，宿主级基础设施键）。
  *
- * 背景（登记 docs/todo/engine-default-provider-setting.md「新发现登记」节，2026-10-23
+ * 背景（原始登记文档 engine-default-provider-setting「新发现登记」节已删、见 git 历史，2026-10-23
  * 裁决）：pi 引擎回落 `~/.pi/agent` 与 taiji 主会话配置目录（`<dataDir>/agent/`）不同源，
  * settings 配的 provider 对 pi 引擎派发不生效。裁决 = taiji 派发的 pi 参数一切由
  * taiji 控制，注入托管目录对齐主会话链（主会话 spawn 侧终态强制写入同构：

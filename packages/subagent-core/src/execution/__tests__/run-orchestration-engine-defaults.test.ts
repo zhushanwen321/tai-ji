@@ -446,8 +446,9 @@ describe("engine-ref-translation：chat 域派发期翻译", () => {
 
   it("偏好层翻译抛非 model_not_available 错误 → 仍向上传播（首败即停语义仅收窄清单漂移）", async () => {
     // 断言在 resolveEngineModelWithTranslation 直调面：其他错误码不降级
+    // [listModels 异步面] helper async 化 → 断言形态同步 throw 改 rejects
     const { resolveEngineModelWithTranslation } = await import("../engine/model-ref-translation.ts");
-    expect(() =>
+    await expect(
       resolveEngineModelWithTranslation(
         { engineId: NON_PI_ENGINE_ID, engine: { translateModelRef: () => { throw Object.assign(new Error("x"), { code: "engine_credential_missing" }); } } } as never,
         undefined,
@@ -456,7 +457,7 @@ describe("engine-ref-translation：chat 域派发期翻译", () => {
         () => {},
         "test",
       ),
-    ).toThrow();
+    ).rejects.toThrow("x");
   });
 
   it("显式 model 翻译失败 → 派发同步期抛错（首败即停，record 创建前）", async () => {

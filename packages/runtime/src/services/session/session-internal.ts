@@ -182,8 +182,9 @@ export interface IDispatcherSessionOps {
   persistSessionOutcome(sessionId: string, outcome: SessionOutcome, reason?: string): void
   /**
    * 清除 session 终态 sidecar（新回合受理入口调用，dmg-r1-1 跨回合终态放行——旧终态
-   * 不拦新周期写入；同回合并发竞态保护不受影响）。唯一消费方 = message-dispatcher
-   * runAcceptance 受理成功后。
+   * 不拦新周期写入；同回合并发竞态保护不受影响）。消费方 = message-dispatcher
+   * runAcceptance 受理成功后（本窄接口）与 session-manager-handler handleSend
+   * 受理成功后（经 ISessionService 同名方法，agent send 通路对齐）。
    */
   clearSessionOutcome(sessionId: string): void
   /** 只读查 Map，返回 managed session 视图（active 判定 + 字段读改）。 */
