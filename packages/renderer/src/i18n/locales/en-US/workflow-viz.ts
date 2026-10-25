@@ -65,6 +65,7 @@ export default {
     chipSettled: 'Settled',
     statusDone: 'Done',
     statusFailed: 'Failed',
+    statusCancelled: 'Cancelled',
     attemptLabel: 'attempt',
     eventsEmpty: 'No event records yet',
     eventsNotFound: 'No event stream record for this run',

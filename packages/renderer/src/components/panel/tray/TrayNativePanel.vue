@@ -515,7 +515,9 @@ function elapsedLabel(entry: BackgroundTaskEntry): string {
 /** 执行态判据 = SSOT 谓词（isRunningProjection），与计数/徽标同源不漂移 */
 const isRunningSubagent = isRunningProjection
 function completedAgentCount(record: WorkflowRunRecord): number {
-  return record.agentCalls.filter((call) => call.status === 'done' || call.status === 'failed').length
+  // 已收束计数（进度分母分子）：done/failed/cancelled 都是终态——cancelled（run 终局
+  // 收尾在途成员，§3.3.8）计入，防 run 取消后进度条永久不满格。
+  return record.agentCalls.filter((call) => call.status === 'done' || call.status === 'failed' || call.status === 'cancelled').length
 }
 function workflowPercent(record: WorkflowRunRecord): number {
   if (record.agentCalls.length === 0) return 0

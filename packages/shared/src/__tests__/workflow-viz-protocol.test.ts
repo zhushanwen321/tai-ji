@@ -309,7 +309,7 @@ describe('fold 透出字段（U2 纯加法）与既有契约不回退', () => {
 
   it('既有契约不回退：WorkflowAgentCall / WorkflowRunRecord 既有字段类型签名不变（纯加法核验的测试侧锚）', () => {
     // 既有字段抽查（字段存在性 + 类型不变——误删/改形时本用例编译红）
-    expectTypeOf<WorkflowAgentCall['status']>().toEqualTypeOf<'pending' | 'running' | 'done' | 'failed'>()
+    expectTypeOf<WorkflowAgentCall['status']>().toEqualTypeOf<'pending' | 'running' | 'done' | 'failed' | 'cancelled'>()
     expectTypeOf<WorkflowAgentCall['inputTokens']>().toEqualTypeOf<number | undefined>()
     expectTypeOf<WorkflowAgentCall['lastProgressAt']>().toEqualTypeOf<number | undefined>()
     expectTypeOf<WorkflowRunRecord['status']>().toEqualTypeOf<'running' | 'interrupted' | 'done'>()

@@ -217,13 +217,14 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
     const port = new FakeWindowEnginePort("fake-win");
     usePerWindowGateway({ "fake-win": port });
     resolveWorkflowWindowEnginePort(runId, "fake-win");
-    // dispose 执行时点断言：在途 call 已被 closeOut 收尾（done + trace failed）。
-    // closeOut 是 finalizeRun 的模块内部调用，其「先于 dispose」只能靠被收尾对象的
-    // 状态在 dispose 时点已翻转来证明——dispose 早于 closeOut 时本断言为 false。
+    // dispose 执行时点断言：在途 call 已被 closeOut 收尾（done + trace cancelled——
+    // §3.3.8 取消收尾成员中性档）。closeOut 是 finalizeRun 的模块内部调用，其「先于
+    // dispose」只能靠被收尾对象的状态在 dispose 时点已翻转来证明——dispose 早于
+    // closeOut 时本断言为 false。
     let closeOutObservedAtDispose = false;
     port.onDispose = () => {
       deps.order.push("dispose");
-      closeOutObservedAtDispose = call.status === "done" && node.status === "failed";
+      closeOutObservedAtDispose = call.status === "done" && node.status === "cancelled";
     };
 
     // [W2/V1 适配] run-created 正点首帧（同验收①——abort 走 dispatched×cancel-requested 表内行）。

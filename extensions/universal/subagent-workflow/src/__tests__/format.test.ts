@@ -780,6 +780,8 @@ describe("run 域展示映射（§2.2 回归）", () => {
     expect(statusDotStr("time_limited", markingTheme)).toContain("error(");
     expect(statusDotStr("interrupted", markingTheme)).toContain("muted(");
     expect(statusDotStr("completed", markingTheme)).toContain("success(");
+    // §3.3.8 cancelled（run 终局收尾在途成员）=「未交付且非失败」中性档，与 interrupted 同 muted
+    expect(statusDotStr("cancelled", markingTheme)).toContain("muted(");
   });
 });
 

@@ -94,6 +94,8 @@ export function statusLabel(status: ExecutionTraceNode["status"], theme: ThemeLi
     case "completed": return theme.fg("success", status);
     case "running": return theme.fg("warning", status);
     case "failed": return theme.fg("error", status);
+    // cancelled（§3.3.8 run 终局收尾在途成员）= 中性档，与 pending 同 muted
+    case "cancelled": return theme.fg("muted", status);
     default: return theme.fg("muted", status);
   }
 }

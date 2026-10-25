@@ -435,7 +435,7 @@ const MS_PER_SEC = 1000;
  * [D2] 重新加载进内存时的中断派生视图——displayStatusOf 三态输出的第三值，与 core runSummary
  * 派生视图 / shared WorkflowRunStatus 同词）+ DoneReason（completed/failed/aborted/
  * budget_limited/time_limited）+ ExecutionTraceNode.status（含 "pending"——trace
- * 节点的初始态）。
+ * 节点的初始态；"cancelled" = run 终局收尾在途成员，§3.3.8——中性档）。
  *
  * 收窄自 string → 显式联合，编译器会在新增 status 时强制 switch 补齐分支。
  */
@@ -444,7 +444,8 @@ export type StatusText =
   | "interrupted"
   | "done"
   | DoneReason
-  | "pending";
+  | "pending"
+  | "cancelled";
 
 // ── Workflow status helpers ──────────────────────────────────
 
@@ -458,6 +459,8 @@ function statusColorToken(
     case "failed": case "aborted": case "budget_limited": case "time_limited": return "error";
     case "completed": case "done": return "success";
     case "running": return "warning";
+    // cancelled（§3.3.8 run 终局收尾在途成员）=「未交付且非失败」中性档（muted）
+    case "cancelled": return "muted";
     default: return "muted";
   }
 }

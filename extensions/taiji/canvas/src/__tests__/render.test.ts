@@ -64,5 +64,8 @@ describe("renderCanvasToolResult", () => {
     const sample = { content: [{ type: "text", text: "raw" }], details: { summary: 'Entered canvas "n"' } };
     expect(render(enter.renderResult, sample)).toContain('Entered canvas "n"');
     expect(render(list.renderResult, sample)).toContain('Entered canvas "n"');
-  });
+  }, 30_000);
+  // ↑ timeout：harness 动态 import 重初始化（六工具注册链）裸跑已 ~4s，插桩（coverage）
+  //   口径超 vitest 默认 5s 预算——纯耗时贴边，非断言回归；DOWNSTREAM 联动门禁把本包
+  //   带进插桩跑后暴露（#52 先例：门禁拦的基线测试债分支内当场修复）。
 });

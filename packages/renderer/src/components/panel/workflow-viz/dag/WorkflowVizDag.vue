@@ -20,7 +20,7 @@
     phase 分区 → semantic 'phase'（设计 §3.1-2 点击行为边界）；其余节点/实例行
     no-op（纯展示）。
 
-  运行实况：节点六态经 props.nodeStates 接收已派生映射（派生单处归 u5，D9 单点
+  运行实况：节点七态经 props.nodeStates 接收已派生映射（派生单处归 u5，D9 单点
   实现——本组件不自行判定 retrying/skipped）；执行实例经 props.instancesByNode
   接收已匹配映射（D2 产物，宿主单处派生），用于节点实例行渲染与增高节点的布局
   高度表；run 停止叠加（D9）消费 run 级原始输入（runStatus/runOutcome）归一为
@@ -177,7 +177,7 @@ const props = defineProps<{
   /** DAG 蓝图（session.getWorkflowDag 成功臂；null = 数据未就绪——空画布）。 */
   dag: WorkflowDag | null
   /**
-   * 节点六态映射（nodeId → 状态）。已派生数据（D9 派生单处在 u5——retrying/skipped
+   * 节点七态映射（nodeId → 状态）。已派生数据（D9 派生单处在 u5——retrying/skipped
    * 判定不在此实现）；缺失键按 'pending' 兜（run 运行中零实例节点一律 pending）。
    */
   nodeStates?: Record<string, WorkflowVizDagNodeStatus>
@@ -273,7 +273,7 @@ function nodeState(nodeId: string): WorkflowVizDagNodeStatus {
 /**
  * D9 停止叠加归一（叠加两档只属于「被停止的 run」，正常完成不是停止）：
  * run 运行中 = null（无叠加，在途节点正常蓝脉冲）；outcome='done' = null（正常
- * 完成的 run 六态自明——done 节点 success 绿与 skipped 虚线不被叠加吞掉，D9
+ * 完成的 run 七态自明——done 节点 success 绿与 skipped 虚线不被叠加吞掉，D9
  * 「DAG done = success 供扫读」）；interrupted（暂停）与 cancelled（用户主动终局）
  * 落中性暗（tray-tone「同语义同色」先例）；failed / time_limited 落失败色系
  * （D9 着色映射全枚举）；done + outcome 缺省（v1 存量数据缺口）保守中性暗，

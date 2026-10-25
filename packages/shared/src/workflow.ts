@@ -99,8 +99,8 @@ export interface WorkflowAgentCall {
   agent: string
   /** phase 分组名（trace.phase，如 "Dev-w0(W1)"） */
   phase?: string
-  /** call 状态（trace.status） */
-  status: 'pending' | 'running' | 'done' | 'failed'
+  /** call 状态（trace.status；cancelled = run 终局收尾的在途成员——journal 侧 agent-settled 帧 outcome 同值） */
+  status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled'
   /**
    * 执行所用 model（run 详情增强透传成员 record.model——v2 fold 骨架行无此域，
    * workflow-record-projection.callEnhancementTarget 是现行唯一填充点）。值形态 =

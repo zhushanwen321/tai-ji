@@ -372,7 +372,7 @@ export interface ExecutionTraceNode { // oe-exempt:20261023:framework:追踪节�
   agent: string;
   task: string;
   model: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
  /** Phase name for TUI grouping. Set from explicit opts.phase or global _currentPhase. */
   phase?: string;
   startedAt?: string;
@@ -403,7 +403,7 @@ export interface ExecutionTraceNode { // oe-exempt:20261023:framework:追踪节�
  * callId 不存在时 update 为 no-op（D-10）。
  */
 export interface TracePatch { // oe-exempt:20261023:framework:追踪增量载荷契约接口（自 orchestration/models 搬迁，单实现常态）
-  status?: "pending" | "running" | "completed" | "failed";
+  status?: "pending" | "running" | "completed" | "failed" | "cancelled";
   result?: AgentResult;
   error?: string;
   completedAt?: string;
