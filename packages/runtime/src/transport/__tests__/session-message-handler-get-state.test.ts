@@ -57,7 +57,7 @@ function bindQuery(reply: unknown): ReturnType<typeof vi.fn> {
     getClient: () => undefined,
     getReplicatedStates: () => undefined,
     locateMainSessionFileFromCache: () => undefined,
-    locateMainSessionFileFromDisk: () => undefined,
+    locateMainSessionFileFromDisk: () => ({ filePath: undefined, scannedDirCount: 0 }),
     locateBtwLineFile: () => undefined,
     locateBtwLineFileByLayout: () => ({ filePath: undefined, scannedDirCount: 0 }),
   }
@@ -118,7 +118,7 @@ describe('SessionMessageHandler session.getState', () => {
       getClient: () => undefined,
       getReplicatedStates: () => undefined,
       locateMainSessionFileFromCache: () => undefined,
-      locateMainSessionFileFromDisk: () => undefined,
+      locateMainSessionFileFromDisk: () => ({ filePath: undefined, scannedDirCount: 0 }),
       locateBtwLineFile: () => undefined,
     locateBtwLineFileByLayout: () => ({ filePath: undefined, scannedDirCount: 0 }),
     }
@@ -149,7 +149,7 @@ describe('SessionMessageHandler session.getState', () => {
       getClient: () => undefined,
       getReplicatedStates: () => undefined,
       locateMainSessionFileFromCache: () => undefined,
-      locateMainSessionFileFromDisk: () => undefined,
+      locateMainSessionFileFromDisk: () => ({ filePath: undefined, scannedDirCount: 0 }),
       locateBtwLineFile: () => undefined,
     locateBtwLineFileByLayout: () => ({ filePath: undefined, scannedDirCount: 0 }),
     }

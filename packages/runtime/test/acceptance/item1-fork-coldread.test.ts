@@ -163,7 +163,7 @@ function makeQuery(): { query: SessionStateQuery; traces: SessionStateColdReadTr
     getClient: () => undefined,
     getReplicatedStates: () => undefined,
     locateMainSessionFileFromCache: () => undefined,
-    locateMainSessionFileFromDisk: () => undefined,
+    locateMainSessionFileFromDisk: () => ({ filePath: undefined, scannedDirCount: 0 }),
     locateBtwLineFile: (sessionId) => btwRegistry.get(sessionId),
     locateBtwLineFileByLayout: (sessionId) => findBtwLineFileByLayout(sessionId),
     onColdRead: (t) => traces.push(t),

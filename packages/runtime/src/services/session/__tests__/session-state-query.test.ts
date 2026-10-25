@@ -34,6 +34,7 @@ import {
   findScannedSessionFileById,
   findBtwLineFileByLayout,
   findBtwLineFileByPiSessionId,
+  type MainSessionScanLocateResult,
 } from '../../../infra/pi/session-file-locator.js'
 import {
   scanPiSessions,
@@ -193,6 +194,8 @@ function makeQuery(opts: {
   pm?: IProcessManager
   live?: SessionStateLiveStates | undefined
   now?: () => number
+  /** 段 2 定位缝覆盖（默认 = 真实 findScannedSessionFileById） */
+  diskLocate?: (sid: string) => MainSessionScanLocateResult
 } = {}) {
   const traces: SessionStateColdReadTrace[] = []
   // 布局兜底调用留痕（判别顺序断言：注册表命中时不得枚举存储树）
@@ -201,7 +204,7 @@ function makeQuery(opts: {
     getClient: (sid) => opts.pm?.getClient(sid),
     getReplicatedStates: () => opts.live,
     locateMainSessionFileFromCache: (sid) => findCachedSessionFileById(sid),
-    locateMainSessionFileFromDisk: (sid) => findScannedSessionFileById(sid),
+    locateMainSessionFileFromDisk: opts.diskLocate ?? ((sid) => findScannedSessionFileById(sid)),
     // 生产投影注入的两步：注册表判别（btwRegistry Map 模拟 lifecycle 记录）→ 布局兜底
     locateBtwLineFile: (sessionId) => btwRegistry.get(sessionId),
     locateBtwLineFileByLayout: (sessionId) => {
@@ -478,6 +481,26 @@ describe('SessionStateQuery.getState', () => {
     expect(traces[0]).toMatchObject({ source: 'disk-scan', found: true })
     // 埋点只含段 2 全扫的 cwd 分组目录数（fixture 1 个分组）
     expect(traces[0].scannedDirCount).toBe(1)
+  })
+
+  it('埋点计数经段 2 注入缝返回值取得（不反向探 infra 模块级 sessionScanDirCount）', async () => {
+    const fx = seedForkFixture(dataDir)
+    // 段 2 缝注入带计数桩（计数 7 = fixture 不可能出现的值）：埋点 scannedDirCount 来自
+    // 注入缝返回值而非 infra 全局——services → infra 只走 deps 注入缝单向流动，与
+    // locateBtwLineFileByLayout 的 { filePath, scannedDirCount } 同构
+    const globalCountBefore = sessionScanDirCount.last
+    const { query, traces, layoutCalls } = makeQuery({
+      pm: makeProcessTable(),
+      diskLocate: () => ({ filePath: fx.mainFile, scannedDirCount: 7 }),
+    })
+
+    const state = await query.getState(fx.mainSid)
+
+    expect(state).toEqual({ sessionId: fx.mainSid, modelId: 'prov-d/model-d', thinkingLevel: 'high' })
+    expect(traces[0]).toMatchObject({ source: 'disk-scan', found: true, scannedDirCount: 7 })
+    // 本轮未发生真实扫描：infra 全局计数器未被触碰（计数来源 = 注入缝返回值）
+    expect(sessionScanDirCount.last).toBe(globalCountBefore)
+    expect(layoutCalls).toEqual([])
   })
 
   it('判别顺序：btw 线重启后（注册表无记录）段 1/段 2 miss 后才走布局兜底，埋点计入布局枚举目录数', async () => {

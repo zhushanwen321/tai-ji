@@ -32,7 +32,7 @@ import { join } from 'node:path'
 // paths.ts 是 Node-only 模块，刻意不从 shared barrel 导出（shared/src/index.ts 注释），
 // Node 端从子路径 import（btw-service 同款用法）。
 import { getSessionStoreDir } from '@taiji/shared/paths'
-import { sessionMetaCache } from './session-binding-sidecar-io.js'
+import { sessionMetaCache, sessionScanDirCount } from './session-binding-sidecar-io.js'
 import { scanPiSessions } from './session-file-utils.js'
 
 /**
@@ -48,14 +48,32 @@ export function findCachedSessionFileById(sessionId: string): string | undefined
 }
 
 /**
+ * 段 2 定位结果（寻址 + 本轮扫描的 cwd 分组目录数；埋点 `scannedDirCount` 的段 2 部分）。
+ *
+ * 与 `BtwLineLayoutLocateResult` 同构：计数经返回值透出——services 层不经模块级可变
+ * 计数器反向探 infra 状态，services → infra 只走 deps 注入缝单向流动。
+ */
+export interface MainSessionScanLocateResult {
+  /** 定位到的主会话文件（未命中 = undefined） */
+  filePath: string | undefined
+  /** 本轮 `scanPiSessions({ force: true })` 枚举的 cwd 分组目录数（未命中也照实返回） */
+  scannedDirCount: number
+}
+
+/**
  * 段 2：`scanPiSessions({ force: true })` 全扫按 id 匹配（目录枚举 + stat + 解析）。
  *
- * 本轮枚举的 cwd 分组目录数同步进 `sessionScanDirCount`（冷路径埋点的取数来源）。
+ * 本轮枚举的 cwd 分组目录数经返回值透出（读数 = `sessionScanDirCount.last`，infra 内部
+ * 事实源不变；冷路径埋点改由本结构承载，不经 services 反向探 infra 模块状态）。
  *
- * @returns 文件绝对路径；未命中（会话不存在 / 文件未落盘 / 已被清理）= undefined
+ * @returns 定位结果；未命中（会话不存在 / 文件未落盘 / 已被清理）= `filePath: undefined`
  */
-export function findScannedSessionFileById(sessionId: string): string | undefined {
-  return scanPiSessions({ force: true }).find((s) => s.id === sessionId)?.filePath
+export function findScannedSessionFileById(sessionId: string): MainSessionScanLocateResult {
+  const scanned = scanPiSessions({ force: true })
+  return {
+    filePath: scanned.find((s) => s.id === sessionId)?.filePath,
+    scannedDirCount: sessionScanDirCount.last,
+  }
 }
 
 /**
@@ -75,8 +93,9 @@ export function findScannedSessionFileById(sessionId: string): string | undefine
  * - `<piSessionId>.jsonl` 精确名（历史落盘形态；header.id 即文件名主干——
  *   rebuildFromDisk 的 session id 派生同源）；
  * - `<fileTimestamp>_<piSessionId>.jsonl` 时间戳前缀形态——**pi forkFrom 的实盘命名**
- *   （node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js 的
- *   forkFrom：`join(dir, `${fileTimestamp}_${newSessionId}.jsonl`)`，fileTimestamp =
+ *   （node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js:1374,1395-1396
+ *   的 forkFrom；源码同点位 packages/coding-agent/src/core/session-manager.ts:1580,1609-1610：
+ *   `join(dir, `${fileTimestamp}_${newSessionId}.jsonl`)`，fileTimestamp =
  *   ISO 时间戳把 `:`/`.` 替换为 `-`；实证文件名如
  *   `2026-10-24T13-00-44-583Z_01a16dff-….jsonl`）。只认精确名会让重启后的线寻址
  *   结构性失败（session.getState 报 SESSION_NOT_FOUND），故两种都兼容。

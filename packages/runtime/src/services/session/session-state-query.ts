@@ -33,8 +33,8 @@ import type { ServerMessageMap } from '@taiji/shared'
 import type { IPiEngine } from '../ports/pi-engine.js'
 import type { ReplicatedState } from './replicated-state.js'
 import type { ModelIdSnapshot, ThinkingLevelSnapshot } from './replicated-states.config.js'
-import type { BtwLineLayoutLocateResult } from '../../infra/pi/session-file-locator.js'
-import { extractLatestModelFromJsonl, sessionScanDirCount } from '../../infra/pi/session-file-utils.js'
+import type { BtwLineLayoutLocateResult, MainSessionScanLocateResult } from '../../infra/pi/session-file-locator.js'
+import { extractLatestModelFromJsonl } from '../../infra/pi/session-file-utils.js'
 import { SESSION_NOT_FOUND } from '../../utils/errors.js'
 
 /** `session.getState` 的 reply payload（协议 SSOT = shared ServerMessageMapBase）。 */
@@ -95,8 +95,12 @@ export interface SessionStateQueryDeps { // oe-exempt:20261024:framework:DI 装�
   /**
    * 主会话冷读段 2：`scanPiSessions({ force: true })` 全扫（目录枚举 + stat + 解析）。
    * 生产注入 `findScannedSessionFileById`。
+   *
+   * 返回 filePath + 本轮全扫的 cwd 分组目录数——与 `locateBtwLineFileByLayout` 同构：
+   * 段 2 枚举是 O(cwd 分组数) 的磁盘成本，计数经返回值进冷读埋点 `scannedDirCount`
+   * （services 层不反向探 infra 模块级 `sessionScanDirCount`，只经注入缝单向流动）。
    */
-  locateMainSessionFileFromDisk(sessionId: string): string | undefined
+  locateMainSessionFileFromDisk(sessionId: string): MainSessionScanLocateResult
   /**
    * btw 线注册表记录定位（lifecycle 判别，廉价内存读）。生产注入
    * `(sessionId) => getSession(sessionId)?.surface === 'btw' ? rec.sessionFilePath : undefined`
@@ -221,9 +225,10 @@ export class SessionStateQuery {
       filePath = this.deps.locateMainSessionFileFromCache(sessionId)
       source = 'meta-cache'
       if (filePath === undefined) {
-        filePath = this.deps.locateMainSessionFileFromDisk(sessionId)
+        const scanned = this.deps.locateMainSessionFileFromDisk(sessionId)
+        filePath = scanned.filePath
         source = 'disk-scan'
-        scannedDirCount += sessionScanDirCount.last
+        scannedDirCount += scanned.scannedDirCount
       }
       // ③ btw 布局兜底：两段均未命中才枚举存储树（btw 线构造性不在两段扫描范围，
       //    此时兜底结果不变；重启后的线只有本支能寻址）。枚举目录数进埋点。
