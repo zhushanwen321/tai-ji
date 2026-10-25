@@ -52,6 +52,9 @@ grep -rln 'readEntries' resources/plugins --include='*.ts' | grep -v '\.test\.' 
 
 # R4 · runtime 侧 getEntries RPC 通道读者（2026-10-01 分支审查补锚：N13/N14 补登暴露的通道盲区——E1 只扫 extensions/、R1/R2/R3 只扫 runtime fs 通道，runtime 侧经 RpcClient.getEntries 读 session 的读者此前不可检索；命中侧 session-api / session-records / history-rebuild-cache / trace-sync / revoke-orchestrator / session-delivery-registry 六文件均已登记）
 grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
+
+# S1 · scripts/ 侧 session header 读者（2026-10-25 dev-merge branch-review dmg-r1-2 补锚：scripts/ 无构建链 ESM 同语义镜像读者不被 E1/E2/R1/R2/R3/P3/R4 覆盖——既有锚点族 grep 范围只扫 packages/runtime/src、extensions/、resources/plugins；命中侧 sweep-orphan-session-dirs.mjs 已登记于 §4.4 末行）
+grep -rln 'readSessionHeaderId\|SESSION_HEADER_TYPE' scripts/ --include='*.mjs'
 ```
 
 补全规则：任一锚点出现本清单未登记的新命中 → 按 C-proc-28 同 commit 归类登记后再合入。「接入单元」列 = message-revoke 流水线内承接裁剪/重建接线的单元（U6a-U6d）；「—」= 照实/非派生视图/豁免，无代码改动。
@@ -130,6 +133,7 @@ grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '
 | `services/session/events-projection.ts` | record 族派生视图 entry 源（冷启动路径：`session-records.ts:513` `scanRecordFamilyEntriesFromSessionFile` 流式扫描 → :514 `applyEntryBatch`；活跃路径：get_entries 游标 → :758 `applyEntryBatch`——本文件仅头部注释自述该消费致 R2 锚点命中，自身不调扫描） | 照实 | v2 subagent/workflow 注册/终态条目 = run 真实执行过的事实记录，与 subagent/workflow-extractor、journal-projection 冷启动路径同业务含义同口径（扫描不裁剪，照实构造性保持；plan 家族不进派生视图，无随树路径）；事件源（record 事件文件 / run journal）为 record 域独立文件，不在 pi session `.jsonl` 普查对象内；读取语义落在 session-file-extraction 骨架 + session-records 编排（均已登记），撤回重建经 session-records U6d 全量重喂——零追加单元 |
 | `services/archive/archive-service.ts` | 归档域读取点两处（2026-10-20 dev-merge branch-review dmg-r1-3 补登，当次 diff 引入；R1 锚点命中 `utils/jsonl` import、R2 锚点命中 `extractSessionName`，可检索性由既有锚点承载无需增补）：①`parseJsonl` 全量解析喂 summary-extractor（后台压缩任务的 D4 摘要提取）②`extractSessionName` 簿记名称尾读（staging 簿记骨架与自愈补写的 name 字段数据源） | 照实 | 归档摘要与会话名称 = 已发生事实（对话确实发生过、名称确实提取过），与 §4.3 `extractSessionName`（侧栏名 fallback）/ §3 rename-session 起名输入同口径；读取对象 = 已离场（pi 已终止、sessions/ 原路径已 rename 走）的归档明文主文件，撤回机制不触及 archive/ 树（互斥不变量 4 物理隔离），无注入模型上下文通道 | — |
 | `services/archive/archive-self-heal.ts` | 行 4 孤儿明文首行 header 读取（`parseSessionHeader` 取 sessionId/cwd 归属判定——R2 锚点命中；2026-10-20 dev-merge branch-review dmg-r1-3 补登，当次 diff 引入） | 非派生视图读者 | 启动自愈 = 崩溃残留的文件维护管线（归位 / 补簿记 / 搬回原位），逐文件事实驱动、不派生展示视图、不丢行——同 restore-seeding 归一化管线口径（N11 同族）；读取对象 = 归档目录内孤儿文件（非活跃树），header 读取只承载归属判定非内容重建 | — |
+| `scripts/sweep-orphan-session-dirs.mjs` | `readSessionHeaderId` 活跃会话 id 取数源（pi 会话文件 `<dataDir>/agent/sessions/**/*.jsonl` 与 btw 线文件 `<storeRoot>/<mainSid>/btw/*.jsonl` 首行 header 取 `entry.id`，`collectPiSessionIds` / `collectBtwLineIds` 逐个调用；2026-10-25 dev-merge branch-review dmg-r1-2 补登，当次 diff 引入——scripts/ 无构建链 ESM 同语义镜像读者，§2 既有锚点族 grep 范围只覆盖 packages/runtime/src、extensions/、resources/plugins，可检索性由 S1 锚承载） | 非派生视图读者 | header id = 会话身份事实，只读首行、不消费消息内容；删除目标构造性不含带 session 文件的目录（id 命中即保留）——同 archive-self-heal header-only 口径（身份判定，非内容重建）；脚本写点登记见 data-source-registry §4 ㉑ | — |
 
 ### 4.5 消费方委托（锚点命中、自身不读文件）
 
