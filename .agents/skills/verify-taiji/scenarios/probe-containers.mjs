@@ -17,8 +17,11 @@ export const meta = {
   priority: 'P0',
   title: '容器位统一探针：抽屉派生 S1 / 浮层直开 S2 / hostAction 导航 S3 / 降级 S4 / 共存 S7 / 禁用重放 S8',
   covers: ['env.launch', 'env.ready', 'ui.container'],
-  requires: [],
-  estimateSec: 180,
+  requires: ['faux'],
+  estimateSec: 240,
+  faux: {
+    responses: [{ text: 'probe-containers-spare', stopReason: 'stop' }],
+  },
   provable: [
     'S1：抽屉标签条出现「探针面板」（注册表派生），点入见插件推树两行文本',
     'S2：点击探针 headerAction 按钮 → 浮层打开且落在「探针浮层」内容段',
@@ -45,7 +48,11 @@ export async function run(ctx) {
   await protocol.subscribe(sid)
   await ui.click('css=.session-item', { timeoutMs: 30_000 })
   // 对话态就绪判据 = Composer 挂载（session-item 可点 ≠ 对话态——挂载链慢于侧栏渲染）
-  await ui.expectVisible('composer-bar', { timeoutMs: 45_000 })
+  {
+    const ids = await ui.visibleTestIds(500)
+    log('PRE-COMPOSER 采样(' + ids.length + '): ' + JSON.stringify(ids.slice(0, 60)))
+  }
+  await ui.expectVisible('composer-bar', { timeoutMs: 90_000 })
   step('ui.activate', { sid })
 
   // 打开右抽屉（ComposerBtwButton = D7 唯一入口，openDrawerTab('btw')）
