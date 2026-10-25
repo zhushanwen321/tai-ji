@@ -1280,8 +1280,9 @@ export function createUseChat(deps: UseChatDeps) {
     } catch (e) {
       // abort 失败不重抛——用户已表达「停止」意图，UI 不应因 abort RPC 失败而卡住。
       // pendingSend 已清（乐观），实体收尾靠 runtime 广播 message.complete{aborted} 兜底。
-      const msg = toErrorMessage(e)
-      deps.toast.error(deps.t('composable.stopFailed', { msg }))
+      // [chat-flow R4] 停止失败 toast 已删：pi 层失败的呈现由 runtime message.error 气泡承担
+      // （dispatcher.abort 吞错广播）；WS 断由断连全局提示覆盖，RPC reject 落 warn 不打扰。
+      console.warn(`[useChat] abort RPC failed (sid=${sid})`, e)
     }
   }
 
@@ -1293,7 +1294,7 @@ export function createUseChat(deps: UseChatDeps) {
    * 实时反馈 + 结果由 message.bashStart / message.bashResult 广播驱动（runtime 负责，经
    * 会话级订阅的 applyMessageEvent 消费），故此处仅确保订阅存在 + 发 RPC。
    *
-   * 错误处理与 abort/compact 对齐：toast + 不 throw（消费侧 Composer.onSend 已有 try/catch，
+   * 错误处理与 compact 对齐：toast + 不 throw（消费侧 Composer.onSend 已有 try/catch，
    * throw 只会变 unhandled rejection）。
    * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = RPC 受理成功；false = RPC 失败
    * （内部已 toast 或终态帧已呈现故抑制 toast）——调用方（dispatch bash）据 `=== false`
@@ -1357,7 +1358,7 @@ export function createUseChat(deps: UseChatDeps) {
   /**
    * 取消进行中的 bash 执行（调 pi abort_bash）。
    *
-   * 错误处理与 abort 对齐：toast + 不 throw。
+   * 错误处理与 abort 对齐：不 throw，失败呈现收敛聊天流内联（不弹 toast）。
    */
   async function abortBash(sessionId: string): Promise<void> {
     const sid = sessionId
@@ -1369,9 +1370,10 @@ export function createUseChat(deps: UseChatDeps) {
       // [B2 PR#116 review] abortBash RPC 失败时 bashResult 广播不会到达，bash 消息永久卡在 streaming。
       // 调 store.markStreamingBashError 找到最后 streaming bash 消息标 error 态兼底（store 持有
       // 自己的 messages ref，useChat 不碰 ref——解耦 pinia Store/factory 产物的 messages 类型鸿沟）。
+      // [chat-flow R4] 错误文本经 markStreamingBashError 写入 bash 消息 error 字段（聊天流内联
+      // 呈现），停止失败 toast 已删。
       const msg = toErrorMessage(e)
       chat.markStreamingBashError(sid, msg)
-      deps.toast.error(deps.t('composable.stopFailed', { msg }))
     }
   }
 
@@ -1463,7 +1465,7 @@ export function createUseChat(deps: UseChatDeps) {
 
   /**
    * [U5 消息撤回 D6] 统一撤回编排：在途 / 已送达双态路由 + reply 消费（fire-and-forget，
-   * 不 throw——错误全部经 toast 消化，与 abort/compact 同契约）。编排体在模块级
+   * 不 throw——错误全部经 toast 消化，与 compact 同契约）。编排体在模块级
    * handleRevokeMessage（handleSessionDelivery 同款形态——factory 保持行数门禁内）。
    */
   function revokeMessage(sessionId: string, targetId: string): Promise<void> {

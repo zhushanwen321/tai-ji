@@ -1,7 +1,6 @@
 export default {
   sendFailed: 'Failed to send message: {msg}',
   nextTurnSendFailed: 'Failed to send next turn: {msg}',
-  stopFailed: 'Failed to stop: {msg}',
   compactFailed: 'Failed to compact: {msg}',
   bashFailed: 'Failed to run bash: {msg}',
   // [U5 message revoke D8] revoke orchestration toasts (D8 spec table is the presentation SSOT;

@@ -292,12 +292,14 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
-  it('abort API 失败：toast.error（乐观 clearPendingSend，不 throw）', async () => {
+  it('abort API 失败：不 throw 不 toast（chat-flow R4 删停止失败 toast，乐观 clearPendingSend）', async () => {
     const f = makeFixture()
     f.chatApi.abort.mockRejectedValueOnce(new Error('pi死'))
-    await f.useChat.abort('s9')
+    await expect(f.useChat.abort('s9')).resolves.toBeUndefined()
     await nextTick()
-    expect(f.toast.error).toHaveBeenCalled()
+    // 停止失败 toast 已删（chat-flow R4）：WS 断由断连全局提示覆盖、pi 层失败由 runtime
+    // message.error 气泡承担，RPC reject 落 console.warn 不打扰。
+    expect(f.toast.error).not.toHaveBeenCalled()
     f.dispose()
   })
 
@@ -417,13 +419,14 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
-  it('abortBash API 失败：toast.error（markStreamingBashError 兼底，不 throw）', async () => {
+  it('abortBash API 失败：markStreamingBashError 兼底不 toast（chat-flow R4 呈现收敛聊天流内联）', async () => {
     const f = makeFixture()
     f.chatApi.abortBash.mockRejectedValueOnce(new Error('pi死'))
-    // abortBash 失败 → markStreamingBashError（无 streaming bash 时 no-op）+ toast.error
-    await f.useChat.abortBash('s14')
+    // abortBash 失败 → markStreamingBashError（无 streaming bash 时 no-op；错误文本写入 bash
+    // 消息 error 字段内联呈现）+ 停止失败 toast 已删（chat-flow R4）
+    await expect(f.useChat.abortBash('s14')).resolves.toBeUndefined()
     await nextTick()
-    expect(f.toast.error).toHaveBeenCalled()
+    expect(f.toast.error).not.toHaveBeenCalled()
     f.dispose()
   })
 })
