@@ -32,6 +32,11 @@ export default {
     focusMissing: 'Target plugin is not in the catalog (it may have been removed); reopen this page',
     channelUnavailable: 'Install channel unavailable: update to a version that supports plugin install, then retry',
     confirmFailed: 'Install failed',
+    // S13 crash recovery (failure-path table: crashed family card "plugin stopped" + restart = toggle off/on)
+    stoppedBadge: 'Plugin stopped',
+    restart: 'Restart',
+    restarting: 'Restarting…',
+    restartFailed: 'Restart failed: {reason}',
     // Install confirmation card (S27 disclosure)
     confirmInstallDesc: 'About to install',
     confirmUpdateDesc: 'About to update',

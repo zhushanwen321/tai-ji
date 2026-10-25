@@ -66,6 +66,7 @@ import type {
   RecommendedExtension,
   PluginEventPayload,
   PluginListAvailableReply,
+  PluginInfo,
 } from '@taiji/shared'
 
 /**
@@ -385,6 +386,19 @@ export interface SettingsTransport {
   // ── 插件 Provider 来源（provider-plugin-access U6：清单 / 业务方法 / 状态上报 / 输入回传）──
   /** 插件清单可安装视图（Provider 页家族卡数据源 + 本地安装状态 / 可更新标记） */
   listAvailablePlugins(): Promise<PluginListAvailableReply>
+  /**
+   * 已发现插件列表（plugin.list；S13 家族卡崩溃态判定源——PluginInfo.status 含
+   * 'crashed'）。拉为主：进入 family 段拉取是权威态，崩溃广播（onPluginCrashed）
+   * 只作增量提示。
+   */
+  listPlugins(): Promise<PluginInfo[]>
+  /**
+   * 启用/停用插件（plugin.toggle；reply 携带最新插件列表快照）。S13 重启动作 =
+   * off 再 on（ADR-0122：不自动重激活，用户显式触发）。
+   */
+  togglePlugin(pluginId: string, enabled: boolean): Promise<PluginInfo[]>
+  /** 订阅插件崩溃广播（plugin:crashed；S13 家族卡崩溃标记的增量提示，丢失由拉取收敛） */
+  onPluginCrashed(h: (payload: { pluginId: string; workerId?: string; error?: string }) => void): () => void
   /** 调插件业务方法（plugin.invoke；reply.result 解包，请求级失败 reject） */
   invokePlugin(pluginId: string, method: string, params?: Record<string, unknown>): Promise<unknown>
   /** 订阅插件业务事件广播（plugin:event；凭据状态上报的增量提示通道，D5 拉为主推补充） */

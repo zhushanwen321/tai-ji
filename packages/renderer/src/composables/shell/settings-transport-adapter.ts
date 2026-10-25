@@ -157,6 +157,11 @@ export function createSettingsTransport(): SettingsTransport {
 
     // ── 插件 Provider 来源（provider-plugin-access U6）──
     listAvailablePlugins: () => plugin.listAvailablePlugins(),
+    // 插件运行态（S13 崩溃恢复）：家族卡崩溃态判定（plugin.list 拉为主）+ 重启动作
+    //（plugin.toggle off/on）+ 崩溃广播增量提示
+    listPlugins: () => plugin.listPlugins(),
+    togglePlugin: (pluginId, enabled) => plugin.togglePlugin(pluginId, enabled),
+    onPluginCrashed: (h) => plugin.onPluginCrashed(h),
     invokePlugin: (pluginId, method, params) => plugin.invokePlugin(pluginId, method, params),
     onPluginEvent: (h) => plugin.onPluginEvent(h),
     sendPluginUiEvent: (payload) => plugin.sendPluginUiEvent(payload),

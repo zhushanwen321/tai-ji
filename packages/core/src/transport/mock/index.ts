@@ -1874,8 +1874,22 @@ const pluginsSub = makeMockSubscription((): PluginInfo[] => [])
 // 恒空订阅（结构面与 real 同构，消费方可订阅但收不到帧——mock 无插件的真实形态）。
 const pluginEventsSub = makeMockSubscription((): PluginEventPayload => ({ pluginId: '', channel: '', payload: null }))
 
+// plugin:crashed 订阅骨架（S13 崩溃恢复）：恒空订阅（mock 无插件进程可崩溃，同上形态）。
+const pluginCrashedSub = makeMockSubscription((): { pluginId: string; workerId?: string; error?: string } => ({ pluginId: '' }))
+
 const pluginImpl = {
   onPlugins: (h: (plugins: PluginInfo[]) => void) => pluginsSub.subscribe(h),
+  // 插件运行态（S13 崩溃恢复）：list/toggle mock 无插件运行时返回空列表（与 onPlugins
+  // 恒空同形态——家族卡无崩溃标记可呈）；crashed 订阅恒空（无生产方）。
+  async listPlugins(): Promise<PluginInfo[]> {
+    await sleep(TIMING.ack)
+    return []
+  },
+  async togglePlugin(_pluginId: string, _enabled: boolean): Promise<PluginInfo[]> {
+    await sleep(TIMING.ack)
+    return []
+  },
+  onPluginCrashed: (h: (payload: { pluginId: string; workerId?: string; error?: string }) => void) => pluginCrashedSub.subscribe(h),
   // 插件权限审批/回收/拒绝（[G4 锚定补齐]：锚定前 mock 缺此族成员，门面三元下不可达）。
   // mock 无插件运行时，ack 型 stub resolve 即可。revokePermissions / denyPermissions
   // 与 real 同为单参（锚定曾抓出 stub 多参，已对齐）。

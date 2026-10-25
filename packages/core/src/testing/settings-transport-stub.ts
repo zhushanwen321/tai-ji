@@ -210,6 +210,11 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     //    Provider 页呈 channelUnavailable 可见降级；real adapter 无条件挂载）；用例需
     //    覆盖确认卡时经 overrides 注入三个 vi.fn。──
     listAvailablePlugins: vi.fn(async () => ({ plugins: [] })),
+    // 插件运行态（S13 崩溃恢复）：list/toggle 中性默认空列表（无崩溃标记可呈）；
+    // crashed 订阅 no-op（用例经 overrides 注入可触发订阅回调的 vi.fn）
+    listPlugins: vi.fn(async () => []),
+    togglePlugin: vi.fn(async () => []),
+    onPluginCrashed: makeUnsubscribeStub(),
     invokePlugin: vi.fn(async () => null),
     onPluginEvent: makeUnsubscribeStub(),
     sendPluginUiEvent: vi.fn(async () => undefined),

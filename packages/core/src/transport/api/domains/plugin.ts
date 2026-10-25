@@ -54,6 +54,50 @@ export async function denyPermissions(pluginId: string): Promise<void> {
   await command('plugin.denyPermissions', { pluginId }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
+// ── 插件运行态（S13 崩溃恢复）：list / toggle / crashed 订阅 ──
+
+/**
+ * 已发现插件列表（plugin.list，reply config.plugins）。PluginInfo.status 含
+ * 'crashed'（S13 家族卡「插件已停止」判定源）；崩溃态由 plugin:crashed 广播增量提示。
+ */
+export async function listPlugins(): Promise<PluginInfo[]> {
+  const reply = await command('plugin.list', {}, RPC_BACKSTOP_TIMEOUT_MS)
+  return reply.plugins
+}
+
+/**
+ * 启用/停用插件（plugin.toggle，reply 携带最新插件列表快照）。S13 重启动作 =
+ * 本方法 off 再 on（设计失败路径表；ADR-0122：不自动重激活，重启由用户显式触发）。
+ */
+export async function togglePlugin(pluginId: string, enabled: boolean): Promise<PluginInfo[]> {
+  const reply = await command('plugin.toggle', { pluginId, enabled }, RPC_BACKSTOP_TIMEOUT_MS)
+  return reply.plugins
+}
+
+/** plugin:crashed 广播载荷（runtime 崩溃回调原样下发；workerId = 崩溃的进程/线程标识）。 */
+export interface PluginCrashedPayload {
+  pluginId: string
+  workerId?: string
+  error?: string
+}
+
+/**
+ * 订阅插件崩溃广播（plugin:crashed，全局通道）。S13 家族卡崩溃标记的增量提示源
+ * （拉为主：进入 family 段的 plugin.list 是权威态，本订阅丢失由下次拉取收敛）。
+ * wire payload 未契约化（ServerMessageMapBase 占位 Record），此处窄化 pluginId 必带。
+ */
+export function onPluginCrashed(handler: (payload: PluginCrashedPayload) => void): () => void {
+  return events.onGlobalType('plugin:crashed', (msg) => {
+    const payload = msg.payload as Record<string, unknown>
+    if (typeof payload.pluginId !== 'string' || payload.pluginId === '') return
+    handler({
+      pluginId: payload.pluginId,
+      ...(typeof payload.workerId === 'string' ? { workerId: payload.workerId } : {}),
+      ...(typeof payload.error === 'string' ? { error: payload.error } : {}),
+    })
+  })
+}
+
 // ── provider-plugin-access D9 / D8 / U5：invoke、uiEvent、plugin:event 订阅、清单域 ──
 
 /**

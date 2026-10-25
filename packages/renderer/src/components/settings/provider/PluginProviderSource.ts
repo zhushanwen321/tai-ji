@@ -3,6 +3,9 @@
  *
  * 职责（D1/D5/D9 消费侧）：
  *  - 拉清单：plugin.listAvailable（家族卡数据源 + 本地安装状态 + 更新可用标记）；
+ *  - 插件运行态：plugin.list（S13 家族卡崩溃态判定源，进入 family 段拉取为主；
+ *    plugin:crashed 广播作增量标记，丢失由下次拉取收敛）+ 重启动作（plugin.toggle
+ *    off 再 on——不自动重激活，ADR-0122）；
  *  - 凭据状态：条目展开 / 页进入经 plugin.invoke 的 getStatus 拉已知状态（拉为主，
  *    ADR-0097/D5），plugin:event 的凭据状态上报作增量提示（推补充——丢失由下一次
  *    展开拉取收敛，不建推送补偿）；宿主只做展示映射，不推断状态（D5）。
@@ -19,7 +22,7 @@
  * 插件未上报时 statusOf 返回 undefined，宿主不显示任何失效标记（D5/S5——不猜测）。
  */
 import { onScopeDispose, ref, type Ref } from 'vue'
-import type { PluginListAvailableReply } from '@taiji/shared'
+import type { PluginListAvailableReply, PluginInfo } from '@taiji/shared'
 import type { ActionExecutor, UiEventSender } from '@taiji/ui/rendering-protocol'
 // [C3] settings 域的 WS 读写一律经 SettingsTransport seam（禁直连 @/api 门面 /
 // 禁深 import transport 域）；插件来源的四条通道 + 可选安装成员由 seam 承载
@@ -174,6 +177,20 @@ export type PluginProviderSourceReturn = {
   catalogUnavailable: Ref<boolean>
   /** 拉取清单（fail-safe 链在 runtime，本层失败保持现状 + warn） */
   refreshCatalog: () => Promise<void>
+  /**
+   * 拉取插件运行态列表（plugin.list，S13 家族卡崩溃态判定源——status='crashed' 的
+   * 已装条目呈「插件已停止」+ 重启按钮）。失败保持现状 + warn（拉为主：进入 family
+   * 段的本次拉取是权威态，plugin:crashed 增量提示丢失由它收敛）。
+   */
+  refreshPlugins: () => Promise<void>
+  /**
+   * 重启崩溃插件（S13 失败路径表：plugin.toggle off 再 on——不自动重激活，用户显式
+   * 触发，ADR-0122）。成功后以 toggle reply 的最新列表更新运行态缓存并返回；
+   * 失败向调用方抛出（UI 层呈现，不静默）。
+   */
+  restartPlugin: (pluginId: string) => Promise<void>
+  /** 已知插件运行态（undefined = 未拉取/不在列表——无崩溃标记，不猜测） */
+  pluginInfoOf: (pluginId: string) => PluginInfo | undefined
   /** 已知凭据状态（undefined = 未上报/未拉取——宿主不显示任何标记，D5/S5） */
   statusOf: (providerId: string) => CredentialStatusPayload | undefined
   /**
@@ -206,26 +223,46 @@ const catalog = ref<PluginCatalogItem[]>([])
 const catalogLoaded = ref(false)
 // taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构）：S15 两态元数据（R-2 wire 字段）。
 const catalogStale = ref(false)
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构）：S15 两态元数据（R-2 wire 字段，同上）。
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构）：S15 两态元数据（R-2 wire 字段）。
 const catalogUnavailable = ref(false)
+// taste:allow-no-data-owner W24-EX-B（模块级单例，设置域全局态非 per-session——ADR-0049
+// 例外清单形态，判定见文件头）：插件运行态 map（pluginId → PluginInfo，S13 崩溃态判定源）。
+const pluginInfoMap = ref(new Map<string, PluginInfo>())
 
 let refCount = 0
 let unsubscribeEvent: (() => void) | null = null
+let unsubscribeCrashed: (() => void) | null = null
 
-/** plugin:event 增量提示订阅（D5：推补充——丢失由下次 pullStatus 收敛，无补偿机制）。 */
+/**
+ * plugin:event 增量提示订阅（D5：推补充——丢失由下次 pullStatus 收敛，无补偿机制）
+ * + plugin:crashed 崩溃增量提示（S13：拉为主，进入 family 段的 plugin.list 是权威态，
+ * 崩溃帧丢失由下次拉取收敛）。
+ */
 function ensureSubscribed(): void {
-  if (unsubscribeEvent !== null) return
-  unsubscribeEvent = getSettingsTransport().onPluginEvent((event) => {
-    if (event.channel !== CREDENTIAL_STATUS_CHANNEL) return
-    // parseCredentialStatus 的契约含 providerId（归属必带）；仍显式提取并校验，
-    // 防御「payload providerId 与窄化结果错位」的插件侧 bug 静默写错分区。
-    const providerId = extractProviderId(event.payload)
-    const status = providerId !== undefined ? parseCredentialStatus(event.payload) : null
-    if (!status) return
-    const next = new Map(statusMap.value)
-    next.set(providerId!, { state: status.state, ...(status.message !== undefined ? { message: status.message } : {}) })
-    statusMap.value = next
-  })
+  if (unsubscribeEvent === null) {
+    unsubscribeEvent = getSettingsTransport().onPluginEvent((event) => {
+      if (event.channel !== CREDENTIAL_STATUS_CHANNEL) return
+      // parseCredentialStatus 的契约含 providerId（归属必带）；仍显式提取并校验，
+      // 防御「payload providerId 与窄化结果错位」的插件侧 bug 静默写错分区。
+      const providerId = extractProviderId(event.payload)
+      const status = providerId !== undefined ? parseCredentialStatus(event.payload) : null
+      if (!status) return
+      const next = new Map(statusMap.value)
+      next.set(providerId!, { state: status.state, ...(status.message !== undefined ? { message: status.message } : {}) })
+      statusMap.value = next
+    })
+  }
+  if (unsubscribeCrashed === null) {
+    unsubscribeCrashed = getSettingsTransport().onPluginCrashed((payload) => {
+      // 增量标记崩溃（字段原样保留 wire 真值；status 语义 = runtime 崩溃回调已落
+      // registry 的 crashed，此处只同步展示缓存，不重算其他字段）
+      const previous = pluginInfoMap.value.get(payload.pluginId)
+      if (previous === undefined || previous.status === 'crashed') return
+      const next = new Map(pluginInfoMap.value)
+      next.set(payload.pluginId, { ...previous, status: 'crashed', enabled: false })
+      pluginInfoMap.value = next
+    })
+  }
 }
 
 /** 上报载荷里的归属 providerId（parseCredentialStatus 契约字段的前置提取）。 */
@@ -238,6 +275,8 @@ function extractProviderId(payload: unknown): string | undefined {
 function releaseSubscription(): void {
   unsubscribeEvent?.()
   unsubscribeEvent = null
+  unsubscribeCrashed?.()
+  unsubscribeCrashed = null
 }
 
 /**
@@ -260,6 +299,9 @@ export function usePluginProviderSource(): PluginProviderSourceReturn {
     catalogStale,
     catalogUnavailable,
     refreshCatalog,
+    refreshPlugins,
+    restartPlugin,
+    pluginInfoOf: (pluginId) => pluginInfoMap.value.get(pluginId),
     statusOf: (providerId) => statusMap.value.get(providerId),
     pullStatus,
     pullAuthorizeView,
@@ -287,6 +329,28 @@ async function refreshCatalog(): Promise<void> {
     // 辅助域降级：失败保持现状（首拉失败 = 空清单空态），不向上抛。
     console.warn('[plugin-provider-source] listAvailable failed (kept current catalog):', e)
   }
+}
+
+/** 拉取插件运行态列表（plugin.list；失败保持现状 + warn，S13 拉为主）。 */
+async function refreshPlugins(): Promise<void> {
+  try {
+    const plugins = await getSettingsTransport().listPlugins()
+    pluginInfoMap.value = new Map(plugins.map((p) => [p.pluginId, p]))
+  } catch (e) {
+    // 辅助域降级：失败保持现状（无崩溃标记——不猜测），不向上抛。
+    console.warn('[plugin-provider-source] plugin.list failed (kept current plugin states):', e)
+  }
+}
+
+/**
+ * 重启崩溃插件（S13：toggle off 再 on）。两步 reply 均携带最新插件列表快照，末次
+ * 结果直接更新运行态缓存；off/on 任一步失败都中断并向调用方抛出（UI 呈现，不静默）。
+ */
+async function restartPlugin(pluginId: string): Promise<void> {
+  const transport = getSettingsTransport()
+  await transport.togglePlugin(pluginId, false)
+  const plugins = await transport.togglePlugin(pluginId, true)
+  pluginInfoMap.value = new Map(plugins.map((p) => [p.pluginId, p]))
 }
 
 /** 条目展开 / 页进入的凭据状态拉取（invoke getStatus；失败 warn 降级，D5）。 */
@@ -333,6 +397,7 @@ export function _resetPluginProviderSourceForTest(): void {
   refCount = 0
   releaseSubscription()
   statusMap.value = new Map()
+  pluginInfoMap.value = new Map()
   catalog.value = []
   catalogLoaded.value = false
   catalogStale.value = false

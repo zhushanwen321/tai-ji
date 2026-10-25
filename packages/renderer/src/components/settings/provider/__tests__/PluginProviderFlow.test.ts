@@ -53,6 +53,9 @@ const FAMILIES: PluginListAvailableReply['plugins'] = [
 
 const pluginMock = vi.hoisted(() => ({
   listAvailablePlugins: vi.fn(),
+  listPlugins: vi.fn(),
+  togglePlugin: vi.fn(),
+  onPluginCrashed: vi.fn(() => () => {}),
   preparePluginInstall: vi.fn(),
   confirmPluginInstall: vi.fn(),
   cancelPluginInstall: vi.fn(),
@@ -118,9 +121,13 @@ function queryAll(testId: string): HTMLElement[] {
 
 beforeEach(() => {
   _resetPluginProviderSourceForTest()
-  // [C3] 插件来源四通道 + 两段式安装经 SettingsTransport seam 注入（不 mock @/api 门面）
+  // [C3] 插件来源通道（清单 + 运行态/重启 + 两段式安装）经 SettingsTransport seam 注入
+  //（不 mock @/api 门面）
   provideSettingsTransport(makeSettingsTransportStub({
     listAvailablePlugins: pluginMock.listAvailablePlugins,
+    listPlugins: pluginMock.listPlugins,
+    togglePlugin: pluginMock.togglePlugin,
+    onPluginCrashed: pluginMock.onPluginCrashed,
     preparePluginInstall: pluginMock.preparePluginInstall,
     confirmPluginInstall: pluginMock.confirmPluginInstall,
     cancelPluginInstall: pluginMock.cancelPluginInstall,
@@ -129,6 +136,11 @@ beforeEach(() => {
     onPluginEvent: pluginMock.onPluginEvent,
   }))
   pluginMock.listAvailablePlugins.mockReset().mockImplementation(() => Promise.resolve({ plugins: FAMILIES }))
+  // 插件运行态中性默认：Trae 已装且正常（家族卡崩溃标记判定源，S13）
+  pluginMock.listPlugins.mockReset().mockImplementation(() => Promise.resolve([
+    { pluginId: 'wool-trae', version: '1.2.0', displayName: 'Trae', description: '', status: 'active', trustLevel: 'sandbox', enabled: true },
+  ]))
+  pluginMock.togglePlugin.mockReset().mockResolvedValue([])
   pluginMock.preparePluginInstall.mockReset().mockImplementation((spec: string) => {
     const entry = FAMILIES.find((e) => e.packageName === spec || e.pluginId === spec)
     if (entry === undefined) return Promise.reject(new Error(`unknown package: ${spec}`))
@@ -349,5 +361,100 @@ describe('PluginProviderFlow S7：text-input 输入经 uiEvent 回传', () => {
     })
     // 输入状态保持（宿主本地镜像，插件回推覆盖）
     expect((query('gui-text-input-field-pat') as HTMLInputElement).value).toBe('pat-123')
+  })
+})
+
+/** S13 家族卡崩溃态（plugin.list status=crashed → 「插件已停止」+ 重启按钮）*/
+function crashedPluginsList() {
+  return [
+    { pluginId: 'wool-trae', version: '1.2.0', displayName: 'Trae', description: '', status: 'crashed', trustLevel: 'sandbox', enabled: false },
+  ]
+}
+
+describe('PluginProviderFlow S13：家族卡崩溃态（失败路径表「插件已停止」+ 重启）', () => {
+  it('crashed 家族卡显示「插件已停止」标记 + 重启按钮（正常态家族卡零呈现）', async () => {
+    pluginMock.listPlugins.mockImplementation(() => Promise.resolve(crashedPluginsList()))
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    const badges = queryAll('plugin-family-crashed-badge')
+    const buttons = queryAll('plugin-family-restart-btn')
+    expect(badges).toHaveLength(1)
+    expect(buttons).toHaveLength(1)
+    // 标记挂在 Trae（crashed）那张卡内；WorkBuddy/Qoder 未装未拉到运行态 → 零呈现
+    const traeCard = queryAll('plugin-family-card').find((c) => (c.textContent ?? '').includes('Trae'))
+    expect(traeCard?.contains(badges[0])).toBe(true)
+    expect(traeCard?.contains(buttons[0])).toBe(true)
+    expect(badges[0].textContent).toContain('插件已停止')
+  })
+
+  it('正常态（active）家族卡不渲染崩溃标记与重启按钮', async () => {
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    expect(queryAll('plugin-family-crashed-badge')).toHaveLength(0)
+    expect(queryAll('plugin-family-restart-btn')).toHaveLength(0)
+  })
+
+  it('plugin:crashed 广播增量标记（对话框开着时崩溃实时刷新，丢失由拉取收敛）', async () => {
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+    expect(queryAll('plugin-family-crashed-badge')).toHaveLength(0)
+
+    // 取 ensureSubscribed 注册的 crashed handler 直接触发（增量提示链）
+    const handler = pluginMock.onPluginCrashed.mock.calls.at(-1)?.[0] as (p: { pluginId: string }) => void
+    expect(handler).toBeTypeOf('function')
+    handler({ pluginId: 'wool-trae', error: 'Child process exited' })
+    await nextTick()
+
+    expect(queryAll('plugin-family-crashed-badge')).toHaveLength(1)
+    expect(queryAll('plugin-family-restart-btn')).toHaveLength(1)
+  })
+
+  it('点重启 → plugin.toggle off 再 on（顺序序列），完成后以回包刷新家族卡（标记消失）', async () => {
+    pluginMock.listPlugins.mockImplementation(() => Promise.resolve(crashedPluginsList()))
+    // toggle 回包 = 重启后的最新列表（Trae 回 active）——回包即运行态缓存的刷新源
+    pluginMock.togglePlugin.mockImplementation((_pluginId: string, enabled: boolean) =>
+      Promise.resolve(enabled
+        ? [{ pluginId: 'wool-trae', version: '1.2.0', displayName: 'Trae', description: '', status: 'active', trustLevel: 'sandbox', enabled: true }]
+        : crashedPluginsList()))
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+    expect(queryAll('plugin-family-restart-btn')).toHaveLength(1)
+
+    query('plugin-family-restart-btn')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    await nextTick()
+
+    // off → on 顺序序列（设计失败路径表：plugin.toggle off/on，不自动重激活）
+    expect(pluginMock.togglePlugin.mock.calls).toEqual([
+      ['wool-trae', false],
+      ['wool-trae', true],
+    ])
+    // 回包 status=active → 家族卡崩溃标记与重启按钮消失
+    expect(queryAll('plugin-family-crashed-badge')).toHaveLength(0)
+    expect(queryAll('plugin-family-restart-btn')).toHaveLength(0)
+  })
+
+  it('重启失败（toggle reject）→ family 段错误条呈现，不静默', async () => {
+    pluginMock.listPlugins.mockImplementation(() => Promise.resolve(crashedPluginsList()))
+    pluginMock.togglePlugin.mockRejectedValue(new Error('activation timeout'))
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    query('plugin-family-restart-btn')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    await nextTick()
+
+    const error = query('plugin-flow-error')
+    expect(error).not.toBeNull()
+    expect(error?.textContent).toContain('重启失败')
+    // 失败后运行态未变（拉取态仍 crashed）→ 标记保留，可再试
+    expect(queryAll('plugin-family-crashed-badge')).toHaveLength(1)
   })
 })

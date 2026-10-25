@@ -2,7 +2,8 @@
   <!--
     插件 Provider 接入流程（provider-plugin-access 设计 U6 / D1/D2/D3/D5）。
     三段视图（显式 phase 状态机：family → confirm → authorize）：
-      ① family 家族卡网格：清单 family 条目（名称/厂商/授权方式/模型数/安装状态），S1；
+      ① family 家族卡网格：清单 family 条目（名称/厂商/授权方式/模型数/安装状态），
+         S1；已装家族插件崩溃时呈「插件已停止」+ 重启按钮（S13，plugin.toggle off/on）；
       ② confirm 安装确认卡：preparePluginInstall 回包的知情面全量展示
         （capabilities/readPaths 逐项），展示物 = 暂存解压物 manifest（同源），S27——
         确认前不发生安装落盘（取消/关闭 = cancelPluginInstall 清暂存）；
@@ -56,8 +57,23 @@
                 data-testid="plugin-family-update-badge"
                 class="rounded-sm bg-warn-soft px-1.5 py-0.5 font-medium text-warn"
               >{{ t('pluginProvider.flow.updateBadge') }}</span>
+              <!-- S13 崩溃标记（失败路径表：crashed 家族卡显示「插件已停止」） -->
+              <span
+                v-if="isCrashed(entry)"
+                data-testid="plugin-family-crashed-badge"
+                class="rounded-sm bg-danger-soft px-1.5 py-0.5 font-medium text-danger"
+              >{{ t('pluginProvider.flow.stoppedBadge') }}</span>
             </span>
           </span>
+          <!-- S13 重启按钮（失败路径表：plugin.toggle off/on，用户显式触发不自动重激活，ADR-0122） -->
+          <Button
+            v-if="isCrashed(entry)"
+            variant="secondary"
+            size="sm"
+            data-testid="plugin-family-restart-btn"
+            :disabled="restartingPluginId !== null"
+            @click.stop="onRestartPlugin(entry)"
+          >{{ restartingPluginId === entry.pluginId ? t('pluginProvider.flow.restarting') : t('pluginProvider.flow.restart') }}</Button>
           <!-- 未装家族的显式安装引导（失败路径表：家族卡显示「需要先安装插件」） -->
           <span
             v-if="!entry.installed"
@@ -249,9 +265,34 @@ const confirming = ref(false)
 const catalogRefreshing = ref(false)
 /** 包名直装输入（S27 第二路径：清单是发现通道，用户可直接输入包名） */
 const directSpec = ref('')
+/** S13 重启中的插件 id（null = 无；重启按钮 loading/互斥判据） */
+const restartingPluginId = ref<string | null>(null)
 
 /** 家族条目（清单 family 非空者——Provider 来源插件的家族卡数据）。 */
 const familyEntries = computed(() => source.catalog.value.filter((e) => e.family !== undefined))
+
+/** S13 崩溃态判定：该家族对应插件在 plugin.list 运行态中 status=crashed（未拉到 = 不猜测）。 */
+function isCrashed(entry: PluginCatalogItem): boolean {
+  return source.pluginInfoOf(entry.pluginId)?.status === 'crashed'
+}
+
+/**
+ * S13 重启动作（失败路径表）：plugin.toggle off 再 on，经 source.restartPlugin 执行；
+ * 执行中按钮 loading + 互斥，完成后运行态缓存由 restartPlugin 以 toggle 回包刷新
+ * （家族卡崩溃标记随之消失）。失败呈 family 段错误条，不静默。
+ */
+async function onRestartPlugin(entry: PluginCatalogItem): Promise<void> {
+  if (restartingPluginId.value !== null) return
+  restartingPluginId.value = entry.pluginId
+  flowError.value = ''
+  try {
+    await source.restartPlugin(entry.pluginId)
+  } catch (e) {
+    flowError.value = t('pluginProvider.flow.restartFailed', { reason: e instanceof Error ? e.message : String(e) })
+  } finally {
+    restartingPluginId.value = null
+  }
+}
 
 const dialogTitle = computed(() => {
   if (phase.value === 'confirm') {
@@ -312,12 +353,14 @@ watch(() => props.open, (open) => {
   void enterFlow()
 }, { immediate: true })
 
-/** 打开：拉清单 → 有焦点则直达（authorize 直进挂载位容器；update 直进确认卡）。 */
+/** 打开：拉清单 + 插件运行态（S13 崩溃标记判定源）→ 有焦点则直达（authorize 直进挂载位容器；update 直进确认卡）。 */
 async function enterFlow(): Promise<void> {
   flowError.value = ''
   catalogRefreshing.value = true
   try {
     await source.refreshCatalog()
+    // 并行不 await 阻塞清单呈现：运行态只影响家族卡崩溃标记（后到后渲染，S13 拉为主）
+    void source.refreshPlugins()
   } finally {
     catalogRefreshing.value = false
   }
@@ -347,6 +390,7 @@ function resetFlow(): void {
   installPreview.value = null
   pendingAuthorizePluginId.value = null
   directSpec.value = ''
+  restartingPluginId.value = null
   flowError.value = ''
 }
 
