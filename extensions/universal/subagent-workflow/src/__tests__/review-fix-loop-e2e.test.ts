@@ -347,11 +347,14 @@ function miniValidator(schema: unknown, value: unknown, path: string): void {
   }
 }
 
-/** 按 schema 形状识别调用阶段（review / aggregator / fix）。 */
-function classifyCall(opts: { schema?: unknown }): "review" | "aggregate" | "fix" {
+/** 按 schema 形状识别调用阶段（review / aggregator / fix / repair）。
+ *  repair = 统一 commit 补修子循环的补修 agent（commitRepairSchema：repairedFiles/note，
+ *  autoCommit 补修链专用——mock 剧本经 scenario.repair 提供）。 */
+function classifyCall(opts: { schema?: unknown }): "review" | "aggregate" | "fix" | "repair" {
   const props = (opts.schema as JsonSchema | undefined)?.properties ?? {};
   if ("must_fix_ids" in props) return "aggregate";
   if ("fixed_count" in props) return "fix";
+  if ("repairedFiles" in props) return "repair";
   return "review";
 }
 
@@ -434,6 +437,12 @@ interface Scenario {
   aggregate: (prompt: string) => ScenarioReturn;
   /** fix 剧本；回调收到 prompt 文本（fail-fast / 分组用例按 "group G<k>/<n>" header 分流）。 */
   fix: (prompt: string) => ScenarioReturn;
+  /**
+   * 补修 agent 剧本（可选；autoCommit 补修链用例提供）。返回 CommitRepairReport 形态
+   * （{repairedFiles, note}）——空申报 = 补修 agent 判不可修（unrepairable 终态的最短路径）。
+   * 未配置而补修调用发生 = 用例剧本错配，立即抛错可见。
+   */
+  repair?: (prompt: string) => ScenarioReturn;
 }
 
 /**
@@ -442,7 +451,7 @@ interface Scenario {
  */
 function makeScenarioRunner(scenario: Scenario) {
   const reviewCalls: Array<{ prompt: string; result: Record<string, unknown> }> = [];
-  const calls: Array<{ kind: "review" | "aggregate" | "fix"; prompt: string; agent?: string; schema?: unknown; model?: string }> = [];
+  const calls: Array<{ kind: "review" | "aggregate" | "fix" | "repair"; prompt: string; agent?: string; schema?: unknown; model?: string }> = [];
   const run = vi.fn(async (opts: { prompt?: string; schema?: unknown; agent?: string; model?: string }): Promise<AgentResult> => {
     const kind = classifyCall(opts);
     const prompt = opts.prompt ?? "";
@@ -470,6 +479,12 @@ function makeScenarioRunner(scenario: Scenario) {
       parsed = unwrapped.parsed; error = unwrapped.error; failureKind = unwrapped.failureKind; skipContractCheck = unwrapped.skipContractCheck;
     } else if (kind === "aggregate") {
       const unwrapped = unwrapScenario(scenario.aggregate(prompt));
+      parsed = unwrapped.parsed; error = unwrapped.error; failureKind = unwrapped.failureKind; skipContractCheck = unwrapped.skipContractCheck;
+    } else if (kind === "repair") {
+      if (!scenario.repair) {
+        throw new Error(`测试剧本错配：补修 agent 调用发生但 scenario.repair 未配置（prompt 首行：${prompt.split("\n")[0] ?? ""}）`);
+      }
+      const unwrapped = unwrapScenario(scenario.repair(prompt));
       parsed = unwrapped.parsed; error = unwrapped.error; failureKind = unwrapped.failureKind; skipContractCheck = unwrapped.skipContractCheck;
     } else {
       const unwrapped = unwrapScenario(scenario.fix(prompt));
@@ -2589,7 +2604,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
     );
 
     it(
-      "MF-1-1b: 统一 commit 的 git add 失败（index.lock 争用）→ fix-failure 结构化终止 + state.json 落盘",
+      "MF-1-1b: 统一 commit 的 git add 失败（index.lock 争用）→ 环境恢复重试仍败 → 补修子循环 → fix-failure 结构化终止 + state.json 落盘",
       async () => {
         const repo = makeTmpGitRepo();
         mkdirSync(join(repo, "src"), { recursive: true });
@@ -2613,6 +2628,8 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
               fixes: [{ issue_id: "MF-1", description: "mock fix", self_check: "grep: 1 hit; synced", affected_files: ["src/a.ts"] }],
               deferred: [],
             }),
+            // 补修 agent：锁争用报错未写明可改文件的恢复动作 → 空申报（unrepairable 最短路径）
+            repair: () => ({ repairedFiles: [], note: "index.lock 争用是环境态问题，报错未写明可改文件的恢复动作" }),
           });
           const deps = makeDeps(runner);
           const result = await runWorkflowToSettled(
@@ -2621,14 +2638,26 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
             deps, undefined, RUN_TIMEOUT_MS,
           );
 
-          expect(result.reason).toBe("completed"); // 结构化终止而非抛错
+          // 结构化终止而非抛错：run 终局吸收失败成员（subagent-observability §3.3.8
+          // 行为反转），reason 落正常收尾族——终判语义由 scriptResult 承载（对齐 W3
+          // runFailFastCase 的 run 级断言约定）
+          expect(["completed", "partially_succeeded", "failed"]).toContain(result.reason);
           expect(result.error).toBeUndefined();
           const outcome = assertScriptOutcome(result.scriptResult);
           // git add 抛错 → terminated='fix-failure'（结构化终止语义）
           expect(outcome.terminated).toBe("fix-failure");
           expect(outcome.message).toContain("[UNRESOLVED]");
-          expect(outcome.message).toContain("统一 commit 环境恢复重试后仍失败");
+          // 恢复链完整走过：env 恢复 agent 先行（重试 add+commit 仍败）→ 补修子循环
+          //（空申报判不可修）→ fix-failure。终态文案 = buildRepairFailureMessage 信息全集。
+          expect(outcome.message).toContain("补修 agent 判定不可修");
+          expect(outcome.message).toContain("统一 git commit 补修 1 次仍被拦截");
+          expect(outcome.message).toContain("Unable to create"); // index.lock 报错原文进终态（证据可溯）
           expect(outcome.message).toContain("git status"); // 恢复动作指引
+          const { prompts, kinds } = runner.stats();
+          // 环境恢复通道先行锁定：env-fix agent 派发过（prompt 含 pre-commit 拦截语境）
+          expect(prompts.some((p) => p.includes("pre-commit hook"))).toBe(true);
+          // 补修 agent 恰 1 次（空申报立即终止：不回注、不消耗剩余补修次数）
+          expect(kinds.filter((k) => k === "repair").length).toBe(1);
           // 终止路径 saveState 已落盘（断点恢复依据）
           expect(existsSync(join(outcome.runDir!, "state.json"))).toBe(true);
           // 无 commit 产生（add 失败在 commit 之前；空仓 HEAD 仍不存在）
