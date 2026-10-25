@@ -76,6 +76,8 @@ import type { WorkflowRun } from "./models/workflow-run.ts";
 // 消费的下述符号经本行直接指向权威（下方 re-export 块供 orchestration 消费面、barrel
 // 与外部包深导入零改动）。
 import type {
+  FailedMemberReport,
+  PartialMemberReport,
   WorkflowRunEvent,
   WorkflowRunEventInput,
 } from "../shared/run-event-contracts.ts";
@@ -103,6 +105,7 @@ import type {
  * | aborted         | cancelled    | —                    | 用户主动取消（cancel-requested 控制事件合成路径的终局 outcome 同值——转移表 cancelled 行与本映射构造性一致） |
  * | budget_limited  | failed       | 'budget_limited'     | 预算耗尽 = 任务没跑完，failed 是用户视角的诚实归因（维持 failed && errorCode 分级） |
  * | time_limited    | time_limited | —                    | [D2] 活体墙钟预算超时升格为独立 outcome（新写入方无码；错误处理分级改双路判定——outcome=time_limited 直判） |
+ * | partially_succeeded | partially_succeeded | —            | [subagent-observability §3.3.8] 部分成功独立档（成员交付结算派生，聚合规则归 u4；失败成员因经 failedMembers[].cause 承载） |
  *
  * 被动收编语境注记：[D2] 后收编不再落 run-settled(outcome=interrupted)——中断 =
  * run-interrupted 转移事件（非终局帧），由收编写入方（D15 入口 interruptRun）直
@@ -125,6 +128,10 @@ export function doneReasonToRunOutcome(reason: DoneReason): RunOutcome {
       return "failed";
     case "time_limited":
       return "time_limited";
+    // [subagent-observability §3.3.8] 部分成功 = 独立 outcome（不折进 failed——
+    // 「一半成功」与全败不可分辨即故障 B 反方向失真）。
+    case "partially_succeeded":
+      return "partially_succeeded";
   }
 }
 
@@ -140,13 +147,16 @@ export function doneReasonToRunOutcome(reason: DoneReason): RunOutcome {
  * - budget_limited：run 级终局码恒等映射（同名字面量，上方注释载收录依据）；
  * - time_limited：[D2] 无码（超时终局已升格为 outcome 直判，RunErrorCode 的
  *   time_limited 成员保留为历史帧解析，新写入方不产出）；
- * - failed：按因提取。
+ * - failed：按因提取；
+ * - partially_succeeded：无码（[subagent-observability §3.3.8] 部分成功非 failed
+ *   终局；失败成员的因经终局帧 failedMembers[].cause 点拼承载，u4 接线）。
  */
 export function finalRunErrorCodeOf(run: WorkflowRun, doneReason: DoneReason): RunErrorCode | undefined {
   switch (doneReason) {
     case "completed":
     case "aborted":
     case "time_limited":
+    case "partially_succeeded":
       return undefined;
     case "budget_limited":
       return "budget_limited";
@@ -204,6 +214,8 @@ export type {
   RunInterruptedEvent,
   RunResumedEvent,
   RunSettledEvent,
+  FailedMemberReport,
+  PartialMemberReport,
   ModelOverrideEvent,
   WorkerLogEvent,
   WorkflowModelOverride,
@@ -620,8 +632,16 @@ export interface RunJournalFold { // oe-exempt:20260929:framework:workflow/recor
   interrupted?: { errorCode?: RunErrorCode; reason?: string; ts: number };
   /** 最近一次复活（run-resumed 帧；未复活 undefined——[D2] resume 锚点投影，D10 预算算式的切段边界之一）。 */
   resumed?: { reason?: string; host?: string; ts: number };
-  /** run-settled 终局（未终态 undefined；terminal 吸收性保证先到帧为准）。 */
-  runSettled: { outcome: RunOutcome; errorCode?: RunErrorCode; reason?: string; ts: number } | undefined;
+  /** run-settled 终局（未终态 undefined；terminal 吸收性保证先到帧为准；failedMembers/
+   *  partialMembers 随帧透传——§3.3.8 成员交付结算明细，runtime 派生视图消费）。 */
+  runSettled: {
+    outcome: RunOutcome;
+    errorCode?: RunErrorCode;
+    reason?: string;
+    ts: number;
+    failedMembers?: FailedMemberReport[];
+    partialMembers?: PartialMemberReport[];
+  } | undefined;
 }
 
 /**
@@ -886,37 +906,60 @@ export function foldRunEventCheckpoint(
     try {
       const { state } = transition(checkpoint.state, event);
       const { asks, phases } = applyAskFoldEvent(checkpoint.asks, checkpoint.phases, event);
-      checkpoint = {
+      checkpoint = advanceSkeletonFields(
+        checkpoint,
+        event,
         state,
-        lastSeq: typeof seq === "number" ? seq : checkpoint.lastSeq,
-        // 骨架半边（[W2 D7]）：状态机转移合法才推进——坏帧行整体不写，骨架与
-        // 状态同停在最近一致态。argsSummary 为写侧恒写载荷的透传（[可视化 U1，
-        // 设计 §3.3-D12]；旧格式行缺失即 undefined，读取面放行）。
-        created:
-          event.type === "run-created"
-            ? { runId: event.runId, workflowName: event.workflowName, argsSummary: event.argsSummary, ts: event.ts }
-            : checkpoint.created,
+        typeof seq === "number" ? seq : checkpoint.lastSeq,
         asks,
         phases,
-        interrupted:
-          event.type === "run-interrupted"
-            ? { errorCode: event.errorCode, reason: event.reason, ts: event.ts }
-            : checkpoint.interrupted,
-        resumed:
-          event.type === "run-resumed"
-            ? { reason: event.reason, host: event.host, ts: event.ts }
-            : checkpoint.resumed,
-        runSettled:
-          event.type === "run-settled"
-            ? { outcome: event.outcome, errorCode: event.errorCode, reason: event.reason, ts: event.ts }
-            : checkpoint.runSettled,
-      };
+      );
     } catch (err) {
       onBrokenFrame(err, event.type);
       break;
     }
   }
   return checkpoint;
+}
+
+/** 骨架半边推进（[W2 D7]）：created/interrupted/resumed/runSettled 各自只在对应帧写、其余帧保持既有值（骨架与状态同停在最近一致态）；argsSummary 为写侧恒写载荷的透传（[可视化 U1，设计 §3.3-D12]；旧格式行缺失即 undefined，读取面放行）。 */
+function advanceSkeletonFields(
+  checkpoint: RunEventFoldCheckpoint,
+  event: WorkflowRunEvent,
+  state: RunEventFoldCheckpoint["state"],
+  lastSeq: number,
+  asks: RunEventFoldCheckpoint["asks"],
+  phases: RunEventFoldCheckpoint["phases"],
+): RunEventFoldCheckpoint {
+  return {
+    state,
+    lastSeq,
+    created:
+      event.type === "run-created"
+        ? { runId: event.runId, workflowName: event.workflowName, argsSummary: event.argsSummary, ts: event.ts }
+        : checkpoint.created,
+    asks,
+    phases,
+    interrupted:
+      event.type === "run-interrupted"
+        ? { errorCode: event.errorCode, reason: event.reason, ts: event.ts }
+        : checkpoint.interrupted,
+    resumed:
+      event.type === "run-resumed"
+        ? { reason: event.reason, host: event.host, ts: event.ts }
+        : checkpoint.resumed,
+    runSettled:
+      event.type === "run-settled"
+        ? {
+          outcome: event.outcome,
+          errorCode: event.errorCode,
+          reason: event.reason,
+          ts: event.ts,
+          ...(event.failedMembers !== undefined ? { failedMembers: event.failedMembers } : {}),
+          ...(event.partialMembers !== undefined ? { partialMembers: event.partialMembers } : {}),
+        }
+        : checkpoint.runSettled,
+  };
 }
 
 /**

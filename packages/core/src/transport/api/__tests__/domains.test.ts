@@ -951,6 +951,18 @@ describe('config 域 请求-响应', () => {
     await expect(config.setRetryConfig({ maxRetries: 3 } as never)).resolves.toEqual(retry)
   })
 
+  it('retry 规则视图（subagent-observability §3.3.12）：get/set 走对应 type + customRules 透传', async () => {
+    const view = { builtinRules: [{ id: 'b' }], customRules: [{ id: 'c' }] }
+    mockCommand.mockResolvedValueOnce(view)
+    await expect(config.getRetryRules()).resolves.toEqual(view)
+    expect(mockCommand).toHaveBeenLastCalledWith('config.getRetryRules', {}, RPC_BACKSTOP_TIMEOUT_MS)
+
+    const rules = [{ id: 'probe', name: 'p', verdict: 'retryable', class: 'provider', source: 'custom', match: [{ kind: 'pattern', pattern: 'x' }] }]
+    mockCommand.mockResolvedValueOnce(view)
+    await expect(config.setRetryRules(rules as never)).resolves.toEqual(view)
+    expect(mockCommand).toHaveBeenLastCalledWith('config.setRetryRules', { customRules: rules }, RPC_BACKSTOP_TIMEOUT_MS)
+  })
+
   it('OAuth：login/cancel/logout/hasOAuth/checkEnvVars', async () => {
     mockCommand.mockResolvedValueOnce({ started: true })
     await expect(config.oauthLogin('p')).resolves.toEqual({ started: true })
@@ -1109,6 +1121,19 @@ describe('config 域 订阅（onGlobalType 通道）', () => {
     expect(hTc).toHaveBeenCalledWith({ shell: 'zsh' }, true)
     byType['config.retryConfig']({ payload: { config: { maxRetries: 1 }, configured: false } })
     expect(hRc).toHaveBeenCalledWith({ config: { maxRetries: 1 }, configured: false })
+  })
+
+  it('onRetryRules 经 onGlobalType(config.retryRules) 解包 payload（subagent-observability §3.3.12）', () => {
+    const subs: Array<[string, (msg: { payload: unknown }) => void]> = []
+    mockOnGlobalType.mockImplementation((type, handler) => {
+      subs.push([type, handler])
+      return vi.fn()
+    })
+    const h = vi.fn(); config.onRetryRules(h)
+    const byType = Object.fromEntries(subs)
+    const view = { builtinRules: [{ id: 'b' }], customRules: [{ id: 'c' }] }
+    byType['config.retryRules']({ payload: view })
+    expect(h).toHaveBeenCalledWith(view)
   })
 
   it('onNetworkProxyConfig 解包 payload.config（llm-network-proxy U1）', () => {

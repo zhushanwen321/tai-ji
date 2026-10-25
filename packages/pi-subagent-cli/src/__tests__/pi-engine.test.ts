@@ -456,6 +456,45 @@ describe("PiEngine.run（一次性任务形态）", () => {
     await runP;
   });
 
+  it("[subagent-observability §3.3.1/§3.3.3] 收尾事实字段透传：promptDisposition / observations / engineStopReason / retryAttempts", async () => {
+    const { engine, captured } = makeEngine();
+    const runP = engine.run({ prompt: "handled round" }, { ...baseCtx, taskId: "run-disposition" });
+    await settleRun(
+      captured[0]!,
+      spawnRunResult({
+        // 被接管轮形态（P6-A）：无停因 + 接管标注 + 观察事实（无 usage——零执行）
+        promptDisposition: "handled",
+        observations: ["structured output was never called"],
+        usage: undefined,
+        turns: 0,
+      }),
+    );
+    const { outcome } = await runP;
+    // [F1-33/F1-40] promptDisposition 透传（引擎产出 → 协议应答，宿主轮收条数据源）
+    expect(outcome.promptDisposition).toBe("handled");
+    // [F1-34] observations 透传
+    expect(outcome.observations).toEqual(["structured output was never called"]);
+    expect(outcome.engineStopReason).toBeUndefined();
+    expect(outcome.retryAttempts).toBeUndefined();
+
+    // 失败轮形态：engineStopReason + retryAttempts 透传（>0 才落键的既有判据）
+    const runP2 = engine.run({ prompt: "failed round" }, { ...baseCtx, taskId: "run-stop" });
+    await settleRun(
+      captured[1]!,
+      spawnRunResult({
+        engineStopReason: "aborted",
+        retryAttempts: 2,
+        success: false,
+        error: "engine reported error without message text",
+      }),
+    );
+    const { outcome: outcome2 } = await runP2;
+    expect(outcome2.engineStopReason).toBe("aborted");
+    expect(outcome2.retryAttempts).toBe(2);
+    expect(outcome2.promptDisposition).toBeUndefined();
+    expect(outcome2.observations).toBeUndefined();
+  });
+
   it("ctx.sessionDir 缺失 → engine_not_found fail-fast（附宿主接线恢复指引），不进 spawn", async () => {
     const { engine, captured } = makeEngine();
     const ctx: RunContext = { taskId: "run-sd-missing" };

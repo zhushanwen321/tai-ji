@@ -11,7 +11,7 @@
  *   importOriginal 保留），withFileLockSync/atomicWrite 真实执行。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, rmSync, truncateSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, truncateSync, utimesSync } from 'node:fs'
 import { logger } from '../../../infra/logger.js'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -451,6 +451,75 @@ describe('refreshRecordEntries：拉取与发布', () => {
     records.invalidateRecordEntries('s1', 'subagent-record')
     await flushDebounce()
     expect(publish).toHaveBeenCalledTimes(3)
+  })
+
+  it('lastRound 比对位：仅 lastRound 变化的投影也触发 publish（漏比对 = wire 永不下发新轮收条）', async () => {
+    // [subagent-observability u3 F4] 构造「除 lastRound 外全字段相等」的两轮投影：
+    // 第二轮收条与前轮同 stopReason/turns/totalTokens/resultSummary，仅多
+    // promptDisposition——发布去重层缺 lastRound 比对位时判全等 → 不发布 → 红点
+    // 判据失真。事件驱动链（report → fold → 投影 → 发布门）全真，不经 entry 面。
+    const dir = mkdtempSync(join(tmpdir(), 'session-records-lastround-'))
+    const recordsDir = getSubagentRecordsDir('s1', dir)
+    mkdirSync(recordsDir, { recursive: true })
+    const eventsPath = join(recordsDir, 'sa-lr.events')
+    const header = { type: 'record-events', id: 'sa-lr' }
+    const created = { type: 'record-created', seq: 1, ts: 1000, id: 'sa-lr', agent: 'worker', task: 't', slug: 's', origin: 'tool', rootSessionId: 's1', depth: 0, mode: 'background', startedAt: 1000 }
+    // 两轮收条事实字段刻意同值（stopReason/turns/totalTokens/resultSummary）——
+    // 第二轮仅多 promptDisposition（lastRound 的键）。
+    const roundIdle1 = { type: 'record-round-idle', seq: 2, ts: 2000, round: 1, stopReason: 'stop', turns: 2, totalTokens: 500, resultSummary: 'round reply' }
+    const reopened = { type: 'record-reopened', seq: 3, ts: 3000, epoch: 2, round: 0 }
+    const roundStarted = { type: 'record-round-started', seq: 4, ts: 3100, round: 2, epoch: 2 }
+    const roundIdle2 = { type: 'record-round-idle', seq: 5, ts: 4000, round: 2, stopReason: 'stop', turns: 2, totalTokens: 500, resultSummary: 'round reply', promptDisposition: 'queued' }
+    writeFileSync(eventsPath, [header, created, roundIdle1].map((l) => JSON.stringify(l)).join('\n') + '\n')
+    interface WireMember {
+      subagentId: string
+      status: string
+      turns?: number
+      lastRound?: { turns?: number; result?: string; promptDisposition?: string }
+    }
+    const membersOf = (frame: unknown): WireMember =>
+      ((frame as { payload: { subagents: WireMember[] } }).payload.subagents ?? []).find((r) => r.subagentId === 'sa-lr')!
+    try {
+      piAgentDirRef.dir = dir
+      const { records, publish } = makeRecords({
+        sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: join(dir, 's1.jsonl'), cwd: dir }]) } as unknown as ISessionStore,
+      })
+      registerSession(records)
+      writeFileSync(join(dir, 's1.jsonl'), '{}\n')
+
+      expect(routeJournalReport('s1', {
+        domain: 'record',
+        fileKey: 'sa-lr',
+        events: [created, roundIdle1],
+        sessionId: 's1',
+        emittedAt: Date.now(),
+      })).toBe(true)
+      const subMsgs = () => publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.subagents')
+      expect(subMsgs().length).toBeGreaterThanOrEqual(1)
+      const first = membersOf(subMsgs()[0]![1])
+      expect(first.lastRound).toEqual({ turns: 2, result: 'round reply' })
+
+      // 第二轮：仅 lastRound.promptDisposition 新增（其余投影字段全等）→ 必须发布
+      writeFileSync(eventsPath, [reopened, roundStarted, roundIdle2].map((l) => JSON.stringify(l)).join('\n') + '\n', { flag: 'a' })
+      expect(routeJournalReport('s1', {
+        domain: 'record',
+        fileKey: 'sa-lr',
+        events: [reopened, roundStarted, roundIdle2],
+        sessionId: 's1',
+        emittedAt: Date.now(),
+      })).toBe(true)
+      const frameCount = subMsgs().length
+      const second = membersOf(subMsgs()[frameCount - 1]![1])
+      // 「仅 lastRound 变化」的构造前提钉住（其余字段与首轮逐项相等）
+      expect(second.status).toBe(first.status)
+      expect(second.turns).toBe(first.turns)
+      expect(second.lastRound).toEqual({ turns: 2, result: 'round reply', promptDisposition: 'queued' })
+      // 发布锚：比对位删除（漏比对）时本断言红——wire 永不下发新轮收条
+      expect(frameCount).toBeGreaterThanOrEqual(2)
+    } finally {
+      piAgentDirRef.dir = ''
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
   })
 
   it('engine 域同值新引用不重复发布（字段级浅比较——引用比较会把每轮重解析误判为变化）', async () => {
@@ -1617,6 +1686,90 @@ describe('[W1] 读侧换源：磁盘 entry-only 派生视图 / v2 读派生视�
       // RPC 读侧同源：getSubagents 与已发布帧一致（读请求唯一数据源 = 派生视图）
       const rpc = await records.getSubagents('s1')
       expect(rpc.records[0]).toMatchObject({ subagentId: 'sa-1', status: 'idle', stopReason: 'completed' })
+    } finally {
+      rmSync(world.worldDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+})
+
+// ── 查询真理通道：未激活会话投影 mtime 失效（F1-51/F1-17）───────────────
+//
+// 验收对照（设计 §3.3.6，ADR-0097）：未激活会话（无 journal 推送、无 entry 游标增量）
+// 首次读建投影后，磁盘事实补写（启动清点落定形态）在激活前的可见性由「会话文件 mtime
+// 对账」承载——① mtime 变化 → 重建投影，次查询读到新事实；② mtime 未变 → 走缓存不重建。
+// scanSessions mock 返回真实 statSync mtimeMs（生产同式：lastModified = fstat.mtimeMs）；
+// mtime 经 fs.utimesSync 显式设定（写内容与 mtime 解耦，不依赖写入时刻的粒度）。
+describe('查询真理通道：未激活会话事件投影 mtime 失效（F1-51/F1-17）', () => {
+  /** 整数秒 mtime 基线/更新值（utimesSync 数字参数按秒解释，回读 mtimeMs 无粒度歧义）。 */
+  const MTIME_BASE_S = 1000
+  const MTIME_AFTER_S = 2000
+
+  function makeUnactivatedWorld(): {
+    world: ReturnType<typeof makeV2World>
+    records: SessionRecords
+    rewriteSessionFile: (entries: Array<Record<string, unknown>>, mtimeSeconds: number) => void
+  } {
+    const cwd = '/tmp/mtime-proj'
+    const world = makeV2World(cwd)
+    piAgentDirRef.dir = world.worldDir
+    const rewriteSessionFile = (entries: Array<Record<string, unknown>>, mtimeSeconds: number): void => {
+      writeFileSync(world.sessionFile, entries.map((e) => JSON.stringify(e)).join('\n') + '\n')
+      utimesSync(world.sessionFile, mtimeSeconds, mtimeSeconds)
+    }
+    rewriteSessionFile([
+      { type: 'session', id: 's1', cwd },
+      subagentRegisteredV2('sa-1'),
+    ], MTIME_BASE_S)
+    const { records } = makeRecords({
+      sessionStore: {
+        scanSessions: vi.fn(() => [{
+          id: 's1',
+          filePath: world.sessionFile,
+          cwd,
+          lastModified: statSync(world.sessionFile).mtimeMs,
+        }]),
+      } as unknown as ISessionStore,
+    })
+    return { world, records, rewriteSessionFile }
+  }
+
+  it('mtime 变化 → 重建投影：未激活会话首读建缓存后磁盘补写的新事实次查询可见', async () => {
+    const { world, records, rewriteSessionFile } = makeUnactivatedWorld()
+    try {
+      // 首读建事件投影：会话文件只有注册条目 → running 在途态（陈旧快照原缺陷形态）
+      const first = await records.getSubagents('s1')
+      expect(first.records[0]).toMatchObject({ subagentId: 'sa-1', status: 'running' })
+
+      // 磁盘事实补写（清点落定形态：settled 条目追加）+ 显式新 mtime
+      rewriteSessionFile([
+        { type: 'session', id: 's1', cwd: '/tmp/mtime-proj' },
+        subagentRegisteredV2('sa-1'),
+        subagentSettledV2('sa-1'),
+      ], MTIME_AFTER_S)
+
+      // 次查询：mtime 对账命中变化 → 投影重建 → 新事实可见
+      const second = await records.getSubagents('s1')
+      expect(second.records[0]).toMatchObject({ subagentId: 'sa-1', status: 'idle' })
+    } finally {
+      rmSync(world.worldDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('mtime 未变 → 走缓存不重建：盘上补写内容不进入读取结果（缓存仍是判定真值）', async () => {
+    const { world, records, rewriteSessionFile } = makeUnactivatedWorld()
+    try {
+      const first = await records.getSubagents('s1')
+      expect(first.records[0]).toMatchObject({ subagentId: 'sa-1', status: 'running' })
+
+      // 盘上内容已补写，但 mtime 显式设回首读时的值（未变）→ 对账判定缓存有效
+      rewriteSessionFile([
+        { type: 'session', id: 's1', cwd: '/tmp/mtime-proj' },
+        subagentRegisteredV2('sa-1'),
+        subagentSettledV2('sa-1'),
+      ], MTIME_BASE_S)
+
+      const second = await records.getSubagents('s1')
+      expect(second.records[0]).toMatchObject({ subagentId: 'sa-1', status: 'running' })
     } finally {
       rmSync(world.worldDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }

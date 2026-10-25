@@ -101,8 +101,8 @@ const MAIN_PROMPT =
 const MAIN_TURN_TIMEOUT_MS = 180_000
 const JOURNAL_TIMEOUT_MS = 300_000
 const NOTIFY_TIMEOUT_MS = 300_000
-/** ack 关闭等待窗：ack 由回执扫描（agent_settled 边沿）驱动——通知唤醒 turn 结算
- *  后才落盘，送达后立即断言必为 0；窗口 = 一个真实 LLM turn（r3 实测教训）。 */
+/** ack 终局等待窗：ack 由 message_end 边沿驱动（注入落 transcript 即确认送达凭据并
+ *  落 ack 终局 entry），窗口只吸收 JSONL flush 延迟与边沿处理的时序差。 */
 const ACK_TIMEOUT_MS = 180_000
 const JSONL_FLUSH_TIMEOUT_MS = 20_000
 
@@ -132,7 +132,7 @@ async function settleS1Anchors(
     agentDir,
     dataDir,
     timeoutMs: JOURNAL_TIMEOUT_MS,
-    foundMessage: `run journal (wf-*.record.jsonl) 应在 ${JOURNAL_TIMEOUT_MS}ms 内落盘于 <agentDir>/sessions/**/workflow-state/`,
+    foundMessage: `run journal (wf-*.record.jsonl) 应在 ${JOURNAL_TIMEOUT_MS}ms 内落盘于 <dataDir>/ext-sessions/**/workflow/runs/`,
     diag: (name, data) => writeDiag(testInfo, name, data),
     diagName: 'batch-s1-journal-missing.json',
     diagExtra: {
@@ -244,14 +244,13 @@ function assertS1JournalAndEntryContract(
   runId: string,
   dataDir: string,
 ): void {
-  const agentDir = path.join(dataDir, 'agent')
-// ── 断言 M1（journal）：首帧 run-created / run-settled 恰 1 且 completed / seq 严格递增 ──
+  // ── 断言 M1（journal）：首帧 run-created / run-settled 恰 1 且 done / seq 严格递增 ──
 const frames = readJournalFrames(journalFile)
 expect(frames.length, 'journal 应至少有 run-created 与 run-settled 两帧').toBeGreaterThanOrEqual(2)
 expect(frames[0]?.['type'], 'journal 首帧应为 run-created（journal 首帧行为）').toBe('run-created')
 const settledFrames = frames.filter((f) => f['type'] === 'run-settled')
 expect(settledFrames.length, 'run-settled 应恰 1 帧（一个 run 恰好一帧）').toBe(1)
-expect(settledFrames[0]?.['outcome'], 'run-settled outcome 应为 completed').toBe('completed')
+expect(settledFrames[0]?.['outcome'], 'run-settled outcome 应为 done（全部成员成功交付，subagent-observability §3.3.8）').toBe('done')
 const seqs = frames.map((f) => Number(f['seq']))
 const strictlyIncreasing = seqs.every((s, i) => i === 0 || s > seqs[i - 1])
 expect(strictlyIncreasing, 'journal seq 应严格递增（行级单调序号，W1 D1 信封契约）').toBe(true)
@@ -280,15 +279,16 @@ for (const line of recordEntryLines) {
   expect(serialized.includes('displayItems'), 'v2 条目不应含 displayItems 死字节（W1 停写断言）').toBe(false)
 }
 
-// record 事件文件存在性（record 侧新介质）：每成员 <sa-id>.events
-const recordEvents = listFilesRecursive(path.join(agentDir, 'subagents'), '.events')
+// record 事件文件存在性（record 侧新介质）：每成员 <sa-id>.events——搜索根 =
+// <dataDir>/ext-sessions（ADR-0141 session 存储树，subagents/records/ 域按 rootSessionId 分区）
+const recordEvents = listFilesRecursive(path.join(dataDir, 'ext-sessions'), '.events')
 expect(recordEvents.length, 'record 事件文件族应恰 2 个（<recordsDir>/<sa-id>.events，每成员一个）').toBe(2)
 
 }
 
 // ── S1 主用例 ────────────────────────────────────────────────────────────
 
-test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + W1 新介质锚定', async ({ }, testInfo) => {
+test('S1 (batch real): subagent_batch 双任务并行 → 一条 notifyDone 收齐 + W1 新介质锚定', async ({ }, testInfo) => {
   // 凭证双门（缺一 skip 不 fail——防全量扫跑烧 token）
   applyRealTrackGate(test, { timeoutMs: 600_000, tag: 'batch-s1' })
 

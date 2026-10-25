@@ -2263,7 +2263,12 @@ describe("review-fix-loop fail-fast（结构化返回失败立即终判）", () 
       { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID(), ...args },
       deps, undefined, FAUX_RUN_TIMEOUT_MS,
     );
-    expect(result.reason).toBe("completed");
+    // [subagent-observability §3.3.8 行为反转连带] run 终局吸收成员交付：fail-fast
+    // case 的失败成员（reviewer/fixer 结构化 error）传导 run 终局——reason 落
+    // completed（无失败成员形态）/ partially_succeeded（部分失败）/ failed（全失败）
+    // 三者之一；终判语义由脚本返回值承载（assertScriptOutcome），run 级断言只锁
+    // 「正常收尾族 + 无 run 级错误」（time_limited/budget_limited/aborted 均非本组语义）。
+    expect(["completed", "partially_succeeded", "failed"]).toContain(result.reason);
     expect(result.error).toBeUndefined();
     return assertScriptOutcome(result.scriptResult) as FailFastOutcome;
   }

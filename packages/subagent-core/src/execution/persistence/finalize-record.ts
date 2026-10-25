@@ -22,6 +22,11 @@ import * as path from "node:path";
 import { getLogger } from "../../core/logger.ts";
 
 import { bestEffort, bestEffortPiCall } from "../assembly/best-effort.ts";
+// [subagent-observability u3] 轮终事实字段类型（FailureCause 权威 = SDK 协议词表家址；
+// ROUND_TERMINAL_STOP_REASONS = 轮终停因写入值域锚）。
+import { ROUND_TERMINAL_STOP_REASONS } from "../domain/record-types.ts";
+import type { FailureCause } from "@zhushanwen/subagent-engine-sdk";
+import type { AgentUsageTotal } from "@zhushanwen/subagent-engine-sdk";
 import { completeLegacyClosed } from "./execution-record.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "./record-store.ts";
@@ -46,8 +51,9 @@ export interface FinalizeDeps {
    * [F-5 修复] record 终态化的宿主侧收尾钩子（recordId；best-effort，抛错由调用方
    * 在闭包内自行兜底）。[永久会话模型] 现行调用点（recordLifecycle.finalizeRecord →
    * doFinalizeRecord 的全部生产入口）：workflow-origin D7 例外族（settleOneShotOutcome
-   * 成功/失败/abort 终态化 + finalizeFailed / finalizeAborted 的 workflow 分支）+
-   * 监督器放弃（finalizeClosed）。旧 finalizeEngineOutcome 兜底（引擎死亡不可接管
+   * 成功/失败/abort 终态化 + finalizeFailed / finalizeAborted 的 workflow 分支）——
+   * 旧「监督器放弃（finalizeClosed）」支已随轮次活性监督器整机清退删除。旧
+   * finalizeEngineOutcome 兜底（引擎死亡不可接管
    * 形态的终态化）已删——引擎死亡现走 Continuation 失败分支收尾（settleRoundFailed，
    * idle 可恢复不终态化），不经本钩子。旧「全部 closed 终态必经路径」口径已失效：tool-origin 轮终走
    * settle/markRoundIdle 不终态化（万物可续 G1），close = 收尾落定（consumePendingArchive）、
@@ -241,10 +247,45 @@ export async function doFinalizeRecord(
  * 命名与协议 AgentOutcome 同名不同物（设计 D7 v6：kind 判别联合消歧）——
  * kind 判别轮终分流：成功轮正文来源 = Continuation 成功分支的 content（协议
  * AgentOutcome.content 映射产物）；失败轮 reason = 失败原因原文。
+ *
+ * [subagent-observability u3 §3.3.3 轮收条事实化] 轮终事实字段（全可选，additive）：
+ *   - engineStopReason — 引擎停因原值（值域 = ROUND_TERMINAL_STOP_REASONS 三态）。
+ *     产出方 = u1 判定链接线（收尾边沿三汇合）；缺省 = 迁移期回落旧推断值
+ *     completed/failed（双写，§3.4——退役条件 = 迁移完删旧值）。
+ *   - failure — 失败分类（FailureCause，收尾边沿一次产出；本层只透传不改写）。
+ *   - promptDisposition — pi 接管三态（handled = 本条 prompt 未启动任何 run——
+ *     被接管轮：engineStopReason 无值 + result 空正文 + 不写 FailureCause，§3.3.1 P6）。
+ *   - usage / retryAttempts — 轮收条 usage 快照（最终尝试值）与重试计数（P5 计账）。
+ *   - observations — 观察性事实（引擎侧摘要——§3.3.10 分源表述：观察降级落
+ *     此处，不改写 failure；交付谓词缺项在 worker 脚本侧执行不经本字段——落
+ *     脚本结果 / run 终局帧 partialMembers / workflow_control missingDeliverables 三面）。
+ *   - stderrTeePath — 失败轮的引擎诊断 tee 路径（AgentOutcome.stderrTeePath 透传，
+ *     随轮收条事实落盘 → list evidence 装配；仅诊断引用，读侧不假设文件永存）。
+ * fact 字段缺席 = 旧引擎形态——停因展示词回落轮成败判据派生（failed 轮 = failed /
+ * 其余 = completed），轮终簿记与结清照常（结清按轮终事实产 completed/failed/no_result）。
  */
 export type RoundSettlementOutcome =
-  | { kind: "success"; content: string }
-  | { kind: "failed"; reason: string };
+  | {
+      kind: "success";
+      content: string;
+      engineStopReason?: (typeof ROUND_TERMINAL_STOP_REASONS)[number];
+      promptDisposition?: "started" | "queued" | "handled";
+      usage?: AgentUsageTotal;
+      retryAttempts?: number;
+      observations?: string[];
+      stderrTeePath?: string;
+    }
+  | {
+      kind: "failed";
+      reason: string;
+      engineStopReason?: (typeof ROUND_TERMINAL_STOP_REASONS)[number];
+      failure?: FailureCause;
+      promptDisposition?: "started" | "queued" | "handled";
+      usage?: AgentUsageTotal;
+      retryAttempts?: number;
+      observations?: string[];
+      stderrTeePath?: string;
+    };
 
 /**
  * 对话模式轮次完成收尾：record 进 idle 态（非终态化，等待续聊）。

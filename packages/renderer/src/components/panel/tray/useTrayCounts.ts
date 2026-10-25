@@ -25,8 +25,10 @@
  * - subagent：`subagentStore.recordsOf(sid)` 过滤 `origin !== 'workflow'`（workflow 派发的
  *   record 由 workflow 面板承载；该过滤口径原在侧栏任务计数内，已随侧栏任务视图退役、
  *   托盘为唯一实现）+ subagent-bucket SSOT 谓词：
- *   进行中 = `isRunningProjection`（running 且无 stopReason——死亡纳管态 running+failed 不落
- *   进行中）；已结束 = `!isRunningProjection`（两态语义：idle 与死亡纳管态全落此桶）。
+ *   进行中 = `isRunningProjection`（running 且无 stopReason——占用信号 = 「轮收条已写
+ *   = 本轮不在途」的等价信号，[subagent-observability §3.3.3]；原「W4 死亡纳管态
+ *   排除」措辞随 adoptEngineDeath 写点退役删除，不再单列，登记见 lib/subagent-bucket）；
+ *   已结束 = `!isRunningProjection`（两态语义：idle 与带停因的 running 全落此桶）。
  * - workflow：`workflowStore.recordsOf(sid)`；进行中 = `status === 'running'`，
  *   已结束 = 其余（done / interrupted——[D2] 显式裁决：interrupted 计 ended 桶，
  *   托盘计数语义 = 正在进行的活动，interrupted 是无活体暂停态不算进行中）。

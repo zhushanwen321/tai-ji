@@ -59,6 +59,7 @@ import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../sh
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
 import { project, settleWorkflowRecord } from "../persistence/execution-record.ts";
+import { notifyGateAllowsDelivery } from "../notify/notifier.ts";
 // [P1b-1] settle 链收尾单点（settleOneShotOutcome workflow origin 分支的终态收尾
 // 迁入）。[D1 拆边 Class C] 该单点下沉持久化层（记录级原语：CAS + 委托
 // finalizeRecord，零编排语义），上方 import 已直连 persistence。
@@ -69,6 +70,7 @@ import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
 import { identityEnvelopeOf } from "../engine/port.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
 import type { SubagentModelSource } from "../domain/record-model.ts";
+import { settlementFactsOf } from "../domain/record-model.ts";
 import { resolveEngineModelWithTranslation } from "../engine/model-ref-translation.ts";
 import { getLogger } from "../../core/logger.ts";
 import { executeOptionsToEngineTaskSpec } from "../engine/host-task-spec.ts";
@@ -107,8 +109,28 @@ import { DEFAULT_AGENT_NAME } from "../domain/record-model.ts";
 // [R6/D-R4-4] 跨聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
 import type { AgentStreamSink } from "../../shared/agent-stream.ts";
+import type { RoundSettlementOutcome } from "../persistence/finalize-record.ts";
 
 const logger = getLogger("subagents");
+
+/**
+ * RoundSettlementOutcome 两分支的同构可选字段透传（[§3.3.1 P6] 接管三态 / usage 快照 /
+ * 观察事实 / 重试计数 / [§3.3.6 evidence 取证指针] stderrTeePath——AgentResult 值在
+ * 场才携带，两分支消费同构，装配单点）。
+ */
+function roundIdleCommonFields(result: AgentResult): Pick<
+  Extract<RoundSettlementOutcome, { kind: "success" }>,
+  "engineStopReason" | "promptDisposition" | "usage" | "retryAttempts" | "observations" | "stderrTeePath"
+> {
+  return {
+    ...(result.engineStopReason !== undefined ? { engineStopReason: result.engineStopReason } : {}),
+    ...(result.retryAttempts !== undefined ? { retryAttempts: result.retryAttempts } : {}),
+    ...(result.promptDisposition !== undefined ? { promptDisposition: result.promptDisposition } : {}),
+    ...(result.usage !== undefined ? { usage: result.usage } : {}),
+    ...(result.observations !== undefined ? { observations: result.observations } : {}),
+    ...(result.stderrTeePath !== undefined ? { stderrTeePath: result.stderrTeePath } : {}),
+  };
+}
 
 /**
  * [R1 打样模式 1] 聚合协作 deps——**全部晚绑定闭包，构造期零求值**。
@@ -793,10 +815,32 @@ export class RunOrchestration {
       // [U2b] 轮终簿记①-⑪归属 store.markRoundIdle（`.alive` 跨轮保留；[W4 发射点②]
       // pending 注销已随 store 簿记⑧统一发射；⑩⑪ A-lite stopReason 展示位 +
       // `.state` 收条/binding 快照——正常轮终后宿主崩溃 revive 水合不归零）。
-      this.deps.getStore().markRoundIdle(record.id, { kind: "success", content: result.text });
+      this.deps.getStore().markRoundIdle(record.id, {
+        kind: "success",
+        content: result.text,
+        // [§3.3.3] 引擎停因原值随轮收条落盘（正常收尾派生判据的事实输入）。
+        ...roundIdleCommonFields(result),
+      });
     } else {
       // [U5] 失败轮 settle（不终态化——旧一次性销毁退役，失败轮同样可续聊）。
-      this.deps.getStore().markRoundIdle(record.id, { kind: "failed", reason: result.error ?? "round failed" });
+      // [§3.3.3] 失败分类与引擎停因原值随轮收条落盘（判定链事实不再止步于 reason
+      // 串——list lastRound.failure / 通知文案点拼消费方的数据源）。
+      this.deps.getStore().markRoundIdle(record.id, {
+        kind: "failed",
+        reason: result.error ?? "round failed",
+        ...(result.failure !== undefined ? { failure: result.failure } : {}),
+        ...roundIdleCommonFields(result),
+      });
+    }
+    // [subagent-observability §3.3.7② one-shot 通道放行] 非 workflow origin 的一次性
+    // 成员（executeAndAwait 域——G9 核实的现役调用点 canvas reviewer 等）轮终后发
+    // 轮应答（UC-4：正常轮收单条轮应答；该域无 run，runSettledEffects 的 wf-done 不
+    // 适用——构造性不双发）。gate 两步判定与 Continuation 调用点同形（notifyGate
+    // 消费方注释登记的「泛化派发主干尾部 one-shot 回注」位）；workflow origin 分支
+    // 维持 origin gate 静默（结果由脚本返回值承载，fan-out 成员放行判据缺口另案裁决
+    // ——u4 deviations 登记）。
+    if (notifyGateAllowsDelivery(record)) {
+      this.deps.getNotifyHost().notifyComplete(record);
     }
   }
 
@@ -817,6 +861,11 @@ export class RunOrchestration {
       sessionId: outcome.sessionId ?? record.id,
       toolCalls: [],
       ...(outcome.parsedOutput !== undefined ? { parsedOutput: outcome.parsedOutput } : {}),
+      // [subagent-observability §3.3.1/§3.3.3/§3.3.10] 收尾边沿事实透传（failure/
+      // engineStopReason/retryAttempts/接管三态/usage 快照/观察性事实——单一构造器
+      // settlementFactsOf）→ settleOneShotOutcome → 轮收条 rec.lastRound——one-shot
+      // 域与 workflow 域同源，判定分类与「正常收尾」派生判据不因执行域丢失。
+      ...settlementFactsOf(outcome),
     };
   }
 

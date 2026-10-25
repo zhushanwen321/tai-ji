@@ -567,7 +567,7 @@ describe("ConversationContinuation — 轮末分流（D7）与通知侧", () => 
     expect(calls.notified.length).toBe(0); // 成功通知经 route（record.result 权威），非独立载荷
   });
 
-  it("失败轮：lastError 簿记（failed outcome）+ 独立载荷失败通知（不经 route）+ round 同样 +1（dedup 分离）", async () => {
+  it("失败轮：lastError 簿记（failed outcome）+ 轮应答通道失败通知（五分支载体，不经 route）+ round 同样 +1（dedup 分离）", async () => {
     const record = makeRecord({ id: "sa-fail", round: 1 });
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
@@ -575,19 +575,65 @@ describe("ConversationContinuation — 轮末分流（D7）与通知侧", () => 
     cont.onRunSettled(makeOutcome({ content: "", error: "engine_crashed: child died" }));
 
     await vi.waitFor(() => expect(calls.notified.length).toBe(1));
-    // 失败通知：独立构造载荷（closed+failed 形态——正文 = 失败摘要 + 恢复指引）
+    // 失败通知：轮应答载体（[subagent-observability §3.3.7①] status:"running" +
+    // lastRound 事实字段 → buildRoundReplyContent 五分支判定）；本用例合成 outcome
+    // 无分类事实 → 走 ③' 迁移期回落（error 字段判失败形态），不落 ⑤ completed。
     const notify = calls.notified[0]!;
-    expect(notify.status).toBe("closed");
-    expect(notify.outcome).toBe("failed");
+    expect(notify.status).toBe("running");
     expect(notify.error).toContain("round did not complete: engine_crashed: child died");
-    expect(notify.error).toContain("Recovery");
-    expect(notify.error).toContain("action:'message'");
+    // error 字段 = 失败摘要原文（不嵌恢复指引）——恢复指引由 notifier 五分支正文尾部
+    // 单点承载，error 再嵌即成双段指引（双拼防线锚）。
+    expect(notify.error).not.toContain("Recovery:");
+    expect(notify.error).not.toContain("action:'message'");
     // dedup key = record:round：round 已随簿记 +1 → 失败通知与上一轮成功通知 key 分离
     expect(record.round).toBe(2);
     expect(notify.round).toBe(2);
     // 不经 route(record)——其正文恒读 record.result = 前值，直接复用会以旧正文冒充失败通知
     expect(calls.routed.length).toBe(0);
     expect(calls.finalized[0]!.outcome).toEqual({ kind: "failed", reason: "engine_crashed: child died" });
+  });
+
+  it("轮收条事实透传（§3.3.1/§3.3.3 settle 调用点）：接管三态 / usage 快照 / 观察性事实随轮终载荷下传（success/failed 两分支）", async () => {
+    // success 分支：被接管轮（promptDisposition=handled）——finalizeRoundOutcome 载荷
+    // 携带接管三态 + usage 快照（AgentUsageTotal 词形，total 派生四项和）+ 观察性事实；
+    // markRoundIdle 的 handled 分支（stopReason 不写 + 结清 no_result）由此载荷可达。
+    const record = makeRecord({});
+    const { host, calls } = makeHost(record);
+    const cont = new ConversationContinuation(record, host);
+    cont.onRunSettled(makeOutcome({
+      content: "",
+      promptDisposition: "handled",
+      usage: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 4, turns: 0 },
+      observations: ["structured output was not invoked"],
+    }));
+    await vi.waitFor(() => expect(calls.routed.length).toBe(1));
+    expect(calls.finalized[0]!.outcome).toEqual({
+      kind: "success",
+      content: "",
+      promptDisposition: "handled",
+      usage: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, total: 4 },
+      observations: ["structured output was not invoked"],
+    });
+
+    // failed 分支：事实字段同点下传（failure 分类 + usage + observations）。
+    const failRecord = makeRecord({ id: "sa-facts-fail" });
+    const fail = makeHost(failRecord);
+    const failCont = new ConversationContinuation(failRecord, fail.host);
+    failCont.onRunSettled(makeOutcome({
+      content: "",
+      error: "engine_boom",
+      failure: { class: "provider", kind: "rate_limited", retryable: "conditional", raw: "429" },
+      usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 7, turns: 1 },
+      observations: ["delivery predicate not satisfied"],
+    }));
+    await vi.waitFor(() => expect(fail.calls.notified.length).toBe(1));
+    expect(fail.calls.finalized[0]!.outcome).toEqual({
+      kind: "failed",
+      reason: "engine_boom",
+      failure: { class: "provider", kind: "rate_limited", retryable: "conditional", raw: "429" },
+      usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, cost: 0, total: 7 },
+      observations: ["delivery predicate not satisfied"],
+    });
   });
 
   it("[U5] 成功分支：编排性关闭（settle idle + 放弃轮标记）后迟到应答被入口 status 检查拦截（不 route）", async () => {
@@ -724,7 +770,6 @@ describe("ConversationContinuation — 轮末分流（D7）与通知侧", () => 
     configureNotifyDomain({ getDeliveryPort: () => fakePort });
     const notifier = createNotifier({
       sendMessage: () => {}, // port 主投不经此端口；仅缺席直发兜底消费
-      hasRunningBackground: () => false,
       isIdle: () => true,
     });
     const origNotifyRecord = host.notifyRecord;
@@ -904,7 +949,7 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
     expect(routeOrder).toEqual(["route:round=2"]);
   });
 
-  it("空 content 成功轮 → result = '(no output this round)'，lastError 不混入正文（D7 ⑤）", async () => {
+  it("空 content 成功轮 → result 原样空串（[subagent-observability §3.3.3 空正文语义]——无文本输出非异常，占位制造退役），lastError 不混入正文（D7 ⑤）", async () => {
     const record = makeChatRecord("sa-round-empty", agentDir);
     record.lastError = "stale engine_crashed: previous failure";
     store.register(record);
@@ -914,7 +959,7 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
     fake.runs[0]!.settle({ content: "" });
 
     await vi.waitFor(() => expect(record.round).toBe(2));
-    expect(record.result).toBe("(no output this round)");
+    expect(record.result).toBe("");
     expect(record.result).not.toContain("stale engine_crashed");
   });
 

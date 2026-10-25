@@ -1,6 +1,6 @@
 # 统一消息投递重构：豁免类（scheduler / smart-context）迁移评估
 
-状态：已裁决（2026-10-23）：smart-context=不迁（确认）；steering mode=维持 one-at-a-time 不覆写（确认）；scheduler=迁移（用户裁决推翻本文件评估结论）。**迁移落地核实（2026-10-23，实码）**：用户所述「已由独立会话实施」未在 main 实码找到——main HEAD / 全部分支 / 未提交改动 / 兄弟 worktree 均无 scheduler 迁移痕迹，scheduler 现仍裸 `pi.sendMessage` steer 直投；迁移与残余缺口承接于 [need-design.md](need-design.md) scheduler 条目（来源 [scheduler-result-awareness-channel.md](scheduler-result-awareness-channel.md)）。
+状态：已裁决（2026-10-23）：smart-context=不迁（确认）；steering mode=维持 one-at-a-time 不覆写（确认；覆写复评项已关闭 2026-10-24——攒批窗整机制退役后 collect 批量语义由挂起分流承载，复评前提消失，见第三节）；scheduler=迁移（用户裁决推翻本文件评估结论）。**迁移落地核实（2026-10-23，实码）**：用户所述「已由独立会话实施」未在 main 实码找到——main HEAD / 全部分支 / 未提交改动 / 兄弟 worktree 均无 scheduler 迁移痕迹，scheduler 现仍裸 `pi.sendMessage` steer 直投；迁移与残余缺口承接于 [need-design.md](need-design.md) scheduler 条目（来源 [scheduler-result-awareness-channel.md](scheduler-result-awareness-channel.md)）。
 
 评估依据：unified-delivery 设计（设计档案已随 .tmp 清理；§9 非目标 5 / §3.9 / 附录 C）+ impl-plan 单元 u6-exempt-eval（A17）；port 接口以 u2 已交付实装为准（`extensions/shared/delivery-port`）。全部现状陈述以本仓实码与 pi 实装（`node_modules/@earendil-works/pi-coding-agent/dist`）为依据。
 
@@ -84,8 +84,8 @@ port 通道模型只有两档：`DeliveryTiming = 'steer' | 'followUp'`（`exten
 ## 三、steering mode 覆写复评（设计 §7 检查点 4）
 
 - 登记形态（设计 §3.9）：保持 pi 缺省 one-at-a-time（每个轮边界投 1 条）；`set_steering_mode('all')`（同边界全量出队）覆写登记为实施期可复评项，触发条件 = phase 2 collect（批量收取）需要批量插入语义。
-- 复评结论：**维持 one-at-a-time，不覆写**。phase 2 collect 尚未立项；设计附录 C④ 已给 collect 的批量语义承载位置 = 提交侧合批窗口（60s 攒批合成一条 `{batch, items}` 单条注入）——「一次收取多个终态」经合批单条注入即可满足，不需要「多条独立消息同边界全量出队」；覆写是全局状态、影响全部 steer 消息（含用户文本），「交叉影响范围大于收益」的原始裁决理由不变。
-- 复评触发条件具体化：phase 2 collect 立项、且其设计裁决明确「合批单条注入形态不满足消费契约、需多条独立消息同边界全量出队」时再评；collect 沿用合批窗口形态则本复评项关闭。
+- 复评结论：**维持 one-at-a-time，不覆写；本复评项已关闭（2026-10-24）**。collect 已立项交付，其批量语义的实际承载 = delivery-port 提交编排层的 collect 挂起分流（collectArm/consume/collectRelease——命中挂起缓冲纯内存等待、consume 全键展开单条注入、未收条目 collectRelease 直通内核边沿即投），攒批窗不参与——「一次收取多个终态」由挂起期零消息化 + 展开单条注入满足，不需要「多条独立消息同边界全量出队」；覆写是全局状态、影响全部 steer 消息（含用户文本），「交叉影响范围大于收益」的原始裁决理由不变。
+- 关闭判据（原复评触发条件的落定）：合批窗已整机制退役，复评前提消失——collect 未采用合批窗形态且消费契约已满足，覆写维持不启用。后续如重开，触发条件 = collect 挂起分流的消费契约明确不满足、需多条独立消息同边界全量出队。
 
 ## 重审触发汇总
 

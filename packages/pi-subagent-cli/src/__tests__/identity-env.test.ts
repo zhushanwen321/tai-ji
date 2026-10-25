@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { SUBAGENT_IDENTITY_ENV } from "@zhushanwen/subagent-engine-sdk";
 
-import { applyIdentityEnvToChildEnv } from "../spawn-runner.ts";
+import { applyIdentityEnvToChildEnv } from "../child-env.ts";
 
 const KEY = SUBAGENT_IDENTITY_ENV;
 

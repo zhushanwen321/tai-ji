@@ -7,9 +7,10 @@
 // extension 加载进 pi 进程），runtime 无法直查——D5 裁决为 extension 聚合上报：壳层
 // （extensions/universal/subagent-workflow 的 host/inflight-reporter）经 select 通道
 // 把绝对计数推给 runtime。本模块是这条通道的 core 侧出口：
-//   - 求值位置 = 状态所在的 pi 进程（本模块 getInFlightSnapshot——谓词与
-//     notify-host.ts hasRunningBackground 的双谓词过滤同源：hasLiveProcessHandle &&
-//     !hasIdleTimer，只把「正在执行」计为在途，Path A 保活（idle timer armed）不计）；
+//   - 求值位置 = 状态所在的 pi 进程（本模块 getInFlightSnapshot——双谓词过滤：
+//     hasLiveProcessHandle && !hasIdleTimer，只把「正在执行」计为在途，Path A 保活
+//     （idle timer armed）不计；原「与 notify-host.ts hasRunningBackground 同源」
+//     的表述随该谓词退役删除——subagent-observability §3.3.7③）；
 //   - 事件产生点 = 引擎域内的状态迁移点（session-runner 子进程注册/移除、idle timer
 //     arm/disarm），迁移后调 notifyInFlightChanged() 把最新快照推给壳层监听者；
 //   - core 闭包红线：本模块零 pi SDK import（只 import 本包 lifecycle 记账侧），
@@ -58,8 +59,9 @@ export function setInFlightListener(next: InFlightListener | null): void {
  * 当前在途快照（纯读，无副作用）：遍历活句柄记账（spawnedChildren 的 recordId 键集），
  * 按双谓词过滤——活句柄（child 存在且未 killed）且无 armed idle timer。
  *
- * SSOT 复用：谓词取 lifecycle-predicates/lifecycle-manager 既有导出，与 notify-host
- * hasRunningBackground 完全同源，不复制判定逻辑。活句柄记账的写方分两路，均落同一
+ * SSOT 复用：谓词取 lifecycle-predicates/lifecycle-manager 既有导出，不复制判定逻辑
+ * （原「与 notify-host hasRunningBackground 完全同源」的表述随该谓词退役删除——
+ * subagent-observability §3.3.7③）。活句柄记账的写方分两路，均落同一
  * 镜像：local 形态引擎进程由本进程 spawn（镜像事件 + 反向通道上报其任务 pi 子进程）；
  * 托管态（M3）引擎进程归 runtime 所有，extension 仅经反向通道记账引擎 spawn 的任务
  * pi 子进程。因此本模块统计的是「本会话仍存活的任务子进程」，不表达引擎进程所有权。

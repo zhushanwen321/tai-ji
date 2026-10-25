@@ -39,7 +39,11 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-import { EngineSdkError } from "@zhushanwen/subagent-engine-sdk";
+import { EngineSdkError, HOST_TIMEOUT_ABORT_REASON } from "@zhushanwen/subagent-engine-sdk";
+import {
+  hostTimeoutFailureCause,
+  yieldsToTimeoutFact,
+} from "../../execution/service/workflow-dispatch.ts";
 import { trySettleLegacyClosed } from "../../execution/persistence/execution-record.ts";
 import { createRecord } from "../../execution/persistence/execution-record.ts";
 import { createNotifyHost } from "../../execution/notify/notify-host.ts";
@@ -471,6 +475,154 @@ describe("executeWorkflowAgent D7 成功收尾", () => {
 });
 
 // ============================================================
+// 4.2 [subagent-observability §3.3.1/§3.3.3] one-shot 轮收条事实透传
+// （settle 调用点 → markRoundIdle 收条 → 派生视图——F1-33/40/34/41 生产写入方锁定）
+// ============================================================
+
+describe("one-shot 轮收条事实透传（settle 调用点 → markRoundIdle）", () => {
+  it("被接管轮（promptDisposition=handled）到达宿主后不再是 success+空正文+completed 形态：结清 no_result + 通知走接管分支 + lastRound 事实在场", async () => {
+    const { service, store, fake, pi } = makeHarness();
+    // 覆盖生产注入（subagent-service 构造点）——捕获 markRoundIdle ⑧ 的结清枚举。
+    const settlements: Array<{ id: string; reason: string }> = [];
+    (Reflect.get(service, "store") as RecordStore).setPendingUnregister((id, reason) =>
+      settlements.push({ id, reason }),
+    );
+    const pending = service.executeAndAwait({ task: "handled one-shot", slug: "handled-shot", ctxModel });
+    await flush();
+    soleRun(fake).settle({
+      content: "",
+      promptDisposition: "handled",
+      observations: ["structured output was not invoked"],
+      usage: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 4, turns: 0 },
+    });
+    const result = await pending;
+    const record = store.getMutable(result.sessionId ?? "");
+    expect(record).toBeDefined();
+
+    // 被接管轮形态（§3.3.3 第三形态）：空正文 + stopReason 不写（修复前 = completed）。
+    expect(record!.status).toBe("idle");
+    expect(record!.result).toBe("");
+    expect(record!.stopReason).toBeUndefined();
+    // 轮收条事实快照：接管三态 + usage 快照（AgentUsageTotal 词形——total 派生四项和）
+    // + 观察性事实（协议侧 contextTokens 不进快照）+ 收条轮数定格（F1-46：turns 随
+    // 收条快照恒在场——被接管轮零 turn）。
+    expect(record!.lastRound).toEqual({
+      promptDisposition: "handled",
+      usage: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, total: 4 },
+      observations: ["structured output was not invoked"],
+      turns: 0,
+    });
+    // 结清：被接管 = no_result（修复前 = completed，§3.3.6）。
+    expect(settlements).toEqual([{ id: record!.id, reason: "no_result" }]);
+    // 通知走接管分支（§3.3.7① 分支①文案——修复前落④「无文本输出」形态）。
+    await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));
+    const content = (pi.sendMessage.mock.calls[0]?.[0] as { content: string }).content;
+    expect(content).toContain("taken over by an extension");
+    expect(content).toContain("prompt disposition: handled");
+  });
+
+  it("失败轮：failure 分类 + usage 快照 + 观察性事实同点落轮收条（lastRound 双承载）", async () => {
+    const { service, store, fake } = makeHarness();
+    const pending = service.executeAndAwait({ task: "failed one-shot", slug: "failed-shot", ctxModel });
+    await flush();
+    soleRun(fake).settle({
+      content: "",
+      error: "engine_boom: child died",
+      engineStopReason: "error",
+      usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 7, turns: 1 },
+      observations: ["delivery predicate not satisfied"],
+    });
+    const result = await pending;
+    const record = store.getMutable(result.sessionId ?? "");
+    expect(record!.status).toBe("idle");
+    // 停因存引擎原值（§3.3.3 事实化写侧——引擎停因 error 在场即写原值，不再派生 failed）。
+    expect(record!.stopReason).toBe("error");
+    expect(record!.lastRound).toMatchObject({
+      engineStopReason: "error",
+      usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, cost: 0, total: 7 },
+      observations: ["delivery predicate not satisfied"],
+    });
+  });
+});
+
+// ============================================================
+// 4.3 [subagent-observability §3.3.9/§3.3.6] 宿主超时轮失败分类
+// （harness.timeout——F1-37：timeoutMs 到期的事实只有宿主持有，结算点改判）
+// ============================================================
+
+describe("宿主超时轮失败分类（harness.timeout）", () => {
+  it("纯函数：仅 reason 命中超时标记才产分类；provider/agent 事实不被覆盖（user/engine/未分类被覆盖）", () => {
+    const noError = { content: "", engineId: "pi" };
+    // 未超时收敛（外部 cancel / 正常应答）→ undefined（分类事实交还引擎收条）。
+    expect(hostTimeoutFailureCause(undefined, noError)).toBeUndefined();
+    expect(hostTimeoutFailureCause("user-cancel", noError)).toBeUndefined();
+    // 命中：raw 取引擎错误原文（分类不丢原文）；无原文时落超时事实 + 恢复动作。
+    expect(hostTimeoutFailureCause(HOST_TIMEOUT_ABORT_REASON, { content: "", engineId: "pi", error: "engine run aborted" })).toEqual({
+      class: "harness",
+      kind: "timeout",
+      retryable: false,
+      raw: "engine run aborted",
+    });
+    expect(hostTimeoutFailureCause(HOST_TIMEOUT_ABORT_REASON, noError)?.raw).toContain("timeoutMs");
+
+    expect(yieldsToTimeoutFact(undefined)).toBe(true);
+    expect(yieldsToTimeoutFact({ class: "user", kind: "cancelled", retryable: false, raw: "r" })).toBe(true);
+    expect(yieldsToTimeoutFact({ class: "engine", kind: "engine_aborted", retryable: false, raw: "r" })).toBe(true);
+    // §3.3.2 cause 优先级：provider/agent 是更高优先级事实，不被宿主超时分类覆盖。
+    expect(yieldsToTimeoutFact({ class: "provider", kind: "rate_limited", retryable: "conditional", raw: "r" })).toBe(false);
+    expect(yieldsToTimeoutFact({ class: "agent", kind: "no_deliverable", retryable: false, raw: "r" })).toBe(false);
+  });
+
+  it("接线：timeoutMs 到期（fake timers 确定性触发）→ 超时轮结清失败分类 harness.timeout（引擎中性误判被宿主改判）", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { service, store, fake } = makeHarness();
+      const pending = service.executeWorkflowAgent(baseOpts({ timeoutMs: 50 }), "run-timeout");
+      await flush();
+      const run = soleRun(fake);
+      const record = runningRecord(store);
+
+      vi.advanceTimersByTime(50); // 超时 abort 定时器到期（reason = 超时标记）
+      expect(run.ctx.signal?.aborted).toBe(true);
+      expect(run.ctx.signal?.reason).toBe(HOST_TIMEOUT_ABORT_REASON);
+
+      // 引擎收条事实保持原样：引擎按 aborted 记 user.cancelled（缺超时事实的中性误判）。
+      run.settle({
+        content: "",
+        error: "engine run aborted",
+        failure: { class: "user", kind: "cancelled", retryable: false, raw: "aborted" },
+      });
+      const result = await pending;
+
+      // 宿主改判：回脚本结果与 record 结算同判 harness.timeout（§3.3.6 超时轮失败结清）。
+      expect(result.failure).toEqual({
+        class: "harness",
+        kind: "timeout",
+        retryable: false,
+        raw: "engine run aborted",
+      });
+      expect(record.agentResult?.failure).toEqual(result.failure);
+      expect(record.outcome).toBe("failed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("负向：未超时收敛（无 timeoutMs）→ 分类事实交还引擎收条（不产生 harness.timeout）", async () => {
+    const { service, fake } = makeHarness();
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-no-timeout");
+    await flush();
+    soleRun(fake).settle({
+      content: "",
+      error: "engine run aborted",
+      failure: { class: "user", kind: "cancelled", retryable: false, raw: "aborted" },
+    });
+    const result = await pending;
+    expect(result.failure).toEqual({ class: "user", kind: "cancelled", retryable: false, raw: "aborted" });
+  });
+});
+
+// ============================================================
 // 4.5 [H2 A3] live usage 喂入（fake engine 事件 → record.totalTokens/turns 保真）
 // ============================================================
 
@@ -529,8 +681,7 @@ describe("D6 toNotifyRecord origin gate", () => {
     const pi = makePi();
     const host = createNotifyHost({
       getPi: () => pi,
-      listRunning: () => [],
-      getIsIdle: () => undefined,
+            getIsIdle: () => undefined,
     });
 
     const base = createRecord("sa-d6", {

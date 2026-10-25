@@ -10,7 +10,7 @@
  * （agent-event / agent-stream）。
  *
  * 核心内容：
- * - DoneReason（completed/failed/aborted/budget_limited/time_limited）
+ * - DoneReason（completed/failed/aborted/budget_limited/time_limited/partially_succeeded）
  *   （run 生命周期两态机词表已随 [D6(a)] 退役——生命周期判定唯一走
  *   六态机 dispatchRunTrigger 链与终局记录注册表，聚合不持状态机词表）
  * - AgentCallOpts / AgentResult（单次 agent 调用的输入/输出，宿主侧 SSOT）
@@ -20,8 +20,10 @@
  */
 
 import type {
+  EngineStopReason,
   AgentFailureKind,
   AgentOutcomeUsage as AgentUsage,
+  FailureCause,
   ToolCallEntry,
   // [§2.3 环解开] WorktreeHandle 的权威定义在 SDK（assembly/types.ts 只是 re-export）；
   // 此前消费方经 assembly/types.ts 转手取它，构成 orchestration/models ↔
@@ -46,7 +48,8 @@ export type DoneReason =
   | "failed"
   | "aborted"
   | "budget_limited"
-  | "time_limited";
+  | "time_limited"
+  | "partially_succeeded";
 
 export const ALL_DONE_REASONS: readonly DoneReason[] = [
   "completed",
@@ -54,6 +57,7 @@ export const ALL_DONE_REASONS: readonly DoneReason[] = [
   "aborted",
   "budget_limited",
   "time_limited",
+  "partially_succeeded",
 ] as const;
 
 /**
@@ -63,6 +67,8 @@ export const ALL_DONE_REASONS: readonly DoneReason[] = [
  *
  * 穷举 switch 无 default：DoneReason 新增成员时 tsc 强制在此显式归类，
  * 消费方（壳 workflow-notify）不再持有本地词表镜像。
+ * [subagent-observability §3.3.8] partially_succeeded 归终止性（部分成功仍含
+ * 失败成员——模型把它当全成汇报即吞失败，终止性提示适用）。
  */
 export function isTerminalDoneReason(reason: DoneReason): boolean {
   switch (reason) {
@@ -72,6 +78,7 @@ export function isTerminalDoneReason(reason: DoneReason): boolean {
     case "aborted":
     case "budget_limited":
     case "time_limited":
+    case "partially_succeeded":
       return true;
   }
 }
@@ -229,16 +236,17 @@ export interface AgentCallOpts { // oe-exempt:20261023:framework:调用契约接
 // AgentCallOpts / AgentResult 留守本文件（宿主侧 SSOT——SDK 版 AgentCallOpts 是引擎侧
 // 子集，字段裁决见 SDK contract-types 注释）。
 //
-// AgentFailureKind 语义守恒（最高优先约束，core 侧权威说明——SDK 侧为简版）：
-// - stale_context：pi session context 被 compact/cancel/替换——重试无意义（同 call
-//   再次失败），不重试。
-// - schema_deterministic：确定性 schema 失败（SO tool 从未调用 / gate 终止 /
-//   不可满足 schema）——同 schema 重试必同结果，不重试。
-// - unknown：其余一切失败（瞬态 provider 错误、spawn 失败等）——**默认可重试**。
-//   unknown（含字段缺省）= 可重试；仅 stale_context 与 schema_deterministic 两态
-//   维持不重试特判。词表归属（产出侧单点识别）：识别词表保留在产出侧
-//   execution/engine/inproc pi 引擎目录/output-collector.ts 包内——词表漂移的失效模式
-//   是 failureKind=unknown → 保守重试（安全默认），不再是静默漏诊。
+// AgentFailureKind = 历史解析兼容残留（@deprecated 终态，权威说明在 SDK
+// contract-types AgentOutcome.failureKind，本处 core 侧同口径——[subagent-observability
+// §3.4，ADR-0158]）：新写入方失败分类一律产 FailureCause（class×kind 封闭矩阵），
+// 「可重试」判定的现行承载 = FailureCause.retryable 三态 + retry-rules extension
+// verdict（§3.3.2 硬规则③）——execute-agent-call 重试矩阵已删（失败单次即终态），
+// 本词表不再有任何重试判定点。三值保留作旧 record 帧与历史 journal 的解析兼容：
+// stale_context（pi session context 被 compact/cancel/替换）/ schema_deterministic
+// （确定性 schema 失败）/ unknown（其余一切失败）。产出侧残留 = pi 引擎
+// output-collector（packages/pi-subagent-cli/）[D5-③ 改轨] 引擎送达错误码前缀确定性
+// 分诊（恒 unknown/undefined）；子串分类器 classifyFailureKind 不再参与 outcome
+// 生产路径（仅存量跨包测试 import 词表谓词）。
 export type {
   AgentFailureKind,
   AgentOutcomeUsage as AgentUsage,
@@ -255,15 +263,25 @@ export interface AgentResult { // oe-exempt:20261023:framework:执行结果载�
  /** Raw text output from the agent. */
   content: string;
  /**
- * [D5-③] 失败分诊结构化标签（AgentFailureKind）。产出侧唯一识别点 =
- * execution/engine/inproc pi 引擎目录/output-collector.ts（collectResult 对最终 error
- * 分类后写入，经 agent-result-mapper / AgentOutcome 透传到本形态）；消费侧
- * execute-agent-call 读本字段分诊，不再扫 error 文案子串。
+* [D5-③ 改轨] 失败分诊结构化标签（AgentFailureKind，历史解析兼容残留——@deprecated
+ * 终态口径见 AgentFailureKind 守恒块与 SDK contract-types AgentOutcome.failureKind）。
+ * 产出侧残留 = pi 引擎 output-collector（packages/pi-subagent-cli/）引擎送达错误码
+ * 前缀确定性分诊（恒 unknown/undefined）——非「collectResult 对最终 error 分类」
+ * （子串分类器 classifyFailureKind 已不参与 outcome 生产路径）；经 agent-result-mapper /
+ * AgentOutcome 透传到本形态。消费侧按字段透传（terminal-actions 作 RunErrorCode，
+ * 缺省兜底 "unknown"）。
  *
- * 仅在 error !== undefined 时有意义（成功时缺省）；缺省视为 unknown = 可重试
- * （语义守恒，见 AgentFailureKind）。
+ * 仅在 error !== undefined 时有意义（成功时缺省）；缺省 = undefined（字段缺位），
+ * 不承载重试判定（重试判定在 FailureCause.retryable 三态，见下方 failure 字段）。
  */
   failureKind?: AgentFailureKind;
+ /**
+ * [subagent-observability §3.3.8] 失败分类（AgentOutcome.failure 协议透传，引擎收尾
+ * 边沿一次产出）。run 终局成员交付结算消费本字段点拼 `"<class>.<kind>"` 进
+ * failedMembers[].cause（场景 2 断言的数据源）；缺省 = 未分类（cause 回落 error
+ * 前缀协议码 / "unknown"）。
+ */
+  failure?: FailureCause;
  /**
  * Parsed structured output.
  * Present when `schema` was provided and the output was valid JSON.
@@ -283,6 +301,21 @@ export interface AgentResult { // oe-exempt:20261023:framework:执行结果载�
   * worker-message-pump dispatchAgentSettled 读本字段填 agent-settled 事件载荷。
   */
   stderrTeePath?: string;
+ /**
+ * [subagent-observability §3.3.3] 轮终停因引擎原值（AgentOutcome.engineStopReason
+ * 协议透传，经 outcomeToWorkflowResult / outcomeToAgentResult 到本形态）。成员/one-shot
+ * 轮收条 lastRound.engineStopReason 的数据源；缺省 = 事实缺席（旧格式放行）。
+ */
+  engineStopReason?: EngineStopReason;
+ /** [subagent-observability §3.3.3 P5] 本 run 内重试失败尝试计数（同 record-model 字段）。 */
+  retryAttempts?: number;
+ /**
+ * [subagent-observability §3.3.1/§3.3.8 P6] pi 接管三态（AgentOutcome.promptDisposition
+ * 协议透传，经 outcomeToWorkflowResult 到本形态）。handled = 本条 prompt 未启动任何
+ * run（被既有会话接管）——run 终局成员交付结算消费：被接管成员判 cancelled（未交付
+ * 且非失败），agent-settled 帧跳写（resume 落重派集）；缺省 = 事实缺席（旧格式放行）。
+ */
+  promptDisposition?: "started" | "queued" | "handled";
  /**
  * Pi session ID for the subagent process (uuidv7).
  * Present when pi emits a session header (default in --mode json).

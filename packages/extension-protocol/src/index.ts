@@ -363,6 +363,8 @@ export type {
   MappedPendingStatus,
   PendingEntriesScan,
   PendingFieldsScan,
+  ResolvedSettlementReason,
+  SettlementReason,
 } from './pending-entries'
 export {
   PENDING_REGISTER_ENTRY_TYPE,
@@ -373,6 +375,8 @@ export {
   collectActivePendingIds,
   mapReasonToStatus,
   MAPPED_PENDING_STATUSES,
+  SETTLEMENT_REASONS,
+  resolveSettlementReason,
 } from './pending-entries'
 
 // ── background-task 协议（base-tool-enhance 后台任务 registry.json 契约；写侧实现在 extensions/universal/base-tool-enhance，收殓读侧在 runtime）──

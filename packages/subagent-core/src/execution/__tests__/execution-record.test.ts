@@ -246,14 +246,17 @@ describe("updateFromEvent", () => {
       expect(r.turnCount).toBe(1);
     });
 
-    it("turn_end clears lastError (transient error recovery → success)", () => {
-      // 瞬态 error 到达后，若 turn 正常结束，lastError 应清空——
-      // 否则 session-runner 会据残留 lastError 把成功误判为 success=false。
+    it("turn_end no longer clears lastError (§3.3.5——error → turn_end 后仍可读)", () => {
+      // 旧语义「正常结束清 lastError」的补偿假设与真实事件序（error → turn_end：
+      // 失败发生在轮内、轮终时到达）相反，结构上几乎永远读不到值（故障 B 掩盖层）。
+      // 新语义：失败事实进 errors 只追加，lastError 派生保留——成功判定不再依赖
+      // 轮终清洗（collectOutcome 读真实分支，transient 恢复由后续成功轮的新事实表达）。
       const r = makeRecord();
       updateFromEvent(r, { type: "error", message: "transient" });
       expect(r.lastError).toBe("transient");
       updateFromEvent(r, { type: "turn_end" });
-      expect(r.lastError).toBeUndefined();
+      expect(r.lastError).toBe("transient");
+      expect(r.errors).toEqual([{ message: "transient", at: expect.any(Number) }]);
     });
 
     it("turn_end after turn_end: next delta opens 3rd turn (not mutate 2nd)", () => {
@@ -355,7 +358,7 @@ describe("updateFromEvent", () => {
   });
 
   // ============================================================
-  // error event → record.lastError
+  // error event → errors 只追加 + lastError 派生（§3.3.5）
   // ============================================================
   describe("error event", () => {
     it("stores error message in record.lastError", () => {
@@ -368,6 +371,32 @@ describe("updateFromEvent", () => {
       const r = makeRecord();
       updateFromEvent(r, { type: "message_end", error: "provider error" });
       expect(r.lastError).toBe("provider error");
+    });
+
+    it("appends ErrorFact per failure and derives lastError from the last non-empty (makeRecord 无 errors 字段 → ??= 兜底)", () => {
+      // makeRecord 手写形状不带 errors（旧 record / 旧构造兼容形态）——
+      // reducer ??= 兜底初始化后照常入账。
+      const r = makeRecord();
+      updateFromEvent(r, { type: "error", message: "first" });
+      updateFromEvent(r, { type: "turn_end" });
+      updateFromEvent(r, { type: "message_end", error: "second" });
+      updateFromEvent(r, { type: "turn_end" });
+      expect(r.errors).toEqual([
+        { message: "first", at: expect.any(Number) },
+        { message: "second", at: expect.any(Number) },
+      ]);
+      // lastError = 最后一个非空轮失败（续聊后旧失败轮仍可见）
+      expect(r.lastError).toBe("second");
+    });
+
+    it("empty-string error is not recorded (无信息失败事实不占位)", () => {
+      const r = makeRecord();
+      updateFromEvent(r, { type: "error", message: "" });
+      updateFromEvent(r, { type: "message_end", error: "" });
+      // 只有空串失败 → appendErrorFact 全部早退，??= 未触发——errors 保持缺省
+      // undefined（无事实不建数组），lastError 无派生值
+      expect(r.errors).toBeUndefined();
+      expect(r.lastError).toBeUndefined();
     });
   });
 
@@ -828,7 +857,7 @@ describe("completeLegacyClosed", () => {
 // isLegacyClosedSettled（[W2/V3 D5] 桥接判据单一谓词——历史 9 处手抄的权威实现）
 // ============================================================
 describe("isLegacyClosedSettled（桥接判据单一谓词）", () => {
-  it("命中：idle ∧ closedReason 有值（旧 closed 终态遗留——D7 例外族/监督器放弃/v1 数据）", () => {
+  it("命中：idle ∧ closedReason 有值（旧 closed 终态遗留——D7 例外族/v1 数据）", () => {
     const r = makeRecord({ closedReason: "gc" });
     r.status = "idle";
     expect(isLegacyClosedSettled(r)).toBe(true);

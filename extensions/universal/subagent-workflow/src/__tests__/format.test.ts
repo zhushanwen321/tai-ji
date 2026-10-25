@@ -763,9 +763,9 @@ describe("buildPhaseGroups × fold 派生视图同源（D3/检查点 6 展示侧
 // [§2.2] run 域展示映射的可见错误回归
 // ============================================================
 describe("run 域展示映射（§2.2 回归）", () => {
-  it("formatStatusBadge('done') 出 success 徽标而非 muted 裸字（唯一生产入参的终局值）", () => {
-    // displayStatusOf 的值域 = running | interrupted | done；此前无 "done" 分支 →
-    // 落 default 显示 muted 色裸字 "done"。
+  it("formatStatusBadge('done') 出 success 徽标而非 muted 裸字（对拍锚：与 formatRunBadge 同文案表）", () => {
+    // formatStatusBadge 与 formatRunBadge 同一徽标文案表：done 终局出 success 徽标，
+    // 不落 default 的 muted 裸字。
     expect(formatStatusBadge("done", markingTheme)).toBe("success(✓ completed)");
     // 既有词表分支不被去重破坏
     expect(formatStatusBadge("completed", markingTheme)).toBe("success(✓ completed)");

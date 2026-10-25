@@ -28,11 +28,8 @@ import * as fs from "node:fs";
 import { dirname } from "node:path";
 
 import {
-  buildOutboundChildEnv,
   createReplayRecord,
   getLogger,
-  PI_SUBAGENT_TASK_MAX_CHARS,
-  SUBAGENT_IDENTITY_ENV,
   resolveEngineDataDir,
   spawnEngineChild,
   type AgentEvent,
@@ -43,23 +40,30 @@ import {
 import { killPiProcess, type SpawnModelRef } from "@zhushanwen/pi-rpc";
 
 import { registerActiveChild } from "./active-children.ts";
+import { buildChildEnv } from "./child-env.ts";
 import { SCHEMA_ENV_VAR } from "./constants.ts";
+import { createHandledSettlement } from "./handled-settlement.ts";
 import { getPiInvocation } from "./pi-invocation.ts";
 import {
   buildExitErrorText,
   collectOutcome,
   describePromptAckFailure,
   type CollectedOutcome,
+  type CollectResultArgs,
 } from "./output-collector.ts";
-import { createPromptAckTracker, resolvePromptAckTimeoutMs, type PromptAckTracker } from "./prompt-ack.ts";
-import { createFd3RawMirrorWriter, RAW_MIRROR_ENV_VAR, type RawMirrorWriter } from "./raw-mirror.ts";
+import { createPromptAckTracker, resolvePromptAckTimeoutMs, type PromptAckResult, type PromptAckTracker } from "./prompt-ack.ts";
+import { createFd3RawMirrorWriter, type RawMirrorWriter } from "./raw-mirror.ts";
 import { toErrorMessage } from "./error-message.ts";
 import {
   buildEnvBlock,
   buildSpawnArgs,
   parseSpawnModelRef,
 } from "./spawn-args.ts";
-import { createSdkEventTranslator, type SdkTranslatorOpts } from "./spawn-event-translator.ts";
+import {
+  createSdkEventTranslator,
+  type EngineRoundErrorFact,
+  type SdkTranslatorOpts,
+} from "./spawn-event-translator.ts";
 import {
   createPromptRunCounters,
   createSessionIdentityTracker,
@@ -73,7 +77,6 @@ import { performGetStateHandshake } from "./get-state-handshake.ts";
 import { sendPromptCommand } from "./stdin-writer.ts";
 import { cleanupTempPrompt, writePromptToTempFile } from "./temp-prompt.ts";
 import { WRAP_UP_HINT } from "./turn-limiter.ts";
-import { applySchemaEnvToChildEnv } from "./spawn-args.ts";
 import { createUiRequestQueue } from "./ui-request-queue.ts";
 import {
   cleanupSiblingStderrLogs,
@@ -175,147 +178,6 @@ export interface SpawnRunResult extends Omit<CollectedOutcome, "sessionId"> {
    * 装配源，经 pi-engine toOutcome 透传上协议）。
    */
   stderrTeePath?: string;
-}
-
-/**
- * [§2.7 身份 env 接通] 把本次 run 的子代理身份写入子进程 env（**必须在
- * `buildOutboundChildEnv` 的 deny 剥除之后调用**——当前 deny 名单不含 PI_SUBAGENT_*，
- * 但按「deny 终态之后显式写回」先例统一处理，防将来 deny 扩展时这些键被静默剥掉）。
- *
- * 值的来源分层（引擎只写它确实知道的；其余不写，读者各自回落）：
- *   - selfRecordId / agent / task：本次 run 参数（recordId / agentName / task 文本）；
- *   - rootSessionId：run 参数优先，回落引擎自身 env（嵌套链贯穿）；
- *   - rootCwd：引擎自身 env（真 ROOT 的 cwd，worktree 场景下≠子进程 cwd）优先，
- *     回落本次 spawn cwd；
- *   - depth：引擎自身 env 的层数 + 1（子进程 = 父进程 + 1）；
- *   - forkDepth：引擎自身 env 原值（root 侧一次设定，链上不变）；
- *   - parentRecordId：引擎自身 env 的 selfRecordId（嵌套时引擎自己也是某个 run 的
- *     子进程，那正是本次子进程的父 record id）；
- *   - mode：继承引擎自身 env（嵌套场景），缺席缺省 "background"（子代理 record 的
- *     常规形态；壳读者对非法值同款兜底）；
- *   - worktree：引擎自身 env 或本次 run 声明任一为真即写 "true"。
- *   - slug / startedAt：引擎无从得知（record 级字段，协议未携带）→ 不写；壳读者
- *     分别按「可选」与「Date.now()」回落。补齐它们需要把 record 身份挂上协议（登记见
- *     已归档设计档案 §2.7 遗留）。
- */
-/** 链路定位键写入（applyIdentityEnvToChildEnv 拆出）：root 链 / 深度 / 父 record。
- * 值源分层见主函数注释——run 参数优先、引擎自身 env 回落（嵌套链贯穿）。 */
-function applyLinkageIdentityKeys(
-  childEnv: Record<string, string>,
-  params: Pick<SpawnRunParams, "recordId" | "cwd" | "sessionRootId">,
-  parentEnv: NodeJS.ProcessEnv,
-): void {
-  const key = SUBAGENT_IDENTITY_ENV;
-  childEnv[key.selfRecordId] = params.recordId;
-  const rootSessionId = params.sessionRootId ?? parentEnv[key.rootSessionId];
-  if (rootSessionId !== undefined && rootSessionId !== "") {
-    childEnv[key.rootSessionId] = rootSessionId;
-  }
-  const rootCwd = parentEnv[key.rootCwd];
-  childEnv[key.rootCwd] = rootCwd !== undefined && rootCwd !== "" ? rootCwd : params.cwd;
-  const parentDepth = Number(parentEnv[key.depth]);
-  childEnv[key.depth] = String((Number.isFinite(parentDepth) ? parentDepth : 0) + 1);
-  const forkDepth = Number(parentEnv[key.forkDepth]);
-  if (Number.isFinite(forkDepth) && forkDepth > 0) childEnv[key.forkDepth] = String(forkDepth);
-  const parentRecordId = parentEnv[key.selfRecordId];
-  if (parentRecordId !== undefined && parentRecordId !== "") {
-    childEnv[key.parentRecordId] = parentRecordId;
-  }
-}
-
-/**
- * [M1 D2] PI_SUBAGENT_TASK 写入点截断（SDK identity-env 常量单源）：任务正文只取前
- * PI_SUBAGENT_TASK_MAX_CHARS 字符 + 截断标记，使控制面（握手帧）与 execve env 不随
- * 任务正文线性膨胀。全文以 pi session 文件首条 user 消息与父侧 manifest 为准（设计
- * D2 消费方矩阵：截断只影响 manifest 缺席时的重建链/P-fallback 投影，env 读取点
- * appendSubagentIdentityEntry 零改动）。
- *
- * 多字节不劈半：JS 字符串按 UTF-16 码元 slice，BMP 内（含 CJK）天然整字符；补一步
- * 代理对回退——边界恰好劈在 astral 字符（如 emoji，高低代理各占一个码元）时回退
- * 一个码元，保证 env 值无孤立代理（execve 的 UTF-8 编码不产生替换字符）。标记计数
- * 与 `task.length` 同口径（UTF-16 码元）。
- */
-export function truncateTaskForEnv(task: string): string {
-  if (task.length <= PI_SUBAGENT_TASK_MAX_CHARS) return task;
-  let keep = PI_SUBAGENT_TASK_MAX_CHARS;
-  // 边界恰在代理对中间（高代理 + 低代理）时回退一个码元：regex 以码元区间表达
-  // 边界两码元，与逐 charCode 区间比较等价（含孤立代理的畸形输入）。
-  if (/^[\uD800-\uDBFF][\uDC00-\uDFFF]$/.test(task.slice(keep - 1, keep + 1))) keep -= 1;
-  return `${task.slice(0, keep)}…[truncated ${task.length - keep} chars]`;
-}
-
-/** 身份内容键写入（applyIdentityEnvToChildEnv 拆出）：agent/task 直写 + [D4]
- * 身份信封三键（slug/startedAt/mode）——信封优先（宿主派发权威值），缺席按既有
- * 继承/缺省语义回落。 */
-function applyContentIdentityKeys(
-  childEnv: Record<string, string>,
-  params: Pick<SpawnRunParams, "agentName" | "task"> & {
-    identity?: { slug?: string; startedAt?: number; mode?: string };
-  },
-  parentEnv: NodeJS.ProcessEnv,
-): void {
-  const key = SUBAGENT_IDENTITY_ENV;
-  childEnv[key.agent] = params.agentName;
-  childEnv[key.task] = truncateTaskForEnv(params.task);
-  // [D4] record 身份信封优先（宿主派发的权威值）；缺席时按既有继承/缺省语义回落。
-  const identity = params.identity;
-  const slug = identity?.slug ?? parentEnv[key.slug];
-  if (slug !== undefined && slug !== "") childEnv[key.slug] = slug;
-  const startedAt = identity?.startedAt ?? Number(parentEnv[key.startedAt]);
-  if (Number.isFinite(startedAt) && startedAt > 0) childEnv[key.startedAt] = String(startedAt);
-  const mode = identity?.mode ?? parentEnv[key.mode];
-  childEnv[key.mode] = mode !== undefined && mode !== "" ? mode : "background";
-}
-
-export function applyIdentityEnvToChildEnv(
-  childEnv: Record<string, string>,
-  params: Pick<SpawnRunParams, "recordId" | "agentName" | "task" | "cwd" | "sessionRootId"> & {
-    worktree?: boolean;
-    /** [D4] record 身份信封：在场时写 slug / startedAt / mode 三键（缺省不写）。 */
-    identity?: { slug?: string; startedAt?: number; mode?: string };
-  },
-  parentEnv: NodeJS.ProcessEnv,
-): void {
-  applyLinkageIdentityKeys(childEnv, params, parentEnv);
-  applyContentIdentityKeys(childEnv, params, parentEnv);
-  const worktree = params.worktree === true || parentEnv[SUBAGENT_IDENTITY_ENV.worktree] === "true";
-  if (worktree) childEnv[SUBAGENT_IDENTITY_ENV.worktree] = "true";
-}
-
-/** 子进程 env 组装（deny 剥除 + PI_WORKFLOW_SCHEMA 派生注入 + 身份 env 写回）。
- *
- * `parentEnv` 缺省 = 进程自身 env（生产路径）；显式传入供 P-15 env 矩阵形状测试
- * 做纯函数断言（不触碰 process.env，避免测试误建 fd3 镜像写入器）。
- */
-export function buildChildEnv(
-  params: SpawnRunParams,
-  parentEnv: NodeJS.ProcessEnv = process.env,
-): Record<string, string> {
-  const extras: Record<string, string | undefined> = {};
-  // [D1 schema 传输归位] env 值派生点：schema 本体的唯一 env 消费点就在此处，
-  // 按数据流最短路径就地派生（JSON.stringify 本体），注入实现沿用
-  // applySchemaEnvToChildEnv（含 E2BIG 上限校验）。
-  applySchemaEnvToChildEnv(
-    extras,
-    params.schema !== undefined ? JSON.stringify(params.schema) : undefined,
-  );
-  // [D1 补强] PI_WORKFLOW_SCHEMA 是派生注入键，唯一合法来源 = task.schema 派生
-  // （上一行 extras）：引擎自身 env 的 ambient 值不透传——schema-less run 的孙进程
-  // 绝不携带幽灵 schema env（structured-output 扩展会按幽灵 schema 校验无 schema
-  // 任务）。实测泄漏源：workflow 驱动的宿主会话内跑测时，父 env 携带本 run 自己的
-  // schema（run-spawn-once 集成测试「无 schema run 不注入」用例红）。
-  const baseEnv: NodeJS.ProcessEnv = { ...parentEnv };
-  delete baseEnv[SCHEMA_ENV_VAR];
-  const childEnv = buildOutboundChildEnv({ parentEnv: baseEnv, extras });
-  // [P-15 / A-U-1 / C-U2] fd3 raw mirror 宣告只给引擎进程（设计 D4 env 矩阵 task pi
-  // 行 ❌）。引擎→task pi 的 spawn 走 SDK buildOutboundChildEnv（deny =
-  // ENGINE_ENV_DENY_LIST，刻意不含本键——引擎自身要读 fd 3），shared 的出站 deny
-  // 清单没有 task pi 路径消费者，故必须在此显式剥除；否则 task pi（顶层与嵌套）
-  // 继承该键，local/嵌套回退场景的 raw-mirror 代码被误武装。
-  delete childEnv[RAW_MIRROR_ENV_VAR];
-  // [§2.7] 身份 env 写回（deny 终态之后——见函数头分层说明）
-  applyIdentityEnvToChildEnv(childEnv, params, parentEnv);
-  return childEnv;
 }
 
 // ── [D3 止血版] 武装断言（run 开始后、孙进程 spawn 前；缺席即秒级 fail-fast） ──
@@ -589,36 +451,71 @@ async function writeAppendPromptFile(params: SpawnRunParams) {
     : undefined;
 }
 
-/** SDK 事件翻译器 opts 装配（agent_end 轮收敛不 kill / agent_settled resolve+收割 + run 收尾状态接线）。 */
+/** SDK 事件翻译器 opts 装配（判定事实化 + P5 计账接线 + run 收尾状态）。 */
 function buildTranslatorOpts(
   params: SpawnRunParams,
   callbacks: SpawnRunCallbacks,
   killChild: () => void,
   runEnd: RunEndState,
 ): SdkTranslatorOpts {
+  // [§3.3.1 P9 迟到终态顺序契约] abort 决已事实位：宿主取消（signal 置位）或 limiter
+  // 预算耗尽（直杀置位）任一在场 = abort 已裁决——此后到达的终态边沿按迟到处理。
+  const isAbortDecided = (): boolean =>
+    params.signal?.aborted === true || runEnd.turnBudgetExhausted === true;
   return {
     maxTurns: params.maxTurns,
     graceTurns: params.graceTurns,
     onEvent: callbacks.onEvent,
     onDelta: callbacks.onDelta,
-    abort: () => killChild(),
-    // agent_end（非 willRetry，队列排空）= 轮收敛（输出完整即轮终）：不 kill（等
-    // agent_settled 收割边界——pi 的 compact/收尾在 agent_end 后执行，提前 kill 截断
-    // 收尾截断 session 文件）；endedCleanly 置位让「end 与 settled 之间被杀」的 close
-    // 也按 0 口径收尾。
+    // [§3.3.1 三源判别] limiter abort 事实位镜像：limiter 耗尽走 SIGKILL 直杀（进程
+    // 死前无停因可采），本位是 turn-budget 支的事实载体（→ harness.turn_budget_exhausted）。
+    // [§3.3.9/UC-10] abort 签名携带耗尽事实（{used, limit}，translator/limiter 一次
+    // 产出）——快照随事实位传入 collectOutcome，cause.budget 结构化承载。
+    abort: (info) => {
+      runEnd.turnBudgetExhausted = true;
+      runEnd.turnBudgetExhaustion = info;
+      killChild();
+    },
+    // [§3.3.1 三源判别] 宿主取消信号谓词（收尾边沿 host-cancel 支输入）。
+    isHostAbortRequested: () => params.signal?.aborted === true,
+    // [§3.3.1 P9 迟到终态顺序契约] abort（宿主取消 / limiter 预算耗尽）已发生后到达的
+    // 终态边沿一律按迟到处理——终局以 abort 事实优先，不得翻成成功。谓词 = 两个 abort
+    // 事实位（宿主 signal 置位 / limiter 直杀置位）。
+    // agent_end（非 willRetry，队列排空）= 轮收敛：不 kill（等 agent_settled 收割
+    // 边界——pi 的 compact/收尾在 agent_end 后执行）。本回调只在干净停因路径触发
+    //（错误停因走 onErroredEnd）——置位「end 与 settled 之间被杀」的 close 按 0 收尾。
     onAgentEnd: () => {
+      if (isAbortDecided()) return; // 迟到边沿：不置 clean（杀链 close 的非零码裁决轮终）
       runEnd.endedCleanly = true;
     },
-    // agent_settled（真空闲，agent_end 之后、post-run 完成后才 emit）= run 的 resolve
-    // 与收割边界（[H1 U3] D7，[modeless 波2] 唯一语义）：resolveChatRun 先 settle
-    // exitPromise（run 应答不等收割——应答 exit 0 口径与 close 信号无关），随后
-    // fire-and-forget 杀链收割子进程——每轮一进程，续聊 = 新 run + resume 锚点，
-    // 进程不再保活。
-    onAgentSettled: (turnsAtSettle) => {
+    // [§3.3.1 settled 语义修正] settled = run 结束事实非成功证据：resolve 口径受收尾
+    // 边沿事实门控——错误停因事实在场 → 不 resolve(0)、不置 endedCleanly，kill 收割后
+    // close 按 128+signo 非零归一（第二条置 0 通路同点封堵）；干净轮维持 fast path。
+    onAgentSettled: (snapshot) => {
+      // [§3.3.1 P9 迟到终态] abort 已发生 → 迟到 settled：不 resolve、不置 clean、
+      // 不记成功快照（快照会经收集侧回填轮数并参与防伪判据，迟到 settled 不是成功
+      // 锚点——终局由杀链 close 的非零码 + abort 事实位裁决）。
+      if (isAbortDecided()) return;
+      runEnd.settledTurnCount = snapshot.turnsAtSettle;
+      runEnd.settledAccounting = {
+        finalAttemptTurnBase: snapshot.finalAttemptTurnBase,
+        retryAttempts: snapshot.retryAttempts,
+      };
+      if (runEnd.terminalErrorFact !== undefined) {
+        runEnd.endedCleanly = false;
+        killChild();
+        return;
+      }
       runEnd.endedCleanly = true;
-      runEnd.settledTurnCount = turnsAtSettle;
+      runEnd.exitResolved = true;
       runEnd.resolveChatRun?.(0);
       killChild();
+    },
+    // [§3.3.1 停因事实优先] 收尾边沿错误事实落 runEnd：endedCleanly=false → 退出码
+    // 非零 → 轮失败；真实死因经 collectRunResult 上报；分类输入一次产出。
+    onErroredEnd: (fact) => {
+      runEnd.endedCleanly = false;
+      runEnd.terminalErrorFact = fact;
     },
   };
 }
@@ -644,33 +541,23 @@ function collectRunResult(
   // 不产生 success=true + error 并存的自相矛盾终态）。
   // 成功边界（agent_settled 到达）已按轮清零 record.turnCount（SP-9）——收集前
   // 以 resolve 时刻快照恢复真实轮数（成功 run 的 outcome.turns/usage.turns 不为
-  // 0）；失败路径 agent_settled 未到达，快照缺省，record 值即真实值。
+  // 0；[P5 计账] 快照已按失败尝试排除）；失败路径 agent_settled 未到达，快照
+  // 缺省，record 值即真实值。
   if (runEnd.settledTurnCount !== undefined) record.turnCount = runEnd.settledTurnCount;
   // [M2 D3] 送达失败分支优先：tracker 已结算（timeout/lost → engine_prompt_not_delivered；
   // rejected → engine_prompt_rejected），退出码只是杀链后果（SIGKILL → 137），
   // 终态呈现映射后的错误码文案而非裸「子进程退出 137」（设计 S7/S7b 反向断言）。
+  // [subagent-observability §3.3.1] 错误停因事实在场时死因事实优先于退出码裸文案
+  //（结构化轮终事实的 errorMessage = provider 层真实死因）。
   const ackFailure = runEnd.promptAckFailure;
-  const success = exitCode === 0 && ackFailure === undefined;
-  const error = success
-    ? undefined
-    : ackFailure !== undefined
-      ? describePromptAckFailure(ackFailure)
-      : buildExitErrorText(exitCode, runEnd.childErrorMessage);
+  const terminalErrorFact = resolveTerminalErrorFact(runEnd, params);
+  const { success, error } = deriveRunVerdict(record, runEnd, exitCode, ackFailure, terminalErrorFact);
   if (ackFailure !== undefined) {
     // 送达失败路径同时发 error 事件（设计 §3.4.2：让 journal 有记录；既有退出码
     // 失败不加发，行为面不变）。
     callbacks.onEvent({ type: "error", message: error ?? "prompt delivery failed" });
   }
-  const outcome = collectOutcome(record, {
-    startTime,
-    success,
-    error,
-    sessionId: identity.sessionId ?? "",
-    sessionFile: identity.sessionFile,
-    // [F-1 信号解耦] schemaExpected 判定源 = task.schema 声明形态（schema 本体
-    // 存在与否），与 env 派生/注入值不再同源——注入链路变化不影响检查期待。
-    ...(params.schema !== undefined ? { schemaExpected: true } : {}),
-  });
+  const outcome = collectOutcome(record, buildCollectOutcomeArgs(runEnd, identity, params, startTime, success, error, terminalErrorFact));
   // [D5 诊断引用写入 journal 记录] 失败时随终态应答上报 stderr tee 路径（引擎应答 failed /
   // 进程异常退出路径的共同汇聚点 = outcome.error 非空；成功不报——诊断引用只在
   // 失败语义下有意义）。tee 缺席（无 stderr / dataDir 不可解析 / pid 缺失）= 字段
@@ -680,6 +567,132 @@ function collectRunResult(
     ...outcome,
     ...(stderrTeePath !== undefined ? { stderrTeePath } : {}),
     sessionId: identity.sessionId,
+  };
+}
+
+/**
+ * [subagent-observability §3.3.1 P9 迟到终态顺序契约 — 结算点 abort 事实核对] abort
+ * 已裁决（宿主 signal 置位 / limiter 直杀置位，与 buildTranslatorOpts 的 isAbortDecided
+ * 同判据）的 run 在结算点不得落 success：「agent_end 已置 clean、settled 未到」竞窗
+ *（含 queue_update 缺失退化形态下中间边沿置 clean 的扩大窗口）被宿主杀链终止时，
+ * close 经 endedCleanly 短路归 0（normalizeExitCode），退出码事实不承载取消事实——
+ * 此处补落宿主取消停因事实（abortSource=host-cancel → FailureCause user.cancelled），
+ * 与 turn-budget 支经 collectOutcome 事实位收口同口径。收尾边沿事实在场时以边沿为
+ * 权威（不覆盖）；settled 已完成的轮（settledTurnCount 在场 = settled 先于取消到达）
+ * 不补落——取消晚于完成不翻案。
+ *
+ * [已知退化边界 — 当前零触发面，登记防扩展清单扩容时静默踩中] handleAgentEnd 中间
+ * 边沿判据只消费 queue_update 队列事实（edge.queueNonEmpty），缺 before_settle 边沿
+ * 第三事实源：pi 1.0.0 注册 agent_before_settle handler 时 _runBeforeSettleBoundary
+ *（dist/core/agent-session.js :1416-1439）可凭 result.continue 于队列为空时强制
+ * continue（:1428），该形态下 queueNonEmpty=false 的中间 agent_end 被误判轮终致 run
+ * 截断（干净停因置 clean、settled 到达即 resolve(0)+killChild；错误停因失败收口）。
+ * 当前全仓生产代码零 agent_before_settle 注册（零触发面）；行为修复（handleAgentEnd
+ * 判据补 before_settle 边沿事实源）待真实触发面出现再做。
+ */
+function resolveTerminalErrorFact(runEnd: RunEndState, params: SpawnRunParams): EngineRoundErrorFact | undefined {
+  if (runEnd.terminalErrorFact !== undefined) return runEnd.terminalErrorFact;
+  if (params.signal?.aborted !== true || runEnd.settledTurnCount !== undefined) return undefined;
+  return {
+    stopReason: "aborted",
+    errorMessage: hostCancelReasonText(params.signal),
+    abortSource: "host-cancel",
+  };
+}
+
+/**
+ * 成功公式与错误文案优先序（collectRunResult 判定段单点）。
+ *
+ * [subagent-observability §3.3.1 P4 静默空成功防伪] 退出 0 不再单独构成成功证据
+ *（pi 1.0.0 实装：stdin EOF → rpc-mode shutdown → 无条件 exit(0)——dist/modes/rpc/
+ * rpc-mode.js :579（shutdown 缺省 exitCode=0，函数体无 settled 检查）/:595（process
+ * .exit）/:640-642（onInputEnd → void shutdown()），无 settled 的 0 退出可达）。
+ * 成功公式 = 退出 0 ∧ 无送达失败 ∧ 无错误停因事实（含取消竞窗补落）
+ * ∧ 非未解释空轮——未解释空轮 = 无 agent_settled 快照、无被接管标记
+ *（promptHandledNoRun——被接管轮的空是「有解释的空」，见 p6 收条设计）、零轮：按
+ * 失联语义记失败，不产假成功。「end 与 settled 之间被杀」且无 abort 事实的形态
+ *（endedCleanly=true 且有真实轮数，如外部杀死）不受本判据影响（有轮 = 有工作证据，
+ * 非空成功）；abort 已裁决的同窗被杀由取消事实收口，不落成功。
+ *
+ * 错误文案优先序：送达失败（tracker 结算事实）> 停因事实（收尾边沿 / 取消竞窗补落，
+ * 死因事实优先于推断与裸退出码）> 未解释空轮（失联推断）> 退出码裸文案。
+ */
+function deriveRunVerdict(
+  record: ReturnType<typeof createReplayRecord>,
+  runEnd: RunEndState,
+  exitCode: number,
+  ackFailure: PromptAckResult | undefined,
+  terminalErrorFact: EngineRoundErrorFact | undefined,
+): { success: boolean; error: string | undefined } {
+  const unexplainedEmptyExit =
+    exitCode === 0 &&
+    ackFailure === undefined &&
+    runEnd.settledTurnCount === undefined &&
+    runEnd.promptHandledNoRun !== true &&
+    recordHasNoWork(record);
+  const success =
+    exitCode === 0 && ackFailure === undefined && terminalErrorFact === undefined && !unexplainedEmptyExit;
+  if (success) return { success, error: undefined };
+  if (ackFailure !== undefined) return { success, error: describePromptAckFailure(ackFailure) };
+  if (terminalErrorFact !== undefined) return { success, error: terminalErrorFact.errorMessage };
+  if (unexplainedEmptyExit) {
+    return {
+      success,
+      error: "pi child exited with code 0 without any agent activity (no agent_settled, zero turns): " +
+        "treating as lost contact, not success. Recovery: retry the run; if it reproduces, " +
+        "inspect the pi child stderr tee for the shutdown cause.",
+    };
+  }
+  return { success, error: buildExitErrorText(exitCode, runEnd.childErrorMessage) };
+}
+
+/** [P4 静默空成功防伪] 零轮且全部轮无文本/思考/工具调用 = 无工作证据。 */
+function recordHasNoWork(record: ReturnType<typeof createReplayRecord>): boolean {
+  return (
+    record.turnCount === 0 &&
+    record.turns.every((t) => t.text === "" && t.thinking === "" && t.toolCalls.length === 0)
+  );
+}
+
+/** collectOutcome 入参装配（条件 spread 单点；事实位/计账切片的取舍判据见各 spread 注释源）。 */
+function buildCollectOutcomeArgs(
+  runEnd: RunEndState,
+  identity: SessionIdentityTracker,
+  params: SpawnRunParams,
+  startTime: number,
+  success: boolean,
+  error: string | undefined,
+  terminalErrorFact: EngineRoundErrorFact | undefined,
+): CollectResultArgs {
+  return {
+    startTime,
+    success,
+    error,
+    sessionId: identity.sessionId ?? "",
+    sessionFile: identity.sessionFile,
+    // [F-1 信号解耦] schemaExpected 判定源 = task.schema 声明形态（schema 本体
+    // 存在与否），与 env 派生/注入值不再同源——注入链路变化不影响检查期待。
+    ...(params.schema !== undefined ? { schemaExpected: true } : {}),
+    // [subagent-observability §3.3.1] 收尾边沿结构化事实（含取消竞窗补落）+ 三源判别
+    // 事实位。turn-budget 事实位只在停因事实缺席时传入（limiter abort 是 SIGKILL 直杀
+    // 路径、结构上无停因事实；两者并存的矛盾输入以收尾边沿裁决为权威——分类
+    // 单源不双裁）。
+    ...(terminalErrorFact !== undefined ? { terminalError: terminalErrorFact } : {}),
+    ...(runEnd.turnBudgetExhausted === true && terminalErrorFact === undefined
+      ? {
+        turnBudgetExhausted: true,
+        // [§3.3.9/UC-10] 耗尽事实（{used, limit}）随事实位传入——cause.budget。
+        ...(runEnd.turnBudgetExhaustion !== undefined ? { turnBudget: runEnd.turnBudgetExhaustion } : {}),
+      }
+      : {}),
+    ...(runEnd.promptHandledNoRun === true ? { promptHandledNoRun: true } : {}),
+    // [P5 计账] 最终尝试 usage 切片基 + 重试波次计数。
+    ...(runEnd.settledAccounting !== undefined && runEnd.settledAccounting.retryAttempts > 0
+      ? {
+        finalAttemptTurnBase: runEnd.settledAccounting.finalAttemptTurnBase,
+        retryAttempts: runEnd.settledAccounting.retryAttempts,
+      }
+      : {}),
   };
 }
 
@@ -701,10 +714,19 @@ function collectCancelledBeforeSpawn(
   signal: AbortSignal,
   startTime: number,
 ): SpawnRunResult {
-  const reason = signal.reason;
-  const error = reason instanceof Error && reason.message !== "" ? reason.message : "cancelled by host";
+  const error = hostCancelReasonText(signal);
   const outcome = collectOutcome(record, { startTime, success: false, error, sessionId: "", sessionFile: undefined });
   return { ...outcome, sessionId: undefined };
+}
+
+/**
+ * 宿主取消文案：cancel 通道的 signal.reason 承载（server.ts cancel →
+ * `controller.abort(new Error("cancelled by host: <reason>"))`）；reason 缺失/非
+ * Error/空串回落固定文案。取消终态装配（prepare 期短路与本文件取消竞窗补落）共用。
+ */
+function hostCancelReasonText(signal: AbortSignal | undefined): string {
+  const reason = signal?.reason;
+  return reason instanceof Error && reason.message !== "" ? reason.message : "cancelled by host";
 }
 
 export async function runSpawnOnce(
@@ -824,6 +846,9 @@ export async function runSpawnOnce(
         runEnd.promptAckFailure = result;
         killChild();
       },
+      // [subagent-observability §3.3.1 P6] handled 结算分派接线（ack 结算后触发；
+      // 零终态事件挂起的唯一修复点）。
+      onHandled: createHandledSettlement(child, params, identity, runEnd),
     });
     const handleSdkEvent = createSdkEventTranslator(
       record,

@@ -27,8 +27,9 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { configureNotifyDomain, resetNotifyDomainForTests } from "../../core/notify-ports.ts";
 
-// [D5 消亡] listActivePendingFromSessionFile（后代补杀清单口径）随 inproc pi 引擎目录
-// 删除消亡（消费方全在待删 session-runner；止损语义由 W4 监督器该放弃承接）——
+// [D5 消亡] listActivePendingFromSessionFile（后代补杀清单口径）随 inproc session-runner
+// （已删）删除消亡（消费方全在该待删文件；「层主死后孤儿后代止损」语义的承接方 W4 轮次
+// 活性监督器已随 commit 924ace33f 整机清退，现由孤儿恢复 + registry reconcile sweep 承接）——
 // 本文件覆盖收敛为 count 口径 + 游标剪枝原语。
 import {
   clearPendingCursors,

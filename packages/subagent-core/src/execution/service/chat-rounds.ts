@@ -824,6 +824,17 @@ export class ChatRounds {
    * dispose = 孙进程同进程组连带收割）。disposeAll 幂等（无登记状态时 no-op）且
    * 单实例失败收集留痕不阻断收尾（U1/U2 同款围栏纪律）——释放失败不影响轮终簿记
    * 与后续 drain（下一轮经轮窗口解析单点重新创建实例，respawn 语义）。
+   *
+   * [fire-and-forget 收割] 窗口收割不 await（void），与本文件 onRecordFinalizedCleanup /
+   * abortContinuationQueue 的既有 void 形态一致。理由：① dispose 的完成不 gate 任何
+   * 下游——先摘后放（窗口状态同步摘除）后，续聊 drain 经轮窗口解析单点 respawn 新实
+   * 例，与在途收割无共享状态；失败收集在 disposeWorkflowWindowEngineState 内部留痕；
+   * ② 通知时延契约：settleRoundSuccess/settleRoundFailed 在本方法返回后立即发轮终通
+   * 知，await 收割会把通知钉在引擎进程回收时延上（2026-10-25 实测：runtime transport
+   * 的 engine_close 宽限上界 CONTROL_CLOSE_GRACE_MS=3s，engine_closed 迟到时通知恒
+   * 迟 3s——失败轮通知 <1s 预算被资源回收时延击穿，排查与修复记录见 git 提交
+   * 2ed6f5133）。收割是资源回收面，通知是用户可见时延面
+   * ，两者无数据依赖，不得互相阻塞。
    */
   async finalizeRoundToIdle(
     record: ExecutionRecord,
@@ -849,7 +860,7 @@ export class ChatRounds {
       record,
       outcome,
     );
-    await disposeWorkflowWindowEngineState(record.id, outcome.kind, "chat round idle (finalizeRoundToIdle)");
+    void disposeWorkflowWindowEngineState(record.id, outcome.kind, "chat round idle (finalizeRoundToIdle)");
   }
 
   /**

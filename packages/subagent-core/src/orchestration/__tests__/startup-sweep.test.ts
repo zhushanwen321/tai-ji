@@ -7,8 +7,9 @@
 //   errorCode=startup-sweep）+ 反向断言（全树文件 diff：零新增、修改仅 journal
 //   追加、session 文件零新增）+ info 结果行按方法名落位。
 // - 场景 2：同假树二次调用幂等——journal 零新增帧 + adopted 0。
-// - 场景 3：失败不阻断——3a 枚举整体失败（sessions 根 EACCES）error 留痕 +
-//   函数正常 resolve；3b 单 run 收编失败（journal 文件 EACCES）warn 留痕 +
+// - 场景 3：失败不阻断——3a 枚举整体失败（sessions 根 EACCES）run/record 两半
+//   各自 error 留痕 + 函数正常 resolve（两半解耦，run 侧故障不连坐 record 半边）；
+//   3b 单 run 收编失败（journal 文件 EACCES）warn 留痕 +
 //   其余可收编 run 不受影响。
 // - 场景 4：时序防拆断言——静态读 runtime main() 源码，断言 startupSweep 调用
 //   位于单实例锁之后、service 构造段（pi spawn 的前置装配）之前，且时序硬
@@ -28,6 +29,7 @@ import { readRunTerminalManifest } from "../../execution/persistence/manifest-st
 import { RUN_EVENTS_SUFFIX } from "../../shared/run-vocabulary.ts";
 import { createRunEventJournal, type WorkflowRunEventInput } from "../run-events.ts";
 import { startupSweep, type SweepLogChannel } from "../startup-sweep.ts"; // [D1 拆边 Class C] 实现已上移 orchestration/
+import { createRecordEventStream } from "../../execution/persistence/record-events.ts";
 
 /** mock 日志通道（按方法名断言级别落位——规格 6 签名的级别结构承载位）。 */
 function makeLog(): SweepLogChannel {
@@ -192,12 +194,20 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
       // 不 reject：枚举整体失败折进结果对象（扫描是旁路维护，不阻断启动）
       const result = await startupSweep(() => agentRoot, log);
       expect(result).toMatchObject({ adopted: 0, skipped: 0, stateDirs: 0 });
-      expect(result.errors).toHaveLength(1);
+      // 两半各自留痕（[subagent-observability §3.3.4 两半解耦]）：同一 store root
+      // 对 run 枚举与 record 枚举两条通道各自失败——record 半边不被 run 侧故障
+      // 连坐跳过，逐条折进 errors 继续。
+      expect(result.errors).toHaveLength(2);
       expect(result.errors[0]).toContain("EACCES");
-      // error 按方法名落位（级别结构承载位），枚举失败早退无 info 结果行
-      expect(log.error).toHaveBeenCalledTimes(1);
+      expect(result.errors[1]).toContain("EACCES");
+      // error 按方法名落位（级别结构承载位）：run 半边与 record 半边各一条。
+      expect(log.error).toHaveBeenCalledTimes(2);
       expect(String(vi.mocked(log.error).mock.calls[0]?.[0])).toContain("EACCES");
-      expect(log.info).not.toHaveBeenCalled();
+      // 主结果行照打（record 半边已执行——枚举失败无命中，recordsSwept 0）。
+      expect(log.info).toHaveBeenCalledTimes(1);
+      expect(log.info).toHaveBeenCalledWith(
+        "[subagents] startup sweep: adopted 0 run(s), skipped 0, across 0 state dir(s)",
+      );
     } finally {
       chmodSync(storeRoot, 0o755);
     }
@@ -342,5 +352,272 @@ describe("startupSweep 枚举换源三形态（[D16⑥] 检查点 8）", () => {
     );
     // 旧件原样在盘（不读不写不主动删）
     expect(readFileSync(join(stateDir, "wf-v1-only.events.jsonl"), "utf8")).toContain("run-created");
+  });
+});
+
+// ── [subagent-observability §3.3.4 合并清点] record 半边（失联清点）──────────
+//
+// 场景 3 单元级断言（kill -9 重启 → 合并清点）：run 收编与 record 失联清点在同一
+// startupSweep 入口完成。判定全事实无时间窗：
+//   - 候选枚举 = manifest 快照在途形态（executionStatus=running——快照通道，禁全量 fold）；
+//   - 命中确认 = 事件流停在「轮在途」形态（轮收条未写）；
+//   - 命中处置 = 失联轮收条补写（interrupted-by-restart + swept 附注）+ manifest
+//     快照刷新（executionStatus=idle + 收编停因——占用判据与计数摘除）；
+//   - pending 结清 lost 的发射位 = session reattach 侧对账 sweep（runtime 进程无
+//     appendEntry 通道）——判据事实位断言在 sweep-binding.test.ts（u3 同批）。
+describe("startupSweep 合并清点 record 半边（subagent-observability §3.3.4）", () => {
+  let agentRoot: string;
+  let log: SweepLogChannel;
+
+  beforeEach(() => {
+    agentRoot = mkdtempSync(join(tmpdir(), "startup-sweep-records-"));
+    log = makeLog();
+  });
+
+  afterEach(() => {
+    rmSync(agentRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** 构造 records 目录（`<root>/ext-sessions/<sid>/subagents/records/`）。 */
+  function makeRecordsDir(sid: string): string {
+    const recordsDir = join(agentRoot, "ext-sessions", sid, "subagents", "records");
+    mkdirSync(recordsDir, { recursive: true });
+    return recordsDir;
+  }
+
+  /** manifest 快照写入（生产写点同款字段形——executionStatus 两态权威词双写）。 */
+  function seedManifest(recordsDir: string, id: string, executionStatus: "running" | "idle"): void {
+    writeFileSync(
+      join(recordsDir, `${id}.json`),
+      JSON.stringify(
+        {
+          id,
+          rootSessionId: "sid-records-fixture",
+          agentName: "worker",
+          status: "running",
+          executionStatus,
+          createdAt: Date.now() - 60_000,
+          task: "long runner",
+          slug: "long-runner",
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+  }
+
+  /** 事件流播种（created → bound 前缀 + 末帧形态控制）：events 事件经生产流 append（seq 单调）。 */
+  async function seedEvents(recordsDir: string, id: string, endWithReceipt: boolean): Promise<void> {
+    const stream = createRecordEventStream(() => recordsDir);
+    await stream.append(id, {
+      type: "record-created",
+      ts: Date.now() - 60_000,
+      id,
+      agent: "worker",
+      task: "long runner",
+      slug: "long-runner",
+      origin: "tool",
+      rootSessionId: "sid-records-fixture",
+      depth: 0,
+      mode: "background",
+      startedAt: Date.now() - 60_000,
+    });
+    await stream.append(id, {
+      type: "record-round-started",
+      ts: Date.now() - 10_000,
+      round: 0,
+      epoch: 0,
+    });
+    if (endWithReceipt) {
+      await stream.append(id, {
+        type: "record-round-idle",
+        ts: Date.now() - 5_000,
+        round: 1,
+        stopReason: "completed",
+        turns: 2,
+        totalTokens: 100,
+      });
+    }
+  }
+
+  const readManifest = (recordsDir: string, id: string): Record<string, unknown> =>
+    JSON.parse(readFileSync(join(recordsDir, `${id}.json`), "utf-8")) as Record<string, unknown>;
+
+  const readEvents = (recordsDir: string, id: string): Array<Record<string, unknown>> =>
+    readFileSync(join(recordsDir, `${id}.events`), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+
+  it("场景 3 主路径：manifest 在途 + 轮收条未写 → 失联轮收条补写 + manifest 快照摘除 + 无时间窗（末帧距今 10s 照常清点）", async () => {
+    const recordsDir = makeRecordsDir("sid-records-fixture");
+    const id = "sa-sweep-orphan";
+    seedManifest(recordsDir, id, "running");
+    await seedEvents(recordsDir, id, false);
+    const before = walkFiles(agentRoot);
+
+    const result = await startupSweep(() => agentRoot, log);
+
+    expect(result.recordsSwept).toBe(1);
+    // manifest 快照：executionStatus=idle + 收编停因（占用判据与计数自此摘除——
+    // manifest 直读主路径同步收敛）。
+    const manifest = readManifest(recordsDir, id);
+    expect(manifest.executionStatus).toBe("idle");
+    expect(manifest.stopReason).toBe("interrupted-by-restart");
+    // 失联轮收条：停因复用 interrupted-by-restart + 清点附注（swept 标记 + evidence）。
+    const idle = readEvents(recordsDir, id).find((e) => e.type === "record-round-idle");
+    expect(idle?.stopReason).toBe("interrupted-by-restart");
+    expect(idle?.swept).toMatchObject({ at: expect.any(Number) });
+    expect(String((idle?.swept as { evidence?: string })?.evidence)).toContain("manifest=");
+    // 轮计数 = 在途轮的轮终语义值（轮始帧 round 0 + 1）；统计 carry-forward 无前帧诚实 0。
+    expect(idle?.round).toBe(1);
+    expect(idle?.turns).toBe(0);
+    // 反向断言：改动面 = manifest + 事件文件两件（session 文件零新增——禁触碰 pi 域）。
+    const after = walkFiles(agentRoot);
+    const added = [...after.keys()].filter((k) => !before.has(k));
+    expect(added).toEqual([]);
+    const changed = [...after.keys()].filter((k) => before.has(k) && before.get(k) !== after.get(k));
+    expect(changed.sort()).toEqual(
+      [
+        join("ext-sessions", "sid-records-fixture", "subagents", "records", `${id}.json`),
+        join("ext-sessions", "sid-records-fixture", "subagents", "records", `${id}.events`),
+      ].sort(),
+    );
+    // 结果行按命中落位（record 半边 info 行 + 主结果行）。
+    expect(log.info).toHaveBeenCalledWith(
+      expect.stringContaining("[subagents] startup sweep (records): swept 1 interrupted record(s)"),
+    );
+  });
+
+  it("幂等：清点后二次启动扫描零重复（manifest 已 idle 不再命中）+ 半更新窗让位（收条已在不补写不覆写）", async () => {
+    const recordsDir = makeRecordsDir("sid-records-fixture");
+    const id = "sa-sweep-idem";
+    seedManifest(recordsDir, id, "running");
+    await seedEvents(recordsDir, id, false);
+
+    const first = await startupSweep(() => agentRoot, log);
+    expect(first.recordsSwept).toBe(1);
+    const eventsAfterFirst = readEvents(recordsDir, id).length;
+
+    const second = await startupSweep(() => agentRoot, log);
+    expect(second.recordsSwept).toBe(0);
+    expect(readEvents(recordsDir, id).length).toBe(eventsAfterFirst);
+
+    // 半更新窗：另一 record 事件流已停在轮终收条（孤儿自收尾、manifest 快照滞后
+    // running）——让位不补写（不覆写真实轮收条）。
+    const lateId = "sa-sweep-late-receipt";
+    seedManifest(recordsDir, lateId, "running");
+    await seedEvents(recordsDir, lateId, true);
+    const third = await startupSweep(() => agentRoot, log);
+    expect(third.recordsSwept).toBe(0);
+    const lateReceipts = readEvents(recordsDir, lateId).filter((e) => e.type === "record-round-idle");
+    expect(lateReceipts).toHaveLength(1);
+    expect(lateReceipts[0]?.stopReason).toBe("completed");
+  });
+
+  it("reopen 后首个在途轮崩溃：轮计数 = 轮始帧 round + 1（不携带旧世代轮数）+ 上一收条统计 carry-forward", async () => {
+    const recordsDir = makeRecordsDir("sid-records-fixture");
+    const id = "sa-sweep-reopened";
+    seedManifest(recordsDir, id, "running");
+    // 帧序：created → round-started(0) → round-idle（旧世代累计 3 轮）→ reopened
+    //（round 归零载荷）→ round-started(0, epoch 1) → 崩溃（新世代首个在途轮）。
+    const stream = createRecordEventStream(() => recordsDir);
+    await stream.append(id, {
+      type: "record-created",
+      ts: Date.now() - 60_000,
+      id,
+      agent: "worker",
+      task: "long runner",
+      slug: "long-runner",
+      origin: "tool",
+      rootSessionId: "sid-records-fixture",
+      depth: 0,
+      mode: "background",
+      startedAt: Date.now() - 60_000,
+    });
+    await stream.append(id, { type: "record-round-started", ts: Date.now() - 50_000, round: 0, epoch: 0 });
+    await stream.append(id, {
+      type: "record-round-idle",
+      ts: Date.now() - 40_000,
+      round: 3,
+      stopReason: "completed",
+      turns: 9,
+      totalTokens: 900,
+    });
+    await stream.append(id, { type: "record-reopened", ts: Date.now() - 30_000, epoch: 1, round: 0 });
+    await stream.append(id, { type: "record-round-started", ts: Date.now() - 20_000, round: 0, epoch: 1 });
+
+    const result = await startupSweep(() => agentRoot, log);
+
+    expect(result.recordsSwept).toBe(1);
+    const idles = readEvents(recordsDir, id).filter((e) => e.type === "record-round-idle");
+    const swept = idles.at(-1);
+    // 轮终语义值 = 轮始帧 round 0 + 1（对齐 markRoundIdle 递增后落帧）——旧世代
+    // 轮终 round 3 不再泄漏进新世代收条。
+    expect(swept?.round).toBe(1);
+    // 上一收条统计 carry-forward（轮始不清统计——turns/tokens 沿旧收条值）。
+    expect(swept?.turns).toBe(9);
+    expect(swept?.totalTokens).toBe(900);
+    expect(swept?.stopReason).toBe("interrupted-by-restart");
+  });
+
+  it("两半解耦：run 枚举整体失败（runs 目录 EACCES）error 留痕，record 失联清点半边照常执行", async () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const sidRoot = join(agentRoot, "ext-sessions", "sid-records-fixture");
+    const recordsDir = makeRecordsDir("sid-records-fixture");
+    const id = "sa-sweep-decoupled";
+    seedManifest(recordsDir, id, "running");
+    await seedEvents(recordsDir, id, false);
+    // run 半边候选在盘（readdir 之前即有事实候选），随后锁 runs 目录——run 枚举的
+    // state 目录 readdir EACCES 整体上抛（读错分通道）。
+    const runsDir = join(sidRoot, "workflow", "runs");
+    mkdirSync(runsDir, { recursive: true });
+    const journal = createRunEventJournal(runsDir);
+    await journal.append("wf-decoupled", {
+      type: "run-created",
+      runId: "wf-decoupled",
+      workflowName: "fixture-flow",
+      argsSummary: "{}",
+      ts: Date.now() - 3 * 60 * 60 * 1000,
+    });
+    chmodSync(runsDir, 0o000);
+    try {
+      const result = await startupSweep(() => agentRoot, log);
+
+      // run 半边：枚举失败 error 留痕（adopted/skipped/stateDirs 全 0——候选未读出）。
+      expect(result).toMatchObject({ adopted: 0, skipped: 0, stateDirs: 0 });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain("EACCES");
+      expect(log.error).toHaveBeenCalledTimes(1);
+      // record 半边：未被 run 侧故障连坐——在途 record 照常清点（失联收条 + 快照摘除）。
+      expect(result.recordsSwept).toBe(1);
+      const manifest = readManifest(recordsDir, id);
+      expect(manifest.executionStatus).toBe("idle");
+      expect(manifest.stopReason).toBe("interrupted-by-restart");
+      // 结果行照打：record 半边命中行 + 主结果行（末条 = 主结果行）。
+      expect(log.info).toHaveBeenCalledTimes(2);
+      expect(log.info).toHaveBeenLastCalledWith(
+        "[subagents] startup sweep: adopted 0 run(s), skipped 0, across 0 state dir(s)",
+      );
+    } finally {
+      chmodSync(runsDir, 0o755);
+    }
+  });
+
+  it("非候选：manifest 快照 idle（正常轮终/已清点）不进判定；损坏 manifest warn 跳过不炸", async () => {
+    const recordsDir = makeRecordsDir("sid-records-fixture");
+    seedManifest(recordsDir, "sa-idle-record", "idle");
+    await seedEvents(recordsDir, "sa-idle-record", false);
+    // 损坏快照（JSON 截断）。
+    writeFileSync(join(recordsDir, "sa-broken.json"), '{"id":"sa-broken",', "utf-8");
+
+    const result = await startupSweep(() => agentRoot, log);
+
+    expect(result.recordsSwept).toBe(0);
+    // 损坏快照 warn 留痕（不虚构在途判定），不放大为启动失败。
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("sa-broken.json"));
+    // idle record 零写入（不在候选，事件流原样）。
+    expect(readEvents(recordsDir, "sa-idle-record").every((e) => e.type !== "record-round-idle")).toBe(true);
   });
 });

@@ -83,8 +83,6 @@ export interface DeliveryPort {
  * 行为锁拦截——typecheck 对删字段形态不亮红）。
  */
 export interface DeliverySubmitOptions {
-  /** 合批窗口判定覆盖。 */
-  merge?: boolean;
   /**
    * 期望注入时机（unified-delivery §3.3 timing 词条的转写位；与 pi-delivery-port
    * 的 DeliveryTiming 结构兼容）。直发兜底路径不消费（pi.sendMessage({triggerTurn})
@@ -104,7 +102,7 @@ export interface DeliverySubmitOptions {
 
 /** 投递句柄（notifier 消费方：send / flush / dispose——诊断 depth 等不入端口）。 */
 export interface DeliveryHandle {
-  /** 唯一常规入口（合批窗口 + 空闲零延迟立即投）。 */
+  /** 唯一常规入口（边沿即投——攒批窗已删 §3.3.7③）。 */
   send(msg: DeliveryMessage, opts?: DeliverySubmitOptions): void;
   /** 强制投递尝试（shutdown flush 等）。 */
   flush(): void;
@@ -146,8 +144,16 @@ export interface PortDeliverEnvelope {
 
 /** deliver 提交选项转写（与 pi-delivery-port 的 DeliveryDeliverOptions 结构兼容）。 */
 export interface PortDeliverOptions {
-  /** 合批窗口判定覆盖（缺省批判定在端口侧）。 */
-  merge?: boolean;
+  /**
+   * [subagent-observability §3.3.7③] 原 merge（合批窗口判定覆盖）已随攒批窗整机制
+   * 退役删除——core 窄端口转写面无合批字段，提交方无合批控制面。
+   */
+  /**
+   * 收取关联键（result-collect 设计 §3.1① 转写位）：世代首个通知申报债权键集
+   * （notify() 申报判据见 notifier.ts）；后续轮次 undefined。字段实参一直在传
+   * （notify deliverViaPort），转写声明此批补齐（先前靠结构兼容鸭子通过）。
+   */
+  collectKey?: string[];
 }
 
 /**
@@ -161,7 +167,7 @@ export interface DeliveryPortHandle {
    * rejected 条目由调用方裁决（幂等键未登记，重提合法）。
    */
   deliver(envelope: PortDeliverEnvelope, opts?: PortDeliverOptions): PortDeliverResult;
-  /** 强制投递尝试（窗口缓冲提前出站 + 内核 flush——shutdown flush 消费）。 */
+  /** 强制投递尝试（缓冲条目出站 + 内核 flush——shutdown flush 消费）。 */
   flush(): void;
 }
 

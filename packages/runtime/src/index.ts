@@ -1872,9 +1872,10 @@ async function main(): Promise<void> {
   })
 
   // ── remote-config 启动拉取（延迟 30s 单次）────────────────────────
-  // taiji 远程配置两域（provider 清单域 + quota-fetchers 域，checkedAt 4h 节流在 fetch 层
-  // 内建）。延迟避开启动网络竞争；有 provider 模型合并写盘时广播新列表（无变化/失败 =
-  // 零动作，fail-safe 链内建在 fetch/sync 层）。unref：不阻塞进程退出。
+  // taiji 远程配置三域（provider 清单域 + quota-fetchers 域 + retry-rules 域，同一触发点
+  // refreshRemoteProviders；checkedAt 4h 节流在 fetch 层内建）。延迟避开启动网络竞争；有
+  // provider 模型合并写盘时广播新列表（无变化/失败 = 零动作，fail-safe 链内建在 fetch/sync
+  // 层）。unref：不阻塞进程退出。
   const REMOTE_CONFIG_STARTUP_DELAY_MS = 30_000
   const remoteConfigStartupTimer = setTimeout(() => {
     void configService

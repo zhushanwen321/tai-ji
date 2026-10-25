@@ -54,7 +54,6 @@ function makeRecord(id: string, over: Partial<ExecutionRecord> = {}): ExecutionR
 function makeHost(pi: PiLike | null = null): NotifyHost {
   return createNotifyHost({
     getPi: () => pi,
-    listRunning: () => [],
     getIsIdle: () => undefined,
   });
 }

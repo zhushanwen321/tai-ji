@@ -188,7 +188,7 @@ export const HIDDEN_ALLOWLIST = new Map([
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:271', '插件 ui.updateHeaderAction hidden 透传'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:331', '插件 ui.updateHeaderAction 方法签名 hidden 形参（跨行断言的声明行）'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:346', '插件 ui.updateHeaderAction 实现签名 hidden 形参（跨行断言的声明行）'],
-  ['packages/shared/src/protocol.ts:596', '协议 plugin headerAction 条目 hidden 字段声明'],
+  ['packages/shared/src/protocol.ts:611', '协议 plugin headerAction 条目 hidden 字段声明'],
   // document.hidden（浏览器 API）
   ['packages/renderer/src/composables/features/settings/use-app-update-autocheck.ts:166', 'document.hidden（浏览器 API：页面可见性）'],
   ['packages/ui/src/features/chat/composables/useTurnElapsed.ts:125', 'document.hidden（浏览器 API：页面可见性，计时器暂停判据）'],
@@ -199,8 +199,8 @@ export const HIDDEN_ALLOWLIST = new Map([
   // renderer 扩展宿主桥的插件条目 hidden（帧面透传）
   ['packages/renderer/src/composables/shell/useExtensionHostBridge.ts:256', '插件 headerAction 运行时镜像 hidden（扩展宿主桥透传）'],
   // locale 键（设置页「注册但不可达」开关的字面键名）
-  ['packages/ui/src/locale/en-US/settings.ts:1365', 'locale 键 hidden（设置项字面键名，非会话语义）'],
-  ['packages/ui/src/locale/zh-CN/settings.ts:1364', 'locale 键 hidden（设置项字面键名，非会话语义）'],
+  ['packages/ui/src/locale/en-US/settings.ts:1393', 'locale 键 hidden（设置项字面键名，非会话语义）'],
+  ['packages/ui/src/locale/zh-CN/settings.ts:1392', 'locale 键 hidden（设置项字面键名，非会话语义）'],
 ])
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -271,7 +271,7 @@ export const SURFACE_READ_POINTS = new Map([
   // 用途②：抑制类只读判别（W4b 收编后判别器 = session.list {surface:'btw'} 拉取缓存，
   // 入口 = btw-line-membership 模块；原 session.surfaces 派生表已按协议收缩删除）
   ['packages/renderer/src/composables/effects/useCompletionNotify.ts:59', 'suppression'],
-  ['packages/renderer/src/components/panel/tray/useTrayCounts.ts:229', 'suppression'],
+  ['packages/renderer/src/components/panel/tray/useTrayCounts.ts:231', 'suppression'],
   ['packages/renderer/src/composables/effects/useForkNoticeEffect.ts:93', 'suppression'],
   ['packages/renderer/src/composables/effects/useForkNoticeEffect.ts:230', 'suppression'],
   ['packages/renderer/src/composables/panel/useBtwTabData.ts:193', 'suppression'],

@@ -13,9 +13,10 @@
  *   非法 agent——非 `^/` 绝对路径——在 subagent_batch 工具入口被拒）。
  * - 持久介质断言 = W1 设计（w1-run-record-journal-authority，历史设计档案已随 .tmp 清理，git 可追溯）§4.2 场景 1
  *   （介质归位）+ D7 终态双维度语义：
- *   ① S3a partial：fan-out 脚本返回 status=partial（脚本层失败），但 run 自身正常完成——
- *      journal run-settled outcome=completed（「脚本层失败 = outcome:completed + 脚本返回失败
- *      结论」与「run 自身怎么死的 = outcome:failed」在通知侧可区分）；
+ *   ① S3a partial：fan-out 脚本返回 status=partial（脚本层失败），run 终局由成员交付
+ *      债结算集合派生——journal run-settled outcome=partially_succeeded + failedMembers
+ *      （subagent-observability §3.3.8：存在失败且存在非失败成员 → 第五值，失败成员
+ *      cause 点拼 "<class>.<kind>"；成员失败传导 run 终局，不折进 completed 吞失败）；
  *   ② v2 条目每实体两条（registered/settled）且 settled 数 === registered 数
  *      （每注册实体必有终态——W1 D4 恢复语义的静息面）；
  *   ③ S3c 入口拒绝：非法成员 agent 在 subagent_batch 工具入口被拒——零 run journal
@@ -235,7 +236,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
     }
   }
 
-  test('S3a (batch real): 坏 agent 路径 → partial 收尾（脚本层失败 ≠ run 死法）', async ({ }, testInfo) => {
+  test('S3a (batch real): 坏 agent 路径 → partial 收尾（成员失败传导 run 终局——partially_succeeded + failedMembers）', async ({ }, testInfo) => {
     test.setTimeout(600_000)
     const s = shared!
     // 成员对象形状（§3.1.2 终态）：好坏双 agent 改为各成员对象的 agent 字段
@@ -305,12 +306,26 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
     expect(failedEntries.length, '应恰 1 条 failed（坏 agent 路径成员）').toBe(1)
     expect(failedEntries[0]?.error, 'failed 条目应带 error 字段（失败归因）').toBeTruthy()
 
-    // W1 介质锚：journal run-settled outcome=completed（脚本层失败 ≠ run 死法——D7 终态双维度）
-    assertSingleRunSettled(
+    // W1 介质锚：journal run-settled outcome=partially_succeeded + failedMembers 明细
+    //（subagent-observability §3.3.8：run 级 outcome 从成员交付债结算集合派生——
+    // 存在失败且存在非失败成员 → partially_succeeded，失败成员进 failedMembers[].cause
+    // 点拼（"<class>.<kind>"），脚本层吞失败不再把 run 终局升格为 completed）
+    const settledFrame = assertSingleRunSettled(
       readJournalFrames(journalFile),
-      'completed',
-      'partial 收尾的 run outcome 应为 completed（run 正常跑完，失败在脚本层结论）',
+      'partially_succeeded',
+      'partial 收尾的 run outcome 应为 partially_succeeded（成员失败传导 run 终局——§3.3.8 聚合派生）',
     )
+    const failedMembers = settledFrame['failedMembers'] as { taskIndex?: number; cause?: string }[] | undefined
+    expect(Array.isArray(failedMembers), 'run-settled 帧应携带 failedMembers 数组（失败成员交付结算明细）').toBe(true)
+    expect(failedMembers?.length, 'failedMembers 应恰 1 条（坏 agent 路径成员）').toBe(1)
+    expect(failedMembers?.[0]?.taskIndex, '失败成员 taskIndex 应为 1（派发序第二个成员 = 坏 agent 路径）').toBe(1)
+    // cause 点拼结构断言（现行实装 memberFailureCauseOf）：failure 在场 = 受控词表
+    // "<class>.<kind>"；failure 缺席回落 = "engine.<error 冒号前段>"——坏 agent 路径
+    // 场景成员无 FailureCause，cause 前缀恒 engine.（尾段为 error 首段文本，非受控词表）
+    expect(
+      typeof failedMembers?.[0]?.cause === 'string' && /^engine\..+/.test(failedMembers[0].cause),
+      `失败成员 cause 应为点拼形态（"engine." 前缀 + 非空尾段；实际：${String(failedMembers?.[0]?.cause)}）`,
+    ).toBe(true)
 
     // v2 条目：settled 数 === registered 数（每注册实体必有终态）+ record id 留给 S3b
     const saRegistered = extractCustomEntries(s.sessionFile, 'subagent-record').filter((d) => d['v'] === 2 && d['kind'] === 'registered')
@@ -319,7 +334,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
     expect(saSettled.length, 'subagent-record v2 settled 数应 === registered 数（W1 D4：每注册实体必有终态）').toBe(saRegistered.length)
     const wfSettled = extractCustomEntries(s.sessionFile, 'workflow-record').filter((d) => d['v'] === 2 && d['kind'] === 'settled')
     expect(wfSettled.length, 'workflow-record v2 settled 应恰 1').toBe(1)
-    expect(wfSettled[0]['outcome'], 'workflow-record settled 条目 outcome 应与 journal 一致（journal 唯一事实源派生视图）').toBe('completed')
+    expect(wfSettled[0]['outcome'], 'workflow-record settled 条目 outcome 应与 journal 一致（journal 唯一事实源派生视图）').toBe('partially_succeeded')
     s.s3aRecordId = typeof saRegistered[0]?.['id'] === 'string' ? saRegistered[0]['id'] as string : undefined
     console.log(`[batch-s3a] PASS：runId=${runId} partial 收尾，recordId=${s.s3aRecordId}`)
   })
@@ -343,13 +358,17 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
       `\`subagent_message\` tool before replying. Do not summarize, do not simulate the result.`
     let rejectArrived = false
     for (let round = 1; round <= 2 && !rejectArrived; round += 1) {
-      const offsetBefore = fs.statSync(s.sessionFile).size
       await sendAndWaitTurn(testInfo, round === 1 ? basePrompt : retryPrompt, `s3b-send-r${round}`, MAIN_TURN_TIMEOUT_MS)
       s.sessionFile = await locateSessionFile(path.join(s.dataDir, 'agent'))
       rejectArrived = await waitUntil(
         () => {
-          const text = fs.readFileSync(s.sessionFile, 'utf8')
-          return text.length > offsetBefore && text.slice(offsetBefore).includes(REJECT_BOUNDARY_SNIPPET)
+          // 结构锚定 = 全文件含域边界拒绝文案（拒绝 toolResult 的 isError 帧落盘）。
+          // 不用「发送前 offset 增量窗口」判定：S3b 上下文逼近 compaction 阈值时
+          // session 文件可能被重写轮转（size 骤减），offsetBefore 恒大于文件长度
+          // → slice 后恒空、判定永假——2026-10-25 真机实测拒绝 toolResult 已在盘
+          // 而判定未命中即此形态。全文件扫描无误判面：进入下一轮的前提 = 前轮
+          // 未产生拒绝文案（第一轮失败形态 = LLM 未调工具，session 内无 snippet）。
+          return fs.readFileSync(s.sessionFile, 'utf8').includes(REJECT_BOUNDARY_SNIPPET)
         },
         round === 1 ? JSONL_FLUSH_TIMEOUT_MS : JSONL_FLUSH_TIMEOUT_MS * 2,
       )
@@ -370,7 +389,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / invalid member agent
     console.log('[batch-s3b] PASS：message 域边界拒绝')
   })
 
-  test('S3c (batch real): 非法成员 agent（非 ^/ 绝对路径）→ subagents 工具入口拒绝（零 run + 零派发）', async ({ }, testInfo) => {
+  test('S3c (batch real): 非法成员 agent（非 ^/ 绝对路径）→ subagent_batch 工具入口拒绝（零 run + 零派发）', async ({ }, testInfo) => {
     test.setTimeout(300_000)
     const s = shared!
     // 成员对象形状（§3.1.2 终态）：非法 agent 走成员对象 agent 字段——相对路径

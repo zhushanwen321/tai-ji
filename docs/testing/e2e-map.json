@@ -4411,6 +4411,91 @@
       "owner": "packages/runtime/test/acceptance/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态：真实运行形态 = dev-flow D3 verify 剧本逐节点驱动（剧本在 ~/.agents/skill-data/dev-flow/<slug>/<name>.verify/，node 直跑、退出码判定）；本表 run 为同资产的仓内直跑形态（D3 首批 7 节点全 exit 0 实跑证据）。fixture 全部 mkdtemp 隔离（禁触真实数据目录）。补登原因（dmg-r1-4 同型）：验收测试目录落 packages/runtime/test/ 看护目录（看护根源头 E2E-INTEG-19），零登记被 e2e-map --staged 门禁拦截，随修复同批补登。"
+    },
+    {
+      "id": "E2E-BATCH-14",
+      "summary": "轮应答事实文案单元层：轮收条五分支（失败/中止/被接管/空正文/正常）→ 轮应答文案如实 + finished a round 废除回归锚（subagent-observability u4 交付，L1 单测资产登记防漏）",
+      "scope": [
+        "packages/subagent-core/src/execution/notify/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/subagent-core/src/execution/__tests__/notifier-round-facts.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "authority": "docs/TEST-STRATEGY.md#subagent-轮收条事实化与债权结清",
+      "serial": false,
+      "run": "cd packages/subagent-core && pnpm vitest run src/execution/__tests__/notifier-round-facts.test.ts",
+      "owner": "packages/subagent-core"
+    },
+    {
+      "id": "E2E-BATCH-15",
+      "summary": "list 轮收条 wire 形状对拍单元层：core SubagentListLastRound ⊇ shared SubagentLastRound 键集 + 已登记偏差清单（stderrTeePath/swept）——形状漂移静态防线（subagent-observability D5 sync 交付，L1 单测资产登记防漏）",
+      "scope": [
+        "packages/subagent-core/src/execution/assembly/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/subagent-core/src/execution/__tests__/subagent-list-last-round-parity.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "authority": "docs/TEST-STRATEGY.md#subagent-轮收条事实化与债权结清",
+      "serial": false,
+      "run": "cd packages/subagent-core && pnpm vitest run src/execution/__tests__/subagent-list-last-round-parity.test.ts",
+      "owner": "packages/subagent-core"
+    },
+    {
+      "id": "E2E-SPAWNISOL-01",
+      "summary": "真机批次 spawn 隔离契约 guard（mock 层零 token）：settings 播种剥 packages/skills 且凭据继承（认证不破坏）、discovery.json 空态在盘（缺失即回落 preset 全默认勾选——宿主扩展/ skill 目录经 discovery 源进真机 argv 的缺口，batch-s3 现场实证）、schema 与 runtime discovery-store v2 形态对齐",
+      "scope": [
+        "e2e/fixtures/batch-real-helpers.ts",
+        "packages/runtime/src/infra/pi/discovery-store.ts",
+        "packages/pi-rpc/src/spawn-args.ts",
+        "packages/pi-subagent-cli/src/spawn-args.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "e2e/spawn-isolation-guard.spec.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "serial": false,
+      "run": "npx playwright test e2e/spawn-isolation-guard.spec.ts --project=electron",
+      "owner": "e2e"
+    },
+    {
+      "id": "E2E-RETRYRULES-01",
+      "summary": "重试规则域 mock 层（零 token）：runtime handler 接线契约（config.get/setRetryRules → reply/broadcast/sendError 形态，服务层 mock）+ 服务层 ext-config 读写回退契约（文件缺失/坏形状回落空集不抛错）",
+      "scope": [
+        "packages/runtime/src/transport/retry-rules-config-message-handler.ts",
+        "packages/runtime/src/services/remote-config/remote-retry-rules.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/retry-rules-config-message-handler.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/services/remote-config/__tests__/remote-retry-rules.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "serial": false,
+      "run": "pnpm -C packages/runtime exec vitest run test/retry-rules-config-message-handler.test.ts src/services/remote-config/__tests__/remote-retry-rules.test.ts",
+      "owner": "packages/runtime",
+      "note": "subagent-observability §3.3.12 特性域的 mock 层（零 token，可进 CI）：断言本质 = handler 对服务层调用的消息形态契约（校验失败 sendError 不 reply 不广播 / 成功 reply 读回终态 + broadcast 同帧）+ 服务层读回退与写校验。settings UI 面由 renderer settings-transport-adapter 转发矩阵单测承接（packages/renderer，非看护目录）；真实进程层当前无登记，落建时同 commit 增补 rule（先例 E2E-DELIVERY-01/02 双层口径）。"
     }
   ]
 }

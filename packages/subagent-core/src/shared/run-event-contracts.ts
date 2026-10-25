@@ -380,6 +380,26 @@ export interface WorkerLogEvent extends EventEnvelope { // oe-exempt:20260930:fr
   entry: WorkerLogEntry;
 }
 
+/**
+ * 成员交付结算报告（[subagent-observability §3.3.8] run-settled 帧载荷，成员交付债
+ * 结算集合的明细面）：失败成员带 `"<class>.<kind>"` 点拼 cause；部分交付成员
+ * （产物契约部分满足，u5 填充）不进 failedMembers、无 cause——missing 清单独立承载。
+ */
+export interface FailedMemberReport { // oe-exempt:20260930:framework:workflow/record 协议契约类型——与既有 run 事件族同款豁免
+  /** 成员 call 关联键（对齐 AgentCall.id / agent-settled.taskIndex）。 */
+  taskIndex: number;
+  /** 失败分类点拼（`"<class>.<kind>"`，如 `provider.rate_limited`；未分类 = "unknown"）。 */
+  cause: string;
+}
+
+/** 部分交付成员报告（产物契约部分满足——u5 交付校验填充；u4 落帧字段结构）。 */
+export interface PartialMemberReport { // oe-exempt:20260930:framework:workflow/record 协议契约类型——与既有 run 事件族同款豁免
+  /** 成员 call 关联键（对齐 AgentCall.id）。 */
+  taskIndex: number;
+  /** 未满足的 deliverable 谓词清单（u5 填充）。 */
+  missing: string[];
+}
+
 /** `run-settled`——run 终局（一个 run 恰好一帧；终局通知的单点判定源，防多处各判漏分支）。 */
 export interface RunSettledEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "run-settled";
@@ -390,6 +410,16 @@ export interface RunSettledEvent extends EventEnvelope { // oe-exempt:20260929:f
   reason?: string;
   /** 产物目录指针：run 持久化产物所在目录绝对路径（终局通知与排障的入口载荷）。 */
   artifactsDir: string;
+  /**
+   * [subagent-observability §3.3.8] 失败成员明细（成员交付结算派生的终局携带；
+   * done/cancelled 等无失败终局缺省——cancelled 族不产失败成员，UC-16）。
+   */
+  failedMembers?: FailedMemberReport[];
+  /**
+   * [subagent-observability §3.3.8/u5] 部分交付成员明细（产物契约部分满足——u5
+   * 交付校验填充；u4 落帧字段结构，缺省恒缺省）。
+   */
+  partialMembers?: PartialMemberReport[];
 }
 
 /** run 事件判别联合（D5 词表全集，[D4] 对齐 9 个 + model-override 记账 + worker-log 诊断；判别键 = type）。 */

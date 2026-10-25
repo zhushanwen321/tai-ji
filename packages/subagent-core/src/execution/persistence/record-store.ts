@@ -36,14 +36,14 @@
 // | register(record) | 创建入册（既有方法，意图语义补齐） | entry（best-effort）+ 缓存一致性（stat 戳自校验承接） |
 // | appendEvent(id, event) | 事件追加（过程；turns 归约） | entry 变迁（best-effort） |
 // | markRoundStarted(id) | 轮始重置（status=running + result 清除） | entry（best-effort） |
-// | markRoundIdle(id, outcome) | 轮末收口（[two-state-convergence U4/D3] 轮终翻边写 idle；簿记全集①-⑫见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ A-lite 轮终 stopReason 展示位 + binding 快照（轮终停因由 record-round-idle 事件帧承载）；⑫ [B2] 轮终派生 manifest 投影） | binding 快照（A-lite）+ 派生 manifest 投影（[B2]，session-reader 直读主路径数据源）+ entry + 注销发射点② |
+// | markRoundIdle(id, outcome) | 轮末收口（[two-state-convergence U4/D3] 轮终翻边写 idle；簿记全集①-⑫见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ [subagent-observability §3.3.3] 轮终停因事实化（引擎原值经派生展示词进旧展示位，迁移期双写）+ rec.lastRound 事实快照 + binding 快照（轮终停因由 record-round-idle 事件帧承载）；⑫ [B2] 轮终派生 manifest 投影） | binding 快照（A-lite）+ 派生 manifest 投影（[B2]，session-reader 直读主路径数据源）+ entry + 结清发射点②（[§3.3.6] completed/failed/no_result 按轮终事实） |
 // | [collect 退役] markBatchFinalized 原语行已随 sync 批机制删除 |
-// | adoptEngineDeath(id, {error}) | 引擎死亡收养（[U5/D4] error/result/stopReason 三写——W4 新态 running+stopReason=failed；监督器接管编排留调用方） | 纯内存三写，无持久化面（[W1] 过程 entry 停写；尾部 reportRecordTransition 仅引擎域回填感知，引擎域未变零写入） |
+// | [subagent-observability u3 退役] adoptEngineDeath 原语行已随判定事实化删除（引擎死亡走正常轮终 error 停因，W4 死亡纳管态退役） |
 // | markResurrected(record, wasClosed) | 磁盘终态位翻回活态（acquire-first + 内存翻回 + register，单 try 域原子收敛，任一步失败响亮抛错，D3c） | `.alive` 写（writeSync）先 → 内存翻回 + register（无磁盘终态位清理——磁盘终态由事件流折叠判定，翻回由 record-reopened 帧表达） |
 // | acquireWriteLease(sessionFile, id) | store 内部 acquire 动作（writeAliveMarker 唯一包装；spawn 侧 sessionFile 回填挂钩用，D3a 时机①，U2b 消费） | `.alive` 写（失败响亮抛错） |
 //
-// ── legacy 例外原语（workflow D7 例外族 / 监督器放弃专用；新调用面禁用）──
-// | markFinalized(record, reason) | closed 终态化（仅 workflow D7 例外族 / 监督器放弃 / 引擎死亡不可接管兜底消费；副作用编排 abort/kill/disarm/CAS/promote 留调用方） | binding 快照（updateRecordBinding，best-effort）→ entry/archive → 终态 manifest writeSync → `.alive` 删（`.state` 收条已退场——磁盘终态由事件流 record-settled 帧判定） |
+// ── legacy 例外原语（workflow D7 例外族专用；新调用面禁用）──
+// | markFinalized(record, reason) | closed 终态化（仅 workflow D7 例外族消费——引擎死亡走正常轮终 error 停因，无独立死亡写点；副作用编排 abort/kill/disarm/CAS/promote 留调用方） | binding 快照（updateRecordBinding，best-effort）→ entry/archive → 终态 manifest writeSync → `.alive` 删（`.state` 收条已退场——磁盘终态由事件流 record-settled 帧判定） |
 // | markCancelled(record) | cancelled 终态化（仅 workflow D7 例外族 abort 路径；tombstone endedAt） | 同 markFinalized 写序（legacyTerminalWrite 共用编排，恒返回 true） |
 //
 // ── [永久会话模型 / u-foundation 骨架] 新意图原语（设计 subagent-permanent-session-model.md
@@ -67,9 +67,10 @@
 //                    markFinalized 序言随投影持久化；acquireWriteLease 在锚点确立时
 //                    声明写权（D3a 时机①）
 //   ⑧ turns       —— 事件累积族→appendEvent（execution-record.updateFromEvent 归约）
-//   ⑨ lastError   —— 轮终失败→markRoundIdle failed 载荷
-//   ⑩ error       —— 收养/失败→adoptEngineDeath/markRoundIdle
-//   ⑪ stopReason  —— 轮终写（成功 completed / 失败 failed，A-lite 展示位——status
+//   ⑨ lastError   —— 轮终失败→markRoundIdle failed 载荷（[u3] 经 appendErrorFact 单点——errors 只追加 + lastError 派生）
+//   ⑩ error       —— 轮终失败→markRoundIdle（[u3 退役] adoptEngineDeath 写点已删）
+//   ⑪ stopReason  —— 轮终写（[subagent-observability §3.3.3] 事实优先——引擎原值派生
+//                    展示词 completed/failed 迁移期双写；被接管轮不写——status
 //                    已翻 idle，U4/D3）→markRoundIdle；settle 写（中断族）→markSettled
 //
 // [perf] 两级读写设计（修复 /subagents 打开慢）：
@@ -145,6 +146,7 @@ import {
   derivedManifestRecord,
   detectIdentity,
   identityFromFold,
+  identityFromFoldSource,
   isFreshCache,
   manifestToSubagent,
   projectFoldToLight,
@@ -172,13 +174,13 @@ import {
 } from "./record-store-terminal.ts";
 import type { TerminalCtx } from "./record-store-terminal.ts";
 // [H4 三轴拆分] 轮次簿记轴（record-store-rounds.ts）：appendEvent/markRoundStarted/
-// markRoundIdle/adoptEngineDeath 实现——轮次过程簿记（轮始重置/轮末收口/事件归约/
-// 收养）。经 RoundsCtx 注入（records 共享 Map + manifest/事件写面注入；binding
-// settle 快照由 rounds 轴直接 import persistSettleSnapshot——定义在 terminal 轴，
-// H4 依赖方向允许）。
+// markRoundIdle 实现——轮次过程簿记（轮始重置/轮末收口/事件归约）。经 RoundsCtx
+// 注入（records 共享 Map + manifest/事件写面注入；binding settle 快照由 rounds 轴
+// 直接 import persistSettleSnapshot——定义在 terminal 轴，H4 依赖方向允许）。
+// [subagent-observability u3] adoptEngineDeath 意图原语已退役删除（写点随判定
+// 事实化退役——引擎死亡走正常轮终，见 record-store-rounds.ts 退役注释）。
 // 依赖方向单向：store → rounds → {terminal, rebuild}（不回 import store，无环）。
 import {
-  adoptEngineDeathImpl,
   appendEventImpl,
   markRoundIdleImpl,
   markRoundStartedImpl,
@@ -188,7 +190,7 @@ import { reconstructFromFile } from "./session-reconstructor.ts";
 import type { IdentityHeaderRecon } from "./session-reconstructor.ts";
 import type { ClosedReason, StopReason, TranscriptRef } from "../domain/record-types.ts";
 import type { ExecutionRecord, ModelOverride } from "../domain/record-model.ts";
-import type { AgentEvent, RecordSnapshot, SubagentRecord } from "../assembly/types.ts";
+import type { AgentEvent, RecordSnapshot, SubagentListEvidence, SubagentRecord } from "../assembly/types.ts";
 // [U4a / D3b (a″)] findForeignLiveInstance：孤儿恢复的活实例跳过判据——现查探针
 // 替代重建时 externalInstance 缓存（pid 单判据 + self-pid 排除，比缓存更新鲜）。
 import { writeAliveMarker, removeAliveMarker, findForeignLiveInstance } from "./alive-store.ts";
@@ -589,8 +591,13 @@ export class RecordStore {
    *      空窗）；⑧ pending 注销发射点②（进程已死，从活跃后代差集移除——经
    *      setPendingUnregister 注入，未注入时跳过）；⑨ reportRecordTransition（entry
    *      携带新 round 与本轮 result）；
-   *      ⑩ [A-lite] stopReason 展示位（成功轮 completed / 失败轮 failed——status 已
-   *      idle，endedAt 不写）；⑪ [A-lite / U7] 轮终磁盘面（锚分派对齐 markSettled：
+   *      ⑩ [subagent-observability §3.3.3 停因事实化] stopReason 写引擎原值（stop/
+   *      error/aborted 优先；旧引擎无停因上报回落推断值 failed/completed——迁移期
+   *      回落，被接管轮不写——status 已 idle，endedAt 不写）+ rec.lastRound 轮收条
+   *      事实快照（RoundFacts：停因/失败分类/接管三态/收条轮数 turns/usage/重试计数/
+   *      观察项/诊断 tee 路径——下轮轮始不清）；结清发射按轮终事实产 SettlementReason
+   *      （completed/failed/cancelled/no_result，roundSettlementReasonOf——簿记⑧同点）；
+   *      ⑪ [A-lite / U7] 轮终磁盘面（锚分派对齐 markSettled：
    *      pi 腿 binding 快照 / zcode 腿锚键 binding 快照——轮终停因由 record-round-idle
    *      事件帧承载，正常轮终后
    *      宿主崩溃 revive 水合 turns/tokens 不归零）；⑫ [B2] 轮终派生 manifest 投影
@@ -650,19 +657,8 @@ export class RecordStore {
 
   // [collect 退役] 原 markBatchFinalized（sync 批终态统一写点——manifest 屏障 +
   // batchFinalized 落标 entry）已随批机制整体删除。
-
-  /**
-   * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] 新态
-   * running + stopReason=failed 表驱动死亡，禁 completed 谎报 / closed 直接终局）。
-   * 归口调用面已随 adopt 派发链退役：one-shot engine-run 编排不再经本原语收口
-   * （原归口调用点随 U2b 修复轮移除），现仅测试直调可达
-   * （run-orchestration-write-lease.test.ts 用例 2/5 为退役与归口语义锚）。
-   *
-   * @returns false = id 不在内存（debug 留痕，无副作用）。
-   */
-  adoptEngineDeath(id: string, opts: { error: string }): boolean {
-    return adoptEngineDeathImpl(id, opts, this.roundsCtx);
-  }
+  // [subagent-observability u3] 原 adoptEngineDeath 意图原语已退役删除（W4 死亡
+  // 纳管态写点随判定事实化退役——引擎死亡走正常轮终 error 停因，纳管语义被吸收）。
 
   /**
    * 意图原语：磁盘终态位翻回活态（透明重生回边整体收编，D3c 规格）。
@@ -1144,8 +1140,39 @@ export class RecordStore {
     this.mergeManifestRecords(byId, rootSessionFilter);
     this.mergeMemoryRecords(byId, rootSessionFilter);
     this.rebuildMissingManifests(byId);
+    // [subagent-observability §3.3.6] evidence 取证指针附加（查询漏斗单点——list
+    // 与 run 下钻两条查询路径同源）。
+    this.attachListEvidence(byId);
 
     return byId;
+  }
+
+  /**
+   * [subagent-observability §3.3.6] list 条目 evidence 取证指针附加（mergedRecords
+   * 查询漏斗单点）：eventsFile = `<recordsDir>/<id>.events`（D3 落点推导——recordsDir
+   * 与 manifest 同目录接线，record-events.recordEventsPath）；lastSeq = fold 水位
+   * （eventStreamFace.foldOf——已接受事件最高 seq；journal seq 区间 = [1, lastSeq]，
+   * append-only 单流下界恒 1）；stderrTeePath = 最近轮收条携带的引擎诊断 tee 路径
+   * （rec.lastRound 事实透传——仅诊断引用，文件受引擎侧轮转清理管辖，读侧不假设
+   * 其永存）。附加在浅拷贝上（磁盘源 light 是 scanFile 缓存条目，原地写会污染缓存
+   * 复用对象）。
+   * 缺席语义（类型注释同步）：事件面未接线（无 manifestDir 的纯内存测试形态）或
+   * 无事件流事实（fold lastSeq = 0——entry-only / manifest-only 存量）= evidence
+   * 缺省，不产指向不存在文件的指针。
+   */
+  private attachListEvidence(byId: Map<string, SubagentRecord>): void {
+    const recordsDir = this.getManifestDir?.();
+    if (recordsDir === undefined) return;
+    for (const [id, rec] of byId) {
+      const lastSeq = this.eventStreamFace?.foldOf(id).lastSeq ?? 0;
+      if (lastSeq <= 0) continue;
+      const evidence: SubagentListEvidence = {
+        eventsFile: recordEventsPath(recordsDir, id),
+        lastSeq,
+        ...(rec.lastRound?.stderrTeePath !== undefined ? { stderrTeePath: rec.lastRound.stderrTeePath } : {}),
+      };
+      byId.set(id, { ...rec, evidence });
+    }
   }
 
   /** mergedRecords 源 1.7（主 session entry 源，[U7 / B-restart store 面]）。行为保持：
@@ -1761,6 +1788,23 @@ export class RecordStore {
     // 均已退场）。fold 取一次，收条（stopReason/endedAt）与统计（round/turns/
     // totalTokens/endedAt）共用同一折叠态。
     const fold = this.eventStreamFace?.foldOf(base.id);
+    // [S3b origin 补齐] identity entry 命中时 origin/parentRunId 两域从 fold 补齐：
+    // identity entry 写点（subagent-workflow appendSubagentIdentityEntry，载荷源 =
+    // SUBAGENT_IDENTITY_ENV）不携带 origin/parentRunId（env 键表无此二键），而身份
+    // 基底命中即权威（上方两级判据）——workflow 成员收尾出内存后冷查重建会拿到
+    // origin=undefined，D7 域边界检查（messageHandler record.origin === "workflow"）
+    // 不命中，成员被误续聊（S3b 真机实证）。fold 的 record-created 帧由宿主 register
+    // 恒写 origin（buildCreatedEventPayload 二值载荷），是这两域唯一可靠重建源；
+    // 归一复用 identityFromFoldSource 单源（JSON 值不裸收）。补齐谓词收窄为
+    // "workflow"：tool 来源 undefined 与 "tool" 读侧同义（缺省语义），保持 undefined
+    // 即零行为变化；workflow 是唯一被 origin 门槛消费的值（D7 检查 + D1 过滤）。
+    if (base.origin === undefined) {
+      const foldIdentity = identityFromFoldSource(fold);
+      if (foldIdentity?.origin === "workflow") {
+        base.origin = "workflow";
+        base.parentRunId = base.parentRunId ?? foldIdentity.parentRunId;
+      }
+    }
     const state = stateMarkerFromFold(fold);
     const entry = buildFileCacheEntry(base, file, stamps, state, this.eventsStampOfId(base.id));
     // [U7 / §3.2.7 统计口径单基准] 统计域换源折叠 + [subagent-model-switch §6.2]

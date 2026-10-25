@@ -140,6 +140,41 @@ export type {
 // LLM 重试配置域（类型 + D8 合法域常量 + 校验纯函数，renderer 表单与 runtime 写入侧共用）
 export type { LlmRetryConfig, LlmRetryProviderConfig } from './llm-retry'
 export { LLM_RETRY_DOMAIN, validateLlmRetryConfig } from './llm-retry'
+// LLM 重试规则域（subagent-observability §3.3.12：类型 + 校验 + 判定管线纯函数，SSOT；
+// retry-rules extension bundle 自包含复制同语义实现时以本出口为准）
+export type {
+  RetryRuleDecision,
+  RetryRuleMatch,
+  RetryRuleMatchOperator,
+  RetryRuleSource,
+  RetryRuleVerdict,
+  RetryableErrorRule,
+  RetryRulesExtConfig,
+  RetryRulesRemoteConfig,
+  RetryRulesValidationResult,
+  RetryRuleHttpStatusClass,
+} from './retry-rules'
+export {
+  appendRetryMarker,
+  DEFAULT_RETRY_RULES_EXT_CONFIG,
+  evaluateRetryRules,
+  extractJsonSegment,
+  isDangerousRetryPattern,
+  isRetryRulesExtConfig,
+  isRetryRulesRemoteConfig,
+  matchRetryRule,
+  mergeRetryRules,
+  RETRY_REWRITE_MARKER,
+  RETRY_REWRITE_MARKER_PREFIX,
+  RETRY_RULES_BASELINE,
+  RETRY_RULES_DOMAIN,
+  RETRY_RULE_HTTP_STATUS_CLASSES,
+  RETRY_RULE_KINDS_BY_CLASS,
+  RETRY_RULE_MATCH_OPERATORS,
+  RETRY_RULE_VERDICTS,
+  validateRetryRuleFields,
+  validateRetryRuleList,
+} from './retry-rules'
 // LLM 网络代理域（llm-network-proxy 设计 §5 U1：类型 + 校验 + 匹配语义纯函数，SSOT；
 // extension 侧 bundle 隔离复制同语义实现时以本出口为准）
 export type {
@@ -312,7 +347,22 @@ export * from './file-tree'
 export * from './local-file-url'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
-export type { SubagentRecord, SubagentStatus, SubagentModelSource, ClosedDisplayStatus, SubagentModelOverrideStatus, SubagentRecentEffectiveModel } from './subagent'
+// [subagent-observability §3.3.3⑤] FailureCause 族 = sdk 权威的 type-only re-export
+// （subagent.ts 内转出口；wire 载体 = SubagentRecord.lastRound.failure，renderer 红点
+// 判据与 u8 测试的数据源）。SubagentLastRound = 轮收条事实快照契约（F4）。
+export type {
+  SubagentRecord,
+  SubagentStatus,
+  SubagentModelSource,
+  ClosedDisplayStatus,
+  SubagentModelOverrideStatus,
+  SubagentRecentEffectiveModel,
+  SubagentLastRound,
+  FailureCause,
+  FailureCauseClass,
+  FailureRetryability,
+  AgentUsageTotal,
+} from './subagent'
 // 远程访问配置契约 SSOT（remote-access.json：main 写入侧与 runtime 握手热读侧共用；
 // 含 IPC 信封类型 RemoteAccessInfo/RemoteAccessToggleResult，main/preload/renderer
 // 三端共同 import；含无策略 shape 谓词（main/runtime 双侧 shape 判据单源）；
@@ -428,13 +478,20 @@ export type {
   WorkflowDag,
 } from './workflow'
 // [W2 D8] 状态中文显示名词表运行时常量（ALL = 值域全集 / LABELS = outcome → 中文
-// 显示名（成功/失败/已取消/已中断），通知渲染与 tray 文案消费它 / COVERAGE_LOCK =
+// 显示名（成功/失败/已取消/已超时/部分成功），通知渲染与 tray 文案消费它 / COVERAGE_LOCK =
 // WorkflowRunOutcome 联合 ⊆ ALL 的反向完备编译锁载体）——renderer 消费入口经此
 // 包根导出清单（tray-tone workflowStatusLabel / state-tone-lock 文案断言段）。
 export {
   WORKFLOW_RUN_OUTCOME_ALL,
   WORKFLOW_RUN_OUTCOME_LABELS,
   WORKFLOW_RUN_OUTCOME_COVERAGE_LOCK,
+} from './workflow'
+// [subagent-observability §3.3.8] done 终态原因值域对账锚（ALL = 六值全集 /
+// COVERAGE_LOCK = WorkflowDoneReason 联合 ⊆ ALL 的反向完备编译锁载体）——runtime
+// WORKFLOW_DONE_REASON_SET 扩值入对账（u4）与消费方全集遍历的数据源。
+export {
+  WORKFLOW_DONE_REASON_ALL,
+  WORKFLOW_DONE_REASON_COVERAGE_LOCK,
 } from './workflow'
 // [可视化 U2] workflow-visualization 协议冻结段的运行时常量（截断白名单五字段 /
 // 截断阈值 / 事件类型全集 + 反向完备编译锁）——消费入口经包根导出清单（同上先例）。

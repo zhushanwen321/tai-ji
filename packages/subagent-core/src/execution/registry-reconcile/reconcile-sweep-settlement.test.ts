@@ -487,3 +487,31 @@ describe("[U1 判定核抽取] findRunSettlementEvidence 直测（矩阵逐分�
     });
   });
 });
+
+describe("[subagent-observability §3.3.11④] terminal 判据缺省方向（settlementReason 缺失不产假成功）", () => {
+  it("terminal 判据 settlementReason 缺失（类型合法输入，守卫演化防线）→ 缺省 reason = no_result，不产 completed 假成功", () => {
+    fs.appendFileSync(
+      path.join(tmpDir, "session.jsonl"),
+      `${JSON.stringify({ customType: "pending:register", data: { id: "bg-no-reason", type: "subagent" } })}\n`,
+      "utf8",
+    );
+    const unregisterAppends: unknown[] = [];
+    const result = runReconcileSweep({
+      sessionFile: path.join(tmpDir, "session.jsonl"),
+      // SupervisedRecordState.terminal 分支类型层允许 settlementReason undefined——生产
+      // 判据 isLegacyClosedSettled 守卫其非空（现状不可达），本断言钉住守卫放宽 /
+      // 新构造点接入时的缺省方向：无事实可依 → no_result，非 completed。
+      lookupRecordState: () => ({ terminal: true, settlementReason: undefined }),
+      appendEntry: (customType, data) => {
+        if (customType === "pending:unregister") unregisterAppends.push(data);
+      },
+    });
+
+    expect(result.reconciled).toEqual(["bg-no-reason"]);
+    expect(unregisterAppends[0]).toEqual({
+      id: "bg-no-reason",
+      reason: "no_result",
+      status: mapReasonToStatus("no_result"),
+    });
+  });
+});

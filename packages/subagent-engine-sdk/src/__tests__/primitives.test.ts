@@ -163,8 +163,8 @@ describe("journal-replay（纯派生视图 + reducer，重放等价性语义）"
       { type: "turn_end" },
       { type: "text_delta", delta: "next turn" },
       { type: "turn_end" },
-      // error 事件在 turn_end 之后到达：applyTurnEnd 清 lastError（瞬态 error 恢复后
-      // 不误判失败），error 处理器随后写回——顺序即语义
+      // error 事件在 turn_end 之后到达：turn_end 不再清 lastError（§3.3.5——
+      // 轮终不清洗失败事实），error 处理器入账 errors + 派生刷新 lastError
       { type: "error", message: "transient" },
     ];
     for (const ev of events) updateFromEvent(record, ev);
@@ -183,7 +183,7 @@ describe("journal-replay（纯派生视图 + reducer，重放等价性语义）"
     });
     // totalTokens = 四项之和（10+5+1+2）
     expect(record.totalTokens).toBe(18);
-    // turn_end 清 lastError；滞后 error 事件写回
+    // lastError 随 error 事件入账存活（轮终不清洗，§3.3.5）
     expect(record.lastError).toBe("transient");
   });
 

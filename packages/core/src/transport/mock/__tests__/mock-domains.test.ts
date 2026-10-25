@@ -6,7 +6,7 @@
  * 时序：setMockTiming 全键压至 1ms（mock 默认节奏面向人眼演示 40ms～2s/步，真实等待
  * 无契约价值——阶段经历顺序不变，只消墙钟），afterAll 还原默认。
  */
-import type { ProviderId, ImportSourceKind } from '@taiji/shared'
+import type { ProviderId, ImportSourceKind, RetryableErrorRule } from '@taiji/shared'
 import { QUOTA_PRESETS } from '@taiji/shared'
 import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest'
 import type { ServerMessageUnion } from '@taiji/shared'
@@ -613,6 +613,28 @@ describe('mock config domain', () => {
     const afterReset = await config.resetNetworkProxyStats()
     expect(afterReset.stats).toEqual([])
     unNp()
+  })
+
+  it('重试规则 stub（subagent-observability §3.3.12）：get 回基线+内存态 / set 深拷贝广播 / 订阅注册即推初始', async () => {
+    // get 初始：custom 空（mock 模块级内存态，此前用例未触碰）；builtin = shared 基线快照非空
+    const rr0 = await config.getRetryRules()
+    expect(rr0.customRules).toEqual([])
+    expect(rr0.builtinRules.length).toBeGreaterThan(0)
+    // set 深拷贝后广播 + 回执同形；调用方原地改写不影响 mock 内存态
+    const custom: RetryableErrorRule[] = [
+      { id: 'probe-rr', name: 'probe', verdict: 'retryable', class: 'provider', source: 'custom', match: [{ kind: 'pattern', pattern: 'x' }] },
+    ]
+    const rrSeen: Array<{ builtinRules: unknown[]; customRules: unknown[] }> = []
+    const un = config.onRetryRules((p) => rrSeen.push(p))
+    await waitFor(() => rrSeen.length > 0) // 订阅注册即触发初始推送（mock 订阅型惯例）
+    const rrSet = await config.setRetryRules(custom)
+    expect(rrSet.customRules).toHaveLength(1)
+    await waitFor(() => rrSeen.length > 1)
+    expect(rrSeen[rrSeen.length - 1]!.customRules).toHaveLength(1)
+    custom[0]!.id = 'mutated'
+    const rr1 = await config.getRetryRules()
+    expect(rr1.customRules[0]!.id).toBe('probe-rr')
+    un()
   })
 })
 

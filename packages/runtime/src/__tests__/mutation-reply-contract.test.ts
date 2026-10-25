@@ -177,6 +177,17 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     effectiveFields: ['config'],
   },
   {
+    // 重试规则域（subagent-observability §3.3.12）：set 校验失败走错误信封不落盘；成功写
+    // ext-config（写侧 source 归一 custom + effectiveRules 合并持久段重算，确定性变换）——
+    // 归分支一；reply/broadcast 读回服务端组装视图（getBuiltinRetryRules + customRules 读回），
+    // customRules 即生效值（消费侧以服务端终态校准，network-proxy 同款）。
+    type: 'config.setRetryRules',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'config.retryRules',
+    effectiveFields: ['customRules'],
+  },
+  {
     // codemode 开关写（codemode 设计 D1/A1/D2）：后端按 D2 语义表规范化落盘（幂等不动 /
     // 负条目占位），reply ok 分支 enabled = 写后落盘终态（生效值）；ok:false 为损坏拒入
     // 信封（error+corruption，A1 写点拒入），错误态不走 effectiveFields

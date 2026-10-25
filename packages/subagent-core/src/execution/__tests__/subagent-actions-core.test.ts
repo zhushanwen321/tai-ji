@@ -1234,3 +1234,201 @@ describe("⛔4 forkFromHandler（检查链 + slug 派生 + prompt 包装，快�
     expect(executeResumed.mock.calls[0]![0].slug).toBe("resumed-resumed");
   });
 });
+
+// ============================================================
+// [subagent-observability §3.3.6 查询入口补全] list 条目轮收条事实字段
+// （UC-1③：父 agent 查询拿到「上一轮怎么收尾」的真相通道——消费方先读事实，
+// outcome 展示词保留为兼容读侧）。
+// ============================================================
+describe("recordToListItem 轮收条事实字段（subagent-observability u3）", () => {
+  it("失败轮事实：lastRound 携带引擎停因原值 + 失败分类 + 正文摘要 + turns；swept 失联标注随附；lastError 透传", () => {
+    const item = recordToListItem(
+      makeRec({
+        id: "bg-lr-fail",
+        status: "idle",
+        stopReason: "failed",
+        turns: 6,
+        result: "429: tier_limit_exceeded, resets 2026-10-24T06:58:00Z",
+        lastError: "429: tier_limit_exceeded, resets 2026-10-24T06:58:00Z",
+        lastRound: {
+          engineStopReason: "error",
+          failure: {
+            class: "provider",
+            kind: "rate_limited",
+            retryable: "conditional",
+            retryAfterMs: 1_320_000,
+            raw: "429: tier_limit_exceeded",
+          },
+        },
+      }),
+    );
+    expect(item.lastRound).toMatchObject({
+      engineStopReason: "error",
+      failure: { class: "provider", kind: "rate_limited", retryable: "conditional" },
+      result: "429: tier_limit_exceeded, resets 2026-10-24T06:58:00Z",
+      turns: 6,
+    });
+    expect(item.lastError).toContain("tier_limit_exceeded");
+    expect(item.swept).toBeUndefined();
+  });
+
+  it("失联清点命中：lastRound.swept 附注随 lastRound 派生（清点事实落轮收条附注——恢复动作 = 查 evidence + 续聊重建）", () => {
+    const item = recordToListItem(
+      makeRec({
+        id: "bg-lr-swept",
+        status: "idle",
+        stopReason: "interrupted-by-restart",
+        lastRound: {
+          engineStopReason: "interrupted-by-restart",
+          swept: { at: 1_700_000_000_000, evidence: "manifest=executionStatus:running" },
+        },
+      }),
+    );
+    expect(item.swept).toEqual({ at: 1_700_000_000_000, evidence: "manifest=executionStatus:running" });
+    expect(item.lastRound?.engineStopReason).toBe("interrupted-by-restart");
+    // 失联非失败：无 failure 分类（红点判据读 failure——失联轮不误报红点，中性档）。
+    expect(item.lastRound?.failure).toBeUndefined();
+  });
+
+  it("被接管轮（promptDisposition=handled）事实透传；无 lastRound 事实的存量形态不落键（⛔4 快照零扰动）", () => {
+    const handled = recordToListItem(
+      makeRec({
+        id: "bg-lr-handled",
+        status: "idle",
+        lastRound: { promptDisposition: "handled" },
+      }),
+    );
+    // turns 随聚合字段派生（收条时点的累计 turn 数——makeRec 基线 turns=1）。
+    expect(handled.lastRound).toEqual({ promptDisposition: "handled", turns: 1 });
+
+    // 存量 record（无轮收条事实）→ lastRound/lastError/swept 键缺省（JSON 形态零新增键）。
+    const legacy = recordToListItem(makeRec({ id: "bg-lr-legacy" }));
+    expect("lastRound" in legacy).toBe(false);
+    expect("lastError" in legacy).toBe(false);
+    expect("swept" in legacy).toBe(false);
+  });
+
+  it("evidence 取证指针透传（查询漏斗附加——recordToListItem 只透传）；无指针的存量形态不落键", () => {
+    const withEvidence = recordToListItem(
+      makeRec({
+        id: "bg-ev-1",
+        evidence: { eventsFile: "/records/bg-ev-1.events", lastSeq: 7 },
+      }),
+    );
+    expect(withEvidence.evidence).toEqual({ eventsFile: "/records/bg-ev-1.events", lastSeq: 7 });
+
+    const noEvidence = recordToListItem(makeRec({ id: "bg-ev-2" }));
+    expect("evidence" in noEvidence).toBe(false);
+  });
+});
+
+// ============================================================
+// listHandler 组合链：证据与轮收条事实（subagent-observability F1-39/F1-42/F1-46）
+// ============================================================
+// 断言走 listHandler 全链（collectRecords 漏斗条目 × getFullRecord 富化合并），
+// 不只直调 recordToListItem——evidence 只附加在 collectRecords 的 mergedRecords
+// 浅拷贝上（attachListEvidence 单点），富化替换丢漏斗产物即在本层拦截。
+describe("listHandler 组合链：evidence/lastRound/lastError 两路在场（F1-39）", () => {
+  it("内存路：富化对象不带 evidence 时从漏斗条目保留（修复前全链丢失的回归锚）", () => {
+    const funneled = makeRec({
+      id: "bg-mem-1",
+      status: "running",
+      lastError: "provider 500: upstream error",
+      lastRound: { engineStopReason: "error" },
+      evidence: { eventsFile: "/records/bg-mem-1.events", lastSeq: 3 },
+    });
+    // 内存富化形态（recordToSubagent 投影）：lastRound/lastError 直读在场，evidence 不产。
+    const full = makeRec({
+      id: "bg-mem-1",
+      status: "running",
+      lastError: "provider 500: upstream error",
+      lastRound: { engineStopReason: "error" },
+    });
+    const r = listHandler(
+      makeService({
+        collectRecords: vi.fn(() => [funneled]),
+        getFullRecord: vi.fn(() => full),
+      }),
+      { includeFinished: true },
+    );
+    expect(r.response.items).toHaveLength(1);
+    expect(r.response.items[0].evidence).toEqual({
+      eventsFile: "/records/bg-mem-1.events",
+      lastSeq: 3,
+    });
+    expect(r.response.items[0].lastRound).toMatchObject({ engineStopReason: "error" });
+    expect(r.response.items[0].lastError).toBe("provider 500: upstream error");
+  });
+
+  it("磁盘路：全量重建 full 无 lastRound/evidence（buildRecord 形态）→ 漏斗条目 fold 派生事实补缺；lastError 取 full", () => {
+    // 漏斗 light 形态（扫描探测路径 projectFoldToLight 派生）：lastRound 带收条帧
+    // turns 快照与 stderrTeePath、evidence 漏斗附加；在途形态 light.turns = 0。
+    const funneled = makeRec({
+      id: "bg-disk-1",
+      status: "running",
+      turns: 0,
+      lastRound: {
+        engineStopReason: "error",
+        turns: 6,
+        stderrTeePath: "/logs/pi-2026-10-23-bg-disk-1.jsonl",
+      },
+      evidence: {
+        eventsFile: "/records/bg-disk-1.events",
+        lastSeq: 12,
+        stderrTeePath: "/logs/pi-2026-10-23-bg-disk-1.jsonl",
+      },
+    });
+    // 磁盘全量重建 full 形态（buildRecord）：lastError 透传，lastRound/evidence 不恢复。
+    const full = makeRec({
+      id: "bg-disk-1",
+      status: "running",
+      turns: 14,
+      lastError: "429: tier_limit_exceeded",
+    });
+    const r = listHandler(
+      makeService({
+        collectRecords: vi.fn(() => [funneled]),
+        getFullRecord: vi.fn(() => full),
+      }),
+      { includeFinished: true },
+    );
+    const item = r.response.items[0];
+    expect(item.evidence).toEqual({
+      eventsFile: "/records/bg-disk-1.events",
+      lastSeq: 12,
+      stderrTeePath: "/logs/pi-2026-10-23-bg-disk-1.jsonl",
+    });
+    expect(item.lastRound).toMatchObject({
+      engineStopReason: "error",
+      turns: 6,
+      stderrTeePath: "/logs/pi-2026-10-23-bg-disk-1.jsonl",
+    });
+    expect(item.lastError).toBe("429: tier_limit_exceeded");
+  });
+});
+
+describe("listLastRoundOf turns 语义（F1-46：收条自身轮终值优先）", () => {
+  it("收条快照 turns 在场时不被 live 计数器覆盖（下一轮轮始起累加的 r.turns 不漂移上一轮收条）", () => {
+    const item = recordToListItem(
+      makeRec({
+        id: "bg-turns-1",
+        status: "running",
+        turns: 9, // live 计数器（新一轮已推进）
+        lastRound: { engineStopReason: "stop", turns: 6 }, // 上一轮收条定格
+      }),
+    );
+    expect(item.lastRound?.turns).toBe(6);
+  });
+
+  it("旧快照（无 turns 字段）回落 live r.turns（兼容存量 RoundFacts 形态）", () => {
+    const item = recordToListItem(
+      makeRec({
+        id: "bg-turns-2",
+        status: "idle",
+        turns: 4,
+        lastRound: { engineStopReason: "stop" },
+      }),
+    );
+    expect(item.lastRound?.turns).toBe(4);
+  });
+});

@@ -33,10 +33,11 @@
 // 判据保守性（[F2] 按类型分流收尾）：
 //  - type=subagent → record 差集对账（lookupRecordState）；
 //  - type=workflow 及缺失/未知的畸形条目（normalizePendingType 归 workflow 的偏好）
-//    → workflow run 判据（lookupWorkflowRunState，生产装配查 WorkflowRun store 的
-//    run state 文件）：终态 ∪ 文件不存在 → 补注销；running → 跳过；全部行损坏
-//    （读不出 ≠ 不存在）由判据侧保守按 running 处理（宁挂着不处理不失明——误注销活跃
-//    workflow run 是事故方向）。deps 未注入该判据时维持旧保守跳过（向后兼容）。
+//    → workflow run 判据（lookupWorkflowRunState，生产装配经共享判定核
+//    findRunSettlementEvidence——journal run-settled 帧 ∨ manifest 终局条目）：
+//    终局证据 ∪ 证据缺席（视同不存在）→ 补注销；非终态/坏链/IO 故障由判定核
+//    保守侧按活跃处理跳过（宁挂着不处理不失明——误注销活跃 workflow run 是事故
+//    方向）。deps 未注入该判据时维持保守跳过（向后兼容）。
 //  - type=bash → 无 record/store 可查（bash 注册随进程退出注销，进程死亡窗口的
 //    丢失无补发通道）→ 保守跳过，显式偏差登记（impl-plan §5 #5）：挂着不处理的方向代价 =
 //    每孤儿 bash 注册 1 条静态虚报，无空转驱动源（goal 检查读侧过滤已使子 session
@@ -62,8 +63,14 @@ export type SupervisedRecordState =
    *  pending-notifications registry，轮终 record 的注销已随 markRoundIdle 簿记⑧
    *  发射、不在册，保守归 active 不动）——不动。 */
   | "active"
-  /** 终态（closed，含 closedReason——映射 pending reason 用）。 */
-  | { terminal: true; closedReason: string | undefined }
+  /** 终态（closed / 失联结清），携 settlementReason——pending 注销 reason 的
+   *  直通载体，字段名按结清事实词正名（不借 ClosedReason 词表语义名：lost 等
+   *  结清值不在该词表）。直通值域横跨 SettlementReason（词表内直通）∪ 历史
+   *  ClosedReason ∪ run 侧 DoneReason 派生 ∪ adopted StopReason（三族词表外
+   *  直通）——类型保持 string 宽容是设计内合法产出，词表判读统一交下游
+   *  extension-protocol resolveSettlementReason 解析表（词表外落 unknown，
+   *  fail-visible），不在此层收窄封闭。 */
+  | { terminal: true; settlementReason: string | undefined }
   /** 已离场/不存在（视同终态，补注销）。 */
   | "missing";
 
@@ -75,8 +82,8 @@ export interface ReconcileSweepDeps {
   lookupRecordState: (id: string) => SupervisedRecordState;
   /**
    * [F2] workflow run 状态判据（type=workflow 及畸形条目的收尾依据）。生产装配查
-   * 共享判定核（service-binding → persistence/run-state-evidence 的
-   * findRunSettlementEvidence）。
+   * 共享判定核（execution/registry-reconcile/sweep-binding.ts →
+   * persistence/run-state-evidence 的 findRunSettlementEvidence）。
    * 缺省（未注入）= workflow/畸形条目无收尾通道，保守跳过（skippedNonSubagent）。
    */
   lookupWorkflowRunState?: (runId: string) => SupervisedRecordState;
@@ -171,7 +178,7 @@ function appendUnregisterEntry(
   result: ReconcileSweepResult,
 ): void {
   const reason =
-    state === "missing" ? "expired" : closedReasonToPendingReason(state.closedReason);
+    state === "missing" ? "expired" : settlementReasonToPendingReason(state.settlementReason);
   // 权威路径：直接 appendEntry 落盘。status 经 protocol mapReasonToStatus 单点映射
   // （与 pending-notifications listener / finalizeRun 直落 / bte 对账同一函数）——
   // 原 `status: reason` 裸写是词表漂移源：非 identity 映射 case（budget_limited→
@@ -194,10 +201,15 @@ function appendUnregisterEntry(
   result.reconciled.push(id);
 }
 
-/** closedReason → pending reason（未知值交 pending-notifications mapReasonToStatus
- *  的 default=completed 兜底——诚实且对差集消费方无行为影响，reason 不参与计数）。 */
-function closedReasonToPendingReason(closedReason: string | undefined): string {
-  return closedReason ?? "completed";
+/** settlementReason → pending reason（直通载体；未知值交 pending-notifications 解析通道——
+ *  mapReasonToStatus 历史六值通道对词表外值落 unknown（fail-visible，§3.3.11④ 后缺省
+ *  方向已反转，原 default=completed 的注释补偿假设退役）、新权威通道
+ *  resolveSettlementReason 按 §3.3.6 解析表解析。reason 不参与计数。）
+ *  [subagent-observability §3.3.11④] settlementReason 缺失（无事实可依）缺省 no_result
+ *  不产 completed——现行判据链下该缺省不可达（isLegacyClosedSettled 守卫要求
+ *  closedReason 非空），缺省方向钉住 fail-open 废除宣言（守卫演化防线）。 */
+function settlementReasonToPendingReason(settlementReason: string | undefined): string {
+  return settlementReason ?? "no_result";
 }
 
 // ── 差集读取（独立轻量实现，不复用 session-pending 的 per-file 增量游标——sweep
