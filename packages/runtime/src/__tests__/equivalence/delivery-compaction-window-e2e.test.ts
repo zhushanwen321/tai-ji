@@ -58,9 +58,10 @@ const CLIENT_UUID_A = 'u-1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f'
 const CLIENT_UUID_B = 'u-9a8b7c6d-5e4f-4a3b-8c9d-0e1f2a3b4c5d'
 const BARE_MARKER_A = '1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f'
 const BARE_MARKER_B = '9a8b7c6d-5e4f-4a3b-8c9d-0e1f2a3b4c5d'
-/** turn 1 的 faux 节流（tokens/s）：计数序列 ≈ 30+ tokens → 秒级流式窗口，覆盖两次出站
- *  与断言链的测试侧耗时（第二条出站时 pi 大概率仍在 turn 1 → 走 D6 steer 重试分支） */
-const FAUX_TPS = '6'
+/** turn 1 的 faux 节流（tokens/s）：计数序列 ≈ 25 tokens → 25/18 ≈ 1.4s 流式窗口，覆盖
+ *  flush 两次出站的间隔（第二条出站时 pi 大概率仍在 turn 1 → 走 D6 steer 重试分支；
+ *  断言只锚终态，窗口时长不参与断言） */
+const FAUX_TPS = '18'
 /** turn 1 的 faux 回复文本（计数序列——断言只锚 user entry 与标记，回复内容不参与） */
 const LONG_TASK_TEXT = Array.from({ length: 36 }, (_, i) => String(i + 1)).join('\n')
 /** turn 2 的 faux 回复（定局标记，run 尾部边沿锚点） */
