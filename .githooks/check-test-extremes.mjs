@@ -71,6 +71,8 @@ for (const k of Object.keys(STOCK)) STOCK[k] = '存量：二波清单外文件�
 
 const EXEMPT = {
   ...STOCK,
+  // —— 确定性时钟 mock（X4 假阳性：performance.now 被 vi.spyOn 全控，非真实计时断言） ——
+  'packages/ui/src/primitives/__tests__/sheet.test.ts': 'Sheet 拖拽手势测试的时钟全控 mock——happy-dom 的 PointerEvent 构造函数自身消费 performance.now() 做 timeStamp，须 spyOn mock 后事件构造与 handler 共享同一时钟源，速度 = dy/durationMs 断言才确定性成立；是确定性化手段，非性能水位断言',
   // —— 检查器黑盒自测（spawn 检查脚本本体，亚秒级） ——
   'scripts/__tests__/check-test-extremes.test.mjs': '本检查器黑盒自测（spawn 检查器本体，单处 <300ms）',
   'scripts/__tests__/check-test-blind-wait.test.mjs': '盲等检查器黑盒自测（每处 spawn <300ms，裁决保留）',

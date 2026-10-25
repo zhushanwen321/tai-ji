@@ -32,6 +32,17 @@ export interface DrawerOpenOptions {
 export type SpeakState = 'idle' | 'loading' | 'playing'
 
 /**
+ * ChatView 密度档（remote-use-mobile-v2 §6.2）：desktop = 桌面既有形态（缺省值），
+ * mobile = 移动档类名组合（正文 16px/1.62、用户气泡 82% 右下角 6px、思考块收起一行、
+ * 工具行 13px、展开输出 220px 内滚）。
+ *
+ * additive-only 红线：缺省（不传 = desktop）时产出类名与既有桌面渲染逐字一致——
+ * 桌面渲染路径零变化，机器证明 = chat-density-desktop-snapshot 快照用例 +
+ * E2E-VISUAL-01 像素基线。
+ */
+export type ChatDensity = 'desktop' | 'mobile'
+
+/**
  * ChatView 依赖端口（shell → ui 展示层注入）。
  */
 export interface ChatViewDeps {
@@ -174,6 +185,15 @@ export interface ChatViewDeps {
    * 既有纯 Textarea 编辑器（移植债登记处），不阻断 ChatView 其余功能。
    */
   editComposerRenderer?: Component<EditComposerProps>
+
+  /**
+   * 密度档（remote-use-mobile-v2 §6.2，ChatView 移动 variant 注入维度）。
+   * optional，缺省 desktop：未传时全部 chat 组件走既有桌面类名，渲染路径字节不变
+   * （桌面 renderer 壳零改动即保持现状；移动壳 MobileMessageStream provide
+   * density:'mobile' 换移动档类名组合）。机器证明 = chat-density-desktop-snapshot
+   * 快照用例 + E2E-VISUAL-01 像素基线。
+   */
+  density?: ChatDensity
 }
 
 /**
@@ -209,4 +229,14 @@ export function useChatViewDeps(): ChatViewDeps {
     )
   }
   return deps
+}
+
+/**
+ * inject 密度档 helper（remote-use-mobile-v2 §6.2）。与 useChatViewDeps 的差别 =
+ * 容错：token 缺失（叶子组件脱离 ChatView 树的测试宿主）时回退 'desktop' 不抛错——
+ * 密度是纯展示维度，缺失即桌面形态，不存在「undefined 调用崩溃」面。
+ * 与 deps 同 key（ChatViewDepsKey）：单一 provide 树，移动壳只 provide 一次。
+ */
+export function useChatDensity(): ChatDensity {
+  return inject(ChatViewDepsKey)?.density ?? 'desktop'
 }

@@ -86,6 +86,7 @@ import { useI18n } from 'vue-i18n'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会封住循环依赖环（同 Block.vue / BashOutputBlock.vue 注释）
 import { Button } from '../../primitives/button'
+import { useChatDensity } from './chat-view-deps'
 
 const props = withDefaults(
   defineProps<{
@@ -98,6 +99,9 @@ const props = withDefaults(
 )
 
 const { t } = useI18n()
+
+/** 密度档（§6.2）：mobile 展开块限高收窄档（--m-scroll-expand 220px），desktop 维持既有 token */
+const density = useChatDensity()
 
 /** 距底容差（px）：scrollTop 取整与亚像素高度差会让「贴底」差 1px，判据统一带容差 */
 const BOTTOM_EPSILON = 1
@@ -136,10 +140,15 @@ const rootStyle = computed<Record<string, string>>(() => ({
   '--block-scroll-fade-bg': FADE_BG[props.surface],
 }))
 
-/** 视口样式：限高 = token；展开态解除限高。
+/** 视口样式：限高 = token（mobile 档 = --m-scroll-expand，remote-use-mobile-v2 §6.2「展开输出
+ *  ≤220px 内滚」；desktop 维持 --block-scroll-max-height 原值原串）；展开态解除限高。
  *  走内联绑定而非 class——限高是运行时状态（展开/收起），且单测可断言（jsdom 无 CSS 引擎）。 */
 const viewportStyle = computed<Record<string, string>>(() => ({
-  maxHeight: expanded.value ? 'none' : 'var(--block-scroll-max-height)',
+  maxHeight: expanded.value
+    ? 'none'
+    : density === 'mobile'
+      ? 'var(--m-scroll-expand)'
+      : 'var(--block-scroll-max-height)',
 }))
 
 /** 信息条渲染判据：超限高（常态）或展开态（收起按钮唯一入口，不能随限高消失一起消失） */

@@ -63,15 +63,17 @@
       <span v-if="turn.user?.timestamp" class="absolute -top-[22px] right-[10px] font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/ts:opacity-100 group-focus-within/ts:opacity-100" data-testid="user-timestamp">
         {{ formatClock(turn.user.timestamp) }}
       </span>
-      <!-- N3 宽度纪律（设计决策 8）：max-width min(72%, 64ch) 双约束——窄窗按容器 72% 收，
-           宽窗按 64ch 封顶防长行拉伸；overflow-wrap: anywhere（替代 break-words）让无空格
+      <!-- N3 宽度纪律（设计决策 8）：desktop max-width min(72%, 64ch) 双约束——窄窗按容器 72% 收，
+           宽窗按 64ch 封顶防长行拉伸；mobile 档（remote-use-mobile-v2 §6.2）= 82% + 右下角 6px
+           （rounded-br-sm = 预设 6px 档）。overflow-wrap: anywhere（替代 break-words）让无空格
            长令牌可折行，编辑态气泡同宽同纪律。
            气泡形态（M3a demo 权威，workbench.css .user-bubble）：--bubble-bg 底 + hairline
            边框 + 12px 统一圆角（--radius-lg）+ 15px/10px 内边距 + 15px 字号（--text-md）
-           1.7 行高。 -->
+           1.7 行高。
+           档位类整串 computed 切换（同属性类并存会落样式表序裁决——button-variants 同律注释，
+           追加不构成可靠覆盖）；desktop 分支 = 原静态串逐字一致（快照用例锁）。 -->
       <div
-        class="user-bubble-md max-w-[min(72%,64ch)] min-w-0 [overflow-wrap:anywhere] rounded-lg border border-hairline bg-[var(--bubble-bg)] px-[15px] py-[10px] text-[length:var(--text-md)] leading-[1.7] text-neutral-fg"
-        :class="{ 'is-mixed': isMixedContent }"
+        :class="[bubbleClass, { 'is-mixed': isMixedContent }]"
       >
       <template v-for="(seg, i) in orderedSegments" :key="i">
         <!-- slash 段与后继段之间的边界空格：slash 段按纯文本渲染（D4-d，无 badge、
@@ -210,7 +212,7 @@ import { rebuildSegmentsWithEditedText } from '../../lib/segment-rebuild'
 import { useCopy } from './composables/useCopy'
 import { formatClock } from './format-utils'
 import { SLASH_ICON_COMPONENTS } from './slash-icons'
-import { useChatViewDeps } from './chat-view-deps'
+import { useChatViewDeps, useChatDensity } from './chat-view-deps'
 import ImageThumb from './ImageThumb.vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 
@@ -235,6 +237,20 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const chatViewDeps = useChatViewDeps()
 const { editAndResend, openDrawer, onFileClick, isPendingSend } = chatViewDeps
+
+/** 密度档（§6.2）：setup 期一次 inject */
+const density = useChatDensity()
+
+/**
+ * 展示态气泡类串（§6.2 密度维度，整串切换防同属性类并存）：
+ * desktop 分支 = 原静态类串逐字一致（缺省桌面路径字节不变，快照用例锁）；
+ * mobile 分支 = max 82% + 右下角 6px（rounded-br-sm），其余形态不变。
+ */
+const bubbleClass = computed(() =>
+  density === 'mobile'
+    ? 'user-bubble-md max-w-[82%] min-w-0 [overflow-wrap:anywhere] rounded-lg rounded-br-sm border border-hairline bg-[var(--bubble-bg)] px-[15px] py-[10px] text-[length:var(--text-md)] leading-[1.7] text-neutral-fg'
+    : 'user-bubble-md max-w-[min(72%,64ch)] min-w-0 [overflow-wrap:anywhere] rounded-lg border border-hairline bg-[var(--bubble-bg)] px-[15px] py-[10px] text-[length:var(--text-md)] leading-[1.7] text-neutral-fg',
+)
 
 /** 点击 skill badge → 打开 drawer Doc tab */
 function openCommandDoc(commandName: string): void {
