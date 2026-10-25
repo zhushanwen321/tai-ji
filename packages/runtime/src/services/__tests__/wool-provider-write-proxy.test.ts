@@ -143,7 +143,7 @@ describe('providers.* 代理（provider-plugin-access D4）', () => {
       providerId: 'wool-workbuddy',
       apiKey: 'sk-new',
       displayName: 'WorkBuddy',
-      headers: { 'x-wool-refresh-token': 'rt-1', bad: 42 },
+      headers: { 'x-wool-refresh-token': 'rt-1' },
       models: [{ id: 'deepseek-v4.1', name: 'DeepSeek' }, 'glm-5.3'],
     })
 
@@ -155,6 +155,24 @@ describe('providers.* 代理（provider-plugin-access D4）', () => {
     })
     const response = responses[0]?.response as { result?: { written?: boolean } }
     expect(response.result?.written).toBe(true)
+  })
+
+  it('write 载荷校验：headers 值非字符串 → INVALID_PAYLOAD 显式拒绝（与 models 元素同款），setProvider 零调用', async () => {
+    const rpcServer = new PluginRpcServer()
+    const deps = makeDeps()
+    registerProviderWriteProxy(rpcServer, deps)
+    const { port, responses } = makeWorkerPort()
+    rpcServer.registerWorker('w1', port, { trustLevel: 'sandbox', pluginId: 'plugin-wool-workbuddy' })
+
+    // 2026-10-25 审查回写：修复前该形态被 filter 静默丢弃（写入侧与插件预期静默漂移）
+    await dispatch(rpcServer, 'w1', PROVIDERS_WRITE_METHOD, {
+      providerId: 'wool-workbuddy',
+      apiKey: 'sk-new',
+      headers: { 'x-wool-refresh-token': 'rt-1', bad: 42 },
+    })
+
+    expect(errorCodeOf(responses)).toBe('INVALID_PAYLOAD')
+    expect(vi.mocked(deps.setProvider)).not.toHaveBeenCalled()
   })
 
   it('write 越权：ns 前缀边界外（无连字符粘尾）→ NAMESPACE_MISMATCH，setProvider 零调用', async () => {

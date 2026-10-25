@@ -427,6 +427,8 @@ describe('plugin-fs-guard buildProxyObject（in-process：CJS 只读代理对象
 
     const handle = (await promisesFace.open(inside, 'r')) as import('node:fs').promises.FileHandle
     await expect(handle.write('x')).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+    // 纵深名单：createWriteStream 只读 fd 上原生仅 EBADF，代理须显式拒绝（可诊断）
+    await expect(handle.createWriteStream()).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
     await handle.close()
   })
 

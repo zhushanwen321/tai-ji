@@ -207,8 +207,10 @@ const PROMISES_DENIED_APIS = [
   'openAsBlob',
 ]
 
-/** FileHandle 写方法拒绝名单（promises.open 读 flags 打开后仍拒绝经句柄写入） */
-const HANDLE_DENIED_METHODS = ['writeFile', 'appendFile', 'truncate', 'chmod', 'chown', 'utimes', 'sync', 'datasync', 'write']
+/** FileHandle 写方法拒绝名单（promises.open 读 flags 打开后仍拒绝经句柄写入）。
+ * createWriteStream：只读 fd 上原生调用会 EBADF，纵深名单显式拦截（PERMISSION_DENIED
+ * 可诊断）而非依赖底层 fd 模式兜底 */
+const HANDLE_DENIED_METHODS = ['writeFile', 'appendFile', 'truncate', 'chmod', 'chown', 'utimes', 'sync', 'datasync', 'write', 'createWriteStream']
 
 /** 代理模块 named export 名单（模板 export 行与名单常量一致性由测试断言） */
 function proxyExportNames(target) {

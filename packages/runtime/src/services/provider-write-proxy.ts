@@ -186,13 +186,25 @@ async function handleProviderWrite(deps: ProviderWriteProxyDeps, params: Record<
       throw errorWithCode('INVALID_PAYLOAD: providers.write models entries must be strings or objects with a string id.', 'INVALID_PAYLOAD')
     })
   }
+  // 载荷收窄（headers）：值必须全为字符串，非字符串值与 models 元素同款显式
+  // INVALID_PAYLOAD 拒绝——静默过滤会让插件误以为非字符串头已生效，写入侧与插件
+  // 预期静默漂移（2026-10-25 审查回写：修复前为 filter 静默丢弃）。
   const rawHeaders = params.headers
-  if (rawHeaders !== undefined && (typeof rawHeaders !== 'object' || rawHeaders === null || Array.isArray(rawHeaders))) {
-    throw errorWithCode('INVALID_PAYLOAD: providers.write headers must be a flat string record.', 'INVALID_PAYLOAD')
+  let headers: Record<string, string> | undefined
+  if (rawHeaders !== undefined) {
+    if (typeof rawHeaders !== 'object' || rawHeaders === null || Array.isArray(rawHeaders)) {
+      throw errorWithCode('INVALID_PAYLOAD: providers.write headers must be a flat string record.', 'INVALID_PAYLOAD')
+    }
+    for (const [key, value] of Object.entries(rawHeaders as Record<string, unknown>)) {
+      if (typeof value !== 'string') {
+        throw errorWithCode(
+          `INVALID_PAYLOAD: providers.write headers['${key}'] must be a string (got ${typeof value}).`,
+          'INVALID_PAYLOAD',
+        )
+      }
+    }
+    headers = { ...(rawHeaders as Record<string, string>) }
   }
-  const headers = rawHeaders === undefined ? undefined : Object.fromEntries(
-    Object.entries(rawHeaders as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
-  )
 
   await deps.setProvider(providerId, {
     ...(asNonEmptyString(params.displayName) !== undefined ? { name: asNonEmptyString(params.displayName) } : {}),
