@@ -26,7 +26,7 @@
 import { onScopeDispose, readonly, shallowRef, watch, type DeepReadonly, type Ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { ServerMessage, SessionGroup } from '@taiji/shared'
-import { isKnownBtwLine, refreshBtwLineMembership } from '@/composables/panel/btw-line-membership'
+import { isKnownBtwLine, ensureBtwLineMembership } from '@/composables/panel/btw-line-membership'
 import * as events from '@taiji/core/transport/api'
 import { useSessionStore } from '@/stores/session'
 import {
@@ -222,9 +222,12 @@ export function bindForkNoticeEffect(): void {
     const payload = (msg as ServerMessage<'session.forkNotice'>).payload
     const { srcSessionId, newSessionId, branchName, preview } = payload
     // W4b 收编（设计 §5-W4b ①「fork 事件到达时按需拉」）：源会话不在拉取缓存时补拉一次
-    // 全量线集合—— notices() 的读站点抑制读同一缓存，拉取落地后重算即抑制（拉取失败 =
-    // 显式未知，当次不抑制：失败方向 = 偶发显示一行 fork 反馈，可接受）。
-    if (!isKnownBtwLine(srcSessionId)) void refreshBtwLineMembership()
+    // 全量线集合。走 ensureBtwLineMembership 而非 refreshBtwLineMembership——前者是负向缓存
+    // 的唯一写入入口，补充拉取确认非线后把 id 写进 nonLines，后续 fork 事件命中负向缓存即
+    // 不再重复发起全量 RPC（refresh 只写正表，每个 fork 事件都会落空一次再拉一次）。
+    // notices() 的读站点抑制读同一缓存，拉取落地后重算即抑制（拉取失败 = 显式未知，当次
+    // 不抑制：失败方向 = 偶发显示一行 fork 反馈，可接受）。
+    if (!isKnownBtwLine(srcSessionId)) void ensureBtwLineMembership(srcSessionId)
     // [P2 去重] fork-ask 在本地 pushForkNoticeAsk 已推 askedPrefix notice（带 preview）。
     // runtime 对每次 session.fork 都广播（含 fork-ask），此 newSessionId 已有 notice 时跳过
     // pushNotice（避免 forkedPrefix 重复）；registerFork 仍执行（RV2 分支追踪两边都需建立）。

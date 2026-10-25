@@ -273,7 +273,7 @@ export const SURFACE_READ_POINTS = new Map([
   ['packages/renderer/src/composables/effects/useCompletionNotify.ts:59', 'suppression'],
   ['packages/renderer/src/components/panel/tray/useTrayCounts.ts:229', 'suppression'],
   ['packages/renderer/src/composables/effects/useForkNoticeEffect.ts:93', 'suppression'],
-  ['packages/renderer/src/composables/effects/useForkNoticeEffect.ts:227', 'suppression'],
+  ['packages/renderer/src/composables/effects/useForkNoticeEffect.ts:230', 'suppression'],
   ['packages/renderer/src/composables/panel/useBtwTabData.ts:193', 'suppression'],
   ['packages/renderer/src/composables/panel/useBtwTabData.ts:194', 'suppression'],
 ])
