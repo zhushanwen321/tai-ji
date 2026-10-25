@@ -5,9 +5,11 @@
  *    （done/error/stopped）则跳过写入；三个终态写点（handleTurnEndSideEffects / abort /
  *    进程退出链）统一继承。射程 = 同回合写入竞态（abort vs pi 自发 agent_end）。
  *    V3 已核实：restore/fork 附着成功后均删 .meta.json 旧 sidecar，重开新周期不受旧终态
- *    拦截。dmg-r1-1 补齐跨回合放行：活跃会话新回合受理入口（message-dispatcher
- *    runAcceptance 受理成功后）经 clearSessionOutcome 清旧 sidecar——旧终态不再永久拦截
- *    新周期写入（否则用户 abort 后继续对话，重启后侧栏滞留旧终态），本文件第三组用例锁定。
+ *    拦截。dmg-r1-1 补齐跨回合放行：新回合受理入口（message-dispatcher runAcceptance
+ *    受理成功后）经 clearSessionOutcome 清旧 sidecar——旧终态不再永久拦截新周期写入
+ *    （否则用户 abort 后继续对话，重启后侧栏滞留旧终态），本文件第三组用例锁定。
+ *    session-manager-send-sidecar-stale 补第二受理点：agent send_to_session 通路
+ *    （session-manager-handler handleSend 受理成功后同一 clearSessionOutcome），第四组用例锁定。
  * 2. willRetry 中间失败跳终态（缺陷 1 方案 A）：handleTurnEndSideEffects 第三参
  *    willRetry=true → settling 转移照写、终态 sidecar 不写（settling 转移与 project sidecar
  *    兜底在 session-state-projection.test.ts 已有行为锚，此处锁 outcome 跳过）。
@@ -22,6 +24,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SessionService } from '../session-service.js'
+import { SessionManagerHandler } from '../../../transport/session-manager-handler.js'
+import type { SessionDeliveryRegistry } from '../session-delivery-registry.js'
 import { PiSessionStore } from '../../../infra/pi/session-store.js'
 import { PiConfigStore } from '../../../infra/pi/pi-config-store.js'
 import { persistSessionEnd } from '../../../infra/pi/session-file-utils.js'
@@ -29,7 +33,7 @@ import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
 import type { IExtensionService } from '../../../interfaces.js'
 import type { WorkspaceService } from '../../workspace/workspace-service.js'
 import type { SessionLifecycle } from '../session-lifecycle.js'
-import type { IManagedSessionRecord } from '../session-internal.js'
+import type { IManagedSessionRecord, ManagedSession } from '../session-internal.js'
 
 let runDir: string
 
@@ -70,7 +74,12 @@ function createService(): { service: SessionService; sessionStore: PiSessionStor
 }
 
 /** 经 lifecycle Map 塞入带 sessionFilePath 的最小记录（persistSessionOutcome 的定位路径）。 */
-function registerSessionRecord(service: SessionService, sid: string, filePath: string): void {
+function registerSessionRecord(
+  service: SessionService,
+  sid: string,
+  filePath: string,
+  overrides: Partial<ManagedSession> = {},
+): void {
   const lifecycle = (service as unknown as { lifecycle: SessionLifecycle }).lifecycle
   const sessions = (lifecycle as unknown as { sessions: Map<string, IManagedSessionRecord> }).sessions
   sessions.set(sid, {
@@ -85,6 +94,7 @@ function registerSessionRecord(service: SessionService, sid: string, filePath: s
     bashRunToken: undefined,
     occupancy: { turn: 'idle', compacting: false, bash: false, handingOff: false },
     sessionFilePath: filePath,
+    ...overrides,
   } as IManagedSessionRecord)
 }
 
@@ -178,6 +188,73 @@ describe('跨回合终态放行（dmg-r1-1：新回合受理入口清旧终态 s
     writeFileSync(filePath, '{}\n')
     registerSessionRecord(service, 's10', filePath)
     expect(() => service.clearSessionOutcome('s10')).not.toThrow()
+  })
+})
+
+describe('session-manager send 通路受理清旧终态（session-manager-send-sidecar-stale，第二受理点对齐 dmg-r1-1）', () => {
+  /**
+   * handler 装置：真 SessionService（受理清 sidecar 走真删 + 真缓存失效，归属校验走真
+   * getSummary 派生）+ mock delivery（sendChecked 受理形态可控）。sendExtensionUiResponse
+   * 捕获 respond JSON 断言回包。
+   */
+  function makeHandler(service: SessionService, sendChecked: () => Promise<unknown>): {
+    handler: SessionManagerHandler
+    respond: ReturnType<typeof vi.fn>
+  } {
+    const respond = vi.fn(() => true)
+    const delivery = {
+      getOrCreateDelivery: () => ({ sendChecked: vi.fn(sendChecked) }),
+    } as unknown as SessionDeliveryRegistry
+    const handler = new SessionManagerHandler({
+      sessionService: service,
+      delivery,
+      sendExtensionUiResponse: respond,
+      broadcastSessionList: () => {},
+    })
+    return { handler, respond }
+  }
+
+  it('send 受理成功（queued）→ 旧终态 sidecar 被清，新回合终态不再被拦', async () => {
+    const { service, sessionStore } = createService()
+    const filePath = join(runDir, 's-agent-send.jsonl')
+    writeFileSync(filePath, '{}\n')
+    registerSessionRecord(service, 's11', filePath, {
+      spawnSource: 'agent',
+      parentAgentSessionId: 'parent-1',
+    })
+    // 上一回合：abort → stopped 落盘
+    service.persistSessionOutcome('s11', 'stopped', 'User aborted')
+    expect(sessionStore.extractSessionOutcome(filePath)).toBe('stopped')
+
+    const { handler, respond } = makeHandler(service, async () => undefined)
+    await handler.handle('req-sm-1', 'parent-1', 'send', { sessionId: 's11', prompt: 'continue' })
+    // 受理成功回包（queued，无 notifyId → willNotify false）
+    expect(respond).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(respond.mock.calls[0][2] as string)).toEqual({ queued: true, willNotify: false })
+    // 受理清旧终态：sidecar 已删，新周期 done 可正常写入
+    expect(sessionStore.extractSessionOutcome(filePath)).toBeNull()
+    service.persistSessionOutcome('s11', 'done')
+    expect(sessionStore.extractSessionOutcome(filePath)).toBe('done')
+  })
+
+  it('send 受理失败（sendChecked throw）→ 旧终态保留（被拒的提交不开启新周期）', async () => {
+    const { service, sessionStore } = createService()
+    const filePath = join(runDir, 's-agent-send-fail.jsonl')
+    writeFileSync(filePath, '{}\n')
+    registerSessionRecord(service, 's12', filePath, {
+      spawnSource: 'agent',
+      parentAgentSessionId: 'parent-1',
+    })
+    service.persistSessionOutcome('s12', 'stopped', 'User aborted')
+
+    const { handler, respond } = makeHandler(service, async () => {
+      throw new Error('target unreachable')
+    })
+    await handler.handle('req-sm-2', 'parent-1', 'send', { sessionId: 's12', prompt: 'continue' })
+    // 失败回包走 error + hint（hint 恢复指引），旧终态原样保留
+    const payload = JSON.parse(respond.mock.calls[0][2] as string) as Record<string, unknown>
+    expect(payload['error']).toBe('target unreachable')
+    expect(sessionStore.extractSessionOutcome(filePath)).toBe('stopped')
   })
 })
 

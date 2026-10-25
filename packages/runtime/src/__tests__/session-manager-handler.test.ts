@@ -40,6 +40,8 @@ function makeMockSessionService(overrides: Partial<ISessionService> = {}): ISess
     ),
     listPersistedSessions: vi.fn(),
     abort: vi.fn(),
+    // 受理成功后清旧终态 sidecar（session-manager-send-sidecar-stale）；send 失败路径不触
+    clearSessionOutcome: vi.fn(),
     getRpcClient: vi.fn(),
     getActiveSessionIds: vi.fn(),
     // session 文件路径解析（respond payload sessionFilePath）的内存态路径：缺省无文件
