@@ -9,7 +9,7 @@
  * 运行：cd packages/shared && pnpm vitest run
  */
 import { describe, it, expect } from 'vitest'
-import { ACTIVE_TURN_PHASES } from '../session-occupancy'
+import { ACTIVE_TURN_PHASES, isActiveTurnPhase } from '../session-occupancy'
 import type { ActiveTurnPhase, SessionTurnPhase } from '../session-occupancy'
 import type { ServerMessageMap } from '../protocol'
 
@@ -41,5 +41,14 @@ describe('ACTIVE_TURN_PHASES「回合进行中」判定集合（chat-flow-consis
 
   it('idle 不在集内（回合进行中判定不含空档相位）', () => {
     expect(ACTIVE_TURN_PHASES).not.toContain('idle')
+  })
+})
+
+describe('isActiveTurnPhase 判定函数（ACTIVE_TURN_PHASES 的唯一函数读口）', () => {
+  it('集内相位 → true，集外（idle）→ false', () => {
+    expect(isActiveTurnPhase('dispatching')).toBe(true)
+    expect(isActiveTurnPhase('generating')).toBe(true)
+    expect(isActiveTurnPhase('settling')).toBe(true)
+    expect(isActiveTurnPhase('idle')).toBe(false)
   })
 })

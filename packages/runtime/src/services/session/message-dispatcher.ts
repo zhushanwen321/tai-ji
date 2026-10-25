@@ -34,7 +34,12 @@
 import type { IDispatcherSessionOps } from './session-internal.js'
 import { runDestroyStepIsolated } from './session-entry-removal.js'
 import type { IPiEngine, IProcessManager } from '../ports/pi-engine.js'
-import type { SendMessageHook, ForceQuitSource } from './types.js'
+import type {
+  SendMessageHook,
+  ForceQuitSource,
+  SessionOccupancy,
+  IManagedSessionView,
+} from './types.js'
 import { isGeneratingTurn } from './types.js'
 import type { WorkspaceService } from '../workspace/workspace-service.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
@@ -589,6 +594,46 @@ export class MessageDispatcher {
     return client
   }
 
+  /**
+   * busy 预检的拒绝原因（null = 不忙）。判定序 = compacting 优先（A 置位后 B 进来预检
+   * 能看到）、bash 次之、生成中最后——文案与 rejectIfBusy 的 warn 日志共用。
+   */
+  private busyCompactReason(
+    occ: SessionOccupancy | undefined,
+  ): 'compaction already running' | 'bash running' | 'agent generating' | null {
+    if (occ?.compacting === true) return 'compaction already running'
+    if (occ?.bash === true) return 'bash running'
+    if (isGeneratingTurn(occ?.turn)) return 'agent generating'
+    return null
+  }
+
+  /**
+   * [W3 + M4] busy 预检：与 sendBash 预检的 occupancy.compacting 拒绝对称 + 防并发 compact 重入。
+   * 补 compacting 维：A 置位（interpreter 从 compaction_start 事件）后，B 进来预检若无 compacting
+   * 看不到 A → 两个 client.compact RPC 并发 → 双 compaction 事件流。补上后事件层 P-dedup by construction 成立。
+   *
+   * 事件驱动（M4）：compaction 生命周期广播全删——由 interpreter 从 compaction_start/compaction_end
+   * 唯一编排（session.compacting / message.compactionSummary / session.compacted / 对话流错误提示）。
+   * dispatcher 退化为「预检 + RPC 触发 + 失败复位」三件事。
+   */
+  private rejectCompactIfBusy(sessionId: string, active: IManagedSessionView | undefined): void {
+    const reason = this.busyCompactReason(active?.occupancy)
+    if (reason === null) return
+    const errMsg = `Cannot compact while ${reason}`
+    console.warn(`[message-dispatcher] compact preemptive reject (busy), sid=${sessionId}, reason=${reason}`)
+    // 对话流内联呈现（msg-pipeline-debloat D4-2）：busy 拒绝的可见部分从 renderer toast
+    // 改为对话流 system 提示条目——走 message.stream_warn（非终结性提示通道：仅追加
+    // system 消息、不调 finalizeSession，正在流式的 turn 不受影响；runtime 自产提示、
+    // pi 无 entry 的正确入流形态）。不能用 message.error——其终态 effect 会把生成中的
+    // assistant 误收尾为 error。renderer catch 见 compact_busy 分类码抑制 toast，双呈现
+    // 不叠加。零生命周期广播不变：不广播 session.compacted{error}（预检在 RPC 前，pi
+    // 未发 compaction_start，interpreter 状态机不参与）。
+    this.messageBus?.publish(sessionId, { type: 'message.stream_warn', payload: { sessionId, content: errMsg } })
+    // throw 扁平错误携带分类码（WorktreeService 同款 Object.assign 模式）→ handler
+    // error envelope 原样透传 → renderer catch 按分类码路由（抑制 toast）。
+    throw Object.assign(new Error(errMsg), { code: 'compact_busy' })
+  }
+
   async compact(sessionId: string, customInstructions?: string): Promise<void> {
     const startTime = Date.now()
     const client = this.pm.getClient(sessionId)
@@ -599,35 +644,10 @@ export class MessageDispatcher {
 
     console.log('[message-dispatcher] compact: start, sessionId=' + sessionId + ', customInstructions=' + (customInstructions ? `"${customInstructions}"` : '(none)'))
 
-    // [W3 + M4] busy 预检：与 sendBash 预检的 occupancy.compacting 拒绝对称 + 防并发 compact 重入。
-    // 补 compacting 维：A 置位（interpreter 从 compaction_start 事件）后，B 进来预检若无 compacting
-    // 看不到 A → 两个 client.compact RPC 并发 → 双 compaction 事件流。补上后事件层 P-dedup by construction 成立。
-    //
-    // 事件驱动（M4）：compaction 生命周期广播全删——由 interpreter 从 compaction_start/compaction_end
-    // 唯一编排（session.compacting / message.compactionSummary / session.compacted / 对话流错误提示）。
-    // dispatcher 退化为「预检 + RPC 触发 + 失败复位」三件事。
     const active = this.svc.getSessionByClient(client)
     // [chat-flow-consistency D1] 派生三布尔已删，忙闲读口 = occupancy 派生（isGeneratingTurn /
     // compacting / bash 维），语义与原读点逐字等价。
-    const occ = active?.occupancy
-    if (active && (occ?.bash === true || isGeneratingTurn(occ?.turn) || occ?.compacting === true)) {
-      const reason = occ?.compacting ? 'compaction already running'
-        : occ?.bash === true ? 'bash running'
-          : 'agent generating'
-      const errMsg = `Cannot compact while ${reason}`
-      console.warn(`[message-dispatcher] compact preemptive reject (busy), sid=${sessionId}, reason=${reason}`)
-      // 对话流内联呈现（msg-pipeline-debloat D4-2）：busy 拒绝的可见部分从 renderer toast
-      // 改为对话流 system 提示条目——走 message.stream_warn（非终结性提示通道：仅追加
-      // system 消息、不调 finalizeSession，正在流式的 turn 不受影响；runtime 自产提示、
-      // pi 无 entry 的正确入流形态）。不能用 message.error——其终态 effect 会把生成中的
-      // assistant 误收尾为 error。renderer catch 见 compact_busy 分类码抑制 toast，双呈现
-      // 不叠加。零生命周期广播不变：不广播 session.compacted{error}（预检在 RPC 前，pi
-      // 未发 compaction_start，interpreter 状态机不参与）。
-      this.messageBus?.publish(sessionId, { type: 'message.stream_warn', payload: { sessionId, content: errMsg } })
-      // throw 扁平错误携带分类码（WorktreeService 同款 Object.assign 模式）→ handler
-      // error envelope 原样透传 → renderer catch 按分类码路由（抑制 toast）。
-      throw Object.assign(new Error(errMsg), { code: 'compact_busy' })
-    }
+    this.rejectCompactIfBusy(sessionId, active)
 
     // [RT-4#10] 预检与置位原子化：预检通过后立即写 'compacting-start'（原语义 = 只在 pi
     // compaction_start 事件回流后由 interpreter 置位，事件往返窗内第二个 compact 的预检

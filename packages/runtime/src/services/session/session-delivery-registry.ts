@@ -2051,6 +2051,30 @@ export function createSessionDeliveryRegistry(
   }
 
   /**
+   * 移交表（Q1）命中 → 撤销成功应答：消费移交全文并清两表（移交表 + 意图集）。
+   * segments 优先用发起方入口快照（时序上更早、与本次点击同源），缺失时用兑现点移交的
+   * 快照。revokeInFlight 主链与 already-final 兑现分支两处共用（返回 null = 未命中，
+   * 调用方继续各自失败口径）。
+   */
+  function redeemRevokeOutcome(
+    rt: SessionRuntime,
+    clientUuid: string,
+    segmentsSnapshot: Segment[] | undefined,
+  ): DeliveryCancelOutcome | null {
+    const redeemed = rt.redeemedRevokes.get(clientUuid)
+    if (!redeemed) return null
+    rt.redeemedRevokes.delete(clientUuid)
+    rt.pendingRevoke.delete(clientUuid)
+    return {
+      cancelled: true,
+      content: redeemed.content,
+      ...((segmentsSnapshot ?? redeemed.segments) !== undefined
+        ? { segments: (segmentsSnapshot ?? redeemed.segments) as Segment[] }
+        : {}),
+    }
+  }
+
+  /**
    * in-flight 撤销的收回兑现流程（cancel 首次与 pendingRevoke 再入共用，dmg-r1-2）：
    * clear_queue 全收 → 三分处置（目标 exclude 沉默回草稿；其余撤销待收回条目一并兑现）
    * → transcript 校验（delivered 事实优先）→ 收回命中即终态撤销。pendingRevoke 登记
@@ -2088,20 +2112,10 @@ export function createSessionDeliveryRegistry(
       rt.handle.confirmDelivered(clientUuid)
       return { cancelled: false, reason: '已投递不可撤' }
     }
-    const redeemed = rt.redeemedRevokes.get(clientUuid)
+    const redeemed = redeemRevokeOutcome(rt, clientUuid, segmentsSnapshot)
     if (redeemed) {
-      // 他径已兑现（Q1 移交表命中）：消费移交全文，按撤销成功应答（cancelled=true
-      // 携带全文）——segments 优先用发起方入口快照（时序上更早、与本次点击同源），
-      // 缺失时用兑现点移交的快照。
-      rt.redeemedRevokes.delete(clientUuid)
-      rt.pendingRevoke.delete(clientUuid)
-      return {
-        cancelled: true,
-        content: redeemed.content,
-        ...((segmentsSnapshot ?? redeemed.segments) !== undefined
-          ? { segments: (segmentsSnapshot ?? redeemed.segments) as Segment[] }
-          : {}),
-      }
+      // 他径已兑现（Q1 移交表命中）：消费移交全文，按撤销成功应答（cancelled=true 携带全文）
+      return redeemed
     }
     if (!hasMarkerFor([...cleared.steering, ...cleared.followUp], clientUuid)) {
       // 目标文本不在收回集（既不在槽位、也不在 transcript）：留守原态 + 意图留守，
@@ -2120,18 +2134,8 @@ export function createSessionDeliveryRegistry(
       // 他径已兑现为 cancelled 终态（对账器/断连同帧兑现）：查移交表，命中即按撤销
       // 成功应答（Q1）；未命中维持失败口径（条目已终结、全文已不可考——该形态只在
       // 移交表写入前发生，见顺序可达性论证）
-      const redeemedFinal = rt.redeemedRevokes.get(clientUuid)
-      if (redeemedFinal) {
-        rt.redeemedRevokes.delete(clientUuid)
-        rt.pendingRevoke.delete(clientUuid)
-        return {
-          cancelled: true,
-          content: redeemedFinal.content,
-          ...((segmentsSnapshot ?? redeemedFinal.segments) !== undefined
-            ? { segments: (segmentsSnapshot ?? redeemedFinal.segments) as Segment[] }
-            : {}),
-        }
-      }
+      const redeemedFinal = redeemRevokeOutcome(rt, clientUuid, segmentsSnapshot)
+      if (redeemedFinal) return redeemedFinal
     }
     return { cancelled: false, reason: '已投递不可撤' }
   }
@@ -2221,67 +2225,67 @@ export function createSessionDeliveryRegistry(
     rt.submitted.set(bareMarkerId(id), { id, text: payloadText(payload) })
   }
 
+  /** 终态基线（Q3 分支表分支 1）：无条目 / cancelled / delivered 均不可编辑，短路先于收回。 */
+  function terminalEditOutcome(stateBefore: DeliveryEntryState | undefined): DeliveryEditOutcome | null {
+    if (stateBefore === undefined) return { edited: false, reason: 'not-found' }
+    if (stateBefore === 'cancelled') return { edited: false, reason: 'cancelled' }
+    if (stateBefore === 'delivered') return { edited: false, reason: 'delivered' }
+    return null
+  }
+
   /**
-   * 原位编辑（Q3 分支表，判定链与 cancel 收回链同构、按序短路）：
-   * 1. 终态基线：无条目 → not-found；cancelled → cancelled；delivered → delivered
-   *   （终态短路先于收回——不向已终局条目发 clear_queue）。
-   * 2. queued（非出站批留守）/ failed（留守行）：直接内核替换，无收回——queued 位置不动
-   *   （保位），failed 追加 requeue（编辑即重发的心理模型，E7）。queued 且在出站批内挂起
-   *   （受理即出站下持有期的常态）内核拒绝 → 跌落分支 3（unconfirmed 收场）。
-   * 3. 收回路径（in-flight 在槽位 / queued 挂起跌落）：unmarked 条目无投递身份锚（收回
-   *   文本无法与条目对账，收养重投会换 id 双出场）→ unconfirmed；普通条目 clear_queue 全收：
-   *   - 目标在收回集：先替换 payload（own 重投的出站文本 = 新内容），再 disposeCleared
-   *     （exclude 空 = 目标与其余条目一起按收回文本序 own 重投——保位语义；E2 撤销竞态时
-   *     pendingRevoke 兑现优先，处置后按实际状态答 cancelled）；
-   *   - 不在收回集：transcript 权威判定——命中 = delivered（真已注入），miss = 注入悬空
-   *     窗口 / 批内挂起 → unconfirmed（用户裁决采纳的第四值，回执如实化）。
+   * failed 编辑拒绝 = 他径同帧终态（failed 必不在出站批）：按处置后实际状态应答；
+   * 状态未变（仍 failed）= 替换未发生且原因不明 → unconfirmed。
+   */
+  function failedEditRejectionOutcome(rt: SessionRuntime, clientUuid: string): DeliveryEditOutcome {
+    const after = entryStateOf(rt, clientUuid)
+    if (after === 'cancelled') return { edited: false, reason: 'cancelled' }
+    if (after === 'delivered') return { edited: false, reason: 'delivered' }
+    if (after === undefined) return { edited: false, reason: 'not-found' }
+    return { edited: false, reason: 'unconfirmed' }
+  }
+
+  /**
+   * 分支 2：queued（非出站批留守）/ failed（留守行）直接内核替换，无收回。
+   * 返回 null = 跌落收回路径（queued 被内核拒绝 = 出站批内挂起；failed 有独立应答不跌落）。
+   */
+  function directEditOutcome(
+    rt: SessionRuntime,
+    clientUuid: string,
+    input: DeliveryEditInput,
+    stateBefore: DeliveryEntryState,
+  ): DeliveryEditOutcome | null {
+    const payload = editPayloadFor(rt, clientUuid, input.content)
+    if (rt.handle.edit(clientUuid, payload)) {
+      recordEditSubmission(rt, clientUuid, payload)
+      updateEditSegments(rt, clientUuid, input.segments)
+      if (stateBefore === 'failed') {
+        // failed 行编辑即重发（E7）：requeue 进队首立即出站（compaction 持有由
+        // waitDeliverable 拦截，与 resync 重试同路径）
+        if (rt.handle.requeue([clientUuid]) > 0) rt.handle.flush()
+      }
+      return { edited: true }
+    }
+    if (stateBefore === 'failed') return failedEditRejectionOutcome(rt, clientUuid)
+    // queued 拒绝 = 出站批内挂起 → 落入收回路径（clear_queue 收不到挂起文本 →
+    // transcript miss → unconfirmed，见分支 3）
+    return null
+  }
+
+  /**
+   * 分支 3：收回路径（in-flight 在槽位文本 / queued 出站批内挂起的跌落判定）。
+   * unmarked 条目无投递身份锚（收回文本无法与条目对账，收养重投会换 id 双出场）→
+   * unconfirmed；clear_queue 全收后目标在收回集 → 先替换再处置（own 重投出站文本 =
+   * 新内容）；不在收回集 → transcript 权威判定（命中 = delivered，miss = unconfirmed）。
    * 收回失败（pi 卡死）/ pi 未附着：无法确认原文本状态 → unconfirmed（不留守重试——
    * edit 的用户意图由降级新消息承载，原条目由对账器兜底，与 cancel 的留守重试语义分界）。
-   * 保序口径承继 D3①：重投相对序 = 收回文本序（disposeCleared own 通路既有语义），跨投递路径
-   * 交错时与内核 active 序可能短暂错位——E1 已登记的收回-重投窗口瞬态，不新增机制。
    */
-  async function editEntry(
+  async function reclaimEditOutcome(
     sessionId: string,
     rt: SessionRuntime,
     clientUuid: string,
     input: DeliveryEditInput,
   ): Promise<DeliveryEditOutcome> {
-    const stateBefore = entryStateOf(rt, clientUuid)
-    if (stateBefore === undefined) return { edited: false, reason: 'not-found' }
-    if (stateBefore === 'cancelled') return { edited: false, reason: 'cancelled' }
-    if (stateBefore === 'delivered') return { edited: false, reason: 'delivered' }
-
-    // 分支 2：queued / failed 先试直接替换（无收回）。queued 的可达形态 = 非出站批留守
-    //（deferred 设计内等待窗）；**出站批内挂起（受理即出站下持有期的常态——port.send 在
-    // waitDeliverable 挂起、出站文本已在 attemptSend 同步段定格）内核拒绝**，跌落下方
-    // 收回路径判定收场（pi 槽位无该文本 + transcript miss → unconfirmed：修改内容按普通
-    // 新消息发出不丢，原条目按定格文本照常投递——挂起窗口内替换在结构上不可达，
-    // 与设计分支表「queued 直接替换」的偏差随 deviations 登记）。
-    if (stateBefore === 'queued' || stateBefore === 'failed') {
-      const payload = editPayloadFor(rt, clientUuid, input.content)
-      if (rt.handle.edit(clientUuid, payload)) {
-        recordEditSubmission(rt, clientUuid, payload)
-        updateEditSegments(rt, clientUuid, input.segments)
-        if (stateBefore === 'failed') {
-          // failed 行编辑即重发（E7）：requeue 进队首立即出站（compaction 持有由
-          // waitDeliverable 拦截，与 resync 重试同路径）
-          if (rt.handle.requeue([clientUuid]) > 0) rt.handle.flush()
-        }
-        return { edited: true }
-      }
-      if (stateBefore === 'failed') {
-        // failed 拒绝 = 他径同帧终态（failed 必不在出站批）：按处置后实际状态应答
-        const after = entryStateOf(rt, clientUuid)
-        if (after === 'cancelled') return { edited: false, reason: 'cancelled' }
-        if (after === 'delivered') return { edited: false, reason: 'delivered' }
-        if (after === undefined) return { edited: false, reason: 'not-found' }
-        return { edited: false, reason: 'unconfirmed' }
-      }
-      // queued 拒绝 = 出站批内挂起 → 落入收回路径（clear_queue 收不到挂起文本 →
-      // transcript miss → unconfirmed，见分支 3）
-    }
-
-    // 分支 3：收回路径（in-flight 在槽位文本 / queued 出站批内挂起的跌落判定）
     if (rt.unmarkedEntryIds.has(clientUuid)) {
       return { edited: false, reason: 'unconfirmed' }
     }
@@ -2317,12 +2321,45 @@ export function createSessionDeliveryRegistry(
       }
       return { edited: false, reason: 'unconfirmed' }
     }
-    // 目标在收回集：按处置后的实际状态应答
+    // 目标在收回集：按处置后的实际状态应答（queued/in-flight/failed = 替换后条目存活）
     const after = entryStateOf(rt, clientUuid)
     if (after === 'queued' || after === 'in-flight' || after === 'failed') return { edited: true }
     if (after === 'delivered') return { edited: false, reason: 'delivered' }
     if (after === 'cancelled') return { edited: false, reason: 'cancelled' }
     return { edited: false, reason: 'not-found' }
+  }
+
+  /**
+   * 原位编辑（Q3 分支表，判定链与 cancel 收回链同构、按序短路）：
+   * 1. 终态基线：无条目 → not-found；cancelled → cancelled；delivered → delivered
+   *   （终态短路先于收回——不向已终局条目发 clear_queue）。
+   * 2. queued（非出站批留守）/ failed（留守行）：直接内核替换，无收回——queued 位置不动
+   *   （保位），failed 追加 requeue（编辑即重发的心理模型，E7）。queued 且在出站批内挂起
+   *   （受理即出站下持有期的常态）内核拒绝 → 跌落分支 3（unconfirmed 收场）。
+   * 3. 收回路径（in-flight 在槽位 / queued 挂起跌落）：见 reclaimEditOutcome。
+   * 保序口径承继 D3①：重投相对序 = 收回文本序（disposeCleared own 通路既有语义），跨投递路径
+   * 交错时与内核 active 序可能短暂错位——E1 已登记的收回-重投窗口瞬态，不新增机制。
+   */
+  async function editEntry(
+    sessionId: string,
+    rt: SessionRuntime,
+    clientUuid: string,
+    input: DeliveryEditInput,
+  ): Promise<DeliveryEditOutcome> {
+    const stateBefore = entryStateOf(rt, clientUuid)
+    // 分支 1：终态基线（queued 的可达形态 = 非出站批留守（deferred 设计内等待窗）；
+    // **出站批内挂起（受理即出站下持有期的常态——port.send 在 waitDeliverable 挂起、
+    // 出站文本已在 attemptSend 同步段定格）内核拒绝**，跌落下方收回路径判定收场
+    //（pi 槽位无该文本 + transcript miss → unconfirmed：修改内容按普通新消息发出不丢，
+    // 原条目按定格文本照常投递——挂起窗口内替换在结构上不可达，与设计分支表
+    // 「queued 直接替换」的偏差随 deviations 登记）。
+    const terminal = terminalEditOutcome(stateBefore)
+    if (terminal) return terminal
+    if (stateBefore === 'queued' || stateBefore === 'failed') {
+      const direct = directEditOutcome(rt, clientUuid, input, stateBefore)
+      if (direct) return direct
+    }
+    return await reclaimEditOutcome(sessionId, rt, clientUuid, input)
   }
 
   return registry

@@ -54,31 +54,28 @@ import { isDevMode } from '../../../platform/dev-mode'
  * （损害被限定为「同气泡错挂」，与 D3 错挂降级声明同构）。末条 streaming assistant 不在
  * 场（断连收尾后锚定命中已终态气泡）是 D3 规则 1 声明的合法迟到定稿覆写，不触发断言。
  */
-export function rebuildAssistantOnFinalize(
-  ctx: Pick<MessageEffectContext, 'messages'>,
-  sid: string,
-  entry: PiMessageEntry,
-  anchorMessageId: string | undefined,
-): void {
-  const prev = ctx.messages.value.get(sid)?.value ?? []
-  // 定位：id 锚定优先（含已终态气泡——不做 sealed 丢弃，见函数头）；位置兜底 = 末条
-  // streaming assistant（无则 no-op，对齐升级前 markStreamingAssistantTextFinalized 的空态行为）。
+/** 末条 streaming assistant 下标（无则 -1）。 */
+function lastStreamingAssistantIdx(prev: Message[]): number {
+  for (let i = prev.length - 1; i >= 0; i--) {
+    const m = prev[i]
+    if (m?.role === 'assistant' && m.status === 'streaming') return i
+  }
+  return -1
+}
+
+/**
+ * 定稿重建的目标定位：id 锚定优先（含已终态气泡——不做 sealed 丢弃，见 rebuildAssistantOnFinalize
+ * 函数头）；位置兜底 = 末条 streaming assistant（-1 = 无目标 no-op）。锚定命中与末条 streaming
+ * 不一致时 dev warn（C2 顺序不变量断言，warn 不阻断）。
+ */
+function locateFinalizeTarget(prev: Message[], anchorMessageId: string | undefined, sid: string): number {
   let idx = -1
   if (anchorMessageId !== undefined) {
     idx = prev.findIndex((m) => m.id === anchorMessageId && m.role === 'assistant')
   }
-  let fallbackIdx = -1
-  for (let i = prev.length - 1; i >= 0; i--) {
-    const m = prev[i]
-    if (m?.role === 'assistant' && m.status === 'streaming') {
-      fallbackIdx = i
-      break
-    }
-  }
-  if (idx < 0) {
-    idx = fallbackIdx
-    if (idx < 0) return
-  } else if (fallbackIdx >= 0 && idx !== fallbackIdx && isDevMode()) {
+  const fallbackIdx = lastStreamingAssistantIdx(prev)
+  if (idx < 0) return fallbackIdx
+  if (fallbackIdx >= 0 && idx !== fallbackIdx && isDevMode()) {
     // C2 顺序不变量 dev 断言：锚定命中 ≠ 末条 streaming assistant = 帧序契约破坏信号。
     // fallbackIdx < 0（断连收尾后已无 streaming 气泡）时锚定命中已终态气泡属 D3 规则 1
     // 声明的合法迟到定稿覆写，不算契约破坏，不 warn。
@@ -87,56 +84,95 @@ export function rebuildAssistantOnFinalize(
         ' — message.* frame order contract broken (async translation point added?); rebuild follows the anchor',
     )
   }
+  return idx
+}
+
+/**
+ * 工具 join 复用：id 命中复用 live 对象（保 startTime / 已回填输出与终态），序位兜底；
+ * 未命中的载荷条目补建对象（running——工具执行严格晚于所属 message_end，重建时刻其
+ * 执行开始消息尚未到达；随后 tool_call_start 的同 id 幂等检查按 running 接管），dev 下
+ * warn 留痕（D3 规则 4 补建留痕）。
+ */
+function joinToolCalls(
+  prevToolCalls: ToolCall[],
+  derived: ToolCall[],
+  sid: string,
+  msgId: string,
+): ToolCall[] {
+  let backfilledCount = 0
+  const joined = derived.map((d, i) => {
+    const existing = prevToolCalls.find((t) => t.id === d.id) ?? prevToolCalls[i]
+    if (existing) return { ...existing, id: d.id, toolName: d.toolName, input: d.input }
+    backfilledCount++
+    return { ...d, status: 'running' as const }
+  })
+  if (backfilledCount > 0 && isDevMode()) {
+    console.warn(
+      `[effects] D3 rebuild backfilled ${backfilledCount} payload item(s) without live counterpart (sid=${sid}, msg=${msgId})` +
+        ' — delta/stream events missed them; authority restored from entry payload',
+    )
+  }
+  return joined
+}
+
+/**
+ * 定稿重建的 Message 构造：载荷字段整条覆写 + live 状态保留。status 规则 2 正常路径不动
+ *（streaming 保持到回合末尾统一收尾——sealed guard 依赖）；已终态（断连收尾的中断态）复原
+ * complete（中断呈现是传输层事故的临时态，规则 1，error 文案随载荷覆写退役——与载荷全文
+ * 并存会双显）。载荷无对应内容时显式清 undefined：重建是权威整条覆写，delta 阶段的残留
+ *（协议异常形态下的 thinking/toolCalls 块）不得存活过定稿（toEqual 语义下 undefined ≡ 缺失）。
+ */
+function finalizeRebuiltMessage(
+  target: Message,
+  entry: PiMessageEntry,
+  acc: ReturnType<typeof collectContentParts>,
+  rebuiltThinking: ThinkingBlock[],
+  rebuiltToolCalls: ToolCall[],
+): Message {
+  const entryMs = toMs(entry.timestamp)
+  // 中断呈现随载荷覆写退役：error 文案（断连兜底）与载荷全文并存会双显；status 按规则 2
+  // 正常路径不动（streaming 保持到回合末尾统一收尾——sealed guard 依赖）。
+  const restored = target.status === 'streaming' ? target : { ...target, error: undefined }
+  return {
+    ...restored,
+    status: target.status === 'streaming' ? 'streaming' : 'complete',
+    content: acc.textContent,
+    contentBlocks: acc.contentBlocks,
+    thinking: rebuiltThinking.length > 0 ? rebuiltThinking : undefined,
+    toolCalls: rebuiltToolCalls.length > 0 ? rebuiltToolCalls : undefined,
+    usage: usageField(entry.message).usage,
+    // endedAt = entry 落盘时刻（handleMessageEnd 以 body.timestamp 构造，与 reload 侧
+    // applyEntryEndTimes 同源）；toMs 对畸形值降级 0——0 会以 nullish 穿透消费侧 ?? 回退，
+    // 非 >0 不写（保持回退 timestamp 的既有缺省行为）。
+    ...(entryMs > 0 ? { endedAt: entryMs } : {}),
+    textFinalized: true,
+  }
+}
+
+export function rebuildAssistantOnFinalize(
+  ctx: Pick<MessageEffectContext, 'messages'>,
+  sid: string,
+  entry: PiMessageEntry,
+  anchorMessageId: string | undefined,
+): void {
+  const prev = ctx.messages.value.get(sid)?.value ?? []
+  const idx = locateFinalizeTarget(prev, anchorMessageId, sid)
+  if (idx < 0) return
   const target = prev[idx]
   const body = entry.message
   // 权威转换：与 reload 侧同一 collectContentParts（baseId 用气泡自身 id——重建不改气泡 id，
   // 派生 thinking/toolCall id 只要求与 contentBlocks 引用一一对应，同一命名空间内自洽）。
   const acc = collectContentParts(normalizeContentParts(body), target.id, body, target.timestamp)
-  // join 复用：保 live 状态（thinking 折叠态/起止时刻、toolCall startTime/已回填输出与终态）
+  // 思考 join 复用：保 live 状态（折叠态 / 起止时刻）。思考块实时 id 与载荷派生 id 不同源
+  //（pi thinking part 无 id，实时 id 是 thinkingId 帧值或随机）——id 匹配构造性恒 miss，
+  // 生效路径是序位兜底（D3 规则 4）。
   const prevThinking = target.thinking ?? []
   const rebuiltThinking: ThinkingBlock[] = acc.thinking.map((derived, i) => {
     const existing = prevThinking[i]
     return existing ? { ...existing, id: derived.id, content: derived.content } : derived
   })
-  const prevToolCalls = target.toolCalls ?? []
-  let rebuiltCount = 0
-  const rebuiltToolCalls: ToolCall[] = acc.toolCalls.map((derived, i) => {
-    const existing = prevToolCalls.find((t) => t.id === derived.id) ?? prevToolCalls[i]
-    if (existing) return { ...existing, id: derived.id, toolName: derived.toolName, input: derived.input }
-    rebuiltCount++
-    // 补建条目置 running：工具执行严格晚于所属 message_end（pi 事件序），载荷工具条目在
-    // 重建时刻其执行开始消息尚未到达；随后 tool_call_start 的同 id 幂等检查按 running 接管。
-    return { ...derived, status: 'running' }
-  })
-  if (rebuiltCount > 0 && isDevMode()) {
-    console.warn(
-      `[effects] D3 rebuild backfilled ${rebuiltCount} payload item(s) without live counterpart (sid=${sid}, msg=${target.id})` +
-        ' — delta/stream events missed them; authority restored from entry payload',
-    )
-  }
-  const usage = usageField(body).usage
-  // endedAt = entry 落盘时刻（handleMessageEnd 以 body.timestamp 构造，与 reload 侧
-  // applyEntryEndTimes 同源）；toMs 对畸形值降级 0——0 会以 nullish 穿透消费侧 ?? 回退，
-  // 非 >0 不写（保持回退 timestamp 的既有缺省行为）。
-  const entryMs = toMs(entry.timestamp)
-  // 中断呈现随载荷覆写退役：error 文案（断连兜底）与载荷全文并存会双显；status 按规则 2
-  // 正常路径不动（streaming 保持到回合末尾统一收尾——sealed guard 依赖）。
-  const restored = target.status === 'streaming' ? target : { ...target, error: undefined }
-  const rebuilt: Message = {
-    ...restored,
-    // status：规则 2 正常路径不动（streaming 保持——sealed guard 与后续消息定位依赖）；
-    // 已终态（断连收尾的中断态）复原 complete（中断呈现是传输层事故的临时态，规则 1）。
-    status: target.status === 'streaming' ? 'streaming' : 'complete',
-    content: acc.textContent,
-    contentBlocks: acc.contentBlocks,
-    // 载荷无对应内容时显式清 undefined：重建是权威整条覆写，delta 阶段的残留（协议异常
-    // 形态下的 thinking/toolCalls 块）不得存活过定稿（toEqual 语义下 undefined ≡ 缺失）。
-    thinking: rebuiltThinking.length > 0 ? rebuiltThinking : undefined,
-    toolCalls: rebuiltToolCalls.length > 0 ? rebuiltToolCalls : undefined,
-    usage,
-    ...(entryMs > 0 ? { endedAt: entryMs } : {}),
-    textFinalized: true,
-  }
+  const rebuiltToolCalls = joinToolCalls(target.toolCalls ?? [], acc.toolCalls, sid, target.id)
+  const rebuilt = finalizeRebuiltMessage(target, entry, acc, rebuiltThinking, rebuiltToolCalls)
   const next = [...prev]
   next[idx] = rebuilt
   commitMessages(ctx.messages, sid, next)

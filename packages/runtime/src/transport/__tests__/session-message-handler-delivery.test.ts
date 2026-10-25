@@ -79,6 +79,8 @@ interface Harness {
   bus: MessageBus
   session: IManagedSessionView
   promptFn: ReturnType<typeof vi.fn>
+  /** 真实 registry 装配用的 mock pi client（clearQueue 收回集可控注入，peek/edit 用例用）。 */
+  piClient: { clearQueue: ReturnType<typeof vi.fn> }
   /** 真实内核句柄（registry 装配）。 */
   handle: DeliveryHandleV2
   sent: ServerMessage[]
@@ -172,6 +174,7 @@ function makeHarness(
     bus,
     session,
     promptFn,
+    piClient,
     handle,
     sent,
     replies,
@@ -646,6 +649,77 @@ describe('delivery.resync（D5：判重去重 + 单源恢复）', () => {
     // 存留条目（delivered 窗口内）经 onChange 帧可见（confirmDelivered 变更单发；
     // resync deduped 全命中无内核变更 → 零新帧，最后一帧即权威派生视图，D4-4）
     expect(frameEntries(h).map((e) => [e.clientUuid, e.state])).toEqual([[UUID_A, 'delivered']])
+  })
+})
+
+// ── delivery.peek / delivery.edit（chat-flow-consistency D6：✎ 编辑预填 + 原位替换）──
+//
+// handler 层只做「payload 校验 → 委托 registry → reply」（lane 判定 / 收回 / 判重全在
+// registry，D1 单一判定源，分支语义归 session-delivery-registry 测试）：
+// - peek：queued 条目全文取回（剥出站标记，用户侧文本）+ 未知条目 found:false + 字段校验
+// - edit：queued 直接替换（edited:true）+ 空 content 拒绝 + registry 未注入防御
+
+describe('delivery.peek / delivery.edit（D6：handler 委托接线）', () => {
+  it('handles 认领 delivery.peek / delivery.edit（协议配对）', () => {
+    const h = makeHarness()
+    expect(h.handler.handles).toEqual(expect.arrayContaining(['delivery.peek', 'delivery.edit']))
+  })
+
+  it('peek 命中 queued 条目：全文剥标记返回（用户侧文本，cancel reply 同口径）', async () => {
+    const h = makeHarness()
+    await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: MARKED_CONTENT, clientUuid: UUID_A }), WS)
+    await h.handler.handleSessionMessage(msg('delivery.peek', { sessionId: SID, clientUuid: UUID_A }), WS)
+
+    const reply = replyOf(h, 'delivery.peek') as { clientUuid: string; found: boolean; content?: string }
+    expect(reply.clientUuid).toBe(UUID_A)
+    expect(reply.found).toBe(true)
+    // content 剥出站裸标记（单点剥离 stripDeliveryMarkers），preview 截断不适用于全文通道
+    expect(reply.content).toBe(stripDeliveryMarkers(MARKED_CONTENT))
+  })
+
+  it('peek 未知条目：found:false（条目不在内核活跃集，renderer 提示后放弃预填）', async () => {
+    const h = makeHarness()
+    await h.handler.handleSessionMessage(msg('delivery.peek', { sessionId: SID, clientUuid: UUID_UNKNOWN }), WS)
+
+    const reply = replyOf(h, 'delivery.peek') as { clientUuid: string; found: boolean }
+    expect(reply).toEqual({ clientUuid: UUID_UNKNOWN, found: false })
+  })
+
+  it('edit in-flight 条目（收回命中）：edited:true 透传（重投出站语义归 session-delivery-edit 测试）', async () => {
+    const h = makeHarness()
+    subscribeLive(h)
+    // idle 受理即出站（条目 in-flight）；edit 命中收回路径的收回命中分支：
+    // clear_queue 返回含目标槽位文本（mock pi client 可控注入）
+    await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: MARKED_CONTENT, clientUuid: UUID_A }), WS)
+    h.piClient.clearQueue.mockImplementation(async () => ({ steering: [MARKED_CONTENT], followUp: [] }) as never)
+    await h.handler.handleSessionMessage(msg('delivery.edit', { sessionId: SID, clientUuid: UUID_A, content: 'after' }), WS)
+
+    // handler 契约 = registry outcome 原样 reply（clientUuid + edited）；收回-重投的出站
+    // 文本/时序是 registry 内核语义（session-delivery-edit.test.ts 已锁定），此处不重复断言
+    const reply = replyOf(h, 'delivery.edit') as { clientUuid: string; edited: boolean }
+    expect(reply).toEqual({ clientUuid: UUID_A, edited: true })
+  })
+
+  it('字段校验：peek 缺 clientUuid / edit 空 content → invalid_payload（不静默吞）', async () => {
+    const h = makeHarness()
+    await h.handler.handleSessionMessage(msg('delivery.peek', { sessionId: SID }), WS)
+    await h.handler.handleSessionMessage(msg('delivery.edit', { sessionId: SID, clientUuid: UUID_A, content: '  ' }), WS)
+
+    expect(h.errors).toHaveLength(2)
+    for (const e of h.errors) {
+      expect(e.code).toBe('invalid_payload')
+      expect(e.details).toMatchObject({ sessionId: SID })
+    }
+    expect(h.replies.filter((r) => r.type === 'delivery.peek' || r.type === 'delivery.edit')).toHaveLength(0)
+  })
+
+  it('registry 未注入：peek / edit 各报 delivery_unsupported（可选注册表防御分支）', async () => {
+    const h = makeHarness({ withRegistry: false })
+    await h.handler.handleSessionMessage(msg('delivery.peek', { sessionId: SID, clientUuid: UUID_A }), WS)
+    await h.handler.handleSessionMessage(msg('delivery.edit', { sessionId: SID, clientUuid: UUID_A, content: 'x' }), WS)
+
+    expect(h.errors).toHaveLength(2)
+    for (const e of h.errors) expect(e.code).toBe('delivery_unsupported')
   })
 })
 
