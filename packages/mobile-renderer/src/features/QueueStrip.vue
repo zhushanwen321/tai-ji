@@ -264,12 +264,13 @@ function onAbandonEdit(): void {
         :data-testid="`mobile-queue-state-${row.state}`"
       >{{ stateText(row.state) }}</span>
       <span class="min-w-0 flex-1 truncate text-sm text-neutral-fg">{{ row.preview }}</span>
-      <!-- 重试钮（§6.22 仅 failed）：delivery.resync 重报，幂等去重在 runtime 单点 -->
+      <!-- 重试钮（§6.22 仅 failed）：delivery.resync 重报，幂等去重在 runtime 单点；
+           min-h --m-tap = 44px 触控热区（§2 目标 2 拇指可达） -->
       <div
         v-if="row.state === 'failed'"
         role="button"
         tabindex="0"
-        class="flex shrink-0 cursor-pointer items-center gap-1 rounded p-1.5 text-xs text-accent transition-colors outline-none active:text-neutral-fg focus-visible:ring-2 focus-visible:ring-accent"
+        class="flex min-h-[var(--m-tap)] shrink-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-xs text-accent transition-colors outline-none active:text-neutral-fg focus-visible:ring-2 focus-visible:ring-accent"
         data-testid="mobile-queue-retry"
         :aria-label="t('mobile.queueStrip.retry')"
         :aria-disabled="resyncingId !== null"
@@ -279,11 +280,12 @@ function onAbandonEdit(): void {
         <RotateCcw class="size-3.5" />
         <span>{{ t('mobile.queueStrip.retry') }}</span>
       </div>
-      <!-- 编辑钮（chat-flow-consistency D6）：常驻触达（触屏无 hover），编排见 onEditEntry -->
+      <!-- 编辑钮（chat-flow-consistency D6）：常驻触达（触屏无 hover），编排见 onEditEntry；
+           图标钮 44px 热区（--m-tap，视觉尺寸仍由内部 size-3.5 图标承载） -->
       <div
         role="button"
         tabindex="0"
-        class="shrink-0 cursor-pointer rounded p-1 text-neutral-mid transition-colors outline-none active:text-neutral-fg focus-visible:ring-2 focus-visible:ring-accent"
+        class="flex min-h-[var(--m-tap)] min-w-[var(--m-tap)] shrink-0 cursor-pointer items-center justify-center rounded p-1 text-neutral-mid transition-colors outline-none active:text-neutral-fg focus-visible:ring-2 focus-visible:ring-accent"
         data-testid="mobile-queue-edit"
         :aria-label="t('mobile.queueStrip.edit')"
         @click="onEditEntry(row.clientUuid)"
@@ -291,12 +293,13 @@ function onAbandonEdit(): void {
       >
         <PenLine class="size-3.5" />
       </div>
-      <!-- 取消钮（§6.22 仅 queued：in-flight 不可取消——受理后条目不可撤，× 不渲染即禁） -->
+      <!-- 取消钮（§6.22 仅 queued：in-flight 不可取消——受理后条目不可撤，× 不渲染即禁）；
+           44px 取消热区（§7.2 F6 行明示，--m-tap 档，视觉尺寸由 size-3.5 图标承载） -->
       <div
         v-if="row.state === 'queued'"
         role="button"
         tabindex="0"
-        class="shrink-0 cursor-pointer rounded p-1 text-neutral-mid transition-colors outline-none active:text-neutral-fg focus-visible:ring-2 focus-visible:ring-accent"
+        class="flex min-h-[var(--m-tap)] min-w-[var(--m-tap)] shrink-0 cursor-pointer items-center justify-center rounded p-1 text-neutral-mid transition-colors outline-none active:text-neutral-fg focus-visible:ring-2 focus-visible:ring-accent"
         data-testid="mobile-queue-cancel"
         :aria-label="t('mobile.queueStrip.cancel')"
         :aria-disabled="cancellingId !== null"

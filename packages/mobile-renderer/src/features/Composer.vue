@@ -280,11 +280,12 @@ function onKeydown(e: KeyboardEvent): void {
           @keydown="onKeydown"
         />
       </div>
-      <!-- 停止按钮（无内容 + 会话占用；title 两档对齐桌面：回合中止=停止 / 仅压缩=终止压缩） -->
+      <!-- 停止按钮（无内容 + 会话占用；title 两档对齐桌面：回合中止=停止 / 仅压缩=终止压缩）；
+           icon-44 档（§6.9 专为移动建的 44px 档，§2 目标 2 中断拇指可达） -->
       <Button
         v-if="showStop"
         variant="default"
-        size="icon"
+        size="icon-44"
         data-testid="mobile-composer-stop"
         :aria-label="stopTarget === 'compacting' ? t('mobile.composer.stopCompacting') : t('mobile.composer.stop')"
         :title="stopTarget === 'compacting' ? t('mobile.composer.stopCompacting') : t('mobile.composer.stop')"
@@ -292,11 +293,12 @@ function onKeydown(e: KeyboardEvent): void {
       >
         <Square class="size-4" />
       </Button>
-      <!-- 发送按钮（±排队角标）：有内容恒发送；无内容空闲 = 禁用态发送占位 -->
+      <!-- 发送按钮（±排队角标）：有内容恒发送；无内容空闲 = 禁用态发送占位；
+           icon-44 档（44px 触控，§2 目标 2） -->
       <Button
         v-else
         variant="default"
-        size="icon"
+        size="icon-44"
         class="relative"
         data-testid="mobile-composer-send"
         :disabled="!hasInput"
