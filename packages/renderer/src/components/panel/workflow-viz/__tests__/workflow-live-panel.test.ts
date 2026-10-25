@@ -216,6 +216,18 @@ describe('WorkflowLivePanel · header 去重（D2 单 header 终态）', () => {
     expect(spinner.classes()).not.toContain('animate-spin')
   })
 
+  it('cancelled 行（§3.3.8 run 终局收尾在途成员）：trace 表渲染中性档状态词，不再折进 failed', async () => {
+    const wrapper = await mountPanel(makeRun({
+      agentCalls: [makeCall({ id: 4, status: 'cancelled' })],
+    }))
+    const status4 = wrapper.find('[data-testid="wf-viz-trace-status-4"]')
+    expect(status4.attributes('data-status')).toBe('cancelled')
+    expect(status4.text()).toContain('panel.workflowViz.statusCancelled')
+    // 状态点着色 = 中性灰（与 pending 同灰系，非失败红）
+    const dot = status4.find('span.rounded-full')
+    expect(dot.classes()).toContain('bg-neutral-dim')
+  })
+
   it('partially_succeeded run：在途行渲染中性停止色、不抛错（run 级聚合 outcome 不是 call 级失败形态；成员行无 settled 帧投影保持 running 可达此输入）', async () => {
     // run 终局部分成功 + 成员行在途（closeOutInFlightCalls 只写内存不落帧 → 投影保持 running）
     const wrapper = await mountPanel(makeRun({
