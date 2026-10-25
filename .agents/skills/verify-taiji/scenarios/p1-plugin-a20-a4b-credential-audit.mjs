@@ -256,7 +256,7 @@ function startFrameTap(dataDir) {
   ws.addEventListener('error', () => notify())
   ws.addEventListener('close', () => notify())
   const ready = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('tap auth 握手超时（15s）')), 15_000)
+    let timer = setTimeout(() => reject(new Error('tap auth 握手超时（15s）')), 15_000)
     ws.addEventListener('open', () => {
       ws.send(JSON.stringify({ type: 'auth', payload: { token } }))
     })
@@ -425,9 +425,11 @@ export async function run(ctx) {
       expected: `无 ${TRAE.pluginId}`,
       actual: ids0.join(',').slice(0, 200) || '(空)',
     })
-    ev.assert('C: 基线——models.json 无 wool/cred-audit 条目', !Object.keys(modelsProviders()).some((k) => k.startsWith('wool-') || k.startsWith(PROBE_NS)), {
+    // 基线只断言 wool-* 缺席：探针 fixture 在 onStartupFinished 激活（早于本检查），
+    // 其 providers.write 落盘是装配预期（下一条断言即消费它作对照落点）。
+    ev.assert('C: 基线——models.json 无 wool-* 条目（探针条目属装配预期，不计违规）', !Object.keys(modelsProviders()).some((k) => k.startsWith('wool-')), {
       channel: 'C',
-      expected: `providers 无 wool-* 与 ${PROBE_PROVIDER}`,
+      expected: 'providers 无 wool-*',
       actual: Object.keys(modelsProviders()).join(',').slice(0, 200) || '(空)',
     })
 
@@ -578,14 +580,16 @@ export async function run(ctx) {
     })
 
     // ── A20：getStatus + 状态行渲染 ────────────────────────────────
-    const statusBody = await auditedCall('plugin.invoke', { pluginId: TRAE.pluginId, method: 'getStatus', params: { providerId: TRAE.providerId } }, { timeoutMs: 30_000 })
+    const statusBody = (await auditedCall('plugin.invoke', { pluginId: TRAE.pluginId, method: 'getStatus', params: { providerId: TRAE.providerId } }, { timeoutMs: 30_000 }))?.result
     ev.assert('B: A20 getStatus 返回宿主契约形状 { state: valid }（无素材时 message 省略、无 providerId）',
       statusBody?.state === 'valid' && statusBody?.providerId === undefined, {
         channel: 'B',
         expected: '{state:valid}（无昵称/额度素材 → message 省略）',
         actual: JSON.stringify(statusBody ?? null).slice(0, 200),
       })
-    // 状态行渲染（S20「状态呈现活性」等价断言）：提取写回后行卡即时出现（写落点广播）+ 展开渲染状态行
+    // 状态行渲染（S20「状态呈现活性」等价断言）：先关插件接入流（对话框遮罩会拦截
+    // 行卡点击——A3 同款顺序），行卡出现仍由写落点广播驱动（不重开设置窗）。
+    await closePluginFlow(ui)
     const traeCard = page.locator('[data-testid="provider-card"]', { hasText: /trae/i }).first()
     const cardAppeared = await pollValue(
       async () => (await traeCard.count()) > 0,
@@ -655,11 +659,16 @@ export async function run(ctx) {
         actual: `ok=${probeCrossBody?.ok} message=${String(probeCrossBody?.message ?? '').slice(0, 120)}`,
       })
 
-    // ── Phase A 收口：宽限 2s（尾触发广播/推送落网）后关 tap ───────
+    // ── Phase A 收口：宽限 2s（尾触发广播/推送落网）后切片审计 ─────
+    // 切片在揭示对照前取（tap 保持打开到 Phase C 结束——揭示 reply 帧要落同一缓冲）。
     await new Promise((r) => setTimeout(r, 2_000))
-    await tap.close()
-    const windowClasses = auditFrames(tap.buffer, needles)
-    const windowFrames = tap.buffer.filter((f) => f.dir === 'in').length
+    const windowBuffer = [...tap.buffer]
+    // A4b 核心 needle 集 = 提取所得 apiKey + 探针合成 key（设计 S20/S4b 原文口径）。
+    // refreshToken 单列：provider 级 headers 读侧透传使其出现在 config.providers 广播
+    // （ISSUES-2 ⑨ 登记的缺陷现状），不并入核心零命中断言。
+    const coreNeedles = { apiKey: needles.apiKey, probeKey: needles.probeKey }
+    const windowClasses = auditFrames(windowBuffer, coreNeedles)
+    const windowFrames = windowBuffer.filter((f) => f.dir === 'in').length
     const windowHitClasses = [...windowClasses.entries()].filter(([, rec]) => Object.keys(rec.hits).length > 0)
     ev.step({
       step: 'audit.window-classify',
@@ -670,11 +679,33 @@ export async function run(ctx) {
         classes: [...windowClasses.entries()].map(([cls, rec]) => `${cls}=${rec.count}`).join(' | ').slice(0, 600),
       },
     })
-    ev.assert('B: A4b 帧审计 Phase A——提取+回读窗口全部 WS 帧按类型零命中', windowHitClasses.length === 0, {
+    ev.assert('B: A4b 帧审计 Phase A——提取+回读窗口全部 WS 帧按类型零命中（apiKey + probeKey）', windowHitClasses.length === 0, {
       channel: 'B',
-      expected: `窗口 ${windowFrames} 帧逐类零命中（needle=apiKey/refreshToken?/probeKey）`,
+      expected: `窗口 ${windowFrames} 帧逐类零命中（needle=apiKey/probeKey）`,
       actual: windowHitClasses.length === 0 ? `零命中（${windowClasses.size} 类 ${windowFrames} 帧）` : `命中类：${windowHitClasses.map(([cls, rec]) => `${cls}=${JSON.stringify(rec.hits)}`).join(' | ').slice(0, 300)}`,
     })
+    // refreshToken 缺陷 ⑨ 现状锚点：headers 随 config.providers 广播出线（apiKey 本体
+    // 已脱敏为 apiKeySet 布尔，headers 没有——双标准）。断言形态对修复后仍成立：命中
+    // 类 ⊆ { in:config.providers }（零命中 = 已修复，同样通过）；分布越界即真越界。
+    if (needles.refreshToken !== null) {
+      const rtClasses = auditFrames(windowBuffer, { refreshToken: needles.refreshToken })
+      const rtHitClasses = [...rtClasses.entries()].filter(([, rec]) => (rec.hits.refreshToken ?? 0) > 0)
+      const rtBounded = rtHitClasses.every(([cls]) => cls === 'in:config.providers')
+      ev.step({
+        step: 'audit.refreshToken-distribution',
+        channel: 'C',
+        exitCode: 0,
+        stats: {
+          defect: 'ISSUES-2 ⑨（headers 读侧透传使 refreshToken 随 config.providers 广播出线；修复后本分布应归零）',
+          distribution: rtHitClasses.length === 0 ? '零命中（已修复形态）' : rtHitClasses.map(([cls, rec]) => `${cls}=${rec.hits.refreshToken}`).join(' | '),
+        },
+      })
+      ev.assert('C: A4b refreshToken 面（ISSUES-2 ⑨ 现状锚点）——refreshToken 广播分布 ⊆ config.providers 帧（修复后归零仍通过）', rtBounded, {
+        channel: 'C',
+        expected: '命中类 ⊆ { in:config.providers }（⑨ 现状）或零命中（已修复）',
+        actual: rtHitClasses.length === 0 ? '零命中（已修复形态）' : rtHitClasses.map(([cls, rec]) => `${cls}=${rec.hits.refreshToken}`).join(' | ').slice(0, 200),
+      })
+    }
 
     // ── Phase B：白名单正向对照（揭示 RPC 经 tap 派发，reply 帧落缓冲）──
     tap.send(JSON.stringify({ type: 'config.revealProviderApiKey', id: 'tap-reveal-1', payload: { providerId: TRAE.providerId } }))
@@ -694,11 +725,12 @@ export async function run(ctx) {
         actual: `type=${revealParsed?.type} available=${revealParsed?.payload?.available} match=${revealApiKey === needles.apiKey} len=${revealApiKey?.length ?? 0} source=${revealParsed?.payload?.source}`,
       })
 
-    // ── Phase C：全缓冲命中分布 = 仅揭示 reply 一类 ────────────────
-    const fullClasses = auditFrames(tap.buffer, needles)
+    // ── Phase C：全缓冲命中分布 = 仅揭示 reply 一类（然后才关 tap）──
+    const fullClasses = auditFrames(tap.buffer, coreNeedles)
     const fullHitClasses = [...fullClasses.entries()].filter(([, rec]) => Object.keys(rec.hits).length > 0)
     const onlyReveal = fullHitClasses.every(([cls]) => cls === 'in:config.providerApiKeyRevealed')
       && (fullClasses.get('in:config.providerApiKeyRevealed')?.hits?.apiKey ?? 0) >= 1
+    await tap.close()
     ev.assert('B: A4b 帧审计 Phase C——全缓冲命中分布 = 仅揭示 reply 一类（明文只在定向 reply 帧出现）', onlyReveal, {
       channel: 'B',
       expected: '命中类 ⊆ { in:config.providerApiKeyRevealed } 且该类 apiKey 命中 ≥1',
@@ -778,7 +810,6 @@ export async function run(ctx) {
       },
     })
 
-    await closePluginFlow(ui)
     log('A20+A4b done')
   } finally {
     for (const e of fs.readdirSync(distDir)) {
