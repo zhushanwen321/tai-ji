@@ -1107,6 +1107,69 @@ describe("review-fix-loop 编排（faux worker 宿主 in-process + 场景化 moc
   );
 
   it(
+    "E2E-9：聚合器空壳重报（无 title/severity 的延续条目）不抹已追踪身份锚点——正常销账 clean 终止（need-design 8 空壳缺陷 e2e 锁定）",
+    async () => {
+      // wf-1792073055433 空壳缺陷现象链：聚合器延续条目无 title/severity → 旧无条件
+      // 赋值把已追踪条目抹成空壳 → 跨轮身份锚点（title）断链 → 后续 clean 轮对账
+      // 无法销账 → 连续 clean 轮误判 stuck。修复（inheritCarryoverFields：title 缺失
+      // 侧才回填、severity 采信本轮显式标注）的 e2e 执法点：R2 空壳重报后字段保留 +
+      // R3 正常销账终止 clean。
+      let aggRound9 = 0;
+      const runner = makeScenarioRunner({
+        review: [
+          // R1：首次发现
+          () => ({ report_file: "/tmp/e2e9-r1.md", must_fix: 1, suggestion: 0, reconciliation: [] }),
+          // R2：对账 not-fixed（同号重报，无改键）
+          () => ({ report_file: "/tmp/e2e9-r2.md", must_fix: 1, suggestion: 0, reconciliation: [{ prev_id: "MF-1", status: "not-fixed", evidence: "still wrong" }] }),
+          // R3：对账 fixed → 全员销账
+          () => ({ report_file: "/tmp/e2e9-r3.md", must_fix: 0, suggestion: 0, reconciliation: [{ prev_id: "MF-1", status: "fixed", evidence: "read confirmed" }] }),
+        ],
+        aggregate: () => {
+          aggRound9++;
+          if (aggRound9 === 1) {
+            // R1：条目带完整身份锚点（title + severity）
+            return { report_file: "/tmp/e2e9-agg.md", must_fix: 1, suggestion: 0, must_fix_ids: [{ id: "MF-1", severity: "major", title: "Parser null check missing" }], fixes_caution: [] };
+          }
+          // R2：空壳重报——同 id 延续条目缺 title/severity（schema required 仅 id，合法）
+          return { report_file: "/tmp/e2e9-agg.md", must_fix: 1, suggestion: 0, must_fix_ids: [{ id: "MF-1" }], fixes_caution: [] };
+        },
+        fix: () => ({
+          fixed_count: 1,
+          fixes: [{ issue_id: "MF-1", description: "mock fix", self_check: "grep: 1 hit; synced", affected_files: [] }],
+          deferred: [],
+        }),
+      });
+      const deps = makeFauxDeps(runner);
+
+      const result = await runWorkflowToSettled(
+        wf("review-fix-loop"),
+        { targetType: "file", target: "README.md", agents: agentMd("reviewer"), maxRounds: 4, _runId: RUN_ID() },
+        deps,
+        FAUX_RUN_TIMEOUT_MS,
+      );
+
+      expect(result.reason).toBe("completed");
+      expect(result.error).toBeUndefined();
+      const outcome = assertScriptOutcome(result.scriptResult);
+      // 空壳重报不断身份链：R3 对账销账成功，clean 终止（修复前该链路误判 stuck）
+      expect(outcome.terminated).toBe("clean");
+      expect(outcome.totalFixed).toBe(2); // R1/R2 两轮 fix 各申报 1 次修复的累计计数
+      const { reviewCalls } = runner.stats();
+      expect(reviewCalls.length).toBe(3);
+      // 终态问题清单：延续条目保留 R1 身份锚点（title 未被 R2 空壳抹掉；severity 仍为合法值）
+      const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
+        issues: Record<string, { title?: string; severity?: string; status?: string }>;
+      };
+      const issue = st.issues["MF-1"];
+      expect(issue).toBeDefined();
+      expect(issue.status).toBe("fixed");
+      expect(issue.title).toBe("Parser null check missing");
+      expect(issue.severity).toBe("major");
+    },
+    FAUX_RUN_TIMEOUT_MS,
+  );
+
+  it(
     "fail-fast：未知参数名（batchl 拼错）→ workflow 失败且 error 含未知参数提示（S-19）",
     async () => {
       const runner = makeScenarioRunner({

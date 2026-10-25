@@ -89,11 +89,11 @@
 
 ### 8. review-fix-loop 聚合器延续条目空壳缺陷
 
+状态：已实施（2026-10-23 随双平台单源管线 2e6876e75 落地；e2e 执法锁定于 2026-10-25 补齐）。载体裁决：机制源单源化于 `packages/subagent-core/workflows/src/review-fix-loop.shared.ts`（inheritCarryoverFields：title 缺失侧才回填、severity 采信本轮显式标注），zcode / pi 两壳模板经构建产物接入，改机制只改 shared + 重建两产物（多平台对齐纪律收编为构建管线）。
+
 来源：workflow-viz-dag-minor-residuals.md 关联工具缺陷登记。
 
 问题：review-fix-loop 的聚合器把「延续未修」条目写成无 title/severity 的空壳，后续 clean 轮 reconcile 无法匹配关闭，连续 3 轮 clean 后误判 stuck 终态。修复方向已明确（聚合器延续条目继承上轮 title/severity 字段）。
-
-开放问题：修复载体确认——review-fix-loop 存在多份（zcode 侧 `.agents/skills/pr-cr-fix/workflows/` 等 + 全局 `~/.zcode/workflows/`），属仓外/多平台 workflow 资产，需确认改哪份、是否双版本同步（多平台 workflow 脚本双版本对齐纪律）。
 
 ### 9. pi 内置版 review-fix-loop 补修子循环
 
