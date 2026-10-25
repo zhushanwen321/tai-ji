@@ -429,35 +429,57 @@ export async function run(ctx) {
 
     // ── Qoder 段（同构第二段）────────────────────────────────────
     await closePluginFlow(ui)
+
+    // A：条目展开状态行（getStatus 契约形状修复回归锚点，原 ISSUES-2 ③）：提取成功
+    // 后 wool-trae 条目展开 → 宿主 pullStatus（getStatus）→ provider-plugin-status
+    // 状态行渲染（宿主 parseStatusFields 可窄化 = 形状对齐的端到端证据）。
+    // 手风琴点击一次（重复点击会展开/收起交替），状态行出现走异步 pullStatus 轮询。
+    const traeCard = page.locator('[data-testid="provider-card"]', { hasText: 'Trae' }).first()
+    await traeCard.locator('span[role="button"]').click()
+    const statusRow = page.locator('[data-testid="provider-plugin-status"]')
+    const statusAppeared = await pollValue(
+      async () => (await statusRow.count()) > 0,
+      Boolean,
+      { timeoutMs: 20_000, label: 'wool-trae 条目状态行渲染' },
+    )
+    const statusText = statusAppeared ? await statusRow.first().innerText().catch(() => '') : ''
+    ev.assert('A: Trae 条目展开渲染凭据状态行（provider-plugin-status——getStatus 契约形状修复回归锚点）',
+      statusAppeared && statusText.trim().length > 0, {
+        channel: 'A',
+        expected: 'provider-plugin-status 存在且文案非空（valid 默认文案或摘要）',
+        actual: `appeared=${statusAppeared} text=${statusText.trim().slice(0, 80) || '(空)'}`,
+      })
+    // 收起（还原手风琴，避免后续 Qoder 安装流程干扰）
+    await traeCard.locator('span[role="button"]').click().catch(() => {})
+
     await ui.click('testid=provider-template-picker')
     await ui.click('testid=add-menu-plugin')
     await ui.expectVisible('testid=plugin-provider-flow')
     await ui.expectVisible('testid=plugin-family-grid')
     await installViaFamilyCard(ui, page, FAMILIES[1], ev)
     await assertInstalledState({ protocol, ev, ui, family: FAMILIES[1], registry, dataDir, settingsPackages, modelsProviders })
-    await assertAuthorizeMountGap(ui, page, FAMILIES[1], ev)
+    await assertAuthorizeMountRenders(ui, page, FAMILIES[1], ev)
 
     const qoderExtract = await driveExtractAndTime({ protocol, page, ui, ev, family: FAMILIES[1] })
 
-    // B：状态上报（Qoder：userinfo + quota 两数据源）。D5 契约 = getStatus 同步返回
-    // 本地最近已知 + 上游校验异步跟进。实测（r7-r9 全量日志）：refreshStatus 稳定缓存
-    // loggedIn:false 且零「status refresh failed」→ fetchStatus 收到 undefined token
-    // → providers.credential 回读链落空（refreshCatalog 诊断佐证，ISSUES-2 ⑦）。
-    // 断言 = 状态形状契约 + loggedIn:false 成因归档；nickname/quota 上报被 ⑦ 阻断，
-    // 移入 notProvable。
+    // B：状态上报（Qoder：userinfo + quota 两数据源）。宿主契约形状断言 = state 两值
+    // 合法 + providerId 归属（不钉死 valid/invalid——ISSUES-2 ⑦ 凭据回读链为 runtime
+    // 侧修复面，修复前后本断言均成立；invalid 时的 message 携带「未接入」恢复指引）。
     const qoderStatusBody = await pollValue(async () => {
       const r = await protocol.call('plugin.invoke', { pluginId: FAMILIES[1].pluginId, method: 'getStatus', params: { providerId: FAMILIES[1].providerId } }, { timeoutMs: 30_000 })
-      const s = r?.result?.status
-      return s !== undefined && s !== null ? s : null
+      const s = r?.result
+      return s !== undefined && s !== null && typeof s === 'object' ? s : null
     }, Boolean, { timeoutMs: 15_000, label: 'Qoder getStatus 返回状态形状' })
-    const qoderShapeOk = qoderStatusBody?.family === 'qoder' && typeof qoderStatusBody?.loggedIn === 'boolean' && typeof qoderStatusBody?.fetchedAt === 'number'
-    ev.assert('B: Qoder getStatus 返回状态形状 { family, loggedIn, fetchedAt }（D5 契约）', qoderShapeOk, {
+    const qoderShapeOk = (qoderStatusBody?.state === 'valid' || qoderStatusBody?.state === 'invalid')
+      && qoderStatusBody?.providerId === FAMILIES[1].providerId
+      && (qoderStatusBody?.message === undefined || typeof qoderStatusBody?.message === 'string')
+    ev.assert('B: Qoder getStatus 返回宿主契约形状 { state, message?, providerId }（CredentialStatusPayload 对齐）', qoderShapeOk, {
       channel: 'B',
-      expected: '{family:qoder, loggedIn:boolean, fetchedAt:number}',
+      expected: '{state:valid|invalid, message?:string, providerId:wool-qoder}',
       actual: JSON.stringify(qoderStatusBody ?? null).slice(0, 200),
     })
-    // 凭据回读链诊断（ISSUES-2 ⑦ 定位实验）：refreshCatalog 内部走 readCredential——
-    // 「未接入」= providers.credential 落空实锤；ok = 回读链通、问题在状态链别处。
+    // 凭据回读链诊断（ISSUES-2 ⑦，runtime 侧修复面——信息性留痕不判负）：refreshCatalog
+    // 内部走 readCredential——「未接入」= providers.credential 落空佐证；ok = 回读链通。
     const refreshCatalogReply = await protocol.call('plugin.invoke', { pluginId: FAMILIES[1].pluginId, method: 'refreshCatalog', params: {} }, { timeoutMs: 60_000 })
     const credentialReadBroken = refreshCatalogReply?.result?.ok === false
       && String(refreshCatalogReply?.result?.error ?? '').includes('未接入')
@@ -467,16 +489,11 @@ export async function run(ctx) {
       exitCode: 0,
       stats: {
         refreshCatalogOk: refreshCatalogReply?.result?.ok,
+        getStatusState: qoderStatusBody?.state,
         error: String(refreshCatalogReply?.result?.error ?? '').slice(0, 120),
-        verdict: credentialReadBroken ? 'providers.credential 回读落空（⑦ 实锤）' : '回读链通，状态链问题在别处',
+        verdict: credentialReadBroken ? 'providers.credential 回读落空（⑦ 未修佐证）' : '回读链通（⑦ 已修复或回读可用）',
       },
     })
-    ev.assert('B: Qoder loggedIn=false 成因归档（凭据回读链落空——插件如实上报，非伪造登录态）',
-      qoderStatusBody?.loggedIn === false && credentialReadBroken, {
-        channel: 'B',
-        expected: 'loggedIn=false + refreshCatalog「未接入」（同一成因）',
-        actual: `loggedIn=${qoderStatusBody?.loggedIn} refreshCatalog=${JSON.stringify(refreshCatalogReply?.result ?? null).slice(0, 160)}`,
-      })
 
     const qoderEntry = await pollValue(() => modelsProviders()[FAMILIES[1].providerId] ?? null, Boolean, { timeoutMs: 15_000, label: 'models.json wool-qoder 条目' })
     const qoderModels = qoderEntry?.models ?? []
