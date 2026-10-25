@@ -4655,6 +4655,26 @@
       "run": "pnpm -C packages/runtime exec vitest run test/retry-rules-config-message-handler.test.ts src/services/remote-config/__tests__/remote-retry-rules.test.ts",
       "owner": "packages/runtime",
       "note": "subagent-observability §3.3.12 特性域的 mock 层（零 token，可进 CI）：断言本质 = handler 对服务层调用的消息形态契约（校验失败 sendError 不 reply 不广播 / 成功 reply 读回终态 + broadcast 同帧）+ 服务层读回退与写校验。settings UI 面由 renderer settings-transport-adapter 转发矩阵单测承接（packages/renderer，非看护目录）；真实进程层当前无登记，落建时同 commit 增补 rule（先例 E2E-DELIVERY-01/02 双层口径）。"
+    },
+    {
+      "id": "E2E-PIPE-21",
+      "summary": "test-related.mjs：diff 关联文件级测试跑脚本（测试提速 B2 口径日常入口——变更文件按 import 图反查关联测试，逐包预检枚举 + 超限回退包全量）。测试基建工具非 e2e 资产本体，无下游 e2e 触发；登记本表 = scripts/ 看护根防漏门禁（--check）的 coverage 显式化",
+      "scope": [
+        "scripts/test-related.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/test-related.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/test-related.mjs --help",
+      "owner": "scripts/",
+      "authority": "scripts/test-related.mjs",
+      "note": "使用说明/默认 base/上限保护/回退名单的权威源 = 脚本头注释。2026-10-26 首版 30 merge 回放达标率 6/30（B2 不达标结论与归因见 round2 报告，.tmp 不入库）；脚本不接入任何现有技能命令，接入与否是后续独立变更。"
     }
   ]
 }
