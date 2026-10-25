@@ -1,6 +1,7 @@
 // [u-sessions] app-runtime 接线段单测（remote-use-mobile-v2 验收条款 1/2/3）：
 // ① 双源分组谓词（§6.19）：未订阅 active 会话归「进行中」组、dead 优先「最近」组；
-// ② 未读置位（lastActiveAt 推进或 status 翻转且非活跃）/ 点入即清（§6.3 客户端半）；
+// ② 未读置位（lastActiveAt 推进或 status 翻转且非活跃；首见会话按落盘 lastVisitedAt
+//    对照播种——刷新后未读恢复）/ 点入即清（§6.3 客户端半）；
 // ③ 删除级联三件：关闭相关 Sheet + localStorage lastVisitedAt 条目摘除 + 草稿条目丢弃。
 //
 // mock 策略（对齐 shell/__tests__/app-runtime.test.ts）：仅 transport 出口（session 域
@@ -179,8 +180,35 @@ describe('未读 diff（§6.3）', () => {
     summary({ id: 's2', status: 'active', lastActiveAt: 100 }),
   )
 
-  it('首帧播种不点亮（无先前基线，防刷新后全表误标未读）', () => {
+  it('首帧播种：无落盘 lastVisitedAt 条目不点亮（防新装/清缓存后全表误标未读）', () => {
     dispatchGlobal(sessionsFrame(baseGroups()))
+    expect(isSessionUnread('s1')).toBe(false)
+    expect(isSessionUnread('s2')).toBe(false)
+  })
+
+  it('刷新后未读恢复：首见会话按落盘 lastVisitedAt 对照播种（§6.3 持久对照半）', async () => {
+    // 上次访问后有过新投递（lastActiveAt > lastVisitedAt）→ 恢复点亮
+    await storage.set(LAST_VISITED_KEY_PREFIX + 's1', '50')
+    // 上次访问后无活动（lastActiveAt <= lastVisitedAt）→ 不点亮
+    await storage.set(LAST_VISITED_KEY_PREFIX + 's2', '150')
+    dispatchGlobal(sessionsFrame(groupOf(
+      summary({ id: 's1', status: 'active', lastActiveAt: 100 }),
+      summary({ id: 's2', status: 'active', lastActiveAt: 100 }),
+    )))
+    await flushPromises()
+    expect(isSessionUnread('s1')).toBe(true)
+    expect(isSessionUnread('s2')).toBe(false)
+  })
+
+  it('播种不点亮当前活跃会话；条目损坏（非数字）不点亮', async () => {
+    activeSessionId.value = 's1'
+    await storage.set(LAST_VISITED_KEY_PREFIX + 's1', '50')
+    await storage.set(LAST_VISITED_KEY_PREFIX + 's2', 'corrupt')
+    dispatchGlobal(sessionsFrame(groupOf(
+      summary({ id: 's1', status: 'active', lastActiveAt: 100 }),
+      summary({ id: 's2', status: 'active', lastActiveAt: 100 }),
+    )))
+    await flushPromises()
     expect(isSessionUnread('s1')).toBe(false)
     expect(isSessionUnread('s2')).toBe(false)
   })

@@ -19,13 +19,14 @@ import { activeSessionId, deleteSession } from './app-runtime'
 import { closeSheet } from './sheet-manager'
 
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：未读 diff 基线（上一帧
-// config.sessions 快照的 lastActiveAt/status，diff 的比较源；首帧播种不点亮）
+// config.sessions 快照的 lastActiveAt/status，diff 的比较源；基线无条目的首见会话另走
+// 落盘 lastVisitedAt 播种，见 seedUnreadFromLastVisited）
 const unreadBaseline = new Map<string, { lastActiveAt: number; status: SessionSummary['status'] }>()
 
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：未读会话 id 集合（§6.3 权威源 =
-// 客户端本地 diff；不可变替换触发响应式）。置位语义 = 新投递（lastActiveAt 推进）或新终态
-// （status 翻转）且非当前活跃会话；流式中间态/等待输入不点亮（未订阅会话在客户端无信号源，
-// §6.3 收窄口径）；点入即清（markSessionVisited）。
+// 客户端本地——落盘 lastVisitedAt 持久对照（首见播种）+ 帧间 diff；不可变替换触发响应式）。
+// 置位语义 = 新投递（lastActiveAt 推进）或新终态（status 翻转）且非当前活跃会话；流式中间态/
+// 等待输入不点亮（未订阅会话在客户端无信号源，§6.3 收窄口径）；点入即清（markSessionVisited）。
 const unreadSessionIds = ref<ReadonlySet<string>>(new Set<string>())
 
 /** lastVisitedAt 持久键前缀（每会话一条目，§6.3/§7.1；删除级联按条目摘除防单调累积） */
@@ -35,7 +36,8 @@ function lastVisitedKey(sid: string): string {
   return LAST_VISITED_KEY_PREFIX + sid
 }
 
-/** 点入即清（§6.3）：摘未读点 + 落 lastVisitedAt（best-effort——存储失败不阻断切入）。 */
+/** 点入即清（§6.3）：摘未读点 + 落 lastVisitedAt（刷新后未读恢复的对照源，读方 =
+ * seedUnreadFromLastVisited；best-effort——存储失败不阻断切入）。 */
 export function markSessionVisited(sid: string): void {
   if (unreadSessionIds.value.has(sid)) {
     const next = new Set(unreadSessionIds.value)
@@ -54,10 +56,38 @@ export function isSessionUnread(sid: string): boolean {
   return unreadSessionIds.value.has(sid)
 }
 
+// 首见播种（§6.3 权威源的持久对照半——落盘 lastVisitedAt 的唯一读方）：基线无条目的会话
+// （刷新/重连后的第一帧，或快照中新出现）按「lastActiveAt > lastVisitedAt（上次访问后有
+// 过新投递）且非当前活跃会话」点亮，刷新后未读由此恢复。无落盘条目或条目损坏 → 不点亮
+// （从未在本机访问过的会话无「已读」事实可对照，点亮即全表误标——该分支保持原「首帧只建
+// 基线」保守语义）。边界：status 翻转无落盘快照，播种只对照时间戳——访问后仅终态翻转而
+// lastActiveAt 未推进的会话刷新后不恢复（§6.3 权威源仅含 lastVisitedAt 时间戳）。异步读回
+// 护栏：会话已从最新快照消失（基线被后续帧摘除）不点亮；存储失败降级不点亮（best-effort，
+// 与写口同策略）。
+function seedUnreadFromLastVisited(s: SessionSummary): void {
+  void getPlatform()
+    .storage.get(lastVisitedKey(s.id))
+    .then((raw) => {
+      if (raw === null) return
+      const visitedAt = Number(raw)
+      if (!Number.isFinite(visitedAt)) return
+      if (s.lastActiveAt <= visitedAt) return
+      if (s.id === activeSessionId.value) return
+      if (!unreadBaseline.has(s.id)) return
+      if (unreadSessionIds.value.has(s.id)) return
+      const next = new Set(unreadSessionIds.value)
+      next.add(s.id)
+      unreadSessionIds.value = next
+    })
+    .catch((e: unknown) => {
+      console.warn('[sessions-runtime] read lastVisitedAt failed:', s.id, e)
+    })
+}
+
 // 未读 diff 订阅（模块级单次注册；events 全局通道 Set 允许多订阅者，与 store 整表快照
-// 的既有订阅互不干扰——core events M4 隔离语义）。基线播种：首帧（重连/刷新后的第一帧
-// 快照）只建基线不点亮——无先前状态可比对，点亮会把全表误标未读。此后每帧 diff：
-// lastActiveAt 推进 ∨ status 翻转，且非当前活跃会话 → 置未读。
+// 的既有订阅互不干扰——core events M4 隔离语义）。基线播种：首见会话（无基线条目）走
+// seedUnreadFromLastVisited 落盘对照；此后每帧 diff：lastActiveAt 推进 ∨ status 翻转，
+// 且非当前活跃会话 → 置未读。
 void onGlobalType('config.sessions', (msg) => {
   const flat = msg.payload.groups.flatMap((g) => g.sessions)
   const seen = new Set<string>(flat.map((s) => s.id))
@@ -72,6 +102,7 @@ void onGlobalType('config.sessions', (msg) => {
         changed = true
       }
     }
+    if (prev === undefined) seedUnreadFromLastVisited(s)
     unreadBaseline.set(s.id, { lastActiveAt: s.lastActiveAt, status: s.status })
   }
   // 已消失会话（删除/deleteByCwd/归档出列表）同步摘除基线与未读（注册表级联外的兜底收敛）
