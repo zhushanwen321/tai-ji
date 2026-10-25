@@ -130,11 +130,14 @@ export function warnFailureOnce(
 // ── 图标解析（§6.13 单函数：四容器与头部按钮共用）────────────────────
 
 /**
- * 贡献图标白名单（lucide 名，单一事实源）：初始成员 = 渲染端既有四套映射表的并集——
+ * 贡献图标白名单（lucide 名，单一事实源）：成员 = 渲染端全部图标消费点的并集——
  * DrawerPanel.ICON_BY_ID（11）/ TrayWidgetButton.WIDGET_ICON_ENTRIES（11，与抽屉表
- * 重叠 square-check-big、bot）/ HeaderActionsHost.HEADER_ACTION_ICONS（1）+ 两个登记项：
+ * 重叠 square-check-big、bot）/ HeaderActionsHost.HEADER_ACTION_ICONS（1）+ 设置页
+ * SETTINGS_SECTION_ICONS（17，其中 bot/git-branch 与抽屉表重叠）+ 浮层壳
+ * OVERLAY_TAB_ICON_COMPONENTS（3，其中 workflow/clock 已在）+ 两个登记项：
  * 'layout-grid' = 统一兜底图标自指（插件显式声明兜底 = 合法）；'panel-right' = 设计
- * §5.2 成功路径示例 icon（照文档写的声明不得落兜底）。渲染端四套映射表接线本表后退役。
+ * §5.2 成功路径示例 icon（照文档写的声明不得落兜底）。各消费端已接线 resolveContributionIcon、
+ * 本地表退役——新容器/新内置项的图标名在本表登记一行 + 渲染端组件表登记一行。
  */
 export const CONTRIBUTION_ICON_KEYS: readonly string[] = [
   // DrawerPanel.ICON_BY_ID ∪ TrayWidgetButton.WIDGET_ICON_ENTRIES ∪ HeaderActionsHost.HEADER_ACTION_ICONS
@@ -158,13 +161,32 @@ export const CONTRIBUTION_ICON_KEYS: readonly string[] = [
   'zap',
   'flag',
   'gauge',
+  // 设置页 SETTINGS_SECTION_ICONS（bot/git-branch 与上方抽屉/托盘表重叠，不重复登记）
+  'settings',
+  'sparkles',
+  'blocks',
+  'server',
+  'clipboard-list',
+  'palette',
+  'scroll-text',
+  'tag',
+  'volume-2',
+  'terminal-square',
+  'download',
+  'wifi',
+  'waypoints',
+  'sliders-horizontal',
+  'chart-column',
+  // 浮层壳 OVERLAY_TAB_ICON_COMPONENTS（workflow/clock 已在）
+  'network',
   // 统一兜底图标（= PluginViewContainer.DEFAULT_ICON / TrayWidgetButton.FALLBACK_WIDGET_ICON 同源 lucide 名）
   'layout-grid',
   // 设计 §5.2 成功路径示例
   'panel-right',
 ]
 
-/** 未命中兜底图标（lucide 名）。注：DrawerPanel 现行兜底为 FileText（容器侧差异），U6 接线本函数时收敛到本键。 */
+/** 未命中/未声明兜底图标（lucide 名）。各容器兜底差异（DrawerPanel 旧 FileText /
+ *  HeaderActionsHost 旧 Puzzle）已随接线收敛到本键——四容器兜底一致（§6.13 效果）。 */
 export const FALLBACK_CONTRIBUTION_ICON = 'layout-grid'
 
 /** 白名单键归一化：沿用托盘 normalizeIconKey 口径（trim + 小写 + 去除 -/_/空白）——插件侧拼写习惯各异，宽容优于强制单写法。 */

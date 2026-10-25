@@ -127,7 +127,7 @@
            （workflow-viz-overlay-derivation 单点）；testid 沿用 per-segment 形态
            （wfvz-overlay-scheduler-title / -canvas-title），e2e 与单测锚点不变。 -->
       <template v-else-if="activeSegment !== null">
-        <component :is="segmentIconComponent(activeSegment.icon)" class="size-[15px] shrink-0 text-neutral-dim" aria-hidden="true" />
+        <component :is="segmentIconComponent(activeSegment)" class="size-[15px] shrink-0 text-neutral-dim" aria-hidden="true" />
         <span
           class="min-w-0 shrink-0 font-mono text-[length:var(--text-xs)] font-semibold text-neutral-fg"
           :data-testid="`wfvz-overlay-${activeSegment.value}-title`"
@@ -339,8 +339,11 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown, Clock, Network, Workflow } from '@lucide/vue'
+import type { LucideIcon } from '@lucide/vue'
+import { ChevronDown, Workflow } from '@lucide/vue'
 import { WORKFLOW_RUN_OUTCOME_LABELS, type ProviderId, type WorkflowAgentCall, type WorkflowDag, type WorkflowRunRecord } from '@taiji/shared'
+import { HOST_PLUGIN_ID } from '@taiji/core/extension-host'
+import { contributionIconComponent } from '@taiji/ui'
 import { Button } from '@/components/ui/button'
 import { PopoverTrigger } from '@/components/ui/popover'
 import ModelSelectPopover from '@/components/panel/ModelSelectPopover.vue'
@@ -443,17 +446,12 @@ const activeSegment = computed<OverlayTabSegment | null>(() =>
   derivedSegments.find((seg) => seg.value === props.tab) ?? null)
 
 /**
- * 段 icon 解析（icon 名 → lucide 组件；本壳白名单 + 兜底——§6.13 四容器单一解析函数
- * 收敛归 U13，本表是浮层壳的本地消费形态）。
+ * 段 icon 解析（§6.13 单一解析函数的浮层消费侧：resolveContributionIcon 归一化/白名单/
+ * 错名 warn + 共享组件表换算——内置段 pluginId = taiji-host，contributionId = tab 位；
+ * 本壳零本地映射表，未声明/错名落统一兜底）。
  */
-const OVERLAY_TAB_ICON_COMPONENTS: Record<string, typeof Workflow> = {
-  workflow: Workflow,
-  clock: Clock,
-  network: Network,
-}
-
-function segmentIconComponent(icon: string): typeof Workflow {
-  return OVERLAY_TAB_ICON_COMPONENTS[icon] ?? Workflow
+function segmentIconComponent(seg: OverlayTabSegment): LucideIcon {
+  return contributionIconComponent({ pluginId: HOST_PLUGIN_ID, contributionId: seg.value, icon: seg.icon })
 }
 
 /**
@@ -465,13 +463,13 @@ function segmentLabel(seg: OverlayTabSegment): string {
 }
 
 /** tab 词条组装（文案解析 + 图标组件绑定；t() 保持 i18n 响应式）。 */
-const tabSegments = computed<Array<{ value: OverlayTab; kind: OverlayKind; openableWithoutData: boolean; label: string; icon: typeof Workflow }>>(() =>
+const tabSegments = computed<Array<{ value: OverlayTab; kind: OverlayKind; openableWithoutData: boolean; label: string; icon: LucideIcon }>>(() =>
   derivedSegments.map((seg) => ({
     value: seg.value,
     kind: seg.kind,
     openableWithoutData: seg.openableWithoutData,
     label: seg.kind === 'workflow' ? t('panel.workflowViz.overlayTabRuns') : t(seg.labelKey),
-    icon: segmentIconComponent(seg.icon),
+    icon: segmentIconComponent(seg),
   })))
 
 /**

@@ -221,9 +221,10 @@ describe('TrayWidgetButton icon fallback 链（D4）', () => {
 
     const goalBtn = mountButton({ viewId: 'goal', meta: makeMeta({ icon: 'no-such-icon' }) })
     expect(goalBtn.find('svg.lucide-target').exists()).toBe(true)
-    // 未知 string key 落内置映射，且 warn 一次（可操作诊断）
+    // 未知 string key 落内置映射，且 warn 一次（§6.14 统一告警出口：icon-not-in-allowlist
+    // 种类 + pluginId::contributionId 去重键——pluginId 未透传时回退 viewId，故含 goal）
     expect(warnSpy).toHaveBeenCalledTimes(1)
-    expect(String(warnSpy.mock.calls[0][0])).toContain('unknown-key')
+    expect(String(warnSpy.mock.calls[0][0])).toContain('icon-not-in-allowlist')
     expect(String(warnSpy.mock.calls[0][0])).toContain('goal')
   })
 

@@ -582,11 +582,16 @@ describe('图标解析单函数（§6.13，U13 验收④：四容器共用 / 未
     expect(warn.mock.calls.length).toBeGreaterThan(0)
   })
 
-  it('白名单 = 既有四套映射表并集 + layout-grid（兜底自指）+ panel-right（设计 §5.2 示例）；兜底键自身可声明', () => {
+  it('白名单 = 全部图标消费点并集（抽屉/托盘/头部 + 设置页 + 浮层）+ layout-grid（兜底自指）+ panel-right（设计 §5.2 示例）；兜底键自身可声明', () => {
     expect([...CONTRIBUTION_ICON_KEYS]).toEqual([
       'terminal', 'globe', 'git-branch', 'book-open', 'file-text', 'bot',
       'square-terminal', 'square-check-big', 'messages-square', 'workflow', 'list-tree',
       'list-checks', 'list-todo', 'circle-check', 'circle-dot', 'target', 'clock', 'zap', 'flag', 'gauge',
+      // 设置页 SETTINGS_SECTION_ICONS（bot/git-branch 与抽屉/托盘表重叠，不重复登记）
+      'settings', 'sparkles', 'blocks', 'server', 'clipboard-list', 'palette', 'scroll-text', 'tag',
+      'volume-2', 'terminal-square', 'download', 'wifi', 'waypoints', 'sliders-horizontal', 'chart-column',
+      // 浮层壳段（workflow/clock 已在）
+      'network',
       'layout-grid', 'panel-right',
     ])
     expect(FALLBACK_CONTRIBUTION_ICON).toBe('layout-grid')

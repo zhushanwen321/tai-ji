@@ -219,7 +219,7 @@ const navGroups = computed(() =>
       view,
       key: settingsNavKey(view),
       label: slotDisplayLabel(view, t),
-      icon: settingsNavIcon(view.icon),
+      icon: settingsNavIcon(view),
     })),
   })),
 )

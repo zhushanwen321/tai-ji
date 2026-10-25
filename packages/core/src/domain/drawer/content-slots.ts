@@ -23,6 +23,7 @@ import {
   builtinDrawerSlots,
   contentSlotRegistry,
   type ContentSlotRenderer,
+  type ContentSlotView,
 } from '../../extension-host/content-slot-registry'
 import { RIGHT_DRAWER_REGISTRY } from './registry'
 import type { RightDrawerTab } from './types'
@@ -33,7 +34,9 @@ export interface DrawerTabView { // oe-exempt:20261025:framework:抽屉派生条
   key: RightDrawerTab
   source: 'builtin' | 'plugin'
   pluginId: string
-  /** 插件文案原文（§6.16④：有 label 用原文；内置项无此字段） */
+  /** 插件文案原文（§6.16④：有 label 用原文）；内置项恒 undefined——内置 label 是声明
+   *  结构必填的 id 占位值、非渲染文案，文案恒走 labelKey（消费端 label ?? labelKey 判据
+   *  据此自然落到 i18n key）。 */
   label?: string
   /** 内置文案 i18n key（内置项恒走，§6.16④） */
   labelKey?: string
@@ -49,9 +52,12 @@ export interface DrawerTabView { // oe-exempt:20261025:framework:抽屉派生条
   renderer: ContentSlotRenderer
 }
 
-/** 内置项装配（惰性幂等：首个读访问登记，重复调用零操作——registerBuiltin 同 id 覆盖写）。 */
+/** 内置项装配（惰性幂等：首个读访问登记，重复调用零操作——registerBuiltin 同 id 覆盖写）。
+ *  导出给容器导航装配侧（useExtensionHostBridge 的 ContainerSlotLookup）：抽屉内置项的
+ *  既有触发点在抽屉渲染（drawerTabViews 首调），而导航点击可能先于抽屉首渲（树内/浮层
+ *  交互）——解析全局 id 空间前须确保内置声明在册，否则内置 tab 目标误判 unknown-target。 */
 let builtinsAssembled = false
-function ensureBuiltinsAssembled(): void {
+export function ensureBuiltinsAssembled(): void {
   if (builtinsAssembled) return
   contentSlotRegistry.registerBuiltin(builtinDrawerSlots(RIGHT_DRAWER_REGISTRY))
   builtinsAssembled = true
@@ -61,6 +67,12 @@ function ensureBuiltinsAssembled(): void {
 function builtinTabKey(declarationId: string): RightDrawerTab {
   const prefix = `${BUILTIN_NAMESPACE}.`
   return declarationId.startsWith(prefix) ? declarationId.slice(prefix.length) : declarationId
+}
+
+/** 内置项文案不透传（§6.16④ 内置项恒走 labelKey）：投影单点表达「内置 label = 声明结构
+ *  占位值、非渲染文案」，消费端的 label ?? labelKey 判据无需各自复刻 source 分叉。 */
+function viewLabel(view: ContentSlotView): string | undefined {
+  return view.source === 'plugin' ? view.label : undefined
 }
 
 /**
@@ -73,7 +85,7 @@ export function drawerTabViews(): DrawerTabView[] {
     key: view.source === 'builtin' ? builtinTabKey(view.id) : view.id,
     source: view.source,
     pluginId: view.pluginId,
-    label: view.label,
+    label: viewLabel(view),
     labelKey: view.labelKey,
     icon: view.icon,
     scope: view.scope,

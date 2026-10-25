@@ -151,11 +151,14 @@ export function parseOverlayDisplayState(payload: unknown): OverlayDisplayState 
   ) {
     throw new Error(`[browser:overlay-state] content must be "browser" | "workflow" | "scheduler" | "canvas" | "plugin" when open, got ${String(payload.content)}`)
   }
-  // sessionId 通用判据（容器扩展点统一 §7.2 浮层 kind 词表四方同批）：唯一消费方是 browser
-  // 显示谓词（computeShouldShow 的 isOverlayBrowserActive + 发起会话匹配）——非 browser 内容
+  // sessionId 通用判据（容器扩展点统一 §7.2 浮层 kind 词表四方同批）：消费方是 browser
+  // 显示谓词（computeShouldShow 的 isOverlayBrowserActive + 发起会话匹配）与会话销毁复位
+  // （browser-view-manager destroyView 的 open && sessionId 匹配级联复位）——非 browser 内容
   // 一律不驱动 view 显示，sessionId 恒 null（上报侧 renderer useBrowserOverlayStateSync 同一
-  // 判据）；browser 内容持发起会话（非空 string，谓词事实源语义不变）。原 canvas 单值特判
-  // 随判据通用化并入此分支（画布归属会话仍在 core 载荷层，谓词面恒 null 不变）。
+  // 判据），销毁复位对非 browser 内容恒不命中（陈旧浮层态与 CLOSED_OVERLAY 观测等价：view
+  // 恒隐藏、focus 不豁免、复位不触发）；browser 内容持发起会话（非空 string，谓词事实源语义
+  // 不变）。原 canvas 单值特判随判据通用化并入此分支（画布归属会话仍在 core 载荷层，谓词面
+  // 恒 null 不变）。
   if (payload.content === 'browser') {
     if (typeof payload.sessionId !== 'string' || payload.sessionId.length === 0) {
       throw new Error('[browser:overlay-state] sessionId must be a non-empty string when open')

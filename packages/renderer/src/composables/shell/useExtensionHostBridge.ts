@@ -55,11 +55,11 @@ import {
   type SessionScopedMap,
   type ViewCacheEntry,
 } from '@taiji/core'
-import { openDrawerTab, getBoundSessionId, RIGHT_DRAWER_REGISTRY } from '@taiji/core/domain/drawer'
+import { openDrawerTab, getBoundSessionId, ensureBuiltinsAssembled } from '@taiji/core/domain/drawer'
 import type { ContentSlotDeclaration, PluginDescriptorLike } from '@taiji/core'
 import { contentSlotRegistry } from '@taiji/core'
+import { openOverlayContent } from '@taiji/core/domain/overlay'
 import { getState as getWsState, send } from '@taiji/core/transport/ws-client'
-import { getContentSlotRegistry } from '@/lib/content-slots'
 import {
   createCompanionDialogAdapters,
   createWsPluginMessageSource,
@@ -99,7 +99,7 @@ export function getExtensionBus(): InternalEventBus {
  * 模块级 = 进程级持存：跨容器实例与跨会话生效，插件重新启用后不清空——routeAll 每次
  * loadExternal 后重跑，同一无效声明会在每次 config.plugins 广播时重复 emit（7 处触发点），
  * 无去重则告警刷屏。键 = pluginId::contributionId::失败种类（§6.14 统一口径）。
- * 登记处 = docs/architecture/data-source-registry.md #80（与 ContentSlotRegistry.warnedKeys
+ * 登记处 = docs/architecture/data-source-registry.md #80（与 failure-degradation.ts warnedKeys
  * 同条两载体，本条为 renderer 桥侧载体②）。
  */
 const unregisteredMountPointWarned = new Set<string>() // @data-owner #80
@@ -257,24 +257,20 @@ function toContentSlotDeclaration(pluginId: string, v: PluginContributesView): C
 /**
  * 插件容器位声明的注册表操作（灌入/清理/重放共用同一入口）。
  *
- * 双实例成对操作（现状必双写）：插件容器位的派生消费横跨两份注册表实例——抽屉读 core
- * 模块级单例（domain/drawer/content-slots.ts 的 ensureBuiltinsAssembled/drawerTabViews），
- * 侧栏与设置页读 renderer 装配单例（lib/content-slots.ts 的 getContentSlotRegistry）。
- * 只写其一 = 容器位在另一半容器永久缺失/残留（清不净、放不回），故灌入与清理必须两份
- * 同步；两实例注册同一声明，派生视图同构一致。统一为单一实例是前序单元实现分歧，不属
- * 本单元裁决（登记 runlog 待裁决）。
+ * 单一写路径：四个容器的派生视图同源于 core 模块级单例 contentSlotRegistry（§6.1 一份
+ * 注册表；侧栏/设置页经 lib/content-slots 的 getContentSlotRegistry 访问同一实例，抽屉经
+ * domain/drawer/content-slots 消费同一实例）——灌入与清理各只有这一个写点，无双权威、
+ * 无成对写。
  */
 function loadExternalContentSlots(descriptor: PluginDescriptorLike): void {
   const declarations = (descriptor.contributes?.views ?? []).map((v) =>
     toContentSlotDeclaration(descriptor.pluginId, v),
   )
   contentSlotRegistry.loadExternal(descriptor.pluginId, declarations)
-  getContentSlotRegistry().loadExternal(descriptor.pluginId, declarations)
 }
 
 function clearContentSlots(pluginId: string): void {
   contentSlotRegistry.clearForPlugin(pluginId)
-  getContentSlotRegistry().clearForPlugin(pluginId)
 }
 
 // ── u4b（plugin-header-action-modal-points AP-1）渲染宿主的数据源契约 ──
@@ -653,7 +649,7 @@ export function initExtensionHostBridge(app: App): void {
     headerActionStore.clearForPlugin(pluginId)
     // 容器位注册表同链清理（W-C-9）：不清则禁用后派生视图仍含该插件容器位（抽屉/侧栏/
     // 设置页四处；浮层插件内容不进标签条，构造性不受影响）。注册表内建 host 保护
-    //（taiji-host 内置项不受影响），幂等；双实例成对清（见 loadExternalContentSlots 注释）。
+    //（taiji-host 内置项不受影响），幂等；四容器同源单实例，本清理即全容器生效。
     clearContentSlots(pluginId)
     refreshHeaderActionDeclarations()
   }
@@ -693,34 +689,37 @@ export function initExtensionHostBridge(app: App): void {
   // 容器导航执行器（容器扩展点统一 §6.4）：core 执行器装配后直接 provide（与 ui
   // CONTAINER_NAVIGATION_KEY 接口结构同构，零适配）。校验逻辑（全局 id 解析/族匹配/
   // 可打开性/params 标量/会话优先级）全在 core 执行器（container-navigation.test.ts 承载）；
-  // 壳层只装配两个端口的当前真实实现：
-  // - lookup：容器位注册表（ContentSlotRegistry）就绪前的空查询——全局 id 空间恒无命中，
-  //   导航点击落 unknown-target warning（判定表口径：点击无动作，零状态写入）。
-  //   注册表装配后由其接线单元替换为真实查询。
-  // - sink.openDrawerTab：接 core drawer coordination（瞬时参数 + 开合态一次写入）。
-  //   RightDrawerTab 仍是字面量联合，经 RIGHT_DRAWER_REGISTRY 收窄；内置 8 tab 之外
-  //   的插件命名空间 tab 待容器类型去枚举后放行（守卫随签名开放删除）。
-  //   sessionId 形参为浮层级联（§6.8）保留统一签名：drawer 选中态分区键走
-  //   bindDrawerSessionId 绑定的焦点会话（ADR-0053 单例抽屉语义），本分支不消费。
-  // - sink.openOverlayContent：openOverlayContent 协调函数落地前的显式 warn 出声
-  //   （失败可见，零状态写入），不静默吞。
+  // 壳层装配两个端口的真实实现：
+  // - lookup：容器位注册表（core 单例 contentSlotRegistry）的真实查询——resolveTargets 投影
+  //   注册表 findById（全局 id 空间解析，§6.12）；查询前确保抽屉内置声明在册（内置装配
+  //   既有触发点在抽屉首渲，导航点击可能先于首渲）。hasData 的按族数据事实查询（view 类
+  //   = ViewHostStore 分区读）待声明面出现 openableWithoutData=false 成员时随端口扩形落地：
+  //   现声明面无 false 成员（内置项恒 true、插件清单声明无该字段缺省 true），本端口仅
+  //   false 声明可达——保守判无数据，不打开空容器（§5.4 行 7，warn 出声可诊断），不谎报。
+  // - sink.openDrawerTab：接 core drawer coordination openDrawerTab（瞬时参数 + 开合态一次
+  //   写入）。RightDrawerTab 已去枚举（开放 string，types.ts），目标存在性/族匹配已由执行器
+  //   对注册表校验先行（§6.4 先校验后动作），tabId 直接透传。sessionId 形参为浮层级联
+  //   （§6.8）保留统一签名：drawer 选中态分区键走 bindDrawerSessionId 绑定的焦点会话
+  //   （ADR-0053 单例抽屉语义），本分支不消费。
+  // - sink.openOverlayContent：接 core overlay 协调函数 openOverlayContent（内置 scheduler
+  //   走既有组装，其余按声明 id 走 §6.8 plugin 载体；core 形参序 (contentId, sessionId)）。
   const containerNavigationExecutor = new ContainerNavigationExecutor({
     lookup: {
-      resolveTargets: () => [],
+      resolveTargets: (tabId) => {
+        ensureBuiltinsAssembled()
+        return contentSlotRegistry.findById(tabId).map((d) => ({
+          id: d.id,
+          placement: d.placement,
+          pluginId: d.pluginId,
+          scope: d.scope,
+          openableWithoutData: d.openableWithoutData ?? true,
+        }))
+      },
       hasData: () => false,
     },
     sink: {
-      openDrawerTab: (_sessionId, tabId, params) => {
-        const tab = RIGHT_DRAWER_REGISTRY.find((e) => e.content === tabId)?.content
-        if (tab === undefined) {
-          console.warn(`[container-navigation] drawer 目标 '${tabId}' 不在 RIGHT_DRAWER_REGISTRY，跳过打开——插件命名空间 tab 待容器位注册表接线后放行`)
-          return
-        }
-        openDrawerTab(tab, params)
-      },
-      openOverlayContent: (_sessionId, contentId) => {
-        console.warn(`[container-navigation] 浮层内容 '${contentId}' 打开通道未接线，跳过打开——待浮层协调函数落地后生效`)
-      },
+      openDrawerTab: (_sessionId, tabId, params) => openDrawerTab(tabId, params),
+      openOverlayContent: (sessionId, contentId) => openOverlayContent(contentId, sessionId),
     },
     // 焦点会话复用 drawer 域绑定（useSideDrawer 模块加载时绑到 panel store 的 focusedSessionId）
     getBoundSessionId,

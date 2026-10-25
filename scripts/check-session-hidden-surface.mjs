@@ -197,7 +197,7 @@ export const HIDDEN_ALLOWLIST = new Map([
   ['packages/renderer/src/components/canvas/canvas-display.ts:229', 'canvas 布局 opts.hidden 形参声明'],
   ['packages/renderer/src/components/canvas/canvas-display.ts:232', 'canvas 布局 opts.hidden 属性访问'],
   // renderer 扩展宿主桥的插件条目 hidden（帧面透传）
-  ['packages/renderer/src/composables/shell/useExtensionHostBridge.ts:338', '插件 headerAction hidden 开关读取（isVisibleHeaderAction 谓词：显式推送 hidden 即隐藏，两类入口一视同仁）'],
+  ['packages/renderer/src/composables/shell/useExtensionHostBridge.ts:334', '插件 headerAction hidden 开关读取（isVisibleHeaderAction 谓词：显式推送 hidden 即隐藏，两类入口一视同仁）'],
   // locale 键（设置页「注册但不可达」开关的字面键名）
   ['packages/ui/src/locale/en-US/settings.ts:1396', 'locale 键 hidden（设置项字面键名，非会话语义）'],
   ['packages/ui/src/locale/zh-CN/settings.ts:1395', 'locale 键 hidden（设置项字面键名，非会话语义）'],

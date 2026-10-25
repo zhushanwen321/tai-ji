@@ -4,7 +4,7 @@
  * useExtensionHostBridge-plugin-replay.test.ts —— 清理与重放接线单测（容器扩展点统一
  * U12 / 走查 W-C-9 修复的验收载体）。
  *
- * 被测行为（桥内 config.plugins 订阅处维护快照 + E2 触发链成对接线双注册表）：
+ * 被测行为（桥内 config.plugins 订阅处维护快照 + E2 触发链接线容器位注册表）：
  * - U12-A（验收①）：plugin-status-change inactive/crashed → handlePluginGone 追加
  *   contentSlotRegistry.clearForPlugin——禁用后插件容器位从抽屉派生视图消失、内置项不受影响；
  * - U12-B（验收②）：handlePluginBack 的 external 分支从「只重放 builtin」改为从最近一帧
@@ -17,9 +17,10 @@
  *   事件不看快照 enabled 位（statusChange 先于下一帧到达，快照 enabled 位已过期）；
  * - U12-E：快照缺失（安装后首帧未达）时 handlePluginBack 不 throw、builtin 照常重放。
  *
- * 双注册表断言：抽屉派生读 core 模块级单例（domain/drawer/content-slots 的
- * drawerTabViews），侧栏派生读 renderer 装配单例（lib/content-slots 的
- * getContentSlotRegistry().deriveSidebarTabs）——清理/灌入/重放对两份实体成对生效。
+ * 双侧派生断言：抽屉派生读 core 模块级单例（domain/drawer/content-slots 的
+ * drawerTabViews），侧栏派生读 lib/content-slots 的
+ * getContentSlotRegistry().deriveSidebarTabs——两读侧同源 core 唯一实例（§6.1 一份注册表），
+ * 桥内灌入/清理单写点对全部容器生效。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useExtensionHostBridge-plugin-replay.test.ts
  */
@@ -42,8 +43,8 @@ vi.mock('@/composables/features/command/useCommandStore', () => ({
 }))
 
 beforeEach(() => {
-  // 双注册表实例均跨用例持存（core 模块级单例 + renderer 装配单例）：每用例重置 renderer
-  // 侧；core 侧无 reset 入口，用各用例独立 pluginId 隔离（声明分区互不重叠）
+  // 注册表为 core 模块级单例（跨用例持存）：每用例重置（清插件分区 + 重登内置项）后，
+  // 用各用例独立 pluginId 声明隔离（分区互不重叠）
   __resetContentSlotsForTesting()
 })
 

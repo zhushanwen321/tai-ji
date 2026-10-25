@@ -27,14 +27,15 @@
   ① `meta.icon` 为 `{ paths }` 且过 `validateWidgetIconPaths` 白名单 → 渲染自定义形状
      `<path :d>`：统一 viewBox 24 / fill none / stroke currentColor / stroke-width 1.75 /
      round linecap·join（形状归 extension、线宽颜色尺寸归宿主锁死）
-  ② `meta.icon` 为 string → 宿主 registry 按 lucide 名解析（大小写 / 连字符 / 下划线不敏感）
+  ② `meta.icon` 为 string → §6.13 单一解析函数按白名单 lucide 名解析（大小写 / 连字符 /
+     下划线不敏感），组件换算走共享表（ui/lib/contribution-icons）
   ③ 上一档未命中或越限 → 宿主内置 widgetKey 映射（'todo'→ListChecks、'goal'→Target）
-  ④ 仍无 → 通用 widget icon（LayoutGrid，与 PluginViewContainer DEFAULT_ICON 同源）
-  ① 越限 / ② 未命中时 console.warn 一次（按 viewId+原因去重，防 tool call 级推送刷屏，§3.5）；
-  无 icon 字段（含 v1 旧 extension）不是坏数据，静默走 ③/④，不 warn。
-  [落地裁决] ② 的「按 lucide 名解析」实现为宿主 registry 白名单而非 @lucide/vue 全量
+  ④ 仍无 → 通用 widget icon（LayoutGrid，统一兜底 FALLBACK_CONTRIBUTION_ICON 同源）
+  ① 越限（本地 warn 一次）/ ② 未命中（core 按去重键 warn 一次）后继续下探；无 icon 字段
+  （含 v1 旧 extension）不是坏数据，静默走 ③/④，不 warn。
+  [落地裁决] ② 的「按 lucide 名解析」收敛到 §6.13 单一函数 + 白名单而非 @lucide/vue 全量
   namespace 解析——namespace import 击穿 tree-shaking，会把整套 1500+ icon 打进 renderer
-  bundle；新增可用名在 WIDGET_ICON_ENTRIES 一行登记即可。
+  bundle；新增可用名在 core CONTRIBUTION_ICON_KEYS 一行 + 共享组件表一行登记即可。
 
   ── badge fallback 链（D4）──
   `meta.badge` → `meta.progress.label ?? String(meta.progress.current)` → 无
@@ -118,7 +119,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Component } from 'vue'
-import { Bot, CircleCheck, CircleDot, Clock, Flag, Gauge, LayoutGrid, ListChecks, ListTodo, SquareCheckBig, Target, Workflow, Zap } from '@lucide/vue'
+import { LayoutGrid, ListChecks, Target } from '@lucide/vue'
+import { normalizeIconKey, resolveContributionIcon } from '@taiji/core'
+import { contributionIconComponentByKey } from '@taiji/ui'
 import { validateWidgetIconPaths } from '@zhushanwen/extension-protocol'
 import type { WidgetMeta } from '@zhushanwen/extension-protocol'
 import { Button } from '@/components/ui/button'
@@ -131,9 +134,11 @@ const props = withDefaults(
     viewId: string
     /** widget 宿主元数据（可选：v1 旧 extension 推送无 meta） */
     meta?: WidgetMeta
+    /** 归属插件 id（icon 错名 warn 去重键的归属段；缺省回退 viewId，外壳从 ViewHostStore 条目透传） */
+    pluginId?: string
     /** pin 态（外壳持有） */
     pinned?: boolean
-    /** 关联面板是否可见（外壳持有：hover 预览或 pin） */
+    /** 关联面板是否可见（外壳持有：hover 预览或 pin 均置 true） */
     expanded?: boolean
   }>(),
   { pinned: false, expanded: false },
@@ -160,39 +165,17 @@ const BUILTIN_WIDGET_ICONS: ReadonlyMap<string, Component> = new Map<string, Com
 ])
 
 /**
- * 宿主 icon registry（D4 第二档）：按 lucide 名解析（归一化后匹配，见 normalizeIconKey）。
- * 刻意不用 @lucide/vue namespace 全量解析——见文件头「落地裁决」。
+ * 宿主 icon registry（D4 第二档）：§6.13 单一解析函数（resolveContributionIcon：归一化 +
+ * 白名单校验 + 错名按去重键 warn 一次）+ 共享组件表换算——本组件零本地映射表与零本地
+ * 归一化实现（原 WIDGET_ICON_ENTRIES/normalizeIconKey 已退役）。未命中落 fallback 后继续
+ * 下探内置映射（与原链语义一致：warn 一次后下探）。
  */
-const WIDGET_ICON_ENTRIES: ReadonlyArray<readonly [string, Component]> = [
-  ['list-checks', ListChecks],
-  ['list-todo', ListTodo],
-  ['square-check-big', SquareCheckBig],
-  ['circle-check', CircleCheck],
-  ['circle-dot', CircleDot],
-  ['target', Target],
-  ['clock', Clock],
-  ['zap', Zap],
-  ['flag', Flag],
-  ['gauge', Gauge],
-  // subagent 域图标名（与右抽屉 subagent tab 的 icon 同名——drawer registry SUBAGENT_ENTRY）
-  ['bot', Bot],
-  // workflow 域图标名（容器扩展点统一 §6.6/U10：托盘 workflow 件迁插件 widget 树，
-  // meta.icon='workflow' 由本 registry 解析——原宿主 built-in 件的 Workflow 图标同源）
-  ['workflow', Workflow],
-]
-
-/** registry 查表（模块级常量表，非缓存：仅归一化键名映射，无运行时写方） */
-const WIDGET_ICON_REGISTRY: ReadonlyMap<string, Component> = new Map(
-  WIDGET_ICON_ENTRIES.map(([name, icon]) => [normalizeIconKey(name), icon]),
-)
 
 /** 通用 widget icon（D4 第四档）：与 PluginViewContainer 的 view 兜底 icon 同源（LayoutGrid） */
 const FALLBACK_WIDGET_ICON: Component = LayoutGrid
 
-/** registry 键归一化：忽略大小写与 -/_/空格（extension 侧拼写习惯各异，宽容优于强制单写法） */
-function normalizeIconKey(name: string): string {
-  return name.trim().toLowerCase().replace(/[-_\s]/g, '')
-}
+/** registry 键归一化（§6.13 单一实现，core 导出）：忽略大小写与 -/_/空格。 */
+// normalizeIconKey 由 @taiji/core 提供（failure-degradation），本地副本已退役。
 
 /** icon 解析结果：自定义形状 paths 或 lucide 组件（二选一，模板据此分支） */
 type WidgetIcon =
@@ -217,8 +200,10 @@ function warnIconOnce(viewId: string, reason: string): void {
   )
 }
 
-/** icon fallback 链（D4 四档顺序，见文件头）。越限/未知各 warn 一次后继续下探。 */
-function resolveWidgetIcon(viewId: string, raw: WidgetMeta['icon'] | undefined): WidgetIcon {
+/** icon fallback 链（D4 四档顺序，见文件头）。越限/未知各 warn 一次后继续下探。
+ *  ② 档的 string 解析走 §6.13 单一函数：pluginId 缺省（外壳未透传/测试直挂）回退 viewId
+ *  作去重键归属段——键粒度退化为 viewId 维度（与退役前的本地 warn 粒度一致）。 */
+function resolveWidgetIcon(viewId: string, pluginId: string | undefined, raw: WidgetMeta['icon'] | undefined): WidgetIcon {
   if (raw !== undefined && typeof raw !== 'string') {
     // 显式 null 是协议可达形态（wire 上 stripUndefined 只删 undefined 不删 null，第三方独立
     // 安装扩展可推 icon: null）——null 无 paths 可取，归 'not-array' 走既有兜底链（与非法
@@ -227,15 +212,16 @@ function resolveWidgetIcon(viewId: string, raw: WidgetMeta['icon'] | undefined):
     if (validation.valid) return { kind: 'paths', paths: validation.paths }
     warnIconOnce(viewId, validation.reason)
   } else if (typeof raw === 'string' && raw.trim() !== '') {
-    const hit = WIDGET_ICON_REGISTRY.get(normalizeIconKey(raw))
-    if (hit) return { kind: 'glyph', component: hit }
-    warnIconOnce(viewId, 'unknown-key')
+    // {paths} 自定义形状仅本区支持（§6.13 范围外），string 名档在单一函数范围内
+    const resolution = resolveContributionIcon({ pluginId: pluginId ?? viewId, contributionId: viewId, icon: raw })
+    if (resolution.status === 'declared') return { kind: 'glyph', component: contributionIconComponentByKey(resolution.key) }
+    // fallback（未命中白名单，core 已按去重键 warn 一次）→ 下探内置映射
   }
   const builtin = BUILTIN_WIDGET_ICONS.get(normalizeIconKey(viewId))
   return { kind: 'glyph', component: builtin ?? FALLBACK_WIDGET_ICON }
 }
 
-const icon = computed<WidgetIcon>(() => resolveWidgetIcon(props.viewId, props.meta?.icon))
+const icon = computed<WidgetIcon>(() => resolveWidgetIcon(props.viewId, props.pluginId, props.meta?.icon))
 
 /** 显示标题：meta.title（空串视为缺省）→ viewId（v1 旧 extension 与脏数据兜底） */
 const displayTitle = computed(() => {

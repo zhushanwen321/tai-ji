@@ -1,13 +1,13 @@
 /**
- * content-slots.ts —— ContentSlotRegistry 渲染端装配单点（容器扩展点统一 §6.1 / U8）。
+ * content-slots.ts —— ContentSlotRegistry 渲染端消费单点（容器扩展点统一 §6.1 / U8）。
  *
- * 职责：core 注册表（headless 非响应结构）在本壳的单例装配 + 内置项登记 + 响应式派生。
- * 侧栏与设置页两个容器共用同一注册表实例（插件声明注入一次、两容器派生视图同步可见）；
- * 抽屉/浮层的消费由各自接线单元复用本单例（getContentSlotRegistry），不得另建实例
- *（双实例 = 同一声明两处登记、派生视图分裂）。
+ * 职责：core 模块级单例（content-slot-registry.ts 的 contentSlotRegistry，§6.1「一份注册表」
+ * 的实体承载）在本壳的访问入口 + 侧栏/设置页内置项登记 + 响应式派生。四个容器（抽屉/浮层/
+ * 侧栏/设置页）的派生视图同源于该唯一实例（多实例 = 双权威：同一插件声明在一个容器的派生
+ * 视图出现、另一个容器的实例缺失），声明灌入/清理走桥内单一写路径，无成对写。
  *
  * 内置项登记（§6.1「内置三项为注册表初始项」；core 无侧栏/设置页静态表，消费单元以
- * 声明形态登记）：侧栏 3 项（placement='sidebar.tab'）+ 设置页 17 项
+ * 声明形态登记进 core 单例）：侧栏 3 项（placement='sidebar.tab'）+ 设置页 17 项
  *（placement='settings.section'，group 决定归属）。内置文案走 labelKey（§6.16④），
  * 插件项文案走声明 label 原文。
  *
@@ -18,40 +18,22 @@
  * 分区键（nav key）：内置项 = id 去 'ui.' 前缀（保持既有 testid/深链/内容分支键不变，
  * 零行为变化）；插件项 = 声明 id 全值。设置页 activeMenu/深链/键盘导航均消费分区键。
  *
- * 图标解析：设置页内置项 icon 登记为 lucide 官方 kebab 名，本模块映射到组件；未命中
- * 落兜底图标（§6.13 语义的设置页消费侧——U13 收敛单函数后并入，届时本表迁移）。
+ * 图标解析：设置页内置项 icon 登记为 lucide 官方 kebab 名，经 §6.13 单一解析函数
+ *（contributionIconComponent：resolveContributionIcon + 共享组件表）解析，本模块零本地映射表。
  */
 import { computed, type ComputedRef } from 'vue'
 import type { LucideIcon } from '@lucide/vue'
 import {
-  Bot,
-  Blocks,
-  ChartColumn,
-  ClipboardList,
-  Download,
-  GitBranch,
-  Palette,
-  Puzzle,
-  ScrollText,
-  Server,
-  Settings,
-  SlidersHorizontal,
-  Sparkles,
-  Tag,
-  TerminalSquare,
-  Volume2,
-  Waypoints,
-  Wifi,
-} from '@lucide/vue'
-import {
   BUILTIN_NAMESPACE,
-  ContentSlotRegistry,
+  contentSlotRegistry,
   HOST_PLUGIN_ID,
   type ContentSlotDeclaration,
+  type ContentSlotRegistry,
   type ContentSlotView,
   type SettingsContentMaxWidth,
   type SettingsSectionGroupView,
 } from '@taiji/core'
+import { contributionIconComponent } from '@taiji/ui'
 
 // ── 内置声明（注册表初始项）──────────────────────────────────────────
 
@@ -149,32 +131,42 @@ function settingsSectionDeclaration(spec: SettingsSectionSlotSpec): ContentSlotD
 
 const SETTINGS_BUILTIN_SLOTS: ContentSlotDeclaration[] = SETTINGS_SECTION_SPECS.map(settingsSectionDeclaration)
 
-// ── 单例装配 ─────────────────────────────────────────────────────────
+// ── 单例装配（core 单一实例 + 本壳内置项惰性登记）────────────────────
 
-let singleton: ContentSlotRegistry | null = null
+/** 侧栏/设置页内置项是否已登记进 core 单例（registerBuiltin 同 id 覆盖幂等，标记防热路径
+ * 重复刷新快照——getContentSlotRegistry 在派生 computed getter 内高频取用）。 */
+let builtinsRegistered = false
 
 /**
- * 渲染端注册表单例（惰性创建；首次创建即登记内置项）。生产代码与测试共用本入口——
- * 插件声明注入（loadExternal）/ 清理（clearForPlugin）经实例方法操作，派生视图自动跟随。
+ * 容器位注册表（core 模块级单例，四容器派生视图唯一事实源）。首次访问登记侧栏/设置页
+ * 内置项；插件声明注入（loadExternal）/ 清理（clearForPlugin）经实例方法操作，派生视图
+ * 自动跟随。生产代码与测试共用本入口。
  */
 export function getContentSlotRegistry(): ContentSlotRegistry {
-  if (singleton === null) {
-    singleton = new ContentSlotRegistry()
-    singleton.registerBuiltin([...SIDEBAR_BUILTIN_SLOTS, ...SETTINGS_BUILTIN_SLOTS])
+  if (!builtinsRegistered) {
+    contentSlotRegistry.registerBuiltin([...SIDEBAR_BUILTIN_SLOTS, ...SETTINGS_BUILTIN_SLOTS])
+    builtinsRegistered = true
   }
-  return singleton
+  return contentSlotRegistry
 }
 
-/** 测试隔离：丢弃单例（下一 getContentSlotRegistry 重建并重登记内置项）。仅测试消费。 */
+/**
+ * 测试隔离：清空 core 单例全部插件声明分区并复位内置项登记标记（下次 getContentSlotRegistry
+ * 重新登记内置项）。core 单例不可丢弃重建（模块 const 导出），重定向为「清插件分区 +
+ * 重登内置项」——终态与旧「丢弃重建」语义等价（回到仅有内置项的初始态）。仅测试消费。
+ */
 export function __resetContentSlotsForTesting(): void {
-  singleton = null
+  builtinsRegistered = false
+  const pluginIds = new Set(getContentSlotRegistry().listEntries().map((e) => e.declaration.pluginId))
+  for (const id of pluginIds) contentSlotRegistry.clearForPlugin(id) // clearForPlugin 对 taiji-host 幂等跳过（内置项保留）
+  getContentSlotRegistry()
 }
 
 // ── 响应式派生（先读 snapshot 建依赖，再 derive——见模块头注释）────────────
 
-// 派生 computed 的 getter 内取当前单例（不在外层捕获实例引用）：注册表实例方法内部刷新
-// snapshot（shallowRef 整表替换）驱动重算；测试重置（__resetContentSlotsForTesting）换新
-// 实例后，getter 下次求值自然绑定新实例，不会 stale 在旧快照上。
+// 派生 computed 的 getter 内经 getContentSlotRegistry 取注册表（不在外层捕获实例引用）：
+// 注册表实例方法内部刷新 snapshot（shallowRef 整表替换）驱动重算；测试重置
+//（__resetContentSlotsForTesting）清插件分区后，getter 下次求值即读到干净快照。
 
 /** 侧栏标签数组（内置 3 项 ∪ 插件声明项，§6.16 排序后）。 */
 export function useSidebarTabs(): ComputedRef<ContentSlotView[]> {
@@ -243,31 +235,9 @@ export function contentMaxWidthCss(width: SettingsContentMaxWidth | undefined): 
   return 'var(--content-max-w)'
 }
 
-/** 内置分区 icon 名 → lucide 组件（未命中落兜底——§6.13 设置页消费侧；U13 收敛单函数
- * 后本表并入统一解析）。 */
-const SETTINGS_SECTION_ICONS: Record<string, LucideIcon> = {
-  settings: Settings,
-  sparkles: Sparkles,
-  bot: Bot,
-  blocks: Blocks,
-  server: Server,
-  'clipboard-list': ClipboardList,
-  palette: Palette,
-  'scroll-text': ScrollText,
-  tag: Tag,
-  'volume-2': Volume2,
-  'terminal-square': TerminalSquare,
-  'git-branch': GitBranch,
-  download: Download,
-  wifi: Wifi,
-  waypoints: Waypoints,
-  'sliders-horizontal': SlidersHorizontal,
-  'chart-column': ChartColumn,
-}
-
-const FALLBACK_ICON: LucideIcon = Puzzle
-
-export function settingsNavIcon(icon: string | undefined): LucideIcon {
-  if (icon === undefined) return FALLBACK_ICON
-  return SETTINGS_SECTION_ICONS[icon] ?? FALLBACK_ICON
+/** 视图条目图标解析（§6.13 单一函数的设置页消费侧）：resolveContributionIcon 归一化/白名单/
+ * 错名兜底 + 按去重键 warn 一次（内置项 pluginId = taiji-host，插件项 = 声明归属），组件
+ * 换算在共享表（ui/lib/contribution-icons）——本模块零本地映射表。 */
+export function settingsNavIcon(view: Pick<ContentSlotView, 'pluginId' | 'id' | 'icon'>): LucideIcon {
+  return contributionIconComponent({ pluginId: view.pluginId, contributionId: view.id, icon: view.icon })
 }

@@ -130,10 +130,11 @@
 import { Comment, computed, ref, useSlots, watch } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { BookOpen, Bot, FileText, GitBranch, Globe, ListTree, MessagesSquare, SquareCheckBig, SquareTerminal, Terminal as TerminalIcon, Workflow, X } from '@lucide/vue'
+import { X } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { drawerTabViews } from '@taiji/core/domain/drawer'
 import type { RightDrawerTab } from '@taiji/core/domain/drawer'
+import { contributionIconComponent } from '../../lib/contribution-icons'
 
 const slots = useSlots()
 
@@ -176,36 +177,20 @@ interface TabMeta {
   emptyHint: string
 }
 
-/** tab 元信息（图标标识 → @lucide/vue 组件映射，display-containers §7.2：图标是 Vue 组件进不了
- *  core，ui 层建映射表解析渲染；标签/空态文案的 i18n key 由注册表条目携带）。 */
-const ICON_BY_ID: Record<string, Component> = {
-  terminal: TerminalIcon,
-  globe: Globe,
-  'git-branch': GitBranch,
-  'book-open': BookOpen,
-  'file-text': FileText,
-  bot: Bot,
-  'square-terminal': SquareTerminal,
-  'square-check-big': SquareCheckBig,
-  'messages-square': MessagesSquare,
-  workflow: Workflow,
-  'list-tree': ListTree,
-}
-
-/** 注册表新增图标标识未入映射时的占位（file-text 同形中性图标；新条目评审/测试可见） */
-const FALLBACK_ICON: Component = FileText
+/** tab 元信息（图标经 §6.13 单一解析函数（contributionIconComponent：resolveContributionIcon
+ *  + 共享组件表）解析——归一化/白名单/错名 warn 全在 core 单函数，未声明/错名落统一兜底，
+ *  本组件零本地映射表；标签/空态文案的 i18n key 由注册表条目携带）。 */
 
 /** L1 tab 列表 = 容器位注册表派生视图（单一数据源，容器扩展点统一 §6.1/U6：内置 8 项 ∪
  *  插件声明项；RIGHT_DRAWER_REGISTRY 直读已由 core domain 消费侧投影取代——直读是
  *  「core 派生集、界面渲染集」双权威的根源）。文案二态（§6.16④）：插件项用声明原文
- *  label/emptyState，内置项查 labelKey/empty*Key i18n；图标经既有映射表解析（§6.13 单一
- *  解析函数归 U13，暂沿用）。各 tab 的桌面内容面板仍由壳层（PanelContainer）注入（C2），
- *  本组件不感知面板归属与 renderer 分派；空态/未读徽章不变。 */
+ *  label/emptyState，内置项查 labelKey/empty*Key i18n。各 tab 的桌面内容面板仍由壳层
+ *  （PanelContainer）注入（C2），本组件不感知面板归属与 renderer 分派；空态/未读徽章不变。 */
 const tabs = computed<TabMeta[]>(() =>
   drawerTabViews().map((view) => ({
     key: view.key,
     label: view.label ?? (view.labelKey !== undefined ? t(view.labelKey) : view.key),
-    icon: view.icon !== undefined ? (ICON_BY_ID[view.icon] ?? FALLBACK_ICON) : FALLBACK_ICON,
+    icon: contributionIconComponent({ pluginId: view.pluginId, contributionId: view.key, icon: view.icon }),
     emptyText: view.emptyState?.text ?? (view.emptyTextKey !== undefined ? t(view.emptyTextKey) : ''),
     emptyHint: view.emptyState?.hint ?? (view.emptyHintKey !== undefined ? t(view.emptyHintKey) : ''),
   })),

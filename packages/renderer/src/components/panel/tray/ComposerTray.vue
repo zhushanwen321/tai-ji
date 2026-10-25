@@ -247,6 +247,7 @@
         <TrayWidgetButton
           :view-id="item.viewId"
           :meta="item.entry.meta"
+          :plugin-id="item.entry.pluginId"
           :pinned="isPinnedOf(widgetKey(item.viewId))"
           :expanded="activeKey === widgetKey(item.viewId)"
           @hover-start="onHoverStart(widgetKey(item.viewId))"
