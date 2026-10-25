@@ -1557,6 +1557,11 @@ async function main(): Promise<void> {
     deleteProvider: (providerId) => configService.deleteProvider(providerId),
     resolveProviderCredential: (providerId) => providerCredentialResolver.resolveProviderCredential(providerId),
     readPluginManifest: createPluginManifestReader(pluginService.registry),
+    // ISSUES-2 ⑧ 写落点广播：插件 providers.write/delete 写回 models.json 后经去抖调度
+    // 广播 provider 列表（与 12 处 config.* 写 handler 的 broadcastProviderList 收尾同构；
+    // 直连 broadcastProviderList，去抖在 proxy 模块内）。缺它则插件写回后 renderer
+    // Provider 页条目行卡不出现（变化感知 watch 只盯 models-store.json），重开设置窗才可见。
+    notifyProvidersMutated: () => server.broadcastProviderList(),
   })
   try {
     const legacyCatalogPath = join(getDataDir(), 'wool-catalog.json')

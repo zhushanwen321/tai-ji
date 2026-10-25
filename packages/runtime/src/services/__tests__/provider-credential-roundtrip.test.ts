@@ -75,6 +75,7 @@ describe('providers.write → providers.credential 真链路 roundtrip（⑦ 读
       deleteProvider: async () => ({ removed: true }),
       resolveProviderCredential: (providerId) => resolver.resolveProviderCredential(providerId),
       readPluginManifest: () => ({ pkgName: '@zhushanwen/plugin-wool-qoder', capabilities: ['network.http'] }),
+      notifyProvidersMutated: () => {},
     })
 
     const writeReply = await dispatch(rpcServer, 'providers.write', {

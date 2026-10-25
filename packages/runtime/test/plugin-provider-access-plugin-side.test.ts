@@ -43,6 +43,7 @@ function manifestDeps(overrides: Partial<ProviderWriteProxyDeps> = {}): Provider
     deleteProvider: vi.fn(async () => ({ removed: true })),
     resolveProviderCredential: vi.fn(async () => ({ key: 'sk-test', source: 'models.json', kind: 'api_key' } as const)),
     readPluginManifest: () => ({ pkgName: PLUGIN_ID, capabilities: ['network.http'] }),
+    notifyProvidersMutated: vi.fn(),
     ...overrides,
   }
 }

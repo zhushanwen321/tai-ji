@@ -73,6 +73,7 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
       deleteProvider: async () => ({ removed: true }),
       resolveProviderCredential: async () => undefined,
       readPluginManifest: () => undefined,
+      notifyProvidersMutated: () => {},
     })
     registeredMethods = new Set(internals.rpcServer.listMethods())
   })

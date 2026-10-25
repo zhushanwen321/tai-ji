@@ -22,6 +22,7 @@ import {
   PROVIDERS_WRITE_METHOD,
   PROVIDERS_DELETE_METHOD,
   PROVIDERS_CREDENTIAL_METHOD,
+  WRITE_BROADCAST_DEBOUNCE_MS,
   type ProviderWriteProxyDeps,
 } from '../provider-write-proxy.js'
 
@@ -38,6 +39,7 @@ function makeDeps(overrides: Partial<ProviderWriteProxyDeps> = {}): ProviderWrit
       kind: 'api_key' as const,
     })),
     readPluginManifest: vi.fn((pluginId: string) => (pluginId === 'plugin-wool-workbuddy' ? { ...WORKBUDDY_MANIFEST } : undefined)),
+    notifyProvidersMutated: vi.fn(),
   }
   return { ...deps, ...overrides }
 }
@@ -237,6 +239,76 @@ describe('providers.* 代理（provider-plugin-access D4）', () => {
   })
 })
 
+describe('写落点广播（ISSUES-2 ⑧：write/delete 成功 → 去抖合并后 notify 一次）', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  /** 带去抖时钟推进的装配：write 派发后 advance 一个去抖窗口，notify 兑现在窗口尾部。 */
+  async function setupWithWorker(deps: ProviderWriteProxyDeps) {
+    const rpcServer = new PluginRpcServer()
+    registerProviderWriteProxy(rpcServer, deps)
+    const { port } = makeWorkerPort()
+    rpcServer.registerWorker('w1', port, { trustLevel: 'sandbox', pluginId: 'plugin-wool-workbuddy' })
+    return rpcServer
+  }
+
+  it('write 成功 → 去抖窗口后 notify 恰一次（窗口内零调用 = 广播延后到窗口尾部）', async () => {
+    vi.useFakeTimers()
+    const deps = makeDeps()
+    const rpcServer = await setupWithWorker(deps)
+
+    await dispatch(rpcServer, 'w1', PROVIDERS_WRITE_METHOD, { providerId: 'wool-workbuddy', apiKey: 'sk-x' })
+    expect(deps.notifyProvidersMutated).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(WRITE_BROADCAST_DEBOUNCE_MS)
+    expect(deps.notifyProvidersMutated).toHaveBeenCalledTimes(1)
+  })
+
+  it('连续两次 write（writeCredentials + writeCatalog 批量形态）→ 合并为一次广播', async () => {
+    vi.useFakeTimers()
+    const deps = makeDeps()
+    const rpcServer = await setupWithWorker(deps)
+
+    await dispatch(rpcServer, 'w1', PROVIDERS_WRITE_METHOD, { providerId: 'wool-workbuddy', apiKey: 'sk-x' })
+    await dispatch(rpcServer, 'w1', PROVIDERS_WRITE_METHOD, { providerId: 'wool-workbuddy', models: ['m1'] })
+
+    await vi.advanceTimersByTimeAsync(WRITE_BROADCAST_DEBOUNCE_MS)
+    expect(deps.notifyProvidersMutated).toHaveBeenCalledTimes(1)
+  })
+
+  it('delete 成功 → 同样触发一次广播', async () => {
+    vi.useFakeTimers()
+    const deps = makeDeps()
+    const rpcServer = await setupWithWorker(deps)
+
+    await dispatch(rpcServer, 'w1', PROVIDERS_DELETE_METHOD, { providerId: 'wool-workbuddy' })
+    await vi.advanceTimersByTimeAsync(WRITE_BROADCAST_DEBOUNCE_MS)
+    expect(deps.notifyProvidersMutated).toHaveBeenCalledTimes(1)
+  })
+
+  it('providers.credential 只读 → 零广播', async () => {
+    vi.useFakeTimers()
+    const deps = makeDeps()
+    const rpcServer = await setupWithWorker(deps)
+
+    await dispatch(rpcServer, 'w1', PROVIDERS_CREDENTIAL_METHOD, { providerId: 'wool-workbuddy' })
+    await vi.advanceTimersByTimeAsync(WRITE_BROADCAST_DEBOUNCE_MS)
+    expect(deps.notifyProvidersMutated).not.toHaveBeenCalled()
+  })
+
+  it('write 被拒（NAMESPACE_MISMATCH，写未发生）→ 零广播', async () => {
+    vi.useFakeTimers()
+    const deps = makeDeps()
+    const rpcServer = await setupWithWorker(deps)
+
+    await dispatch(rpcServer, 'w1', PROVIDERS_WRITE_METHOD, { providerId: 'wool-trae', apiKey: 'sk-x' })
+    await vi.advanceTimersByTimeAsync(WRITE_BROADCAST_DEBOUNCE_MS)
+    expect(deps.notifyProvidersMutated).not.toHaveBeenCalled()
+  })
+})
+
 describe('S20/S21 磁盘断言（唯一权威落盘 + 拒绝路径零副作用）', () => {
   let dataDir: string | undefined
 
@@ -287,6 +359,7 @@ describe('S20/S21 磁盘断言（唯一权威落盘 + 拒绝路径零副作用�
           : undefined
       }),
       readPluginManifest: vi.fn((pluginId: string) => (pluginId === 'plugin-wool-workbuddy' ? { ...WORKBUDDY_MANIFEST } : undefined)),
+      notifyProvidersMutated: vi.fn(),
     }
   }
 

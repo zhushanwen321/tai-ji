@@ -81,6 +81,36 @@ export interface ProviderWriteProxyDeps { // oe-exempt:20261024:framework:ports/
   >
   /** 插件包清单读取（包名 + capabilities；未装/清单不可读 = undefined → fail-closed）。 */
   readPluginManifest: (pluginId: string) => PluginManifestInfo | undefined
+  /**
+   * 写落点 provider 列表广播（组合根注入 server.broadcastProviderList）：providers.write /
+   * providers.delete 成功后触发，让 renderer Provider 页条目行卡即时出现（无需重开设置窗）。
+   * 与既有 12 处写 handler 的广播收尾同构（ISSUES-2 ⑧）；只读的 providers.credential 不触发。
+   * 直连调用会被去抖调度器包装（见 createMutatedBroadcastScheduler），注入方无需自行去抖。
+   */
+  notifyProvidersMutated: () => void
+}
+
+/**
+ * 写落点广播去抖窗口（ms）。插件提取编排的 writeCredentials + writeCatalog 是两个串行
+ * RPC（第二个在第一个响应返回后才发出，跨宏任务），微任务级合并对其零效果——故用单发
+ * 尾触发 timer（无周期、非轮询）：窗口内后续写并入已排定的广播，连续写批只广播一次。
+ * 50ms 覆盖 worker IPC 往返（5ms 量级）的连续写批，尾延迟对「条目行卡即时出现」无感。
+ */
+export const WRITE_BROADCAST_DEBOUNCE_MS = 50
+
+/**
+ * 写落点广播去抖调度器：首写排定单发 timer，窗口内的后续调用合并为尾部一次 notify。
+ * 每个 registerProviderWriteProxy 装配点创建一个实例（write/delete 共享），不模块级单例。
+ */
+export function createMutatedBroadcastScheduler(notify: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  return () => {
+    if (timer !== null) return
+    timer = setTimeout(() => {
+      timer = null
+      notify()
+    }, WRITE_BROADCAST_DEBOUNCE_MS)
+  }
 }
 
 /** 包根定位共享实现（pkg-root，与 fork env 注入 / CJS 拦截器三处同源——ISSUES-2 ⑤）。 */
@@ -268,8 +298,20 @@ async function handleProviderCredential(deps: ProviderWriteProxyDeps, params: Re
  * 是羊毛/插件域的宿主服务通道，归属本模块自包含。
  */
 export function registerProviderWriteProxy(rpcServer: PluginRpcServer, deps: ProviderWriteProxyDeps): void {
-  rpcServer.registerMethod(PROVIDERS_WRITE_METHOD, (params, ctx) => handleProviderWrite(deps, params, ctx))
-  rpcServer.registerMethod(PROVIDERS_DELETE_METHOD, (params, ctx) => handleProviderDelete(deps, params, ctx))
+  // 写落点广播（ISSUES-2 ⑧）：write/delete 成功 resolve 后经去抖调度触发 provider 列表
+  // 广播——handler 抛错（INVALID_PAYLOAD / NAMESPACE_MISMATCH / PERMISSION_DENIED）不触发，
+  // broadcast 语义 = 「写成功」，与既有 config.setProvider/deleteProvider handler 的收尾一致。
+  const notifyAfterMutation = createMutatedBroadcastScheduler(deps.notifyProvidersMutated)
+  rpcServer.registerMethod(PROVIDERS_WRITE_METHOD, (params, ctx) =>
+    handleProviderWrite(deps, params, ctx).then((result) => {
+      notifyAfterMutation()
+      return result
+    }))
+  rpcServer.registerMethod(PROVIDERS_DELETE_METHOD, (params, ctx) =>
+    handleProviderDelete(deps, params, ctx).then((result) => {
+      notifyAfterMutation()
+      return result
+    }))
   rpcServer.registerMethod(PROVIDERS_CREDENTIAL_METHOD, (params, ctx) => handleProviderCredential(deps, params, ctx))
 }
 
