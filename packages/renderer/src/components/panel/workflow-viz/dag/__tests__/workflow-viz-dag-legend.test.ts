@@ -2,7 +2,7 @@
  * DAG 状态图例 + tone 同源测试（workflow-overlay-refine D4 / impl-plan u-wf-dag-visual；
  * 三视角）。图例挂载段在壳（WorkflowVizOverlay）内 DAG 区，故本文件挂整壳断言图例。
  *
- * - 使用者黑盒：图例六态词可见（现值词族 + skipped 新词）、停止叠加两档说明在容器
+ * - 使用者黑盒：图例七态词可见（现值词族 + skipped / cancelled 新词）、停止叠加两档说明在容器
  *   title——每条用例至少一个用户可见 DOM 断言；
  * - 构建者白盒：V3-wf① 同源性断言——图例 dot 与 DAG 节点 dot 的 fill 类逐一相同
  *   （dotTone 单一事实源的构造性保证），图例 dot 不带脉冲类；
@@ -18,8 +18,8 @@ import WorkflowVizOverlay from '../../overlay/WorkflowVizOverlay.vue'
 import { dotTone } from '../tone'
 import type { WorkflowVizDagNodeStatus } from '../types'
 
-/** 六态词表序（图例条目序；tone 同源断言逐一覆盖）。 */
-const STATES: WorkflowVizDagNodeStatus[] = ['pending', 'running', 'done', 'failed', 'retrying', 'skipped']
+/** 七态词表序（图例条目序；cancelled 为 §3.3.8 新增中性档；tone 同源断言逐一覆盖）。 */
+const STATES: WorkflowVizDagNodeStatus[] = ['pending', 'running', 'done', 'failed', 'retrying', 'cancelled', 'skipped']
 
 function stateNode(state: WorkflowVizDagNodeStatus, line: number): WorkflowDagNode {
   return { id: `n-${state}`, kind: 'agent', templateName: state, matchPattern: '', phase: 'p', line }
@@ -61,7 +61,7 @@ function mountLegend(props: Record<string, unknown> = {}) {
 }
 
 describe('WorkflowVizDag 图例（workflow-overlay-refine D4）', () => {
-  it('V3-wf① tone 同源：图例六态 dot 与 DAG 节点 dot 的 fill 类逐一相同，且图例 dot 无脉冲类', () => {
+  it('V3-wf① tone 同源：图例七态 dot 与 DAG 节点 dot 的 fill 类逐一相同，且图例 dot 无脉冲类', () => {
     const wrapper = mountLegend()
     for (const state of STATES) {
       const nodeDot = wrapper.find(`[data-testid="wfvz-dag-node-n-${state}"] circle`)
@@ -79,7 +79,7 @@ describe('WorkflowVizDag 图例（workflow-overlay-refine D4）', () => {
     }
   })
 
-  it('V3-wf① 图例六态 dot 各恰一个 fill 类且为 tone 色（无基础中性类竞争——单 fill 类消发射序覆盖）', () => {
+  it('V3-wf① 图例七态 dot 各恰一个 fill 类且为 tone 色（无基础中性类竞争——单 fill 类消发射序覆盖）', () => {
     const wrapper = mountLegend()
     for (const state of STATES) {
       const dot = wrapper.find(`[data-testid="wfvz-dag-legend-dot-${state}"]`)
@@ -89,7 +89,7 @@ describe('WorkflowVizDag 图例（workflow-overlay-refine D4）', () => {
     }
   })
 
-  it('V3-wf① 图例六态词可见（现值词族 + skipped 新词「已跳过」）', () => {
+  it('V3-wf① 图例七态词可见（现值词族 + skipped / cancelled 新词）', () => {
     const wrapper = mountLegend()
     const text = wrapper.find('[data-testid="wfvz-dag-legend"]').text()
     expect(text).toContain('等待中')
@@ -97,6 +97,7 @@ describe('WorkflowVizDag 图例（workflow-overlay-refine D4）', () => {
     expect(text).toContain('完成')
     expect(text).toContain('失败')
     expect(text).toContain('重试中')
+    expect(text).toContain('已取消')
     expect(text).toContain('已跳过')
   })
 
@@ -105,8 +106,8 @@ describe('WorkflowVizDag 图例（workflow-overlay-refine D4）', () => {
     const title = wrapper.find('[data-testid="wfvz-dag-legend"]').attributes('title') ?? ''
     expect(title).toContain('已中断')
     expect(title).toContain('超时')
-    // 两档说明在 title，不作为图例条目渲染（图例只含六态 dot）
-    expect(wrapper.find('[data-testid="wfvz-dag-legend"]').findAll('circle')).toHaveLength(6)
+    // 两档说明在 title，不作为图例条目渲染（图例只含七态 dot）
+    expect(wrapper.find('[data-testid="wfvz-dag-legend"]').findAll('circle')).toHaveLength(7)
   })
 
   it('V3-wf⑤ 图例绝对定位层不拦截交互：pointer-events-none + 节点点击上抛照常 + wheel 缩放照常', async () => {

@@ -73,12 +73,14 @@ function makeSub(over: Partial<SubagentRecord> = {}): SubagentRecord {
   } as SubagentRecord;
 }
 
-describe("statusLabel 色档四分支", () => {
-  it("completed→success / running→warning / failed→error / 其他→muted", () => {
+describe("statusLabel 色档分支", () => {
+  it("completed→success / running→warning / failed→error / cancelled 与其他→muted", () => {
     expect(statusLabel("completed", markingTheme)).toBe("success(completed)");
     expect(statusLabel("running", markingTheme)).toBe("warning(running)");
     expect(statusLabel("failed", markingTheme)).toBe("error(failed)");
     expect(statusLabel("pending" as ExecutionTraceNode["status"], markingTheme)).toBe("muted(pending)");
+    // §3.3.8 cancelled（run 终局收尾在途成员）=「未交付且非失败」中性档，与 pending 同 muted
+    expect(statusLabel("cancelled", markingTheme)).toBe("muted(cancelled)");
   });
 });
 
