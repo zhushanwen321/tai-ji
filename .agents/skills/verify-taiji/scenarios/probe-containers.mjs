@@ -17,11 +17,8 @@ export const meta = {
   priority: 'P0',
   title: '容器位统一探针：抽屉派生 S1 / 浮层直开 S2 / hostAction 导航 S3 / 降级 S4 / 共存 S7 / 禁用重放 S8',
   covers: ['env.launch', 'env.ready', 'ui.container'],
-  requires: ['faux'],
-  estimateSec: 240,
-  faux: {
-    responses: [{ text: 'probe-containers-spare', stopReason: 'stop' }],
-  },
+  requires: [],
+  estimateSec: 300,
   provable: [
     'S1：抽屉标签条出现「探针面板」（注册表派生），点入见插件推树两行文本',
     'S2：点击探针 headerAction 按钮 → 浮层打开且落在「探针浮层」内容段',
@@ -41,24 +38,20 @@ export async function run(ctx) {
   const uncovered = []
   const step = (name, detail) => ev.step({ step: name, channel: 'A', exitCode: 0, ...(detail ? { stats: detail } : {}) })
 
-  // 建会话并激活（抽屉/托盘在对话态渲染）
+  // 页面加载门（dev vite 冷编译 30-90s，runner ready 只保证 runtime 健康不保证页面）
+  await ui.expectVisible('app-shell', { timeoutMs: 150_000 })
+  // 建会话（RPC 直建 + UI 列表点选激活；激活渲染链实测 40s+，窗口给足）
   const created = await protocol.call('session.create', { cwd: ctx.repo, label: 'probe-containers' }, { timeoutMs: 120_000 })
   const sid = created.session?.id
   if (!sid) throw new Error('session.create 未返回 sessionId')
   await protocol.subscribe(sid)
-  await ui.click('css=.session-item', { timeoutMs: 30_000 })
-  // 对话态就绪判据 = Composer 挂载（session-item 可点 ≠ 对话态——挂载链慢于侧栏渲染）
-  {
-    const ids = await ui.visibleTestIds(500)
-    log('PRE-COMPOSER 采样(' + ids.length + '): ' + JSON.stringify(ids.slice(0, 60)))
-  }
-  await ui.expectVisible('composer-bar', { timeoutMs: 90_000 })
+  await ui.click('css=.session-item', { timeoutMs: 60_000 })
+  await ui.expectVisible('composer-btw-button', { timeoutMs: 90_000 })
   step('ui.activate', { sid })
 
   // 打开右抽屉（ComposerBtwButton = D7 唯一入口，openDrawerTab('btw')）
-  await ui.expectVisible('composer-btw-button', { timeoutMs: 15_000 })
   await ui.click('composer-btw-button')
-  await ui.expectVisible('drawer-panel', { timeoutMs: 15_000 })
+  await ui.expectVisible('drawer-panel', { timeoutMs: 30_000 })
   step('drawer.opened')
 
   // ── S1：抽屉标签条派生「探针面板」 ─────────────────────────────
