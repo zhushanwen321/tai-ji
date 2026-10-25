@@ -39,8 +39,8 @@ export async function run(ctx) {
   const step = (name, detail) => ev.step({ step: name, channel: 'A', exitCode: 0, ...(detail ? { stats: detail } : {}) })
 
   // 页面加载门（dev vite 冷编译 30-90s，runner ready 只保证 runtime 健康不保证页面）
-  await ui.expectVisible('app-shell', { timeoutMs: 150_000 })
-  // 建会话（RPC 直建 + UI 列表点选激活；激活渲染链实测 40s+，窗口给足）
+  await ui.expectVisible('app-shell', { timeoutMs: 300_000 })
+  // 建会话（页面就绪后建——渲染前建会话的广播在 renderer 订阅建立前丢失，列表不刷）
   const created = await protocol.call('session.create', { cwd: ctx.repo, label: 'probe-containers' }, { timeoutMs: 120_000 })
   const sid = created.session?.id
   if (!sid) throw new Error('session.create 未返回 sessionId')
