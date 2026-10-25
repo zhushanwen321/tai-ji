@@ -2263,6 +2263,12 @@ export function createSessionDeliveryRegistry(
         // failed 行编辑即重发（E7）：requeue 进队首立即出站（compaction 持有由
         // waitDeliverable 拦截，与 resync 重试同路径）
         if (rt.handle.requeue([clientUuid]) > 0) rt.handle.flush()
+      } else {
+        // queued 留守编辑即驱动：替换成功 = 用户显式要求新内容出站，触发义务在
+        // 替换点就地兑现，不留等下一个 settled 边沿 / 外部 flush / 新 send（内核
+        // retain 轮「不主动 pump」只豁免失败边沿自身，编辑是其后的显式用户动作）。
+        // flush 幂等，无待投条目时空转无害。
+        rt.handle.flush()
       }
       return { edited: true }
     }
