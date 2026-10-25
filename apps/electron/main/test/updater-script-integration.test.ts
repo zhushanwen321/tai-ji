@@ -26,26 +26,28 @@
  *
  * Mock 策略
  * ------------------------------------------------------------------
- * - 文件系统：每用例 mkdtempSync 独立临时目录，afterEach 清理。
+ * - 文件系统：每用例 mkdtempSync 独立临时目录（per-test context 传递），afterEach 清理。
  * - dmg：hdiutil create -srcfolder 生成真实 dmg（让 attach/ditto/detach 段真实
  *   执行，批次 3 §3.3.3-B 解包原语）；缺 hdiutil/ditto 则 it.skipIf 跳过。
  * - open 重启行：测试前替换为 echo（避免真启动 GUI），文档化确定性变换。
  * - parentPid：默认 '9999999'（超过 macOS/linux pid_max，kill -0 立即失败 =
  *   模拟「app 已退出」）；超时用例用真实存活进程模拟「app 未退出」。
  *
- * dmg 资产复用（round2-a 方案乙，审计 .tmp/round1-e1-electron-main-integration-audit.md）
+ * dmg 资产复用（round2-a 五元组缓存 + round3-a 私有副本，审计 .tmp/round1-e1-electron-main-integration-audit.md）
  * ------------------------------------------------------------------
  * hdiutil create ≈5.5-6s/次，13 次构造占本文件集成耗时近六成且大量同内容重复：
  * - buildMinimalAppDmg 按五元组 (appBundleName, binaryName, versionMarker,
- *   binarySize, hollow) 惰性缓存：首次真构造落文件级共享目录，同键命中直接返回
- *   共享路径与预计算 sha。脚本对 dmg 只读（shasum + attach -readonly，
- *   updater-script.ts L258/L283），复用语义安全。
+ *   binarySize, hollow) 惰性缓存：首次真构造落文件级共享目录，同键首造有
+ *   promise 互斥（并发首跑不 double-create）；每次调用把共享 dmg 复制一份到
+ *   用例私有 tmpDir 返回（copyFileSync，字节不变 sha 不变，毫秒级）。脚本只
+ *   attach 私有副本，共享缓存文件从不被挂载——同 inode 并发/残留挂载竞态在
+ *   结构上不存在（round3-a 探针实测：同 inode 并发 attach 2/6 失败「无可装载的
+ *   文件系统」，独立副本 15/15 成功；见 .tmp/round3-a-probe-hdiutil-concurrency.md）。
  * - 4 个「dmg 从未被读 / 真 sha 从不参与」的用例直接用假文件替代真 dmg 构造
  *   （sha mismatch / dmg 挂载失败 / M6 等待超时 / 只读卷拒装，逐例注释依据）。
- * - 本文件用例必须串行执行（禁止 describe.concurrent / it.concurrent）：
- *   共享 dmg 资产下并发 attach 存在「同 inode dmg 前次挂载未 detach 时重挂载
- *   报资源忙」竞态（updater-script.ts S1 注释，r2 实测）。串行 + 中断用例
- *   kill 点保持在 S1 detach 之后（见 S1 中断用例注释）共同封住该窗口。
+ * - 并发安全形态（探针判定）：独立 dmg 副本 + 独立挂载点 + 同键首造互斥 +
+ *   用例局部 tmpDir 清理；hdiutil create 并发无全局串行化（并发 3 总墙钟
+ *   0.52x 串行）。当前用例按 vitest 默认串行执行。
  *
  * 与 updater-script.test.ts 的边界：那边字符串视角（检查片段在不在），本文件
  * 执行视角（bash 跑不跑得通、分支真不真触发、终态对不对）。
@@ -71,7 +73,7 @@ import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../
 // 让 happy path 在 CI 仍撞 20s 线（2026-09-10）；除既有存量外不要补第三参，
 // 统一由这行管辖，新增用例也不要写显式超时。
 vi.setConfig({ testTimeout: 60_000 })
-import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync, statSync, chmodSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync, statSync, chmodSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
@@ -110,31 +112,35 @@ function gatedTitle(name: string): string {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// 临时目录生命周期
+// 临时目录生命周期（per-test：vitest 可扩展 test context 传递，用例间零共享变量）
 // ──────────────────────────────────────────────────────────────────
 
-let tmpDir: string
+/** 用例级作用域：beforeEach 写入 tmpDir，用例体与 afterEach 经同一 context 对象读回。 */
+interface TestScope {
+  tmpDir: string
+}
 
-beforeEach(() => {
-  tmpDir = mkdtempSync(path.join(tmpdir(), 'updater-int-'))
+beforeEach<TestScope>((ctx) => {
+  ctx.tmpDir = mkdtempSync(path.join(tmpdir(), 'updater-int-'))
 })
 
-afterEach(() => {
-  if (!tmpDir || !existsSync(tmpDir)) return
+afterEach<TestScope>(async (ctx) => {
+  const t = ctx.tmpDir
+  if (!t || !existsSync(t)) return
   // 磁盘镜像用例可能留下挂载点：先尝试卸载再删目录（失败仅告警，不让 teardown 掩盖用例结果）
-  const mnt = path.join(tmpDir, 'mnt')
+  const mnt = path.join(t, 'mnt')
   if (existsSync(mnt) && IS_MAC && HAS_HDIUTIL) {
-    spawnSync('hdiutil', ['detach', mnt, '-force'])
+    await detachQuiet(mnt)
   }
   try {
-    rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    rmSync(t, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   } catch (e) {
     console.warn('[warn] tmpDir 清理失败（可能挂载点残留）:', e)
   }
 })
 
 // ──────────────────────────────────────────────────────────────────
-// 共享 dmg 资产（五元组惰性缓存，方案乙；见文件头「dmg 资产复用」节）
+// 共享 dmg 资产（五元组惰性缓存 + 首造互斥；见文件头「dmg 资产复用」节）
 // ──────────────────────────────────────────────────────────────────
 
 /**
@@ -150,6 +156,12 @@ let sharedDmgAssetsDir: string | undefined
 
 /** 五元组缓存键 → 已构造共享 dmg（路径 + 首次预计算 sha）。 */
 const sharedDmgCache = new Map<string, { dmgPath: string; sha256: string }>()
+
+/**
+ * 同键首造在途 promise：并发首跑时第二个到达者复用在途构造（等待完成拿到同一份
+ * dmg），不得 double-create——两个 hdiutil create 同路径并发会互相覆写/产损坏 dmg。
+ */
+const sharedDmgCreateInFlight = new Map<string, Promise<{ dmgPath: string; sha256: string }>>()
 
 afterAll(() => {
   if (sharedDmgAssetsDir && existsSync(sharedDmgAssetsDir)) {
@@ -167,11 +179,63 @@ afterAll(() => {
 // 辅助函数
 // ──────────────────────────────────────────────────────────────────
 
+/**
+ * 异步执行外部命令并采集 stdio（promisify spawn；用 close 事件保证管道排空后才返回，
+ * 与 spawnSync 的 { encoding: 'utf8' } 采集语义等价）。
+ * timeoutMs 到点向子进程发 SIGTERM（spawnSync 默认 killSignal 同款），超时判定
+ * 由调用方按 signal === 'SIGTERM' 完成。
+ */
+function execCapture(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; timeoutMs?: number } = {},
+): Promise<{ status: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { cwd: opts.cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
+    child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
+    const timer = opts.timeoutMs !== undefined
+      ? setTimeout(() => child.kill('SIGTERM'), opts.timeoutMs)
+      : undefined
+    child.on('error', (e) => {
+      if (timer !== undefined) clearTimeout(timer)
+      reject(e)
+    })
+    child.on('close', (code, signal) => {
+      if (timer !== undefined) clearTimeout(timer)
+      resolve({ status: code, signal, stdout, stderr })
+    })
+  })
+}
+
+/** 安静卸载挂载点（teardown 兜底路径：结果不关心、不抛错、异步不阻塞事件循环）。 */
+function detachQuiet(mountPoint: string): Promise<void> {
+  return new Promise((resolve) => {
+    const c = spawn('hdiutil', ['detach', mountPoint, '-force'], { stdio: 'ignore' })
+    c.on('close', () => resolve())
+    c.on('error', () => resolve())
+  })
+}
+
 /** 计算文件 sha256 hex（64 位），与脚本里 shasum -a 256 等价。 */
 function sha256OfFile(filePath: string): string {
   const h = crypto.createHash('sha256')
   h.update(readFileSync(filePath))
   return h.digest('hex')
+}
+
+/** buildMinimalAppDmg 的构造参数（五元组即缓存键）。 */
+interface DmgSpec {
+  appBundleName?: string
+  binaryName?: string
+  /** 塞进 .app 根的版本标记文件内容（如 'NEW-V-B'），中断用例断言残留物完整性 */
+  versionMarker?: string
+  /** 主二进制填充大小（字节，随机不可压内容），磁盘满用例用 5MB 撑爆小卷 */
+  binarySize?: number
+  /** true = 空壳 .app（无 Contents/MacOS/<binary>），主二进制检查拦截用例用 */
+  hollow?: boolean
 }
 
 /**
@@ -181,21 +245,12 @@ function sha256OfFile(filePath: string): string {
  *   与脚本 S1 的 `ls -d "$MOUNT_DIR"/*.app` 定位链一致。
  * - 主二进制 chmod 755：脚本对解包产物做 `-x` 可执行检查（RI1 检查），
  *   hdiutil 镜像保留 POSIX 权限位。writeFileSync 默认 0644，必须显式 chmod。
- * - 按五元组惰性缓存（方案乙）：同键命中直接返回共享 dmg 路径与首次预计算的
- *   sha（脚本对 dmg 只读：shasum + attach -readonly，复用语义安全）。返回的
- *   dmgPath 指向共享资产，用例不得写它；确需覆写内容的用例先 copyFileSync 到
- *   私有 tmpDir 改副本，不得污染缓存。
+ * - 按五元组惰性缓存（方案乙）：同键命中/首造互斥后取共享 dmg 与首次预计算
+ *   sha，再复制一份到调用方私有 tmpDir 返回。共享缓存文件从不被脚本挂载
+ *   （同 inode 并发/残留挂载竞态结构性消除，见文件头）；副本字节不变故 sha
+ *   沿用预计算值。返回的 dmgPath 属调用方私有，可任意处置。
  */
-function buildMinimalAppDmg(opts: {
-  appBundleName?: string
-  binaryName?: string
-  /** 塞进 .app 根的版本标记文件内容（如 'NEW-V-B'），中断用例断言残留物完整性 */
-  versionMarker?: string
-  /** 主二进制填充大小（字节，随机不可压内容），磁盘满用例用 5MB 撑爆小卷 */
-  binarySize?: number
-  /** true = 空壳 .app（无 Contents/MacOS/<binary>），主二进制检查拦截用例用 */
-  hollow?: boolean
-} = {}): { dmgPath: string; appBundleName: string; binaryName: string; sha256: string } {
+async function buildMinimalAppDmg(tmpDir: string, opts: DmgSpec = {}): Promise<{ dmgPath: string; appBundleName: string; binaryName: string; sha256: string }> {
   const appBundleName = opts.appBundleName ?? 'TaiJi.app'
   const binaryName = opts.binaryName ?? 'TaiJi'
   // 缓存键 = 五元组。正确性前提：「同五元组 → 同 dmg 字节 → 同 sha」——默认路径
@@ -203,81 +258,97 @@ function buildMinimalAppDmg(opts: {
   // 内容随机，但该键仅磁盘满一例、无第二消费者。未来给夹具加新随机源时必须把
   // 随机源纳入键，否则命中方拿到的 sha 与其期望漂移 → 假红。
   const cacheKey = JSON.stringify([appBundleName, binaryName, opts.versionMarker ?? null, opts.binarySize ?? null, opts.hollow ?? false])
-  const cached = sharedDmgCache.get(cacheKey)
-  if (cached) {
-    // 完整性自检：共享资产被意外删除时快速失败并指向缓存机制，不让后续用例
-    // 连锁假红难归因（共享的隔离性损失排查成本，审计风险清单第 7 项）
-    if (!existsSync(cached.dmgPath)) {
-      throw new Error(`共享 dmg 资产丢失: ${cached.dmgPath}（cacheKey=${cacheKey}）`)
-    }
-    return { dmgPath: cached.dmgPath, appBundleName, binaryName, sha256: cached.sha256 }
-  }
-
-  // 惰性创建共享目录（不是 beforeAll：门控关闭的默认口径必须零构造，见声明处注释）
-  sharedDmgAssetsDir ??= mkdtempSync(path.join(tmpdir(), 'updater-int-assets-'))
   // 共享目录内文件名用键哈希：appBundleName 跨五元组重名（TaiJi.app ×3 组），不能直接命名
   const keyTag = crypto.createHash('sha256').update(cacheKey).digest('hex').slice(0, 10)
-  const buildRoot = path.join(sharedDmgAssetsDir, `build-${keyTag}`)
-  const appDir = path.join(buildRoot, appBundleName)
-  if (opts.hollow) {
-    // 空壳：只有 Contents/Info.plist，无 MacOS/<binary>（RI1 误判成功防护用例）
-    mkdirSync(path.join(appDir, 'Contents'), { recursive: true })
-    writeFileSync(path.join(appDir, 'Contents', 'Info.plist'), '{}\n')
-  } else {
-    mkdirSync(path.join(appDir, 'Contents', 'MacOS'), { recursive: true })
-    writeFileSync(path.join(appDir, 'Contents', 'Info.plist'), '{}\n')
-    const binaryPath = path.join(appDir, 'Contents', 'MacOS', binaryName)
-    if (opts.binarySize) {
-      writeFileSync(binaryPath, crypto.randomBytes(opts.binarySize))
-    } else {
-      writeFileSync(binaryPath, '#!/bin/bash\necho fake app\n')
-    }
-    chmodSync(binaryPath, 0o755)
+  let entry = sharedDmgCache.get(cacheKey)
+  if (!entry) {
+    // 首造互斥：同键并发首跑时，后到者复用在途 promise（等待完成拿到同一份），不 double-create
+    entry = sharedDmgCreateInFlight.get(cacheKey) ?? await createSharedDmg(cacheKey, keyTag, appBundleName, binaryName, opts)
   }
-  if (opts.versionMarker) {
-    writeFileSync(path.join(appDir, 'VERSION_MARKER'), opts.versionMarker)
+  // 完整性自检：共享资产被意外删除时快速失败并指向缓存机制，不让后续用例
+  // 连锁假红难归因（共享的隔离性损失排查成本，审计风险清单第 7 项）
+  if (!existsSync(entry.dmgPath)) {
+    throw new Error(`共享 dmg 资产丢失: ${entry.dmgPath}（cacheKey=${cacheKey}）`)
   }
-
-  const dmgPath = path.join(sharedDmgAssetsDir, `app-${keyTag}.dmg`)
-  const r = spawnSync('hdiutil', [
-    'create', '-srcfolder', buildRoot, '-format', 'UDZO', '-ov', dmgPath,
-  ])
-  rmSync(buildRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) // 构建中间目录用完即清，共享目录只留 dmg
-  if (r.status !== 0) {
-    throw new Error(`hdiutil create 失败 status=${r.status} stderr=${r.stderr?.toString()}`)
-  }
-  const sha256 = sha256OfFile(dmgPath)
-  sharedDmgCache.set(cacheKey, { dmgPath, sha256 })
-  return { dmgPath, appBundleName, binaryName, sha256 }
+  const localDmg = path.join(tmpDir, `asset-${keyTag}.dmg`)
+  copyFileSync(entry.dmgPath, localDmg)
+  return { dmgPath: localDmg, appBundleName, binaryName, sha256: entry.sha256 }
 }
 
-function writeScriptToTmp(script: string, name = 'updater.sh'): string {
+/** 真实构造共享 dmg（首造路径）：构建 .app 源目录 → hdiutil create → 预计算 sha → 写缓存。 */
+async function createSharedDmg(cacheKey: string, keyTag: string, appBundleName: string, binaryName: string, opts: DmgSpec): Promise<{ dmgPath: string; sha256: string }> {
+  const build = (async () => {
+    // 惰性创建共享目录（不是 beforeAll：门控关闭的默认口径必须零构造，见声明处注释）
+    sharedDmgAssetsDir ??= mkdtempSync(path.join(tmpdir(), 'updater-int-assets-'))
+    const buildRoot = path.join(sharedDmgAssetsDir, `build-${keyTag}`)
+    const appDir = path.join(buildRoot, appBundleName)
+    if (opts.hollow) {
+      // 空壳：只有 Contents/Info.plist，无 MacOS/<binary>（RI1 误判成功防护用例）
+      mkdirSync(path.join(appDir, 'Contents'), { recursive: true })
+      writeFileSync(path.join(appDir, 'Contents', 'Info.plist'), '{}\n')
+    } else {
+      mkdirSync(path.join(appDir, 'Contents', 'MacOS'), { recursive: true })
+      writeFileSync(path.join(appDir, 'Contents', 'Info.plist'), '{}\n')
+      const binaryPath = path.join(appDir, 'Contents', 'MacOS', binaryName)
+      if (opts.binarySize) {
+        writeFileSync(binaryPath, crypto.randomBytes(opts.binarySize))
+      } else {
+        writeFileSync(binaryPath, '#!/bin/bash\necho fake app\n')
+      }
+      chmodSync(binaryPath, 0o755)
+    }
+    if (opts.versionMarker) {
+      writeFileSync(path.join(appDir, 'VERSION_MARKER'), opts.versionMarker)
+    }
+
+    const dmgPath = path.join(sharedDmgAssetsDir, `app-${keyTag}.dmg`)
+    const r = await execCapture('hdiutil', [
+      'create', '-srcfolder', buildRoot, '-format', 'UDZO', '-ov', dmgPath,
+    ])
+    rmSync(buildRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) // 构建中间目录用完即清，共享目录只留 dmg
+    if (r.status !== 0) {
+      throw new Error(`hdiutil create 失败 status=${r.status} stderr=${r.stderr}`)
+    }
+    const sha256 = sha256OfFile(dmgPath)
+    return { dmgPath, sha256 }
+  })()
+  sharedDmgCreateInFlight.set(cacheKey, build)
+  try {
+    const entry = await build
+    sharedDmgCache.set(cacheKey, entry)
+    return entry
+  } finally {
+    sharedDmgCreateInFlight.delete(cacheKey)
+  }
+}
+
+function writeScriptToTmp(tmpDir: string, script: string, name = 'updater.sh'): string {
   const p = path.join(tmpDir, name)
   writeFileSync(p, script, { mode: 0o755 })
   return p
 }
 
 /**
- * 同步执行 bash 脚本（spawnSync，timeout 硬上限）。
+ * 异步执行 bash 脚本（spawn + close 采集，timeout 硬上限）。
  * 超时（SIGTERM）明确抛错——避免被当成正常 exit 误判为通过（假绿）。
  */
 const BASH_TIMEOUT_MS = 15_000
 
-function runBash(scriptPath: string, timeoutMs = BASH_TIMEOUT_MS): { status: number | null; stdout: string; stderr: string } {
-  const r = spawnSync('bash', [scriptPath], { cwd: tmpDir, encoding: 'utf8', timeout: timeoutMs })
+async function runBash(tmpDir: string, scriptPath: string, timeoutMs = BASH_TIMEOUT_MS): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  const r = await execCapture('bash', [scriptPath], { cwd: tmpDir, timeoutMs })
   if (r.signal === 'SIGTERM') {
     throw new Error(
-      `bash 脚本超时（${timeoutMs}ms）：${scriptPath}\nstdout: ${r.stdout ?? ''}\nstderr: ${r.stderr ?? ''}`,
+      `bash 脚本超时（${timeoutMs}ms）：${scriptPath}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
     )
   }
-  return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr }
 }
 
 /**
  * detached 执行 bash 脚本（中断注入用）：返回子进程与 exit Promise。
  * 后续用 process.kill(-pid, SIGKILL) 杀整个进程组（bash + 注入的暂停 sleep）。
  */
-function runBashDetached(scriptPath: string): { child: ChildProcess; exited: Promise<number | null> } {
+function runBashDetached(tmpDir: string, scriptPath: string): { child: ChildProcess; exited: Promise<number | null> } {
   const child = spawn('bash', [scriptPath], { cwd: tmpDir, stdio: 'ignore', detached: true })
   const exited = new Promise<number | null>((resolve) => {
     child.on('exit', (code) => resolve(code))
@@ -368,7 +439,7 @@ function shortenWaitLimit(script: string): string {
 }
 
 /** mac 用标准 vars（parentPid 默认死 PID：kill -0 立即失败 = 模拟 app 已退出）。 */
-function makeMacVars(opts: {
+function makeMacVars(tmpDir: string, opts: {
   dmgPath: string
   sha256: string
   appBundleName?: string
@@ -395,16 +466,16 @@ function makeMacVars(opts: {
 // bash 语法检查（不依赖 hdiutil/ditto，最稳）
 // ════════════════════════════════════════════════════════════════
 describe('updater-script integration: bash 语法检查', () => {
-  it('mac 脚本：buildUpdaterScript 产物 bash -n 通过（语法正确、无残留占位符炸）', () => {
-    const script = buildUpdaterScript(makeMacVars({ dmgPath: '/tmp/x.dmg', sha256: 'a'.repeat(64) }))
-    const scriptPath = writeScriptToTmp(script)
+  it<TestScope>('mac 脚本：buildUpdaterScript 产物 bash -n 通过（语法正确、无残留占位符炸）', ({ tmpDir }) => {
+    const script = buildUpdaterScript(makeMacVars(tmpDir, { dmgPath: '/tmp/x.dmg', sha256: 'a'.repeat(64) }))
+    const scriptPath = writeScriptToTmp(tmpDir, script)
 
     expect(script, '执行产物不应残留 {{...}} 占位符').not.toMatch(/\{\{[^}]+\}\}/)
     const r = spawnSync('bash', ['-n', scriptPath], { encoding: 'utf8' })
     expect(r.status, `bash -n 应通过；stderr=${r.stderr}`).toBe(0)
   })
 
-  it('linux 脚本：buildLinuxUpdaterScript 产物 bash -n 通过', () => {
+  it<TestScope>('linux 脚本：buildLinuxUpdaterScript 产物 bash -n 通过', ({ tmpDir }) => {
     const script = buildLinuxUpdaterScript({
       appImagePath: path.join(tmpDir, 'x.appimage'),
       newFilePath: path.join(tmpDir, 'y.appimage'),
@@ -414,17 +485,17 @@ describe('updater-script integration: bash 语法检查', () => {
       targetVersion: '0.9.0-int',
       parentPid: '9999999',
     })
-    const scriptPath = writeScriptToTmp(script, 'linux-updater.sh')
+    const scriptPath = writeScriptToTmp(tmpDir, script, 'linux-updater.sh')
     expect(script).not.toMatch(/\{\{[^}]+\}\}/)
 
     const r = spawnSync('bash', ['-n', scriptPath], { encoding: 'utf8' })
     expect(r.status, `bash -n 应通过；stderr=${r.stderr}`).toBe(0)
   })
 
-  it('mac 脚本：sha256 含特殊字符也不破坏 bash 语法（防御注入）', () => {
+  it<TestScope>('mac 脚本：sha256 含特殊字符也不破坏 bash 语法（防御注入）', ({ tmpDir }) => {
     const weirdButHex = '0'.repeat(64)
-    const script = buildUpdaterScript(makeMacVars({ dmgPath: '/tmp/x.dmg', sha256: weirdButHex }))
-    const r = spawnSync('bash', ['-n', writeScriptToTmp(script)], { encoding: 'utf8' })
+    const script = buildUpdaterScript(makeMacVars(tmpDir, { dmgPath: '/tmp/x.dmg', sha256: weirdButHex }))
+    const r = spawnSync('bash', ['-n', writeScriptToTmp(tmpDir, script)], { encoding: 'utf8' })
     expect(r.status).toBe(0)
   })
 })
@@ -433,13 +504,13 @@ describe('updater-script integration: bash 语法检查', () => {
 // MAC 脚本：端到端 happy path（真 .app + 真 dmg + 真 attach/ditto/detach）【集成门控】
 // ════════════════════════════════════════════════════════════════
 describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 端到端'), () => {
-  it(
+  it<TestScope>(
     'happy path（M1 脚本侧）：S0→S5 走通 → exit 0、新 .app 就位、result done（合法 JSON）、无任何残留',
-    () => {
-      const { dmgPath, sha256, appBundleName, binaryName } = buildMinimalAppDmg({
+    async ({ tmpDir }) => {
+      const { dmgPath, sha256, appBundleName, binaryName } = await buildMinimalAppDmg(tmpDir, {
         versionMarker: 'NEW-V-B',
       })
-      const vars = makeMacVars({ dmgPath, sha256, appBundleName, binaryName })
+      const vars = makeMacVars(tmpDir, { dmgPath, sha256, appBundleName, binaryName })
       const appDir = path.dirname(vars.appBundle)
       mkdirSync(appDir, { recursive: true })
       // 预置：旧 .app（OLD_MARKER）+ 上次残留的过期 .old（$APP 在位时应被清掉）
@@ -449,7 +520,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
       writeFileSync(path.join(`${vars.appBundle}.old`, 'STALE'), 'stale-backup')
 
       const script = stripOpenLine(buildUpdaterScript(vars))
-      const r = runBash(writeScriptToTmp(script))
+      const r = await runBash(tmpDir, writeScriptToTmp(tmpDir, script))
 
       expect(r.status, `期望 exit 0，stderr=${r.stderr}`).toBe(0)
 
@@ -488,21 +559,21 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
     },
   )
 
-  it(
+  it<TestScope>(
     'sha mismatch：exit 1、旧 .app 完好、不产生 .old/staging、result failed 且为合法 JSON',
-    () => {
+    async ({ tmpDir }) => {
       // 白造消除（方案乙）：期望 sha 是假值（'0'×64），真 dmg 的实际 sha 从不参与
       // 比较——脚本只需 shasum 读到一个文件即失配，几十字节假文件语义等价
       // （省一次 hdiutil create ≈5.5-6s）。
       const fakeDmg = path.join(tmpDir, 'payload-not-a-dmg.bin')
       writeFileSync(fakeDmg, 'not a dmg; only needs to be shasum-able')
-      const vars = makeMacVars({ dmgPath: fakeDmg, sha256: '0'.repeat(64) })
+      const vars = makeMacVars(tmpDir, { dmgPath: fakeDmg, sha256: '0'.repeat(64) })
       mkdirSync(path.dirname(vars.appBundle), { recursive: true })
       mkdirSync(vars.appBundle, { recursive: true })
       writeFileSync(path.join(vars.appBundle, 'OLD_MARKER'), 'preserved')
 
       const script = stripOpenLine(buildUpdaterScript(vars))
-      const r = runBash(writeScriptToTmp(script))
+      const r = await runBash(tmpDir, writeScriptToTmp(tmpDir, script))
 
       expect(r.status, 'sha 失败应 exit 1').toBe(1)
       expect(existsSync(vars.appBundle)).toBe(true)
@@ -515,18 +586,18 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
     },
   )
 
-  it(
+  it<TestScope>(
     '版本号含引号污染 → result 仍是合法 JSON 且结构不被注入（printf %s 参数通道回归）',
-    () => {
+    async ({ tmpDir }) => {
       // write_result 的 printf format 曾把版本号放 format 字符串（printf 会处理 \"
       // 转义 → 污染值可注入 JSON 结构字段）。回归断言：污染版本只能成为字符串内容。
       const evilVersion = '0.9.0","injected":"pwned'
       const payload = path.join(tmpDir, 'payload.bin')
       writeFileSync(payload, 'tampered')
-      const vars = makeMacVars({ dmgPath: payload, sha256: '0'.repeat(64), targetVersion: evilVersion })
+      const vars = makeMacVars(tmpDir, { dmgPath: payload, sha256: '0'.repeat(64), targetVersion: evilVersion })
 
       const script = stripOpenLine(buildUpdaterScript(vars))
-      const r = runBash(writeScriptToTmp(script))
+      const r = await runBash(tmpDir, writeScriptToTmp(tmpDir, script))
 
       expect(r.status).toBe(1)
       const raw = readFileSync(vars.resultPath, 'utf8')
@@ -537,9 +608,9 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
     },
   )
 
-  it(
+  it<TestScope>(
     'dmg 挂载失败（伪 dmg，sha 对）：exit 1、旧 .app 完好、error=dmg mount failed（含恢复指引）',
-    () => {
+    async ({ tmpDir }) => {
       // sha 对、但内容不是合法 dmg：让校验段过、挂载段炸（attach 失败分支，§3.3.3-B）。
       // 白造消除（方案乙）：shasum 需要真值，但内容本就不必是 dmg——小假文件 +
       // 预计算其 sha，与「真 dmg 覆写伪内容」语义等价，且完全不触碰共享缓存
@@ -549,13 +620,13 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
       writeFileSync(fakeDmg, 'this is not a valid dmg file content')
       const realSha = sha256OfFile(fakeDmg)
 
-      const vars = makeMacVars({ dmgPath: fakeDmg, sha256: realSha, appBundleName })
+      const vars = makeMacVars(tmpDir, { dmgPath: fakeDmg, sha256: realSha, appBundleName })
       mkdirSync(path.dirname(vars.appBundle), { recursive: true })
       mkdirSync(vars.appBundle, { recursive: true })
       writeFileSync(path.join(vars.appBundle, 'OLD_MARKER'), 'untouched')
 
       const script = stripOpenLine(buildUpdaterScript(vars))
-      const r = runBash(writeScriptToTmp(script))
+      const r = await runBash(tmpDir, writeScriptToTmp(tmpDir, script))
 
       expect(r.status, 'dmg 挂载失败应 exit 1').toBe(1)
       // 正式位置零接触（G1：S4 前失败 = 旧版完好）
@@ -571,14 +642,14 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
     },
   )
 
-  it(
+  it<TestScope>(
     '解包产物缺主二进制（dmg 内只有空壳 .app）→ exit 1、error=extract failed、旧 .app 完好（RI1 误判成功防护）',
-    () => {
+    async ({ tmpDir }) => {
       // 构造「合法 dmg 但 .app 没有 Contents/MacOS/<bin>」：attach/ditto 成功、主二进制检查拦截。
       const appBundleName = 'TaiJi.app'
-      const { dmgPath, sha256 } = buildMinimalAppDmg({ appBundleName, hollow: true })
+      const { dmgPath, sha256 } = await buildMinimalAppDmg(tmpDir, { appBundleName, hollow: true })
 
-      const vars = makeMacVars({
+      const vars = makeMacVars(tmpDir, {
         dmgPath,
         sha256,
         appBundleName,
@@ -589,7 +660,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
       writeFileSync(path.join(vars.appBundle, 'OLD_MARKER'), 'untouched')
 
       const script = stripOpenLine(buildUpdaterScript(vars))
-      const r = runBash(writeScriptToTmp(script))
+      const r = await runBash(tmpDir, writeScriptToTmp(tmpDir, script))
 
       expect(r.status, '主二进制缺失应 exit 1').toBe(1)
       expect(existsSync(path.join(vars.appBundle, 'OLD_MARKER'))).toBe(true)
@@ -603,11 +674,11 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
 // MAC 脚本：状态机中断注入（kill 进程组）与失败分支【集成门控】
 // ════════════════════════════════════════════════════════════════
 describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 状态机中断注入'), () => {
-  it(
+  it<TestScope>(
     'S1 中断（M2 脚本侧）：staging 解压完成后 kill → 正式位置零接触 + staging 残留 + result 未写',
-    async () => {
-      const { dmgPath, sha256, appBundleName, binaryName } = buildMinimalAppDmg({ versionMarker: 'NEW-V-B' })
-      const vars = makeMacVars({ dmgPath, sha256, appBundleName, binaryName })
+    async ({ tmpDir }) => {
+      const { dmgPath, sha256, appBundleName, binaryName } = await buildMinimalAppDmg(tmpDir, { versionMarker: 'NEW-V-B' })
+      const vars = makeMacVars(tmpDir, { dmgPath, sha256, appBundleName, binaryName })
       const appDir = path.dirname(vars.appBundle)
       const stagingDir = path.join(appDir, `.staging.${appBundleName}`)
       mkdirSync(appDir, { recursive: true })
@@ -617,14 +688,14 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
       const flag = path.join(tmpDir, 'pause-S2.flag')
       writeFileSync(flag, '')
       const script = pauseAfterStage(stripOpenLine(buildUpdaterScript(vars)), 'S2 promote', flag)
-      const { child, exited } = runBashDetached(writeScriptToTmp(script))
+      const { child, exited } = runBashDetached(tmpDir, writeScriptToTmp(tmpDir, script))
 
       // 等 S1 完成（含 detach 已执行）且脚本停在 S2 前的注入暂停循环：触发条件用
       // 「S2 begin 日志行已写」而非「staging 二进制就位」——后者会让 kill 落进
-      // attach→detach 窗口，孤儿挂载持有共享 dmg，后续用例 attach 同一文件可撞
-      // 「资源忙」假红（updater-script.ts S1 注释：同 inode dmg 前次挂载未 detach
-      // 时重挂载可报忙，r2 实测）。kill 点仍在 M2 语义窗口内（S1 完成 → S2 动作前，
-      // flag 暂停循环保证 S2 mv 零执行）。
+      // attach→detach 窗口，孤儿挂载持有脚本要挂载的 dmg。同 inode dmg 前次挂载
+      // 未 detach 时重挂载可报资源忙/失败（updater-script.ts S1 注释 r2 实测；
+      // round3-a 探针 A2 同 inode 并发 attach 2/6 失败）。kill 点仍在 M2 语义
+      // 窗口内（S1 完成 → S2 动作前，flag 暂停循环保证 S2 mv 零执行）。
       const logText = () => (existsSync(vars.logPath) ? readFileSync(vars.logPath, 'utf8') : '')
       await waitFor('S1 完成（S2 begin 已记日志，脚本暂停中）', () =>
         logText().includes('[stage] S2 promote begin'))
@@ -645,11 +716,11 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
     },
   )
 
-  it(
+  it<TestScope>(
     'S3→S4 残余窗口中断（M3b 脚本侧）：备份与换装之间 kill → $APP 缺失 + .old/.new 双份完整',
-    async () => {
-      const { dmgPath, sha256, appBundleName, binaryName } = buildMinimalAppDmg({ versionMarker: 'NEW-V-B' })
-      const vars = makeMacVars({ dmgPath, sha256, appBundleName, binaryName })
+    async ({ tmpDir }) => {
+      const { dmgPath, sha256, appBundleName, binaryName } = await buildMinimalAppDmg(tmpDir, { versionMarker: 'NEW-V-B' })
+      const vars = makeMacVars(tmpDir, { dmgPath, sha256, appBundleName, binaryName })
       const appDir = path.dirname(vars.appBundle)
       mkdirSync(appDir, { recursive: true })
       mkdirSync(vars.appBundle, { recursive: true })
@@ -658,7 +729,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
       const flag = path.join(tmpDir, 'pause-S4.flag')
       writeFileSync(flag, '')
       const script = pauseAfterStage(stripOpenLine(buildUpdaterScript(vars)), 'S4 swap', flag)
-      const { child, exited } = runBashDetached(writeScriptToTmp(script))
+      const { child, exited } = runBashDetached(tmpDir, writeScriptToTmp(tmpDir, script))
 
       // 等 S3 完成（$APP 已 mv 到 .old），脚本停在 S4 前的暂停循环
       await waitFor('S3 备份完成（.old 就位 + $APP 缺失）', () =>
@@ -679,11 +750,11 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
     },
   )
 
-  it(
+  it<TestScope>(
     'S4 后 done 前中断（M3a 脚本侧）：换装完成 kill → $APP 完整新版 + .old 在（self-healer 可判定状态）',
-    async () => {
-      const { dmgPath, sha256, appBundleName, binaryName } = buildMinimalAppDmg({ versionMarker: 'NEW-V-B' })
-      const vars = makeMacVars({ dmgPath, sha256, appBundleName, binaryName })
+    async ({ tmpDir }) => {
+      const { dmgPath, sha256, appBundleName, binaryName } = await buildMinimalAppDmg(tmpDir, { versionMarker: 'NEW-V-B' })
+      const vars = makeMacVars(tmpDir, { dmgPath, sha256, appBundleName, binaryName })
       mkdirSync(path.dirname(vars.appBundle), { recursive: true })
       mkdirSync(vars.appBundle, { recursive: true })
       writeFileSync(path.join(vars.appBundle, 'OLD_MARKER'), 'old-vA')
@@ -691,7 +762,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
       const flag = path.join(tmpDir, 'pause-S5.flag')
       writeFileSync(flag, '')
       const script = pauseAfterStage(stripOpenLine(buildUpdaterScript(vars)), 'S5 finalize', flag)
-      const { child, exited } = runBashDetached(writeScriptToTmp(script))
+      const { child, exited } = runBashDetached(tmpDir, writeScriptToTmp(tmpDir, script))
 
       // 等 S4 完成（$APP 已是新版），脚本停在 S5 前的暂停循环
       await waitFor('S4 换装完成（$APP 出现新版标记）', () =>
@@ -710,9 +781,9 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
     },
   )
 
-  it(
+  it<TestScope>(
     '等待超时 abort（M6）：父进程不退 → failed(app still running)、旧 .app 完好、运行中进程不被打扰',
-    async () => {
+    async ({ tmpDir }) => {
       // 白造消除（方案乙）：脚本阶段顺序 = 只读检测 → 等待 → sha → attach（本用例
       // 死在等待段：父进程不退 → 3s 超时 abort），dmg 从未被读——假路径 + 任意 sha。
       const dmgPath = path.join(tmpDir, 'never-read.dmg')
@@ -721,7 +792,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
       // bash kill -0 对僵尸恒真，等待循环永远不 break。
       const parent = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' })
       parent.once('exit', () => {})
-      const vars = makeMacVars({
+      const vars = makeMacVars(tmpDir, {
         dmgPath,
         sha256: '0'.repeat(64),
         appBundleName: 'TaiJi.app',
@@ -736,7 +807,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
         // 120 轮压成 2 轮（1s），1s 出超时结论
         const script = shortenWaitLimit(stripOpenLine(buildUpdaterScript(vars)))
         const started = Date.now()
-        const r = runBash(writeScriptToTmp(script))
+        const r = await runBash(tmpDir, writeScriptToTmp(tmpDir, script))
         const elapsed = Date.now() - started
 
         expect(r.status, '超时应 exit 1').toBe(1)
@@ -753,24 +824,24 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
     },
   )
 
-  it(
+  it<TestScope>(
     '等待退出正向路径：父进程 1s 后退出 → 脚本等到再继续 → 升级完成（kill -0 立即返回语义，P12）',
-    async () => {
-      const { dmgPath, sha256, appBundleName, binaryName } = buildMinimalAppDmg({ versionMarker: 'NEW-V-B' })
+    async ({ tmpDir }) => {
+      const { dmgPath, sha256, appBundleName, binaryName } = await buildMinimalAppDmg(tmpDir, { versionMarker: 'NEW-V-B' })
       // 父进程用「孤儿化」模式：sleep 的 stdout/stderr 必须全部重定向 —— 否则
       // stderr 仍持有 spawnSync 的管道写端，spawnSync 会阻塞到 sleep 死亡才返回
       // （捕获到的 pid 已死，等待语义完全测不到）。父 bash 立即退出 → sleep 归
       // launchd 收割，无僵尸 → kill -0 语义真实。
       const parentPid = spawnSync('bash', ['-c', 'sleep 1 >/dev/null 2>&1 & pid=$!; echo $pid'])
         .stdout.toString().trim()
-      const vars = makeMacVars({ dmgPath, sha256, appBundleName, binaryName, parentPid })
+      const vars = makeMacVars(tmpDir, { dmgPath, sha256, appBundleName, binaryName, parentPid })
       mkdirSync(path.dirname(vars.appBundle), { recursive: true })
       mkdirSync(vars.appBundle, { recursive: true })
       writeFileSync(path.join(vars.appBundle, 'OLD_MARKER'), 'old-vA')
 
       const script = stripOpenLine(buildUpdaterScript(vars))
       const started = Date.now()
-      const r = runBash(writeScriptToTmp(script))
+      const r = await runBash(tmpDir, writeScriptToTmp(tmpDir, script))
       const elapsed = Date.now() - started
 
       expect(r.status, `期望 exit 0，stderr 见 log：${existsSync(vars.logPath) ? readFileSync(vars.logPath, 'utf8').slice(-400) : ''}`).toBe(0)
@@ -781,11 +852,11 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
     },
   )
 
-  it(
+  it<TestScope>(
     '备份失败 abort（RM7）：APP_DIR 只读 → failed(backup failed)、旧 .app 完好、.old 不被破坏',
-    async () => {
-      const { dmgPath, sha256, appBundleName, binaryName } = buildMinimalAppDmg({ versionMarker: 'NEW-V-B' })
-      const vars = makeMacVars({ dmgPath, sha256, appBundleName, binaryName })
+    async ({ tmpDir }) => {
+      const { dmgPath, sha256, appBundleName, binaryName } = await buildMinimalAppDmg(tmpDir, { versionMarker: 'NEW-V-B' })
+      const vars = makeMacVars(tmpDir, { dmgPath, sha256, appBundleName, binaryName })
       const appDir = path.dirname(vars.appBundle)
       mkdirSync(appDir, { recursive: true })
       mkdirSync(vars.appBundle, { recursive: true })
@@ -796,7 +867,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
       const flag = path.join(tmpDir, 'pause-S3.flag')
       writeFileSync(flag, '')
       const script = pauseAfterStage(stripOpenLine(buildUpdaterScript(vars)), 'S3 backup', flag)
-      const { child, exited } = runBashDetached(writeScriptToTmp(script))
+      const { child, exited } = runBashDetached(tmpDir, writeScriptToTmp(tmpDir, script))
 
       // 等 S2 完成（.new 就位），趁暂停把 APP_DIR 改只读（owner 555：不可建/删条目）
       await waitFor('S2 完成（.new 就位）', () => existsSync(`${vars.appBundle}.new`))
@@ -818,11 +889,11 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
     },
   )
 
-  it(
+  it<TestScope>(
     '换装失败回滚：S4 mv 失败 → 回滚 .old 成功 → failed(swap failed) + 旧 .app 完整恢复',
-    async () => {
-      const { dmgPath, sha256, appBundleName, binaryName } = buildMinimalAppDmg({ versionMarker: 'NEW-V-B' })
-      const vars = makeMacVars({ dmgPath, sha256, appBundleName, binaryName })
+    async ({ tmpDir }) => {
+      const { dmgPath, sha256, appBundleName, binaryName } = await buildMinimalAppDmg(tmpDir, { versionMarker: 'NEW-V-B' })
+      const vars = makeMacVars(tmpDir, { dmgPath, sha256, appBundleName, binaryName })
       mkdirSync(path.dirname(vars.appBundle), { recursive: true })
       mkdirSync(vars.appBundle, { recursive: true })
       writeFileSync(path.join(vars.appBundle, 'OLD_MARKER'), 'old-vA-rollback')
@@ -830,7 +901,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
       const flag = path.join(tmpDir, 'pause-S4b.flag')
       writeFileSync(flag, '')
       const script = pauseAfterStage(stripOpenLine(buildUpdaterScript(vars)), 'S4 swap', flag)
-      const { child, exited } = runBashDetached(writeScriptToTmp(script))
+      const { child, exited } = runBashDetached(tmpDir, writeScriptToTmp(tmpDir, script))
 
       // 等 S3 完成，趁暂停删掉 .new（模拟 staging 内容消失 → S4 mv 必失败）
       await waitFor('S3 完成', () => existsSync(`${vars.appBundle}.old`) && !existsSync(vars.appBundle))
@@ -849,13 +920,13 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
     },
   )
 
-  it(
+  it<TestScope>(
     '只读卷拒装（M5）：appBundle 位于 /Volumes → failed(read-only volume)、不触碰任何路径',
-    () => {
+    async ({ tmpDir }) => {
       // 只读检测是脚本第一步（case /Volumes/*），在任何文件系统操作前退出——
       // 因此可以用 /Volumes 下的虚拟路径真实执行而不需要真挂载。
       // 白造消除（方案乙）：dmg 在第一步就被短路、从未被读——假路径 + 任意 sha。
-      const vars = makeMacVars({
+      const vars = makeMacVars(tmpDir, {
         dmgPath: path.join(tmpDir, 'never-read.dmg'),
         sha256: '0'.repeat(64),
         appBundle: '/Volumes/TaiJi-Integration-Test/TaiJi.app',
@@ -863,7 +934,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
       })
 
       const script = stripOpenLine(buildUpdaterScript(vars))
-      const r = runBash(writeScriptToTmp(script))
+      const r = await runBash(tmpDir, writeScriptToTmp(tmpDir, script))
 
       expect(r.status, '只读卷应 exit 1').toBe(1)
       const result = JSON.parse(readFileSync(vars.resultPath, 'utf8')) as { status: string; error: string }
@@ -881,19 +952,20 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
 // MAC 脚本：磁盘满（M4 + P10：ditto 磁盘满必须非 0 退出）【集成门控】
 // ════════════════════════════════════════════════════════════════
 describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 磁盘满（P10）'), () => {
-  it(
+  it<TestScope>(
     '小容量卷上 ditto 拷入 5MB 不可压产物 → ENOSPC → ditto 非零退出、error=ditto copy failed、旧 app 完好',
-    (ctx) => {
+    async (ctx) => {
+      const { tmpDir } = ctx
       // 3MB HFS+ 镜像当「应用卷」；5MB 随机字节二进制必撑爆（ditto 无压缩）。
       // 更新 dmg 挂载在 $TMPDIR（S1 选址约束），只有 ditto 落 staging 在小卷上。
       const imgPath = path.join(tmpDir, 'tiny.dmg')
       const mountDir = path.join(tmpDir, 'mnt')
       mkdirSync(mountDir, { recursive: true })
 
-      const cr = spawnSync('hdiutil', ['create', '-size', '3m', '-fs', 'HFS+', '-volname', 'UPDTEST', '-ov', imgPath])
-      if (cr.status !== 0) ctx.skip(`hdiutil create 失败: ${cr.stderr?.toString()}`)
-      const at = spawnSync('hdiutil', ['attach', imgPath, '-mountpoint', mountDir, '-nobrowse'])
-      if (at.status !== 0) ctx.skip(`hdiutil attach 失败: ${at.stderr?.toString()}`)
+      const cr = await execCapture('hdiutil', ['create', '-size', '3m', '-fs', 'HFS+', '-volname', 'UPDTEST', '-ov', imgPath])
+      if (cr.status !== 0) ctx.skip(`hdiutil create 失败: ${cr.stderr}`)
+      const at = await execCapture('hdiutil', ['attach', imgPath, '-mountpoint', mountDir, '-nobrowse'])
+      if (at.status !== 0) ctx.skip(`hdiutil attach 失败: ${at.stderr}`)
 
       try {
         // 旧 app（小，能装下）挂在卷上
@@ -902,11 +974,11 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
         mkdirSync(path.join(appBundle, 'Contents', 'MacOS'), { recursive: true })
         writeFileSync(path.join(appBundle, 'OLD_MARKER'), 'old-vA-on-tiny-vol')
 
-        const { dmgPath, sha256, binaryName } = buildMinimalAppDmg({ appBundleName, binaryName: 'TaiJi', binarySize: 5 * 1024 * 1024 })
-        const vars = makeMacVars({ dmgPath, sha256, appBundleName, binaryName, appBundle })
+        const { dmgPath, sha256, binaryName } = await buildMinimalAppDmg(tmpDir, { appBundleName, binaryName: 'TaiJi', binarySize: 5 * 1024 * 1024 })
+        const vars = makeMacVars(tmpDir, { dmgPath, sha256, appBundleName, binaryName, appBundle })
 
         const script = stripOpenLine(buildUpdaterScript(vars))
-        const r = runBash(writeScriptToTmp(script), 30_000)
+        const r = await runBash(tmpDir, writeScriptToTmp(tmpDir, script), 30_000)
 
         expect(r.status, '磁盘满应 exit 1').toBe(1)
         const result = JSON.parse(readFileSync(vars.resultPath, 'utf8')) as { status: string; error: string }
@@ -920,7 +992,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
         const log = readFileSync(vars.logPath, 'utf8')
         expect(log, 'ditto 应在磁盘满时输出错误（P10）').toMatch(/ditto:|No space left|Disk Full|I\/O error|error/i)
       } finally {
-        spawnSync('hdiutil', ['detach', mountDir, '-force'])
+        await detachQuiet(mountDir)
       }
     },
     60_000,
@@ -933,7 +1005,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
 // 组合行为」——retry:2 与 bash 预算 15s 正是本段负载敏感症状，一并挂门控。
 // ════════════════════════════════════════════════════════════════
 describe.skipIf(!INTEGRATION_TESTS_ENABLED)(gatedTitle('updater-script integration: linux mv 备份/回滚'), () => {
-  function makeLinuxVars(opts: { appImagePath?: string; newFilePath?: string } = {}): LinuxUpdaterScriptVars {
+  function makeLinuxVars(tmpDir: string, opts: { appImagePath?: string; newFilePath?: string } = {}): LinuxUpdaterScriptVars {
     return {
       appImagePath: opts.appImagePath ?? path.join(tmpDir, 'TaiJi-x86_64.AppImage'),
       newFilePath: opts.newFilePath ?? path.join(tmpDir, 'update', 'TaiJi-x86_64.AppImage'),
@@ -950,14 +1022,14 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(gatedTitle('updater-script integrati
     return stripLinuxRestart(stripLinuxSha(buildLinuxUpdaterScript(vars)))
   }
 
-  it('happy path：备份 + 换装 + chmod 755 + status=done + .old 清理', () => {
-    const vars = makeLinuxVars()
+  it<TestScope>('happy path：备份 + 换装 + chmod 755 + status=done + .old 清理', async ({ tmpDir }) => {
+    const vars = makeLinuxVars(tmpDir)
     writeFileSync(vars.appImagePath, 'OLD AppImage content')
     mkdirSync(path.dirname(vars.newFilePath), { recursive: true })
     writeFileSync(vars.newFilePath, 'NEW AppImage content')
 
-    const scriptPath = writeScriptToTmp(buildLinuxBodyScript(vars), 'linux-updater.sh')
-    const r = runBash(scriptPath)
+    const scriptPath = writeScriptToTmp(tmpDir, buildLinuxBodyScript(vars), 'linux-updater.sh')
+    const r = await runBash(tmpDir, scriptPath)
 
     expect(r.status, `期望 exit 0，stderr=${r.stderr}`).toBe(0)
     expect(existsSync(vars.appImagePath)).toBe(true)
@@ -969,13 +1041,13 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(gatedTitle('updater-script integrati
     expect(result.status).toBe('done')
   })
 
-  it('mv 失败回滚：新文件不存在 → exit 1、旧 AppImage 恢复、error=mv failed', () => {
-    const vars = makeLinuxVars()
+  it<TestScope>('mv 失败回滚：新文件不存在 → exit 1、旧 AppImage 恢复、error=mv failed', async ({ tmpDir }) => {
+    const vars = makeLinuxVars(tmpDir)
     writeFileSync(vars.appImagePath, 'OLD AppImage content')
     // 不创建 newFilePath → S4 mv 必失败 → 回滚
 
-    const scriptPath = writeScriptToTmp(buildLinuxBodyScript(vars), 'linux-updater.sh')
-    const r = runBash(scriptPath)
+    const scriptPath = writeScriptToTmp(tmpDir, buildLinuxBodyScript(vars), 'linux-updater.sh')
+    const r = await runBash(tmpDir, scriptPath)
 
     expect(r.status, 'mv 失败应 exit 1').toBe(1)
     expect(existsSync(vars.appImagePath), '旧 AppImage 应被回滚恢复').toBe(true)
@@ -987,16 +1059,16 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(gatedTitle('updater-script integrati
 
   // retry: 2 —— CI macOS runner 高负载下实测 flaky（v0.10.8 post-merge 2/23，rerun 绿），
   // chmod 语义与负载的耦合无法在 JS 侧消除，retry 兜底环境敏感性
-  it('只读检测：APP_DIR 不可写 → exit 1、error=read-only volume、不动任何文件', { retry: 2 }, () => {
+  it<TestScope>('只读检测：APP_DIR 不可写 → exit 1、error=read-only volume、不动任何文件', { retry: 2 }, async ({ tmpDir }) => {
     const appDir = path.join(tmpDir, 'readonly-mount')
     mkdirSync(appDir, { recursive: true })
-    const vars = makeLinuxVars({ appImagePath: path.join(appDir, 'TaiJi-x86_64.AppImage') })
+    const vars = makeLinuxVars(tmpDir, { appImagePath: path.join(appDir, 'TaiJi-x86_64.AppImage') })
     writeFileSync(vars.appImagePath, 'OLD content')
 
     chmodSync(appDir, 0o555)
     try {
-      const scriptPath = writeScriptToTmp(buildLinuxBodyScript(vars), 'linux-updater.sh')
-      const r = runBash(scriptPath)
+      const scriptPath = writeScriptToTmp(tmpDir, buildLinuxBodyScript(vars), 'linux-updater.sh')
+      const r = await runBash(tmpDir, scriptPath)
       expect(r.status, '只读目录应 exit 1').toBe(1)
       const result = JSON.parse(readFileSync(vars.resultPath, 'utf8')) as { status: string; error: string }
       expect(result.error).toBe('read-only volume')
@@ -1008,8 +1080,8 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(gatedTitle('updater-script integrati
   })
 
   // retry: 2 —— 等待窗已放宽到 3s（见 shortenWaitLimit），retry 再兜一层极端调度抖动
-  it('等待超时 abort：父进程不退 → failed(app still running)', { retry: 2 }, async () => {
-    const vars = makeLinuxVars()
+  it<TestScope>('等待超时 abort：父进程不退 → failed(app still running)', { retry: 2 }, async ({ tmpDir }) => {
+    const vars = makeLinuxVars(tmpDir)
     writeFileSync(vars.appImagePath, 'OLD AppImage content')
     mkdirSync(path.dirname(vars.newFilePath), { recursive: true })
     writeFileSync(vars.newFilePath, 'NEW AppImage content')
@@ -1019,8 +1091,8 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(gatedTitle('updater-script integrati
     const timedVars: LinuxUpdaterScriptVars = { ...vars, parentPid: String(parent.pid) }
     try {
       const script = shortenWaitLimit(buildLinuxBodyScript(timedVars))
-      const scriptPath = writeScriptToTmp(script, 'linux-updater.sh')
-      const r = runBash(scriptPath)
+      const scriptPath = writeScriptToTmp(tmpDir, script, 'linux-updater.sh')
+      const r = await runBash(tmpDir, scriptPath)
       expect(r.status, '超时应 exit 1').toBe(1)
       const result = JSON.parse(readFileSync(vars.resultPath, 'utf8')) as { status: string; error: string }
       expect(result.error).toBe('app still running')
