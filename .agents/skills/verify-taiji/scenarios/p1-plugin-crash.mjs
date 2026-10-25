@@ -4,10 +4,11 @@
  * plugin.list status=crashed；C：crash journal 行）+ 邻居与宿主不受影响
  * （builtin 插件状态不变、宿主 RPC 通道正常）。
  *
- * UI 面缺口（如实登记 degraded/notProvable）：设计 S13 期望「家族卡显示『插件已停止』+ 重启」，
- * 现行实现无此 UI——插件管理面对 crashed 插件零呈现（扩展页呈「未发现已安装插件」），
- * 崩溃的实际反馈面 = 崩溃 toast（plugin:crashed → showToast，4s 消失窗）。本剧本断言
- * toast 呈现（A），管理面缺口取证 attach 照录（不判失败）。
+ * S13 崩溃恢复 UI（设计 §3.1 失败路径表）：家族卡显示「插件已停止」+ 重启按钮，
+ * 重启 = plugin.toggle off/on（不自动重激活，ADR-0122）。本剧本 A 通道断言该闭环
+ *（标记与按钮呈现 → 点击重启 → status 回 active）。fixture 经 seedPluginCatalog
+ * 预置带 family 的清单条目进实例数据目录（家族卡只渲染清单 family 条目，顶层预置
+ * 先于 instance.launch，同 p1-plugin-a3-a12-real-extract 模式）。
  *
  * 装配：本机 mock npm registry（同 p1-plugin-install-confirm）；无 LLM 需求。
  */
@@ -15,17 +16,25 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 
-import { startMockNpmRegistry, registryEnv } from './lib/mock-npm-registry.mjs'
+import { startMockNpmRegistry, registryEnv, seedPluginCatalog, catalogEntry } from './lib/mock-npm-registry.mjs'
+import { resolveDataDirFromArgv } from './lib-plugin-fixtures.mjs'
 import { openPluginFlow, directInstallToConfirm, closePluginFlow, pollUntil } from './lib/plugin-flow-helper.mjs'
 
 const PKG = 'plugin-crash-demo'
 const PLUGIN_ID = 'plugin-crash-demo'
 const BUILTIN_ID = 'scheduler-manager'
 
+// ── 顶层预置（import 阶段执行，先于 runner 的 instance.launch）：seed 带 family 的
+//    清单条目（家族卡崩溃态的渲染前提——plugin-family-grid 只含清单 family 条目）──
+const dataDir0 = resolveDataDirFromArgv()
+seedPluginCatalog(dataDir0, [
+  catalogEntry({ packageName: PKG, pluginId: PLUGIN_ID, displayName: 'Crash Demo', namespace: PLUGIN_ID, version: '1.0.0' }),
+])
+
 export const meta = {
   id: 'p1-plugin-crash',
   priority: 'P1',
-  title: 'S13 插件崩溃隔离：SIGKILL fork → 崩溃检测（crashed + journal）+ 邻居/宿主不受影响',
+  title: 'S13 插件崩溃隔离：SIGKILL fork → 崩溃检测（crashed + journal）+ 家族卡停止/重启 + 邻居/宿主不受影响',
   covers: ['plugin.list', 'plugin.toggle'],
   requires: [],
   estimateSec: 240,
@@ -35,10 +44,10 @@ export const meta = {
     'kill fork 后崩溃检测生效：plugin:crashed 广播（payload.pluginId 命中）+ plugin.list status=crashed（B 双证）',
     'C：crash journal 落 plugin-worker crash 行（processId=sandbox-<pluginId> + pluginIds 命中）',
     '隔离性：builtin 插件 scheduler-manager 状态不受影响；宿主 RPC（ping / config.getProviders / plugin.list）全部正常',
-    'A：崩溃 toast 呈现（plugin:crashed → showToast，文案「插件 <id> 崩溃: …」含插件标识，4s 自动消失窗内观测）；插件管理面对 crashed 插件的呈现缺口照录（证据 attach，不判失败）',
+    'A：崩溃 toast 呈现（plugin:crashed → showToast，文案「插件 <id> 崩溃: …」含插件标识，4s 自动消失窗内观测）',
+    'A/S13：家族卡崩溃恢复闭环——家族卡显示「插件已停止」标记 + 重启按钮，点击重启（plugin.toggle off/on）后 status 回 active、标记消失',
   ],
   notProvable: [
-    '「家族卡显示『插件已停止』+ 重启按钮」——现行实现无该 UI 面（uncovered，产品缺口非剧本缺口）',
     'fork 内部致命异常形态（SIGKILL 外部注入覆盖 exit 信号路径；fatal_error 消息路径归单测）',
   ],
 }
@@ -46,9 +55,7 @@ export const meta = {
 export async function run(ctx) {
   const { protocol, ui, ev, log, dataDir } = ctx
   const uncovered = []
-  const gotchas = [
-    '崩溃 UI 缺口：crashed 插件在协议层 enabled 推导为 false（plugin-info-mapper enabled = status===active），插件管理卡文本呈「已禁用」——与本剧本照录的 actual 对照读',
-  ]
+  const gotchas = []
   const page = await ctx.instance.page()
 
   const registry = await startMockNpmRegistry(ctx.repo, {
@@ -175,25 +182,50 @@ export async function run(ctx) {
     actual: othersCrashed.map((p) => p.pluginId).join(',') || '0',
   })
 
-  // ── A 通道②：插件管理面对 crashed 插件的呈现（缺口照录，不判失败——设计 S13
-  //    「插件已停止 + 重启」现行实现无对应 UI，缺口已登记 meta.notProvable；此处只取证）
+  // ── A/S13 通道③：家族卡崩溃恢复闭环（设计失败路径表）─────────────
+  //    家族卡显示「插件已停止」+ 重启按钮 → 点击重启（plugin.toggle off/on）→
+  //    status 回 active、家族卡标记消失。数据流：进入流程对话框拉 plugin.list
+  //    （crashed 判定主通道），点击重启后 toggle 回包刷新运行态。
   try {
-    const navVisible = await page.locator('[data-testid="settings-nav-extension"]').first().isVisible().catch(() => false)
-    if (!navVisible) await ui.click('testid=sidebar-settings')
-    await ui.click('testid=settings-nav-extension')
-    const entry = page.locator('[data-testid="extension-contributions-entry"]')
-    if ((await entry.count()) > 0) {
-      await ui.click('testid=extension-contributions-entry')
-    }
-    await ui.expectVisible('testid=plugin-settings-page', { timeoutMs: 15_000 })
-    const cardCount = await page.locator('[data-testid="plugin-card"]').count()
-    const pageText = await ui.text('testid=plugin-settings-page')
-    ev.attach('s13-management-surface-text', `plugin-card ×${cardCount}；页面文案：${pageText.slice(0, 300)}`)
-    await ui.screenshot('s13-plugin-card-after-crash')
-    gotchas.push(`插件管理面对 crashed 插件零呈现（plugin-card ×${cardCount}，页面呈「${pageText.slice(0, 40).trim()}」）——崩溃反馈面 = 崩溃 toast（① 已断言）`)
+    await openPluginFlow(ui, page)
+    const crashedCard = page.locator('[data-testid="plugin-family-card"]', { hasText: 'Crash Demo' })
+    await ui.expectVisible('testid=plugin-family-grid', { timeoutMs: 20_000 })
+    await crashedCard.waitFor({ state: 'visible', timeoutMs: 20_000 })
+
+    const badge = crashedCard.locator('[data-testid="plugin-family-crashed-badge"]')
+    const restartBtn = crashedCard.locator('[data-testid="plugin-family-restart-btn"]')
+    ev.assert('A/S13: 家族卡显示「插件已停止」标记 + 重启按钮', (await badge.count()) === 1 && (await restartBtn.count()) === 1, {
+      channel: 'A',
+      expected: 'crashed 家族卡含「插件已停止」标记与重启按钮各一',
+      actual: `badge ×${await badge.count()} restart ×${await restartBtn.count()}（卡片文案：${(await crashedCard.textContent() ?? '').slice(0, 120)}）`,
+    })
+    await ui.screenshot('s13-family-card-crashed')
+
+    // 点击重启 → toggle off/on → status 回 active（ADR-0122：用户显式触发，不自动重激活）
+    await restartBtn.first().click()
+    const restarted = await pollUntil(
+      () => protocol.call('plugin.list', {}),
+      (r) => (r.plugins ?? []).some((p) => p.pluginId === PLUGIN_ID && p.status === 'active'),
+      { timeoutMs: 30_000 },
+    )
+    const restartedInfo = (restarted.plugins ?? []).find((p) => p.pluginId === PLUGIN_ID)
+    ev.assert('A/S13: 点击重启 → plugin.toggle off/on → status 回 active', Boolean(restartedInfo && restartedInfo.status === 'active'), {
+      channel: 'A',
+      expected: 'status=active（重启完成）',
+      actual: restartedInfo ? `status=${restartedInfo.status} enabled=${restartedInfo.enabled}` : '不在列表',
+    })
+    // 重启完成后家族卡标记消失（toggle 回包刷新运行态，对话框保持打开）
+    await badge.waitFor({ state: 'detached', timeoutMs: 15_000 }).catch(() => {})
+    const badgeAfter = await page.locator('[data-testid="plugin-family-crashed-badge"]').count()
+    ev.assert('A/S13: 重启完成后家族卡「插件已停止」标记消失', badgeAfter === 0, {
+      channel: 'A',
+      expected: '0（标记消失）',
+      actual: `×${badgeAfter}`,
+    })
+    await ui.screenshot('s13-family-card-restarted')
+    await closePluginFlow(ui)
   } catch (e) {
-    // 管理面取证失败不阻断结论（B/C 双证 + toast 已闭合）；缺口照录
-    uncovered.push(`插件管理面取证未完成：${e instanceof Error ? e.message : String(e)}`)
+    uncovered.push(`S13 家族卡崩溃恢复闭环取证未完成：${e instanceof Error ? e.message : String(e)}`)
   }
 
   log('S13 done')
