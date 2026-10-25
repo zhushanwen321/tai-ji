@@ -73,7 +73,8 @@ function makeHarness() {
     inject: async (_c: IPiEngine, text: string) => ({ text, notices: [] }),
   } as unknown as SkillInjector)
   const dispatcher = new MessageDispatcher(
-    {} as unknown as IDispatcherSessionOps,
+    // 本测试走 runAcceptance 受理成功路径，clearSessionOutcome 必须存在（dmg-r1-1 跨回合终态放行）
+    { clearSessionOutcome: vi.fn() } as unknown as IDispatcherSessionOps,
     { getClient: () => client as unknown as IPiEngine } as unknown as IProcessManager,
     { record: vi.fn() } as unknown as WorkspaceService,
     ({ publish: (_sid: string, msg: ServerMessage) => published.push(msg) }) as unknown as IMessageBus,

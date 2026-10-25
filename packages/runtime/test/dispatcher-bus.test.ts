@@ -92,12 +92,13 @@ function makeMocks(opts: {
     touchActivity: vi.fn(),
   } as unknown as IPiEngine
 
-  // S2 ISP 化：结构性满足 dispatcher 窄接口（6 方法 = 消费方实际用到的全部），无强转；
+  // S2 ISP 化：结构性满足 dispatcher 窄接口（7 方法 = 消费方实际用到的全部），无强转；
   // applyContextUpdate 不在窄接口（event-interpreter 组合根回调消费），随迁移移除
   const svc: IDispatcherSessionOps = {
     ensureActive: vi.fn(async () => client),
     getSessionByClient: vi.fn(() => session),
     persistSessionOutcome: vi.fn(),
+    clearSessionOutcome: vi.fn(),
     getSession: vi.fn(),
     removeSessionEntry: vi.fn(),
     detachSession: vi.fn(),
@@ -412,6 +413,7 @@ describe('message-dispatcher bus integration', () => {
       ensureActive: vi.fn(async () => client),
       getSessionByClient: vi.fn(() => session),
       persistSessionOutcome: vi.fn(),
+      clearSessionOutcome: vi.fn(),
       getSession: vi.fn(),
       removeSessionEntry: vi.fn(),
       detachSession: vi.fn(),
@@ -431,6 +433,7 @@ describe('message-dispatcher bus integration', () => {
     const svc: IDispatcherSessionOps = {
       getSessionByClient: vi.fn(() => session),
       persistSessionOutcome: vi.fn(),
+      clearSessionOutcome: vi.fn(),
       ensureActive: vi.fn(),
       getSession: vi.fn(),
       removeSessionEntry: vi.fn(),
@@ -453,6 +456,7 @@ describe('message-dispatcher bus integration', () => {
       getSessionByClient: vi.fn(() => session),
       ensureActive: vi.fn(),
       persistSessionOutcome: vi.fn(),
+      clearSessionOutcome: vi.fn(),
       getSession: vi.fn(),
       removeSessionEntry: vi.fn(),
       detachSession: vi.fn(),

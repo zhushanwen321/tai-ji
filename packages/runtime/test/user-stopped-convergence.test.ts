@@ -213,6 +213,7 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
       ensureActive: vi.fn(async () => client),
       getSessionByClient: vi.fn(() => session),
       persistSessionOutcome,
+      clearSessionOutcome: vi.fn(),
       getSession: vi.fn(() => session),
       removeSessionEntry: vi.fn(),
       detachSession: vi.fn(),

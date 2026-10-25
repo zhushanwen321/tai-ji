@@ -119,6 +119,7 @@ function makeDispatcherMocks(_opts: { abortError?: Error } = {}) {
     getSessionByClient: vi.fn(() => session),
     detachSession: vi.fn(),
     persistSessionOutcome: vi.fn(),
+    clearSessionOutcome: vi.fn(),
     removeSessionEntry: vi.fn(),
     ensureActive: vi.fn(),
     getSession: vi.fn(() => undefined),

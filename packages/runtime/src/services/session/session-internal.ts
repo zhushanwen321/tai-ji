@@ -166,7 +166,7 @@ export interface ILifecycleSessionOps {
 }
 
 /**
- * dispatcher 消费的窄接口（MessageDispatcher.svc，6 方法，调用点实测）。
+ * dispatcher 消费的窄接口（MessageDispatcher.svc，7 方法，调用点实测）。
  *
  * 含跨消费者共享方法（重复声明、单一实现）：removeSessionEntry（lifecycle 共用）。
  * detachSession / getSession 仅本接口+组合根消费（S3 后 lifecycle 走所有权自查）。
@@ -180,6 +180,12 @@ export interface IDispatcherSessionOps {
    * 写 session_end 终态 entry（W4，ADR 0042）。3 个终态点复用。
    */
   persistSessionOutcome(sessionId: string, outcome: SessionOutcome, reason?: string): void
+  /**
+   * 清除 session 终态 sidecar（新回合受理入口调用，dmg-r1-1 跨回合终态放行——旧终态
+   * 不拦新周期写入；同回合并发竞态保护不受影响）。唯一消费方 = message-dispatcher
+   * runAcceptance 受理成功后。
+   */
+  clearSessionOutcome(sessionId: string): void
   /** 只读查 Map，返回 managed session 视图（active 判定 + 字段读改）。 */
   getSession(sessionId: string): IManagedSessionView | undefined
   /** 从 Map 删除条目（仅删条目，不 detach adapter / 不 destroy 进程）。 */

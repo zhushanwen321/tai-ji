@@ -90,6 +90,7 @@ function makeHarness(opts: HarnessOptions = {}) {
     }),
     getSessionByClient: vi.fn(() => session),
     persistSessionOutcome: vi.fn(),
+    clearSessionOutcome: vi.fn(),
     getSession: vi.fn(() => session),
     removeSessionEntry: vi.fn(),
     detachSession: vi.fn(),

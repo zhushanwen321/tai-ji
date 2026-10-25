@@ -285,18 +285,19 @@ export class SessionStateProjection {
    * 的 `finally` 中 `_emitAgentSettled()`（pi dist/core/agent-session.js:772-786），且存在
    * 「post-run 尾段返回 false 直接 settle」这条不含 agent_end 的收尾路径（同文件 :787+）。
    *
-   * 缺本挂点的后果：message-dispatcher 的 processing 分支在 pi 拒绝「already processing」时
-   * 置回 busy（见 handlePromptFailure 注释），其复位原先只
-   * 依赖 agent_end。若 prompt 恰落在「post-run 尾段」（_flushPendingBashMessages 等 I/O，可达
-   * 百毫秒级、**每次 run 结束都经过**）窗口，则 agent_end 已发而 settle 未完成 → isGenerating
-   * 永久残留 true：occupancy 已被 #4 复位为 idle（前端照常 flush），但 busy 预检读 occupancy
-   * → 后续每条消息被拒，只能等 abort / 进程退出（幽灵忙碌，与本次事故同类）。
+   * 缺本挂点的后果：occupancy 的占用复位只依赖 agent_end。若 prompt 恰落在「post-run 尾段」
+   *（_flushPendingBashMessages 等 I/O，可达百毫秒级、**每次 run 结束都经过**）窗口，则
+   * agent_end 已发而 settle 未完成 → isGenerating 永久残留 true：occupancy 已被 #4 复位为
+   * idle（前端照常 flush），但 busy 预检读 occupancy → 后续每条消息被拒，只能等 abort /
+   * 进程退出（幽灵忙碌，与本次事故同类）。
    *
    * 语义依据：agent_settled = run 级联结束（pi finally），此刻必无 turn 在跑 → 'idle' 转移正确。
-   * 反向竞态（本复位晚于「新 run 受理 prompt」的置位）存在但可自愈：pi 对活跃 run 的 prompt
-   * 会拒绝 processing（锚点 pi 1.0.0 dist/core/agent-session.js prompt 的
-   * "Agent is already processing" throw，run 活跃时 prompt 直拒），由 handlePromptFailure 的 processing 分支
-   * （busy 反转纠偏转移）重新纠偏。
+   * 反向竞态（本复位晚于「新 run 受理 prompt」的置位）由 pi 的活跃 run 直拒兜住：pi 对活跃
+   * run 的 prompt 抛 "Agent is already processing"（锚点 pi 1.0.0 dist/core/agent-session.js
+   * prompt，run 活跃时 prompt 直拒）——投递内核按真失败首败即停显式上报、不反转 occupancy
+   *（原 busy 反转纠偏转移已随忙闲门禁退役，u5a：受理即出站下文本投递恒带 streamingBehavior，
+   * pi 忙时入队不拒，见 session-delivery-registry promptAwaitingCompaction 注释），occupancy
+   * 以本挂点的 'idle' 复位为准。
    */
   handleAgentSettledSideEffects(sessionId: string): void {
     const session = this.deps.getSession(sessionId)

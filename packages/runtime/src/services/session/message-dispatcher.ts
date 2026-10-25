@@ -210,6 +210,15 @@ export class MessageDispatcher {
     }
 
     const receipt = this.submitToKernel(sessionId, hookOutcome.modifiedContent ?? content, { images, clientUuid })
+    // [dmg-r1-1 跨回合终态放行] 内核受理成功 = 新回合周期开启：清上一回合的终态 sidecar，
+    // 使本周期终态（新回合完成 done / 失败 error / 再次 abort stopped）不被第一终态优先
+    // 检查拦截（否则用户 abort 后继续对话，重启后侧栏永久滞留旧终态——失真根因）。
+    // 放在 hook/requireCommand 全通过后：被拦截的提交不开启新周期，旧终态保留。
+    // submit 失败（registry 未接线的显式失败）同样保留旧终态。同回合并发竞态（abort vs
+    // pi 自发 agent_end）不经本受理点，persistSessionOutcome 的先写者赢保护原样生效。
+    if (receipt) {
+      this.svc.clearSessionOutcome(sessionId)
+    }
     return { blocked: false, receipt }
   }
 

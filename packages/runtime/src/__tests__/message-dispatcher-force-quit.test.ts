@@ -75,13 +75,14 @@ function makeMocks(opts: MockOpts = {}): ForceQuitMocks {
   const persistOutcomeFn = vi.fn(() => { callOrder.push('persist') })
   const removeEntryFn = vi.fn(() => { callOrder.push('remove') })
 
-  // S2 ISP 化：结构性满足 dispatcher 窄接口（6 方法 = 消费方实际用到的全部），无强转。
+  // S2 ISP 化：结构性满足 dispatcher 窄接口（7 方法 = 消费方实际用到的全部），无强转。
   // ensureActive/getSession 不在 forceQuit/abort 收敛路径上，空 mock 即可。
   const svcGetSession = vi.fn()
   const svc: IDispatcherSessionOps = {
     getSessionByClient: vi.fn(() => makeMockSession()),
     detachSession: detachSessionFn,
     persistSessionOutcome: persistOutcomeFn,
+    clearSessionOutcome: vi.fn(),
     removeSessionEntry: removeEntryFn,
     ensureActive: vi.fn(),
     getSession: svcGetSession,

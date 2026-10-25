@@ -111,6 +111,7 @@ function makeMocks(opts: MockOpts = {}) {
     getSessionByClient: vi.fn(() => session),
     getSession: vi.fn(() => session),
     persistSessionOutcome: vi.fn(),
+    clearSessionOutcome: vi.fn(),
     removeSessionEntry: vi.fn(),
     detachSession: vi.fn(),
   }

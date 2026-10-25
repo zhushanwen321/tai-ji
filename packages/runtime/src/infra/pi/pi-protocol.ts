@@ -113,15 +113,14 @@ export interface PiAgentEndEvent extends PiBaseMessage {
   // [W6 A-10 探针 2026-08-20] taiji 不消费 willRetry 是安全的：真实 pi 0.84.1 实测（rpc + 500 provider
   // 触发 auto-retry，退避窗口内抢发 prompt），retry 全程 session.isStreaming=true（isStreaming =
   // _isAgentRunActive，仅 _runAgentPrompt finally 的 _emitAgentSettled 复位——agent-session.js:327-328,744-754），
-  // 窗口内新 prompt 被 pi 拒绝（"Agent is already processing..."，agent-session.js:831-836）→ runtime prompt
-  // catch 按拒绝分型收尾（message-dispatcher.ts handlePromptFailure，无数据竞争）：busy 类（'processing' /
-  // 'compacting'）转 send.rejected 广播，非 busy 真失败才走 message.error + isGenerating 复位；
-  // [session-dead 2026-09-10] 'processing'（本条窗口）不视为空闲——以 pi 的拒绝为权威信号恢复占用
-  //（isGenerating=true + occupancy turn:'generating'），前端占用短路生效、defer 队列不再按 idle 1s 重投。
-  // 原「已知 UX 瑕疵（登记不修）：retry 窗口内 UI 视为空闲（isGenerating 已被首个 agent_end 复位），
-  // 用户发消息会收到 pi 英文错误而非 busy 拒绝」[session-dead 2026-09-10 已收尾]：该窗口内的发送尝试现经
-  // 上述分型处理（中文拒绝提示 + 占用转 generating，由前端排队等待 pi 真正 settle），不再泄漏 pi 英文
-  // 错误、也不再产生 idle 帧驱动的 1s 重投环。注：0.80.3 旧版 isStreaming = agent.state.isStreaming（loop 级），
+  // 窗口内新 prompt 被 pi 拒绝（"Agent is already processing..."，agent-session.js:831-836）。现行收尾
+  //（投递内核化 + 忙闲门禁退役，session-delivery-registry promptAwaitingCompaction）：文本投递恒带
+  // streamingBehavior，pi 忙时入队不拒（agent-session.js:1515-1524）——retry 窗口内的发送进 pi 队列、
+  // settle 后正常消费，不撞本拒绝；processing 拒绝仅剩无 behavior 直投（sendDirect，create 首发、
+  // 新 session 必 idle 无竞态）撞 runtime 不知情幽灵 turn 的异常形态，按真失败首败即停显式上报
+  //（message.error），不反转 occupancy（原「以 pi 拒绝为权威信号恢复占用」的 busy 反转纠偏转移已随
+  // 分型重试退役）；compacting 拒绝置 piCompactingBlocked、按 compaction_end 事件重提。
+  // 注：0.80.3 旧版 isStreaming = agent.state.isStreaming（loop 级），
   // retry 窗口为 false——审计 A-10 的竞争前提来自旧 clone 语义，0.84.1 已不可复现。
 }
 
