@@ -182,8 +182,8 @@ try {
   packStep.packed.push(`pi-wool-shared@${SHARED_VERSION}`)
   packStep.copied.push(sharedCopyName)
   // packument 依赖元数据（安装器递归装依赖读 packument，mock registry 元数据缺位 =
-  // 依赖递归不发生——见 mock-npm-registry.mjs pkgExtra 注释）
-  pkgExtraByCopyName[sharedCopyName] = readTgzPackageJson(sharedTgzPath).dependencies ?? {}
+  // 依赖递归不发生——见 mock-npm-registry.mjs pkgExtra 注释；值 = 字段级合并对象）
+  pkgExtraByCopyName[sharedCopyName] = { dependencies: readTgzPackageJson(sharedTgzPath).dependencies ?? {} }
 
   for (const f of FAMILIES) {
     f.packTgzName = execFileSync('pnpm', ['pack', '--pack-destination', PACK_TMP_DIR], {
@@ -204,7 +204,7 @@ try {
     fs.copyFileSync(path.join(PACK_TMP_DIR, path.basename(extTgzName)), path.join(distDir, extCopyName))
     packStep.packed.push(`${f.extPkgName}@${f.extVersion}`)
     packStep.copied.push(extCopyName)
-    pkgExtraByCopyName[extCopyName] = readTgzPackageJson(path.join(PACK_TMP_DIR, path.basename(extTgzName))).dependencies ?? {}
+    pkgExtraByCopyName[extCopyName] = { dependencies: readTgzPackageJson(path.join(PACK_TMP_DIR, path.basename(extTgzName))).dependencies ?? {} }
   }
 } finally {
   fs.rmSync(workDir, { recursive: true, force: true })
