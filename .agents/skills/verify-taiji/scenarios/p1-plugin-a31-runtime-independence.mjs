@@ -215,25 +215,39 @@ function psLines() {
     .split('\n').map((l) => l.trim()).filter(Boolean)
 }
 
-/** pi 可执行文件路径（which pi → nvm 回退；与 runtime find-pi-executable 探测序同源）。 */
-function resolvePiPath() {
+/**
+ * pi 可执行文件候选路径集（与 runtime find-pi-executable 探测序同源镜像）：
+ * dev 模式优先 <repo>/apps/electron/resources/pi/pi-<plat>-<arch>（prepare-pi-resources
+ * 产物，runtime 实际 spawn 的就是它），回退 which pi → nvm → 常见位置。检测器按「行内
+ * 含任一候选」匹配——a31-r1 实测教训：只匹配 which pi 会对 dev resources pi 恒零命中
+ * （检测器空真被正向对照当场证伪，正是对照存在的意义）。
+ */
+function resolvePiCandidates(repo) {
+  const candidates = []
+  const devPi = path.join(repo, 'apps', 'electron', 'resources', 'pi', `pi-${process.platform}-${process.arch}`)
+  if (fs.existsSync(devPi)) candidates.push(devPi)
   try {
     const out = execFileSync('which', ['pi'], { encoding: 'utf8', timeout: 10_000 }).trim()
-    if (out.length > 0) return out
-  } catch { /* PATH 无 pi，落 nvm 回退 */ }
+    if (out.length > 0) candidates.push(out)
+  } catch { /* PATH 无 pi */ }
   try {
     const nvmVersions = path.join(os.homedir(), '.nvm', 'versions', 'node')
     for (const ver of fs.readdirSync(nvmVersions)) {
       const candidate = path.join(nvmVersions, ver, 'bin', 'pi')
-      if (fs.existsSync(candidate)) return candidate
+      if (fs.existsSync(candidate)) candidates.push(candidate)
     }
   } catch { /* nvm 树不存在 */ }
-  throw new Error('pi 可执行文件定位失败（which pi + nvm 回退均空）——检测器无法建立，核对环境')
+  const localPi = '/usr/local/bin/pi'
+  if (fs.existsSync(localPi)) candidates.push(localPi)
+  if (candidates.length === 0) {
+    throw new Error('pi 可执行文件定位失败（dev resources + which pi + nvm + /usr/local/bin 均空）——检测器无法建立，核对环境')
+  }
+  return candidates
 }
 
-/** pi 进程行（匹配 pi 可执行路径；排除探测命令自身）。 */
-function piProcessLines(lines, piPath) {
-  return lines.filter((l) => l.includes(piPath) && !l.includes('which pi') && !l.includes('ps -axo'))
+/** pi 进程行（行内含任一候选路径；排除探测命令自身）。 */
+function piProcessLines(lines, piCandidates) {
+  return lines.filter((l) => piCandidates.some((p) => l.includes(p)) && !l.includes('which pi') && !l.includes('ps -axo'))
 }
 
 /** 插件宿主 fork 进程行（plugin-bootstrap.cjs 标识）。 */
@@ -267,7 +281,7 @@ export const meta = {
     'B: 检测器正向对照——控制会话（wool 模型，零消息）建立时检测器命中 ≥1 pi 进程，session.delete 后收敛回零（零命中断言因此有 teeth）',
   ],
   notProvable: [
-    '插件 fork IPC 通道的逐调用观测——管理方法对宿主 API 的依赖面以 plugin-kit 源码（只消费 api.providers/commands/views/storage/events）+ 沙箱 fork 进程存在性承载，不逐帧审计 IPC',
+    '插件 fork IPC 通道的逐调用观测——管理方法对宿主 API 的依赖判定以 plugin-kit 源码（只消费 api.providers/commands/views/storage/events）+ 沙箱 fork 进程存在性承载，不逐帧审计 IPC',
     'Qoder getStatus 的 loggedIn 瞬时值——上游校验依赖当刻 userinfo/quota 可达性，形状断言不定死 valid/invalid（与 A3 同口径）',
     'refreshCatalog 上游目录内容与官方目录的一致性——真机口径只验回读链通（非「未接入」）与条目写回，不做目录逐项核对',
     'WorkBuddy 家族——按用户指示跳过，留待其窗口期',
@@ -327,7 +341,7 @@ export async function run(ctx) {
     return map
   }
 
-  const piPath = resolvePiPath()
+  const piCandidates = resolvePiCandidates(ctx.repo)
 
   /**
    * 零 pi 断言点（基线/每命令后复用）。requireBootstrap：插件 fork 进程只在安装后存在——
@@ -336,14 +350,14 @@ export async function run(ctx) {
    */
   function assertNoPi(label, { requireBootstrap = true } = {}) {
     const lines = psLines()
-    const pi = piProcessLines(lines, piPath)
+    const pi = piProcessLines(lines, piCandidates)
     const bootstrap = pluginBootstrapLines(lines)
     const ok = pi.length === 0 && (!requireBootstrap || bootstrap.length > 0)
     ev.assert(`C: A31 进程面（${label}）`, ok, {
       channel: 'C',
       expected: requireBootstrap
-        ? `pi 进程=0（piPath=${piPath}）+ plugin-bootstrap fork ≥1`
-        : `pi 进程=0（piPath=${piPath}）`,
+        ? `pi 进程=0（candidates=${piCandidates.length} 个）+ plugin-bootstrap fork ≥1`
+        : `pi 进程=0（candidates=${piCandidates.length} 个）`,
       actual: `pi=${pi.length} bootstrap=${bootstrap.length}${pi.length > 0 ? ` piPids=${pi.map((l) => l.split(/\s+/)[0]).slice(0, 5).join(',')}` : ''}`,
     })
     return { piCount: pi.length, bootstrapCount: bootstrap.length }
@@ -378,7 +392,7 @@ export async function run(ctx) {
       channel: 'C',
       exitCode: 0,
       stats: {
-        piPath,
+        piCandidates: piCandidates.map((p) => path.basename(p)).join(','),
         sessions: baselineSessionCount,
         extSessionDirs: baselineExtSessionDirs,
       },
@@ -388,6 +402,9 @@ export async function run(ctx) {
     // ── 两家族轮次：安装 → 三命令零 pi → 落盘对账 ─────────────────
     const familyResults = []
     for (const [fIdx, f] of FAMILIES.entries()) {
+      // 逐家族基线（前一家族的控制会话会在 ext-sessions 留会话目录——会话删除不清
+      // 历史目录，家族窗口内零新增才是本断言语义）
+      const familyExtBaseline = extSessionDirCount()
       await openProviderPage(ui)
       await ui.click('testid=provider-template-picker')
       await ui.click('testid=add-menu-plugin')
@@ -497,11 +514,11 @@ export async function run(ctx) {
         })
       const piAfterCommands = assertNoPi(`refreshCatalog 后（${f.family}）`)
 
-      // 会话目录零新增（三命令窗口无 session 生命周期发生）
+      // 会话目录零新增（三命令窗口无 session 生命周期发生；基线 = 本家族轮次起点）
       const extDirsNow = extSessionDirCount()
-      ev.assert(`C: ${f.displayName} 三命令窗口 ext-sessions 无新增会话目录`, extDirsNow === baselineExtSessionDirs, {
+      ev.assert(`C: ${f.displayName} 三命令窗口 ext-sessions 无新增会话目录`, extDirsNow === familyExtBaseline, {
         channel: 'C',
-        expected: `${baselineExtSessionDirs}（基线值）`,
+        expected: `${familyExtBaseline}（本家族基线值）`,
         actual: `${extDirsNow}`,
       })
 
@@ -537,17 +554,23 @@ export async function run(ctx) {
 
         const created = await protocol.call('session.create', { cwd: process.cwd(), label: `a31-${f.family}-control`, modelOverride: composite }, { timeoutMs: 120_000 })
         const sid = created.session?.id
-        const piDuringControl = piProcessLines(psLines(), piPath)
+        // 轮询等 pi 进程出现在进程表（create 链 await client.start() 后才回执，ps 可见性
+        // 紧随其后；轮询 15s 只为吸收进程表采样时序差）
+        const piDuringControl = await pollValue(
+          () => piProcessLines(psLines(), piCandidates).length,
+          (n) => n >= 1,
+          { timeoutMs: 15_000, intervalMs: 500, label: '控制会话 pi 进程出现在进程表' },
+        ).catch(() => 0)
         ev.assert(`B: ${f.displayName} 检测器正向对照——控制会话建立时检测器命中 ≥1 pi 进程（检测器非「空真」）`,
-          Boolean(sid) && piDuringControl.length >= 1, {
+          Boolean(sid) && piDuringControl >= 1, {
             channel: 'B',
-            expected: `sessionId 非空 + pi 进程 ≥1（piPath=${piPath}）`,
-            actual: `sid=${sid} modelId=${created.session?.modelId} pi=${piDuringControl.length}`,
+            expected: `sessionId 非空 + pi 进程 ≥1（candidates=${piCandidates.map((p) => path.basename(p)).join(',')}）`,
+            actual: `sid=${sid} modelId=${created.session?.modelId} pi=${piDuringControl}`,
           })
         if (sid) {
           await protocol.call('session.delete', { sessionId: sid }, { timeoutMs: 30_000 }).catch(() => {})
           const converged = await pollValue(
-            () => piProcessLines(psLines(), piPath).length,
+            () => piProcessLines(psLines(), piCandidates).length,
             (n) => n === 0,
             { timeoutMs: 30_000, intervalMs: 1000, label: 'session.delete 后 pi 进程收敛回零' },
           ).catch(() => -1)
@@ -588,11 +611,24 @@ export async function run(ctx) {
 
 // ── 段内共享步骤 ──────────────────────────────────────────────────────
 
+/** 打开 Provider 页；控制会话会把 renderer 切去会话视图且可能有遮罩残留——失败时
+ * Esc 清场重试（a31-r1 实测：控制会话后 sidebar-settings 点击被拦截超时）。 */
 async function openProviderPage(ui) {
-  await ui.click('testid=sidebar-settings')
-  await ui.expectVisible('testid=settings-nav-provider')
-  await ui.click('testid=settings-nav-provider')
-  await ui.expectVisible('testid=provider-template-picker')
+  for (let attempt = 1; ; attempt++) {
+    if (attempt > 3) throw new Error('openProviderPage 三次重试失败——核对 renderer 视图状态（截图见 a31-nav-retry-*）')
+    try {
+      await ui.click('testid=sidebar-settings', { timeoutMs: 15_000 })
+      await ui.expectVisible('testid=settings-nav-provider', { timeoutMs: 15_000 })
+      await ui.click('testid=settings-nav-provider', { timeoutMs: 15_000 })
+      await ui.expectVisible('testid=provider-template-picker', { timeoutMs: 15_000 })
+      return
+    } catch (e) {
+      await ui.screenshot(`a31-nav-retry-${attempt}`).catch(() => {})
+      await ui.press('Escape').catch(() => {})
+      await new Promise((r) => setTimeout(r, 1_500))
+      if (attempt === 3) throw e
+    }
+  }
 }
 
 /** 家族卡 → 安装确认卡（真实 manifest 知情面断言）→ 确认安装 → 授权容器。 */

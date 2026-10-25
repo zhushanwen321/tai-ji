@@ -30,14 +30,14 @@
  *   Phase C（命中分布）：全缓冲命中分布 = 仅 { config.providerApiKeyRevealed } 一类。
  *   结构性依据（源码锚）：providers.credential 的明文回执只进插件 IPC 定向 reply
  *   （provider-write-proxy.ts handleProviderCredential，成功路径零日志；插件 fork IPC
- *   不经 runtime WS），故 WS 观测面上提取/回读窗口预期全帧零命中，「只有定向 reply」
+ *   不经 runtime WS），故 在 WS 观测范围内提取/回读窗口预期全帧零命中，「只有定向 reply」
  *   以 Phase B 的揭示通道为白名单代表。
  *
  * A4b 磁盘断言（分体系裁决已核，provider-config-helper.ts applyProviderCredentials）：
  *   插件条目走 custom 通道 → apiKey 落 models.json（merged.apiKey）且 authStorage.remove
  *   清 auth.json——凭据合法落点 = <dataDir>/agent/models.json 唯一；<dataDir> 其余全部
  *   文件（logs/、快照落点、settings.json、auth.json、插件目录、npm 目录）对 needle 零命中；
-   auth.json 实测若出现 needle 即按缺陷登记（分体系被破坏）。快照面 = plugin.ui.snapshot
+   auth.json 实测若出现 needle 即按缺陷登记（分体系被破坏）。快照检查 = plugin.ui.snapshot
  *   reply（auditedCall 内存比对）零命中。
  *
  * 凭据安全红线：needle 只在内存比对（tap 缓冲、reply 对象、文件读入即检）；assert/step/
@@ -354,13 +354,13 @@ export const meta = {
     'B: A4b 帧审计 Phase A——提取+回读窗口全部 WS 帧按类型零命中（帧类型×帧数分布留证）',
     'B: A4b 帧审计 Phase B——config.revealProviderApiKey 定向 reply（config.providerApiKeyRevealed）携带 apiKey（白名单正向对照 + 检测器有效性证明）',
     'B: A4b 帧审计 Phase C——全缓冲命中分布 = 仅揭示 reply 一类（明文只在定向 reply 帧出现）',
-    'C: A4b 快照面——plugin.ui.snapshot reply 零命中（UI 快照存储无凭据）',
-    'C: A4b 日志面——<dataDir>/logs/ 全量文件零命中',
-    'C: A4b 磁盘面——<dataDir> 除 agent/models.json 全量文件零命中；models.json 持有 needle（合法落点正验）',
+    'C: A4b 快照检查——plugin.ui.snapshot reply 零命中（UI 快照存储无凭据）',
+    'C: A4b 日志检查——<dataDir>/logs/ 全量文件零命中',
+    'C: A4b 磁盘检查——<dataDir> 除 agent/models.json 全量文件零命中；models.json 持有 needle（合法落点正验）',
   ],
   notProvable: [
     '额度百分比/昵称数值呈现——Trae 上游设计性缺席（fetchStatus 无昵称/额度素材，A3 批次已确立）；S20 该子项以「状态行 valid 渲染 + refreshCatalog 真实上游成功」为等价活性断言，WorkBuddy 家族形态留待其窗口期',
-    'providers.credential 插件 IPC reply 帧本体——插件 fork IPC 不经 runtime WS，WS tap 观测面不含它；「定向 reply」以探针 keyMatches（回给发起插件）+ 跨命名空间拒绝 + 源码锚（provider-write-proxy handleProviderCredential 定向回执）三重承载',
+    'providers.credential 插件 IPC reply 帧本体——插件 fork IPC 不经 runtime WS，WS tap 观测不到它；「定向 reply」以探针 keyMatches（回给发起插件）+ 跨命名空间拒绝 + 源码锚（provider-write-proxy handleProviderCredential 定向回执）三重承载',
     '第三方 WS 连接（renderer 本体）的定向 reply——tap 只能看到广播与自己两连接的 reply；服务端广播面全量在 tap 缓冲，renderer reply 面与 scenario 共享同一服务端构造器（listProviders/buildProviderListMsgs 只出 apiKeySet 布尔）',
     'wool-manifest 远端发布链与 npm 远端发布链——本剧本单产物装配，不经该链（A3/A23a 已覆盖双产物形态）',
   ],
@@ -659,7 +659,7 @@ export async function run(ctx) {
         actual: `ok=${probeCrossBody?.ok} message=${String(probeCrossBody?.message ?? '').slice(0, 120)}`,
       })
 
-    // ── Phase A 收口：宽限 2s（尾触发广播/推送落网）后切片审计 ─────
+    // ── Phase A 收尾：宽限 2s（尾触发广播/推送落网）后切片审计 ─────
     // 切片在揭示对照前取（tap 保持打开到 Phase C 结束——揭示 reply 帧要落同一缓冲）。
     await new Promise((r) => setTimeout(r, 2_000))
     const windowBuffer = [...tap.buffer]
@@ -684,26 +684,25 @@ export async function run(ctx) {
       expected: `窗口 ${windowFrames} 帧逐类零命中（needle=apiKey/probeKey）`,
       actual: windowHitClasses.length === 0 ? `零命中（${windowClasses.size} 类 ${windowFrames} 帧）` : `命中类：${windowHitClasses.map(([cls, rec]) => `${cls}=${JSON.stringify(rec.hits)}`).join(' | ').slice(0, 300)}`,
     })
-    // refreshToken 缺陷 ⑨ 现状锚点：headers 随 config.providers 广播出线（apiKey 本体
-    // 已脱敏为 apiKeySet 布尔，headers 没有——双标准）。断言形态对修复后仍成立：命中
-    // 类 ⊆ { in:config.providers }（零命中 = 已修复，同样通过）；分布越界即真越界。
+    // refreshToken（ISSUES-2 ⑨ 修复后收紧为硬断言）：凭据材料不随任何 WS 帧出线——
+    // 宿主读侧出口脱敏（provider-header-redaction，凭据词根键剔除）后应全帧零命中；
+    // models.json 文件落点不属帧审计面，由下方磁盘检查单独豁免正验。
     if (needles.refreshToken !== null) {
       const rtClasses = auditFrames(windowBuffer, { refreshToken: needles.refreshToken })
       const rtHitClasses = [...rtClasses.entries()].filter(([, rec]) => (rec.hits.refreshToken ?? 0) > 0)
-      const rtBounded = rtHitClasses.every(([cls]) => cls === 'in:config.providers')
       ev.step({
         step: 'audit.refreshToken-distribution',
         channel: 'C',
         exitCode: 0,
         stats: {
-          defect: 'ISSUES-2 ⑨（headers 读侧透传使 refreshToken 随 config.providers 广播出线；修复后本分布应归零）',
-          distribution: rtHitClasses.length === 0 ? '零命中（已修复形态）' : rtHitClasses.map(([cls, rec]) => `${cls}=${rec.hits.refreshToken}`).join(' | '),
+          fix: 'ISSUES-2 ⑨ 已修复（headers 出线脱敏：凭据词根键剔除，读侧出口 provider-header-redaction；models.json 落盘形态不变）',
+          distribution: rtHitClasses.length === 0 ? '零命中' : rtHitClasses.map(([cls, rec]) => `${cls}=${rec.hits.refreshToken}`).join(' | '),
         },
       })
-      ev.assert('C: A4b refreshToken 面（ISSUES-2 ⑨ 现状锚点）——refreshToken 广播分布 ⊆ config.providers 帧（修复后归零仍通过）', rtBounded, {
+      ev.assert('C: A4b refreshToken 面（ISSUES-2 ⑨ 修复收紧）——refreshToken 全帧零命中（凭据材料不随广播/reply 帧出线）', rtHitClasses.length === 0, {
         channel: 'C',
-        expected: '命中类 ⊆ { in:config.providers }（⑨ 现状）或零命中（已修复）',
-        actual: rtHitClasses.length === 0 ? '零命中（已修复形态）' : rtHitClasses.map(([cls, rec]) => `${cls}=${rec.hits.refreshToken}`).join(' | ').slice(0, 200),
+        expected: `窗口 ${windowFrames} 帧逐类零命中（needle=refreshToken；唯一合法落点 = models.json 文件，由磁盘检查豁免正验）`,
+        actual: rtHitClasses.length === 0 ? '零命中' : rtHitClasses.map(([cls, rec]) => `${cls}=${rec.hits.refreshToken}`).join(' | ').slice(0, 200),
       })
     }
 
@@ -744,13 +743,13 @@ export async function run(ctx) {
         if (needle && frameHits(r.text, needle)) replyHits.push(`${r.type}:${label}`)
       }
     }
-    ev.assert('C: A4b 快照面 + 回执面——窗口内全部 RPC reply（含 plugin.ui.snapshot）零命中', replyHits.length === 0, {
+    ev.assert('C: A4b 快照与回执检查——窗口内全部 RPC reply（含 plugin.ui.snapshot）零命中', replyHits.length === 0, {
       channel: 'C',
       expected: `窗口 ${auditedReplies.length} 个 reply 零命中`,
       actual: replyHits.length === 0 ? `零命中（${auditedReplies.length} replies：${[...new Set(auditedReplies.map((r) => r.type))].join(',').slice(0, 200)}）` : `命中：${replyHits.join(',').slice(0, 200)}`,
     })
 
-    // ── A4b 日志面：<dataDir>/logs/ 全量扫描 ────────────────────────
+    // ── A4b 日志检查：<dataDir>/logs/ 全量扫描 ────────────────────────
     const logsDir = path.join(dataDir, 'logs')
     const logFiles = fs.existsSync(logsDir) ? walkFiles(logsDir) : []
     const logHits = []
@@ -762,13 +761,13 @@ export async function run(ctx) {
         if (needle && frameHits(text, needle)) logHits.push(`${path.basename(file)}:${label}`)
       }
     }
-    ev.assert('C: A4b 日志面——<dataDir>/logs/ 全量文件零命中', logHits.length === 0, {
+    ev.assert('C: A4b 日志检查——<dataDir>/logs/ 全量文件零命中', logHits.length === 0, {
       channel: 'C',
       expected: `${logFiles.length} 个日志文件零命中`,
       actual: logHits.length === 0 ? `零命中（files=${logFiles.length} bytes≈${logBytes}）` : `命中：${logHits.join(',').slice(0, 200)}`,
     })
 
-    // ── A4b 磁盘面：<dataDir> 全量扫描（合法落点 = agent/models.json）──
+    // ── A4b 磁盘检查：<dataDir> 全量扫描（合法落点 = agent/models.json）──
     const legalLanding = path.join(dataDir, 'agent', 'models.json')
     // 探针 fixture 自身源码内嵌合成 key（剧本装配产物，launch 前写入，非产品落点）——排除。
     const probeSourceFile = path.join(dataDir, 'plugins', PROBE_ID, 'index.js')
@@ -790,12 +789,12 @@ export async function run(ctx) {
     const legalHasKeys = frameHits(fs.readFileSync(legalLanding, 'latin1'), needles.apiKey)
       && (needles.refreshToken === null || frameHits(fs.readFileSync(legalLanding, 'latin1'), needles.refreshToken))
       && frameHits(fs.readFileSync(legalLanding, 'latin1'), needles.probeKey)
-    ev.assert('C: A4b 磁盘面——models.json 持有全部 needle（凭据合法落点正验）', legalHasKeys, {
+    ev.assert('C: A4b 磁盘检查——models.json 持有全部 needle（凭据合法落点正验）', legalHasKeys, {
       channel: 'C',
       expected: 'agent/models.json 含 apiKey + refreshToken? + probeKey（needle 有效性反证）',
       actual: `apiKey=${frameHits(fs.readFileSync(legalLanding, 'latin1'), needles.apiKey)} refreshTokenPresent=${needles.refreshToken !== null} probeKey=${frameHits(fs.readFileSync(legalLanding, 'latin1'), needles.probeKey)}`,
     })
-    ev.assert('C: A4b 磁盘面——<dataDir> 其余全部文件零命中（logs/settings/auth.json/插件目录/npm 目录）', diskHits.length === 0, {
+    ev.assert('C: A4b 磁盘检查——<dataDir> 其余全部文件零命中（logs/settings/auth.json/插件目录/npm 目录）', diskHits.length === 0, {
       channel: 'C',
       expected: `${allFiles.length} 个文件零命中（auth.json 零命中 = 分体系裁决：custom 通道清 auth.json）`,
       actual: diskHits.length === 0 ? `零命中（files=${allFiles.length} bytes≈${diskBytes}）` : `命中：${diskHits.join(',').slice(0, 300)}`,

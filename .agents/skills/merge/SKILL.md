@@ -239,7 +239,7 @@ cd apps/electron && pnpm version patch --no-git-tag-version && cd ../..
 #    commit 后必须核对 exit=0 且 HEAD 前进（git 关键操作纪律，见阶段 4 顶部 [MANDATORY]）
 VERSION=$(node -p "require('./package.json').version")
 git add package.json apps/electron/package.json
-git commit -m "chore: bump version to ${VERSION}" > /tmp/merge-commit.log 2>&1; echo "exit=$?"; tail -5 /tmp/merge-commit.log
+TAIJI_ALLOW_MAIN_COMMIT=1 git commit -m "chore: bump version to ${VERSION}" > /tmp/merge-commit.log 2>&1; echo "exit=$?"; tail -5 /tmp/merge-commit.log
 
 # 3. 手动打 tag，确保指向包含两个文件变更的 commit。
 #    push 前核对 tag 指向（在本地拦截坏 tag，不等 push 后 CI 兜底）
@@ -350,7 +350,7 @@ STAMP=$(date +%Y%m%d-%H%M)
 #    另加 .changeset 记录 apply-version 消费掉的 changeset 删除，避免脏工作区
 git add extensions/universal/*/package.json extensions/taiji/*/package.json extensions/shared/*/package.json packages/*/package.json \
         '**/CHANGELOG.md' .changeset
-git commit -m "chore: version bump — <包与版本摘要>" > /tmp/merge-4n-commit.log 2>&1; echo "exit=$?"; tail -5 /tmp/merge-4n-commit.log
+TAIJI_ALLOW_MAIN_COMMIT=1 git commit -m "chore: version bump — <包与版本摘要>" > /tmp/merge-4n-commit.log 2>&1; echo "exit=$?"; tail -5 /tmp/merge-4n-commit.log
 
 # npm-* tag（不绑单一版本号，多包不同步时不误导；release-npm.yml 不从 tag 解析版本）
 git tag "npm-${SLUG}-${STAMP}"
@@ -524,7 +524,7 @@ cd $WS_ROOT/main && node .agents/skills/merge/scripts/update-readme-install.mjs 
 ```bash
 cd $WS_ROOT/main
 git add README.md README_EN.md
-git commit -m "docs: bump install version to v$(node -p "require('./package.json').version") in README"
+TAIJI_ALLOW_MAIN_COMMIT=1 git commit -m "docs: bump install version to v$(node -p "require('./package.json').version") in README"
 git push github HEAD:main
 ```
 

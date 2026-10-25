@@ -523,6 +523,21 @@ async function main(): Promise<Record<string, unknown>> {
   }
   const repoRoot = rootProbe.stdout.trim();
 
+  // 分支身份 preflight：本 workflow 只在 feature 线 worktree 内运行——gates 口径 = 分支增量、
+  // branch-review 的 diff 与 committer/fixer 的 commit 落点全部以该检出为对象。world.run cwd
+  // 继承宿主 bash 持久 cwd，不保证停在 feat 根：2026-10-25 事故形态 = committer agent 的 git
+  // 命令在 main worktree 执行，把一轮分支审查修复误提交进 main（main 从 e8b7bafbe 被推到
+  // 94ea75386，事后 reset 恢复）。提示词级"提交前核实 worktree"依赖 agent 遵守；此处与
+  // pre-commit 的 main 直提交守卫（.githooks/install-hooks.sh，TAIJI_ALLOW_MAIN_COMMIT
+  //  bypass）构成双闸——本闸挡在派发任何 agent 之前。分支类型口径 = DEV-WORKFLOW.md §1。
+  const branchProbe = await world.run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const wfBranch = branchProbe.exitCode === 0 ? branchProbe.stdout.trim() : "";
+  if (!/^(feat|fix|refactor|chore|docs|test|perf|hotfix|verify)-/.test(wfBranch)) {
+    throw new Error(
+      `分支身份 preflight 失败：当前分支 = ${wfBranch || "(detached 或探测失败)"}——dev-merge-gates 只允许在 feature 线 worktree（分支名 feat-/fix-/refactor-/chore-/docs-/test-/perf-/hotfix-/verify- 前缀，DEV-WORKFLOW.md §1）内运行；main / dev-* / detached 一律 fail-fast。恢复：宿主 bash cd 到待合并 feat worktree 根后重新发起本 workflow`,
+    );
+  }
+
   async function existsViaNode(path: string): Promise<boolean> {
     const r = await world.run("node", ["-e", EXISTS, path]);
     return r.exitCode === 0;
