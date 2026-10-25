@@ -14,6 +14,7 @@ import { bestEffort } from "../assembly/best-effort.ts";
 import { isLegacyClosedSettled } from "../persistence/execution-record.ts";
 import { findRunSettlementEvidence, type RunSettlementEvidence } from "../persistence/run-state-evidence.ts";
 import { resolvePiWorkflowRunsDir } from "../assembly/workflow-state-root.ts";
+import type { SettlementReason } from "../../shared/run-vocabulary.ts";
 import type { PiLike } from "../notify/notify-host.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { runReconcileSweep, type SupervisedRecordState } from "./reconcile-sweep.ts";
@@ -28,12 +29,12 @@ import { runReconcileSweep, type SupervisedRecordState } from "./reconcile-sweep
  * 的折叠收敛在派生函数单点（default 分支折 "failed"，W2 D5 先例「interrupted →
  * failed 诊断兜底容器」：中断形态注销 reason 报 completed 是完成语义误报），
  * 本消费方零处理直传（reason 恒 string，不落 reconcile-sweep
- * closedReasonToPendingReason 的 completed 兜底）。
+ * settlementReasonToPendingReason 的 completed 兜底）。
  */
 export function settlementEvidenceToRunState(state: RunSettlementEvidence): SupervisedRecordState {
   if (state.kind === "missing") return "missing";
   if (state.kind === "terminal") {
-    return { terminal: true, closedReason: state.reason };
+    return { terminal: true, settlementReason: state.reason };
   }
   return "active";
 }
@@ -47,15 +48,17 @@ export function settlementEvidenceToRunState(state: RunSettlementEvidence): Supe
  * 结清已随轮终发射点②完成）与其余形态归 active 不动。
  * 返回 undefined = 非失联形态（调用方回落既有分流）。
  *
- * 注：closedReason 字段名沿 SupervisedRecordState 既有形状（string 载体）——本值
- * 不是 ClosedReason 词表成员，是 SettlementReason 的 lost（结清枚举）；经
- * closedReasonToPendingReason 直通为注销 reason，历史六值通道 mapReasonToStatus 对
- * lost 落 unknown（fail-visible 如实），新权威通道 resolveSettlementReason("lost")
- * 原样解析（双通道以新写入方为权威，§3.3.6）。
+ * 注：结清值 lost 的类型防线 = 返回值显式 SettlementReason 词表（shared/run-vocabulary
+ * ALL_SETTLEMENT_REASONS 封闭五值）——"lost" 是结清枚举成员而非 ClosedReason 词表成员，
+ * 词表归属在类型层表达，拼错值编译期报错。经 settlementReasonToPendingReason 直通为
+ * 注销 reason，历史六值通道 mapReasonToStatus 对 lost 落 unknown（fail-visible 如实），
+ * 新权威通道 resolveSettlementReason("lost") 原样解析（双通道以新写入方为权威，§3.3.6）。
  */
-function lostSettlementOf(stopReason: string | undefined): SupervisedRecordState | undefined {
+function lostSettlementOf(
+  stopReason: string | undefined,
+): { terminal: true; settlementReason: SettlementReason } | undefined {
   return stopReason === "interrupted-by-restart"
-    ? { terminal: true, closedReason: "lost" }
+    ? { terminal: true, settlementReason: "lost" }
     : undefined;
 }
 
@@ -101,14 +104,14 @@ export function runPendingReconcileSweepForService(binding: ReconcileSweepBindin
         const memory = binding.getStore().getMutable(id);
         if (memory !== undefined) {
           if (isLegacyClosedSettled(memory)) {
-            return { terminal: true, closedReason: memory.closedReason };
+            return { terminal: true, settlementReason: memory.closedReason };
           }
           return lostSettlementOf(memory.stopReason) ?? "active";
         }
         const disk = binding.getStore().findLightById(id);
         if (disk !== undefined) {
           if (isLegacyClosedSettled(disk)) {
-            return { terminal: true, closedReason: disk.closedReason };
+            return { terminal: true, settlementReason: disk.closedReason };
           }
           return lostSettlementOf(disk.stopReason) ?? "active";
         }
@@ -121,7 +124,7 @@ export function runPendingReconcileSweepForService(binding: ReconcileSweepBindin
         // 债未经轮终发射点②结清）；其余收编停因维持直通。
         const adoptedStopReason = binding.getStore().findAdoptedStopReasonSync(id);
         if (adoptedStopReason !== undefined) {
-          return lostSettlementOf(adoptedStopReason) ?? { terminal: true, closedReason: adoptedStopReason };
+          return lostSettlementOf(adoptedStopReason) ?? { terminal: true, settlementReason: adoptedStopReason };
         }
         return "missing";
       },

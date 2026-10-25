@@ -63,8 +63,14 @@ export type SupervisedRecordState =
    *  pending-notifications registry，轮终 record 的注销已随 markRoundIdle 簿记⑧
    *  发射、不在册，保守归 active 不动）——不动。 */
   | "active"
-  /** 终态（closed，含 closedReason——映射 pending reason 用）。 */
-  | { terminal: true; closedReason: string | undefined }
+  /** 终态（closed / 失联结清），携 settlementReason——pending 注销 reason 的
+   *  直通载体，字段名按结清事实词正名（不借 ClosedReason 词表语义名：lost 等
+   *  结清值不在该词表）。直通值域横跨 SettlementReason（词表内直通）∪ 历史
+   *  ClosedReason ∪ run 侧 DoneReason 派生 ∪ adopted StopReason（三族词表外
+   *  直通）——类型保持 string 宽容是设计内合法产出，词表判读统一交下游
+   *  extension-protocol resolveSettlementReason 解析表（词表外落 unknown，
+   *  fail-visible），不在此层收窄封闭。 */
+  | { terminal: true; settlementReason: string | undefined }
   /** 已离场/不存在（视同终态，补注销）。 */
   | "missing";
 
@@ -172,7 +178,7 @@ function appendUnregisterEntry(
   result: ReconcileSweepResult,
 ): void {
   const reason =
-    state === "missing" ? "expired" : closedReasonToPendingReason(state.closedReason);
+    state === "missing" ? "expired" : settlementReasonToPendingReason(state.settlementReason);
   // 权威路径：直接 appendEntry 落盘。status 经 protocol mapReasonToStatus 单点映射
   // （与 pending-notifications listener / finalizeRun 直落 / bte 对账同一函数）——
   // 原 `status: reason` 裸写是词表漂移源：非 identity 映射 case（budget_limited→
@@ -195,15 +201,15 @@ function appendUnregisterEntry(
   result.reconciled.push(id);
 }
 
-/** closedReason → pending reason（直通载体；未知值交 pending-notifications 解析通道——
+/** settlementReason → pending reason（直通载体；未知值交 pending-notifications 解析通道——
  *  mapReasonToStatus 历史六值通道对词表外值落 unknown（fail-visible，§3.3.11④ 后缺省
  *  方向已反转，原 default=completed 的注释补偿假设退役）、新权威通道
  *  resolveSettlementReason 按 §3.3.6 解析表解析。reason 不参与计数。）
- *  [subagent-observability §3.3.11④] closedReason 缺失（无事实可依）缺省 no_result
+ *  [subagent-observability §3.3.11④] settlementReason 缺失（无事实可依）缺省 no_result
  *  不产 completed——现行判据链下该缺省不可达（isLegacyClosedSettled 守卫要求
  *  closedReason 非空），缺省方向钉住 fail-open 废除宣言（守卫演化防线）。 */
-function closedReasonToPendingReason(closedReason: string | undefined): string {
-  return closedReason ?? "no_result";
+function settlementReasonToPendingReason(settlementReason: string | undefined): string {
+  return settlementReason ?? "no_result";
 }
 
 // ── 差集读取（独立轻量实现，不复用 session-pending 的 per-file 增量游标——sweep

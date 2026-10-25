@@ -80,10 +80,10 @@ function makeDeps(overrides: {
 }
 
 describe("runReconcileSweep 差集补发", () => {
-  it("register(subagent) × record 终态 → 补发 unregister（appendEntry 权威，不经 emit），reason 取 closedReason", () => {
+  it("register(subagent) × record 终态 → 补发 unregister（appendEntry 权威，不经 emit），reason 取 settlementReason", () => {
     writeSessionFile([reg("bg-1")]);
     const { deps, appended } = makeDeps({
-      states: new Map([["bg-1", { terminal: true, closedReason: "cancelled" }]]),
+      states: new Map([["bg-1", { terminal: true, settlementReason: "cancelled" }]]),
     });
     const result = runReconcileSweep(deps);
     expect(result.reconciled).toEqual(["bg-1"]);
@@ -95,7 +95,7 @@ describe("runReconcileSweep 差集补发", () => {
   it("[D4] status 经 mapReasonToStatus 单点映射：budget_limited → failed（非 identity 词表锁定）", () => {
     writeSessionFile([reg("wf-bl", "workflow")]);
     const { deps, appended } = makeDeps({
-      workflowStates: new Map([["wf-bl", { terminal: true, closedReason: "budget_limited" }]]),
+      workflowStates: new Map([["wf-bl", { terminal: true, settlementReason: "budget_limited" }]]),
     });
     const result = runReconcileSweep(deps);
     expect(result.reconciled).toEqual(["wf-bl"]);
@@ -104,10 +104,10 @@ describe("runReconcileSweep 差集补发", () => {
     ]);
   });
 
-  it("[D4 → subagent-observability §3.3.11④] 词表外 closedReason → status 落 unknown（fail-visible——原 default=completed 兜底方向整体废除）", () => {
+  it("[D4 → subagent-observability §3.3.11④] 词表外 settlementReason → status 落 unknown（fail-visible——原 default=completed 兜底方向整体废除）", () => {
     writeSessionFile([reg("bg-gc")]);
     const { deps, appended } = makeDeps({
-      states: new Map([["bg-gc", { terminal: true, closedReason: "gc" }]]),
+      states: new Map([["bg-gc", { terminal: true, settlementReason: "gc" }]]),
     });
     const result = runReconcileSweep(deps);
     expect(result.reconciled).toEqual(["bg-gc"]);
@@ -137,7 +137,7 @@ describe("runReconcileSweep 差集补发", () => {
   it("[F2] type=workflow × workflow run 终态 → 补注销（reason 取 run state reason）", () => {
     writeSessionFile([reg("wf-1", "workflow")]);
     const { deps, appended } = makeDeps({
-      workflowStates: new Map([["wf-1", { terminal: true, closedReason: "aborted" }]]),
+      workflowStates: new Map([["wf-1", { terminal: true, settlementReason: "aborted" }]]),
     });
     const result = runReconcileSweep(deps);
     expect(result.reconciled).toEqual(["wf-1"]);
@@ -200,7 +200,7 @@ describe("runReconcileSweep 差集补发", () => {
       reg("bg-1", "subagent"),
     ]);
     const { deps, appended } = makeDeps({
-      states: new Map([["bg-1", { terminal: true, closedReason: "cancelled" } as SupervisedRecordState]]),
+      states: new Map([["bg-1", { terminal: true, settlementReason: "cancelled" } as SupervisedRecordState]]),
     });
     const result = runReconcileSweep(deps);
     expect(result.skippedSession).toEqual(["sm-123e4567-e89b-12d3-a456-426614174001"]);
@@ -263,7 +263,7 @@ describe("runReconcileSweep 差集补发", () => {
   it("坏行（截断 JSON）跳过不拖垮其余条目", () => {
     fs.writeFileSync(sessionFile, [JSON.stringify(reg("bg-1")), '{"customType":"pending:regis'].join("\n"), "utf-8");
     const { deps, appended } = makeDeps({
-      states: new Map([["bg-1", { terminal: true, closedReason: "gc" }]]),
+      states: new Map([["bg-1", { terminal: true, settlementReason: "gc" }]]),
     });
     const result = runReconcileSweep(deps);
     expect(result.reconciled).toEqual(["bg-1"]);
