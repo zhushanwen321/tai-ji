@@ -27,7 +27,7 @@ import type { RemoteEngineManifestSnapshot } from "./remote-engine.ts";
  * 会把派发挂死在无应答引擎上；秒级有界 + 超时失败放行（消费方 model-ref-translation
  * 的 per-engine 一次性 warn 语义）。
  */
-export const LIST_MODELS_REQUEST_TIMEOUT_MS = 10_000;
+const LIST_MODELS_REQUEST_TIMEOUT_MS = 10_000;
 
 /**
  * RemoteEngine.listModels 门面：快照可枚举 → 同步数组；无静态枚举 → 活清单 RPC
