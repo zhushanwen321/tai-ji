@@ -251,12 +251,15 @@ export async function run(ctx) {
       stats: { rendered: turnSubagents === '2 个子代理', note: '仅回合生成中渲染；后台子代理形态走空态' },
     })
     // 行数只数 list 容器内的行（v-if 与空态分支互斥，容器在 = running > 0；
-    // 全页前缀匹配会误命中空态按钮 activity-subagent-empty-action）
+    // 全页前缀匹配会误命中空态按钮 activity-subagent-empty-action）。
+    // 判定 = ≥1 行：列表段是 running 过滤口径，短代理（~7s）可能在「RunBand 断言 →
+    // 导航到 activity 屏」窗口内完成离场（复跑实测 1 行 = ma-sub-a，ma-sub-b 已完成）——
+    // 「两个子代理派发」事实由 RunBand = 2 + SubagentSheet 列表 2 项两断言承载。
     const subRows = activityShown
       ? await shell.page.locator('[data-testid="activity-subagent-list"] [data-testid^="activity-subagent-"]').count()
       : 0
-    ev.assert('A: 进行中域子代理列表 2 行', activityShown && subRows === 2, {
-      channel: 'A', expected: 'activity-subagent-list 2 行', actual: `${subRows} 行`,
+    ev.assert('A: 进行中域子代理列表呈现运行中行（≥1）', activityShown && subRows >= 1, {
+      channel: 'A', expected: 'activity-subagent-list ≥1 行（running 过滤口径）', actual: `${subRows} 行`,
     })
     await ev.shot(shell.page, 'a9-activity-count')
 
