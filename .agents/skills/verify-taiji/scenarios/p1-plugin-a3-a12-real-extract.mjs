@@ -12,11 +12,15 @@
  *   - 双产物安装（清单条目 piExtensionVersion + wool-manifest 本地夹具，A23a 同款
  *     preload 拦截）：真实对话硬依赖 pi 扩展注册 wool 自定义 api（模型目录 api 字段 =
  *     'wool-trae'/'wool-qoder'，无扩展则 pi 无法解析模型），故本剧本必须双产物；
- *   - 插件 tgz 内嵌依赖（node_modules/@zhushanwen/pi-wool-shared + typebox）：宿主插件
- *     安装器「单包解压，不递归装依赖」（plugin-installer-adapter.ts 头注），而沙箱 ESM
- *     loader 要求裸导入落 pluginDir 内——真实插件的发布形态必须 bundle 依赖才能激活
- *     （发布链缺口，ISSUES-2 登记）；插件源码零改动，内嵌依赖 = 独立仓真实 pack 产物；
- *   - mock npm registry（A23a 同款 HTTPS 本机服务）承载五个 tarball，安装走真实 npm 链。
+ *   - 插件 tgz 用独立仓 pnpm pack 原始产物（子目录入口 src/index.ts + workspace 依赖
+ *     声明，零改动零内嵌）：④ 修复后安装器在 prepare 段把 dependencies 递归装进
+ *     pluginDir/node_modules（真实 npm 链），⑤ 修复后 sandboxDir = 入口向上首个含
+ *     package.json 的包根——原先「内嵌 node_modules + 根入口 shim」的剧本侧绕行
+ *     已随产品修复退役；
+ *   - mock npm registry（A23a 同款 HTTPS 本机服务）承载 tarball：插件/扩展/共享库 ×2
+ *     家族 + typebox（shared 的运行时依赖，声明形态为 peerDependencies——npm7+ 自动
+ *     装 peer 语义经 mock pkgExtra 并进 shared 的 packument dependencies 镜像），安装
+ *     走真实 npm 链。
  *
  * 交互路径（A 通道为主，B 通道对账）：
  *   Provider 页 → 添加供应商 ▾ → 家族卡 → 安装确认卡（真实 manifest 知情面）→ 确认安装
@@ -33,9 +37,15 @@
  *   ③→ 凭据状态行形状对齐：wool getStatus / plugin:event 推送适配宿主
  *      CredentialStatusPayload 契约（{ state, message?, providerId }，channel=
  *      provider.credentialStatus）→ 条目展开渲染 provider-plugin-status 状态行。
- *   ④⑤（安装器依赖 / sandboxDir）、⑥（api.events.emit 断裂）、⑦（providers.credential
- *      回读链）为 runtime 侧缺口，随修复进度另行翻转（本剧本 Qoder 状态断言已按形状
- *      契约书写，不钉死 valid/invalid——⑦ 修复前后均可通过）。
+ *   ④→ 安装器依赖安装：prepare 段把插件 dependencies 递归装进 pluginDir/node_modules
+ *      （真实 npm 链）→ 原始 pack 产物（子目录入口 + workspace 依赖）直接激活，落盘
+ *      断言 node_modules 含 pi-wool-shared + typebox。
+ *   ⑤→ sandboxDir 包根推导：宿主取入口向上首个含 package.json 的祖先 → 子目录入口
+ *      （main = src/index.ts）激活不再判 node_modules 越界（插件能激活即本项回归锚）。
+ *   ⑥→ api.events.emit 接入 plugin.event 通道 → 凭据状态增量推送出线（renderer 侧
+ *      plugin:event 消费为渲染/契约修复面，本剧本经状态行断言间接覆盖）。
+ *   ⑦→ providers.credential 回读链（插件侧调用形态归一）：提取落盘后 refreshCatalog /
+ *      getStatus 走真实回读——refreshCatalog 不再返回「未接入」（硬断言）。
  *
  * 凭据安全红线：apiKey/token 只验存在性与长度，剧本证据（日志/截图/attach）零明文凭据。
  *
@@ -106,32 +116,17 @@ function findTypeboxDir() {
 }
 
 /**
- * 组装插件 tgz：真实 pack 产物 + 内嵌依赖（wool-shared pack + typebox）+ 入口上提 shim。
- * 为什么内嵌：宿主插件安装器不装依赖（单包解压），沙箱 loader 要求裸导入落 pluginDir
- * 内——见文件头「已知产品缺口」。为什么入口上提：宿主 sandboxDir = dirname(manifest
- * main)（plugin-host-process.ts env 注入处），仅支持根入口；真实插件 main = src/index.ts
- * → sandboxDir = <dir>/src → node_modules 判越界、激活必炸（d3-r2 首轮实测根因，ISSUES-2）。
- * 剧本产物 = 真实源码零改动 + 根入口 shim（re-export）+ manifest main 指回根。
+ * 从 pnpm store 目录构造 typebox tgz（package/ 根布局，与 npm pack 产物同形——
+ * 安装器 tar 解压 strip=1 只要求单一根目录）。store 目录经 symlink 装配，cp -RL
+ * 解引用后打包；产物供 mock registry 出 tarball（安装器递归装 shared 的依赖时消费）。
  */
-function assemblePluginTgz(f, sharedTgzPath, workDir, outPath) {
-  const extractDir = path.join(workDir, `assembly-${f.family}`)
-  fs.rmSync(extractDir, { recursive: true, force: true })
-  fs.mkdirSync(extractDir, { recursive: true })
-  execFileSync('tar', ['xzf', f.packTgzPath, '-C', extractDir])
-  const pkgDir = path.join(extractDir, 'package')
-  const scopedNm = path.join(pkgDir, 'node_modules', '@zhushanwen')
-  fs.mkdirSync(scopedNm, { recursive: true })
-  execFileSync('tar', ['xzf', sharedTgzPath, '-C', scopedNm])
-  fs.renameSync(path.join(scopedNm, 'package'), path.join(scopedNm, 'pi-wool-shared'))
-  fs.cpSync(f.typeboxDir, path.join(pkgDir, 'node_modules', 'typebox'), { recursive: true, dereference: true })
-  fs.writeFileSync(path.join(pkgDir, 'index.js'), 'export { activate } from "./src/index.ts";\n')
-  const pkgJsonPath = path.join(pkgDir, 'package.json')
-  const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'))
-  pkgJson.main = 'index.js'
-  pkgJson.taijiPlugin.main = 'index.js'
-  fs.writeFileSync(pkgJsonPath, `${JSON.stringify(pkgJson, null, 2)}\n`, 'utf8')
-  execFileSync('tar', ['czf', outPath, '-C', extractDir, 'package'])
-  fs.rmSync(extractDir, { recursive: true, force: true })
+function makeTypeboxTgz(typeboxDir, outPath, workDir) {
+  const stage = path.join(workDir, 'typebox-pack')
+  fs.rmSync(stage, { recursive: true, force: true })
+  fs.mkdirSync(path.join(stage, 'package'), { recursive: true })
+  fs.cpSync(typeboxDir, path.join(stage, 'package'), { recursive: true, dereference: true })
+  execFileSync('tar', ['czf', outPath, '-C', stage, 'package'])
+  fs.rmSync(stage, { recursive: true, force: true })
 }
 
 // ── 顶层预置（import 阶段执行，先于 runner 的 instance.launch）────────
@@ -149,6 +144,7 @@ fs.mkdirSync(PACK_TMP_DIR, { recursive: true })
 fs.mkdirSync(dataDir0, { recursive: true })
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'a3a12-work-'))
 const typeboxDir = findTypeboxDir()
+const TYPEBOX_VERSION = JSON.parse(fs.readFileSync(path.join(typeboxDir, 'package.json'), 'utf8')).version
 
 /** 从 tgz 直读 package.json（tar -xO 到 stdout；供 packument 依赖元数据组装）。 */
 function readTgzPackageJson(tgzPath) {
@@ -160,7 +156,12 @@ const packStep = { packed: [], assembled: [], copied: [] }
 /** tgz 拷贝文件名 → 真实 dependencies（packument 元数据；安装器递归装依赖消费）。 */
 const pkgExtraByCopyName = {}
 try {
-  // pi-wool-shared 先 pack（插件组装要引用它的 tgz）
+  // typebox tgz 先备（shared 的 packument 依赖元数据要引用其版本；安装器递归装时消费）
+  const typeboxCopyName = `a3a12-typebox-${TYPEBOX_VERSION}.tgz`
+  makeTypeboxTgz(typeboxDir, path.join(distDir, typeboxCopyName), workDir)
+  packStep.copied.push(typeboxCopyName)
+
+  // pi-wool-shared pack（插件依赖，安装器 prepare 段递归装进 pluginDir/node_modules）
   const sharedTgzName = execFileSync('pnpm', ['pack', '--pack-destination', PACK_TMP_DIR], {
     cwd: SHARED_PKG_DIR, encoding: 'utf8',
   }).trim().split('\n').pop().trim()
@@ -170,19 +171,22 @@ try {
   packStep.packed.push(`pi-wool-shared@${SHARED_VERSION}`)
   packStep.copied.push(sharedCopyName)
   // packument 依赖元数据（安装器递归装依赖读 packument，mock registry 元数据缺位 =
-  // 依赖递归不发生——见 mock-npm-registry.mjs pkgExtra 注释；值 = 字段级合并对象）
-  pkgExtraByCopyName[sharedCopyName] = { dependencies: readTgzPackageJson(sharedTgzPath).dependencies ?? {} }
+  // 依赖递归不发生——见 mock-npm-registry.mjs pkgExtra 注释）。shared 声明 typebox 为
+  // peerDependencies（npm 不装 peer），npm7+ 自动装 peer 语义在此镜像：把它并进
+  // shared 的 packument dependencies，安装器递归即真实安装 typebox。
+  pkgExtraByCopyName[sharedCopyName] = { dependencies: { typebox: TYPEBOX_VERSION } }
 
   for (const f of FAMILIES) {
-    f.packTgzName = execFileSync('pnpm', ['pack', '--pack-destination', PACK_TMP_DIR], {
+    // 插件 tgz = pnpm pack 原始产物直拷（子目录入口 src/index.ts + workspace 依赖声明
+    // 零改动）：④ 安装器 prepare 段装依赖 + ⑤ sandboxDir 包根推导修复后，原始发布
+    // 形态直接激活——不再需要内嵌 node_modules 与根入口 shim（原剧本侧绕行已退役）。
+    const packTgzName = execFileSync('pnpm', ['pack', '--pack-destination', PACK_TMP_DIR], {
       cwd: f.pkgDir, encoding: 'utf8',
     }).trim().split('\n').pop().trim()
-    f.packTgzPath = path.join(PACK_TMP_DIR, path.basename(f.packTgzName))
-    packStep.packed.push(`${f.pkgName}@${f.version}`)
-    f.typeboxDir = typeboxDir
     const assembledName = `a3a12-plugin-wool-${f.family}-${f.version}.tgz`
-    assemblePluginTgz(f, sharedTgzPath, workDir, path.join(distDir, assembledName))
-    packStep.assembled.push(`${f.pkgName} +node_modules{pi-wool-shared,typebox} +root-entry-shim`)
+    fs.copyFileSync(path.join(PACK_TMP_DIR, path.basename(packTgzName)), path.join(distDir, assembledName))
+    packStep.packed.push(`${f.pkgName}@${f.version}`)
+    packStep.assembled.push(`${f.pkgName} raw-pack（子目录入口 + 依赖交安装器安装）`)
     packStep.copied.push(assembledName)
     // pi 扩展 tgz 保持真实 pack 形态（extension 安装链会真实 npm 装依赖）
     const extTgzName = execFileSync('pnpm', ['pack', '--pack-destination', PACK_TMP_DIR], {
@@ -340,6 +344,9 @@ export async function run(ctx) {
         ...(extra !== undefined ? { pkgExtra: { [version]: extra } } : {}),
       }
     }
+    // typebox 在表（shared 的 packument dependencies 递归目标——mock registry 是
+    // runtime 安装链的唯一 registry，缺表 = 依赖安装 not_found）
+    add('typebox', TYPEBOX_VERSION, `a3a12-typebox-${TYPEBOX_VERSION}.tgz`)
     add('@zhushanwen/pi-wool-shared', SHARED_VERSION, `a3a12-pi-wool-shared-${SHARED_VERSION}.tgz`)
     for (const f of FAMILIES) {
       add(f.pkgName, f.version, `a3a12-plugin-wool-${f.family}-${f.version}.tgz`)
@@ -502,11 +509,19 @@ export async function run(ctx) {
       expected: '{state:valid|invalid, message?:string}',
       actual: JSON.stringify(qoderStatusBody ?? null).slice(0, 200),
     })
-    // 凭据回读链诊断（ISSUES-2 ⑦，runtime 侧修复面——信息性留痕不判负）：refreshCatalog
-    // 内部走 readCredential——「未接入」= providers.credential 落空佐证；ok = 回读链通。
+    // 凭据回读链回归断言（ISSUES-2 ⑦ 修复面：插件侧 credential 调用形态归一）：
+    // refreshCatalog 内部走 readCredential——「未接入」= providers.credential 落空（修复
+    // 前的稳定症状）；修复后 readCredential 必命中 models.json 条目（上游目录拉取失败
+    // 属环境类，错误文案不是「未接入」即回读链通）。
     const refreshCatalogReply = await protocol.call('plugin.invoke', { pluginId: FAMILIES[1].pluginId, method: 'refreshCatalog', params: {} }, { timeoutMs: 60_000 })
-    const credentialReadBroken = refreshCatalogReply?.result?.ok === false
-      && String(refreshCatalogReply?.result?.error ?? '').includes('未接入')
+    const refreshCatalogError = String(refreshCatalogReply?.result?.error ?? '')
+    const credentialReadBroken = refreshCatalogReply?.result?.ok === false && refreshCatalogError.includes('未接入')
+    ev.assert('B: Qoder refreshCatalog 不再「未接入」（⑦ 回读链修复锚点——providers.credential 命中 models.json 条目）',
+      !credentialReadBroken, {
+        channel: 'B',
+        expected: 'refreshCatalog ok=true，或 ok=false 但 error 非「未接入」（上游环境类失败）',
+        actual: `ok=${refreshCatalogReply?.result?.ok} error=${refreshCatalogError.slice(0, 120)}`,
+      })
     ev.step({
       step: 'qoder.credential-read.probe',
       channel: 'B',
@@ -514,8 +529,8 @@ export async function run(ctx) {
       stats: {
         refreshCatalogOk: refreshCatalogReply?.result?.ok,
         getStatusState: qoderStatusBody?.state,
-        error: String(refreshCatalogReply?.result?.error ?? '').slice(0, 120),
-        verdict: credentialReadBroken ? 'providers.credential 回读落空（⑦ 未修佐证）' : '回读链通（⑦ 已修复或回读可用）',
+        error: refreshCatalogError.slice(0, 120),
+        verdict: credentialReadBroken ? 'providers.credential 回读落空（回归破）' : '回读链通',
       },
     })
 
@@ -618,6 +633,21 @@ async function assertInstalledState({ protocol, ev, ui, family: f, registry, dat
       channel: 'C',
       expected: `${f.pkgName} ns=${f.namespace} + ${f.extPkgName}@${f.extVersion}`,
       actual: `plugin=${pluginPkg ? `${pluginPkg.name} ns=${pluginPkg.taijiPlugin?.namespace}` : '缺失'} ext=${extPkg ? `${extPkg.name}@${extPkg.version}` : '缺失'}`,
+    })
+  // ④ 依赖安装落盘断言（原始发布形态 = 子目录入口 + workspace 依赖声明，依赖由安装器
+  // prepare 段真实 npm 链装进 pluginDir/node_modules，随 commit 换入）：
+  // 子目录入口保留（main = src/index.ts——⑤ sandboxDir 包根推导修复的回归锚：插件能
+  // 激活即包根推导正确）+ node_modules 含 shared（安装器装）与 typebox（shared 的
+  // packument dependencies 递归装）。
+  const sharedInstalled = readPkgJsonSafe(path.join(dataDir, 'plugins', f.pluginId, 'node_modules', '@zhushanwen', 'pi-wool-shared', 'package.json'))
+  const typeboxInstalled = readPkgJsonSafe(path.join(dataDir, 'plugins', f.pluginId, 'node_modules', 'typebox', 'package.json'))
+  ev.assert(`C: ${f.displayName} 依赖落盘 pluginDir/node_modules（④ 安装器装依赖：shared + typebox；子目录入口 main=src/index.ts 保留 = ⑤ 包根回归锚）`,
+    pluginPkg?.main === 'src/index.ts'
+      && sharedInstalled?.name === '@zhushanwen/pi-wool-shared' && sharedInstalled?.version === SHARED_VERSION
+      && typeboxInstalled?.name === 'typebox' && typeboxInstalled?.version === TYPEBOX_VERSION, {
+      channel: 'C',
+      expected: `main=src/index.ts + node_modules{pi-wool-shared@${SHARED_VERSION}, typebox@${TYPEBOX_VERSION}}`,
+      actual: `main=${pluginPkg?.main} shared=${sharedInstalled ? `${sharedInstalled.name}@${sharedInstalled.version}` : '缺失'} typebox=${typeboxInstalled ? `${typeboxInstalled.name}@${typeboxInstalled.version}` : '缺失'}`,
     })
   ev.assert(`C: ${f.displayName} settings.json packages[] 登记 pi 扩展`, settingsPackages().includes(`npm:${f.extPkgName}`), {
     channel: 'C',
