@@ -544,8 +544,8 @@ export function evaluateRetryRules(message: string, rules: readonly RetryableErr
 
 /**
  * 追加式改写标记（subagent-observability §3.3.12 改写落盘约束 + 探针实证）：
- * - 前缀 `[taiji-retry:` 是本机制触发重试的识别约定（观测侧按标记对账；pi 原生词表
- *   命中的重试无标记）；
+ * - 前缀 `[taiji-retry:` 是本机制触发重试的识别约定（现无按标记消费的观测方，观测侧
+ *   可凭标记区分机制触发与 pi 原生词表命中的重试——后者无标记）；
  * - 锚文本 `rate limit 429 too many requests` 实测命中 pi-ai RETRYABLE 词表的
  *   `rate.?limit` / `429` / `too many requests` 三条，且不含 NON_RETRYABLE 词表任何成员
  *   （node_modules @earendil-works/pi-ai dist/utils/retry.js 1.0.0 实装核对）；
