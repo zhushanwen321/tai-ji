@@ -338,6 +338,16 @@ export async function createMobileTask(input: MobileNewTaskInput): Promise<Sessi
 export { chatStore, liveStateStore, sessionStore, useChatInstance }
 
 /**
+ * 流订阅全套重建原语的壳侧绑定（ensureStreamSubscription 的 4 参形态收窄为 1 参）：
+ * 消费方 = bootstrap 的 lifecycleEffects.ensureStream 注入（session.exited 恢复窗口——
+ * events handler 重挂 + bus 订阅一步完成，A5 缺陷修复）。与 sessionEntry 同源同参
+ * （deps 就地 const，非公开 API 面）。
+ */
+export function ensureStreamFor(sid: string): void {
+  ensureStreamSubscription(sid, chatStore, sessionStore as SessionStoreLike, subDeps)
+}
+
+/**
  * 会话运行时状态读口（[W1] 状态层薄壳的移动形态）：
  * `modelId` / `thinkingLevel` 读状态层，缓存缺失返回 undefined（显式未知——视图显示
  * 显式未知占位，不回退列表种子字段/其他会话的值）。

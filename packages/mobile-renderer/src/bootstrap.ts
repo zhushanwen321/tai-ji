@@ -22,7 +22,7 @@
 import { createApp } from 'vue'
 import { i18n } from './i18n'
 import { configureChatNoticeText, createLifecycleEffects } from '@taiji/core'
-import { chatStore, sessionStore } from './shell/app-runtime'
+import { chatStore, ensureStreamFor, sessionStore } from './shell/app-runtime'
 import {
   errorBarEffects,
   resetCompanionChannelsForExitedSession,
@@ -73,7 +73,13 @@ function handleRuntimeUnavailable(reason: 'restart' | 'disconnect'): void {
 // 恢复提示条两形态）单一归属 core factory。文案 bootstrap 期一次求值即可——移动壳无语言
 // 切换链（locale 由 navigator.language 启动检测定死），与桌面逐回调 t() 求值的差异仅在此。
 const lifecycleEffects = createLifecycleEffects(
-  { chat: chatStore, session: sessionStore },
+  {
+    chat: chatStore,
+    session: sessionStore,
+    // 恢复窗口全套重建（A5 缺陷修复）：events handler 重挂 + bus 订阅一步完成——只发
+    // bus 层 subscribe 时恢复后的帧到不了已退订的 events handler（core deps 注释）。
+    ensureStream: ensureStreamFor,
+  },
   {
     restored: t('panel.message.respawnRestored'),
     restoreFailed: t('panel.message.respawnFailed'),

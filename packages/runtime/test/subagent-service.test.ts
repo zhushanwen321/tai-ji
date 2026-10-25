@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SessionService } from '../src/services/session/session-service.js'
 import { convertPiHistory } from '../src/infra/pi/message-converter.js'
-import { getPiAgentDir } from '../src/infra/pi/pi-paths.js'
 import type { ISessionStore } from '../src/services/ports/session.js'
 import type { ScannedSessionMeta } from '../src/infra/pi/session-file-utils.js'
 
@@ -222,8 +221,8 @@ describe('SessionService.getSubagentHistory', () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'subagent-hist-'))
-    // 隔离数据目录到 tempDir，使 getPiAgentDir() 返回 tempDir/agent —— 测试文件写入真实
-    // piAgentDir 下（getSubagentHistory W-R1 路径穿越校验），又不污染真实 ~/.taiji。
+    // 隔离数据目录到 tempDir，使守卫锚 getSessionStoreDir(getDataDir()) 落在 tempDir 内
+    //（getSubagentHistory 路径穿越校验），又不污染真实 ~/.taiji。
     prevDataDir = process.env.TAIJI_AGENT_DATA_DIR
     process.env.TAIJI_AGENT_DATA_DIR = tempDir
   })
@@ -236,9 +235,10 @@ describe('SessionService.getSubagentHistory', () => {
 
   it('reads subagent JSONL and converts to Message[]', async () => {
     const mainSessionFile = join(tempDir, 'main.jsonl')
-    // subagent JSONL 必须落在 piAgentDir 下（getSubagentHistory W-R1 路径穿越校验）。
-    // 真实 subagent 文件由 pi-subagent-workflow 写入 getSubagentSessionDir(mainCwd)，位于 piAgentDir 内。
-    const subagentDir = join(getPiAgentDir(), 'subagents', 'mock-subagent-hist')
+    // subagent JSONL 必须落在 session 存储树（<dataDir>/ext-sessions/）下（getSubagentHistory
+    // 路径穿越校验锚，[session-store-layout-inversion] 后合法根 = 会话存储树）。
+    // 真实 subagent 文件由 pi 写入 <ext-sessions>/<rootSid>/subagents/sessions/。
+    const subagentDir = join(tempDir, 'ext-sessions', MAIN_SESSION_ID, 'subagents', 'sessions', 'mock-subagent-hist')
     mkdirSync(subagentDir, { recursive: true })
     const subagentFile = join(subagentDir, 'subagent.jsonl')
 

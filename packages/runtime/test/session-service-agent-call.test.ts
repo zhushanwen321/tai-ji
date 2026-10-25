@@ -19,6 +19,12 @@ vi.mock('../src/infra/pi/pi-paths.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/infra/pi/pi-paths.js')>()
   return { ...actual, getPiAgentDir: () => '/tmp/pi-agent' }
 })
+// 路径穿越守卫锚 = getSessionStoreDir(getDataDir())（<dataDir>/ext-sessions/，
+// [session-store-layout-inversion] 后 subagent 会话 jsonl 的合法根）——dataDir 同步重定向
+vi.mock('@taiji/shared/paths', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/shared/paths')>()
+  return { ...actual, getDataDir: () => '/tmp/taiji-data' }
+})
 vi.mock('../src/services/session-history.js', () => ({
   getHistoryFromFile: vi.fn().mockResolvedValue([]),
   getHistoryFromFilePath: vi.fn().mockResolvedValue([]),
@@ -110,17 +116,19 @@ function recordsRef(service: SessionService): SessionRecords {
 describe('SessionService.getAgentCallFilePath', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('record 有 sessionFile（在 piAgentDir 下）→ 返回路径', async () => {
+  it('record 有 sessionFile（在 ext-sessions 会话树内）→ 返回路径', async () => {
     const service = createService()
+    // [session-store-layout-inversion] 新布局合法根 = <dataDir>/ext-sessions/<sid>/subagents/sessions/
+    const sessionFile = '/tmp/taiji-data/ext-sessions/main-sess/subagents/sessions/sa-001.jsonl'
     vi.spyOn(recordsRef(service), 'getSubagents').mockResolvedValue({
       records: [
-        { subagentId: 'sa-001', sessionFile: '/tmp/pi-agent/subagents/enc/sa-001.jsonl' } as SubagentRecord,
+        { subagentId: 'sa-001', sessionFile } as SubagentRecord,
       ],
       oversize: false,
       found: true,
     })
     const result = await service.getAgentCallFilePath('main-sess', 'sa-001')
-    expect(result).toBe('/tmp/pi-agent/subagents/enc/sa-001.jsonl')
+    expect(result).toBe(sessionFile)
   })
 
   it('找不到 record → 空串', async () => {
@@ -141,7 +149,7 @@ describe('SessionService.getAgentCallFilePath', () => {
     expect(await service.getAgentCallFilePath('main-sess', 'sa-001')).toBe('')
   })
 
-  it('sessionFile 路径穿越（不在 piAgentDir 下）→ 空串（isStrictlyUnder 安全校验）', async () => {
+  it('sessionFile 路径穿越（不在 ext-sessions 会话树内）→ 空串（isStrictlyUnder 安全校验）', async () => {
     const service = createService()
     vi.spyOn(recordsRef(service), 'getSubagents').mockResolvedValue({
       records: [

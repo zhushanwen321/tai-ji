@@ -1912,8 +1912,37 @@ export function createSessionDeliveryRegistry(
       return withSegments
     },
     async resync(sessionId, clientUuids) {
-      const rt = runtimes.get(sessionId)
-      if (!rt) return []
+      let rt = runtimes.get(sessionId)
+      if (!rt) {
+        // 崩溃断连后的 manual retry 恢复支线（§6.22 failed 重试语义 / A5 缺陷修复）：
+        // pi 意外死亡的销毁收敛链（onSessionExit → removeSessionEntry → delivery.dispose）
+        // 把 failed 留守条目连同运行时态一并丢弃，UI 仍持 failed 行快照可点重试——原样
+        // 返回空 = 静默 no-op，「发送未确认」无限滞留。条目的持久形态 = 磁盘 outbox 未终局
+        // 记录（受理前 persist 的耐久承诺，§3.8）：命中 = 未送达事实在案。用户重试是显式
+        // 投递意图（pi-respawn「recovery waits for user action (manual retry / lazy
+        // restore)」的 manual retry 支线）——与 readTranscriptUserTexts 的「resync 不拉起
+        // pi」裁决不冲突：该裁决针对 idle 回收场景的只读判重，本分支只在磁盘记录证实确有
+        // 未送达条目待处置时才恢复。恢复通道 = deps.ensureActive（respawn.ensureRestored
+        // 单源 join）→ ensureRuntime 重建 → 'pi-restored' 对账尾部 replayUndelivered 以原
+        // id 重投（transcript 判重防双发，已送达只补记账）。恢复失败保持现状（条目留
+        // renderer 侧 failed 行，可再试或经发消息惰性恢复）。
+        const store = deps.createDeliveryStore?.(sessionId)
+        const undelivered = store ? store.loadUndelivered() : []
+        const pendingRetry = clientUuids.filter((id) => undelivered.some((r) => r.id === id))
+        if (pendingRetry.length === 0) return []
+        warn(`resync: ${pendingRetry.length} undelivered entry(ies) survive on disk outbox after teardown — lazy-restoring for manual retry, sid=`, sessionId, pendingRetry)
+        try {
+          await deps.ensureActive(sessionId)
+        } catch (e) {
+          warn('resync: lazy restore failed (kept on renderer), sid=', sessionId, e)
+          return []
+        }
+        rt = ensureRuntime(sessionId)
+        // 同步等重放对账落地再回落既有判定：'pi-restored' 常规触发点（watchClient changed
+        // 边沿）是 fire-and-forget，直调同一触发点让回执语义对齐「重投后的条目状态」。
+        // reconcile 内部自兜异常（失败只 warn），此 await 不上抛。
+        await reconcile(sessionId, 'pi-restored')
+      }
       const full = rt.handle.entriesFull()
       const finalIds = new Set(full.tombstones.map((t) => t.id))
       const activeStateById = new Map(full.active.map((e) => [e.id, e.state] as const))
