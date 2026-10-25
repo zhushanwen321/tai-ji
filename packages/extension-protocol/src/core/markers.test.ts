@@ -6,7 +6,7 @@
  * NUL 前缀 + TAIJI_ 命名空间 + 冒号结尾（与 GUI_WIDGET_MARKER 同族形态）。
  */
 import { describe, it, expect } from 'vitest'
-import { GUI_WIDGET_MARKER, PLAN_REVIEW_MARKER } from './markers'
+import { GUI_WIDGET_MARKER, PLAN_REVIEW_MARKER, PERMISSION_APPROVAL_TITLE } from './markers'
 import type { PlanDocMeta, PlanReviewRequest, PlanReviewResponse } from './types'
 
 describe('core markers', () => {
@@ -14,6 +14,13 @@ describe('core markers', () => {
     expect(PLAN_REVIEW_MARKER).toBe('\x00TAIJI_PLAN_REVIEW:')
     expect(PLAN_REVIEW_MARKER.startsWith('\x00')).toBe(true)
     expect(PLAN_REVIEW_MARKER.endsWith(':')).toBe(true)
+  })
+
+  it('PERMISSION_APPROVAL_TITLE 值锁定（对拍基准：写侧 approval.ts 与读侧 event-adapter.ts 均引用本符号）', () => {
+    // 该常量是 title 首行可见文案判定键（非 NUL 控制符 marker 家族），双端 import
+    // 同一符号；此处锁定具体值，防符号级一致但值被误改的残留风险
+    expect(PERMISSION_APPROVAL_TITLE).toBe('[pi-permission] Approval required')
+    expect(PERMISSION_APPROVAL_TITLE.startsWith('\x00')).toBe(false)
   })
 
   it('plan 审阅 payload/decision 类型可赋值（判别联合收窄编译断言）', () => {

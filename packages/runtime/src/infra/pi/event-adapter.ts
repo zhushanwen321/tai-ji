@@ -32,7 +32,7 @@
  */
 import type { ServerMessage, ServerMessageType, ExtensionInteractMethod, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
 import { EXTENSION_EVENTS, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
-import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, SUBAGENT_JOURNAL_MARKER, JOURNAL_REPORT_ACK, CANVAS_MARKER, isCanvasMarkerRequest, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion, isSubagentJournalReport } from '@zhushanwen/extension-protocol'
+import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, SUBAGENT_JOURNAL_MARKER, JOURNAL_REPORT_ACK, CANVAS_MARKER, PERMISSION_APPROVAL_TITLE, isCanvasMarkerRequest, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion, isSubagentJournalReport } from '@zhushanwen/extension-protocol'
 import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
 import type { PiEventListener } from '../../services/ports/pi-engine.js'
 import type { PiTranslatedEvent } from '../../services/session/types.js'
@@ -969,14 +969,15 @@ function tryTranslateFormSelect(
  * 对 string 元素调 .label 产出 undefined[]——普通 select 在前端是坏的。改为 .map(String) 透传。
  *
  * [chat-flow-consistency U9 / S4] permission 等待判定键：title 首行为
- * PERMISSION_APPROVAL_TITLE（pi-permission 扩展审批 select 的固定 title 首行，
- * extensions/universal/permission approval.ts buildApprovalFieldSet/formatTitle 单点构造）
- * 的 select → payload 附加 permission: true。先例 = planReview 键（runtime 检测 marker
- * 后附加，renderer extension-ui store 消费）——同款机制不新发明。消费链：renderer
+ * PERMISSION_APPROVAL_TITLE（常量单源 @zhushanwen/extension-protocol core/markers；
+ * pi-permission 扩展审批 select 的固定 title 首行，extensions/universal/permission
+ * approval.ts buildApprovalFieldSet 单点构造——双端 import 同一符号，防文案漂移
+ * 静默失联）的 select → payload 附加 permission: true。先例 = planReview 键
+ * （runtime 检测 marker 后附加，renderer extension-ui store 消费）——同款机制
+ * 不新发明。消费链：renderer
  * hasPendingBlockingOverlay 判定键扩 permission → deriveStatus waiting → 侧栏警示点对
  * 未水合会话（chat 分区无消息、toolCall running 输入不可见）同样生效。
  */
-const PERMISSION_APPROVAL_TITLE = '[pi-permission] Approval required'
 
 /** permission 审批 select 判定：select 方法 + title 首行精确匹配（title 可多行，首行恒为标记串）。 */
 function isPermissionApprovalSelect(method: string, title: unknown): boolean {
