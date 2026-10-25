@@ -16,7 +16,7 @@
     "pi-package"
   ],
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --pool=threads",
     "test:watch": "vitest"
   },
   "dependencies": {

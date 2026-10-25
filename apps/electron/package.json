@@ -28,7 +28,7 @@
     "build:e2e": "pnpm run build:main && pnpm run build:preload && pnpm run build:vite",
     "typecheck:preload": "tsc -p tsconfig.preload.json",
     "test": "pnpm run test:main",
-    "test:main": "cd main && vitest run",
+    "test:main": "cd main && vitest run --pool=threads",
     "test:all": "pnpm --filter @taiji/frontend run test && pnpm --filter @taiji/runtime run test && cd main && vitest run"
   },
   "dependencies": {

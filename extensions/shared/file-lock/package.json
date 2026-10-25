@@ -22,7 +22,7 @@
   ],
   "scripts": {
     "typecheck": "npx tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --pool=threads"
   },
   "dependencies": {
     "@zhushanwen/pi-extension-logger": "workspace:*"

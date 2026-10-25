@@ -117,7 +117,7 @@
   },
   "scripts": {
     "typecheck": "vue-tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --pool=threads"
   },
   "dependencies": {
     "@lucide/vue": "^1.21.0",
