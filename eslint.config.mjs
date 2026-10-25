@@ -782,10 +782,21 @@ export default [
       'max-lines': 'off',
     },
   },
+  // [2026-10-25 dev-0.11.16 集成线] rebuild 轴折算 713 微超 13 行——按「微超即提额」
+  // 先例（pi-provider-store 508>500→520 同型）提额 730 保留软上限告警；再拆属独立重构任务。
   {
     files: ['packages/subagent-core/src/execution/persistence/record-store-rebuild.ts'],
     rules: {
-      'max-lines': ['warn', { max: 700, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 730, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // [2026-10-25 dev-0.11.16 集成线] LLM 重试规则域 SSOT（类型 + 校验 + 判定管线纯函数，
+  // 四消费方共用同一套语义，镜像对拍锚点）折算 506 微超 6 行——按「微超即提额」先例
+  // （pi-provider-store 同型）提额 520 保留软上限告警；拆分属独立重构任务。
+  {
+    files: ['packages/shared/src/retry-rules.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
   // [W1 D4 双面证据判别 2026-09-26] record-store-terminal.ts：终局调和面增补收编

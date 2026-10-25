@@ -611,11 +611,11 @@ export class SessionHistoryReader {
     const result = this.deps.resolveBtwThreadFile?.(sessionId) !== undefined
       ? await this.tailReadBtwOffline(sessionId, query)
       : await getHistoryTailFromFile(
-          sessionId,
-          this.deps.sessionStore,
-          query?.limitTurns ?? HISTORY_BUDGET.RECENT_TURNS,
-          { cursor: query?.cursor, maxBytes: query?.maxBytes ?? HISTORY_BUDGET.MAX_BYTES },
-        )
+        sessionId,
+        this.deps.sessionStore,
+        query?.limitTurns ?? HISTORY_BUDGET.RECENT_TURNS,
+        { cursor: query?.cursor, maxBytes: query?.maxBytes ?? HISTORY_BUDGET.MAX_BYTES },
+      )
     // 开关关闭时剥除（tailReadHistory 内 cursor 翻页本就不判，此处防未来判定面扩大后
     // 降级路径误透传；字段可选，剥除 = 不出场而非 false——消费方按「无判定」处理）
     return opts?.detectInterrupted === true ? result : { ...result, interrupted: undefined }
