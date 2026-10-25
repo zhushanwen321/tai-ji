@@ -29,7 +29,7 @@ function onSubmit(): void {
 
 <template>
   <div
-    class="flex h-screen flex-col items-center justify-center gap-4 bg-bg p-6"
+    class="flex h-[var(--shell-viewport-h,100dvh)] flex-col items-center justify-center gap-4 bg-bg p-6"
     data-testid="token-input-view"
   >
     <p class="text-sm text-neutral-fg" data-testid="token-input-title">{{ t('mobile.tokenInput.title') }}</p>

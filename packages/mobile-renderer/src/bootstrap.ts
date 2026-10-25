@@ -1,35 +1,36 @@
 // bootstrap.ts —— mobile 壳纯装配编排（连接 UI 状态机已抽至 shell/connection-view，
 // W6；本模块不再拥有任何连接视图态）。
 //
-// 序列（core bootstrap 时序链的 mobile 子集；platform 先于连接编排由 await 链顺序保证，
-// 同 core bootstrap 死锁防线）：
+// 序列（remote-use-mobile-v2 §6.6 重排：先挂载后连接——首屏任意时点 #app 非空，
+// 消除 v1「挂载排在连接编排后，连接慢/验身失败期间 #app 为空白屏」的 P0-1）：
 //   1. providePlatform(createMobilePlatformAdapter()) —— 注入 mobile 平台端口到 core
-//   2. createConnectionProfilePort（凭据派生 D4 三分支，onTokenInputRequired 接线到
+//   2. createApp(App).mount('#app') —— 先挂载（connect 路由态呈会话列表骨架 + 连接中，
+//      连接编排异步推进后由连接视图状态机切换三态：骨架/验身入口/失败指引）
+//   3. createConnectionProfilePort（凭据派生 D4 三分支，onTokenInputRequired 接线到
 //      connection-view 信号入口）+ setupConnectionView（连接视图状态机装配：controller
 //      注入 + 转移 watch 建立）
-//   3. setConnectionPorts(mobile ports) —— 壳层端口注入（visibility/env/connectionProfile/
+//   4. setConnectionPorts(mobile ports) —— 壳层端口注入（visibility/env/connectionProfile/
 //      onAuthRejected），远程形态（无 ipc）走 use-connection 的 profile 分支
-//   4. initConnection() → restoreSessions() —— core transport/coordination 序列
+//   5. initConnection() → restoreSessions() —— core transport/coordination 序列
 //      （resolve = 编排已提交，非 connected——core bootstrap D2 裁决②同语义）
-//   5. createApp(App).use(createPinia()).mount('#app')
+//   6. setupRouteHistory() —— 壳层 popstate 返回接管装配（§6.7；挂载后调用）
 //
 // 凭据派生（D4 三分支）在 platform/connection-profile；连接视图态（四态 + hasConnectedOnce
 // 粘滞锚点 + tokenSubmit）与三信号转移优先级在 shell/connection-view.ts——依赖方向
 // bootstrap → connection-view，App.vue / 测试直接消费 connection-view 导出。
 
 import { createApp } from 'vue'
-import { createPinia } from 'pinia'
 import { i18n } from './i18n'
 import { configureChatNoticeText, createLifecycleEffects } from '@taiji/core'
 import { chatStore, sessionStore } from './shell/app-runtime'
 import {
-  clearAllFormRequests,
   errorBarEffects,
   resetCompanionChannelsForExitedSession,
+  suspendFormSubmissions,
 } from './shell/companion-bridge'
 import { initConnection, providePlatform, restoreSessions, setConnectionPorts } from '@taiji/core'
 import App from './App.vue'
-import { applySubagentRecords } from './views/SubagentStatusLine.vue'
+import { applySubagentRecords } from './shell/subagent-records'
 import { createConnectionProfilePort } from './platform/connection-profile'
 import { createMobilePlatformAdapter } from './platform/mobile-platform-adapter'
 import {
@@ -37,6 +38,7 @@ import {
   notifyTokenInputRequired,
   setupConnectionView,
 } from './shell/connection-view'
+import { setupRouteHistory } from './shell/route'
 
 // vue-i18n 的 t 复杂重载收窄为 (key, params?) => string（对齐 app-runtime 同款收窄）
 const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
@@ -48,16 +50,22 @@ const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => st
 configureChatNoticeText((key) => t('panel.message.chatNotice.' + key))
 
 /**
- * 断连/重启用尽的对话流收尾（对齐桌面 useMessageEffects.handleRuntimeUnavailable）：
- * 断连宽限（10s）到期或重连放弃（failed）时，①把在途 streaming 消息落终态、错误作为
- * assistant 消息插入对话流（项目规则#3：错误必须重置状态）；②清空 form/planReview 挂起
- * 分区（clearAllFormRequests，对齐桌面 extensionUI clearAllPending——runtime 重启后是全新
- * 实例，挂起 Promise 不会被 resolve，僵尸 form 卡在 WS 重连窗口内提交即假成功）。不接线 =
- * 断连后 composer 永久卡「生成中」。模块级提取供 __testing 装配断言消费（shellEffects 同式）。
+ * 断连/重启用尽的对话流收尾（remote-use-mobile-v2 §6.23 reason 分流，A 级）：
+ * ① finalizeAllStreaming 两 reason 共通保留（在途流收尾是独立的正确行为，不随本决策退役）
+ * ——在途 streaming 消息落终态、错误作为 assistant 消息插入对话流（项目规则#3）。
+ * ② form/planReview 分区两 reason 均不清（v1 clearAllFormRequests 整表清空 = 时间平抑类
+ * 形态，§6.23 裁决退役）——重连后由既有 getPendingRequests reconcile 对账收敛（事实源）：
+ * - disconnect：网络断连，runtime 同一实例、挂起表还在——分区保留即对账基线，无额外动作；
+ * - restart：runtime 重启，新实例挂起表已清零——分区保留（Sheet 视图不闪删）+ 提交挂起
+ *   （suspendFormSubmissions）：重连成功后 reconcile 完成前 FormSheet 提交/取消禁用，
+ *   封住「旧 runtime 对已终结 requestId 静默忽略、UI 记为已提交」的假成功窗口；恢复恒经
+ *   form 通道 onSnapshotReconciled（对账完成事件，无定时器）。dialog 通道 queue 两 reason
+ *   均不清（同 §6.23 分区保留语义）。
+ * 模块级提取供 __testing 装配断言消费（shellEffects 同式）。
  */
 function handleRuntimeUnavailable(reason: 'restart' | 'disconnect'): void {
   chatStore.finalizeAllStreaming(reason)
-  clearAllFormRequests()
+  if (reason === 'restart') suspendFormSubmissions()
 }
 
 // session 生命周期 core 语义实例（remote-use D5/U6）：exited/restored/restoreFailed 的
@@ -107,7 +115,12 @@ export async function bootstrap(): Promise<void> {
   const adapter = createMobilePlatformAdapter()
   providePlatform(adapter)
 
-  // 2. 连接视图状态机装配 + 凭据派生端口：profile controller 注入 connection-view
+  // 2. 先挂载（§6.6 首屏三态：mount 即刻呈现 connect 路由态的骨架 + 连接中——挂载后
+  //    连接编排异步推进，任意时点 #app 非空。i18n 装配是 ui 组件 useI18n 的前置）。
+  //    无 pinia（§7.3 M-18：移动壳零 store，状态经 core factory Map 分区 + 壳层模块态）。
+  createApp(App).use(i18n).mount('#app')
+
+  // 3. 连接视图状态机装配 + 凭据派生端口：profile controller 注入 connection-view
   //    （submitRemoteToken / auth 成功处置的操作面）；onTokenInputRequired 落视图信号入口。
   const profile = createConnectionProfilePort({
     storage: adapter.storage,
@@ -124,7 +137,7 @@ export async function bootstrap(): Promise<void> {
   })
   setupConnectionView(profile)
 
-  // 3. 壳层端口注入（远程 profile 形态：无 ipc；凭据派生 D4 + auth 拒绝消费 D8）。
+  // 4. 壳层端口注入（远程 profile 形态：无 ipc；凭据派生 D4 + auth 拒绝消费 D8）。
   setConnectionPorts({
     visibility: {
       isVisible: () => document.visibilityState === 'visible',
@@ -154,20 +167,15 @@ export async function bootstrap(): Promise<void> {
     // reject 流入用户可见 UI（列表 loadError role=alert）。透传 key 会把裸 key 直出给用户。
     // i18n.global.t 的复杂重载收窄为 (key, params?) => string（对齐 app-runtime 同款收窄）。
     t: i18n.global.t as (key: string, params?: Record<string, unknown>) => string,
-    // 断连/重启用尽的对话流收尾（对齐桌面 useMessageEffects.handleRuntimeUnavailable 双路
-    // 收尾形态——finalizeAllStreaming + form/planReview 分区清空 clearAllFormRequests，对应
-    // 桌面 extensionUI clearAllPending；dialog 通道 queue 两壳一致不清）：断连宽限（10s）到
-    // 期或重连放弃（failed）时，把在途 streaming 消息落终态、错误作为 assistant 消息插入对话
-    // 流（项目规则#3：错误必须重置状态），并清空 form 挂起分区——runtime 重启后挂起 Promise
-    // 不会被 resolve，僵尸 form 卡在 WS 重连窗口内提交即假成功。不接线 = 断连后 composer
-    // 永久卡「生成中」。
+    // 断连/重启用尽的对话流收尾（§6.23 reason 分流——finalizeAllStreaming 两 reason 共通；
+    // form/planReview 分区不清，restart 分支置提交挂起、重连对账完成后恢复，见函数头注）。
     onRuntimeUnavailable: handleRuntimeUnavailable,
   })
 
-  // 4. core transport/coordination 序列（远程 profile 分支：D4 凭据解析 → ws 连接发起）。
+  // 5. core transport/coordination 序列（远程 profile 分支：D4 凭据解析 → ws 连接发起）。
   await initConnection()
   await restoreSessions()
 
-  // 5. 挂载 App（多视图：列表/聊天/token 输入；i18n 装配是 ui 组件 useI18n 的前置）。
-  createApp(App).use(createPinia()).use(i18n).mount('#app')
+  // 6. 壳层 popstate 返回接管装配（§6.7：系统侧滑 / Android 返回键关闭聊天回来源域）。
+  setupRouteHistory()
 }

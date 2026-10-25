@@ -11,20 +11,21 @@
 // 产出工具类，env(safe-area-inset-*, 0px) 变量定义经 postcss 管线原样存活）。
 //
 // 分治边界（u19 裁决）：顶部 + 横向 inset 由壳根 .mobile-shell 一处覆盖（顶部元素
-// 随视图态变化：ErrorBar/token/failed/connecting/chat header——组件级各自处理会漏态，
-// 壳根一处覆盖所有视图态）；底部 inset 由贴底 chrome BottomTabBar 自身避让（iOS 形态：
-// bar 延伸进 Home Indicator 区，内容 padding 避让，bar 自身背景延伸到屏底）；无底部
-// chrome 的全屏态（token-input/failed/connecting）内容居中布局不贴底，底部 inset 不
-// 重叠内容。MobileComposer 恒在 BottomTabBar 上方不贴屏底，不叠加（叠加 = 双倍空隙）。
+// 随视图态变化：ErrorBar/连接条/各屏页头——组件级各自处理会漏态，壳根一处覆盖所有
+// 视图态）；底部 inset 由贴底 chrome BottomNav 自身避让（iOS 形态：bar 延伸进 Home
+// Indicator 区，内容 padding 避让，bar 自身背景延伸到屏底）；无底部 chrome 的全屏态
+//（connect 路由 / chat 详情页）内容布局不贴底，底部 inset 不重叠内容。
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import App from '../App.vue'
-import BottomTabBar from '../shell/BottomTabBar.vue'
+import BottomNav from '../components/BottomNav.vue'
 import { i18n } from '../i18n'
 import { sessionStore } from '../shell/app-runtime'
 import { hasConnectedOnce, shellConnectionState } from '../shell/connection-view'
+import { resetRouteForTesting } from '../shell/route'
 
 // vitest 运行时 cwd 即包根（vitest.config.ts 所在目录）
 const pkgRoot = process.cwd()
@@ -52,6 +53,7 @@ describe('A16: safe-area 布局类挂载（DOM 断言，TC-1 形态）', () => {
   }
 
   beforeEach(() => {
+    resetRouteForTesting()
     shellConnectionState.value = 'connecting'
     hasConnectedOnce.value = false
     sessionStore.setActiveId(null)
@@ -60,6 +62,7 @@ describe('A16: safe-area 布局类挂载（DOM 断言，TC-1 形态）', () => {
   afterEach(() => {
     wrapper?.unmount()
     wrapper = null
+    resetRouteForTesting()
     shellConnectionState.value = 'connecting'
     hasConnectedOnce.value = false
     sessionStore.setActiveId(null)
@@ -79,20 +82,21 @@ describe('A16: safe-area 布局类挂载（DOM 断言，TC-1 形态）', () => {
     expect(shell.classes()).not.toContain('pb-[var(--safe-area-bottom)]')
   })
 
-  it('connected 态 BottomTabBar 挂底部 safe-area 类（底导航职责）', () => {
+  it('connected 态 BottomNav 挂底部 safe-area 类（底导航职责；v2 五路由形态）', async () => {
     hasConnectedOnce.value = true
     shellConnectionState.value = 'connected'
     wrapper = mountApp()
-    const bar = wrapper.get('[data-testid="bottom-tab-bar"]')
+    await nextTick()
+    const bar = wrapper.get('[data-testid="bottom-nav"]')
     expect(bar.classes()).toContain('pb-[var(--safe-area-bottom)]')
   })
 
-  it('BottomTabBar 独立挂载同样挂底部 safe-area 类（组件自身契约，不依赖 App 接线）', () => {
-    const bar = mount(BottomTabBar, {
+  it('BottomNav 独立挂载同样挂底部 safe-area 类（组件自身契约，不依赖 App 接线）', () => {
+    const bar = mount(BottomNav, {
       global: { plugins: [i18n] },
       props: { modelValue: 'sessions' as const },
     })
-    expect(bar.get('[data-testid="bottom-tab-bar"]').classes()).toContain('pb-[var(--safe-area-bottom)]')
+    expect(bar.get('[data-testid="bottom-nav"]').classes()).toContain('pb-[var(--safe-area-bottom)]')
     bar.unmount()
   })
 })

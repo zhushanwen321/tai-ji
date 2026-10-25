@@ -28,7 +28,7 @@ import { __testing as bootstrapTesting } from '../bootstrap'
 const pkgRoot = process.cwd()
 
 /** 注释提及 __testing 但无消费的生产文件（相对 src 路径）——新条目须随改动同 commit 裁决 */
-const DOC_MENTION_ALLOWLIST = ['views/SubagentStatusLine.vue'] as const
+const DOC_MENTION_ALLOWLIST: readonly string[] = []
 
 /** 生产文件 = src 下 .ts/.vue，排除测试目录与测试文件命名 */
 function isProductionFile(relPath: string): boolean {

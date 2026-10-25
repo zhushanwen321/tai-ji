@@ -1,6 +1,6 @@
 // form-protocol —— ui-form 线协议的答案编码/已答判定/schedule 回显共享纯模块（双壳单点）。
 //
-// 桌面 FormOverlay 与移动 MobileFormCard 是同一线协议（@zhushanwen/extension-protocol
+// 桌面 FormOverlay 与移动 FormSheet 是同一线协议（@zhushanwen/extension-protocol
 // ui-form/types.ts FormAnswers 注释 = 协议 SSOT）的两套渲染形态（桌面 tab 逐题 / 移动
 // 堆叠单列——真差异），但编码规则必须逐字一致：本模块是该契约的唯一实现，双壳只做
 // 呈现与状态持有，编码/判定一律 import 此处，禁止壳内副本。

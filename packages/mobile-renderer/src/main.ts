@@ -7,6 +7,9 @@ import './styles/tokens.css'
 // styles/shell.css 是桌面 style.css 同段的 mobile 镜像副本，改动须同步两处。
 import './styles/shell.css'
 
+// 壳基础层（焦点可见性 / reduced-motion 降级；remote-use-mobile-v2 S1 壳骨架）。
+import './styles/base.css'
+
 import { bootstrap } from './bootstrap'
 
 // 全局错误留痕（error-reporter 双面）：Vue 体系内 render/setup 错误在无 app 级

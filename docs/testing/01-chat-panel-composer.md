@@ -387,7 +387,7 @@ testid 以组件 template 内 data-testid 属性为准。
 
 ### 3.2 移动壳队列条 testid（mobile-renderer QueueStrip，remote-use D7 / chat-flow-consistency D6）
 
-> 登记边界：本册正文以桌面壳（packages/renderer）为准；移动壳（packages/mobile-renderer）的 testid 当前仅登记队列条一族（下表，与 §3 queue-* 系同批交付对账），其余 mobile-* 系 testid 未纳入本册登记——移动壳验收/回归直接以组件 template 内 `data-testid` 属性为准，本节是快捷索引而非完整性清单。组件源码：`packages/mobile-renderer/src/views/QueueStrip.vue`。
+> 登记边界：本册正文以桌面壳（packages/renderer）为准；移动壳（packages/mobile-renderer）的 testid 当前仅登记队列条一族（下表，与 §3 queue-* 系同批交付对账），其余 mobile-* 系 testid 未纳入本册登记——移动壳验收/回归直接以组件 template 内 `data-testid` 属性为准，本节是快捷索引而非完整性清单。组件源码：`packages/mobile-renderer/src/features/QueueStrip.vue`。
 
 | testid | 触发/可见条件 |
 |--------|--------------|

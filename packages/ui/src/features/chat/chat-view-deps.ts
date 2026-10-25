@@ -198,7 +198,7 @@ export interface ChatViewDeps {
 
 /**
  * 编辑态富编辑器组件契约（editComposerRenderer 的 props/emits 形状声明）。
- * 组件内部自行 provide ComposerInputDepsKey（与 Composer.vue / MobileComposer 同契约），
+ * 组件内部自行 provide ComposerInputDepsKey（与移动壳 Composer.vue 同契约），
  * 挂载即 setSegments(props.segments) 真 chip 还原；提交经 emit('submit', segments)
  * 交还 UserBubble（双发锁 + editAndResend 收尾链在 ui 侧单点）。
  */

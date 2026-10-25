@@ -1,6 +1,6 @@
 // app-runtime 投递域透传出口直测（chat-flow-consistency D6 移动壳接线）。
 //
-// QueueStrip / MobileComposer 的组件级 mock 全量替换了 app-runtime（隔离 core WS），
+// QueueStrip / Composer 的组件级 mock 全量替换了 app-runtime（隔离 core WS），
 // 透传函数本体（peek/edit 直调 core transport chat 域 + 锚定分区三出口）在组件测试中
 // 不可达——本文件 mock core chat 域后直调出口，锁定透传接线与锚定分区读写语义：
 // - peekDelivery / editDelivery：参数原样透传 core chat 域（chatApiPort 不扩口，移动壳

@@ -1,13 +1,13 @@
-// AC5 结构断言测试套件（W2 建立；remote-use U1.4c 多视图重排改写 TC-1/TC-2，
-// BM5 断连不换视图新增视图分支用例；TC-3 挂载点注册与 TC-7 main.ts 源码文本断言
-// 随死模块删除/测试锚点解除移除）。
+// AC5 结构断言测试套件（W2 建立；remote-use U1.4c 多视图重排改写 TC-1/TC-2；
+// remote-use-mobile-v2 §6.6/§6.7 壳重排再改写——五路由消费（connect/sessions/settings/chat）+
+// BottomNav 三目的域 + BM5 断连不换视图语义保留；v1 两 tab 形态断言已随壳重写退役，
+// v1 组件已清退，老能力映射逐条对账结论落包根 MIGRATION-RECONCILIATION.md。
 //
 // 覆盖（TC-6 构建验收由 cw test gate 的 build 步骤单独跑）：
-//   TC-1: mount(App) 多视图态断言（列表视图 / 聊天视图 / token 输入视图 / 连接中，U1.4c 改写）
-//   TC-2: SlashBarStub 隐藏保留断言（DOM 层：hidden class + testid 留 DOM，源码文本正则已删）
+//   TC-1: mount(App) 五路由结构断言（connect 骨架/验身入口/connected 三目的域/settings/chat）
 //   TC-4: createMobilePlatformAdapter 满足 core PlatformPort 契约（IF2）
-//   TC-5: providePlatform/getPlatform 注入链路通（经 bootstrap）
-//   BM5:  断线重连中保持 connected 布局 + 顶部断线条（failed 全屏 / 首连全屏连接中）
+//   TC-5: providePlatform/getPlatform 注入链路通（经 bootstrap；§6.6 先挂载后连接）
+//   BM5:  断线重连中保持路由布局 + 顶部断线条（failed/首连走验身页全屏）
 //   TC-8: Tailwind 样式入口防回归
 //
 // 从 vitest 导入（禁 node:test / tsx --test）。运行：npx vitest run。
@@ -24,6 +24,7 @@ import { createMobilePlatformAdapter } from '../platform/mobile-platform-adapter
 import { bootstrap } from '../bootstrap'
 // 连接视图态（W6 起本体在 shell/connection-view；直改 ref 驱动视图断言的操纵形态不变）
 import { hasConnectedOnce, shellConnectionState } from '../shell/connection-view'
+import { navigateRoute, resetRouteForTesting } from '../shell/route'
 
 // vitest 运行时 cwd 即包根（vitest.config.ts 所在目录）
 const pkgRoot = process.cwd()
@@ -44,10 +45,11 @@ function mountApp() {
   return mount(App, { global: { plugins: [i18n] } })
 }
 
-describe('TC-1: AC5 多视图态结构断言（U1.4c 多视图重排）', () => {
+describe('TC-1: AC5 五路由结构断言（remote-use-mobile-v2 §6.6/§6.7 壳重排）', () => {
   let wrapper: ReturnType<typeof mountApp> | null = null
 
   beforeEach(() => {
+    resetRouteForTesting()
     shellConnectionState.value = 'connecting'
     hasConnectedOnce.value = false
     sessionStore.setActiveId(null)
@@ -56,83 +58,78 @@ describe('TC-1: AC5 多视图态结构断言（U1.4c 多视图重排）', () => 
   afterEach(() => {
     wrapper?.unmount()
     wrapper = null
+    resetRouteForTesting()
     shellConnectionState.value = 'connecting'
     hasConnectedOnce.value = false
     sessionStore.setActiveId(null)
   })
 
-  it('connecting 态渲染轻量连接中视图（无 tab bar / 无列表）', () => {
+  it('connect 态（首连 connecting）渲染验身页骨架 + 连接中（无 bottom-nav）', () => {
     wrapper = mountApp()
-    expect(wrapper.find('[data-testid="shell-connecting"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="bottom-tab-bar"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="mobile-session-list"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="connect-screen"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="shell-boot-skeleton"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="shell-connecting-label"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="bottom-nav"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="shell-reconnecting-banner"]').exists()).toBe(false)
   })
 
   it('token-input 态渲染 token 表单（token-input-view testid）', () => {
     shellConnectionState.value = 'token-input'
     wrapper = mountApp()
+    expect(wrapper.find('[data-testid="connect-screen"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="token-input-view"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="token-input"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="token-submit"]').exists()).toBe(true)
   })
 
-  it('connected 列表视图渲染列表容器 + bottom-tab-bar', () => {
+  it('connected 首目的域渲染 sessions 屏 + bottom-nav 三目的域条目', async () => {
     // 直接置态复现 connection-view watch 的置位序（connected 蕴含 hasConnectedOnce，BM5 分支锚点）
     hasConnectedOnce.value = true
     shellConnectionState.value = 'connected'
     wrapper = mountApp()
-    expect(wrapper.find('[data-testid="mobile-session-list"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="bottom-tab-bar"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="mobile-tab-sessions"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="mobile-tab-chat"]').exists()).toBe(true)
+    await nextTick()
+    expect(wrapper.find('[data-testid="screen-sessions"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="bottom-nav"]').exists()).toBe(true)
+    for (const id of ['sessions', 'activity', 'settings']) {
+      expect(wrapper.find(`[data-testid="mobile-nav-${id}"]`).exists()).toBe(true)
+    }
   })
 
-  it('connected 聊天视图渲染 message-stream + companion + slash 隐藏保留 + 输入条 + bottom-tab-bar', async () => {
+  it('settings 路由渲染设置屏（bottom-nav 保持在场）', async () => {
     hasConnectedOnce.value = true
     shellConnectionState.value = 'connected'
-    sessionStore.setActiveId('sid-tc1')
     wrapper = mountApp()
-    await wrapper.get('[data-testid="mobile-tab-chat"]').trigger('click')
-    expect(wrapper.find('[data-testid="zone-message-stream"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="mobile-message-stream"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="zone-companion"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="zone-slash"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="stub-slash"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="mobile-composer"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="mobile-composer-send"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="bottom-tab-bar"]').exists()).toBe(true)
-  })
-})
-
-describe('TC-2: AC5 SlashBarStub 隐藏保留（DOM 层断言）', () => {
-  let wrapper: ReturnType<typeof mountApp> | null = null
-
-  beforeEach(() => {
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
+    await nextTick()
+    navigateRoute('settings')
+    await nextTick()
+    expect(wrapper.find('[data-testid="settings-screen"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="bottom-nav"]').exists()).toBe(true)
   })
 
-  afterEach(() => {
-    wrapper?.unmount()
-    wrapper = null
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
-  })
-
-  it('聊天视图内 zone-slash 容器 + stub-slash testid 在场且隐藏（不裸渲染占位文案）', async () => {
+  it('chat 路由渲染聊天屏 v2（返回出口在场 + bottom-nav 隐藏）', async () => {
     hasConnectedOnce.value = true
     shellConnectionState.value = 'connected'
-    sessionStore.setActiveId('sid-tc2')
+    // 播种活跃会话（无 summary 的 sid 合法——标题回落「未命名会话」兜底）→ ChatScreen 全量挂载
+    sessionStore.setActiveId('sess-chat-shell-spec')
     wrapper = mountApp()
-    await wrapper.get('[data-testid="mobile-tab-chat"]').trigger('click')
-    expect(wrapper.find('[data-testid="zone-slash"]').exists()).toBe(true)
-    const stub = wrapper.get('[data-testid="stub-slash"]')
-    // 不可见断言走 DOM 属性（class）而非源码文本：项目 SSOT `.hidden { display: none }`；
-    // happy-dom 的 getComputedStyle 不解析样式表，computed display 断言不可用
-    expect(stub.classes()).toContain('hidden')
-    expect(stub.text()).toBe('')
+    await nextTick()
+    navigateRoute('chat')
+    await nextTick()
+    expect(wrapper.find('[data-testid="chat-screen"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="chat-back"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="bottom-nav"]').exists()).toBe(false)
+  })
+
+  it('chat 路由无活跃会话 → 空态（新建入口在场，不挂 ChatScreen）', async () => {
+    hasConnectedOnce.value = true
+    shellConnectionState.value = 'connected'
+    wrapper = mountApp()
+    await nextTick()
+    navigateRoute('chat')
+    await nextTick()
+    expect(wrapper.find('[data-testid="screen-chat"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="mobile-chat-empty-new"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="chat-screen"]').exists()).toBe(false)
   })
 })
 
@@ -199,13 +196,15 @@ describe('TC-5: AC5 providePlatform/getPlatform 注入链路通（经 bootstrap�
   })
 })
 
-// BM5 瞬时断连不换视图：connected 后掉回 connecting 时 connected 布局保持挂载
-//（composer/message-stream 不卸载 = 输入草稿保留），仅壳顶部插轻量断线条；
-// failed 仍全屏接管；首连（从未 connected）仍是全屏「连接中」。
-describe('BM5: 断线重连中保持 connected 布局 + 壳顶部断线条', () => {
+// BM5 瞬时断连不换视图：connected 后掉回 connecting 时当前路由布局保持挂载（v2 五路由
+// 消费形态——视图保持 = 草稿/滚动保留，u-chat 交付后随 ChatScreen 落位），仅壳顶部插轻量
+// 断线条；failed / token-input 经路由回验身页全屏接管；首连（从未 connected）也是验身页
+// 骨架态（§6.6 首屏三态：任意时点 #app 非空）。
+describe('BM5: 断线重连中保持路由布局 + 壳顶部断线条', () => {
   let wrapper: ReturnType<typeof mountApp> | null = null
 
   beforeEach(() => {
+    resetRouteForTesting()
     shellConnectionState.value = 'connecting'
     hasConnectedOnce.value = false
     sessionStore.setActiveId(null)
@@ -214,53 +213,56 @@ describe('BM5: 断线重连中保持 connected 布局 + 壳顶部断线条', () 
   afterEach(() => {
     wrapper?.unmount()
     wrapper = null
+    resetRouteForTesting()
     shellConnectionState.value = 'connecting'
     hasConnectedOnce.value = false
     sessionStore.setActiveId(null)
   })
 
-  it('连接成功后掉回 connecting：聊天视图元素仍在场 + shell-reconnecting-banner 在场（无全屏连接中）', async () => {
+  it('连接成功后掉回 connecting：目的域布局仍在场 + shell-reconnecting-banner 在场（无全屏验身页）', async () => {
     shellConnectionState.value = 'connected'
     hasConnectedOnce.value = true
     sessionStore.setActiveId('sid-bm5')
     wrapper = mountApp()
-    await wrapper.get('[data-testid="mobile-tab-chat"]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-testid="screen-sessions"]').exists()).toBe(true)
 
     // 瞬时断连：connected → connecting（connection-view watch 同款状态流转）
     shellConnectionState.value = 'connecting'
     await nextTick()
 
     expect(wrapper.find('[data-testid="shell-reconnecting-banner"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="zone-message-stream"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="mobile-composer"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="bottom-tab-bar"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="shell-connecting"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="screen-sessions"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="bottom-nav"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="connect-screen"]').exists()).toBe(false)
   })
 
-  it('failed 重连预算用尽：仍全屏接管（shell-failed 在场，无断线条/无聊天视图/tab bar）', () => {
+  it('failed 重连预算用尽：路由回验身页全屏接管（shell-failed 在场，无断线条/无目的域/无 bottom-nav）', async () => {
     shellConnectionState.value = 'failed'
     hasConnectedOnce.value = true
     sessionStore.setActiveId('sid-bm5-failed')
     wrapper = mountApp()
+    await nextTick()
 
     expect(wrapper.find('[data-testid="shell-failed"]').exists()).toBe(true)
-    // failed 全屏容器独立 testid（不复用首连分支的 shell-connecting）：负向断言防「failed 态
-    // 误渲染连接中视图」回归——曾因 failed 分支复用 shell-connecting 使该断言假绿
+    // failed 全屏容器独立 testid（不复用首连分支的 shell-boot-skeleton）：负向断言防「failed 态
+    // 误渲染连接中视图」回归
     expect(wrapper.find('[data-testid="shell-failed-screen"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="shell-connecting"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="shell-boot-skeleton"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="shell-reconnecting-banner"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="zone-message-stream"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="bottom-tab-bar"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="screen-sessions"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="bottom-nav"]').exists()).toBe(false)
   })
 
-  it('首连未 connected：全屏连接中，无断线条', () => {
+  it('首连未 connected：验身页骨架态（无断线条）——§6.6 首屏任意时点 #app 非空', () => {
     shellConnectionState.value = 'connecting'
     hasConnectedOnce.value = false
     wrapper = mountApp()
 
-    expect(wrapper.find('[data-testid="shell-connecting"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="connect-screen"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="shell-boot-skeleton"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="shell-reconnecting-banner"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="mobile-session-list"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="screen-sessions"]').exists()).toBe(false)
   })
 })
 
@@ -283,6 +285,11 @@ describe('TC-8: AC5 Tailwind 样式入口（U1.6 P0 防回归）', () => {
   it('main.ts import shell.css（浮层进出场过渡进构建图，缺失时弹窗出视口）', () => {
     const mainSrc = readFileSync(resolve(pkgRoot, 'src/main.ts'), 'utf-8')
     expect(mainSrc).toMatch(/import '\.\/styles\/shell\.css'/)
+  })
+
+  it('main.ts import base.css（壳基础层进构建图：焦点可见性 / reduced-motion 降级）', () => {
+    const mainSrc = readFileSync(resolve(pkgRoot, 'src/main.ts'), 'utf-8')
+    expect(mainSrc).toMatch(/import '\.\/styles\/base\.css'/)
   })
 
   it('tailwind.config.ts content 覆盖壳源码与 ui 组件（防扫描范围缩窄致工具类缺失）', () => {

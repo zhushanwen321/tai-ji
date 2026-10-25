@@ -12,7 +12,7 @@
 // - panel/navigation/hooks → no-op（移动壳无 panel/导航 store；SessionEntryPort 全成员
 //   可选缺省 no-op、链零新增步骤可跑，sessionEntry 订阅/LRU 步已接线——remote-use D2）
 // - turn 展开 → 壳内 per-session Map 分区（ADR-0049 范式；桌面 useTurnExpansion 的 mobile 子集）
-import type { Ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import {
   createChatStore,
   createSessionFlow,
@@ -22,6 +22,7 @@ import {
   createUseSession,
   ensureStreamSubscription,
   evictLruWithUnsubscribe,
+  getPlatform,
 } from '@taiji/core'
 import type {
   ChatApiPort,
@@ -33,13 +34,16 @@ import type {
 } from '@taiji/core'
 import * as chatApi from '@taiji/core/transport/api/domains/chat'
 import * as sessionApi from '@taiji/core/transport/api/domains/session'
+import * as modelApi from '@taiji/core/transport/api/domains/model'
+import * as projectApi from '@taiji/core/transport/api/domains/project'
 import { command, onGlobalType, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 import { registerSessionCleanup } from '@taiji/core/foundation/use-session-scoped-state'
 import { createComposerInjectionStore } from '@taiji/core/domain/composer/context'
 // 队列编辑锚定判定（chat-flow-consistency D6：单锚定不变式 core 下沉，桌面 composer-shell 同源）
 import { clearQueueEdit, startQueueEdit, type QueueEditAnchorPartition, type QueueEditStartOutcome } from '@taiji/core/domain/composer'
 import { showErrorBar } from './error-bar'
-import type { DeliveryCancelReply, DeliveryEditReply, DeliveryPeekReply, Segment, SessionSummary } from '@taiji/shared'
+import type { DeliveryCancelReply, DeliveryEditReply, DeliveryPeekReply, DeliveryResyncReply, ModelInfo, ProjectStoreState, ProviderId, Segment, SessionSummary, SubagentRecord } from '@taiji/shared'
+import { normalizeContent } from '@taiji/shared'
 import { i18n } from '../i18n'
 
 // vue-i18n 的 t 复杂重载收窄为 (key, params?) => string（对齐 renderer useChat.ts tFn 形态）
@@ -266,10 +270,10 @@ const useSessionInstance = createUseSession({
   liveState: liveStateStore,
 })
 
-// ── 新建任务（createSessionFlow 直组；手输路径是移动唯一形态）────────────────
+// ── 新建任务（createSessionFlow 直组；v2 §6.12 项目 chip 主路径 + 手输兜底）────────
 
 export interface MobileNewTaskInput {
-  /** 项目路径（表单手输，必填） */
+  /** 项目路径（表单手输或项目 chip cwd 派生，必填） */
   cwd: string
   /** 首条消息文本 */
   firstMessage: string
@@ -279,6 +283,11 @@ export interface MobileNewTaskInput {
    * 重置（提交成功/关闭）由表单层按意图生命周期负责——本函数只透传 createSessionFlow。
    */
   clientUuid?: string
+  /**
+   * 归属 project id（remote-use-mobile-v2 §6.12 NewTaskSheet 项目 chip 选中透传；
+   * 缺省 = 未归类走默认项目兜底，与手输路径同语义）。
+   */
+  projectId?: string
 }
 
 /**
@@ -301,7 +310,13 @@ export async function createMobileTask(input: MobileNewTaskInput): Promise<Sessi
         console.warn(`[mobile-task] cwd fallback: requested="${reqCwd}" actual="${actualCwd}"`)
       },
     },
-    { cwd, segments, clientUuid: input.clientUuid },
+    {
+      cwd,
+      segments,
+      clientUuid: input.clientUuid,
+      // §6.12 项目 chip 选中归属（D14 创建时归属语义；缺省 undefined = 默认项目兜底）
+      projectId: input.projectId,
+    },
   )
   if (!result) return null
   sessionStore.setActiveId(result.session.id)
@@ -349,7 +364,7 @@ export function peekDelivery(sessionId: string, clientUuid: string): Promise<Del
   return chatApi.peekDelivery(sessionId, clientUuid)
 }
 
-/** 原位编辑（chat-flow-consistency D6）：发送侧替换条目内容且排队位置保持不变（MobileComposer 消费）。 */
+/** 原位编辑（chat-flow-consistency D6）：发送侧替换条目内容且排队位置保持不变（Composer 消费）。 */
 export function editDelivery(
   sessionId: string,
   clientUuid: string,
@@ -362,7 +377,7 @@ export function editDelivery(
 /**
  * 取消全文回输入框的一次性注入通道（remote-use D7/U10，core composer injection factory
  * 平台无关单例——桌面 renderer composer-injection-store 同范式）：QueueStrip（写入侧，
- * 取消应答全文）与 MobileComposer（消费侧，insertTextAtCursor 光标插入）跨组件树共享。
+ * 取消应答全文）与 Composer（消费侧，insertTextAtCursor 光标插入）跨组件树共享。
  * 通道 text 单值语义（无 segments 承载位）：移动壳产不出 chip（无 slash 浮层/file 注入源/
  * 图片粘贴降级文本），cancel reply segments 的 chip 恢复面在移动壳为零，零丢失。
  */
@@ -401,7 +416,7 @@ export function clearQueueEditFor(sid: string): void {
   clearQueueEdit(anchorPartitionOf(sid))
 }
 
-/** 当前锚定的条目 id（null = 非编辑态；MobileComposer 发送分流读口）。 */
+/** 当前锚定的条目 id（null = 非编辑态；Composer 发送分流读口）。 */
 export function queueEditAnchorOf(sid: string): string | null {
   return anchorPartitionOf(sid).clientUuid
 }
@@ -487,4 +502,232 @@ export async function restoreSession(id: string): Promise<void> {
  */
 export function refreshHistory(id: string): Promise<void> {
   return useSessionInstance.refreshHistory(id)
+}
+
+// ── 偏好读写接线段（u-shell-skeleton；§6.16 键盘 / §6.17 偏好持久化）────────────────
+// 偏好持久化 = localStorage（键 taiji.mobile.prefs 单 JSON 键），读写经既有 PlatformPort.storage
+// 端口（测试注入内存实现）；应用 = 根节点 data-theme / data-font-size 槽位（tokens.css 与
+// ui 包 mobile-tokens.css 双槽位均已定义），切换即时生效不重挂载。错误处理契约（§7.4）：
+// 偏好属辅助功能——读写失败静默回默认（platform 未注入 / storage 抛 / JSON 坏 / 形状不对）。
+
+/** 移动壳用户偏好（§6.17：主题深/浅 + 字号三档；键域封闭，新增偏好项先扩此表） */
+export interface MobilePrefs {
+  theme: 'dark' | 'light'
+  fontSize: 'small' | 'medium' | 'large'
+}
+
+/** 偏好在 PlatformPort.storage 的持久键（单 JSON 键；登记 = data-source-registry 壳侧条目） */
+export const MOBILE_PREFS_STORAGE_KEY = 'taiji.mobile.prefs'
+
+export const DEFAULT_MOBILE_PREFS: MobilePrefs = { theme: 'dark', fontSize: 'medium' }
+
+/** 存储值形状守卫：字段级校验（不认识的值落默认），坏形状整体回默认 */
+function isMobilePrefsShape(value: unknown): value is MobilePrefs {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  return (
+    (v.theme === 'dark' || v.theme === 'light') &&
+    (v.fontSize === 'small' || v.fontSize === 'medium' || v.fontSize === 'large')
+  )
+}
+
+/** 读偏好（容错回默认）：platform 未注入 / storage 抛 / JSON 坏 / 形状不对 → DEFAULT_MOBILE_PREFS */
+export async function loadMobilePrefs(): Promise<MobilePrefs> {
+  try {
+    const raw = await getPlatform().storage.get(MOBILE_PREFS_STORAGE_KEY)
+    if (raw === null) return { ...DEFAULT_MOBILE_PREFS }
+    const parsed: unknown = JSON.parse(raw)
+    return isMobilePrefsShape(parsed) ? parsed : { ...DEFAULT_MOBILE_PREFS }
+  } catch (e) {
+    // 降级策略（best-effort 读取）：偏好属辅助功能，读写失败静默回默认（§7.4 错误处理
+    // 契约——接入点降级不许辅助故障拖垮核心）；warn 留排障依据，不向上传播。
+    console.warn('[app-runtime] loadMobilePrefs failed, falling back to defaults:', e)
+    return { ...DEFAULT_MOBILE_PREFS }
+  }
+}
+
+/**
+ * 合并写偏好：读当前（容错）→ 浅合并 → storage.set。写失败降级 warn 不上抛（对齐
+ * LocalStorageKV 降级语义——Safari 隐私模式等受限环境偏好本轮内存生效，刷新后回默认）。
+ * 返回合并后的值（调用方据此驱动 UI 态，不依赖 storage 落盘成功）。
+ */
+export async function saveMobilePrefs(patch: Partial<MobilePrefs>): Promise<MobilePrefs> {
+  const current = await loadMobilePrefs()
+  const merged: MobilePrefs = { ...current, ...patch }
+  try {
+    await getPlatform().storage.set(MOBILE_PREFS_STORAGE_KEY, JSON.stringify(merged))
+  } catch (e) {
+    // 降级策略（best-effort 持久化，对齐 LocalStorageKV 降级语义）：Safari 隐私模式等受限
+    // 环境写失败不向上传播——本轮内存生效（返回值驱动 UI），刷新后回默认；warn 留排障依据。
+    console.warn('[app-runtime] saveMobilePrefs persist skipped:', e)
+  }
+  return merged
+}
+
+/** 偏好应用到文档根节点（data-theme / data-font-size 槽位；即时生效不重挂载） */
+export function applyMobilePrefs(prefs: MobilePrefs): void {
+  document.documentElement.dataset.theme = prefs.theme
+  document.documentElement.dataset.fontSize = prefs.fontSize
+}
+
+/**
+ * 连接信息客户端派生——网络形态判定（§6.11）：hostname 落 Tailscale 网段（100.64/10，
+ * 即 100.64.0.0 – 100.127.255.255）→ 'tailscale'，否则 'lan'。与桌面 enumerateLanAddresses
+ * 同口径的判定子集：域名形态（MagicDNS 名）不在网段判定内，归 'lan'（诚实缺省——
+ * 判不了的形态不假装判得出）。
+ */
+/** Tailscale 网段（100.64.0.0/10）第二八位组边界：100.64 – 100.127 */
+const TAILSCALE_SECOND_OCTET_MIN = 64
+const TAILSCALE_SECOND_OCTET_MAX = 127
+
+export function networkKindFromHost(hostname: string): 'tailscale' | 'lan' {
+  const match = /^100\.(\d+)\.\d+\.\d+$/.exec(hostname)
+  if (match !== null) {
+    const second = Number(match[1])
+    if (second >= TAILSCALE_SECOND_OCTET_MIN && second <= TAILSCALE_SECOND_OCTET_MAX) return 'tailscale'
+  }
+  return 'lan'
+}
+
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：最近一次连接建立时刻（§6.11
+// 设置页「已连接时长」的客户端派生源；null = 尚无 connected 边沿）
+export const connectedSince = ref<number | null>(null)
+
+/** connected 边沿记录（App.vue watch isConnected 消费；每次重连重算——显示本次连接会话时长） */
+export function markConnectedNow(): void {
+  connectedSince.value = Date.now()
+}
+
+// ── W3 并行单元契约锚段（u-shell-skeleton 立契；u-sessions / u-chat / u-sheets 各填各段，
+//    不触他人段——impl-plan §3 D0 偏差同款分段纪律）────────────────────────────
+//
+// [u-sessions] 未读 diff 段 + 分组谓词段（已落位）：抽在 ./sessions-runtime 独立模块
+//   （本文件 W3 三单元并行后超 eslint max-lines 预算，会话域接线拆出；消费方直接
+//   import 该模块，不经本文件中转）。依赖本文件既有导出：activeSessionId / deleteSession。
+//
+// [u-chat] activeSessionId 段：契约 = 本文件既有导出 activeSessionId（sessionStore.activeId，
+//   响应式 Ref）。ChatScreen 消费此读口，壳层不做第二份「当前会话」定义。
+//
+// [u-chat] 计时通知段：回合计时（§6.21 客户端派生——本回合 message_start 本地时刻起算，
+//   「已观察」措辞）与动作通知（§6.20 经 core chatStore 既有 appendSystemNotice 插入）。
+//   依赖本文件既有导出：chatStore / useChatInstance。
+//
+// [u-sheets] Sheet 挂载契约：activeSheet / openSheet / closeSheet（./sheet-manager），
+//   companion-bridge 三通道呈现出口（FormSheet/PermissionSheet）打开走 openSheet，
+//   Sheet 内关闭动作走 closeSheet；Sheet 生命周期联动（路由离开 chat 等）在消费方事件点
+//   调 closeSheet()，manager 不反向 watch。
+
+// ── [u-chat] 计时通知段（remote-use-mobile-v2 §6.20 动作通知 / §6.14 重试重报透传）──────
+// 依赖本文件既有导出：chatStore（appendSystemNotice 消费）/ useChatInstance。u-shell-skeleton
+// 契约锚段的落位单元；组件层不直调 chatStore.appendSystemNotice（ops 面收拢装配层——组件
+// 禁触 chat store ops 是 no-chat-ops-in-components 规则的既有边界）。
+
+/**
+ * 动作通知插入（§6.20：spec 9.4 七类动作通知的壳层唯一接线点）——经 core chatStore 既有
+ * appendSystemNotice（store.ts:1098，v2 为其首个生产消费方）把 system 提示行追加进该会话
+ * 消息分区尾部。持久性边界（§6.20 采用段）：内存态——会话期间不消失（分区不清）、断线重连
+ * 保留；刷新/重开该会话后不在（历史来自 runtime 重拉，本地插入行不进 pi JSONL）。
+ * 文案经 i18n（mobile.notices.*），渲染 = ui SystemNotice 既有 system 行形态（壳零新渲染路径）。
+ *
+ * 其余触发点分布：中断生成/重试本轮在 Composer/出错条（本单元接线）；提交回答/允许/拒绝
+ * （FormSheet/PermissionSheet，u-sheets territory）/会话重新打开（SessionActionsSheet，
+ * u-sessions territory）/停止子代理（SubagentSheet，u-sheets territory）——后续单元在各自
+ * 回执成功点调用本函数接线（单点出口已立，一处调用一行）。
+ */
+export function appendActionNotice(sessionId: string, text: string): void {
+  chatStore.appendSystemNotice(sessionId, text)
+}
+
+/**
+ * 队列条目失败重报（§6.22 failed 重试，QueueStrip v2 消费方）：delivery.resync RPC 透传
+ * （core transport chat 域既有封装；clientUuid 幂等去重在 runtime 单点，壳只透传）。
+ */
+export function resyncDelivery(sessionId: string, clientUuids: string[]): Promise<DeliveryResyncReply> {
+  return chatApi.resyncDelivery(sessionId, clientUuids)
+}
+
+// ── [u-sheets] Sheet 域 RPC 透传段（remote-use-mobile-v2 §6.5/§6.10/§6.12；组件层不直连
+//    transport，经本段出口消费——与 cancelDelivery/peekDelivery 透传形态平行）──────────
+
+/**
+ * project 清单拉取（§6.12 NewTaskSheet 项目 chip 主路径数据源；V-2 结论：project.load
+ * reply = ProjectStoreState）。RPC 失败上抛由调用方降级手输兜底（§6.12 降级链）。
+ */
+export function fetchProjects(): Promise<ProjectStoreState> {
+  return projectApi.load()
+}
+
+/**
+ * 会话模型清单订阅（§7.2 ModelSheet：onModels 广播订阅）+ 主动拉兜底（listModels，
+ * 订阅注册时序竞态的请求-响应兜底）。当前会话权威值经 liveStateOf 读口 + 切入链
+ * getState 拉取（既有），本段不另立读法。
+ */
+export function subscribeModels(handler: (models: ModelInfo[]) => void): () => void {
+  return modelApi.onModels(handler)
+}
+
+export function fetchModels(): Promise<ModelInfo[]> {
+  return modelApi.listModels()
+}
+
+/**
+ * 会话级模型切换（§7.2 F9）：回执 = pi 生效值（静默换模防线），调用方以回执值写显示态
+ * （禁请求值乐观写——runtime switchModel 契约）。
+ */
+export function switchSessionModel(
+  sessionId: string,
+  provider: string,
+  modelId: string,
+): Promise<{ sessionId: string; provider: string; modelId: string }> {
+  // provider 串来源 = ModelInfo.provider（runtime 聚合清单原值透传，非用户输入——
+  // branded ProviderId 的构造信任点在 runtime 侧清单）
+  return modelApi.switchModel(sessionId, provider as ProviderId, modelId)
+}
+
+/**
+ * 会话思考档设置（§7.2）：回执 level = runtime set→get_state 读回的生效档（pi 钳制时
+ * ≠ 请求值），调用方以回执值写显示态。
+ */
+export function setSessionThinkingLevel(
+  sessionId: string,
+  level: string,
+): Promise<{ sessionId: string; level: string }> {
+  return sessionApi.setThinkingLevel(sessionId, level)
+}
+
+/** 扩展命令清单拉取（§6.13 CommandSheet：切会话后主动拉，broadcast 时序竞争规则的主动拉取模式） */
+export function fetchSessionCommands(sessionId: string): Promise<Array<{ name: string; description?: string; source: string }>> {
+  return sessionApi.getCommands(sessionId).then((r) => r.commands)
+}
+
+/** 子代理清单拉取（§6.10/§7.2 SubagentSheet 列表态；found=false = 会话不在册，调用方保留既有数据） */
+export function fetchSubagents(sessionId: string): Promise<{ subagents: SubagentRecord[]; oversize?: boolean; found?: boolean }> {
+  return sessionApi.getSubagents(sessionId)
+}
+
+/** 子代理最近执行历史（§6.10 详情执行记录 = 历史消息派生，不新增 steps 概念）；content
+ * 经 normalizeContent 归一纯文本（Message.content 是 string | Segment[] 联合，Sheet 步骤
+ * 列表只消费文本 + 状态） */
+export function fetchSubagentHistory(sessionId: string, subagentId: string): Promise<MobileSubagentHistoryMessage[]> {
+  return sessionApi.getSubagentHistory(sessionId, subagentId).then((messages) =>
+    messages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      text: normalizeContent(m.content),
+      status: m.status,
+    })),
+  )
+}
+
+/** 子代理停止（§6.10：subagentAction cancel；收敛消费 session.subagents 快照由调用方重拉） */
+export function stopSubagent(sessionId: string, subagentId: string): Promise<void> {
+  return sessionApi.subagentAction(sessionId, 'cancel', { subagentId })
+}
+
+/** 详情执行记录的消息窄化面（role + 文本 + 状态；FormSheet 族外的 Sheet 渲染消费子集） */
+export interface MobileSubagentHistoryMessage {
+  id: string
+  role: string
+  text: string
+  status: string
 }
