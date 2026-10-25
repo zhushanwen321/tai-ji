@@ -1,6 +1,7 @@
 /**
- * p1-direct-send-user-bubble-probe —— 协议直发 user 气泡缺失复现探针
- * （docs/todo/rpc-direct-send-user-bubble.md 专项；非验收剧本）。
+ * p1-direct-send-user-bubble-probe —— 协议直发 user 气泡缺失回归哨兵
+ * （专项探针，非验收剧本；原登记文档已随缺陷修复退役——缺失形态的根因修复 =
+ * delivery-topic 运行时创建事件接线 + 守卫降级入流，见 effects/user-delivery.ts）。
  *
  * 复现形态：session.create → UI 激活（renderer 订阅建立）→ delivery.submit 协议直发
  * （非 composer，无乐观气泡/inflight 记账）→ 轮完成后断言 user 气泡哨兵 live 在场。
