@@ -306,7 +306,7 @@ export async function run(ctx) {
     '④ 安装器装依赖（修复后形态）：prepare 段把 dependencies 递归装进 pluginDir/node_modules（真实 npm 链）——shared 声明 typebox 为 peerDependencies，npm7+ 自动装 peer 语义由 mock pkgExtra 镜像（并进 shared 的 packument dependencies）',
     '⑤ sandboxDir 包根推导（修复后形态）：宿主取入口向上首个含 package.json 的祖先——子目录入口（src/index.ts）与 pluginDir/node_modules 裸导入兼容，激活即回归锚',
     '提取确认卡渲染 = 宿主 PluginProviderFlow 进入 authorize 段 invoke getAuthorizeView 驱动（渲染驱动修复的回归锚点）；提取派发仍走 plugin.executeCommand（与 action-bar 按钮点击同一命令通道，规避 DOM 点击定位脆弱性）',
-    'WOOL providers.write 后 config.providers 无广播（登记缺陷，runtime 侧）：变化感知 watch 盯 models-store.json（远程目录缓存），models.json 写回不在感知范围；设置分区 v-show 常挂载、切页签不重拉——条目行卡只在重开设置窗（v-if 卸载式重挂载 → listProviders reply）后出现，剧本按该真实恢复路径驱动',
+    'ISSUES-2 ⑧ 已修复（写落点广播）：providers.write/delete 写回 models.json 后 runtime 侧 provider-write-proxy 经 50ms 去抖广播 config.providers，renderer Provider 页条目行卡即时出现——重开设置窗不再是恢复路径（原缺口：变化感知 watch 只盯 models-store.json，models.json 写回零广播，行卡要重开设置窗 listProviders 才出现）',
     'pi 扩展侧 typebox 由 pi virtual-modules 注入（root/compile/value 三入口），无需 npm 安装；插件侧沙箱无注入——typebox 由安装器经 shared 的 packument dependencies 递归装进 pluginDir/node_modules',
     'models.json 对话条目的 enabledModels 由剧本合并写入（pi 的 model scope；非产品断言对象——产品侧启用链归设置域剧本）',
     'A12 计时含真实上游目录拉取（extract 编排在 success 相位前做 writeCatalog）——上游延迟直接计入耗时，这是设计验收的口径而非剧本瑕疵',
@@ -442,32 +442,24 @@ export async function run(ctx) {
     // A：条目展开状态行（getStatus 契约形状修复回归锚点，原 ISSUES-2 ③）：提取成功
     // 后 wool-trae 条目展开 → 宿主 pullStatus（getStatus）→ provider-plugin-status
     // 状态行渲染（宿主 parseStatusFields 可窄化 = 形状对齐的端到端证据）。
-    // 行卡出现依赖 config.providers 广播到达 renderer（runtime 侧 models-store mtime
-    // 轮询 30s 粒度，provider-catalog-refresh.MODELS_STORE_WATCH_INTERVAL_MS）——
-    // 固定 click 超时覆盖不了轮询窗口：先显式轮询行卡渲染；超时则重进页签
-    // （ProviderPage 重挂载 → listProviders reply 拉新列表）再收敛。
+    // 行卡出现 = providers.write 写落点广播驱动（ISSUES-2 ⑧ 修复后形态）：runtime 侧
+    // provider-write-proxy 写回 models.json 成功后经 50ms 去抖广播 config.providers，
+    // renderer 常驻订阅即时更新——行卡应在提取写回后短窗口内出现；重开设置窗
+    // （v-if 卸载式重挂载 → listProviders reply）不再是恢复路径，超时即断言负例。
     // 手风琴点击一次（重复点击会展开/收起交替）。条目名 = models.json name ?? id
     // （Trae 提取无 displayName → 显示 'wool-trae'），正则兼容两种形态。
     const traeCard = page.locator('[data-testid="provider-card"]', { hasText: /trae/i }).first()
     const cardAppeared = await pollValue(
       async () => (await traeCard.count()) > 0,
       Boolean,
-      { timeoutMs: 40_000, intervalMs: 500, label: 'wool-trae 行卡渲染（广播窗口）' },
+      { timeoutMs: 15_000, intervalMs: 500, label: 'wool-trae 行卡即时渲染（写落点广播）' },
     ).catch(() => false)
-    if (!cardAppeared) {
-      // 广播缺口兜底（登记缺陷，runtime 侧：WOOL providers.write 不触发 config.providers
-      // 广播——变化感知 watch 盯 models-store.json（远程目录缓存），models.json 写回不在
-      // 感知范围；且设置分区 v-show 常挂载，切页签不重拉。恢复动作 = 关闭设置模态再重开
-      // （SettingsModal v-if="open" 卸载式重挂载 → ProviderPage 重新 onMounted listProviders
-      // reply 拉新列表），与「用户重开设置窗」同一真实路径）。
-      await ui.press('Escape')
-      await openProviderPage(ui)
-      await pollValue(
-        async () => (await traeCard.count()) > 0,
-        Boolean,
-        { timeoutMs: 15_000, intervalMs: 500, label: 'wool-trae 行卡渲染（重开设置窗后）' },
-      )
-    }
+    ev.assert('A: 提取写回后条目行卡即时出现（ISSUES-2 ⑧ 写落点广播修复锚点——不重开设置窗）',
+      cardAppeared, {
+        channel: 'A',
+        expected: 'providers.write 写回后 15s 内 provider-card 出现（config.providers 广播驱动）',
+        actual: cardAppeared ? '行卡已渲染（未做任何重开窗/重进页签动作）' : '15s 内行卡未出现（广播链断：写落点未触发或 renderer 订阅失效）',
+      })
     await traeCard.locator('span[role="button"]').click()
     const statusRow = page.locator('[data-testid="provider-plugin-status"]')
     const statusAppeared = await pollValue(
