@@ -107,4 +107,38 @@ describe('W5: health-checker 改用 HTTP /health 探活', () => {
     // 不实际调用避免 CI 真实连网络；W5 改动不应删除/改语义 isPortInUse
     expect(typeof isPortInUse).toBe('function')
   })
+
+  // ── HC7：aliveCheck 返回 false（进程已退出）→ 立即失败 ────────
+  it('HC7: aliveCheck 返回 false → 立即抛错（含「runtime 进程已退出」），不等满 retryCount', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response('busy', { status: 503 }),
+    ) as typeof globalThis.fetch
+    const aliveCheck = vi.fn(() => false)
+
+    // retryCount=100（真实等待会跑 100×10ms），aliveCheck 首轮即失败 → 毫秒级返回
+    await expect(
+      waitForHealth(7788, { intervalMs: 10, retryCount: 100, aliveCheck }),
+    ).rejects.toThrow(/runtime 进程已退出/)
+
+    // 立即失败：首轮即抛，且存活检查先于健康探测（fetch 未被调）
+    expect(aliveCheck).toHaveBeenCalledTimes(1)
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
+  // ── HC8：aliveCheck 恒 true → 行为与不传一致，按 retryCount 等满 ──
+  it('HC8: aliveCheck 恒 true → 不影响轮询，按 retryCount 等满后抛超时', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response('busy', { status: 503 }),
+    ) as typeof globalThis.fetch
+    const aliveCheck = vi.fn(() => true)
+
+    // 超时错误仍是既有形态（可与 HC7 的崩溃错误区分）
+    await expect(
+      waitForHealth(7788, { intervalMs: 1, retryCount: 5, aliveCheck }),
+    ).rejects.toThrow('Runtime health check timed out on port 7788')
+
+    // 每轮都查存活 + 探健康，各 retryCount 次
+    expect(aliveCheck).toHaveBeenCalledTimes(5)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(5)
+  })
 })
