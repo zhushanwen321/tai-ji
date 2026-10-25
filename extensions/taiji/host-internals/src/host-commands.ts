@@ -1,5 +1,5 @@
 /**
- * taiji extension for Pi — internal commands for the host.
+ * Host commands for the taiji runtime。
  *
  * Registers `/__taiji_get_system_prompt__` (Trace view fetch-current button)
  * and `/__taiji_nav__` (session tree rewind for message revoke).
@@ -19,7 +19,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
-export default function (pi: ExtensionAPI): void {
+export function registerHostCommands(pi: ExtensionAPI): void {
   // [fetch-current-system-prompt] Trace 视图「现取当前值」通道（session-trace design §3.1
   // 失败路径 / D2）：pi RPC 无 get_system_prompt 命令、getSystemPrompt() 只在 extension
   // API，且现取不能依赖可禁的留痕包（system-prompt-trace 是 feature tier）——挂本

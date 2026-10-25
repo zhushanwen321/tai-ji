@@ -52,7 +52,7 @@ export const BUILTIN_TOOLS = ['read', 'write', 'bash', 'edit', 'grep', 'find', '
 // 迁移（2026-08）删除。现行 builtin 扩展 = @zhushanwen/pi-* npm 包，清单 SSOT =
 // packages/shared/src/mandatory-extensions.json（tier: infrastructure / feature 两级），
 // 打包经 scripts/bundle-extensions.mjs staging 到 apps/electron/resources/extensions/。
-// infrastructure 级（pi-system-prompt / pi-msg-id-mapper / pi-agent-ext 等）不受
+// infrastructure 级（pi-system-prompt / pi-host-internals 等）不受
 // extensionMode 影响；feature 级（pi-goal / pi-todo 等）与用户扩展同受筛选——见 §2.3。
 
 /** Pi 启动参数预设 */
@@ -260,8 +260,7 @@ rpc-client.ts:128 当前**硬编码** `--no-extensions --approve`，所有 exten
 
 **现行理由（按原文件型三件套的继承者）**：
 - `@zhushanwen/pi-system-prompt`（infrastructure）实现「系统提示词追加注入 + 全局 AGENTS.md 注入」，屏蔽它整个系统提示词机制失效
-- `@zhushanwen/pi-agent-ext`（infrastructure）提供 session 树导航与 `/__taiji_reload__` 内部命令
-- `@zhushanwen/pi-msg-id-mapper`（infrastructure）处理 msg id 映射，屏蔽会导致前端消息路由错乱
+- `@zhushanwen/pi-host-internals`（infrastructure）提供 session 树导航内部命令与 msg id 映射，屏蔽后者会导致前端消息路由错乱
 
 **现行实现**（设计期的 `getBuiltinExtensionPaths()` + 手工前置注入链路已删，builtin 与用户扩展统一走同一发现/过滤管线）：
 

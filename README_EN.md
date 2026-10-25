@@ -163,7 +163,7 @@ The following 16 extensions are usable standalone outside taiji (all published t
 | [`pi-cache-probe`](extensions/universal/cache-probe/README.md) | Cache prefix fingerprint collection |
 | [`pi-provider-live-sync`](extensions/universal/provider-live-sync/README.md) | Provider config real-time sync |
 
-The remaining 4 (`agent-ext` / `msg-id-mapper` / `system-prompt` / `system-prompt-trace`, npm package names have `pi-` prefix) are taiji-integration-specific, source code under `extensions/taiji/`. For extension development, see [docs/extensions/development-guide.md](docs/extensions/development-guide.md).
+The remaining 3 (`host-internals` / `system-prompt` / `system-prompt-trace`, npm package names have `pi-` prefix) are taiji-integration-specific, source code under `extensions/taiji/`. For extension development, see [docs/extensions/development-guide.md](docs/extensions/development-guide.md).
 
 ---
 

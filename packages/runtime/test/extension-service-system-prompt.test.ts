@@ -2,7 +2,7 @@
  * ExtensionService 扩展加载测试。
  *
  * 断言：
- * - 新的扩展包（@zhushanwen/pi-agent-ext 等）通过 mandatory-extensions.json 机制加载
+ * - 新的扩展包（@zhushanwen/pi-host-internals 等）通过 mandatory-extensions.json 机制加载
  * - 旧的文件型扩展机制已被移除
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'

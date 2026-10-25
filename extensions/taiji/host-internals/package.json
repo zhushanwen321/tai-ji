@@ -1,7 +1,7 @@
 {
-  "name": "@zhushanwen/pi-msg-id-mapper",
-  "version": "1.0.10",
-  "description": "Client UUID ↔ user entry ID mapping extension for Pi — enables metadata preservation across sessions",
+  "name": "@zhushanwen/pi-host-internals",
+  "version": "1.4.1",
+  "description": "taiji extension for Pi — internal host protocol facilities: host commands (system prompt fetch, session tree nav) and client UUID ↔ user entry ID mapping",
   "type": "module",
   "main": "src/index.ts",
   "taiji": {
@@ -15,6 +15,8 @@
   "keywords": [
     "pi-package",
     "extension",
+    "host",
+    "internal",
     "msg-id",
     "client-uuid",
     "mapping"

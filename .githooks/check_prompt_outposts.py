@@ -123,7 +123,7 @@ OUTPOST_CALLSITES = [
         "services/session/trace-sync.ts",
         "'/__taiji_get_system_prompt__'",
         "exempt",
-        "system-prompt 留痕探针内部命令（builtin agent-ext 包注册，无用户内容）",
+        "system-prompt 留痕探针内部命令（builtin host-internals 包注册，无用户内容）",
     ),
     (
         "services/session/message-dispatcher.ts",

@@ -130,7 +130,7 @@ describe.skipIf(!PI_DIST)(
       const splitIdx = win.indexOf('const spaceIndex = text.indexOf(" ");')
       expect(
         splitIdx,
-        'PS-63 漂移：首空格切分（indexOf(" ")）消失/改形——agent-ext __taiji_nav__ 的 entryId 投递前提变化，复审 PS-63',
+        'PS-63 漂移：首空格切分（indexOf(" ")）消失/改形——host-internals __taiji_nav__ 的 entryId 投递前提变化，复审 PS-63',
       ).toBeGreaterThanOrEqual(0)
       const argsIdx = win.indexOf('text.slice(spaceIndex + 1)')
       expect(

@@ -742,7 +742,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   /**
    * 追加 user 消息（Segment[]，ADR-0043）。返回 id：useChat 用作 clientUuid 建立重开回填映射
    * （prompt 标记 `<!--taiji:msg:u-<uuid>-->` + segments sidecar 主键——extension TAG 正则锚定
-   * `u-[0-9a-fA-F-]{36}` 形态，@zhushanwen/pi-msg-id-mapper）。
+   * `u-[0-9a-fA-F-]{36}` 形态，@zhushanwen/pi-host-internals msg-id-mapper 模块）。
    *
    * [W2 fix-chat-flow-order D6 → 后修 overlay-only] 消息形态从 user message entry 派生（形态
    * 对照 apply-entry user 分支——segments 原样放 message.content，applyEntry 空态派生），但

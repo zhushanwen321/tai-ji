@@ -220,7 +220,7 @@ describe('B · spawn-markers 三根登记规则', () => {
         `${repo}/extensions/universal/session-reader`,
         // [pi1-disposition-chat-flow D7①] 原 fixture 路径 extensions/taiji/plugin-bridge 随包退役删除，
         // 换现存 taiji 组包（dev 分支断言只认分组形态，包名无语义）
-        `${repo}/extensions/taiji/agent-ext`,
+        `${repo}/extensions/taiji/host-internals`,
       ]
       expect(selectSpawnMarkerPaths(values, dataDir)).toEqual(values)
       // discovery 深层形态（包目录下入口文件）同样收录

@@ -25,7 +25,7 @@ import { reapOrphanPiProcesses, type PsRow, type ReapOrphanOptions } from './rea
 const DATA_DIR = '/Users/tester/.taiji'
 const OWN_PID = 100
 /** spawn 清单值（判据 v2：argv --extension 值与清单精确相等；形态对齐 reap-orphan-pi.test MARKERS）。 */
-const MARKER = '/Applications/TaiJi.app/Contents/Resources/extensions/pi-agent-ext'
+const MARKER = '/Applications/TaiJi.app/Contents/Resources/extensions/pi-host-internals'
 
 let dataDir: string
 const createdDirs: string[] = []

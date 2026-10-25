@@ -547,7 +547,7 @@ describe('send 定向分流（含 subagent 段）', () => {
       string, string, string,
     ]
     expect(calledSid).toBe('d7')
-    // 非纯文本消息（session 段）：u- 标记拼进 prompt（msg-id-mapper 映射通路不变，D8 双标记共存）
+    // 非纯文本消息（session 段）：u- 标记拼进 prompt（msg-id-mapper 模块映射通路不变，D8 双标记共存）
     expect(calledContent.startsWith('#sess-1 看看这个')).toBe(true)
     expect(calledContent).toMatch(/<!--taiji:msg:u-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-->$/i)
     expect(calledUuid).toMatch(/^u-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)

@@ -2073,7 +2073,7 @@
     },
     {
       "id": "E2E-XPROCLIT-01",
-      "summary": "跨进程契约字面量多侧对账检查（cross-process-literals）：'taiji.client-msg-id'（runtime entry-tree-builder / revoke-orchestrator × msg-id-mapper 扩展三侧）与 'taiji:revoked'（revoke-orchestrator × agent-ext × scheduler-manager 插件三侧）全部生产定义点同串 AST 机检——定义点分属互不可 import 的包，编译期拦截不可行",
+      "summary": "跨进程契约字面量多侧对账检查（cross-process-literals）：'taiji.client-msg-id'（runtime entry-tree-builder / revoke-orchestrator × host-internals 扩展 msg-id-mapper 模块三侧）与 'taiji:revoked'（revoke-orchestrator × host-internals 扩展 host-commands 模块 × scheduler-manager 插件三侧）全部生产定义点同串 AST 机检——定义点分属互不可 import 的包，编译期拦截不可行",
       "scope": [
         "scripts/check-cross-process-literals.mjs"
       ],
@@ -2699,7 +2699,7 @@
       "serial": false,
       "run": "pnpm --filter @zhushanwen/subagent-core exec vitest run src/execution/__tests__/subagent-model-source-parity.test.ts",
       "owner": "packages/subagent-core",
-      "authority": "docs/todo/just-do-it.md"
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3"
     },
     {
       "id": "E2E-BOUNDARY-01",

@@ -1,5 +1,5 @@
 /**
- * Client UUID ↔ user entry ID mapping extension for Pi.
+ * Client UUID ↔ user entry ID mapping。
  *
  * Establishes clientUuid ↔ userEntryId mapping for taiji session metadata
  * preservation across sessions.
@@ -56,7 +56,7 @@ function extractClientUuid(text: string): string | undefined {
   return text.match(TAG_MATCH)?.[1]
 }
 
-export default function (pi: ExtensionAPI): void {
+export function registerMsgIdMapper(pi: ExtensionAPI): void {
   // 待处理的 client uuid（input hook 抓到标记后写入，flush 后清空）。
   let pendingClientUuid: string | undefined = undefined
   // user message 已 message_end、等待 flush（拿到 leafId 后写映射）。

@@ -37,7 +37,7 @@ const CLIENT_MSG_ID_TYPE = 'taiji.client-msg-id'
 
 /**
  * 撤回失效信号的 customType（双侧同构字面量，域字符串自由域、零 RPC 契约变更）：
- * 与 agent-ext navigateTree 的 LabelEntry label 'taiji:revoked'、scheduler-manager 插件
+ * 与 host-internals navigateTree 的 LabelEntry label 'taiji:revoked'、scheduler-manager 插件
  * 订阅串三侧同串。组合根经 deps.notifyEntryInvalidation 注入的回调把它转
  * pluginService.notifyEntryInvalidation(sessionId, 本串) 广播给插件 Worker。
  */

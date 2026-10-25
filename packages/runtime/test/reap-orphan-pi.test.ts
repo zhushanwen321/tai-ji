@@ -25,7 +25,7 @@ import { reapOrphanPiProcesses, type ReapOrphanOptions } from '../src/services/r
 const DATA_DIR = '/data/taiji'
 
 /** spawn 清单 fixture 值（staged 形态即可，本文件只测状态机，形态覆盖在 src 版专测）。 */
-const MARKER = '/data/taiji/extensions/pi-agent-ext'
+const MARKER = '/data/taiji/extensions/pi-host-internals'
 
 function orphanRow(pid: number): string {
   // ps -axo pid=,ppid=,command= 单行：ppid=1（reparent 证据）+ 判据 v2 同形 argv

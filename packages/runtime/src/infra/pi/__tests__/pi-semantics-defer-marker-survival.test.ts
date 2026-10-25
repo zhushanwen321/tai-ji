@@ -134,11 +134,11 @@ describe.skipIf(SKIP_REASON !== '')(
       const sharedSrc = readFileSync(join(REPO_ROOT as string, 'packages', 'shared', 'src', 'message.ts'), 'utf-8')
       const coreSrc = readFileSync(join(REPO_ROOT as string, 'packages', 'core', 'src', 'domain', 'chat', 'apply-entry-convert.ts'), 'utf-8')
       const rtSrc = readFileSync(join(REPO_ROOT as string, 'packages', 'runtime', 'src', 'infra', 'pi', 'entry-tree-builder.ts'), 'utf-8')
-      const extSrc = readFileSync(join(REPO_ROOT as string, 'extensions', 'taiji', 'msg-id-mapper', 'src', 'index.ts'), 'utf-8')
+      const extSrc = readFileSync(join(REPO_ROOT as string, 'extensions', 'taiji', 'host-internals', 'src', 'msg-id-mapper.ts'), 'utf-8')
       const segmentDef = /const MSG_ID_UUID_SEGMENT = '(.+?)'/.exec(sharedSrc)
       const tagMatchDef = /const TAG_MATCH = \/(.+?)\/([a-z]*)\r?\n/.exec(extSrc)
       expect(segmentDef, 'shared MSG_ID_UUID_SEGMENT 字面量提取失败——复核 packages/shared/src/message.ts').not.toBeNull()
-      expect(tagMatchDef, 'extension TAG_MATCH 字面量提取失败——复核 msg-id-mapper/src/index.ts').not.toBeNull()
+      expect(tagMatchDef, 'extension TAG_MATCH 字面量提取失败——复核 host-internals/src/msg-id-mapper.ts').not.toBeNull()
       // [MF-1-11] uuid 模式段手写体全仓单处：shared message.ts 只允许 MSG_ID_UUID_SEGMENT
       // 一处（出现 2 次 = 三形态外又冒出手写体新问题点）；core/runtime 零残留（残留 =
       // 派生器回退或新问题点）

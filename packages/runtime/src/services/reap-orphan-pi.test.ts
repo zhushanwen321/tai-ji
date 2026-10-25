@@ -42,7 +42,7 @@ const OWN_PID = 100
  * 只是精确相等目标字符串，形态区分用于正向 ×2 的宿主覆盖：打包 / dev）。
  */
 const MARKERS = [
-  '/Applications/TaiJi.app/Contents/Resources/extensions/pi-agent-ext', // ① 打包资源根
+  '/Applications/TaiJi.app/Contents/Resources/extensions/pi-host-internals', // ① 打包资源根
   '/Users/tester/Code/taiji/extensions/universal/todo', // ② dev 仓库源码根（D-11 形态）
 ] as const
 

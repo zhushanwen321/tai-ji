@@ -1,5 +1,5 @@
 /**
- * msg-id-mapper extension 真实行为测试。
+ * msg-id-mapper 模块真实行为测试。
  *
  * 覆盖（替换原 expect(true) 占位）：
  * - input hook：clientUuid 提取（有/无/畸形 userEntryId 标记、非 rpc source、多标记全剥离）
@@ -11,7 +11,9 @@
  * ExtensionAPI/ExtensionContext 用结构化桩（参照 subagent-workflow mocks/ 的最小桩模式，
  * 本包无 SDK 运行时依赖故不需要 alias 配置）。
  *
- * 运行：cd extensions/taiji/msg-id-mapper && npx vitest run
+ * 运行：cd extensions/taiji/host-internals && npx vitest run
+ * （经 src/index.ts 装配入口驱动——default 同时注册 host 命令与本模块 hooks，pi 桩补
+ * registerCommand no-op 承接。）
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 const { loggerMock } = vi.hoisted(() => ({
@@ -21,7 +23,7 @@ vi.mock('@zhushanwen/pi-extension-logger', () => ({
   getLogger: () => loggerMock,
 }))
 
-import createMapper from '../index'
+import registerExtension from '../index'
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -55,12 +57,15 @@ function createHarness(): Harness {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const appendEntry = vi.fn()
   const pi = {
+    // registerCommand no-op：装配入口（default）同时注册 host-commands 的两个命令，
+    // 桩只需承接调用不抛错（命令断言归 agent-ext.test.ts）
+    registerCommand: vi.fn(),
     on: (event: string, handler: (...args: unknown[]) => unknown) => {
       handlers.set(event, handler)
     },
     appendEntry,
   } as unknown as ExtensionAPI
-  createMapper(pi)
+  registerExtension(pi)
 
   const makeCtx = (getLeafId: () => string | null): ExtensionContext =>
     ({ sessionManager: { getLeafId } }) as unknown as ExtensionContext

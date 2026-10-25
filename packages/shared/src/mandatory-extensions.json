@@ -50,18 +50,13 @@
     "tier": "feature"
   },
   {
-    "name": "@zhushanwen/pi-agent-ext",
-    "description": "Internal host commands: extension reload, system prompt fetch, and session tree navigation (__taiji_nav__ for message revoke)",
+    "name": "@zhushanwen/pi-host-internals",
+    "description": "Internal host protocol facilities: host commands (system prompt fetch, session tree nav for message revoke) and client UUID ↔ user entry ID mapping",
     "tier": "infrastructure"
   },
   {
     "name": "@zhushanwen/pi-system-prompt",
     "description": "System prompt injection extension",
-    "tier": "infrastructure"
-  },
-  {
-    "name": "@zhushanwen/pi-msg-id-mapper",
-    "description": "Client UUID ↔ user entry ID mapping extension",
     "tier": "infrastructure"
   },
   {

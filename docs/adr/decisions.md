@@ -26,7 +26,7 @@ taiji 与 pi 之间的私有语义适配收敛为四支柱：① 能力注册表
 1. **lane 判定单一源**：direct（pi 空闲直投）/ steer（并入当前 run 的 turn 边界）/ queued（内核 FIFO 持有）由内核按 runtime 权威 occupancy 推算（C-data-19 单写原语）+ 内核队列态判定；renderer 侧发送路由表降级为发送位按钮形态的 UI 预测，extension 不做投递路径判定。
 2. **两阶段回执**：受理（prompt 受理 / 文本进入 pi 槽位）与送达（`message_end(user)` 命中消息标记 = 已进 transcript）显式分离，只有拿到送达回执的条目转终态，停留受理的由对账器接管。`sendChecked` 的同步 settle 时点维持**受理口径**（agent 间 send 的 `{queued:true}` 契约锚定受理时点，不因送达而阻塞工具调用），记账回调 `onSettled` 为送达口径。
 3. **对账器**：五触发点（agent_settled / compaction_end / abort 完成 / pi restored / 30s watchdog）在「空闲 + pi 槽位非空」时 `clear_queue` 全收，按消息标记三分处置——reclaim（内核在途条目回队首重投）/ rebuild（带标记但内核无记录，先按标记对 transcript 全量扫描判已送达再决定重建或仅记账）/ adopt（无标记外来文本收养入队；rebuild 身份判据的尾附锚细化见 ADR-0077）。撤销（`delivery.cancel`）与投递中收回复用同一路径（pi 只有队列级原语，不新造条目级原语）。
-4. **消息身份**：出站文本尾附裸标记 `<!--taiji:msg:<uuid>-->`（与 msg-id-mapper 的 `u-` 前缀标记空间互斥、正交共存），随文本进 transcript 成为逐消息精确身份；判重按 id 匹配（禁计数 FIFO / 文本匹配）；终态 tombstone 在 runtime 存活期内全量保留供 `delivery.resync` 去重，不跨 runtime 重启——reattach 场景判重锚回落 transcript 全量标记扫描。
+4. **消息身份**：出站文本尾附裸标记 `<!--taiji:msg:<uuid>-->`（与 host-internals msg-id-mapper 模块的 `u-` 前缀标记空间互斥、正交共存），随文本进 transcript 成为逐消息精确身份；判重按 id 匹配（禁计数 FIFO / 文本匹配）；终态 tombstone 在 runtime 存活期内全量保留供 `delivery.resync` 去重，不跨 runtime 重启——reattach 场景判重锚回落 transcript 全量标记扫描。
 5. **UI 单一数据源**：队列区状态广播 = `session.delivery`（内核条目**派生视图**：活跃态全量 + delivered 最近 50 条完整条目 + lane；cancelled 不进派生视图），`queue_update` 一条消息降级为内核内部回执；pi 的 steer/followUp/clear_queue/get_state/get_entries/nextTurn 契约原语全部保留复用，零绕过、零重造。
 6. **回执锚申报制（`DeliverySubmitOptions.receiptAnchor`，消息链路去冗余 D1）**：条目级提交选项 `'marker' | 'acceptance'`（缺省 `'marker'` = 保守语义）——`'marker'` 条目出站文本尾附裸标记、等 `message_end` 回执命中转 delivered；`'acceptance'` 条目（无回执锚点的 agent 通路文本）port.send 受理即落 delivered——「受理 = 送达」是无锚条目唯一可判事实（前提 = pi 无逐条回执原语）。申报制替代旧适配层文本反查（反查在合批/混合批次下构造性失效——G2 投递死锁根因：无标记合批第 5 环确认落空 → in-flight 永挂 → gate 恒关）；内核保持零正则、零 pi 知识，无标记判定归有身份知识的提交方。receiptAnchor 是 KernelEntry 内部字段，不进条目视图 DTO、不进 session.delivery 帧（派生视图范围零扩散）。**来源清单（SSOT；新增无标记投递来源必须显式申报 `'acceptance'` 并回登本清单——漏申报 = 条目永挂 in-flight、该 session 投递 gate 恒关，诊断链见 [data-source-registry #15](../architecture/data-source-registry.md)）**：`'marker'` 恒申报 = runtime registry `submit`/`submitToKernel`（`withDeliveryMarker` 在自己手里）；`'acceptance'` 申报点 = `completion-backflow.ts`（agent 完成回流）/ `session-manager-handler.ts`（agent-managed send）/ subagent-core `notifier.ts` handle.send fallback（通知出站文本无标记）/ subagent-core pi-host（custom payload，经 notify-ports.ts 影子契约同步）。护栏 = 提交方行为锁单测（subagent-workflow notifier-receipt-anchor 装配测试 + runtime S1 复现单测，重构丢申报时亮红；无通用正则护栏——与内核零正则冲突，有意不做）。演进路径 = D7-33 per-id 回执契约改造后，`'acceptance'` 保守口径被逐条回执替代。
 
@@ -427,7 +427,7 @@ subagent 体系的资源侧决策三条现状（原记于包内 `extensions/univ
 | D7-33 | splitComposed 合批拆批 → port 逐条投递契约 | 与 29 合并的「内核↔适配层契约收敛」专项立项 | ADR-0074 acceptance 口径被 per-id 回执替代 |
 | D7-34 | notifyHoldRelease 手动边沿义务散落 | occupancy 原语加边沿回调的跨模块设计 | 3 手动点收敛 |
 | D7-35 | 9 个 *_unsupported 防御码家族 | 惯例一致性裁决（缺服务码 vs 必选注入） | 统一其一 |
-| D7-36 | msg-id-mapper 双标记载体 | 登记决策裁决（收敛方向：backfill 改派生/写侧退役/读侧兼容） | 按裁决执行 |
+| D7-36 | host-internals msg-id-mapper 模块双标记载体 | 登记决策裁决（收敛方向：backfill 改派生/写侧退役/读侧兼容） | 按裁决执行 |
 | D7-37 | morph 段 TTL（R2-b04-4 防泄漏兜底，core 模块级 Map 双侧惰性清扫） | delivery 条目作废生命周期事件挂钩改造立项（事件挂钩后 TTL 降级为兜底或删除） | 与 respawn 恢复事件零耦合，非同根源，独立立项 |
 | D7-38 | 双 30s watchdog flush 半边冗余（内核 delivery.ts watchdogMs 30_000 flush 复核 vs registry 对账/补投/唤醒周期器） | session-delivery 域下次改动顺带核实双周期器对象异同（路径 A 收官未顺手执行，疑非冗余） | 确冗余删半边，非冗余本条注销 |
 | D7-39 | gap 判定泄漏 ring 内部知识 | bus.subscribe 返回侧扩 oldestSeq/gap 的协议变更窗口 | 随协议 wave |

@@ -106,7 +106,7 @@ function makeDeps() {
   const appInfo = { appVersion: '1.2.3', piVersion: 'unknown' }
   const broadcastAppInfo = vi.fn(() => { calls.push('broadcastAppInfo') })
   // u17：spawn 清单读取 port（组合根注入 infra 读侧闭包）；值无意义（reap 全 mock），形态保真。
-  const readSpawnMarkers = vi.fn(() => ['/data/taiji/extensions/pi-agent-ext'])
+  const readSpawnMarkers = vi.fn(() => ['/data/taiji/extensions/pi-host-internals'])
   const deps = {
     configStore: {} as PiConfigStore,
     authStorage: {} as AuthStorage,

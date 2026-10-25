@@ -24,7 +24,9 @@
  * [HISTORICAL] __taiji_reload__ 及其测试随 W5 skill 变更→pi reload 编排退役一并移除
  * （2026-09-25，消费端已 D7 切源 taiji SkillRegistry，pi 侧列表滞后归 ADR-0050 降级）。
  *
- * 运行：cd extensions/taiji/agent-ext && npx vitest run
+ * 运行：cd extensions/taiji/host-internals && npx vitest run
+ * （走 src/index.ts 装配入口——default 注册命令 + msg-id-mapper hooks；Proxy 假体对
+ * 未知成员返回 no-op 函数，hook 注册调用天然兼容，命令断言不受影响。）
  */
 import { describe, it, expect, vi } from "vitest";
 
