@@ -34,7 +34,9 @@
 - **前置**：`requires` = faux（结构层）/ **mock-http | live**（执行层）；依赖 `session.create`
   `chat.send` `chat.wait` `extension.load` `subagent.list`
 - **用于**：`p0-subagent-dispatch`（主）、`p0-chat-stream`（工具块子项）、
-  `p0-model-switch`（dispatch 时模型参数）
+  `p0-model-switch`（dispatch 时模型参数）、`p0-subagent-round-failure-facticity`
+  （subagent-observability 轮收条事实化：失败轮经派发制造，判定/轮收条/list 三处同真相——
+  登记见 P0-P1-COVERAGE 第七节）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -149,7 +151,8 @@ expect testid=drawer-tab-subagent visible                  # 抽屉已切到 sub
 
 - **通道**：B（`session.getSubagents` + `session.subagents` state 帧）+ A（托盘行 / drawer 详情）
 - **前置**：`requires` = none（读结构）；依赖 `subagent.dispatch`（要有记录）
-- **用于**：`p0-subagent-dispatch`、`p0-subagent-cancel`、`p0-subagent-model`
+- **用于**：`p0-subagent-dispatch`、`p0-subagent-cancel`、`p0-subagent-model`、
+  `p0-subagent-round-failure-facticity`（失败轮 lastRound.failure/轮收条与 list 同真相断言面）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 

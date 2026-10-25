@@ -179,3 +179,19 @@
 | 5 | 真机窗口批次：真实凭据场景（提取 / 存量升级 / 凭据审计 / 运行时独立性） | `plugin.invoke` `plugin.executeCommand` `settings.provider` | `p1-plugin-a3-a12-real-extract` `p1-plugin-a24-legacy-upgrade` `p1-plugin-a20-a4b-credential-audit` `p1-plugin-a31-runtime-independence` | **`scenario`** | 实测覆盖（51+32+36+43 断言，全 pass，2026-10-25 真机窗口）：真实插件（pnpm pack + mock registry 真实 npm 链）提取链全语义 + A12 ≤ 1s；存量采纳链免重授权 + 模型目录写回 + 真实对话出话；WS 帧审计与磁盘扫描凭据零命中（缺陷 9 refreshToken 出线修复后收紧为全帧零命中）；零会话下管理方法进程表零 pi（正向对照防空真）。批次暴露的 9 项真实形态产品缺口全部修复闭环（详录 [plugin.md](plugin.md) 真机窗口批次节与 skill-data 侧 `ISSUES-2.md`）。WorkBuddy 专属场景（A2/A4a）留窗口期 |
 
 **本批次产品缺陷处置终态（详录 skill-data 侧 `provider-plugin-access.acceptance/ISSUES.md`）**：D3 实跑登记的 3 个产品缺陷——① 更新提交后重激活复用旧 sandbox fork + 同 URL ESM 模块缓存，新代码不生效（P1）；② `plugin.listAvailable` 的 stale/available 判据未透出 RPC（P2）；③ 更新回滚分支重激活复用激活失败残留 fork，旧版本停 discovered（P1）——已全部修复并真机验证闭环（修复 commit 744490d9f / 07c2d8a9c / 6557a0683，A26 终验轮 pass 31/31）。更新链的进程边界机制见 [plugin.md](plugin.md) 坑 4。
+
+## 七、subagent-observability 交付新增剧本（2026-10-24，验收批次）
+
+> 本节是 subagent-observability 设计交付（轮收条事实化 / run 终局成员交付结算 / retry-rules extension）
+> 的剧本登记（三剧本全实跑；装配通道均为 mock-http，孙进程零 token）。功能面不在 FEATURE-PRIORITIES
+> 的 P0/P1 行口径内，仿第五、六节单列；verdict 证据根 =
+> `~/.agents/skill-data/dev-flow/refactor-subagent-workflow-solid-02f7ab08/subagent-observability.verify/<验收项>/<runId>/<剧本名>/verdict.json`。
+> 能力域细节见 [subagent.md](subagent.md) 与 [workflow.md](workflow.md)。
+
+| 剧本 | 功能面 | verdict | 覆盖要点 |
+|---|---|---|---|
+| `p0-subagent-round-failure-facticity` | 软限流死因穿透（轮收条事实化，验收项 A1） | ❌ fail（28 断言 failed=1，诚实判定） | 判定 / 轮收条 / list 三处同真相 + 通知恢复指引全验（27/28）：成员「剧本耗尽」404 经 pi 真实 provider 错误路径 → FailureCause 分类（provider.protocol_unsupported）→ 轮收条落盘 → 通知正文带 `failed (provider.…)` 点拼与 Recovery 尾巴 → record/list 与磁盘同真相。**失败断言 A1④**：轮终 → 通知到达时差实测 3015ms 超 ≤1s 预算（通知帧先于 record 广播帧到达，同属即投形态——判据按绝对差，实测形态登记待复跑）。429/rate_limited 分支 mock 不可注入（notProvable，留 live 或 mock server 扩展） |
+| `p0-workflow-partial-and-notify-edge` | run 终局吸收成员交付 + 通知消费表面（验收项 A2+A6） | ⚠️ degraded（38 断言 0 失败） | 段 1 场景 2：fanout-partial 双成员（成功干净收尾 + 失败 404）→ run 终局派生 `partially_succeeded` + failedMembers[].cause 进 run-settled 帧；段 2 场景 6②：两条 background 单成员近同时完成 → 同组（subagent-bg-notify）完成通知同窗到达（攒批窗退役后即投）。铁证 = mock.requests 成员模型请求 + workflow runs record journal。notProvable：UI 面（overlay/托盘/气泡）、真 `{batch:true}` 批形态（recover 重放支由 u4 行为锁测试承载）、fan-out 批量成员轮应答（origin gate 判据缺口，u4 deviations 登记） |
+| `p1-retry-rules-extension` | retryable 增强 extension 执行层（验收项 A8，非核心组） | ✅ pass（45 断言） | 三段：改写触发（错误文案追加 `[taiji-retry: …]` 标记 → pi 原生词表命中 → 真实重试请求打到 mock，`tier_limit_exceeded` 对 pi 双词表零命中保证归因闭合）+ settings round-trip（`config.setRetryConfig` 开关/参数经 runtime WS 产品通道）+ 停用回落（extension 关闭后错误文案无追加标记、不触发重试）。notProvable：settings UI 面（testid 归 UI 剧本）、重试请求 messages 含标记（pi `_omitRecoveryAttempt` 结构性剔除，证据走持久化面）、指数退避节奏（baseDelayMs=0 短路换速度） |
+
+**本批次登记的机制边界（三剧本共性，驱动复用前必读）**：① mock-http 的错误注入唯一出口 = 成员剧本队列置空命中 404（`scripts/lib/mock-llm.mjs` 文件头职责边界）——404 在范本剧本里是噪音、在本批次剧本里是被注入的故障本身，直接作铁证；② mock 回复无真实模型语义——限流重试行为/编排质量/真实耗时与 token 成本不可断言（沿用已知空洞 #6）；③ 成员级 model 必须显式指定（`$ARGS.models` / 成员对象 model），否则继承主 agent 模型与主队共享游标。

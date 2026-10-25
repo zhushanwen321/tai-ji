@@ -37,7 +37,10 @@
   `session.getWorkflows` 列表）+ C（`ext-sessions/<rootSid>/workflow/runs/<runId>.record.jsonl`）
 - **前置**：`requires` = faux（结构层）| **mock-http | live**（执行层）；依赖 `session.create`
   `chat.send` `chat.wait` `subagent.dispatch`（批量为 fan-out）`workflow.runs`
-- **用于**：`p0-workflow-run`（主）、`p0-subagent-dispatch`（批量形态）、`p0-workflow-abort`
+- **用于**：`p0-workflow-run`（主）、`p0-subagent-dispatch`（批量形态）、`p0-workflow-abort`、
+  `p0-workflow-partial-and-notify-edge`（run 终局成员交付结算 partially_succeeded + 通知即投，
+  subagent-observability 交付）、`p1-retry-rules-extension`（成员执行层重试改写触发，
+  subagent-observability 交付——登记见 P0-P1-COVERAGE 第七节）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -154,7 +157,8 @@ const { workflows } = await p.call('session.getWorkflows', { sessionId: rootSid 
 - **通道**：B（`session.getWorkflows` 拉取 + `session.workflowUpdate` 信号；stateSnapshot 回放）
   + A（托盘行 / overlay 标题栏 pill）
 - **前置**：`requires` = none（读结构）；依赖 `workflow.dispatch`
-- **用于**：`p0-workflow-run`、`p0-workflow-abort`、`p0-workflow-overlay`、`p0-workflow-reconnect`
+- **用于**：`p0-workflow-run`、`p0-workflow-abort`、`p0-workflow-overlay`、`p0-workflow-reconnect`、
+  `p0-workflow-partial-and-notify-edge`（outcome=partially_succeeded 派生与 failedMembers[].cause 的 runs/record 断言面）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
