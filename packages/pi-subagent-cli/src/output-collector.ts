@@ -39,7 +39,7 @@ import type { TurnBudgetExhaustion } from "./turn-limiter.ts";
  * Stale context 检测模式（P1-5；W4b 对齐 pi 0.84.x 真实文案）。
  * 命中时分诊 failureKind="stale_context"——重试只会再次失败。
  *
- * abort 词登记 pi 实装精确字面量（pi-ai dist/utils/abort.js 模块常量 "The operation
+ * abort 词登记 pi 实装精确字面量（pi-ai dist/utils/abort.js:4 的 "The operation
  * was aborted"），不收裸词 "aborted"——裸词子串会把任何携带 aborted 字样的动态错误
  * （如 provider 的 "request aborted while busy"）误诊为 stale context（枚举清理项 P8）。
  */
@@ -113,8 +113,9 @@ export function classifyFailureKind(
 
 /**
  * [§3.3.2 机读主通道] openai 兼容层（主力 provider）errorMessage 恒为
- * `"<status>: <body>"` 前缀拼法（pi-ai error-body.js formatProviderError 实证，
- * 1.0.0 实装核实）——status 前缀是引擎内置 HTTP 语义层的机读入口。
+ * `"<status>: <body>"` 前缀拼法（pi-ai dist/utils/error-body.js:111
+ * formatProviderError 实证，1.0.0 实装核实）——status 前缀是引擎内置 HTTP 语义层的
+ * 机读入口。
  */
 const PROVIDER_STATUS_PREFIX_PATTERN = /^(\d{3}):\s*/;
 

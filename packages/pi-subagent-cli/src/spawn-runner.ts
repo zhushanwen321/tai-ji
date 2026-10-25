@@ -580,6 +580,15 @@ function collectRunResult(
  * 与 turn-budget 支经 collectOutcome 事实位收口同口径。收尾边沿事实在场时以边沿为
  * 权威（不覆盖）；settled 已完成的轮（settledTurnCount 在场 = settled 先于取消到达）
  * 不补落——取消晚于完成不翻案。
+ *
+ * [已知退化边界 — 当前零触发面，登记防扩展清单扩容时静默踩中] handleAgentEnd 中间
+ * 边沿判据只消费 queue_update 队列事实（edge.queueNonEmpty），缺 before_settle 边沿
+ * 第三事实源：pi 1.0.0 注册 agent_before_settle handler 时 _runBeforeSettleBoundary
+ *（dist/core/agent-session.js :1416-1439）可凭 result.continue 于队列为空时强制
+ * continue（:1428），该形态下 queueNonEmpty=false 的中间 agent_end 被误判轮终致 run
+ * 截断（干净停因置 clean、settled 到达即 resolve(0)+killChild；错误停因失败收口）。
+ * 当前全仓生产代码零 agent_before_settle 注册（零触发面）；行为修复（handleAgentEnd
+ * 判据补 before_settle 边沿事实源）待真实触发面出现再做。
  */
 function resolveTerminalErrorFact(runEnd: RunEndState, params: SpawnRunParams): EngineRoundErrorFact | undefined {
   if (runEnd.terminalErrorFact !== undefined) return runEnd.terminalErrorFact;
@@ -595,8 +604,10 @@ function resolveTerminalErrorFact(runEnd: RunEndState, params: SpawnRunParams): 
  * 成功公式与错误文案优先序（collectRunResult 判定段单点）。
  *
  * [subagent-observability §3.3.1 P4 静默空成功防伪] 退出 0 不再单独构成成功证据
- *（pi 1.0.0 实装：stdin EOF → rpc-mode shutdown → 无条件 exit(0)，无 settled 的
- * 0 退出可达）。成功公式 = 退出 0 ∧ 无送达失败 ∧ 无错误停因事实（含取消竞窗补落）
+ *（pi 1.0.0 实装：stdin EOF → rpc-mode shutdown → 无条件 exit(0)——dist/modes/rpc/
+ * rpc-mode.js :579（shutdown 缺省 exitCode=0，函数体无 settled 检查）/:595（process
+ * .exit）/:640-642（onInputEnd → void shutdown()），无 settled 的 0 退出可达）。
+ * 成功公式 = 退出 0 ∧ 无送达失败 ∧ 无错误停因事实（含取消竞窗补落）
  * ∧ 非未解释空轮——未解释空轮 = 无 agent_settled 快照、无被接管标记
  *（promptHandledNoRun——被接管轮的空是「有解释的空」，见 p6 收条设计）、零轮：按
  * 失联语义记失败，不产假成功。「end 与 settled 之间被杀」且无 abort 事实的形态

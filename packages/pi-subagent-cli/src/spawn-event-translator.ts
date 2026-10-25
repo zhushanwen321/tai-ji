@@ -303,7 +303,10 @@ function handleAgentEnd(
   // pi queue_update 事件（_emitQueueUpdate 在入队/出队两侧逐帧刷新，agent_end 时刻
   // 的队列状态即在流上）。中间边沿不判终（onAgentEnd/onErroredEnd 都不发——终局
   // 判定留给队列排空后的末边沿，以最新停因事实裁决；失败尝试已经 message_end 的
-  // error 事件入 journal，不静默）。
+  // error 事件入 journal，不静默）。已知退化边界：注册 agent_before_settle handler
+  // 时 pi 可凭 result.continue 于队列为空时强制 continue（agent-session.js
+  // :1416-1439，:1428）——queueNonEmpty=false 的中间 agent_end 被误判轮终，登记与
+  // 退役条件见 spawn-runner.ts resolveTerminalErrorFact 头注（当前零触发面）。
   if (edge.queueNonEmpty) return;
   // [subagent-observability §3.3.1] 停因事实优先：错误停因（error/aborted）或存在
   // 未消费的引擎 error 事实 → onErroredEnd（失败收口），settled 门控在 spawn-runner
