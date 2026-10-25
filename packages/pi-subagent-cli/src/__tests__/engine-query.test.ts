@@ -98,7 +98,7 @@ describe("resolvePiAgentDir", () => {
   });
 
   // 无参形态（读进程 env）= taiji 派发链注入的消费入口：宿主在引擎进程 env 注入
-  // PI_CODING_AGENT_DIR=<dataDir>/agent（登记 docs/todo/engine-default-provider-setting.md
+  // PI_CODING_AGENT_DIR=<dataDir>/agent（原始登记文档 engine-default-provider-setting 已删、见 git 历史；
   // 「新发现登记」节，2026-10-23 裁决），引擎进程内 resolvePiAgentDir() 读到托管目录。
   it("无参形态读进程 env：宿主注入 <dataDir>/agent → 消费链读到托管目录", () => {
     vi.stubEnv("PI_CODING_AGENT_DIR", "/taiji/hosted/data/agent");

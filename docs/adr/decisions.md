@@ -654,7 +654,7 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **元原则**：原则面前无存量豁免——与本体系冲突的既往裁决一并推翻（已删：zcode 无进展检测双 timer、notify 看门狗重投、update 停滞检测、event-tail watch 族、structured-output 强制退出等，清单见 defense-mechanism-cleanup 登记）。
 
-**保留白名单（原则不适用域）**：产品功能定时（调度/提醒/产品轮询能力）、调用方显式配置传入的超时参数、恢复场景的文件读取、锁语义原语、事件驱动的对账与拉取通道（ADR-0097 实现本体）、构建脚本类。
+**保留白名单（原则不适用域）**：产品功能定时（调度/提醒/产品轮询能力）、调用方显式配置传入的超时参数（C2 显式业务超时）、恢复场景的文件读取、锁语义原语（file-lock）、事件驱动的对账与拉取通道（ADR-0097 实现本体：delivery-port 回执对账（details-id 命中 + session_start 差集重放）、reconcile 事件触发路径、worktree 观察期族）、构建脚本类、PingProbe 无进展检测（ADR-0047 口径）、外部网络端点墙钟（npm/oauth，网络客户端标准防线）。过渡形态轮询登记：trace-sync 现取轮询（FETCH_CURRENT_PROMPT_POLL_MS=250ms / 8s 上限，pi 侧写侧无完成事件信号、轮询是当前唯一可达通道；退役条件 = pi 提供 entry 写入事件边沿或命令 RPC 直返结果）。
 
 **依据**：本体系收敛自 pi 1.0 适配设计包交付后的系列裁决（2026-10-05）：命令终局事件化（handled/started/断连三事件）、投递 backoff 退役、全项目防御机制清查（约 270 处登记）、event-tail 退役与推送通道方向、受理层同步上屏、scheduler 切换对账翻转为事实查询。故障模型依据 = 本地进程通信无网络类瞬态失败情形，对端死亡有 OS 级信号。
 
