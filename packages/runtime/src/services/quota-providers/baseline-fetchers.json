@@ -318,6 +318,13 @@
       "windows": [
         {
           "slot": "fiveHour",
+          "gateValue": {
+            "path": [
+              "planFamily",
+              "plan_family"
+            ],
+            "notEquals": 2
+          },
           "pct": {
             "path": [
               "fiveHourUsageLeftRate",
@@ -335,6 +342,13 @@
         },
         {
           "slot": "week",
+          "gateValue": {
+            "path": [
+              "planFamily",
+              "plan_family"
+            ],
+            "notEquals": 2
+          },
           "pct": {
             "path": [
               "weeklyUsageLeftRate",
@@ -352,6 +366,13 @@
         },
         {
           "slot": "month",
+          "gateValue": {
+            "path": [
+              "planFamily",
+              "plan_family"
+            ],
+            "equals": 2
+          },
           "pct": {
             "path": [
               "planCreditRateLimit.subscriptionCreditLeftRate",
@@ -367,13 +388,13 @@
             "mode": "epochSecOrMs"
           },
           "usedLimit": {
-            "used": [
-              "planCreditRateLimit.creditBuckets[type=SUBSCRIPTION].creditResidual",
-              "plan_credit_rate_limit.credit_buckets[type=SUBSCRIPTION].credit_residual"
-            ],
             "limit": [
-              "planCreditRateLimit.creditBuckets[type=SUBSCRIPTION].creditTotal",
-              "plan_credit_rate_limit.credit_buckets[type=SUBSCRIPTION].credit_total"
+              "planCreditRateLimit.creditBuckets[type=1].creditTotal",
+              "plan_credit_rate_limit.credit_buckets[type=1].credit_total"
+            ],
+            "remaining": [
+              "planCreditRateLimit.creditBuckets[type=1].creditResidual",
+              "plan_credit_rate_limit.credit_buckets[type=1].credit_residual"
             ],
             "unit": "credits"
           }

@@ -56,8 +56,10 @@ export interface DeclarativeWindow { // oe-exempt:20261019:framework:taiji 远�
   fromRequest?: string
   /** 选取无命中升级语义（minimax find general 失败 → 整查询失败）。 */
   gate?: { path: string; missing: 'query-fail' | 'infinite-win' }
-  /** 字段值门控：取值 !== equals（含字段缺失 = 状态不可知）→ 本窗 INFINITE_WIN（minimax status 门控）。 */
-  gateValue?: { path: string; equals: number }
+  /** 字段值门控：取值 !== equals（含字段缺失 = 状态不可知）→ 本窗 INFINITE_WIN（minimax status 门控）；
+   *  notEquals 反义门控（stepfun plan_family：TOKEN 家族不展示 5h/周窗口——平台前端同判据）；
+   *  equals 与 notEquals 至少声明一个（guard 强制）。 */
+  gateValue?: { path: string | string[]; equals?: number; notEquals?: number }
   pct?: { path: string | string[]; via: PctVia }
   resetSec?: { path: string | string[]; mode: ResetSecMode; /** 覆写窗级 fromRequest（mimo resetSec 来自辅助请求）。 */ fromRequest?: string }
   usedLimit?: { used: string | string[]; limit: string | string[]; remaining?: string | string[]; unit: 'requests' | 'tokens' | 'credits';
@@ -124,7 +126,11 @@ function isGateValid(g: unknown): boolean {
 }
 
 function isGateValueValid(g: unknown): boolean {
-  return isRecord(g) && typeof g['path'] === 'string' && g['path'] !== '' && typeof g['equals'] === 'number'
+  if (!isRecord(g) || !isPathValid(g['path'])) return false
+  const hasEquals = typeof g['equals'] === 'number'
+  const hasNotEquals = typeof g['notEquals'] === 'number'
+  // equals / notEquals 至少一个（且类型为 number）——全缺 = 恒真门控无意义，拒
+  return hasEquals || hasNotEquals
 }
 
 function isPctValid(p: unknown): boolean {
@@ -142,8 +148,14 @@ function isResetSecValid(r: unknown): boolean {
 }
 
 function isUsedLimitValid(u: unknown): boolean {
-  if (!isRecord(u) || !isPathValid(u['used']) || !isPathValid(u['limit'])) return false
+  if (!isRecord(u) || !isPathValid(u['limit'])) return false
+  // used 可选：used 直给 ∵ limit−remaining 折算两种派生源至少其一（stepfun 月度 credit 只有
+  // total+residual——残值是剩余量，used 由引擎折算，禁止把残值当 used 的倒置映射）
+  if (u['used'] !== undefined && !isPathValid(u['used'])) return false
   if (u['remaining'] !== undefined && !isPathValid(u['remaining'])) return false
+  const hasUsed = u['used'] !== undefined
+  const hasRemaining = u['remaining'] !== undefined
+  if (!(hasUsed || hasRemaining)) return false
   return u['unit'] === undefined || typeof u['unit'] === 'string'
 }
 
@@ -259,25 +271,44 @@ function pickBracketIndexed(cur: unknown, idx: RegExpMatchArray, path: string, k
 /** 条件选取无命中时判定是否类型漂移：数组非空但无命中、且存在条目的条件字段为非 string
  * 类型 = 类型漂移致无命中 → parse（fail-visible，对齐 minimax guard 的 model_name 字段级
  * 类型校验——正常无命中（值不同）才降级缺失）。 */
-function isConditionalMissByDrift(cur: unknown[], field: string): boolean {
+/** 条件选取无命中时判定是否类型漂移。判据锚定**配置侧声明的条件值形态**：
+ *  - 条件值为数值形态（"1"）而条目字段是 number → 合法数值枚举比较，值不中 = 正常未命中
+ *    （线上实测 stepfun creditBuckets type=1 数值下发）；
+ *  - 条件值为非数值形态（"general"）而条目字段是 number → 该字段语义是 string，数值 = 漂移
+ *    （minimax model_name 字段级 guard 语义保持）；
+ *  - 条目非对象 / 字段既非 string 也非 number → 漂移。 */
+function isConditionalMissByDrift(cur: unknown[], field: string, configValue: string): boolean {
+  const numericConfig = /^\d+$/.test(configValue)
   return cur.some((e) => {
     if (!isRecord(e)) return true
-    return typeof (e as Record<string, unknown>)[field] !== 'string'
+    const v = (e as Record<string, unknown>)[field]
+    if (typeof v === 'string') return false
+    if (typeof v === 'number') return !numericConfig
+    return true
   })
 }
 
-/** 条件选取 `[k=v]`：严格 string 比较首命中（与各家现行 find(m => m[k] === 'v') 逐字对齐）。 */
+/** 条件选取 `[k=v]`：首命中。比较含数值容忍——protojson 枚举可为数值（线上实测
+ *  stepfun creditBuckets type=1），配置侧写串 "1"；条目字段为 number 时按字符串化比较，
+ *  其余严格 string 比较（与各家现行 find(m => m[k] === 'v') 语义对齐）。 */
 function pickBracketConditional(cur: unknown, cond: RegExpMatchArray, path: string, key: string): unknown {
   if (!Array.isArray(cur)) {
     if (cur === undefined || cur === null) return undefined
     throw new WireDriftError(`array expected at '${key}${cond[0]}' in '${path}'`)
   }
   const [, field, value] = cond
-  const hit = cur.find((e) => isRecord(e) && (e as Record<string, unknown>)[field] === value)
-  if (!hit && cur.length > 0 && isConditionalMissByDrift(cur, field)) {
+  const hit = cur.find((e) => isRecord(e) && conditionMatches((e as Record<string, unknown>)[field], value))
+  if (!hit && cur.length > 0 && isConditionalMissByDrift(cur, field, value)) {
     throw new WireDriftError(`condition field type drift at '${key}${cond[0]}' in '${path}'`)
   }
   return hit
+}
+
+/** 条件值比较：string 条目严格相等；number 条目仅在配置条件值为数值形态时按字符串化比较
+ *  （protojson 数值枚举 vs 配置串的真实二元性——非数值条件值对 number 字段不命中）。 */
+function conditionMatches(entryValue: unknown, configValue: string): boolean {
+  if (typeof entryValue === 'number') return /^\d+$/.test(configValue) && String(entryValue) === configValue
+  return entryValue === configValue
 }
 
 /** 单路径段：`name` | `name[0]`（下标）| `name[k=v]`（条件选取首命中）。
@@ -472,9 +503,11 @@ function evalWindowGate(
   }
   if (win.gateValue) {
     const v = strictNumeric(pickPath(source, win.gateValue.path), strict)
-    // 决策字段缺失（undefined/null）= 状态不可知 → INFINITE_WIN（对齐 minimax 现行
+    // equals 门控：决策字段缺失（undefined/null）= 状态不可知 → INFINITE_WIN（对齐 minimax 现行
     // isActive「非 1 即无限」——undefined !== 1 同走该分支），不放行继续求 pct 产假可用态
-    if (v !== win.gateValue.equals) return { win: INFINITE_WIN }
+    if (win.gateValue.equals !== undefined && v !== win.gateValue.equals) return { win: INFINITE_WIN }
+    // notEquals 反义门控（stepfun plan_family=TOKEN → 该窗不适用）；缺失不等于任何值 → 放行
+    if (win.gateValue.notEquals !== undefined && v === win.gateValue.notEquals) return { win: INFINITE_WIN }
   }
   return null
 }
@@ -487,8 +520,8 @@ function evalUsedLimit(
 ): { used: number; limit: number; unit: NonNullable<QuotaWindow['unit']> } | undefined {
   if (!win.usedLimit) return undefined
   const limit = strictNumeric(pickPath(source, win.usedLimit.limit), strict)
-  const usedRaw = strictNumeric(pickPath(source, win.usedLimit.used), strict)
-  const remaining = win.usedLimit.remaining ? strictNumeric(pickPath(source, win.usedLimit.remaining), strict) : undefined
+  const usedRaw = win.usedLimit.used !== undefined ? strictNumeric(pickPath(source, win.usedLimit.used), strict) : undefined
+  const remaining = win.usedLimit.remaining !== undefined ? strictNumeric(pickPath(source, win.usedLimit.remaining), strict) : undefined
   const used = usedRaw ?? (limit !== undefined && remaining !== undefined ? limit - remaining : undefined)
   if (limit === undefined || used === undefined || limit <= 0) return undefined
   return { used, limit, unit: (win.usedLimit.unit ?? 'requests') as NonNullable<QuotaWindow['unit']> }

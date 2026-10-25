@@ -101,25 +101,32 @@ describe('stepfun · 窗口映射', () => {
     expect(out.ok).toBe(true)
     if (!out.ok) return
     const [fiveHour, week, month] = out.data.wins
-    // leftRate 0.8 → 已用 20%；0.5 → 已用 50%
+    // leftRate 0.8 → 已用 20%；0.5 → 已用 50%；无 plan_family 字段时 5h/周放行、month 隐藏
     expect(fiveHour).toEqual({ pct: 20, resetSec: HOUR })
     expect(week).toEqual({ pct: 50, resetSec: 6 * DAY })
     expect(month).toEqual({ pct: null, resetSec: null })
     expect(out.data.label).toBe('StepFun Step Plan')
   })
 
-  it('snake_case 原名 + planCreditRateLimit 嵌套（TOKEN 家族月度 credits → month 槽含绝对量）', async () => {
+  it('线上真实响应（2026-10-25 live 200 原文）：TOKEN 家族只展示 month 槽，绝对量=总量−剩余', async () => {
+    // 探针原文（platform.stepfun.com QueryStepPlanRateLimit，用户 prod Chrome cookie 解密取得）：
+    // snake_case + 数值枚举（plan_family:2 / type:1 / status:1）+ 秒级 epoch 字符串。
+    // 该套餐 = Pro 档（credit_total 8e9），剩余 99.2%，月重置时间戳 1795069998。
     setupFetch(() =>
       jsonResponse({
-        status: 'CODE_OK',
-        plan_family: 'PLAN_FAMILY_TOKEN',
+        status: 1,
+        desc: '',
+        five_hour_usage_left_rate: 0,
+        five_hour_usage_reset_time: '0',
+        weekly_usage_left_rate: 0,
+        weekly_usage_reset_time: '0',
+        plan_family: 2,
         plan_credit_rate_limit: {
-          subscription_credit_left_rate: 0.25,
-          subscription_credit_reset_time: String(NOW_SEC + 12 * DAY),
-          topup_credit_left_rate: 0.9,
+          subscription_credit_left_rate: 0.99216026,
+          subscription_credit_reset_time: '1795069998',
+          topup_credit_left_rate: 0,
           credit_buckets: [
-            { type: 'SUBSCRIPTION', credit_total: '400000000', credit_residual: '100000000' },
-            { type: 'TOPUP', credit_total: '1000', credit_residual: '900' },
+            { type: 1, credit_total: '8000000000', credit_residual: '7937281865', expire_at: '1797661998', next_reset_at: '1795069998' },
           ],
         },
       }),
@@ -128,10 +135,35 @@ describe('stepfun · 窗口映射', () => {
     expect(out.ok).toBe(true)
     if (!out.ok) return
     const [fiveHour, week, month] = out.data.wins
+    // TOKEN 家族（plan_family=2）：5h/周窗口按平台前端判据不展示（其 left_rate=0 非真实耗尽）
     expect(fiveHour).toEqual({ pct: null, resetSec: null })
     expect(week).toEqual({ pct: null, resetSec: null })
-    // month 槽：pct 75% + SUBSCRIPTION 桶绝对量（TOPUP 桶不混入）
-    expect(month).toEqual({ pct: 75, resetSec: 12 * DAY, used: 100000000, limit: 400000000, unit: 'credits' })
+    // month 槽：pct = (1-0.99216026)*100 ≈ 0.78；used = 8e9 - 7937281865 = 62718135（残值是剩余非已用）
+    expect(month.pct).toBe(0.78)
+    expect(month.used).toBe(62718135)
+    expect(month.limit).toBe(8000000000)
+    expect(month.unit).toBe('credits')
+    expect(month.resetSec).toBe(1795069998 - NOW_SEC)
+  })
+
+  it('CODING 家族（plan_family≠2）：5h/周窗口展示，month 槽隐藏（平台前端同判据）', async () => {
+    setupFetch(() =>
+      jsonResponse({
+        status: 1,
+        five_hour_usage_left_rate: 0.6,
+        five_hour_usage_reset_time: String(NOW_SEC + HOUR),
+        weekly_usage_left_rate: 0.9,
+        weekly_usage_reset_time: String(NOW_SEC + 3 * DAY),
+        plan_family: 1,
+      }),
+    )
+    const out = await stepfunFetcher.fetchQuota('Oasis-Token=tok', 'cookie')
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    const [fiveHour, week, month] = out.data.wins
+    expect(fiveHour).toEqual({ pct: 40, resetSec: HOUR })
+    expect(week).toEqual({ pct: 10, resetSec: 3 * DAY })
+    expect(month).toEqual({ pct: null, resetSec: null })
   })
 
   it('resetTime 毫秒级 epoch → resetSec；过去时刻 → null', async () => {

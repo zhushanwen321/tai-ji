@@ -199,8 +199,8 @@ export const HIDDEN_ALLOWLIST = new Map([
   // renderer 扩展宿主桥的插件条目 hidden（帧面透传）
   ['packages/renderer/src/composables/shell/useExtensionHostBridge.ts:256', '插件 headerAction 运行时镜像 hidden（扩展宿主桥透传）'],
   // locale 键（设置页「注册但不可达」开关的字面键名）
-  ['packages/ui/src/locale/en-US/settings.ts:1393', 'locale 键 hidden（设置项字面键名，非会话语义）'],
-  ['packages/ui/src/locale/zh-CN/settings.ts:1391', 'locale 键 hidden（设置项字面键名，非会话语义；1392→1391 随 stepfun quota-params 波次 i18n 键替换漂移）'],
+  ['packages/ui/src/locale/en-US/settings.ts:1392', 'locale 键 hidden（设置项字面键名，非会话语义；1393→1392 随并发 genstats locale 编辑漂移）'],
+  ['packages/ui/src/locale/zh-CN/settings.ts:1390', 'locale 键 hidden（设置项字面键名，非会话语义；1392→1391→1390 先后随 stepfun i18n 键替换与并发 genstats locale 编辑漂移）'],
 ])
 
 // ─────────────────────────────────────────────────────────────────────────────
