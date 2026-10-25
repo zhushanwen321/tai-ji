@@ -5,7 +5,11 @@
  * §3.3.12）——extension bundle 自包含不 import shared 运行时代码（network-proxy 同款
  * 惯例：结构类型本地声明 + 行为镜像锁定测试），本文件是复制体；漂移时以 shared 为准，
  * __tests__/config.test.ts 锁两侧行为一致 + 域常量值级对账（import shared
- * RETRY_RULES_DOMAIN，仅测试面消费、不进 bundle——复制体常量漂移即红）。
+ * RETRY_RULES_DOMAIN，仅测试面消费、不进 bundle——复制体常量漂移即红）；
+ * 校验通道跨包对拍 = __tests__/retry-rules-validation-parity.test.ts（同一规则输入
+ * 矩阵断言两侧 validateRetryRuleFields ok 与错误同判 + 基线全量过本文件读侧 guard；
+ * source 校验边界是该测试内登记的有意差异面——shared 组装前不校验 source，本文件
+ * 读侧校验组装后落盘形态，source 必填）。
  *
  * 配置文件 = <agentDir>/config/retry-rules-ext-config.json（llm-shared getConfigPath
  * 推导；写入侧 = taiji runtime RMW——内置基线 ⊕ 远程覆盖 ⊕ 用户自定义的合并权威在
@@ -117,7 +121,7 @@ function collectPatternMatchErrors(item: Record<string, unknown>, at: string): s
 		return errors;
 	}
 	if (isDangerousRetryPattern(pattern)) {
-		errors.push(`${at}（正则）包含嵌套量词等高回溯构造，存在卡死风险，请简化正则`);
+		errors.push(`${at}（正则）包含嵌套量词等高回溯构造，存在卡死风险，请简化正则（如用具体字符类替换 .+ 嵌套）`);
 		return errors;
 	}
 	try {

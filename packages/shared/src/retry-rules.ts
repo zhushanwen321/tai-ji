@@ -11,6 +11,12 @@
  *   packages/pi-subagent-cli/src/retry-rules-classification.ts（自声明镜像 SSOT，
  *   跨包行为对拍 = 该包 __tests__/retry-rules-classification-parity.test.ts——同一
  *   错误文本矩阵断言分类 retryable 判定 ≡ 本模块 evaluateRetryRules 改写结论）。
+ * - retry-rules extension 校验通道（ext-config 读侧 guard / normalize 消费）：行为
+ *   镜像复制体位于 extensions/universal/retry-rules/src/config.ts（自声明镜像 SSOT；
+ *   source 域校验是复制体扩展面——本模块是组装前校验，source 由组装方填不在表单面，
+ *   扩展读的是组装后落盘形态故 source 必填），跨包校验对拍 =
+ *   该包 __tests__/retry-rules-validation-parity.test.ts——同一规则输入矩阵断言两侧
+ *   validateRetryRuleFields ok 与错误同判 + 基线全量过扩展读侧 guard。
  *
  * 判定管线两层序（设计定稿，UC-23 走查缺陷修复）：
  *   第一层按 verdict 排除——non_retryable 规则优先于 retryable/conditional（先排除再放行，
