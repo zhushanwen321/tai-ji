@@ -684,6 +684,12 @@ export class SessionManagerHandler {
           // 即落地（缺省 'marker' 会让该条目永挂 in-flight，死锁形态复发——接入义务见 ADR-0074）
           { receiptAnchor: 'acceptance' },
         )
+      // [session-manager-send-sidecar-stale] 受理成功（含排队：queued 同样是新周期受理）
+      // → 清上一回合终态 sidecar，对齐 GUI 通路 message-dispatcher.runAcceptance 受理成功
+      // 后 clearSessionOutcome 的 dmg-r1-1 口径（同一写入口，双受理通路不双实现）。不清则
+      // agent 在子会话 abort/error 终态后继续 send，新回合终态被旧终态的第一终态优先检查
+      // 吞掉，重启后侧栏滞留旧终态。失败路径（catch 分支）不清：被拒的提交不开启新周期。
+      this.opts.sessionService.clearSessionOutcome(sessionId)
       return { queued: true, willNotify: armed }
     } catch (e) {
       // 投递失败路径（D2 状态机）：armed → 静默删除（主 agent 已同步收到工具 error）

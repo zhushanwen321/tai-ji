@@ -652,13 +652,13 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **删除判据**：删掉某机制后数据仍最终一致 → 它是补偿补丁，删；不一致 → 事件顺序契约本身未定义，先定义契约（谁的事实、谁推送、丢了如何补充拉取）再删。
 
-**元原则**：原则面前无存量豁免——与本体系冲突的既往裁决一并推翻（已删：zcode 无进展检测双 timer、notify 看门狗重投、update 停滞检测、event-tail watch 族、structured-output 强制退出等，清单见 defense-mechanism-cleanup 登记）。
+**元原则**：原则面前无存量豁免——与本体系冲突的既往裁决一并推翻（已删：zcode 无进展检测双 timer、notify 看门狗重投、update 停滞检测、event-tail watch 族、structured-output 强制退出等，清单原 defense-mechanism-cleanup 登记已随清查完结删除，git 历史可追溯）。
 
-**保留白名单（原则不适用域）**：产品功能定时（调度/提醒/产品轮询能力）、调用方显式配置传入的超时参数、恢复场景的文件读取、锁语义原语、事件驱动的对账与拉取通道（ADR-0097 实现本体）、构建脚本类。
+**保留白名单（原则不适用域）**：产品功能定时（调度/提醒/产品轮询能力）、调用方显式配置传入的超时参数（C2 显式业务超时）、恢复场景的文件读取、锁语义原语（file-lock）、事件驱动的对账与拉取通道（ADR-0097 实现本体：delivery-port 回执对账（details-id 命中 + session_start 差集重放）、reconcile 事件触发路径、worktree 观察期族）、构建脚本类、PingProbe 无进展检测（ADR-0047 口径）、外部网络端点墙钟（npm/oauth，网络客户端标准防线）。过渡形态轮询登记：trace-sync 现取轮询（FETCH_CURRENT_PROMPT_POLL_MS=250ms / 8s 上限，pi 侧写侧无完成事件信号、轮询是当前唯一可达通道；退役条件 = pi 提供 entry 写入事件边沿或命令 RPC 直返结果）。
 
 **依据**：本体系收敛自 pi 1.0 适配设计包交付后的系列裁决（2026-10-05）：命令终局事件化（handled/started/断连三事件）、投递 backoff 退役、全项目防御机制清查（约 270 处登记）、event-tail 退役与推送通道方向、受理层同步上屏、scheduler 切换对账翻转为事实查询。故障模型依据 = 本地进程通信无网络类瞬态失败情形，对端死亡有 OS 级信号。
 
-**登记**：清查清单与删改记录 = `docs/todo/defense-mechanism-cleanup.md` 与 defense-scan 过程产物（已随 .tmp 清理，不入库；四分区清单 + 改动清单）；投递域重构与推送通道设计为 tech-design 过程产出（已随 .tmp 清理，不入库；决策以本条与 cleanup 登记为准）；AGENTS.md「防御机制第一原则」规则条目为本条的规则面派生视图。原「时间平抑类逻辑红线」为本体系判定层的既有条目，继续有效。
+**登记**：清查清单与删改记录 = 原 `docs/todo/defense-mechanism-cleanup.md`（清查完结已删除，git 历史可追溯）与 defense-scan 过程产物（已随 .tmp 清理，不入库；四分区清单 + 改动清单）；投递域重构与推送通道设计为 tech-design 过程产出（已随 .tmp 清理，不入库；决策以本条为准）；AGENTS.md「防御机制第一原则」规则条目为本条的规则面派生视图。原「时间平抑类逻辑红线」为本体系判定层的既有条目，继续有效。
 
 **边界澄清（SendReceipt 设计内等待类型化申报，2026-10-18 架构审查裁决）**：首败即停的「失败」判定以 SendReceipt 拒绝分支的判别联合为准——`{ accepted: false, deferred: DeliveryDeferReason }`（设计内等待：条目未被注入、等投递端下一边沿重提，**不计首败**，词表 = 内核 `packages/session-delivery` 单源导出）与 `{ accepted: false, reason }`（真失败：计首败）互斥，由类型构造保证；内核消费点按判别字段分流，不维护字符串白名单。演进动因：白名单形态下生产点裸字面量与消费点集合两处独立演化，同族漂移两次现实击中（建白名单与三小时后补第二个 reason 各一次）；类型化通道防未来审查把判别联合当冗余「简化」回字符串。词条见 [CONTEXT.md「设计内等待」](../CONTEXT.md)。
 
@@ -788,7 +788,7 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 2. **部署形态翻译面（RemoteEngine 补成员）**：ADR-0137 的翻译面只在 in-process 引擎类实装，staged 引擎 cli 形态（`TAIJI_AGENT_ENGINE_ROOTS` 发现 → RemoteEngine 代理）的 `translateModelRef` 缺席且无任何信号——2026-10-16 双会话实测：engineDefaults 偏好死值直穿引擎侧炸 `model_not_available`（16 个 subagent 批次全灭）、record 盖章未翻译 ref，修复语义在部署形态整体静默失效。修复 = 引擎 manifest 新增可选段 **`modelTranslation`**（静态翻译表声明，SSOT = `package.json taiji.subagentEngine.modelTranslation`），发现期快照携带（与 capabilities/modelCatalog 同模式：静态声明读快照不握手），RemoteEngine 构造器按声明装配/摘除 `translateModelRef` 成员（纯查表改写 provider 段、模型段原样保留；大小写归一与目录校验由引擎侧幂等再翻译承担——代理侧无内建目录，不复制该职责）。与 validateModel/setModel 同款形态映射：声明缺席 = 成员摘除，消费方 `typeof` 探测缺席语义。in-process 引擎类代码表与 manifest 声明表由对账锁步单测绑定（`preparer.test.ts` modelTranslation 锁步用例）。
 3. **生效回执**：派发层翻译编排（`resolveEngineModelWithTranslation`）发现 `translateModelRef` 缺席时按 engineId 进程级一次告警（`has no model translation face`）——缺席语义（恒等透传）不变，但必须可观测。
 
-**边界（显式不修）**：远程形态 `listModels()` 读 manifest 静态快照（zcode 声明 `dynamic:true, models:[]` → null = 无法枚举模型）——偏好层清单成员校验在远程形态仍为「放行」，偏好死值的拦截依赖「写入时校验（u7，翻译感知扩展后）+ 引擎侧首败显式报错 + 指引重选」，ADR-0137 偏好层降级语义仅在「可枚举模型的引擎/形态」达成；engineDefaults 存量失效自动清理不做（D5 减法裁决维持），后续项登记 `docs/todo/engine-remote-membership-face.md`。
+**边界（远程形态偏好层成员校验，2026-10-25 实装后口径）**：远程形态 `listModels()` 为 union 门面——manifest 静态快照可枚举（`dynamic:false` / 非空静态目录）时同步返回快照；无静态枚举（省略 / null / `dynamic:true, models:[]`——zcode/pi manifest 均此占位形态）时发协议 `listModels` 帧取引擎活清单（async RPC，控制范围超时 `LIST_MODELS_REQUEST_TIMEOUT_MS` = 10s；连接复用路由 probe 已锚定的连接）。偏好层清单成员校验（`resolveEngineModelWithTranslation`，async）await 消费 union：远程形态的偏好死值在派发同步期即被成员校验拦截（跳过偏好走引擎缺省 + warn，与 ADR-0137 决策 3 同语义）；RPC 失败放行 + per-engine 一次性 warn（引擎侧 validateModel/run prepare 兜底，不拦截模型解析）。ADR-0137 偏好层降级语义自此在远程形态同样达成。仍不做的：engineDefaults 存量失效自动清理（D5 减法裁决维持）；写入时校验（u7，翻译感知扩展）为独立后续项。
 
 **依据**：2026-10-16 用户裁决原文「全部修复。默认引擎应该用 zai-coding-cn/glm-5.3-flash（期望应该是自动翻译到 account:zai-individual-coding-plan/glm-5.3-flash）」（原始裁决命名的目标通道为同日中间态，决策 1 已按凭据链实证修正为 `account:bigmodel-individual-coding-plan`）；事故取证 = 双 pi 会话（01a14400 workflow 批次 16 失败 + 01a14414 派发测试 3/4 失败）+ 本机 bundle 指纹（运行版 v0.11.5 已含 ADR-0137 实装但 RemoteEngine 无 translateModelRef、staged manifest 无翻译声明）。
 

@@ -18,4 +18,4 @@ app 3.14.x 起 plan 家族 provider 全部 `access=zhipu-account`（entitlement 
 
 ## 关联
 
-- 引擎默认 provider/model 设置长期登记：[engine-default-provider-setting.md](engine-default-provider-setting.md)。
+- 引擎默认 provider/model 设置长期登记：原 engine-default-provider-setting.md（已随设置交付销账删除，git 历史可追溯）。

@@ -19,11 +19,25 @@
 //
 // 幂等：翻译产物再入恒等（引擎内 validateModel/run prepare 的同名翻译分支零冲突）；
 // 无翻译面的引擎原样透传（pi 不实现本成员）。
+//
+// [listModels 异步面 2026-10-25] async 化：偏好层成员校验消费 EnginePort.listModels
+// union 的 Promise 侧（RemoteEngine 对无静态枚举的 dynamic 引擎——zcode/pi 的
+// manifest 均为 {dynamic:true, models:[]} 占位——发协议 listModels 帧拿活清单；
+// 此前该形态恒 null 放行，engineDefaults 偏好值零成员校验直穿引擎侧才炸
+// model_not_available）。RPC 失败放行 + per-engine 一次性 warn（成员校验通道故障
+// 不拦截模型解析，引擎侧校验仍兜底）。
 
 import type { EngineRouteResult } from "./routing.ts";
+import type { EngineModelList } from "./port.ts";
 
 /** 生效回执去重（per-engineId 进程级）：翻译面缺席的 warn 只报一次，不逐派发刷屏。 */
 const translationFaceAbsentWarned = new Set<string>();
+
+/**
+ * [listModels 异步面] 成员校验 RPC 失败的生效回执去重（per-engineId 进程级）：同一
+ * 引擎会话只 warn 一次，不逐派发刷屏（对齐 translationFaceAbsentWarned 惯例）。
+ */
+const listModelsFailedWarned = new Set<string>();
 
 /** 派发期模型来源（与 shared/core 同名词域——本层只消费不定义类型，避免三处漂移）。 */
 export type ResolvedEngineModelSource = "explicit" | "frontmatter" | "preference" | "default";
@@ -41,15 +55,22 @@ export interface ResolvedEngineModelResult {
  * 'explicit'，frontmatter 次之，偏好层 'preference'，全缺席 'default'）——避免
  * 「解析一处、来源另判」的双处漂移。warn 通道由调用方注入（chat/workflow 域各自
  * 的日志前缀）。
+ *
+ * [listModels 异步面 2026-10-25] async：偏好层成员校验消费 EnginePort.listModels
+ * union 的 Promise 侧（RemoteEngine 对无静态枚举的 dynamic 引擎发协议 listModels 帧
+ * 拿活清单——此前该形态恒 null 放行，engineDefaults 偏好值零校验直穿引擎侧才炸
+ * model_not_available，宿主无清单数据源）。显式/frontmatter 层不触清单（不 RPC）。
+ * RPC 失败放行（不拦截模型解析——引擎侧 validateModel/run prepare 仍兜底）+
+ * per-engine 一次性 warn。
  */
-export function resolveEngineModelWithTranslation(
+export async function resolveEngineModelWithTranslation(
   route: EngineRouteResult,
   taskModel: string | undefined,
   frontmatterModel: string | undefined,
   readPreference: () => string | undefined,
   warn: (message: string) => void,
   logPrefix: string,
-): ResolvedEngineModelResult {
+): Promise<ResolvedEngineModelResult> {
   const translate = (ref: string): string =>
     route.engine.translateModelRef !== undefined ? route.engine.translateModelRef(ref) : ref;
   // [engine-ref-translation D5 生效回执] 翻译面缺席时一次告警（per-engine 进程级去
@@ -80,14 +101,20 @@ export function resolveEngineModelWithTranslation(
  * 显式层首败即停不变；偏好层按本文件头声明的语义降级——跳过偏好层走引擎缺省
  * + warn，不炸派发（settings 页可重选）。code 用结构化探测，不 import 具体
  * 引擎包（core 不依赖引擎实装）。
+ *
+ * [listModels 异步面 2026-10-25] async：成员校验 await union（同步面 = manifest
+ * 静态快照 / 引擎进程内同步实现，await 非 Promise 值零开销穿透；Promise 面 =
+ * RemoteEngine 协议 listModels 帧活清单）。RPC 失败放行（known = true）+
+ * per-engine 一次性 warn——成员校验是「锦上添花」的拦截器（引擎侧 validateModel/
+ * run prepare 仍是权威兜底），可发现性通道故障不得拦截模型解析。
  */
-function resolvePreferenceLayer(
+async function resolvePreferenceLayer(
   route: EngineRouteResult,
   preference: string,
   translate: (ref: string) => string,
   warn: (message: string) => void,
   logPrefix: string,
-): ResolvedEngineModelResult {
+): Promise<ResolvedEngineModelResult> {
   let translated: string;
   try {
     translated = translate(preference);
@@ -104,7 +131,22 @@ function resolvePreferenceLayer(
   // 清单成员校验仅对「有枚举侧」的引擎生效：undefined/null = port 契约的「无自有
   // 枚举侧」形态（放行——引擎侧 validateModel 仍兜底；回归检查：不可把无面引擎
   // 当空清单处理，否则偏好层被误跳过）；空数组 = 枚举侧在册但当前无可用模型 → 跳过。
-  const list = route.engine.listModels?.();
+  // [listModels 异步面] RPC 失败（dynamic 引擎活清单帧故障）→ 放行 + per-engine
+  // 一次性 warn（同一引擎会话不刷屏）——校验通道故障不拦截模型解析。
+  let list: EngineModelList | undefined;
+  try {
+    list = route.engine.listModels !== undefined ? await route.engine.listModels() : undefined;
+  } catch (err) {
+    if (!listModelsFailedWarned.has(route.engineId)) {
+      listModelsFailedWarned.add(route.engineId);
+      warn(
+        `[${logPrefix}] engine '${route.engineId}' listModels failed while validating ` +
+          `engineDefaults preference "${preference}" (${err instanceof Error ? err.message : String(err)}) ` +
+          `— preference passed through unvalidated; the engine-side model check still guards the dispatch`,
+      );
+    }
+    return { engineModel: translated, source: "preference" };
+  }
   const known = list === undefined || list === null || list.some((m) => m.id === translated);
   if (known) return { engineModel: translated, source: "preference" };
   warn(
