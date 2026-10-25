@@ -67,6 +67,44 @@ export function writeRemoteAccessConfig(dataDir, token, { enabled = true } = {})
   return file
 }
 
+/**
+ * remote-access 开态生效取证（区分「GET / 404 = 开态没生效」vs「开了但 dist 缺失禁用」）：
+ * - main 侧（verify-launch.log）：spawn 时现读 remote-access.json 开态会打
+ *   `remote access enabled: --remote-access --mobile-dist=...`（process-control buildRemoteAccessSpawnArgs）；
+ * - runtime 侧（logs/runtime-*.log）：开态 + dist 缺失时 resolveMobileStaticRoot 打
+ *   `remote access: 移动壳 dist 目录不存在: <path>，静态托管面已禁用`。
+ * 两行均在 = 预置生效且 404 归因 dist 缺失；main 行缺 = 预置没生效（恢复：检查写点时序）。
+ * 返回 { mainEnabled, runtimeDisabledByDist, mainLine, runtimeLine }（找不到为 null）。
+ */
+export function readRemoteAccessSpawnEvidence(dataDir) {
+  const readSafe = (file) => {
+    try {
+      return fs.readFileSync(file, 'utf8')
+    } catch {
+      return ''
+    }
+  }
+  const launchLog = readSafe(path.join(dataDir, 'verify-launch.log'))
+  const mainLine = launchLog.split('\n').find((l) => l.includes('remote access enabled')) ?? null
+  const logDir = path.join(dataDir, 'logs')
+  let runtimeLogText = ''
+  try {
+    for (const f of fs.readdirSync(logDir)) {
+      if (f.startsWith('runtime-')) runtimeLogText += readSafe(path.join(logDir, f))
+    }
+  } catch {
+    /* logs 目录不存在 */
+  }
+  const runtimeLine =
+    runtimeLogText.split('\n').find((l) => l.includes('remote access') && (l.includes('dist 目录不存在') || l.includes('--mobile-dist'))) ?? null
+  return {
+    mainEnabled: mainLine !== null,
+    runtimeDisabledByDist: runtimeLine !== null && runtimeLine.includes('dist 目录不存在'),
+    mainLine,
+    runtimeLine,
+  }
+}
+
 /** GET 一个 runtime HTTP 路径（毫秒级本地探测；非 2xx 也返回状态码供判定）。 */
 function httpGet(port, pathname, timeoutMs = 5_000) {
   return new Promise((resolve) => {
@@ -121,7 +159,11 @@ export async function openMobileShell({ repo, runtimePort, token, deviceName = '
   const consoleLines = []
   const pageErrors = []
   page.on('console', (msg) => consoleLines.push(`[${msg.type()}] ${msg.text()}`))
-  page.on('pageerror', (err) => pageErrors.push(String(err?.stack ?? err)))
+  // SyntaxError 类 pageerror 的 stack 为空串（V8 导出绑定错误不填栈）——序列化必须带
+  // name+message，只取 stack 会拿到空串丢失全部定位信息（2026-10-25 探针实测）。
+  page.on('pageerror', (err) => {
+    pageErrors.push(err instanceof Error ? `${err.name}: ${err.message}` : String(err))
+  })
   const url = `http://127.0.0.1:${runtimePort}/?token=${encodeURIComponent(token)}`
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs })
   return { browser, context, page, consoleLines, pageErrors, url }

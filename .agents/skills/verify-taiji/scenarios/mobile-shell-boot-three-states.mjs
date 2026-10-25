@@ -27,6 +27,7 @@ import {
   closeMobileShell,
   openMobileShell,
   probeShellServing,
+  readRemoteAccessSpawnEvidence,
   readStoredToken,
   resolveMobileDist,
   waitForTokenHandover,
@@ -72,12 +73,22 @@ export async function run(ctx) {
     stats: { distDir, indexHtml: distIndex },
   })
   const serving = await probeShellServing(runtimePort)
+  // 开态生效取证：GET / 404 有两因（预置没生效 vs 开了但 dist 缺失禁用），日志行区分
+  const spawnEvidence = readRemoteAccessSpawnEvidence(ctx.dataDir)
   ev.step({
     step: 'mobile.shell.serving',
     channel: 'B',
     exitCode: serving.healthOk && serving.shellStatus === 200 ? 0 : 1,
-    stats: { runtimePort, healthStatus: serving.healthStatus, shellStatus: serving.shellStatus, contentType: serving.shellContentType },
+    stats: {
+      runtimePort,
+      healthStatus: serving.healthStatus,
+      shellStatus: serving.shellStatus,
+      contentType: serving.shellContentType,
+      remoteAccessSpawned: spawnEvidence.mainEnabled,
+      runtimeDisabledByDist: spawnEvidence.runtimeDisabledByDist,
+    },
   })
+  ev.attach('remote-access-spawn-evidence', [spawnEvidence.mainLine, spawnEvidence.runtimeLine].filter(Boolean).join('\n') || '(两侧行均未找到)')
   ev.assert('B: runtime /health 通（实例活着）', serving.healthOk, {
     channel: 'B', expected: 'GET /health → 200', actual: `status=${serving.healthStatus}`,
   })
