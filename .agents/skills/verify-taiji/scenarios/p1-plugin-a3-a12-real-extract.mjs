@@ -20,34 +20,22 @@
  *
  * 交互路径（A 通道为主，B 通道对账）：
  *   Provider 页 → 添加供应商 ▾ → 家族卡 → 安装确认卡（真实 manifest 知情面）→ 确认安装
- *   → 授权挂载位容器 → 提取确认卡（见下方已知缺口）→ 提取 → 成功卡（A12 计时）
- *   → getStatus / models.json / 真实对话出话（wool 条目模型，极短探针）。
+ *   → 授权挂载位容器 → 提取确认卡（宿主 getAuthorizeView 驱动渲染）→ 提取 → 成功卡
+ *   （A12 计时，DOM 直读）→ getStatus（宿主契约形状）/ models.json / 真实对话出话。
  *
- * 已知产品缺口（ISSUES-2 登记，剧本如实呈现不掩盖）：
- *   ① 提取确认卡无渲染驱动：wool 插件只在 getAuthorizeView 被调用时推初始树，宿主
- *      renderer 无任何调用点（全仓 grep 零命中）→ 授权容器进入后呈占位空态。提取动作
- *      改以 plugin.executeCommand 驱动——与 action-bar 按钮点击完全同一命令派发通道
- *      （PluginProviderSource.createPluginActionExecutor → plugin.executeCommand）。
- *   ② 额度/昵称的条目行 DOM 呈现无驱动：凭据状态行（provider-plugin-status）期望
- *      { state, message } 形状，wool getStatus 返回 { status: { family, loggedIn, ... } }
- *      形状（parseStatusFields 恒 null）；详情扩展区树只在 getDetail 被调用时推送，
- *      宿主同样无调用点。额度断言权威 = B 通道 getStatus 插件上报（任务口径「以插件
- *      上报非空为准」），不做真实上游数值核对。
- *   ③ 插件安装器不装依赖（plugin-installer-adapter「单包解压」），沙箱 loader 要求
- *      裸导入落 pluginDir 内——真实插件必须 bundle 依赖才能激活。剧本产物内嵌
- *      node_modules/{@zhushanwen/pi-wool-shared, typebox}（独立仓真实 pack 产物）。
- *   ④ 宿主 sandboxDir = dirname(manifest main)（plugin-host-process.ts），仅支持根
- *      入口；真实插件 main = src/index.ts → 激活必炸（d3-r2 实测：Sandbox: import
- *      resolves outside plugin directory）。剧本产物以根入口 shim（re-export 真实
- *      src）+ manifest main 指回根承载——插件源码零改动。
- *   ⑤ api.events.emit 在沙箱子进程未接 plugin.event 通道（bootstrap NOT_IMPLEMENTED，
- *      d3-r3 实测 wool-status 推送降级 warn）——D5 推补充通道断裂，「拉为主」仍可用。
- *   ⑥ 提取结果树 DOM 不渲染：wool 插件推树 viewId='authorize'（plugin-kit views.update
- *      首参），宿主 ViewHost 渲染 viewId='provider.authorize'（viewId=挂载位同名约定，
- *      PluginProviderFlow AUTHORIZE_VIEW_ID）——跨仓契约错位，d3-r3 实测提取成功后
- *      DOM 停留「加载中…」而宿主快照（viewId='authorize'）持有成功树。A12 的「结果
- *      回显」以宿主快照持有成功相位为计时终点（runtime 数据层回显成立），DOM 呈现
- *      断裂如实断言并登记。
+ * 渲染/契约修复回归面（原 ISSUES-2 ①②③，宿主 renderer + wool-shared 修复后本剧本
+ * 断言面已翻转为修复后正向断言）：
+ *   ①→ 提取确认卡渲染驱动：PluginProviderFlow 进入 authorize 段 invoke getAuthorizeView
+ *      → 插件推初始 ready 树 → 确认卡渲染（不再占位空态），提取按钮可直接点击（A12
+ *      计时口径仍以 executeCommand 同通道派发，见 driveExtractAndTime 注释）。
+ *   ②→ viewId 契约对齐：wool-shared 推树 viewId = 挂载位同名（provider.authorize），
+ *      宿主 ViewHost 精确匹配渲染 → 提取成功后 DOM 呈现「提取成功」卡（不再「加载中…」）。
+ *   ③→ 凭据状态行形状对齐：wool getStatus / plugin:event 推送适配宿主
+ *      CredentialStatusPayload 契约（{ state, message?, providerId }，channel=
+ *      provider.credentialStatus）→ 条目展开渲染 provider-plugin-status 状态行。
+ *   ④⑤（安装器依赖 / sandboxDir）、⑥（api.events.emit 断裂）、⑦（providers.credential
+ *      回读链）为 runtime 侧缺口，随修复进度另行翻转（本剧本 Qoder 状态断言已按形状
+ *      契约书写，不钉死 valid/invalid——⑦ 修复前后均可通过）。
  *
  * 凭据安全红线：apiKey/token 只验存在性与长度，剧本证据（日志/截图/attach）零明文凭据。
  *
@@ -283,24 +271,22 @@ export const meta = {
     'B: 双产物双注册表——插件 active（sandbox）+ pi 扩展 enabled（extension.list）',
     'C: 双产物落盘——plugins/<scope__pkg>/ + npm/node_modules/<ext>/ + settings.json packages[]',
     'C: 安装链经本机 mock registry 流转（plugin/ext/shared 三包 packument 请求在案）',
-    'A: 授权挂载位容器进入后无提取确认卡（占位空态——宿主无 getAuthorizeView 驱动，ISSUES-2 登记的事实断言）',
-    'A+B: Trae 提取（executeCommand 同通道驱动）→ 宿主持有「提取成功」结果树（快照 viewId=authorize）+ A12 耗时 ≤ 1000ms（stats 计时）；DOM 呈现缺口信息性记录（ISSUES-2 ⑥）',
-    'B: Trae getStatus 上报 { family: trae, loggedIn: true, fetchedAt }（quota/nickname 设计性缺席，形状断言）',
+    'A: 授权挂载位容器进入后提取确认卡渲染（宿主 getAuthorizeView 驱动 + viewId=provider.authorize 对齐——渲染驱动修复回归锚点）',
+    'A+B: Trae 提取（executeCommand 同通道驱动）→ DOM 呈现「提取成功」卡（viewId 对齐后用户可见回显）+ 宿主快照 viewId=provider.authorize 持有成功树 + A12 耗时 ≤ 1000ms（stats 计时）',
+    'A: Trae 条目展开渲染凭据状态行（provider-plugin-status——getStatus 契约形状修复回归锚点）',
+    'B: Trae getStatus 返回宿主契约形状 { state: valid, providerId: wool-trae }（已登录无昵称/额度素材 → message 省略，宿主回落默认文案）',
     'C: models.json wool-trae 条目——apiKey 非空（只验长度）+ models ≥1 且 api=wool-trae',
     'B: wool-trae 真实对话出话——modelOverride 建 session → message.complete → assistant 文本非空',
-    'A+B: Qoder 提取（同构）→ 宿主持有「提取成功」结果树 + A12 耗时 ≤ 1000ms（stats 计时）；DOM 呈现缺口信息性记录（ISSUES-2 ⑥）',
-    'B: Qoder getStatus 状态形状契约（{ family, loggedIn, fetchedAt }）+ loggedIn=false 成因归档（凭据回读链落空——refreshCatalog 诊断佐证，ISSUES-2 ⑦）',
+    'A+B: Qoder 提取（同构）→ DOM 呈现「提取成功」卡 + 宿主快照持成功树 + A12 耗时 ≤ 1000ms（stats 计时）',
+    'B: Qoder getStatus 返回宿主契约形状 { state: valid|invalid, message?: string, providerId: wool-qoder }（形状契约断言，不钉死两值——⑦ 凭据回读链修复前后均可通过）',
     'C: models.json wool-qoder 条目（apiKey 非空 + models ≥1）',
     'B: wool-qoder 真实对话出话（message.complete + assistant 文本非空）',
   ],
   notProvable: [
-    '额度/昵称的条目行 DOM 呈现——宿主凭据状态行期望 {state,message} 形状与 wool getStatus {status} 形状错位 + getDetail 无宿主调用方（ISSUES-2 登记）；本剧本以 B 通道插件上报为额度断言权威',
-    '额度/模型目录数值与真实上游的一致性——真机口径只验插件上报形状与非空，不做上游数值核对',
-    'A12 的物理点击起点——确认卡渲染缺口（ISSUES-2 ①）下以 plugin.executeCommand 同通道派发替代（通道与按钮点击完全一致，缺 DOM 点击动作）；回显终点 = 宿主快照持有成功相位',
-    '授权容器 DOM 的用户可见回显（viewId 契约错位：宿主渲染 provider.authorize、插件推 authorize——已由 viewId 双向证据断言坐实为 PASS 级事实，信息性 step 记录 DOM 实况；修复追踪 ISSUES-2 ⑥）',
-    'Qoder nickname/quota 状态上报（providers.credential 凭据回读链落空 → fetchStatus 收到 undefined token → 插件如实上报 loggedIn:false——ISSUES-2 ⑦；提取/目录/对话链不受影响，均走提取所得令牌直传）',
+    '额度/昵称数值与真实上游的一致性——真机口径只验插件上报形状与非空，不做上游数值核对（Trae 无 quota/nickname 为上游设计性缺席，已登录态 message 省略由宿主默认文案承接）',
+    'A12 的物理点击起点——计时以 plugin.executeCommand 同通道派发起算（通道与按钮点击完全一致，规避 DOM 点击的定位脆弱性）；回显终点 = DOM「提取成功」卡或宿主快照成功相位先到者',
+    'Qoder nickname/quota 状态上报（providers.credential 凭据回读链落空 → fetchStatus 收到 undefined token → 插件如实上报 invalid——ISSUES-2 ⑦，runtime 侧修复追踪；提取/目录/对话链不受影响，均走提取所得令牌直传）',
     'Trae 状态链的 token 回读有效性（loggedIn:true 可由本地 storage.json 存在性判真，与回读链解耦——同样受 ⑦ 影响，被设计形态掩盖）',
-    'Trae 家族 quota/nickname 字段缺席的产品语义（SOLO 免费通道无账号信息 API，插件设计不伪造——按形状断言缺席）',
     'wool-manifest 远端发布链与 npm 远端发布链——经本地夹具 + mock registry 折本，版本配对校验代码路径为真、网络链为假',
     'Qoder 提取失败转 PAT 屏路径——环境探针确认凭据在位，失败路径归负例剧本（A21 族）',
   ],
@@ -312,9 +298,9 @@ export async function run(ctx) {
   const { protocol, ui, ev, log, dataDir } = ctx
   const page = await ctx.instance.page()
   const gotchas = [
-    '插件安装器不装依赖（plugin-installer-adapter「单包解压」）——插件发布形态必须 bundle 依赖，否则 sandbox loader 对裸导入 fail-closed 拒绝、真实插件激活必炸（ISSUES-2 ③）',
-    '宿主 sandboxDir = dirname(manifest main)——子目录 main（真实发布形态 src/index.ts）激活必炸（d3-r2 实测 Sandbox: import resolves outside plugin directory；ISSUES-2 ④）——剧本产物以根入口 shim 承载真实源码',
-    'renderer 只在条目展开时 invoke getStatus（期望 {state,message} 形状），从不 invoke getAuthorizeView/getDetail——羊毛初始授权树与详情树在现宿主上无渲染驱动（ISSUES-2 ①②）',
+    '插件安装器不装依赖（plugin-installer-adapter「单包解压」）——插件发布形态必须 bundle 依赖，否则 sandbox loader 对裸导入 fail-closed 拒绝、真实插件激活必炸（ISSUES-2 ④；runtime 侧修复前由剧本产物内嵌依赖承载）',
+    '宿主 sandboxDir = dirname(manifest main)——子目录 main（真实发布形态 src/index.ts）激活必炸（d3-r2 实测 Sandbox: import resolves outside plugin directory；ISSUES-2 ⑤；runtime 侧修复前由剧本产物根入口 shim 承载）',
+    '提取确认卡渲染 = 宿主 PluginProviderFlow 进入 authorize 段 invoke getAuthorizeView 驱动（渲染驱动修复回归面）；提取派发仍走 plugin.executeCommand（与 action-bar 按钮点击同一命令通道，规避 DOM 点击定位脆弱性）',
     'pi 扩展侧 typebox 由 pi virtual-modules 注入（root/compile/value 三入口），无需 npm 安装；插件侧沙箱无注入，必须内嵌',
     'models.json 对话条目的 enabledModels 由剧本合并写入（pi 的 model scope；非产品断言对象——产品侧启用链归设置域剧本）',
     'A12 计时含真实上游目录拉取（extract 编排在 success 相位前做 writeCatalog）——上游延迟直接计入耗时，这是设计验收的口径而非剧本瑕疵',
@@ -613,18 +599,19 @@ async function assertInstalledState({ protocol, ev, ui, family: f, registry, dat
   await ui.screenshot(`a3a12-${f.family}-installed`)
 }
 
-/** 授权挂载位渲染缺口的事实断言（ISSUES-2 ①）：容器在、提取按钮不在（占位空态）。 */
-async function assertAuthorizeMountGap(ui, page, f, ev) {
+/** 授权挂载位渲染驱动回归断言（原 ISSUES-2 ①，修复后正向）：容器内提取确认卡在
+ * （宿主 getAuthorizeView 驱动插件推初始树），占位空态不在。 */
+async function assertAuthorizeMountRenders(ui, page, f, ev) {
   const extractBtn = page.locator('[data-testid="gui-action-bar-item-wool-extract-start"]')
   const btnCount = await extractBtn.count()
   const emptyHost = await page.locator('[data-testid="view-host-empty"]').count()
-  ev.assert(`A: ${f.displayName} 授权挂载位无提取确认卡（宿主无 getAuthorizeView 驱动，占位空态——ISSUES-2 事实断言）`,
-    btnCount === 0, {
+  ev.assert(`A: ${f.displayName} 授权挂载位渲染提取确认卡（getAuthorizeView 驱动 + viewId 对齐——渲染驱动修复回归锚点）`,
+    btnCount > 0 && emptyHost === 0, {
       channel: 'A',
-      expected: 'gui-action-bar-item-wool-extract-start 不存在（缺口证据）',
+      expected: 'gui-action-bar-item-wool-extract-start 存在 + 无 view-host-empty 占位',
       actual: `extractBtn=${btnCount} view-host-empty=${emptyHost}`,
     })
-  await ui.screenshot(`a3a12-${f.family}-authorize-mount-gap`)
+  await ui.screenshot(`a3a12-${f.family}-authorize-mount`)
 }
 
 /**
