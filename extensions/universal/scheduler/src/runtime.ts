@@ -85,6 +85,9 @@ export class SchedulerRuntime {
   private readonly isCtxStale: (() => boolean) | undefined
   // R3-S1：同任务 dispatch 在途标记（Set<taskId>），见 dispatchTask 注释
   private readonly dispatchesInFlight = new Set<string>()
+  // dispatch 幂等键的轮次标记状态（unified-delivery 迁移），见 nextDispatchEpoch 注释
+  private dispatchStamp = 0
+  private dispatchSeq = 0
   // U4 dispatch 模型切换（设计 D3 修订版）：模型控制接口（缺省 undefined = 无切换能力，降级）
   private readonly modelOps: SchedulerModelOps | undefined
   // 未决模型切换记录（同时至多一条——互斥窗口 + 模型 op 串行队列共同保证「切换→dispatch→
@@ -340,10 +343,10 @@ export class SchedulerRuntime {
   // ── dispatch ──
 
   /**
-   * dispatch 单个任务。返回 true 表示消息已发出（pi.sendMessage 受理），false 表示
-   * no-op（task disabled / 已有同任务在途 / rate-limited）。
+   * dispatch 单个任务。返回 true 表示消息已发出（投递端口受理 / 直发兜底受理），
+   * false 表示 no-op（task disabled / 已有同任务在途 / rate-limited）。
    *
-   * R3-S1 in-flight 检查：tick 为 fire-and-forget，若 tick1 的 `await backend.sendMessage`
+   * R3-S1 in-flight 检查：tick 为 fire-and-forget，若 tick1 的 `await backend.deliverDispatch`
    * 挂起超过 TICK_INTERVAL_MS（如 pi 卡死），tick2 的 step2 会再标 pending、step3 对同一
    * task 并发第二个 dispatch → 同一 prompt 双注入。参照 subagent-workflow resumesInFlight
    * 模式：入口同步置位、finally 清除（覆盖 gate / rate-limit / sendMessage 抛错 / 成功推进
@@ -367,16 +370,22 @@ export class SchedulerRuntime {
   /**
    * dispatch 本体（dispatchTask 检查置位后执行；runTaskNow 与 tick step3 共用入口，
    * 手动 run-now 与挂起中的 tick dispatch 并发时同样被检查拦截）。
-   * steer 直投（scheduler-steer-direct-dispatch 设计）：{deliverAs:'steer', triggerTurn:true}
-   * 在 pi 侧的两分支——busy 时 steer 插入当前 turn（立即被模型看到）、idle 时开新 turn。
-   * 受理即记账：pi extension API sendMessage 是 fire-and-forget（返回 void，错误走
-   * pi 内部 emitError 通道），await 立即通过，无「入队未终态」窗口——nextRunAt 调用即推进，
-   * tick 不重标 pending，无需防重标记。
-   * sendMessage 抛错（同步异常，session 关闭等）时记录 failed 状态但不 rethrow，
-   * 让 tick 继续处理其他任务。
+   * steer 直投（scheduler-steer-direct-dispatch 设计 + unified-delivery 迁移）：
+   * deliverDispatch 经投递端口注入，steer 两分支不变——busy 时插入当前 turn（立即
+   * 被模型看到）、idle 时开新 turn；注入参数与直发逐字一致（收件 session、内容、
+   * steer 语义不变）。
+   * 受理即记账：deliver 返回 accepted / swallowed 即推进 nextRunAt（受理前端口已落
+   * 投递日志，注入直达 pi 唯一队列）；受理后注入失败由端口按 forget 首败即弃
+   * （2026-10-25 裁决：不重投，丢一轮 << 双通道重投造成重复提醒），重试只由本侧
+   * failed 记账承载。
+   * deliverDispatch 抛错（端口拒收 rejected：persist-failed / disposed——未受理未
+   * 落账，幂等键未登记）时记录 failed 状态但不 rethrow，让 tick 继续处理其他任务；
+   * nextRunAt 未推进，下个 tick 重标 pending 重试，重试轮经 nextDispatchEpoch 取新
+   * 幂等键（不撞上一轮在端口投递日志里的终局条目——恒定 taskId 会被端口永久判重
+   * 吞掉）。
    *
-   * U4 模型切换（设计 D3 修订版）：task.model 非空且 ≠ 会话当前模型时，sendMessage 前
-   * 按序执行「互斥校验 → setModel(task.model) → 记未决切换记录 → sendMessage」，切换段
+   * U4 模型切换（设计 D3 修订版）：task.model 非空且 ≠ 会话当前模型时，dispatch 前
+   * 按序执行「互斥校验 → setModel(task.model) → 记未决切换记录 → dispatch」，切换段
    * 整体入模型 op 串行队列（modelOpChain——与恢复 setModel 互斥，MF-2）。busy 亦照常 setModel
    * （P-MODEL-② 证伪「busy 切换不生效」——steer 消息消费时在同一 run 内开新 turn，turn
    * 开始从 ctx.model 取当前模型，setModel 对 steer turn 生效。pi 实装锚点（1.0.0 复核）：
@@ -467,13 +476,14 @@ export class SchedulerRuntime {
     }
 
     try {
-      await this.backend.sendMessage(
+      await this.backend.deliverDispatch(
         { content: task.prompt, customType: `${DISPATCH_CUSTOM_TYPE_PREFIX}dispatched`, display: true },
         { deliverAs: 'steer', triggerTurn: true },
+        `${task.id}:${this.nextDispatchEpoch()}`,
       )
     } catch {
-      // U4 (a)：接管副作用——同步抛错路径先恢复原模型（异常路径不得把会话留在目标任务
-      // 模型上），再走现状 failed 记账。记录先关后恢复（防 await 期间并发重入）。
+      // U4 (a)：接管副作用——投递拒收/直发抛错路径先恢复原模型（异常路径不得把会话留在
+      // 目标任务模型上），再走现状 failed 记账。记录先关后恢复（防 await 期间并发重入）。
       const ps = this.pendingModelSwitch
       if (ps && modelOps) {
         this.pendingModelSwitch = null
@@ -537,6 +547,30 @@ export class SchedulerRuntime {
     const oneMinuteAgo = now - MS_PER_MINUTE
     this.dispatchTimestamps = this.dispatchTimestamps.filter(t => t > oneMinuteAgo)
     return this.dispatchTimestamps.length < RATE_LIMIT_PER_MINUTE
+  }
+
+  /**
+   * 每次 dispatch 的唯一轮次标记（幂等键 `${taskId}:${epoch}` 的 epoch 维度，
+   * unified-delivery 迁移 2026-10-25）：
+   * - 裸 taskId 会被投递端口按终局条目永久判重吞掉（首轮送达落终局后，第二轮起
+   *   deliver 恒 swallowed → 任务永不再提醒）——epoch 必须每轮 dispatch 不同，
+   * 含 failed 重试轮（重试轮若复用上轮键，上轮已落 discard 终局 → 重试被吞，
+   * 「failed 记账 + 下 tick 重试」通道失效）。
+   * - 事实源选择（既有事实源均不满足）：runCount 仅成功递增（failed 轮同值撞键）；
+   * history 上限 20 截断（位置饱和不可作计数）。取 backend.now() 时间戳为基底：
+   * 与 nextRunAt / history 记录同源，且跨 runtime 重建不回退——纯内存计数器在
+   * session_start 重建后归零，会与投递日志终局条目撞键（runtime 每次会话装配都
+   * 重建，该撞键常发而非边角，notifier.ts 的 epoch 段防御同族先例）。同毫秒多次
+   * dispatch（手动 run-now 连击 / 固定时钟测试）由同毫秒序号补齐唯一性。
+   */
+  private nextDispatchEpoch(): string {
+    const now = this.backend.now()
+    if (now === this.dispatchStamp) this.dispatchSeq += 1
+    else {
+      this.dispatchStamp = now
+      this.dispatchSeq = 0
+    }
+    return this.dispatchSeq === 0 ? String(now) : `${now}-${this.dispatchSeq}`
   }
 
   // ── 模型切换：agent_settled 恢复与 tick 事实查询（U4，D3 修订版 + D1 归属简化

@@ -27,8 +27,8 @@ import {
 // ── 1. 接口扩大可被纯对象夹具实现（类型完备）──
 
 /**
- * 纯对象夹具：只实现接口成员（sendMessage/appendEntry/getSessionFile/now +
- * registerProvider/unregisterProvider/getEntries）。
+ * 纯对象夹具：只实现接口成员（sendMessage/deliverDispatch/appendEntry/getSessionFile/
+ * now + registerProvider/unregisterProvider/getEntries）。
  * `satisfies SchedulerBackend` 的**编译期**效力以「测试被 typecheck」为前提——
  * `extensions/tsconfig.json` 的 exclude 覆盖全部测试目录，常态 `extensions:typecheck`
  * 不覆盖本文件（若将来把测试纳入 typecheck，这行才是编译期契约完备证据）；当前至少保证
@@ -40,6 +40,7 @@ function createFixtureBackend(): SchedulerBackend {
   const model: SchedulerCurrentModel = { provider: 'prov', api: 'anthropic-messages', id: 'model-x' }
   return {
     async sendMessage() {},
+    async deliverDispatch() {},
     appendEntry() {},
     getSessionFile() {
       return '/fixture/session.json'
