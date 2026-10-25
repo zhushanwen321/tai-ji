@@ -49,7 +49,7 @@ vi.mock('../src/services/remote-config/remote-config-fetch.js', () => ({
 }))
 
 // 延迟 import：vi.mock 会被提升到 import 之前，故此处能拿到 mocked 版本。
-const { downloadPackageTarball } = await import('../src/infra/installers/npm-installer.js')
+const { downloadPackageTarball, installDependencies } = await import('../src/infra/installers/npm-installer.js')
 const { NpmPluginInstaller } = await import('../src/infra/installers/plugin-installer-adapter.js')
 const { InstalledStore } = await import('../src/services/plugin-service/installed-store.js')
 const { PluginRegistry } = await import('../src/services/plugin-service/plugin-registry.js')
@@ -279,6 +279,48 @@ describe('NpmPluginInstaller.prepareInstall', () => {
     expect(result.success).toBe(true)
     expect(existsSync(staleMarker)).toBe(false)
     expect(existsSync(join(result.prepared!.stagingPath, 'package.json'))).toBe(true)
+  })
+
+  it('④ 声明 dependencies：prepare 段装依赖进暂存（随 commit 换入 pluginDir/node_modules）', async () => {
+    const installer = newInstaller()
+    const pkg = JSON.parse(pkgJson('@scope/test-plugin', { namespace: 'test-plugin' })) as Record<string, unknown>
+    pkg.dependencies = { '@scope/shared-lib': '^1.0.0' }
+    mockDownloadWrites(JSON.stringify(pkg))
+    vi.mocked(installDependencies).mockResolvedValue({ failed: [] })
+
+    const result = await installer.prepareInstall('@scope/test-plugin@1.0.0')
+
+    expect(result.success).toBe(true)
+    // 依赖落暂存目录 node_modules——暂存整体 rename 提交后即 pluginDir/node_modules
+    //（sandbox 裸导入解析边界内），暂存/回滚语义不变
+    expect(vi.mocked(installDependencies)).toHaveBeenCalledWith(result.prepared!.stagingPath)
+  })
+
+  it('④ 依赖安装失败：整体废弃暂存 + 结构化错误（fail-fast 在安装确认前）', async () => {
+    const installer = newInstaller()
+    const pkg = JSON.parse(pkgJson('my-plugin')) as Record<string, unknown>
+    pkg.dependencies = { 'missing-dep': '^1.0.0' }
+    mockDownloadWrites(JSON.stringify(pkg))
+    vi.mocked(installDependencies).mockResolvedValue({
+      failed: [{ name: 'missing-dep', error: 'Package not found (404)' }],
+    })
+
+    const result = await installer.prepareInstall('my-plugin')
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('PLUGIN_DEPENDENCIES_INSTALL_FAILED')
+    expect(result.error).toContain('missing-dep')
+    expect(existsSync(join(pluginsDir, '.staging', 'my-plugin'))).toBe(false)
+  })
+
+  it('④ 零依赖插件：不触发依赖安装（零开销路径）', async () => {
+    const installer = newInstaller()
+    mockDownloadWrites(pkgJson('plain-plugin'))
+
+    const result = await installer.prepareInstall('plain-plugin')
+
+    expect(result.success).toBe(true)
+    expect(vi.mocked(installDependencies)).not.toHaveBeenCalled()
   })
 })
 

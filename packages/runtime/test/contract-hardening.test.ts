@@ -18,7 +18,8 @@
  * - sessions 创建入口收敛：lifecycle create / restoreSession / forkSession 三处
  *   spawn 路径均触发 notifySessionCreated；销毁汇聚点 removeSessionEntry 触发
  *   onSessionDestroyed
- * - events 显式降级：api.events.on / emit 调用即抛 NOT_IMPLEMENTED（含 issue 指引）
+ * - events 面：api.events.on 调用即抛 NOT_IMPLEMENTED（含 issue 指引）；emit 已接
+ *   plugin.event 上报通道（真实往返用例在 plugin-provider-access-plugin-side.test.ts）
  * - CT-U1（S3-W3）：40+ RPC 方法 params 畸形输入（缺字段/错类型/越界键）返回
  *   INVALID_* 结构化错误（error.code）且零写副作用；asString/asSafeKey/
  *   asBoundedString 工具正反例
@@ -770,20 +771,20 @@ describe('session 销毁汇聚点触发 onSessionDestroyed', () => {
 })
 
 // ══════════════════════════════════════════════════════════════════
-// S3-W2 — events 显式降级（NOT_IMPLEMENTED）
+// S3-W2 — events 面：on 显式降级（NOT_IMPLEMENTED）；emit 接 plugin.event（⑥ 接线）
 // ══════════════════════════════════════════════════════════════════
 
-describe('events 面显式降级：调用即抛 NOT_IMPLEMENTED', () => {
+describe('events 面：on 显式降级（NOT_IMPLEMENTED）；emit 接入 plugin.event 通道', () => {
   it('api.events.on 调用即抛，错误含 NOT_IMPLEMENTED 与 issue 指引', () => {
     const api = createAgentAPI('p1')
     expect(() => api.events.on('some-event', () => {})).toThrow(/NOT_IMPLEMENTED/)
     expect(() => api.events.on('some-event', () => {})).toThrow(/zhushanwen321\/tai-ji\/issues/)
   })
 
-  it('api.events.emit 调用即抛，错误含 NOT_IMPLEMENTED 与 issue 指引', () => {
+  it('api.events.emit 不再抛 NOT_IMPLEMENTED：走 plugin.event request 路径（真实往返见 plugin-provider-access-plugin-side）', async () => {
     const api = createAgentAPI('p1')
-    expect(() => api.events.emit('some-event', { a: 1 })).toThrow(/NOT_IMPLEMENTED/)
-    expect(() => api.events.emit('some-event', { a: 1 })).toThrow(/zhushanwen321\/tai-ji\/issues/)
+    // 未 attach client：装配态以 rejection 呈现（同步 NOT_IMPLEMENTED 已随 ⑥ 接线退役）
+    await expect(api.events.emit('some-event', { a: 1 })).rejects.toThrow(/RPC client not attached/)
   })
 })
 

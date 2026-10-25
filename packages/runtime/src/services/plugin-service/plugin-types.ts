@@ -15,7 +15,8 @@ import type { ISessionService, IConfigService } from '../../interfaces.js'
 // 分层标注（IF2）沿承 SDK 侧定义：
 // - @stable — Phase1AgentAPI 核心部分 storage/notify/sessions、PermissionConstants、
 //   PluginRpcErrorCodes、Disposable、SessionInfo、PluginStateStorage
-// - @experimental — events 插件间事件总线（未实现，调用即抛 NOT_IMPLEMENTED）
+// - @experimental — events.on 插件间事件总线订阅侧（未实现，调用即抛 NOT_IMPLEMENTED）；
+//   emit/report 已接 plugin.event 上报通道（D5/D9，plugin-bootstrap 单一实现）
 // - @proposed — Phase2AgentAPI 扩展范围 tools/hooks/config/sessionData/ui/agent/
 //   workspace、ToolRegistration、HookEntry 等
 // - @internal — runtime 内部塑形对象（WorkerHandle、PluginContext、Bridge* 等）

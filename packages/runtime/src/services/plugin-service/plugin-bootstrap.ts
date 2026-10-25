@@ -12,7 +12,6 @@
 import { parentPort } from 'node:worker_threads'
 import { Module } from 'node:module'
 import * as realFs from 'node:fs'
-import { dirname as pathDirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type {
   HostToWorkerMessage,
@@ -27,6 +26,7 @@ import type {
 } from './plugin-types.js'
 import { PluginRpcErrorCodes } from './plugin-types.js'
 import { PluginRpcClient } from './plugin-rpc-client.js'
+import { findPackageRootDir } from './pkg-root.js'
 import { createRequireInterceptor, createEnvProxy, FS_PROXY_MODULES } from './plugin-sandbox.js'
 // fs-guard 复用（F1-9 接线）：CJS 通道在 env 被空 Proxy 替换前解码放行清单与
 // readPaths——与 ESM loader 消费同一 env 键与同一解码原语（default import 取
@@ -190,11 +190,13 @@ export async function handleMessage(msg: HostToWorkerMessage): Promise<void> {
 
 async function handleLoad(msg: Extract<HostToWorkerMessage, { type: 'load' }>): Promise<void> {
   try {
-    // sandbox 模式下初始化 require 拦截（S1-W3：msg.pluginPath 是入口文件路径，
+    // sandbox 模式下初始化 require 拦截（⑤ 包根修正：msg.pluginPath 是入口文件路径，
     // CJS 拦截器的边界判定需要插件根目录——与 fork env 注入处（plugin-host-process）
-    // 同款 dirname 修正，两处各自在「宿主传入点→边界判定消费点」的转换处完成）
+    // 消费同一 findPackageRootDir：向上首个含 package.json 的祖先。子目录入口（真实
+    // 发布形态 main = src/index.ts）下 dirname 会把边界错划成 <插件目录>/src，node_modules
+    // 的裸导入被误判越界；无清单 fixture 回落入口目录，边界退化不放大 fail-closed 面）
     if (msg.trustLevel === 'sandbox') {
-      initSandbox(pathDirname(msg.pluginPath))
+      initSandbox(findPackageRootDir(msg.pluginPath))
     }
 
     const moduleUrl = pathToFileURL(msg.pluginPath).href
@@ -355,12 +357,18 @@ export function createAgentAPI(pluginId: string): Phase2AgentAPI {
     },
     notify: createNotifyApi(rpcClient, pluginId),
     sessions: createSessionApi(rpcClient, pluginId),
-    // S3-W2 events 显式降级：插件间事件总线（on/emit）从未实现（plugin.event.* 通知
-    // 全仓无生产方），SDK 已从 @stable 移到 @experimental。调用即抛 NOT_IMPLEMENTED
-    //（带 issue 指引）——显式失败优于静默失效（G4：SDK 允诺的能力全部真实可用或显式报错）。
-    // 需要订阅 session 生命周期的插件请用 api.sessions.onDidCreateSession（已实现）。
-    // report（provider-plugin-access D9）：插件 → renderer 业务事件上报，真实通路——
-    // 宿主 plugin.event RPC 校验后广播 'plugin:event' 帧（首个消费方 = 凭据状态上报）。
+    // events 面（provider-plugin-access D5/D9）：
+    // - on：插件间事件总线的订阅侧从未实现（plugin.event.* 通知全仓无生产方），
+    //   调用即抛 NOT_IMPLEMENTED（带 issue 指引）——显式失败优于静默失效（G4）。
+    //   需要订阅 session 生命周期的插件请用 api.sessions.onDidCreateSession（已实现）。
+    // - emit（⑥ 接线）：与 report 同走 plugin.event RPC 通道——channel = 事件名、
+    //   payload 透传，宿主校验后广播 'plugin:event' 帧（首个消费方 = 凭据状态上报）。
+    //   pluginId 归属取通道身份（宿主 handler 通道反查优先，trusted/sandbox 同语义），
+    //   权限判定在 RPC dispatch 层按方法名统一执法（plugin.event 已入权限方法名全集，
+    //   与 report 完全同一入站校验面）。request 形态：channel 超长 / payload 超限等
+    //   宿主校验错误以 rejection 回到插件侧可见（awaitable，不静默吞）。
+    // - report（D9）：插件 → renderer 业务事件上报的显式命名出口，语义与 emit 相同
+    //   （回执携 { forwarded } 供插件判断广播是否真正发出）。
     events: {
       on: (event: string, _handler: (data: unknown) => void): Disposable => {
         throw errorWithCode(
@@ -371,17 +379,13 @@ export function createAgentAPI(pluginId: string): Phase2AgentAPI {
           PluginRpcErrorCodes.METHOD_NOT_FOUND,
         )
       },
-      emit: (event: string, _data: unknown): void => {
-        throw errorWithCode(
-          `NOT_IMPLEMENTED: api.events.emit('${event}', ...) — plugin-to-plugin event bus is not implemented. ` +
-          'This API is experimental (removed from the stable SDK surface). ' +
-          'Open an issue at https://github.com/zhushanwen321/tai-ji/issues if you need it.',
-          PluginRpcErrorCodes.METHOD_NOT_FOUND,
-        )
-      },
       // PLUGIN_EVENT_RPC_METHOD = 'plugin.event'（SSOT 见 plugin-rpc-setup.ts；
       // Worker 入口不 import 主线程侧模块，同款字符串硬编码先例）。经 request 而非
       // notify：channel 超长等宿主校验错误以 error response 回到插件侧可见。
+      emit: (event: string, data: unknown): Promise<void> =>
+        rpcClient
+          .request('plugin.event', { pluginId, channel: event, payload: data })
+          .then(() => undefined),
       report: (channel: string, payload: unknown) =>
         rpcClient
           .request('plugin.event', { pluginId, channel, payload })

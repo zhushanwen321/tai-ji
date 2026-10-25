@@ -2,7 +2,9 @@
  * PluginInstaller 域 port —— 两段式安装（prepare 暂存 → commit 换入）+ 卸载删目录。
  *
  * 与 IInstaller（extension 的 npm+git 安装，递归装依赖到 node_modules）对称但独立：
- * plugin 安装模型是「单包解压 + manifest 校验 + 无依赖」，不走递归 node_modules 布局。
+ * plugin 安装模型是「单包解压 + manifest 校验 + 依赖装进插件目录 node_modules」——
+ * 声明 dependencies 的插件在 prepare 段把依赖递归装进 <暂存目录>/node_modules，随
+ * commit 整体换入（sandbox 裸导入解析边界在 pluginDir 内，ISSUES-2 ④）。
  *
  * 两段式（provider-plugin-access U4）：prepareInstall 把下载/校验/解压停在暂存目录，
  * 返回确认卡知情面（capabilities/readPaths 等 manifest 声明全量）；调用方（PluginService
@@ -57,12 +59,14 @@ export interface IPluginInstaller {
   /**
    * 第一段：下载 tarball 解压至暂存目录并校验。
    *
-   * 流程（由 infra 实现负责）：
-   *  1. 解析包名 → 安全化目录名（@scope/pkg → scope__pkg）
-   *  2. 清空同插件旧暂存（重复发起安装幂等）后下载解压（strip=1，包内容落暂存根）
-   *  3. 读 package.json，校验 taijiPlugin.manifestVersion === 1
-   *  4. manifest 声明 namespace 时做包名绑定校验（不一致 → NAMESPACE_MISMATCH）
-   *  5. 任一失败 → 清理暂存 + 返回 { success: false, error }，不抛异常
+ * 流程（由 infra 实现负责）：
+ *  1. 解析包名 → 安全化目录名（@scope/pkg → scope__pkg）
+ *  2. 清空同插件旧暂存（重复发起安装幂等）后下载解压（strip=1，包内容落暂存根）
+ *  3. 读 package.json，校验 taijiPlugin.manifestVersion === 1
+ *  4. manifest 声明 namespace 时做包名绑定校验（不一致 → NAMESPACE_MISMATCH）
+ *  5. package.json 声明 dependencies 时递归安装进 <暂存目录>/node_modules（任一直接
+ *     依赖失败 = 整体废弃暂存并返回失败——缺依赖插件激活必炸，fail-fast 在安装确认前）
+ *  6. 任一失败 → 清理暂存 + 返回 { success: false, error }，不抛异常
    */
   prepareInstall(packageSpecifier: string): Promise<PluginPrepareResult>
   /**

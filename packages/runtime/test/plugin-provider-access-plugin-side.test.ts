@@ -148,7 +148,24 @@ describe('providers.credential 往返（D4 受控明文回读）', () => {
     expect(deps.resolveProviderCredential).toHaveBeenCalledWith(NS_PROVIDER_ID)
   })
 
-  it('未声明 network.http：宿主 PERMISSION_DENIED 拒绝回到插件侧（读通道不触达）', async () => {
+  it('对象形态调用（wool 系插件自持契约 { providerId }）：代理归一为 wire 字符串形，回读命中同一明文（⑦）', async () => {
+    const deps = manifestDeps()
+    const server = new PluginRpcServer()
+    registerProviderWriteProxy(server, deps)
+    const loop = wireLoop(server)
+    const api = createAgentAPI(PLUGIN_ID)
+
+    // 修复前：对象直传使 wire 载荷 providerId 变成对象 → 宿主 INVALID_PAYLOAD →
+    // 插件 catch 呈「未接入」且零留痕（真机 d3-r10 实测）。归一后两种形态同达。
+    const reply = await api.providers.credential({ providerId: NS_PROVIDER_ID })
+    await loop.settle()
+
+    expect(reply).toEqual({ providerId: NS_PROVIDER_ID, key: 'sk-test', source: 'models.json', kind: 'api_key' })
+    expect(deps.resolveProviderCredential).toHaveBeenCalledWith(NS_PROVIDER_ID)
+  })
+
+  it('未声明 network.http：宿主 PERMISSION_DENIED 拒绝回到插件侧（读通道不触达）+ 分级 warn 落 capability 环节', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const deps = manifestDeps({ readPluginManifest: () => ({ pkgName: PLUGIN_ID, capabilities: [] }) })
     const server = new PluginRpcServer()
     registerProviderWriteProxy(server, deps)
@@ -158,6 +175,23 @@ describe('providers.credential 往返（D4 受控明文回读）', () => {
     await expect(api.providers.credential(NS_PROVIDER_ID)).rejects.toThrow(/PERMISSION_DENIED/)
     await loop.settle()
     expect(deps.resolveProviderCredential).not.toHaveBeenCalled()
+    // ⑦ 分级诊断：warn 指名落空环节（capability），可从日志直接归因
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("link 'capability'"))
+    warnSpy.mockRestore()
+  })
+
+  it('凭据源空：PROVIDER_CREDENTIAL_MISSING + 分级 warn 落 credential-source 环节（哪环落的空可归因）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const deps = manifestDeps({ resolveProviderCredential: vi.fn(async () => undefined) })
+    const server = new PluginRpcServer()
+    registerProviderWriteProxy(server, deps)
+    const loop = wireLoop(server)
+    const api = createAgentAPI(PLUGIN_ID)
+
+    await expect(api.providers.credential(NS_PROVIDER_ID)).rejects.toThrow(/PROVIDER_CREDENTIAL_MISSING/)
+    await loop.settle()
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("link 'credential-source'"))
+    warnSpy.mockRestore()
   })
 })
 
@@ -243,6 +277,47 @@ describe('events.report 往返（D9 插件 → renderer 业务事件上报）', 
     })
     await loop.settle()
     expect(broadcasts).toEqual([]) // 超限不进广播
+  })
+})
+
+describe('events.emit 往返（D5 推补充通道，⑥ 接线）', () => {
+  it('emit 与 report 同走 plugin.event：广播帧出线 + pluginId 取通道身份，回执 resolve undefined', async () => {
+    const broadcasts: PluginEventPayload[] = []
+    const server = new PluginRpcServer()
+    registerPluginEventRpcHandler(server, {
+      broadcast: (payload) => broadcasts.push(payload),
+    })
+    const loop = wireLoop(server)
+    const api = createAgentAPI(PLUGIN_ID)
+
+    // wool 系插件的调用形态：await api.events.emit(channel, payload)（plugin-kit emitStatusEvent）
+    await api.events.emit('provider.credentialStatus', { providerId: NS_PROVIDER_ID, loggedIn: true })
+    await loop.settle()
+
+    expect(broadcasts).toEqual([
+      {
+        pluginId: PLUGIN_ID, // 通道身份（registerWorker 注册），非载荷自报
+        channel: 'provider.credentialStatus',
+        payload: { providerId: NS_PROVIDER_ID, loggedIn: true },
+      },
+    ])
+  })
+
+  it('payload 超限：错误以 rejection 回到插件侧可见（awaitable，不静默吞），广播零出线', async () => {
+    const broadcasts: PluginEventPayload[] = []
+    const server = new PluginRpcServer()
+    registerPluginEventRpcHandler(server, {
+      broadcast: (payload) => broadcasts.push(payload),
+    })
+    const loop = wireLoop(server)
+    const api = createAgentAPI(PLUGIN_ID)
+
+    const huge = 'x'.repeat(129 * 1024)
+    await expect(api.events.emit('huge-payload', { blob: huge })).rejects.toMatchObject({
+      code: 'PLUGIN_EVENT_PAYLOAD_TOO_LARGE',
+    })
+    await loop.settle()
+    expect(broadcasts).toEqual([])
   })
 })
 

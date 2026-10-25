@@ -6,7 +6,13 @@
  * 消除 services 层 child_process seam 泄漏。
  *
  * 安装模型（区别于 extension 的 IInstaller）：
- *  - 单包解压（strip=1，包内容落暂存根），不递归装依赖
+ *  - 单包解压（strip=1，包内容落暂存根）+ 依赖安装：package.json 声明 dependencies 时
+ *    经 installDependencies 递归装进 <暂存目录>/node_modules（同一 npm 安装链：registry
+ *    解析 + integrity 校验，纯 Node 不 spawn）。依赖随暂存目录整体 rename 提交，落在
+ *    pluginDir/node_modules——sandbox ESM loader 对裸导入的解析边界在 pluginDir 内，
+ *    真实发布形态（子目录入口 + workspace 依赖）不再激活即炸（ISSUES-2 ④）；任一直接
+ *    依赖安装失败 = 暂存整体废弃（fail-fast：缺依赖的插件激活必炸，失败要暴露在安装
+ *    确认前而非激活时），回滚语义与既有暂存清理一致
  *  - 两段式（provider-plugin-access U4）：prepareInstall 下载/校验/解压停在暂存目录
  *    并返回确认卡知情面；commitInstall 暂存到正式目录单步 rename 原子换入
  *  - scoped 包目录名解耦：@scope/pkg → scope__pkg（registry.scan 只 readdir 一级目录，
@@ -19,7 +25,7 @@
 import { mkdir, readFile, rename, readdir, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { downloadPackageTarball } from './npm-installer.js'
+import { downloadPackageTarball, installDependencies } from './npm-installer.js'
 import { validateNamespaceBinding, NAMESPACE_MISMATCH } from '@taiji/shared/plugin-namespace'
 import type {
   IPluginInstaller,
@@ -39,6 +45,7 @@ const SCOPED_NAME_MIN_SLASH_INDEX = 2
 interface ExtractedPackageJson {
   name: string
   version?: string
+  dependencies?: Record<string, string>
   taijiPlugin?: {
     manifestVersion?: unknown
     namespace?: unknown
@@ -92,6 +99,27 @@ export class NpmPluginInstaller implements IPluginInstaller {
           }
         }
         namespace = binding.namespace
+      }
+
+      // 依赖安装进暂存目录（④）：声明 dependencies 才触发（零依赖插件零开销）。依赖
+      // 落 <暂存>/node_modules，随 commit 的单步 rename 一并换入正式目录——暂存/回滚
+      // 语义不变（失败清理暂存即连带清理依赖；更新回滚 replacing 位整体移回，依赖同生
+      // 同灭）。任一直接依赖失败整体废弃暂存：缺依赖的插件激活必炸（sandbox loader 对
+      // 裸导入 fail-closed），失败必须显式暴露在安装确认前。
+      const deps = pkg.dependencies ?? {}
+      if (Object.keys(deps).length > 0) {
+        const { failed } = await installDependencies(stagingPath)
+        if (failed.length > 0) {
+          await rm(stagingPath, { recursive: true, force: true }).catch(() => {})
+          const detail = failed.map(f => `${f.name}: ${f.error}`).join('; ')
+          return {
+            success: false,
+            error:
+              `PLUGIN_DEPENDENCIES_INSTALL_FAILED: failed to install plugin dependencies into the ` +
+              `staging area (${detail}). 👉 Check that the dependency names/versions resolve on the ` +
+              `registry, then retry the install.`,
+          }
+        }
       }
 
       const prepared: PreparedPluginInstall = {

@@ -22,8 +22,9 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { deriveNamespace, NAMESPACE_MISMATCH } from '@taiji/shared/plugin-namespace'
+import { findPackageRootDir } from './plugin-service/pkg-root.js'
 import type { PluginRpcServer, RpcDispatchContext } from './plugin-service/plugin-rpc-server.js'
 // 能力词经 shared SSOT 常量引用（与 manifest 校验/放行计算同一词表——裸字面量在词表
 // 改值时会静默失配为 credential 恒拒，常量引用让失配在编译期可见）
@@ -82,8 +83,7 @@ export interface ProviderWriteProxyDeps { // oe-exempt:20261024:framework:ports/
   readPluginManifest: (pluginId: string) => PluginManifestInfo | undefined
 }
 
-/** 包根定位的祖先遍历深度上界（entry → 包根通常 ≤3 层；上界防病态路径无限上溯）。 */
-const MAX_PACKAGE_ROOT_WALK_DEPTH = 8
+/** 包根定位共享实现（pkg-root，与 fork env 注入 / CJS 拦截器三处同源——ISSUES-2 ⑤）。 */
 
 function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
@@ -197,6 +197,11 @@ async function handleProviderDelete(deps: ProviderWriteProxyDeps, params: Record
  * providers.credential：身份 → 清单 → 能力前提（network.http）→ 命名空间 → 唯一读通道
  * 定向回读。明文只进本 reply（JSON-RPC 定向响应），无广播/快照/日志路径——帧审计
  * 断言的结构性依据（S20）。
+ *
+ * 失败分级日志（⑦ 诊断信号，成功路径零输出）：拒绝/落空的每一环（清单不可读 / 能力
+ * 未声明 / 凭据源空 / 形态不支持）落 warn——插件侧 catch 后多呈静默「未接入」态，
+ * 宿主零留痕时回读链断裂无从归因（真机 d3-r7~r10 的掩盖效应）。载荷畸形（INVALID_
+ * PAYLOAD）不落日志：调用方形参错误属插件缺陷，错误响应已原样回达。
  */
 async function handleProviderCredential(deps: ProviderWriteProxyDeps, params: Record<string, unknown>, ctx: RpcDispatchContext): Promise<ProviderCredentialReply> {
   const pluginId = requireSandboxPluginId(ctx)
@@ -206,6 +211,11 @@ async function handleProviderCredential(deps: ProviderWriteProxyDeps, params: Re
   }
   const manifest = deps.readPluginManifest(pluginId)
   if (manifest === undefined) {
+    console.warn(
+      `[provider-write-proxy] providers.credential falling empty at link 'manifest': installed manifest ` +
+        `unreadable for plugin '${pluginId}' (fail-closed). Recovery: reinstall the plugin so the ` +
+        `package root carries a readable package.json.`,
+    )
     throw errorWithCode(
       `PERMISSION_DENIED: cannot read installed manifest for plugin '${pluginId}' — ` +
         `providers.credential is only available to installed plugins (fail-closed).`,
@@ -213,6 +223,11 @@ async function handleProviderCredential(deps: ProviderWriteProxyDeps, params: Re
     )
   }
   if (!manifest.capabilities.includes(PluginCapabilityConstants.NETWORK_HTTP)) {
+    console.warn(
+      `[provider-write-proxy] providers.credential denied at link 'capability': manifest of '${pluginId}' ` +
+        `does not declare 'network.http' (declared: [${manifest.capabilities.join(', ')}]). ` +
+        `Recovery: declare network.http in taijiPlugin.capabilities and reinstall.`,
+    )
     throw errorWithCode(
       `PERMISSION_DENIED: providers.credential requires the 'network.http' capability in the ` +
         `plugin manifest (plaintext credentials only serve network actions). ` +
@@ -223,6 +238,12 @@ async function handleProviderCredential(deps: ProviderWriteProxyDeps, params: Re
   assertInNamespace(pluginId, manifest.pkgName, providerId)
   const resolved = await deps.resolveProviderCredential(providerId)
   if (resolved === undefined) {
+    console.warn(
+      `[provider-write-proxy] providers.credential falling empty at link 'credential-source': no usable ` +
+        `credential for '${providerId}' in either source (auth.json entry absent, models.json entry ` +
+        `absent or apiKey empty). Recovery: complete authorization/extraction so providers.write ` +
+        `lands the credential first.`,
+    )
     throw errorWithCode(
       `PROVIDER_CREDENTIAL_MISSING: no credential entry found for '${providerId}' — ` +
         `the provider has not been authorized yet (providers.write first).`,
@@ -230,6 +251,12 @@ async function handleProviderCredential(deps: ProviderWriteProxyDeps, params: Re
     )
   }
   if ('unsupported' in resolved) {
+    console.warn(
+      `[provider-write-proxy] providers.credential falling empty at link 'credential-form': credential ` +
+        `for '${providerId}' exists but its form '${resolved.unsupported}' is not resolvable ` +
+        `(command / unresolved env reference are served verbatim to no consumer). Recovery: store a ` +
+        `plain credential value via providers.write.`,
+    )
     return { providerId, unsupported: resolved.unsupported }
   }
   return { providerId, key: resolved.key, source: resolved.source, kind: resolved.kind }
@@ -257,31 +284,23 @@ export function createPluginManifestReader(
   return (pluginId: string) => {
     const descriptor = registry.getDescriptor(pluginId)
     if (descriptor === undefined) return undefined
-    let dir = dirname(descriptor.pluginPath)
-    for (let depth = 0; depth < MAX_PACKAGE_ROOT_WALK_DEPTH; depth++) {
-      const pkgPath = join(dir, 'package.json')
-      if (existsSync(pkgPath)) {
-        try {
-          const raw = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
-            name?: unknown
-            taijiPlugin?: { capabilities?: unknown }
-          }
-          if (typeof raw.name !== 'string' || raw.name.length === 0) return undefined
-          const capabilities = raw.taijiPlugin?.capabilities
-          return {
-            pkgName: raw.name,
-            capabilities: Array.isArray(capabilities)
-              ? capabilities.filter((entry): entry is string => typeof entry === 'string')
-              : [],
-          }
-        } catch {
-          return undefined
-        }
+    const pkgPath = join(findPackageRootDir(descriptor.pluginPath), 'package.json')
+    if (!existsSync(pkgPath)) return undefined
+    try {
+      const raw = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
+        name?: unknown
+        taijiPlugin?: { capabilities?: unknown }
       }
-      const parent = dirname(dir)
-      if (parent === dir) return undefined
-      dir = parent
+      if (typeof raw.name !== 'string' || raw.name.length === 0) return undefined
+      const capabilities = raw.taijiPlugin?.capabilities
+      return {
+        pkgName: raw.name,
+        capabilities: Array.isArray(capabilities)
+          ? capabilities.filter((entry): entry is string => typeof entry === 'string')
+          : [],
+      }
+    } catch {
+      return undefined
     }
-    return undefined
   }
 }

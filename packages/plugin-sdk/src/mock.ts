@@ -55,7 +55,7 @@ export function createMockAgentAPI(): Phase2AgentAPI {
     },
     events: {
       on: () => mockDisposable,
-      emit: () => {},
+      emit: () => Promise.resolve(),
       report: () => Promise.resolve({ forwarded: true }),
     },
     // Phase2

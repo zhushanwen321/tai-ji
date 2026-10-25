@@ -35,6 +35,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { createRequireInterceptor, BLOCKED_BUILTINS } from '../src/services/plugin-service/plugin-sandbox.js'
+import { findPackageRootDir } from '../src/services/plugin-service/pkg-root.js'
 import { createTsxPathsTsconfig } from './helpers/tsx-fork-tsconfig.js'
 import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../test-guard/integration-gate.ts'
 
@@ -78,7 +79,7 @@ const collectResults = (child: ReturnType<typeof fork>): Promise<ImportResult[]>
     })
   })
 
-/** fork runner：真实 ESM loader + env（目录形态 = dirname(入口)，对齐 S1-W3 宿主注入） */
+/** fork runner：真实 ESM loader + env（目录形态 = 包根遍历，对齐宿主 S1-W3 + ⑤ 注入） */
 function runInSandbox(
   pluginEntry: string,
   items: Array<{ label: string; url: string }>,
@@ -88,8 +89,9 @@ function runInSandbox(
     execArgv: ['--import', LOADER_PATH],
     env: {
       ...process.env,
-      // 宿主（plugin-host-process env 注入处）修正后的注入形态：dirname(pluginPath)
-      TAIJI_PLUGIN_SANDBOX_DIR: dirname(pluginEntry),
+      // 宿主（plugin-host-process env 注入处）的注入形态：入口向上首个含 package.json
+      // 的祖先（⑤ 包根修正——子目录入口下 dirname 会把边界错划成 <插件目录>/src）
+      TAIJI_PLUGIN_SANDBOX_DIR: findPackageRootDir(pluginEntry),
       ...extraEnv,
     },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -193,6 +195,37 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`S1-W3: sandbox escape regression (r
     expect(evilBare?.error).toContain('PERMISSION_DENIED')
     // 界内 node_modules（合法依赖形态）：放行
     expect(okBare?.ok).toBe(true)
+  }, TIMEOUT_MS)
+
+  it('SEC-A3(单元): 子目录入口 + 包根内 node_modules 依赖放行（真实发布形态，⑤ 包根修正回归）', async () => {
+    // 真实发布形态 fixture：manifest main = src/index.ts（此处以 src/index.mjs 承载），
+    // 依赖装在 pluginDir/node_modules（④ 修复后的安装落点）。修复前宿主注入
+    // dirname(entry) = <pluginDir>/src，界内依赖被判越界激活即炸（d3-r2 实测）；
+    // 修复后 sandboxDir = 包根（向上首个含 package.json 的祖先），裸导入界内解析放行。
+    pluginDir = mkdtempSync(join(tmpdir(), 'escape-plugin-'))
+    writeFileSync(join(pluginDir, 'package.json'), JSON.stringify({
+      name: '@fixture/plugin-sub-entry',
+      version: '1.0.0',
+      main: 'src/index.mjs',
+    }))
+    const insideModules = join(pluginDir, 'node_modules', 'escape-sub-dep')
+    mkdirSync(insideModules, { recursive: true })
+    writeFileSync(join(insideModules, 'package.json'), JSON.stringify({ name: 'escape-sub-dep', version: '1.0.0', main: 'index.mjs' }))
+    writeFileSync(join(insideModules, 'index.mjs'), 'export const v = 3\n')
+    mkdirSync(join(pluginDir, 'src'), { recursive: true })
+    writeFileSync(join(pluginDir, 'src', 'index.mjs'), "import 'escape-sub-dep'\nexport const loaded = true\n")
+
+    // findPackageRootDir 是宿主 env 注入处（plugin-host-process）的消费函数——
+    // 本断言钉住「子目录入口 → 包根」的推导，env 注入即用推导值
+    expect(findPackageRootDir(join(pluginDir, 'src', 'index.mjs'))).toBe(pluginDir)
+
+    const { child, results } = runInSandbox(join(pluginDir, 'src', 'index.mjs'), [
+      { label: 'sub-entry-bare', url: pathToFileURL(join(pluginDir, 'src', 'index.mjs')).href },
+    ])
+    const all = await results
+    child.kill()
+    const bare = all.find((r) => r.label === 'sub-entry-bare')
+    expect(bare?.ok).toBe(true)
   }, TIMEOUT_MS)
 
   it('CAP-PERM(单元): 放行 network.http 后 import node:vm 仍被拒（永久封禁不受放行清单影响）', async () => {

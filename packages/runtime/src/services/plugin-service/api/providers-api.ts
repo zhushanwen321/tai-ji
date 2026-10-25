@@ -21,7 +21,7 @@ export function createProvidersApi(
 ): {
   write(params: ProviderWriteParams): Promise<{ written: true; providerId: string }>
   delete(providerId: string): Promise<{ deleted: boolean; providerId: string }>
-  credential(providerId: string): Promise<ProviderCredentialReply>
+  credential(providerId: string | { providerId: string }): Promise<ProviderCredentialReply>
 } {
   return {
     write: (params: ProviderWriteParams) =>
@@ -34,9 +34,16 @@ export function createProvidersApi(
         .request('providers.delete', { pluginId, providerId })
         .then(v => v as { deleted: boolean; providerId: string }),
 
-    credential: (providerId: string) =>
-      rpcClient
-        .request('providers.credential', { pluginId, providerId })
-        .then(v => v as ProviderCredentialReply),
+    credential: (providerId: string | { providerId: string }) => {
+      // ⑦ 调用形态归一：SDK 声明形是裸字符串，wool 系插件按其自持契约以 { providerId }
+      // 对象调用（真机 d3-r10 实测：对象直传使 wire 载荷 providerId 变成对象，宿主
+      // 非空字符串校验拒以 INVALID_PAYLOAD，插件 catch 后呈现「未接入」且零留痕——
+      // 提取成功但回读链全断）。两种形态在此归一为 wire 契约形（params.providerId =
+      // 非空字符串）；畸形载荷（对象缺 providerId）不在此拦，由宿主既有校验拒绝。
+      const id = typeof providerId === 'string' ? providerId : providerId.providerId
+      return rpcClient
+        .request('providers.credential', { pluginId, providerId: id })
+        .then(v => v as ProviderCredentialReply)
+    },
   }
 }

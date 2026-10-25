@@ -77,7 +77,7 @@ describe('plugin-sdk freeze 运行时侧（AC12 后半：runtime api 对象冻�
         onDidActivateSession: () => ({ dispose: () => undefined }),
         onEntriesInvalidated: () => ({ dispose: () => undefined }),
       },
-      events: { on: () => ({ dispose: () => undefined }), emit: () => undefined, report: async () => ({ forwarded: true }) },
+      events: { on: () => ({ dispose: () => undefined }), emit: async () => undefined, report: async () => ({ forwarded: true }) },
       tools: { register: async () => '', unregister: async () => undefined },
       hooks: {
         onBeforeSendMessage: async () => ({ dispose: () => undefined }),

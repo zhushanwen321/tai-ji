@@ -16,11 +16,11 @@
  */
 
 import { fork, type ChildProcess, type Serializable } from 'node:child_process'
-import { dirname as pathDirname } from 'node:path'
 import type { CrashJournalEvent } from '@taiji/shared'
 import { buildOutboundChildEnv } from '../../infra/spawn-env.js'
 import { getCrashJournal } from '../../infra/crash-journal.js'
 import type { ProcessHandle } from './plugin-types.js'
+import { findPackageRootDir } from './pkg-root.js'
 import { PluginRpcServer, type RpcIdentity } from './plugin-rpc-server.js'
 import { resolveAndValidateFile, dispatchHostRpcMessage, safeDispatchHostMessage, isRecordMessage } from './plugin-host.js'
 import { buildPluginCapabilityForkEnv, type PluginCapabilityForkEnvInput } from './plugin-fs-guard.js'
@@ -418,12 +418,15 @@ export class PluginHostProcess implements PluginHostProcessContract {
       )
     }
 
-    // sandbox 子进程 env：注入 TAIJI_PLUGIN_SANDBOX_DIR = dirname(pluginPath)（S1-W3
-    // dirname 修正落点，spec §3.3 D2-①：ESM loader 以 startsWith(sandboxDir + sep)
-    // 判界，目录必须传插件根目录形态。此前把入口文件路径原样注入，任何真实模块
-    // 都不可能以 `<dir>/index.js/` 开头 → 边界/黑名单/scheme 检查 0% 命中）。
-    // dirname 修正只在本宿主 env 注入处一处（activator 继续传 pluginPath 原语义），
-    // loader 的 fail-closed 语义不变（env 缺失仍 initialize throw）。
+    // sandbox 子进程 env：注入 TAIJI_PLUGIN_SANDBOX_DIR = 插件包根目录（S1-W3 修正 +
+    // ⑤ 包根修正：ESM loader 以 startsWith(sandboxDir + sep) 判界，目录必须是插件根
+    // 目录形态。两步演化——先把入口文件路径原样注入改为 dirname(pluginPath)（spec
+    // §3.3 D2-①），再发现子目录入口（真实发布形态 manifest main = src/index.ts）下
+    // dirname 落 <插件目录>/src，<插件目录>/node_modules 的裸导入被判越界激活即炸，
+    // 改为向上首个含 package.json 的祖先（findPackageRootDir，ISSUES-2 ⑤；CJS 拦截器
+    // 与清单读取器消费同一 helper，三处同源）。找不到 package.json 回落入口目录——
+    // 边界退化为入口目录，不放大既有 fail-closed 面。loader 的 fail-closed 语义不变
+    // （env 缺失仍 initialize throw）。
     // trusted 不需要（ESM loader 仅 sandbox 进程经 execArgv --import 注入；
     // trusted 走 Worker 线程不经此 fork 路径）。
     // D6（docs/architecture/env-propagation-boundary.md §5-U4）：{...process.env} 全量拷贝对
@@ -438,7 +441,7 @@ export class PluginHostProcess implements PluginHostProcessContract {
       capInput ? buildPluginCapabilityForkEnv(capInput) : undefined,
     )
     if (trustLevel === 'sandbox' && pluginPath) {
-      env.TAIJI_PLUGIN_SANDBOX_DIR = pathDirname(pluginPath)
+      env.TAIJI_PLUGIN_SANDBOX_DIR = findPackageRootDir(pluginPath)
     }
 
     let child: ChildProcess

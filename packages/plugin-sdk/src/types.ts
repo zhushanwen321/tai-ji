@@ -431,8 +431,8 @@ export interface HookResult {
  * 分层标注（IF2）：
  * - @stable — 稳定契约范围（Phase1AgentAPI 核心部分 storage/notify/sessions、
  *   PermissionConstants、PluginRpcErrorCodes、Disposable、SessionInfo、PluginStateStorage）
- * - @experimental — 已显式降级的 API（events 插件间事件总线：未实现，调用即抛
- *   NOT_IMPLEMENTED；已移出稳定面）
+ * - @experimental — 已显式降级的 API（events.on 插件间事件总线订阅侧：未实现，调用即抛
+ *   NOT_IMPLEMENTED；已移出稳定面。emit/report 走 plugin.event 上报通道，真实可用）
  * - @proposed — 演进中 API（Phase2AgentAPI 扩展范围 tools/hooks/config/sessionData/
  *   ui/agent/workspace、ToolRegistration、HookEntry 等）
  * - @internal — runtime 内部塑形对象（WorkerHandle、PluginContext、Bridge* 等；
@@ -559,14 +559,15 @@ export interface Phase1AgentAPI {
     ): Disposable
   }
   /**
-   * @experimental — 插件间事件总线**未实现**（plugin.event.* 通知全仓无生产方，
-   * 曾是 SDK 稳定面上的死链路，2026-08 显式降级）。调用 events.on/emit 即抛
-   * NOT_IMPLEMENTED（带 issue 指引）。等出现真实消费方再设计实现；订阅 session
-   * 生命周期请用 api.sessions.onDidCreateSession / onDidDestroySession（已实现）。
+   * @experimental — events 面：on（插件间事件总线订阅侧）**未实现**，调用即抛
+   * NOT_IMPLEMENTED（带 issue 指引）。emit 已接入 plugin.event 上报通道（D5 推补充，
+   * 与 report 同一宿主出线——channel/payload 宿主校验后广播 'plugin:event' 帧）；
+   * 校验错误以 rejection 回到插件侧。订阅 session 生命周期请用
+   * api.sessions.onDidCreateSession / onDidDestroySession（已实现）。
    */
   readonly events: {
     on(event: string, handler: (data: unknown) => void): Disposable
-    emit(event: string, data: unknown): void
+    emit(event: string, data: unknown): Promise<void>
   }
 }
 
@@ -799,7 +800,8 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
    * [provider-plugin-access D9] events 面扩展：report 为插件 → renderer 的业务事件
    * 上报出口（宿主 RPC `plugin.event`，宿主校验后广播 `plugin:event` 帧给 renderer；
    * 首个消费方 = 凭据状态上报，D5——宿主只转发不解释，channel/payload 语义由插件与
-   * 消费方自定）。Phase1 的 on/emit（插件间事件总线）维持未实现语义不变。
+   * 消费方自定）。Phase1 的 emit 与 report 同走 plugin.event（D5 推补充通道）；
+   * on（插件间事件总线订阅侧）维持未实现语义不变。
    */
   readonly events: Phase1AgentAPI['events'] & {
     report(channel: string, payload: unknown): Promise<{ forwarded: boolean }>
@@ -874,8 +876,12 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
     write(params: ProviderWriteParams): Promise<{ written: true; providerId: string }>
     /** 删除本命名空间的 provider 条目（卸载编排消费；条目不存在时如实回 {deleted:false}）。 */
     delete(providerId: string): Promise<{ deleted: boolean; providerId: string }>
-    /** 受控明文回读（授权后状态/额度查询、401 复检；不广播、不落日志、不进快照）。 */
-    credential(providerId: string): Promise<ProviderCredentialReply>
+    /**
+     * 受控明文回读（授权后状态/额度查询、401 复检；不广播、不落日志、不进快照）。
+     * 调用形态两可：裸字符串（SDK 声明形）或 `{ providerId }` 对象（wool 系插件
+     * 自持契约形，ISSUES-2 ⑦）——代理层归一为 wire 字符串形，两态同达。
+     */
+    credential(providerId: string | { providerId: string }): Promise<ProviderCredentialReply>
   }
   readonly agent: {
     /** U6 回执：resolve 生效模型复合串（pi pattern 换模时 ≠ 请求值；降级路径空串） */
