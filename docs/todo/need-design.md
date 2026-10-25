@@ -68,15 +68,9 @@
 
 ### 6. subagent-core D1 反向值边收编
 
-状态：已裁决立项（2026-10-23：不留长期豁免，不能有反向依赖），收编设计进行中（产物 `.tmp/need-design-batch/`）。
+状态：已解决（2026-10-23 裁决不留长期豁免、全部消除；同日落地并经 refactor-subagent-workflow-solid 合入 dev-0.11.16——commit d2e3d377e「clear remaining production reverse edges (D1-U3)」+ c532de35d「enforce zero reverse dependency edges (D1-U4)」）——残余 1（subagent-service 值导入 latestModelOverride）落地形态 = execution 侧单源：本体迁 `execution/persistence/run-event-journal.ts`（与 scanRunEvents 同域的读侧折叠原语），原址 `orchestration/run-events.ts` 留壳 re-export（resume-run / barrel / 测试消费方零改动），subagent-service 直连新址、原豁免注记删除；残余 2（model-switch-wiring 值导入 projectRunRegistryEvents）消费消除：assertRunNotTerminalForSwitch 终局判法从 run-registry fold 派生视图改为直读 run-settled 帧（run-event-journal 新具名导出 findRunSettledEvent），错误文案逐字节不变；残余 3（entry-guards SLUG_MAX_LENGTH 改直连 shared/run-vocabulary.ts）= just-do-it 条目 55。固化：零反向边（值边与类型边同等拦截，生产与测试无豁免）为机器检查 check-subagent-core-value-cycles.mjs 判据二（约束 C-data-27，pre-commit + CI 双接线）。2026-10-25 复核：检查 0 反向边 / 0 值环、包测试 4129 通过 0 失败、tsc --noEmit 零错误。
 
-来源：subagent-core-d1-residual-edges.md（残余 1、2；残余 3 随手改已入 just-do-it 条目 55）。
-
-问题：D1（execution → orchestration 反向依赖拆边）后残留 2 条显式豁免反向值边：`execution/subagent-service.ts:116` 值导入 `orchestration/run-events.ts` 的 `latestModelOverride`（注释显式登记有意豁免）、`execution/service/model-switch-wiring.ts:15` 值导入 `orchestration/run-registry.ts` 的 `projectRunRegistryEvents`（无显式豁免注记）。
-
-候选方向：收进 execution 侧单源（或改经端口接口），兑现 D1 终态「反向边收窄为端口接口」；或经用户裁决登记为长期豁免。
-
-开放问题：登记原判断「低优先」，需裁决收编 or 长期豁免。
+来源：subagent-core-d1-residual-edges.md（已解决，本条即其终态；残余 3 随手改见 just-do-it 条目 55）。
 
 ### 7. workflow-viz 两项交互/算法设计
 
