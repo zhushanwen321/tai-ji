@@ -1110,6 +1110,9 @@ async function main(): Promise<void> {
     // [A2 D-A2-2] skillNotice 广播通道（deliverText 注入的 notice 发布用）；组合根
     // messageBus 恒就绪，getter 形态与 SessionRecordsDeps 装配同款。
     getMessageBus: () => messageBus,
+    // [remote-use-mobile-v2 §6.3 fallback] prompt 受理写点补发整表广播（未读「新投递」
+    // 触发源）：与 handoffService 装配同款注入（server.broadcastSessionList 整表通道）。
+    broadcastSessionList: () => server.broadcastSessionList(),
     // notify-once D2 受理回执（P9 帧序：内核同栈于 port.send 受理回调触发，先于 settled 帧）。
     onSettledMessage: (_sid, msg, outcome) => {
       const meta = msg.meta

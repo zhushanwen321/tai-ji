@@ -83,6 +83,13 @@ export interface SessionDeliveryDeps {
   /** MessageBus 当前值（skillNotice 广播 + 投递失败 message.error 用） */
   getMessageBus(): IMessageBus | null
   /**
+   * 整表会话列表广播（remote-use-mobile-v2 §6.3 fallback）：prompt 受理（deliverOne 尾部
+   * markSessionActive 后）补发既有 config.sessions 帧——未读信号的「新投递」触发源
+   * （客户端 lastActiveAt diff 消费）。缺席（未注入）= no-op，既有测试装配零变化。
+   * 生产 = 组合根传 server.broadcastSessionList。
+   */
+  broadcastSessionList?(): void
+  /**
    * 磁盘 outbox store 装配（§3.8 波 4，每 session 一个实例）：返回 undefined = 无持久化存储的一侧
    * （v2 行为，既有测试装配缺省零变化）。生产 = 组合根传 createDiskDeliveryStoreForSession；
    * 测试可注入内存替身或 undefined。
@@ -1021,6 +1028,16 @@ export function createSessionDeliveryRegistry(
     // [occupancy 置位退役] 记账-only（dispatching 置位归 prompt 发起前的 markDispatchingIfIdle，
     // 竞态根因见 markSessionActive 注释——handled 终局回落语义由上方 settleDispatching 承担）
     markSessionActive(sessionId)
+    // [remote-use-mobile-v2 §6.3 fallback] prompt 受理即整表广播（既有 config.sessions
+    // 通道补发，不加新事件类型）：未读信号的「新投递」触发源——客户端以 lastActiveAt
+    // 推进 diff 点亮非活跃会话未读。频度契约 = 每次投递受理恰好一帧（事件边界去重，
+    // 禁定时器合帧；护栏单测 broadcast-session-list-fanout.test.ts 钉住）。广播失败不
+    // 影响投递受理回执（推补充通道 best-effort，ADR-0097——丢失由重连快照/整表拉取收敛）。
+    try {
+      deps.broadcastSessionList?.()
+    } catch (e) {
+      warn('broadcastSessionList failed (non-blocking), sid=', sessionId, e)
+    }
   }
 
   /**
