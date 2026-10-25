@@ -78,6 +78,25 @@ export async function pollVisible(page, selector, { timeoutMs = 10_000, interval
 }
 
 /**
+ * 条件轮询等待一个定位器消失（pollVisible 的对偶：命中「不可见」即返 true，超时返 false）。
+ * 用于「消失是延迟事件」的断言——恢复类重路径（resync → 惰性恢复 spawn pi，秒级）下
+ * 徽标不会在点击后立即离场，「等出现 + 取反」形态会在首查命中时立即误判残留。
+ */
+export async function pollGone(page, selector, { timeoutMs = 10_000, intervalMs = 100 } = {}) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const visible = await page
+      .locator(selector)
+      .first()
+      .isVisible()
+      .catch(() => false)
+    if (!visible) return true
+    if (Date.now() >= deadline) return false
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+}
+
+/**
  * protocol session.list 回复展平成 SessionSummary[]（groups[].sessions 单层展开）。
  */
 export function flattenSessions(reply) {

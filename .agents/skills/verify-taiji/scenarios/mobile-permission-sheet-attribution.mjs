@@ -18,7 +18,7 @@
  *      流内「已拒绝本次权限请求」+ B: resolved 帧 + plugin.list 不 ACTIVE；
  *   ② toggle → 请求 #2 → 进聊天页经待授权条（chat-permission-bar）打开 Sheet → Allow →
  *      流内「已允许本次权限请求」+ B: resolved 帧 + plugin.list status=active（批准后激活放行）；
- *   ③ revokePermissions + toggle → 请求 #3 → 不作答等待到期 → B: expired 帧 + Sheet 自动关 +
+ *   ③ 插件 B（从未批准过）toggle → 请求 #3 → 不作答等待到期 → B: expired 帧 + Sheet 自动关 +
  *      错误条「请求已过期」+ plugin.list 不 ACTIVE（超时取消非判拒，UNLOADED）。
  */
 import fs from 'node:fs'
@@ -34,10 +34,16 @@ import {
 } from './lib/mobile-drive.mjs'
 
 const PLUGIN_ID = 'mobile-perm-demo'
+// 插件 B 只服务段 3（过期路径）：approve 会 grant+save，A 批准后再触发同插件的门需要
+// revoke——而 plugin.revokePermissions 会把 descriptor.permissions 一并清空（内存 manifest
+// 被改），此后该插件的激活恒跳过权限门（跑 5 实测：revoke+toggle 后无请求且 status=active）。
+// 用从未批准过的 B 触发全新权限门验过期，绕开该语义。
+const PLUGIN_ID_B = 'mobile-perm-demo-b'
 // 权限名必须是词表内可归一的完整方法名（shared/plugin-permission-map 的
 // normalizePermissionInput：未知名归一为空 → 被滤出 unapproved → 权限门静默放行，
 // 首跑实测 providers.list 不在词表内导致门未触发）
 const PERMISSIONS = ['plugin.storage.global.get']
+const PERMISSIONS_B = ['plugin.storage.global.set']
 const PERM_TIMEOUT_MS = 45_000
 
 /** 场景模块 import 阶段执行（先于 runner 的 instance.launch——插件发现在 launch 期 scan）。 */
@@ -62,15 +68,15 @@ function resolveDataDirFromArgv() {
 }
 
 /** 落盘 fixture 插件（sandbox external 一律需审批；activateBody 空实现——批准后激活零 RPC 依赖）。 */
-function seedPermissionGatePlugin(dataDir) {
-  const dir = path.join(dataDir, 'plugins', PLUGIN_ID)
+function seedPermissionGatePlugin(dataDir, pluginId, permissions) {
+  const dir = path.join(dataDir, 'plugins', pluginId)
   fs.mkdirSync(dir, { recursive: true })
   const pkg = {
-    name: '@verify/mobile-perm-demo',
+    name: `@verify/${pluginId}`,
     version: '0.1.0',
     private: true,
     type: 'module',
-    displayName: 'MobilePermDemo (verify fixture)',
+    displayName: `${pluginId} (verify fixture)`,
     description: 'A7 permission gate fixture: activation stalls on approval gate',
     taijiPlugin: {
       manifestVersion: 1,
@@ -78,7 +84,7 @@ function seedPermissionGatePlugin(dataDir) {
       // 置空激活事件：启动期 handleEvent 不自动激活，激活时机由剧本 plugin.toggle 直触——
       // 壳连接时序与请求广播时序解耦（broadcast 只投递已连接端，启动期自发弹会错过壳）
       activationEvents: [],
-      permissions: PERMISSIONS,
+      permissions,
     },
   }
   fs.writeFileSync(path.join(dir, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
@@ -91,7 +97,8 @@ function seedPermissionGatePlugin(dataDir) {
 }
 
 const seedDir = resolveDataDirFromArgv()
-seedPermissionGatePlugin(seedDir)
+seedPermissionGatePlugin(seedDir, PLUGIN_ID, PERMISSIONS)
+seedPermissionGatePlugin(seedDir, PLUGIN_ID_B, PERMISSIONS_B)
 
 export const meta = {
   id: 'mobile-permission-sheet-attribution',
@@ -106,7 +113,7 @@ export const meta = {
   },
   env: { TAIJI_PLUGIN_PERMISSION_TIMEOUT_MS: String(PERM_TIMEOUT_MS) },
   provable: [
-    'C：fixture 插件落盘 <dataDir>/plugins/mobile-perm-demo（声明 permissions、activationEvents 置空）',
+    'C：fixture 插件落盘 <dataDir>/plugins/mobile-perm-demo(-b)（声明 permissions、activationEvents 置空）',
     'B：plugin.toggle 触发激活链停在权限门——plugin:permissionRequest 广播 {pluginId, permissions, requestId} 且无 sessionId 字段（§6.18 V-6 降级协议事实）',
     'A：请求到达时壳在会话列表页，Sheet 即全局弹出（挂壳根级、无会话归属锚点；scope-hint 文案含「不归属特定会话」）',
     'A：权限作用域逐条呈现（permission-sheet-perm-providers.list）；「拒绝」按钮几何位置在「允许」左侧（安全侧在左）',
@@ -125,6 +132,7 @@ export async function run(ctx) {
   const { protocol, ev, log, dataDir } = ctx
   const uncovered = []
   const gotchas = [
+    '过期路径用第二个从未批准的 fixture 插件触发：approve 持久化 grant 后重触发同插件恒跳过门，revoke 通道又会把 descriptor.permissions 清空使门永久失效（跑 5 实测）',
     'permissionRequest 广播只投递已连接端——fixture 的 activationEvents 置空 + plugin.toggle 直触激活，把广播时机压到壳连接之后（启动期自发弹会被壳错过且无快照补拉）',
     '审批等待到期 env（TAIJI_PLUGIN_PERMISSION_TIMEOUT_MS）是请求粒度：每条请求从各自审批门起算 45s，三段路径互不影响',
     'deny 语义 = 拒绝本次申请不持久化（plugin.denyPermissions 只 resolve pending），二次 toggle 会重新弹审批；approve 才 grant+save',
@@ -132,8 +140,9 @@ export async function run(ctx) {
 
   // C：fixture 落盘取证（import 阶段已写，此处取事实）
   const fixtureDir = path.join(dataDir, 'plugins', PLUGIN_ID)
-  const fixtureSeeded = fs.existsSync(path.join(fixtureDir, 'package.json')) && fs.existsSync(path.join(fixtureDir, 'index.js'))
-  ev.assert('C: fixture 插件已落盘（package.json + index.js，launch 前）', fixtureSeeded, {
+  const fixtureDirB = path.join(dataDir, 'plugins', PLUGIN_ID_B)
+  const fixtureSeeded = fs.existsSync(path.join(fixtureDir, 'package.json')) && fs.existsSync(path.join(fixtureDir, 'index.js')) && fs.existsSync(path.join(fixtureDirB, 'package.json'))
+  ev.assert('C: 双 fixture 插件已落盘（package.json + index.js，launch 前）', fixtureSeeded, {
     channel: 'C', expected: `${fixtureDir}/ 发现场`, actual: fixtureSeeded ? '两文件均在' : 'fixture 缺失（import 阶段 seed 未生效？）',
   })
 
@@ -208,6 +217,20 @@ export async function run(ctx) {
       channel: 'A', expected: 'deny.x < approve.x', actual: `deny.x=${denyBox && Math.round(denyBox.x)} approve.x=${approveBox && Math.round(approveBox.x)}`,
     })
 
+    // Deny（V7 正典路径：Esc 关 Sheet 视图（请求保留）→ 进聊天页经待授权条重开 → 聊天
+    // 上下文内拒绝——通知插当前活跃会话分区，重进聊天会经历史刷新冲掉内存态通知（跑 6
+    // 实测：列表页拒绝后重进聊天，通知被刷新清除），故拒绝动作必须发生在聊天页内）
+    await shell.page.keyboard.press('Escape')
+    const sheetViewClosed = await pollFor(async () => !(await shell.page.locator('[data-testid="permission-sheet-deny"]').isVisible().catch(() => false)), { timeoutMs: 10_000 })
+    const enteredForDeny = await openSessionByRow(shell.page, sid)
+    const permBar1 = enteredForDeny ? await pollVisible(shell, 'chat-permission-bar', { timeoutMs: 15_000 }) : false
+    ev.assert('A: Esc 关视图后请求保留——聊天页待授权条在场（关闭≠取消呈现契约）', permBar1 && sheetViewClosed, {
+      channel: 'A', expected: 'chat-permission-bar 可见（请求未随视图关闭被取消）', actual: `escClosed=${sheetViewClosed} bar=${permBar1}`,
+    })
+    if (permBar1) {
+      await clickTestid(shell, 'chat-permission-bar')
+      await pollVisible(shell, 'permission-sheet-permissions', { timeoutMs: 10_000 })
+    }
     // Deny（韧性点击；失败取证：sheet 是否还在/错误条/时间线——呈现面曾观察到持续微重渲染）
     const denyClickAt = Date.now()
     try {
@@ -242,13 +265,12 @@ export async function run(ctx) {
     ev.assert('B: 拒绝后插件未激活（status≠active，UNLOADED 终态）', statusAfterDeny !== null && statusAfterDeny !== 'active', {
       channel: 'B', expected: 'status ≠ active', actual: `status=${statusAfterDeny}`,
     })
-    const enteredAgain = await openSessionByRow(shell.page, sid)
-    const deniedNotice = enteredAgain ? await pollTextIn(shell, 'mobile-message-stream', '已拒绝本次权限请求', { timeoutMs: 15_000 }) : false
+    const deniedNotice = enteredForDeny ? await pollTextIn(shell, 'mobile-message-stream', '已拒绝本次权限请求', { timeoutMs: 15_000 }) : false
     ev.assert('A: 流内插入「已拒绝本次权限请求」动作通知（§6.20，动作回执成立点插入）', deniedNotice, {
       channel: 'A', expected: '流内含「已拒绝本次权限请求」', actual: deniedNotice ? '在' : '15s 未现（现场见截图）',
     })
     await ev.shot(shell.page, 'a7-denied-notice')
-    if (enteredAgain) await backToList(shell.page)
+    if (enteredForDeny) await backToList(shell.page)
 
     // ── 段 2：请求 #2 → Esc 关视图（请求保留）→ 聊天页待授权条重开 → 允许 → 激活放行 ──
     since = protocol.events.length
@@ -294,16 +316,14 @@ export async function run(ctx) {
     await ev.shot(shell.page, 'a7-approved-notice')
     if (enteredChat2) await backToList(shell.page)
 
-    // ── 段 3：请求 #3 → 不作答等到期（env 缩短 45s）→ 过期撤窗 ──
-    // 批准后插件已 ACTIVE（激活幂等早退不会再过权限门）：先 disable（UNLOADED）再
-    // revoke（清 grant+save）再 enable，权限门才会重新拦截。
+    // ── 段 3：请求 #3（插件 B，从未批准过）→ 不作答等到期（env 缩短 45s）→ 过期撤窗 ──
+    // A 已批准（grant+save 持久化，重触发恒跳过门）；revoke 通道会把 descriptor.permissions
+    // 一并清空使门永久失效（跑 5 实测），故过期路径用全新插件 B 触发。
     since = protocol.events.length
-    await protocol.call('plugin.toggle', { pluginId: PLUGIN_ID, enabled: false }) // disable 无门等待，可阻塞
-    await protocol.call('plugin.revokePermissions', { pluginId: PLUGIN_ID })
-    const toggle3 = fireToggle(protocol, PLUGIN_ID, true)
+    const toggle3 = fireToggle(protocol, PLUGIN_ID_B, true)
     const req3 = await waitForFrame(protocol, 'plugin:permissionRequest', since, { timeoutMs: 30_000 })
-    ev.assert('B: revoke 后三次激活再次弹审批（权限门重新拦截）', req3 !== null, {
-      channel: 'B', expected: 'plugin:permissionRequest 帧', actual: req3 ? `requestId=${req3.payload?.requestId ?? ''}` : '30s 未到',
+    ev.assert('B: 未批准插件 toggle 触发权限门（plugin:permissionRequest 再次广播）', req3 !== null, {
+      channel: 'B', expected: `plugin:permissionRequest（pluginId=${PLUGIN_ID_B}）`, actual: req3 ? `requestId=${req3.payload?.requestId ?? ''} pluginId=${req3.payload?.pluginId ?? ''}` : '30s 未到',
     })
     const sheet3 = await pollVisible(shell, 'permission-sheet-permissions', { timeoutMs: 20_000 })
     ev.assert('A: 第三次请求 Sheet 再现（不作答等待到期）', sheet3, {
@@ -313,12 +333,17 @@ export async function run(ctx) {
     ev.assert(`B: 审批等待到期撤窗广播（TAIJI_PLUGIN_PERMISSION_TIMEOUT_MS=${PERM_TIMEOUT_MS}）`, expiredFrame !== null, {
       channel: 'B', expected: 'plugin:permissionRequestExpired', actual: expiredFrame ? `requestId=${expiredFrame.payload?.requestId ?? ''}` : '超时未到',
     })
+    // 错误条先轮询（controller 撤 pending 与 companion-bridge 呈现联动是两个订阅者，双帧
+    // 下发时 App 关层 watch 可能先行——错误条「请求已过期」的呈现窗口在此给 5s）
+    const expiredBarText = await pollFor(async () => {
+      const t = await textOf(shell, 'mobile-error-bar-text')
+      return typeof t === 'string' && t.includes('请求已过期') ? t : null
+    }, { timeoutMs: 5_000 })
     const sheetAutoGone = await pollFor(async () => !(await shell.page.locator('[data-testid="permission-sheet-deny"]').isVisible().catch(() => false)), { timeoutMs: 15_000 })
-    const expiredBarText = await textOf(shell, 'mobile-error-bar-text')
-    ev.assert('A: 到期后 Sheet 自动关 + 错误条「请求已过期」（不把过期请求提交成成功）', sheetAutoGone === true && typeof expiredBarText === 'string' && expiredBarText.includes('请求已过期'), {
-      channel: 'A', expected: 'sheet 收起 ∧ 错误条含「请求已过期」', actual: `sheetGone=${sheetAutoGone} errorBar=${expiredBarText ?? '(无)'}`,
+    ev.assert('A: 到期后 Sheet 自动关 + 错误条「请求已过期」（不把过期请求提交成成功）', sheetAutoGone === true && expiredBarText !== null, {
+      channel: 'A', expected: 'sheet 收起 ∧ 错误条含「请求已过期」', actual: `sheetGone=${sheetAutoGone} errorBar=${expiredBarText ?? await textOf(shell, 'mobile-error-bar-text') ?? '(无)'}`,
     })
-    const statusAfterExpire = await pluginStatus(protocol, PLUGIN_ID)
+    const statusAfterExpire = await pluginStatus(protocol, PLUGIN_ID_B)
     ev.assert('B: 到期是取消非判拒（插件未激活，重触发可再弹）', statusAfterExpire !== 'active', {
       channel: 'B', expected: 'status ≠ active（UNLOADED，非 rejected 记录）', actual: `status=${statusAfterExpire}`,
     })

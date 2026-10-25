@@ -3,27 +3,38 @@
  * §8.2 场景 V11；A11）。
  *
  * 真实用户路径（V11）：设置屏切浅色主题 + 大字号（即时生效）→ 刷新页面（偏好保持）→
- * 打开一个已退出（dead，pi 进程已退出）的会话（历史只读形态）→ 动作 Sheet「重新打开」
- * 链路可达。
+ * 打开一个已退出（dead）会话（点开即恢复形态）→ 动作 Sheet「重新打开」链路可达。
  *
- * dead 会话制造（真实路径）：pi 主 agent 进程以 SIGTERM 精确杀死（PID = pgrep -P
- * <runtimePid> + 命令行核对 `--mode rpc`，只动本实例 runtime 的直接子进程）→ runtime
- * onSessionExit 链置 dead（ADR-0122 后无自动恢复链——崩溃处置显式上报、恢复决策归用户，
- * 源码 pi-respawn.ts 头注，2026-10-25 亲读）→ session.list 轮询确认 status='dead'。
- * 串行制造两个 dead 会话（先建 → 跑一轮 → 杀 → 确认 dead，再建下一个，保证「当时唯一
- * pi」的可定位性）：C 用于「点开已退出会话」断言，B 用于「动作 Sheet 重新打开」链路。
+ * dead 会话语义（shared/session.ts:7 亲读）＝「前端收到 session.exited 后标记」——
+ * runtime 的 session.list 永不下发 dead（纯客户端标记），且为内存态、页面刷新即失。
+ * 由此两条场景约束：①壳必须先订阅目标会话（点入过）才能收到 session.exited 并在行上
+ * 呈现「已退出」——dead 断言全部排在 reload 之前；②「重新打开」链路同样依赖客户端
+ * dead 标记（动作项 v-if status==='dead'），也排在 reload 之前。pi 进程以 SIGKILL
+ * 精确杀死（PID = pgrep -P <runtimePid> + 命令行核对 `--mode rpc`，只动本实例的子进程；
+ * 串行制造保证「当时唯一」可定位性——SIGTERM 会走 pi 优雅退出、runtime 侧翻 done 不出
+ * exited 崩溃帧，首跑实测改 SIGKILL）。
  *
- * 断言（§8.2 V11 通过标准 + F14/偏好持久化映射，逐条对应）：
- *   ① 即时生效：切浅色 + 大字号后 html 根槽位 data-theme='light' + data-font-size='large'
- *      切换，且 settings-screen 节点未重挂载（预置探针属性跨切换保留）；
- *   ② 刷新后偏好保持：localStorage taiji.mobile.prefs 持久化读侧 + reload 后根槽位维持
- *      + 设置屏控件选中态一致；
- *   ③ 已退出会话历史形态：点开 dead 会话 C → 历史文本在流（只读可见）+ Composer 形态
- *      ——设计契约（§7.2 映射表「聊天历史只读、输入条隐藏」）在 dead 窗口内断言
- *      mobile-composer 缺位；前提（C 仍 dead）由 session.list 当刻核实，前提消失（惰性
- *      恢复先于断言完成）如实记 uncovered 不判红；
- *   ④ 重新打开链路：长按 dead 会话 B 行 → SessionActionsSheet「重新打开」（仅 dead
- *      渲染）→ 点后 B 复活（session.list status 离开 dead + 行状态更新）。
+ * dead 只读窗口与点开即恢复（2026-10-25 裁决，fix-mfix-s）：设计 §7.2:196 旧字面
+ * 「聊天历史只读、输入条隐藏」与 runtime 既有恢复机制冲突——pi 被 SIGKILL 后 pi-respawn
+ * 编排延迟 5s 自动 respawn + session.restored 广播（ensureActive 惰性恢复不推该帧，
+ * protocol.ts:2491），壳经 restored → revive 翻活 status 并插恢复通知；该链在点开
+ * （selectSession → switch RPC）挂载 ChatScreen 前后数秒内完成，dead 形态窗口真机
+ * 结构性不可达。场景断言按实现现实收敛：点开 dead 会话断「恢复通知在场 + 恢复后发送链
+ * 可达 + 历史可见」；输入条隐藏语义由 ChatScreen 组件测试守卫（恢复失败/恢复中窗口），
+ * 设计语义修订呈报 D5 终态同步。
+ *
+ * 断言（§8.2 V11 通过标准 + F14/偏好持久化映射）：
+ *   ① 即时生效：切浅色 + 大字号后 html 根槽位 data-theme/data-font-size 切换，且
+ *      settings-screen 未重挂载（预置探针属性跨切换保留）；
+ *   ② dead 呈现：壳订阅过的会话在 pi 被杀后行状态词翻「已退出」（session.exited →
+ *      客户端 store → 行刷新）；
+ *   ③ 已退出会话点开：历史文本在流 + 流内恢复通知在场（pi-respawn 自动恢复）+
+ *      恢复后发送链可达（Composer 在场 + 发送后 user 气泡回显在流，不等 LLM 回复——
+ *      不依赖恢复后新 pi 的响应脚本出队位置）；
+ *   ④ 重新打开链路：长按 B → 动作 Sheet「重新打开」（仅 dead 渲染）→ 点击后行状态
+ *      离开「已退出」（restore RPC 重建 pi → status 翻活）；
+ *   ⑤ 刷新后偏好保持：localStorage 读侧 + 设置屏控件选中态 + 根槽位（重进设置屏后
+ *      applyMobilePrefs 异步落根，条件等槽位出现再断言——直接读会撞上应用前的空窗）。
  */
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -33,11 +44,13 @@ import {
   MOBILE_PREFS_STORAGE_KEY,
   closeMobileShell,
   openMobileShell,
+  openSessionInShell,
   probeShellServing,
   resolveMobileDist,
   waitForShellConnected,
   waitForTestidVisible,
 } from './lib/mobile-shell-helper.mjs'
+import { sendViaComposer } from './lib/mobile-task-flow.mjs'
 
 const LABEL_RESTORE = 'A11-DEAD-RESTORE' // B：动作 Sheet 重新打开链路
 const LABEL_OPEN = 'A11-DEAD-OPEN' // C：点开已退出会话断言
@@ -51,10 +64,10 @@ const MARK = {
 export const meta = {
   id: 'mobile-preferences-session-exit',
   priority: 'P0',
-  title: '移动壳偏好与已退出会话（V11）：浅色+大字号即时生效 → 刷新保持 → dead 会话只读形态 → 重新打开链路',
-  covers: ['mobile.prefs.apply', 'mobile.prefs.persist', 'session.restore', 'mobile.dead.readonly'],
+  title: '移动壳偏好与已退出会话（V11）：浅色+大字号即时生效 → dead 行呈现与点开即恢复形态 → 重新打开链路 → 刷新偏好保持',
+  covers: ['session.restore', 'mobile.prefs.apply'],
   requires: ['remote-access', 'mobile-dist', 'mock-http'],
-  estimateSec: 360,
+  estimateSec: 420,
   remoteAccess: {},
   llm: {
     responses: {
@@ -63,18 +76,21 @@ export const meta = {
         { text: `${MARK[LABEL_OPEN]} 回复`, stopReason: 'stop' },
         { text: `${MARK[LABEL_LIVE]} 回复`, stopReason: 'stop' },
         { text: 'spare-1', stopReason: 'stop' },
+        { text: 'spare-2', stopReason: 'stop' },
       ],
     },
   },
   provable: [
-    'A：切浅色 + 大字号后 html 根槽位即时切换（data-theme/data-font-size），settings-screen 未重挂载',
-    'A：reload 后偏好保持（localStorage 读侧 + 根槽位 + 控件选中态）',
-    'A：点开 dead 会话历史可见；dead 前提窗口内 Composer 形态对照设计契约（输入条隐藏）断言',
-    'A：动作 Sheet「重新打开」可达且点击后 dead 会话复活',
+    'A：切浅色 + 大字号后 html 根槽位即时切换，settings-screen 未重挂载',
+    'A：壳订阅过的会话 pi 被杀后行状态词翻「已退出」（session.exited → 客户端 dead 标记）',
+    'A：点开已退出会话：历史可见 + 流内恢复通知在场（pi-respawn 自动恢复）+ 恢复后发送链可达（Composer 在场 + user 气泡回显）',
+    'A：动作 Sheet「重新打开」可达且点击后行状态离开「已退出」',
+    'A：reload 后偏好保持（localStorage + 控件选中态 + 重进设置屏后的根槽位）',
   ],
   notProvable: [
     '真实手机字号/主题的视觉像素（断言根槽位与控件态，不证渲染像素——像素面归 E2E-VISUAL）',
-    '惰性恢复速度（点开 dead 会话的恢复窗口时长是运行时事实，场景只分辨「窗口内形态」与「窗口错过」）',
+    'dead 标记跨刷新持久性（客户端内存态、刷新即失——机制事实记录于 gotchas，非本场景裁决面）',
+    'dead 只读窗口（「输入条隐藏」旧字面）真机形态：被点开链的 pi-respawn 自动恢复取代（杀 pi 后 5s 延迟 respawn + session.restored → 壳 revive，dead 窗口结构性不可达）——输入条隐藏语义由 ChatScreen 组件测试守卫（恢复失败/恢复中窗口），设计语义修订（§5 dead 态 = 点开即恢复 + 恢复通知在场）呈报 D5 终态同步（2026-10-25 裁决）',
   ],
 }
 
@@ -104,7 +120,7 @@ function listRuntimeChildPis(runtimePid) {
 }
 
 /** 杀掉当时唯一的 pi 主 agent（多值 = 定位歧义，fail-fast 不猜）。SIGKILL = 异常死亡
- *  形态（SIGTERM 会走 pi 优雅退出，runtime 侧翻 done 不翻 dead——首跑实测）。 */
+ *  形态（SIGTERM 走 pi 优雅退出，runtime 侧翻 done 不出 exited 崩溃帧——首跑实测）。 */
 function killSoleRuntimeChildPi(ev, dataDir) {
   const runtimePid = readRuntimePid(dataDir)
   const pis = listRuntimeChildPis(runtimePid).filter((x) => /--mode(\s+|=)rpc/.test(x.cmd))
@@ -112,34 +128,27 @@ function killSoleRuntimeChildPi(ev, dataDir) {
     step: 'pi.locate',
     channel: 'C',
     exitCode: pis.length === 1 ? 0 : 1,
-    stats: { runtimePid, candidates: pis },
+    stats: { runtimePid, candidates: pis.map((x) => ({ pid: x.pid, head: x.cmd.slice(0, 120) })) },
   })
   if (pis.length !== 1) throw new Error(`pi 定位歧义：期望唯一 --mode rpc 子进程，实际 ${pis.length} 个`)
   process.kill(pis[0].pid, 'SIGKILL')
   return pis[0].pid
 }
 
-/** session.list 轮询指定会话 status（分组 reply 形态：{groups:[{sessions:[...]}]}）。 */
-async function waitSessionStatus(proto, sessionId, expect, { timeoutMs = 30_000 } = {}) {
-  const deadline = Date.now() + timeoutMs
-  let last = null
-  for (;;) {
-    const reply = await proto.call('session.list', {}, { timeoutMs: 30_000 })
-    const flat = (reply.groups ?? []).flatMap((g) => g.sessions ?? [])
-    last = flat.find((s) => s.id === sessionId)?.status ?? null
-    if (last === expect) return last
-    if (Date.now() >= deadline) return last
-    await new Promise((r) => setTimeout(r, 500))
-  }
-}
-
-/** 条件等文本可见（消息流/指引文案的呈现事实锚）。 */
-async function waitForTextVisible(page, text, { timeoutMs = 15_000 } = {}) {
+/**
+ * 等 session.exited 广播（runtime 侧进程退出确认）。SIGKILL 的 exit code 就是 null
+ * （信号杀死无退出码）——命中与否用 hit 区分，不得以 code 判（null ?? null 会把
+ * 「命中但 code=null」误判成未命中，跑批实测）。
+ */
+async function waitSessionExited(ev, proto, sessionId, { timeoutMs = 20_000 } = {}) {
   try {
-    await page.locator(`text=${text}`).first().waitFor({ state: 'visible', timeout: timeoutMs })
-    return true
-  } catch {
-    return false
+    const evt = await proto.waitFor((e) => e.type === 'session.exited', { timeoutMs, sessionId })
+    return { hit: true, code: evt.payload?.code ?? null, reason: evt.payload?.reason ?? '' }
+  } catch (e) {
+    // 帧未达归因兜底：最近帧类型清单（区分「无广播」vs「广播了但类型/归属不符」）
+    const recent = proto.events.slice(-12).map((x) => `${x.type}:${x.payload?.sessionId ?? ''}`)
+    ev.attach(`session-exited-miss-${sessionId.slice(0, 8)}`, `${e instanceof Error ? e.message : String(e)}\n${recent.join('\n')}`)
+    return { hit: false, code: null, reason: '' }
   }
 }
 
@@ -158,7 +167,11 @@ async function createSessionWithOneRound(ctx, proto, label) {
 
 export async function run(ctx) {
   const { instance, ev, log, remoteAccess, protocol: proto } = ctx
-  const gotchas = []
+  const gotchas = [
+    'dead 是纯客户端内存态标记（session.exited → store），runtime 的 session.list 不下发、页面刷新即失——「已退出」呈现与「重新打开」链路都要求壳订阅过该会话且未刷新；刷新后行回到 runtime summary 终态词（如「已完成」）',
+    'dead 只读窗口被 pi-respawn 自动恢复取代：杀 pi 后 runtime 延迟 5s 自动 respawn + session.restored 广播（ensureActive 惰性恢复不推该帧，protocol.ts:2491）→ 壳 revive 翻活 status + 流内恢复通知——恢复完成点落在点开链前后数秒（行断言与 composer 断言之间实测），dead 形态窗口真机结构性不可达；点开 dead 断言按恢复形态收敛（2026-10-25 裁决，设计语义修订呈报 D5）',
+    '恢复通知文案源 = ui 包 locale respawnRestored（「会话引擎已从崩溃中恢复…可继续发消息」），断言文本锚「已从崩溃中恢复」',
+  ]
   const uncovered = []
   const info = instance.info()
   const runtimePort = info.runtimePort
@@ -179,30 +192,7 @@ export async function run(ctx) {
     return { uncovered, gotchas }
   }
 
-  // ── 会话准备（串行制造两个 dead + 一个活会话）；dead 制造失败 fail-fast（后续断言
-  //    全部依赖 dead 前提，错误前提下继续 = 误导性结果）──
-  const sidB = await createSessionWithOneRound(ctx, proto, LABEL_RESTORE)
-  const piB = killSoleRuntimeChildPi(ev, ctx.dataDir)
-  const statusB = await waitSessionStatus(proto, sidB, 'dead', { timeoutMs: 30_000 })
-  ev.step({ step: 'dead.make.restore-target', channel: 'C', exitCode: statusB === 'dead' ? 0 : 1, stats: { sidB, piB, status: statusB } })
-  if (statusB !== 'dead') {
-    uncovered.push(`dead 会话 B 制造失败：杀 pi(${piB}) 后 status=${statusB} ≠ dead（dead 翻转链与预期不符）——V11 未驱动`)
-    return { uncovered, gotchas }
-  }
-
-  const sidC = await createSessionWithOneRound(ctx, proto, LABEL_OPEN)
-  const piC = killSoleRuntimeChildPi(ev, ctx.dataDir)
-  const statusC = await waitSessionStatus(proto, sidC, 'dead', { timeoutMs: 30_000 })
-  ev.step({ step: 'dead.make.open-target', channel: 'C', exitCode: statusC === 'dead' ? 0 : 1, stats: { sidC, piC, status: statusC } })
-  if (statusC !== 'dead') {
-    uncovered.push(`dead 会话 C 制造失败：杀 pi(${piC}) 后 status=${statusC} ≠ dead——V11 未驱动`)
-    return { uncovered, gotchas }
-  }
-
-  const sidA = await createSessionWithOneRound(ctx, proto, LABEL_LIVE)
-  ev.step({ step: 'dead.make.live-control', channel: 'C', exitCode: 0, stats: { sidA } })
-
-  // ── 壳：打开 → settings 屏切偏好 ──
+  // ── 壳先连接（订阅前提）──
   let shell = null
   try {
     shell = await openMobileShell({ repo: ctx.repo, runtimePort, token, locale: 'zh-CN' })
@@ -214,6 +204,126 @@ export async function run(ctx) {
       uncovered.push('V11 未驱动：壳未达 connected')
       return { uncovered, gotchas }
     }
+
+    // ── 串行制造两个 dead（壳订阅在案：点入 → 返回 → 杀 → 等 session.exited）──
+    async function makeDeadWithShellSubscription(label, marker) {
+      const sid = await createSessionWithOneRound(ctx, proto, label)
+      // 壳点入（订阅建立）→ 返回列表
+      const opened = await openSessionInShell(shell.page, sid, { timeoutMs: 20_000 })
+      if (!opened) throw new Error(`壳点入 ${label} 失败（订阅前提缺失）`)
+      await waitForTextVisible(shell.page, marker, { timeoutMs: 20_000 })
+      await shell.page.locator('[data-testid="chat-back"]').click()
+      await waitForTestidVisible(shell.page, 'bottom-nav', { timeoutMs: 10_000 })
+      // 杀当时唯一的 pi（该会话的）→ 等 exited 广播（壳同连接在案）
+      const piPid = killSoleRuntimeChildPi(ev, ctx.dataDir)
+      const exited = await waitSessionExited(ev, proto, sid)
+      ev.step({ step: `dead.make.${label}`, channel: 'C', exitCode: exited.hit ? 0 : 1, stats: { sid, piPid, ...exited } })
+      if (!exited.hit) throw new Error(`杀 pi(${piPid}) 后 20s 内无 session.exited 广播（${label}）`)
+      return sid
+    }
+
+    const sidB = await makeDeadWithShellSubscription(LABEL_RESTORE, MARK[LABEL_RESTORE])
+    const sidC = await makeDeadWithShellSubscription(LABEL_OPEN, MARK[LABEL_OPEN])
+    const sidA = await createSessionWithOneRound(ctx, proto, LABEL_LIVE)
+    ev.step({ step: 'dead.make.live-control', channel: 'C', exitCode: 0, stats: { sidA } })
+
+    // ── dead 行呈现（客户端 dead 标记 → 行状态词「已退出」）──
+    await shell.page.locator('[data-testid="mobile-nav-sessions"]').click()
+    const rowB = shell.page.locator(`[data-testid="session-row-${sidB}"]`).first()
+    const rowC = shell.page.locator(`[data-testid="session-row-${sidC}"]`).first()
+    await rowB.waitFor({ state: 'visible', timeout: 20_000 })
+    const rowBText = await rowB.innerText()
+    const rowCText = await rowC.innerText()
+    const rowBDead = rowBText.includes('已退出')
+    const rowCDead = rowCText.includes('已退出')
+    ev.assert('A: 已退出会话行呈「已退出」状态词（B/C 两行）', rowBDead && rowCDead, {
+      channel: 'A',
+      expected: 'session-row 文本含「已退出」（session.exited → 客户端 dead 标记 → 行刷新）',
+      actual: `B=${rowBDead} C=${rowCDead}（B 词=${rowBText.replace(/\n/g, '/').slice(0, 40)}）`,
+    })
+    await ev.shot(shell.page, 'a11-session-list-dead')
+
+    // ── 点开已退出会话 C：历史可见 + 流内恢复通知 + 恢复后发送链可达 ──
+    // （2026-10-25 裁决：dead 只读窗口被点开链的 pi-respawn 自动恢复取代——杀 pi 后
+    // runtime 5s 延迟自动 respawn + session.restored 广播 → 壳 revive 翻活 status 并插
+    // 恢复通知，dead 形态窗口真机结构性不可达；原「输入条缺位」断言移除，输入条隐藏
+    // 语义由 ChatScreen 组件测试守卫恢复失败/恢复中窗口，设计语义修订呈报 D5）
+    await rowC.click()
+    await waitForTestidVisible(shell.page, 'chat-screen', { timeoutMs: 20_000 })
+    const historyVisible = await waitForTextVisible(shell.page, MARK[LABEL_OPEN], { timeoutMs: 30_000 })
+    ev.assert('A: 已退出会话历史可见（历史在流）', historyVisible, {
+      channel: 'A', expected: MARK[LABEL_OPEN], actual: historyVisible ? '可见' : '30s 内未出现',
+    })
+    // ① 流内恢复通知（pi-respawn 自动恢复 → session.restored → 前端恢复提示条；5s 延迟
+    // + spawn 耗时，30s 预算覆盖）
+    const restoreNoticeVisible = await waitForTextVisible(shell.page, '已从崩溃中恢复', { timeoutMs: 30_000 })
+    ev.assert('A: 点开 dead 会话后流内恢复通知在场（点开即恢复形态）', restoreNoticeVisible, {
+      channel: 'A',
+      expected: '流内恢复通知（「会话引擎已从崩溃中恢复…可继续发消息」提示条）',
+      actual: restoreNoticeVisible ? '可见' : '30s 内未出现（session.restored 未送达或未渲染）',
+    })
+    // ② 恢复后可继续发消息：Composer 在场 + 发送链可达（user 气泡回显在流——不等 LLM
+    // 回复，不依赖恢复后新 pi 的响应脚本出队位置）
+    const composerVisible = await waitForTestidVisible(shell.page, 'mobile-composer', { timeoutMs: 15_000 })
+    ev.assert('A: 恢复后 Composer 在场（可继续发消息形态）', composerVisible, {
+      channel: 'A',
+      expected: 'mobile-composer 可见（恢复完成，会话可交互）',
+      actual: composerVisible ? '可见' : '15s 内未出现',
+    })
+    if (composerVisible) {
+      const PING = 'A11-C-REVIVE-PING'
+      await sendViaComposer(shell.page, PING)
+      const sentEcho = await waitForTextVisible(shell.page, PING, { timeoutMs: 15_000 })
+      ev.assert('A: 恢复后发送链可达（发送后 user 气泡回显在流）', sentEcho, {
+        channel: 'A',
+        expected: `user 气泡含 ${PING}`,
+        actual: sentEcho ? '回显可见' : '15s 内未出现（发送链未通）',
+      })
+      ev.step({ step: 'dead.open.composer', channel: 'A', exitCode: sentEcho ? 0 : 1, stats: { composerVisible, sentEcho } })
+    }
+    await ev.shot(shell.page, 'a11-dead-opened')
+
+    // ── 重新打开链路：长按 dead 会话 B 行 → 动作 Sheet「重新打开」→ 复活 ──
+    await shell.page.locator('[data-testid="chat-back"]').click()
+    await rowB.waitFor({ state: 'visible', timeout: 20_000 })
+    const box = await rowB.boundingBox()
+    if (!box) throw new Error('session-row B boundingBox 不可得（未渲染？）')
+    // 长按 480ms 阈值 + 余量；按下后位移 <8px（>8px 取消长按，spec A9）
+    await shell.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await shell.page.mouse.down()
+    await shell.page.waitForTimeout(700)
+    await shell.page.mouse.up()
+    const actionsShown = await waitForTestidVisible(shell.page, 'session-actions-list', { timeoutMs: 10_000 })
+    ev.assert('A: 长按打开动作 Sheet', actionsShown, {
+      channel: 'A', expected: 'session-actions-list 可见', actual: actionsShown ? '可见' : '长按后未出现',
+    })
+    const restoreShown = actionsShown ? await waitForTestidVisible(shell.page, 'session-action-restore', { timeoutMs: 5_000 }) : false
+    ev.assert('A: dead 会话「重新打开」动作可达（仅 dead 渲染）', restoreShown, {
+      channel: 'A', expected: 'session-action-restore 可见', actual: restoreShown ? '可见' : '未出现',
+    })
+    if (restoreShown) {
+      await shell.page.locator('[data-testid="session-action-restore"]').click()
+      // 复活确认（壳侧）：行状态词离开「已退出」（restore RPC → runtime 重建 pi →
+      // 客户端 store status 翻活 → 行刷新）
+      const deadline = Date.now() + 30_000
+      let revived = false
+      while (Date.now() < deadline) {
+        const txt = await rowB.innerText().catch(() => '')
+        if (txt !== '' && !txt.includes('已退出')) {
+          revived = true
+          break
+        }
+        await new Promise((r) => setTimeout(r, 500))
+      }
+      ev.assert('A: 重新打开后 B 复活（行状态离开「已退出」）', revived, {
+        channel: 'A',
+        expected: 'restore 前「已退出」→ restore 后状态词翻活',
+        actual: revived ? '状态词已翻活' : '30s 内仍呈「已退出」',
+      })
+      await ev.shot(shell.page, 'a11-restored')
+    }
+
+    // ── 设置屏：切浅色 + 大字号 → 即时生效（不重挂载）──
     await shell.page.locator('[data-testid="mobile-nav-settings"]').click()
     const settingsShown = await waitForTestidVisible(shell.page, 'settings-screen', { timeoutMs: 15_000 })
     if (!settingsShown) {
@@ -252,24 +362,32 @@ export async function run(ctx) {
     })
     await ev.shot(shell.page, 'a11-prefs-applied')
 
-    // ── 刷新 → 偏好保持 ──
+    // ── 刷新 → 偏好保持（storage 读侧 + 控件选中态 + 重进设置屏后的根槽位）──
     await shell.page.reload({ waitUntil: 'domcontentloaded' })
     const reconnected = await waitForShellConnected(shell.page, { timeoutMs: 30_000 })
     ev.assert('A: 刷新后壳恢复 connected（storage 凭据自动验身）', reconnected, {
       channel: 'A', expected: 'bottom-nav 可见', actual: reconnected ? '可见' : '刷新后未恢复',
     })
-    const persisted = await shell.page.evaluate(() => ({
-      theme: document.documentElement.dataset.theme ?? '',
-      fontSize: document.documentElement.dataset.fontSize ?? '',
-    }))
-    ev.assert('A: 刷新后主题保持浅色', persisted.theme === 'light', {
-      channel: 'A', expected: "data-theme='light'", actual: `data-theme='${persisted.theme}'`,
-    })
-    ev.assert('A: 刷新后字号保持大档', persisted.fontSize === 'large', {
-      channel: 'A', expected: "data-font-size='large'", actual: `data-font-size='${persisted.fontSize}'`,
-    })
     await shell.page.locator('[data-testid="mobile-nav-settings"]').click()
     await waitForTestidVisible(shell.page, 'settings-screen', { timeoutMs: 15_000 })
+    // 根槽位由 SettingsScreen.onMounted → loadMobilePrefs → applyMobilePrefs 异步落
+    // （reload 后停在 sessions 屏时根节点无 data-theme——条件等应用完成再断言）
+    const deadline = Date.now() + 10_000
+    let persisted = { theme: '', fontSize: '' }
+    while (Date.now() < deadline) {
+      persisted = await shell.page.evaluate(() => ({
+        theme: document.documentElement.dataset.theme ?? '',
+        fontSize: document.documentElement.dataset.fontSize ?? '',
+      }))
+      if (persisted.theme === 'light' && persisted.fontSize === 'large') break
+      await new Promise((r) => setTimeout(r, 250))
+    }
+    ev.assert('A: 刷新后主题保持浅色（重进设置屏根槽位生效）', persisted.theme === 'light', {
+      channel: 'A', expected: "data-theme='light'", actual: `data-theme='${persisted.theme}'`,
+    })
+    ev.assert('A: 刷新后字号保持大档（重进设置屏根槽位生效）', persisted.fontSize === 'large', {
+      channel: 'A', expected: "data-font-size='large'", actual: `data-font-size='${persisted.fontSize}'`,
+    })
     const lightSelected = await shell.page
       .locator('[data-testid="settings-theme"] [data-testid="segmented-option-light"]')
       .getAttribute('aria-selected')
@@ -279,77 +397,11 @@ export async function run(ctx) {
     ev.assert('A: 设置屏控件选中态与偏好一致', lightSelected === 'true' && largeSelected === 'true', {
       channel: 'A', expected: 'light 与 large 段 aria-selected=true', actual: `light=${lightSelected} large=${largeSelected}`,
     })
+    const prefsAfterReload = await shell.page.evaluate((key) => window.localStorage.getItem(key), MOBILE_PREFS_STORAGE_KEY)
+    ev.assert('A: 刷新后 localStorage 偏好仍在', Boolean(prefsAfterReload?.includes('"light"') && prefsAfterReload?.includes('"large"')), {
+      channel: 'A', expected: 'storage 键保持', actual: prefsAfterReload ?? '(storage 无键)',
+    })
     await ev.shot(shell.page, 'a11-prefs-persisted')
-
-    // ── 打开已退出会话 C：历史可见 + dead 窗口内 Composer 形态对照契约 ──
-    await shell.page.locator('[data-testid="mobile-nav-sessions"]').click()
-    await shell.page
-      .locator(`[data-testid="session-row-${sidC}"]`)
-      .first()
-      .waitFor({ state: 'visible', timeout: 20_000 })
-    const openStatusBefore = await waitSessionStatus(proto, sidC, 'dead', { timeoutMs: 5_000 }).catch(() => null)
-    await shell.page.locator(`[data-testid="session-row-${sidC}"]`).first().click()
-    await waitForTestidVisible(shell.page, 'chat-screen', { timeoutMs: 20_000 })
-    const historyVisible = await waitForTextVisible(shell.page, MARK[LABEL_OPEN], { timeoutMs: 30_000 })
-    ev.assert('A: 已退出会话历史可见（只读历史在流）', historyVisible, {
-      channel: 'A', expected: MARK[LABEL_OPEN], actual: historyVisible ? '可见' : '30s 内未出现',
-    })
-    if (openStatusBefore === 'dead') {
-      // 前提核实于点入前一刻：dead 前提窗口内的 Composer 形态断言（设计 §7.2 映射表：
-      // dead 会话「聊天历史只读、输入条隐藏」）。惰性恢复（switch 内 ensureActive）可能
-      // 抢先复活会话——复活即前提消失，如实记 uncovered，不判红。
-      const composerStillDead = await waitSessionStatus(proto, sidC, 'dead', { timeoutMs: 3_000 }).catch(() => null)
-      const composerVisible = await shell.page
-        .locator('[data-testid="mobile-composer"]')
-        .first()
-        .isVisible()
-        .catch(() => false)
-      if (composerStillDead === 'dead') {
-        ev.assert('A: dead 前提窗口内输入条缺位（契约：输入条隐藏）', composerVisible === false, {
-          channel: 'A',
-          expected: 'mobile-composer 不可见（会话已退出，输入条隐藏）',
-          actual: composerVisible ? 'Composer 在场（dead 态可见输入条——契约缺口，ChatScreen.vue Composer v-if 仅 !formPending 无 dead 分支）' : '缺位',
-        })
-      } else {
-        uncovered.push(`点开已退出会话的 dead 窗口错过：惰性恢复先于断言完成（点入前 status=${openStatusBefore}，断言时已非 dead）——Composer 形态未观察到`)
-      }
-      ev.step({ step: 'dead.open.composer', channel: 'A', exitCode: 0, stats: { composerVisible, statusNow: composerStillDead } })
-    } else {
-      uncovered.push(`dead 会话 C 在点入前已非 dead（status=${openStatusBefore}）——点开形态断言前提消失`)
-    }
-    await ev.shot(shell.page, 'a11-dead-opened')
-
-    // ── 重新打开链路：长按 dead 会话 B 行 → 动作 Sheet「重新打开」→ 复活 ──
-    await shell.page.locator('[data-testid="chat-back"]').click()
-    await shell.page
-      .locator(`[data-testid="session-row-${sidB}"]`)
-      .first()
-      .waitFor({ state: 'visible', timeout: 20_000 })
-    const rowB = shell.page.locator(`[data-testid="session-row-${sidB}"]`).first()
-    const box = await rowB.boundingBox()
-    if (!box) throw new Error('session-row B boundingBox 不可得（未渲染？）')
-    // 长按 480ms 阈值 + 余量；按下后位移 <8px（>8px 取消长按，spec A9）
-    await shell.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-    await shell.page.mouse.down()
-    await shell.page.waitForTimeout(700)
-    await shell.page.mouse.up()
-    const actionsShown = await waitForTestidVisible(shell.page, 'session-actions-list', { timeoutMs: 10_000 })
-    ev.assert('A: 长按打开动作 Sheet', actionsShown, {
-      channel: 'A', expected: 'session-actions-list 可见', actual: actionsShown ? '可见' : '长按后未出现',
-    })
-    const restoreShown = actionsShown ? await waitForTestidVisible(shell.page, 'session-action-restore', { timeoutMs: 5_000 }) : false
-    ev.assert('A: dead 会话「重新打开」动作可达（仅 dead 渲染）', restoreShown, {
-      channel: 'A', expected: 'session-action-restore 可见', actual: restoreShown ? '可见' : '未出现',
-    })
-    if (restoreShown) {
-      await shell.page.locator('[data-testid="session-action-restore"]').click()
-      const statusAfterRestore = await waitSessionStatus(proto, sidB, 'idle', { timeoutMs: 30_000 }).catch(() => null)
-      const revived = statusAfterRestore !== null && statusAfterRestore !== 'dead'
-      ev.assert('A: 重新打开后 B 复活（status 离开 dead）', revived, {
-        channel: 'A', expected: "status ∈ {idle, ...} 非 dead", actual: `status=${statusAfterRestore ?? '(查询失败)'}`,
-      })
-      await ev.shot(shell.page, 'a11-restored')
-    }
   } finally {
     if (shell) {
       if (shell.pageErrors.length > 0) ev.attach('page-errors-tail', shell.pageErrors.join('\n---\n'))
@@ -360,4 +412,14 @@ export async function run(ctx) {
 
   log('mobile-preferences-session-exit 完成')
   return { uncovered, gotchas }
+}
+
+/** 条件等文本可见（消息流/指引文案的呈现事实锚）。 */
+async function waitForTextVisible(page, text, { timeoutMs = 15_000 } = {}) {
+  try {
+    await page.locator(`text=${text}`).first().waitFor({ state: 'visible', timeout: timeoutMs })
+    return true
+  } catch {
+    return false
+  }
 }

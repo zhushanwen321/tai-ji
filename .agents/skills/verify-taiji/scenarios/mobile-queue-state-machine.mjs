@@ -26,6 +26,7 @@ import {
   createTaskViaSheet,
   flattenSessions,
   openConnectedShell,
+  pollGone,
   pollVisible,
   sendViaComposer,
 } from './lib/mobile-task-flow.mjs'
@@ -436,7 +437,10 @@ export async function run(ctx) {
       expected: "runtime 日志含「resync: …」行（delivery.resync 到达：retry 重投 / already in transcript / transcript read failed 任一）",
       actual: resyncLine ? resyncLine.trim().slice(0, 160) : `35s 内未出现（含协议侧 cross-check；日志字节量 ${readLogBytes(dataDir) - logLenBefore} 前后对照）`,
     })
-    const failedGone = !(await pollVisible(page, '[data-testid="mobile-queue-state-failed"]', { timeoutMs: 20_000 }))
+    // 等待消失（pollGone）：恢复重路径（resync → 磁盘 outbox 命中 → 惰性恢复 spawn pi，
+    // 秒级）下徽标离场是延迟事件——「等出现 + 取反」形态在首查命中时立即误判残留
+    //（重试点击后 100ms 内徽标必然还在，恢复尚未完成）。
+    const failedGone = await pollGone(page, '[data-testid="mobile-queue-state-failed"]', { timeoutMs: 20_000 })
     ev.assert('A: 重试后条目离开 failed 态（mobile-queue-state-failed 消失）', failedGone, {
       channel: 'A', expected: 'failed 徽标不可见（requeue→queued 或直接 delivered）', actual: `gone=${failedGone}`,
     })
