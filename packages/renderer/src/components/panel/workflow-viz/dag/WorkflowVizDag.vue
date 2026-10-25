@@ -6,10 +6,15 @@
   标注/循环回边）→ 节点卡片（per-node 包 WorkflowVizDagNodeGuard 节点级边界）。
 
   交互：
-  - 视口（2026-10 用户裁决 fit-to-view）：打开/切换 run 时全图缩放到四周留
-    FIT_PAD_PX 空隙并居中（computeFitTransform，内容小于视口不放大 k 封顶 1）；
-    此后滚轮缩放（wheel 指数缩放，以指针为缩放中心）/ 拖拽平移照旧，实例流式
-    到达引起的节点增高不追打 fit（不与用户手势竞争，切 run 时自然重 fit）；
+  - 视口（fit/free 二态状态机，2026-10-23 设计裁决）：fit 态 = 全图自适应
+    （computeFitTransform 缩放到四周留 FIT_PAD_PX 空隙并居中，内容小于视口不放大
+    k 封顶 1；容器尺寸变化经 ResizeObserver 重新 fit——含挂载时容器未布局的
+    首次就绪补 fit）；用户接管即转 free 态——自动 fit 停用（容器变化、实例流式
+    到达引起的节点增高不追打，不与用户手势竞争），右下角出「回到全景」入口
+    （点击回 fit 态并 fit 一次，此后恢复自动 fit 直至下次接管）。接管判定：
+    拖拽位移超 PAN_THRESHOLD_PX 的 pan 与 wheel 缩放算接管，pointerdown 未移动
+    不算（纯点击）；程序化写视口（fitView 及其全部调用路径）结构性不触发接管
+    ——转 free 只存在于两个手势处理器内；切 run 重置回 fit 态；
   - 点击上抛（[2026-10-19] agent 钻取语义删除，钻取入口 = 下方实例 trace 行）：
     pending/skipped 节点（零实例、无对话可看——skipped = run 终局后零实例）与
     phase 分区 → semantic 'phase'（设计 §3.1-2 点击行为边界）；其余节点/实例行
@@ -140,8 +145,18 @@
       <p class="text-[length:var(--text-3xs)] text-neutral-dim">{{ t('panel.workflowViz.noAgentCallsHint') }}</p>
     </div>
 
-    <!-- 操作提示角标 -->
+    <!-- free 态右下角「回到全景」（接管后自动 fit 停用的唯一恢复入口）；fit 态该
+         位置为操作提示角标——两态互斥占位，零布局冲突 -->
+    <Button
+      v-if="viewMode === 'free'"
+      variant="secondary"
+      size="dense"
+      class="absolute bottom-2 right-3 h-6 gap-1 rounded-sm px-2 text-[length:var(--text-2xs)]"
+      data-testid="wfvz-dag-back-to-fit"
+      @click="backToFit"
+    >{{ t('panel.workflowViz.dagBackToFit') }}</Button>
     <span
+      v-else
       class="pointer-events-none absolute bottom-2 right-3 text-[length:var(--text-3xs)] text-neutral-faint"
       data-testid="wfvz-dag-hint"
     >{{ t('panel.workflowViz.dagZoomHint') }}</span>
@@ -152,6 +167,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { WorkflowAgentCall, WorkflowDag, WorkflowDagEdgeKind, WorkflowRunOutcome, WorkflowRunStatus } from '@taiji/shared'
+import { Button } from '@/components/ui/button'
 import { ZOOM_MIN, computeFitTransform, dagNodeHeight, layoutDag, layoutEdges } from './layout'
 import WorkflowVizDagNode from './WorkflowVizDagNode.vue'
 import WorkflowVizDagNodeGuard from './WorkflowVizDagNodeGuard.vue'
@@ -215,6 +231,17 @@ const svgRef = ref<SVGSVGElement | null>(null)
 /** 视口变换（tx/ty 平移 + k 缩放；初始与切换 run 重置时 tx 居中——见 centeredTx）。 */
 const vp = reactive({ k: 1, tx: 0, ty: 0 })
 
+/**
+ * 视口模式状态机（2026-10-23 设计裁决「fit 不追打」）：'fit' = 全图自适应态
+ * （挂载/切 run/回到全景时进入，容器尺寸变化自动重新 fit）；'free' = 用户接管态
+ * （pan 位移超阈值或 wheel 缩放触发，自动 fit 停用，直至回到全景或切 run 重置）。
+ * 转 'free' 只存在于两个用户手势处理器内（onPointerMove 的 moved 分支 / onWheel）
+ * ——程序化写视口（fitView 及其调用路径：挂载、切 run、ResizeObserver 回调、
+ * 回到全景按钮）结构性不可能触发接管。
+ */
+type ViewMode = 'fit' | 'free'
+const viewMode = ref<ViewMode>('fit')
+
 /** dag prop 未就绪（null）时布局用的空 DAG（layoutDag/layoutEdges 均纯函数不 mutate 输入）。 */
 const EMPTY_DAG: WorkflowDag = { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] }
 
@@ -260,19 +287,20 @@ const stopTone = computed<WorkflowVizDagStopTone>(() => {
   return 'neutral'
 })
 
-// 切换 run（D11：开新 run 切内容）→ 画布视口重置为新蓝图的 fit（全图居中、
-// 四周 FIT_PAD_PX 留白；此前用户 pan/zoom 过也在重置中回到 fit）
+// 切换 run（D11：开新 run 切内容）→ 视口重置为新蓝图的 fit（全图居中、四周
+// FIT_PAD_PX 留白）+ 状态机回 fit 态：此前用户 pan/zoom 接管过也在重置中放弃，
+// 此后恢复自动 fit 直至下次接管
 watch(() => props.dag, () => {
+  viewMode.value = 'fit'
   fitWhenContainerReady()
 })
 
 /**
- * fit-to-view（2026-10 用户裁决，替代原 D1「仅水平居中 k 恒 1」形态——fit 引入后
- * 全图默认完整可见不裁切）：内容缩放到四周各留 FIT_PAD_PX 空隙后居中；内容小于
- * 视口不放大（k 封顶 1，文字原生渲染）。容器尺寸无布局环境（jsdom clientWidth
- * 缺失）→ computeFitTransform 退化 k=1 平移 0，不破坏渲染。窗口 resize 不追 fit：
- * pan/zoom 可达且属用户主动交互；实例流式到达的节点增高同理不追打（不与用户手势
- * 竞争，切 run 时自然重 fit）。
+ * fit-to-view（fit 态的视口写入单源）：内容缩放到四周各留 FIT_PAD_PX 空隙后居中；
+ * 内容小于视口不放大（k 封顶 1，文字原生渲染）。容器尺寸无布局环境（jsdom
+ * clientWidth 缺失）→ computeFitTransform 退化 k=1 平移 0，不破坏渲染。实例流式
+ * 到达的节点增高不触发本函数（布局变化不改视口——free 态不与用户手势竞争，
+ * fit 态下内容仍完整可达无需重 fit）。
  */
 function fitView(): void {
   const fit = computeFitTransform(
@@ -287,51 +315,54 @@ function fitView(): void {
 }
 
 /**
- * fit 前的容器尺寸就绪闸（残余 1 竞态修复）：overlay 刚挂载时容器可能尚未布局
+ * fit 前的容器尺寸就绪闸（挂载过渡态竞态）：overlay 刚挂载时容器可能尚未布局
  * （宽高均为 0 的过渡态）——此时 fit 只得 k=1 平移 0 的退化形态（内容宽于视口
  * 即裁切）。就绪 = 任一轴有布局（> 0），与 computeFitTransform 的单轴参与口径
- * 对齐（缺席轴不参与约束、该向偏移取 0）；未就绪时经 ResizeObserver 首次非零
- * 回调补 fit——一次性（回调后即断开观察器），「窗口 resize 不追 fit」的用户
- * 裁决不变；环境无 ResizeObserver（jsdom）时不补，维持既有退化口径。
+ * 对齐（缺席轴不参与约束、该向偏移取 0）；未就绪时不 fit，由持续 ResizeObserver
+ * 在 fit 态下首次非零尺寸回调补 fit。
  */
-let pendingFitObserver: ResizeObserver | null = null
-
 function containerSizeReady(): boolean {
   const el = svgRef.value
   return (el?.clientWidth ?? 0) > 0 || (el?.clientHeight ?? 0) > 0
 }
 
 function fitWhenContainerReady(): void {
-  if (containerSizeReady()) {
-    fitView()
-    return
-  }
-  if (pendingFitObserver !== null || typeof ResizeObserver === 'undefined') return
-  const el = svgRef.value
-  if (!el) return
-  const observer: ResizeObserver = new ResizeObserver(() => {
-    // 已断开（补 fit 完成）/被替代的旧观察器回调 no-op——disconnect 只停浏览器派发，
-    // 闭包本身仍可被持有方调用，须自证现役
-    if (observer !== pendingFitObserver) return
-    if (!containerSizeReady()) return
-    observer.disconnect()
-    pendingFitObserver = null
-    fitView()
-  })
-  pendingFitObserver = observer
-  observer.observe(el)
+  if (containerSizeReady()) fitView()
 }
 
+/**
+ * 容器尺寸持续观察（fit 态自动重新 fit 的驱动源）：fit 态下容器变化（窗口拖宽、
+ * overlay 布局就绪）→ 重新 fit；free 态 → 不动（用户接管后自动 fit 停用）。
+ * 环境无 ResizeObserver（jsdom）时不观察，维持既有退化口径（挂载时一次性 fit）。
+ */
+let resizeObserver: ResizeObserver | null = null
+
 // 打开 overlay 即挂载（壳 v-if dag !== null）→ 初始视口 = 全图 fit 居中
-// （容器未布局时经 ResizeObserver 首次非零尺寸回调补 fit）
+// （容器未布局时不 fit，观察器回调就绪后补 fit）
 onMounted(() => {
   fitWhenContainerReady()
+  const el = svgRef.value
+  if (el === null || typeof ResizeObserver === 'undefined') return
+  resizeObserver = new ResizeObserver(() => {
+    if (viewMode.value !== 'fit' || !containerSizeReady()) return
+    fitView()
+  })
+  resizeObserver.observe(el)
 })
 
 onBeforeUnmount(() => {
-  pendingFitObserver?.disconnect()
-  pendingFitObserver = null
+  resizeObserver?.disconnect()
+  resizeObserver = null
 })
+
+/**
+ * 「回到全景」入口（free 态右下角按钮）：回 fit 态并 fit 一次——此后恢复自动
+ * fit 语义（容器变化重新 fit）直至下次用户接管。
+ */
+function backToFit(): void {
+  viewMode.value = 'fit'
+  fitWhenContainerReady()
+}
 
 // ── 缩放平移（原型 04-final-overlay.html 手法：client 坐标差换算，规避
 // getScreenCTM 在测试环境缺失；pan 位移按 1/k 修正保持视觉等速）。
@@ -366,6 +397,9 @@ function onPointerMove(e: PointerEvent): void {
   if (!pan) return
   if (Math.abs(e.clientX - pan.sx) + Math.abs(e.clientY - pan.sy) > PAN_THRESHOLD_PX) pan.moved = true
   if (pan.moved) {
+    // pan 接管（位移超阈值的拖拽）→ free 态（自动 fit 停用；pointerdown 未移动
+    // 不进此分支——纯点击不算接管）
+    viewMode.value = 'free'
     vp.tx = pan.tx0 + (e.clientX - pan.sx) / vp.k
     vp.ty = pan.ty0 + (e.clientY - pan.sy) / vp.k
   }
@@ -379,10 +413,12 @@ function onPointerUp(): void {
   routeClick(target)
 }
 
-/** wheel 缩放：以指针位置为缩放中心（画布坐标系下保持指针下的内容点不动）。 */
+/** wheel 缩放：以指针位置为缩放中心（画布坐标系下保持指针下的内容点不动）。
+ *  wheel 即用户接管 → free 态（自动 fit 停用）。 */
 function onWheel(e: WheelEvent): void {
   const rect = svgRef.value?.getBoundingClientRect()
   if (!rect) return
+  viewMode.value = 'free'
   const px = e.clientX - rect.left
   const py = e.clientY - rect.top
   const k2 = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, vp.k * Math.exp(-e.deltaY * ZOOM_WHEEL_FACTOR)))

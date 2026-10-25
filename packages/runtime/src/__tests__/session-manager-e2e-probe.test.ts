@@ -109,6 +109,8 @@ function makeFakeSessionService(overrides: Partial<ISessionService> = {}): ISess
       { cwd: '/test/cwd', sessions: [makeSummary({ id: 'agent-1', spawnSource: 'agent', parentAgentSessionId: 'sid-parent' }), makeSummary({ id: 'user-1', spawnSource: 'user' })] },
     ]),
     abort: vi.fn().mockResolvedValue(undefined),
+    // 受理成功后清旧终态 sidecar（session-manager-send-sidecar-stale）
+    clearSessionOutcome: vi.fn(),
     getRpcClient: vi.fn(),
     getActiveSessionIds: vi.fn().mockReturnValue([]),
     ...overrides,

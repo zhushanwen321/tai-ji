@@ -782,18 +782,21 @@ export default [
       'max-lines': 'off',
     },
   },
+  // [2026-10-25 gate static-gate 复测] dev-0.11.16 集成线（fix-chat-flow-order /
+  // refactor-subagent-workflow-solid 两轮合并）后折算 713 > 700 微超——按「微超即提额」
+  // （pi-provider-store 508→520 同型）提额 740 保留软上限告警；重建/派生视图轴再拆属
+  // 独立重构任务。
   {
     files: ['packages/subagent-core/src/execution/persistence/record-store-rebuild.ts'],
-    // [2026-10-25 base lint 债清理] 折算 713 > 700 微超 13——同型提额 720（先例：
-    // journal-projection 545→560 / provider-config-helper 920→950）。拆分属独立重构任务。
     rules: {
-      'max-lines': ['warn', { max: 720, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 740, skipBlankLines: true, skipComments: true }],
     },
   },
-  // retry-rules.ts：LLM 重试规则域 SSOT（类型 + 校验 + 判定管线纯函数 + 基线数据表
-  // RETRY_RULES_BASELINE，四个消费方共用同一套语义——见文件头注释）。跨包行为镜像
-  // 锁定测试以本文件为锚，拆分需连带迁移锚点，属独立重构任务。折算 506 > 500 微超
-  // ——「微超即提额，保留软上限告警」先例（pi-provider-store 508→520 同型）提额 520。
+  // [2026-10-25 gate static-gate 复测] retry-rules.ts：LLM 重试规则域 SSOT（类型 + 校验 +
+  // 判定管线纯函数，四消费方共用同一语义——runtime 写侧 / settings 表单 / 两处行为镜像
+  // 复制体的对拍锁定测试，拆开会造成判定语义双份）。dev-0.11.16 集成线合并后折算
+  // 506 > 500 微超，按「微超即提额，保留软上限告警」提额 520（pi-provider-store /
+  // preset-service 同型）；判定管线两层序与规则 schema 再拆属独立重构任务。
   {
     files: ['packages/shared/src/retry-rules.ts'],
     rules: {

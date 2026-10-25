@@ -70,7 +70,7 @@ export interface SchedulerBackend {
    *
    * - 注入参数逐字一致：port 内部对 steer 档条目调用 host.sendMessage，
    *   形态与直发兜底完全相同（同 customType / content / display，
-   *   {deliverAs:'steer', triggerTurn:true}），仅 details 追加端口送达凭据
+   *   deliverAs steer 档 + triggerTurn 直唤参数），仅 details 追加端口送达凭据
    *   deliveryId。
    * - 失败语义 forget（2026-10-25 裁决）：受理后注入失败端口首败即弃（落 discard
    *   终局，不重投）——重试由 scheduler 既有「failed 记账 + 下个 tick 重试」单通道
@@ -227,7 +227,7 @@ export class PiSchedulerBackend implements SchedulerBackend {
    *   既有 catch（模型恢复 + failed 记账 + 下个 tick 重试，单通道重试）。
    *
    * timing 恒 'steer'（scheduler-steer-direct-dispatch 投递模型：dispatch 只有
-   * steer 一档，端口翻译为 host.sendMessage {deliverAs:'steer', triggerTurn:true}，
+   * steer 一档，端口翻译为 host.sendMessage 的 steer 档同参形态，
    * 与直发兜底参数逐字一致）。
    *
    * 槽语义（同 bash notify.ts D17 形态）：getDeliveryPort() 在调用时点读进程级槽，
