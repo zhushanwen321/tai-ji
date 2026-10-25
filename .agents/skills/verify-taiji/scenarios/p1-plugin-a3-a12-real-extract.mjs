@@ -274,11 +274,11 @@ export const meta = {
     'A: 授权挂载位容器进入后提取确认卡渲染（宿主 getAuthorizeView 驱动 + viewId=provider.authorize 对齐——渲染驱动修复回归锚点）',
     'A+B: Trae 提取（executeCommand 同通道驱动）→ DOM 呈现「提取成功」卡（viewId 对齐后用户可见回显）+ 宿主快照 viewId=provider.authorize 持有成功树 + A12 耗时 ≤ 1000ms（stats 计时）',
     'A: Trae 条目展开渲染凭据状态行（provider-plugin-status——getStatus 契约形状修复回归锚点）',
-    'B: Trae getStatus 返回宿主契约形状 { state: valid, providerId: wool-trae }（已登录无昵称/额度素材 → message 省略，宿主回落默认文案）',
+    'B: Trae getStatus 返回宿主契约形状 { state: valid }（已登录无昵称/额度素材 → message 省略，宿主回落默认文案）',
     'C: models.json wool-trae 条目——apiKey 非空（只验长度）+ models ≥1 且 api=wool-trae',
     'B: wool-trae 真实对话出话——modelOverride 建 session → message.complete → assistant 文本非空',
     'A+B: Qoder 提取（同构）→ DOM 呈现「提取成功」卡 + 宿主快照持成功树 + A12 耗时 ≤ 1000ms（stats 计时）',
-    'B: Qoder getStatus 返回宿主契约形状 { state: valid|invalid, message?: string, providerId: wool-qoder }（形状契约断言，不钉死两值——⑦ 凭据回读链修复前后均可通过）',
+    'B: Qoder getStatus 返回宿主契约形状 { state: valid|invalid, message?: string }（形状契约断言，不钉死两值——⑦ 凭据回读链修复前后均可通过）',
     'C: models.json wool-qoder 条目（apiKey 非空 + models ≥1）',
     'B: wool-qoder 真实对话出话（message.complete + assistant 文本非空）',
   ],
@@ -400,10 +400,10 @@ export async function run(ctx) {
     // 宿主回落默认「凭据可用」文案——形状断言不钉文案）。
     const traeStatus = await protocol.call('plugin.invoke', { pluginId: FAMILIES[0].pluginId, method: 'getStatus', params: { providerId: FAMILIES[0].providerId } }, { timeoutMs: 30_000 })
     const traeStatusBody = traeStatus?.result
-    ev.assert('B: Trae getStatus 返回宿主契约形状 { state: valid, providerId: wool-trae }（CredentialStatusPayload 对齐）',
-      traeStatusBody?.state === 'valid' && traeStatusBody?.providerId === FAMILIES[0].providerId, {
+    ev.assert('B: Trae getStatus 返回宿主契约形状 { state: valid }（CredentialStatusPayload 对齐；返回值不带归属——providerId 已在 invoke params）',
+      traeStatusBody?.state === 'valid' && traeStatusBody?.providerId === undefined, {
         channel: 'B',
-        expected: '{state:valid, providerId:wool-trae}（无素材时 message 省略）',
+        expected: '{state:valid}（无素材时 message 省略、无 providerId）',
         actual: JSON.stringify(traeStatusBody ?? traeStatus).slice(0, 200),
       })
     ev.assert('B: Trae 提取后插件上报提取成功态（A3 主链第一语义）', traeStatusBody?.state === 'valid'
@@ -433,8 +433,28 @@ export async function run(ctx) {
     // A：条目展开状态行（getStatus 契约形状修复回归锚点，原 ISSUES-2 ③）：提取成功
     // 后 wool-trae 条目展开 → 宿主 pullStatus（getStatus）→ provider-plugin-status
     // 状态行渲染（宿主 parseStatusFields 可窄化 = 形状对齐的端到端证据）。
-    // 手风琴点击一次（重复点击会展开/收起交替），状态行出现走异步 pullStatus 轮询。
-    const traeCard = page.locator('[data-testid="provider-card"]', { hasText: 'Trae' }).first()
+    // 行卡出现依赖 config.providers 广播到达 renderer（runtime 侧 models-store mtime
+    // 轮询 30s 粒度，provider-catalog-refresh.MODELS_STORE_WATCH_INTERVAL_MS）——
+    // 固定 click 超时覆盖不了轮询窗口：先显式轮询行卡渲染；超时则重进页签
+    // （ProviderPage 重挂载 → listProviders reply 拉新列表）再收敛。
+    // 手风琴点击一次（重复点击会展开/收起交替）。条目名 = models.json name ?? id
+    // （Trae 提取无 displayName → 显示 'wool-trae'），正则兼容两种形态。
+    const traeCard = page.locator('[data-testid="provider-card"]', { hasText: /trae/i }).first()
+    const cardAppeared = await pollValue(
+      async () => (await traeCard.count()) > 0,
+      Boolean,
+      { timeoutMs: 40_000, intervalMs: 500, label: 'wool-trae 行卡渲染（广播窗口）' },
+    ).catch(() => false)
+    if (!cardAppeared) {
+      await ui.click('testid=settings-nav-skill')
+      await ui.click('testid=settings-nav-provider')
+      await ui.expectVisible('testid=provider-list-header', { timeoutMs: 15_000 })
+      await pollValue(
+        async () => (await traeCard.count()) > 0,
+        Boolean,
+        { timeoutMs: 15_000, intervalMs: 500, label: 'wool-trae 行卡渲染（重进页签后）' },
+      )
+    }
     await traeCard.locator('span[role="button"]').click()
     const statusRow = page.locator('[data-testid="provider-plugin-status"]')
     const statusAppeared = await pollValue(
@@ -463,7 +483,7 @@ export async function run(ctx) {
     const qoderExtract = await driveExtractAndTime({ protocol, page, ui, ev, family: FAMILIES[1] })
 
     // B：状态上报（Qoder：userinfo + quota 两数据源）。宿主契约形状断言 = state 两值
-    // 合法 + providerId 归属（不钉死 valid/invalid——ISSUES-2 ⑦ 凭据回读链为 runtime
+    // 合法（不钉死 valid/invalid——ISSUES-2 ⑦ 凭据回读链为 runtime
     // 侧修复面，修复前后本断言均成立；invalid 时的 message 携带「未接入」恢复指引）。
     const qoderStatusBody = await pollValue(async () => {
       const r = await protocol.call('plugin.invoke', { pluginId: FAMILIES[1].pluginId, method: 'getStatus', params: { providerId: FAMILIES[1].providerId } }, { timeoutMs: 30_000 })
@@ -471,11 +491,10 @@ export async function run(ctx) {
       return s !== undefined && s !== null && typeof s === 'object' ? s : null
     }, Boolean, { timeoutMs: 15_000, label: 'Qoder getStatus 返回状态形状' })
     const qoderShapeOk = (qoderStatusBody?.state === 'valid' || qoderStatusBody?.state === 'invalid')
-      && qoderStatusBody?.providerId === FAMILIES[1].providerId
       && (qoderStatusBody?.message === undefined || typeof qoderStatusBody?.message === 'string')
-    ev.assert('B: Qoder getStatus 返回宿主契约形状 { state, message?, providerId }（CredentialStatusPayload 对齐）', qoderShapeOk, {
+    ev.assert('B: Qoder getStatus 返回宿主契约形状 { state, message? }（CredentialStatusPayload 对齐；返回值不带归属）', qoderShapeOk, {
       channel: 'B',
-      expected: '{state:valid|invalid, message?:string, providerId:wool-qoder}',
+      expected: '{state:valid|invalid, message?:string}',
       actual: JSON.stringify(qoderStatusBody ?? null).slice(0, 200),
     })
     // 凭据回读链诊断（ISSUES-2 ⑦，runtime 侧修复面——信息性留痕不判负）：refreshCatalog
