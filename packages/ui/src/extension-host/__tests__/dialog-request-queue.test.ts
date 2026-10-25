@@ -382,4 +382,71 @@ describe('DialogRequestQueue', () => {
       scope.stop()
     }
   })
+
+  // ── pendingCountBySession 跨分区计数（remote-use-mobile-v2 §6.18 待办聚合半）────
+  // currentRequest/pendingCount 只读当前活跃分区；「需要你处理」聚合要全部会话的 dialog
+  // 待答数——本组锁定计数登记与分区写点的同步（入队/出队/dedup/resetFor 四路径）。
+
+  it('TC-15 跨分区聚合：非活跃分区的请求计入 pendingCountBySession（活跃分区读口不可见的面）', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r2' })
+      source.triggerUiRequest({ sessionId: 'B', requestId: 'b1' }) // 非活跃分区
+      expect(q.pendingCountBySession.value.get('A')).toBe(2)
+      expect(q.pendingCountBySession.value.get('B')).toBe(1)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-16 出队递减与键消失：逐条 respond 后计数递减，最后一条出队后键从 Map 摘除', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r2' })
+      expect(q.pendingCountBySession.value.get('A')).toBe(2)
+      q.respond('r1', true)
+      expect(q.pendingCountBySession.value.get('A')).toBe(1)
+      q.respond('r2', true)
+      expect(q.pendingCountBySession.value.has('A')).toBe(false)
+      expect(q.pendingCountBySession.value.size).toBe(0)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-17 dedup 不加计：同 requestId 双源重复入队计数仍为 1（与 TC-3 分区行为对齐）', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      expect(q.pendingCountBySession.value.get('A')).toBe(1)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-18 resetFor 计数归零 + 不存在分区 resetFor 不误登记：与分区写点同语义', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'B', requestId: 'b1' })
+      q.resetFor('A')
+      expect(q.pendingCountBySession.value.has('A')).toBe(false)
+      expect(q.pendingCountBySession.value.get('B')).toBe(1) // 他分区不受影响
+      q.resetFor('never-existed') // no-op 不误建登记（与 TC-14 分区侧同语义）
+      expect(q.pendingCountBySession.value.size).toBe(1)
+    } finally {
+      scope.stop()
+    }
+  })
 })
