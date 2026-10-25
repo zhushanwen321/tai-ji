@@ -50,5 +50,7 @@ export function isActiveTurnPhase(turn: SessionTurnPhase): boolean {
  *  六行预测表退役迁本文件——occupancy 形状 SSOT 同点收敛）。 */
 export type SessionPhase = Omit<ServerMessageMap['session.occupancy'], 'sessionId'>
 
-/** occupancy 缺省值（session 无 occupancy 记录时 = 全 idle；landing 无 session 同值）。 */
-export const IDLE_SESSION_PHASE: SessionPhase = { turn: 'idle', compacting: false, bash: false }
+/** occupancy 缺省值（session 无 occupancy 记录时 = 全 idle；landing 无 session 同值）。
+ *  四维全带（handingOff: false 与 runtime 广播恒带四维的形态对齐——消费方展开/读字段
+ *  均按 undefined ≡ false 语义消费，补键零行为变化）。 */
+export const IDLE_SESSION_PHASE: SessionPhase = { turn: 'idle', compacting: false, bash: false, handingOff: false }

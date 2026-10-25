@@ -2,7 +2,7 @@
 // 设计 §3.1.3 / §3.3.3 / §3.4；impl-plan u-foundation 验收条款①）。
 //
 // 覆盖：
-// - state 映射四态（record 规则含存量回落 + trace 兜底行映射；cancelled 与兜底 failed 的粒度差异）
+// - state 映射四态（record 规则含存量回落 + trace 兜底行映射；cancelled 两源对齐——§3.3.8 trace 枚举补 cancelled）
 // - stepIndex 去重（running 优先 / startedAt 最新 / trace 兜底 last-wins / 合并后每 stepIndex 至多一行）
 // - trace 兜底折行（records undefined 不抛错；字段回落链）
 // - 8K 截断省略行（failed/cancelled 行优先保留；未超预算全保留）
@@ -87,21 +87,28 @@ describe("runMemberViews — state 映射四态", () => {
     expect(views.map((v) => v.state)).toEqual(["running", "completed", "failed", "cancelled"]);
   });
 
-  it("cancelled 与兜底 failed 的粒度差异（设计 §3.1.3 诚实注记）：record 行可 cancelled；trace 兜底行只能是 failed", () => {
+  it("cancelled 两源对齐（§3.3.8 trace 状态枚举补 cancelled）：record 行与 trace 兜底行同判 cancelled", () => {
     const cancelled = runMemberViews(makeRun(), {
       records: [makeRecord({ stepIndex: 0, outcome: "cancelled", endedAt: T0 + 1_000 })],
       now: NOW,
     });
     expect(cancelled[0]!.state).toBe("cancelled");
 
-    // 同一 abort 场景，record 查询不可用时：trace 节点无 cancelled 状态（取消语义由
-    // 错误文案承载），兜底行折 failed——降级形态，粒度差异可接受。
+    // 同一 abort 场景，record 查询不可用时：trace 节点 cancelled（closeOutInFlightCalls
+    // 写点，§3.3.8）——兜底行与 record 行取消语义对齐，无降级形态差异。
     const fallback = runMemberViews(
-      makeRun([makeNode({ stepIndex: 0, status: "failed", error: "aborted: user cancelled" })]),
+      makeRun([makeNode({ stepIndex: 0, status: "cancelled", error: "aborted: user cancelled" })]),
       { now: NOW },
     );
-    expect(fallback[0]!.state).toBe("failed");
+    expect(fallback[0]!.state).toBe("cancelled");
     expect(fallback[0]!.lastError).toBe("aborted: user cancelled");
+
+    // trace 节点 failed 仍判 failed（真实失败形态不因枚举扩展漂移）。
+    const failedFallback = runMemberViews(
+      makeRun([makeNode({ stepIndex: 0, status: "failed", error: "boom" })]),
+      { now: NOW },
+    );
+    expect(failedFallback[0]!.state).toBe("failed");
   });
 
   it("存量 record（idle 且无 outcome）：设计表未定义形态——回落 trace 节点映射，再回落 record 事实，缺省 running", () => {

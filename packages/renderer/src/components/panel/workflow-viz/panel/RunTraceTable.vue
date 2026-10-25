@@ -137,11 +137,13 @@ function stoppedColorOf(runStatus: WorkflowRunStatus, outcome: WorkflowRunOutcom
 
 /**
  * 派生态 → 状态点着色（dot 仅非活态渲染：running/retrying 活态走 Loader2 转圈分支，
- * 不落 dot 表——查表键 = dot 可达三态，嵌套三元链的平铺替代）。
+ * 不落 dot 表——查表键 = dot 可达四态，嵌套三元链的平铺替代）。cancelled（run 终局
+ * 收尾在途成员，§3.3.8）= 中性档，与 pending 同灰系（D9 中性灰先例）。
  */
 const STATUS_DOT_CLASS: Record<Exclude<TraceRow['view']['status'], 'running' | 'retrying'>, string> = {
   done: 'bg-success',
   failed: 'bg-danger',
+  cancelled: 'bg-neutral-dim opacity-40',
   pending: 'bg-neutral-dim opacity-40',
 }
 
@@ -163,6 +165,7 @@ function statusLabel(status: TraceRow['view']['status']): string {
     case 'retrying': return t('panel.workflowViz.statusRetrying')
     case 'done': return t('panel.workflowViz.statusDone')
     case 'failed': return t('panel.workflowViz.statusFailed')
+    case 'cancelled': return t('panel.workflowViz.statusCancelled')
     default: {
       const exhaustive: never = status
       throw new Error(`unreachable derived status: ${String(exhaustive)}`)

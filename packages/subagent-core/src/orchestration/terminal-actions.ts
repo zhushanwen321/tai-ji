@@ -1260,10 +1260,12 @@ async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneReason):
  * [OR-8] run 到达终态时，把 calls Map 残留的 in-flight call（status !== "done"）
  * 收尾为取消终态（不删除条目——保留调用痕迹）。
  *
- * 收尾语义（trace/call 状态枚举封闭，无 "cancelled" 态）：AgentCall 补齐
- * pending→running→done 状态机，result 以 IN_FLIGHT_CALL_CANCELLED_MSG 承载取消
- * 原因；trace 节点置 failed + 固定取消文案 + completedAt。调用点约定：终局/
- * 中断转移成功后、save 之前——先收尾再落盘，内存态与持久化在同一时点收敛。
+ * 收尾语义（[subagent-observability §3.3.8] trace 状态枚举补 "cancelled"）：AgentCall
+ * 状态机保持封闭（pending→running→done），result 以 IN_FLIGHT_CALL_CANCELLED_MSG
+ * 承载取消原因；trace 节点置 cancelled + 固定取消文案 + completedAt（journal 侧
+ * agent-settled 帧 outcome 同判 cancelled——dispatchAgentSettled 的 IN_FLIGHT_CALL_
+ * CANCELLED_MSG 分支，与 TUI/快照呈现一致）。调用点约定：终局/中断转移成功后、
+ * save 之前——先收尾再落盘，内存态与持久化在同一时点收敛。
  * 返回被收尾的 callId 数组（升序）供调用方记日志。
  */
 export function closeOutInFlightCalls(run: WorkflowRun): number[] {
@@ -1280,7 +1282,7 @@ export function closeOutInFlightCalls(run: WorkflowRun): number[] {
       call.markDone({ content: "", error: IN_FLIGHT_CALL_CANCELLED_MSG });
     }
     run.state.trace.update(callId, {
-      status: "failed",
+      status: "cancelled",
       result: { content: "", error: IN_FLIGHT_CALL_CANCELLED_MSG },
       error: IN_FLIGHT_CALL_CANCELLED_MSG,
       completedAt,

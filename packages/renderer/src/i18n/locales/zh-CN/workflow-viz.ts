@@ -72,6 +72,7 @@ export default {
     chipSettled: '已收束',
     statusDone: '完成',
     statusFailed: '失败',
+    statusCancelled: '已取消',
     attemptLabel: '尝试',
     eventsEmpty: '暂无事件记录',
     eventsNotFound: '该 run 无事件流记录',

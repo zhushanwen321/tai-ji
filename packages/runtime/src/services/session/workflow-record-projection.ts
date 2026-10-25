@@ -87,12 +87,17 @@ function projectAskStepsToAgentCalls(fold: RunEventFoldCheckpoint): WorkflowAgen
  *   cacheWrite/cost 无 shared 消费位不透出）；attempts/lastRetry 缺省 = 无重试记录不造键。
  */
 function projectAskStepToAgentCall(ask: RunAskStepFold): WorkflowAgentCall {
+  // outcome → status 映射：call 级 outcome 值域 = done/failed/cancelled（run-events
+  // RunAskStepFold.settled 契约）——cancelled 是「未交付且非失败」的中性档（run 终局
+  // 收尾成员），不得冒充 failed（§3.3.8 closeOutInFlightCalls call 枚举补 cancelled）。
   const stepStatus: WorkflowAgentCall['status'] =
     ask.settled === undefined
       ? 'running'
       : ask.settled.outcome === 'done'
         ? 'done'
-        : 'failed'
+        : ask.settled.outcome === 'cancelled'
+          ? 'cancelled'
+          : 'failed'
   return {
     id: ask.taskIndex,
     agent: ask.agentName,

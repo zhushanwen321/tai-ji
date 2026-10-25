@@ -20,7 +20,7 @@ import type { WorkflowRun } from "./models/workflow-run.ts";
 
 /**
  * 成员四态词表（设计 §3.1.3；不设 unknown——run 正常终局前 closeOutInFlightCalls
- * 把在途 call 写成 failed + 取消文案，resume 同 stepIndex 重复 record 由去重规则取
+ * 把在途 call 写成 cancelled + 取消文案，resume 同 stepIndex 重复 record 由去重规则取
  * 当前尝试，旧尝试不会以终局形态冒充新尝试）。
  */
 export type MemberState = "running" | "completed" | "failed" | "cancelled";
@@ -327,15 +327,18 @@ function applyFinalFields(
 }
 
 /**
- * trace 兜底行组装（record 查询不可用或该 stepIndex 无 record 时）。粒度差异（设计
- * §3.1.3 诚实注记）：abort 场景下 record 行显示 cancelled，兜底行只能显示 failed
- * （trace 节点无 cancelled 状态，取消语义由错误文案承载）——兜底是降级形态。
+ * trace 兜底行组装（record 查询不可用或该 stepIndex 无 record 时）。trace 状态枚举
+ * 已补 cancelled（[subagent-observability §3.3.8] closeOutInFlightCalls 写点）——
+ * 兜底行与 record 行的取消语义对齐，无降级形态差异。
  */
 function memberViewFromTraceNode(node: ExecutionTraceNode, now: number): RunMemberView {
-  // 节点 completed → completed；failed → failed；pending/running → running
-  // （设计 §3.1.3 状态表「record 缺失，trace 节点兜底」行）。
+  // 节点 completed → completed；failed → failed；cancelled → cancelled；pending/
+  // running → running（设计 §3.1.3 状态表「record 缺失，trace 节点兜底」行）。
   const state: MemberState =
-    node.status === "completed" ? "completed" : node.status === "failed" ? "failed" : "running";
+    node.status === "completed" ? "completed"
+      : node.status === "failed" ? "failed"
+        : node.status === "cancelled" ? "cancelled"
+          : "running";
   const startedMs = parseIsoMs(node.startedAt);
   const view: RunMemberView = {
     stepIndex: node.stepIndex,

@@ -930,6 +930,31 @@ describe('projectV2Workflow（run 域定界 + 事件 fold 骨架）', () => {
     expect(record.outcome).toBe('done')
   })
 
+  it('agent-settled outcome=cancelled → agentCalls 行 status=cancelled（§3.3.8 取消收尾成员不冒充 failed）', () => {
+    const registered = {
+      v: 2 as const,
+      kind: 'registered' as const,
+      runId: 'wf-cancel',
+      workflowName: 'flow',
+      scriptName: 'test-flow',
+      slug: 'tf',
+      startedAt: 1000,
+      recordPath: '/tmp/ws/wf-cancel.events.jsonl',
+    }
+    const fold = foldRunEventCheckpoint(
+      [
+        runEvent({ type: 'run-created', runId: 'wf-cancel', workflowName: 'flow', argsSummary: '', ts: 1000 }),
+        runEvent({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
+        // run 取消：在途成员被收尾（dispatchAgentSettled 的 aborted 分支）→ outcome=cancelled
+        runEvent({ type: 'agent-settled', taskIndex: 0, attempt: 1, outcome: 'cancelled', durationMs: 500, ts: 1500 }),
+        runEvent({ type: 'run-settled', outcome: 'cancelled', artifactsDir: '/tmp/a', ts: 3000 }),
+      ],
+      () => {},
+    )
+    const record = projectV2Workflow(registered, undefined, fold)!
+    expect(record.agentCalls[0]).toMatchObject({ id: 0, status: 'cancelled' })
+  })
+
   it('agent-started 带 phase → fold 骨架与派生视图 call.phase 透传；无 phase 行 undefined（W1 D6 分组供源）', () => {
     const fold = foldRunEventCheckpoint(
       [
