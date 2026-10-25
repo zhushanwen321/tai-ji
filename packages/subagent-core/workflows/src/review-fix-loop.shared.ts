@@ -16,7 +16,7 @@
 // - contentRepairLoop：统一 commit 的 content 补修子循环（commit 被 pre-commit
 //   拦截且恢复需改仓库内文件时：派补修 agent 按报错原文补全 → git status 快照
 //   差集对账 → 显式路径 add → 重跑同一 commit，上限 maxRepairs 次）
-// 设计依据：docs/todo/dev-merge-gates-sibling-content-repair-gap.md（路线 B 数据流）。
+// 设计依据：commit content 补修子循环 = 路线 B 数据流（2026-10-23 落地；原始登记文档已删，见 git 历史）。
 
 /** 命令执行结果（平台注入统一形状：zcode 侧 world.run / pi 侧 execFileSync 包装） */
 export interface CmdResult { // oe-exempt:20261023:framework:双平台单源契约/平台注入面——接口先立、单实现常态（zcode world.run 与 pi execFileSync 等差异经此边界注入）

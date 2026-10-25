@@ -1,4 +1,4 @@
-// pi 引擎托管 agent 目录注入链测试（登记 docs/todo/engine-default-provider-setting.md
+// pi 引擎托管 agent 目录注入链测试（原始登记文档 engine-default-provider-setting 已删、见 git 历史；
 // 「新发现登记」节，2026-10-23 裁决：taiji 派发的 pi 参数一切由 taiji 控制——pi 引擎
 // 配置目录注入 <dataDir>/agent，独立 pi CLI 直跑回落 ~/.pi/agent 不受影响）。
 //

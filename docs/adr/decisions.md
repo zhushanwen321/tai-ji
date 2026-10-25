@@ -652,13 +652,13 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **删除判据**：删掉某机制后数据仍最终一致 → 它是补偿补丁，删；不一致 → 事件顺序契约本身未定义，先定义契约（谁的事实、谁推送、丢了如何补充拉取）再删。
 
-**元原则**：原则面前无存量豁免——与本体系冲突的既往裁决一并推翻（已删：zcode 无进展检测双 timer、notify 看门狗重投、update 停滞检测、event-tail watch 族、structured-output 强制退出等，清单见 defense-mechanism-cleanup 登记）。
+**元原则**：原则面前无存量豁免——与本体系冲突的既往裁决一并推翻（已删：zcode 无进展检测双 timer、notify 看门狗重投、update 停滞检测、event-tail watch 族、structured-output 强制退出等，清单原 defense-mechanism-cleanup 登记已随清查完结删除，git 历史可追溯）。
 
-**保留白名单（原则不适用域）**：产品功能定时（调度/提醒/产品轮询能力）、调用方显式配置传入的超时参数、恢复场景的文件读取、锁语义原语、事件驱动的对账与拉取通道（ADR-0097 实现本体）、构建脚本类。
+**保留白名单（原则不适用域）**：产品功能定时（调度/提醒/产品轮询能力）、调用方显式配置传入的超时参数（C2 显式业务超时）、恢复场景的文件读取、锁语义原语（file-lock）、事件驱动的对账与拉取通道（ADR-0097 实现本体：delivery-port 回执对账（details-id 命中 + session_start 差集重放）、reconcile 事件触发路径、worktree 观察期族）、构建脚本类、PingProbe 无进展检测（ADR-0047 口径）、外部网络端点墙钟（npm/oauth，网络客户端标准防线）。过渡形态轮询登记：trace-sync 现取轮询（FETCH_CURRENT_PROMPT_POLL_MS=250ms / 8s 上限，pi 侧写侧无完成事件信号、轮询是当前唯一可达通道；退役条件 = pi 提供 entry 写入事件边沿或命令 RPC 直返结果）。
 
 **依据**：本体系收敛自 pi 1.0 适配设计包交付后的系列裁决（2026-10-05）：命令终局事件化（handled/started/断连三事件）、投递 backoff 退役、全项目防御机制清查（约 270 处登记）、event-tail 退役与推送通道方向、受理层同步上屏、scheduler 切换对账翻转为事实查询。故障模型依据 = 本地进程通信无网络类瞬态失败情形，对端死亡有 OS 级信号。
 
-**登记**：清查清单与删改记录 = `docs/todo/defense-mechanism-cleanup.md` 与 defense-scan 过程产物（已随 .tmp 清理，不入库；四分区清单 + 改动清单）；投递域重构与推送通道设计为 tech-design 过程产出（已随 .tmp 清理，不入库；决策以本条与 cleanup 登记为准）；AGENTS.md「防御机制第一原则」规则条目为本条的规则面派生视图。原「时间平抑类逻辑红线」为本体系判定层的既有条目，继续有效。
+**登记**：清查清单与删改记录 = 原 `docs/todo/defense-mechanism-cleanup.md`（清查完结已删除，git 历史可追溯）与 defense-scan 过程产物（已随 .tmp 清理，不入库；四分区清单 + 改动清单）；投递域重构与推送通道设计为 tech-design 过程产出（已随 .tmp 清理，不入库；决策以本条为准）；AGENTS.md「防御机制第一原则」规则条目为本条的规则面派生视图。原「时间平抑类逻辑红线」为本体系判定层的既有条目，继续有效。
 
 **边界澄清（SendReceipt 设计内等待类型化申报，2026-10-18 架构审查裁决）**：首败即停的「失败」判定以 SendReceipt 拒绝分支的判别联合为准——`{ accepted: false, deferred: DeliveryDeferReason }`（设计内等待：条目未被注入、等投递端下一边沿重提，**不计首败**，词表 = 内核 `packages/session-delivery` 单源导出）与 `{ accepted: false, reason }`（真失败：计首败）互斥，由类型构造保证；内核消费点按判别字段分流，不维护字符串白名单。演进动因：白名单形态下生产点裸字面量与消费点集合两处独立演化，同族漂移两次现实击中（建白名单与三小时后补第二个 reason 各一次）；类型化通道防未来审查把判别联合当冗余「简化」回字符串。词条见 [CONTEXT.md「设计内等待」](../CONTEXT.md)。
 
