@@ -20,7 +20,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { i18n } from './i18n'
-import { createLifecycleEffects } from '@taiji/core'
+import { configureChatNoticeText, createLifecycleEffects } from '@taiji/core'
 import { chatStore, sessionStore } from './shell/app-runtime'
 import {
   clearAllFormRequests,
@@ -40,6 +40,12 @@ import {
 
 // vue-i18n 的 t 复杂重载收窄为 (key, params?) => string（对齐 app-runtime 同款收窄）
 const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
+
+// [chatNotice i18n 移动壳接线] liveOnly 提示行文案注入（core 键出口 → 本模块 i18n 翻译）：
+// 与桌面 useMessageEffects 模块顶层注入同款闭包（逐次 t() 求值，locale 启动检测定死下
+// 等价一次求值，形态对齐双壳一致）；模块加载期注入，恒先于任何 WS 消息到达。不接 =
+// core 回退键名原文（notice-text.ts「注入时序」段），移动壳渲染 panel.message.chatNotice.*。
+configureChatNoticeText((key) => t('panel.message.chatNotice.' + key))
 
 /**
  * 断连/重启用尽的对话流收尾（对齐桌面 useMessageEffects.handleRuntimeUnavailable）：
