@@ -202,7 +202,7 @@ const {
 // - contentRepairLoop：统一 commit 的 content 补修子循环（commit 被 pre-commit
 //   拦截且恢复需改仓库内文件时：派补修 agent 按报错原文补全 → git status 快照
 //   差集对账 → 显式路径 add → 重跑同一 commit，上限 maxRepairs 次）
-// 设计依据：docs/todo/dev-merge-gates-sibling-content-repair-gap.md（路线 B 数据流）。
+// 设计依据：commit content 补修子循环 = 路线 B 数据流（2026-10-23 落地；原始登记文档已删，见 git 历史）。
 /** git status --porcelain 输出 → 路径数组。rename 行取新路径、剥引号包裹；
  *  过滤 .review/ 与 .tmp/（脚本自持目录——差集对账不得把脚本自产文件算作补修改动）。
  *  status 失败由壳在取 stdout 前抛错（commit 已跑通说明是有效 git 仓库，此处失败属异常，

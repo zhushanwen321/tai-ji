@@ -90,6 +90,13 @@ export interface WaitForHealthOptions {
   intervalMs?: number
   /** 最大重试次数，默认 HEALTH_RETRY_COUNT */
   retryCount?: number
+  /**
+   * 进程存活检查：每轮轮询循环**先**执行它（在探测 /health 之前），返回 false
+   * （进程已退出）→ 立即抛错，不再等满重试上限。用途：区分「慢启动超时」与
+   * 「进程已崩溃」——对一个已退出的进程等满上限没有意义，且错误信息可归因。
+   * 不传时行为与不检查存活完全一致。
+   */
+  aliveCheck?: () => boolean
 }
 
 /**
@@ -99,7 +106,8 @@ export interface WaitForHealthOptions {
  * 确保 runtime 已完成 HTTP 服务初始化（而非仅 listen 端口）。
  *
  * @param port 目标端口
- * @param opts 可选参数：intervalMs / retryCount
+ * @param opts 可选参数：intervalMs / retryCount / aliveCheck
+ * @throws aliveCheck 返回 false（进程已退出，立即失败不等满上限）
  * @throws 重试耗尽仍不就绪
  */
 export async function waitForHealth(
@@ -108,7 +116,13 @@ export async function waitForHealth(
 ): Promise<void> {
   const intervalMs = opts?.intervalMs ?? HEALTH_INTERVAL_MS
   const retryCount = opts?.retryCount ?? HEALTH_RETRY_COUNT
+  const aliveCheck = opts?.aliveCheck
   for (let i = 0; i < retryCount; i++) {
+    // 存活检查先于健康探测：进程已退出时继续轮询端口只会白等满上限，
+    // 错误信息也无法区分「超时」与「崩溃」——立即失败
+    if (aliveCheck && !aliveCheck()) {
+      throw new Error(`runtime 进程已退出 (exit before healthy, port ${port})`)
+    }
     if (await checkHealthEndpoint(port)) return
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }

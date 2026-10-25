@@ -597,4 +597,4 @@ export { ACTIVE_TURN_PHASES, isActiveTurnPhase, IDLE_SESSION_PHASE } from './ses
 // handoff 域（chat-flow-consistency U9 / 特殊流程 S2）：交接 prompt 固定模板常量——
 // runtime 发送侧（handoff-prompt）与 core 派生侧（交接回合识别，apply-entry-convert）
 // 同源引用，识别判定与发送值不漂移。措辞冻结约束见 ./handoff 头注。
-export { HANDOFF_PROMPT_TEMPLATE } from './handoff
+export { HANDOFF_PROMPT_TEMPLATE } from './handoff'

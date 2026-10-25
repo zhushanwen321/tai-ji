@@ -16,7 +16,10 @@
 //
 // 应答侧补充约定（设计 §3.3）：initialize 应答仅诊断（与 manifest 不一致 → warn 留痕，
 // 不参与同步成员判据；唯一阻断面 = 被 gate 能力位多声明 → engine_capability_mismatch）；
-// listModels / validateModel 为诊断范围（宿主侧同步成员读 manifest，不经本方法）；
+// validateModel 为诊断范围（宿主侧同步成员读 manifest，不经本方法）；listModels 宿主
+// 为 union 门面——manifest 静态快照可枚举时同步返回快照不发帧，无静态枚举
+// （省略 / null / dynamic:true+[]）时发本方法取引擎活清单（async RPC，engineDefaults
+// 偏好层成员校验消费；失败放行 + per-engine 一次性 warn，不拦截模型解析）；
 // dispose 幂等；ping 为健康检查（ADR-0047：静默 ≠ 卡死，不据此杀任务）；
 // setModel 应答 = 回读生效值（引擎 set 后经 get_state 同源读回，不信命令应答即真——
 // pi 部分模型族静默替换成同族模型，生效值 ≠ 请求值，先例 = 主对话 set→回读范式）；

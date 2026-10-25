@@ -267,6 +267,11 @@
           "package": "@zhushanwen/pi-session-path",
           "type": "package",
           "reason": "代码层静态 import filterActivePath（src/backend.ts top-level import，活跃路径裁剪单一实现——todo/plan/goal/scheduler 四包同构副本收编于该共享库），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-delivery-port",
+          "type": "package",
+          "reason": "代码层静态 import getDeliveryPort（src/backend.ts deliverDispatch——到期 dispatch 经统一投递端口投递，unified-delivery 迁移），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },

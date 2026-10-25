@@ -1381,9 +1381,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
-   * 清除 session 终态 sidecar（persistSessionOutcome 的对称操作）：新回合受理入口
-   * （message-dispatcher.runAcceptance 受理成功后）调用，使跨回合新终态不被上一回合的
-   * 第一终态优先检查拦截。
+   * 清除 session 终态 sidecar（persistSessionOutcome 的对称操作）：新回合受理成功后调用，
+   * 使跨回合新终态不被上一回合的第一终态优先检查拦截。受理点两处：message-dispatcher
+   * .runAcceptance（GUI 通路）与 session-manager-handler handleSend（agent send_to_session
+   * 通路，session-manager-send-sidecar-stale 登记的对齐修复）。
    *
    * [dmg-r1-1 跨回合终态放行] 第一终态优先的射程限定为同回合写入竞态（见
    * persistSessionOutcome 注释）；用户在终态后继续对话 = 开启新周期，旧终态的历史使命

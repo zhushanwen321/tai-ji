@@ -77,7 +77,7 @@
 }
 ```
 
-`modelCatalog` 与 §2 `listModels`/`validateModel` 的联动（`remote-engine.ts:108-182`）：manifest 省略 catalog 或 `models: null` → `validateModel` 成员**整体摘除**（消费方 `typeof validateModel !== "function"` → 跳过校验恒放行）；`dynamic: false`（静态目录）未命中 → 同步拒；`dynamic: true` 未命中 → 放行运行期自证。作者按引擎模型目录的真实形态选 `dynamic`：静态可枚举 → false，代价是未命中模型在派发前即被同步拒；动态（无法预先枚举）→ true，未命中放行、由引擎运行期自证。声明与实际形态不符会在错误的方向上放行或拒绝。
+`modelCatalog` 与 §2 `listModels`/`validateModel` 的联动（`remote-engine.ts:214-343`）：manifest 省略 catalog 或 `models: null` → `validateModel` 成员**整体摘除**（消费方 `typeof validateModel !== "function"` → 跳过校验恒放行）；`dynamic: false`（静态目录）未命中 → 同步拒；`dynamic: true` 未命中 → 放行运行期自证。作者按引擎模型目录的真实形态选 `dynamic`：静态可枚举 → false，代价是未命中模型在派发前即被同步拒；动态（无法预先枚举）→ true，未命中放行、由引擎运行期自证（宿主对无静态枚举形态另发协议 `listModels` 帧取活清单，见 §2.1 表）。声明与实际形态不符会在错误的方向上放行或拒绝。
 
 ## 2. 协议实现义务（engine-protocol v1）
 
@@ -92,7 +92,7 @@
 | `run` | 任务派发（chat 域 `executeViaEngine` / workflow 域 SAR（SubprocessAgentRunner）.run） | 握手后；期间事件经 event 通知、句柄经 `host/handleReady` 回传；**应答到达即终态**（`methods.ts:153`） | **任务级无墙钟**（宿主不传 timeoutMs——`engine-client.ts:539`；超时治理 = 宿主显式 `timeoutMs` 走 cancel 链 + 引擎侧回收层 timer，§7） | 否（每 runId 一次） | 运行中失败不 reject——合成 error outcome + handle 正常返回（`remote-engine.ts:196-200`）；error 帧码按 §4 透传；进程崩 → `engine_crashed`（附 stderr 尾 400 字） |
 | `cancel` | 用户取消或宿主超时链触发，仅 run 在途时 | 应答仅受理确认；**终态本体由该 run 的 run 应答承载**（`methods.ts:164-170`） | 控制范围：`CANCEL_SETTLE_GRACE_MS` = 3s（`engine-protocol.ts:63`；`engine-client.ts:602`）——超窗 core 走杀链 | 是（`ok:true` 恒定） | 引擎须 3s 内收敛终态；stop 生效 = 终态在窗内到达；超窗 = 共享进程收割、在途任务走崩溃路径（zcode 实装 §7 abort 链） |
 | `read` | SessionView 读取（降级链①级，§8） | handle 有效即可；`dataDir` 必填（存量定位依赖，`methods.ts:172-176`） | 任务级无墙钟（大会话慢读不设限，`remote-engine.ts:272-279`） | 是（纯读） | 引擎抛错 → 宿主降级链②③级承接（§8） |
-| `listModels` | 模型目录诊断 | **宿主现行实装不发协议帧**——RemoteEngine 直读 manifest 快照三态映射（`remote-engine.ts:134-144`）；协议方法保留（`methods.ts:178-186`，`models: null` = 无枚举形态） | 同步内存判定，无超时语义。引擎仍须实现并应答（属 10 方法集），宿主现行不调用 | 是 | 无（三态：null / [] / 数组） |
+| `listModels` | 模型目录诊断 + engineDefaults 偏好层成员校验（`model-ref-translation.ts` await 消费） | **宿主 union 门面**：manifest 静态快照可枚举 → 同步返回快照**不发帧**（`remote-engine.ts` `listModelsFromManifest` 四态映射）；无静态枚举（省略 / null / `dynamic:true, models:[]`——zcode/pi manifest 均此占位形态）→ 发协议帧拿引擎活清单（`remote-engine.ts` `listModels`/`requestLiveModels`；连接复用路由 probe 已锚定的连接，无参 ensureConnected 走 ready 快路径） | 快照侧同步内存判定；RPC 侧控制范围单请求 **`LIST_MODELS_REQUEST_TIMEOUT_MS` = 10s**（`client/list-models-face.ts` 常量，量级对齐 `SET_MODEL_REQUEST_TIMEOUT_MS`——派发同步路径 await，秒级有界防挂派发） | 是（纯读） | RPC 失败原样上浮；偏好层消费方**放行 + per-engine 一次性 warn**（引擎侧 validateModel/run prepare 兜底）。应答 `models: null` = 无枚举形态（三态：null / [] / 数组） |
 | `validateModel` | 模型 ref 校验 | manifest 同源判定（`remote-engine.ts:155-182`）；`dynamic:false` 且未命中（含 undefined 查缺省）→ 同步拒 **record 不创建** | 同步内存判定 | 是 | `engine_model_unknown`（同步拒）；`dynamic:true` 放行原样 ref，运行期引擎拒绝 → `engine_model_mismatch`（run 失败 + record 标 failed，`error-codes.ts:15`） |
 | `dispose` | **per-window 引擎随窗口收尾释放**（主触发：workflow finalizeRun 五步序列末尾 / chat 轮 idle 收尾链；cancel 不收敛合成终态兜底同链）/ 引擎停机 / 包升级换实例 / 杀链清理 | 收尾阶段；应答 `ok:true` | 控制范围：**DISPOSE_GRACE_MS** = 3s（`engine-client.ts:95`，杀链路径 :645） | **是**（协议明文「dispose 幂等」，`methods.ts:14`） | 超时不重试（杀链兜底）；幂等重入无害 |
 | `ping` | 健康检查 | 连接就绪后任意时点（`engine-client.ts:593-597`） | 任务级（不设墙钟） | 是（`pong:true` 恒定） | **ADR-0047：静默 ≠ 卡死，不据此杀任务**（`methods.ts:14`）——ping 失败仅作诊断信号 |

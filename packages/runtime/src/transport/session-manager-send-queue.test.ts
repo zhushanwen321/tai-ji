@@ -125,6 +125,8 @@ function makeHarness(overrides: {
     ),
     listPersistedSessions: vi.fn().mockReturnValue([]),
     abort: vi.fn(),
+    // 受理成功后清旧终态 sidecar（session-manager-send-sidecar-stale）；A2 失败路径不触
+    clearSessionOutcome: vi.fn(),
   } as unknown as ISessionService
   const handler = new SessionManagerHandler({
     sessionService,

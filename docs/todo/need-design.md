@@ -38,13 +38,9 @@
 
 ### 4. scheduler 定时任务结果感知通道
 
-状态：现状核实完成（2026-10-23，报告 `.tmp/need-design-batch/scheduler-channel-verification.md`），**不可关闭**。核实结论：统一通道已建成（delivery-port 为 custom 投递路径唯一执行者，bash / session-manager / workflow / notifier 四条提交链全部接入；pending-notifications 是登记/收取层，与投递端口上下游分工），可感知「受理回执 + 送达凭据（消息进入 LLM 请求上下文、已写盘、轮次真实起步）」，不感知「LLM 成功产出响应」。**scheduler 不在通道内、迁移未落地**：用户所述「已由独立会话实施」经实码核实未找到（main HEAD / 全部分支 / 未提交改动 / 兄弟 worktree 均无 scheduler 迁移痕迹），现仍裸 `pi.sendMessage` steer 直投，失败静默缺口原样存在，compaction isIdle 小修也未实施。迁移实施必办项：幂等键改每轮唯一 + 失败语义二选一（详见来源登记）。待用户指认迁移真实落点或确认迁移仍待实施。
+状态：已解决（2026-10-25 迁移实施，feat-scheduler-delivery-migration 分支）——到期 dispatch 经 delivery-port 投递（`PiSchedulerBackend.deliverDispatch`，getDeliveryPort 进程级槽，接入形态同 bash / session-manager / workflow / notifier 四条提交链）：注入参数与原 sendMessage 直投逐字一致（收件 session、内容、steer 语义不变——timing steer → host.sendMessage `{deliverAs:'steer', triggerTurn:true}`，details 仅追加端口送达凭据 deliveryId）；幂等键每轮唯一 `${taskId}:${epoch}`，epoch = backend.now() 时间戳 + 同毫秒序号（既有事实源均不满足每轮唯一：runCount 仅成功递增、history 上限 20 截断；纯内存计数器跨 session_start 重建归零会与投递日志终局条目撞键被端口永久判重吞掉，时间戳基底跨重启不回退、同毫秒序号补齐 fake-clock 场景）；失败语义 forget（2026-10-25 裁决：受理后注入失败端口首败即弃、落 discard 终局不重投，重试由 scheduler 既有「failed 记账 + 下个 tick 重试」单通道承载，避免双通道重投造成用户重复提醒；端口拒收 rejected → deliverDispatch throw → 既有 failed 记账路径在新受理回执形态下保持工作，重试轮自动取新幂等键）；port 缺席（装配异常窗口）降级 pi.sendMessage 直发 + warn 留痕。由此获得「受理回执 + 送达凭据（details-id，消息进入 LLM 请求上下文、已写盘、轮次真实起步）」感知；「LLM 成功产出响应」仍不感知（通道上限，与其余四条链一致）。原登记的 compaction 直闯缺口由端口提交侧 compaction 等待机制（session_before_compact 置位挂起 + 终态边沿唤醒重投）结构性覆盖，域内 isIdle 前置检查小修不再需要。原登记文档 scheduler-result-awareness-channel.md 已删，本条即其终态。
 
-来源：scheduler-result-awareness-channel.md。
-
-问题：scheduler 经扩展 API sendMessage 注入 owner session 后无投递结果感知（返回 `Promise<void>`），失败静默。
-
-候选方向：迁移到统一投递通道（delivery-port），注入参数逐字一致；架构级换通道，独立立项设计。
+来源：scheduler-result-awareness-channel.md（已解决，文档删除后内容以本条为准）。
 
 ### 5. dev 实例 runtime 慢启动被健康检查误杀
 
@@ -68,42 +64,27 @@
 
 ### 6. subagent-core D1 反向值边收编
 
-状态：已裁决立项（2026-10-23：不留长期豁免，不能有反向依赖），收编设计进行中（产物 `.tmp/need-design-batch/`）。
+状态：已解决（2026-10-23 裁决不留长期豁免、全部消除；同日落地并经 refactor-subagent-workflow-solid 合入 dev-0.11.16——commit d2e3d377e「clear remaining production reverse edges (D1-U3)」+ c532de35d「enforce zero reverse dependency edges (D1-U4)」）——残余 1（subagent-service 值导入 latestModelOverride）落地形态 = execution 侧单源：本体迁 `execution/persistence/run-event-journal.ts`（与 scanRunEvents 同域的读侧折叠原语），原址 `orchestration/run-events.ts` 留壳 re-export（resume-run / barrel / 测试消费方零改动），subagent-service 直连新址、原豁免注记删除；残余 2（model-switch-wiring 值导入 projectRunRegistryEvents）消费消除：assertRunNotTerminalForSwitch 终局判法从 run-registry fold 派生视图改为直读 run-settled 帧（run-event-journal 新具名导出 findRunSettledEvent），错误文案逐字节不变；残余 3（entry-guards SLUG_MAX_LENGTH 改直连 shared/run-vocabulary.ts）= just-do-it 条目 55。固化：零反向边（值边与类型边同等拦截，生产与测试无豁免）为机器检查 check-subagent-core-value-cycles.mjs 判据二（约束 C-data-27，pre-commit + CI 双接线）。2026-10-25 复核：检查 0 反向边 / 0 值环、包测试 4129 通过 0 失败、tsc --noEmit 零错误。
 
-来源：subagent-core-d1-residual-edges.md（残余 1、2；残余 3 随手改已入 just-do-it 条目 55）。
-
-问题：D1（execution → orchestration 反向依赖拆边）后残留 2 条显式豁免反向值边：`execution/subagent-service.ts:116` 值导入 `orchestration/run-events.ts` 的 `latestModelOverride`（注释显式登记有意豁免）、`execution/service/model-switch-wiring.ts:15` 值导入 `orchestration/run-registry.ts` 的 `projectRunRegistryEvents`（无显式豁免注记）。
-
-候选方向：收进 execution 侧单源（或改经端口接口），兑现 D1 终态「反向边收窄为端口接口」；或经用户裁决登记为长期豁免。
-
-开放问题：登记原判断「低优先」，需裁决收编 or 长期豁免。
+来源：subagent-core-d1-residual-edges.md（已解决，本条即其终态；残余 3 随手改见 just-do-it 条目 55）。
 
 ### 7. workflow-viz 两项交互/算法设计
 
-状态：设计完成（2026-10-23 裁决立项 → 设计产物 `.tmp/need-design-batch/workflow-viz-fit-and-routing-design.md`，待实施排期）。设计期核实修正：穿卡的是跨列不同行边的通道中位竖线（原登记「同列边」与实码不符，同列边走列右缘细道不穿卡）；fit 打断风险点 = 组件契约层可达的 watch 防御代码。边界外新发现一条（跨列同行直线边穿卡，登记为来源文件残余 5）。设计期待裁决项（回到全景入口等）见来源登记。
+状态：已解决（两项均已实施）——穿卡避让在前批落地（`avoidObstructedChannelMid` 通道竖线整条平移至最近零穿卡走廊 + 车道铺开超容量的降级并线档 + `sameRowBypass` 同行直线边纵向绕行，实装 `workflow-viz/dag/layout.ts`，防回归测试 5+3 条白盒用例）；fit 不追打策略与「回到全景」入口随本条目收尾批落地（`viewMode: 'fit' | 'free'` 二态状态机，七条用户接管判定 + 程序化写视口结构性排除 + ResizeObserver 持续观察 fit 态追 fit、free 态不动 + 切 run 重置回 fit；free 态右下角「回到全景」按钮，与缩放提示角标两态互斥占位）。本条目终态。
 
 来源：workflow-viz-dag-minor-residuals.md（另 2 条小项已入 just-do-it 条目 59/60）。
 
-- fit 不追打策略：需要「仅首次 fit + 用户操作后不再自动 fit」的策略收敛（交互策略设计，涉及用户意图判定——什么操作算「用户接管」）。位置 `WorkflowVizDag.vue`。
-- 同列垂直 sequence 边折线穿卡片：垂直边路由对途经节点 x 区间做避让侧道（布局算法改动，需防回归）。位置 `workflow-viz/dag/layout.ts`。
-
 ### 8. review-fix-loop 聚合器延续条目空壳缺陷
+
+状态：已实施（2026-10-23 随双平台单源管线 2e6876e75 落地；e2e 执法锁定于 2026-10-25 补齐）。载体裁决：机制源单源化于 `packages/subagent-core/workflows/src/review-fix-loop.shared.ts`（inheritCarryoverFields：title 缺失侧才回填、severity 采信本轮显式标注），zcode / pi 两壳模板经构建产物接入，改机制只改 shared + 重建两产物（多平台对齐纪律收编为构建管线）。
 
 来源：workflow-viz-dag-minor-residuals.md 关联工具缺陷登记。
 
 问题：review-fix-loop 的聚合器把「延续未修」条目写成无 title/severity 的空壳，后续 clean 轮 reconcile 无法匹配关闭，连续 3 轮 clean 后误判 stuck 终态。修复方向已明确（聚合器延续条目继承上轮 title/severity 字段）。
 
-开放问题：修复载体确认——review-fix-loop 存在多份（zcode 侧 `.agents/skills/pr-cr-fix/workflows/` 等 + 全局 `~/.zcode/workflows/`），属仓外/多平台 workflow 资产，需确认改哪份、是否双版本同步（多平台 workflow 脚本双版本对齐纪律）。
-
 ### 9. pi 内置版 review-fix-loop 补修子循环
 
-来源：dev-merge-gates-sibling-content-repair-gap.md（残留②；原文件保留作设计输入）。
-
-问题：`packages/subagent-core/workflows/review-fix-loop.js`（pi 内置版，npm 分发）的 commit content 类拦截同款缺口不在已实施的三份脚本改造批内。
-
-候选方向：复用原登记「确定方案」节的路线 B 数据流（补修子循环：上限 2 次 / 报错原文权威源 / 快照对账 / 显式路径 add / 同命令重跑），按 pi 平台形态适配。理由（登记原文）：发版载体不同（版本 bump + npm publish + 下游升级）、平台形态差异需独立适配与验证。
-
-开放问题：独立批次排期；npm 分发版本的发布窗口。
+状态：已解决——pi 内置版已随 2e6876e75（2026-10-23）落地补修子循环：pi 壳 commit 链含环境恢复 agent 重试 + contentRepairLoop（shared 单源段，zcode/pi 双壳同源），经 MF-1-1b e2e 归因链实跑证实（该用例即 pi 产物路径，环境恢复→补修子循环→结构化终止全链在实现中完好）。登记滞后销账；来源文档 dev-merge-gates-sibling-content-repair-gap.md 已删（三份脚本 + pi 内置版全部实施验证完毕，git 历史可追溯）。已知相邻差异（zcode 壳逐路径 add 单项失败仅跳过、pi 壳 add/commit 同 try 进恢复链）保留为双平台形态差异，不统一。
 
 ### 10. queue-hold 非生产形态物理删除
 
@@ -137,8 +118,8 @@
 - dev-0.11.7 S-16：翻译通道键集三处手写；runtime 测试按源码树相对路径读 zcode 包 package.json
 - dev-0.11.7 S-14：provider/oauth handler 领域失效判定仍在 transport 层（7+2 触发点），无结构收敛与枚举式检查——收敛方案需小设计
 - dev-0.11.8 S-15：`TAIJI_ENGINE_RAW_MIRROR` 字面量三处镜像无机器锁，真正修法 = `.githooks/check_env_whitelist_sync.py` 新增 rule-3 断言（独立加固改动、带自己的测试）
-- dev-0.11.7-review SG-7 其余 7 个设置页 `overflow: clip` 复核（见 just-do-it 验证活动节，属验证不属代码）
+- dev-0.11.7-review SG-7 其余 7 个设置页 `overflow: clip` 复核（属验证活动不属代码，原文见已删的 just-do-it 登记之 git 历史）
 
 ## 三、保留原文件的登记（非待办，不进本清单处置）
 
-以下文档为终态存档 / 条件触发观察 / 登记容器，无当前动作，保留原文件：defense-mechanism-cleanup（终态存档）、disconnect-window-dialog-loss（不修+重审触发）、long-stream-delta-double-count（观察不实施）、font-weight-dual-cjk-verification（挂起等反馈）、mcp-session-lifetime-apply（五项观察）、remote-use-shell-unification-reserved-divergences（真差异白名单容器）、system-prompt-trace-context-with-system（前瞻登记）、vitest-teardown-race-vendor-patch（等上游退役）、workflow-subtask-local-model-unsupported（不修+上游触发）、dev-merge-gates-sibling-content-repair-gap（残留条件触发 + pi 内置版设计输入）、engine-default-provider-setting（溯源保留；新发现节已裁决转 just-do-it）、e2e-spec-blind-wait-cleanup / zcode-provider-wiring-recheck / subagent-d5-nested-dispatch-verification / subagent-reload-replacement-window-recheck / terminal-multi-instance（验证活动与条件登记载体；产品口径已全部裁决落定）/ subagent-control-delivery-residue（验证活动与条件登记载体；sweep 判活加固已裁决转 just-do-it）、unified-delivery-exempt-eval（已裁决存档：smart-context 不迁 + steering mode 维持确认；scheduler 节结论作废、迁移线由本清单条目 4 承接）、unified-delivery-residuals（裁决容器）。
+以下文档为终态存档 / 条件触发观察 / 登记容器，无当前动作，保留原文件：disconnect-window-dialog-loss（不修+重审触发）、long-stream-delta-double-count（观察不实施）、font-weight-dual-cjk-verification（挂起等反馈）、mcp-session-lifetime-apply（五项观察）、remote-use-shell-unification-reserved-divergences（真差异白名单容器）、system-prompt-trace-context-with-system（前瞻登记）、vitest-teardown-race-vendor-patch（等上游退役）、workflow-subtask-local-model-unsupported（不修+上游触发）、e2e-spec-blind-wait-cleanup / zcode-provider-wiring-recheck / subagent-d5-nested-dispatch-verification / subagent-reload-replacement-window-recheck（验证活动与条件登记载体；产品口径已全部裁决落定）/ subagent-control-delivery-residue（验证活动与条件登记载体；sweep 判活加固已裁决转 just-do-it）、unified-delivery-exempt-eval（已裁决存档：smart-context 不迁 + steering mode 维持确认；迁移线由本清单条目 4 承接）、unified-delivery-residuals（裁决容器）。已删除的终态文档：just-do-it（68 条全部处置完毕，git 历史可追溯）、terminal-multi-instance（已实施；其「同族延期项」——浏览器多页面、浮层实例 tab 条——条件触发另立项，依赖实例编号先例）、engine-default-provider-setting（登记关闭，溯源见 git）、dev-merge-gates-sibling-content-repair-gap（全部实施，见条目 9）、defense-mechanism-cleanup（例外保留清单已并入 ADR-0122 保留白名单段）、review-fix-loop-autocommit-recovery-channel（MF-1-1b 已修，见 fix-review-fix-loop-defects 分支）。

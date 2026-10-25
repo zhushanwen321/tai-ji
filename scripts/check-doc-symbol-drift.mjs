@@ -398,7 +398,7 @@ const COMMENT_DOC_REF_EXEMPT = new Map([
   ['*::aggregated.md', 'zsw review-fix-loop 工作流脚本（.zcode/workflow-drafts，gitignored 产物目录）自述其产物文件名，非本仓 docs 引用'],
   ['*::delivery-ownership-kernel.md', '投递所有权内核设计文档为 dev-flow 工作流产物（现已迁 `~/.agents/skill-data/dev-flow/<slug>/`，原 `.tmp/dev-flow/` 存量随 worktree 消亡；按规不入库）；决策记录在 ADR-0074，设计章节锚点（§/D 编号）指工作盘文档'],
   ['*::tool-declaration-slimming.md', '工具声明精简设计文档为 tech-design 工作流产物（现已迁 `~/.agents/skill-data/tech-design/<slug>/`，原 `.tmp/tech-design/` 存量随 worktree 消亡；按规不入库）；决策记录在 ADR-0134/0135/0136，设计章节锚点（§/D 编号）指工作盘文档（同 delivery-ownership-kernel 先例）'],
-  ['*::DEV-WORKFLOW.md', '工作流规范文档位于 workspace 根（bare repo + worktree 布局下跨 worktree 共享的唯一权威），不在单个 worktree 仓库内；`.agents/` 为 workspace 根共享实体（ADR-0086），其 skill/workflow 引用该文档属合法跨 worktree 引用'],
+  ['*::DEV-WORKFLOW.md', 'workspace 容器根的分支模型权威文档（worktree 上一级目录，workspace AGENTS.md 所链同一份），非本仓文件——引用方为 .agents/ symlink 指向的仓外工作流脚本，全仓扫描（.md 删除触发）会跟入 symlink 误报'],
 ])
 
 /**

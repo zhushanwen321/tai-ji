@@ -182,6 +182,15 @@ export interface ISessionService {
     reason?: SendPromptReason
   }>
 
+  /**
+   * 清除 session 终态 sidecar（persistSessionOutcome 的对称操作）：新回合受理成功后调用，
+   * 使跨回合新终态不被上一回合的第一终态优先检查拦截（dmg-r1-1 跨回合终态放行）。
+   * 受理点两处（GUI 与 agent 两条生产通路同一写入口）：
+   * message-dispatcher.runAcceptance（GUI 通路，经 IDispatcherSessionOps 同名方法）与
+   * session-manager-handler.handleSend（agent send_to_session 通路，经本接口）。
+   */
+  clearSessionOutcome(sessionId: string): void
+
   // [HISTORICAL] sendSubagentMessage 已删除（composer 四符号设计 D2，marker 半成品通道废弃）：
   // 定向消息改走 subagentAction(message/start) 直达 subagent。
   abort(sessionId: string): Promise<void>

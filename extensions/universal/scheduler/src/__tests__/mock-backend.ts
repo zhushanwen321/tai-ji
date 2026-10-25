@@ -8,14 +8,16 @@ import type { ScheduledTask, SchedulerEntryOp } from '../types.js'
 export interface SentMessage {
   msg: { content: string; customType: string; display: boolean }
   opts?: { deliverAs?: 'steer'; triggerTurn?: boolean }
+  /** deliverDispatch 的幂等键（unified-delivery 迁移；sendMessage 直发路径恒缺省）。 */
+  idempotencyKey?: string
 }
 
 /**
- * Mock 后端：零 session/FS 副作用，记录 sendMessage/appendEntry/registerProvider/
- * unregisterProvider 调用，支持注入固定时间与 fake entries。
+ * Mock 后端：零 session/FS 副作用，记录 sendMessage/deliverDispatch/appendEntry/
+ * registerProvider/unregisterProvider 调用，支持注入固定时间与 fake entries。
  *
  * 能力：
- * - sentMessages: 每次 sendMessage 的 {msg, opts} 记录
+ * - sentMessages: 每次 sendMessage / deliverDispatch 的 {msg, opts, idempotencyKey} 记录
  * - appendedOps: 每次 appendEntry 收到的 SchedulerEntryOp（测 runtime 各 op 断言）
  * - registeredProviders / unregisteredProviders: ack 覆写注册/注销记录
  * - fakeEntries / fakeSessionFile: loadTasks 经 replayFoldEntries 的注入源（测 backend→replay 委托）
@@ -37,6 +39,16 @@ export class MockSchedulerBackend implements SchedulerBackend {
     opts?: { deliverAs?: 'steer'; triggerTurn?: boolean },
   ): Promise<void> {
     this.sentMessages.push({ msg, opts })
+  }
+
+  /** 到期 dispatch 投递入口的 mock 记录（unified-delivery 迁移）：与 sendMessage
+   * 共用 sentMessages（同一「注入消息」概念），幂等键随记录携带供跨轮唯一性断言。 */
+  async deliverDispatch(
+    msg: { content: string; customType: string; display: boolean },
+    opts: { deliverAs?: 'steer'; triggerTurn?: boolean } | undefined,
+    idempotencyKey: string,
+  ): Promise<void> {
+    this.sentMessages.push({ msg, opts, idempotencyKey })
   }
 
   appendEntry(op: SchedulerEntryOp): void {

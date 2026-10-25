@@ -4,7 +4,7 @@
  *
  * 覆盖五块机制（D1 终态：agent_settled + isIdle 复核拆 turnIndex 归属状态机——原
  * turnIndex 归属：4 状态字段 + 6 事件挂点 + customType 前缀匹配）：
- * - 切换：dispatchTaskInner 在 sendMessage 前 setModel（busy 亦生效——本层不做 idle 检查）
+ * - 切换：dispatchTaskInner 在 deliverDispatch 前 setModel（busy 亦生效——本层不做 idle 检查）
  * - 恢复：判定锚点 = isIdle() 同步事实查询（判定层级最高）；agent_settled 确定性事件是
  *   提前触发的加速器——事件到达即查询并兑现；非 idle（settled 与用户新 run 交错）不切
  *   （记录保留），tick 的 isIdle() 查询在 idle 重入时兑现；不挂 agent_end（end 后可能
@@ -15,7 +15,7 @@
  * - tick 事实查询兜正确性（原 2-tick 计数对账已按 ADR-0122 删除）：严格先于同 tick
  *   dispatch 循环；记录存在 + idle 即恢复（agent_settled 丢失时由查询收敛——拉保证
  *   正确、事件只优化延迟）；未决记录检查（无记录时模型漂移 = 用户自主行为不动作）
- * - 降级与接管副作用：setModel false 不阻塞 dispatch；sendMessage 抛错 catch 先恢复；
+ * - 降级与接管副作用：setModel false 不阻塞 dispatch；deliverDispatch 抛错 catch 先恢复；
  *   模型语义异常只走日志（不进持久化词表）
  *
  * 事件注入：直接调用 runtime 的 handleRunSettled（index.ts 的 pi.on 只做转发）。
@@ -470,10 +470,10 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       expect(ops.setModelCalls).toEqual([TASK_M])
     })
 
-    it('sendMessage 同步抛错 → catch 先恢复原模型，再走现状 failed 记账', async () => {
+    it('deliverDispatch 拒收抛错 → catch 先恢复原模型，再走现状 failed 记账', async () => {
       // 首次 reject 触发同步抛错路径；后续 resolve（CL7 现状重试语义：failed 不推进
       // nextRunAt，下个到期 tick 重试 dispatch）
-      backend.sendMessage = vi.fn().mockRejectedValueOnce(new Error('session closed')).mockResolvedValue(undefined)
+      backend.deliverDispatch = vi.fn().mockRejectedValueOnce(new Error('rejected by delivery port')).mockResolvedValue(undefined)
       task = await addModelTask('job', TASK_M)
       const ok = await runtime.dispatchTask(task)
       expect(ok).toBe(false)
@@ -483,7 +483,7 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
 
       // 重试到期：记录已清（否则互斥挡住、TASK_M 不会再次出现），dispatch 照常重试。
       // 重试成功的证据 = 第三次 setModel(TASK_M)（切换分支重新执行）+ lastStatus 翻回 success
-      //（onDispatchSuccess 记账；vi.fn 覆盖实例 sendMessage 后 sentMessages 不再记录，不以此断言）
+      //（onDispatchSuccess 记账；vi.fn 覆盖实例 deliverDispatch 后 sentMessages 不再记录，不以此断言）
       task.nextRunAt = 0
       runtime.startScheduler()
       await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS)
