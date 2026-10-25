@@ -770,7 +770,9 @@ export async function run(ctx) {
 
     // ── A4b 磁盘面：<dataDir> 全量扫描（合法落点 = agent/models.json）──
     const legalLanding = path.join(dataDir, 'agent', 'models.json')
-    const allFiles = walkFiles(dataDir).filter((f) => f !== legalLanding)
+    // 探针 fixture 自身源码内嵌合成 key（剧本装配产物，launch 前写入，非产品落点）——排除。
+    const probeSourceFile = path.join(dataDir, 'plugins', PROBE_ID, 'index.js')
+    const allFiles = walkFiles(dataDir).filter((f) => f !== legalLanding && f !== probeSourceFile)
     const diskHits = []
     let diskBytes = 0
     for (const file of allFiles) {
