@@ -55,7 +55,7 @@ export async function handleCompletion(
   // W4b 收编判别器 = session.list {surface:'btw'} 拉取缓存成员判别
   // （ensureBtwLineMembership，登记于 docs/constraints.json C-data-28 抑制类清单——为何无
   // 构造性替代见该条；旧 isBtwVirtualId 前缀判别随 vid 退役、session.surfaces 派生表随
-  // W4b 收编删除，设计 §5-W4b 四步之①）。查找落空补拉一次再判；拉取失败 warn + 当次不抑制。
+  // W4b 收编删除，设计 §5-W4b 四步之①）。查找落空补充拉取一次再判；已确认非线的 id 命中负向缓存、不再重复补充拉取（否则主会话每 turn 完成都多发一次全量 RPC，未读与提示音被拖慢）；拉取失败 warn + 当次不抑制。
   if (await ensureBtwLineMembership(sessionId)) return
   // 1. 过滤 stopReason：aborted 不触发
   if (stopReason === 'aborted') return
