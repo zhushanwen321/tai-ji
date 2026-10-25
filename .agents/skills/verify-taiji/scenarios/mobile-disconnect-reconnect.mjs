@@ -214,7 +214,7 @@ export async function run(ctx) {
   /** 占端口 server（预算耗尽段；finally 必关——防吊住 runtime 端口段与进程）。 */
   let occupier = null
   try {
-    shell = await openMobileShell({ repo: ctx.repo, runtimePort, token })
+    shell = await openMobileShell({ repo: ctx.repo, runtimePort, token, locale: 'zh-CN' })
     const connected = await waitForShellConnected(shell.page, { timeoutMs: 30_000 })
     ev.assert('A: 壳连接成功（bottom-nav 挂载）', connected, {
       channel: 'A', expected: 'bottom-nav 可见', actual: connected ? '可见' : '30s 内未出现',

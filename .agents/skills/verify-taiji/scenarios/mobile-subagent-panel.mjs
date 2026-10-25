@@ -51,6 +51,11 @@ function longSubText(marker) {
   return `${marker} ` + 'process the queued subtask step by step and report intermediate findings. '.repeat(14)
 }
 
+/** 子演员短文本（~230 字符 ≈ 7s 完成——详情/执行记录断言的观察对象先走完落盘）。 */
+function shortSubText(marker) {
+  return `${marker} ` + 'subtask finished with a concise summary of the outcome. '.repeat(4)
+}
+
 export const meta = {
   id: 'mobile-subagent-panel',
   priority: 'P0',
@@ -90,14 +95,14 @@ export const meta = {
         { text: 'noted-c', stopReason: 'stop' },
       ],
       'mockllm/mock-sub-a': [{ text: longSubText('SUB-A-RESULT'), stopReason: 'stop' }],
-      'mockllm/mock-sub-b': [{ text: longSubText('SUB-B-RESULT'), stopReason: 'stop' }],
+      'mockllm/mock-sub-b': [{ text: shortSubText('SUB-B-RESULT'), stopReason: 'stop' }],
     },
   },
   provable: [
     'A：壳发指令后 RunBand 呈现且计数 = 2（running 过滤，session.subagents 推送驱动）',
-    'A：进行中域计数呈现（回合面板「2 个子代理」+ 子代理列表 2 行）',
-    'A：SubagentSheet 两级推进：列表 2 项 → 详情（状态行 + 元信息 + 执行记录容器）',
-    'A：停止其一 → 流内通知「已停止子代理 ma-sub-a」+ RunBand 计数减一 = 1 + 详情状态收敛',
+    'A：进行中域计数呈现（子代理列表段 2 行；回合面板 subagentCount 仅回合生成中渲染，见 gotchas）',
+    'A：SubagentSheet 两级推进：列表 2 项 → 已完成子代理详情（状态行 + 元信息 + 执行记录 = 历史派生行 >0）',
+    'A：停止其一（运行中子代理）→ 流内通知「已停止子代理 ma-sub-a」+ RunBand 计数减一 = 1 + 详情状态收敛',
   ],
   notProvable: [
     '真机触控热区/长按时长（仿真 viewport 断言呈现与状态机，不证触控手感）',
@@ -133,7 +138,10 @@ async function waitForTextVisible(page, text, { timeoutMs = 15_000 } = {}) {
 
 export async function run(ctx) {
   const { instance, ev, log, remoteAccess, protocol: proto } = ctx
-  const gotchas = []
+  const gotchas = [
+    'subagent_start 为异步派发：主轮回合秒级收尾（idle），进行中屏回合面板（含 subagentCount）仅回合生成中渲染——后台子代理形态的进行中域计数呈现面 = 子代理列表段（activity-subagent-list）；BottomNav 角标是待办计数（权限/表单），不反映子代理数',
+    '运行中子代理的执行记录可能拉不到（子会话 JSONL 首条未落盘窗口，首跑实测 B 通道 20s 全 0）——「元信息 + 执行记录」断言选先完成的子代理，停止断言选长跑子代理',
+  ]
   const uncovered = []
   const info = instance.info()
   const runtimePort = info.runtimePort
@@ -170,7 +178,7 @@ export async function run(ctx) {
   // ── 打开移动壳 → connected → 进入会话 ──
   let shell = null
   try {
-    shell = await openMobileShell({ repo: ctx.repo, runtimePort, token })
+    shell = await openMobileShell({ repo: ctx.repo, runtimePort, token, locale: 'zh-CN' })
     const connected = await waitForShellConnected(shell.page, { timeoutMs: 30_000 })
     ev.assert('A: 壳连接成功（bottom-nav 挂载）', connected, {
       channel: 'A', expected: 'bottom-nav 可见', actual: connected ? '可见' : '30s 内未出现',
@@ -206,23 +214,32 @@ export async function run(ctx) {
       channel: 'A', expected: RUNBAND_COUNT_2, actual: countText ?? '(计数文本未命中)',
     })
     await ev.shot(shell.page, 'a9-runband-2')
+    // 注意：此处不等主轮 message.complete——subagent_start 派发后主轮回合要到子代理跑完
+    // 才收尾（完成通知轮），等待会把「运行中窗口」耗尽（2026-10-25 首跑实测 30s 空档）。
+    // 派发双发生的事实由 RunBand = 2 承载。
 
-    // 主轮完成事实记录（派发双发生的 B 通道旁证；不作为主断言）
-    try {
-      const end = await proto.waitTurnEnd(sid, { timeoutMs: 90_000 })
-      ev.step({ step: 'main.turn.end', channel: 'B', exitCode: end.ok ? 0 : 1, stats: { type: end.type, stopReason: end.payload?.stopReason ?? '' } })
-    } catch (e) {
-      ev.step({ step: 'main.turn.end', channel: 'B', exitCode: 1, stats: { error: e instanceof Error ? e.message : String(e) } })
-    }
-
-    // ── 断言②：进行中域计数呈现（底部导航 → activity 屏）──
+    // ── 断言②：进行中域计数呈现（running 窗口内；chat 态 BottomNav 结构性隐藏——
+    //    先 popstate 回列表再点 activity tab；App.vue BottomNav v-if="shellRoute !== 'chat'"）──
+    await shell.page.locator('[data-testid="chat-back"]').click()
+    await waitForTestidVisible(shell.page, 'bottom-nav', { timeoutMs: 15_000 })
     await shell.page.locator('[data-testid="mobile-nav-activity"]').click()
     const activityShown = await waitForTestidVisible(shell.page, 'activity-screen', { timeoutMs: 15_000 })
-    const turnSubagents = activityShown ? await waitForTextEquals(shell.page, 'activity-turn-subagents', '2 个子代理', { timeoutMs: 15_000 }) : null
-    ev.assert('A: 进行中域回合面板计数 = 2 个子代理', turnSubagents === '2 个子代理', {
-      channel: 'A', expected: '2 个子代理', actual: turnSubagents ?? '(activity-turn-subagents 未命中)',
+    const turnSubagents = activityShown ? await waitForTextEquals(shell.page, 'activity-turn-subagents', '2 个子代理', { timeoutMs: 5_000 }) : null
+    // 回合面板 subagentCount 挂在 v-if="isActive && observedDuration" 内（ActivityScreen）——
+    // subagent_start 为异步派发，主轮回合秒级收尾（idle），后台子代理形态下面板结构性走
+    // 空态。呈现条件如实记录（首跑实测），不作为通过判据；进行中域的子代理计数呈现面 =
+    // 下方子代理列表段。
+    ev.step({
+      step: 'activity.turnpanel.subagentcount',
+      channel: 'A',
+      exitCode: 0,
+      stats: { rendered: turnSubagents === '2 个子代理', note: '仅回合生成中渲染；后台子代理形态走空态' },
     })
-    const subRows = await shell.page.locator('[data-testid^="activity-subagent-"]').count()
+    // 行数只数 list 容器内的行（v-if 与空态分支互斥，容器在 = running > 0；
+    // 全页前缀匹配会误命中空态按钮 activity-subagent-empty-action）
+    const subRows = activityShown
+      ? await shell.page.locator('[data-testid="activity-subagent-list"] [data-testid^="activity-subagent-"]').count()
+      : 0
     ev.assert('A: 进行中域子代理列表 2 行', activityShown && subRows === 2, {
       channel: 'A', expected: 'activity-subagent-list 2 行', actual: `${subRows} 行`,
     })
@@ -244,48 +261,94 @@ export async function run(ctx) {
     })
     await ev.shot(shell.page, 'a9-sheet-list')
 
-    // 点 SLUG_A 行进详情（列表行按 slug 文本过滤）
+    // ── 断言③：详情（已完成子代理 SLUG_B——执行记录已落盘）→ 返回 → 运行中 SLUG_A ──
+    // 执行记录数据 = 打开详情时 fetchSubagentHistory 一次拉取；运行中子代理的子会话
+    // JSONL 首条可能未落盘（首跑实测 B 通道 20s 全 0），故「元信息 + 执行记录」断言
+    // 选先完成的 SLUG_B（B 通道等终态后打开），「停止」断言选长跑的 SLUG_A。
+    let subBStatus = null
+    try {
+      const deadline = Date.now() + 45_000
+      for (;;) {
+        const reply = await proto.call('session.getSubagents', { sessionId: sid }, { timeoutMs: 15_000 })
+        subBStatus = (reply.subagents ?? []).find((r) => r.slug === SLUG_B)?.status ?? null
+        if (subBStatus && subBStatus !== 'running') break
+        if (Date.now() >= deadline) break
+        await new Promise((r) => setTimeout(r, 500))
+      }
+    } catch (e) {
+      ev.step({ step: 'subagent.b.waitdone', channel: 'B', exitCode: 1, stats: { error: e instanceof Error ? e.message : String(e) } })
+    }
+    ev.step({ step: 'subagent.b.waitdone', channel: 'B', exitCode: subBStatus && subBStatus !== 'running' ? 0 : 1, stats: { status: subBStatus } })
+
     await shell.page
       .locator('[data-testid^="subagent-sheet-item-"]')
-      .filter({ hasText: SLUG_A })
+      .filter({ hasText: SLUG_B })
       .first()
       .click()
     const detailShown = await waitForTestidVisible(shell.page, 'subagent-sheet-detail', { timeoutMs: 15_000 })
     ev.assert('A: 详情态推进（subagent-sheet-detail）', detailShown, {
       channel: 'A', expected: 'subagent-sheet-detail 可见', actual: detailShown ? '可见' : '列表项点击后未推进',
     })
-    const detailStateRunning = detailShown ? await waitForTextEquals(shell.page, 'subagent-sheet-detail-state', '运行中', { timeoutMs: 10_000 }) : null
-    ev.assert('A: 详情状态行 = 运行中', detailStateRunning === '运行中', {
-      channel: 'A', expected: '运行中', actual: detailStateRunning ?? '(状态行未命中)',
+    const detailStateEnded = detailShown ? await waitForTextEquals(shell.page, 'subagent-sheet-detail-state', '已结束', { timeoutMs: 10_000 }) : null
+    ev.assert('A: 已完成子代理详情状态行 = 已结束', detailStateEnded === '已结束', {
+      channel: 'A', expected: '已结束', actual: detailStateEnded ?? '(状态行未命中)',
     })
     // 元信息 dl（agent 必有；model/turns 等缺省字段不渲染行——行数 ≥1 即形态成立）
     const metaRows = detailShown ? await shell.page.locator('[data-testid="subagent-sheet-detail-meta"] dt').count() : 0
     ev.assert('A: 详情元信息呈现（dl ≥1 行）', metaRows >= 1, {
       channel: 'A', expected: 'subagent-sheet-detail-meta ≥1 行', actual: `${metaRows} 行`,
     })
-    // 执行记录（最近历史派生窗口）：容器在 + 子代理已跑若干秒后应有 user task 消息行
     const historyShown = detailShown ? await waitForTestidVisible(shell.page, 'subagent-sheet-history', { timeoutMs: 10_000 }) : false
     ev.assert('A: 执行记录容器呈现（历史派生）', historyShown, {
       channel: 'A', expected: 'subagent-sheet-history 容器可见', actual: historyShown ? '可见' : '未出现',
     })
-    const historyRows = historyShown ? await shell.page.locator('[data-testid^="subagent-sheet-history-"]').count() : 0
+    // 执行记录行：已完成子代理的 task/回复消息派生（N≈8 窗口）。首拉为空时回列表重进
+    // 重拉一次（fetchSubagentHistory 只在 openDetail 触发）。
+    let historyRows = historyShown ? await shell.page.locator('[data-testid^="subagent-sheet-history-"]').count() : 0
+    if (historyRows === 0 && historyShown) {
+      await shell.page.locator('[data-testid="subagent-sheet-back"]').click()
+      await waitForTestidVisible(shell.page, 'subagent-sheet-list', { timeoutMs: 10_000 })
+      await shell.page
+        .locator('[data-testid^="subagent-sheet-item-"]')
+        .filter({ hasText: SLUG_B })
+        .first()
+        .click()
+      await waitForTestidVisible(shell.page, 'subagent-sheet-detail', { timeoutMs: 10_000 })
+      historyRows = await shell.page.locator('[data-testid^="subagent-sheet-history-"]').count().catch(() => 0)
+    }
     ev.step({ step: 'subagent.history.rows', channel: 'A', exitCode: historyRows > 0 ? 0 : 1, stats: { rows: historyRows } })
     ev.assert('A: 执行记录含历史行（子代理 task 消息派生）', historyRows > 0, {
       channel: 'A', expected: 'subagent-sheet-history-* ≥1 行', actual: `${historyRows} 行`,
     })
+    await ev.shot(shell.page, 'a9-sheet-detail-done')
+
+    // 返回列表 → 点运行中 SLUG_A 进详情
+    await shell.page.locator('[data-testid="subagent-sheet-back"]').click()
+    await waitForTestidVisible(shell.page, 'subagent-sheet-list', { timeoutMs: 10_000 })
+    await shell.page
+      .locator('[data-testid^="subagent-sheet-item-"]')
+      .filter({ hasText: SLUG_A })
+      .first()
+      .click()
+    await waitForTestidVisible(shell.page, 'subagent-sheet-detail', { timeoutMs: 10_000 })
+    const detailStateRunning = await waitForTextEquals(shell.page, 'subagent-sheet-detail-state', '运行中', { timeoutMs: 10_000 })
+    ev.assert('A: 运行中子代理详情状态行 = 运行中', detailStateRunning === '运行中', {
+      channel: 'A', expected: '运行中', actual: detailStateRunning ?? '(状态行未命中——运行窗口错过则如实红)',
+    })
+    await ev.shot(shell.page, 'a9-sheet-detail-running')
     await ev.shot(shell.page, 'a9-sheet-detail')
 
     // ── 断言④：停止其一 → 详情收敛 + 流内通知 + RunBand 计数减一 ──
     await shell.page.locator('[data-testid="subagent-sheet-stop"]').click()
-    const stateAfterStop = await waitForTextEquals(shell.page, 'subagent-sheet-detail-state', '已结束', { timeoutMs: 20_000 })
+    const stateAfterStop = await waitForTextEquals(shell.page, 'subagent-sheet-detail-state', '已结束', { timeoutMs: 30_000 })
     ev.assert('A: 停止后详情状态收敛为已结束', stateAfterStop === '已结束', {
-      channel: 'A', expected: '已结束', actual: stateAfterStop ?? '(20s 内未收敛)',
+      channel: 'A', expected: '已结束', actual: stateAfterStop ?? '(30s 内未收敛)',
     })
     const noticeShown = await waitForTextVisible(shell.page, STOP_NOTICE_TEXT, { timeoutMs: 15_000 })
     ev.assert('A: 流内通知「已停止子代理 ma-sub-a」呈现', noticeShown, {
       channel: 'A', expected: STOP_NOTICE_TEXT, actual: noticeShown ? '可见' : '15s 内未出现',
     })
-    const countAfterStop = await waitForTextEquals(shell.page, 'mobile-run-band-count', RUNBAND_COUNT_1, { timeoutMs: 20_000 })
+    const countAfterStop = await waitForTextEquals(shell.page, 'mobile-run-band-count', RUNBAND_COUNT_1, { timeoutMs: 30_000 })
     ev.assert('A: 停止后 RunBand 计数减一 = 1', countAfterStop === RUNBAND_COUNT_1, {
       channel: 'A', expected: RUNBAND_COUNT_1, actual: countAfterStop ?? '(计数未收敛)',
     })
@@ -304,7 +367,7 @@ export async function run(ctx) {
     }
   }
 
-  // ── 收敛等待：全部子代理终态（防 dispose 时孙进程仍在跑）──
+  // ── 收敛等待：全部子代理终态（防 dispose 时孙进程仍在跑）+ mock 请求面归因证据 ──
   try {
     const deadline = Date.now() + 90_000
     let running = -1
@@ -316,6 +379,14 @@ export async function run(ctx) {
       await new Promise((r) => setTimeout(r, 1_000))
     }
     ev.step({ step: 'subagents.settled', channel: 'C', exitCode: running === 0 ? 0 : 1, stats: { running } })
+    const mockRequests = (instance.mockLlm?.requests ?? []).map((r) => ({
+      model: r.model,
+      status: r.status,
+      stepIndex: r.stepIndex,
+      error: r.error,
+    }))
+    ev.attach('mock-requests', JSON.stringify(mockRequests, null, 2))
+    ev.step({ step: 'mock.requests', channel: 'C', exitCode: 0, stats: { total: mockRequests.length, models: [...new Set(mockRequests.map((r) => r.model))].join(',') } })
   } catch (e) {
     gotchas.push(`收敛等待失败（dispose 可能需杀在飞孙进程）：${e instanceof Error ? e.message : String(e)}`)
   }

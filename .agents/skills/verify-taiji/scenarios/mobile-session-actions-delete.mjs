@@ -126,6 +126,13 @@ export async function run(ctx) {
         channel: 'A', expected: 'session-actions-list 不出现', actual: sheetShown ? 'Sheet 被打开（阈值失效）' : 'Sheet 未打开',
       })
       ev.step({ step: 'mobile.longpress.cancel-move', channel: 'A', exitCode: sheetShown ? 1 : 0, stats: { dx: 24 } })
+      // 合成鼠标伪影恢复：真机触屏 move 超滑动 slop 由滚动接管（pointercancel，无 click）；
+      // Playwright mouse 指针无 slop 抑制，move+up 会伴生 click → 可能切入聊天。回到列表再继续。
+      if (await page.locator('[data-testid="chat-screen"]').isVisible().catch(() => false)) {
+        await page.locator('[data-testid="chat-back"]').click()
+        await page.locator('[data-testid="sessions-screen"]').waitFor({ state: 'visible', timeout: 15_000 })
+        ev.attach('cancel-move-artifact', '合成鼠标 move+up 伴生 click 切入了聊天，已返回列表（真机触屏由 pointercancel 天然抑制）')
+      }
     }
 
     // ── 断言①：长按 ≥480ms 打开动作 Sheet ─────────────────────────────────
@@ -154,14 +161,17 @@ export async function run(ctx) {
     // ── 断言③：删除二次确认态文案（不可逆声明 + 影响范围） ──────────────────
     await page.locator('[data-testid="session-action-delete"]').click()
     await page.locator('[data-testid="session-delete-confirm"]').waitFor({ state: 'visible', timeout: 5_000 })
-    const descText = (await page.locator('[data-testid="session-delete-confirm"]').innerText()).trim()
-    const hasIrreversible = descText.includes('不可恢复')
+    // 文案落点：不可逆声明在目标行（session-delete-confirm-target），影响范围在 Sheet 头部
+    // 说明行（sheet-description = deleteConfirmDescription，Sheet 原语渲染位）——两处分开取。
+    const targetText = (await page.locator('[data-testid="session-delete-confirm-target"]').innerText()).trim()
+    const descLoc = page.locator('[data-testid="sheet-description"]')
+    const descText = (await descLoc.isVisible().catch(() => false)) ? (await descLoc.innerText()).trim() : ''
+    const hasIrreversible = targetText.includes('不可恢复')
     const hasScope = descText.includes('全部对话记录') && descText.includes('草稿')
-    const targetText = await page.locator('[data-testid="session-delete-confirm-target"]').innerText()
     ev.assert('A: 确认态文案含不可逆声明与影响范围（不可恢复 + 全部对话记录 + 草稿）', hasIrreversible && hasScope, {
       channel: 'A',
-      expected: '「不可恢复」∧「全部对话记录」∧「草稿」（deleteConfirmDescription）',
-      actual: `irreversible=${hasIrreversible} scope=${hasScope} 文本="${descText.replace(/\s+/g, ' ').slice(0, 120)}"`,
+      expected: '「不可恢复」∧「全部对话记录」∧「草稿」（deleteConfirmDescription @ sheet-description）',
+      actual: `irreversible=${hasIrreversible} scope=${hasScope} 目标行="${targetText.slice(0, 80)}" 说明行="${descText.slice(0, 80)}"`,
     })
     ev.assert('A: 确认态目标行指认被删会话（label 在场）', targetText.includes(created.label), {
       channel: 'A', expected: `含「${created.label}」`, actual: `"${targetText.trim().slice(0, 80)}"`,

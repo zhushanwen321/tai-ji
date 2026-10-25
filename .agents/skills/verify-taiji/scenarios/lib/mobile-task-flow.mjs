@@ -16,7 +16,9 @@ import { openMobileShell, waitForTokenHandover } from './mobile-shell-helper.mjs
  * @returns openMobileShell 句柄（browser/context/page/consoleLines/pageErrors/url）+ handover 结果
  */
 export async function openConnectedShell({ repo, runtimePort, token, timeoutMs = 30_000 }) {
-  const shell = await openMobileShell({ repo, runtimePort, token })
+  // locale 固定 zh-CN：移动壳 i18n 按 navigator.language 映射词表（zh* → zh-CN），
+  // 本组剧本断言壳文案（确认态/队列状态词/段控标签），Playwright 描述符缺省 en-US 会全英文。
+  const shell = await openMobileShell({ repo, runtimePort, token, locale: 'zh-CN' })
   const handover = await waitForTokenHandover(shell.page, token, { timeoutMs: 20_000 })
   await shell.page
     .locator('[data-testid="sessions-screen"]')
