@@ -83,43 +83,78 @@ const TEST_FILE = /\.(spec|test)\.(ts|tsx|vue)$/
  * 注释态。两者都是「清单外命中即红」（设计 §3.3.8）的漏报通道。字符串内容原样
  * 保留（不剥离）——字符串内的 hidden/surface 形态与代码内同样计命中，与加状态机
  * 前的口径一致（修的是截断漏报，不放宽 pattern）。
+ * 拆分说明：四态（块注释 / Vue 模板注释 / 字符串 / 代码）各由一个 step 函数承载，
+ * 跨行态（inBlock/inHtml）挂 st 上逐行延续，quote 态行内生效、每行重置。
  */
 export function codeLines(text) {
-  const out = []
-  let inBlock = false
-  let inHtml = false
-  for (const raw of text.split('\n')) {
-    let res = ''
-    let i = 0
-    let quote = null
-    while (i < raw.length) {
-      if (inBlock) {
-        if (raw[i] === '*' && raw[i + 1] === '/') { inBlock = false; i += 2; continue }
-        i += 1
-        continue
-      }
-      if (inHtml) {
-        if (raw[i] === '-' && raw[i + 1] === '-' && raw[i + 2] === '>') { inHtml = false; i += 3; continue }
-        i += 1
-        continue
-      }
-      if (quote !== null) {
-        if (raw[i] === '\\') { res += raw[i] + (raw[i + 1] ?? ''); i += 2; continue }
-        if (raw[i] === quote) quote = null
-        res += raw[i]
-        i += 1
-        continue
-      }
-      if (raw[i] === '/' && raw[i + 1] === '*') { inBlock = true; i += 2; continue }
-      if (raw[i] === '<' && raw[i + 1] === '!' && raw[i + 2] === '-' && raw[i + 3] === '-') { inHtml = true; i += 4; continue }
-      if (raw[i] === '/' && raw[i + 1] === '/') break
-      if (raw[i] === "'" || raw[i] === '"' || raw[i] === '`') { quote = raw[i]; res += raw[i]; i += 1; continue }
-      res += raw[i]
-      i += 1
-    }
-    out.push(res)
+  const st = { inBlock: false, inHtml: false, quote: null }
+  return text.split('\n').map((raw) => {
+    st.quote = null
+    return stripLine(raw, st)
+  })
+}
+
+/** 单行剥注释：返回该行剥离后的文本（逐字符经 stripChar 分派，行内位置由 next 推进）。 */
+function stripLine(raw, st) {
+  let res = ''
+  let i = 0
+  while (i < raw.length) {
+    const step = stripChar(raw, i, st)
+    res += step.text
+    i = step.next
   }
-  return out
+  return res
+}
+
+/** 单字符步进：按当前态分派，返回 { text, next }——text = 追加进结果的内容，next = 下一位置。 */
+function stripChar(raw, i, st) {
+  if (st.inBlock) return blockStep(raw, i, st)
+  if (st.inHtml) return htmlStep(raw, i, st)
+  if (st.quote !== null) return quoteStep(raw, i, st)
+  return codeStep(raw, i, st)
+}
+
+/** 块注释态：吃到 `*\/` 结束（态内字符不产出文本）；否则原样跳过。 */
+function blockStep(raw, i, st) {
+  if (raw[i] === '*' && raw[i + 1] === '/') {
+    st.inBlock = false
+    return { text: '', next: i + 2 }
+  }
+  return { text: '', next: i + 1 }
+}
+
+/** Vue 模板注释态：吃到 `-->` 结束（态内字符不产出文本）。 */
+function htmlStep(raw, i, st) {
+  if (raw[i] === '-' && raw[i + 1] === '-' && raw[i + 2] === '>') {
+    st.inHtml = false
+    return { text: '', next: i + 3 }
+  }
+  return { text: '', next: i + 1 }
+}
+
+/** 字符串态：内容原样产出（字符串内的 hidden/surface 与代码内同样计命中）；反斜杠吞下一字符。 */
+function quoteStep(raw, i, st) {
+  if (raw[i] === '\\') return { text: raw[i] + (raw[i + 1] ?? ''), next: i + 2 }
+  if (raw[i] === st.quote) st.quote = null
+  return { text: raw[i], next: i + 1 }
+}
+
+/** 代码态：块注释开 / Vue 注释开 / 行注释截断 / 字符串开；其余原样产出。 */
+function codeStep(raw, i, st) {
+  if (raw[i] === '/' && raw[i + 1] === '*') {
+    st.inBlock = true
+    return { text: '', next: i + 2 }
+  }
+  if (raw[i] === '<' && raw[i + 1] === '!' && raw[i + 2] === '-' && raw[i + 3] === '-') {
+    st.inHtml = true
+    return { text: '', next: i + 4 }
+  }
+  if (raw[i] === '/' && raw[i + 1] === '/') return { text: '', next: raw.length }
+  if (raw[i] === "'" || raw[i] === '"' || raw[i] === '`') {
+    st.quote = raw[i]
+    return { text: raw[i], next: i + 1 }
+  }
+  return { text: raw[i], next: i + 1 }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

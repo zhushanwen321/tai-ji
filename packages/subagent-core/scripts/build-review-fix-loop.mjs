@@ -56,87 +56,130 @@ function stitch(template, shared) {
   return out.join("\n");
 }
 
+// ── 词法规则表（lexSegments 的分派依据）──────────────────────────────────────
+// 每条规则两件套：matches(src, i, prevSig) 判起点；scan(src, i) 返回
+// { end, prevSig }——end = 消费到的下一位置，prevSig = 该字面量结束后回溯给
+// 主循环的「上一个有效字符」。按表中顺序首次命中即生效（与原 if/else-if 链同序，
+// 注释优先于正则判定）。新增字面量形态只加一行规则，主循环分支数不随形态数量增长。
+const REGEX_PRECEDING = new Set(["(", "[", "{", ",", ";", ":", "=", "!", "&", "|", "?", "+", "-", "*", "%", "<", ">", "~", "^", "\n"]);
+const REGEX_KEYWORDS = new Set(["return", "case", "do", "else", "in", "of", "typeof", "void", "delete", "yield", "await"]);
+
+const LEX_RULES = [
+  {
+    name: "line-comment",
+    matches: (src, i) => src[i] === "/" && src[i + 1] === "/",
+    scan: (src, i) => ({ end: indexOrEnd(src, "\n", i), prevSig: "\n" }),
+  },
+  {
+    name: "block-comment",
+    matches: (src, i) => src[i] === "/" && src[i + 1] === "*",
+    scan: (src, i) => {
+      const j = src.indexOf("*/", i + 2);
+      return { end: j < 0 ? src.length : j + 2, prevSig: "\n" };
+    },
+  },
+  {
+    name: "regex-literal",
+    matches: (src, i, prevSig) => src[i] === "/" && regexAllowedAt(src, i, prevSig),
+    scan: (src, i) => ({ end: scanRegexEnd(src, i), prevSig: "/" }),
+  },
+  {
+    name: "quoted-string",
+    matches: (src, i) => src[i] === '"' || src[i] === "'",
+    scan: (src, i) => ({ end: scanQuotedEnd(src, i, src[i]), prevSig: src[i] }),
+  },
+  {
+    name: "template-string",
+    matches: (src, i) => src[i] === "`",
+    scan: (src, i) => ({ end: scanTemplateEnd(src, i), prevSig: "`" }),
+  },
+];
+
+/** 段尾复用：末段已是目标 kind 则续写，否则开新段（原 codeStart/rawStart 的公共体）。 */
+function pushSegment(segments, code) {
+  const last = segments[segments.length - 1];
+  if (last && last.code === code) return last;
+  const seg = { code, text: "" };
+  segments.push(seg);
+  return seg;
+}
+
+/** indexOf 的「找不到 → 串尾」包装（行注释吃到行尾或文件尾）。 */
+function indexOrEnd(src, needle, from) {
+  const j = src.indexOf(needle, from);
+  return j < 0 ? src.length : j;
+}
+
+/** 正则字面量起点判定：前一有效字符落在 REGEX_PRECEDING，或紧邻关键字之后。 */
+function regexAllowedAt(src, i, prevSig) {
+  if (REGEX_PRECEDING.has(prevSig)) return true;
+  return /[A-Za-z_$]/.test(prevSig) && REGEX_KEYWORDS.has(prevWordBefore(src, i));
+}
+
+/** 位置 i 之前紧邻的标识符（正则/除法判定的关键词依据）。 */
+function prevWordBefore(src, i) {
+  let j = i;
+  while (j > 0 && /[A-Za-z_$]/.test(src[j - 1])) j--;
+  return src.slice(j, i);
+}
+
+/** 正则字面量结束位置：不吃跨行；字符类内的 / 不终止；反斜杠吞下一字符。 */
+function scanRegexEnd(src, i) {
+  const n = src.length;
+  let j = i + 1;
+  let inClass = false;
+  while (j < n && src[j] !== "\n") {
+    if (src[j] === "\\") { j += 2; continue; }
+    if (src[j] === "[") inClass = true;
+    else if (src[j] === "]") inClass = false;
+    else if (src[j] === "/" && !inClass) break;
+    j++;
+  }
+  return j;
+}
+
+/** 引号字符串结束位置（quote 由 src[i] 给出）：反斜杠吞下一字符；未闭合吃到串尾。 */
+function scanQuotedEnd(src, i, quote) {
+  const n = src.length;
+  let j = i + 1;
+  while (j < n && src[j] !== quote) { if (src[j] === "\\") j += 2; else j++; }
+  return Math.min(j + 1, n);
+}
+
+/** 模板串结束位置：${} 嵌套计入深度，嵌内的反引号不终止；未闭合吃到串尾。 */
+function scanTemplateEnd(src, i) {
+  const n = src.length;
+  let j = i + 1;
+  let depth = 0;
+  while (j < n && (src[j] !== "`" || depth > 0)) {
+    if (src[j] === "\\") { j += 2; continue; }
+    if (src[j] === "$" && src[j + 1] === "{") { depth++; j += 2; continue; }
+    if (src[j] === "}" && depth > 0) { depth--; j++; continue; }
+    j++;
+  }
+  return Math.min(j + 1, n);
+}
+
 // ── 词法扫描（与 zsw-skills check-workflow-parity.mjs 同一套状态机设计）──
 // 输出段列表：{ code, text }——code=true 的段是可改写区，其余原样透传
 function lexSegments(src) {
   const segments = [];
-  let i = 0;
   const n = src.length;
+  let i = 0;
   let prevSig = "\n";
-  const REGEX_PRECEDING = new Set(["(", "[", "{", ",", ";", ":", "=", "!", "&", "|", "?", "+", "-", "*", "%", "<", ">", "~", "^", "\n"]);
-  const REGEX_KEYWORDS = new Set(["return", "case", "do", "else", "in", "of", "typeof", "void", "delete", "yield", "await"]);
-  const codeStart = () => {
-    const last = segments[segments.length - 1];
-    if (last && last.code) return last;
-    const seg = { code: true, text: "" };
-    segments.push(seg);
-    return seg;
-  };
-  const rawStart = () => {
-    const last = segments[segments.length - 1];
-    if (last && !last.code) return last;
-    const seg = { code: false, text: "" };
-    segments.push(seg);
-    return seg;
-  };
   while (i < n) {
-    const c = src[i];
-    if (c === "/" && src[i + 1] === "/") {
-      const j = src.indexOf("\n", i);
-      rawStart().text += src.slice(i, j < 0 ? n : j);
-      i = j < 0 ? n : j;
-      prevSig = "\n";
-    } else if (c === "/" && src[i + 1] === "*") {
-      const j = src.indexOf("*/", i + 2);
-      const end = j < 0 ? n : j + 2;
-      rawStart().text += src.slice(i, end);
-      i = end;
-      prevSig = "\n";
-    } else if (c === "/" && (REGEX_PRECEDING.has(prevSig) || (/[A-Za-z_$]/.test(prevSig) && REGEX_KEYWORDS.has(prevWord())))) {
-      const start = i;
-      let j = i + 1;
-      let inClass = false;
-      while (j < n && src[j] !== "\n") {
-        if (src[j] === "\\") { j += 2; continue; }
-        if (src[j] === "[") inClass = true;
-        else if (src[j] === "]") inClass = false;
-        else if (src[j] === "/" && !inClass) break;
-        j++;
-      }
-      rawStart().text += src.slice(start, j);
-      i = j;
-      prevSig = "/";
-    } else if (c === '"' || c === "'") {
-      const start = i;
-      let j = i + 1;
-      while (j < n && src[j] !== c) { if (src[j] === "\\") j += 2; else j++; }
-      rawStart().text += src.slice(start, Math.min(j + 1, n));
-      i = j + 1;
-      prevSig = c;
-    } else if (c === "`") {
-      const start = i;
-      let j = i + 1;
-      let depth = 0;
-      while (j < n && (src[j] !== "`" || depth > 0)) {
-        if (src[j] === "\\") { j += 2; continue; }
-        if (src[j] === "$" && src[j + 1] === "{") { depth++; j += 2; continue; }
-        if (src[j] === "}" && depth > 0) { depth--; j++; continue; }
-        if (depth === 0) { j++; continue; }
-        j++;
-      }
-      rawStart().text += src.slice(start, Math.min(j + 1, n));
-      i = j + 1;
-      prevSig = "`";
-    } else {
-      codeStart().text += c;
+    const rule = LEX_RULES.find((r) => r.matches(src, i, prevSig));
+    if (!rule) {
+      const c = src[i];
+      pushSegment(segments, true).text += c;
       if (!" \t\r".includes(c)) prevSig = c;
-      i++;
+      i += 1;
+      continue;
     }
-  }
-  function prevWord() {
-    let j = i;
-    while (j > 0 && /[A-Za-z_$]/.test(src[j - 1])) j--;
-    return src.slice(j, i);
+    const { end, prevSig: nextSig } = rule.scan(src, i);
+    pushSegment(segments, false).text += src.slice(i, end);
+    i = end;
+    prevSig = nextSig;
   }
   return segments;
 }

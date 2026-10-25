@@ -41,6 +41,7 @@ args:
     description: must-fix 连续不降轮次熔断阈值
     default: 3
 */
+// coverage-file-gate-exempt: 构建期壳模板——文件含字面 @@STITCH@@ 占位行，语法上不可 import；可执行语义只在与 shared 段拼接后的单文件脚本体内存在（该脚本体由 zcode 工作流引擎承载）。行为验证由产物一致性门禁（review-fix-loop-build.test.ts）与双实现对账（scripts/check-rfl-parity.mjs）承担，单测无加载面
 // review-fix-loop — zcode 原生动态工作流版
 // 与 pi/zsw 内置版（@zhushanwen/subagent-core workflows/review-fix-loop.js）语义同源：
 // 多维并行 review（4 个一批分批并行）→ LLM 聚合裁决（去重 + 证据分级 + 修复分组）→
@@ -1062,68 +1063,77 @@ const titlesCompatible = (a: string, b: string): boolean => {
   return na.startsWith(nb) || nb.startsWith(na);
 };
 let seq = 0;
+/** L1 身份对齐：按精确 id 命中问题清单。标题不兼容（LLM 紧凑化重排把新问题排到旧号上）
+ *  时放弃命中转 L2——编号撞车不得静默沿用。 */
+const alignById = (i: AggIssueInput): IssueRecord | undefined => {
+  const prev = i.id ? issues.find((p) => p.id === i.id) : undefined;
+  if (prev && i.title && prev.title && !titlesCompatible(prev.title, i.title)) {
+    log(`身份对齐 L1 检查：${i.id} 命中问题清单 ${prev.id} 但标题不兼容（${prev.title} ≁ ${i.title}），放弃编号沿用转 L2`);
+    return undefined;
+  }
+  return prev;
+};
+/** L2 身份对齐：标题归一后完全相等（不用前缀：前缀互含会把同前缀的不同问题误合并），
+ *  在非 deferred 条目中唯一命中 → 沿用旧键；非唯一/无命中 → 新条目。 */
+const alignByTitle = (i: AggIssueInput): IssueRecord | undefined => {
+  if (!i.title || titleUnits(i.title) < TITLE_MATCH_MIN) return undefined;
+  const key = normalizeTitle(i.title);
+  if (!key) return undefined;
+  const hits = issues.filter((p) => p.status !== "deferred" && normalizeTitle(p.title) === key);
+  if (hits.length === 1) {
+    log(`身份对齐 L2：${i.id ?? "(无 id)"} 按标题唯一命中沿用问题清单条目 ${hits[0]!.id}`);
+    return hits[0]!;
+  }
+  if (hits.length > 1) {
+    log(`身份对齐 L2：${i.id ?? "(无 id)"} 标题命中 ${hits.length} 条（非唯一），按新条目处理`);
+  }
+  return undefined;
+};
+/** 延续条目字段安全合并（空壳缺陷修复，run wf-1792073055433）：旧无条件赋值在聚合器
+ *  输出无 title/severity 的空壳延续条目时把已追踪字段抹空——跨轮身份锚点断链，下轮
+ *  L2 标题对账失配关不掉，连续 3 轮 clean 后误判 stuck。改为：title 锁定（缺失侧才
+ *  回填）+ severity 采信本轮显式标注 + 内容字段非空刷新（单源 shared 段承载）。已确认
+ *  修复的问题被重报 = 复发（对齐 pi 版 MF-2）：转 regressed + 修复失败 +1，needs-redesign
+ *  可达；open（活跃仍报）不改状态。 */
+const mergeCarryover = (prev: IssueRecord, i: AggIssueInput): IssueRecord => {
+  if (inheritCarryoverFields(prev, i)) {
+    log(`身份对齐：延续条目 ${prev.id} 继承 title 缺失侧 / severity 本轮标注`);
+  }
+  refreshTrackedFields(prev, i, ["files", "evidence", "guidance"]);
+  if (prev.status === "fixed") {
+    prev.status = "regressed";
+    prev.fixAttempts += 1;
+  }
+  return prev;
+};
+/** 新建条目。id 复用检查：L1 标题不兼容被拒（或 id 未命中问题清单但与问题清单现有 id
+ *  撞车）时，复用该 id 会让新建 open 条目借保留块 dedup 把旧条目（deferred/disputed/fixed）
+ *  挤出问题清单——deferred 由此绕过「唯一复活入口 = escalate」。冲突/空串时强制新 id。 */
+const newIssueRecord = (i: AggIssueInput): IssueRecord => {
+  const idOk = i.id && !issues.some((p) => p.id === i.id);
+  seq += 1;
+  return {
+    id: idOk ? i.id! : `MF-${round}-${seq}`,
+    title: i.title,
+    severity: i.severity,
+    files: i.files,
+    evidence: i.evidence,
+    guidance: i.guidance,
+    status: "open" as const,
+    firstSeen: round,
+    fixAttempts: 0,
+    consecutiveUnfixed: 0,
+  };
+};
 // null 元素防御：LLM 数组元素可能为 null（与 fixes/disputed/deferred 同款防御），
 // 畸形元素丢弃不裸 TypeError
 const nextIssues: IssueRecord[] = (agg.issues ?? [])
   .filter((i): i is NonNullable<typeof i> => i !== null && typeof i === "object" && i.adjudication === "evidence")
   .map((i) => {
-    let prev = i.id ? issues.find((p) => p.id === i.id) : undefined;
-    // L1 标题检查：编号撞车（LLM 紧凑化重排把新问题排到旧号上）不得静默沿用——
-    // 标题不兼容时放弃 L1 命中，交给 L2 标题对齐决策。
-    if (prev && i.title && prev.title && !titlesCompatible(prev.title, i.title)) {
-      log(`身份对齐 L1 检查：${i.id} 命中问题清单 ${prev.id} 但标题不兼容（${prev.title} ≁ ${i.title}），放弃编号沿用转 L2`);
-      prev = undefined;
-    }
-    if (!prev && i.title && titleUnits(i.title) >= TITLE_MATCH_MIN) {
-      const key = normalizeTitle(i.title);
-      if (key) {
-        // L2 命中要求归一后完全相等（不用前缀：前缀互含在 L2 会把同前缀的不同问题误合并）；
-        // 过滤 deferred（已退出追踪的条目不参与复用）。
-        const hits = issues.filter((p) => p.status !== "deferred" && normalizeTitle(p.title) === key);
-        if (hits.length === 1) {
-          prev = hits[0]!;
-          log(`身份对齐 L2：${i.id ?? "(无 id)"} 按标题唯一命中沿用问题清单条目 ${prev.id}`);
-        } else if (hits.length > 1) {
-          log(`身份对齐 L2：${i.id ?? "(无 id)"} 标题命中 ${hits.length} 条（非唯一），按新条目处理`);
-        }
-      }
-    }
-      if (prev) {
-        // 延续条目字段安全合并（空壳缺陷修复，run wf-1792073055433）：旧无条件赋值在聚合器
-        // 输出无 title/severity 的空壳延续条目时把已追踪字段抹空——跨轮身份锚点断链，下轮
-        // L2 标题对账失配关不掉，连续 3 轮 clean 后误判 stuck。改为：title 锁定（缺失侧才
-        // 回填）+ severity 采信本轮显式标注 + 内容字段非空刷新（单源 shared 段承载）
-        if (inheritCarryoverFields(prev, i)) {
-          log(`身份对齐：延续条目 ${prev.id} 继承 title 缺失侧 / severity 本轮标注`);
-        }
-        refreshTrackedFields(prev, i, ["files", "evidence", "guidance"]);
-        if (prev.status === "fixed") {
-          // 已确认修复的问题被重报 = 复发（对齐 pi 版 MF-2）：转 regressed + 修复失败 +1，
-          // needs-redesign 可达；open（活跃仍报）不改状态。
-          prev.status = "regressed";
-          prev.fixAttempts += 1;
-        }
-        // deferred 不经聚合重报复活——唯一复活入口 = reviewer 对注入清单申报 escalate。
-        return prev;
-      }
-      // id 复用检查：L1 标题不兼容被拒（或 id 未命中问题清单但与问题清单现有 id 撞车）时，
-      // 复用该 id 会让新建 open 条目借保留块 dedup 把旧条目（deferred/disputed/fixed）
-      // 挤出问题清单——deferred 由此绕过「唯一复活入口 = escalate」。冲突/空串时强制新 id
-      const idOk = i.id && !issues.some((p) => p.id === i.id);
-      seq += 1;
-      return {
-        id: idOk ? i.id! : `MF-${round}-${seq}`,
-        title: i.title,
-        severity: i.severity,
-        files: i.files,
-        evidence: i.evidence,
-        guidance: i.guidance,
-        status: "open" as const,
-        firstSeen: round,
-        fixAttempts: 0,
-        consecutiveUnfixed: 0,
-      };
-    });
+    // deferred 不经聚合重报复活——唯一复活入口 = reviewer 对注入清单申报 escalate。
+    const prev = alignById(i) ?? alignByTitle(i);
+    return prev ? mergeCarryover(prev, i) : newIssueRecord(i);
+  });
 
   // 问题清单保真（对齐 pi 版增量合并语义）：旧活跃条目本轮聚合漏报且对账未申报 fixed →
   // 保留——重建式合并会静默丢条目（丢失 = 假收敛）；保留后 active 非空驱动继续

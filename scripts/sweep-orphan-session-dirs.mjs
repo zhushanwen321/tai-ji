@@ -350,23 +350,55 @@ function resolveMtimeSubject(dirPath) {
   return { mtimeMs: dirMtime, mtimeSource: 'dir', jsonlCount, notes }
 }
 
-function annotateEntry({ storeRoot, entry, activeIds, cutoffMs }) {
-  const dirPath = join(storeRoot, entry.name)
-  const base = { name: entry.name, path: dirPath, isPiSessionId: isPiSessionId(entry.name) }
-  if (!entry.isDirectory) {
-    return {
-      ...base,
-      kind: entry.isSymbolicLink ? 'symlink' : 'non-dir',
-      form: null,
-      cond1: null,
-      cond2: null,
-      cond3: null,
-      hit: false,
-      skipReason: entry.isSymbolicLink
-        ? '符号链接（不跟随、不代删）'
-        : '非目录条目（存储树一级只应有会话目录）',
-    }
+/** 非目录条目（符号链接 / 文件）：恒不删，附跳过理由（符号链接不跟随、不代删）。 */
+function annotateNonDir(base, entry) {
+  return {
+    ...base,
+    kind: entry.isSymbolicLink ? 'symlink' : 'non-dir',
+    form: null,
+    cond1: null,
+    cond2: null,
+    cond3: null,
+    hit: false,
+    skipReason: entry.isSymbolicLink
+      ? '符号链接（不跟随、不代删）'
+      : '非目录条目（存储树一级只应有会话目录）',
   }
+}
+
+/** 条件一（形态）：空目录或仅 logs 才可删；目录不可读时保守判有兄弟域（不删）。 */
+function buildCond1(described, readNote) {
+  return {
+    pass: described.form === 'empty' || described.form === 'logs-only',
+    detail: readNote ?? `形态=${described.form}${described.form === 'has-siblings' ? `（兄弟域：${described.siblings.join(', ')}）` : ''}`,
+  }
+}
+
+/** 条件二（身份）：目录名须是合法 sessionId 形态，且不在活跃会话 id 集合内。 */
+function buildCond2(entryName, validId, activeIds) {
+  if (!validId) {
+    return { pass: false, detail: '一级目录名非合法 sessionId 形态（树内遍历规约：跳过，junk 归外部不代删）' }
+  }
+  const active = activeIds.has(entryName)
+  return {
+    pass: !active,
+    detail: active ? '目录名命中活跃会话 id 集合（不删）' : '目录名不在活跃会话 id 集合',
+  }
+}
+
+/** 条件三（时点）：mtime 主语须可读且早于 cutoff。 */
+function buildCond3(mtime, cutoffMs) {
+  return {
+    pass: mtime.mtimeMs !== null && mtime.mtimeMs < cutoffMs,
+    detail: `mtime 主语=${mtime.mtimeSource}（${mtime.mtimeMs === null ? '不可读' : new Date(mtime.mtimeMs).toISOString()}）`,
+    mtimeMs: mtime.mtimeMs,
+    mtimeSource: mtime.mtimeSource,
+    jsonlCount: mtime.jsonlCount,
+  }
+}
+
+/** 目录条目：读目录判形态（不可读保守判有兄弟域）+ 三条件求值，冻结单条点检结果。 */
+function annotateDir(base, { dirPath, entry, activeIds, cutoffMs }) {
   let names = null
   let readNote = null
   try {
@@ -377,23 +409,9 @@ function annotateEntry({ storeRoot, entry, activeIds, cutoffMs }) {
   const described = names === null ? { form: 'has-siblings', siblings: [] } : describeForm(dirPath, names)
   const mtime = resolveMtimeSubject(dirPath)
   const validId = isPiSessionId(entry.name)
-  const cond1 = {
-    pass: described.form === 'empty' || described.form === 'logs-only',
-    detail: readNote ?? `形态=${described.form}${described.form === 'has-siblings' ? `（兄弟域：${described.siblings.join(', ')}）` : ''}`,
-  }
-  const cond2 = validId
-    ? {
-        pass: !activeIds.has(entry.name),
-        detail: activeIds.has(entry.name) ? '目录名命中活跃会话 id 集合（不删）' : '目录名不在活跃会话 id 集合',
-      }
-    : { pass: false, detail: '一级目录名非合法 sessionId 形态（树内遍历规约：跳过，junk 归外部不代删）' }
-  const cond3 = {
-    pass: mtime.mtimeMs !== null && mtime.mtimeMs < cutoffMs,
-    detail: `mtime 主语=${mtime.mtimeSource}（${mtime.mtimeMs === null ? '不可读' : new Date(mtime.mtimeMs).toISOString()}）`,
-    mtimeMs: mtime.mtimeMs,
-    mtimeSource: mtime.mtimeSource,
-    jsonlCount: mtime.jsonlCount,
-  }
+  const cond1 = buildCond1(described, readNote)
+  const cond2 = buildCond2(entry.name, validId, activeIds)
+  const cond3 = buildCond3(mtime, cutoffMs)
   return {
     ...base,
     kind: 'dir',
@@ -406,6 +424,13 @@ function annotateEntry({ storeRoot, entry, activeIds, cutoffMs }) {
     skipReason: validId ? null : cond2.detail,
     ...(mtime.notes.length > 0 ? { notes: mtime.notes } : {}),
   }
+}
+
+function annotateEntry({ storeRoot, entry, activeIds, cutoffMs }) {
+  const dirPath = join(storeRoot, entry.name)
+  const base = { name: entry.name, path: dirPath, isPiSessionId: isPiSessionId(entry.name) }
+  if (!entry.isDirectory) return annotateNonDir(base, entry)
+  return annotateDir(base, { dirPath, entry, activeIds, cutoffMs })
 }
 
 /**

@@ -1,4 +1,5 @@
 // review-fix-loop.js — 通用多批审查-修复循环（内置 workflow）
+// coverage-file-gate-exempt: 构建期壳模板——文件含字面 @@STITCH@@ 占位行且整体是脚本体（顶层 return），语法上不可 import；可执行语义只在与 shared 段拼接后的单文件脚本体内存在（该脚本体由 pi worker 承载）。行为验证由产物一致性门禁（review-fix-loop-build.test.ts）与双实现对账（scripts/check-rfl-parity.mjs）承担，单测无加载面
 //
 // 模式：多批（batch）串行，批内循环（round）：并行 review（4 个一批分批并行，
 // REVIEWER_BATCH）→ aggregate（去重合并 + 修复分组，独立 phase）→ fix（按分组
