@@ -3,24 +3,27 @@
  *
  * 组件契约（组件头注为准）：纯 props 展示——
  * - rows: QueueRow[]（调用方经 useQueueRows 从 session.delivery 帧派生视图过滤而来：
- *   非 direct 车道且未 delivered）
- * - hint: string（session 级占用分档 hover title）
- * - emit cancel(clientUuid)（× 撤销 → delivery.cancel）+ retry(clientUuid)（failed 行重试
- *   → delivery.resync 单条重报）
- * 行形态：状态 chip（排队中 / 投递中 / 发送失败）+ 对应 icon（Hourglass / Zap / AlertCircle）
- * + truncate 预览文本（>3 条显前 3 + 「+N」溢出）。
+ *   非 direct 投递路径且未 delivered）
+ * - hint: string（session 级占用分档 hover title）+ expanded?: boolean（+N 展开开关
+ *   展开态，Q2——持有在 useQueueRows per-session 分区，Composer 传入）
+ * - emit cancel(clientUuid)（× 撤销 → delivery.cancel）+ retry(clientUuid)（failed 行
+ *   重试 → delivery.resync 单条重报）+ retryAll()（failed ≥2 批量重报，Q5）+
+ *   toggleExpand()（+N 开关，Q2）
+ * 行形态：状态 chip（排队中 / 投递中 / 发送未确认——Q6 三口径统一，行=状态、错误气泡=
+ * 事件详情分层）+ 对应 icon（Hourglass / Zap / AlertCircle）+ truncate 预览文本
+ * （>3 条显前 3 + 「+N」可点展开开关，Q2）。
  *
  * 三视角覆盖：
  * - 观察者（形态）：单条/多条渲染结构、状态 icon 与 chip 文案、溢出计数、失败行红色标识
- * - 使用者（黑盒）：hover × 撤销 emit cancel；failed 行重试钮 emit retry；queued/in-flight
- *   行无重试钮；hint 落到行 title
+ * - 使用者（黑盒）：hover × 撤销 emit cancel；failed 行重试钮 emit retry；failed ≥2 重试
+ *   全部 emit retryAll；+N / 收起 emit toggleExpand；failed 行 title 附判重说明（Q6）
  * - 构建者（白盒）：空 rows 不渲染根门；行增删跟随 props 变化（响应式）
  *
  * [HISTORICAL] 前身（draft-composer-states S8 → compact-defer-composer-queue u1）：数据源是
  * 「queue_update 帧 steering/followUp 快照 + useCompactQueue 未提交条目」双拼，含 Zap/Clock
  * 只读行与 defer 行 +N 富内容徽标。u3c 单源化后：pi 队列快照不再直驱 UI、本地 defer 队列
  * 整体退役，行/状态/撤销全部对齐内核条目；+N 徽标随帧无 segments 字段退役（草稿恢复改由
- * cancel reply 的 segments 快照承担，ADR-0043）。
+ * cancel reply 的 segments 快照承担，ADR-0043）；+N 静态文本升级为可点展开开关（Q2）。
  *
  * 运行：cd packages/renderer && pnpm test -- queue-bubble-s8
  */
@@ -30,17 +33,18 @@ import { nextTick } from 'vue'
 import QueueBubble from '@/components/panel/QueueBubble.vue'
 import type { QueueRow } from '@/composables/panel/useQueueRows'
 
-/** 队列行构造（state 三态；默认 queued 车道行） */
+/** 队列行构造（state 三态；默认 queued 投递路径行） */
 function row(clientUuid: string, preview: string, state: QueueRow['state'] = 'queued'): QueueRow {
   return { clientUuid, preview, state }
 }
 
 /** mount 助手：rows/hint 为必传（Composer 恒传），缺省给中性值 */
-function mountQB(overrides: { rows?: QueueRow[]; hint?: string } = {}) {
+function mountQB(overrides: { rows?: QueueRow[]; hint?: string; expanded?: boolean } = {}) {
   return mount(QueueBubble, {
     props: {
       rows: overrides.rows ?? [],
       hint: overrides.hint ?? '等待上下文压缩完成后发送',
+      ...(overrides.expanded !== undefined ? { expanded: overrides.expanded } : {}),
     },
   })
 }
@@ -68,9 +72,9 @@ describe('QueueBubble · 根门与单源行渲染', () => {
     expect(wrapper.find('svg.lucide-hourglass').exists()).toBe(false)
   })
 
-  it('failed 行 → AlertCircle（danger）+「发送失败」chip + 重试钮可见（§3.4 重试耗尽行）', () => {
-    const wrapper = mountQB({ rows: [row('u-3', '重试耗尽的文本', 'failed')] })
-    expect(wrapper.text()).toContain('发送失败')
+  it('failed 行 → AlertCircle（danger）+「发送未确认」chip（Q6 统一口径）+ 重试钮可见（§3.4 失败行）', () => {
+    const wrapper = mountQB({ rows: [row('u-3', '未确认送达的文本', 'failed')] })
+    expect(wrapper.text()).toContain('发送未确认')
     expect(wrapper.find('svg.lucide-circle-alert').exists()).toBe(true)
     expect(wrapper.find('[data-testid="queue-retry-u-3"]').exists()).toBe(true)
     // 状态 chip 用 danger 底/前景（红色标识）
@@ -96,6 +100,13 @@ describe('QueueBubble · 根门与单源行渲染', () => {
   it('行 hover title = 传入的 hint（session 级占用分档文案）', () => {
     const wrapper = mountQB({ rows: [row('u-1', 'x')], hint: '等待命令执行结束后发送' })
     expect(wrapper.find('[data-testid="queue-item-u-1"]').attributes('title')).toBe('等待命令执行结束后发送')
+  })
+
+  it('failed 行 title 在 hint 之外附判重说明（Q6 分层：行 = 状态 + 恢复指引）', () => {
+    const wrapper = mountQB({ rows: [row('u-6', '失败的', 'failed')], hint: '占用结束后发送' })
+    const title = wrapper.find('[data-testid="queue-item-u-6"]').attributes('title') ?? ''
+    expect(title).toContain('占用结束后发送')
+    expect(title).toContain('点重试会自动判重，不会重复投递')
   })
 
   it('rows 变化 → 行跟随更新（响应式）；清空 → 根门关闭', async () => {
@@ -140,8 +151,53 @@ describe('QueueBubble · 行操作（撤销 / 重试）', () => {
     expect(wrapper.emitted('cancel')).toBeUndefined()
   })
 
-  it('无 chevron / 无折叠控件（v6 去折叠，不支持收起）', () => {
+  it('无 chevron 折叠控件（+N 开关为纯文字 Button，无 chevron 图标形态）', () => {
     const wrapper = mountQB({ rows: [row('u-1', 'x')] })
     expect(wrapper.find('svg.lucide-chevron-right').exists()).toBe(false)
+  })
+})
+
+describe('QueueBubble · +N 展开开关（Q2）与重试全部（Q5）', () => {
+  const FIVE_ROWS = [row('u-1', 'm1'), row('u-2', 'm2'), row('u-3', 'm3'), row('u-4', 'm4'), row('u-5', 'm5')]
+
+  it('+N 为可点开关：点击 emit toggleExpand，aria-expanded 反映展开态（用户可见展开入口）', async () => {
+    const wrapper = mountQB({ rows: FIVE_ROWS })
+    expect(wrapper.text()).toContain('+2')
+    const expander = wrapper.find('[data-testid="queue-expand"]')
+    expect(expander.exists()).toBe(true)
+    expect(expander.attributes('aria-expanded')).toBe('false')
+    await expander.trigger('click')
+    expect(wrapper.emitted('toggleExpand')).toHaveLength(1)
+  })
+
+  it('expanded=true → 全部行渲染（被折叠行可见，行操作天然可用）+ 无 +N 溢出', async () => {
+    const wrapper = mountQB({ rows: FIVE_ROWS, expanded: true })
+    expect(wrapper.findAll('.qb-item-text').map((w) => w.text())).toEqual(['m1', 'm2', 'm3', 'm4', 'm5'])
+    expect(wrapper.find('[data-testid="queue-expand"]').exists()).toBe(false)
+    // 收起出口：收起后仍有溢出行才显示
+    expect(wrapper.find('[data-testid="queue-collapse"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="queue-collapse"]').trigger('click')
+    expect(wrapper.emitted('toggleExpand')).toHaveLength(1)
+  })
+
+  it('展开但无溢出（行数 ≤ 上限）→ 不渲染收起出口', () => {
+    const wrapper = mountQB({ rows: [row('u-1', 'm1'), row('u-2', 'm2')], expanded: true })
+    expect(wrapper.find('[data-testid="queue-collapse"]').exists()).toBe(false)
+  })
+
+  it('failed ≥2 → 「重试全部失败项」入口可见，点击 emit retryAll', async () => {
+    const wrapper = mountQB({
+      rows: [row('u-11', '失败一', 'failed'), row('u-12', '失败二', 'failed'), row('u-13', '排队', 'queued')],
+    })
+    const retryAll = wrapper.find('[data-testid="queue-retry-all"]')
+    expect(retryAll.exists()).toBe(true)
+    expect(retryAll.text()).toContain('重试全部失败项')
+    await retryAll.trigger('click')
+    expect(wrapper.emitted('retryAll')).toHaveLength(1)
+  })
+
+  it('failed <2 → 不渲染重试全部入口（单条走行内重试钮）', () => {
+    const wrapper = mountQB({ rows: [row('u-11', '失败一', 'failed'), row('u-13', '排队', 'queued')] })
+    expect(wrapper.find('[data-testid="queue-retry-all"]').exists()).toBe(false)
   })
 })

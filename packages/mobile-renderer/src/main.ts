@@ -38,11 +38,11 @@ function renderFatalError(err: unknown): void {
   if (!container) return
   const detail = err instanceof Error ? err.message : String(err)
   container.innerHTML = `
-    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg, #131316);">
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg, #242428);">
       <div style="max-width:420px;text-align:center;">
-        <p style="margin:0 0 8px;font-size:16px;color:var(--neutral-fg, #dedee2);">应用启动失败</p>
-        <p style="margin:0 0 16px;font-size:13px;line-height:1.6;color:var(--neutral-mid, #96969c);">请刷新页面重试；若反复出现，请联系服务提供者检查服务状态。</p>
-        <p style="margin:0;font-size:12px;line-height:1.6;color:var(--neutral-faint, #74747a);word-break:break-all;">${escapeHtml(detail)}</p>
+        <p style="margin:0 0 8px;font-size:16px;color:var(--neutral-fg, #e6e6e6);">应用启动失败</p>
+        <p style="margin:0 0 16px;font-size:13px;line-height:1.6;color:var(--neutral-mid, #949494);">请刷新页面重试；若反复出现，请联系服务提供者检查服务状态。</p>
+        <p style="margin:0;font-size:12px;line-height:1.6;color:var(--neutral-faint, #525257);word-break:break-all;">${escapeHtml(detail)}</p>
       </div>
     </div>`
 }

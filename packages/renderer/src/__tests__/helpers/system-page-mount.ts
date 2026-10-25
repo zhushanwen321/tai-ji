@@ -92,7 +92,7 @@ export function systemFixture(): SystemSettings {
   return {
     locale: 'zh-CN',
     theme: 'dark',
-    themePreset: 'cold-blue',
+    themePreset: '',
     fontSize: 'medium',
     completionSound: true,
   }

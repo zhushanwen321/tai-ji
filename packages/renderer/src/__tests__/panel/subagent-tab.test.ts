@@ -103,7 +103,7 @@ const globalStubs = {
   BashOutputBlock: { name: 'BashOutputBlock', template: '<div />' },
   ForkNotice: { name: 'ForkNotice', template: '<div />' },
   Button: { name: 'Button', template: '<button><slot /></button>' },
-  // composer 车道行为有专属单测（subagent-composer-lane.test.ts）——本文件只断言
+  // composer 通道行为有专属单测（subagent-composer-lane.test.ts）——本文件只断言
   // SubagentTab 的挂载门（chatCapable），壳体 stub 掉避免拖入 composer 全依赖树。
   Composer: { name: 'Composer', template: '<div data-testid="composer-stub" />' },
 }
@@ -354,6 +354,40 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     }
   })
 
+  it('DC-8 降级推送：session.subagentStreamDegraded 帧（主 sid 路由）→ 降级提示条立即可见；recordId 过滤', async () => {
+    // done record：无接入拉取（避免拉取响应 found:false 把降级位覆盖回 false——拉取快照是权威源）
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'done' })])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID })
+    const wrapper = mountTab()
+    try {
+      await settle(wrapper)
+
+      // 生产路由按 payload.sessionId = 主 sid 走主键订阅；双键共用同一 handler 函数对象——
+      // 断言主键注册点与虚拟分区键是同一函数（接线不漂移），经 handler 直接驱动。
+      const handler = streamHandler()
+      const mainCall = vi.mocked(events.on).mock.calls.findLast(([key]) => key === MAIN_SID)
+      expect(mainCall?.[1]).toBe(handler)
+
+      const bar = () => wrapper.find('[data-testid="subagent-stream-degraded"]')
+      expect(bar().exists()).toBe(false)
+
+      // recordId 过滤：非本 record 的降级帧不分派（降级位保持 false）
+      handler({ type: 'session.subagentStreamDegraded', payload: { sessionId: MAIN_SID, recordId: 'sub-other' } })
+      await settle(wrapper)
+      expect(bar().exists()).toBe(false)
+
+      // 命中本 record：一次性信号直写降级位 → 提示条可见（无任何 chunk/拉取参与）。
+      // 本文件用真实 i18n（非 key 回显桩）——断言 zh-CN 实文（i18n key 锚见 SubagentTab.degraded.test.ts）
+      handler({ type: 'session.subagentStreamDegraded', payload: { sessionId: MAIN_SID, recordId: SUB_ID } })
+      await settle(wrapper)
+      expect(bar().exists()).toBe(true)
+      expect(bar().text()).toContain('实时流已降级')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it('引擎 badge（U3 D9）：engine 缺省 → 常态 badge 显示 pi', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ engine: undefined })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
@@ -395,7 +429,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     wrapper.unmount()
   })
 
-  it('停因词：W4 新型（[U5/D4] adoptEngineDeath：running + stopReason=failed）→ 有值即渲染', async () => {
+  it('停因词：轮收条已写的轮终（running + stopReason=failed，迁移期回落值）→ 有值即渲染', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [
       makeRecord({
         status: 'running',
@@ -426,6 +460,71 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     await settle(wrapper)
     expect(wrapper.find('[data-testid="subagent-stop-reason"]').exists()).toBe(false)
     wrapper.unmount()
+  })
+
+  // ── 轮收条事实展示（subagent-observability §3.4 u8：lastRound.failure + 被接管标注）──
+
+  it('轮收条失败分类：lastRound.failure 在场 → 标题栏渲染 class.kind 点拼（danger 色档）', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [
+      makeRecord({
+        status: 'idle',
+        lastRound: {
+          engineStopReason: 'error',
+          failure: { class: 'provider', kind: 'rate_limited', retryable: 'conditional', raw: 'rpm 101/100' },
+        },
+      }),
+    ])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    const failure = wrapper.find('[data-testid="subagent-lastround-failure"]')
+    expect(failure.exists()).toBe(true)
+    expect(failure.text()).toBe('provider.rate_limited')
+    expect(failure.classes()).toContain('text-danger')
+    wrapper.unmount()
+  })
+
+  it('轮收条失败分类：user.cancelled → 渲染但落中性档（用户主动中止非失败）', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [
+      makeRecord({
+        status: 'idle',
+        lastRound: {
+          engineStopReason: 'aborted',
+          failure: { class: 'user', kind: 'cancelled', retryable: false, raw: 'user aborted' },
+        },
+      }),
+    ])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    const failure = wrapper.find('[data-testid="subagent-lastround-failure"]')
+    expect(failure.exists()).toBe(true)
+    expect(failure.classes()).toContain('text-neutral-dim')
+    expect(failure.classes()).not.toContain('text-danger')
+    wrapper.unmount()
+  })
+
+  it('被接管（promptDisposition=handled）→ handled 标注渲染；lastRound 缺省 → 两元素均不渲染', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [
+      makeRecord({ status: 'idle', lastRound: { promptDisposition: 'handled' } }),
+    ])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    expect(wrapper.find('[data-testid="subagent-lastround-handled"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="subagent-lastround-failure"]').exists()).toBe(false)
+    wrapper.unmount()
+
+    // lastRound 通道缺省（u3 runtime 产出前恒 undefined）→ 均不占位
+    const wrapper2 = mountTab()
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle' })])
+    await settle(wrapper2)
+    expect(wrapper2.find('[data-testid="subagent-lastround-handled"]').exists()).toBe(false)
+    expect(wrapper2.find('[data-testid="subagent-lastround-failure"]').exists()).toBe(false)
+    wrapper2.unmount()
   })
 
   it('空态：未选中 subagent 时渲染空态占位（首屏冒烟）', () => {
@@ -773,7 +872,7 @@ describe('subagent composer 挂载门（chatCapable，subagent-composer 2026-10-
 
   it('chatCapable=true：挂 composer 带（.composer-band 同壳）+ 只读提示行消失', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle', chatCapable: true })])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     const band = wrapper.find('[data-testid="drawer-subagent-composer-band"]')
@@ -785,7 +884,7 @@ describe('subagent composer 挂载门（chatCapable，subagent-composer 2026-10-
 
   it('chatCapable 缺省（未刷新旧帧语义 = 不支持）：不挂带，回退只读提示', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle' })])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     expect(wrapper.find('[data-testid="drawer-subagent-composer-band"]').exists()).toBe(false)
@@ -794,7 +893,7 @@ describe('subagent composer 挂载门（chatCapable，subagent-composer 2026-10-
 
   it('chatCapable=false（引擎声明不支持）：不挂带', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle', chatCapable: false })])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     expect(wrapper.find('[data-testid="drawer-subagent-composer-band"]').exists()).toBe(false)

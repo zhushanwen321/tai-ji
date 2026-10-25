@@ -46,7 +46,7 @@ describe('D6a: server.setServices 注册 onSessionDestroyed 汇聚清理', () =>
     expect(mgr.getPendingRequests('s1')).toHaveLength(1)
 
     // 触发点传 summary（removeSessionEntry 删除前缓存；Map 无条目时是最小形状，id 恒可靠）
-    handler({ id: 's1', label: 's1', cwd: '', status: 'dead', lastActiveAt: 0, modelId: '', tokenCount: 0 })
+    handler({ id: 's1', label: 's1', cwd: '', status: 'dead', lastActiveAt: 0 })
 
     expect(mgr.getPendingRequests('s1')).toHaveLength(0)
     // per-session 分区：s2 不受 s1 清理影响

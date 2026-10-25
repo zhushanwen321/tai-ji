@@ -646,3 +646,96 @@ describe('createRelease（json→form→query 编码降载）', () => {
     }
   })
 })
+
+describe('断点续传下载（cacheDirForTag / buildDownloadCurlCommand / downloadAssetResumable）', () => {
+  it('cacheDirForTag：正常 tag 直拼、含路径分隔符等字符清洗为安全目录名', async () => {
+    const mod = await loadModule()
+    expect(mod.cacheDirForTag('/tmp/base', 'v0.11.13')).toBe('/tmp/base/gitcode-sync-cache/v0.11.13')
+    expect(mod.cacheDirForTag('/tmp/base', 'a/b c:d')).toBe('/tmp/base/gitcode-sync-cache/a_b_c_d')
+  })
+
+  it('buildDownloadCurlCommand：断点续传 + 断流检测参数齐备，且不带 curl --retry（回卷坑防回归锚）', async () => {
+    const mod = await loadModule()
+    const direct = mod.buildDownloadCurlCommand('https://example.com/a.exe', '/tmp/a.exe.part', '')
+    expect(direct).toContain("--noproxy '*'")
+    expect(direct).toContain('-C -')
+    expect(direct).toContain('--speed-limit 1024 --speed-time 60')
+    expect(direct).not.toContain('--retry')
+    const proxied = mod.buildDownloadCurlCommand('https://example.com/a.exe', '/tmp/a.exe.part', 'http://127.0.0.1:7890')
+    expect(proxied).toContain("-x 'http://127.0.0.1:7890'")
+    expect(proxied).not.toContain('--noproxy')
+    expect(proxied).toContain('-C -')
+  })
+
+  /** 可注入文件系统与命令执行的 mock：files = Map<路径, 大小> */
+  function makeDeps(behavior) {
+    const files = new Map(behavior?.initialFiles ?? [])
+    const commands = []
+    const deps = {
+      exec: async (cmd) => {
+        commands.push(cmd)
+        if (behavior?.execOnce) behavior.execOnce(commands.length, files, cmd)
+      },
+      sleep: async () => {},
+      statSize: (f) => files.get(f) ?? (() => { throw new Error('ENOENT') })(),
+      fileExists: (f) => files.has(f),
+      rename: (from, to) => { files.set(to, files.get(from) ?? 0); files.delete(from) },
+      log: () => {},
+      maxRounds: behavior?.maxRounds ?? 5,
+    }
+    return { deps, files, commands }
+  }
+
+  const ASSET = { name: 'app.dmg', url: 'https://example.com/app.dmg', size: 1000 }
+
+  it('正式文件已完整 → 跳过（零命令执行）', async () => {
+    const mod = await loadModule()
+    const { deps, commands } = makeDeps({ initialFiles: [['/tmp/d/app.dmg', 1000]] })
+    const r = await mod.downloadAssetResumable(ASSET, '/tmp/d', '', deps)
+    expect(r).toEqual({ skipped: true })
+    expect(commands).toHaveLength(0)
+  })
+
+  it('首轮直连完成 → .part 改名正式文件，rounds=1', async () => {
+    const mod = await loadModule()
+    const { deps, files, commands } = makeDeps({
+      execOnce: (_n, fs) => { fs.set('/tmp/d/app.dmg.part', 1000) },
+    })
+    const r = await mod.downloadAssetResumable(ASSET, '/tmp/d', '', deps)
+    expect(r.rounds).toBe(1)
+    expect(files.has('/tmp/d/app.dmg.part')).toBe(false)
+    expect(files.get('/tmp/d/app.dmg')).toBe(1000)
+    expect(commands).toHaveLength(1)
+    expect(commands[0]).toContain('--noproxy')
+  })
+
+  it('直连断流、同轮代理接力完成 → viaProxy=true 且命令按 直连→代理 顺序', async () => {
+    const mod = await loadModule()
+    const { deps, commands } = makeDeps({
+      execOnce: (n, fs) => { if (n === 2) fs.set('/tmp/d/app.dmg.part', 1000) },
+    })
+    const r = await mod.downloadAssetResumable(ASSET, '/tmp/d', 'http://p:1', deps)
+    expect(r).toEqual({ rounds: 1, viaProxy: true })
+    expect(commands[0]).toContain('--noproxy')
+    expect(commands[1]).toContain('-x')
+  })
+
+  it('未配置代理时代理尝试被跳过（每轮仅一条直连命令）', async () => {
+    const mod = await loadModule()
+    const { deps, commands } = makeDeps({
+      maxRounds: 2,
+      execOnce: (n, fs) => { if (n === 2) fs.set('/tmp/d/app.dmg.part', 1000) },
+    })
+    await mod.downloadAssetResumable(ASSET, '/tmp/d', '', deps)
+    expect(commands).toHaveLength(2)
+    expect(commands.every((c) => c.includes('--noproxy'))).toBe(true)
+  })
+
+  it('轮尽未完成 → throw 文案含断点续传与重跑指引（缓存保留语义）', async () => {
+    const mod = await loadModule()
+    const { deps } = makeDeps({ maxRounds: 2 })
+    await expect(mod.downloadAssetResumable(ASSET, '/tmp/d', '', deps)).rejects.toThrow(
+      /断点续传 2 轮未完成.*重跑从未断点继续/s,
+    )
+  })
+})

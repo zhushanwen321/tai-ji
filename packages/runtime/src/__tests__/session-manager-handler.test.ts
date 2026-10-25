@@ -10,7 +10,7 @@
  * - u8: 子会话 project 归属继承父会话
  * - notify-once watch 桥：单键寻址三分支 + respond 前二次归属校验；无 notifyId 降级 once 日志
  * - session-manager-archive-delete U3: delete/archive 终局双 action（扩展归属校验 /
- *   archiveService 停用象限 / 归档成功后三步收尾）
+ *   archiveService 停用象限 / 归档成功经 'archive' 处置登记到组合根汇聚点收尾）
  *
  * 运行：pnpm --filter @taiji/runtime exec vitest run session-manager-handler
  */
@@ -19,7 +19,8 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { SessionManagerHandler } from '../transport/session-manager-handler.js'
 import type { SessionManagerHandlerOptions } from '../transport/session-manager-handler.js'
-import { deliverRespondTargets } from '../transport/session-manager-handler.js'
+import { deliverRespondTargets, settleClaimsOnDeath } from '../transport/session-manager-handler.js'
+import { fireDeathDisposition, subscribeSessionDeathDisposition } from '../services/session/session-lifecycle.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import { ArchiveError } from '../services/archive/archive-service.js'
 import type { ArchiveService } from '../services/archive/archive-service.js'
@@ -91,8 +92,6 @@ function makeSessionSummary(overrides: Partial<SessionSummary> = {}): SessionSum
     cwd: '/test/cwd',
     status: 'active',
     lastActiveAt: Date.now(),
-    modelId: 'openai/gpt-4',
-    tokenCount: 0,
     // 归属校验默认材料：测试中发起方一律 'sid-parent'，目标 s1 默认是其 managed child
     spawnSource: 'agent',
     parentAgentSessionId: 'sid-parent',
@@ -125,10 +124,14 @@ async function runListScenario(
 /** status 场景装配单源：mock getSummary → handle(status) → opts（mock 调用断言用）+ respond payload */
 async function runStatusScenario(
   summary: SessionSummary,
+  recordModelId?: string,
 ): Promise<{ opts: SessionManagerHandlerOptions; response: Record<string, unknown> }> {
   const opts = makeMockOptions({
     sessionService: makeMockSessionService({
       getSummary: vi.fn().mockReturnValue(summary),
+      // W3：handler 的 modelId 读点从 summary 改到 lifecycle 注册表记录
+      // （IManagedSessionView.modelId 双写缓存），scenario 经 recordModelId 接线同值记录。
+      getSession: vi.fn().mockReturnValue(recordModelId === undefined ? undefined : { id: summary.id, modelId: recordModelId }),
     }),
   })
   const handler = new SessionManagerHandler(opts)
@@ -166,10 +169,13 @@ describe('SessionManagerHandler', () => {
 
   describe('U4-A1: create 分支完整链路', () => {
     it('四步串行时序：create → broadcastSessionList → respond({sessionId,status,modelId})', async () => {
-      const session = makeSessionSummary({ id: 'new-session', modelId: 'openai/gpt-4' })
+      const session = makeSessionSummary({ id: 'new-session' })
       const opts = makeMockOptions({
         sessionService: makeMockSessionService({
           create: vi.fn().mockResolvedValue(session),
+          // W3：respond 的 modelId 读点从 create 返回值改到 lifecycle 注册表记录
+          // （IManagedSessionView.modelId 双写缓存），测试同步接线同值记录。
+          getSession: vi.fn().mockReturnValue({ id: 'new-session', modelId: 'openai/gpt-4' }),
         }),
       })
       const handler = new SessionManagerHandler(opts)
@@ -479,7 +485,7 @@ describe('SessionManagerHandler', () => {
     })
 
     it('status → {status, modelId}', async () => {
-      const { opts } = await runStatusScenario(makeSessionSummary({ status: 'active', modelId: 'openai/gpt-4' }))
+      const { opts } = await runStatusScenario(makeSessionSummary({ status: 'active' }), 'openai/gpt-4')
       expect(opts.sendExtensionUiResponse).toHaveBeenCalledWith(
         'sid-parent',
         'req-1',
@@ -655,12 +661,12 @@ describe('SessionManagerHandler', () => {
 
   describe('U4-A5: modelId 从 state.model 组装', () => {
     it('status 返回 modelId', async () => {
-      const { response } = await runStatusScenario(makeSessionSummary({ modelId: 'anthropic/claude-3' }))
+      const { response } = await runStatusScenario(makeSessionSummary(), 'anthropic/claude-3')
       expect(response.modelId).toBe('anthropic/claude-3')
     })
 
     it('modelId 为空时不在 respond 中出现', async () => {
-      const { response } = await runStatusScenario(makeSessionSummary({ modelId: '' }))
+      const { response } = await runStatusScenario(makeSessionSummary(), '')
       expect(response.modelId).toBeUndefined()
     })
   })
@@ -783,6 +789,8 @@ describe('SessionManagerHandler', () => {
         sessionService: makeMockSessionService({
           getSummary: vi.fn().mockReturnValue(undefined),
           create: vi.fn().mockResolvedValue(makeSessionSummary({ id: 'child-3' })),
+          // W3：respond 的 modelId 读点从 create 返回值改到 lifecycle 注册表记录。
+          getSession: vi.fn().mockReturnValue({ id: 'child-3', modelId: 'openai/gpt-4' }),
         }),
       })
       const handler = new SessionManagerHandler(opts)
@@ -1123,9 +1131,9 @@ describe('SessionManagerHandler', () => {
   })
 
   // ─── session-manager-archive-delete U3：delete/archive 终局双 action ────────────
-  // 覆盖验收条款①-⑤：归档成功三步收尾（watch 收 'exited' + 双债全消）/ 归档失败债权零损伤 /
-  // delete 成功回包与死亡发声共存 / 越权·已归档·扫描态·统一文案四类归属判定 / ArchiveError
-  // code additive 透传。
+  // 覆盖验收条款①-⑤：归档成功经 'archive' 处置登记到汇聚点收尾（watch 收 'exited' +
+  // 双债全消）/ 归档失败债权零损伤 / delete 成功回包与死亡发声共存 / 越权·已归档·扫描态·
+  // 统一文案四类归属判定 / ArchiveError code additive 透传。
   describe('session-manager-archive-delete U3: delete/archive 终局双 action', () => {
     const VALID_NID = 'sm-12345678-1234-4234-8234-123456789014'
     const LIFETIME_NID = 'sm-12345678-1234-4234-8234-123456789015'
@@ -1224,21 +1232,35 @@ describe('SessionManagerHandler', () => {
       expect(opts.claims!.getClaim('sid-parent', VALID_NID)).toBeUndefined()
     })
 
-    it('archive 成功：双债全消 + 双 watch 收 exited + claims 清账 + 回包（验收①）', async () => {
+    it('archive 成功：处置登记经汇聚点收尾——双 watch 收 exited + claims 清账 + 回包（验收①，条目 28 单一汇聚点）', async () => {
+      // 收尾不经 handler（条目 28：归档 teardown 发 'archive' 处置登记 → 组合根统一
+      // speakSessionDeath('exit')）。mock archive 复刻真实 ArchiveService 的登记动作
+      // （真实登记器 fire），本测试以组合根同款订阅消费——watch 收 'exited' 证明
+      // 「GUI 侧栏归档与 agent 工具 archive_session 两入口同判」的汇聚点链路成立。
       const archive = vi.fn().mockImplementation(async () => {
-        // 时序不变量锚：收尾必须在 archive() resolve 之后——此刻双债仍在册
+        // 时序不变量锚：处置登记在归档前置三门之后——此刻（三门已过）双债仍在册
         expect(opts.claims!.getClaim('sid-parent', VALID_NID)?.state).toBe('injected')
         expect(opts.claims!.getClaim('sid-parent', LIFETIME_NID)?.kind).toBe('lifetime')
+        fireDeathDisposition('s1', 'archive', { hasDestroySink: true })
         return { sessionId: 's1' }
       })
       const opts = makeArchiveFixture(archive)
       const handler = new SessionManagerHandler(opts)
-
-      await handler.handle('req-arch', 'sid-parent', 'archive', { sessionId: 's1' })
+      const unsubscribe = subscribeSessionDeathDisposition((sessionId, disposition) => {
+        // 组合根 index.ts 同款消费形态（speakSessionDeath 三步委托 settleClaimsOnDeath）
+        if (disposition === 'archive') {
+          settleClaimsOnDeath(opts.claims!, sessionId, 'exit', handler.watchRespond, () => undefined)
+        }
+      })
+      try {
+        await handler.handle('req-arch', 'sid-parent', 'archive', { sessionId: 's1' })
+      } finally {
+        unsubscribe()
+      }
 
       expect(archive).toHaveBeenCalledWith('s1')
       const mock = opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>
-      // 三步收尾：双 watch 各收一条 'exited'（同 deathSeq 批，fulfillsN 只计 kind=claim）
+      // 汇聚点收尾：双 watch 各收一条 'exited'（同 deathSeq 批，fulfillsN 只计 kind=claim）
       expect(mock).toHaveBeenCalledTimes(3)
       expect(mock.mock.calls[0]).toEqual([
         'sid-parent',

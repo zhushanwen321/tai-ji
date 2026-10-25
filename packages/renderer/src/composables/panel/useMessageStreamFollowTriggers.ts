@@ -19,13 +19,21 @@
  * | contentWrapEl RO 高度变化（tail/spacer）   | 跟随       | 不滚       |
  * | scrollEl RO（视口 resize）                 | 跟随       | 不滚       |
  * | 纯宽度变化（高度未变）                      | 显式 no-op | —          |
- * | 尾部新增 user 消息（用户主动发送，见下）     | 强制回底重锚定**        |
+ * | 提交序号递增（用户主动发送，见下）           | 强制回底重锚定**        |
  *
  *  ** feat-new-message-to-bottom：「不扯用户」保护（INVAR-M4-2′）只约束**到来**的内容
  *  （assistant 流式 / 工具输出 / system notice）——用户在 composer 主动发送的消息是显式
  *  用户意图，脱离态也必须回底（业界聊天通用行为：发送即回底，用户要看到自己刚发的消息
  *  与后续回复）。本行是唯一绕过 stickToBottom guard 的触发，走 followToBottomForce
  *  （= followToBottom(true)，重置贴底态 + NaN 快照 + 开收敛抑制窗，force 第二合法来源）。
+ *  [chat-flow-consistency F1] 触发判据从「尾部新增 user 消息」的数据变化推断改为消费
+ *  chat store 的 per-session 提交序号（submitNewMessage 受理确认单点递增——事实在产生处
+ *  带上标记）：旧 watch 被 morph 回执重建 / 外来直发复用 user 消息身份尾插命中，把上翻
+ *  阅读中的用户强拉回底；序号只由真实提交路径递增，回执重建与外来注入不再误触发。
+ *
+ * [chat-flow-consistency F2] 脱离态几何快照刷新调用点（两处）：contentWrap RO 回调与
+ * messages.length watch——高度/条数变化事实喂 refreshDistanceSnapshot（贴底态 guard 内聚
+ * 于原语），脱离静止用户的「回到最新」胶囊随内容增长及时浮现。
  *
  * 观察目标：contentWrapEl（Virtualizer + tailEl 的静态无样式 wrapper——spacer 与 tail 高度
  * 都映射到它的盒尺寸）+ scrollEl（滚动视口）。wrap RO 回调读 tailEl.offsetHeight 维护
@@ -48,6 +56,13 @@ interface MessageStreamFollowTriggerDeps {
   /** store 级消息源（MessageStream.currentMessages 同一 computed——条数与末条文本的观察基准） */
   messages: ComputedRef<Message[]>
   /**
+   * 本 session 的提交序号 getter（chat store getSubmitSeq——[chat-flow-consistency F1]
+   * force 回底的触发源）：递增 = 用户主动发送（submitNewMessage 受理确认单点 +1，覆盖
+   * send / followUp / editAndResend 全部提交路径）。morph 回执重建 / 外来直发不动序号，
+   * 结构性不触发 force。
+   */
+  submitSeq: () => number
+  /**
    * 末条 turn（含 isStreaming 标志）。无 turn 时为 null——null 与 undefined 都视为「无值」，
    * 内部 optional chaining（?.isStreaming）统一处理（与原 useMessageStreamScroll 同构）。
    */
@@ -60,10 +75,16 @@ interface MessageStreamFollowTriggerDeps {
   notifyRoActivity: () => void
   /**
    * 强制回底（useVirtuaFollow.followToBottom(true) 透传）：无视 stickToBottom guard，
-   * 重置贴底态 + NaN 快照 + 开收敛抑制窗。唯一调用点 = 尾部新增 user 消息（用户主动发送，
+   * 重置贴底态 + NaN 快照 + 开收敛抑制窗。唯一调用点 = 提交序号递增（用户主动发送，
    * 触发矩阵末行——force 第二合法来源，与「回到最新」胶囊点击同级）。
    */
   followToBottomForce: () => void
+  /**
+   * [chat-flow-consistency F2] 脱离态几何快照刷新（useVirtuaFollow.refreshDistanceSnapshot
+   * 透传）：RO 高度变化 / 条数变化两个调用点喂入，脱离态胶囊浮现判定即时跟上几何事实
+   * （贴底态 guard 在原语内聚，调用方零判定）。
+   */
+  refreshDistanceSnapshot: () => void
 }
 
 /**
@@ -129,6 +150,8 @@ export function useMessageStreamFollowTriggers(deps: MessageStreamFollowTriggerD
     // contentWrapEl RO：spacer 与 tail 高度变化都映射到本元素盒尺寸（D3 触发矩阵 3-4 行）。
     // [决策 12] tail/spacer 二分与 isPrepend 前插抑制窗随标记分档退役——两类变化统一跟随
     // （tailHeight 快照照常维护：它是 endOffset 数据源，与本 RO 的触发职责解耦）。
+    // [chat-flow-consistency F2] 高度变化事实同步喂脱离态几何快照刷新（贴底态 guard 在
+    // 原语内聚）——脱离静止用户的「回到最新」胶囊随内容增长即时浮现。
     wrapRo = new ResizeObserver((entries) => {
       deps.notifyRoActivity()
       const last = entries[entries.length - 1]
@@ -140,6 +163,7 @@ export function useMessageStreamFollowTriggers(deps: MessageStreamFollowTriggerD
       prevWrapHeight = wrapHeight
       if (prevTail === null || prevWrap === null) return // 首回调：只建基线
       if (tailH === prevTail && wrapHeight === prevWrap) return // 纯宽度变化（高度未变）→ no-op
+      deps.refreshDistanceSnapshot()
       followFromRo()
     })
     if (contentWrapEl.value) wrapRo.observe(contentWrapEl.value)
@@ -154,35 +178,27 @@ export function useMessageStreamFollowTriggers(deps: MessageStreamFollowTriggerD
 
   // ── store 级 watch（D3 矩阵前两行；自 useMessageStreamScroll 迁入，语义逐路对齐）──
 
-  // 消息条数变化 → 跟随（新消息 append / load-more 前插同型）
+  // 消息条数变化 → 脱离态几何快照刷新（[F2]）+ 跟随（新消息 append / load-more 前插同型；
+  // 贴底态快照刷新由原语内 guard 拦下，跟随照常）
   watch(
     () => deps.messages.value.length,
     () => {
+      deps.refreshDistanceSnapshot()
       deps.followIfStuck()
     },
   )
 
   // ── 用户主动发送 → 强制回底重锚定（触发矩阵末行，唯一绕过 guard 的触发）────────
-  // 判据 = 末条消息「role:id」快照变化 ∧ role==='user'（尾部新增 user 消息）。
-  // appendUser 是全部用户意图路径的共同落点，一处覆盖全部：
-  // - composer 直发（useChat.send → appendUser 乐观插入）
-  // - steer / followUp（pushPending 不进流，投递时 drainN → appendUser 尾插）
-  // - defer 入队 flush 重放（flush → send → appendUser）
-  // - 编辑重发（editAndResend → truncateFrom + appendUser）
-  // 排除情形（结构性不触发）：load-more 前插（尾部身份不变，新增在头部）；assistant 流式 /
-  // system notice / bashExecution 追加（role ≠ user，仍走 followIfStuck 矩阵）；末条 user
-  // 消息同 id 对象替换（segments 回填等，快照不变）。
-  watch(
-    () => {
-      const list = deps.messages.value
-      const last = list[list.length - 1]
-      return last ? `${last.role}:${last.id}` : null
-    },
-    (cur, prev) => {
-      if (!cur || cur === prev || !cur.startsWith('user:')) return
-      deps.followToBottomForce()
-    },
-  )
+  // [chat-flow-consistency F1] 判据 = 本 session 提交序号递增（提交事实在产生处标记——
+  // chat store submitSeqs 分区，submitNewMessage 受理确认单点 +1，send / followUp /
+  // editAndResend 三通路共同上提点）。替代旧「尾部新增 user 消息」watch（已删除）：后者
+  // 被 morph 回执重建（user-delivery 复用原 clientUuid 尾插）与外来直发命中，把上翻阅读
+  // 中的用户强拉回底——序号不动即不触发，回执重建后的新回合内容经 RO 网对贴底用户照常
+  // 跟随、对脱离用户不滚（INVAR-M4-2′ guard 管住「到来的内容不扯人」）。
+  // 递减不触发（session 切换读到另一分区的更小值——切回动作自身已有 followToBottom(true)）。
+  watch(deps.submitSeq, (cur, prev) => {
+    if (cur > prev) deps.followToBottomForce()
+  })
 
   // streaming 中 text 追加也触发跟随（按最后一条消息归一化后的文本长度）。
   // content 是 string | Segment[]：.length 对 string 是字符数、对 Segment[] 是元素数，语义不一致；

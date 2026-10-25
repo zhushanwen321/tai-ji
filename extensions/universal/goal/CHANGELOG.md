@@ -1,5 +1,11 @@
 # @zhushanwen/pi-goal
 
+## 0.16.1
+
+### Patch Changes
+
+- 318994f4a: The `goal_control` tool is now always declared to the model (resident) instead of being activated only through tool_search, so goal tracking works without a discovery step.
+
 ## 0.16.0
 
 ### Minor Changes

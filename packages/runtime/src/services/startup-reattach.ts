@@ -33,7 +33,7 @@
  * **过滤排除不记 journal**（设计无此要求）：被补集排除 = 设计内「不恢复」语义，非异常；
  * reattach-skipped 只覆盖三类异常跳过（reason 常量见下方导出），逐 session 一条。
  *
- * **checkpoint 删除（D3 契约 1 删除属主第二轨）**：全部尝试完后无条件删（含全跳过/全
+ * **checkpoint 删除（D3 契约 1 删除属主第二路）**：全部尝试完后无条件删（含全跳过/全
  * 失败/收割超时跳过形态）；删除失败 best-effort（残留由 main 退出链删除 + 下次启动隔离
  * 双通道收敛）；高水位等待期间不删（等待中再崩 → checkpoint 保留 → 下次 runtime 重试）。
  */
@@ -189,7 +189,7 @@ export interface ReattachReport {
   skipped: Array<{ sessionId: string; reason: string }>
   /** 高水位轮询等待次数（0 = 判定时刻无高压）。 */
   highWaterWaits: number
-  /** checkpoint 主文件是否已删除（D3 契约 1 第二轨）。 */
+  /** checkpoint 主文件是否已删除（D3 契约 1 第二路）。 */
   checkpointDeleted: boolean
 }
 
@@ -325,7 +325,7 @@ export async function runStartupReattach(
   //    逐 session 容错在 restoreOne 内部收敛——allSettled 是第二道结构防线）。
   await restoreCandidates(ctx, entryById, report)
 
-  // ⑦ 全部尝试完删除 checkpoint（D3 契约 1 第二轨——无条件删，含全跳过/全失败形态）。
+  // ⑦ 全部尝试完删除 checkpoint（D3 契约 1 第二路——无条件删，含全跳过/全失败形态）。
   report.checkpointDeleted = deleteCheckpointFile(ctx.checkpoint)
   console.log(`[reattach] done: restored=${report.restored.length} skipped=${report.skipped.length} excluded=${report.excluded.length} checkpointDeleted=${report.checkpointDeleted}`)
   return report
@@ -480,7 +480,7 @@ function appendSkip(journal: CrashJournalWriter, sessionId: string, reason: stri
 }
 
 /**
- * 删除 checkpoint 主文件（D3 契约 1 删除属主第二轨——删除属主在 main 退出链与本编排，
+ * 删除 checkpoint 主文件（D3 契约 1 删除属主第二路——删除属主在 main 退出链与本编排，
  * runtime 自身退出路径一律不删）。ENOENT = 已删/竞态删除（非失败）；其余失败 best-effort
  * 记日志，残留交 main 退出链与下次启动隔离双通道收敛。
  */

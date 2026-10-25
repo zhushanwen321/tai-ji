@@ -204,8 +204,9 @@ export function deliverRespondTargets(
 }
 
 /**
- * 终局死亡收尾序列（D5 汇聚点的唯一实装；组合根 speakSessionDeath 与本 handler 的
- * handleArchive 共调，新死亡发声点一律经此、禁手抄）：
+ * 终局死亡收尾序列（D5 汇聚点的唯一实装；组合根 speakSessionDeath 消费——delete /
+ * forceQuit / 非 respawn 链 exit / 熔断 / 'archive' 处置登记五点全部经它收尾，新死亡
+ * 发声点一律经此、禁手抄）：
  * onSessionDeath 同 deathSeq 批终结全部种类债权（即时删除，含 abortClaims 覆盖不到的
  * lifetime）→ terminated 非空则逐 target respond（携 sessionFilePath / exitCode / stderrTail）
  * → clearSession 清残留记录 + seq/undelivered 计数器（迟到 exit 路径查无记录自然静默）。
@@ -551,7 +552,10 @@ export class SessionManagerHandler {
     return {
       sessionId: session.id,
       status: 'created',
-      modelId: session.modelId || undefined,
+      // W3：SessionSummary.modelId 已删（三状态字段退役，状态归状态层），创建时生效
+      // 模型改读 lifecycle 注册表记录的同名双写缓存字段（IManagedSessionView.modelId，
+      // 值与原 summary 派生逐字一致）。
+      modelId: this.opts.sessionService.getSession(session.id)?.modelId || undefined,
       willNotify: claimArmed,
       lifetimeNotifyId,
     }
@@ -737,7 +741,10 @@ export class SessionManagerHandler {
 
     return {
       status: summary.status,
-      modelId: summary.modelId || undefined,
+      // W3：SessionSummary.modelId 已删（三状态字段退役），改读 lifecycle 注册表记录的
+      // 同名双写缓存字段（IManagedSessionView.modelId；summary 本就只覆盖活跃会话，
+      // getSession 同范围，值与原派生逐字一致）。
+      modelId: this.opts.sessionService.getSession(sessionId)?.modelId || undefined,
       // D6 undeliveredResults 事实计数（按被管理子会话分桶；claims 停用象限恒 0）
       undeliveredResults: this.opts.claims?.undeliveredCount(sessionId) ?? 0,
     }
@@ -820,23 +827,17 @@ export class SessionManagerHandler {
 
   /**
    * archive 分支（session-manager-archive-delete 决策 2/5）：扩展归属校验 → 归档服务执行 →
-   * **成功后**经 settleClaimsOnDeath（与组合根 speakSessionDeath 同一实装）以 cause='exit'
-   * 收尾——一次终结全部种类债权（含 abortClaims 覆盖不到的 lifetime），挂起 watch 统一收
-   * 'exited'（会话退场的事实陈述），清残留记录与 undelivered 计数器。
+   * 回包。债权收尾不经本 handler——归档 teardown（archive-service.ts teardownForArchive）
+   * 向死亡处置汇聚点发 'archive' 处置登记，组合根 subscribeSessionDeathDisposition 对该值
+   * 统一 speakSessionDeath(sid, 'exit')：一次终结全部种类债权（含 abortClaims 覆盖不到的
+   * lifetime），挂起 watch 统一收 'exited'，清残留记录与 undelivered 计数器。GUI 侧栏归档
+   * （session-message-handler.ts handleSessionArchive）与本 agent 工具入口同经该登记到达
+   * 单一汇聚点，两入口同判、不再依赖各入口自觉调用。
    *
-   * 时序不变量：收尾必须在 archive() resolve 之后——三门任一拒绝（archive_generating 等）
-   * 时债权零损伤（先收尾会把「等完成通知再重试」的在途债权不可逆抹除）。
+   * 时序不变量：处置登记在归档前置三门之后（archive-service 内部序）——三门任一拒绝
+   * （archive_generating 等）时不发登记，债权零损伤（先收尾会把「等完成通知再重试」的
+   * 在途债权不可逆抹除）。claims 缺席 = 停用象限：无债权可收，登记空转无害。
    * pendingExitDeaths latch 属组合根私有，handler 侧不涉及。
-   * claims 缺席 = 停用象限：无债权可收，跳过收尾直接回成功。
-   *
-   * 已知缺口（基线既有，非本分支引入）：同一归档操作的 GUI 入口 `session.archive`
-   * （session-message-handler.ts handleSessionArchive）只调 archive.archive 后 reply，不收尾
-   * watch——归档 teardown 向死亡处置汇聚点发的是 'suppress'（archive-service.ts
-   * teardownForArchive → fireSuppressDisposition），组合根 subscribeSessionDeathDisposition 仅对
-   * 'delete' 发声；用户在侧栏归档 agent 子会话时，父 agent 挂起的 watch 悬至 runtime 重启。
-   * 长期方案 = SessionDeathDisposition（session-lifecycle.ts）增 'archive' 值，归档 teardown
-   * 改发该值，组合根统一 speakSessionDeath(sid, 'exit')——两入口同判，本处工具路径收尾
-   * 随之并入汇聚点、handler 侧收尾删除。
    */
   private async handleArchive(parentSessionId: string, params: SessionManagerArchiveParams): Promise<SessionManagerArchiveResult> {
     const { sessionId } = params
@@ -848,10 +849,6 @@ export class SessionManagerHandler {
       throw new Error(ARCHIVE_SERVICE_MISSING_ERROR)
     }
     await archiveService.archive(sessionId)
-    const claims = this.opts.claims
-    if (claims) {
-      settleClaimsOnDeath(claims, sessionId, 'exit', this.watchRespond, (sid) => this.resolveSessionFile(sid))
-    }
     return { sessionId, archived: true }
   }
 

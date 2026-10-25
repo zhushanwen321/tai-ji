@@ -1,5 +1,5 @@
 /**
- * 状态撕裂修复 E2E —— Playwright + Electron + mock 轨。
+ * 状态撕裂修复 E2E —— Playwright + Electron + mock 层。
  *
  * 验证 fix-state-tearing 的用户可见行为：
  * - E2E-ST-1: 发送消息 → UI 切到 busy（停止按钮出现）→ complete 后回 idle（发送按钮恢复）
@@ -14,7 +14,7 @@
  * 落兜底空态（「选择左侧会话开始」），new-task 渲染撕裂。修复后 isGenerating 改为
  * per-session 派生（chat.isGenerating(sessionId)），空 session 的 Landing 不再被跨 session 误伤。
  *
- * mock 轨数据流：VITE_MOCK=true → send 后 run-send-stream 自动推
+ * mock 层数据流：VITE_MOCK=true → send 后 run-send-stream 自动推
  * message_start(~60ms) → text_delta(*N) → complete。
  * isGenerating 从 message 实体派生，UI 状态切换完全由事件驱动。
  *

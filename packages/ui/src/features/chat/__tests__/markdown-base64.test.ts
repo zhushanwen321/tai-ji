@@ -73,7 +73,7 @@ function extractDataCode(html: string): string {
 /** 分块边界压力文本：总字节 ≈175KB（多倍于 2×CHUNK(0x8000)），多字节字符（中文 3B /
  *  emoji 4B）大量分布，分块边界必然落在多字节 UTF-8 序列内部——字节级切分正确性由对拍
  *  锁定。数据量取「跨多分块 + 边界落多字节」的最小充分规模（逻辑等价缩量，判据见
- *  docs/todo/test-single-layer-cleanup.md），不追求量。 */
+ *  docs/TEST-STRATEGY.md「新写测试判据」节），不追求量。 */
 const LARGE_TEXT =
   'a'.repeat(20000) + '中文注释'.repeat(10000) + '😀🎉'.repeat(2500) + 'const x = 1;\n'.repeat(1500)
 

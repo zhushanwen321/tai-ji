@@ -7,11 +7,12 @@
  * （统一 submit）+ 失败 restoreSegments 回滚。
  *
  * [u3b/D1 改造] getSendRoute / steer / enqueueCompact 三 deps 退役（lane 判定收归 runtime
- * 内核，renderer 不再判定车道）：steer 路由与 defer 入队两分支删除，终端统一 deps.send
+ * 内核，renderer 不再判定投递路径）：steer 路由与 defer 入队两分支删除，终端统一 deps.send
  * （useChat.send：乐观气泡 + delivery.submit）。canSend 检查语义收窄为「可提交」
  * （hasInput ∧ ¬isSending——占用不再拦截，内核排队取代拦截/拒绝）；busy 期命令拒绝退役。
  *
- * 发送位预测表六行的纯函数断言见 ./send-route.test.ts；本文件锁定分发器行为。
+ * 分发器行为锁定（发送位形态/角标与 Alt+⏎ 分流断言在 renderer 测试族——chat-flow-consistency
+ * D5 内容驱动双形态后判定源在 shared isActiveTurnPhase + renderer composer-shell）；本文件锁定分发器行为。
  *
  * 运行：cd packages/core && npx vitest run src/domain/composer/dispatch/send.test.ts
  */
@@ -185,11 +186,11 @@ describe('useComposerSend.onSend', () => {
     expect(spies.stagingSend).not.toHaveBeenCalled()
   })
 
-  // ── [u3b/D1] 统一 submit：车道判定退役，终端收敛 deps.send ──
+  // ── [u3b/D1] 统一 submit：投递路径判定退役，终端收敛 deps.send ──
 
-  it('②d RET: steer/defer 路由退役——不分车道，终端统一 send（统一 submit，D1）', async () => {
+  it('②d RET: steer/defer 路由退役——不分投递路径，终端统一 send（统一 submit，D1）', async () => {
     // 前身：sendRoute='steer' → deps.steer / sendRoute='defer' → enqueueCompact。
-    // 收敛后 onSend 不再有车道分支——调度器层不存在「按车道走不同终端」的输入。
+    // 收敛后 onSend 不再有投递路径分支——调度器层不存在「按投递路径走不同终端」的输入。
     const { deps, spies } = setup({ draft: '普通消息' })
     await useComposerSend(deps).onSend()
     expect(spies.send).toHaveBeenCalledWith('s1', SEGMENTS)
@@ -371,7 +372,7 @@ describe('useComposerSend.onSend', () => {
   it('⑨e [compaction-input-unlock] compact RPC 期间不置 isSending（压缩期 composer 可输入）', async () => {
     // 旧契约（已废）：compact 期间 isSending 置位双发锁——锁住整个压缩期（runtime compact
     // RPC 同步等压缩全程）→ composer 置灰不可输入。新契约：UI 锁只保留给受理往返型提交，
-    // 压缩期输入/发送由投递内核 queued 车道承接；并发 /compact 互斥交还 runtime compact_busy。
+    // 压缩期输入/发送由投递内核 queued 投递路径承接；并发 /compact 互斥交还 runtime compact_busy。
     const { deps, spies } = setup({ variant: 'panel', draft: '/compact' })
     spies.getSegments.mockReturnValue([{ type: 'slash', name: 'compact' }])
     let sendingDuringRpc: boolean | undefined

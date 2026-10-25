@@ -19,7 +19,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
@@ -85,7 +85,12 @@ function makeFixture(): Fixture {
     getActiveSession: (sid) => active.get(sid),
     findScannedSession: (sid) => scanned.get(sid),
     disposeUserStopped: (sid) => { calls.push(`userStopped:${sid}`) },
-    fireSuppressDisposition: (sid, hasDestroySink) => { calls.push(`suppress:${sid}:${hasDestroySink}`) },
+    // 生产接线同款（index.ts：fireArchiveDisposition → fireDeathDisposition('archive')）——
+    // fake 同时驱动真实登记器，处置通道探针经本 fixture 端到端可达。
+    fireArchiveDisposition: (sid, hasDestroySink) => {
+      calls.push(`archive-disp:${sid}:${hasDestroySink}`)
+      fireDeathDisposition(sid, 'archive', { hasDestroySink })
+    },
     closeAllBtwLines: async (sid) => { calls.push(`btw:${sid}`); return [] },
     detachSession: (sid) => { calls.push(`detach:${sid}`) },
     destroyPiSession: async (sid) => { calls.push(`destroy:${sid}`) },
@@ -160,8 +165,6 @@ function summaryOf(sid: string, cwd: string): SessionSummary {
     cwd,
     status: 'idle',
     lastActiveAt: 1,
-    modelId: '',
-    tokenCount: 0,
   }
 }
 
@@ -186,8 +189,8 @@ function scanPersistedSummary(sessionsRoot: string, sid: string): SessionSummary
         cwd: header.cwd,
         status: 'idle',
         lastActiveAt: statSync(filePath).mtimeMs,
-        modelId: '',
-        tokenCount: 0,
+        // W3：磁盘扫描条目显式缺省 surface 'sidebar'（与 scannedToSummary 同口径）
+        surface: 'sidebar',
         source: 'scan',
         sessionFile: filePath,
       }
@@ -258,7 +261,7 @@ describe('ArchiveService.archive', () => {
     expect(f.calls).toEqual([`btw:${sid}`, `reap:${sid}`, 'invalidateScan', 'broadcast'])
   })
 
-  it('活跃 session：杀 pi 前置五步复刻 delete 分支（suppress 登记先于 detach/destroy）', async () => {
+  it('活跃 session：杀 pi 前置五步复刻 delete 分支（archive 处置登记先于 detach/destroy）', async () => {
     const f = makeFixture()
     const sid = 'sess-bbbb22'
     const mainPath = f.writeMainFile(sid, CWD_A)
@@ -266,11 +269,11 @@ describe('ArchiveService.archive', () => {
 
     await f.service.archive(sid)
 
-    // 活跃编排序（D5 步骤 2 ①-⑤）：userStopped → suppress → btw → detach → destroy
-    // → removeEntry → reap，先于 invalidateScan/broadcast。
+    // 活跃编排序（D5 步骤 2 ①-⑤）：userStopped → archive 处置登记 → btw → detach →
+    // destroy → removeEntry → reap，先于 invalidateScan/broadcast。
     const prefix = [
       `userStopped:${sid}`,
-      `suppress:${sid}:true`,
+      `archive-disp:${sid}:true`,
       `btw:${sid}`,
       `detach:${sid}`,
       `destroy:${sid}`,
@@ -322,6 +325,86 @@ describe('ArchiveService.archive', () => {
     const f = makeFixture()
     await expect(f.service.archive('sess-ghost99')).rejects.toThrow(/not found/)
     expect(f.calls).toEqual([])
+  })
+
+  it('零消息 session（主文件未落盘，条目 26）：空归档成功——name 回退 sessionId、rawBytes 0、旁挂随迁、无压缩任务、幂等重入门 2', async () => {
+    const f = makeFixture()
+    const sid = 'sess-empty26'
+    // 活跃零消息形态：sessionFilePath 有值（pi SessionManager 构造期即派生路径）但文件
+    // 不存在（首 flush 前不落盘，规则 #6）；create 期 sidecar 已写在该路径旁。
+    const fileName = `2026-10-20T00-00-00-000Z_${sid}.jsonl`
+    const mainPath = join(f.sessionsRoot, ENC_A, fileName)
+    mkdirSync(join(f.sessionsRoot, ENC_A), { recursive: true })
+    writeFileSync(`${mainPath}.preset.json`, '{}')
+    f.registerActive(sid, CWD_A, mainPath)
+
+    // 旧形态：rename ENOENT → archive_io_error；现按登记倾向方案直接成功（空归档语义）。
+    await f.service.archive(sid)
+
+    // 空归档单元：无主文件；簿记在（name 回退 sessionId、rawBytes 0）；旁挂随迁。
+    const unitDir = join(f.archiveRoot, ENC_A)
+    expect(existsSync(join(unitDir, fileName))).toBe(false)
+    const ledger = readJson(join(unitDir, `${fileName}.archive.json`))
+    expect(ledger.status).toBe('staging')
+    expect(ledger.name).toBe(sid)
+    expect(ledger.rawBytes).toBe(0)
+    expect(ledger.cwd).toBe(CWD_A)
+    expect(existsSync(join(unitDir, `${fileName}.preset.json`))).toBe(true)
+    // 活跃退场照常（teardown 不因空归档跳过）+ 成功侧广播。
+    expect(f.calls).toContain(`destroy:${sid}`)
+    expect(f.calls).toContain('broadcast')
+    // 压缩任务不派发：短暂让渡后无 .zst、无压缩域 warn、簿记保持 staging 稳定态。
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(existsSync(join(unitDir, `${fileName}.zst`))).toBe(false)
+    expect(f.warnings.filter((w) => w.includes('压缩'))).toEqual([])
+    expect(readJson(join(unitDir, `${fileName}.archive.json`)).status).toBe('staging')
+    // 幂等：重复归档走门 2 的明确领域错误（archive_already_archived），非底层 IO 错误。
+    await expect(f.service.archive(sid)).rejects.toMatchObject({ code: 'archive_already_archived' })
+  })
+
+  it('符号链接 cwd（条目 27）：realpath 归一分桶——主文件重定位自真值分桶、簿记 cwd 存真值、恢复回真值分桶原位', async () => {
+    const f = makeFixture()
+    const sid = 'sess-sym27'
+    // 真实目录 + 指向它的符号链接（macOS /var → /private/var 同款形态，tmp 下自建复现）。
+    // realCwd 经 realpathSync 全链解析为 pi 的编码基准（pi spawn 子进程 process.cwd()
+    // 返回内核全解析真值——本机实测 spawn cwd=/tmp/symtest-link 子进程 process.cwd()
+    // 返回 /private/tmp/symtest-real；macOS tmpdir() 自身即 /var 未解析形态）。
+    const realCwd = realpathSync(mkdtempSync(join(tmpdir(), 'taiji-archive-realcwd-')))
+    cleanupDirs.push(realCwd)
+    const linkCwd = join(f.root, 'link-cwd')
+    symlinkSync(realCwd, linkCwd)
+    expect(realpathSync(linkCwd)).toBe(realCwd) // 前置锚：链接解析基准成立
+    // pi 落盘形态：主文件在 realpath 分桶、header.cwd = 全解析真值（pi SessionManager
+    // 以 process.cwd() 落 header）。
+    const fileName = `2026-10-20T00-00-00-000Z_${sid}.jsonl`
+    const realMainPath = join(f.sessionsRoot, encodeCwd(realCwd), fileName)
+    mkdirSync(join(f.sessionsRoot, encodeCwd(realCwd)), { recursive: true })
+    writeFileSync(
+      realMainPath,
+      `${JSON.stringify({ type: 'session', id: sid, cwd: realCwd, timestamp: '2026-10-20T00:00:00.000Z' })}\n`
+        + `${JSON.stringify({ type: 'session_info', name: `会话-${sid}` })}\n`,
+    )
+    // 定位源形态（真机探针复现）：active.cwd = 未解析链接路径，sessionFilePath = 按未解析
+    // cwd 派生的分桶路径（磁盘不存在——旧形态 rename 源 ENOENT）。
+    f.registerActive(sid, linkCwd, join(f.sessionsRoot, encodeCwd(linkCwd), fileName))
+
+    await f.service.archive(sid)
+
+    // 归档单元按 realpath 真值编码分桶；主文件从真值分桶搬入；未解析编码桶不被创建。
+    const unitDir = join(f.archiveRoot, encodeCwd(realCwd))
+    expect(existsSync(join(unitDir, fileName))).toBe(true)
+    expect(existsSync(join(f.archiveRoot, encodeCwd(linkCwd)))).toBe(false)
+    expect(existsSync(realMainPath)).toBe(false)
+    // 簿记 cwd 存 realpath 真值（恢复侧按簿记 cwd 原样推导——两侧同编码即往返一致）。
+    const ledger = readJson(join(unitDir, `${fileName}.archive.json`))
+    expect(ledger.cwd).toBe(realCwd)
+
+    // 恢复路径一致性（条目 27 验收）：sessionOriginalPath 按簿记 cwd 推导 = realpath 分桶
+    // 原位（与 pi 落盘位同桶）；summary 读回走磁盘扫描腿（header.id 定位）。
+    const reply = await f.service.unarchive(sid)
+    expect(reply.session.id).toBe(sid)
+    expect(existsSync(realMainPath)).toBe(true)
+    expect(existsSync(join(f.archiveRoot, encodeCwd(realCwd), `${fileName}.archive.json`))).toBe(false)
   })
 })
 
@@ -675,46 +758,59 @@ describe('不变量 3：归档列表 = 扫描 .archive.json 派生', () => {
   })
 })
 
-// ── suppress 消费点探针（残留风险 R2）───────────────────────────────────────
+// ── 'archive' 处置登记探针（条目 28：归档退场经处置登记到达组合根单一汇聚点）──────
 
-describe('suppress 消费点探针（R2：归档活跃 session 后死亡通知通道零输出）', () => {
-  it('fireDeathDisposition(suppress) 直达订阅通道：disposition=suppress、hasDestroySink 按 in-册判定', () => {
+describe("'archive' 处置登记探针（条目 28：GUI 侧栏归档与 agent 工具 archive_session 两入口共用的收尾触发点）", () => {
+  it('真实登记通道：archive 活跃 session 触发 disposition=archive、hasDestroySink=true（GUI 入口 handleSessionArchive 的唯一动作 = 调本服务）', async () => {
     const seen: Array<{ sid: string; disposition: string; hasDestroySink: boolean }> = []
     const unsubscribe = subscribeSessionDeathDisposition((sid, disposition, detail) => {
       seen.push({ sid, disposition, hasDestroySink: detail.hasDestroySink })
     })
     try {
-      // 真实登记器直达（ArchiveService 经 deps.fireSuppressDisposition 接线到本函数）。
-      fireDeathDisposition('sess-probe-1', 'suppress', { hasDestroySink: true })
-      expect(seen).toEqual([{ sid: 'sess-probe-1', disposition: 'suppress', hasDestroySink: true }])
+      const f = makeFixture()
+      const sid = 'sess-probe-1'
+      const mainPath = f.writeMainFile(sid, CWD_A)
+      f.registerActive(sid, CWD_A, mainPath)
+
+      await f.service.archive(sid)
+
+      // ArchiveService 经 deps.fireArchiveDisposition 接线到真实登记器——组合根订阅同款
+      // 形态收到 'archive' 处置（组合根对该值统一 speakSessionDeath(sid, 'exit') 收尾
+      // completion-watch 债权，两入口同判）。
+      expect(seen).toEqual([{ sid: 'sess-probe-1', disposition: 'archive', hasDestroySink: true }])
     } finally {
       unsubscribe()
     }
   })
 
-  it('归档活跃 session 的登记时序：suppress 先于 detach/destroy（先于任何杀进程，检查点①语义）', async () => {
-    const f = makeFixture()
-    const sid = 'sess-probe-2'
-    const mainPath = f.writeMainFile(sid, CWD_A)
-    f.registerActive(sid, CWD_A, mainPath)
+  it('归档被前置三门拒绝（生成中）时零登记：债权零损伤（处置登记在门 1/2/3 之后）', async () => {
+    const seen: Array<{ sid: string; disposition: string; hasDestroySink: boolean }> = []
+    const unsubscribe = subscribeSessionDeathDisposition((sid, disposition, detail) => {
+      seen.push({ sid, disposition, hasDestroySink: detail.hasDestroySink })
+    })
+    try {
+      const f = makeFixture()
+      const sid = 'sess-probe-2'
+      const mainPath = f.writeMainFile(sid, CWD_A)
+      f.registerActive(sid, CWD_A, mainPath)
+      f.setGenerating(sid)
 
-    await f.service.archive(sid)
-
-    const suppressIdx = f.calls.indexOf(`suppress:${sid}:true`)
-    const detachIdx = f.calls.indexOf(`detach:${sid}`)
-    const destroyIdx = f.calls.indexOf(`destroy:${sid}`)
-    expect(suppressIdx).toBeGreaterThanOrEqual(0)
-    expect(detachIdx).toBeGreaterThan(suppressIdx)
-    expect(destroyIdx).toBeGreaterThan(detachIdx)
+      await expect(f.service.archive(sid)).rejects.toMatchObject({ code: 'archive_generating' })
+      expect(seen).toEqual([])
+    } finally {
+      unsubscribe()
+    }
   })
 })
 
 /**
- * 探针代码级核实结论（R2，2026-10-20 实施期核实，写入 runlog）：
- * - 组合根消费（runtime index.ts:849-856）：suppress 分支只立 suppressedDeaths 标
- *   （hasDestroySink 时）不触发 speakSessionDeath——死亡通知通道零输出；
- * - 销毁回调消费（index.ts:1147）：removeSessionEntry 的销毁回调查标即消、跳过发声；
- * - intentional destroy 的 exit 事件（process-manager.ts:262-264）：destroySession 先清
+ * 处置通道消费点核实结论（现行接线，探针锚定）：
+ * - 组合根消费（runtime index.ts subscribeSessionDeathDisposition）：'archive' 分支
+ *   speakSessionDeath(sid, 'exit') 收尾 completion-watch 债权 + 立 suppressedDeaths 标
+ *   （hasDestroySink 时）——收尾回到单一汇聚点，GUI 与 agent 工具两入口同判；
+ * - 销毁回调消费（index.ts setOnSessionDestroyed 第二订阅者）：removeSessionEntry 的
+ *   销毁回调查标即消、跳过二次发声；
+ * - intentional destroy 的 exit 事件（process-manager.ts）：destroySession 先清
  *   clientToId/processes 条目，pi 进程随后 exit 反查无条目直接 return——exit 通道结构性
- *   拦截，与「同 id 随即重开」无时序假设。R2 前提成立，无需扩展 disposition 枚举。
+ *   拦截，不产生伪造死亡通知。
  */

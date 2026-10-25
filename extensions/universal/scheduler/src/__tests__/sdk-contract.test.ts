@@ -17,7 +17,7 @@
 // 读取——若在 factory 顶层捕获 service! 非空断言，注册时 service 为 null，
 // execute 调用会 NPE。此套件验证 session_start 前 execute 优雅 throw 而非 crash。
 
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext, Theme } from '@earendil-works/pi-coding-agent'
 import { describe, expect, it, vi } from 'vitest'
 
 // MF-3：session_start handler 会真实执行 importLegacyStore(ctx.cwd, ...) —— fakeCtx cwd='/test'
@@ -102,6 +102,40 @@ describe('pi-scheduler SDK contract', () => {
       // 反回归：旧的错误字段名不应存在
       expect(tool.handler).toBeUndefined()
       expect(tool.fn).toBeUndefined()
+    }
+  })
+
+  // exposure 重划终态锚（C-ext-05，2026-10-23 ADR-0136）：两工具保持 direct 常驻 =
+  // 注册时不写 exposure 字段（SDK 缺省 direct，pi-semantics PS-91）——误写 "deferred" 会把
+  // 触发入口从模型默认可见集收走（tool_search 才可激活），此处红。
+  it('exposure 注册终态：schedule / schedule_control 均 direct 常驻（不写 exposure 字段，SDK 缺省）', () => {
+    const { pi, tools } = createMockPi()
+    schedulerExtension(pi)
+    expect(tools.map(t => t.name).sort()).toEqual(['schedule', 'schedule_control'])
+    for (const tool of tools) {
+      expect(tool.exposure).toBeUndefined()
+    }
+  })
+
+  it('每个 tool 有 renderResult 函数成员（C-ext-05）+ 折叠态输出 details.summary 一行', () => {
+    const { pi, tools } = createMockPi()
+    schedulerExtension(pi)
+    for (const tool of tools) {
+      expect(typeof tool.renderResult).toBe('function')
+      const renderResult = tool.renderResult as (
+        result: unknown,
+        options: { expanded: boolean },
+        theme: Theme,
+      ) => { render: (width: number) => string[] }
+      const renderTheme = { fg: (_token: string, text: string) => text } as unknown as Theme
+      const result = {
+        content: [{ type: 'text', text: 'schedule output…' }],
+        details: { summary: 'Scheduled reminder in 5m' },
+      }
+      // Text.render 按宽度 pad，trim 后断言（折叠态 = details.summary 一行）
+      const lines = renderResult(result, { expanded: false }, renderTheme).render(400)
+      expect(lines.length).toBe(1)
+      expect(lines[0].trim()).toBe('Scheduled reminder in 5m')
     }
   })
 

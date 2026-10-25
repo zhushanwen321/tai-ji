@@ -129,6 +129,8 @@
           <Loader2 class="size-3.5 animate-spin text-neutral-dim opacity-60" />
           <span class="text-[length:var(--text-2xs)] text-neutral-dim opacity-60">{{ t('panel.htmlPreview.checking') }}</span>
         </div>
+        <!-- bg-white = 内容语义色例外（同 QR 码白底条款）：iframe 是用户 HTML 的浏览器式画布，
+             白底对齐浏览器默认行为，预览不失真；非 UI 主题色，不随主题切换 -->
         <iframe
           v-else
           data-testid="html-preview-frame"

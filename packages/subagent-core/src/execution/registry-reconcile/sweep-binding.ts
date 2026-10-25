@@ -14,6 +14,7 @@ import { bestEffort } from "../assembly/best-effort.ts";
 import { isLegacyClosedSettled } from "../persistence/execution-record.ts";
 import { findRunSettlementEvidence, type RunSettlementEvidence } from "../persistence/run-state-evidence.ts";
 import { resolvePiWorkflowRunsDir } from "../assembly/workflow-state-root.ts";
+import type { SettlementReason } from "../../shared/run-vocabulary.ts";
 import type { PiLike } from "../notify/notify-host.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { runReconcileSweep, type SupervisedRecordState } from "./reconcile-sweep.ts";
@@ -28,14 +29,37 @@ import { runReconcileSweep, type SupervisedRecordState } from "./reconcile-sweep
  * 的折叠收敛在派生函数单点（default 分支折 "failed"，W2 D5 先例「interrupted →
  * failed 诊断兜底容器」：中断形态注销 reason 报 completed 是完成语义误报），
  * 本消费方零处理直传（reason 恒 string，不落 reconcile-sweep
- * closedReasonToPendingReason 的 completed 兜底）。
+ * settlementReasonToPendingReason 的 completed 兜底）。
  */
 export function settlementEvidenceToRunState(state: RunSettlementEvidence): SupervisedRecordState {
   if (state.kind === "missing") return "missing";
   if (state.kind === "terminal") {
-    return { terminal: true, closedReason: state.reason };
+    return { terminal: true, settlementReason: state.reason };
   }
   return "active";
+}
+
+/**
+ * [subagent-observability §3.3.4/§3.3.6 失联结清判定位] 轮收条停因 → 失联结清态
+ * （reconcile-sweep 直通族的「在途被重启打断 → lost」事实判定位，走查补）：轮收条
+ * 已写且停因 = 宿主重启打断族（interrupted-by-restart——u3 失联清点的轮收条补写值，
+ * 也是崩溃重建单规则的无收条回落值）→ 该 record 的在途轮被宿主重启打断，其 pending
+ * 债未经轮终发射点②结清 → 补结清为 lost（失联）。正常轮终（completed/failed——
+ * 结清已随轮终发射点②完成）与其余形态归 active 不动。
+ * 返回 undefined = 非失联形态（调用方回落既有分流）。
+ *
+ * 注：结清值 lost 的类型防线 = 返回值显式 SettlementReason 词表（shared/run-vocabulary
+ * ALL_SETTLEMENT_REASONS 封闭五值）——"lost" 是结清枚举成员而非 ClosedReason 词表成员，
+ * 词表归属在类型层表达，拼错值编译期报错。经 settlementReasonToPendingReason 直通为
+ * 注销 reason，历史六值通道 mapReasonToStatus 对 lost 落 unknown（fail-visible 如实），
+ * 新权威通道 resolveSettlementReason("lost") 原样解析（双通道以新写入方为权威，§3.3.6）。
+ */
+function lostSettlementOf(
+  stopReason: string | undefined,
+): { terminal: true; settlementReason: SettlementReason } | undefined {
+  return stopReason === "interrupted-by-restart"
+    ? { terminal: true, settlementReason: "lost" }
+    : undefined;
 }
 
 /** 绑定侧（SubagentService 供给；全部惰性——见文件头注）。 */
@@ -79,23 +103,28 @@ export function runPendingReconcileSweepForService(binding: ReconcileSweepBindin
         // ——sweep 对账面行为不变（轮终注销已随 markRoundIdle 簿记⑧发射，不在册）。
         const memory = binding.getStore().getMutable(id);
         if (memory !== undefined) {
-          return isLegacyClosedSettled(memory)
-            ? { terminal: true, closedReason: memory.closedReason }
-            : "active";
+          if (isLegacyClosedSettled(memory)) {
+            return { terminal: true, settlementReason: memory.closedReason };
+          }
+          return lostSettlementOf(memory.stopReason) ?? "active";
         }
         const disk = binding.getStore().findLightById(id);
         if (disk !== undefined) {
-          return isLegacyClosedSettled(disk)
-            ? { terminal: true, closedReason: disk.closedReason }
-            : "active";
+          if (isLegacyClosedSettled(disk)) {
+            return { terminal: true, settlementReason: disk.closedReason };
+          }
+          return lostSettlementOf(disk.stopReason) ?? "active";
         }
         // [W4 收敛] v2 收编 record 的第三级判据：v1 磁盘读侧（findLightById）不含
         // 收编产物（events 帧 + manifest 派生视图），无本级时收编 record 落 missing 分支
         // 被误注销为 expired——注销词统一手术的修复点（与 run 侧 D6 判据源改接
         // findRunSettlementEvidence 同构：判据接终局证据，不接两态机持久化字段）。
+        // [subagent-observability u3] 收编停因 = 宿主重启打断族（interrupted-by-restart）
+        // → 结清值 lost（失联结清判定位同款事实——收编 record 的在途轮同被重启打断，
+        // 债未经轮终发射点②结清）；其余收编停因维持直通。
         const adoptedStopReason = binding.getStore().findAdoptedStopReasonSync(id);
         if (adoptedStopReason !== undefined) {
-          return { terminal: true, closedReason: adoptedStopReason };
+          return lostSettlementOf(adoptedStopReason) ?? { terminal: true, settlementReason: adoptedStopReason };
         }
         return "missing";
       },

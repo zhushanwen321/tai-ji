@@ -407,8 +407,8 @@ describe('useChatViewDeps — 虚拟 id 解析（fileSearch vid 修复：需要�
     expect((mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { resourceBaseDir?: string }).resourceBaseDir).toBe('/home/demo/project-a')
   })
 
-  it('btw 两段式 vid → 解析到内嵌线 pi session id', async () => {
-    const deps = assemble(ref('btw:s2'))
+  it('W4a：btw 线 id 即真实 session id（直通不解析——vid 两段式已退役）', async () => {
+    const deps = assemble(ref('s2'))
     await flushPromises()
     expect(mockLoad).toHaveBeenCalledWith('s2')
     await deps.renderMarkdown('x')
@@ -425,7 +425,8 @@ describe('useChatViewDeps — 虚拟 id 解析（fileSearch vid 修复：需要�
     const deps = assemble(ref('s1'), { mainSessionId: computed(() => 's1') })
     expect(deps.sessionCwdOf?.('subagent:s1:sub-9')).toBe('/home/demo/project-a')
     expect(deps.sessionCwdOf?.('agentcall:acs-1')).toBe('/home/demo/project-a')
-    expect(deps.sessionCwdOf?.('btw:s2')).toBe('/home/demo/project-b')
+    // W4a：btw 线 id 即真实 session id，直通查 cwd（旧 `btw:<piSid>` 两段式已退役）
+    expect(deps.sessionCwdOf?.('s2')).toBe('/home/demo/project-b')
     // agentcall vid 一律解析到挂载链 owner（第二段 acsId 不参与归属判定——同视图分区共享归属）
     expect(deps.sessionCwdOf?.('agentcall:other')).toBe('/home/demo/project-a')
   })

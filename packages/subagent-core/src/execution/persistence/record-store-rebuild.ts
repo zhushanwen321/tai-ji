@@ -48,9 +48,9 @@ import {
   IDENTITY_HEAD_BYTES,
 } from "./session-reconstructor.ts";
 import type { ClosedReason, ExecutionMode, ExecutionStatus, RecordOrigin, ZcodeTranscriptRef } from "../domain/record-types.ts";
-import type { ExecutionRecord } from "../domain/record-model.ts";
-import type { SubagentRecord } from "../assembly/types.ts";
-import { CLOSED_REASONS as CLOSED_REASON_LIST } from "../domain/record-types.ts";
+import type { ExecutionRecord, RoundFacts } from "../domain/record-model.ts";
+import type { SubagentRecord, SubagentListLastRound } from "../assembly/types.ts";
+import { CLOSED_REASONS as CLOSED_REASON_LIST, ROUND_TERMINAL_STOP_REASONS } from "../domain/record-types.ts";
 import { isZcodeTranscriptRef, isValidStopReason } from "../domain/record-model.ts";
 
 const logger = getLogger("subagents");
@@ -194,6 +194,19 @@ function mapManifestStatus(s: string): ExecutionStatus | null {
 function manifestStatusToExecution(m: ManifestRecord): ExecutionStatus | null {
   if (m.executionStatus === "idle" || m.executionStatus === "running") return m.executionStatus;
   return mapManifestStatus(m.status);
+}
+
+/**
+ * [subagent-observability §3.3.4 失联清点] manifest 快照在途判定（清点候选枚举的
+ * 唯一通道——禁止全量事件流重放 fold 判定在途态，P0-25 红线）：快照两态权威词
+ * executionStatus 优先、越界/缺席回落 legacy status 映射（与 manifestStatusToExecution
+ * 同一套读侧判据——本函数是其谓词形态，同文件同源防漂移）。
+ * true = 快照停在轮在途形态（轮始写点随 u3 落 manifest 派生视图——running 快照与
+ * 在途轮一一对应；轮终写点刷 idle）。候选仍须经收条未写确认（markRoundIdle 的
+ * 事件先落、manifest 后刷的崩溃半更新窗），确认通道在 sweep 编排侧。
+ */
+export function manifestSnapshotInFlight(m: ManifestRecord): boolean {
+  return manifestStatusToExecution(m) === "running";
 }
 
 // ============================================================
@@ -568,6 +581,37 @@ export function projectFoldToLight(
   if (fold?.modelOverride !== undefined) {
     light.modelOverride = copyModelOverride(fold.modelOverride);
   }
+  // [subagent-observability §3.3.3/§3.3.6] 轮收条事实快照派生视图（fold 的轮终收条
+  // 帧 → lastRound）——重启后 fold 重建路径的内存读侧恢复源（与内存写点 rec.lastRound
+  // 同形）。result/turns 事实在收条帧上（resultSummary 摘要锚 + turns 快照），随
+  // lastRound 事实字段一并派生（list 消费方零二次查询）。
+  const lastRound = lastRoundFromFold(fold);
+  if (lastRound !== undefined) light.lastRound = lastRound;
+}
+
+/**
+ * [subagent-observability §3.3.6] 轮终收条帧 → lastRound 读模型（fold 重建路径与
+ * fold 直查通道共用的纯派生单点）。result 取收条帧 resultSummary 摘要锚（空串 =
+ * 无文本输出——§3.3.3 空正文语义）；turns 取帧累计轮数快照；事实字段（engineStopReason/failure/promptDisposition/usage/retryAttempts/observations/stderrTeePath）直读透传。
+ * undefined = fold 缺席或无轮终收条（从未收尾 / 存量旧帧）。
+ */
+export function lastRoundFromFold(
+  fold: RecordEventFoldState | undefined,
+): SubagentListLastRound | undefined {
+  const receipt = fold?.roundIdle;
+  if (receipt === undefined) return undefined;
+  return {
+    ...(receipt.engineStopReason !== undefined ? { engineStopReason: receipt.engineStopReason } : {}),
+    ...(receipt.failure !== undefined ? { failure: receipt.failure } : {}),
+    ...(receipt.promptDisposition !== undefined ? { promptDisposition: receipt.promptDisposition } : {}),
+    ...(receipt.resultSummary !== undefined ? { result: receipt.resultSummary } : {}),
+    ...(receipt.turns !== undefined ? { turns: receipt.turns } : {}),
+    ...(receipt.usage !== undefined ? { usage: receipt.usage } : {}),
+    ...(receipt.retryAttempts !== undefined ? { retryAttempts: receipt.retryAttempts } : {}),
+    ...(receipt.observations !== undefined ? { observations: receipt.observations } : {}),
+    ...(receipt.stderrTeePath !== undefined ? { stderrTeePath: receipt.stderrTeePath } : {}), // [§3.3.6] 诊断引用透传（仅引用不假设永存）。
+    ...(receipt.swept !== undefined ? { swept: receipt.swept } : {}),
+  };
 }
 
 /**
@@ -624,7 +668,14 @@ interface FoldIdentityFields {
   stepIndex: number | undefined;
 }
 
-function identityFromFoldSource(fold: RecordEventFoldState | undefined): FoldIdentityFields | undefined {
+/**
+ * fold 身份域归一（record-store 补齐 origin 消费单源——[S3b origin 补齐] 见
+ * record-store.probeAndCache）：record-created 必需标量校验 + optional 域安全读取。
+ * identity entry 写点（subagent-workflow session-lifecycle appendSubagentIdentityEntry）
+ * 载荷缺 origin/parentRunId 期，fold（record-created 帧，宿主 register 恒写 origin）
+ * 是这两域唯一可靠的重建源——归一判据单源，禁止调用方裸读 fold.identity 裸收 JSON 值。
+ */
+export function identityFromFoldSource(fold: RecordEventFoldState | undefined): FoldIdentityFields | undefined {
   const identity = fold?.identity;
   if (identity === undefined) return undefined; // 残文件/全坏行形态（record-events 注释）
   if (
@@ -763,6 +814,9 @@ export function buildRecord(
       displayItems: getDisplayItems(base),
       result: base.result,
       error: base.error,
+      // [subagent-observability §3.3.5] lastError 随全量重建透传（session jsonl 的
+      // 错误事实扫描产物——错误事实只追加语义，跨轮可见）。
+      lastError: base.lastError,
       sessionFile: base.sessionFile,
       worktree: base.worktree,
     };
@@ -793,6 +847,7 @@ export function buildRecord(
       displayItems: [],
       result: undefined,
       error: undefined,
+      lastError: undefined,
       sessionFile: base.sessionFile,
       worktree: base.worktree,
     };
@@ -865,8 +920,9 @@ export function terminalManifestRecord(record: ExecutionRecord): ManifestRecord 
 /**
  * [U2 两态桥接 + U8 / §3.2.8] 旧 status 三态（session-reader 兼容契约）的派生单点。
  * 判定序（先命中先出）：
- *   1. idle ∧ closedReason 有值（桥接不变量「旧 closed 终态」读形态——workflow D7
- *      例外族与监督器放弃仍产出）→ cancelled（reason='cancelled'）/ closed 二分；
+ *   1. idle ∧ closedReason 有值（桥接不变量「旧 closed 终态」读形态——现役生产者仅
+ *      workflow D7 例外族（旧监督器放弃支已随 924ace33f 清退））→
+ *      cancelled（reason='cancelled'）/ closed 二分；
  *   2. 其余（running / 轮间 idle（markSettled 无 closedReason）/ close 收尾
  *      record）→ running
  *      （session-reader 视角的活跃成员，§3.2.8 行为变化声明：可续聊 record =
@@ -1041,6 +1097,12 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     // 水合的候选数据源 + 覆盖状态查询通道）。持久化权威 = record-model-override 事件
     // 帧（写点 = store.markModelOverride），本派生视图只透传内存值；undefined 自然缺省。
     modelOverride: r.modelOverride,
+    // [subagent-observability §3.3.3/§3.3.6] 轮收条事实快照（markRoundIdle 写点产出，
+    // 直读透传——「上一轮怎么收尾」的内存读侧权威源）+ §3.3.5 派生 lastError（最后
+    // 一个非空轮失败——u2 只追加语义后跨轮可见）。undefined 自然缺省（本进程内尚无
+    // 轮终 / 旧数据）。
+    lastRound: r.lastRound,
+    lastError: r.lastError,
   };
 }
 
@@ -1052,7 +1114,8 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
  * [U7 / §3.2.7] revive 统计基线水合：事件流折叠（唯一事实源，[② 读侧换源] 后取代
  * binding 快照读侧）→ 内存 record 基线。max 合并防御调用方传入已带统计的形态
  * （水合只增不减——防归零覆盖的语义本体）；epoch 同款 max（跨重启单调防撞）；
- * lastAbandonedRound / transcriptRef 仅缺省回填（非空不覆盖，调用方冷查水合值优先）。
+ * lastAbandonedRound / transcriptRef / lastRound / lastError 仅缺省回填（非空不
+ * 覆盖，调用方冷查水合值优先）。
  *
  * fold 来源 = TerminalCtx.foldOf 注入位（调用时读事件流——事件流未接线的纯内存
  * 形态返回 undefined，本函数整体 no-op）。
@@ -1072,6 +1135,66 @@ function hydrateModelOverride(
   (record as MutableOverrideRecord).modelOverride = copyModelOverride(override);
 }
 
+/**
+ * [subagent-observability §3.3.6/§3.3.5] 轮收条事实与 lastError 水合（缺省回填，
+ * 非空不覆盖——与 transcriptRef 同构）：
+ *   - lastRound ← 最近轮终收条帧（fold.roundIdle）的事实字段。组装独立于
+ *     {@link lastRoundFromFold}：读模型字段集不同——record 内的 RoundFacts 只收
+ *     「派生不出来的事实」（result 正文经读侧 summarize 从聚合字段派生，不重复
+ *     存储；turns 收进快照——聚合字段 turnCount 是 live 计数器，收条值随收条定格）。
+ *   - lastError ← 最新带失败原文的收条帧（新旧以 lastEvent 判定，另一帧作回落）
+ *     ——「最后一个非空轮失败」在 fold 单槽收条上的等价形。
+ *
+ * 数据源 = 既有事件帧，零数据格式变更。已知边界：跨「失败轮 → 成功轮」后更早
+ * 轮的失败原文 fold 不保留（单槽收条），此形态 lastError 以最近收条为准——完整
+ * 等价需事件流逐帧扫描或 fold 扩展失败事实槽。
+ */
+/** 帧上停因值的引擎三态收窄（历史/异常宽词表值不入 RoundFacts——值域检查归一，
+ *  isValidClosedReason 同款先例）。 */
+function isRoundTerminalStopReason(v: string | undefined): v is (typeof ROUND_TERMINAL_STOP_REASONS)[number] {
+  return v !== undefined && (ROUND_TERMINAL_STOP_REASONS as readonly string[]).includes(v);
+}
+
+function hydrateRoundFactsAndError(record: ExecutionRecord, fold: RecordEventFoldState): void {
+  const idle = fold.roundIdle;
+  if (record.lastRound === undefined && idle !== undefined) {
+    const facts = roundFactsFromIdle(idle);
+    if (Object.keys(facts).length > 0) record.lastRound = facts;
+  }
+  hydrateLastError(record, fold, idle);
+}
+
+/** fold.roundIdle 收条帧 → record 内 RoundFacts（只收「派生不出来的事实」字段集，见 hydrateRoundFactsAndError 头注）。 */
+function roundFactsFromIdle(
+  idle: NonNullable<RecordEventFoldState["roundIdle"]>,
+): RoundFacts {
+  return {
+    ...(isRoundTerminalStopReason(idle.engineStopReason) ? { engineStopReason: idle.engineStopReason } : {}),
+    ...(idle.failure !== undefined ? { failure: idle.failure } : {}),
+    ...(idle.promptDisposition !== undefined ? { promptDisposition: idle.promptDisposition } : {}),
+    // [F1-46] 收条轮终轮数随水合恢复（live 值下一轮会推进，回落会漂移上一轮收条）。
+    ...(idle.turns !== undefined ? { turns: idle.turns } : {}),
+    ...(idle.stderrTeePath !== undefined ? { stderrTeePath: idle.stderrTeePath } : {}),
+    ...(idle.usage !== undefined ? { usage: idle.usage } : {}),
+    ...(idle.retryAttempts !== undefined ? { retryAttempts: idle.retryAttempts } : {}),
+    ...(idle.observations !== undefined ? { observations: idle.observations } : {}),
+  };
+}
+
+/** lastError 水合（缺省回填，非空不覆盖）：最近帧带失败原文优先；最近帧无失败时回落另一收条槽（失败事实只追加不清空的内存语义——成功收条不抹掉更早的失败原文）。 */
+function hydrateLastError(
+  record: ExecutionRecord,
+  fold: RecordEventFoldState,
+  idle: RecordEventFoldState["roundIdle"],
+): void {
+  if (record.lastError !== undefined) return;
+  const newestIsSettled = fold.lastEvent?.type === "record-settled";
+  const newest = newestIsSettled ? fold.settled?.error : idle?.error;
+  const older = newestIsSettled ? idle?.error : fold.settled?.error;
+  const errorFact = newest ?? older;
+  if (errorFact !== undefined) record.lastError = errorFact;
+}
+
 export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordEventFoldState | undefined): void {
   if (fold === undefined) return;
   const stats = baselineStatisticsFromFold(fold);
@@ -1088,4 +1211,7 @@ export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordEvent
     record.transcriptRef = reopenedRef;
   }
   hydrateModelOverride(record, fold.modelOverride);
+  // [subagent-observability §3.3.6/§3.3.5] 轮收条事实与 lastError 随冷复活恢复
+  // （fold 是唯一事实源——重启后 record.lastRound/lastError 不再停在新进程缺省）。
+  hydrateRoundFactsAndError(record, fold);
 }

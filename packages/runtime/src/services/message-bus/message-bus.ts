@@ -137,7 +137,8 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'session.subagentEntriesAppended': 'state',
   'session.workflowUpdate': 'state',
   'session.state_changed': 'state',
-  // occupancy（session-occupancy-send-closure P3）：占用三维快照。state topic last-value——
+  // occupancy（session-occupancy-send-closure P3）：占用四维快照（turn/compacting/bash/
+  // handingOff）。state topic last-value——
   // 断连重连 / 切回 session 经 stateSnapshot 回放恢复（G4），不依赖广播时序。
   'session.occupancy': 'state',
   // session.delivery（投递所有权内核 D5）：投递内核条目全量快照（队列区单一数据源 D7）。
@@ -156,14 +157,11 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   // goal / plan 四方（同经 widget 通道，同批获得保证性恢复）。
   'extension:widget': 'state',
   'extension:widgetGui': 'state',
-  // btw 线列表（btw-question D6 的 TOPIC/STATE 登记，M2-a）：state last-value——payload =
-  // { mainSid, threads }（ServerMessageMap['btw.list']），publish 于**主会话**（mainSid）bus：
-  // btw.create / btw.remove 成功后 handler 广播全量线列表（覆盖式），重连/切回主会话经
-  // stateSnapshot('btw') 恢复 drawer 线列表与 badge 聚合（不依赖广播时序；拉取兜底 =
-  // btw.list RPC 同形应答，双通道同一 payload——C6「需立即消费的状态必须可拉取」）。
-  // btw.create / btw.remove 是纯 RPC reply（同名 request/reply，走 reply 通道不经 publish）
-  // ——不入本表（session.subscribe 同族；检查锚定见 __tests__/state-type-key-map-guard.test.ts）。
-  'btw.list': 'state',
+  // btw.* 无 TOPIC_TABLE 登记（W4b 后）：btw.create / btw.remove 是纯 RPC reply（同名
+  // request/reply，走 reply 通道不经 publish，session.subscribe 同族）。原 btw.list 线
+  // 列表 state 登记（typeKey 'btw'）随该消息退役删除——btw 线进通用列表
+  // （session.list {surface:'btw', mainSessionId}，设计 §3.3.1/§5-W4b），create/remove
+  // 成功后不再 publish 线列表帧。检查锚定见 __tests__/state-type-key-map-guard.test.ts。
   // ── stream 类：分配 seq、入 ring（O(1) 覆盖写）──
   'message.message_start': 'stream',
   'message.complete': 'stream',
@@ -191,6 +189,11 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   // renderer 订阅已被 bus.clearSession 清除，回放是提示条的主要送达通路）。
   'session.restored': 'stream',
   'session.restoreFailed': 'stream',
+  // subagent live 流降级一次性信号（DC-8，subagent-control-delivery-residue）：低频（每
+  // record 至多一次）+ 需可靠送达——stream 入 ring（session.restored / terminal.writeFailed
+  // 同款理由）；消费端幂等（降级位单次翻转），回放重复帧零副作用。缺席丢失的兜底 =
+  // 接入拉取（session.getSubagentStreamState 的 degraded 字段是权威来源）。
+  'session.subagentStreamDegraded': 'stream',
   'terminal.alive': 'stream',
   'terminal.exit': 'stream',
   'terminal.ack': 'stream',
@@ -279,9 +282,8 @@ export const STATE_TYPE_KEY_MAP: Readonly<Record<string, string>> = {
   // 时 subscribe 的 stateSnapshot 含此帧，renderer 队列区从快照恢复（V5/G2「断连不丢队列」）。
   // 同 key 覆盖：同一次队列变更序列只留最新一帧（帧本身即全量快照，无需历史）。
   'session.delivery': 'delivery',
-  // btw 线列表（btw-question D6，M2-a）：typeKey 'btw'——与 TOPIC_TABLE 的 state 登记配对，
-  // 重连回放键 = 主会话 stateSnapshot 内的 'btw' 条目（全量线列表 last-value 覆盖）。
-  'btw.list': 'btw',
+  // 原 btw 线列表 typeKey 'btw'（btw-question D6，M2-a）随 btw.list 消息退役删除——
+  // 线列表读取入口 = session.list 通用查询（设计 §3.3.1/§5-W4b），无 state 帧需回放。
 }
 
 /**

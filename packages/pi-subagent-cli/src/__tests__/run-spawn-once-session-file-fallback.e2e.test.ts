@@ -128,7 +128,7 @@ afterEach(() => {
 });
 
 // 真 pi 对端（fake 脚本真子进程）+ close 收尾 warn 留痕 = 代码 × OS 组合行为
-// （进程存亡无完成信号可等）——移出默认单测轨，集成门控启用时真跑。
+// （进程存亡无完成信号可等）——移出默认单测层，集成门控启用时真跑。
 describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
   `close 时 sessionFile 缺失的响亮 warn（runSpawnOnce + fake pi 全程不应答）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
   () => {

@@ -5,7 +5,8 @@
  * 本 composable 把 renderer 真实现适配组装：
  * - ports：isMock（VITE_MOCK）/ isMac（navigator.platform，D8 收编）/ searchMock
  *   （mockApi.search.query）/ fileRead（@/api 门面 file.read，mock/real 构建期切换；AC-6.9 不经吞错层）/
- *   fileCandidates（api/domains/composer.getFileCandidates）/ sessionList（api/domains/session.list）/
+ *   fileCandidates（api/domains/composer.getFileCandidates）/ sessionList（W4b 搜索迁移：
+ *   session.list {surface:'sidebar'}——全局/新任务搜索同批改吃通用查询，见下方接线处）/
  *   selectSession（壳传入 useSidebar().selectSession，C-W3-2）/ archiveList（api/domains/
  *   session.listArchives——归档搜索源）/ archiveJump（useArchiveView().openSummary——
  *   归档跳转）/ t（i18n）
@@ -26,7 +27,7 @@ import * as composerApi from '@taiji/core/transport/api/domains/composer'
 import * as sessionApi from '@taiji/core/transport/api/domains/session'
 import * as mockApi from '@taiji/core/transport/mock'
 // SM-E2E-6：fileRead 必须经 @/api 门面（isMock 切换 mockApi.file / realFile）——直引 core real 域
-// 会绕过 mock 切换，mock 轨 file.read RPC 无 handler 挂 65s backstop，confirm 永不完成
+// 会绕过 mock 切换，mock 层 file.read RPC 无 handler 挂 65s backstop，confirm 永不完成
 import { file } from '@/api'
 import { useCommandStore } from '@/composables/features/command/useCommandStore'
 import { useFileTree } from '@/composables/features/file-tree/useFileTree'
@@ -60,7 +61,11 @@ export function useSearchModalDeps(shell: SearchModalShellDeps): SearchDeps {
       searchMock: isMock ? mockApi.search.query : undefined,
       fileRead: (path, sessionId) => file.read(path, sessionId).then(() => {}),
       fileCandidates: composerApi.getFileCandidates,
-      sessionList: sessionApi.list,
+      // W4b 搜索迁移（设计 §3.3.1/§5-W4b）：session 源从 config.sessions 查询侧改吃
+      // session.list 纯查询消息——**调用侧显式传 { surface:'sidebar' }**（不依赖无参
+      // 默认语义：无参 = 全量是给抽屉/调试用的口径，搜索只要侧栏口径；btw 线不得进
+      // 搜索结果）。端口形状不变（同一 port 换消息），search/search-jump 编排零改动。
+      sessionList: () => sessionApi.listSessions({ surface: 'sidebar' }),
       // C-W3-2：SessionSelectPort 接收点归实现域（useSidebar().selectSession）
       selectSession: shell.selectSession,
       // 归档搜索源（config.archives 按需拉取）+ 归档跳转（openSummary = 归档列表行点击同路径）

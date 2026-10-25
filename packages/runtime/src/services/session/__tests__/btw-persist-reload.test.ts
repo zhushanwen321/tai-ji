@@ -3,7 +3,7 @@
  * reattach）。
  *
  * 覆盖边界（防重复写已有断言）：
- * - 注册表重建基础面（vid/header cwd/mainSid/hidden 复原/幂等/坏文件跳过）已由
+ * - 注册表重建基础面（session id/header cwd/mainSid/hidden 复原/幂等/坏文件跳过）已由
  *   btw-registry.test.ts 覆盖。
  * - [session-store-layout-inversion] 启动孤儿补账已随布局反转退役（线 jsonl 挂主树
  *   内域随主树回收，btw 侧无启动期扫描删除面）——原「孤儿补账先于重建」测试组随
@@ -24,6 +24,7 @@ import { join } from 'node:path'
 
 import { initRuntimeCheckpointStore, getRuntimeCheckpointStore } from '../runtime-checkpoint.js'
 import { BtwService } from '../btw-service.js'
+import { setBtwCascadeOps } from '../session-lifecycle.js'
 import {
   cleanupDir,
   makeHarness,
@@ -57,6 +58,7 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 afterEach(() => {
+  setBtwCascadeOps(null)
   svc.dispose()
   cleanupDir(fx)
   restoreDataDir()
@@ -64,16 +66,22 @@ afterEach(() => {
 })
 
 describe('checkpoint 豁免（P-persist 重启半边：不为 btw 建档 → 重启不误 reattach）', () => {
-  it('registerSession(vid) 后 checkpoint 无该条目；普通 session 照常入档（订阅者其余保留）', async () => {
+  it('registerSession(btw 线) 后 checkpoint 无该条目；普通 session 照常入档（订阅者其余保留）', async () => {
     const { service } = createSetup()
-    const vid = `btw:linepi-ckpt-${Date.now()}`
+    const lineSid = `linepi-ckpt-${Date.now()}`
     const mainSid = `main-ckpt-${Date.now()}`
+    // W4a：checkpoint 豁免判别器 = registry 成员查询（btwCascadeOps.getLine，键 = 线
+    // session id = piId）——线先经 BtwService.createLine 入册，再走 registerSession。
+    setBtwCascadeOps(svc)
+    h.deps.resolveMainSessionFile = vi.fn(() => undefined)
+    h.state = { sessionId: lineSid, sessionFile: join(fx, `${lineSid}.jsonl`) }
+    const line = await svc.createLine({ mainSid: 'main-ckpt-owner', cwd: CWD })
 
-    await service.initializeManagedSession(vid, {} as IPiEngine, CWD, 'line', undefined, true)
+    await service.initializeManagedSession(line.sessionId, {} as IPiEngine, CWD, 'line', undefined, undefined, undefined, undefined, undefined, undefined, 'btw')
     await service.initializeManagedSession(mainSid, {} as IPiEngine, CWD, 'main')
 
     const ids = getRuntimeCheckpointStore().read()?.sessions.map(s => s.piSessionId) ?? []
-    expect(ids).not.toContain(vid) // 豁免生效：reattach 编排结构上看不见 btw 线
+    expect(ids).not.toContain(line.sessionId) // 豁免生效：reattach 编排结构上看不见 btw 线
     expect(ids).toContain(mainSid) // 对照：主会话建档不受影响（D3 语义保持）
 
     // 卸载清理（避免条目跨用例累积噪音）

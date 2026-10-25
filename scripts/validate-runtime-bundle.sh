@@ -227,45 +227,24 @@ echo -e "${GREEN}[OK] 产物裸 require 白名单检查通过（node 内建 + ex
 
 # ── 3. CJS 兼容性检查 ───────────────────────────────────────────────
 echo ""
-echo -e "${BLUE}[3/6] 检查 CJS 兼容性（禁止 import.meta / fileURLToPath / globalThis.__dirname）...${NC}"
+echo -e "${BLUE}[3/6] 检查 CJS 兼容性（禁止无 guard 的 import.meta / globalThis.__dirname）...${NC}"
 
-# 允许的 import.meta 用法：有 __dirname 兼容层或 getAppVersion/getPluginHostDir 的注释说明
-# plugin-host.ts 和 plugin-version-checker.ts 有专门的 __dirname 兼容层，予以排除
-# [HISTORICAL] 2026-08-05：排除 __tests__ 目录——测试文件不走 tsup CJS bundle（entry 只含 index.ts + bootstrap），
-# vitest 在 ESM 环境直接跑源码，import.meta 有效；此前误扫 plugin-esm-loader.test.ts（fixture 路径定位用 import.meta）导致误报。
-IMPORTS_META=$(grep -rn "import\.meta" "$RUNTIME_DIR/src" --include="*.ts" --exclude-dir=__tests__ 2>/dev/null | grep -v "plugin-host.ts\|plugin-version-checker.ts" || true)
-
-if [ -n "$IMPORTS_META" ]; then
-    echo -e "${RED}[ERROR] runtime 源码使用了 import.meta，CJS bundle 会变成 undefined：${NC}"
-    echo "$IMPORTS_META" | sed 's/^/  /'
-    echo -e "${YELLOW}[FIX] 使用 __dirname 或 process.cwd() 代替 import.meta.url${NC}"
+# 扫描根 = runtime src + tsup noExternal 所列 workspace 包 src（C-build-01 前置化，
+# dev-0.11.8 残余 S-12：workspace 包内联进 bundle 后其源码形态同样是 CJS 失效面）。
+# 判定/豁免/guard 语义的单一权威 = .githooks/check_runtime_meta_url.py——本步骤曾经的
+# 三段 grep 已收编进该脚本：任意 import.meta 属性访问（规则 A，强度不降）、
+# fileURLToPath(import.meta（规则 A 子集）、globalThis.__dirname（规则 B）；且 grep
+# 不剥注释，扩展扫描根后对 workspace 包 JSDoc 内的 import.meta 字样会误报。
+# [HISTORICAL] 2026-08-05：排除 __tests__ 目录——测试文件不走 tsup CJS bundle（entry 只含
+# index.ts + bootstrap），vitest 在 ESM 环境直接跑源码，import.meta 有效（收编后由脚本内
+# 同款排除承载）。[HISTORICAL] 2026-08-17：fileURLToPath 全量匹配误报收窄（security slice
+# W3）与 [D8b] globalThis.__dirname 禁令的语义均由脚本规则 A/B 承载。
+if ! python3 "$PROJECT_ROOT/.githooks/check_runtime_meta_url.py"; then
+    echo -e "${YELLOW}[FIX] 路径解析用 typeof __dirname !== 'undefined' ? __dirname : undefined guard（参照 plugin-host.ts）；双形态 guard 实现登记脚本 allowlist（参照 d8-compat.ts）${NC}"
     exit 1
 fi
 
-# [HISTORICAL] 2026-08-17：检查收窄到 fileURLToPath(import.meta...) 危险模式——对普通
-# 字符串参数的调用（如 plugin-sandbox.ts 转换插件传入的 file:// URL）在 CJS bundle 下
-# require('node:url') 正常可用，与 import.meta 无关，原全量匹配属误报（security slice W3 实证）。
-FILE_URL_USAGE=$(grep -rn "fileURLToPath(import\.meta" "$RUNTIME_DIR/src" --include="*.ts" --exclude-dir=__tests__ 2>/dev/null | grep -v "plugin-host.ts" || true)
-if [ -n "$FILE_URL_USAGE" ]; then
-    echo -e "${RED}[ERROR] runtime 源码使用了 fileURLToPath（CJS 中需要 import.meta.url）：${NC}"
-    echo "$FILE_URL_USAGE" | sed 's/^/  /'
-    echo -e "${YELLOW}[FIX] 使用 __dirname 兼容层或 process.cwd() 代替${NC}"
-    exit 1
-fi
-
-# [D8b] globalThis.__dirname 禁令（AGENTS.md #12）：CJS 中 __dirname 是模块作用域变量，
-# 不在 globalThis 上——globalThis.__dirname 恒为 undefined，路径解析静默指向错误位置。
-# 合规形态：typeof __dirname !== 'undefined' ? __dirname : undefined（plugin-host.ts 范本）。
-GLOBAL_DIRNAME_USAGE=$(grep -rn "globalThis\.__dirname" "$RUNTIME_DIR/src" --include="*.ts" --exclude-dir=__tests__ 2>/dev/null || true)
-
-if [ -n "$GLOBAL_DIRNAME_USAGE" ]; then
-    echo -e "${RED}[ERROR] runtime 源码使用了 globalThis.__dirname（CJS bundle 中恒为 undefined）：${NC}"
-    echo "$GLOBAL_DIRNAME_USAGE" | sed 's/^/  /'
-    echo -e "${YELLOW}[FIX] 使用模块作用域 __dirname（typeof __dirname !== 'undefined' 兼容层），见 plugin-host.ts resolvePluginHostDir${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}[OK] 无 import.meta / fileURLToPath / globalThis.__dirname 引用${NC}"
+echo -e "${GREEN}[OK] 打包面源码（runtime + noExternal workspace 包）无未加 guard 的 import.meta / globalThis.__dirname 引用${NC}"
 
 # ── 4. 产物自包含验证 ────────────────────────────────────────────────
 echo ""

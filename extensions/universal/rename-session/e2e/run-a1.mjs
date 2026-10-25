@@ -2,7 +2,7 @@
 /**
  * A1 场景：工具型首轮 —— 触发时机 + 输入内容证据链（契约 C1）。
  *
- * [L2.5 faux 翻轨，2026-09-15] LLM 演员改 faux 脚本（凭证无关、零 token）：
+ * [L2.5 faux 迁组，2026-09-15] LLM 演员改 faux 脚本（凭证无关、零 token）：
  * 队列 = bash toolCall（列 ts 文件，触发多 iteration）→ 最终 stop 文本（结论文案，
  * 刻意不含 .ts 原始行形态——④ 负向断言的特征行前提）→ rename 标题文本。
  * 断言范围全在扩展捕获的请求日志/时序构造（非模型智能），全部保留不动。
@@ -165,7 +165,7 @@ function assertStreamOrder(timeline, llmReq) {
 function assertToolUseSkips(logEntries, llmReq, log) {
 	// firstPrompt skip: mode=first-stop 是 first-prompt handler 的模式分发日志
 	//（rename-session-three-modes 落地后出现），与本断言要抓的「round 中间 iteration
-	// 的 stopReason skip」不同源——排除后过滤（faux 翻轨首跑暴露：真实轨下该日志
+	// 的 stopReason skip」不同源——排除后过滤（faux 迁组首跑暴露：真实层下该日志
 	// 同样早于 LLM request，原断言对存量代码已假红）。
 	const skipBefore = logEntries.filter(
 		(e) => e.message.includes("skip: ") && !e.message.includes("firstPrompt skip:") && e.t < llmReq.t,

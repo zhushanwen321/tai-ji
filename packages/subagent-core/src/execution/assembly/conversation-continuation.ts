@@ -21,7 +21,10 @@
 // 通知门（notifyGateAllowsDelivery）双闸消费：成功分支 route 前 + 失败分支独立
 // 载荷发出前（B#19 投递门照迁移），与 onRunSettled 的 status 终态侧正交双闸。
 
-import type { AgentOutcome, ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
+import type {
+  AgentOutcome,
+  ResumeAnchor,
+} from "@zhushanwen/subagent-engine-sdk";
 
 import { toErrorMessage } from "../../core/error-message.ts";
 import { getLogger } from "../../core/logger.ts";
@@ -47,6 +50,9 @@ import { isAnchorResolvable, transcriptAnchorOf } from "./cold-lookup.ts";
 // [U5 / §3.2.5] worktree 续聊重建 outcome（三失败形态判别联合）。
 import type { WorktreeRebuildOutcome } from "../worktree/worktree-manager.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
+// settle 站点事实载荷单点（收尾边沿六字段条件收集——onRunSettled 分流与两 settle
+// 分支共用；usage 经 roundUsageSnapshot 适配轮收条词形）。
+import { settlementFactsOf, type SettlementFacts } from "../domain/record-model.ts";
 
 const logger = getLogger("subagents");
 
@@ -62,11 +68,6 @@ function voidRoundFinalChain(promise: Promise<void>, what: string): void {
     bestEffort(err, `${what} (round-final chain)`, "error");
   });
 }
-
-// [T2-③/LC-1] 失败恢复指引尾段：定义在 notify/notifier.ts（notifier 与本文件
-// 互相消费——尾段放 notifier 侧保持依赖方向单一：本文件已 import notifier）。
-import { FAILURE_RECOVERY_TAIL } from "../notify/notifier.ts";
-export { FAILURE_RECOVERY_TAIL };
 
 /** [U4 / §3.2.3] reopen 降级首轮的历史摘要 prompt（模板单点，单测锁定 §3.2.3 摘要
  *  来源契约：binding 快照域 task/agent/round/totalTokens/turns + 上一轮 result）。
@@ -355,7 +356,13 @@ export class ConversationContinuation {
       return;
     }
     if (outcome.error !== undefined) {
-      voidRoundFinalChain(this.settleRoundFailed(outcome.error), "settleRoundFailed (onRunSettled)");
+      // [subagent-observability §3.3.3] 收尾边沿事实随分流下传（settlementFactsOf 六字段
+      // → 轮收条 rec.lastRound）——判定分类、「正常收尾」派生判据、接管三态、usage 快照
+      // 与观察性事实不因 chat 域载体丢失。
+      voidRoundFinalChain(
+        this.settleRoundFailed(outcome.error, settlementFactsOf(outcome)),
+        "settleRoundFailed (onRunSettled)",
+      );
       return;
     }
     voidRoundFinalChain(this.settleRoundSuccess(outcome), "settleRoundSuccess (onRunSettled)");
@@ -698,7 +705,15 @@ export class ConversationContinuation {
    *  → closeAfterRound 归档消费（[U5] 顺序约束：通知送达后才归档）。 */
   private async settleRoundSuccess(outcome: AgentOutcome): Promise<void> {
     const record = this.record;
-    await this.host.finalizeRoundOutcome(record, { kind: "success", content: outcome.content });
+    await this.host.finalizeRoundOutcome(record, {
+      kind: "success",
+      content: outcome.content,
+      // [§3.3.3/§3.3.1 P6] 收尾边沿事实（停因原值/重试计数/接管三态/usage 快照/
+      // 观察性事实）随轮收条落盘——「正常收尾」派生判据的事实输入；被接管轮的
+      // markRoundIdle handled 分支（stopReason 不写 + 结清 no_result + 通知接管
+      // 分支）由此可达。
+      ...settlementFactsOf(outcome),
+    });
     // [u7a 生产补挂] 轮终簿记完成 = 「正在执行 → 保活」翻转边界（与旧 idle 相位帧
     //（H1 U6 已退役）同一时点语义：成功轮收敛进 idle 稳态，活句柄交 idle timer 保活）
     // ——arm 后推最新在途计数（D5 双谓词：保活不计在途）。失败轮不 arm（旧 idle
@@ -730,28 +745,39 @@ export class ConversationContinuation {
    * ②放弃轮标记命中——cancel 中断轮防双发；检查是入口一次性判定，覆盖不了簿记
    * await 链内的中途归档窗）。
    */
-  private async settleRoundFailed(reason: string): Promise<void> {
+  private async settleRoundFailed(
+    reason: string,
+    facts?: SettlementFacts,
+  ): Promise<void> {
     const record = this.record;
-    await this.host.finalizeRoundOutcome(record, { kind: "failed", reason });
+    await this.host.finalizeRoundOutcome(record, {
+      kind: "failed",
+      reason,
+      ...(facts ?? {}),
+    });
     if (!notifyGateAllowsDelivery(record)) {
       this.drain();
       return;
     }
-    // dedup key = id:epoch:round（notifier notifyId 构造段口径；epoch=0 恒旧格式
-    // record:round）：round 已随簿记 +1，失败轮通知与上一轮成功通知天然分离（60s 窗不吞）。
-    // [collect 退役] 原 sync 成员失败入批分流（isCollectMember → routeRecord）随批
-    // 机制删除——失败统一单发（独立载荷 + 恢复指引，可达性 [T2-③/LC-1]）。
+    // [subagent-observability §3.3.7①] 失败轮应答 = 轮应答五分支通道：载荷带
+    // status:"running" + lastRound 事实字段（failure/engineStopReason 已随轮终簿记
+    // 落盘）→ buildRoundReplyContent 分支③按失败分类点拼 + 恢复指引构造正文。
+    // 原载荷 status:"closed" 使五分支判定在本路径结构性不可达（旧式 error 文案）；
+    // 仍走直投通道不经 route(record)——其正文读 record.result = 前值，直复用会以
+    // 旧正文冒充失败通知。dedup key = id:epoch:round（与成功轮应答天然分离）。
+    // error 字段 = 失败摘要原文（与轮终簿记 record-store-rounds 的 reason 落盘纪律
+    // 一致，不嵌恢复指引——五分支正文尾部是恢复指引的唯一承载点，error 再嵌即成
+    // 双段指引且措辞分叉）。
     const notify: BgNotifyRecord = {
       id: record.id,
-      // status:"closed" + outcome:"failed" 载荷 = buildLlmContent 的失败文案形态
-      // `Subagent "agent" (id) failed: <error>`——载荷只是通知文案载体，record 实态
-      // 保持可续聊 [two-state-convergence U4/D3]（容器未被销毁，轮终已翻 idle 展示等续聊）。
-      status: "closed",
-      closedReason: "gc",
-      outcome: "failed",
+      status: "running",
       agent: record.agent,
       ...(record.model !== undefined ? { model: record.model } : {}),
-      error: `round did not complete: ${reason}. ${FAILURE_RECOVERY_TAIL}`,
+      error: `round did not complete: ${reason}`,
+      ...(record.lastRound?.failure !== undefined ? { lastRoundFailure: record.lastRound.failure } : {}),
+      ...(record.lastRound?.engineStopReason !== undefined
+        ? { lastRoundStopReason: record.lastRound.engineStopReason }
+        : {}),
       startedAt: record.startedAt,
       endedAt: Date.now(),
       round: record.round,

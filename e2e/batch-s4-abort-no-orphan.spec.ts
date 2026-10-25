@@ -84,7 +84,7 @@ const MEMBER_SLEEP_S = 180
 const MAIN_MARKER = 'BATCH-S4-MAIN-5320'
 
 const DISPATCH_PROMPT =
-  `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagents\` tool ` +
+  `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagent_batch\` tool ` +
   `(do NOT do the tasks yourself). Both tasks are identical long-running tasks: ` +
   `"First run \\\`sleep ${MEMBER_SLEEP_S}\\\` using the bash tool, wait for it to finish, then reply with only the word MEMBER-DONE." ` +
   `After the tool call returns, reply with only the word DISPATCHED. [${MAIN_MARKER}]`
@@ -102,8 +102,8 @@ const MAIN_TURN_TIMEOUT_MS = 180_000
 const JOURNAL_TIMEOUT_MS = 300_000
 const ABORT_SETTLE_TIMEOUT_MS = 120_000
 const NOTIFY_TIMEOUT_MS = 120_000
-/** ack 关闭等待窗：ack 由回执扫描（agent_settled 边沿）驱动——通知唤醒 turn 结算
- *  后才落盘，送达后立即断言必为 0；窗口 = 一个真实 LLM turn（r3 实测教训）。 */
+/** ack 终局等待窗：ack 由 message_end 边沿驱动（注入落 transcript 即确认送达凭据并
+ *  落 ack 终局 entry），窗口只吸收 JSONL flush 延迟与边沿处理的时序差。 */
 const ACK_TIMEOUT_MS = 180_000
 const ORPHAN_GRACE_MS = 150_000
 const JSONL_FLUSH_TIMEOUT_MS = 20_000
@@ -215,12 +215,12 @@ async function awaitS4SettlementAndNotifyBase(
   }
   expect(notifyArrived, `abort 终局通知应照达（${notifyId}）——通知链不因 abort 丢失`).toBe(true)
 
-  // ── 三通道口径（BATCH-06）：送达恰 1 + ledger/ack 各恰 1 ──
-  // 通道与 entry type 均不同（与 s1 同款口径，详见 s1 注释）：①送达 = type
+  // ── 三通道口径（BATCH-06）：送达恰 1 + 投递日志 outbox/ack 各恰 1 ──
+  // 通道与 entry type 均不同（与 s1 同款口径，详见共享实现注释）：①送达 = type
   // custom_message × customType "workflow-result"（u9 外部通道设计，键在顶层
-  // details.notifyId；权威消费方 collectDeliveredNotifyIds）②ledger 条目写入 = type
-  // custom × "subagent-bg-notify-ledger" ③ack 关闭 = type custom ×
-  // "subagent-bg-notify-ack"。「键出现次数」结构性 = 3 ≠ 投递次数。
+  // details.notifyId；权威消费方 collectDeliveredNotifyIds）②投递日志 outbox 条目 = type
+  // custom × "delivery-port-outbox"（v2，键在 data.id）③ack 终局 = type custom ×
+  // "delivery-port-ack"（v2，键在 data.id）。「键出现次数」结构性 = 3 ≠ 投递次数。
 
   return sessionFile
 }
@@ -328,7 +328,7 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
         consoleErrors: consoleCap.errors,
       })
     }
-    expect(dispatchDone, `派发 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagents 工具？）`).toBe(true)
+    expect(dispatchDone, `派发 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagent_batch 工具？）`).toBe(true)
     sub.events.length = 0
 
     // ── 在途证据（journal + agent-started + 双进程正面对照；拆出 awaitS4InFlightEvidence）──

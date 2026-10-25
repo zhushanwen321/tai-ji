@@ -1,7 +1,7 @@
 /**
  * subagent control server 协议与治理编排单测。
  *
- * 分层（判据三档，docs/todo/test-single-layer-cleanup.md）：
+ * 分层（判据三档，docs/TEST-STRATEGY.md「新写测试判据」节）：
  * - 默认组（本文件主体）：引擎侧换成进程内桩 fake-engine.ts（spawn 注入），控制面全部
  *   经 await 帧/事件收尾——第 ② 档「异步但有确定性完成信号」，与负载无关。覆盖协议状态机
  *   （hello/engine_open 失败面/幂等/通道上限）、帧双向与 UTF-8 跨 chunk、帧超限归因、
@@ -23,7 +23,7 @@ import {
   SUBAGENT_CONTROL_FRAME_KINDS,
   SUBAGENT_CONTROL_CLOSED_REASONS,
 } from '@zhushanwen/subagent-engine-sdk'
-import { isPidAlive } from '../../../utils/protocol-background-task.js'
+import { isPidAlive, getProcessStartTimeSec } from '../../../utils/protocol-background-task.js'
 import { logger } from '../../../infra/logger.js'
 import {
   getControlEnginesDir,
@@ -90,6 +90,13 @@ function killGroupRecorder(): { killed: number[]; killGroup: (pid: number | null
       fakeEngineByPid(pid)?.exitWith(null, 'SIGKILL')
     },
   }
+}
+
+/** 治理收尾断言收敛点：等 engine_closed（reason = killed_by_control）+ 组杀已落到 recorder。 */
+async function expectKilledByControlClose(agent: TestAgent, pid: number, killed: number[]): Promise<void> {
+  const closed = await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed, 'engine_closed')
+  expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl)
+  expect(killed).toContain(pid)
 }
 
 /** vi.spyOn(logger, ...) 的最小消费面（mock.calls）。 */
@@ -186,6 +193,10 @@ describe('subagent-control server：协议与治理编排（引擎进程内桩�
     const record = JSON.parse(await readFile(pidFile, 'utf-8')) as Record<string, unknown>
     expect(record.pid).toBe(pid)
     expect(record.runtimePid).toBe(process.pid)
+    // 条目 65：owner start time 登记（ps 可得平台与实际 start time 一致；Windows/ps 取
+    // 不到时该键省略 = 旧格式形态，sweep 侧保守跳过——由 sweep.test.ts 覆盖）
+    const ownStartSec = getProcessStartTimeSec(process.pid)
+    if (ownStartSec !== undefined) expect(record.runtimePidStartSec).toBe(ownStartSec)
     expect(record.instanceId).toBe(String(process.pid))
     expect(record.hostKind).toBe('runtime-sidecar')
     expect(record.engineId).toBe('fake-engine')
@@ -250,10 +261,8 @@ describe('subagent-control server：协议与治理编排（引擎进程内桩�
     })
     const { channelId, pid } = expectOpened(await agent.open(launchSpec({ args: ['--hang'] }), 1))
     agent.send({ v: 1, kind: SUBAGENT_CONTROL_FRAME_KINDS.engineClose, channelId })
-    const closed = await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed, 'engine_closed')
-    expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl)
     // 组杀判定（真实组杀效果由门控用例覆盖）：grace 超时必杀该通道引擎组
-    expect(killed).toContain(pid)
+    await expectKilledByControlClose(agent, pid, killed)
   })
 
   it('engine_open 失败面：相对路径 invalid_launch / 根会话不一致 session / 重复 id duplicate', async () => {
@@ -301,9 +310,7 @@ describe('subagent-control server：协议与治理编排（引擎进程内桩�
     // m-rt-7：recovery 必须是可执行文案（SDK 词表），不能是错误码复读
     expect(String(error.recovery)).toContain('reduce concurrent subagent fan-out')
     expect(String(error.recovery)).not.toBe('engine_backpressure_overflow')
-    const closed = await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed, 'engine_closed')
-    expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl)
-    expect(killed).toContain(pid)
+    await expectKilledByControlClose(agent, pid, killed)
   })
 
   it('下行帧超限：maxFrameBytes 小值 → error frame_too_large + 关通道（连接保持）', async () => {
@@ -320,9 +327,7 @@ describe('subagent-control server：协议与治理编排（引擎进程内桩�
     )
     // m-rt-7：下行超限走 handleOversize，recovery 已是可执行指引（非错误码）
     expect(String(oversizeError.recovery)).toContain('Split the payload')
-    const closed = await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed, 'engine_closed')
-    expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl)
-    expect(killed).toContain(pid)
+    await expectKilledByControlClose(agent, pid, killed)
     // 通道已关：后续该通道帧回 unknown_channel error（连接未被销毁——hello 后畸形/未知通道不升连）
     agent.sendFrame(channelId, 'after-close')
     await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.error && f.code === 'unknown_channel', 'unknown_channel error')
@@ -757,7 +762,7 @@ describe('subagent-control server：协议与治理编排（引擎进程内桩�
 /**
  * 进程治理（真进程组）——判据第 ③ 档「代码 + OS 组合行为」：组杀是否真收割孤儿、
  * kill-on-disconnect 真 fan-out、Windows 树杀兜底。没有完成信号可等，只能观测窗口，
- * 故移出默认单测轨：本地默认跳过，CI 或按改动范围触发时设 TAIJI_TEST_INTEGRATION=1 真跑
+ * 故移出默认单测层：本地默认跳过，CI 或按改动范围触发时设 TAIJI_TEST_INTEGRATION=1 真跑
  * （helper = test-guard/integration-gate.ts；登记见 docs/testing/e2e-map.json）。
  *
  * 真进程组用例 POSIX 断言 skipIf(win32)。

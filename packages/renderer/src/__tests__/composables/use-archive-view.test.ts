@@ -92,6 +92,21 @@ beforeEach(() => {
   apiMocks.list.mockResolvedValue([])
 })
 
+/**
+ * 主区摘要视图布景（openSummary 呈现该条目）+ purge 成功回复与列表刷新 mock 置备，
+ * 返回条目与导航 store 供删除编排与离开断言（单条 purgeArchiveEntry / 批量
+ * purgeArchivesBatch 的 selected 联动用例同布景）。
+ */
+function stageSummaryViewForPurge(purgeReply: Record<string, unknown>) {
+  const archive = makeArchive()
+  useArchiveView().openSummary(archive)
+  const navigation = useNavigationStore()
+  expect(navigation.current.view).toBe('archive')
+  apiMocks.purgeArchive.mockResolvedValue(purgeReply)
+  apiMocks.listArchives.mockResolvedValue([])
+  return { archive, navigation }
+}
+
 describe('openSummary / refreshArchives（D11 摘要视图入口 + D10 列表拉取）', () => {
   it('openSummary：登记 selected + navigation.push({view:"archive"})', () => {
     const { openSummary } = useArchiveView()
@@ -123,6 +138,33 @@ describe('openSummary / refreshArchives（D11 摘要视图入口 + D10 列表拉
     await refreshArchives()
 
     expect(useArchiveStore().listError).toBe('net down')
+  })
+
+  it('refreshArchives 在途期间再触发：去重并发 + 完成后自动补拉一轮（trailing 收敛到最新快照）', async () => {
+    const { refreshArchives } = useArchiveView()
+    // 两轮拉取均受控挂起（慢 RPC 形态），分别返回新旧快照——补拉轮返回新触发时点的数据
+    let resolveFirst!: (v: ArchiveSummary[]) => void
+    let resolveSecond!: (v: ArchiveSummary[]) => void
+    apiMocks.listArchives.mockImplementationOnce(
+      () => new Promise<ArchiveSummary[]>((res) => { resolveFirst = res }),
+    )
+    apiMocks.listArchives.mockImplementationOnce(
+      () => new Promise<ArchiveSummary[]>((res) => { resolveSecond = res }),
+    )
+
+    const first = refreshArchives()
+    const second = refreshArchives() // 在途期间新触发（帧密集到达形态）：复用在途 promise
+    expect(apiMocks.listArchives).toHaveBeenCalledTimes(1) // 不并发、不丢弃
+
+    resolveFirst([makeArchive()])
+    await Promise.all([first, second])
+    // 首轮结果落地（触发者复用同一 promise）；补拉轮已由工具自动发起（挂起中）
+    expect(useArchiveStore().archives.map((a) => a.sessionId)).toEqual(['arc-1'])
+    expect(apiMocks.listArchives).toHaveBeenCalledTimes(2)
+
+    resolveSecond([makeArchive('arc-2')])
+    await vi.waitFor(() => expect(useArchiveStore().archives.map((a) => a.sessionId)).toEqual(['arc-2']))
+    expect(useArchiveStore().loading).toBe(false)
   })
 })
 
@@ -297,14 +339,11 @@ describe('purgeArchiveEntry（D5 步骤 7：keep-all 保守分支显式上报）
   })
 
   it('keep-all 分支（keptSubagentsDir 携带）：warning toast 含残留目录指引；主区呈现该条目时同步离开', async () => {
-    const { purgeArchiveEntry, openSummary } = useArchiveView()
-    const archive = makeArchive()
-    openSummary(archive)
-    const navigation = useNavigationStore()
-    expect(navigation.current.view).toBe('archive')
-
-    apiMocks.purgeArchive.mockResolvedValue({ sessionId: 'arc-1', keptSubagentsDir: '/data/ext-sessions/arc-1/subagents' })
-    apiMocks.listArchives.mockResolvedValue([])
+    const { purgeArchiveEntry } = useArchiveView()
+    const { archive, navigation } = stageSummaryViewForPurge({
+      sessionId: 'arc-1',
+      keptSubagentsDir: '/data/ext-sessions/arc-1/subagents',
+    })
 
     await purgeArchiveEntry(archive)
 
@@ -323,5 +362,135 @@ describe('purgeArchiveEntry（D5 步骤 7：keep-all 保守分支显式上报）
 
     expect(toastMocks.error).toHaveBeenCalled()
     expect(apiMocks.listArchives).not.toHaveBeenCalled()
+  })
+})
+
+describe('purgeArchivesBatch（筛选行批量彻底删除：串行循环 + 结果分流）', () => {
+  it('全部成功：串行逐条 purgeArchive + info toast + 列表刷新 + batchPurging 全程置位后复位', async () => {
+    const { purgeArchivesBatch } = useArchiveView()
+    const store = useArchiveStore()
+    const entries = [makeArchive(), makeArchive('arc-2'), makeArchive('arc-3')]
+    apiMocks.purgeArchive.mockResolvedValue({ sessionId: 'x' })
+    apiMocks.listArchives.mockResolvedValue([])
+
+    const promise = purgeArchivesBatch(entries)
+    expect(store.batchPurging).toBe(true) // 在途置位（钮禁用的数据源）
+    await promise
+
+    expect(apiMocks.purgeArchive).toHaveBeenCalledTimes(3)
+    expect(store.batchPurging).toBe(false)
+    expect(toastMocks.info).toHaveBeenCalledWith('已彻底删除 3 个归档会话')
+    expect(toastMocks.warning).not.toHaveBeenCalled()
+    expect(apiMocks.listArchives).toHaveBeenCalled() // 结束统一刷新一次
+  })
+
+  it('部分失败：单条失败不中断整批 + warning toast 汇总成功/失败数并附首个失败原因文案', async () => {
+    const { purgeArchivesBatch } = useArchiveView()
+    apiMocks.purgeArchive
+      .mockResolvedValueOnce({ sessionId: 'arc-1' })
+      .mockRejectedValueOnce(new Error('会话目录被占用'))
+      .mockResolvedValueOnce({ sessionId: 'arc-3' })
+
+    await purgeArchivesBatch([makeArchive(), makeArchive('arc-2'), makeArchive('arc-3')])
+
+    expect(apiMocks.purgeArchive).toHaveBeenCalledTimes(3)
+    // 未知码回退操作级通用模板（archive.entry.purgeFailed）——原因文案随汇总 toast 附带
+    expect(toastMocks.warning).toHaveBeenCalledWith(
+      '已彻底删除 2 个、失败 1 个；彻底删除失败：会话目录被占用；列表已刷新，可重试剩余项',
+    )
+    expect(toastMocks.info).not.toHaveBeenCalled()
+  })
+
+  it('archive_not_found 幂等达成：计成功口径不入 failed（不触发「可重试」误导指引），warning 只汇总真实失败并附首因', async () => {
+    const { purgeArchivesBatch } = useArchiveView()
+    // 第 2 条列表过期（并发单条删除/陈旧快照形态）：code 信封挂 Error.code，archiveErrorKey 命中映射
+    apiMocks.purgeArchive
+      .mockResolvedValueOnce({ sessionId: 'arc-1' })
+      .mockRejectedValueOnce(Object.assign(new Error('归档记录不存在'), { code: 'archive_not_found' }))
+      .mockRejectedValueOnce(Object.assign(new Error('disk io hung'), { code: 'archive_io_error' }))
+
+    await purgeArchivesBatch([makeArchive(), makeArchive('arc-2'), makeArchive('arc-3')])
+
+    expect(apiMocks.purgeArchive).toHaveBeenCalledTimes(3)
+    // ok=2（真实成功 + 幂等达成）、failed=1（仅 archive_io_error）；首因取 ioError 映射文案
+    expect(toastMocks.warning).toHaveBeenCalledWith(
+      '已彻底删除 2 个、失败 1 个；操作失败：disk io hung（archive_io_error）。session 状态以磁盘为准，启动自愈会归位，重试或检查磁盘；列表已刷新，可重试剩余项',
+    )
+    expect(toastMocks.info).not.toHaveBeenCalled()
+  })
+
+  it('全部 archive_not_found（列表过期形态）：幂等达成全计成功口径，info toast 不出 warning', async () => {
+    const { purgeArchivesBatch } = useArchiveView()
+    apiMocks.purgeArchive.mockRejectedValue(
+      Object.assign(new Error('归档记录不存在'), { code: 'archive_not_found' }),
+    )
+    apiMocks.listArchives.mockResolvedValue([])
+
+    await purgeArchivesBatch([makeArchive(), makeArchive('arc-2')])
+
+    expect(toastMocks.info).toHaveBeenCalledWith('已彻底删除 2 个归档会话')
+    expect(toastMocks.warning).not.toHaveBeenCalled()
+  })
+
+  it('keep-all 保守分支（keptSubagentsDir 携带）：warning toast 出声（与单条 purge 同语义）', async () => {
+    const { purgeArchivesBatch } = useArchiveView()
+    apiMocks.purgeArchive
+      .mockResolvedValueOnce({ sessionId: 'arc-1', keptSubagentsDir: '/data/ext-sessions/arc-1/subagents' })
+      .mockResolvedValueOnce({ sessionId: 'arc-2' })
+
+    await purgeArchivesBatch([makeArchive(), makeArchive('arc-2')])
+
+    expect(toastMocks.warning).toHaveBeenCalledWith(
+      '已彻底删除 2 个归档会话；1 条的子代理记录因数据不可读已保守保留',
+    )
+  })
+
+  it('防重入：batchPurging 在途期间新触发直接忽略（零 RPC）', async () => {
+    const { purgeArchivesBatch } = useArchiveView()
+    const store = useArchiveStore()
+    let release!: () => void
+    apiMocks.purgeArchive.mockImplementationOnce(
+      () => new Promise<{ sessionId: string }>((res) => { release = () => res({ sessionId: 'arc-1' }) }),
+    )
+    apiMocks.listArchives.mockResolvedValue([])
+
+    const first = purgeArchivesBatch([makeArchive()])
+    await purgeArchivesBatch([makeArchive('arc-2')]) // 在途期间再触发：直接返回
+    expect(apiMocks.purgeArchive).toHaveBeenCalledTimes(1)
+
+    release()
+    await first
+    expect(store.batchPurging).toBe(false)
+  })
+
+  it('主区 selected 落在被删集合：清空选中 + 导航回 chat（对齐单条 purge 编排）', async () => {
+    const { purgeArchivesBatch } = useArchiveView()
+    const { archive, navigation } = stageSummaryViewForPurge({ sessionId: 'arc-1' })
+
+    await purgeArchivesBatch([archive, makeArchive('arc-2')])
+
+    expect(useArchiveStore().selected).toBeNull()
+    expect(navigation.current.view).toBe('chat')
+  })
+
+  it('主区 selected 条目删除失败：选中保留、不导航回 chat（对齐单条失败分支），失败汇总 toast 照常', async () => {
+    const { purgeArchivesBatch, openSummary } = useArchiveView()
+    const archive = makeArchive()
+    openSummary(archive)
+    const navigation = useNavigationStore()
+
+    apiMocks.purgeArchive
+      .mockRejectedValueOnce(new Error('会话目录被占用'))
+      .mockResolvedValueOnce({ sessionId: 'arc-2' })
+    // 刷新后失败条目仍在列表（删除失败 = 磁盘未动，列表即事实源）——store 对账不清选中
+    apiMocks.listArchives.mockResolvedValue([archive])
+
+    await purgeArchivesBatch([archive, makeArchive('arc-2')])
+
+    expect(useArchiveStore().selected?.sessionId).toBe('arc-1')
+    expect(navigation.current.view).toBe('archive')
+    expect(toastMocks.warning).toHaveBeenCalledWith(
+      '已彻底删除 1 个、失败 1 个；彻底删除失败：会话目录被占用；列表已刷新，可重试剩余项',
+    )
   })
 })

@@ -19,6 +19,7 @@ import {
   readSubagentSelectionFor,
   setSubagentView,
   clearSubagentView,
+  clearSubagentViewFor,
   useSubagentSelection,
   _resetSubagentSelectionForTest,
 } from '../selection/subagent'
@@ -91,5 +92,35 @@ describe('readSubagentSelectionFor（复合谓词跨域读，updateFor 语义）
     setSubagentView('subagent:A:s1')
     clearSubagentView()
     expect(readSubagentSelectionFor('A', (s) => s.selectedSubagentId)).toBe(null)
+  })
+})
+
+describe('clearSubagentViewFor（定向清除，N-1——显式 sid 分区，不依赖 current 绑定）', () => {
+  it('清指定 sid 分区且对当前绑定视图可见；其他分区不受影响', () => {
+    focusSession('A')
+    setSubagentView('subagent:A:s1')
+    focusSession('B')
+    setSubagentView('subagent:B:s2')
+
+    clearSubagentViewFor('A')
+
+    // 跨域读口径：A 清空、B 保留
+    expect(readSubagentSelectionFor('A', (s) => s.selectedSubagentId)).toBe(null)
+    expect(readSubagentSelectionFor('B', (s) => s.selectedSubagentId)).toBe('subagent:B:s2')
+    // 视图口径：切回 A 后 useSubagentSelection 见到清空结果（定向清除真实生效，
+    // 而非只写了无人消费的分区）
+    focusSession('A')
+    expect(useSubagentSelection().selectedSubagentId.value).toBe(null)
+  })
+
+  it('当前绑定不在被清 sid 时定向清除不动 current 分区（键不一致曾是 N-1 根源，反向锚定）', () => {
+    focusSession('A')
+    setSubagentView('subagent:A:s1')
+    focusSession('B')
+    setSubagentView('subagent:B:s2')
+
+    // 清 B（= 当前绑定）之外的 A；current（B）分区保持
+    clearSubagentViewFor('A')
+    expect(useSubagentSelection().selectedSubagentId.value).toBe('subagent:B:s2')
   })
 })

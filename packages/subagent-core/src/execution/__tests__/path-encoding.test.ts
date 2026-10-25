@@ -68,7 +68,7 @@ describe("getSubagentSessionDir", () => {
   });
 
   it("rejects invalid sessionId (path traversal blocked)", () => {
-    // 同域校验（shared assertPiSessionId）：路径分隔符 / 冒号（btw vid）/ .. 一律拒绝
+    // 同域校验（shared assertPiSessionId）：路径分隔符 / 冒号（旧 btw vid 形态）/ .. 一律拒绝
     expect(() => getSubagentSessionDir("../escape", DATA_DIR)).toThrow();
     expect(() => getSubagentSessionDir("btw:sid", DATA_DIR)).toThrow();
     expect(() => getSubagentSessionDir("", DATA_DIR)).toThrow();

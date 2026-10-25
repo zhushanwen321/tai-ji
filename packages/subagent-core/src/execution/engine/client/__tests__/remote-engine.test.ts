@@ -32,6 +32,7 @@ import {
   setHostUiRequestEndpoint,
 } from "../../host/host-ui-endpoint.ts";
 import { configureCore, resetCoreForTests } from "../../../../core/host-services.ts";
+import { waitFor } from "./helpers/wait-for.ts";
 
 const FAKE_ENGINE = fileURLToPath(new URL("./__fixtures__/fake-engine.mjs", import.meta.url));
 
@@ -53,15 +54,10 @@ const FAKE_MATCHED_CAPS = {
   maxTurns: false,
 } as const;
 
-/** 轮询等待（真实 timers；引擎启动/信号传播是真实 IO，fake timers 会挂死自写轮询）。 */
-async function waitForTrue(predicate: () => boolean, timeoutMs = 8_000, stepMs = 25): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, stepMs));
-  }
-  throw new Error("waitForTrue: condition not met within timeout");
-}
+/** 轮询等待本文件用例量级 8s（引擎全链真 IO），经共享 waitFor 转发（真实 timers；
+ *  引擎启动/信号传播是真实 IO，fake timers 会挂死自写轮询）。 */
+const waitForTrue = (predicate: () => boolean, timeoutMs = 8_000, stepMs = 25): Promise<void> =>
+  waitFor(predicate, timeoutMs, stepMs);
 
 function waitForReady(client: EngineClient): Promise<void> {
   return waitForTrue(() => client.currentState === "ready");
@@ -299,13 +295,22 @@ describe("RemoteEngine run 帧映射", () => {
     await bare.cleanup();
   });
 
-  it("[B-U-1] ctx.sessionRootId → client.ensureConnected(根 id)（engine_open 归属键权威源贯通）", async () => {
+  it("[B-U-1] ctx.sessionRootId → client.ensureConnected({rootSessionId})（engine_open 归属键权威源贯通）+ [S-10] recordId = resume.recordId ?? taskId", async () => {
     const fixture = makeEngine();
     const spy = vi.spyOn(fixture.client, "ensureConnected");
     const { ctx } = makeCtx({ sessionRootId: "root-sess-connect" });
     await fixture.engine.run({ prompt: "p" }, ctx);
-    expect(spy).toHaveBeenCalledWith("root-sess-connect");
+    expect(spy).toHaveBeenCalledWith({ rootSessionId: "root-sess-connect", recordId: ctx.taskId });
     await fixture.cleanup();
+
+    // 续聊轮：record 锚沿用原 record（resume.recordId 优先于新 taskId）
+    const resumed = makeEngine();
+    const resumedSpy = vi.spyOn(resumed.client, "ensureConnected");
+    const { ctx: ctxResume } = makeCtx({ sessionRootId: "root-sess-connect" });
+    ctxResume.resume = { recordId: "rec-original" };
+    await resumed.engine.run({ prompt: "p2" }, ctxResume);
+    expect(resumedSpy).toHaveBeenCalledWith({ rootSessionId: "root-sess-connect", recordId: "rec-original" });
+    await resumed.cleanup();
   });
 
   it("[Option C] wire ctx.sessionDir = getSubagentSessionDir(env 同源推导)；ctx 显式注入优先", async () => {

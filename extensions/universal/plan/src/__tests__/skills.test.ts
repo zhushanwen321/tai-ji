@@ -1,12 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock dependencies before importing（形态照 command.test.ts）
-vi.mock("node:fs", () => ({
-  mkdirSync: vi.fn(),
-  readdirSync: vi.fn(() => []),
-  statSync: vi.fn(),
-  existsSync: vi.fn(() => false),
-}));
+// 共享 mock 布景（typebox / pi-ai / exec-skills / widget + node:fs 全桩）：
+// 首行 import 保证注册先于 ../command.js 加载
+import "./test-setup-mocks";
+import "./test-setup-fs-mock";
 
 vi.mock("../widget.js", () => ({
   updatePlanWidget: vi.fn(),
@@ -19,8 +16,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { parsePlanArgs, registerPlanCommand } from "../command.js";
 import { resolveSkills } from "../enter.js";
 import { createPlanCtx, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
-
-const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
+import { createEnterFamilyPi } from "./test-setup";
 
 /**
  * fake skill 命令条目（SlashCommandInfo 形态：source === 'skill' + sourceInfo.path）。
@@ -152,18 +148,14 @@ describe("E1 fail-fast via /plan handler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     let capturedHandler: (args: string, ctx: ExtensionContext) => Promise<void>;
-    pi = {
-      registerCommand: vi.fn((_name: string, def: { handler: (args: string, ctx: ExtensionContext) => Promise<void> }) => {
-        capturedHandler = def.handler;
-      }),
-      appendEntry: vi.fn(),
-      setActiveTools: vi.fn(),
-      // 快照式恢复（dmg-r1-2）：enter 收拢前记录进入前激活集（getActiveTools）
-      getActiveTools: vi.fn(() => ALL_TOOL_NAMES.filter((n) => n !== "plan")),
-      sendMessage: vi.fn(),
-      getCommands: vi.fn(() => SKILL_COMMANDS),
-      getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
-    } as unknown as ExtensionAPI;
+    pi = createEnterFamilyPi(
+      {
+        registerCommand: vi.fn((_name: string, def: { handler: (args: string, ctx: ExtensionContext) => Promise<void> }) => {
+          capturedHandler = def.handler;
+        }),
+      },
+      SKILL_COMMANDS,
+    );
     ctx = {
       cwd: "/tmp/test-project",
       sessionManager: {

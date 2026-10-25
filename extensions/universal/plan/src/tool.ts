@@ -522,7 +522,7 @@ function executeEnter(
 
 /**
  * select-template（D7）：三源合并视图解析 + content 携带胜者文件全文。
- * - 合并视图与注入段同源：两轨都以 ctx.cwd 为 projectRoot 调 listTemplates
+ * - 合并视图与注入段同源：两路都以 ctx.cwd 为 projectRoot 调 listTemplates
  *   （注入段经 PlanPromptInput.projectRoot 由命令层显式传入，不从 planFilePath
  *   逆推层级）——模型看到什么清单就能选中什么（含用户级/项目级投放）。
  * - 单次扫描复用（C1 去重）：清单查找与内容读取共用同一次扫描产物（胜者 path
@@ -1382,9 +1382,6 @@ export function registerPlanTool(
   pi.registerTool({
     name: "plan",
     label: "Plan Mode",
-    // deferred（tool-declaration-slimming D4）：不常驻声明，tool_search 命中即激活；
-    // 迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
-    exposure: "deferred",
     // 串行声明（D-B1-4）：全部 action 就地突变共享 PlanState，声明串行消除并行交错类
     //（A1 死锁机理的调度半边）。pi 声明粒度是工具级——同批任一 sequential 工具
     // 使整批工具顺序执行。pi 实装锚点（1.0.0 复核）：dist/core/extensions/types.d.ts

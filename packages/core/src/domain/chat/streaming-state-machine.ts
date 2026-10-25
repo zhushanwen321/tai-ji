@@ -149,15 +149,15 @@ interface SubagentChunkPartitionState {
 
 /** 工厂依赖注入接口：全部 refs + setter + helpers 由 store 装配，本模块不直连外部状态。
  *  [u5b] compactingSessions Set / setCompacting 退役——occupancy 派生视图（session.occupancy
- *  帧驱动）是 compacting membership 唯一来源，clearOccupancy 承接断连收尾。 */
+ *  帧驱动）是 compacting membership 唯一来源，clearOccupancy 承接断连收尾。
+ *  [chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] handingOffSessions Set 同型退役——handingOff membership
+ *  同归 occupancy 派生视图（第四维），断连收尾由 clearOccupancy 一并覆盖。 */
 export interface StreamingStateMachineDeps {
   messages: MessagesRef
   occupancies: { value: Map<string, SessionOccupancyState> }
-  handingOffSessions: { value: Set<string> }
   retryStates: { value: Map<string, unknown> }
   pendingSend: { value: Set<string> }
   clearOccupancy: (sessionId: string) => void
-  setHandingOff: (sessionId: string, value: boolean) => void
   /**
    * [B2 subagent-stream-chunk §4.3] subagent 流状态拉取执行器（core 不直接发 RPC，renderer
    * 层经 ChatStoreOptions.subagentStreamPull 注入——对齐 agentCallEvictionsOf 回调注入模式）。
@@ -173,7 +173,7 @@ export interface StreamingStateMachineDeps {
  * 由闭包持有），行为由 streaming-state-machine.test.ts + store.test.ts 双锁。
  */
 export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
-  const { messages, occupancies, handingOffSessions, retryStates, pendingSend, clearOccupancy, setHandingOff, subagentStreamPull } = deps
+  const { messages, occupancies, retryStates, pendingSend, clearOccupancy, subagentStreamPull } = deps
 
   /**
    * subagent streaming delta 吸收纯逻辑（W4，模块作用域）：
@@ -466,6 +466,17 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
   }
 
   /**
+   * [DC-8] 降级位推送写入口（session.subagentStreamDegraded 广播的消费侧）：runtime
+   * markDegraded 的一次性信号直写 per-(virtualId, recordId) degraded 位——与拉取响应
+   * （applySubagentStreamState 第 0 步）同一位，推送只是即时性补强，拉取快照仍是权威
+   * 来源（非降级快照会把位覆盖回 false）。幂等（位已真时 setPartitionDegraded 零副作用），
+   * 分区不存在时创建（只置位不动消息实体）。
+   */
+  function markSubagentStreamDegraded(virtualId: string, recordId: string): void {
+    setPartitionDegraded(getOrCreateChunkPartition(virtualId, recordId), true)
+  }
+
+  /**
    * 分区/record 级清除（生命周期挂点：record 删除 / 虚拟分区删除路径由 renderer 接线，
    * ADR-0049 分区范式）。recordId 缺省删整个 virtualId 名下全部分区。
    */
@@ -514,12 +525,14 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    * finalizeAllStreaming 的候选 session 集合构造（W3 / W-S3，模块作用域）。
    *
    * 遍历所有可能持有瞬态态的 session 的 key 并集：messages.keys() ∪ occupancy 分区中
-   * compacting 的 sid ∪ handingOffSessions ∪ retryStates ∪ pendingSend。
-   * 不能只遍历 messages.keys()——compacting / retry / pendingSend 可能独立于消息
-   * 存在，仅遍历 messages 会漏掉这些 session。
+   * compacting / handingOff 的 sid ∪ retryStates ∪ pendingSend。
+   * 不能只遍历 messages.keys()——compacting / handingOff / retry / pendingSend 可能独立于
+   * 消息存在，仅遍历 messages 会漏掉这些 session。
    *
    * [u5b] compacting 候选来源从 compactingSessions Set 改为 occupancy 派生视图过滤（membership
    * 单一来源）。
+   * [chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] handingOff 候选同型改 occupancy 派生视图过滤（第四维；
+   * handingOffSessions Set 已退役）。
    *
    * [W3 / W-S3] pendingSend 并入：纯 pendingSend 态（用户已发起、message_start 空窗、无消息实体）
    * 不在 messages.keys() 内，断连时不会立即收尾，UI 卡「发送中」。
@@ -527,9 +540,8 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
   function collectFinalizeCandidates(): Set<string> {
     const candidateSids = new Set<string>(messages.value.keys())
     for (const [sid, occ] of occupancies.value) {
-      if (occ.compacting) candidateSids.add(sid)
+      if (occ.compacting || occ.handingOff) candidateSids.add(sid)
     }
-    for (const sid of handingOffSessions.value) candidateSids.add(sid)
     for (const sid of retryStates.value.keys()) candidateSids.add(sid)
     for (const sid of pendingSend.value) candidateSids.add(sid)
     return candidateSids
@@ -537,11 +549,13 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
 
   /**
    * resetTransientStates 的 session 级独立瞬态清理（W3，模块作用域）。
-   * 清 occupancy 分区 / handingOff / retry（断连兜底：这些态在断连后无事件驱动清理）。
+   * 清 occupancy 分区 / retry（断连兜底：这些态在断连后无事件驱动清理）。
    * [u5a] queue 维度已随 queueStates 分区退役（分区删除，无清理对象）。
    *
    * [u5b] occupancy 分区删除（替代原 setCompacting(false)）：派生回落全 idle，重连后
    * resubscribeAll 的 stateSnapshot 回放恢复真实值（G4）。
+   * [chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] handingOff 复位随 occupancy 分区删除一并成立
+   * （membership = occupancy 第四维，独立 setHandingOff(false) 调用退役）。
    *
    * [steer-bubble D4 豁免声明] 本断连收尾点刻意**不**清 inflight 计数
    * （steer-bubble D4「刻意保留」）——与「清理信号
@@ -552,7 +566,6 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    */
   function clearIndependentTransient(sessionId: string): void {
     clearOccupancy(sessionId)
-    setHandingOff(sessionId, false)
     if (retryStates.value.has(sessionId)) {
       const next = new Map(retryStates.value)
       next.delete(sessionId)
@@ -581,6 +594,7 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
     applySubagentStreamState,
     requestSubagentStreamState,
     sealSubagentStream,
+    markSubagentStreamDegraded,
     isSubagentStreamDegraded,
     clearSubagentChunkState,
     clearSubagentChunkStateForSession,

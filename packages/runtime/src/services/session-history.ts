@@ -32,7 +32,7 @@ import type { ISessionStore } from './ports/session.js'
 import { isEnoent } from '../utils/errors.js'
 import { parseJsonl, type JsonlParseOptions } from '../utils/jsonl.js'
 import { warnOnce } from '../utils/warn-once.js'
-import { applyEntryEndTimes, mapSessionEntries } from '../infra/pi/session-entry-mapper.js'
+import { applyEntryEndTimes, mapSessionEntries, isInterruptedTail, computeActivePathEntries } from '../infra/pi/session-entry-mapper.js'
 import type { PiSessionEntry } from '../infra/pi/pi-protocol.js'
 import { forEachReversedLineChunk } from '../utils/history-reverse-read.js'
 
@@ -210,6 +210,12 @@ export interface HistoryWindowResult {
   truncated: boolean
   loadedTurns: number
   totalTurnsEstimate: number
+  /**
+   * [U8 重启中断标记·方向 A] 尾部中断形态判定（仅最新窗口请求且经 tailReadHistory 离线
+   * 读出时可能置位；true = 文件尾部为中断三形态之一）。活跃路径与游标翻页恒 undefined——
+   * 判定只对「会话未附着 + 读的是文件尾」成立（RPC 失败降级路径不得透传，防活会话误标）。
+   */
+  interrupted?: boolean
 }
 
 /** [HISTORICAL] N1 修复期旧名，= HistoryWindowResult 别名（保留既有 import 兼容）。 */
@@ -457,6 +463,20 @@ function convertWindowEntries(entries: PiSessionEntry[], sessionStore: ISessionS
 }
 
 /**
+ * 中断判定（isInterruptedTail）的喂数：活跃路径裁剪后的窗口 entries。推导与
+ * convertWindowEntries 同款（剥 session header——header 有 id 无 parentId 会把单根检查
+ * 顶成多根降级；leafId = 剥除后窗口末条 entry 的 string id），裁剪语义共享 mapper 的
+ * computeActivePathEntries SSOT。tailReadHistory 的中断判定专用——渲染链仍走
+ * convertWindowEntries，两处判定输入经同一 SSOT 保持一致。
+ */
+function activePathEntriesOf(entries: PiSessionEntry[]): PiSessionEntry[] {
+  const scoped = entries.filter((e) => (e as { type?: unknown }).type !== 'session')
+  const last = scoped[scoped.length - 1]
+  const leafId = last !== undefined && typeof last.id === 'string' ? last.id : undefined
+  return computeActivePathEntries(scoped, leafId)
+}
+
+/**
  * W1 H4：尾读 JSONL 历史，按 turn 边界加载最近 maxTurns 个完整 turn（分块扩窗，D5②）。
  *
  * 对应 FR-3 + AC-5/6/12。从文件尾部按 1MB 块向前扩窗，倒序计数 turn（user message 为
@@ -478,7 +498,7 @@ export async function tailReadHistory(
   maxTurns: number = HISTORY_BUDGET.RECENT_TURNS,
   query?: HistoryWindowQuery,
 ): Promise<TailReadResult> {
-  const emptyPage = { messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }
+  const emptyPage: TailReadResult = { messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }
   // 规则 #6：文件不存在（ENOENT，pi 延迟落盘常态）空页 + warn；其余 stat 失败
   //（EACCES/EIO 等）原样上抛——压成空页会把「读不了」伪装成「历史为空」假成功
   //（RT-5#4，与上方 getHistoryFromFilePath 的 statSync 预检同款分级；打开期竞态由
@@ -503,10 +523,20 @@ export async function tailReadHistory(
 
   // AC-5 turn 外扩（D14）：若窗口首条是孤立 toolResult（窗口外有对应 assistant），
   // convertHistory 内部 warn 丢弃（不额外拉取，外扩逻辑在 convertHistory 处理）。
+  // [U8 重启中断标记] 仅最新窗口请求（无 cursor——cursor 翻页返回锚前区域，尾部不是文件
+  // 尾）做尾部形态判定；判定读活跃路径裁剪后的窗口 entries（喂数推导与 convertWindowEntries
+  // 同款：剥 session header + leafId = 文件最后 entry id → computeActivePathEntries）——
+  // 撤回后文件尾 = label entry + 被撤子树（文件序先于 label，见 :433-439 裁剪注释），裁剪前
+  // 判定从尾向前会跳过 label 落在被撤子树最后一条 message entry 上，把健康会话误标
+  // interrupted；裁剪后「未附着重开」前提对撤回后文件形态重新成立，无撤回时两输入相同
+  // （零行为差异）。convertWindowEntries 内部再做一次同款裁剪（共享 SSOT computeActivePathEntries，
+  // 幂等；窗口尺寸有限，重复回溯成本可忽略）。
+  const interrupted = query?.cursor === undefined ? isInterruptedTail(activePathEntriesOf(loaded.entries)) : undefined
   return {
     messages: convertWindowEntries(loaded.entries, sessionStore),
     truncated: loaded.truncated,
     loadedTurns: loaded.loadedTurns,
     totalTurnsEstimate: loaded.totalTurnsEstimate,
+    ...(interrupted !== undefined && { interrupted }),
   }
 }

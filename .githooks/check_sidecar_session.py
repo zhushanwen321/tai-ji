@@ -14,6 +14,7 @@ Sidecar session 隔离检查
   2 — 有违规
 """
 
+from __future__ import annotations
 import re
 import sys
 from pathlib import Path

@@ -22,6 +22,7 @@
 
 import { getLogger } from "../../core/logger.ts";
 import { SUBAGENT_BG_NOTIFY_CUSTOM_TYPE } from "@zhushanwen/extension-protocol";
+import type { FailureCause } from "@zhushanwen/subagent-engine-sdk";
 import {
   getNotifyDomainPorts,
   type DeliveryHandle,
@@ -152,7 +153,8 @@ export interface BgNotifyRecord {
   endedAt: number | undefined;
   /**
    * 对话轮次计数（仅 idle 有意义）。dedup key 按 `id:round` 去重——对话模式每轮 round
-   * 不同，60s 内多轮不被吞；首轮前 round 恒定（0/undefined），key 同旧 id 行为不变。
+   * 不同，多轮通知互不命中投递日志按 key 的判重；首轮前 round 恒定（0/undefined），
+   * key 同旧 id 行为不变。
    */
   round?: number;
   /** [MF#1] worktree 模式下子 agent 改动的 patch 路径（worktree 外，cleanup 后留存）。
@@ -189,6 +191,17 @@ export interface BgNotifyRecord {
    *  置 undefined（与轮次通知的 id:round key 区分，终态不被吞），轮数改由本字段进
    *  文案。one-shot 完成通知不设置，文案保持 "completed. Result:" 逐字节（G4）。 */
   totalRounds?: number;
+  /**
+   * [subagent-observability §3.3.7① 轮应答文案事实化] 本轮轮收条事实（lastRound
+   * 透传——失败分类/停因/接管三态），buildLlmContent 的五分支判定输入：
+   * 失败轮（failure 非空非 user.cancelled）写失败摘要 + cause + 恢复指引；中止轮
+   * （user.cancelled / aborted 停因）写「本轮被中止」+ 来源；被接管轮
+   * （promptDisposition=handled）写接管事实；正常轮带结果正文（空正文写「本轮
+   * 完成，无文本输出」——UC-15）。缺省 = 轮收条缺席（迁移期回落帧），文案回落
+   * 既有形态。 */
+  lastRoundFailure?: FailureCause;
+  lastRoundStopReason?: "stop" | "error" | "aborted";
+  lastRoundDisposition?: "started" | "queued" | "handled";
 }
 
 /** notifier 依赖的宿主最小接口（解耦，便于测试）。
@@ -199,8 +212,6 @@ export interface NotifierHost {
     message: { customType: string; content: string; display: boolean; details?: unknown },
     options?: { triggerTurn?: boolean },
   ): void;
-  /** 是否还有 running 的 background 任务（用于滑动窗口立即 flush 判断）。 */
-  hasRunningBackground(): boolean;
   /** 主 agent 是否空闲（非 streaming）。可选：未注入时 flush 不 gate。 */
   isIdle?: () => boolean;
   /**
@@ -215,8 +226,9 @@ export interface NotifierHost {
 
 /**
  * 失败通知的恢复指引尾段（[T2-③/LC-1] 可达性语义——失败原因 + 恢复指引必须可达宿主）。
- * 定义于本模块（notify 域）：conversation-continuation（轮失败 error 构造）与本模块的
- * failed 通知文案共同消费——单一权威禁散改。
+ * 定义于本模块（notify 域）：本模块 buildLlmContent 的 failed 通知与轮应答 ③' 迁移期
+ * 回落支消费——单一权威禁散改。载荷 error 字段不嵌本尾段（失败摘要原文纪律——恢复
+ * 指引由通知正文尾部单点承载，error 再嵌即双段指引）。
  * [勿重做警示] 失败通知与恢复轮完成通知之间存在时序窗：主 agent 若在窗口内改判
  * 「亲自接管」并同时重发 message，会产生并行恢复轮 + 重复劳动（2026-09-24 事故 S1
  * 实测形态）——接管前必须先 list 确认无在跑恢复轮。
@@ -227,6 +239,79 @@ export const FAILURE_RECOVERY_TAIL =
   "If you decide to take over the work yourself instead, first run action:'list' to check " +
   "whether a resumed round is already running for this subagent — do not redo work that a " +
   "recovery round may have already started or finished.";
+
+/**
+ * 轮应答恢复指引尾段（[§3.3.7①] 失败轮恢复指引——续聊重试 / 换模型；设计明令
+ * 轮应答正文如实，失败摘要 + FailureCause + 恢复指引必须可达宿主）。
+ */
+export const ROUND_REPLY_RECOVERY_TAIL =
+  "Recovery: re-send your message (action:'message') to continue this conversation " +
+  "and retry the round (context is preserved), or re-dispatch with a different model.";
+
+/**
+ * 轮应答正文五分支事实化（[subagent-observability §3.3.7①]）——轮应答是债权兑现的
+ * 轮收条如实呈现，不再硬编码 `finished a round`（文案说谎是故障 B 的呈现面）。
+ * 判定序（先特殊后一般，输入 = BgNotifyRecord 轮事实字段，数据源 record.lastRound）：
+ *   ① 被接管轮（promptDisposition=handled）：回执层成功 + 引擎未执行——简短事实；
+ *   ② 中止轮（取消支——失败分类事实优先）：user.cancelled 写「本轮被中止 + 用户
+ *      取消」；迁移期回落 = 旧引擎 aborted 停因且无 failure 事实（分类不可得，维持
+ *      取消文案）；带 failure 事实的中止轮（engine_aborted / turn_budget_exhausted，
+ *      §3.3.1 三源判别）不走本支——落 ③ 失败分支，失败分类与恢复指引不丢；
+ *   ③ 失败轮（failure 非空非 user.cancelled）：失败摘要 + cause 点拼 + 恢复指引；
+ *   ④ 正常轮空正文：「本轮完成，无文本输出」（UC-15 空值语义——不告警不谎报）；
+ *   ⑤ 正常轮：结果正文（多轮与 one-shot 同形）。
+ */
+function buildRoundReplyContent(record: BgNotifyRecord): string {
+  const agent = record.agent;
+  const id = record.id;
+  const roundLabel = record.round != null ? ` round ${record.round}` : "";
+  const failure = record.lastRoundFailure;
+  // [§3.3.1 取消支判据事实优先] 有 failure 事实时以分类为准（user = 取消族，其余
+  // class = 失败轮）；仅旧引擎 aborted 停因而无分类事实时回落取消文案（迁移期回落）。
+  const isCancelledRound =
+    failure?.class === "user" ||
+    (failure === undefined && record.lastRoundStopReason === "aborted");
+  if (record.lastRoundDisposition === "handled") {
+    // ① 被接管（§3.3.1 第三形态：回执层成功 + 轮终事实词——引擎未执行，无成败）
+    return `Subagent "${agent}" (${id})${roundLabel} was taken over by an extension before the engine ran it (prompt disposition: handled) — the round never executed; re-dispatch if the work is still needed.${transcriptTail(record)}`;
+  }
+  if (isCancelledRound) {
+    // ② 中止轮（cancelled 族——「本轮被中止」+ 来源）
+    const source =
+      failure?.class === "user" ? "cancelled by user" : "aborted";
+    return `Subagent "${agent}" (${id})${roundLabel} was aborted (${source}).${transcriptTail(record)}`;
+  }
+  if (failure !== undefined) {
+    // ③ 失败轮：失败摘要 + FailureCause 点拼 + 恢复指引
+    return (
+      `Subagent "${agent}" (${id})${roundLabel} failed (${failure.class}.${failure.kind}).` +
+      ` Error: ${record.error ?? "(no error text)"}\n\n${ROUND_REPLY_RECOVERY_TAIL}${transcriptTail(record)}`
+    );
+  }
+  if (record.error !== undefined) {
+    // ③' 迁移期回落：轮失败但轮收条分类缺席（旧格式 record / 合成失败）——如实出
+    // 失败形态，禁落 ⑤「completed」把失败轮包装成成功应答（判定输入 = error 字段
+    // 非空；分类事实在场时走 ③ 结构化文案）。
+    return `Subagent "${agent}" (${id})${roundLabel} failed: ${record.error}\n\n${FAILURE_RECOVERY_TAIL}${transcriptTail(record)}`;
+  }
+  if (record.result == null || record.result === "") {
+    // ④ 正常轮空正文（UC-15：空输出不是异常——简短事实，不谎报结果）
+    return `Subagent "${agent}" (${id})${roundLabel} completed with no text output (the round finished; tool-only turns produce no reply text).${transcriptTail(record)}`;
+  }
+  // ⑤ 正常轮：结果正文
+  return `Subagent "${agent}" (${id})${roundLabel} completed. Reply:\n${record.result}${transcriptTail(record)}`;
+}
+
+/** transcript 指针行（cancelled/gc-failed 不追加的对齐判据同样适用于轮应答——
+ *  中止/接管轮无成功结果可读，指针无意义；失败/正常轮追加。取消判据与
+ *  buildRoundReplyContent 的取消支同口径——事实优先，迁移期回落 aborted 停因）。 */
+function transcriptTail(record: BgNotifyRecord): string {
+  const cancelledLike =
+    record.lastRoundFailure?.class === "user" ||
+    (record.lastRoundFailure === undefined && record.lastRoundStopReason === "aborted") ||
+    record.lastRoundDisposition === "handled";
+  return !cancelledLike && record.sessionFile ? `\n\nFull transcript: ${record.sessionFile}` : "";
+}
 
 /**
  * 将 BgNotifyRecord 格式化为 LLM 可读的 notification content。
@@ -278,7 +363,9 @@ function buildLlmContent(record: BgNotifyRecord): string {
     }
     case "running":
       // v4 B-1: 对话模式轮次完成（旧 idle 折入 running）：携带本轮结果送回主 agent，等待下一轮 message。
-      return `Subagent "${agent}" (${id}) finished a round. Reply:\n${record.result ?? "(empty)"}${transcriptPointer}`;
+      // [subagent-observability §3.3.7①] 正文五分支事实化（失败/中止/正常/空正文/被接管
+      // ——判定序与文案见 buildRoundReplyContent；`finished a round` 硬编码文案废除）。
+      return buildRoundReplyContent(record);
   }
 }
 
@@ -288,7 +375,7 @@ function buildLlmContent(record: BgNotifyRecord): string {
  * 保持与旧 BgNotifier 类相同的公共 API，避免消费方（subagent-service）改动范围过大。
  */
 export interface BgNotifier {
-  /** 入队一条完成通知（去重 + 合批窗口合并）。dispose 后短路。 */
+  /** 入队一条完成通知（边沿即投，判重由投递日志按 notifyId 承载）。dispose 后短路。 */
   notify(record: BgNotifyRecord): void;
   /** 立即 flush（session_shutdown 调用，防丢失）。 */
   flushPendingNotifications(): void;
@@ -329,7 +416,7 @@ function createDirectSendHandle(port: DeliveryPort): DeliveryHandle {
  * 限流——降级是装配级状态而非逐条通知事件）。
  * 本函数职责：BgNotifyRecord → 预格式化 content + notifyId 物化。
  *
- * @param host 宿主能力注入（直发兜底的 sendMessage + hasRunningBackground）
+ * @param host 宿主能力注入（直发兜底的 sendMessage）
  * @returns BgNotifier 接口
  */
 export function createNotifier(host: NotifierHost): BgNotifier {
@@ -409,10 +496,10 @@ export function createNotifier(host: NotifierHost): BgNotifier {
           },
           id: notifyId,
         },
-        // 攒批判定跟随提交方语义（账本 mergeHoldActive 现状保持）：有活跃后台任务
-        // → 端口 60s 滑动窗口攒批；否则直通。collectKey 债权申报（result-collect
-        // 设计 §3.4）：世代首个通知携带（见 notify() 内申报判据），后续轮次 undefined。
-        { merge: host.hasRunningBackground(), ...(collectKey !== undefined ? { collectKey } : {}) },
+        // [subagent-observability §3.3.7③] 攒批窗退役后边沿即投：无合批选项，
+        // collectKey 债权申报（result-collect 设计 §3.4）保留——世代首个通知携带
+        // （见 notify() 内申报判据），后续轮次 undefined。
+        { ...(collectKey !== undefined ? { collectKey } : {}) },
       );
       if (result.kind === "rejected") {
         notifyLogger.warn(

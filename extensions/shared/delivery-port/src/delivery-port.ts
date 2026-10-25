@@ -2,7 +2,7 @@
 //
 // pi 半区投递端口主体（设计 .tmp/tech-design/unified-delivery.md §3.7 组件表）：
 // 把 pi 扩展运行时端口接线成 @zhushanwen/session-delivery v3 内核的 port 半区
-// 装配——custom 车道唯一执行者。与账本（notify-ledger）的四步生命周期逐条对位：
+// 装配——custom 投递路径唯一执行者。与账本（notify-ledger）的四步生命周期逐条对位：
 //   ① record（受理前落盘）→ deliver 入口 appendEntry（outbox，plain entry）；
 //   ② deliver（投递）→ 内核 on-accept 受理即出站 → pi.sendMessage 直达唯一队列
 //     （两档出队由 pi 原生 steer/followUp 队列承载，本端口零注入时机代码——提交
@@ -14,19 +14,24 @@
 // 装配形态（§3.7）：每 session 一份（session_start 重绑 = 旧实例 dispose + 新实例
 // recover）；消费方经 Symbol.for 进程级槽 getDeliveryPort 获取（C-ext-06 惯例）。
 //
-// ── 提交侧双缓冲与按通道分组放行（§3.7 合批行 + 批组隔离行）───────────────
-// 全部提交先落盘再进提交缓冲（攒批成员 mergeBuffer / 直通成员 directBuffer），由
-// 放行泵按通道分组交给内核：
-//   - 默认通道组（subagent-bg-notify）：60s 滑动窗口攒批（攒批条件 = 有活跃后台
-//     任务），到期/flush 时经 merge-commit hold 逐条提交内核（注入门禁 hold →
-//     内核 retain → 条目 queued 聚合）→ kernel.flush() → 内核 buildBatchPayload
-//     合成一条 {batch:true, items} 消息一次 sendMessage 入队；
+// ── 提交侧缓冲与按通道分组放行（§3.7 批组隔离行；攒批窗已退役）─────────────
+// 全部提交先落盘再进提交缓冲（directBuffer），由放行泵按通道分组交给内核：
+//   - 默认通道组（subagent-bg-notify）：边沿即投——落盘受理后立即经 merge-commit
+//     hold 逐条提交内核（注入门禁 hold → 内核 retain → 条目 queued 聚合）→
+//     kernel.flush() → 内核 buildBatchPayload 合成一条 {batch:true, items} 消息
+//     一次 sendMessage 入队（同组多成员近同时到达时仍是合法批形态——分组放行
+//     语义保留，窗口等待已删）；
 //   - 外部通道组（workflow-result / managed-session-notify 等）：逐条提交、逐条
 //     消息（账本 [u9] 分组规则——batch 合并形态对外部通道无消费契约）。
+// [subagent-observability §3.3.7③] 攒批窗（60s 滑动窗口 + mergeBuffer +
+// wantMerge 判定 + MERGE_WINDOW_MS 定时器）整机制退役删除——所有通知边沿即投；
+// 省 token 价值由 collect_results 批量收取能力取代。保留边界（防误删）：内核
+// buildBatchPayload 与 pumpDirect/commitAsBatch/merge-commit hold（recover 重放、
+// collectRelease 直通、compaction 唤醒仍产合法批形态）、消费方批兼容读分支、
+// collect 挂起子系统、journal 差集重放——全部保留。
 // 分组放行的不变量：内核 queued 集恒来自单次单组放行 → 内核 doSend 的合批产物恒
 // 单通道——批组隔离不依赖时序巧合（混批窗口结构性消除；残余边界见 pumpDirect
-// 注释）。双缓冲（攒批/直通分离）的原因：直通放行不得携带窗口攒批成员（窗口语义
-// = 攒到到期/flush）。账目/幂等/回执/ack 全程逐条（成员各自独立内核条目，
+// 注释）。账目/幂等/回执/ack 全程逐条（成员各自独立内核条目，
 // items[].deliveryId 逐项对位），合批只发生在注入形态。
 //
 // ── compaction 防御（§3.8 提交侧等待）────────────────────────
@@ -46,8 +51,8 @@
 // 不进投递内核）+ onCollectArrival 唤醒等待器；未命中 → push 现状零变化。挂起不独立
 // 持久化，投递日志即耐久层：崩溃后差集重放按未投递重投（push），收取过的条目写
 // collected 终局（ack outcome 扩值）构造性退出差集。等待器三 API（collectArm 五态
-// 快照 / consume 全键展开收取 / collectRelease 解散等待集 + 未收条目直通内核跳过
-// 合批窗口）。session 替换路径 abort 先于 dispose 归并中断语义；extension 重载在
+// 快照 / consume 全键展开收取 / collectRelease 解散等待集 + 未收条目直通内核
+// flush——边沿即投，攒批窗已删 §3.3.7③）。session 替换路径 abort 先于 dispose 归并中断语义；extension 重载在
 // collect 阻塞期不可达（设计 §3.1 [重绑] 登记），dispose 只做在途等待器 warn 留痕
 // 不变量检查，不定义唤醒与返回语义。
 //
@@ -74,11 +79,11 @@ import type {
 import {
   scanPendingEntries,
   type MappedPendingStatus,
+  type ResolvedSettlementReason,
 } from "@zhushanwen/extension-protocol";
 
 import {
   ACK_CUSTOM_TYPE,
-  DEFAULT_NOTIFY_CUSTOM_TYPE,
   OUTBOX_CUSTOM_TYPE,
   extractDeliveryIds,
   isPlainObject,
@@ -97,9 +102,6 @@ import type {
   DeliveryPortMetrics,
   DeliveryTiming,
 } from "./types.ts";
-
-/** 提交侧合批窗口（账本 MERGE_WINDOW_MS=60s 现状保持，设计 §3.7 合批行）。 */
-const MERGE_WINDOW_MS = 60_000;
 
 /** genId 时间戳段进制（base36：紧凑且小写字母数字安全，dp-<ts>-<seq> 的 ts 段）。 */
 const ID_TIMESTAMP_RADIX = 36;
@@ -212,9 +214,8 @@ function createKernelAssembly(deps: KernelAssemblyDeps): { kernel: ReturnType<ty
    */
   const kernelPort: KernelPort = {
     supportedPayloads: ["custom"],
-    // 内核接口必填成员；on-accept 模式内核 busy gate 短路旁路（delivery.ts flush/
-    // scheduleFlush 均先判 on-accept），恒不被消费。提交侧挂起判定 = compacting
-    // 事件标记（见 send 第二道防线与放行泵预检），不走本探测。
+    // 内核接口必填成员；内核受理即出站不读忙闲探测，恒不被消费。提交侧挂起判定 =
+    // compacting 事件标记（见 send 第二道防线与放行泵预检），不走本探测。
     isIdle: () => host.isIdle(),
     subscribeSettled: (cb) => host.onAgentSettled(cb),
     send(msg: DeliveryMessage, intent: DeliveryIntent) {
@@ -257,7 +258,6 @@ function createKernelAssembly(deps: KernelAssemblyDeps): { kernel: ReturnType<ty
 
   const kernelConfig: DeliveryConfigWithWarn = {
     intent: "interrupt-at-turn-boundary",
-    dispatchMode: "on-accept",
     store,
     // details-id 凭据判定：state.deliveredIds 由 message_end 边沿增量维护（事件与
     // entry 写入同栈——收到事件 = entry 已持久），O(1) 且锚定磁盘事实。
@@ -275,7 +275,7 @@ interface CollectFaceDeps {
   /** 挂起条目收取时摘除失败策略项（deliver 登记的提交时选项不残留）。 */
   failurePolicies: Map<string, DeliveryFailurePolicy>;
   warn(msg: string, err?: unknown): void;
-  /** 解散等待集后未收条目的直通放行（进 pumpDirect 分组放行管线，跳过合批窗口）。 */
+  /** 解散等待集后未收条目的直通放行（进 pumpDirect 分组放行管线——边沿即投，攒批窗已删 §3.3.7③）。 */
   routeDirect(records: readonly JournalRecord[]): void;
 }
 
@@ -328,7 +328,7 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
   ): Omit<CollectedEntry, "id"> {
     return {
       type: pending.registerTypes.get(key),
-      outcome: pending.unregisterStatus.get(key),
+      outcome: pending.unregisterSettlements.get(key) ?? pending.unregisterStatus.get(key),
       content: rec.payload.content,
       details: rec.payload.details,
     };
@@ -343,8 +343,9 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
    *   收取（不写新终局——已注入条目再写 collected 会让日志宣称「未注入过」）；
    * - in-push-pipeline：键 ∈ 日志条目键集、条目无终局（已过分流点，在 push 管线
    *   排队待注入）→ 不收取不等待（等它会自锁，设计 §3.3 push 管线态决策）；
-   * - unregistered-no-entry：键曾注册已注销、不属任何日志条目键集 → 按 unregister
-   *   entry 的 status 定 outcome 进 collected（无载荷快照形态）；
+   * - unregistered-no-entry：键曾注册已注销、不属任何日志条目键集 → outcome 按
+   *   unregister entry 的结清视图优先 + legacy status 兜底定值进 collected（无载荷
+   *   快照形态；畸形 data 缺省语义见 types.ts CollectedEntry 注释）；
    * - waiting：活跃（register 在册无注销）且无日志条目 → 登记等待集，后续 deliver
    *   命中被挂起；
    * - unknown（MF-1-5 第五态）：键未注册且无条目——判定源 = 活跃集 ∪ 投递日志 ∪
@@ -370,7 +371,7 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
           state: "unregistered-no-entry",
           entry: {
             type: pending.registerTypes.get(key),
-            outcome: pending.unregisterStatus.get(key),
+            outcome: pending.unregisterSettlements.get(key) ?? pending.unregisterStatus.get(key),
             note: UNREGISTERED_NO_ENTRY_NOTE,
           },
         });
@@ -424,10 +425,9 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
   }
 
   /**
-   * 解散等待集；未收挂起条目直通内核 flush（跳过 60s 合批窗口——等待期
-   * hasRunningBackground 恒真，复用 wantMerge 判定会把恢复 push 推迟一个窗口）。
-   * 直通走 routeDirect（pumpDirect 按通道分组放行：外部通道逐条 / 默认通道组合批
-   * 消息，批形态语义合法——跳过的是窗口不是分组）。
+   * 解散等待集；未收挂起条目直通内核 flush（边沿即投——攒批窗已删，恢复 push
+   * 不再有任何窗口延迟）。直通走 routeDirect（pumpDirect 按通道分组放行：外部
+   * 通道逐条 / 默认通道组合批消息，批形态语义合法——分组放行保留，窗口已删）。
    */
   function collectRelease(): void {
     if (deps.isDisposed()) return;
@@ -492,20 +492,14 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
   const buckets: DeliveryPortMetrics = { settleRejected: 0, recoveryReplays: 0 };
   let disposed = false;
   /**
-   * 提交双缓冲（落盘已完成，等待放行；仅在缓冲期持有，放行即摘）：
-   * - mergeBuffer = 默认通道攒批成员（60s 窗口，到期聚合批放行）；
-   * - directBuffer = 直通成员（外部通道 / 无后台任务 / merge:false；按通道分组
-   *   立即放行）。
-   * 分两缓冲的原因：直通放行不得携带窗口攒批成员（窗口语义 = 攒到到期/flush），
-   * 统一单缓冲时「直通触发的 pump」会把窗口成员提前冲出——正是内核 v1 clearMergeTimer
-   * 注释登记过的「孤儿 timer 冲出窗口成员」同构缺陷，结构性规避。
+   * 提交缓冲（落盘已完成，等待放行；仅在缓冲期持有，放行即摘）。窗口攒批缓冲
+   * （mergeBuffer）已随攒批窗退役删除（§3.3.7③）——全部受理条目统一进本缓冲
+   * 边沿即投；同组多成员近同时到达经 pumpDirect 分组放行仍产合法批形态。
    */
-  const mergeBuffer = new Map<string, JournalRecord>();
   const directBuffer = new Map<string, JournalRecord>();
   /** 已受理 id 索引（deliver 幂等预检的全窗口快路径；内核三级判重对已入内核条目
    *  兜底）。仅增量添加，无淘汰——量级 = 每 session 通知总量（数十~数百）。 */
   const seenIds = new Set<string>();
-  let mergeTimer: ReturnType<typeof setTimeout> | undefined;
   /** merge-commit 期标志：默认通道组逐条提交内核期间 hold 注入，使成员聚合为内核
    *  queued 集，最后 kernel.flush() 一次合批出站（见文件头分组放行段）。 */
   let mergeCommitting = false;
@@ -521,7 +515,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
   let idSeq = 0;
   /**
    * 显式覆写的失败保留策略（deliver opts.onFailure → submitToKernel 的单次传递）：
-   * 条目在提交缓冲期（合批窗口 / compaction 挂起）暂存 id → policy，提交内核时
+   * 条目在提交缓冲期（compaction 挂起等提交期悬置；攒批窗已删 §3.3.7③）暂存 id → policy，提交内核时
    * 消费并摘除。不进 JournalRecord / outbox schema（§3.7 耐久面行 schema 定形，
    * 策略是提交时选项非账目字段）。重放重建的条目不在册（缺省 retain）：forget
    * 条目首败即 discard 落终局列、不在重放差集；「首败前崩溃」的残留条目重放按
@@ -546,7 +540,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
 
   // ─── collect 挂起面（result-collect 设计 §3.1②；子系统实现见 createCollectFace）───
   // routeDirect = 解散等待集后未收条目的直通放行（进 pumpDirect 分组放行管线——
-  // 跳过 60s 合批窗口，不逐条唤醒泵）。
+  // 边沿即投，攒批窗已删 §3.3.7③，不逐条唤醒泵）。
   const collectFace = createCollectFace({
     host,
     state,
@@ -585,7 +579,6 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
     if (disposed) return;
     compacting = false;
     try {
-      flushMergeBuffer("compaction-edge");
       pumpDirect();
       kernel.flush();
     } catch (err) {
@@ -665,7 +658,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
     // 显式失败策略随条目登记（submitToKernel 单次消费；缺省 retain 不占位）。
     // 登记在落盘成功后——persist-failed rejected 的条目不残留策略项。
     if (opts?.onFailure) failurePolicies.set(id, opts.onFailure);
-    routeAcceptedDelivery(id, record, collectKeys, channel, opts);
+    routeAcceptedDelivery(id, record, collectKeys);
     return { kind: "accepted", id };
   }
 
@@ -687,16 +680,14 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
     return true;
   }
 
-  /** 受理后路由（collect 挂起分流 → 攒批判定）：挂起条目已落盘（persistOutboxRecord
+  /** 受理后路由（collect 挂起分流 → 边沿即投放行）：挂起条目已落盘（persistOutboxRecord
    * 成功在前）——崩溃后差集重放按未投递重投。 */
   function routeAcceptedDelivery(
     id: string,
     record: JournalRecord,
     collectKeys: readonly string[] | undefined,
-    channel: string,
-    opts: DeliveryDeliverOptions | undefined,
   ): void {
-    // collect 挂起分流（result-collect 设计 §3.1②，先于合批判定）：键集 ∩ 在途
+    // collect 挂起分流（result-collect 设计 §3.1②，先于放行）：键集 ∩ 在途
     // 等待集 ≠ ∅ → 挂起缓冲（不进内核，push 管线零感知）+ 唤醒等待器；否则 push
     // 现状零变化。
     if (collectKeys !== undefined && collectKeys.length > 0 && collectFace.hasWaiterFor(collectKeys)) {
@@ -704,55 +695,15 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
       seenIds.add(id);
       return;
     }
-    // 攒批判定（§3.4 缺省值表）：默认通道 + 有活跃后台任务 → 60s 窗口攒批；其余
-    // → 立即放行（泵按通道分组）：外部通道结构性逐条——merge:true 亦不得覆盖
-    // （批组隔离 [u9]，窗口合批形态 {batch,items} 对外部通道无消费契约，任务书
-    // 目标 6）；默认通道的无后台任务 / merge:false 覆写同样立即放行。
-    const wantMerge =
-      channel === DEFAULT_NOTIFY_CUSTOM_TYPE &&
-      (opts?.merge ?? host.hasRunningBackground());
-    if (wantMerge) {
-      mergeBuffer.set(id, record);
-      seenIds.add(id);
-      armMergeTimer();
-    } else {
-      directBuffer.set(id, record);
-      seenIds.add(id);
-      pumpDirect();
-    }
-  }
-
-  // ─── 合批窗口（60s 滑动；攒批路径专用）─────────────────────
-
-  function clearMergeTimer(): void {
-    if (mergeTimer !== undefined) {
-      clearTimeout(mergeTimer);
-      mergeTimer = undefined;
-    }
-  }
-
-  /** 滑动窗口：每次新攒批成员到达重置窗口尾（账本内核 mergeWindowMs 滑动语义同源）。 */
-  function armMergeTimer(): void {
-    clearMergeTimer();
-    mergeTimer = setTimeout(() => {
-      mergeTimer = undefined;
-      flushMergeBuffer("merge-window");
-    }, MERGE_WINDOW_MS);
+    // 边沿即投（§3.3.7③ 攒批窗退役后唯一路由）：落盘受理的条目直接进放行缓冲，
+    // 泵按通道分组交给内核——默认通道组经 merge-commit hold 聚合出合法批形态，
+    // 外部通道组结构性逐条（批组隔离 [u9] 不依赖时序）。
+    directBuffer.set(id, record);
+    seenIds.add(id);
+    pumpDirect();
   }
 
   // ─── 放行泵（按通道分组交给内核）───────────────────────────
-
-  /**
-   * 窗口攒批成员聚合放行（mergeBuffer → 一次批消息）。compaction 挂起标记置位时
-   * 整缓冲挂起（compaction 终态边沿唤醒）。
-   */
-  function flushMergeBuffer(_reason: string): void {
-    if (disposed || mergeBuffer.size === 0) return;
-    if (compacting) return; // compaction 等待：整缓冲挂起（终态边沿复位 + 唤醒）
-    const group = [...mergeBuffer.values()];
-    mergeBuffer.clear();
-    commitAsBatch(group);
-  }
 
   /**
    * 直通成员分组放行（directBuffer）。不变量：内核 queued 集恒来自单次单组放行
@@ -835,8 +786,6 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
 
   function flush(): void {
     if (disposed) return;
-    clearMergeTimer();
-    flushMergeBuffer("flush");
     pumpDirect();
     kernel.flush();
   }
@@ -853,18 +802,14 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
       if (seenIds.has(rec.id)) continue;
       if (state.ackedIds.has(rec.id) || state.deliveredIds.has(rec.id)) continue;
       seenIds.add(rec.id);
-      if (rec.payload.customType === DEFAULT_NOTIFY_CUSTOM_TYPE) {
-        mergeBuffer.set(rec.id, rec);
-      } else {
-        directBuffer.set(rec.id, rec);
-      }
+      directBuffer.set(rec.id, rec);
       replayed += 1;
     }
     if (replayed > 0) {
       buckets.recoveryReplays += replayed;
       emitBucketLog(host, "recoveryReplays", buckets.recoveryReplays);
-      // 立即尝试投递（重放合并形态：攒批成员合并批、直通成员分组放行）。
-      flushMergeBuffer("replay");
+      // 立即尝试投递（重放合并形态：直通成员分组放行——同组多成员仍产合法批
+      // 形态，保留边界 pumpDirect/commitAsBatch 未删）。
       pumpDirect();
     }
     return replayed;
@@ -888,8 +833,6 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
           `(waiting=${inFlight.waiting}, suspended=${inFlight.suspended})`,
       );
     }
-    clearMergeTimer();
-    mergeBuffer.clear();
     directBuffer.clear();
     unsubMessageEnd();
     unsubBeforeCompact();
@@ -942,6 +885,10 @@ interface PendingBaseline {
   unregisteredIds: Set<string>;
   /** 注销条目 id → status（写侧经 mapReasonToStatus 已映射落盘；畸形不收）。 */
   unregisterStatus: Map<string, MappedPendingStatus>;
+  /** 注销条目 id → 结清五值（§3.3.6 权威通道 resolveSettlementReason——快照收取与
+   *  工具侧回填两通道同规则，结清视图优先取值；legacy status 视图承担对账副档与
+   *  本视图缺位（畸形 data：reason 非 string）时的兜底）。 */
+  unregisterSettlements: Map<string, ResolvedSettlementReason>;
 }
 
 function scanPendingBaseline(entries: readonly unknown[]): PendingBaseline {
@@ -955,6 +902,7 @@ function scanPendingBaseline(entries: readonly unknown[]): PendingBaseline {
     registerTypes: scan.registerTypes,
     unregisteredIds: scan.unregisteredIds,
     unregisterStatus: scan.unregisterStatuses,
+    unregisterSettlements: scan.unregisterSettlements,
   };
 }
 

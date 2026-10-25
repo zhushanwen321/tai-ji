@@ -62,6 +62,15 @@ export interface EngineLaunchSpec { // oe-exempt:20261018:framework:extension↔
   parentRecordId?: string;
   /** 嵌套深度（来自 PI_SUBAGENT_DEPTH）。 */
   depth?: number;
+  /**
+   * [S-10] 本通道的自申报 record id（wire 可选扩展）：channel 树的父链挂点——
+   * 嵌套通道以 parentRecordId 指向父通道的 recordId 建树（runtime findDescendantIds
+   * 递归收割的登记面）。值源 = run 的 `ctx.resume?.recordId ?? ctx.taskId`（与引擎侧
+   * buildRunIdentityParams 同一 record 锚），仅在 open 由 run 触发时携带（probe 先行
+   * 建立的通道无 run 上下文 → 缺席，收割依赖进程组 + 连接 fan-out 的结构性保证）。
+   * local 实现忽略（standalone 无 runtime 归属概念）。
+   */
+  recordId?: string;
 }
 
 /** open() 的结果（pid 尽力而为：local=spawn 即知；runtime=engine_opened 帧；不可得时不谎报）。 */

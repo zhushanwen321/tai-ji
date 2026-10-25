@@ -35,9 +35,9 @@
 
 `~/.zcode/workflows/dev-consistency-loop.dwf.ts` L1655-1656：组 commit 失败仅记 WARN、改动留工作区随复审重修，run 不终止——组 agent 仍在会话中、有写权限，可自行补登记重试。
 
-### subagent-core 内置 review-fix-loop（同款缺口，不在本批——设计评审 R1 补入）
+### subagent-core 内置 review-fix-loop（同款缺口——已实施，2026-10-23）
 
-`packages/subagent-core/workflows/review-fix-loop.js`（pi 内置版）：统一 commit 失败分支 L1724-1770 与三份改动对象同款 env-only → fix-failure 缺口（2026-10-11 read 核实：catch 起 → env agent 红线「绝不修改任何文件内容」→ 重跑 → 仍败 `terminated = "fix-failure"`）。该文件 git 跟踪（`git ls-files` 核实）、经 `@zhushanwen/subagent-core` npm 分发（package.json `files` 含 `workflows/`，实装副本在 `~/.pi/agent/npm/node_modules/@zhushanwen/subagent-core/workflows/`）；pi 侧只跑 review+fix 不开 PR 的场景用的就是它（pr-lifecycle.js 头部 notFor 声明点名）。不在本批的理由：① 发版载体不同——在库文件改动须经版本 bump + npm publish + 下游升级才生效，与三份 git 外脚本「改完即生效 + 真机验证」节奏不同构；② 平台形态差异需独立适配与验证（execFileSync 同步直跑、commit 60s 超时、agent timeoutMs 600s）；③ 本批方案已经用户裁决限定为三份脚本（2026-10-11）。处置 = 独立后续批次，方案复用本文档「确定方案」节路线 B 数据流、按平台形态适配。
+`packages/subagent-core/workflows/review-fix-loop.js`（pi 内置版）：统一 commit 失败分支与三份改动对象同款 env-only → fix-failure 缺口。**已修复（2026-10-23）**：补修子循环经双版本单源化落地——`contentRepairLoop`（路线 B 数据流的 ctx 注入版）实装在 `packages/subagent-core/workflows/src/review-fix-loop.shared.ts`，zcode 版（`~/.zcode/workflows/review-fix-loop.dwf.ts`，经仓内 `workflows/review-fix-loop.dwf.ts` 构建同步）与 pi 内置版共用同一实现，经 `pnpm build:workflows`（`scripts/build-review-fix-loop.mjs`）拼装生成；pi 壳 ctx 装配 = execFileSync 包 CmdResult + ajv schema 补修 agent + 失败信封转 undefined 统一进校验路径。同批吸收 zcode 版优点：聚合失败重试回注失败原因（对齐 REVIEWER_RETRY_SUFFIX 形态）。随批顺带把 `inheritCarryoverFields`/`applyCarryoverRegression` 从 utils.cjs 迁出（前者单源化，后者随 pi 模板——CJS 模块作用域无法引用脚本顶层单源段）。产物一致性由 `src/__tests__/review-fix-loop-build.test.ts`（--check 等价）+ `contentRepairLoop` mock ctx 单测守护。发版：随 `@zhushanwen/subagent-core` 版本 bump + npm publish 生效（files 排除 workflows/src，单源源文件不入包）。
 
 ## 确定方案：路线 B——env agent 骨架扩展 content 补修分支
 

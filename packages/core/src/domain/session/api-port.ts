@@ -9,7 +9,6 @@
  * 经 ChatApiPort（w3 use-session 的 ChatHydratePort 注入回调）承接。
  */
 import type { PanelLeaf, SessionGroup, SessionSummary, BatchDeleteResult, ThinkingLevel, SessionArchiveReply } from '@taiji/shared'
-
 /**
  * session 后端操作端口。
  * 壳侧实现：renderer 现 api/domains/session（pending/events/request/domains 原样继承，是好地基不动）。
@@ -72,6 +71,16 @@ export interface SessionApiPort {
    * 壳侧实现：@/api/events.onGlobalType('config.sessions') 并在适配层提取 msg.payload.groups。
    */
   onConfigSessions(handler: (groups: SessionGroup[]) => void): () => void
+  /**
+   * [W2 权威拉取与冷读] 拉取会话运行时状态（modelId / thinkingLevel）。
+   *
+   * 打开视图 / 缓存缺失 / 重连三时机拉取（设计 §5-W2；ADR-0097 拉为真理通道）。活会话读
+   * runtime 实例快照、冷会话读会话文件，全程不 spawn pi 进程（设计 §3.3.3）。会话不存在
+   * 走结构化错误 SESSION_NOT_FOUND（reject）；字段缺省 = 该维尚未就绪（显式未知）。
+   *
+   * 可选成员：壳未接线（headless / mobile 旧装配）时 use-session 的拉取对账静默跳过。
+   */
+  getState?(id: string): Promise<{ sessionId: string; modelId?: string; thinkingLevel?: string }>
 }
 
 /**

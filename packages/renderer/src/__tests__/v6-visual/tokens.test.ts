@@ -3,16 +3,16 @@
  *
  * 三类用例：
  *  - TC1：CSS 变量定义存在性（纯 JS 解析 style.css :root，≥8 核心变量 + --primary 别名）
- *  - chromium 轨脚本存在性（双轨防静默删除）
+ *  - chromium 层脚本存在性（双轨防静默删除）
  *  （原 TC2 恒真探测记录与 TC3 自证循环——注入自写 CSS 再读取、未 mount 任何组件——已删；
- *   组件真实消费验证归 chromium 轨 scripts/token-consume-check.mjs。）
+ *   组件真实消费验证归 chromium 层 scripts/token-consume-check.mjs。）
  *  【历史结构】TC3：组件消费层断言（vitest 契约验证：注入 :root 变量 + Tailwind 等价语义类 CSS，
- *         5 组件各 ≥1 条 color/background 取自 var()；chromium 轨 scripts/token-consume-
+ *         5 组件各 ≥1 条 color/background 取自 var()；chromium 层 scripts/token-consume-
  *         check.mjs 作真实验证双轨——加载真实 vite dev server + Tailwind JIT 编译产物）
  *
  * 探测结论（W1 实测，见 TC2 输出）：happy-dom 完整支持 var() 展开（inline + class
  * 双路径均 resolves），推翻 slice plan 预设。但 vitest 不加载 Tailwind 编译产物，
- * 故 vitest 轨为「类名→var() 契约验证」（注入等价 CSS），chromium 轨为「真实验证」。
+ * 故 vitest 层为「类名→var() 契约验证」（注入等价 CSS），chromium 层为「真实验证」。
  */
 import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -136,7 +136,7 @@ describe('TC1: CSS 变量定义存在性（style.css :root）', () => {
 
 // ---------------------------------------------------------------------------
 // TC3：组件消费层断言（vitest 契约验证——happy-dom 支持 var()，注入等价 CSS 验证
-//      5 组件 Tailwind 语义类 → var() 消费关系；chromium 轨作真实验证双轨）
+//      5 组件 Tailwind 语义类 → var() 消费关系；chromium 层作真实验证双轨）
 // ---------------------------------------------------------------------------
 
 /** 5 组件消费层断言表（组件 → Tailwind 语义类 → computed 属性 → 期望 CSS 变量） */
@@ -153,9 +153,9 @@ const COMPONENT_CONSUME: Array<{
   { component: 'Settings', cls: 'bg-surface', prop: 'backgroundColor', varName: '--surface' },
 ]
 
-describe('chromium 轨真实验证（双轨检查）', () => {
-  it('chromium 轨真实验证脚本存在（scripts/token-consume-check.mjs，双轨）', () => {
-    // 静态检查：chromium 轨加载真实 vite dev server + Tailwind JIT 验证组件真实消费
+describe('chromium 层真实验证（双轨检查）', () => {
+  it('chromium 层真实验证脚本存在（scripts/token-consume-check.mjs，双轨）', () => {
+    // 静态检查：chromium 层加载真实 vite dev server + Tailwind JIT 验证组件真实消费
     const scriptPath = resolve(
       process.cwd(),
       '..',

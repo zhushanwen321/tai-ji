@@ -188,6 +188,18 @@ async function mountContainer(stubOverrides: Record<string, Component> = {}) {
   })
 }
 
+/** L1 tab 注册断言面（display-containers §7.2）：注册 tab 全在 DOM、三个迁出位
+ *  （terminal 底抽屉 / browser、workflow 浮层）不在、总数恰 8。 */
+function expectL1DrawerTabsRendered(wrapper: Awaited<ReturnType<typeof mountContainer>>): void {
+  for (const key of L1_DRAWER_TABS) {
+    expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists(), `drawer-tab-${key} 应存在`).toBe(true)
+  }
+  expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
+  expect(wrapper.find('[data-testid="drawer-tab-browser"]').exists()).toBe(false)
+  expect(wrapper.find('[data-testid="drawer-tab-workflow"]').exists()).toBe(false)
+  expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(8)
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   // 直连 core 控制态：绑定分区键（panel store focusedSessionId）+ 清模块级状态（测试隔离）
@@ -228,13 +240,7 @@ describe('drawer-tab 注册表契约（L1 全量收敛点，display-containers �
     const wrapper = await mountContainer()
     await nextTick()
 
-    for (const key of L1_DRAWER_TABS) {
-      expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists(), `drawer-tab-${key} 应存在`).toBe(true)
-    }
-    expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="drawer-tab-browser"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="drawer-tab-workflow"]').exists()).toBe(false)
-    expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(8)
+    expectL1DrawerTabsRendered(wrapper)
   })
 })
 

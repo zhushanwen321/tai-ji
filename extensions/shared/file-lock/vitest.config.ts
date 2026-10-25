@@ -3,7 +3,7 @@ import { defaultExclude } from "vitest/config";
 import { guardProjectSetup, taijiTestConfig } from "../../../test-guard/factory.ts";
 
 /**
- * vitest 分池维护契约（两池：unit 默认轨 / integration 串行尾组），范式同
+ * vitest 分池维护契约（两池：unit 默认组 / integration 串行尾组），范式同
  * packages/runtime/vitest.config.ts（三池契约的完整版见该文件头）。
  *
  * 调度契约（vitest 4）：fileParallelism: false 在配置解析层强制单 worker，task
@@ -14,7 +14,7 @@ import { guardProjectSetup, taijiTestConfig } from "../../../test-guard/factory.
  *
  * 两池分工：
  * - **unit**：除登记文件外的全部测试，保持默认满并行。本包测试面当前整体是真实
- *   fs IO（见下条），故本轨当前为零文件——新增纯逻辑（mock fs）测试文件自动落本轨。
+ *   fs IO（见下条），故本组当前为零文件——新增纯逻辑（mock fs）测试文件自动落本组。
  * - **integration**：真实 fs / 真子进程用例。本包的测试面就是跨进程 mkdir 锁的
  *   磁盘协议本身（mkdtemp 真目录 + mkdir/rmdir 真锁 + 子进程持锁），满并行下与
  *   其他包的资源竞争会放大单条耗时（CI 慢盘单条 7s+ 实录），故测试文件整体登记
@@ -24,7 +24,7 @@ import { guardProjectSetup, taijiTestConfig } from "../../../test-guard/factory.
  * 维护契约：
  * - 新增「真进程 / 真 IO」测试文件 → 路径加入 INTEGRATION_TESTS（该数组同时喂
  *   integration project 的 include 与 unit project 的 exclude，漏加 = 文件落回
- *   unit 满并行轨）；纯逻辑（mock fs）文件不加。
+ *   unit 满并行组）；纯逻辑（mock fs）文件不加。
  * - 登记文件内只有部分用例需门控 → 用 describe.skipIf(!INTEGRATION_TESTS_ENABLED)
  *   包裹该用例组（用例级门控），快用例照常本地跑。
  * - 防线（globalSetup env 固定 + fs-guard 切面）经 test-guard/factory 顶层注入；
@@ -43,7 +43,7 @@ export default taijiTestConfig({
 	test: {
 		projects: [
 			{
-				// unit 默认轨：除登记文件外全部测试，默认满并行
+				// unit 默认组：除登记文件外全部测试，默认满并行
 				test: guardProjectSetup({
 					name: "unit",
 					include: ["src/__tests__/**/*.test.ts"],

@@ -89,7 +89,7 @@ export function emitPlanReviewRequest(
       requestId,
       pluginId: '',
       kind: 'select',
-      method: 'select',
+      dialogKind: 'select',
       title: '\x00TAIJI_PLAN_REVIEW:',
       options: [JSON.stringify({ docs: [], ...(selfReview !== undefined ? { selfReview } : {}) })],
       planReview: true,

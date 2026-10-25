@@ -3,11 +3,11 @@
  *
  * 场景：双 workflow 并发（long = 2 成员各 sleep 150s；short = 1 成员 sleep 20s，独立
  * session 各自派发）——
- *  - A3/V3 并发窗口隔离：short run 正常收尾（run-settled completed + finalizeRun 窗口
+ *  - A3/V3 并发窗口隔离：short run 正常收尾（run-settled done + finalizeRun 窗口
  *    dispose）后，long run 的成员保活进程与引擎宿主薄壳均仍存活（短收尾只 dispose 自己
- *    的窗口实例，不波及并发窗口），且 long 最终以 completed 收尾（若短收尾误杀长窗口，
- *    long 成员 ask 失败 → outcome ≠ completed）。
- *  - A1/V1 正常完成后薄壳退出：long run completed 收尾后，成员保活进程与引擎宿主薄壳
+ *    的窗口实例，不波及并发窗口），且 long 最终以 done 收尾（若短收尾误杀长窗口，
+ *    long 成员 ask 失败 → outcome ≠ done）。
+ *  - A1/V1 正常完成后薄壳退出：long run done 收尾后，成员保活进程与引擎宿主薄壳
  *    计数均回落基线（finalizeRun 五步序列末尾窗口 dispose 生效于正常完成路径；abort
  *    路径的同型断言由 batch-s4 承载）。
  *
@@ -18,7 +18,7 @@
  * 执行侧约定（与 batch-s1/s3/s4 同款）：
  * - 触发：窗口资源模型行为范围（engine 窗口实例表 / finalizeRun 收尾链 / 路由）改动时
  *   开发期空载串行执行；双凭证门 = TAIJI_PI_LIVE=1 + 本机 provider 凭证，缺一 skip
- *   不 fail；CI/PR/merge 门禁不跑本轨。
+ *   不 fail；CI/PR/merge 门禁不跑本组。
  * - 前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle）。
  * - 预算：600s（长成员 150s sleep + 双派发 turn + 收尾确认）；「第一个 settled =
  *   short」判据由 sleep 硬下界保证（150s vs 20s），LLM 抖动不反转。
@@ -36,6 +36,7 @@ import {
 import {
   applyRealTrackGate,
   attachConsoleCapture,
+  awaitMainTurnComplete,
   cleanupRealTrackApp,
   countEngineShellProcesses,
   countMemberSleeperProcesses,
@@ -67,13 +68,13 @@ const longTasks = [
 const shortTasks = [{ task: taskText(MEMBER_SLEEP_SHORT_S) }]
 
 const DISPATCH_PROMPT_LONG =
-  `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagents\` tool ` +
+  `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagent_batch\` tool ` +
   `(do NOT do the tasks yourself). Both tasks are identical long-running tasks: ` +
   `tasks = ${JSON.stringify(longTasks)} ` +
   `After the tool call returns, reply with only the word DISPATCHED. [BATCH-WL-LONG-7731]`
 
 const DISPATCH_PROMPT_SHORT =
-  `Dispatch exactly 1 background subagent task in ONE call using the \`subagents\` tool ` +
+  `Dispatch exactly 1 background subagent task in ONE call using the \`subagent_batch\` tool ` +
   `(do NOT do the task yourself). The task: tasks = ${JSON.stringify(shortTasks)} ` +
   `After the tool call returns, reply with only the word DISPATCHED. [BATCH-WL-SHORT-7732]`
 
@@ -118,9 +119,10 @@ async function awaitWLInFlightEvidence(
   baseShort: { count: number; lines: string[] },
   shellBaseline: { count: number; lines: string[] },
 ): Promise<string[]> {
-  // ── journal 恰 2 个 run（双 workflow 在途；后缀 .record.jsonl——run-vocabulary RUN_EVENTS_SUFFIX） ──
-  const agentDir = path.join(dataDir, 'agent')
-  const journalsFound = await waitUntil(() => listFilesRecursive(agentDir, '.record.jsonl').length >= 2, JOURNAL_TIMEOUT_MS)
+  // ── journal 恰 2 个 run（双 workflow 在途；后缀 .record.jsonl——run-vocabulary RUN_EVENTS_SUFFIX）──
+  // 搜索根 = <dataDir>/ext-sessions（ADR-0141 session 存储树，workflow/runs/ 域按 rootSessionId 分区）
+  const journalRoot = path.join(dataDir, 'ext-sessions')
+  const journalsFound = await waitUntil(() => listFilesRecursive(journalRoot, '.record.jsonl').length >= 2, JOURNAL_TIMEOUT_MS)
   if (!journalsFound) {
     writeDiag('batch-wl-journals-missing.json', {
       runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
@@ -128,14 +130,20 @@ async function awaitWLInFlightEvidence(
     })
   }
   expect(journalsFound, '双 workflow run journal 应落盘').toBe(true)
-  const journalFiles = listFilesRecursive(agentDir, '.record.jsonl')
+  const journalFiles = listFilesRecursive(journalRoot, '.record.jsonl')
 
   // ── 在途证据：long 两成员 + short 一成员 + 引擎宿主薄壳（每 run 一窗口） ──
   const inFlightLong = await waitUntil(
     () => countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S, 'batch-wl').count - baseLong.count >= 2,
     JOURNAL_TIMEOUT_MS,
   )
-  const inFlightShort = countMemberSleeperProcesses(MEMBER_SLEEP_SHORT_S, 'batch-wl').count - baseShort.count >= 1
+  // short 同走轮询等待：sleep 20 窗口短，成员 LLM 从派发到真正执行 bash 有数十秒
+  // 延迟，单次采样会落在执行段之前而 miss（在途证据的正面对照 = 「进程出现过」，
+  // 轮询窗口覆盖执行段起点，不弱化断言）。
+  const inFlightShort = await waitUntil(
+    () => countMemberSleeperProcesses(MEMBER_SLEEP_SHORT_S, 'batch-wl').count - baseShort.count >= 1,
+    JOURNAL_TIMEOUT_MS,
+  )
   const shellInFlight = await waitUntil(
     () => countEngineShellProcesses('batch-wl').count > shellBaseline.count,
     JOURNAL_TIMEOUT_MS,
@@ -200,16 +208,15 @@ test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）
         payload: { sessionId: sid, content },
       }, wsId, 30_000)
       expect(sendReply.type, '派发 prompt 应被接受').not.toBe('error')
-      const done = await waitUntil(() => sub.events.filter((e) => e.type === 'message.complete').length > 0, MAIN_TURN_TIMEOUT_MS)
-      if (!done) {
-        writeDiag(`batch-wl-${wsId}-turn.json`, {
-          seen: [...new Set(sub.events.map((e) => String(e.type)))],
-          runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-          consoleErrors: consoleCap.errors,
-        })
-      }
-      expect(done, `派发 turn（${wsId}）未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagents 工具？）`).toBe(true)
-      sub.events.length = 0
+      await awaitMainTurnComplete({
+        events: sub.events,
+        timeoutMs: MAIN_TURN_TIMEOUT_MS,
+        dataDir,
+        consoleErrors: consoleCap.errors,
+        diag: writeDiag,
+        diagName: `batch-wl-${wsId}-turn.json`,
+        foundMessage: `派发 turn（${wsId}）未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagent_batch 工具？）`,
+      })
     }
     await dispatch(longSid, DISPATCH_PROMPT_LONG, 'wl-dispatch-long', listeners[0]!)
     await dispatch(shortSid, DISPATCH_PROMPT_SHORT, 'wl-dispatch-short', listeners[1]!)
@@ -252,22 +259,22 @@ test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）
     expect(longMembersAlive, 'short 收尾后 long 成员保活进程应仍 ≥2（并发窗口隔离——短收尾不杀长 run 成员）').toBe(true)
     expect(longShellAlive, 'short 收尾后 long 引擎宿主薄壳应仍 > 基线（短收尾只 dispose 自己的窗口实例）').toBe(true)
 
-    // ── long 收尾（completed）+ A1/V1 断言：正常完成后计数回落基线 ──
-    const longSettledCompleted = await waitUntil(
-      () => journalFiles.flatMap((f) => readSettledFrames(f)).some((v) => v.outcome === 'completed'),
+    // ── long 收尾（done）+ A1/V1 断言：正常完成后计数回落基线 ──
+    const longSettledDone = await waitUntil(
+      () => journalFiles.flatMap((f) => readSettledFrames(f)).some((v) => v.outcome === 'done'),
       SETTLE_TIMEOUT_MS,
       2_000,
     )
     const settledNow = journalFiles.flatMap((f) => readSettledFrames(f))
-    if (!longSettledCompleted) {
-      writeDiag('batch-wl-long-not-completed.json', {
+    if (!longSettledDone) {
+      writeDiag('batch-wl-long-not-done.json', {
         settledFrames: settledNow,
         journals: journalFiles.map((f) => ({ file: path.basename(f), types: parseJsonlLines(f).entries.map((e) => String(e['type'])) })),
         longMembersNow: countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S, 'batch-wl').lines,
         piLogsTail: readPiLogs(dataDir).slice(-3000),
       })
     }
-    expect(longSettledCompleted, `long run 应 completed 收尾（若为 failed/partial = 短收尾波及长窗口或成员超预算，见 diag）`).toBe(true)
+    expect(longSettledDone, `long run 应 done 收尾（若为 failed/partially_succeeded = 短收尾波及长窗口或成员超预算，见 diag）`).toBe(true)
 
     const membersBack = await waitUntil(
       () => countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S, 'batch-wl').count <= baseLong.count,
@@ -286,15 +293,15 @@ test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）
         shellBaseline: shellBaseline.lines,
       })
     }
-    expect(membersBack, `long completed 收尾后成员保活进程应回落基线（孤儿窗口 ${ORPHAN_GRACE_MS}ms）`).toBe(true)
-    expect(shellBack, `long completed 收尾后引擎宿主薄壳应退出（A1/V1 正常完成路径窗口 dispose；残留见 diag）`).toBe(true)
+    expect(membersBack, `long done 收尾后成员保活进程应回落基线（孤儿窗口 ${ORPHAN_GRACE_MS}ms）`).toBe(true)
+    expect(shellBack, `long done 收尾后引擎宿主薄壳应退出（A1/V1 正常完成路径窗口 dispose；残留见 diag）`).toBe(true)
 
     await page.screenshot({ path: testInfo.outputPath('wl-teardown.png'), fullPage: true })
     if (consoleCap.errors.length > 0) {
       writeDiag('batch-wl-console-errors.json', { errors: consoleCap.errors.slice(-50) })
       console.warn(`[batch-wl] renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言范围）`)
     }
-    console.log(`[batch-wl] PASS：shortRunId=${shortRunId} 短收尾未波及长窗口；long completed 收尾后成员与薄壳均回落基线`)
+    console.log(`[batch-wl] PASS：shortRunId=${shortRunId} 短收尾未波及长窗口；long done 收尾后成员与薄壳均回落基线`)
   } finally {
     await cleanupRealTrackApp({
       closeListeners: () => {

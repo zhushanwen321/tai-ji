@@ -28,6 +28,11 @@ export const GLOBAL_SLOT_KEYS = {
   notifyPorts: "@zhushanwen/subagent-core.notify-ports",
   /** engineRegistry：引擎注册表（execution/engine/registry.ts）。 */
   engineRegistry: "@zhushanwen/subagent-core.engineRegistry",
+  /**
+   * runtimeControlClients：control 客户端进程级共享表
+   * （execution/engine/client/transport/control-client.ts；per-(socket, root) 复用键）。
+   */
+  runtimeControlClients: "@zhushanwen/subagent-core.runtimeControlClients",
   /** activeWindowEngineDisposer：活动窗口引擎释放器（execution/engine/registry.ts）。 */
   activeWindowEngineDisposer: "@zhushanwen/subagent-core.activeWindowEngineDisposer",
   /** engineDiscoveryRescanOpts：引擎发现重扫配置（execution/engine/routing.ts）。 */

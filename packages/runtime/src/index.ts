@@ -15,7 +15,6 @@ import { REVOKED_SIGNAL_CUSTOM_TYPE } from './services/session/revoke-orchestrat
 import { BtwService } from './services/session/btw-service.js'
 // 线 spawn options 工厂（buildLineSpawnOptions 决策侧的可测提取，见该文件 docstring）。
 import { createBtwLineSpawnOptionsFactory } from './services/session/btw-line-spawn-options.js'
-import { buildBtwThreadListPayload } from './transport/btw-message-handler.js'
 // D8-3 迁移门与 create/restore spawn 同约束（组合根后台序列 setMigrationGate 注入，读侧在
 // btw-line-spawn-options 工厂——getMigrationGate 经下方 createBtwLineSpawnOptionsFactory 接线）。
 // [M4-a] setBtwCascadeOps：deleteSession/deleteByCwd 的 btw 级联支线注入点（session-lifecycle）；
@@ -65,9 +64,9 @@ import type { IProviderCredentialResolver } from './services/ports/provider-cred
 import { PresetService } from './services/preset-service.js'
 import { ModelService } from './services/model-service.js'
 
-import { mandatoryExtensions, isBtwVirtualId } from '@taiji/shared'
+import { mandatoryExtensions } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
-import { getDataDir } from '@taiji/shared/paths'
+import { getDataDir, getDefaultSessionDir } from '@taiji/shared/paths'
 // startupSweep：启动收编扫描 core 装配单点（挂点见 main() 内 registerRuntimeInstance
 // 之后的时序硬声明注释段）。
 import { startupSweep } from '@zhushanwen/subagent-core'
@@ -89,7 +88,7 @@ import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver,
 // engine-provider-unification u2：pi→zcode provider 启动同步接线（路径拼装 + D7 降级
 // 包装收敛在该模块——组合根 import 即执行 main()，降级分支抽独立模块才可单测，
 // run-extras-migration 同族先例）。
-import { createZcodeProviderMirrorSync, runZcodeProviderStartupSync } from './services/zcode-provider-sync-wiring.js'
+import { createZcodeProviderMirrorSync, runZcodeProviderStartupSync, type ZcodeProviderStartupSyncDeps } from './services/zcode-provider-sync-wiring.js'
 import { getExtensionsDir, getNpmDir, getTmpDir, getProviderExtrasPath } from './infra/pi/pi-paths.js'
 import { getPiGlobalAgentDir, syncBundledResources } from './infra/pi/pi-maintenance.js'
 import { runCodemodeStartupMigration } from './infra/pi/pi-codemode-settings.js'
@@ -105,6 +104,7 @@ import { PiRetrySettings } from './infra/pi/pi-retry-settings.js'
 import { EventAdapter } from './infra/pi/event-adapter.js'
 import { FileChangeDiffAdapter } from './infra/pi/file-change-diff-adapter.js'
 import { EventInterpreter, applySessionOccupancyTransition } from './services/session/event-interpreter.js'
+import { isGeneratingTurn } from './services/session/types.js'
 import { join, resolve, isAbsolute } from 'node:path'
 import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
@@ -641,7 +641,17 @@ async function main(): Promise<void> {
   // RecentWorkspacesStore：最近工作区持久化（WriteBackCache 固定 partition 'global'）。
   // configDir 由 configService 动态推导，无硬编码路径（INV-5）。
   const recentWorkspacesStore = new RecentWorkspacesStore(configDir)
-  const workspaceService = new WorkspaceService(recentWorkspacesStore)
+  // 默认会话目录（<dataDir>/defaultSession/，landing「默认会话」固定入口）：启动即确保存在
+  // （用户裁决 2026-10-22，与 <dataDir> 配置目录同一保障时机）。失败不阻塞启动——后续经
+  // workspace.defaultSessionDir RPC 幂等重试（自愈），仍失败则前端隐藏入口。
+  try {
+    fs.mkdirSync(getDefaultSessionDir(), { recursive: true })
+  } catch (err) {
+    // best-effort 降级：启动期确保目录失败不阻塞启动——后续 workspace.defaultSessionDir
+    // RPC 幂等重试自愈，仍失败则前端隐藏入口（见上方 try 前注释）。
+    console.error('[runtime] ensure defaultSession dir failed (non-fatal, will retry on RPC):', err)
+  }
+  const workspaceService = new WorkspaceService(recentWorkspacesStore, () => getDefaultSessionDir())
   // ProjectStore：project 列表持久化（D14，2026-08-04 迁 runtime projects.json，
   // 与 recent-workspaces 同模式；前端 localStorage 仅首启迁移源）。
   const projectStore = new ProjectStore(configDir)
@@ -762,12 +772,13 @@ async function main(): Promise<void> {
   // ── notify-once（设计 U3 + 偏差 D-1：ClaimLedger 组合根接线）─────────────
   // 职责范围：respond 写回通道 / settle 兑现路径（agentSettledListeners）/ 终局死亡发声
   //（五汇聚点：delete·forceQuit·非 respawn 链 exit·熔断四点经本组合根 speakSessionDeath，
-  // 第五点 archive（session-manager 工具路径）由 SessionManagerHandler.handleArchive 发声——
-  // 五点共用 settleClaimsOnDeath 同一收尾实装）/ 父死亡批量 orphan（触发器②）/
-  // shutdown 非零 warn（D7b）。（TTL 清扫已随 ADR-0122 防御机制清查退役——claimLedger
-  // 消费点全集仅：组合根直调 settle/orphanByParent/markInjected/disarmDeliveryFailed/count/
-  // dispose 六方法 + 经 settleClaimsOnDeath 的 onSessionDeath/clearSession + 经
-  // deliverRespondTargets 的 onRespond，无定时回收路径。）
+  // 第五点 archive 由归档 teardown 的 'archive' 死亡处置登记经下方订阅到达本组合根发声
+  //——GUI 侧栏归档与 agent 工具 archive_session 两入口同判，五点共用 settleClaimsOnDeath
+  // 同一收尾实装）/ 父死亡批量 orphan（触发器②）/ shutdown 非零 warn（D7b）。（TTL 清扫
+  // 已随 ADR-0122 防御机制清查退役——claimLedger 消费点全集仅：组合根直调 settle/
+  // orphanByParent/markInjected/disarmDeliveryFailed/count/dispose 六方法 + 经
+  // settleClaimsOnDeath 的 onSessionDeath/clearSession + 经 deliverRespondTargets 的
+  // onRespond，无定时回收路径。）
   // 订阅顺序硬约束：pm.onSessionExit 订阅须先于下方
   // `new SessionService` 的 exit 清理路径（按订阅序分发，本路径排前才能读到 session 内存态）。
   // 前向引用（sessionService/sessionStore）为 createAdapter 同款「声明在后、调用在运行期」模式。
@@ -875,14 +886,21 @@ async function main(): Promise<void> {
 
   // 死亡处置汇聚点（session-lifecycle：delete 在 pm.destroySession 之前立 latch，检查点①；
   // restore 清场 'suppress' 静默）。'delete' 即时发声关闭条目 + clearSession（检查点①语义不动，
-  // 发声覆盖 active/scanned 两分支）；suppressedDeaths 抑制标（供随后的 removeSessionEntry
-  // 销毁回调查过即消）**仅在 detail.hasDestroySink = 必有销毁回调时立**——scanned/未找到
-  // throw 等不在册路径无销毁回调消费点（btw 活线在册，onLineTerminated → removeSessionEntry
-  // 同样消费标），无差别立标 = stale id 无界滞留（审查 unreasonable#3）；
-  // 'delete' 已发声关闭条目，销毁回调即便迟到对空账本也是幂等空转（标记原收益仅省一次空批查询）。
+  // 发声覆盖 active/scanned 两分支）；'archive'（归档 teardown，archive-service
+  // teardownForArchive——GUI 侧栏归档与 agent 工具 archive_session 两入口共用执行体）以
+  // 'exit' 发声收尾 completion-watch 债权（会话退场的事实陈述，挂起 watch 统一收 'exited'），
+  // 收尾回到本单一汇聚点、不再依赖各入口自觉调用；suppressedDeaths 抑制标（供随后的
+  // removeSessionEntry 销毁回调查过即消）**仅在 detail.hasDestroySink = 必有销毁回调时立**——
+  // scanned/未找到 throw 等不在册路径无销毁回调消费点（btw 活线在册，onLineTerminated →
+  // removeSessionEntry 同样消费标），无差别立标 = stale id 无界滞留（审查 unreasonable#3）；
+  // 'delete'/'archive' 已发声关闭条目，销毁回调即便迟到对空账本也是幂等空转（标记原收益仅省
+  // 一次空批查询）。
   subscribeSessionDeathDisposition((sessionId, disposition, detail) => {
     if (disposition === 'delete') {
       speakSessionDeath(sessionId, 'delete')
+    }
+    if (disposition === 'archive') {
+      speakSessionDeath(sessionId, 'exit')
     }
     if (detail.hasDestroySink) {
       suppressedDeaths.add(sessionId)
@@ -900,10 +918,12 @@ async function main(): Promise<void> {
       fileChangeDiff,
       onExtensionUIRequest: (requestId, sid, method, payload) => {
         server.registerExtensionTimeout(sid, requestId, method, payload)
-        // [BU2 / D1 闲置豁免生产通道·置位推送] btw 线（sid=vid）的挂起交互请求 →
+        // [BU2 / D1 闲置豁免生产通道·置位推送] btw 线的挂起交互请求 →
         // setPendingInteraction(true)（豁免不计闲置）；解除 = 终态派生（respond/expired/失效
-        // 清空中转 pending 表 → BtwService.idleTick 经 hasPendingUiRequests 见空即解除）。
-        if (isBtwVirtualId(sid)) btwService.setPendingInteraction(sid, true)
+        // 清空中转 pending 表 → hasPendingUiRequests 见空即解除）。
+        // W4a 判别器 = registry 成员查询（getLine，键 = 线 session id = piSessionId；旧
+        // isBtwVirtualId 前缀判别对 piId 形态恒 false，随键切换同批替换，§3.3.6 迁移表）。
+        if (btwService.getLine(sid) !== undefined) btwService.setPendingInteraction(sid, true)
       },
       // session-manager 请求路由：fire-and-forget 调 server.handleSessionManagerRequest
       //（由 SessionManagerHandler 异步处理并回写 pi response）。
@@ -935,11 +955,13 @@ async function main(): Promise<void> {
       // EventInterpreterOptions.onCompactionContextRewritten）。与 onGenStats 同模式：
       // 闭包引用下方声明的 genStatsService，createAdapter 仅在 session 创建后调用，引用恒就绪。
       onCompactionContextRewritten: (sid) => genStatsService.markContextRewritten(sid),
-      // W3：agent_end 副作用——isGenerating 复位（W1 后 label 直写兜底已随机制删除）。
-      // 原 attachUsageListener agent_end 分支迁移至此。不迁移则 session 永远 busy（下条消息被拒）。
+      // W3：agent_end 副作用——occupancy 'settling' 转移（W1 后 label 直写兜底已随机制删除）。
+      // 原 attachUsageListener agent_end 分支迁移至此。
       // W4：转发 stopReason 用于 session_end 终态判定（'error'→error，其余→done）。
-      onTurnFinalize: (sid, stopReason) => {
-        sessionService.handleTurnEndSideEffects(sid, stopReason)
+      // [chat-flow-consistency willRetry 分层] willRetry=true（pi 自动重试中间失败）跳过终态
+      // sidecar 写入（settling 转移保留——attempt 间隙真实阶段就是 settling）。
+      onTurnFinalize: (sid, stopReason, willRetry) => {
+        sessionService.handleTurnEndSideEffects(sid, stopReason, willRetry)
       },
       // D4（rename-session-three-modes 显示侧扇出修复）：session_info_changed 事件到达时
       // ① label 回写（session_info_changed 事件路径唯一写方，toSummary/config.sessions 读
@@ -963,7 +985,7 @@ async function main(): Promise<void> {
       }),
       // [ADR-0047] ping 探测连续 3 次失败（180s）判定 pi 进程真死，触发 abort。
       // 复用 sessionService.abort → message-dispatcher.abort 完整路径（client.abort 成功/失败
-      // 均有兜底广播 + 复位 isGenerating）。.catch 防极端异常逃逸成 unhandledRejection
+      // 均有兜底广播 + occupancy turn 复位（isGeneratingTurn 派生自然翻 false））。.catch 防极端异常逃逸成 unhandledRejection
       //（abort 内部已 try/catch 广播终态）——逃逸异常必须留痕：pi 死而 abort 链也坏时，
       // 零诊断线索无法排障（b24-M4）。
       onSilentAbort: ({ sessionId: sid }) => {
@@ -974,7 +996,7 @@ async function main(): Promise<void> {
       // M4 compaction 事件驱动：interpreter 从 compaction_start/end 唯一编排广播（session.compacting /
       // message.compactionSummary / session.compacted）。[session-dead-structural-fixes D2 挂点迁移，
       // u3b] 原此处对三布尔的直写（布尔赋值）改调原语对应行（'compacting-start' /
-      // 'compacting-end'）：isCompacting 派生 + occupancy 合并 + state 帧广播原子完成——结构上
+      // 'compacting-end'）：occupancy.compacting 置位/复位 + 合并写 + state 帧广播原子完成——结构上
       // 消灭「只写布尔不写派生视图」的残留直写（interpreter #5/#6 的 onOccupancyTransition 通道
       // 调同一原语行，幂等去重）。
       onCompactingStateChange: (sid, v) => {
@@ -983,7 +1005,7 @@ async function main(): Promise<void> {
       },
       // occupancy 挂点接线（session-dead-structural-fixes D2 挂点迁移，u3b）：interpreter 侧
       // 挂点（#2-#6 + turn-end 异常兜底）传封闭转移枚举值，经本闭包写 session 记录——原语
-      // 原子完成「合并三维 + 派生三布尔 + 幂等去重 + state 帧广播」（interpreter 不持有全量
+      // 原子完成「合并四维 + 幂等去重 + state 帧广播」（interpreter 不持有全量
       // occupancy，经 session 记录权威聚合，与上方 onCompactingStateChange 同构）。
       onOccupancyTransition: (transition) => {
         const s = sessionService.getSession(sessionId)
@@ -1030,7 +1052,7 @@ async function main(): Promise<void> {
       onAgentSettled: (sid) => {
         sessionService.flushPendingBashResults(sid)
         // [session-dead 2026-09-10] run 级联结束（pi _runAgentPrompt 的 finally 确定性 emit）→
-        // 复位 isGenerating。agent_end 在 retry / auto-compaction 续跑时会重发、post-run 尾段
+        // occupancy turn 复位（isGeneratingTurn 派生自然翻 false）。agent_end 在 retry / auto-compaction 续跑时会重发、post-run 尾段
         // 直接 settle 的收尾路径更不含 agent_end——只靠 agent_end 复位会让 processing 分支置的
         // true 残留（幽灵忙碌）。语义与竞态自愈论证见 handleAgentSettledSideEffects 注释。
         sessionService.handleAgentSettledSideEffects(sid)
@@ -1169,7 +1191,7 @@ async function main(): Promise<void> {
   })
   // notify-once D5 销毁汇聚点（追加式列表的第二订阅者）：
   // - 同步 exit 链路径（exitChainLegs 同步标）→ 跳过——respawn 终态事件随后裁决（stash 在挂）；
-  // - suppressedDeaths 已标（在册 'delete' 已发声 / restore 清场 'suppress' 非终局）→ 跳过；
+  // - suppressedDeaths 已标（在册 'delete'/'archive' 已发声 / restore 清场 'suppress' 非终局）→ 跳过；
   //   非在册 'delete'（scanned / 冷线）无销毁回调、本分支结构性不可达——「delete 漏标
   //   误发声」无可达面（unreasonable#3 判据修复：hasDestroySink = 在册）；唯一残留标
   //  （adapter.detach 抛错致删除整体失败）被后续销毁消费时，对 'delete' 已清空的账本幂等空转无害；
@@ -1192,6 +1214,8 @@ async function main(): Promise<void> {
   const handoffService = new HandoffService({
     sessionService,
     broker: server,
+    // [chat-flow-consistency R1] handingOff 维 state-topic 广播通道（session.occupancy 帧）
+    messageBus,
     broadcastSessionList: () => server.broadcastSessionList(),
     nextPushId: () => server.nextPushId(),
   })
@@ -1243,11 +1267,15 @@ async function main(): Promise<void> {
   // 早于此点会 TDZ（wiring 的 catch 降级能兜住但同步功能整体失效，不可接受）。
   // D7 降级语义在 wiring 模块收敛：任何异常 warn 不阻断启动（副本是可用性增强不是启动
   // 前置）。路径缺省拼装与 catalog 单点直传均收在 runZcodeProviderStartupSync。
-  await runZcodeProviderStartupSync({
+  // S-12（dev-0.11.7 review residue）：三依赖在此单点组装——本处启动同步与下方
+  // createZcodeProviderMirrorSync（server setServices）两个消费点共用同一份，杜绝
+  // 字面量手抄两份漂移。
+  const zcodeProviderSyncDeps: ZcodeProviderStartupSyncDeps = {
     configStore,
     credentialResolver: providerCredentialResolver,
     isModelsCorrupted: isModelsStoreCorrupted,
-  })
+  }
+  await runZcodeProviderStartupSync(zcodeProviderSyncDeps)
   const fileService = new FileService({
     sessionService,
     executor: new FsExecutor(),
@@ -1421,26 +1449,14 @@ async function main(): Promise<void> {
   // ── BtwService（btw-question D1/D2/D3 + B2 授权接线，M2-b）──
   // 六项依赖按 BtwServiceDeps docstring 归位组合根：线进程复用同一 pm（出站 env 经
   // rpc-client start → buildOutboundChildEnv 统一武装，C-proc-09，无新增进程创建点）；
-  // registerSession 走 SessionService 的 lifecycle 兼容委托（hidden:true 透传 = active
-  // 路径防线）；源文件解析 = 活跃 ?? 扫盘（与 resolveSessionFilePath 同源）；pi 二进制与
+  // registerSession 走 SessionService 的 lifecycle 兼容委托（W3 起 surface:'btw' 同链
+  // 透传；hidden 形参已随 W5 字段退场删除，此处传 undefined）；源文件解析 = 活跃 ?? 扫盘（与 resolveSessionFilePath 同源）；pi 二进制与
   // pm 同 effectiveRoot 锚点。
-  // 线状态变化广播（onThreadStateChanged 消费）：发该主会话线列表 state 帧
-  //（typeKey 'btw'，buildBtwThreadListPayload 防漂移）。best-effort：失败留痕不打断主链
-  //（恢复通道 = btw.list RPC 拉取兜底）。
-  const publishBtwThreadList = (vid: string): void => {
-    const rec = btwService.getLine(vid)
-    if (!rec) return
-    try {
-      messageBus.publish(rec.mainSid, {
-        type: 'btw.list',
-        id: server.nextPushId(),
-        payload: buildBtwThreadListPayload(btwService, rec.mainSid),
-      })
-    } catch (e) {
-      // best-effort 广播降级：推送失败不影响主流程，前端经 btw.list RPC 拉取兜底（拉为主）
-      console.error(`[btw] thread-list broadcast failed (vid=${vid}) — pull fallback via btw.list RPC remains available:`, e)
-    }
-  }
+  // W4b：原「线状态变化广播」（onThreadStateChanged → 线列表 state 帧 typeKey 'btw'）随
+  // btw.list 双通道退役整体删除——btw 线进通用列表（session.list {surface:'btw',
+  // mainSessionId}，设计 §3.3.1/§5-W4b），renderer drawer 线列表与 badge 通道均走拉取，
+  // create/remove 后不再 publish 零订阅方的线列表帧（该 dep 挂点本就零调用方，广播实际
+  // 只经 handler 侧发生，随协议收缩一并回收）。
   const btwService = new BtwService({
     processes: pm,
     // 线 launch 快照组装（preset 回落链 / skillPaths 回落 / 模型终态语义的决策侧
@@ -1453,8 +1469,14 @@ async function main(): Promise<void> {
       getExtensionPaths: (cwd) => sessionService.getExtensionPaths(cwd),
       getReplaceSystemPrompt: () => sessionService.getReplaceSystemPrompt(),
     }),
-    registerSession: (id, client, cwd, label, sessionFilePath, hidden) =>
-      sessionService.initializeManagedSession(id, client, cwd, label, sessionFilePath, hidden),
+    // W3 surface 落地：btw 直注册链第二处签名（dep 类型 → 本 adapter →
+    // initializeManagedSession 三处同批扩参）。线不经 create 链路，surface 必须
+    // 经本链显式传到 registerSession 尾部——只改 registerSession 尾部传不到线，
+    // 线会以缺省 'sidebar' 注册。
+    // W5：dep 类型、registerSession 与兼容委托的 hidden 形参已随字段退场全部删除，
+    // 本 adapter 不再传 hidden 占位（协议字段 session.create.hidden 同批收缩）。
+    registerSession: (id, client, cwd, label, sessionFilePath, surface) =>
+      sessionService.initializeManagedSession(id, client, cwd, label, sessionFilePath, undefined, undefined, undefined, undefined, undefined, surface),
     resolveMainSessionFile: (mainSid) =>
       sessionService.getSession(mainSid)?.sessionFilePath ?? sessionService.findScannedSession(mainSid)?.filePath,
     resolvePiCommand: () => findPiExecutable(effectiveRoot),
@@ -1464,22 +1486,21 @@ async function main(): Promise<void> {
     // lifecycle 收尾：planned kill 抑制 exit 回调，Map 条目/总线分区/插件数据不自清——
     // 在此镜像主会话 delete 的收尾序（detach → removeSessionEntry → 插件 sessionData 真删）。
     // 冷线（从未注册）getSession 空 → 三步全幂等零动作；失效路径（闲置回收）不经过本回调。
-    onLineTerminated: (vid) => {
-      if (!sessionService.getSession(vid)) return
-      sessionService.detachSession(vid)
-      sessionService.removeSessionEntry(vid)
-      clearRemovedSessionData(vid)
+    onLineTerminated: (sessionId) => {
+      if (!sessionService.getSession(sessionId)) return
+      sessionService.detachSession(sessionId)
+      sessionService.removeSessionEntry(sessionId)
+      clearRemovedSessionData(sessionId)
     },
-    onThreadStateChanged: publishBtwThreadList,
     // [BU2] 交互中转 pending 快照（respond/expired/失效三终态共同落点，server 薄委托）。
-    hasPendingUiRequests: (vid) => server.getPendingUiRequests(vid).length > 0,
+    hasPendingUiRequests: (sessionId) => server.getPendingUiRequests(sessionId).length > 0,
     // [BU6 / V6·⑤a] D9⑤ 行为契约注入生产 trace（运行期可达；最终裁决角色 对账单测层见
     // btw-contract-inject.test.ts，system-prompt-trace 对账/豁免结论见本轮 deviations）。
     traceContractInjection: (t) => {
-      logger.info(`[btw] contract injection: vid=${t.vid} round=${t.round} carrier=${t.carrier} contract=${t.contract}`)
+      logger.info(`[btw] contract injection: sessionId=${t.sessionId} round=${t.round} carrier=${t.carrier} contract=${t.contract}`)
     },
   })
-  // B3 ensure 链分支（D1⑥/V5 回收后续问）：ensureActive 对 btw vid 转 ensureProcess。
+  // B3 ensure 链分支（D1⑥/V5 回收后续问）：ensureActive 对 btw 线转 ensureProcess。
   sessionService.setBtwService(btwService)
   // [M4-a / btw-question D4 消费方① + D9④] 级联接线 + 启动重建：
   // ① delete/deleteByCwd 的级联支线经模块槽注入（BtwService 两原语结构性满足窄接口）；
@@ -1495,17 +1516,20 @@ async function main(): Promise<void> {
 
   // ── ArchiveService（session-archive 设计 D5，u-rpc-wiring 组合根接线）──────────
   // deps 逐项对齐 delete 活跃分支原语（session-lifecycle.ts delete 方法体）：归档的杀 pi
-  // 编排与删除同链（userStopped 清理 → suppress 处置登记先于杀进程 → btw 级联 → detach/
-  // destroy/摘除 → 收殓在途后台任务）；purge 的残树处置 / 插件 KV tombstone / 画布解绑
+  // 编排与删除同链（userStopped 清理 → 'archive' 处置登记先于杀进程——组合根对该值
+  // speakSessionDeath('exit') 收尾 completion-watch 债权（GUI 与 agent 工具两入口同判）→
+  // btw 级联 → detach/destroy/摘除 → 收殓在途后台任务）；purge 的残树处置 / 插件 KV
+  // tombstone / 画布解绑
   // 复用 delete 同名原语；trash 经 sessionStore（与 cascade 生产装配同源，G4 语义——失败
   // 原样上抛保持可恢复形态）。getActiveSession 映射 getSession（IManagedSessionView 含
-  // cwd/sessionFilePath/isGenerating，ArchiveService 消费的最小字段集）。
+  // cwd/sessionFilePath/occupancy，ArchiveService 消费的最小字段集）。
+  // [chat-flow-consistency D1] isGenerating 供给端迁移：isGeneratingTurn(occupancy.turn)。
   const archiveService = new ArchiveService({
-    isGenerating: (sid) => sessionService.getSession(sid)?.isGenerating ?? false,
+    isGenerating: (sid) => isGeneratingTurn(sessionService.getSession(sid)?.occupancy?.turn),
     getActiveSession: (sid) => sessionService.getSession(sid),
     findScannedSession: (sid) => sessionService.findScannedSession(sid),
     disposeUserStopped: (sid) => userStoppedGate.disposeForDelete(sid),
-    fireSuppressDisposition: (sid, hasDestroySink) => fireDeathDisposition(sid, 'suppress', { hasDestroySink }),
+    fireArchiveDisposition: (sid, hasDestroySink) => fireDeathDisposition(sid, 'archive', { hasDestroySink }),
     closeAllBtwLines: (mainSid, cwd) => btwService.closeAllForMain(mainSid, cwd),
     detachSession: (sid) => sessionService.detachSession(sid),
     destroyPiSession: (sid) => pm.destroySession(sid),
@@ -1540,7 +1564,8 @@ async function main(): Promise<void> {
    */
   const resolveBtwMain = (mainSid: string): { cwd: string; mainTurnActive: boolean } | undefined => {
     const active = sessionService.getSession(mainSid)
-    if (active) return { cwd: active.cwd, mainTurnActive: active.isGenerating }
+    // [chat-flow-consistency D1] 读口迁移：mainTurnActive ≡ isGeneratingTurn(occupancy.turn)。
+    if (active) return { cwd: active.cwd, mainTurnActive: isGeneratingTurn(active.occupancy?.turn) }
     const scanned = sessionService.findScannedSession(mainSid)
     return scanned ? { cwd: scanned.cwd, mainTurnActive: false } : undefined
   }
@@ -1577,6 +1602,13 @@ async function main(): Promise<void> {
     getClient: (sessionId) => sessionService.getRpcClient(sessionId),
     scanSessions: (opts) => sessionStore.scanSessions(opts),
   })
+  // zcode 镜像同步 write-through 触发面实例（ADR-0142 镜像架构）：唯一实例、三触发面共用
+  // 同一串行化队列（latest-wins，顺序契约见 createZcodeProviderMirrorSync 头注释）——
+  // ① settings 域 provider 变更（server.setServices 注入，write-through）；② 凭据域 OAuth
+  // 事件（handler 侧同实例消费）；③ 启动后台 legacy provider 迁移完成后（下方
+  // runStartupBackgroundInit 注入，S-9：迁移写入的 provider 配置不在启动同步快照内，须
+  // 触发镜像重跑）。三依赖 = 上方 zcodeProviderSyncDeps 单点（S-12）。
+  const zcodeProviderMirrorSync = createZcodeProviderMirrorSync(zcodeProviderSyncDeps)
   server.setServices(sessionService, configService, modelService, {
     extension: extensionService,
     plugin: pluginService,
@@ -1590,13 +1622,9 @@ async function main(): Promise<void> {
     quota: quotaService,
     // zcode 镜像同步 write-through（ADR-0142 镜像架构）：settings 域 provider 变更成功后
     // 与启动同步同源同实现地重跑镜像（同一判定链，副本天然对账；失败只 warn 不阻断配置写入）。
-    // 三依赖装配收口在 createZcodeProviderMirrorSync（与启动同步单点组装，防手抄漂移）；
+    // 实例与三依赖均为上方单点（zcodeProviderMirrorSync / zcodeProviderSyncDeps，S-12）；
     // trigger='mutation' 使日志措辞按来源分流（不冒用启动同步文案）。
-    zcodeProviderMirrorSync: createZcodeProviderMirrorSync({
-      configStore,
-      credentialResolver: providerCredentialResolver,
-      isModelsCorrupted: isModelsStoreCorrupted,
-    }),
+    zcodeProviderMirrorSync,
     // ai-voice-tts：tts 四 RPC 路由（TtsMessageHandler 装配 + buildRoutes 展开 handles）。
     tts: ttsService,
     handoff: handoffService,
@@ -1627,8 +1655,9 @@ async function main(): Promise<void> {
     // u8（reply 通路对称接线）：reply 超限错误 envelope 的恢复指引携带 session 文件实路径，
     // 与上方 MessageBus（push 通路）共用同一 resolveSessionFilePath resolver 实例。
     replyGuardResolver: resolveSessionFilePath,
-    // btw 线三帧路由（btw-question M2-b，B1/B2 授权接线）：BtwService 窄接口 + 主会话解析
-    // 注入 BtwMessageHandler（assembleOptionalHandlers 装配 → buildRoutes 展开 handles）。
+    // btw 线两帧路由（btw-question M2-b，B1/B2 授权接线；W4b 线枚举帧退役后 create/remove
+    // 两帧）：BtwService 窄接口 + 主会话解析注入 BtwMessageHandler（assembleOptionalHandlers
+    // 装配 → buildRoutes 展开 handles）。
     btw: { service: btwService, resolveMain: resolveBtwMain },
     // [subagent-model-switch U6] subagent.setModel 路由依赖（§7.1.1 通道生产适配器，
     // 上方构造；缺席时 handler 恒回 unwired 可操作错误的兜底自此不可达）。
@@ -1896,12 +1925,16 @@ async function main(): Promise<void> {
     readSpawnMarkers: () => readSpawnMarkerList(getDataDir()),
     // 加固轮：spawn 清单 tmp 残片清扫（infra 实现经 port 注入，同上闭包形态）
     sweepSpawnMarkerTmpResidue: () => sweepStaleSpawnMarkerTmpFiles(getDataDir()),
+    // S-9：legacy provider 迁移完成后触发镜像重跑——迁移写入的配置不在启动同步快照内，
+    // 不触发则副本陈旧至下次 mutation/重启。与 settings 域共用上方同一实例（串行化队列）。
+    zcodeProviderMirrorSync,
   })
 
   // ── remote-config 启动拉取（延迟 30s 单次）────────────────────────
-  // taiji 远程配置两域（provider 清单域 + quota-fetchers 域，checkedAt 4h 节流在 fetch 层
-  // 内建）。延迟避开启动网络竞争；有 provider 模型合并写盘时广播新列表（无变化/失败 =
-  // 零动作，fail-safe 链内建在 fetch/sync 层）。unref：不阻塞进程退出。
+  // taiji 远程配置三域（provider 清单域 + quota-fetchers 域 + retry-rules 域，同一触发点
+  // refreshRemoteProviders；checkedAt 4h 节流在 fetch 层内建）。延迟避开启动网络竞争；有
+  // provider 模型合并写盘时广播新列表（无变化/失败 = 零动作，fail-safe 链内建在 fetch/sync
+  // 层）。unref：不阻塞进程退出。
   const REMOTE_CONFIG_STARTUP_DELAY_MS = 30_000
   const remoteConfigStartupTimer = setTimeout(() => {
     void configService

@@ -85,7 +85,7 @@ export interface CliEngineDescriptor {
    * 不 throw（§3.5.3 代理形态：缺包/坏包的失败推迟到首次协议调用）。
    */
   portFactory: EngineFactory;
-  /** manifest 快照余项（modelCatalog/displayName/processModel；capabilities 已提升为直读字段）。 */
+  /** manifest 快照余项（modelCatalog/modelTranslation/displayName/processModel；capabilities 已提升为直读字段）。 */
   manifest?: Omit<EngineManifestSnapshot, "capabilities">;
   /**
    * 引擎包版本面（package.json `version`，发现器装配时盖章；L3 显式配置无

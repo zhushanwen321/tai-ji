@@ -23,6 +23,10 @@ export interface RetryState {
  *   error        → message:error,     toolCall:error
  *   disconnect   → message:error,     toolCall:end_not_received
  *   restart      → message:error,     toolCall:end_not_received
+ *   stalled      → message:error,     toolCall:end_not_received（本地残留定格：终态消息处理
+ *                  半途失败、权威 idle 已到而本地未收尾——chat-flow-consistency D4；收尾后
+ *                  紧随一次 getHistory → reconcileHistory 以权威内容接管，本终态呈现在
+ *                  reconcile 成功后被权威版本替换）
  * （原 'timeout' 成员随 pendingSend 30s 空窗 timer 退役——ADR-0122 时间平抑红线，
  * pendingSend/streaming 的收尾全事件驱动，无墙钟兜底生产者。）
  */
@@ -33,3 +37,4 @@ export type FinalizeReason =
   | 'error'
   | 'disconnect'
   | 'restart'
+  | 'stalled'

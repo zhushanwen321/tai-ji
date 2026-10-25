@@ -1,6 +1,6 @@
 /**
  * Workflow agent() thinkingLevel REAL E2E —— 真实 runtime + pi 子进程 + faux LLM 演员
- * （L2.5 翻轨，2026-09-15）。
+ * （L2.5 迁组，2026-09-15）。
  *
  * 验证目标：workflow script 里 agent({ model, thinkingLevel: "high" }) 的
  * thinkingLevel 端到端真实生效。观测表面全部是 pi 自己写的文件（零 taiji
@@ -15,7 +15,7 @@
  * - TC3: session.workflowUpdate done 信号 + 子进程 JSONL 有 assistant 消息
  *        （faux 演者跑完产出，凭证无关）
  *
- * faux 翻轨装配：主对话模型 faux/faux-1（settings 预置），faux 响应脚本用
+ * faux 迁组装配：主对话模型 faux/faux-1（settings 预置），faux 响应脚本用
  * model-keyed 对象形态（faux-llm-ext loadScript 的第二种形态）——主进程队列
  * [workflow toolCall → done 文本]（faux-1 槽位）、子进程队列 [PROBE-OK 文本]
  * （faux-1-reasoning 槽位，由 agent() 的 model 选择）。主/子进程共享同一
@@ -32,7 +32,7 @@
  * 文件定位链（[D1] record 单源后）：
  * 主 session JSONL（session.create reply 的 sessionFile）
  *   → workflow-record v2 registered 条目的 data.recordPath → record 事件流
- *     （<sessionDir>/workflow-state/<runId>.record.jsonl，jsonl-run-store.ts）
+ *     （<dataDir>/ext-sessions/<sid>/workflow/runs/<runId>.record.jsonl，ADR-0141 树）
  *   → agent-settled 帧 result.sessionFile → 子进程 session 文件
  *     （缺失时全量扫描 dataDir 下 sessions/*.jsonl 按首行 session.id 匹配，
  *     session-service.ts findAgentCallFile 同策略，更健壮）
@@ -87,7 +87,7 @@ function buildFauxScript(probePath: string): Record<string, FauxStep[]> {
 
 /**
  * 预置 dataDir：workflow 探针脚本复制到 user 级 <dataDir>/agent/workflows/。
- * provider/model/npm 扩展目录预置已由 launchRealApp({ faux }) 接管（L2.5 翻轨，
+ * provider/model/npm 扩展目录预置已由 launchRealApp({ faux }) 接管（L2.5 迁组，
  * 凭证无关）；piAgentDir = <dataDir>/agent（runtime pi-paths SSOT）。
  *
  * 不能依赖 project 级 <workspaceRoot>/.pi/workflows/：sample-project 的祖先目录
@@ -202,7 +202,7 @@ function readSessionEntries(file: string): any[] | null {
  * pi 侧落盘形状（workflow-record-entry.ts v2 schema）：主 session 每 run 两条小
  * 条目——registered（`{v:2, kind:"registered", runId, recordPath, ...}`，含 record
  * 流绝对路径锚点）与 settled（`{v:2, kind:"settled", runId, status, ...}`）。唯一
- * 事实源 = recordPath 指向的 record 事件流（`<sessionDir>/workflow-state/
+ * 事实源 = recordPath 指向的 record 事件流（`<dataDir>/ext-sessions/<sid>/workflow/runs/
  * <runId>.record.jsonl`，jsonl-run-store.ts 头注），条目本身可随时从 record 重建。
  *
  * 返回 null = 主 session 文件不可读；内层字段 null = 文件可读但对应条目缺失

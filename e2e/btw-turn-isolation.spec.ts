@@ -6,15 +6,15 @@
  * 通过标准（设计 S7 原文口径）：主 turn 全程无 abort / 无 steer 注入；主流历史不含 btw 内容（滚动检查）。
  *
  * 执行侧六要素（与 e2e-map E2E-BTW-01.note 同步维护，改其一须同 commit 改另一）：
- * - 触发：scope diff 命中（btw 会话生命周期 / 消息路由 / 协议帧 / vid 工厂 + spec 自身）时开发期
- *   按改动范围执行；双凭证门 = env TAIJI_PI_LIVE=1 + 本机 provider 凭证（缺一 skip 不 fail——防
- *   `--project=electron` 全量扫跑烧 token，CI/PR/merge 门禁不跑本轨，AGENTS.md e2e 执行准则）。
- *   前置：real renderer bundle（`VITE_E2E=true pnpm run build:e2e`，不带 VITE_MOCK；mock 轨跑过
+ * - 触发：scope diff 命中（btw 会话生命周期 / 消息路由 / 协议帧 / 虚拟 id 工厂（subagent/agentcall）
+ *   + spec 自身）时开发期按改动范围执行；双凭证门 = env TAIJI_PI_LIVE=1 + 本机 provider 凭证（缺一 skip 不 fail——防
+ *   `--project=electron` 全量扫跑烧 token，CI/PR/merge 门禁不跑本组，AGENTS.md e2e 执行准则）。
+ *   前置：real renderer bundle（`VITE_E2E=true pnpm run build:e2e`，不带 VITE_MOCK；mock 层跑过
  *   之后必须重建——launch-real pre-flight 会 fail-fast 并给出重建命令）。
  * - 预算：test.setTimeout 300s；**主 turn 在途窗口旋钮 = MAIN_PROMPT 里的 bash `sleep 40`**
  *   （真实 LLM 三轮 btw 问答须在窗口内完成；窗口不足属预算校准 → 调 sleep 秒数，禁止放宽断言
  *   或膨胀其他预算换绿灯）；单事件等待 30-90s。
- * - 事件：listen WS 订阅 mainSid 与 btw vid 的 message.message_start / message.complete；负向监听
+ * - 事件：listen WS 订阅 mainSid 与 btw 线 session id 的 message.message_start / message.complete；负向监听
  *   message.error / send.rejected / session.exited。失败打印 seen types（AGENTS 准则：区分
  *   「LLM 在推进但慢」与「真死锁」）。
  * - 断言（S7 三条 + 正面对照）：
@@ -32,7 +32,7 @@
  *
  * 形态说明：
  * - WS 直连驱动（TEST-STRATEGY 既定约定：UI/OS dialog 不可自动化处用 WS 触发等效业务动作）：
- *   session.create → message.send（主长 turn）→ btw.create → message.send × 3（vid 串行）。
+ *   session.create → message.send（主长 turn）→ btw.create → message.send × 3（线 id 串行）。
  *   S7 断言范围全部落在事件帧与 pi session JSONL，不依赖 DOM。
  * - L3 真实 LLM（impl-plan A7 方式列）：faux 统一队列无法表达「主长 turn × btw 三短问」的进程间
  *   异构节奏（两进程独立 shift 同一序列、turn 边界结构性对齐），model-keyed 分道被 btw spawn 的
@@ -129,7 +129,7 @@ function countOccurrences(haystack: string, needle: string): number {
 // ── S7 主用例 ────────────────────────────────────────────────────────────
 
 test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort / 无 steer / 主流历史不含 btw 内容', async () => {
-  // 凭证双门（六要素「触发」）：真实 LLM 轨只在显式授权 + 本机凭证齐备时执行
+  // 凭证双门（六要素「触发」）：真实 LLM 层只在显式授权 + 本机凭证齐备时执行
   applyRealTrackGate(test, { timeoutMs: 300_000, tag: 's7', envVar: 'TAIJI_S7_CREDENTIAL_SOURCE' })
 
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-s7-btw-'))
@@ -137,7 +137,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
 
   const { page, cleanup } = await launchRealApp({ dataDir })
   let mainListen: { ws: { close: () => void }; events: WsFrame[] } | undefined
-  let vidListen: { ws: { close: () => void }; events: WsFrame[] } | undefined
+  let lineListen: { ws: { close: () => void }; events: WsFrame[] } | undefined
   try {
     const port = await waitRealAppReady(page, dataDir, 's7')
 
@@ -174,38 +174,39 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
       payload: { mainSid },
     }, 's7-btw-create', 30_000)
     expect(createBtw.type).toBe('btw.create')
-    const vid = createBtw.payload.vid as string
-    expect(vid.startsWith('btw:'), `btw.create reply vid 应为两段式 btw: 形态，收到 "${vid}"`).toBe(true)
-    console.log(`[s7] btw 线创建：vid=${vid} forkState=${String(createBtw.payload.forkState)}`)
+    // W4a 键统一：reply 字段 vid → sessionId（线 pi 真实会话 id，无 btw: 前缀）
+    const lineId = createBtw.payload.sessionId as string
+    expect(lineId && !lineId.includes(':'), `btw.create reply sessionId 应为 pi 真实 id 形态（无冒号），收到 "${lineId}"`).toBe(true)
+    console.log(`[s7] btw 线创建：sessionId=${lineId} forkState=${String(createBtw.payload.forkState)}`)
 
-    const vidSub = await openListenWs(port, vid)
-    vidListen = vidSub
-    const vidEvents = vidSub.events
+    const lineSub = await openListenWs(port, lineId)
+    lineListen = lineSub
+    const lineEvents = lineSub.events
 
     // ── 串行连发 3 条（每轮等 message.complete 再发下一轮）──
     for (let i = 0; i < BTW_ROUNDS; i++) {
-      const before = countOf(vidEvents, 'message.complete')
+      const before = countOf(lineEvents, 'message.complete')
       const roundReply = await wsRoundTrip(port, {
         type: 'message.send',
         id: `s7-q${i + 1}`,
-        payload: { sessionId: vid, content: btwPrompt(i) },
+        payload: { sessionId: lineId, content: btwPrompt(i) },
       }, `s7-q${i + 1}`, 30_000)
       expect(roundReply.type, `btw 第 ${i + 1} 轮 message.send 应被接受`).not.toBe('error')
       const roundDone = await waitUntil(
-        () => countOf(vidEvents, 'message.complete') > before,
+        () => countOf(lineEvents, 'message.complete') > before,
         EVT_TIMEOUT_MS,
       )
       if (!roundDone) {
         writeDiag(`s7-round-${i + 1}.json`, {
           round: i + 1,
-          seen: seenTypes(vidEvents),
+          seen: seenTypes(lineEvents),
           runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
           piLogsTail: readPiLogs(dataDir).slice(-3000),
         })
       }
       expect(
         roundDone,
-        `btw 第 ${i + 1} 轮未在 ${EVT_TIMEOUT_MS}ms 内 message.complete（seen types: ${seenTypes(vidEvents).join(', ')}）`,
+        `btw 第 ${i + 1} 轮未在 ${EVT_TIMEOUT_MS}ms 内 message.complete（seen types: ${seenTypes(lineEvents).join(', ')}）`,
       ).toBe(true)
     }
 
@@ -247,9 +248,9 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     ).toEqual([])
 
     mainSub.ws.close()
-    vidSub.ws.close()
+    lineSub.ws.close()
     mainListen = undefined
-    vidListen = undefined
+    lineListen = undefined
 
     // ── 断言 ②③（持久化侧）：pi session JSONL 全文滚动检查 ──
     const agentDir = path.join(dataDir, 'agent')
@@ -307,7 +308,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     await cleanupRealTrackApp({
       closeListeners: () => {
         mainListen?.ws.close()
-        vidListen?.ws.close()
+        lineListen?.ws.close()
       },
       cleanup,
       dataDir,

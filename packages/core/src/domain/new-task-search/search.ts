@@ -4,8 +4,9 @@
  * [归位] 迁自 renderer composables/features/useSearch.ts（313 行），语义逐条等价。
  * C-W3-1 端口注入：isMock 改 deps.ports.isMock（替代 import.meta.env.VITE_MOCK）、
  * mockApi.search fixture 经 deps.ports.searchMock（SearchDataPort）、composerApi.getFileCandidates
- * 经 deps.ports.fileCandidates（FileCandidatesPort）、sessionApi.list 经 deps.ports.sessionList
- * （SessionListPort）。i18n.global.t 经 deps.ports.t（TranslatePort）。
+ * 经 deps.ports.fileCandidates（FileCandidatesPort）、session 列表经 deps.ports.sessionList
+ * （SessionListPort——W4b 起壳侧接 session.list {surface:'sidebar'} 通用查询，§3.3.1）。
+ * i18n.global.t 经 deps.ports.t（TranslatePort）。
  *
  * 数据流：SearchModal.watch(query) → debounce 120ms → query(q, ctx) →
  *   allSettled 并行查 4 源（命令内存 / file WS 直查 / session WS / 归档 WS）→
@@ -77,7 +78,7 @@ export function useSearch(
     const seq = ++loadSeq // BC-9 检查入口
 
     // AC-5.2：mock 模式走 searchMock fixture（search 无 real WS domain，D-026）。
-    // 返回已是 Section[] 形态（{label, items}），符号占位恒加入（与 real 轨 groupByType 对齐 D-001）。
+    // 返回已是 Section[] 形态（{label, items}），符号占位恒加入（与 真实进程层 groupByType 对齐 D-001）。
     if (ports.isMock) {
       // [tc u3/D4-②] searchMock 可选端口检查：isMock=true 而未装配属壳装配错误——显式抛错
       // 指向恢复动作（恢复路径：检查 useSearchModalDeps 的 VITE_MOCK 分支与 mock 模块导入），
@@ -92,7 +93,7 @@ export function useSearch(
       const mockSections = await ports.searchMock(q)
       // BC-9 检查：旧响应丢弃
       if (seq !== loadSeq) return []
-      // 补符号占位 section（mock fixture 无符号数据，与 real 轨 groupByType 占位行为一致 D-001）
+      // 补符号占位 section（mock fixture 无符号数据，与 真实进程层 groupByType 占位行为一致 D-001）
       const symbolLabel = ports.t('search.sectionSymbol')
       const hasSymbol = mockSections.some((s) => s.label === symbolLabel)
       return hasSymbol
@@ -160,7 +161,8 @@ export function useSearch(
     return mapFileCandidatesToItems(filtered)
   }
 
-  /** session 源（WS + #17 超时 race + 源内子串过滤）：sessionList 全量跨项目 */
+  /** session 源（WS + #17 超时 race + 源内子串过滤）：sessionList 侧栏口径全量跨项目
+   *  （W4b 起端口背后 = session.list {surface:'sidebar'}，btw 线不进搜索口径，§3.3.1） */
   async function querySessionSource(q: string): Promise<SearchItem[]> {
     // #17：WS 超时 race
     const groups = await withWsTimeout(ports.sessionList())

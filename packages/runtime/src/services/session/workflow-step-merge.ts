@@ -11,7 +11,8 @@
  * 三条规则（设计 D2）：
  * - R1 状态映射：record 两态（running|idle）× stopReason → 步骤四态
  *   （pending|running|completed|failed），词表显式转换禁止直拷（两态进四态消费方，
- *   renderer 聚合 switch 落 default 的确定性事故）。13 值域逐行见 mapStepStatusFromRecord。
+ *   renderer 聚合 switch 落 default 的确定性事故）。StopReason 全枚举逐行见
+ *   mapStepStatusFromRecord。
  * - R2 一键多 record 收敛：候选集有 running 取之（多条 running 取 startedAt 最新——
  *   rebuildRuntime 瞬态窗口 tiebreak）；全终态取 startedAt 最新（终态取最后 attempt）。
  * - R3 record-only 成行与检查：候选有而 trace 无（① 节流窗口 + P4 竞态）→ record 自身
@@ -50,9 +51,10 @@ const INTERRUPTED_STOP_REASONS: readonly string[] = NEW_STOP_REASONS.filter(
 )
 
 /**
- * [R1] 兜底通用异常文案（stopReason ∈ legacy ClosedReason 家族 / reopened / 缺失——
- * 现行写侧 invariant 下 settle 必带 stopReason，缺失是真异常形态）。缺省显示成功会让
- * 异常静默隐形；文案携带 stopReason 原文供排障归因。
+ * [R1] 兜底通用异常文案（stopReason ∈ legacy ClosedReason 家族剩余 / disconnected /
+ * reopened / 引擎原值 stop / error / aborted / 缺失——现行写侧 invariant 下 settle 必带
+ * stopReason，缺失是真异常形态）。缺省显示成功会让异常静默隐形；文案携带 stopReason
+ * 原文供排障归因。
  */
 function genericStopText(stopReason: string | undefined): string {
   return stopReason !== undefined
@@ -62,8 +64,9 @@ function genericStopText(stopReason: string | undefined): string {
 
 /**
  * [R1] 状态映射矩阵：record (status, stopReason) → 步骤行 (status, error)。
- * 13 值域逐行（StopReason 全枚举 = CLOSED_REASONS 六值 + disconnected + 中断族三值 +
- * reopened + completed + failed，见 subagent-core assembly/types.ts）：
+ * StopReason 全枚举 16 值逐行（= CLOSED_REASONS 六值 + disconnected 读侧兜底 + 中断族
+ * 三值 + reopened + 引擎原值三值 stop / error / aborted + 迁移期旧值 completed / failed，
+ * 见 subagent-core execution/domain/record-types.ts）：
  *
  * | record status | stopReason                                          | 步骤行           |
  * |--------------|-----------------------------------------------------|------------------|
@@ -74,14 +77,15 @@ function genericStopText(stopReason: string | undefined): string {
  * | idle         | gc（error 非空）                                     | failed + error 透传 |
  * | idle         | cancelled                                           | failed + 文案填充 |
  * | idle         | interrupted / interrupted-by-restart / -by-parent    | failed + 原文填充 |
- * | idle         | 其余任意值（legacy 家族剩余 + reopened）               | failed + 通用文案 |
+ * | idle         | 其余任意值（legacy 家族剩余 + disconnected + reopened + 引擎原值 stop/error/aborted） | failed + 通用文案 |
  * | idle         | 缺失（真异常形态）                                    | failed + 通用文案 |
  *
  * gc 是双语义值按 error 分叉：写侧 D7 例外族（subagent-core run-orchestration.ts
  * settleOneShotOutcome / record-lifecycle.ts finalizeFailed）workflow origin 成功与失败
  * settle 均写 closed/"gc"，成败由 error 区分（成功 result.error 空、失败恒带错误文本）；
- * 与 outcome 权威派生 deriveOutcome 的 error-truthy 判定同构（监督器放弃等其余 gc 写入
- * 点恒带非空 error，落 failed 分支不受影响）。
+ * 与 outcome 权威派生 deriveOutcome 的 error-truthy 判定同构（历史 gc 写入点恒带
+ * 非空 error——旧监督器放弃支已随 924ace33f 监督器整机清退删除——落 failed 分支
+ * 不受影响）。
  *
  * 中断族必须可见不可静默隐形（run 进行中宿主崩溃/重启是 ① 的设计目标场景）；error 非空时
  * record.error 恒优先（真实错误文本），填充仅兜 error 空。
@@ -94,8 +98,8 @@ export function mapStepStatusFromRecord(record: Pick<SubagentRecord, 'status' | 
 } {
   if (record.status === 'running') return { status: 'running', error: undefined }
   // idle（终态概念在 stopReason）
-  // 下方单值分支字面量均为 core 词表成员（completed/failed ∈ ROUND_TERMINAL_STOP_REASONS，
-  // gc/cancelled ∈ CLOSED_REASONS，barrel 可取）——但四个分支行为各异（done / failed /
+  // 下方单值分支字面量均为 core 词表成员（completed/failed ∈ LEGACY_INFERRED_STOP_REASONS
+  // 迁移期旧值，gc/cancelled ∈ CLOSED_REASONS）——但四个分支行为各异（done / failed /
   // error 分叉 / 文案填充），用集合常量 includes 判定会把同族其余成员吸进单一分支改变
   // 行为（如 CLOSED_REASONS 含 parent-shutdown 等 4 值），故保留单值字面量判定。
   const reason = record.stopReason

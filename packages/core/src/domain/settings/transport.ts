@@ -15,7 +15,7 @@
  * 保存与编辑体保存合流到同一 `setProvider`（quotaAutoEnabled reply 透传语义不变）。
  *
  * 两个 adapter 证明 seam 真实：real adapter（renderer settings-transport-adapter，
- * 转发 @/api/WS 命令）+ mock adapter（@/api 三元的 mock 轨，core/transport/mock）。
+ * 转发 @/api/WS 命令）+ mock adapter（@/api 三元的 mock 层，core/transport/mock）。
  *
  * 注入机制（C-W1-2）：仿 platform/port.ts 模块级单例模式——provideSettingsTransport
  * 注入、getSettingsTransport 注入前调用 fail-fast 抛错（防隐式 undefined）。
@@ -41,6 +41,7 @@ import type {
   CodemodeEnabledResult,
   CodemodeSetEnabledResult,
   LlmRetryConfig,
+  RetryableErrorRule,
   NetworkProxyConfig,
   NetworkProxyStatsRange,
   NetworkProxyTestResult,
@@ -220,6 +221,8 @@ export interface SettingsTransport {
   getTerminalConfig(): Promise<{ config: TerminalConfig; corrupted: boolean }>
   /** 读取 LLM 重试配置（configured=false：无显式 retry 配置，config 为合并 pi 默认后的值） */
   getRetryConfig(): Promise<{ config: LlmRetryConfig; configured: boolean }>
+  /** 读取重试规则合并视图（内置层基线⊕远程 + 用户自定义层，subagent-observability §3.3.12） */
+  getRetryRules(): Promise<ServerMessageMap['config.retryRules']>
   /** 读取网络代理配置（llm-network-proxy §5 U1 协议，reply = config.networkProxy 同形） */
   getNetworkProxyConfig(): Promise<ServerMessageMap['config.networkProxy']>
   /** 请求统计读聚合（range 时间范围过滤；truncatedNote = 「累计」档截断窗口标注，缺省无截断语义） */
@@ -298,6 +301,8 @@ export interface SettingsTransport {
   setTerminalConfig(config: TerminalConfig): Promise<{ config: TerminalConfig; corrupted: boolean }>
   /** 保存 LLM 重试配置（整体保存；越界 reject） */
   setRetryConfig(config: LlmRetryConfig): Promise<{ config: LlmRetryConfig; configured: boolean }>
+  /** 保存重试规则用户自定义层（校验失败 reject；reply = 服务端读回终态） */
+  setRetryRules(customRules: RetryableErrorRule[]): Promise<ServerMessageMap['config.retryRules']>
   /** 全量保存网络代理配置（单页单保存语义：一次整页草稿写 ext-config；校验失败 reject） */
   setNetworkProxyConfig(config: NetworkProxyConfig): Promise<ServerMessageMap['config.networkProxy']>
   /** 测试连接（runtime 两段探测：代理可达性 + 经代理出站；归因文案与耗时由 runtime 产出） */
@@ -427,6 +432,8 @@ export interface SettingsTransport {
   onTerminalConfig(h: (cfg: TerminalConfig, corrupted: boolean) => void): () => void
   /** LLM 重试配置广播（多窗口同步） */
   onRetryConfig(h: (payload: { config: LlmRetryConfig; configured: boolean }) => void): () => void
+  /** 重试规则视图广播（保存成功后推回，多窗口同步） */
+  onRetryRules(h: (payload: ServerMessageMap['config.retryRules']) => void): () => void
   /** 网络代理配置广播（保存成功后推回，多窗口同步） */
   onNetworkProxyConfig(h: (config: NetworkProxyConfig) => void): () => void
 

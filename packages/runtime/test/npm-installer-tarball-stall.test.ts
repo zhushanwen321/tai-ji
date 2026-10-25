@@ -302,7 +302,7 @@ describe('tarball stall 兜底 — 触发路径（默认 60s 窗口，fake timer
   })
 })
 
-// 真实传输组（集成轨）：trickle ~1s 真实限速传输 / 真实短定时器窗口——传输墙钟无
+// 真实传输组（集成组）：trickle ~1s 真实限速传输 / 真实短定时器窗口——传输墙钟无
 // 确定性完成信号，本地默认跳过（见文件头门控说明）
 describe.skipIf(
   !INTEGRATION_TESTS_ENABLED,

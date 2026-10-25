@@ -32,6 +32,7 @@
 退出码：0 通过 / 2 违规
 """
 
+from __future__ import annotations
 import json
 import re
 import subprocess

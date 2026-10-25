@@ -27,7 +27,7 @@ import {
   type SessionView as SdkSessionView,
 } from "@zhushanwen/subagent-engine-sdk";
 
-import type { AgentCallOpts } from "../../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../../shared/agent-call-types.ts";
 import { getHostServices } from "../../../core/host-services.ts";
 import { CANCEL_SETTLE_GRACE_WINDOW_MS, resolveArmedReceiptTimeoutMs } from "./armed-receipt-config.ts";
 import { getLogger } from "../../../core/logger.ts";
@@ -219,9 +219,10 @@ export class RemoteEngine implements EnginePort {
       // 抛给用户（capabilities 注释的消费点登记）。
       (this as { setModel?: unknown }).setModel = undefined;
     }
-    if (opts.manifest.modelTranslation === undefined) {
+    if (opts.manifest.modelTranslation === undefined || opts.manifest.modelTranslation === null) {
       // [engine-ref-translation D5] translateModelRef 成员同款形态映射：manifest 无
-      // modelTranslation 声明 → 成员**不实现**——消费方
+      // modelTranslation 声明（null 合法等价省略，同 modelCatalog 三态）→ 成员
+      // **不实现**——消费方
       // （resolveEngineModelWithTranslation）以 `route.engine.translateModelRef !==
       // undefined` 探测：缺席 = 翻译恒等透传 + 生效回执 warn（部署形态翻译面缺席
       // 不再静默——2026-10-16 修复：staged 引擎经 cli descriptor 装载时，此前
@@ -237,7 +238,11 @@ export class RemoteEngine implements EnginePort {
    * 缺席时本成员已在构造器摘除（见构造器注释）。
    */
   translateModelRef(modelRef: string): string {
-    return translateByTable(this.opts.manifest.modelTranslation as Record<string, string>, modelRef);
+    const table = this.opts.manifest.modelTranslation;
+    // 运行时窄化替代 as 断言（S-15）：null 形态构造器已摘除本成员，此处兜住
+    // 窄化缺口——缺席按翻译面恒等透传语义处理，不把 undefined/null 炸进查表。
+    if (table === undefined || table === null) return modelRef;
+    return translateByTable(table, modelRef);
   }
 
   /** 直读 manifest 注册期快照（无缓存——每次调用同值，快照不可变）。 */
@@ -304,8 +309,18 @@ export class RemoteEngine implements EnginePort {
     return { canonicalRef: modelRef };
   }
 
-  async probe(probeOpts?: { force?: boolean }): Promise<ProbeReport> {
-    await this.opts.client.ensureConnected();
+  /**
+   * 协议 probe。probeOpts.rootSessionId（DC-12）：service 层注入的权威根——probe 与
+   * 后续 run 命中同一 (socket, root) 共享连接（双连接 = runtime 双 spawn + rebind 的
+   * 3s close grace 等待）；缺席时由 runtime transport 以 control env 的 spawn 期值
+   * 回落（嵌套宿主 env 已是真根，首层 create 路径可能是 temp id）。
+   */
+  async probe(probeOpts?: { force?: boolean; rootSessionId?: string }): Promise<ProbeReport> {
+    await this.opts.client.ensureConnected(
+      probeOpts?.rootSessionId !== undefined && probeOpts.rootSessionId.length > 0
+        ? { rootSessionId: probeOpts.rootSessionId }
+        : undefined,
+    );
     const report = (await this.opts.client.request("probe", {
       force: probeOpts?.force ?? false,
     })) as SdkProbeReport;
@@ -318,6 +333,9 @@ export class RemoteEngine implements EnginePort {
    * code 保留：三型失败 + engine_run_not_active 无活进程形态——消费方按 §7.2 处置表
    * 分派）。非 native 引擎的本成员已在构造器摘除（见构造器注释）；位 native 的调用
    * 若引擎侧漂移未实装，由引擎 server 的 setModel 分发行结构化拒。
+   *
+   * 无参 ensureConnected：setModel 作用于活 run（连接已按 run 锚定的权威根打开），
+   * 与 read 同理不受 DC-12 双连接窗口影响。
    */
   async setModel(params: SetModelParams): Promise<SetModelResult> {
     await this.opts.client.ensureConnected();
@@ -341,7 +359,14 @@ export class RemoteEngine implements EnginePort {
     // [B-U-1] 根会话权威 = per-run ctx（RunContext.sessionRootId）→ engine_open
     // 归属键；不能依赖 control env 的 spawn 期 temp id（create 路径 rekey 不更新
     // 已 spawn 的 pi env，会致 live 流/流状态拉取双失效，且遮蔽嵌套身份根）。
-    await this.opts.client.ensureConnected(ctx.sessionRootId);
+    // [S-10] recordId = record 锚（续聊轮沿用原 record）→ launch.recordId（channel
+    // 树父链挂点），与引擎侧 buildRunIdentityParams 同源。
+    await this.opts.client.ensureConnected({
+      ...(ctx.sessionRootId !== undefined && ctx.sessionRootId.length > 0
+        ? { rootSessionId: ctx.sessionRootId }
+        : {}),
+      recordId: ctx.resume?.recordId ?? ctx.taskId,
+    });
 
     // [W3 契约⑤ run 期接线] gate 位方向判定②：同步部分 assertTaskShapeSupported 读
     // manifest 拦「少声明」；「多声明」（manifest 声明可用、引擎实态不符）gate 同步部分
@@ -473,7 +498,11 @@ export class RemoteEngine implements EnginePort {
     }
   }
 
-  /** 协议 read（dataDir 必填——引擎数据根，构造注入）。 */
+  /**
+   * 协议 read（dataDir 必填——引擎数据根，构造注入）。无参 ensureConnected：连接
+   * 归属键沿用 run 锚定的权威值（requestedRootSessionId——run 后调用恒安全；DC-12
+   * 的双连接只发生在「probe 以 env temp 根先建连」的首轮窗口）。
+   */
   async read(handle: EngineHandle): Promise<SessionView> {
     await this.opts.client.ensureConnected();
     const view = (await this.opts.client.request("read", {

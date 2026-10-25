@@ -70,6 +70,34 @@ describe("buildBashKillSummary", () => {
 		expect(buildBashKillSummary({ task_id: "t1" }, resultOf(text))).toBe(`Kill failed: ${"x".repeat(80)}…`);
 	});
 
+	it("reason 含换行 → 摘要归一单行（details.summary 单行契约）", () => {
+		const text = JSON.stringify({ killed: false, reason: "no such task\ntry bash_output" });
+		expect(buildBashKillSummary({ task_id: "t1" }, resultOf(text))).toBe(
+			"Kill failed: no such task try bash_output",
+		);
+	});
+
+	it("reason 含 emoji 超长 → 码点安全截断不劈代理对（S-3）", () => {
+		// "x🎉" = 3 个 UTF-16 码元；UTF-16 slice(0,80) 会在第 80 码元处劈开 🎉 的代理对。
+		// 码点口径：60 码点 ≤ 80 → 原样保留（全为完整代理对）
+		const text = JSON.stringify({ killed: false, reason: "x🎉".repeat(30) });
+		const summary = buildBashKillSummary({ task_id: "t1" }, resultOf(text));
+		expect(summary).not.toContain("\n");
+		const loneSurrogates = Array.from(summary).filter(
+			(ch) => ch.length === 1 && /[\uD800-\uDFFF]/.test(ch),
+		);
+		expect(loneSurrogates).toHaveLength(0);
+
+		// 超过 80 码点的 emoji 输入同样不产生孤立代理项（截 80 码点 + 省略号）
+		const long = JSON.stringify({ killed: false, reason: "🎉".repeat(100) });
+		const clipped = buildBashKillSummary({ task_id: "t1" }, resultOf(long));
+		const loneInClipped = Array.from(clipped).filter(
+			(ch) => ch.length === 1 && /[\uD800-\uDFFF]/.test(ch),
+		);
+		expect(loneInClipped).toHaveLength(0);
+		expect(clipped).toBe(`Kill failed: ${"🎉".repeat(80)}…`);
+	});
+
 	it("content 非 JSON（防御）→ 兜底 Done", () => {
 		expect(buildBashKillSummary({ task_id: "t1" }, resultOf(""))).toBe("Done");
 	});

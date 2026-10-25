@@ -26,7 +26,7 @@ function makeScheduleCreate(overrides: Partial<ExtensionUIRequest> = {}): Extens
   return {
     sessionId: 'sess-A',
     requestId: 'r1',
-    method: 'select',
+    dialogKind: 'select',
     form: true,
     scheduleCreate: true,
     scheduleDraft: {
@@ -42,11 +42,11 @@ function makeScheduleCreate(overrides: Partial<ExtensionUIRequest> = {}): Extens
 
 /** 构造表单请求（form 帧形状） */
 function makeForm(requestId: string): ExtensionUIRequest {
-  return { sessionId: 'sess-A', requestId, method: 'select', form: true }
+  return { sessionId: 'sess-A', requestId, dialogKind: 'select', form: true }
 }
 
 function makeDialog(requestId: string): ExtensionUIRequest {
-  return { sessionId: 'sess-A', requestId, method: 'confirm' }
+  return { sessionId: 'sess-A', requestId, dialogKind: 'confirm' }
 }
 
 describe('form 键判定：hasPendingBlockingOverlay 覆盖 legacy scheduler 表单（有 pending 阻塞 overlay）', () => {
@@ -80,10 +80,10 @@ describe('form 键判定：hasPendingBlockingOverlay 覆盖 legacy scheduler 表
   })
 
   it('判定侧收敛语义：裸 legacy 形状（无 form 键、未经归一）不命中 overlay 判定', () => {
-    // store 判定键只认 form——裸 scheduleCreate/askUser 形状只在归一层之前存在
+    // store 判定键只认 form——无 form 键的形状只在归一层之前存在
     //（useExtensionUI 双挂点保证入 store 前必经归一，此处裸形状 = 归一层回归的探针）
     const store = useExtensionUIStore()
-    store.addRequest('sess-A', { sessionId: 'sess-A', requestId: 'r1', method: 'select', scheduleCreate: true } as Partial<ExtensionUIRequest> as ExtensionUIRequest)
+    store.addRequest('sess-A', { sessionId: 'sess-A', requestId: 'r1', dialogKind: 'select', scheduleCreate: true })
     expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
 
     store.clearSession('sess-A')

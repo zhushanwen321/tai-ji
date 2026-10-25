@@ -14,6 +14,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope } from 'vue'
 import type { ServerMessage } from '@taiji/shared'
+import { createSessionLiveState } from '@taiji/core/domain/session'
 import { createChatStore } from '../store'
 import type { ChatStoreInstance } from '../store'
 import {
@@ -79,7 +80,13 @@ function makeFixture(): Fixture {
   setSubscriptionPorts({ subscribe: subscribeRpc, replay: vi.fn() })
   const unsubscribeRpc = vi.fn().mockResolvedValue(undefined)
   const deps: EnsureStreamSubDeps = {
-    chatApi: { streamSubscribe },
+    // [chat-flow-consistency D4 扩员] getHistory 形状补齐（本文件用例不触发）
+    chatApi: {
+      streamSubscribe,
+      getHistory: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
+    },
+    // [W1 状态层] session.* 状态帧唯一落点（本用例不触达 session.* 状态帧，注入真实 factory 保持契约形状）
+    liveState: createSessionLiveState(),
     toast: { error: vi.fn(), warning: vi.fn() },
     t: (k: string) => k,
   }

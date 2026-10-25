@@ -3,13 +3,13 @@
  *
  * 背景：runtime file.search 等服务只登记真实 pi session，vid 直传必 session_not_found
  * （fileSearch vid 修复，方案 A）。本函数是「vid 只做前端路由 key」契约的解析收尾，
- * 三族虚拟 id（subagent 三段式 / agentcall 两段式 / btw 两段式）规则见函数体注释。
+ * 两族虚拟 id（subagent 三段式 / agentcall 两段式）规则见函数体注释——btw 两段式已随
+ * W4a 身份统一退役（线以 pi 真实 id 直通第一分支）。
  */
 import { describe, it, expect } from 'vitest'
 import {
   resolveVirtualSessionId,
   subagentVirtualId,
-  btwVirtualId,
   agentCallVirtualId,
 } from '../virtual-session-id'
 
@@ -28,13 +28,6 @@ describe('resolveVirtualSessionId — subagent 三段式（自带归属命名空
 
   it('非法两段形态（subagent:foo 残留）→ undefined（fail-safe，不外传残键）', () => {
     expect(resolveVirtualSessionId('subagent:foo')).toBeUndefined()
-  })
-})
-
-describe('resolveVirtualSessionId — btw 两段式（映射即 extract）', () => {
-  it('提取内嵌线 pi session id（线自身是真实 session，runtime hidden 注册）', () => {
-    const vid = btwVirtualId('pi-line-9')
-    expect(resolveVirtualSessionId(vid)).toBe('pi-line-9')
   })
 })
 
@@ -57,5 +50,11 @@ describe('resolveVirtualSessionId — 未知冒号形态', () => {
   it('未知前缀带冒号 → undefined（fail-safe：不把未知 vid 传给 runtime RPC）', () => {
     expect(resolveVirtualSessionId('weird:a:b')).toBeUndefined()
     expect(resolveVirtualSessionId(':')).toBeUndefined()
+  })
+
+  it('W4a：btw 线 session id（pi 真实 id，无冒号）直通——虚拟 id 第三家族已退役', () => {
+    expect(resolveVirtualSessionId('pi-line-9')).toBe('pi-line-9')
+    // 退役后的 btw: 形态按未知冒号形态处理（fail-safe，不会当成线解析）
+    expect(resolveVirtualSessionId('btw:pi-line-9')).toBeUndefined()
   })
 })

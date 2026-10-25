@@ -358,9 +358,11 @@ interface RebuiltTurns {
  * 待匹配队列；usage → usageDelta（token 总量增量返回给调用方累加）。
  *
  * stopReason 语义（与 updateFromEvent 一致）：error/aborted → 设 lastError；
- * stop（正常结束）→ 清 lastError（镜像 turn_end 的清除语义，即前序 turn 的瞬态
- * error 在后续成功 turn 后恢复，不误判 success=false）；其余 stopReason → 保持
- * prevLastError 原值。 [v4 B-1] status 恒 closed 后 lastStopReason 不再参与推导，死变量已删。
+ * stop → **不清 lastError**（[subagent-observability §3.3.5] u3 收编 u2 移交的语义
+ * 分叉——镜像 SDK reducer 新语义「错误事实只追加，lastError = 最后一个非空轮失败，
+ * 跨轮可见」；原「正常结束清 lastError」镜像的是旧 turn_end 清除补偿假设，与真实
+ * 事件序 error → turn_end 相反）；其余 stopReason → 保持 prevLastError 原值。
+ * [v4 B-1] status 恒 closed 后 lastStopReason 不再参与推导，死变量已删。
  *
  * content 非数组 → 跳过 usage/stopReason 处理（镜像原实现的 continue）：turn 仍存在
  * （由调用方 push），lastError 透传 prevLastError、token 增量为 0。
@@ -400,9 +402,8 @@ function applyAssistantMessage(
   let lastError = prevLastError;
   if (msg.stopReason === "error" || msg.stopReason === "aborted") {
     lastError = msg.errorMessage ?? msg.stopReason;
-  } else if (msg.stopReason === "stop") {
-    lastError = undefined;
   }
+  // [subagent-observability §3.3.5] stop 不再清 lastError（语义分叉收编，见方法头注）。
   return { lastError, totalTokensDelta };
 }
 
@@ -509,7 +510,10 @@ function buildReconstructedRecord(
     model,
     thinkingLevel,
     endedAt: rebuilt.lastEntryTsMs,
-    result: resultText.length > 0 ? resultText : undefined,
+    // [subagent-observability §3.3.3 空正文语义] 空正文保真：空串 = 无文本输出
+    // （纯工具调用收尾），非异常——归一 undefined 会抹掉「已收尾无文本」与
+    // 「未产出」的区分。
+    result: resultText,
     error: rebuilt.lastError,
     eventLog,
   };

@@ -90,23 +90,25 @@
           <!-- 行形态 = demo .sess-pop .pr：行首 13px 图标（dim）+ 值（mono 12px fg-2 break-all），
                padding 5px 0 / gap 7px；图标 margin-top 2px 对齐首行文本 -->
           <!-- fork 血缘（原列表行 sub 信息随单行化迁入卡片：spec §8.5「↑ fork 自 <父名>」；
-               demo 无此概念，复用分支行 GitBranch 图标语言） -->
-          <div v-if="session.parentSession" class="flex items-start gap-[7px] py-[5px]">
+               demo 无此概念，复用分支行 GitBranch 图标语言。字段读 displaySession
+               （展示边界合并对象）而非 raw session——parentLabel 只经 prop 注入，
+               读 raw session 恒回退 parentSession 原值） -->
+          <div v-if="displaySession.parentSession" class="flex items-start gap-[7px] py-[5px]">
             <GitBranch class="mt-[2px] size-[13px] shrink-0 text-neutral-dim" :stroke-width="1.8" />
             <span class="min-w-0 break-all text-[length:var(--text-xs)] leading-[1.55] text-neutral-fg-2">
-              {{ t('sidebar.sessionItem.forkFrom') }} {{ session.parentLabel || session.parentSession }}
+              {{ t('sidebar.sessionItem.forkFrom') }} {{ displaySession.parentLabel || displaySession.parentSession }}
             </span>
           </div>
-          <div v-if="session.gitBranch" class="flex items-start gap-[7px] py-[5px]">
+          <div v-if="displaySession.gitBranch" class="flex items-start gap-[7px] py-[5px]">
             <GitBranch class="mt-[2px] size-[13px] shrink-0 text-neutral-dim" :stroke-width="1.8" />
             <span class="min-w-0 break-all font-mono text-[length:var(--text-xs)] leading-[1.55] text-neutral-fg-2">
-              {{ session.gitBranch }}
+              {{ displaySession.gitBranch }}
             </span>
           </div>
           <div class="flex items-start gap-[7px] py-[5px]">
             <Folder class="mt-[2px] size-[13px] shrink-0 text-neutral-dim" :stroke-width="1.8" />
             <span class="min-w-0 break-all font-mono text-[length:var(--text-xs)] leading-[1.55] text-neutral-fg-2">
-              {{ session.cwd }}
+              {{ displaySession.cwd }}
             </span>
           </div>
           <!-- 末行 meta（demo .pr.meta：dim 12px 纯文本行；demo 内容 = `upd · msgs` 两段，
@@ -157,6 +159,9 @@ const props = withDefaults(defineProps<{
   /** 父 session 显示名（SessionList 反查血缘注入，hover 详情卡血缘行展示「fork 自 <父名>」；
    *  缺省回退 session.parentSession 原值——卡片血缘行的 `parentLabel || parentSession`） */
   parentLabel?: string
+  /** 交接目标显示名（chat-flow-consistency U9 / S8，SessionList 按 handedOffTo 反查注入，
+   *  parentLabel 同款机制；查不到 = 空串）：Display 已交接徽标 title 用，回退显目标 id 前缀 */
+  handoffTargetLabel?: string
   /**
    * 刚恢复高亮（session-archive §5.1 恢复样例「accent-soft 高亮渐隐」）：unarchive 成功
    * 后由 SessionList 按 archive store restoredSessionId 注入，数秒后随 store 清除渐隐回
@@ -212,10 +217,17 @@ const canStop = computed(() => props.session.status === 'active')
  * parentLabel 是展示期注入字段（不污染 SessionSummary 实体），合并在展示边界完成——
  * 此前 SessionList 传了 :parent-label 但 SessionItem 未声明该 prop，血缘 sub 行实际
  * 回退到 parentSession 原值（文件路径/UUID，不可读），与 SessionList 注释声明的机制不符。
+ * [chat-flow-consistency U9 / S8] handoffTargetLabel 同款合并（已交接徽标 title 用）。
+ * 列表主行（SessionItemDisplay）与 hover 详情卡都读本对象，不读 raw props.session。
  */
-const displaySession = computed<SessionItemSession>(() =>
-  props.parentLabel ? { ...props.session, parentLabel: props.parentLabel } : props.session,
-)
+const displaySession = computed<SessionItemSession>(() => {
+  let merged = props.session
+  if (props.parentLabel) merged = { ...merged, parentLabel: props.parentLabel }
+  if (props.handoffTargetLabel !== undefined) {
+    merged = { ...merged, handoffTargetLabel: props.handoffTargetLabel }
+  }
+  return merged
+})
 
 /**
  * 删除→归档两段式确认态（session-archive D6：确认 UI 在 Actions 子组件，经 v-model:confirming

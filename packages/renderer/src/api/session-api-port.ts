@@ -16,9 +16,17 @@
  * 与移动壳行为分叉）；rest 传播让端口签名成为唯一参数来源，加参零改动即透传。
  * onConfigSessions 是唯一非透传成员（改编 msg.payload.groups 给 handler），同取 rest 形态
  * 保持全文件单一形态，args[0] 即 handler。
+ *
+ * [W2 权威拉取与冷读] getState 是第二个非透传成员：该 RPC 经 request helper 的 command
+ * 直发，不经 @/api 的 session 域代理。原因是它只有一个消费方（createUseSession 的拉取
+ * 对账），而 @/api 的 session 域在 mock 模式整体替换为 core mock 实现——给域加一个成员
+ * 会强制 mock 同步实现一个「无 runtime 可读」的空壳。直发下 mock 模式 ws 未连，
+ * command 立即以 notDelivered reject，由 core 侧静默降级承接（行为 mock 层不在 W2
+ * 影响面内）。先例 = useGenStats / stores/canvas 的 command 直发。
  */
 import { session as sessionApi } from '@/api'
 import * as events from '@taiji/core/transport/api'
+import { command, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 import type { SessionApiPort } from '@taiji/core'
 
 /**
@@ -40,5 +48,9 @@ export function buildSessionApiPort(): SessionApiPort {
       sessionApi.migrateImage(...args),
     onConfigSessions: (...args: Parameters<SessionApiPort['onConfigSessions']>) =>
       events.onGlobalType('config.sessions', (msg) => args[0](msg.payload.groups)),
+    // [W2] session.getState 直发（不经 session 域代理，理由见文件头）。reply 与 request
+    // 同名、payload 消费型；会话不存在 = SESSION_NOT_FOUND reject（core 侧显式未知）。
+    getState: (id: string) =>
+      command('session.getState', { sessionId: id }, RPC_BACKSTOP_TIMEOUT_MS),
   }
 }

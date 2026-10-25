@@ -23,6 +23,17 @@
  * 对比锚定（R4 公式重验，2026-10-17 六主题 v2 后）：暗色族 ≈11.4–11.9:1 / 皓 10.65 / 青墨 10.62 / 朱印 10.50，
  * 六主题全部过统一 ≥4:1 线；旧「朱印 code-c 本色字 3.92:1」的 3.9 豁免随 R4 公式
  * 落地失效，后随 2026-10-10 裁决统一提升至 WCAG AA 4.5:1（见 CODE_CONTRAST_MIN）。
+ *
+ * 实底前景令牌（--accent-fg / --danger-fg / --success-fg 对各自实底）对比断言：
+ * 六主题令牌契约的「实底必有前景令牌」规则的数值面固化。accent-fg / success-fg 为
+ * 深字公式（color-mix(in oklch, 基色 12%, 深底)），按 WCAG AA 4.5:1 正文线断言；
+ * danger-fg 为亮字（var(--neutral-fg)，2026-10-23 裁决：旧 12% 混深底公式产出暗红褐，
+ * 红底暗红字视觉发闷，vision 真机验收三轮判 FAIL 后废弃），亮色族为 #ffffff 白字覆盖。
+ * danger 实底（#bf6b6b 中明度）上任何亮字数学上过不了 4.5:1 正文线，实底短标签按钮按
+ * WCAG 1.4.11 图形组件线 3:1 断言（对齐 destructive 按钮既有先例与 2026-10-23 已验收
+ * 视觉）。success-fg 不随 danger 改亮字：--success 明度更高，亮字仅 2.18:1 连组件线都
+ * 不过，深字公式 6.24:1 过正文线且无视觉投诉，保留原形态。
+ * warn 不设 -fg（无实底用法，见 docs/DESIGN.md §4.4），不在断言范围。
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -269,6 +280,25 @@ describe('行内 code 对比（场景 2③，六主题；demo R4 弱化终态 = 
     ]
   }
 
+  /** 实底 -fg 原始声明 → linear sRGB 三元组。接受三种形态：hex 字面值（亮色族白字覆盖）、
+   * color-mix(in oklch, var(--基色) N%, #hex) 公式（accent-fg 深字）、var(--neutral-fg)
+   * 引用（danger-fg/success-fg 亮字，2026-10-23 裁决形态——引用值以当前主题实值代入，
+   * 与浏览器 var 解析行为一致，由调用方传入该主题的 neutral-fg hex）。 */
+  function solidFgToLinear(
+    fgRaw: string,
+    baseName: 'accent' | 'danger' | 'success',
+    baseHex: string,
+    themeNeutralFg: string,
+  ): [number, number, number] {
+    if (/^#[0-9a-fA-F]{6}$/.test(fgRaw)) return hexToLinearRgb(fgRaw)
+    if (fgRaw === 'var(--neutral-fg)') return hexToLinearRgb(themeNeutralFg)
+    const mix = fgRaw.match(
+      new RegExp(`^color-mix\\(in oklch,\\s*var\\(--${baseName}\\)\\s*([\\d.]+)%,\\s*(#[0-9a-fA-F]{6})\\)$`),
+    )
+    expect(mix, `-fg 公式形态非 color-mix(in oklch, var(--${baseName}) N%, #hex) 或 var(--neutral-fg)：${fgRaw}`).not.toBeNull()
+    return mixOklabToLinear(baseHex, Number(mix![1]) / 100, mix![2])
+  }
+
   it('--md-code-fg（neutral-fg 85% 混 code-c）于合成底（code-c N% 叠 surface）上对比 ≥4:1（六主题统一线）', () => {
     for (const theme of THEMES) {
       const raw = parseThemeRawVars(theme, ['--neutral-fg', '--code-c', '--md-code-bg', '--md-code-fg'])
@@ -291,6 +321,42 @@ describe('行内 code 对比（场景 2③，六主题；demo R4 弱化终态 = 
       const ratio = contrastRatioLinear(fgLinear, hexToLinearRgb(codeBg))
       const min = CODE_CONTRAST_MIN[theme.id]
       expect(ratio, `${theme.label} code ${fgRaw} on ${codeBg}（code-c ${bgMix![1]}% 叠 surface）= ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(min)
+    }
+  })
+
+  it('实底 -fg 对各自底色对比：accent-fg / success-fg ≥4.5:1（AA 正文线，深字公式）；danger-fg ≥3:1（WCAG 1.4.11 图形组件线，亮字形态——2026-10-23 裁决：中明度 danger 实底上任何亮字数学上过不了 4.5:1，旧 12% 混深底暗字公式压线凑 AA 致视觉发闷已废弃，实底短标签按组件线断言，对齐 destructive 先例；success 底更亮、亮字仅 2.18:1 故保留深字公式不随改）', () => {
+    const MIN_BY_BASE = { accent: 4.5, danger: 3.0, success: 4.5 } as const
+    for (const theme of THEMES) {
+      const raw = parseThemeRawVars(theme, ['--accent', '--accent-fg', '--danger', '--danger-fg', '--success', '--success-fg'])
+      const neutralFg = tokensByTheme.get(theme.id)!['--neutral-fg']
+      for (const name of ['accent', 'danger', 'success'] as const) {
+        const baseHex = (raw[`--${name}`] ?? '').toLowerCase()
+        expect(baseHex, `主题 ${theme.label} --${name} 非 hex 字面值：${raw[`--${name}`]}`).toMatch(/^#[0-9a-fA-F]{6}$/)
+        const fgLinear = solidFgToLinear(raw[`--${name}-fg`] ?? '', name, baseHex, neutralFg)
+        const ratio = contrastRatioLinear(fgLinear, hexToLinearRgb(baseHex))
+        expect(ratio, `${theme.label} --${name}-fg on --${name}（${baseHex}）= ${ratio.toFixed(2)}:1 低于 ${MIN_BY_BASE[name]}:1`).toBeGreaterThanOrEqual(MIN_BY_BASE[name])
+      }
+    }
+  })
+
+  it('--danger-text（danger 78% 混 neutral-fg 提亮档）于浮层底 --bg 上对比 ≥4.5:1（六主题；套餐浮层窗口百分比小字消费点，环/条填充仍用 --danger 原色）', () => {
+    for (const theme of THEMES) {
+      const raw = parseThemeRawVars(theme, ['--danger-text', '--danger', '--neutral-fg', '--bg'])
+      const fgRaw = (raw['--danger-text'] ?? '').trim()
+      const mix = fgRaw.match(/^color-mix\(in oklch,\s*var\(--danger\)\s*([\d.]+)%,\s*var\(--neutral-fg\)\)$/)
+      expect(
+        mix,
+        `主题 ${theme.label} --danger-text 形态非 color-mix(in oklch, var(--danger) N%, var(--neutral-fg))：${fgRaw}`,
+      ).not.toBeNull()
+      const danger = (raw['--danger'] ?? '').toLowerCase()
+      const fg = (raw['--neutral-fg'] ?? '').toLowerCase()
+      const bg = (raw['--bg'] ?? '').toLowerCase()
+      expect(danger, `主题 ${theme.label} --danger 非 hex 字面值：${raw['--danger']}`).toMatch(/^#[0-9a-fA-F]{6}$/)
+      expect(fg, `主题 ${theme.label} --neutral-fg 非 hex 字面值：${raw['--neutral-fg']}`).toMatch(/^#[0-9a-fA-F]{6}$/)
+      expect(bg, `主题 ${theme.label} --bg 非 hex 字面值：${raw['--bg']}`).toMatch(/^#[0-9a-fA-F]{6}$/)
+      const fgLinear = mixOklabToLinear(danger, Number(mix![1]) / 100, fg)
+      const ratio = contrastRatioLinear(fgLinear, hexToLinearRgb(bg))
+      expect(ratio, `${theme.label} --danger-text on --bg（${bg}）= ${ratio.toFixed(2)}:1 低于 WCAG AA 4.5:1`).toBeGreaterThanOrEqual(4.5)
     }
   })
 })

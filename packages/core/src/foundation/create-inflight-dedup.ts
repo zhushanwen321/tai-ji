@@ -28,11 +28,32 @@
  *   落地过 live 帧的分区被陈旧 reply 回滚（useContextUsage 收编前注释的教训）。
  * - 单键退化形态（全局唯一 in-flight 变量，如 useProjectSkills 的 globalInFlight）：
  *   固定 key 常量 `dedup.run(SINGLE_KEY, fn)`——同 key 去重语义自然退化为单变量形态。
+ * - trailing 补拉（在途期间的新触发不丢弃：如 useArchiveView 的 refreshArchives——
+ *   帧到达密集时复用旧 promise 会拿到旧快照，须完成后补拉一次收敛到最新）：
+ *   `const dedup = createInflightDedup<void>({ trailing: true })`。
  *
  * dispose/clear 面：delete(key) / keys()（快照副本，供前缀匹配批量失效，如
  * subscription-state 的 invalidateSubscription）/ clear()（全清，供 dispose 钩子与
  * 测试隔离）。被清条目的 settle 回调经引用比对 no-op，无副作用。
  */
+
+/**
+ * 工厂选项。
+ *
+ * trailing 补拉语义（在途期间新触发的「最终一致」保障，典型场景 = useArchiveView
+ * refreshArchives：帧密集到达时复用旧 promise 会拿到旧快照，须完成后补拉一次收敛）：
+ * - 同 key 在途期间的新 run 不丢弃：登记补拉标记并复用在途 entry（触发者拿到的是
+ *   **首轮** promise，不等待补拉——与「await 在途任务后返回」的手写形态等价）
+ * - 在途 settle 后由工具自动再执行一轮 fn（执行首次发起的 fn——复用者的 fn 本就
+ *   不执行）；在途期间的多次触发合并为一次补拉（标记是集合成员资格，非计数）
+ * - 补拉轮的在途/settle 与首轮同构：补拉期间又有新触发则继续补拉（循环收敛）
+ * - delete(key) / clear() 显式失效同批清补拉标记：被清条目 settle 后不补拉
+ *   （显式失效语义优先于自动补拉）
+ * - 补拉轮的 rejection 由新一轮 settle 清理链接管，不产生 unhandled rejection
+ */
+export interface InflightDedupOptions {
+  trailing?: boolean
+}
 
 /** in-flight 去重表条目：promise 本体 + 发起时刻元数据。 */
 export interface InflightEntry<T, M> {
@@ -78,9 +99,34 @@ export interface InflightDedup<T, M> {
  * @typeParam T 异步操作的 resolve 值类型
  * @typeParam M entry 附带元数据类型（默认 void = 无元数据；声明具体类型后 run 的
  *   meta 参数变为必传——seqAtIssue 类簿记漏传会编译期报错而非运行时 undefined）
+ * @param options trailing 补拉开关（见 InflightDedupOptions；缺省 = 纯去重，settle 即结束）
  */
-export function createInflightDedup<T, M = void>(): InflightDedup<T, M> {
+export function createInflightDedup<T, M = void>(options?: InflightDedupOptions): InflightDedup<T, M> {
   const entries = new Map<string, InflightEntry<T, M>>()
+  // trailing 补拉标记（仅 trailing 模式登记）：在途期间的新 run 置位，settle 后据此再执行一轮
+  const trailingPending = new Set<string>()
+
+  function start(key: string, fn: () => Promise<T>, meta: M): InflightEntry<T, M> {
+    const promise = fn()
+    const entry: InflightEntry<T, M> = { promise, meta }
+    entries.set(key, entry)
+
+    // settle 即清 + 引用比对防误删 + trailing 补拉：仅当 Map 中仍是自己的 entry 才删除。
+    // then 双分支而非 .finally()：finally 返回的新 promise 会镜像 rejection，
+    // void 丢弃即产生 unhandled rejection；双分支等价且 reject 分支已接管
+    // （useGenStats/useContextUsage 收编前的同款教训）。补拉轮同样经本链接管 rejection。
+    const clearOnSettle = (): void => {
+      // 条目被外部 delete/clear（或被同 key 新 entry 覆盖）时不补拉：显式失效语义优先
+      if (entries.get(key) !== entry) return
+      entries.delete(key)
+      if (options?.trailing && trailingPending.delete(key)) {
+        start(key, fn, meta)
+      }
+    }
+    void promise.then(clearOnSettle, clearOnSettle)
+
+    return entry
+  }
 
   function run(
     key: string,
@@ -88,24 +134,15 @@ export function createInflightDedup<T, M = void>(): InflightDedup<T, M> {
     ...meta: M extends void ? [meta?: undefined] : [meta: M]
   ): InflightEntry<T, M> {
     const existing = entries.get(key)
-    if (existing) return existing
-
-    const promise = fn()
+    if (existing) {
+      // trailing 模式：在途期间的新触发登记补拉标记（多次触发合并为一次），触发者
+      // 复用在途 entry（首轮 promise，不等补拉）
+      if (options?.trailing) trailingPending.add(key)
+      return existing
+    }
     // 条件元组 rest 在泛型未实例化时无法证明与 M 兼容，此处断言是本模块唯一的
     // 类型收窄点（运行时 meta[0] 的真实类型由签名保证）
-    const entry: InflightEntry<T, M> = { promise, meta: meta[0] as M }
-    entries.set(key, entry)
-
-    // settle 即清 + 引用比对防误删：仅当 Map 中仍是自己的 entry 才删除。
-    // then 双分支而非 .finally()：finally 返回的新 promise 会镜像 rejection，
-    // void 丢弃即产生 unhandled rejection；双分支等价且 reject 分支已接管
-    // （useGenStats/useContextUsage 收编前的同款教训）。
-    const clearOnSettle = (): void => {
-      if (entries.get(key) === entry) entries.delete(key)
-    }
-    void promise.then(clearOnSettle, clearOnSettle)
-
-    return entry
+    return start(key, fn, meta[0] as M)
   }
 
   return {
@@ -113,10 +150,12 @@ export function createInflightDedup<T, M = void>(): InflightDedup<T, M> {
     has: (key: string): boolean => entries.has(key),
     delete: (key: string): void => {
       entries.delete(key)
+      trailingPending.delete(key)
     },
     keys: (): string[] => [...entries.keys()],
     clear: (): void => {
       entries.clear()
+      trailingPending.clear()
     },
   }
 }

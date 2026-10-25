@@ -1,5 +1,5 @@
 /**
- * Turn.vue 收纳完成通知编排测试（specs/chat/system-notices.md §3，bg-notice-fold-into-meta）。
+ * Turn.vue 收纳完成通知编排测试
  *
  * 覆盖（renderer i18n setup 回真实 zh 文案——vitest-i18n-setup.ts）：
  * - 落成态 + foldedNotices → 展开区首行起渲染收纳明细行（类型词 / 摘要 / 状态 / 任务 id，
@@ -61,7 +61,7 @@ function mountTurn(turn: MessageTurn, opts: { expanded?: boolean; isSessionActiv
   })
 }
 
-describe('Turn 收纳完成通知（specs/chat/system-notices.md §3）', () => {
+describe('Turn 收纳完成通知', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()

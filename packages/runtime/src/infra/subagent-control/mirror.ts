@@ -3,8 +3,8 @@
  *
  * 引擎进程 stdout 的原始字节经 fd3 pipe 以 NDJSON 帧 `{v, recordId, seq, b64}` 到达
  * （引擎侧 writer = pi-subagent-cli/src/raw-mirror.ts）。本模块把镜像帧还原为字节行，
- * 按 `(rootSessionId, recordId)` 找/建 SubagentTee（首个 mirror 帧登记；engine_closed /
- * control close → dispose 该通道全部 record），并同步落盘磁盘镜像
+ * 按 `(rootSessionId, recordId, channelId)` 找/建 SubagentTee（首个 mirror 帧登记；
+ * engine_closed / control close → dispose 该通道全部 record），并同步落盘磁盘镜像
  * `pi-subagent-<date>-<recordId>.jsonl`。
  *
  * seq 连续性检查（D6）：写侧 seq **per recordId** 单调递增（引擎进程级计数器，跨 run
@@ -92,8 +92,15 @@ export function parseRawMirrorLine(line: string): RawMirrorWireFrame | null {
   return { recordId: raw.recordId, seq: raw.seq, b64: raw.b64 }
 }
 
-function mirrorKey(rootSessionId: string, recordId: string): string {
-  return `${rootSessionId}\u0000${recordId}`
+/**
+ * record 身份键（含 channelId，S-8）：同一 (rootSessionId, recordId) 在多 channel 场景
+ * （换代重连窗口内新旧引擎进程并存、record 复用）必须各持独立镜像——写侧 seq 是
+ * per-recordId **进程级**计数器，两个引擎进程各自从 0 递增，若共身份键会把两路帧序
+ * 混进同一 record（seq 断裂误降级 + record 生命周期绑定首个 channel、释放延后到
+ * owner channel 关闭）。channel 入键后每通道一个镜像、随本通道关闭释放。
+ */
+function mirrorKey(rootSessionId: string, recordId: string, channelId: string): string {
+  return `${rootSessionId}\u0000${recordId}\u0000${channelId}`
 }
 
 /** 换行帧界（镜像行载荷是 b64+JSON，全 ASCII；string 缓冲安全）。 */
@@ -172,8 +179,9 @@ export class SubagentMirrorHub {
     this.readers.delete(channelId)
     const keys = this.channelRecords.get(channelId)
     if (keys !== undefined) {
+      // [S-8] 身份键含 channelId：keys 集合内的 record 全归本通道，逐一释放即可。
       for (const key of keys) {
-        this.disposeRecord(key, channelId)
+        this.disposeRecord(key)
       }
       this.channelRecords.delete(channelId)
     }
@@ -191,10 +199,17 @@ export class SubagentMirrorHub {
 
   /**
    * RPC 路由：流状态查询（session.getSubagentStreamState 的 control 侧数据源）。
-   * 跨 session 查询（key 不匹配）返回 undefined——组合根按缺省形态处理。
+   * 跨 session 查询（无匹配）返回 undefined——组合根按缺省形态处理。
+   * [S-8] 键含 channelId 后同一 (session, record) 可有多通道镜像（换代重连窗口）；
+   * 查询面无 channel 维度，取最近登记的一个（Map 迭代序 = 插入序，新 channel 的
+   * 镜像后建 = 当前活跃流；旧 channel 的镜像随其关闭释放）。
    */
   getStreamStateByRecord(sessionId: string, recordId: string): SubagentTeeStreamState | undefined {
-    return this.records.get(mirrorKey(sessionId, recordId))?.tee.getStreamState()
+    let latest: RecordMirror | undefined
+    for (const rec of this.records.values()) {
+      if (rec.rootSessionId === sessionId && rec.recordId === recordId) latest = rec
+    }
+    return latest?.tee.getStreamState()
   }
 
   /** 在册 record 数（仅测试/诊断消费）。 */
@@ -216,7 +231,7 @@ export class SubagentMirrorHub {
 
   /** 已解析帧路由（record 查找/登记 + seq 检查 + 落盘 + live feed）。 */
   routeFrame(channelId: string, rootSessionId: string, frame: RawMirrorWireFrame): void {
-    const key = mirrorKey(rootSessionId, frame.recordId)
+    const key = mirrorKey(rootSessionId, frame.recordId, channelId)
     let rec = this.records.get(key)
     if (rec === undefined) {
       rec = {
@@ -266,16 +281,23 @@ export class SubagentMirrorHub {
     if (rec.degraded) return
     rec.degraded = true
     rec.tee.markDegraded()
+    // DC-8：降级即时广播——降级后 tee feed 变 no-op、不再有 chunk，drawer 已打开且无
+    // 失步拉取时用户得不到任何信号。payload 与 session.subagentEntriesAppended 同约定
+    //（sessionId = 主 session id，recordId 即 subagentId）；消费端写到与拉取响应
+    // degraded 字段同一位（拉取快照仍是权威来源）。
+    this.publish(rec.rootSessionId, {
+      type: 'session.subagentStreamDegraded',
+      payload: { sessionId: rec.rootSessionId, recordId: rec.recordId },
+    })
     this.warn(
       `[subagent-mirror] degraded rootSessionId=${rec.rootSessionId} recordId=${rec.recordId} `
         + `channelId=${rec.channelId} seq=${seq}: ${reason}; live stream stopped, reload shows full history`,
     )
   }
 
-  private disposeRecord(key: string, ownerChannelId?: string): void {
+  private disposeRecord(key: string): void {
     const rec = this.records.get(key)
     if (rec === undefined) return
-    if (ownerChannelId !== undefined && rec.channelId !== ownerChannelId) return
     rec.tee.dispose()
     try {
       rec.log.end()

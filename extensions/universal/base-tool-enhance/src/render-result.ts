@@ -8,7 +8,7 @@
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { firstContentText } from "@zhushanwen/extension-protocol";
+import { firstContentText, firstLine, readDetailsSummary, resultContentText } from "@zhushanwen/extension-protocol";
 
 // ── summary 纯函数 ───────────────────────────────────
 
@@ -54,6 +54,15 @@ export function buildBashOutputSummary(
 /** 收起态摘要中失败 reason 的保留长度（超长截断加省略号）。 */
 const KILL_REASON_SUMMARY_CHARS = 80;
 
+/** reason 归一单行 + 码点安全截断到上限（超长补省略号；与 goal/todo/plan 的摘要 helper
+ *  同语义：换行/连续空白折叠为单空格，Array.from 按码点切分，emoji 代理对不劈半——
+ *  details.summary 单行契约见 extension-conventions.md）。 */
+function clipSummaryText(text: string, max: number): string {
+	const line = text.replace(/\s+/g, " ").trim();
+	const chars = Array.from(line);
+	return chars.length > max ? chars.slice(0, max).join("") + "…" : line;
+}
+
 /** bash_kill 摘要：killed=true → `Killed task <id>`；killed=false（正常返回的失败形态）
  *  → `Kill failed: <reason>`。 */
 export function buildBashKillSummary(args: { task_id: string }, result: ToolResultLike): string {
@@ -61,38 +70,10 @@ export function buildBashKillSummary(args: { task_id: string }, result: ToolResu
 	if (parsed === undefined) return "Done";
 	if (parsed.killed === true) return `Killed task ${args.task_id}`;
 	const reason = typeof parsed.reason === "string" ? parsed.reason : "unknown";
-	const clipped = reason.length > KILL_REASON_SUMMARY_CHARS
-		? `${reason.slice(0, KILL_REASON_SUMMARY_CHARS)}…`
-		: reason;
-	return `Kill failed: ${clipped}`;
+	return `Kill failed: ${clipSummaryText(reason, KILL_REASON_SUMMARY_CHARS)}`;
 }
 
 // ── TUI renderResult ─────────────────────────────────
-
-/** unknown 值按字段名安全取值（index-signature 收窄，替代全可选结构断言）。 */
-function fieldValue(v: unknown, key: string): unknown {
-	if (typeof v !== "object" || v === null) return undefined;
-	return (v as Record<string, unknown>)[key];
-}
-
-/** 从 details 安全读取 summary（容错非对象形态与旧版本 entry）。 */
-function readDetailsSummary(result: unknown): string | undefined {
-	const summary = fieldValue(fieldValue(result, "details"), "summary");
-	return typeof summary === "string" && summary !== "" ? summary : undefined;
-}
-
-/** content[0] 的 text 纯文本（content 缺失或非 text 类型时兜底空串）。 */
-function contentText(result: unknown): string {
-	const content = fieldValue(result, "content");
-	if (!Array.isArray(content)) return "";
-	return firstContentText({ content });
-}
-
-/** 折叠态回退：JSON 文本取首行（保持一行摘要形态）。 */
-function firstLine(text: string): string {
-	const idx = text.indexOf("\n");
-	return idx === -1 ? text : text.slice(0, idx);
-}
 
 /** 折叠态（expanded=false）= details.summary 一行（dim）；展开态 = content 纯文本。 */
 export function renderBashToolResult(
@@ -100,7 +81,7 @@ export function renderBashToolResult(
 	options: { expanded: boolean },
 	theme: Theme,
 ): Text {
-	if (options.expanded) return new Text(contentText(result), 0, 0);
-	const summary = readDetailsSummary(result) ?? firstLine(contentText(result));
+	if (options.expanded) return new Text(resultContentText(result), 0, 0);
+	const summary = readDetailsSummary(result) ?? firstLine(resultContentText(result));
 	return new Text(theme.fg("dim", summary), 0, 0);
 }

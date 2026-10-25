@@ -18,16 +18,25 @@
 export type SessionStatus = 'active' | 'idle' | 'dead' | 'done' | 'error' | 'stopped'
 
 /**
- * 条目/快照数据来源标记（W15 磁盘占位值检查的判定依据，D1b 按来源分流）。
+ * 条目数据来源标记（W15 起源标记；D1b 按来源分流的占位值检查对象已随
+ * SessionSummary 三状态字段删除一并退役，见 core mergeViewSnapshot）。
  *
- * - `'scan'`：磁盘扫描来源（SessionScanner.scannedToSummary 产出）。扫描读不出
- *   modelId / tokenCount 真值，其 `''` / `0` 是**占位值**而非权威空值——core 合并侧
- *   （createSessionStore.mergeViewSnapshot 检查）据此跳过对已知真值的覆盖
- *   （#2 空串覆盖事故的最后防线）。
- * - 缺省（undefined）：owner 来源——runtime 活跃实例 / 广播 / 乐观更新，D1b 整字段
- *   覆盖的权威语义，显式空值（''/0）按「owner 声明空即空」正常覆盖。
+ * - `'scan'`：磁盘扫描来源（SessionScanner.scannedToSummary 产出）。
+ * - 缺省（undefined）：owner 来源——runtime 活跃实例 / 广播 / 乐观更新。
  */
 export type SessionDataSource = 'scan'
+
+/**
+ * 会话的展示归属（surface，会话架构四层分离之 presentation 维）。
+ *
+ * 取值 = 存储位置的函数、终身不可变，由注册表单一持有（registerSession 写入）：
+ * - `'sidebar'`：主会话，进左侧边栏（缺省值）。
+ * - `'btw'`：旁路提问线，进右侧抽屉（不进出侧栏）。
+ *
+ * 不是用户可改属性；冷会话的 surface 由目录位置派生（磁盘扫描路径缺省
+ * `'sidebar'`，见 SessionScanner.scannedToSummary）。
+ */
+export type SessionSurface = 'sidebar' | 'btw'
 
 export interface SessionSummary {
   id: string
@@ -44,9 +53,6 @@ export interface SessionSummary {
   isBareWorkspace?: boolean
   status: SessionStatus
   lastActiveAt: number
-  modelId: string
-  thinkingLevel?: string
-  tokenCount: number
   /**
    * session JSONL 文件绝对路径。活跃 session 来自 pi get_state 的 sessionFile
    * （create 时写入 IManagedSessionView.sessionFilePath）；持久化 session 来自磁盘扫描
@@ -63,13 +69,16 @@ export interface SessionSummary {
    */
   projectId?: string
   /**
-   * 隐藏 session（如公共 session）：不显示在 sidebar session 列表，仅供内部使用（如
-   * landing 态命令源）。scanner listAll 过滤掉 hidden:true 的 session。
+   * 展示归属（surface）：'sidebar' = 进左侧边栏的主会话（缺省）；'btw' = 进右侧
+   * 抽屉的旁路提问线。注册表单一持有（registerSession 尾部可选参数，缺省
+   * 'sidebar'）；磁盘扫描条目显式缺省 'sidebar'（scannedToSummary）。
+   *
+   * 侧栏 / slash 候选两处过滤点与工作区历史判据均以 `surface === 'sidebar'`
+   * 正向谓词读取（W5 起，读取点登记于 docs/constraints.json C-data-28 清单）。
    */
-  hidden?: boolean
+  surface?: SessionSurface
   /**
-   * 条目数据来源（W15）：'scan' = 磁盘扫描条目（modelId/tokenCount 为占位值，见
-   * SessionDataSource）；缺省 = 活跃实例真值（SessionService.toSummary 产出，不标）。
+   * 条目数据来源（W15）：'scan' = 磁盘扫描条目；缺省 = 活跃实例真值（SessionService.toSummary 产出，不标）。
    */
   source?: SessionDataSource
   /**

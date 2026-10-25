@@ -159,11 +159,16 @@ export interface SpawnEnvForwardEntry {
 export const SPAWN_ENV_FORWARD_REFERENCE: readonly SpawnEnvForwardEntry[] = [
   {
     name: 'PI_CODING_AGENT_DIR',
-    // 非 TAIJI_ 前缀，故不走白名单侥幸，靠 B3 显式追加兜底数据隔离根目录同源
-    injectionPath: 'B3 显式追加（rpc-client.ts:168 env.PI_CODING_AGENT_DIR = getPiAgentDir()）',
+    // 非 TAIJI_ 前缀，白名单 PI_ 整域准入后 ambient 值可随链流转，但目录权威值恒由
+    // 两条派发链终态强制写入覆盖（见 injectionPath），不依赖白名单继承
+    injectionPath: '主会话链 = B3 显式追加（pi-rpc buildPiOutboundEnv env.PI_CODING_AGENT_DIR = piAgentDir，'
+      + 'rpc-client.ts start() 接线）；引擎链 = core 发现管线 EngineClient identityEnv L0 注入'
+      + '（engine-inspect-package.ts piHostedAgentDirIdentityEnv，2026-10-23 裁决：taiji 派发的'
+      + 'pi 参数一切由 taiji 控制，配置目录对齐 <dataDir>/agent）',
     piConsumerAnchors: [
       'extensions/taiji/system-prompt/src/index.ts:77（process.env.PI_CODING_AGENT_DIR 直读，上推两级同源推导 dataDir）',
       '全 extensions 面经 pi 导出的 getAgentDir() 间接消费（如 llm-shared/src/config.ts:8 注释点名禁止自实现路径推导，须尊重 PI_CODING_AGENT_DIR）',
+      'pi-subagent-cli engine-query.ts resolvePiAgentDir（引擎查询范围数据目录）',
     ],
   },
   {

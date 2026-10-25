@@ -10,7 +10,7 @@
  * - T4.6 核心是「持久化」，create 只是触发 record 的手段；record 触发点（session-lifecycle.create）
  *   在 real runtime 内部，WS session.create 与 UI 点击走同一 runtime 代码路径
  *
- * faux LLM 轨（L2.5 翻轨，2026-09-15）：全程无 LLM turn（responses: []）——本用例只验证
+ * faux LLM 层（L2.5 迁组，2026-09-15）：全程无 LLM turn（responses: []）——本用例只验证
  * 跨进程持久化，凭证无关化 = 移除真实凭证拷贝，装配改 launchRealApp({ faux })。
  * pi 的 create 门禁（getDefaultModel）由 faux settings/models 预置满足。
  */

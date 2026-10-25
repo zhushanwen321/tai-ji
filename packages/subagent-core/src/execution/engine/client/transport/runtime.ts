@@ -151,6 +151,10 @@ export class RuntimeEngineTransport implements EngineTransport {
       rootSessionId,
       ...(parentRecordId.length > 0 ? { parentRecordId } : {}),
       ...(depth !== undefined ? { depth } : {}),
+      // [S-10] recordId 不经 env 回落：record 锚只在 run 路径存在（EngineClient
+      // requestedRecordId → spec），probe 先行的通道显式缺席（树挂点语义见
+      // types.ts EngineLaunchSpec.recordId 注释）。
+      ...(spec.recordId !== undefined && spec.recordId.length > 0 ? { recordId: spec.recordId } : {}),
     };
 
     const client = acquireRuntimeControlClient(

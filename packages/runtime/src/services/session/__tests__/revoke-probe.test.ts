@@ -52,11 +52,8 @@ function makeView(overrides: Partial<IManagedSessionView> = {}): IManagedSession
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
     bashRunToken: undefined,
-    occupancy: { turn: 'idle', compacting: false, bash: false },
+    occupancy: { turn: 'idle', compacting: false, bash: false, handingOff: false },
     ...overrides,
   }
 }
@@ -281,11 +278,9 @@ describe('A6 信令不污染（探针：transcript 撤回前后对比 + 命令�
     await h.flush()
     // 投递收尾副作用复位（markSessionActive 置 dispatching + 派生 isGenerating=true；
     // 真实回落 = pi 事件驱动（[D3③] handled 响应 / sweepInFlight 收尾，CP6 时间窗已退役），
-    // fake 环境无事件流——按 event-interpreter 'idle' 行语义手动复位，撤回前置 = 空闲。
-    // isGenerating 是只读派生属性，经 spyOn getter 复位——与 revoke-orchestrator.test.ts
-    // 的 isCompacting 同款手法）
-    vi.spyOn(h.view, 'isGenerating', 'get').mockReturnValue(false)
-    h.view.occupancy = { turn: 'idle', compacting: false, bash: false }
+    // fake 环境无事件流——按 event-interpreter idle 行语义手动复位，撤回前置 = 空闲
+    //（[D1] 读口迁移：turn 维 occupancy 直写复位）
+    h.view.occupancy = { turn: 'idle', compacting: false, bash: false, handingOff: false }
 
     const before = await h.snapshotTranscript()
     const reply = await h.revoke('e2')

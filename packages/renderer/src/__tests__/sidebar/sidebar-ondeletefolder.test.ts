@@ -102,6 +102,36 @@ describe('Sidebar onDeleteFolder（W2TC6）', () => {
     wrapper.unmount()
   })
 
+  // delete-generating-error-localization：failed[].code 命中封闭枚举 → error 占位插 i18n
+  // 词条（runtime 原文是编译期中文，en 用户不可读——词条化是本修复的核心行为）。
+  it('失败条目 code=delete_generating → error 占位插本地化词条，不透传 runtime 原文', async () => {
+    sidebarActionMocks.deleteFolder.mockResolvedValueOnce({
+      cwd: '/p',
+      deleted: ['s1'],
+      failed: [{ sessionId: 's2', error: '会话正在生成中，无法删除；请先停止生成或等待完成 (sessionId=s2)', code: 'delete_generating' }],
+    })
+    const wrapper = await mountAndEmitDeleteFolder()
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1)
+    // deleteFolderPartialFailed × deleteFolderGenerating（zh-CN）='1 个会话删除失败：会话正在生成中，已跳过删除'
+    expect(toastErrorMock).toHaveBeenCalledWith('1 个会话删除失败：会话正在生成中，已跳过删除')
+    wrapper.unmount()
+  })
+
+  // 映射 miss（未知码）回落原文——防把 code 直接当 key 传给 t() 显示出 key 字面量。
+  it('失败条目带未知 code → 映射 miss 回落 runtime 原文', async () => {
+    sidebarActionMocks.deleteFolder.mockResolvedValueOnce({
+      cwd: '/p',
+      deleted: ['s1'],
+      failed: [{ sessionId: 's2', error: 'EPERM: operation not permitted', code: 'future_unknown_code' }],
+    })
+    const wrapper = await mountAndEmitDeleteFolder()
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1)
+    expect(toastErrorMock).toHaveBeenCalledWith('1 个会话删除失败：EPERM: operation not permitted')
+    wrapper.unmount()
+  })
+
   it('网络异常（deleteFolder reject）→ toastError(deleteFolderFailed, msg)', async () => {
     sidebarActionMocks.deleteFolder.mockRejectedValueOnce(new Error('network'))
     const wrapper = await mountAndEmitDeleteFolder()

@@ -59,11 +59,11 @@ describe('useSidebarCounts sessionCount（tab 计数口径）', () => {
   const MARKERS_STORAGE_KEY = 'taiji:session-markers'
 
   function makeSummary(id: string, status: SessionSummary['status'] = 'idle'): SessionSummary {
-    return { id, label: id, cwd: '/proj', status, lastActiveAt: 1, modelId: 'm1', tokenCount: 0 }
+    return { id, label: id, cwd: '/proj', status, lastActiveAt: 1 }
   }
 
   function seedSessions(sessions: SessionSummary[]): void {
-    useSessionStore().applySnapshot({ groups: [{ cwd: '/proj', sessions }] } satisfies SessionGroup[])
+    useSessionStore().applySnapshot({ groups: [{ cwd: '/proj', sessions }] satisfies SessionGroup[] })
   }
 
   beforeEach(() => {

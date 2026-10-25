@@ -31,13 +31,56 @@ import type { SubagentModelOverrideStatus, SubagentRecentEffectiveModel } from '
  */
 export type WorkflowRunStatus = 'running' | 'interrupted' | 'done'
 
-/** done 终态原因（WorkflowRun 不变式 I2：done 时必有 reason）。 */
+/**
+ * done 终态原因（WorkflowRun 不变式 I2：done 时必有 reason）。
+ * [subagent-observability §3.3.8] 增 partially_succeeded（run 终局吸收成员交付的
+ * 独立档——「一半成功」与全败不可分辨即故障 B 的反方向失真，不入失败族折叠）。
+ * 与 core DoneReason（低层镜像 RunDoneReason）值级对齐，漂移由 core
+ * run-vocabulary.test.ts 的「DoneReason 三词表跨词表对拍」钉住（core
+ * ALL_DONE_REASONS ≡ shared WORKFLOW_DONE_REASON_ALL 值级对拍 + 镜像联合双向
+ * 编译锚）。
+ */
 export type WorkflowDoneReason =
   | 'completed'
   | 'failed'
   | 'aborted'
   | 'budget_limited'
   | 'time_limited'
+  | 'partially_succeeded'
+
+/**
+ * WorkflowDoneReason 值全集（[subagent-observability §3.3.8 消费链②] 增配的对账锚，
+ * 结构对齐 WORKFLOW_RUN_OUTCOME_ALL 先例——runtime 收窄点 WORKFLOW_DONE_REASON_SET
+ * 扩值入对账时的 shared 侧成员集合数据源）。
+ *
+ * 用途：跨包值级等价断言的成员集合 + 消费方全集遍历数据源。扩枚举检查：
+ * 上方联合与本元组须同步改——正向（元组含非联合值）由 satisfies 编译期拦截；
+ * 反向（联合扩值漏改元组）由下方覆盖编译锁拦截。
+ */
+export const WORKFLOW_DONE_REASON_ALL = [
+  'completed',
+  'failed',
+  'aborted',
+  'budget_limited',
+  'time_limited',
+  'partially_succeeded',
+] as const satisfies readonly WorkflowDoneReason[]
+
+/**
+ * 反向完备编译锁：WorkflowDoneReason 联合 ⊆ WORKFLOW_DONE_REASON_ALL 值域。
+ * 联合扩值漏改元组时该类型退化为错误信息元组，下行赋值 tsc 编译错。
+ */
+type _WorkflowDoneReasonCoversAll = [WorkflowDoneReason] extends [
+  (typeof WORKFLOW_DONE_REASON_ALL)[number],
+]
+  ? true
+  : ['WorkflowDoneReason 扩值须同步 WORKFLOW_DONE_REASON_ALL 元组（subagent-observability §3.3.8 值域跟随锚）']
+
+/**
+ * 编译锁消费点（导出以通过 noUnusedLocals）：值恒 true 无运行期语义——类型才
+ * 承重，联合漏扩元组时本赋值 tsc 红。同 WORKFLOW_RUN_OUTCOME_COVERAGE_LOCK 先例。
+ */
+export const WORKFLOW_DONE_REASON_COVERAGE_LOCK: _WorkflowDoneReasonCoversAll = true
 
 /**
  * workflow 内的单个 agent call（从 record 事件流 fold 的 ask 步骤行映射，
@@ -134,12 +177,15 @@ export interface WorkflowAgentCall {
  * （漏升 = interrupted 经提取链被静默丢弃）；② runtime 双包值级等价断言
  * （core ALL_RUN_OUTCOMES ≡ extractor 集合 ≡ 本词表成员，runtime 单测）。
  *
- * 值语义（[D2] 后四值）：done=成功 / failed=失败 / cancelled=已取消（用户主动）/
- * time_limited=已超时（活体墙钟预算超时，升格独立 outcome——错误处理分级双路
- * 判定的超时通道）。中断语义已移出 outcome（入 status 三态 'interrupted'——
- * 暂停态显示「已中断（可续跑）」，非终局），显示名见 WORKFLOW_RUN_OUTCOME_LABELS。
+ * 值语义（[D2] 后四值 + [subagent-observability §3.3.8] 第五值）：done=成功 /
+ * failed=失败 / cancelled=已取消（用户主动）/ time_limited=已超时（活体墙钟预算
+ * 超时，升格独立 outcome——错误处理分级双路判定的超时通道）/ partially_succeeded=
+ * 部分成功（存在失败且存在非失败成员，或无失败但部分交付——run 终局吸收成员交付
+ * 债结算集合的派生物，聚合规则裁决权威 = core terminal-actions）。中断语义已移出
+ * outcome（入 status 三态 'interrupted'——暂停态显示「已中断（可续跑）」，非终局），
+ * 显示名见 WORKFLOW_RUN_OUTCOME_LABELS。
  */
-export type WorkflowRunOutcome = 'done' | 'failed' | 'cancelled' | 'time_limited'
+export type WorkflowRunOutcome = 'done' | 'failed' | 'cancelled' | 'time_limited' | 'partially_succeeded'
 
 /**
  * WorkflowRunOutcome 值全集（[W2 D5] 值级跟随锚的 shared 侧载体；形态对齐
@@ -155,6 +201,7 @@ export const WORKFLOW_RUN_OUTCOME_ALL = [
   'failed',
   'cancelled',
   'time_limited',
+  'partially_succeeded',
 ] as const satisfies readonly WorkflowRunOutcome[]
 
 /**
@@ -174,7 +221,7 @@ type _WorkflowRunOutcomeCoversAll = [WorkflowRunOutcome] extends [
 export const WORKFLOW_RUN_OUTCOME_COVERAGE_LOCK: _WorkflowRunOutcomeCoversAll = true
 
 /**
- * [W2 D8] outcome 状态中文显示名单源词表（成功/失败/已取消/已中断——章程 D2
+ * [W2 D8] outcome 状态中文显示名单源词表（成功/失败/已取消/已超时/部分成功——章程 D2
  * 中文词表）。
  *
  * 消费方 = 通知渲染与 tray 文案（显示接线归 UI 单元）；「已取消」（用户主动）
@@ -186,6 +233,7 @@ export const WORKFLOW_RUN_OUTCOME_LABELS: Record<WorkflowRunOutcome, string> = {
   failed: '失败',
   cancelled: '已取消',
   time_limited: '已超时',
+  partially_succeeded: '部分成功',
 }
 
 /**
@@ -478,10 +526,30 @@ export interface WorkflowRunResumedEntry extends WorkflowRunEventEntryBase {
   model?: string
 }
 
+/**
+ * 失败成员明细（[subagent-observability §3.3.8] run-settled 条目载荷，成员交付债
+ * 结算集合的明细面）：cause = `"<class>.<kind>"` 点拼字符串（如
+ * `provider.rate_limited`）；retryable/retryAfterMs 不进终局事件、由成员轮收条承载。
+ */
+export interface WorkflowFailedMemberEntry {
+  /** 成员 call 关联键（对齐 WorkflowAgentCall.id）。 */
+  taskIndex: number
+  /** 失败分类点拼（`"<class>.<kind>"`；未分类 = "unknown"）。 */
+  cause: string
+}
+
+/** 部分交付成员明细（产物契约部分满足——u5 交付校验填充；字段结构先行落定）。 */
+export interface WorkflowPartialMemberEntry {
+  /** 成员 call 关联键（对齐 WorkflowAgentCall.id）。 */
+  taskIndex: number
+  /** 未满足的 deliverable 谓词清单。 */
+  missing: string[]
+}
+
 /** `run-settled` 条目（run 终局，一个 run 恰好一帧）。 */
 export interface WorkflowRunSettledEntry extends WorkflowRunEventEntryBase {
   type: 'run-settled'
-  /** 终局形态（四值词表 = WorkflowRunOutcome）。 */
+  /** 终局形态（五值词表 = WorkflowRunOutcome）。 */
   outcome: WorkflowRunOutcome
   /** 失败时的结构化编码（done/cancelled/time_limited 缺省）。 */
   errorCode?: string
@@ -489,6 +557,10 @@ export interface WorkflowRunSettledEntry extends WorkflowRunEventEntryBase {
   reason?: string
   /** 产物目录指针（run 持久化产物所在目录绝对路径）。 */
   artifactsDir: string
+  /** [subagent-observability §3.3.8] 失败成员明细（成员交付结算派生的终局携带；cancelled 族缺省——UC-16）。 */
+  failedMembers?: WorkflowFailedMemberEntry[]
+  /** [subagent-observability §3.3.8/u5] 部分交付成员明细（u5 交付校验填充；缺省恒缺省）。 */
+  partialMembers?: WorkflowPartialMemberEntry[]
 }
 
 /**

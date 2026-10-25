@@ -8,7 +8,7 @@ import type { EnginePort, RunContext } from "../port.ts";
 import { DEFAULT_ENGINE_ID, EngineNotFoundError } from "../registry.ts";
 import { EngineError } from "../common/errors.ts";
 import type { ProbeReport, SessionView } from "../types.ts";
-import type { AgentCallOpts } from "../../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../../shared/agent-call-types.ts";
 import { resolveEngineRouting, routeEngine, routeEngineForHost, type EngineRouteOptions, type HostRouteOptions } from "../routing.ts";
 import type { EngineRouteResult } from "../routing.ts";
 

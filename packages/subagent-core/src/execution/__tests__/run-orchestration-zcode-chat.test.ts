@@ -25,7 +25,7 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../shared/agent-call-types.ts";
 import type { EnginePort, EngineRunResult, RunContext } from "../engine/port.ts";
 import type {
   AgentEvent,

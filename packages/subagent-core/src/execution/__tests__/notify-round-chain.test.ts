@@ -52,12 +52,12 @@ import type { RecordStore } from "../persistence/record-store.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import { SubagentService } from "../subagent-service.ts";
 
-// ─── fake 投递端口（port.deliver 消费方：同 id 幂等吞 + merge 判定分流）────────
+// ─── fake 投递端口（port.deliver 消费方：同 id 幂等吞 + 边沿即投注入）────────
 //
 // 波 2 改写对位：原「投递内核等价桩」（dedupe / busy gate / 合批窗口）随内核队列
-// 持有退役——port 形态下受理即入 pi 原生队列（忙时不拒），合批窗口在端口侧。
-// 本文件断言范围只需三片：幂等键判重（同 id:round 吞）、merge 判定透传（hasRunning-
-// Background 的 M3 判据回归锚）、非 merge 条目受理即注入（观察侧 = pi.sendMessage）。
+// 持有退役——port 形态下受理即入 pi 原生队列（忙时不拒）。[§3.3.7③] 攒批窗退役
+// 后无 merge 维度（替身保留恒 false 的 merge 位仅作形态存证），本文件断言范围
+// 两片：幂等键判重（同 id:round 吞）、全部条目受理即注入（观察侧 = pi.sendMessage）。
 
 type FakePortRecord = { id: string; merge: boolean };
 
@@ -69,7 +69,9 @@ function makeFakePort(inject: (message: unknown) => void) {
       const id = envelope.id ?? "gen-id";
       if (seen.has(id)) return { kind: "swallowed", reason: "already-seen" };
       seen.add(id);
-      const merge = opts?.merge ?? false;
+      // [subagent-observability §3.3.7③] 攒批窗退役：deliver opts 无 merge 字段——
+      // 全部条目受理即注入（替身的 merge 维度随机制删除）。
+      const merge = false;
       records.push({ id, merge });
       if (!merge) {
         // 受理即注入（pi 原生队列忙时不拒——本文件无注入失败场景）；details 由
@@ -84,8 +86,8 @@ function makeFakePort(inject: (message: unknown) => void) {
       return { kind: "accepted", id };
     },
     flush() {
-      // merge:true 条目在真实 port 走 60s 窗口；本文件对 merge 条目的断言范围是
-      // 「不立即注入」（窗口判定透传锚），无到期出站断言，flush 直通为空。
+      // [§3.3.7③] 攒批窗退役后无挂起条目（全部边沿即投），flush 仅保留强制出站
+      // 转发语义——本替身无缓冲，直通为空。
     },
   };
   return { handle, records };
@@ -195,7 +197,8 @@ describe("[N2] chatMode 轮次通知正文：真实执行链路（协议引擎�
 
     const sentMsg = pi.sendMessage.mock.calls[0]![0] as { customType: string; content: string };
     expect(sentMsg.customType).toBe("subagent-bg-notify");
-    expect(sentMsg.content).toContain("finished a round");
+    // [subagent-observability §3.3.7①] 事实化文案（`finished a round` 硬编码废除）
+    expect(sentMsg.content).toContain("completed. Reply:");
     // [N2] 核心：正文含本轮真实回复文本（修复前此处是 "(empty)"）
     expect(sentMsg.content).toContain(ROUND_REPLY);
     expect(sentMsg.content).not.toContain("(empty)");
@@ -292,7 +295,7 @@ describe("首轮闭环独有断言范围（迁自壳 first-round-closure-service
     expect(pi.sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("[M3 busy 对照] 真在跑的 background 工作（镜像活进程 + 无 timer）→ merge:true 透传端口（窗口判定），非 merge 条目受理即注入", async () => {
+  it("[M3 busy 对照] 真在跑的 background 工作（镜像活进程 + 无 timer）不推迟投递（边沿即投），同 key 重提由投递日志判重吞", async () => {
     // fake port 装配：非 merge 条目受理即注入 pi.sendMessage（真实 port 直通形态）
     currentFakePort = makeFakePort((message) => {
       pi.sendMessage(message as never, { triggerTurn: true });
@@ -318,21 +321,21 @@ describe("首轮闭环独有断言范围（迁自壳 first-round-closure-service
     internals.notifyHost.notifyComplete(settled);
     expect(pi.sendMessage).toHaveBeenCalledTimes(1);
 
-    // 对照（busy 半边，本文件独有断言范围）：真在跑的 background 工作（镜像活进程 +
-    // 无 timer）计入合并窗口判定——done 通知以 merge:true 受理（窗口攒批成员，端口
-    // 60s 窗口承载，不立即注入；合并窗口语义对真正的并发完成保留）。
+    // 对照半边（本文件独有断言范围）：「在跑的 background 工作」不再影响投递——
+    // [subagent-observability §3.3.7③] 攒批窗退役后 deliver opts 无 merge 字段，
+    // 边沿即投（done 通知受理即注入；M3 判据回归锚改锚「无合批选项」形态）。
     const busy = makeRecord("sa-busy");
     busy.status = "running";
     internals.store.register(busy);
-    // 协议形态的「活进程」记账 = core 侧 spawnedChildren 镜像活位（hasRunningBackground
-    // 判据 hasLiveProcessHandle 读本镜像）。
+    // 协议形态的「活进程」记账 = core 侧 spawnedChildren 镜像活位（原 hasRunningBackground
+    // 判据 hasLiveProcessHandle 读本镜像；该谓词已随攒批窗退役删除）。
     coreSpawnedChildrenMirror().register(busy.id, { pid: 4321, killed: false });
     const done = makeRecord("sa-done");
     done.status = "idle"; // V1 终态形态：markRoundIdle 收尾 idle，toNotifyRecord 放行
     internals.store.register(done);
     internals.notifyHost.notifyComplete(done);
-    expect(pi.sendMessage).toHaveBeenCalledTimes(1); // 未新增——merge:true 不立即注入
-    expect(currentFakePort!.records.at(-1)).toMatchObject({ merge: true }); // M3 判据回归锚
+    expect(pi.sendMessage).toHaveBeenCalledTimes(2); // 边沿即投——受理即注入
+    expect(currentFakePort!.records.at(-1)).toMatchObject({ id: "sa-done:0" }); // 受理锚（dedup key = id:round）
   });
 
   it("[N1 载荷派生视图] one-shot 成功完成通知：details.status=running（轮终通知形态）、正文含真实结果，恰 1 条", async () => {
@@ -354,7 +357,10 @@ describe("首轮闭环独有断言范围（迁自壳 first-round-closure-service
     // 完成语义 [modeless]：轮终通知 status=running（旧 idle 折入 running 携带本轮
     // Reply）；closed 仅归档/GC/cancel 路径出现
     expect(sentMsg.details?.status).toBe("running");
-    expect(sentMsg.content).toContain("finished a round");
+    // [subagent-observability §3.3.7①] 轮应答文案事实化：`finished a round` 硬编码
+    // 废除——正常轮正文如实携带结果（UC-4/UC-5）
+    expect(sentMsg.content).toContain("completed. Reply:");
+    expect(sentMsg.content).not.toContain("finished a round");
     expect(sentMsg.content).toContain("done"); // 应答 content，经 MF-2 写入 record.result
 
     // 恰好 1 条：无第二个通知点（轮终 settle 单写点；回注同 id:round 被 dedup 吞）

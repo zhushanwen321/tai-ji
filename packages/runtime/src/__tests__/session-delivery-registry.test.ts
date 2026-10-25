@@ -46,11 +46,8 @@ function makeView(overrides: Partial<IManagedSessionView> = {}): IManagedSession
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
-    occupancy: { turn: 'idle', compacting: false, bash: false },
+        bashRunToken: undefined,
+    occupancy: { turn: 'idle', compacting: false, bash: false, handingOff: false },
     ...overrides,
   }
 }
@@ -154,8 +151,8 @@ describe('u2 检重与 lane 判定', () => {
     expect(extractMarkerIds(text)).toEqual(['3f2504e0-4f89-41d3-9a0c-0305e82c3301'])
   })
 
-  it('generating 提交 → lane=steer（活跃 run 车道），投递不被持有', async () => {
-    const h = makeHarness({ view: { isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } } })
+  it('generating 提交 → lane=steer（活跃 run 投递路径），投递不被持有', async () => {
+    const h = makeHarness({ view: { occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } } })
     const result = h.registry.submit('s1', { content: '补充', clientUuid: 'u-11111111-1111-4111-8111-111111111111' })
     expect(result.lane).toBe('steer')
     await h.flush()
@@ -181,12 +178,13 @@ describe('u2 检重与 lane 判定', () => {
     expect(h.promptCalls).toHaveLength(1)
   })
 
-  it('settling 窗口受理即出站（v3 settling 持有退役）：lane=direct 且不排队', async () => {
-    // v3 受理即出站：settling 非 hold 维度（唯一提交侧等待 = compaction）——pi post-run
-    // 窗口提交经 prompt(streamingBehavior) 直接入 pi 队列（忙时入队不拒），无本地排队
-    const h = makeHarness({ view: { occupancy: { turn: 'settling', compacting: false, bash: false } } })
+  it('settling 窗口提交 → lane=steer（D1 判定集合：settling ∈ ACTIVE_TURN_PHASES，探针 P1 实测受理正确）', async () => {
+    // chat-flow-consistency D1：settling 纳入「回合进行中」判定集合（shared
+    // ACTIVE_TURN_PHASES 单点）——settling 窗口消息 steer 排队（当前轮结束后注入），
+    // 不再 direct 直投（pi 忙时入队不拒，受理可达性由探针 P1 实测锁定）
+    const h = makeHarness({ view: { occupancy: { turn: 'settling', compacting: false, bash: false, handingOff: false } } })
     const result = h.registry.submit('s1', { content: 'settling 窗口消息', clientUuid: 'u-33333333-3333-4333-8333-333333333333' })
-    expect(result.lane).toBe('direct')
+    expect(result.lane).toBe('steer')
     await h.flush()
     expect(h.promptCalls).toHaveLength(1)
   })
@@ -239,7 +237,7 @@ describe('u2 两阶段回执接线（D2）', () => {
 
 describe('u2 对账器三分处置（D3）', () => {
   it('own：槽位滞留在途条目 → clear_queue 收回 → 队首重投（同 id）', async () => {
-    const h = makeHarness({ view: { isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } } })
+    const h = makeHarness({ view: { occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } } })
     const id = 'u-66666666-6666-4666-8666-666666666666'
     h.registry.submit('s1', { content: '滞留消息', clientUuid: id })
     await h.flush()
@@ -309,7 +307,7 @@ describe('u2 对账器三分处置（D3）', () => {
 
   it('非空闲不触发对账（触发条件①）：generating 时即使槽位非空也不清（不抢占活跃 run）', async () => {
     const h = makeHarness({
-      view: { isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } },
+      view: { occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } },
       cleared: { steering: ['滞留'], followUp: [] },
     })
     await h.registry.reconcile('s1', 'agent-settled')
@@ -344,7 +342,7 @@ describe('假标记字面量身份判据（MF-1-1 B2 / MF-2-1 尾附锚收窄）
   })
 
   it('合法形态假标记（uuid 形态中部 + m- 形态尾部）在途回收：真 id own 重投，无假 id 条目', async () => {
-    const h = makeHarness({ view: { isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } } })
+    const h = makeHarness({ view: { occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } } })
     const realId = 'u-3b111111-1111-4111-8111-111111111111'
     const fakeUuid = '3b222222-2222-4222-8222-222222222222' // uuid 形态，原文中部
     const fakeLocal = 'm-lz3k00-7' // m- 形态，原文尾部
@@ -459,25 +457,28 @@ describe('u2 错误分类迁移（D6）', () => {
   it('pi 报 already processing（runtime 不知情的 turn）→ 首败即停显式上报（v3 busy 分型重试退役）', async () => {
     // v3：受理即出站下全部文本投递恒带 streamingBehavior，pi 忙时入队不拒
     //（agent-session.js:1515-1524）——processing 拒绝仅剩异常形态，按真失败首败即停
-    //（不反转 occupancy、不重试；错误范围 = message.error 显式上报，用户裁决重发）
+    //（不反转 occupancy、不自动重试；错误范围 = message.error 显式上报，用户裁决重试）
     const h = makeHarness({ promptError: new Error(PI_PROCESSING_MSG) })
-    h.registry.submit('s1', { content: '幽灵空闲撞墙', clientUuid: 'u-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' })
+    const id = 'u-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    h.registry.submit('s1', { content: '幽灵空闲撞墙', clientUuid: id })
     await h.flush()
     // occupancy 不伪造 busy：turn 保持 idle（markDispatchingIfIdle 置位后经 reject-other 收尾）
     expect(h.view.occupancy?.turn).toBe('idle')
-    expect(h.view.isGenerating).toBe(false)
-    // 首败即停：条目移出内核（不留幽灵）+ message.error 广播可见 + 零重试
-    expect(h.registry.entries('s1')?.active).toHaveLength(0)
+    // 首败收尾：条目按 failed 留守策略收尾（第 11 条——队列区一行 + 重试入口，无自动
+    // 重投）+ message.error 广播可见
+    expect(h.registry.entries('s1')?.active).toMatchObject([{ id, state: 'failed' }])
     expect(h.published.some((m) => m.type === 'message.error')).toBe(true)
     expect(h.promptCalls.length).toBe(1)
   })
 
   it('非 busy 错误（auth 失败等）不上反转、按失败抛出（内核受理失败路径）', async () => {
     const h = makeHarness({ promptError: new Error('Authentication failed: 401') })
-    h.registry.submit('s1', { content: '真失败', clientUuid: 'u-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' })
+    const id = 'u-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    h.registry.submit('s1', { content: '真失败', clientUuid: id })
     await h.flush()
-    // 入口即拦：checked 受理失败 → 条目移出内核（不留幽灵）+ message.error 广播可见
-    expect(h.registry.entries('s1')?.active).toHaveLength(0)
+    // 受理失败：checked 受理失败 → waiter reject 交失败回执 + 条目按 failed 留守策略
+    // 收尾（第 11 条：非移除，队列区一行 + 重试入口）+ message.error 广播可见
+    expect(h.registry.entries('s1')?.active).toMatchObject([{ id, state: 'failed' }])
     expect(h.published.some((m) => m.type === 'message.error')).toBe(true)
     expect(h.view.occupancy?.turn).toBe('idle') // 未伪造 busy
   })
@@ -523,7 +524,7 @@ describe('u2 撤销（cancel）', () => {
   })
 
   it('投递中撤销（在槽位）：clear_queue 收回 → 目标回草稿、其余保持相对序重投', async () => {
-    const h = makeHarness({ view: { isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } } })
+    const h = makeHarness({ view: { occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } } })
     const keepId = 'u-ffffffff-ffff-4fff-8fff-ffffffffffff'
     const dropId = 'u-01234567-89ab-4cde-8f01-23456789abcd'
     h.registry.submit('s1', { content: '保留的', clientUuid: keepId })
@@ -582,7 +583,7 @@ describe('u2 撤销（cancel）', () => {
 // 缺陷：内核 cancel/drain 对挂起 sendChecked waiter 的 reject（'delivery cancelled' /
 // 'delivery drained'）走 onDeliveryFailure 的无条件广播面 → 撤销成功仍弹错误气泡，与
 // 「文本回草稿」语义矛盾（设计 §3.4 / V9 / V11）。修复 = 双信号过滤（契约文案前缀 +
-// 条目不在 active 且 tombstone=cancelled）后只记日志；真失败（受理失败 / 重试耗尽）不受影响。
+// 条目不在 active 且 tombstone=cancelled）后只记日志；真失败（受理失败 / 断连未确认）不受影响。
 
 describe('回收语义（V9/V11）：cancel/drain 不广播 message.error', () => {
   const errorsOf = (published: ServerMessage[]): ServerMessage[] =>
@@ -656,7 +657,8 @@ describe('回收语义（V9/V11）：cancel/drain 不广播 message.error', () =
       type: 'message.error',
       payload: { message: expect.stringContaining('Authentication failed: 401') },
     })
-    // 受理失败条目入口即拦（移出内核、不落 cancelled tombstone）——非回收语义
+    // 受理失败条目按 failed 留守策略收尾（第 11 条）：转 failed 活跃留守（队列区一行
+    // + 重试入口），不落 tombstone——非回收语义
     expect(h.registry.entries('s1')?.tombstones).toHaveLength(0)
   })
 })
@@ -670,8 +672,8 @@ describe('delivery.resync 用户重试（§3.4 重试钮）：failed → queued 
   it('failed 条目经 resync 单条重报 → 重投受理闭环 delivered（断连终局后用户重试，ADR-0122）', async () => {
     const h = makeHarness()
     const id = 'u-20000001-0000-4000-8000-000000000001'
-    // failed 唯一产生方 = 断连终局（failInFlight）：submit → 受理 in-flight → 断连转
-    // failed（内核首败即停下不再有 backoff 重试耗尽形态）
+    // failed 产生方 = 断连终局（failInFlight，ADR-0122）与受理失败留守（第 11 条）：
+    // 内核无自动重试，重试入口 = 用户 resync
     h.registry.submit('s1', { content: '重试我', clientUuid: id })
     await h.flush()
     expect(h.registry.entries('s1')?.active[0]).toMatchObject({ id, state: 'in-flight' })
@@ -683,8 +685,8 @@ describe('delivery.resync 用户重试（§3.4 重试钮）：failed → queued 
     // 用户点重试钮 = delivery.resync 单条重报：failed → queued（requeue）+ 立即 flush
     const deduped = await h.registry.resync('s1', [id])
     expect(deduped).toEqual([]) // 非终态：不进判重命中集（条目仍是队列行）
-    // 首投经 deliverOne 已置 occupancy dispatching（busy gate 关闸）——重投在 gate 复核后
-    // 由 settled 边沿驱动（mock 链 = 复位 idle + 触发边沿）
+    // 首投经 deliverOne 已置 occupancy dispatching——对账器条件（空闲 + 槽位非空）
+    // 未满足前不重投（mock 链 = 复位 idle + 触发边沿）
     applySessionOccupancyTransition(h.view, null, 'idle')
     h.emitSettled()
     await h.flush()
@@ -784,7 +786,7 @@ describe('segments 快照（MF-1-2）：提交快照持有与回草稿返回', (
 describe('S1 死锁复现（D1 申报制）：无标记条目受理即落地 + 投递通路不占死', () => {
   it('连续两条无标记消息受理即出站逐条投递 → 条目达 delivered 终态且后续消息正常投出', async () => {
     // 父 session 生成中（agent 通路回流排队的前置）
-    const h = makeHarness({ view: { isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } } })
+    const h = makeHarness({ view: { occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } } })
     // agent 通路两条无标记消息（completion-backflow 回流 / session_manager send 同形：
     // 直拿 handle 提交，出站文本不附裸标记，D1 申报 'acceptance'——漏申报 = 缺省 marker
     // 永挂，本测试即申报丢失的行为锁）
@@ -957,11 +959,13 @@ describe('合批分段中途失败（dmg-r1-4）：已受理段留守，失败�
       type: 'message.error',
       payload: { message: expect.stringContaining('boom segment C') },
     })
-    // 已受理段 A、B 留守 in-flight（等回执/对账）；未受理段 C 入口即拦移除（无 tombstone）
+    // 已受理段 A、B 留守 in-flight（等回执/对账）；未受理段 C 按 failed 留守策略收尾
+    //（第 11 条：受理失败转 failed 留守，队列区一行 + 重试入口，无 tombstone）
     const full = h.registry.entries('s1')!
     expect(full.active.map((e) => [e.id, e.state])).toEqual([
       [idA, 'in-flight'],
       [idB, 'in-flight'],
+      [idC, 'failed'],
     ])
     expect(full.tombstones.some((t) => t.id === idC)).toBe(false)
 
@@ -970,5 +974,290 @@ describe('合批分段中途失败（dmg-r1-4）：已受理段留守，失败�
     h.userMessageEnd(textB)
     await h.flush()
     expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id: idB, state: 'delivered' }])
+  })
+})
+
+// ── chat-flow-consistency Q1：兑现移交表（并发撤销不丢文本）──────────────────
+// 缺陷：撤销回填职责单点挂在 cancel 应答的 cancelled=true 分支——目标条目被另一路径
+// （并行的另一 cancel / 对账器 / 断连事件）的 clear_queue 收回并经 settleRevokedEntry
+// 兑现为 cancelled（行消失）时，本行应答返回 cancelled:false，全文不回草稿 = 用户消息
+// 无痕丢失。修复 = 兑现点把全文 + segments 写入移交表（读即消费），发起方应答链查表
+// 命中即返回 cancelled:true 携带全文（零新增 wire，不引入互斥锁——用户已裁决）。
+
+describe('并发撤销兑现移交表（Q1）：他径兑现的 cancel 应答返回 cancelled:true 带全文', () => {
+  const SUBMIT_AND_ACCEPT = async (h: ReturnType<typeof makeHarness>, id: string, content: string) => {
+    h.registry.submit('s1', { content, clientUuid: id })
+    await h.flush()
+    expect(h.registry.entries('s1')?.active.find((e) => e.id === id)).toMatchObject({ id, state: 'in-flight' })
+    return h.promptCalls[h.promptCalls.length - 1]![0] as string
+  }
+
+  it('双行投递中连点撤销：两行应答各自命中移交表，全文均回草稿（修复前后者报不可撤丢文本）', async () => {
+    const h = makeHarness()
+    const idA = 'u-91000001-0000-4000-8000-000000000001'
+    const idB = 'u-91000002-0000-4000-8000-000000000002'
+    const textA = await SUBMIT_AND_ACCEPT(h, idA, '第一条甲')
+    const textB = await SUBMIT_AND_ACCEPT(h, idB, '第二条乙')
+
+    // 双行连点：两次 cancel 的 clear_queue 交错（pi 串行处理——先到者收走全部，后到者收空）
+    h.setCleared({ steering: [textA, textB], followUp: [] })
+    const pA = h.registry.cancel('s1', idA) // 先点：clearQueue 第一次调用收走 [textA, textB]
+    const pB = h.registry.cancel('s1', idB) // 后点：clearQueue 第二次调用收空
+    const outA = await pA
+    const outB = await pB
+
+    // A 的应答：目标在收回集、意图在册 → 兑现成功（移交表命中路径）
+    expect(outA.cancelled).toBe(true)
+    expect(outA.content).toContain('第一条甲')
+    // B 的应答（修复前：收空 + 不在 transcript → cancelled:false「未找到在途文本」，
+    // 而 B 行已被 A 轮 disposeCleared 兑现消失 = 全文无痕丢失）：命中移交表 → 成功回全文
+    expect(outB.cancelled).toBe(true)
+    expect(outB.content).toContain('第二条乙')
+    expect(h.registry.entries('s1')?.active).toHaveLength(0)
+    expect(h.registry.entries('s1')?.tombstones.filter((t) => t.state === 'cancelled')).toHaveLength(2)
+    expect(h.published.filter((m) => m.type === 'message.error')).toHaveLength(0)
+  })
+
+  it('对账器同帧兑现后用户再点 ×：already-final tombstone 查移交表命中，返回全文', async () => {
+    const h = makeHarness()
+    const id = 'u-91000003-0000-4000-8000-000000000003'
+    const sentText = await SUBMIT_AND_ACCEPT(h, id, '对账兑现的')
+
+    // 第一次 cancel：clear_queue 失败 → 意图留守（pendingRevoke）
+    h.client.clearQueue.mockRejectedValueOnce(new Error('pi stuck'))
+    expect((await h.registry.cancel('s1', id)).cancelled).toBe(false)
+
+    // 对账器同帧兑现（clear_queue 收回 → disposeCleared → settleRevokedEntry 写移交表）
+    h.setCleared({ steering: [sentText], followUp: [] })
+    await h.registry.reconcile('s1', 'agent-settled')
+    await h.flush()
+    expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id, state: 'cancelled' }])
+
+    // 用户再点 ×（pendingRevoke 已清，走 first.cancel）：already-final(cancelled) →
+    // 查移交表命中 → cancelled:true 携带全文（修复前：already cancelled 失败丢文本）
+    const outcome = await h.registry.cancel('s1', id)
+    expect(outcome.cancelled).toBe(true)
+    expect(outcome.content).toContain('对账兑现的')
+  })
+
+  it('pi 断连兑现后 cancel 应答：经 already-final tombstone 查移交表命中返回全文', async () => {
+    const h = makeHarness()
+    const id = 'u-91000004-0000-4000-8000-000000000004'
+    await SUBMIT_AND_ACCEPT(h, id, '断连兑现的')
+
+    h.client.clearQueue.mockRejectedValueOnce(new Error('pi stuck'))
+    expect((await h.registry.cancel('s1', id)).cancelled).toBe(false)
+
+    // 断连：进程死亡 = 文本已离场 → 撤销意图就地兑现（settleRevokedEntry 写移交表）
+    h.registry.onPiDisconnected('s1')
+    expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id, state: 'cancelled' }])
+
+    // cancel 应答后到：already-final(cancelled) → 查移交表命中 → 成功回全文
+    const outcome = await h.registry.cancel('s1', id)
+    expect(outcome.cancelled).toBe(true)
+    expect(outcome.content).toContain('断连兑现的')
+  })
+
+  it('segments 快照经移交表返回（peek 先于 handle.cancel：onChange 剪枝前持引用）', async () => {
+    const h = makeHarness()
+    const idA = 'u-91000005-0000-4000-8000-000000000005'
+    const idB = 'u-91000006-0000-4000-8000-000000000006'
+    const textA = await SUBMIT_AND_ACCEPT(h, idA, '带chips甲')
+    const textB = await SUBMIT_AND_ACCEPT(h, idB, '带chips乙')
+    const SEGS = [{ type: 'text' as const, text: '带chips甲' }, { type: 'file' as const, path: '/tmp/x.ts' }]
+    h.registry.attachSegments('s1', idA, SEGS)
+
+    h.setCleared({ steering: [textA, textB], followUp: [] })
+    const [outA] = await Promise.all([h.registry.cancel('s1', idA), h.registry.cancel('s1', idB)])
+
+    // 移交表携带兑现点持有的 segments 快照——证明 peek 发生在 handle.cancel 的 onChange
+    // 剪枝之前（剪枝后快照已出表，迟 peek 恒 undefined）
+    expect(outA.cancelled).toBe(true)
+    expect(outA.segments).toEqual(SEGS)
+  })
+
+  it('transcript delivered 事实优先于移交表：命中时清残留，后续 cancel 报 already delivered（不误报撤销成功）', async () => {
+    const h = makeHarness()
+    const id = 'u-91000007-0000-4000-8000-000000000007'
+    const sentText = await SUBMIT_AND_ACCEPT(h, id, '其实已送达')
+
+    // 收回成功：目标文本收回、条目兑现 cancelled（移交表写入），但 transcript 已有文本
+    //（送达事实先行，回执未到）→ delivered 事实优先：应答失败 + 移交表清残留
+    h.setCleared({ steering: [sentText], followUp: [] })
+    h.client.getEntries.mockResolvedValue({
+      data: { entries: [{ type: 'message', message: { role: 'user', content: [{ type: 'text', text: sentText }] } }] },
+    })
+    const outcome = await h.registry.cancel('s1', id)
+    expect(outcome.cancelled).toBe(false)
+    expect(outcome.reason).toBe('已投递不可撤')
+
+    // 清残留断言（有牙）：若移交表未清，后续 cancel 会经 already-final(cancelled) 查表
+    // 误报 cancelled:true——实际条目已被 confirmDelivered 转为 delivered 终局
+    const again = await h.registry.cancel('s1', id)
+    expect(again.cancelled).toBe(false)
+    expect(again.reason).toBe('already delivered')
+    expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id, state: 'delivered' }])
+  })
+
+  it('移交表未命中（单行撤销收空、无他径兑现）→ 维持失败口径（既有行为锚）', async () => {
+    const h = makeHarness()
+    const id = 'u-91000008-0000-4000-8000-000000000008'
+    await SUBMIT_AND_ACCEPT(h, id, '无迹可寻')
+
+    // 收空（目标不在槽位也不在 transcript，也无他径兑现）→ 留守原态 + 意图留守
+    h.setCleared({ steering: [], followUp: [] })
+    const outcome = await h.registry.cancel('s1', id)
+    expect(outcome.cancelled).toBe(false)
+    expect(outcome.reason).toContain('未找到在途文本')
+    expect(h.registry.entries('s1')?.active[0]).toMatchObject({ id, state: 'in-flight' })
+  })
+})
+
+// ── chat-flow-consistency 第 11 条：受理失败留守（failed 行 + 重试入口，与断连 E4 同构）──
+// 缺陷：文本投递受理失败（port.send 首败）首败即停直接移除条目，只广播 message.error
+// 纯气泡——失败消息无队列行、无重试入口，用户文本从队列区静默消失。修复 = 文本投递
+// 提交点显式申报 onFailure:'failed'：受理失败转 failed 终态留守（queued → failed 迁移），
+// 与断连 failInFlight 的 failed 同态同出路。
+
+describe('受理失败留守（第 11 条）：failed 行可重试（E3 与断连 E4 双呈现同构）', () => {
+  it('受理失败条目转 failed 留守（非移除）+ message.error 双呈现 + resync 重试闭环', async () => {
+    const h = makeHarness({ promptError: new Error('Authentication failed: 401') })
+    const id = 'u-f1000001-0000-4000-8000-000000000001'
+    h.registry.submit('s1', { content: '受理失败的', clientUuid: id })
+    await h.flush()
+
+    // failed 留守（修复前：条目被移除，队列区无行无入口）+ 错误气泡照发（双呈现）
+    expect(h.registry.entries('s1')?.active).toHaveLength(1)
+    expect(h.registry.entries('s1')?.active[0]).toMatchObject({ id, state: 'failed' })
+    const errors = h.published.filter((m) => m.type === 'message.error')
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({
+      type: 'message.error',
+      payload: { message: expect.stringContaining('Authentication failed: 401') },
+    })
+
+    // 用户重试：resync（transcript 无标记 → 不预检命中）→ requeue 重投受理 → delivered
+    h.client.prompt.mockImplementation(async (text: string) => {
+      h.promptCalls.push([text, undefined, undefined])
+      return {}
+    })
+    await expect(h.registry.resync('s1', [id])).resolves.toEqual([])
+    applySessionOccupancyTransition(h.view, null, 'idle')
+    h.emitSettled()
+    await h.flush()
+    expect(h.registry.entries('s1')?.active[0]).toMatchObject({ id, state: 'in-flight' })
+    expect(h.promptCalls.length).toBe(2)
+    h.userMessageEnd(h.promptCalls[1]![0] as string)
+    await h.flush()
+    expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id, state: 'delivered' }])
+  })
+
+  it('resync 重试前 transcript 预检：已进 transcript 的 failed 条目不重投，delivered 记账 + 计入 deduped', async () => {
+    const h = makeHarness()
+    const id = 'u-f1000002-0000-4000-8000-000000000002'
+    h.registry.submit('s1', { content: '可能已送达', clientUuid: id })
+    await h.flush()
+    const sentText = h.promptCalls[0]![0] as string
+    h.registry.onPiDisconnected('s1')
+    expect(h.registry.entries('s1')?.active[0]).toMatchObject({ id, state: 'failed' })
+
+    // 受理失败的歧义性：文本实际已进 transcript（getEntries 命中裸标记）→ 重试预检
+    // 命中 = 确定性送达事实：delivered 记账（failed 猜测终结）+ deduped 应答，不重投
+    h.client.getEntries.mockResolvedValue({
+      data: { entries: [{ type: 'message', message: { role: 'user', content: [{ type: 'text', text: sentText }] } }] },
+    })
+    await expect(h.registry.resync('s1', [id])).resolves.toEqual([id])
+    await h.flush()
+    expect(h.registry.entries('s1')?.active).toHaveLength(0)
+    expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id, state: 'delivered' }])
+    expect(h.promptCalls).toHaveLength(1) // 未重投
+  })
+})
+
+describe('onRuntimeCreated 创建事件（chat-flow-consistency D3 修复）', () => {
+  it('运行时首次创建触发一次；复用与后续 submit 不再触发', async () => {
+    const h = makeHarness()
+    const seen: string[] = []
+    h.registry.onRuntimeCreated!((sid) => seen.push(sid))
+
+    h.registry.submit('s1', { content: '首条', clientUuid: 'u-a1000000-0000-4000-8000-000000000001' })
+    await h.flush()
+    expect(seen).toEqual(['s1'])
+
+    // 复用（运行时已存在）与再次 submit 均不触发——事件只承载「创建」这一确定性事实
+    h.registry.getOrCreateDelivery('s1')
+    h.registry.submit('s1', { content: '次条', clientUuid: 'u-a1000000-0000-4000-8000-000000000002' })
+    await h.flush()
+    expect(seen).toEqual(['s1'])
+  })
+
+  it('退订函数生效；监听抛错不阻断投递主流程', async () => {
+    const h = makeHarness()
+    const seen: string[] = []
+    const bad = vi.fn(() => {
+      throw new Error('listener boom')
+    })
+    const offGood = h.registry.onRuntimeCreated!((sid) => seen.push(sid))
+    h.registry.onRuntimeCreated!(bad)
+    offGood()
+
+    h.registry.submit('s1', { content: '唯一', clientUuid: 'u-a1000000-0000-4000-8000-000000000003' })
+    await h.flush()
+    expect(seen).toEqual([]) // 已退订
+    expect(bad).toHaveBeenCalledTimes(1) // 抛错监听被调用但被隔离
+    expect(h.promptCalls).toHaveLength(1) // 投递主流程不受影响
+  })
+})
+
+describe('error turn 收尾竞态：响应后 occupancy 写点退役（error-turn-dispatch-stall 根因修复）', () => {
+  it('响应帧晚于终局事件收尾（prompt 返回时 turn 已被事件链收成 idle）→ 不置 dispatching（修前滞留）', async () => {
+    // faux error turn 秒败形态：pi 在写出 prompt 响应帧之前已完成整个失败 turn 的事件流
+    //（turn-end → settling → agent_settled → idle）——runtime stdout 循环按序先分发事件帧
+    // 再分发响应帧，deliverOne 恢复执行时回合已被收尾。修前 markSessionActive 的空闲判定
+    // 通过 → 置 dispatching 且无任何后续事件复位（发送位滞留，A4 探针 >60s 形态）。
+    const h = makeHarness()
+    h.client.prompt.mockImplementation(async (text: string, images?: unknown, behavior?: unknown) => {
+      h.promptCalls.push([text, images, behavior])
+      // deliverOne 前置已置 dispatching；此处模拟事件链在响应帧分发前完成收尾
+      applySessionOccupancyTransition(h.view, null, 'idle')
+      return {}
+    })
+    h.registry.submit('s1', { content: '触发终态失败', clientUuid: 'u-eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' })
+    await h.flush()
+
+    // 修前此处为 dispatching（响应后写点把已收尾回合打回）；修后保持事件链的收尾终态
+    expect(h.view.occupancy?.turn).toBe('idle')
+  })
+
+  it('正常时序锚：受理前置 dispatching 保持到响应处理完（RPC 往返窗不呈 idle，RT-4#10）', async () => {
+    const h = makeHarness()
+    h.registry.submit('s1', { content: '正常投递', clientUuid: 'u-ffffffff-ffff-4fff-8fff-ffffffffffff' })
+    await h.flush()
+
+    // 前置 markDispatchingIfIdle 的置位在响应处理后保持（响应后无写点覆盖）；
+    // 后续占用演进归事件链（turn-start → generating，interpreter 挂点）
+    expect(h.view.occupancy?.turn).toBe('dispatching')
+  })
+
+  it('compaction 拒绝重试：边沿释放后重试 prompt 发起前补置 dispatching（受理前脉冲语义统一）', async () => {
+    const h = makeHarness({ promptError: new Error(PI_COMPACTING_MSG) })
+    h.registry.submit('s1', { content: '撞压缩窗口', clientUuid: 'u-99999999-9999-4999-8999-999999999999' })
+    await h.flush()
+    // 等待期不呈 dispatching（reject-other 收回 idle——挂起期的事实）
+    expect(h.view.occupancy?.turn).toBe('idle')
+
+    h.client.prompt.mockImplementation(async (text: string, images?: unknown, behavior?: unknown) => {
+      h.promptCalls.push([text, images, behavior])
+      // 重试 prompt 发起时刻：occupancy 已被补置位（markDispatchingIfIdle，受理前脉冲）
+      expect(h.view.occupancy?.turn).toBe('dispatching')
+      return {}
+    })
+    // pi 侧 compaction_end 事件 = 持有释放条件（D6 事件驱动）
+    h.emitPiEvent({ type: 'compaction_end', reason: 'manual', aborted: false, willRetry: false })
+    await vi.advanceTimersByTimeAsync(1200)
+    await h.flush()
+
+    expect(h.promptCalls.length).toBeGreaterThanOrEqual(2) // 重试达成
+    expect(h.view.occupancy?.turn).toBe('dispatching') // 响应处理完仍保持（无响应后写点）
   })
 })

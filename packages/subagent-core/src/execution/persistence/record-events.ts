@@ -35,6 +35,9 @@ import { getLogger } from "../../core/logger.ts";
 // [§3.1.3 基座单源] append/scan 实现在 shared/jsonl-event-stream.ts（与 run journal
 // 共用同一实现体，差异经策略注入——本文件只提供 record 域策略）。
 import { JsonlEventStream } from "../../shared/jsonl-event-stream.ts";
+// [subagent-observability u3] 轮收条事实字段类型（FailureCause/AgentUsageTotal 权威
+// = SDK 协议词表家址——type-only 引用零运行时依赖）。
+import type { AgentUsageTotal, FailureCause } from "@zhushanwen/subagent-engine-sdk";
 import type { Epoch, ExecutionMode, ExecutionOutcome, RecordOrigin, StopReason } from "../domain/record-types.ts";
 import type { SubagentModelSource } from "../domain/record-model.ts";
 import type { AbandonedRoundMark, TranscriptRef } from "../domain/record-types.ts";
@@ -217,6 +220,12 @@ export interface RecordRoundStartedEvent extends RecordEventEnvelope { // oe-exe
  *
  * 对应现状写点（D3 表行 4）：markRoundIdle（.state 写点）。.state 降级为本事件
  * 的落盘物化派生视图（D2 sidecar 裁决表 .state 行）。
+ *
+ * [subagent-observability §3.3.3] 帧停因事实链：`engineStopReason`/`failure`/
+ * `promptDisposition` 承载引擎原值 + 失败分类 + 接管三态；`stopReason` 与内存
+ * rec.stopReason 同源（写点 = roundStopReasonOf——引擎原值优先，旧引擎无事实时
+ * 回落 kind 派生展示词，被接管轮不写）。消费方先读事实字段、缺省回落本值；历史帧
+ * 解析按解析词表纪律放行（旧帧只有 stopReason，事实字段缺席）。
  */
 export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "record-round-idle";
@@ -224,8 +233,48 @@ export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt
    *  原 `.record-binding` round 快照的承载接替；首轮轮终（无 round-started 帧）也在此
    *  落盘轮计数）。 */
   round: number;
-  /** 轮终停因（StopReason 值域——「为什么停」的轮粒度权威词）。 */
-  stopReason: StopReason;
+  /**
+   * 轮终停因（与 rec.stopReason 同源——引擎原值 stop/error/aborted 优先，旧引擎
+   * 无事实回落派生展示词；详见本帧头注）。
+   * undefined = 无停因可言的轮终（被接管轮——引擎未执行，§3.3.1 P6 第三形态）。
+   */
+  stopReason?: StopReason;
+  /**
+   * [u3 事实字段] 引擎停因原值（值域 = ROUND_TERMINAL_STOP_REASONS 三态 stop/error/
+   * aborted；产出方 = u1 判定链接线）。undefined = 引擎停因不可得（迁移期回落帧 /
+   * 被接管轮——引擎未执行无停因）。
+   */
+  engineStopReason?: StopReason;
+  /**
+   * [u3 事实字段] 失败分类（收尾边沿一次产出，写入后不可替换——§3.3.2 三硬规则；
+   * 结构 = SDK FailureCause 判别联合）。undefined = 无失败发生（成功轮 / 被接管轮）。
+   */
+  failure?: FailureCause;
+  /**
+   * [u3 事实字段] pi 接管三态（started/queued/handled；handled = 本条 prompt 未启动
+   * 任何 run——被接管的事实字段，§3.3.1 P6）。undefined = 无 disposition 事实。
+   */
+  promptDisposition?: "started" | "queued" | "handled";
+  /**
+   * [u3 事实字段] 观察性事实（引擎侧摘要，如「SO 未调用」——§3.3.10 分源表述：
+   * 观察降级落此处，不改写 failure）。undefined = 无观察项。注意承载分源：交付
+   * 谓词缺项在 worker 脚本侧执行，不经本字段——落脚本结果 observations / run
+   * 终局帧 partialMembers / workflow_control 成员行 missingDeliverables 三面。
+   */
+  observations?: string[];
+  /**
+   * [u3 事实字段] 轮收条 usage 快照（最终尝试值——失败尝试 usage 经 journal
+   * auto_retry 帧可查，§3.3.1 P5 计账）。undefined = 引擎未上报结构化 usage。
+   */
+  usage?: AgentUsageTotal;
+  /** [u3 事实字段] 重试尝试计数（auto_retry_start 帧数；无重试 = 缺省不落键）。 */
+  retryAttempts?: number;
+  /**
+   * [u3 §3.3.3/§3.3.4 失联清点附注] 清点事实标记（swept 标记 + evidence）——
+   * 仅失联清点写点（startup sweep record 侧）落键，不进停因枚举（§3.3.3 走查补：
+   * 清点事实落轮收条附注）。undefined = 正常轮终帧。
+   */
+  swept?: { at: number; evidence: string };
   /**
    * 轮被弃置的标记（与 .record-binding 的 lastAbandonedRound 同源；undefined = 无此
    * 记录，null = 显式清空）。轮终是它的天然写点。
@@ -240,6 +289,7 @@ export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt
    * 事件行与空结果轮缺席）。承接 v1 轮终 result 显示信号（U8b：轮终迁移
    * 恰翻 result，是「轮终等待续聊」的展示侧）——W1 停写 v1 entry 后轮终粒度的
    * result 断供由本锚补齐（终局全文仍只在 v2 终态条目一次性写，D1）。
+   * [u3 空正文语义] 空串 = 无文本输出（纯工具调用收尾），非异常不告警。
    */
   resultSummary?: string;
   /**
@@ -248,6 +298,12 @@ export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt
    * W1 终态同步 F2-2 裁决）。resultSummary 的失败摘要句是兼容形态，本字段是权威。
    */
   error?: string;
+  /**
+   * [§3.3.6 evidence 取证指针] 失败轮的引擎子进程 stderr tee 文件绝对路径（可选——
+   * 成功轮引擎不上报；仅诊断引用，文件受引擎侧轮转与过期清理管辖，读侧不假设
+   * 其永存）。additive 可选字段，旧帧缺席零迁移。
+   */
+  stderrTeePath?: string;
 }
 
 /**

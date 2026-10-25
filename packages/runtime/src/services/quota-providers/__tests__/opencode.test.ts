@@ -183,7 +183,7 @@ describe('opencodeFetcher · 既有语义回归', () => {
     expect(await opencodeFetcher.fetchQuota('session=1', 'cookie', { workspaceUrl: WORKSPACE_URL })).toEqual({
       ok: true,
       data: {
-        label: 'opencode.go',
+        label: 'OpenCode Go',
         wins: [
           { pct: 12, resetSec: 14748 },
           { pct: null, resetSec: null },
@@ -213,7 +213,7 @@ describe('opencodeFetcher · 既有语义回归', () => {
     expect(out).toEqual({
       ok: true,
       data: {
-        label: 'opencode.go',
+        label: 'OpenCode Go',
         wins: [
           { pct: 12, resetSec: 14748 },
           { pct: 28, resetSec: 583200 },

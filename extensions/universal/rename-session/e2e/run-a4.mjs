@@ -2,7 +2,7 @@
 /**
  * A4 场景：error 轮不命名 + 重启 --session 续跑后下一成功轮命名。
  *
- * [L2.5 faux 翻轨，2026-09-15] 阶段 1 的 error 轮改 faux 队列预设
+ * [L2.5 faux 迁组，2026-09-15] 阶段 1 的 error 轮改 faux 队列预设
  * （{error, stopReason:'error'} 步骤——stopReason=error 直接由 faux 演员产出），
  * 原「坏 provider models.json（baseUrl 127.0.0.1:1）」装配删除（凭证无关）。
  * 阶段 2 续跑队列：数数回复 → rename 标题。

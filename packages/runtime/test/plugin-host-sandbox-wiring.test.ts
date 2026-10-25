@@ -6,14 +6,14 @@
  * - sandbox fork 子进程宿主经 PluginPoolOptions.bootstrapPathOverride 注入（fixtures/plugin-bootstrap-process.mock.cjs）
  * - trusted Worker 线程经 workerBootstrapOverride 注入（fixtures/mock-bootstrap.cjs）
  *
- * 2026-10-22 单测层整治（判据三档与处置通道见 docs/todo/test-single-layer-cleanup.md）：
+ * 2026-10-22 单测层整治（判据三档与处置通道见 docs/TEST-STRATEGY.md「新写测试判据」节）：
  * 原形态 spy 模式保留真实 fork/Worker（b+c+f 类）+ vi.waitFor 5s——进程启动与退出
  * 传播没有确定性完成信号。现经 vi.mock 把 node:child_process.fork 与
  * node:worker_threads.Worker 换成注入桩（test/helpers/plugin-host-inproc-stubs.ts，
  * 消息协议逐条对齐上述 fixtures）：
  * - 被测逻辑（sandbox→子进程宿主转调 / 字段映射 / 崩溃转发 / fork 边界断言）全部留在
  *   PluginHost 与 PluginHostProcess 实装内，fork/Worker 的调用实参经桩的 vi.fn 记录断言；
- * - 真实 fork 的进程级行为归集成轨（TAIJI_TEST_INTEGRATION 门控）覆盖。
+ * - 真实 fork 的进程级行为归集成组（TAIJI_TEST_INTEGRATION 门控）覆盖。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { resolve, dirname } from 'node:path'

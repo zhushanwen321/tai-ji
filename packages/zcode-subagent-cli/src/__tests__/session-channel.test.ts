@@ -7,7 +7,7 @@
 // 调用（try/finally）/ -32601/-32602 结构化透传（R5 降级链地基）/ resolve 严格晚于
 // 末事件回调（不变量 2）/ golden 双副本 diff + 帧序列语料四类样本全链回放。
 //
-// 分层（判据三档，docs/todo/test-single-layer-cleanup.md；2026-10-22 单测层整治）：
+// 分层（判据三档，docs/TEST-STRATEGY.md「新写测试判据」节；2026-10-22 单测层整治）：
 // - 默认组主体 = 进程内可编程假连接（makeMockChannel）：SessionChannel 全部行为
 //   逻辑。假连接实现连接层接口（request / onNotification / onClose）并按 scenario
 //   编程应答与推送帧——推送帧在 session/send 应答前同步发出（与真 fake 同序：先

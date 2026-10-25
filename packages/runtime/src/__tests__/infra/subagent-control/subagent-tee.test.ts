@@ -366,30 +366,31 @@ describe('SubagentTee toolResult entry 全量透传（不在此层截断）', ()
   })
 })
 
-describe('[B1 / btw-question D9③] 生产半边：btw 线归属的键中段翻译（M1-a 键中段位约定）', () => {
-  it('mainSessionId=btw vid：构造不 throw；键 = subagent:<线piSid>:<recordId>（vid 不入键、三段式）；bus 路由键保持 vid', () => {
+describe('[B1 / btw-question D9③] 生产半边：btw 线归属的键中段（M1-a 键中段位约定）', () => {
+  it('mainSessionId=btw 线 session id（W4a 后即 pi 真实 id）：构造不 throw；键 = subagent:<线id>:<recordId> 三段式；bus 路由键同值', () => {
     const published: Array<{ sid: string; msg: ServerMessage }> = []
     const publish = vi.fn((sid: string, msg: ServerMessage) => { published.push({ sid, msg }) })
-    const vid = 'btw:line-rt-b1'
-    expect(() => new SubagentTee({ mainSessionId: vid, recordId: 'rec-b1', publish })).not.toThrow()
-    const tee = new SubagentTee({ mainSessionId: vid, recordId: 'rec-b1', publish })
+    const lineId = 'line-rt-b1'
+    expect(() => new SubagentTee({ mainSessionId: lineId, recordId: 'rec-b1', publish })).not.toThrow()
+    const tee = new SubagentTee({ mainSessionId: lineId, recordId: 'rec-b1', publish })
     feedLines(tee, [
       { type: 'message_start' },
       { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hi' } },
     ])
     const chunks = chunkFrames(published)
     expect(chunks).toHaveLength(1)
-    // ① 三段键、不 throw，与 shared 工厂按线 piSessionId 构造逐字一致（INVAR-1.1 键契约闭环）
+    // ① 三段键、不 throw，与 shared 工厂按线 session id 构造逐字一致（INVAR-1.1 键契约闭环；
+    //   W4a 后线 id 即 pi 真实 id——旧「vid 先 extract 再入键」翻译层已删，直接传参）
     expect(chunks[0].sessionId).toBe(subagentVirtualId('line-rt-b1', 'rec-b1'))
     expect(isSubagentVirtualId(chunks[0].sessionId)).toBe(true)
-    // ② 清理前缀 owner 面：中段 = 线 piSessionId（renderer disposeBtwLinePartitions 按
-    //    isVirtualKeyOf(key, extractBtwPiSessionId(vid)) 前缀命中——owner 同源即闭环）
+    // ② 清理前缀 owner 面：中段 = 线 session id（renderer disposeBtwLinePartitions 按
+    //    isVirtualKeyOf(key, 线id) 前缀命中——owner 同源即闭环）
     expect(extractMainSessionId(chunks[0].sessionId)).toBe('line-rt-b1')
-    // D9 路由键不变：bus publish 第一参仍是线 vid（分区路由），仅键中段翻译
-    expect(published[0].sid).toBe(vid)
-    // entry 帧同理：路由键 vid、payload 归属 vid（路由键 ≠ 键中段，两面解耦）
+    // D9 路由键不变：bus publish 第一参仍是线 session id（分区路由）
+    expect(published[0].sid).toBe(lineId)
+    // entry 帧同理：路由键与 payload 归属同为线 session id（路由键 = 键中段，两面同源）
     feedLines(tee, [{ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'x' }], timestamp: 1 } }])
     const entries = entryFrames(published)
-    expect(entries[0].sessionId).toBe(vid)
+    expect(entries[0].sessionId).toBe(lineId)
   })
 })

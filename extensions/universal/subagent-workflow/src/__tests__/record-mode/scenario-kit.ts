@@ -306,6 +306,15 @@ export async function scanScenarioEvents(env: RecordFixtureEnv, runId: string): 
   return createRunEventJournal(env.stateDir).scan(runId);
 }
 
+/** 按 taskIndex 统计 agent-settled 帧次数（scenario 族共用的「结果恰写一次」计数锚）。 */
+export function settledCountByTaskIndex(events: readonly WorkflowRunEvent[]): Map<number, number> {
+  const settledCount = new Map<number, number>();
+  for (const e of events) {
+    if (e.type === "agent-settled") settledCount.set(e.taskIndex, (settledCount.get(e.taskIndex) ?? 0) + 1);
+  }
+  return settledCount;
+}
+
 /** 轮询至终局（runSummary 派生视图——活体终局源 = 终局记录注册表）。 */
 export async function waitForScenarioSettled(
   runs: Map<string, WorkflowRun>,
@@ -406,10 +415,10 @@ export async function runSessionReaderProbe(
   }
 }
 
-// ── probe 集成轨门控约定（单测层极端测试整治）───────────────────────────────
+// ── probe 集成组门控约定（单测层极端测试整治）───────────────────────────────
 //
 // runSessionReaderProbe 是 tsx 子进程形态（跨包 session-reader 实装对拍）：每次
-// 调用 spawn 一个含冷编译的子进程，负载下无完成信号上界（判据第 3 档），归集成轨
+// 调用 spawn 一个含冷编译的子进程，负载下无完成信号上界（判据第 3 档），归集成组
 // （TAIJI_TEST_INTEGRATION）。kit 本体保持 tsx 形态不动（门控开启时真跑，对拍语义
 // 不变）——门控落在消费用例上（it.skipIf，本文件无 skipIf 载体）。消费点清单
 //（新增消费须同步挂门控）：

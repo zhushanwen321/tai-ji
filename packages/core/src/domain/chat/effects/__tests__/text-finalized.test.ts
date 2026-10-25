@@ -1,10 +1,12 @@
 /**
  * message_end 文本定稿标记单测（chat-flow-text-color D1）。
  *
- * 设计锚点 = shared.Message.textFinalized 注释 + registry.ts markStreamingAssistantTextFinalized：
+ * 设计锚点 = shared.Message.textFinalized 注释 + registry message_end assistant 分支的
+ * rebuildAssistantOnFinalize（C2 统一后 textFinalized 在定稿重建内写入，effects/finalized-rebuild.ts；
+ * 定位 = id 锚定优先、末条 streaming assistant 位置兜底）：
  * pi 回合 =「assistant 消息 → 工具 → assistant 消息 → …」循环，live 气泡 status 要到回合级
- * message.complete 才整体收尾；message_end（assistant role）当下按位置给末条 streaming
- * 气泡打 textFinalized，UI（Turn.unitBlockProps）据此逐消息派生正文颜色——长工具回合中
+ * message.complete 才整体收尾；message_end（assistant role）当下给属主气泡打
+ * textFinalized，UI（Turn.unitBlockProps）据此逐消息派生正文颜色——长工具回合中
  * 已写完的正文不再滞留 streaming 灰。
  *
  * 覆盖：

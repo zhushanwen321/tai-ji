@@ -13,10 +13,10 @@
  * 后逐行 JSON.parse）+ fork 桩子进程（child_process.fork 换成同进程注入桩，测试显式
  * 驱动 exit 事件码值）。
  *
- * 层级归属（docs/todo/test-single-layer-cleanup.md 判据三档）：被测逻辑 = 宿主 exit
+ * 层级归属（docs/TEST-STRATEGY.md「新写测试判据」节 判据三档）：被测逻辑 = 宿主 exit
  * 事件分流（crash / clean exit / 计划内终止幂等）与 journal 行的字段装配，全部在
  * PluginHostProcess 实装内；「真实 fork 的子进程确实以 code 3 退出」是 OS 事实、
- * 无完成信号可等，不进默认单测轨。桩只替换进程边界，exit 事件与码值由测试确定性
+ * 无完成信号可等，不进默认单测层。桩只替换进程边界，exit 事件与码值由测试确定性
  * 注入——崩溃回调同步执行，原 vi.waitFor 5s 轮询随之删除。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/plugin-service/__tests__/plugin-host-process-journal.test.ts

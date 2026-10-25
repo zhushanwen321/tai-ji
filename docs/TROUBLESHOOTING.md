@@ -48,6 +48,55 @@ sessionId 的取法：侧栏会话列表 / `<数据目录>/agent/sessions/<encod
 
 **不在清扫范围**：pi 会话 jsonl 本体 `<数据目录>/agent/sessions/<encodeCwd>/<ts>_<sessionId>.jsonl` 及其 sidecar——它是会话本体而非衍生数据，删除它等于删除会话本身（走应用内删除，删除时主文件进废纸篓）。
 
+## 存量磁盘孤儿清扫（ext-sessions 一级孤儿目录）
+
+**现象**：`<数据目录>/ext-sessions/` 一级目录里混着从不属于任何活跃会话的残留目录。四族来源（E-21）：族① `btw-create-*`、族② `btw-attach-*`（btw 虚拟 id 含冒号过不了 `isPiSessionId`，日志树迁移 early-return）、族③ `ephemeral-*`（临时 pi 进程从不 rekey）、族④ 主会话 tempId 空目录（迁移只回收 `logs/` 叶子、父目录永久留空，实测最大一族）。族③族④的新增来源已由磁盘树生命周期修复根治（迁移成功连父目录回收 + 临时进程 finally 自清理）；本节的脚本只承接**存量**清扫。
+
+**清扫工具**：`node scripts/sweep-orphan-session-dirs.mjs`（默认 dry-run，只读点检 + 打印删除清单；真实删除须显式 `--apply`）。
+
+### 清扫三条件（同时成立才删）
+
+| 条件 | 判据 | 不成立的含义 |
+|---|---|---|
+| ① | 目录内**仅** `logs/` 或为空（`logs` 还必须是目录，不是同名文件） | 有兄弟域（attachments / canvases / btw / subagents / …）= 有内容，一律不碰 |
+| ② | 目录名不属于任何已注册/已扫描会话 id | 是真实会话（含日志很旧但仍在扫描范围里的会话），不删 |
+| ③ | mtime 早于保留期 | 刚建的树（首 flush 窗口内的新会话也在其内），不删 |
+
+- **mtime 主语**：目录内 `logs/*.jsonl` 的最新 mtime；该目录没有 jsonl 时取目录自身 mtime。轮转段 `pi-<date>.jsonl.N.gz` 不算 jsonl。
+- **保留期数值** = `readLogKeepDays()`（默认 7 天，env `TAIJI_LOG_KEEP_DAYS` 可覆盖，与 `cleanExpiredLogs` 同一读取函数；不新造常数）。
+- **条件② 的 id 集合**取自磁盘：pi 会话文件 `<数据目录>/agent/sessions/**/*.jsonl` 的首行 header id（tmp 残留文件名 `.tmp-migrate-<ts>.jsonl` / `.tmp-import-<ts>.jsonl` 按 scanner 同规则排除）+ btw 线文件 `<数据目录>/ext-sessions/<mainSid>/btw/*.jsonl` 的首行 header id。runtime 内存注册表外部脚本读不到，已注册但 pi 尚未首 flush 的会话由条件③ 兜底（tee 日志在建线即时落盘，窗口内 mtime 必然新鲜）。
+- **不另造前缀白名单**：四族名字都能过 `isPiSessionId`，前缀清单既漏未来新族、又把判据退化成名单维护。与 `cleanExpiredLogs` 的树内遍历规约对齐——一级目录名非合法 sessionId 形态（如 `--Users-x-proj--`）一律跳过，手放的非会话目录归外部，不代删。
+
+### 删除形态与失败账目
+
+- 删除经目录级端口 `ISessionStore.trashDirectory` 移入回收站（mac 可在访达废纸篓恢复整树）；**失败 = 目录保留原地 + 结构化错误上抛**，禁用「降级硬删 + warn」。非 mac 平台 `rmSync` 递归删是该端口内的设计内平台分支（无恢复通道），不是降级路径。
+- 逐目录 attempt、**失败继续**（不全停）。收到结构化错误的目录记入**失败集合 F**，留痕进点检记录（判别器 = 结构化错误的 `category` 分类字段）；F 内目录不进删除集、不计漏删。
+- **F 非空 = 环境故障**：本轮判环境故障、整轮重来（退出码 2）。重跑时点检与删除清单重新求值，**不重放上次冻结的清单**——端口对不存在的路径直接上抛，重放必撞。
+- 脚本对端口错误派生分类：`ENOENT` → `path_missing`，其余 → `trash_failed`（底层 stderr 摘录由脚本捕获后一并写入失败集合 F）。端口本身只承诺「失败保留原地并 reject」，不做分类。
+
+### 用法与点检记录
+
+```bash
+# 点检（只读）：打印删除清单，不改任何数据
+node scripts/sweep-orphan-session-dirs.mjs [--data-dir <path>]
+# 落点检记录（JSON：逐目录三条件判定与证据 + 冻结删除清单 + 失败集合 F）
+node scripts/sweep-orphan-session-dirs.mjs --record <path>
+# 真实删除：显式 --apply；目标在 prod 数据树内时还须 --allow-prod
+node scripts/sweep-orphan-session-dirs.mjs --apply --allow-prod
+# 机器可读输出 / 自检（tmp 树六形态 + prod 护栏，不触真实数据目录）
+node scripts/sweep-orphan-session-dirs.mjs --json
+node scripts/sweep-orphan-session-dirs.mjs --selftest
+```
+
+- 数据目录取值：`--data-dir` 显式指定 > env `TAIJI_AGENT_DATA_DIR` > 缺省 `<home>/.taiji-dev`（裸跑一律落 dev 树，结构性杜绝脚本默认写 prod）。dry-run 只读，prod 树也允许读；`--apply` 落在 prod 树（`<home>/.taiji`）内时**必须**同时给 `--allow-prod`（prod 只能被显式声明触达），否则拒绝执行、不做任何修改。
+- **点检记录**（`--record` 落的 JSON）是破坏性 fs 操作的验收凭据：`entries[]` 对每个一级目录逐条标注形态、条件①②③ 的判定与证据（mtime 主语与取值、id 集合成员性），`deleteSet` 是点检时求值一次后冻结的清单，`failureSet` 带 `category` 分类字段。验收方据记录独立复算「删除集 = 三条件命中的存量全集」（等号形态：漏删与多删都红），不采信脚本自报分类；零存量环境两份集合皆空属合法，但须有点检记录证明清扫真跑过。
+- **自检**：`--selftest` 在 `os.tmpdir()` 下构造 tmp 树，覆盖六形态（空目录 / 仅 logs / 有兄弟域 / 活跃会话树 / 保留期内新树 / 端口失败注入）与边界（logs 是同名文件、btw 线树、仅轮转 gz、jsonl 新鲜但目录旧、tmp 残留文件名、非 sessionId 目录名、顶层散文件），断言删除集等号 + 零误删 + F 留痕 + prod 护栏。自检与一切自动化断言禁触真实数据目录。
+
+### 已知边界（登记接受）
+
+- **归档会话**不在条件② 的 id 集合内（scanner 只扫 `agent/sessions/`）：归档时资产已搬去 `<数据目录>/agent/archive/<encodeCwd>/assets/<sessionId>/`，残留的 logs-only 旧树按三条件判孤儿可回收，取消归档时会重建树。
+- **保留期 env 值域无界**：`Number(env) || 7`，负数会透传，负保留期使条件③ 对全部目录命中。出现清扫失败报告或 env 被设为非正数时须重审。
+
 ## 关键诊断路径
 
 **打包后应用结构** (`/Applications/TaiJi.app/Contents/Resources/`)：
@@ -125,6 +174,19 @@ lsof -i :3210 -P | grep LISTEN                     # 端口占用
 lsof -i :3210-3220 -P | grep LISTEN | awk '{print $2}' | sort -u   # 清理残留进程前先定位 PID
 ```
 
+### 3.1 dev 实例 vite 端口「ready 但 Electron 判未就绪」死循环
+
+症状：装配日志里 vite 已打印 `ready in N ms / Local: http://localhost:<port>/`，Electron 主进程仍报
+`Vite dev server ... did not become ready within 30000ms` 后退出。
+
+判定：派生端口（`dev-instance-lib.mjs` deriveParams，1420+hash%300）落在 WHATWG fetch spec
+「bad port」清单（undici fetch 与 Chromium 导航一致，连接发起前即拒）。实测撞点 = 1719
+（h323hostcall）。探针：`node -e "fetch('http://localhost:1719').catch(e => console.log(e.cause))"`
+输出 `Error: bad port` 即命中。
+
+恢复：deriveParams 已对清单端口确定性 +1 顺延（2026-10-24 修复）；旧实例名仍命中时换
+`TAIJI_DEV_INSTANCE_NAME=<新名>` 重派端口段。
+
 ### 4. Extension 相关问题
 
 builtin pi extensions（数量与分组以 `packages/shared/src/mandatory-extensions.json` 为 SSOT）随应用打包内置，不经过 npm 安装：
@@ -170,9 +232,9 @@ grep "transport selected" ~/.taiji/agent/logs/subagents-*.log
 
 打包模式下 runtime sidecar 由 main 以 `ELECTRON_RUN_AS_NODE=1` 启动（Electron 二进制当纯 node 跑 sidecar 的必需条件），打包态 runtime 再经 `getEngineRootsSpawnEnv` 以 extras 显式注入 pi 子进程（`engine-roots.ts:65-67` → `process-manager.ts` 注入 env → `rpc-client.ts:277-283` 的 `buildPiOutboundEnv`（`extras: this.options.env`）交 `buildOutboundChildEnv` 构建；`ENV_WHITELIST_PREFIXES` 不含 `ELECTRON_` 前缀，不是白名单继承），runtime spawn 引擎遇到 Electron 执行器时同样注入（SDK node-executor 的宿主矩阵①/②）——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。终端服务不受影响（TerminalService 独立构造 env 已剥离）。**playwright e2e 形态（fail-fast 非静默）[2026-09-22]**：经 subagent bash 跑 `npx playwright test --project=electron*` 时，launch-app fixture 的 `{...process.env}` 把该变量透传给 Playwright 拉起的 Electron → 纯 node 化不认 `--remote-debugging-port=0` → 全部用例 `electron.launch: Process failed to launch!` + `bad option` + exit 9（对照：直接跑 `--version` 打出 `v24.15.0` 而非 `Electron x.y.z` 即此病）。对策 = e2e 运行命令前缀 `env -u ELECTRON_RUN_AS_NODE`（CI 无此变量时 no-op）；pnpm dev 正规链（dev-instance `buildDevEnv` LEAK_ENV_KEYS）已内置剥离不受影响。机制细节见 `packages/subagent-engine-sdk/src/node-executor.ts` 的宿主矩阵注释与 `apps/electron/main/supervisor/process-control.ts` 的 sidecar env 注释。
 
-**同根因的第二个症状面（2026-09-19 实测）：playwright electron 轨在 agent bash 里全灭**——`npx playwright test --project=electron` 报 `electron.launch: Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`（`--version` 回显 `v24.x` 而非 `v42.3.3` = 已被降级为裸 node，node 的 CLI 不认该开关）；与代码无关，**跑 e2e 前先 `env -u ELECTRON_RUN_AS_NODE`**（例：`env -u ELECTRON_RUN_AS_NODE npx playwright test --project=electron-smoke`）。别误判为 Electron 二进制损坏或构建失败。解除该变量后 mock 轨与 real 轨均可跑通（2026-09-20 实测：electron 轨 64/64 全绿，real 轨为凭证无关的 faux LLM 装配，无需真实 provider）。
+**同根因的第二个症状面（2026-09-19 实测）：playwright electron 层在 agent bash 里全灭**——`npx playwright test --project=electron` 报 `electron.launch: Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`（`--version` 回显 `v24.x` 而非 `v42.3.3` = 已被降级为裸 node，node 的 CLI 不认该开关）；与代码无关，**跑 e2e 前先 `env -u ELECTRON_RUN_AS_NODE`**（例：`env -u ELECTRON_RUN_AS_NODE npx playwright test --project=electron-smoke`）。别误判为 Electron 二进制损坏或构建失败。解除该变量后 mock 层与 真实进程层均可跑通（2026-09-20 实测：electron 层 64/64 全绿，真实进程层为凭证无关的 faux LLM 装配，无需真实 provider）。
 
-**配套陷阱：mock/real 两轨共用同一份 renderer 产物，须分批构建**——两条轨都读 `apps/electron/renderer/dist`，构建期由 `VITE_MOCK` define 决定走哪条 transport 链，而 e2e globalSetup 只查产物存在、不查构建形态。故跑完 real 轨（`VITE_E2E=true pnpm run build:e2e`）后必须重建 mock bundle（`VITE_E2E=true VITE_MOCK=true pnpm run build:e2e`）再跑 mock 轨，否则 mock spec 全部以 30s 超时呈现。两个方向的形态错配均已由 pre-flight fail-fast 拦住并给出重建命令：`launch-app-real.ts` 的 `assertRealRendererBundle`（mock 产物在场）+ `launch-app.ts` 的 `assertMockRendererBundle`（real 产物在场，判据 = mock fixture 标记串 `Promise 代码评审`，两 fixture 共享导出）。
+**配套陷阱：mock/real 两种形态共用同一份 renderer 产物，须分批构建**——两种形态都读 `apps/electron/renderer/dist`，构建期由 `VITE_MOCK` define 决定走哪条 transport 链，而 e2e globalSetup 只查产物存在、不查构建形态。故跑完 真实进程层（`VITE_E2E=true pnpm run build:e2e`）后必须重建 mock bundle（`VITE_E2E=true VITE_MOCK=true pnpm run build:e2e`）再跑 mock 层，否则 mock spec 全部以 30s 超时呈现。两个方向的形态错配均已由 pre-flight fail-fast 拦住并给出重建命令：`launch-app-real.ts` 的 `assertRealRendererBundle`（mock 产物在场）+ `launch-app.ts` 的 `assertMockRendererBundle`（real 产物在场，判据 = mock fixture 标记串 `Promise 代码评审`，两 fixture 共享导出）。
 
 ### 8. runtime 启动即退出："fatal: subagent control server init failed"
 
@@ -321,18 +383,18 @@ vitest run --root <子包目录>                                 # 或从仓库�
 
 **排障**：输出里出现该通告 = 当前 shell 带宿主 env（正常现象，无需处理）；确需显式指定数据目录时，注入白名单内路径。
 
-### 19. e2e real 轨用例失败：sidebar 出现 mock 假会话数据（e2e 产物形态错误，2026-09-18）
+### 19. e2e 真实进程层用例失败：sidebar 出现 mock 假会话数据（e2e 产物形态错误，2026-09-18）
 
 **现象**：`e2e/*-real.spec.ts`（launch-app-real）跑出诡异失败——sidebar 列出大量不存在于临时数据目录的会话（mock 假数据），新建 session 的条目永远不出现；同 spec 的纯 WS 断言用例（不经 UI）却全绿。
 
-**真相**：playwright global-setup 构建产物时恒定注入 `VITE_MOCK=true`（mock 形态 bundle）。mock 轨与 real 轨共享同一份 `apps/electron/dist` 产物，谁最后构建产物就是谁的形态——real spec 跑在 mock bundle 上时 renderer 走 `mock://localhost`（连接日志可证），根本不连 runtime。
+**真相**：playwright global-setup 构建产物时恒定注入 `VITE_MOCK=true`（mock 形态 bundle）。mock 层与 真实进程层共享同一份 `apps/electron/dist` 产物，谁最后构建产物就是谁的形态——real spec 跑在 mock bundle 上时 renderer 走 `mock://localhost`（连接日志可证），根本不连 runtime。
 
 **排障动作**：
 
 ```bash
-# real 轨前重建 real 形态产物（无 VITE_MOCK）
+# 真实进程层前重建 real 形态产物（无 VITE_MOCK）
 VITE_E2E=true pnpm run build:e2e
-# real 轨跑完、要跑 mock 轨（launch-app 形态）前再重建 mock 形态产物
+# 真实进程层跑完、要跑 mock 层（launch-app 形态）前再重建 mock 形态产物
 VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 ```
 
@@ -451,9 +513,9 @@ grep "\[prompt-ack\]" <数据目录>/logs/*.log
 
 **恢复动作**：按错误文案内联的 `Recovery` 重跑任务；复现时保留 `outcome.error` 的诊断摘要 + 上述日志 + `engine_open`/`engine_opened` 时间点（runtime 日志 `[subagent-control] engine opened`）。`engine_prompt_rejected` 的 pi error 文本（busy / queue / extension takeover）由 pi 侧给出，不归结为 taiji 传输故障。
 
-### 32. 引擎 / 任务 pi 残留（组杀与启动 sweep）
+### 32. 引擎 / 任务 pi 残留（按进程组终止与启动 sweep）
 
-**机制**：托管态下控制面裁决统一走组杀（POSIX 负 pid 进程组 + 子孙递归兜底；Windows `taskkill /PID <pid> /T /F`），信号发出即返回，真实 exit 由 child exit 事件收尾——**pid 文件只在 exit 确认后删除**；杀链失败时 pid 文件保留给下次启动 sweep。连接关闭 → 该连接全部通道 fan-out 组杀；runtime 退出 → 引擎 stdin EOF → SDK `armEngineSelfDestruct` 自灭；runtime 异常死亡 → 下次启动 `sweepOrphanEnginePids` 对 owner 已死的引擎组立即收割（pid 复用防护：现持有者启动时间晚于登记则只删记录不杀）。
+**机制**：托管态下控制层裁决的进程终止统一走按进程组终止（POSIX 负 pid 进程组 + 子孙递归兜底；Windows `taskkill /PID <pid> /T /F`），信号发出即返回，真实 exit 由 child exit 事件收尾——**pid 文件只在 exit 确认后删除**；杀链失败时 pid 文件保留给下次启动 sweep。连接关闭 → 对该连接全部通道 fan-out 按进程组终止；runtime 退出 → 引擎 stdin EOF → SDK `armEngineSelfDestruct` 自灭；runtime 异常死亡 → 下次启动 `sweepOrphanEnginePids` 对 owner 已死的引擎组立即收割（pid 复用防护：现持有者启动时间晚于登记则只删记录不杀）。
 
 **取证**：
 
@@ -493,11 +555,11 @@ Windows 等效：`tasklist /FI "PID eq <pid>"` 核对单进程；按命令行定
 - **现状**：`main.ts` dev 块经 `utils/dev-data-dir.ts` 的 `resolveDevDataDir` 受控采信——装配器注入的 `instances/<worktree>` 实例目录生效（多 worktree 并行 dev 自动隔离），树外值（泄漏形态 `~/.taiji` 等）仍固定回 `~/.taiji-dev`。
 - **处置建议**：排查多实例互相污染类问题先核对实际数据目录（日志首行/`getDataDir()` 输出），不要按文档预期推定；需要干净环境时使用 `--fresh`。
 
-### 36. e2e real 轨执行环境三坑（2026-09-19 session 导入验收实测）
+### 36. e2e 真实进程层执行环境三坑（2026-09-19 session 导入验收实测）
 
-- **坑① 沙箱杀子进程**：沙箱化终端（如 AI agent 的 sandbox bash）里跑 `npx playwright test <real 轨 spec>`，e2e 派生的 runtime/pi 子进程会被持续 SIGKILL（supervisor 日志呈 `exitCode 137` 循环重启、runtime 死前零错误输出、无 jetsam 系统记录）——症状是 WS reply 超时/「连接中…」卡死，极具迷惑性。**处置**：real 轨一律非沙箱执行；取证先看 `<dataDir>/logs/main-*.log` 的 supervisor restart decision 与 `log show` 查 jetsam（有 = 系统内存压力，无 = 沙箱/外部 kill）。
-- **坑② bundle 陈旧分裂**：`build:e2e` 链 = main + preload + vite 三产物，**不含 build:runtime**——runtime 源码改动后直接跑 real 轨会用旧 runtime bundle，行为与源码对不上且无告警。**处置**：改过 runtime 后重跑 real 轨前先 `VITE_E2E=true pnpm run build:e2e`（会重建 runtime），或核对 `apps/electron/dist*/runtime` 产物 mtime 晚于源码最后改动。
-- **坑③ mock/real 构建产物互斥覆盖**：mock 轨（`VITE_MOCK=true`）与 real 轨（`VITE_E2E=true` 不传 VITE_MOCK）写同一 renderer 产物目录，后构建者覆盖前者——mock 轨 spec 在 real bundle 下会以「UI 停空态/元素找不到」失败，real 轨 spec 在 mock bundle 下被 `assertRealRendererBundle` 检查拦截（报 mock fixture 标记）。**处置**：切换轨之前按轨重建 bundle；mock 轨的 13 个失败里若混着 real spec 的 8-38ms 秒败，属预期拦截非回归。
+- **坑① 沙箱杀子进程**：沙箱化终端（如 AI agent 的 sandbox bash）里跑 `npx playwright test <真实进程层 spec>`，e2e 派生的 runtime/pi 子进程会被持续 SIGKILL（supervisor 日志呈 `exitCode 137` 循环重启、runtime 死前零错误输出、无 jetsam 系统记录）——症状是 WS reply 超时/「连接中…」卡死，极具迷惑性。**处置**：真实进程层一律非沙箱执行；取证先看 `<dataDir>/logs/main-*.log` 的 supervisor restart decision 与 `log show` 查 jetsam（有 = 系统内存压力，无 = 沙箱/外部 kill）。
+- **坑② bundle 陈旧分裂**：`build:e2e` 链 = main + preload + vite 三产物，**不含 build:runtime**——runtime 源码改动后直接跑 真实进程层会用旧 runtime bundle，行为与源码对不上且无告警。**处置**：改过 runtime 后重跑 真实进程层前先 `VITE_E2E=true pnpm run build:e2e`（会重建 runtime），或核对 `apps/electron/dist*/runtime` 产物 mtime 晚于源码最后改动。
+- **坑③ mock/real 构建产物互斥覆盖**：mock 层（`VITE_MOCK=true`）与 真实进程层（`VITE_E2E=true` 不传 VITE_MOCK）写同一 renderer 产物目录，后构建者覆盖前者——mock 层 spec 在 real bundle 下会以「UI 停空态/元素找不到」失败，真实进程层 spec 在 mock bundle 下被 `assertRealRendererBundle` 检查拦截（报 mock fixture 标记）。**处置**：切换之前按所需形态重建 bundle；mock 层的 13 个失败里若混着 real spec 的 8-38ms 秒败，属预期拦截非回归。
 
 ### 37. 终端多实例（一会话多终端）四类症状定位（2026-10-04 交付）
 
@@ -693,7 +755,7 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 ### 10. settled 事件先复位再广播：边沿回调内 isIdle 恒真（PS-07）
 
 - **pi 锚点**：`dist/core/agent-session.js:325-336`——`_emitAgentSettled` 首行复位 `_isAgentRunActive = false` 再发 agent_settled 事件
-- **机制**：settled 边沿驱动的通知通道不会撞上残留 busy 态——delivery-port 的注入链与文本车道对账器的 settled 边沿重投依赖此序；若 pi 未来调换次序，注入/重投时序需重验
+- **机制**：settled 边沿驱动的通知通道不会撞上残留 busy 态——delivery-port 的注入链与文本投递路径对账器的 settled 边沿重投依赖此序；若 pi 未来调换次序，注入/重投时序需重验
 - **处置建议**：探针检查（pi-semantics-agent-session.test.ts）；消费 settled 边沿的新代码可假定回调内 idle，但 pi 升级时此条目自动进重验清单（verifiedWith 门禁）
 
 ### 11. plain appendEntry（type=custom）不进 LLM 上下文（PS-09）

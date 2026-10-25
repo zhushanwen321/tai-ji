@@ -1,8 +1,11 @@
 /**
  * 审查循环轮次语义与终态、支撑度写回。
  * - 轮次口径（一轮 = 一循环）：发起 → reviewer 报告写回（review-append）→ 处置为
- *   一轮；当前轮无报告条目时再发起 = 同一轮重发（GUI 双跳：user 发起 → 回推 →
+ *   一轮；当前轮无报告写回时再发起 = 同一轮重发（GUI 双跳：user 发起 → 回推 →
  *   agent run 再发起），round 不动、不消耗 maxRounds 预算。
+ * - 零发现轮（reviewer 空 entries / 条目全畸形被丢弃）：写回本身是「本轮 run 已完成」
+ *   的落盘事实（review.lastRunRound 随 review-append 落聚合，无占位假条目）——零发现
+ *   轮照常推进轮次、消耗预算，max-rounds 停回保护对该形态生效。
  * - 设计 §3.1 失败路径②：审查达轮次上限（完成的循环数用尽预算）→ 终态 max-rounds +
  *   停回说明 + ReviewMaxRoundsReached 留痕 → 用户升级裁决放行恰一轮（round+1 且
  *   maxRounds 同步抬升 + ReviewEscalated 留痕，放行后即回 in-progress）——升级后的
@@ -74,6 +77,72 @@ describe('轮次口径（一轮 = 一循环：GUI 双跳 / 重发不虚增轮次
       }, 'review', SID))
       expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
       expect(c.state().review?.round).toBe(2)
+    } finally {
+      h.dispose()
+    }
+  })
+})
+
+describe('零发现轮（空 entries 写回也是审查结论——轮次推进与 max-rounds 预算不失灵）', () => {
+  it('零发现写回（空 entries）→ lastRunRound 落聚合（无占位假条目污染 entries 消费方），再发起推进 R2', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
+      expectOk(h.svc.mutate({ action: 'review-append', params: { canvasId: c.canvasId, round: 1, entries: [] } }, 'review', SID))
+      expect(c.state().review?.entries).toHaveLength(0)
+      expect(c.state().review?.lastRunRound).toBe(1)
+      // 零发现轮完成 → 再发起推进 R2（修复前按条目存在判完成 → 卡死 R1、预算永不消耗）
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
+      expect(c.state().review?.round).toBe(2)
+      expect(c.state().review?.status).toBe('in-progress')
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('连续零发现轮烧完预算 → 再发起触发 max-rounds 终态（停回保护对零发现形态生效）', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      for (let round = 1; round <= 5; round++) {
+        expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
+        expect(c.state().review?.round).toBe(round)
+        expectOk(h.svc.mutate({ action: 'review-append', params: { canvasId: c.canvasId, round, entries: [] } }, 'review', SID))
+      }
+      const reply = h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID)
+      expect(reply.ok).toBe(true)
+      if (reply.ok) expect(reply.summary).toContain('停回')
+      expect(c.state().review?.status).toBe('max-rounds')
+      expect(c.state().review?.round).toBe(5)
+      expect(c.state().review?.entries).toHaveLength(0)
+      expect(readLines(h.dir, c.canvasId).map((l) => l.type)).toContain('ReviewMaxRoundsReached')
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('直写 ≡ 重放：零发现轮的 lastRunRound 经 events.jsonl 重建一致，且重建侧完成判据照常推进轮次', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      // 两轮零发现：R1 完成推进 R2、R2 完成待推进（直写态锚点）
+      for (let round = 1; round <= 2; round++) {
+        expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
+        expectOk(h.svc.mutate({ action: 'review-append', params: { canvasId: c.canvasId, round, entries: [] } }, 'review', SID))
+      }
+      const directWrite: CanvasState = h.svc.readState(c.canvasId, SID)
+      expect(directWrite.review?.round).toBe(2)
+      expect(directWrite.review?.lastRunRound).toBe(2)
+      const reborn = new CanvasService({ dataDir: h.dir, generateId: (): string => 'replay-unused-id' })
+      try {
+        expect(reborn.readState(c.canvasId, SID)).toEqual(directWrite)
+        // 重放侧 lastRunRound 判据成立：重建后再发起 = 推进 R3（非卡死 R2）
+        expectOk(reborn.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
+        expect(reborn.readState(c.canvasId, SID).review?.round).toBe(3)
+      } finally {
+        reborn.dispose()
+      }
     } finally {
       h.dispose()
     }

@@ -537,6 +537,85 @@ describe('useVirtuaFollow', () => {
     })
   })
 
+  /**
+   * [chat-flow-consistency F2] 脱离态几何快照刷新（refreshDistanceSnapshot）+
+   * [F3] touchmove 升格用户输入信号族。
+   */
+  describe('F2 脱离态快照刷新 / F3 touch 信号族（chat-flow-consistency）', () => {
+    it('F2: 脱离态刷新按当前几何重算距底快照 → 胶囊浮现判定即时跟上内容增长（无 scroll 事件）', () => {
+      const { stickToBottom, showJumpButton, refreshDistanceSnapshot } = setupFollow(
+        {},
+        { scrollSize: 3000, scrollOffset: 500, viewportSize: 500 },
+      )
+      // 用户上滑脱离（无后续 scroll 事件——静止阅读）
+      stickToBottom.value = false
+      // 初始快照冻结（0），胶囊不亮
+      expect(showJumpButton.value).toBe(false)
+
+      // 流式增长后（scrollSize 3000）RO/条数 watch 调用点喂刷新：distance = 3000-500-500 = 2000 > 一屏
+      refreshDistanceSnapshot()
+      expect(showJumpButton.value).toBe(true)
+    })
+
+    it('F2: 贴底态 guard——贴底期调用不重算（防跟随增长拍胶囊闪烁）', () => {
+      const { showJumpButton, onScroll, refreshDistanceSnapshot } = setupFollow(
+        {},
+        { scrollSize: 3000, scrollOffset: 2000, viewportSize: 500 },
+      )
+      // 建 scroll 快照（贴底态，offset 未递增不判定）：distance = 500 = 一屏 → 胶囊不亮
+      onScroll(2000)
+      expect(showJumpButton.value).toBe(false)
+
+      // 内容增长（贴底跟随 rAF 落地前的瞬时态，scrollSize 3000→4000、无 scroll 事件）
+      mock.scrollSize = 4000
+      // 贴底态调用 refreshDistanceSnapshot：guard 拦住 → 快照不重算，胶囊不闪
+      // （无 guard 时会算出 distance=1500 > 一屏 → 胶囊闪现）
+      refreshDistanceSnapshot()
+      expect(showJumpButton.value).toBe(false)
+    })
+
+    it('F2: 空列表（scrollSize=0）刷新 → 快照清零（无滚动空间即无离底）', () => {
+      const { stickToBottom, showJumpButton, refreshDistanceSnapshot } = setupFollow(
+        {},
+        { scrollSize: 0, scrollOffset: 0, viewportSize: 500 },
+      )
+      stickToBottom.value = false
+      refreshDistanceSnapshot()
+      expect(showJumpButton.value).toBe(false)
+    })
+
+    it('F3: touchstart + 上滑 touchmove → 脱离锚定（纯用户输入信号）', () => {
+      const { stickToBottom, onTouchStart, onTouchMove } = setupFollow()
+      expect(stickToBottom.value).toBe(true)
+
+      onTouchStart({ touches: [{ clientY: 300 }] } as unknown as TouchEvent)
+      onTouchMove({ touches: [{ clientY: 260 }] } as unknown as TouchEvent)
+
+      expect(stickToBottom.value).toBe(false)
+      expect(onStickChange).toHaveBeenCalledWith(false)
+    })
+
+    it('F3: 下滑 touchmove 不改变贴底态（回底由 onScroll 恢复分支处理，与 wheel 同语义）', () => {
+      const { stickToBottom, onTouchStart, onTouchMove } = setupFollow()
+      onTouchStart({ touches: [{ clientY: 300 }] } as unknown as TouchEvent)
+      onTouchMove({ touches: [{ clientY: 340 }] } as unknown as TouchEvent)
+      expect(stickToBottom.value).toBe(true)
+      expect(onStickChange).not.toHaveBeenCalled()
+    })
+
+    it('F3: 收敛抑制窗内上滑 touchmove 恒即时脱离（同 wheel 免抑制窗）', () => {
+      const { stickToBottom, followToBottom, onTouchStart, onTouchMove } = setupFollow({ itemCount: () => 5 })
+      // force 开收敛抑制窗
+      followToBottom(true)
+      expect(stickToBottom.value).toBe(true)
+
+      onTouchStart({ touches: [{ clientY: 200 }] } as unknown as TouchEvent)
+      onTouchMove({ touches: [{ clientY: 160 }] } as unknown as TouchEvent)
+
+      expect(stickToBottom.value).toBe(false)
+    })
+  })
+
   describe('ManualResizeObserverStub（happy-dom RO 手动派发 stub，_virtua-mock-helper 定稿）', () => {
     beforeEach(() => {
       ManualResizeObserverStub.install()

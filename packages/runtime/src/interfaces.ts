@@ -10,6 +10,7 @@ import type {
   ServerMessageMap,
   SessionSummary,
   SessionGroup,
+  SessionSurface,
   Message,
   ProviderInfo,
   BuiltinProviderTemplate,
@@ -104,11 +105,6 @@ export interface IEventAdapter {
 
 /** Session create 选项（SessionService.create / SessionLifecycle.create 共用）。 */
 export interface SessionCreateOptions {
-  /**
-   * 隐藏 session（公共 session）：scanner listAll 过滤，不进 sidebar 列表。
-   * 用于 landing 态命令源等内部场景。
-   */
-  hidden?: boolean
   /** Launch preset id（设计文档 §4.1），绑定到新 session 并解析为 pi 启动参数。 */
   presetId?: string
   /**
@@ -220,7 +216,7 @@ export interface ISessionService {
    * 覆盖默认预算（缺省回落 HISTORY_BUDGET）。cursor 未命中返回空页 + truncated=false
    * （翻页到头，不报错）。
    */
-  getHistory(sessionId: string, query?: { cursor?: string; limitTurns?: number; maxBytes?: number }): Promise<{ messages: Message[]; truncated: boolean; loadedTurns: number; totalTurnsEstimate: number }>
+  getHistory(sessionId: string, query?: { cursor?: string; limitTurns?: number; maxBytes?: number }): Promise<{ messages: Message[]; truncated: boolean; loadedTurns: number; totalTurnsEstimate: number; interrupted?: boolean }>
   /**
    * 获取 session 派生的 subagent 列表（从主 session JSONL 的 subagent toolCall/toolResult 提取）。
    * 纯磁盘读取，不依赖 pi 进程活跃。文件不存在或无 subagent 调用时返回空数组。
@@ -357,9 +353,10 @@ export interface ISessionService {
   hasActiveSession(sessionId: string): boolean
   getSummary(sessionId: string): SessionSummary | undefined
   /**
-   * 取活跃 session 的运行时状态视图（isGenerating / isCompacting / isBashRunning /
-   * lastActiveAt 等可写字段；未激活/不存在返回 undefined）。sd-u5 起 delivery 装配
-   * 经此读 isIdle 判定标志；字段可写语义见 IManagedSessionView 注释。
+   * 取活跃 session 的运行时状态视图（occupancy 四维 / lastActiveAt 等可写字段；
+   * 未激活/不存在返回 undefined）。isGenerating 等忙闲判定从 occupancy 派生
+   * （chat-flow-consistency D1 派生布尔已删，读口 = types.ts isGeneratingTurn）。
+   * sd-u5 起 delivery 装配经此读 isIdle 判定标志；字段可写语义见 IManagedSessionView 注释。
    */
   getSession(sessionId: string): IManagedSessionView | undefined
   /**
@@ -413,6 +410,18 @@ export interface ISessionService {
    * @throws if restore fails or session not found
    */
   ensureActive(sessionId: string): Promise<IPiEngine>
+
+  /**
+   * session.list 通用查询（W4b，设计 §3.3.1）：按 surface / mainSessionId 过滤的派生分组
+   * 列表（btw 线进通用列表的读取入口；过滤维度只存在于本查询——config.sessions 是无参
+   * 全量查询 + 全量广播双用消息）。实现在 SessionService（session-list-query.ts），
+   * 纯内存派生，不依赖 pi 进程活跃。
+   *
+   * 可选成员形态：transport 消费方（session-message-handler ctx 交集）按 optional 登记，
+   * 缺省仅出现在测试最小 mock 中，case 内判空走 session_list_unsupported 防御分支
+   * ——与 ctx 侧 getPlanState 同一套登记惯例。
+   */
+  listSessions?(query: { surface?: SessionSurface; mainSessionId?: string }): SessionGroup[]
 
   listPersistedSessions(): SessionGroup[]
   destroyAll(): Promise<void>

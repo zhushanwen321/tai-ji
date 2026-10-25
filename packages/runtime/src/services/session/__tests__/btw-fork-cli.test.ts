@@ -147,10 +147,10 @@ describe('createLine 默认 fork 装配链（resolvePiCommand → forkViaCliPi �
 
       const res = await svc.createLine({ mainSid: MAIN_SID, cwd })
 
-      expect(res).toMatchObject({ vid: 'btw:cli', snapshotKind: 'forked', sessionFilePath: forkFile })
+      expect(res).toMatchObject({ sessionId: 'cli', snapshotKind: 'forked', sessionFilePath: forkFile })
       expect(existsSync(forkFile)).toBe(true)
       expect(h.spawned[0].client.switchSession).toHaveBeenCalledWith(forkFile)
-      expect(h.registered[0]).toMatchObject({ id: 'btw:cli', hidden: true })
+      expect(h.registered[0]).toMatchObject({ id: 'cli', surface: 'btw' })
       // argv 双旗标原样传递（V2① 同款组合）
       const argv = JSON.parse(readFileSync(join(scriptDir, 'chain.js.argv'), 'utf8')) as string[]
       expect(argv).toEqual(['--mode', 'rpc', '--fork', src, '--session-dir', threadDir])

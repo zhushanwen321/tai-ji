@@ -32,12 +32,6 @@ import {
 	type ModelEntry,
 	type WorkflowEntry,
 } from "../injection-render.ts";
-import type {
-	AgentEntry as BarrelAgentEntry,
-	ModelEntry as BarrelModelEntry,
-	WorkflowEntry as BarrelWorkflowEntry,
-} from "../../index.ts";
-import * as subagentCore from "../../index.ts";
 
 // ============================================================
 // fixtures
@@ -621,8 +615,38 @@ describe("summarizeDescription", () => {
 // ============================================================
 
 describe("barrel exports probe", () => {
-	it("值导出逐名可达（typeof function）", () => {
-		const valueExports = [
+	// 读 barrel 源码做逐名文本断言，不 import barrel（入 barrel 边零容忍，D1 决策二）。
+	// barrel 逐名 re-export 存在单行与多行两种块形态（多行块的导出名在不含 from 的
+	// 独立行上），故按 re-export 块整体解析而非单行匹配。
+	const barrelSource = fs.readFileSync(
+		path.join(path.dirname(fileURLToPath(import.meta.url)), "../../index.ts"),
+		"utf8",
+	);
+	// 剥块注释与整行注释后再解析，防注释里的示例字面混入导出名集合。
+	const sourceSansComments = barrelSource
+		.replace(/\/\*[\s\S]*?\*\//g, "")
+		.split("\n")
+		.filter((line) => !line.trimStart().startsWith("//"))
+		.join("\n");
+	const valueExports = new Set<string>();
+	const typeExports = new Set<string>();
+	for (const block of sourceSansComments.matchAll(
+		/export\s+(type\s+)?\{([^}]*)\}\s*from\s*["'][^"']+["']/g,
+	)) {
+		const isTypeBlock = block[1] !== undefined;
+		for (const raw of block[2].split(",")) {
+			const spec = raw.trim();
+			if (spec === "") continue;
+			// 项形态：Name / type Name / Name as Alias / type Name as Alias
+			const parsed = /^(?:type\s+)?(\w+)(?:\s+as\s+(\w+))?$/u.exec(spec);
+			if (parsed === null) continue;
+			const isType = isTypeBlock || spec.startsWith("type ");
+			(isType ? typeExports : valueExports).add(parsed[2] ?? parsed[1]);
+		}
+	}
+
+	it("值导出逐名在 barrel re-export 块中列出（文本断言）", () => {
+		const expected = [
 			"formatAgentList",
 			"formatEmptyResourceList",
 			"formatWorkflowList",
@@ -637,18 +661,15 @@ describe("barrel exports probe", () => {
 			"getCachedParsed",
 			"parseResourceMeta",
 		] as const;
-		const barrel = subagentCore as Record<string, unknown>;
-		for (const name of valueExports) {
-			expect(typeof barrel[name], `barrel 缺值导出: ${name}`).toBe("function");
+		for (const name of expected) {
+			expect(valueExports.has(name), `barrel 缺值导出: ${name}`).toBe(true);
 		}
 	});
 
-	it("类型导出经 barrel 可引用（typecheck 即探针）", () => {
-		const agent: BarrelAgentEntry = { name: "n", description: "d", path: "/p" };
-		const workflow: BarrelWorkflowEntry = { name: "n", description: "d", path: "/p" };
-		const model: BarrelModelEntry = { id: "i", name: "n" };
-		expect(agent.name).toBe("n");
-		expect(workflow.name).toBe("n");
-		expect(model.id).toBe("i");
+	it("类型导出逐名在 barrel re-export 块中列出（文本断言；编译可达性由 re-export 行存在 + barrel 参与 tsc 编译构造性承接）", () => {
+		const expectedTypes = ["AgentEntry", "WorkflowEntry", "ModelEntry"] as const;
+		for (const name of expectedTypes) {
+			expect(typeExports.has(name), `barrel 缺类型导出: ${name}`).toBe(true);
+		}
 	});
 });

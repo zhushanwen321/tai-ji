@@ -16,6 +16,8 @@ export * from './model-thinking-memory'
 export * from './thinking-level-sync'
 export * from './thinking-levels'
 export * from './orphan-draft'
+// 队列编辑锚定（chat-flow-consistency D6）：单锚定不变式纯逻辑，桌面/移动双壳同源消费
+export * from './queue-edit-anchor'
 // last-used-model 的 loadOnce/lookup/record/onLoaded 与 model-thinking-memory 星导重名
 //（两模块同为 KV 单键族），不能 `export *`——按消费方（renderer 壳 launchConfig.getInput
 // 注入 U2d / 壳接线测试种入）别名导出

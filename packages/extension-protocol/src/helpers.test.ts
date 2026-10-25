@@ -9,6 +9,9 @@ import {
   isGuiRenderResult,
   extractGui,
   firstContentText,
+  firstLine,
+  readDetailsSummary,
+  resultContentText,
   validateWidgetIconPaths,
   GUI_WIDGET_MARKER,
   PROTOCOL_VERSION,
@@ -392,5 +395,74 @@ describe('validateWidgetIconPaths（自定义 icon paths 白名单，宿主 fall
       const paths = [...Array.from({ length: 4 }, () => pathOfChars(512)), pathOfChars(1)]
       expect(validateWidgetIconPaths(paths)).toEqual({ valid: false, reason: 'total-too-long' })
     })
+  })
+})
+
+describe('readDetailsSummary（details.summary 读侧单点）', () => {
+  it('details.summary 为非空字符串 → 返回该值', () => {
+    expect(readDetailsSummary({ details: { summary: 'Renamed session' } })).toBe('Renamed session')
+  })
+
+  it('result 非对象形态（string / number / null / undefined / 数组）→ undefined', () => {
+    expect(readDetailsSummary('text')).toBeUndefined()
+    expect(readDetailsSummary(42)).toBeUndefined()
+    expect(readDetailsSummary(null)).toBeUndefined()
+    expect(readDetailsSummary(undefined)).toBeUndefined()
+    expect(readDetailsSummary([])).toBeUndefined()
+  })
+
+  it('details 缺失 / 非对象形态（含 null）→ undefined', () => {
+    expect(readDetailsSummary({})).toBeUndefined()
+    expect(readDetailsSummary({ details: undefined })).toBeUndefined()
+    expect(readDetailsSummary({ details: null })).toBeUndefined()
+    expect(readDetailsSummary({ details: 'broken' })).toBeUndefined()
+    expect(readDetailsSummary({ details: 7 })).toBeUndefined()
+  })
+
+  it('summary 缺失 / 非字符串 / 空串 → undefined', () => {
+    expect(readDetailsSummary({ details: {} })).toBeUndefined()
+    expect(readDetailsSummary({ details: { summary: undefined } })).toBeUndefined()
+    expect(readDetailsSummary({ details: { summary: 123 } })).toBeUndefined()
+    expect(readDetailsSummary({ details: { summary: '' } })).toBeUndefined()
+  })
+})
+
+describe('resultContentText（content 文本读侧单点，unknown 检查式入参）', () => {
+  it('content[0] 为 text 块 → 取其 text 全文（多行不切分）', () => {
+    expect(resultContentText({ content: [{ type: 'text', text: 'a\nb' }] })).toBe('a\nb')
+  })
+
+  it('result 非对象形态（null / undefined / string）→ 空串', () => {
+    expect(resultContentText(null)).toBe('')
+    expect(resultContentText(undefined)).toBe('')
+    expect(resultContentText('text')).toBe('')
+  })
+
+  it('content 缺失 / 非数组 → 空串', () => {
+    expect(resultContentText({})).toBe('')
+    expect(resultContentText({ content: 'broken' })).toBe('')
+  })
+
+  it('content[0] 非 text 块 → 空串（脏元素形态不崩）', () => {
+    expect(resultContentText({ content: [{ type: 'image' }] })).toBe('')
+    expect(resultContentText({ content: [null, { type: 'text', text: 'x' }] })).toBe('')
+  })
+})
+
+describe('firstLine（首行切分）', () => {
+  it('多行文本取首个换行前内容', () => {
+    expect(firstLine('a\nb\nc')).toBe('a')
+  })
+
+  it('无换行返回原文', () => {
+    expect(firstLine('single')).toBe('single')
+  })
+
+  it('空串返回空串', () => {
+    expect(firstLine('')).toBe('')
+  })
+
+  it('首字符即换行 → 空串', () => {
+    expect(firstLine('\nrest')).toBe('')
   })
 })

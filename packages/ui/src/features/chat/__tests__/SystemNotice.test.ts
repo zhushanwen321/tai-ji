@@ -12,6 +12,8 @@
  * - [U3] D3 增强规格：两端渐隐横线 / 主文案分档 / meta 钉右拆段（tokens 从文案拆出）
  * - [方案 A] 短语化：主体 = 终态短语（完成/失败/超时）+ 命令原文进悬停详情（HoverCard
  *   portal 挂 body，mouseenter + open-delay 后可及）+ chip 退役 + 长 system 原文悬停全文
+ * - [chat-flow-consistency U9 / S6] 压缩行摘要悬停：compactionSummary.summary 非空挂
+ *   「压缩摘要」详情（全文 + 复制）；summary 缺失不挂（无内容可显）
  *
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/SystemNotice.test.ts
  */
@@ -32,6 +34,7 @@ vi.mock('vue-i18n', async () => {
     'panel.message.bashTimeout': '已超时',
     'panel.message.bashCommandLabel': '完整命令',
     'panel.message.noticeDetailLabel': '通知全文',
+    'panel.message.compactionSummaryLabel': '压缩摘要',
     'common.copy': '复制',
     'common.copied': '已复制',
     'panel.message.respawnRestored': '会话引擎已从崩溃中恢复。',
@@ -384,6 +387,9 @@ describe('SystemNotice 悬停详情（方案 A）', () => {
   })
 
   it('无 detail 的行：受控 open 恒 false，悬停不弹面板（族「静态无交互」判据的收窄例外外）', async () => {
+    // [chat-flow-consistency U9 / S6] summary 非空的压缩行已按设计挂悬停详情（压缩摘要），
+    // 「无 detail 行」的现行代表形态 = summary 缺失（reducer fallback「上下文已压缩」，
+    // 无内容可显不挂 detail——tech-design 产物包 chat-flow-consistency/design-special-flows.md S6 穷举表）
     const wrapper = mount(SystemNotice, {
       props: {
         message: {
@@ -392,12 +398,43 @@ describe('SystemNotice 悬停详情（方案 A）', () => {
           content: '',
           status: 'complete',
           timestamp: NOW,
-          compactionSummary: { summary: '已压缩', tokensBefore: 1000 },
+          compactionSummary: { tokensBefore: 1000 },
         } as Message,
       },
     })
     const detail = await openDetailAndQuery(wrapper)
     expect(detail).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('[U9/S6] 压缩行 summary 非空 → 悬停弹出「压缩摘要」详情，body = 摘要全文（可复制）', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const summary = '已完成本轮上下文压缩：保留任务目标与关键结论，丢弃中间工具输出明细'
+    const wrapper = mount(SystemNotice, {
+      props: {
+        message: {
+          id: 'sys-h',
+          role: 'system',
+          content: '',
+          status: 'complete',
+          timestamp: NOW,
+          compactionSummary: { summary, tokensBefore: 1000 },
+        } as Message,
+      },
+    })
+    const detail = await openDetailAndQuery(wrapper)
+    expect(detail).not.toBeNull()
+    expect(detail?.querySelector('[data-testid="system-notice-detail-body"]')?.textContent).toBe(summary)
+    expect(detail?.textContent).toContain('压缩摘要')
+    // 行内主体短语与 meta 不受影响（S6：主体短语与 tokens meta 不变）
+    expect(wrapper.find('[data-testid="system-notice-text"]').text()).toBe('已压缩上下文')
+    expect(wrapper.find('[data-testid="system-notice-meta"]').text()).toBe('1K tokens')
+    // 复制按钮写入摘要全文
+    const copyBtn = detail?.querySelector<HTMLButtonElement>('[data-testid="system-notice-detail-copy"]')
+    copyBtn?.click()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(writeText).toHaveBeenCalledWith(summary)
     wrapper.unmount()
   })
 })
@@ -433,7 +470,7 @@ describe('SystemNotice D3 增强规格（U3）', () => {
     }
   })
 
-  it('主文案：text-sm + --fw-mid 字重 + fg 提色；静态外部行距 = 裁决三值（pt-[13px] pb-[19px]，specs/chat/system-notices.md §4）；inline 行保持 py-1.5；动效与内容列宽度不动', () => {
+  it('主文案：text-sm + --fw-mid 字重 + fg 提色；静态外部行距 = 裁决三值（pt-[13px] pb-[19px]）；inline 行保持 py-1.5；动效与内容列宽度不动', () => {
     const wrapper = mount(SystemNotice, { props: { message: compactionMessage(1000) } })
     const row = wrapper.find('.system-notice')
     // 静态外部行（缺省）：demo 权威间距（margin 10/16 + 行内 padding 3px 的合成视觉值）

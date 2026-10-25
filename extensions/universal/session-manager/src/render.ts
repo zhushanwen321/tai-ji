@@ -4,19 +4,12 @@
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { firstContentText } from "@zhushanwen/extension-protocol";
-
-/** pi toolResult 通用形状（AgentToolResult 的结构最小面，renderResult 入参收窄用）。 */
-interface ToolResultShape { // oe-exempt:20261017:framework:details 数据形状窄 view（单实现消费，非抽象接口）
-	content: Array<{ type: string; text?: string }>;
-	details?: { summary?: unknown };
-}
+import { readDetailsSummary, resultContentText } from "@zhushanwen/extension-protocol";
 
 export function renderSessionManagerResult(result: unknown, options: { expanded: boolean }, theme: Theme): Text {
-	const r = result as ToolResultShape;
-	const summary = r.details?.summary;
-	if (options.expanded === false && typeof summary === "string" && summary !== "") {
+	const summary = readDetailsSummary(result);
+	if (options.expanded === false && summary !== undefined) {
 		return new Text(theme.fg("dim", summary), 0, 0);
 	}
-	return new Text(firstContentText(r), 0, 0);
+	return new Text(resultContentText(result), 0, 0);
 }

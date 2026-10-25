@@ -43,6 +43,10 @@ export const WORKFLOW_TONE_BY_OUTCOME = {
   failed: 'bg-danger',
   cancelled: 'bg-neutral-dim opacity-50',
   time_limited: 'bg-neutral-dim opacity-50',
+  // [subagent-observability §3.3.8] 部分成功独立档（不落失败族红档）：色调初值 =
+  // 中性暗（不谎报成败——中性暗与「数据缺口不作成败断言」同方向）；独立档视觉
+  // 形态（警示色/徽标）归 u4 场景 2 GUI 呈现核对项实施定稿。
+  partially_succeeded: 'bg-neutral-dim opacity-50',
 } satisfies Record<WorkflowRunOutcome, string>
 
 /** 中性暗档（cancel/interrupt 共用；与 record 侧中断族状态点同款类名） */

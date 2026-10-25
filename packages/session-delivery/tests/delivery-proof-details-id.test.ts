@@ -7,7 +7,7 @@
  * - 凭据档位分派：非 details-id 条目（marker / acceptance）经 confirmDeliveredByProof
  *   一律拒绝（误确认结构上不可达）。
  * - 降级面：未注入 proofCheck / proofCheck 抛错 → 视为未送达留守 + warn 留痕
- *   （safeIsIdle 同型降级）。
+ *   （保守放行型降级）。
  *
  * 三档并列的现状锚（marker 回执命中 / acceptance 受理即终态）由既有
  * delivery-receipt-anchor / delivery-settled 套件锁定，本文件补 details-id 档与
@@ -73,7 +73,11 @@ describe("送达凭据 'details-id'：confirmDeliveredByProof 判定通路", () 
   })
 
   it('queued 态 details-id 条目（回执先到竞态）同样可经凭据确认（扩展① 形态）', () => {
-    const port = makeMockPort({ isIdle: () => false }) // busy：受理未发生，条目留守 queued
+    // hold 拒（设计内等待）：条目受理未发生，留守 queued
+    const port = makeMockPort({
+      send: () => ({ accepted: false as const, deferred: 'merge-commit-hold' as const }),
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const proofCheck = vi.fn(() => true)
     const handle = createDelivery(port, { proofCheck })
     try {
@@ -82,6 +86,7 @@ describe("送达凭据 'details-id'：confirmDeliveredByProof 判定通路", () 
       expect(handle.confirmDeliveredByProof('sid-1')).toBe(true) // 事实优先（delivered 事实 > 时序）
       expect(handle.entriesFull().active).toHaveLength(0)
     } finally {
+      warnSpy.mockRestore()
       handle.dispose()
     }
   })
@@ -89,16 +94,20 @@ describe("送达凭据 'details-id'：confirmDeliveredByProof 判定通路", () 
 
 describe('confirmDeliveredByProof 凭据档位分派（误确认结构上不可达）', () => {
   it('marker 条目：不走凭据检查（回执命中通路），恒返回 false', () => {
-    const port = makeMockPort()
+    // hold 拒（设计内等待）：条目留守 queued，凭据确认对 marker 档恒拒
+    const port = makeMockPort({
+      send: () => ({ accepted: false as const, deferred: 'merge-commit-hold' as const }),
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const proofCheck = vi.fn(() => true)
     const handle = createDelivery(port, { proofCheck })
     try {
-      port.idle = false
       handle.send(customMsg('subagents:notify', 'n-1'), { id: 'sid-m', receiptAnchor: 'marker' })
       expect(handle.confirmDeliveredByProof('sid-m')).toBe(false)
       expect(proofCheck).not.toHaveBeenCalled()
       expect(handle.entriesFull().active[0]!.state).toBe('queued')
     } finally {
+      warnSpy.mockRestore()
       handle.dispose()
     }
   })

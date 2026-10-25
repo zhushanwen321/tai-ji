@@ -1,28 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock typebox before importing tool（形态照 tool.test.ts；Type.Array 需在列——enter 的 skills 参数）
-vi.mock("typebox", () => ({
-  Type: {
-    Object: (props: Record<string, unknown>) => ({ type: "object", properties: props }),
-    String: (opts?: Record<string, unknown>) => ({ type: "string", ...opts }),
-    Optional: (schema: unknown) => schema,
-    Array: (item: unknown, opts?: Record<string, unknown>) => ({ type: "array", items: item, ...opts }),
-  },
-  Static: class {},
-}));
-
-vi.mock("@earendil-works/pi-ai", () => ({
-  StringEnum: (values: readonly string[]) => ({ type: "string", enum: [...values] }),
-}));
-
-// Mock node:fs（plan 目录 mkdirSync 不触真实盘——fs-guard 只白名单 tmpdir；command.test.ts 同形态）
-vi.mock("node:fs", () => ({
-  mkdirSync: vi.fn(),
-  readdirSync: vi.fn(() => []),
-  statSync: vi.fn(),
-  existsSync: vi.fn(() => false),
-  readFileSync: vi.fn(() => ""),
-}));
+// 共享 mock 布景（typebox / pi-ai / exec-skills / widget + node:fs 全桩）：
+// 首行 import 保证注册先于 ../tool.js 加载
+import "./test-setup-mocks";
+import "./test-setup-fs-mock";
 
 // Mock templates（enter 的 buildPlanModePrompt 走 listTemplates；单测不扫真实模板目录）
 vi.mock("../templates.js", () => ({
@@ -35,59 +16,24 @@ vi.mock("../execution-notice.js", () => ({
   GOAL_FAILURE_RECOVERY: {},
 }));
 
-// Mock 执行方式检测（D10）：单测不扫真实目录。importActual 展开：只覆写
-// detectExecSkills，其余导出（含 enter.ts re-export 的 resolveSkills 执行门禁）走
-// 真实现——mock 罩全模块会把它一并变 undefined
-vi.mock("@zhushanwen/pi-exec-skills", async () => {
-  const actual = await vi.importActual<typeof import("@zhushanwen/pi-exec-skills")>(
-    "@zhushanwen/pi-exec-skills",
-  );
-  return { ...actual, detectExecSkills: vi.fn(() => []) };
-});
-
-vi.mock("../widget.js", () => ({
-  updatePlanWidget: vi.fn(),
-}));
-
 import * as fs from "node:fs";
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { registerPlanTool } from "../tool.js";
 import { type PlanState, createPlanCtx, DEFAULT_PLAN_STATE, PLAN_MODE_TOOLS } from "../state.js";
-
-const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
+import { type PlanExecuteResult, ALL_TOOL_NAMES, createEnterFamilyPi, createExecCapture, createTestCtx } from "./test-setup";
 
 function setup(skillCommands: Array<{ name: string; path: string }> = []) {
   const planCtx = createPlanCtx();
-  let executeFn: (id: string, p: Record<string, unknown>, sig?: AbortSignal, upd?: unknown, ctx?: unknown) => Promise<{
-    content: Array<{ type: string; text: string }>;
-    details: { action: string; requirement?: string; skills?: string[] };
-  }>;
-  const pi = {
-    registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
-    appendEntry: vi.fn(),
-    setActiveTools: vi.fn(),
-    // 快照式恢复（dmg-r1-2）：enter 收拢前记录进入前激活集（getActiveTools）
-    getActiveTools: vi.fn(() => ALL_TOOL_NAMES.filter((n) => n !== "plan")),
-    sendMessage: vi.fn(),
-    getCommands: vi.fn(() => skillCommands.map((c) => ({ name: c.name, source: "skill", sourceInfo: { path: c.path } }))),
-    getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
-  } as unknown as ExtensionAPI;
+  const ctx = createTestCtx() as unknown as ExtensionContext;
+  const { registerTool, exec } = createExecCapture<PlanExecuteResult>(ctx);
+  const pi = createEnterFamilyPi(
+    { registerTool },
+    skillCommands.map((c) => ({ name: c.name, source: "skill", sourceInfo: { path: c.path } })),
+  );
   registerPlanTool(pi, planCtx);
 
-  const ctx = {
-    sessionId: "test-session",
-    cwd: "/tmp/test-project",
-    hasUI: true,
-    mode: "tui" as const,
-    isProjectTrusted: () => true,
-    sessionManager: { getSessionId: () => "test-session", getLeafId: () => null, getEntries: () => [] },
-    ui: { select: vi.fn(), notify: vi.fn() },
-  } as unknown as ExtensionContext;
-
-  const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
-    executeFn!("tc0", params, signal, undefined, ctx);
   return { pi, planCtx, sessions: planCtx.states, ctx, exec };
 }
 

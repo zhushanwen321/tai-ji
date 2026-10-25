@@ -33,3 +33,17 @@ export function registerPrimitiveContainers(
 export function getPrimitiveContainer(type: PrimitiveContainerType): Component | undefined {
   return containers.get(type)
 }
+
+/**
+ * 清空注册表，恢复模块初始空态（测试专用导出，运行时不消费）。
+ *
+ * 消费方：PrimitiveRouter.test.ts 的 beforeEach——「barrel 未加载回退」与「barrel 加载命中」
+ * 两类用例共享本模块的模块级 Map，注册一经发生（动态 import barrel）不可逆；每用例前清空
+ * 使各自前置状态自建，消除对文件内用例顺序的依赖（--sequence.shuffle 下双绿）。
+ *
+ * 清空 = 恢复初始空态（模块加载时 `new Map()` 的状态），不是部分删除的半清态；清空后
+ * Router 回退 AnsiText 降级，与「绕过 barrel 独立使用」的生产形态一致。
+ */
+export function resetPrimitiveContainers(): void {
+  containers.clear()
+}

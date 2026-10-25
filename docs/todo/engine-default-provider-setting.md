@@ -174,9 +174,11 @@ engineModel = isPiRoute ? undefined : (opts.model ?? agentConfig?.model ?? engin
 - **OAuth 形态 provider**：pi 的 OAuth 凭据（auth.json type 非 api-key 形态）不可映射为 zcode api-key 条目——映射期按「凭据形态不可转」跳过 + warn。
 - **多写方**：合并副本唯一写方 = runtime 同步模块；`subagents/config.json` 既有跨进程锁形态沿用（`engineDefaults` 进同一锁域）。
 
-## 新发现登记（2026-10-11 核实，待裁决）
+## 新发现登记（2026-10-11 核实；2026-10-23 已裁决：注入统一，转 just-do-it）
 
-**pi 引擎的 provider 配置目录与 taiji 主会话不同源**。env 链核实：`ENV_WHITELIST_PREFIXES` 不含 `PI_` 前缀（`packages/shared/src/constants.ts:74-85`），Electron 主进程 spawn runtime 不注入 `PI_CODING_AGENT_DIR`（`apps/electron/main/supervisor/process-control.ts:423-430`、`safe-env.ts`）；runtime 派发 pi 引擎时 EngineClient 构造不带 `baseEnv/identityEnv`（`engine-inspect-package.ts:197-210`，基座 = `{...process.env}`）→ pi 引擎 CLI 及其孙 pi 进程按 `resolvePiAgentDir` 缺省回落 **`~/.pi/agent`**（`engine-query.ts:50-54`），而 taiji 主会话 provider 配置在 `<dataDir>/agent/`（`pi-paths.ts:63-69`）。两者不是同一份配置（本机实测内容亦不同）。影响：用户在 taiji settings 配的 provider 对 pi 引擎派发不生效，pi 引擎用的是独立 pi 的配置。本期方案不处理（zcode 同步源取 taiji 数据目录侧，与 taiji 管理侧一致）；完整收敛「provider 来源统一」需后续裁决是否给 pi 引擎注入 `PI_CODING_AGENT_DIR=<dataDir>/agent`（pi 会话内 extension 派发形态本就携带该 env，两形态当前行为不一致）。另注：pi 引擎内部对 env 的注释假设（`engine-query.ts:45-48`「taiji 托管形态下宿主注入的托管目录」）在 runtime 派发形态下不成立。
+**pi 引擎的 provider 配置目录与 taiji 主会话不同源**。env 链核实：`ENV_WHITELIST_PREFIXES` 不含 `PI_` 前缀（`packages/shared/src/constants.ts:74-85`），Electron 主进程 spawn runtime 不注入 `PI_CODING_AGENT_DIR`（`apps/electron/main/supervisor/process-control.ts:423-430`、`safe-env.ts`）；runtime 派发 pi 引擎时 EngineClient 构造不带 `baseEnv/identityEnv`（`engine-inspect-package.ts:197-210`，基座 = `{...process.env}`）→ pi 引擎 CLI 及其孙 pi 进程按 `resolvePiAgentDir` 缺省回落 **`~/.pi/agent`**（`engine-query.ts:50-54`），而 taiji 主会话 provider 配置在 `<dataDir>/agent/`（`pi-paths.ts:63-69`）。两者不是同一份配置（本机实测内容亦不同）。影响：用户在 taiji settings 配的 provider 对 pi 引擎派发不生效，pi 引擎用的是独立 pi 的配置。
+
+**裁决（2026-10-23）**：原则 = taiji 派发的 pi 就是 taiji 专用的，参数一切由 taiji 控制；系统独立安装的 pi 不受影响、不管。实施 = 给 pi 引擎注入 `PI_CODING_AGENT_DIR=<dataDir>/agent`（转 just-do-it 清单，2026-10-23 批次）。附带可选项（provider CRUD 服务层追加 zcode 同步调用，覆盖会话内变更重同步）维持不做。另注：pi 引擎内部对 env 的注释假设（`engine-query.ts:45-48`「taiji 托管形态下宿主注入的托管目录」）在 runtime 派发形态下不成立——注入落地时同批核对注释与实际形态。
 
 ## 实现要点（届时从这起步）
 

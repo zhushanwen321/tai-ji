@@ -26,7 +26,7 @@ import type { IManagedSessionView } from '../types.js'
 import type { SessionSummary } from '@taiji/shared'
 
 function makeSummary(id: string): SessionSummary {
-  return { id, label: 'test', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now(), modelId: 'p/m', tokenCount: 0 }
+  return { id, label: 'test', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now() }
 }
 
 function makeEnv() {

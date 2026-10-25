@@ -322,9 +322,13 @@ function mapSingleProviderToZcodeRule(
   if ('unsupported' in cred) {
     return { skip: { providerId: id, rule: 'unsupported-credential', detail: `凭据形态不支持（${cred.unsupported}），不做 api-key 映射，请修正 pi 侧凭据配置` } }
   }
-  // ① 凭据形态为 oauth → 不映射。oauth access 是短时 token（pi 侧自动 refresh），zcode
-  // 无法用它做静态 api-key 鉴权：复制过去只会得到 401，且副本里残留明文 token（退出登录
-  // 后仍留在副本）。凭据域事实来自 resolver 的 kind 判别，不做 provider id 分支（零写死）。
+  // ① 凭据形态为 oauth → 不映射。oauth access 是短时 token（pi 侧自动 refresh——pi 实装
+  // 锚点 S-6：@earendil-works/pi-coding-agent@1.0.0 dist/core/auth-storage.js load 校验
+  // :195-201，oauth 条目 = { access, refresh, expires } 三件套；刷新流程实装在
+  // @earendil-works/pi-ai dist/auth/oauth/*），zcode 无法用它做静态 api-key 鉴权：复制
+  // 过去只会得到 401，且副本里残留明文 token（退出登录后仍留在副本）。凭据域事实来自
+  // resolver 的 kind 判别（readAuthCredentialKey，pi 侧 oauth/未知 type 均判 'oauth'
+  // fail-closed），不做 provider id 分支（零写死）。
   if (cred.kind === 'oauth') {
     return { skip: { providerId: id, rule: 'oauth-credential', detail: '凭据类型为 oauth（短时 access token，非静态 api-key），不做 api-key 映射——zcode 侧请使用其自有账号/订阅登录' } }
   }
@@ -847,8 +851,10 @@ export interface ZcodeModelListPaths extends Pick<ZcodeProviderSyncPaths, 'realP
  * 聚合带 apiKey 的（与 zcode 校验链 listZcodeModels 同判据）；∪ 内建目录 account:
  * 直通家族（[engine-ref-translation D3] 2026-10-13/14 用户裁决——account 条目凭据走
  * zcode CLI 账号体系不经个人 provider 表，无 apiKey 过滤；与 preparer listZcodeModels
- * 的 account 段对账锁步，跨包红线：runtime 不 import zcode-subagent-cli）。
- * 任一源不可读按空集继续（查询环节失败安全，非同步环节）。
+ * 的 account 段对账锁步，跨包红线：runtime 不 import zcode-subagent-cli）。account
+ * 段并入按**模型级**去重（S-1 统一判据，同 id 个人源胜出），清单判据（builtin 在位
+ * 即用/缺键回落）见 readAccountFamilyRules 注释。任一源不可读按空集继续（查询环节
+ * 失败安全，非同步环节）。
  */
 export function deriveZcodeEngineModels(paths: ZcodeModelListPaths): ZcodeEngineModelEntry[] {
   const byId = new Map<string, ModelListEntry>()
@@ -857,13 +863,20 @@ export function deriveZcodeEngineModels(paths: ZcodeModelListPaths): ZcodeEngine
     if (!byId.has(entry.providerId)) byId.set(entry.providerId, entry)
   }
   const out: ZcodeEngineModelEntry[] = []
+  // 去重粒度 = 模型级（id = `${providerId}/${model}`，S-1 统一判据）：与引擎侧
+  // preparer listZcodeModels 的 seen 语义一致（先个人源后 account 家族，同 id 个人胜）。
+  // 个人源聚合作者仍是 providerId 级真实优先（读侧合并语义，与 push 去重正交）。
+  const pushedIds = new Set<string>()
   const push = (entry: ModelListEntry): void => {
     const providerName = entry.providerName !== undefined && entry.providerName.trim() !== ''
       ? entry.providerName.trim()
       : undefined
     for (const model of entry.models) {
+      const id = `${entry.providerId}/${model}`
+      if (pushedIds.has(id)) continue
+      pushedIds.add(id)
       out.push({
-        id: `${entry.providerId}/${model}`,
+        id,
         ...(providerName !== undefined ? { name: `${providerName} · ${model}` } : {}),
       })
     }
@@ -873,13 +886,21 @@ export function deriveZcodeEngineModels(paths: ZcodeModelListPaths): ZcodeEngine
     push(entry)
   }
   for (const entry of readAccountFamilyRules(paths.builtinCatalogPath)) {
-    if (byId.has(entry.providerId)) continue
     push(entry)
   }
   return out
 }
 
-/** 内建目录 account: 直通家族规则（与 preparer resolveAccountModelRef 同源判据；失败安全空集）。 */
+/**
+ * 内建目录 account: 直通家族规则（与 preparer resolveAccountModelRef 同源判据；失败安全空集）。
+ *
+ * 模型清单判据（S-1 统一，2026-10-23）：`builtinModelIds` **数组在位即用（含空数组），
+ * 缺键才回落 `personalModelIds`**——与本包 deriveZcodeEngineModels 的消费端去重（模型级）
+ * 一并与引擎侧对齐：`packages/zcode-subagent-cli/src/preparer.ts` 的
+ * pushAccountFamilyRuleModels / listAccountFamilyModels（引擎 listModels 供数）。
+ * 此前形态「builtin 非空才用、否则回落 personal」与引擎侧 `Array.isArray` 在位判定
+ * 语义相反（空 builtin 数组时两侧可产出不同集合，偏好层成员校验有缝隙）。
+ */
 function readAccountFamilyRules(builtinCatalogPath?: string): ModelListEntry[] {
   const catalogPath = builtinCatalogPath ?? locateZcodeBuiltinCatalogSync()
   if (catalogPath === undefined) return []
@@ -893,12 +914,11 @@ function readAccountFamilyRules(builtinCatalogPath?: string): ModelListEntry[] {
     const providerId = rule['providerId']
     if (typeof providerId !== 'string' || !providerId.startsWith('account:')) continue
     const cfg = isRecord(rule['config']) ? rule['config'] : {}
-    const builtin = strArray(cfg['builtinModelIds'])
-    const personal = strArray(cfg['personalModelIds'])
+    const builtinIds = cfg['builtinModelIds']
     entries.push({
       providerId,
       providerName: typeof rule['providerName'] === 'string' ? rule['providerName'] : undefined,
-      models: builtin.length > 0 ? builtin : personal,
+      models: Array.isArray(builtinIds) ? strArray(builtinIds) : strArray(cfg['personalModelIds']),
     })
   }
   return entries

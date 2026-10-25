@@ -11,6 +11,9 @@ import {
 	renderApprovalView,
 	requestUserApproval,
 } from "../approval.js";
+// 对拍符号：runtime event-adapter 判定键与本扩展 title 构造引用同一常量（值锁定在
+// extension-protocol markers.test.ts），单源化后双端文案漂移在编译期即报错
+import { PERMISSION_APPROVAL_TITLE } from "@zhushanwen/extension-protocol";
 import type { ApprovalRequest } from "../pipeline.js";
 import type { ClassifierResult, ToolInvocationContext, UserDecision } from "../types.js";
 
@@ -176,7 +179,7 @@ describe("requestUserApproval: rpc 模式", () => {
 		const lines = capturedTitle.split("\n");
 		// RPC title 5→6 行：补 `  reasoning: <AI 理由>` 行（与 TUI 字段集同源，M6 漂移修复）
 		expect(lines).toHaveLength(6);
-		expect(lines[0]).toBe("[pi-permission] Approval required");
+		expect(lines[0]).toBe(PERMISSION_APPROVAL_TITLE);
 		expect(lines[1]).toBe("Tool: bash");
 		expect(lines[2]).toBe("Command: rm -rf /tmp");
 		expect(lines[3]).toBe("Reason: no allow rule");

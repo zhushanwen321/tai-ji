@@ -37,10 +37,6 @@ export class ConnectionOutboundQueue {
     return this.bytes
   }
 
-  get hasPendingFrames(): boolean {
-    return this.frames.length > 0
-  }
-
   get hasOverflowed(): boolean {
     return this.overflowed
   }

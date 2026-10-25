@@ -160,7 +160,8 @@ export class RecordLifecycle {
           `[subagents] disposeAllRecords (${reason}): active nested subagent ${record.id} ` +
             `(depth=${record.depth}, parent=${record.parentRecordId ?? "?"}) is being torn down with its parent — ` +
             `its in-flight work is lost. Nested dispatch cannot outlive the parent's round (U6); ` +
-            `the parent must await nested results within the same round; otherwise check subagents action:'list' and re-dispatch.`,
+            `the parent must await nested results within the same round; otherwise check ` +
+            `subagent_manage action:'list' includeWorkflow:true and re-dispatch via the subagent_batch tool.`,
         );
       }
       // 回收侧 i：abort 在途 controller（排队的 acquire / 在途 signal listener 立即

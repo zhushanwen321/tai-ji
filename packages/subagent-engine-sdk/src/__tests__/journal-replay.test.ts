@@ -133,6 +133,52 @@ describe("journal-replay reducer 边界契约", () => {
   });
 });
 
+describe("errors 只追加 + lastError 派生（subagent-observability §3.3.5）", () => {
+  it("error → turn_end 后 lastError 仍可读（不再被轮终清洗），ErrorFact 入账", () => {
+    const record = replayRecord([
+      { type: "error", message: "boom" },
+      { type: "turn_end" },
+    ]);
+    expect(record.lastError).toBe("boom");
+    expect(record.errors).toEqual([{ message: "boom", at: expect.any(Number) }]);
+  });
+
+  it("跨轮多失败只追加：errors 累积历史轮，lastError = 最后一个非空轮失败（复活后旧失败轮仍可见）", () => {
+    const record = replayRecord([
+      { type: "error", message: "round-1" },
+      { type: "turn_end" },
+      { type: "text_delta", delta: "retry" },
+      { type: "message_end", error: "round-2" },
+      { type: "turn_end" },
+      { type: "text_delta", delta: "recovered" },
+      { type: "turn_end" },
+    ]);
+    expect(record.errors).toHaveLength(2);
+    expect(record.errors?.map((f) => f.message)).toEqual(["round-1", "round-2"]);
+    expect(record.lastError).toBe("round-2");
+  });
+
+  it("空串 / 缺席 error 不入账（无信息失败事实不占位，也不构成派生值）", () => {
+    const record = replayRecord([
+      { type: "error", message: "" },
+      { type: "message_end", error: "" },
+      { type: "turn_end" },
+    ]);
+    expect(record.errors).toEqual([]);
+    expect(record.lastError).toBeUndefined();
+  });
+
+  it("旧 record 无 errors 字段（磁盘重建兼容形态）→ ??= 兜底初始化，不崩且照常入账", () => {
+    const record = createReplayRecord();
+    // 模拟旧版本 fold 产物：无 errors 字段
+    delete (record as { errors?: unknown }).errors;
+    updateFromEvent(record, { type: "error", message: "legacy boom" });
+    updateFromEvent(record, { type: "turn_end" });
+    expect(record.errors).toEqual([{ message: "legacy boom", at: expect.any(Number) }]);
+    expect(record.lastError).toBe("legacy boom");
+  });
+});
+
 describe("eventsToSessionView 派生与 sessionIdFromHandle", () => {
   it("ReplayedTurn.toolCalls 导出纯净形状（无 _status/startedTs 内部态）；无 usage → undefined；未传 sessionId → 键缺省", () => {
     const view = eventsToSessionView(

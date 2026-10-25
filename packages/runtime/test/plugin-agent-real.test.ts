@@ -23,8 +23,17 @@ function createMockBroker(): IMessageBroker {
   }
 }
 
-function createMockSessionService(sessions: SessionSummary[] = []): ISessionService {
+/**
+ * [W3] records = lifecycle 注册表记录最小形状（IManagedSessionView 的 modelId /
+ * thinkingLevel 双写缓存字段）——getModel / getThinkingLevel 的读点已从 SessionSummary
+ * 改到注册表记录（SessionSummary 三状态字段删除），测试经本参数接线同值记录。
+ */
+function createMockSessionService(
+  sessions: SessionSummary[] = [],
+  records: Array<{ id: string; modelId?: string; thinkingLevel?: string }> = [],
+): ISessionService {
   const sessionMap = new Map(sessions.map(s => [s.id, s]))
+  const recordMap = new Map(records.map(r => [r.id, r]))
   const groups: SessionGroup[] = sessions.length > 0
     ? [{ cwd: sessions[0].cwd, sessions }]
     : []
@@ -32,6 +41,7 @@ function createMockSessionService(sessions: SessionSummary[] = []): ISessionServ
   return {
     listPersistedSessions: vi.fn().mockReturnValue(groups),
     getSummary: vi.fn((id: string) => sessionMap.get(id)),
+    getSession: vi.fn((id: string) => recordMap.get(id)),
     sendMessage: vi.fn().mockResolvedValue(undefined),
     switchModel: vi.fn().mockResolvedValue('provider/model-b'),
     setThinkingLevel: vi.fn().mockResolvedValue('off'),
@@ -82,9 +92,9 @@ describe('Agent RPC Handlers — real implementation', () => {
   it('getModel returns active session modelId', async () => {
     const session: SessionSummary = {
       id: 's1', label: 'S1', cwd: '/work', status: 'active',
-      lastActiveAt: Date.now(), modelId: 'openai/gpt-4', tokenCount: 0,
+      lastActiveAt: Date.now(),
     }
-    const sessionService = createMockSessionService([session])
+    const sessionService = createMockSessionService([session], [{ id: 's1', modelId: 'openai/gpt-4' }])
     const service = createService(sessionService)
 
     const model = await callMethod(service, 'plugin.agent.getModel', {})
@@ -94,7 +104,7 @@ describe('Agent RPC Handlers — real implementation', () => {
   it('getModel returns empty string when no active session', async () => {
     const session: SessionSummary = {
       id: 's1', label: 'S1', cwd: '/work', status: 'idle',
-      lastActiveAt: Date.now(), modelId: 'provider/x', tokenCount: 0,
+      lastActiveAt: Date.now(),
     }
     const sessionService = createMockSessionService([session])
     const service = createService(sessionService)
@@ -106,7 +116,7 @@ describe('Agent RPC Handlers — real implementation', () => {
   it('setModel calls switchModel on active session', async () => {
     const session: SessionSummary = {
       id: 's1', label: 'S1', cwd: '/work', status: 'active',
-      lastActiveAt: Date.now(), modelId: 'provider/old', tokenCount: 0,
+      lastActiveAt: Date.now(),
     }
     const sessionService = createMockSessionService([session])
     const service = createService(sessionService)
@@ -133,10 +143,9 @@ describe('Agent RPC Handlers — real implementation', () => {
   it('getThinkingLevel returns active session thinkingLevel', async () => {
     const session: SessionSummary = {
       id: 's1', label: 'S1', cwd: '/work', status: 'active',
-      lastActiveAt: Date.now(), modelId: 'provider/x', tokenCount: 0,
-      thinkingLevel: 'high',
+      lastActiveAt: Date.now(),
     }
-    const sessionService = createMockSessionService([session])
+    const sessionService = createMockSessionService([session], [{ id: 's1', thinkingLevel: 'high' }])
     const service = createService(sessionService)
 
     const level = await callMethod(service, 'plugin.agent.getThinkingLevel', {})
@@ -146,10 +155,10 @@ describe('Agent RPC Handlers — real implementation', () => {
   it('getThinkingLevel returns "off" when active session has undefined thinkingLevel', async () => {
     const session: SessionSummary = {
       id: 's1', label: 'S1', cwd: '/work', status: 'active',
-      lastActiveAt: Date.now(), modelId: 'provider/x', tokenCount: 0,
-      thinkingLevel: undefined,
+      lastActiveAt: Date.now(),
     }
-    const sessionService = createMockSessionService([session])
+    // W3：注册表记录无 thinkingLevel 缓存值（undefined）→ 'off' 兜底
+    const sessionService = createMockSessionService([session], [{ id: 's1' }])
     const service = createService(sessionService)
 
     const level = await callMethod(service, 'plugin.agent.getThinkingLevel', {})
@@ -231,7 +240,7 @@ describe('Agent RPC Handlers — U6 降级检查返回空串', () => {
   it('setModel：复合串无 "/"（parts < MIN_MODEL_PARTS）→ 返回空串且不触达 switchModel（检查分支 3）', async () => {
     const session: SessionSummary = {
       id: 's1', label: 'S1', cwd: '/work', status: 'active',
-      lastActiveAt: Date.now(), modelId: 'provider/old', tokenCount: 0,
+      lastActiveAt: Date.now(),
     }
     const sessionService = createMockSessionService([session])
     const service = createService(sessionService)
@@ -244,7 +253,7 @@ describe('Agent RPC Handlers — U6 降级检查返回空串', () => {
   it('setModel：活跃 session + 合法复合串 → 返回 switchModel 的生效值（回执契约正向锚点）', async () => {
     const session: SessionSummary = {
       id: 's1', label: 'S1', cwd: '/work', status: 'active',
-      lastActiveAt: Date.now(), modelId: 'provider/old', tokenCount: 0,
+      lastActiveAt: Date.now(),
     }
     const sessionService = createMockSessionService([session])
     const service = createService(sessionService)
@@ -275,7 +284,7 @@ describe('Agent RPC Handlers — U6 降级检查返回空串', () => {
   it('setThinkingLevel：活跃 session → 返回 setThinkingLevel 的生效档（回执契约正向锚点）', async () => {
     const session: SessionSummary = {
       id: 's1', label: 'S1', cwd: '/work', status: 'active',
-      lastActiveAt: Date.now(), modelId: 'provider/x', tokenCount: 0,
+      lastActiveAt: Date.now(),
     }
     const sessionService = createMockSessionService([session])
     ;(sessionService.setThinkingLevel as ReturnType<typeof vi.fn>).mockResolvedValue('high')
@@ -290,7 +299,7 @@ describe('Agent RPC Handlers — U6 降级检查返回空串', () => {
   it('setModel：deps 注入 modelService → 委托 modelService.switchModel 原样返回生效值（生产主臂锚点，session-only 兜底臂零触达）', async () => {
     const session: SessionSummary = {
       id: 's1', label: 'S1', cwd: '/work', status: 'active',
-      lastActiveAt: Date.now(), modelId: 'provider/old', tokenCount: 0,
+      lastActiveAt: Date.now(),
     }
     const sessionService = createMockSessionService([session])
     const modelService = {
@@ -310,7 +319,7 @@ describe('Agent RPC Handlers — U6 降级检查返回空串', () => {
   it('setThinkingLevel：deps 注入 modelService → 委托 modelService.setThinkingLevel 原样返回生效档（生产主臂锚点）', async () => {
     const session: SessionSummary = {
       id: 's1', label: 'S1', cwd: '/work', status: 'active',
-      lastActiveAt: Date.now(), modelId: 'provider/x', tokenCount: 0,
+      lastActiveAt: Date.now(),
     }
     const sessionService = createMockSessionService([session])
     const modelService = {

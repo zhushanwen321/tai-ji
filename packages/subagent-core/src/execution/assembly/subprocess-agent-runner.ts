@@ -11,8 +11,7 @@
 // SAR 构造）——掏空只删 run() 内部编排，构造签名与公共部分不变。model 解析归
 // service resolveIdentity（W2 迁移清单⑧，不双轨）。
 
-import type { AgentRunner } from "../../orchestration/models/ports.ts";
-import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
+import type { AgentRunner, AgentCallOpts, AgentResult } from "../../shared/agent-call-types.ts";
 import type { AgentEvent } from "../../shared/agent-event.ts";
 import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 import type { SubagentService } from "../subagent-service.ts";
@@ -20,7 +19,7 @@ import type { SubagentService } from "../subagent-service.ts";
 /**
  * SAR 直调（无 workflow run 上下文）时的 parentRunId 占位——record 仍带
  * origin:"workflow" 进 store，但不隶属任何 run（views 按真实 runId 查询
- * collectRecordsByParentRunId 天然不中；治理通道 `subagents action:'list'
+ * collectRecordsByParentRunId 天然不中；治理通道 `subagent_manage action:'list'
  * includeWorkflow:true` 仍可查）。
  *
  * 生产链路 pump 恒经 workflowAgentDispatch 注入（闭包携带真实 run.runId），

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * W1 token 消费层断言——chromium 真实验证轨（IF1 消费层分支）。
+ * W1 token 消费层断言——chromium 真实验证层（IF1 消费层分支）。
  *
  * 目标：在真实浏览器环境（chromium + vite dev server + Tailwind JIT 编译产物）验证
  * 5 核心组件的 Tailwind 语义类（bg-bg/text-neutral-fg/composer-box/bg-bg-input/text-accent/
  * bg-surface）computed style 取自 CSS 变量（var()）非硬编码。
  *
- * 与 vitest 轨（tokens.test.ts TC3）的关系：
- *  - vitest 轨注入「等价 CSS」验证「类名→var()」契约（happy-dom 已证实支持 var() 展开）。
+ * 与 vitest 层（tokens.test.ts TC3）的关系：
+ *  - vitest 层注入「等价 CSS」验证「类名→var()」契约（happy-dom 已证实支持 var() 展开）。
  *  - 本脚本加载真实 vite dev server + Tailwind JIT 编译产物，验证组件真实渲染消费（端到端）。
  *  双轨：vitest 快速契约 + chromium 真实环境，任一发现问题即拦截 token 引用断裂（ERR1）。
  *
@@ -39,7 +39,7 @@ const KILL_GRACE_MS = 2000
 
 // 5 核心组件消费层断言表（label/选择器/computed 属性/期望变量/首屏/必需）
 // required=true 计入 exit code 判定；required=false 为 best-effort（var() 消费由 vitest
-// 契约验证 tokens.test.ts TC3 覆盖，chromium 轨为真实验证抽样，失败降级 warn）
+// 契约验证 tokens.test.ts TC3 覆盖，chromium 层为真实验证抽样，失败降级 warn）
 const ASSERTIONS = [
   { label: 'AppShell', selector: '.app-shell', prop: 'backgroundColor', varName: '--bg', firstScreen: true, required: true },
   { label: 'Sidebar', selector: '.sidebar .text-neutral-fg', prop: 'color', varName: '--neutral-fg', firstScreen: true, required: true },

@@ -42,6 +42,7 @@ interface RegisteredTool {
 		ctx: { mode: TestMode },
 	) => Promise<ExecuteResult>;
 	renderCall?: (args: Record<string, unknown>, theme: Theme, context?: unknown) => unknown;
+	renderResult?: (result: unknown, options: { expanded: boolean }, theme: Theme, context?: unknown) => { render: (width: number) => string[] };
 }
 
 // pi-coding-agent 的 ExtensionContext 类型声明里没有 mode 字段（运行时实际有），
@@ -185,6 +186,22 @@ describe("executeTodoAction — tool result 无 __gui__（全模式）", () => {
 		// execute 组装线：details.summary 恒写入（tool.ts:235 buildTodoSummary；
 		// TUI 折叠渲染与 taiji GUI ToolRow 读链同源文本，组装行丢失时此处红）
 		expect(result.details.summary).toBe("Added 1 todo (#1)");
+	});
+
+	it("renderResult 接线（C-ext-05）：注册定义携带函数成员 + 折叠态输出 summary 一行（突变动作 ✓ 前缀）", async () => {
+		const { tool } = setup();
+		expect(typeof tool.renderResult).toBe("function");
+		const result = await tool.execute(
+			"id",
+			{ action: "add", texts: ["task A"] },
+			undefined,
+			undefined,
+			makeCtx("rpc").ctx,
+		);
+		const lines = tool.renderResult!(result, { expanded: false }, stubTheme).render(400);
+		// Text.render 按宽度 pad，trim 后断言（折叠态 = details.summary 一行 + ✓ 前缀）
+		expect(lines.length).toBe(1);
+		expect(lines[0].trim()).toBe("✓ Added 1 todo (#1)");
 	});
 
 	it.each(MODES)("%s + list → details 无 __gui__ 字段，文本内容可读", async (mode) => {

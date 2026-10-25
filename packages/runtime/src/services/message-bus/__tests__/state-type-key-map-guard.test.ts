@@ -90,26 +90,25 @@ describe('TOPIC_TABLE ↔ STATE_TYPE_KEY_MAP 一致性检查（RT-1#5）', () =>
   })
 })
 
-describe('btw.* TOPIC/STATE 登记锚定（btw-question D6，M2-a）', () => {
-  it('btw.list 登记为 state 且静态 typeKey = "btw"（线列表 last-value，重连经 stateSnapshot 恢复）', () => {
-    // 锚定意图：D6 要求 TOPIC/STATE 登记落在 message-bus——publish 面 = btw.list（create/remove
-    // 成功后广播全量线列表于主会话 bus）。typeKey 'btw' 是主会话 stateSnapshot 的回放键；
-    // 若被降级为 stream（不写快照）/改键，本断言红——改动者须同步 protocol.ts 帧注释与
-    // M2-b handler 的广播接线。
-    expect(TOPIC_TABLE['btw.list']).toBe('state')
-    expect(STATE_TYPE_KEY_MAP['btw.list']).toBe('btw')
-    // 一 type 只一形态（防双源歧义）：不同时进派生表 / 例外白名单
-    expect('btw.list' in STATE_TYPE_KEY_PAYLOAD_DERIVED).toBe(false)
-    expect(STATE_NO_KEY_TOPICS.has('btw.list')).toBe(false)
-  })
-
-  it('btw.create / btw.remove 纯 RPC reply 不入 TOPIC_TABLE（D6：publish 面仅 btw.list）', () => {
+describe('btw.* TOPIC/STATE 登记锚定（btw-question D6，M2-a；W4b 线枚举帧退役）', () => {
+  it('btw.create / btw.remove 纯 RPC reply 不入 TOPIC_TABLE（D6：btw 域无 publish 面）', () => {
     // 锚定意图：create/remove 走 reply 通道（同名 request/reply，broker.reply 直发），
     // 从不经 bus.publish——入表即误导（topicOf 对 reply 无意义，state 登记会造出永空的
-    // 快照槽位）。若未来确需广播这两帧，须先裁决语义再改本断言。
+    // 快照槽位）。原 btw.list 的 state 登记（typeKey 'btw'）随该消息退役删除：btw 线进
+    // 通用列表（session.list {surface:'btw', mainSessionId}，设计 §3.3.1/§5-W4b），
+    // create/remove 后不再 publish 线列表帧。若未来确需广播，须先裁决语义再改本断言。
     expect('btw.create' in TOPIC_TABLE).toBe(false)
     expect('btw.remove' in TOPIC_TABLE).toBe(false)
     expect('btw.create' in STATE_TYPE_KEY_MAP).toBe(false)
     expect('btw.remove' in STATE_TYPE_KEY_MAP).toBe(false)
+  })
+
+  it('btw.list 已退役：三张登记表（TOPIC_TABLE / STATE_TYPE_KEY_MAP / 派生表 / 例外白名单）零残留', () => {
+    // 锚定意图：线枚举消息与其 state 广播面整体收缩——任何一张表残留 'btw.list' 登记
+    // 都意味着「零订阅方的死消息面」复活（协议已删、publish 点已删，登记表是最后漏网点）。
+    expect('btw.list' in TOPIC_TABLE).toBe(false)
+    expect('btw.list' in STATE_TYPE_KEY_MAP).toBe(false)
+    expect('btw.list' in STATE_TYPE_KEY_PAYLOAD_DERIVED).toBe(false)
+    expect(STATE_NO_KEY_TOPICS.has('btw.list')).toBe(false)
   })
 })

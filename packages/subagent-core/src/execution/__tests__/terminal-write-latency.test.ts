@@ -1,18 +1,18 @@
 // src/execution/__tests__/terminal-write-latency.test.ts
 //
-// [H4 / D2 / 待验证检查点①] markFinalized 终态写面——两条轨道（单测层极端测试
-// 整治第二波拆分层，判据见 docs/todo/test-single-layer-cleanup.md）：
+// [H4 / D2 / 待验证检查点①] markFinalized 终态写面——两种形态道（单测层极端测试
+// 整治第二波拆分层，判据见 docs/TEST-STRATEGY.md「新写测试判据」节）：
 //
-//   1. 单测轨（默认）：终态写面的**逻辑断言**——「双写发生且 persisted=true」。
+//   1. 单测层（默认）：终态写面的**逻辑断言**——「双写发生且 persisted=true」。
 //      现行写面（.state 收条已退场，见 record-store.ts 意图原语表 markFinalized 行）：
 //      record-settled 事件帧（appendFileSync 同步落盘，事件流是磁盘终态的权威）
 //      + 终态 manifest 投影（writeAtomicFileSync 同步落盘），写序 = 先事件后派生
 //      （manifest 携带事件文件 stat 水位，构造性新鲜）。
-//   2. 时延实测轨（TAIJI_TEST_INTEGRATION=1 才跑，本地默认跳过）：真实磁盘采样
+//   2. 时延实测层（TAIJI_TEST_INTEGRATION=1 才跑，本地默认跳过）：真实磁盘采样
 //      N=100 的耗时分布实测（P99 水位追踪）。
 //
-// 为什么时延轨不再有阈值断言：负载态墙钟耗时（CPU 被并行 worker 抢占的整段慢窗）
-// 在单测/集成轨都没有稳定上界，历史上的 10ms→200ms 抬升正是拿阈值补偿负载的
+// 为什么时延层不再有阈值断言：负载态墙钟耗时（CPU 被并行 worker 抢占的整段慢窗）
+// 在单测/集成组都没有稳定上界，历史上的 10ms→200ms 抬升正是拿阈值补偿负载的
 // 反模式（症状不是解法）——阈值已随拆层退役，P99 数字经 console.info 落测试输出
 // 供人工/文档追踪（结构性回归如误加 fsync / N 倍冗余写在数字上呈数量级跳变，
 // 单跑口径即可见）。
@@ -36,10 +36,10 @@ import {
 import { ManifestStore } from "../persistence/manifest-store.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 
-/** 时延实测轨采样次数（D2 口径 N=100）。 */
+/** 时延实测层采样次数（D2 口径 N=100）。 */
 const SAMPLE_COUNT = 100;
 
-describe("markFinalized 终态写面：双写发生且 persisted=true（单测轨）", () => {
+describe("markFinalized 终态写面：双写发生且 persisted=true（单测层）", () => {
   let tmpDir: string;
   let recordsDir: string;
   let store: RecordStore;

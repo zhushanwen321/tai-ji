@@ -1,12 +1,13 @@
 /**
- * batch-real 系 spec 共享 helpers —— 真实 LLM 轨「凭证门与播种 / 诊断与扫描 / run 介质锚」
+ * batch-real 系 spec 共享 helpers —— 真实 LLM 层「凭证门与播种 / 诊断与扫描 / run 介质锚」
  * 的单一实现（原 batch-s1/s3/s4、batch-window-*、batch-zsl、batch-cr、btw-turn-isolation
  * 各自头注「同款范式」的拷贝收敛单点）。
  *
  * 逐文件差异全部参数化，行为与拆出前逐字段一致：
- * - diag 落点两种现状都保留：tmpDiag → /tmp/<name>（窗口/进程族 spec 现状）；
- *   testInfoDiag → testInfo.outputPath（Playwright 托管产物位——诊断载荷含 session entry
- *   正文的 s1/s3/s4 走此落点，ADR-0063 I2）。
+ * - diag 落点两种现状都保留：tmpDiag → /tmp/<name>（窗口/进程族 spec 现状，载荷仅限
+ *   帧型/日志尾等非对话数据证据）；testInfoDiag → testInfo.outputPath（Playwright 托管
+ *   产物位——载荷含对话数据（session 正文尾 / task 字段等）的调用点走此落点，
+ *   ADR-0063 I2 / C-data-10）。
  * - console 前缀 tag（[batch-s1] / [batch-wl] / [s7] …）。
  * - 凭证源 env 覆盖键：TAIJI_BATCH_CREDENTIAL_SOURCE（batch 族缺省）/ TAIJI_S7_CREDENTIAL_SOURCE
  *   （btw-turn-isolation）。
@@ -31,7 +32,7 @@ import {
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-/** 仓根 / e2e 采样项目路径（real 轨 spec 共享——原各 spec 头部同构派生收敛单点）。 */
+/** 仓根 / e2e 采样项目路径（真实进程层 spec 共享——原各 spec 头部同构派生收敛单点）。 */
 export { REPO_ROOT }
 export const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-project')
 
@@ -40,7 +41,9 @@ export const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-pr
 const JSON_INDENT = 2
 const DEFAULT_POLL_INTERVAL_MS = 200
 const MAX_SCAN_DEPTH = 8
-const READY_WAIT_TIMEOUT_MS = 30_000
+// 真机 app 就绪等待窗：runtime 走 dev 分支 tsx 冷启动（编译全量 TS 源码），机器高负载
+//（生产实例/pi 子进程并存）时 30s 不够——校准为 90s（启动预算校准，非断言放宽）。
+const READY_WAIT_TIMEOUT_MS = 90_000
 const DIAG_LOG_TAIL_CHARS = 3_000
 const DIAG_SESSION_TAIL_CHARS = 4_000
 
@@ -112,12 +115,41 @@ export function seedRealCredentials(
     path.join(dst, 'settings.json'),
     JSON.stringify({ defaultProvider, defaultModel, retry: source['retry'] ?? { enabled: false } }, null, JSON_INDENT),
   )
+  writeEmptyDiscoveryConfig(dst)
   opts.extraSeed?.(dst)
+}
+
+/**
+ * 播种 discovery.json 空态（v2 schema，三 kind 全空）：结构性切断 discovery 源的宿主目录
+ * 勾选。discovery.json 缺失时 runtime 回落「全部 preset 目录默认勾选」（discovery-store
+ * DEFAULT_DISCOVERY），宿主自定义扩展目录（如 ~/.pi/agent/extensions 下的用户扩展）会被
+ * 六源发现的 discovery 源收进 pi spawn 的 --extension 白名单——真机批次因此加载宿主个人
+ * 扩展，与「用户扩展/skill 清单不进 e2e」的播种纪律冲突（batch-s3 现场实证：宿主
+ * pi-statusline / xyz-agent-bridge 进了真机 argv）。
+ *
+ * schema 形态对齐 runtime discovery-store v2（version:2 + skill/agent/extension 各
+ * { projectPaths, globalPaths }）；形态漂移由 e2e/spawn-isolation-guard.spec.ts 断言拦截。
+ * 全空文件被保留（不被当脏数据删除），runtime 读回即空勾选，不回落默认。
+ */
+function writeEmptyDiscoveryConfig(agentDir: string): void {
+  const emptyPaths = { projectPaths: [] as string[], globalPaths: [] as string[] }
+  fs.writeFileSync(
+    path.join(agentDir, 'discovery.json'),
+    JSON.stringify({
+      version: 2,
+      skill: { ...emptyPaths },
+      agent: { ...emptyPaths },
+      extension: { ...emptyPaths },
+    }, null, JSON_INDENT),
+  )
 }
 
 // ── 诊断落盘（两种落点现状共用核心） ──────────────────────────────────────
 
-/** /tmp 落点 diag 工厂（窗口/进程族 spec 现状——载荷为帧型/日志尾，无 entry 正文）。 */
+/** /tmp 落点 diag 工厂（窗口/进程族 spec 现状）。载荷契约：仅限帧型/日志尾/进程与文件
+ *  清单等非对话数据证据——session entry 正文及任何携带对话文本的载荷（sessionTextTail、
+ *  含 task/message 字段的对象等）禁走本通道（ADR-0063 I2 / C-data-10：对话数据禁入
+ *  $TMPDIR），必须改走 testInfoDiag。 */
 export function tmpDiag(tag: string): (name: string, data: Record<string, unknown>) => void {
   return (name, data) => {
     fs.writeFileSync(`/tmp/${name}`, JSON.stringify(data, null, JSON_INDENT))
@@ -148,6 +180,35 @@ export async function waitUntil(pred: () => boolean, deadlineMs: number, interva
     await new Promise((r) => setTimeout(r, intervalMs))
   }
   return pred()
+}
+
+/**
+ * 派发主回合 turn 等待（message.send 后等 message.complete 帧到齐）：超时先落 diag
+ * 归因（已见事件型 + runtime 日志尾 + 控制台错误）再断言失败——失败归因纪律
+ * （禁不归因重试）。命中后清空事件缓冲隔离下一断言范围。diag 落点与失败文案差异
+ * 由调用方注入（batch-window-lifecycle / batch-zcode-shared-lifecycle 共用）。
+ */
+export async function awaitMainTurnComplete(opts: {
+  /** 监听 WS 的事件累积缓冲 */
+  events: WsFrame[]
+  timeoutMs: number
+  /** dataDir（runtime 日志尾 diag 载荷的取数根） */
+  dataDir: string
+  consoleErrors: string[]
+  diag: (name: string, data: Record<string, unknown>) => void
+  diagName: string
+  foundMessage: string
+}): Promise<void> {
+  const done = await waitUntil(() => opts.events.filter((e) => e.type === 'message.complete').length > 0, opts.timeoutMs)
+  if (!done) {
+    opts.diag(opts.diagName, {
+      seen: [...new Set(opts.events.map((e) => String(e.type)))],
+      runtimeLogsTail: readRuntimeLogs(opts.dataDir).slice(-DIAG_LOG_TAIL_CHARS),
+      consoleErrors: opts.consoleErrors,
+    })
+  }
+  expect(done, opts.foundMessage).toBe(true)
+  opts.events.length = 0
 }
 
 /** 递归列 suffix 匹配文件（depth 防失控）。 */
@@ -282,8 +343,8 @@ export async function waitRealAppReady(page: Page, dataDir: string, tag: string,
 }
 
 /**
- * 真实 LLM 轨双凭证门（在 test 体内调用）：预算 + TAIJI_PI_LIVE 门 + 本机 provider 凭证门
- * （缺一 skip 不 fail——防全量扫跑烧 token；CI/PR/merge 门禁不跑本轨）。
+ * 真实 LLM 层双凭证门（在 test 体内调用）：预算 + TAIJI_PI_LIVE 门 + 本机 provider 凭证门
+ * （缺一 skip 不 fail——防全量扫跑烧 token；CI/PR/merge 门禁不跑本组）。
  */
 export function applyRealTrackGate(
   testFn: { setTimeout(ms: number): void; skip(condition: unknown, description?: string): void },
@@ -292,7 +353,7 @@ export function applyRealTrackGate(
   testFn.setTimeout(opts.timeoutMs)
   testFn.skip(
     process.env['TAIJI_PI_LIVE'] !== '1',
-    '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则——开发期按改动范围手动触发，CI/门禁不跑）',
+    '真实 LLM 层门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则——开发期按改动范围手动触发，CI/门禁不跑）',
   )
   const credSkip = realCredentialSkipReason(opts.tag, opts.envVar)
   testFn.skip(credSkip !== null, credSkip ?? '')
@@ -300,7 +361,7 @@ export function applyRealTrackGate(
 
 // ── session / journal / notify 锚 ─────────────────────────────────────────
 
-/** real 轨 spec 共享收尾（各 spec finally 单行调用）：listener 关闭 → app cleanup →
+/** 真实进程层 spec 共享收尾（各 spec finally 单行调用）：listener 关闭 → app cleanup →
  *  临时 dataDir 清理（PLAYWRIGHT_DEBUG_KEEP_DATA 置位时保留现场）。listener 关闭
  *  异常不阻断后续清理（swallow——清理链继续）。 */
 export async function cleanupRealTrackApp(opts: {
@@ -335,7 +396,10 @@ export async function openMainListenWs(
 
 /** run journal（<runId>.record.jsonl）等待：缺席落 diag（runtime/pi 日志尾为基座载荷，
  *  diagExtra 供调用方补 console errors / agentTree 等归因载荷），命中返回首个 journal
- *  文件路径。runId 解析与形态校验留给调用方（各 spec 断言粒度不同）。 */
+ *  文件路径。runId 解析与形态校验留给调用方（各 spec 断言粒度不同）。
+ *  搜索根 = <dataDir>/ext-sessions（ADR-0141 session 存储树，workflow/runs/ 域）——
+ *  旧 agentDir/sessions 下的 workflow-state 布局已退役（subagent-core index.ts 退役注
+ *  2026-10-18），helper 搜索根随布局迁移。 */
 export async function waitForRunJournal(opts: {
   agentDir: string
   /** dataDir（runtime/pi 日志尾 diag 载荷的取数根） */
@@ -346,8 +410,9 @@ export async function waitForRunJournal(opts: {
   diagName: string
   diagExtra?: Record<string, unknown>
 }): Promise<string> {
+  const journalRoot = path.join(opts.dataDir, 'ext-sessions')
   const journalFound = await waitUntil(
-    () => listFilesRecursive(opts.agentDir, '.record.jsonl').length > 0,
+    () => listFilesRecursive(journalRoot, '.record.jsonl').length > 0,
     opts.timeoutMs,
   )
   if (!journalFound) {
@@ -358,7 +423,7 @@ export async function waitForRunJournal(opts: {
     })
   }
   expect(journalFound, opts.foundMessage).toBe(true)
-  return listFilesRecursive(opts.agentDir, '.record.jsonl')[0]!
+  return listFilesRecursive(journalRoot, '.record.jsonl')[0]!
 }
 
 /** journal run-settled 恰 1 帧且 outcome 相符（run 终局断言共享形态）。返回该帧。 */
@@ -394,11 +459,12 @@ export async function locateMainSessionFile(
 /**
  * 通知三通道口径（BATCH-06）：①送达恰 1 = type custom_message × customType
  * "workflow-result"（u9 外部通道设计，幂等键单次投递，键在顶层 details.notifyId）；
- * ②ledger 条目写入恰 1 = type custom × "subagent-bg-notify-ledger"（键在 data.notifyId）；
- * ③ack 关闭恰 1 = type custom × "subagent-bg-notify-ack"（at-least-once 幂等闭环）。
- * 「notifyId 字面出现次数」结构性 = 3 ≠ 投递次数。ack 由回执扫描（agent_settled 边沿）
- * 驱动——通知唤醒 turn 结算后才落盘，先等待再计数（r3 实测：送达后立即断言 Received 0）；
- * ack 缺席落 diag（diagExtra 供调用方补 journal 帧序等归因载荷）。
+ * ②投递日志 outbox 条目恰 1 = type custom × "delivery-port-outbox"（v2 schema，键在
+ * data.id，data.v=2）；③ack 终局恰 1 = type custom × "delivery-port-ack"（v2 schema，
+ * 键在 data.id——at-least-once 幂等闭环）。
+ * 「notifyId 字面出现次数」结构性 = 3 ≠ 投递次数。ack 由 message_end 边沿驱动
+ * （注入消息落 transcript 时确认送达凭据 → 立即落 ack 终局 entry），等待窗只吸收
+ * JSONL flush 延迟；ack 缺席落 diag（diagExtra 供调用方补 journal 帧序等归因载荷）。
  */
 export async function assertNotifyThreeChannels(opts: {
   sessionFile: string
@@ -416,15 +482,17 @@ export async function assertNotifyThreeChannels(opts: {
     deliveredWorkflowResults.length,
     'notifyDone 送达通道（custom_message × workflow-result）应恰 1 条（幂等键单次投递）',
   ).toBe(1)
-  const countNotifyEntries = (customType: string): number =>
+  /** v2 投递日志/ack 条目计数（键 = data.id，data.v=2——journal.ts OutboxEntryDataV2/AckEntryDataV2）。 */
+  const DELIVERY_PORT_ENTRY_VERSION = 2
+  const countDeliveryPortEntries = (customType: string): number =>
     extractCustomEntries(opts.sessionFile, customType)
-      .filter((d) => JSON.stringify(d).includes(opts.notifyId)).length
+      .filter((d) => d['v'] === DELIVERY_PORT_ENTRY_VERSION && d['id'] === opts.notifyId).length
   expect(
-    countNotifyEntries('subagent-bg-notify-ledger'),
-    'notifyDone ledger 条目应恰 1 条（at-least-once 幂等闭环——写入/关闭各恰一次，BATCH-06 口径）',
+    countDeliveryPortEntries('delivery-port-outbox'),
+    'notifyDone 投递日志 outbox 条目应恰 1 条（delivery-port v2 受理前落盘——写入/关闭各恰一次，BATCH-06 口径）',
   ).toBe(1)
   const ackArrived = await waitUntil(
-    () => countNotifyEntries('subagent-bg-notify-ack') > 0,
+    () => countDeliveryPortEntries('delivery-port-ack') > 0,
     opts.ackTimeoutMs,
   )
   if (!ackArrived) {
@@ -434,9 +502,9 @@ export async function assertNotifyThreeChannels(opts: {
       ...opts.diagExtra,
     })
   }
-  expect(ackArrived, `notifyDone ack 关闭应在 turn 结算后落盘（agent_settled 边沿，${opts.ackTimeoutMs}ms 窗）`).toBe(true)
+  expect(ackArrived, `notifyDone ack 终局应在送达凭据确认后落盘（message_end 边沿，${opts.ackTimeoutMs}ms 窗）`).toBe(true)
   expect(
-    countNotifyEntries('subagent-bg-notify-ack'),
-    'notifyDone ack 关闭应恰 1 条（at-least-once 幂等闭环——写入/关闭各恰一次，BATCH-06 口径）',
+    countDeliveryPortEntries('delivery-port-ack'),
+    'notifyDone ack 终局应恰 1 条（delivery-port v2 at-least-once 幂等闭环——写入/关闭各恰一次，BATCH-06 口径）',
   ).toBe(1)
 }

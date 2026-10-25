@@ -19,6 +19,7 @@ session-store-paths.ts（2026-10-20 登记，C-ext-31）：paths.ts 拆分出的
 退出码: 0 通过 / 2 违规
 """
 
+from __future__ import annotations
 import re
 import sys
 from pathlib import Path

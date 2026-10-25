@@ -100,7 +100,7 @@ function buildFullKindsSnapshot(): ServerMessageMap['session.traceEntries'] {
     header: { type: 'session', version: 1, id: 'h0', cwd: '/w/demo' },
     entries,
     malformed: [{ lineNumber: 3, raw: 'not json' }],
-    sessionEnd: { type: 'session_end', outcome: 'done' },
+    sessionEnd: { outcome: 'done' },
     leafId: 'u3',
   }
 }
@@ -611,7 +611,7 @@ describe('error 态 envelope message 透出（回流修复）', () => {
 
 describe('B11 登记清单截断降级 banner（truncated 正交字段→现有降级渲染分支，不新增 status 值）', () => {
   // 软上限注入 50：截断/降级分支语义与 5000 同构，fixture 51 条替代 5001 条
-  //（test-single-layer-cleanup 判据 d：上限参数化注入，消万条 fixture 与实现常量耦合）
+  //（TEST-STRATEGY「新写测试判据」类型码 d：上限参数化注入，消万条 fixture 与实现常量耦合）
   beforeEach(() => {
     _setTraceEntriesSoftCapForTest(50)
   })

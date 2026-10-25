@@ -12,11 +12,13 @@
  *   修复由用户重新发起 run 承接）
  * - 成功：consume usage + incrementCallCount + markDone + trace.update(completed)
  *
- * [D5-③ 结构化分诊] 失败分诊读 AgentResult.failureKind 字段（产出侧唯一识别点 =
- * execution/engine/inproc pi 引擎目录/output-collector.ts 的 classifyFailureKind，词表归属
- * 见其文件头）。本模块不扫 error 文案子串——failureKind 随 result 透传进 trace 节点，
- * 消费方（trace 读取/TUI）按字段分类展示；原 stale_context / schema_deterministic
- * 「不重试」特判随重试矩阵一并删除（所有失败行为一致：单次即终态）。
+ * [D5-③ 改轨] AgentResult.failureKind 为历史解析兼容残留（@deprecated 终态口径见
+ * models/types.ts AgentFailureKind 守恒块；子串分类器 classifyFailureKind 已不参与
+ * outcome 生产路径——产出侧残留 = pi 引擎 output-collector 送达错误码前缀确定性分诊，
+ * 恒 unknown/undefined）。本模块不扫 error 文案子串——failureKind 随 result 透传进
+ * trace 节点，消费方（trace 读取/TUI）按字段分类展示；原 stale_context /
+ * schema_deterministic「不重试」特判随重试矩阵一并删除（所有失败行为一致：单次即
+ * 终态，见上方「[ADR-0122] 失败显式上报」）。
  *
  * 关键设计：
  * - **usage 透传**：result.usage 直接交给 budget.consume，加权由 Budget 内部的权重常量

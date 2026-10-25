@@ -1,0 +1,750 @@
+// src/execution/__tests__/workflow-agent-dispatch.test.ts
+//
+// [H2 W2] executeWorkflowAgent 统一编排入口单测（设计锚点：
+// subagent-workflow-record-unification.md 的 §3.4 错误规格 / §3.5 终态数据流 / D3 池顺序 / D4 守护 / D6 通知
+// gate / D7 成功收尾 / adopt 豁免双点）。
+//
+// 锁以下组面：
+//   1. 注册范围：record 带 origin:"workflow" + parentRunId；record 级
+//      pending:register/unregister 配对（D5：record 级照旧）。
+//   2. 池顺序（D3）：路由/预检失败先于池 acquire——零池占用 + 同步抛错 + 零孤儿 record。
+//   3. 守护（D4/M3 复刻）：arm 键 = record.id（ctx.taskId 即守护键）；双刷新源
+//      （journal.onEvent 包装 ∪ stream.onDelta 包装）；fire 后失败结果追注恢复指引。
+//   4. D7 收尾 CAS 规格：成功 → closed/gc 立即终态化 + archive；close 路径抢先
+//      （user-close 已写 closedReason）→ 静默跳过不覆盖（memory closedReason 不分叉）；
+//      aborted+success 竞态 → 落 cancelled 分支不漂移；origin=tool 负向对照
+//      （executeAndAwait 成功仍 SP-5 running-resumable，D7 零外溢）。
+//   5. D6 gate：workflow record 完成/失败/关闭不产生任何回注通知（toNotifyRecord
+//      返回 undefined + pi.sendMessage 零调用）。
+//   6. 引擎死亡（§3.4）：engine_crashed → catch 合成 failed result 回脚本（swallow）
+//      + record 由失败路径立即终态化（不 adopt）；service 分诊两处豁免（runEngineTask
+//      catch（已删）/ finalizeEngineOutcome exitCode===null（已删））对 workflow record 落空即终态化。
+//   7. [H2 W3 must-fix] stream 缺省自构：runWorkflowEngineTask 在 stream 实参缺省时
+//      经 createBackgroundStream 自构（kickOffChatRound 同款策略）——三形态（TUI
+//      widget 接通 / GUI+control 停发私货 / sink 未注入降级 no-op）+ 内构对象的守护
+//
+// 替身形态：pi EnginePort = registerFakePiEngine（协议 seam 替身）；受限引擎
+// （strict-engine）本地构造（预检命中用）；pi = mock（appendEntry 捕获 subagent-record
+// entry、events.emit 捕获 pending 注册/注销、sendMessage 零调用断言）。journal 落盘
+// 经 TAIJI_AGENT_DATA_DIR 指到 tmpdir（测试红线：不触真实数据目录）。
+
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
+
+import { EngineSdkError, HOST_TIMEOUT_ABORT_REASON } from "@zhushanwen/subagent-engine-sdk";
+import {
+  hostTimeoutFailureCause,
+  yieldsToTimeoutFact,
+} from "../../execution/service/workflow-dispatch.ts";
+import { trySettleLegacyClosed } from "../../execution/persistence/execution-record.ts";
+import { createRecord } from "../../execution/persistence/execution-record.ts";
+import { createNotifyHost } from "../../execution/notify/notify-host.ts";
+import { ModelConfigService } from "../../execution/assembly/model-config-service.ts";
+import type { RecordStore } from "../../execution/persistence/record-store.ts";
+import { SubagentStream } from "../../execution/assembly/stream-sink.ts";
+import { SAR_UNATTACHED_PARENT_RUN_ID } from "../../execution/assembly/subprocess-agent-runner.ts";
+import { SubagentService } from "../../execution/subagent-service.ts";
+import type { AgentCallOpts, AgentResult } from "../models/types.ts";
+import type { SubagentRecordEntryV2 } from "../../execution/persistence/record-entry.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../../execution/persistence/record-entry.ts";
+import { resetCoreForTests } from "../../core/host-services.ts";
+import { clearEngines, registerEngine } from "../../execution/engine/registry.ts";
+import type { EngineCapabilities } from "../../execution/engine/types.ts";
+import type { EnginePort } from "../../execution/engine/port.ts";
+import type { ExecutionRecord } from "../../execution/domain/record-model.ts";
+import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "../../execution/__tests__/helpers/fake-engine-port.ts";
+import { CTX_MODEL as ctxModel, emptyRegistry } from "../../execution/__tests__/helpers/model-registry-mock.ts";
+import { makePi, type PiMock } from "../../execution/__tests__/helpers/pi-mock.ts";
+// [D3 协议版 P6] armed 消费写入 journal 记录端到端用例：journal 注入点（orchestration/pump 公共
+// 测试钩子）+ journal 读回（run-events 唯一实装）。
+import {
+  dispatchRunTrigger,
+  setRunEventJournalDirForTest,
+} from "../terminal-actions.ts";
+import { createRunEventJournal, type WorkflowRunEvent } from "../run-events.ts";
+
+// ── 辅助：service 构造（notify-gate / routing 测试同款范式）──
+
+interface DispatchHarness {
+  service: SubagentService;
+  store: RecordStore;
+  pi: PiMock;
+  fake: FakePiEnginePort;
+  entries: SubagentRecordEntryV2[];
+  tmpRoot: string;
+}
+
+function makeHarness(opts: {
+  /** [H2 W3 must-fix] streamSink 注入（TUI/未激活形态的 widget sink；缺省 null = 无 UI）。 */
+  streamSink?: { setWidget: (key: string, lines: string[] | undefined) => void };
+  /** [H2 W3 must-fix] 宿主形态（createBackgroundStream 的 GUI 判定输入；缺省 undefined）。 */
+  mode?: "tui" | "rpc";
+} = {}): DispatchHarness {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "wf-dispatch-it-"));
+  process.env.TAIJI_AGENT_DATA_DIR = path.join(tmpRoot, "engine-data");
+  const agentDir = path.join(tmpRoot, "agent");
+  const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
+  modelService.initModel({
+    modelRegistry: emptyRegistry(),
+    sessionId: "wf-dispatch-it",
+    ctxModel,
+  });
+  const service = new SubagentService({ cwd: agentDir, modelService });
+  const pi = makePi();
+  const entries: SubagentRecordEntryV2[] = [];
+  pi.appendEntry.mockImplementation((customType: string, data: unknown) => {
+    if (customType === SUBAGENT_RECORD_CUSTOM_TYPE) entries.push(data as SubagentRecordEntryV2);
+  });
+  service.initSession({
+    pi,
+    sessionId: "wf-dispatch-it",
+    ...(opts.streamSink !== undefined ? { streamSink: opts.streamSink } : {}),
+    ...(opts.mode !== undefined ? { mode: opts.mode } : {}),
+  });
+  clearEngines();
+  const fake = registerFakePiEngine();
+  const harness = { service, store: Reflect.get(service, "store") as RecordStore, pi, fake, entries, tmpRoot };
+  openHarnesses.push({ service, tmpRoot });
+  return harness;
+}
+
+function baseOpts(over: Partial<AgentCallOpts> = {}): AgentCallOpts {
+  return { prompt: "调研 A", description: "research-a", ...over };
+}
+
+/** 微任务冲刷：dispatch 的 acquire/engine.run 链路是 await 链，flush 后 run 才进 fake。 */
+async function flush(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+/** 最近一次 run 捕获（多次 dispatch 共用 fake 时取最后一个）。 */
+function lastRun(fake: FakePiEnginePort): FakeRun {
+  const run = fake.runs.at(-1);
+  expect(run).toBeDefined();
+  return run!;
+}
+
+/** 唯一在途 run（首次 dispatch 后必须恰好一个）。 */
+function soleRun(fake: FakePiEnginePort): FakeRun {
+  expect(fake.runs).toHaveLength(1);
+  return fake.runs[0]!;
+}
+
+/** 从 store 取内存 running record（getMutable 公共部分）。 */
+function runningRecord(store: RecordStore): ExecutionRecord {
+  const running = store.listRunning();
+  expect(running).toHaveLength(1);
+  return store.getMutable(running[0]!.id)!;
+}
+
+/** 受限引擎能力位（worktree/conversation/maxTurns/fork 全不支持——预检命中用）。 */
+const STRICT_CAPS: EngineCapabilities = {
+  schemaEnforcement: "native",
+  steer: "unsupported",
+  conversation: "unsupported",
+  personaInjection: "flag",
+  eventGranularity: "stream",
+  sandbox: "none",
+  sessionRead: "full",
+  resume: "unsupported",
+  interrupt: "kill-only",
+  permissionMode: "native",
+  maxTurns: false,
+};
+
+/** 受限引擎注册（池顺序用例：worktree:true 命中 gate）。 */
+function registerStrictEngine(): void {
+  const port: EnginePort = {
+    id: "strict-engine",
+    capabilities: () => STRICT_CAPS,
+    probe: async () => ({ ok: true, engineVersion: "fake-strict", checks: [{ name: "invocation", ok: true, detail: "fake" }] }),
+    run: () => new Promise(() => {}),
+    read: async () => ({ engineId: "strict-engine", turns: [], source: "outcome-only" }),
+  };
+  registerEngine("strict-engine", () => port);
+}
+
+let prevDataDirEnv: string | undefined;
+
+/** 在途 harness 登记处：makeHarness 创建即登记，顶层 afterEach 统一释放（tmp 不泄漏）。 */
+const openHarnesses: Array<{ service: SubagentService; tmpRoot: string }> = [];
+
+beforeEach(() => {
+  prevDataDirEnv = process.env["TAIJI_AGENT_DATA_DIR"];
+});
+
+afterEach(() => {
+  for (const h of openHarnesses) {
+    h.service.dispose();
+    fs.rmSync(h.tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  }
+  openHarnesses.length = 0;
+  clearEngines();
+  vi.restoreAllMocks();
+  if (prevDataDirEnv === undefined) delete process.env["TAIJI_AGENT_DATA_DIR"];
+  else process.env["TAIJI_AGENT_DATA_DIR"] = prevDataDirEnv;
+});
+
+// ============================================================
+// 1. 注册范围（origin/parentRunId + pending:register 配对）
+// ============================================================
+
+describe("executeWorkflowAgent 注册范围", () => {
+  it("[U2 窗口键] piEngine 注入携带 parentRunId——pi 同步短路位是成员 run 的执行体，无键即 WindowScopeEngineError（batch-s4 真机首跑实锤的回归锁）", async () => {
+    const { service, fake } = makeHarness();
+    const runOrchestration = Reflect.get(service, "runOrchestration") as {
+      resolveChatEnginePort: (windowKey?: string) => unknown;
+    };
+    const portSpy = vi.spyOn(runOrchestration, "resolveChatEnginePort");
+
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-win-key");
+    await flush();
+
+    // 装配侧契约：routeWorkflowEngine 的 piEngine 注入 = resolveChatEnginePort(parentRunId)
+    //（per-window 引擎经窗口实例解析单点取用，probe 与 run 同实例；shared-service 透传保形）。
+    expect(portSpy).toHaveBeenCalledWith("run-win-key");
+    // 缺省网关下（保守 shared-service 透传）run 仍须可达 fake pi port——键传递不改变既有派发行为
+    expect(fake.runs).toHaveLength(1);
+    fake.runs[0]!.settle({ content: "done" });
+    await pending;
+  });
+
+  it("record 带 origin=workflow + parentRunId，pending:register/unregister 配对，taskId 即 record id", async () => {
+    const { service, store, pi, fake } = makeHarness();
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-42");
+    await flush();
+    const run = soleRun(fake);
+    const record = runningRecord(store);
+
+    expect(record.origin).toBe("workflow");
+    expect(record.parentRunId).toBe("run-42");
+    // 守护/journal/spawned-children 的键 = record.id（SAR 占位 taskId 消亡）
+    expect(run.ctx.taskId).toBe(record.id);
+    // record 级 pending:register 照旧（与既有派发路径同款）
+    const registered = pi.events.emit.mock.calls.find((c) => c[0] === "pending:register");
+    expect(registered?.[1]).toMatchObject({ id: record.id, type: "subagent" });
+    // parentRunId 查询范围（W1）命中
+    expect(service.queries.collectRecordsByParentRunId("run-42", 10).map((r) => r.id)).toEqual([record.id]);
+
+    run.settle({ content: "done" });
+    await pending;
+    // 终态化 → record 级注销（D5：record 级配对照旧）
+    const unregistered = pi.events.emit.mock.calls.find((c) => c[0] === "pending:unregister");
+    expect(unregistered?.[1]).toMatchObject({ id: record.id });
+  });
+
+  it("[W0 / D1] dispatch 尾参 stepIndex → record 携带（originFields 写点参数链）；缺省 → undefined（零迁移）", async () => {
+    const { service, store, fake, entries } = makeHarness();
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-step", undefined, undefined, undefined, 3);
+    await flush();
+    const run = soleRun(fake);
+    const record = runningRecord(store);
+
+    // dispatch 参数 → executeWorkflowAgent 尾参 → createRecordForMode originFields →
+    // record（构造点 spread 落位）——链路终点断言，写点参数链的效果面。
+    expect(record.origin).toBe("workflow");
+    expect(record.stepIndex).toBe(3);
+
+    run.settle({ content: "done" });
+    await pending;
+    // register 落盘 entry（recordToSubagent → v2 注册条目派生视图）同步携带
+    // stepIndex 仅存在于 registered 变体（settled 无该域）——按 kind 窄化后查找。
+    const withStep = entries.find((e) => e.kind === "registered" && e.stepIndex === 3);
+    expect(withStep).toMatchObject({ id: record.id, origin: "workflow", parentRunId: "run-step" });
+
+    // 缺省负向：不传 stepIndex（SAR 直调占位路径 / 旧调用方形态）→ undefined
+    const pending2 = service.executeWorkflowAgent(baseOpts(), "run-step-none");
+    await flush();
+    const record2 = runningRecord(store);
+    expect(record2.stepIndex).toBeUndefined();
+    lastRun(fake).settle({ content: "done" });
+    await pending2;
+  });
+});
+
+// ============================================================
+// 2. 池顺序（D3：路由/预检先于池 acquire——失败零池占用）
+// ============================================================
+
+describe("executeWorkflowAgent 池顺序", () => {
+  it("预检命中（不支持的 task shape）→ 同步抛错 + 池 acquire 未被调 + 零孤儿 record", async () => {
+    const { service, store, pi } = makeHarness();
+    registerStrictEngine();
+    const pool = Reflect.get(service, "pool") as { acquire: (p: number, m?: number, s?: AbortSignal) => Promise<void> };
+    const acquireSpy = vi.spyOn(pool, "acquire");
+
+    await expect(
+      service.executeWorkflowAgent(baseOpts({ engine: "strict-engine", worktree: true }), "run-1"),
+    ).rejects.toThrow(/engine_capability_unsupported/);
+
+    expect(acquireSpy).not.toHaveBeenCalled(); // 零池占用（D3）
+    expect(store.listRunning()).toHaveLength(0); // 零孤儿 record
+    expect(pi.events.emit).not.toHaveBeenCalledWith("pending:register", expect.anything());
+  });
+
+  it("池排队中被 abort → run 域 cancelled 收尾（acquirePoolOrFinalize S1 同款分支）", async () => {
+    const { service, store, fake, entries } = makeHarness();
+    // 占满共享池（maxConcurrent 槽全占）→ 新派发排队；run 级 signal abort → cancelled 收尾
+    const pool = Reflect.get(service, "pool") as {
+      maxConcurrent: number;
+      acquire(p: number, m?: number, s?: AbortSignal): Promise<void>;
+      release(): void;
+    };
+    for (let i = 0; i < pool.maxConcurrent; i++) await pool.acquire(0);
+
+    const controller = new AbortController();
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-2", controller.signal);
+    await flush();
+    expect(fake.runs).toHaveLength(0); // 仍在排队（未触达 engine.run）
+    const record = runningRecord(store);
+    expect(record.status).toBe("running");
+
+    controller.abort();
+    const result = await pending;
+    expect(result.error).toContain("cancelled"); // 合成 failed result 回脚本
+    expect(record.status).toBe("idle");
+    expect(record.closedReason).toBe("cancelled"); // run 域 cancelled 收尾
+    expect(entries.at(-1)).toMatchObject({ id: record.id, kind: "settled", stopReason: "cancelled" });
+    expect(fake.runs).toHaveLength(0); // 零引擎副作用
+  });
+});
+
+// ============================================================
+// 3.5 [H2 W3 must-fix] stream 缺省自构（createBackgroundStream 三形态）
+// ============================================================
+
+describe("executeWorkflowAgent stream 自构（设计 D2「service 派发路径既有通道承载」）", () => {
+  afterEach(() => {
+    // control env 注入的清理（防泄漏到同文件其他用例）
+    delete process.env["TAIJI_SUBAGENT_CONTROL_SOCKET"];
+    delete process.env["TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID"];
+  });
+
+  it("TUI 形态：内构 stream 接通 widget——emitDelta 流式可见 + settle 后 dispose 清除", async () => {
+    const sink = { setWidget: vi.fn() };
+    const { service, store, fake } = makeHarness({ streamSink: sink, mode: "tui" });
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-stream-tui");
+    await flush();
+    const run = soleRun(fake);
+    const record = runningRecord(store);
+
+    run.emitDelta("hello "); // leading edge：首个 delta 立即 flush（无 timer 等待）
+    run.emitDelta("world");
+    const widgetKey = `subagent-stream-${record.id}`;
+    expect(sink.setWidget).toHaveBeenCalledWith(widgetKey, ["hello "]);
+    // 第二个 delta 走 trailing 合并窗（100ms timer）——推进后 flush 累积文本
+    await new Promise<void>((resolve) => setTimeout(resolve, 150));
+    expect(sink.setWidget).toHaveBeenCalledWith(widgetKey, ["hello world"]);
+
+    run.settle({ content: "done" });
+    await pending;
+    // dispose 清除 widget（releaseRoundResources → stream.dispose）
+    expect(sink.setWidget).toHaveBeenLastCalledWith(widgetKey, undefined);
+  });
+
+  it("GUI + control 激活（托管态）：停发私货（createBackgroundStream H1 策略）——sink 零调用", async () => {
+    process.env["TAIJI_SUBAGENT_CONTROL_SOCKET"] = "/tmp/subagent-control.sock";
+    process.env["TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID"] = "root-1";
+    const sink = { setWidget: vi.fn() };
+    const { service, fake } = makeHarness({ streamSink: sink, mode: "rpc" });
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-stream-gui");
+    await flush();
+    const run = soleRun(fake);
+
+    run.emitDelta("should-not-ship");
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    expect(sink.setWidget).not.toHaveBeenCalled();
+
+    run.settle({ content: "done" });
+    const result = await pending;
+    expect(result.content).toBe("done"); // 停发不影响执行本体
+  });
+
+  it("sink 未注入（无 UI）：降级 undefined no-op——dispatch 正常完成不崩", async () => {
+    const { service, fake } = makeHarness(); // 无 streamSink
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-stream-nosink");
+    await flush();
+    const run = soleRun(fake);
+
+    run.emitDelta("no-op"); // ctx.stream undefined → emitDelta 经 fake 的 ctx.stream?. 判空
+    run.settle({ content: "done" });
+    const result = await pending;
+    expect(result.content).toBe("done");
+  });
+});
+
+// ============================================================
+// 4. D7 收尾 CAS 规格
+// ============================================================
+
+describe("executeWorkflowAgent D7 成功收尾", () => {
+  it("成功 → closed/gc 立即终态化 + archive（非 SP-5 running-idle）+ 字段保真回脚本", async () => {
+    const { service, store, fake, entries, tmpRoot } = makeHarness();
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-7");
+    await flush();
+    const run = soleRun(fake);
+    const record = runningRecord(store);
+
+    // [H4/U5 适配] sessionFile 必须是真实可写路径（mkdtemp 下）——假路径会让
+    // 终态写入 journal 记录（事件 + binding 快照）失败，旧断言（终态化 + archive）随之失效。
+    fs.mkdirSync(path.join(tmpRoot, "wf"), { recursive: true });
+    const sessionFile = path.join(tmpRoot, "wf", "session.jsonl");
+    run.settle({
+      content: "done",
+      sessionFile,
+      usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: 0.1, contextTokens: 15, turns: 2 },
+    });
+    const result: AgentResult = await pending;
+
+    // 回脚本字段保真（outcome 直映射：usage/sessionFile 不丢）
+    expect(result.content).toBe("done");
+    expect(result.sessionFile).toBe(sessionFile);
+    expect(result.usage?.turns).toBe(2);
+    // D7：成功即终态化 closed/gc + archive 出内存（不再 SP-5 running-resumable）
+    expect(record.status).toBe("idle");
+    expect(record.closedReason).toBe("gc");
+    expect(store.getMutable(record.id)).toBeUndefined();
+    // 终态 entry（持久化链）携带 origin/closedReason
+    const finalEntry = entries.at(-1);
+    expect(finalEntry).toMatchObject({ id: record.id, kind: "settled", status: "idle", stopReason: "gc" });
+    // origin 身份域在 v2 注册条目（首条——D1 两条款各承载自己的域）
+    expect(entries[0]).toMatchObject({ id: record.id, kind: "registered", origin: "workflow" });
+  });
+
+  it("close 路径抢先（user-close 已写 closedReason）→ 静默跳过不覆盖（memory closedReason 不分叉）", async () => {
+    const { service, store, fake, entries } = makeHarness();
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-8");
+    await flush();
+    // 基线在 register 之后取（register 自身落一条 entry——record-store 迁移点内置）
+    const entriesBefore = entries.length;
+    const run = soleRun(fake);
+    const record = runningRecord(store);
+
+    // 模拟 close 路径赢家（close 收尾前的终态写点抢先形态：closed + user-close）
+    expect(trySettleLegacyClosed(record, "user-close")).toBe(true);
+
+    run.settle({ content: "done" });
+    await pending;
+
+    // D7 分支抢锁失败 → 静默跳过：closedReason 不被 "gc" 覆盖，无二次终态 entry
+    expect(record.closedReason).toBe("user-close");
+    expect(record.status).toBe("idle");
+    expect(entries.length).toBe(entriesBefore);
+  });
+
+  it("aborted+success 竞态 → 照旧落现有 cancelled 分支（不漂移为 gc）", async () => {
+    const { service, store, fake, entries } = makeHarness();
+    const controller = new AbortController();
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-9", controller.signal);
+    await flush();
+    const run = soleRun(fake);
+    const record = runningRecord(store);
+
+    controller.abort(); // 外部 run 级 abort 抢先（run 仍以 success 应答的竞态边缘）
+    run.settle({ content: "done" });
+    const result = await pending;
+
+    expect(record.status).toBe("idle");
+    expect(record.closedReason).toBe("cancelled"); // 不漂移为 "gc"（D7 条件含 !aborted）
+    const finalEntry = entries.at(-1);
+    expect(finalEntry).toMatchObject({ id: record.id, kind: "settled", stopReason: "cancelled" });
+    expect(result.content).toBe("done");
+  });
+
+  it("origin=tool 负向对照：executeAndAwait 成功仍 SP-5 收尾可续聊（D7 零外溢；[two-state-convergence U4] 翻边 idle）", async () => {
+    const { service, store, fake } = makeHarness();
+    const pending = service.executeAndAwait({ task: "tool one-shot", slug: "tool-shot", ctxModel });
+    await flush();
+    const run = soleRun(fake);
+    run.settle({ content: "ok" });
+    const result = await pending;
+
+    const record = store.getMutable(result.sessionId ?? "");
+    expect(record).toBeDefined();
+    expect(record!.status).toBe("idle"); // SP-5：等 message 升级，不终态化（翻边 idle）
+    expect(record!.origin).toBeUndefined();
+  });
+});
+
+// ============================================================
+// 4.2 [subagent-observability §3.3.1/§3.3.3] one-shot 轮收条事实透传
+// （settle 调用点 → markRoundIdle 收条 → 派生视图——F1-33/40/34/41 生产写入方锁定）
+// ============================================================
+
+describe("one-shot 轮收条事实透传（settle 调用点 → markRoundIdle）", () => {
+  it("被接管轮（promptDisposition=handled）到达宿主后不再是 success+空正文+completed 形态：结清 no_result + 通知走接管分支 + lastRound 事实在场", async () => {
+    const { service, store, fake, pi } = makeHarness();
+    // 覆盖生产注入（subagent-service 构造点）——捕获 markRoundIdle ⑧ 的结清枚举。
+    const settlements: Array<{ id: string; reason: string }> = [];
+    (Reflect.get(service, "store") as RecordStore).setPendingUnregister((id, reason) =>
+      settlements.push({ id, reason }),
+    );
+    const pending = service.executeAndAwait({ task: "handled one-shot", slug: "handled-shot", ctxModel });
+    await flush();
+    soleRun(fake).settle({
+      content: "",
+      promptDisposition: "handled",
+      observations: ["structured output was not invoked"],
+      usage: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 4, turns: 0 },
+    });
+    const result = await pending;
+    const record = store.getMutable(result.sessionId ?? "");
+    expect(record).toBeDefined();
+
+    // 被接管轮形态（§3.3.3 第三形态）：空正文 + stopReason 不写（修复前 = completed）。
+    expect(record!.status).toBe("idle");
+    expect(record!.result).toBe("");
+    expect(record!.stopReason).toBeUndefined();
+    // 轮收条事实快照：接管三态 + usage 快照（AgentUsageTotal 词形——total 派生四项和）
+    // + 观察性事实（协议侧 contextTokens 不进快照）+ 收条轮数定格（F1-46：turns 随
+    // 收条快照恒在场——被接管轮零 turn）。
+    expect(record!.lastRound).toEqual({
+      promptDisposition: "handled",
+      usage: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, total: 4 },
+      observations: ["structured output was not invoked"],
+      turns: 0,
+    });
+    // 结清：被接管 = no_result（修复前 = completed，§3.3.6）。
+    expect(settlements).toEqual([{ id: record!.id, reason: "no_result" }]);
+    // 通知走接管分支（§3.3.7① 分支①文案——修复前落④「无文本输出」形态）。
+    await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));
+    const content = (pi.sendMessage.mock.calls[0]?.[0] as { content: string }).content;
+    expect(content).toContain("taken over by an extension");
+    expect(content).toContain("prompt disposition: handled");
+  });
+
+  it("失败轮：failure 分类 + usage 快照 + 观察性事实同点落轮收条（lastRound 双承载）", async () => {
+    const { service, store, fake } = makeHarness();
+    const pending = service.executeAndAwait({ task: "failed one-shot", slug: "failed-shot", ctxModel });
+    await flush();
+    soleRun(fake).settle({
+      content: "",
+      error: "engine_boom: child died",
+      engineStopReason: "error",
+      usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 7, turns: 1 },
+      observations: ["delivery predicate not satisfied"],
+    });
+    const result = await pending;
+    const record = store.getMutable(result.sessionId ?? "");
+    expect(record!.status).toBe("idle");
+    // 停因存引擎原值（§3.3.3 事实化写侧——引擎停因 error 在场即写原值，不再派生 failed）。
+    expect(record!.stopReason).toBe("error");
+    expect(record!.lastRound).toMatchObject({
+      engineStopReason: "error",
+      usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, cost: 0, total: 7 },
+      observations: ["delivery predicate not satisfied"],
+    });
+  });
+});
+
+// ============================================================
+// 4.3 [subagent-observability §3.3.9/§3.3.6] 宿主超时轮失败分类
+// （harness.timeout——F1-37：timeoutMs 到期的事实只有宿主持有，结算点改判）
+// ============================================================
+
+describe("宿主超时轮失败分类（harness.timeout）", () => {
+  it("纯函数：仅 reason 命中超时标记才产分类；provider/agent 事实不被覆盖（user/engine/未分类被覆盖）", () => {
+    const noError = { content: "", engineId: "pi" };
+    // 未超时收敛（外部 cancel / 正常应答）→ undefined（分类事实交还引擎收条）。
+    expect(hostTimeoutFailureCause(undefined, noError)).toBeUndefined();
+    expect(hostTimeoutFailureCause("user-cancel", noError)).toBeUndefined();
+    // 命中：raw 取引擎错误原文（分类不丢原文）；无原文时落超时事实 + 恢复动作。
+    expect(hostTimeoutFailureCause(HOST_TIMEOUT_ABORT_REASON, { content: "", engineId: "pi", error: "engine run aborted" })).toEqual({
+      class: "harness",
+      kind: "timeout",
+      retryable: false,
+      raw: "engine run aborted",
+    });
+    expect(hostTimeoutFailureCause(HOST_TIMEOUT_ABORT_REASON, noError)?.raw).toContain("timeoutMs");
+
+    expect(yieldsToTimeoutFact(undefined)).toBe(true);
+    expect(yieldsToTimeoutFact({ class: "user", kind: "cancelled", retryable: false, raw: "r" })).toBe(true);
+    expect(yieldsToTimeoutFact({ class: "engine", kind: "engine_aborted", retryable: false, raw: "r" })).toBe(true);
+    // §3.3.2 cause 优先级：provider/agent 是更高优先级事实，不被宿主超时分类覆盖。
+    expect(yieldsToTimeoutFact({ class: "provider", kind: "rate_limited", retryable: "conditional", raw: "r" })).toBe(false);
+    expect(yieldsToTimeoutFact({ class: "agent", kind: "no_deliverable", retryable: false, raw: "r" })).toBe(false);
+  });
+
+  it("接线：timeoutMs 到期（fake timers 确定性触发）→ 超时轮结清失败分类 harness.timeout（引擎中性误判被宿主改判）", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { service, store, fake } = makeHarness();
+      const pending = service.executeWorkflowAgent(baseOpts({ timeoutMs: 50 }), "run-timeout");
+      await flush();
+      const run = soleRun(fake);
+      const record = runningRecord(store);
+
+      vi.advanceTimersByTime(50); // 超时 abort 定时器到期（reason = 超时标记）
+      expect(run.ctx.signal?.aborted).toBe(true);
+      expect(run.ctx.signal?.reason).toBe(HOST_TIMEOUT_ABORT_REASON);
+
+      // 引擎收条事实保持原样：引擎按 aborted 记 user.cancelled（缺超时事实的中性误判）。
+      run.settle({
+        content: "",
+        error: "engine run aborted",
+        failure: { class: "user", kind: "cancelled", retryable: false, raw: "aborted" },
+      });
+      const result = await pending;
+
+      // 宿主改判：回脚本结果与 record 结算同判 harness.timeout（§3.3.6 超时轮失败结清）。
+      expect(result.failure).toEqual({
+        class: "harness",
+        kind: "timeout",
+        retryable: false,
+        raw: "engine run aborted",
+      });
+      expect(record.agentResult?.failure).toEqual(result.failure);
+      expect(record.outcome).toBe("failed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("负向：未超时收敛（无 timeoutMs）→ 分类事实交还引擎收条（不产生 harness.timeout）", async () => {
+    const { service, fake } = makeHarness();
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-no-timeout");
+    await flush();
+    soleRun(fake).settle({
+      content: "",
+      error: "engine run aborted",
+      failure: { class: "user", kind: "cancelled", retryable: false, raw: "aborted" },
+    });
+    const result = await pending;
+    expect(result.failure).toEqual({ class: "user", kind: "cancelled", retryable: false, raw: "aborted" });
+  });
+});
+
+// ============================================================
+// 4.5 [H2 A3] live usage 喂入（fake engine 事件 → record.totalTokens/turns 保真）
+// ============================================================
+
+describe("executeWorkflowAgent live usage 喂入（H2 A3）", () => {
+  it("fake engine message_end(usage) 事件 → live record 实时累积，终态 entry 落盘保真", async () => {
+    const { service, store, fake, entries } = makeHarness();
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-usage");
+    await flush();
+    const run = soleRun(fake);
+
+    // 引擎协议事件：message_end 携带 usage（pi-subagent-cli spawn-event-translator
+    // accumulateMessageEnd 的协议产物形态），turn_end 结束 turn。
+    run.emitEvent({ type: "message_end", usage: { input: 100, output: 50, cacheRead: 20, cacheWrite: 10, cost: 0.5 } });
+    run.emitEvent({ type: "text_delta", delta: "working" });
+    run.emitEvent({ type: "message_end", usage: { input: 7, output: 3, cacheRead: 0, cacheWrite: 0 } });
+    run.emitEvent({ type: "turn_end" });
+
+    // live record 实时累积（Gate B A3 现象面：agent 实际消耗 LLM 而 record 恒 0）
+    const record = runningRecord(store);
+    expect(record.totalTokens).toBe(190); // (100+50+20+10) + (7+3)
+    expect(record.turnCount).toBe(1);
+
+    // 终态 entry（持久化链）保真：list / 重启重建源读到非零 tokens
+    run.settle({ content: "done" });
+    await pending;
+    const finalEntry = entries.at(-1);
+    expect(finalEntry).toMatchObject({ id: record.id, status: "idle", totalTokens: 190, turns: 1 });
+  });
+
+  it("error 事件 → lastError 记录（reducer 喂入不破坏失败语义）", async () => {
+    const { service, store, fake, entries } = makeHarness();
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-usage-err");
+    await flush();
+    const run = soleRun(fake);
+
+    run.emitEvent({ type: "error", message: "boom" });
+    run.settle({ content: "", error: "boom" });
+    await pending;
+
+    // 失败收尾不受喂入影响（终态 entry 正常落盘）
+    // status 仅存在于 settled 变体（v2 判别联合）——先按 kind 窄化再读。
+    const finalEntry = entries.at(-1);
+    expect(finalEntry?.kind).toBe("settled");
+    if (finalEntry?.kind !== "settled") throw new Error("expected settled entry");
+    expect(finalEntry.status).toBe("idle");
+    expect(store.getMutable(finalEntry.id)).toBeUndefined();
+  });
+});
+
+// ============================================================
+// 5. D6 gate（workflow 回注全静默）
+// ============================================================
+
+describe("D6 toNotifyRecord origin gate", () => {
+  it("漏斗层单点：workflow record 完成/失败/关闭全返回 undefined（notifyComplete 零投递）", () => {
+    const pi = makePi();
+    const host = createNotifyHost({
+      getPi: () => pi,
+            getIsIdle: () => undefined,
+    });
+
+    const base = createRecord("sa-d6", {
+      agent: "worker",
+      model: "m",
+      mode: "background",
+      task: "t",
+      slug: "d6",
+      startedAt: Date.now(),
+    });
+    const closedWf = { ...base, origin: "workflow" as const, status: "idle" as const, closedReason: "gc" as const };
+    expect(host.toNotifyRecord(closedWf)).toBeUndefined();
+    host.notifyComplete(closedWf);
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+
+    // 对照：tool 来源 closed record 正常产通知（gate 仅 workflow）
+    expect(trySettleLegacyClosed(base, "gc")).toBe(true);
+    expect(host.toNotifyRecord(base)).toBeDefined();
+  });
+
+  it("service 级：executeWorkflowAgent 成功/引擎死亡全程 pi.sendMessage 零调用", async () => {
+    const { service, fake, pi } = makeHarness();
+    const success = service.executeWorkflowAgent(baseOpts(), "run-10");
+    await flush();
+    lastRun(fake).settle({ content: "done" });
+    await success;
+
+    const death = service.executeWorkflowAgent(baseOpts(), "run-11");
+    await flush();
+    lastRun(fake).fail(new EngineSdkError("engine_crashed", "engine process died", "re-dispatch the workflow"));
+    const deathResult = await death;
+    expect(deathResult.error).toContain("engine_crashed");
+
+    expect(pi.sendMessage).not.toHaveBeenCalled(); // D6：完成/失败回注全静默
+  });
+});
+
+// ============================================================
+// 6. 引擎死亡 + adopt 豁免（service 分诊；[modeless 波1] runEngineTask/
+//    finalizeEngineOutcome（均已删）直注双测随 one-shot engine-run 编排消亡删除——
+//    豁免语义由上方 engine_crashed 端到端用例覆盖：workflow record 不 adopt、
+//    立即终态化回脚本）
+// ============================================================
+
+describe("引擎死亡与 adopt 豁免（§3.4 + 决策表）", () => {
+  it("engine_crashed → 合成 failed result 回脚本（swallow）+ record 立即终态化（不 adopt）", async () => {
+    const { service, store, fake, entries } = makeHarness();
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-12");
+    await flush();
+    const run = soleRun(fake);
+    const record = runningRecord(store);
+
+    run.fail(new EngineSdkError("engine_crashed", "engine process died", "re-dispatch the workflow"));
+    const result = await pending; // 不 reject——脚本观察到失败结果
+
+    expect(result.error).toContain("engine_crashed");
+    expect(result.content).toBe("");
+    // record 由失败路径立即终态化（closed/gc + archive），不保持纳管态交监督器
+    expect(record.status).toBe("idle");
+    expect(record.closedReason).toBe("gc");
+    expect(store.getMutable(record.id)).toBeUndefined();
+    expect(entries.at(-1)).toMatchObject({ id: record.id, kind: "settled", status: "idle", stopReason: "gc" });
+  });
+
+});
+

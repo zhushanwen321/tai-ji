@@ -1,7 +1,7 @@
 /**
  * Workspace E2E —— 最近工作区记录 popover（DirSelectPopover）渲染 + 空态 + 搜索过滤。
  *
- * 数据流（MOCK 轨）：VITE_MOCK=true → stores/workspace 走 @/api 门面 → mockApi.workspace，
+ * 数据流（MOCK 层）：VITE_MOCK=true → stores/workspace 走 @/api 门面 → mockApi.workspace，
  * listRecent 返回 3 条固定 records（project-a / project-b / another-foo）。
  * DirSelectPopover 读 workspaceStore.records（computed）即时渲染 + 搜索过滤。
  *

@@ -6,7 +6,7 @@
  * → EventInterpreter session-manager 路由（onSessionManagerRequest）→ SessionManagerHandler
  * action 分发（handler routes 表现 9 键：create/send/history/status/list/abort/delete/
  * archive/watch；本探针驱动其中 6 个——create/send/history/status/list/abort 的旧断言面，
- * delete/archive 全链由 equivalence/session-manager-full-e2e.test.ts 真 LLM 轨覆盖，
+ * delete/archive 全链由 equivalence/session-manager-full-e2e.test.ts 真 LLM 层覆盖，
  * watch 不对 LLM 暴露）→ extension_ui_response 回写 pi stdin。mock 只保留两层：
  *   1. pi 子进程 IO 层（JSONL stdout → runtime / runtime → stdin 的 wire 映射）
  *   2. SessionService 数据层（ISessionService fake）
@@ -58,8 +58,6 @@ function makeSummary(overrides: Record<string, unknown> = {}): Record<string, un
     cwd: '/test/cwd',
     status: 'active',
     lastActiveAt: 1_755_000_000_000,
-    modelId: 'openai/gpt-4',
-    tokenCount: 0,
     // 归属校验默认材料：发起方一律 'sid-parent'，目标 s1 默认是其 managed child
     spawnSource: 'agent',
     parentAgentSessionId: 'sid-parent',
@@ -84,6 +82,9 @@ function makeFakeSessionView(overrides: Record<string, unknown> = {}): Record<st
     isCompacting: false,
     isBashRunning: false,
     lastActiveAt: 1_755_000_000_000,
+    // W3：handler 的 modelId 读点从 summary 改到注册表记录（IManagedSessionView.modelId
+    // 双写缓存），fake 记录带同值缓存。
+    modelId: 'openai/gpt-4',
     ...overrides,
   }
 }

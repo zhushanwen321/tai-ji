@@ -37,7 +37,7 @@ import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import { useSessionStore } from '@/stores/session'
 
 function makeSummary(id: string): SessionSummary {
-  return { id, label: `session-${id}`, cwd: '/proj', status: 'idle', lastActiveAt: 1, modelId: 'm1', tokenCount: 0 }
+  return { id, label: `session-${id}`, cwd: '/proj', status: 'idle', lastActiveAt: 1 }
 }
 
 function seedSession(s: SessionSummary): void {

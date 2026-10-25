@@ -195,7 +195,7 @@ function extractYamlField(yaml: string, key: string): string | undefined {
  *
  * 双轨语义（D3 定稿）：本结构是**执行可用性**面（可用即跑），严格路由面仍是
  * AgentMeta（注入清单可见性：缺 name/description 不进清单，由 meta !== null 表达）。
- * 两轨分离是两宿主既有设计，本类型只是把执行侧第三份手写实现（zsw mini parser）
+ * 双路分离是两宿主既有设计，本类型只是把执行侧第三份手写实现（zsw mini parser）
  * 收敛到 core 单点。
  */
 export interface AgentProfile {

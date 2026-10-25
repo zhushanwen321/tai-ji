@@ -11,9 +11,10 @@
  * sessionStore.applySnapshot 同步侧栏 label。事故背景：tui-to-gui-mapping-audit.md:62
  * 标记 session_info_changed 未处理，useChat 的 switch 落到 default:break 丢弃。
  *
- * session.state_changed / session.thinkingLevelSet（W3）：
- * model.switch 后 runtime 广播 state_changed（modelId + thinkingLevel + 重算用量），
- * Composer 工具条跟随；thinkingLevelSet 为独立窄更新通道。
+ * session.state_changed / session.thinkingLevelSet（W3；[W1 会话架构四层分离] 起写**状态层**）：
+ * model.switch 后 runtime 广播 state_changed（modelId + thinkingLevel），Composer 工具条经
+ * 状态层跟随；thinkingLevelSet 为独立窄更新通道。两者都不再经 sessionStore.applySnapshot
+ * （列表成员资格不得成为状态写入判据——本文件反向锁定该不变量）。
  *
  * mock 策略：vi.hoisted + vi.mock('@/api')（chat.streamSubscribe 捕获回调，手动触发），
  * 真用 useSessionStore（验证 applySnapshot 落点）+ useChat（被测入口）。
@@ -50,6 +51,7 @@ vi.mock('@/api', () => ({
 
 import { useChat } from '@/composables/features/chat/useChat'
 import { useSessionStore } from '@/stores/session'
+import { useSessionLiveStateStore } from '@/stores/session-live-state'
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -72,8 +74,6 @@ describe('session.renamed 事件 → store label 同步', () => {
       cwd: '/repo',
       status: 'idle',
       lastActiveAt: 100,
-      modelId: 'm',
-      tokenCount: 0,
     })
     const chat = useChat()
     // send 触发 ensureStreamSubscription，注册回调（mock 捕获）
@@ -94,8 +94,6 @@ describe('session.renamed 事件 → store label 同步', () => {
       cwd: '/repo',
       status: 'idle',
       lastActiveAt: 100,
-      modelId: 'm',
-      tokenCount: 0,
     })
     const chat = useChat()
     await chat.send('s2', textToSegments('触发订阅'))
@@ -113,8 +111,6 @@ describe('session.renamed 事件 → store label 同步', () => {
       cwd: '/repo',
       status: 'idle',
       lastActiveAt: 100,
-      modelId: 'm',
-      tokenCount: 0,
     })
     const chat = useChat()
     await chat.send('s3', textToSegments('触发订阅'))
@@ -127,11 +123,11 @@ describe('session.renamed 事件 → store label 同步', () => {
   })
 })
 
-describe('session.state_changed 事件 → store 状态同步', () => {
-  it('U14: 正常 state_changed（sessionId + modelId + thinkingLevel）→ store 更新', async () => {
+describe('session.state_changed 事件 → 状态层同步（W1：不经导航列表）', () => {
+  it('U14: 正常 state_changed（sessionId + modelId + thinkingLevel）→ 状态层更新', async () => {
     seedSession({
       id: 'sc-1', label: 'test', cwd: '/repo', status: 'idle',
-      lastActiveAt: 100, modelId: 'old/model', thinkingLevel: 'medium', tokenCount: 0,
+      lastActiveAt: 100,
     })
     const chat = useChat()
     await chat.send('sc-1', textToSegments('触发订阅'))
@@ -146,16 +142,21 @@ describe('session.state_changed 事件 → store 状态同步', () => {
       },
     })
 
-    const updated = useSessionStore().list.find((s) => s.id === 'sc-1')
-    expect(updated?.modelId).toBe('anthropic/claude-4')
-    expect(updated?.thinkingLevel).toBe('high')
+    expect(useSessionLiveStateStore().liveStateOf('sc-1')).toEqual({
+      modelId: 'anthropic/claude-4',
+      thinkingLevel: 'high',
+    })
+    // 导航列表不承载状态字段（W3 起 SessionSummary 已无三字段，状态唯一权威 = 状态层，上面已断言）
+    expect(useSessionStore().list.find((s) => s.id === 'sc-1')?.label).toBe('test')
   })
 
-  it('thinkingLevel 为 undefined 时只更新 modelId，thinkingLevel 保留旧值', async () => {
+  it('thinkingLevel 为 undefined 时只更新 modelId，已缓存档位保留（字段级合并）', async () => {
     seedSession({
       id: 'sc-2', label: 'test', cwd: '/repo', status: 'idle',
-      lastActiveAt: 100, modelId: 'old/model', thinkingLevel: 'low', tokenCount: 0,
+      lastActiveAt: 100,
     })
+    const liveStore = useSessionLiveStateStore()
+    liveStore.applyLiveState('sc-2', { thinkingLevel: 'low' })
     const chat = useChat()
     await chat.send('sc-2', textToSegments('触发订阅'))
 
@@ -168,21 +169,37 @@ describe('session.state_changed 事件 → store 状态同步', () => {
       },
     })
 
-    const updated = useSessionStore().list.find((s) => s.id === 'sc-2')
-    expect(updated?.modelId).toBe('openai/gpt-4')
-    expect(updated?.thinkingLevel).toBe('low') // undefined 跳过，保留旧值
+    expect(liveStore.liveStateOf('sc-2')).toEqual({ modelId: 'openai/gpt-4', thinkingLevel: 'low' })
   })
 
-  it('其他 session 的 state_changed 不影响当前 session', async () => {
+  it('[W1] 侧栏列表之外的会话 id（btw 线 session id）状态帧同样落地（无列表命中判据）', async () => {
+    const vid = 'pi-line-sync' // 线 session id（W4a 后 = pi 真实 id）
+    const chat = useChat()
+    await chat.send(vid, textToSegments('触发订阅'))
+
+    streamCbHolder.current!({
+      type: 'session.state_changed',
+      payload: { sessionId: vid, modelId: 'line/model', thinkingLevel: 'low' },
+    })
+
+    expect(useSessionLiveStateStore().liveStateOf(vid)).toEqual({
+      modelId: 'line/model',
+      thinkingLevel: 'low',
+    })
+    // 列表未新增该 id（导航视图不变）
+    expect(useSessionStore().list.some((s) => s.id === vid)).toBe(false)
+  })
+
+  it('其他 session 的 state_changed 不影响当前 session（按 id 分区）', async () => {
     seedSession({
       id: 'sc-3', label: 'test', cwd: '/repo', status: 'idle',
-      lastActiveAt: 100, modelId: 'original', thinkingLevel: 'max', tokenCount: 0,
+      lastActiveAt: 100,
     })
+    const liveStore = useSessionLiveStateStore()
+    liveStore.applyLiveState('sc-3', { modelId: 'original', thinkingLevel: 'max' })
     const chat = useChat()
     await chat.send('sc-3', textToSegments('触发订阅'))
 
-    // payload.sessionId 指向另一个 session（streamSubscribe 按 sid 路由，实际不会收到，
-    // 但 applySnapshot 内部按 id 查找，不匹配则 no-op）
     streamCbHolder.current!({
       type: 'session.state_changed',
       payload: {
@@ -192,68 +209,69 @@ describe('session.state_changed 事件 → store 状态同步', () => {
       },
     })
 
-    const updated = useSessionStore().list.find((s) => s.id === 'sc-3')
-    expect(updated?.modelId).toBe('original') // 不受影响
-    expect(updated?.thinkingLevel).toBe('max')
+    expect(liveStore.liveStateOf('sc-3')).toEqual({ modelId: 'original', thinkingLevel: 'max' })
   })
 })
 
-describe('session.thinkingLevelSet 事件 → store thinkingLevel 同步', () => {
-  it('U-TLSet-1: payload 含 sessionId + level → applySnapshot 更新 thinkingLevel', async () => {
+describe('session.thinkingLevelSet 事件 → 状态层 thinkingLevel 同步', () => {
+  it('U-TLSet-1: payload 含 sessionId + level → 状态层更新 thinkingLevel', async () => {
     // 注：streamSubscriptions 是 useChat 模块级单例，跨用例复用 sid 会跳过订阅，故用唯一 sid。
     const sid = 'tlset-1'
     seedSession({
       id: sid, label: 'test', cwd: '/repo', status: 'idle',
-      lastActiveAt: 100, modelId: 'm', thinkingLevel: 'low', tokenCount: 0,
+      lastActiveAt: 100,
     })
+    const liveStore = useSessionLiveStateStore()
+    liveStore.applyLiveState(sid, { modelId: 'm', thinkingLevel: 'low' })
     const chat = useChat()
     await chat.send(sid, textToSegments('触发订阅'))
     expect(streamCbHolder.current).not.toBeNull()
 
-    const updateSpy = vi.spyOn(useSessionStore(), 'applySnapshot')
     streamCbHolder.current!({
       type: 'session.thinkingLevelSet',
       payload: { sessionId: sid, level: 'high' },
     })
 
-    expect(updateSpy).toHaveBeenCalledWith(sid, { thinkingLevel: 'high' })
+    expect(liveStore.liveStateOf(sid)).toEqual({ modelId: 'm', thinkingLevel: 'high' })
+    // 导航列表不写（W3 起 SessionSummary 已无 thinkingLevel，状态唯一权威 = 状态层）
+    expect(useSessionStore().list.find((s) => s.id === sid)?.label).toBe('test')
   })
 
   it('U-TLSet-2: level 缺省时跳过更新', async () => {
     const sid = 'tlset-2'
     seedSession({
       id: sid, label: 'test', cwd: '/repo', status: 'idle',
-      lastActiveAt: 100, modelId: 'm', thinkingLevel: 'low', tokenCount: 0,
+      lastActiveAt: 100,
     })
     const chat = useChat()
     await chat.send(sid, textToSegments('触发订阅'))
     expect(streamCbHolder.current).not.toBeNull()
 
-    const updateSpy = vi.spyOn(useSessionStore(), 'applySnapshot')
     streamCbHolder.current!({
       type: 'session.thinkingLevelSet',
       payload: { sessionId: sid, level: undefined },
     })
 
-    expect(updateSpy).not.toHaveBeenCalled()
+    expect(useSessionLiveStateStore().liveStateOf(sid)).toBeUndefined()
+    expect(useSessionStore().list.find((s) => s.id === sid)?.label).toBe('test')
   })
 
   it('U-TLSet-3: sessionId 缺省时跳过更新', async () => {
     const sid = 'tlset-3'
     seedSession({
       id: sid, label: 'test', cwd: '/repo', status: 'idle',
-      lastActiveAt: 100, modelId: 'm', thinkingLevel: 'low', tokenCount: 0,
+      lastActiveAt: 100,
     })
     const chat = useChat()
     await chat.send(sid, textToSegments('触发订阅'))
     expect(streamCbHolder.current).not.toBeNull()
 
-    const updateSpy = vi.spyOn(useSessionStore(), 'applySnapshot')
     streamCbHolder.current!({
       type: 'session.thinkingLevelSet',
       payload: { sessionId: undefined, level: 'high' },
     })
 
-    expect(updateSpy).not.toHaveBeenCalled()
+    expect(useSessionLiveStateStore().liveStateOf(sid)).toBeUndefined()
+    expect(useSessionStore().list.find((s) => s.id === sid)?.label).toBe('test')
   })
 })

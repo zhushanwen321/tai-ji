@@ -1,5 +1,5 @@
 /**
- * provider-live-sync 真机验收（e2e 资产 E2E-MODELS-02，L2.5 faux 轨）。
+ * provider-live-sync 真机验收（e2e 资产 E2E-MODELS-02，L2.5 faux 层）。
  *
  * 触发范围（docs/testing/e2e-map.json）：`extensions/universal/provider-live-sync/**` +
  * 模型切换链（session-model-control / model-message-handler / composer 提示链）+

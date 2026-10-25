@@ -239,6 +239,43 @@ export function firstContentText(result: { content: Array<{ type: string; text?:
   return first?.type === 'text' ? (first.text ?? '') : ''
 }
 
+// ── toolResult 读侧检查式 helper（details.summary / content 文本；renderResult 入参
+//    是 unknown——容错历史持久化 entry 与非对象形态，读侧检查单点，调用方不再自写
+//    fieldValue 取值或 as 断言）──
+
+/**
+ * 从 pi toolResult（unknown 入参）安全读取 details.summary（一行摘要读侧单点）。
+ * result / details 非对象形态、summary 非字符串或空串一律 undefined——调用方以
+ * `?? 回退文本` 表达降级。读侧检查单点化：extension 的 renderResult 不再各自
+ * 手抄取值函数（历史 8 处手抄 + 2 处 as 断言已收编）。
+ */
+export function readDetailsSummary(result: unknown): string | undefined {
+  if (result === null || typeof result !== 'object') return undefined
+  const details = (result as Record<string, unknown>).details
+  if (details === null || typeof details !== 'object') return undefined
+  const summary = (details as Record<string, unknown>).summary
+  return typeof summary === 'string' && summary !== '' ? summary : undefined
+}
+
+/**
+ * pi toolResult 通用形状提取的 unknown 检查式版（firstContentText 的宽入参形态）：
+ * content 数组缺失或 content[0] 非 text 块时兜底空串。renderResult 入参是 unknown
+ * （容错历史持久化 entry），无法直接满足 firstContentText 的强类型入参——本函数
+ * 内化取值检查，调用方不再各自包装 contentText。
+ */
+export function resultContentText(result: unknown): string {
+  if (result === null || typeof result !== 'object') return ''
+  const content = (result as Record<string, unknown>).content
+  if (!Array.isArray(content)) return ''
+  return firstContentText({ content: content as Array<{ type: string; text?: string }> })
+}
+
+/** 文本首行（按首个换行切分；无换行返回原文）。折叠态一行摘要形态的共用切分。 */
+export function firstLine(text: string): string {
+  const idx = text.indexOf('\n')
+  return idx === -1 ? text : text.slice(0, idx)
+}
+
 // ── 内部工具 ──
 
 /** 递归 strip undefined 字段，确保 JSON.stringify 产出干净的对象 */

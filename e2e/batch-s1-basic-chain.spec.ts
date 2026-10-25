@@ -1,5 +1,5 @@
 /**
- * BATCH S1 批量基本链（E2E-BATCH-01）—— subagents 双任务并行 → 一条 notifyDone 收齐。
+ * BATCH S1 批量基本链（E2E-BATCH-01）—— subagent_batch 双任务并行 → 一条 notifyDone 收齐。
  *
  * 登记：E2E-BATCH-01（docs/testing/e2e-map.json，R2 按改动范围 on-diff，serial 空载串行，
  * L3 真实 LLM）。本 spec 是 2026-09-22 丢失剧本的重建产物（W1 介质归位触发义务，
@@ -25,7 +25,7 @@
  * 执行侧约定（与 e2e-map note 同步维护，改其一须同 commit 改另一）：
  * - 触发：scope diff 命中（subagent-workflow shell / fan-out 模板 / core 执行链）时开发期
  *   按改动范围空载串行执行；双凭证门 = env TAIJI_PI_LIVE=1 + 本机 provider 凭证（缺一 skip
- *   不 fail，防全量扫跑烧 token）；CI/PR/merge 门禁不跑本轨（AGENTS.md e2e 执行准则）。
+ *   不 fail，防全量扫跑烧 token）；CI/PR/merge 门禁不跑本组（AGENTS.md e2e 执行准则）。
  *   前置：real renderer bundle（VITE_E2E=true pnpm run build:e2e，不带 VITE_MOCK）。
  * - 预算：test.setTimeout 600s（真实 LLM 双成员并行 + 通知落盘）；journal/通知到达
  *   等待 300s（轮询，不固定 sleep）；窗口不足属预算校准，禁止放宽断言换绿灯。
@@ -92,7 +92,7 @@ const TASKS = [
 ]
 
 const MAIN_PROMPT =
-  `Dispatch exactly ${TASKS.length} background subagent tasks in ONE call using the \`subagents\` tool ` +
+  `Dispatch exactly ${TASKS.length} background subagent tasks in ONE call using the \`subagent_batch\` tool ` +
   `(do NOT do the tasks yourself, do NOT use any other tool). ` +
   `tasks = ${JSON.stringify(TASKS)} ` +
   `After the tool call returns, reply with only the word DISPATCHED. [${MAIN_MARKER}]`
@@ -101,8 +101,8 @@ const MAIN_PROMPT =
 const MAIN_TURN_TIMEOUT_MS = 180_000
 const JOURNAL_TIMEOUT_MS = 300_000
 const NOTIFY_TIMEOUT_MS = 300_000
-/** ack 关闭等待窗：ack 由回执扫描（agent_settled 边沿）驱动——通知唤醒 turn 结算
- *  后才落盘，送达后立即断言必为 0；窗口 = 一个真实 LLM turn（r3 实测教训）。 */
+/** ack 终局等待窗：ack 由 message_end 边沿驱动（注入落 transcript 即确认送达凭据并
+ *  落 ack 终局 entry），窗口只吸收 JSONL flush 延迟与边沿处理的时序差。 */
 const ACK_TIMEOUT_MS = 180_000
 const JSONL_FLUSH_TIMEOUT_MS = 20_000
 
@@ -132,7 +132,7 @@ async function settleS1Anchors(
     agentDir,
     dataDir,
     timeoutMs: JOURNAL_TIMEOUT_MS,
-    foundMessage: `run journal (wf-*.record.jsonl) 应在 ${JOURNAL_TIMEOUT_MS}ms 内落盘于 <agentDir>/sessions/**/workflow-state/`,
+    foundMessage: `run journal (wf-*.record.jsonl) 应在 ${JOURNAL_TIMEOUT_MS}ms 内落盘于 <dataDir>/ext-sessions/**/workflow/runs/`,
     diag: (name, data) => writeDiag(testInfo, name, data),
     diagName: 'batch-s1-journal-missing.json',
     diagExtra: {
@@ -244,14 +244,13 @@ function assertS1JournalAndEntryContract(
   runId: string,
   dataDir: string,
 ): void {
-  const agentDir = path.join(dataDir, 'agent')
-// ── 断言 M1（journal）：首帧 run-created / run-settled 恰 1 且 completed / seq 严格递增 ──
+  // ── 断言 M1（journal）：首帧 run-created / run-settled 恰 1 且 done / seq 严格递增 ──
 const frames = readJournalFrames(journalFile)
 expect(frames.length, 'journal 应至少有 run-created 与 run-settled 两帧').toBeGreaterThanOrEqual(2)
 expect(frames[0]?.['type'], 'journal 首帧应为 run-created（journal 首帧行为）').toBe('run-created')
 const settledFrames = frames.filter((f) => f['type'] === 'run-settled')
 expect(settledFrames.length, 'run-settled 应恰 1 帧（一个 run 恰好一帧）').toBe(1)
-expect(settledFrames[0]?.['outcome'], 'run-settled outcome 应为 completed').toBe('completed')
+expect(settledFrames[0]?.['outcome'], 'run-settled outcome 应为 done（全部成员成功交付，subagent-observability §3.3.8）').toBe('done')
 const seqs = frames.map((f) => Number(f['seq']))
 const strictlyIncreasing = seqs.every((s, i) => i === 0 || s > seqs[i - 1])
 expect(strictlyIncreasing, 'journal seq 应严格递增（行级单调序号，W1 D1 信封契约）').toBe(true)
@@ -280,15 +279,16 @@ for (const line of recordEntryLines) {
   expect(serialized.includes('displayItems'), 'v2 条目不应含 displayItems 死字节（W1 停写断言）').toBe(false)
 }
 
-// record 事件文件存在性（record 侧新介质）：每成员 <sa-id>.events
-const recordEvents = listFilesRecursive(path.join(agentDir, 'subagents'), '.events')
+// record 事件文件存在性（record 侧新介质）：每成员 <sa-id>.events——搜索根 =
+// <dataDir>/ext-sessions（ADR-0141 session 存储树，subagents/records/ 域按 rootSessionId 分区）
+const recordEvents = listFilesRecursive(path.join(dataDir, 'ext-sessions'), '.events')
 expect(recordEvents.length, 'record 事件文件族应恰 2 个（<recordsDir>/<sa-id>.events，每成员一个）').toBe(2)
 
 }
 
 // ── S1 主用例 ────────────────────────────────────────────────────────────
 
-test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + W1 新介质锚定', async ({ }, testInfo) => {
+test('S1 (batch real): subagent_batch 双任务并行 → 一条 notifyDone 收齐 + W1 新介质锚定', async ({ }, testInfo) => {
   // 凭证双门（缺一 skip 不 fail——防全量扫跑烧 token）
   applyRealTrackGate(test, { timeoutMs: 600_000, tag: 'batch-s1' })
 
@@ -318,7 +318,7 @@ test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + 
     }, 's1-main-send', 30_000)
     expect(sendReply.type, '主 prompt message.send 应被接受').not.toBe('error')
 
-    // 主 turn（LLM 调 subagents 工具后即收尾——批量是后台通知型工具）
+    // 主 turn（LLM 调 subagent_batch 工具后即收尾——批量是后台通知型工具）
     const mainDone = await waitUntil(() => sub.events.filter((e) => e.type === 'message.complete').length > 0, MAIN_TURN_TIMEOUT_MS)
     if (!mainDone) {
       writeDiag(testInfo, 'batch-s1-main-turn.json', {
@@ -327,7 +327,7 @@ test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + 
         runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
       })
     }
-    expect(mainDone, `主 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内 message.complete（真实 LLM 未调 subagents 工具？查 diag）`).toBe(true)
+    expect(mainDone, `主 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内 message.complete（真实 LLM 未调 subagent_batch 工具？查 diag）`).toBe(true)
     await page.screenshot({ path: testInfo.outputPath('s1-dispatched.png'), fullPage: true })
 
     // ── W1 介质锚 ① + 通知等待（拆出 settleS1Anchors）──

@@ -279,6 +279,6 @@ pi 进程内无法直接渲染，只能用 `ctx.ui.select(title, options)` 这�
 | pi extension 接入 GUI 的操作指南 | [extensions/gui-protocol-guide.md](../extensions/gui-protocol-guide.md) |
 | Renderer 包拓扑与 ExtensionHost 分层 | [renderer-package-topology.md](../architecture/renderer-package-topology.md) |
 | pi extension 开发指南 / 强约束 | [extensions/development-guide.md](../extensions/development-guide.md) · [extensions/extension-conventions.md](../extensions/extension-conventions.md) |
-| provider 插件形态 | ADR-0159（[decisions.md](../adr/decisions.md)） |
+| provider 插件形态 | ADR-0166（[decisions.md](../adr/decisions.md)） |
 | 拉为主推补充原则 | ADR-0097（[decisions.md](../adr/decisions.md)） |
 | 插件 SDK 契约源码 | `packages/plugin-sdk/src/types.ts` |

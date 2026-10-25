@@ -23,6 +23,7 @@ Python ast 解析不可靠；node 原生支持 JS 语法）。
   2 — 有 desync
 """
 
+from __future__ import annotations
 import json
 import subprocess
 import sys

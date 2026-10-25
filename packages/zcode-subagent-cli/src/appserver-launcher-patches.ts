@@ -188,11 +188,20 @@ function patchedCliSource(path) {
             }
           }
         }
-        // 锚点 B（回退）：调用点注入 create:r(()=><fn>( → (<arg>,{standalone:{}})
+        // 锚点 B（回退）：调用点注入 create:r(()=><fn>( → (<arg>,{standalone:{}})。
+        // 结构校验与定义锚同口径（2026-10 review·N-1）：全文件出现次数必须恰好 1
+        // ——曾取首个文本命中，未来版本出现两处同款调用时注入落在无关调用上、
+        // standaloneApplied 仍置 true = 真实协议路径 host 模式而门报 armed 的假成功。
+        // count > 1 = 无法确定协议路径调用点 → 放弃本锚（not armed）。
         if (!standaloneApplied) {
           const callAnchor = 'create:r(()=>' + fnName + '(';
-          const callIdx = src.indexOf(callAnchor);
-          if (callIdx >= 0) {
+          let callCount = 0;
+          let callIdx = -1;
+          for (let scan = src.indexOf(callAnchor); scan >= 0; scan = src.indexOf(callAnchor, scan + 1)) {
+            callCount++;
+            callIdx = scan;
+          }
+          if (callCount === 1) {
             const argStart = callIdx + callAnchor.length;
             // 括号配平找与 fnName( 配对的闭括号（扫描器跳过字面量/模板/注释——实参
             // 含内联串或内层调用时首个 ')' 落在错误层级 = 注入错位的假成功）
@@ -288,7 +297,9 @@ export const ACCOUNT_METADATA_SECTION = `
 // 引擎侧既有文案承载）。catches：文件缺失/坏 JSON/目录不可写。
 // 并发边界（ADR-0143 登记）：对与 GUI 共享的凭据库做无锁 read-modify-write 全量
 // 写回，与 GUI token 刷新并发存在毫秒级丢更新窗口——后果自愈（GUI 侧重试刷新 /
-// 本侧缺键下次 spawn 幂等补齐），事实驱动原则下不加锁、不做时间补偿。
+// 本侧缺键下次 spawn 幂等补齐），事实驱动原则下不加锁、不做时间补偿。元数据键
+// 面另加 compare-and-skip 防线（2026-10 review·N-3）：写回前重读磁盘比对
+// identity/auth-source 两键，检测到并发写入即放弃本次写入（见落库段注释）。
 // 调用契约（2026-10 review·S-3）：仅在安装门确认 standalone 与 header-port 两锚
 // 均已武装时调用——这些元数据键只被 standalone 账号源消费，且账号链要成立还要求
 // 认证头走本地端口；任一锚漂移（版本不支持）时写入用户共享 credentials.json 无
@@ -324,9 +335,15 @@ function ensureAccountMetadata() {
     }
     const added = [];
     const reconciled = [];
+    // compare-and-skip 基线（2026-10 review·N-3）：全部 plan 两键的读时原始值（首见
+    // 捕获——后续改写 creds 不影响基线）。写回前重读磁盘逐键比对，检测「快照读取
+    // →写回」窗口内的 GUI/登录并发写入，防陈旧快照覆盖权威新值。
+    const metaBaseline = Object.create(null);
     for (const pid of planIds) {
       const idKey = 'account-provider:' + pid + ':identity';
       const srcKey = 'account-provider:' + pid + ':auth-source';
+      if (metaBaseline[idKey] === undefined) metaBaseline[idKey] = creds[idKey];
+      if (metaBaseline[srcKey] === undefined) metaBaseline[srcKey] = creds[srcKey];
       // host 态 plan api-key 键名模板：account-provider:coding-plan:<pid>:account:<identity>:api-key
       const apiKeyPrefix = 'account-provider:coding-plan:' + pid + ':account:';
       const apiKeySuffix = ':api-key';
@@ -336,13 +353,47 @@ function ensureAccountMetadata() {
       };
       let identity = typeof creds[idKey] === 'string' ? creds[idKey] : '';
       const authSource = typeof creds[srcKey] === 'string' ? creds[srcKey] : '';
-      // 派生身份每次 spawn 重算（不读既有键）：当前 host 态键名首命中（保持既有优先级）。
+      // 派生身份每次 spawn 重算（不读既有键）。多 plan api-key（旧+新 account / 轮换
+      // 残留）时「Object.keys 首个命中」会永久指向陈旧 account 且 hasPlanApiKey 恒真、
+      // 永不自愈（2026-10 review·DG-R2-01）——派生优先级：
+      //   ① project-key-location:v1:[origin,family,identity,...] 键内嵌 identity
+      //      （ZCode 登录写入的确定性信号；键名尾段 URL 编码 JSON 数组，第 2/3 元素
+      //      = family/identity，family 与 pid 前缀匹配同 oauth 家族判据）全体去重后
+      //      唯一且该 identity 名下确有 plan api-key → 用它；
+      //   ② 无①信号时，该 pid 名下 plan api-key 键的 identity 去重后唯一 → 用它
+      //      （单 account 常态）；
+      //   ③ 多候选且无①确定性信号 → 不猜测：不派生（保留既有 stored identity）并
+      //      log 歧义——猜测改写比保留陈旧值更糟（陈旧值至少是登录流程写过的）。
       let derivedIdentity = '';
+      let ambiguousIdentity = false;
+      const keyLocPrefix = 'project-key-location:v1:';
+      const keyLocIds = [];
       for (const k of Object.keys(creds)) {
-        if (k.indexOf(apiKeyPrefix) === 0 && k.slice(-apiKeySuffix.length) === apiKeySuffix) {
+        if (k.indexOf(keyLocPrefix) !== 0) continue;
+        try {
+          const arr = JSON.parse(decodeURIComponent(k.slice(keyLocPrefix.length)));
+          if (Array.isArray(arr) && typeof arr[1] === 'string' && typeof arr[2] === 'string'
+              && pid.indexOf('account:' + arr[1]) === 0 && keyLocIds.indexOf(arr[2]) === -1) {
+            keyLocIds.push(arr[2]);
+          }
+        } catch (e2) { /* 形态外键（损坏/非数组）不构成确定性信号 */ }
+      }
+      if (keyLocIds.length === 1 && hasPlanApiKey(keyLocIds[0])) {
+        derivedIdentity = keyLocIds[0];
+      } else {
+        const apiKeyIds = [];
+        for (const k of Object.keys(creds)) {
+          if (k.indexOf(apiKeyPrefix) !== 0 || k.slice(-apiKeySuffix.length) !== apiKeySuffix) continue;
           const mid = k.slice(apiKeyPrefix.length, k.length - apiKeySuffix.length);
-          if (mid) { try { derivedIdentity = decodeURIComponent(mid); } catch (e2) { derivedIdentity = mid; } break; }
+          if (!mid) continue;
+          let id; try { id = decodeURIComponent(mid); } catch (e2) { id = mid; }
+          if (apiKeyIds.indexOf(id) === -1) apiKeyIds.push(id);
         }
+        if (apiKeyIds.length === 1) derivedIdentity = apiKeyIds[0];
+        else if (apiKeyIds.length > 1) ambiguousIdentity = true;
+      }
+      if (ambiguousIdentity) {
+        process.stderr.write('[zcode-launcher] account metadata: multiple plan api-key identities for ' + pid + ', no deterministic signal - keeping stored identity\\n');
       }
       // oauth 家族凭据存在性：扫 oauth:<family>:access_token，provider id 以
       // account:<family> 开头即绑定该家族（零家族名写死）。
@@ -395,6 +446,24 @@ function ensureAccountMetadata() {
       }
     }
     if (added.length === 0 && reconciled.length === 0) return;
+    // compare-and-skip（2026-10 review·N-3）：无锁 RMW 的陈旧覆盖防线——写回前重读
+    // 磁盘，任一 plan 两键当前值 ≠ 读时基线 = 窗口内 GUI/登录已完成权威写入 → 放弃
+    // 本次写入（log 说明，下次 spawn 幂等重算；放弃后的恢复 = 重新登录/配置或删除
+    // 该键，ADR-0143 并发边界）。重读/解析失败 = 窗口不可判定，同样保守放弃。
+    try {
+      const reread = JSON.parse(readOrig.call(fs, credPath, 'utf8'));
+      if (!reread || typeof reread !== 'object' || Array.isArray(reread)) {
+        throw new Error('credentials reread is not an object');
+      }
+      for (const mk of Object.keys(metaBaseline)) {
+        if ((reread[mk] || '') !== (metaBaseline[mk] || '')) {
+          throw new Error('concurrent write detected on ' + mk);
+        }
+      }
+    } catch (skipErr) {
+      process.stderr.write('[zcode-launcher] account metadata skipped (' + ((skipErr && skipErr.message) || String(skipErr)) + ') - retry on next spawn\\n');
+      return;
+    }
     const tmp = credPath + '.taiji-tmp-' + process.pid;
     // rename 换 inode——tmp 不带 mode 落盘会把 GUI 侧收紧过的文件权限静默放宽为
     // 缺省 umask 值，写前读既有 mode 随写传递（stat 失败回退 0600）；写/rename

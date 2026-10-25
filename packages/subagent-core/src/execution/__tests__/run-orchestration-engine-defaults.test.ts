@@ -25,7 +25,7 @@ import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { getGlobalConfigPath } from "../assembly/config.ts";
 import type { ModelRegistryLike } from "../assembly/model-resolver.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
-import type { AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../shared/agent-call-types.ts";
 import { resetCoreForTests } from "../../core/host-services.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import type {
@@ -157,6 +157,7 @@ interface Harness { // oe-exempt:20261012:test:测试装配形态
   pi: PiMock;
   fakePi: FakePiEnginePort;
   nonPi: CapturingNonPiEngine;
+  modelService: ModelConfigService;
   agentDir: string;
   tmpRoot: string;
 }
@@ -180,7 +181,21 @@ function writeFrontmatterAgent(tmpRoot: string, name: string, model: string): st
   return agentPath;
 }
 
-function makeHarness(engineDefaults?: Record<string, string>, engineHooks?: NonPiHooks): Harness {
+/** 单模型 registry（pi 链 resolveModel / 派发期目录校验都要查表命中 frontmatter 值）。 */
+function registryWith(model: { provider: string; id: string }): ModelRegistryLike {
+  const entry = { id: model.id, name: model.id, provider: model.provider, reasoning: false };
+  return {
+    getAvailable: () => [entry],
+    find: (provider, modelId) => (provider === model.provider && modelId === model.id ? entry : undefined),
+    hasConfiguredAuth: () => true,
+  };
+}
+
+function makeHarness(
+  engineDefaults?: Record<string, string>,
+  engineHooks?: NonPiHooks,
+  registry: ModelRegistryLike = EMPTY_REGISTRY,
+): Harness {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "d6-engine-defaults-"));
   // 测试红线：store/引擎数据范围不触真实数据目录
   process.env.TAIJI_AGENT_DATA_DIR = path.join(tmpRoot, "engine-data");
@@ -188,7 +203,7 @@ function makeHarness(engineDefaults?: Record<string, string>, engineHooks?: NonP
   if (engineDefaults !== undefined) writeEngineDefaults(agentDir, engineDefaults);
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   modelService.initModel({
-    modelRegistry: EMPTY_REGISTRY,
+    modelRegistry: registry,
     sessionId: "d6-engine-defaults-it",
     ctxModel: CTX_MODEL,
   });
@@ -200,7 +215,7 @@ function makeHarness(engineDefaults?: Record<string, string>, engineHooks?: NonP
   registerEngine(NON_PI_ENGINE_ID, () => nonPi);
   const fakePi = registerFakePiEngine();
   openHarnesses.push({ service, tmpRoot });
-  return { service, store: (service as unknown as ServiceInternals).store, pi, fakePi, nonPi, agentDir, tmpRoot };
+  return { service, store: (service as unknown as ServiceInternals).store, pi, fakePi, nonPi, modelService, agentDir, tmpRoot };
 }
 
 beforeEach(() => {
@@ -310,6 +325,18 @@ describe("D6 四层优先级：chat 域（run-orchestration）", () => {
     // pi 链自有三层解析：无显式 model → ctxModel 兜底（p/m）；若误插偏好层则为
     // prov/pi-pref——本断言即判别面
     expect(fakePi.runs[0]!.task.model).toBe(PI_CTX_MODEL_REF);
+    fakePi.runs[0]!.settle({ content: "pi done" });
+  });
+
+  it("S-2 pi 路由来源标注三层：task 空 + agent frontmatter 有 → frontmatter（pi 链自解析同样消费 frontmatter）", async () => {
+    const { service, fakePi, store } = makeHarness({ pi: "prov/pi-pref" }, undefined, registryWith({ provider: "prov", id: "front-model" }));
+    const agentPath = writeFrontmatterAgent(openHarnesses[0]!.tmpRoot, "s2-agent", "prov/front-model");
+    const handle = await service.execute({ task: "s2 pi front", slug: "s2-pi-front", agent: agentPath });
+    await vi.waitFor(() => expect(fakePi.runs.length).toBe(1));
+    // 修复前 pi 路由标注 = explicit|default 二层：frontmatter 声明被误标「default」
+    //（引擎缺省）——与「pi 链消费 agent .md 声明」的事实不符。偏好键不消费（上用例）
+    // 与 frontmatter 层标注并存：pi 路由不插 taiji 级偏好，但 frontmatter 属 pi 链自解析层。
+    expect(store.getMutable(handle.subagentId)?.modelSource).toBe("frontmatter");
     fakePi.runs[0]!.settle({ content: "pi done" });
   });
 
@@ -529,6 +556,40 @@ describe("D6 四层优先级：workflow 域（workflow-dispatch）同层序", ()
     await waitForFirstRunModel(nonPi.runs, `${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
     const running = store.listRunningMutable();
     expect(running[0]!.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
+    nonPi.runs[0]!.settle();
+    await pending;
+  });
+
+  it("S-2 pi 路由来源标注三层（workflow 域同构）：frontmatter agent → frontmatter", async () => {
+    // pi 路由 frontmatter 声明过派发期目录校验（declaredModel = agentConfig.model
+    // → assertModelInCatalog）——registry 需含该模型。
+    const { service, fakePi, store } = makeHarness(undefined, undefined, registryWith({ provider: "prov", id: "front-model" }));
+    const agentPath = writeFrontmatterAgent(openHarnesses[0]!.tmpRoot, "s2-wf-agent", "prov/front-model");
+    const pending = service.executeWorkflowAgent(
+      { prompt: "s2 wf pi", description: "s2-wf-pi", agent: agentPath },
+      "run-s2-wf",
+    );
+    await vi.waitFor(() => expect(fakePi.runs.length).toBe(1));
+    const running = store.listRunningMutable();
+    expect(running).toHaveLength(1);
+    expect(running[0]!.modelSource).toBe("frontmatter");
+    fakePi.runs[0]!.settle({ content: "pi wf done" });
+    await pending;
+  });
+
+  it("S-3 覆盖 restamp 经引擎翻译面：record.model 与 task.model = 引擎原生 ref（不呈现 pi 词汇）", async () => {
+    const { service, nonPi, store, modelService } = makeHarness(undefined, translatedEngineHooks());
+    modelService.setModelOverride("run-s3-ovr", {
+      ref: { provider: "zai-coding-cn", modelId: "glm-5.3-flash" },
+      setAt: Date.now(),
+    });
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-s3-ovr");
+    const ENGINE_REF = `${TRANSLATION_TARGET}/GLM-5.3-FLASH`;
+    await waitForFirstRunModel(nonPi.runs, ENGINE_REF);
+    // 修复前 restamp 直写 pi 词汇 overrideRef（zai-coding-cn/glm-5.3-flash）——
+    // record/task 呈现引擎从未收到的 ref；修复后经 translateModelRef 翻译。
+    const running = store.listRunningMutable();
+    expect(running[0]!.model).toBe(ENGINE_REF);
     nonPi.runs[0]!.settle();
     await pending;
   });

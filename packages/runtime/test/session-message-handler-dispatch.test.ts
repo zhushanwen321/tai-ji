@@ -205,6 +205,32 @@ describe('SessionMessageHandler 分发路由（W1 表驱动重构回归锚定）
       expect(cap.replies[0]).toMatchObject({ id: 'm1', type: 'config.sessions', payload: { groups: [{ id: 'a' }] } })
     })
 
+    it('session.list → listSessions(query) + reply session.list { groups }（W4b 通用查询，过滤参数透传）', async () => {
+      const listSessions = vi.fn().mockReturnValue([{ cwd: '/repo', sessions: [{ id: 'line-1', surface: 'btw' }] }])
+      const { cap, handler } = makeHandler({ listSessions })
+      await handler.handleSessionMessage(msg('session.list', { surface: 'btw', mainSessionId: 'main-1' }), WS)
+      expect(listSessions).toHaveBeenCalledWith({ surface: 'btw', mainSessionId: 'main-1' })
+      expect(cap.replies[0]).toMatchObject({
+        id: 'm1',
+        type: 'session.list',
+        payload: { groups: [{ cwd: '/repo', sessions: [{ id: 'line-1', surface: 'btw' }] }] },
+      })
+    })
+
+    it('session.list → 缺省过滤键不落 payload（undefined 键显式剔除，query 形态稳定）', async () => {
+      const listSessions = vi.fn().mockReturnValue([])
+      const { handler } = makeHandler({ listSessions })
+      await handler.handleSessionMessage(msg('session.list', {}), WS)
+      expect(listSessions).toHaveBeenCalledWith({})
+    })
+
+    it('session.list → listSessions 未装配（测试最小 mock）= session_list_unsupported，不静默空回复', async () => {
+      const { cap, handler } = makeHandler()
+      await handler.handleSessionMessage(msg('session.list', { surface: 'btw' }), WS)
+      expect(cap.replies).toHaveLength(0)
+      expect(cap.errors[0]).toMatchObject({ id: 'm1', code: 'session_list_unsupported' })
+    })
+
     it('session.getCommands → getCommands(sid) + reply session.commands（规则 7：payload 带 sessionId）', async () => {
       const getCommands = vi.fn().mockResolvedValue([{ name: 'run' }])
       const { ctx, cap, handler } = makeHandler({ getCommands })

@@ -131,7 +131,7 @@ thread.started（:40-43，携 thread_id）/ turn.started（:47）/ turn.complete
 | AgentOutcomeUsage.contextTokens | ThreadTokenUsage.modelContextWindow（窗口容量） | v2/thread.rs:1777-1779 | 语义错配：taiji contextTokens = 当前上下文占用，codex 只给窗口容量与 totalTokens（累计吞吐，含历史轮，非占用快照）。近似取 modelContextWindow 可判「接近上限」，取 totalTokens 会单调膨胀——建议投 modelContextWindow 并标注未核实精确占用 |
 | AgentOutcomeUsage.turns | turn/completed 到达计数 | common.rs:1848 | 适配器累计 |
 | （reasoningOutputTokens / totalTokens） | 无 taiji 槽 | v2/thread.rs:1806-1808 | reasoning 输出已含于 output；totalTokens 不投 |
-| exec Usage{inputTokens,cachedInputTokens,cacheWriteInputTokens,outputTokens,reasoningOutputTokens} | turn.completed.usage（exec 轨） | exec/src/exec_events.rs:61-73 | 字段同名对位，无 context 窗口字段 |
+| exec Usage{inputTokens,cachedInputTokens,cacheWriteInputTokens,outputTokens,reasoningOutputTokens} | turn.completed.usage（exec 层） | exec/src/exec_events.rs:61-73 | 字段同名对位，无 context 窗口字段 |
 | 精确上游 usage（可选） | rawResponse/completed.usage | v2/thread.rs:1761-1769 | 内部通道，core TokenUsage 同构（protocol/src/protocol.rs:2079-2098） |
 
 ## 6. session 记录与 read 重建
@@ -157,7 +157,7 @@ ReplayedTurn 映射（Turn.items 派生视图）：
 | toolCalls | CommandExecution / McpToolCall / DynamicToolCall / FileChange / WebSearch 依序 → ToolCall（§4 装载） | userMessage 等非工具项跳过 |
 | closed | 恒 true | Turn.status ∈ {completed,interrupted,failed} 即完成；inProgress 不应出现在 read 结果 |
 
-SessionView：engineId="codex"；sessionId=thread.id；usage=read 面不可得（rollout 不存汇总 usage，缺省）；source="native"（thread/read 成功）/ "outcome-only"（仅 run 终态可用时）。exec 轨 read：`codex exec resume --json` 重放（exec/src/cli.rs:150-151），能力受限。
+SessionView：engineId="codex"；sessionId=thread.id；usage=read 面不可得（rollout 不存汇总 usage，缺省）；source="native"（thread/read 成功）/ "outcome-only"（仅 run 终态可用时）。exec 层 read：`codex exec resume --json` 重放（exec/src/cli.rs:150-151），能力受限。
 
 ### 6.3 ResumeAnchor.sessionRef 构成建议
 
@@ -214,7 +214,7 @@ UiRequest 9 method 对齐度：select（← requestUserInput）✅、confirm（�
 - contextTokens 精确上下文占用（只有窗口容量与累计吞吐，见 §5 语义错配）。
 - denyTools 工具黑名单（仅 config override 变通，语义不对等）。
 - UiRequest 的 notify/setStatus/setWidget/setTitle/set_editor_text 反向推送（codex 无此形态）。
-- exec 降级轨：无 delta 流事件（eventGranularity 降 coarse）、无 reasoning delta。
+- exec 降级层：无 delta 流事件（eventGranularity 降 coarse）、无 reasoning delta。
 
 ### 9.3 语义错配（映射时须显式裁决）
 

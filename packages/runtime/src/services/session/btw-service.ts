@@ -2,16 +2,15 @@
  * BtwService —— btw 旁路提问线的会话生命周期服务（btw-question 设计 D1/D2/D3/D9⑤）。
  *
  * 职责边界（M1-b，SSOT = 实施计划 §2 单元表）：
- *   ✅ 线注册表（内存缓存 + 启动目录扫描重建 + hidden 复原）
+ *   ✅ 线注册表（内存缓存 + 启动目录扫描重建 + surface 复原）
  *   ✅ pi 原生 fork 创建（`--fork` + `--session-dir` 双旗标，**不复用 session-fork.ts**
  *      ——后者 root→leaf 单路径截断丢分支，与「完整上下文」裁决冲突）
  *   ✅ 源状态三分支（正常 fork / 源缺失空文件 → 回落无 fork 新建 / 半截 turn 截断快照）
- *   ✅ 线进程生命周期（惰性 spawn / 闲置 30min destroy / 有待处理交互豁免计闲置 /
- *      回收前提醒挂点 onWillReclaim）
+ *   ✅ 线进程生命周期（惰性 spawn / 存续至显式关线或 shutdown / 有待处理交互豁免）
  *   ✅ reattach spawn 形态（restore/getHistory 离线腿按 `sessions/` 解析不通用——
  *      findScannedSession 只扫 sessions/，btw 线不在其扫描面，故自建附着编排：
  *      spawn → switch_session → 附着断言 → registerSession）
- *   ✅ `hidden: true` 注册（经既有 registerSession 汇聚点；不写 parentSession 血缘）
+ *   ✅ `surface: 'btw'` 注册（经既有 registerSession 汇聚点；不写 parentSession 血缘）
  *   ✅ 行为契约注入挂点（D9⑤：线会话建立时注入一次，载体 = spawn
  *      `--append-system-prompt` 组合；**子通道归属随 V6 核实钉固**，oracle =
  *      traceContractInjection 挂点 + spawn options 断言）
@@ -65,7 +64,7 @@
  */
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { basename, join, sep } from 'node:path'
-import { btwVirtualId } from '@taiji/shared'
+import type { SessionSurface } from '@taiji/shared'
 import { getSessionBtwDir, getSessionStoreDir } from '@taiji/shared/paths'
 // 临时 key 生成走 core 唯一入口（禁直调 crypto.randomUUID，secure context/Node 版本防御）
 import { randomUuid } from '@taiji/core/utils/random-uuid'
@@ -90,10 +89,13 @@ export type { BtwErrorCode } from './btw-error.js'
 // 常量（闲置回收节拍；D9⑤ 行为契约文本已迁 btw-contract-inject.ts、fork 常量迁 btw-fork-exec.ts）
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ADR-0122 退役登记（2026-10-05）：btw 线闲置回收（BTW_IDLE_RECLAIM_MS 30min 阈值 +
-// BTW_IDLE_TICK_MS 1min 扫描节拍 + reclaimImminent 回收前提醒）已整体删除——线进程
-// 存续至显式关线（closeLine）或 runtime shutdown destroyAll。协议字段
-// BtwThreadInfo.reclaimImminent 保留（恒 false，wire 形状不变），提醒 UI 沉默退化。
+// ADR-0122 退役登记（2026-10-05 整体删除，2026-10-24 W5 残留收尾）：btw 线闲置回收
+// （BTW_IDLE_RECLAIM_MS 30min 阈值 + BTW_IDLE_TICK_MS 1min 扫描节拍 + 回收前提醒
+// 挂点）已整体删除——线进程存续至显式关线（closeLine）或 runtime shutdown destroyAll。
+// W5 同批删除其余残留：BtwLineRecord.reclaimImminent 字段、BtwServiceDeps.onWillReclaim
+// 挂点、btw.list 载荷的 reclaimImminent 映射；协议字段 BtwThreadInfo.reclaimImminent
+// 与 renderer reclaimReminderVids 表已由 u-w5b 协议收缩单元删除（shared/protocol.ts
+// BtwThreadInfo 整体随 W4b 线枚举帧退役，见 btw-message-handler.ts）。
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 类型
@@ -113,9 +115,9 @@ export type BtwSnapshotKind = 'forked' | 'no-source' | 'truncated' | 'unknown'
 
 /** 线注册表条目（内存缓存；持久载体 = 目录布局，D2/D5）。 */
 export interface BtwLineRecord {
-  /** btw 虚拟 id（`btw:<piSessionId>`，M1-a 工厂产出）；runtime/前端路由 key，不直传 pi。 */
-  vid: string
-  /** 线的真实 pi 会话 id（= vid 去前缀，映射即 extract）。 */
+  /** 线的真实 pi 会话 id（W4a 键统一后 = runtime/前端唯一键：注册表键、registerSession
+   *  入参、bus 发布键、chatStore 分区键、磁盘文件主干全部同一 id；旧 `btw:<piSessionId>`
+   *  两段式虚拟 id 已退役，不保留 alias）。 */
   piSessionId: string
   /** 归属主会话 id（关联 = 目录布局，本注册表是其内存投影）。 */
   mainSid: string
@@ -128,13 +130,16 @@ export interface BtwLineRecord {
   /** 线会话文件绝对路径（分支② 首 flush 前为 pi 推导路径，文件可能尚不存在——规则 #6）。 */
   sessionFilePath: string
   snapshotKind: BtwSnapshotKind
-  /** hidden:true（active 腿防线：listAll 过滤 + 不记工作区历史；重建轮同样复原）。 */
-  hidden: true
+  /**
+   * surface:'btw'（W3 双写）：线的展示归属恒为抽屉。三条写路径必须齐——
+   * createLine / ensureProcess（reattach）/ rebuildFromDisk（重启重建），漏一条会
+   * 让重启后的线 surface 缺失（W5 切判据后 undefined !== 'sidebar' 落向安全一侧，
+   * 但属偶然，不能依赖）。
+   */
+  surface: 'btw'
   createdAt: number
   /** 有待处理交互（豁免计闲置；豁免随任一终态解除——派生通道见 deps.hasPendingUiRequests / setPendingInteraction）。 */
   pendingInteraction: boolean
-  /** 回收提醒态（协议面 = BtwThreadInfo.reclaimImminent；闲置回收退役后恒 false，wire 形状保留）。 */
-  reclaimImminent: boolean
   /** 行为契约注入轮数（= 会话建立次数：create 1 轮 + 每次 reattach +1）。 */
   contractRounds: number
   /** 活跃线进程（undefined = 已被闲置回收/进程亡——文件在，续问走 reattach）。 */
@@ -156,7 +161,8 @@ export interface BtwCreateRequest {
 
 /** createLine 结果（pill 口径：仅创建时返回一次，快照元信息不持久化）。 */
 export interface BtwCreateResult {
-  vid: string
+  /** 新线 session id（= 线 pi 真实会话 id；W4a 键统一后协议 reply 字段名 sessionId）。 */
+  sessionId: string
   mainSid: string
   snapshotKind: Exclude<BtwSnapshotKind, 'unknown'>
   sessionFilePath: string
@@ -182,7 +188,7 @@ export interface BtwLineSpawnOptions {
 export interface BtwServiceDeps {
   /**
    * 线进程 spawn（组合根接 IProcessManager.createSession；key 见 ensureProcess
-   * 的 tempKey 编排——日志文件名避冒号，rekey 后 pm 键 ≡ 注册 id = vid）。
+   * 的 tempKey 编排——日志文件名避冒号，rekey 后 pm 键 ≡ 注册 id = 线 piSessionId）。
    */
   processes: Pick<IProcessManager, 'createSession' | 'destroySession' | 'rekey' | 'getClient'>
   /**
@@ -191,8 +197,8 @@ export interface BtwServiceDeps {
    * = 线目录（V2②③ 落点保证）、appendSystemPrompt ⊕ 行为契约（D9⑤）。
    */
   buildLineSpawnOptions(ctx: BtwLineSpawnContext): Promise<BtwLineSpawnOptions>
-  /** 既有 registerSession 汇聚点（hidden:true 经此透传；本服务不传 parentSession 血缘）。 */
-  registerSession(id: string, client: IPiEngine, cwd: string, label: string, sessionFilePath?: string, hidden?: boolean): Promise<unknown>
+  /** 既有 registerSession 汇聚点（surface:'btw' 经此透传；本服务不传 parentSession 血缘）。 */
+  registerSession(id: string, client: IPiEngine, cwd: string, label: string, sessionFilePath?: string, surface?: SessionSurface): Promise<unknown>
   /** 主会话文件解析（组合根接 scanner/findScannedSession；undefined = 源不可用）。 */
   resolveMainSessionFile(mainSid: string): string | undefined
   /**
@@ -209,30 +215,21 @@ export interface BtwServiceDeps {
   /** 行为契约注入 trace（D9⑤；缺省 no-op）。 */
   traceContractInjection?(trace: BtwContractInjectionTrace): void
   /**
-   * 回收前提醒挂点（D1「回收前」，实装 = 提前 1 拍窗口进入即触发，badge 置「待处理」；
-   * 回收发生/用户续问后清——badge 清除归 M3-c，本侧负责 reclaimImminent 翻转的广播驱动）。
-   * 每回收周期至多触发一次（含时钟跳拍跨窗直达回收时的兜底补发——「提醒恒在回收前」不变量）。
-   */
-  onWillReclaim?(vid: string): void
-  /**
-   * 线状态变化广播驱动。组合根接「线列表 state 广播」（typeKey 'btw'）。缺省 no-op（测试零广播）。
-   */
-  onThreadStateChanged?(vid: string): void
-  /**
    * 交互中转 pending 快照：respond / expired / 失效三终态的共同落点 =
    * ExtensionTimeoutManager 的 per-session pending 表（respond → removeRequest、失效 →
    * invalidatePendingForSession），组合根经 server.getPendingUiRequests 薄委托注入。
-   * 缺省缺席 = 纯推送形态（解除走结构腿/显式调用）。
+   * 缺省缺席 = 纯推送形态（解除走结构腿/显式调用）。入参 = 线 session id。
    */
-  hasPendingUiRequests?(vid: string): boolean
+  hasPendingUiRequests?(sessionId: string): boolean
   /**
    * [M4-a / D9④ 单入口终结扇出] 线终结（三路：deleteSession 级联 / deleteByCwd 批内直删 /
    * btw.remove）后的 lifecycle 收尾：摘 sessions Map 条目 + detach adapter + 插件 sessionData
    * 真删清理（组合根注入，镜像主会话 delete 的收尾序）。必要性：planned kill（destroySession
    * 先删进程表）抑制 exit 回调——条目/总线分区/插件数据不自清。回调自身幂等（无条目零动作）；
    * closeLine 对已出册线也补发一次（防注册表先摘、条目后存在的残留形态）。
+   * 入参 = 线 session id（W4a 键统一后 = piSessionId）。
    */
-  onLineTerminated?(vid: string): void
+  onLineTerminated?(sessionId: string): void
   /** 时钟注入（测试）。 */
   now?(): number
 }
@@ -313,7 +310,12 @@ function isInsideSessionBtwDir(target: string, mainSid: string): boolean {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class BtwService {
-  /** mainSid → 条目仅经 registry 全表索引（消费方 listLines(mainSid) 过滤；注册表即 D4 关联投影）。 */
+  /**
+   * 线注册表（键 = 线 pi 真实会话 id，W4a 键统一；消费方 listLines(mainSid) 过滤，
+   * 注册表即 D4 关联投影）。与 SessionLifecycle.sessions 同一键空间（未物理合并）：线既在本表
+   * 持线自身运行态（threadDir/snapshotKind/client/contractRounds 等），又以同一 piId
+   * 经 registerSession 进 lifecycle 活跃注册表（通用会话记录）。
+   */
   private readonly registry = new Map<string, BtwLineRecord>()
 
   constructor(private readonly deps: BtwServiceDeps) {
@@ -325,11 +327,14 @@ export class BtwService {
 
   // ── 注册表读 ──
 
-  getLine(vid: string): BtwLineRecord | undefined {
-    return this.registry.get(vid)
+  /** 成员查询（键 = 线 session id = piSessionId；W4a 后判别器来源，见 §3.3.6 迁移表）。 */
+  getLine(sessionId: string): BtwLineRecord | undefined {
+    return this.registry.get(sessionId)
   }
 
-  /** 线列表枚举（btw.list{mainSid} 后端；BtwPanel 消费，不属于禁止的关联展示面——D4）。 */
+  /** 线列表枚举（按主会话过滤；session.list {surface:'btw', mainSessionId} 通用查询的
+   *  注册表数据源，W4b 起 drawer BtwPanel 与 badge 通道均经该查询消费——原 btw.list
+   *  {mainSid} 聚合消息已退役；关联展示面枚举读，D4）。 */
   listLines(mainSid: string): BtwLineRecord[] {
     const out: BtwLineRecord[] = []
     for (const rec of this.registry.values()) {
@@ -344,17 +349,17 @@ export class BtwService {
     return [...this.registry.values()]
   }
 
-  // ── 注册表重建（D5：启动目录扫描重建 + hidden 复原）──
+  // ── 注册表重建（D5：启动目录扫描重建 + surface 复原）──
 
   /**
    * 启动扫描 `<root>/<mainSid>/btw/*.jsonl` 重建注册表（裁决⑧：持久化 + 重启可复原；
    * [session-store-layout-inversion] 换根后遍历 = ext-sessions 存储树一级 sessionId
    * 分区 → 各分区 btw/ 域目录）。
    *
-   * - hidden 复原：每条重建条目 `hidden: true`（active 腿防线随 reattach 轮
-   *   经 registerSession 复原；磁盘扫描腿由目录隔离构造性不可见——SessionScanner 只扫 sessions/）。
+   * - surface 复原：每条重建条目 `surface: 'btw'`（三条写路径 createLine /
+   *   ensureProcess / 本方法必须齐，漏此条 = 重启后的线 surface 缺失）。
    * - 不 spawn（惰性）：进程在 ensureProcess（续问/重开）时自建附着编排拉起。
-   * - 幂等：已有活跃条目（by vid）不覆盖；无法解析的文件 warn 跳过（登记不静默）。
+   * - 幂等：已有活跃条目（by session id）不覆盖；无法解析的文件 warn 跳过（登记不静默）。
    * - 树内遍历规约（设计 D7）：一级目录名非合法 sessionId 形态一律跳过（isPiSessionId
    *   结构性拦截，防外部 junk 目录混入；junk 目录不代删不代清）。
    * - 无孤儿补账前置（补账已随布局反转退役——线 jsonl 挂主树内域，主会话删除整树回收
@@ -399,32 +404,31 @@ export class BtwService {
           console.warn(`[btw] rebuild: skip session file without cwd header: ${file}`)
           continue
         }
-        let vid: string
-        try {
-          vid = btwVirtualId(header.id)
-        } catch {
-          console.warn(`[btw] rebuild: skip file with invalid session id "${header.id}": ${file}`)
+        // W4a 键统一：注册键 = 线 header.id（pi 真实会话 id）——旧 `btw:<id>` 两段式已退役。
+        // 值域守卫（对齐旧 btwVirtualId 断言）：header.id 须过 isPiSessionId（防冒号等
+        // 非法形态入册——注册键同时是 pm 键 / bus 键 / 目录层键，非法值会穿透到路径）。
+        const sessionId = header.id
+        if (!isPiSessionId(sessionId)) {
+          console.warn(`[btw] rebuild: skip file with invalid session id "${sessionId}": ${file}`)
           continue
         }
-        if (this.registry.has(vid)) continue // 活跃条目优先（live ≡ reload 不覆盖运行态）
+        if (this.registry.has(sessionId)) continue // 活跃条目优先（live ≡ reload 不覆盖运行态）
         let createdAt: number
         try { createdAt = statSync(file).mtimeMs } catch { createdAt = this.now() }
         const rec: BtwLineRecord = {
-          vid,
-          piSessionId: header.id,
+          piSessionId: sessionId,
           mainSid,
           cwd: header.cwd,
           label: basename(header.cwd),
           threadDir,
           sessionFilePath: file,
           snapshotKind: 'unknown',
-          hidden: true,
+          surface: 'btw',
           createdAt,
           pendingInteraction: false,
-          reclaimImminent: false,
           contractRounds: 0,
         }
-        this.registry.set(vid, rec)
+        this.registry.set(sessionId, rec)
         rebuilt.push(rec)
       }
     }
@@ -435,10 +439,10 @@ export class BtwService {
 
   /**
    * 创建 btw 线：源检查 →（分支①）pi 原生 fork 或（分支②）回落无 fork 新建 →
-   * 惰性 spawn 线进程 → 附着/读回 → registerSession(hidden:true) → 注册表登记。
+   * 惰性 spawn 线进程 → 附着/读回 → registerSession(surface:'btw') → 注册表登记。
    *
    * 全程零触碰主会话进程与主会话文件（P-no-abort 结构面：主 turn 不可能被本路径
-   * 打断——真机断言归 S7 真实进程轨）；零直写线会话文件（fork 文件由 pi 写、
+   * 打断——真机断言归 S7 真实进程层）；零直写线会话文件（fork 文件由 pi 写、
    * 回落文件由 pi 首 flush 自建）。
    *
    * 分解件（metrics-gate 复杂度偿还，编排序不变）：fork 编排归 forkSnapshotForLine、
@@ -491,8 +495,12 @@ export class BtwService {
   /**
    * createLine 的 spawn/附着/登记编排：临时 key spawn →（fork 时）switch_session +
    * 附着断言（I1：登记路径 ≡ pi 写路径）→ get_state 守卫 → rekey →
-   * registerSession(hidden:true) → 注册表登记 + 契约注入留痕 + 闲置武装。
+   * registerSession(piSessionId, surface:'btw') → 注册表登记 + 契约注入留痕。
    * 任一步失败 → 双键收尸（不留半截条目）。
+   *
+   * W4a 键统一：rekey 目标 = piSessionId（合法 pi id，过 isPiSessionId——旧 vid 含冒号
+   * 使 migratePiSessionLogTree early-return 留 `btw-create-*` 孤儿目录，E-21 族①②随
+   * 本切换自然消失）；注册键与 pm 键 ≡ lifecycle.sessions 键 ≡ 派生分区键，全部同一 id。
    */
   private async spawnAndRegisterLine(
     ctx: BtwLineSpawnContext,
@@ -514,14 +522,15 @@ export class BtwService {
         // 附着一致性守卫：switch 后活跃会话必须是 fork 目标（进程绑错 = 实现 bug，fail-fast）。
         throw new BtwError('state_mismatch', `[btw] attached session id ${piSessionId} !== fork header id — refusing to register`)
       }
-      const vid = btwVirtualId(piSessionId)
-      if (vid !== tempKey) {
-        this.deps.processes.rekey(tempKey, vid)
-        registeredKey = vid
+      if (piSessionId !== tempKey) {
+        this.deps.processes.rekey(tempKey, piSessionId)
+        registeredKey = piSessionId
       }
-      await this.deps.registerSession(vid, client, cwd, label, sessionFilePath, true)
+      // W3 双写：registerSession 尾部 surface 显式传 'btw'（只改 registerSession 尾部
+      // 传不到 btw 线——线不经 create 链路，走本直注册链；三处签名同批扩参）。
+      // W4a：注册 id = piSessionId（线的唯一键；lifecycle.sessions 与本 registry 同一键空间）。
+      await this.deps.registerSession(piSessionId, client, cwd, label, sessionFilePath, 'btw')
       const rec: BtwLineRecord = {
-        vid,
         piSessionId,
         mainSid,
         cwd,
@@ -529,16 +538,15 @@ export class BtwService {
         threadDir: ctx.threadDir,
         sessionFilePath,
         snapshotKind,
-        hidden: true,
+        surface: 'btw',
         createdAt: this.now(),
         pendingInteraction: false,
-        reclaimImminent: false,
         contractRounds: 1,
         client,
       }
-      this.registry.set(vid, rec)
-      this.deps.traceContractInjection?.({ vid, round: 1, carrier: 'append-system-prompt', contract: BTW_BEHAVIOR_CONTRACT })
-      return { vid, mainSid, snapshotKind, sessionFilePath }
+      this.registry.set(piSessionId, rec)
+      this.deps.traceContractInjection?.({ sessionId: piSessionId, round: 1, carrier: 'append-system-prompt', contract: BTW_BEHAVIOR_CONTRACT })
+      return { sessionId: piSessionId, mainSid, snapshotKind, sessionFilePath }
     } catch (e) {
       // 与 create/restore 的 init catch 同构：注册半途失败 → 收尸进程，不留半截条目。
       // 两处 destroy 均 best-effort：收尸失败不掩盖原始错误（进程表退出回调兜底）。
@@ -554,21 +562,23 @@ export class BtwService {
    * 确保线进程存活（惰性 spawn / 闲置回收后续问、drawer 重开走此口）。
    *
    * 编排 = spawn（env session-dir 线目录）→ switch_session（线文件）→ 附着断言 →
-   * get_state 一致性守卫 → rekey → registerSession(hidden:true)。不走 restoreSession
+   * get_state 一致性守卫 → rekey → registerSession(surface:'btw')。不走 restoreSession
    * （其 resolveRestoreTarget/findScannedSession 只扫 sessions/，btw 线目录不在其
    * 扫描面——V5 核实结论）。
    *
    * 行为契约每轮重注入（D9⑤「含重附着轮」）。
    * 线会话文件缺失（分支② 首 flush 前即被回收/删除）→ BtwError('thread_file_missing')：
    * 该线无任何持久化内容，策略（报错可见 / 引导新建）由调用方 M2-b 决定，宿主不代造文件。
+   *
+   * 入参 = 线 session id（W4a 键统一后 = piSessionId，registry 键）。
    */
-  async ensureProcess(vid: string): Promise<IPiEngine> {
-    const rec = this.registry.get(vid)
-    if (!rec) throw new BtwError('line_not_found', `[btw] no such line: ${vid}`)
+  async ensureProcess(sessionId: string): Promise<IPiEngine> {
+    const rec = this.registry.get(sessionId)
+    if (!rec) throw new BtwError('line_not_found', `[btw] no such line: ${sessionId}`)
     const alive = rec.client
     if (alive && !alive.exited) return alive
     if (!rec.sessionFilePath || !existsSync(rec.sessionFilePath)) {
-      throw new BtwError('thread_file_missing', `[btw] thread session file missing (line had never flushed) — rebuild from scratch: ${rec.sessionFilePath ?? vid}`)
+      throw new BtwError('thread_file_missing', `[btw] thread session file missing (line had never flushed) — rebuild from scratch: ${rec.sessionFilePath ?? sessionId}`)
     }
     const ctx: BtwLineSpawnContext = { mainSid: rec.mainSid, cwd: rec.cwd, threadDir: rec.threadDir, snapshotKind: rec.snapshotKind === 'unknown' ? 'forked' : rec.snapshotKind }
     const options = await this.buildEstablishOptions(ctx)
@@ -576,17 +586,21 @@ export class BtwService {
     try {
       const client = await this.deps.processes.createSession(tempKey, rec.cwd, options)
       await client.switchSession(rec.sessionFilePath)
-      await assertPiSessionFile(client, rec.sessionFilePath, `btw.ensureProcess(${vid})`)
+      await assertPiSessionFile(client, rec.sessionFilePath, `btw.ensureProcess(${sessionId})`)
       const state = await client.getState()
       const stateSid = typeof state?.sessionId === 'string' ? state.sessionId : undefined
       if (stateSid !== rec.piSessionId) {
         throw new BtwError('state_mismatch', `[btw] reattach landed on session ${stateSid ?? '<none>'}, expected ${rec.piSessionId}`)
       }
-      this.deps.processes.rekey(tempKey, vid)
-      await this.deps.registerSession(vid, client, rec.cwd, rec.label, rec.sessionFilePath, true)
+      this.deps.processes.rekey(tempKey, sessionId)
+      // W3 双写：reattach 注册同样显式传 surface 'btw'（与 createLine 对称），
+      // 记录对象侧 rec.surface 幂等重写（条目由 createLine/rebuildFromDisk 建立，
+      // 此处补齐三条写路径的最后一条）。
+      await this.deps.registerSession(sessionId, client, rec.cwd, rec.label, rec.sessionFilePath, 'btw')
+      rec.surface = 'btw'
       rec.client = client
       rec.contractRounds += 1
-      this.deps.traceContractInjection?.({ vid, round: rec.contractRounds, carrier: 'append-system-prompt', contract: BTW_BEHAVIOR_CONTRACT })
+      this.deps.traceContractInjection?.({ sessionId, round: rec.contractRounds, carrier: 'append-system-prompt', contract: BTW_BEHAVIOR_CONTRACT })
       // [D1 豁免随请求失效] 重附着 = 旧轮挂起请求的失效终态（中断 turn / 进程亡同一切面）
       // → 结构解除。
       rec.pendingInteraction = false
@@ -594,7 +608,7 @@ export class BtwService {
     } catch (e) {
       // best-effort 收尸：两键都试（rekey 前后），失败不掩盖原始附着错误（退出回调兜底）。
       await this.deps.processes.destroySession(tempKey).catch(() => {})
-      await this.deps.processes.destroySession(vid).catch(() => {})
+      await this.deps.processes.destroySession(sessionId).catch(() => {})
       throw e
     }
   }
@@ -604,16 +618,17 @@ export class BtwService {
   /**
    * 有待处理交互登记（豁免随任一终态解除——终态机触发点归 M3-c，本方法是其解除口）。
    * 登记本身即提醒态的一部分（badge 待处理 = M3-c 消费）。
+   * 入参 = 线 session id（W4a 后 = piSessionId）。
    */
-  setPendingInteraction(vid: string, pending: boolean): void {
-    const rec = this.registry.get(vid)
+  setPendingInteraction(sessionId: string, pending: boolean): void {
+    const rec = this.registry.get(sessionId)
     if (!rec) return
     rec.pendingInteraction = pending
   }
 
   /**
    * 关线（btw.remove 原语，单线销毁；**三路并发收敛的单入口**——btw.remove 直调、
-   * delete 对 btw vid 直删、主删级联 closeAllForMain 逐线转调，均落本方法）：
+   * delete 对 btw 线直删、主删级联 closeAllForMain 逐线转调，均落本方法）：
    * 杀进程（派生 subagent/workflow 任务随 pi 进程亡——abort 幂等由 pm.destroySession
    * 「Map 无条目静默跳过」保证）+ 注册表移除 +（可选）删线会话文件 + 软删线树
    * `<root>/<线sid>/` 整树（D5 对称挂树软删：线作为会话有自己的树——线派生的
@@ -622,23 +637,25 @@ export class BtwService {
    * **失效腿（闲置回收/进程亡）不走本方法**——不清注册表、不删文件、不软删线树、
    * 不清派生键（线可重开，D9④）。
    *
+   * 入参 = 线 session id（W4a 键统一后 = piSessionId，registry 键）。
+   *
    * 删除段失败语义（[session-store-layout-inversion]）：结构化报错上抛不静默——
    * 启动孤儿补账已随布局反转退役，删除失败残留无兜底面；错误含路径与恢复指引
    *（trashDirectory 原生结构化错误）。注意：报错时注册表条目与线进程已终结，
    * 残留 = 磁盘文件/树待后续重试或按错误指引手动清理。
    */
-  async closeLine(vid: string, opts?: { deleteSessionFile?: boolean }): Promise<boolean> {
-    const rec = this.registry.get(vid)
+  async closeLine(sessionId: string, opts?: { deleteSessionFile?: boolean }): Promise<boolean> {
+    const rec = this.registry.get(sessionId)
     if (!rec) {
       // 幂等完成面（M4-a）：注册表已无此线（并发双删 / 级联先行）仍补发一次终结扇出——
       // lifecycle 条目可能残留（planned kill 不走 exit 链），回调自身幂等（无条目零动作）。
-      this.fireLineTerminated(vid)
+      this.fireLineTerminated(sessionId)
       return false
     }
-    this.registry.delete(vid)
-    if (rec.client) await this.deps.processes.destroySession(vid).catch((e: unknown) => console.warn(`[btw] closeLine destroy failed (${vid}): ${toErrorMessage(e)}`))
+    this.registry.delete(sessionId)
+    if (rec.client) await this.deps.processes.destroySession(sessionId).catch((e: unknown) => console.warn(`[btw] closeLine destroy failed (${sessionId}): ${toErrorMessage(e)}`))
     // 终结扇出（M4-a 单入口）：lifecycle 条目 / 总线分区 / 插件数据收尾——三路终结合一挂点。
-    this.fireLineTerminated(vid)
+    this.fireLineTerminated(sessionId)
     if (opts?.deleteSessionFile && rec.sessionFilePath && isInsideSessionBtwDir(rec.sessionFilePath, rec.mainSid)) {
       // force:true 吞 ENOENT：首 flush 前文件可能尚未落盘（规则 #6）——目标态已达成不算失败；
       // 其余 IO 失败（EACCES/EBUSY 等）仍原生抛出，走下方包装上抛。
@@ -675,7 +692,7 @@ export class BtwService {
    * best-effort：逐线失败 warn 不上抛（调用方是删除主链，P2 降级隔离；失败已出声，
    * 残留无补账兜底——按错误日志路径人工/重试处置）。
    *
-   * @returns 本次快照枚举到的线 sessionId 清单（先于逐线关闭捕获）——delete 编排侧
+   * @returns 本次快照枚举到的线 session id 清单（先于逐线关闭捕获）——delete 编排侧
    *   据此解绑各线画布绑定（F1-11：级联真删除的线与主会话同一解绑规则）。并发双删
    *   形态（closeLine 返 false）同样在清单内——线已不在，解绑幂等无副作用。
    *   （cwd 参数保留：调用方 BtwCascadeOps 窄接口（session-lifecycle）两参形态不动，
@@ -685,25 +702,26 @@ export class BtwService {
     const lines = this.listLines(mainSid)
     for (const rec of lines) {
       try {
-        await this.closeLine(rec.vid)
+        await this.closeLine(rec.piSessionId)
       } catch (e) {
         // best-effort：删线失败不上抛（主删链 P2 降级隔离），warn 留痕出声（残留按
         // 错误内路径人工处置——补账兜底已退役，此处不再有自动重试面）
-        console.warn(`[btw] closeAllForMain line close failed (${rec.vid}): ${toErrorMessage(e)}`)
+        console.warn(`[btw] closeAllForMain line close failed (${rec.piSessionId}): ${toErrorMessage(e)}`)
       }
     }
-    return lines.map((rec) => rec.vid)
+    return lines.map((rec) => rec.piSessionId)
   }
 
   // ── 内部 ──
 
-  /** 终结扇出（best-effort：扇出失败不阻断关线主链；回调内部各步自身隔离/幂等）。 */
-  private fireLineTerminated(vid: string): void {
+  /** 终结扇出（best-effort：扇出失败不阻断关线主链；回调内部各步自身隔离/幂等）。
+   *  入参 = 线 session id（W4a 后 = piSessionId）。 */
+  private fireLineTerminated(sessionId: string): void {
     try {
-      this.deps.onLineTerminated?.(vid)
+      this.deps.onLineTerminated?.(sessionId)
     } catch (e) {
       // best-effort：终结扇出异常不阻断关线主链（回调内各步自身隔离/幂等），留痕可归因
-      console.warn(`[btw] onLineTerminated hook failed (${vid}): ${toErrorMessage(e)}`)
+      console.warn(`[btw] onLineTerminated hook failed (${sessionId}): ${toErrorMessage(e)}`)
     }
   }
 

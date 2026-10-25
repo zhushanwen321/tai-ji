@@ -89,7 +89,7 @@ export class FileService implements IFileService {
    * 返回前按 sortNodes 排序（dir 在前、同类型内 name 降序），与 listLevel 一致。
    *
    * ignore 策略：始终返回所有节点，对 .gitignore 命中的节点标记 `ignored=true`，
-   * 由前端按 showIgnored 开关做本地 computed 过滤（瞬时切换不重新拉取，避免闪烁）。
+   * 前端全量显示（2026-10-15 裁决：showIgnored 过滤开关退役，跟踪态由文件名颜色区分）。
    * @throws FileError('session_not_found' | 'permission_denied')
    */
   async listTree(sessionId: string): Promise<FileNode[]> {

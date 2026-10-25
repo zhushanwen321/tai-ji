@@ -228,7 +228,8 @@ describe("entry status maps via protocol mapReasonToStatus (D10 single-source, i
 		expect(mapReasonToStatus("interrupted-by-restart")).toBe("aborted");
 		expect(mapReasonToStatus("interrupted-by-parent")).toBe("aborted");
 		expect(mapReasonToStatus("reopened")).toBe("completed");
-		expect(mapReasonToStatus("some-future-reason")).toBe("completed");
+		// 词表外 reason 缺省 unknown（fail-visible——§3.3.11④ fail-open=completed 废除）
+		expect(mapReasonToStatus("some-future-reason")).toBe("unknown");
 	});
 });
 

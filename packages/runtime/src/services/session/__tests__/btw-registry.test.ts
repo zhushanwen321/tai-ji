@@ -1,5 +1,5 @@
 /**
- * 线注册表启动重建（btw-question D5：内存缓存 + 目录扫描重建 + hidden 复原）。
+ * 线注册表启动重建（btw-question D5：内存缓存 + 目录扫描重建 + surface 复原）。
  * 目录布局 = session-store-layout-inversion 换根后 `<root>/<mainSid>/btw/*.jsonl`
  *（<root> = `<dataDir>/ext-sessions/`；数据目录经 TAIJI_AGENT_DATA_DIR 测试隔离指向
  * tmp，写删目标全部自建自删——测试红线）。
@@ -47,23 +47,23 @@ function seedThread(mainSid: string, lineSid: string, cwd: string, entries = cle
 }
 
 describe('rebuildFromDisk：启动目录扫描重建', () => {
-  it('按 <root>/<mainSid>/btw/*.jsonl 重建：vid/header cwd/mainSid 目录 + hidden 复原', () => {
+  it('按 <root>/<mainSid>/btw/*.jsonl 重建：session id（= header id）/header cwd/mainSid 目录 + surface 复原', () => {
     seedThread('main-a', 'line-1', PROJ_A)
     seedThread('main-b', 'line-2', PROJ_B)
 
     const rebuilt = svc.rebuildFromDisk()
 
     expect(rebuilt).toHaveLength(2)
-    const byVid = new Map(rebuilt.map(r => [r.vid, r]))
-    expect(byVid.get('btw:line-1')).toMatchObject({
-      piSessionId: 'line-1', mainSid: 'main-a', cwd: PROJ_A, hidden: true,
+    const byId = new Map(rebuilt.map(r => [r.piSessionId, r]))
+    expect(byId.get('line-1')).toMatchObject({
+      piSessionId: 'line-1', mainSid: 'main-a', cwd: PROJ_A, surface: 'btw',
       snapshotKind: 'unknown', contractRounds: 0,
       threadDir: getBtwThreadDir('main-a'),
     })
-    expect(byVid.get('btw:line-1')!.client).toBeUndefined() // 重建不 spawn（惰性）
-    expect(byVid.get('btw:line-2')).toMatchObject({ mainSid: 'main-b', cwd: PROJ_B, hidden: true })
+    expect(byId.get('line-1')!.client).toBeUndefined() // 重建不 spawn（惰性）
+    expect(byId.get('line-2')).toMatchObject({ mainSid: 'main-b', cwd: PROJ_B, surface: 'btw' })
     // sessionFilePath 指向真实文件
-    expect(byVid.get('btw:line-1')!.sessionFilePath).toContain('main-a')
+    expect(byId.get('line-1')!.sessionFilePath).toContain('main-a')
   })
 
   it('listLines(mainSid) 按归属过滤 + createdAt 升序', () => {
@@ -72,8 +72,8 @@ describe('rebuildFromDisk：启动目录扫描重建', () => {
     seedThread('main-b', 'line-9', PROJ_B)
     svc.rebuildFromDisk()
 
-    expect(svc.listLines('main-a').map(l => l.vid)).toEqual(['btw:line-1', 'btw:line-2'])
-    expect(svc.listLines('main-b').map(l => l.vid)).toEqual(['btw:line-9'])
+    expect(svc.listLines('main-a').map(l => l.piSessionId)).toEqual(['line-1', 'line-2'])
+    expect(svc.listLines('main-b').map(l => l.piSessionId)).toEqual(['line-9'])
     expect(svc.listAllLines()).toHaveLength(3)
   })
 
@@ -94,12 +94,12 @@ describe('rebuildFromDisk：启动目录扫描重建', () => {
     writeSessionFile(btwDir, 'nocwd.jsonl', { type: 'session', version: 3, id: 'line-x' }, cleanEntries())
     // 非 sid 目录名（新布局一级即 sessionId 分区；树内遍历规约：非合法形态跳过不代删）
     mkdirSync(join(root, 'not a sid!'), { recursive: true })
-    // 非法 header id（含冒号 → btwVirtualId 拒）
+    // 非法 header id（含冒号 → isPiSessionId 拒，W4a 后注册键 = header id 原样）
     writeSessionFile(btwDir, 'badid.jsonl', { type: 'session', version: 3, id: 'btw:evil', cwd: PROJ_A }, cleanEntries())
 
     const rebuilt = svc.rebuildFromDisk()
 
-    expect(rebuilt.map(r => r.vid)).toEqual(['btw:line-1'])
+    expect(rebuilt.map(r => r.piSessionId)).toEqual(['line-1'])
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('skip unparsable'))
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('without cwd'))
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('non-session dir name'))
@@ -117,17 +117,17 @@ describe('rebuildFromDisk：启动目录扫描重建', () => {
     expect(svc.rebuildFromDisk()).toEqual([])
   })
 
-  it('重建条目 reattach 轮 hidden:true 注册（hidden 复原经既有 registerSession）', async () => {
+  it('重建条目 reattach 轮 surface:btw 注册（surface 复原经既有 registerSession）', async () => {
     const file = seedThread('main-a', 'line-1', PROJ_A)
     svc.rebuildFromDisk()
     h.state = { sessionId: 'line-1', sessionFile: file }
 
-    const client = await svc.ensureProcess('btw:line-1')
+    const client = await svc.ensureProcess('line-1')
 
     expect(client).toBeDefined()
     expect(h.spawned[0].client.switchSession).toHaveBeenCalledWith(file)
-    expect(h.registered[0]).toMatchObject({ id: 'btw:line-1', hidden: true, file, cwd: PROJ_A })
+    expect(h.registered[0]).toMatchObject({ id: 'line-1', surface: 'btw', file, cwd: PROJ_A })
     expect(h.spawned[0].options.env?.PI_CODING_AGENT_SESSION_DIR).toBe(getBtwThreadDir('main-a'))
-    expect(svc.getLine('btw:line-1')!.contractRounds).toBe(1)
+    expect(svc.getLine('line-1')!.contractRounds).toBe(1)
   })
 })

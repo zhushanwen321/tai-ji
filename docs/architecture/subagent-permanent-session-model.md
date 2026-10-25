@@ -58,7 +58,7 @@
 
 ### 1.3 设计目标（从使用者体验倒推）
 
-1. **G1 万物可续聊**：对任何**非 workflow-origin** 的 subagent——无论自然完成、被取消、被关闭、宿主重启过、用的哪种引擎——用户（或主 agent）发 message 都能在**同一个 id** 上继续对话；不需要理解任何形态词汇（workflow 编排成员的立即终态化语义维持现状，见 §1.4 out-of-scope）。**准入例外第二类（one-shot 批成员）**：批量编排成员（workflow-origin record，含 `subagents` 批量 tool 的 fan-out 成员）硬拒续聊——成员是一次性 one-shot 计算单元，message 通道在 core `subagent-actions-core.ts` 的 messageHandler 处拒绝（成员工具文案同步明示 re-dispatch 指引）；恢复 = 按恢复指引只重派失败项（`subagents` tool）或 `subagent_start` tool 单发（无批参数）。
+1. **G1 万物可续聊**：对任何**非 workflow-origin** 的 subagent——无论自然完成、被取消、被关闭、宿主重启过、用的哪种引擎——用户（或主 agent）发 message 都能在**同一个 id** 上继续对话；不需要理解任何形态词汇（workflow 编排成员的立即终态化语义维持现状，见 §1.4 out-of-scope）。**准入例外第二类（one-shot 批成员）**：批量编排成员（workflow-origin record，含 `subagent_batch` 批量 tool 的 fan-out 成员）硬拒续聊——成员是一次性 one-shot 计算单元，message 通道在 core `subagent-actions-core.ts` 的 messageHandler 处拒绝（成员工具文案同步明示 re-dispatch 指引）；恢复 = 按恢复指引只重派失败项（`subagent_batch` tool）或 `subagent_start` tool 单发（无批参数）。
 2. **G2 状态可读**：用户在 UI 上只需要理解两个词：「正在跑」（running）和「空闲」（idle）。「为什么停」作为一句话解释展示，不参与任何资格判定。
 3. **G3 资源有序**：永久会话不等于资源永不释放——进程、worktree、transcript 文件各有明确保留期与回收通道；回收后续聊自动降级为「带历史重开」，用户无感知中断。
    **[阶段 5 验收注记，commit `8ea19681e`] 归档保留分支的资源生命周期裁决**：归档 cleanup keepBranch:true 后，`pi-sub-*` 分支作为重建依据保留（无注册表条目、无 checkout 目录、对账器不触碰），回收通道**随 record 语义存续**——寻回续聊可消费，record 被用户删除时分支留存（GC 名单不含 git 分支）。显式接受该形态（分支是轻量 ref，量级远小于 worktree 目录与 transcript 文件）；**重审条件**：主仓 `pi-sub-*` 分支数超过阈值（建议 500）或出现分支名冲突事故时，复审「transcript GC 联动回收无 checkout 分支」通道。
@@ -373,7 +373,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 
 | 派生视图形态 | 现状 | 改动 |
 |---|---|---|
-| GUI（renderer） | `SubagentStatus` 六值（shared/subagent.ts:26）+ deriveClosedDisplay 三分色 + legacy 分支 | 契约改 `running \| idle` + `stopReason?`（intent 派生视图字段已随 2026-09-16 裁决删除）；用户可见状态**两桶**：进行中 = `isRunningProjection`（running 且无 stopReason）、已结束 = 取反（含 idle 与 running+stopReason 的死亡纳管态）——「已收起」不以第三状态呈现（2026-09-16 用户裁决，原 U8b 三色/过滤器设计已废）；legacy done/failed/crashed/cancelled 状态值保留只读兼容（旧 session 显示）。**同步三处判据**（行为回归高发点，U8 逐一点名）：subagent-bucket.ts:41 反向白名单 `status !== 'running' → ended 桶`（idle 必须归「进行中类」桶）、SUBAGENT_STATUS_ALL 编译锁元组（shared/subagent.ts:44-62，扩值漏改 = tsc 红）、SubagentTab.vue:278 同判据 |
+| GUI（renderer） | `SubagentStatus` 六值（shared/subagent.ts:26）+ deriveClosedDisplay 三分色 + legacy 分支 | 契约改 `running \| idle` + `stopReason?`（intent 派生视图字段已随 2026-09-16 裁决删除）；用户可见状态**两桶**：进行中 = `isRunningProjection`（running 且无 stopReason）、已结束 = 取反（含 idle 与带停因的 running；原「死亡纳管态」措辞随 adoptEngineDeath 写点退役，登记见 record-store.ts:179）——「已收起」不以第三状态呈现（2026-09-16 用户裁决，原 U8b 三色/过滤器设计已废）；legacy done/failed/crashed/cancelled 状态值保留只读兼容（旧 session 显示）。**同步三处判据**（行为回归高发点，U8 逐一点名）：subagent-bucket.ts:41 反向白名单 `status !== 'running' → ended 桶`（idle 必须归「进行中类」桶）、SUBAGENT_STATUS_ALL 编译锁元组（shared/subagent.ts:44-62，扩值漏改 = tsc 红）、SubagentTab.vue:278 同判据 |
 | **默认列表可见性** | closed 默认隐藏（includeFinished:true 才显示）——终态化副产物 | **列表两桶：进行中 / 已结束**（判据 = `isRunningProjection` 及其取反，2026-09-16 用户裁决）。原「已收起」过滤器与默认可见性翻转设计（U8b）已随 intent 位删除退役——subagent 收起是执行层收敛而非用户状态，UI 无第三桶的必要性；close 后 record 归「已结束」桶，可续性不受影响（message 到「已结束」record 直接续聊并归「进行中」桶） |
 | runtime（session-records / subagent-extractor） | closedReason 参与 diff 基线（session-records.ts:553-569） | diff 基线改 {status, stopReason}（intent 已随 2026-09-16 裁决删除）；W18 entry_appended 失效链不变 |
 | TUI（subagent-workflow） | mapExternalState closed→ended（actions-core.ts:298-308）+ endedMessageGuard 形态文案 + bg-notify-render | mapExternalState：running→active / idle→idle；endedMessageGuard 缩为单形态（活实例占用）；bg-notify 渲染改 stopReason 派生词 |

@@ -15,6 +15,7 @@
 # 用法：node/pre-commit 直跑 `python3 .githooks/check_path_ref_drift.py`；staged 无
 # 删除/移动时零成本放行。
 
+from __future__ import annotations
 import re
 import subprocess
 import sys

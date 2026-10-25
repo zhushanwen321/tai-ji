@@ -1,21 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// 共享 mock 布景（typebox / pi-ai / exec-skills / widget + node:fs 全桩）：
+// 首行 import 保证注册先于 ../command.js 加载
+import { setFsReadFileSync } from "./test-setup-fs-mock";
+import "./test-setup-mocks";
+
 // --template 直传注入的全文 fixture（vi.hoisted：vi.mock 工厂引用需先于模块体初始化）
 const TEMPLATE_FILE_FIXTURE = vi.hoisted(() => "# retro skeleton\n\n## Implementation Steps\n- step one\n");
 
-// Mock dependencies before importing
-vi.mock("node:fs", () => ({
-  mkdirSync: vi.fn(),
-  readdirSync: vi.fn(() => []),
-  statSync: vi.fn(),
-  existsSync: vi.fn(() => false),
-  // --template 直传的全文内嵌读取（v2b：prompts 分支消费）
-  readFileSync: vi.fn(() => TEMPLATE_FILE_FIXTURE),
-}));
-
-vi.mock("../widget.js", () => ({
-  updatePlanWidget: vi.fn(),
-}));
+// --template 直传的全文内嵌读取（v2b：prompts 分支消费）——覆写共享 fs 桩的空串默认
+setFsReadFileSync(() => TEMPLATE_FILE_FIXTURE);
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -28,11 +22,16 @@ import type { PlanAbortControllers } from "../state.js";
 import { createPlanCtx, freshPendingSelect, MAX_PLAN_REQUIREMENT_LENGTH, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
-// 对齐 pi 实装档位（快照式恢复 dmg-r1-2）：plan = deferred（tool.ts 注册档位）；
+// 对齐 pi 实装注册档位：plan = direct 常驻（tool.ts 注册零 exposure 字段，pi 默认 direct，
+// pi-semantics PS-91）；
 // tool_search = model-only + defaultActive:false 注册（pi tool-search/index.js:11）——
 // model-only 档但注册不进默认激活集，恢复集点名它 = 未 opt-in 的独立 pi 常驻激活它
 const TOOL_SEARCH = "tool_search";
-/** 独立 pi 进入 plan 前的默认激活集（getActiveTools 语义）：不含 plan 与 tool_search */
+/**
+ * 独立 pi 进入 plan 前的默认激活集（getActiveTools 语义）：不含 plan 与 tool_search。
+ * plan 的排除是命令侧用例布景（激活前状态），锻炼 setActiveTools 激活路径，
+ * 与 exposure 无关——注册终态 plan = direct 常驻
+ */
 const DEFAULT_ACTIVE_TOOLS = ALL_TOOL_NAMES.filter((n) => n !== "plan");
 
 function createMocks() {
@@ -51,7 +50,8 @@ function createMocks() {
     getAllTools: vi.fn(() =>
       [...ALL_TOOL_NAMES, TOOL_SEARCH].map((n) => ({
         name: n,
-        exposure: n === "plan" ? "deferred" : n === TOOL_SEARCH ? "model-only" : "direct",
+        // plan 已转 direct 常驻（2026-10-23 裁决）；tool_search 保持 model-only 布景
+        exposure: n === TOOL_SEARCH ? "model-only" : "direct",
       })),
     ),
   } as unknown as ExtensionAPI;

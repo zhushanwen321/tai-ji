@@ -33,7 +33,7 @@
 
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { firstContentText } from "@zhushanwen/extension-protocol";
+import { resultContentText } from "@zhushanwen/extension-protocol";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { type Static, Type } from "typebox";
 
@@ -149,8 +149,21 @@ export interface GoalControlDetails {
 /** 收起态摘要中 reason 的保留长度（超长截断加省略号）。 */
 const BLOCKED_REASON_SUMMARY_CHARS = 40;
 
+/** 多行文本 → 单行摘要文本（换行与连续空白折叠为单空格；plan tool.ts 同模式）。
+ *  details.summary 单行契约见 extension-conventions.md「Tool result details.summary 约定」
+ *  （自由文本 reason 可含 \n，截断前先归一）。 */
+function toSingleLine(text: string): string {
+	return text.replace(/\s+/g, " ").trim();
+}
+
+/** 码点安全截断到上限（超长补省略号；Array.from 按码点切分，emoji 代理对不劈半）。 */
+function elide(text: string, max: number): string {
+	const chars = Array.from(text);
+	return chars.length > max ? chars.slice(0, max).join("") + "…" : text;
+}
+
 /** 收起态一行摘要：create → slug；complete → goalId（complete 的 details 无 slug）；
- *  report_blocked → reason 首段（超长加省略号）。 */
+ *  report_blocked → reason 归一单行后码点安全截断（超长加省略号）。 */
 export function buildGoalControlSummary(
 	params: GoalControlParamsT,
 	details: GoalControlDetails,
@@ -161,11 +174,9 @@ export function buildGoalControlSummary(
 		case "complete":
 			return `Goal completed: ${details.goalId}`;
 		case "report_blocked": {
-			const reason = params.reason?.trim() ?? "";
+			const reason = toSingleLine(params.reason ?? "");
 			if (reason === "") return "Blocked";
-			return reason.length > BLOCKED_REASON_SUMMARY_CHARS
-				? `Blocked: ${reason.slice(0, BLOCKED_REASON_SUMMARY_CHARS)}…`
-				: `Blocked: ${reason}`;
+			return `Blocked: ${elide(reason, BLOCKED_REASON_SUMMARY_CHARS)}`;
 		}
 		default:
 			return "Done";
@@ -367,9 +378,6 @@ export function registerGoalControlTool(pi: ExtensionAPI, session: GoalSession):
 	pi.registerTool({
 		name: "goal_control",
 		label: "Goal Control",
-		// deferred（tool-declaration-slimming D4）：不常驻声明，tool_search 命中即激活；
-		// 迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
-		exposure: "deferred",
 		description: `管理当前会话的目标（goal）。目标用于追踪需要完成验证的复杂工作。动作：create（创建）| complete（完成）| report_blocked（阻塞报告）——各参数必填性与用法见 schema 字段说明，触发纪律见 guidelines。
 
 控制权归属：pause/resume 和 budget 变更由用户经 /goal 命令控制，你不能修改。`,
@@ -459,7 +467,7 @@ export function registerGoalControlTool(pi: ExtensionAPI, session: GoalSession):
 			const d = hasGoalDetails(result) ? result.details : undefined;
 			// 展开态 = content 纯文本（多行详情）；content 缺失时回退折叠形态
 			if (options.expanded) {
-				const content = getContentText(result);
+				const content = resultContentText(result);
 				if (content !== "") return new Text(content, 0, 0);
 			}
 			// 折叠态 = details.summary 一行（dim）；旧 entry 无 summary 时保留原 ◆ 状态行
@@ -469,19 +477,6 @@ export function registerGoalControlTool(pi: ExtensionAPI, session: GoalSession):
 			return renderLegacyGoalResult(d, theme);
 		},
 	});
-}
-
-/** unknown 值按字段名安全取值（index-signature 收窄，替代全可选结构断言）。 */
-function fieldValue(v: unknown, key: string): unknown {
-	if (typeof v !== "object" || v === null) return undefined;
-	return (v as Record<string, unknown>)[key];
-}
-
-/** content[0] 的 text 纯文本（content 缺失或非 text 类型时兜底空串）。 */
-function getContentText(result: unknown): string {
-	const content = fieldValue(result, "content");
-	if (!Array.isArray(content)) return "";
-	return firstContentText({ content });
 }
 
 /** 旧形态回退（details 无 summary 的历史 entry）：原 ◆ 状态行，视觉零变化。 */

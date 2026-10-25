@@ -1,6 +1,6 @@
 /**
- * 磁盘 outbox 崩溃恢复全链单测（统一投递波 4，设计 §3.8 文本行 / impl-plan A9；mock 轨，
- * 零 pi 进程零 token——真进程轨归 e2e-map E2E-DELIVERY-02）。
+ * 磁盘 outbox 崩溃恢复全链单测（统一投递波 4，设计 §3.8 文本行 / impl-plan A9；mock 层，
+ * 零 pi 进程零 token——真实进程层归 e2e-map E2E-DELIVERY-02）。
  *
  * 场景矩阵（任务书验收四项）：
  * 1. 崩溃恢复：受理落盘 → 进程「重启」（新 registry + 新 pi client 实例）→ reattach 对账
@@ -106,9 +106,6 @@ function makeView(id: string): IManagedSessionView {
     lastActiveAt: Date.now(),
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
     bashRunToken: undefined,
   }
 }

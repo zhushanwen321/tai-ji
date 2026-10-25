@@ -94,7 +94,7 @@ pnpm version "$BETA_VERSION" --no-git-tag-version 1>/dev/null
 cd "$WS_ROOT"
 
 git add package.json apps/electron/package.json
-git commit -m "chore: prerelease ${BETA_TAG}"
+TAIJI_ALLOW_MAIN_COMMIT=1 git commit -m "chore: prerelease ${BETA_TAG}"
 git tag "$BETA_TAG"
 git push "$GITHUB_REMOTE" HEAD
 git push "$GITHUB_REMOTE" "$BETA_TAG"

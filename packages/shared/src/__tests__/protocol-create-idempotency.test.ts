@@ -28,7 +28,6 @@ describe('session.create clientUuid payload 契约（发现 B）', () => {
     const full: SessionCreatePayload = {
       cwd: '/w',
       label: 'L',
-      hidden: false,
       presetId: 'preset-1',
       projectId: 'proj-1',
       modelOverride: 'prov/model',

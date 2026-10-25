@@ -20,7 +20,7 @@
 
 ## 快速开始
 
-当前最新版本：**v0.11.13**（[查看全部版本](https://github.com/zhushanwen321/tai-ji/releases)）。安装后 app 内会自动检测新版本，提示一键升级。
+当前最新版本：**v0.11.15**（[查看全部版本](https://github.com/zhushanwen321/tai-ji/releases)）。安装后 app 内会自动检测新版本，提示一键升级。
 
 <!-- INSTALL:BEGIN -->
 <!-- 本区块内的版本号由 .agents/skills/merge/scripts/update-readme-install.mjs 在每次正式发布后自动替换；区块外仅上方「当前最新版本」行会同步更新，其余内容不会被打扰。 -->
@@ -32,17 +32,17 @@
 
 **macOS（Apple Silicon）**
 ```bash
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.11.13/TaiJi-0.11.13-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.11.15/TaiJi-0.11.15-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
 ```
 
 **Linux**
 ```bash
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.11.13/TaiJi-0.11.13-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.11.15/TaiJi-0.11.15-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
 ```
 
 **Windows（PowerShell）**
 ```powershell
-Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.11.13/TaiJi-0.11.13-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.11.15/TaiJi-0.11.15-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
 </details>
@@ -54,17 +54,17 @@ Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download
 
 **macOS（Apple Silicon）**
 ```bash
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.11.13/TaiJi-0.11.13-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.11.15/TaiJi-0.11.15-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
 ```
 
 **Linux**
 ```bash
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.11.13/TaiJi-0.11.13-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.11.15/TaiJi-0.11.15-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
 ```
 
 **Windows（PowerShell）**
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.11.13/TaiJi-0.11.13-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.11.15/TaiJi-0.11.15-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
 </details>
@@ -142,7 +142,7 @@ Agent 能力通过 pi 扩展机制实现，涵盖权限控制、定时任务、�
 
 taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](extensions/)（20 个 `@zhushanwen/pi-*` 包 + `shared/` 共享库），其中 19 个随应用打包（15 个通用扩展 + 4 个 TaiJi 集成专用）。
 
-以下 16 个扩展可脱离 taiji 独立使用（全部经 npm 发布，也可 `--extension` 直接加载）。注意：9 个包的低频工具标记 `exposure: "deferred"`，需 pi 内置 `tool_search` 按需激活——独立 pi 使用在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）加 `"defaultTools": ["+tool_search"]`（`+` 前缀保留默认工具集），否则这些工具对模型不可见，激活说明见各包 README 的「工具激活（deferred）」节：
+以下 16 个扩展可脱离 taiji 独立使用（全部经 npm 发布，也可 `--extension` 直接加载）。注意：5 个包的低频工具标记 `exposure: "deferred"`（subagent-workflow / session-manager 除 create_managed_session 外的七件 / session-reader / rename-session / base-tool-enhance），需 pi 内置 `tool_search` 按需激活——独立 pi 使用在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）加 `"defaultTools": ["+tool_search"]`（`+` 前缀保留默认工具集），否则这些工具对模型不可见，激活说明见各包 README 的「工具激活」节：
 
 | 扩展 | 用途 |
 |------|------|

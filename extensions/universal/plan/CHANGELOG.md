@@ -1,5 +1,11 @@
 # @zhushanwen/pi-plan
 
+## 1.2.2
+
+### Patch Changes
+
+- 318994f4a: The `plan` tool is now always declared to the model (resident) instead of being activated only through tool_search.
+
 ## 1.2.1
 
 ### Patch Changes

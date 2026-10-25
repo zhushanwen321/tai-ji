@@ -25,6 +25,7 @@ import {
 } from '../session-delivery-registry.js'
 import { applySessionOccupancyTransition } from '../event-interpreter.js'
 import type { IDispatcherSessionOps } from '../session-internal.js'
+import { isGeneratingTurn } from '../types.js'
 import type { IManagedSessionView } from '../types.js'
 import type { IPiEngine, IProcessManager } from '../../ports/pi-engine.js'
 import type { IMessageBus } from '../../message-bus/message-bus.js'
@@ -44,11 +45,8 @@ function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManaged
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
     bashRunToken: undefined,
-    occupancy: { turn: 'idle', compacting: false, bash: false },
+    occupancy: { turn: 'idle', compacting: false, bash: false, handingOff: false },
     ...overrides,
   }
 }
@@ -78,6 +76,7 @@ function makeHarness(opts: HarnessOptions = {}) {
     }),
     // 入口同步 touch（idle-pi-reclamation D6-1）经 pm.getClient 到达本 fake
     touchActivity: vi.fn(),
+    abort: vi.fn(async () => {}),
     getEntries: vi.fn(async () => ({ data: { entries: [] } })),
     clearQueue: vi.fn(async () => ({ steering: [], followUp: [] })),
     getCommands: vi.fn(async () => opts.commands ?? []),
@@ -91,6 +90,7 @@ function makeHarness(opts: HarnessOptions = {}) {
     }),
     getSessionByClient: vi.fn(() => session),
     persistSessionOutcome: vi.fn(),
+    clearSessionOutcome: vi.fn(),
     getSession: vi.fn(() => session),
     removeSessionEntry: vi.fn(),
     detachSession: vi.fn(),
@@ -137,7 +137,7 @@ function makeHarness(opts: HarnessOptions = {}) {
   }
   const promptArgs = (): unknown[] => (client.prompt.mock.calls[0] ?? []) as unknown[]
   return {
-    dispatcher, registry, session, client, published, calls, injectMock, hookMock, injectState, flush, promptArgs,
+    dispatcher, registry, session, client, published, calls, injectMock, hookMock, injectState, flush, promptArgs, svc,
     /** [CP6 移植] 模拟回收/重建竞态：fire 时重查 getSession 已查不到该 session。 */
     setGetSessionResult: (v: unknown): void => { sessionForGet = v },
   }
@@ -282,8 +282,8 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
     await h.flush()
     expect(h.published.filter((m) => m.type === 'session.skillNotice')).toHaveLength(0)
     expect(h.published.some((m) => m.type === 'message.error')).toBe(true)
-    // busy 态复位（原 precheck 用例收编）：turn 没跑起来，不得滞留 dispatching/isGenerating
-    expect(h.session.isGenerating).toBe(false)
+    // busy 态复位（原 precheck 用例收编）：turn 没跑起来，不得滞留 dispatching（[D1] 读口迁移：isGenerating ≡ isGeneratingTurn(turn)）
+    expect(isGeneratingTurn(h.session.occupancy?.turn)).toBe(false)
     expect(h.session.occupancy?.turn).toBe('idle')
   })
 
@@ -297,7 +297,7 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
       expect(result.blocked).toBe(false)
       expect(h.client.prompt).toHaveBeenCalledTimes(1)
       // prompt 成功置位不回退（record 副作用失败不影响状态机）
-      expect(h.session.isGenerating).toBe(true)
+      expect(isGeneratingTurn(h.session.occupancy?.turn)).toBe(true)
       // 有诊断信号（非 fail-silent）
       expect(warnSpy).toHaveBeenCalled()
     } finally {
@@ -324,12 +324,11 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
  * 的断言强度平移到「排队承接」面（消息不丢 = 内核条目在册）。
  */
 describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () => {
-  it('turn=generating：零 send.rejected + 内核按 steer 车道即时投递（turn 边界注入，不等拒绝）', async () => {
+  it('turn=generating：零 send.rejected + 内核按 steer 投递路径即时投递（turn 边界注入，不等拒绝）', async () => {
 
     const h = makeHarness({
       sessionByClient: {
-        occupancy: { turn: 'generating', compacting: false, bash: false },
-        isGenerating: true,
+        occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false },
       },
     })
     const result = await h.dispatcher.sendMessage('s1', '活跃 run 期消息')
@@ -345,7 +344,7 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
 
   it('turn=settling（pi post-run 窗口）：零 send.rejected + 受理即出站（v3 settling 持有退役）', async () => {
     const h = makeHarness({
-      sessionByClient: { occupancy: { turn: 'settling', compacting: false, bash: false } },
+      sessionByClient: { occupancy: { turn: 'settling', compacting: false, bash: false, handingOff: false } },
     })
     const result = await h.dispatcher.sendMessage('s1', 'settling 窗口消息')
     await h.flush()
@@ -360,7 +359,7 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
 
   it('compacting 命中：零拒绝广播 + 持有；compaction 结束后自动投递', async () => {
     const h = makeHarness({
-      sessionByClient: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } },
+      sessionByClient: { occupancy: { turn: 'idle', compacting: true, bash: false, handingOff: false } },
 
     })
     const result = await h.dispatcher.sendMessage('s1', '压缩中消息')
@@ -381,7 +380,7 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
   it('bash 命中：零拒绝广播 + 受理即出站（v3 bash 持有退役——pi 队列忙时入队不拒）', async () => {
 
     const h = makeHarness({
-      sessionByClient: { isBashRunning: true, occupancy: { turn: 'idle', compacting: false, bash: true } },
+      sessionByClient: { occupancy: { turn: 'idle', compacting: false, bash: true, handingOff: false } },
     })
     const result = await h.dispatcher.sendMessage('s1', 'bash 期间消息')
     await h.flush()
@@ -472,5 +471,60 @@ describe('handled 终局与 occupancy 事实驱动（D1/D3，CP6 退役后）', 
     await h.flush()
     expect(view.occupancy.turn).toBe('dispatching')
     expect(h.published.filter((m) => m.type === 'session.deliveryHandled').length).toBe(0)
+  })
+})
+
+/**
+ * abort 入口三分型（chat-flow-consistency design-turn-statemachine 缺陷 2 + 缺陷 10 同批）。
+ * 入口快照 turnAtEntry 分型：型 1（dispatching/generating，有回合可中止）= 现状路径
+ * （idle 转移 + stopped 终态 + complete{aborted} 广播）；型 2（压缩取消）与型 3（settling/
+ * 已空闲，无回合可中止）= 不写终态、不广播、不动 turn（'idle' 调用只允许出现在型 1 内——
+ * 缺陷 10：原实现在判型前无条件复位 turn，settling+compacting 时把 settling 提前旁路）。
+ */
+describe('abort 入口三分型（chat-flow-consistency 缺陷 2/10）', () => {
+  it('型 1（turn=generating）：idle 转移 + stopped 终态 + complete{aborted} 广播', async () => {
+    const h = makeHarness({
+      sessionByClient: { occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } },
+    })
+    await h.dispatcher.abort('s1')
+    await h.flush()
+    expect(h.session.occupancy?.turn).toBe('idle')
+    expect(h.svc.persistSessionOutcome).toHaveBeenCalledWith('s1', 'stopped', 'User aborted')
+    expect(h.published.some((m) => m.type === 'message.complete')).toBe(true)
+  })
+
+  it('型 3（turn=settling 收尾窗口）：不写终态、不广播 complete、occupancy 不动（settling 留给 agent_settled 收口）', async () => {
+    const h = makeHarness({
+      sessionByClient: { occupancy: { turn: 'settling', compacting: false, bash: false, handingOff: false } },
+    })
+    await h.dispatcher.abort('s1')
+    await h.flush()
+    // done 已写（agent_end 副作用），abort 覆盖即谎报「回合被中止」——不写终态
+    expect(h.svc.persistSessionOutcome).not.toHaveBeenCalled()
+    expect(h.published.some((m) => m.type === 'message.complete')).toBe(false)
+    // occupancy 不动：settling 留给 agent_settled 的 idle 转移正常收口
+    expect(h.session.occupancy?.turn).toBe('settling')
+  })
+
+  it('型 2（压缩取消：compacting 且无回合）：不写终态、不广播、turn 不复位（缺陷 10：idle 移入型 1）', async () => {
+    const h = makeHarness({
+      sessionByClient: { occupancy: { turn: 'settling', compacting: true, bash: false, handingOff: false } },
+    })
+    await h.dispatcher.abort('s1')
+    await h.flush()
+    expect(h.svc.persistSessionOutcome).not.toHaveBeenCalled()
+    expect(h.published.some((m) => m.type === 'message.complete')).toBe(false)
+    // turn 仍是 settling（压缩取消不旁路 turn 维；compacting 由 pi compaction_end{aborted} 复位）
+    expect(h.session.occupancy?.turn).toBe('settling')
+    expect(h.session.occupancy?.compacting).toBe(true)
+  })
+
+  it('型 3（已空闲）：第二次 abort 无多余 complete 广播（缺陷 5 边界 5b 口径）', async () => {
+    const h = makeHarness()
+    await h.dispatcher.abort('s1')
+    await h.dispatcher.abort('s1')
+    await h.flush()
+    expect(h.published.filter((m) => m.type === 'message.complete')).toHaveLength(0)
+    expect(h.svc.persistSessionOutcome).not.toHaveBeenCalled()
   })
 })

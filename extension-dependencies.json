@@ -218,6 +218,11 @@
       "directory": "extensions/universal/permission",
       "dependsOn": [
         {
+          "package": "@zhushanwen/extension-protocol",
+          "type": "package",
+          "reason": "代码层静态 import PERMISSION_APPROVAL_TITLE（src/approval.ts top-level import，审批 select title 首行判定键单源——runtime event-adapter 同符号判定），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
           "package": "@zhushanwen/pi-llm-shared",
           "type": "package",
           "reason": "top-level 静态 import callLLM/resolveModel/loadConfig/saveConfig/migrateLegacyConfig（src/config.ts、src/production.ts、src/classifier/classifier.ts、src/index.ts），缺失即模块加载抛 Cannot find module"
@@ -613,6 +618,22 @@
           "package": "@zhushanwen/pi-file-lock",
           "type": "package",
           "reason": "代码层静态 import withFileLockSync（src/stats.ts flushStats 与 runtime 截断/重置同一把跨进程锁，top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        }
+      ]
+    },
+    {
+      "name": "@zhushanwen/pi-retry-rules",
+      "directory": "extensions/universal/retry-rules",
+      "dependsOn": [
+        {
+          "package": "@zhushanwen/pi-llm-shared",
+          "type": "package",
+          "reason": "代码层静态 import loadConfig（src/config.ts:24 读 retry-rules-ext-config.json，llm-shared getConfigPath 推导 + mtime 热重载契约）"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger/setPiHandle（src/index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     }

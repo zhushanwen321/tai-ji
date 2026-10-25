@@ -20,7 +20,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildRecord,
   collectV2EntryPairs,
+  lastRoundFromFold,
   v2PairToRecord,
 } from "../persistence/record-store-rebuild.ts";
 import type {
@@ -29,7 +31,9 @@ import type {
 } from "../persistence/record-entry.ts";
 import {
   type RecordBoundEvent,
+  foldRecordEvents,
 } from "../persistence/record-events.ts";
+import type { IdentityHeaderRecon, ReconstructedRecord } from "../persistence/session-reconstructor.ts";
 
 // ── fixture ───────────────────────────────────────────────────
 
@@ -274,3 +278,86 @@ describe("v2PairToRecord：v2 条目对 → record 派生视图", () => {
 
 // ── [身份换源第二步] 原第三面（resolveRecordIdentity 三级优先级）已随 binding
 // 兜底路径退场删除——fold 身份路径检查锚定在 record-identity-fold.test.ts。
+
+// ── 3. buildRecord：重建单规则的 lastError 透传（subagent-observability §3.3.5）──
+//
+// 全量重建分支（ReconstructedRecord）携带 session jsonl 扫描的错误事实
+// lastError——透传缺位则 list 条目（r.lastError）在全量重建读侧恒缺席；light
+// 分支详情字段缺省口径不变。
+
+describe("buildRecord：lastError 透传（subagent-observability §3.3.5）", () => {
+  const identityFields = {
+    id: "sa-recon",
+    agent: "worker",
+    mode: "background" as const,
+    task: "t",
+    slug: "s",
+    startedAt: 1000,
+    rootSessionId: "root-A",
+    parentRecordId: undefined,
+    depth: 0,
+    forkDepth: undefined,
+    origin: undefined,
+    parentRunId: undefined,
+    stepIndex: undefined,
+  };
+
+  it("全量重建分支透传 base.lastError", () => {
+    const base: ReconstructedRecord = {
+      ...identityFields,
+      sessionFile: "/tmp/sessions/sa-recon.jsonl",
+      status: "idle",
+      turns: [],
+      turnCount: 2,
+      totalTokens: 30,
+      lastError: "boom: engine died",
+      model: undefined,
+      thinkingLevel: undefined,
+      endedAt: 2000,
+      result: "partial output",
+      error: "boom: engine died",
+      eventLog: [],
+    };
+    const rec = buildRecord(base, { state: undefined, jsonlMtimeMs: 1 });
+    expect(rec.lastError).toBe("boom: engine died");
+  });
+
+  it("light 分支 lastError 缺省（详情字段懒补口径不变）", () => {
+    const base: IdentityHeaderRecon = {
+      ...identityFields,
+      model: undefined,
+      thinkingLevel: undefined,
+      sessionFile: "/tmp/sessions/sa-recon.jsonl",
+    };
+    const rec = buildRecord(base, { state: undefined, jsonlMtimeMs: 1 });
+    expect(rec.lastError).toBeUndefined();
+  });
+});
+
+// ── 4. lastRoundFromFold：result 摘要锚的空串保真（subagent-observability
+//    §3.3.3 空正文语义）——读侧可区分「空串 = 无文本输出」与「缺席 = 未记录」；
+//    旧帧（无 resultSummary 键）行为不变（存量零迁移锁定）。
+
+describe("lastRoundFromFold：resultSummary 空串保真与旧帧缺席", () => {
+  const idleBase = {
+    type: "record-round-idle",
+    ts: 900,
+    round: 1,
+    turns: 1,
+    totalTokens: 10,
+  } as const;
+
+  it("收条帧 resultSummary 空串 → lastRound.result 空串（键在场，非异常不告警语义）", () => {
+    const fold = foldRecordEvents([{ ...idleBase, seq: 1, resultSummary: "" }]);
+    const lastRound = lastRoundFromFold(fold);
+    expect(lastRound).toBeDefined();
+    expect(lastRound).toHaveProperty("result", "");
+  });
+
+  it("收条帧无 resultSummary（旧帧形态）→ lastRound 无 result 键（缺席 = 未记录，不伪造空串）", () => {
+    const fold = foldRecordEvents([{ ...idleBase, seq: 1 }]);
+    const lastRound = lastRoundFromFold(fold);
+    expect(lastRound).toBeDefined();
+    expect(lastRound).not.toHaveProperty("result");
+  });
+});

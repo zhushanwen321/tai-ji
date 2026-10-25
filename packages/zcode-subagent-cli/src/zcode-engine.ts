@@ -654,7 +654,7 @@ export class ZcodeEngine implements EnginePort {
     const env = buildAppServerEnv(this.deps.processEnv ?? process.env);
     env.ZCODE_ENG_CLI_PATH = cliPath;
     env.ZCODE_ENG_V2_CONFIG = this.deps.sources?.v2ConfigPath ?? defaultV2ConfigPath();
-    // [D3 顺带发现 6 / engine-provider-unification D3 换轨] wrapper 装载通道与引擎侧
+    // [D3 顺带发现 6 / engine-provider-unification D3 切换] wrapper 装载通道与引擎侧
     // 模型校验源同锚——两消费方走 preparer 同一解析函数（显式 sources > taiji 同步
     // 副本存在 > 真实 provider_config.json；生产 deps.sources 恒 undefined 走 default
     // 链，回落判定点在该函数内单点收敛），env 值 = 同步副本路径：校验链读

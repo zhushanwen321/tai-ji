@@ -20,6 +20,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { MessageDispatcher } from '../services/session/message-dispatcher.js'
+import { isGeneratingTurn } from '../services/session/types.js'
 import { SessionMessageHandler } from '../transport/session-message-handler.js'
 import {
   createSessionDeliveryRegistry,
@@ -49,11 +50,8 @@ function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManaged
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
-    occupancy: { turn: 'idle', compacting: false, bash: false },
+        bashRunToken: undefined,
+    occupancy: { turn: 'idle', compacting: false, bash: false, handingOff: false },
     ...overrides,
   }
 }
@@ -67,13 +65,11 @@ interface MockOpts {
 
 function makeMocks(opts: MockOpts = {}) {
   const session = makeMockSession({
-    isBashRunning: opts.isBashRunning ?? false,
-    isGenerating: opts.isGenerating ?? false,
-    isCompacting: opts.isCompacting ?? false,
     occupancy: {
       turn: opts.isGenerating ? 'generating' : 'idle',
       compacting: opts.isCompacting ?? false,
       bash: opts.isBashRunning ?? false,
+      handingOff: false,
     },
   })
   const promptCalls: unknown[][] = []
@@ -96,6 +92,7 @@ function makeMocks(opts: MockOpts = {}) {
     getSessionByClient: vi.fn(() => session),
     getSession: vi.fn(() => session),
     persistSessionOutcome: vi.fn(),
+    clearSessionOutcome: vi.fn(),
     removeSessionEntry: vi.fn(),
     detachSession: vi.fn(),
   }
@@ -189,7 +186,7 @@ describe('pi busy 类拒绝的处置迁移（D6：适配器 catch 面）', () =>
     // v3：受理即出站下全部投递恒带 streamingBehavior，pi 忙时入队不拒——processing 拒绝
     // 按真失败首败即停：occupancy 不伪造 busy（turn 收敛回 idle），错误进 message.error
     // 广播链路（错因可见，用户裁决重发）
-    expect(h.session.isGenerating).toBe(false)
+    expect(isGeneratingTurn(h.session.occupancy?.turn)).toBe(false)
     expect(h.session.occupancy?.turn).toBe('idle')
     const err = findError(h.broadcasts)
     expect(err).toBeDefined()

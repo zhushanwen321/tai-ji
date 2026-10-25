@@ -52,8 +52,6 @@ function makeSummary(id: string, projectId?: string): SessionSummary {
     cwd: '/proj',
     status: 'idle',
     lastActiveAt: 1,
-    modelId: 'm1',
-    tokenCount: 0,
     ...(projectId !== undefined ? { projectId } : {}),
   }
 }

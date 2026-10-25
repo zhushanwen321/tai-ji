@@ -9,9 +9,10 @@
  * 额外持有 adapter 等运行时句柄)。
  * 子模块经内部协议窄接口(ILifecycleSessionOps 等,见 session-internal.ts)
  * 只看到 IManagedSessionView,
- * 但拿到的是 ManagedSession 实例,可读写字段(lastActiveAt / isGenerating)。
+ * 但拿到的是 ManagedSession 实例,可读写字段(lastActiveAt);忙闲判定读 occupancy 派生
+ * (isGeneratingTurn / occupancy.compacting,见 IManagedSessionView 注)。
  */
-import type { ServerMessage, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
+import type { ServerMessage, PiMessageEntry, PiToolCallEntryForm, SessionSurface } from '@taiji/shared'
 import type { SessionManagerAction, CanvasMarkerAction } from '@zhushanwen/extension-protocol'
 import type { ScannedSessionMeta } from '../ports/session.js'
 
@@ -31,11 +32,18 @@ export type SendMessageHook = (
 export type ScannedSession = ScannedSessionMeta
 
 /**
- * 会话占用状态（session-occupancy-send-closure D3/P3）——三维结构而非单枚举：
+ * 会话占用状态（session-occupancy-send-closure D3/P3；chat-flow-consistency D1 迁移后
+ * 四维结构）：turn 维由声明式状态机（SESSION_TURN_MACHINE，event-interpreter.ts）唯一裁决，
+ * 其余三维是与 turn 正交的两态布尔维（ADR-0080 先例：两态域布尔判定比表级 fail-fast 更早
+ * 更严，不建机器）：
  * - turn 三阶段：dispatching（prompt 已发、message_start 未到）→ generating（turn-start..turn-end）
  *   → settling（turn-end..agent-settled，pi post-run 收尾期）；idle 为空档。
  * - compacting / bash 独立布尔（与 turn 各阶段可并存：settling+compacting 是 overflow 收尾常态，
  *   threshold 模式 turn 内自动压缩则 generating+compacting）。
+ * - handingOff（chat-flow-consistency §6「交接在途状态归属」裁决，R1 采纳）：handoff（会话交接）
+ *   编排在途两态布尔，与 compacting/bash 同型正交——handingOff 与 turn=generating 可并存
+ *   （交接 turn 在跑，turn 维表达「pi 占用」、handingOff 维表达「占用者是谁的编排」，互不替代）。
+ *   置位/复位挂点 = handoff-service（编排开始置位 / cleanupInflight 统一复位）。
  *
  * wire 形状见 shared protocol.ts 的 'session.occupancy' payload（本形状是其 runtime 侧镜像，
  * 广播帧由 updateSessionOccupancy 按字段展开构造，两处字段名/值域必须保持一致）。
@@ -46,14 +54,28 @@ export interface SessionOccupancy {
   turn: SessionTurnPhase
   compacting: boolean
   bash: boolean
+  handingOff: boolean
+}
+
+/**
+ * 「生成中」派生判定（chat-flow-consistency D1 采用 2 单点定义）：isGenerating ≡
+ * turn ∈ {dispatching, generating}——原 IManagedSessionView.isGenerating 派生布尔的
+ * 唯一语义读口（平行存储已删）。不含 settling（settling 是「回合进行中」ACTIVE_TURN_PHASES
+ * 的成员，但生成已结束、收尾中——活动条/侧栏摘要/toSummary 的 active 判定沿用本口径）。
+ */
+export function isGeneratingTurn(turn: SessionTurnPhase | undefined): boolean {
+  return turn === 'dispatching' || turn === 'generating'
 }
 
 /**
  * ManagedSession 的子模块可见视图(不含运行时句柄)。
- * 子模块经此引用更新 lastActiveAt 等可变字段；isGenerating/isCompacting/isBashRunning
- * 三个忙闲布尔为只读派生存储（session-dead-structural-fixes D2 防回潮，u3c readonly 收紧）——
- * 唯一写点 = applySessionOccupancyTransition 原语（经 SessionOccupancyStateStore 写视图），
- * 类型层 readonly 使绕开原语的直写在编译期红（约束 C-data-19）。
+ * 子模块经此引用更新 lastActiveAt 等可变字段。
+ *
+ * [chat-flow-consistency D1 采用 2] 原 isGenerating/isCompacting/isBashRunning 三个
+ * 「同点双写」派生布尔已删除（与 occupancy 的 turn/compacting/bash 维平行存了一份语义，
+ * 同一事实两处记录）——消费方改读 occupancy 派生：isGenerating ≡ isGeneratingTurn(turn)
+ * （本文件单点定义）、isCompacting ≡ occupancy?.compacting === true、isBashRunning ≡
+ * occupancy?.bash === true。occupancy 是会话占用四维的唯一存储与广播源。
  */
 export interface IManagedSessionView {
   id: string
@@ -65,31 +87,6 @@ export interface IManagedSessionView {
   tokenCount: number
   /** 最近一次 agent_end / context.update 的 inputTokens 缓存，供 switchModel 重算用量 */
   inputTokens: number
-  /**
-   * 生成中派生标志（只读派生存储，D2/u3c readonly）。覆盖 dispatching+generating 两段，
-   * 唯一写点 = applySessionOccupancyTransition 的 'dispatching'/'generating'/'settling'/'idle'/
-   * 'reject-*'/'full-reset' 等行派生——绕开原语直写编译期红（C-data-19）。
-   */
-  readonly isGenerating: boolean
-  /**
-   * compact 进行中标记（W3, U6；只读派生存储，唯一写点 = 原语 'compacting-start'/'compacting-end'
-   * /'full-reset' 行派生）。
-   *
-   * compact 期间 pi 正在做上下文压缩（不开 isGenerating），sendPrompt 的 busy 预检
-   * 只看 isGenerating 会让 compact 中途的消息进入 pi.prompt 触发竞态/卡死。
-   * 故 compact 用 try/finally 置此标记，sendPrompt 预检同时拒 isGenerating/isCompacting。
-   * 与 isGenerating 对称：不进 toSummary（前端状态摘要只看 isGenerating 推 active/idle）。
-   */
-  readonly isCompacting: boolean
-  /**
-   * bash 执行进行中标记（composer-bash-execute W1；只读派生存储，唯一写点 = 原语
-   * 'bash-start'/'bash-end'/'full-reset' 行派生）。
-   *
-   * composer 直接执行 bash（pi bash RPC，不经 LLM turn）期间置 true，与 isGenerating/isCompacting
-   * 三者互斥（任一为 true 时 sendPrompt/sendBash 都拒）。用 try/finally 置位，finally 复位。
-   * 不进 toSummary（前端状态摘要只看 isGenerating 推 active/idle，bash 执行不改变 active/idle 态）。
-   */
-  readonly isBashRunning: boolean
   /**
    * bash 执行的「代次令牌」（composer-bash-execute W1 竞态检查，纯运行时态不进 toSummary）。
    *
@@ -114,11 +111,11 @@ export interface IManagedSessionView {
    */
   pendingBashResults?: PendingBashResultData[]
   /**
-   * 会话占用状态派生视图（session-occupancy-send-closure D3/P3）——turn 三阶段 + compacting/bash
-   * 三维的权威聚合，唯一写方 = updateSessionOccupancy（幂等写 + 变化才广播 session.occupancy
-   * state 帧）。与上方 isGenerating/isCompacting/isBashRunning 同源同点写入（11 挂点见设计
-   * D3 转移表），但维度划分不同：isGenerating 覆盖 dispatching+generating 两段，turn 把
-   * settling（turn-end..agent-settled 的 pi post-run 窗口）从「空闲」中显式分离。
+   * 会话占用状态派生视图（session-occupancy-send-closure D3/P3；chat-flow-consistency D1
+   * 迁移后四维权威聚合，唯一写方 = applySessionOccupancyTransition（turn 维经
+   * SESSION_TURN_MACHINE 全组合合法表裁决）——幂等写 + 变化才广播 session.occupancy
+   * state 帧。原同点双写的派生三布尔已删，消费方一律从本字段派生（isGeneratingTurn /
+   * compacting / bash / handingOff）。
    *
    * 可选（undefined = idle）：registerSession 显式初始化为 idle；测试 mock 与历史构造点
    * 缺省时由 updateSessionOccupancy 按 idle 兜底合并，不强制所有构造点同步改。
@@ -128,10 +125,15 @@ export interface IManagedSessionView {
   thinkingLevel?: string
   sessionFilePath?: string
   /**
-   * 隐藏 session（公共 session）：不进 sidebar 列表（scanner listAll 过滤），
-   * 仅供内部使用（如 landing 态命令源）。toSummary 透传到 SessionSummary.hidden。
+   * 展示归属（surface，会话架构四层分离 presentation 维）：'sidebar' = 进左侧边栏
+   * （缺省，registerSession 不传即此值）；'btw' = 进右侧抽屉的旁路提问线。
+   * 存储位置的函数、终身不可变，注册表单一持有；toSummary 透传到
+   * SessionSummary.surface。宿主是 View（IManagedSessionRecord 经 extends 继承）。
+   *
+   * 读取点仅限 docs/constraints.json C-data-28 登记清单（用途① 导航过滤与工作区
+   * 历史判据 + 用途② 抑制类判别），其余一律禁止。
    */
-  hidden?: boolean
+  surface?: SessionSurface
   /**
    * 父 session 血缘键（FR-2 active 路径回传血缘）。fork 出的 session 在 initializeManagedSession
    * 时写入，toSummary 透传到 SessionSummary.parentSession。源 session 未落盘时用源 sessionId 作
@@ -216,23 +218,25 @@ export interface UserStoppedMarkStore {
 }
 
 /**
- * session 忙闲状态的封闭转移枚举（session-dead-structural-fixes D2 转移表，转移表即文档）。
- *
- * 每行的 occupancy 三维 patch 与三布尔派生语义登记在 event-interpreter.ts 的
- * SESSION_OCCUPANCY_TRANSITIONS 表——新增转移必须先在此扩枚举再在表内登记派生，
- * 绕开原语直写三布尔/occupancy 的路径由 u3c readonly 收紧在编译期拦截。
+ * session 忙闲状态的封闭转移枚举（session-dead-structural-fixes D2 转移表原语入参；
+ * chat-flow-consistency D1 迁移后 = turn 机器事件 ∪ 正交布尔维事件的并集，唯一入口 =
+ * applySessionOccupancyTransition，内部编排为「turn 机器 transition + 布尔维 patch」，
+ * 绕开原语直写 occupancy 的路径在编译期拦截（C-data-19）。
  *
  * 行分组：
- * - turn 四相：dispatching / generating / settling / idle（#1/#2/#3/#4 挂点语义）；
- * - compacting± / bash±：与 turn 正交维度的置位/复位（#5/#6/#7/#11 挂点）；
- * - full-reset：三维全复位（#10 forceQuit/进程退出失败路径）；
- * - reject-processing / reject-other：A1 止血的转正（prompt 失败按 pi 拒绝分型收尾，
- *   processing → isGenerating=true+generating 以 pi 拒绝为权威信号；其余 → 复位 idle）；
- * - announce-idle：registerSession 宣告帧收编行——强制广播当前派生视图，跳过全等去重
- *   （Gate B V6b④；内部合并/派生均为 no-op，走 state-topic 通路双路径）；
- * - abort-stall-converged / abort-stall-force-kill：为 fix-subagent-no-notification 分支
- *   abort 三级阶梯预留的两行（D8 对齐点①），本单元只登记枚举与派生定义，挂点接线由
- *   兄弟分支合并方完成。
+ * - turn 四相：dispatching / generating / settling / idle（#1/#2/#3/#4 挂点语义）——
+ *   进 SESSION_TURN_MACHINE 全组合合法表（每事件 × 每状态一行，幂等 no-op 也是行）；
+ * - compacting± / bash±：正交布尔维置位/复位（#5/#6/#7/#11 挂点，机器外 patch）；
+ * - handingOff±：交接在途维置位/复位（chat-flow-consistency R1 裁决，挂点在 handoff-service）；
+ * - full-reset：四维全复位（#10 forceQuit/进程退出失败路径，机器内「任意态 → idle」行
+ *   + 布尔维全 false patch）；
+ * - reject-other：A1 止血的转正（prompt 真失败按 pi 拒绝收尾复位 idle）。
+ *
+ * [D1 死行清理] 兄弟分支预留的 abort 阶梯两行（状态机组核实零调用）与 u5a 退役分型的
+ * 转正行（零派发点）均已删除
+ * ——转移词表派发点静态审计（词表转移审计测试）保证每词表项必有派发点，未来需求复活时
+ * 按新需求重新登记（git 可追溯，不保留占位）。宣告事件退出词表（D1 定稿裁决：
+ * 宣告语义归广播层原语 announceSessionOccupancy，不进机器）。
  */
 export type SessionOccupancyTransition =
   | 'dispatching'
@@ -243,27 +247,21 @@ export type SessionOccupancyTransition =
   | 'compacting-end'
   | 'bash-start'
   | 'bash-end'
+  | 'handingOff-start'
+  | 'handingOff-end'
   | 'full-reset'
-  | 'reject-processing'
   | 'reject-other'
-  | 'announce-idle'
-  | 'abort-stall-converged'
-  | 'abort-stall-force-kill'
 
 /**
- * occupancy 转移原语的写视图（session-dead-structural-fixes D2/u3c readonly 收紧的配套）。
+ * occupancy 转移原语的写视图（原 u3c readonly 收紧的配套；chat-flow-consistency D1 后
+ * 三布尔派生存储已删，本接口收缩为 occupancy 单字段——原语是 occupancy 的唯一合法写点
+ * （C-data-19），本接口不得用于原语之外的写路径。
  *
- * IManagedSessionView 的三布尔 readonly 化后，applySessionOccupancyTransition 的内部派生写
- * 需要一个可变视图——本接口即原语内部对 session 记录的最小可写视图（id + occupancy + 三布尔）。
- * readonly 不参与 TS 结构兼容判定，ManagedSession / IManagedSessionView 可直接传入；
- * 原语是三布尔与 occupancy 的唯一合法写点（C-data-19），本接口不得用于原语之外的写路径。
+ * readonly 不参与 TS 结构兼容判定，ManagedSession / IManagedSessionView 可直接传入。
  */
 export interface SessionOccupancyStateStore {
   id: string
   occupancy?: SessionOccupancy
-  isGenerating: boolean
-  isCompacting: boolean
-  isBashRunning: boolean
 }
 
 /**
@@ -446,8 +444,8 @@ export type PiTranslatedEvent =
   | { kind: 'record-entry-appended'; customType: string }
   /**
    * compaction 生命周期开始（pi compaction_start{reason}）—— interpreter 编排：
-   * 广播 session.compacting{reason} + isCompacting 置位经 occupancy 转移原语
-   * 'compacting-start' 行（isCompacting 派生 + occupancy 合并 + state 帧广播原子完成）。
+   * 广播 session.compacting{reason} + compacting 置位经 occupancy 转移原语
+   * 'compacting-start' 行（occupancy.compacting 置位 + 合并写 + state 帧广播原子完成）。
    * onCompactingStateChange 回调通道为「与原语 compacting± 行幂等的冗余通道，勿新增使用」
    * （u3c 裁决：与 interpreter 内 onOccupancyTransition 通道汇入同一原语行，保留仅因
    * 删除牵连组合根接线与存量测试断言的接口级变更超出本单元领地——新挂点一律走
@@ -467,13 +465,13 @@ export type PiTranslatedEvent =
   | { kind: 'agent-settled' }
   /**
    * compaction 生命周期结束（pi compaction_end）—— interpreter 唯一驱动 compaction 全部前端态：
-   * - result 真值（成功）→ message.compactionSummary + applyContextUpdate + session.compacted + 复位 isCompacting
+   * - result 真值（成功）→ message.compactionSummary + applyContextUpdate + session.compacted + 复位 occupancy.compacting
    * - 无 errorMessage 真值（aborted）→ session.compacted（不带 error，前端 flush queue）+ 复位
    * - errorMessage 真值（failed）→ session.compacted{error} + message.error 对话流提示 + 复位
    *
    * 失败判据以 errorMessage 真值为准（非 aborted 字段、非 key 存在性）—— pi 三种 aborted:true
    * 形态在 errorMessage 真值层面一致（都 falsy）。result 类型暂 unknown（M5 契约清理时收紧，CQ1——事件路径宽松形状 PiCompactionResult 在 infra/pi/pi-protocol，services/session import 会违分层）。
-   * 孤儿 end 容错：overflow 早退路径无 preceding start，end handler 复位对「本来就 false 的 isCompacting」幂等无害。
+   * 孤儿 end 容错：overflow 早退路径无 preceding start，end handler 复位对「本来就 false 的 occupancy.compacting」幂等无害。
    */
   | { kind: 'compaction-end'; reason: string; result?: unknown; aborted: boolean; errorMessage?: string }
   /**

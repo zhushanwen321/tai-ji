@@ -140,9 +140,14 @@ export function useNewTaskFlow() {
           // activeProject（与 cwd 无关，project 可跨目录）。默认项目不传（undefined = 未归类，
           // 读取侧统一兜底默认项目，不写 sidecar）。fork 路径不走 createSessionFlow
           //（useForkActions 直接 sessionApi.fork），fork 在 runtime 侧继承父归属。
+          // landing 显式选择优先（用户裁决 2026-10-22 pending 语义）：flow.pendingProjectId
+          // 非空时已由 core 经 input.projectId 透传（只影响本次创建，不切换侧栏锚定）；
+          // null = 未显式选择，回落「当前 activeProject 归属」既有语义。
           const result = await createSessionFlow(ctx, {
             ...input,
-            projectId: projectStore.isDefaultProject ? undefined : projectStore.activeProjectId,
+            projectId:
+              input.projectId ??
+              (projectStore.isDefaultProject ? undefined : projectStore.activeProjectId),
           })
           return result
         },

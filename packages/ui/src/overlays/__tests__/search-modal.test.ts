@@ -208,7 +208,7 @@ describe('键盘导航（MF-2，AC-7.2/BC-2/AC-9.1~9.4）', () => {
     deps.commandStore.registerApp([{ id: 'c1', name: 'cmd-x', action: vi.fn() }])
     deps.ports.fileCandidates = vi.fn(async () => [fileNode('src/x.ts')])
     deps.ports.sessionList = vi.fn(async (): Promise<SessionGroup[]> => [
-      { cwd: '/p', sessions: [{ id: 's1', label: 'sess-x', cwd: '/p', status: 'active', lastActiveAt: 0, tokenCount: 0, modelId: 'm' }] },
+      { cwd: '/p', sessions: [{ id: 's1', label: 'sess-x', cwd: '/p', status: 'active', lastActiveAt: 0 }] },
     ])
     const wrapper = mount(SearchModal, {
       props: { open: true, deps, activeSessionId: 'sid-1' },

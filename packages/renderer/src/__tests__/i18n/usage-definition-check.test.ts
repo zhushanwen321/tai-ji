@@ -112,7 +112,6 @@ const USAGE_WHITELIST: ReadonlyArray<{ literal: string; kind: 'exact' | 'prefix'
     reason: '模板属性里的 store 属性链（FindBar v-model="find.query.value"），非 i18n key',
   },
   { literal: 'btw.create', kind: 'exact', reason: 'WS 消息类型（ServerMessageMap 索引 / command 名），btw 恰为 i18n 命名空间' },
-  { literal: 'btw.list', kind: 'exact', reason: 'WS 消息类型（同上）' },
   { literal: 'btw.remove', kind: 'exact', reason: 'WS 消息类型（command 名）' },
   {
     literal: 'sidebar.collapsed',

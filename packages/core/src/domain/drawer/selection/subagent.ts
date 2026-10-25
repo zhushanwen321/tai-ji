@@ -8,7 +8,8 @@
  * （drawerSessionKey，control.ts 绑定），但物理独立——控制态只留开合 + activeTab。
  *
  * 写侧 = setSubagentView（coordination.openSubagent 编排调用）/ clearSubagentView
- * （coordination.clearSubagentSelection 编排调用）；
+ * （coordination.clearSubagentSelection 编排调用）/ clearSubagentViewFor（同编排的
+ * 定向清除形态，按显式 sid 分区——消除「清除走 current、读写走显式 sid」的键不一致）；
  * 读侧 = useSubagentSelection（SubagentTab 消费）+ readSubagentSelectionFor
  * （复合谓词 selection/predicates.ts 按 sid 跨域读，getViewedVids 豁免链用）。
  */
@@ -61,6 +62,21 @@ export function setSubagentView(virtualId: string): void {
  */
 export function clearSubagentView(): void {
   selection.current.value.selectedSubagentId = null
+}
+
+/**
+ * 定向清空指定 sid 的 subagent 选中态分区（键与 readSubagentSelectionFor 同源——
+ * current 分区随 drawerSessionKey 绑定，显式 sid 路径不经绑定，两侧键不一致曾是
+ * 「依赖 current == focused 隐式不变量」的根源）。先查后清（useSessionScopedState
+ * hasPartition 契约，先例 DialogRequestQueue.resetFor）：分区不存在（未初始化/已删）
+ * 时跳过——updateFor 对未触达 sid 会惰性建分区，不查即清会把清除动作本身变成
+ * 常驻空分区的制造点。
+ */
+export function clearSubagentViewFor(sid: string): void {
+  if (!selection.hasPartition(sid)) return
+  selection.updateFor(sid, (s) => {
+    s.selectedSubagentId = null
+  })
 }
 
 /** 按 sid 读 subagent 选中态（复合谓词跨域读取用；updateFor 语义：已删 sid 不复活分区） */

@@ -52,6 +52,18 @@ describe('ToolResultImages', () => {
     expect(src).not.toContain(pngImg().data)
   })
 
+  it('W4a：btw 线 session id（pi 真实 id）直通落盘键（旧 btw: 前缀 extract 分支已删）', async () => {
+    const seen: string[] = []
+    const port = makePort({ results: [{ status: 'written', path: '/data/cache/images/line-pi-1/abc.png', bytes: 5 }], quotaFull: false }, (sid) => seen.push(sid))
+    setImageCacheWritePort(port)
+    // 线 id 即 pi 真实 id（无冒号）——normalizeCacheSessionId 直通，落盘目录键 = 线 id 本身
+    const wrapper = mount(ToolResultImages, { props: { sessionId: 'line-pi-1', images: [pngImg()] } })
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image"]').exists()).toBe(true))
+    expect(seen).toEqual(['line-pi-1']) // 落盘键 = 线 session id 原值（无 extract 翻译）
+    const src = wrapper.find('[data-testid="tool-image"]').attributes('src')
+    expect(src).toBe('local-file:///' + encodeURIComponent('/data/cache/images/line-pi-1/abc.png'))
+  })
+
   it('帽满占位：placeholder 元素 + 设计措辞文案（i18n key 渲染）', async () => {
     const port = makePort({ results: [{ status: 'quota-full' }], quotaFull: true })
     setImageCacheWritePort(port)

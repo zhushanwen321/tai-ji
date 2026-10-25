@@ -2,9 +2,8 @@
 //
 // [D1 拆边 Class C 第 4 步] 自 `orchestration/member-reuse-pool.ts` 整体下沉（同一批
 // 消除 `service/workflow-dispatch` → 编排层的值反向边）。依赖范围核查结论 = 可下沉：
-// 值依赖只有 `core/logger`（叶子），类型依赖只有 run-events 的 `WorkflowRunEvent`
-// （事件载荷接口按 Class B 先例留原位作类型导入——B1 已裁决「值不能反向依赖编排层」，
-// 类型边编译期擦除）；模块本体是 record 流的 fold + runId 分区内存表，零编排状态机
+// 值依赖只有 `core/logger`（叶子），类型依赖只有 shared/run-event-contracts 的
+// `WorkflowRunEvent`（事件载荷契约权威在 shared 层，按类型导入，类型边编译期擦除）；模块本体是 record 流的 fold + runId 分区内存表，零编排状态机
 // 语义、除 io 注入的 record 读外零 IO / 零时钟依赖，不把状态机语义带进下层。编排侧
 // 消费方（terminal-actions / worker-message-pump / 成员复用池测试）直连本模块——
 // 过渡期曾保留同名 re-export façade，收尾已删。
@@ -39,8 +38,8 @@
 // 测试）。
 
 import { getLogger } from "../../core/logger.ts";
-// 事件载荷接口单源（Class B 裁决：值不下沉时接口留原位，消费方按类型导入）。
-import type { WorkflowRunEvent } from "../../orchestration/run-events.ts";
+// 事件载荷接口单源（D1 组 2 下沉：权威在 shared/run-event-contracts.ts，消费方按类型导入）。
+import type { WorkflowRunEvent } from "../../shared/run-event-contracts.ts";
 
 const logger = getLogger("member-reuse-pool");
 

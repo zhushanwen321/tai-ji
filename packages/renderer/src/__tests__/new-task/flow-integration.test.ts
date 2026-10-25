@@ -46,8 +46,6 @@ const createCtrl = vi.hoisted(() => ({
       cwd: cwd ?? '/repo',
       status: 'idle',
       lastActiveAt: Date.now(),
-      modelId: 'm',
-      tokenCount: 0,
     }),
   ),
   remove: vi.fn<(sessionId: string) => Promise<void>>().mockResolvedValue(undefined),
@@ -141,8 +139,6 @@ function mkSession(over: Partial<SessionSummary>): SessionSummary {
     cwd: over.cwd ?? '/repo',
     status: 'idle',
     lastActiveAt: over.lastActiveAt ?? 0,
-    modelId: 'm',
-    tokenCount: 0,
     ...over,
   }
 }

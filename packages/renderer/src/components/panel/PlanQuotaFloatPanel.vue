@@ -12,15 +12,16 @@
     data-testid="plan-quota-float"
     :aria-label="t('panel.quotaFloat.title')"
   >
-    <!-- 展开态：标题行 + 套餐清单（宽度定宽防内容随收起动画回流） -->
+    <!-- 展开态：标题行 + 套餐清单（宽度定宽防内容随收起动画回流；间距对齐紧凑化定稿：
+         body 10px / 标题行下 7px / 项分隔 7px） -->
     <div
       v-show="!collapsed"
-      class="max-h-[calc(100%-12px)] overflow-y-auto p-3"
+      class="max-h-[calc(100%-12px)] overflow-y-auto p-2.5"
       :style="{ width: `${QUOTA_FLOAT_WIDTH_EXPANDED}px` }"
       data-testid="plan-quota-body"
     >
-      <div class="mb-2 flex items-center gap-1.5">
-        <Zap class="size-3.5 shrink-0 text-neutral-dim" aria-hidden="true" />
+      <div class="mb-[7px] flex items-center gap-1.5">
+        <Zap class="size-3.5 shrink-0 text-neutral-mid" aria-hidden="true" />
         <span class="flex-1 text-[length:var(--text-xs)] font-medium text-neutral-fg">{{ t('panel.quotaFloat.title') }}</span>
         <Button
           variant="ghost"
@@ -40,7 +41,7 @@
           :provider-id="entry.providerId"
           :label="entry.label"
           :current="entry.providerId === currentProviderId"
-          :class="idx > 0 ? 'mt-2.5 border-t border-hairline pt-2.5' : ''"
+          :class="idx > 0 ? 'mt-[7px] border-t border-hairline pt-[7px]' : ''"
         />
       </div>
     </div>
@@ -48,7 +49,7 @@
     <Button
       v-show="collapsed"
       variant="ghost"
-      class="h-auto max-h-[calc(100%-12px)] flex-col gap-2 rounded-none py-2 text-neutral-dim hover:text-neutral-fg"
+      class="h-auto max-h-[calc(100%-12px)] flex-col gap-2 rounded-none py-2 text-neutral-mid hover:text-neutral-fg"
       :style="{ width: `${QUOTA_FLOAT_WIDTH_COLLAPSED}px` }"
       :aria-label="t('panel.quotaFloat.expand')"
       data-testid="plan-quota-rail"
@@ -88,7 +89,7 @@ import {
   QUOTA_FLOAT_WIDTH_EXPANDED,
 } from './plan-quota-float'
 import { useQuotaPlanList } from '@/composables/features/model/useQuotaPlanList'
-import { useSessionStore } from '@/stores/session'
+import { useSessionLiveState } from '@/composables/features/session/useSessionLiveState'
 
 const props = defineProps<{
   /** 当前会话（「当前」标记的模型真值来源） */
@@ -103,13 +104,20 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const { entries } = useQuotaPlanList()
-const sessionStore = useSessionStore()
+// 选择器统一：与 composer / 移动壳同源（useSessionLiveState → core createSessionLiveStateSelector）
+const { modelId: currentModelId } = useSessionLiveState(computed(() => props.sessionId))
 
-/** 当前会话生效模型的 providerId（modelId 形如 "provider/model"；无 session/未选模型 → null） */
+/**
+ * 当前会话生效模型的 providerId（modelId 形如 "provider/model"；无 session/未选模型 → null）。
+ *
+ * [W1 会话架构四层分离] 读状态层（按会话 id 寄存），不再读 sessionStore.list 条目——
+ * applySnapshot 已不再写 modelId，列表查找会使本判定恒 null。
+ * 状态尚未观测（undefined）= 显式未知 → null（UI 不标「当前」，禁止猜测）。
+ */
 const currentProviderId = computed<string | null>(() => {
   const sid = props.sessionId
   if (!sid) return null
-  const modelId = sessionStore.list.find((s) => s.id === sid)?.modelId ?? ''
+  const modelId = currentModelId.value ?? ''
   const slash = modelId.indexOf('/')
   return slash > 0 ? modelId.slice(0, slash) : null
 })

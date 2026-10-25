@@ -52,15 +52,15 @@
 | R7 | ack 残窗可达性**未做真机探针**（幽灵条目是否真被回收） | 真机造「spawn 后立即 exit」并观察切换条 | 双通道回收已由 u2 合成单测覆盖；未触发则该防御机制为冗余防御 | 真机观察到「活着的死实例」且未被回收 |
 | R8 | `terminal.list` 对账失败分支未构造验收 | 注入拉取失败或真机弱网 | 失败语义若偏差会在重启后误报或误清 | 出现「重启后误报/误清条目」症状 |
 
-### 待裁决（产品口径）
+### 产品口径（已全部裁决）
 
-- **T10「重置后空态」产品口径**：实装为世代变更重连后重挂载路径自动新建本世代默认实例（空态窗口 ~50-150ms 不可稳定观测）。若产品须保留「重置后空态、由用户点「+」新建」，需产品侧抑制挂载路径自动新建（改动落 TerminalView/useTerminal，非验收资产可解）。
+- **T10「重置后空态」（已裁决 2026-10-23：维持实装形态）**：世代变更重连后重挂载路径自动新建本世代默认实例（空态窗口 ~50-150ms 不可稳定观测），不保留「重置后空态、由用户点「+」新建」形态，无改动。
 - **I-A1「+」是否自动激活新实例（已裁决 2026-10-04）**：产品裁决 = **点「+」自动切换 active 并聚焦新实例输入区**（点「+」是显式用户意图，与「首挂载不夺焦」不冲突）；`terminal.list` 对账路径仍不抢 active。已落实现：`TerminalView.onCreate` 在 ack 建档拿到编号后显式 `selectInstance` + `focus`（`createWithToast` 返回编号），`registerInstance` 仍仅在 active 为空时落位；设计 §3.1/§3.3/§4 T1 已同步回写。断言：单测 TV-11/TV-15 + RC-5/REG-3/REG-4（对账不抢 active、active 回空后重新落位防回归）+ e2e T1/T8/T9（新建后直接可写、焦点在新实例）。
-- **I-A5 O1-O2 redraw 观察**：一次「删除已显示终端的会话→新建会话→重开」观察到旧会话命令文本叠在新会话提示符行；受控复现（不删除前会话）未复现，超 A5 单实例范围，登记待裁决。
-- **世代判据是否需显式透出 token 拉取失败（F1-56 分支②）**：F1-56 取分支①（文档对齐实装——世代判据不可表达拉取失败）后，备选分支②「`use-connection` 显式透出 token 拉取失败并保守重置终端域」留待裁决。现文档口径 = 拉取失败不可表达（`getCurrentToken()` 同步只读、无失败态；token 拉取失败时 use-connection 回落 `connectWs(url, undefined)`，ws-client 保留旧 token，连接沿读旧值判「未变、不重置」，该场景由 auth 失败/重连链覆盖），与设计 §0.5 P6 段一致。若采纳分支②：实施面 = `use-connection` 拉取失败态透出 + `getCurrentToken` 语义扩展 + 重置触发范围复核（防把「拉取失败」误当世代变更清空有效历史）；触发条件 = 真机出现「世代变更未被 token 判据捕获」症状。
+- **I-A5 O1-O2 redraw（已裁决 2026-10-23：不处理）**：一次「删除已显示终端的会话→新建会话→重开」观察到旧会话命令文本叠在新会话提示符行；受控复现（不删除前会话）未复现，超单实例范围，不处理。若同症状再次出现，按现象重新登记。
+- **世代判据 token 拉取失败透出（F1-56 分支②）（已裁决 2026-10-23：不采纳）**：维持现行口径——`getCurrentToken()` 同步只读、拉取失败不可表达（token 拉取失败时 use-connection 回落 `connectWs(url, undefined)`，ws-client 保留旧 token，连接沿读旧值判「未变、不重置」，该场景由 auth 失败/重连链覆盖），与设计 §0.5 P6 段一致。若真机出现「世代变更未被 token 判据捕获」症状，再重新裁决。
 
 ### 探针欠账
 
 - **P5 真机探针未执行**（终端内起 `nohup sleep 600` → 正常退出应用 → 查系统进程表应无残留）：正常退出 PTY 清理目前仅由 u4 单测与打点断言覆盖，非真机证据（impl-plan §6 R9）。
 - **R7 ack 残窗真机探针未执行**（见上表 R7）。
-- **T10 世代重置提示真机可见部分未走查**（世代变更重置时「输入可能丢失」toast 的真机渲染范围）：GEN-3 单测只覆盖「确有滞留命令时发提示」的触发条件逻辑，不覆盖真机 toast 渲染范围；D3 四节点无世代变更构造故未走查（`docs/testing/e2e-map.json` E2E-TERMINAL-01 note 指向本条）。走查方法 = 真机制造世代变更（SIGKILL runtime 进程 → supervisor 自动重启换 token；或先 stop 再 `restartRuntime`）+ 预置滞留命令 → 观察「输入可能丢失」toast 真机渲染；**不可用 devtools 直调 `runtime-restart` IPC**——`runtime-supervisor.ts:303-309` 的 `restartRuntime()` 在 runtime 存活时是幂等分支（仅广播 `runtime-port` 后 return，不 spawn 新进程、token 不变），造的是设计 §4 T12 的「非世代广播沿」而非 T10 的世代变更。该面不在本轨断言内（spec 的 T10 用例无 toast 断言），须补真机走查或给 T10 增断言后方可验证；本轨 T8/T9/T13 已执行全绿（2026-10-12 全 spec 7 passed——T13 首跑暴露的是 e2e harness 竞态而非产品缺陷：切会话后底抽屉按 per-session 分区收起、断言范围消失，harness 补等会话激活落地信号后修复，提交 09fdd52ad；T10 已由 D3 verify A10 三次绿灯）。
+- **T10 世代重置提示真机可见部分未走查**（世代变更重置时「输入可能丢失」toast 的真机渲染范围）：GEN-3 单测只覆盖「确有滞留命令时发提示」的触发条件逻辑，不覆盖真机 toast 渲染范围；D3 四节点无世代变更构造故未走查（`docs/testing/e2e-map.json` E2E-TERMINAL-01 note 指向本条）。走查方法 = 真机制造世代变更（SIGKILL runtime 进程 → supervisor 自动重启换 token；或先 stop 再 `restartRuntime`）+ 预置滞留命令 → 观察「输入可能丢失」toast 真机渲染；**不可用 devtools 直调 `runtime-restart` IPC**——`runtime-supervisor.ts:303-309` 的 `restartRuntime()` 在 runtime 存活时是幂等分支（仅广播 `runtime-port` 后 return，不 spawn 新进程、token 不变），造的是设计 §4 T12 的「非世代广播沿」而非 T10 的世代变更。该面不在本组断言内（spec 的 T10 用例无 toast 断言），须补真机走查或给 T10 增断言后方可验证；本组 T8/T9/T13 已执行全绿（2026-10-12 全 spec 7 passed——T13 首跑暴露的是 e2e harness 竞态而非产品缺陷：切会话后底抽屉按 per-session 分区收起、断言范围消失，harness 补等会话激活落地信号后修复，提交 09fdd52ad；T10 已由 D3 verify A10 三次绿灯）。

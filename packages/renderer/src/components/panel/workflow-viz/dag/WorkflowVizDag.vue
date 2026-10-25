@@ -149,7 +149,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { WorkflowAgentCall, WorkflowDag, WorkflowDagEdgeKind, WorkflowRunOutcome, WorkflowRunStatus } from '@taiji/shared'
 import { ZOOM_MIN, computeFitTransform, dagNodeHeight, layoutDag, layoutEdges } from './layout'
@@ -263,7 +263,7 @@ const stopTone = computed<WorkflowVizDagStopTone>(() => {
 // 切换 run（D11：开新 run 切内容）→ 画布视口重置为新蓝图的 fit（全图居中、
 // 四周 FIT_PAD_PX 留白；此前用户 pan/zoom 过也在重置中回到 fit）
 watch(() => props.dag, () => {
-  fitView()
+  fitWhenContainerReady()
 })
 
 /**
@@ -286,9 +286,51 @@ function fitView(): void {
   vp.ty = fit.ty
 }
 
+/**
+ * fit 前的容器尺寸就绪闸（残余 1 竞态修复）：overlay 刚挂载时容器可能尚未布局
+ * （宽高均为 0 的过渡态）——此时 fit 只得 k=1 平移 0 的退化形态（内容宽于视口
+ * 即裁切）。就绪 = 任一轴有布局（> 0），与 computeFitTransform 的单轴参与口径
+ * 对齐（缺席轴不参与约束、该向偏移取 0）；未就绪时经 ResizeObserver 首次非零
+ * 回调补 fit——一次性（回调后即断开观察器），「窗口 resize 不追 fit」的用户
+ * 裁决不变；环境无 ResizeObserver（jsdom）时不补，维持既有退化口径。
+ */
+let pendingFitObserver: ResizeObserver | null = null
+
+function containerSizeReady(): boolean {
+  const el = svgRef.value
+  return (el?.clientWidth ?? 0) > 0 || (el?.clientHeight ?? 0) > 0
+}
+
+function fitWhenContainerReady(): void {
+  if (containerSizeReady()) {
+    fitView()
+    return
+  }
+  if (pendingFitObserver !== null || typeof ResizeObserver === 'undefined') return
+  const el = svgRef.value
+  if (!el) return
+  const observer: ResizeObserver = new ResizeObserver(() => {
+    // 已断开（补 fit 完成）/被替代的旧观察器回调 no-op——disconnect 只停浏览器派发，
+    // 闭包本身仍可被持有方调用，须自证现役
+    if (observer !== pendingFitObserver) return
+    if (!containerSizeReady()) return
+    observer.disconnect()
+    pendingFitObserver = null
+    fitView()
+  })
+  pendingFitObserver = observer
+  observer.observe(el)
+}
+
 // 打开 overlay 即挂载（壳 v-if dag !== null）→ 初始视口 = 全图 fit 居中
+// （容器未布局时经 ResizeObserver 首次非零尺寸回调补 fit）
 onMounted(() => {
-  fitView()
+  fitWhenContainerReady()
+})
+
+onBeforeUnmount(() => {
+  pendingFitObserver?.disconnect()
+  pendingFitObserver = null
 })
 
 // ── 缩放平移（原型 04-final-overlay.html 手法：client 坐标差换算，规避

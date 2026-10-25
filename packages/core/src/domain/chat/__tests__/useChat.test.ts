@@ -24,6 +24,7 @@ import { effectScope, nextTick, toRaw } from 'vue'
 import { segmentsToText, textToSegments } from '@taiji/shared'
 import type { Message, Segment, ServerMessage } from '@taiji/shared'
 import { createChatStore } from '../store'
+import { createSessionLiveState } from '@taiji/core/domain/session'
 import { createUseChat, resetChatModuleStateForTest } from '../useChat'
 import { getExecutingBash as getExecutingBashForTest } from '../bash-effects'
 import { provideDevMode, __resetDevModeForTesting } from '../../../platform/dev-mode'
@@ -53,6 +54,7 @@ interface Fixture {
   }
   chatStore: ReturnType<typeof createChatStore>
   sessionStore: { applySnapshot: ReturnType<typeof vi.fn>; revive: ReturnType<typeof vi.fn> }
+  liveState: ReturnType<typeof createSessionLiveState>
   toast: { error: ReturnType<typeof vi.fn>; warning: ReturnType<typeof vi.fn> }
   writeSegments: ReturnType<typeof vi.fn>
   restoreDraft: ReturnType<typeof vi.fn>
@@ -89,6 +91,8 @@ function makeFixture(): Fixture {
     cancelDelivery: vi.fn().mockResolvedValue({ clientUuid: 'u-x', cancelled: false }),
   }
   const sessionStore = { applySnapshot: vi.fn(), revive: vi.fn() }
+  // [W1] 状态层：session.* 状态帧的落点（真实 core factory，非 mock）
+  const liveState = createSessionLiveState()
   const toast = { error: vi.fn(), warning: vi.fn() }
   const restoreDraft = vi.fn()
   const deps: UseChatDeps = {
@@ -96,6 +100,7 @@ function makeFixture(): Fixture {
     writeSegments: vi.fn().mockResolvedValue(undefined),
     getChatStore: () => chatStore,
     getSessionStore: () => sessionStore,
+    getLiveStateStore: () => liveState,
     toast,
     restoreDraft,
     t: (k: string, p?: Record<string, unknown>) => (p ? `${k}:${JSON.stringify(p)}` : k),
@@ -106,6 +111,7 @@ function makeFixture(): Fixture {
     chatApi,
     chatStore,
     sessionStore,
+    liveState,
     toast,
     restoreDraft,
     writeSegments: deps.writeSegments as unknown as ReturnType<typeof vi.fn>,
@@ -164,13 +170,13 @@ describe('createUseChat factory 行为', () => {
     }
   })
 
-  it('busy 期发送不转车道（B 策略退役）：统一 submit 照常提交，由内核判定 lane', async () => {
+  it('busy 期发送不改投递路径（B 策略退役）：统一 submit 照常提交，由内核判定 lane', async () => {
     const f = makeFixture()
     await f.useChat.send('s2', textToSegments('hi'))
     f.emit('s2', msg('s2', 'message.message_start', { messageId: 'a1' }))
     expect(f.chatStore.isActive('s2')).toBe(true)
     await f.useChat.send('s2', textToSegments('more'))
-    // 两次都走统一 submit；chatApi.send 零调用（车道判定在 runtime 内核）。
+    // 两次都走统一 submit；chatApi.send 零调用（投递路径判定在 runtime 内核）。
     // [u5a] 前身同时断言 chatApi.steer 零调用——该成员已随 u5a 删除，断言随之移除。
     expect(f.chatApi.submitDelivery).toHaveBeenCalledTimes(2)
     expect(f.chatApi.send).not.toHaveBeenCalled()
@@ -226,14 +232,13 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
-  it('session.state_changed → sessionStore.applySnapshot(modelId/thinkingLevel)', async () => {
+  it('session.state_changed → 状态层 applyLiveState(modelId/thinkingLevel)（W1：不经导航列表）', async () => {
     const f = makeFixture()
     await f.useChat.send('s7', textToSegments('hi'))
     f.emit('s7', msg('s7', 'session.state_changed', { modelId: 'gpt-4', thinkingLevel: 'high' }))
-    expect(f.sessionStore.applySnapshot).toHaveBeenCalledWith('s7', {
-      modelId: 'gpt-4',
-      thinkingLevel: 'high',
-    })
+    expect(f.liveState.liveStateOf('s7')).toEqual({ modelId: 'gpt-4', thinkingLevel: 'high' })
+    // 导航列表不承载状态字段写入
+    expect(f.sessionStore.applySnapshot).not.toHaveBeenCalled()
     f.dispose()
   })
 
@@ -559,7 +564,7 @@ describe('统一 submit 的 inflight 占位闭环（u3b：占位保留服务 dir
     resetDeliveryProjectionForTest()
   })
 
-  it('send 乐观插入 → inflight +1；确认帧到达 → 抵消归零（direct 车道抵消机制保留，D7）', async () => {
+  it('send 乐观插入 → inflight +1；确认帧到达 → 抵消归零（direct 投递路径抵消机制保留，D7）', async () => {
     const f = makeFixture()
     await f.useChat.send('s30', textToSegments('hi'))
     expect(f.chatStore.getInflight('s30')).toBe(1)
@@ -619,7 +624,7 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     } as unknown as ServerMessage
   }
 
-  it('morph：steer 车道帧到达 → 乐观气泡移出对话流 + 派生视图落位（队列区数据）+ dispatching 占位回收', async () => {
+  it('morph：steer 投递路径帧到达 → 乐观气泡移出对话流 + 派生视图落位（队列区数据）+ dispatching 占位回收', async () => {
     const f = makeFixture()
     await f.useChat.send('m1', textToSegments('补充要求'))
     const bubbleId = f.chatStore.getMessages('m1').find((m) => m.role === 'user')!.id
@@ -632,12 +637,12 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     // 派生视图落位（单一数据源，u3c QueueBubble 消费）
     expect(getDeliveryProjection('m1')).toHaveLength(1)
     expect(getDeliveryProjection('m1')[0]).toMatchObject({ clientUuid: bubbleId, state: 'in-flight', lane: 'steer' })
-    // 非直发车道：dispatching 空窗占位回收（无「本条即将触发 message_start」语义）
+    // 非直发投递路径：dispatching 空窗占位回收（无「本条即将触发 message_start」语义）
     expect(f.chatStore.isPendingSend('m1')).toBe(false)
     f.dispose()
   })
 
-  it('direct 车道帧：气泡保持待确认（不 morph 不移除），派生视图照常落位', async () => {
+  it('direct 投递路径帧：气泡保持待确认（不 morph 不移除），派生视图照常落位', async () => {
     const f = makeFixture()
     await f.useChat.send('m2', textToSegments('直达消息'))
     const bubbleId = f.chatStore.getMessages('m2').find((m) => m.role === 'user')!.id
@@ -672,7 +677,7 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     const bubble = f.chatStore.getMessages('m4').find((m) => m.role === 'user')!
     const bubbleId = bubble.id
 
-    // 1) steer 车道帧 → morph（气泡移除 + 原段暂存）
+    // 1) steer 投递路径帧 → morph（气泡移除 + 原段暂存）
     f.emit('m4', deliveryFrame('m4', [{ clientUuid: bubbleId, state: 'in-flight', lane: 'steer' }]))
     expect(f.chatStore.getMessages('m4').some((m) => m.id === bubbleId)).toBe(false)
 
@@ -737,6 +742,19 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     // 前身：全 idle + 队列非空 → flush 投递；退役后 occupancy 只维护派生视图，无任何投递编排
     expect(f.toast.error).not.toHaveBeenCalled()
     expect(f.toast.warning).not.toHaveBeenCalled()
+    f.dispose()
+  })
+
+  it('occupancy 帧第四维 handingOff 透传派生视图（[chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] Set 退役后 membership 唯一通路）', async () => {
+    const f = makeFixture()
+    await f.useChat.send('m7', textToSegments('hi'))
+    f.emit('m7', msg('m7', 'session.occupancy', { turn: 'generating', compacting: false, bash: false, handingOff: true }))
+    // sessionPhase 派生视图带 handingOff（useQueueRows hint 交接分档 / isHandingOff 读口的唯一数据源）
+    expect(f.chatStore.sessionPhase('m7').handingOff).toBe(true)
+    expect(f.chatStore.isHandingOff('m7')).toBe(true)
+    // 复位帧（'handingOff-end' 整帧替换）→ false
+    f.emit('m7', msg('m7', 'session.occupancy', { turn: 'idle', compacting: false, bash: false, handingOff: false }))
+    expect(f.chatStore.sessionPhase('m7').handingOff).toBe(false)
     f.dispose()
   })
 })
@@ -1301,6 +1319,162 @@ describe('消息投递可靠性：bash 投递回执（验收⑦a-⑦d）', () =>
     // 收尾：哨兵帧（command:'' + cancelled:true，abortBash 兜底广播形态）清 executingBash，
     // 防 bash-effects 模块级 Map 残留泄漏到后续用例
     f.emit('bf4', msg('bf4', 'message.bashResult', { command: '', output: '', exitCode: null, cancelled: true, truncated: false, excludeFromContext: false, timestamp: 1724000000002 }))
+    f.dispose()
+  })
+})
+
+describe('chat-flow-consistency D4 终态处理失败恢复（occupancy idle × 本地 streaming 残留）', () => {
+  beforeEach(() => {
+    resetChatModuleStateForTest()
+  })
+
+  /** 权威历史 reply（getHistory 生产形态：pi 落盘 entry 派生消息，piEntryId 权威锚） */
+  function authoritativeHistoryReply() {
+    const now = Date.now()
+    return {
+      messages: [
+        { id: 'e-user-1', piEntryId: 'e-user-1', role: 'user', content: 'hi', status: 'complete', timestamp: now },
+        { id: 'e-assistant-1', piEntryId: 'e-assistant-1', role: 'assistant', content: '权威完整内容', status: 'complete', timestamp: now + 1 },
+      ] as Message[],
+      truncated: false,
+      loadedTurns: 1,
+      totalTurnsEstimate: 1,
+    }
+  }
+
+  /**
+   * 注入「终态处理失败」形态（任务书 A4 验收形态）：message.complete 帧副作用链抛错——
+   * 走 ensureStreamSubscription 的 dispatch 错误隔离点（catch 吞掉只 warn，缺陷 5 现状
+   * 半执行入口），终态帧被吞、本地 streaming 残留在场。
+   */
+  function injectCompleteHandlerFailure(f: Fixture): void {
+    const realApply = f.chatStore.applyMessageEvent
+    vi.spyOn(f.chatStore, 'applyMessageEvent').mockImplementation((sid, m) => {
+      if (m.type === 'message.complete') throw new Error('injected terminal-frame handler failure')
+      realApply(sid, m)
+    })
+  }
+
+  it('主形态：complete 处理抛错后权威 idle 到达 → 两步收尾（stalled 定格 + getHistory 拉权威），最终消息列表与权威一致、无永久工作中态', async () => {
+    const f = makeFixture()
+    await f.useChat.send('s-d4', textToSegments('hi'))
+    f.emit('s-d4', msg('s-d4', 'message.message_start', { messageId: 'm1' }))
+    expect(f.chatStore.isGenerating('s-d4')).toBe(true)
+    injectCompleteHandlerFailure(f)
+    f.emit('s-d4', msg('s-d4', 'message.complete', { stopReason: 'end_turn' }))
+    // 处理失败形态在场：终态帧被吞、本地 streaming 残留（缺陷 5 现状形态）
+    expect(f.chatStore.isGenerating('s-d4')).toBe(true)
+    f.chatApi.getHistory.mockResolvedValue(authoritativeHistoryReply())
+
+    f.emit('s-d4', msg('s-d4', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
+
+    // 第一步收尾生效（无永久工作中态）
+    expect(f.chatStore.isGenerating('s-d4')).toBe(false)
+    // 第二步拉权威（每回合至多一次）
+    expect(f.chatApi.getHistory).toHaveBeenCalledTimes(1)
+    expect(f.chatApi.getHistory).toHaveBeenCalledWith('s-d4')
+    await vi.waitFor(() => {
+      const messages = f.chatStore.getMessages('s-d4')
+      // 最终消息列表与权威一致：乐观 user 气泡经合并判据被权威 user 副本去重，
+      // stalled 定格的 error assistant 被权威 assistant 替换（先收尾 → 保护段为空 → 基线接管）
+      expect(messages).toHaveLength(2)
+      expect(messages.some((m) => m.role === 'assistant' && m.status === 'streaming')).toBe(false)
+      expect(messages.some((m) => m.role === 'assistant' && m.error)).toBe(false)
+      expect(messages.find((m) => m.role === 'assistant')?.content).toBe('权威完整内容')
+    })
+    f.dispose()
+  })
+
+  it('stalled 定格形态：收尾后残留 assistant 转 error 终态 + 设计定稿中断文案（拉取前窗口）', async () => {
+    const f = makeFixture()
+    await f.useChat.send('s-d4m', textToSegments('hi'))
+    f.emit('s-d4m', msg('s-d4m', 'message.message_start', { messageId: 'm1' }))
+    injectCompleteHandlerFailure(f)
+    f.emit('s-d4m', msg('s-d4m', 'message.complete', { stopReason: 'end_turn' }))
+    // getHistory 挂起不 settle：锁存「收尾已做、拉取未回」的定格窗口形态
+    f.chatApi.getHistory.mockImplementation(() => new Promise(() => {}))
+
+    f.emit('s-d4m', msg('s-d4m', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
+
+    const lastAssistant = [...f.chatStore.getMessages('s-d4m')].reverse().find((m) => m.role === 'assistant')
+    expect(lastAssistant?.status).toBe('error')
+    expect(lastAssistant?.error).toContain('回复已中断')
+    expect(lastAssistant?.error).toContain('重新打开会话可恢复完整内容')
+    f.dispose()
+  })
+
+  it('拉取失败降级：getHistory reject → warn 留痕，stalled 定格文案保持完成时态 + 恢复动作指引（与设计 D4 降级登记一致）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const f = makeFixture()
+    await f.useChat.send('s-d4fail', textToSegments('hi'))
+    f.emit('s-d4fail', msg('s-d4fail', 'message.message_start', { messageId: 'm1' }))
+    injectCompleteHandlerFailure(f)
+    f.emit('s-d4fail', msg('s-d4fail', 'message.complete', { stopReason: 'end_turn' }))
+    f.chatApi.getHistory.mockRejectedValue(new Error('ws closed'))
+
+    f.emit('s-d4fail', msg('s-d4fail', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
+
+    await vi.waitFor(() => {
+      // 降级已发生：失败 warn 留痕
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('history pull failed'))).toBe(true)
+    })
+    // 定格文案与 REASON_FALLBACK_ERROR_TEXT.stalled 登记一致：完成时态 + 恢复动作指引，
+    // 无进行时态「正在恢复」（恢复已静默终止，收敛依赖下次切入/刷新的既有 reconcile）
+    const lastAssistant = [...f.chatStore.getMessages('s-d4fail')].reverse().find((m) => m.role === 'assistant')
+    expect(lastAssistant?.status).toBe('error')
+    expect(lastAssistant?.error).toBe('回复已中断（内容可能不完整）。重新打开会话可恢复完整内容。')
+    expect(lastAssistant?.error).not.toContain('正在恢复')
+    warnSpy.mockRestore()
+    f.dispose()
+  })
+
+  it('正常路径零触发：complete 正常收尾后 idle 帧到达不拉权威（每回合至多一次拉取契约）', async () => {
+    const f = makeFixture()
+    await f.useChat.send('s-d4n', textToSegments('hi'))
+    f.emit('s-d4n', msg('s-d4n', 'message.message_start', { messageId: 'm1' }))
+    f.emit('s-d4n', msg('s-d4n', 'message.complete', { stopReason: 'end_turn' }))
+    expect(f.chatStore.isGenerating('s-d4n')).toBe(false)
+
+    f.emit('s-d4n', msg('s-d4n', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
+
+    expect(f.chatApi.getHistory).not.toHaveBeenCalled()
+    const messages = f.chatStore.getMessages('s-d4n')
+    expect(messages.some((m) => m.role === 'assistant' && m.error)).toBe(false)
+    f.dispose()
+  })
+
+  it('负路径：occupancy 非 idle（generating / bash 在途）到达时本地 streaming 在场不触发恢复', async () => {
+    const f = makeFixture()
+    await f.useChat.send('s-d4g', textToSegments('hi'))
+    f.emit('s-d4g', msg('s-d4g', 'message.message_start', { messageId: 'm1' }))
+
+    f.emit('s-d4g', msg('s-d4g', 'session.occupancy', { turn: 'generating', compacting: false, bash: false }))
+    expect(f.chatApi.getHistory).not.toHaveBeenCalled()
+    expect(f.chatStore.isGenerating('s-d4g')).toBe(true)
+
+    f.emit('s-d4g', msg('s-d4g', 'session.occupancy', { turn: 'idle', compacting: false, bash: true }))
+    expect(f.chatApi.getHistory).not.toHaveBeenCalled()
+    expect(f.chatStore.isGenerating('s-d4g')).toBe(true)
+    f.dispose()
+  })
+
+  it('降级：权威拉取失败仅 warn 留痕——本地已收尾无永久工作中态，不沿订阅回调逆传', async () => {
+    const f = makeFixture()
+    await f.useChat.send('s-d4f', textToSegments('hi'))
+    f.emit('s-d4f', msg('s-d4f', 'message.message_start', { messageId: 'm1' }))
+    injectCompleteHandlerFailure(f)
+    f.emit('s-d4f', msg('s-d4f', 'message.complete', { stopReason: 'end_turn' }))
+    f.chatApi.getHistory.mockRejectedValue(new Error('transport down'))
+
+    expect(() =>
+      f.emit('s-d4f', msg('s-d4f', 'session.occupancy', { turn: 'idle', compacting: false, bash: false })),
+    ).not.toThrow()
+    expect(f.chatStore.isGenerating('s-d4f')).toBe(false)
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const lastAssistant = [...f.chatStore.getMessages('s-d4f')].reverse().find((m) => m.role === 'assistant')
+    expect(lastAssistant?.status).toBe('error')
+    expect(lastAssistant?.error).toContain('回复已中断')
     f.dispose()
   })
 })

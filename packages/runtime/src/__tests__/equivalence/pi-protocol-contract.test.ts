@@ -26,13 +26,13 @@
  * message entry 不发射」是当前契约。上游若补发射此断言红 → 触发 W21 预留的换源适配
  * （message_end 流不再是等价源），而非静默分叉。
  *
- * faux LLM 轨（L2.5 翻轨，2026-09-15）：验证对象是 RPC/事件/entry 三个协议范围（pi 自身
+ * faux LLM 层（L2.5 迁组，2026-09-15）：验证对象是 RPC/事件/entry 三个协议范围（pi 自身
  * 行为），非模型智能——LLM turn 由 fauxResponses 脚本固定（it2 用 reasoning 演员
  * faux/faux-1-reasoning，档位 ⊇ {off, low} 确定性成立，摆脱宿主 models.json 依赖），
- * 断言语义与翻轨前一致。门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（本地默认跳过，CI
+ * 断言语义与迁组前一致。门控 = 集成测试门控 TAIJI_TEST_INTEGRATION（本地默认跳过，CI
  * 与按改动范围触发时真跑；SSOT = test-guard/integration-gate.ts）——spawn 真 pi 的
- * 协议契约锁定属「代码 + OS 组合行为」（整治判据见 docs/todo/test-single-layer-cleanup.md）。
- * **pi bump 时需真实轨重放一次**（本文件断言的 RPC reply 形状/事件范围/D5 负向断言是对
+ * 协议契约锁定属「代码 + OS 组合行为」（整治判据见 docs/TEST-STRATEGY.md「新写测试判据」节）。
+ * **pi bump 时需真实层重放一次**（本文件断言的 RPC reply 形状/事件范围/D5 负向断言是对
  * pi wire 协议的契约锁定；接线点 scripts/check-version-bump.sh 跑本文件须带
  * TAIJI_TEST_INTEGRATION=1，e2e-map 侧由 E2E-INTEG 规则承接）。
  *
@@ -224,7 +224,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
     '① RPC 命令范围：五个契约命令全部可调 + reply 形状 guard 全过（无 LLM 调用，空 session）',
     { timeout: TEST_TIMEOUT_MS },
     async () => {
-      // faux 轨空队列：本用例全程无 LLM turn（纯 RPC 面），队列耗尽即报错是意外 turn 的 fail-fast
+      // faux 层空队列：本用例全程无 LLM turn（纯 RPC 面），队列耗尽即报错是意外 turn 的 fail-fast
       const fx = await spawnPiFixture({ fauxResponses: [] })
       fixture = fx
       // 契约锁定的 binary 版本证据（漂移归因用）
@@ -272,7 +272,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
     '② 事件范围五事件真实发射 + D5 固化（N 事件 0 条 message 载体 entry_appended）+ ③ entry 面穷举',
     { timeout: TEST_TIMEOUT_MS },
     async () => {
-      // faux 轨 reasoning 演员（thinking-level 二档互切的确定性前提）；一轮 turn 的
+      // faux 层 reasoning 演员（thinking-level 二档互切的确定性前提）；一轮 turn 的
       // 响应由脚本固定
       const fx = await spawnPiFixture({ model: 'faux/faux-1-reasoning', fauxResponses: [{ text: 'w25-contract' }] })
       fixture = fx

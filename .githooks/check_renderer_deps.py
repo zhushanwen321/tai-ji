@@ -25,6 +25,7 @@ package.json 未声明 class-variance-authority，开发机靠 hoist 假绿，
   2 — 有未声明的 import
 """
 
+from __future__ import annotations
 import json
 import re
 import sys

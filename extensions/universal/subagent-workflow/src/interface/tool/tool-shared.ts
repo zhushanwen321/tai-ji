@@ -1,5 +1,5 @@
 /**
- * tool-shared.ts — workflow / subagents / workflow-script 三个 tool 的同粒度共享构件。
+ * tool-shared.ts — workflow / subagent_batch / workflow-script 三个 tool 的同粒度共享构件。
  *
  * 抽取边界（findings g11a-F1/F2/F3）：
  * - `assertNotAborted` / `optionSlugSuffix` / `renderTextResult`：三处逐字重复的
@@ -8,7 +8,7 @@
  *   字面量漏改即静默丢字段。
  * - `withGuiAttach`：RPC 模式给 details 附加 `__gui__` 的唯一实现（workflow-script /
  *   subagent 两个 tool 的 attach 点收敛于此，组件构造回调由调用方提供；workflow /
- *   subagents 走 isWorkflow 块分支不消费 `__gui__`，不构造——D8）。
+ *   subagent_batch 走 isWorkflow 块分支不消费 `__gui__`，不构造——D8）。
  * - `throwPrefixed`：catch 内 `<前缀>: <msg>` 重抛（pi 的 execute-throw 契约，
  *   toErrorMessage 规整单点）。
  *
@@ -68,8 +68,8 @@ export function renderTextResult(result: RenderableToolResult): Text {
 
 /**
  * buildRunSpecFromScript 的调用方差异项（两个 tool 的取值域不同，用参数保留）：
- * - args：subagents 由 handler 从顶层 tasks/agents/aggregate 组装；workflow 用 params.args
- * - slug：subagents 可能是 handler 生成的 `<script>-<时间短码>`；workflow 用 params.slug
+ * - args：subagent_batch 由 handler 从顶层 tasks + 运行级 agent 组装；workflow 用 params.args
+ * - slug：subagent_batch 可能是 handler 生成的 `<script>-<时间短码>`；workflow 用 params.slug
  * - budgetTokens / budgetTimeMs：分别来自各 tool 的 tokens / time 字段
  */
 export interface RunSpecFromScriptOptions {

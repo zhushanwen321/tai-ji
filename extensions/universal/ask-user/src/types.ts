@@ -129,13 +129,21 @@ export type AskUserDetails = Result;
  *  HEADER_MAX_CHARS 不同档——摘要是完整一句话语境，不是 tab 标签） */
 const SUMMARY_LABEL_MAX_CHARS = 60;
 
-/** 单问题的摘要标签：header 优先（多问场景必填），缺省回退截断后的 question */
+/** 多行文本 → 单行摘要文本（换行与连续空白折叠为单空格；plan tool.ts 同模式）。
+ *  details.summary 单行契约见 extension-conventions.md「Tool result details.summary 约定」
+ *  （单问 header 不经控制字符校验、question 校验在 validate 层——摘要纯函数自带归一兜底）。 */
+function toSingleLine(text: string): string {
+	return text.replace(/\s+/g, " ").trim();
+}
+
+/** 单问题的摘要标签：header 优先（多问场景必填，归一单行），缺省回退归一 + 截断后的 question */
 function summaryLabel(q: Question): string {
-	if (q.header) return q.header;
-	const chars = Array.from(q.question);
+	if (q.header) return toSingleLine(q.header);
+	const text = toSingleLine(q.question);
+	const chars = Array.from(text);
 	return chars.length > SUMMARY_LABEL_MAX_CHARS
 		? chars.slice(0, SUMMARY_LABEL_MAX_CHARS).join("") + "…"
-		: q.question;
+		: text;
 }
 
 /** 收起态一行摘要：`Asked 1 question: Which database?` / `Asked 2 questions: DB, Region` */

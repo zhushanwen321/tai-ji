@@ -13,16 +13,16 @@
 //     第②级降级编排）——core 侧引用切换已完成（core 依赖 SDK 方向合法）。
 //
 // record 形态：SDK 侧 reducer 操作 ReplayRecordView（turns/turnCount/totalTokens/
-// lastError 四字段视图）——core ExecutionRecord 留 core（类型闭包表裁决），其结构
+// lastError/errors 五字段视图）——core ExecutionRecord 留 core（类型闭包表裁决），其结构
 // 满足本视图（W2 双向可赋值断言验证）。重放场景不需要 identity 字段（agent/model/
 // task 等只服务派生视图与持久化，reducer 不触碰），不搬 createRecord 全量 identity。
 //
-// 重放等价性现状（2026-09-30 核实更正）：设计目标是「重放与 live 共用同一 reducer」，
-// 实现上仍是两份逐字同形的副本（本文件与 core execution-record.ts 各一份）。生产证
-// 据 = core `execution/__tests__/reducer-parity.test.ts` 的差分对拍（同一事件序列分喂
-// 两侧、逐字段断言等价）——conformance C5 只跑本文件这一侧，不构成漂移防线。
-// 收敛为单源的尝试（core 委托本文件）已回退：经 SDK barrel 引入会把 spawn/env/
-// child_process 整图拖进 core 持久化模块，与测试的 vi.mock("node:child_process") 冲突。
+// reducer 单源（subagent-observability §3.3.5 双 reducer 合一）：本文件是 updateFromEvent
+// 的**唯一实现**；core `execution/persistence/execution-record.ts` 为薄委托（deep import
+// 本文件，绕开 SDK barrel 的 spawn/env/child_process 图——历史上经 barrel 引入曾与
+// core 持久化测试的 vi.mock("node:child_process") 冲突，故加 ./journal-replay 子导出）。
+// 「record 事件流 fold ≡ 内存单源」等价断言 = core reducer-parity.test.ts（fold 重放
+// 结果 ≡ live 累积，同一实现的调用路径级等价仍是断言对象）。
 //
 // CJS 多 entry 内联副本的实例分裂影响 = runningToolIndex WeakMap（按 record 实例
 // 隔离）各自为政，无跨实例语义。
@@ -40,7 +40,19 @@ import type {
 } from "./protocol/contract-types.ts";
 
 /**
- * reducer 的 record 视图（core ExecutionRecord 的结构子集：reducer 只触碰这四个字段）。
+ * 轮失败事实（subagent-observability §3.3.5：失败事实只追加进 errors 数组，
+ * lastError 由「最后一个非空轮失败」派生——数组只追加且空串不入账，
+ * 尾项即最后一个非空失败）。事实源记录，append-only，不因后续轮终清除。
+ */
+export interface ErrorFact {
+  /** 错误消息原文（空串 / 缺席不入账——无信息失败事实不占位）。 */
+  message: string;
+  /** 事实落账墙钟（Date.now()，ms）。 */
+  at: number;
+}
+
+/**
+ * reducer 的 record 视图（core ExecutionRecord 的结构子集：reducer 只触碰这五个字段）。
  * core ExecutionRecord 满足本视图（W2 断言挂靠点）；SDK 内自持 createReplayRecord 产出。
  */
 export interface ReplayRecordView {
@@ -48,10 +60,16 @@ export interface ReplayRecordView {
   turnCount: number;
   totalTokens: number;
   lastError: string | undefined;
+  /**
+   * 轮失败事实只追加数组（§3.3.5）。缺省 undefined 视为空（磁盘重建的旧 record
+   * 兼容——reducer 以 `??=` 兜底初始化，不要求构造方预置）。
+   */
+  errors?: ErrorFact[];
 }
 
 // ============================================================
-// usage 累积（core execution-record.ts 私有 helper 逐字等价）
+// usage 累积（reducer 单源自 core execution-record.ts 收编；导出供 core 侧
+// 磁盘重建路径 session-reconstructor 复用——原 core 导出改 re-export 本处）
 // ============================================================
 
 /** usage 单字段求和（undefined 视为 0——与旧 `(a ?? 0) + (b ?? 0)` 内联式逐字等价）。 */
@@ -74,7 +92,7 @@ function usageFromNext(next: AgentUsage): AgentUsage {
  * 累加两个 AgentUsage（field-wise）。prev 为空时返回 next 的拷贝。
  * 供 message_end 把 usage 增量并入 turn.usageDelta。
  */
-function addUsage(prev: AgentUsage | undefined, next: AgentUsage): AgentUsage {
+export function addUsage(prev: AgentUsage | undefined, next: AgentUsage): AgentUsage {
   if (prev === undefined) return usageFromNext(next);
   return {
     input: sumUsageField(prev.input, next.input),
@@ -90,7 +108,7 @@ function addUsage(prev: AgentUsage | undefined, next: AgentUsage): AgentUsage {
 // ============================================================
 
 /** 创建一个空 turn（text/thinking 空，无 toolCalls，未结束）。 */
-function emptyTurn(): Turn {
+export function emptyTurn(): Turn {
   return { text: "", thinking: "", toolCalls: [], usageDelta: undefined, closed: false };
 }
 
@@ -103,6 +121,7 @@ export function createReplayRecord(): ReplayRecordView {
     turnCount: 0,
     totalTokens: 0,
     lastError: undefined,
+    errors: [],
   };
 }
 
@@ -260,21 +279,40 @@ function applyToolEnd(
 }
 
 /**
- * turn_end：结束当前 turn，记 closedTs（真实墙钟），turnCount++，清 lastError。
- * 正常结束清 lastError：瞬态 error 恢复后不应误判 success=false
- * （若 turn_end 后 message_end 报 error，会在 message_end 处理器重新写回）。
+ * [§3.3.5 第 0 波②] turn_end：结束当前 turn，记 closedTs（真实墙钟），turnCount++。
+ * **不再清空 lastError**——旧「正常结束清 lastError」的注释补偿假设（瞬态 error 恢复
+ * 后由 turn_end 清除）与真实事件序（error → turn_end：失败发生在轮内、轮终时到达）
+ * 相反，结构上几乎永远读不到值（故障 B 的掩盖层之一：真实死因被轮终清洗）。
+ * 失败事实改由 errors 只追加承载，lastError 由「最后一个非空轮失败」派生——
+ * error → turn_end 序后 lastError 仍可读，复活/续聊后旧失败轮仍可见。
  */
 function applyTurnEnd(record: ReplayRecordView): void {
   const turn = currentTurn(record);
   turn.closed = true;
   turn.closedTs = Date.now();
   record.turnCount += 1;
-  record.lastError = undefined;
+}
+
+/**
+ * [§3.3.5] 轮失败事实入账单点：append ErrorFact + lastError 派生刷新（唯一写点）。
+ * 空串 / 缺席不入账（无信息失败事实不占位）；`??=` 兜底磁盘重建的旧 record
+ * （无 errors 字段，缺省 undefined 视为空）。lastError = 最后追加的非空 message
+ * ——数组 append-only 且项非空，尾项即「最后一个非空轮失败」。
+ *
+ * [subagent-observability u3] 导出给 core 轮终写点（record-store-rounds 失败轮
+ * settlement）复用——u2 移交的「markRoundIdle 直写 rec.lastError 绕过 errors 数组」
+ * 收编：轮终失败事实与流内 error 事件走同一入账通道，写点单点（双写漂移防线）。
+ */
+export function appendErrorFact(record: ReplayRecordView, message: string | undefined | null): void {
+  if (!message) return;
+  (record.errors ??= []).push({ message, at: Date.now() });
+  record.lastError = message;
 }
 
 /**
  * message_end：usage 增量存进末 turn.usageDelta（直接写末 turn，不开新 turn）；
- * totalTokens 累加；error（stopReason=error）记进 lastError。
+ * totalTokens 累加；error（stopReason=error）经 appendErrorFact 入账
+ * （errors 只追加 + lastError 派生刷新，§3.3.5）。
  *
  * usageDelta 按 message_end **累加**（非覆盖）——同一 turn 内若多次 message_end
  * 到达（或 turn_end 后的滞后 message_end 落到 currentTurn 开的新 turn），
@@ -294,16 +332,16 @@ function applyMessageEnd(
       (event.usage.cacheRead ?? 0) + (event.usage.cacheWrite ?? 0);
   }
   if (event.error) {
-    record.lastError = event.error;
+    appendErrorFact(record, event.error);
   }
 }
 
-/** error：存 record.lastError（getEventLog 派生 error 条目用）。 */
+/** error：经 appendErrorFact 入账（getEventLog 派生 error 条目读 lastError）。 */
 function applyErrorEvent(
   record: ReplayRecordView,
   event: Extract<AgentEvent, { type: "error" }>,
 ): void {
-  record.lastError = event.message;
+  appendErrorFact(record, event.message);
 }
 
 /**
@@ -312,10 +350,10 @@ function applyErrorEvent(
  *   - tool_start/end：push 进 currentTurn().toolCalls（含完整 result）
  *     tool_end 跨 turn 扫描找 running 同名 toolCall（兜底滞后事件）
  *   - turn_end：结束当前 turn，记 closedTs（真实墙钟，供 getEventLog）；
- *     正常结束清 lastError（瞬态 error 恢复后不应误判 success=false）
+ *     不再清 lastError（§3.3.5——error → turn_end 序后 lastError 仍可读）
  *   - message_end：usage 增量存进末 turn.usageDelta（直接写末 turn，不开新 turn）；
  *     totalTokens 累加
- *   - error：存 record.lastError（getEventLog 派生 error 条目用）
+ *   - error：经 appendErrorFact 入账（errors 只追加 + lastError 派生刷新）
  *
  * 唯一写点——replay 与 live 共用（重放等价性的实现体）。
  *
@@ -344,7 +382,7 @@ export function updateFromEvent(record: ReplayRecordView, event: AgentEvent): vo
     case "message_end":
       return applyMessageEnd(record, event);
 
-    // ── error：存 record.lastError ──
+    // ── error：appendErrorFact 入账（errors 只追加 + lastError 派生）──
     case "error":
       return applyErrorEvent(record, event);
 
@@ -360,6 +398,13 @@ export function updateFromEvent(record: ReplayRecordView, event: AgentEvent): vo
     //    信号不进 record 派生视图，消费方 = 宿主等待门 + run 事件 journal（C3 第④步
     //    双侧 reducer no-op 义务的 SDK 侧）
     case "armed":
+      return;
+
+    // ── auto_retry：pi 原生重试边界帧（[subagent-observability §3.3.1 P5]）——
+    //    观测面（journal 留痕失败尝试轨迹），不进 record 派生视图：失败尝试的
+    //    turns/usage 切片与 retryAttempts 计数由引擎收尾快照一次产出（outcome
+    //    字段承载），reducer 写入会让失败尝试静默混进 turns 聚合，恰违背 P5 计账。
+    case "auto_retry":
       return;
 
     default: {

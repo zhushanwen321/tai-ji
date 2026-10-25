@@ -6,7 +6,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { CONSERVATIVE_CAPABILITIES, parseCapabilities, parseProcessModel } from "../engine-manifest.ts";
+import { CONSERVATIVE_CAPABILITIES, parseCapabilities, parseModelTranslation, parseProcessModel } from "../engine-manifest.ts";
 import type { EngineCapabilities } from "../types.ts";
 
 // [teardown 竞态修复] 被测链（parseCapabilities/parseProcessModel 回退路径）的 logger 输出
@@ -73,5 +73,27 @@ describe("parseProcessModel 缺省回落（U0 验收：缺省按 per-window 分�
     expect(parseProcessModel("e1", 42)).toBe("per-window");
     expect(parseProcessModel("e1", "")).toBe("per-window");
     expect(parseProcessModel("e1", null)).toBe("per-window");
+  });
+});
+
+// parseModelTranslation（S-6）：trim 只用于校验、原始键值入库的形态已修——入库与
+// 校验同用 trim 后形态（翻译查表层按 trim 后 ref 段比对，原始带空白键永不匹配）。
+describe("parseModelTranslation trim 入库（S-6）", () => {
+  it("带空白键/值：入库为 trim 后形态（校验与入库同形态）", () => {
+    expect(
+      parseModelTranslation("e1", { " zai-coding-cn/flash ": "  native/FLASH  " }),
+    ).toEqual({ "zai-coding-cn/flash": "native/FLASH" });
+  });
+
+  it("键 trim 后空 / 非串值 / 值 trim 后空 → 条目丢弃；全弃 = 无翻译面", () => {
+    expect(parseModelTranslation("e1", { "  ": "v" })).toBeUndefined();
+    expect(parseModelTranslation("e1", { k: 42 })).toBeUndefined();
+    expect(parseModelTranslation("e1", { k: "  " })).toBeUndefined();
+  });
+
+  it("缺省/null = 无翻译面；无空白键值原样入库（不动形）", () => {
+    expect(parseModelTranslation("e1", undefined)).toBeUndefined();
+    expect(parseModelTranslation("e1", null)).toBeUndefined();
+    expect(parseModelTranslation("e1", { "a/b": "c/d" })).toEqual({ "a/b": "c/d" });
   });
 });

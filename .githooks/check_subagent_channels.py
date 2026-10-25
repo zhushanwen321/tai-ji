@@ -9,7 +9,7 @@ custom 消息注入点唯一性检查（C-ext-19，pi-boundary-reliability §3.3
   规则 1（deliverAs 注入点唯一）：扫描 extensions/ 全部 .ts 源码（排除 __tests__/
   与 *.test.ts / *.d.ts——测试模拟串不拦，同 install-hooks.sh EXTENSION_FILES 的
   __tests__|\.test\. 排除先例），deliverAs:"steer"/"followUp"/"nextTurn" 字面量不得
-  出现在 delivery-port 白名单外——custom 车道唯一执行者 =
+  出现在 delivery-port 白名单外——custom 投递路径唯一执行者 =
   extensions/shared/delivery-port（port.deliver → 内核受理 → pi.sendMessage 直达
   pi 唯一队列，受理前落 session entry 投递日志 + details-id 送达凭据 + session_start
   差集重放）。deliverAs 字面量注入点在检查层面收敛——字面量形态结构性排除，
@@ -37,6 +37,7 @@ custom 消息注入点唯一性检查（C-ext-19，pi-boundary-reliability §3.3
 退出码: 0 通过 / 2 违规
 """
 
+from __future__ import annotations
 import re
 import subprocess
 import sys
@@ -48,7 +49,7 @@ PKG_PREFIX = "extensions/universal/subagent-workflow"
 PKG_SRC_SUFFIX = f"{PKG_PREFIX}/src"
 
 # ── 规则 1 白名单（路径相对 extensions/；扩白名单必须给职责定性注释）────────
-# delivery-port：custom 车道唯一执行者本体（port.deliver → 内核 → pi.sendMessage
+# delivery-port：custom 投递路径唯一执行者本体（port.deliver → 内核 → pi.sendMessage
 # 直达唯一队列）——全项目通知唯一出口（统一投递设计 §3.7）。
 # 其余条目 = 逐文件定性豁免；后续包经 port 迁移时对应条目摘除（清单单调收缩）。
 WHITELIST_DELIVERAS = {

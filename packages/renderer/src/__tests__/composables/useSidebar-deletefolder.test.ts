@@ -96,7 +96,7 @@ import { useSessionStore } from '@/stores/session'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 
 function makeSummary(id: string, cwd = '/p'): SessionSummary {
-  return { id, label: id, cwd, status: 'idle', lastActiveAt: 1, modelId: 'm1', tokenCount: 0 }
+  return { id, label: id, cwd, status: 'idle', lastActiveAt: 1 }
 }
 
 /** 种入指定 cwd 下若干 session（单组）—— seed pinia session store（ADR-0059） */

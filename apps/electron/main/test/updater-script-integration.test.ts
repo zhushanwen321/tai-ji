@@ -36,10 +36,10 @@
  * 与 updater-script.test.ts 的边界：那边字符串视角（检查片段在不在），本文件
  * 执行视角（bash 跑不跑得通、分支真不真触发、终态对不对）。
  *
- * 集成门控（TAIJI_TEST_INTEGRATION，docs/todo/test-single-layer-cleanup.md 第二波）：
+ * 集成门控（TAIJI_TEST_INTEGRATION，docs/TEST-STRATEGY.md「新写测试判据」节 第二波）：
  * 真 hdiutil/DMG + 真 bash + 真实等待窗的用例属「代码 + OS 组合行为」（判据档③，
  * 无确定性完成信号，负载下窗口拉长），四段重执行 describe 挂门控——本地默认跳过、
- * CI / 按 update 域改动范围触发时设 env 真跑。单测轨保留两类轻用例：bash -n 语法
+ * CI / 按 update 域改动范围触发时设 env 真跑。单测层保留两类轻用例：bash -n 语法
  * 检查（3 条）+ 脚本依赖的 CLI 工具可用性。
  *
  * 运行：cd apps/electron && pnpm run test:main test/updater-script-integration.test.ts

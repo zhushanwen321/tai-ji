@@ -8,7 +8,7 @@
  * - TC-w4-1/2/7/8：mount Turn.vue + 真实 useTurnExpansion（无 mock，验端到端接线）
  * - TC-w4-3：mount TurnRail.vue smoke test（TurnRail props 契约：4 props + 2 emit）
  * - TC-w4-3b/4/6：useMessageStreamRail composable 单元测试（验事件路由 handler → useTurnExpansion，
- *   rail 下标→MessageTurn.index 映射）
+ *   rail 下标→turnStableId 稳定 key 映射）
  * - TC-w4-9：mount MessageStream.vue 首屏冒烟（验 MessageStream 模板真的引用 TurnRail + emit 接线）。
  *   真实 mount：壳 mock 经 message-stream-shell-mount 导入注册（useChat/useSidebar，store
  *   副作用隔离），用 chat store setMessages 注入
@@ -90,7 +90,8 @@ function makeTurn(over: Partial<MessageTurn> = {}): MessageTurn {
 }
 
 /** [w6] ui Turn 展开态经 deps 注入：stateful mock（reactive Set）驱动展开/收起契约
- *  （真实 useTurnExpansion 逻辑在 renderer 壳 useChatViewDeps 内，组件层只经 isExpanded/toggleExpand/collapse 消费）。
+ *  （真实 useTurnExpansion 逻辑在 renderer 壳 useChatViewDeps 内，组件层只经 isExpanded/toggleExpand
+ *  消费；[chat-flow-consistency C3] deps.collapse 已随 onComplete 接线退役删除）。
  *  [M5 stable-key] key 为 turnStableId(turn)（string，首条消息 id），非 turn.index。 */
 const expandedTurns = reactive(new Set<string>())
 function statefulExpandDeps() {
@@ -100,7 +101,6 @@ function statefulExpandDeps() {
       if (expandedTurns.has(key)) expandedTurns.delete(key)
       else expandedTurns.add(key)
     },
-    collapse: (key: string) => expandedTurns.delete(key),
   }
 }
 
@@ -157,16 +157,12 @@ describe('Turn.vue 接线 useTurnExpansion（w1）', () => {
     expect(wrapper.find('.chev').classes()).toContain('rotate-90')
   })
 
-  it('TC-w4-2: 完成态自动收起（isSessionActive true→false 触发 useTurnElapsed.onComplete → deps.collapse）', async () => {
-    // 关键：先让 isExpanded=true（手动展开），才能区分两条路径——
-    //   showTrace = sessionActive || isExpanded(idx)。
-    //   若不预先展开，sessionActive true→false 时 showTrace 直接 false，与 onComplete 是否调用无关，
-    //   测试无法捕捉 onComplete 回归（即使把 onComplete 改 no-op 测试仍过）。
-    //   预先 isExpanded=true 后：onComplete 正确触发 collapse → isExpanded 转 false → showTrace=false；
-    //   若 onComplete 未触发 → isExpanded 仍 true → showTrace=false||true=true（trace 仍在，测试能捕捉）。
-    //
-    // sessionActive=true 时 turn-meta button :disabled（Turn.vue），无法用点击触发 toggle，
-    // 故直接预置 expandedTurns（makeTurn() 默认 index=1 → 稳定 key 'u1'）。
+  it('TC-w4-2 [C3 退役]: 会话结束降沿不清手动展开态（onComplete collapse 已退役，收起纯派生）', async () => {
+    // [chat-flow-consistency C3] 旧契约（isSessionActive true→false 触发 onComplete →
+    // deps.collapse 清手动展开）已退役：工作回合的收起由派生完成（isWorkingTurn 翻 false →
+    // showTrace = isExpanded），显式 collapse 的唯一净效果是清挂载回合的手动展开态（有害无益）。
+    // 新契约（design-stream-presentation C3 验收断言）：手动展开的回合在会话结束降沿保持展开。
+    // 预置 expandedTurns（makeTurn() 默认稳定 key 'u1'）后降沿——展开必须原样保留。
     expandedTurns.add('u1')
     const wrapper = mount(Turn, {
       props: {
@@ -183,15 +179,12 @@ describe('Turn.vue 接线 useTurnExpansion（w1）', () => {
     // sessionActive=true → showTrace = true || true = true（thinking+text 都渲染）
     expect(wrapper.find('.trace').exists()).toBe(true)
     expect(wrapper.findAllComponents({ name: 'Block' }).length).toBe(2)
-    // 对话结束：isSessionActive true→false → useTurnElapsed watch 触发 onComplete → deps.collapse(1)
-    //   → isExpanded(1) 变 false → showTrace = false || false = false → thinking/tool 内容隐藏
-    await wrapper.setProps({ isSessionActive: false })
-    // [block-rendering M0] trace 容器恒渲染，折叠态仅 text 恒渲染（thinking 隐藏）
+    // 对话结束：isSessionActive true→false——不再有 onComplete collapse；手动展开保持
     expect(wrapper.find('.trace').exists()).toBe(true)
-    expect(wrapper.findAllComponents({ name: 'Block' }).length).toBe(1)
-    // 回归检查：collapse 确实被调用（expandedTurns 已被 onComplete 路径复位）。
-    // 若 onComplete 被改成 no-op，此处仍为 true，测试会失败（捕捉回归）。
-    expect(expandedTurns.has('u1')).toBe(false)
+    await wrapper.setProps({ isSessionActive: false })
+    // 手动展开态保持：isExpanded('u1') 仍 true → showTrace 仍 true（thinking 可回看）
+    expect(wrapper.findAllComponents({ name: 'Block' }).length).toBe(2)
+    expect(expandedTurns.has('u1')).toBe(true)
   })
 
   it('TC-w4-7: 展开态隔离 —— 两个 Turn（不同稳定 key）展开互不影响', async () => {
@@ -267,7 +260,7 @@ describe('Turn.vue 接线 useTurnExpansion（w1）', () => {
 
 /* ──────────────────────────────────────────────────────────────
  * TC-w4-3：TurnRail（w3）props 契约 smoke test（TurnRail props 契约：4 props + 2 emit）
- * TC-w4-3b/4/6：useMessageStreamRail composable 单元测试（验事件路由 → useTurnExpansion，rail 下标→MessageTurn.index 映射）
+ * TC-w4-3b/4/6：useMessageStreamRail composable 单元测试（验事件路由 → useTurnExpansion，rail 下标→turnStableId 稳定 key 映射）
  *
  * MessageStream.vue 整体 mount 的真接线性由 TC-w4-9（见文末 describe）覆盖：仅 mock useChat/
  * useSidebar（store 副作用隔离），用 chat store setMessages 注入消息让 railTurns 非空，
@@ -348,18 +341,19 @@ describe('MessageStream rail 接线（TurnRail props 契约 + useMessageStreamRa
     wrapper.unmount()
   })
 
-  it('TC-w4-4: onToggle(idx) → useTurnExpansion.toggle 翻转（rail 下标 → MessageTurn.index 映射正确）', () => {
+  it('TC-w4-4: onToggle(idx) → useTurnExpansion.toggle 翻转（rail 下标 → turnStableId 稳定 key 映射正确）', () => {
     // useMessageStreamRail 内部调 useTurnExpansion（per-instance Map）。
-    // 验证 rail onToggle 下标映射 → MessageTurn.index：railTurns[0].index=1，onToggle(0) 应翻转 index=1。
+    // 验证 rail onToggle 下标映射 → turnStableId 稳定 key：railTurns[0] 稳定 key 'u1'（user.id=u1），
+    // onToggle(0) 应调 toggle('u1')（M5 stable-key 后 Map key 是稳定 id 非数组 index；翻转 store 断言见 TC-w4-3b）。
     // 注：useTurnExpansion 是 per-instance（每次调用建自己的 Map），与 Turn.vue 内的调用不共享——
     //    这是 w1 既定设计（任务规范「直接 import 用，不重新实现」）。本测验证 rail handler 路由正确性。
     const { rail, wrapper } = mountRail()
-    // railTurns 下标 → MessageTurn.index 映射（这是 onToggle/expandAll 的路由核心）
+    // railTurns 下标 → turnStableId 稳定 key 映射（这是 onToggle 的路由核心：idx → turnStableId(turn)）
     expect(rail.railTurns.value).toHaveLength(3)
     expect(rail.railTurns.value[0].index).toBe(1)
     expect(rail.railTurns.value[1].index).toBe(2)
     expect(rail.railTurns.value[2].index).toBe(3)
-    // onToggle(0) 不抛错（railTurns[0].index=1 存在，调 useTurnExpansion.toggle(1)）
+    // onToggle(0) 不抛错（railTurns[0] 存在，调 useTurnExpansion.toggle('u1')——稳定 key 路由）
     expect(() => rail.onToggle(0)).not.toThrow()
     // 边界：onToggle 越界不抛错（railTurns[99] 不存在 → turnIdx undefined → no-op）
     expect(() => rail.onToggle(99)).not.toThrow()

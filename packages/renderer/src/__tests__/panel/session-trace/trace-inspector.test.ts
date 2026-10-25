@@ -154,7 +154,7 @@ const PanelStub = defineComponent({
 })
 
 // PanelContainer 组件构造器（beforeAll 预热填充）：整图 transform 首载成本（junit 实测
-// 单条 13s+）一次性移入文件级 beforeAll，不落在任何单条用例预算内（test-single-layer-cleanup
+// 单条 13s+）一次性移入文件级 beforeAll，不落在任何单条用例预算内（TEST-STRATEGY「新写测试判据」
 // h 类处置：模块图首载预热共享；vi.mock 声明提升到文件顶部，预热 import 时 mock 已生效）
 let PanelContainerCtor: (typeof import('@/components/workspace/PanelContainer.vue'))['default']
 

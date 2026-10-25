@@ -55,10 +55,11 @@
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
 
-import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../shared/agent-call-types.ts";
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
 import { project, settleWorkflowRecord } from "../persistence/execution-record.ts";
+import { notifyGateAllowsDelivery } from "../notify/notifier.ts";
 // [P1b-1] settle 链收尾单点（settleOneShotOutcome workflow origin 分支的终态收尾
 // 迁入）。[D1 拆边 Class C] 该单点下沉持久化层（记录级原语：CAS + 委托
 // finalizeRecord，零编排语义），上方 import 已直连 persistence。
@@ -69,6 +70,7 @@ import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
 import { identityEnvelopeOf } from "../engine/port.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
 import type { SubagentModelSource } from "../domain/record-model.ts";
+import { settlementFactsOf } from "../domain/record-model.ts";
 import { resolveEngineModelWithTranslation } from "../engine/model-ref-translation.ts";
 import { getLogger } from "../../core/logger.ts";
 import { executeOptionsToEngineTaskSpec } from "../engine/host-task-spec.ts";
@@ -107,8 +109,28 @@ import { DEFAULT_AGENT_NAME } from "../domain/record-model.ts";
 // [R6/D-R4-4] 跨聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
 import type { AgentStreamSink } from "../../shared/agent-stream.ts";
+import type { RoundSettlementOutcome } from "../persistence/finalize-record.ts";
 
 const logger = getLogger("subagents");
+
+/**
+ * RoundSettlementOutcome 两分支的同构可选字段透传（[§3.3.1 P6] 接管三态 / usage 快照 /
+ * 观察事实 / 重试计数 / [§3.3.6 evidence 取证指针] stderrTeePath——AgentResult 值在
+ * 场才携带，两分支消费同构，装配单点）。
+ */
+function roundIdleCommonFields(result: AgentResult): Pick<
+  Extract<RoundSettlementOutcome, { kind: "success" }>,
+  "engineStopReason" | "promptDisposition" | "usage" | "retryAttempts" | "observations" | "stderrTeePath"
+> {
+  return {
+    ...(result.engineStopReason !== undefined ? { engineStopReason: result.engineStopReason } : {}),
+    ...(result.retryAttempts !== undefined ? { retryAttempts: result.retryAttempts } : {}),
+    ...(result.promptDisposition !== undefined ? { promptDisposition: result.promptDisposition } : {}),
+    ...(result.usage !== undefined ? { usage: result.usage } : {}),
+    ...(result.observations !== undefined ? { observations: result.observations } : {}),
+    ...(result.stderrTeePath !== undefined ? { stderrTeePath: result.stderrTeePath } : {}),
+  };
+}
 
 /**
  * [R1 打样模式 1] 聚合协作 deps——**全部晚绑定闭包，构造期零求值**。
@@ -274,7 +296,7 @@ export class RunOrchestration {
       ? this.deps.getModelService().getRequiredAgentConfig(opts.agent)
       : undefined;
 
-    // ── 1.5 引擎路由（D2 单轨 + D3-② 路由单点：统一经 routeEngineForHost）──
+    // ── 1.5 引擎路由（D2 单路 + D3-② 路由单点：统一经 routeEngineForHost）──
     // 唯一实现在 engine/routing.ts（pi 同步短路 + registry 注入收敛于此）；本调用点
     // 只装配三层输入与注入件。时机：路由（含 probe）在 record 创建前完成——引擎未
     // 注册 / probe 失败 / 全局配置读不出来都在此 throw，不产生孤儿 record，也不换
@@ -301,7 +323,13 @@ export class RunOrchestration {
       // [2026-10-13 进程形态修复] shared-service 引擎（zcode）已经由 descriptor
       // 装配修复（processModel 同源进 manifest）在透传路径直通单例；本处 U3 接线的
       // 剩余场景 = 未来「每窗口一份」的非 pi 引擎接入 chat 直派时才需要。
-      probe: (engineId) => resolveWorkflowWindowEnginePort(undefined, engineId).probe(),
+      // [DC-12] probe 携带 service 层权威根（与 runCtx.sessionRootId 同源）：probe
+      // 与 run 命中同一 (socket, root) 共享连接，消「temp 根连接 + rebind」双 spawn。
+      probe: (engineId) => resolveWorkflowWindowEnginePort(undefined, engineId).probe(
+        this.sessionRootId !== null && this.sessionRootId !== ""
+          ? { rootSessionId: this.sessionRootId }
+          : undefined,
+      ),
       // [W3] chat 域 pi 路由 = registry cli 形态 port（协议客户端）——inproc DI 实例
       // 随 inproc pi 引擎目录 删除消亡，chat 与 run 域同路（G1 单一 CLI 形态）。
       piEngine: this.resolveChatEnginePort(),
@@ -452,7 +480,7 @@ export class RunOrchestration {
   }
 
   /**
-   * chat 域统一执行入口（D2 单轨：全引擎——含 pi——经此进入 EnginePort）。路由
+   * chat 域统一执行入口（D2 单路：全引擎——含 pi——经此进入 EnginePort）。路由
    *（routeEngineForHost：三层 + pi 同步短路 + probe/检查）已由 execute 完成——这里
    * 只剩 unsupported 预检 → identity（pi 链解析 / 非 pi 按目标引擎校验，
    * [u-h2 D2-1/D2-2]）→ record 创建+盖章 → worktree → detached 引擎 run。
@@ -572,7 +600,9 @@ export class RunOrchestration {
     // [engine-ref-translation D2] 四层产物经引擎翻译侧改写为引擎原生 ref（共享 helper
     // resolveEngineModelWithTranslation——与 workflow 域同语义；两层失败语义分立见模块头）。
     // [subagent-detail-model-info] 来源标注与解析同点判定：pi 路由 = task 显式 ?
-    // explicit : default（frontmatter/偏好层不适用——pi 链自解析）。
+    // (agent frontmatter ? frontmatter : default)（S-2：pi 链自解析虽不经 taiji 侧
+    // helper，但 agent .md 声明的模型同样被 pi 链消费，标注须与事实同构；偏好层
+    // 不适用——pi 路由不插 taiji 级偏好，D6 不采用段）。
     const resolvedModel = isPiRoute
       ? undefined
       : resolveEngineModelWithTranslation(
@@ -585,7 +615,9 @@ export class RunOrchestration {
       );
     const engineModel = resolvedModel?.engineModel;
     const modelSource: SubagentModelSource = isPiRoute
-      ? (opts.model !== undefined ? "explicit" : "default")
+      ? (opts.model !== undefined
+        ? "explicit"
+        : (preIdentity.agentConfig?.model !== undefined ? "frontmatter" : "default"))
       : (resolvedModel?.source ?? "default");
     const identity = isPiRoute
       ? await this.deps.resolveIdentity(opts, preIdentity)
@@ -783,10 +815,32 @@ export class RunOrchestration {
       // [U2b] 轮终簿记①-⑪归属 store.markRoundIdle（`.alive` 跨轮保留；[W4 发射点②]
       // pending 注销已随 store 簿记⑧统一发射；⑩⑪ A-lite stopReason 展示位 +
       // `.state` 收条/binding 快照——正常轮终后宿主崩溃 revive 水合不归零）。
-      this.deps.getStore().markRoundIdle(record.id, { kind: "success", content: result.text });
+      this.deps.getStore().markRoundIdle(record.id, {
+        kind: "success",
+        content: result.text,
+        // [§3.3.3] 引擎停因原值随轮收条落盘（正常收尾派生判据的事实输入）。
+        ...roundIdleCommonFields(result),
+      });
     } else {
       // [U5] 失败轮 settle（不终态化——旧一次性销毁退役，失败轮同样可续聊）。
-      this.deps.getStore().markRoundIdle(record.id, { kind: "failed", reason: result.error ?? "round failed" });
+      // [§3.3.3] 失败分类与引擎停因原值随轮收条落盘（判定链事实不再止步于 reason
+      // 串——list lastRound.failure / 通知文案点拼消费方的数据源）。
+      this.deps.getStore().markRoundIdle(record.id, {
+        kind: "failed",
+        reason: result.error ?? "round failed",
+        ...(result.failure !== undefined ? { failure: result.failure } : {}),
+        ...roundIdleCommonFields(result),
+      });
+    }
+    // [subagent-observability §3.3.7② one-shot 通道放行] 非 workflow origin 的一次性
+    // 成员（executeAndAwait 域——G9 核实的现役调用点 canvas reviewer 等）轮终后发
+    // 轮应答（UC-4：正常轮收单条轮应答；该域无 run，runSettledEffects 的 wf-done 不
+    // 适用——构造性不双发）。gate 两步判定与 Continuation 调用点同形（notifyGate
+    // 消费方注释登记的「泛化派发主干尾部 one-shot 回注」位）；workflow origin 分支
+    // 维持 origin gate 静默（结果由脚本返回值承载，fan-out 成员放行判据缺口另案裁决
+    // ——u4 deviations 登记）。
+    if (notifyGateAllowsDelivery(record)) {
+      this.deps.getNotifyHost().notifyComplete(record);
     }
   }
 
@@ -807,6 +861,11 @@ export class RunOrchestration {
       sessionId: outcome.sessionId ?? record.id,
       toolCalls: [],
       ...(outcome.parsedOutput !== undefined ? { parsedOutput: outcome.parsedOutput } : {}),
+      // [subagent-observability §3.3.1/§3.3.3/§3.3.10] 收尾边沿事实透传（failure/
+      // engineStopReason/retryAttempts/接管三态/usage 快照/观察性事实——单一构造器
+      // settlementFactsOf）→ settleOneShotOutcome → 轮收条 rec.lastRound——one-shot
+      // 域与 workflow 域同源，判定分类与「正常收尾」派生判据不因执行域丢失。
+      ...settlementFactsOf(outcome),
     };
   }
 

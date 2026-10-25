@@ -88,7 +88,7 @@
           data-testid="session-stop-item"
           class="flex h-[28px] w-full cursor-pointer select-none items-center gap-[8px] rounded-sm px-[9px] text-[length:var(--text-xs)] outline-none [&_svg]:size-[13px]"
           :class="confirmingStop
-            ? 'bg-danger text-neutral-fg'
+            ? 'bg-danger text-danger-fg'
             : 'text-neutral-fg hover:bg-surface-hover hover:text-neutral-fg data-[highlighted]:bg-surface-hover data-[highlighted]:text-neutral-fg'"
           @select="onStopSelect"
         >
@@ -102,7 +102,7 @@
           data-testid="session-force-quit-item"
           class="flex h-[28px] w-full cursor-pointer select-none items-center gap-[8px] rounded-sm px-[9px] text-[length:var(--text-xs)] outline-none [&_svg]:size-[13px]"
           :class="confirmingQuit
-            ? 'bg-danger text-neutral-fg'
+            ? 'bg-danger text-danger-fg'
             : 'text-danger hover:bg-danger-soft hover:text-danger data-[highlighted]:bg-danger-soft data-[highlighted]:text-danger'"
           @select="onForceQuitSelect"
         >

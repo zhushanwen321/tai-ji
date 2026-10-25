@@ -47,6 +47,7 @@ utilityProcess.fork），要求每个调用点的实参区窗口内出现出站�
 豁免/范围调整须同步 docs/architecture/env-propagation-boundary.md §3.6 R5 并过评审。
 """
 
+from __future__ import annotations
 import os
 import re
 import sys

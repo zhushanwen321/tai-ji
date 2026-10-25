@@ -1,8 +1,8 @@
 /**
  * pi 环境探测与常量（equivalence 测试族共用底层，零测试逻辑）。
  *
- * 为什么独立成文件：pi-fixture.ts（faux 轨主模块）按需动态 import real-pi-gate.ts
- * （real 轨门控），而 real-pi-gate 又需要 PI_PATH / DEFAULT_MODEL——两者互相引用构成
+ * 为什么独立成文件：pi-fixture.ts（faux 层主模块）按需动态 import real-pi-gate.ts
+ * （真实进程层门控），而 real-pi-gate 又需要 PI_PATH / DEFAULT_MODEL——两者互相引用构成
  * 循环依赖（metrics-gate circular-dependency 门禁拦截）。把 binary 探测与模型常量下沉
  * 到本叶子模块后，依赖方向恒为 pi-fixture → 本模块 ← real-pi-gate，环消除。
  *

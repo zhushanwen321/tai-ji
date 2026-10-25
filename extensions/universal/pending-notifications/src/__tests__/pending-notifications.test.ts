@@ -14,7 +14,7 @@
 
 /* eslint-disable taste/no-unsafe-cast */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import pendingNotificationsExtension from "../index";
@@ -422,7 +422,7 @@ describe("pendingNotificationsExtension factory", () => {
 			}
 		});
 
-		it("U7c: 未知 reason 落 default 兜底 completed（兜底语义的显式登记——未来若改兜底口径，此用例同步更新）", () => {
+		it("U7c: 未知 reason 落 default 兜底 unknown（fail-visible 缺省——§3.3.11④ fail-open=completed 废除，不产假成功）", () => {
 			fireSessionStart(setup);
 			setup.handlers.pendingRegister!({ id: "w-unknown", type: "workflow", name: "op" });
 			setup.appendEntryMock.mockClear();
@@ -431,7 +431,24 @@ describe("pendingNotificationsExtension factory", () => {
 
 			expect(setup.appendEntryMock).toHaveBeenCalledWith(
 				"pending:unregister",
-				expect.objectContaining({ id: "w-unknown", reason: "some-future-reason", status: "completed" }),
+				expect.objectContaining({ id: "w-unknown", reason: "some-future-reason", status: "unknown" }),
+			);
+		});
+
+		it("[subagent-observability §3.3.11④] reason 缺失（emit 方漏传的畸形 data）→ 结清 reason = no_result，不产 completed 假成功", () => {
+			fireSessionStart(setup);
+			setup.handlers.pendingRegister!({ id: "w-no-reason", type: "workflow", name: "op" });
+			setup.appendEntryMock.mockClear();
+
+			setup.handlers.pendingUnregister!({ id: "w-no-reason" });
+
+			expect(setup.appendEntryMock).toHaveBeenCalledWith(
+				"pending:unregister",
+				expect.objectContaining({ id: "w-no-reason", reason: "no_result", status: "unknown" }),
+			);
+			expect(setup.appendEntryMock).not.toHaveBeenCalledWith(
+				"pending:unregister",
+				expect.objectContaining({ reason: "completed" }),
 			);
 		});
 	});
@@ -453,6 +470,21 @@ describe("pendingNotificationsExtension factory", () => {
 			const res = await runTool(setup, { action: "list" });
 			const ids = (res.details as { items: PendingEntry[] }).items.map((i) => i.id);
 			expect(ids.sort()).toEqual(["s-1", "w-1"]);
+		});
+
+		it("renderResult 接线（C-ext-05）：注册定义携带函数成员 + 折叠态输出 details.summary 一行", async () => {
+			fireSessionStart(setup);
+			setup.handlers.pendingRegister!({ id: "w-1", type: "workflow", name: "a" });
+			const tool = setup.registerToolMock.mock.calls[0][0] as {
+				renderResult: (result: unknown, options: { expanded: boolean }, theme: Theme) => { render: (width: number) => string[] };
+			};
+			expect(typeof tool.renderResult).toBe("function");
+			const res = await runTool(setup, { action: "count" });
+			const renderTheme = { fg: (_token: string, text: string) => text } as unknown as Theme;
+			const lines = tool.renderResult(res, { expanded: false }, renderTheme).render(400);
+			// Text.render 按宽度 pad，trim 后断言（折叠态 = details.summary 一行）
+			expect(lines.length).toBe(1);
+			expect(lines[0].trim()).toBe("1 pending operations");
 		});
 	});
 

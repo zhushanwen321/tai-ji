@@ -28,7 +28,7 @@ import {
 } from '@zhushanwen/extension-protocol'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 
-// ── 帧标记守卫（窄化 ExtensionUIRequest 索签名承载的 marker 键）──────────────
+// ── 帧标记守卫（窄化 ExtensionUIRequest 契约上的 marker 键）──────────────
 
 /** planReview 审批帧（runtime event-adapter PLAN_REVIEW_MARKER 分支产出，selfReview 有界可选） */
 export type PlanReviewFrame = ExtensionUIRequest & {
@@ -37,7 +37,7 @@ export type PlanReviewFrame = ExtensionUIRequest & {
 }
 
 export function isPlanReviewFrame(req: ExtensionUIRequest): req is PlanReviewFrame {
-  return (req as { planReview?: unknown }).planReview === true
+  return req.planReview === true
 }
 
 /**

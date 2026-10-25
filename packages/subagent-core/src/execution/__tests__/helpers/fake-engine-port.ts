@@ -17,7 +17,7 @@
 // 与 recordId 键路由模拟面已随 chat 域退役删除。
 
 import type { EnginePort, EngineRunResult, RunContext } from "../../../execution/engine/port.ts";
-import type { AgentCallOpts } from "../../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../../shared/agent-call-types.ts";
 import type {
   AgentOutcome,
   EngineCapabilities,

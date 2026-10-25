@@ -41,6 +41,7 @@ export type SettingsSubscriptionStubs = Pick<
   | 'onProviders' | 'onModels' | 'onSkills' | 'onAgents' | 'onExtensions'
   | 'onSkillDirs' | 'onAgentDirs' | 'onExtensionDirs' | 'onDefaults' | 'onDefaultsWithSource'
   | 'onSkillCacheInvalidated' | 'onSystemPrompt' | 'onTerminalConfig' | 'onRetryConfig'
+  | 'onRetryRules'
   | 'onNetworkProxyConfig'
   | 'onAuthDeviceCode' | 'onAuthAuthUrl' | 'onAuthSuccess' | 'onAuthError'
 >
@@ -69,6 +70,7 @@ export function makeSettingsSubscriptionStubs(): SettingsSubscriptionStubs {
     onSystemPrompt: makeUnsubscribeStub(),
     onTerminalConfig: makeUnsubscribeStub(),
     onRetryConfig: makeUnsubscribeStub(),
+    onRetryRules: makeUnsubscribeStub(),
     onNetworkProxyConfig: makeUnsubscribeStub(),
     onAuthDeviceCode: makeUnsubscribeStub(),
     onAuthAuthUrl: makeUnsubscribeStub(),
@@ -118,6 +120,7 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
       config: { enabled: true, maxRetries: 3, baseDelayMs: 2000 },
       configured: false,
     })),
+    getRetryRules: vi.fn(async () => ({ builtinRules: [], customRules: [] })),
     getNetworkProxyConfig: vi.fn(async () => ({
       config: {
         enabled: false,
@@ -166,6 +169,7 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     setSystemPrompt: vi.fn(async (config) => ({ config, corrupted: false })),
     setTerminalConfig: vi.fn(async (config) => ({ config, corrupted: false })),
     setRetryConfig: vi.fn(async (config) => ({ config, configured: true })),
+    setRetryRules: vi.fn(async (customRules) => ({ builtinRules: [], customRules })),
     setNetworkProxyConfig: vi.fn(async (config) => ({ config })),
     testNetworkProxy: vi.fn(async () => ({ ok: true, stage: 'done' as const, message: '', elapsedMs: 0 })),
     resetNetworkProxyStats: vi.fn(async () => ({ stats: [] })),

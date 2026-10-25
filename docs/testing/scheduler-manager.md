@@ -14,7 +14,7 @@
 | 5 | 换插件复用点位（demo-echo 夹具） | 两枚插件按钮并存、demo 插件点击计数闭环、禁用后按钮消失（E2）、重启用恢复；验后夹具已删 | pass | statusChange/plugin-gone 双帧证 |
 | 6 | 忙时回执诚实性 | 生成中点暂停 → 行内「会话正在忙，操作未生效」+ JSONL 零新条目；结束后再点生效 | pass | busy notice 截图 + baseline diff |
 | 7 | 上限与空态 | 灌满 50：徽标 50 + 「共 50 / 上限 50」；零任务会话按钮常驻无徽标 + 空态 | pass | count50 + empty JSON |
-| 8 | 顶栏无回归 | 像素轨绿（visual-chromium）+ 真机几何 22px 不变、新增按钮为唯一 DOM 变化 | pass | 像素轨 2 passed + header 采样 |
+| 8 | 顶栏无回归 | 像素对比层绿（visual-chromium）+ 真机几何 22px 不变、新增按钮为唯一 DOM 变化 | pass | 像素对比层 2 passed + header 采样 |
 | 9 | 多会话徽标互不串 | A=2/B=1 切换互串零；重启应用后 didActivate 补充拉取正确（split 已移除，单 panel 口径） | pass | 重启前后截图 |
 | 12 | 负面路径 | 扩展禁用 → 灰置 + 泛化 tooltip + 点击零 prompt；requireCommand 直发无命令语境 → 回执 command-missing、零 prompt 不漏模型、无新通知通路 | pass | 回执证据 + 灰置截图 |
 

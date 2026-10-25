@@ -1,7 +1,7 @@
 /**
  * useSearch 单测（IF6，core 版）。
  *
- * 覆盖 plan TC-1..TC-6 + DTO 映射：mock 轨 4 类型合并 + 符号占位、loadSeq 乱序检查、
+ * 覆盖 plan TC-1..TC-6 + DTO 映射：mock 层 4 类型合并 + 符号占位、loadSeq 乱序检查、
  * file 源直查、双源 reject 静默、WS 超时 race、截断、符号占位恒定。
  * （TC-3 stale cache teardown / TC-4 缓存命中用例随 fileSearchStore 缓存退役删除——缓存治理 U1 1-3。）
  * 端口全 vi.fn() 注入（SearchDeps），真实 createCommandStore。
@@ -48,7 +48,7 @@ function makeDeps(overrides?: Partial<SearchDeps>): SearchDeps {
       selectSession: vi.fn(async () => {}),
       archiveList: vi.fn(async () => [] as ArchiveSummary[]),
       archiveJump: vi.fn(),
-      // t 返回实际本地化标签（mock fixture 用中文标签，与 real 轨 i18n 行为一致）
+      // t 返回实际本地化标签（mock fixture 用中文标签，与 真实进程层 i18n 行为一致）
       t: vi.fn((key: string) => {
         const labels: Record<string, string> = {
           'search.sectionSymbol': '符号',
@@ -94,7 +94,7 @@ function findSection(sections: Section[], kind: Section['kind']): Section | unde
   return sections.find((s) => s.kind === kind)
 }
 
-describe('TC-1: mock 轨 4 类型合并 + 符号占位', () => {
+describe('TC-1: mock 层 4 类型合并 + 符号占位', () => {
   it('isMock=true + searchMock 返 3 section → 补 symbol 占位，返回 4 section', async () => {
     const deps = makeDeps()
     deps.ports.isMock = true

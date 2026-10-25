@@ -26,6 +26,7 @@ pre-commit 检查，防止 store/composable/组件回退到直调底层通道。
 退出码：0 通过 / 2 违规
 """
 
+from __future__ import annotations
 import re
 import sys
 from collections.abc import Iterator

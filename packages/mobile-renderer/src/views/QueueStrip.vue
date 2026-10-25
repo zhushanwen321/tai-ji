@@ -12,18 +12,30 @@
 //   insertTextAtCursor 追加不覆盖——G5 同族语义：不回填即静默丢输入）。reply.segments
 //   快照不消费（移动 composer 无 chip 呈现载体，与图片粘贴文本降级同因）——桌面空输入分支的
 //   restoreSegments 整段恢复为双壳真差异（D9② 白名单 §6 登记）。
+// - 行内编辑钮（chat-flow-consistency D6 移动壳最小形态）：行内编辑 → peek 取全文预填 + 锚定
+//   登记发送侧 delivery.edit 原位替换（MobileComposer 分流）；编辑态提示条 + 单锚定三裁决
+//   （同行幂等 / 跨行拦截 / 非空追加），锚定分区在 app-runtime（Map + cleanup，桌面
+//   useSessionScopedState 同范式，判定逻辑 core queue-edit-anchor 双壳同源）。
 //
 // 反馈通道：取消失败就近落条目级内联错误行（MobileComposer sendFailed 同款
 // respondFailedId 范式：role=alert + 专用 testid；新取消尝试时清空，不跨条目残留旧错；
 // core toast 契约的错误条承载 core 失败情形文案，壳级条目反馈不挪用该单槽）。
 // 移动壳不做 failed 行重试钮（D7 原文「条目状态 + 取消钮」，重试
 // 面属桌面 QueueBubble 展示序；取消对 failed 条目同样有效，滞留条目有出路）。
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X } from '@lucide/vue'
+import { PenLine, X } from '@lucide/vue'
 import { deliveryQueueEntries, getDeliveryProjectionRef } from '@taiji/core'
+import { isQueueEditAlive } from '@taiji/core/domain/composer'
 import type { DeliveryFrameEntry } from '@taiji/core'
-import { cancelDelivery, composerInjectionStore } from '../shell/app-runtime'
+import {
+  beginQueueEdit,
+  cancelDelivery,
+  clearQueueEditFor,
+  composerInjectionStore,
+  peekDelivery,
+  queueEditAnchorOf,
+} from '../shell/app-runtime'
 
 const props = defineProps<{ sessionId: string }>()
 
@@ -105,6 +117,68 @@ function requestDraftRestore(text: string): void {
     text: stacked,
   })
 }
+
+// ── 队列条目编辑（chat-flow-consistency D6 移动壳最小形态）──────────────────────────
+// 形态：行内常驻编辑钮（触屏无 hover——长按手势不做，与取消钮同范式并列；Q4「最小形态
+// 对齐三裁决」的实质要求 = 单锚定/幂等/拦截，形态对齐移动壳既有按钮链）。三裁决：
+// 同行再点幂等 no-op（不重新 peek 不覆盖草稿）/ 编辑他行拦截（提示行反馈）/ 预填遇非空
+// 输入 = 注入通道 '\n\n' 追加不覆盖（与撤销回填同通道同语义）。锚定活性 = 帧驱动 watch
+//（条目离场自动解除 → 提示条消失，草稿保留静默降级）；发送侧 delivery.edit 分流在
+// MobileComposer（读 queueEditAnchorOf），本组件只管入口与提示条。
+const editNotice = ref('')
+
+/** 编辑态锚定 id（null = 非编辑态；提示条显隐 + 重复点击编辑的幂等判定同源） */
+const editingClientUuid = computed(() => queueEditAnchorOf(props.sessionId))
+
+// 条目离场自动解除（Q3 帧驱动信号）：行集更新后锚定不在行中 → 静默清锚定（草稿保留，
+// 发送自然降级普通新消息；不发 toast——发送时 edit 回执分类兜底）
+watch(
+  () => {
+    const uuid = queueEditAnchorOf(props.sessionId)
+    return uuid === null ? null : isQueueEditAlive(rows.value, uuid) ? uuid : null
+  },
+  (alive) => {
+    if (alive === null && queueEditAnchorOf(props.sessionId) !== null) {
+      clearQueueEditFor(props.sessionId)
+    }
+  },
+)
+
+async function onEditEntry(clientUuid: string): Promise<void> {
+  // 每次新尝试先清空上一次提示（不跨条目残留）；conflict 拦截提示随后与编辑条并存——
+  // 渲染门不按 editingClientUuid 抑制（原门在 conflict 场景恒 false：拦截只发生在锚定
+  // 在册时，提示被结构性吞掉，Q4「拦截 + 提示」缺反馈件）
+  editNotice.value = ''
+  const outcome = beginQueueEdit(props.sessionId, clientUuid)
+  if (outcome === 'already-editing-same') return
+  if (outcome === 'conflict') {
+    editNotice.value = t('mobile.queueStrip.editConflict')
+    return
+  }
+  let reply: Awaited<ReturnType<typeof peekDelivery>>
+  try {
+    reply = await peekDelivery(props.sessionId, clientUuid)
+  } catch (e) {
+    if (queueEditAnchorOf(props.sessionId) === clientUuid) clearQueueEditFor(props.sessionId)
+    const msg = e instanceof Error ? e.message : String(e)
+    editNotice.value = t('mobile.queueStrip.editPeekFailed', { msg })
+    return
+  }
+  // peek 往返期间锚定已被放弃（提示条「放弃编辑」）：放弃预填
+  if (queueEditAnchorOf(props.sessionId) !== clientUuid) return
+  if (!reply.found || !reply.content || !reply.content.trim()) {
+    clearQueueEditFor(props.sessionId)
+    editNotice.value = t('mobile.queueStrip.editGone')
+    return
+  }
+  requestDraftRestore(reply.content)
+}
+
+/** 放弃编辑（提示条按钮）：解除锚定但草稿文本保留（放弃的是保位意图，不是文本）。 */
+function onAbandonEdit(): void {
+  clearQueueEditFor(props.sessionId)
+  editNotice.value = ''
+}
 </script>
 
 <template>
@@ -114,6 +188,34 @@ function requestDraftRestore(text: string): void {
     class="flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-bg-input p-1.5"
     data-testid="mobile-queue-strip"
   >
+    <!-- 编辑态提示条（chat-flow-consistency D6）：锚定在册渲染，「放弃编辑」解除锚定草稿保留；
+         条目离场由帧驱动 watch 自动解除 → 本条随之消失 -->
+    <div
+      v-if="editingClientUuid"
+      class="flex items-center gap-1.5 rounded-md bg-[var(--accent-soft)] px-1.5 py-1 text-xs text-accent"
+      data-testid="mobile-queue-edit-banner"
+    >
+      <PenLine class="size-3 shrink-0" />
+      <span class="min-w-0 flex-1">{{ t('mobile.queueStrip.editingBanner') }}</span>
+      <span
+        role="button"
+        tabindex="0"
+        class="shrink-0 cursor-pointer underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        data-testid="mobile-queue-edit-abandon"
+        @click="onAbandonEdit"
+        @keydown.enter="onAbandonEdit"
+      >{{ t('mobile.queueStrip.editingBannerAbandon') }}</span>
+    </div>
+    <!-- 编辑相关提示行（conflict 拦截 / peek 失败 / 条目已离场；每次新尝试开头清空不跨条目
+         残留——conflict 提示与编辑条并存可见，门不按 editingClientUuid 抑制） -->
+    <p
+      v-if="editNotice"
+      class="text-xs text-neutral-fg"
+      role="status"
+      data-testid="mobile-queue-edit-notice"
+    >
+      {{ editNotice }}
+    </p>
     <!-- 取消失败内联错误行（respondFailedId 范式：role=alert + 专用 testid） -->
     <p
       v-if="cancelError"
@@ -134,6 +236,18 @@ function requestDraftRestore(text: string): void {
         :data-testid="`mobile-queue-state-${row.state}`"
       >{{ stateText(row.state) }}</span>
       <span class="min-w-0 flex-1 truncate text-sm text-neutral-fg">{{ row.preview }}</span>
+      <!-- 编辑钮（chat-flow-consistency D6）：常驻触达（触屏无 hover），编排见 onEditEntry -->
+      <div
+        role="button"
+        tabindex="0"
+        class="shrink-0 cursor-pointer rounded p-1 text-neutral-dim transition-colors outline-none active:text-neutral-fg focus-visible:ring-2 focus-visible:ring-accent"
+        data-testid="mobile-queue-edit"
+        :aria-label="t('mobile.queueStrip.edit')"
+        @click="onEditEntry(row.clientUuid)"
+        @keydown.enter="onEditEntry(row.clientUuid)"
+      >
+        <PenLine class="size-3.5" />
+      </div>
       <!-- role="button" 条目（原生 button 由 vue_rules_checker 拦，先例 = SessionListItem） -->
       <div
         role="button"

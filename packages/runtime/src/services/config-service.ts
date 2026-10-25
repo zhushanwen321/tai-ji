@@ -111,6 +111,7 @@ import {
 } from './provider-catalog-refresh.js'
 import { syncRemoteProviderModels } from './remote-config/remote-provider-sync.js'
 import { refreshRemoteConfig } from './remote-config/remote-config-fetch.js'
+import { syncRetryRulesRemote } from './remote-config/remote-retry-rules.js'
 import { isQuotaFetchersRemoteConfig } from './quota-providers/index.js'
 import {
   loadSkills as loadSkillsImpl,
@@ -262,14 +263,20 @@ export class ConfigService implements IConfigService {
   }
 
   /**
-   * taiji 远程配置拉取 + 两个域同步（remote-config 域 1 provider 清单 + 域 2 quota-fetchers，
-   * checkedAt 4h 节流在 fetch 层内建）。触发点：进设置 Provider 页
+   * taiji 远程配置拉取 + 三个域同步（remote-config 域 1 provider 清单 + 域 2 quota-fetchers +
+   * 域 3 retry-rules，checkedAt 4h 节流在 fetch 层内建）。触发点：进设置 Provider 页
    * （handleRefreshProviderCatalogs 顺带）+ runtime 启动延迟（组合根）。
    *
    * 域 2（quota-fetchers）只有读侧消费方（quota-providers/index.ts 的 loadRemoteConfig），
    * 拉取结果无需任何下游动作——落盘缓存即生效，读侧下次调用自然吃到新数据。故本方法只
    * 负责触发拉取，不消费其 outcome（失败沿用 fetch 层内建 fail-safe 链：回退缓存/基线 +
    * warn，无需额外 try/catch）。
+   *
+   * 域 3（retry-rules，subagent-observability §3.3.12）消费方在 pi 孙进程 extension
+   * （ext-config 文件读侧）——缓存落盘不直达，syncRetryRulesRemote 每次同步无条件
+   * 重算并落盘 effectiveRules 派生段（编译期基线 ⊕ 可用远程覆盖 ⊕ 现有 customRules），
+   * 与远程命中 / ext-config 文件在场均无关：幂等写、单写方纪律；extension startupConfig
+   * 在启动早期建的占位文件（空 effectiveRules）由此被覆盖，基线规则默认生效。
    *
    * 返回实际发生模型合并写盘的 provider 列表供调用方决定是否广播（空 = 拉取失败/无变化/
    * 无同步对象，fail-safe 链内建在 sync 层）。
@@ -283,6 +290,9 @@ export class ConfigService implements IConfigService {
     })
     // 域 2 拉取（与域 1 同触发点；await 保证启动/进页路径在返回前完成落盘，读侧立即可见）
     await refreshRemoteConfig('quota-fetchers', isQuotaFetchersRemoteConfig)
+    // 域 3 拉取 + 生效落盘（同触发点；syncRetryRulesRemote 无条件重算落盘——ext-config
+    // 缺席即补写基线，不跳过；fail-safe 链内建在拉取层）
+    await syncRetryRulesRemote()
     return { updatedProviders: result.updatedProviders }
   }
 

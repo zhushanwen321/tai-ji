@@ -81,12 +81,12 @@ let driverRunSeq = 0;
 
 function makeRun(
   nodes: ExecutionTraceNode[],
-  opts: { status?: string; errorLogs?: WorkerLogEntry[]; description?: string } = {},
+  opts: { status?: string; errorLogs?: WorkerLogEntry[]; description?: string; outcome?: "done" | "partially_succeeded" } = {},
 ): WorkflowRun {
   const runId = `wf-driver-${driverRunSeq++}`;
   const status = opts.status ?? "running";
   if (status === "done") {
-    noteRebuiltSettlement(runId, { outcome: "done", settledAt: Date.parse("2026-09-27T00:00:00.000Z") });
+    noteRebuiltSettlement(runId, { outcome: opts.outcome ?? "done", settledAt: Date.parse("2026-09-27T00:00:00.000Z") });
   }
   return {
     runId,
@@ -474,6 +474,20 @@ describe("WorkflowsView trace 导出（'S'）", () => {
     d.component.handleInput("S");
     await flush();
     expect(d.notifies).toEqual([{ msg: "Save failed: EACCES: no perms", level: "error" }]);
+  });
+
+  it("[§3.3.8 终局失真同型面] 部分交付 run（partially_succeeded）导出 trace 头部 Status 行带原因后缀（与完成通知 done (${reason}) 同形）", async () => {
+    vi.spyOn(fsPromises, "mkdir").mockResolvedValue(undefined);
+    const writeFile = vi.spyOn(fsPromises, "writeFile").mockResolvedValue(undefined);
+    const d = openDriver({
+      status: "done",
+      outcome: "partially_succeeded",
+      nodes: [makeNode(0, { status: "completed" }), makeNode(1, { status: "failed" })],
+    });
+    d.component.handleInput("S");
+    await flush();
+    const [, content] = vi.mocked(writeFile).mock.calls[0] as unknown as [string, string];
+    expect(content).toContain("Status: done (partially_succeeded)");
   });
 });
 

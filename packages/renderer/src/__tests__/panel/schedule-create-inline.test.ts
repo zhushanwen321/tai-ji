@@ -82,7 +82,7 @@ const scheduleDraft = {
 const scheduleCreateReq: ExtensionUIRequest = {
   sessionId: 'session-A',
   requestId: 'req-sc',
-  method: 'select',
+  dialogKind: 'select',
   form: true,
   scheduleCreate: true,
   scheduleDraft,
@@ -92,7 +92,7 @@ const scheduleCreateReq: ExtensionUIRequest = {
 const formReq: ExtensionUIRequest = {
   sessionId: 'session-A',
   requestId: 'req-ask',
-  method: 'select',
+  dialogKind: 'select',
   form: true,
   formQuestions: [{ type: 'choice', header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
 }
@@ -160,7 +160,7 @@ describe('Panel overlay 挂载源分流（draft 源 ∨ questions 源互斥）',
     const wrapper = mountPanel('session-A')
     const extensionUI = useExtensionUIStore()
     extensionUI.addRequest('session-A', {
-      sessionId: 'session-A', requestId: 'req-sc', method: 'select', form: true, receivedAt: Date.now(),
+      sessionId: 'session-A', requestId: 'req-sc', dialogKind: 'select', form: true, receivedAt: Date.now(),
     })
     await nextTick()
 

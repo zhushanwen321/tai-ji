@@ -83,6 +83,12 @@ describe("buildTodoSummary — update", () => {
 			),
 		).toBe("Updated #1 → completed; #2 → pending");
 	});
+
+	it("text 含换行 → 摘要归一单行（S-1）", () => {
+		expect(buildTodoSummary({ action: "update", id: 2, text: "第一行\n第二段\n\n尾行" }, todos)).toBe(
+			'Updated #2 → "第一行 第二段 尾行"',
+		);
+	});
 });
 
 describe("buildTodoSummary — delete", () => {
@@ -92,6 +98,14 @@ describe("buildTodoSummary — delete", () => {
 
 	it("多 id → 逗号连接", () => {
 		expect(buildTodoSummary({ action: "delete", ids: [3, 5] }, todos)).toBe("Deleted #3, #5");
+	});
+
+	it("重复 id → 去重后列出（S-2）", () => {
+		expect(buildTodoSummary({ action: "delete", ids: [3, 5, 3] }, todos)).toBe("Deleted #3, #5");
+	});
+
+	it("重复 id 去重后只剩一个 → 单 id 形态（S-2）", () => {
+		expect(buildTodoSummary({ action: "delete", ids: [3, 3] }, todos)).toBe("Deleted #3");
 	});
 
 	it("ids 缺失（不可达防御）→ 空串", () => {

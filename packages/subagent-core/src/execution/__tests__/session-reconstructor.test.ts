@@ -143,6 +143,21 @@ describe("reconstructFromFile", () => {
       expect(rec!.result).toBe("first\n\nsecond");
     });
 
+    it("空正文（无 text block）→ result 空串保真（§3.3.3 空正文语义：空串 = 无文本输出，非异常）", () => {
+      writeJsonl([
+        headerLine(),
+        identityEntry({ id: "r1", agent: "w", mode: "background", task: "t", startedAt: 100 }),
+        assistantEntry([{ type: "toolCall", id: "tc-1", name: "bash", arguments: {} }], { ts: 1000 }),
+        toolResultEntry("tc-1", "bash", { text: "ok" }),
+        assistantEntry([], { ts: 2000 }),
+      ]);
+      const rec = reconstructFromFile(filePath);
+      expect(rec).toBeDefined();
+      expect(rec!.turnCount).toBeGreaterThan(0);
+      // 空串 = 已收尾但无文本输出；与「未产出」（undefined）可区分。
+      expect(rec!.result).toBe("");
+    });
+
     it("读出 identity 里的 rootSessionId", () => {
       writeJsonl([
         headerLine(),
@@ -304,7 +319,7 @@ describe("reconstructFromFile", () => {
       expect(rec!.status).toBe("idle");
     });
 
-    it("前序 error 但最后 stop → lastError 清除（镜像 turn_end 语义），status=done", () => {
+    it("前序 error 但最后 stop → lastError 保留（[subagent-observability §3.3.5 u3 收编] 错误事实只追加不清除——与 SDK reducer 新语义镜像一致），status=done", () => {
       writeJsonl([
         headerLine(),
         identityEntry({ id: "r1", agent: "w", mode: "background", task: "t", startedAt: 100 }),
@@ -314,7 +329,9 @@ describe("reconstructFromFile", () => {
         assistantEntry([{ type: "text", text: "recovered" }], { stopReason: "stop", ts: 2000 }),
       ]);
       const rec = reconstructFromFile(filePath);
-      expect(rec!.lastError).toBeUndefined(); // 后续 stop 清除了 error
+      // u2 移交的语义分叉收编：reducer 侧 turn_end 不再清 lastError（真实事件序
+      // error → turn_end 与旧补偿假设相反），重建通道镜像跟随——后续 stop 不清除。
+      expect(rec!.lastError).toBe("transient");
       expect(rec!.status).toBe("idle");
       expect(rec!.result).toBe("oops\n\nrecovered");
     });

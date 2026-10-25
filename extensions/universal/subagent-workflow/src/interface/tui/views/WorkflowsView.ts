@@ -193,7 +193,7 @@ export function collectNodeLiveProgress(
  *
  * | 签名字段 | 消费点 |
  * |---|---|
- * | displayStatusOf(run) 派生二值（[W2/V1 D1 第 6 行] 混合判源单点——v2 fold/注册表派生视图 ∨ v1 聚合读侧）| WorkflowsView.ts renderHeader（statusDotStr+statusLabel 同串源）/ detail-content.ts statusLabel（statusDotStr 调用处）/ renderFooter |
+ * | runDisplaySignaturePart(runDisplayStateOf(run)) 三字段 status:doneReason:abortable（display-state.ts 展示态单一中间表示；status 判源 = core runSummary 终局记录注册表 + 中断标记的三态 running/interrupted/done，与 tool-workflow.ts displayStatusOf 同源——displayStatusOf 生产消费点 = abort 守卫 / command/commands.ts 排序，均消费同源值不漏）| renderHeader formatRunBadge(runDisplayStateOf(run)) / renderFooter（runDisplayStateOf(run).abortable）/ saveTraceToFile traceHeaderLines（runDisplayStateOf Status 行，带 doneReason 原因后缀）|
  * | 秒桶 Math.floor(now/1000) | renderHeader formatElapsed（现算 elapsed）+ detail-content.ts（now 参与未完成节点 elapsed）|
  * | completed/total（节点 status 推导）| renderHeader |
  * | budget 量化值（tokens round-k + cost toFixed(4)=BUDGET_COST_DECIMALS，与 renderHeader budgetStr 同精度——第 3-4 位小数变化是可见变化）| renderHeader / saveTraceToFile |
@@ -288,7 +288,7 @@ function createInitialState(): ViewState {
 /**
  * 创建 workflow fullscreen view。
  *
- * @param run WorkflowRun 聚合根（读 displayStatusOf 派生视图二值/spec/trace/meta）
+ * @param run WorkflowRun 聚合根（读 runSummary 三态派生视图——displayStatusOf / runDisplayStateOf 同源/spec/trace/meta）
  * @param theme ThemeLike（避免直接 import Pi runtime）
  * @param ctx ExtensionContext（调 ui.custom 渲染 + ui.notify 错误反馈）
  * @param actions lifecycle 操作（abort），由调用方注入
@@ -849,7 +849,7 @@ function renderLevel0(
 // ── Level 1: Agent selection ──────────────────────────────────
 
 /** L1 左列：sidebar title + phase list（固定高度 viewport + 滚动，只构建可见行）。
- *  与 renderLevel0 左列同构——本 helper 只供 renderLevel1（renderLevel0 不在本单元目标内，不并轨，
+ *  与 renderLevel0 左列同构——本 helper 只供 renderLevel1（renderLevel0 不在本单元目标内，不并入，
  *  避免扩大行为范围；后续如消重可让 L0 复用）。 */
 function buildLevelSidebar(
   phases: ReturnType<typeof buildPhaseGroups>,
@@ -1062,7 +1062,12 @@ function saveTraceToFile(run: WorkflowRun, ctx: ExtensionContext): void {
 function traceHeaderLines(run: WorkflowRun): string[] {
   const lines: string[] = [];
   lines.push(`# Workflow Trace: ${run.spec.scriptName} (${run.runId})`, "");
-  lines.push(`Status: ${displayStatusOf(run)} | Started: ${run.meta.startedAt ?? "-"} | Duration: ${formatElapsed(run.meta.startedAt)}`);
+  // [§3.3.8 终局失真同型面] Status 行随终局原因后缀（与完成通知 `done (${reason})`
+  // 同形，workflow-notify）——部分交付 run（partially_succeeded）的导出 trace 归档件
+  // 与全成功 run 可区分；done 缺 reason（旧格式 run）同徽标口径不带后缀。
+  const ds = runDisplayStateOf(run);
+  const statusText = ds.doneReason !== undefined ? `${ds.status} (${ds.doneReason})` : ds.status;
+  lines.push(`Status: ${statusText} | Started: ${run.meta.startedAt ?? "-"} | Duration: ${formatElapsed(run.meta.startedAt)}`);
   const budget = run.state.budget;
   lines.push(`Budget: ${budget.usedTokens}/${budget.maxTokens ?? "unlimited"} tokens, $${budget.usedCost.toFixed(BUDGET_COST_DECIMALS)}`, "");
   return lines;

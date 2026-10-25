@@ -21,7 +21,6 @@ import type {
   BackgroundTaskKillReason,
   BackgroundTaskRegistryEntry,
   BtwForkState,
-  BtwThreadInfo,
 } from '../src/protocol'
 
 // ── 编译期类型断言辅助 ─────────────────────────────────────────
@@ -361,10 +360,11 @@ describe('backgroundTask RegistryEntry 镜像形状（D9）', () => {
   })
 })
 
-// ── btw.* 3 控制帧（btw-question 设计 D6，M2-a 协议根节点）────────────────
+// ── btw.* 2 控制帧（btw-question 设计 D6，M2-a 协议根节点；W4b 线枚举帧退役）────────
 //
-// 三帧 = btw.create / btw.list { mainSid } / btw.remove，ack 必回；**不设 btw.send /
-// btw.close**（D6 不采用项）。登记完整性断言分两层：
+// 两帧 = btw.create / btw.remove，ack 必回；**不设 btw.send / btw.close**（D6 不采用项）。
+// 线枚举（原 btw.list { mainSid }）已随 W4b 退役——btw 线进通用列表
+// （session.list { surface:'btw', mainSessionId }，设计 §3.3.1/§5-W4b）。登记完整性断言分两层：
 // ① 源码区段扫描（运行期，vitest 强制）——本文件位于包根 __tests__/（不在 tsconfig
 //    include 内），类型断言不被 tsc 执行，扫描断言才是机器检查本体；
 // ② 类型级断言（同文件风格，typecheck 覆盖到时自动生效）。
@@ -384,28 +384,27 @@ function extractBlock(anchor: string): string {
 
 // ── 类型级断言（style 同上文 AssertHasKey；typecheck 覆盖到即编译期生效）──
 type _Assert_Client_btwCreate = AssertHasKey<ClientMessageMap, 'btw.create'>
-type _Assert_Client_btwList = AssertHasKey<ClientMessageMap, 'btw.list'>
 type _Assert_Client_btwRemove = AssertHasKey<ClientMessageMap, 'btw.remove'>
 type _Assert_Server_btwCreate = AssertHasKey<ServerMessageMapBase, 'btw.create'>
-type _Assert_Server_btwList = AssertHasKey<ServerMessageMapBase, 'btw.list'>
 type _Assert_Server_btwRemove = AssertHasKey<ServerMessageMapBase, 'btw.remove'>
 type _Assert_Reply_btwCreate = AssertHasKey<ReplyPayloadMap, 'btw.create'>
-type _Assert_Reply_btwList = AssertHasKey<ReplyPayloadMap, 'btw.list'>
 type _Assert_Reply_btwRemove = AssertHasKey<ReplyPayloadMap, 'btw.remove'>
+/** W4b 负向（类型层）：btw.list 已注销——key 若复活则求值 true，下面赋 false 编译错 */
+const _no_btw_list: IsClientKey<'btw.list'> = false
 /** D6 负向（类型层）：key 存在则求值 true，下面赋 false 编译错 */
 type IsClientKey<K extends string> = K extends keyof ClientMessageMap ? true : false
 const _no_btw_send: IsClientKey<'btw.send'> = false
 const _no_btw_close: IsClientKey<'btw.close'> = false
 
-describe('btw.* 3 帧登记完整性（D6，M2-a）', () => {
+describe('btw.* 2 帧登记完整性（D6，M2-a；W4b 线枚举帧退役）', () => {
   const clientBlock = extractBlock('export type ClientMessageType =')
   const clientMapBlock = extractBlock('export interface ClientMessageMap {')
   const serverMapBlock = extractBlock('export interface ServerMessageMapBase {')
   const replyMapBlock = extractBlock('export interface ReplyPayloadMap {')
 
-  it('ClientMessageType 恰好 3 个 btw.* 帧（create / list / remove）', () => {
+  it('ClientMessageType 恰好 2 个 btw.* 帧（create / remove；线枚举帧已退役）', () => {
     const frames = [...clientBlock.matchAll(/\'(btw\.[a-zA-Z]+)\'/g)].map((m) => m[1])
-    expect([...new Set(frames)].sort()).toEqual(['btw.create', 'btw.list', 'btw.remove'])
+    expect([...new Set(frames)].sort()).toEqual(['btw.create', 'btw.remove'])
   })
 
   it('D6 负向检查：不设 btw.send / btw.close（发送复用 message.send、销毁复用 btw.remove）', () => {
@@ -414,14 +413,16 @@ describe('btw.* 3 帧登记完整性（D6，M2-a）', () => {
     }
   })
 
-  it('BtwThreadInfo 含可选 reclaimImminent（D1 回收提醒数据源；可选防破坏既有消费——BU3 runtime 半）', () => {
-    const block = extractBlock('export interface BtwThreadInfo {')
-    expect(block).toMatch(/vid: string/)
-    expect(block).toMatch(/reclaimImminent\?: boolean/)
+  it('BtwThreadInfo 接口已随线枚举帧退役删除（协议面零残留：条目 = session.list 的 SessionSummary）', () => {
+    expect(PROTOCOL_SOURCE).not.toMatch(/export interface BtwThreadInfo/)
+    // 三张表均无 btw.list 登记（协议 + 登记表 + publish 面同批收缩）
+    for (const block of [clientBlock, clientMapBlock, serverMapBlock, replyMapBlock]) {
+      expect(block).not.toMatch(/'btw\.list'/)
+    }
   })
 
-  it('三帧在 ClientMessageMap / ServerMessageMapBase / ReplyPayloadMap 全登记（ack 必回）', () => {
-    for (const frame of ['btw.create', 'btw.list', 'btw.remove']) {
+  it('两帧在 ClientMessageMap / ServerMessageMapBase / ReplyPayloadMap 全登记（ack 必回）', () => {
+    for (const frame of ['btw.create', 'btw.remove']) {
       const pattern = new RegExp(`'${frame.replace('.', '\\.')}'`)
       expect(clientMapBlock, `ClientMessageMap 缺 ${frame}`).toMatch(pattern)
       expect(serverMapBlock, `ServerMessageMapBase 缺 ${frame}（reply type）`).toMatch(pattern)
@@ -429,39 +430,32 @@ describe('btw.* 3 帧登记完整性（D6，M2-a）', () => {
     }
   })
 
-  it('request payload 形状：create/list 只带 mainSid、remove 只带 vid', () => {
+  it('request payload 形状：create 只带 mainSid、remove 只带 sessionId', () => {
     const createPayload: ClientMessageMap['btw.create'] = { mainSid: 's-main' }
     expect(createPayload.mainSid).toBe('s-main')
-    const listPayload: ClientMessageMap['btw.list'] = { mainSid: 's-main' }
-    expect(Object.keys(listPayload)).toEqual(['mainSid'])
-    const removePayload: ClientMessageMap['btw.remove'] = { vid: 'btw:pi-1' }
-    expect(Object.keys(removePayload)).toEqual(['vid'])
+    const removePayload: ClientMessageMap['btw.remove'] = { sessionId: 'pi-1' }
+    expect(Object.keys(removePayload)).toEqual(['sessionId'])
   })
 
-  it('reply payload 形状：create 带 vid/mainSid/forkState（三值域）、list 带 threads、remove 回显 vid', () => {
+  it('reply payload 形状：create 带 sessionId/mainSid/forkState（三值域）、remove 回显 sessionId', () => {
     const states: BtwForkState[] = ['full', 'truncated', 'none']
     expect(states).toHaveLength(3)
-    const createReply: ServerMessageMapBase['btw.create'] = { vid: 'btw:pi-1', mainSid: 's-main', forkState: 'none' }
+    const createReply: ServerMessageMapBase['btw.create'] = { sessionId: 'pi-1', mainSid: 's-main', forkState: 'none' }
     expect(createReply.forkState).toBe('none')
-    const threads: BtwThreadInfo[] = [{ vid: 'btw:pi-1' }]
-    const listReply: ServerMessageMapBase['btw.list'] = { mainSid: 's-main', threads }
-    expect(listReply.threads[0].vid).toBe('btw:pi-1')
-    const removeReply: ServerMessageMapBase['btw.remove'] = { vid: 'btw:pi-1' }
-    expect(removeReply.vid).toBe('btw:pi-1')
+    const removeReply: ServerMessageMapBase['btw.remove'] = { sessionId: 'pi-1' }
+    expect(removeReply.sessionId).toBe('pi-1')
   })
 
-  it('ReplyPayloadMap：create/list payload 消费型、remove ack 型 void', () => {
-    const createReply: ReplyPayloadMap['btw.create'] = { vid: 'btw:pi-1', mainSid: 's-main', forkState: 'full' }
-    expect(createReply.vid).toBe('btw:pi-1')
-    const listReply: ReplyPayloadMap['btw.list'] = { mainSid: 's-main', threads: [] }
-    expect(listReply.threads).toEqual([])
+  it('ReplyPayloadMap：create payload 消费型、remove ack 型 void', () => {
+    const createReply: ReplyPayloadMap['btw.create'] = { sessionId: 'pi-1', mainSid: 's-main', forkState: 'full' }
+    expect(createReply.sessionId).toBe('pi-1')
     const removeAck: ReplyPayloadMap['btw.remove'] = undefined as void
     expect(removeAck).toBeUndefined()
   })
 
   it('forkState 回显型：分支三态在 ServerMessageMapBase create reply 内联可达（pill 数据源）', () => {
     for (const forkState of ['full', 'truncated', 'none'] as const) {
-      const reply: ServerMessageMapBase['btw.create'] = { vid: 'v', mainSid: 'm', forkState }
+      const reply: ServerMessageMapBase['btw.create'] = { sessionId: 'v', mainSid: 'm', forkState }
       expect(reply.forkState).toBe(forkState)
     }
   })
@@ -469,5 +463,6 @@ describe('btw.* 3 帧登记完整性（D6，M2-a）', () => {
   it('类型层负向常量恒 false（key 若出现，typecheck 报错；运行期仅标记已使用）', () => {
     expect(_no_btw_send).toBe(false)
     expect(_no_btw_close).toBe(false)
+    expect(_no_btw_list).toBe(false)
   })
 })

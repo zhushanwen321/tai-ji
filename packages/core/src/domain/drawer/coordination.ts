@@ -20,7 +20,7 @@
 import { ref } from 'vue'
 import type { WorkflowRunRecord } from '@taiji/shared'
 import { drawerControl, getDrawerControlState, _resetDrawerControlForTest } from './control'
-import { setSubagentView, clearSubagentView } from './selection/subagent'
+import { setSubagentView, clearSubagentView, clearSubagentViewFor } from './selection/subagent'
 import { setBackgroundTaskView } from './selection/bash-task'
 import { selectedCommandName, detailFilePath } from './selection/transient'
 import { _resetSelectionForTest } from './selection'
@@ -80,9 +80,13 @@ export function openSubagent(opts: OpenSubagentOptions): void {
  * 清空 subagent 选中态（drawer 二级 tab 全部关闭回空态时调用，不开合 drawer）。
  * 与 openSubagent 同为 subagent 选中态的编排级写入入口——空态不同步清空会在分区留
  * 残留 vid，重挂载复活已关闭 tab / 同值重选不触发 watch。
+ * sid 省缺 = 清当前分区（绑定键 current）；显式传 sid = 定向清除该分区（与 tab
+ * store 分区同键——调用方 useSubagentDrawerTabs 空态收敛传 focusedSid，消除
+ * 「清除走 current、读写走 focusedSid」对 current == focused 隐式不变量的依赖）。
  */
-export function clearSubagentSelection(): void {
-  clearSubagentView()
+export function clearSubagentSelection(sid?: string): void {
+  if (sid !== undefined) clearSubagentViewFor(sid)
+  else clearSubagentView()
 }
 
 /**

@@ -98,7 +98,7 @@ export interface LocalEngineTransportOptions { // oe-exempt:20261018:framework:s
   /**
    * 子进程 spawn 注入点（缺省 node:child_process spawn；单测注入进程端点桩——
    * stdio 行切分 / 半行残片上限 / 终局投影等帧面逻辑可在无真进程下确定性验证，
-   * 见 docs/todo/test-single-layer-cleanup.md「确定性同步化」）。注入桩必须实现
+   * 见 docs/TEST-STRATEGY.md「新写测试判据」节「确定性同步化」）。注入桩必须实现
    * wireChild / close / waitForChildExit 消费的 ChildProcess 面（on/removeAllListeners /
    * pid / exitCode / signalCode / stdin/stdout/stderr 流）；pid 应取不可达高位
    * （killProcessTree 对其 ESRCH no-op，不触碰真实进程表）。

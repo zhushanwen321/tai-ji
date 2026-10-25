@@ -12,11 +12,14 @@ vi.mock("../pure.js", async (importOriginal) => {
 import { DEFAULT_SMART_CONTEXT_CONFIG, loadSmartContextConfig } from "../pure.js";
 import { registerCompactContextTool } from "../tool.js";
 import { countCompactions } from "../pure.js";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 
 interface RegisteredTool {
 	name: string;
+	/** pi SDK 的 exposure 缺省值 "direct"（常驻）——不写字段时 SDK 侧默认（pi-semantics PS-91），本视图可缺省。 */
+	exposure?: string;
 	parameters: { type?: string };
+	renderResult?: (result: unknown, options: { expanded: boolean }, theme: Theme) => { render: (width: number) => string[] };
 	execute: (id: string, params: Record<string, unknown>, signal: undefined, onUpdate: undefined, ctx: ExtensionContext) => Promise<{ content: Array<{ type: string; text: string }>; details: Record<string, unknown> }>;
 }
 
@@ -67,6 +70,17 @@ describe("compact_context 工具（R2 降级态：fire-and-forget + 结果注入
 		expect(tools[0].name).toBe("compact_context");
 	});
 
+	// exposure 重划终态锚（C-ext-05，2026-10-23 ADR-0136）：direct 常驻 = 注册时不写
+	// exposure 字段（SDK 缺省 direct，pi-semantics PS-91）——误写 "deferred" 会把压缩入口
+	// 从模型默认可见集收走（tool_search 才可激活），此处红。
+	it("exposure 注册终态：direct 常驻——不写 exposure 字段（SDK 缺省 direct）", () => {
+		const { pi, tools } = makePi();
+		registerCompactContextTool(pi);
+		expect(tools).toHaveLength(1);
+		expect(tools[0]!.name).toBe("compact_context");
+		expect(tools[0]!.exposure).toBeUndefined();
+	});
+
 	it("门控拒绝（排除命中）→ throw 带原因与恢复指引（D5）", async () => {
 		mockedLoad.mockReturnValue({ ...DEFAULT_SMART_CONTEXT_CONFIG, excludedModels: ["zai/glm"] });
 		const { pi, tools } = makePi();
@@ -95,13 +109,26 @@ describe("compact_context 工具（R2 降级态：fire-and-forget + 结果注入
 		expect(result.details).toMatchObject({ mode: "same-model", launched: true, fellBack: false, compactionCount: 1 });
 	});
 
+	it("renderResult 接线（C-ext-05）：注册定义携带函数成员 + 折叠态输出 details.summary 一行", async () => {
+		const { pi, tools } = makePi();
+		registerCompactContextTool(pi, { getEntries: () => [{ type: "message" }] });
+		const tool = tools[0];
+		expect(typeof tool.renderResult).toBe("function");
+		const result = await tool.execute("t1", {}, undefined, undefined, makeCtx());
+		const renderTheme = { fg: (_token: string, text: string) => text } as unknown as Theme;
+		const lines = tool.renderResult!(result, { expanded: false }, renderTheme).render(400);
+		// Text.render 按宽度 pad，trim 后断言（折叠态 = details.summary 一行）
+		expect(lines.length).toBe(1);
+		expect(lines[0].trim()).toBe("Context compacted");
+	});
+
 	it("onComplete 兑现后 nextTurn 注入结果（含模式/前后 tokens/成本；降智提示按次数）", async () => {
 		const { pi, tools } = makePi();
 		registerCompactContextTool(pi, { getEntries: () => [{ type: "compaction" }, { type: "compaction" }] });
 		await tools[0].execute("t1", {}, undefined, undefined, makeCtx());
 		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
 		const [message, options] = pi.sendMessage.mock.calls[0];
-		// D4①：nextTurn 化——custom role 消息 + 不自起 run 的投递车道
+		// D4①：nextTurn 化——custom role 消息 + 不自起 run 的投递路径
 		expect(message.customType).toBe("smart-context");
 		expect(message.details).toEqual({ source: "compact-complete" });
 		expect(options).toEqual({ triggerTurn: false, deliverAs: "nextTurn" });
@@ -111,7 +138,7 @@ describe("compact_context 工具（R2 降级态：fire-and-forget + 结果注入
 		expect(text).toContain("500K");
 		expect(text).toContain("24K");
 		expect(text).toContain("compacted multiple times");
-		// 旧车道（自起 run 的 user 消息）已退役：不再调用 sendUserMessage（mock 挂 spy，被调用即断言红）
+		// 旧投递路径（自起 run 的 user 消息）已退役：不再调用 sendUserMessage（mock 挂 spy，被调用即断言红）
 		expect(pi.sendUserMessage).not.toHaveBeenCalled();
 	});
 
@@ -124,7 +151,7 @@ describe("compact_context 工具（R2 降级态：fire-and-forget + 结果注入
 		expect(pi.sendMessage.mock.calls[0][0].content).toContain("回退");
 	});
 
-	it("onError → 注入失败消息带重试指引（display:true 失败必须用户可见 + nextTurn 车道不自起 run）", async () => {
+	it("onError → 注入失败消息带重试指引（display:true 失败必须用户可见 + nextTurn 投递路径不自起 run）", async () => {
 		const { pi, tools } = makePi();
 		registerCompactContextTool(pi);
 		const ctx = makeCtx((options) => options.onError(new Error("Nothing to compact")));

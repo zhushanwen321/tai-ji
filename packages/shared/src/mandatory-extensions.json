@@ -85,6 +85,11 @@
     "tier": "infrastructure"
   },
   {
+    "name": "@zhushanwen/pi-retry-rules",
+    "description": "Retryable error rules: message_end rewrite (appended [taiji-retry: marker) routes throttling-class provider errors into pi's native retry loop, with configurable rules (baseline + remote overlay + user custom) and ReDoS-guarded matching",
+    "tier": "infrastructure"
+  },
+  {
     "name": "@zhushanwen/pi-provider-live-sync",
     "description": "Keep the running pi process's model snapshot in sync with on-disk provider/model/credential changes",
     "tier": "infrastructure"

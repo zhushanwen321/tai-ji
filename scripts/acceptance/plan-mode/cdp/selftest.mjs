@@ -17,7 +17,7 @@
  *   dev-instance-reachable  CDP 探活（实例未运行 = SKIP 不计红，空跑已覆盖验收口径）
  *
  * 采样语义用**同一份** sampler 脚本字符串在 node vm + fake DOM 沙箱执行（与 CDP
- * Runtime.evaluate 通道零分叉）；真实 DOM 轨归 U6 验收窗口。
+ * Runtime.evaluate 通道零分叉）；真实 DOM 层归 U6 验收窗口。
  *
  * 运行：node scripts/acceptance/plan-mode/cdp/selftest.mjs
  * 退出码：0 = 全绿；1 = 任一用例红。

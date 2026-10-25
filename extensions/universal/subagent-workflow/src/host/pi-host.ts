@@ -71,7 +71,7 @@ import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
  *   - **bundle / staged 打包形态**（2026-10-03 B′ 修复）：esbuild 自包含 bundle 把
  *     core inline、staged 布局无 node_modules ⇒ resolve 必败（实证：pi-host 日志全天
  *     202 条 'Cannot find module … workflows/README.md'，内置 6 workflow + 10 agent
- *     整体不可发现、`subagents` 批量工具报 'Built-in workflow fan-out is not available'）。
+ *     整体不可发现、`subagent_batch` 批量工具报 'Built-in workflow fan-out is not available'）。
  *     此时回退到 staged scope 根（见 stagedScopeRootFromModuleUrl）——仅当回退也不
  *     成立（异常布局/解析器不可用）才降级为不注入并 warn。
  */
@@ -355,9 +355,9 @@ export function resolveGrandchildExtensionPaths(
 }
 
 /**
- * e2e harness 专用的孙进程扩展放行门（faux 轨装配）。
+ * e2e harness 专用的孙进程扩展放行门（faux 层装配）。
  *
- * faux 轨（e2e/fixtures/launch-app-real.ts seedFauxDataDir）的孙进程 LLM 演员注入
+ * faux 层（e2e/fixtures/launch-app-real.ts seedFauxDataDir）的孙进程 LLM 演员注入
  * 靠 `<agentDir>/extensions/faux-llm-ext.ts` 自动发现装载——[D2 扩展加载显式化]
  * 孙进程恒 `--no-extensions`（自动发现全关）+ 仅加载本文件白名单集后，该路径被
  * 排除，孙进程报 `Model "faux/..." not found`。faux-llm-ext 是 e2e harness 复制进

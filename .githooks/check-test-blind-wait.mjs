@@ -9,7 +9,7 @@
  * 判定形态（测试文件，且文件不含 useFakeTimers）：
  *   1. await new Promise((r) => setTimeout(r, N))，N >= 50（resolve 形态盲等）
  *   2. sleep(N) / delay(N) / waitForMs(N)，N >= 50（毫秒级 helper 盲等调用）
- * 范围外：仓根 e2e/（Playwright 真机 real 轨——串行空载跑、非 CI 门禁线，其盲等
+ * 范围外：仓根 e2e/（Playwright 真机 真实进程层——串行空载跑、非 CI 门禁线，其盲等
  * 治理另行安排，见 docs/todo/）；行内 // 注释后缀剥除后匹配（防注释文字误报，
  * 字符串中的 https:// 被切坏只可能漏报不会误报，可接受）。
  * 已知盲区：resolve 在箭头体外调用的复杂形态（setTimeout(() => resolve(), N) 内联
@@ -85,7 +85,7 @@ function collectAllTestFiles() {
 }
 
 const args = process.argv.slice(2).filter(Boolean)
-// 仓根 e2e/ = Playwright 真机 real 轨域，不在本检查范围（见文件头「范围外」）
+// 仓根 e2e/ = Playwright 真机 真实进程层域，不在本检查范围（见文件头「范围外」）
 const files = (args.length > 0 ? args : collectAllTestFiles())
   .filter((f) => TEST_FILE_RE.test(f))
   .filter((f) => !f.replaceAll('\\', '/').startsWith('e2e/'))

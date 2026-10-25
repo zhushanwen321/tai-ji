@@ -6,7 +6,7 @@
  * pid 复用不杀只删 / pid 文件删除失败；control-server 连接 error / 畸形帧丢弃 /
  * destroy 时 socket 文件删除失败 / pid 文件写失败 / pid 文件清理失败 / spawn ENOENT。
  *
- * 分层（判据三档，docs/todo/test-single-layer-cleanup.md）：失败 deps 一律注入——
+ * 分层（判据三档，docs/TEST-STRATEGY.md「新写测试判据」节）：失败 deps 一律注入——
  * 引擎进程换进程内桩（fake-engine.ts，spawn 注入）、pid 判活/杀链/start time 走
  * sweepOrphanEnginePids 的 deps 槽。全部用例经事件/回执收尾（第 ② 档），零真 spawn、
  * 零真实等待窗口。

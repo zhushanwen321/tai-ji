@@ -77,7 +77,8 @@ interface Fixture {
   getClient: ReturnType<typeof vi.fn>
   getState: ReturnType<typeof vi.fn>
   setOnSessionDestroyed: ReturnType<typeof vi.fn>
-  getSummary: ReturnType<typeof vi.fn>
+  /** [W3] 降级链③读点：lifecycle 注册表记录（IManagedSessionView.modelId 双写缓存）。 */
+  getSession: ReturnType<typeof vi.fn>
 }
 
 function makeService(getStateImpl?: () => Promise<unknown>): Fixture {
@@ -85,13 +86,15 @@ function makeService(getStateImpl?: () => Promise<unknown>): Fixture {
   const getState = vi.fn(getStateImpl ?? (async () => undefined))
   const getClient = vi.fn(() => (getStateImpl === null ? undefined : ({ getState } as unknown)))
   const setOnSessionDestroyed = vi.fn()
-  const getSummary = vi.fn(() => undefined)
+  // W3：SessionSummary.modelId 已删（三状态字段退役），降级链③读点从 getSummary
+  // 改到 getSession（注册表记录的同名双写缓存字段）。
+  const getSession = vi.fn(() => undefined)
   const service = new GenStatsService({
     publish: (sid, msg) => published.push({ sid, msg }),
     pm: { getClient } as unknown as IProcessManager,
-    sessionService: { setOnSessionDestroyed, getSummary } as unknown as ISessionService,
+    sessionService: { setOnSessionDestroyed, getSession } as unknown as ISessionService,
   })
-  return { service, published, getClient, getState, setOnSessionDestroyed, getSummary }
+  return { service, published, getClient, getState, setOnSessionDestroyed, getSession }
 }
 
 /** 无活跃 pi 进程（降级链①不可用）形态 */
@@ -731,12 +734,12 @@ describe('GenStatsService.getSnapshotForSession（恢复路径降级链，D4）'
     expect(frame.speed.current).toBe(50)
   })
 
-  it('③ get_state 失败 + 无映射 → replicated states 缓存值（getSummary 的 modelId 双写缓存）', async () => {
-    const { service, getSummary } = makeService(async () => { throw new Error('pi offline') })
-    getSummary.mockReturnValue({ id: 's1', modelId: 'prov/mdl-cached' })
+  it('③ get_state 失败 + 无映射 → 注册表记录缓存值（getSession 的 modelId 双写缓存）', async () => {
+    const { service, getSession } = makeService(async () => { throw new Error('pi offline') })
+    getSession.mockReturnValue({ id: 's1', modelId: 'prov/mdl-cached' })
 
     const frame = await service.getSnapshotForSession('s1')
-    expect(getSummary).toHaveBeenCalledWith('s1')
+    expect(getSession).toHaveBeenCalledWith('s1')
     expect(frame.model).toBe('prov/mdl-cached')
     expect(frame.speed).toEqual({ current: null, day: null, d7: null, d30: null })
   })

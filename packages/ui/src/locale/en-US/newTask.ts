@@ -33,6 +33,11 @@ export default {
     remoteConnect: 'Remote connect',
     existingWorktrees: 'Existing worktrees',
     noWorktrees: 'No existing worktrees',
+    pinnedGroup: 'Pinned',
+    defaultSession: 'Default session',
+    pin: 'Pin',
+    unpin: 'Unpin',
+    pinLimitReached: 'You can pin up to {count} directories',
   },
   createWorktree: {
     title: 'New worktree',
@@ -102,5 +107,14 @@ export default {
   presetChip: {
     ariaLabel: 'Mode: {name}',
     replaceHint: 'Replaces prompt',
+  },
+  // Owning-project chip (2026-10-22): 4th chip on the landing meta row — shows/picks the project
+  // the session being created belongs to
+  projectSelect: {
+    title: 'Owning project',
+    defaultProject: 'Default project',
+    projectLockedTooltip: 'This session belongs to the "{name}" project',
+    legacySessionTooltip: '(legacy session, ownership not recorded)',
+    ariaLabel: 'Owning project: {name}',
   },
 }

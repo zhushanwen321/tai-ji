@@ -58,6 +58,8 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
     writeSegments: vi.fn().mockResolvedValue(undefined),
     // useModel.setThinkingLevel 依赖（thinking-level-sync watch 在 mount 时触发）
     setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })),
+    // W4b：useBtwTabData badge 数据源（session.list {surface:'btw'}，btw 线进通用列表）
+    listSessions: vi.fn().mockResolvedValue([]),
   },
   config: {
     getGlobalSkills: vi.fn().mockResolvedValue([]),

@@ -22,7 +22,8 @@
 export interface SubagentInFlightReport {
   /**
    * 绝对计数：该 pi 进程当前「非 idle 句柄数」（hasLiveProcessHandle && !hasIdleTimer
-   * 双谓词过滤，与 notify-host.ts hasRunningBackground 同源）。非增量——消费方整帧
+   * 双谓词过滤；原「与 notify-host.ts hasRunningBackground 同源」的表述随该谓词
+   * 退役删除——subagent-observability §3.3.7③）。非增量——消费方整帧
    * 覆盖镜像，不做加减。
    */
   inFlight: number

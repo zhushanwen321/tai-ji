@@ -166,7 +166,8 @@ describe('W4TC4: TurnSummary hover actions', () => {
 
   it('fork/handoff 按钮在 subagent session 隐藏', () => {
     const wrapper = mountSummary({ sessionId: 'subagent:main1:sub1' })
-    // subagent session：复制MD + 朗读 2 按钮形态（朗读是只读消费，与复制同类可见），无 fork/handoff
+    // subagent session：复制正文 + 朗读 2 按钮形态（复制 = 末条 assistant 正文 text，
+    // 2026-10-15 裁决；朗读是只读消费，与复制同类可见），无 fork/handoff
     expect(wrapper.find('[data-testid="fork-ask-btn"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="handoff-ask-btn"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="speak-btn"]').exists()).toBe(true)

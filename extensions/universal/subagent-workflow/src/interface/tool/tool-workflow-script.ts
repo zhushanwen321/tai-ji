@@ -16,7 +16,7 @@
  * 结构化 {ok}|{error} → pi 的 execute-throw 契约转换在本层（pi 1.0.0：execute 抛出经
  * pi-agent-core agent-loop.js executePreparedToolCall 外层 catch 统一转 isError:true）；
  * AbortSignal 的 aborted 检查在 execute 入口统一拦截（与
- * workflow / subagents 两 tool 同源，tool-shared assertNotAborted；C4 偏差 #4）。
+ * workflow / subagent_batch 两 tool 同源，tool-shared assertNotAborted；C4 偏差 #4）。
  *
  * 层归属：Interface。依赖 Pi SDK + engine script-lint + infra workflow-files。
  */
@@ -213,8 +213,6 @@ export function registerWorkflowScriptTool(
   pi.registerTool({
     name: "workflow-script",
     label: "Workflow Script",
-    // tool-declaration-slimming U-C1 R1 裁决：低频脚本管理侧延迟加载（defer 名单工具）。
-    exposure: "deferred",
     description:
       "Manage workflow scripts: generate (AI creates tmp script), lint (static check), " +
       "save (tmp→permanent), delete, list. Before generating a new script, use action:list " +

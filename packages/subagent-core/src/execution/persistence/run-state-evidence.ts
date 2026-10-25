@@ -16,8 +16,8 @@
 // 判定与清理语义零变化（宽限窗 / 保留窗 / 终态判据全保留）。
 //
 // 依赖方向：record 事件文件族的枚举与 fold 资格判定消费同域 record-events；
-// run 事件词表与 fold 经 orchestration/run-events 单源消费（本文件只做候选
-// 枚举与成对裁剪，不定义后缀词表；fold 终态 = W1 D5 清理资格判据）；
+// run 事件词表与载荷契约经 shared 层单源消费（run-vocabulary / run-event-contracts；
+// 本文件只做候选枚举与成对裁剪，不定义后缀词表；fold 终态 = W1 D5 清理资格判据）；
 // reason 派生单点在 orchestration/terminal-actions
 // （runSettledOutcomeToDoneReason——sweep 判据的 reason 派生单点，
 // 帧/manifest (outcome, errorCode) → DoneReason 五处统一派生）。
@@ -39,7 +39,7 @@ import {
 } from "./record-events.ts";
 import { RUN_EVENTS_SUFFIX, type RunErrorCode, type RunOutcome } from "../../shared/run-vocabulary.ts";
 import { createRunEventJournal } from "./run-event-journal.ts";
-import type { WorkflowRunEvent } from "../../orchestration/run-events.ts";
+import type { WorkflowRunEvent } from "../../shared/run-event-contracts.ts";
 import { runSettledOutcomeToDoneReason } from "../../shared/run-vocabulary.ts";
 
 const logger = getLogger("run-state-evidence");

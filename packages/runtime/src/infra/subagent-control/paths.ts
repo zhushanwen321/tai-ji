@@ -9,6 +9,8 @@
  * 布局（§3.4.5 状态写入点表）：
  * - `<dataDir>/run/subagent-<pid>.sock`     control socket（win32 为 named pipe，无文件残留）
  * - `<dataDir>/run/subagent-engines/*.pid`  引擎通道 pid 文件
+ * - `<dataDir>/run/relay-<pid>.sock` + `<dataDir>/run/relay-children/<recordId>.pid`
+ *   旧 relay 时代残片（只读收割面，见 getLegacyRelayChildrenDir 注释）
  */
 import { join } from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
@@ -19,6 +21,19 @@ export const CONTROL_ENGINES_DIR_NAME = 'subagent-engines'
 /** control socket 父目录（<dataDir>/run/）。 */
 export function getControlRunDir(dataDir: string = getDataDir()): string {
   return join(dataDir, 'run')
+}
+
+/**
+ * 旧 relay 时代的跨代残片路径（S-13）：relay 实现已整体退役（u-m3-delete），本模块只
+ * 保留路径构造供启动 sweep 收割升级前崩溃留下的残片——socket 残片形态 =
+ * `<dataDir>/run/relay-<pid>.sock`（sweep 扫 runDir 时按 `relay-` 前缀匹配，无独立
+ * 路径函数）；pid 残片目录 = `<dataDir>/run/relay-children/`。这些路径不再有写方。
+ */
+export const LEGACY_RELAY_CHILDREN_DIR_NAME = 'relay-children'
+
+/** 旧 relay 子进程 pid 文件目录（残片收割只读）。 */
+export function getLegacyRelayChildrenDir(dataDir: string = getDataDir()): string {
+  return join(getControlRunDir(dataDir), LEGACY_RELAY_CHILDREN_DIR_NAME)
 }
 
 /** 引擎通道 pid 文件目录。 */

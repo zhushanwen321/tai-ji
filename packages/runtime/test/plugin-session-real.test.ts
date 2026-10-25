@@ -29,8 +29,6 @@ function createSessionSummary(overrides: Partial<SessionSummary> = {}): SessionS
     cwd: '/project',
     status: 'active',
     lastActiveAt: Date.now(),
-    modelId: 'provider/model-a',
-    tokenCount: 0,
     ...overrides,
   }
 }
