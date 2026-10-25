@@ -19,6 +19,7 @@ export default {
     // DAG canvas
     dagCanvasLabel: 'Workflow structure diagram (DAG)',
     dagZoomHint: 'Scroll to zoom · Drag to pan',
+    dagBackToFit: 'Back to overview',
     dagLoading: 'Parsing workflow structure…',
     dagRetryParse: 'Retry parse',
     dagErrorParseFailed: 'DAG parse failed, switched to list view',
