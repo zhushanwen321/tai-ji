@@ -33,7 +33,7 @@ import type {
 } from '@taiji/core'
 import * as chatApi from '@taiji/core/transport/api/domains/chat'
 import * as sessionApi from '@taiji/core/transport/api/domains/session'
-import { onGlobalType } from '@taiji/core/transport/api'
+import { command, onGlobalType, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 import { registerSessionCleanup } from '@taiji/core/foundation/use-session-scoped-state'
 import { createComposerInjectionStore } from '@taiji/core/domain/composer/context'
 import { showErrorBar } from './error-bar'
@@ -90,6 +90,15 @@ const sessionApiPort: SessionApiPort = {
   migrateImage: (p) => sessionApi.migrateImage(p),
   onConfigSessions: (handler) =>
     onGlobalType('config.sessions', (msg) => handler(msg.payload.groups)),
+  // [W2 权威拉取与冷读] session.getState 直发（对齐桌面 api/session-api-port.ts:51-54：
+  // 不经 session 域代理，经 command 原语直发）。移动壳缺此成员时 core use-session 的
+  // refreshLiveState 首行门控 `if (!liveState || !getState) return` 恒命中，三时机拉取
+  // 整体跳过，而状态层唯一写入方是 useChat 的 liveState dep（冷会话无 state_changed 帧，
+  // registerReplicatedStates 只在 onSessionRegistered 调）——模型/思考档标签恒空。
+  // reply 与 request 同名、payload 消费型；会话不存在 = SESSION_NOT_FOUND reject
+  // （core 侧显式未知保持，不回退其他会话的值）。
+  getState: (id: string) =>
+    command('session.getState', { sessionId: id }, RPC_BACKSTOP_TIMEOUT_MS),
 }
 
 // ── store / composable 单例（模块级；移动壳单实例应用）──────────────────
@@ -241,6 +250,11 @@ const useSessionInstance = createUseSession({
   },
   // D2/U5：sessionEntry 端口束注入——切入链 12 步的订阅/LRU 步在移动壳生效（对齐桌面）
   sessionEntry,
+  // [W2 权威拉取与冷读] 状态层：session.getState reply 的唯一落点（与状态消息 /
+  // 操作回执共用 applyLiveState 这一个 reducer，设计 §7 验收项 8）。缺省不注入时
+  // refreshLiveState 整体跳过（缓存缺失门控拉取不生效），与上方 sessionApiPort.getState
+  // 成对缺失——冷会话模型/思考档标签恒空（对齐桌面 useSidebar 注入形态）。
+  liveState: liveStateStore,
 })
 
 // ── 新建任务（createSessionFlow 直组；手输路径是移动唯一形态）────────────────

@@ -316,6 +316,12 @@ export const SURFACE_WRITE_SIDE_FILES = new Set([
   'packages/runtime/src/services/session/session-service.ts',
   // renderer 侧 session.list 端口形参（domains/session.ts:68，查询侧过滤参数载体）
   'packages/core/src/transport/api/domains/session.ts',
+  // ISessionService.listSessions 查询形参声明（interfaces.ts:413）：session.list 通用
+  // 查询（W4b，设计 §3.3.1）的接口侧 facade 签名——`surface?: SessionSurface` 是查询
+  // 过滤参数的类型声明，与 session-service.ts:1022 listSessions facade 形参、core
+  // domains/session.ts:68 端口形参同族载体；类型声明不是运行时读取点（不进 usage
+  // 三值词表），按载体文件级登记
+  'packages/runtime/src/interfaces.ts',
 ])
 
 // ─────────────────────────────────────────────────────────────────────────────
