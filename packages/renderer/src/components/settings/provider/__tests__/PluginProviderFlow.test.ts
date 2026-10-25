@@ -279,6 +279,49 @@ describe('PluginProviderFlow S27：安装确认卡知情面（两路径）', () 
   })
 })
 
+describe('PluginProviderFlow 授权视图渲染驱动（初始树生产者 = 插件 getAuthorizeView）', () => {
+  it('focus 直达授权段（重新授权入口）→ invoke getAuthorizeView 驱动插件推初始树', async () => {
+    wrapper = mountFlow({ focus: { pluginId: 'wool-trae', intent: 'authorize' } })
+    await flushPromises()
+    await nextTick()
+
+    expect(query('plugin-authorize-container')).not.toBeNull()
+    expect(pluginMock.invokePlugin).toHaveBeenCalledWith('wool-trae', 'getAuthorizeView', {})
+  })
+
+  it('家族卡点击已装家族 → 进入授权段并驱动 getAuthorizeView', async () => {
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    // 第二张卡 = Trae（installed=true → 直接进授权段）
+    queryAll('plugin-family-card')[1].click()
+    await flushPromises()
+    await nextTick()
+
+    expect(query('plugin-authorize-container')).not.toBeNull()
+    expect(pluginMock.invokePlugin).toHaveBeenCalledWith('wool-trae', 'getAuthorizeView', {})
+  })
+
+  it('安装确认成功 → 进入授权段并驱动 getAuthorizeView（activate 已随确认完成，命令通道就绪）', async () => {
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    // 第一张卡 = WorkBuddy（未安装 → 安装确认卡）
+    queryAll('plugin-family-card')[0].click()
+    await flushPromises()
+    await nextTick()
+    pluginMock.invokePlugin.mockClear()
+    query('plugin-install-confirm-btn')?.click()
+    await flushPromises()
+    await nextTick()
+
+    expect(query('plugin-authorize-container')).not.toBeNull()
+    expect(pluginMock.invokePlugin).toHaveBeenCalledWith('wool-workbuddy', 'getAuthorizeView', {})
+  })
+})
+
 describe('PluginProviderFlow S7：text-input 输入经 uiEvent 回传', () => {
   it('demo 插件树含 text-input → 输入值经 plugin.sendPluginUiEvent 回传（pluginId/viewId/componentId）', async () => {
     const tree: GuiComponent[] = [

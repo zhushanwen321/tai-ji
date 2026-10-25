@@ -8,6 +8,8 @@
         确认前不发生安装落盘（取消/关闭 = cancelPluginInstall 清暂存）；
       ③ authorize 授权挂载位容器：ViewHost(global:provider.authorize) 渲染插件推的树，
          重新授权复用同一挂载位（D5，focus intent=authorize 直达本段）。
+         进入本段即 invoke getAuthorizeView 驱动插件推初始树（enterAuthorize——快照
+         store 只存插件推送内容，无宿主驱动则初始树无生产者、容器恒占位空态）。
   -->
   <Dialog :open="open" @update:open="onDialogToggle">
     <DialogContent data-testid="plugin-provider-flow" class="max-w-[720px]">
@@ -279,6 +281,18 @@ const authorizeEntry = computed<PluginCatalogItem | undefined>(() => {
   return source.catalog.value.find((e) => e.pluginId === pluginId)
 })
 
+/**
+ * 进入授权挂载位段（三入口共用：focus 直达 / 家族卡已装 / 安装确认成功）。进入即
+ * invoke getAuthorizeView——插件初始树的唯一生产者是插件该方法（快照 store 只存
+ * 插件 views.update 推送的内容，无此驱动容器恒占位空态）；activate 完成是安装确认
+ * 的一部分，命令通道在容器渲染前已就绪，树经实时帧到达后 ViewHost 渲染。
+ */
+function enterAuthorize(pluginId: string): void {
+  pendingAuthorizePluginId.value = pluginId
+  phase.value = 'authorize'
+  void source.pullAuthorizeView(pluginId)
+}
+
 const authorizeTitle = computed<string>(() =>
   authorizeEntry.value?.family?.displayName ?? pendingAuthorizePluginId.value ?? '',
 )
@@ -315,8 +329,7 @@ async function enterFlow(): Promise<void> {
     return
   }
   if (focus.intent === 'authorize') {
-    pendingAuthorizePluginId.value = entry.pluginId
-    phase.value = 'authorize'
+    enterAuthorize(entry.pluginId)
     return
   }
   // update 意图：直达确认卡（安装链与首次安装同构，文案按 update 差异化）
@@ -353,8 +366,7 @@ function familyAvatarChar(entry: PluginCatalogItem): string {
 /** 家族卡点击：已装 → 授权容器；未装 → 安装段（确认卡）。 */
 function onFamilySelect(entry: PluginCatalogItem): void {
   if (entry.installed) {
-    pendingAuthorizePluginId.value = entry.pluginId
-    phase.value = 'authorize'
+    enterAuthorize(entry.pluginId)
     return
   }
   void beginInstall(entry.packageName, 'install')
@@ -406,8 +418,7 @@ async function onInstallConfirm(): Promise<void> {
       return
     }
     installPreview.value = null
-    pendingAuthorizePluginId.value = preview.pluginId
-    phase.value = 'authorize'
+    enterAuthorize(preview.pluginId)
     // 安装状态刷新不阻塞进入授权容器（家族卡在下次打开时呈现最新安装态）
     void source.refreshCatalog()
   } catch (e) {

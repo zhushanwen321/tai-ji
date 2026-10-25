@@ -32,6 +32,15 @@ export const CREDENTIAL_STATUS_CHANNEL = 'provider.credentialStatus'
 /** getStatus 业务方法名（插件经 commands-executor 注册的 method 路由键）。 */
 export const GET_STATUS_METHOD = 'getStatus'
 
+/**
+ * getAuthorizeView 业务方法名（进入授权挂载位容器时 invoke——插件初始树的唯一生产者：
+ * 快照 store 只存插件 views.update 推送的内容，无此驱动容器恒占位空态）。
+ */
+export const GET_AUTHORIZE_VIEW_METHOD = 'getAuthorizeView'
+
+/** getDetail 业务方法名（条目展开时 invoke——detail-extra 扩展区树的初生产者，同上）。 */
+export const GET_DETAIL_METHOD = 'getDetail'
+
 /** 凭据状态载荷（宿主展示映射的最小契约：状态 + 可选一行文案）。 */
 export interface CredentialStatusPayload { // oe-exempt:20261024:framework:ports/SDK 契约类型——接口先立、单实现常态（映射表/端口单一数据源）
   /** 凭据状态两值：valid = 插件判定可用；invalid = 插件判定失效（S17 展示驱动） */
@@ -174,6 +183,13 @@ export type PluginProviderSourceReturn = {
    */
   pullStatus: (pluginId: string, providerId: string) => Promise<void>
   /**
+   * 进入授权挂载位容器时拉取插件授权视图（invoke getAuthorizeView 触发插件推初始树
+   * ——快照 store 只存插件推送内容，无此驱动容器恒占位空态）。失败降级 warn。
+   */
+  pullAuthorizeView: (pluginId: string) => Promise<void>
+  /** 条目展开时拉取插件扩展区视图（invoke getDetail 触发插件推 detail-extra 树）。失败降级 warn。 */
+  pullDetailView: (pluginId: string) => Promise<void>
+  /**
    * providerId → 插件来源条目（识别两源，S15②/D4）：① 清单家族前缀（family.id）；
    * ② 清单外兜底 = 本地已装条目的 manifest namespace 前缀（清单不可达时管理入口
    * 不断，R-2 本地回退条目携带 namespace）。两源都未命中返回 undefined。
@@ -246,6 +262,8 @@ export function usePluginProviderSource(): PluginProviderSourceReturn {
     refreshCatalog,
     statusOf: (providerId) => statusMap.value.get(providerId),
     pullStatus,
+    pullAuthorizeView,
+    pullDetailView,
     entryOfProvider: (providerId) =>
       // 识别源①：清单家族前缀（D1，含家族元数据与 updateAvailable 增强）
       catalog.value.find((entry) => entry.family !== undefined && providerMatchesNamespace(providerId, entry.family.id)) ??
@@ -283,6 +301,30 @@ async function pullStatus(pluginId: string, providerId: string): Promise<void> {
   } catch (e) {
     // 插件崩溃 / 方法未注册：辅助域降级 warn，保持现状（无标记——不猜测，S5）
     console.warn(`[plugin-provider-source] getStatus(${pluginId}, ${providerId}) failed:`, e)
+  }
+}
+
+/**
+ * 进入授权挂载位容器时拉取插件授权视图（invoke getAuthorizeView → 插件推初始树经
+ * 实时帧进快照 store → ViewHost 渲染）。失败 warn 降级（容器保持占位空态，树到达
+ * 通道本身由重进授权段重试收敛），不阻断进入。
+ */
+async function pullAuthorizeView(pluginId: string): Promise<void> {
+  try {
+    await getSettingsTransport().invokePlugin(pluginId, GET_AUTHORIZE_VIEW_METHOD, {})
+  } catch (e) {
+    // 插件崩溃 / 方法未注册：辅助域降级 warn，容器保持占位空态（树到达通道由重进授权段重试收敛）
+    console.warn(`[plugin-provider-source] getAuthorizeView(${pluginId}) failed:`, e)
+  }
+}
+
+/** 条目展开时拉取插件扩展区视图（invoke getDetail → 插件推 detail-extra 树；降级同上）。 */
+async function pullDetailView(pluginId: string): Promise<void> {
+  try {
+    await getSettingsTransport().invokePlugin(pluginId, GET_DETAIL_METHOD, {})
+  } catch (e) {
+    // 插件崩溃 / 方法未注册：辅助域降级 warn，扩展区保持空态（推送/下次展开收敛），不阻断展开
+    console.warn(`[plugin-provider-source] getDetail(${pluginId}) failed:`, e)
   }
 }
 

@@ -289,8 +289,10 @@ describe('S17：plugin:event 状态展示 + 重展开经 invoke getStatus 补齐
 
     await expandRow('wool-trae')
 
-    // 展开再拉一次（拉为主；状态行渲染依据）
-    expect(pluginMock.invokePlugin).toHaveBeenCalledTimes(callsAfterEnter + 1)
+    // 展开再拉一次（拉为主；状态行渲染依据）+ 驱动扩展区树（getDetail——快照 store
+    // 只存插件推送内容，无此驱动扩展区恒空）
+    expect(pluginMock.invokePlugin).toHaveBeenCalledTimes(callsAfterEnter + 2)
+    expect(pluginMock.invokePlugin).toHaveBeenCalledWith('wool-trae', 'getDetail', {})
     const status = wrapper.find('[data-testid="provider-plugin-status"]')
     expect(status.exists()).toBe(true)
     expect(status.text()).toContain('登录态已过期')
@@ -306,11 +308,11 @@ describe('S17：plugin:event 状态展示 + 重展开经 invoke getStatus 补齐
 
     expect(wrapper.find('[data-testid="provider-plugin-status"]').text()).toContain('凭据可用')
 
-    // 收起再展开 → 再次拉取补齐（推送丢失的收敛路径）
+    // 收起再展开 → 再次拉取补齐（推送丢失的收敛路径；getStatus + getDetail 各一次）
     const callsBefore = pluginMock.invokePlugin.mock.calls.length
     await expandRow('wool-trae') // 收起
     await expandRow('wool-trae') // 重新展开
-    expect(pluginMock.invokePlugin).toHaveBeenCalledTimes(callsBefore + 1)
+    expect(pluginMock.invokePlugin).toHaveBeenCalledTimes(callsBefore + 2)
   })
 })
 

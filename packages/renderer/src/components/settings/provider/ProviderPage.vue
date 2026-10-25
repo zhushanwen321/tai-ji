@@ -422,14 +422,16 @@ function onUpdatePlugin(providerId: string): void {
 }
 
 /**
- * 条目展开 → 拉凭据状态（D5 时序语义：getStatus 同步返回插件本地最近已知状态，
- * 上游校验由插件异步执行后经 plugin:event 增量上报）。未展开/非插件条目不动。
+ * 条目展开 → 拉凭据状态 + 扩展区插件树（D5 时序语义：getStatus 同步返回插件本地最近
+ * 已知状态，上游校验由插件异步执行后经 plugin:event 增量上报；getDetail 驱动插件推
+ * detail-extra 树——快照 store 只存插件推送内容，无此驱动扩展区恒空）。未展开/非插件条目不动。
  */
 watch(expandedId, (id) => {
   if (id === null || id === NEW_ID) return
   const entry = pluginSource.entryOfProvider(id)
   if (entry === undefined) return
   void pluginSource.pullStatus(entry.pluginId, id)
+  void pluginSource.pullDetailView(entry.pluginId)
 })
 
 
