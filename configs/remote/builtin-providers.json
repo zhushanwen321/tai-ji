@@ -20,7 +20,7 @@
         {
           "id": "step-3.7-flash",
           "name": "Step 3.7 Flash",
-          "contextWindow": 256000,
+          "contextWindow": 262144,
           "maxTokens": 230400,
           "reasoning": true,
           "input": ["text", "image"]
@@ -28,7 +28,7 @@
         {
           "id": "step-5-preview",
           "name": "Step 5 Preview",
-          "contextWindow": 1048576,
+          "contextWindow": 1024000,
           "maxTokens": 65536,
           "reasoning": true,
           "input": ["text", "image"]
