@@ -731,11 +731,21 @@ async function realConversation({ protocol, ev, ui, providerId, models, settings
   await protocol.subscribe(sid)
   const since = protocol.events.length
   await protocol.send(sid, '请只回复两个字：收到')
-  const end = await protocol.waitTurnEnd(sid, { since, timeoutMs: 180_000 })
+  let end = await protocol.waitTurnEnd(sid, { since, timeoutMs: 180_000 })
+  // 上游排队信封（Qoder 免费通道 403 + code 10605 isQueued）= 环境类瞬态：等 45s 重发
+  // 一次探针（真实用户稍后重试同构）；其余错误不重试。
+  const endError = () => String(end.payload?.message ?? end.payload?.errorMessage ?? '')
+  if (!end.ok && (endError().includes('10605') || endError().includes('isQueued'))) {
+    ev.step({ step: `conversation.queue-retry.${label}`, channel: 'B', exitCode: 0, stats: { waitMs: 45_000, reason: '上游排队信封（环境类瞬态）' } })
+    await new Promise((r) => setTimeout(r, 45_000))
+    const since2 = protocol.events.length
+    await protocol.send(sid, '请只回复两个字：收到')
+    end = await protocol.waitTurnEnd(sid, { since: since2, timeoutMs: 180_000 })
+  }
   ev.assert(`B: wool-${label} 真实对话出话（message.complete + assistant 文本非空）`, end.type === 'message.complete' && end.ok, {
     channel: 'B',
     expected: 'message.complete + stopReason≠error（真实上游一轮）',
-    actual: `${end.type} stopReason=${end.payload?.stopReason ?? 'n/a'} error=${String(end.payload?.message ?? end.payload?.errorMessage ?? '').slice(0, 160)}`,
+    actual: `${end.type} stopReason=${end.payload?.stopReason ?? 'n/a'} error=${endError().slice(0, 400)}`,
   })
   const hist = await protocol.history(sid, { limitTurns: 5 })
   const assistantTexts = (hist.messages ?? [])
