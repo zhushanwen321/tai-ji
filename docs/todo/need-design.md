@@ -80,12 +80,9 @@
 
 ### 7. workflow-viz 两项交互/算法设计
 
-状态：设计完成（2026-10-23 裁决立项 → 设计产物 `.tmp/need-design-batch/workflow-viz-fit-and-routing-design.md`，待实施排期）。设计期核实修正：穿卡的是跨列不同行边的通道中位竖线（原登记「同列边」与实码不符，同列边走列右缘细道不穿卡）；fit 打断风险点 = 组件契约层可达的 watch 防御代码。边界外新发现一条（跨列同行直线边穿卡，登记为来源文件残余 5）。设计期待裁决项（回到全景入口等）见来源登记。
+状态：已解决（两项均已实施）——穿卡避让在前批落地（`avoidObstructedChannelMid` 通道竖线整条平移至最近零穿卡走廊 + 车道铺开超容量的降级并线档 + `sameRowBypass` 同行直线边纵向绕行，实装 `workflow-viz/dag/layout.ts`，防回归测试 5+3 条白盒用例）；fit 不追打策略与「回到全景」入口随本条目收尾批落地（`viewMode: 'fit' | 'free'` 二态状态机，七条用户接管判定 + 程序化写视口结构性排除 + ResizeObserver 持续观察 fit 态追 fit、free 态不动 + 切 run 重置回 fit；free 态右下角「回到全景」按钮，与缩放提示角标两态互斥占位）。本条目终态。
 
 来源：workflow-viz-dag-minor-residuals.md（另 2 条小项已入 just-do-it 条目 59/60）。
-
-- fit 不追打策略：需要「仅首次 fit + 用户操作后不再自动 fit」的策略收敛（交互策略设计，涉及用户意图判定——什么操作算「用户接管」）。位置 `WorkflowVizDag.vue`。
-- 同列垂直 sequence 边折线穿卡片：垂直边路由对途经节点 x 区间做避让侧道（布局算法改动，需防回归）。位置 `workflow-viz/dag/layout.ts`。
 
 ### 8. review-fix-loop 聚合器延续条目空壳缺陷
 
