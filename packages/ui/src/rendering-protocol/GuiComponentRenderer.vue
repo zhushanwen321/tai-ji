@@ -30,6 +30,7 @@ import {
   Group,
   ListTree,
   Actionbar,
+  TextInput,
 } from './primitives'
 import { PRIMITIVE_RENDER_KEY } from './primitive-render-key'
 import { GUI_CUSTOM_REGISTRY_KEY } from '@taiji/core/rendering-protocol/custom-registry'
@@ -45,7 +46,7 @@ if (self?.type) {
 
 const props = defineProps<{ component: GuiComponent }>()
 
-/** core resolveComponent 保证可渲染的 builtin type（ansi-text + 8 原语：7 布局 + 首个交互原语 action-bar）。 */
+/** core resolveComponent 保证可渲染的 builtin type（ansi-text + 9 原语：7 布局 + action-bar + text-input）。 */
 type RenderableBuiltinType = Exclude<GuiComponentType, 'custom'>
 
 /** builtin type → Vue 组件纯映射表（无降级分支，降级 SSOT 在 core resolveComponent）。
@@ -60,6 +61,7 @@ const BUILTIN_MAP: Record<RenderableBuiltinType, Component> = {
   'group': Group,
   'list-tree': ListTree,
   'action-bar': Actionbar,
+  'text-input': TextInput,
 }
 
 /** custom 组件注册表（内置 extension 编译期注册）。core resolveComponent 用它判注册态，

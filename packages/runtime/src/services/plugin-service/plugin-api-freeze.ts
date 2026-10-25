@@ -13,8 +13,9 @@ import type { Phase2AgentAPI } from './plugin-types.js'
  *
  * freeze 范围 = stable 层：顶层（不可增删属性）+ storage（含 global/workspace
  * 二级）/notify/sessions/events/tools/hooks/config/sessionData/ui/agent/workspace
- * 各子对象。commands/views（proposed 演进面，D3）仅由顶层 freeze 锁住引用，
- * 不递归冻结其内部。子对象内的方法本身是函数引用，函数对象不 freeze
+ * 各子对象。providers（provider-plugin-access D4 凭据安全面）同口径递归冻结——
+ * 域方法引用不可被插件替换。commands/views（proposed 演进面，D3）仅由顶层 freeze
+ * 锁住引用，不递归冻结其内部。子对象内的方法本身是函数引用，函数对象不 freeze
  * （调用行为不受影响）。subscriptions 不在 api 对象内（createPluginContext
  * 构造），天然不冻（DM1）。
  */
@@ -34,6 +35,7 @@ export function freezeApiSurface(api: Phase2AgentAPI): Phase2AgentAPI {
   Object.freeze(api.ui)
   Object.freeze(api.agent)
   Object.freeze(api.workspace)
+  Object.freeze(api.providers)
   // 顶层
   return Object.freeze(api)
 }

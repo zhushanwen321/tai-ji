@@ -156,7 +156,7 @@
         <template v-if="hasPluginToolbar">
           <span class="h-px w-full shrink-0 bg-border-strong" aria-hidden="true" />
           <div class="shrink-0">
-            <ViewHost view-id="composer.toolbar" :session-id="sessionId" empty="hidden" />
+            <ViewHost view-id="composer.toolbar" :scope="{ kind: 'session', sessionId }" empty="hidden" />
           </div>
         </template>
       </TrayPanelSurface>

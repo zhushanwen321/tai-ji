@@ -102,15 +102,16 @@ function refreshOverlayState(): void {
 const isMinimized = computed(() => overlayState.value === 'minimized')
 
 /**
- * z-index 状态驱动（契约闭环）：expanded → 用户待决确认层（--z-dialog，高于 modal——
- * AP-2 规则③：plugin modal 打开期间新到的 ui-request 叠在其上，用户待决优先，token
- * 定义在 renderer style.css）；minimized/restored → 覆盖层（低层级，为多 overlay 编排
- * 预留语义）；无状态（undefined）→ 不设 z-index（默认层）。
+ * z-index 状态驱动（契约闭环）：expanded → 用户待决确认层（calc(var(--z-dialog)+1)，
+ * 高于 modal 与浮层壳——AP-2 规则③：plugin modal 打开期间新到的 ui-request 叠在其上，
+ * 用户待决优先；壳也用 z-dialog（同值平局下 DOM 后序的壳遮罩会盖住本带），+1 消除
+ * 平局；token 定义在 renderer style.css）；minimized/restored → 覆盖层（低层级，为多
+ * overlay 编排预留语义）；无状态（undefined）→ 不设 z-index（默认层）。
  */
 const bandStyle = computed<Record<string, string> | undefined>(() => {
   const s = overlayState.value
   if (s === undefined) return undefined
-  return { zIndex: s === 'expanded' ? 'var(--z-dialog)' : 'var(--z-overlay)' }
+  return { zIndex: s === 'expanded' ? 'calc(var(--z-dialog) + 1)' : 'var(--z-overlay)' }
 })
 
 /** 收起当前 overlay（transition expanded→minimized；inject 缺失静默跳过） */

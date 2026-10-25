@@ -30,6 +30,7 @@ import {
 import { PermissionConstants } from '../../plugin-sdk/src/types.js'
 
 import { PluginService } from '../src/services/plugin-service/plugin-service.js'
+import { registerProviderWriteProxy } from '../src/services/provider-write-proxy.js'
 import type { PluginRpcServer } from '../src/services/plugin-service/plugin-rpc-server.js'
 import type { PluginRegistry } from '../src/services/plugin-service/plugin-registry.js'
 import type { IMessageBroker } from '../src/interfaces.js'
@@ -64,6 +65,16 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
     })
     const internals = service as unknown as ServiceInternals
     internals.registerRpcMethods()
+    // provider-plugin-access D4：providers.* 三 RPC 注册点在组合根（index.ts →
+    // registerProviderWriteProxy），不在 PluginService.registerRpcMethods 内——
+    // 按生产注册链路真实装配一次，注册表集合才完整（否则三方法被判「孤儿」）。
+    registerProviderWriteProxy(internals.rpcServer, {
+      setProvider: async () => ({}),
+      deleteProvider: async () => ({ removed: true }),
+      resolveProviderCredential: async () => undefined,
+      readPluginManifest: () => undefined,
+      notifyProvidersMutated: () => {},
+    })
     registeredMethods = new Set(internals.rpcServer.listMethods())
   })
 
@@ -103,10 +114,12 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
     // 数量级回归锚点：46（agent5 commands3 config3 hooks2 notify1 sessionData4
     // sessions8 storage8 tools2 ui5 views2 workspace3）+ AP-4 读侧 6（readEntries/
     // getCommands/register+unregisterEntryInvalidation 4 + activate 族 2）+ ui 命令式
-    // 点位 1（updateHeaderAction，[u5b] handler 已落地转正）= 53。
-    // registeredMethods.size 同步锚点：53/53。
-    expect(PLUGIN_RPC_METHODS.length).toBe(53)
-    expect(registeredMethods.size).toBe(53)
+    // 点位 1（updateHeaderAction，[u5b] handler 已落地转正）= 53 + provider-plugin-access
+    // D9 两项（plugin.event 上报 + plugin.ui.openUrl 服务调用）= 55 + D4 三项
+    // （providers.write / providers.delete / providers.credential，组合根注册）= 58。
+    // registeredMethods.size 同步锚点：58/58。
+    expect(PLUGIN_RPC_METHODS.length).toBe(58)
+    expect(registeredMethods.size).toBe(58)
   })
 
   it('AC-I6: 全部口径归一化产物无孤儿（每个产出方法名都在真实注册表）', () => {

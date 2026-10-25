@@ -628,6 +628,15 @@ export function migratePiSessionLogTree(oldSessionId: string, newSessionId: stri
     // 清理失败不抛（半空目录无害）；留痕满足 no-silent-catch
     writeLogEntry('warn', '[logger] log tree cleanup ignored (best-effort)', { from, error: String(e) })
   }
+  // 旧树 <oldId>/ 空壳清理：logs/ 删除后上级目录若已空同样移除——否则 tempId 空壳目录
+  // 残留成 ext-sessions 孤儿（D3 验收 A15a 发现：管理会话每次编排泄漏一个空目录）。
+  // 只在确认空后删（readdirSync 抛错 = 不可判定，跳过）。
+  try {
+    const oldTreeRoot = dirname(from)
+    if (readdirSync(oldTreeRoot).length === 0) rmSync(oldTreeRoot, { recursive: true, force: true })
+  } catch (e) {
+    writeLogEntry('warn', '[logger] temp-id tree shell cleanup ignored (best-effort)', { from: dirname(from), error: String(e) })
+  }
 }
 
 /**

@@ -200,6 +200,35 @@ describe('MessageBusBridge', () => {
       source.emit({ type: 'plugin:viewUpdate', payload: { sessionId: 's1', viewId: 'v', pluginId: 'p', guiTree: 'nope' } })
       expect(emitted.some((x) => x.kind === 'error')).toBe(true)
     })
+
+    it('viewUpdate 全局域（U2）：mountId 归属 → mountId 事件形态 + generation 透传', () => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({
+        type: 'plugin:viewUpdate',
+        payload: { mountId: 'provider.authorize', viewId: 'flow', pluginId: 'plug-a', guiTree: [{ type: 'ansi-text', props: { lines: ['auth'] } }], updatedAt: 1, generation: 3 },
+      })
+      const e = emitted.find((x) => x.kind === 'extension-widget')
+      expect(e).toMatchObject({
+        kind: 'extension-widget',
+        mountId: 'provider.authorize',
+        widget: { viewId: 'flow', pluginId: 'plug-a', generation: 3 },
+      })
+      expect((e as { sessionId?: string }).sessionId).toBeUndefined()
+    })
+
+    it.each([
+      ['都缺（无 sessionId 无 mountId）', { viewId: 'v', pluginId: 'p', guiTree: [] }],
+      ['都给（sessionId + mountId）', { sessionId: 's1', mountId: 'provider.authorize', viewId: 'v', pluginId: 'p', guiTree: [] }],
+      ['全局域缺 pluginId（分区键无法成形）', { mountId: 'provider.authorize', viewId: 'v', guiTree: [] }],
+    ])('viewUpdate 归属非法（U2 二选一）：%s → error 事件（ERR2 不静默吞）', (_label, payload) => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({ type: 'plugin:viewUpdate', payload })
+      const errorEvents = emitted.filter((x) => x.kind === 'error')
+      expect(errorEvents).toHaveLength(1)
+      expect(emitted.some((x) => x.kind === 'extension-widget')).toBe(false)
+    })
   })
 
   describe('FR5: 5 个 extension:* wire type 收敛', () => {

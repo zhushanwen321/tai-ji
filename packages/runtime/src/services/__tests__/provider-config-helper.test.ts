@@ -922,3 +922,84 @@ describe('coding-plan 额度显示自动开启（新增即默认同意，quota-a
     await setPlainZaiAndExpectNoAutoEnable(svc, extras)
   })
 })
+
+/**
+ * ISSUES-2 ⑨：headers 出线脱敏（读侧出口层）。
+ *
+ * 断言口径：listProviders 聚合输出（config.providers / model.list 帧、config.getProviders
+ * reply 的共同单点）对 provider 级与模型级 headers 做凭据词根键剔除；写侧（setProvider →
+ * upsertProvider 落盘）零变化——pi 扩展对话链读 models.json 条目 headers 取 refreshToken
+ * 的链路不经过 listProviders，落盘形态不变即链路不受影响。
+ */
+describe('ISSUES-2 ⑨: headers 出线脱敏（listProviders 读侧出口，落盘不动）', () => {
+  function makeRedactionStore(providers: Record<string, unknown>) {
+    return {
+      readModels: vi.fn(() => ({ providers })),
+      getEnabledModels: vi.fn(() => []),
+    } as unknown as IConfigStore
+  }
+
+  function makeNoCredentialsResolver(): IProviderCredentialResolver {
+    return {
+      hasProviderCredential: vi.fn(() => false),
+      listCredentialBackedProviderIds: vi.fn(() => new Set<string>()),
+      resolveProviderCredential: vi.fn(async () => undefined),
+      resolveProviderApiKeyRaw: async () => undefined,
+      resolveProviderBaseUrl: vi.fn(() => undefined),
+    }
+  }
+
+  const mixedHeaders = { 'x-wool-refresh-token': 'rt-candidate', 'User-Agent': 'taiji-gateway/1.0' }
+
+  it('custom 条目 provider 级 + 模型级凭据键剔除、非敏感键保留', () => {
+    const store = makeRedactionStore({
+      'wool-qoder': {
+        name: 'Wool Qoder',
+        headers: mixedHeaders,
+        authHeader: false,
+        models: [{ id: 'qoder-cli', api: 'wool-qoder', headers: { 'x-wool-refresh-token': 'rt-model-level', 'X-Trace': 'on' } }],
+      },
+    })
+
+    const result = listProviders(store, makeAuth(), undefined, makeNoCredentialsResolver())
+    const wool = result.find(p => p.id === 'wool-qoder')
+
+    expect(wool?.headers).toEqual({ 'User-Agent': 'taiji-gateway/1.0' })
+    expect(wool?.models[0]?.headers).toEqual({ 'X-Trace': 'on' })
+  })
+
+  it('catalog override 条目同形脱敏；全键命中 → headers undefined（帧内不落字段）', () => {
+    const store = makeRedactionStore({
+      anthropic: { headers: mixedHeaders },
+      'wool-trae': { name: 'Wool Trae', headers: { 'x-wool-refresh-token': 'rt-only' } },
+    })
+
+    const result = listProviders(store, makeAuth(), undefined, makeNoCredentialsResolver())
+
+    expect(result.find(p => p.id === 'anthropic')?.headers).toEqual({ 'User-Agent': 'taiji-gateway/1.0' })
+    expect(result.find(p => p.id === 'wool-trae')?.headers).toBeUndefined()
+  })
+
+  it('写侧零变化：setProvider 落盘条目含完整 headers（凭据键原样，pi 对话链读盘不受出线脱敏影响）', async () => {
+    const upsertProvider = vi.fn((_providerId: string, _merged: Record<string, unknown>) => ({}))
+    const store = {
+      getProviderConfig: vi.fn(() => undefined),
+      applyTypeTranslation: vi.fn((t: string) => t),
+      upsertProvider,
+      ensureProviderInWhitelist: vi.fn(),
+      getEnabledModels: vi.fn(() => []),
+    } as unknown as IConfigStore
+    const svc = new ConfigService('/tmp/project', store, makeAuth(), new TaijiProviderStore(extrasPath))
+
+    await svc.setProvider('wool-qoder', {
+      name: 'Wool Qoder',
+      headers: mixedHeaders,
+      models: [{ id: 'qoder-cli', api: 'wool-qoder', headers: mixedHeaders }],
+    })
+
+    const written = upsertProvider.mock.calls[0]?.[1] as { headers?: Record<string, string>; models?: Array<{ headers?: Record<string, string> }> }
+    // 落盘 provider 级 + 模型级 headers 完整保留（含凭据键）——脱敏只发生在读侧出口
+    expect(written.headers).toEqual(mixedHeaders)
+    expect(written.models?.[0]?.headers).toEqual(mixedHeaders)
+  })
+})

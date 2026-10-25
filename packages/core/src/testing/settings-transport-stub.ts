@@ -22,7 +22,12 @@ import type { SettingsTransport } from '../domain/settings/transport'
  * `const transport: SettingsTransport` 全量字面量承担（新 seam 方法缺失/改名在此报错）。
  */
 export type SettingsTransportStubOverrides = {
-  [K in keyof SettingsTransport]?: (...args: Parameters<SettingsTransport[K]>) => unknown
+  // NonNullable：契约含 optional 方法（插件两段式安装三成员为宿主实现兼容差异的
+  // optional 契约形态，非「未实装」——wire 已完整实装，stub 缺省以覆盖降级路径用例），
+  // Parameters<F | undefined> 不满足函数约束——先剥 undefined 再取实参表
+  [K in keyof SettingsTransport]?: NonNullable<SettingsTransport[K]> extends (...args: infer A) => unknown
+    ? (...args: A) => unknown
+    : never
 }
 
 /** 订阅方法统一桩形（模块内共用）：一键产出「调用返回 no-op 取消函数」的独立 vi.fn
@@ -203,6 +208,22 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     cancelExtensionInstall: vi.fn(async () => {}),
     upgradeExtension: vi.fn(async () => {}),
     setExtensionAutoUpgrade: vi.fn(async () => {}),
+
+    // ── 插件 Provider 来源（provider-plugin-access U6）：读/调/订阅 + 输入回传中性默认。
+    //    optional 四成员（两段式安装三方法 + clearPluginMountUi）刻意不挂（optional
+    //    契约形态的 stub 缺省 = 覆盖降级路径用例：Provider 页呈 channelUnavailable 可见
+    //    降级 / 挂载位清理静默跳过；real adapter 无条件挂载）；用例需覆盖时经 overrides
+    //    注入 vi.fn。──
+    listAvailablePlugins: vi.fn(async () => ({ plugins: [] })),
+    // 插件运行态（S13 崩溃恢复）：list/toggle 中性默认空列表（无崩溃标记可呈）；
+    // crashed 订阅 no-op（用例经 overrides 注入可触发订阅回调的 vi.fn）
+    listPlugins: vi.fn(async () => []),
+    togglePlugin: vi.fn(async () => []),
+    onPluginCrashed: makeUnsubscribeStub(),
+    invokePlugin: vi.fn(async () => null),
+    onPluginEvent: makeUnsubscribeStub(),
+    sendPluginUiEvent: vi.fn(async () => undefined),
+    executePluginCommand: vi.fn(async () => undefined),
 
     // ── 订阅（返回 no-op 取消函数）—— 订阅段单源 = makeSettingsSubscriptionStubs
     //    （键集漂移由其 Pick 标注 + 下方 SettingsTransport 标注双重报错）──

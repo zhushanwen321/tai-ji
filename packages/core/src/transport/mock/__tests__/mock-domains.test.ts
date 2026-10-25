@@ -697,6 +697,44 @@ describe('mock model / extension / plugin / composer / search domain', () => {
     expect(await composer.getFileCandidatesByCwd('/any')).toEqual({ files: [], truncated: false })
   })
 
+  it('plugin 运行态/清单/两段式安装 stub（S13 + provider-plugin-access D9/D8/U5/U4：mock 无插件运行时的显式降级形态）', async () => {
+    // 运行态：list/toggle 恒空列表（与 onPlugins 恒空同形态）
+    await expect(plugin.listPlugins()).resolves.toEqual([])
+    await expect(plugin.togglePlugin('p1', true)).resolves.toEqual([])
+    // invoke/uiEvent/executeCommand：ack 型 stub，invoke 返回 undefined（无插件业务方法可调）
+    await expect(plugin.invokePlugin('p1', 'getStatus')).resolves.toBeUndefined()
+    await expect(
+      plugin.sendPluginUiEvent({ pluginId: 'p1', viewId: 'v', componentId: 'c', event: 'change', value: 1 }),
+    ).resolves.toBeUndefined()
+    await expect(plugin.executePluginCommand({ pluginId: 'p1', commandId: 'cmd' })).resolves.toBeUndefined()
+    // 清单域：恒空清单（mock 无远程清单基建）
+    await expect(plugin.listAvailablePlugins()).resolves.toEqual({ plugins: [] })
+    await expect(plugin.getPluginCatalog()).resolves.toEqual({ entries: [] })
+    // 两段式安装：prepare 返回最小知情面（pluginId = packageSpec 占位形态）、confirm 演示成功
+    const preview = await plugin.preparePluginInstall('@acme/plugin-x')
+    expect(preview).toMatchObject({ pluginId: '@acme/plugin-x', packageName: '@acme/plugin-x', version: '0.0.0' })
+    await expect(plugin.confirmPluginInstall('p1')).resolves.toEqual({ success: true })
+    await expect(plugin.cancelPluginInstall('p1')).resolves.toBeUndefined()
+    // 挂载位分区清理：ack 型 stub
+    await expect(plugin.clearPluginMountUi('mount-1')).resolves.toBeUndefined()
+    // UI 快照拉取（U2 scope 二选一）：mock 无插件运行时恒返空快照
+    await expect(plugin.getPluginUiSnapshot({ mountId: 'mount-1', pluginId: 'p1' })).resolves.toEqual({ headerActions: [], views: [] })
+    await expect(plugin.getPluginUiSnapshot()).resolves.toEqual({ headerActions: [], views: [] })
+  })
+
+  it('plugin 崩溃/事件订阅骨架：mock 无生产方，仅订阅时初始推空骨架值（与 onPlugins 同款订阅形态）', async () => {
+    const crashed: unknown[] = []
+    const pluginEvents: unknown[] = []
+    const offCrashed = plugin.onPluginCrashed((p) => crashed.push(p))
+    const offEvents = plugin.onPluginEvent((p) => pluginEvents.push(p))
+    await waitFor(() => crashed.length > 0 && pluginEvents.length > 0)
+    // 初始推 = fixture 工厂返回的空骨架（makeMockSubscription 订阅即推惯例）；此后无生产方不再有帧
+    expect(crashed).toEqual([{ pluginId: '' }])
+    expect(pluginEvents).toEqual([{ pluginId: '', channel: '', payload: null }])
+    offCrashed()
+    offEvents()
+  })
+
   it('search：空查询返回 recent+suggested；有查询按四类过滤', async () => {
     const empty = await search.query('  ')
     expect(empty.map((s) => s.kind)).toEqual(['recent', 'suggested'])

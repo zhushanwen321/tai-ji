@@ -111,7 +111,7 @@ function mountPage(providers: ProviderInfo[]): ReturnType<typeof mount> {
         ProviderEditBody: {
           name: 'ProviderEditBody',
           props: ['provider', 'oauthPresent', 'oauthSupported'],
-          emits: ['oauthLogin', 'oauthLogout', 'saved'],
+          emits: ['oauthLogin', 'oauthLogout', 'saved', 'cancel'],
           template: `<div data-testid="provider-edit-body-stub">
             <span data-testid="stub-kind">{{ provider?.kind ?? "new" }}</span>
             <span data-testid="stub-oauth-present">{{ oauthPresent === undefined ? 'unknown' : oauthPresent ? 'present' : 'absent' }}</span>
@@ -119,6 +119,7 @@ function mountPage(providers: ProviderInfo[]): ReturnType<typeof mount> {
             <button data-testid="stub-oauth-logout-btn" @click="$emit('oauthLogout')">logout</button>
             <button data-testid="stub-saved-quota-on-btn" @click="$emit('saved', { wroteApiKey: false, quotaAutoEnabled: true })">save-quota-on</button>
             <button data-testid="stub-saved-btn" @click="$emit('saved', { wroteApiKey: false })">save</button>
+            <button data-testid="stub-cancel-btn" @click="$emit('cancel')">cancel</button>
           </div>`,
         },
         ProviderImportMenu: { template: '<div />' },
@@ -613,5 +614,18 @@ describe('新增即默认同意：setProvider 返回 quotaAutoEnabled → toast�
     await wrapper.find('[data-testid="stub-saved-btn"]').trigger('click')
     await flushPromises()
     expectNoCodingPlanToast()
+  })
+
+  it('编辑体 @cancel → 收起展开行（表单态随卸载丢弃，onBodyCancel）', async () => {
+    wrapper = mountPage([CUSTOM_P])
+    await flushPromises()
+    await wrapper.find('[role="button"][aria-expanded="false"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="provider-expand-body"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="stub-cancel-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="provider-expand-body"]').exists()).toBe(false)
   })
 })

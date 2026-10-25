@@ -278,6 +278,7 @@ export default {
       menuBuiltin: 'From built-in templates',
       menuRecommended: 'Recommended',
       menuCustom: 'Custom (manual)',
+      menuPlugin: 'Plugin Provider',
       searchPlaceholder: 'Search...',
       dialogTitle: 'Select Built-in Provider',
       dialogSubtitle: 'pi ships {count} built-in providers with baseUrl, protocol and models — just configure credentials',

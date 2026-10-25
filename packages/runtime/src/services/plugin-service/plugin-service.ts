@@ -1,6 +1,6 @@
 import { PluginPermissionChecker as PermissionChecker } from './plugin-permission.js'
 import type { PluginDescriptor, ToolEntry, HookEntry, HookContext, HookResult, IPluginServiceDeps } from './plugin-types.js'
-import type { PluginInfo, PluginUiSnapshotPayload } from '@taiji/shared'
+import type { PluginInfo, PluginUiSnapshotPayload, PluginListAvailableReply, PluginCatalogReply } from '@taiji/shared'
 import type { IPluginService, ISessionService } from '../../interfaces.js'
 import type { IMessageBroker } from '../../interfaces.js'
 import type { ServerMessageMap, ServerMessageType } from '@taiji/shared'
@@ -11,26 +11,34 @@ import { PluginRpcServer } from './plugin-rpc-server.js'
 import { PluginHost } from './plugin-host.js'
 import { PluginActivator } from './plugin-activator.js'
 import { registerAllRpcMethods } from './plugin-rpc-setup.js'
+import { PluginCatalogService, installedEntriesFromDescriptors, installedVersionsFromDescriptors } from './plugin-catalog.js'
+import { terminateStaleSandboxWorker, reactivatePreviousVersionAfterRollback } from './plugin-update-activation.js'
 import { bootstrapPluginService } from './plugin-lifecycle.js'
 import { ActiveSessionResolver, SessionEventDispatch, sessionInfoFromSummary } from './api/session-api.js'
 import type { CommandRegistration } from './api/commands-api.js'
 import { EntryInvalidationDispatch, ENTRY_INVALIDATION_NOTIFY_METHOD } from './plugin-entry-invalidation-dispatch.js'
 import { PluginUiSnapshotStore } from './plugin-ui-snapshot-store.js'
 import type { UiSnapshotFilter } from './plugin-ui-snapshot-store.js'
-import { executeCommand as executePluginCommand, deliverInvokeResult as deliverPluginInvokeResult } from './api/commands-executor.js'
-import type { InstallResult } from '../ports/plugin-installer.js'
+import { executeCommand as executePluginCommand, invokeMethod as invokePluginMethod, deliverInvokeResult as deliverPluginInvokeResult } from './api/commands-executor.js'
+import type { CommandExecutorDeps } from './api/commands-executor.js'
+import type { InstallResult, PreparedPluginInstall } from '../ports/plugin-installer.js'
+import { InstalledStore } from './installed-store.js'
+import { NAMESPACE_MISMATCH, validateNamespaceBinding } from '@taiji/shared/plugin-namespace'
+import { errorWithCode } from '../../utils/errors.js'
 import { toConfigKey, fromConfigKey, isConfigKey } from './api/config-api.js'
 import { HookPipeline, OBSERVE_HOOK_TYPES } from './hook-pipeline.js'
 import { UiRequestQueue } from './ui-request-queue.js'
 import { PermissionStorage } from './plugin-permission-storage.js'
-import { EXTERNAL_PLUGIN_ENABLED, EXTERNAL_PLUGIN_DISABLED_MESSAGE } from './plugin-security.js'
+import { EXTERNAL_PLUGIN_ENABLED, EXTERNAL_PLUGIN_DISABLED, EXTERNAL_PLUGIN_DISABLED_MESSAGE } from './plugin-security.js'
 import { resolveEsmLoaderExecArgv } from './plugin-esm-execargv.js'
 import { toPluginInfos } from './plugin-info-mapper.js'
 import { removePluginHookEntries, removePluginToolEntries, removePluginCommandEntries } from './plugin-contributions.js'
 import { broadcastOrBrokerWith, publishViewUpdateTo, createUiRequestBroadcastFn } from './plugin-broadcast.js'
 import type { PluginBroadcastDeps, ViewUpdateBroadcastPayload } from './plugin-broadcast.js'
 import { shutdownPluginCollaborators } from './plugin-shutdown.js'
-import { join } from 'node:path'
+import { join, dirname, sep } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { createPluginEventIdGenerator, deliverUiEventToPlugin, openUrlInSystemBrowser } from './plugin-host-actions.js'
 import { toErrorMessage } from '../../utils/errors.js'
 import { pluginToggleFailedError, pluginUninstallPartialError, removePluginDiskFiles } from './api/lifecycle-errors.js'
 import { readEnvPermissionTimeoutMs } from './plugin-env-timeout.js'
@@ -42,6 +50,25 @@ import type { IMessageBus } from '../message-bus/message-bus.js'
 // （BC）findTsxImportArg / resolveEsmLoaderExecArgv 原从本文件导出（实现迁至
 // plugin-esm-execargv.ts，max-lines 拆分），re-export 保持既有导入路径稳定
 export { findTsxImportArg, resolveEsmLoaderExecArgv } from './plugin-esm-execargv.js'
+
+/** preparePluginInstall 失败错误码（非命名空间类准备失败的统一 code；命名空间类用 NAMESPACE_MISMATCH） */
+export const PLUGIN_PREPARE_FAILED = 'PLUGIN_PREPARE_FAILED'
+
+/**
+ * 两段式安装第一段（prepare）的回包：确认卡知情面（S27）。
+ * manifest 声明的 capabilities/readPaths/permissions 全量透传（展示物 = 暂存解压物
+ * 内 manifest，同源）；未声明 namespace 时为 undefined（非 provider 插件常态）。
+ */
+export interface PluginInstallPreview {
+  /** 安全化目录名（@scope/pkg → scope__pkg），= 安装后 registry pluginId 与 installed.json key */
+  pluginId: string
+  packageName: string
+  version: string
+  capabilities: string[]
+  readPaths: string[]
+  permissions: string[]
+  namespace?: string
+}
 
 /**
  * PluginService — 纯门面 + 初始化编排（ADR-0012/0013/0014/0023/0001）。
@@ -79,8 +106,43 @@ export class PluginService implements IPluginService {
   /** 注入的外部依赖 */
   private deps: IPluginServiceDeps
 
+  /**
+   * providerEntries port 是否已接线（组合根装配自检消费）：port 缺省时卸载编排静默
+   * 跳过 models.json 条目清理（cleanupProviderEntriesFor 的 warn 降级分支），孤儿的
+   * apiKey 条目残留只有在生产装配路径才可能发生——测试轨显式注入 port 不会暴露漏接，
+   * 组合根构造后经本探测 fail-fast（provider-plugin-access U7/S14）。
+   */
+  get hasProviderEntries(): boolean {
+    return this.deps.providerEntries !== undefined
+  }
+
+  /**
+   * piExtensionInstaller port 是否已接线（组合根装配自检消费，与 hasProviderEntries
+   * 同构）：port 缺省时双产物条目只装插件侧（installPiExtensionMember 的 warn 降级
+   * 分支），pi 扩展成员缺失只有在生产装配路径才可见——对话时报「模型不存在」而非
+   * 安装时失败。组合根构造后经本探测 fail-fast（provider-plugin-access U7/S23）。
+   */
+  get hasPiExtensionInstaller(): boolean {
+    return this.deps.piExtensionInstaller !== undefined
+  }
+
   /** taiji 配置根（~/.taiji/），plugin/session-data 持久化根。组合根注入。 */
   private readonly configDir: string
+
+  /**
+   * 安装登记（<pluginsDir>/installed.json，U4）：只记 installedAt，版本与命名空间
+   * 不落盘（D11——版本唯一事实 = 包内 package.json，命名空间 = 包名纯函数推导）。
+   */
+  private readonly installedStore: InstalledStore
+
+  /**
+   * 安装/卸载串行锁（U4）：promise 链互斥，同一时刻仅一个安装或卸载编排执行。
+   * 锁语义（ADR-0122 保留白名单）——前序失败不断链（吞 reject 保队列活性）。
+   */
+  private installQueue: Promise<unknown> = Promise.resolve()
+
+  /** prepare 完成、等待确认停点的安装（pluginId → prepare 产物），confirm/cancel 消费 */
+  private readonly pendingPrepares = new Map<string, { prepared: PreparedPluginInstall; preview: PluginInstallPreview }>()
 
   private permissionChecker: PermissionChecker
 
@@ -117,6 +179,19 @@ export class PluginService implements IPluginService {
   readonly uiSnapshotStore = new PluginUiSnapshotStore()
 
   /**
+   * 插件清单 service（provider-plugin-access U5/F3）：RPC 通路（plugin.listAvailable /
+   * plugin.catalog）的 runtime 侧装配——清单加载与本地安装状态比对的编排入口在本类
+   * 构造时自建（registry 端口注入，installedVersions 比对基准 = descriptor.version，
+   * D11 版本唯一事实）。
+   */
+  private readonly catalogService = new PluginCatalogService({
+    getInstalledVersions: async () => installedVersionsFromDescriptors(this.registry.getAllDescriptors()),
+    // S15② 本地已装条目回退（R-2 裁决）：清单不可达时 listAvailable 用已装插件构造
+    // 条目，renderer 按 namespace 前缀识别插件条目——管理入口不随清单故障消失
+    getInstalledEntries: async () => installedEntriesFromDescriptors(this.registry.getAllDescriptors()),
+  })
+
+  /**
    * IMessageBus（wave:perf-w08，02 文档 D1-1）：plugin 的 session 级广播接 bus 定向发布。
    * 经 setMessageBus 后置注入（与 SessionService.setMessageBus 同模式）。wave:perf-w09
    * 接口收敛后 wire 归组合根（index.ts，pluginService 构造后直调）。未注入时回退全局广播。
@@ -132,6 +207,7 @@ export class PluginService implements IPluginService {
     const configDir = this.deps.configDir ?? process.cwd()
     this.configDir = configDir
     const pluginsDir = join(configDir, 'plugins')
+    this.installedStore = new InstalledStore(pluginsDir)
     this.storage = new PluginStorage()
     this.rpcServer = new PluginRpcServer()
     // sandbox 子进程 ESM loader 经 execArgv --import 注入（重构 3：消除 ESM 绕过）。
@@ -228,6 +304,15 @@ export class PluginService implements IPluginService {
     return this.uiSnapshotStore.snapshot(filter)
   }
 
+  /**
+   * 清挂载位全局域快照分区（plugin.ui.clearMount handler 消费）。U2 悬置二选一裁决 =
+   * ①调用防陈旧（2026-10-25 用户裁决）：renderer 家族切换时调用，防旧家族树残留进
+   * 快照恢复源；插件维度生命周期清理仍走 clearForPlugin（crash/disable/uninstall 链）。
+   */
+  clearMountUiSnapshots(mountId: string): void {
+    this.uiSnapshotStore.clearForMount(mountId)
+  }
+
   /** Wire sessionService after construction (breaks circular dependency at creation time) */
   setSessionService(sessionService: ISessionService): void {
     this.deps.sessionService = sessionService
@@ -285,6 +370,16 @@ export class PluginService implements IPluginService {
       watchExternalIfActive: (desc) => this.watchExternalIfActive(desc),
       registerSendMessageHook: () => this.registerSendMessageHook(),
     })
+
+    // 启动清扫（U4，恢复类，无定时器）：上次进程死在安装提交/取消周期中的暂存与
+    // 替换位残留，按「正常暂存删、替换位恢复优先」收敛（实现归 installer port——
+    // .staging 目录布局知识在 infra adapter，service 只编排）。
+    try {
+      await this.deps.pluginInstaller?.sweepStaging()
+    } catch (err: unknown) {
+      // 降级策略：清扫是恢复类收尾（残留下次启动幂等重扫），失败不阻断插件服务启动
+      console.warn('[plugin-service] staging sweep on boot failed:', toErrorMessage(err))
+    }
 
     this.initialized = true
   }
@@ -481,76 +576,219 @@ export class PluginService implements IPluginService {
   }
 
   async uninstallPlugin(pluginId: string): Promise<PluginInfo[]> {
-    // descriptor 先取（removeDescriptor 之前）：pluginPath 供磁盘删除、source 供
-    // builtin 判定
-    const descriptor = this.registry.getDescriptor(pluginId)
-    // RT-6#6：磁盘删除失败的事故记录——盘上残留意味着重启后 scan 会把插件扫回来
-    // （用户视角 = 卸载无效/复活）。内存清理仍必须完成（Fix-5），但失败要在收尾时抛出。
-    let onDiskRemovalError: string | undefined
+    // 安装/卸载串行锁（U4）：与安装编排互斥，避免半卸载态撞上半安装态
+    return this.withInstallLock(async () => {
+      // descriptor 先取（removeDescriptor 之前）：pluginPath 供磁盘删除、source 供
+      // builtin 判定
+      const descriptor = this.registry.getDescriptor(pluginId)
+      // RT-6#6：磁盘删除失败的事故记录——盘上残留意味着重启后 scan 会把插件扫回来
+      // （用户视角 = 卸载无效/复活）。内存清理仍必须完成（Fix-5），但失败要在收尾时抛出。
+      let onDiskRemovalError: string | undefined
 
-    // 停用插件。Fix-5：deactivate 失败不阻断后续清理——注册表/工具/hook/命令清理是
-    // uninstall 的核心语义，Worker 侧 deactivate 抛错（如超时）时仍必须完成本地拆除
-    try {
-      await this.activator.deactivatePlugin(pluginId, this.host)
-    } catch (err: unknown) {
-      // best-effort 降级（Fix-5）：deactivate 失败不阻断清理——uninstall 的注册表/工具/
-      // hook/命令拆除必须完成（Worker 已 deactivate 抛超时等错误时仍要拆本地状态）
-      console.error(`[plugin-service] deactivate during uninstall failed (continuing cleanup) for ${pluginId}:`, toErrorMessage(err))
-    }
+      // 停用插件。Fix-5：deactivate 失败不阻断后续清理——注册表/工具/hook/命令清理是
+      // uninstall 的核心语义，Worker 侧 deactivate 抛错（如超时）时仍必须完成本地拆除
+      try {
+        await this.activator.deactivatePlugin(pluginId, this.host)
+      } catch (err: unknown) {
+        // best-effort 降级（Fix-5）：deactivate 失败不阻断清理——uninstall 的注册表/工具/
+        // hook/命令拆除必须完成（Worker 已 deactivate 抛超时等错误时仍要拆本地状态）
+        console.error(`[plugin-service] deactivate during uninstall failed (continuing cleanup) for ${pluginId}:`, toErrorMessage(err))
+      }
 
-    // F2-①：停该插件的 fs.watch 热重载监听（toggle(false) 有 stopWatching，uninstall
-    // 此前缺失——目录删除后残留 watcher 持续触发 reload 事件）
-    this.activator.stopWatching(pluginId)
+      // F2-①：停该插件的 fs.watch 热重载监听（toggle(false) 有 stopWatching，uninstall
+      // 此前缺失——目录删除后残留 watcher 持续触发 reload 事件）
+      this.activator.stopWatching(pluginId)
 
-    // F2-③：sandbox 子进程真杀。deactivate 只 postMessage 不 terminate（fork 宿主的
-    // 进程复用设计），但 uninstall 后插件目录即删，复用无意义且泄漏进程。
-    // terminateProcess 内置 SIGTERM→2s→SIGKILL 升级链。trusted Worker 共享
-    //（≤10 插件/线程），terminate 会误杀同 worker 其他插件，跳过。未激活/无进程
-    // 时 getWorkerHandle 返回 undefined，天然 no-op。
-    const handle = this.host.getWorkerHandle(pluginId)
-    if (handle && handle.workerId.startsWith('sandbox-')) {
-      await this.host.terminateWorker(handle.workerId).catch((err: unknown) => {
-        console.error(`[plugin-service] terminate sandbox process during uninstall failed for ${pluginId}:`, toErrorMessage(err))
+      // U4 卸载清理编排：manifest 声明 namespace 的插件（provider 插件），按命名空间
+      // 前缀扫描 models.json 派生待清理条目集 → 逐条 providers.delete。放在磁盘删除
+      // 之前——namespace 事实源 = 插件目录内 package.json，删盘后无从推导。
+      await this.cleanupProviderEntriesFor(descriptor)
+
+      // U4 双产物卸载编排（provider-plugin-access D6/S23：完整移除 = 条目 + 插件 +
+      // pi 扩展）：plugin-wool-<family> 形态包名的插件连带卸载 pi 扩展成员
+      // （pi-wool-<family>）。同样放在磁盘删除之前——包名事实源 = 插件目录内
+      // package.json。失败降级 warn 不阻断插件侧清理（镜像上方 deactivate 失败继续
+      // 清理的卸载语义），残留可到扩展管理页手动移除。
+      await this.uninstallPiExtensionMemberFor(descriptor)
+
+      // F2-③：sandbox 子进程真杀。deactivate 只 postMessage 不 terminate（fork 宿主的
+      // 进程复用设计），但 uninstall 后插件目录即删，复用无意义且泄漏进程。
+      // terminateProcess 内置 SIGTERM→2s→SIGKILL 升级链。trusted Worker 共享
+      //（≤10 插件/线程），terminate 会误杀同 worker 其他插件，跳过。未激活/无进程
+      // 时 getWorkerHandle 返回 undefined，天然 no-op。
+      const handle = this.host.getWorkerHandle(pluginId)
+      if (handle && handle.workerId.startsWith('sandbox-')) {
+        await this.host.terminateWorker(handle.workerId).catch((err: unknown) => {
+          console.error(`[plugin-service] terminate sandbox process during uninstall failed for ${pluginId}:`, toErrorMessage(err))
+        })
+      }
+
+      // F2-②：删除磁盘插件目录（此前缺失 → 重启后 registry.scan() 把插件扫回来）。
+      // 仅 external 插件删盘——builtin（resources/plugins，随应用分发）删盘会破坏安装
+      // 产物。删除失败记日志不中断内存清理：磁盘残留重启后被 scan 扫回、可重试；
+      // 内存清理（下方 registry/activator/工具/hook 拆除）是 uninstall 的核心语义。
+      if (descriptor && descriptor.source === 'external') {
+        const installer = this.deps.pluginInstaller
+        if (installer) {
+          // RT-6#6：best-effort 删除——失败不阻断内存清理（Fix-5），但把原因交还调用方，
+          // 由下方收尾抛出（「卸载重启后复活」不得静默假成功）。
+          // 删除靶 = 插件目录（descriptor.pluginPath 是入口文件形态，按文件删会留下
+          // 含 package.json 的目录残壳，重启后被 scan 扫回复活）；目录按 main 相对
+          // 路径后缀截取（main 可带子目录段，如 dist/index.js——dirname 只剥一层会错删）
+          onDiskRemovalError = await removePluginDiskFiles(installer, pluginId, this.pluginDirOf(descriptor))
+        } else {
+          console.warn(`[plugin-service] no pluginInstaller configured; on-disk removal skipped for ${pluginId}`)
+        }
+      }
+
+      // U4：安装登记同步清理（installed.json 条目随卸载移除）。降级策略：登记缺失
+      // 无碍安装判定（目录 + package.json 才是事实源），失败 warn 留痕不阻断卸载
+      await this.installedStore.recordUninstalled(pluginId).catch((err: unknown) => {
+        console.warn(`[plugin-service] failed to remove installed.json entry for ${pluginId}:`, toErrorMessage(err))
       })
-    }
 
-    // F2-②：删除磁盘插件目录（此前缺失 → 重启后 registry.scan() 把插件扫回来）。
-    // 仅 external 插件删盘——builtin（resources/plugins，随应用分发）删盘会破坏安装
-    // 产物。删除失败记日志不中断内存清理：磁盘残留重启后被 scan 扫回、可重试；
-    // 内存清理（下方 registry/activator/工具/hook 拆除）是 uninstall 的核心语义。
-    if (descriptor && descriptor.source === 'external') {
-      const installer = this.deps.pluginInstaller
-      if (installer) {
-        // RT-6#6：best-effort 删除——失败不阻断内存清理（Fix-5），但把原因交还调用方，
-        // 由下方收尾抛出（「卸载重启后复活」不得静默假成功）。
-        onDiskRemovalError = await removePluginDiskFiles(installer, pluginId, descriptor.pluginPath)
-      } else {
-        console.warn(`[plugin-service] no pluginInstaller configured; on-disk removal skipped for ${pluginId}`)
+      // 从注册表中移除
+      this.registry.removeDescriptor(pluginId)
+
+      // F2-④：清理 activator 侧描述符/状态/eventMap（此前缺失 → 幽灵重激活：
+      // activationEvent 下次触发时 eventMap 仍命中已卸载插件）
+      this.activator.removeDescriptor(pluginId)
+
+      // 清理工具和 hook 注册
+      this.removeToolEntriesFor(pluginId)
+      this.removeHookEntriesFor(pluginId)
+      // 清理命令注册表（插件卸载后残留命令会导致 invoke 通知发向已死 worker）
+      this.removeCommandEntriesFor(pluginId)
+      // S3-W2：session 事件注册表同步清理（卸载插件的订阅不再投递）
+      this.sessionEventDispatch.clearForPlugin(pluginId)
+      this.entryInvalidationDispatch.clearForPlugin(pluginId)
+      this.uiSnapshotStore.clearForPlugin(pluginId)
+
+      this.broadcastPluginList()
+      // RT-6#6：内存清理与回滚广播已全部完成，此刻才把磁盘删除失败抛给调用方——
+      // 「只 log 不回错」会让卸载在重启后静默复活。code 供 transport 全局 catch 透传。
+      if (onDiskRemovalError !== undefined) throw pluginUninstallPartialError(pluginId, onDiskRemovalError)
+      return this.getDiscoveredPlugins()
+    })
+  }
+
+  /**
+   * 插件目录推导：descriptor.pluginPath = 入口文件绝对路径（= resolve(插件目录, main)），
+   * 按 main 相对路径后缀截取还原目录（main 带子目录段时 dirname 只剥一层不够）；
+   * 后缀不匹配（异常 descriptor）回退 dirname。uninstall 删盘与卸载期 manifest
+   * 读取共用此推导。
+   */
+  private pluginDirOf(descriptor: PluginDescriptor): string {
+    const { pluginPath, main } = descriptor
+    if (main.length > 0 && pluginPath.endsWith(main)) {
+      const dir = pluginPath.slice(0, pluginPath.length - main.length)
+      return dir.endsWith(sep) ? dir.slice(0, -sep.length) : dir
+    }
+    return dirname(pluginPath)
+  }
+
+  /**
+   * U4 卸载清理编排：按命名空间前缀扫描派生待清理 provider 条目集 → 逐条 delete。
+   *
+   * 事实源链：插件目录内 package.json 的 taijiPlugin.namespace 声明 = 包名推导值
+   * （安装期绑定校验保证一致，此处复跑校验防手工放置的坏包按错误声明误删）→
+   * 命名空间前缀规则（providerId === ns || providerId.startsWith(ns + '-')，与
+   * providers.write 的写入校验同规则）扫 models.json 全部条目派生清理集。可派生
+   * 状态不落第二份（ADR-0122）——无「pluginId → providerId 集合」持久化登记。
+   *
+   * 逐条 best-effort：单条删除失败 warn 留痕继续（镜像 deactivate 失败继续清理的
+   * 既有卸载语义——条目残留可在重装/重卸时收敛，插件目录拆除不等它）。deps 未接
+   * providerEntries port 时整段跳过（warn 一次）。
+   */
+  private async cleanupProviderEntriesFor(descriptor: PluginDescriptor | undefined): Promise<void> {
+    if (!descriptor) return
+    const store = this.deps.providerEntries
+    if (!store) {
+      console.warn(`[plugin-service] no providerEntries configured; provider cleanup skipped for ${descriptor.pluginId}`)
+      return
+    }
+    const ns = await this.readManifestNamespace(descriptor)
+    if (!ns) return
+    const allIds = await store.listIds()
+    const targets = allIds.filter(id => id === ns || id.startsWith(ns + '-'))
+    for (const providerId of targets) {
+      try {
+        await store.delete(providerId)
+      } catch (err: unknown) {
+        // best-effort 降级：单条清理失败 warn 留痕继续，条目残留可在重装/重卸时收敛（插件目录拆除不等它）
+        console.warn(`[plugin-service] provider entry cleanup failed for '${providerId}' (ns=${ns}):`, toErrorMessage(err))
       }
     }
+  }
 
-    // 从注册表中移除
-    this.registry.removeDescriptor(pluginId)
+  /**
+   * 从插件目录 package.json 读命名空间（卸载期唯一可用事实源——ns 不落盘，D11）。
+   * manifest 未声明 namespace（非 provider 插件）、声明与包名推导不一致（手工放置
+   * 的坏包，不按错误声明清理）、目录/文件不可读（返回 undefined + warn）时返回
+   * undefined，调用方跳过清理。
+   */
+  private async readManifestNamespace(descriptor: PluginDescriptor): Promise<string | undefined> {
+    const pluginDir = this.pluginDirOf(descriptor)
+    let raw: string
+    try {
+      raw = await readFile(join(pluginDir, 'package.json'), 'utf-8')
+    } catch {
+      console.warn(`[plugin-service] cannot read package.json for ${descriptor.pluginId}; provider cleanup skipped`)
+      return undefined
+    }
+    let pkg: { name?: unknown; taijiPlugin?: { namespace?: unknown } }
+    try {
+      pkg = JSON.parse(raw) as { name?: unknown; taijiPlugin?: { namespace?: unknown } }
+    } catch {
+      console.warn(`[plugin-service] cannot parse package.json for ${descriptor.pluginId}; provider cleanup skipped`)
+      return undefined
+    }
+    const declared = pkg.taijiPlugin?.namespace
+    if (typeof declared !== 'string' || declared.trim().length === 0) return undefined
+    if (typeof pkg.name !== 'string') return undefined
+    const binding = validateNamespaceBinding(pkg.name, declared)
+    if (!binding.ok) {
+      console.warn(
+        `[plugin-service] namespace binding mismatch for ${descriptor.pluginId} ` +
+          `(declared "${declared}", derived "${binding.derived}"); provider cleanup skipped`,
+      )
+      return undefined
+    }
+    return binding.namespace
+  }
 
-    // F2-④：清理 activator 侧描述符/状态/eventMap（此前缺失 → 幽灵重激活：
-    // activationEvent 下次触发时 eventMap 仍命中已卸载插件）
-    this.activator.removeDescriptor(pluginId)
-
-    // 清理工具和 hook 注册
-    this.removeToolEntriesFor(pluginId)
-    this.removeHookEntriesFor(pluginId)
-    // 清理命令注册表（插件卸载后残留命令会导致 invoke 通知发向已死 worker）
-    this.removeCommandEntriesFor(pluginId)
-    // S3-W2：session 事件注册表同步清理（卸载插件的订阅不再投递）
-    this.sessionEventDispatch.clearForPlugin(pluginId)
-    this.entryInvalidationDispatch.clearForPlugin(pluginId)
-    this.uiSnapshotStore.clearForPlugin(pluginId)
-
-    this.broadcastPluginList()
-    // RT-6#6：内存清理与回滚广播已全部完成，此刻才把磁盘删除失败抛给调用方——
-    // 「只 log 不回错」会让卸载在重启后静默复活。code 供 transport 全局 catch 透传。
-    if (onDiskRemovalError !== undefined) throw pluginUninstallPartialError(pluginId, onDiskRemovalError)
-    return this.getDiscoveredPlugins()
+  /**
+   * U4 双产物卸载编排的扩展侧接线：读插件目录 package.json 取包名 → piExtensionInstaller
+   * 端口卸载（家族推导在端口实现内，plugin-service 不持 wool 域知识——与 installForCatalogEntry
+   * 同构的卸载侧）。三类跳过/降级：端口未接线（测试与联调环境常态，warn 留痕）、
+   * 包名读不出（目录/文件不可读或包名缺失，warn 留痕——磁盘异常态，扩展残留可在
+   * 扩展管理页手动移除）、端口卸载失败（warn 留痕不阻断——镜像 deactivate 失败继续
+   * 清理的卸载语义，插件目录拆除不等扩展侧）。非羊毛插件经端口 no-op（家族推导
+   * miss = 无扩展成员可卸），无感知。
+   */
+  private async uninstallPiExtensionMemberFor(descriptor: PluginDescriptor | undefined): Promise<void> {
+    if (!descriptor) return
+    const installer = this.deps.piExtensionInstaller
+    if (!installer) {
+      console.warn(`[plugin-service] no piExtensionInstaller configured; pi extension member uninstall skipped for ${descriptor.pluginId}`)
+      return
+    }
+    let packageName: string | undefined
+    try {
+      const raw = await readFile(join(this.pluginDirOf(descriptor), 'package.json'), 'utf-8')
+      const pkg = JSON.parse(raw) as { name?: unknown }
+      if (typeof pkg.name === 'string' && pkg.name.length > 0) packageName = pkg.name
+    } catch {
+      console.warn(`[plugin-service] cannot read package.json for ${descriptor.pluginId}; pi extension member uninstall skipped`)
+      return
+    }
+    if (packageName === undefined) return
+    try {
+      await installer.uninstallForCatalogEntry(packageName)
+    } catch (err: unknown) {
+      // best-effort 降级：端口卸载失败 warn 留痕不阻断（插件目录拆除不等扩展侧，残留可在扩展管理页手动移除）
+      console.warn(`[plugin-service] pi extension member uninstall failed for ${packageName}:`, toErrorMessage(err))
+    }
   }
 
   /**
@@ -631,6 +869,20 @@ export class PluginService implements IPluginService {
   }
 
   /**
+   * commands-executor 依赖装配（executeCommand / invokePlugin 共用同一执行链状态：
+   * registry / worker 宿主 / RPC 通道 / 命令注册表 / pending 登记表）。
+   */
+  private commandExecutorDeps(): CommandExecutorDeps {
+    return {
+      registry: this.registry,
+      host: this.host,
+      rpcServer: this.rpcServer,
+      commandRegistry: this.commandRegistry,
+      commandInvokes: this.commandInvokes,
+    }
+  }
+
+  /**
    * 执行插件注册的命令（S3-W1 发送段闭环）。
    *
    * 实现在 api/commands-executor.ts（max-lines 拆分迁出，行为不变）：复合键查
@@ -642,20 +894,61 @@ export class PluginService implements IPluginService {
    */
   async executeCommand(pluginId: string, commandId: string, args?: Record<string, unknown>): Promise<unknown> {
     return executePluginCommand(
-      {
-        registry: this.registry,
-        host: this.host,
-        rpcServer: this.rpcServer,
-        commandRegistry: this.commandRegistry,
-        commandInvokes: this.commandInvokes,
-        // RT-6#7：命令下发后广播 started（在途反馈，填上长命令 30min 兜底窗口的零反馈缺口）
-        broadcast: this.broadcastOrBroker.bind(this),
-      },
+      // RT-6#7：命令下发后广播 started（在途反馈，填上长命令 30min 兜底窗口的零反馈缺口）
+      { ...this.commandExecutorDeps(), broadcast: this.broadcastOrBroker.bind(this) },
       pluginId,
       commandId,
       args,
     )
   }
+
+  /**
+   * 调用插件注册的业务方法（provider-plugin-access D9，plugin.invoke）：与
+   * executeCommand 共用 commands-executor 执行链（invokeMethod，kind='method'——
+   * 不广播 started，界面代码调用持有 pending promise 自行等待）。
+   */
+  async invokePlugin(pluginId: string, method: string, params?: Record<string, unknown>): Promise<unknown> {
+    return invokePluginMethod(this.commandExecutorDeps(), pluginId, method, params)
+  }
+
+  /**
+   * 投递输入组件值回传（provider-plugin-access D8，plugin.uiEvent）：查插件 Worker
+   * 后经 PLUGIN_UI_EVENT_NOTIFY 单向通知下发（fire-and-forget）。实现与降级出声在
+   * plugin-host-actions（facade 只留接口门面与依赖装配）。
+   */
+  async deliverPluginUiEvent(pluginId: string, viewId: string, componentId: string, event: string, value: unknown): Promise<void> {
+    deliverUiEventToPlugin(
+      {
+        getDescriptor: (id) => this.registry.getDescriptor(id),
+        getWorkerHandle: (id) => this.host.getWorkerHandle(id),
+        notify: (workerId, method, params) => this.rpcServer.notify(workerId, method, params),
+      },
+      pluginId,
+      viewId,
+      componentId,
+      event,
+      value,
+    )
+  }
+
+  /**
+   * 清单可安装视图（provider-plugin-access U5，plugin.listAvailable 的 runtime 侧）。
+   * R-2 裁决（2026-10-24）：service 返回的拉取元数据（available/stale/reason，S15①②
+   * 两态呈现判据）原样透传进 reply 本体出 wire，不再丢弃。
+   */
+  async listAvailablePlugins(): Promise<PluginListAvailableReply> {
+    const { reply, available, stale, reason } = await this.catalogService.listAvailable()
+    return { ...reply, available, stale, ...(reason !== undefined ? { reason } : {}) }
+  }
+
+  /** 清单原始目录条目（provider-plugin-access U5，plugin.catalog 的 runtime 侧）；元数据透传同 listAvailablePlugins。 */
+  async getPluginCatalog(): Promise<PluginCatalogReply> {
+    const { reply, available, stale, reason } = await this.catalogService.catalog()
+    return { ...reply, available, stale, ...(reason !== undefined ? { reason } : {}) }
+  }
+
+  /** plugin:event 广播 id 单调计数（碰撞面见 createPluginEventIdGenerator） */
+  private readonly nextPluginEventId = createPluginEventIdGenerator()
 
   async getPluginConfig(pluginId: string, key?: string): Promise<unknown> {
     if (key === undefined || key === '__all__') {
@@ -721,6 +1014,9 @@ export class PluginService implements IPluginService {
       mountPoints: this.mountPoints,
       uiSnapshotStore: this.uiSnapshotStore,
       publishViewUpdate: (payload) => this.publishViewUpdate(payload),
+      // provider-plugin-access D9：plugin.event 广播出线（id 单调计数）+ openUrl 系统浏览器出口
+      broadcastPluginEvent: (payload) => this.broadcastOrBroker('plugin:event', this.nextPluginEventId(), payload),
+      openExternal: openUrlInSystemBrowser,
     })
   }
 
@@ -760,6 +1056,24 @@ export class PluginService implements IPluginService {
     })
   }
 
+  /**
+   * 安装/卸载串行锁执行体（U4）：安装（直通/prepare/confirm/cancel）与卸载互斥，
+   * 同一时刻仅一个执行。前序失败不断链——队列槽吞 reject 保后续编排活性。
+   */
+  private withInstallLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.installQueue.then(fn, fn)
+    this.installQueue = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    return run
+  }
+
+  /**
+   * 直通安装（旧通道，WS plugin.install 消费）：prepare → commit 段一次走完，无
+   * 确认停点。两段式入口（确认停点对接 Provider 页确认卡，S27）走 preparePluginInstall
+   * / confirmPluginInstall；两条通道共用同一提交与回滚编排（commitAndActivate）。
+   */
   async installPlugin(packageSpecifier: string): Promise<InstallResult> {
     // external 安装硬锁（§6.6 排期硬锁）：sandbox 真隔离闭环已落地、
     // EXTERNAL_PLUGIN_ENABLED=true 后放行安装；开关回退 false 时短路在 installer port
@@ -771,16 +1085,193 @@ export class PluginService implements IPluginService {
     if (!installer) {
       return { success: false, error: 'Plugin installer not configured (pluginInstaller deps missing)' }
     }
-    const result = await installer.install(packageSpecifier)
-    if (result.success && result.pluginId) {
-      // Re-scan registry to pick up the new plugin
-      await this.registry.reload()
-      // Re-register descriptors with activator
-      const descriptors = this.registry.getAllDescriptors()
-      this.activator.registerDescriptors(descriptors)
-      this.broadcastPluginList()
+    return this.withInstallLock(async () => {
+      const prep = await installer.prepareInstall(packageSpecifier)
+      if (!prep.success || !prep.prepared) {
+        return { success: false, error: prep.error ?? 'Plugin prepare failed' }
+      }
+      return this.commitAndActivate(prep.prepared)
+    })
+  }
+
+  /**
+   * 两段式安装第一段（U4）：下载校验解压至暂存，返回确认卡知情面后停在确认停点。
+   * 未确认不发生安装落盘（正式目录未触及）；失败抛带 code 领域错误（transport 全局
+   * catch 透传 code——NAMESPACE_MISMATCH 对齐 S22 前端提示）。
+   */
+  async preparePluginInstall(packageSpecifier: string): Promise<PluginInstallPreview> {
+    if (!EXTERNAL_PLUGIN_ENABLED) {
+      throw errorWithCode(EXTERNAL_PLUGIN_DISABLED_MESSAGE, EXTERNAL_PLUGIN_DISABLED)
     }
-    return result
+    const installer = this.deps.pluginInstaller
+    if (!installer) {
+      throw errorWithCode('Plugin installer not configured (pluginInstaller deps missing)', PLUGIN_PREPARE_FAILED)
+    }
+    return this.withInstallLock(async () => {
+      const prep = await installer.prepareInstall(packageSpecifier)
+      if (!prep.success || !prep.prepared) {
+        // 命名空间绑定失败（adapter 错误文案以 NAMESPACE_MISMATCH 起头）单独透传
+        // code——S22 前端据此提示「命名空间与包名不匹配」，其余归准备失败
+        const code = prep.error?.startsWith(NAMESPACE_MISMATCH) ? NAMESPACE_MISMATCH : PLUGIN_PREPARE_FAILED
+        throw errorWithCode(prep.error ?? 'Plugin prepare failed', code)
+      }
+      const prepared = prep.prepared
+      const preview: PluginInstallPreview = {
+        pluginId: prepared.dirName,
+        packageName: prepared.packageName,
+        version: prepared.version,
+        capabilities: prepared.capabilities,
+        readPaths: prepared.readPaths,
+        permissions: prepared.permissions,
+        ...(prepared.namespace !== undefined ? { namespace: prepared.namespace } : {}),
+      }
+      // 同插件重复 prepare 覆盖登记（adapter 幂等清旧暂存后重下，登记取最新）
+      this.pendingPrepares.set(preview.pluginId, { prepared, preview })
+      return preview
+    })
+  }
+
+  /**
+   * 两段式安装第二段（确认停点之后）：暂存单步 rename 换入 → 扫描 → 激活 → 安装
+   * 登记（installed.json）→ 广播 → pi 扩展成员安装（双产物条目，U7/D6）。激活失败
+   * 自动回滚（S18：正式目录/暂存/installed.json/注册表/列表五处无残留；更新场景旧
+   * 版本幸存）；扩展成员安装失败整体报失败（插件已落盘事实保留，重试安装幂等自愈）。
+   */
+  async confirmPluginInstall(pluginId: string): Promise<InstallResult> {
+    return this.withInstallLock(async () => {
+      const pending = this.pendingPrepares.get(pluginId)
+      if (!pending) {
+        return {
+          success: false,
+          error: `No prepared install found for '${pluginId}' — call preparePluginInstall first`,
+        }
+      }
+      const result = await this.commitAndActivate(pending.prepared)
+      if (!result.success) return result
+      this.pendingPrepares.delete(pluginId)
+      const extensionResult = await this.installPiExtensionMember(pending.preview)
+      return extensionResult ?? result
+    })
+  }
+
+  /**
+   * pi 扩展成员安装（provider-plugin-access U7/D6 双产物安装编排的接线）：按清单条目
+   * 判定双产物——条目携带 piExtensionVersion（guard 契约：仅双产物条目携带）→ 调端口
+   * 安装，失败整体报失败（fail-fast：静默成功 = 对话链在很远的下游报「模型不存在」，
+   * 排障成本远高于此刻失败）。三类跳过（不误伤单产物插件）：端口未配置（测试/联调，
+   * warn 留痕）、清单不可得（fail-safe 链尾 config undefined——无法判定双产物 ≠ 必为
+   * 双产物，跳过 + warn；清单恢复后重试安装自愈）、条目无 piExtensionVersion（单产物）。
+   */
+  private async installPiExtensionMember(preview: PluginInstallPreview): Promise<InstallResult | undefined> {
+    const installer = this.deps.piExtensionInstaller
+    if (!installer) {
+      console.warn(`[plugin-service] no piExtensionInstaller configured; pi extension member skipped for ${preview.packageName}`)
+      return undefined
+    }
+    const load = await this.catalogService.load()
+    const entry = load.config?.plugins.find((p) => p.packageName === preview.packageName)
+    if (!entry) {
+      console.warn(`[plugin-service] catalog has no entry for ${preview.packageName}; pi extension member skipped`)
+      return undefined
+    }
+    if (entry.piExtensionVersion === undefined) {
+      return undefined
+    }
+    try {
+      await installer.installForCatalogEntry({ packageName: entry.packageName, piExtensionVersion: entry.piExtensionVersion })
+      return undefined
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      console.warn(`[plugin-service] pi extension member install failed for ${entry.packageName}:`, detail)
+      return {
+        success: false,
+        error: `插件已安装，但配套 pi 扩展成员安装失败：${detail}。请重试安装（幂等覆盖；扩展侧恢复后即自愈）`,
+      }
+    }
+  }
+
+  /** 两段式安装取消：清暂存与 pending 登记（用户取消路径，S27「未确认不落盘」）。 */
+  async cancelPluginInstall(pluginId: string): Promise<void> {
+    await this.withInstallLock(async () => {
+      const pending = this.pendingPrepares.get(pluginId)
+      this.pendingPrepares.delete(pluginId)
+      if (!pending) return
+      await this.deps.pluginInstaller?.uninstall(pluginId, pending.prepared.stagingPath).catch((err: unknown) => {
+        console.warn(`[plugin-service] failed to clean staging for cancelled install ${pluginId}:`, toErrorMessage(err))
+      })
+    })
+  }
+
+  /**
+   * 提交段编排（直通与 confirm 共用）：commit 换入 → 终结旧沙箱进程 → reload 注册表
+   * → 激活 → installed.json 登记 → 广播。激活失败回滚：删刚换入目录（更新场景旧版本
+   * 由 rollbackInstall 恢复）+ 重扫注册表 + 移除 activator 侧残留描述符 + 旧版本
+   * best-effort 重激活。
+   *
+   * R-1 裁决（2026-10-24，缺陷 2）：激活前先 terminateWorker 已存在的 sandbox 子进程
+   * （进程即模块边界）——assignProcess 对存活 fork 恒命中复用分支（M6a-06），且
+   * plugin-bootstrap 按 URL `await import` 命中 ESM 模块缓存，不换进程则更新后仍跑
+   * 旧代码、激活必败包也静默「成功」（S26 重激活与 S18 更新回滚双双失效，a26 真机
+   * 实证）。trusted 共享 Worker 跳过判定镜像 uninstallPlugin。
+   *
+   * 激活成败判定用 getState 终态（activatePlugin 吞错不抛——doActivatePlugin 全部
+   * 失败路径 settleActivationFailure 后正常 resolve），非 ACTIVE 即失败。
+   */
+  private async commitAndActivate(prepared: PreparedPluginInstall): Promise<InstallResult> {
+    const installer = this.deps.pluginInstaller
+    if (!installer) {
+      return { success: false, error: 'Plugin installer not configured (pluginInstaller deps missing)' }
+    }
+    const commit = await installer.commitInstall(prepared)
+    if (!commit.success) return commit
+
+    // R-1：换入成功即终结旧沙箱进程（首装无进程，getWorkerHandle 未命中 no-op）——
+    // 新激活 fork 新进程装新代码，模块缓存随进程边界失效
+    await terminateStaleSandboxWorker(this.host, prepared.dirName)
+
+    await this.registry.reload()
+    this.activator.registerDescriptors(this.registry.getAllDescriptors())
+
+    await this.activator.activatePlugin(prepared.dirName, { type: 'onStartupFinished' }, this.host)
+    const state = this.activator.getState(prepared.dirName)
+    const descriptor = this.registry.getDescriptor(prepared.dirName)
+    if (state !== 'ACTIVE' || !descriptor) {
+      console.warn(
+        `[plugin-service] plugin ${prepared.dirName} installed but activation failed (state=${state ?? 'UNKNOWN'}, ` +
+          `descriptor=${descriptor ? 'found' : 'missing'}) — rolling back`,
+      )
+      await installer.rollbackInstall(prepared)
+      await this.registry.reload()
+      this.activator.removeDescriptor(prepared.dirName)
+      // D6 B1：reload 后 descriptors 表是旧版内容，但 removeDescriptor 刚删掉了本插件
+      // 条目（清新版激活失败残留）——不回填则 activatePlugin 开头 descriptor 缺失直接
+      // no-op，重激活沦为死路径（旧版本幸存但进程内不可用，只剩重启恢复）
+      this.activator.registerDescriptors(this.registry.getAllDescriptors())
+      // R-1 回滚分支进程态语义：旧沙箱已在提交段终结，但新版激活段可能又起了一个
+      // fork（activate 抛错不 terminate，A26 真机实证）——不终结则重激活 assignProcess
+      // 复用坏进程 + 同 URL ESM 缓存重放必抛错代码，重激活停 discovered（D6 ISSUES
+      // 问题 3）。与提交段对称：重激活前先终结残留沙箱。
+      await terminateStaleSandboxWorker(this.host, prepared.dirName)
+      // best-effort 重激活恢复的旧版本（S26「旧版本幸存可用」即时成立；新 fork 装
+      // 旧代码，模块缓存同样干净）
+      await reactivatePreviousVersionAfterRollback(this.activator, this.host, prepared.dirName)
+      this.broadcastPluginList()
+      return {
+        success: false,
+        error: `Plugin '${prepared.dirName}' installed but failed to activate (state=${state ?? 'UNKNOWN'}) — installation rolled back`,
+      }
+    }
+
+    // 安装登记（best-effort）：目录与激活已成功 = 安装事实成立，登记只承载
+    // installedAt 展示——写失败 warn 留痕不让安装整体报失败（报失败会与已落盘
+    // 事实分裂；镜像卸载侧 recordUninstalled 的 catch 对称）
+    await this.installedStore.recordInstalled(prepared.dirName).catch((err: unknown) => {
+      console.warn(`[plugin-service] failed to write installed.json entry for ${prepared.dirName}:`, toErrorMessage(err))
+    })
+    // 激活成功收尾：清理更新场景遗留的旧版本替换位（best-effort，残留由启动清扫收敛）
+    await installer.discardReplaced(prepared)
+    this.broadcastPluginList()
+    return { success: true, pluginId: prepared.dirName, path: commit.path }
   }
 
   /** 将所有 dirty sessionData 批量 flush（由定时器调用） */

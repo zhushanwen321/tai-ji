@@ -44,6 +44,7 @@
 import type { InternalEvent } from './types'
 import type { InternalEventBus } from './internal-event-bus'
 import type { PluginMessageSource, IncomingPluginMessage } from './plugin-message-source'
+import { pluginViewScopeFromWire } from '@taiji/shared'
 
 // ── 窄化工具（模块私有，不 export）────────────────────────────────
 
@@ -193,11 +194,13 @@ function parseUiRequest(msg: IncomingPluginMessage): InternalEvent | null {
 }
 
 /**
- * plugin:viewUpdate 窄化检查（s3 链路，MF-1 修复）。
+ * plugin:viewUpdate 窄化检查（s3 链路，MF-1 修复；U2 scope 形态检查）。
  *
  * runtime plugin-rpc-setup.ts handleViewUpdate 广播 payload 形状：
- * { sessionId, viewId, pluginId, guiTree, updatedAt }（guiTree 为 GuiComponent[]）。
- * 与 extension:widget 同事件（extension-widget）：ViewHostStore 消费按 viewId 分区更新，
+ * { sessionId | mountId, viewId, pluginId, guiTree, updatedAt, generation }
+ * （guiTree 为 GuiComponent[]；归属二选一，形态检查复用 shared pluginViewScopeFromWire——
+ * 都缺或都给 / 字段非 string → null，parse-failed error 事件，ERR2 不静默吞）。
+ * 与 extension:widget 同事件（extension-widget）：ViewHostStore 消费按 scope 分区更新，
  * guiTree 结构化数组直存（窄化规则同 widgetGui——isGuiComponent 校验 + string 行包装）。
  */
 function parseViewUpdate(msg: IncomingPluginMessage): InternalEvent | null {
@@ -206,11 +209,18 @@ function parseViewUpdate(msg: IncomingPluginMessage): InternalEvent | null {
   const viewId = asString(payload.viewId)
   const pluginId = asOptionalString(payload.pluginId) ?? ''
   const guiTree = Array.isArray(payload.guiTree) ? payload.guiTree : null
-  if (viewId === null || guiTree === null) return null
+  const scope = pluginViewScopeFromWire(payload)
+  if (viewId === null || guiTree === null || scope === null) return null
+  const generation = typeof payload.generation === 'number' ? payload.generation : undefined
   return {
     kind: 'extension-widget',
-    sessionId: resolveSessionId(msg, payload),
-    widget: { viewId, pluginId, guiTree },
+    ...(scope.kind === 'session' ? { sessionId: scope.sessionId } : { mountId: scope.mountId }),
+    widget: {
+      viewId,
+      pluginId,
+      guiTree,
+      ...(generation !== undefined ? { generation } : {}),
+    },
   }
 }
 

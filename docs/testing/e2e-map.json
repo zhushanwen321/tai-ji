@@ -2699,7 +2699,7 @@
       "serial": false,
       "run": "pnpm --filter @zhushanwen/subagent-core exec vitest run src/execution/__tests__/subagent-model-source-parity.test.ts",
       "owner": "packages/subagent-core",
-      "authority": "docs/todo/just-do-it.md"
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3"
     },
     {
       "id": "E2E-BOUNDARY-01",
@@ -4341,6 +4341,165 @@
       "owner": "apps/electron",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
       "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）（四段门控 describe：mac 三段另叠加 MAC_SUITE_READY 判据；单测层保留 bash -n 语法 3 条 + CLI 工具可用性 2 条）。触发条件 = 升级脚本本体 diff 命中。断言本质 = 升级脚本对真实 DMG / bash / 磁盘满的组合行为（18 条门控用例断言体零改动，文件级 60s 预算只辖门控组）；serial=真 的理由 = 真 hdiutil/ditto/bash 子进程，重执行用例 3-12s。run 命令唯一正确入口 = test:main script（vitest 直跑因 config 上浮 no tests found，见 TEST-STRATEGY.md 已知坑）。CI test-main job 已带 env=1。"
+    },
+    {
+      "id": "E2E-PLUGINPERM-01",
+      "summary": "能力放行主池测试：基线 16 项黑名单 + computeBlockedBuiltins 放行计算 + fs 只读子集 ESM 源码模板结构断言 + P-perm 四 fixture 插件（声明内读/声明外读/os 免声明/写操作变体拒）",
+      "scope": [
+        "packages/runtime/src/services/plugin-service/plugin-blocked-builtins.cjs",
+        "packages/runtime/src/services/plugin-service/plugin-esm-loader.cjs",
+        "packages/runtime/src/services/plugin-service/plugin-fs-guard.ts",
+        "packages/runtime/src/services/plugin-service/plugin-fs-guard.cjs",
+        "packages/runtime/src/services/plugin-service/plugin-host-process.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-esm-loader.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/services/plugin-service/__tests__/plugin-esm-loader.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-perm-fixtures/read-inside.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-perm-fixtures/read-outside.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-perm-fixtures/os-homedir.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-perm-fixtures/write-denied.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-perm-fixtures/vm-blocked.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm --filter @taiji/runtime exec vitest run test/plugin-esm-loader.test.ts src/services/plugin-service/__tests__/plugin-esm-loader.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态（2026-10-24 u-capability 交付登记，防漏门禁补登）。主池快用例 + fixture 插件（fixtures 被 E2E-INTEG-17/23 门控轨 fork 时消费，fixture 本体改动即触发本 rule 与门控轨）；真 fork 行为面归 E2E-INTEG-17/23。"
+    },
+    {
+      "id": "E2E-PLUGCAP-01",
+      "summary": "插件清单域：v2-plugins guard（VERSION_PAIR_MISMATCH 配对校验 / CATALOG_INVALID）+ S15 fail-safe 链（远程→缓存→报错，stale 判定）+ listAvailable 数据组装与已装版本比对",
+      "scope": [
+        "packages/runtime/src/services/plugin-service/plugin-catalog.ts",
+        "packages/runtime/src/services/remote-config/remote-config-fetch.ts",
+        "configs/remote/v2-plugins.json"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-catalog.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-catalog-rpc.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm --filter @taiji/runtime exec vitest run test/plugin-catalog.test.ts test/plugin-catalog-rpc.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "R2 态（2026-10-24 u-catalog/u-protocol 交付登记）。plugin-catalog-rpc 同时覆盖 listAvailable/catalog 的 runtime 注册段（RPC 通路接线）。"
+    },
+    {
+      "id": "E2E-PLUGPROTO-01",
+      "summary": "协议原语通道：plugin.invoke 复用 commands-executor（pending/超时/同键并发）+ plugin:event 上报 + plugin.uiEvent 值回传形状校验 + openUrl scheme 白名单（URL 解析归一）",
+      "scope": [
+        "packages/runtime/src/services/plugin-service/api/commands-executor.ts",
+        "packages/runtime/src/services/plugin-service/plugin-host-actions.ts",
+        "packages/runtime/src/services/plugin-service/plugin-rpc-setup.ts",
+        "packages/runtime/src/services/provider-write-proxy.ts",
+        "packages/runtime/src/transport/plugin-message-handler.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-invoke-channel.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-openurl-scheme.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-ui-event-channel.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-host-actions.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm --filter @taiji/runtime exec vitest run test/plugin-invoke-channel.test.ts test/plugin-openurl-scheme.test.ts test/plugin-ui-event-channel.test.ts test/plugin-host-actions.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "R2 态（2026-10-24 u-protocol 交付登记，防漏门禁补登）。ui 渲染层（TextInput 等）改动由 packages/ui 包内 vitest 子集与 A29 承接。"
+    },
+    {
+      "id": "E2E-PLUGINWIRE-01",
+      "summary": "能力放行宿主接线：激活链登记（descriptor → host.setPluginCapabilityEnv）→ sandbox fork env 含放行清单与 readPaths（D3 注入点）→ 未登记 fail-closed → 进程回收清除后重登记恢复（真实宿主链 PluginHost → PluginHostProcess）",
+      "scope": [
+        "packages/runtime/src/services/plugin-service/plugin-activator.ts",
+        "packages/runtime/src/services/plugin-service/plugin-host.ts",
+        "packages/runtime/src/services/plugin-service/plugin-host-process.ts",
+        "packages/runtime/src/services/plugin-service/plugin-registry.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-capability-wiring.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm --filter @taiji/runtime exec vitest run test/plugin-capability-wiring.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态（2026-10-24 D2 补登，U4 宿主接线测试）。capabilityEnvInputs 宿主写入口接线段断言；放行计算与 ESM loader 主池归 E2E-PLUGINPERM-01。"
+    },
+    {
+      "id": "E2E-PLUGINAPI-01",
+      "summary": "插件侧消费面契约：Phase2AgentAPI providers.write/delete/credential + ui.openUrl + events.report + views.onUiEvent 出站帧形态（pluginId 命名空间校验）+ plugin.ui.event 下行通知消费分发",
+      "scope": [
+        "packages/plugin-sdk/src/types.ts",
+        "packages/plugin-sdk/src/mock.ts",
+        "packages/runtime/src/services/plugin-service/plugin-bootstrap.ts",
+        "packages/runtime/src/services/plugin-service/plugin-api-freeze.ts",
+        "packages/runtime/src/services/plugin-service/api/providers-api.ts",
+        "packages/runtime/src/services/plugin-service/api/ui-api.ts",
+        "packages/runtime/src/services/provider-write-proxy.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-provider-access-plugin-side.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm --filter @taiji/runtime exec vitest run test/plugin-provider-access-plugin-side.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
+      "note": "R2 态（2026-10-24 D2 补登，U6 插件侧出口 API 契约测试）。宿主侧三 RPC 注册与帧审计归 E2E-PLUGPROTO-01。"
     },
     {
       "id": "E2E-PIPE-20",

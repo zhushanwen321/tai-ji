@@ -8,6 +8,7 @@ import {
 } from '../src/services/plugin-service/plugin-security.js'
 import type { IMessageBroker } from '../src/interfaces.js'
 import type { IPluginInstaller, InstallResult } from '../src/services/ports/plugin-installer.js'
+import type { PluginDescriptor } from '../src/services/plugin-service/plugin-types.js'
 
 function createMockBroker(): IMessageBroker {
   return {
@@ -24,17 +25,54 @@ function createService(installer: IPluginInstaller): PluginService {
 
 describe('external plugin install hard lock（§6.6 排期硬锁）', () => {
   it('TC-1: EXTERNAL_PLUGIN_ENABLED=true（sandbox 闭环已落地）时 installPlugin 放行到 installer', async () => {
+    // U4 两段式：直通 installPlugin = prepareInstall → commitInstall（+ 激活终态判定）
     const installer: IPluginInstaller = {
-      install: vi.fn().mockResolvedValue({ success: true, pluginId: 'pkg', path: '/tmp' }),
+      prepareInstall: vi.fn().mockResolvedValue({
+        success: true,
+        prepared: {
+          dirName: 'scope__pkg',
+          packageName: '@scope/pkg',
+          version: '1.0.0',
+          stagingPath: '/tmp/.staging/scope__pkg',
+          capabilities: [],
+          readPaths: [],
+          permissions: [],
+        },
+      }),
+      commitInstall: vi.fn().mockResolvedValue({ success: true, pluginId: 'scope__pkg', path: '/tmp' }),
+      rollbackInstall: vi.fn().mockResolvedValue(undefined),
+      discardReplaced: vi.fn().mockResolvedValue(undefined),
+      sweepStaging: vi.fn().mockResolvedValue(undefined),
       uninstall: vi.fn().mockResolvedValue(undefined),
     }
     const service = createService(installer)
+    // 激活链 mock：activatePlugin 对无 descriptor 插件 no-op resolve；getState 恒 ACTIVE；
+    // registry 空（/tmp/fake-project 不存在）→ descriptor mock 供提交段存在性检查
+    vi.spyOn(service.activator, 'activatePlugin').mockResolvedValue(undefined)
+    vi.spyOn(service.activator, 'getState').mockReturnValue('ACTIVE')
+    vi.spyOn(service.registry, 'getDescriptor').mockReturnValue({
+      pluginId: 'scope__pkg',
+      version: '1.0.0',
+      displayName: 'scope__pkg',
+      description: '',
+      main: 'index.js',
+      activationEvents: [],
+      trustLevel: 'sandbox',
+      status: 'ACTIVE',
+      contributes: {},
+      permissions: [],
+      engines: { taiji: '*' },
+      pluginPath: '/tmp/scope__pkg/index.js',
+      source: 'external',
+      extensionDependencies: [],
+    })
 
     const result: InstallResult = await service.installPlugin('any-npm-pkg')
 
     // 翻转后契约：安装放行到 installer port（sandbox 子进程 + ESM loader 兜底隔离）
     expect(result.success).toBe(true)
-    expect(installer.install).toHaveBeenCalledTimes(1)
+    expect(installer.prepareInstall).toHaveBeenCalledTimes(1)
+    expect(installer.commitInstall).toHaveBeenCalledTimes(1)
     // 硬锁文案常量仍导出（开关回退 false 时复用）
     expect(EXTERNAL_PLUGIN_DISABLED).toBe('EXTERNAL_PLUGIN_DISABLED')
     expect(EXTERNAL_PLUGIN_DISABLED_MESSAGE).toContain(EXTERNAL_PLUGIN_DISABLED)

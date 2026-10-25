@@ -112,6 +112,8 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     | 'preset'
     | 'usage'
     | 'session'
+    // provider-plugin-access U6：插件 Provider 来源域（清单 / invoke / 事件 / uiEvent / 安装）
+    | 'plugin'
 
   interface ForwardEntry {
     domain: FacadeDomain
@@ -192,6 +194,45 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     listPresets: fwd('preset', 'list', [], (t) => t.listPresets()),
     getDefaultPreset: fwd('preset', 'getDefault', [], (t) => t.getDefaultPreset()),
     fetchRecommendedExtensions: fwd('extension', 'fetchRecommended', [], (t) => t.fetchRecommendedExtensions()),
+
+    // ── 插件 Provider 来源（provider-plugin-access U6）──
+    listAvailablePlugins: fwd('plugin', 'listAvailablePlugins', [], (t) => t.listAvailablePlugins()),
+    // 已发现插件列表（S13 家族卡崩溃态判定源：plugin.list 拉为主）
+    listPlugins: fwd('plugin', 'listPlugins', [], (t) => t.listPlugins()),
+    invokePlugin: fwd('plugin', 'invokePlugin', ['probe-plugin', 'getStatus', { providerId: 'probe-provider' }], (t, pluginId, method, params) =>
+      t.invokePlugin(pluginId, method, params),
+    ),
+    sendPluginUiEvent: fwd(
+      'plugin',
+      'sendPluginUiEvent',
+      [{ pluginId: 'probe-plugin', viewId: 'probe-view', componentId: 'probe-input', event: 'change', value: 'probe' }],
+      (t, payload) => t.sendPluginUiEvent(payload),
+    ),
+    executePluginCommand: fwd(
+      'plugin',
+      'executePluginCommand',
+      [{ pluginId: 'probe-plugin', commandId: 'probe-command' }],
+      (t, payload) => t.executePluginCommand(payload),
+    ),
+    // 两段式安装三成员在 seam 上是 optional（通道未落定的宿主实现可省略）：矩阵以
+    // 可选调用形态登记，domain 实装存在时（本用例 Proxy 恒返回 spy）必须逐条转发。
+    preparePluginInstall: fwd('plugin', 'preparePluginInstall', ['probe-package'], (t, spec) =>
+      t.preparePluginInstall?.(spec),
+    ),
+    confirmPluginInstall: fwd('plugin', 'confirmPluginInstall', ['probe-plugin'], (t, pluginId) =>
+      t.confirmPluginInstall?.(pluginId),
+    ),
+    cancelPluginInstall: fwd('plugin', 'cancelPluginInstall', ['probe-plugin'], (t, pluginId) =>
+      t.cancelPluginInstall?.(pluginId),
+    ),
+    // 启用/停用插件（S13 重启动作 = off 再 on）+ 挂载位分区清理（U2 裁决①：防陈旧；
+    // clearPluginMountUi 与安装三成员同款 optional 契约形态）
+    togglePlugin: fwd('plugin', 'togglePlugin', ['probe-plugin', true], (t, pluginId, enabled) =>
+      t.togglePlugin(pluginId, enabled),
+    ),
+    clearPluginMountUi: fwd('plugin', 'clearPluginMountUi', ['probe-mount'], (t, mountId) =>
+      t.clearPluginMountUi?.(mountId),
+    ),
 
     // ════════════════ 写（动作-ack）════════════════
     setProvider: fwd('config', 'setProvider', [PROBE_PID, PROBE_PROVIDER_DATA], (t, id, data) =>
@@ -313,6 +354,8 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     onAuthAuthUrl: fwd('config', 'onAuthAuthUrl', [probeHandler], (t, h) => t.onAuthAuthUrl(h)),
     onAuthSuccess: fwd('config', 'onAuthSuccess', [probeHandler], (t, h) => t.onAuthSuccess(h)),
     onAuthError: fwd('config', 'onAuthError', [probeHandler], (t, h) => t.onAuthError(h)),
+    onPluginEvent: fwd('plugin', 'onPluginEvent', [probeHandler], (t, h) => t.onPluginEvent(h)),
+    onPluginCrashed: fwd('plugin', 'onPluginCrashed', [probeHandler], (t, h) => t.onPluginCrashed(h)),
   } satisfies Record<keyof SettingsTransport, ForwardEntry>
 
   it('SettingsTransport 接口清单全量方法逐条转发：目标 = @/api 门面对应导出，参数与返回值原样透传（防回退 core/transport 直连）', async () => {
@@ -346,6 +389,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
       preset: domainProxy('preset'),
       usage: domainProxy('usage'),
       session: domainProxy('session'),
+      plugin: domainProxy('plugin'),
     }))
     const { createSettingsTransport } = await import('../settings-transport-adapter')
     const transport = createSettingsTransport()
@@ -426,6 +470,8 @@ describe('settings-transport-adapter · discoverModels 模式感知 guard（S-13
       },
       model: { listModels: vi.fn(), onModels: vi.fn(() => () => {}) },
       extension: { onExtensions: vi.fn(() => () => {}) },
+      // plugin 域：空对象 = 两段式安装成员缺席（optional 不挂载；本组用例不触插件通道）
+      plugin: {},
     }))
     const { createSettingsTransport } = await import('../settings-transport-adapter')
     return { transport: createSettingsTransport(), discoverModels }

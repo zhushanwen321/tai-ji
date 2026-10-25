@@ -150,19 +150,26 @@ describe('开关触发上报（真实事件序：ref 翻转 → flush 即报，�
     expect(sentCalls().at(-1)).toEqual({ faces: [] })
   })
 
-  it('overlay 内容切换触发范围：faces 无变化时重算不上报（变化才上报，内容比较收敛）', async () => {
+  it('overlay 内容切换触发范围：unconditional 面随浮层开合让位上报一次，faces 无变化时重算不上报（变化才上报，内容比较收敛）', async () => {
     mountSyncHost()
     const surface = mountSurface('search-modal', 'sm')
     surface.open.value = true
     await nextTick()
     await nextTick()
-    const callsAfterOpen = mockBrowserSetShields.mock.calls.length
 
-    // overlay 开/换内容——faces 全集不变 ⇒ 重算等值 ⇒ 不产生新 IPC
+    // 浮层开 → unconditional 面（search-modal）让位（05f496948：被壳盖住无需避让）——
+    // faces 全集真实变化 ⇒ 上报一次（合法）
     openOverlay({ kind: 'browser', payload: { sessionId: 'sess-a', url: 'http://localhost:1420/' } })
     await nextTick()
     await nextTick()
-    expect(mockBrowserSetShields.mock.calls.length).toBe(callsAfterOpen)
+    expect(sentCalls().at(-1)).toEqual({ faces: [] })
+    const callsAfterOverlayOpen = mockBrowserSetShields.mock.calls.length
+
+    // overlay 换内容（browser → browser，另一 url）——faces 全集不变 ⇒ 重算等值 ⇒ 不产生新 IPC
+    openOverlay({ kind: 'browser', payload: { sessionId: 'sess-a', url: 'http://localhost:9999/' } })
+    await nextTick()
+    await nextTick()
+    expect(mockBrowserSetShields.mock.calls.length).toBe(callsAfterOverlayOpen)
   })
 })
 

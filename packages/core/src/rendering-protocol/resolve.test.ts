@@ -151,6 +151,12 @@ describe('resolveComponent: P5 降级契约（D8：加 type 不 bump PROTOCOL_VE
     expect(r).toStrictEqual({ type: 'action-bar', props })
   })
 
+  it('P5 断言 a2：新宿主 text-input 合法 props → 原样透传（BUILTIN_TYPES 已加，provider-plugin-access D8）', () => {
+    const props = { id: 'pat', label: '访问令牌', placeholder: '粘贴 PAT', value: '', multiline: false }
+    const r = resolveComponent({ type: 'text-input', props })
+    expect(r).toStrictEqual({ type: 'text-input', props })
+  })
+
   it('P5 断言 b：旧宿主（白名单不含 action-bar）→ 降级 ansi-text 且 label 可读', () => {
     // BUILTIN_TYPES 是模块私有常量不可注入；旧宿主上 `!BUILTIN_TYPES.has('action-bar')`
     // 为真，与新宿主上任意未知 type 共用同一降级分支（resolve.ts `!BUILTIN_TYPES.has`

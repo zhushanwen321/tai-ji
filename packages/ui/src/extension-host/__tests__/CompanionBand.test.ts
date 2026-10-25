@@ -301,15 +301,16 @@ describe('CompanionBand × OverlayLifecycle 契约（IF9）', () => {
     expect(wrapper.find('[data-testid="companion-band"]').attributes('style')).toContain('z-index: var(--z-overlay)')
   })
 
-  it('expanded 态 → z-index 钉 --z-dialog 档（AP-2 规则③：用户待决确认层浮于 plugin modal 之上）', async () => {
+  it('expanded 态 → z-index 钉 dialog+1 档（AP-2 规则③：用户待决确认层浮于 plugin modal 与浮层壳之上）', async () => {
     // OverlayLifecycle 生产语义：ui-request 到达即建 expanded 分区——mock 预置 expanded 态
     const overlay = new MockOverlayLifecycle()
     overlay.transition('A', 'r4', 'expanded')
     const { wrapper, source } = mountBand('A', overlay)
     source.triggerUiRequest({ sessionId: 'A', requestId: 'r4', method: 'confirm', title: '确认', message: 'm' })
     await nextTick()
-    // 用户可见断言：band 内联 z 钉确认层档 token（高于 --z-modal 的数值序由 renderer style.css 检查）
-    expect(wrapper.find('[data-testid="companion-band"]').attributes('style')).toContain('z-index: var(--z-dialog)')
+    // 用户可见断言：band 内联 z 钉确认层档 token +1（高于 --z-modal，且高于同用 z-dialog
+    // 的浮层壳——同值平局 DOM 后序者胜会让壳遮罩盖住待决带，+1 消除平局）
+    expect(wrapper.find('[data-testid="companion-band"]').attributes('style')).toContain('z-index: calc(var(--z-dialog) + 1)')
   })
 
   it('无 OverlayLifecycle inject：minimize 点击不崩（静默 no-op）', async () => {

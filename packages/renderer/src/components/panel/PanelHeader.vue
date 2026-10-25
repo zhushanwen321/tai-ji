@@ -121,7 +121,7 @@
       <ViewHost
         v-if="sessionId"
         view-id="panel.header"
-        :session-id="sessionId"
+        :scope="{ kind: 'session', sessionId }"
         empty="hidden"
       />
       <!-- 终端开关（三卡化 2026-10-04 迁入顶栏：鼠标路径入口与其它容器开关同区，

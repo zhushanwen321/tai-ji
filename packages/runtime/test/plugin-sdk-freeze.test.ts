@@ -77,7 +77,7 @@ describe('plugin-sdk freeze 运行时侧（AC12 后半：runtime api 对象冻�
         onDidActivateSession: () => ({ dispose: () => undefined }),
         onEntriesInvalidated: () => ({ dispose: () => undefined }),
       },
-      events: { on: () => ({ dispose: () => undefined }), emit: () => undefined },
+      events: { on: () => ({ dispose: () => undefined }), emit: async () => undefined, report: async () => ({ forwarded: true }) },
       tools: { register: async () => '', unregister: async () => undefined },
       hooks: {
         onBeforeSendMessage: async () => ({ dispose: () => undefined }),
@@ -93,6 +93,7 @@ describe('plugin-sdk freeze 运行时侧（AC12 后半：runtime api 对象冻�
         showInput: async () => undefined,
         notify: async () => undefined,
         updateHeaderAction: async () => ({ updated: true }),
+        openUrl: async () => ({ opened: true }),
       },
       agent: {
         setModel: async () => '',
@@ -103,7 +104,12 @@ describe('plugin-sdk freeze 运行时侧（AC12 后半：runtime api 对象冻�
       },
       workspace: { rootPath: '', name: '', findFiles: async () => [] },
       commands: { register: async () => ({ dispose: () => undefined }), unregister: async () => undefined },
-      views: { update: async () => undefined, listMountPoints: async () => [] },
+      views: { update: async () => undefined, listMountPoints: async () => [], onUiEvent: () => ({ dispose: () => undefined }) },
+      providers: {
+        write: async () => ({ written: true as const, providerId: 'p' }),
+        delete: async () => ({ deleted: false, providerId: 'p' }),
+        credential: async () => ({ providerId: 'p', unsupported: 'command' } as const),
+      },
     }
   }
 
@@ -112,7 +118,7 @@ describe('plugin-sdk freeze 运行时侧（AC12 后半：runtime api 对象冻�
     expect(Object.isFrozen(api)).toBe(true)
   })
 
-  it('全部一级子对象已冻结（storage/notify/sessions/events/tools/hooks/config/sessionData/ui/agent/workspace）', () => {
+  it('全部一级子对象已冻结（storage/notify/sessions/events/tools/hooks/config/sessionData/ui/agent/workspace/providers）', () => {
     const api = freezeApiSurface(buildTestApi())
     const subObjects = [
       api.storage,
@@ -126,6 +132,9 @@ describe('plugin-sdk freeze 运行时侧（AC12 后半：runtime api 对象冻�
       api.ui,
       api.agent,
       api.workspace,
+      // provider-plugin-access D4 凭据安全面：providers 域方法引用不可被插件替换，
+      // 冻结与冻结断言同口径登记（plugin-api-freeze.ts freeze 清单同步面）
+      api.providers,
     ]
     for (const sub of subObjects) {
       expect(Object.isFrozen(sub)).toBe(true)

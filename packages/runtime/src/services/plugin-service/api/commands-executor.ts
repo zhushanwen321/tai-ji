@@ -54,33 +54,50 @@ export interface CommandExecutorDeps {
 const COMMAND_STARTED_NOTIFICATION_TYPE = 'plugin:notification'
 
 /**
- * 执行插件注册的命令（S3-W1 发送段闭环）。
+ * 方法键种类（provider-plugin-access D9）：同一条执行链服务两个语义入口——
+ * - 'command'：executeCommand，命令面向「用户可发现的动作」（有 title/category，
+ *   进命令面板），下发后广播 started 在途反馈（RT-6#7）。
+ * - 'method'：invokeMethod，plugin.invoke 面向界面代码主动调用（renderer 持有
+ *   pending promise 自行等待，无需 toast 反馈），不广播 started。
+ * 两者仅错误文案与 started 广播行为分叉，pending 登记 / 超时取值链 / 并发检查 /
+ * Worker notify 通道完全共用（P-invoke：复用 commands-executor 链，不新增第二条
+ * 执行通道）。
+ */
+export type MethodKeyKind = 'command' | 'method'
+
+/** kind 对应的键名词（错误文案用：Command / Method） */
+const KIND_LABEL: Record<MethodKeyKind, string> = { command: 'Command', method: 'Method' }
+
+/**
+ * 按方法键派发（D9 通用执行链，executeCommand 与 invokeMethod 共用本体）。
  *
  * 链路：复合键查 registry → rpcServer.notify 向 Worker 发 plugin.commands.invoke
  * （handler 驻留 Worker，方法名 COMMAND_RPC_METHODS.invoke 统一 SSOT）→ Worker
  * 执行 handler 后经 plugin.commands.invoke.result 回传结果/错误 → deliverInvokeResult
  * resolve/reject 对应 pending（超时取值链见下，默认 30min）。
  *
- * 执行超时取值链（timeout-plugin-service D4，同工具 D1）：命令定义级
+ * 执行超时取值链（timeout-plugin-service D4，同工具 D1）：注册级
  * `registration.timeoutMs` 声明（合法正数优先）→ `<=0`/`Infinity` 显式 opt-out
  * （timer 域上界近似）→ 非法/缺省回落 DEFAULT_TOOL_EXECUTE_TIMEOUT_MS → clamp。
+ * invoke 入口复用同一注册通道（commands.register），方法级 timeoutMs 声明同样生效。
  *
- * 前端消费契约（useExtensionHostBridge commandExecutor）：payload 携带分离的
- * pluginId + commandId，本方法组复合键 `${pluginId}:${commandId}` 查表——
- * 命令表按插件隔离（B 无法覆盖/注销 A 的同名命令）。
+ * 前端消费契约：payload 携带分离的 pluginId + 键名，本方法组复合键
+ * `${pluginId}:${键名}` 查表——注册表按插件隔离（B 无法覆盖/注销 A 的同名条目）。
  */
-export async function executeCommand(
+async function dispatchByMethodKey(
   deps: CommandExecutorDeps,
+  kind: MethodKeyKind,
   pluginId: string,
-  commandId: string,
+  methodKey: string,
   args?: Record<string, unknown>,
 ): Promise<unknown> {
+  const label = KIND_LABEL[kind]
   const descriptor = deps.registry.getDescriptor(pluginId)
   if (!descriptor) throw new Error(`Plugin not found: ${pluginId}`)
 
-  const compositeKey = commandCompositeKey(pluginId, commandId)
+  const compositeKey = commandCompositeKey(pluginId, methodKey)
   const registration = deps.commandRegistry.get(compositeKey)
-  if (!registration) throw new Error(`Command not found: ${compositeKey}`)
+  if (!registration) throw new Error(`${label} not found: ${compositeKey}`)
 
   const handle = deps.host.getWorkerHandle(pluginId)
   if (!handle) throw new Error(`Plugin worker not available: ${pluginId}`)
@@ -92,14 +109,14 @@ export async function executeCommand(
   const declaredActive = isDeclaredTimeoutActive(declared)
 
   // 并发检查：同 handlerId 二次执行会覆盖 pending 登记表条目（旧 promise 永挂），
-  // 显式拒绝并发（用户双击同一命令的第二次触发立即失败优于静默挂死）。错误规格表
+  // 显式拒绝并发（同键二次触发立即失败优于静默挂死）。错误规格表
   // 「命令执行中重复触发」行：30min 默认窗口放大了重复触发的等待面，busy 提示
   // 含已等待时长与出路（现状无取消通道——诚实告知等当前执行结束/超时后再试）。
   if (deps.commandInvokes.has(registration.handlerId)) {
     const startedAt = commandStartTimes.get(deps.commandInvokes)?.get(registration.handlerId)
     const waited = startedAt !== undefined ? formatDurationMs(Date.now() - startedAt) : 'unknown'
     throw new Error(
-      `Command already executing: ${compositeKey} (already running for ${waited}; ` +
+      `${label} already executing: ${compositeKey} (already running for ${waited}; ` +
         `no cancel channel yet — wait for it to finish or time out after ` +
         `${formatDurationMs(timeoutMs)} before retrying)`,
     )
@@ -117,9 +134,9 @@ export async function executeCommand(
     registration.handlerId,
     Object.assign(
       new Error(
-        `Command '${compositeKey}' timed out after ${formatDurationMs(timeoutMs)} ` +
+        `${label} '${compositeKey}' timed out after ${formatDurationMs(timeoutMs)} ` +
           `(${declaredActive ? 'declared' : 'default'}; plugin handler may still be running). ` +
-          `Plugin authors: pass timeoutMs in the command definition to extend or opt out (<=0 = no limit).`,
+          `Plugin authors: pass timeoutMs in the ${kind === 'command' ? 'command definition' : 'registration options'} to extend or opt out (<=0 = no limit).`,
       ),
       { code: -32000 },
     ),
@@ -133,28 +150,64 @@ export async function executeCommand(
   // RT-6#7：命令已真正下发 → 广播 started（在途反馈）。放在 notify 之后：notify 是
   // 「命令开始」的权威时刻（先于它 = 命令没发出，先于 await = 通知可能永远发不出）。
   // best-effort：广播失败不影响命令执行本身（命令已下发、结果仍会回传），仅留痕。
-  try {
-    deps.broadcast?.(
-      COMMAND_STARTED_NOTIFICATION_TYPE,
-      `cmdStarted_${compositeKey}_${Date.now()}`,
-      {
-        pluginId,
-        level: 'info',
-        message:
-          `Command '${commandId}' started (plugin '${pluginId}', handler ` +
-          `'${registration.handlerId}') — running in background; you will be ` +
-          `notified when it finishes.`,
-      },
-    )
-  } catch (err: unknown) {
-    // best-effort 降级：广播失败不影响命令执行（命令已下发、结果仍会回传），仅留痕——
-    // 在途反馈是观测增强，不是命令语义的一部分，不值得为它打断执行链。
-    console.warn(
-      `[plugin-service] broadcast command started failed for ${compositeKey}:`,
-      toErrorMessage(err),
-    )
+  // invoke（kind='method'）不广播：界面代码调用持有 pending promise 自行等待，toast
+  // 在途反馈是「用户可发现动作」的命令语义（broadcast 未注入同样静默跳过）。
+  if (kind === 'command' && deps.broadcast) {
+    try {
+      deps.broadcast(
+        COMMAND_STARTED_NOTIFICATION_TYPE,
+        `cmdStarted_${compositeKey}_${Date.now()}`,
+        {
+          pluginId,
+          level: 'info',
+          message:
+            `Command '${methodKey}' started (plugin '${pluginId}', handler ` +
+            `'${registration.handlerId}') — running in background; you will be ` +
+            `notified when it finishes.`,
+        },
+      )
+    } catch (err: unknown) {
+      // best-effort 降级：广播失败不影响命令执行（命令已下发、结果仍会回传），仅留痕——
+      // 在途反馈是观测增强，不是命令语义的一部分，不值得为它打断执行链。
+      console.warn(
+        `[plugin-service] broadcast command started failed for ${compositeKey}:`,
+        toErrorMessage(err),
+      )
+    }
   }
   return result
+}
+
+/**
+ * 执行插件注册的命令（S3-W1 发送段闭环）。
+ *
+ * 链路与超时取值链见 dispatchByMethodKey（D9 通用执行链本体）；本函数是 'command'
+ * 语义入口——下发后广播 started 在途反馈（填上长命令 30min 兜底窗口的零反馈缺口）。
+ */
+export async function executeCommand(
+  deps: CommandExecutorDeps,
+  pluginId: string,
+  commandId: string,
+  args?: Record<string, unknown>,
+): Promise<unknown> {
+  return dispatchByMethodKey(deps, 'command', pluginId, commandId, args)
+}
+
+/**
+ * 调用插件注册的业务方法（provider-plugin-access D9，plugin.invoke 的执行函数）。
+ *
+ * 与 executeCommand 共用同一条执行链（dispatchByMethodKey）与同一注册表——插件侧
+ * 经 commands.register 注册业务方法（handlerId 机制不变），路由键同为
+ * `${pluginId}:${键名}`；差异仅在语义面：method 面向界面代码主动调用（不进命令
+ * 面板的展示判定由消费方按 title/category 过滤），不广播 started 反馈。
+ */
+export async function invokeMethod(
+  deps: CommandExecutorDeps,
+  pluginId: string,
+  method: string,
+  params?: Record<string, unknown>,
+): Promise<unknown> {
+  return dispatchByMethodKey(deps, 'method', pluginId, method, params)
 }
 
 /**

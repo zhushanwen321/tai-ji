@@ -363,6 +363,15 @@ export const UI_TOAST_LIMITS = { MAX_IN_FLIGHT: 5 } as const
 export const OUTBOUND_FRAME_WARN_BYTES: number = 8 * 1024 * 1024
 
 /**
+ * plugin:event payload 入口上限（128KB，D5 F1-23 用户裁决 2026-10-24）。
+ * plugin:event 走全局广播通路（不经 session push 双档检查），上限在 plugin.event RPC
+ * 入口拒绝（PLUGIN_EVENT_PAYLOAD_TOO_LARGE）——C-comm-14 出站帧治理对该通路的防线。
+ * 合法载荷（凭据状态/小通知）为 KB 量级，128KB 留足 2 个数量级余量。
+ */
+// eslint-disable-next-line no-magic-numbers -- 设计标定阈值非魔法数，校准依据见上方 JSDoc
+export const PLUGIN_EVENT_PAYLOAD_MAX_BYTES: number = 128 * 1024
+
+/**
  * B7 ring 字节预算默认值（16MB/session，设计值——A9 已按设计值通过，维持 16MB，校准遗留 = 无）。
  * 条数上限（ring 1000 帧）之外补字节维度：大帧场景下字节才是主导维度。
  */

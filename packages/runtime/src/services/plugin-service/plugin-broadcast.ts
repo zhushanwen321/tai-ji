@@ -15,19 +15,17 @@
  * 经 getter 闭包注入——调用时求值，与原实例方法动态读 this.* 逐字等价。
  */
 import type { IMessageBroker } from '../../interfaces.js'
-import type { ServerMessageMap, ServerMessageType } from '@taiji/shared'
+import type { ServerMessageMap, ServerMessageType, ViewSnapshotItem } from '@taiji/shared'
 // type-only：IMessageBus 不反向依赖 plugin-service，无运行时环（与 message-dispatcher 同款约束）
 import type { IMessageBus } from '../message-bus/message-bus.js'
 import type { UiBroadcastType } from './ui-request-queue.js'
 
-/** views.update 的广播 payload（原 plugin-service.publishViewUpdate 参数形状，单一来源迁此）。 */
-export interface ViewUpdateBroadcastPayload {
-  sessionId: string
-  viewId: string
-  pluginId: string
-  guiTree: import('@zhushanwen/extension-protocol').GuiComponent[]
-  updatedAt: number
-}
+/**
+ * views.update 的广播 payload（provider-plugin-access U2 起 = shared ViewSnapshotItem
+ * 单一来源：scope 二选一 + generation 全量替换代际，契约注释见该类型——广播帧与快照
+ * 条目同构由类型引用构造性保证）。原手抄形状（sessionId 必填）已随分区键泛化退役。
+ */
+export type ViewUpdateBroadcastPayload = ViewSnapshotItem
 
 /** 广播出口共享依赖（动态成员经 getter 注入，调用时求值——晚期注入语义保持）。 */
 export interface PluginBroadcastDeps {
@@ -59,30 +57,40 @@ export function broadcastOrBrokerWith<T extends ServerMessageType>(
 }
 
 /**
- * views.update 的广播出口（wave:perf-w08，02 文档 D1-1）。
+ * views.update 的广播出口（wave:perf-w08，02 文档 D1-1；U2 按 scope 形态分流通道）。
  *
- * payload.sessionId 由调用方保证存在（rpc-setup ES2：无活跃 session 已提前丢弃）。
- * bus 已装配 → publish 定向（plugin:viewUpdate 归 transient 类：高频 UI 流，不占
- * seq、不入 ring，直传订阅者——丢失可接受，ExtensionHost 不靠 ring 回放重建状态），
- * 不再 broadcast；bus 未装配（测试构造）→ 回退全局广播，保持消息不丢。
+ * 会话域（payload.sessionId）：bus 已装配 → publish 定向（plugin:viewUpdate 归
+ * transient 类：高频 UI 流，不占 seq、不入 ring，直传订阅者——丢失可接受，
+ * ExtensionHost 不靠 ring 回放重建状态），不再 broadcast；bus 未装配（测试构造）→
+ * 回退全局广播，保持消息不丢。
+ *
+ * 全局域（payload.mountId，Provider 页等无会话挂载位）：无会话订阅通道可投——
+ * 会话 bus.publish 落在无人订阅的键上等于静默丢帧，故恒走全局广播（broker/broadcastFn
+ * 纯全局通道，payload 无 sessionId 不触发广播哨兵告警）；renderer 经 route-inbound
+ * 全局通道 → bridge 归一 → ViewHostStore 全局域分区消费。
  */
 export function publishViewUpdateTo(
   deps: PluginBroadcastDeps,
   payload: ViewUpdateBroadcastPayload,
   nextPushId: () => string,
 ): void {
-  const messageBus = deps.getMessageBus()
-  if (messageBus) {
-    // m2/m3：'plugin:viewUpdate' 已是 ServerMessageMap 精确条目（payload 形状一致），
-    // 免 as ServerMessage 断言；push id 改单调计数（Date.now() 同毫秒多视图更新会碰撞，
-    // 前端按 id 去重/追踪场景下碰撞导致更新被误判重复）。
-    messageBus.publish(payload.sessionId, {
-      type: 'plugin:viewUpdate',
-      id: nextPushId(),
-      payload,
-    })
+  if (payload.sessionId !== undefined) {
+    const messageBus = deps.getMessageBus()
+    if (messageBus) {
+      // m2/m3：'plugin:viewUpdate' 已是 ServerMessageMap 精确条目（payload 形状一致），
+      // 免 as ServerMessage 断言；push id 改单调计数（Date.now() 同毫秒多视图更新会碰撞，
+      // 前端按 id 去重/追踪场景下碰撞导致更新被误判重复）。
+      messageBus.publish(payload.sessionId, {
+        type: 'plugin:viewUpdate',
+        id: nextPushId(),
+        payload,
+      })
+      return
+    }
+    broadcastOrBrokerWith(deps, 'plugin:viewUpdate', nextPushId(), payload)
     return
   }
+  // 全局域：恒全局广播（含 bus 未装配的会话域回退同出口——payload 无 sessionId 形态）
   broadcastOrBrokerWith(deps, 'plugin:viewUpdate', nextPushId(), payload)
 }
 

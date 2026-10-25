@@ -329,6 +329,12 @@ export function createUiApi(
    * 可据此告警或走轮询兜底，不应把 false 当成功。
    */
   updateHeaderAction(id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean; hidden?: boolean }): Promise<{ updated: boolean }>
+  /**
+   * provider-plugin-access D9：打开外部 URL（授权页等）。宿主侧 http(s) scheme 白名单
+   * 校验（INVALID_URL_SCHEME 拒绝 file:// 与自定义 scheme）；回执 {opened:false} =
+   * scheme 已放行但宿主唤起出口未装配（装配缺陷可见，不假成功）。
+   */
+  openUrl(url: string): Promise<{ opened: boolean }>
 } {
   return {
     showSelect: (title: string, options: string[], opts?: UiDialogOptions) =>
@@ -347,5 +353,10 @@ export function createUiApi(
       rpcClient
         .request('plugin.ui.updateHeaderAction', { pluginId, headerActionId: id, ...opts })
         .then(v => v as { updated: boolean }),
+
+    openUrl: (url: string) =>
+      rpcClient
+        .request('plugin.ui.openUrl', { pluginId, url })
+        .then(v => v as { opened: boolean }),
   }
 }

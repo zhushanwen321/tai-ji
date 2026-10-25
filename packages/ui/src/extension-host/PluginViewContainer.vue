@@ -31,7 +31,7 @@ import type { L2TabItem } from './l2-tab-item'
 import ViewHost from './ViewHost.vue'
 
 const props = defineProps<{
-  /** 透传给 ViewHost 的 sessionId（view 按 session 分区） */
+  /** 透传给 ViewHost 的会话 id（U2：包装为会话域 scope——sidebar view 恒会话内渲染） */
   sessionId: string
 }>()
 
@@ -105,7 +105,7 @@ function onClose(viewId: string): void {
       <ViewHost
         v-if="activeView"
         :view-id="activeView"
-        :session-id="props.sessionId"
+        :scope="{ kind: 'session', sessionId: props.sessionId }"
         :title="activeTitle"
         empty="placeholder"
       />

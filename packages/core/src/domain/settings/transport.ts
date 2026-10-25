@@ -65,6 +65,9 @@ import type {
   QuotaFetchFailureReason,
   ExtensionDiscoveredPayload,
   RecommendedExtension,
+  PluginEventPayload,
+  PluginListAvailableReply,
+  PluginInfo,
 } from '@taiji/shared'
 
 /**
@@ -127,6 +130,38 @@ export interface QuotaSnapshot {
    * getCached 在上次查询失败时携带（失败态渲染 + 「查看上次成功数据」归 Phase B）。
    */
   reason?: QuotaFetchFailureReason
+}
+
+/**
+ * text-input 值回传载荷（provider-plugin-access D8）：连接口形状对齐
+ * `plugin.uiEvent` 帧（viewId 定位挂载视图，componentId 定位输入项）。
+ */
+export interface PluginUiEventPayload {
+  pluginId: string
+  viewId: string
+  componentId: string
+  event: string
+  value: unknown
+}
+
+/**
+ * 安装确认卡知情面（S27；结构对齐 runtime IPluginService.PluginInstallPreview）：
+ * prepare 阶段返回暂存解压物的 manifest 声明，宿主全量展示后由用户确认。
+ */
+export interface PluginInstallPreview {
+  pluginId: string
+  packageName: string
+  version: string
+  capabilities: string[]
+  readPaths: string[]
+  permissions: string[]
+  namespace?: string
+}
+
+/** confirm 提交结果（失败携带错误码 / 文案，UI 可见不静默）。 */
+export interface PluginInstallResult {
+  success: boolean
+  error?: string
 }
 
 /**
@@ -352,6 +387,49 @@ export interface SettingsTransport {
   cancelExtensionInstall(tempDir: string): Promise<void>
   upgradeExtension(name: string): Promise<void>
   setExtensionAutoUpgrade(name: string, enabled: boolean): Promise<void>
+
+  // ── 插件 Provider 来源（provider-plugin-access U6：清单 / 业务方法 / 状态上报 / 输入回传）──
+  /** 插件清单可安装视图（Provider 页家族卡数据源 + 本地安装状态 / 可更新标记） */
+  listAvailablePlugins(): Promise<PluginListAvailableReply>
+  /**
+   * 已发现插件列表（plugin.list；S13 家族卡崩溃态判定源——PluginInfo.status 含
+   * 'crashed'）。拉为主：进入 family 段拉取是权威态，崩溃广播（onPluginCrashed）
+   * 只作增量提示。
+   */
+  listPlugins(): Promise<PluginInfo[]>
+  /**
+   * 启用/停用插件（plugin.toggle；reply 携带最新插件列表快照）。S13 重启动作 =
+   * off 再 on（ADR-0122：不自动重激活，用户显式触发）。
+   */
+  togglePlugin(pluginId: string, enabled: boolean): Promise<PluginInfo[]>
+  /** 订阅插件崩溃广播（plugin:crashed；S13 家族卡崩溃标记的增量提示，丢失由拉取收敛） */
+  onPluginCrashed(h: (payload: { pluginId: string; workerId?: string; error?: string }) => void): () => void
+  /** 调插件业务方法（plugin.invoke；reply.result 解包，请求级失败 reject） */
+  invokePlugin(pluginId: string, method: string, params?: Record<string, unknown>): Promise<unknown>
+  /** 订阅插件业务事件广播（plugin:event；凭据状态上报的增量提示通道，D5 拉为主推补充） */
+  onPluginEvent(h: (payload: PluginEventPayload) => void): () => void
+  /** text-input 值回传（plugin.uiEvent；fire-and-forget，插件侧始终持有最新值） */
+  sendPluginUiEvent(payload: PluginUiEventPayload): Promise<void>
+  /** 执行插件树 action-bar 命令（plugin.executeCommand；命令活在插件 fork，不在宿主命令表） */
+  executePluginCommand(payload: { pluginId: string; commandId: string; args?: Record<string, unknown> }): Promise<void>
+  /**
+   * 两段式安装（S27 确认停点）：prepare 下载校验解压至暂存并返回知情面，confirm 提交落盘
+   * 并激活，cancel 清理暂存（未确认不发生安装落盘）。
+   *
+   * optional 为宿主实现兼容差异的契约形态（wire 已完整实装：protocol.ts 三帧 +
+   * runtime 两段式编排 + real adapter 无条件挂载；stub 缺省以覆盖降级路径用例），
+   * 非「通道未实装」——消费方（Provider 页 resolvePluginInstallPort）以「方法存在
+   * 与否」判定安装入口可用性并显式降级（channelUnavailable 文案），不崩溃。
+   */
+  preparePluginInstall?(packageSpec: string): Promise<PluginInstallPreview>
+  confirmPluginInstall?(pluginId: string): Promise<PluginInstallResult>
+  cancelPluginInstall?(pluginId: string): Promise<void>
+  /**
+   * 清挂载位全局域快照分区（plugin.ui.clearMount，provider-plugin-access U2 悬置二选一
+   * 裁决 = ①调用防陈旧）：Provider 页家族切换时调用，防旧家族树残留进快照恢复源。
+   * optional 为 stub 兼容形态（real adapter 无条件挂载），与安装三成员同款契约。
+   */
+  clearPluginMountUi?(mountId: string): Promise<void>
 
   // ══════════════════════ 订阅（on*，返回取消函数）══════════════════════
 

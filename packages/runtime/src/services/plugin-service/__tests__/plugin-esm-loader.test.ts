@@ -43,7 +43,7 @@ type LoaderNextResolve = (
   context: { parentURL?: string },
 ) => Promise<{ url: string }>
 
-interface LoaderHooks {
+interface LoaderHooks { // oe-exempt:20261024:framework:测试内契约类型——单实现常态
   initialize(): void
   resolve(
     specifier: string,
@@ -66,7 +66,9 @@ type CjsModuleFactory = (
  *
  * node:vm + 桩 require：`register` 打成 no-op——直接 require 本模块会在 vitest 进程
  * 注册 ESM hook（self-register 污染 vitest 的 ESM loader）；其余 require
- * （node:url / node:path / node:fs / 黑名单 SSOT）走真实实现，loader 源码零改动执行。
+ * （node:url / node:path / node:fs / 黑名单 SSOT / fs-guard）走真实实现，loader 源码
+ * 零改动执行（provider-plugin-access D3：fs-guard 为能力放行与只读代理的真实现，
+ * 同目录真实文件，无副作用直至 configure）。
  */
 function loadLoaderHooks(): LoaderHooks {
   const src = readFileSync(LOADER_PATH, 'utf-8')
@@ -81,7 +83,11 @@ function loadLoaderHooks(): LoaderHooks {
       case 'node:fs':
         return { realpathSync }
       case './plugin-blocked-builtins.cjs':
-        return { BLOCKED_BUILTINS }
+        // 基线 + computeBlockedBuiltins 都来自真实 .cjs（D3 后 loader initialize 依赖
+        // 放行计算函数；黑名单数据语义 = 真实基线，与本文件顶部真实 require 读取一致）
+        return nodeRequire(join(__dirname, '..', 'plugin-blocked-builtins.cjs'))
+      case './plugin-fs-guard.cjs':
+        return nodeRequire(join(__dirname, '..', 'plugin-fs-guard.cjs'))
       default:
         throw new Error(`plugin-esm-loader.cjs 出现未预期的 require('${id}')（依赖面变化须同步本桩）`)
     }
@@ -253,8 +259,9 @@ describe('plugin-esm-loader 源文件结构（打包验证的源层检查）', (
     // 对应 TC7（打包验证的源文件层检查）：hooks 先赋值后 self-register 是
     // resolve 生效的前提，realpath 规范化修复 macOS /var→/private/var 失配。
     // 不 require 该模块（self-register 会污染 vitest 的 ESM loader），读源断言。
+    // provider-plugin-access D3：导出面含 load hook（fs 只读代理 sentinel 短路）。
     const src = readFileSync(LOADER_PATH, 'utf-8')
-    expect(src).toContain('module.exports = { initialize, resolve }')
+    expect(src).toContain('module.exports = { initialize, resolve, load }')
     expect(src).toContain('register(pathToFileURL(__filename).href)')
     expect(src).toContain('realpathSync')
   })

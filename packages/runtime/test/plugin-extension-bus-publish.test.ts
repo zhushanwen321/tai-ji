@@ -141,21 +141,28 @@ describe('W08: plugin:viewUpdate 经 bus publish（transient）', () => {
     const ws = createMockClient()
     bus.subscribe('s1', ws)
 
-    // 直接调 publishViewUpdate 两次（rpc dispatch 路径等价，绕开 worker 回环更聚焦 id 语义）
-    const mkPayload = (viewId: string) => ({
+    // 直接调 publishViewUpdate 四次（rpc dispatch 路径等价，绕开 worker 回环更聚焦 id 语义）：
+    // 同 viewId 旧 generation 重推 + 新 viewId 同毫秒混发——transient 类逐帧直传（无合并），
+    // 4 连发 = 4 帧，m3 断言面 = 4 个 push id 在同一毫秒内互不碰撞。
+    const mkPayload = (viewId: string, generation: number) => ({
       sessionId: 's1', viewId, pluginId: 'p1',
       // 空树字面量推断 never[]，可赋给 GuiComponent[]（原 `as unknown[]` 逃逸类型检查，tsc 报错）
       guiTree: [], updatedAt: Date.now(),
+      // U2：payload = ViewSnapshotItem（generation 必填，全量替换代际）
+      generation,
     })
-    service.publishViewUpdate(mkPayload('v1'))
-    service.publishViewUpdate(mkPayload('v2'))
+    service.publishViewUpdate(mkPayload('v1', 1))
+    service.publishViewUpdate(mkPayload('v2', 1))
+    service.publishViewUpdate(mkPayload('v1', 2))
+    service.publishViewUpdate(mkPayload('v2', 2))
 
-    expect(ws.sent).toHaveLength(2)
-    const id1 = (JSON.parse(ws.sent[0]!) as { id: string }).id
-    const id2 = (JSON.parse(ws.sent[1]!) as { id: string }).id
-    expect(id1).toMatch(/^vu_\d+$/)
-    expect(id2).toMatch(/^vu_\d+$/)
-    expect(id1).not.toBe(id2)
+    expect(ws.sent).toHaveLength(4)
+    const ids = ws.sent.map((m) => (JSON.parse(m) as { id: string }).id)
+    for (const id of ids) {
+      expect(id).toMatch(/^vu_\d+$/)
+    }
+    // 单调计数器：同毫秒 4 连发 id 全不碰撞（原 Date.now() 形态在此必撞）
+    expect(new Set(ids).size).toBe(4)
   })
 })
 

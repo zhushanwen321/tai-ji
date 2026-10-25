@@ -40,12 +40,16 @@ export interface DialogRequest {
 /** widget 载荷（IF2/DM3）。guiTree 目前为 unknown[]，W4 ViewHostStore 消费时替换为
  *  @zhushanwen/extension-protocol 的 GuiComponent 类型（wave plan DM3 标注）。
  *  meta 为 widget 宿主元数据（v1.1 widgetGui wire 携带，wire 真值 unknown，
- *  ViewHostStore 消费时窄化为 WidgetMeta）。 */
+ *  ViewHostStore 消费时窄化为 WidgetMeta）。
+ *  generation 为全量替换代际（provider-plugin-access U2）：plugin:viewUpdate 帧携带
+ *  （extension:widget 纯文本源无代际）——同 (scope, viewId) 单调递增，新值整体替换
+ *  旧树（不做增量 merge），透传进缓存条目供消费方判别。 */
 export interface WidgetPayload {
   viewId: string
   pluginId: string
   guiTree: unknown[]
   meta?: unknown
+  generation?: number
 }
 
 /** 消息装饰（IF2/DM3）。 */
@@ -80,7 +84,10 @@ export type InternalEvent =
   | { kind: 'plugin-message-decoration'; sessionId?: string; decoration: MessageDecoration }
   | { kind: 'plugin-status-change'; pluginId: string; status: PluginStatus }
   | { kind: 'ui-request'; sessionId?: string; request: DialogRequest } // uiRequest + extension.ui_request 归一
-  | { kind: 'extension-widget'; sessionId?: string; widget: WidgetPayload } // widget + widgetGui 归一
+  // widget + widgetGui 归一。归属二选一（provider-plugin-access U2 分区键泛化）：
+  // 会话域带 sessionId（extension:widget / 会话域 plugin:viewUpdate）；全局域带 mountId
+  //（Provider 页挂载位，分区键并入 widget.pluginId）。两字段恰好其一。
+  | { kind: 'extension-widget'; sessionId?: string; mountId?: string; widget: WidgetPayload }
   | { kind: 'extension-notify'; sessionId?: string; notification: NotificationPayload }
   | { kind: 'requests-invalidated'; sessionId?: string; requestIds: string[]; reason: string } // 挂起 UI 请求失效广播（P2-2）
   | { kind: 'session-destroyed'; sessionId: string }

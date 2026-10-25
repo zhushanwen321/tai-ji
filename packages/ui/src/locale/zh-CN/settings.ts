@@ -278,6 +278,7 @@ export default {
       menuBuiltin: '从内置模板',
       menuRecommended: '推荐',
       menuCustom: '自定义（手填）',
+      menuPlugin: '插件 Provider',
       searchPlaceholder: '搜索...',
       dialogTitle: '选择内置供应商',
       dialogSubtitle: 'pi 内置 {count} 个供应商，自带 baseUrl、协议和模型，只需配置凭据',

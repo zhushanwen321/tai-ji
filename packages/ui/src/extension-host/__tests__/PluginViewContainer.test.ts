@@ -52,7 +52,7 @@ describe('PluginViewContainer', () => {
     const host = wrapper.findComponent(ViewHost)
     expect(host.exists()).toBe(true)
     expect(host.props('viewId')).toBe('todo')
-    expect(host.props('sessionId')).toBe('s1')
+    expect(host.props('scope')).toEqual({ kind: 'session', sessionId: 's1' })
     // todo tab 是 active 态（data-active DOM 断言）
     expect(wrapper.find('[data-testid="l2-tab-todo"]').attributes('data-active')).toBe('true')
     expect(wrapper.find('[data-testid="l2-tab-goal"]').attributes('data-active')).toBe('false')

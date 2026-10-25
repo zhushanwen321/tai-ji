@@ -22,6 +22,14 @@
       "types": "./src/plugin-permission-map.ts",
       "import": "./src/plugin-permission-map.ts"
     },
+    "./plugin-namespace": {
+      "types": "./src/plugin-namespace.ts",
+      "import": "./src/plugin-namespace.ts"
+    },
+    "./plugin-capability-map": {
+      "types": "./src/plugin-capability-map.ts",
+      "import": "./src/plugin-capability-map.ts"
+    },
     "./tailwind-preset": {
       "types": "./src/tailwind-preset.ts",
       "import": "./src/tailwind-preset.ts",

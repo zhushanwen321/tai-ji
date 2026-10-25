@@ -385,12 +385,14 @@ export interface MemberViewsBudget { // oe-exempt:20261022:framework:设计 §3.
  * （null 轴 = 显式无界不入行）；部分交付成员缀 `deliverables: N missing`（§3.3.10
  * 交付校验结果，明细清单在 details 载荷 missingDeliverables）。
  */
+/** 成员表列宽（padEnd 预算，列式对齐设计 §3.1.3——state/agent/model 三列定宽）。 */
+const STATE_COL = 11;
+const AGENT_COL = 16;
+const MODEL_COL = 30;
+/** 毫秒 → 秒（成员行时长列的显示单位换算）。 */
+const MS_PER_SECOND = 1000;
+
 export function memberViewLine(view: RunMemberView): string {
-  // 终端成员表列宽（`[idx] state agent model …` 对齐，与 tool 端 README 示例同形态）
-  const STATE_COL = 11;
-  const AGENT_COL = 16;
-  const MODEL_COL = 30;
-  const MS_PER_SECOND = 1000;
   const parts: string[] = [
     `[${view.stepIndex}]`,
     view.state.padEnd(STATE_COL),

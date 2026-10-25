@@ -62,6 +62,14 @@ export type {
 export { PROTOCOL_VERSION } from '@zhushanwen/extension-protocol'
 
 /**
+ * 业务能力词常量 re-export（provider-plugin-access D3）：定义源 = @taiji/shared 的
+ * plugin-capability-map.ts（能力词与其放行模块集同地单源），本包值 re-export 供插件
+ * 作者在 manifest taijiPlugin.capabilities 声明消费。PROTOCOL_VERSION 值 re-export 同先例。
+ */
+export { PluginCapabilityConstants } from '@taiji/shared/plugin-capability-map'
+export type { PluginCapability } from '@taiji/shared/plugin-capability-map'
+
+/**
  * 插件描述域类型（manifest/descriptor 契约范围）
  *
  * 分层标注（IF2）：
@@ -81,6 +89,28 @@ export interface TaijiManifest {
   activationEvents: string[]
   trustLevel?: 'trusted' | 'sandbox'
   permissions?: string[]
+  /**
+   * 业务能力声明（provider-plugin-access D3，词表 = PluginCapabilityConstants）：
+   * network.http / fs.read-user-data / crypto / process.spawn。授权时机在安装——装上
+   * 即授予声明的能力，运行时不做逐次审批；未知词由安装期校验检出（放行计算
+   * resolveAllowedModules 返回 unknown 清单，不静默忽略）。
+   */
+  capabilities?: string[]
+  /**
+   * fs.read-user-data 的读取路径白名单（家目录相对路径，如
+   * 'Library/Application Support/Trae CN/User/globalStorage/storage.json'）。仅在声明
+   * fs.read-user-data 时有意义；与能力词是两个独立机制（路径边界由 fork 侧路径检查
+   * 承载，不互相顶替）。
+   */
+  readPaths?: string[]
+  /**
+   * 命名空间显式声明（provider-plugin-access D4，形如 'wool-workbuddy'）：插件经
+   * providers.write/delete/credential 触达 provider 条目的边界。安装期与「包名去 npm
+   * scope、去 plugin- 前缀」的推导值绑定校验（validateNamespaceBinding），不一致拒绝
+   * 安装（NAMESPACE_MISMATCH）；校验通过后 ns 从包名推导，不落盘——包名即唯一事实源。
+   * 仅 provider 插件需要声明；缺省 = 无绑定校验（非 provider 插件常态）。
+   */
+  namespace?: string
   contributes?: PluginContributes
   /** 插件来源，由 registry 扫描时自动设置，manifest 中声明无效 */
   source?: PluginSource
@@ -116,6 +146,29 @@ export interface PluginDescriptor {
   status: PluginState
   contributes: PluginContributes
   permissions: string[]
+  /**
+   * 业务能力声明（provider-plugin-access D3，manifest taijiPlugin.capabilities 透传）：
+   * 激活链据此登记 fork 放行清单（PluginHost.setPluginCapabilityEnv → fork env
+   * TAIJI_PLUGIN_ALLOWED_MODULES）。缺省 = 无声明 = loader 按基线黑名单全拦。
+   */
+  capabilities?: string[]
+  /**
+   * fs.read-user-data 的读取路径白名单透传（manifest taijiPlugin.readPaths，家目录
+   * 相对路径）：激活链随 capabilities 一并登记（fork env TAIJI_PLUGIN_READ_PATHS）。
+   * 仅在声明 fs.read-user-data 时有意义。
+   */
+  readPaths?: string[]
+  /**
+   * 包名透传（package.json name，scan 装配）：清单不可达时 listAvailable 的本地已装
+   * 条目回退（S15②）与卸载编排的包名事实源。registry scan 是唯一装配点。
+   */
+  packageName?: string
+  /**
+   * 命名空间声明透传（manifest taijiPlugin.namespace，provider-plugin-access D4；
+   * 安装期已做包名推导绑定校验）：清单不可达时 renderer 条目识别的第二数据源
+   * （S15②本地回退条目按 namespace 前缀识别）。
+   */
+  namespace?: string
   engines: { 'taiji': string }
   pluginPath: string
   /** 插件来源：built-in（随应用分发）或 external（用户安装） */
@@ -239,7 +292,7 @@ export interface RpcErrorResponse {
   error: { code: number; message: string; data?: unknown }
 }
 
-export type RpcResponse = RpcSuccessResponse | RpcErrorResponse
+export type RpcResponse = RpcSuccessResponse | RpcErrorResponse // oe-exempt:20261024:framework:ports/SDK 契约类型——接口先立、单实现常态（映射表/端口单一数据源）
 
 export interface RpcNotification {
   jsonrpc: '2.0'
@@ -378,8 +431,8 @@ export interface HookResult {
  * 分层标注（IF2）：
  * - @stable — 稳定契约范围（Phase1AgentAPI 核心部分 storage/notify/sessions、
  *   PermissionConstants、PluginRpcErrorCodes、Disposable、SessionInfo、PluginStateStorage）
- * - @experimental — 已显式降级的 API（events 插件间事件总线：未实现，调用即抛
- *   NOT_IMPLEMENTED；已移出稳定面）
+ * - @experimental — 已显式降级的 API（events.on 插件间事件总线订阅侧：未实现，调用即抛
+ *   NOT_IMPLEMENTED；已移出稳定面。emit/report 走 plugin.event 上报通道，真实可用）
  * - @proposed — 演进中 API（Phase2AgentAPI 扩展范围 tools/hooks/config/sessionData/
  *   ui/agent/workspace、ToolRegistration、HookEntry 等）
  * - @internal — runtime 内部塑形对象（WorkerHandle、PluginContext、Bridge* 等；
@@ -506,14 +559,15 @@ export interface Phase1AgentAPI {
     ): Disposable
   }
   /**
-   * @experimental — 插件间事件总线**未实现**（plugin.event.* 通知全仓无生产方，
-   * 曾是 SDK 稳定面上的死链路，2026-08 显式降级）。调用 events.on/emit 即抛
-   * NOT_IMPLEMENTED（带 issue 指引）。等出现真实消费方再设计实现；订阅 session
-   * 生命周期请用 api.sessions.onDidCreateSession / onDidDestroySession（已实现）。
+   * @experimental — events 面：on（插件间事件总线订阅侧）**未实现**，调用即抛
+   * NOT_IMPLEMENTED（带 issue 指引）。emit 已接入 plugin.event 上报通道（D5 推补充，
+   * 与 report 同一宿主出线——channel/payload 宿主校验后广播 'plugin:event' 帧）；
+   * 校验错误以 rejection 回到插件侧。订阅 session 生命周期请用
+   * api.sessions.onDidCreateSession / onDidDestroySession（已实现）。
    */
   readonly events: {
     on(event: string, handler: (data: unknown) => void): Disposable
-    emit(event: string, data: unknown): void
+    emit(event: string, data: unknown): Promise<void>
   }
 }
 
@@ -702,10 +756,56 @@ export interface HookEntry {
 // ── Phase 2 AgentAPI（在 Phase 1 基础上增加 tools 和 hooks）─────────
 
 /**
+ * [provider-plugin-access D4] providers.write 载荷：凭据与模型目录一并交给宿主写
+ * 策略链（线协议 handler = runtime provider-write-proxy.ts，宿主侧做身份 / 命名空间 /
+ * 载荷校验，本契约只描述插件侧可表达的形状）。models 条目 = 字符串 id 简写或对象全形。
+ */
+export interface ProviderWriteParams {
+  providerId: string
+  apiKey: string
+  displayName?: string
+  headers?: Record<string, string>
+  models?: Array<
+    string | { id: string; name?: string; api?: string; reasoning?: boolean; contextWindow?: number; enabled?: boolean }
+  >
+}
+
+/**
+ * [provider-plugin-access D4] providers.credential 回执：明文 key + 命中源 + 形态判别
+ * （provider-credential-resolver 唯一读通道直透）。`unsupported` = 该 provider 的凭据
+ * 形态无明文可回读（command 型 / 未解析 env 型）。
+ */
+export type ProviderCredentialReply =
+  | { providerId: string; key: string; source: 'auth.json' | 'models.json'; kind: 'api_key' | 'oauth' }
+  | { providerId: string; unsupported: 'command' | 'unresolved-env' }
+
+/**
+ * [provider-plugin-access D8] uiEvent 值回传载荷（宿主 → Worker 单向通知）：text-input
+ * 等输入组件的值变更即投递，插件侧始终持有最新值。value 形状由宿主做标量/深度 ≤2 的
+ * 形状校验，业务校验归插件。
+ */
+export interface PluginUiEventPayload {
+  viewId: string
+  componentId: string
+  event: string
+  value: unknown
+}
+
+/**
  * @proposed — Phase 2 AgentAPI 扩展范围（tools/hooks/config/sessionData/ui/agent/
- * workspace/commands/views），在 Phase 1 核心部分上叠加，API 表面仍在演进。
+ * workspace/commands/views/providers），在 Phase 1 核心部分上叠加，API 表面仍在演进。
  */
 export interface Phase2AgentAPI extends Phase1AgentAPI {
+  /**
+   * [provider-plugin-access D9] events 面扩展：report 为插件 → renderer 的业务事件
+   * 上报出口（宿主 RPC `plugin.event`，宿主校验后广播 `plugin:event` 帧给 renderer；
+   * 首个消费方 = 凭据状态上报，D5——宿主只转发不解释，channel/payload 语义由插件与
+   * 消费方自定）。Phase1 的 emit 与 report 同走 plugin.event（D5 推补充通道）；
+   * on（插件间事件总线订阅侧）维持未实现语义不变。
+   */
+  readonly events: Phase1AgentAPI['events'] & {
+    report(channel: string, payload: unknown): Promise<{ forwarded: boolean }>
+  }
   readonly tools: {
     register(registration: ToolRegistration): Promise<string>
     unregister(toolKey: string): Promise<void>
@@ -754,6 +854,34 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
         hidden?: boolean
       },
     ): Promise<{ updated: boolean }>
+    /**
+     * [provider-plugin-access D9] 打开外部 URL（授权页等，走既有浮层通道）：宿主侧仅
+     * 放行 http(s) scheme（`new URL(url).protocol` 白名单归一判定），`file://` 与自定义
+     * scheme 直接拒绝（INVALID_URL_SCHEME）。回执 {opened}：false = scheme 已放行但
+     * 宿主唤起出口未装配（装配缺陷可见，不假成功）。
+     */
+    openUrl(url: string): Promise<{ opened: boolean }>
+  }
+  /**
+   * [provider-plugin-access D4] 受控 provider 条目通道：凭据与模型目录经宿主写策略链
+   * 落 `models.json`（不绕过写策略链），明文回读经 provider-credential-resolver 唯一
+   * 读通道（C-proc-14）定向返回给发起调用的插件。providerId 限定在本插件命名空间内
+   * （`ns` 或 `ns-` 前缀，ns 由插件 npm 包名推导）——越权拒绝 NAMESPACE_MISMATCH；
+   * credential 明文回读要求 manifest 已声明 `network.http` 能力（未声明
+   * PERMISSION_DENIED）。trusted 共享 Worker 无唯一插件身份 → fail-closed 拒绝
+   * （正常路径 sandbox fork 一对一恒有身份）。
+   */
+  readonly providers: {
+    /** 写入/更新本命名空间的 provider 条目（凭据 + 可选展示名 / headers / 模型目录）。 */
+    write(params: ProviderWriteParams): Promise<{ written: true; providerId: string }>
+    /** 删除本命名空间的 provider 条目（卸载编排消费；条目不存在时如实回 {deleted:false}）。 */
+    delete(providerId: string): Promise<{ deleted: boolean; providerId: string }>
+    /**
+     * 受控明文回读（授权后状态/额度查询、401 复检；不广播、不落日志、不进快照）。
+     * 调用形态两可：裸字符串（SDK 声明形）或 `{ providerId }` 对象（wool 系插件
+     * 自持契约形，ISSUES-2 ⑦）——代理层归一为 wire 字符串形，两态同达。
+     */
+    credential(providerId: string | { providerId: string }): Promise<ProviderCredentialReply>
   }
   readonly agent: {
     /** U6 回执：resolve 生效模型复合串（pi pattern 换模时 ≠ 请求值；降级路径空串） */
@@ -777,9 +905,21 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
     unregister(commandId: string): Promise<void>
   }
   readonly views: {
-    /** [D1/u5b] sessionId 显式必填（E15）：内容绑打开时所在会话，runtime 按它定向投递。 */
-    update(viewId: string, guiTree: GuiComponent[], opts: { sessionId: string }): Promise<void>
+    /**
+     * 推送视图树（全量替换语义）。归属二选一（provider-plugin-access U2 分区键泛化）：
+     * `{ sessionId }` 会话域（内容绑打开时所在会话，runtime 定向投递该会话）；
+     * `{ mountId }` 全局域（Provider 页等无会话挂载位，如 'provider.authorize'——
+     * 分区键自动并入本插件 id，多插件同挂载位互不覆盖）。都给或缺 → INVALID_VIEW_SCOPE。
+     */
+    update(viewId: string, guiTree: GuiComponent[], opts: { sessionId: string } | { mountId: string }): Promise<void>
     listMountPoints(): Promise<string[]>
+    /**
+     * [provider-plugin-access D8] 输入组件值回传订阅：uiEvent 经宿主单向通知到达
+     * （fire-and-forget——输入值变更即发，插件侧始终持有最新值；单条丢失由下一条变更
+     * 自然覆盖，不建补偿）。sandbox fork 与插件一对一（精确投递）；trusted 共享 Worker
+     * 上通知载荷无 pluginId，广播给该 Worker 全部 handler（宿主投递语义的忠实转译）。
+     */
+    onUiEvent(handler: (event: PluginUiEventPayload) => void): Disposable
   }
 }
 

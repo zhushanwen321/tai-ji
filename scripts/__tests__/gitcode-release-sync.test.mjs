@@ -69,6 +69,21 @@ async function flushApiPauses(times = 8) {
   }
 }
 
+describe('redactSecrets（错误文案令牌脱敏——git 失败 message 内嵌认证 URL 的泄漏防线）', () => {
+  it('push URL 的认证段令牌被替换为 ***，用户名与 host 保留', async () => {
+    const mod = await loadModule()
+    const leak = "Command failed: git push 'https://qq_18433817:SECRETtoken123@gitcode.com/owner/repo.git' --progress"
+    const out = mod.redactSecrets(leak)
+    expect(out).not.toContain('SECRETtoken123')
+    expect(out).toContain('https://qq_18433817:***@gitcode.com/owner/repo.git')
+  })
+
+  it('无认证段文本原样返回（普通错误消息不受影响）', async () => {
+    const mod = await loadModule()
+    expect(mod.redactSecrets('HTTP 404 not found')).toBe('HTTP 404 not found')
+  })
+})
+
 describe('assetList', () => {
   it('assets 标准形态（name + size 缺失 → null）', async () => {
     const { assetList } = await loadModule()

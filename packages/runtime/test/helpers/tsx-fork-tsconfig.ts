@@ -45,6 +45,10 @@ export function createTsxPathsTsconfig(): TsxPathsTsconfig {
         moduleResolution: 'bundler',
         paths: {
           '@taiji/shared': [join(PACKAGES_ROOT, 'shared', 'src', 'index.ts')],
+          // 子路径通配（plugin-capability-map / paths / plugin-permission-map 等）：
+          // 共享包 exports 只声明 types/import 条件，CJS 转译链（fixture 以 require
+          // 拉 TS 源）的裸名映射覆盖不到子路径 → require 撞 ERR_PACKAGE_PATH_NOT_EXPORTED
+          '@taiji/shared/*': [join(PACKAGES_ROOT, 'shared', 'src', '*.ts')],
           '@zhushanwen/extension-protocol': [join(PACKAGES_ROOT, 'extension-protocol', 'src', 'index.ts')],
           '@zhushanwen/state-machine': [join(PACKAGES_ROOT, 'state-machine', 'src', 'index.ts')],
           // extension-protocol 的运行时依赖（其 src/extensions/plan/state-machine.ts 静态

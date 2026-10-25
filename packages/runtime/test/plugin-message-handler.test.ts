@@ -43,6 +43,11 @@ function makeHandler(pluginServiceMethods: Record<string, ReturnType<typeof vi.f
     installPlugin: vi.fn().mockResolvedValue({ success: true }),
     handleUiResponse: vi.fn(),
     syncMountPoints: vi.fn(),
+    // provider-plugin-access D9 / D8 / U5
+    invokePlugin: vi.fn().mockResolvedValue(undefined),
+    deliverPluginUiEvent: vi.fn().mockResolvedValue(undefined),
+    listAvailablePlugins: vi.fn().mockResolvedValue({ plugins: [] }),
+    getPluginCatalog: vi.fn().mockResolvedValue({ entries: [] }),
     ...pluginServiceMethods,
   }
   const ctx = {
@@ -174,6 +179,102 @@ describe('PluginMessageHandler — 查询/操作类 case', () => {
   })
 })
 
+describe('PluginMessageHandler — plugin.invoke / plugin.uiEvent / 清单域（provider-plugin-access D8/D9/U5）', () => {
+  it('plugin.invoke → invokePlugin(pluginId, method, params) + reply plugin.invoke { result }', async () => {
+    const { replies, handler, pluginService } = makeHandler({
+      invokePlugin: vi.fn().mockResolvedValue({ loggedIn: true }),
+    })
+    await handler.handlePluginMessage(buildMsg('plugin.invoke', {
+      pluginId: 'wool-workbuddy',
+      method: 'getStatus',
+      params: { providerId: 'wool-workbuddy' },
+    }), WS)
+    expect(pluginService.invokePlugin).toHaveBeenCalledWith('wool-workbuddy', 'getStatus', { providerId: 'wool-workbuddy' })
+    expect(replies).toEqual([{ id: 'm1', type: 'plugin.invoke', payload: { result: { loggedIn: true } } }])
+  })
+
+  it('plugin.invoke method 缺失/空串 → INVALID_ARGS，不触执行链', async () => {
+    const { errors, handler, pluginService } = makeHandler()
+    await handler.handlePluginMessage(buildMsg('plugin.invoke', { pluginId: 'p1', method: '' }), WS)
+    expect(errors[0]).toMatchObject({ code: 'INVALID_ARGS', id: 'm1' })
+    expect(pluginService.invokePlugin).not.toHaveBeenCalled()
+  })
+
+  it('plugin.uiEvent 合法值（标量 / 两层容器）→ deliverPluginUiEvent 原样透传 + reply pong', async () => {
+    const { replies, handler, pluginService } = makeHandler()
+    // 深度 2 容器（root + 一层）+ 标量叶子 + 标量本身，两种形态都合法
+    await handler.handlePluginMessage(buildMsg('plugin.uiEvent', {
+      pluginId: 'wool-workbuddy',
+      viewId: 'authorize',
+      componentId: 'pat',
+      event: 'change',
+      value: { form: { token: 'abc', remember: true } },
+    }), WS)
+    expect(pluginService.deliverPluginUiEvent).toHaveBeenCalledWith(
+      'wool-workbuddy', 'authorize', 'pat', 'change', { form: { token: 'abc', remember: true } },
+    )
+    expect(replies).toEqual([{ id: 'm1', type: 'pong', payload: {} }])
+
+    await handler.handlePluginMessage(buildMsg('plugin.uiEvent', {
+      pluginId: 'wool-workbuddy', viewId: 'authorize', componentId: 'pat', event: 'change', value: 'scalar-token',
+    }), WS)
+    expect(pluginService.deliverPluginUiEvent).toHaveBeenCalledTimes(2)
+  })
+
+  it('plugin.uiEvent 值深度 > 2 → INVALID_ARGS，不投递（D8 形状校验）', async () => {
+    const { errors, handler, pluginService } = makeHandler()
+    await handler.handlePluginMessage(buildMsg('plugin.uiEvent', {
+      pluginId: 'wool-workbuddy',
+      viewId: 'authorize',
+      componentId: 'pat',
+      event: 'change',
+      value: { a: { b: { c: 'too-deep' } } },
+    }), WS)
+    expect(errors[0]).toMatchObject({ code: 'INVALID_ARGS', id: 'm1' })
+    expect(errors[0]?.message).toContain('at most 2 levels')
+    expect(pluginService.deliverPluginUiEvent).not.toHaveBeenCalled()
+  })
+
+  it('plugin.uiEvent 非标量叶子（函数等）→ INVALID_ARGS，不投递', async () => {
+    const { errors, handler, pluginService } = makeHandler()
+    await handler.handlePluginMessage(buildMsg('plugin.uiEvent', {
+      pluginId: 'wool-workbuddy',
+      viewId: 'authorize',
+      componentId: 'pat',
+      event: 'change',
+      value: { cb: () => undefined },
+    }), WS)
+    expect(errors[0]).toMatchObject({ code: 'INVALID_ARGS' })
+    expect(pluginService.deliverPluginUiEvent).not.toHaveBeenCalled()
+  })
+
+  it('plugin.uiEvent 路由字段缺失 → INVALID_ARGS（componentId / event 非空字符串）', async () => {
+    const { errors, handler, pluginService } = makeHandler()
+    await handler.handlePluginMessage(buildMsg('plugin.uiEvent', {
+      pluginId: 'wool-workbuddy', viewId: 'authorize', componentId: '', event: 'change', value: 'x',
+    }), WS)
+    expect(errors[0]).toMatchObject({ code: 'INVALID_ARGS' })
+    expect(pluginService.deliverPluginUiEvent).not.toHaveBeenCalled()
+  })
+
+  it('plugin.listAvailable / plugin.catalog → reply 同名帧（清单 service 回复透传）', async () => {
+    const available = { plugins: [{ packageName: '@acme/plugin-wool-workbuddy', pluginId: 'wool-workbuddy', displayName: 'WorkBuddy', pluginVersion: '1.0.0', installed: false }] }
+    const catalog = { entries: [{ packageName: '@acme/plugin-wool-workbuddy', pluginId: 'wool-workbuddy', displayName: 'WorkBuddy', pluginVersion: '1.0.0' }] }
+    const { replies, handler } = makeHandler({
+      listAvailablePlugins: vi.fn().mockResolvedValue(available),
+      getPluginCatalog: vi.fn().mockResolvedValue(catalog),
+    })
+
+    await handler.handlePluginMessage(buildMsg('plugin.listAvailable', {}), WS)
+    await handler.handlePluginMessage(buildMsg('plugin.catalog', {}), WS)
+
+    expect(replies).toEqual([
+      { id: 'm1', type: 'plugin.listAvailable', payload: available },
+      { id: 'm1', type: 'plugin.catalog', payload: catalog },
+    ])
+  })
+})
+
 describe('PluginMessageHandler — plugin.config.*', () => {
   it('config.get 带 key → reply plugin:config 单键包装', async () => {
     // key 路径：getPluginConfig(pluginId, key) 返回该 key 的值，handler 包装为 { [key]: value }
@@ -256,14 +357,21 @@ describe('PluginMessageHandler — 落空语义与 handles 清单', () => {
     expect(pluginService.getDiscoveredPlugins).not.toHaveBeenCalled()
   })
 
-  it('handles 清单含全部 13 个 plugin.* type', () => {
+  it('handles 清单含全部 21 个 plugin.* type', () => {
     const { handler } = makeHandler()
-    expect(handler.handles).toHaveLength(13)
+    expect(handler.handles).toHaveLength(21)
     expect(handler.handles).toEqual(expect.arrayContaining([
       'plugin.list', 'plugin.toggle', 'plugin.uninstall', 'plugin.approvePermissions', 'plugin.revokePermissions',
       'plugin.denyPermissions',
       'plugin.executeCommand', 'plugin.config.get', 'plugin.config.set', 'plugin.install', 'plugin.uiResponse',
       'plugin.mountPoints.sync', 'plugin.ui.snapshot',
+      // provider-plugin-access U2 裁决①：挂载位分区清理（家族切换防陈旧）
+      'plugin.ui.clearMount',
+      // provider-plugin-access D9/D8/U5：plugin.invoke 业务方法调用、plugin.uiEvent 输入
+      // 值回传、清单域两个无参只读 RPC
+      'plugin.invoke', 'plugin.uiEvent', 'plugin.listAvailable', 'plugin.catalog',
+      // provider-plugin-access U4/U6：两段式安装（prepare 确认停点 / confirm 提交 / cancel 清暂存）
+      'plugin.prepareInstall', 'plugin.confirmInstall', 'plugin.cancelInstall',
     ]))
   })
 })

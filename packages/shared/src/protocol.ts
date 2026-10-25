@@ -273,10 +273,28 @@ export type ClientMessageType =
   | 'plugin.install' | 'plugin.uninstall'
   | 'plugin.approvePermissions' | 'plugin.revokePermissions' | 'plugin.denyPermissions'
   | 'plugin.executeCommand'
+  // plugin.invoke（provider-plugin-access D9）：renderer → 插件的业务方法调用（区别于
+  // executeCommand 的「用户可发现动作」语义——invoke 面向界面代码主动调用，不进命令
+  // 面板）。reply 同名（PluginInvokeReply），复用 commands-executor 执行链。
+  | 'plugin.invoke'
+  // plugin.uiEvent（provider-plugin-access D8）：text-input 等输入组件的值回传通道
+  // （输入值变更即回传，fire-and-forget——插件侧始终持有最新值，确认动作复用
+  // action-bar 按钮点击）。
+  | 'plugin.uiEvent'
+  // 插件清单域（provider-plugin-access U5）：listAvailable = 清单 service 组装的可安装
+  // 视图（含本地安装状态比对）；catalog = 清单原始目录条目。均无参只读，reply 同名。
+  | 'plugin.listAvailable' | 'plugin.catalog'
+  // 两段式安装（provider-plugin-access U4/U6）：prepare = 下载校验解压至暂存并返回
+  // 确认卡知情面（停在确认停点，S27）；confirm = 提交落盘并激活；cancel = 清暂存
+  //（未确认不发生安装落盘）。reply：prepare/confirm 同名（payload 消费型），cancel pong ack。
+  | 'plugin.prepareInstall' | 'plugin.confirmInstall' | 'plugin.cancelInstall'
   | 'plugin.config.get' | 'plugin.config.set'
   | 'plugin.uiResponse'
   | 'plugin.mountPoints.sync'
   | 'plugin.ui.snapshot'
+  // plugin.ui.clearMount：清挂载位全局域快照分区（provider-plugin-access U2 悬置二选一
+  // 裁决 = ①调用防陈旧，家族切换时消费侧调用）。reply pong ack。
+  | 'plugin.ui.clearMount'
   | 'file.read'
   | 'file.tree' | 'file.tree.expand' | 'file.search' | 'file.search.cwd'
   | 'git.diff'
@@ -625,25 +643,189 @@ export interface HeaderActionUpdatePayload {
 }
 
 /**
- * 视图快照条目（'plugin:uiSnapshot'.views 元素）：与 'plugin:viewUpdate' 广播载荷同构
- * （guiTree 用 unknown[] 保持 shared 依赖最小化，消费端 isGuiComponent 收窄）。
+ * 插件视图载荷基座（'plugin:viewUpdate' 广播与 'plugin:uiSnapshot' 快照条目共用——
+ * 同构由类型引用构造性保证，快照回放与实时帧两路同函数）。
+ *
+ * 归属作用域 scope（provider-plugin-access U2，分区键由 sessionId 泛化）：wire 上
+ * sessionId 与 mountId 二选一，runtime views-api 校验「恰好一个」——都缺或都给 →
+ * INVALID_VIEW_SCOPE。guiTree 用 unknown[] 保持 shared 依赖最小化，消费端
+ * isGuiComponent 收窄。
  */
-export interface ViewSnapshotItem {
-  sessionId: string
+export interface PluginViewPayloadBase {
   viewId: string
   pluginId: string
   guiTree: unknown[]
   updatedAt: number
+  /**
+   * 全量替换代际：同一 (scope, viewId) 下单调标记，清除后从 1 重新起算（runtime
+   * 快照存储分配）。消费端**不做代际比较门控**——帧到达即整体替换旧树（不做增量
+   * merge）：WS 有序传输 + 快照回放与实时帧同函数写入已保证时序，「清除后重起算」
+   * 与代际比较门控冲突（重起的 generation=1 会被旧门控丢弃）。generation 的承重
+   * 语义是「全量替换证据字段」；推送丢失由按 scope 定向拉快照收敛（ADR-0097
+   * 拉为主、推补充），快照条目携带同一 generation。
+   */
+  generation: number
+  /** 会话域归属：分区键 session:<sessionId>。与 mountId 互斥（恰好其一） */
+  sessionId?: string
+  /** 全局域归属（Provider 页等无会话挂载位）：分区键 global:<mountId>:<pluginId>。
+   *  pluginId 取自 RPC 身份（fork 与 pluginId 一对一），不接受载荷自报 */
+  mountId?: string
 }
 
 /**
+ * 视图快照条目（'plugin:uiSnapshot'.views 元素）：与 'plugin:viewUpdate' 广播载荷同构
+ * （经 PluginViewPayloadBase 引用构造性保证）。
+ */
+export type ViewSnapshotItem = PluginViewPayloadBase
+
+/**
  * 插件 UI 快照（'plugin:uiSnapshot'，plugin.ui.snapshot 的 reply）：runtime 持有的每
- * (sessionId, id) 最新 headerAction 状态与视图树全集（或按过滤参数的子集）。快照条目
+ * (scope, id) 最新 headerAction 状态与视图树全集（或按过滤参数的子集）。快照条目
  * 与实时推送帧同构——渲染端喂同一 store 写入口，快照回放与实时帧两路同函数。
  */
 export interface PluginUiSnapshotPayload {
   headerActions: HeaderActionUpdatePayload[]
   views: ViewSnapshotItem[]
+}
+
+/**
+ * plugin:event 载荷（provider-plugin-access D9）：插件 → renderer 的业务事件上报
+ * （插件侧经宿主 RPC notify `plugin.event` 转发广播）。首个消费方 = 凭据状态上报
+ * （D5：插件是凭据有效性的权威，宿主只做展示映射）。channel 为插件自命字符串，
+ * 上限 256 字节（PLUGIN_EVENT_CHANNEL_MAX_BYTES，超限 INVALID_ARGS 结构化拒绝）；
+ * payload 形状由插件自定（unknown 透传，宿主不解释），字节上限 128KB
+ * （PLUGIN_EVENT_PAYLOAD_MAX_BYTES，宿主 plugin.event RPC 入口序列化实测，超限
+ * PLUGIN_EVENT_PAYLOAD_TOO_LARGE 结构化拒绝——全局广播通路不经 session push
+ * 双档检查，入口拒绝即 C-comm-14 防线）。
+ */
+export interface PluginEventPayload {
+  pluginId: string
+  channel: string
+  payload: unknown
+}
+
+/**
+ * plugin.invoke reply 载荷（provider-plugin-access D9）：renderer → 插件业务方法调用
+ * 的返回值信封（复用 commands-executor 执行链：pending 登记 / 超时取值 / 并发检查，
+ * 路由键 = pluginId:method）。result 为插件方法返回值的 JSON 形态（unknown 透传）；
+ * 请求级失败走统一 error envelope，不占用本信封。
+ */
+export interface PluginInvokeReply {
+  result: unknown
+}
+
+/**
+ * Provider 插件家族元数据（provider-plugin-access D1）：清单承载、Provider 页家族卡
+ * 渲染。凭据来源两值：oauth = 浏览器授权流程；ide-extract = 本机 IDE 登录态提取。
+ */
+export interface PluginProviderFamilyMeta {
+  /** 家族 id（如 wool-workbuddy；与该插件 manifest namespace 同值） */
+  id: string
+  /** 家族显示名（如 WorkBuddy） */
+  displayName: string
+  /** 厂商名（如 腾讯） */
+  vendor: string
+  credentialSource: 'oauth' | 'ide-extract'
+  /** 上游可用模型数量（清单声明值，随清单热更新） */
+  modelCount: number
+}
+
+/**
+ * 插件清单条目（provider-plugin-access U5，v2-plugins.json 单条形状）：清单是「可安装
+ * 插件列表」——发现与一键安装通道，不是白名单、不承担安全审核。
+ */
+export interface PluginCatalogEntry {
+  /** 插件 npm 包名（安装 spec 基准；scoped 形态原样保留） */
+  packageName: string
+  pluginId: string
+  displayName: string
+  description?: string
+  /** taiji 插件包版本（双产物形态与 piExtensionVersion 成对钉定，D6） */
+  pluginVersion: string
+  /** pi 扩展包版本（双产物形态专用；单产物条目省略） */
+  piExtensionVersion?: string
+  /** Provider 家族元数据（Provider 页家族卡数据源；非 provider 插件省略） */
+  family?: PluginProviderFamilyMeta
+  /** manifest 能力声明摘要（安装确认卡知情展示，D3） */
+  capabilities?: string[]
+  /** manifest 读取路径声明（家目录相对路径；安装确认卡知情展示，D3） */
+  readPaths?: string[]
+  /**
+   * 命名空间（provider-plugin-access D4）：仅本地已装条目回退（S15② available=false
+   * 时合并已装插件构造条目）携带——renderer 条目识别的第二数据源（清单不可达时按
+   * namespace 前缀识别插件条目，S15「已装 provider 的管理不受影响」）。清单条目
+   * 不带（家族归属已由 family.id 承载）。
+   */
+  namespace?: string
+}
+
+/**
+ * plugin.listAvailable reply（清单 service 组装的可安装视图）：条目附本地安装状态
+ * 比对结果（比对基准 = 插件目录内 package.json 的 version，唯一事实）。
+ *
+ * available/stale/reason（provider-plugin-access S15①②，R-2 裁决 2026-10-24）：
+ * 清单拉取元数据随 reply 本体下发，UI 两态呈现的数据源——
+ * - available=false = 无缓存且拉取失败：plugins 为本地已装条目回退，UI 整页报错
+ *   （与「缓存清单为空」区分呈现，不再是同形空态）；
+ * - stale=true = 有缓存兜底但本次非「确认新鲜」路径（网络失败 / guard 拒绝）：
+ *   UI 显示「清单可能不是最新」提示条；
+ * - reason = 未刷新原因（network / invalid / throttled），排障可见。
+ */
+export interface PluginListAvailableReply {
+  plugins: Array<
+    PluginCatalogEntry & {
+      /** 本地已安装同 pluginId 插件 */
+      installed: boolean
+      /** 已安装版本（包内 package.json version；未安装省略） */
+      installedVersion?: string
+      /** 清单版本 > 已装版本（「更新插件」动作的数据源，S26） */
+      updateAvailable?: boolean
+    }
+  >
+  /** 清单可用（有缓存或本次拉取成功）；false = 无缓存且拉取失败（S15② 报错态判据） */
+  available?: boolean
+  /** 缓存兜底生效且本次非确认新鲜（S15①「清单可能不是最新」提示判据） */
+  stale?: boolean
+  /** 未刷新原因（remote-config fail-safe 链产出；排障可见，UI 不消费） */
+  reason?: string
+}
+
+/**
+ * plugin.catalog reply（清单原始目录条目，含家族元数据）。available/stale/reason
+ * 语义与 PluginListAvailableReply 对齐（同一清单拉取链产出）。
+ */
+export interface PluginCatalogReply {
+  entries: PluginCatalogEntry[]
+  /** 清单可用（有缓存或本次拉取成功）；false = 无缓存且拉取失败（S15② 报错态判据） */
+  available?: boolean
+  /** 缓存兜底生效且本次非确认新鲜（S15①「清单可能不是最新」提示判据） */
+  stale?: boolean
+  /** 未刷新原因（remote-config fail-safe 链产出；排障可见，UI 不消费） */
+  reason?: string
+}
+
+/**
+ * plugin.prepareInstall reply（provider-plugin-access U4/U6）：两段式安装第一段的
+ * 确认卡知情面——暂存解压物 manifest 声明的全量透传（展示物 = 提交阶段校验物，同源），
+ * 宿主全量展示后由用户确认（D3 知情第一层，S27）。结构对齐 runtime
+ * PluginService.PluginInstallPreview 与 core SettingsTransport.PluginInstallPreview。
+ */
+export interface PluginPrepareInstallReply {
+  /** 安全化目录名（@scope/pkg → scope__pkg），= 安装后 registry pluginId 与 installed.json key */
+  pluginId: string
+  packageName: string
+  version: string
+  capabilities: string[]
+  readPaths: string[]
+  permissions: string[]
+  /** manifest 声明的命名空间（未声明时省略——非 provider 插件常态） */
+  namespace?: string
+}
+
+/** plugin.confirmInstall reply：两段式安装第二段提交结果（失败携带文案，UI 可见不静默）。 */
+export interface PluginConfirmInstallReply {
+  success: boolean
+  error?: string
 }
 
 
@@ -979,13 +1161,35 @@ export interface ClientMessageMap {
   'plugin.revokePermissions': { pluginId: string }
   'plugin.denyPermissions': { pluginId: string }
   'plugin.executeCommand': { pluginId: string; commandId: string; args?: Record<string, unknown> }
+  // plugin.invoke 请求（provider-plugin-access D9）：method 为插件业务方法名（路由键
+  // pluginId:method，复用 commands-executor 链——pending 登记 / 超时取值 / 并发检查）；
+  // params 形状由插件方法自定。reply 同名（PluginInvokeReply 信封）。
+  'plugin.invoke': { pluginId: string; method: string; params?: Record<string, unknown> }
+  // plugin.uiEvent 值回传（provider-plugin-access D8）：pluginId = 渲染该树帧携带的
+  // 插件 id（渲染事实，非载荷自报——宿主据此路由到发起该视图的插件）；value 宿主只做
+  // 形状校验（标量，深度 ≤ 2），业务校验归插件。
+  'plugin.uiEvent': { pluginId: string; viewId: string; componentId: string; event: string; value: unknown }
   'plugin.config.get': { pluginId: string; key?: string }
   'plugin.config.set': { pluginId: string; key: string; value: unknown }
   'plugin.uiResponse': { requestId: string; result: unknown }
   'plugin.mountPoints.sync': { mountPoints: string[] }
-  // plugin.ui.snapshot：拉取插件 UI 快照（headerAction 状态 + 视图树）。无过滤 = 全部会话
-  //（connected 边沿全量恢复）；sessionId/viewId 过滤 = 单分区补拉（ViewHost 挂载缺失自举）。
-  'plugin.ui.snapshot': { sessionId?: string; viewId?: string }
+  // plugin.ui.snapshot：拉取插件 UI 快照（headerAction 状态 + 视图树）。无过滤 = 全部
+  //（connected 边沿全量恢复）；过滤 = 单分区补拉（ViewHost 挂载缺失自举）。过滤参数
+  // 为 scope 联合（provider-plugin-access U2 分区键泛化）：会话域 { sessionId }、
+  // 全局域 { mountId, pluginId }（二选一形态，runtime 校验「恰好一个」），viewId 可与
+  // 两者组合做单视图补拉。
+  'plugin.ui.snapshot': { sessionId?: string; mountId?: string; pluginId?: string; viewId?: string }
+  // plugin.ui.clearMount：清挂载位全局域快照分区（家族切换防陈旧，U2 裁决 ①）。只给
+  // mountId（清全部插件维度）——清单插件维度场景走 clearForPlugin 生命周期链。
+  'plugin.ui.clearMount': { mountId: string }
+  // 插件清单域（provider-plugin-access U5）：无参只读，reply 同名。
+  'plugin.listAvailable': Record<string, never>
+  'plugin.catalog': Record<string, never>
+  // 两段式安装（provider-plugin-access U4/U6）：packageSpec = npm 包名（scoped 形态原样
+  // 保留）；pluginId = prepare 回包知情面的 pluginId（安全化目录名，两段间路由键）。
+  'plugin.prepareInstall': { packageSpec: string }
+  'plugin.confirmInstall': { pluginId: string }
+  'plugin.cancelInstall': { pluginId: string }
   'file.read': { path: string; sessionId?: string }
   'file.tree': { sessionId: string }
   'file.tree.expand': { sessionId: string; path: string }
@@ -1492,6 +1696,19 @@ export type ServerMessageType =
   // 迟到审批对已删 pending miss noop 不产生本帧（该请求终局已由 expired 覆盖）。
   | 'plugin:permissionRequestResolved'
   | 'plugin:viewUpdate'
+  // plugin:event（provider-plugin-access D9）：插件 → renderer 的业务事件上报（插件经
+  // 宿主 RPC notify `plugin.event` 转发广播，载荷契约见 PluginEventPayload）。首个消费
+  // 方 = 凭据状态上报（D5——拉取给已知事实，本帧只作增量提示，推送丢失由下一次
+  // 展开拉取收敛，不建推送补偿）。
+  | 'plugin:event'
+  // plugin.invoke（provider-plugin-access D9）：plugin.invoke RPC 的 reply（与 request
+  // 同名——canvas.mutate 同款 payload 消费型），载荷 = PluginInvokeReply 信封。
+  | 'plugin.invoke'
+  // 插件清单域 reply（provider-plugin-access U5）：与 request 同名（payload 消费型）。
+  | 'plugin.listAvailable' | 'plugin.catalog'
+  // 两段式安装 reply（provider-plugin-access U4/U6）：prepare/confirm 与 request 同名
+  //（payload 消费型——确认卡知情面 / 提交结果）；cancel ack 型走 pong，不占下行帧。
+  | 'plugin.prepareInstall' | 'plugin.confirmInstall'
   // plugin:headerActionUpdate：headerAction 可变字段（badge/tooltip/disabled）下行帧
   //（AP-1）。必带 sessionId——渲染端按 (sessionId, headerActionId) 写对应会话分区；
   // 经 broker 全局广播直发（同上不入 ring）。
@@ -2390,17 +2607,19 @@ export interface ServerMessageMapBase {
   // reply { pluginId, config }）。config 是该插件全量配置对象（get 不带 key 时）或单 key 子树。
   // 用 Record<string, unknown> 保持 shared 依赖最小化（与 extension:widgetGui.gui:unknown 同先例）。
   'plugin:config': { pluginId: string; config: Record<string, unknown> }
-  // plugin:viewUpdate：plugin views.update 下行广播（plugin-rpc-setup.ts handleViewUpdate 生产，
-  // 带 sessionId 走 session 通道 + crossSession 声明条目分发到 ExtensionHost）。
-  // guiTree 用 unknown[] 保持 shared 包依赖最小化（与 extension:widgetGui 的 gui:unknown 同先例），
-  // 消费端（core MessageBusBridge parseViewUpdate → ViewHostStore）用 isGuiComponent 检查收窄。
-  'plugin:viewUpdate': {
-    sessionId: string
-    viewId: string
-    pluginId: string
-    guiTree: unknown[]
-    updatedAt: number
-  }
+  // plugin:viewUpdate：plugin views.update 下行广播（plugin-rpc-setup.ts handleViewUpdate 生产）。
+  // 载荷 = PluginViewPayloadBase（scope 二选一 + generation 全量替换代际，契约注释见该类型）。
+  'plugin:viewUpdate': PluginViewPayloadBase
+  // plugin:event（provider-plugin-access D9）：插件业务事件上报广播，载荷契约见 PluginEventPayload。
+  'plugin:event': PluginEventPayload
+  // plugin.invoke RPC 的 reply（与 request 同名，payload 消费型——信封见 PluginInvokeReply）。
+  'plugin.invoke': PluginInvokeReply
+  // 插件清单域 reply（provider-plugin-access U5，与 request 同名）。
+  'plugin.listAvailable': PluginListAvailableReply
+  'plugin.catalog': PluginCatalogReply
+  // 两段式安装 reply（provider-plugin-access U4/U6，与 request 同名——payload 消费型）。
+  'plugin.prepareInstall': PluginPrepareInstallReply
+  'plugin.confirmInstall': PluginConfirmInstallReply
   // plugin:headerActionUpdate：headerAction 可变字段下行帧（AP-1；必带 sessionId，
   // 渲染端按 (sessionId, headerActionId) 写会话分区）。payload 契约见 HeaderActionUpdatePayload。
   'plugin:headerActionUpdate': HeaderActionUpdatePayload
@@ -3593,10 +3812,26 @@ export interface ReplyPayloadMap {
   'plugin.revokePermissions': ServerMessageMap['pong']
   'plugin.denyPermissions': ServerMessageMap['pong']
   'plugin.executeCommand': ServerMessageMap['pong']
+  // plugin.invoke（provider-plugin-access D9）：reply 与 request 同名，PluginInvokeReply
+  // 信封（result = 插件方法返回值）；请求级失败走统一 error envelope。
+  'plugin.invoke': ServerMessageMap['plugin.invoke']
+  // plugin.uiEvent（provider-plugin-access D8）：值回传 fire-and-forget，reply pong ack
+  // （前端不读 payload）；未送达（WS 未 OPEN）由 command() 立即 reject，不留悬挂窗口。
+  'plugin.uiEvent': ServerMessageMap['pong']
+  // 插件清单域（provider-plugin-access U5）：无参只读，reply 与 request 同名。
+  'plugin.listAvailable': ServerMessageMap['plugin.listAvailable']
+  'plugin.catalog': ServerMessageMap['plugin.catalog']
+  // 两段式安装（provider-plugin-access U4/U6）：prepare/confirm 同名 reply（payload
+  // 消费型——确认卡知情面 / 提交结果）；cancel ack 型走 pong。
+  'plugin.prepareInstall': ServerMessageMap['plugin.prepareInstall']
+  'plugin.confirmInstall': ServerMessageMap['plugin.confirmInstall']
+  'plugin.cancelInstall': ServerMessageMap['pong']
   'plugin.config.get': ServerMessageMap['plugin:config']
   'plugin.config.set': ServerMessageMap['plugin:config']
   'plugin.mountPoints.sync': ServerMessageMap['pong']
   'plugin.ui.snapshot': ServerMessageMap['plugin:uiSnapshot']
+  // plugin.ui.clearMount：清挂载位全局域快照分区（家族切换防陈旧）——ack 型走 pong。
+  'plugin.ui.clearMount': ServerMessageMap['pong']
   'workspace.listRecent': ServerMessageMap['workspace.recentList']
   'workspace.record': ServerMessageMap['workspace.recentList']
   'workspace.setPinned': ServerMessageMap['workspace.recentList']

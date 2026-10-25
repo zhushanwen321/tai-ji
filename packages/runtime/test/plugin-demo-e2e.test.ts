@@ -110,6 +110,7 @@ function createMockContext(): {
       events: {
         on: vi.fn(() => ({ dispose: () => {} })),
         emit: vi.fn(),
+        report: vi.fn(async () => ({ forwarded: true })),
       },
       // ── config ────────────────────────────────────────────
       config: {
@@ -133,6 +134,7 @@ function createMockContext(): {
           notifications.push({ level, message })
         }),
         updateHeaderAction: vi.fn(async () => ({ updated: true })),
+        openUrl: vi.fn(async () => ({ opened: true })),
       },
       // ── agent ─────────────────────────────────────────────
       agent: {
@@ -156,6 +158,13 @@ function createMockContext(): {
       views: {
         update: vi.fn(async () => {}),
         listMountPoints: vi.fn(async () => []),
+        onUiEvent: vi.fn(() => ({ dispose: () => {} })),
+      },
+      // ── providers（provider-plugin-access D4，mock 占位）──
+      providers: {
+        write: vi.fn(async () => ({ written: true as const, providerId: 'demo-provider' })),
+        delete: vi.fn(async () => ({ deleted: false, providerId: 'demo-provider' })),
+        credential: vi.fn(async () => ({ providerId: 'demo-provider', unsupported: 'command' } as const)),
       },
     },
     subscriptions: [],

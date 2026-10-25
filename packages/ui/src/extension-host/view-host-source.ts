@@ -1,30 +1,34 @@
 /**
- * view-host-source.ts —— ViewHost 组件的数据源注入接口（W3 · T1，C2 契约）。
+ * view-host-source.ts —— ViewHost 组件的数据源注入接口（W3 · T1，C2 契约 + U2 scope 消费面）。
  *
- * 对齐 S2 plan IF10（ViewHostStore）消费方：getView(sessionId, viewId)。
- * S2 的 ViewHostStore 类尚未交付（S2 W4 headless-consumers），本接口即 ui 侧消费契约：
- * 壳（P5）在 S2 落地后把真 store 适配注入（S4 TC4），单测注入 mock 实现。
+ * 对齐 core ViewHostStore（U2 起 per-scope 分区）：会话域三法（getSessionId 形态，托盘
+ * widget 区既有消费方沿用）+ scope 联合两法（ViewHost scope prop 消费，Provider 页等
+ * 全局域挂载位走此路径）。两族方法落同一 store 分区（会话域 scope 串 = session:<id>），
+ * 只是参数形态不同——ui 侧契约先行，壳（P5）provide 真实实现，单测注入 mock 实现。
  *
- * ViewCacheEntry 形状对齐 S2 IF10：viewId/pluginId/guiTree/updatedAt。
- * guiTree 用 @zhushanwen/extension-protocol 的权威 GuiComponent 类型（P2 GuiComponentRenderer
- * 同源——core types.ts 的 WidgetPayload.guiTree 尚为 unknown[]，S2 W4 落地时替换为
- * GuiComponent[]，本接口按 S2 IF10 契约先行）。
+ * ViewCacheEntry 形状对齐 core view-host-store：viewId/pluginId/guiTree/updatedAt
+ * （+ meta / generation 可选）。guiTree 用 @zhushanwen/extension-protocol 的权威
+ * GuiComponent 类型（P2 GuiComponentRenderer 同源）。
  */
 import type { InjectionKey } from 'vue'
 import type { GuiComponent, WidgetMeta } from '@zhushanwen/extension-protocol'
+import type { PluginViewScope } from '@taiji/shared'
 
-/** plugin view 的 GuiComponent 树缓存条目（对齐 S2 IF10 ViewCacheEntry）。 */
+/** plugin view 的 GuiComponent 树缓存条目（对齐 core ViewHostStore ViewCacheEntry）。 */
 export interface ViewCacheEntry {
   viewId: string
   pluginId: string
   guiTree: GuiComponent[]
   /** widget 宿主元数据（v1.1 wire 携带，托盘 widget 面板 head 渲染） */
   meta?: WidgetMeta
+  /** 全量替换代际（U2，plugin:viewUpdate 源携带；extension:widget 纯文本源无） */
+  generation?: number
   updatedAt: number
 }
 
-/** ViewHost 数据源（对齐 S2 IF10 ViewHostStore 消费方）。 */
+/** ViewHost 数据源（会话域三法 + U2 scope 联合两法，落同一 store 分区）。 */
 export interface ViewHostSource {
+  /** 会话域读（托盘 widget 区既有消费方；等价 getView({ kind:'session', sessionId })） */
   getView(sessionId: string, viewId: string): ViewCacheEntry | undefined
 
   /**
@@ -35,11 +39,23 @@ export interface ViewHostSource {
   getViewIds(sessionId: string): string[]
 
   /**
-   * 分区缺失自举补拉（ADR-0097「拉为主、推补充」事件边沿拉，可选）：ViewHost 挂载发现
-   * 该 (sessionId, viewId) 分区无内容时调用——壳实现按同键过滤拉取插件 UI 快照并写回
-   * store（幂等读）。推送型数据丢失（transient 帧不入 ring）后的组件级收敛通道。
+   * 会话域分区缺失自举补拉（ADR-0097「拉为主、推补充」事件边沿拉，可选）：ViewHost
+   * 挂载发现该 (sessionId, viewId) 分区无内容时调用——壳实现按同键过滤拉取插件 UI 快照
+   * 并写回 store（幂等读）。推送型数据丢失（transient 帧不入 ring）后的组件级收敛通道。
    */
   refreshView?(sessionId: string, viewId: string): void
+
+  /**
+   * scope 联合读（U2）：ViewHost scope prop 消费；全局域挂载位（Provider 页）经此读
+   * `global:<mountId>:<pluginId>` 分区，会话域与上方 getView 同分区。
+   */
+  getViewInScope?(scope: PluginViewScope, viewId: string): ViewCacheEntry | undefined
+
+  /**
+   * scope 联合自举补拉（U2，可选）：语义同 refreshView，键为 scope 联合——全局域按
+   * { mountId, pluginId, viewId } 过滤拉取。
+   */
+  refreshViewInScope?(scope: PluginViewScope, viewId: string): void
 }
 
 /** provide/inject key——壳 provide，组件 inject，单测 global.provide mock。 */

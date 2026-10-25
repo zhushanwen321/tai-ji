@@ -106,4 +106,42 @@ describe('Task 2: Worker Sandbox (require 拦截)', () => {
       }
     })
   })
+
+  describe('F1-24: fs 系两态放行（CJS 通道只读代理接线）', () => {
+    // fs.read-user-data 的 CJS 通道落地（2026-10-24 裁决）：拦截器对 fs / fs/promises
+    // 按能力声明两态放行——声明含该名 → 放行（initSandbox 的 Module._load patch 返回
+    // 只读代理对象，与 ESM 通道同语义）；未声明 → PERMISSION_DENIED（fail-closed）。
+    // 放行行为面（代理对象读写正反例）由 plugin-esm-loader.test.ts 的 buildProxyObject
+    // 组与 sandbox-escape 的 fork 门控组覆盖，这里锁定拦截器判定面。
+    let pluginDir = ''
+
+    beforeAll(() => {
+      pluginDir = realpathSync(mkdtempSync(join(tmpdir(), 'taiji-plugin-sandbox-fs2-')))
+    })
+
+    afterAll(() => {
+      if (pluginDir) rmSync(pluginDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    })
+
+    it('声明 fs.read-user-data（allowed=fs,fs/promises）→ fs / fs/promises 两态放行（含 node: 前缀形态，不抛）', () => {
+      const interceptor = createRequireInterceptor(pluginDir, ['fs', 'fs/promises'])
+      expect(interceptor('fs', 'node:fs')).toBe('fs')
+      expect(interceptor('node:fs', 'node:fs')).toBe('node:fs')
+      expect(interceptor('fs/promises', 'node:fs/promises')).toBe('fs/promises')
+      expect(interceptor('node:fs/promises', 'node:fs/promises')).toBe('node:fs/promises')
+    })
+
+    it('未声明 → fs / fs/promises PERMISSION_DENIED（fail-closed；能力声明只放行映射集）', () => {
+      const interceptor = createRequireInterceptor(pluginDir, ['http', 'https'])
+      for (const mod of ['fs', 'fs/promises']) {
+        try {
+          interceptor(mod, `node:${mod}`)
+          expect.unreachable(`should have thrown for ${mod}`)
+        } catch (err) {
+          expect(err).toBeInstanceOf(Error)
+          expect((err as { code?: string }).code).toBe('PERMISSION_DENIED')
+        }
+      }
+    })
+  })
 })

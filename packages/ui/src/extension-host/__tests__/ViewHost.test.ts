@@ -51,7 +51,7 @@ function makeTreeEntry(): ViewCacheEntry {
 
 function mountHost(store: ViewHostSource, title?: string, empty?: 'placeholder' | 'hidden') {
   return mount(ViewHost, {
-    props: { viewId: VIEW_ID, sessionId: SESSION, title, empty },
+    props: { viewId: VIEW_ID, scope: { kind: 'session', sessionId: SESSION }, title, empty },
     global: {
       provide: { [VIEW_HOST_SOURCE_KEY as symbol]: store },
     },
@@ -128,7 +128,7 @@ describe('ViewHost', () => {
   })
 
   it('R3 无注入 source 时静默空态不崩', () => {
-    const wrapper = mount(ViewHost, { props: { viewId: VIEW_ID, sessionId: SESSION } })
+    const wrapper = mount(ViewHost, { props: { viewId: VIEW_ID, scope: { kind: 'session', sessionId: SESSION } } })
     expect(wrapper.find('[data-testid="view-host-empty"]').exists()).toBe(true)
   })
 
@@ -191,5 +191,43 @@ describe('ViewHost', () => {
     // source 无 refreshView（可选方法缺省）：静默跳过不崩
     expect(() => mountHost(makeStore(undefined))).not.toThrow()
     expect(refreshView).not.toHaveBeenCalled()
+  })
+
+  it('U2 全局域：scope prop 为 global → 走 getViewInScope / refreshViewInScope（Provider 页挂载位）', async () => {
+    const entry: ViewCacheEntry = { viewId: VIEW_ID, pluginId: 'plug-a', guiTree: makeTree(), updatedAt: 1 }
+    const getViewInScope = vi.fn((_scope: unknown, viewId: string) => (viewId === VIEW_ID ? entry : undefined))
+    const refreshViewInScope = vi.fn()
+    const source: ViewHostSource = {
+      getView: vi.fn(() => undefined),
+      getViewIds: vi.fn(() => []),
+      getViewInScope,
+      refreshViewInScope,
+    }
+    const wrapper = mount(ViewHost, {
+      props: { viewId: VIEW_ID, scope: { kind: 'global', mountId: 'provider.authorize', pluginId: 'plug-a' } },
+      global: { provide: { [VIEW_HOST_SOURCE_KEY as symbol]: source } },
+    })
+    await wrapper.vm.$nextTick()
+
+    // 渲染走 scope 读侧；会话域读侧不被触碰（分区键不同）
+    expect(getViewInScope).toHaveBeenCalledWith({ kind: 'global', mountId: 'provider.authorize', pluginId: 'plug-a' }, VIEW_ID)
+    expect(wrapper.find('[data-testid="ansi-text"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Hello')
+    // 已有 view：不补拉
+    expect(refreshViewInScope).not.toHaveBeenCalled()
+
+    // 分区缺失 → 自举补拉走 scope 联合法
+    const emptySource: ViewHostSource = {
+      getView: vi.fn(() => undefined),
+      getViewIds: vi.fn(() => []),
+      getViewInScope: vi.fn(() => undefined),
+      refreshViewInScope,
+    }
+    mount(ViewHost, {
+      props: { viewId: VIEW_ID, scope: { kind: 'global', mountId: 'provider.authorize', pluginId: 'plug-a' } },
+      global: { provide: { [VIEW_HOST_SOURCE_KEY as symbol]: emptySource } },
+    })
+    expect(refreshViewInScope).toHaveBeenCalledTimes(1)
+    expect(refreshViewInScope).toHaveBeenCalledWith({ kind: 'global', mountId: 'provider.authorize', pluginId: 'plug-a' }, VIEW_ID)
   })
 })

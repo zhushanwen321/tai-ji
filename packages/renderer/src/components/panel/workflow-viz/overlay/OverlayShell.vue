@@ -1,7 +1,16 @@
 <!--
   OverlayShell —— 内容浮层统一壳（display-containers §6.5/§7.3「浮层公共壳组件」）。
 
-  从 WorkflowVizOverlay 抽出的公共壳：面板（88%×92% 圆角面板 + 遮罩、--z-modal）+ **两通道
+  根元素 @pointerdown.stop（浮层 = 全局最高交互层）：浮层内交互不向 document 传播——
+  reka 弹层（Dialog/Popover）的「层外点击关闭」判定挂在 document 级 pointerdown 上，
+  其弹层栈只收录 reka 自己的层；浮层作为独立 fixed 层不在栈内，不拦截则用户与浮层的
+  全部交互会被浮层盖住的下层弹层误判为「点我外面」连带关闭（羊毛授权浮层盖向导是
+  首个同屏场景）。stop 在源头让「层外」语义对浮层内交互不产生，任何下层弹层自动正确。
+
+  从 WorkflowVizOverlay 抽出的公共壳：面板（88%×92% 圆角面板 + 遮罩、--z-dialog 档——设置
+  弹窗经 DialogPortal teleport 到 body 尾部且同用 --z-modal，同值后序者胜会把浮层盖住；
+  浮层语义 = 从任何业务弹窗内都可唤起的全局工作层，授权浮层（设置弹窗内发起）是首个同屏
+  场景）+ **两通道
   关闭**（点遮罩 / 右上关闭按钮）+ 标题栏 slot（#title，内容侧注入自己的 header 信息）+
   body slot（默认槽 = 面板 body 区，直接挂在面板 flex-col 下——内容自带 `min-h-0 flex-1`
   尺寸控制，如 workflow 的左 DAG 右实况分栏）。browser 与 workflow 两个内容挂进来
@@ -28,9 +37,10 @@
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-scrim backdrop-blur-[2px]"
+    class="fixed inset-0 z-[var(--z-dialog)] flex items-center justify-center bg-scrim backdrop-blur-[2px]"
     data-testid="wfvz-overlay"
     @click.self="close"
+    @pointerdown.stop
   >
     <section
       ref="panelRef"
