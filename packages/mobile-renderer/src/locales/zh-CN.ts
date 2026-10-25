@@ -174,6 +174,10 @@ export default {
     notices: {
       turnAborted: '已中断本轮生成',
       turnRetried: '已重发最后一条消息，重试本轮',
+      answerSubmitted: '已提交回答',
+      permissionApproved: '已允许本次权限请求',
+      permissionDenied: '已拒绝本次权限请求',
+      subagentStopped: '已停止子代理 {name}',
     },
     activity: {
       turnTitle: '当前回合',

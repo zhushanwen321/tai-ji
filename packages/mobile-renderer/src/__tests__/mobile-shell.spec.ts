@@ -292,6 +292,11 @@ describe('TC-8: AC5 Tailwind 样式入口（U1.6 P0 防回归）', () => {
     expect(mainSrc).toMatch(/import '\.\/styles\/base\.css'/)
   })
 
+  it("main.ts import @taiji/ui/mobile-tokens.css（--m-* 尺度层进构建图：Sheet 原语/chat density 移动档/触控 44px 的变量源，缺失时全量 var(--m- 失效）", () => {
+    const mainSrc = readFileSync(resolve(pkgRoot, 'src/main.ts'), 'utf-8')
+    expect(mainSrc).toMatch(/import '@taiji\/ui\/mobile-tokens\.css'/)
+  })
+
   it('tailwind.config.ts content 覆盖壳源码与 ui 组件（防扫描范围缩窄致工具类缺失）', () => {
     const config = readFileSync(resolve(pkgRoot, 'tailwind.config.ts'), 'utf-8')
     expect(config).toContain("./src/**/*.{vue,ts,tsx}")

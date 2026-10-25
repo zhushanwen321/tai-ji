@@ -14,6 +14,7 @@ import { useI18n } from 'vue-i18n'
 import { Button, Sheet } from '@taiji/ui'
 import type { SubagentRecord } from '@taiji/shared'
 import {
+  appendActionNotice,
   fetchSubagentHistory,
   fetchSubagents,
   stopSubagent,
@@ -140,7 +141,8 @@ async function onStop(): Promise<void> {
   stopping.value = true
   try {
     await stopSubagent(props.sessionId, r.subagentId)
-    // 收敛 = 重拉清单（消费 runtime 侧状态收敛后的快照，§7.2 停止行）
+    // §6.20「已停止子代理 X」流内通知（回执成功点）；收敛 = 重拉清单（消费 runtime 侧状态收敛后的快照，§7.2 停止行）
+    appendActionNotice(props.sessionId, t('mobile.notices.subagentStopped', { name: r.agent }))
     reloadList(props.sessionId)
   } catch (e) {
     console.warn('[SubagentSheet] subagent cancel failed:', e)

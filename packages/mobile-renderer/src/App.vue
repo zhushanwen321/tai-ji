@@ -35,6 +35,7 @@ import {
 } from './shell/companion-bridge'
 import {
   activeSessionId,
+  appendActionNotice,
   loadSessions,
   markConnectedNow,
   refreshHistory,
@@ -87,7 +88,12 @@ function onSheetSubmit(payload: { requestId: string; result: string | boolean })
     ? respondDialogRequest(payload.requestId, payload.result)
     : respondFormRequest(payload.requestId, payload.result)
   formRespondFailedId.value = delivered ? null : payload.requestId
-  if (delivered) closeSheet()
+  if (delivered) {
+    closeSheet()
+    // §6.20「已提交回答」流内通知（回执成功点插入；三源请求分区键 = 活跃会话）
+    const sid = activeSessionId.value
+    if (sid) appendActionNotice(sid, t('mobile.notices.answerSubmitted'))
+  }
 }
 
 /** FormSheet 取消（回传 result:null——送达即请求终结收层；未送达保留可重试 + 错误行） */
@@ -99,12 +105,19 @@ function onSheetCancel(payload: { requestId: string; source: 'form' | 'dialog' }
   if (delivered) closeSheet()
 }
 
+// §6.20「已允许/已拒绝」流内通知的本端动作标记：transport approve/deny 返回 void，
+// 回执成功点 = controller pending 翻 false（RPC 失败保持 true，BM3）。标记区分
+// pending 翻 false 的其余来源（expired 超时 / 他端 resolved 撤回——无本端动作不发通知）。
+let pendingPermissionAction: 'approve' | 'deny' | null = null
+
 /** PermissionSheet 审批回传（controller transport 既有通路；成败呈现由 controller state 收敛） */
 function onPermissionApprove(payload: { pluginId: string; permissions: string[] }): void {
+  pendingPermissionAction = 'approve'
   mobilePermissionTransport.approve(payload.pluginId, payload.permissions)
 }
 
 function onPermissionDeny(payload: { pluginId: string }): void {
+  pendingPermissionAction = 'deny'
   mobilePermissionTransport.deny(payload.pluginId)
 }
 
@@ -128,7 +141,24 @@ watch([pendingFormRequest, pendingPlanReview, pendingDialogRequest], ([f, p, d])
 })
 // 审批收尾（approve/deny RPC 成功 → controller pending 翻 false；失败 BM3 保持 true 留层重试）
 watch(() => permission.pending, (pending) => {
-  if (!pending && activeSheet.value === 'permission') closeSheet()
+  if (pending) {
+    // 新请求覆盖旧弹窗：清旧动作标记（本次弹窗终局若非本端动作不发通知）
+    pendingPermissionAction = null
+    return
+  }
+  if (activeSheet.value === 'permission') closeSheet()
+  // §6.20「已允许/已拒绝」流内通知（本端动作回执成功点）：审批请求经 §6.18 V-6 探针
+  // 恒无会话归属，通知插当前活跃会话分区（动作发生的壳上下文；内存态事实记录）。
+  if (pendingPermissionAction !== null) {
+    const sid = activeSessionId.value
+    const key = pendingPermissionAction === 'approve' ? 'mobile.notices.permissionApproved' : 'mobile.notices.permissionDenied'
+    pendingPermissionAction = null
+    if (sid) appendActionNotice(sid, t(key))
+  }
+})
+// RPC 失败（error 显形）清动作标记：失败后请求终局（超时/他端撤回）不误发成功通知
+watch(() => permission.error, (e) => {
+  if (e) pendingPermissionAction = null
 })
 
 // 新建任务入口统一走 openSheet('newTask')（SessionsScreen 上抛 + 聊天空态入口共用）；

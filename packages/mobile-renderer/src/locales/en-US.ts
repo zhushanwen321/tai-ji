@@ -172,6 +172,10 @@ export default {
     notices: {
       turnAborted: 'Turn generation interrupted',
       turnRetried: 'Last message resent — retrying this turn',
+      answerSubmitted: 'Answer submitted',
+      permissionApproved: 'Permission request approved',
+      permissionDenied: 'Permission request denied',
+      subagentStopped: 'Stopped subagent {name}',
     },
     activity: {
       turnTitle: 'Current turn',
