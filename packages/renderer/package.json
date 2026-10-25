@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "typecheck:test": "vue-tsc --noEmit -p tsconfig.typecheck-test.json",
-    "test": "vitest run",
+    "test": "vitest run --pool=threads",
     "check:i18n": "vitest run src/__tests__/i18n/"
   },
   "dependencies": {
