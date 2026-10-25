@@ -34,7 +34,10 @@ import {
 } from './lib/mobile-drive.mjs'
 
 const PLUGIN_ID = 'mobile-perm-demo'
-const PERMISSIONS = ['providers.list']
+// 权限名必须是词表内可归一的完整方法名（shared/plugin-permission-map 的
+// normalizePermissionInput：未知名归一为空 → 被滤出 unapproved → 权限门静默放行，
+// 首跑实测 providers.list 不在词表内导致门未触发）
+const PERMISSIONS = ['plugin.storage.global.get']
 const PERM_TIMEOUT_MS = 45_000
 
 /** 场景模块 import 阶段执行（先于 runner 的 instance.launch——插件发现在 launch 期 scan）。 */
@@ -175,7 +178,7 @@ export async function run(ctx) {
 
     // ── 段 1：请求 #1 → 全局呈现 + 拒绝在左 → Deny ──
     let since = protocol.events.length
-    await protocol.call('plugin.toggle', { pluginId: PLUGIN_ID, enabled: true })
+    const toggle1 = fireToggle(protocol, PLUGIN_ID, true)
     const req1 = await waitForFrame(protocol, 'plugin:permissionRequest', since, { timeoutMs: 30_000 })
     ev.assert('B: 激活链停在权限门（plugin:permissionRequest 广播）', req1 !== null, {
       channel: 'B', expected: 'plugin:permissionRequest 帧', actual: req1 ? `requestId=${req1.payload?.requestId ?? ''}` : '30s 未到（检查 activationEvents/EXTERNAL_PLUGIN_ENABLED）',
@@ -205,7 +208,28 @@ export async function run(ctx) {
       channel: 'A', expected: 'deny.x < approve.x', actual: `deny.x=${denyBox && Math.round(denyBox.x)} approve.x=${approveBox && Math.round(approveBox.x)}`,
     })
 
-    await clickTestid(shell, 'permission-sheet-deny')
+    // Deny（韧性点击；失败取证：sheet 是否还在/错误条/时间线——呈现面曾观察到持续微重渲染）
+    const denyClickAt = Date.now()
+    try {
+      await clickTestid(shell, 'permission-sheet-deny')
+    } catch (e) {
+      const sheetCount = await shell.page.locator('[data-testid="sheet-content"]').count().catch(() => -1)
+      const denyCount = await shell.page.locator('[data-testid="permission-sheet-deny"]').count().catch(() => -1)
+      const barText = await textOf(shell, 'mobile-error-bar-text')
+      const visibleIds = await shell.page.locator('[data-testid]').evaluateAll((nodes) => nodes.slice(0, 40).map((n) => n.getAttribute('data-testid'))).catch(() => [])
+      const expiredHint = await waitForFrame(protocol, 'plugin:permissionRequestExpired', since, { timeoutMs: 1_500 })
+      ev.attach('a7-deny-click-failure', JSON.stringify({
+        error: e instanceof Error ? e.message.split('\n').slice(0, 3).join(' | ') : String(e),
+        toggleToClickMs: denyClickAt - (req1?.receivedAt ?? denyClickAt),
+        sheetContentCount: sheetCount,
+        denyButtonCount: denyCount,
+        errorBar: barText,
+        expiredFrameSeen: expiredHint !== null,
+        visibleIds,
+      }, null, 2))
+      await ev.shot(shell.page, 'a7-deny-click-failure')
+      throw e
+    }
     const sheetGone1 = await pollFor(async () => !(await shell.page.locator('[data-testid="permission-sheet-deny"]').isVisible().catch(() => false)), { timeoutMs: 20_000 })
     ev.assert('A: 拒绝后 Sheet 收层（controller pending 翻 false）', sheetGone1 === true, {
       channel: 'A', expected: 'permission-sheet 收起', actual: sheetGone1 ? '已收' : '20s 仍在',
@@ -228,7 +252,7 @@ export async function run(ctx) {
 
     // ── 段 2：请求 #2 → Esc 关视图（请求保留）→ 聊天页待授权条重开 → 允许 → 激活放行 ──
     since = protocol.events.length
-    await protocol.call('plugin.toggle', { pluginId: PLUGIN_ID, enabled: true })
+    const toggle2 = fireToggle(protocol, PLUGIN_ID, true)
     const req2 = await waitForFrame(protocol, 'plugin:permissionRequest', since, { timeoutMs: 30_000 })
     ev.assert('B: 二次激活重新弹审批（deny 不持久化，权限门再次拦截）', req2 !== null, {
       channel: 'B', expected: 'plugin:permissionRequest 帧', actual: req2 ? `requestId=${req2.payload?.requestId ?? ''}` : '30s 未到',
@@ -274,9 +298,9 @@ export async function run(ctx) {
     // 批准后插件已 ACTIVE（激活幂等早退不会再过权限门）：先 disable（UNLOADED）再
     // revoke（清 grant+save）再 enable，权限门才会重新拦截。
     since = protocol.events.length
-    await protocol.call('plugin.toggle', { pluginId: PLUGIN_ID, enabled: false })
+    await protocol.call('plugin.toggle', { pluginId: PLUGIN_ID, enabled: false }) // disable 无门等待，可阻塞
     await protocol.call('plugin.revokePermissions', { pluginId: PLUGIN_ID })
-    await protocol.call('plugin.toggle', { pluginId: PLUGIN_ID, enabled: true })
+    const toggle3 = fireToggle(protocol, PLUGIN_ID, true)
     const req3 = await waitForFrame(protocol, 'plugin:permissionRequest', since, { timeoutMs: 30_000 })
     ev.assert('B: revoke 后三次激活再次弹审批（权限门重新拦截）', req3 !== null, {
       channel: 'B', expected: 'plugin:permissionRequest 帧', actual: req3 ? `requestId=${req3.payload?.requestId ?? ''}` : '30s 未到',
@@ -334,7 +358,16 @@ async function textOf(shell, testid) {
 }
 
 async function clickTestid(shell, testid, { timeoutMs = 15_000 } = {}) {
-  await shell.page.locator(`[data-testid="${testid}"]`).first().click({ timeout: timeoutMs })
+  // 韧性点击：常规 actionability 点击 → 超时降级 force（跳过稳定性检查、仍走真实输入管
+  // 线打元素中心点）。headless iPhone 仿真下壳存在持续微重渲染（visualViewport 抖动嫌疑），
+  // 按钮bounding box 连续两帧不同会让 actionability 永不满足——真实触点不受影响。
+  try {
+    await shell.page.locator(`[data-testid="${testid}"]`).first().click({ timeout: Math.min(timeoutMs, 6_000) })
+    return 'actionability'
+  } catch {
+    await shell.page.locator(`[data-testid="${testid}"]`).first().click({ timeout: timeoutMs, force: true })
+    return 'force'
+  }
 }
 
 async function pollTextIn(shell, testid, needle, { timeoutMs = 20_000 } = {}) {
@@ -348,6 +381,16 @@ async function pollTextIn(shell, testid, needle, { timeoutMs = 20_000 } = {}) {
     if (Date.now() >= deadline) return false
     await new Promise((r) => setTimeout(r, 300))
   }
+}
+
+/**
+ * 发 plugin.toggle 但不阻塞等回执：togglePlugin 的 reply 要等整条激活链终局（含权限门
+ * 45s 等待）才返回，await 它会把自己的审批窗口耗尽（首跑实测：回执阻塞 45s，点击发起
+ * 时请求恰好过期）。权限门事件以广播帧为准，回执 promise 由调用方择机回收。
+ */
+function fireToggle(protocol, pluginId, enabled) {
+  const promise = protocol.call('plugin.toggle', { pluginId, enabled }, { timeoutMs: 120_000 }).catch(() => null)
+  return promise
 }
 
 /** 协议帧条件等待（按 type；返回帧或 null）。 */

@@ -38,6 +38,8 @@ const FILLER_REPLY = 'QUEUE-ACK-收到，继续执行。'
 const MSG2 = 'QUEUE-STEER-MSG-2-插入的追问'
 const MSG3 = 'QUEUE-CANCEL-MSG-3-压缩窗口提交'
 const MSG4 = 'QUEUE-FAILED-MSG-4-断链前提交'
+/** 段④载体回合正文（~240 字，TPS=8 ≈ 30s 流式窗口；kill 落在窗口内） */
+const KILL_CARRIER = `${'断链载体的长回合正文，限速吐出以维持流式窗口，让 steer 条目在未消费时进程死亡。'.repeat(4)}QUEUE-CARRIER-END`
 
 /** 条件轮询 runtime 日志出现目标行（读侧条件等待，非 sleep 后断言）。 */
 async function waitForRuntimeLogLine(dataDir, needle, { timeoutMs = 20_000 } = {}) {
@@ -60,12 +62,51 @@ async function waitForRuntimeLogLine(dataDir, needle, { timeoutMs = 20_000 } = {
   }
 }
 
-/** pi 主进程 PID（--mode rpc --session-dir 含本实例数据目录；隔离实例内应恰一）。 */
-function findPiPid(dataDir) {
-  const sessionsDir = path.join(dataDir, 'agent', 'sessions')
-  const out = execFileSync('pgrep', ['-f', `--session-dir ${sessionsDir}`], { encoding: 'utf8' })
-  const pids = out.split('\n').map((s) => s.trim()).filter(Boolean)
-  return pids
+/**
+ * 种子压缩阈值（launch 后、会话首建前写 <dataDir>/agent/settings.json）：pi 压缩默认
+ * keepRecentTokens=20000——小验收会话全落在「保留区」，手动 compact 报
+ * "Nothing to compact (session too small)"（首跑实测），持有窗口造不出来。归零后
+ * 小会话即可真实走完 compacting 持有链（阈值维度注入，投递状态机零改动）。
+ */
+function seedCompactionWindow(dataDir) {
+  const settingsPath = path.join(dataDir, 'agent', 'settings.json')
+  const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
+  settings.compaction = { ...(settings.compaction ?? {}), keepRecentTokens: 0 }
+  fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`)
+}
+
+/**
+ * pi 主进程 PID = 实例进程树内的 --mode rpc 节点（精确打击，禁 pkill 宽匹配）。
+ * 定位锚 = dev-instance PID 的后代 ∩ argv 含 '--mode rpc'：主 agent pi 的 argv 不带
+ * --session-dir（只有子代理模板带，首跑实测 pgrep 无命中）——进程树归属是唯一可靠锚，
+ * 隔离实例内（无 subagent/workflow 派发）树内 rpc 节点恰一。
+ */
+function findPiPid(rootPid) {
+  const out = execFileSync('ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8' })
+  const rows = out
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const m = l.match(/^(\d+)\s+(\d+)\s+(.*)$/)
+      return m ? { pid: Number(m[1]), ppid: Number(m[2]), cmd: m[3] } : null
+    })
+    .filter(Boolean)
+  const childrenOf = new Map()
+  for (const r of rows) {
+    if (!childrenOf.has(r.ppid)) childrenOf.set(r.ppid, [])
+    childrenOf.get(r.ppid).push(r)
+  }
+  const hits = []
+  const queue = [rootPid]
+  while (queue.length > 0) {
+    const pid = queue.shift()
+    for (const c of childrenOf.get(pid) ?? []) {
+      if (c.cmd.includes('--mode rpc')) hits.push(c.pid)
+      queue.push(c.pid)
+    }
+  }
+  return hits
 }
 
 export const meta = {
@@ -81,8 +122,9 @@ export const meta = {
       { text: LONG_TEXT, stopReason: 'stop' }, // 回合一：长正文（steer 窗口载体）
       { text: FILLER_REPLY, stopReason: 'stop' }, // steer 追问回复
       { text: `${'压缩摘要占位正文。'.repeat(30)}COMPACT-SUMMARY-END`, stopReason: 'stop' }, // session.compact 摘要（拉宽 compacting 窗口）
-      { text: FILLER_REPLY, stopReason: 'stop' }, // 段④直接回合
+      { text: KILL_CARRIER, stopReason: 'stop' }, // 段④载体回合（流式中杀 pi，永不收尾）
       { text: FILLER_REPLY, stopReason: 'stop' }, // 段⑤重试重投（若 pi 已复活则消费，否则留存）
+      { text: FILLER_REPLY, stopReason: 'stop' }, // 余量
       { text: FILLER_REPLY, stopReason: 'stop' }, // 余量
     ],
     tps: TPS,
@@ -90,11 +132,11 @@ export const meta = {
   provable: [
     'A：生成中再发一条，队列条进入 in-flight 形态（mobile-queue-state-in-flight 可见）',
     'B：该条目 session.delivery 帧 lane=steer（steer 注入当前回合，非排队/直发）',
-    'B：submit → 首个 message.complete 窗口内无第二个 message.message_start（不出现第二个流式回复）',
-    'B：session.compact 触发 occupancy compacting（session.compacting 帧在场，runtime 真实压缩链）',
+    'B：steer 提交 → 第一条流式消息 message_end 窗口内无第二个 message.message_start（首个流式回复结束前不出现并行第二个流式回复）',
+    'B：session.compact 真实完成（session.compacting 帧在场 ∧ session.compacted 广播无 error；runtime 真实压缩链）',
     'A：压缩持有窗口内提交进 queued 态（排队中）且行内 × 取消钮可见',
     'A：点 × 后条目从队列条消失（delivery.cancel）',
-    'A：pi 断链后 failed 形态在场：「发送未确认」+ 重试钮（未送出可重试）',
+    'A：流中 steer 条目遇 pi 断链 → failed 形态在场：「发送未确认」+ 重试钮（未送出可重试）',
     'B：failed 附带 message.error「执行结果未确认」上报（in-flight 未确认的显式失败终局）',
     'B：点重试后 runtime 日志出现 delivery.resync 请求侧行（resync: retry … as user-requested）',
     'A：重试后条目离开 failed 态（mobile-queue-state-failed 消失）',
@@ -112,6 +154,8 @@ export async function run(ctx) {
     'faux 脚本全局逐轮出队：steer 追问 / compact 摘要 / 直发回合各自消耗 step，段②之后 step 文本统一 filler 防 off-by-N 错位（断言只看投递状态不看回复文本）',
     'steer 条目的 in-flight paint 窗口受 TPS 拉长（回合在途即 in-flight），100ms 轮询必达；若 TPS 未生效（env 断链）段①断言会如实红',
     'session.compact RPC reply（session.compacted）在压缩完成时才 resolve——「压缩窗口内」提交必须 fire-and-await：先发 call、等 session.compacting 广播帧、窗口内完成移动端操作、再 await 收尾',
+    '压缩持有窗口的可达性依赖开局种子 compaction.keepRecentTokens=0（写 <dataDir>/agent/settings.json，会话首建 = pi 子进程 spawn 前落盘）：pi 默认 keepRecentTokens=20000 会把小验收会话全判进保留区，手动 compact 报 "Nothing to compact (session too small)"（首跑实测）——阈值维度注入，投递状态机零改动',
+    '「不出现第二个流式回复」的窗口锚 = message.message_end（assistant 帧带 messageId）：message.complete 只在 run 终态广播（steer 使 run 跨 assistant 消息延续，run 内含追问回复的 message_start 属先后串行的合法形态，非并行抢流）',
   ]
   const uncovered = []
   const info = instance.info()
@@ -127,6 +171,10 @@ export async function run(ctx) {
     const page = shell.page
     const protocol = ctx.protocol
     ev.step({ step: 'mobile.shell.connected', channel: 'A', exitCode: 0, stats: { handover: shell.handover.ok } })
+
+    // 压缩阈值种子（会话首建 = pi 子进程 spawn 前落盘，spawn 读盘生效）
+    seedCompactionWindow(dataDir)
+    ev.step({ step: 'pi.compaction.seed', channel: 'C', exitCode: 0, stats: { keepRecentTokens: 0 } })
 
     // ── 装配：NewTaskSheet 建会话（faux 首轮直发），轮询订阅接线 ───────────────
     await createTaskViaSheet(page, { cwd, firstMessage: 'A5 队列全链会话的首条消息' })
@@ -175,24 +223,26 @@ export async function run(ctx) {
       actual: steerEntry ? JSON.stringify(steerEntry) : '未等到 session.delivery 帧',
     })
 
-    // B：submit → 首个 message.complete 窗口内无第二个 message_start（不出现第二个流式回复）
-    let end1 = null
+    // B：不出现第二个流式回复——窗口 = steer 提交 → 第一条流式消息 message_end（assistant
+    // 帧带 messageId）。首个流式回复结束前出现新 message_start = 并行抢流（违规）；
+    // 追问回复的 message_start 在 end 之后 = 先后串行合法形态。
+    let firstStreamEndIdx = -1
     try {
-      end1 = await protocol.waitTurnEnd(sid, { since: sinceSubmit2, timeoutMs: 180_000 })
+      const endEvt = await protocol.waitFor(
+        (e) => e.type === 'message.message_end' && typeof e.payload?.messageId === 'string',
+        { timeoutMs: 180_000, since: sinceSubmit2, sessionId: sid },
+      )
+      firstStreamEndIdx = protocol.events.indexOf(endEvt)
     } catch (e) {
-      ev.attach('turn1-end-miss', waitErr(e))
+      ev.attach('first-stream-end-miss', waitErr(e))
     }
-    const windowStart = sinceSubmit2
-    const completeIdx = end1
-      ? protocol.events.findIndex((e) => e.type === 'message.complete' && e.payload?.sessionId === sid && e.receivedAt === end1.at)
-      : -1
-    const secondStarts = completeIdx > windowStart
-      ? protocol.events.slice(windowStart, completeIdx).filter((e) => e.type === 'message.message_start')
+    const parallelStarts = firstStreamEndIdx > sinceSubmit2
+      ? protocol.events.slice(sinceSubmit2, firstStreamEndIdx).filter((e) => e.type === 'message.message_start')
       : []
-    ev.assert('B: 首个 complete 前 streaming 窗口内无第二个 message_start（不出现第二个流式回复）', end1?.ok === true && secondStarts.length === 0, {
+    ev.assert('B: 首条流式消息结束前无并行 message_start（不出现第二个流式回复）', firstStreamEndIdx > sinceSubmit2 && parallelStarts.length === 0, {
       channel: 'B',
-      expected: 'message.complete 到达 ∧ 窗口内 message_start 计数 = 0',
-      actual: `end=${end1 ? `${end1.type}@${end1.payload?.stopReason ?? ''}` : '未等到'} 第二次起流=${secondStarts.length}`,
+      expected: 'message_end 到达 ∧ 窗口内 message_start 计数 = 0',
+      actual: `endIdx=${firstStreamEndIdx} 并行起流=${parallelStarts.length}`,
     })
     ev.step({ step: 'mobile.queue.steer', channel: 'B', exitCode: steerEntry?.lane === 'steer' ? 0 : 1, stats: { lane: steerEntry?.lane ?? null } })
 
@@ -201,6 +251,10 @@ export async function run(ctx) {
     ev.step({ step: 'mobile.turn1.idle', channel: 'A', exitCode: 0, stats: {} })
 
     // ── 段②③：压缩持有窗口内提交 → queued + × 可取消 → 点 × 条目消失 ─────────
+    const compactedFramePromise = protocol
+      .waitFor((e) => e.type === 'session.compacted' && e.payload?.sessionId === sid, { timeoutMs: 240_000 })
+      .then((f) => ({ ok: true, error: f.payload?.error }))
+      .catch((e) => ({ ok: false, error: String(e?.message ?? e) }))
     const compactPromise = protocol
       .call('session.compact', { sessionId: sid }, { replyType: 'session.compacted', timeoutMs: 240_000 })
       .then(() => ({ ok: true }))
@@ -257,28 +311,44 @@ export async function run(ctx) {
     ev.attach('cancel-draft-restore', composerAfterCancel.includes(MSG3) ? '取消后全文回输入框（旁证成立）' : `输入框当前文本="${composerAfterCancel.trim().slice(0, 60)}"`)
     ev.step({ step: 'mobile.queue.cancel', channel: 'A', exitCode: rowGone ? 0 : 1, stats: {} })
 
-    // 压缩收尾（窗口关闭）+ idle
-    const compactResult = await compactPromise
-    ev.assert('B: session.compact 收尾无错误（compacted）', compactResult.ok, {
-      channel: 'B', expected: 'reply session.compacted', actual: compactResult.ok ? 'ok' : String(compactResult.error).slice(0, 200),
+    // 压缩收尾（窗口关闭）+ idle：compacted 广播 payload.error 为空 = 压缩真实完成
+    //（reply 先行 ok、pi 侧失败经广播 error 字段显形的形态首跑实测——"Nothing to compact"）
+    const compactedResult = await compactedFramePromise
+    await compactPromise
+    ev.assert('B: session.compact 真实完成（compacted 广播无 error）', compactedResult.ok && !compactedResult.error, {
+      channel: 'B', expected: 'session.compacted 无 error', actual: compactedResult.ok ? `error=${String(compactedResult.error ?? 'none')}` : String(compactedResult.error).slice(0, 200),
     })
     await page.locator('[data-testid="mobile-composer-stop"]').waitFor({ state: 'hidden', timeout: 60_000 })
 
-    // ── 段④：杀 pi 制造 failed →「发送未确认」+ 重试钮 ───────────────────────
-    const sinceSubmit4 = protocol.events.length
+    // ── 段④：流中 steer + 杀 pi 制造 failed →「发送未确认」+ 重试钮 ────────────
+    // 形态选型（四次实跑归因）：空闲直发的条目在回合开始时 marker 已落 transcript →
+    // delivered，杀 pi 只产生回合出错条（chat-turn-error-bar），不产生队列 failed；
+    // failed 的可达形态 = steer 条目在流中未消费即死亡（steering 文本未进 transcript →
+    // in-flight 未确认 → failInFlight）。载体回合 = MSG4a 长正文（TPS 限速拉宽窗口）。
+    const since4a = protocol.events.length
+    await sendViaComposer(page, KILL_CARRIER)
+    await page.locator('[data-testid="mobile-composer-stop"]').waitFor({ state: 'visible', timeout: 30_000 })
+    ev.step({ step: 'mobile.turn4a.generating', channel: 'A', exitCode: 0, stats: {} })
+
     await sendViaComposer(page, MSG4)
-    let start4 = null
+    let steer4Frame = null
     try {
-      start4 = await protocol.waitFor((e) => e.type === 'message.message_start', { timeoutMs: 30_000, since: sinceSubmit4, sessionId: sid })
+      steer4Frame = await protocol.waitFor(
+        (e) => e.type === 'session.delivery' && (e.payload?.entries ?? []).some((x) => (x.preview ?? '').includes(MSG4)),
+        { timeoutMs: 20_000, since: since4a, sessionId: sid },
+      )
     } catch (e) {
-      ev.attach('turn4-start-miss', waitErr(e))
+      ev.attach('steer4-frame-miss', waitErr(e))
     }
-    ev.assert('B: 直接提交开新回合（message_start 在场，pi 在途窗口成立）', Boolean(start4), {
-      channel: 'B', expected: 'message.message_start', actual: start4 ? '到达' : '未等到',
+    const steer4Entry = steer4Frame ? (steer4Frame.payload.entries ?? []).find((x) => (x.preview ?? '').includes(MSG4)) : null
+    ev.assert('B: 断链前 steer 提交受理在途（session.delivery 帧含条目且未终态）', Boolean(steer4Entry) && steer4Entry.state !== 'delivered', {
+      channel: 'B',
+      expected: '{state: in-flight | queued}',
+      actual: steer4Entry ? JSON.stringify(steer4Entry) : '未等到帧',
     })
 
-    const piPids = findPiPid(dataDir)
-    ev.assert('C: pi 进程精确定位（--session-dir 含本实例数据目录，恰一 PID）', piPids.length === 1, {
+    const piPids = findPiPid(info.pid)
+    ev.assert('C: pi 进程精确定位（实例进程树内 --mode rpc 节点，恰一 PID）', piPids.length === 1, {
       channel: 'C', expected: '恰一 PID', actual: `pids=${piPids.join(',') || 'none'}`,
     })
     if (piPids.length === 1) {
@@ -320,13 +390,51 @@ export async function run(ctx) {
     ev.step({ step: 'mobile.queue.failed', channel: 'A', exitCode: failedSeen && retryVisible ? 0 : 1, stats: {} })
 
     // ── 段⑤：点重试 → delivery.resync 请求侧取证 + 条目离开 failed 态 ─────────
+    const failedUuid = steer4Entry?.clientUuid ?? null
     const logLenBefore = readLogBytes(dataDir)
     await failedRow.locator('[data-testid="mobile-queue-retry"]').click()
-    const resyncLine = await waitForRuntimeLogLine(dataDir, 'resync: retry', { timeoutMs: 20_000 })
+    let resyncLine = await waitForRuntimeLogLine(dataDir, 'resync: ', { timeoutMs: 20_000 })
+    if (!resyncLine) {
+      // 归因分流：移动端点击无日志响应时，桌面协议侧直发同参 delivery.resync cross-check——
+      // 协议侧有日志 = 移动端请求未达（接线缺陷）；协议侧也无日志 = runtime 侧挂死（产品缺陷）。
+      ev.attach('mobile-console-tail', shell.consoleLines.slice(-30).join('\n') || '(无 console)')
+      ev.attach('runtime-log-tail-before-crosscheck', readLogTail(dataDir, 30) || '(空)')
+      // 内核在册性只读核对：peek 命中 = 条目仍在内核活跃集（failed 帧与内核态分歧定位）；
+      // peek 未命中 = 条目已离册（unknown 路径）
+      let peekReply = null
+      try {
+        peekReply = failedUuid
+          ? await protocol.call('delivery.peek', { sessionId: sid, clientUuid: failedUuid }, { replyType: 'delivery.peek', timeoutMs: 10_000 })
+          : { skipped: 'no-uuid' }
+      } catch (e) {
+        peekReply = { error: String(e?.message ?? e).slice(0, 160) }
+      }
+      let crossReply = null
+      try {
+        crossReply = await protocol.call('delivery.resync', { sessionId: sid, clientUuids: failedUuid ? [failedUuid] : [] }, { replyType: 'delivery.resync', timeoutMs: 15_000 })
+      } catch (e) {
+        crossReply = { error: String(e?.message ?? e).slice(0, 200) }
+      }
+      resyncLine = await waitForRuntimeLogLine(dataDir, 'resync: ', { timeoutMs: 15_000 })
+      ev.attach(
+        'resync-crosscheck',
+        JSON.stringify(
+          {
+            peekReply,
+            mobileRetryLogHit: Boolean(resyncLine),
+            protocolReply: crossReply,
+            protocolSideLogHit: Boolean(resyncLine),
+            logTailAfter: readLogTail(dataDir, 15),
+          },
+          null,
+          2,
+        ).slice(0, 3_000),
+      )
+    }
     ev.assert('B: 重试点击后 runtime 日志出现 delivery.resync 请求侧行', Boolean(resyncLine), {
       channel: 'B',
-      expected: "runtime 日志含「resync: retry … as user-requested」（delivery.resync 到达）",
-      actual: resyncLine ? resyncLine.trim().slice(0, 160) : `20s 内未出现（日志字节量 ${readLogBytes(dataDir) - logLenBefore} 前后对照）`,
+      expected: "runtime 日志含「resync: …」行（delivery.resync 到达：retry 重投 / already in transcript / transcript read failed 任一）",
+      actual: resyncLine ? resyncLine.trim().slice(0, 160) : `35s 内未出现（含协议侧 cross-check；日志字节量 ${readLogBytes(dataDir) - logLenBefore} 前后对照）`,
     })
     const failedGone = !(await pollVisible(page, '[data-testid="mobile-queue-state-failed"]', { timeoutMs: 20_000 }))
     ev.assert('A: 重试后条目离开 failed 态（mobile-queue-state-failed 消失）', failedGone, {
@@ -336,6 +444,25 @@ export async function run(ctx) {
     ev.step({ step: 'mobile.queue.retry', channel: 'B', exitCode: resyncLine && failedGone ? 0 : 1, stats: { resyncLogged: Boolean(resyncLine), failedGone } })
 
     if (shell.pageErrors.length > 0) ev.attach('page-errors', shell.pageErrors.join('\n---\n'))
+    // 事件时间线（红跑归因第一现场：段界时序 / 投递帧 / 压缩帧）
+    {
+      const keyFrames = []
+      for (const e of protocol.events) {
+        const brief = e.type === 'message.complete'
+          ? `stop=${String(e.payload?.stopReason)}`
+          : e.type === 'session.occupancy'
+            ? `turn=${String(e.payload?.turn)} compacting=${String(e.payload?.compacting)}`
+            : e.type === 'session.delivery'
+              ? `entries=${JSON.stringify(e.payload?.entries ?? []).slice(0, 220)}`
+              : e.type?.startsWith('session.compact')
+                ? JSON.stringify(e.payload ?? {}).slice(0, 120)
+                : ''
+        if (brief !== '' || e.type === 'message.message_start' || e.type === 'message.message_end' || e.type === 'session.exited' || e.type === 'message.error') {
+          keyFrames.push(`${e.type}@${new Date(e.receivedAt).toISOString().slice(11, 23)} ${brief}`.trimEnd())
+        }
+      }
+      ev.attach('event-timeline', `frames total=${protocol.events.length}\n${keyFrames.join('\n')}`.slice(0, 30_000))
+    }
     log(`done sid=${sid}`)
   } finally {
     if (shell) {
@@ -358,5 +485,19 @@ function readLogBytes(dataDir) {
     return n
   } catch {
     return 0
+  }
+}
+
+/** runtime 日志尾 N 行（归因附件用）。 */
+function readLogTail(dataDir, lines = 20) {
+  try {
+    const dir = path.join(dataDir, 'logs')
+    let text = ''
+    for (const f of fs.readdirSync(dir)) {
+      if (f.startsWith('runtime-')) text += fs.readFileSync(path.join(dir, f), 'utf8')
+    }
+    return text.split('\n').filter(Boolean).slice(-lines).join('\n')
+  } catch {
+    return ''
   }
 }

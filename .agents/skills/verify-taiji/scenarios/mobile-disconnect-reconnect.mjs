@@ -14,11 +14,10 @@
  *
  * 预算耗尽段：ws-client 重连总时长上限 60s 为模块硬编码常量（packages/core/src/
  * transport/ws-client.ts MAX_RECONNECT_DURATION_MS = 60_000，无 env 覆盖点——已核实），
- * 无法缩短。为制造「重连目标 >60s 不可达」，杀 runtime 后立即在本机抢占旧端口（TCP
- * listen）：supervisor 重启的 runtime 探测到旧端口被占 → 换端口段下一端口 → 移动壳
- * 死等旧地址 → 60s 预算耗尽 → failed 终态。壳侧视角与真实断网等价（重连地址不可达），
- * 差异仅在服务端实际换了端口——如实记录。抢占失败（supervisor 抢回旧端口 → 重连成功）
- * 时按夹具重试处理（重杀重抢，至多 2 次），不涉断言放宽。
+ * 无法缩短。为制造「服务长期不在」，连杀 runtime 耗尽 supervisor 重启配额
+ * （MAX_RESTARTS=5）：前 5 次死亡各触发一次重启，第 6 次死亡后不再重启，壳侧重连预算
+ * 60s 耗尽 → failed 终态。全程产品机制（占端口方案在 macOS 原理性不可行已实测弃用：
+ * SO_REUSEADDR 双方重叠 bind 合法、连接归后绑者）。
  *
  * 断言（§8.2 V10 通过标准，逐条对应）：
  *   ① 断线条呈现（shell-reconnecting-banner；文案 restarting/reconnecting 双态之一）；
@@ -58,7 +57,7 @@ export const meta = {
   title: '移动壳断线重连（V10）：断线条 + 视图/草稿/滚动不卸载 → 恢复收敛 → 预算耗尽进连接页 + 指引',
   covers: ['mobile.connection.banner', 'mobile.connection.reconnect', 'mobile.connection.budget'],
   requires: ['remote-access', 'mobile-dist', 'mock-http'],
-  estimateSec: 420,
+  estimateSec: 540,
   remoteAccess: {},
   llm: {
     responses: {
@@ -77,10 +76,10 @@ export const meta = {
     'A：断线条呈现且文案为 reconnecting/restarting 之一（close code 分流如实记录）',
     'A：断线期间 chat-screen 不卸载 + Composer 草稿原值保留 + 滚动位置保持',
     'A：runtime 回来后断线条消失 + 列表收敛（会话行在）+ 历史收敛（轮次文本在流）',
-    'A：重连目标 >60s 不可达 → failed 进连接页 + 「连接失败」指引文案（60s 预算硬编码，机制等价模拟）',
+    'A：服务不再回来 >60s → failed 进连接页 + 「连接失败」指引文案（以耗尽 supervisor 重启配额模拟，60s 预算硬编码）',
   ],
   notProvable: [
-    '真实网络层断开（Wi-Fi 关断/防火墙）——以「旧端口被占 + 服务端换端口」机制等价模拟，壳侧不可区分',
+    '真实网络层断开（Wi-Fi 关断/防火墙）——以「runtime 不再回来」机制等价模拟，壳侧重连目标不可达的事实序列相同',
     '重连预算的精确秒数（60s 常量不可 env 化；断言只证「断线条长时间呈现后才落 failed」的事实序列）',
   ],
 }
@@ -93,6 +92,25 @@ function readRuntimeInstance(dataDir) {
     throw new Error(`runtime-instance.json 形态异常：${JSON.stringify(rec).slice(0, 200)}`)
   }
   return { pid: rec.pid, port: rec.port }
+}
+
+function readRuntimeStartedAt(dataDir) {
+  return JSON.parse(fs.readFileSync(path.join(dataDir, 'runtime-instance.json'), 'utf8')).startedAt ?? ''
+}
+
+/** 等 supervisor 重启的新 runtime 登记出现（pid 与上次被杀者不同）。超时返回 null。 */
+async function waitForRuntimeRespawn(dataDir, lastKilled, { timeoutMs = 45_000 } = {}) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    try {
+      const rec = readRuntimeInstance(dataDir)
+      if (rec.pid !== lastKilled.pid && rec.port > 0) return rec
+    } catch {
+      /* json 瞬态不可读：继续轮询 */
+    }
+    if (Date.now() >= deadline) return null
+    await new Promise((r) => setTimeout(r, 500))
+  }
 }
 
 function isAlive(pid) {
@@ -118,21 +136,6 @@ function sigtermRuntime(ev, dataDir) {
   if (!isAlive(pid)) throw new Error(`runtime pid=${pid} 已不存活（runtime-instance.json 陈旧？）`)
   process.kill(pid, 'SIGTERM')
   return { pid, port, killedAt: Date.now() }
-}
-
-/** 抢占端口（runtime 退出释放后 listen 成功；EADDRINUSE 轮询重试）。返回 server。 */
-async function occupyPort(port, { timeoutMs = 15_000 } = {}) {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const server = await new Promise((resolve) => {
-      const s = net.createServer()
-      s.once('error', (e) => resolve({ error: e }))
-      s.listen(port, '127.0.0.1', () => resolve(s))
-    })
-    if (server instanceof net.Server) return server
-    if (Date.now() >= deadline) throw new Error(`抢占端口 ${port} 失败：${server.error?.message}`)
-    await new Promise((r) => setTimeout(r, 200))
-  }
 }
 
 /** 条件等文本出现（text 引擎全页匹配）。 */
@@ -211,8 +214,6 @@ export async function run(ctx) {
 
   // ── 壳：打开 → connected → 进会话 → 滚动就位 + 草稿 ──
   let shell = null
-  /** 占端口 server（预算耗尽段；finally 必关——防吊住 runtime 端口段与进程）。 */
-  let occupier = null
   try {
     shell = await openMobileShell({ repo: ctx.repo, runtimePort, token, locale: 'zh-CN' })
     const connected = await waitForShellConnected(shell.page, { timeoutMs: 30_000 })
@@ -300,7 +301,8 @@ export async function run(ctx) {
     ev.assert('A: 重连成功（断线条消失）', bannerGone, {
       channel: 'A', expected: '断线条 60s 内消失', actual: bannerGone ? '已消失' : '仍在（重连未成）',
     })
-    await shell.page.locator('[data-testid="mobile-nav-sessions"]').click()
+    // 路由保持在 chat（断线不换视图）；chat 态 BottomNav 结构性隐藏——popstate 回列表
+    await shell.page.locator('[data-testid="chat-back"]').click()
     const rowBack = await waitForSessionRow(shell.page, sid, { timeoutMs: 30_000 })
     ev.assert('A: 恢复后列表收敛（会话行在）', rowBack, {
       channel: 'A', expected: `session-row-${sid} 可见`, actual: rowBack ? '可见' : '30s 内未回到列表',
@@ -312,58 +314,45 @@ export async function run(ctx) {
     })
     await ev.shot(shell.page, 'a10-recovered')
 
-    // ── 第二段：预算耗尽（杀 + 抢占旧端口 → 60s 预算 → failed 指引）──
-    let budgetOk = false
-    let budgetActual = ''
-    for (let attempt = 1; attempt <= 2 && !budgetOk; attempt++) {
-      const kill2 = sigtermRuntime(ev, ctx.dataDir)
-      occupier = await occupyPort(kill2.port)
-      ev.step({ step: 'port.occupied', channel: 'C', exitCode: 0, stats: { attempt, port: kill2.port } })
-      // 等 failed（60s 预算 + 退避余量）；同时观察是否被「supervisor 抢回端口 + 重连成功」翻盘
-      const deadline = Date.now() + 90_000
-      let failedShown = false
-      while (Date.now() < deadline) {
-        failedShown = await shell.page
-          .locator('[data-testid="shell-failed-screen"]')
-          .first()
-          .isVisible()
-          .catch(() => false)
-        if (failedShown) break
-        // 夹具竞争判定：断线条已消失 = 重连成功 = 本次抢占输了 → 换下一次尝试
-        const bannerStillThere = await shell.page
-          .locator('[data-testid="shell-reconnecting-banner"]')
-          .first()
-          .isVisible()
-          .catch(() => false)
-        if (!bannerStillThere && attempt < 2) break
-        await new Promise((r) => setTimeout(r, 500))
-      }
-      if (failedShown) {
-        budgetOk = true
-        budgetActual = `attempt=${attempt} failed 态出现`
-      } else if (attempt < 2) {
-        gotchas.push(`预算耗尽夹具 attempt=${attempt} 竞争失败（supervisor 重启抢回旧端口、壳重连成功）——重杀重抢一次`)
-        if (occupier) {
-          await new Promise((r) => {
-            occupier.close(() => r())
-          })
-          occupier = null
+    // ── 第二段：预算耗尽（连杀耗尽 supervisor 重启配额 → 服务不再回来 → 60s 预算 →
+    //    failed 指引）。占端口方案在 macOS 原理性不可行（SO_REUSEADDR 双方重叠 bind
+    //    合法、连接归后绑者——两轮实测 supervisor 重启的 runtime 均绑回原端口），改走
+    //    产品机制：runtime-supervisor 崩溃自动重启上限 MAX_RESTARTS=5（restart-policy.ts，
+    //    退避 1/2/4/8/16s）——连杀 6 次（exit#1..#6），前 5 次各触发一次重启，第 6 次死亡
+    //    后不再重启，壳侧重连预算（ws-client MAX_RECONNECT_DURATION_MS=60s 硬编码）耗尽
+    //    落 failed。全程产品机制，无夹具 hack。
+    const killTimeline = []
+    const KILLS_NEEDED = 6
+    let budgetInterrupted = false
+    let lastKilled = { pid: -1, startedAt: '' }
+    for (let i = 0; i < KILLS_NEEDED; i++) {
+      // 等上一个被杀 runtime 的新实例登记出现（最后一杀后无重启，不等待）
+      if (i > 0) {
+        const newSpawn = await waitForRuntimeRespawn(ctx.dataDir, lastKilled, { timeoutMs: 45_000 })
+        if (!newSpawn) {
+          // 无重启 = 配额已尽（提前达成）或 supervisor 未按预期重启——交给 failed 观察判定
+          killTimeline.push(`#${i + 1}: 无新实例登记（45s），停止连杀`)
+          budgetInterrupted = true
+          break
         }
-        // 等壳回到 connected 稳定态再重杀（重连边沿收敛，防叠加断线态）
-        await waitForShellConnected(shell.page, { timeoutMs: 30_000 })
-      } else {
-        budgetActual = '两次尝试均未落 failed（抢占竞争两次失利或预算未耗尽）'
       }
+      const kill = sigtermRuntime(ev, ctx.dataDir)
+      lastKilled = { pid: kill.pid, startedAt: readRuntimeStartedAt(ctx.dataDir) }
+      killTimeline.push(`#${i + 1}: pid=${kill.pid} port=${kill.port} @${new Date(kill.killedAt).toISOString().slice(11, 23)}`)
+      await new Promise((r) => setTimeout(r, 300))
     }
-    ev.assert('A: 预算耗尽进连接页（shell-failed-screen）', budgetOk, {
+    ev.attach('budget-kill-timeline', killTimeline.join('\n'))
+    // failed 等待：最后一次死亡 + ws-client 60s 预算 + 余量
+    const failedShown = await waitForTestidVisible(shell.page, 'shell-failed-screen', { timeoutMs: 90_000 })
+    const connectShown = failedShown ? await waitForTestidVisible(shell.page, 'connect-screen', { timeoutMs: 10_000 }) : false
+    const failedText = failedShown ? await waitForTextVisible(shell.page, '连接失败', { timeoutMs: 5_000 }) : false
+    const hintShown = failedShown ? await waitForTextVisible(shell.page, '请刷新页面重试', { timeoutMs: 5_000 }) : false
+    ev.assert('A: 预算耗尽进连接页（shell-failed-screen）', failedShown, {
       channel: 'A',
-      expected: '断网 >60s → shell-failed-screen 可见（60s 预算硬编码不可 env 化，端口抢占机制等价模拟）',
-      actual: budgetActual,
+      expected: '服务不再回来 >60s → shell-failed-screen 可见（60s 预算硬编码不可 env 化；以耗尽 supervisor 重启配额模拟「服务长期不在」）',
+      actual: failedShown ? `failed 出现（连杀 ${killTimeline.length} 次${budgetInterrupted ? '，配额提前耗尽' : ''}）` : `90s 内未落 failed（连杀 ${killTimeline.length} 次）`,
     })
-    if (budgetOk) {
-      const connectShown = await waitForTestidVisible(shell.page, 'connect-screen', { timeoutMs: 10_000 })
-      const failedText = await waitForTextVisible(shell.page, '连接失败', { timeoutMs: 5_000 })
-      const hintShown = await waitForTextVisible(shell.page, '请刷新页面重试', { timeoutMs: 5_000 })
+    if (failedShown) {
       ev.assert('A: failed 落连接页（connect-screen 路由）', connectShown, {
         channel: 'A', expected: 'connect-screen 可见', actual: connectShown ? '可见' : '仍在聊天布局',
       })
@@ -375,11 +364,6 @@ export async function run(ctx) {
       await ev.shot(shell.page, 'a10-budget-exhausted')
     }
   } finally {
-    if (occupier) {
-      await new Promise((r) => {
-        occupier.close(() => r())
-      })
-    }
     if (shell) {
       if (shell.pageErrors.length > 0) ev.attach('page-errors-tail', shell.pageErrors.join('\n---\n'))
       await closeMobileShell(shell)

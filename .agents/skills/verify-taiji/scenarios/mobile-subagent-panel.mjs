@@ -136,6 +136,21 @@ async function waitForTextVisible(page, text, { timeoutMs = 15_000 } = {}) {
   }
 }
 
+/** 等元素消失（RunBand 计数归 0 时结构性不渲染）。 */
+async function waitForTestidGone(page, testid, { timeoutMs = 15_000 } = {}) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const visible = await page
+      .locator(`[data-testid="${testid}"]`)
+      .first()
+      .isVisible()
+      .catch(() => false)
+    if (!visible) return true
+    if (Date.now() >= deadline) return false
+    await new Promise((r) => setTimeout(r, 250))
+  }
+}
+
 export async function run(ctx) {
   const { instance, ev, log, remoteAccess, protocol: proto } = ctx
   const gotchas = [
@@ -261,10 +276,9 @@ export async function run(ctx) {
     })
     await ev.shot(shell.page, 'a9-sheet-list')
 
-    // ── 断言③：详情（已完成子代理 SLUG_B——执行记录已落盘）→ 返回 → 运行中 SLUG_A ──
-    // 执行记录数据 = 打开详情时 fetchSubagentHistory 一次拉取；运行中子代理的子会话
-    // JSONL 首条可能未落盘（首跑实测 B 通道 20s 全 0），故「元信息 + 执行记录」断言
-    // 选先完成的 SLUG_B（B 通道等终态后打开），「停止」断言选长跑的 SLUG_A。
+    // Sheet 内 records 是打开时的快照（reloadList 只在打开时触发）——先关 Sheet，等
+    // SLUG_B 走到终态后重开（重拉清单），详情才呈现「已结束」快照。
+    await shell.page.locator('[data-testid="subagent-sheet-close"]').click()
     let subBStatus = null
     try {
       const deadline = Date.now() + 45_000
@@ -280,6 +294,14 @@ export async function run(ctx) {
     }
     ev.step({ step: 'subagent.b.waitdone', channel: 'B', exitCode: subBStatus && subBStatus !== 'running' ? 0 : 1, stats: { status: subBStatus } })
 
+    // 重开 Sheet（重拉清单）→ 点 SLUG_B 进详情
+    await shell.page.locator('[data-testid="mobile-run-band"]').click()
+    await waitForTestidVisible(shell.page, 'subagent-sheet-list', { timeoutMs: 15_000 })
+
+    // ── 断言③：详情（已完成子代理 SLUG_B——执行记录已落盘）→ 返回 → 运行中 SLUG_A ──
+    // 执行记录数据 = 打开详情时 fetchSubagentHistory 一次拉取；运行中子代理的子会话
+    // JSONL 首条可能未落盘（首跑实测 B 通道 20s 全 0），故「元信息 + 执行记录」断言
+    // 选先完成的 SLUG_B（B 通道等终态后打开），「停止」断言选长跑的 SLUG_A。
     await shell.page
       .locator('[data-testid^="subagent-sheet-item-"]')
       .filter({ hasText: SLUG_B })
@@ -318,7 +340,9 @@ export async function run(ctx) {
     }
     ev.step({ step: 'subagent.history.rows', channel: 'A', exitCode: historyRows > 0 ? 0 : 1, stats: { rows: historyRows } })
     ev.assert('A: 执行记录含历史行（子代理 task 消息派生）', historyRows > 0, {
-      channel: 'A', expected: 'subagent-sheet-history-* ≥1 行', actual: `${historyRows} 行`,
+      channel: 'A',
+      expected: 'subagent-sheet-history-* ≥1 行（子会话 JSONL 的 user/assistant message 派生）',
+      actual: `${historyRows} 行（已归因：session-records.ts:1198 路径守卫锚旧布局 agent/，新布局 ext-sessions/ 的 sessionFile 被拒 → getSubagentHistory 恒空，功能缺陷如实 fail）`,
     })
     await ev.shot(shell.page, 'a9-sheet-detail-done')
 
@@ -348,16 +372,37 @@ export async function run(ctx) {
     ev.assert('A: 流内通知「已停止子代理 ma-sub-a」呈现', noticeShown, {
       channel: 'A', expected: STOP_NOTICE_TEXT, actual: noticeShown ? '可见' : '15s 内未出现',
     })
+    // 计数减一断言（含减到 0 形态）：停止目标 SLUG_A 是唯一长跑者，SLUG_B 已先自然完成
+    // ——停止前计数可能已是 1，停止后 = 0 = RunBand 消失。两种形态同属「计数减一」。
+    const countBeforeStop = await shell.page
+      .locator('[data-testid="mobile-run-band-count"]')
+      .first()
+      .innerText()
+      .catch(() => '')
     const countAfterStop = await waitForTextEquals(shell.page, 'mobile-run-band-count', RUNBAND_COUNT_1, { timeoutMs: 30_000 })
-    ev.assert('A: 停止后 RunBand 计数减一 = 1', countAfterStop === RUNBAND_COUNT_1, {
-      channel: 'A', expected: RUNBAND_COUNT_1, actual: countAfterStop ?? '(计数未收敛)',
+    const bandGoneAfterStop = countAfterStop === null
+      ? await waitForTestidGone(shell.page, 'mobile-run-band', { timeoutMs: 10_000 })
+      : false
+    const decrementOk = countAfterStop === RUNBAND_COUNT_1 || bandGoneAfterStop
+    ev.assert('A: 停止后 RunBand 计数减一（含减到 0 的消失形态）', decrementOk, {
+      channel: 'A',
+      expected: `停止前「${countBeforeStop.trim() || '(带已不在)'}」→ 停止后 =1 或（减到 0）RunBand 消失`,
+      actual: countAfterStop === RUNBAND_COUNT_1 ? RUNBAND_COUNT_1 : bandGoneAfterStop ? 'RunBand 已消失（计数归 0）' : '(30s 未收敛)',
     })
     await ev.shot(shell.page, 'a9-after-stop')
 
     await shell.page.locator('[data-testid="subagent-sheet-close"]').click()
     const bandStillThere = await waitForTestidVisible(shell.page, 'mobile-run-band', { timeoutMs: 10_000 })
-    ev.assert('A: 关 Sheet 后 RunBand 保持（计数 1）', bandStillThere, {
-      channel: 'A', expected: 'mobile-run-band 仍可见', actual: bandStillThere ? '可见' : '关闭后消失',
+    // 减到 0 形态：关 Sheet 后 RunBand 不在场是正确终态（无运行中子代理不渲染）
+    const countStill = await shell.page
+      .locator('[data-testid="mobile-run-band-count"]')
+      .first()
+      .innerText()
+      .catch(() => '')
+    ev.assert('A: 关 Sheet 后运行带终态与计数一致（>0 保持 / 0 消失）', bandStillThere || bandGoneAfterStop, {
+      channel: 'A',
+      expected: '仍有运行中 → RunBand 保持；计数归 0 → 消失（结构性不渲染）',
+      actual: `band=${bandStillThere ? `可见「${countStill.trim()}」` : '不在场'}`,
     })
   } finally {
     if (shell) {

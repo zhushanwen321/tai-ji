@@ -42,12 +42,14 @@ export async function pollFor(predicate, { timeoutMs = 20_000, intervalMs = 250 
 /**
  * 打开移动壳并等到「已连接 + 落会话列表」（token query 验身 → App 路由 sessions）。
  * 失败时把三态锚点命中情况返回给调用方记断言；不抛错（装配不完整是真实结果）。
+ * locale 缺省钉 zh-CN：壳按 navigator.language 选词表，Playwright 设备描述符缺省 en——
+ * 不钉则通知/状态词等中文文案断言全落英文本（2026-10-26 A4 实测教训）。
  *
  * @returns {{ok:boolean, shell:object, anchor:string}} anchor = 终态锚点 testid
  */
-export async function openConnectedShell(ctx, { timeoutMs = 30_000 } = {}) {
+export async function openConnectedShell(ctx, { timeoutMs = 30_000, locale = 'zh-CN' } = {}) {
   const info = ctx.instance.info()
-  const shell = await openMobileShell({ repo: ctx.repo, runtimePort: info.runtimePort, token: ctx.remoteAccess?.token })
+  const shell = await openMobileShell({ repo: ctx.repo, runtimePort: info.runtimePort, token: ctx.remoteAccess?.token, locale })
   const anchors = ['screen-sessions', 'token-input-view', 'shell-failed-screen']
   const anchor = await pollFor(
     async () => {

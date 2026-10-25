@@ -107,6 +107,18 @@ export async function run(ctx) {
       return { uncovered, gotchas }
     }
 
+    // 前置：等流内容撑满视口（内容 < 视口时 scrollHeight == clientHeight，底距恒 0、
+    // 无法上滑——首跑实测采样过早全部失真）。以 scrollHeight 超过视口 1.2 倍为起点。
+    const filled = await pollFor(async () => {
+      const m = await streamScrollMetrics(shell.page)
+      return m !== null && m.scrollHeight > m.clientHeight * 1.2
+    }, { timeoutMs: 90_000, intervalMs: 500 })
+    ev.step({ step: 'stream.viewport-filled', channel: 'A', exitCode: filled ? 0 : 1, stats: {} })
+    if (!filled) {
+      uncovered.push('滚动断言未驱动：90s 内流内容未撑满视口（流式速率异常）')
+      return { uncovered, gotchas }
+    }
+
     // ── 断言①：贴底自动跟流（3 次采样，期间 scrollHeight 必须增长 = 流式在途）──
     const followSamples = []
     let grew = false
@@ -127,13 +139,14 @@ export async function run(ctx) {
     })
     await ev.shot(shell.page, 'a4-following-bottom')
 
-    // ── 断言②：上滑读历史不抢滚动 ──
+    // ── 断言②：上滑读历史不抢滚动（真实滚轮手势——程序化 scrollTop 赋值与跟流观察器
+    // 有时序纠缠，不构成用户路径证据）──
     const before = await streamScrollMetrics(shell.page)
-    await shell.page
-      .locator('[data-testid="mobile-message-stream"]')
-      .evaluate((el) => {
-        el.scrollTop = Math.max(0, el.scrollTop - 600)
-      })
+    const streamBox = await shell.page.locator('[data-testid="mobile-message-stream"]').boundingBox()
+    if (streamBox) {
+      await shell.page.mouse.move(streamBox.x + streamBox.width / 2, streamBox.y + streamBox.height / 2)
+      await shell.page.mouse.wheel(0, -800)
+    }
     await new Promise((r) => setTimeout(r, 300)) // nearBottom 翻 false + 浮钮渲染
     const scrolled = await streamScrollMetrics(shell.page)
     const backBtnBox = await shell.page
@@ -165,14 +178,19 @@ export async function run(ctx) {
     await ev.shot(shell.page, 'a4-scrolled-up')
 
     // ── 断言③：点击回到最新 → 回底 + 浮钮收起 ──
-    await shell.page.locator('[data-testid="mobile-back-to-latest"]').click()
-    const backAtBottom = await pollFor(async () => {
-      const m = await streamScrollMetrics(shell.page)
-      return m !== null && m.bottomDistance < NEAR_BOTTOM_THRESHOLD_PX
-    }, { timeoutMs: 10_000 })
-    const btnGone = await pollFor(async () => !(await isVisible(shell.page, 'mobile-back-to-latest')), { timeoutMs: 8_000 })
+    const backBtnReady = await pollVisible(shell.page, 'mobile-back-to-latest', { timeoutMs: 8_000 })
+    let backAtBottom = false
+    let btnGone = false
+    if (backBtnReady) {
+      await shell.page.locator('[data-testid="mobile-back-to-latest"]').click()
+      backAtBottom = await pollFor(async () => {
+        const m = await streamScrollMetrics(shell.page)
+        return m !== null && m.bottomDistance < NEAR_BOTTOM_THRESHOLD_PX
+      }, { timeoutMs: 10_000 })
+      btnGone = await pollFor(async () => !(await isVisible(shell.page, 'mobile-back-to-latest')), { timeoutMs: 8_000 })
+    }
     ev.assert('A: 点击「回到最新」回到底部（底距 < 80px）', backAtBottom === true, {
-      channel: 'A', expected: `bottomDistance < ${NEAR_BOTTOM_THRESHOLD_PX}`, actual: backAtBottom ? '已回底' : '10s 未回底',
+      channel: 'A', expected: `bottomDistance < ${NEAR_BOTTOM_THRESHOLD_PX}`, actual: backBtnReady ? (backAtBottom ? '已回底' : '10s 未回底') : '浮钮未浮出，未驱动点击',
     })
     ev.assert('A: 回底后浮钮收起（nearBottom 复位）', btnGone === true, {
       channel: 'A', expected: 'mobile-back-to-latest 移除', actual: btnGone ? '已收起' : '仍在',

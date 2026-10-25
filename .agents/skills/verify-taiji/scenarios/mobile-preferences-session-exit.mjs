@@ -103,7 +103,8 @@ function listRuntimeChildPis(runtimePid) {
   })
 }
 
-/** 杀掉当时唯一的 pi 主 agent（多值 = 定位歧义，fail-fast 不猜）。 */
+/** 杀掉当时唯一的 pi 主 agent（多值 = 定位歧义，fail-fast 不猜）。SIGKILL = 异常死亡
+ *  形态（SIGTERM 会走 pi 优雅退出，runtime 侧翻 done 不翻 dead——首跑实测）。 */
 function killSoleRuntimeChildPi(ev, dataDir) {
   const runtimePid = readRuntimePid(dataDir)
   const pis = listRuntimeChildPis(runtimePid).filter((x) => /--mode(\s+|=)rpc/.test(x.cmd))
@@ -114,7 +115,7 @@ function killSoleRuntimeChildPi(ev, dataDir) {
     stats: { runtimePid, candidates: pis },
   })
   if (pis.length !== 1) throw new Error(`pi 定位歧义：期望唯一 --mode rpc 子进程，实际 ${pis.length} 个`)
-  process.kill(pis[0].pid, 'SIGTERM')
+  process.kill(pis[0].pid, 'SIGKILL')
   return pis[0].pid
 }
 
@@ -129,6 +130,16 @@ async function waitSessionStatus(proto, sessionId, expect, { timeoutMs = 30_000 
     if (last === expect) return last
     if (Date.now() >= deadline) return last
     await new Promise((r) => setTimeout(r, 500))
+  }
+}
+
+/** 条件等文本可见（消息流/指引文案的呈现事实锚）。 */
+async function waitForTextVisible(page, text, { timeoutMs = 15_000 } = {}) {
+  try {
+    await page.locator(`text=${text}`).first().waitFor({ state: 'visible', timeout: timeoutMs })
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -168,16 +179,25 @@ export async function run(ctx) {
     return { uncovered, gotchas }
   }
 
-  // ── 会话准备（串行制造两个 dead + 一个活会话）──
+  // ── 会话准备（串行制造两个 dead + 一个活会话）；dead 制造失败 fail-fast（后续断言
+  //    全部依赖 dead 前提，错误前提下继续 = 误导性结果）──
   const sidB = await createSessionWithOneRound(ctx, proto, LABEL_RESTORE)
   const piB = killSoleRuntimeChildPi(ev, ctx.dataDir)
   const statusB = await waitSessionStatus(proto, sidB, 'dead', { timeoutMs: 30_000 })
   ev.step({ step: 'dead.make.restore-target', channel: 'C', exitCode: statusB === 'dead' ? 0 : 1, stats: { sidB, piB, status: statusB } })
+  if (statusB !== 'dead') {
+    uncovered.push(`dead 会话 B 制造失败：杀 pi(${piB}) 后 status=${statusB} ≠ dead（dead 翻转链与预期不符）——V11 未驱动`)
+    return { uncovered, gotchas }
+  }
 
   const sidC = await createSessionWithOneRound(ctx, proto, LABEL_OPEN)
   const piC = killSoleRuntimeChildPi(ev, ctx.dataDir)
   const statusC = await waitSessionStatus(proto, sidC, 'dead', { timeoutMs: 30_000 })
   ev.step({ step: 'dead.make.open-target', channel: 'C', exitCode: statusC === 'dead' ? 0 : 1, stats: { sidC, piC, status: statusC } })
+  if (statusC !== 'dead') {
+    uncovered.push(`dead 会话 C 制造失败：杀 pi(${piC}) 后 status=${statusC} ≠ dead——V11 未驱动`)
+    return { uncovered, gotchas }
+  }
 
   const sidA = await createSessionWithOneRound(ctx, proto, LABEL_LIVE)
   ev.step({ step: 'dead.make.live-control', channel: 'C', exitCode: 0, stats: { sidA } })

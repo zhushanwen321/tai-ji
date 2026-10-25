@@ -211,10 +211,8 @@ export async function run(ctx) {
       channel: 'A', expected: 'form-sheet-dialog-input 可见', actual: inputShown ? '可见' : '20s 未现',
     })
     if (inputShown) {
-      await shell.page
-        .locator('[data-testid="form-sheet-dialog-input"] input, [data-testid="form-sheet-dialog-input"] textarea, [data-testid="form-sheet-dialog-input"]')
-        .first()
-        .fill(DENY_REASON)
+      // ui Input 是裸 <input>（attrs 透传，testid 即 input 本身），直接 fill
+      await shell.page.locator('[data-testid="form-sheet-dialog-input"]').first().fill(DENY_REASON)
       await clickTestid(shell, 'form-sheet-dialog-ok')
     }
     const end2 = await protocol.waitTurnEnd(sid, { since, timeoutMs: 180_000 })
@@ -231,8 +229,15 @@ export async function run(ctx) {
     await ev.shot(shell.page, 'a6-deny-reason')
 
     // ── 段 3：表单取消路径（回传 result:null 的协议层取证）──
+    // strict 模式下 ask_user 工具调用同样先过审批 select（tool_call hook 全工具生效），
+    // 先答审批表单才会出现（首跑实测：漏答审批 → 表单 60s 不现、回合挂起）
     since = protocol.events.length
     await protocol.send(sid, '最后再确认一次')
+    const approval3 = await pollVisible(shell, 'form-sheet-dialog', { timeoutMs: 60_000 })
+    if (approval3) {
+      await clickTestid(shell, 'form-sheet-dialog-option-Approve (once)')
+      await clickTestid(shell, 'form-sheet-dialog-ok')
+    }
     const form3 = await pollVisible(shell, 'form-sheet-form-section', { timeoutMs: 60_000 })
     ev.assert('A: 第三次 ask_user 表单呈现（取消路径载体）', form3, {
       channel: 'A', expected: 'form-sheet-form-section 可见', actual: form3 ? '可见' : '60s 未现',
