@@ -536,7 +536,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     return flag.value
   }
 
-  /** 活跃（派生）：`isActive(sid) ≡ isGenerating(sid) ∨ pendingSend.has(sid)`。驱动停止按钮 / steer guard / B 策略路由。 */
+  /** 活跃（派生）：`isActive(sid) ≡ isGenerating(sid) ∨ pendingSend.has(sid)`。现仅作乐观窗并集成分（停止按钮判定已迁 composer-shell effectivePhase——occupancy 投影 ∨ isActive 并集）；另驱动 steer guard / B 策略路由。 */
   function isActive(sessionId: string): boolean {
     return isGenerating(sessionId) || pendingSend.value.has(sessionId)
   }
