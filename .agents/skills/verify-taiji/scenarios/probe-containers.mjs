@@ -44,19 +44,15 @@ export async function run(ctx) {
   if (!sid) throw new Error('session.create 未返回 sessionId')
   await protocol.subscribe(sid)
   await ui.click('css=.session-item', { timeoutMs: 30_000 })
+  // 对话态就绪判据 = Composer 挂载（session-item 可点 ≠ 对话态——挂载链慢于侧栏渲染）
+  await ui.expectVisible('composer-bar', { timeoutMs: 45_000 })
   step('ui.activate', { sid })
 
   // 打开右抽屉（ComposerBtwButton = D7 唯一入口，openDrawerTab('btw')）
-  try {
-    await ui.click('composer-btw-button', { timeoutMs: 15_000 })
-  } catch (e) {
-    log('btw click failed: ' + String(e).slice(0, 120))
-  }
+  await ui.expectVisible('composer-btw-button', { timeoutMs: 15_000 })
+  await ui.click('composer-btw-button')
+  await ui.expectVisible('drawer-panel', { timeoutMs: 15_000 })
   step('drawer.opened')
-  {
-    const ids = await ui.visibleTestIds(400)
-    log('DOM drawer/probe testids: ' + JSON.stringify(ids.filter((t) => t.includes('drawer-tab') || t.includes('probe'))))
-  }
 
   // ── S1：抽屉标签条派生「探针面板」 ─────────────────────────────
   await ui.expectVisible('drawer-tab-probe-container-plugin.tab', { timeoutMs: 20_000 })
