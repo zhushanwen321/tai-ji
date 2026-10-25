@@ -45,7 +45,7 @@
 
 ### 4. scheduler 定时任务结果感知通道
 
-状态：现状核实完成（2026-10-23，报告 `.tmp/need-design-batch/scheduler-channel-verification.md`），**不可关闭**。核实结论：统一通道已建成（delivery-port 为 custom 车道唯一执行者，bash / session-manager / workflow / notifier 四条提交链全部接入；pending-notifications 是登记/收取层，与投递端口上下游分工），可感知「受理回执 + 送达凭据（消息进入 LLM 请求上下文、已写盘、轮次真实起步）」，不感知「LLM 成功产出响应」。**scheduler 不在通道内、迁移未落地**：用户所述「已由独立会话实施」经实码核实未找到（main HEAD / 全部分支 / 未提交改动 / 兄弟 worktree 均无 scheduler 迁移痕迹），现仍裸 `pi.sendMessage` steer 直投，失败静默缺口原样存在，compaction isIdle 小修也未实施。迁移实施必办项：幂等键改每轮唯一 + 失败语义二选一（详见来源登记）。待用户指认迁移真实落点或确认迁移仍待实施。
+状态：现状核实完成（2026-10-23，报告 `.tmp/need-design-batch/scheduler-channel-verification.md`），**不可关闭**。核实结论：统一通道已建成（delivery-port 为 custom 投递路径唯一执行者，bash / session-manager / workflow / notifier 四条提交链全部接入；pending-notifications 是登记/收取层，与投递端口上下游分工），可感知「受理回执 + 送达凭据（消息进入 LLM 请求上下文、已写盘、轮次真实起步）」，不感知「LLM 成功产出响应」。**scheduler 不在通道内、迁移未落地**：用户所述「已由独立会话实施」经实码核实未找到（main HEAD / 全部分支 / 未提交改动 / 兄弟 worktree 均无 scheduler 迁移痕迹），现仍裸 `pi.sendMessage` steer 直投，失败静默缺口原样存在，compaction isIdle 小修也未实施。迁移实施必办项：幂等键改每轮唯一 + 失败语义二选一（详见来源登记）。待用户指认迁移真实落点或确认迁移仍待实施。
 
 来源：scheduler-result-awareness-channel.md。
 
@@ -116,7 +116,7 @@
 
 来源：session-delivery-meta-retirement-eval.md。状态：待裁决。
 
-现状事实：pi 车道零供稿已成立；runtime 车道仍活跃（notify-once 受理回执锚经 `msg.meta.notifyId`），透传链不能删。
+现状事实：pi 投递路径零供稿已成立；runtime 投递路径仍活跃（notify-once 受理回执锚经 `msg.meta.notifyId`），透传链不能删。
 
 删除判据（三条全满足方可退役）：① notify-once D2 受理回执锚改道（以 notify-once 域设计裁决为准）；② `DeliveryStoreRecord.meta` 与 disk-store `t:'meta'` 行除 segments 快照补记外消费方清零；③ `delivery-envelope-meta.test.ts` 随删除同批退役。
 
