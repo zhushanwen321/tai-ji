@@ -343,8 +343,9 @@ function createCollectFace(deps: CollectFaceDeps): CollectFace {
    *   收取（不写新终局——已注入条目再写 collected 会让日志宣称「未注入过」）；
    * - in-push-pipeline：键 ∈ 日志条目键集、条目无终局（已过分流点，在 push 管线
    *   排队待注入）→ 不收取不等待（等它会自锁，设计 §3.3 push 管线态决策）；
-   * - unregistered-no-entry：键曾注册已注销、不属任何日志条目键集 → 按 unregister
-   *   entry 的 status 定 outcome 进 collected（无载荷快照形态）；
+   * - unregistered-no-entry：键曾注册已注销、不属任何日志条目键集 → outcome 按
+   *   unregister entry 的结清视图优先 + legacy status 兜底定值进 collected（无载荷
+   *   快照形态；畸形 data 缺省语义见 types.ts CollectedEntry 注释）；
    * - waiting：活跃（register 在册无注销）且无日志条目 → 登记等待集，后续 deliver
    *   命中被挂起；
    * - unknown（MF-1-5 第五态）：键未注册且无条目——判定源 = 活跃集 ∪ 投递日志 ∪
@@ -885,7 +886,8 @@ interface PendingBaseline {
   /** 注销条目 id → status（写侧经 mapReasonToStatus 已映射落盘；畸形不收）。 */
   unregisterStatus: Map<string, MappedPendingStatus>;
   /** 注销条目 id → 结清五值（§3.3.6 权威通道 resolveSettlementReason——快照收取与
-   *  工具侧回填同源读此视图，legacy status 视图仅为对账副档）。 */
+   *  工具侧回填两通道同规则，结清视图优先取值；legacy status 视图承担对账副档与
+   *  本视图缺位（畸形 data：reason 非 string）时的兜底）。 */
   unregisterSettlements: Map<string, ResolvedSettlementReason>;
 }
 

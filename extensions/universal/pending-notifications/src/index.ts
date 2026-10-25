@@ -467,8 +467,9 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 				case "ready":
 				case "unregistered-no-entry":
 					// 快照收取：ready = 日志条目已有终局的读侧快照（不写新终局）；
-					// unregistered-no-entry = 第四态无载荷有限信息形态（outcome 取注销
-					// status、note 说明来源，端口侧组装）。两态的 entry 契约在册。
+					// unregistered-no-entry = 第四态无载荷有限信息形态（outcome 由端口
+					// 按结清视图优先 + legacy status 兜底填充、note 说明来源，端口侧
+					// 组装）。两态的 entry 契约在册。
 					buckets.collected.push({ id: snap.id, ...(snap.entry ?? {}) });
 					break;
 				case "in-push-pipeline":
@@ -530,23 +531,26 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 	}
 
 	/** type/outcome 缺失回填（设计 §3.1③ 字段来源表 + §3.3.6 结清权威）：type 与
-	 *  pending:register 的 type 对齐；outcome 读注销 entry 的 reason 事实经
-	 *  resolveSettlementReason 结清解析（封闭五值 + 词表外 unknown fail-visible，
-	 *  protocol scanPendingFields 单点投影），不经 mapReasonToStatus 旧映射——
-	 *  no_result/lost 等新写入方 reason 在旧 status 副档恒落 unknown，结清视图才载
-	 *  真值。「等待中同步到达」的挂起条目在端口 consume 时点，生产方的注销 entry
-	 *  尚未落盘（managed flushBatch 的 deliver 与 unregisterPending 同步段相邻、
-	 *  deliver 先行；端口 consume 由到达回调在 deliver 栈内同步触发），outcome 恒取
-	 *  空。await 恢复后生产方同步栈已完成（注销 entry 已落盘），按本 session entries
-	 *  现算回填；注销不在册的条目保持 undefined（诚实缺省，不虚构终态）。快照收取
-	 *  条目（ready / unregistered-no-entry）的 type/outcome 已由端口 collectArm 填充，
-	 *  回填只补缺不覆盖。 */
+	 *  pending:register 的 type 对齐；outcome 与端口快照通道（delivery-port
+	 *  collectFieldsFor / collectArm）统一填充规则——注销结清视图优先（reason 事实
+	 *  经 resolveSettlementReason 结清解析，封闭五值 + 词表外 unknown fail-visible，
+	 *  protocol scanPendingFields 单点投影），legacy status 副档兜底。结清视图承载
+	 *  no_result/lost 等新写入方 reason 的真值（旧 status 副档恒落 unknown），兜底
+	 *  仅服务结清视图缺位的畸形 data（status 合法但 reason 非 string——注销 entry
+	 *  不入结清视图、status 副档在册），此时两通道同取 status 值保持一致；两视图
+	 *  皆缺位保持 undefined（诚实缺省，不虚构终态）。「等待中同步到达」的挂起条目
+	 *  在端口 consume 时点，生产方的注销 entry 尚未落盘（managed flushBatch 的
+	 *  deliver 与 unregisterPending 同步段相邻、deliver 先行；端口 consume 由到达
+	 *  回调在 deliver 栈内同步触发），outcome 恒取空。await 恢复后生产方同步栈已完成
+	 *  （注销 entry 已落盘），按本 session entries 现算回填；注销不在册的条目保持
+	 *  undefined。快照收取条目（ready / unregistered-no-entry）的 type/outcome 已由
+	 *  端口 collectArm 填充，回填只补缺不覆盖。 */
 	function backfillCollectFields(ctx: ExtensionContext, collected: CollectedEntry[]): void {
 		if (!collected.some((c) => c.outcome === undefined || c.type === undefined)) return;
 		const fields = scanPendingFields(ctx.sessionManager.getEntries());
 		for (const c of collected) {
 			if (c.type === undefined) c.type = fields.registerTypes.get(c.id);
-			if (c.outcome === undefined) c.outcome = fields.unregisterSettlements.get(c.id);
+			if (c.outcome === undefined) c.outcome = fields.unregisterSettlements.get(c.id) ?? fields.unregisterStatuses.get(c.id);
 		}
 	}
 }

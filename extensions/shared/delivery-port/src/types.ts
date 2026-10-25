@@ -78,12 +78,13 @@ export type DeliveryDeliverResult =
  * 收取条目（collect 面返回给等待器的单条结果；字段来源设计 §3.1③ 字段来源表）：
  * id = 收取展开键（单债权条目 = 生产方申报的操作 id；managed 合批条目逐键展开，
  * 每键一条、载荷共享）；type 与 pending 词表对齐；outcome 是不透明终态标注值
- * （消费方按原文呈现，不做词表分支判断），值域两通道：
- * - 结清五值 + 解析缺省 unknown（SettlementReason ∪ 'unknown'）——消费方回填通道
- *   读注销 entry 的 reason 事实经 resolveSettlementReason 结清解析
- *   （subagent-observability §3.3.6 权威通道）；
- * - legacy status 值（expired / time_limited / aborted 等历史终态）——collectArm
- *   快照通道读注销 entry 落盘的 status 副档（mapReasonToStatus 映射产物）。
+ * （消费方按原文呈现，不做词表分支判断）。快照与回填两通道统一填充规则：
+ * 注销结清视图（SettlementReason ∪ 'unknown'——reason 事实经 resolveSettlementReason
+ * 结清解析，subagent-observability §3.3.6 权威通道）优先取值；结清视图缺位时
+ * legacy status 副档（expired / time_limited / aborted 等历史终态，
+ * mapReasonToStatus 映射产物）兜底。缺位仅发生于畸形 data（status 合法但 reason
+ * 非 string——注销 entry 不入结清视图），此时两通道同取 status 值保持一致；
+ * 两视图皆缺位保持 undefined（诚实缺省，不虚构终态）。
  * content/details = 通知载荷原样；note 标记特殊态说明（如 managed 域「注销
  * 无条目分支完结，无独立载荷快照」）。
  */
@@ -102,8 +103,9 @@ export interface CollectedEntry { // oe-exempt:20261017:framework:collect 批量
  *   discarded）→ 可快照收取；
  * - in-push-pipeline：键 ∈ 某日志条目键集、条目无终局（已过分流点，在 push 管线
  *   排队待注入）→ 不收取不等待；
- * - unregistered-no-entry：键曾注册且已注销、不属任何日志条目键集 → 按 unregister
- *   的 status 定 outcome 进 collected（无载荷快照形态）；
+ * - unregistered-no-entry：键曾注册且已注销、不属任何日志条目键集 → outcome 按
+ *   unregister 的结清视图优先 + legacy status 兜底定值进 collected（无载荷快照
+ *   形态，畸形 data 缺省语义见 CollectedEntry 注释）；
  * - waiting：活跃且无日志条目 → 登记等待，后续 deliver 命中等待集被挂起；
  * - unknown：键未注册且无条目（活跃集 ∪ 投递日志键集 ∪ 曾注册集的补集）→ 不登记
  *   等待集、不虚构终态——工具侧读本态组装 errors（未知判定单点在端口）。
