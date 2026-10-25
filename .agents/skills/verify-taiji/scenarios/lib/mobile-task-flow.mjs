@@ -28,10 +28,13 @@ export async function openConnectedShell({ repo, runtimePort, token, timeoutMs =
 /**
  * NewTaskSheet 建会话（手输兜底形态；chip 模式先点「手动输入」逃生口再手输）。
  * 成功判据 = chat-screen 可达（App.onTaskCreated → navigateRoute('chat')）。
+ *
+ * 坑：ui Sheet 原语根 = DialogPortal fragment，消费方传给 <Sheet> 的 data-testid
+ * （如 new-task-sheet）不落 DOM——开合锚点用 Sheet 自带的 sheet-content + 表单字段。
  */
 export async function createTaskViaSheet(page, { cwd, firstMessage, timeoutMs = 30_000 }) {
   await page.locator('[data-testid="sessions-new-task"]').click()
-  await page.locator('[data-testid="new-task-sheet"]').waitFor({ state: 'visible', timeout: timeoutMs })
+  await page.locator('[data-testid="sheet-content"]').waitFor({ state: 'visible', timeout: timeoutMs })
   const manualSwitch = page.locator('[data-testid="new-task-manual-switch"]')
   if (await manualSwitch.isVisible().catch(() => false)) {
     await manualSwitch.click()

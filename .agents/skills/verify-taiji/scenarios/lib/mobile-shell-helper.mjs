@@ -29,6 +29,9 @@ import path from 'node:path'
 /** remote token 在移动壳 localStorage 的持久 key（契约源 mobile-renderer connection-profile.ts）。 */
 export const MOBILE_TOKEN_STORAGE_KEY = 'taiji.remote-access.token'
 
+/** 移动壳用户偏好持久 key（单 JSON 键；契约源 mobile-renderer shell/app-runtime.ts MOBILE_PREFS_STORAGE_KEY）。 */
+export const MOBILE_PREFS_STORAGE_KEY = 'taiji.mobile.prefs'
+
 /** remote-access.json 文件名与内容契约（SSOT packages/shared/src/remote-access.ts）。 */
 export const REMOTE_ACCESS_FILENAME = 'remote-access.json'
 
@@ -142,11 +145,14 @@ export async function probeShellServing(runtimePort) {
 /**
  * 打开移动壳页面（Playwright chromium headless + 设备描述符仿真）。
  *
- * @param {{repo:string, runtimePort:number, token:string, deviceName?:string, timeoutMs?:number}} opts
+ * @param {{repo:string, runtimePort:number, token:string, deviceName?:string,
+ *          locale?:string, timeoutMs?:number}} opts
+ *   locale：浏览器 nav 语言（vue-i18n 按 locale 选词表）；缺省 = 设备描述符自带（en-US）。
+ *   文案断言的剧本（V9-V11 系）显式传 'zh-CN' 对齐中文用户真机形态。
  * @returns console/pageerror 收集器挂在返回值上（白屏归因的第一现场：模块加载 SyntaxError
  *   会以 pageerror 形态出现，是「断链白屏」与「逻辑 bug 白屏」的分辨证据）。
  */
-export async function openMobileShell({ repo, runtimePort, token, deviceName = 'iPhone 13', timeoutMs = 30_000 }) {
+export async function openMobileShell({ repo, runtimePort, token, deviceName = 'iPhone 13', locale, timeoutMs = 30_000 }) {
   const { loadPlaywright } = await import('../../scripts/lib/instance.mjs')
   const { chromium, devices } = loadPlaywright(repo)
   const device = devices[deviceName]
@@ -154,7 +160,7 @@ export async function openMobileShell({ repo, runtimePort, token, deviceName = '
     throw new Error(`Playwright 设备描述符不存在：${deviceName}（可用：${Object.keys(devices).filter((k) => k.toLowerCase().includes('iphone')).join(', ')}…）`)
   }
   const browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext({ ...device })
+  const context = await browser.newContext(locale ? { ...device, locale } : { ...device })
   const page = await context.newPage()
   const consoleLines = []
   const pageErrors = []
@@ -259,4 +265,46 @@ export async function closeMobileShell(handle) {
   } catch {
     /* 已关 */
   }
+}
+
+// ── V9/V10/V11 系列共享驱动原语（mobile-subagent-panel / mobile-disconnect-reconnect /
+//    mobile-preferences-session-exit 三剧本复用；装配仍归上方 openMobileShell，不重复）────
+
+/**
+ * 条件等 testid 元素可见（playwright 原生 waitFor，超时返回 false 由剧本记断言，不抛）。
+ */
+export async function waitForTestidVisible(page, testid, { timeoutMs = 15_000 } = {}) {
+  try {
+    await page.locator(`[data-testid="${testid}"]`).first().waitFor({ state: 'visible', timeout: timeoutMs })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 等壳 connected：bottom-nav 挂载 = 已验身成功且路由已离开 connect 页的稳定信号
+ * （BottomNav 只在非 connect 路由渲染，App.vue；token 交接在先由 connection-profile 完成）。
+ */
+export async function waitForShellConnected(page, { timeoutMs = 30_000 } = {}) {
+  return waitForTestidVisible(page, 'bottom-nav', { timeoutMs })
+}
+
+/** 移动壳 Composer 输入区 locator（ComposerInput = contenteditable div；fill 不触发 input 逻辑）。 */
+export function shellComposerInput(page) {
+  return page.locator('[data-testid="mobile-composer"] [contenteditable]').first()
+}
+
+/**
+ * 点会话行切入聊天（SessionsScreen 行 testid = `session-row-<sid>` → chat-screen 挂载）。
+ * 点入前先等行在（connected 边沿 loadSessions 异步拉列表，广播可能晚于可点时机）。
+ */
+export async function openSessionInShell(page, sessionId, { timeoutMs = 20_000 } = {}) {
+  await page
+    .locator(`[data-testid="session-row-${sessionId}"]`)
+    .first()
+    .waitFor({ state: 'visible', timeout: timeoutMs })
+  await page.locator(`[data-testid="session-row-${sessionId}"]`).first().click()
+  const chatShown = await waitForTestidVisible(page, 'chat-screen', { timeoutMs })
+  return chatShown
 }
