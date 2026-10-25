@@ -32,7 +32,7 @@ import {
   SessionStateQuery,
   type SessionStateColdReadTrace,
 } from '../../src/services/session/session-state-query.js'
-import { findBtwLineFileByPiSessionId } from '../../src/infra/pi/session-file-locator.js'
+import { findBtwLineFileByLayout } from '../../src/infra/pi/session-file-locator.js'
 import {
   scanJsonlFromTail,
   invalidateScanDirCache,
@@ -152,8 +152,8 @@ function makeProcessTable(): IProcessManager {
 }
 
 /**
- * btw 线文件定位的两级（模拟生产投影注入）：注册表记录的 sessionFilePath 优先，
- * 未命中（重启后 rebuildFromDisk 不注册进 lifecycle）走存储树布局定位兜底。
+ * btw 线定位的两步（模拟生产投影注入）：注册表判别（btwRegistry Map 模拟 lifecycle
+ * 记录）先行；存储树布局兜底沉到主会话两段均未命中之后（dmg-r1-3 判别顺序）。
  */
 const btwRegistry = new Map<string, string>()
 
@@ -164,7 +164,8 @@ function makeQuery(): { query: SessionStateQuery; traces: SessionStateColdReadTr
     getReplicatedStates: () => undefined,
     locateMainSessionFileFromCache: () => undefined,
     locateMainSessionFileFromDisk: () => undefined,
-    locateBtwLineFile: (sessionId) => btwRegistry.get(sessionId) ?? findBtwLineFileByPiSessionId(sessionId),
+    locateBtwLineFile: (sessionId) => btwRegistry.get(sessionId),
+    locateBtwLineFileByLayout: (sessionId) => findBtwLineFileByLayout(sessionId),
     onColdRead: (t) => traces.push(t),
   })
   return { query, traces }
@@ -258,7 +259,10 @@ describe('§7 验收项 1：fork 混合分支文件冷读（§10.1 六步序列�
     expect(state).toEqual({ sessionId: fx.linePiId, modelId: 'prov-a/model-a', thinkingLevel: 'high' })
     // 重启后定位来源 = btw 存储树布局（source 仍为 btw-registry 口径的定位成功）
     expect(afterRestart.traces).toHaveLength(1)
-    expect(afterRestart.traces[0]).toMatchObject({ sessionId: fx.linePiId, found: true, scannedDirCount: 0 })
+    expect(afterRestart.traces[0]).toMatchObject({ sessionId: fx.linePiId, found: true })
+    // 布局兜底的枚举成本进埋点（dmg-r1-3）：本文件段 1/段 2 为 stub miss（无真实全扫），
+    // scannedDirCount = 布局枚举的 mainSid 会话目录数（fixture 1 个主会话目录）
+    expect(afterRestart.traces[0].scannedDirCount).toBe(1)
   })
 
   it('项1-c 主会话再切 D 后线仍显示 A（线文件不变；主会话自身反映新值作对照）', async () => {
@@ -317,6 +321,6 @@ describe('§7 验收项 1：fork 混合分支文件冷读（§10.1 六步序列�
     expect(activePath).not.toContain('mcB')
     expect(activePath).not.toContain('a1')
     // 布局定位（存储树公式）与注册表记录读同一个文件（重启后两级寻址等价）
-    expect(findBtwLineFileByPiSessionId(fx.linePiId)).toBe(fx.lineFile)
+    expect(findBtwLineFileByLayout(fx.linePiId).filePath).toBe(fx.lineFile)
   })
 })

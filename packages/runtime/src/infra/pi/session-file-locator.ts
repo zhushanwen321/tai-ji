@@ -20,6 +20,10 @@
  *    的线：`BtwService.rebuildFromDisk()` 只重建 BtwService.registry，不注册进
  *    lifecycle.sessions）走存储树布局公式定位。
  *
+ * 冷读的判别顺序（dmg-r1-3，由 session-state-query 决定）：注册表判别（廉价内存读）
+ * → 段 1 → 段 2 → 布局兜底（两段均未命中才枚举存储树）——布局枚举是 O(会话数) 成本，
+ * 沉到最后避免每个冷主会话都先付这笔钱。
+ *
  * spawn 风险点 3 的实现约定：三支全部只读文件系统，**不 spawn 任何 pi 进程**——禁
  * `withEphemeralPi`（它会 spawn 短命 pi）。
  */
@@ -82,17 +86,38 @@ export function findScannedSessionFileById(sessionId: string): string | undefine
  * 文件、不另起新文件），最新 mtime = 最后一次写入的那个，防止读到被取代的旧副本。
  * 不枚举时（存储树根不存在/不可读、mainSid 目录无 btw 子目录）返回 undefined，不抛。
  */
-export function findBtwLineFileByPiSessionId(piSessionId: string): string | undefined {
+
+/** btw 布局定位结果（寻址 + 本轮枚举目录数；埋点 `scannedDirCount` 的布局兜底部分）。 */
+export interface BtwLineLayoutLocateResult {
+  /** 布局定位到的线会话文件（未命中 = undefined） */
+  filePath: string | undefined
+  /** 本轮枚举的 mainSid 会话目录数（根不存在 / 不可读 / 无会话目录 = 0） */
+  scannedDirCount: number
+}
+
+/**
+ * btw 布局定位 + 本轮枚举的 mainSid 会话目录数。
+ *
+ * 寻址规则见上方函数头（遍历规约 / 两种命名形态 / mtime 取新）；差别只在伴生返回
+ * 枚举计数——布局定位对存储树根 readdirSync + 逐 mainSid statSync + 逐 btw/ readdirSync，
+ * 成本主体是 O(会话数) 的目录枚举，`session.getState` 冷读埋点的 `scannedDirCount`
+ * 必须能读到这部分（设计 §3.1 四要素重审：>200ms / cwd 目录数 >200 的判据取数来源；
+ * 此前布局枚举不进埋点，兜底成本不可观测）。计数口径对齐 `sessionScanDirCount`：只计
+ * mainSid 会话目录（根 readdir 不计），未命中也照实返回（走了多深的枚举是事实，与
+ * 是否命中无关）。
+ */
+export function findBtwLineFileByLayout(piSessionId: string): BtwLineLayoutLocateResult {
   const root = getSessionStoreDir()
-  if (!existsSync(root)) return undefined
+  if (!existsSync(root)) return { filePath: undefined, scannedDirCount: 0 }
   let sidDirs: string[]
   try {
     sidDirs = readdirSync(root)
   } catch {
-    return undefined
+    return { filePath: undefined, scannedDirCount: 0 }
   }
   // 命中候选跨 mainSid 目录汇总（同 id 多条命中时下方按 mtime 取最新，故不提前返回）
   let best: { path: string; mtimeMs: number } | undefined
+  let scannedDirCount = 0
   for (const mainSid of sidDirs) {
     if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(mainSid)) continue // isPiSessionId 同款正则（避免 import 环）
     let isDir = false
@@ -102,6 +127,7 @@ export function findBtwLineFileByPiSessionId(piSessionId: string): string | unde
       continue
     }
     if (!isDir) continue
+    scannedDirCount += 1
     const btwDir = join(root, mainSid, 'btw')
     let lineFiles: string[]
     try {
@@ -124,5 +150,13 @@ export function findBtwLineFileByPiSessionId(piSessionId: string): string | unde
       if (!best || mtimeMs > best.mtimeMs) best = { path: filePath, mtimeMs }
     }
   }
-  return best?.path
+  return { filePath: best?.path, scannedDirCount }
+}
+
+/**
+ * btw 布局定位（只返路径）——`findBtwLineFileByLayout` 的路径单字段伴生口，
+ * 供不需要枚举计数的既有调用方使用（测试直测 / 布局等价性断言）。
+ */
+export function findBtwLineFileByPiSessionId(piSessionId: string): string | undefined {
+  return findBtwLineFileByLayout(piSessionId).filePath
 }

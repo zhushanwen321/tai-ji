@@ -59,6 +59,7 @@ function bindQuery(reply: unknown): ReturnType<typeof vi.fn> {
     locateMainSessionFileFromCache: () => undefined,
     locateMainSessionFileFromDisk: () => undefined,
     locateBtwLineFile: () => undefined,
+    locateBtwLineFileByLayout: () => ({ filePath: undefined, scannedDirCount: 0 }),
   }
   // 直接替换实例方法（查询服务本体行为由 session-state-query.test.ts 锁定，本文件只测接线）
   const query = new SessionStateQuery(deps)
@@ -119,6 +120,7 @@ describe('SessionMessageHandler session.getState', () => {
       locateMainSessionFileFromCache: () => undefined,
       locateMainSessionFileFromDisk: () => undefined,
       locateBtwLineFile: () => undefined,
+    locateBtwLineFileByLayout: () => ({ filePath: undefined, scannedDirCount: 0 }),
     }
     const query = new SessionStateQuery(deps)
     vi.spyOn(query, 'getState').mockImplementation(getState as never)
@@ -149,6 +151,7 @@ describe('SessionMessageHandler session.getState', () => {
       locateMainSessionFileFromCache: () => undefined,
       locateMainSessionFileFromDisk: () => undefined,
       locateBtwLineFile: () => undefined,
+    locateBtwLineFileByLayout: () => ({ filePath: undefined, scannedDirCount: 0 }),
     }
     const query = new SessionStateQuery(deps)
     vi.spyOn(query, 'getState').mockImplementation(getState as never)

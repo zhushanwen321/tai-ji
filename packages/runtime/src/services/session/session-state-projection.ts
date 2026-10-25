@@ -54,7 +54,7 @@ import {
 import {
   findCachedSessionFileById,
   findScannedSessionFileById,
-  findBtwLineFileByPiSessionId,
+  findBtwLineFileByLayout,
 } from '../../infra/pi/session-file-locator.js'
 // 冷路径埋点落点（设计 §3.1「可观测」栏）：runtime logger，与 patched console 同源同文件。
 import { logger } from '../../infra/logger.js'
@@ -201,17 +201,21 @@ export class SessionStateProjection {
       // 风险点 3：filePath 只准来自扫描两段（主会话）或 btw 线的注册表记录 / 存储树布局
       locateMainSessionFileFromCache: (sessionId) => findCachedSessionFileById(sessionId),
       locateMainSessionFileFromDisk: (sessionId) => findScannedSessionFileById(sessionId),
-      // btw 线分叉（W4a 判别器 = 本注入的成员查询语义）：注册表记录 surface==='btw' 的
-      // sessionFilePath（= BtwLineRecord.sessionFilePath 在 lifecycle 记录上的镜像）优先；
-      // 重启后的线不在 lifecycle.sessions（rebuildFromDisk 只重建 BtwService.registry），
-      // 由存储树布局定位兜底——两者读同一个文件，寻址方式不同（见
-      // findBtwLineFileByPiSessionId）。主会话（surface 'sidebar' / 未注册）本注入返
-      // undefined，冷读走主会话两段（session-state-query 以本注入作 btw 分支判据）。
+      // btw 判别两步（dmg-r1-3，判别成本从低到高）：
+      // ① 注册表判别（本注入，冷读第一步）：lifecycle 记录 surface==='btw' 的
+      //    sessionFilePath（= BtwLineRecord.sessionFilePath 在 lifecycle 记录上的镜像）。
+      //    纯内存读、无磁盘枚举；主会话（surface 'sidebar' / 未注册）返 undefined，
+      //    冷读走主会话两段。
       locateBtwLineFile: (sessionId) => {
         const rec = this.deps.getSession(sessionId)
         if (rec?.surface === 'btw') return rec.sessionFilePath
-        return findBtwLineFileByPiSessionId(sessionId)
+        return undefined
       },
+      // ② 布局兜底（查询链两段均未命中后才调）：重启后的线不在 lifecycle.sessions
+      //    （rebuildFromDisk 只重建 BtwService.registry），由存储树布局公式定位——
+      //    与注册表记录读同一个文件，寻址方式不同（见 findBtwLineFileByLayout）。
+      //    伴生返回本轮枚举的 mainSid 目录数，进冷读埋点 scannedDirCount。
+      locateBtwLineFileByLayout: (sessionId) => findBtwLineFileByLayout(sessionId),
       // 冷路径埋点（设计 §3.1「可观测」栏）：单次耗时 + 扫描目录数 + 定位来源 + 是否命中。
       // 四要素重审触发（单次冷开 > 200ms 或 cwd 目录数 > 200）的数据来源；debug 级——
       // 冷读频度低（打开视图/缓存缺失/重连三时机各一次），不占常规日志量。

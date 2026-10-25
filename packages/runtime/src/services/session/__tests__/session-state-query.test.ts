@@ -32,6 +32,7 @@ import {
 import {
   findCachedSessionFileById,
   findScannedSessionFileById,
+  findBtwLineFileByLayout,
   findBtwLineFileByPiSessionId,
 } from '../../../infra/pi/session-file-locator.js'
 import {
@@ -194,21 +195,29 @@ function makeQuery(opts: {
   now?: () => number
 } = {}) {
   const traces: SessionStateColdReadTrace[] = []
+  // 布局兜底调用留痕（判别顺序断言：注册表命中时不得枚举存储树）
+  const layoutCalls: string[] = []
   const query = new SessionStateQuery({
     getClient: (sid) => opts.pm?.getClient(sid),
     getReplicatedStates: () => opts.live,
     locateMainSessionFileFromCache: (sid) => findCachedSessionFileById(sid),
     locateMainSessionFileFromDisk: (sid) => findScannedSessionFileById(sid),
-    locateBtwLineFile: (sessionId) => btwRegistry.get(sessionId) ?? findBtwLineFileByPiSessionId(sessionId),
+    // 生产投影注入的两步：注册表判别（btwRegistry Map 模拟 lifecycle 记录）→ 布局兜底
+    locateBtwLineFile: (sessionId) => btwRegistry.get(sessionId),
+    locateBtwLineFileByLayout: (sessionId) => {
+      layoutCalls.push(sessionId)
+      return findBtwLineFileByLayout(sessionId)
+    },
     onColdRead: (t) => traces.push(t),
     now: opts.now,
   })
-  return { query, traces }
+  return { query, traces, layoutCalls }
 }
 
 /**
- * btw 线文件定位（模拟生产投影注入的两级：注册表记录的 sessionFilePath 优先，
- * 未命中走存储树布局定位）。测试经本 Map 模拟「线已注册」的一路。
+ * btw 线注册表记录 Map（模拟生产投影注入的注册表判别：lifecycle.get(sessionId) 的
+ * surface==='btw' 记录）。测试经本 Map 模拟「线已注册」的一路；未填 = 重启后的线
+ * （lifecycle.sessions 无记录）→ 走主会话两段后的存储树布局兜底。
  */
 const btwRegistry = new Map<string, string>()
 
@@ -448,9 +457,44 @@ describe('SessionStateQuery.getState', () => {
       getReplicatedStates: () => undefined,
       locateMainSessionFileFromCache: (sid) => findCachedSessionFileById(sid),
       locateMainSessionFileFromDisk: (sid) => findScannedSessionFileById(sid),
-      locateBtwLineFile: (sessionId) => btwRegistry.get(sessionId) ?? findBtwLineFileByPiSessionId(sessionId),
+      locateBtwLineFile: (sessionId) => btwRegistry.get(sessionId),
+      locateBtwLineFileByLayout: (sessionId) => findBtwLineFileByLayout(sessionId),
     })
     await expect(query.getState(fx.linePiId)).resolves.toMatchObject({ modelId: 'prov-a/model-a' })
+  })
+
+  // ── 判别顺序（dmg-r1-3：surface 判别 → 段 1 → 段 2 → btw 布局兜底）──
+
+  it('判别顺序：主会话段 2 命中即止，不枚举 btw 存储树（布局兜底沉到最后）', async () => {
+    const fx = seedForkFixture(dataDir)
+    // 段 1 miss（缓存空）→ 段 2 全扫命中主会话
+    const { query, traces, layoutCalls } = makeQuery({ pm: makeProcessTable() })
+
+    const state = await query.getState(fx.mainSid)
+
+    expect(state.modelId).toBe('prov-d/model-d')
+    // 布局兜底只在两段均未命中后调：主会话段 2 已命中，存储树零枚举
+    expect(layoutCalls).toEqual([])
+    expect(traces[0]).toMatchObject({ source: 'disk-scan', found: true })
+    // 埋点只含段 2 全扫的 cwd 分组目录数（fixture 1 个分组）
+    expect(traces[0].scannedDirCount).toBe(1)
+  })
+
+  it('判别顺序：btw 线重启后（注册表无记录）段 1/段 2 miss 后才走布局兜底，埋点计入布局枚举目录数', async () => {
+    const fx = seedForkFixture(dataDir)
+    // 不填 btwRegistry = 重启后的线：注册表判别 miss → 段 1 miss → 段 2 全扫 miss
+    // （线文件构造性不在 scanPiSessions 范围）→ 布局兜底命中
+    const { query, traces, layoutCalls } = makeQuery({ pm: makeProcessTable() })
+
+    const state = await query.getState(fx.linePiId)
+
+    expect(state).toEqual({ sessionId: fx.linePiId, modelId: 'prov-a/model-a', thinkingLevel: 'high' })
+    // 布局兜底确实被走到（两段 miss 之后），且只走一次
+    expect(layoutCalls).toEqual([fx.linePiId])
+    expect(traces[0]).toMatchObject({ sessionId: fx.linePiId, source: 'btw-registry', found: true })
+    // 埋点 scannedDirCount = 段 2 全扫的 cwd 分组目录数（1）+ 布局兜底枚举的 mainSid
+    // 会话目录数（1）——布局枚举成本必须可观测（设计 §3.1 四要素重审取数来源）
+    expect(traces[0].scannedDirCount).toBe(2)
   })
 
   // ── btw 线定位的两级（注册表记录 / 存储树布局）──
@@ -458,11 +502,13 @@ describe('SessionStateQuery.getState', () => {
   it('btw 线：注册表记录命中（lifecycle.get(sessionId).sessionFilePath）即用，不碰布局定位', async () => {
     const fx = seedForkFixture(dataDir)
     btwRegistry.set(fx.linePiId, fx.lineFile)
-    const { query } = makeQuery({ pm: makeProcessTable() })
+    const { query, layoutCalls } = makeQuery({ pm: makeProcessTable() })
 
     expect((await query.getState(fx.linePiId)).modelId).toBe('prov-a/model-a')
-    // 布局定位读的是同一个文件，故此处不断言「未调用」；断言语义由下一条的对照覆盖
-    expect(findBtwLineFileByPiSessionId(fx.linePiId)).toBe(fx.lineFile)
+    // 注册表判别是冷读第一步（廉价内存读）：命中即止，不得枚举存储树（dmg-r1-3 判别顺序）
+    expect(layoutCalls).toEqual([])
+    // 布局定位读的是同一个文件（两级寻址等价性的直接证据）
+    expect(findBtwLineFileByLayout(fx.linePiId).filePath).toBe(fx.lineFile)
   })
 
   it('btw 线：注册表无记录（重启后 rebuildFromDisk 不注册进 lifecycle）→ 存储树布局定位兜底', async () => {

@@ -19,7 +19,7 @@
  * 本文件补的缺口：
  * 1. 进程表 = 全 vi.fn mock（ensureActive / ensureProcess / getClient 及全部 spawn 形态），
  *    冷读后逐项断言零调用（spawn 风险点 1/2/3 的注入缝即断言点，调用即留痕）；
- * 2. filePath 只准来自注入的三个定位缝（风险点 3）——冷读后断言三缝的调用形态；
+ * 2. filePath 只准来自注入的四个定位缝（风险点 3）——冷读后断言四缝的调用形态；
  * 3. 活会话快照未就绪的两种 stub 形态都锁定：标量值 undefined（应答字段缺省、且不回落
  *    冷读）与 getReplicatedStates 整体返 undefined（按设计 §3.3.3 伪码
  *    `pm.getClient(id) && projection.getReplicatedStates(id)` 回落冷读，仍不触发
@@ -46,7 +46,7 @@ import {
 import {
   findCachedSessionFileById,
   findScannedSessionFileById,
-  findBtwLineFileByPiSessionId,
+  findBtwLineFileByLayout,
 } from '../../src/infra/pi/session-file-locator.js'
 import { invalidateScanDirCache, _resetSessionMetaCacheForTest } from '../../src/infra/pi/session-file-utils.js'
 
@@ -101,17 +101,19 @@ function liveStatesStub(modelId: string | undefined, thinkingLevel: string | und
 function makeLocateSeams() {
   const locateMainSessionFileFromCache = vi.fn((sid: string) => findCachedSessionFileById(sid))
   const locateMainSessionFileFromDisk = vi.fn((sid: string) => findScannedSessionFileById(sid))
-  const locateBtwLineFile = vi.fn((sid: string) => findBtwLineFileByPiSessionId(sid))
-  return { locateMainSessionFileFromCache, locateMainSessionFileFromDisk, locateBtwLineFile }
+  const locateBtwLineFile = vi.fn((sid: string) => undefined) // 注册表判别（本验收无 btw 线 fixture）
+  const locateBtwLineFileByLayout = vi.fn((sid: string) => findBtwLineFileByLayout(sid))
+  return { locateMainSessionFileFromCache, locateMainSessionFileFromDisk, locateBtwLineFile, locateBtwLineFileByLayout }
 }
 
-function makeQuery(deps: Omit<SessionStateQueryDeps, 'locateMainSessionFileFromCache' | 'locateMainSessionFileFromDisk' | 'locateBtwLineFile'> & Partial<Pick<SessionStateQueryDeps, 'locateMainSessionFileFromCache' | 'locateMainSessionFileFromDisk' | 'locateBtwLineFile'>>): { query: SessionStateQuery; seams: ReturnType<typeof makeLocateSeams> } {
+function makeQuery(deps: Omit<SessionStateQueryDeps, 'locateMainSessionFileFromCache' | 'locateMainSessionFileFromDisk' | 'locateBtwLineFile' | 'locateBtwLineFileByLayout'> & Partial<Pick<SessionStateQueryDeps, 'locateMainSessionFileFromCache' | 'locateMainSessionFileFromDisk' | 'locateBtwLineFile' | 'locateBtwLineFileByLayout'>>): { query: SessionStateQuery; seams: ReturnType<typeof makeLocateSeams> } {
   const seams = makeLocateSeams()
   const query = new SessionStateQuery({
     ...deps,
     locateMainSessionFileFromCache: deps.locateMainSessionFileFromCache ?? seams.locateMainSessionFileFromCache,
     locateMainSessionFileFromDisk: deps.locateMainSessionFileFromDisk ?? seams.locateMainSessionFileFromDisk,
     locateBtwLineFile: deps.locateBtwLineFile ?? seams.locateBtwLineFile,
+    locateBtwLineFileByLayout: deps.locateBtwLineFileByLayout ?? seams.locateBtwLineFileByLayout,
   })
   return { query, seams }
 }
@@ -163,7 +165,7 @@ describe('§7 验收项 6：getState 冷线零 spawn + 快照未就绪无 restor
     expect(table.getClient).toHaveBeenCalledWith(fx.sessionId)
   })
 
-  it('冷线查询：filePath 只来自注入的三个定位缝（段1缓存 miss → 段2全扫 hit，btw 成员查询先行）', async () => {
+  it('冷线查询：filePath 只来自注入的四个定位缝（注册表判别 → 段1缓存 miss → 段2全扫 hit，布局兜底不调）', async () => {
     const fx = seedMainSession(dataDir)
     // 不预热 metaCache：段 1（缓存全表遍历）miss → 段 2（force 全扫）hit
     const table = makeProcessTable()
@@ -172,11 +174,14 @@ describe('§7 验收项 6：getState 冷线零 spawn + 快照未就绪无 restor
     const state = await query.getState(fx.sessionId)
 
     expect(state.modelId).toBe('prov-cold/model-cold')
-    // 风险点 3：filePath 来源收敛在注入缝上——btw 成员查询先行（主会话恒 miss），
-    // 随后段 1 缓存 miss、段 2 全扫 hit；无第四个取路径的调用形态
+    // 风险点 3：filePath 来源收敛在注入缝上——注册表判别先行（主会话恒 miss），
+    // 随后段 1 缓存 miss、段 2 全扫 hit；段 2 已命中，btw 布局兜底（存储树枚举）
+    // 不再调用（dmg-r1-3 判别顺序：布局兜底沉到两段均未命中之后）；无第五个取路径的
+    // 调用形态
     expect(seams.locateBtwLineFile).toHaveBeenCalledWith(fx.sessionId)
     expect(seams.locateMainSessionFileFromCache).toHaveBeenCalledWith(fx.sessionId)
     expect(seams.locateMainSessionFileFromDisk).toHaveBeenCalledWith(fx.sessionId)
+    expect(seams.locateBtwLineFileByLayout).not.toHaveBeenCalled()
     // 进程表仍零 spawn（与上一条同口径，本条聚焦定位缝）
     expect(table.ensureActive).not.toHaveBeenCalled()
     expect(table.ensureProcess).not.toHaveBeenCalled()
@@ -198,6 +203,7 @@ describe('§7 验收项 6：getState 冷线零 spawn + 快照未就绪无 restor
     expect(state.thinkingLevel).toBeUndefined()
     // 不回落冷读（否则活会话暂无快照会被误报成文件值）
     expect(seams.locateBtwLineFile).not.toHaveBeenCalled()
+    expect(seams.locateBtwLineFileByLayout).not.toHaveBeenCalled()
     expect(seams.locateMainSessionFileFromCache).not.toHaveBeenCalled()
     expect(seams.locateMainSessionFileFromDisk).not.toHaveBeenCalled()
     // 未就绪不得触发 restore/spawn（风险点 2）
