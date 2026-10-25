@@ -449,10 +449,11 @@ async function createThread(): Promise<void> {
       s.creating = false
       s.forkPills[reply.sessionId] = reply.forkState
       if (!s.threads.some((th) => th.id === reply.sessionId)) {
-        // 新建线即时入列（不等下次拉取）：条目字段与 session.list 合成同口径——
-        // label 暂缺（序号由下次拉取按创建次序定），先以 sessionId 占位渲染；
-        // cwd = 所属主会话 cwd（见 optimisticThreadCwd，§5-W4b 派生规则）。
-        // 下一次拉取（抽屉活动触发）即替换为权威条目。
+        // 乐观占位写入（data-source-registry #44 已登记）：create reply 后即时入列，不等
+        // 下次拉取——该条目是一次性占位、不是第二套权威合成（字段与 session.list 拉取 reply
+        // 合成同口径：label 暂缺（序号由下次拉取按创建次序定），先以 sessionId 占位渲染；
+        // cwd = 所属主会话 cwd，见 optimisticThreadCwd §5-W4b 派生规则）。
+        // 下一次拉取（抽屉活动触发）reply 整表覆写，本条即被权威条目整体替换。
         s.threads = [...s.threads, {
           id: reply.sessionId,
           label: reply.sessionId,
