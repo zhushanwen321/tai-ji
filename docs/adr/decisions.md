@@ -1066,7 +1066,7 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **否决记录**：渐进修补不采用（六问题全部锚定视图层结构，修补 = 在错误信息架构上打补丁）；保留 v1 作 private 回退不采用（死代码 + 两套「当前会话」定义并存，UI 回退用 git revert 更干净）。
 
-**效果**：audit 全部 P0/P1/P2 随重写消除（首屏白屏 / 触控 44px / 对比度达标 / 浮层焦点管理 / 删除二次确认）；v1 两 tab 空壳态、三套手写浮层、ErrorBar/断线条/Band 三层堆叠退役，概念净减；v1 视图 10 文件、SlashBarStub、pinia 空挂载清退完成（对账 M-1~M-18 全绿）。
+**效果**：audit 全部 P0/P1/P2 随重写消除（首屏白屏 / 触控 44px / 对比度达标 / 浮层焦点管理 / 删除二次确认）；v1 两 tab 空壳态、三套手写浮层、ErrorBar/断线条/Band 三层堆叠退役，概念净减；v1 视图 8 文件 + SlashBarStub + BottomTabBar + pinia 空挂载清退完成（views/ 保留 2 个 v2 现役组件，清单见 `MIGRATION-RECONCILIATION.md` 清退清单节；对账 M-1~M-18 全绿）。
 
 ### ADR-0165 ChatView 移动 variant = density 注入，桌面渲染路径字节不变（2026-10-25 设计落地，remote-use-mobile-v2 §6.2）
 

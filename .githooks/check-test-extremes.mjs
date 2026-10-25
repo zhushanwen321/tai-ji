@@ -29,10 +29,11 @@ import { fileURLToPath } from 'node:url'
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
- * 豁免登记表（仓库相对路径 → 理由）。合法例外只有三类先例：
+ * 豁免登记表（仓库相对路径 → 理由）。合法例外只有四类先例：
  * ① 锁 / 进程语义本身是被测物且量小（真 pid 判定）；
  * ② 检查器/门禁脚本的黑盒自测（spawn 检查器本体，单处 <300ms）；
- * ③ 既有专用门（真实凭证 / 真 LLM 手动门），门控方向与集成门控不同。
+ * ③ 既有专用门（真实凭证 / 真 LLM 手动门），门控方向与集成门控不同；
+ * ④ performance.now 非断言性消费（轮询时钟 / 确定性时钟 mock），非类型 g 性能水位断言。
  */
 /**
  * 存量登记（2026-10-22 全仓盘点）：二波整治清单外的既有文件命中信号，待后续波次
@@ -71,7 +72,7 @@ for (const k of Object.keys(STOCK)) STOCK[k] = '存量：二波清单外文件�
 
 const EXEMPT = {
   ...STOCK,
-  // —— 确定性时钟 mock（X4 假阳性：performance.now 被 vi.spyOn 全控，非真实计时断言） ——
+  // —— ④ performance.now 非断言性消费：确定性时钟 mock（X4 假阳性：performance.now 被 vi.spyOn 全控，非真实计时断言） ——
   'packages/ui/src/primitives/__tests__/sheet.test.ts': 'Sheet 拖拽手势测试的时钟全控 mock——happy-dom 的 PointerEvent 构造函数自身消费 performance.now() 做 timeStamp，须 spyOn mock 后事件构造与 handler 共享同一时钟源，速度 = dy/durationMs 断言才确定性成立；是确定性化手段，非性能水位断言',
   // —— 检查器黑盒自测（spawn 检查脚本本体，亚秒级） ——
   'scripts/__tests__/check-test-extremes.test.mjs': '本检查器黑盒自测（spawn 检查器本体，单处 <300ms）',
@@ -96,7 +97,7 @@ const EXEMPT = {
   // —— 锁 / 进程语义本身是被测物 ——
   'apps/electron/main/test/update-self-healer.test.ts': 'argv 级进程识别是被测物：1 条真 bash 阳性 + 其余注入 ps 输出（二波裁决形态）',
   'packages/subagent-core/src/__tests__/transport-local.test.ts': '谓词层留一次确定性 ps -p 探活（不可达 pid、ENOENT 立返、零时间窗；E2E-INTEG-28 登记）',
-  // —— performance.now 作轮询时钟（fake Date 用例下 Date.now 冻结的替代），非性能断言 ——
+  // —— ④ performance.now 非断言性消费：轮询时钟（fake Date 用例下 Date.now 冻结的替代），非性能断言 ——
   'apps/electron/main/logs/__tests__/main-logger.test.ts': 'performance.now 作轮询 deadline 时钟（fake Date 下 Date.now 冻结会死循环），非时延断言',
   'apps/electron/main/logs/__tests__/stderr-sink-rotation.test.ts': 'performance.now 作轮询 deadline 时钟（同上），非时延断言',
   // —— 既有专用门（方向 = 手动/凭证门，非集成门控） ——

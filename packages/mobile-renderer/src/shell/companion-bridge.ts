@@ -242,7 +242,7 @@ void onGlobal((msg) => {
  * 登记表主表 #53（声明处 @data-owner #53）——runtime 双源（bus ui-request 实时帧 +
  * getPendingRequests 快照）的消费副本，写口经 formPartitions 适配器封闭于本模块，
  * 清理点 = registerSessionCleanup（删除）+ resetCompanionChannelsForExitedSession
- * （exited 分通道重置）+ clearAllFormRequests（runtime-unavailable 断连收口）。
+ * （exited 分通道重置）。
  */
 // @data-owner #53 —— 主表 #53 mobile 壳 form/planReview 挂起请求分区（消费副本）
 const formRequestsBySid = reactive(new Map<string, ExtensionUIRequest[]>())
