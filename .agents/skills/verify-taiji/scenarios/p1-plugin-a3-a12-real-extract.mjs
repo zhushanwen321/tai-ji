@@ -301,6 +301,7 @@ export async function run(ctx) {
     '插件安装器不装依赖（plugin-installer-adapter「单包解压」）——插件发布形态必须 bundle 依赖，否则 sandbox loader 对裸导入 fail-closed 拒绝、真实插件激活必炸（ISSUES-2 ④；runtime 侧修复前由剧本产物内嵌依赖承载）',
     '宿主 sandboxDir = dirname(manifest main)——子目录 main（真实发布形态 src/index.ts）激活必炸（d3-r2 实测 Sandbox: import resolves outside plugin directory；ISSUES-2 ⑤；runtime 侧修复前由剧本产物根入口 shim 承载）',
     '提取确认卡渲染 = 宿主 PluginProviderFlow 进入 authorize 段 invoke getAuthorizeView 驱动（渲染驱动修复回归面）；提取派发仍走 plugin.executeCommand（与 action-bar 按钮点击同一命令通道，规避 DOM 点击定位脆弱性）',
+    'WOOL providers.write 后 config.providers 无广播（登记缺陷，runtime 侧）：变化感知 watch 盯 models-store.json（远程目录缓存），models.json 写回不在感知范围；设置分区 v-show 常挂载、切页签不重拉——条目行卡只在重开设置窗（v-if 卸载式重挂载 → listProviders reply）后出现，剧本按该真实恢复路径驱动',
     'pi 扩展侧 typebox 由 pi virtual-modules 注入（root/compile/value 三入口），无需 npm 安装；插件侧沙箱无注入，必须内嵌',
     'models.json 对话条目的 enabledModels 由剧本合并写入（pi 的 model scope；非产品断言对象——产品侧启用链归设置域剧本）',
     'A12 计时含真实上游目录拉取（extract 编排在 success 相位前做 writeCatalog）——上游延迟直接计入耗时，这是设计验收的口径而非剧本瑕疵',
@@ -446,13 +447,17 @@ export async function run(ctx) {
       { timeoutMs: 40_000, intervalMs: 500, label: 'wool-trae 行卡渲染（广播窗口）' },
     ).catch(() => false)
     if (!cardAppeared) {
-      await ui.click('testid=settings-nav-skill')
-      await ui.click('testid=settings-nav-provider')
-      await ui.expectVisible('testid=provider-list-header', { timeoutMs: 15_000 })
+      // 广播缺口兜底（登记缺陷，runtime 侧：WOOL providers.write 不触发 config.providers
+      // 广播——变化感知 watch 盯 models-store.json（远程目录缓存），models.json 写回不在
+      // 感知范围；且设置分区 v-show 常挂载，切页签不重拉。恢复动作 = 关闭设置模态再重开
+      // （SettingsModal v-if="open" 卸载式重挂载 → ProviderPage 重新 onMounted listProviders
+      // reply 拉新列表），与「用户重开设置窗」同一真实路径）。
+      await ui.press('Escape')
+      await openProviderPage(ui)
       await pollValue(
         async () => (await traeCard.count()) > 0,
         Boolean,
-        { timeoutMs: 15_000, intervalMs: 500, label: 'wool-trae 行卡渲染（重进页签后）' },
+        { timeoutMs: 15_000, intervalMs: 500, label: 'wool-trae 行卡渲染（重开设置窗后）' },
       )
     }
     await traeCard.locator('span[role="button"]').click()
