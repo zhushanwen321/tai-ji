@@ -530,12 +530,12 @@ export default {
     quotaFetchFailNoCredential: 'Quota query failed: no usable credential found. Fill in the API Key in the "Credentials" section above, or enter a dedicated API Key here',
     // §5.2 path 4 cookie variant (ghost state: cookieSet=true but the secrets file is missing; only re-pasting the Cookie recovers)
     quotaFetchFailNoCredentialCookie: 'Quota query failed: no usable credential found. Re-paste this platform’s Cookie below and retry',
-    // Workspace URL (resource-scoped fetcher e.g. opencode-go, D1-1)
-    quotaWorkspaceLabel: 'Workspace URL',
-    quotaWorkspacePlaceholder: 'Paste the workspace page URL or a bare wrk_ id',
-    quotaWorkspaceHelp: 'Open the opencode.ai console and enter your workspace, then copy the page URL from the browser address bar (like https://opencode.ai/workspace/wrk_xxx/go)',
-    quotaWorkspaceRequired: 'Enter the Workspace URL first',
-    quotaWorkspaceInvalid: 'Invalid Workspace URL: paste an opencode.ai workspace page URL (like https://opencode.ai/workspace/wrk_xxx/go) or a bare wrk_ id',
+    // User-dimension params (2026-10 generalization, former quotaWorkspace keys): label /
+    // placeholder / help moved into the preset's param spec (per-platform, see
+    // QUOTA_PRESETS.params); only generic validation and missing-hint copy remains here
+    quotaParamRequired: 'Fill in the required parameter first',
+    quotaParamInvalid: 'Invalid parameter: check the input format',
+    quotaMissingParam: 'Parameter not filled in',
     // B-3 stale-cache collapse entry in failure state (design §3.4 display semantics)
     quotaLastSuccessToggle: 'View last successful data',
     quotaLastSuccessAt: 'Data as of {time}',

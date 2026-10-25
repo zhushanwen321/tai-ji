@@ -20,15 +20,21 @@
  */
 
 import type { QuotaAuthKind, QuotaFetchFailureReason, QuotaFetchOutcome, QuotaWindow } from '@taiji/shared'
-import { INFINITE_WIN, isRecord, isoResetRemaining, numericField, statusToReason } from './types.js'
-import { extractQuotaWorkspaceId, normalizeCookieHeader } from '@taiji/shared'
+import { INFINITE_WIN, isRecord, isoResetRemaining, numericField } from './types.js'
+import { isHeaderFromsValid, resolveHeaderFroms, type HeaderFrom } from './header-froms.js'
+import { fetchAuxiliaryRequests, fetchPrimary } from './declarative-fetch.js'
+import { normalizeCookieHeader } from '@taiji/shared'
 
-const REQUEST_TIMEOUT_MS = 8000
+/** 动态请求头来源（2026-10 泛化，替代原 precondition 单通道；实现与 guard 在 header-froms.ts）。 */
+export type DeclarativeHeaderFrom = HeaderFrom
+
 const SEC_PER_DAY = 86400
 const SEC_PER_HOUR = 3600
 const SEC_PER_MIN = 60
 const PERCENT_SCALE = 100
 const MS_PER_SEC = 1000
+/** epoch 单位消歧阈值：秒级戳恒 < 1e11，毫秒级戳恒 > 1e11（见 evalEpochSecOrMsReset）。 */
+const EPOCH_MS_THRESHOLD = 1e11
 /** label 插值定界符 `{{` / `}}` 的长度（slice 剥壳用）。 */
 const LABEL_DELIM_LEN = 2
 
@@ -36,8 +42,12 @@ const LABEL_DELIM_LEN = 2
 
 export type QuotaSlot = 'fiveHour' | 'week' | 'month' // oe-exempt:20261019:framework:taiji 远程配置域内形状——接口先立单实现常态（本仓架构偏好）
 export type QuotaCredentialMode = 'bearer' | 'raw' | 'cookie' // oe-exempt:20261019:framework:taiji 远程配置域内形状——接口先立单实现常态（本仓架构偏好）
-export type ResetSecMode = 'iso' | 'epochMs' | 'relativeLabel' | 'zonelessUtcWallClock' | 'epochMsElseRelativeLabel' | 'relativeMs' // oe-exempt:20261019:framework:taiji 远程配置域内形状——接口先立单实现常态（本仓架构偏好）
-export type PctVia = 'direct' | 'percent01to100' | 'usedOverLimit' | 'remainingToUsed' // oe-exempt:20261019:framework:taiji 远程配置域内形状——接口先立单实现常态（本仓架构偏好）
+export type ResetSecMode = 'iso' | 'epochMs' | 'relativeLabel' | 'zonelessUtcWallClock' | 'epochMsElseRelativeLabel' | 'relativeMs' | 'epochSecOrMs' // oe-exempt:20261019:framework:taiji 远程配置域内形状——接口先立单实现常态（本仓架构偏好）
+export type PctVia = 'direct' | 'percent01to100' | 'usedOverLimit' | 'remainingToUsed' | 'fractionRemainingToUsed' // oe-exempt:20261019:framework:taiji 远程配置域内形状——接口先立单实现常态（本仓架构偏好）
+/** HTTP 方法（2026-10 传输层扩展：请求条目可声明 POST + 静态 body；缺省 GET 保持存量语义）。 */
+export type QuotaRequestMethod = 'GET' | 'POST' // oe-exempt:20261026:framework:taiji 远程配置域内形状——接口先立单实现常态（本仓架构偏好）
+/** bodyCode.success 合法元素（protojson 枚举可为名称串或数值——双形态兼容）。 */
+export type BodyCodeSuccess = string | number | boolean // oe-exempt:20261026:framework:taiji 远程配置域内形状——接口先立单实现常态（本仓架构偏好）
 
 /** 声明式窗口原语（字段语义见 baseline-fetchers.json 内逐家注释）。 */
 export interface DeclarativeWindow { // oe-exempt:20261019:framework:taiji 远程配置域内形状——接口先立单实现常态（本仓架构偏好）
@@ -48,9 +58,9 @@ export interface DeclarativeWindow { // oe-exempt:20261019:framework:taiji 远�
   gate?: { path: string; missing: 'query-fail' | 'infinite-win' }
   /** 字段值门控：取值 !== equals（含字段缺失 = 状态不可知）→ 本窗 INFINITE_WIN（minimax status 门控）。 */
   gateValue?: { path: string; equals: number }
-  pct?: { path: string; via: PctVia }
-  resetSec?: { path: string; mode: ResetSecMode; /** 覆写窗级 fromRequest（mimo resetSec 来自辅助请求）。 */ fromRequest?: string }
-  usedLimit?: { used: string; limit: string; remaining?: string; unit: 'requests' | 'tokens' | 'credits';
+  pct?: { path: string | string[]; via: PctVia }
+  resetSec?: { path: string | string[]; mode: ResetSecMode; /** 覆写窗级 fromRequest（mimo resetSec 来自辅助请求）。 */ fromRequest?: string }
+  usedLimit?: { used: string | string[]; limit: string | string[]; remaining?: string | string[]; unit: 'requests' | 'tokens' | 'credits';
     /** false = 仅用于派生 pct（usedOverLimit），不输出绝对量（opencode：micro-cents 比值中单位约掉，不做金额换算）。 */
     output?: boolean }
 }
@@ -64,9 +74,13 @@ export interface DeclarativeFetcherConfig { // oe-exempt:20261019:framework:taij
    *  表达（zhipu/minimax/mimo 实测 guard 严格；kimi/opencode 实测数值串合法，缺省宽容）。 */
   strictNumbers?: boolean
   extraHeaders?: Record<string, string>
-  /** 请求前置（opencode workspace 提取）：提取失败 → failReason，不发任何请求。 */
-  precondition?: { from: 'workspaceUrl'; extractor: 'quotaWorkspaceId'; header: string; failReason: QuotaFetchFailureReason }
-  requests: Array<{ name: string; url: string; role?: 'primary' | 'auxiliary' }>
+  /**
+   * 动态请求头来源列表（2026-10 泛化，替代原 precondition 单通道）：params 源实现
+   * 用户维度参数注入（opencode workspace id → x-org-id），cookie 源实现凭据派生头
+   * （stepfun Oasis-Webid → oasis-webid）。缺失 failReason 的条目 = best-effort。
+   */
+  headerFroms?: DeclarativeHeaderFrom[]
+  requests: Array<{ name: string; url: string; role?: 'primary' | 'auxiliary'; method?: QuotaRequestMethod; body?: string }>
   /** HTTP 状态特判（opencode 404）；未命中表 → 默认 statusToReason。 */
   statusMap?: Record<string, QuotaFetchFailureReason>
   /** 在体业务码：body[path] === success 放行；map[值] 分派；其余 → else（缺省 no-subscription）。
@@ -74,8 +88,9 @@ export interface DeclarativeFetcherConfig { // oe-exempt:20261019:framework:taij
    *  「code=0 且 data 缺席」归 parse 的等价表达）。
    *  missing：决策字段本身缺失（undefined/null）的归口——'parse' = 形态漂移可见（mimo 现行
    *  guard `typeof o.code !== 'number'` 即拒收，字段消失不能被 else 引导为「查订阅」）；
-   *  缺省 'else' = 业务失败（minimax/zhipu 现行「决策字段缺席 = 无订阅数据」语义）。 */
-  bodyCode?: { path: string; success: number | boolean; map?: Record<string, QuotaFetchFailureReason>; else?: QuotaFetchFailureReason; successRequires?: string; missing?: 'else' | 'parse' }
+   *  缺省 'else' = 业务失败（minimax/zhipu 现行「决策字段缺席 = 无订阅数据」语义）。
+   *  success：标量或数组（2026-10 protojson 枚举双形态——'CODE_OK' 名称串或数值 1 任一命中即放行）。 */
+  bodyCode?: { path: string | string[]; success: BodyCodeSuccess | readonly BodyCodeSuccess[]; map?: Record<string, QuotaFetchFailureReason>; else?: QuotaFetchFailureReason; successRequires?: string | string[]; missing?: 'else' | 'parse' }
   /** 数据源存在性：列出的顶层路径全部缺失/为空数组 → no-subscription（kimi/opencode）。 */
   requires?: string[]
   windows: DeclarativeWindow[]
@@ -85,12 +100,19 @@ export interface DeclarativeFetcherConfig { // oe-exempt:20261019:framework:taij
 
 const CREDENTIAL_MODES: readonly QuotaCredentialMode[] = ['bearer', 'raw', 'cookie']
 const SLOTS: readonly QuotaSlot[] = ['fiveHour', 'week', 'month']
-const RESET_MODES: readonly ResetSecMode[] = ['iso', 'epochMs', 'relativeLabel', 'zonelessUtcWallClock', 'epochMsElseRelativeLabel', 'relativeMs']
-const PCT_VIAS: readonly PctVia[] = ['direct', 'percent01to100', 'usedOverLimit', 'remainingToUsed']
+const RESET_MODES: readonly ResetSecMode[] = ['iso', 'epochMs', 'relativeLabel', 'zonelessUtcWallClock', 'epochMsElseRelativeLabel', 'relativeMs', 'epochSecOrMs']
+const PCT_VIAS: readonly PctVia[] = ['direct', 'percent01to100', 'usedOverLimit', 'remainingToUsed', 'fractionRemainingToUsed']
+const REQUEST_METHODS: readonly QuotaRequestMethod[] = ['GET', 'POST']
 const FAIL_REASONS: readonly string[] = ['unauthorized', 'network', 'no-subscription', 'parse', 'not_configured', 'no-credential', 'credential-unavailable', 'credential-unsupported', 'cookie-invalid-format']
 
 function isFailReason(v: unknown): v is QuotaFetchFailureReason {
   return typeof v === 'string' && (FAIL_REASONS as readonly string[]).includes(v)
+}
+
+/** 路径字段形态：单路径串或双形态数组（protojson camelCase / snake_case 皆合法，首命中生效）。 */
+function isPathValid(v: unknown): boolean {
+  if (typeof v === 'string') return v !== ''
+  return Array.isArray(v) && v.length > 0 && v.every((p) => typeof p === 'string' && p !== '')
 }
 
 // 窗口 guard 按子对象分组（每组只对一组决策依赖字段负责；分组本身 = DeclarativeWindow
@@ -110,18 +132,18 @@ function isPctValid(p: unknown): boolean {
   // usedOverLimit 的 pct 由 usedLimit 派生，无独立字段路径
   const pathRequired = p['via'] !== 'usedOverLimit'
   if (typeof p['via'] !== 'string' || !(PCT_VIAS as readonly string[]).includes(p['via'])) return false
-  return !pathRequired || (typeof p['path'] === 'string' && p['path'] !== '')
+  return !pathRequired || isPathValid(p['path'])
 }
 
 function isResetSecValid(r: unknown): boolean {
-  if (!isRecord(r) || typeof r['path'] !== 'string' || r['path'] === '') return false
+  if (!isRecord(r) || !isPathValid(r['path'])) return false
   if (typeof r['mode'] !== 'string' || !(RESET_MODES as readonly string[]).includes(r['mode'])) return false
   return r['fromRequest'] === undefined || typeof r['fromRequest'] === 'string'
 }
 
 function isUsedLimitValid(u: unknown): boolean {
-  if (!isRecord(u) || typeof u['used'] !== 'string' || typeof u['limit'] !== 'string') return false
-  if (u['remaining'] !== undefined && typeof u['remaining'] !== 'string') return false
+  if (!isRecord(u) || !isPathValid(u['used']) || !isPathValid(u['limit'])) return false
+  if (u['remaining'] !== undefined && !isPathValid(u['remaining'])) return false
   return u['unit'] === undefined || typeof u['unit'] === 'string'
 }
 
@@ -156,16 +178,11 @@ function isAuthArrayValid(v: unknown[]): boolean {
   return v.every(a => typeof a === 'string')
 }
 
-function isPreconditionValid(p: unknown): boolean {
-  if (!isRecord(p)) return false
-  if (p['from'] !== 'workspaceUrl' || p['extractor'] !== 'quotaWorkspaceId') return false
-  if (typeof p['header'] !== 'string' || p['header'] === '') return false
-  return isFailReason(p['failReason'])
-}
-
 function isRequestEntryValid(r: unknown): boolean {
   if (!isRecord(r) || typeof r['name'] !== 'string' || r['name'] === '' || typeof r['url'] !== 'string' || r['url'] === '') return false
-  return r['role'] === undefined || r['role'] === 'primary' || r['role'] === 'auxiliary'
+  if (r['role'] !== undefined && r['role'] !== 'primary' && r['role'] !== 'auxiliary') return false
+  if (r['method'] !== undefined && !(REQUEST_METHODS as readonly string[]).includes(r['method'] as string)) return false
+  return r['body'] === undefined || typeof r['body'] === 'string'
 }
 
 function isStatusMapValid(m: unknown): boolean {
@@ -173,12 +190,17 @@ function isStatusMapValid(m: unknown): boolean {
 }
 
 function isBodyCodeValid(b: unknown): boolean {
-  if (!isRecord(b) || typeof b['path'] !== 'string' || b['path'] === '') return false
-  if (typeof b['success'] !== 'number' && typeof b['success'] !== 'boolean') return false
+  if (!isRecord(b) || !isPathValid(b['path'])) return false
+  // success：标量或数组；元素限 string/number/boolean（protojson 枚举双形态）
+  const success = b['success']
+  const successValid = Array.isArray(success)
+    ? success.length > 0 && success.every((s) => typeof s === 'string' || typeof s === 'number' || typeof s === 'boolean')
+    : typeof success === 'number' || typeof success === 'boolean' || typeof success === 'string'
+  if (!successValid) return false
   if (b['map'] !== undefined && !isRecord(b['map'])) return false
   if (b['else'] !== undefined && !isFailReason(b['else'])) return false
   if (b['missing'] !== undefined && b['missing'] !== 'else' && b['missing'] !== 'parse') return false
-  return b['successRequires'] === undefined || (typeof b['successRequires'] === 'string' && b['successRequires'] !== '')
+  return b['successRequires'] === undefined || isPathValid(b['successRequires'])
 }
 
 function isRequiredScalarFieldsValid(v: Record<string, unknown>): boolean {
@@ -191,7 +213,7 @@ function isRequiredScalarFieldsValid(v: Record<string, unknown>): boolean {
 function isOptionalFieldsValid(v: Record<string, unknown>): boolean {
   if (v['strictNumbers'] !== undefined && typeof v['strictNumbers'] !== 'boolean') return false
   if (v['extraHeaders'] !== undefined && !isRecord(v['extraHeaders'])) return false
-  if (v['precondition'] !== undefined && !isPreconditionValid(v['precondition'])) return false
+  if (v['headerFroms'] !== undefined && !isHeaderFromsValid(v['headerFroms'])) return false
   if (v['statusMap'] !== undefined && !isStatusMapValid(v['statusMap'])) return false
   if (v['bodyCode'] !== undefined && !isBodyCodeValid(v['bodyCode'])) return false
   if (v['requires'] !== undefined && !Array.isArray(v['requires'])) return false
@@ -279,7 +301,22 @@ function pickSegment(cur: unknown, seg: string, path: string): unknown {
   return undefined
 }
 
-function pickPath(data: unknown, path: string): unknown {
+/**
+ * 路径求值：单路径串或双形态数组（protojson camelCase / snake_case 皆合法——首命中生效）。
+ * 语义：按序尝试，首个取值 !== undefined 的路径命中（含 null：JSON null 是「字段存在」，
+ * 由消费侧 numericField 归为缺失）；全部 undefined = 缺失；任一路径形态漂移（期望容器处
+ * 拿到非容器）照常上抛 WireDriftError——双形态不放过漂移。
+ */
+function pickPath(data: unknown, path: string | string[]): unknown {
+  if (typeof path === 'string') return pickSinglePath(data, path)
+  for (const p of path) {
+    const v = pickSinglePath(data, p)
+    if (v !== undefined) return v
+  }
+  return undefined
+}
+
+function pickSinglePath(data: unknown, path: string): unknown {
   let cur: unknown = data
   for (const seg of path.split('.')) {
     cur = pickSegment(cur, seg, path)
@@ -367,6 +404,16 @@ function evalEpochMsElseRelativeLabelReset(raw: unknown): number | null {
   return parseRelativeLabel(s)
 }
 
+// epochSecOrMs：protojson int64 单位二义（秒级戳 ~1.8e9 / 毫秒级戳 ~1.8e12）按量级消歧——
+// 阈值 1e11：秒级戳（公元 5138 前）恒小于它，毫秒级戳（1973 后）恒大于它。
+function evalEpochSecOrMsReset(raw: unknown): number | null {
+  const n = strictNumeric(raw)
+  if (n === undefined || n <= 0) return null
+  const ms = n > EPOCH_MS_THRESHOLD ? n : n * MS_PER_SEC
+  const rem = Math.floor(ms / MS_PER_SEC) - Math.floor(Date.now() / MS_PER_SEC)
+  return rem > 0 ? rem : null
+}
+
 const RESET_EVALUATORS: Readonly<Record<ResetSecMode, (raw: unknown) => number | null>> = {
   iso: evalIsoReset,
   epochMs: evalEpochMsReset,
@@ -374,6 +421,7 @@ const RESET_EVALUATORS: Readonly<Record<ResetSecMode, (raw: unknown) => number |
   zonelessUtcWallClock: evalZonelessUtcReset,
   epochMsElseRelativeLabel: evalEpochMsElseRelativeLabelReset,
   relativeMs: evalRelativeMsReset,
+  epochSecOrMs: evalEpochSecOrMsReset,
 }
 
 function evalResetSec(raw: unknown, mode: ResetSecMode): number | null {
@@ -460,13 +508,17 @@ function evalWindowPct(
       if (win.pct.via === 'direct') pct = raw
       else if (win.pct.via === 'percent01to100') pct = raw * PERCENT_SCALE
       else if (win.pct.via === 'remainingToUsed') pct = Math.max(0, Math.min(PERCENT_SCALE, PERCENT_SCALE - raw))
+      // fractionRemainingToUsed：输入是 0..1 剩余比例（stepfun leftRate），已用% = (1 - rate) * 100
+      else if (win.pct.via === 'fractionRemainingToUsed') {
+        pct = Math.round((1 - Math.max(0, Math.min(1, raw))) * PERCENT_SCALE * PERCENT_SCALE) / PERCENT_SCALE
+      }
       // usedOverLimit：pct 由 usedLimit 派生（下方）
     }
   }
-  // pct direct 缺失 = 主数据不可知 → 整窗 INFINITE_WIN（resetSec 同折 null，zhipu 现行
-  // 语义「TOKENS_LIMIT percentage 缺失 → INFINITE_WIN」；percent01to100/remainingToUsed
-  // 的主数据是 percent 本身，缺失仅 pct=null、resetSec 独立输出——mimo/minimax 现行）
-  if (win.pct?.via === 'direct' && pct === null) return { pct, infiniteWin: true }
+  // pct direct / fractionRemainingToUsed 缺失 = 主数据不可知 → 整窗 INFINITE_WIN（resetSec
+  // 同折 null，zhipu 现行语义「TOKENS_LIMIT percentage 缺失 → INFINITE_WIN」；percent01to100/
+  // remainingToUsed 的主数据是 percent 本身，缺失仅 pct=null、resetSec 独立输出——mimo/minimax 现行）
+  if ((win.pct?.via === 'direct' || win.pct?.via === 'fractionRemainingToUsed') && pct === null) return { pct, infiniteWin: true }
   if (win.pct?.via === 'usedOverLimit') {
     // pct 由绝对量派生时，绝对量缺失 = 主数据不可知 → 整窗 INFINITE_WIN（resetSec 同折 null，
     // 对齐 opencode/kimi 现行语义——与 mimo「pct 缺失仅 pct=null、resetSec 独立输出」相区分）
@@ -529,7 +581,7 @@ function prevalidateWindowPaths(config: DeclarativeFetcherConfig, primary: unkno
   const primaryDef = config.requests.find(r => r.role !== 'auxiliary') ?? config.requests[0]
   for (const win of config.windows) {
     const source = win.fromRequest ? reqsByName(primary, primaryDef.name, win.fromRequest) : primary
-    const touch = (p: string | undefined): void => {
+    const touch = (p: string | string[] | undefined): void => {
       if (p) pickPath(source, p)
     }
     if (win.gate) touch(win.gate.path)
@@ -552,80 +604,43 @@ function reqsByName(primary: unknown, primaryName: string, name: string | undefi
 
 /** 构造 credential header（引擎统一 redirect:'manual' + statusToReason 3xx 判据）。
  *  cookie 模式的 credential 必须已由调用方归一（runDeclarativeFetcher 的空判据判的是归一
- *  后的值——见 normalizeCookieHeader 契约「归一后为空 → 调用方按 cookie-invalid-format 处理」）。 */
+ *  后的值——见 normalizeCookieHeader 契约「归一后为空 → 调用方按 cookie-invalid-format 处理」）。
+ *  body 声明存在时自动带 content-type: application/json（body 原语即 JSON——漏头 = 服务端
+ * *  415；extraHeaders 可覆写，默认值在 spread 前）。 */
 function buildHeaders(config: DeclarativeFetcherConfig, credential: string, extra: Record<string, string>): Record<string, string> {
-  const headers: Record<string, string> = { accept: 'application/json, text/plain, */*', ...extra }
+  const headers: Record<string, string> = {
+    accept: 'application/json, text/plain, */*',
+    ...(config.requests.some((r) => r.body !== undefined) ? { 'content-type': 'application/json' } : {}),
+    ...extra,
+  }
   if (config.credential === 'bearer') headers['authorization'] = `Bearer ${credential}`
   else if (config.credential === 'raw') headers['authorization'] = credential
   else headers['cookie'] = credential
   return headers
 }
 
-/** 引擎自管的主请求（fetchQuotaJson 骨架只有 reason 通道，statusMap 需要原始 HTTP 状态）。 */
-async function fetchPrimary(
-  config: DeclarativeFetcherConfig,
-  url: string,
-  headers: Record<string, string>,
-  doFetch: (url: string, init: RequestInit) => Promise<Response>,
-): Promise<{ ok: true; data: unknown } | { ok: false; reason: QuotaFetchFailureReason }> {
-  let resp: Response
-  try {
-    resp = await doFetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), redirect: 'manual' })
-  } catch {
-    return { ok: false, reason: 'network' }
-  }
-  if (!resp.ok) {
-    void resp.body?.cancel()
-    const mapped = config.statusMap?.[String(resp.status)]
-    return { ok: false, reason: mapped ?? statusToReason(resp.status) }
-  }
-  try {
-    const data: unknown = await resp.json()
-    if (!isRecord(data)) return { ok: false, reason: 'parse' }
-    return { ok: true, data }
-  } catch {
-    return { ok: false, reason: 'parse' }
-  }
-}
-
-/** 请求前置（opencode workspace 提取）：提取失败返回 undefined（调用方落 failReason）。 */
-function resolvePreconditionHeader(config: DeclarativeFetcherConfig, fetcherConfig?: { workspaceUrl?: string }): string | undefined {
-  if (!config.precondition) return undefined
-  const from = fetcherConfig?.[config.precondition.from]
-  const value = from && config.precondition.extractor === 'quotaWorkspaceId' ? extractQuotaWorkspaceId(from) : undefined
-  return value ?? undefined
-}
-
-/** 辅助请求并行 + 独立 fail-safe（mimo detail：失败仅 resetSec 降级，不影响主数据）。
- * allSettled 表达「独立数据源允许部分降级」：单请求失败不拖垮其余辅助请求。 */
-async function fetchAuxiliaryRequests(
-  config: DeclarativeFetcherConfig,
-  primaryDef: DeclarativeFetcherConfig['requests'][number],
-  headers: Record<string, string>,
-  fetchImpl: (url: string, init: RequestInit) => Promise<Response>,
-  reqs: ResolvedRequests,
-): Promise<void> {
-  await Promise.allSettled(config.requests.filter(r => r !== primaryDef).map(async (def) => {
-    const r = await fetchPrimary(config, def.url, headers, fetchImpl)
-    if (r.ok) reqs.byName[def.name] = r.data
-  }))
-}
-
-/** 在体业务码判定（mimo code / minimax base_resp.status_code / zhipu success boolean）；返回非 null = 提前返回。 */
+/** 在体业务码判定（mimo code / minimax base_resp.status_code / zhipu success boolean /
+ *  stepfun protojson 枚举名 'CODE_OK'）；返回非 null = 提前返回。 */
 function evaluateBodyCode(config: DeclarativeFetcherConfig, primaryData: unknown): { ok: false; reason: QuotaFetchFailureReason } | null {
   const bodyCode = config.bodyCode
   if (!bodyCode) return null
   const code = pickPath(primaryData, bodyCode.path)
-  // 决策字段必须原生 number/boolean。缺失（undefined/null）按 missing 归口：'parse' =
-  // 漂移可见（mimo 现行 guard `typeof o.code !== 'number'` 拒收，字段消失引导「查订阅」
-  // 会误导排障）；缺省 'else' = 业务失败（minimax/zhipu 现行「决策字段缺席 = 无订阅」）。
-  // 存在但类型非法恒 parse（防 "401" 绕过类型检查命中 map）
+  const successValues = Array.isArray(bodyCode.success) ? bodyCode.success : [bodyCode.success]
+  // success 词表含字符串元素 = 该平台的业务码是 protojson 枚举名形态（stepfun 'CODE_OK'）——
+  // 字符串 code 合法；否则（mimo/minimax/zhipu 的数值码）字符串 code = 类型漂移 → parse
+  // （各配置的 success 词表即 wire 类型声明，不全局放宽也不全局收紧）。
+  const allowsStringCode = successValues.some((s) => typeof s === 'string')
+  // 决策字段必须 string/number/boolean。缺失（undefined/null）按 missing 归口：'parse' =
+  // 漂移可见（mimo 现行 guard 拒收，字段消失引导「查订阅」会误导排障）；缺省 'else' = 业务
+  // 失败（minimax/zhipu 现行「决策字段缺席 = 无订阅数据」语义）。存在但类型非法恒 parse
+  // （防对象/数组绕过类型检查命中 map）
   if (code === undefined || code === null) {
-    if (bodyCode.missing === 'parse') throw new WireDriftError(`missing body code at '${bodyCode.path}'`)
-  } else if (typeof code !== 'number' && typeof code !== 'boolean') {
-    throw new WireDriftError(`non-numeric body code: ${JSON.stringify(code)}`)
+    if (bodyCode.missing === 'parse') throw new WireDriftError(`missing body code at '${JSON.stringify(bodyCode.path)}'`)
+  } else if (typeof code === 'string' ? !allowsStringCode : typeof code !== 'number' && typeof code !== 'boolean') {
+    throw new WireDriftError(`illegal body code: ${JSON.stringify(code)}`)
   }
-  if (code !== bodyCode.success) {
+  const isSuccess = code !== undefined && code !== null && successValues.some((s) => s === code)
+  if (!isSuccess) {
     const reason = (typeof code === 'string' || typeof code === 'number')
       ? bodyCode.map?.[String(code)]
       : undefined
@@ -668,7 +683,7 @@ function assembleWindows(config: DeclarativeFetcherConfig, reqs: ResolvedRequest
 export async function runDeclarativeFetcher(
   config: DeclarativeFetcherConfig,
   credential: string,
-  fetcherConfig?: { workspaceUrl?: string },
+  fetcherConfig?: { quotaParams?: Record<string, string> },
   doFetch?: (url: string, init: RequestInit) => Promise<Response>,
 ): Promise<QuotaFetchOutcome> {
   // cookie 模式的空判据必须判**归一后**的值：`';'` / `' ; '` 等无任何 k=v 对的粘贴伪影原文
@@ -681,16 +696,13 @@ export async function runDeclarativeFetcher(
   }
 
   const extra = { ...(config.extraHeaders ?? {}) }
-  const preconditionValue = resolvePreconditionHeader(config, fetcherConfig)
-  if (config.precondition) {
-    if (!preconditionValue) return { ok: false, reason: config.precondition.failReason }
-    extra[config.precondition.header] = preconditionValue
-  }
-  const headers = buildHeaders(config, resolvedCredential, extra)
+  const resolvedHeaders = resolveHeaderFroms(config.headerFroms ?? [], resolvedCredential, fetcherConfig?.quotaParams)
+  if ('failure' in resolvedHeaders) return { ok: false, reason: resolvedHeaders.failure }
+  const headers = buildHeaders(config, resolvedCredential, { ...extra, ...resolvedHeaders.headers })
 
   const fetchImpl = doFetch ?? ((url: string, init: RequestInit) => fetch(url, init))
   const primaryDef = config.requests.find(r => r.role !== 'auxiliary') ?? config.requests[0]
-  const primary = await fetchPrimary(config, primaryDef.url, headers, fetchImpl)
+  const primary = await fetchPrimary(config, primaryDef, headers, fetchImpl)
   if (!primary.ok) return primary
   const reqs: ResolvedRequests = { primaryName: primaryDef.name, byName: { [primaryDef.name]: primary.data } }
   await fetchAuxiliaryRequests(config, primaryDef, headers, fetchImpl, reqs)

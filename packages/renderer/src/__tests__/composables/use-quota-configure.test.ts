@@ -11,10 +11,10 @@
  * ① readiness 齐备性矩阵（D1/D13）：未选类型 → ['type']；草稿类型未命中 QUOTA_PRESETS（历史数据）
  *    也 → ['type']（不静默按 api-key 分支放行）；cookie 类缺 cookie；
  *    api-key 类按 credentialSource 分流（provider 看 providerAvailable，
- *    exclusive 看「草稿 ∨ (¬typeChanged ∧ apiKeySet)」）；workspace 只看草稿
+ *    exclusive 看「草稿 ∨ (¬typeChanged ∧ apiKeySet)」）；param 只看草稿
  * ② 凭证归属（D5）：savedFetcher undefined 不算类型已变；类型切换后旧凭证不计入齐备
  * ③ saveAndTest 的 payload 逐键构造（§7.2 细节 4）：cookie 空草稿 / 掩码哨兵 → typeChanged ? '' : undefined；
- *    apiKey 仅 exclusive 且草稿非空且非哨兵才传且永不 ''；workspace 必填永不 ''；credentialSource / enabled 恒传
+ *    apiKey 仅 exclusive 且草稿非空且非哨兵才传且永不 ''；param 必填永不 ''；credentialSource / enabled 恒传
  * ④ setEnabled（D4）：只发 { providerId, enabled }，零查询调用
  * ⑤ 掩码哨兵（D7）：syncFromProvider 后已保存密文显示 QUOTA_SECRET_MASK；保存不清空草稿
  * ⑥ 类型草稿写入（D5 细节 2）：同值短路 / 真变清凭证草稿 / 非字符串检查
@@ -96,7 +96,7 @@ function mountModule(
 
 // ── 高频基线装配（文件内单源）────────────────────────────────────────────────
 // 三类 fetcher 的「无覆写」provider 快照 + preset 组合是十余处用例的公共装配侧（差异全在
-// 断言侧动作与期望值）；基线收敛在此，变体形态（enabled 翻转 / 已保存 workspace /
+// 断言侧动作与期望值）；基线收敛在此，变体形态（enabled 翻转 / 已保存 param /
 // apiKeySet·credentialSource 覆写 / 未选类型等）仍直接走 mountModule 内联。
 
 /** 基线键 = fetcher 名（与 QUOTA_PRESETS 的 fetcher 对齐）。 */
@@ -113,7 +113,7 @@ const BASELINES: Record<BaselineKey, { preset: QuotaPreset | undefined; provider
     preset: KIMI_PRESET,
     providerInit: provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
   },
-  // cookie+workspace 类基线：已保存 cookie、workspace 未保存
+  // cookie+param 类基线：已保存 cookie、param 未保存
   'opencode-go': {
     preset: OPENCODE_PRESET,
     providerInit: provider({ id: 'oc-p', quota: { enabled: false, fetcher: 'opencode-go', cookieSet: true } }),
@@ -191,7 +191,7 @@ describe('readiness 齐备性矩阵（D1 / D13）', () => {
   })
 
   it('草稿类型不在 QUOTA_PRESETS（历史数据 / 手工编辑 providers.json）→ missing [type]，不静默按 api-key 放行', async () => {
-    // 未知 fetcher 无法判定凭证形态（是否 cookie 类 / 是否需要 workspace）：旧行为是
+    // 未知 fetcher 无法判定凭证形态（是否 cookie 类 / 是否声明用户维度参数）：旧行为是
     // isCookieAuth / needsWorkspace 双双落 false 后走 api-key 分支，provider 凭据可用时
     // readiness.ready=true → 放行一条带未知 fetcher 的 configure。按「类型缺失」处理（D8 同形态）。
     const { module } = mountModule(
@@ -271,7 +271,7 @@ describe('readiness 齐备性矩阵（D1 / D13）', () => {
     expect(noCookie.module.view.value.readiness).toEqual({ ready: false, missing: ['cookie'] })
   })
 
-  it('requiresWorkspace 只看草稿：已保存 workspace 不计入，清空即置灰（D13）', async () => {
+  it('params 必填项只看草稿：已保存值不计入，清空即置灰（D13）', async () => {
     const { module } = mountModule(
       provider({
         id: 'oc-p',
@@ -279,29 +279,29 @@ describe('readiness 齐备性矩阵（D1 / D13）', () => {
           enabled: false,
           fetcher: 'opencode-go',
           cookieSet: true,
-          workspace: 'https://opencode.ai/workspace/wrk_saved/go',
+          params: { workspaceUrl: 'https://opencode.ai/workspace/wrk_saved/go' },
         },
       }),
       { preset: OPENCODE_PRESET },
     )
     await Promise.resolve()
 
-    expect(module.draft.value.workspace).toBe('https://opencode.ai/workspace/wrk_saved/go')
+    expect(module.draft.value.params.workspaceUrl).toBe('https://opencode.ai/workspace/wrk_saved/go')
     expect(module.view.value.readiness).toEqual({ ready: true, missing: [] })
 
-    module.draft.value.workspace = ''
-    // 磁盘上仍有 workspace，但判定只看草稿 —— 两个密文字段才是并集规则
-    expect(module.view.value.readiness).toEqual({ ready: false, missing: ['workspace'] })
+    module.draft.value.params = { ...module.draft.value.params, workspaceUrl: '' }
+    // 磁盘上仍有 params，但判定只看草稿 —— 两个密文字段才是并集规则
+    expect(module.view.value.readiness).toEqual({ ready: false, missing: ['param'] })
   })
 
-  it('多个缺口按 cookie → workspace 顺序累积', async () => {
+  it('多个缺口按 cookie → param 顺序累积', async () => {
     const { module } = mountModule(
       provider({ id: 'oc-p', quota: { enabled: false, fetcher: 'opencode-go' } }),
       { preset: OPENCODE_PRESET },
     )
     await Promise.resolve()
 
-    expect(module.view.value.readiness).toEqual({ ready: false, missing: ['cookie', 'workspace'] })
+    expect(module.view.value.readiness).toEqual({ ready: false, missing: ['cookie', 'param'] })
   })
 })
 
@@ -330,8 +330,8 @@ describe('凭证归属 typeChanged（D5）', () => {
     expect(module.view.value.readiness).toEqual({ ready: true, missing: [] })
 
     module.selectType('opencode-go')
-    module.draft.value.workspace = 'wrk_abc'
-    // 旧 MiMo cookie 不再算「已填」；workspace 草稿已填
+    module.draft.value.params = { workspaceUrl: 'wrk_abc' }
+    // 旧 MiMo cookie 不再算「已填」；param 草稿已填
     expect(module.view.value.readiness).toEqual({ ready: false, missing: ['cookie'] })
 
     module.draft.value.cookie = 'opencode-session'
@@ -373,7 +373,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
       credentialSource: 'provider',
       cookie: undefined,
       apiKey: undefined,
-      workspace: undefined,
+      params: undefined,
     })
   })
 
@@ -399,7 +399,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
       credentialSource: 'provider',
       cookie: '',
       apiKey: undefined,
-      workspace: undefined,
+      params: undefined,
     })
   })
 
@@ -423,7 +423,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
       credentialSource: 'exclusive',
       cookie: undefined,
       apiKey: 'sk-own',
-      workspace: undefined,
+      params: undefined,
     })
   })
 
@@ -493,10 +493,10 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
     expect(lastConfigurePayload()?.apiKey).toBeUndefined()
   })
 
-  it('workspace 必填：草稿非空 → 传归一化 URL（永不空串）', async () => {
+  it('param 必填：草稿非空 → 传归一化 URL（永不空串）', async () => {
     const { module } = await mountBaseline('opencode-go')
 
-    module.draft.value.workspace = 'wrk_newid77'
+    module.draft.value.params = { workspaceUrl: 'wrk_newid77' }
     await module.saveAndTest()
 
     expect(lastConfigurePayload()).toEqual({
@@ -506,32 +506,32 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
       credentialSource: 'provider',
       cookie: undefined,
       apiKey: undefined,
-      workspace: 'https://opencode.ai/workspace/wrk_newid77/go',
+      params: { workspaceUrl: 'https://opencode.ai/workspace/wrk_newid77/go' },
     })
   })
 
-  it('workspace 草稿空 → 本地拦截，不发 RPC（D13：不再有空串 = 清除通道）', async () => {
+  it('param 草稿空 → 本地拦截，不发 RPC（D13：不再有空串 = 清除通道）', async () => {
     const { module } = mountModule(
       provider({
         id: 'oc-p',
-        quota: { enabled: false, fetcher: 'opencode-go', cookieSet: true, workspace: 'https://opencode.ai/workspace/wrk_x/go' },
+        quota: { enabled: false, fetcher: 'opencode-go', cookieSet: true, params: { workspaceUrl: 'https://opencode.ai/workspace/wrk_x/go' } },
       }),
       { preset: OPENCODE_PRESET },
     )
     await Promise.resolve()
 
-    module.draft.value.workspace = ''
+    module.draft.value.params = { ...module.draft.value.params, workspaceUrl: '' }
     await module.saveAndTest()
 
     expect(quotaApi.configure).not.toHaveBeenCalled()
-    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaWorkspaceRequired')
+    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaParamRequired')
   })
 
-  it('非 requiresWorkspace 类型不传 workspace 键', async () => {
+  it('非 params 类型（账号维度 fetcher）不传 params 键', async () => {
     const { module } = await mountBaseline('kimi-coding')
 
     await module.saveAndTest()
-    expect(lastConfigurePayload()?.workspace).toBeUndefined()
+    expect(lastConfigurePayload()?.params).toBeUndefined()
   })
 
   it('保存成功不清空密文草稿；provider 广播重建后转掩码哨兵（D7）', async () => {
@@ -709,12 +709,30 @@ describe('掩码哨兵（D7）：已保存密文显示 QUOTA_SECRET_MASK', () =>
         enabled: false,
         fetcher: 'opencode-go',
         cookieSet: true,
-        workspace: 'https://opencode.ai/workspace/wrk_saved/go',
+        params: { workspaceUrl: 'https://opencode.ai/workspace/wrk_saved/go' },
       },
     })
 
-    await vi.waitFor(() => { expect(module.draft.value.workspace).toBe('https://opencode.ai/workspace/wrk_saved/go') })
+    await vi.waitFor(() => { expect(module.draft.value.params.workspaceUrl).toBe('https://opencode.ai/workspace/wrk_saved/go') })
     expect(module.draft.value.cookie).toBe(QUOTA_SECRET_MASK)
+  })
+
+  it('旧版 workspace 单字段（泛化前持久化）读侧映射为 params.workspaceUrl 草稿', async () => {
+    const { module } = mountModule(
+      provider({
+        id: 'oc-p',
+        quota: {
+          enabled: false,
+          fetcher: 'opencode-go',
+          cookieSet: true,
+          workspace: 'https://opencode.ai/workspace/wrk_legacy/go',
+        },
+      }),
+      { preset: OPENCODE_PRESET },
+    )
+    await Promise.resolve()
+
+    expect(module.draft.value.params.workspaceUrl).toBe('https://opencode.ai/workspace/wrk_legacy/go')
   })
 })
 
@@ -730,7 +748,7 @@ describe('类型草稿写入（D5 细节 2）', () => {
     expect(quotaApi.configure).not.toHaveBeenCalled()
   })
 
-  it('类型真变 → 清凭证草稿，但 Workspace 草稿保留（D13）', async () => {
+  it('类型真变 → 清凭证草稿，但 param 草稿保留（D13）', async () => {
     const { module } = mountModule(
       provider({
         id: 'oc-p',
@@ -738,7 +756,7 @@ describe('类型草稿写入（D5 细节 2）', () => {
           enabled: false,
           fetcher: 'opencode-go',
           cookieSet: true,
-          workspace: 'https://opencode.ai/workspace/wrk_saved/go',
+          params: { workspaceUrl: 'https://opencode.ai/workspace/wrk_saved/go' },
         },
       }),
       { preset: OPENCODE_PRESET },
@@ -749,7 +767,7 @@ describe('类型草稿写入（D5 细节 2）', () => {
     module.selectType('mimo')
 
     expect(module.draft.value.cookie).toBe('')
-    expect(module.draft.value.workspace).toBe('https://opencode.ai/workspace/wrk_saved/go')
+    expect(module.draft.value.params.workspaceUrl).toBe('https://opencode.ai/workspace/wrk_saved/go')
     expect(quotaApi.configure).not.toHaveBeenCalled()
   })
 
@@ -830,14 +848,14 @@ describe('configureError i18n（D9）', () => {
     expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaSaveAndTestFail')
   })
 
-  it('workspace 非法输入 → i18n 文案且不发 RPC', async () => {
+  it('param 非法输入 → i18n 文案且不发 RPC', async () => {
     const { module } = await mountBaseline('opencode-go')
 
-    module.draft.value.workspace = 'https://evil.example.com/workspace/wrk_x/go'
+    module.draft.value.params = { workspaceUrl: 'https://evil.example.com/workspace/wrk_x/go' }
     await module.saveAndTest()
 
     expect(quotaApi.configure).not.toHaveBeenCalled()
-    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaWorkspaceInvalid')
+    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaParamInvalid')
   })
 
   it('cookie 无 name=value 对（DevTools 表格粘贴形态）→ 本地拦下：专属文案且不发任何 RPC（2026-10-18）', async () => {
@@ -896,17 +914,24 @@ describe('既有回归（reason 透传 / preset 派生）', () => {
     expect(module.test.value.failure).toEqual({ kind: 'generic', cookieAuth: false, message: 'transport unavailable' })
   })
 
-  it('凭证形态 / workspace 需求随草稿类型派生（view.credential.form / view.workspace.required）', async () => {
+  it('凭证形态 / param 需求随草稿类型派生（view.credential.form / view.params）', async () => {
     const { module } = await mountBaseline('kimi-coding')
 
     expect(module.view.value.type.selected).toBe('kimi-coding')
     expect(module.view.value.credential.form).toBe('apiKey')
     expect(module.view.value.credential.exclusiveApplicable).toBe(true)
-    expect(module.view.value.workspace.required).toBe(false)
+    expect(module.view.value.params).toEqual([])
 
     module.selectType('opencode-go')
     expect(module.view.value.credential.form).toBe('cookie')
-    expect(module.view.value.workspace.required).toBe(true)
+    expect(module.view.value.params).toEqual([
+      {
+        key: 'workspaceUrl',
+        label: 'Workspace 地址',
+        required: true,
+        helpText: expect.stringContaining('opencode.ai'),
+      },
+    ])
   })
 
   it('store quotaPresets 为空数组（RPC 未回包 / 拉取失败）→ 类型下拉回落编译期基线，不永久为空', async () => {
@@ -1005,6 +1030,6 @@ describe('派生逻辑收拢（C1：失败归一 / 警示分档 / 来源提示 /
     module.selectType('opencode-go')
     expect(module.view.value.type.undetermined).toBe(false)
     expect(module.view.value.help?.url).toBe('https://opencode.ai/')
-    expect(module.view.value.workspace.required).toBe(true)
+    expect(module.view.value.params.map((p) => p.key)).toEqual(['workspaceUrl'])
   })
 })

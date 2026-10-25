@@ -3,7 +3,7 @@
  *
  * 覆盖（对齐 opencode.test.ts 的资源维度范式）：
  * - 未配置 workspace → not_configured，且不发任何 HTTP 请求
- * - 配置注入的 workspaceUrl 原样作为请求目标（QuotaService 负责归一化，fetcher 不再改写）
+ * - 配置注入的 quotaParams.workspaceUrl 原样作为请求目标（QuotaService 负责归一化，fetcher 不再改写）
  * - 成功路径：5h/7d 窗口按 durationSeconds 映射到 wins 槽位（month 槽恒 INFINITE_WIN）
  * - credits 字符串数值下发（实测 wire 形态）→ numericField 归一
  * - 非法窗口项丢弃（不整单拒绝）；两窗口全缺 → no-subscription
@@ -74,22 +74,22 @@ afterEach(() => {
 })
 
 describe('opendesignFetcher · workspace 配置注入', () => {
-  it('未传 config / workspaceUrl 为空 → not_configured，且不发任何 HTTP 请求', async () => {
+  it('未传 config / quotaParams.workspaceUrl 为空 → not_configured，且不发任何 HTTP 请求', async () => {
     const fetchMock = setupFetch(() => {
       throw new Error('must not fetch when workspace is not configured')
     })
     expect(await opendesignFetcher.fetchQuota('k=v', 'cookie')).toEqual({ ok: false, reason: 'not_configured' })
     expect(await opendesignFetcher.fetchQuota('k=v', 'cookie', {})).toEqual({ ok: false, reason: 'not_configured' })
-    expect(await opendesignFetcher.fetchQuota('k=v', 'cookie', { workspaceUrl: '' })).toEqual({
+    expect(await opendesignFetcher.fetchQuota('k=v', 'cookie', { quotaParams: { workspaceUrl: '' } })).toEqual({
       ok: false,
       reason: 'not_configured',
     })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('以注入的 workspaceUrl 发请求，携带 cookie 与 accept json', async () => {
+  it('以注入的 quotaParams.workspaceUrl 发请求，携带 cookie 与 accept json', async () => {
     const fetchMock = setupFetch(() => jsonResponse(usagePayload()))
-    const out = await opendesignFetcher.fetchQuota('a=1; b=2', 'cookie', { workspaceUrl: WORKSPACE_URL })
+    const out = await opendesignFetcher.fetchQuota('a=1; b=2', 'cookie', { quotaParams: { workspaceUrl: WORKSPACE_URL } })
     expect(out.ok).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
@@ -102,7 +102,7 @@ describe('opendesignFetcher · workspace 配置注入', () => {
 describe('opendesignFetcher · 窗口映射', () => {
   it('5h → wins[0]，7d → wins[1]，month 槽恒 INFINITE_WIN；credits 字符串数值归一', async () => {
     setupFetch(() => jsonResponse(usagePayload()))
-    const out = await opendesignFetcher.fetchQuota('k=v', 'cookie', { workspaceUrl: WORKSPACE_URL })
+    const out = await opendesignFetcher.fetchQuota('k=v', 'cookie', { quotaParams: { workspaceUrl: WORKSPACE_URL } })
     expect(out.ok).toBe(true)
     if (!out.ok) return
     const [fiveHour, week, month] = out.data.wins
@@ -123,7 +123,7 @@ describe('opendesignFetcher · 窗口映射', () => {
         }),
       ),
     )
-    const out = await opendesignFetcher.fetchQuota('k=v', 'cookie', { workspaceUrl: WORKSPACE_URL })
+    const out = await opendesignFetcher.fetchQuota('k=v', 'cookie', { quotaParams: { workspaceUrl: WORKSPACE_URL } })
     expect(out.ok).toBe(true)
     if (!out.ok) return
     expect(out.data.wins[0].pct).toBe(10)
@@ -142,7 +142,7 @@ describe('opendesignFetcher · 窗口映射', () => {
         }),
       ),
     )
-    const out = await opendesignFetcher.fetchQuota('k=v', 'cookie', { workspaceUrl: WORKSPACE_URL })
+    const out = await opendesignFetcher.fetchQuota('k=v', 'cookie', { quotaParams: { workspaceUrl: WORKSPACE_URL } })
     expect(out.ok).toBe(true)
     if (!out.ok) return
     expect(out.data.wins[0].pct).toBe(10)
@@ -152,12 +152,12 @@ describe('opendesignFetcher · 窗口映射', () => {
   it('windows 非法形态 / 两窗口全缺 → parse / no-subscription', async () => {
     setupFetch(() => jsonResponse(JSON.stringify({ eligible: true })))
     expect(
-      await opendesignFetcher.fetchQuota('k=v', 'cookie', { workspaceUrl: WORKSPACE_URL }),
+      await opendesignFetcher.fetchQuota('k=v', 'cookie', { quotaParams: { workspaceUrl: WORKSPACE_URL } }),
     ).toEqual({ ok: false, reason: 'parse' })
 
     setupFetch(() => jsonResponse(JSON.stringify({ eligible: false, windows: [] })))
     expect(
-      await opendesignFetcher.fetchQuota('k=v', 'cookie', { workspaceUrl: WORKSPACE_URL }),
+      await opendesignFetcher.fetchQuota('k=v', 'cookie', { quotaParams: { workspaceUrl: WORKSPACE_URL } }),
     ).toEqual({ ok: false, reason: 'no-subscription' })
   })
 })
@@ -165,7 +165,7 @@ describe('opendesignFetcher · 窗口映射', () => {
 describe('opendesignFetcher · 失败归类', () => {
   it('空 cookie → unauthorized（不发请求）', async () => {
     const fetchMock = setupFetch(() => jsonResponse('{}'))
-    expect(await opendesignFetcher.fetchQuota('   ', 'cookie', { workspaceUrl: WORKSPACE_URL })).toEqual({
+    expect(await opendesignFetcher.fetchQuota('   ', 'cookie', { quotaParams: { workspaceUrl: WORKSPACE_URL } })).toEqual({
       ok: false,
       reason: 'unauthorized',
     })
@@ -175,17 +175,17 @@ describe('opendesignFetcher · 失败归类', () => {
   it('401 → unauthorized；500 → network；响应非 JSON → parse', async () => {
     setupFetch(() => jsonResponse('{"error":"unauthenticated"}', 401))
     expect(
-      await opendesignFetcher.fetchQuota('k=v', 'cookie', { workspaceUrl: WORKSPACE_URL }),
+      await opendesignFetcher.fetchQuota('k=v', 'cookie', { quotaParams: { workspaceUrl: WORKSPACE_URL } }),
     ).toEqual({ ok: false, reason: 'unauthorized' })
 
     setupFetch(() => jsonResponse('boom', 500))
     expect(
-      await opendesignFetcher.fetchQuota('k=v', 'cookie', { workspaceUrl: WORKSPACE_URL }),
+      await opendesignFetcher.fetchQuota('k=v', 'cookie', { quotaParams: { workspaceUrl: WORKSPACE_URL } }),
     ).toEqual({ ok: false, reason: 'network' })
 
     setupFetch(() => new Response('<html>not json</html>', { status: 200 }))
     expect(
-      await opendesignFetcher.fetchQuota('k=v', 'cookie', { workspaceUrl: WORKSPACE_URL }),
+      await opendesignFetcher.fetchQuota('k=v', 'cookie', { quotaParams: { workspaceUrl: WORKSPACE_URL } }),
     ).toEqual({ ok: false, reason: 'parse' })
   })
 
@@ -194,7 +194,7 @@ describe('opendesignFetcher · 失败归类', () => {
       throw new Error('connection reset')
     })
     expect(
-      await opendesignFetcher.fetchQuota('k=v', 'cookie', { workspaceUrl: WORKSPACE_URL }),
+      await opendesignFetcher.fetchQuota('k=v', 'cookie', { quotaParams: { workspaceUrl: WORKSPACE_URL } }),
     ).toEqual({ ok: false, reason: 'network' })
   })
 })

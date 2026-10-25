@@ -1,10 +1,13 @@
 /**
- * QuotaService workspace 配置读写与注入测试（timeout-audit-hygiene-batch D1-1~D1-4）。
+ * QuotaService 用户维度参数（quotaParams）配置读写与注入测试
+ * （timeout-audit-hygiene-batch D1-1~D1-4 起源；2026-10 workspace 单字段泛化为 params）。
  *
  * 覆盖：
- * - configure：workspace 完整 URL / 裸 wrk_ id 归一化落盘（P1-1）；非法输入 fail-fast 不落盘；
- *   空串 = 清除；未传 = 继承既有值（三态语义）
- * - doFetch：providers.json 读出的 workspace 经 QuotaFetcherConfig.workspaceUrl 注入 fetcher
+ * - configure：params 逐键按 preset 声明的 param spec 归一化落盘（opencode-workspace /
+ *   opendesign-workspace 分流；未知键 raw 透传）；非法输入 fail-fast 不落盘；
+ *   null/空串 = 清除该键；键缺省 = 继承既有值（逐键三态语义）
+ * - doFetch：providers.json 读出的 params 经 QuotaFetcherConfig.quotaParams 注入 fetcher；
+ *   旧版 workspace 单字段读侧映射为 params.workspaceUrl（泛化前持久化数据兼容）
  * - not_configured 透传：fetcher 报 not_configured 时失败态原样透传（data=null + reason）
  *
  * 测试框架：vitest。策略：真实文件系统（临时目录）+ 注入假 fetcher（URL 注入点断言），
@@ -13,10 +16,10 @@
  * 运行：cd packages/runtime && npx vitest run src/services/__tests__/quota-service-workspace.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ProviderQuotaFetcher, QuotaFetcherConfig, QuotaFetchOutcome } from '@taiji/shared'
+import type { ProviderQuotaFetcher, QuotaFetcherConfig, QuotaFetchOutcome, QuotaPreset } from '@taiji/shared'
 import type { IProviderCredentialResolver } from '../ports/provider-credential-resolver.js'
 import { QuotaService } from '../quota-service.js'
 import { TaijiProviderStore } from '../provider-extras-store.js'
@@ -24,12 +27,31 @@ import { TaijiProviderStore } from '../provider-extras-store.js'
 // 注入改走模块 mock（getQuotaFetcher 按注册表返回，测试用例动态 put/delete）
 import { getQuotaFetcher } from '../quota-providers/index.js'
 
+const fakeFetchers = new Map<string, ProviderQuotaFetcher>()
+
+// param spec 驱动归一化：listQuotaPresets 提供 opencode-go / opendesign 两家的 spec
+// （与 shared QUOTA_PRESETS 同形态——service 只读 .fetcher 与 .params[].key/.normalize）
+const PARAM_PRESETS: QuotaPreset[] = [
+  {
+    fetcher: 'opencode-go',
+    label: 'OpenCode Go',
+    auth: ['cookie'],
+    match: {},
+    params: [{ key: 'workspaceUrl', normalize: 'opencode-workspace' }],
+  },
+  {
+    fetcher: 'opendesign',
+    label: 'OpenDesign Coding Plan',
+    auth: ['cookie'],
+    match: {},
+    params: [{ key: 'workspaceUrl', normalize: 'opendesign-workspace' }],
+  },
+]
+
 vi.mock('../quota-providers/index.js', () => ({
   getQuotaFetcher: vi.fn((id: string) => fakeFetchers.get(id) ?? null),
-  listQuotaPresets: vi.fn(() => []),
+  listQuotaPresets: vi.fn(() => PARAM_PRESETS),
 }))
-
-const fakeFetchers = new Map<string, ProviderQuotaFetcher>()
 
 vi.mock('../../infra/pi/pi-provider-store.js', () => ({
   getProviderConfig: vi.fn(() => undefined),
@@ -85,7 +107,7 @@ function makeService(): QuotaService {
 }
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'quota-service-workspace-'))
+  dir = mkdtempSync(join(tmpdir(), 'quota-service-params-'))
   agentDir = join(dir, 'agent')
   mkdirSync(join(agentDir, 'config'), { recursive: true })
   process.env.TAIJI_AGENT_DATA_DIR = dir
@@ -101,78 +123,116 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
-describe('QuotaService.configure · workspace 三态（D1-1/P1-1）', () => {
-  it('完整 URL 归一化为规范 URL 落盘', async () => {
+describe('QuotaService.configure · params 逐键归一化（D1-1/P1-1，2026-10 泛化）', () => {
+  it('完整 URL 归一化为规范 URL 落盘（opencode spec 分流）', async () => {
     const svc = makeService()
-    const result = await svc.configure({ providerId: 'p1', enabled: true, workspace: 'https://opencode.ai/workspace/wrk_abc/go' })
+    const result = await svc.configure({
+      providerId: 'p1',
+      enabled: true,
+      fetcher: 'opencode-go',
+      params: { workspaceUrl: 'https://opencode.ai/workspace/wrk_abc/go' },
+    })
     expect(result).toEqual({ ok: true })
-    expect(readQuotaRaw()?.workspace).toBe('https://opencode.ai/workspace/wrk_abc/go')
+    expect(readQuotaRaw()?.params).toEqual({ workspaceUrl: 'https://opencode.ai/workspace/wrk_abc/go' })
   })
 
   it('裸 wrk_ id 归一化为规范 URL 落盘（P1-1 两形态）', async () => {
     const svc = makeService()
-    const result = await svc.configure({ providerId: 'p1', enabled: true, workspace: 'wrk_bareid9' })
+    const result = await svc.configure({
+      providerId: 'p1',
+      enabled: true,
+      fetcher: 'opencode-go',
+      params: { workspaceUrl: 'wrk_bareid9' },
+    })
     expect(result).toEqual({ ok: true })
-    expect(readQuotaRaw()?.workspace).toBe('https://opencode.ai/workspace/wrk_bareid9/go')
+    expect(readQuotaRaw()?.params).toEqual({ workspaceUrl: 'https://opencode.ai/workspace/wrk_bareid9/go' })
   })
 
-  it('非法输入 → ok:false 不落盘（fail-fast，不写半成品配置）', async () => {
+  it('非法输入 → ok:false 不落盘（fail-fast，不写半成品配置；host 白名单安全边界）', async () => {
     const svc = makeService()
-    const result = await svc.configure({ providerId: 'p1', enabled: true, workspace: 'https://evil.example.com/workspace/wrk_abc/go' })
+    const result = await svc.configure({
+      providerId: 'p1',
+      enabled: true,
+      fetcher: 'opencode-go',
+      params: { workspaceUrl: 'https://evil.example.com/workspace/wrk_abc/go' },
+    })
     expect(result.ok).toBe(false)
     expect(result.error).toContain('opencode.ai')
-    // 清除之外的非法输入不落任何 workspace
-    expect(readQuotaRaw()?.workspace).toBeUndefined()
+    // 清除之外的非法输入不落任何 params
+    expect(readQuotaRaw()?.params).toBeUndefined()
   })
 
-  it('空字符串 = 清除（quota 块无 workspace 字段，恢复未配置态）', async () => {
+  it('null / 空串 = 清除该键（quota.params 无该键，恢复未配置态）', async () => {
     const svc = makeService()
-    await svc.configure({ providerId: 'p1', enabled: true, workspace: 'wrk_abc' })
-    expect(readQuotaRaw()?.workspace).toBe('https://opencode.ai/workspace/wrk_abc/go')
+    await svc.configure({ providerId: 'p1', enabled: true, fetcher: 'opencode-go', params: { workspaceUrl: 'wrk_abc' } })
+    expect(readQuotaRaw()?.params).toEqual({ workspaceUrl: 'https://opencode.ai/workspace/wrk_abc/go' })
 
-    const cleared = await svc.configure({ providerId: 'p1', enabled: true, workspace: '  ' })
+    const cleared = await svc.configure({ providerId: 'p1', enabled: true, params: { workspaceUrl: '  ' } })
     expect(cleared).toEqual({ ok: true })
-    expect(readQuotaRaw()?.workspace).toBeUndefined()
+    expect(readQuotaRaw()?.params).toBeUndefined()
   })
 
-  it('未传 workspace（undefined）= 继承既有值不被清掉', async () => {
+  it('未传 params（undefined）= 继承既有值不被清掉（逐键三态）', async () => {
     const svc = makeService()
-    await svc.configure({ providerId: 'p1', enabled: true, fetcher: 'fake-cookie-fetcher', workspace: 'wrk_keep77' })
-    // 只改 enabled 不传 workspace
+    await svc.configure({ providerId: 'p1', enabled: true, fetcher: 'opencode-go', params: { workspaceUrl: 'wrk_keep77' } })
+    // 只改 enabled 不传 params
     await svc.configure({ providerId: 'p1', enabled: false })
-    expect(readQuotaRaw()?.workspace).toBe('https://opencode.ai/workspace/wrk_keep77/go')
+    expect(readQuotaRaw()?.params).toEqual({ workspaceUrl: 'https://opencode.ai/workspace/wrk_keep77/go' })
     expect(readQuotaRaw()?.enabled).toBe(false)
   })
 
-  it('fetcher=opendesign 时裸 workspace id 按 opendesign 规则归一化（分流）', async () => {
+  it('fetcher=opendesign 时裸 workspace id 按 opendesign 规则归一化（spec 分流）', async () => {
     const svc = makeService()
     const result = await svc.configure({
       providerId: 'p1',
       enabled: true,
       fetcher: 'opendesign',
-      workspace: 'userownws01',
+      params: { workspaceUrl: 'userownws01' },
     })
     expect(result).toEqual({ ok: true })
-    expect(readQuotaRaw()?.workspace).toBe(
-      'https://amr-api.open-design.ai/api/v1/workspaces/userownws01/billing/coding-plan-usage',
-    )
+    expect(readQuotaRaw()?.params).toEqual({
+      workspaceUrl: 'https://amr-api.open-design.ai/api/v1/workspaces/userownws01/billing/coding-plan-usage',
+    })
   })
 
-  it('同 input 在无 fetcher 上下文时按缺省 opencode 规则拒绝（分流不改缺省行为）', async () => {
+  it('preset 未声明的键（远程 preset 先行 / 自定义参数）按 raw 透传——不阻断保存', async () => {
     const svc = makeService()
-    const result = await svc.configure({ providerId: 'p1', enabled: true, workspace: 'userownws01' })
-    expect(result.ok).toBe(false)
-    expect(readQuotaRaw()?.workspace).toBeUndefined()
+    const result = await svc.configure({
+      providerId: 'p1',
+      enabled: true,
+      fetcher: 'opencode-go',
+      params: { workspaceUrl: 'wrk_x1', orgId: 'org-123' },
+    })
+    expect(result).toEqual({ ok: true })
+    expect(readQuotaRaw()?.params).toEqual({
+      workspaceUrl: 'https://opencode.ai/workspace/wrk_x1/go',
+      orgId: 'org-123',
+    })
   })
 
   it('payload 不传 fetcher 时按既存配置的 fetcher 分流（部分更新）', async () => {
     const svc = makeService()
     await svc.configure({ providerId: 'p1', enabled: true, fetcher: 'opendesign' })
-    const result = await svc.configure({ providerId: 'p1', enabled: true, workspace: 'secondws02' })
+    const result = await svc.configure({ providerId: 'p1', enabled: true, params: { workspaceUrl: 'secondws02' } })
     expect(result).toEqual({ ok: true })
-    expect(readQuotaRaw()?.workspace).toBe(
-      'https://amr-api.open-design.ai/api/v1/workspaces/secondws02/billing/coding-plan-usage',
-    )
+    expect(readQuotaRaw()?.params).toEqual({
+      workspaceUrl: 'https://amr-api.open-design.ai/api/v1/workspaces/secondws02/billing/coding-plan-usage',
+    })
+  })
+
+  it('多键部分更新：只动传入键，其余键继承（逐键合并不是整表替换）', async () => {
+    const svc = makeService()
+    await svc.configure({
+      providerId: 'p1',
+      enabled: true,
+      fetcher: 'opencode-go',
+      params: { workspaceUrl: 'wrk_multi1', orgId: 'org-keep' },
+    })
+    await svc.configure({ providerId: 'p1', enabled: true, params: { workspaceUrl: 'wrk_multi2' } })
+    expect(readQuotaRaw()?.params).toEqual({
+      workspaceUrl: 'https://opencode.ai/workspace/wrk_multi2/go',
+      orgId: 'org-keep',
+    })
   })
 })
 
@@ -205,10 +265,11 @@ describe('QuotaService.configure · cookie 入站归一化（SG-10，wire 不信
   })
 })
 
-describe('QuotaService.doFetch · workspace 注入与 not_configured 透传（D1-2/D1-3）', () => {
-  it('providers.json 读出的 workspace 经 config.workspaceUrl 注入 fetcher', async () => {
+describe('QuotaService.doFetch · params 注入与 not_configured 透传（D1-2/D1-3）', () => {
+  it('providers.json 读出的 params 经 config.quotaParams 注入 fetcher', async () => {
     const svc = makeService()
-    await svc.configure({ providerId: 'p1', enabled: true, fetcher: 'fake-cookie-fetcher', workspace: 'wrk_inject1' })
+    // fetcher=opencode-go 走 preset spec 归一化（裸 wrk_ id → 规范 URL 落盘）
+    await svc.configure({ providerId: 'p1', enabled: true, fetcher: 'opencode-go', params: { workspaceUrl: 'wrk_inject1' } })
     // 写 cookie 凭证（cookie 文件）保证 resolveCredential 命中
     await svc.configure({ providerId: 'p1', enabled: true, cookie: 'session=abc123' })
 
@@ -216,10 +277,10 @@ describe('QuotaService.doFetch · workspace 注入与 not_configured 透传（D1
     const result = await svc.refresh('p1')
 
     expect(result.data).toEqual({ label: 'L', wins: [{ pct: 1, resetSec: null }, { pct: null, resetSec: null }, { pct: null, resetSec: null }] })
-    expect(lastConfig?.workspaceUrl).toBe('https://opencode.ai/workspace/wrk_inject1/go')
+    expect(lastConfig?.quotaParams).toEqual({ workspaceUrl: 'https://opencode.ai/workspace/wrk_inject1/go' })
   })
 
-  it('未配置 workspace → 注入 undefined，fetcher 报 not_configured 原样透传（D1-3）', async () => {
+  it('未配置 params → 注入 undefined，fetcher 报 not_configured 原样透传（D1-3）', async () => {
     const svc = makeService()
     await svc.configure({ providerId: 'p1', enabled: true, cookie: 'session=abc123', fetcher: 'fake-cookie-fetcher' })
 
@@ -227,7 +288,29 @@ describe('QuotaService.doFetch · workspace 注入与 not_configured 透传（D1
 
     expect(result.data).toBeNull()
     expect(result.reason).toBe('not_configured')
-    expect(lastConfig?.workspaceUrl).toBeUndefined()
+    expect(lastConfig?.quotaParams).toBeUndefined()
+  })
+
+  it('旧版 workspace 单字段（泛化前持久化）读侧映射为 params.workspaceUrl 注入', async () => {
+    // 直接以旧版磁盘形态写入 providers.json（quota.workspace 单字符串，无 params 键）
+    writeFileSync(
+      join(agentDir, 'config', 'providers.json'),
+      JSON.stringify({
+        version: 1,
+        providers: {
+          p1: {
+            quota: { fetcher: 'fake-cookie-fetcher', enabled: true, workspace: 'https://opencode.ai/workspace/wrk_legacy1/go' },
+          },
+        },
+      }),
+    )
+    const svc = makeService()
+    await svc.configure({ providerId: 'p1', enabled: true, cookie: 'session=abc123' })
+
+    nextOutcome = { ok: true, data: { label: 'L', wins: [{ pct: 1, resetSec: null }, { pct: null, resetSec: null }, { pct: null, resetSec: null }] } }
+    await svc.refresh('p1')
+
+    expect(lastConfig?.quotaParams).toEqual({ workspaceUrl: 'https://opencode.ai/workspace/wrk_legacy1/go' })
   })
 
   it('fetcher 报 not_configured 不写缓存（getCached 携带 reason 供 UI 失败态）', async () => {
