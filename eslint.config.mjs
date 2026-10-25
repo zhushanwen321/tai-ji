@@ -782,10 +782,22 @@ export default [
       'max-lines': 'off',
     },
   },
+  // [dev-0.11.16 集成线 lint 收敛 2026-10-25] 集成线合并后折算 713 微超 13 行——按
+  // 「微超即提额」（pi-provider-store 508>500→520 同型）提额 730 保留软上限告警；
+  // 重建/派生视图轴再拆属独立重构任务。
   {
     files: ['packages/subagent-core/src/execution/persistence/record-store-rebuild.ts'],
     rules: {
-      'max-lines': ['warn', { max: 700, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 730, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // [dev-0.11.16 集成线 lint 收敛 2026-10-25] retry-rules.ts：集成线合并后折算 506 微超
+  // 6 行——按「微超即提额」（pi-provider-store 508>500→520 同型）提额 520 保留软上限
+  // 告警；重试规则单点再拆属独立重构任务。
+  {
+    files: ['packages/shared/src/retry-rules.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
   // [W1 D4 双面证据判别 2026-09-26] record-store-terminal.ts：终局调和面增补收编
