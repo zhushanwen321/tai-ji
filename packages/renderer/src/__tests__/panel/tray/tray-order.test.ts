@@ -17,11 +17,19 @@ import { computed, defineComponent, h, reactive } from 'vue'
 import { TRAY_WIDGET_KNOWN_ORDER, orderTrayWidgetIds } from '@/components/panel/tray/tray-order'
 
 describe('orderTrayWidgetIds（D6：known-order + 当前插入序）', () => {
-  it('known-order 优先：todo 恒在 goal 前，与传入数组序无关', () => {
+  it('known-order 优先：todo → goal → subagent → workflow 恒序，与传入数组序无关', () => {
     expect(orderTrayWidgetIds(['goal', 'todo'])).toEqual(['todo', 'goal'])
     expect(orderTrayWidgetIds(['todo', 'goal'])).toEqual(['todo', 'goal'])
+    expect(orderTrayWidgetIds(['subagent', 'goal', 'todo'])).toEqual(['todo', 'goal', 'subagent'])
+    // [容器扩展点统一 §6.6/U10] workflow 件迁插件 widget 区后加入 known-order（与 subagent 同档）
+    expect(orderTrayWidgetIds(['workflow', 'subagent', 'goal', 'todo'])).toEqual([
+      'todo',
+      'goal',
+      'subagent',
+      'workflow',
+    ])
     // 前置顺序来源是常量表（外部可读，作为宿主契约的单一登记处）
-    expect(TRAY_WIDGET_KNOWN_ORDER).toEqual(['todo', 'goal'])
+    expect(TRAY_WIDGET_KNOWN_ORDER).toEqual(['todo', 'goal', 'subagent', 'workflow'])
   })
 
   it('未知 key 按传入数组序追加在 known-order 之后', () => {

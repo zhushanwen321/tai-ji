@@ -2,9 +2,10 @@
   <!--
     展示组件 · segmented 视图切换 tab（demo .vtab 形态）。
     tablist 范式（spec §3.1）：容器 role=tablist + 钮 role=tab + aria-selected；上下左右
-    方向键在 会话→文件→插件 间环形移动并立即激活（demo onVtabKey 同款）。
-    文字 tab：3 tab 等宽均分（flex-1），label 直出；第 3 个 plugins 为挂载点占位
-    （无 plugin 贡献时 ViewHost 空态自隐藏，见下方 tabs 定义）。
+    方向键在 tab 序列间环形移动并立即激活（demo onVtabKey 同款）。
+    文字 tab：等宽均分（flex-1），label 直出。数据源 = 容器位注册表派生（§6.1/U8：内置
+    三项为注册表初始项，lib/content-slots.ts 登记；插件声明的 sidebar.tab 项并入标签条）。
+    第 3 个内置 plugins 为挂载点占位（无 plugin 贡献时 ViewHost 空态自隐藏）。
     容器 = 凹陷槽（bg-surface ← demo --card）+ hairline 描边 + rounded-sm(6px) + p-[2px]；
     按钮 h-[24px] / 12px 字 / dim / radius-xs；选中态 = demo Tier A 状态件选中范式
     （--sel-bg accent tint 底 + 中性亮字 + fw-mid + 1px --sel-edge 内描边）。
@@ -46,6 +47,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { slotDisplayLabel, useSidebarTabs } from '@/lib/content-slots'
 import type { SidebarTab } from '@/stores/sidebar'
 
 const { t } = useI18n()
@@ -69,14 +71,13 @@ interface TabDef {
 }
 
 /**
- * tabs 静态定义：plugins 无 plugin 贡献时 ViewHost 空态自隐藏，tab 仅作挂载点占位。
+ * tabs 从容器位注册表派生（§6.1 侧栏行）：内置三项（注册表初始项）∪ 插件声明项，
+ * value = 注册表条目 id；文案谓词见 slotDisplayLabel（内置走 labelKey，插件走声明原文）。
  */
-const tabs = computed<TabDef[]>(() => [
-  { value: 'sessions', label: t('sidebar.segmentedTab.session') },
-  { value: 'files', label: t('sidebar.segmentedTab.file') },
-  // ExtensionHost sidebar view 宿主（MountPointRegistry sidebar.tab，W4 接线）。
-  { value: 'plugins', label: t('sidebar.segmentedTab.plugin') },
-])
+const sidebarTabs = useSidebarTabs()
+const tabs = computed<TabDef[]>(() =>
+  sidebarTabs.value.map((view) => ({ value: view.id, label: slotDisplayLabel(view, t) })),
+)
 
 /**
  * tablist 方向键环形切换（demo onVtabKey 同款，spec §3.1）：上下左右四键同义——

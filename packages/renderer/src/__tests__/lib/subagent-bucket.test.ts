@@ -8,7 +8,10 @@
  * countSubagents / DEFAULT_SUBAGENT_FILTER 及其类型）随托盘「已收起」桶退役删除，
  * 其用例一并退役——已结束桶判据 = !isRunningProjection（「已收起」机制现已全链路删除，
  * intent 字段不复存在），口径断言现承载于 `__tests__/panel/tray/useTrayCounts.test.ts`。
- * 本文件保留两谓词本体的完整断言体系：
+ * 本文件保留判据与展示 helper 本体的完整断言体系：
+ * [容器扩展点统一 §6.6/U9] 原「失败红点判据四形态 / subagentDotClass 兜底」两段随
+ * 托盘 subagent 件迁移退役（宿主托盘行删，状态点规则表删除）——四形态 fixture 迁插件
+ * 侧 interface/gui/tray-widget.ts 单测承载（判定镜像，两侧同批扩值）。
  *
  * 三视角：
  * - 白盒：isRunningProjection 占用谓词（SUBAGENT_STATUS_ALL 全集 × 占用矩阵 + P1 形态矩阵）
@@ -25,7 +28,7 @@ import {
   type SubagentRecord,
   type SubagentStatus,
 } from '@taiji/shared'
-import { isRunningProjection, failureCauseLabel, failureCauseToneClass, subagentDotClass } from '@/lib/subagent-bucket'
+import { isRunningProjection, failureCauseLabel, failureCauseToneClass } from '@/lib/subagent-bucket'
 import { SESSION_01A09F83_GHOST_FIXTURE, type GhostFixtureSpec } from './subagent-ghost-fixture'
 
 /**
@@ -268,77 +271,6 @@ describe('[subagent-observability u8] wire 契约字段存在性（§3.3.3⑤）
   })
 })
 
-describe('失败红点判据四形态（subagent-observability §3.3.3② u8 验收）', () => {
-  it('形态① aborted + harness.turn_budget_exhausted → 红', () => {
-    const r = makeRecord('idle', {
-      stopReason: 'aborted',
-      lastRound: {
-        engineStopReason: 'aborted',
-        failure: { class: 'harness', kind: 'turn_budget_exhausted', retryable: false, raw: 'turn budget exhausted' },
-      },
-    })
-    expect(subagentDotClass(r)).toBe('bg-danger')
-  })
-
-  it('形态② engine 失败分型 → 红（error 停因与 engine_* 透传族）', () => {
-    const r = makeRecord('idle', {
-      stopReason: 'error',
-      lastRound: {
-        engineStopReason: 'error',
-        failure: { class: 'engine', kind: 'engine_crash', retryable: false, raw: 'engine died' },
-      },
-    })
-    expect(subagentDotClass(r)).toBe('bg-danger')
-  })
-
-  it('形态③ user.cancelled → 灰（用户主动中止非失败，归中性档）', () => {
-    const r = makeRecord('idle', {
-      stopReason: 'aborted',
-      lastRound: {
-        engineStopReason: 'aborted',
-        failure: { class: 'user', kind: 'cancelled', retryable: false, raw: 'user aborted' },
-      },
-    })
-    expect(subagentDotClass(r)).toBe('bg-neutral-dim opacity-50')
-  })
-
-  it('形态④ promptDisposition=handled（被接管）→ 灰', () => {
-    const r = makeRecord('idle', { lastRound: { promptDisposition: 'handled' } })
-    expect(subagentDotClass(r)).toBe('bg-neutral-dim opacity-50')
-  })
-
-  it('四形态对 running 组同判：失败红命中、被接管落 accent 兜底（running 组无中性规则）', () => {
-    const failureRunning = makeRecord('running', {
-      lastRound: { failure: { class: 'provider', kind: 'rate_limited', retryable: 'conditional', raw: 'rpm 101/100' } },
-    })
-    expect(subagentDotClass(failureRunning)).toBe('bg-danger')
-    const handledRunning = makeRecord('running', { lastRound: { promptDisposition: 'handled' } })
-    expect(subagentDotClass(handledRunning)).toBe('bg-accent')
-  })
-
-  it('绿兜底：引擎 stop 无失败分类 → 绿（派生「正常收尾」）', () => {
-    const r = makeRecord('idle', { lastRound: { engineStopReason: 'stop', result: 'ok' } })
-    expect(subagentDotClass(r)).toBe('bg-success')
-  })
-
-  it('迁移期回落（legacy closed 兼容，§3.3.3⑥）：failure 缺省 + 旧 stopReason=failed → 红', () => {
-    // 旧推断存储值（迁移完删旧值）+ runtime deriveClosedDisplay 注入族（legacy closed
-    // 失败展示值）——红点迁移前后保持；退役条件绑定见 subagent-bucket isFailedRound 注释
-    expect(subagentDotClass(makeRecord('idle', { stopReason: 'failed' }))).toBe('bg-danger')
-    expect(subagentDotClass(makeRecord('running', { stopReason: 'failed' }))).toBe('bg-danger')
-  })
-
-  it('双写期事实字段优先：failure 在场时不再看旧 stopReason 值（user.cancelled 不因停因残留误红）', () => {
-    const r = makeRecord('idle', {
-      stopReason: 'completed',
-      lastRound: { failure: { class: 'user', kind: 'cancelled', retryable: false, raw: 'user aborted' } },
-    })
-    expect(subagentDotClass(r)).toBe('bg-neutral-dim opacity-50')
-  })
-})
-
-// ── 轮收条失败分类展示 helper（SubagentTab 标题栏与任务托盘共用，§3.4 u8）────────
-
 describe('failureCauseLabel / failureCauseToneClass（展示判据 SSOT）', () => {
   it('label = class.kind 点拼（与 run 终局 failedMembers[].cause 序列化同形）', () => {
     expect(failureCauseLabel({ class: 'provider', kind: 'rate_limited', retryable: 'conditional', raw: 'x' })).toBe('provider.rate_limited')
@@ -349,18 +281,5 @@ describe('failureCauseLabel / failureCauseToneClass（展示判据 SSOT）', () 
     expect(failureCauseToneClass({ class: 'user', kind: 'cancelled', retryable: false, raw: 'x' })).toBe('text-neutral-dim opacity-70')
     expect(failureCauseToneClass({ class: 'harness', kind: 'turn_budget_exhausted', retryable: false, raw: 'x' })).toBe('text-danger')
     expect(failureCauseToneClass({ class: 'engine', kind: 'engine_crash', retryable: false, raw: 'x' })).toBe('text-danger')
-  })
-})
-
-describe('subagentDotClass — 词表外/缺失 status 兜底（D3r3 验收顺带缺陷回归）', () => {
-  it('status 缺失不抛错，落中性 accent 档', () => {
-    const r = { subagentId: 'r-x' } as never
-    expect(() => subagentDotClass(r)).not.toThrow()
-    expect(subagentDotClass(r)).toBe('bg-accent')
-  })
-
-  it('status 词表外值不抛错，落中性 accent 档', () => {
-    const r = { subagentId: 'r-y', status: 'not-in-vocab' } as never
-    expect(subagentDotClass(r)).toBe('bg-accent')
   })
 })

@@ -194,7 +194,14 @@ export interface PluginContributesView {
   placement: string
   viewType?: 'gui' | 'webview' | 'tree'
   activationEvent?: string
-  initialVisibility?: 'visible' | 'hidden'
+  /** 图标名（lucide 名，宿主按白名单统一解析，未命中落兜底图标 + 一次 warning）；缺省 = 容器兜底图标 */
+  icon?: string
+  /** 排序权重（序号契约：内置项按下标派生，未声明排在内置项之后，同值按 pluginId 字典序决胜） */
+  order?: number
+  /** 空态文案（快照拉取完成仍无树时展示，插件自带；缺省 = 容器通用空态） */
+  emptyState?: { text?: string; hint?: string }
+  /** 会话归属（会话删除级联与进入范围）；缺省 'session' */
+  scope?: 'session' | 'global'
 }
 
 /**
@@ -246,16 +253,52 @@ export interface PluginConfigurationProperty {
 }
 
 /**
+ * @proposed — headerAction 点击激活方式（结构化联合，容器扩展点统一 §6.3）。
+ *
+ * 结构化成员 = 声明即存在的静态入口：command 走命令链（需 commandId）；overlay / drawer
+ * 为容器导航（点击请求宿主打开对应容器的 tabId，params 透传给目标容器的选项字段，
+ * 值限标量）。'scheduler-overlay' 为迁移期兼容值（定时任务直开入口，带运行时徽标），
+ * 下一版本删除——新声明一律用结构化形态。
+ *
+ * 与 core 版（packages/core/src/extension-host/types.ts 同名类型）形状一致——
+ * 两版契约漂移会让插件作者照 SDK 写不出 core 已支持的声明形态（字段级语义以 core
+ * 版注释为准）。
+ */
+export type HeaderActionActivation =
+  | { kind: 'command' }
+  | { kind: 'overlay'; tabId: string; params?: Record<string, string | number | boolean> }
+  | { kind: 'drawer'; tabId: string; params?: Record<string, string | number | boolean> }
+  | 'scheduler-overlay'
+
+/**
  * @proposed — panel header 按钮区贡献（icon 为 lucide 名字符串，宿主解析；
  * badge/tooltip/disabled 等可变字段经 api.ui.updateHeaderAction 运行时更新）。
+ *
+ * 字段集与 core 版（packages/core/src/extension-host/types.ts 同名接口）一致——
+ * 两版契约漂移会让插件作者照 SDK 写不出 core 已支持的声明形态（容器扩展点统一
+ * 设计 §6.11 阶段 0 对齐；字段级语义以 core 版注释为准）。
  */
 export interface PluginContributesHeaderAction {
   id: string
   title: string
   icon: string
-  commandId: string
+  /**
+   * 命令链命令 id（可选）。缺省（无 activation 且无 commandId）声明无法走命令链，
+   * 渲染端不渲染；带 commandId 的缺省声明点击经 CommandRegistry.execute。
+   * activation 结构化成员 / 'scheduler-overlay' 兼容值声明无需 commandId——
+   * 前者按 kind 分派（overlay/drawer 走容器导航，command 走命令链），
+   * 后者走既有 scheduler overlay 直开分派，均不经缺省命令链。
+   */
+  commandId?: string
   /** 与内置按钮组的相对序；缺省追加在后 */
   order?: number
+  /**
+   * 点击激活方式（声明驱动分派，渲染端消费；core 不读此字段）。
+   * 缺省 = 走 commandId 命令链（需 commandId）；结构化联合与迁移兼容值见
+   * HeaderActionActivation。
+   * 与 PluginContributesView.activationEvent（view 激活时机事件）语义无关。
+   */
+  activation?: HeaderActionActivation
 }
 
 // ── RPC 线协议类型（Wire Protocol）────────────────────────────────────

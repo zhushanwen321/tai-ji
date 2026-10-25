@@ -19,9 +19,11 @@
     浮层模式。[U7] subagent/agent call 详情走 drawer tab（SubagentTab），PanelHeader
     不再承载 overlay 返回/标题/JSONL 路径（那套展示层已随 overlay 移除）。本容器渲染跨端共享容器
     DrawerPanel（@taiji/ui/features/drawer，W3 迁移自旧
-    SideDrawer.vue），并按 C2 contract 经默认 slot 注入桌面独占内容面板（GitPanel/SubagentTab
-    等，v-if chain 对齐注册表终态 7 员；TerminalView 现挂本文件 bottom-drawer 块——
-    display-containers §7.6）。git 状态唯一数据源在此层 provide
+    SideDrawer.vue），并按 C2 contract 经默认 slot 注入内容面板；内容分派自容器扩展点统一
+    U6 起按容器位注册表派生视图驱动（renderer.kind='host' 走内置组件表、'view' 走
+    ViewHost 渲染插件推树，原 8 分支 drawerTab 字面量 v-if chain 删除；
+    TerminalView 现挂本文件 bottom-drawer 块——display-containers §7.6）。
+    git 状态唯一数据源在此层 provide
     （按 panel 的 session），GitPanel 注入共享。
 
     壳层职责（W3 C3 裁决，旧 SideDrawer 逻辑迁移至此）：AC-13 unread badge（chatStore
@@ -132,48 +134,37 @@
       >
         <DrawerPanel
           :is-open="drawerOpen"
-          :active-tab="drawerTab"
+          :active-tab="effectiveTab"
           :session-id="panelSessionId"
           @close="onDrawerClose"
           @set-tab="setDrawerTab"
         >
-          <!-- 桌面独占内容面板（C2 v-if chain；分支与 RIGHT_DRAWER_REGISTRY 终态 8 员一一对应）：
+          <!-- 桌面独占内容面板（C2 slot 注入契约）：内容分派按容器位注册表派生视图（容器
+               扩展点统一 §6.1/U6，8 分支 drawerTab 字面量条件链已删，机制见
+               useDrawerContentDispatch）——生效 tab 的 renderer.kind='host' 走内置组件表
+              （组件绑定与注入条件内聚在表项），'view' 走 ViewHost 渲染插件推树。表项
+               inject=false 或插件项无会话时 slot 渲染空 → DrawerPanel 空态 fallback
+              （bashTask/trace「未选中不注入」语义不变）。
                Git tab → GitPanel（inject GIT_STATUS_KEY，非 git 仓库组件内自隐藏走空态）
                Doc tab → CommandDocPanel（selectedCommandName 由 core 瞬时参数指定）
-               Detail tab → DetailPane（W3 多文件 tab：selectFile 同步注入 detail 分区，store 响应式自动加载）
-               browser/terminal 已迁出本链（display-containers §7.6）——terminal 归底抽屉（本文件
-               bottom-drawer 块 TerminalView 挂载点），browser tab 已删除、能力在浮层壳复活 -->
-          <GitPanel v-if="drawerTab === 'git'" />
-          <CommandDocPanel v-else-if="drawerTab === 'doc'" :session-id="panelSessionId" />
-          <DetailPane
-            v-else-if="drawerTab === 'detail'"
-            :key="detailRetryKey"
-            :session-id="panelSessionId"
+               Detail tab → DetailPane（W3 多文件 tab：selectFile 同步注入 detail 分区，
+               store 响应式自动加载；:key 语义经 v-bind 对象内保留 prop key 承接）
+               browser/terminal 已迁出本容器（display-containers §7.6）——terminal 归底抽屉
+              （本文件 bottom-drawer 块 TerminalView 挂载点），browser tab 已删除、能力在
+               浮层壳复活 -->
+          <component
+            v-if="activeHostPanel !== null"
+            :is="activeHostPanel.component"
+            v-bind="activeHostPanel.props"
           />
-          <!-- subagent tab（2026-08-14 subagent-workflow-drawer-tab U2/U3/U4）：内容由
-               SubagentTab 自治（读 core selection/ 内容域选中态 + store），
-               不依赖 panelSessionId，延续默认 slot 注入模式。
-               （workflow tab 2026-10-19 删除：workflow 唯一入口 = 浮层。） -->
-          <SubagentTab v-else-if="drawerTab === 'subagent'" />
-          <!-- bashTask tab（2026-09 background-task-sidebar-view D5③）：后台命令详情。未选中
-               任务（selectedBackgroundTaskId undefined，bashTask 内容域选中态）不注入 →
-               DrawerPanel 空态 fallback（C2 v-if chain 语义与 browser 无 URL 同款） -->
-          <BackgroundTaskDetailPanel
-            v-else-if="drawerTab === 'bashTask' && bashTaskSelected"
+          <!-- 插件推树 tab：视图归属按声明 scope（会话域跟随 panel 焦点会话；全局域挂载位
+               = drawer.tab 族 + 插件维度分区） -->
+          <ViewHost
+            v-else-if="activePluginView !== null"
+            :view-id="activePluginView.viewId"
+            :scope="activePluginView.scope"
+            :title="activePluginView.title"
           />
-          <!-- plan tab（plan 模式重设计 u1-drawer-tab + u1-docs-panel）：无条件注入（tab 激活
-               即渲染，不经空态 fallback——与 bashTask 的「未选中不注入」相反）。u1-docs-panel
-               起由 PlanDocsPanel 承载（L2 文档 tab + file.read 正文 + 划选评论），面板内部
-               docs 空时自渲染空态（D10），替代 u1-drawer-tab 的过渡空骨架。 -->
-          <PlanDocsPanel v-else-if="drawerTab === 'plan'" :session-id="panelSessionId" />
-          <!-- btw tab（btw-question D7，M3-a）：旁路线面板。无条件注入（与 plan 同款——
-               tab 激活即渲染，面板自渲染线列表空态；D7② 焦点绑定经 :session-id=panelSessionId
-               透传当前焦点主会话，线列表按 mainSid 拉取） -->
-          <BtwPanel v-else-if="drawerTab === 'btw'" :session-id="panelSessionId" />
-          <!-- trace tab（session-trace A44/D5b 终态）：选中 trace 条目的详情页。未选中
-               （selectedKey null，trace 视图分区）不注入 → DrawerPanel 空态 fallback
-               （与 bashTask 同款）；点其它一级 tab 切走不清选中，切回 trace tab 详情还在。 -->
-          <TraceInspector v-else-if="drawerTab === 'trace' && traceSelected" :session-id="panelSessionId ?? ''" />
           <!-- header-extra：AC-13 unread badge 壳侧挂载点（W4；chatStore 消息数感知，C3 壳层职责） -->
           <template #header-extra>
             <div
@@ -264,7 +255,6 @@ import {
   closeDrawer,
   toggleDrawer,
   setDrawerTab,
-  useBashTaskSelection,
 } from '@taiji/core/domain/drawer'
 import {
   bindBottomDrawerSessionId,
@@ -273,35 +263,28 @@ import {
   BOTTOM_DRAWER_HEIGHT_MAX_PCT,
 } from '@taiji/core/domain/bottom-drawer'
 import { DrawerPanel } from '@taiji/ui/features/drawer'
+import { ViewHost } from '@taiji/ui/extension-host'
 import { usePanelStore } from '@/stores/panel'
 import { useSessionStore } from '@/stores/session'
 import { useSessionDerivations } from '@/composables/features/chat/useSessionDerivations'
 import { provideGitStatus } from '@/composables/features/file-tree/useGitStatus'
 import { useDrawerSplitWidth, useBottomDrawerHeight } from '@/composables/features/drawer/useDrawerSplitWidth'
+import { useDrawerContentDispatch } from '@/composables/features/drawer/useDrawerContentDispatch'
 import { focusComposer } from '@/composables/features/app/key-orchestrator'
 import { useFindInSurface } from '@/composables/features/find/useFindInSurface'
 import FindBar from '@/components/find/FindBar.vue'
 import { usePlanDrawerSync } from '@/composables/use-plan-drawer-sync'
 import { useChatStore } from '@/stores/chat'
-import { useSessionTrace } from '@/composables/features/trace/useSessionTrace'
-import TraceInspector from '@/components/panel/trace/TraceInspector.vue'
-import PlanDocsPanel from '@/components/panel/plan/PlanDocsPanel.vue'
-import BtwPanel from '@/components/panel/BtwPanel.vue'
 import Panel from '@/components/panel/Panel.vue'
 import PanelHeader from '@/components/panel/PanelHeader.vue'
 import ToastContainer from '@/components/ui/ToastContainer.vue'
-import GitPanel from '@/components/panel/GitPanel.vue'
-import CommandDocPanel from '@/components/panel/CommandDocPanel.vue'
-import SubagentTab from '@/components/panel/SubagentTab.vue'
-import BackgroundTaskDetailPanel from '@/components/extension/BackgroundTaskDetailPanel.vue'
 import AsyncErrorFallback from '@/components/ui/AsyncErrorFallback.vue'
 import { createLazyChunkRetry } from '@/components/ui/lazy-chunk-retry'
 
-// D-8 懒加载（§3.3 边界判据：首屏不渲染 + 重依赖）：DetailPane（DiffView 等专属依赖）在抽屉
-// detail tab、TerminalView（xterm + 4 addon）在底抽屉，各自激活才挂载 → 首次激活才拉 chunk
-// （xterm 移出首屏初始请求集合）。其余条件挂载面板（GitPanel/CommandDocPanel/SubagentTab）不拆：
-// 均无重第三方依赖（重依赖判据不满足），拆分只引入 async 边界无字节收益。
-// （WorkflowTab 懒加载挂载点 2026-10-19 随 drawer workflow tab 删除移除。）
+// D-8 懒加载（§3.3 边界判据：首屏不渲染 + 重依赖）：TerminalView（xterm + 4 addon）在底抽屉，
+// 激活才挂载 → 首次激活才拉 chunk（xterm 移出首屏初始请求集合）。抽屉内容面板的分派与
+// DetailPane 懒加载自容器扩展点统一 U6 起归 useDrawerContentDispatch（内容分派是独立变化
+// 原因：注册表词表/白名单扩员、组件绑定调整，与壳层布局无关）。
 // 错误兜底（§3.5 · D6 2026-10-03 用户裁决改版）：界面无重试按钮——装载失败由内部有界自动
 // 重试承接（createLazyChunkRetry：3 次 × 300ms 递增退避，失败 URL 提取 + ?t=N cache-busting
 // 绕过浏览器 module map 对失败模块的记忆化——同 URL 重试零网络请求、busting 才有真自愈，
@@ -311,15 +294,6 @@ import { createLazyChunkRetry } from '@/components/ui/lazy-chunk-retry'
 // 隔离」随按钮删除一并退役：重试不再由用户点击路由，各挂载点状态机天然独立，串线形态
 // 结构性消失；retryKey 重挂保留为自动重试的唯一驱动（Vue 实装语义见 lazy-chunk-retry.ts
 // 头注「重试驱动形态」）。
-const detailRetryState = createLazyChunkRetry(() => import('@/components/panel/DetailPane.vue'))
-const { retryKey: detailRetryKey } = detailRetryState
-const DetailPane = defineAsyncComponent({
-  loader: detailRetryState.loader,
-  loadingComponent: AsyncErrorFallback,
-  errorComponent: AsyncErrorFallback,
-  delay: 200,
-  onError: detailRetryState.onError,
-})
 const terminalRetryState = createLazyChunkRetry(() => import('@/components/panel/TerminalView.vue'))
 const { retryKey: terminalRetryKey } = terminalRetryState
 const TerminalView = defineAsyncComponent({
@@ -395,20 +369,16 @@ const { isOpen: bottomOpen } = useBottomDrawerControl()
 // 同一 pinia store 单例，接线读焦点分区不依赖注入宿主同层）。
 usePlanDrawerSync()
 
-/** bashTask tab 选中态（D5①：selectedBackgroundTaskId undefined=未选中 → 不注入本面板，
- *  DrawerPanel 空态 fallback 承载；bashTask 内容域选中态（selection/bash-task.ts）直读，
- *  写入方 = 列表 item 点击 D5④） */
-const { selectedBackgroundTaskId: selectedBashTaskId } = useBashTaskSelection()
-const bashTaskSelected = computed(() => selectedBashTaskId.value !== undefined)
-
-/** panel 的 session（git 状态数据源） */
+/** panel 的 session（git 状态数据源；同时是抽屉内容分派的会话透传源） */
 const panelSessionId = computed<string | null>(() => leaf.value?.sessionId ?? null)
 
-/** session-trace（A44）：trace 一级 tab 内容注入条件——选中 trace 条目（trace 视图分区 selectedKey）时
- *  注入 inspector 详情页，未选中走 DrawerPanel 空态 fallback。选中联动（切 tab + 开 drawer）
- *  在 useSessionTrace 的写入口（selectTraceEntry/revealTraceEntry）。 */
-const { partition: tracePartition } = useSessionTrace()
-const traceSelected = computed(() => tracePartition.value.selectedKey !== null)
+// ── 抽屉内容分派（容器扩展点统一 §6.1/U6）：数据源 = 容器位注册表派生视图 ──────────
+// 生效 tab（分区值失效回退内置默认项，§11.1-1 断言 3）+ host 内置组件表 / view ViewHost
+// 分派，机制与组件绑定在 useDrawerContentDispatch（独立变化原因，见该文件头注）。
+const { effectiveTab, activeHostPanel, activePluginView } = useDrawerContentDispatch({
+  drawerTab,
+  panelSessionId,
+})
 
 /**
  * 鼠标路径关闭/开关的焦点契约包装（§6.7「任一容器关闭后焦点回 composer」，display-containers

@@ -259,7 +259,7 @@ describe('U9: locale 消息无裸 @（linked-message 语法冲突检查）', () 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => logs.push(`error: ${String(args[0])}`))
     try {
       const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': zhCN } })
-      expect(i18n.global.t('settings.preset.builtinExtensionHint')).toContain('@zhushanwen/pi-agent-ext')
+      expect(i18n.global.t('settings.preset.builtinExtensionHint')).toContain('@zhushanwen/pi-host-internals')
       expect(logs).toEqual([])
     } finally {
       warnSpy.mockRestore()

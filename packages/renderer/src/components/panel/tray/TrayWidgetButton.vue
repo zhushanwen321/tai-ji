@@ -118,7 +118,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Component } from 'vue'
-import { CircleCheck, CircleDot, Clock, Flag, Gauge, LayoutGrid, ListChecks, ListTodo, SquareCheckBig, Target, Zap } from '@lucide/vue'
+import { Bot, CircleCheck, CircleDot, Clock, Flag, Gauge, LayoutGrid, ListChecks, ListTodo, SquareCheckBig, Target, Workflow, Zap } from '@lucide/vue'
 import { validateWidgetIconPaths } from '@zhushanwen/extension-protocol'
 import type { WidgetMeta } from '@zhushanwen/extension-protocol'
 import { Button } from '@/components/ui/button'
@@ -174,6 +174,11 @@ const WIDGET_ICON_ENTRIES: ReadonlyArray<readonly [string, Component]> = [
   ['zap', Zap],
   ['flag', Flag],
   ['gauge', Gauge],
+  // subagent 域图标名（与右抽屉 subagent tab 的 icon 同名——drawer registry SUBAGENT_ENTRY）
+  ['bot', Bot],
+  // workflow 域图标名（容器扩展点统一 §6.6/U10：托盘 workflow 件迁插件 widget 树，
+  // meta.icon='workflow' 由本 registry 解析——原宿主 built-in 件的 Workflow 图标同源）
+  ['workflow', Workflow],
 ]
 
 /** registry 查表（模块级常量表，非缓存：仅归一化键名映射，无运行时写方） */

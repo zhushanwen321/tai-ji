@@ -26,7 +26,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { computed, nextTick } from 'vue'
 import { InternalEventBus, MessageBusBridge, providePlatform, registerMountPoints, scanContributions, type ContributionRegistry, ActivationManager, CommandRegistry, type ContributionRecord, type HeaderActionEntry } from '@taiji/core'
-import { dispatchCrossSession } from '@taiji/core/transport/api'
+import { dispatchCrossSession, dispatchGlobal } from '@taiji/core/transport/api'
 import {
   getExtensionBus,
   initExtensionHostBridge,
@@ -49,6 +49,7 @@ import {
 } from '@taiji/ui/extension-host'
 import { connect, disconnect } from '@taiji/core/transport/ws-client'
 import { createMockPlatform } from '@taiji/core/transport/mock/mock-ws'
+import type { PluginInfo } from '@taiji/shared'
 
 // mock ws-client.send：MF-4 断言 mountPoints.sync 发送（真实 send 在单测环境不可观测）。
 // D5 后 bridge 直连 core ws-client——mock 须拦截该模块本身；importOriginal 保留真实
@@ -83,6 +84,21 @@ function disposeLastInit(): void {
   __testing.lastInitHandles?.dispose()
   __testing.lastInitHandles = null
 }
+
+/**
+ * 本文件挂载点全量快照（U3 起含容器位三族）：bootstrap registerMountPoints 注册序即
+ * mountPoints.list() 序，断言数组随注册表同步更新（单一事实源 = bootstrap.ts 注册序列）。
+ */
+const ALL_MOUNT_POINTS = [
+  'sidebar.tab',
+  'panel.header',
+  'composer.toolbar',
+  'provider.authorize',
+  'provider.detail-extra',
+  'drawer.tab',
+  'overlay.content',
+  'settings.section',
+]
 
 describe('initExtensionHostBridge provide CompanionBand 契约（FR2/FR7，TC10）', () => {
   afterEach(disposeLastInit)
@@ -225,7 +241,7 @@ describe('MF-2 响应式桥（分区后建时序 + global scope）', () => {
       type: 'view',
       placement: 'sidebar.tab',
       available: false,
-      view: { viewType: 'gui', title: 'Demo', initialVisibility: 'hidden' },
+      view: { viewType: 'gui', title: 'Demo' },
     })
 
     // 静态映射路径被真实覆盖（防止移除动态段时改坏 staticViews 映射零报警）
@@ -234,7 +250,6 @@ describe('MF-2 响应式桥（分区后建时序 + global scope）', () => {
       viewId: 'demo-view',
       title: 'Demo',
       pluginId: 'demo-plugin',
-      initialVisibility: 'hidden',
     })
 
     // placement 过滤保持：非 sidebar.tab 的 view 声明不进清单
@@ -244,7 +259,7 @@ describe('MF-2 响应式桥（分区后建时序 + global scope）', () => {
       type: 'view',
       placement: 'panel.header',
       available: false,
-      view: { viewType: 'gui', title: 'Panel', initialVisibility: 'hidden' },
+      view: { viewType: 'gui', title: 'Panel' },
     })
     expect(viewsSource.getViews('s1').map((v) => v.viewId)).toEqual(['demo-view'])
   })
@@ -298,7 +313,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(1)
     expect(transportSendSpy).toHaveBeenCalledWith({
       type: 'plugin.mountPoints.sync',
-      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'provider.authorize', 'provider.detail-extra'] },
+      payload: { mountPoints: ALL_MOUNT_POINTS },
     })
   })
 
@@ -317,7 +332,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
 
     expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(2)
     expect(syncCallsOf('plugin.mountPoints.sync').at(-1)).toEqual([
-      { type: 'plugin.mountPoints.sync', payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'provider.authorize', 'provider.detail-extra'] } },
+      { type: 'plugin.mountPoints.sync', payload: { mountPoints: ALL_MOUNT_POINTS } },
     ])
   })
 
@@ -330,7 +345,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
 
     // 重复 init：dispose-and-rebuild 使新 watcher 绑定新 registry 实例（setExtensionRegistries
     // 已换新）。register:false 使新实例快照为空表——若退回模块级布尔检查（watcher 永久闭包
-    // 绑定第一次 init 的实例），此处上报的是实例 1 残留快照（5 个挂载点），空表断言即红。
+    // 绑定第一次 init 的实例），此处上报的是实例 1 残留快照（8 个挂载点），空表断言即红。
     initBridge({ register: false })
     // 已 connected → 新 watcher immediate 同步补发（无需推进 timer）
     expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(2)
@@ -345,7 +360,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     await vi.advanceTimersByTimeAsync(200)
     expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(3)
     expect(syncCallsOf('plugin.mountPoints.sync').at(-1)).toEqual([
-      { type: 'plugin.mountPoints.sync', payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'provider.authorize', 'provider.detail-extra'] } },
+      { type: 'plugin.mountPoints.sync', payload: { mountPoints: ALL_MOUNT_POINTS } },
     ])
   })
 })
@@ -431,6 +446,25 @@ describe('isVisibleHeaderAction（可见性谓词单点：渲染过滤与聚合�
 
   it('④ 声明缺省（headerAction 段为空）→ false——predicate 同时收窄掉缺省形状', () => {
     expect(isVisibleHeaderAction(declOf(null), pushedEntry)).toBe(false)
+  })
+
+  it('⑤ 结构化 activation 且无 commandId：未推送也可渲染（静态入口自带可见性依据，§6.3 连带明确）', () => {
+    // 容器扩展点统一 §6.3：fail-safe（未推送 = 不可见）只约束依赖运行时推送的入口；
+    // 结构化 activation 是声明即存在的静态入口，要求先推一次 updateHeaderAction 才可见
+    // 是无意义仪式——overlay/drawer 导航与 command 链三种 kind 在 runtimeState=undefined
+    // 时均直接可见
+    expect(isVisibleHeaderAction(declOf({ activation: { kind: 'overlay', tabId: 'my.panel' }, title: 'T' }), undefined)).toBe(true)
+    expect(isVisibleHeaderAction(declOf({ activation: { kind: 'drawer', tabId: 'ui.doc' }, title: 'T' }), undefined)).toBe(true)
+    expect(isVisibleHeaderAction(declOf({ activation: { kind: 'command' }, title: 'T' }), undefined)).toBe(true)
+    // 对照：徽标兼容值（scheduler-overlay）与无 activation 纯命令链声明维持 fail-safe
+    expect(isVisibleHeaderAction(declOf({ activation: 'scheduler-overlay', title: 'T' }), undefined)).toBe(false)
+    expect(isVisibleHeaderAction(declOf({ commandId: 'demo.open', title: 'T' }), undefined)).toBe(false)
+  })
+
+  it('⑥ 结构化 activation 推送 hidden=true 后不可见（运行时开关对静态入口同样生效）', () => {
+    const decl = declOf({ activation: { kind: 'overlay', tabId: 'my.panel' }, title: 'T' })
+    expect(isVisibleHeaderAction(decl, hiddenEntry)).toBe(false)
+    expect(isVisibleHeaderAction(decl, { ...hiddenEntry, hidden: false })).toBe(true)
   })
 })
 
@@ -671,5 +705,107 @@ describe('插件 UI 快照拉取（ADR-0097 拉为主：connected 全量恢复 +
     const frame = snapshotCalls[0][0] as { type: string; payload: unknown }
     expect(frame.type).toBe('plugin.ui.snapshot')
     expect(frame.payload).toEqual({ mountId: 'provider.authorize', pluginId: 'plug-a', viewId: 'flow' })
+  })
+})
+
+// ── U4 声明通路（config.plugins 订阅 → loadExternal + routeAll 重跑；unregistered 去重 warn）──
+
+describe('U4 声明通路（config.plugins 订阅 + routeAll 接线 + unregistered-mount-point 告警）', () => {
+  afterEach(() => {
+    disposeLastInit()
+    vi.restoreAllMocks()
+  })
+
+  /** 装配桥 + bootstrap 注册（订阅在 scanContributions 内建立），返回当次注册表实例 */
+  function initBridge(): ContributionRegistry {
+    const provided: Array<{ key: unknown; value: unknown }> = []
+    const app = {
+      provide(key: unknown, value: unknown) {
+        provided.push({ key, value })
+        return app
+      },
+    }
+    initExtensionHostBridge(app as never)
+    const handles = __testing.lastInitHandles
+    if (!handles) throw new Error('initExtensionHostBridge 未写入 __testing.lastInitHandles')
+    void simulateBootstrapRegistration()
+    return handles.contributions
+  }
+
+  const pluginInfoOf = (pluginId: string, contributes: PluginInfo['contributes']): PluginInfo => ({
+    pluginId,
+    version: '1.0.0',
+    displayName: pluginId,
+    description: '',
+    status: 'active',
+    trustLevel: 'trusted',
+    enabled: true,
+    ...(contributes !== undefined ? { contributes } : {}),
+  })
+
+  /** config.plugins 帧（initial-state 与运行时广播在 renderer 侧同通道同形状——global 通道） */
+  const pluginsFrame = (plugins: PluginInfo[]) => ({
+    type: 'config.plugins' as const,
+    id: `plugins-test-${plugins.map((p) => p.pluginId).join('_')}`,
+    payload: { plugins },
+  })
+
+  it('U4-A: config.plugins 帧到达 → external 声明进注册表，routeAll 重跑使已注册 placement available=true', () => {
+    const contributions = initBridge()
+    // 通路接通前 external 声明不存在（旧实现恒 loadExternal([])）
+    expect(contributions.getContributions({ pluginId: 'probe' })).toEqual([])
+
+    dispatchGlobal(pluginsFrame([
+      pluginInfoOf('probe', { views: [{ id: 'probe.tab', title: '探针面板', placement: 'drawer.tab' }] }),
+    ]))
+
+    const records = contributions.getContributions({ pluginId: 'probe' })
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ type: 'view', contributionId: 'probe.tab', placement: 'drawer.tab' })
+    // routeAll 接线（§7.2）：drawer.tab 已由 bootstrap step4 注册 → available=true
+    expect(records[0].available).toBe(true)
+  })
+
+  it('U4-B: 同一帧重复到达不翻倍（订阅每次广播重跑幂等 loadExternal；builtin 静态项共存）', () => {
+    const contributions = initBridge()
+    const frame = pluginsFrame([
+      pluginInfoOf('probe', { views: [{ id: 'probe.tab', title: '探针面板', placement: 'drawer.tab' }] }),
+      pluginInfoOf('scheduler-manager', {}),
+    ])
+    dispatchGlobal(frame)
+    dispatchGlobal(frame)
+    expect(contributions.getContributions({ pluginId: 'probe' })).toHaveLength(1)
+    // 空声明（{}）插件不触碰静态表（覆盖粒度规则的桥端整体行为，§6.2）
+    expect(contributions.getContributions({ pluginId: 'scheduler-manager', type: 'headerAction' })).toHaveLength(1)
+  })
+
+  it('U4-C: 未注册挂载点声明 → available=false 且 console.warn 按去重键一次（§6.14）', () => {
+    const contributions = initBridge()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const frame = pluginsFrame([
+      pluginInfoOf('probe', { views: [{ id: 'probe.bad', title: '坏声明', placement: 'nonexistent.slot' }] }),
+    ])
+    dispatchGlobal(frame)
+    dispatchGlobal(frame)
+    expect(contributions.getContributions({ pluginId: 'probe' })[0].available).toBe(false)
+    // 同一无效声明双渠道各告警一次、各自幂等去重（词表校验进注册表后，未注册挂载点的
+    // placement 必然同时在词表外——两渠道恒定成对出声，按前缀分组断言；二次广播不翻倍）：
+    // ① 声明侧：ContentSlotRegistry.loadExternal 的 unknown-placement（warnOnce 按 message 去重）
+    // ② 路由侧：routeAll → 桥内 unregistered-mount-point 订阅（按 pluginId+contributionId+种类 去重）
+    const warnsOf = (prefix: string) => warnSpy.mock.calls.filter((c) => String(c[0]).startsWith(prefix))
+    expect(warnsOf('[content-slot-registry]')).toHaveLength(1)
+    expect(warnsOf('[extension-host]')).toHaveLength(1)
+    // 不同贡献是不同去重键（两渠道同理），各自告警一次；同键贡献（probe.bad）不重复告警
+    warnSpy.mockClear()
+    dispatchGlobal(pluginsFrame([
+      pluginInfoOf('probe', {
+        views: [
+          { id: 'probe.bad', title: '坏声明', placement: 'nonexistent.slot' },
+          { id: 'probe.bad2', title: '坏声明2', placement: 'nonexistent.slot' },
+        ],
+      }),
+    ]))
+    expect(warnsOf('[content-slot-registry]')).toHaveLength(1)
+    expect(warnsOf('[extension-host]')).toHaveLength(1)
   })
 })

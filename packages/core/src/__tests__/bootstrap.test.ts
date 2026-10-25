@@ -9,6 +9,7 @@ import {
   registerMountPoints,
   scanContributions,
   setExtensionRegistries,
+  setPluginListSource,
   type BootstrapOptions,
 } from '../bootstrap'
 import { createFakeWebSocket } from '../transport/__tests__/helpers/fake-websocket'
@@ -124,7 +125,7 @@ describe('步骤真实现（非 spyOn 路径）', () => {
     await expect(restoreSessions()).resolves.toBeUndefined()
   })
 
-  it('registerMountPoints 注入 registry 后注册 5 个挂载点（Tier 1 三点 + Provider 页两点）', async () => {
+  it('registerMountPoints 注入 registry 后注册 8 个挂载点（Tier 1 三点 + Provider 页两点 + 容器位三族）', async () => {
     const register = vi.fn()
     setExtensionRegistries({
       mountPoints: { register } as never,
@@ -139,20 +140,38 @@ describe('步骤真实现（非 spyOn 路径）', () => {
       'composer.toolbar',
       'provider.authorize',
       'provider.detail-extra',
+      // 容器位挂载点三族（容器扩展点统一 §7.2 挂载点注册：U3 新增）
+      'drawer.tab',
+      'overlay.content',
+      'settings.section',
     ])
   })
 
-  it('scanContributions 注入 registry 后 registerBuiltin + loadExternal([])', async () => {
+  it('scanContributions 注入 registry 后 registerBuiltin + routeAll 首跑 + 订阅回调注入声明', async () => {
     const registerBuiltin = vi.fn()
     const loadExternal = vi.fn()
+    const routeAll = vi.fn()
     setExtensionRegistries({
       mountPoints: { register: vi.fn() } as never,
-      contributions: { registerBuiltin, loadExternal } as never,
+      contributions: { registerBuiltin, loadExternal, routeAll } as never,
+    })
+    // 订阅源 stub（生产 = 壳注入 onPlugins）：捕获 handler 供帧到达断言
+    let listHandler: ((plugins: never[]) => void) | undefined
+    setPluginListSource((handler) => {
+      listHandler = handler as (plugins: never[]) => void
+      return () => {}
     })
 
     await scanContributions()
 
     expect(registerBuiltin).toHaveBeenCalledTimes(1)
+    // 声明通路（容器扩展点统一 §6.2）：不再同步传空数组——external 声明改由订阅回调注入
+    expect(loadExternal).not.toHaveBeenCalled()
+    // routeAll 接线（§7.2）：首跑对齐 step4 已注册挂载点
+    expect(routeAll).toHaveBeenCalledTimes(1)
+    // 订阅通路：config.plugins 到达 → loadExternal + routeAll 重跑（幂等，routeAll 计 2 次）
+    listHandler?.([])
     expect(loadExternal).toHaveBeenCalledWith([])
+    expect(routeAll).toHaveBeenCalledTimes(2)
   })
 })

@@ -28,10 +28,10 @@
  *   两跳转译是事故高发区——对照 workflow_run 的 name+args 形态）。
  * - 批量成员是一次性成员：不可 message/续聊（workflow-origin record 由 messageHandler
  *   拒绝），结果在 run 收尾时以一条通知（notifyDone）到达。
- * - 不构造 `details.__gui__`：GUI 挂载按 WORKFLOW_TOOL_NAMES 集合分流，批量块走
- *   workflow 块分支（恒折叠单行 + openWorkflowDrawer）；`__gui__` 的渲染点在普通
- *   tool 分支（v-else）的展开区内，isWorkflow 分支无展开路径不消费——构造即死代码
- *   （D8 裁决；workflow_run 的 `__gui__` 死构造已随之删除，isWorkflow 集合内工具零消费）。
+ * - GUI 协议（容器扩展点统一 §7.4 workflow 层 2）：RPC 模式下 execute 经 withGuiAttach
+ *   为 details 附加 `__gui__` 成员清单树（构造单点 buildBatchGui）——撤销 D8「isWorkflow
+ *   块分支不消费故不构造」裁决（该裁决随宿主 WorkflowRow 专属行组件删除、ToolRow 通用
+ *   渲染路径承接而失效；本工具从未构造过 `__gui__`，此处是新增构造而非恢复被删分支）。
  *
  * 层归属：Interface。依赖 Pi SDK + core lifecycle/registry + reentry-guard。
  */
@@ -39,6 +39,12 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { Static } from "typebox";
+// GUI 协议（容器扩展点统一 §7.4 workflow 层 2：批量工具产成员清单树）。
+import {
+  guiComponent,
+  type GuiComponent,
+  type GuiRenderResult,
+} from "@zhushanwen/extension-protocol";
 
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
 // formatAvailableWorkflowRefs：拒单可用清单单源（core launcher，副本已并入）。
@@ -62,7 +68,10 @@ import {
   buildRunSpecFromScript,
   optionSlugSuffix,
   renderTextResult,
+  withGuiAttach,
 } from "./tool-shared.ts";
+// GUI 上下文最小子集构造（Pi ExtensionContext → 协议 GuiContext）。
+import { toGuiCtx } from "../gui/gui-mappers.ts";
 import type { RunStartDetails, WorkflowToolResult } from "./tool-result.ts";
 
 // ── Constants ────────────────────────────────────────────────
@@ -88,8 +97,9 @@ export type SubagentsToolParams = Static<typeof SubagentsParams>;
 /**
  * `subagent_batch` tool 的 details。
  *
- * 单形态（无 action 判别式——本工具只有一个动作）。刻意不含 `__gui__`（D8）：
- * 批量块由集合分流走 workflow 块分支，不消费 GUI 描述符。
+ * 单形态（无 action 判别式——本工具只有一个动作）。`__gui__`（容器扩展点统一 §7.4
+ * workflow 层 2）：RPC 模式经 withGuiAttach 附加的成员清单树（构造单点 buildBatchGui），
+ * 宿主 ToolRow 通用渲染路径消费；非 RPC 模式不构造。
  */
 export interface SubagentsToolDetails extends RunStartDetails {
   /** 启动即返回（后台运行），恒 "running"。 */
@@ -99,10 +109,37 @@ export interface SubagentsToolDetails extends RunStartDetails {
   /** 生效标签（模型提供的 slug，或 handler 生成的 fan-out-<时间短码>）。 */
   slug: string;
   taskCount: number;
+  __gui__?: GuiRenderResult;
 }
 
 /** Result returned by the `subagent_batch` tool's execute（公共骨架见 tool-result.ts）。 */
 type SubagentsExecuteResult = WorkflowToolResult<SubagentsToolDetails>;
+
+// ── GUI 协议构造（容器扩展点统一 §7.4 workflow 层 2）────────────────────────
+
+/** 成员行 task 摘要截断长度（对话流树行单行可读量级；全文在 LLM 文本面与 record）。 */
+const BATCH_TASK_LABEL_MAX = 80;
+
+/**
+ * 批量启动回执的成员清单树：每成员一行（label = `执行者 · task 摘要`，running/circle
+ * ——启动即返回，全部成员在途）。启动时刻无成员级状态分化（成员一次性、结果经
+ * notifyDone 汇总通知），树是「派发了什么」的可见清单，不是进度面。
+ */
+export function buildBatchGui(details: SubagentsToolDetails, tasks: SubagentsToolParams["tasks"]): GuiComponent {
+  return guiComponent("list-tree", {
+    items: tasks.map((member) => {
+      const task = typeof member.task === "string" ? member.task.trim() : "";
+      const taskLabel = task.length > BATCH_TASK_LABEL_MAX ? `${task.slice(0, BATCH_TASK_LABEL_MAX)}…` : task;
+      const agent = member.agent ?? "(default)";
+      return {
+        label: `${agent} · ${taskLabel}`,
+        status: "running" as const,
+        icon: "circle" as const,
+        depth: 0,
+      };
+    }),
+  });
+}
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -341,7 +378,16 @@ export function registerSubagentsTool(
         throw new Error(REENTRY_BUSY_MESSAGE);
       }
       try {
-        return await runSubagentsBatch(params, deps, signal);
+        // [容器扩展点统一 §7.4 workflow 层 2] RPC 模式附加 __gui__ 成员清单树（attach
+        // 入参 = result.details——workflow_run 同款结构兼容陷阱；构造需要 tasks 原文，
+        // details 只携带 taskCount，经闭包捕获入参传入）。
+        const started = await runSubagentsBatch(params, deps, signal);
+        return {
+          ...started,
+          details: withGuiAttach(started.details, toGuiCtx(_ctx), (details) =>
+            buildBatchGui(details, params.tasks),
+          ),
+        };
       } finally {
         releaseReentryGuard(reentryRef);
       }

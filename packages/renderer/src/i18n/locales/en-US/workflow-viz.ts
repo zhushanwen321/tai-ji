@@ -8,6 +8,8 @@ export default {
     // overlay shell
     overlayTitle: 'Workflow live view',
     overlayClose: 'Close',
+    // Plugin overlay aria-label (§6.8 plugin carrier; declaration title pending registry wiring, generic word for now)
+    overlayPluginTitle: 'Plugin panel',
     overlayTabRuns: 'Runs',
     overlayTabScheduler: 'Scheduled tasks',
     overlayTabCanvas: 'Canvas',

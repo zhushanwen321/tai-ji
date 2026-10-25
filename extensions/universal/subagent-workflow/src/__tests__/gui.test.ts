@@ -5,17 +5,18 @@
  *   1. gui-mappers —— mapRunStatus / mapRunIcon（子代理执行状态 → 协议三态 + 图标）与
  *      toGuiCtx（ExtensionContext → GuiContext 最小子集）
  *   2. adapter     —— ctx.mode 分发契约（rpc → __gui__ 附加，其余模式不附加）
- *   3. 构造器      —— buildGuiComponent（subagent）/ buildScriptGui（script）按
- *      action 构造对应 GuiComponent，验证 type 字段 + 子组件结构（workflow tool 走
- *      isWorkflow 块分支不消费 `__gui__`，无构造器——D8）
+ *   3. 构造器      —— buildGuiComponent（subagent）/ buildWorkflowGui（workflow）/
+ *      buildBatchGui（batch）/ buildScriptGui（script）按 action 构造对应
+ *      GuiComponent，验证 type 字段 + 子组件结构（workflow/batch 两构造器为容器
+ *      扩展点统一 §7.4 workflow 层 2 恢复/新增——撤销 D8「不构造」裁决）
  *
  * isGuiCapable 属协议包符号，其模式判定矩阵由 packages/extension-protocol 的
  * helpers.test.ts 锁定，不在此重复。
  *
- * 构造器入参是纯数据类型（AdapterInput / WorkflowScriptToolDetails 联合），不需
- * mock 领域 service，直接构造对象字面量即可。状态/icon 映射的正确性已在
- * mapRunStatus/mapRunIcon 用例里独立覆盖，构造器用例只验证「正确组件 type +
- * items 结构 + 映射联动」。
+ * 构造器入参是纯数据类型（AdapterInput / WorkflowToolDetails / SubagentsToolDetails /
+ * WorkflowScriptToolDetails 联合），不需 mock 领域 service，直接构造对象字面量即可。
+ * 状态/icon 映射的正确性已在 mapRunStatus/mapRunIcon 用例里独立覆盖，构造器用例只
+ * 验证「正确组件 type + items 结构 + 映射联动」。
  */
 import type { GuiContext } from "@zhushanwen/extension-protocol";
 import { describe, expect, it } from "vitest";
@@ -23,8 +24,12 @@ import { describe, expect, it } from "vitest";
 import { mapRunIcon, mapRunStatus, toGuiCtx } from "../interface/gui/gui-mappers.ts";
 import { adapter, buildGuiComponent } from "../interface/gui/subagent-actions.ts";
 import type { AdapterInput } from "../interface/gui/subagent-actions.ts";
+import { buildBatchGui } from "../interface/tool/tool-subagents.ts";
+import type { SubagentsToolDetails } from "../interface/tool/tool-subagents.ts";
 import { buildScriptGui } from "../interface/tool/tool-workflow-script.ts";
 import type { WorkflowScriptToolDetails } from "../interface/tool/tool-workflow-script.ts";
+import { buildWorkflowGui } from "../interface/tool/tool-workflow.ts";
+import type { WorkflowToolDetails } from "../interface/tool/tool-workflow.ts";
 
 // ============================================================
 // mapRunStatus / mapRunIcon —— 子代理执行状态（ExecutionStatus）→ 三态 + 图标
@@ -368,6 +373,230 @@ describe("S6: ctx.mode dispatches __gui__ output correctly", () => {
   it("ctx=undefined → details.__gui__ is undefined (backward compat)", () => {
     const result = adapter(makeStartInput(), undefined);
     expect(result.details.__gui__).toBeUndefined();
+  });
+});
+
+// ============================================================
+// buildWorkflowGui —— workflow tool details 的 GUI 构造（§7.4 恢复）
+// ============================================================
+//
+// WorkflowToolDetails 五变体（run / status×mode / abort / resume）。run→list-tree(1
+// item)，status:list→list-tree(N items)，status:run→list-tree(run 行 + 成员行)，
+// abort→stats-line，resume→list-tree(1 item)。状态映射走 runTreePresentation
+// （running/interrupted/done+reason 穷尽——经构造器输出侧断言联动验证）。
+
+describe("buildWorkflowGui", () => {
+  describe("action: run", () => {
+    it("running → list-tree，单 item status=running icon=circle", () => {
+      const details: WorkflowToolDetails = {
+        action: "run",
+        runId: "abcdefgh1234",
+        status: "running",
+        name: "build",
+        slug: "ci",
+      };
+      const comp = buildWorkflowGui(details);
+
+      expect(comp.type).toBe("list-tree");
+      const props = comp.props as { items: Array<{ label: string; status: string; icon: string }> };
+      expect(props.items).toHaveLength(1);
+      expect(props.items[0].status).toBe("running");
+      expect(props.items[0].icon).toBe("circle");
+      // label = name + slug + runId 前 8 字符
+      expect(props.items[0].label).toBe("build ci abcdefgh");
+    });
+
+    it("not_found → stats-line danger（错误状态不渲染为成功）", () => {
+      const details: WorkflowToolDetails = {
+        action: "run",
+        runId: "",
+        status: "not_found",
+        name: "missing",
+      };
+      const comp = buildWorkflowGui(details);
+
+      // not_found 是脚本未找到的逻辑错误（isError:true），短路为 stats-line danger，
+      // 不走通用映射的 done/check 成功语义（避免绿色对勾与错误文案矛盾）。
+      expect(comp.type).toBe("stats-line");
+      const props = comp.props as { items: Array<{ label: string; value: string; severity: string }> };
+      expect(props.items[0].label).toBe("run");
+      expect(props.items[0].value).toBe("not_found");
+      expect(props.items[0].severity).toBe("danger");
+    });
+
+    it("无 slug 时 label 不含双空格（filter(Boolean).join 生效）", () => {
+      const details: WorkflowToolDetails = {
+        action: "run",
+        runId: "1234567890",
+        status: "running",
+        name: "deploy",
+      };
+      const comp = buildWorkflowGui(details);
+      const props = comp.props as { items: Array<{ label: string }> };
+      // slug 缺失 → filter(Boolean) 过滤掉空段 → "deploy 12345678"（单空格）
+      expect(props.items[0].label).toBe("deploy 12345678");
+    });
+  });
+
+  describe("action: status (mode:list)", () => {
+    it("多 runs → list-tree，状态映射穷尽联动（running/done/failed）", () => {
+      const details: WorkflowToolDetails = {
+        action: "status",
+        mode: "list",
+        runs: [
+          { runId: "run11111", name: "build", slug: "b", status: "running" },
+          { runId: "run22222", name: "test", slug: "t", status: "done", reason: "completed" },
+          { runId: "run33333", name: "deploy", slug: "d", status: "done", reason: "failed" },
+        ],
+      };
+      const comp = buildWorkflowGui(details);
+
+      expect(comp.type).toBe("list-tree");
+      const props = comp.props as { items: Array<{ label: string; status: string; icon: string }> };
+      expect(props.items).toHaveLength(3);
+
+      // running → running/circle
+      expect(props.items[0].status).toBe("running");
+      expect(props.items[0].icon).toBe("circle");
+
+      // done (completed) → done/check
+      expect(props.items[1].status).toBe("done");
+      expect(props.items[1].icon).toBe("check");
+
+      // done (failed) → failed/cross
+      expect(props.items[2].status).toBe("failed");
+      expect(props.items[2].icon).toBe("cross");
+    });
+
+    it("interrupted → 无圆点 + pause 图标（暂停态不作成败断言）", () => {
+      const details: WorkflowToolDetails = {
+        action: "status",
+        mode: "list",
+        runs: [{ runId: "run44444", name: "ghost", status: "interrupted" }],
+      };
+      const comp = buildWorkflowGui(details);
+      const props = comp.props as { items: Array<{ status?: string; icon: string }> };
+      expect(props.items[0].status).toBeUndefined();
+      expect(props.items[0].icon).toBe("pause");
+    });
+
+    it("done + budget_limited → failed（终止性因落失败档）", () => {
+      const details: WorkflowToolDetails = {
+        action: "status",
+        mode: "list",
+        runs: [{ runId: "run55555", name: "hog", status: "done", reason: "budget_limited" }],
+      };
+      const comp = buildWorkflowGui(details);
+      const props = comp.props as { items: Array<{ status: string; icon: string }> };
+      expect(props.items[0].status).toBe("failed");
+      expect(props.items[0].icon).toBe("cross");
+    });
+
+    it("空 runs → list-tree with empty items", () => {
+      const details: WorkflowToolDetails = { action: "status", mode: "list", runs: [] };
+      const comp = buildWorkflowGui(details);
+
+      expect(comp.type).toBe("list-tree");
+      const props = comp.props as { items: unknown[] };
+      expect(props.items).toEqual([]);
+    });
+  });
+
+  describe("action: status (mode:run)", () => {
+    it("run 行 depth 0 + 成员行 depth 1（memberViewLine 文本同源）+ 截断省略行", () => {
+      const details: WorkflowToolDetails = {
+        action: "status",
+        mode: "run",
+        run: { runId: "run66666", name: "build", slug: "ci", status: "running" },
+        members: [
+          { stepIndex: 0, state: "running", agent: "reviewer", model: "default" },
+        ],
+        truncated: true,
+        total: 12,
+      };
+      const comp = buildWorkflowGui(details);
+
+      expect(comp.type).toBe("list-tree");
+      const props = comp.props as { items: Array<{ label: string; depth: number }> };
+      // 首行 = run 摘要行（depth 0，含 failed N/M 文本）
+      expect(props.items[0].depth).toBe(0);
+      expect(props.items[0].label).toContain("build");
+      expect(props.items[0].label).toContain("0/1");
+      // 成员行 depth 1（memberViewLine 文本含执行者名）
+      expect(props.items[1].depth).toBe(1);
+      expect(props.items[1].label).toContain("reviewer");
+      // 截断省略行在末尾
+      expect(props.items[props.items.length - 1].label).toContain("omitted");
+    });
+  });
+
+  describe("action: abort → stats-line", () => {
+    it("abort → stats-line，label=abort value=runId 前 8 字符，severity=warn（破坏性终止非成功完成）", () => {
+      const details: WorkflowToolDetails = {
+        action: "abort",
+        runId: "abortId1234",
+        status: "done",
+        reason: "aborted",
+      };
+      const comp = buildWorkflowGui(details);
+      expect(comp.type).toBe("stats-line");
+      const props = comp.props as { items: Array<{ label: string; value: string; severity: string }> };
+      expect(props.items[0].label).toBe("abort");
+      expect(props.items[0].value).toBe("abortId1");
+      expect(props.items[0].severity).toBe("warn");
+    });
+  });
+
+  describe("action: resume", () => {
+    it("running → list-tree，单 item label=runId 前 8 字符（resume 变体无 name 段）", () => {
+      const details: WorkflowToolDetails = {
+        action: "resume",
+        runId: "resumeId123",
+        status: "running",
+      };
+      const comp = buildWorkflowGui(details);
+      expect(comp.type).toBe("list-tree");
+      const props = comp.props as { items: Array<{ label: string; status: string }> };
+      expect(props.items[0].label).toBe("resumeId");
+      expect(props.items[0].status).toBe("running");
+    });
+  });
+});
+
+// ============================================================
+// buildBatchGui —— subagent_batch 启动回执的成员清单树（§7.4 新增构造）
+// ============================================================
+
+describe("buildBatchGui", () => {
+  const baseDetails: SubagentsToolDetails = {
+    runId: "batchId1234",
+    status: "running",
+    scriptName: "fan-out",
+    slug: "fan-out-abc",
+    taskCount: 2,
+  };
+
+  it("每成员一行：label = 执行者 · task 摘要，status=running icon=circle", () => {
+    const comp = buildBatchGui(baseDetails, [
+      { task: "review the login flow", agent: "/abs/a.md" },
+      { task: "write tests" },
+    ]);
+    expect(comp.type).toBe("list-tree");
+    const props = comp.props as { items: Array<{ label: string; status: string; icon: string }> };
+    expect(props.items).toHaveLength(2);
+    expect(props.items[0].label).toBe("/abs/a.md · review the login flow");
+    // 未指定执行者的成员落 (default) 占位（与 args 组装的运行级回填同语义的展示形态）
+    expect(props.items[1].label).toBe("(default) · write tests");
+    expect(props.items[0].status).toBe("running");
+    expect(props.items[0].icon).toBe("circle");
+  });
+
+  it("超长 task 截断到 80 字符 + 省略号", () => {
+    const long = "x".repeat(120);
+    const comp = buildBatchGui(baseDetails, [{ task: long }]);
+    const props = comp.props as { items: Array<{ label: string }> };
+    expect(props.items[0].label.endsWith("…")).toBe(true);
+    expect(props.items[0].label.length).toBeLessThan(long.length);
   });
 });
 

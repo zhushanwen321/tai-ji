@@ -12,6 +12,11 @@
  * 被动失联后的断点续跑，workflow-run-resume-revision U3/D14），不是把活跃 run 暂停再继续。
  * 一次性生命周期：run 不可挂起（pause 已废弃），提前停止用 abort，要新结果开新 run。
  *
+ * GUI 协议（容器扩展点统一 §7.4 workflow 层 2）：RPC 模式下 execute 经 withGuiAttach
+ * 为 details 附加 `__gui__` 组件树（构造单点 buildWorkflowGui）——撤销 D8「isWorkflow
+ * 块分支不消费故不构造」裁决（该裁决随宿主 WorkflowRow 专属行组件删除、ToolRow 通用
+ * 渲染路径承接而失效，恢复产树）。
+ *
  * 层归属：Interface。依赖 Pi SDK + Engine lifecycle/launcher + helpers。
  */
 
@@ -22,6 +27,15 @@ import os from "node:os";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
+// GUI 协议（容器扩展点统一 §7.4 workflow 层 2：撤销 D8「不构造 __gui__」裁决恢复产树
+// ——工具结果 details 附带组件树，宿主 ToolRow 通用渲染路径消费）。
+import {
+  guiComponent,
+  type GuiComponent,
+  type GuiRenderResult,
+  type TreeItem,
+  type TreeItemIcon,
+} from "@zhushanwen/extension-protocol";
 
 const logger = getLogger("tool-workflow");
 import { Text } from "@earendil-works/pi-tui";
@@ -76,7 +90,10 @@ import {
   optionSlugSuffix,
   renderTextResult,
   throwPrefixed,
+  withGuiAttach,
 } from "./tool-shared.ts";
+// GUI 上下文最小子集构造（Pi ExtensionContext → 协议 GuiContext，ui.custom 签名冲突规避）。
+import { toGuiCtx } from "../gui/gui-mappers.ts";
 
 // ── Parameter schema（D3 拆分：workflow_run + workflow_control）─────────────
 
@@ -239,17 +256,22 @@ interface RunSummary {
  * Discriminated union of the workflow tools'（workflow_run / workflow_control）`details` payloads.
  *
  * Discriminant: `action`. Each action's details shape is explicitly typed so
- * downstream consumers (structured-output) can narrow without unsafe casts.
+ * downstream consumers (GUI list-tree renderer, structured-output) can narrow
+ * without unsafe casts.
  *
  * status 双变体（subagent-tool-interface-refactor §3.1.3，`mode` 为新增判别字段，
  * additive：list 变体仍带 runs，既有消费方读 details.runs 行为不变）：
  * - mode:"list" = 无 runId 列表（内存保留窗口内 run 摘要）；
  * - mode:"run" = 带 runId 单 run 视图（run 摘要 + 成员表 + 截断标记；members 为
  *   core runMemberViews 派生视图，truncated/total 来自同一截断预算）。
+ *
+ * `__gui__`（容器扩展点统一 §7.4 workflow 层 2）：RPC 模式经 withGuiAttach 附加的
+ * 组件树（构造单点 buildWorkflowGui），宿主 ToolRow 通用渲染路径消费。非 RPC 模式
+ * 不构造（withGuiAttach 的 isGuiCapable 门控）。
  */
 export type WorkflowToolDetails =
-  | ({ action: "run"; name: string } & RunStartDetails)
-  | { action: "status"; mode: "list"; runs: RunSummary[] }
+  | ({ action: "run"; name: string; __gui__?: GuiRenderResult } & RunStartDetails)
+  | { action: "status"; mode: "list"; runs: RunSummary[]; __gui__?: GuiRenderResult }
   | {
       action: "status";
       mode: "run";
@@ -258,12 +280,120 @@ export type WorkflowToolDetails =
       truncated: boolean;
       /** 成员表总行数（截断前——failed N/M 的 M 同源）。 */
       total: number;
+      __gui__?: GuiRenderResult;
     }
-  | { action: "abort"; runId: string; status: string; reason?: string }
-  | ({ action: "resume"; runId: string } & RunStartDetails);
+  | { action: "abort"; runId: string; status: string; reason?: string; __gui__?: GuiRenderResult }
+  | ({ action: "resume"; runId: string; __gui__?: GuiRenderResult } & RunStartDetails);
 
 /** Result returned by the workflow tools' execute（公共骨架见 tool-result.ts）。 */
 type WorkflowExecuteResult = WorkflowToolResult<WorkflowToolDetails | undefined>;
+
+// ── GUI 协议构造（容器扩展点统一 §7.4 workflow 层 2 恢复，撤销 D8 裁决）───────
+
+/**
+ * run 状态 → 树行呈现（穷尽映射，不复活 D8 前的裸 string 子串匹配死词表——
+ * 输入域 = runSummary 派生视图三态 + DoneReason 终局因，编译期穷尽）：
+ * - running → running/circle（accent 圆点）；
+ * - interrupted（暂停态，无活体可续跑）→ 无圆点 + pause 图标（非终局不作成败断言，
+ *   与宿主 tray-tone 的中性暗档同方向）；
+ * - done：终止性因（failed/budget_limited/time_limited/partially_succeeded——
+ *   isTerminalDoneReason 同一穷举口径）落 failed/cross；completed/aborted 落
+ *   done/check（aborted 是用户主动取消，非失败——与 WORKFLOW_TONE_BY_OUTCOME 的
+ *   cancelled 中性档同向）。
+ */
+function runTreePresentation(
+  summary: Pick<RunSummary, "status" | "reason">,
+): { status?: TreeItem["status"]; icon: TreeItemIcon } {
+  if (summary.status === "running") return { status: "running", icon: "circle" };
+  if (summary.status === "interrupted") return { icon: "pause" };
+  switch (summary.reason) {
+    case "failed":
+    case "budget_limited":
+    case "time_limited":
+    case "partially_succeeded":
+      return { status: "failed", icon: "cross" };
+    case "completed":
+    case "aborted":
+      return { status: "done", icon: "check" };
+    // done + reason 缺省或词表外语（RunSummary.reason 是宽 string——旧持久化 run 无终局
+    // 帧的注册表 miss 窗口）——数据缺口不作成败断言（同 tray-tone 的 outcome 缺省中性档
+    // 方向），pause 中性呈现。
+    default:
+      return { icon: "pause" };
+  }
+}
+
+/** run 行 label：`name · slug · runId 前 8 字符`（缺段 filter(Boolean) 过滤，防双空格）。 */
+function runRowLabel(parts: readonly (string | undefined)[]): string {
+  return parts.filter(Boolean).join(" ");
+}
+
+/**
+ * 按 WorkflowToolDetails 构造对应的 GuiComponent（§7.4 恢复的构造单点；D8 删除的
+ * buildWorkflowGui 按现行五变体词表重建——status 的 mode:"run" 变体为 D8 后新增，
+ * 成员行复用 core memberViewLine 文本（与 TUI/LLM 文本面同一行格式，不造第二套），
+ * 截断标记照文本面口径落省略行）。
+ */
+export function buildWorkflowGui(details: WorkflowToolDetails): GuiComponent {
+  if (details.action === "run" || details.action === "resume") {
+    // not_found / invalid_args 曾是「isError:true + 错误 details」形态（W4 后该类错误
+    // 改 throw，生产不再产出）；分支保留消费历史 session entry / 防御性渲染——错误
+    // 状态不走通用映射的 done/check 成功语义（绿色对勾与错误文案矛盾）。
+    if (details.status !== "running") {
+      return guiComponent("stats-line", {
+        items: [{ label: "run", value: details.status, severity: "danger" as const }],
+      });
+    }
+    const label =
+      details.action === "run"
+        ? runRowLabel([details.name, details.slug, details.runId.slice(0, ID_PREVIEW_LENGTH)])
+        : details.runId.slice(0, ID_PREVIEW_LENGTH);
+    return guiComponent("list-tree", {
+      items: [{ label, status: "running", icon: "circle", depth: 0 }],
+    });
+  }
+  if (details.action === "status") {
+    if (details.mode === "list") {
+      return guiComponent("list-tree", {
+        items: details.runs.map((r) => {
+          const presentation = runTreePresentation(r);
+          return {
+            label: runRowLabel([r.name, r.slug, r.runId.slice(0, ID_PREVIEW_LENGTH)]),
+            status: presentation.status,
+            icon: presentation.icon,
+            depth: 0,
+          };
+        }),
+      });
+    }
+    // mode:"run"：run 摘要行（depth 0）+ 成员行（depth 1，memberViewLine 同源文本）。
+    const presentation = runTreePresentation(details.run);
+    const items: TreeItem[] = [
+      {
+        label: runMemberHeaderLine(details.run, details.total, details.members.filter((m) => m.state === "failed").length),
+        status: presentation.status,
+        icon: presentation.icon,
+        depth: 0,
+      },
+      ...details.members.map<TreeItem>((member) => ({
+        label: memberViewLine(member),
+        depth: 1,
+      })),
+    ];
+    if (details.truncated) {
+      items.push({ label: "… more members omitted", depth: 1 });
+    }
+    return guiComponent("list-tree", { items });
+  }
+  // abort（唯一 lifecycle action）：破坏性终止非成功完成，用 warn 与成功区分
+  return guiComponent("stats-line", {
+    items: [{
+      label: details.action,
+      value: details.runId.slice(0, ID_PREVIEW_LENGTH),
+      severity: "warn" as const,
+    }],
+  });
+}
 
 // ── Tool registration ────────────────────────────────────────
 
@@ -326,9 +456,12 @@ export function registerWorkflowTool(
         throw new Error(REENTRY_BUSY_MESSAGE);
       }
       try {
-        // workflow 块分支（WORKFLOW_TOOL_NAMES 集合分流）恒折叠单行不消费 __gui__
-        // （D8 裁决），details 不构造 GUI 描述符。
-        return await actionRun(params, deps, signal);
+        // [容器扩展点统一 §7.4 workflow 层 2] RPC 模式附加 __gui__（attach 单点在
+        // tool-shared；构造单点 buildWorkflowGui）——撤销 D8「不构造」裁决恢复产树，
+        // 宿主 ToolRow 通用渲染路径消费。attach 入参 = result.details（details union
+        // 本体；传整个 result 会因 __gui__ 可选字段的结构兼容绕过类型检查）。
+        const started = await actionRun(params, deps, signal);
+        return { ...started, details: withGuiAttach(started.details, toGuiCtx(_ctx), buildWorkflowGui) };
       } finally {
         releaseReentryGuard(reentryRef);
       }
@@ -411,9 +544,10 @@ export function registerWorkflowTool(
             throw new Error(`Unknown action: ${String(_exhaustive)}`);
           }
         }
-        // workflow 块分支（WORKFLOW_TOOL_NAMES 集合分流）恒折叠单行不消费 __gui__
-        // （D8 裁决），details 不构造 GUI 描述符。
-        return result;
+        // [容器扩展点统一 §7.4 workflow 层 2] RPC 模式附加 __gui__（run action 同款；
+        // 撤销 D8「不构造」裁决恢复产树）。attach 入参 = result.details（run action
+        // 注释同款结构兼容陷阱）。
+        return { ...result, details: withGuiAttach(result.details, toGuiCtx(_ctx), buildWorkflowGui) };
       } finally {
         releaseReentryGuard(reentryRef);
       }

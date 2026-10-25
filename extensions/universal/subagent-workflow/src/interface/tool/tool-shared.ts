@@ -6,9 +6,10 @@
  *   入口前置与渲染片段（同粒度小函数）。
  * - `buildRunSpecFromScript`：RunSpec 组装字面量——RunSpec 是 core 启动契约，
  *   字面量漏改即静默丢字段。
- * - `withGuiAttach`：RPC 模式给 details 附加 `__gui__` 的唯一实现（workflow-script /
- *   subagent 两个 tool 的 attach 点收敛于此，组件构造回调由调用方提供；workflow /
- *   subagent_batch 走 isWorkflow 块分支不消费 `__gui__`，不构造——D8）。
+ * - `withGuiAttach`：RPC 模式给 details 附加 `__gui__` 的唯一实现（四个 tool 的
+ *   attach 点收敛于此，组件构造回调由调用方提供；isGuiCapable 门控非 RPC 模式
+ *   零构造——容器扩展点统一 §7.4 workflow 层 2 恢复后 workflow / subagent_batch
+ *   同样消费本单点，撤销 D8「isWorkflow 块分支不构造」裁决）。
  * - `throwPrefixed`：catch 内 `<前缀>: <msg>` 重抛（pi 的 execute-throw 契约，
  *   toErrorMessage 规整单点）。
  *

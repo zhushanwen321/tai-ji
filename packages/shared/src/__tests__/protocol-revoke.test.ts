@@ -125,7 +125,7 @@ describe('session.revokeMessage 协议契约（U3，D8 SSOT）', () => {
     expect(payload.targetId).toMatch(/^[0-9a-f]{8}$/)
   })
 
-  it('TAIJI_NAV_COMMAND 命令串常量与 agent-ext 注册名逐字一致（D1 信令通道）', () => {
+  it('TAIJI_NAV_COMMAND 命令串常量与 host-internals 注册名逐字一致（D1 信令通道）', () => {
     expect(TAIJI_NAV_COMMAND).toBe('__taiji_nav__')
   })
 

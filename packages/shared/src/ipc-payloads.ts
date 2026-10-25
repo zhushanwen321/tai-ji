@@ -280,13 +280,14 @@ export interface ShieldsFacesPayload {
 // ── browser:overlay-state 浮层开合/内容上报（display-containers §7.4）──
 
 /**
- * 浮层内容种类闭集（browser 网页 / workflow 工作流图 / scheduler 定时任务 tab /
- * canvas 问题解决画布 tab），`browser:overlay-state` IPC payload 契约的词表单源：
+ * 浮层内容种类词表（browser 网页 / workflow 工作流图 / scheduler 定时任务 tab /
+ * canvas 问题解决画布 tab / plugin 插件声明内容——容器扩展点统一 §6.8 插件内容载体），
+ * `browser:overlay-state` IPC payload 契约的词表单源：
  * core overlay 域（OverlayKind 派生别名）、main display-gate 校验解析、preload
  * ElectronAPI 签名、renderer ipc 封装四方共用同一形态声明，防漂移——renderer 侧收窄
  * 为子集时 TS 结构可赋值性会使手抄词表漂移静默通过，main 侧只剩运行时 throw 兜底。
  */
-export type OverlayContentKind = 'browser' | 'workflow' | 'scheduler' | 'canvas'
+export type OverlayContentKind = 'browser' | 'workflow' | 'scheduler' | 'canvas' | 'plugin'
 
 // ── browser:state view 状态推送（display-containers W2）──
 

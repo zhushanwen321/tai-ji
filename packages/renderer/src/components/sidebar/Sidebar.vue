@@ -73,14 +73,15 @@
         :file-count="fileCount"
       />
 
-      <!-- 子视图区：会话列表 / 归档列表 / 文件视图 / plugin sidebar view。
-           视图切换方向滑入（spec §3.1 裁决 P1-6，demo vt-slide 同语言）：三个分支各挂
+      <!-- 子视图区：会话列表 / 归档列表 / 文件视图 / plugin 视图。分支键 = 注册表 tab id
+           （stores/sidebar 内置常量；非内置 id = 插件声明 sidebar.tab 项 → ViewHost，§6.1）。
+           视图切换方向滑入（spec §3.1 裁决 P1-6，demo vt-slide 同语言）：各分支各挂
            viewSlideCls——目标视图序号更大自右滑入、反之自左；v-if 分支重挂载使动画每次
            切换重播；首次进入不播（方向类初始为空，watch 置值前无类）。
            [session-archive D10，u-renderer-entry] sessions tab 内容区二态视图：
            archive store.viewOpen 时切为归档列表（ArchiveListView），否则会话列表。 -->
       <div class="min-h-0 flex-1 overflow-hidden">
-        <template v-if="sidebar.activeTab === 'sessions'">
+        <template v-if="sidebar.activeTab === SIDEBAR_TAB_SESSIONS">
           <div class="h-full min-h-0" :class="viewSlideCls">
             <!-- S5：加载失败态 + 重试（session.listLoadError 非空时） -->
             <div
@@ -131,10 +132,9 @@
         </template>
         <!-- ExtensionHost sidebar view 宿主（audit §12.1 sidebar.tab 挂载点）。
              L2 二级路由：PluginViewContainer 经 VIEWS_SOURCE_KEY 取 plugin view 清单
-             （ContributionRegistry sidebar.tab 贡献）→ L2TabBar 切 tab → ViewHost 渲染
-             （数据按 viewId 'todo'/'goal' 落，见 02-extension-host-wiring.md 重构 2）。
+             （ContributionRegistry sidebar.tab 贡献）→ L2TabBar 切 tab → ViewHost 渲染。
              sessionId 绑定焦点 session。 -->
-        <template v-else-if="sidebar.activeTab === 'plugins'">
+        <template v-else-if="sidebar.activeTab === SIDEBAR_TAB_PLUGINS">
           <div class="h-full min-h-0" :class="viewSlideCls">
             <PluginViewContainer
               v-if="focusedSessionId"
@@ -146,6 +146,18 @@
               class="flex flex-col items-center justify-center gap-2 py-10 text-center"
               data-testid="sidebar-plugin-no-session"
             >
+              <Puzzle class="size-5 text-neutral-dim opacity-40" />
+              <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('sidebar.selectSessionHint') }}</p>
+            </div>
+          </div>
+        </template>
+        <!-- 插件声明的 sidebar.tab 项（非内置 id）：ViewHost 按声明 id 寻址渲染插件推树
+             （§6.1 派生语义，与抽屉 renderer.kind='view' 走 ViewHost 同构）；空态 =
+             ViewHost placeholder（等待插件推树）。 -->
+        <template v-else-if="isPluginTab(sidebar.activeTab)">
+          <div class="h-full min-h-0" :class="viewSlideCls">
+            <ViewHost v-if="focusedSessionId" :view-id="sidebar.activeTab" :scope="{ kind: 'session', sessionId: focusedSessionId }" :title="activeTabLabel" />
+            <div v-else class="flex flex-col items-center justify-center gap-2 py-10 text-center" data-testid="sidebar-plugin-tab-no-session">
               <Puzzle class="size-5 text-neutral-dim opacity-40" />
               <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('sidebar.selectSessionHint') }}</p>
             </div>
@@ -322,12 +334,13 @@ import { Plus, Search, FolderOpen, AlertCircle, Puzzle, Download, Smartphone, Pa
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SearchModal } from '@taiji/ui'
-import { PluginViewContainer } from '@taiji/ui/extension-host'
+import { PluginViewContainer, ViewHost } from '@taiji/ui/extension-host'
 import { useSearchModal, getSettingsStore } from '@taiji/core'
 import { TAIJI_THEMES, resolveTaijiTheme, type TaijiTheme } from '@/composables/useTaijiThemes'
 import { DEFAULT_FONT_SCALES, type FontScaleTier } from '@taiji/core'
 import { useSessionStore } from '@/stores/session'
-import { useSidebarStore } from '@/stores/sidebar'
+import { SIDEBAR_TAB_FILES, SIDEBAR_TAB_PLUGINS, SIDEBAR_TAB_SESSIONS, useSidebarStore } from '@/stores/sidebar'
+import { slotDisplayLabel, useSidebarTabs } from '@/lib/content-slots'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { useSessionDerivations } from '@/composables/features/chat/useSessionDerivations'
 import SegmentedTab from './SegmentedTab.vue'
@@ -415,16 +428,30 @@ onBeforeUnmount(() => window.clearTimeout(quickThemeCloseTimer))
 // ── 视图切换方向滑入（spec §3.1 裁决 P1-6，demo Sidebar.vue VIEW_ORDER 同源）──
 // 方向判定 = 激活位索引比较：目标序号更大自右滑入、反之自左；初始为空 = 首次进入不播
 // （无前序方向不叠动画，与抽屉面板同纪律）。reduced-motion 由 style.css 全局 reduce 块归零。
-const VIEW_ORDER = ['sessions', 'files', 'plugins'] as const
+// 序 = 内置三项注册表顺序（lib/content-slots 登记序）；插件项不在序内 → indexOf -1 比较
+// 退化（方向类取左侧滑入，仅首帧动画方向差异，可接受）。
+const VIEW_ORDER = [SIDEBAR_TAB_SESSIONS, SIDEBAR_TAB_FILES, SIDEBAR_TAB_PLUGINS] as const
 const viewSlideCls = ref('')
 watch(
   () => sidebar.activeTab,
   (nv, ov) => {
     if (ov === undefined) return
     viewSlideCls.value
-      = VIEW_ORDER.indexOf(nv) > VIEW_ORDER.indexOf(ov) ? 'vt-slide-r' : 'vt-slide-l'
+      = VIEW_ORDER.indexOf(nv as (typeof VIEW_ORDER)[number]) > VIEW_ORDER.indexOf(ov as (typeof VIEW_ORDER)[number]) ? 'vt-slide-r' : 'vt-slide-l'
   },
 )
+
+// 侧栏标签派生（§6.1/U8）：非内置 id 判定（插件声明项 → ViewHost 分支）与激活项文案
+// （ViewHost 空态标题）同源取自派生数组。
+const sidebarTabs = useSidebarTabs()
+const activeSidebarTab = computed(() => sidebarTabs.value.find((v) => v.id === sidebar.activeTab))
+const activeTabLabel = computed(() =>
+  activeSidebarTab.value !== undefined ? slotDisplayLabel(activeSidebarTab.value, t) : sidebar.activeTab,
+)
+/** 插件声明项 = 注册表派生数组中的非内置条目 id（内置三项以常量精确匹配在前置分支）。 */
+function isPluginTab(tab: string): boolean {
+  return sidebarTabs.value.some((v) => v.id === tab && v.source === 'plugin')
+}
 
 const settingsStore = getSettingsStore()
 const currentTheme = computed(() => resolveTaijiTheme(settingsStore.system.value))

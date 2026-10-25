@@ -38,7 +38,8 @@ export type { ShieldFace, OverlayContentKind } from '@taiji/shared'
 import type { ShieldFace, ShieldRect, OverlayContentKind } from '@taiji/shared'
 
 // 浮层内容种类（core overlay 域同词表；scheduler = 定时任务 tab 整合 2026-10-06；
-// canvas = 问题解决画布 tab（problem-solve-canvas §3.1(3)）——非 browser 内容谓词恒假，
+// canvas = 问题解决画布 tab（problem-solve-canvas §3.1(3)）；plugin = 插件声明内容载体
+//（容器扩展点统一 §6.8）——非 browser 内容谓词恒假，
 // view 照常隐藏）：词表单源 = @taiji/shared
 // OverlayContentKind（browser:overlay-state payload 契约四方共用），经上方 re-export
 // 保持既有导入路径（browser-view-manager / 测试）不变；下 :parse 校验的运行时词值
@@ -146,21 +147,25 @@ export function parseOverlayDisplayState(payload: unknown): OverlayDisplayState 
     && payload.content !== 'workflow'
     && payload.content !== 'scheduler'
     && payload.content !== 'canvas'
+    && payload.content !== 'plugin'
   ) {
-    throw new Error(`[browser:overlay-state] content must be "browser" | "workflow" | "scheduler" | "canvas" when open, got ${String(payload.content)}`)
+    throw new Error(`[browser:overlay-state] content must be "browser" | "workflow" | "scheduler" | "canvas" | "plugin" when open, got ${String(payload.content)}`)
   }
-  // canvas 内容跨 session 无会话归属（problem-solve-canvas D4/D7）——sessionId 恒 null；
-  // 其余三类内容都持发起 sessionId（非空 string，谓词事实源语义不变）
-  if (payload.content === 'canvas') {
-    if (payload.sessionId !== null) {
-      throw new Error('[browser:overlay-state] sessionId must be null for canvas content')
+  // sessionId 通用判据（容器扩展点统一 §7.2 浮层 kind 词表四方同批）：唯一消费方是 browser
+  // 显示谓词（computeShouldShow 的 isOverlayBrowserActive + 发起会话匹配）——非 browser 内容
+  // 一律不驱动 view 显示，sessionId 恒 null（上报侧 renderer useBrowserOverlayStateSync 同一
+  // 判据）；browser 内容持发起会话（非空 string，谓词事实源语义不变）。原 canvas 单值特判
+  // 随判据通用化并入此分支（画布归属会话仍在 core 载荷层，谓词面恒 null 不变）。
+  if (payload.content === 'browser') {
+    if (typeof payload.sessionId !== 'string' || payload.sessionId.length === 0) {
+      throw new Error('[browser:overlay-state] sessionId must be a non-empty string when open')
     }
-    return { open: true, content: payload.content, sessionId: null }
+    return { open: true, content: payload.content, sessionId: payload.sessionId }
   }
-  if (typeof payload.sessionId !== 'string' || payload.sessionId.length === 0) {
-    throw new Error('[browser:overlay-state] sessionId must be a non-empty string when open')
+  if (payload.sessionId !== null) {
+    throw new Error(`[browser:overlay-state] sessionId must be null for non-browser content, got ${String(payload.content)}`)
   }
-  return { open: true, content: payload.content, sessionId: payload.sessionId }
+  return { open: true, content: payload.content, sessionId: null }
 }
 
 /** 解析 'browser:shields' payload（{ faces: ShieldFace[] }）。非法 → throw */

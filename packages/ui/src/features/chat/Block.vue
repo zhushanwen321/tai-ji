@@ -11,7 +11,7 @@
   - run-group → RunGroupBlock（run 类型分组组块：组头「类型名 + N 步 · 耗时 +
     含 M 次失败」+ 展开成员列表，成员行在行组件内直递 ToolRow 收起态）。
   - tool / agentgraph → ToolRow（行组件内部按 isSubagent/isWorkflow 三分：subagent →
-    SubagentRow / workflow → WorkflowRow / 其余普通 tool 形态——agentgraph 数据结构同
+    SubagentRow → SubagentRow / 其余（含 workflow 工具组——WorkflowRow 已随 §7.4/U10 删，落通用形态）普通 tool 形态——agentgraph 数据结构同
     tool，Turn 层 type 语义与渲染分派在行组件内一致）。
   - failed（tool/agentgraph 族）：无鲜红全展开（红框已删），行文字保持中性灰、图标常驻染
     danger（demo .line.subagent.failed .sicon 形态），错误摘要进 body 文本（形态细节随各 Row）。

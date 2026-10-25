@@ -83,17 +83,23 @@ function persistSideWidth(v: number): void {
 }
 
 /**
- * 'plugins' tab：ExtensionHost sidebar view 宿主（挂载点 sidebar.tab，ViewHost view-id=sidebar.tab 同名路由）。
- * 无 plugin 贡献时 ViewHost 空态自隐藏（empty="hidden"），tab 内容区空白不破坏布局。
+ * 侧栏 tab 选中值（容器扩展点统一 §6.1/U8：tab 全集从注册表派生后开放，类型降 string）。
+ * 已知值常量 = 内置三项的注册表 id（'ui.' 命名空间，与 lib/content-slots.ts 登记的
+ * 内置声明同源——常量在此导出供 Sidebar.vue 内容分支消费，注册表登记侧引用同一字面值）。
  *
  * [HISTORICAL] 2026-09-16 五 tab 收敛为三 tab：两个任务 tab 对应的联合成员随 Agents/Flows
- * tab 退役删除（任务观察入口唯一化收敛到 composer 任务托盘）——类型收窄后按旧成员值摘取的
- * 类型（Extract<SidebarTab, ...>）编译期即断，无需迁移存量值（activeTab 本就不持久化）。
+ * tab 退役删除（任务观察入口唯一化收敛到 composer 任务托盘）——activeTab 本就不持久化。
+ * [HISTORICAL] 联合类型降 string（U8）：插件可声明 sidebar.tab，tab 全集不再是编译期
+ * 闭集；内置值以常量承载（§6.1 容器类型去枚举同款处理）。
  */
-export type SidebarTab = 'sessions' | 'files' | 'plugins'
+export type SidebarTab = string
+
+export const SIDEBAR_TAB_SESSIONS = 'ui.sessions'
+export const SIDEBAR_TAB_FILES = 'ui.files'
+export const SIDEBAR_TAB_PLUGINS = 'ui.plugins'
 
 export const useSidebarStore = defineStore('sidebar', () => {
-  const activeTab = ref<SidebarTab>('sessions')
+  const activeTab = ref<SidebarTab>(SIDEBAR_TAB_SESSIONS)
   /** 用户意图位：唯一写手 = toggleCollapsed（收起/展开按钮 + ⌘B）。持久化。 */
   const userCollapsed = ref(loadCollapsed())
   /** 视口强制位：唯一写手 = useNarrowWindowCollapse（挂载即查 + matchMedia change）。不持久化。 */

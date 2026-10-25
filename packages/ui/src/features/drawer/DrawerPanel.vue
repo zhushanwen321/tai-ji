@@ -132,7 +132,7 @@ import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { BookOpen, Bot, FileText, GitBranch, Globe, ListTree, MessagesSquare, SquareCheckBig, SquareTerminal, Terminal as TerminalIcon, Workflow, X } from '@lucide/vue'
 import { Button } from '@taiji/ui'
-import { RIGHT_DRAWER_REGISTRY } from '@taiji/core/domain/drawer'
+import { drawerTabViews } from '@taiji/core/domain/drawer'
 import type { RightDrawerTab } from '@taiji/core/domain/drawer'
 
 const slots = useSlots()
@@ -195,16 +195,19 @@ const ICON_BY_ID: Record<string, Component> = {
 /** 注册表新增图标标识未入映射时的占位（file-text 同形中性图标；新条目评审/测试可见） */
 const FALLBACK_ICON: Component = FileText
 
-/** L1 tab 列表 = 右抽屉容器声明（单一权威 §7.7：禁止与注册表各自文字化；终态 7 条——
- *  u-w2-browser-mount 撤 browser 载入序列后直读容器声明）。各 tab 的桌面内容面板仍由壳层
- *  （PanelContainer）经默认 slot v-if chain 注入（C2），本组件不感知面板归属；空态/未读徽章不变。 */
+/** L1 tab 列表 = 容器位注册表派生视图（单一数据源，容器扩展点统一 §6.1/U6：内置 8 项 ∪
+ *  插件声明项；RIGHT_DRAWER_REGISTRY 直读已由 core domain 消费侧投影取代——直读是
+ *  「core 派生集、界面渲染集」双权威的根源）。文案二态（§6.16④）：插件项用声明原文
+ *  label/emptyState，内置项查 labelKey/empty*Key i18n；图标经既有映射表解析（§6.13 单一
+ *  解析函数归 U13，暂沿用）。各 tab 的桌面内容面板仍由壳层（PanelContainer）注入（C2），
+ *  本组件不感知面板归属与 renderer 分派；空态/未读徽章不变。 */
 const tabs = computed<TabMeta[]>(() =>
-  RIGHT_DRAWER_REGISTRY.map((entry) => ({
-    key: entry.content,
-    label: t(entry.labelKey),
-    icon: ICON_BY_ID[entry.icon] ?? FALLBACK_ICON,
-    emptyText: t(entry.emptyTextKey),
-    emptyHint: t(entry.emptyHintKey),
+  drawerTabViews().map((view) => ({
+    key: view.key,
+    label: view.label ?? (view.labelKey !== undefined ? t(view.labelKey) : view.key),
+    icon: view.icon !== undefined ? (ICON_BY_ID[view.icon] ?? FALLBACK_ICON) : FALLBACK_ICON,
+    emptyText: view.emptyState?.text ?? (view.emptyTextKey !== undefined ? t(view.emptyTextKey) : ''),
+    emptyHint: view.emptyState?.hint ?? (view.emptyHintKey !== undefined ? t(view.emptyHintKey) : ''),
   })),
 )
 

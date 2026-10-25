@@ -26,6 +26,7 @@ import * as portNs from './platform/port'
 import { useConnection } from './transport/use-connection'
 import type { MountPointRegistry } from './extension-host/mount-point-registry'
 import type { ContributionRegistry } from './extension-host/contribution-registry'
+import type { PluginDescriptorLike } from './extension-host/types'
 
 // ── 步骤实现 ──────────────────────────────────────────────────────
 
@@ -59,6 +60,18 @@ export function setExtensionRegistries(registries: {
   contributionRegistryImpl = registries.contributions
 }
 
+/**
+ * 声明通路订阅源注入点（容器扩展点统一 §6.2）：壳装配时传入 config.plugins 的订阅原语
+ * （生产 = core transport api 的 onPlugins，返回退订函数）。bootstrap 对 transport api
+ * 域保持 import 零依赖（编排层只消费注入端口，与 setExtensionRegistries 同范式）；
+ * 未注入时 scanContributions 的 external 声明通路降级跳过（warn 出声，builtin 照常注册）。
+ */
+let pluginListSubscribe: ((handler: (plugins: PluginDescriptorLike[]) => void) => () => void) | undefined
+
+export function setPluginListSource(subscribe: (handler: (plugins: PluginDescriptorLike[]) => void) => () => void): void {
+  pluginListSubscribe = subscribe
+}
+
 // 壳向 ExtensionHost 注册挂载点（sidebar.tab / panel.header / composer.toolbar）
 export async function registerMountPoints(): Promise<void> {
   console.log('[bootstrap] step 4/5 registerMountPoints')
@@ -78,7 +91,19 @@ export async function registerMountPoints(): Promise<void> {
   // global:<mountId>:<pluginId>）。消费方 = U6 Provider 页接入（u-provider-page）。
   mountRegistryImpl.register('provider.authorize')
   mountRegistryImpl.register('provider.detail-extra')
+  // 容器位挂载点三族（容器扩展点统一 §7.2 挂载点注册）：drawer.tab（右抽屉标签页）/
+  // overlay.content（浮层内容类型——§6.8 内容注册表形态，非标签页）/ settings.section
+  //（设置页分区）。该机制连续第三次真实扩位且零渲染端改动；三族的渲染端派生消费由
+  // ContentSlotRegistry 派生视图承接（U6/U7/U8 接线）。
+  mountRegistryImpl.register('drawer.tab')
+  mountRegistryImpl.register('overlay.content')
+  mountRegistryImpl.register('settings.section')
 }
+
+// 声明通路订阅句柄（容器扩展点统一 §6.2）：scanContributions 重复调用时先退订旧订阅
+// 再重建（dispose-and-rebuild 习语）——闭包绑定当次注入的 registry 实例，防
+// setExtensionRegistries 换实例后旧订阅写旧表（对齐 ensureMountPointsSync 的 R2-2 教训）。
+let pluginListUnobserve: (() => void) | undefined
 
 // 扫描 plugin manifest 注册声明式贡献（views/menus/commands/slashCommands/configuration）
 export async function scanContributions(): Promise<void> {
@@ -87,9 +112,27 @@ export async function scanContributions(): Promise<void> {
     console.warn('[bootstrap] scanContributions: registry not injected, skip (setExtensionRegistries)')
     return
   }
-  contributionRegistryImpl.registerBuiltin()
-  // loadExternal：external plugin descriptors 经 runtime 透传（s3 通道未完成，ERR5 降级——空数组 no-op）
-  contributionRegistryImpl.loadExternal([])
+  const contributions = contributionRegistryImpl
+  const mounts = mountRegistryImpl
+  contributions.registerBuiltin()
+  // 声明通路（容器扩展点统一 §6.2）：订阅 config.plugins 广播（插件启停/安装/卸载等
+  // 7 处触发点均广播），每次到达重跑 loadExternal（幂等，覆盖粒度按 (type, contributionId)
+  // 逐项——见 ContributionRegistry.loadExternal）+ routeAll（幂等重算 available）。
+  // 非边沿一次性：首帧由连接 initial-state 的 config.plugins 帧覆盖（sendInitialState
+  // 推送先于本订阅可达——订阅建立于 bootstrap step5，早于 WS connected，initial-state
+  // 帧到达时订阅必已在位），重连后 runtime 重推 initial-state 天然重放。
+  if (pluginListSubscribe) {
+    pluginListUnobserve?.()
+    pluginListUnobserve = pluginListSubscribe((plugins) => {
+      contributions.loadExternal(plugins)
+      if (mounts) contributions.routeAll(mounts)
+    })
+  } else {
+    console.warn('[bootstrap] scanContributions: plugin list source not injected, external contributions skipped (setPluginListSource)')
+  }
+  // routeAll 接线（容器扩展点统一 §7.2）：首跑对齐 step4 已注册的挂载点全集；此后每次
+  // loadExternal（订阅回调）后重跑，保证新到达声明的 available 反映挂载点注册态。
+  if (mounts) contributions.routeAll(mounts)
 }
 
 // bootstrap 内部步骤表（命名导出，供单测 vi.spyOn(bootstrapSteps, '<fn>') 验证 ES1 顺序 + reject 中断）。

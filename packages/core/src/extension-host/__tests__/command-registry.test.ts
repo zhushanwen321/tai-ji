@@ -81,7 +81,7 @@ describe('CommandRegistry 统一命令表（TC-1 + registerCommand 幂等）', (
       type: 'view',
       placement: 'sidebar.tab',
       available: true,
-      view: { viewType: 'gui', title: 'View', initialVisibility: 'hidden' },
+      view: { viewType: 'gui', title: 'View' },
     })
     registry.registerFromContribution({
       pluginId: 'tasks',

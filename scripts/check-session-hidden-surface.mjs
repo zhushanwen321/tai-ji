@@ -182,7 +182,7 @@ export const HIDDEN_ALLOWLIST = new Map([
   ['packages/core/src/extension-host/header-action-store.ts:38', '插件 headerAction 声明侧静态形状 hidden（ContributionRegistry 侧）'],
   ['packages/core/src/extension-host/header-action-store.ts:78', '插件 headerAction 帧载荷 hidden 透传（set 写入）'],
   ['packages/core/src/extension-host/message-bus-bridge.ts:251', '插件 headerActionUpdate 帧 hidden 解析透传（241→251 随 dev-0.11.16 合并行号漂移）'],
-  ['packages/plugin-sdk/src/types.ts:841', 'plugin-sdk HeaderActionOptions.hidden 声明（插件 API 面；754→841 随 dev-0.11.16 合并行号漂移）'],
+  ['packages/plugin-sdk/src/types.ts:884', 'plugin-sdk updateHeaderAction opts.hidden 声明（wire 契约 HeaderActionUpdatePayload.hidden，入口整体不渲染；与 ui-api.ts 校验行同族）'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:254', '插件 ui.updateHeaderAction 入参 hidden 校验'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:256', '插件 ui.updateHeaderAction hidden 校验错误文案'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:271', '插件 ui.updateHeaderAction hidden 透传'],
@@ -197,10 +197,10 @@ export const HIDDEN_ALLOWLIST = new Map([
   ['packages/renderer/src/components/canvas/canvas-display.ts:229', 'canvas 布局 opts.hidden 形参声明'],
   ['packages/renderer/src/components/canvas/canvas-display.ts:232', 'canvas 布局 opts.hidden 属性访问'],
   // renderer 扩展宿主桥的插件条目 hidden（帧面透传）
-  ['packages/renderer/src/composables/shell/useExtensionHostBridge.ts:267', '插件 headerAction 运行时镜像 hidden（扩展宿主桥透传；256→267 随 dev-0.11.16 合并行号漂移）'],
+  ['packages/renderer/src/composables/shell/useExtensionHostBridge.ts:338', '插件 headerAction hidden 开关读取（isVisibleHeaderAction 谓词：显式推送 hidden 即隐藏，两类入口一视同仁）'],
   // locale 键（设置页「注册但不可达」开关的字面键名）
-  ['packages/ui/src/locale/en-US/settings.ts:1394', 'locale 键 hidden（设置项字面键名，非会话语义；1393→1394 随 dev-0.11.16 合并行号漂移）'],
-  ['packages/ui/src/locale/zh-CN/settings.ts:1393', 'locale 键 hidden（设置项字面键名，非会话语义；1392→1393 随 dev-0.11.16 合并行号漂移）'],
+  ['packages/ui/src/locale/en-US/settings.ts:1396', 'locale 键 hidden（设置项字面键名，非会话语义）'],
+  ['packages/ui/src/locale/zh-CN/settings.ts:1395', 'locale 键 hidden（设置项字面键名，非会话语义）'],
 ])
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -272,7 +272,7 @@ export const SURFACE_READ_POINTS = new Map([
   // 用途②：抑制类只读判别（W4b 收编后判别器 = session.list {surface:'btw'} 拉取缓存，
   // 入口 = btw-line-membership 模块；原 session.surfaces 派生表已按协议收缩删除）
   ['packages/renderer/src/composables/effects/useCompletionNotify.ts:59', 'suppression'],
-  ['packages/renderer/src/components/panel/tray/useTrayCounts.ts:231', 'suppression'],
+  ['packages/renderer/src/components/panel/tray/useTrayCounts.ts:182', 'suppression'],
   ['packages/renderer/src/composables/effects/useForkNoticeEffect.ts:93', 'suppression'],
   ['packages/renderer/src/composables/effects/useForkNoticeEffect.ts:230', 'suppression'],
   ['packages/renderer/src/composables/panel/useBtwTabData.ts:193', 'suppression'],

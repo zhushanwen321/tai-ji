@@ -3,7 +3,8 @@
   数据来自 settings store（单一真相源：providers/skills/agents/extensions/system）。
   store 由 AppShell 应用级 init（常驻订阅），本组件只读 store + open 时刷新 providers。
   形态：fixed inset-0 z-modal bg-bg 全屏覆盖。左 nav 252px（bg-sunken + 右 hairline 分隔，
-  三组头分组，nav 列表自身滚动）+ 右 content flex-1（内容列 max-w 720/860/1064 三态左对齐）。
+  nav 分组 = 容器位注册表派生（内置三组 ∪ 插件声明组，U8），nav 列表自身滚动）+ 右 content
+  flex-1（内容列 max-w 1064/860/720 三态左对齐，档位 = 分区声明字段）。
   header 面包屑「设置 · <page>」+ 右侧 X 关闭。
 -->
 <template>
@@ -64,23 +65,23 @@
              位置），nav 顶部留白避免遮挡 menus。红黄绿原生位置 x8~60。 -->
         <div class="h-[44px] shrink-0"></div>
         <nav ref="navRootEl" :aria-label="t('settings.title')" class="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto pb-[8px]">
-          <template v-for="group in navGroups" :key="group.labelKey">
+          <template v-for="group in navGroups" :key="group.key">
             <!-- demo .nv-group：text-2xs neutral-mid，padding 10/10/3，字距 0.02em；首组头顶距 2px -->
-            <div class="px-[10px] pb-[3px] pt-[10px] text-[length:var(--text-2xs)] tracking-[0.02em] text-neutral-mid first:pt-[2px]">{{ t(group.labelKey) }}</div>
+            <div class="px-[10px] pb-[3px] pt-[10px] text-[length:var(--text-2xs)] tracking-[0.02em] text-neutral-mid first:pt-[2px]">{{ group.headLabel }}</div>
             <Button
               v-for="item in group.items"
-              :key="item.id"
+              :key="item.key"
               type="button"
               variant="ghost"
               class="nav-item group h-auto w-full flex items-center gap-[8px] py-[8px] px-[10px] rounded-[var(--radius-sm)] text-[length:var(--text-base)] font-normal leading-[1.5] text-left text-neutral-mid whitespace-normal transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] focus-visible:ring-0 focus-visible:ring-offset-0 [&:hover:not(.active)]:bg-surface-hover [&:hover:not(.active)]:text-neutral-fg [&.active]:bg-surface [&.active]:text-neutral-fg"
-              :class="{ active: item.id === activeMenu }"
-              :data-testid="`settings-nav-${item.id}`"
-              :aria-current="item.id === activeMenu ? 'page' : undefined"
-              @click="select(item.id)"
+              :class="{ active: item.key === activeMenu }"
+              :data-testid="`settings-nav-${item.key}`"
+              :aria-current="item.key === activeMenu ? 'page' : undefined"
+              @click="select(item.key)"
             >
               <component :is="item.icon" class="w-[16px] h-[16px] shrink-0 opacity-[0.85] transition-opacity duration-[var(--duration-fast)] ease-[var(--ease)] group-hover:opacity-100 group-[.active]:opacity-100" />
-              <span class="flex-1 min-w-0 truncate">{{ t(item.labelKey) }}</span>
-              <span v-if="getItemCount(item.id)" class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[length:var(--text-3xs)] font-bold text-[color:var(--neutral-fg-2)] group-hover:bg-bg-card group-[.active]:text-neutral-fg shrink-0">{{ getItemCount(item.id) }}</span>
+              <span class="flex-1 min-w-0 truncate">{{ item.label }}</span>
+              <span v-if="getItemCount(item.key)" class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[length:var(--text-3xs)] font-bold text-[color:var(--neutral-fg-2)] group-hover:bg-bg-card group-[.active]:text-neutral-fg shrink-0">{{ getItemCount(item.key) }}</span>
             </Button>
           </template>
         </nav>
@@ -89,7 +90,7 @@
       <!-- 右 content -->
       <div ref="contentEl" class="flex min-w-0 flex-1 flex-col bg-bg overflow-auto">
         <div class="flex h-[44px] shrink-0 items-center justify-between px-[14px] border-b border-border">
-          <span class="text-[length:var(--text-sm)] font-semibold text-neutral-fg">{{ t('settings.title') }} · {{ t(currentMenu.labelKey) }}</span>
+          <span class="text-[length:var(--text-sm)] font-semibold text-neutral-fg">{{ t('settings.title') }} · {{ currentMenu !== undefined ? slotDisplayLabel(currentMenu, t) : '' }}</span>
           <Button
             ref="closeBtnEl"
             type="button"
@@ -162,12 +163,21 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, Tag, TerminalSquare, GitBranch, ClipboardList, Server, Volume2, X, Download, Palette, ChartColumn, ArrowLeft, ArrowRight, PanelLeftClose, Wifi, Waypoints, type LucideIcon } from '@lucide/vue'
+import { X, ArrowLeft, ArrowRight, PanelLeftClose } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { registerModalSurface, otherSurfaceYieldsEsc } from '@/composables/features/app/modal-surface-registry'
 import { detectPlatform } from '@/composables/effects/usePlatformChrome'
 import { cycleTabFocus, getFocusableElements } from '@/composables/logic/focus-trap'
-import { getSettingsStore, useSettings, type SystemSettings } from '@taiji/core'
+import { getSettingsStore, useSettings, type SystemSettings, type ContentSlotView } from '@taiji/core'
+import {
+  contentMaxWidthCss,
+  settingsGroupHeadLabel,
+  settingsNavIcon,
+  settingsNavKey,
+  slotDisplayLabel,
+  useSettingsNavGroups,
+  useSettingsNavSections,
+} from '@/lib/content-slots'
 import { useToast } from '@/composables/useToast'
 import { createMirrorSave } from '@/composables/features/settings/setting-field'
 import type { SkillDirConfig } from '@taiji/shared'
@@ -193,51 +203,46 @@ import NetworkPage from './network/NetworkPage.vue'
 // mac 灯组为 OS 绘制，几何随系统版本 → 左上 chrome 组平移按平台分叉（推导见 template 内注释）
 const isMac = detectPlatform() === 'mac'
 
-// 左 nav 分组（demo NAV_GROUPS 形态：三组头 + 组内项；渲染与键盘 ↑↓/Home/End 顺序均按此结构）。
-// 仅展示层分组，不改分区注册/store 契约（menus 各项的 id/labelKey/icon 原样保留）。
-const navGroups = [
-  {
-    labelKey: 'settings.menu.groupResources',
-    items: [
-      { id: 'provider', labelKey: 'settings.menu.provider', icon: Settings },
-      { id: 'skill', labelKey: 'settings.menu.skill', icon: Sparkles },
-      { id: 'agent', labelKey: 'settings.menu.agent', icon: Bot },
-      { id: 'extension', labelKey: 'settings.menu.extension', icon: Blocks },
-      { id: 'mcp', labelKey: 'settings.menu.mcp', icon: Server },
-      { id: 'preset', labelKey: 'settings.menu.preset', icon: ClipboardList },
-    ],
-  },
-  {
-    labelKey: 'settings.menu.groupInputAppearance',
-    items: [
-      { id: 'appearance', labelKey: 'settings.menu.appearance', icon: Palette },
-      { id: 'system-prompt', labelKey: 'settings.menu.systemPrompt', icon: ScrollText },
-      { id: 'rename-session', labelKey: 'settings.menu.sessionRename', icon: Tag },
-      { id: 'tts', labelKey: 'settings.menu.tts', icon: Volume2 },
-      { id: 'terminal', labelKey: 'settings.menu.terminal', icon: TerminalSquare },
-    ],
-  },
-  {
-    labelKey: 'settings.menu.groupEnvSystem',
-    items: [
-      { id: 'worktree', labelKey: 'settings.menu.worktree', icon: GitBranch },
-      { id: 'update', labelKey: 'settings.menu.update', icon: Download },
-      { id: 'remote-access', labelKey: 'settings.menu.remoteAccess', icon: Wifi },
-      { id: 'network-proxy', labelKey: 'settings.menu.networkProxy', icon: Waypoints },
-      { id: 'system', labelKey: 'settings.menu.system', icon: SlidersHorizontal },
-      { id: 'usage', labelKey: 'settings.menu.usage', icon: ChartColumn },
-    ],
-  },
-] as const
+/**
+ * nav 分组数据源（容器扩展点统一 §6.1/U8）：容器位注册表派生（内置 17 项为注册表初始项，
+ * lib/content-slots.ts 登记；插件声明的 settings.section 项按 group 字段归组、无组归
+ * 「其他」），此处只做展示塑形（分组头文案 / 分区键 / label / icon 组件解析）。
+ * [HISTORICAL] 曾为 navGroups as const 静态三分组 17 项（demo NAV_GROUPS 形态），分区
+ * 全集开放后改注册表派生——「仅展示层分组，不改分区注册/store 契约」的约束由
+ * 分区键（内置 = id 去 'ui.' 前缀）承载：深链/内容分支/testid 键全部不变。
+ */
+const navGroups = computed(() =>
+  derivedGroups.value.map((group) => ({
+    key: group.group ?? OTHER_GROUP_KEY,
+    headLabel: settingsGroupHeadLabel(group.group, t),
+    items: group.sections.map((view) => ({
+      view,
+      key: settingsNavKey(view),
+      label: slotDisplayLabel(view, t),
+      icon: settingsNavIcon(view.icon),
+    })),
+  })),
+)
 
-type MenuId = (typeof navGroups)[number]['items'][number]['id']
+/** 设置页分区平铺（显示顺序）；键盘导航/页查找/深链校验共用。 */
+const navSections = useSettingsNavSections()
 
-/** 键盘 ↑↓/Home/End 导航与页查找用的平铺顺序（= 显示顺序）；显式注解 + spread 拷贝解
- *  as const 元组 flatMap 的推断塌缩（readonly 字面量元组直接 flatMap 会推成数组联合） */
-const flatMenus: readonly { id: MenuId; labelKey: string; icon: LucideIcon }[] =
-  navGroups.flatMap((group) => [...group.items])
+/** 分区键查条目（currentMenu / contentMaxWidth 判定用）。 */
+function findSection(key: string): ContentSlotView | undefined {
+  return navSections.value.find((view) => settingsNavKey(view) === key)
+}
+
+/** 内置缺省分区（深链非法值回落目标；设置页首屏锚定）。 */
+const DEFAULT_MENU_SECTION = 'provider'
+
+type MenuId = string
 
 const { t } = useI18n()
+
+/** 派生源（注册表快照驱动，响应式范式见 lib/content-slots.ts 模块头注释）。 */
+const derivedGroups = useSettingsNavGroups()
+/** 无组分区桶（group=undefined）的 v-for 稳定 key；组头文案 = 「其他」（settingsGroupHeadLabel）。 */
+const OTHER_GROUP_KEY = 'other'
 
 const props = defineProps<{ open: boolean; /** 直达分区（AppShell openSettings(section) 传入；非法值回落 provider——侧栏远程钮等深链入口用） */ initialSection?: string }>()
 const emit = defineEmits<{ 'update:open': [value: boolean] }>()
@@ -251,18 +256,22 @@ const disposeSurfaceRegistration = registerModalSurface({
 })
 onBeforeUnmount(disposeSurfaceRegistration)
 
-const activeMenu = ref<MenuId>(
-  flatMenus.some((m) => m.id === props.initialSection) ? (props.initialSection as MenuId) : 'provider',
-)
+/** 深链归一：initialSection 命中派生分区键（内置裸键或插件声明 id）则直取，非法值回落
+ *  内置缺省分区（既有行为）。 */
+function normalizeInitialSection(section: string | undefined): MenuId {
+  return section !== undefined && findSection(section) !== undefined ? section : DEFAULT_MENU_SECTION
+}
+
+const activeMenu = ref<MenuId>(normalizeInitialSection(props.initialSection))
 /** extension 域子视图（M16）：main=扩展管理 ExtensionPage / contributions=插件贡献 PluginContributionsPage。 */
 const extensionView = ref<'main' | 'contributions'>('main')
-const currentMenu = computed(() => flatMenus.find((m) => m.id === activeMenu.value) ?? flatMenus[0])
+const currentMenu = computed(() => findSection(activeMenu.value) ?? navSections.value[0])
 /** keyed 访问键（v-show 常挂载渲染表）：nav 分区 id；extension 域子视图展开为独立键
  *  （切回扩展管理页表单态保留）。其余分区键 = 分区 id 本身。 */
 const activeView = computed(() =>
   activeMenu.value === 'extension' && extensionView.value === 'contributions'
     ? 'extension-contributions'
-    : (activeMenu.value as string),
+    : activeMenu.value,
 )
 /** 已访问分区清单（首访挂载，此后 v-show 常挂载——demo「分区组件常挂载、切分区
  *  不丢已填表单与交互态」的 real 形态；首访才挂载是 real 侧加载副作用的收敛差异）。
@@ -272,13 +281,10 @@ watch(activeView, (view) => {
   if (!visitedViews.value.includes(view)) visitedViews.value.push(view)
 }, { immediate: true })
 
-// 内容列限宽三态（demo：wide=--content-max-w-wide 1064（usage）· narrow 860（mcp/system-prompt，
-// demo P2「限宽双实现」收敛值）· 其余 --content-max-w 720）
-const contentMaxWidth = computed(() => {
-  if (activeMenu.value === 'usage') return 'var(--content-max-w-wide)'
-  if (activeMenu.value === 'mcp' || activeMenu.value === 'system-prompt' || activeMenu.value === 'rename-session') return '860px'
-  return 'var(--content-max-w)'
-})
+// 内容列限宽三态（demo：wide=--content-max-w-wide 1064 · medium 860 · 默认 --content-max-w 720）。
+// 档位判据 = 分区声明字段（§7.5 声明化：lib/content-slots 内置声明登记，插件声明自带）；
+// 未命中条目（防御）与缺省档同值。
+const contentMaxWidth = computed(() => contentMaxWidthCss(findSection(activeMenu.value)?.contentMaxWidth))
 
 const settingsStore = getSettingsStore()
 const { providers, skills, agents, extensions, system, skillDirs, agentDirs } = settingsStore
@@ -389,7 +395,8 @@ function handleNavItemNavigation(e: KeyboardEvent): void {
   if (next < 0 || next >= items.length) return
   e.preventDefault()
   items[next].focus()
-  select(flatMenus[next].id)
+  const nextSection = navSections.value[next]
+  if (nextSection !== undefined) select(settingsNavKey(nextSection))
 }
 
 /** overlay 内可聚焦元素（Tab 循环三路语义见共享单元 focus-trap）。

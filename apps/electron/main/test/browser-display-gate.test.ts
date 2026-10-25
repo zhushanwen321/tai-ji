@@ -112,11 +112,16 @@ describe('display-gate 纯策略', () => {
   })
 
   describe('IPC payload 解析（error envelope + 边界用例）', () => {
-    it('overlay-state：合法形态归一（含关闭态归一 + canvas 无会话归属形态）', () => {
+    it('overlay-state：合法形态归一（含关闭态归一 + 非 browser 内容 sessionId 恒 null 形态）', () => {
       expect(parseOverlayDisplayState({ open: true, content: 'browser', sessionId: 'A' })).toEqual({ open: true, content: 'browser', sessionId: 'A' })
       expect(parseOverlayDisplayState({ open: false, content: 'browser', sessionId: 'A' })).toEqual(CLOSED_OVERLAY)
-      // canvas 跨 session 无会话归属（problem-solve-canvas D4/D7）：sessionId 恒 null
+      // 非 browser 内容不驱动 view 显示谓词 → sessionId 恒 null（容器扩展点统一 §7.2
+      // 词表四方同批：canvas 无会话归属形态（problem-solve-canvas D4/D7）并入通用判据，
+      // plugin 插件内容载体同判据）
       expect(parseOverlayDisplayState({ open: true, content: 'canvas', sessionId: null })).toEqual({ open: true, content: 'canvas', sessionId: null })
+      expect(parseOverlayDisplayState({ open: true, content: 'workflow', sessionId: null })).toEqual({ open: true, content: 'workflow', sessionId: null })
+      expect(parseOverlayDisplayState({ open: true, content: 'scheduler', sessionId: null })).toEqual({ open: true, content: 'scheduler', sessionId: null })
+      expect(parseOverlayDisplayState({ open: true, content: 'plugin', sessionId: null })).toEqual({ open: true, content: 'plugin', sessionId: null })
     })
 
     it('overlay-state：非法 payload 抛错（error envelope 带原因）', () => {
@@ -125,8 +130,9 @@ describe('display-gate 纯策略', () => {
       expect(() => parseOverlayDisplayState({ open: true, content: 'drawer', sessionId: 'A' })).toThrow(/content must be/)
       expect(() => parseOverlayDisplayState({ open: true, content: 'browser', sessionId: '' })).toThrow(/sessionId must be a non-empty string/)
       expect(() => parseOverlayDisplayState({ open: true, content: 'browser' })).toThrow(/sessionId must be a non-empty string/)
-      // canvas 的会话归属校验独立分支：sessionId 非 null 拒绝（画布不属任何会话）
-      expect(() => parseOverlayDisplayState({ open: true, content: 'canvas', sessionId: 'A' })).toThrow(/sessionId must be null for canvas/)
+      // 非 browser 内容的会话归属校验：sessionId 非 null 拒绝（不驱动 view 显示谓词，无会话事实源）
+      expect(() => parseOverlayDisplayState({ open: true, content: 'canvas', sessionId: 'A' })).toThrow(/sessionId must be null for non-browser content/)
+      expect(() => parseOverlayDisplayState({ open: true, content: 'plugin', sessionId: 'A' })).toThrow(/sessionId must be null for non-browser content/)
     })
 
     it('shields：合法形态（fullscreen 无 rect / 非全屏带 rect）', () => {

@@ -1,23 +1,30 @@
 /**
  * overlay 协调层单测 —— u-w2-browser-mount：openBrowser URL 注入链 + 会话删除级联。
  *
- * 覆盖（display-containers §7.4/§5.3）：
+ * 覆盖（display-containers §7.4/§5.3 + 容器扩展点统一 §6.4/§6.8/§11.1-2）：
  * - openBrowser(url, sessionId)：开浮层 browser 内容（URL 注入链核心落点）；已开态换 URL/换会话 = 单例换内容
  * - 无效载荷 no-op（url / sessionId 空白）
  * - closeBrowserOverlayForSession（§7.4 发起会话删除的浮层终态）：**仅发起会话被删才关**
  *   ——删非发起会话浮层不动（S5 反向断言，防过宽清场）；browser 换 workflow 内容后同为不动
+ * - openOverlayContent(contentId, sessionId)（§6.4 浮层落点协调函数）：内置 kind 走既有
+ *   payload 组装（scheduler）/ 专属参数 kind 走专属入口（warn + no-op）/ 插件声明 id 走
+ *   §6.8 {kind:'plugin'} 载体；无效载荷 no-op
+ * - closeOverlayForSession（§6.8/§11.1-2 级联判据统一）：判据唯一 = payload.sessionId
+ *   （kind 不参与）——删归属会话 → 浮层关闭；删其他会话 → 不关闭；对插件内容同样生效
  *
  * 三视角：构建者白盒（载荷校验 + 条件式关闭）、使用者黑盒（「点 localhost 链接浮层开浏览器页、
  * 删掉别的会话浮层照常开着」的用户可见语义）、观察者形态（开合态读出形状）。
  *
  * 运行：cd packages/core && npx vitest run src/domain/overlay/__tests__/coordination.test.ts
  */
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import {
   openBrowser,
   openCanvasOverlay,
   openSchedulerOverlay,
   openOverlay,
+  openOverlayContent,
+  closeOverlayForSession,
   closeBrowserOverlayForSession,
   closeCanvasOverlayForSession,
   closeOverlay,
@@ -27,6 +34,10 @@ import { getOverlayControlState } from '../state'
 
 beforeEach(() => {
   _resetOverlayForTest()
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('openBrowser URL 注入链（§7.4：localhost 链接点击 → 浮层 BrowserPane）', () => {
@@ -147,5 +158,93 @@ describe('closeBrowserOverlayForSession（§7.4 会话删除级联，仅发起�
     closeBrowserOverlayForSession('sess-a')
     expect(getOverlayControlState().isOpen).toBe(false)
     expect(getOverlayControlState().current).toBeNull()
+  })
+})
+
+describe('openOverlayContent（容器扩展点统一 §6.4 浮层落点：contentId 全局寻址）', () => {
+  it('内置 kind scheduler：走既有 payload 组装（openSchedulerOverlay 同载荷——归属会话）', () => {
+    openOverlayContent('scheduler', 'sess-a')
+    const state = getOverlayControlState()
+    expect(state.isOpen).toBe(true)
+    expect(state.current).toEqual({ kind: 'scheduler', payload: { sessionId: 'sess-a' } })
+  })
+
+  it('内置 kind 需专属参数（browser/workflow/canvas）：warn + no-op（载荷需 url/runId/canvasId，各有专属入口）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    openOverlayContent('browser', 'sess-a')
+    openOverlayContent('workflow', 'sess-a')
+    openOverlayContent('canvas', 'sess-a')
+    // 三次调用全部 no-op（零状态写入）且各出一行带恢复指引的 warning
+    expect(getOverlayControlState().isOpen).toBe(false)
+    expect(getOverlayControlState().current).toBeNull()
+    expect(warn).toHaveBeenCalledTimes(3)
+  })
+
+  it('插件声明 id：走 §6.8 插件载体 {kind:"plugin", payload:{contentId, sessionId}}（sessionId 宿主注入）', () => {
+    openOverlayContent('my-plugin.panel', 'sess-a')
+    const state = getOverlayControlState()
+    expect(state.isOpen).toBe(true)
+    expect(state.current).toEqual({ kind: 'plugin', payload: { contentId: 'my-plugin.panel', sessionId: 'sess-a' } })
+  })
+
+  it('已开态（scheduler 内容）再开插件内容 = 单例换内容（isOpen 保持开、载荷替换为 plugin）', () => {
+    openOverlayContent('scheduler', 'sess-a')
+    openOverlayContent('my-plugin.panel', 'sess-a')
+    const state = getOverlayControlState()
+    expect(state.isOpen).toBe(true)
+    expect(state.current).toEqual({ kind: 'plugin', payload: { contentId: 'my-plugin.panel', sessionId: 'sess-a' } })
+  })
+
+  it('contentId / sessionId 空白 → no-op（原态保持；openOverlay 载荷校验兜底）', () => {
+    openOverlayContent('my-plugin.panel', 'sess-a')
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    openOverlayContent('   ', 'sess-a')
+    openOverlayContent('my-plugin.panel', ' ')
+    expect(getOverlayControlState().current).toEqual({ kind: 'plugin', payload: { contentId: 'my-plugin.panel', sessionId: 'sess-a' } })
+  })
+})
+
+describe('closeOverlayForSession（容器扩展点统一 §6.8/§11.1-2：级联判据统一 payload.sessionId，kind 不参与）', () => {
+  it('§11.1-2 插件内容：删除归属会话 → 浮层关闭（PB-2 正向断言——级联对插件内容同样生效）', () => {
+    openOverlayContent('my-plugin.panel', 'sess-a')
+    closeOverlayForSession('sess-a')
+    expect(getOverlayControlState().isOpen).toBe(false)
+    expect(getOverlayControlState().current).toBeNull()
+  })
+
+  it('§11.1-2 插件内容：删除其他会话 → 浮层不关闭（内容原样保留——防过宽清场反向断言）', () => {
+    openOverlayContent('my-plugin.panel', 'sess-a')
+    closeOverlayForSession('sess-b')
+    const state = getOverlayControlState()
+    expect(state.isOpen).toBe(true)
+    expect(state.current).toEqual({ kind: 'plugin', payload: { contentId: 'my-plugin.panel', sessionId: 'sess-a' } })
+  })
+
+  it('判据 kind 无关：五类内容（browser/workflow/scheduler/canvas/plugin）归属会话被删一律关', () => {
+    const cases = [
+      { kind: 'browser', payload: { url: 'http://localhost:1420/', sessionId: 'sess-a' } },
+      { kind: 'workflow', payload: { sessionId: 'sess-a', runId: 'wf-1' } },
+      { kind: 'scheduler', payload: { sessionId: 'sess-a' } },
+      { kind: 'canvas', payload: { canvasId: 'cvs-1', sessionId: 'sess-a' } },
+      { kind: 'plugin', payload: { contentId: 'my-plugin.panel', sessionId: 'sess-a' } },
+    ] as const
+    for (const content of cases) {
+      _resetOverlayForTest()
+      openOverlay(content)
+      closeOverlayForSession('sess-a')
+      expect(getOverlayControlState().isOpen, `kind=${content.kind} 归属会话删除应关浮层`).toBe(false)
+      expect(getOverlayControlState().current, `kind=${content.kind} 关浮层应复位载荷`).toBeNull()
+    }
+  })
+
+  it('per-kind 级联函数保留（专属 hook 入口）：行为 = 统一判据的 kind 收窄子集', () => {
+    openOverlayContent('my-plugin.panel', 'sess-a')
+    // browser 专属 hook 对 plugin 内容不动作（kind 收窄——plugin 内容的级联走统一函数）
+    closeBrowserOverlayForSession('sess-a')
+    expect(getOverlayControlState().isOpen).toBe(true)
+    closeCanvasOverlayForSession('sess-a')
+    expect(getOverlayControlState().isOpen).toBe(true)
+    closeOverlayForSession('sess-a')
+    expect(getOverlayControlState().isOpen).toBe(false)
   })
 })

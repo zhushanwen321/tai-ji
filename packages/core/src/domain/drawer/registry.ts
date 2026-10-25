@@ -10,26 +10,32 @@
  * §7.7 双形态契约：注册表条目即唯一权威，ui 壳组件与 core 协调函数都读它，禁止各自文字化。
  *
  * [HISTORICAL] W0 行为不变锚（u-foundation）：数据源切换当刻条目数与显示序与旧硬编码一致（旧 10 条）。
- * 终态容器归属 = CONTAINER_REGISTRY（右 8/底 1/浮 2，§7.2；drawer workflow 条目 2026-10-19 删除）。
+ * 终态容器归属 = CONTAINER_REGISTRY（右 8/底 1/浮 4，§7.2；drawer workflow 条目 2026-10-19 删除）。
+ * [2026-10-25] 浮层补齐 scheduler/canvas（容器扩展点统一设计 §6.11 阶段 0：注册表条目数
+ * 与 OverlayContent 判别联合 4 成员对齐，消除「类型 4 员 / 注册表 2 条」的既存不一致——
+ * 该不一致状态下推进注册表驱动改造会让后续验证以错误基线运行）。
  *
  * 状态：纯数据注册表，无行为实装（类型契约不实装行为）。终态容器归属 = CONTAINER_REGISTRY
- * （右 8/底 1/浮 2，§7.2）；右抽屉数组以 ContainerRegistryEntry<RightDrawerTab> 实例化——
- * 编译层锁终态 8 员（terminal/browser 混入右抽屉声明即 tsc 红），DrawerPanel 直接读
+ * （右 8/底 1/浮 4，§7.2）；右抽屉数组以 ContainerRegistryEntry<RightDrawerTab> 实例化——
+ * 容器类型去枚举（容器扩展点统一 §7.2）后 RightDrawerTab 为开放 string，内置终态 8 员由
+ * registry 单测 + RIGHT_DRAWER_TAB_IDS 锚定，DrawerPanel 直接读
  * RIGHT_DRAWER_REGISTRY（CONTAINER_REGISTRY['right-drawer'] 同对象）
  */
 import type { RightDrawerTab } from './types'
 
-/** 三容器内容类型全集（display-containers §7.2）：右抽屉 8 员（RightDrawerTab）+ 底抽屉 terminal + 浮层 browser/workflow。
- * workflow 仅浮层承接（[2026-10-19 用户裁决] drawer workflow tab 删除，浮层是唯一形态）。
+/** 三容器内容类型全集（display-containers §7.2；容器扩展点统一 §7.2「容器类型去枚举」后
+ * 为开放字符串——插件声明经 ContentSlotRegistry 派生新容器位，封闭联合不再成立；内置成员
+ * 校验 = RIGHT_DRAWER_TAB_IDS / OverlayContentKind）。
  * 仅注册表层使用——右抽屉控制态/tab 位一律用 RightDrawerTab。 */
-export type ContainerContentType = RightDrawerTab | 'terminal' | 'browser' | 'workflow'
+export type ContainerContentType = string
 
 /** 容器标识（§7.2 三个容器） */
 export type ContainerId = 'right-drawer' | 'bottom-drawer' | 'overlay'
 
 /** 容器注册表条目（§7.2：内容类型 + 图标标识字符串 + 标签/空态文案的 i18n key）。
- * 泛型按容器实例化：RIGHT_DRAWER_REGISTRY = <RightDrawerTab>（编译层锁终态 8 员）；
- * 底抽屉/浮层条目持全集类型（各容器条目数 1/2 由单测锚定，§7.2 声明即终态）。 */
+ * 泛型按容器实例化：RIGHT_DRAWER_REGISTRY = <RightDrawerTab>（容器类型去枚举后为开放
+ * string，终态 8 员由 registry 单测 + RIGHT_DRAWER_TAB_IDS 运行时校验锚定，不再由编译层锁）；
+ * 底抽屉/浮层条目持全集类型（各容器条目数 1/4 由单测锚定，§7.2 声明即终态）。 */
 export interface ContainerRegistryEntry<C extends ContainerContentType = ContainerContentType> { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费方
   /** 内容类型（tab/内容标识；泛型参数 C 精确到容器承接的内容类型） */
   content: C
@@ -140,17 +146,42 @@ const TRACE_ENTRY: ContainerRegistryEntry<RightDrawerTab> = {
 }
 
 /** 浮层 workflow 条目（§7.2：workflow（工作流图）——[2026-10-19 用户裁决] drawer 侧条目
- * 已随 workflow tab 删除，浮层是 workflow 唯一容器） */
+ * 已随 workflow tab 删除，浮层是 workflow 唯一容器）。
+ * i18n key 复用 workflow-viz 域既有 key（panel.workflowViz.*，浮层壳 WorkflowVizOverlay
+ * 现行消费的同一词域），不再指向 panel.sideDrawer 的 drawer 时代键。 */
 const WORKFLOW_OVERLAY_ENTRY: ContainerRegistryEntry = {
   content: 'workflow',
   text: 'workflow（工作流图）',
   icon: 'workflow',
-  labelKey: 'panel.sideDrawer.tabWorkflow',
-  emptyTextKey: 'panel.sideDrawer.noWorkflow',
-  emptyHintKey: 'panel.sideDrawer.workflowHint',
+  labelKey: 'panel.workflowViz.overlayTitle',
+  emptyTextKey: 'panel.workflowViz.ganttEmpty',
+  emptyHintKey: 'panel.workflowViz.eventsEmpty',
 }
 
-// ── 终态容器声明（§7.2 逐字序：右 8 / 底 1 / 浮 2）──
+/** 浮层 scheduler 条目（scheduler 整合一级 tab，2026-10-06 用户裁决；与 OverlayContent
+ * kind='scheduler' 对应）。labelKey = 浮层 tab 条现行标签键（WorkflowVizOverlay tabSegments）。 */
+const SCHEDULER_OVERLAY_ENTRY: ContainerRegistryEntry = {
+  content: 'scheduler',
+  text: 'scheduler（定时任务）',
+  icon: 'clock',
+  labelKey: 'panel.workflowViz.overlayTabScheduler',
+  emptyTextKey: 'panel.workflowViz.ganttEmpty',
+  emptyHintKey: 'panel.workflowViz.eventsEmpty',
+}
+
+/** 浮层 canvas 条目（problem-solve-canvas §3.1(3)，canvas 整合一级 tab；与 OverlayContent
+ * kind='canvas' 对应）。labelKey = 浮层 tab 条现行标签键；emptyTextKey 复用托盘画布件
+ * 既有空态文案（panel.tray.canvas.empty，画布内容现行的真实空态文案）。 */
+const CANVAS_OVERLAY_ENTRY: ContainerRegistryEntry = {
+  content: 'canvas',
+  text: 'canvas（画布）',
+  icon: 'network',
+  labelKey: 'panel.workflowViz.overlayTabCanvas',
+  emptyTextKey: 'panel.tray.canvas.empty',
+  emptyHintKey: 'panel.workflowViz.eventsEmpty',
+}
+
+// ── 终态容器声明（§7.2 逐字序：右 8 / 底 1 / 浮 4——浮层序与 OverlayContent 判别联合成员序一致）──
 
 /** 右抽屉（right-drawer）承接的内容类型列表（8 条，§7.2 声明序；<RightDrawerTab> = 编译层锁终态） */
 export const RIGHT_DRAWER_REGISTRY: readonly ContainerRegistryEntry<RightDrawerTab>[] = [
@@ -167,8 +198,14 @@ export const RIGHT_DRAWER_REGISTRY: readonly ContainerRegistryEntry<RightDrawerT
 /** 底抽屉（bottom-drawer）承接的内容类型列表（1 条——本期只有 terminal 一种内容，不预设 tab 枚举，§7.1 YAGNI） */
 export const BOTTOM_DRAWER_REGISTRY: readonly ContainerRegistryEntry[] = [TERMINAL_ENTRY]
 
-/** 浮层（overlay）承接的内容类型列表（2 条——单例换内容） */
-export const OVERLAY_REGISTRY: readonly ContainerRegistryEntry[] = [BROWSER_ENTRY, WORKFLOW_OVERLAY_ENTRY]
+/** 浮层（overlay）承接的内容类型列表（4 条——browser/workflow/scheduler/canvas，与
+ * OverlayContent 判别联合 4 成员一一对应；单例换内容） */
+export const OVERLAY_REGISTRY: readonly ContainerRegistryEntry[] = [
+  BROWSER_ENTRY,
+  WORKFLOW_OVERLAY_ENTRY,
+  SCHEDULER_OVERLAY_ENTRY,
+  CANVAS_OVERLAY_ENTRY,
+]
 
 /** 容器声明式注册表（§7.2：每个容器声明承接的内容类型列表 + 元信息） */
 export const CONTAINER_REGISTRY: Readonly<Record<ContainerId, readonly ContainerRegistryEntry[]>> = {

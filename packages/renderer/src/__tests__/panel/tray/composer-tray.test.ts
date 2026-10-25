@@ -42,11 +42,9 @@ import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionSc
 import { HEADER_ACTIONS_SOURCE_KEY } from '@/composables/shell/useExtensionHostBridge'
 import ComposerTray from '@/components/panel/tray/ComposerTray.vue'
 import type { TrayBuiltinKind as TrayKind, UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
-import { useSubagentStore } from '@/stores/subagent'
-import { useWorkflowStore } from '@/stores/workflow'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
-import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
+import type { SessionSummary } from '@taiji/shared'
 import zhTray from '@/i18n/locales/zh-CN/tray'
 
 // ── mock：数据范围（三件计数/行集；口径与首次拉取触发在 useTrayCounts.test.ts）──
@@ -54,12 +52,6 @@ interface TrayState {
   bashRunning: BackgroundTaskEntry[]
   bashEnded: BackgroundTaskEntry[]
   bashLoaded: boolean
-  subagentRunning: SubagentRecord[]
-  subagentEnded: SubagentRecord[]
-  subagentLoading: boolean
-  workflowRunning: WorkflowRunRecord[]
-  workflowEnded: WorkflowRunRecord[]
-  workflowLoading: boolean
   /** 第 4 件子会话行集（u7） */
   sessionChildren: SessionSummary[]
   /** 第 5 件画布清单（u-tray-entry） */
@@ -71,12 +63,6 @@ function createTrayState(): TrayState {
     bashRunning: [],
     bashEnded: [],
     bashLoaded: true,
-    subagentRunning: [],
-    subagentEnded: [],
-    subagentLoading: false,
-    workflowRunning: [],
-    workflowEnded: [],
-    workflowLoading: false,
     sessionChildren: [],
     canvasEntries: [],
   }
@@ -113,8 +99,6 @@ function createTrayFixture(): UseTrayCountsReturn {
       corrupted: false,
       fetchFailed: false,
     })),
-    errors: { subagent: computed(() => null), workflow: computed(() => null) },
-    retry: vi.fn().mockResolvedValue(undefined),
   }
 }
 
@@ -189,17 +173,6 @@ function makeTask(overrides: Partial<BackgroundTaskEntry> & { taskId: string }):
     state: 'running',
     ownerPiPid: 500,
     sessionId: SID,
-    ...overrides,
-  }
-}
-
-function makeSubagent(overrides: Partial<SubagentRecord> & { subagentId: string }): SubagentRecord {
-  return {
-    sessionFile: null,
-    agent: 'reviewer',
-    slug: 'review-changes',
-    task: 'Review the code changes',
-    status: 'idle',
     ...overrides,
   }
 }
@@ -382,11 +355,11 @@ afterEach(() => {
 // ── ① built-in 三态（D7；验收 N2「归零不虚亮」）──
 
 describe('ComposerTray built-in 三态（D7 / N2）', () => {
-  it('全无记录 → 任务五件都不渲染（DOM 层不存在，而非 opacity:0）；canvas 同三态（零画布隐藏）', () => {
+  it('全无记录 → built-in 件都不渲染（DOM 层不存在，而非 opacity:0）；canvas 同三态（零画布隐藏）', () => {
     mountTray(makeWidgetSource(SID))
 
     expect(row().find('[data-testid="composer-tray"]').exists()).toBe(true)
-    // bash/subagent/workflow/session/canvas 全无 → 都不渲染（D4 隔离后 canvas 无恒渲染豁免：
+    // bash/session/canvas 全无 → 都不渲染（D4 隔离后 canvas 无恒渲染豁免：
     // 「本 session 无画布」前提成立，零画布时按钮隐藏，新建入口随首张画布出现）
     expect(builtinKinds()).toEqual([])
     expect(row().find('[data-testid="composer-tray"]').attributes('data-session-id')).toBe(SID)
@@ -394,12 +367,11 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
 
   it('有历史无进行中 → dim 常驻：按钮在，但计数与呼吸点元素不存在（不虚亮）', () => {
     trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
-    trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1', status: 'completed' })]
-    trayState.workflowEnded = [makeWorkflow({ runId: 'wf-e1' })]
+    trayState.sessionChildren = [makeChild({ id: 'c-e1', status: 'done' })]
     mountTray(makeWidgetSource(SID))
 
-    expect(builtinKinds()).toEqual(['bash', 'subagent', 'workflow'])
-    for (const kind of ['bash', 'subagent', 'workflow'] as const) {
+    expect(builtinKinds()).toEqual(['bash', 'session'])
+    for (const kind of ['bash', 'session'] as const) {
       const button = builtinButton(kind)
       expect(button.attributes('data-state')).toBe('idle')
       expect(button.find('[data-testid="tray-builtin-count"]').exists()).toBe(false)
@@ -412,7 +384,7 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
   it('running > 0 → 亮计数 + 呼吸点（accent），且计数文本等于进行中条数', () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' }), makeTask({ taskId: 'bt-2' })]
     trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
-    trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1', status: 'completed' })]
+    trayState.sessionChildren = [makeChild({ id: 'c-e1', status: 'done' })]
     mountTray(makeWidgetSource(SID))
 
     const button = builtinButton('bash')
@@ -425,33 +397,32 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
     expect(button.find('[data-testid="tray-builtin-count"]').classes()).toContain('text-accent-fg')
     expect(button.find('[data-testid="tray-builtin-pulse"]').classes()).toContain('bg-accent')
     // 只有有进行中的那一件变亮，其余仍 dim 常驻
-    expect(builtinButton('subagent').attributes('data-state')).toBe('idle')
+    expect(builtinButton('session').attributes('data-state')).toBe('idle')
   })
 
   it('三态混合：进行中件亮、仅历史件 dim、无记录件不渲染（同屏）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1' })]
+    trayState.sessionChildren = [makeChild({ id: 'c-e1', status: 'done' })]
     mountTray(makeWidgetSource(SID))
 
-    // workflow 无记录 → 不渲染；bash 亮；subagent dim（零画布 → canvas 件同样不渲染）
-    expect(builtinKinds()).toEqual(['bash', 'subagent'])
+    // bash 亮；session dim（零画布 → canvas 件同样不渲染）
+    expect(builtinKinds()).toEqual(['bash', 'session'])
 
     // 进行中的计数消失（任务结束）→ 该按钮自动降为 dim 常驻（不虚亮）
     trayState.bashRunning = []
     trayState.bashEnded = [makeTask({ taskId: 'bt-1', state: 'exited', reason: 'natural' })]
     await nextTick()
-    expect(builtinKinds()).toEqual(['bash', 'subagent'])
+    expect(builtinKinds()).toEqual(['bash', 'session'])
     expect(builtinButton('bash').attributes('data-state')).toBe('idle')
     expect(builtinButton('bash').find('[data-testid="tray-builtin-count"]').exists()).toBe(false)
   })
 
-  it('built-in 固定序 bash → subagent → workflow（不参与 widget 动态排序）', () => {
-    trayState.workflowEnded = [makeWorkflow({ runId: 'wf-e1' })]
-    trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1' })]
+  it('built-in 固定序 bash → session（不参与 widget 动态排序；[U10] workflow 件已迁插件 widget 区）', () => {
+    trayState.sessionChildren = [makeChild({ id: 'c-e1', status: 'done' })]
     trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
     mountTray(makeWidgetSource(SID))
 
-    expect(builtinKinds()).toEqual(['bash', 'subagent', 'workflow'])
+    expect(builtinKinds()).toEqual(['bash', 'session'])
   })
 })
 
@@ -665,14 +636,14 @@ describe('ComposerTray pin（D8：点击 pin / 再点·Esc·点外解除）', ()
 
   it('点击托盘自身按钮行不算「面板外」：pin 一件后点另一件 icon → 原 pin 不被 pointerdown 悄悄解除', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    trayState.subagentRunning = [makeSubagent({ subagentId: 'sa-1', status: 'running' })]
+    trayState.sessionChildren = [makeChild({ id: 'c-1', status: 'active' })]
     mountTray(makeWidgetSource(SID))
 
     await realClick(builtinButton('bash'))
     expect(panelNodes()[0].dataset.pinned).toBe('true')
 
     // 真实点击序列的前半：pointerdown（reka 层外判定发生在这里）
-    builtinButton('subagent').element.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    builtinButton('session').element.dispatchEvent(new Event('pointerdown', { bubbles: true }))
     await flushPromises()
     await advance(0)
     // 被当成层外 → 这里会被解除；拦截正确 → pin 态原样保持
@@ -680,11 +651,11 @@ describe('ComposerTray pin（D8：点击 pin / 再点·Esc·点外解除）', ()
     expect(panelKeys()).toEqual(['native:bash'])
 
     // 后半：click 把交互切到 B（互斥）
-    await builtinButton('subagent').trigger('click')
+    await builtinButton('session').trigger('click')
     await flushPromises()
     await nextTick()
-    expect(panelKeys()).toEqual(['native:subagent'])
-    expect(builtinButton('subagent').attributes('aria-pressed')).toBe('true')
+    expect(panelKeys()).toEqual(['native:session'])
+    expect(builtinButton('session').attributes('aria-pressed')).toBe('true')
   })
 })
 
@@ -693,50 +664,50 @@ describe('ComposerTray pin（D8：点击 pin / 再点·Esc·点外解除）', ()
 describe('ComposerTray 互斥（D8：同时至多一个面板）', () => {
   it('开 A 后触发 B → A 收 B 开（hover 切换）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    trayState.subagentRunning = [makeSubagent({ subagentId: 'sa-1', status: 'running' })]
+    trayState.sessionChildren = [makeChild({ id: 'c-1', status: 'active' })]
     mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS)
     expect(panelKeys()).toEqual(['native:bash'])
 
-    await builtinButton('subagent').trigger('pointerenter')
+    await builtinButton('session').trigger('pointerenter')
     await advance(OPEN_MS)
 
     // 互斥的结构性证据：面板节点数恒 ≤ 1，且换成 B
     expect(panelNodes()).toHaveLength(1)
-    expect(panelKeys()).toEqual(['native:subagent'])
+    expect(panelKeys()).toEqual(['native:session'])
     expect(builtinButton('bash').attributes('aria-expanded')).toBe('false')
   })
 
   it('pin 住 A 后 hover B → 切到 B 预览（A 收，B 未 pin）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    trayState.subagentRunning = [makeSubagent({ subagentId: 'sa-1', status: 'running' })]
+    trayState.sessionChildren = [makeChild({ id: 'c-1', status: 'active' })]
     mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('click')
     await nextTick()
-    await builtinButton('subagent').trigger('pointerenter')
+    await builtinButton('session').trigger('pointerenter')
     await advance(OPEN_MS)
 
-    expect(panelKeys()).toEqual(['native:subagent'])
+    expect(panelKeys()).toEqual(['native:session'])
     expect(panelNodes()[0].dataset.pinned).toBe('false')
     expect(builtinButton('bash').attributes('aria-pressed')).toBe('false')
   })
 
   it('未到 160ms 就移开 → 不打开任何面板（指针路过不闪面板）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    trayState.subagentRunning = [makeSubagent({ subagentId: 'sa-1', status: 'running' })]
+    trayState.sessionChildren = [makeChild({ id: 'c-1', status: 'active' })]
     mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS - 1)
     await builtinButton('bash').trigger('pointerleave')
-    await builtinButton('subagent').trigger('pointerenter')
+    await builtinButton('session').trigger('pointerenter')
     await advance(OPEN_MS)
 
     // 唯一打开的是 B（A 的待打开被取消，不是开完再关）
-    expect(panelKeys()).toEqual(['native:subagent'])
+    expect(panelKeys()).toEqual(['native:session'])
     expect(builtinButton('bash').attributes('aria-expanded')).toBe('false')
   })
 })
@@ -883,13 +854,13 @@ describe('ComposerTray widget 区与面板分流', () => {
 describe('ComposerTray 会话切换（D12/A6：不残留旧 session 交互态）', () => {
   it('切 session：面板与 pin 一并作废，托盘行跟随新 sessionId', async () => {
     const mock = makeWidgetSource(SID)
-    trayState.workflowRunning = [makeWorkflow({ runId: 'wf-1', status: 'running' })]
+    trayState.sessionChildren = [makeChild({ id: 'c-1', status: 'active' })]
     mountTray(mock)
 
-    await builtinButton('workflow').trigger('click')
+    await builtinButton('session').trigger('click')
     await nextTick()
-    expect(panelKeys()).toEqual(['native:workflow'])
-    expect(builtinButton('workflow').attributes('aria-pressed')).toBe('true')
+    expect(panelKeys()).toEqual(['native:session'])
+    expect(builtinButton('session').attributes('aria-pressed')).toBe('true')
 
     await row().setProps({ sessionId: SID2 })
     await flushPromises()
@@ -902,71 +873,42 @@ describe('ComposerTray 会话切换（D12/A6：不残留旧 session 交互态）
 
 // ── ⑦ 数据范围单例与首帧（U1/U2；真实 useTrayCounts + spy 拉取路径）──
 
-describe('ComposerTray 数据范围单例（U1：面板不自建实例、开合不重发首次拉取 RPC）', () => {
-  it('面板打开/关闭/换件/重开：数据范围实例恒一个、loadSubagents / loadWorkflows 各仅一次', async () => {
-    // 真实数据范围（外壳仍是唯一调用点）+ spy 拉取路径：断言的是 load RPC 次数，不是替身内部行为
+describe('ComposerTray 数据范围单例（U1：面板不自建实例）', () => {
+  it('面板打开/关闭/换件/重开：数据范围实例恒一个（workflow 首拉不重发守卫随件退役——bash 首拉在 useBackgroundTasks 状态根，session 行集读真实 store）', async () => {
+    // 真实数据范围（外壳仍是唯一调用点）；session 行集来自真实 session store（applySnapshot 种入）
     trayCountsSwitch.useReal = true
-    const subagentStore = useSubagentStore()
-    const workflowStore = useWorkflowStore()
-    const loadSubSpy = vi.spyOn(subagentStore, 'loadSubagents').mockResolvedValue(undefined)
-    const loadWfSpy = vi.spyOn(workflowStore, 'loadWorkflows').mockResolvedValue(undefined)
-    // 拉取路径被替身 → 数据直接种入分区（外壳三态与面板行集都读同一分区）
-    subagentStore.applyRecords(SID, [makeSubagent({ subagentId: 'sa-1', status: 'running' })])
-    // workflow 种数据：applyRecords 已私有化，直写分区 ref
-    workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(SID, [
-      makeWorkflow({ runId: 'wf-1', status: 'running' }),
-    ])
+    const { useSessionStore } = await import('@/stores/session')
+    useSessionStore().applySnapshot({
+      groups: [{ cwd: '/w', sessions: [makeChild({ id: 'c-real', status: 'active' })] }],
+    })
 
     mountTray(makeWidgetSource(SID))
     await flushPromises()
 
     expect(trayCountsSwitch.calls).toBe(1) // 唯一实例 = 外壳（面板若自建即为 2+）
-    expect(loadSubSpy).toHaveBeenCalledTimes(1)
-    expect(loadSubSpy).toHaveBeenCalledWith(SID)
-    expect(loadWfSpy).toHaveBeenCalledTimes(1)
 
-    // 首次打开面板（面板挂载）：行集来自外壳实例，无新增 RPC
-    await builtinButton('subagent').trigger('click')
+    // 首次打开面板（面板挂载）：行集来自外壳实例
+    await builtinButton('session').trigger('click')
     await nextTick()
-    expect(panelKeys()).toEqual(['native:subagent'])
-    expect(panelContentNodes('tray-subagent-row')).toHaveLength(1)
+    expect(panelKeys()).toEqual(['native:session'])
+    // 用户可见断言：行集来自外壳实例（session 行渲染 cwd；面板行序 = 数据范围行序）
+    expect(panelNodes()[0]?.textContent ?? '').toContain('work-project')
     expect(trayCountsSwitch.calls).toBe(1)
-    expect(loadSubSpy).toHaveBeenCalledTimes(1)
 
-    // 关闭 → 换另一件打开（旧面板卸载）→ 再关再开：每次重挂都不得重发首次拉取
-    await builtinButton('subagent').trigger('click')
+    // 关闭 → 再打开（旧面板卸载重挂）：数据范围仍是一个实例（不重建、不重拉）
+    await builtinButton('session').trigger('click')
     await nextTick()
     expect(panelKeys()).toEqual([])
-    await builtinButton('workflow').trigger('click')
+    await builtinButton('session').trigger('click')
     await nextTick()
-    expect(panelKeys()).toEqual(['native:workflow'])
-    expect(panelContentNodes('tray-workflow-row')).toHaveLength(1)
-    await builtinButton('workflow').trigger('click')
-    await nextTick()
-    await builtinButton('subagent').trigger('click')
-    await nextTick()
-    expect(panelKeys()).toEqual(['native:subagent'])
+    expect(panelKeys()).toEqual(['native:session'])
+    expect(panelNodes()[0]?.textContent ?? '').toContain('work-project')
 
     expect(trayCountsSwitch.calls).toBe(1)
-    expect(loadSubSpy).toHaveBeenCalledTimes(1)
-    expect(loadWfSpy).toHaveBeenCalledTimes(1)
   })
 })
 
 describe('ComposerTray 首帧即列表（U2：hover 打开不闪加载态）', () => {
-  it('subagent：在途（loading）但该类已有数据 → 面板打开首帧即列表，不渲染加载占位', async () => {
-    trayState.subagentRunning = [makeSubagent({ subagentId: 'sa-1', status: 'running' })]
-    trayState.subagentLoading = true
-    mountTray(makeWidgetSource(SID))
-
-    await builtinButton('subagent').trigger('pointerenter')
-    await advance(OPEN_MS)
-
-    expect(panelKeys()).toEqual(['native:subagent'])
-    expect(panelContentNodes('tray-panel-loading')).toHaveLength(0)
-    expect(panelContentNodes('tray-subagent-row')).toHaveLength(1)
-  })
-
   it('bash：从未成功 list 过但有广播投递的任务 → 直出列表（loading 只吞「无数据的真首次拉取」）', async () => {
     trayState.bashLoaded = false
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
@@ -986,7 +928,7 @@ describe('ComposerTray 首帧即列表（U2：hover 打开不闪加载态）', (
 describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
   it('aggregated + 有进行中条目 → 单入口按钮（单图标 + 运行数数字角标），逐件按钮不再渲染', () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' }), makeTask({ taskId: 'bt-2' })]
-    trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1', status: 'completed' })]
+    trayState.sessionChildren = [makeChild({ id: 'c-e1', status: 'done' })]
     mountTray(makeWidgetSource(SID), SID, true)
 
     const aggregate = row().find('[data-testid="tray-aggregate-button"]')
@@ -1005,20 +947,19 @@ describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
   it('点击聚合入口 → 面板内分段展示全部类别（段头 = 类别标题 + running/total）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
-    trayState.workflowEnded = [makeWorkflow({ runId: 'wf-e1' })]
+    trayState.sessionChildren = [makeChild({ id: 'c-e1', status: 'done' })]
     trayState.canvasEntries = [makeCanvas({ canvasId: 'cvs-1' })]
     await openAggregatedPanel()
 
     expect(panelContentNodes('tray-aggregate-panel')).toHaveLength(1)
-    // 段 = 有记录的类别（bash + workflow + canvas），全无记录的任务类别不出段
+    // 段 = 有记录的类别（bash + session + canvas），全无记录的任务类别不出段
     expect(panelContentNodes('tray-aggregate-section-bash')).toHaveLength(1)
-    expect(panelContentNodes('tray-aggregate-section-workflow')).toHaveLength(1)
-    expect(panelContentNodes('tray-aggregate-section-subagent')).toHaveLength(0)
+    expect(panelContentNodes('tray-aggregate-section-session')).toHaveLength(1)
     expect(panelContentNodes('tray-aggregate-section-canvas')).toHaveLength(1)
     const bashCount = panelNodes()[0]?.querySelector('[data-testid="tray-aggregate-count-bash"]')
     expect(bashCount?.textContent).toBe('1/2')
     // 段体复用真实 built-in 面板（行渲染/行内操作零复制；canvas 段体 = TrayCanvasPanel）
-    expect(panelContentNodes('tray-native-panel')).toHaveLength(2)
+    expect(panelContentNodes('tray-native-panel')).toHaveLength(1)
     expect(panelContentNodes('tray-canvas-panel')).toHaveLength(1)
   })
 
@@ -1156,15 +1097,13 @@ describe('ComposerTray 第 4 件「子会话」（u7）', () => {
     expect(builtinKinds()).toEqual(['bash'])
   })
 
-  it('固定序末位：bash → subagent → workflow → session → canvas（不参与 widget 动态排序）', () => {
+  it('固定序末位：bash → session → canvas（不参与 widget 动态排序；[U10] workflow 件已迁插件 widget 区）', () => {
     trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
-    trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1', status: 'completed' })]
-    trayState.workflowEnded = [makeWorkflow({ runId: 'wf-e1' })]
     trayState.sessionChildren = [makeChild({ id: 'c-1', status: 'done' })]
     trayState.canvasEntries = [makeCanvas({ canvasId: 'cvs-1' })]
     mountTray(makeWidgetSource(SID))
 
-    expect(builtinKinds()).toEqual(['bash', 'subagent', 'workflow', 'session', 'canvas'])
+    expect(builtinKinds()).toEqual(['bash', 'session', 'canvas'])
   })
 
   it('聚合入口共存（序 4）：聚合面板含 session 段与 canvas 段，段内各复用专属面板', async () => {
@@ -1275,7 +1214,7 @@ describe('ComposerTray 聚合面板 headerAction 段（B3 聚合范围含定时�
 
   it('托盘全无任务条目 + widget 空 + headerAction 有入口 → 聚合入口在场（headerAction 独立可见条件）', () => {
     headerActionsSwitch.source = makeHeaderActionSource()
-    // 三态全空托盘（bash/subagent/workflow/session/canvas 全无）+ 空 widget 源
+    // 三态全空托盘（bash/session/canvas 全无）+ 空 widget 源
     mountTray(makeWidgetSource(SID), SID, true)
 
     // D4 隔离后 canvas 件按三态参与（零画布不渲染）——本用例重新获得辨析力：

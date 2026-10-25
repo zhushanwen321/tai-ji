@@ -33,8 +33,8 @@ import {
   bindWorkflowRunLookup,
 } from '@taiji/core/domain/drawer'
 import {
-  closeCanvasOverlayForSession,
   closeOverlay,
+  closeOverlayForSession,
   getOverlayControlState,
   openCanvasOverlay,
   openOverlay,
@@ -59,8 +59,21 @@ export const overlayDagError = ref<WorkflowVizDagLoadError | null>(null)
 
 // ── overlay 一级 tab（scheduler 整合进浮层，2026-10-06 用户裁决）─────────────────────
 
-/** 浮层一级 tab：'runs' = DAG + 实况 dock（现状 body）；'scheduler' = 定时任务面板（ViewHost 消费插件树）；'canvas' = 问题解决画布（problem-solve-canvas §3.1(3)，tab body 挂载分支归 u-canvas-pane）。 */
-export type OverlayTab = 'runs' | 'scheduler' | 'canvas'
+/** 浮层一级 tab 位（容器扩展点统一 §7.2「容器类型去枚举」）：从编译期联合降为开放字符串，
+ * 与 core RightDrawerTab 去枚举同批（容器 tab 位一律开放——派生视图可产出非内置 tab 位）。
+ * 内置三员已知值 = OVERLAY_TAB_IDS：'runs' = DAG + 实况 dock（现状 body）；'scheduler' =
+ * 定时任务面板（ViewHost 消费插件树）；'canvas' = 问题解决画布（problem-solve-canvas
+ * §3.1(3)，tab body 挂载分支归 u-canvas-pane）。workflow 壳内标签条保持宿主实现
+ *（§6.8：切标签不改内容 kind 的不对称保留，插件内容不进本标签条）。 */
+export type OverlayTab = string
+
+/** 浮层一级 tab 内置已知值（成员序 = tabSegments 呈现序；运行时校验入口）。 */
+export const OVERLAY_TAB_IDS = ['runs', 'scheduler', 'canvas'] as const
+
+/** tab 位是否为浮层内置已知值（去枚举后的成员校验承接）。 */
+export function isKnownOverlayTab(tab: string): tab is OverlayTab {
+  return (OVERLAY_TAB_IDS as readonly string[]).includes(tab)
+}
 
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，补登 §4 ⑧ 2026-10-06）：overlay 一级 tab 槽
 /** 浮层一级 tab 展示态（开合态/内容 SSOT 在 core，tab 是 renderer 展示维度——壳经 Host 受控透传）。 */
@@ -153,17 +166,12 @@ export function closeWorkflowVizOverlay(): void {
   closeOverlay()
 }
 
-/** session 删除编排（SessionCleanupHooks.closeWorkflowOverlay）：删除的是发起 session 时关
- *  （workflow / scheduler / canvas 三类内容同判据——载荷都持归属 sessionId，D4 隔离后
- *  canvas 内容同样挂会话删除级联；§7.4 级联同语义）。 */
+/** session 删除编排（SessionCleanupHooks.closeWorkflowOverlay）：删除的是浮层当前内容的
+ *  归属 session 时关（级联判据统一 = payload.sessionId，kind 不参与——workflow/scheduler/
+ *  canvas/browser/plugin 五类内容同判据，容器扩展点统一 §6.8/§11.1-2；编排入口收敛至
+ *  core closeOverlayForSession，本函数保留既有 hook 名）。 */
 export function closeWorkflowVizOverlayForSession(sessionId: string): void {
-  const cur = getOverlayControlState().current
-  if (
-    (cur?.kind === 'workflow' || cur?.kind === 'scheduler')
-    && cur.payload.sessionId === sessionId
-  ) closeWorkflowVizOverlay()
-  // canvas 分支（core coordination 同判据）：删除的是画布归属会话 → 关浮层。
-  closeCanvasOverlayForSession(sessionId)
+  closeOverlayForSession(sessionId)
 }
 
 /**

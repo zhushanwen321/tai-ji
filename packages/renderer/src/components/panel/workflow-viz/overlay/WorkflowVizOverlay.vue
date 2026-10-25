@@ -8,7 +8,9 @@
   按钮）+ Tab 焦点陷阱注册 + IME 检查 + 焦点契约（打开 focus 面板 / 关闭回 composer）
   全部归 OverlayShell；本组件是挂进壳标题栏 slot 与 body 的 workflow 内容层。
   header 三态（scheduler 整合一级 tab，2026-10-06 用户裁决；canvas 画布 tab，
-  problem-solve-canvas §3.1(3)）：tab=runs = 六元素行
+  problem-solve-canvas §3.1(3)；容器扩展点统一 §7.3 三段标题/内容分支改注册表派生——
+  段集与元数据单点 workflow-viz-overlay-derivation，runs 保留显式内置分支不做 v-else
+  兜底）：tab=runs = 六元素行
   （图标 + workflow 名 + slug + 状态 pill + errorCode + 已用时长，关闭钮归壳不计入
   元素数；v5 终裁参数信息不进 header——workflow-overlay-refine D2）；tab=scheduler =
   Clock + 定时任务标题；tab=canvas = 画布图标 + 画布标题（run 元素整体让位，同
@@ -57,26 +59,13 @@
     :close-label="t('panel.workflowViz.overlayClose')"
     @close="close"
   >
-    <!-- 标题栏 slot 三态：runs = 图标 + workflow 名 + slug + 状态 pill + errorCode + 已用时长
-         （关闭按钮归壳，恒在最右；D2 v5 终裁不展示 args）；scheduler = Clock + 定时任务标题
-         （run 元素整体让位——run 数据不属 scheduler 内容）；canvas = 画布图标 + 画布标题
-         （run 元素整体让位——run 数据不属 canvas 内容，problem-solve-canvas §3.1(3)） -->
+    <!-- 标题栏 slot：runs = 图标 + workflow 名 + slug + 状态 pill + errorCode + 已用时长
+         （关闭按钮归壳，恒在最右；D2 v5 终裁不展示 args）——runs 保留显式内置分支
+         （§7.3 不做 v-else 兜底：六元素行服务 run 数据，宿主实现）。其余段（scheduler/
+         canvas…）按注册表派生段渲染：icon + 文案从内置内容视图派生（段集外 tab 值零渲染），
+         run 元素整体让位——run 数据不属这些内容。 -->
     <template #title>
-      <template v-if="tab === 'scheduler'">
-        <Clock class="size-[15px] shrink-0 text-neutral-dim" aria-hidden="true" />
-        <span
-          class="min-w-0 shrink-0 font-mono text-[length:var(--text-xs)] font-semibold text-neutral-fg"
-          data-testid="wfvz-overlay-scheduler-title"
-        >{{ t('panel.workflowViz.overlayTabScheduler') }}</span>
-      </template>
-      <template v-else-if="tab === 'canvas'">
-        <Network class="size-[15px] shrink-0 text-neutral-dim" aria-hidden="true" />
-        <span
-          class="min-w-0 shrink-0 font-mono text-[length:var(--text-xs)] font-semibold text-neutral-fg"
-          data-testid="wfvz-overlay-canvas-title"
-        >{{ t('panel.workflowViz.overlayTabCanvas') }}</span>
-      </template>
-      <template v-else>
+      <template v-if="tab === 'runs'">
         <Workflow class="size-[15px] shrink-0 text-neutral-dim" aria-hidden="true" />
         <span class="min-w-0 shrink-0 font-mono text-[length:var(--text-xs)] font-semibold text-neutral-fg">{{ run?.scriptName ?? '' }}</span>
         <span
@@ -134,11 +123,24 @@
           </template>
         </ModelSelectPopover>
       </template>
+      <!-- 注册表派生段标题（§7.3 标题分支改派生）：icon + 文案从内置内容视图派生
+           （workflow-viz-overlay-derivation 单点）；testid 沿用 per-segment 形态
+           （wfvz-overlay-scheduler-title / -canvas-title），e2e 与单测锚点不变。 -->
+      <template v-else-if="activeSegment !== null">
+        <component :is="segmentIconComponent(activeSegment.icon)" class="size-[15px] shrink-0 text-neutral-dim" aria-hidden="true" />
+        <span
+          class="min-w-0 shrink-0 font-mono text-[length:var(--text-xs)] font-semibold text-neutral-fg"
+          :data-testid="`wfvz-overlay-${activeSegment.value}-title`"
+        >{{ segmentLabel(activeSegment) }}</span>
+      </template>
     </template>
 
-    <!-- 一级 tab 条（scheduler 整合 2026-10-06）：TraceViewToggle 分段范式（凹陷槽 bg-bg-input
-         + active 浮起 bg-surface-hover solid hover tone，2026-10-14 全族迁移旧 bg-bg-elevated 退役）。无 run 时「运行」禁用（灰置）——scheduler 直达打开
-         本浮层可以没有 run 数据；tab SSOT 在控制器（Host 受控透传），壳只上抛切换意图 -->
+    <!-- 一级 tab 条（scheduler 整合 2026-10-06；容器扩展点统一 §7.3 改注册表派生）：
+         TraceViewToggle 分段范式（凹陷槽 bg-bg-input + active 浮起 bg-surface-hover solid
+         hover tone，2026-10-14 全族迁移旧 bg-bg-elevated 退役）。分段元数据从内置内容视图
+         派生（workflow-viz-overlay-derivation 单点）；禁用判据数据驱动（§6.15）：声明
+         openableWithoutData=false 且当前无数据 → 灰置（runs 段既有规则的派生形态）；
+         tab SSOT 在控制器（Host 受控透传），壳只上抛切换意图 -->
     <nav
       class="ml-3 mt-2 flex flex-none items-center gap-0.5 self-start rounded-md bg-bg-input p-[2px]"
       data-testid="wfvz-overlay-tabs"
@@ -153,7 +155,7 @@
         :class="tab === seg.value
           ? 'bg-surface-hover text-neutral-fg hover:bg-surface-hover'
           : 'text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
-        :disabled="seg.value === 'runs' && run === null"
+        :disabled="!seg.openableWithoutData && !segmentHasData(seg)"
         :aria-selected="tab === seg.value"
         :data-testid="`wfvz-overlay-tab-${seg.value}`"
         @click="onTabClick(seg.value)"
@@ -163,8 +165,8 @@
       </Button>
     </nav>
 
-      <!-- body：tab=runs 上区 DAG（纵向主视图，全宽）+ 下区实况面板 dock（slot），份额 1.6:1；
-           tab=scheduler 定时任务面板（ViewHost 消费插件推树，empty=hidden 首帧零 DOM） -->
+      <!-- body tab=runs（显式内置分支，§7.3 不做 v-else 兜底）：上区 DAG（纵向主视图，全宽）
+           + 下区实况面板 dock（slot），份额 1.6:1 -->
       <div v-if="tab === 'runs'" class="flex min-h-0 flex-1 flex-col">
         <aside
           class="relative flex min-h-0 flex-[1.6] flex-col"
@@ -300,31 +302,37 @@
           <slot />
         </section>
       </div>
-      <!-- tab=canvas：问题解决画布（problem-solve-canvas §3.1(3)）。CanvasPane 异步导入
-           （defineAsyncComponent，与 workflow 壳主 chunk 解耦）；canvasId 读 core 开合态
-           单例（当前内容 kind='canvas' 的载荷——SSOT 在 core/domain/overlay，本壳纯透传）。
-           空载荷防御：canvasId 缺席不挂载（Tab 切换瞬态无内容帧零 DOM） -->
-      <div
-        v-else-if="tab === 'canvas'"
-        class="flex min-h-0 flex-1 flex-col"
-        data-testid="wfvz-overlay-canvas-pane"
-      >
-        <CanvasPane
-          v-if="canvasPaneId"
-          :key="canvasPaneId"
-          :canvas-id="canvasPaneId"
-          :session-id="canvasPaneSessionId"
-        />
-      </div>
-      <!-- tab=scheduler：定时任务面板（viewId 单源常量 = 控制器 SCHEDULER_MODAL_VIEW_ID，
-           树未到 = hidden 零 DOM，容器仍锚定内容区形态） -->
-      <div
-        v-else
-        class="flex min-h-0 flex-1 flex-col overflow-y-auto p-4"
-        data-testid="wfvz-overlay-scheduler-pane"
-      >
-        <ViewHost :view-id="SCHEDULER_MODAL_VIEW_ID" :scope="{ kind: 'session', sessionId: schedulerSessionId ?? '' }" empty="hidden" />
-      </div>
+      <!-- tab=canvas（派生段 kind 分派）：问题解决画布（problem-solve-canvas §3.1(3)）。
+           CanvasPane 异步导入（defineAsyncComponent，与 workflow 壳主 chunk 解耦）；canvasId
+           读 core 开合态单例（当前内容 kind='canvas' 的载荷——SSOT 在 core/domain/overlay，
+           本壳纯透传）。空载荷防御：canvasId 缺席不挂载（Tab 切换瞬态无内容帧零 DOM） -->
+      <template v-else-if="activeSegment !== null">
+        <div
+          v-if="activeSegment.kind === 'canvas'"
+          class="flex min-h-0 flex-1 flex-col"
+          data-testid="wfvz-overlay-canvas-pane"
+        >
+          <CanvasPane
+            v-if="canvasPaneId"
+            :key="canvasPaneId"
+            :canvas-id="canvasPaneId"
+            :session-id="canvasPaneSessionId"
+          />
+        </div>
+        <!-- 派生段 scheduler：定时任务面板（viewId 单源常量 = 控制器 SCHEDULER_MODAL_VIEW_ID，
+             树未到 = hidden 零 DOM，容器仍锚定内容区形态）。canvas/scheduler 渲染器分派 =
+             宿主内置分支（§6.8：内置内容的开合/渲染由壳显式分支承载；runs 段的宿主渲染项
+             登记（core builtinOverlayTypeViews renderer host/WorkflowVizDag，§6.5/U10 层 4）
+             是数据面事实，渲染路径仍走本壳显式分支——登记不改变渲染分派）；
+             段集外 tab 值零渲染（无 v-else 兜底，§7.3） -->
+        <div
+          v-else-if="activeSegment.kind === 'scheduler'"
+          class="flex min-h-0 flex-1 flex-col overflow-y-auto p-4"
+          data-testid="wfvz-overlay-scheduler-pane"
+        >
+          <ViewHost :view-id="SCHEDULER_MODAL_VIEW_ID" :scope="{ kind: 'session', sessionId: schedulerSessionId ?? '' }" empty="hidden" />
+        </div>
+      </template>
   </OverlayShell>
 </template>
 
@@ -343,6 +351,9 @@ import OverlayShell from './OverlayShell.vue'
 import WorkflowVizDag from '../dag/WorkflowVizDag.vue'
 import { dotTone } from '../dag/tone'
 import { SCHEDULER_MODAL_VIEW_ID, type OverlayTab } from './workflow-viz-overlay'
+import { deriveOverlayTabSegments, type OverlayTabSegment } from './workflow-viz-overlay-derivation'
+import { buildFallbackGroups, buildUnmatchedGroups, hasExplicitPhase as hasAnyExplicitPhase, type FallbackGroup, type UnmatchedGroup } from './overlay-fallback-groups'
+import type { OverlayKind } from '@taiji/core/domain/overlay'
 import type { WorkflowUnmatchedInstance } from '../blueprint-match'
 import type { WorkflowVizDagClickPayload, WorkflowVizDagNodeStatus } from '../dag/types'
 import type { WorkflowVizDagLoadError } from './types'
@@ -422,18 +433,59 @@ const canvasPaneSessionId = computed<string>(() => {
   return cur !== null && cur.kind === 'canvas' ? cur.payload.sessionId : ''
 })
 
-// ── 一级 tab 条（scheduler 整合）：分段定义（序 = 缺省视图优先）──
+// ── 一级 tab 条（注册表派生，容器扩展点统一 §7.3 浮层标签条行）──
 
-/** tab 词条 + 图标（TraceViewToggle 分段范式；canvas 段 = 问题解决画布，problem-solve-canvas §3.1(3)）。 */
-const tabSegments = computed<Array<{ value: OverlayTab; label: string; icon: typeof Workflow }>>(() => [
-  { value: 'runs', label: t('panel.workflowViz.overlayTabRuns'), icon: Workflow },
-  { value: 'scheduler', label: t('panel.workflowViz.overlayTabScheduler'), icon: Clock },
-  { value: 'canvas', label: t('panel.workflowViz.overlayTabCanvas'), icon: Network },
-])
+// 派生段集（静态：内置内容视图不随运行时状态变化；序 = OVERLAY_REGISTRY 序 = 呈现序）。
+const derivedSegments = deriveOverlayTabSegments()
 
-/** tab 点击（禁用判据在入口检查，不依赖浏览器对 disabled 按钮的点击抑制）：无 run 时「运行」不可进。 */
+/** 当前 tab 对应的派生段（null = tab 位不在派生段集——未知 tab 零渲染，无兜底）。 */
+const activeSegment = computed<OverlayTabSegment | null>(() =>
+  derivedSegments.find((seg) => seg.value === props.tab) ?? null)
+
+/**
+ * 段 icon 解析（icon 名 → lucide 组件；本壳白名单 + 兜底——§6.13 四容器单一解析函数
+ * 收敛归 U13，本表是浮层壳的本地消费形态）。
+ */
+const OVERLAY_TAB_ICON_COMPONENTS: Record<string, typeof Workflow> = {
+  workflow: Workflow,
+  clock: Clock,
+  network: Network,
+}
+
+function segmentIconComponent(icon: string): typeof Workflow {
+  return OVERLAY_TAB_ICON_COMPONENTS[icon] ?? Workflow
+}
+
+/**
+ * 段文案（§6.16④ 内置项恒走 labelKey；runs 段显式内置——workflow 注册表条目的 labelKey
+ * 是浮层标题键而非 tab 标签键（条目语义 = 条目文本），runs 保留既有 tab 标签键）。
+ */
+function segmentLabel(seg: OverlayTabSegment): string {
+  return seg.kind === 'workflow' ? t('panel.workflowViz.overlayTabRuns') : t(seg.labelKey)
+}
+
+/** tab 词条组装（文案解析 + 图标组件绑定；t() 保持 i18n 响应式）。 */
+const tabSegments = computed<Array<{ value: OverlayTab; kind: OverlayKind; openableWithoutData: boolean; label: string; icon: typeof Workflow }>>(() =>
+  derivedSegments.map((seg) => ({
+    value: seg.value,
+    kind: seg.kind,
+    openableWithoutData: seg.openableWithoutData,
+    label: seg.kind === 'workflow' ? t('panel.workflowViz.overlayTabRuns') : t(seg.labelKey),
+    icon: segmentIconComponent(seg.icon),
+  })))
+
+/**
+ * 段数据就绪判据（§6.15 可打开性的事实源）：workflow 段数据 = run 记录（无 run = 无数据）；
+ * 其余内置段声明 openableWithoutData=true 恒可进（空态由内容侧承载）。
+ */
+function segmentHasData(seg: { kind: OverlayKind }): boolean {
+  return seg.kind !== 'workflow' || props.run !== null
+}
+
+/** tab 点击（禁用判据在入口检查，不依赖浏览器对 disabled 按钮的点击抑制；§6.15 数据驱动）。 */
 function onTabClick(value: OverlayTab): void {
-  if (value === 'runs' && props.run === null) return
+  const seg = derivedSegments.find((s) => s.value === value)
+  if (seg !== undefined && !seg.openableWithoutData && !segmentHasData(seg)) return
   emit('update:tab', value)
 }
 
@@ -504,49 +556,15 @@ const pillClass = computed(() => {
   return 'border-hairline text-neutral-mid'
 })
 
-// ── DAG 不可得降级列表（按 phase 分组只读形态）──
+// ── DAG 不可得降级列表（按 phase 分组只读形态）+ 未匹配实例分组（D2⑥ 展示侧：
+// 零命中/歧义实例按 phase 分组，不静默丢弃）——分组派生单点在 overlay-fallback-groups.ts ──
 
-interface FallbackGroup {
-  phase: string
-  calls: WorkflowAgentCall[]
-}
-
-const fallbackGroups = computed<FallbackGroup[]>(() => {
-  const run = props.run
-  if (!run) return []
-  const groups = new Map<string, WorkflowAgentCall[]>()
-  for (const call of run.agentCalls) {
-    const phase = call.phase ?? ''
-    const list = groups.get(phase) ?? []
-    list.push(call)
-    groups.set(phase, list)
-  }
-  return [...groups.entries()].map(([phase, calls]) => ({ phase, calls }))
-})
+const fallbackGroups = computed<FallbackGroup[]>(() => buildFallbackGroups(props.run))
 
 /** 存在显式 phase 才显示分组 header（线性脚本无 phase 不分组）。 */
-const hasExplicitPhases = computed(() =>
-  fallbackGroups.value.some((g) => g.phase !== ''),
-)
+const hasExplicitPhases = computed(() => hasAnyExplicitPhase(fallbackGroups.value))
 
-// ── 未匹配实例分组（D2⑥ 展示侧：零命中/歧义实例按 phase 分组，不静默丢弃）──
-
-interface UnmatchedGroup {
-  phase: string
-  items: WorkflowUnmatchedInstance[]
-}
-
-/** 按 phase 分组（插入序 = 事件流序，与降级列表同型；phase 缺失归空串组）。 */
-const unmatchedGroups = computed<UnmatchedGroup[]>(() => {
-  const groups = new Map<string, WorkflowUnmatchedInstance[]>()
-  for (const item of props.unmatched ?? []) {
-    const phase = item.call.phase ?? ''
-    const list = groups.get(phase) ?? []
-    list.push(item)
-    groups.set(phase, list)
-  }
-  return [...groups.entries()].map(([phase, items]) => ({ phase, items }))
-})
+const unmatchedGroups = computed<UnmatchedGroup[]>(() => buildUnmatchedGroups(props.unmatched))
 
 /** 随行标注（D2③ 原文口径：歧义 =「歧义（命中 N 个调用点）」，零命中给短标注）。 */
 function unmatchedNote(item: WorkflowUnmatchedInstance): string {

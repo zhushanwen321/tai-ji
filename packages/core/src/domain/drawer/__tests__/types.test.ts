@@ -15,6 +15,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { ref } from 'vue'
 import type { RightDrawerTab, DrawerControlState } from '../types'
+import { RIGHT_DRAWER_TAB_IDS, isKnownRightDrawerTab } from '../types'
 import { bindDrawerSessionId, getDrawerControlState, _resetDrawerControlForTest } from '../control'
 import type { BashTaskSelectionState } from '../selection/bash-task'
 import type { BtwSelectionState } from '../selection/btw'
@@ -127,24 +128,17 @@ describe('drawer types：btw tab 扩展（btw-question D7，M3-a）', () => {
   })
 })
 
-// ── 右抽屉 8 tab 枚举（display-containers §7.1，u-foundation 类型契约）──
+// ── 右抽屉 8 tab 已知值（display-containers §7.1 + 容器扩展点统一 §7.2 容器类型去枚举）──
 // 形态照 bashTask/plan/btw 先例：编译期断言由 tsc 系执行，运行期影子验证成员合法。
-// 负向断言用条件类型锚（不依赖 @ts-expect-error：若负向条件成立（即收窄被回退），
-// 类型从 true 塌缩为 false，赋值即 tsc 红）。
+// [容器类型去枚举] RightDrawerTab 已从编译期联合降为开放字符串（插件声明 drawer.tab 派生
+// 新 tab 位，封闭联合无法表达）——条件类型负向锚（'terminal' extends RightDrawerTab）在
+// string 上恒真、失效退役；成员集合校验改由运行时已知值常量 RIGHT_DRAWER_TAB_IDS +
+// isKnownRightDrawerTab 承接（下方运行期断言）。
 
-// §7.1 终态 8 员逐字成员序（成员缺失/改序即 tsc 红）
+// §7.1 终态 8 员逐字成员序（与 RIGHT_DRAWER_TAB_IDS / RIGHT_DRAWER_REGISTRY 对账）
 const rightDrawerTabs: RightDrawerTab[] = ['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'trace']
 
-// 'terminal' 不属于右抽屉终态枚举（已迁底抽屉）——若 RightDrawerTab 混入 'terminal'，本类型塌缩为 false、赋值 tsc 红
-type TerminalIsNotRightTab = 'terminal' extends RightDrawerTab ? false : true
-const terminalNegativeAnchor: TerminalIsNotRightTab = true
-
-// [U7 收窄终态] tab 类型单一化 = RightDrawerTab：'terminal'（迁底抽屉）与 'browser'（走浮层）
-// 双双不可赋给 RightDrawerTab——负向条件锚（若成员被回混，类型堄缩 false、赋值 tsc 红）
-type BrowserIsNotRightTab = 'browser' extends RightDrawerTab ? false : true
-const browserNegativeAnchor: BrowserIsNotRightTab = true
-
-// 控制态 activeTab 类型收窄锚：activeTab 回流任何 terminal/browser 成员即堄缩 false、赋值 tsc 红
+// 控制态 activeTab 类型锚（去枚举后 activeTab: string = RightDrawerTab，恒真锚保留作形态记录）
 type ControlTabIsRightDrawer = DrawerControlState['activeTab'] extends RightDrawerTab ? true : false
 const controlTabNarrowAnchor: ControlTabIsRightDrawer = true
 
@@ -159,17 +153,21 @@ type ParasiteFieldsRemoved = 'docked' extends keyof DrawerControlState
       : true
 const controlStateSlimAnchor: ParasiteFieldsRemoved = true
 
-describe('drawer types：右抽屉 8 tab 枚举（display-containers §7.1，U7 收窄终态）', () => {
-  it('RightDrawerTab = §7.1 终态 8 员（编译期断言的运行期影子）', () => {
-    expect(rightDrawerTabs).toEqual(['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'trace'])
+describe('drawer types：右抽屉 8 tab 已知值（display-containers §7.1 + 容器类型去枚举）', () => {
+  it('RightDrawerTab 已知值 = §7.1 终态 8 员（RIGHT_DRAWER_TAB_IDS 逐字对账）', () => {
+    expect([...RIGHT_DRAWER_TAB_IDS]).toEqual(['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'trace'])
+    expect(rightDrawerTabs).toEqual([...RIGHT_DRAWER_TAB_IDS])
   })
 
-  it("'terminal'/'browser' 均不可赋给 RightDrawerTab（条件类型负向锚的运行期影子；tab 类型单一化 = RightDrawerTab）", () => {
-    expect(terminalNegativeAnchor).toBe(true)
-    expect(browserNegativeAnchor).toBe(true)
+  it("'terminal'/'browser' 均非右抽屉内置已知值（去枚举后负向校验 = isKnownRightDrawerTab 运行时承接）", () => {
+    expect(isKnownRightDrawerTab('terminal')).toBe(false)
+    expect(isKnownRightDrawerTab('browser')).toBe(false)
+    expect(isKnownRightDrawerTab('workflow')).toBe(false)
+    expect(isKnownRightDrawerTab('git')).toBe(true)
+    expect(isKnownRightDrawerTab('trace')).toBe(true)
   })
 
-  it('DrawerControlState.activeTab 类型收窄为 RightDrawerTab（收窄锚运行期影子）', () => {
+  it('DrawerControlState.activeTab 形态锚（去枚举后 = RightDrawerTab 开放字符串）', () => {
     expect(controlTabNarrowAnchor).toBe(true)
   })
 

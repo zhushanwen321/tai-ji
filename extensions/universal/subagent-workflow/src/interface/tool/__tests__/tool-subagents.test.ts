@@ -291,13 +291,14 @@ describe("schema 契约：一跳扁平 + 成员对象 tasks 必填 + 常驻", ()
     expect(TOOL_SRC.toLowerCase()).toContain("slash");
   });
 
-  it("不构造 details.__gui__（D8：isWorkflow 块分支恒折叠不消费，构造即死代码）", () => {
-    // 文件头注释会提到 __gui__（记录 D8 裁决），故断言构造侧：无 GUI 协议依赖 +
-    // 无描述符构造（属性赋值/工厂调用）。
-    expect(TOOL_SRC).not.toContain("@zhushanwen/extension-protocol");
-    expect(TOOL_SRC).not.toContain("__gui__:");
-    expect(TOOL_SRC).not.toContain("guiResult(");
-    expect(TOOL_SRC).not.toContain("isGuiCapable");
+  it("构造 details.__gui__（§7.4 workflow 层 2：attach 单点 withGuiAttach + 构造单点 buildBatchGui）", () => {
+    // [容器扩展点统一 §7.4 workflow 层 2] 撤销 D8「不构造」裁决恢复产树——断言随
+    // 翻转：GUI 协议依赖 + attach/构造两点在场（handler 层 runSubagentsBatch 不
+    // attach，attach 在 execute 层——上游「handler 组装」describe 的无 __gui__ 断言
+    // 与本断言互补锁定两层分工）。
+    expect(TOOL_SRC).toContain("@zhushanwen/extension-protocol");
+    expect(TOOL_SRC).toContain("withGuiAttach(");
+    expect(TOOL_SRC).toContain("buildBatchGui");
   });
 
   it("promptGuidelines 含分工句/成员对象调用正例；旧 agents/aggregate 形状零残留", () => {
@@ -327,6 +328,35 @@ describe("schema 契约：一跳扁平 + 成员对象 tasks 必填 + 常驻", ()
 });
 
 // ══════════════════════════════════════════════════════════════
+// ── GUI attach（execute 级 RPC/非 RPC 分发；§7.4 workflow 层 2 撤销 D8 裁决新增）──
+// handler（runSubagentsBatch）不 attach——attach 单点在 execute 层 withGuiAttach，
+// 构造单点 buildBatchGui（成员清单树，形状断言在 __tests__/gui.test.ts）。
+
+describe("GUI attach（execute 级 RPC/非 RPC 分发）", () => {
+  type GuiProjection = { __gui__?: { component?: { type?: string; props?: { items?: unknown[] } } } };
+
+  it("RPC ctx → details 附带 __gui__（成员清单 list-tree，行数 = 成员数）", async () => {
+    const tool = captureSubagentsTool(new Set<string>(), makeRegistry());
+    const r = await tool.execute("id", { tasks: TWO_TASKS }, undefined, undefined, {
+      mode: "rpc",
+      hasUI: true,
+    });
+    const gui = (r.details as unknown as GuiProjection).__gui__;
+    expect(gui).toBeDefined();
+    expect(gui?.component?.type).toBe("list-tree");
+    expect(gui?.component?.props?.items).toHaveLength(TWO_TASKS.length);
+  });
+
+  it("TUI ctx → details 无 __gui__（走 pi 原生渲染）", async () => {
+    const tool = captureSubagentsTool(new Set<string>(), makeRegistry());
+    const r = await tool.execute("id", { tasks: TWO_TASKS }, undefined, undefined, {
+      mode: "tui",
+      hasUI: true,
+    });
+    expect((r.details as unknown as GuiProjection).__gui__).toBeUndefined();
+  });
+});
+
 describe("handler 组装：runWorkflow('fan-out') 确定性映射（成员对象 args）", () => {
   it("全参数调用 → spec 逐字段映射（运行级 agent 填入未指定成员；model/thinkingLevel 不复制进成员）", async () => {
     const registry = makeRegistry();
@@ -367,7 +397,8 @@ describe("handler 组装：runWorkflow('fan-out') 确定性映射（成员对象
     // 运行级 model/thinkingLevel 走 spec 顶层（workerData 通路），不进成员对象
     expect(spec.model).toBe("zai-coding-cn/glm-5.3-flash");
     expect(spec.thinkingLevel).toBe("high");
-    // details：无 __gui__，携带 runId/stateFile（程序化消费方）
+    // details：handler 层不 attach（attach 单点在 execute 层 withGuiAttach），携带
+    // runId/stateFile（程序化消费方）
     expect(Object.keys(result.details)).not.toContain("__gui__");
     expect(result.details).toMatchObject({
       runId: "wf-1700000000000-abcd",
@@ -379,8 +410,7 @@ describe("handler 组装：runWorkflow('fan-out') 确定性映射（成员对象
     });
   });
 
-  it("成员已指定 agent 时运行级 agent 不覆盖（成员级优先）；无运行级 agent 时成员原样透传", async () => {
-    await runSubagentsBatch(
+  it("成员已指定 agent 时运行级 agent 不覆盖（成员级优先）；无运行级 agent 时成员原样透传", async () => {    await runSubagentsBatch(
       {
         tasks: [
           { task: "a", agent: "/abs/explicit.md" },

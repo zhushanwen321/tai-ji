@@ -9,8 +9,11 @@
     的 overlayOpen/overlayCurrent 已退役）；DAG 解析态（overlayDag/overlayDagError）与
     一级 tab 展示态（overlayTab，scheduler 整合 2026-10-06）留
     renderer 控制器 workflow-viz-overlay.ts；本容器壳承载 workflow / scheduler / canvas
-    三类内容（browser 由 BrowserOverlay 承载，三壳互斥）；scheduler 内容下 run 相关 props 按无 run
-    形态透传（run/dag/dagError = null，「运行」tab 由壳按 run 缺省禁用）；run
+    三类内容（「是否打开」判定按注册表派生 kind 集合，workflow-viz-overlay-derivation
+    单点；browser 由 BrowserOverlay 承载，三壳互斥；plugin 载体由本组件的独立浮层内容位
+    承载，§6.8——不进 workflow 壳标签条）；scheduler 内容下 run 相关 props 按无 run
+    形态透传（run/dag/dagError = null，「运行」tab 由壳按派生 openableWithoutData 数据驱动禁用）；
+    run
     派生视图从 workflowStore 分区按 runId 选中（recordsOf 响应式读，workflowUpdate 信号触发
     的重新拉取经 store 自动到达）；节点六态/当前 phase/已用时长在本容器单处派生后经
     props 透传（壳与面板均为已派生输入，不自行判定）。
@@ -78,13 +81,39 @@
        只在 workflow 内容时开，两壳互斥不叠显）。Guard 只包 workflow 内容（回落语义
        归属 workflow），browser 内容不进回落链。 -->
   <BrowserOverlay />
+  <!-- 插件内容浮层（容器扩展点统一 §6.8 插件载体）：独立浮层内容显示（不进 workflow 壳
+       标签条——那是「同一会话三种视角」，与插件内容类型不同维度）。壳复用 OverlayShell
+       （两通道关闭/焦点陷阱）；与 workflow 壳互斥（内容 kind 互斥，单焦点陷阱槽不冲突）。
+       contentId = 声明 id = ViewHost viewId（同名路由契约，bootstrap registerMountPoints；
+       插件推树按 (sessionId, viewId) 分区，本位消费同一分区即得内容）。 -->
+  <OverlayShell
+    :open="isPluginOverlayOpen"
+    :label="t('panel.workflowViz.overlayPluginTitle')"
+    :close-label="t('panel.workflowViz.overlayClose')"
+    @close="closeWorkflowVizOverlay"
+  >
+    <div
+      class="flex min-h-0 flex-1 flex-col overflow-y-auto p-4"
+      data-testid="wfvz-overlay-plugin-pane"
+    >
+      <ViewHost
+        v-if="pluginContent !== null"
+        :view-id="pluginContent.contentId"
+        :scope="{ kind: 'session', sessionId: pluginContent.sessionId }"
+        empty="hidden"
+      />
+    </div>
+  </OverlayShell>
 </template>
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { WorkflowRunRecord } from '@taiji/shared'
 import WorkflowVizOverlay from './WorkflowVizOverlay.vue'
 import WorkflowVizOverlayGuard from './WorkflowVizOverlayGuard.vue'
+import OverlayShell from './OverlayShell.vue'
+import { ViewHost } from '@taiji/ui/extension-host'
 import BrowserOverlay from '@/components/panel/BrowserOverlay.vue'
 import WorkflowLivePanel from '../panel/WorkflowLivePanel.vue'
 import AgentStreamDrawer from '../panel/AgentStreamDrawer.vue'
@@ -95,6 +124,8 @@ import { deriveNodeStatus } from '../gantt-segments'
 import type { WorkflowVizDagNodeStatus } from '../dag/types'
 import type { WorkflowVizDagClickPayload } from '../dag/types'
 import { useOverlayControl } from '@taiji/core/domain/overlay'
+import type { OverlayKind } from '@taiji/core/domain/overlay'
+import { deriveOverlayHostedKinds } from './workflow-viz-overlay-derivation'
 import {
   closeWorkflowVizOverlay,
   overlayDag,
@@ -116,19 +147,30 @@ const agentDrawerRef = ref<InstanceType<typeof AgentStreamDrawer> | null>(null)
 // 模块级 ref 已退役，开合态唯一权威 = core/domain/overlay）。
 const { isOpen: overlayOpen, current: overlayContent } = useOverlayControl()
 
-/** workflow 内容开合（单例换内容门控，u-w2-browser-mount）：browser 内容由 BrowserOverlay 的
- *  壳承载，workflow/scheduler/canvas 三类内容由本组件壳承载（scheduler 整合 2026-10-06；
- *  canvas 画布 tab，problem-solve-canvas §3.1(3)），三壳互斥不叠显。 */
+const { t } = useI18n()
+
+/** workflow 内容开合（run 数据链门控：tick / AgentStreamDrawer / runRecord——壳承载集成员）。 */
 const isWorkflowOpen = computed(() => overlayOpen.value && overlayContent.value?.kind === 'workflow')
 
-/** scheduler 内容开合（定时任务 tab 直达）：本组件壳同时承载 workflow 与 scheduler 两类内容。 */
-const isSchedulerOpen = computed(() => overlayOpen.value && overlayContent.value?.kind === 'scheduler')
+/** 壳承载的内容 kind 集（§7.3 浮层宿主行「是否打开」判定改注册表派生）：内置三类经
+ *  转换器产出（workflow-viz-overlay-derivation 单点）；browser 由 BrowserOverlay 专属壳
+ *  承载（§7.4 互斥）、plugin 载体由独立浮层内容位承载（§6.8）——两者不在本集合。 */
+const HOSTED_KINDS: ReadonlySet<OverlayKind> = deriveOverlayHostedKinds()
 
-/** canvas 内容开合（画布 tab 直达，problem-solve-canvas §3.1(3)）：本组件壳承载的第三类内容。 */
-const isCanvasOpen = computed(() => overlayOpen.value && overlayContent.value?.kind === 'canvas')
+/** 壳开合（三类「是否打开」判定收敛为派生集合成员判定）：当前内容 kind ∈ 壳承载集。 */
+const isOverlayShellOpen = computed(() => {
+  const cur = overlayContent.value
+  return overlayOpen.value && cur !== null && HOSTED_KINDS.has(cur.kind)
+})
 
-/** 壳开合（本组件承载的三类内容任一在场即开——Guard/scheduler tab 数据链共用该门控）。 */
-const isOverlayShellOpen = computed(() => isWorkflowOpen.value || isSchedulerOpen.value || isCanvasOpen.value)
+/** 当前插件内容载荷（§6.8 载体：contentId + 归属 sessionId——宿主注入，级联判据锚）。 */
+const pluginContent = computed(() => {
+  const cur = overlayContent.value
+  return cur !== null && cur.kind === 'plugin' ? cur.payload : null
+})
+
+/** 插件内容浮层开合（独立浮层内容位，§6.8：不进 workflow 壳标签条）。 */
+const isPluginOverlayOpen = computed(() => overlayOpen.value && pluginContent.value !== null)
 
 /** 当前内容所属会话（workflow/scheduler 两类载荷持 sessionId；canvas 跨 session 无会话归属
  *  ——空串。scheduler tab 的 ViewHost per-session 分区键；canvas tab body 无会话数据需求）。 */

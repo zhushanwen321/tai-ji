@@ -22,6 +22,7 @@ export type {
   GuiComponentType,
   GuiComponentProps,
   GuiRenderResult,
+  HostContainerAction,
   PlanDocMeta,
   PlanReviewComment,
   PlanReviewDecision,
