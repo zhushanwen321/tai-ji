@@ -1,7 +1,8 @@
 // ChatScreen v2 组件测试（remote-use-mobile-v2 §6.21/§6.14/§7.1 / 验收条款 2-4）。
 //
-// 锁定六组契约（三视角：DOM 断言为使用者面，接线断言为构建者面）：
-//   ① 首屏冒烟：页头五件 + 消息流（观察者面）
+// 锁定七组契约（三视角：DOM 断言为使用者面，接线断言为构建者面）：
+//   ① 首屏冒烟：页头五件 + 消息流（观察者面）；模型 chip = liveState 权威值 + 思考档短词
+//     （mobile.model.level 全路径 i18n，七值抽验段值 high 与段外值 xhigh——A8 缺陷锁定）
 //   ② 回合计时（§6.21）：仅生成中显示（未订阅构造性不显示）+「已观察」措辞 + 秒级刷新 +
 //     回合终态消失；步数 = 本回合工具完成计数
 //   ③ 出错条（§6.14 / V-3 主路径）：尾 error 消息 + 非活跃 → 条显示；点重试 →
@@ -9,8 +10,10 @@
 //     生成中条结构性不在场（isActive guard 的 UI 侧）
 //   ④ 待回答条/待授权条（§6.5/§6.18 消费半）：条点击 openSheet（幂等）；Composer 互斥 =
 //     仅 ask-user form（planReview 并存契约——mobile-form.spec 锁定，互斥面禁扩大）
-//   ⑤ 草稿第三条边界（§7.1）：路由离开 chat → 目的域清当前会话草稿；connect 不清（跨断线保留）
-//   ⑥ M-7/M-8 对账 DOM 断言：UserBubble 撤回钮常显 + 点击 revokeMessage 命中；运行中 bash
+//   ⑤ dead 态只读形态（§5.2「聊天历史只读、输入条隐藏」/ A11 契约缺口）：status=dead →
+//     Composer 隐藏 + 只读提示条在场；非 dead 互斥面不扩大
+//   ⑥ 草稿第三条边界（§7.1）：路由离开 chat → 目的域清当前会话草稿；connect 不清（跨断线保留）
+//   ⑦ M-7/M-8 对账 DOM 断言：UserBubble 撤回钮常显 + 点击 revokeMessage 命中；运行中 bash
 //     停止钮在场 + 点击 abortBash 命中（v1 MobileMessageStream:65-72 接线重写不丢失）
 //
 // mock 策略（对齐 composer.test 先例）：app-runtime 部分模块级 mock（chatStore 保留真实
@@ -23,7 +26,7 @@ import { resetChatModuleStateForTest } from '@taiji/core'
 import type { Message } from '@taiji/shared'
 import ChatScreen from '../ChatScreen.vue'
 import { i18n } from '../../i18n'
-import { chatStore } from '../../shell/app-runtime'
+import { chatStore, liveStateStore, sessionStore } from '../../shell/app-runtime'
 import { draftOf, resetSessionsRuntimeForTesting, setDraft } from '../../shell/sessions-runtime'
 import { activeSheet, resetSheetManagerForTesting } from '../../shell/sheet-manager'
 import { resetRouteForTesting, shellRoute } from '../../shell/route'
@@ -179,6 +182,22 @@ describe('首屏冒烟（观察者面）', () => {
     expect(wrapper.get('[data-testid="chat-model-chip"]').text()).toBe(tOf('mobile.model.unknown'))
     wrapper.unmount()
   })
+
+  it('模型 chip 思考档 = 短词（mobile.model.level 全路径 i18n，非原始档位值）——七值抽验段值 high 与段外值 xhigh', async () => {
+    // liveState 权威值播种（真实 store 写入口；modelId 为 core 契约复合串形态）
+    liveStateStore.applyLiveState(SID, { modelId: 'prov-mock/mock-x', thinkingLevel: 'high' })
+    const wrapper = await mountScreen()
+    const chip = wrapper.get('[data-testid="chat-model-chip"]')
+    expect(chip.text()).toBe(`prov-mock/mock-x · ${tOf('mobile.model.level.high')}`)
+
+    // 段外值（xhigh → 超高）：短词表覆盖七值，非段值同样显短词不显原始值
+    liveStateStore.applyLiveState(SID, { modelId: 'prov-mock/mock-x', thinkingLevel: 'xhigh' })
+    await nextTick()
+    expect(wrapper.get('[data-testid="chat-model-chip"]').text()).toBe(
+      `prov-mock/mock-x · ${tOf('mobile.model.level.xhigh')}`,
+    )
+    wrapper.unmount()
+  })
 })
 
 describe('回合计时与步数（§6.21 / 验收条款 3）', () => {
@@ -303,6 +322,37 @@ describe('待回答条 / 待授权条 / Composer 互斥（§6.5/§7.1）', () =>
     await wrapper.get('[data-testid="chat-permission-bar"]').trigger('click')
     expect(activeSheet.value).toBe('permission')
     expect(wrapper.find('[data-testid="mobile-composer"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+})
+
+describe('dead 态只读形态（§5.2「聊天历史只读、输入条隐藏」/ A11 契约缺口）', () => {
+  it('会话派生 status = dead → Composer 隐藏（契约字面「输入条隐藏」）+ 只读提示条在场', async () => {
+    sessionStore.applySnapshot({
+      groups: [
+        {
+          cwd: '/tmp/dead-proj',
+          sessions: [
+            { id: SID, label: '已退出的会话', cwd: '/tmp/dead-proj', status: 'dead', lastActiveAt: Date.now() },
+          ],
+        },
+      ],
+    })
+    const wrapper = await mountScreen()
+
+    expect(wrapper.find('[data-testid="mobile-composer"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="chat-dead-readonly"]').text()).toBe(tOf('mobile.chat.deadReadOnly'))
+    // dead 摘要在场（历史只读可见的同一数据源）：标题走 summary label 而非未知占位
+    expect(wrapper.get('[data-testid="chat-title"]').text()).toBe('已退出的会话')
+    wrapper.unmount()
+  })
+
+  it('非 dead（列表空 = 常规态）→ Composer 在场、只读提示条不在场（互斥面不扩大）', async () => {
+    // 显式空快照覆盖：sessionStore 是模块级单例，前一用例播种的 dead 条目不随 beforeEach 清退
+    sessionStore.applySnapshot({ groups: [] })
+    const wrapper = await mountScreen()
+    expect(wrapper.find('[data-testid="mobile-composer"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="chat-dead-readonly"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

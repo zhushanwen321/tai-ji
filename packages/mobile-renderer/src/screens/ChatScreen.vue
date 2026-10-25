@@ -65,6 +65,10 @@ const { t } = useI18n()
 const summary = computed(() => sessionList.value.find((s) => s.id === props.sessionId))
 const title = computed(() => summary.value?.label ?? t('mobile.chat.untitled'))
 
+/** 已退出（dead）态（§5.2 契约「聊天历史只读、输入条隐藏」）：session.exited → 壳 store
+ *  markDead 的客户端进程态标记；恢复动作在会话列表长按菜单「重新打开」，聊天页只读呈现。 */
+const sessionDead = computed(() => summary.value?.status === 'dead')
+
 /** 模型 chip 文案：liveState 权威值（切入链 getState 拉取）；缺失 = 显式未知占位（不回退
  *  列表种子字段——W1 状态层契约）；思考档经七值短词表（A-03 教训：值域自 PI_THINKING_LEVELS，
  *  词表外值不标注思考档——runtime 钳制值域扩展时短词缺失显式降级，不硬造文案） */
@@ -73,7 +77,9 @@ const chipText = computed(() => {
   if (!live?.modelId) return t('mobile.model.unknown')
   const level = live.thinkingLevel
   const levelKey = level !== undefined && level in THINKING_LEVEL_LABEL_KEYS ? THINKING_LEVEL_LABEL_KEYS[level as keyof typeof THINKING_LEVEL_LABEL_KEYS] : undefined
-  return levelKey ? `${live.modelId} · ${t(levelKey)}` : live.modelId
+  // key 是词表尾段（'high'），须拼 mobile.model.level. 前缀成全路径（ModelSheet
+  // thinkingShortWord 同款拼法）——裸尾段查表缺键回退显原始档位值（A8 缺陷）
+  return levelKey ? `${live.modelId} · ${t(`mobile.model.level.${levelKey}`)}` : live.modelId
 })
 
 // ── 回合计时与步数（§6.21 客户端派生；观察形态在 ./features/turn-observation，两屏共用）──
@@ -250,7 +256,17 @@ watch(shellRoute, (to, from) => {
       </div>
     </div>
 
-    <!-- Composer（仅 ask-user 表单在场时隐藏——作答优先互斥；planReview/dialog 并存） -->
-    <Composer v-if="!formPending" :session-id="sessionId" />
+    <!-- dead 态只读提示条（§5.2「聊天历史只读、输入条隐藏」）：占输入区位的静态说明行，
+         恢复指引指向会话列表长按菜单（restore 编排在列表动作 Sheet，聊天页不重复入口） -->
+    <p
+      v-if="sessionDead"
+      class="flex min-h-11 items-center justify-center px-3 text-center text-xs text-neutral-mid"
+      data-testid="chat-dead-readonly"
+    >
+      {{ t('mobile.chat.deadReadOnly') }}
+    </p>
+    <!-- Composer（ask-user 表单作答优先互斥；dead 态隐藏——契约字面「输入条隐藏」；
+         planReview/dialog 并存） -->
+    <Composer v-else-if="!formPending" :session-id="sessionId" />
   </div>
 </template>

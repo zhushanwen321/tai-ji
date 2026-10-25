@@ -168,6 +168,7 @@ export default {
       askBar: 'A question awaits your answer — tap to respond',
       permissionBar: 'A permission request awaits approval — tap to review',
       retryTurn: 'Retry',
+      deadReadOnly: 'Session has exited — history is read-only. Long-press it in the list to reopen.',
     },
     notices: {
       turnAborted: 'Turn generation interrupted',

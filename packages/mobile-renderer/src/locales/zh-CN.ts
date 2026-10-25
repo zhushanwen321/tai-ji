@@ -170,6 +170,7 @@ export default {
       askBar: '有待回答的提问，点击作答',
       permissionBar: '有待审批的权限请求，点击处理',
       retryTurn: '重试',
+      deadReadOnly: '会话已退出，历史仅可查看；可在会话列表长按「重新打开」',
     },
     notices: {
       turnAborted: '已中断本轮生成',

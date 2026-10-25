@@ -29,9 +29,10 @@
 //   ——disconnect 不清分区（重连后 reconcile 对账收敛）；restart 保留分区 + 提交挂起
 //   （suspendFormSubmissions，重连对账完成经 onSnapshotReconciled 恢复），封住「旧
 //   runtime 对已终结 requestId 静默忽略、UI 记为已提交」的假成功窗口；
-// - 请求失效呈现联动（§6.4/§7.1）：requests-invalidated / plugin:uiRequestExpired /
-//   plugin:permissionRequestExpired 命中当前呈现请求 → 关闭活动 Sheet + 原因提示
-//   （不把已失效请求提交成成功）。
+// - 请求失效呈现联动（§6.4/§7.1）：requests-invalidated / plugin:uiRequestExpired 命中
+//   当前呈现请求 → 关闭活动 Sheet + 原因提示（不把已失效请求提交成成功）；
+//   plugin:permissionRequestExpired 命中当前审批请求 → 仅原因提示（Sheet 收层由 App
+//   pending watch 权威处理，收层与提示解耦——A7 缺陷修复，见下方过期订阅段）。
 //
 // 回传走 core 既有通路（不新造协议）：pi 源 extension.ui_response（sendExtensionUIResponse）、
 // plugin 源 plugin.uiResponse（ws send）、审批源 plugin.approvePermissions/denyPermissions。
@@ -203,20 +204,25 @@ void onGlobal((msg) => {
   }
 })
 
-// plugin:permissionRequestExpired（plugin 权限审批撤窗）：permission 槽打开且命中当前
-// 请求 → 关 Sheet + 提示。pending 翻转由 controller 权威处理，本订阅不写 state。
+// plugin:permissionRequestExpired（plugin 权限审批撤窗）：命中当前审批请求 → 原因提示。
+// 呈现时序契约（A7 缺陷修复）：controller 的 expired 订阅注册在先，同一同步 emit 链内
+// pending 已翻 false（requestId/pluginId 保留不清），故匹配判定**不得**以 pending 或
+// activeSheet 为前置——两者都依赖「事件到达时弹窗还开着」的时序，而收层（App pending
+// watch）与提示（本订阅）分属同步链与微任务两个时机，前置守卫会把提示恒吞掉。分式：
+// - Sheet 收层 = App.vue watch(permission.pending) 权威处理（自带 activeSheet==='permission'
+//   guard，用户正在其他 Sheet 操作时不误关）；
+// - 本订阅只做原因提示（错误条单槽，route 态无关常驻）。
+// 回退分支（payload 缺 requestId 的旧版广播）以 requestId 非空为「壳确曾观测到审批请求」
+// 判据——state 零值（壳重启后陈旧广播）不误报。
 void onGlobal((msg) => {
   if (msg.type !== 'plugin:permissionRequestExpired') return
-  if (activeSheet.value !== 'permission') return
   const payload = msg.payload as { pluginId?: unknown; requestId?: unknown }
   const s = permissionController.state
-  if (!s.pending) return
   const expiredRequestId = typeof payload.requestId === 'string' ? payload.requestId : ''
   const matches = expiredRequestId !== ''
     ? s.requestId === expiredRequestId
-    : typeof payload.pluginId === 'string' && s.pluginId === payload.pluginId
+    : s.requestId !== '' && typeof payload.pluginId === 'string' && s.pluginId === payload.pluginId
   if (matches) {
-    closeSheet()
     showErrorBar(t('mobile.sheet.requestExpired'))
   }
 })

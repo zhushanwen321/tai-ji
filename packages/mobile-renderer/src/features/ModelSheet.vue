@@ -59,12 +59,25 @@ onMounted(() => {
 /** 当前会话的权威值（响应式读状态层；undefined = 显式未知） */
 const current = computed(() => liveStateOf(props.sessionId))
 
-/** 当前模型是否在可用清单（失效提示分支判据：回读值不在清单 → 原值 + 提示切换） */
-const currentModelKnown = computed(() => {
-  const modelId = current.value?.modelId
-  if (modelId === undefined) return false
-  return models.value.some((m) => m.id === modelId)
+/** liveState 复合串拆段（core 契约 "provider/modelId"，live-state.ts:33；无 '/' 时按裸 id
+ *  全局匹配）——拆段单点，行选中/「当前」标记/失效提示三处比对共用（桌面
+ *  ModelPickerPanel.defaultModelParts 同构先例）。 */
+const currentModelParts = computed<{ id: string; providerId?: string } | null>(() => {
+  const v = current.value?.modelId
+  if (!v) return null
+  const i = v.lastIndexOf('/')
+  return i > 0 ? { providerId: v.slice(0, i), id: v.slice(i + 1) } : { id: v }
 })
+
+/** 行是否当前模型：id + provider 归属双匹配（同 short-id 多 provider 不双行命中） */
+function isCurrentModel(m: ModelInfo): boolean {
+  const cur = currentModelParts.value
+  if (!cur || m.id !== cur.id) return false
+  return cur.providerId !== undefined ? m.providerId === cur.providerId : true
+}
+
+/** 当前模型是否在可用清单（失效提示分支判据：回读值不在清单 → 原值 + 提示切换） */
+const currentModelKnown = computed(() => models.value.some(isCurrentModel))
 
 /** 模型行展示名（providerName · name，桌面 model-picker 同款拼法） */
 function modelDisplayName(m: ModelInfo): string {
@@ -148,7 +161,7 @@ function onClose(): void {
         variant="ghost"
         :disabled="m.enabled === false || switching"
         class="flex min-h-[var(--m-tap)] items-center gap-2 rounded px-2.5 py-2 text-left"
-        :class="current?.modelId === m.id ? 'bg-accent-soft' : 'bg-surface-2'"
+        :class="isCurrentModel(m) ? 'bg-accent-soft' : 'bg-surface-2'"
         @click="onSelectModel(m)"
       >
         <span class="min-w-0 flex-1">
@@ -159,7 +172,7 @@ function onClose(): void {
           >{{ t('mobile.model.unavailable') }}</span>
         </span>
         <span
-          v-if="current?.modelId === m.id"
+          v-if="isCurrentModel(m)"
           class="shrink-0 text-[length:var(--m-text-sub)] font-medium text-accent"
         >{{ t('mobile.model.current') }}</span>
       </Button>
