@@ -272,6 +272,9 @@ export type ClientMessageType =
   | 'plugin.uiResponse'
   | 'plugin.mountPoints.sync'
   | 'plugin.ui.snapshot'
+  // plugin.ui.clearMount：清挂载位全局域快照分区（provider-plugin-access U2 悬置二选一
+  // 裁决 = ①调用防陈旧，家族切换时消费侧调用）。reply pong ack。
+  | 'plugin.ui.clearMount'
   | 'file.read'
   | 'file.tree' | 'file.tree.expand' | 'file.search' | 'file.search.cwd'
   | 'git.diff'
@@ -1118,6 +1121,9 @@ export interface ClientMessageMap {
   // 全局域 { mountId, pluginId }（二选一形态，runtime 校验「恰好一个」），viewId 可与
   // 两者组合做单视图补拉。
   'plugin.ui.snapshot': { sessionId?: string; mountId?: string; pluginId?: string; viewId?: string }
+  // plugin.ui.clearMount：清挂载位全局域快照分区（家族切换防陈旧，U2 裁决 ①）。只给
+  // mountId（清全部插件维度）——清单插件维度场景走 clearForPlugin 生命周期链。
+  'plugin.ui.clearMount': { mountId: string }
   // 插件清单域（provider-plugin-access U5）：无参只读，reply 同名。
   'plugin.listAvailable': Record<string, never>
   'plugin.catalog': Record<string, never>
@@ -3648,6 +3654,8 @@ export interface ReplyPayloadMap {
   'plugin.config.set': ServerMessageMap['plugin:config']
   'plugin.mountPoints.sync': ServerMessageMap['pong']
   'plugin.ui.snapshot': ServerMessageMap['plugin:uiSnapshot']
+  // plugin.ui.clearMount：清挂载位全局域快照分区（家族切换防陈旧）——ack 型走 pong。
+  'plugin.ui.clearMount': ServerMessageMap['pong']
   'workspace.listRecent': ServerMessageMap['workspace.recentList']
   'workspace.record': ServerMessageMap['workspace.recentList']
   'project.load': ServerMessageMap['project.loaded']

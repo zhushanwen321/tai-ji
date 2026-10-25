@@ -865,6 +865,11 @@ export interface IPluginService {
   syncMountPoints(mountPoints: string[]): void
   /** 读插件 UI 快照（plugin.ui.snapshot：headerAction 状态 + 视图树最新值，ADR-0097 拉为主） */
   getUiSnapshot(filter?: import('./services/plugin-service/plugin-ui-snapshot-store.js').UiSnapshotFilter): import('@taiji/shared').PluginUiSnapshotPayload
+  /**
+   * 清挂载位全局域快照分区（plugin.ui.clearMount：provider-plugin-access U2 悬置二选一
+   * 裁决 = ①调用防陈旧——renderer 家族切换时调用，防旧家族树残留进快照恢复源）。
+   */
+  clearMountUiSnapshots(mountId: string): void
   // [B5 触发点收窄 2026-09-15] 原 clearSessionData(sessionId) 条目已删：实装 facade 零调用点
   // （真删除链经模块级 clearRemovedSessionData 分发，见 session-lifecycle.ts delete），
   // 且原签名 sync void 与实现 async 不符（陈旧契约，组 A 顺手修 low 项）。

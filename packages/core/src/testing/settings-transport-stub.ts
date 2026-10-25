@@ -206,9 +206,10 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     setExtensionAutoUpgrade: vi.fn(async () => {}),
 
     // ── 插件 Provider 来源（provider-plugin-access U6）：读/调/订阅 + 输入回传中性默认。
-    //    两段式安装三方法刻意不挂（optional 契约形态的 stub 缺省 = 覆盖降级路径用例：
-    //    Provider 页呈 channelUnavailable 可见降级；real adapter 无条件挂载）；用例需
-    //    覆盖确认卡时经 overrides 注入三个 vi.fn。──
+    //    optional 四成员（两段式安装三方法 + clearPluginMountUi）刻意不挂（optional
+    //    契约形态的 stub 缺省 = 覆盖降级路径用例：Provider 页呈 channelUnavailable 可见
+    //    降级 / 挂载位清理静默跳过；real adapter 无条件挂载）；用例需覆盖时经 overrides
+    //    注入 vi.fn。──
     listAvailablePlugins: vi.fn(async () => ({ plugins: [] })),
     // 插件运行态（S13 崩溃恢复）：list/toggle 中性默认空列表（无崩溃标记可呈）；
     // crashed 订阅 no-op（用例经 overrides 注入可触发订阅回调的 vi.fn）

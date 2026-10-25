@@ -1946,6 +1946,10 @@ const pluginImpl = {
     await sleep(TIMING.ack)
     return { success: true }
   },
+  // 挂载位分区清理（U2 裁决①家族切换防陈旧）：mock 无快照存储，ack 型 stub。
+  async clearPluginMountUi(_mountId: string): Promise<void> {
+    await sleep(TIMING.ack)
+  },
   async cancelPluginInstall(_pluginId: string): Promise<void> {
     await sleep(TIMING.ack)
   },

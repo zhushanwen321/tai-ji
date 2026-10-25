@@ -132,10 +132,34 @@ describe('PluginUiSnapshotStore', () => {
     expect(store.snapshot().headerActions.map((h) => h.sessionId)).toEqual(['s2'])
     expect(store.snapshot().views.map((v) => v.viewId).sort()).toEqual(['flow', 'v2'])
 
-    // clearForPlugin 跨会话/全局域清剩余 p2 条目（挂载位分区由插件维度清理链兜底——
-    // clearForMount 已随 D5 F1-15 裁决删除：零消费方，现实清理场景全部走 clearForPlugin）
+    // clearForPlugin 跨会话/全局域清剩余 p2 条目（插件维度生命周期清理链：crash/disable/uninstall）
     store.clearForPlugin('p2')
     expect(store.snapshot()).toEqual({ headerActions: [], views: [] })
+  })
+
+  it('clearForMount 清该挂载位全部插件维度的全局域分区；其他挂载位/会话域不受影响（U2 裁决①家族切换防陈旧）', () => {
+    const store = new PluginUiSnapshotStore()
+    const authorizeA = viewItem({ mountId: 'provider.authorize', sessionId: undefined, pluginId: 'plug-a', viewId: 'flow' })
+    const authorizeB = viewItem({ mountId: 'provider.authorize', sessionId: undefined, pluginId: 'plug-b', viewId: 'flow' })
+    const detailA = viewItem({ mountId: 'provider.detail-extra', sessionId: undefined, pluginId: 'plug-a', viewId: 'detail' })
+    store.setView(authorizeA)
+    store.setView(authorizeB)
+    store.setView(detailA)
+    store.setView(viewItem({ viewId: 'session-view' }))
+
+    store.clearForMount('provider.authorize')
+
+    // authorize 挂载位两插件维度分区全清（快照恢复源不再含旧家族树）
+    expect(store.snapshot({ mountId: 'provider.authorize', pluginId: 'plug-a' }).views).toEqual([])
+    expect(store.snapshot({ mountId: 'provider.authorize', pluginId: 'plug-b' }).views).toEqual([])
+    // 其他挂载位 / 会话域分区不受影响（S25 键形态，前缀精确匹配）
+    expect(store.snapshot({ mountId: 'provider.detail-extra', pluginId: 'plug-a' }).views).toEqual([gen1(detailA)])
+    expect(store.snapshot({ sessionId: 's1' }).views).toEqual([gen1(viewItem({ viewId: 'session-view' }))])
+    // 前缀不误吞：挂载位名只是前缀相近（provider.authorize2）不受清
+    const authorize2 = viewItem({ mountId: 'provider.authorize2', sessionId: undefined, pluginId: 'plug-a', viewId: 'flow' })
+    store.setView(authorize2)
+    store.clearForMount('provider.authorize')
+    expect(store.snapshot({ mountId: 'provider.authorize2', pluginId: 'plug-a' }).views).toEqual([gen1(authorize2)])
   })
 })
 
@@ -269,6 +293,19 @@ describe('全链写入联动（plugin.ui.updateHeaderAction / plugin.views.updat
       views: [gen1(viewItem({ sessionId: 's2', viewId: 'v2' }))],
     })
   })
+
+  it('clearMountUiSnapshots 门面清挂载位分区（plugin.ui.clearMount 的 service 侧消费，U2 裁决①）', () => {
+    const { service } = buildWiredService()
+    service.uiSnapshotStore.setView(viewItem({ sessionId: undefined, mountId: 'provider.authorize', pluginId: 'plug-a', viewId: 'flow' }))
+    service.uiSnapshotStore.setView(viewItem({ sessionId: undefined, mountId: 'provider.authorize', pluginId: 'plug-b', viewId: 'flow' }))
+    service.uiSnapshotStore.setView(viewItem({ viewId: 'session-view' }))
+
+    service.clearMountUiSnapshots('provider.authorize')
+
+    expect(service.getUiSnapshot({ mountId: 'provider.authorize', pluginId: 'plug-a' }).views).toEqual([])
+    expect(service.getUiSnapshot({ mountId: 'provider.authorize', pluginId: 'plug-b' }).views).toEqual([])
+    expect(service.getUiSnapshot({ sessionId: 's1' }).views).toHaveLength(1)
+  })
 })
 
 // ── WS handler 层（表驱动分发接线）────────────────────────────
@@ -321,5 +358,29 @@ describe('plugin.ui.snapshot WS handler（PluginMessageHandler 分发表）', ()
       {} as never,
     )
     expect(getUiSnapshot).toHaveBeenCalledWith({ mountId: 'provider.authorize', pluginId: 'plug-a', viewId: 'flow' })
+  })
+})
+
+describe('plugin.ui.clearMount WS handler（家族切换防陈旧，U2 裁决①）', () => {
+  it('mountId 透传 clearMountUiSnapshots，reply pong ack', async () => {
+    const replies: Array<{ id: string | undefined; type: string; payload: Record<string, unknown> }> = []
+    const clearMountUiSnapshots = vi.fn()
+    const ctx = {
+      send: vi.fn(),
+      sendError: vi.fn(),
+      reply: vi.fn((_ws: unknown, id: string | undefined, type: string, payload: Record<string, unknown>) => {
+        replies.push({ id, type, payload })
+      }),
+      pluginService: { clearMountUiSnapshots },
+    }
+    const handler = new PluginMessageHandler(ctx as unknown as ConstructorParameters<typeof PluginMessageHandler>[0])
+
+    await handler.handlePluginMessage(
+      { type: 'plugin.ui.clearMount', id: 'm4', payload: { mountId: 'provider.authorize' } } as never,
+      {} as never,
+    )
+
+    expect(clearMountUiSnapshots).toHaveBeenCalledWith('provider.authorize')
+    expect(replies).toEqual([{ id: 'm4', type: 'pong', payload: {} }])
   })
 })

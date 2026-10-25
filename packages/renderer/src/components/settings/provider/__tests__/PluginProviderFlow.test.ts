@@ -59,10 +59,12 @@ const pluginMock = vi.hoisted(() => ({
   preparePluginInstall: vi.fn(),
   confirmPluginInstall: vi.fn(),
   cancelPluginInstall: vi.fn(),
+  clearPluginMountUi: vi.fn(),
   sendPluginUiEvent: vi.fn(),
   invokePlugin: vi.fn(),
   onPluginEvent: vi.fn(() => () => {}),
 }))
+const clearMountMock = pluginMock.clearPluginMountUi
 
 import PluginProviderFlow from '@/components/settings/provider/PluginProviderFlow.vue'
 import { _resetPluginProviderSourceForTest } from '@/components/settings/provider/PluginProviderSource'
@@ -131,6 +133,7 @@ beforeEach(() => {
     preparePluginInstall: pluginMock.preparePluginInstall,
     confirmPluginInstall: pluginMock.confirmPluginInstall,
     cancelPluginInstall: pluginMock.cancelPluginInstall,
+    clearPluginMountUi: pluginMock.clearPluginMountUi,
     sendPluginUiEvent: pluginMock.sendPluginUiEvent,
     invokePlugin: pluginMock.invokePlugin,
     onPluginEvent: pluginMock.onPluginEvent,
@@ -148,6 +151,7 @@ beforeEach(() => {
   })
   pluginMock.confirmPluginInstall.mockReset().mockResolvedValue({ success: true })
   pluginMock.cancelPluginInstall.mockReset().mockResolvedValue(undefined)
+  pluginMock.clearPluginMountUi.mockReset().mockResolvedValue(undefined)
   pluginMock.sendPluginUiEvent.mockReset().mockResolvedValue(undefined)
   pluginMock.invokePlugin.mockReset().mockResolvedValue(null)
 })
@@ -456,5 +460,32 @@ describe('PluginProviderFlow S13：家族卡崩溃态（失败路径表「插件
     expect(error?.textContent).toContain('重启失败')
     // 失败后运行态未变（拉取态仍 crashed）→ 标记保留，可再试
     expect(queryAll('plugin-family-crashed-badge')).toHaveLength(1)
+  })
+})
+
+describe('PluginProviderFlow U2 裁决①：离开授权段清挂载位快照分区（clearPluginMountUi）', () => {
+  it('进入授权段后关闭对话框 → 清授权挂载位（防旧家族树残留进快照恢复源）', async () => {
+    wrapper = mountFlow({ focus: { pluginId: 'wool-trae', intent: 'authorize' } })
+    await flushPromises()
+    await nextTick()
+    expect(query('plugin-authorize-container')).not.toBeNull()
+    expect(clearMountMock).not.toHaveBeenCalled()
+
+    // Dialog 关闭（emit update:open(false) → watch → resetFlow：离开授权段 = 挂载位退役）
+    await wrapper!.setProps({ open: false })
+    await flushPromises()
+
+    expect(clearMountMock).toHaveBeenCalledWith('provider.authorize')
+  })
+
+  it('未进过授权段（family/confirm 段关闭）→ 不清（挂载位无消费无陈旧）', async () => {
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    await wrapper!.setProps({ open: false })
+    await flushPromises()
+
+    expect(clearMountMock).not.toHaveBeenCalled()
   })
 })

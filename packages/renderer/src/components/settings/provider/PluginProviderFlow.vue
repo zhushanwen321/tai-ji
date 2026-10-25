@@ -1,7 +1,8 @@
 <template>
-  <!--
-    插件 Provider 接入流程（provider-plugin-access 设计 U6 / D1/D2/D3/D5）。
-    三段视图（显式 phase 状态机：family → confirm → authorize）：
+<!-- split-justified: 插件 Provider 接入流程单一语义域（family/confirm/authorize 三段状态机 + S13 崩溃态重启 + U2 挂载位清理 + 两段式安装停点——围绕同一流程状态机的编排，数据源已拆 PluginProviderSource；崩溃/重启/清理依赖流程局部状态，拆出即转发壳） -->
+<!--
+  插件 Provider 接入流程（provider-plugin-access 设计 U6 / D1/D2/D3/D5）。
+  三段视图（显式 phase 状态机：family → confirm → authorize）：
       ① family 家族卡网格：清单 family 条目（名称/厂商/授权方式/模型数/安装状态），
          S1；已装家族插件崩溃时呈「插件已停止」+ 重启按钮（S13，plugin.toggle off/on）；
       ② confirm 安装确认卡：preparePluginInstall 回包的知情面全量展示
@@ -223,6 +224,7 @@ import {
 } from '@taiji/ui'
 import { ViewHost } from '@taiji/ui/extension-host'
 import { ACTION_EXECUTOR_KEY, UI_EVENT_SENDER_KEY } from '@taiji/ui/rendering-protocol'
+import { getSettingsTransport } from '@taiji/core'
 import {
   createPluginActionExecutor,
   createPluginUiEventSender,
@@ -334,6 +336,23 @@ function enterAuthorize(pluginId: string): void {
   void source.pullAuthorizeView(pluginId)
 }
 
+/**
+ * 授权挂载位的快照分区清理（plugin.ui.clearMount，U2 悬置二选一已裁决 = ①调用防陈旧
+ * ——2026-10-25 用户裁决）。调用点 = 离开授权段（Dialog 关闭，挂载位退役）：防旧家族
+ * 树残留进快照恢复源——重进授权段恒经 enterAuthorize → invoke getAuthorizeView 驱动
+ * 插件重推初始树，不依赖旧快照；家族切换必经关闭重开，同一清理覆盖。清理失败 warn
+ * 降级不阻断关闭（残留由插件重推覆盖 / clearForPlugin 生命周期链兜底）。
+ */
+async function clearAuthorizeMountSnapshots(): Promise<void> {
+  try {
+    await getSettingsTransport().clearPluginMountUi?.(AUTHORIZE_MOUNT_ID)
+  } catch (e) {
+    // best-effort 降级：清理失败不阻断 Dialog 关闭（残留由插件重推覆盖 / clearForPlugin
+    // 生命周期链兜底），warn 可见
+    console.warn('[plugin-provider-flow] clearPluginMountUi on authorize-exit failed:', e)
+  }
+}
+
 const authorizeTitle = computed<string>(() =>
   authorizeEntry.value?.family?.displayName ?? pendingAuthorizePluginId.value ?? '',
 )
@@ -386,6 +405,8 @@ function resetFlow(): void {
       console.warn('[plugin-provider-flow] cancelPluginInstall on close failed:', e)
     })
   }
+  // 离开授权段（挂载位退役）→ 清该挂载位快照分区（U2 裁决①防陈旧，见函数注释）
+  if (phase.value === 'authorize') void clearAuthorizeMountSnapshots()
   phase.value = 'family'
   installPreview.value = null
   pendingAuthorizePluginId.value = null

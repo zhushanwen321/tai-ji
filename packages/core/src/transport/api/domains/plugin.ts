@@ -98,6 +98,15 @@ export function onPluginCrashed(handler: (payload: PluginCrashedPayload) => void
   })
 }
 
+/**
+ * 清挂载位全局域快照分区（plugin.ui.clearMount，reply pong ack）。provider-plugin-access
+ * U2 悬置二选一裁决 = ①调用防陈旧（2026-10-25 用户裁决）：Provider 页家族切换时调用，
+ * 防旧家族树残留进快照恢复源（重进授权段由 getAuthorizeView 重推初始树，不依赖旧快照）。
+ */
+export async function clearPluginMountUi(mountId: string): Promise<void> {
+  await command('plugin.ui.clearMount', { mountId }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
 // ── provider-plugin-access D9 / D8 / U5：invoke、uiEvent、plugin:event 订阅、清单域 ──
 
 /**

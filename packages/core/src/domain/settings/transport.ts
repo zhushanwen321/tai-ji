@@ -419,6 +419,12 @@ export interface SettingsTransport {
   preparePluginInstall?(packageSpec: string): Promise<PluginInstallPreview>
   confirmPluginInstall?(pluginId: string): Promise<PluginInstallResult>
   cancelPluginInstall?(pluginId: string): Promise<void>
+  /**
+   * 清挂载位全局域快照分区（plugin.ui.clearMount，provider-plugin-access U2 悬置二选一
+   * 裁决 = ①调用防陈旧）：Provider 页家族切换时调用，防旧家族树残留进快照恢复源。
+   * optional 为 stub 兼容形态（real adapter 无条件挂载），与安装三成员同款契约。
+   */
+  clearPluginMountUi?(mountId: string): Promise<void>
 
   // ══════════════════════ 订阅（on*，返回取消函数）══════════════════════
 

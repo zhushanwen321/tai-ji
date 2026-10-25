@@ -357,14 +357,16 @@ describe('PluginMessageHandler — 落空语义与 handles 清单', () => {
     expect(pluginService.getDiscoveredPlugins).not.toHaveBeenCalled()
   })
 
-  it('handles 清单含全部 20 个 plugin.* type', () => {
+  it('handles 清单含全部 21 个 plugin.* type', () => {
     const { handler } = makeHandler()
-    expect(handler.handles).toHaveLength(20)
+    expect(handler.handles).toHaveLength(21)
     expect(handler.handles).toEqual(expect.arrayContaining([
       'plugin.list', 'plugin.toggle', 'plugin.uninstall', 'plugin.approvePermissions', 'plugin.revokePermissions',
       'plugin.denyPermissions',
       'plugin.executeCommand', 'plugin.config.get', 'plugin.config.set', 'plugin.install', 'plugin.uiResponse',
       'plugin.mountPoints.sync', 'plugin.ui.snapshot',
+      // provider-plugin-access U2 裁决①：挂载位分区清理（家族切换防陈旧）
+      'plugin.ui.clearMount',
       // provider-plugin-access D9/D8/U5：plugin.invoke 业务方法调用、plugin.uiEvent 输入
       // 值回传、清单域两个无参只读 RPC
       'plugin.invoke', 'plugin.uiEvent', 'plugin.listAvailable', 'plugin.catalog',

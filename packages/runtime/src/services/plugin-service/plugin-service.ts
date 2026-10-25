@@ -304,6 +304,15 @@ export class PluginService implements IPluginService {
     return this.uiSnapshotStore.snapshot(filter)
   }
 
+  /**
+   * 清挂载位全局域快照分区（plugin.ui.clearMount handler 消费）。U2 悬置二选一裁决 =
+   * ①调用防陈旧（2026-10-25 用户裁决）：renderer 家族切换时调用，防旧家族树残留进
+   * 快照恢复源；插件维度生命周期清理仍走 clearForPlugin（crash/disable/uninstall 链）。
+   */
+  clearMountUiSnapshots(mountId: string): void {
+    this.uiSnapshotStore.clearForMount(mountId)
+  }
+
   /** Wire sessionService after construction (breaks circular dependency at creation time) */
   setSessionService(sessionService: ISessionService): void {
     this.deps.sessionService = sessionService

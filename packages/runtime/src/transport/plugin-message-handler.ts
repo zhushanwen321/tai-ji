@@ -20,6 +20,8 @@ export class PluginMessageHandler {
     'plugin.denyPermissions',
     'plugin.executeCommand', 'plugin.config.get', 'plugin.config.set', 'plugin.install', 'plugin.uiResponse',
     'plugin.mountPoints.sync', 'plugin.ui.snapshot',
+    // provider-plugin-access U2 裁决①：家族切换的挂载位分区清理（防陈旧）。
+    'plugin.ui.clearMount',
     // provider-plugin-access D9/D8/U5：plugin.invoke 业务方法调用、plugin.uiEvent 输入
     // 值回传、清单域两个无参只读 RPC。
     'plugin.invoke', 'plugin.uiEvent', 'plugin.listAvailable', 'plugin.catalog',
@@ -58,7 +60,7 @@ type PluginHandledType =
   | 'plugin.list' | 'plugin.toggle' | 'plugin.uninstall' | 'plugin.approvePermissions' | 'plugin.revokePermissions'
   | 'plugin.denyPermissions'
   | 'plugin.executeCommand' | 'plugin.config.get' | 'plugin.config.set' | 'plugin.install' | 'plugin.uiResponse'
-  | 'plugin.mountPoints.sync' | 'plugin.ui.snapshot'
+  | 'plugin.mountPoints.sync' | 'plugin.ui.snapshot' | 'plugin.ui.clearMount'
   | 'plugin.invoke' | 'plugin.uiEvent' | 'plugin.listAvailable' | 'plugin.catalog'
   | 'plugin.prepareInstall' | 'plugin.confirmInstall' | 'plugin.cancelInstall'
 
@@ -174,6 +176,13 @@ async function handlePluginUiSnapshot(ctx: PluginHandlerContext, msg: PluginMsgO
   //（plugin:headerActionUpdate / plugin:viewUpdate）丢失后的收敛通道。
   // sessionId/viewId 过滤 = 单分区补拉（ViewHost 挂载缺失自举），缺省全量。
   return ctx.reply(ws, msg.id, 'plugin:uiSnapshot', pluginService.getUiSnapshot(msg.payload))
+}
+
+async function handlePluginUiClearMount(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.ui.clearMount'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  // renderer 消费侧的挂载位分区清理（provider-plugin-access U2 悬置二选一裁决 = ①调用
+  // 防陈旧，家族切换时调用）：清该挂载位全局域全部插件维度的视图快照分区。
+  pluginService.clearMountUiSnapshots(msg.payload.mountId)
+  return ctx.reply(ws, msg.id, 'pong', {})
 }
 
 /**
@@ -306,6 +315,7 @@ const PLUGIN_CASE_HANDLERS: { readonly [K in PluginHandledType]: (
   'plugin.uiResponse': handlePluginUiResponse,
   'plugin.mountPoints.sync': handlePluginMountPointsSync,
   'plugin.ui.snapshot': handlePluginUiSnapshot,
+  'plugin.ui.clearMount': handlePluginUiClearMount,
   'plugin.invoke': handlePluginInvoke,
   'plugin.uiEvent': handlePluginUiEvent,
   'plugin.listAvailable': handlePluginListAvailable,

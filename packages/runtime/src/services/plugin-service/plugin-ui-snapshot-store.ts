@@ -124,6 +124,18 @@ export class PluginUiSnapshotStore {
     this.views.delete(`session:${sessionId}`)
   }
 
+  /**
+   * 挂载位维度清理（家族切换防陈旧，U2 悬置二选一已裁决 = ①调用防陈旧——2026-10-25
+   * 用户裁决）：清 `global:<mountId>:` 前缀的全部视图分区（含所有插件维度，S25 键
+   * 形态）。headerAction 无全局域形态（AP-1 必带会话），不涉。会话域分区不受影响。
+   */
+  clearForMount(mountId: string): void {
+    const prefix = `global:${mountId}:`
+    for (const key of this.views.keys()) {
+      if (key.startsWith(prefix)) this.views.delete(key)
+    }
+  }
+
   /** 插件维度清理（崩溃 / 禁用 / 卸载 / 重启用防陈旧）：遍历比对 pluginId。 */
   clearForPlugin(pluginId: string): void {
     for (const [sessionId, partition] of this.headerActions) {
