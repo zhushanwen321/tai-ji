@@ -1,5 +1,5 @@
 /**
- * _smoke-genstats-distribution —— GenStats 分布矩阵真机验收（临时剧本，验收后删除）。
+ * p1-genstats-distribution —— GenStats 分布矩阵真机验收。
  *
  * 目标：composer 指标聚合页里速度卡 / TTFT 卡真的渲染出「5 统计量 × 3 窗口」分布矩阵，
  * 而不是只改了协议没人看。
@@ -11,7 +11,7 @@
  * 装配：faux（真 Electron + 真 pi + 假 LLM 演员，零 token）
  */
 export const meta = {
-  id: 'smoke-genstats-distribution',
+  id: 'p1-genstats-distribution',
   priority: 'P1',
   title: 'GenStats 分布矩阵（速度/TTFT 五量 × 三窗口）渲染',
   covers: ['env.launch', 'env.ready', 'session.create', 'chat.send', 'chat.wait'],
@@ -155,6 +155,69 @@ export async function run(ctx) {
 
   await ev.shot(page, 'genstats-distribution-panel')
   ev.step({ step: 'ui-matrix-rendered', channel: 'A', exitCode: 0, stats: { columnHeaders, rowHeaders, cells } })
+
+  // ── 段 3：窄窗形态（密度退化 + 6 列矩阵不溢出）────────────────────
+  // 分布矩阵最大的布局风险在这一档：聚合页容器 340px 宽要塞「行头 + 5 列」共 6 列，
+  // 每列约 50px——「1.3s」「2400」这类值若换行或撑破就是布局 bug。逐档压窄复验。
+  const cdp = await page.context().newCDPSession(page)
+  const overflowOf = async () =>
+    page.evaluate(() => {
+      const out = []
+      for (const el of document.querySelectorAll(
+        '[data-testid$="-dist-column"], [data-testid$="-dist-row"], [data-testid$="-current"], [data-testid$="-dist-day-p50"], [data-testid$="-dist-d30-max"]',
+      )) {
+        const node = /** @type {HTMLElement} */ (el)
+        if (node.scrollWidth > node.clientWidth + 1) {
+          out.push({
+            testid: node.getAttribute('data-testid'),
+            text: node.textContent,
+            scrollWidth: node.scrollWidth,
+            clientWidth: node.clientWidth,
+          })
+        }
+      }
+      return out
+    })
+
+  /** 逐档宽度：录形态 + 若有矩阵则验溢出。 */
+  async function probeWidth(width) {
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false })
+    await page.waitForTimeout(700)
+    await ui.hover('body')
+    await page.waitForTimeout(250)
+    const aggregated = (await page.locator('[data-testid="composer-metrics-aggregate"]').count()) > 0
+    const entry = aggregated ? 'testid=composer-metrics-aggregate' : 'testid=genstats-ttft-value'
+    await ui.hover(entry)
+    await ui.expectVisible('testid=genstats-ttft-model', { timeoutMs: 15_000 })
+    const overflow = await overflowOf()
+    const columns = await page.locator('[data-testid$="-dist-column"]').count()
+    log(`宽度 ${width}px：形态=${aggregated ? 'aggregated（聚合页）' : 'expanded（平铺）'} 列头=${columns} 溢出=${overflow.length}`)
+    await ev.shot(page, `genstats-distribution-w${width}`)
+    return { width, aggregated, columns, overflow }
+  }
+
+  const probes = []
+  for (const width of [760, 560, 460]) probes.push(await probeWidth(width))
+  await cdp.send('Emulation.clearDeviceMetricsOverride')
+
+  ev.assert(
+    'A: 窄窗下指标退化为单图标聚合按钮（密度状态机生效）',
+    probes.some((x) => x.aggregated),
+    {
+      channel: 'A',
+      expected: '至少一档宽度出现 composer-metrics-aggregate',
+      actual: JSON.stringify(probes.map(({ width, aggregated }) => ({ width, aggregated }))),
+    },
+  )
+  ev.assert(
+    'A: 各档宽度矩阵无横向溢出（单元格不换行不撑破）',
+    probes.every((x) => x.overflow.length === 0),
+    {
+      channel: 'A',
+      expected: '零溢出',
+      actual: JSON.stringify(probes.map(({ width, overflow }) => ({ width, overflow }))),
+    },
+  )
 
   return { uncovered: [], gotchas }
 }

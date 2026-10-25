@@ -37,7 +37,7 @@
 | 16 | provider-live-sync（包级 P0） | `model.live-sync`（v1.1 补登） | — | **`reuse-e2e`** | `node scripts/verify-provider-live-sync.mjs`（E2E-MODELS-02，L2.5，真实 pi + 本地 mock LLM，零外网）。**该脚本同时是 mock-http 通道的权威先例** |
 | 17 | 展示容器体系（右抽屉 / 底抽屉 / 浮层 + 键盘栈序） | `ui.container`（v1.1 补登）`workspace.drawer` `workspace.terminal` `workflow.overlay` | `p0-display-containers` ✅实跑（degraded） | **`scenario`（部分）** | **实测覆盖**（12 断言 0 失败 + 托盘区域 uncovered，2026-10-22）：模型弹层浮层「打开 → Esc → 关闭」最小回路。**修正（2026-10-22 对抗审查）**：托盘按钮渲染条件在源码注释明确（total===0 不渲染、聚合按钮 showAggregate 条件）= 设计内空态非缺口——剧本实测：前台 bash 轮不产托盘条目（托盘统计数据源 = subagent/workflow/后台 bash 记录，useTrayCounts），faux 实例制造路径受限 → 托盘回路条件化登记 uncovered（mock-http 执行域 record 是可行路径）。**仍不可达**：键盘栈序完整语义（空洞 #3）、终端/底抽屉零登记 |
 
-## 二、P1（4 行）
+## 二、P1（5 行）
 
 | # | 功能面 | capability id | 剧本 | 状态 | 备注 |
 |---|---|---|---|---|---|
@@ -45,13 +45,14 @@
 | 2 | 工具调用过程展示 | `chat.stream`（工具块）+ `render.tool-call`（v1.1 补登） | `p1-tool-call-render` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（16 断言，2026-10-22）：bash 工具执行（B：history 回灌 faux-bash-ok）、change-set-card 容器出现、write+edit 落盘（C：faux-v2）+ git untracked（A 态数据证据）。**修正（2026-10-22 对抗审查 + 复跑）**：早前「工具块定位 testid 未进 DOM」的主因是完成态 trace 默认折叠（use-turn-trace 设计内，折叠态只渲染末位 text 块）；展开钮在 turn-meta 多按钮中无独立 testid，first() 无法精确寻址（复跑 2 轮未现）——**可视断言待补 testid**（剧本 uncovered 登记，verdict degraded），内容断言由 B/C 硬证据承载。卡内文件行渲染形态待查（changeset-card-probe 留档） |
 | 3 | 权限审批闭环 | `interaction.permission` | `p1-permission-deny-flow` ✅实跑（deny 分支）· `p1-permission-approval`（fail 存档，待重写吸收 deny-flow 装配） | **`scenario`（部分）** | **deny-flow 实测覆盖**（19 断言，2026-10-24，chat-flow-consistency U9 交付）：strict 模式 bash 审批 companion-band 可见、等待期工具块已入流运行中（S1 撤案结论行为锁定）、侧栏 waiting 警示点（permission 判定键 → deriveStatus）、广播事件 permission:true、Deny（radio+確認两步）→ 展开回合 trace 失败块可见（`[pi-permission] deny: denied via rpc (source=user)`）、page.reload 重放展开后同位置、history isError tool_result。**装配解法（消解 2026-10-22 登记的两未知）**：strict 配置在 `run()` 开头、session.create 之前写（permission 扩展每次读时刷新，pi 按 session spawn——launch 前置写非必要）；侧栏激活条件轮询（偶发环境抖动重试即可，非产品缺陷）。**未覆盖**：approve 分支（approval 剧本待按 deny-flow 装配重写）、AI classifier（auto 模式）、插件权限审批（无 sandbox 夹具不可达）。**坑**：回合收尾后 trace 折叠 + 工具行收进 run-group 组行——deny 文本断言须经「重进会话行 → 点 turn-meta 展开 → 点 run-group-header」三层展开；approval 剧本当年 fail 的「Approve 后浮层不消失」疑似同因（radio 未提交確認） |
 | 4 | 消息撤回 | `chat.revoke` `session.history` | `p1-chat-revoke` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（15 断言，2026-10-22，已送达支）：revokeMessage → `revoked:true` + content 原文（草稿回填数据）、history 回退（哨兵消失）、UI 气泡移除、二次撤回幂等（revoked:true 重返原文——实测形态，非 D8 错误码路径）、JSONL append-only 形态留档。**未覆盖**：在途通道 delivery.cancel、六错误码逐码、direct/steer 投递路径撤回差异、派生面板随树重建、上下文裁剪、定时任务不复活（FEATURE :63 后四项） |
+| 5 | Composer 生成指标（速度 / TTFT 分布矩阵） | `metrics.gen-stats`（本批补登） | `p1-genstats-distribution` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（27 断言，2026-10-26，faux）：B 通道 `session.getGenStats` 回帧 `speed.day`/`ttft.day` 为 `{avg,p50,p99,max,min}` 五量对象且已有实测值；A 通道平铺态 TTFT 卡矩阵（列头 5 / 行头 3）+ 聚合页两卡矩阵（列头 10 / 行头 6）、本次值/今日 P50/速度今日均值三格均渲染实际数字；密度退化 760→560→460px 三档逐档验证，560/460 出现单图标聚合按钮且 6 列矩阵**零横向溢出**（在途态 `Emulation.setDeviceMetricsOverride` 生效于 CSS 视口）。**未覆盖**：数值与磁盘原始样本逐条一致性（分布算法由 `gen-stats-store` 单测断言）、平铺态速度卡矩阵（需单独 hover 速度触发器，本剧本只走 TTFT 触发器入口）、缓存卡（本次/今日加权单值，无分布口径） |
 
 ## 三、统计与待补剧本优先级
 
 | 状态 | P0 | P1 | 合计 |
 |---|---|---|---|
 | `scenario`（已实跑，**完整**覆盖该行全部用例组） | 0 | 0 | **0** |
-| `scenario`（已实跑，**部分**覆盖——见各行「未覆盖」；含 fail/degraded 判定的 P0-9 / P0-17） | 12 | 2 | 14 |
+| `scenario`（已实跑，**部分**覆盖——见各行「未覆盖」；含 fail/degraded 判定的 P0-9 / P0-17） | 12 | 3 | 15 |
 | `capability-only`（含 P1-3 实测未通的 UI 闭环） | 1 | 1 | 2 |
 | `reuse-e2e` | 4 | 1 | 5 |
 | `unreachable` | 0 | 0 | 0 |
