@@ -265,6 +265,7 @@ describe('MessageDispatcher — 写入时机 record', () => {
     const svc = {
       ensureActive: vi.fn().mockResolvedValue(mockClient),
       getSessionByClient: vi.fn().mockReturnValue(activeSession),
+      clearSessionOutcome: vi.fn(),
     }
     // getClient → undefined：无附着 client 形态（sendPrompt 入口 touch 的空检查分支）
     const pm = { getClient: vi.fn(() => undefined) }
@@ -326,6 +327,7 @@ describe('MessageDispatcher — 写入时机 record', () => {
     const svc = {
       ensureActive: vi.fn().mockRejectedValue(new Error('restore failed')),
       getSessionByClient: vi.fn(),
+      clearSessionOutcome: vi.fn(),
     }
     // getClient → undefined：无附着 client 形态（sendPrompt 入口 touch 的空检查分支）
     const pm = { getClient: vi.fn(() => undefined) }
