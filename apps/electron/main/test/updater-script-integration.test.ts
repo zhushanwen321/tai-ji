@@ -33,6 +33,20 @@
  * - parentPid：默认 '9999999'（超过 macOS/linux pid_max，kill -0 立即失败 =
  *   模拟「app 已退出」）；超时用例用真实存活进程模拟「app 未退出」。
  *
+ * dmg 资产复用（round2-a 方案乙，审计 .tmp/round1-e1-electron-main-integration-audit.md）
+ * ------------------------------------------------------------------
+ * hdiutil create ≈5.5-6s/次，13 次构造占本文件集成耗时近六成且大量同内容重复：
+ * - buildMinimalAppDmg 按五元组 (appBundleName, binaryName, versionMarker,
+ *   binarySize, hollow) 惰性缓存：首次真构造落文件级共享目录，同键命中直接返回
+ *   共享路径与预计算 sha。脚本对 dmg 只读（shasum + attach -readonly，
+ *   updater-script.ts L258/L283），复用语义安全。
+ * - 4 个「dmg 从未被读 / 真 sha 从不参与」的用例直接用假文件替代真 dmg 构造
+ *   （sha mismatch / dmg 挂载失败 / M6 等待超时 / 只读卷拒装，逐例注释依据）。
+ * - 本文件用例必须串行执行（禁止 describe.concurrent / it.concurrent）：
+ *   共享 dmg 资产下并发 attach 存在「同 inode dmg 前次挂载未 detach 时重挂载
+ *   报资源忙」竞态（updater-script.ts S1 注释，r2 实测）。串行 + 中断用例
+ *   kill 点保持在 S1 detach 之后（见 S1 中断用例注释）共同封住该窗口。
+ *
  * 与 updater-script.test.ts 的边界：那边字符串视角（检查片段在不在），本文件
  * 执行视角（bash 跑不跑得通、分支真不真触发、终态对不对）。
  *
@@ -45,7 +59,7 @@
  * 运行：cd apps/electron && pnpm run test:main test/updater-script-integration.test.ts
  * （门控真跑：TAIJI_TEST_INTEGRATION=1 同命令）
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../test-guard/integration-gate.ts'
 
 // 文件级超时预算：管辖四段集成门控 describe 的真执行用例（本地默认跳过时不生效）。
@@ -120,6 +134,36 @@ afterEach(() => {
 })
 
 // ──────────────────────────────────────────────────────────────────
+// 共享 dmg 资产（五元组惰性缓存，方案乙；见文件头「dmg 资产复用」节）
+// ──────────────────────────────────────────────────────────────────
+
+/**
+ * 共享 dmg 资产目录：惰性创建 + 文件级生命周期。
+ *
+ * - 惰性：buildMinimalAppDmg 首次真构造时才 mkdtemp（该函数只被集成门控用例触达）
+ *   ——门控关闭（默认口径）时零构造零落盘。因此禁止把创建上提为无条件 beforeAll：
+ *   那会让默认口径的 skip 路径白付 3 次 create（≈18s）。
+ * - 独立于任何用例私有 tmpDir：RM7 / linux 只读用例的 chmod 555 与 afterEach
+ *   清理都波及不到这里；afterAll 统一清理。
+ */
+let sharedDmgAssetsDir: string | undefined
+
+/** 五元组缓存键 → 已构造共享 dmg（路径 + 首次预计算 sha）。 */
+const sharedDmgCache = new Map<string, { dmgPath: string; sha256: string }>()
+
+afterAll(() => {
+  if (sharedDmgAssetsDir && existsSync(sharedDmgAssetsDir)) {
+    try {
+      rmSync(sharedDmgAssetsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    } catch (e) {
+      console.warn('[warn] 共享 dmg 资产目录清理失败（可能挂载点残留）:', e)
+    }
+  }
+  sharedDmgAssetsDir = undefined
+  sharedDmgCache.clear()
+})
+
+// ──────────────────────────────────────────────────────────────────
 // 辅助函数
 // ──────────────────────────────────────────────────────────────────
 
@@ -137,6 +181,10 @@ function sha256OfFile(filePath: string): string {
  *   与脚本 S1 的 `ls -d "$MOUNT_DIR"/*.app` 定位链一致。
  * - 主二进制 chmod 755：脚本对解包产物做 `-x` 可执行检查（RI1 检查），
  *   hdiutil 镜像保留 POSIX 权限位。writeFileSync 默认 0644，必须显式 chmod。
+ * - 按五元组惰性缓存（方案乙）：同键命中直接返回共享 dmg 路径与首次预计算的
+ *   sha（脚本对 dmg 只读：shasum + attach -readonly，复用语义安全）。返回的
+ *   dmgPath 指向共享资产，用例不得写它；确需覆写内容的用例先 copyFileSync 到
+ *   私有 tmpDir 改副本，不得污染缓存。
  */
 function buildMinimalAppDmg(opts: {
   appBundleName?: string
@@ -150,7 +198,26 @@ function buildMinimalAppDmg(opts: {
 } = {}): { dmgPath: string; appBundleName: string; binaryName: string; sha256: string } {
   const appBundleName = opts.appBundleName ?? 'TaiJi.app'
   const binaryName = opts.binaryName ?? 'TaiJi'
-  const buildRoot = path.join(tmpDir, opts.hollow ? 'build-hollow' : 'build')
+  // 缓存键 = 五元组。正确性前提：「同五元组 → 同 dmg 字节 → 同 sha」——默认路径
+  // binary 内容是下方固定字符串字面量，天然满足；binarySize 分支（crypto.randomBytes）
+  // 内容随机，但该键仅磁盘满一例、无第二消费者。未来给夹具加新随机源时必须把
+  // 随机源纳入键，否则命中方拿到的 sha 与其期望漂移 → 假红。
+  const cacheKey = JSON.stringify([appBundleName, binaryName, opts.versionMarker ?? null, opts.binarySize ?? null, opts.hollow ?? false])
+  const cached = sharedDmgCache.get(cacheKey)
+  if (cached) {
+    // 完整性自检：共享资产被意外删除时快速失败并指向缓存机制，不让后续用例
+    // 连锁假红难归因（共享的隔离性损失排查成本，审计风险清单第 7 项）
+    if (!existsSync(cached.dmgPath)) {
+      throw new Error(`共享 dmg 资产丢失: ${cached.dmgPath}（cacheKey=${cacheKey}）`)
+    }
+    return { dmgPath: cached.dmgPath, appBundleName, binaryName, sha256: cached.sha256 }
+  }
+
+  // 惰性创建共享目录（不是 beforeAll：门控关闭的默认口径必须零构造，见声明处注释）
+  sharedDmgAssetsDir ??= mkdtempSync(path.join(tmpdir(), 'updater-int-assets-'))
+  // 共享目录内文件名用键哈希：appBundleName 跨五元组重名（TaiJi.app ×3 组），不能直接命名
+  const keyTag = crypto.createHash('sha256').update(cacheKey).digest('hex').slice(0, 10)
+  const buildRoot = path.join(sharedDmgAssetsDir, `build-${keyTag}`)
   const appDir = path.join(buildRoot, appBundleName)
   if (opts.hollow) {
     // 空壳：只有 Contents/Info.plist，无 MacOS/<binary>（RI1 误判成功防护用例）
@@ -171,14 +238,17 @@ function buildMinimalAppDmg(opts: {
     writeFileSync(path.join(appDir, 'VERSION_MARKER'), opts.versionMarker)
   }
 
-  const dmgPath = path.join(tmpDir, `${appBundleName}.dmg`)
+  const dmgPath = path.join(sharedDmgAssetsDir, `app-${keyTag}.dmg`)
   const r = spawnSync('hdiutil', [
     'create', '-srcfolder', buildRoot, '-format', 'UDZO', '-ov', dmgPath,
   ])
+  rmSync(buildRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) // 构建中间目录用完即清，共享目录只留 dmg
   if (r.status !== 0) {
     throw new Error(`hdiutil create 失败 status=${r.status} stderr=${r.stderr?.toString()}`)
   }
-  return { dmgPath, appBundleName, binaryName, sha256: sha256OfFile(dmgPath) }
+  const sha256 = sha256OfFile(dmgPath)
+  sharedDmgCache.set(cacheKey, { dmgPath, sha256 })
+  return { dmgPath, appBundleName, binaryName, sha256 }
 }
 
 function writeScriptToTmp(script: string, name = 'updater.sh'): string {
@@ -421,8 +491,12 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
   it(
     'sha mismatch：exit 1、旧 .app 完好、不产生 .old/staging、result failed 且为合法 JSON',
     () => {
-      const { dmgPath, appBundleName } = buildMinimalAppDmg()
-      const vars = makeMacVars({ dmgPath, sha256: '0'.repeat(64) })
+      // 白造消除（方案乙）：期望 sha 是假值（'0'×64），真 dmg 的实际 sha 从不参与
+      // 比较——脚本只需 shasum 读到一个文件即失配，几十字节假文件语义等价
+      // （省一次 hdiutil create ≈5.5-6s）。
+      const fakeDmg = path.join(tmpDir, 'payload-not-a-dmg.bin')
+      writeFileSync(fakeDmg, 'not a dmg; only needs to be shasum-able')
+      const vars = makeMacVars({ dmgPath: fakeDmg, sha256: '0'.repeat(64) })
       mkdirSync(path.dirname(vars.appBundle), { recursive: true })
       mkdirSync(vars.appBundle, { recursive: true })
       writeFileSync(path.join(vars.appBundle, 'OLD_MARKER'), 'preserved')
@@ -466,12 +540,16 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
   it(
     'dmg 挂载失败（伪 dmg，sha 对）：exit 1、旧 .app 完好、error=dmg mount failed（含恢复指引）',
     () => {
-      // sha 对、但内容不是合法 dmg：让校验段过、挂载段炸（attach 失败分支，§3.3.3-B）
-      const { dmgPath, appBundleName } = buildMinimalAppDmg()
-      writeFileSync(dmgPath, 'this is not a valid dmg file content')
-      const realSha = sha256OfFile(dmgPath)
+      // sha 对、但内容不是合法 dmg：让校验段过、挂载段炸（attach 失败分支，§3.3.3-B）。
+      // 白造消除（方案乙）：shasum 需要真值，但内容本就不必是 dmg——小假文件 +
+      // 预计算其 sha，与「真 dmg 覆写伪内容」语义等价，且完全不触碰共享缓存
+      // （无需 copy-on-write 副本）。
+      const appBundleName = 'TaiJi.app'
+      const fakeDmg = path.join(tmpDir, 'not-a-valid-dmg.bin')
+      writeFileSync(fakeDmg, 'this is not a valid dmg file content')
+      const realSha = sha256OfFile(fakeDmg)
 
-      const vars = makeMacVars({ dmgPath, sha256: realSha, appBundleName })
+      const vars = makeMacVars({ dmgPath: fakeDmg, sha256: realSha, appBundleName })
       mkdirSync(path.dirname(vars.appBundle), { recursive: true })
       mkdirSync(vars.appBundle, { recursive: true })
       writeFileSync(path.join(vars.appBundle, 'OLD_MARKER'), 'untouched')
@@ -541,8 +619,15 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
       const script = pauseAfterStage(stripOpenLine(buildUpdaterScript(vars)), 'S2 promote', flag)
       const { child, exited } = runBashDetached(writeScriptToTmp(script))
 
-      // 等 S1 完成（staging 内出现完整新 .app），此时脚本停在 S2 前的暂停循环
-      await waitFor('staging 主二进制就位', () => existsSync(path.join(stagingDir, appBundleName, 'Contents', 'MacOS', binaryName)))
+      // 等 S1 完成（含 detach 已执行）且脚本停在 S2 前的注入暂停循环：触发条件用
+      // 「S2 begin 日志行已写」而非「staging 二进制就位」——后者会让 kill 落进
+      // attach→detach 窗口，孤儿挂载持有共享 dmg，后续用例 attach 同一文件可撞
+      // 「资源忙」假红（updater-script.ts S1 注释：同 inode dmg 前次挂载未 detach
+      // 时重挂载可报忙，r2 实测）。kill 点仍在 M2 语义窗口内（S1 完成 → S2 动作前，
+      // flag 暂停循环保证 S2 mv 零执行）。
+      const logText = () => (existsSync(vars.logPath) ? readFileSync(vars.logPath, 'utf8') : '')
+      await waitFor('S1 完成（S2 begin 已记日志，脚本暂停中）', () =>
+        logText().includes('[stage] S2 promote begin'))
       killGroup(child)
       await exited
 
@@ -628,13 +713,21 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
   it(
     '等待超时 abort（M6）：父进程不退 → failed(app still running)、旧 .app 完好、运行中进程不被打扰',
     async () => {
-      const { dmgPath, sha256, appBundleName, binaryName } = buildMinimalAppDmg()
+      // 白造消除（方案乙）：脚本阶段顺序 = 只读检测 → 等待 → sha → attach（本用例
+      // 死在等待段：父进程不退 → 3s 超时 abort），dmg 从未被读——假路径 + 任意 sha。
+      const dmgPath = path.join(tmpDir, 'never-read.dmg')
       // 真实存活的「父进程」：sleep 30 模拟挂住不退的 app。
       // noop exit listener 必须挂：否则 sleep 退出后成为 vitest 进程的僵尸（未收割），
       // bash kill -0 对僵尸恒真，等待循环永远不 break。
       const parent = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' })
       parent.once('exit', () => {})
-      const vars = makeMacVars({ dmgPath, sha256, appBundleName, binaryName, parentPid: String(parent.pid) })
+      const vars = makeMacVars({
+        dmgPath,
+        sha256: '0'.repeat(64),
+        appBundleName: 'TaiJi.app',
+        binaryName: 'TaiJi',
+        parentPid: String(parent.pid),
+      })
       mkdirSync(path.dirname(vars.appBundle), { recursive: true })
       mkdirSync(vars.appBundle, { recursive: true })
       writeFileSync(path.join(vars.appBundle, 'OLD_MARKER'), 'untouched')
@@ -761,12 +854,12 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
     () => {
       // 只读检测是脚本第一步（case /Volumes/*），在任何文件系统操作前退出——
       // 因此可以用 /Volumes 下的虚拟路径真实执行而不需要真挂载。
-      const { dmgPath, sha256, binaryName } = buildMinimalAppDmg()
+      // 白造消除（方案乙）：dmg 在第一步就被短路、从未被读——假路径 + 任意 sha。
       const vars = makeMacVars({
-        dmgPath,
-        sha256,
+        dmgPath: path.join(tmpDir, 'never-read.dmg'),
+        sha256: '0'.repeat(64),
         appBundle: '/Volumes/TaiJi-Integration-Test/TaiJi.app',
-        binaryName,
+        binaryName: 'TaiJi',
       })
 
       const script = stripOpenLine(buildUpdaterScript(vars))
