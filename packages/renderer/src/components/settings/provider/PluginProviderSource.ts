@@ -52,19 +52,6 @@ export interface CredentialStatusPayload { // oe-exempt:20261024:framework:ports
   message?: string
 }
 
-/** unknown → CredentialStatusPayload 的运行时窄化（上报载荷形态，providerId 必带）。 */
-export function parseCredentialStatus(raw: unknown): CredentialStatusPayload | null {
-  if (typeof raw !== 'object' || raw === null) return null
-  const candidate = raw as Record<string, unknown>
-  if (candidate.state !== 'valid' && candidate.state !== 'invalid') return null
-  if (candidate.message !== undefined && typeof candidate.message !== 'string') return null
-  if (typeof candidate.providerId !== 'string' || candidate.providerId === '') return null
-  return {
-    state: candidate.state,
-    ...(candidate.message !== undefined ? { message: candidate.message } : {}),
-  }
-}
-
 /** getStatus 返回值窄化：状态字段形态（providerId 已在 params，返回值不带归属）。 */
 function parseStatusFields(raw: unknown): CredentialStatusPayload | null {
   if (raw === null || raw === undefined) return null
@@ -76,6 +63,16 @@ function parseStatusFields(raw: unknown): CredentialStatusPayload | null {
     state: candidate.state,
     ...(candidate.message !== undefined ? { message: candidate.message } : {}),
   }
+}
+
+/**
+ * unknown → CredentialStatusPayload 的运行时窄化（上报载荷形态，providerId 必带）：
+ * = getStatus 状态字段校验（parseStatusFields）+ providerId 归属前置提取（缺归属
+ * 的载荷不落分区——防「归属与状态错位」的插件侧 bug 静默写错分区）。
+ */
+export function parseCredentialStatus(raw: unknown): CredentialStatusPayload | null {
+  if (extractProviderId(raw) === undefined) return null
+  return parseStatusFields(raw)
 }
 
 /** 清单条目（附安装状态比对结果，PluginListAvailableReply.plugins 元素别名）。 */

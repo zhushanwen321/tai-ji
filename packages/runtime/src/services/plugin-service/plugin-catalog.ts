@@ -268,11 +268,6 @@ export function listAvailablePlugins(
   }
 }
 
-/** plugin.catalog reply（清单原始目录条目，含家族元数据）。 */
-export function toCatalogReply(config: PluginCatalogConfig): PluginCatalogReply {
-  return { entries: config.plugins }
-}
-
 /**
  * 插件清单 service：清单加载与本地安装状态比对的编排入口（RPC 接线归 u-protocol，
  * 复审 F3）。registry 依赖走端口注入，不与 PluginRegistry 实现耦合。

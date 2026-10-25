@@ -113,8 +113,6 @@ export function createMutatedBroadcastScheduler(notify: () => void): () => void 
   }
 }
 
-/** 包根定位共享实现（pkg-root，与 fork env 注入 / CJS 拦截器三处同源——ISSUES-2 ⑤）。 */
-
 function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
@@ -205,9 +203,10 @@ async function handleProviderWrite(deps: ProviderWriteProxyDeps, params: Record<
     }
     headers = { ...(rawHeaders as Record<string, string>) }
   }
+  const displayName = asNonEmptyString(params.displayName)
 
   await deps.setProvider(providerId, {
-    ...(asNonEmptyString(params.displayName) !== undefined ? { name: asNonEmptyString(params.displayName) } : {}),
+    ...(displayName !== undefined ? { name: displayName } : {}),
     apiKey,
     ...(headers !== undefined ? { headers } : {}),
     ...(models !== undefined ? { models } : {}),
@@ -329,7 +328,8 @@ export function registerProviderWriteProxy(rpcServer: PluginRpcServer, deps: Pro
 
 /**
  * 组合根装配的插件清单读取器：descriptor.pluginPath 是 entry 文件（可能在 dist/ 子目录），
- * 包根 = 自 entry 目录向上第一个含 package.json 的祖先（npm 生态通用语义）。
+ * 包根 = 自 entry 目录向上第一个含 package.json 的祖先（npm 生态通用语义）。包根定位
+ * 用共享实现 pkg-root（与 fork env 注入 / CJS 拦截器三处同源——ISSUES-2 ⑤）。
  * registry 以窄接口注入（{ getDescriptor } 子集），本模块不 import PluginRegistry 类型。
  */
 export function createPluginManifestReader(
