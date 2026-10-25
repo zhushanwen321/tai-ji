@@ -47,7 +47,8 @@
  *   （sha mismatch / dmg 挂载失败 / M6 等待超时 / 只读卷拒装，逐例注释依据）。
  * - 并发安全形态（探针判定）：独立 dmg 副本 + 独立挂载点 + 同键首造互斥 +
  *   用例局部 tmpDir 清理；hdiutil create 并发无全局串行化（并发 3 总墙钟
- *   0.52x 串行）。当前用例按 vitest 默认串行执行。
+ *   0.52x 串行）。中断注入段已并发化（describe.concurrent，maxConcurrency=3，
+ *   见 vi.setConfig 注释）；端到端 / 磁盘满 / linux 段仍串行执行。
  *
  * 与 updater-script.test.ts 的边界：那边字符串视角（检查片段在不在），本文件
  * 执行视角（bash 跑不跑得通、分支真不真触发、终态对不对）。
@@ -72,7 +73,12 @@ import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../
 // 注意：用例级第三参显式超时会覆盖本预算——曾漂移出 13 处显式 20_000，
 // 让 happy path 在 CI 仍撞 20s 线（2026-09-10）；除既有存量外不要补第三参，
 // 统一由这行管辖，新增用例也不要写显式超时。
-vi.setConfig({ testTimeout: 60_000 })
+//
+// maxConcurrency=3：describe.concurrent 段的并发度封顶（默认 5）。3 的依据：
+// round3-a 探针实测并发 3 下独立副本 attach 零失败、总墙钟低于串行和（磁盘与
+// diskimages-helper 均未见全局串行化）；再高对 waitFor 链（30s 预算）的负载
+// 膨胀不可控（探针并发 3 尖峰轮单次 attach 已可至 3.65x）。
+vi.setConfig({ testTimeout: 60_000, maxConcurrency: 3 })
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync, statSync, chmodSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -672,8 +678,14 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
 
 // ════════════════════════════════════════════════════════════════
 // MAC 脚本：状态机中断注入（kill 进程组）与失败分支【集成门控】
+// 本段 { concurrent: true }：段内用例受控并发（maxConcurrency=3，见文件头
+// vi.setConfig 注释）。安全前提（round3-a 探针）：每用例独立 dmg 副本 +
+// 独立挂载点（脚本侧 mktemp）+ per-test tmpDir + 同键首造互斥。
+// 注意并发声明必须走 suite options 第三参——vitest 4.1.9 的
+// describe.concurrent.skipIf(cond) 链会静默丢并发语义（探针实测并发度 1，
+// /tmp/round3a-probe skipif-probe2）。
 // ════════════════════════════════════════════════════════════════
-describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 状态机中断注入'), () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 状态机中断注入'), { concurrent: true }, () => {
   it<TestScope>(
     'S1 中断（M2 脚本侧）：staging 解压完成后 kill → 正式位置零接触 + staging 残留 + result 未写',
     async ({ tmpDir }) => {
