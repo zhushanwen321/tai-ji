@@ -499,8 +499,12 @@ export function useSidebar() {
       void useSubagentStore().loadSubagents(sid)
       void useWorkflowStore().loadWorkflows(sid)
       // [W2 权威拉取与冷读] 重连时机：状态层缓存缺失时补拉（缓存缺失门控 + fire-and-forget，
-      // 与打开视图时机同一入口）。断连期间丢的 state_changed 帧由本次拉取收敛（ADR-0097：
-      // 推是提示、拉是真理通道）。
+      // 与打开视图时机同一入口）。断连期间丢的状态帧不由本次拉取收敛：状态层缓存跨重连不清
+      // （removeLiveState 只挂真删除路径），只要该 session 有过条目，门控（use-session.ts:368
+      // liveStateOf !== undefined 即 return）直接跳过。断连恢复的自愈通道是 state topic 的
+      // last-value 回放：session.state_changed 在 message-bus.ts:139 的 STATE_TYPE_KEY_MAP
+      // 登记为 'state'，subscription-state.ts:348 在重连应答里逐条回放 reply.stateSnapshot。
+      // 本 RPC 拉取只覆盖冷启动/无快照形态（条目从未被填过的会话）。
       void core.refreshLiveState(sid)
     }
   }
