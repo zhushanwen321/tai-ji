@@ -4407,11 +4407,15 @@
         {
           "kind": "spec",
           "ref": "packages/runtime/test/plugin-ui-event-channel.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-host-actions.test.ts"
         }
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "pnpm --filter @taiji/runtime exec vitest run test/plugin-invoke-channel.test.ts test/plugin-openurl-scheme.test.ts test/plugin-ui-event-channel.test.ts",
+      "run": "pnpm --filter @taiji/runtime exec vitest run test/plugin-invoke-channel.test.ts test/plugin-openurl-scheme.test.ts test/plugin-ui-event-channel.test.ts test/plugin-host-actions.test.ts",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md",
       "note": "R2 态（2026-10-24 u-protocol 交付登记，防漏门禁补登）。ui 渲染层（TextInput 等）改动由 packages/ui 包内 vitest 子集与 A29 承接。"

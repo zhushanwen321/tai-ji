@@ -63,6 +63,21 @@ function isResolvedInsidePluginDir(resolvedPath: string, normalizedPluginDir: st
   return filePath.startsWith(normalizedPluginDir)
 }
 
+/** 路径类请求（相对 / 绝对 / file: URL）：解析结果必须在 pluginDir 内（拦截规则第一分支）。 */
+function isPathLikeRequest(request: string): boolean {
+  return request.startsWith('./') || request.startsWith('../') || request.startsWith('/') || request.startsWith('file:')
+}
+
+/**
+ * 解析结果判界（fail-closed）：文件形态（绝对路径 / file: URL）且出 pluginDir →
+ * PERMISSION_DENIED。路径类请求分支与裸名解析结果分支共用同一出界裁决。
+ */
+function assertResolvedInsidePluginDir(request: string, resolvedPath: string, normalizedPluginDir: string): void {
+  if (!isResolvedInsidePluginDir(resolvedPath, normalizedPluginDir)) {
+    throw errorWithCode(`Sandbox: require('${request}') resolves outside plugin directory`, 'PERMISSION_DENIED')
+  }
+}
+
 /**
  * 创建 require 拦截函数。
  *
@@ -106,16 +121,9 @@ export function createRequireInterceptor(pluginDir: string, allowedModules: read
 
   return (request: string, resolvedPath?: string): string => {
     // 路径类请求（相对 / 绝对 / file: URL）：解析结果必须在 pluginDir 内
-    if (
-      request.startsWith('./') ||
-      request.startsWith('../') ||
-      request.startsWith('/') ||
-      request.startsWith('file:')
-    ) {
+    if (isPathLikeRequest(request)) {
       if (resolvedPath !== undefined) {
-        if (!isResolvedInsidePluginDir(resolvedPath, normalizedPluginDir)) {
-          throw errorWithCode(`Sandbox: require('${request}') resolves outside plugin directory`, 'PERMISSION_DENIED')
-        }
+        assertResolvedInsidePluginDir(request, resolvedPath, normalizedPluginDir)
       }
       return resolvedPath ?? request
     }
@@ -150,10 +158,9 @@ export function createRequireInterceptor(pluginDir: string, allowedModules: read
     // 不拦截，由调用方（initSandbox 的 _resolveFilename patch 总是传真实解析结果）保证。
     if (
       resolvedPath !== undefined &&
-      (resolvedPath.startsWith('/') || resolvedPath.startsWith('file:')) &&
-      !isResolvedInsidePluginDir(resolvedPath, normalizedPluginDir)
+      (resolvedPath.startsWith('/') || resolvedPath.startsWith('file:'))
     ) {
-      throw errorWithCode(`Sandbox: require('${request}') resolves outside plugin directory`, 'PERMISSION_DENIED')
+      assertResolvedInsidePluginDir(request, resolvedPath, normalizedPluginDir)
     }
 
     return request
