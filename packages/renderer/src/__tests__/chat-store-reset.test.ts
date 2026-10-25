@@ -1,18 +1,12 @@
 // @vitest-environment node
 
 /**
- * Chat store 流式状态复位回归测试（AGENTS.md 规则 #3）。
+ * Chat store 复位回归测试（合并自 chat-streaming-reset + chat-transient-reset——
+ * 同为 useChatStore 复位语义、import 集与 describe 内 beforeEach 结构完全一致，
+ * 合并以减少测试文件的 fork/装载固定开销；describe 与用例名保持原样）。
  *
- * 锁定 MUST_FIX #1 的修复：message.error 到达时，若最后一条 assistant 仍
- * status:'streaming'（流中途错误 / 进程崩溃），必须将其转为 error 并并入 errorText，
- * 而非总新建消息导致流式气泡卡「生成中」。
- *
- * 覆盖：
- * - 流中途 message.error：最后 streaming assistant → status:error + 并入 errorText（不新建）
- * - prompt 级 message.error（无 streaming assistant）：新建独立 error 消息，不改写历史
- * - 已 complete 的历史 assistant 遇 message.error：不回写，新建独立 error 消息
- *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/chat-streaming-reset.test.ts
+ * - 流式状态复位（AGENTS.md 规则 #3）：message.error 到达时的 streaming assistant 转态
+ * - 瞬态状态收尾（W3）：断连 / runtime 重启下 compacting/retry/queue 由 resetTransientStates 全清
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
@@ -310,5 +304,115 @@ describe('chat store markSessionError —— session 级错误统一入口', () 
     expect(msgs[0].status).toBe('error')
     expect(msgs[0].content).toBe('') // [M2] 错误文本不拼进 content
     expect(msgs[0].error).toBe('extension 加载失败')
+  })
+})
+
+describe('chat store 瞬态状态收尾（W3：finalizeAllStreaming 应全收尾）', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('断连时 finalizeAllStreaming 清理 compactingSessions（不只 streaming）', () => {
+    const store = useChatStore()
+    const sid = 's-compacting'
+
+    // 把 session 标为「压缩中」（session.compacting 驱动）
+    store.setOccupancy(sid, { turn: 'idle', compacting: true, bash: false })
+    expect(store.isCompacting(sid)).toBe(true)
+
+    // 模拟 runtime 重启 / 断连：useConnection 会调 finalizeAllStreaming('restart')
+    // W3：finalizeAllStreaming 应同时清掉 compacting（当前实现不清，红灯预期）
+    store.finalizeAllStreaming('restart')
+
+    // 关键断言：断连后 compacting 态应被清，否则 UI 永久卡「压缩中」
+    expect(store.isCompacting(sid)).toBe(false)
+  })
+
+  it('断连时 finalizeAllStreaming 清理 retryStates', () => {
+    const store = useChatStore()
+    const sid = 's-retry'
+
+    // 把 session 标为「自动重试中」（message.auto_retry_start 驱动）
+    store.applyMessageEvent(sid, {
+      type: 'message.auto_retry_start',
+      payload: { sessionId: sid, attempt: 1, maxAttempts: 3 },
+    })
+    expect(store.getRetryState(sid)).toBeDefined()
+    expect(store.getRetryState(sid)?.attempt).toBe(1)
+
+    // 模拟断连：finalizeAllStreaming('disconnect')
+    // W3：应清掉 retryStates（当前实现不清，红灯预期）
+    store.finalizeAllStreaming('disconnect')
+
+    // 关键断言：断连后重试指示位应被清
+    expect(store.getRetryState(sid)).toBeUndefined()
+  })
+
+  it('[u3c/u5a 退役] queue_update 帧零落点——瞬态收尾点收敛为 occupancy/retry/streaming', () => {
+    // [HISTORICAL] 前身「断连时 finalizeAllStreaming 清理 queueStates」用例：queue_update 帧
+    // 已随投递所有权内核降级为内核内部回执（u3b 退役 queueStates 写入路径；u5a 结清分区与
+    // 读写 API 本身），本用例前提（queue_update 能置 queueStates）结构性不成立。
+    // 断言范围保留「帧到达不产生任何瞬态」：messages 与 retry 分区零写入。
+    // 替代覆盖：内核派生视图随 session 销毁/disposeSession 清理（core clearDeliveryProjection，
+    // 见 core chat __tests__/effects-delivery-receipt.test.ts）+ 本文件其余瞬态收尾用例。
+    const store = useChatStore()
+    const sid = 's-queue'
+    store.applyMessageEvent(sid, {
+      type: 'message.queue_update',
+      payload: { sessionId: sid, steering: ['补一条'] },
+    })
+    expect(store.getMessages(sid)).toHaveLength(0)
+    expect(store.getRetryState(sid)).toBeUndefined()
+  })
+
+  it('正常 message.complete 不清 compacting（只有 finalizeAllStreaming 全收尾）', () => {
+    const store = useChatStore()
+    const sid = 's-normal'
+
+    // session 正在压缩 + 一条 streaming 消息
+    store.setOccupancy(sid, { turn: 'idle', compacting: true, bash: false })
+    store.applyMessageEvent(sid, {
+      type: 'message.message_start',
+      payload: { sessionId: sid, messageId: 'a1' },
+    })
+
+    // 正常收尾：message.complete 收尾 streaming 实体
+    store.applyMessageEvent(sid, {
+      type: 'message.complete',
+      payload: { sessionId: sid, stopReason: 'end_turn' },
+    })
+
+    // 关键：message.complete 只收 streaming 实体，不应顺手清 compacting
+    // （compaction 是独立的 session 级状态，由 session.compacted 事件清，不能被消息收尾误清）
+    expect(store.isCompacting(sid)).toBe(true)
+    expect(store.isGenerating(sid)).toBe(false)
+  })
+
+  it('resetTransientStates helper 存在并清理全部瞬态', () => {
+    const store = useChatStore()
+    const sid = 's-reset'
+
+    // 置满所有瞬态：streaming + compacting + retry + pendingSend
+    // （[u3c] queueStates 置位路径已随 queue_update 退役，不再计入瞬态面）
+    store.applyMessageEvent(sid, {
+      type: 'message.message_start',
+      payload: { sessionId: sid, messageId: 'a1' },
+    })
+    store.setOccupancy(sid, { turn: 'idle', compacting: true, bash: false })
+    store.applyMessageEvent(sid, {
+      type: 'message.auto_retry_start',
+      payload: { sessionId: sid, attempt: 1 },
+    })
+    store.addPendingSend(sid)
+
+    expect(store.isGenerating(sid)).toBe(true)
+    expect(store.isCompacting(sid)).toBe(true)
+    expect(store.getRetryState(sid)).toBeDefined()
+    expect(store.isActive(sid)).toBe(true)
+
+    // W3：调用统一收尾 helper（resetTransientStates 已在 store API 暴露）
+    store.resetTransientStates(sid)
+
+    // 关键：全部瞬态一次性清零
+    expect(store.isCompacting(sid)).toBe(false)
+    expect(store.getRetryState(sid)).toBeUndefined()
   })
 })
