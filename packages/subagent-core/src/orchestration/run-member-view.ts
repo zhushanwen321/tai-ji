@@ -390,11 +390,7 @@ const MODEL_COL = 30;
 const MS_PER_SECOND = 1000;
 
 export function memberViewLine(view: RunMemberView): string {
-  // 终端成员表列宽（`[idx] state agent model …` 对齐，与 tool 端 README 示例同形态）
-  const STATE_COL = 11;
-  const AGENT_COL = 16;
-  const MODEL_COL = 30;
-  const MS_PER_SECOND = 1000;
+  // 列宽与时长换算消费模块级常量（STATE_COL/AGENT_COL/MODEL_COL/MS_PER_SECOND）
   const parts: string[] = [
     `[${view.stepIndex}]`,
     view.state.padEnd(STATE_COL),

@@ -21,7 +21,7 @@
   <aside
     v-if="run !== null"
     ref="drawerEl"
-    class="fixed bottom-0 right-0 top-0 z-[calc(var(--z-modal)+1)] flex w-[452px] max-w-[92vw] flex-col border-l border-hairline bg-surface shadow-drawer-left transition-transform duration-[250ms] ease-[var(--ease-out)]"
+    class="fixed bottom-0 right-0 top-0 z-[calc(var(--z-dialog)+1)] flex w-[452px] max-w-[92vw] flex-col border-l border-hairline bg-surface shadow-drawer-left transition-transform duration-[250ms] ease-[var(--ease-out)]"
     :class="open ? 'translate-x-0' : 'translate-x-full'"
     :inert="!open"
     :aria-hidden="!open"

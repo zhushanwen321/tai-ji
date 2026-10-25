@@ -42,7 +42,10 @@ vi.mock('@/stores/session', () => ({
 }))
 
 vi.mock('@/stores/sidebar', () => ({
-  useSidebarStore: () => ({ collapsed: false, activeTab: 'sessions', toggleCollapsed: vi.fn() }),
+  SIDEBAR_TAB_SESSIONS: 'ui.sessions',
+  SIDEBAR_TAB_FILES: 'ui.files',
+  SIDEBAR_TAB_PLUGINS: 'ui.plugins',
+  useSidebarStore: () => ({ collapsed: false, activeTab: 'ui.sessions', toggleCollapsed: vi.fn() }),
 }))
 vi.mock('@/stores/fileTree', () => ({
   useFileTreeStore: () => ({ fileCount: 0, getTree: () => null, getNodeState: () => 'idle', setNodeState: vi.fn() }),

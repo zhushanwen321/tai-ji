@@ -131,7 +131,6 @@ export default {
     imagePlaceholder: '图片缓存已满',
     imagePlaceholderDetail: '该会话图片缓存已达上限（64MB），历史图片仍可见，新图片显示占位',
     imageUnavailable: '图片不可用',
-    workflow: '工作流',
     forkAsk: 'fork 提问（在新分支追问，与主线隔离）',
     forkFailed: 'fork 后台失败：{error}',
     handoffAsk: '交接并备注（输入内容将作为新 session 的首条消息）',

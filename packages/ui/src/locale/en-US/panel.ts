@@ -136,7 +136,6 @@ export default {
     imagePlaceholder: 'Image cache full',
     imagePlaceholderDetail: 'This session image cache reached its limit (64MB). Existing images stay visible; new images show a placeholder',
     imageUnavailable: 'Image unavailable',
-    workflow: 'Workflow',
     forkAsk: 'Fork to ask (ask in a new branch, isolated from main line)',
     forkFailed: 'Fork to background failed: {error}',
     handoffAsk: 'Hand off with note (your text becomes the first message in the new session)',

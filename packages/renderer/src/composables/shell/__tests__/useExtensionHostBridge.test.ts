@@ -793,7 +793,7 @@ describe('U4 声明通路（config.plugins 订阅 + routeAll 接线 + unregister
     // ① 声明侧：ContentSlotRegistry.loadExternal 的 unknown-placement（warnOnce 按 message 去重）
     // ② 路由侧：routeAll → 桥内 unregistered-mount-point 订阅（按 pluginId+contributionId+种类 去重）
     const warnsOf = (prefix: string) => warnSpy.mock.calls.filter((c) => String(c[0]).startsWith(prefix))
-    expect(warnsOf('[content-slot-registry]')).toHaveLength(1)
+    expect(warnsOf('[failure-degradation]')).toHaveLength(1)
     expect(warnsOf('[extension-host]')).toHaveLength(1)
     // 不同贡献是不同去重键（两渠道同理），各自告警一次；同键贡献（probe.bad）不重复告警
     warnSpy.mockClear()
@@ -805,7 +805,7 @@ describe('U4 声明通路（config.plugins 订阅 + routeAll 接线 + unregister
         ],
       }),
     ]))
-    expect(warnsOf('[content-slot-registry]')).toHaveLength(1)
+    expect(warnsOf('[failure-degradation]')).toHaveLength(1)
     expect(warnsOf('[extension-host]')).toHaveLength(1)
   })
 })

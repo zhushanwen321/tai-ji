@@ -45,7 +45,10 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
 
 // ── mock stores（Sidebar setup 期读取）──
 vi.mock('@/stores/sidebar', () => ({
-  useSidebarStore: () => ({ collapsed: false, activeTab: 'sessions', toggleCollapsed: vi.fn() }),
+  SIDEBAR_TAB_SESSIONS: 'ui.sessions',
+  SIDEBAR_TAB_FILES: 'ui.files',
+  SIDEBAR_TAB_PLUGINS: 'ui.plugins',
+  useSidebarStore: () => ({ collapsed: false, activeTab: 'ui.sessions', toggleCollapsed: vi.fn() }),
 }))
 vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({
