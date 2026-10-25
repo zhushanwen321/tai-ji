@@ -45,10 +45,12 @@
  *   文件系统」，独立副本 15/15 成功；见 .tmp/round3-a-probe-hdiutil-concurrency.md）。
  * - 4 个「dmg 从未被读 / 真 sha 从不参与」的用例直接用假文件替代真 dmg 构造
  *   （sha mismatch / dmg 挂载失败 / M6 等待超时 / 只读卷拒装，逐例注释依据）。
- * - 并发安全形态（探针判定）：独立 dmg 副本 + 独立挂载点 + 同键首造互斥 +
- *   用例局部 tmpDir 清理；hdiutil create 并发无全局串行化（并发 3 总墙钟
- *   0.52x 串行）。中断注入段已并发化（describe.concurrent，maxConcurrency=3，
- *   见 vi.setConfig 注释）；端到端 / 磁盘满 / linux 段仍串行执行。
+ * - 并发约束（round3-a 探针判定，.tmp/round3-a-probe-hdiutil-concurrency.md）：
+ *   mac 三段（端到端 / 中断注入 / 磁盘满）声明 suite options { concurrent: true }，
+ *   三段用例交叠共享同一全局并发池（maxConcurrency=3，见 vi.setConfig 注释），
+ *   安全前提 = 每用例独立 dmg 副本 + 独立挂载点（脚本侧 mktemp）+ 同键首造
+ *   互斥 + 用例局部 tmpDir 清理；hdiutil create 并发无全局串行化（并发 3 总
+ *   墙钟 0.52x 串行）。linux 段（retry:2 负载敏感）与轻用例段保持串行。
  *
  * 与 updater-script.test.ts 的边界：那边字符串视角（检查片段在不在），本文件
  * 执行视角（bash 跑不跑得通、分支真不真触发、终态对不对）。
@@ -74,10 +76,12 @@ import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../
 // 让 happy path 在 CI 仍撞 20s 线（2026-09-10）；除既有存量外不要补第三参，
 // 统一由这行管辖，新增用例也不要写显式超时。
 //
-// maxConcurrency=3：describe.concurrent 段的并发度封顶（默认 5）。3 的依据：
-// round3-a 探针实测并发 3 下独立副本 attach 零失败、总墙钟低于串行和（磁盘与
-// diskimages-helper 均未见全局串行化）；再高对 waitFor 链（30s 预算）的负载
-// 膨胀不可控（探针并发 3 尖峰轮单次 attach 已可至 3.65x）。
+// maxConcurrency=3：concurrent 段的并发度封顶（默认 5）。该上限是文件级全局
+// 封顶——多个 concurrent 段之间会交叠（后段用例在前段长用例占槽时即开跑，
+// 探针实测），全部并发用例共享同一 3 槽池。3 的依据：round3-a 探针实测并发 3
+// 下独立副本 attach 零失败、总墙钟低于串行和（磁盘与 diskimages-helper 均未见
+// 全局串行化）；再高对 waitFor 链（30s 预算）的负载膨胀不可控（探针并发 3 尖峰
+// 轮单次 attach 已可至 3.65x）。另注意槽排队时间计入用例耗时（60s 预算内）。
 vi.setConfig({ testTimeout: 60_000, maxConcurrency: 3 })
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync, statSync, chmodSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -268,8 +272,10 @@ async function buildMinimalAppDmg(tmpDir: string, opts: DmgSpec = {}): Promise<{
   const keyTag = crypto.createHash('sha256').update(cacheKey).digest('hex').slice(0, 10)
   let entry = sharedDmgCache.get(cacheKey)
   if (!entry) {
-    // 首造互斥：同键并发首跑时，后到者复用在途 promise（等待完成拿到同一份），不 double-create
-    entry = sharedDmgCreateInFlight.get(cacheKey) ?? await createSharedDmg(cacheKey, keyTag, appBundleName, binaryName, opts)
+    // 首造互斥：同键并发首跑时，后到者 await 在途 promise（拿到与首造者同一份），
+    // 不 double-create——两个 hdiutil create 同路径并发会互相覆写。await 必须包住
+    // 整个 ?? 表达式：漏包会把 Promise 对象当 entry 用（dmgPath 恒 undefined）。
+    entry = await (sharedDmgCreateInFlight.get(cacheKey) ?? createSharedDmg(cacheKey, keyTag, appBundleName, binaryName, opts))
   }
   // 完整性自检：共享资产被意外删除时快速失败并指向缓存机制，不让后续用例
   // 连锁假红难归因（共享的隔离性损失排查成本，审计风险清单第 7 项）
@@ -508,8 +514,10 @@ describe('updater-script integration: bash 语法检查', () => {
 
 // ════════════════════════════════════════════════════════════════
 // MAC 脚本：端到端 happy path（真 .app + 真 dmg + 真 attach/ditto/detach）【集成门控】
+// 本段 { concurrent: true }：与中断注入 / 磁盘满段交叠共享全局 3 槽并发池
+// （见文件头 vi.setConfig 注释）；happy path 与 hollow 首造（不同键）可并发进行。
 // ════════════════════════════════════════════════════════════════
-describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 端到端'), () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 端到端'), { concurrent: true }, () => {
   it<TestScope>(
     'happy path（M1 脚本侧）：S0→S5 走通 → exit 0、新 .app 就位、result done（合法 JSON）、无任何残留',
     async ({ tmpDir }) => {
@@ -962,8 +970,10 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('upda
 
 // ════════════════════════════════════════════════════════════════
 // MAC 脚本：磁盘满（M4 + P10：ditto 磁盘满必须非 0 退出）【集成门控】
+// 本段 { concurrent: true }：段内并发声明（现仅 1 用例，标记统一并发契约、
+// 后续新增用例自动受限控并发管辖；语义同上两段）。
 // ════════════════════════════════════════════════════════════════
-describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 磁盘满（P10）'), () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 磁盘满（P10）'), { concurrent: true }, () => {
   it<TestScope>(
     '小容量卷上 ditto 拷入 5MB 不可压产物 → ENOSPC → ditto 非零退出、error=ditto copy failed、旧 app 完好',
     async (ctx) => {
