@@ -382,6 +382,17 @@ bridge 的 `plugin:statusBarUpdate` / `plugin:statusSetUpdate` / `extension:stat
 A10b（provider 写侧回归）复用既有剧本 `p0-settings-provider`，不另立剧本；D3 复跑证据见
 P0-P1-COVERAGE.md P0-13 行。
 
+### 真机窗口批次（2026-10-25，真实凭据场景；缺陷登记与修复史见 skill-data 侧 `provider-plugin-access.acceptance/ISSUES-2.md`）
+
+| 剧本 | 场景 | verdict（断言数） | 覆盖要点 |
+|---|---|---|---|
+| `p1-plugin-a3-a12-real-extract` | A3 真实凭据提取 + A12 延迟 | pass（51） | Trae/Qoder 真实插件（pnpm pack + mock registry 真实 npm 链安装）提取链：授权挂载位确认卡渲染、提取成功 DOM 呈现、凭据落盘（apiKey 只记长度）、状态行 valid、真实对话出话；A12 提取回显 ≤ 1s（Trae 299-506ms / Qoder 471-801ms） |
+| `p1-plugin-a24-legacy-upgrade` | A24 存量升级 + A23b 真实对话 | pass（32） | 旧版 WoolManager 形态存量条目（运行时提取真实 apiKey seed、无 models 字段）→ 装插件 → 采纳链免重授权（providers.credential 回读 → 上游校验 → 22 模型写回 + 接管标记置位 + 幂等）→ wool-catalog.json 清理 → wool 模型真实对话出话（pi 扩展读条目得完整目录） |
+| `p1-plugin-a20-a4b-credential-audit` | A20 凭据回读 + A4b 帧审计 | pass（36） | providers.credential 正向回读（key 往返逐字节一致 + 跨命名空间拒）+ WS 帧审计（29 帧 18 类凭据零命中；`config.revealProviderApiKey` 定向 reply 白名单正证检测器非空真）+ 磁盘扫描（5035 文件除 models.json 合法落点零命中）；refreshToken 广播泄漏（缺陷 9）修复后全帧零命中 |
+| `p1-plugin-a31-runtime-independence` | A31 管理逻辑无 pi 运行时 | pass（43） | 零会话下 extract / getStatus / refreshCatalog 三命令全程进程表零 pi 进程（检测器经控制会话正向对照防空真）+ plugin-bootstrap fork 在位——羊毛管理方法在插件 fork 内独立执行 |
+
+> WorkBuddy 专属场景（A2 OAuth 全链、A4a 重新授权、A20 额度数值呈现）留 WorkBuddy 窗口期；真机批次暴露的 9 项产品缺口（真实插件形态下的安装依赖 / 沙箱目录 / 渲染驱动 / viewId 与树形状契约 / 凭据回读 / 写回广播 / refreshToken 出线）已全部修复闭环。
+
 ### 共享设施（写插件 Provider 剧本前必读）
 
 | 设施 | 作用 |
