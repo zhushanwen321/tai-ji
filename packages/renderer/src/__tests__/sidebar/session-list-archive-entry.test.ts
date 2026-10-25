@@ -19,7 +19,7 @@ import SessionList from '@/components/sidebar/SessionList.vue'
 const SESSION_MODE_KEY = 'taiji:sidebar-session-mode'
 
 function makeSession(id: string): SessionSummary {
-  return { id, label: `会话 ${id}`, cwd: '/alpha', status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0 }
+  return { id, label: `会话 ${id}`, cwd: '/alpha', status: 'idle', lastActiveAt: 1 }
 }
 
 function mountList(archiveCount?: number, restoredSessionId?: string) {

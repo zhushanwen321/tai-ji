@@ -55,7 +55,7 @@
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
 
-import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../shared/agent-call-types.ts";
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
 import { project, settleWorkflowRecord } from "../persistence/execution-record.ts";

@@ -100,7 +100,7 @@ function buildFullKindsSnapshot(): ServerMessageMap['session.traceEntries'] {
     header: { type: 'session', version: 1, id: 'h0', cwd: '/w/demo' },
     entries,
     malformed: [{ lineNumber: 3, raw: 'not json' }],
-    sessionEnd: { type: 'session_end', outcome: 'done' },
+    sessionEnd: { outcome: 'done' },
     leafId: 'u3',
   }
 }

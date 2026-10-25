@@ -50,6 +50,26 @@ interface CachedSessionMeta {
 // 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（ADR-0069，原审计文档已删除 git 可追溯）
 export const sessionMetaCache = new Map<string, CachedSessionMeta>()
 
+/**
+ * 最近一轮 sessions 磁盘扫描枚举的 cwd 分组目录数（`session.getState` 冷路径埋点的
+ * 「扫描目录数」取数来源，设计 §3.1「可观测」栏——四要素重审触发的数据来源）。
+ *
+ * 落点在本模块的理由：与 `scanDirCache` / `lookupScanDirCache` / `refreshScanDirCache`
+ * 同族——都是「扫描轮级」状态（跨调用保留最近一轮的观测值），而扫描实现（session-file-utils
+ * 的 scanPiSessionsFromDisk）与读取方（session-file-locator 的段 2）都要触达它，放叶子
+ * 模块避免两侧互相 import。
+ *
+ * 写者唯一 = `scanPiSessionsFromDisk`（每轮起始复位为 0，逐 cwd 分组子目录 +1；
+ * 目录不存在支同样复位为 0；顶层 readdir 失败支由起始复位覆盖，不重复置位）。
+ * TTL 缓存命中轮不重算（未发生真实磁盘扫描，读数保持上一轮值）。
+ *
+ * 读语义（消费方 = session-file-locator 段 2，其调用恒带 `force: true` 绕开 TTL）：
+ * 读到非 0 = 段 2 本轮真的枚举了那么多 cwd 分组目录；读到 0 = 本轮未枚举任何分组目录
+ * （空 sessions 目录 / 全是散置文件 / 顶层 readdir 失败 / 目录不存在）。段 1 缓存命中的
+ * 冷读不进扫描，埋点以 source 字段区分（不冒充本次扫描量）。
+ */
+export const sessionScanDirCount = { last: 0 }
+
 // ── sidecar 家族公共骨架（原 session-file-utils.ts，函数体逐字节不变迁入）────────
 
 /**

@@ -44,6 +44,7 @@ import {
 } from '@/stores/plan-store'
 import type { PlanDocMeta, PlanStateView } from '@taiji/shared'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
+import type { PlanReviewUIRequest } from '@/composables/useExtensionUI'
 
 // ── mock 边界：getPlanState RPC mock 掉（runtime 侧 u1-rpc 未接线，用受控 deferred 驱动）──
 // spread actual 保留 events 真实通道与 transport 其余面（本文件不 mount，不依赖 events；
@@ -237,8 +238,8 @@ describe('derivePlanReviewBarMode：D4 分支公式单源（presence 语义）',
 
 describe('审批窗口机件（D4）', () => {
   /** planReview 帧记录（主动拉取 getPendingRequests 快照形态） */
-  function planReviewRecord(requestId: string): ExtensionUIRequest {
-    return { sessionId: 'A', requestId, method: 'select', planReview: true } as unknown as ExtensionUIRequest
+  function planReviewRecord(requestId: string): PlanReviewUIRequest {
+    return { sessionId: 'A', requestId, dialogKind: 'select', planReview: true }
   }
 
   function mountStore(): ReturnType<typeof usePlanRefs> {

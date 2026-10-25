@@ -284,10 +284,10 @@ import { ESTIMATED_TURN_HEIGHT, LOAD_MORE_RESERVED_HEIGHT } from '@/composables/
 
 const props = defineProps<{
   sessionId: string
-  /** 虚拟 id 的归属主 session（agentcall 快照视图挂载链显式传入——两段式 vid 无 mainSid
-   *  命名空间；subagent:/btw: vid 自带归属，本 prop 不消费。经 useChatViewDeps 用于
-   *  file.search 白名单与 markdown 路径点击的 cwd 解析——runtime RPC 只认真实 session id，
-   *  vid 直传必 session_not_found，fileSearch vid 修复） */
+  /** 虚拟 id 的归属主 session（agentcall 快照视图挂载链显式传入——两段式虚拟 id 无 mainSid
+   *  命名空间；subagent: 三段式自带归属、btw 线 id 即真实 session id，本 prop 不消费。经
+   *  useChatViewDeps 用于 file.search 白名单与 markdown 路径点击的 cwd 解析——runtime RPC
+   *  只认真实 session id，虚拟 id 直传必 session_not_found，fileSearch vid 修复） */
   mainSessionId?: string
 }>()
 

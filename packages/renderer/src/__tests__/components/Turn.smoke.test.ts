@@ -35,9 +35,8 @@ function makeTurn(overrides: Partial<MessageTurn> = {}): MessageTurn {
     id: 'a-1',
     role: 'assistant',
     content: 'hello',
-    segments: [],
     status: 'complete',
-    createdAt: Date.now(),
+    timestamp: Date.now(),
   }
   return {
     index: 0,

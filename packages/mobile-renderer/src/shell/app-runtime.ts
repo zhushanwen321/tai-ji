@@ -16,6 +16,7 @@ import type { Ref } from 'vue'
 import {
   createChatStore,
   createSessionFlow,
+  createSessionLiveState,
   createSessionStore,
   createUseChat,
   createUseSession,
@@ -32,7 +33,7 @@ import type {
 } from '@taiji/core'
 import * as chatApi from '@taiji/core/transport/api/domains/chat'
 import * as sessionApi from '@taiji/core/transport/api/domains/session'
-import { onGlobalType } from '@taiji/core/transport/api'
+import { command, onGlobalType, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 import { registerSessionCleanup } from '@taiji/core/foundation/use-session-scoped-state'
 import { createComposerInjectionStore } from '@taiji/core/domain/composer/context'
 import { showErrorBar } from './error-bar'
@@ -89,12 +90,24 @@ const sessionApiPort: SessionApiPort = {
   migrateImage: (p) => sessionApi.migrateImage(p),
   onConfigSessions: (handler) =>
     onGlobalType('config.sessions', (msg) => handler(msg.payload.groups)),
+  // [W2 权威拉取与冷读] session.getState 直发（对齐桌面 api/session-api-port.ts:51-54：
+  // 不经 session 域代理，经 command 原语直发）。移动壳缺此成员时 core use-session 的
+  // refreshLiveState 首行门控 `if (!liveState || !getState) return` 恒命中，三时机拉取
+  // 整体跳过，而状态层唯一写入方是 useChat 的 liveState dep（冷会话无 state_changed 帧，
+  // registerReplicatedStates 只在 onSessionRegistered 调）——模型/思考档标签恒空。
+  // reply 与 request 同名、payload 消费型；会话不存在 = SESSION_NOT_FOUND reject
+  // （core 侧显式未知保持，不回退其他会话的值）。
+  getState: (id: string) =>
+    command('session.getState', { sessionId: id }, RPC_BACKSTOP_TIMEOUT_MS),
 }
 
 // ── store / composable 单例（模块级；移动壳单实例应用）──────────────────
 
 const chatStore = createChatStore()
 const sessionStore = createSessionStore()
+// [W1 会话架构四层分离] 会话运行时状态层（core 纯 factory，与 createSessionStore 同位置组装）：
+// modelId / thinkingLevel 的唯一权威落点——按会话 id 寄存，与列表成员资格无关。
+const liveStateStore = createSessionLiveState()
 
 // [投递所有权内核 u3b] 原本地 compact defer 队列（CompactQueueLike 内存实现 + flush 逐条
 // 提交）已随 core defer 队列状态机整体退役：UseChatDeps 不再有 getCompactQueue 成员，
@@ -126,6 +139,7 @@ function buildUseChatDeps(): UseChatDeps {
     ...coreChannelDeps(),
     getChatStore: () => chatStore,
     getSessionStore: () => sessionStore as SessionStoreLike,
+    getLiveStateStore: () => liveStateStore,
   }
 }
 
@@ -187,6 +201,7 @@ const noop = (): void => {}
 //   ?? noop 解析）：移动壳无 new-task flow 活跃取消面 / 文件树 / 未读体系（未读属 W4）
 const subDeps: EnsureStreamSubDeps = {
   chatApi: chatApiPort,
+  liveState: liveStateStore,
   toast: errorBarToast,
   t,
 }
@@ -230,9 +245,16 @@ const useSessionInstance = createUseSession({
     disposeChat: (sid) => useChatInstance.disposeSession(sid),
     invalidateStatus: noop,
     browserDestroy: noop,
+    // [W1 会话架构四层分离] 状态层条目显式清退（只挂真删除；归档不挂——同 core 契约）
+    clearLiveState: (sid) => liveStateStore.removeLiveState(sid),
   },
   // D2/U5：sessionEntry 端口束注入——切入链 12 步的订阅/LRU 步在移动壳生效（对齐桌面）
   sessionEntry,
+  // [W2 权威拉取与冷读] 状态层：session.getState reply 的唯一落点（与状态消息 /
+  // 操作回执共用 applyLiveState 这一个 reducer，设计 §7 验收项 8）。缺省不注入时
+  // refreshLiveState 整体跳过（缓存缺失门控拉取不生效），与上方 sessionApiPort.getState
+  // 成对缺失——冷会话模型/思考档标签恒空（对齐桌面 useSidebar 注入形态）。
+  liveState: liveStateStore,
 })
 
 // ── 新建任务（createSessionFlow 直组；手输路径是移动唯一形态）────────────────
@@ -289,7 +311,16 @@ export async function createMobileTask(input: MobileNewTaskInput): Promise<Sessi
 // 仅暴露组件/测试实际消费的符号；useSessionInstance 与两个 api 端口是文件内组装细节，
 // 去 export 防「导出清单 = 公开 API」的假象（外部断链由本文件 import 图自证）。
 
-export { chatStore, sessionStore, useChatInstance }
+export { chatStore, liveStateStore, sessionStore, useChatInstance }
+
+/**
+ * 会话运行时状态读口（[W1] 状态层薄壳的移动形态）：
+ * `modelId` / `thinkingLevel` 读状态层，缓存缺失返回 undefined（显式未知——视图显示
+ * 显式未知占位，不回退列表种子字段/其他会话的值）。
+ */
+export function liveStateOf(id: string): { modelId?: string; thinkingLevel?: string } | undefined {
+  return liveStateStore.liveStateOf(id)
+}
 
 /**
  * 队列条目取消（remote-use D7/U10）：delivery.cancel RPC 透传（本文件 chatApiPort

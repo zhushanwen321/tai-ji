@@ -7,7 +7,7 @@
  */
 import { ref } from 'vue'
 import type { Ref } from 'vue'
-import { viewedBtwVidFor, viewedSubagentVidFor } from './predicates'
+import { viewedBtwSessionFor, viewedSubagentVidFor } from './predicates'
 
 /** 全部 panel 的 focusedSessionId 列表源（split 恢复时多 panel 全查；单 panel 恒 1 元素） */
 type ViewedPanelsSource = Ref<readonly (string | null)[]>
@@ -31,7 +31,8 @@ export function bindViewedVidPanels(source: ViewedPanelsSource): void {
 /**
  * [B9] 当前正在查看的 subagent/agentcall 虚拟 id 集（LRU 联动驱逐的豁免源）。
  * [D5 btw-question M3-a] 同源扩含 btw 线：drawer 开在 btw tab 且正在查看某线时，
- * 该线 vid 同样计入豁免（查看中不驱逐；btw 分区被驱逐时的派生键同驱归 M2-c）。
+ * 该线 session id（W4a 后 = pi 真实 id）同样计入豁免（查看中不驱逐；btw 分区被驱逐时
+ * 的派生键同驱归 M2-c）。
  *
  * 组合链（查询源固定为 panel 枚举，R2 S1）：逐 panel → focusedSessionId → 该 sid 的
  * 复合谓词（isOpen ∧ activeTab ∈ {'subagent','btw'} ∧ 选中 id——唯一拼装点 =
@@ -50,8 +51,8 @@ export function getViewedVids(): Set<string> {
     if (subagentVid) viewed.add(subagentVid)
     // btw 线查看保护（D5：查看中不驱逐——本集经 chat store 注入 evictIfNeeded，入口刷新
     // 该线 recency 恒排保留区，阈值驱逐不落选；未查看的线照常参与阈值驱逐，文件持久可回填）
-    const btwVid = viewedBtwVidFor(sid)
-    if (btwVid) viewed.add(btwVid)
+    const btwSessionId = viewedBtwSessionFor(sid)
+    if (btwSessionId) viewed.add(btwSessionId)
   }
   return viewed
 }

@@ -1007,24 +1007,8 @@ function applyFixedRegression(entry, statusNow, id, seen, round) {
   entry.history.push({ round, status: "regressed" });
 }
 
-/**
- * 「重报 → regressed」转移（merge 路径唯一实装，C2 状态机转移单点化）：聚合器在
- * reconCount===0（无对账数据场景，如 doc-reviewer-only 批）时重报 fix-attempted/fixed
- * 条目 = 修复失败。语义与 merge 原内联块逐字段等价：status→regressed、fixAttempts+1
- *（修复失败计数，needs-redesign 数据源）、openStreak+1、history 追加；severity 经
- * inheritCarryoverFields 同源写入（采信本轮显式标注——与延续继承同一权威语义，不在此
- * 重复第二份 severity 写法）。调用方门控（reconCount===0 且 status ∈ {fix-attempted,
- * fixed}）在 review-fix-loop.js merge 循环内，本函数无条件转换。与 reconcile 路径的
- * applyFixAttemptedOutcome/applyFixedRegression 语义同向但进入条件不同（对账通道吃
- * 裸 prev_id 集合，merge 通道吃归一化富条目），不合并为一张转移表（C2 已裁决）。
- */
-function applyCarryoverRegression(tracked, entry, round) {
-  tracked.status = "regressed";
-  tracked.fixAttempts = (tracked.fixAttempts || 0) + 1;
-  tracked.openStreak = (tracked.openStreak || 0) + 1;
-  inheritCarryoverFields(tracked, entry);
-  tracked.history.push({ round, status: "regressed" });
-}
+// applyCarryoverRegression 已迁出（依赖单源版 inheritCarryoverFields——CJS 模块作用域
+// 无法引用脚本顶层，随 pi 模板 workflows/src/review-fix-loop.pi.tpl.js 迁移，语义不变）
 
 // open/regressed 且本轮仍在（seen）→ openStreak +1（跨轮字段）；漏报（未 seen）不增长（保守）。
 // status 读 entry 当前值——fix-attempted/fixed 分支本轮转出的 regressed 同样累计（原语义）。
@@ -1463,28 +1447,8 @@ function recordDormant(dormant, entries, round, excludeIds) {
   return list;
 }
 
-/**
- * 延续条目字段继承（wf-1792073055433 空壳缺陷修复）：聚合器重报已追踪条目时
- * title/severity 可能缺省（旧格式 string / 对象缺字段）——清单侧已有字段为权威不覆盖，
- * title 缺失侧从本轮重报回填；severity 采信本轮显式标注（与 R1/regressed 分支的
- * 「entry.severity || 既有」聚合权威语义一致）。无 title 的延续条目会让跨轮身份锚点
- * 断链（L2 标题对账失配、prev_titles 注入段变 "no title recorded" 空壳）。
- * 签名收窄（AC1）：tracked/entry 恒对象（tracked 取自 state.issues 活跃条目，entry 经
- * normalize）——不设对象性防御，normalize 契约是唯一防御层。
- * 原地更新 tracked，返回是否有变更（调用方可记 log）。
- */
-function inheritCarryoverFields(tracked, entry) {
-  let changed = false;
-  if (!tracked.title && typeof entry.title === "string" && entry.title) {
-    tracked.title = entry.title;
-    changed = true;
-  }
-  if (typeof entry.severity === "string" && entry.severity && tracked.severity !== entry.severity) {
-    tracked.severity = entry.severity;
-    changed = true;
-  }
-  return changed;
-}
+// inheritCarryoverFields 已迁出（单源化：workflows/src/review-fix-loop.shared.ts，
+// 双平台产物共用；wf-1792073055433 空壳缺陷修复的单点实现）
 
 /**
  * dormant 复活条目的 title 继承（wf-1792073055433 空壳缺陷修复）：复活键即 dormant id
@@ -2293,7 +2257,9 @@ module.exports = {
   translateId,
   translateReconSets,
   reconcileIssues,
-  applyCarryoverRegression,
+  // applyCarryoverRegression / inheritCarryoverFields 已迁出：前者随 pi 模板
+  //（workflows/src/review-fix-loop.pi.tpl.js，依赖单源版），后者单源化进
+  // workflows/src/review-fix-loop.shared.ts（双平台产物共用，构建拼入）
   normalizeReviewResult,
   normalizeGroupEntry,
   reconcileGroups,
@@ -2306,7 +2272,6 @@ module.exports = {
   resolveRunRoot,
   computeOrigin,
   recordDormant,
-  inheritCarryoverFields,
   dormantRevivalTitle,
   filterActiveIds,
   filterDormantFromRecon,

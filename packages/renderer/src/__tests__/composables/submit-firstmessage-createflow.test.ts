@@ -80,7 +80,7 @@ import { createSessionFlow, transition, useNewTaskFlowController } from '@taiji/
 import { session as sessionApi } from '@/api'
 
 function summary(over: Partial<SessionSummary> = {}): SessionSummary {
-  return { id: 'ns', label: 'L', cwd: '/x', status: 'idle', lastActiveAt: 1, modelId: '', ...over }
+  return { id: 'ns', label: 'L', cwd: '/x', status: 'idle', lastActiveAt: 1, ...over }
 }
 
 beforeEach(() => {
@@ -160,9 +160,6 @@ describe('wave:remove-bandaids: submitFirstMessage 不再主动拉 subagent/work
       id: 'sess-new-001',
       label: 'test',
       cwd: '/tmp',
-      createdAt: '2026-07-15T10:00:00Z',
-      lastActivity: '2026-07-15T10:00:00Z',
-      piSessionFile: '',
     }
     transition('landing')
     controller.bindCurrentSession(fakeSession)

@@ -104,7 +104,7 @@ const mockQuotaRow: NormalizedQuotaRow = {
 }
 
 /** 设置 session store 有一个 session */
-function setupSession(sid: string, modelId: string): void {
+function setupSession(sid: string): void {
   const sessionStore = useSessionStore()
   sessionStore.groups = [{
     cwd: '/test',
@@ -114,8 +114,6 @@ function setupSession(sid: string, modelId: string): void {
       cwd: '/test',
       status: 'active' as const,
       lastActiveAt: Date.now(),
-      modelId,
-      tokenCount: 0,
     }],
   }]
 }
@@ -236,7 +234,7 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
 
   describe('quota store 写入', () => {
     it('hover 后 quota store 写入缓存数据', async () => {
-      setupSession('s1', 'zhipu/glm-4')
+      setupSession('s1')
       setupProviders([zhipuProvider])
       vi.mocked(quotaApi.getCached).mockResolvedValue({ data: mockQuotaRow, lastFetchAt: 1000 })
       vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: mockQuotaRow, lastFetchAt: 2000 })
@@ -611,7 +609,7 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
     // [迁移来源] 原锚为平铺触发器按钮文字（决策 6 退役）——quota 环境下的容量显示回归宿主
     // 换为 ContextCapacityCard（聚合按钮本身无数值文本，数字在 hover 页卡内）。
     it('context.update 仍正常工作', async () => {
-      setupSession('s1', 'deepseek/v3')
+      setupSession('s1')
       setupProviders([deepseekProvider])
 
       const wrapper = mount(ContextCapacityCard, {
@@ -628,7 +626,7 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
     })
 
     it('无 quota provider 时卡内正常显示用量', async () => {
-      setupSession('s1', 'deepseek/v3')
+      setupSession('s1')
       setupProviders([deepseekProvider])
 
       const wrapper = mount(ContextCapacityCard, {
@@ -645,7 +643,7 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
     })
 
     it('有 quota provider 时卡内仍正常显示用量', async () => {
-      setupSession('s1', 'zhipu/glm-4')
+      setupSession('s1')
       setupProviders([zhipuProvider])
 
       const wrapper = mount(ContextCapacityCard, {

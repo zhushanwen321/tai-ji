@@ -102,7 +102,8 @@ export interface RegisterRecord {
   cwd: string
   label: string
   file: string | undefined
-  hidden: boolean | undefined
+  /** W3 surface 落地：registerSession 尾部第 6 参（btw 两条注册路径显式传 'btw'；W5 hidden 形参已删）。 */
+  surface: string | undefined
   argc: number
 }
 
@@ -113,7 +114,6 @@ export interface BtwHarness {
   rekeyed: [string, string][]
   registered: RegisterRecord[]
   traces: BtwContractInjectionTrace[]
-  reclaimed: string[]
   /** createSession 时读取的 get_state 返回值（每次 spawn 现读，可中途改）。 */
   state: Record<string, unknown>
   /** buildLineSpawnOptions 的基础返回值（可中途改）。 */
@@ -134,7 +134,6 @@ export function makeHarness(overrides?: Partial<BtwServiceDeps>): BtwHarness {
     rekeyed: [],
     registered: [],
     traces: [],
-    reclaimed: [],
     state: {},
     baseOptions: {},
   }
@@ -159,8 +158,8 @@ export function makeHarness(overrides?: Partial<BtwServiceDeps>): BtwHarness {
     },
     buildLineSpawnOptions: vi.fn(async (_ctx: BtwLineSpawnContext) => ({ ...h.baseOptions })),
     registerSession: vi.fn(async (...args: unknown[]) => {
-      const [id, , cwd, label, file, hidden] = args as [string, IPiEngine, string, string, string | undefined, boolean | undefined]
-      h.registered.push({ id, cwd, label, file, hidden, argc: args.length })
+      const [id, , cwd, label, file, surface] = args as [string, IPiEngine, string, string, string | undefined, string | undefined]
+      h.registered.push({ id, cwd, label, file, surface, argc: args.length })
       return {}
     }),
     resolveMainSessionFile: vi.fn(() => undefined),
@@ -170,7 +169,6 @@ export function makeHarness(overrides?: Partial<BtwServiceDeps>): BtwHarness {
     resolvePiCommand: () => 'pi-not-used-in-fake',
     forkSession: vi.fn(async () => { throw new Error('forkSession not stubbed by test') }),
     traceContractInjection: vi.fn((t: BtwContractInjectionTrace) => { h.traces.push(t) }),
-    onWillReclaim: vi.fn((vid: string) => { h.reclaimed.push(vid) }),
     ...overrides,
   }
   return h

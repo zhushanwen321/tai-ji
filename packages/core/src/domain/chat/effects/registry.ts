@@ -14,8 +14,9 @@
  * (a) chunk 状态更新（原 applyChunk 逻辑）+ (b) 终态收尾（finalizeSession，替代原 useChat
  * setStreaming 的 lifecycle flag 翻转）。useChat 收到 message.* 只调 store.applyMessageEvent（单一入口），
  * 不再自己 switch message.*。session.*（compacting/compacted/renamed/state_changed/
- * thinkingLevelSet）涉及跨 store（sessionStore.applySnapshot），
- * 保留在 useChat。
+ * thinkingLevelSet）涉及跨 store，保留在 useChat：其中 renamed 走导航列表 applySnapshot
+ * （仅 label 展示字段），state_changed / thinkingLevelSet 走状态层 applyLiveState
+ * （帧路由见 useChat.ts handle* helper 与 :738）。
  *
  * 行为等价性：
  * - 状态更新顺序与原 applyChunk 逐 case 一致（handler 内先更新 chunk 状态，后收尾，
@@ -910,7 +911,7 @@ export function __clearUnhandledFrameTypeWarnForTest(): void {
  *
  * useChat.ensureStreamSubscription 收到任意 ServerMessage 后：
  * - message.* → 调本函数（经 store.applyMessageEvent 转发），注册表执行全部 effect
- * - session.* → useChat 保留处理（跨 store：sessionStore.applySnapshot 等）
+ * - session.* → useChat 保留处理（跨 store：状态层 applyLiveState / 导航列表 applySnapshot 等）
  *
  * 非 message.* 或未注册的 message.* type 直接 no-op（等价原 applyChunk 的 default return）。
  * [RD-1#9] 未注册 type 的 no-op 在 dev 下补一次/类型 warn（协议漂移零痕迹 → 可见）。

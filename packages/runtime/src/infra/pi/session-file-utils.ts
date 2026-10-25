@@ -31,11 +31,15 @@ import {
   readBindingSidecar,
   refreshScanDirCache,
   sessionMetaCache,
+  sessionScanDirCount,
   warnSidecarReadFailureOnce,
   _resetSidecarWarnDedupForTest,
   type PersistBindingSidecarOpts,
 } from './session-binding-sidecar-io.js'
-export { invalidateScanDirCache, persistBindingSidecar, readBindingSidecar, _resetSidecarWarnDedupForTest } from './session-binding-sidecar-io.js'
+// 按 id 定位 session 文件（getState 冷读三支）在 './session-file-locator.ts'（本文件顶
+// max-lines 软上限 + 一文件一概念）；不在此 re-export——那会构成本文件 ⇄ locator 的环
+// （locator 要 import 本文件的 scanPiSessions），消费方直接 import locator 模块。
+export { invalidateScanDirCache, persistBindingSidecar, readBindingSidecar, _resetSidecarWarnDedupForTest, sessionScanDirCount } from './session-binding-sidecar-io.js'
 // 残留清扫家族已拆出至 './session-residue-cleanup.ts'（max-lines 预算，先例同上）：
 // 本文件 isScannableSessionFile 消费 isTmpResidueFileName（候选侧过滤，RT-3#10 起精确
 // 后缀形态判定，与清扫侧/导入拒绝侧三消费点同一谓词），cleanup* 两函数经 re-export
@@ -982,6 +986,7 @@ export interface ScannedSessionMeta extends ModelBindingFields {
 /** 仅供测试重置缓存用（生产不调）。 */
 export function _resetSessionMetaCacheForTest(): void {
   sessionMetaCache.clear()
+  sessionScanDirCount.last = 0
 }
 
 /** 删除 session 时调用，清理 sessionMetaCache 中的 stale 条目（避免无界增长）。 */
@@ -1199,6 +1204,8 @@ function scanSessionsDirEntry(sessionsDir: string, entry: string, results: Scann
     return
   }
   if (stat.isDirectory()) {
+    // sessionScanDirCount 计数点（写者唯一的另一处）：cwd 分组子目录逐一枚举
+    sessionScanDirCount.last += 1
     scanCwdGroupDir(entryPath, results, degraded)
   } else if (isScannableSessionFile(entry)) {
     collectSessionMetaIntoResults(entryPath, results, degraded)
@@ -1206,9 +1213,13 @@ function scanSessionsDirEntry(sessionsDir: string, entry: string, results: Scann
 }
 
 function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
-  if (!existsSync(sessionsDir)) return [] // 权威空（目录不存在）
+  if (!existsSync(sessionsDir)) { sessionScanDirCount.last = 0; return [] } // 权威空（目录不存在）→ 计数入口复位：本支先于下方轮起始复位即 return，不复位则读方 findScannedSessionFileById 拿到上一轮残留计数
 
   const results: ScannedSessionMeta[] = []
+  // sessionScanDirCount 每轮起始复位（写者唯一的复位点）：随后逐 cwd 分组子目录累加，
+  // 读方 findScannedSessionFileById 依赖「调用前已复位」的时序读本轮值；顶层 readdir
+  // 失败支由本复位覆盖（提前 return 时读数已是 0），不重复置位。
+  sessionScanDirCount.last = 0
   // RT-3#1/#2：降级丢弃计数（degraded 显形）——各失败点计入，扫描轮末汇总打点，
   // 单条坏文件「侧栏少一条」可归因（结构与实现见 session-scan-degraded.ts）。
   const degraded: ScanDegradedStats = createDegradedStats()

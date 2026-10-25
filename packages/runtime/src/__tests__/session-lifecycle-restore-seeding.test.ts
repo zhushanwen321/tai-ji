@@ -88,7 +88,9 @@ function makeSvc(overrides: Record<string, unknown> = {}): ILifecycleSessionOps 
     getExtensionPaths: vi.fn(async () => []),
     getSkillPaths: vi.fn(() => []),
     getReplaceSystemPrompt: vi.fn(() => undefined),
-    toSummary: vi.fn((s: Record<string, unknown>) => ({ id: s.id, modelId: s.modelId, thinkingLevel: s.thinkingLevel } as SessionSummary)),
+    // W3：SessionSummary 三状态字段已删，toSummary mock 只回最小描述形状（断言读
+    // lifecycle 注册表记录的 modelId/thinkingLevel 双写缓存字段，不经 summary）。
+    toSummary: vi.fn((s: Record<string, unknown>) => ({ id: String(s.id), label: 'test', cwd: '/test', status: 'idle' as const, lastActiveAt: 0 } as SessionSummary)),
     fetchAndBroadcastContext: vi.fn(async () => {}),
     removeSessionEntry: vi.fn(),
     notifySessionCreated: vi.fn(),
@@ -316,9 +318,9 @@ describe('U2 restoreSession 播种（D2 设计）', () => {
     const session = await (lifecycle as unknown as { registerSession: Function }).registerSession(
       'test-session-id', client, '/test', 'test',
       '/test/sessions/test-session-id.jsonl',
-      undefined, undefined, undefined,
-      'preset-model',  // modelOverride (9th)
-      { modelId: 'real-model', thinkingLevel: 'low' },  // metaOverride (10th)
+      undefined, undefined,
+      'preset-model',  // modelOverride (8th，W5 hidden 形参删除后左移一参)
+      { modelId: 'real-model', thinkingLevel: 'low' },  // metaOverride (9th)
     )
 
     // metaOverride 优先级高于 modelOverride
@@ -343,8 +345,8 @@ describe('U2 restoreSession 播种（D2 设计）', () => {
     const session = await (lifecycle as unknown as { registerSession: Function }).registerSession(
       'test-session-id', client, '/test', 'test',
       '/test/sessions/test-session-id.jsonl',
-      undefined, undefined, undefined,
-      'preset-model',  // modelOverride
+      undefined, undefined,
+      'preset-model',  // modelOverride（W5 hidden 形参删除后左移一参）
       undefined,  // metaOverride not provided
     )
 

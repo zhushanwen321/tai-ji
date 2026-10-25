@@ -72,7 +72,7 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
   chat: { getHistory: getHistoryMock, streamSubscribe: vi.fn(() => () => {}) },
   extension: {},
   session: {
-    create: vi.fn(() => Promise.resolve({ id: 'mock', label: 'mock', cwd: '/proj', status: 'idle', lastActiveAt: 1, modelId: 'm1' })),
+    create: vi.fn(() => Promise.resolve({ id: 'mock', label: 'mock', cwd: '/proj', status: 'idle', lastActiveAt: 1 })),
     list: vi.fn(() => Promise.resolve([])),
     switchSession: switchSessionMock,
     rename: vi.fn(() => Promise.resolve()),
@@ -321,7 +321,7 @@ describe('selectSession 全链路 touchLru 接线（AC-2 单 panel LRU 基线不
     // seed session store（selectSession 需要列表内有目标 session）
     const ids = Array.from({ length: 9 }, (_, i) => `s${i}`)
     useSessionStore().applySnapshot({
-      groups: [{ cwd: '/proj', sessions: ids.map((id) => ({ id, label: id, cwd: '/proj', status: 'idle' as const, lastActiveAt: 1, modelId: 'm1' })) }],
+      groups: [{ cwd: '/proj', sessions: ids.map((id) => ({ id, label: id, cwd: '/proj', status: 'idle' as const, lastActiveAt: 1 })) }],
     })
 
     // 单 panel：panel 焦点即当前 active session（focusSession 同步 mock panel 枚举）

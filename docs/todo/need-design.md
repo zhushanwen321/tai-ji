@@ -8,16 +8,9 @@
 
 ### 1. btw 线模型/思考档权威数据通路
 
-来源：btw-line-model-state.md（渲染层近似态已合入，权威通路缺口未解）。
+状态：已解决（2026-10-24 定案，「会话架构四层分离」W1+W2 落地）——原登记的两个缺口均已消除。W1 状态层统一接管：btw 线与其他会话同走 `applyLiveState` 同一 reducer，btw 专用 store 与「回退主会话当前值」兜底整体删除，缺失即显式未知。W2 权威拉取：`session.getState { sessionId }` 冷读——活会话读 replicated states 快照、冷会话读线自己的会话文件最新 model_change entry（`extractLatestModelFromJsonl`，activePath 裁剪），全程不 spawn 进程；renderer 在打开视图 / 缓存缺失 / 重连时拉取并喂同一 reducer。裁决 = 拉推两条都走且同源：拉为真值通道（ADR-0097），推为性能提示，无第二套状态容器。原登记锚点 `btw-session-state.ts` 已随 W1 删除，现行载体 = data-source-registry.md 主表 #76（会话运行时状态层）。原登记文档 btw-line-model-state.md 已删，本条即其终态。
 
-问题：btw 旁路线的 modelId / thinkingLevel 显示态无权威数据通路，renderer 现靠回执近似，两个已知缺口（pi 侧静默换模不回显、重启后冷线分歧不回显）靠近似态兜不住。
-
-候选方向（ADR-0097「拉为主、推补充」口径二选一）：
-
-- 拉：`btw.list` 线条目增加 modelId/thinkingLevel（runtime 读线 JSONL 最新 model_change entry，活线读 replicated states 快照），renderer 拉取时喂 btw-session-state store
-- 推：线进程 snapshot 挂钩 `session.state_changed` 广播打通 renderer 摄入
-
-开放问题：涉及 shared 协议类型 + runtime + renderer 三层，登记原判断为「宜走 tech-design 小设计包」。登记锚点：`packages/renderer/src/stores/btw-session-state.ts`、`btw-line-spawn-options.ts`、data-source-registry.md 主表 #63。
+来源：btw-line-model-state.md（已解决，文档删除后内容以本条为准）。
 
 ### 2. extension 工具 details.summary 读侧检查收敛
 
@@ -55,13 +48,23 @@
 
 ### 5. dev 实例 runtime 慢启动被健康检查误杀
 
-来源：dev-runtime-slow-start-killed-by-health-check.md。
+状态：已设计待实施（2026-10-22 登记；2026-10-23 启动链全量调查 + 修复设计完成，待排期）——设计路线 = 候选①无进展检测 + 上限量级对齐。
 
-问题：dev 实例 runtime 慢启动（60-90s）被 main 侧 35s 健康检查超时误杀（exit 143）。排障已排除：端口冲突/偏移、buildSafeEnv 白名单、数据目录双重实例检查、NODE_OPTIONS 外层 env。按「超时量级按被保护对象粒度校准」原则，35s 属控制范围错配。
+来源：dev-runtime-slow-start-killed-by-health-check.md（文档删除后内容以本条为准）。
 
-候选方向（三选一或组合）：① health check 改无进展检测（进程活着即等，上限提至分钟级或 idle 检测）；② 装配器把 runtime 就绪等待与 renderer 兜底页解耦（兜底页提供「仍在启动」态而非失败态）；③ dev 链条前置 runtime 预热。
+问题：dev 实例 runtime 慢启动被 main 侧健康检查超时误杀（exit 143，renderer 落「runtime 不可用」兜底页，整应用不可用）。本机高负载下（多个 worktree dev 实例并存）runtime 的 tsx 两段式启动（tsx CLI 壳进程 + loader 子进程，真身在子进程）实测 60-90s；复测三次连续误杀，负载下降后约 90s 完成启动。**dev-only**：prod 直跑预编译 bundle（tsup 产物），启动秒级不受影响。
 
-开放问题：三个候选的取舍与组合；位置：main 侧 `waitForHealth`（35s 上限）、`apps/electron/scripts/dev-instance.mjs` 启动链。
+启动链事实（2026-10-23 全量调查，订正原登记）：唯一超时错位点 = `waitForHealth`（`apps/electron/main/supervisor/health-checker.ts:25-28`）——HTTP `/health` 轮询，缺省 30 次 × 200ms ≈ **6s 硬上限**（调用点 `runtime-supervisor.ts:321` 不传 opts）；原登记的「35s」是排障观察的整窗 wall clock 累加值（装配器前置步骤 + main/preload 编译 + `waitForVite` 上限 30s + renderer 首载 + 6s 健康检查），不是单一配置值。runtime 侧 `/health` 在 `server.start()` listen 成功即响应（`transport/connection-manager.ts:150-163`，无业务就绪检查），tsx 冷编译 + 全模块加载 + service 装配全部在 6s 窗口内竞争。失败链无隐藏重试：`startAndNotify`（`runtime-supervisor.ts:365-378`）catch 吞错单次失败（记 lastStartError + 推 `RUNTIME_ERROR`）；exit 143 因 markStopping 不触发崩溃重启链（`MAX_RESTARTS=5` 退避重启只覆盖运行期意外退出）。renderer 兜底页 = `App.vue:18-36` failed 分支，中间态只有 connecting「连接中…」与 restarting，无「仍在启动」态。已排除：端口冲突/偏移、`buildSafeEnv` 白名单（最小 env 271ms 就绪）、数据目录双重实例检查、`NODE_OPTIONS`。
+
+修复设计（裁决：无进展检测路线）：超时量级对齐被保护对象（runtime 整进程启动是任务级，dev 形态正常可分钟级）；`waitForHealth` 是启动就绪等待（等必然发生的 listen 事件），非时间平抑补偿机制，保留、只修上限量级 + 进程死亡快败。
+
+1. `health-checker.ts`：`WaitForHealthOptions` 增 `aliveCheck?: () => boolean`——每轮循环先执行，返回 false（进程已退出）立即 throw（错误信息含「runtime 进程已退出」，可区分超时与崩溃）；默认上限不变（prod 消费方零影响）。
+2. `runtime-supervisor.ts` doStart 调用点：传 `aliveCheck = () => 子进程存活`（child 的 `exitCode === null && !killed`，以 supervisor 实际 child 持有形态为准）+ 按形态上限：dev（main 侧 dev 判定）传 `retryCount = 1500`（300s @ 200ms；依据 = tsx 冷编译高负载实测 60-90s，留 3-4 倍余量）、prod 不传（保持 6s——prod 起不来是故障，快失败信号是特性）。
+3. renderer 零改动：main 不再 6s 判死即不发 `RUNTIME_ERROR`，renderer 停在 connecting「连接中…」直到 port 广播到达自动连接；「仍在启动（dev 冷编译可至 1-2 分钟）」类次级提示为可选 UI 增强，本次不做。
+
+否决项备案：装配器前置预热——tsx（esbuild）无进程间编译缓存，预热进程无法加速后续进程启动，不可行；renderer 侧独立「仍在启动」状态——依赖上限修正后自然消解，单独立项无必要。
+
+实施清单：`health-checker.ts`（opts + aliveCheck 分支；测试补两用例——aliveCheck false 立即失败 / true 时按 retryCount 等满，在 `health-checker-http.test.ts` 既有基建上扩展）；`runtime-supervisor.ts`（doStart 传参 + dev/prod 上限常量 `DEV_HEALTH_RETRY_COUNT = 1500`，注释注明量级依据；supervisor 既有 waitForHealth mock 测试同步）。验收：低负载 dev 启动行为不变（秒级就绪即连）；模拟慢启动（手动 hold runtime 入口 `setTimeout` 60s）dev 存活不被杀、300s 内就绪即连；kill 子进程则 aliveCheck 秒级失败进兜底页（快败通道不回退）。复现与定位证据（误杀日志 `[runtime] waitForHealth failed on port N, cleaning up half-alive child` + `Process exited with code 143`；`sample <pid>` 显示壳进程等 tsx loader 子进程）详见 git 历史中本条目原登记文档的调查终态。
 
 ### 6. subagent-core D1 反向值边收编
 

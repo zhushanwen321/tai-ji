@@ -41,7 +41,7 @@
 //    MS_PER_SECOND / SECONDS_PER_MINUTE 消费常量叶子文件 service-constants.ts。
 
 
-import type { AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../shared/agent-call-types.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
 import {
   ConversationContinuation,

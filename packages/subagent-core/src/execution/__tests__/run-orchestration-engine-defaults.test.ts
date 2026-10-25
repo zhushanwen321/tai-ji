@@ -25,7 +25,7 @@ import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { getGlobalConfigPath } from "../assembly/config.ts";
 import type { ModelRegistryLike } from "../assembly/model-resolver.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
-import type { AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../shared/agent-call-types.ts";
 import { resetCoreForTests } from "../../core/host-services.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import type {

@@ -32,6 +32,10 @@ import {
 // 调用现查（raw 预检不经 JsonStore，检测动作自身不触发改名），保证「改坏 → 拒绝 →
 // 修复 → 放行」全程无需重启 runtime。
 import { getSettingsCorruption } from './pi-settings-store.js'
+// tee 树生命周期 SSOT（infra/logger.ts）：短命 pi 的 id 前缀 + 树回收（族③根因修复，
+// W3.5 / E-21）——与 createPiSessionLog / migratePiSessionLogTree 同模块，路径推导
+// 单点（dataDirRoot + getSessionStoreDir）
+import { EPHEMERAL_SESSION_ID_PREFIX, removeEphemeralSessionTree } from '../logger.js'
 
 interface ManagedProcess {
   client: RpcClient
@@ -328,13 +332,13 @@ export class ProcessManager implements IProcessManager {
    * @param fn          就绪后在附着 client 上执行的一次性操作
    */
   async withEphemeralPi<T>(sessionFile: string, fn: (client: RpcClient) => Promise<T>): Promise<T> {
-    // spawn cwd 只影响 pi 初始（弃用）session 的上下文，不影响 switchSession 后的目标
+    // spawn cwd 只影响 pi 初始（弃用）会话的上下文，不影响 switchSession 后的目标
     // session；取 sessions 目录（文件所在处，扫描结果保证存在）——目标 session 自身
     // header 的 cwd 死路径场景由调用方处理（renameSession 非活跃分支附着前 F3 归一化
     // cwd fallback，p1p4-closure W1；restoreSession 同款），与本入口无关。目录竞态消失时
     // 兜底 homedir，让失败落在 switchSession（pi 报「文件不存在」）而非 spawn ENOENT。
     const spawnCwd = existsSync(dirname(sessionFile)) ? dirname(sessionFile) : homedir()
-    const ephemeralId = `ephemeral-${Date.now()}-${randomUuid()}`
+    const ephemeralId = `${EPHEMERAL_SESSION_ID_PREFIX}${Date.now()}-${randomUuid()}`
     const client = await this.createSession(ephemeralId, spawnCwd)
     try {
       await client.switchSession(sessionFile)
@@ -345,6 +349,13 @@ export class ProcessManager implements IProcessManager {
       return await fn(client)
     } finally {
       await this.destroySession(ephemeralId)
+      // 族③根因修复（W3.5 / E-21）：回收本方法自建的 tee 树。短命 pi 从不 rekey，
+      // createSession → tee 落的 `<root>/<ephemeralId>/logs/pi-<date>.jsonl`（**非空**
+      // 树，开工前实证①确认该残留形态）在 destroySession 后永久残留——删除会话只回收
+      // 真实 id 树，ephemeral 树无人认领。树整体由本附着自建（id 现场生成、全局唯一，
+      // 无兄弟域共享），删除逻辑与 ephemeral- 前缀 fail-safe 在 logger（tee 树生命周期
+      // 的 SSOT：createPiSessionLog / migratePiSessionLogTree 同模块）。
+      removeEphemeralSessionTree(ephemeralId)
     }
   }
 

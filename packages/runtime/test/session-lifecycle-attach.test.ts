@@ -52,7 +52,7 @@ import type { SessionSummary } from '@taiji/shared'
 const sessionsDirMock = vi.hoisted(() => ({ value: '/mock/not-yet-initialized' }))
 
 function makeSummary(id: string): SessionSummary {
-  return { id, label: 'test', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now(), modelId: 'p/m', tokenCount: 0 }
+  return { id, label: 'test', cwd: '/tmp', status: 'idle', lastActiveAt: Date.now() }
 }
 
 /**

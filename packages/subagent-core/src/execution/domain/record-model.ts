@@ -11,7 +11,7 @@
 //
 // 依赖方向：只依赖 `./record-types.ts`（同层词汇）与 SDK 契约类型（`Turn` /
 // `ToolCall` / `WorktreeHandle` / `AgentFailureKind` / `AgentUsageTotal`）——**不 import
-// assembly / orchestration**，领域层在下由构造保证（值依赖环检查 C-data-26 同批覆盖）。
+// assembly / orchestration**，领域层在下由构造保证（值依赖环检查 C-data-27 同批覆盖）。
 //
 // 刻意**不迁** `SubagentRecord`：字段证据（`eventLog: AgentEventLogEntry[]` +
 // `displayItems: DisplayItem[]`）表明它是**应用层读模型**（同时携带领域字段与展示

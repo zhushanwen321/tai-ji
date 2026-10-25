@@ -29,7 +29,7 @@ import type {
   WorktreeHandle as SdkWorktreeHandle,
 } from "@zhushanwen/subagent-engine-sdk";
 
-import type { AgentCallOpts as CoreAgentCallOpts } from "../../../../orchestration/models/types.ts";
+import type { AgentCallOpts as CoreAgentCallOpts } from "../../../../shared/agent-call-types.ts";
 import type {
   AgentEvent as CoreAgentEvent,
   WorktreeHandle as CoreWorktreeHandle,

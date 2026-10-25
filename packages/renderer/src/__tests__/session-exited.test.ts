@@ -97,7 +97,7 @@ beforeEach(async () => {
   const group: SessionGroup = {
     cwd: '/repo',
     sessions: [
-      { id: 's-exit', label: 'test', cwd: '/repo', status: 'idle', lastActiveAt: 100, modelId: 'm/x', tokenCount: 0 },
+      { id: 's-exit', label: 'test', cwd: '/repo', status: 'idle', lastActiveAt: 100 },
     ],
   }
   sessionStore.applySnapshot({ groups: [group] })

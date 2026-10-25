@@ -59,7 +59,7 @@ export * from './trace-window'
 
 export { createUseChat, ensureStreamSubscription, invalidateStreamSubscription, resetChatModuleStateForTest } from './useChat'
 // [投递所有权内核 u3b] submitQueuedEntry / SubmitQueuedEntryDeps 已随 defer flush 退役摘除
-export type { UseChatDeps, EnsureStreamSubDeps, SessionStoreLike } from './useChat'
+export type { UseChatDeps, EnsureStreamSubDeps, SessionStoreLike, SessionLiveStateLike } from './useChat'
 // [remote-use D2/U5] 驱逐退订复合入口：sessionEntry.evictLru 双壳共接（evictIfNeeded +
 // invalidateStreamSubscription + session.unsubscribe RPC 编排单点）
 export { evictLruWithUnsubscribe } from './useChat'

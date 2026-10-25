@@ -48,6 +48,55 @@ sessionId 的取法：侧栏会话列表 / `<数据目录>/agent/sessions/<encod
 
 **不在清扫范围**：pi 会话 jsonl 本体 `<数据目录>/agent/sessions/<encodeCwd>/<ts>_<sessionId>.jsonl` 及其 sidecar——它是会话本体而非衍生数据，删除它等于删除会话本身（走应用内删除，删除时主文件进废纸篓）。
 
+## 存量磁盘孤儿清扫（ext-sessions 一级孤儿目录）
+
+**现象**：`<数据目录>/ext-sessions/` 一级目录里混着从不属于任何活跃会话的残留目录。四族来源（E-21）：族① `btw-create-*`、族② `btw-attach-*`（btw 虚拟 id 含冒号过不了 `isPiSessionId`，日志树迁移 early-return）、族③ `ephemeral-*`（临时 pi 进程从不 rekey）、族④ 主会话 tempId 空目录（迁移只回收 `logs/` 叶子、父目录永久留空，实测最大一族）。族③族④的新增来源已由磁盘树生命周期修复根治（迁移成功连父目录回收 + 临时进程 finally 自清理）；本节的脚本只承接**存量**清扫。
+
+**清扫工具**：`node scripts/sweep-orphan-session-dirs.mjs`（默认 dry-run，只读点检 + 打印删除清单；真实删除须显式 `--apply`）。
+
+### 清扫三条件（同时成立才删）
+
+| 条件 | 判据 | 不成立的含义 |
+|---|---|---|
+| ① | 目录内**仅** `logs/` 或为空（`logs` 还必须是目录，不是同名文件） | 有兄弟域（attachments / canvases / btw / subagents / …）= 有内容，一律不碰 |
+| ② | 目录名不属于任何已注册/已扫描会话 id | 是真实会话（含日志很旧但仍在扫描范围里的会话），不删 |
+| ③ | mtime 早于保留期 | 刚建的树（首 flush 窗口内的新会话也在其内），不删 |
+
+- **mtime 主语**：目录内 `logs/*.jsonl` 的最新 mtime；该目录没有 jsonl 时取目录自身 mtime。轮转段 `pi-<date>.jsonl.N.gz` 不算 jsonl。
+- **保留期数值** = `readLogKeepDays()`（默认 7 天，env `TAIJI_LOG_KEEP_DAYS` 可覆盖，与 `cleanExpiredLogs` 同一读取函数；不新造常数）。
+- **条件② 的 id 集合**取自磁盘：pi 会话文件 `<数据目录>/agent/sessions/**/*.jsonl` 的首行 header id（tmp 残留文件名 `.tmp-migrate-<ts>.jsonl` / `.tmp-import-<ts>.jsonl` 按 scanner 同规则排除）+ btw 线文件 `<数据目录>/ext-sessions/<mainSid>/btw/*.jsonl` 的首行 header id。runtime 内存注册表外部脚本读不到，已注册但 pi 尚未首 flush 的会话由条件③ 兜底（tee 日志在建线即时落盘，窗口内 mtime 必然新鲜）。
+- **不另造前缀白名单**：四族名字都能过 `isPiSessionId`，前缀清单既漏未来新族、又把判据退化成名单维护。与 `cleanExpiredLogs` 的树内遍历规约对齐——一级目录名非合法 sessionId 形态（如 `--Users-x-proj--`）一律跳过，手放的非会话目录归外部，不代删。
+
+### 删除形态与失败账目
+
+- 删除经目录级端口 `ISessionStore.trashDirectory` 移入回收站（mac 可在访达废纸篓恢复整树）；**失败 = 目录保留原地 + 结构化错误上抛**，禁用「降级硬删 + warn」。非 mac 平台 `rmSync` 递归删是该端口内的设计内平台分支（无恢复通道），不是降级路径。
+- 逐目录 attempt、**失败继续**（不全停）。收到结构化错误的目录记入**失败集合 F**，留痕进点检记录（判别器 = 结构化错误的 `category` 分类字段）；F 内目录不进删除集、不计漏删。
+- **F 非空 = 环境故障**：本轮判环境故障、整轮重来（退出码 2）。重跑时点检与删除清单重新求值，**不重放上次冻结的清单**——端口对不存在的路径直接上抛，重放必撞。
+- 脚本对端口错误派生分类：`ENOENT` → `path_missing`，其余 → `trash_failed`（底层 stderr 摘录由脚本捕获后一并写入失败集合 F）。端口本身只承诺「失败保留原地并 reject」，不做分类。
+
+### 用法与点检记录
+
+```bash
+# 点检（只读）：打印删除清单，不改任何数据
+node scripts/sweep-orphan-session-dirs.mjs [--data-dir <path>]
+# 落点检记录（JSON：逐目录三条件判定与证据 + 冻结删除清单 + 失败集合 F）
+node scripts/sweep-orphan-session-dirs.mjs --record <path>
+# 真实删除：显式 --apply；目标在 prod 数据树内时还须 --allow-prod
+node scripts/sweep-orphan-session-dirs.mjs --apply --allow-prod
+# 机器可读输出 / 自检（tmp 树六形态 + prod 护栏，不触真实数据目录）
+node scripts/sweep-orphan-session-dirs.mjs --json
+node scripts/sweep-orphan-session-dirs.mjs --selftest
+```
+
+- 数据目录取值：`--data-dir` 显式指定 > env `TAIJI_AGENT_DATA_DIR` > 缺省 `<home>/.taiji-dev`（裸跑一律落 dev 树，结构性杜绝脚本默认写 prod）。dry-run 只读，prod 树也允许读；`--apply` 落在 prod 树（`<home>/.taiji`）内时**必须**同时给 `--allow-prod`（prod 只能被显式声明触达），否则拒绝执行、不做任何修改。
+- **点检记录**（`--record` 落的 JSON）是破坏性 fs 操作的验收凭据：`entries[]` 对每个一级目录逐条标注形态、条件①②③ 的判定与证据（mtime 主语与取值、id 集合成员性），`deleteSet` 是点检时求值一次后冻结的清单，`failureSet` 带 `category` 分类字段。验收方据记录独立复算「删除集 = 三条件命中的存量全集」（等号形态：漏删与多删都红），不采信脚本自报分类；零存量环境两份集合皆空属合法，但须有点检记录证明清扫真跑过。
+- **自检**：`--selftest` 在 `os.tmpdir()` 下构造 tmp 树，覆盖六形态（空目录 / 仅 logs / 有兄弟域 / 活跃会话树 / 保留期内新树 / 端口失败注入）与边界（logs 是同名文件、btw 线树、仅轮转 gz、jsonl 新鲜但目录旧、tmp 残留文件名、非 sessionId 目录名、顶层散文件），断言删除集等号 + 零误删 + F 留痕 + prod 护栏。自检与一切自动化断言禁触真实数据目录。
+
+### 已知边界（登记接受）
+
+- **归档会话**不在条件② 的 id 集合内（scanner 只扫 `agent/sessions/`）：归档时资产已搬去 `<数据目录>/agent/archive/<encodeCwd>/assets/<sessionId>/`，残留的 logs-only 旧树按三条件判孤儿可回收，取消归档时会重建树。
+- **保留期 env 值域无界**：`Number(env) || 7`，负数会透传，负保留期使条件③ 对全部目录命中。出现清扫失败报告或 env 被设为非正数时须重审。
+
 ## 关键诊断路径
 
 **打包后应用结构** (`/Applications/TaiJi.app/Contents/Resources/`)：

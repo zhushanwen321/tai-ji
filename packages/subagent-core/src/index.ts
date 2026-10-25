@@ -516,9 +516,8 @@ export type {
   ToolCallEntry,
   WorkerLogEntry,
 } from "./orchestration/models/types.ts";
-// SLUG_MAX_LENGTH 单源（merge 收敛完成）：唯一定义在 orchestration/models/types.ts；
-// 原 execution/execute-options-mapper.ts 重复定义已删（改 import 消费，深路径消费者
-// subagent-actions-core 同步切到 models/types 单源）。
+// SLUG_MAX_LENGTH 单源：权威定义在 shared/run-vocabulary.ts；本行经 orchestration/
+// models/types.ts 壳面再导出取值（壳保留使外部包深导入消费方路径零改动）。
 export { SLUG_MAX_LENGTH } from "./orchestration/models/types.ts";
 // isTerminalDoneReason：DoneReason 终止性判定（穷举 switch，词表新增成员 tsc 强制归类）。
 // 壳 workflow-notify 的防偷懒收尾指令按它判定——词表镜像收编 core 单源。

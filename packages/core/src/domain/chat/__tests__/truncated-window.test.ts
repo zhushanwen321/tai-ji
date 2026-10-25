@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { effectScope } from 'vue'
 import type { Message } from '@taiji/shared'
 import { createChatStore } from '../store'
+import { createSessionLiveState } from '@taiji/core/domain/session'
 import { createUseChat, resetChatModuleStateForTest } from '../useChat'
 import type { UseChatDeps } from '../use-chat-types'
 import { createTruncatedWindowController, historyWindowFromReply } from '../truncated-window'
@@ -63,6 +64,7 @@ function makeFixture() {
     writeSegments: vi.fn().mockResolvedValue(undefined),
     getChatStore: () => chatStore,
     getSessionStore: () => ({ applySnapshot: vi.fn(), revive: vi.fn() }),
+    getLiveStateStore: () => createSessionLiveState(),
     toast: { error: vi.fn(), warning: vi.fn() },
     t: (k: string) => k,
   }

@@ -186,7 +186,7 @@ export function getBtwSessionsRoot(): string {
  * pi 会话 id 合法值域判定（pi `assertValidSessionId` 同款正则，
  * dist/core/session-manager.js 正则字面量；语义登记 pi-semantics PS-52，verifiedWith 以该登记为准）：
  * 首尾字母数字，中间允许 `[A-Za-z0-9._-]`。真 sid 永不含 `:` ⇒ 本校验同时挡住
- * btw vid 误传（`btw:<sid>` 含冒号必拒——vid 是 runtime/前端路由 key，不直传目录层）。
+ * btw 线 id 误传（旧 `btw:<sid>` 两段式含冒号必拒——线 id 是 runtime/前端路由 key，不直传目录层）。
  */
 export function isPiSessionId(id: string): boolean {
   return PI_SESSION_ID_PATTERN.test(id)
@@ -203,7 +203,7 @@ const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
  * 启动注册表扫描重建的遍历单元。
  *
  * mainSid 校验 fail-fast（路径注入防线）由 shared getSessionBtwDir 内建（同域校验，
- * 挡空串 / 路径分隔符 / `..` / 冒号（vid 误传）等一切非单层目录名输入）。
+ * 挡空串 / 路径分隔符 / `..` / 冒号（虚拟 id 误传）等一切非单层目录名输入）。
  */
 export function getBtwThreadDir(mainSid: string): string {
   return sharedGetSessionBtwDir(mainSid)

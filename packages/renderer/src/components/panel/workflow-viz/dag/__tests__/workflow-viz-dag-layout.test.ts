@@ -20,12 +20,13 @@
  */
 import { describe, it, expect } from 'vitest'
 import type { WorkflowDag, WorkflowDagNode } from '@taiji/shared'
-import type { DagLayout, DagLayoutEdge, DagLayoutNode } from '../layout'
+import type { DagLayout, DagLayoutEdge, DagLayoutNode, ChannelMember } from '../layout'
 import {
   layoutDag,
   layoutEdges,
   computeFitTransform,
   dagNodeHeight,
+  avoidObstructedChannelMid,
   DAG_NODE_W,
   DAG_NODE_H,
   INSTANCE_ROW_H,
@@ -464,6 +465,307 @@ describe('layoutEdges 正交路由（白盒）', () => {
     const layout = layoutDag(d)
     expect(() => layoutEdges(d, layout.nodes)).not.toThrow()
     expect(layoutEdges(d, layout.nodes)).toHaveLength(0)
+  })
+})
+
+// ── 通道竖线避让 + 同行直线绕行（workflow-viz-fit-and-routing 设计残余 3/5，白盒）──
+
+describe('layoutEdges 通道竖线避让（残余 3，白盒）', () => {
+  /** 走廊带中心（按布局产物几何推算，不手算绝对坐标）：lo = 左列节点右缘，hi = 右列节点左缘。 */
+  function corridorCenter(left: DagLayoutNode, right: DagLayoutNode): number {
+    return (left.x + DAG_NODE_W + right.x) / 2
+  }
+
+  it('隔列边中位竖线穿中间列节点带 → 整体迁移到唯一零穿卡走廊（三段全程校验）', () => {
+    // a(row1, y=70) → f(p2 row3, y=194)：p1 两行节点（row2 [110,154] 被中位 302 竖线穿过）；
+    // 408 走廊的「源右缘→竖线」横段 @70 被 p1 row1 节点挡（走查反例：横段也要查），
+    // 196 走廊零穿卡 → 迁移到 196
+    const { geo, edges } = buildRoutedCanvas({
+      phases: [
+        { name: 'p0', order: 0 },
+        { name: 'p1', order: 1 },
+        { name: 'p2', order: 2 },
+      ],
+      nodes: [
+        node({ id: 'a', phase: 'p0' }),
+        node({ id: 'm0', phase: 'p1' }),
+        node({ id: 'm', templateName: 'zm', phase: 'p1' }),
+        node({ id: 'fa', phase: 'p2' }),
+        node({ id: 'fb', templateName: 'zfa', phase: 'p2' }),
+        node({ id: 'f', templateName: 'zz', phase: 'p2' }),
+      ],
+      edges: [{ id: 'e1', from: 'a', to: 'f', kind: 'dataflow' }],
+    })
+    const [edge] = edges.filter((le) => le.edge.id === 'e1')
+    const expected = corridorCenter(geo.get('a')!, geo.get('m0')!)
+    expect(edge.points[1].x).toBe(expected)
+    expect(edge.points[2].x).toBe(expected)
+    expectAxisAligned(edge.points)
+  })
+
+  it('两走廊均零穿卡且等距 → 取较大 x（等距裁决）', () => {
+    // a(p0 row2, y=132) → f(p2 row4, y=256)：中位 302 竖线被 p2 row2 [110,154] 穿过
+    //（p1 仅 row1 [48,92]，不拦 132/256）；196 与 408 走廊均零穿卡、距中位各 106
+    // → 等距取较大 x（408）
+    const { geo, edges } = buildRoutedCanvas({
+      phases: [
+        { name: 'p0', order: 0 },
+        { name: 'p1', order: 1 },
+        { name: 'p2', order: 2 },
+      ],
+      nodes: [
+        node({ id: 'p0f', templateName: 'a0', phase: 'p0' }),
+        node({ id: 'a', templateName: 'a1', phase: 'p0' }),
+        node({ id: 'm', phase: 'p1' }),
+        node({ id: 'p2a', templateName: 'b0', phase: 'p2' }),
+        node({ id: 'p2b', templateName: 'b1', phase: 'p2' }),
+        node({ id: 'p2c', templateName: 'b2', phase: 'p2' }),
+        node({ id: 'f', templateName: 'b3', phase: 'p2' }),
+      ],
+      edges: [{ id: 'e1', from: 'a', to: 'f', kind: 'dataflow' }],
+    })
+    const [edge] = edges.filter((le) => le.edge.id === 'e1')
+    const corridorNear = corridorCenter(geo.get('p0f')!, geo.get('m')!)
+    const corridorFar = corridorCenter(geo.get('m')!, geo.get('p2a')!)
+    const midX = (geo.get('a')!.x + DAG_NODE_W + geo.get('f')!.x) / 2
+    // 等距前提自证：两走廊距原中位相等
+    expect(midX - corridorNear).toBeCloseTo(corridorFar - midX, 6)
+    expect(edge.points[1].x).toBe(corridorFar)
+    expect(edge.points[2].x).toBe(corridorFar)
+    expectAxisAligned(edge.points)
+  })
+
+  it('同通道双成员迁移：整体平移同一差值，车道相对错开保持', () => {
+    // 双车道通道（e1=[70,194] 与 e2=[132,256] 纵向跨度重叠 → 两个游程两条车道）：
+    // 中位竖线分别被 p1 row1（e1 段）与 p2 row2（e2 段）穿过 → 迁移到 196 走廊后
+    // 两成员 laneX 差仍为一个 LANE_STEP
+    const { geo, edges } = buildRoutedCanvas({
+      phases: [
+        { name: 'p0', order: 0 },
+        { name: 'p1', order: 1 },
+        { name: 'p2', order: 2 },
+      ],
+      nodes: [
+        node({ id: 'c', phase: 'p0' }),
+        node({ id: 'a', templateName: 'za', phase: 'p0' }),
+        node({ id: 'm', phase: 'p1' }),
+        node({ id: 'p2a', templateName: 'b0', phase: 'p2' }),
+        node({ id: 'p2b', templateName: 'b1', phase: 'p2' }),
+        node({ id: 'g', templateName: 'b2', phase: 'p2' }),
+        node({ id: 'f', templateName: 'b3', phase: 'p2' }),
+      ],
+      edges: [
+        { id: 'e1', from: 'c', to: 'g', kind: 'dataflow' },
+        { id: 'e2', from: 'a', to: 'f', kind: 'dataflow' },
+      ],
+    })
+    const routed = edges.filter((le) => le.edge.id.startsWith('e'))
+    expect(routed).toHaveLength(2)
+    const byId = new Map(routed.map((le) => [le.edge.id, le]))
+    const laneC = byId.get('e1')!.points[1].x
+    const laneA = byId.get('e2')!.points[1].x
+    expect(Math.abs(laneA - laneC)).toBeCloseTo(LANE_STEP_PX, 6)
+    // 整体落在 p0|p1 走廊（唯一零穿卡候选）内
+    const corridor = corridorCenter(geo.get('c')!, geo.get('m')!)
+    expect(Math.min(laneA, laneC)).toBeGreaterThan(corridor - LANE_STEP_PX)
+    expect(Math.max(laneA, laneC)).toBeLessThan(corridor + LANE_STEP_PX + 0.5)
+    expectAxisAligned(byId.get('e1')!.points)
+    expectAxisAligned(byId.get('e2')!.points)
+  })
+
+  it('无零穿卡候选 → 取穿卡线段数最少者（残留分支；并列时等距取较大 x）', () => {
+    // a(row1, y=70) → j(p3 row3, y=194)，四列中位 = 408：196 = seg3@194（p1c+p2c）1 段；
+    // 408 = seg1@70 + seg3@194 = 2 段；620 = seg1@70（p1a+p2a）= 1 段——
+    // 最少穿卡并列 {196, 620}，距中位 408 各 212 等距 → 取较大 x = 620
+    const { geo, edges } = buildRoutedCanvas({
+      phases: [
+        { name: 'p0', order: 0 },
+        { name: 'p1', order: 1 },
+        { name: 'p2', order: 2 },
+        { name: 'p3', order: 3 },
+      ],
+      nodes: [
+        node({ id: 'a', phase: 'p0' }),
+        node({ id: 'p1a', phase: 'p1' }),
+        node({ id: 'p1b', templateName: 'pb', phase: 'p1' }),
+        node({ id: 'p1c', templateName: 'pc', phase: 'p1' }),
+        node({ id: 'p2a', templateName: 'qa', phase: 'p2' }),
+        node({ id: 'p2b', templateName: 'qb', phase: 'p2' }),
+        node({ id: 'p2c', templateName: 'qc', phase: 'p2' }),
+        node({ id: 'p3a', templateName: 'ra', phase: 'p3' }),
+        node({ id: 'p3b', templateName: 'rb', phase: 'p3' }),
+        node({ id: 'j', templateName: 'rc', phase: 'p3' }),
+      ],
+      edges: [{ id: 'e1', from: 'a', to: 'j', kind: 'dataflow' }],
+    })
+    const [edge] = edges.filter((le) => le.edge.id === 'e1')
+    const expected = corridorCenter(geo.get('p2c')!, geo.get('j')!)
+    expect(edge.points[1].x).toBe(expected)
+    expectAxisAligned(edge.points)
+  })
+
+  it('走廊容不下车道铺开（≥11 游程）→ 降级单线宽并线到零穿卡走廊中心', () => {
+    // 11 条错位目标边（源 row k → 目标 row k+11）：纵向跨度两两相交 → 11 个游程
+    // → 车道铺开 60px > 走廊 56 − 2×2 净距 → 无可容纳候选 → 全体并线到走廊中心
+    const rowName = (k: number): string => `n${String(k).padStart(2, '0')}`
+    const p0Nodes = Array.from({ length: 11 }, (_, i) => node({ id: `s${rowName(i + 1)}`, templateName: rowName(i + 1), phase: 'p0' }))
+    const p1Nodes = Array.from({ length: 22 }, (_, i) => node({ id: `t${rowName(i + 1)}`, templateName: rowName(i + 1), phase: 'p1' }))
+    const edges = Array.from({ length: 11 }, (_, i) => ({
+      id: `e${i}`,
+      from: `s${rowName(i + 1)}`,
+      to: `t${rowName(i + 12)}`,
+      kind: 'dataflow' as const,
+    }))
+    const { geo, edges: routed } = buildRoutedCanvas({
+      phases: [
+        { name: 'p0', order: 0 },
+        { name: 'p1', order: 1 },
+      ],
+      nodes: [...p0Nodes, ...p1Nodes],
+      edges,
+    })
+    const laneXs = routed.map((le) => le.points[1].x)
+    expect(laneXs).toHaveLength(11)
+    // 并线：全部车道重合于走廊中心（原铺开 ±30 不可容纳）
+    const anySource = geo.get(`s${rowName(1)}`)!
+    const anyTarget = geo.get(`t${rowName(12)}`)!
+    const midX = (anySource.x + DAG_NODE_W + anyTarget.x) / 2
+    for (const lane of laneXs) expect(lane).toBeCloseTo(midX, 6)
+    for (const le of routed) expectAxisAligned(le.points)
+  })
+
+  it('降级并线仍无零穿卡走廊 → 保持车道分配原状（中位残留分支，白盒直喂几何输入）', () => {
+    // 「仍无」分支在标准网格不可达（seg3 的 y2 恒为自身目标行，p1 节点拦不住）——
+    // 按设计 U3「纯函数直喂几何输入的白盒用例」原意直接构造通道：车道铺开 60 不可
+    // 容纳 → 并线重评时 196 被 e1 seg3@132（p1 row2）挡、408 被 e1 seg1@70（p1 row1）
+    // 挡 → 两走廊均非零穿卡 → 保持原车道 [166, 196, 226]
+    const nodes: DagLayoutNode[] = [
+      { node: node({ id: 'src', phase: 'p0' }), x: 12, y: 48, h: 44 },
+      { node: node({ id: 'm0', phase: 'p1' }), x: 224, y: 48, h: 44 },
+      { node: node({ id: 'm2', phase: 'p1' }), x: 224, y: 110, h: 44 },
+      { node: node({ id: 'm3', phase: 'p1' }), x: 224, y: 172, h: 44 },
+      { node: node({ id: 'dst', phase: 'p2' }), x: 436, y: 48, h: 44 },
+    ]
+    const members: ChannelMember[] = [
+      { x1: 168, y1: 70, x2: 436, y2: 132, lo: 70, hi: 132, laneX: 166, fromId: 'src', toId: 'dst' },
+      { x1: 168, y1: 194, x2: 436, y2: 256, lo: 194, hi: 256, laneX: 196, fromId: 'src', toId: 'dst' },
+      { x1: 168, y1: 318, x2: 436, y2: 380, lo: 318, hi: 380, laneX: 226, fromId: 'src', toId: 'dst' },
+    ]
+    avoidObstructedChannelMid(new Map([['168|436', members]]), nodes)
+    expect(members.map((m) => m.laneX)).toEqual([166, 196, 226])
+  })
+})
+
+describe('layoutEdges 同行直线边绕行（残余 5，白盒）', () => {
+  it('同行隔列边中间列有节点 → 升级上下绕行 4 折线（等距取上），不穿卡', () => {
+    const { geo, edges } = buildRoutedCanvas({
+      phases: [
+        { name: 'p0', order: 0 },
+        { name: 'p1', order: 1 },
+        { name: 'p2', order: 2 },
+      ],
+      nodes: [
+        node({ id: 'a', phase: 'p0' }),
+        node({ id: 'm', phase: 'p1' }),
+        node({ id: 'f', phase: 'p2' }),
+      ],
+      edges: [{ id: 'e1', from: 'a', to: 'f', kind: 'conditional', predicate: 'fixMode' }],
+    })
+    const [edge] = edges.filter((le) => le.edge.id === 'e1')
+    const lm = geo.get('m')!
+    // 上下等距（障碍行底 +12 与行顶 −12 距边 y 相等）→ 取上
+    const yB = lm.y - 12
+    expect(edge.points).toHaveLength(4)
+    expect(edge.points[1]).toEqual({ x: edge.points[0].x, y: yB })
+    expect(edge.points[2]).toEqual({ x: edge.points[3].x, y: yB })
+    expectAxisAligned(edge.points)
+    // conditional 谓词标注锚随迁绕行横段（中点 x、横段 y）
+    expect(edge.labelY).toBe(yB)
+    expect(edge.labelX).toBe((edge.points[0].x + edge.points[3].x) / 2)
+  })
+
+  it('无障碍同行边保持直线零扰动（labelX/labelY 现行公式不变）', () => {
+    const { geo, edges } = buildRoutedCanvas({
+      phases: [
+        { name: 'p0', order: 0 },
+        { name: 'p1', order: 1 },
+      ],
+      nodes: [
+        node({ id: 'a', phase: 'p0' }),
+        node({ id: 'b', phase: 'p1' }),
+      ],
+      edges: [{ id: 'e1', from: 'a', to: 'b', kind: 'sequence' }],
+    })
+    const [edge] = edges
+    expect(edge.points).toHaveLength(2)
+    expect(edge.labelX).toBe((edge.points[0].x + edge.points[1].x) / 2)
+    expect(edge.labelY).toBe(edge.points[0].y)
+  })
+
+  it('上方绕行带被高个节点覆盖 → 落到下方绕行带（近者规则的方向回退）', () => {
+    // a/f 在 row2（y=132），p2 的 m(row2) 是障碍；p1 的 th(row1) 加高到 [48,128]
+    // 覆盖上方带 110−12=98 → 回退下方 154+12=166（p1 无 row2 节点，无覆盖）
+    const canvas = dag({
+      phases: [
+        { name: 'p0', order: 0 },
+        { name: 'p1', order: 1 },
+        { name: 'p2', order: 2 },
+        { name: 'p3', order: 3 },
+      ],
+      nodes: [
+        node({ id: 'p0f', templateName: 'a0', phase: 'p0' }),
+        node({ id: 'a', templateName: 'a1', phase: 'p0' }),
+        node({ id: 'th', phase: 'p1' }),
+        node({ id: 'p2f', templateName: 'b0', phase: 'p2' }),
+        node({ id: 'm', templateName: 'b1', phase: 'p2' }),
+        node({ id: 'p3f', templateName: 'c0', phase: 'p3' }),
+        node({ id: 'f', templateName: 'c1', phase: 'p3' }),
+      ],
+      edges: [{ id: 'e1', from: 'a', to: 'f', kind: 'dataflow' }],
+    })
+    const layout = layoutDag(canvas, new Map([['th', dagNodeHeight(2)]]))
+    const lm = layout.nodes.find((ln) => ln.node.id === 'm')!
+    const [edge] = layoutEdges(canvas, layout.nodes).filter((le) => le.edge.id === 'e1')
+    const yB = lm.y + lm.h + 12
+    expect(edge.points).toHaveLength(4)
+    expect(edge.points[1].y).toBe(yB)
+    expect(edge.points[2].y).toBe(yB)
+    expect(edge.labelY).toBe(yB)
+    expectAxisAligned(edge.points)
+  })
+
+  it('上下绕行带均被覆盖 → 保持直线登记残留（现行直线公式不变）', () => {
+    // 同上图但 p1 增补 row2 节点 tm [146,190] 覆盖下方带 166 → 两方向均败 → 直线
+    const layout = layoutDag(dag({
+      phases: [
+        { name: 'p0', order: 0 },
+        { name: 'p1', order: 1 },
+        { name: 'p2', order: 2 },
+        { name: 'p3', order: 3 },
+      ],
+      nodes: [
+        node({ id: 'p0f', templateName: 'a0', phase: 'p0' }),
+        node({ id: 'a', templateName: 'a1', phase: 'p0' }),
+        node({ id: 'th', phase: 'p1' }),
+        node({ id: 'tm', templateName: 'tb', phase: 'p1' }),
+        node({ id: 'p2f', templateName: 'b0', phase: 'p2' }),
+        node({ id: 'm', templateName: 'b1', phase: 'p2' }),
+        node({ id: 'p3f', templateName: 'c0', phase: 'p3' }),
+        node({ id: 'f', templateName: 'c1', phase: 'p3' }),
+      ],
+      edges: [{ id: 'e1', from: 'a', to: 'f', kind: 'dataflow' }],
+    }), new Map([
+      ['th', dagNodeHeight(2)],
+      ['tm', dagNodeHeight(2)],
+    ]))
+    const [edge] = layoutEdges(dag({
+      phases: layout.clusters.map((c, i) => ({ name: c.phase, order: i })),
+      nodes: layout.nodes.map((ln) => ln.node),
+      edges: [{ id: 'e1', from: 'a', to: 'f', kind: 'dataflow' }],
+    }), layout.nodes)
+    expect(edge.points).toHaveLength(2)
+    expect(edge.labelY).toBe(edge.points[0].y)
+    expect(edge.labelX).toBe((edge.points[0].x + edge.points[1].x) / 2)
   })
 })
 

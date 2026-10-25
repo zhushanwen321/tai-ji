@@ -76,7 +76,7 @@ const emit = defineEmits<{
   select: [level: string]
 }>()
 
-// 外部当前等级（Composer 从 SessionSummary.thinkingLevel 透传，是 runtime 返回的 value）。
+// 外部当前等级（Composer 从 live-state 状态层透传，是 runtime 返回的 value）。
 // 需经 resolveThinkingKey 反向映射为 UI 档位 key 才能正确高亮。
 // [HISTORICAL] reasoning 必须 withDefaults 显式置 undefined：Vue 对 Boolean prop 的 casting
 // 会把「未传」变成 false（而非 undefined），误触发 non-reasoning 分支致只剩 off 档。

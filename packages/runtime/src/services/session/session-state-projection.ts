@@ -41,6 +41,23 @@ import {
   type UsageSnapshot,
   type CommandsSnapshot,
 } from './replicated-states.config.js'
+// 权威拉取与冷读（W2，session.getState 后端）：薄查询服务。构造点在本模块（deps 的
+// pm + replicated states 全在投影内部，投影是活/冷同入口的天然所有者——设计 §3.3.3
+// 「新增一个按 id 的公开查询入口」的落点），消费方经模块槽 getSessionStateQuery() 触达。
+import {
+  SessionStateQuery,
+  bindSessionStateQuery,
+} from './session-state-query.js'
+// 冷读主会话分叉的两段定位（sessionMetaCache 全表遍历 / scanPiSessions force 全扫）
+// 与 btw 线兜底定位（存储树布局公式）——单文件一概念的定位模块（不经 file-utils 转手，
+// 避免 file-utils ⇄ locator 的 import 环：locator 要 import file-utils 的 scanPiSessions）。
+import {
+  findCachedSessionFileById,
+  findScannedSessionFileById,
+  findBtwLineFileByLayout,
+} from '../../infra/pi/session-file-locator.js'
+// 冷路径埋点落点（设计 §3.1「可观测」栏）：runtime logger，与 patched console 同源同文件。
+import { logger } from '../../infra/logger.js'
 
 /**
  * per-session ReplicatedState 实例组（W7 + W8 data-source-governance，四实例）。
@@ -167,8 +184,51 @@ export class SessionStateProjection {
   private readonly replicatedStates = new Map<string, SessionReplicatedStates>()
   /** W12：state_changed 组合派生视图的 diff 基线（per-session，onSessionDisposed 一并清除）。 */
   private readonly lastPublishedStateChanged = new Map<string, SessionStateChangedBaseline>()
+  /**
+   * W2：按会话 id 的权威状态查询薄服务（session.getState 后端）。构造期固定（deps 全部
+   * 只读、无状态），并绑定为进程实例供 transport 读（模块槽 getSessionStateQuery）。
+   * 与 replicatedStates 的分工：实例组是**活会话**的模型/档位事实源（含失效与防抖），
+   * 本查询服务只做「活读快照 / 冷读文件」的分派，自身无定时器、无 dirty、不 spawn。
+   */
+  readonly stateQuery: SessionStateQuery
 
-  constructor(private readonly deps: SessionStateProjectionDeps) {}
+  constructor(private readonly deps: SessionStateProjectionDeps) {
+    this.stateQuery = new SessionStateQuery({
+      // 风险点 1：只准 getClient（禁 ensureActive——它会转 ensureProcess/ensureRestored → spawn）
+      getClient: (sessionId) => this.deps.pm.getClient(sessionId),
+      // 风险点 2：只读实例快照；undefined = 未就绪，查询服务不触发 restore
+      getReplicatedStates: (sessionId) => this.replicatedStates.get(sessionId),
+      // 风险点 3：filePath 只准来自扫描两段（主会话）或 btw 线的注册表记录 / 存储树布局
+      locateMainSessionFileFromCache: (sessionId) => findCachedSessionFileById(sessionId),
+      locateMainSessionFileFromDisk: (sessionId) => findScannedSessionFileById(sessionId),
+      // btw 判别两步（dmg-r1-3，判别成本从低到高）：
+      // ① 注册表判别（本注入，冷读第一步）：lifecycle 记录 surface==='btw' 的
+      //    sessionFilePath（= BtwLineRecord.sessionFilePath 在 lifecycle 记录上的镜像）。
+      //    纯内存读、无磁盘枚举；主会话（surface 'sidebar' / 未注册）返 undefined，
+      //    冷读走主会话两段。
+      locateBtwLineFile: (sessionId) => {
+        const rec = this.deps.getSession(sessionId)
+        if (rec?.surface === 'btw') return rec.sessionFilePath
+        return undefined
+      },
+      // ② 布局兜底（查询链两段均未命中后才调）：重启后的线不在 lifecycle.sessions
+      //    （rebuildFromDisk 只重建 BtwService.registry），由存储树布局公式定位——
+      //    与注册表记录读同一个文件，寻址方式不同（见 findBtwLineFileByLayout）。
+      //    伴生返回本轮枚举的 mainSid 目录数，进冷读埋点 scannedDirCount。
+      locateBtwLineFileByLayout: (sessionId) => findBtwLineFileByLayout(sessionId),
+      // 冷路径埋点（设计 §3.1「可观测」栏）：单次耗时 + 扫描目录数 + 定位来源 + 是否命中。
+      // 四要素重审触发（单次冷开 > 200ms 或 cwd 目录数 > 200）的数据来源；debug 级——
+      // 冷读频度低（打开视图/缓存缺失/重连三时机各一次），不占常规日志量。
+      onColdRead: (trace) => logger.debug('[session-state-query] cold read', {
+        sessionId: trace.sessionId,
+        source: trace.source,
+        durationMs: trace.durationMs,
+        scannedDirCount: trace.scannedDirCount,
+        found: trace.found,
+      }),
+    })
+    bindSessionStateQuery(this.stateQuery)
+  }
 
   /**
    * 组装期订阅接线（S5/D2②「换订阅者」）：向 lifecycle 注册本模块的播种 handler。

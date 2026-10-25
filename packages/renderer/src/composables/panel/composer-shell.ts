@@ -55,12 +55,9 @@ import {
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useSubagentComposerLane, wireSubagentLaneTerminals } from '@/composables/panel/subagent-composer-lane'
-import {
-  useBtwSessionStateStore,
-  resolveComposerSessionState,
-} from '@/stores/btw-session-state'
+import { useSessionLiveStateStore } from '@/stores/session-live-state'
 import { usePresetStore } from '@/stores/preset'
-import { getSettingsStore } from '@taiji/core'
+import { createSessionLiveStateSelector, getSettingsStore } from '@taiji/core'
 import { useChat } from '@/composables/features/chat/useChat'
 import { useNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 // 显示侧与 submit 侧 getSupportedLevels 的主路径唯一实现（F5；例外 = core flow.ts
@@ -270,7 +267,9 @@ export function useComposerShell(params: ComposerShellParams) {
   const { t } = useI18n()
   const chatStore = useChatStore()
   const sessionStore = useSessionStore()
-  const btwSessionState = useBtwSessionStateStore()
+  const liveState = useSessionLiveStateStore()
+  // 状态层读取单点实现（与 renderer useSessionLiveState / 移动壳 liveStateOf 同源语义）
+  const liveStateOf = createSessionLiveStateSelector(liveState)
   const presetStore = usePresetStore()
   const settingsStore = getSettingsStore()
   const flow = useNewTaskFlow()
@@ -304,15 +303,15 @@ export function useComposerShell(params: ComposerShellParams) {
     exitStagingMode,
     getStagingConfig,
   } = useComposerModelThinking(sessionIdRef, {
-    getSessionState: (sid: string) =>
-      // btw vid 走线态解析（线回执 → 主会话回退，见 btw-session-state store 头注释）；
-      // 非 vid 行为不变（主列表直查）。
-      resolveComposerSessionState(
-        sid,
-        sessionStore.list,
-        (vid) => btwSessionState.modelByVid[vid],
-        (vid) => btwSessionState.mainSidByVid[vid],
-      ),
+    // [W1 会话架构四层分离] 统一读状态层：按会话 id 寄存，主会话 / btw 线 / subagent
+    // 视图同一条路径，**无 id 类别分支、无「回退主会话当前值」**。状态条目缺失返回 null
+    // （core model-thinking 走「已建态空值占位」分支显示显式未知），条目的 modelId 缺维映射
+    // 为 ''（core 契约的占位形态，同样不回落其他会话/全局默认）——设计 §2.4 I5 / §6。
+    getSessionState: (sid: string) => {
+      const live = liveStateOf(sid)
+      if (!live) return null
+      return { modelId: live.modelId ?? '', thinkingLevel: live.thinkingLevel }
+    },
     defaultModel: computed(() => settingsStore.defaultModel.value),
     currentModel: flow.currentModel,
     // [U4r2] 显式 preset 选择进 chip 侧 resolve 输入（D1 pending 三兄弟补齐）：flow

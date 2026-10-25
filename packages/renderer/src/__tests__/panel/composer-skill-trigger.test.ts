@@ -49,7 +49,7 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModu
 const getProjectSkillsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]))
 vi.mock('@/api', () => ({ project: apiProjectMock(),
   model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })), getCommands: vi.fn().mockResolvedValue({ sessionId: '', commands: [] }) },
+  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })), getCommands: vi.fn().mockResolvedValue({ sessionId: '', commands: [] }), listSessions: vi.fn().mockResolvedValue([]) },
   composer: {
     getMentionCandidates: vi.fn().mockResolvedValue([]),
     getFileCandidates: vi.fn().mockResolvedValue([]),
@@ -612,8 +612,6 @@ describe('panel cwd 接线（session cwd → project skill，ADR-0050 修订）'
       cwd: '/w/x',
       status: 'idle',
       lastActiveAt: Date.now(),
-      modelId: '',
-      tokenCount: 0,
     })
     getProjectSkillsMock.mockResolvedValue([skillInfo('proj-x', '/w/x/.agents/skills/proj-x/SKILL.md')])
     const wrapper = mountComposer()

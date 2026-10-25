@@ -32,7 +32,7 @@ import { isVirtualKey } from './lru'
 import { disposeImageCacheForSession } from './image-cache'
 import { toErrorMessage } from '../../utils/error-message'
 import { randomUuid } from '../../utils/random-uuid'
-import type { EnsureStreamSubDeps, SessionStoreLike, UseChatDeps } from './use-chat-types'
+import type { EnsureStreamSubDeps, SessionLiveStateLike, SessionStoreLike, UseChatDeps } from './use-chat-types'
 import type { DeliveryFrameEntry, DeliveryCancelReply, DeliverySubmitReply } from './api-port'
 import type { RevokeMessageErrorCode } from '@taiji/shared'
 import { createDevOnceFrameWarn } from './effects/registry'
@@ -49,6 +49,7 @@ import {
 // 消费）零改动。[u3b] SubmitQueuedEntryDeps 已随 defer flush 退役摘除。
 export type {
   EnsureStreamSubDeps,
+  SessionLiveStateLike,
   SessionStoreLike,
   UseChatDeps,
 } from './use-chat-types'
@@ -667,31 +668,33 @@ function handleSessionRenamed(
 }
 
 /** 模型切换后 runtime 推送（model-service switchModel 末尾广播，含新 modelId/thinkingLevel；
- * usage 已随 D1 协议收敛移出本帧，只经 context.update 一条帧贯穿）。applySnapshot 单 session 快照按 D1b 合并
- * （undefined 字段 = 快照未涉及，不覆盖），不触发整表替换。
- * thinkingLevel optional：未设置时（undefined）不更新，保留旧值。 */
+ * usage 已随 D1 协议收敛移出本帧，只经 context.update 一条帧贯穿）。
+ * [W1 会话架构四层分离] 写**状态层**（按会话 id 寄存），不再经导航列表命中——
+ * btw 线（runtime hidden 注册，不进侧栏列表）与主会话走同一条路径，无 sid 类别分支。
+ * 字段级合并（undefined = 该维未涉及，保留旧值），逐维判定后只把出现过的维交给
+ * applyLiveState（单一 reducer，设计 I4）。 */
 function handleSessionStateChanged(
-  sessionStore: SessionStoreLike,
+  liveState: SessionLiveStateLike,
   msg: ServerMessage<'session.state_changed'>,
 ): void {
-  if (msg.payload.sessionId) {
-    sessionStore.applySnapshot(msg.payload.sessionId, {
-      ...(msg.payload.modelId !== undefined && { modelId: msg.payload.modelId }),
-      ...(msg.payload.thinkingLevel !== undefined && { thinkingLevel: msg.payload.thinkingLevel }),
-    })
-  }
+  if (!msg.payload.sessionId) return
+  liveState.applyLiveState(msg.payload.sessionId, {
+    ...(msg.payload.modelId !== undefined && { modelId: msg.payload.modelId }),
+    ...(msg.payload.thinkingLevel !== undefined && { thinkingLevel: msg.payload.thinkingLevel }),
+  })
 }
 
 /** pi 切模型 / 用户手切档位后推 thinking_level_changed（runtime event-adapter 转为此类型）。
  * 补 state_changed 的时序缺口：switchModel 的 broadcastSessionState 在 set_model RPC resolve 后
  * 立即广播，而 thinking_level_changed 事件可能晚到（异步），此时 state_changed 的 thinkingLevel 为空。
- * 本 handler 独立更新 thinkingLevel，不依赖两条消息的先后顺序。 */
+ * 本 handler 独立更新 thinkingLevel，不依赖两条消息的先后顺序。
+ * [W1] 同样写状态层（与 state_changed 共用 applyLiveState）。 */
 function handleSessionThinkingLevelSet(
-  sessionStore: SessionStoreLike,
+  liveState: SessionLiveStateLike,
   msg: ServerMessage<'session.thinkingLevelSet'>,
 ): void {
   if (msg.payload.sessionId && msg.payload.level) {
-    sessionStore.applySnapshot(msg.payload.sessionId, { thinkingLevel: msg.payload.level })
+    liveState.applyLiveState(msg.payload.sessionId, { thinkingLevel: msg.payload.level })
   }
 }
 
@@ -732,7 +735,8 @@ function consumeRespawnWindowOnTurnStart(
   sessionStore.revive(sid)
 }
 
-/** session.* → 跨 store 协调（sessionStore.applySnapshot / occupancy 派生视图），保留在 useChat
+/** session.* → 跨 store 协调（状态层 liveState / 导航列表 applySnapshot（仅 label 展示字段）/
+ * occupancy 派生视图），保留在 useChat
  *（stores 间禁止互相 import）。case 体提取为上方同名 handle* helper；未列 session.* 类型
  * 的 no-op 观测（RD-1#9）走 warnUnhandledSessionFrame。（原 streamSubscribe 回调内联 switch
  * 逐字迁移。） */
@@ -779,11 +783,12 @@ function handleSessionFrame(
       break
     }
     case 'session.state_changed': {
-      handleSessionStateChanged(sessionStore, msg)
+      // [W1] 状态帧只写状态层（按会话 id 寄存）——不查导航列表，无 sid 类别分支
+      handleSessionStateChanged(deps.liveState, msg)
       break
     }
     case 'session.thinkingLevelSet': {
-      handleSessionThinkingLevelSet(sessionStore, msg)
+      handleSessionThinkingLevelSet(deps.liveState, msg)
       break
     }
     default: {
@@ -887,6 +892,7 @@ export function createUseChat(deps: UseChatDeps) {
   // ensureStreamSubscription 模块级函数所需 deps 子集（TD5）
   const subDeps: EnsureStreamSubDeps = {
     chatApi: deps.chatApi,
+    liveState: deps.getLiveStateStore(),
     toast: deps.toast,
     t: deps.t,
   }

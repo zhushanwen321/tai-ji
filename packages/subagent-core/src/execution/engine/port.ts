@@ -33,7 +33,7 @@
 
 import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
-import type { AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../shared/agent-call-types.ts";
 import type { ModelInfo } from "../assembly/model-resolver.ts";
 import type { ExecutionMode } from "../domain/record-types.ts";
 import type { AgentStreamSink } from "../../shared/agent-stream.ts";

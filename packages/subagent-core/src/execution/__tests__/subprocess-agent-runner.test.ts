@@ -19,7 +19,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
+import type { AgentCallOpts, AgentResult } from "../../shared/agent-call-types.ts";
 import { SubagentStream } from "../assembly/stream-sink.ts";
 import type { SubagentService } from "../subagent-service.ts";
 import {

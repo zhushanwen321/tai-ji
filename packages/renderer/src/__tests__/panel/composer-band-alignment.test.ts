@@ -23,7 +23,7 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-band-alignment.test.ts
  */
 // helper import 必须先于项目内模块（@/api mock factory 在模块图加载期执行，TDZ 约束同 composer-mount 各消费文件）
-import { composerApiModuleActualWithBtw, composerBtwApiMock } from '../helpers/composer-mount'
+import { composerApiModuleActualWithBtw, composerBtwApiMock,  btwLineGroups } from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 import { ref, nextTick } from 'vue'
@@ -173,7 +173,7 @@ describe('旁路提问：composer 与交互降档行同带（使用者黑盒）'
   })
 
   it('选中线时 composer 在 band 内、band 持同缘 token；无选中线时 band 不渲染（无空壳占位）', async () => {
-    apiMock.list.mockResolvedValue([{ vid: 'btw:pi-1' }])
+    apiMock.list.mockResolvedValue(btwLineGroups({ id: 'pi-1' }))
     const wrapper = mountBtw(MAIN_A)
     await settle(wrapper)
 

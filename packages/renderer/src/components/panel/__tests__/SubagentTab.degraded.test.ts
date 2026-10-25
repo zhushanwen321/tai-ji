@@ -27,7 +27,6 @@ const degradedQueries: Array<{ virtualId: string; recordId: string }> = []
 // ── drawer：三段式虚拟 id 固定选中（chat 域 record 视图）────────────────────
 const drawerState = {
   selectedSubagentId: ref<string | null>('subagent:main-1:sa-1'),
-  enteredFrom: ref<'chat' | 'workflow' | null>('chat'),
 }
 // drawer 域 importOriginal 部分 mock（挂载树模块图的顶层装配面持续增长——手写桩
 // 逐导出补齐必漏）：真模块承接 barrel 全导出与顶层绑定（bindDrawerSessionId /
@@ -43,7 +42,6 @@ vi.mock('@taiji/core/domain/drawer', async (importOriginal) => {
     // 真实语义：清 core 选中态（关闭入口的选中同步通道）
     clearSubagentSelection: vi.fn(() => {
       drawerState.selectedSubagentId.value = null
-      drawerState.enteredFrom.value = null
     }),
   }
 })
@@ -157,7 +155,6 @@ beforeEach(() => {
   drawerTabsFixture.tabs = []
   drawerTabsFixture.active = null
   drawerState.selectedSubagentId.value = VIDEO_ID
-  drawerState.enteredFrom.value = 'chat'
   void JSDOM
 })
 
@@ -195,7 +192,6 @@ describe('SubagentTab live 流降级提示条（M3 D6）', () => {
   it('agentcall 快照视图无 live 流：降级位为真也不显示提示条', async () => {
     degradedRef.value = true
     drawerState.selectedSubagentId.value = 'agentcall:acs-1'
-    drawerState.enteredFrom.value = 'workflow'
     const wrapper = mountTab()
     await nextTick()
 

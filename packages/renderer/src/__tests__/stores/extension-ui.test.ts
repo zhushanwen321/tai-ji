@@ -34,7 +34,7 @@ function makeForm(overrides: Partial<ExtensionUIRequest> = {}): ExtensionUIReque
   return {
     sessionId: 'sess-A',
     requestId: 'r1',
-    method: 'select',
+    dialogKind: 'select',
     form: true,
     ...overrides,
   }
@@ -45,7 +45,7 @@ function makeDialog(overrides: Partial<ExtensionUIRequest> = {}): ExtensionUIReq
   return {
     sessionId: 'sess-A',
     requestId: 'r1',
-    method: 'confirm',
+    dialogKind: 'confirm',
     ...overrides,
   }
 }
@@ -57,7 +57,7 @@ function makePlanReview(
   return {
     sessionId: 'sess-B',
     requestId: 'pr-1',
-    method: 'select',
+    dialogKind: 'select',
     planReview: true,
     ...overrides,
   }
@@ -67,7 +67,7 @@ describe('useExtensionUIStore — hasPendingBlockingOverlay', () => {
   it('session 有表单 pending 返回 true，无返回 false', () => {
     const store = useExtensionUIStore()
     store.addRequest('sess-A', makeForm({ requestId: 'r1', form: true }))
-    store.addRequest('sess-A', makeDialog({ requestId: 'r2', method: 'confirm' }))
+    store.addRequest('sess-A', makeDialog({ requestId: 'r2', dialogKind: 'confirm' }))
 
     // r1 带 form 键 → hasPendingBlockingOverlay(sess-A) === true
     expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)
@@ -77,7 +77,7 @@ describe('useExtensionUIStore — hasPendingBlockingOverlay', () => {
 
   it('只有 dialog（无表单）时 hasPendingBlockingOverlay 返回 false', () => {
     const store = useExtensionUIStore()
-    store.addRequest('sess-A', makeDialog({ requestId: 'r1', method: 'input' }))
+    store.addRequest('sess-A', makeDialog({ requestId: 'r1', dialogKind: 'input' }))
 
     expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
   })
@@ -112,7 +112,7 @@ describe('useExtensionUIStore — removeRequest', () => {
   it('respond 后移除单个请求', () => {
     const store = useExtensionUIStore()
     store.addRequest('sess-A', makeForm({ requestId: 'r1', form: true }))
-    store.addRequest('sess-A', makeDialog({ requestId: 'r2', method: 'confirm' }))
+    store.addRequest('sess-A', makeDialog({ requestId: 'r2', dialogKind: 'confirm' }))
 
     store.removeRequest('sess-A', 'r1')
 
@@ -224,7 +224,7 @@ describe('useExtensionUIStore — clearAllPending', () => {
   it('清空所有 session（runtime 重连清理）', () => {
     const store = useExtensionUIStore()
     store.addRequest('sess-A', makeForm({ sessionId: 'sess-A', requestId: 'r1', askUser: true }))
-    store.addRequest('sess-B', makeDialog({ sessionId: 'sess-B', requestId: 'r2', method: 'confirm' }))
+    store.addRequest('sess-B', makeDialog({ sessionId: 'sess-B', requestId: 'r2', dialogKind: 'confirm' }))
 
     store.clearAllPending()
 
@@ -279,7 +279,7 @@ describe('useExtensionUIStore — per-sessionId 分区隔离', () => {
   it('A/B 互不干扰', () => {
     const store = useExtensionUIStore()
     store.addRequest('sess-A', makeForm({ sessionId: 'sess-A', requestId: 'r1', askUser: true }))
-    store.addRequest('sess-B', makeDialog({ sessionId: 'sess-B', requestId: 'r2', method: 'confirm' }))
+    store.addRequest('sess-B', makeDialog({ sessionId: 'sess-B', requestId: 'r2', dialogKind: 'confirm' }))
 
     // 各分区只含自己的请求
     expect(store.getRequestsBySession('sess-A')).toHaveLength(1)

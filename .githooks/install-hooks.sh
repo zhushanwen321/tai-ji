@@ -2041,7 +2041,7 @@ if echo "$SUBAGENT_CORE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/ch
 fi
 
 # ============================================================================
-# subagent-core 包内值依赖环检查（C-data-26，§2.3 配套）
+# subagent-core 包内值依赖环检查（C-data-27，§2.3 配套）
 #   packages/subagent-core/** 或检查脚本自身变更时触发：
 #   scripts/check-subagent-core-value-cycles.mjs —— 值 import 图不得成环（类型擦除边
 #   豁免，仅提示）。与 H3 聚合边界检查互补：后者只看六聚合子图，本检查覆盖整包。
@@ -2051,11 +2051,11 @@ SUBAGENT_CORE_CYCLE_STAGED=$(git diff --cached --name-only -- packages/subagent-
 if echo "$SUBAGENT_CORE_CYCLE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/check-subagent-core-value-cycles\.mjs$"; then
     print_section "[subagent-core 包内值依赖环检查]"
     if [ ! -f "scripts/check-subagent-core-value-cycles.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-value-cycles.mjs（C-data-26 检查缺失）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-value-cycles.mjs（C-data-27 检查缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-subagent-core-value-cycles.mjs; then
-        echo -e "${RED}[ERROR] subagent-core 包内检出值依赖环（C-data-26）——按上方 SCC 成员与内部边处理（端口反转/装配注入/共享词汇下沉契约层）${NC}"
+        echo -e "${RED}[ERROR] subagent-core 包内检出值依赖环（C-data-27）——按上方 SCC 成员与内部边处理（端口反转/装配注入/共享词汇下沉契约层）${NC}"
         echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
@@ -2743,6 +2743,44 @@ if echo "$SESSION_CENSUS_STAGED" | grep -qE "\.(tsx?|vue)$|^scripts/check-sessio
     echo -e "${GREEN}[OK] 调用点 census 与快照一致（E2E-CENSUS-01）${NC}"
 else
     echo -e "${GREEN}[OK] 无 .ts/.tsx/.vue 变更，跳过调用点 census 检查${NC}"
+fi
+
+# ============================================================================
+# 会话 hidden 退场 + surface 读取点白名单门禁（C-data-28 / C-data-29，E2E-PIPE-20
+#   的 pre-commit 执行点）
+#   staged 命中 packages/<任意包>/src 下 .ts/.tsx/.vue 或检查脚本自身（含其单测）时
+#   触发：scripts/check-session-hidden-surface.mjs —— 全仓扫描两族判据（hidden 同名
+#   白名单 + surface 四形态读取点清单，清单外命中即红，ALLOWLIST/READ_POINTS 为唯一
+#   登记处）。触发范围与脚本扫描范围同构（packages/*/src 全域 glob——目录清单式触发
+#   范围必有洞，同 record-write-surface / session-census 段教训）。触发范围天然含
+#   staged 删除（scope 内文件被删 = 清单条目消失，同样必须红）：单独 staged 删除
+#   检查脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的防线。全仓扫描毫秒
+#   级，无增量模式。退出码 0=合规 / 3=清单外命中 / 1=脚本自身异常，非零一律拦截。
+#   检查脚本或其单测 staged 时同跑 vitest 单测（e2e-map 段同款惯例）。
+#   不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+SESSION_HIDDEN_SURFACE_STAGED=$(git diff --cached --name-only -- '*.ts' '*.tsx' '*.vue' scripts/check-session-hidden-surface.mjs scripts/__tests__/check-session-hidden-surface.test.mjs)
+if echo "$SESSION_HIDDEN_SURFACE_STAGED" | grep -qE "^packages/[^/]+/src/.*\.(tsx?|vue)$|^scripts/(__tests__/)?check-session-hidden-surface(\.test)?\.mjs$"; then
+    print_section "[会话 hidden/surface 白名单检查]"
+    if [ ! -f "scripts/check-session-hidden-surface.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-session-hidden-surface.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-session-hidden-surface.mjs; then
+        echo -e "${RED}[ERROR] hidden/surface 清单外命中——按上方明细审阅语义：非会话同名命中附理由登记进 ALLOWLIST/SAME_NAME_EXCLUDE，会话读取点带 usage 登记进 READ_POINTS 后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${BLUE}[INFO] 运行 hidden/surface 检查脚本单测...${NC}"
+    if ! npx vitest run scripts/__tests__/check-session-hidden-surface.test.mjs --silent; then
+        echo -e "${RED}[ERROR] hidden/surface 检查脚本单测失败——按上方失败明细修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] hidden/surface 白名单检查通过（C-data-28 / C-data-29，E2E-PIPE-20）${NC}"
+else
+    echo -e "${GREEN}[OK] 无 packages/*/src 载体变更，跳过 hidden/surface 白名单检查${NC}"
 fi
 
 # ============================================================================

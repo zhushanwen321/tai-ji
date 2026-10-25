@@ -29,7 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ExecuteOptions } from "../assembly/types.ts";
-import type { AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../shared/agent-call-types.ts";
 import { withWorktreeCwd } from "../service/run-orchestration.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";

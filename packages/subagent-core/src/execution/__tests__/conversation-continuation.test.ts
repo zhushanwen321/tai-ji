@@ -32,7 +32,7 @@ import { ConversationContinuation } from "../assembly/conversation-continuation.
 import { transcriptAnchorOf } from "../assembly/cold-lookup.ts";
 // [W1/R1 U1/U1b] zcode 新锚 binding 键基底（真链 binding 落盘断言用）。
 import { zcodeAnchorBasePath, RECORD_BINDING_SIDECAR_EXT } from "../persistence/state-marker.ts";
-import type { AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../shared/agent-call-types.ts";
 import type {
   ContinuationDispatchInput,
   ContinuationHost,

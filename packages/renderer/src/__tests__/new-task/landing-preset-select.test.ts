@@ -64,7 +64,6 @@ function makeFlowDeps(launchConfig: LaunchConfigPort): NewTaskFlowDeps & { ports
         clearActiveSession: vi.fn(),
         setActiveSession: vi.fn(),
         pushChat: vi.fn(),
-        defaultCwd: vi.fn(() => null),
       },
       toast: { error: vi.fn(), warning: vi.fn(), info: vi.fn() },
       fileTree: { loadTree: vi.fn(), selectFile: vi.fn() },
@@ -78,7 +77,7 @@ function makeFlowDeps(launchConfig: LaunchConfigPort): NewTaskFlowDeps & { ports
       detect: vi.fn().mockResolvedValue({ mode: 'not-repo' }),
       listWorktrees: vi.fn().mockResolvedValue({ items: [] }),
     },
-    workspaceState: { defaultCwd: vi.fn(() => null), record: vi.fn() },
+    workspaceState: { record: vi.fn() },
   }
 }
 

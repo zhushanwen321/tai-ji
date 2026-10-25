@@ -7,7 +7,7 @@
  * 注：ServerMessage(id) → pending.resolve 的回灌由 features 层 dispatcher 串联（Wave 3）。
  *      mock 模式下不走本域（api/index 切到 mock 门面）。
  */
-import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ServerMessageMap, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply, SessionRevokeMessageReply, WorkflowRunEventsReply, WorkflowDagReply, SubagentEngineDefaultModelMutationReply, ArchiveSummary, SessionArchiveReply } from '@taiji/shared'
+import type { SessionSummary, SessionGroup, SessionSurface, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ServerMessageMap, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply, SessionRevokeMessageReply, WorkflowRunEventsReply, WorkflowDagReply, SubagentEngineDefaultModelMutationReply, ArchiveSummary, SessionArchiveReply } from '@taiji/shared'
 import { PI_THINKING_LEVELS } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command } from '../request'
@@ -46,9 +46,27 @@ const HANDOFF_RPC_TIMEOUT_MS = 660_000
  * 列出所有 session，按 cwd 分组（对齐后端 SessionGroup[]，D7）。
  * reply payload 是 { groups: SessionGroup[] }，解包 .groups。
  * type=config.sessions（原 session.list，W2 重命名）。
+ *
+ * 口径 = 侧栏全量（无参查询 + 全量广播双用消息的查询侧）。W4b 起带过滤维度的查询走
+ * listSessions（session.list 纯查询消息）——本函数保留给侧栏导航的广播/查询同源消费。
  */
 export async function list(): Promise<SessionGroup[]> {
   const reply = await command('config.sessions', {}, RPC_BACKSTOP_TIMEOUT_MS)
+  return reply.groups
+}
+
+/**
+ * 通用列表查询（会话架构四层分离 W4b，设计 §3.3.1/§5-W4b）：按 surface / mainSessionId
+ * 过滤拉取分组列表——btw 线进通用列表的读取入口（renderer 抽屉取代 btw.list），全局 /
+ * 新任务搜索同批改吃本函数（显式传 { surface:'sidebar' }，不依赖无参默认语义）。
+ *
+ * 与 list()（config.sessions）的分工：后者是「无参全量查询 + 全量广播」双用消息，广播侧
+ * 28 处零参调用点无处传参，过滤参数只存在于本纯查询消息；reply 与 config.sessions 同形
+ * （{ groups: SessionGroup[] }，无 archiveCount——角标是广播侧归档视图语义）。
+ * 无参 = 全量（侧栏条目 + 全部 btw 线），供抽屉/调试用。
+ */
+export async function listSessions(query: { surface?: SessionSurface; mainSessionId?: string }): Promise<SessionGroup[]> {
+  const reply = await command('session.list', query, RPC_BACKSTOP_TIMEOUT_MS)
   return reply.groups
 }
 

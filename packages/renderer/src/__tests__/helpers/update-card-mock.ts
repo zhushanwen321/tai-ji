@@ -18,7 +18,7 @@
  * resetCardUpdateHarness 复位，与原 vi.hoisted 文件内单例语义一致）。
  */
 import { vi } from 'vitest'
-import type { LatestReleaseInfo } from '@taiji/shared'
+import type { LatestReleaseInfo, ProxyTestResult, UpdateSettings } from '@taiji/shared'
 import type { AppUpdateControllerInternal } from '@/composables/features/settings/useAppUpdate'
 import type { UpdateAppState } from '@/composables/features/settings/use-app-update-state'
 import { createMemoryAppUpdateIpc } from './update-ipc-mock'
@@ -126,8 +126,8 @@ export async function useAppUpdateCardModule() {
 export const settingsMock = {
   getProxyConfig: vi.fn(() => Promise.resolve({ mode: 'system', httpProxy: '', httpsProxy: '' })),
   setProxyConfig: vi.fn(() => Promise.resolve()),
-  testProxy: vi.fn(() => Promise.resolve({ success: true, message: '' })),
-  getUpdateSettings: vi.fn(() => Promise.resolve({ preDownload: false, autoUpdate: false })),
+  testProxy: vi.fn((): Promise<ProxyTestResult> => Promise.resolve({ success: true, message: '' })),
+  getUpdateSettings: vi.fn((): Promise<UpdateSettings> => Promise.resolve({ preDownload: false, autoUpdate: false })),
   setUpdateSettings: vi.fn(() => Promise.resolve()),
 }
 

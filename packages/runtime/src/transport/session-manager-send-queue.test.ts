@@ -106,10 +106,10 @@ function makeHarness(overrides: {
       cwd: '/test/workspace',
       status: 'active',
       lastActiveAt: Date.now(),
-      modelId: 'm/x',
-      tokenCount: 0,
       ...overrides.createResult,
     }),
+    // W3：respond 的 modelId 读点从 create 返回值改到注册表记录（双写缓存）。
+    getSession: vi.fn().mockReturnValue({ id: 'child-1', modelId: 'm/x' }),
     sendMessage: vi.fn(),
     getHistory: vi.fn(),
     // 归属校验材料：s1 是发起方 parent-1 的 managed child（真实路径 getSummary 返回

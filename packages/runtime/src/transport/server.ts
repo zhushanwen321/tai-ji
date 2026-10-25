@@ -156,10 +156,10 @@ export interface RuntimeServerOptionalServices {
    */
   replyGuardResolver?: (sessionId: string) => string | null | undefined
   /**
-   * btw 线三帧路由（btw-question M2-b，B1 授权）：BtwService 窄接口 + 主会话解析。
-   * 组合根（index.ts）构造 BtwService 后注入，assembleOptionalHandlers 据此构造
-   * BtwMessageHandler 并在 buildRoutes 展开 handles（缺省 = 不装配，btw.* 落 unknown_type——
-   * 生产组合根恒注入，缺省语义服务存量测试装配）。
+   * btw 线两帧路由（btw-question M2-b，B1 授权；W4b 线枚举帧退役）：BtwService 窄接口 +
+   * 主会话解析。组合根（index.ts）构造 BtwService 后注入，assembleOptionalHandlers 据此
+   * 构造 BtwMessageHandler 并在 buildRoutes 展开 handles（缺省 = 不装配，btw.* 落
+   * unknown_type——生产组合根恒注入，缺省语义服务存量测试装配）。
    */
   btw?: BtwRoutingDeps
   /**
@@ -242,7 +242,7 @@ export class RuntimeServer implements IMessageBroker {
   private sessionManagerHandler!: SessionManagerHandler
   /** problem-solve-canvas U3：canvas transport handler（CanvasService 由 canvas-assembly 构造并被 handler 持有）。 */
   private canvasHandler!: CanvasMessageHandler
-  /** btw 三帧 handler（btw-question M2-b）：optional.btw 注入时装配（可选批次）。 */
+  /** btw 两帧 handler（btw-question M2-b；W4b 线枚举帧退役）：optional.btw 注入时装配（可选批次）。 */
   private btwMessageHandler?: BtwMessageHandler
 
   /** subagent 域 handler（subagent.setModel；gateway 未注入时 case 内回 unwired 错误，恒装配）。 */
@@ -578,10 +578,6 @@ export class RuntimeServer implements IMessageBroker {
         ...messaging,
         btwService: btw.service,
         resolveMain: btw.resolveMain,
-        // state topic 'btw' 广播通道：组合根在 setServices 前已 setMessageBus（与
-        // sessionHandler ctx 同款时序前提，server.messageBus 在本阶段恒就绪）。
-        messageBus: this.messageBus,
-        nextPushId: () => this.broker.nextPushId(),
       })
     }
   }
@@ -676,7 +672,7 @@ export class RuntimeServer implements IMessageBroker {
       ...(ttsHandler ? ttsHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => ttsHandler.handleTtsMessage(msg, ws)] as const) : []),
       ...usageHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => usageHandler.handleUsageMessage(msg, ws)] as const),
       ...(presetHandler ? presetHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => presetHandler.handlePresetMessage(msg, ws)] as const) : []),
-      // btw 三帧（btw-question M2-b / D6）：create/list/remove → BtwMessageHandler。
+      // btw 两帧（btw-question M2-b / D6；W4b 线枚举帧退役）：create/remove → BtwMessageHandler。
       ...(btwHandler ? btwHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => btwHandler.handleBtwMessage(msg, ws)] as const) : []),
     ] as Array<[ClientMessageType, (msg: ClientMessage, ws: WsType) => Promise<unknown> | unknown]>
     // b26-F2：Map 构造对重复 key 后写覆盖——两 handler 的 handles 清单重叠时后者静默接管

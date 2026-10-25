@@ -9,15 +9,37 @@
 import type { SessionViewSnapshot } from '@taiji/shared'
 import type { ChatApiPort, WriteSegmentsFn } from './api-port'
 import type { ChatStoreInstance } from './store'
+// AC10：跨域只经公开 index API（禁相对路径跨域 import）
+import type { SessionLiveState } from '@taiji/core/domain/session'
+
+/**
+ * SessionLiveStateLike —— 状态层的最小结构契约（core 内部 deps 注入面）。
+ *
+ * 与 domain/session/live-state 的 `SessionLiveStateStore` 同形；此处单独声明是为保持
+ * chat→session 域的依赖为「仅结构类型」（同 SessionStoreLike 理由）。壳层状态层实例
+ * （renderer pinia 薄壳 / mobile core factory）自动满足。
+ *
+ * 为什么状态写入不经导航列表（会话架构四层分离 W1，设计 §2.4 I2/I3/I4）：
+ * 状态键 = 会话 id，与「是否出现在侧栏列表」无关——btw 线（runtime 注册，surface='btw'）、
+ * 任意列表外 id 与主会话走**同一条**写入路径，无 `isBtwVirtualId` / hidden 判据。
+ */
+export interface SessionLiveStateLike {
+  /** 唯一写入口：字段级合并（patch 未提供的维度保留现值） */
+  applyLiveState(id: string, patch: SessionLiveState): void
+  /** 读口：缓存缺失返回 undefined（显式未知） */
+  liveStateOf(id: string): SessionLiveState | undefined
+  /** 唯一清退口（会话删除时）；列表刷新/过滤/归档不得调用 */
+  removeLiveState(id: string): void
+}
 
 /**
  * SessionStoreLike —— useChat 消费 session store 的最小结构类型。
  *
  * 不 import 整个 SessionStoreInstance（避免 core 内 chat→session 域强耦合 + 返回类型膨胀）。
- * useChat 只用 applySnapshot 的单 session 形态（session.renamed / state_changed /
- * thinkingLevelSet 三个广播驱动的跨 store 字段更新）+ revive（恢复窗口内新回合开始帧
- * 的过渡态收尾——dead 复位，crash-resilience T4 回流修复）。结构性类型，
- * renderer useSessionStore() 返回值自动满足。
+ * useChat 只用 applySnapshot 的单 session 形态（session.renamed 的 label 展示字段）+ revive
+ * （恢复窗口内新回合开始帧的过渡态收尾——dead 复位，crash-resilience T4 回流修复）。
+ * 状态字段（modelId / thinkingLevel）已迁状态层（W1），不再经本接口写入。
+ * 结构性类型，renderer useSessionStore() 返回值自动满足。
  */
 export interface SessionStoreLike {
   applySnapshot(id: string, snapshot: SessionViewSnapshot): void
@@ -40,6 +62,11 @@ export interface EnsureStreamSubDeps {
    */
   chatApi: Pick<ChatApiPort, 'streamSubscribe'>
   /**
+   * [W1 会话架构四层分离] 状态层：session.* 状态帧（state_changed / thinkingLevelSet）
+   * 的唯一落点——按会话 id 寄存，不经导航列表命中。
+   */
+  liveState: SessionLiveStateLike
+  /**
    * [session-dead 第三环] error = 操作失败；warning = 需用户处置的信号（与 error 语义区分，
    * 壳侧 useToast().warning 对接）。
    */
@@ -52,8 +79,10 @@ export interface EnsureStreamSubDeps {
  *
  * - chatApi：chat 域后端唯一通道（IF6 ChatApiPort）
  * - writeSegments：写 segments.json sidecar（session 域 RPC，useChat 消费者）
- * - getChatStore/getSessionStore：getter 函数（延迟调用，规避 pinia/composable
+ * - getChatStore/getSessionStore/getLiveStateStore：getter 函数（延迟调用，规避 pinia/composable
  *   必须在 setup 上下文调用的约束；factory 调用时机与 store 实例化解耦）
+ * - getLiveStateStore：状态层（会话运行时状态按 id 寄存；W1 起 modelId/thinkingLevel 的
+ *   唯一写入口，写入路径与导航列表无关）
  * - toast/t：壳层 UI/i18n 注入（core 不绑 toast/i18n 实现）
  * [投递所有权内核 u3b] getCompactQueue 成员已随 defer 队列状态机退役摘除。
  */
@@ -62,6 +91,8 @@ export interface UseChatDeps {
   writeSegments: WriteSegmentsFn
   getChatStore: () => ChatStoreInstance
   getSessionStore: () => SessionStoreLike
+  /** 状态层（会话运行时状态按 id 寄存）：session.* 状态帧的唯一落点（W1） */
+  getLiveStateStore: () => SessionLiveStateLike
   /** [session-dead 第三环] warning 同 EnsureStreamSubDeps */
   toast: { error: (msg: string) => void; warning: (msg: string) => void }
   t: (key: string, params?: Record<string, unknown>) => string

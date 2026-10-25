@@ -21,22 +21,22 @@
  *
  * 问题清单层两侧已登记语义差异（结构标记只锁「定义在场」，以下行为语义差异不在
  * 机器锁步面内；改任一侧问题清单层前先核对本清单，新增差异须同步登记于此）：
- *  - D1 延续条目 title 权威【漂移待对齐】：pi 侧 title 清单权威——inheritCarryoverFields
- *    仅在清单侧缺 title 时回填、已有 title 不覆盖（f5c7f1506 裁决）；zcode 侧延续合并
- *    `prev.title = i.title` 无条件覆盖（$HOME/.zcode/workflows/review-fix-loop.dwf.ts）。
- *    severity 两侧一致（均采信本轮），分歧仅 title——待「延续条目 title 清单权威」
- *    ADR 裁决后两侧对齐或登记豁免。
- *  - D2 聚合条目 title 可选性【与 D1 同根】：pi 侧 schema 宽——normalizeMustFixEntry
+ *  - D1 延续条目 title 权威【已对齐，2026-10-23 单源化】：title 清单权威语义
+ *    （清单侧缺 title 才回填、已有不覆盖；severity 采信本轮显式标注）现由单源段
+ *    inheritCarryoverFields（packages/subagent-core/workflows/src/review-fix-loop.shared.ts）
+ *    承载，zcode 与 pi 产物经构建拼装共用同一实现；zcode 侧另有内容字段非空刷新
+ *    （refreshTrackedFields，files/evidence/guidance——防空壳覆盖，pi 侧无此刷新为
+ *    已登记差异：pi 条目 evidence/guidance 保持首见值）。
+ *  - D2 聚合条目 title 可选性【pi 侧现状】：pi 侧 schema 宽——normalizeMustFixEntry
  *    容忍缺 title 并配套回填补偿；zcode 侧 AggIssueInput.title 必填（schema 窄，
- *    无补偿需求）。对齐裁决时与 D1 同批处理。
+ *    无补偿需求）。属契约层差异（聚合器 schema 双轨），不在单源段面内。
  *  - D3 复活模型【刻意】：pi 侧 dormant 分区 + 复活即迁出（复活点 state.dormant.filter
  *    迁出 + dormantRevivalTitle 回填，recordDormant 恒 pending 单形态；resolveIssueIdentity
  *    dormant 自识别）；zcode 侧无 dormant——条目 deferred 退出追踪，唯一复活入口 =
  *    reviewer escalate 申报。两侧宿主演化路径不同，接受为刻意差异（dormant/deferred
  *    域模型统一未立项）。
- *  - D4 inheritCarryoverFields / dormantRevivalTitle 的 zcode 侧处置：前者对应物为
- *    zcode 延续合并内联赋值（title 语义差随 D1，severity 语义一致）；后者属 dormant
- *    机制（随 D3 无对应物），登记豁免、无镜像义务。
+ *  - D4 dormantRevivalTitle 的 zcode 侧处置：属 dormant 机制（随 D3 无对应物），
+ *    登记豁免、无镜像义务。
  *
  * 退出码：0 = 一致（或 zcode 侧文件不存在 → SKIP）；1 = 结构缺失或行为分歧。
  * 输出 [FIX] 指引：两侧文件路径 + 需要同步的内容。

@@ -44,11 +44,24 @@ vi.mock('@taiji/core', async (importOriginal) => ({
   getSettingsStore: settingsMock.getSettingsStore,
 }))
 
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({
-    list: [{ id: 's1', modelId: 'zai-coding-cn/glm-5.3' }],
-  }),
-}))
+// [W1 会话架构四层分离] 当前会话模型读**状态层**（按会话 id 寄存），不再读 sessionStore.list
+// 条目（applySnapshot 已不写 modelId，列表查找会使「当前」判定恒 null）。选择器入口 =
+// useSessionLiveState（内部经 core createSessionLiveStateSelector 读 pinia 薄壳）——本处
+// mock composable 即覆盖整条读链。
+vi.mock('@/composables/features/session/useSessionLiveState', async () => {
+  const { computed } = await import('vue')
+  return {
+    useSessionLiveState: (sessionIdRef: { value: string | null }) => ({
+      liveState: computed(() =>
+        sessionIdRef.value === 's1' ? { modelId: 'zai-coding-cn/glm-5.3' } : undefined,
+      ),
+      modelId: computed(() =>
+        sessionIdRef.value === 's1' ? 'zai-coding-cn/glm-5.3' : undefined,
+      ),
+      thinkingLevel: computed(() => undefined),
+    }),
+  }
+})
 
 // ── 数据构造 ───────────────────────────────────────────────────────
 

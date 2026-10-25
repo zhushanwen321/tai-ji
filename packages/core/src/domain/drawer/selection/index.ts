@@ -3,7 +3,7 @@
  *
  * 选中态字段迁出 DrawerControlState 后各回各的内容域分区（§6.6①）：
  *   subagent.ts（selectedSubagentId）/ bash-task.ts（selectedBackgroundTaskId）/
- *   btw.ts（selectedBtwVid）；
+ *   btw.ts（selectedBtwSessionId）；
  * 瞬时参数按会话分区（§6.6②）：transient.ts（selectedCommandName / detailFilePath）；
  * 复合谓词单一源（迁出不变量 [MANDATORY]）：predicates.ts + viewed-vids.ts。
  * （workflow 分区 2026-10-19 随 drawer workflow tab 删除移除，workflow 唯一入口 = 浮层。）

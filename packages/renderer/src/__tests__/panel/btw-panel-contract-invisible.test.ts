@@ -19,7 +19,7 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/btw-panel-contract-invisible.test.ts
  */
 // helper import 必须先于项目内模块（@/api mock factory 在模块图加载期执行，TDZ 约束同 composer-mount 各消费文件）
-import { composerApiModuleActualWithBtw, composerBtwApiMock } from '../helpers/composer-mount'
+import { composerApiModuleActualWithBtw, composerBtwApiMock,  btwLineGroups } from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 import { ref, nextTick } from 'vue'
@@ -146,7 +146,7 @@ describe('D9⑤ 契约提取自源（构建者白盒 + 防漂移锚）', () => {
 
 describe('BtwPanel 契约 UI 反向断言（使用者黑盒 DOM + 观察者形态）', () => {
   it('含普通消息/表单 fixture 的面板渲染文本不含契约任一句（D9⑤ model-only 不可见）', async () => {
-    apiMock.list.mockResolvedValue([{ vid: 'btw:pi-1' }])
+    apiMock.list.mockResolvedValue(btwLineGroups({ id: 'pi-1' }))
     const wrapper = mountPanel(MAIN_A)
     await settle(wrapper)
 
@@ -169,7 +169,7 @@ describe('BtwPanel 契约 UI 反向断言（使用者黑盒 DOM + 观察者形�
   it('空态（无线）与新建线（fork pill）路径同样不含契约任一句', async () => {
     apiMock.list.mockResolvedValue([])
     apiMock.create.mockResolvedValue({
-      vid: 'btw:pi-9',
+      sessionId: 'pi-9',
       mainSid: MAIN_A,
       forkState: 'full',
     })

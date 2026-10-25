@@ -184,7 +184,7 @@ function createRestoreLifecycle(service: SessionService, sid: string, bodyFile: 
     getLaunchPresetOptions: vi.fn(async () => undefined),
     toSummary: vi.fn((s): SessionSummary => ({
       id: s.id, label: s.label, cwd: s.cwd, status: 'active',
-      lastActiveAt: 1, modelId: 'p/m', tokenCount: 0,
+      lastActiveAt: 1,
     })),
     findScannedSession: vi.fn((id: string): ScannedSession | undefined =>
       id === sid

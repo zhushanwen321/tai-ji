@@ -51,6 +51,8 @@ const { sessionApiMock, submitDeliveryMock, useChatAbortMock } = vi.hoisted(() =
     getCommands: vi.fn().mockResolvedValue({ commands: [] }),
     getContext: vi.fn().mockResolvedValue({}),
     setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })),
+    // W4b：useBtwTabData badge 数据源（session.list {surface:'btw'}，btw 线进通用列表）
+    listSessions: vi.fn().mockResolvedValue([]),
   },
   // [u3c/D1] fork 首发走统一提交（clientUuid = appendUser 产物 → 与内核条目 id 同源，D-10）；
   // spy 基础清单在 @/api factory 内经 composerChatApiSpy 单例展开（vi.hoisted 早于 import

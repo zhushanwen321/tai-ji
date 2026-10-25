@@ -65,9 +65,10 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { closeWorkflowVizOverlayForSession } from '@/components/panel/workflow-viz/overlay/workflow-viz-overlay'
 // [M4-a / btw-question D4 消费方①] deleteSession 级联的前端路径：枚举/处置/清映射三函数
 //（与 m7/agentcall 的 evictVirtualKeys 先例同构，登记结构在 useBtwTabData）。
-import { getBtwVirtualIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
+import { getBtwSessionIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useChat, ensureStreamSubscription } from '@/composables/features/chat/useChat'
+import { useSessionLiveStateStore } from '@/stores/session-live-state'
 import { useTtsPlayer } from '@/composables/features/chat/useTtsPlayer'
 import { invalidateStatusCache } from '@/composables/features/chat/useSessionDerivations'
 import { browserDestroy as browserDestroyIpc } from '@/lib/ipc'
@@ -179,11 +180,11 @@ export function useSidebar() {
         chat.evictVirtualKey(acsVirtualId)
       }
       // [M4-a / btw-question D4 消费方① + D9④ 清派生键] deleteSession 级联的前端路径：
-      // **枚举先于清映射**（顺序约束）——主会话名下全部 btw 线逐线处置（vid 分区 +
+      // **枚举先于清映射**（顺序约束）——主会话名下全部 btw 线逐线处置（线分区 +
       // 派生 subagent/agentcall 键 + 两 store 记录分区，单入口幂等），随后清反查表
       //（主已删，映射无意义）。runtime 半边（杀线进程 + 删线目录）在 session-lifecycle
       // 的级联支线；失效路径（闲置回收/进程亡）不进本路径——分区保留待重载链回填（D9④）。
-      for (const btwVid of getBtwVirtualIdsByMain(sid)) disposeBtwLinePartitions(btwVid)
+      for (const lineSessionId of getBtwSessionIdsByMain(sid)) disposeBtwLinePartitions(lineSessionId)
       clearBtwVirtualKeyMapping(sid)
     },
     clearAgentCallMapping: (sid) => useWorkflowStore().clearAgentCallMapping(sid),
@@ -216,6 +217,9 @@ export function useSidebar() {
     // session 时关 overlay（数据范围——事件流缓存 + 活跃锚——由 clearWorkflow/store.clearSession 收尾）。
     closeWorkflowOverlay: (sid) => closeWorkflowVizOverlayForSession(sid),
     clearForkNotices: (sid) => useForkNoticeFeed().clearSession(sid),
+    // [W1 会话架构四层分离] 状态层条目显式清退（只挂真删除；归档不挂——归档恢复后
+    // 已缓存状态仍在，见 core SessionCleanupHooks.clearLiveState 契约）
+    clearLiveState: (sid) => useSessionLiveStateStore().removeLiveState(sid),
   }
 
   const flow: NewTaskFlowPort = {
@@ -271,6 +275,9 @@ export function useSidebar() {
     hooks,
     flow,
     sessionEntry,
+    // [W2 权威拉取与冷读] 状态层：session.getState reply 的唯一落点（与状态消息 /
+    // 操作回执共用 applyLiveState 这一个 reducer，设计 §7 验收项 8）
+    liveState: useSessionLiveStateStore(),
   })
 
   /** 当前焦点 panel 绑定的 session（UI 高亮 SSOT）——代理 core.focusedSessionId */
@@ -293,6 +300,16 @@ export function useSidebar() {
    * C-W3-4 时序前提（订阅先于 panel 载入，防 snapshot 回放丢失）由 core 链步 5→7 顺序保证。
    */
   const selectSession = core.selectSession
+
+  /**
+   * refreshLiveState —— 代理 core（[W2 权威拉取与冷读] 状态层拉取对账入口）。
+   *
+   * 主路径触发点 = core 12 步切入链步 13（打开视图时机）与本文件 onConnected（重连
+   * 时机）；btw 线视图激活点（BtwPanel 选中线）经本出口复用同一入口——线不走
+   * selectSession 切入链（drawer 旁路呈现，主会话焦点不变），两件事（缓存缺失门控 +
+   * fire-and-forget 语义）由 core 单点保证，壳不另造第二套。
+   */
+  const refreshLiveState = core.refreshLiveState
 
   /**
    * restoreSession —— 显式重开 dead session（重新 spawn pi）。
@@ -481,6 +498,14 @@ export function useSidebar() {
     if (sid) {
       void useSubagentStore().loadSubagents(sid)
       void useWorkflowStore().loadWorkflows(sid)
+      // [W2 权威拉取与冷读] 重连时机：状态层缓存缺失时补拉（缓存缺失门控 + fire-and-forget，
+      // 与打开视图时机同一入口）。断连期间丢的状态帧不由本次拉取收敛：状态层缓存跨重连不清
+      // （removeLiveState 只挂真删除路径），只要该 session 有过条目，门控（use-session.ts:368
+      // liveStateOf !== undefined 即 return）直接跳过。断连恢复的自愈通道是 state topic 的
+      // last-value 回放：session.state_changed 在 message-bus.ts:139 的 STATE_TYPE_KEY_MAP
+      // 登记为 'state'，subscription-state.ts:348 在重连应答里逐条回放 reply.stateSnapshot。
+      // 本 RPC 拉取只覆盖冷启动/无快照形态（条目从未被填过的会话）。
+      void core.refreshLiveState(sid)
     }
   }
 
@@ -503,6 +528,7 @@ export function useSidebar() {
     focusedSession,
     selectSession,
     restoreSession,
+    refreshLiveState,
     newSession,
     retryHistory,
     loadSessions,

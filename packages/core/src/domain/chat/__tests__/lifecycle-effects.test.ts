@@ -17,6 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope } from 'vue'
 import { PI_RESPAWN_NOTICE_CUSTOM_TYPE } from '@taiji/shared'
 import type { Message } from '@taiji/shared'
+import { createSessionLiveState } from '@taiji/core/domain/session'
 import { createChatStore } from '../store'
 import { createSessionStore } from '../../session/store'
 import { createLifecycleEffects } from '../lifecycle-effects'
@@ -70,7 +71,7 @@ function makeFixture(): Fixture {
       {
         cwd: '/fixture',
         sessions: [
-          { id: 's1', label: 'fixture session', cwd: '/fixture', status: 'active', lastActiveAt: 1, modelId: 'm', tokenCount: 0 },
+          { id: 's1', label: 'fixture session', cwd: '/fixture', status: 'active', lastActiveAt: 1 },
         ],
       },
     ],
@@ -163,6 +164,7 @@ describe('createLifecycleEffects.markSessionDead（exited core 序列）', () =>
     const streamSubscribe = vi.fn(() => unsub)
     const deps: EnsureStreamSubDeps = {
       chatApi: { streamSubscribe },
+      liveState: createSessionLiveState(),
       toast: { error: vi.fn(), warning: vi.fn() },
       t: (k: string) => k,
     }

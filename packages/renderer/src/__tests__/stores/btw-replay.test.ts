@@ -2,10 +2,10 @@
  * btw-replay —— btw 重载链接线测试（btw-question D5「重载链」/ M2-c 验收 ③④）。
  *
  * 覆盖范围：
- * - ③ 接线：重开线（drawer 复合条件翻出 selectedBtwVid）→ getHistory(vid) → chatStore
+ * - ③ 接线：重开线（drawer 复合条件翻出 selectedBtwSessionId）→ getHistory(sessionId) → chatStore
  *   分区注入；触发门控（非 btw tab 不回放）；已 hydrate 幂等；驱逐后重开回填一致；
  *   失败降级（markHistoryFailed + 重开重试）。
- * - ④ live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性覆盖范围）：同 vid 上
+ * - ④ live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性覆盖范围）：同线 session id 上
  *   live 帧链（message.message_end 载 entry → applyEntryFrame 累积）≡ 文件回放
  *   （replayEntries 派生视图经接线注入分区）——两路径喂同一 applyEntry reducer。
  * - V8 回放侧核实：半截 entry（悬空 toolCall，无 toolResult）重开回放的呈现形态。
@@ -28,8 +28,8 @@ import {
   setBtwView,
   bindViewedVidPanels,
   getViewedVids,
-  isViewingBtwVid,
-  useViewedBtwVid,
+  isViewingBtwSession,
+  useViewedBtwSession,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
 import { replayEntries } from '@taiji/core'
@@ -75,9 +75,9 @@ async function settle(): Promise<void> {
 }
 
 /** 打开 btw tab 并选中线（生产链 = BtwPanel autoSelect / chip 点击 → setBtwView）。 */
-async function openThread(vid: string): Promise<void> {
+async function openThread(sessionId: string): Promise<void> {
   drawerControl.open('btw')
-  setBtwView(vid)
+  setBtwView(sessionId)
   await settle()
 }
 
@@ -96,17 +96,17 @@ afterEach(() => {
 })
 
 describe('重开线回放接线（D5 重载链：文件 → chatStore 分区）', () => {
-  it('选中 btw 线 → getHistory(vid) 回放注入分区（hydrated + 窗口状态同写）', async () => {
+  it('选中 btw 线 → getHistory(sessionId) 回放注入分区（hydrated + 窗口状态同写）', async () => {
     const history = [msgOf('r1', '线内历史'), msgOf('r2', '第二条')]
     getHistoryMock.mockResolvedValue(reply(history))
 
-    await openThread('btw:pi-9')
+    await openThread('pi-9')
 
     expect(getHistoryMock).toHaveBeenCalledTimes(1)
-    expect(getHistoryMock).toHaveBeenCalledWith('btw:pi-9')
-    expect(store.getMessages('btw:pi-9')).toEqual(history)
-    expect(store.isHydrated('btw:pi-9')).toBe(true)
-    expect(store.getHistoryWindow('btw:pi-9')).toEqual({
+    expect(getHistoryMock).toHaveBeenCalledWith('pi-9')
+    expect(store.getMessages('pi-9')).toEqual(history)
+    expect(store.isHydrated('pi-9')).toBe(true)
+    expect(store.getHistoryWindow('pi-9')).toEqual({
       truncated: false,
       loadedTurns: 1,
       totalTurnsEstimate: 1,
@@ -117,19 +117,19 @@ describe('重开线回放接线（D5 重载链：文件 → chatStore 分区）'
     getHistoryMock.mockResolvedValue(reply([msgOf('r1', '回填')]))
     store.hydrate(MAIN, [msgOf('m1', '主对话')]) // 主分区已回放态（不参与触发范围）
 
-    // 门控①：drawer 开在其他 tab、selectedBtwVid 在场（切走残留）→ 不回放
+    // 门控①：drawer 开在其他 tab、selectedBtwSessionId 在场（切走残留）→ 不回放
     drawerControl.open('git')
-    setBtwView('btw:pi-1')
+    setBtwView('pi-1')
     await settle()
     expect(getHistoryMock).not.toHaveBeenCalled()
 
-    // 门控②：切到 btw tab（源 null → vid 翻出）→ 回放一次
+    // 门控②：切到 btw tab（源 null → 线 id 翻出）→ 回放一次
     drawerControl.setTab('btw')
     await settle()
     expect(getHistoryMock).toHaveBeenCalledTimes(1)
-    expect(store.isHydrated('btw:pi-1')).toBe(true)
+    expect(store.isHydrated('pi-1')).toBe(true)
 
-    // 幂等：关 drawer（vid → null）再开（null → vid）→ 已 hydrate，不重复拉取
+    // 幂等：关 drawer（线 id → null）再开（null → 线 id）→ 已 hydrate，不重复拉取
     drawerControl.close()
     await settle()
     drawerControl.open('btw')
@@ -142,13 +142,13 @@ describe('重开线回放接线（D5 重载链：文件 → chatStore 分区）'
   it('驱逐后重开：hydrated 随驱逐清除 → 再回放，分区内容回填一致', async () => {
     const history = [msgOf('b1', '线回复')]
     getHistoryMock.mockResolvedValue(reply(history))
-    await openThread('btw:pi-r')
-    expect(store.getMessages('btw:pi-r')).toEqual(history)
+    await openThread('pi-r')
+    expect(store.getMessages('pi-r')).toEqual(history)
 
     // LRU 驱逐（btw 键普通候选，core chat-lru-btw 断言范围）：分区 + hydrated 标记同清
-    store.evictSessionWithVirtual('btw:pi-r')
-    expect(store.getMessages('btw:pi-r')).toEqual([])
-    expect(store.isHydrated('btw:pi-r')).toBe(false)
+    store.evictSessionWithVirtual('pi-r')
+    expect(store.getMessages('pi-r')).toEqual([])
+    expect(store.isHydrated('pi-r')).toBe(false)
 
     // 关 drawer 再开（选中值在 drawer 分区内持久，靠 isOpen 翻转重新触发）→ 回填
     drawerControl.close()
@@ -156,15 +156,15 @@ describe('重开线回放接线（D5 重载链：文件 → chatStore 分区）'
     drawerControl.open('btw')
     await settle()
     expect(getHistoryMock).toHaveBeenCalledTimes(2)
-    expect(store.getMessages('btw:pi-r')).toEqual(history)
+    expect(store.getMessages('pi-r')).toEqual(history)
   })
 
   it('回放失败：markHistoryFailed 收尾不写分区；重开自动重试成功后清除失败态', async () => {
     getHistoryMock.mockRejectedValueOnce(new Error('session not registered'))
 
-    await openThread('btw:pi-fail')
-    expect(store.failedHistory.has('btw:pi-fail')).toBe(true)
-    expect(store.getMessages('btw:pi-fail')).toEqual([])
+    await openThread('pi-fail')
+    expect(store.failedHistory.has('pi-fail')).toBe(true)
+    expect(store.getMessages('pi-fail')).toEqual([])
 
     // 重开（关 → 开）触发重试：成功回填 + 失败态清除
     getHistoryMock.mockResolvedValue(reply([msgOf('r1', '重试成功')]))
@@ -173,14 +173,14 @@ describe('重开线回放接线（D5 重载链：文件 → chatStore 分区）'
     drawerControl.open('btw')
     await settle()
     expect(getHistoryMock).toHaveBeenCalledTimes(2)
-    expect(store.failedHistory.has('btw:pi-fail')).toBe(false)
-    expect(store.getMessages('btw:pi-fail')).toEqual([msgOf('r1', '重试成功')])
+    expect(store.failedHistory.has('pi-fail')).toBe(false)
+    expect(store.getMessages('pi-fail')).toEqual([msgOf('r1', '重试成功')])
   })
 })
 
 describe('live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性覆盖范围）', () => {
-  it('同 vid：live message_end 帧链累积 ≡ 文件回放派生视图注入（两路径同一 applyEntry reducer）', async () => {
-    const vid = 'btw:pi-eq'
+  it('同线 session id：live message_end 帧链累积 ≡ 文件回放派生视图注入（两路径同一 applyEntry reducer）', async () => {
+    const vid = 'pi-eq' // 线 session id（W4a 后 = pi 真实 id）
     const entries: PiEntry[] = [
       msgEntry('e1', { role: 'user', content: [{ type: 'text', text: '你好' }], timestamp: 1000 }),
       msgEntry(
@@ -224,9 +224,9 @@ describe('live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性�
     ]
     getHistoryMock.mockResolvedValue(reply(replayEntries(entries).messages))
 
-    await openThread('btw:pi-half')
+    await openThread('pi-half')
 
-    const msgs = store.getMessages('btw:pi-half')
+    const msgs = store.getMessages('pi-half')
     expect(msgs).toHaveLength(2)
     const assistant = msgs[1]!
     expect(assistant.role).toBe('assistant')
@@ -239,10 +239,10 @@ describe('live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性�
 
 describe('三消费方复合谓词不变量（真实事件序对账，display-containers §7.1 迁出不变量）', () => {
   // 回放触发范围（本文件消费方②）必须与 getViewedVids（①chat LRU 豁免）、
-  // isViewingBtwVid（③useBtwTabData 视口命中）同值同变（读取单一源 selection/predicates.ts）。
+  // isViewingBtwSession（③useBtwTabData 视口命中）同值同变（读取单一源 selection/predicates.ts）。
   // 真实事件序 = 真实响应式写入逐步推进（开/切 tab/切 session），每步对账三读数一致。
   it('开 btw → 选线 → 切 tab → 切 session：回放触发与①③读数每步一致', async () => {
-    const V = 'btw:pi-1'
+    const V = 'pi-1'
     getHistoryMock.mockResolvedValue(reply([msgOf('r1', '线内历史')]))
     bindViewedVidPanels(ref<Array<string | null>>([MAIN]))
 
@@ -250,24 +250,24 @@ describe('三消费方复合谓词不变量（真实事件序对账，display-co
     drawerControl.open('btw')
     setBtwView(V)
     await settle()
-    expect(useViewedBtwVid().value).toBe(V)
-    expect(isViewingBtwVid(V)).toBe(true)
+    expect(useViewedBtwSession().value).toBe(V)
+    expect(isViewingBtwSession(V)).toBe(true)
     expect(getViewedVids()).toEqual(new Set([V]))
     expect(getHistoryMock).toHaveBeenCalledTimes(1)
 
     // 切走 tab → 三读数同落；回放不追加
     drawerControl.setTab('git')
     await settle()
-    expect(useViewedBtwVid().value).toBe(null)
-    expect(isViewingBtwVid(V)).toBe(false)
+    expect(useViewedBtwSession().value).toBe(null)
+    expect(isViewingBtwSession(V)).toBe(false)
     expect(getViewedVids()).toEqual(new Set())
     expect(getHistoryMock).toHaveBeenCalledTimes(1)
 
     // 切回 btw tab → 三读数同恢复；已 hydrate 幂等不重新拉取
     drawerControl.setTab('btw')
     await settle()
-    expect(useViewedBtwVid().value).toBe(V)
-    expect(isViewingBtwVid(V)).toBe(true)
+    expect(useViewedBtwSession().value).toBe(V)
+    expect(isViewingBtwSession(V)).toBe(true)
     expect(getViewedVids()).toEqual(new Set([V]))
     expect(getHistoryMock).toHaveBeenCalledTimes(1)
 
@@ -275,15 +275,15 @@ describe('三消费方复合谓词不变量（真实事件序对账，display-co
     // （panel 枚举含 MAIN——LRU 保护不随焦点丢失，查看中不驱逐的数据丢失防线）
     boundSid.value = 's-other'
     await settle()
-    expect(useViewedBtwVid().value).toBe(null)
-    expect(isViewingBtwVid(V)).toBe(false)
+    expect(useViewedBtwSession().value).toBe(null)
+    expect(isViewingBtwSession(V)).toBe(false)
     expect(getViewedVids()).toEqual(new Set([V]))
 
     // 切回 MAIN：三读数同恢复
     boundSid.value = MAIN
     await settle()
-    expect(useViewedBtwVid().value).toBe(V)
-    expect(isViewingBtwVid(V)).toBe(true)
+    expect(useViewedBtwSession().value).toBe(V)
+    expect(isViewingBtwSession(V)).toBe(true)
     expect(getViewedVids()).toEqual(new Set([V]))
     expect(getHistoryMock).toHaveBeenCalledTimes(1)
   })

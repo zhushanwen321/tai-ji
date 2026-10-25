@@ -28,7 +28,7 @@ vi.mock("../lifecycle/lifecycle-manager.ts", async (importOriginal) => {
 
 import { ChatRounds, type ChatRoundsDeps } from "../service/chat-rounds.ts";
 import { RecordEngineIdentityError } from "../engine/common/session-view-service.ts";
-import type { AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../shared/agent-call-types.ts";
 import { resetWorkflowWindowEngineStatesForTest, setWorkflowWindowEngineGateway } from "../engine/routing.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import type { EngineCapabilities, EngineHandle, ProbeReport, SessionView } from "../engine/types.ts";

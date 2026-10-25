@@ -20,7 +20,7 @@
 // zcode 引擎被 gate 拒绝不会到达。（[modeless 波5 收尾] conversation 派发参数已删，
 // 原对话参数预检面随之退役。）
 
-import type { AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../shared/agent-call-types.ts";
 import type { ExecuteOptions } from "../assembly/types.ts";
 
 /** 纯函数：ExecuteOptions（chat 域执行选项）→ 合流任务声明 AgentCallOpts。无副作用、幂等。 */

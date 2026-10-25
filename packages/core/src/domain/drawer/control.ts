@@ -13,7 +13,7 @@
  *
  * [display-containers §6.6 W0 状态还债] DrawerControlState 收窄为 { isOpen, activeTab }：
  * 选中态字段迁出至 selection/ 各内容域分区（selectedSubagentId → subagent、
- * selectedBackgroundTaskId → bashTask、selectedBtwVid → btw；enteredFrom 与
+ * selectedBackgroundTaskId → bashTask、selectedBtwSessionId → btw；enteredFrom 与
  * selectedWorkflowName 2026-10-19 随 drawer workflow tab 删除移除），
  * 瞬时参数（selectedCommandName/detailFilePath）迁 selection/transient.ts 按会话分区；
  * docked 死状态全链删除（display-containers §7.6）。复合谓词读取单一源 = selection/predicates.ts。

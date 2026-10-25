@@ -435,8 +435,8 @@ function childCountOf(s: SessionSummary): number {
 /**
  * 反查分支 session 的父 session label（P3 修复血缘显示）。
  *
- * SessionItem 模板用 `session.parentLabel || session.parentSession` 展示血缘，本 helper 按
- * session.parentSession 反查父 session，取其 label 注入 parentLabel。
+ * SessionItem 详情卡用 `displaySession.parentLabel || displaySession.parentSession` 展示血缘，
+ * 本 helper 按 session.parentSession 反查父 session，取其 label 注入 parentLabel。
  *
  * 匹配规则（FR-20 双键兜底）：parentSession 可能是父的 sessionFile（活跃 session
  * 落盘路径）或父的 id（源未落盘时用 sessionId 作血缘键），两种 key 取并集保证命中。

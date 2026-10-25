@@ -11,7 +11,7 @@
  * 只看到 IManagedSessionView,
  * 但拿到的是 ManagedSession 实例,可读写字段(lastActiveAt / isGenerating)。
  */
-import type { ServerMessage, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
+import type { ServerMessage, PiMessageEntry, PiToolCallEntryForm, SessionSurface } from '@taiji/shared'
 import type { SessionManagerAction, CanvasMarkerAction } from '@zhushanwen/extension-protocol'
 import type { ScannedSessionMeta } from '../ports/session.js'
 
@@ -128,10 +128,15 @@ export interface IManagedSessionView {
   thinkingLevel?: string
   sessionFilePath?: string
   /**
-   * 隐藏 session（公共 session）：不进 sidebar 列表（scanner listAll 过滤），
-   * 仅供内部使用（如 landing 态命令源）。toSummary 透传到 SessionSummary.hidden。
+   * 展示归属（surface，会话架构四层分离 presentation 维）：'sidebar' = 进左侧边栏
+   * （缺省，registerSession 不传即此值）；'btw' = 进右侧抽屉的旁路提问线。
+   * 存储位置的函数、终身不可变，注册表单一持有；toSummary 透传到
+   * SessionSummary.surface。宿主是 View（IManagedSessionRecord 经 extends 继承）。
+   *
+   * 读取点仅限 docs/constraints.json C-data-28 登记清单（用途① 导航过滤与工作区
+   * 历史判据 + 用途② 抑制类判别），其余一律禁止。
    */
-  hidden?: boolean
+  surface?: SessionSurface
   /**
    * 父 session 血缘键（FR-2 active 路径回传血缘）。fork 出的 session 在 initializeManagedSession
    * 时写入，toSummary 透传到 SessionSummary.parentSession。源 session 未落盘时用源 sessionId 作

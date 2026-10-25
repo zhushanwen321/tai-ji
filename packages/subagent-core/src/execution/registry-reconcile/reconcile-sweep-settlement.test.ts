@@ -38,7 +38,7 @@ import type { LogLevel } from "../../core/logger.ts";
 import { configureCore, resetCoreForTests, type HostServices } from "../../core/host-services.ts";
 import { findRunSettlementEvidence } from "../persistence/run-state-evidence.ts";
 import { RUN_EVENTS_SUFFIX, type RunErrorCode } from "../../shared/run-vocabulary.ts";
-import { createRunEventJournal } from "../../orchestration/run-events.ts";
+import { createRunEventJournal } from "../persistence/run-event-journal.ts";
 import { runReconcileSweep, type ReconcileSweepDeps } from "./reconcile-sweep.ts";
 import { settlementEvidenceToRunState } from "./sweep-binding.ts";
 

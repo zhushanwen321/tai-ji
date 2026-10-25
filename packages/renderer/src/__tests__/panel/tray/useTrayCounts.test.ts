@@ -25,10 +25,15 @@ import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useSessionStore } from '@/stores/session'
 import { useTrayCounts } from '@/components/panel/tray/useTrayCounts'
+import {
+  __resetBtwLineMembershipForTest,
+  isKnownBtwLine,
+  noteBtwLinesPulled,
+} from '@/composables/panel/btw-line-membership'
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
-import type { SessionSummary, ServerMessage, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
+import type { SessionGroup, SessionSummary, ServerMessage, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 
 // ── mock：bash 分区状态根（直接 mutate 模拟 list reply / 广播）──
 let partitionState: { tasks: BackgroundTaskEntry[]; loaded: boolean; corrupted: boolean; fetchFailed: boolean }
@@ -53,6 +58,8 @@ const apiMocks = vi.hoisted(() => ({
   // RT-4#8 起 API 返结构化形状 { subagents, oversize }（store 按此解构）
   getSubagents: vi.fn<(sessionId: string) => Promise<{ subagents: SubagentRecord[]; oversize?: boolean }>>(),
   getWorkflows: vi.fn<(sessionId: string) => Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean }>>(),
+  // W4b 收编：btw 线成员判别拉取入口（session.list {surface:'btw'}）
+  listSessions: vi.fn<(query: { surface?: string; mainSessionId?: string }) => Promise<SessionGroup[]>>(),
 }))
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api')>()
@@ -62,6 +69,7 @@ vi.mock('@/api', async (importOriginal) => {
       ...actual.session,
       getSubagents: apiMocks.getSubagents,
       getWorkflows: apiMocks.getWorkflows,
+      listSessions: apiMocks.listSessions,
     },
   }
 })
@@ -131,6 +139,9 @@ function data(): UseTrayCountsReturn {
 }
 
 beforeEach(() => {
+  // W4b 收编：btw 线成员判别缓存逐用例清零（拉取缓存 = session.list {surface:'btw'}）
+  __resetBtwLineMembershipForTest()
+  apiMocks.listSessions.mockResolvedValue([])
   setActivePinia(createPinia())
   vi.clearAllMocks()
   apiMocks.getSubagents.mockResolvedValue({ subagents: [], oversize: false })
@@ -248,8 +259,6 @@ function makeChild(overrides: Partial<SessionSummary> & { id: string }): Session
     cwd: '/Users/dev/Code/work-project',
     status: 'idle',
     lastActiveAt: FIXED_NOW,
-    modelId: 'Anthropic/claude-sonnet-4.5',
-    tokenCount: 0,
     spawnSource: 'agent',
     parentAgentSessionId: SID,
     ...overrides,
@@ -423,14 +432,18 @@ describe('useTrayCounts 错误态与加载态暴露面（面板 retry 判据）'
 })
 
 describe('P-invisible·任务托盘：D9③ 派生视图抑制（btw 线不映射 subagent/workflow）', () => {
-  it('btw vid 挂托盘：线 owner 分区有派生记录仍构造性归零 + 不发首次拉取 RPC；bash（线自身任务）照常', async () => {
-    const vid = 'btw:line-tray-1'
-    // 线 owner 分区真实灌入派生记录（生产 = loadSubagents(vid) / 广播路径落分区）
-    useSubagentStore().applyRecords(vid, [makeSubagent({ subagentId: 'a-line', status: 'running' })])
+  it('btw 线挂托盘：线 owner 分区有派生记录仍构造性归零；bash（线自身任务）照常', async () => {
+    const lineId = 'line-tray-1'
+    // W4b 收编判别器 = session.list {surface:'btw'} 拉取缓存成员判别（登记于
+    // constraints.json C-data-28 抑制类清单；旧 isBtwSession 派生表随收编删除）——线
+    // session id 经缓存预热（= 抽屉打开时拉取产物喂入，同步命中路径）。
+    noteBtwLinesPulled([lineId])
+    // 线 owner 分区真实灌入派生记录（生产 = loadSubagents(线 id) / 广播路径落分区）
+    useSubagentStore().applyRecords(lineId, [makeSubagent({ subagentId: 'a-line', status: 'running' })])
     // 种数据（applyRecords 已私有化，直写分区 ref）
     const workflowStore = useWorkflowStore()
     workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(
-      vid,
+      lineId,
       [makeWorkflow({ runId: 'wf-line', status: 'running' })],
     )
     // bash = 线自身后台命令（非派生虚拟键，抑制面不覆盖）
@@ -438,16 +451,69 @@ describe('P-invisible·任务托盘：D9③ 派生视图抑制（btw 线不映�
       tasks: [makeTask({ taskId: 't-line' })], loaded: true, corrupted: false, fetchFailed: false,
     })
 
-    mountHarness(vid)
+    mountHarness(lineId)
 
     expect(data().counts.value.subagent).toEqual({ running: 0, ended: 0, total: 0 })
     expect(data().counts.value.workflow).toEqual({ running: 0, ended: 0, total: 0 })
     expect(data().lists.subagent.running.value).toHaveLength(0)
     expect(data().lists.workflow.running.value).toHaveLength(0)
     expect(data().counts.value.bash.total).toBe(1) // 边界：bash 不在派生抑制面
-    // 首次拉取被抑制（对线 vid 的 getSubagents/getWorkflows 零消费方 → 不发无效 RPC）
-    expect(apiMocks.getSubagents).not.toHaveBeenCalledWith(vid)
-    expect(apiMocks.getWorkflows).not.toHaveBeenCalledWith(vid)
+    // W4a 已接受代价：3 处纯性能防护分支（首次拉取/retry）删判别器——对线会话多发几次
+    // 空 RPC（hasBackgroundWork/deriveStatus/loadError 对线派生值改变，线不进托盘汇总
+    // 范围、不可见；§6 取舍表）。此处断言「拉了但行集仍归零」的新形态。
+    expect(apiMocks.getSubagents).toHaveBeenCalledWith(lineId)
+    expect(apiMocks.getWorkflows).toHaveBeenCalledWith(lineId)
+  })
+
+  it('在途竞态：补拉未回时切回已缓存线会话，旧 sid 的迟到回写不得解除抑制（时效守卫回归）', async () => {
+    const lineId = 'line-tray-race'
+    const lineSubagent = makeSubagent({ subagentId: 'a-race', status: 'running' })
+    const lineWorkflow = makeWorkflow({ runId: 'wf-race', status: 'running' })
+    // 首次拉取对 lineId 返回线的派生记录（与下方预种一致——D13 拉取 watch 切到 lineId
+    // 时会用 RPC 结果覆盖分区，两边同内容保证覆盖幂等，判别力只剩 derivedSuppressed）
+    apiMocks.getSubagents.mockImplementation(async (sid: string) => ({
+      subagents: sid === lineId ? [lineSubagent] : [],
+      oversize: false,
+    }))
+    apiMocks.getWorkflows.mockImplementation(async (sid: string) => ({
+      workflows: sid === lineId ? [lineWorkflow] : [],
+      oversize: false,
+    }))
+    // 挂载 sid = SID（未缓存主会话）→ watch 内 ensure 触发 session.list 全量拉取并挂起
+    // （在途补拉）；此时把焦点切到已缓存线会话（同步命中路径），旧 sid 的 Promise 续写
+    // 随后才到达——回写前无 sid 时效守卫会把 derivedSuppressed 覆写为 false，线的派生
+    // 任务漏进托盘计数（knownLines 写入不触发 watch 重算，错误状态无自纠触发点）。
+    let resolveListSessions!: (groups: SessionGroup[]) => void
+    apiMocks.listSessions.mockImplementation(
+      () =>
+        new Promise<SessionGroup[]>((resolve) => {
+          resolveListSessions = resolve
+        }),
+    )
+    const wrapper = mountHarness(SID)
+    await vi.waitFor(() => expect(apiMocks.listSessions).toHaveBeenCalledTimes(1))
+    expect(apiMocks.listSessions).toHaveBeenCalledWith({ surface: 'btw' })
+
+    // 线 owner 分区预种派生记录（拉取未覆盖前也有数据，中间态断言才有判别力）
+    useSubagentStore().applyRecords(lineId, [lineSubagent])
+    // 种数据（applyRecords 已私有化，直写分区 ref）
+    const workflowStore = useWorkflowStore()
+    workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(lineId, [lineWorkflow])
+    // 缓存预热（= 抽屉打开时拉取产物喂入）后切焦点：同步命中，抑制立即生效
+    noteBtwLinesPulled([lineId])
+    await wrapper.setProps({ sessionId: lineId })
+    expect(data().counts.value.subagent.total).toBe(0)
+    expect(data().counts.value.workflow.total).toBe(0)
+
+    // 旧 sid（SID，非线）的在途补拉此时才落表（快照替换：lineId 出缓存）——续写到达时
+    // 焦点已不是 SID，时效守卫跳过回写，derivedSuppressed 保持 true
+    resolveListSessions([])
+    await vi.waitFor(() => expect(isKnownBtwLine(lineId)).toBe(false))
+    await nextTick()
+    expect(data().counts.value.subagent).toEqual({ running: 0, ended: 0, total: 0 })
+    expect(data().counts.value.workflow).toEqual({ running: 0, ended: 0, total: 0 })
+    expect(data().lists.subagent.running.value).toHaveLength(0)
+    expect(data().lists.workflow.running.value).toHaveLength(0)
   })
 })
 

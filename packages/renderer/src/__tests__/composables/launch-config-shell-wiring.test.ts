@@ -131,7 +131,7 @@ beforeEach(() => {
 })
 
 function summary(over: Partial<SessionSummary> = {}): SessionSummary {
-  return { id: 'ns', label: 'L', cwd: '/x', status: 'idle', lastActiveAt: 1, modelId: '', ...over }
+  return { id: 'ns', label: 'L', cwd: '/x', status: 'idle', lastActiveAt: 1, ...over }
 }
 
 function makePreset(p: Partial<PiLaunchPreset> = {}): PiLaunchPreset {

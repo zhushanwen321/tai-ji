@@ -55,9 +55,7 @@ import {
   requestImageWrite,
 } from '@taiji/core/domain/chat'
 import {
-  extractBtwPiSessionId,
   extractMainSessionId,
-  isBtwVirtualId,
   isSubagentVirtualId,
   type ImageCacheWriteImage,
 } from '@taiji/shared'
@@ -71,18 +69,20 @@ const props = defineProps<{
 const { t } = useI18n()
 
 /**
- * 落盘目录键归一：虚拟 session id（subagent:main:sub / btw:piSid）→ owner 的 pi session id。
+ * 落盘目录键归一：虚拟 session id（subagent:main:sub）→ owner 的 pi session id。
  *
  * main 侧 getImageCacheDir 的路径穿越检查只放行 `^[A-Za-z0-9_-]+$`（shared paths.ts），
  * 虚拟 id 含冒号恒被拒 → IPC reject → 组件恒 fallback（subagent 会话图片不可见的收尾点，
  * [subagent 派生视图丢失修复]）。图片缓存归 owner 会话目录（随主会话清理/孤儿扫描生命周期），
  * 记账键（帽满标记 / 路径记账）同步用归一后的 sid——与 disposeImageCacheForSession 的
  * owner 侧调用同键。
+ *
+ * W4a 键统一：btw 线的 `btw:` 前缀分支删除——线 id 本身就是 pi 真实会话 id（直通，
+ * 设计 §3.3.6 迁移表 ui 1 处）。
  */
 function normalizeCacheSessionId(sid: string | null | undefined): string | undefined {
   if (!sid) return undefined
   if (isSubagentVirtualId(sid)) return extractMainSessionId(sid)
-  if (isBtwVirtualId(sid)) return extractBtwPiSessionId(sid)
   return sid
 }
 

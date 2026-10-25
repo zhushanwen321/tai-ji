@@ -24,7 +24,7 @@ describe('btw 目录布局推导（session-store-layout-inversion 换根后）',
     expect(getBtwSessionsRoot()).toBe(join(getPiAgentDir(), 'btw'))
   })
 
-  it('mainSid 非法形态 fail-fast（路径注入 + vid 误传防线，校验随 shared 公式）', () => {
+  it('mainSid 非法形态 fail-fast（路径注入 + 虚拟 id 误传防线，校验随 shared 公式）', () => {
     for (const bad of ['', '..', 'a/b', 'a\\b', 'btw:sid-x', ':', 'sid x', '.']) {
       expect(() => getBtwThreadDir(bad), `should reject "${bad}"`).toThrow(/invalid sessionId/)
     }
