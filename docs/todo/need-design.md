@@ -38,13 +38,9 @@
 
 ### 4. scheduler 定时任务结果感知通道
 
-状态：现状核实完成（2026-10-23，报告 `.tmp/need-design-batch/scheduler-channel-verification.md`），**不可关闭**。核实结论：统一通道已建成（delivery-port 为 custom 投递路径唯一执行者，bash / session-manager / workflow / notifier 四条提交链全部接入；pending-notifications 是登记/收取层，与投递端口上下游分工），可感知「受理回执 + 送达凭据（消息进入 LLM 请求上下文、已写盘、轮次真实起步）」，不感知「LLM 成功产出响应」。**scheduler 不在通道内、迁移未落地**：用户所述「已由独立会话实施」经实码核实未找到（main HEAD / 全部分支 / 未提交改动 / 兄弟 worktree 均无 scheduler 迁移痕迹），现仍裸 `pi.sendMessage` steer 直投，失败静默缺口原样存在，compaction isIdle 小修也未实施。迁移实施必办项：幂等键改每轮唯一 + 失败语义二选一（详见来源登记）。待用户指认迁移真实落点或确认迁移仍待实施。
+状态：已解决（2026-10-25 迁移实施，feat-scheduler-delivery-migration 分支）——到期 dispatch 经 delivery-port 投递（`PiSchedulerBackend.deliverDispatch`，getDeliveryPort 进程级槽，接入形态同 bash / session-manager / workflow / notifier 四条提交链）：注入参数与原 sendMessage 直投逐字一致（收件 session、内容、steer 语义不变——timing steer → host.sendMessage `{deliverAs:'steer', triggerTurn:true}`，details 仅追加端口送达凭据 deliveryId）；幂等键每轮唯一 `${taskId}:${epoch}`，epoch = backend.now() 时间戳 + 同毫秒序号（既有事实源均不满足每轮唯一：runCount 仅成功递增、history 上限 20 截断；纯内存计数器跨 session_start 重建归零会与投递日志终局条目撞键被端口永久判重吞掉，时间戳基底跨重启不回退、同毫秒序号补齐 fake-clock 场景）；失败语义 forget（2026-10-25 裁决：受理后注入失败端口首败即弃、落 discard 终局不重投，重试由 scheduler 既有「failed 记账 + 下个 tick 重试」单通道承载，避免双通道重投造成用户重复提醒；端口拒收 rejected → deliverDispatch throw → 既有 failed 记账路径在新受理回执形态下保持工作，重试轮自动取新幂等键）；port 缺席（装配异常窗口）降级 pi.sendMessage 直发 + warn 留痕。由此获得「受理回执 + 送达凭据（details-id，消息进入 LLM 请求上下文、已写盘、轮次真实起步）」感知；「LLM 成功产出响应」仍不感知（通道上限，与其余四条链一致）。原登记的 compaction 直闯缺口由端口提交侧 compaction 等待机制（session_before_compact 置位挂起 + 终态边沿唤醒重投）结构性覆盖，域内 isIdle 前置检查小修不再需要。原登记文档 scheduler-result-awareness-channel.md 已删，本条即其终态。
 
-来源：scheduler-result-awareness-channel.md。
-
-问题：scheduler 经扩展 API sendMessage 注入 owner session 后无投递结果感知（返回 `Promise<void>`），失败静默。
-
-候选方向：迁移到统一投递通道（delivery-port），注入参数逐字一致；架构级换通道，独立立项设计。
+来源：scheduler-result-awareness-channel.md（已解决，文档删除后内容以本条为准）。
 
 ### 5. dev 实例 runtime 慢启动被健康检查误杀
 

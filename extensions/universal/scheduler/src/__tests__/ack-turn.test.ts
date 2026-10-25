@@ -87,6 +87,8 @@ function makeHarness(options: HarnessOptions = {}) {
     async sendMessage(msg, opts) {
       captured.sent.push({ msg, opts })
     },
+    // dispatch 投递入口（unified-delivery 迁移）不属 ack 路径，接口完备性补齐
+    async deliverDispatch() {},
     appendEntry() {},
     getSessionFile: () =>
       'sessionFile' in options ? options.sessionFile : MISSING_SESSION_FILE,
