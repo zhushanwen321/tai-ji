@@ -580,8 +580,10 @@ export class SessionHistoryReader {
    * 已知边界：turn 计数/字节预算在 collect 阶段按原始行计算（含旧分支行）→ 分支
    * session 的窗口可能欠填、totalTurnsEstimate 偏大（设计 D3 允许的降级面，内容正确性优先）。
    *
-   * [btw-question 重载链修复] btw 线分支先于通用链：线目录在 G4 隔离边界侧
-   *（`agent/btw/<encodeCwd>/<mainSid>/`，构造性不在 sessions/ 扫描范围），通用链的
+   * [btw-question 重载链修复] btw 线分支先于通用链：线目录在 session 存储树侧
+   *（`<dataDir>/ext-sessions/<mainSid>/btw/`，公式权威源 = getSessionBtwDir，
+   * packages/shared/src/session-store-paths.ts；无 encodeCwd 层、无 agent/btw
+   * 前缀），构造性不在 sessions/ 扫描范围，通用链的
    * scanSessions 对 btw 线必 miss → 静默空（重启后线视图空态的根因）。分支收窄在
    * 注册表成员查询内（W4a：resolveBtwThreadFile 注入即 BtwService.getLine 成员查询，
    * 键 = 线 session id = piSessionId——旧 isBtwVirtualId 前缀判别对 piId 形态恒 false，
@@ -616,7 +618,7 @@ export class SessionHistoryReader {
     if (!file) {
       console.warn(
         `[session-history] btw line history unavailable: no registry entry for ${sessionId} — ` +
-        'expected a rebuilt line (rebuildFromDisk); verify <dataDir>/agent/btw/ layout, or reopen/delete the line in the btw panel',
+        'expected a rebuilt line (rebuildFromDisk); verify the btw line layout: ls <dataDir>/ext-sessions/<mainSid>/btw/ (formula = getSessionBtwDir, packages/shared/src/session-store-paths.ts), or reopen/delete the line in the btw panel',
       )
       return emptyPage
     }

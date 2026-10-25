@@ -2,8 +2,9 @@
  * SessionHistoryReader btw 线离线尾读解析路径直测（btw-question 重载链缺陷修复）。
  *
  * 缺陷背景：重启后线进程不在场（pm.getClient(sessionId) null）→ 离线尾读走通用链
- * getHistoryTailFromFile → scanSessions 对 btw 线构造性 miss（线目录在 G4 隔离边界侧
- * `agent/btw/…`，不在 sessions/ 扫描范围）→ 静默空 → 线视图空态（「持久化不改变可见性」
+ * getHistoryTailFromFile → scanSessions 对 btw 线构造性 miss（线目录在 session 存储树侧
+ * `<dataDir>/ext-sessions/<mainSid>/btw/`，公式 = getSessionBtwDir，不在 sessions/ 扫描
+ * 范围）→ 静默空 → 线视图空态（「持久化不改变可见性」
  * 裁决⑧被违背）。修复 = tailReadOffline 对 btw 线先经 resolveBtwThreadFile（组合根接
  * BtwService 注册表成员查询）解析线文件，命中走同一 tailReadHistory 链；文件缺失 warn + 空页。
  *
