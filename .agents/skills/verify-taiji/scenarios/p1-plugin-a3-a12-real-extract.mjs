@@ -390,27 +390,27 @@ export async function run(ctx) {
     await installViaFamilyCard(ui, page, FAMILIES[0], ev)
     await assertInstalledState({ protocol, ev, ui, family: FAMILIES[0], registry, dataDir, settingsPackages, modelsProviders })
 
-    // 授权挂载位：确认卡渲染缺口的事实断言（ISSUES-2 ①）
-    await assertAuthorizeMountGap(ui, page, FAMILIES[0], ev)
+    // 授权挂载位：渲染驱动回归断言（原 ISSUES-2 ①，修复后正向）
+    await assertAuthorizeMountRenders(ui, page, FAMILIES[0], ev)
 
     // ── Trae 提取 + A12 计时 ──────────────────────────────────────
     const traeExtract = await driveExtractAndTime({ protocol, page, ui, ev, family: FAMILIES[0] })
 
-    // B：状态上报（形状断言；Trae 无 quota/nickname 为设计形态）
+    // B：状态上报（宿主契约形状；Trae 已登录但无昵称/额度素材 → message 省略，
+    // 宿主回落默认「凭据可用」文案——形状断言不钉文案）。
     const traeStatus = await protocol.call('plugin.invoke', { pluginId: FAMILIES[0].pluginId, method: 'getStatus', params: { providerId: FAMILIES[0].providerId } }, { timeoutMs: 30_000 })
-    const traeStatusBody = traeStatus?.result?.status
-    ev.assert('B: Trae getStatus 上报 { family: trae, loggedIn: true, fetchedAt }（quota/nickname 设计性缺席）',
-      traeStatusBody?.family === 'trae' && traeStatusBody?.loggedIn === true && typeof traeStatusBody?.fetchedAt === 'number'
-        && traeStatusBody?.quota === undefined && traeStatusBody?.nickname === undefined, {
+    const traeStatusBody = traeStatus?.result
+    ev.assert('B: Trae getStatus 返回宿主契约形状 { state: valid, providerId: wool-trae }（CredentialStatusPayload 对齐）',
+      traeStatusBody?.state === 'valid' && traeStatusBody?.providerId === FAMILIES[0].providerId, {
         channel: 'B',
-        expected: '{family:trae, loggedIn:true, fetchedAt:number} 且无 quota/nickname',
+        expected: '{state:valid, providerId:wool-trae}（无素材时 message 省略）',
         actual: JSON.stringify(traeStatusBody ?? traeStatus).slice(0, 200),
       })
-    ev.assert('B: Trae 提取后插件上报提取成功态（A3 主链第一语义）', traeStatusBody?.loggedIn === true
+    ev.assert('B: Trae 提取后插件上报提取成功态（A3 主链第一语义）', traeStatusBody?.state === 'valid'
       && (traeExtract.outcome === 'snapshot-success' || traeExtract.outcome === 'dom-success'), {
       channel: 'B',
-      expected: '提取成功 + loggedIn=true',
-      actual: `outcome=${traeExtract.outcome} loggedIn=${traeStatusBody?.loggedIn}`,
+      expected: '提取成功 + state=valid',
+      actual: `outcome=${traeExtract.outcome} state=${traeStatusBody?.state}`,
     })
 
     // C：models.json wool-trae 条目（apiKey 只验长度，零明文）
@@ -615,11 +615,12 @@ async function assertAuthorizeMountRenders(ui, page, f, ev) {
 }
 
 /**
- * 驱动提取 + A12 计时：plugin.executeCommand（与 action-bar 点击完全同一命令派发通道）
+ * 驱动提取 + A12 计时：plugin.executeCommand（与 action-bar 按钮点击完全同一命令派发
+ * 通道——确认卡已渲染（assertAuthorizeMountRenders），派发通道选择只为计时口径稳定）
  * → 轮询「提取结果树」的两个证据面：
- *   ① 宿主快照（plugin.ui.snapshot，viewId='authorize'——插件实际推送的 viewId）持有
- *      「提取成功」相位 = runtime 数据层回显成立（A12 计时终点）；
- *   ② 授权容器 DOM 渲染成功卡 = 用户可见回显（viewId 错位下不发生——缺口 ⑥ 如实断言）。
+ *   ① 授权容器 DOM 呈现「提取成功」卡 = 用户可见回显（viewId 契约对齐修复后的主断言面）；
+ *   ② 宿主快照（plugin.ui.snapshot，viewId='provider.authorize'——viewId=挂载位同名契约）
+ *      持有成功相位 = runtime 数据层回显（A12 计时终点，DOM 先到亦同）。
  */
 async function driveExtractAndTime({ protocol, page, ui, ev, family: f }) {
   const t0 = Date.now()
@@ -641,7 +642,7 @@ async function driveExtractAndTime({ protocol, page, ui, ev, family: f }) {
     if ((await domSuccess()) > 0) { outcome = 'dom-success'; domText = await safeText(container); break }
     if ((await domFailure()) > 0) { outcome = 'dom-error'; domText = await safeText(container); break }
     let tree = ''
-    try { tree = await snapshotTree('authorize') } catch { /* 快照通道异常按未就绪轮询 */ }
+    try { tree = await snapshotTree('provider.authorize') } catch { /* 快照通道异常按未就绪轮询 */ }
     if (tree.includes('提取成功')) { outcome = 'snapshot-success'; break }
     if (tree.includes('提取失败') || tree.includes('改用官方令牌')) { outcome = 'snapshot-error'; domText = tree.slice(0, 300); break }
     if (Date.now() - start > 60_000) break
@@ -652,34 +653,31 @@ async function driveExtractAndTime({ protocol, page, ui, ev, family: f }) {
   const domVisibleOk = outcome === 'dom-success'
   if (domText === '') domText = await safeText(container)
 
-  ev.assert(`A12: ${f.displayName} 提取回显耗时 ≤ 1000ms（派发 → 宿主持有成功结果）`, runtimeEchoOk && totalMs <= 1000, {
+  ev.assert(`A12: ${f.displayName} 提取回显耗时 ≤ 1000ms（派发 → 用户可见/DOM 先到者）`, runtimeEchoOk && totalMs <= 1000, {
     channel: 'B',
-    expected: '≤1000ms（快照/DOM 任一先到为准）',
+    expected: '≤1000ms（DOM/快照任一先到为准）',
     actual: `${totalMs}ms（outcome=${outcome}）`,
-    stats: { elapsedMs: totalMs, budgetMs: 1000, family: f.family, endpoint: 'plugin.ui.snapshot(viewId=authorize) 或 DOM 先到者' },
+    stats: { elapsedMs: totalMs, budgetMs: 1000, family: f.family, endpoint: 'plugin-authorize-container DOM 或 plugin.ui.snapshot(viewId=provider.authorize) 先到者' },
   })
-  // DOM 呈现为产品缺口 ⑥ 的信息性记录（不作为剧本判负项：提取主链语义已由快照面 +
-  // getStatus + models.json 三证成立；用户可见回显的修复由 ISSUES-2 ⑥ 追踪）。
-  ev.step({
-    step: `extract.dom-echo.${f.family}`,
-    channel: 'A',
-    exitCode: domVisibleOk ? 0 : 1,
-    stats: { outcome, domEcho: domVisibleOk ? 'DOM 命中「提取成功」卡' : 'DOM 停留加载中（viewId 错位，ISSUES-2 ⑥）', domText: domText.slice(0, 120) },
-  })
-  // viewId 错位的双向证据（⑥ 坐实）：宿主约定 viewId 快照空、插件实际 viewId 快照有树
+  // 用户可见回显断言（viewId 契约对齐修复回归锚点）：DOM 呈现「提取成功」卡。
+  ev.assert(`A: ${f.displayName} 提取成功后授权容器 DOM 呈现「提取成功」卡（viewId=provider.authorize 对齐——用户可见回显修复锚点）`,
+    domVisibleOk, {
+      channel: 'A',
+      expected: 'plugin-authorize-container 内 gui-card「提取成功」',
+      actual: `outcome=${outcome} domText=${domText.slice(0, 120)}`,
+    })
+  // viewId 契约对齐证据（修复后正向）：宿主约定 viewId 快照持有成功树（与 DOM 同源）。
   let hostViewTree = ''
-  let pluginViewTree = ''
   try {
     hostViewTree = await snapshotTree('provider.authorize')
-    pluginViewTree = await snapshotTree('authorize')
   } catch { /* 快照通道异常时留空，由断言 actual 呈现 */ }
-  ev.assert(`B: viewId 契约错位证据（宿主 viewId=provider.authorize 无树 / 插件 viewId=authorize 有成功树）`,
-    runtimeEchoOk && !hostViewTree.includes('提取成功') && pluginViewTree.includes('提取成功'), {
+  ev.assert(`B: ${f.displayName} 宿主快照 viewId=provider.authorize 持有提取成功树（viewId=挂载位同名契约对齐）`,
+    runtimeEchoOk && hostViewTree.includes('提取成功'), {
       channel: 'B',
-      expected: 'provider.authorize 空 + authorize 含「提取成功」（错位事实）',
-      actual: `hostView命中=${hostViewTree.includes('提取成功')} pluginView命中=${pluginViewTree.includes('提取成功')}`,
+      expected: 'provider.authorize 快照含「提取成功」（推树 viewId 与宿主渲染键一致）',
+      actual: `hostView命中=${hostViewTree.includes('提取成功')} outcome=${outcome}`,
     })
-  ev.attach(`a3a12-${f.family}-extract-outcome`, `outcome=${outcome} elapsedMs=${totalMs}\ndomText=${domText.slice(0, 400)}\npluginViewTree=${pluginViewTree.slice(0, 400)}`)
+  ev.attach(`a3a12-${f.family}-extract-outcome`, `outcome=${outcome} elapsedMs=${totalMs}\ndomText=${domText.slice(0, 400)}\nhostViewTree=${hostViewTree.slice(0, 400)}`)
   await ui.screenshot(`a3a12-${f.family}-extract-outcome`)
   return { outcome, elapsedMs: totalMs, text: domText }
 }
