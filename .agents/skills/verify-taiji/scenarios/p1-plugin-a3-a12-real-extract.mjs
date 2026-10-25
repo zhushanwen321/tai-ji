@@ -27,8 +27,8 @@
  *   → 授权挂载位容器 → 提取确认卡（宿主 getAuthorizeView 驱动渲染）→ 提取 → 成功卡
  *   （A12 计时，DOM 直读）→ getStatus（宿主契约形状）/ models.json / 真实对话出话。
  *
- * 渲染/契约修复回归面（原 ISSUES-2 ①②③，宿主 renderer + wool-shared 修复后本剧本
- * 断言面已翻转为修复后正向断言）：
+ * 渲染/契约修复回归项（原 ISSUES-2 ①②③，宿主 renderer + wool-shared 修复后本剧本
+ * 断言已翻转为修复后正向形态）：
  *   ①→ 提取确认卡渲染驱动：PluginProviderFlow 进入 authorize 段 invoke getAuthorizeView
  *      → 插件推初始 ready 树 → 确认卡渲染（不再占位空态），提取按钮可直接点击（A12
  *      计时口径仍以 executeCommand 同通道派发，见 driveExtractAndTime 注释）。
@@ -43,7 +43,7 @@
  *   ⑤→ sandboxDir 包根推导：宿主取入口向上首个含 package.json 的祖先 → 子目录入口
  *      （main = src/index.ts）激活不再判 node_modules 越界（插件能激活即本项回归锚）。
  *   ⑥→ api.events.emit 接入 plugin.event 通道 → 凭据状态增量推送出线（renderer 侧
- *      plugin:event 消费为渲染/契约修复面，本剧本经状态行断言间接覆盖）。
+ *      plugin:event 消费属渲染/契约修复范围，本剧本经状态行断言间接覆盖）。
  *   ⑦→ providers.credential 回读链（插件侧调用形态归一）：提取落盘后 refreshCatalog /
  *      getStatus 走真实回读——refreshCatalog 不再返回「未接入」（硬断言）。
  *
@@ -132,7 +132,7 @@ function makeTypeboxTgz(typeboxDir, outPath, workDir) {
 // ── 顶层预置（import 阶段执行，先于 runner 的 instance.launch）────────
 const dataDir0 = resolveDataDirFromArgv()
 
-// ① pack 五包到 /tmp + 组装插件 tgz（内嵌依赖）+ 拷入 fixtures distDir
+// ① pack 五包到 /tmp + typebox 备料 + 原始产物拷入 fixtures distDir
 //   （mock registry 只从 distDir 出 tarball；a3a12- 前缀 + 导入期清扫防跨 run 残留）。
 const distDir = path.join(pluginPkgsDir(process.cwd()), 'dist')
 fs.mkdirSync(distDir, { recursive: true })
@@ -233,7 +233,7 @@ fs.writeFileSync(woolManifestPath, `${JSON.stringify({
 }, null, 2)}\n`, 'utf8')
 
 // ③ 权限预批（permissions.json 启动加载 = 审批门静默通过，A23a 同款）。
-//   全集 = plugin-kit 实际消费面：views.update / commands.register(+invoke.result 回执) /
+//   全集 = plugin-kit 实际消费范围：views.update / commands.register(+invoke.result 回执) /
 //   plugin.event / storage.global.{get,set} / providers.{write,credential}。
 const pluginsDir0 = path.join(dataDir0, 'plugins')
 fs.mkdirSync(pluginsDir0, { recursive: true })
@@ -268,13 +268,14 @@ export const meta = {
   },
 
   provable: [
-    'C: 真实 pack 链在位——五包 pnpm pack 产物 + 插件 tgz 内嵌依赖与根入口 shim（stats 留痕）',
+    'C: 真实 pack 链在位——五包 pnpm pack 产物直用（原始发布形态：子目录入口 + workspace 依赖声明）+ typebox tgz 备料（stats 留痕）',
     'B/C: 基线——两插件不在 plugin.list、models.json 无 wool-trae/wool-qoder 条目',
     'B: plugin.listAvailable 两家族条目（family.id + pluginVersion/piExtensionVersion 配对字段）',
     'A: 家族卡渲染（显示名 + 「读取本机登录态」授权方式）→ 安装确认卡真实知情面（capabilities/readPaths）→ 确认安装',
     'B: 双产物双注册表——插件 active（sandbox）+ pi 扩展 enabled（extension.list）',
     'C: 双产物落盘——plugins/<scope__pkg>/ + npm/node_modules/<ext>/ + settings.json packages[]',
-    'C: 安装链经本机 mock registry 流转（plugin/ext/shared 三包 packument 请求在案）',
+    'C: ④ 依赖安装落盘——pluginDir/node_modules 含 pi-wool-shared + typebox（安装器 prepare 段真实 npm 链装依赖）；子目录入口 main=src/index.ts 保留 = ⑤ sandboxDir 包根回归锚',
+    'C: 安装链经本机 mock registry 流转（plugin/ext/shared/typebox packument 请求在案）',
     'A: 授权挂载位容器进入后提取确认卡渲染（宿主 getAuthorizeView 驱动 + viewId=provider.authorize 对齐——渲染驱动修复回归锚点）',
     'A+B: Trae 提取（executeCommand 同通道驱动）→ DOM 呈现「提取成功」卡（viewId 对齐后用户可见回显）+ 宿主快照 viewId=provider.authorize 持有成功树 + A12 耗时 ≤ 1000ms（stats 计时）',
     'A: Trae 条目展开渲染凭据状态行（provider-plugin-status——getStatus 契约形状修复回归锚点）',
@@ -282,15 +283,15 @@ export const meta = {
     'C: models.json wool-trae 条目——apiKey 非空（只验长度）+ models ≥1 且 api=wool-trae',
     'B: wool-trae 真实对话出话——modelOverride 建 session → message.complete → assistant 文本非空',
     'A+B: Qoder 提取（同构）→ DOM 呈现「提取成功」卡 + 宿主快照持成功树 + A12 耗时 ≤ 1000ms（stats 计时）',
-    'B: Qoder getStatus 返回宿主契约形状 { state: valid|invalid, message?: string }（形状契约断言，不钉死两值——⑦ 凭据回读链修复前后均可通过）',
+    'B: Qoder getStatus 返回宿主契约形状 { state, message? }（不定死两值——上游校验瞬时失败与登录态都合法呈现）',
+    'B: Qoder refreshCatalog 不再「未接入」（⑦ 回读链修复锚点——providers.credential 命中 models.json 条目；上游目录拉取环境类失败不判负）',
     'C: models.json wool-qoder 条目（apiKey 非空 + models ≥1）',
     'B: wool-qoder 真实对话出话（message.complete + assistant 文本非空）',
   ],
   notProvable: [
     '额度/昵称数值与真实上游的一致性——真机口径只验插件上报形状与非空，不做上游数值核对（Trae 无 quota/nickname 为上游设计性缺席，已登录态 message 省略由宿主默认文案承接）',
     'A12 的物理点击起点——计时以 plugin.executeCommand 同通道派发起算（通道与按钮点击完全一致，规避 DOM 点击的定位脆弱性）；回显终点 = DOM「提取成功」卡或宿主快照成功相位先到者',
-    'Qoder nickname/quota 状态上报（providers.credential 凭据回读链落空 → fetchStatus 收到 undefined token → 插件如实上报 invalid——ISSUES-2 ⑦，runtime 侧修复追踪；提取/目录/对话链不受影响，均走提取所得令牌直传）',
-    'Trae 状态链的 token 回读有效性（loggedIn:true 可由本地 storage.json 存在性判真，与回读链解耦——同样受 ⑦ 影响，被设计形态掩盖）',
+    'Qoder getStatus 的 loggedIn 瞬时值——上游校验依赖当刻 userinfo/quota 可达性，形状断言不定死 valid/invalid（refreshCatalog 已硬断言回读链通，⑦ 修复锚点）',
     'wool-manifest 远端发布链与 npm 远端发布链——经本地夹具 + mock registry 折本，版本配对校验代码路径为真、网络链为假',
     'Qoder 提取失败转 PAT 屏路径——环境探针确认凭据在位，失败路径归负例剧本（A21 族）',
   ],
@@ -302,17 +303,17 @@ export async function run(ctx) {
   const { protocol, ui, ev, log, dataDir } = ctx
   const page = await ctx.instance.page()
   const gotchas = [
-    '插件安装器不装依赖（plugin-installer-adapter「单包解压」）——插件发布形态必须 bundle 依赖，否则 sandbox loader 对裸导入 fail-closed 拒绝、真实插件激活必炸（ISSUES-2 ④；runtime 侧修复前由剧本产物内嵌依赖承载）',
-    '宿主 sandboxDir = dirname(manifest main)——子目录 main（真实发布形态 src/index.ts）激活必炸（d3-r2 实测 Sandbox: import resolves outside plugin directory；ISSUES-2 ⑤；runtime 侧修复前由剧本产物根入口 shim 承载）',
-    '提取确认卡渲染 = 宿主 PluginProviderFlow 进入 authorize 段 invoke getAuthorizeView 驱动（渲染驱动修复回归面）；提取派发仍走 plugin.executeCommand（与 action-bar 按钮点击同一命令通道，规避 DOM 点击定位脆弱性）',
+    '④ 安装器装依赖（修复后形态）：prepare 段把 dependencies 递归装进 pluginDir/node_modules（真实 npm 链）——shared 声明 typebox 为 peerDependencies，npm7+ 自动装 peer 语义由 mock pkgExtra 镜像（并进 shared 的 packument dependencies）',
+    '⑤ sandboxDir 包根推导（修复后形态）：宿主取入口向上首个含 package.json 的祖先——子目录入口（src/index.ts）与 pluginDir/node_modules 裸导入兼容，激活即回归锚',
+    '提取确认卡渲染 = 宿主 PluginProviderFlow 进入 authorize 段 invoke getAuthorizeView 驱动（渲染驱动修复的回归锚点）；提取派发仍走 plugin.executeCommand（与 action-bar 按钮点击同一命令通道，规避 DOM 点击定位脆弱性）',
     'WOOL providers.write 后 config.providers 无广播（登记缺陷，runtime 侧）：变化感知 watch 盯 models-store.json（远程目录缓存），models.json 写回不在感知范围；设置分区 v-show 常挂载、切页签不重拉——条目行卡只在重开设置窗（v-if 卸载式重挂载 → listProviders reply）后出现，剧本按该真实恢复路径驱动',
-    'pi 扩展侧 typebox 由 pi virtual-modules 注入（root/compile/value 三入口），无需 npm 安装；插件侧沙箱无注入，必须内嵌',
+    'pi 扩展侧 typebox 由 pi virtual-modules 注入（root/compile/value 三入口），无需 npm 安装；插件侧沙箱无注入——typebox 由安装器经 shared 的 packument dependencies 递归装进 pluginDir/node_modules',
     'models.json 对话条目的 enabledModels 由剧本合并写入（pi 的 model scope；非产品断言对象——产品侧启用链归设置域剧本）',
     'A12 计时含真实上游目录拉取（extract 编排在 success 相位前做 writeCatalog）——上游延迟直接计入耗时，这是设计验收的口径而非剧本瑕疵',
   ]
 
   const packStatsOk = packStep.packed.length === 5 && packStep.assembled.length === 2
-  ev.assert('C: 真实 pack 链在位（五包 pack + 两插件内嵌依赖组装）', packStatsOk, {
+  ev.assert('C: 真实 pack 链在位（五包 pack 原始产物 + typebox 备料）', packStatsOk, {
     channel: 'C',
     expected: 'packed=5 assembled=2',
     actual: `packed=${packStep.packed.length} assembled=${packStep.assembled.length} copied=${packStep.copied.join(',')}`,
@@ -495,8 +496,8 @@ export async function run(ctx) {
     const qoderExtract = await driveExtractAndTime({ protocol, page, ui, ev, family: FAMILIES[1] })
 
     // B：状态上报（Qoder：userinfo + quota 两数据源）。宿主契约形状断言 = state 两值
-    // 合法（不钉死 valid/invalid——ISSUES-2 ⑦ 凭据回读链为 runtime
-    // 侧修复面，修复前后本断言均成立；invalid 时的 message 携带「未接入」恢复指引）。
+    // 合法（不定死 valid/invalid——上游校验瞬时失败与登录态都合法呈现；
+    // invalid 时的 message 携带恢复指引）。
     const qoderStatusBody = await pollValue(async () => {
       const r = await protocol.call('plugin.invoke', { pluginId: FAMILIES[1].pluginId, method: 'getStatus', params: { providerId: FAMILIES[1].providerId } }, { timeoutMs: 30_000 })
       const s = r?.result
@@ -509,7 +510,7 @@ export async function run(ctx) {
       expected: '{state:valid|invalid, message?:string}',
       actual: JSON.stringify(qoderStatusBody ?? null).slice(0, 200),
     })
-    // 凭据回读链回归断言（ISSUES-2 ⑦ 修复面：插件侧 credential 调用形态归一）：
+    // 凭据回读链回归断言（ISSUES-2 ⑦ 修复项：插件侧 credential 调用形态归一）：
     // refreshCatalog 内部走 readCredential——「未接入」= providers.credential 落空（修复
     // 前的稳定症状）；修复后 readCredential 必命中 models.json 条目（上游目录拉取失败
     // 属环境类，错误文案不是「未接入」即回读链通）。
@@ -689,7 +690,7 @@ async function assertAuthorizeMountRenders(ui, page, f, ev) {
  * 驱动提取 + A12 计时：plugin.executeCommand（与 action-bar 按钮点击完全同一命令派发
  * 通道——确认卡已渲染（assertAuthorizeMountRenders），派发通道选择只为计时口径稳定）
  * → 轮询「提取结果树」的两个证据面：
- *   ① 授权容器 DOM 呈现「提取成功」卡 = 用户可见回显（viewId 契约对齐修复后的主断言面）；
+ *   ① 授权容器 DOM 呈现「提取成功」卡 = 用户可见回显（viewId 契约对齐修复后的主断言锚点）；
  *   ② 宿主快照（plugin.ui.snapshot，viewId='provider.authorize'——viewId=挂载位同名契约）
  *      持有成功相位 = runtime 数据层回显（A12 计时终点，DOM 先到亦同）。
  */
