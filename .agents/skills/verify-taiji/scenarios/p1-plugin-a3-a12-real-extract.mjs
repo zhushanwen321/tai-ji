@@ -34,6 +34,13 @@
  *      形状（parseStatusFields 恒 null）；详情扩展区树只在 getDetail 被调用时推送，
  *      宿主同样无调用点。额度断言权威 = B 通道 getStatus 插件上报（任务口径「以插件
  *      上报非空为准」），不做真实上游数值核对。
+ *   ③ 插件安装器不装依赖（plugin-installer-adapter「单包解压」），沙箱 loader 要求
+ *      裸导入落 pluginDir 内——真实插件必须 bundle 依赖才能激活。剧本产物内嵌
+ *      node_modules/{@zhushanwen/pi-wool-shared, typebox}（独立仓真实 pack 产物）。
+ *   ④ 宿主 sandboxDir = dirname(manifest main)（plugin-host-process.ts），仅支持根
+ *      入口；真实插件 main = src/index.ts → 激活必炸（d3-r2 实测：Sandbox: import
+ *      resolves outside plugin directory）。剧本产物以根入口 shim（re-export 真实
+ *      src）+ manifest main 指回根承载——插件源码零改动。
  *
  * 凭据安全红线：apiKey/token 只验存在性与长度，剧本证据（日志/截图/attach）零明文凭据。
  *
@@ -104,9 +111,12 @@ function findTypeboxDir() {
 }
 
 /**
- * 组装插件 tgz：真实 pack 产物 + 内嵌依赖（wool-shared pack + typebox）。
+ * 组装插件 tgz：真实 pack 产物 + 内嵌依赖（wool-shared pack + typebox）+ 入口上提 shim。
  * 为什么内嵌：宿主插件安装器不装依赖（单包解压），沙箱 loader 要求裸导入落 pluginDir
- * 内——见文件头「已知产品缺口」。插件源码零改动；内嵌物 = 独立仓真实 pack 产物。
+ * 内——见文件头「已知产品缺口」。为什么入口上提：宿主 sandboxDir = dirname(manifest
+ * main)（plugin-host-process.ts env 注入处），仅支持根入口；真实插件 main = src/index.ts
+ * → sandboxDir = <dir>/src → node_modules 判越界、激活必炸（d3-r2 首轮实测根因，ISSUES-2）。
+ * 剧本产物 = 真实源码零改动 + 根入口 shim（re-export）+ manifest main 指回根。
  */
 function assemblePluginTgz(f, sharedTgzPath, workDir, outPath) {
   const extractDir = path.join(workDir, `assembly-${f.family}`)
@@ -119,6 +129,12 @@ function assemblePluginTgz(f, sharedTgzPath, workDir, outPath) {
   execFileSync('tar', ['xzf', sharedTgzPath, '-C', scopedNm])
   fs.renameSync(path.join(scopedNm, 'package'), path.join(scopedNm, 'pi-wool-shared'))
   fs.cpSync(f.typeboxDir, path.join(pkgDir, 'node_modules', 'typebox'), { recursive: true, dereference: true })
+  fs.writeFileSync(path.join(pkgDir, 'index.js'), 'export { activate } from "./src/index.ts";\n')
+  const pkgJsonPath = path.join(pkgDir, 'package.json')
+  const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'))
+  pkgJson.main = 'index.js'
+  pkgJson.taijiPlugin.main = 'index.js'
+  fs.writeFileSync(pkgJsonPath, `${JSON.stringify(pkgJson, null, 2)}\n`, 'utf8')
   execFileSync('tar', ['czf', outPath, '-C', extractDir, 'package'])
   fs.rmSync(extractDir, { recursive: true, force: true })
 }
@@ -160,7 +176,7 @@ try {
     f.typeboxDir = typeboxDir
     const assembledName = `a3a12-plugin-wool-${f.family}-${f.version}.tgz`
     assemblePluginTgz(f, sharedTgzPath, workDir, path.join(distDir, assembledName))
-    packStep.assembled.push(`${f.pkgName} +node_modules{pi-wool-shared,typebox}`)
+    packStep.assembled.push(`${f.pkgName} +node_modules{pi-wool-shared,typebox} +root-entry-shim`)
     packStep.copied.push(assembledName)
     // pi 扩展 tgz 保持真实 pack 形态（extension 安装链会真实 npm 装依赖）
     const extTgzName = execFileSync('pnpm', ['pack', '--pack-destination', PACK_TMP_DIR], {
@@ -241,7 +257,7 @@ export const meta = {
   },
 
   provable: [
-    'C: 真实 pack 链在位——五包 pnpm pack 产物 + 插件 tgz 内嵌依赖（stats 留痕）',
+    'C: 真实 pack 链在位——五包 pnpm pack 产物 + 插件 tgz 内嵌依赖与根入口 shim（stats 留痕）',
     'B/C: 基线——两插件不在 plugin.list、models.json 无 wool-trae/wool-qoder 条目',
     'B: plugin.listAvailable 两家族条目（family.id + pluginVersion/piExtensionVersion 配对字段）',
     'A: 家族卡渲染（显示名 + 「读取本机登录态」授权方式）→ 安装确认卡真实知情面（capabilities/readPaths）→ 确认安装',
@@ -274,8 +290,9 @@ export async function run(ctx) {
   const { protocol, ui, ev, log, dataDir } = ctx
   const page = await ctx.instance.page()
   const gotchas = [
-    '插件安装器不装依赖（plugin-installer-adapter「单包解压」）——插件发布形态必须 bundle 依赖，否则 sandbox loader 对裸导入 fail-closed 拒绝、真实插件激活必炸（ISSUES-2）',
-    'renderer 只在条目展开时 invoke getStatus（期望 {state,message} 形状），从不 invoke getAuthorizeView/getDetail——羊毛初始授权树与详情树在现宿主上无渲染驱动（ISSUES-2）',
+    '插件安装器不装依赖（plugin-installer-adapter「单包解压」）——插件发布形态必须 bundle 依赖，否则 sandbox loader 对裸导入 fail-closed 拒绝、真实插件激活必炸（ISSUES-2 ③）',
+    '宿主 sandboxDir = dirname(manifest main)——子目录 main（真实发布形态 src/index.ts）激活必炸（d3-r2 实测 Sandbox: import resolves outside plugin directory；ISSUES-2 ④）——剧本产物以根入口 shim 承载真实源码',
+    'renderer 只在条目展开时 invoke getStatus（期望 {state,message} 形状），从不 invoke getAuthorizeView/getDetail——羊毛初始授权树与详情树在现宿主上无渲染驱动（ISSUES-2 ①②）',
     'pi 扩展侧 typebox 由 pi virtual-modules 注入（root/compile/value 三入口），无需 npm 安装；插件侧沙箱无注入，必须内嵌',
     'models.json 对话条目的 enabledModels 由剧本合并写入（pi 的 model scope；非产品断言对象——产品侧启用链归设置域剧本）',
     'A12 计时含真实上游目录拉取（extract 编排在 success 相位前做 writeCatalog）——上游延迟直接计入耗时，这是设计验收的口径而非剧本瑕疵',
