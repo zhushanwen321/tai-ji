@@ -10,6 +10,7 @@ import type {
   ServerMessageMap,
   SessionSummary,
   SessionGroup,
+  SessionSurface,
   Message,
   ProviderInfo,
   BuiltinProviderTemplate,
@@ -398,6 +399,18 @@ export interface ISessionService {
    * @throws if restore fails or session not found
    */
   ensureActive(sessionId: string): Promise<IPiEngine>
+
+  /**
+   * session.list 通用查询（W4b，设计 §3.3.1）：按 surface / mainSessionId 过滤的派生分组
+   * 列表（btw 线进通用列表的读取入口；过滤维度只存在于本查询——config.sessions 是无参
+   * 全量查询 + 全量广播双用消息）。实现在 SessionService（session-list-query.ts），
+   * 纯内存派生，不依赖 pi 进程活跃。
+   *
+   * 可选成员形态：transport 消费方（session-message-handler ctx 交集）按 optional 登记，
+   * 缺省仅出现在测试最小 mock 中，case 内判空走 session_list_unsupported 防御分支
+   * ——与 ctx 侧 getPlanState 同一套登记惯例。
+   */
+  listSessions?(query: { surface?: SessionSurface; mainSessionId?: string }): SessionGroup[]
 
   listPersistedSessions(): SessionGroup[]
   destroyAll(): Promise<void>
