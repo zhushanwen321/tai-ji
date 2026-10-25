@@ -248,6 +248,24 @@ if (missingCovers.length > 0) {
   log(`warn: covers 缺文档 ${missingCovers.join(', ')}`)
 }
 
+// mobile 壳 remote-access 预置（meta.remoteAccess 声明启用）：launch 前写
+// <dataDir>/remote-access.json（enabled=true + 新生成 64hex token）——main spawn runtime 时
+// 现读该文件决定开态（拼 --remote-access --mobile-dist argv），launch 后写不生效。
+// token 经 ctx.remoteAccess 交剧本消费（V1 扫码路径的 ?token= 凭据）。
+// 助手契约：scenarios/lib/mobile-shell-helper.mjs（与 main 写侧 generateRemoteAccessToken
+// 同熵量同形态，0600 对齐）。
+let remoteAccessHandle = null
+if (meta.remoteAccess ?? scenario.remoteAccess) {
+  const { generateRemoteToken, writeRemoteAccessConfig } = await import(
+    pathToFileURL(path.join(SKILL_DIR, 'scenarios', 'lib', 'mobile-shell-helper.mjs')).href
+  )
+  const token = generateRemoteToken()
+  const file = writeRemoteAccessConfig(dataDir, token)
+  remoteAccessHandle = { token, file }
+  ev.step({ step: 'remote-access.seed', channel: 'C', exitCode: 0, stats: { file, enabled: true } })
+  log(`remote-access 预置：${file}`)
+}
+
 const instance = createInstance({ repo, name: instanceName, dataDir, faux, llm, env: scenarioEnv, background: true })
 let proto = null
 let ui = null
@@ -365,6 +383,8 @@ try {
     get dataDir() {
       return dataDir
     },
+    /** meta.remoteAccess 预置结果（{token, file}；未声明 = null）。 */
+    remoteAccess: remoteAccessHandle,
     ev,
     log,
     meta,
