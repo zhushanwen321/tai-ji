@@ -42,6 +42,12 @@ import {
   extractViewFileSegment,
   extractViewSessionIdRegex,
   mirrorUsesSegmentConst,
+  RETRY_RULES_CONFIG_REL_CONST,
+  RETRY_RULES_EXT_PKG_NAME,
+  RETRY_RULES_STARTUP_CONFIG_PATH,
+  extractConfigRelJoinSegments,
+  extractConfigPathTemplateSegments,
+  extractStartupConfigPath,
 } from '../check-artifact-dir-formula-sync.mjs'
 import { expectGuardDirectRunPasses, makeGuardMirror } from './helpers/guard-mirror.mjs'
 
@@ -157,8 +163,38 @@ ${decl}`, RUNTIME_PATTERN_CONST).value).toBe(DEFAULT_REGEX)
     expect(extractViewSessionIdRegex(block.text).value).toBe(DEFAULT_REGEX)
     // 调用形态锁定：基址 / 变量名 / .test 目标任一变化 → error（宁可误报不可漏报）
     expect(extractViewTreeRootSegment(`const outDir = join(dataRoot(), 'ext-sessions', resolved.sessionId)`).error).toBeDefined()
-    expect(extractViewFileSegment(`const outPath = join(target, 'session-view.md')`).error).toBeDefined()
+    expect(extractViewFileSegment(`const outPath = join(target, 'session-view.txt')`).error).toBeDefined()
     expect(extractViewSessionIdRegex(`if (!${DEFAULT_REGEX}.test(sessionId)) {`).error).toBeDefined()
+  })
+
+  it('第九组提取器：双形态 join 常量 / getConfigPath 泛化模板 / startupConfig path（形态不符报 error）', () => {
+    // runtime 写侧单引号无分号 ↔ 引擎读侧双引号 path.join 带分号，两形态均收
+    const runtimeDecl = `const ${RETRY_RULES_CONFIG_REL_CONST} = join('config', 'retry-rules-ext-config.json')`
+    const engineDecl = `const ${RETRY_RULES_CONFIG_REL_CONST} = path.join("config", "retry-rules-ext-config.json");`
+    for (const decl of [runtimeDecl, engineDecl]) {
+      const segs = extractConfigRelJoinSegments(decl, RETRY_RULES_CONFIG_REL_CONST)
+      expect(segs.error).toBeUndefined()
+      expect(segs.value).toEqual({ configSeg: 'config', fileSeg: 'retry-rules-ext-config.json' })
+    }
+    // 形态锁定：常量名 / 非字面量首段 / 非 join 形态 → error（宁可误报不可漏报）
+    expect(extractConfigRelJoinSegments('const OTHER = join("a", "b")', RETRY_RULES_CONFIG_REL_CONST).error).toBeDefined()
+    expect(extractConfigRelJoinSegments(`const ${RETRY_RULES_CONFIG_REL_CONST} = join(cfgDir, 'x.json')`, RETRY_RULES_CONFIG_REL_CONST).error).toBeDefined()
+    expect(extractConfigRelJoinSegments(`const ${RETRY_RULES_CONFIG_REL_CONST} = 'config/x.json'`, RETRY_RULES_CONFIG_REL_CONST).error).toBeDefined()
+
+    const llmSharedBlock = [
+      'export function getConfigPath(pkgName: string): string {',
+      '\treturn join(getAgentDir(), "config", `${pkgName}-ext-config.json`);',
+      '}',
+    ].join('\n')
+    const template = extractConfigPathTemplateSegments(llmSharedBlock)
+    expect(template.error).toBeUndefined()
+    expect(template.value).toEqual({ configSeg: 'config', pkgParam: 'pkgName', fileSuffix: '-ext-config.json' })
+    expect(extractConfigPathTemplateSegments('return join(getAgentDir(), "config", file)').error).toBeDefined()
+
+    const pkgJson = JSON.stringify({ taiji: { startupConfig: [{ path: 'config/retry-rules-ext-config.json' }] } })
+    expect(extractStartupConfigPath(pkgJson).value).toBe('config/retry-rules-ext-config.json')
+    expect(extractStartupConfigPath('{}').error).toBeDefined()
+    expect(extractStartupConfigPath('{bad json').error).toBeDefined()
   })
 })
 
@@ -413,6 +449,26 @@ const rendererArchiveReferenceSrc = ({
     ``,
   ].join('\n')
 
+// 第九组（retry-rules 路径公式）fixture：四处承载源（runtime 写侧单引号 join / 引擎读侧
+// 双引号 path.join / llm-shared 泛化模板（tab 缩进真实形态）/ extension package.json；
+// drift 注入任一字面量观察第九组各轴红）。
+const runtimeRetryRulesSrc = ({ configSeg = 'config', fileSeg = 'retry-rules-ext-config.json' } = {}) =>
+  [`const ${RETRY_RULES_CONFIG_REL_CONST} = join('${configSeg}', '${fileSeg}')`, ``].join('\n')
+
+const engineRetryRulesSrc = ({ configSeg = 'config', fileSeg = 'retry-rules-ext-config.json' } = {}) =>
+  [`const ${RETRY_RULES_CONFIG_REL_CONST} = path.join("${configSeg}", "${fileSeg}");`, ``].join('\n')
+
+const llmSharedConfigSrc = ({ configSeg = 'config', fileSuffix = '-ext-config.json' } = {}) =>
+  [
+    `export function getConfigPath(pkgName: string): string {`,
+    `\treturn join(getAgentDir(), "${configSeg}", \`\${pkgName}${fileSuffix}\`);`,
+    `}`,
+    ``,
+  ].join('\n')
+
+const retryRulesExtPkgJson = ({ path = 'config/retry-rules-ext-config.json' } = {}) =>
+  JSON.stringify({ taiji: { startupConfig: [{ path }] } })
+
 /**
  * tmp mirror 工厂：目录布局对齐守卫 ROOT 相对路径（packages/shared/src、extensions/taiji/
  * system-prompt/src、packages/runtime/src/infra/pi、extensions/universal/base-tool-enhance/
@@ -420,7 +476,7 @@ const rendererArchiveReferenceSrc = ({
  * overrides 覆盖任一侧公式（漂移注入点），missing 指定不落盘的文件。root/落盘/清理/
  * 守卫副本装置见 guard-mirror.mjs。
  */
-function makeMirror({ shared = {}, mirror = {}, runtime = {}, bte = {}, sr = {}, srRoots = {}, sharedArchive = {}, srLedger = {}, runtimeArchive = {}, rendererRef = {}, missing = [] } = {}) {
+function makeMirror({ shared = {}, mirror = {}, runtime = {}, bte = {}, sr = {}, srRoots = {}, sharedArchive = {}, srLedger = {}, runtimeArchive = {}, rendererRef = {}, retryRules = {}, retryRulesEngine = {}, llmShared = {}, retryRulesPkg = {}, missing = [] } = {}) {
   return makeGuardMirror({
     prefix: 'artifact-formula-fx-',
     files: {
@@ -435,6 +491,10 @@ function makeMirror({ shared = {}, mirror = {}, runtime = {}, bte = {}, sr = {},
       'extensions/universal/session-reader/src/discovery/archive-ledger.ts': srArchiveLedgerSrc(srLedger),
       'packages/runtime/src/services/archive/archive-paths.ts': runtimeArchivePathsSrc(runtimeArchive),
       'packages/renderer/src/components/archive/agent-reference-format.ts': rendererArchiveReferenceSrc(rendererRef),
+      'packages/runtime/src/services/remote-config/remote-retry-rules.ts': runtimeRetryRulesSrc(retryRules),
+      'packages/pi-subagent-cli/src/retry-rules-classification.ts': engineRetryRulesSrc(retryRulesEngine),
+      'extensions/shared/llm-shared/src/config.ts': llmSharedConfigSrc(llmShared),
+      'extensions/universal/retry-rules/package.json': retryRulesExtPkgJson(retryRulesPkg),
     },
     missing,
     script: SCRIPT,
@@ -474,6 +534,46 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       for (const name of D7_LITERAL_CONSTS) {
         expect(r.stdout).toContain(`域 10 D7 字面一致（${name}，renderer 预检 ↔ extension 返回正文逐字相同）`)
       }
+      // 第九组：retry-rules 路径公式四处对拍
+      expect(r.stdout).toContain(`retry-rules 路径公式 config 段三方一致（'config'，runtime 写侧 ↔ 引擎读侧 ↔ extension 读侧泛化公式）`)
+      expect(r.stdout).toContain(`retry-rules 路径公式文件段三方一致（'retry-rules-ext-config.json'，写侧 ↔ 引擎读侧 ↔ 泛化模板 pkg='${RETRY_RULES_EXT_PKG_NAME}' 实例化）`)
+      expect(r.stdout).toContain(`retry-rules startupConfig path 一致（'config/retry-rules-ext-config.json'，package.json ${RETRY_RULES_STARTUP_CONFIG_PATH} ↔ 运行时读写公式）`)
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（第九组 runtime 写侧文件段与引擎读侧不一致）→ exit 1，报双侧值与泛化模板实例化', () => {
+    const fx = makeMirror({ retryRules: { fileSeg: 'retry-rules-ext-config-drift.json' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`retry-rules 路径公式文件段漂移: runtime='retry-rules-ext-config-drift.json' vs 引擎='retry-rules-ext-config.json' vs 泛化模板实例化='retry-rules-ext-config.json'`)
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（第九组 extension startupConfig path 与运行时公式不一致）→ exit 1，报双侧值', () => {
+    const fx = makeMirror({ retryRulesPkg: { path: 'config/retry-rules.json' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`retry-rules startupConfig path 漂移: package.json='config/retry-rules.json' vs 运行时公式='config/retry-rules-ext-config.json'`)
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（第九组 llm-shared 泛化模板后缀漂移）→ exit 1，报实例化值', () => {
+    const fx = makeMirror({ llmShared: { fileSuffix: '.config.json' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`vs 泛化模板实例化='${RETRY_RULES_EXT_PKG_NAME}.config.json'`)
+      expect(r.stderr).toContain('恢复动作')
     } finally {
       fx.cleanup()
     }

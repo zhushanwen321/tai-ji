@@ -9,7 +9,8 @@
  *   锁定测试），本模块是匹配与判定语义 SSOT——复制体漂移时以本文件为准；
  * - pi-subagent-cli 失败分类侧（收尾边沿分类码表消费）：行为镜像复制体位于
  *   packages/pi-subagent-cli/src/retry-rules-classification.ts（自声明镜像 SSOT，
- *   output-collector.test.ts 锁行为一致）。
+ *   跨包行为对拍 = 该包 __tests__/retry-rules-classification-parity.test.ts——同一
+ *   错误文本矩阵断言分类 retryable 判定 ≡ 本模块 evaluateRetryRules 改写结论）。
  *
  * 判定管线两层序（设计定稿，UC-23 走查缺陷修复）：
  *   第一层按 verdict 排除——non_retryable 规则优先于 retryable/conditional（先排除再放行，

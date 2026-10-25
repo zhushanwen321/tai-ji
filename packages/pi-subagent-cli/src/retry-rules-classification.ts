@@ -7,7 +7,8 @@
 //
 // 语义 SSOT = packages/shared/src/retry-rules.ts（匹配/两层序/词表）；本包不依赖
 // shared 契约包，此处是行为镜像实现（extension 侧复制体同款惯例：结构类型本地声明，
-// 漂移以 shared 为准，output-collector.test.ts 锁行为一致）。kind 值域权威 =
+// 漂移以 shared 为准，__tests__/retry-rules-classification-parity.test.ts 以同一错误
+// 文本矩阵做跨包行为对拍锁两侧结论一致）。kind 值域权威 =
 // @zhushanwen/subagent-engine-sdk FAILURE_CAUSE_KINDS_BY_CLASS。
 
 import { readFileSync } from "node:fs";

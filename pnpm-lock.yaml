@@ -667,6 +667,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.0.0
         version: 1.0.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.0)(zod@3.25.76)
+      '@zhushanwen/pi-extension-logger':
+        specifier: workspace:*
+        version: link:../../shared/extension-logger
       '@zhushanwen/pi-llm-shared':
         specifier: workspace:*
         version: link:../../shared/llm-shared
@@ -1117,6 +1120,9 @@ importers:
         specifier: workspace:*
         version: link:../subagent-engine-sdk
     devDependencies:
+      '@taiji/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
