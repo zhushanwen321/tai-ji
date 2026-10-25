@@ -3,9 +3,12 @@
 // RemoteEngine：cli 形态 EnginePort 适配（W2，impl-plan §2.2「RemoteEngine 同步成员
 // 形态映射」必写死；[H1 U6] 交互控制范围与 recordId 键路由面已随 chat 域退役删除）。
 // 把 core EnginePort 的成员映射到 EngineClient 协议请求；
-// 同步成员（capabilities / listModels / validateModel）**只读 manifest 注册期快照**
-// ——单源化原则（设计 §3.3「同步成员清单」v6 减法）：无握手缓存、无失效时机，
-// initialize 应答仅诊断（warn 由 EngineClient 留痕）。
+// 同步成员（capabilities / listModelsFromManifest / validateModel）**只读 manifest
+// 注册期快照**——单源化原则（设计 §3.3「同步成员清单」v6 减法）：无握手缓存、
+// 无失效时机，initialize 应答仅诊断（warn 由 EngineClient 留痕）。
+// [listModels 异步面 2026-10-25] listModels 是该原则的唯一例外：union 门面——
+// manifest 静态快照可枚举时同步返回（快照语义保形），无静态枚举（dynamic 引擎
+// 占位/省略）时发协议 listModels 帧拿引擎活清单（async RPC；偏好层成员校验消费）。
 //
 // 直接 implements EnginePort：SDK 契约类型与 core 中立类型是结构等价闭包，
 // implements 即编译期结构互证（字段漂移在 typecheck 期报错，与 protocol-closure
@@ -42,11 +45,12 @@ import type {
   SetModelParams,
   SetModelResult,
 } from "../types.ts";
-import type { EngineModelSelectorInput, EnginePort, EngineRunResult, RunContext } from "../port.ts";
+import { staticModelListOf, type EngineModelSelectorInput, type EnginePort, type EngineRunResult, type RunContext } from "../port.ts";
 import type { EngineClient, RunRoute } from "./engine-client.ts";
 import { matchCatalogEntry, translateByTable } from "./manifest-lookup.ts";
+import { remoteListModelsFace } from "./list-models-face.ts";
 
-/** manifest 注册期快照（发现器/注册表读取，构造时注入——同步成员唯一源）。 */
+/** manifest 注册期快照（发现器/注册表读取，构造时注入——同步成员唯一源；listModels 的活清单 RPC 面除外，见文件头）。 */
 export interface RemoteEngineManifestSnapshot {
   /** manifest `capabilities`（同步能力位权威，注册期读，无缓存）。 */
   capabilities: EngineCapabilities;
@@ -251,22 +255,26 @@ export class RemoteEngine implements EnginePort {
   }
 
   /**
-   * listModels 四态映射（必写死）：
-   *   省略 modelCatalog / models null → 返回 null（buildCoreAlignedHint 语义）；
-   *   dynamic:true 且 `models: []` → 返回 null（「无静态枚举情形」：dynamic:true 声明
-   *     清单运行期由引擎凭据链动态发现，静态空目录 ≠ 无模型——与 validateModel 的
-   *     dynamic:true 放行对称化。若映射为 []，model-prompt 会走 buildEmptyModelsHint
-   *     注入「no credentialed models — configure the provider in ZCode desktop first」
-   *     误导性文案，模型据此错误拒绝派发，B1 缺陷根因）；
-   *   dynamic:false 且 `models: []` → 返回 []（buildEmptyModelsHint，显式空清单语义）；
-   *   静态非空数组 → 原样返回（dynamic 任意，dynamic:true 非空仍返回静态部分作提示面，
-   *     运行期发现不限于此）。
+   * manifest 注册期静态快照读取（同步面，永不触碰连接——EnginePort.listModels union
+   * 的同步分支数据源）。四态映射单一权威源 = port.ts staticModelListOf（registry
+   * readOnlyEngineProxy 代理面共用同一映射，防止双实现漂移）；四态语义逐条见彼处
+   * 注释（B1 缺陷根因形态：dynamic:true+[] 不得映射为 []——「no credentialed
+   * models」误导文案会让模型错误拒绝派发）。
    */
-  listModels(): Array<{ id: string; name?: string }> | null {
-    const catalog = this.opts.manifest.modelCatalog;
-    if (catalog === undefined || catalog === null) return null;
-    if (catalog.dynamic === true && catalog.models.length === 0) return null;
-    return catalog.models;
+  listModelsFromManifest(): Array<{ id: string; name?: string }> | null {
+    return staticModelListOf(this.opts.manifest.modelCatalog);
+  }
+
+  /**
+   * [listModels 异步面 2026-10-25] union 混合门面（本体 = client/list-models-face.ts
+   * remoteListModelsFace）：静态快照可枚举 → 同步返回（同步消费方经 syncEngineModelList
+   * 窄化保形）；无静态枚举（省略 / null / dynamic:true+[]——zcode/pi manifest 均此
+   * 占位形态）→ 协议 listModels 帧 async RPC 拿引擎活清单，engineDefaults 偏好层
+   * 成员校验（resolveEngineModelWithTranslation → await）由此获得数据源。RPC 失败
+   * 原样上浮（放行 + per-engine 一次性 warn 归偏好层消费方）。
+   */
+  listModels(): Array<{ id: string; name?: string }> | null | Promise<Array<{ id: string; name?: string }> | null> {
+    return remoteListModelsFace(this.opts.manifest, this.opts.client);
   }
 
   /**

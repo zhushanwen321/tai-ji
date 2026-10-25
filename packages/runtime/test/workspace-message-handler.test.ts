@@ -265,6 +265,8 @@ describe('MessageDispatcher — 写入时机 record', () => {
     const svc = {
       ensureActive: vi.fn().mockResolvedValue(mockClient),
       getSessionByClient: vi.fn().mockReturnValue(activeSession),
+      // runAcceptance 受理成功路径清旧 outcome sidecar（dmg-r1-1）——本测试只关 record
+      // 时机，行为断言在 dispatcher 专项测试文件
       clearSessionOutcome: vi.fn(),
     }
     // getClient → undefined：无附着 client 形态（sendPrompt 入口 touch 的空检查分支）
@@ -327,6 +329,7 @@ describe('MessageDispatcher — 写入时机 record', () => {
     const svc = {
       ensureActive: vi.fn().mockRejectedValue(new Error('restore failed')),
       getSessionByClient: vi.fn(),
+      // 同 T2.2：受理面新增的 svc 依赖，mock 补齐（行为断言在 dispatcher 专项测试文件）
       clearSessionOutcome: vi.fn(),
     }
     // getClient → undefined：无附着 client 形态（sendPrompt 入口 touch 的空检查分支）

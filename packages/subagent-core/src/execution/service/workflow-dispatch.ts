@@ -500,8 +500,10 @@ export class WorkflowDispatch {
    * frontmatter : default——S-2，与 run-orchestration.resolveIdentityForRoute 同构）；
    * 非 pi 经 resolveEngineModelWithTranslation 四层解析（?? 链惰性求值——前两层任一
    * 在场时不触盘读偏好），modelSource = resolvedModel?.source ?? "default"。
+   * [listModels 异步面 2026-10-25] async：偏好层成员校验可能发协议 listModels 帧
+   * （dynamic 引擎活清单 RPC；显式/frontmatter 层与 pi 路由不触清单）。
    */
-  private resolveWorkflowModel(
+  private async resolveWorkflowModel(
     route: EngineRouteResult,
     opts: AgentCallOpts,
     agentConfig: AgentConfig | undefined,
@@ -517,7 +519,7 @@ export class WorkflowDispatch {
     // 不适用——pi 路由不插 taiji 级偏好，D6 不采用段）。
     const resolvedModel = isPiRoute
       ? undefined
-      : resolveEngineModelWithTranslation(
+      : await resolveEngineModelWithTranslation(
         route,
         opts.model,
         agentConfig?.model,
@@ -540,7 +542,9 @@ export class WorkflowDispatch {
     agentConfig: AgentConfig | undefined,
   ): Promise<ResolvedIdentity> {
     const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
-    const { engineModel, modelSource } = this.resolveWorkflowModel(route, opts, agentConfig);
+    // [listModels 异步面] await：偏好层成员校验可能发协议 listModels 帧（见
+    // resolveWorkflowModel 注释）。
+    const { engineModel, modelSource } = await this.resolveWorkflowModel(route, opts, agentConfig);
     // [subagent-detail-model-info] execOpts 盖章 modelSource——createRecordForMode
     // 经 opts 读取落 record（与下方 engineModel 覆写同形留痕）。
     execOpts.modelSource = modelSource;

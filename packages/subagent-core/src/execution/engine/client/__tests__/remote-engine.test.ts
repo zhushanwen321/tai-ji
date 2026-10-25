@@ -163,23 +163,89 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
     void cleanup;
   });
 
-  it("listModels() 四态：省略 modelCatalog → null；dynamic:true+[] → null（无静态枚举情形，B1）；dynamic:false+[] → []（显式空清单）；静态非空 → 原样", async () => {
+  it("listModelsFromManifest() 四态：省略 modelCatalog → null；dynamic:true+[] → null（无静态枚举情形，B1）；dynamic:false+[] → []（显式空清单）；静态非空 → 原样", async () => {
     const omitted = makeEngine({ modelCatalog: undefined });
-    expect(omitted.engine.listModels()).toBeNull();
+    expect(omitted.engine.listModelsFromManifest()).toBeNull();
     const nullForm = makeEngine({ modelCatalog: null });
-    expect(nullForm.engine.listModels()).toBeNull(); // null 合法等价省略
+    expect(nullForm.engine.listModelsFromManifest()).toBeNull(); // null 合法等价省略
     // B1 缺陷根因用例：dynamic:true 声明清单运行期动态发现，静态空目录 ≠ 无模型——
     // 不得映射为 []（那会走 buildEmptyModelsHint「no credentialed models」误导拒绝派发）
     const dynamicEmpty = makeEngine({ modelCatalog: { dynamic: true, models: [] } });
-    expect(dynamicEmpty.engine.listModels()).toBeNull();
+    expect(dynamicEmpty.engine.listModelsFromManifest()).toBeNull();
     const explicitEmpty = makeEngine({ modelCatalog: { dynamic: false, models: [] } });
-    expect(explicitEmpty.engine.listModels()).toEqual([]);
+    expect(explicitEmpty.engine.listModelsFromManifest()).toEqual([]);
     const listed = makeEngine();
-    expect(listed.engine.listModels()).toEqual([
+    expect(listed.engine.listModelsFromManifest()).toEqual([
       { id: "glm-4.6", aliases: ["glm"], canonicalRef: "zai/glm-4.6" },
       { id: "mimo-v2.6-flash", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.6-flash" },
     ]);
     await Promise.all([omitted, nullForm, dynamicEmpty, explicitEmpty, listed].map((f) => f.cleanup()));
+  });
+
+  it("[listModels 异步面] 静态快照可枚举 → listModels() 同步返回快照（非 Promise，同步消费方保形）", async () => {
+    const listed = makeEngine();
+    const result = listed.engine.listModels();
+    expect(result).not.toBeInstanceOf(Promise);
+    expect(result).toEqual([
+      { id: "glm-4.6", aliases: ["glm"], canonicalRef: "zai/glm-4.6" },
+      { id: "mimo-v2.6-flash", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.6-flash" },
+    ]);
+    expect(listed.client.currentState).toBe("idle"); // 静态面不触发连接
+    const explicitEmpty = makeEngine({ modelCatalog: { dynamic: false, models: [] } });
+    expect(explicitEmpty.engine.listModels()).toEqual([]); // 显式空清单同步保形
+    await explicitEmpty.cleanup();
+    await listed.cleanup();
+  });
+
+  it("[listModels 异步面] 无静态枚举（dynamic:true+[]）→ 协议 listModels 帧拿引擎活清单（async RPC；zcode/pi manifest 占位形态）", async () => {
+    const fixture = makeEngine({ modelCatalog: { dynamic: true, models: [] } });
+    try {
+      const result = fixture.engine.listModels();
+      expect(result).toBeInstanceOf(Promise);
+      // fake 引擎 listModels 应答 = MODELS 常量（同 initialize models 面）
+      await expect(result).resolves.toEqual([
+        { id: "glm-4.6", aliases: ["glm"], canonicalRef: "zai/glm-4.6" },
+        { id: "mimo-v2.6-flash", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.6-flash" },
+      ]);
+      expect(fixture.client.currentState).toBe("ready"); // RPC 经真连接（ensureConnected）
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("[listModels 异步面] 无静态枚举（省略 modelCatalog）→ 同样走协议帧（union 门面判据 = 快照 null）", async () => {
+    const fixture = makeEngine({ modelCatalog: undefined });
+    try {
+      const result = fixture.engine.listModels();
+      expect(result).toBeInstanceOf(Promise);
+      await expect(result).resolves.toEqual([
+        { id: "glm-4.6", aliases: ["glm"], canonicalRef: "zai/glm-4.6" },
+        { id: "mimo-v2.6-flash", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.6-flash" },
+      ]);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("[listModels 异步面] RPC 失败 → 原样上浮（EngineSdkError code 保留；放行语义归偏好层消费方）", async () => {
+    const failingClient = {
+      ensureConnected: async () => {},
+      request: async () => {
+        throw new EngineSdkError("engine_transport_lost", "socket closed", "restart the engine");
+      },
+      dispose: async () => {},
+    } as unknown as EngineClient;
+    const engine = new RemoteEngine({
+      engineId: "fake",
+      client: failingClient,
+      dataDir,
+      hostKind: "test",
+      manifest: {
+        capabilities: { ...FAKE_MATCHED_CAPS },
+        modelCatalog: { dynamic: true, models: [] },
+      },
+    });
+    await expect(engine.listModels()).rejects.toThrow(/engine_transport_lost/);
   });
 
   it("validateModel 成员不实现：manifest 省略 → typeof validateModel === 'undefined'（消费方跳过校验恒放行）", () => {

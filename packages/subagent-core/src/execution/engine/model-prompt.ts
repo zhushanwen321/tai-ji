@@ -18,6 +18,7 @@
 // engine-neutral：遍历注册表驱动，未来引擎实现 listModels 即自动注入，宿主零改动。
 
 import { DEFAULT_ENGINE_ID, getEngine, hasEngine, normalizeEngineId } from "./registry.ts";
+import { syncEngineModelList } from "./port.ts";
 
 /** pi 段之外的引擎才需要清单段（pi 与主 agent 模型体系一致，核心已有段）。 */
 const CORE_ENGINE_ID = DEFAULT_ENGINE_ID;
@@ -143,7 +144,10 @@ export function buildEngineModelsPromptAppend(defaultEngine: string | undefined)
   try {
     const engine = getEngine(engineId);
     if (engine.listModels === undefined) return buildCoreAlignedHint(engineId);
-    const models = engine.listModels();
+    // [listModels 异步面] union 窄化：Promise 侧（dynamic 引擎协议 RPC 活清单）同步
+    // 不可达，按 null 降级（buildCoreAlignedHint——与快照 null 同形态；prompt 组装是
+    // 同步上下文，不 spawn 引擎连接）。静态快照面行为与快照时代逐字节一致。
+    const models = syncEngineModelList(engine.listModels());
     if (models === null) return buildCoreAlignedHint(engineId);
     if (models.length === 0) return buildEmptyModelsHint(engineId);
     return buildEngineSection(engineId, models);
