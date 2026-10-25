@@ -266,6 +266,8 @@ export const SURFACE_READ_POINTS = new Map([
   // 用途①：导航过滤（两处过滤点，surface === 'sidebar' 正向谓词）
   ['packages/runtime/src/services/session/session-scanner.ts:59', 'nav-filter'],
   ['packages/renderer/src/components/panel/command-popover-symbols.ts:69', 'nav-filter'],
+  // 用途①：导航过滤（移动壳 NewTaskSheet 会话聚合：btw 旁路线不进项目 chip 主列表）
+  ['packages/mobile-renderer/src/features/project-chips.ts:37', 'nav-filter'],
   // 用途①：工作区历史判据（读注册后记录 lifecycle.get(id).surface，不读 options）
   ['packages/runtime/src/services/session/session-lifecycle.ts:676', 'workspace-history'],
   // 用途②：抑制类只读判别（W4b 收编后判别器 = session.list {surface:'btw'} 拉取缓存，
