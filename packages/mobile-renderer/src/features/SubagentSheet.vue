@@ -141,8 +141,9 @@ async function onStop(): Promise<void> {
   stopping.value = true
   try {
     await stopSubagent(props.sessionId, r.subagentId)
-    // §6.20「已停止子代理 X」流内通知（回执成功点）；收敛 = 重拉清单（消费 runtime 侧状态收敛后的快照，§7.2 停止行）
-    appendActionNotice(props.sessionId, t('mobile.notices.subagentStopped', { name: r.agent }))
+    // §6.20「已停止子代理 X」流内通知（回执成功点）；X 与列表项/Sheet 标题同口径（displayName：
+    // slug 优先、空串回退 agent——通知名与展示名一致）；收敛 = 重拉清单（消费 runtime 侧状态收敛后的快照，§7.2 停止行）
+    appendActionNotice(props.sessionId, t('mobile.notices.subagentStopped', { name: displayName(r) }))
     reloadList(props.sessionId)
   } catch (e) {
     console.warn('[SubagentSheet] subagent cancel failed:', e)

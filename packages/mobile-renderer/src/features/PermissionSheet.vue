@@ -13,6 +13,7 @@
 // - 过期自动关 + 原因（§6.4/§7.1）：plugin:permissionRequestExpired 由 companion-bridge
 //   呈现联动 closeSheet + 错误条提示；RPC 失败假成功红线（BM3）由 controller 承接
 //   （pending 保持 + error 显形），本组件 error prop 直出错误行。
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button, Sheet } from '@taiji/ui'
 
@@ -38,15 +39,31 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
+// 动作提交中本地门控：RPC 回执在途时 controller pending 恒为 true（仅失败置 error），
+// pending 门控挡不住慢网连点——第二次点击会覆盖 App 动作标记（§6.20 通知归因单槽），
+// 发出与实际生效动作相反的成功通知。提交置位禁用两按钮消除连点变体；复位时机 =
+// 收尾（成功/过期/他端撤回 → pending 翻 false）或失败显错（error 翻 true，BM3 重试可用）。
+const submitting = ref(false)
+
 function onApprove(): void {
-  if (!props.pending) return
+  if (!props.pending || submitting.value) return
+  submitting.value = true
   emit('approve', { pluginId: props.pluginId, permissions: props.permissions })
 }
 
 function onDeny(): void {
-  if (!props.pending) return
+  if (!props.pending || submitting.value) return
+  submitting.value = true
   emit('deny', { pluginId: props.pluginId })
 }
+
+watch(() => props.pending, (pending) => {
+  if (!pending) submitting.value = false
+})
+
+watch(() => props.error, (e) => {
+  if (e) submitting.value = false
+})
 </script>
 
 <template>
@@ -84,16 +101,18 @@ function onDeny(): void {
       {{ t('mobile.sheet.permissionSubmitFailed') }}
     </p>
 
-    <!-- 拒绝在左（安全侧，destructive 档）+ 允许在右 -->
+    <!-- 拒绝在左（安全侧，destructive 档）+ 允许在右；提交在途两按钮禁用（连点防护） -->
     <template #footer>
       <Button
         variant="destructive"
         data-testid="permission-sheet-deny"
+        :disabled="submitting"
         @click="onDeny"
       >{{ t('mobile.sheet.permissionDeny') }}</Button>
       <Button
         variant="default"
         data-testid="permission-sheet-approve"
+        :disabled="submitting"
         @click="onApprove"
       >{{ t('mobile.sheet.permissionApprove') }}</Button>
     </template>

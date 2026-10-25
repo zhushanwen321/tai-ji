@@ -136,4 +136,54 @@ describe('移动壳权限审批链装配（§6.5 PermissionSheet 形态）', () 
     expect(sheetQuery('[data-testid="permission-sheet-permissions"]')).not.toBeNull()
     expect(sheetQuery('[data-testid="permission-sheet-perm-net.http"]')).not.toBeNull()
   })
+
+  it('慢网连点防抖：approve 回执在途两按钮禁用（不二次回传、不覆盖动作标记——§6.20 通知与实际动作一致）', async () => {
+    // 慢网形态：approve RPC 挂起不回执，手动 resolve 收尾
+    let resolveApprove!: () => void
+    mockApprove.mockReturnValue(new Promise<void>((res) => { resolveApprove = res }))
+    wrapper = mountApp()
+    emitPermissionRequest('p4', ['fs.read'])
+    await nextTick()
+    await nextTick()
+
+    const approve = sheetQuery<HTMLElement>('[data-testid="permission-sheet-approve"]')!
+    const deny = sheetQuery<HTMLElement>('[data-testid="permission-sheet-deny"]')!
+    await approve.click()
+    expect(mockApprove).toHaveBeenCalledTimes(1)
+
+    // 在途：两按钮 disabled（模板禁用 + 提交门控双保险），deny 不被发出
+    expect(approve.hasAttribute('disabled')).toBe(true)
+    expect(deny.hasAttribute('disabled')).toBe(true)
+    await deny.click()
+    await flushPromises()
+    expect(mockDeny).not.toHaveBeenCalled()
+    expect(mockApprove).toHaveBeenCalledTimes(1)
+
+    // 回执成功 → pending 收尾（submitting 随之复位）
+    resolveApprove()
+    await flushPromises()
+    expect(useMobilePermissionRequest().pending).toBe(false)
+  })
+
+  it('失败复位可重试：approve RPC 失败（BM3 error 显形）按钮恢复可用，重试成功收尾', async () => {
+    mockApprove.mockRejectedValueOnce(new Error('ws down')).mockResolvedValueOnce(undefined)
+    wrapper = mountApp()
+    emitPermissionRequest('p5', ['fs.read'])
+    await nextTick()
+    await nextTick()
+
+    const approve = sheetQuery<HTMLElement>('[data-testid="permission-sheet-approve"]')!
+    await approve.click()
+    await flushPromises()
+    expect(useMobilePermissionRequest().error).toBe(true)
+    // 失败复位：按钮不再禁用（Sheet 留层供重试，pending 保持 true）
+    expect(approve.hasAttribute('disabled')).toBe(false)
+    expect(useMobilePermissionRequest().pending).toBe(true)
+
+    await approve.click()
+    await flushPromises()
+    expect(mockApprove).toHaveBeenCalledTimes(2)
+    expect(useMobilePermissionRequest().pending).toBe(false)
+    expect(useMobilePermissionRequest().error).toBe(false)
+  })
 })
