@@ -161,6 +161,55 @@ describe('btw 线离线尾读（btw 面解析路径；W4a 判别器 = 注册表�
   })
 })
 
+describe('附着 btw 线 RPC 失败降级的中断判定门禁（U8 tailReadOffline 剥除门禁）', () => {
+  /** 附着态 reader：pm.getClient(线 id) 返回 getEntries 恒抛错的 fake client（活跃线 RPC 失败 → getLatestWindow catch → tailReadOffline 缺省关闭判定） */
+  function makeAttachedReader(registry: (sessionId: string) => string | undefined) {
+    const resolve = vi.fn(registry)
+    const sessionStore = {
+      scanSessions: vi.fn(() => [] as Array<{ id: string; filePath: string }>),
+      convertHistory: vi.fn((raw: unknown[]) => fakeConvertHistory(raw)),
+    } as unknown as ISessionStore
+    const client = {
+      getEntries: vi.fn(() => Promise.reject(new Error('rpc down'))),
+    }
+    const reader = new SessionHistoryReader({
+      pm: { getClient: vi.fn(() => client) } as unknown as IProcessManager,
+      sessionStore,
+      resolveBtwThreadFile: resolve,
+    })
+    return { reader, client }
+  }
+
+  it('附着 btw 线 RPC 失败降级尾读：interrupted 不出场（判定前提「会话未附着」不成立——线尾 user entry 不得误标活线）', async () => {
+    // 线文件尾 = user entry（中断形态）：若降级路径透传 interrupted，附着中的活线被误标
+    const { registry } = seedThreadFile('attached-line', [
+      messageEntry('e1', 'assistant', 'reply'),
+      messageEntry('e2', 'user', 'generating'),
+    ])
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { reader, client } = makeAttachedReader(registry)
+      const result = await reader.getHistory('attached-line')
+      expect(client.getEntries).toHaveBeenCalled() // 确认走的是附着 RPC 降级链，非离线分支
+      expect(result.messages.map((m) => m.content)).toEqual(['reply', 'generating'])
+      // 剥除语义 = 值 undefined（消费方按 !== undefined 判「无判定」），非键删除
+      expect(result.interrupted).toBeUndefined()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('对照：未附着（离线）同形态线文件中断判定照常出场（门禁只拦附着降级，不废 btw 判定链）', async () => {
+    const { registry } = seedThreadFile('offline-line', [
+      messageEntry('e1', 'assistant', 'reply'),
+      messageEntry('e2', 'user', 'interrupted tail'),
+    ])
+    const { reader } = makeOfflineReader(registry)
+    const result = await reader.getHistory('offline-line')
+    expect(result.interrupted).toBe(true)
+  })
+})
+
 describe('非 btw 线回归路径（原行为不变）', () => {
   it('普通 sid 离线尾读：判别器未命中即走通用链（scanSessions miss → 静默空）', async () => {
     // 生产注入语义：非线 id 查注册表 miss → undefined → 通用链（判别器调用一次）

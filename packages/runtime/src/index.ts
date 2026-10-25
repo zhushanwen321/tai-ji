@@ -104,6 +104,7 @@ import { PiRetrySettings } from './infra/pi/pi-retry-settings.js'
 import { EventAdapter } from './infra/pi/event-adapter.js'
 import { FileChangeDiffAdapter } from './infra/pi/file-change-diff-adapter.js'
 import { EventInterpreter, applySessionOccupancyTransition } from './services/session/event-interpreter.js'
+import { isGeneratingTurn } from './services/session/types.js'
 import { join, resolve, isAbsolute } from 'node:path'
 import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
@@ -923,11 +924,13 @@ async function main(): Promise<void> {
       // EventInterpreterOptions.onCompactionContextRewritten）。与 onGenStats 同模式：
       // 闭包引用下方声明的 genStatsService，createAdapter 仅在 session 创建后调用，引用恒就绪。
       onCompactionContextRewritten: (sid) => genStatsService.markContextRewritten(sid),
-      // W3：agent_end 副作用——isGenerating 复位（W1 后 label 直写兜底已随机制删除）。
-      // 原 attachUsageListener agent_end 分支迁移至此。不迁移则 session 永远 busy（下条消息被拒）。
+      // W3：agent_end 副作用——occupancy 'settling' 转移（W1 后 label 直写兜底已随机制删除）。
+      // 原 attachUsageListener agent_end 分支迁移至此。
       // W4：转发 stopReason 用于 session_end 终态判定（'error'→error，其余→done）。
-      onTurnFinalize: (sid, stopReason) => {
-        sessionService.handleTurnEndSideEffects(sid, stopReason)
+      // [chat-flow-consistency willRetry 分层] willRetry=true（pi 自动重试中间失败）跳过终态
+      // sidecar 写入（settling 转移保留——attempt 间隙真实阶段就是 settling）。
+      onTurnFinalize: (sid, stopReason, willRetry) => {
+        sessionService.handleTurnEndSideEffects(sid, stopReason, willRetry)
       },
       // D4（rename-session-three-modes 显示侧扇出修复）：session_info_changed 事件到达时
       // ① label 回写（session_info_changed 事件路径唯一写方，toSummary/config.sessions 读
@@ -951,7 +954,7 @@ async function main(): Promise<void> {
       }),
       // [ADR-0047] ping 探测连续 3 次失败（180s）判定 pi 进程真死，触发 abort。
       // 复用 sessionService.abort → message-dispatcher.abort 完整路径（client.abort 成功/失败
-      // 均有兜底广播 + 复位 isGenerating）。.catch 防极端异常逃逸成 unhandledRejection
+      // 均有兜底广播 + occupancy turn 复位（isGeneratingTurn 派生自然翻 false））。.catch 防极端异常逃逸成 unhandledRejection
       //（abort 内部已 try/catch 广播终态）——逃逸异常必须留痕：pi 死而 abort 链也坏时，
       // 零诊断线索无法排障（b24-M4）。
       onSilentAbort: ({ sessionId: sid }) => {
@@ -962,7 +965,7 @@ async function main(): Promise<void> {
       // M4 compaction 事件驱动：interpreter 从 compaction_start/end 唯一编排广播（session.compacting /
       // message.compactionSummary / session.compacted）。[session-dead-structural-fixes D2 挂点迁移，
       // u3b] 原此处对三布尔的直写（布尔赋值）改调原语对应行（'compacting-start' /
-      // 'compacting-end'）：isCompacting 派生 + occupancy 合并 + state 帧广播原子完成——结构上
+      // 'compacting-end'）：occupancy.compacting 置位/复位 + 合并写 + state 帧广播原子完成——结构上
       // 消灭「只写布尔不写派生视图」的残留直写（interpreter #5/#6 的 onOccupancyTransition 通道
       // 调同一原语行，幂等去重）。
       onCompactingStateChange: (sid, v) => {
@@ -971,7 +974,7 @@ async function main(): Promise<void> {
       },
       // occupancy 挂点接线（session-dead-structural-fixes D2 挂点迁移，u3b）：interpreter 侧
       // 挂点（#2-#6 + turn-end 异常兜底）传封闭转移枚举值，经本闭包写 session 记录——原语
-      // 原子完成「合并三维 + 派生三布尔 + 幂等去重 + state 帧广播」（interpreter 不持有全量
+      // 原子完成「合并四维 + 幂等去重 + state 帧广播」（interpreter 不持有全量
       // occupancy，经 session 记录权威聚合，与上方 onCompactingStateChange 同构）。
       onOccupancyTransition: (transition) => {
         const s = sessionService.getSession(sessionId)
@@ -1018,7 +1021,7 @@ async function main(): Promise<void> {
       onAgentSettled: (sid) => {
         sessionService.flushPendingBashResults(sid)
         // [session-dead 2026-09-10] run 级联结束（pi _runAgentPrompt 的 finally 确定性 emit）→
-        // 复位 isGenerating。agent_end 在 retry / auto-compaction 续跑时会重发、post-run 尾段
+        // occupancy turn 复位（isGeneratingTurn 派生自然翻 false）。agent_end 在 retry / auto-compaction 续跑时会重发、post-run 尾段
         // 直接 settle 的收尾路径更不含 agent_end——只靠 agent_end 复位会让 processing 分支置的
         // true 残留（幽灵忙碌）。语义与竞态自愈论证见 handleAgentSettledSideEffects 注释。
         sessionService.handleAgentSettledSideEffects(sid)
@@ -1180,6 +1183,8 @@ async function main(): Promise<void> {
   const handoffService = new HandoffService({
     sessionService,
     broker: server,
+    // [chat-flow-consistency R1] handingOff 维 state-topic 广播通道（session.occupancy 帧）
+    messageBus,
     broadcastSessionList: () => server.broadcastSessionList(),
     nextPushId: () => server.nextPushId(),
   })
@@ -1486,9 +1491,10 @@ async function main(): Promise<void> {
   // tombstone / 画布解绑
   // 复用 delete 同名原语；trash 经 sessionStore（与 cascade 生产装配同源，G4 语义——失败
   // 原样上抛保持可恢复形态）。getActiveSession 映射 getSession（IManagedSessionView 含
-  // cwd/sessionFilePath/isGenerating，ArchiveService 消费的最小字段集）。
+  // cwd/sessionFilePath/occupancy，ArchiveService 消费的最小字段集）。
+  // [chat-flow-consistency D1] isGenerating 供给端迁移：isGeneratingTurn(occupancy.turn)。
   const archiveService = new ArchiveService({
-    isGenerating: (sid) => sessionService.getSession(sid)?.isGenerating ?? false,
+    isGenerating: (sid) => isGeneratingTurn(sessionService.getSession(sid)?.occupancy?.turn),
     getActiveSession: (sid) => sessionService.getSession(sid),
     findScannedSession: (sid) => sessionService.findScannedSession(sid),
     disposeUserStopped: (sid) => userStoppedGate.disposeForDelete(sid),
@@ -1527,7 +1533,8 @@ async function main(): Promise<void> {
    */
   const resolveBtwMain = (mainSid: string): { cwd: string; mainTurnActive: boolean } | undefined => {
     const active = sessionService.getSession(mainSid)
-    if (active) return { cwd: active.cwd, mainTurnActive: active.isGenerating }
+    // [chat-flow-consistency D1] 读口迁移：mainTurnActive ≡ isGeneratingTurn(occupancy.turn)。
+    if (active) return { cwd: active.cwd, mainTurnActive: isGeneratingTurn(active.occupancy?.turn) }
     const scanned = sessionService.findScannedSession(mainSid)
     return scanned ? { cwd: scanned.cwd, mainTurnActive: false } : undefined
   }

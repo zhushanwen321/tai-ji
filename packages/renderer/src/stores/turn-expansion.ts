@@ -116,29 +116,6 @@ export const useTurnExpansionStore = defineStore('turn-expansion', () => {
     getTakeoverPartition(sid).set(key, on)
   }
 
-  /** 批量展开 */
-  function expandAll(sid: string, keys: string[]): void {
-    const p = getPartition(sid)
-    for (const k of keys) {
-      p.set(k, true)
-    }
-  }
-
-  /** 批量折叠 */
-  function collapseAll(sid: string, keys: string[]): void {
-    const p = getPartition(sid)
-    for (const k of keys) {
-      p.set(k, false)
-    }
-  }
-
-  /** 任一 turn 处于展开态 */
-  function hasAnyExpanded(sid: string, keys: string[]): boolean {
-    if (keys.length === 0) return false
-    const p = getPartition(sid)
-    return keys.some((k) => p.get(k) === true)
-  }
-
   /**
    * session 销毁时清分区（注册到模块级 cleanup registry，由 triggerSessionCleanups 编排）。
    *
@@ -147,6 +124,14 @@ export const useTurnExpansionStore = defineStore('turn-expansion', () => {
    *   （对齐 useSessionScopedState 的 version ref bump 机制，ADR-0049 对称性）
    * - delete() 再把分区从外层 Map 移除，释放内存（partition 引用断开）
    * session 销毁时该 session 的 UI 也卸载，影响有限，但保留通知路径避免设计 debt。
+   *
+   * [chat-flow-consistency C4 两段式契约] 本方法同时是「磁盘重载后重置」侧的契约动作：
+   * 展开态的清除只有两条路径——① 本方法在 session 销毁清理链触发；② 宿主发起走盘重载的
+   * 基线接管点（ChatHydratePort.reconcileHistory 适配层——use-session 全部 history 写入通路
+   * 的编排单点，桌面 useSidebar / 移动壳 app-runtime）在未 hydrate 会话（走盘重载形态）回填
+   * 前调用。内存驻留期间（LRU 未驱逐切走再切回，已 hydrate 增量 reconcile）分区**不清**——
+   * 驻留期 turn 稳定 id 不变，手动展开保持；走盘重载换 id 空间（live u-id 与盘上 entry 派生
+   * id 不相交），显式重置把「静默键失配」变「可断言重置」。
    */
   function clearSession(sid: string): void {
     const p = partitions.get(sid)
@@ -178,9 +163,6 @@ export const useTurnExpansionStore = defineStore('turn-expansion', () => {
     getTakeoverPartition,
     isTakeover,
     setTakeover,
-    expandAll,
-    collapseAll,
-    hasAnyExpanded,
     clearSession,
     /** 反注册 cleanup（测试/HMR/卸载 Pinia 实例时调，避免模块级 registry 累积废弃闭包）。 */
     $unregisterCleanup: () => {

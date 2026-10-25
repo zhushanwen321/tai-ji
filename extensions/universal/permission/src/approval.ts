@@ -22,6 +22,10 @@
 
 import { type Component, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 
+// 审批 select title 首行判定键单源：runtime event-adapter 按此串精确匹配落
+// permission: true 键（侧栏等待可见性），双端 import 同一符号防文案漂移静默失联。
+import { PERMISSION_APPROVAL_TITLE } from "@zhushanwen/extension-protocol";
+
 import type { ApprovalRequest } from "./pipeline.js";
 import type { ToolInvocationContext, UserDecision } from "./types.js";
 
@@ -223,7 +227,7 @@ interface ApprovalFieldSet {
 /** 构造审批卡字段集（title/tool/command/reason + 可选 AI 四元组含 reasoning）。 */
 function buildApprovalFieldSet(req: ApprovalRequest): ApprovalFieldSet {
 	return {
-		title: "[pi-permission] Approval required",
+		title: PERMISSION_APPROVAL_TITLE,
 		tool: req.toolName,
 		// 空字符串与 undefined 同义（两外壳的 Command 行都只在非空时渲染）
 		command: req.command !== undefined && req.command.length > 0 ? req.command : undefined,

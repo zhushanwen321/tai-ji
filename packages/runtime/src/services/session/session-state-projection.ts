@@ -303,9 +303,7 @@ export class SessionStateProjection {
    *   1. occupancy #3 'settling' 转移（session-dead-structural-fixes D2 挂点迁移，u3b）——
    *      原直写 isGenerating=false 与 interpreter 侧 #3（turn-end → settling）是「agent_end
    *      两边各写一处且非原子」的漂移形态（设计 §2.3 根因 1），改调 'settling' 行后原语原子
-   *      完成「isGenerating=false 派生 + turn='settling' 合并 + state 帧广播」，双写合一；
-   *      interpreter #3 保留为幂等去重的防御性冗余。不迁移则正常生成完成后 session 永远
-   *      isGenerating=true，下一条消息被 busy 拒绝（message-dispatcher preemptive reject）。
+   *      完成合并与广播。interpreter #3 保留为幂等去重的防御性冗余。
    *   2. project sidecar 兜底补写 —— turn_end 时仍未落盘则在此补写（label 持久化已不在此
    *      承载：W1 起活跃 label 唯一写入口 = set_session_name RPC）。
    *   3. session_end 终态写入（W4，ADR 0042）—— 让 scanner 读到终态，前端无需预加载历史。
@@ -314,14 +312,22 @@ export class SessionStateProjection {
    *   outcome 映射：'error'→error，'aborted'→stopped，其余→done。
    *   aborted 走 stopped 与 message-dispatcher.abort 路径一致（abort 写 stopped 后若 pi 仍发
    *   agent_end{stopReason:'aborted'}，此处也写 stopped，两条 session_end 一致不冲突）。
+   * @param willRetry [chat-flow-consistency willRetry 分层，design-turn-statemachine 缺陷 1
+   *   方案 A] pi agent_end 恒带的中间失败标志：true = 本次 error 是 pi 自动重试的中间失败、
+   *   turn 并未结束（attempt 级终态而非回合级终态）——**跳过终态 sidecar 写入**（否则重试
+   *   成功前的每次中间失败都写 error 终态，重试期间进程崩溃会停在 error）。'settling' 转移
+   *   与 project sidecar 兜底保留——attempt 间隙的真实阶段就是 settling（retry 续跑的
+   *   turn-start 会把 turn 推回 generating，机器全组合表已覆盖该路径）。
    */
-  handleTurnEndSideEffects(sessionId: string, stopReason?: string): void {
+  handleTurnEndSideEffects(sessionId: string, stopReason?: string, willRetry?: boolean): void {
     const session = this.deps.getSession(sessionId)
     if (!session) return
     applySessionOccupancyTransition(session, this.deps.getMessageBus(), 'settling')
     // D14 语义修正：agent_end 兜底补写归属（turn_end 时仍未落盘则在此补写）。
     this.deps.tryPersistProjectBinding(session)
-    // W4：写 session_end 终态。aborted→stopped（与 abort 路径一致），error→error，其余→done
+    // W4：写 session_end 终态。aborted→stopped（与 abort 路径一致），error→error，其余→done。
+    // willRetry=true（中间失败）跳过——终态写入是回合级副作用，attempt 级失败不落盘。
+    if (willRetry === true) return
     const outcome = stopReason === 'error' ? 'error'
       : stopReason === 'aborted' ? 'stopped'
         : 'done'
@@ -339,18 +345,19 @@ export class SessionStateProjection {
    * 的 `finally` 中 `_emitAgentSettled()`（pi dist/core/agent-session.js:772-786），且存在
    * 「post-run 尾段返回 false 直接 settle」这条不含 agent_end 的收尾路径（同文件 :787+）。
    *
-   * 缺本挂点的后果：message-dispatcher 的 processing 分支在 pi 拒绝「already processing」时
-   * 置 isGenerating=true（'reject-processing' 行，见 handlePromptFailure 注释），其复位原先只
-   * 依赖 agent_end。若 prompt 恰落在「post-run 尾段」（_flushPendingBashMessages 等 I/O，可达
-   * 百毫秒级、**每次 run 结束都经过**）窗口，则 agent_end 已发而 settle 未完成 → isGenerating
-   * 永久残留 true：occupancy 已被 #4 复位为 idle（前端照常 flush），但 busy 预检读 occupancy
-   * → 后续每条消息被拒，只能等 abort / 进程退出（幽灵忙碌，与本次事故同类）。
+   * 缺本挂点的后果：occupancy 的占用复位只依赖 agent_end。若 prompt 恰落在「post-run 尾段」
+   *（_flushPendingBashMessages 等 I/O，可达百毫秒级、**每次 run 结束都经过**）窗口，则
+   * agent_end 已发而 settle 未完成 → isGenerating 永久残留 true：occupancy 已被 #4 复位为
+   * idle（前端照常 flush），但 busy 预检读 occupancy → 后续每条消息被拒，只能等 abort /
+   * 进程退出（幽灵忙碌，与本次事故同类）。
    *
    * 语义依据：agent_settled = run 级联结束（pi finally），此刻必无 turn 在跑 → 'idle' 转移正确。
-   * 反向竞态（本复位晚于「新 run 受理 prompt」的置位）存在但可自愈：pi 对活跃 run 的 prompt
-   * 会拒绝 processing（锚点 pi 1.0.0 dist/core/agent-session.js prompt 的
-   * "Agent is already processing" throw，run 活跃时 prompt 直拒），由 handlePromptFailure 的 processing 分支
-   * （'reject-processing'）重新纠偏。
+   * 反向竞态（本复位晚于「新 run 受理 prompt」的置位）由 pi 的活跃 run 直拒兜住：pi 对活跃
+   * run 的 prompt 抛 "Agent is already processing"（锚点 pi 1.0.0 dist/core/agent-session.js
+   * prompt，run 活跃时 prompt 直拒）——投递内核按真失败首败即停显式上报、不反转 occupancy
+   *（原 busy 反转纠偏转移已随忙闲门禁退役，u5a：受理即出站下文本投递恒带 streamingBehavior，
+   * pi 忙时入队不拒，见 session-delivery-registry promptAwaitingCompaction 注释），occupancy
+   * 以本挂点的 'idle' 复位为准。
    */
   handleAgentSettledSideEffects(sessionId: string): void {
     const session = this.deps.getSession(sessionId)

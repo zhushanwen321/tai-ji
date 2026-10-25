@@ -141,7 +141,8 @@ export interface StagingAction<S extends StagingSource = StagingSource> {
   readonly isInProgress: ComputedRef<boolean>
   /**
    * 取消进行中的操作（可选——无 B 阶段语义的 staging 如 fork 可不实现）。
-   * handoff → useHandoffActions.abortHandoff（session.abortHandoff RPC + 乐观清 handingOff）。
+   * handoff → useHandoffActions.abortHandoff（session.abortHandoff RPC；occupancy.handingOff
+   * 复位由 runtime 原语经帧到达，前端不乐观清——[chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行]）。
    * @param sessionId 源 session id
    */
   readonly abort?: (sessionId: string) => Promise<void>

@@ -9,7 +9,7 @@
  * - agent_settled：越档检查 + marker 持久化（D15）+ nextTurn 投递一次性提醒（D3/D4①）
  * - model_select：跨界通知 + downshift 提醒（D5/D4①）
  *
- * 通知注入车道（D4①，delivery-ownership-kernel）：四类通知全部经 notices.ts 的
+ * 通知投递路径（D4①，delivery-ownership-kernel）：四类通知全部经 notices.ts 的
  * sendSmartContextNotice 走 nextTurn（随下一次 prompt 注入、不自起 run）——通知 run 不再
  * 抢占用户消息投递跑道；被压缩掐断的 turn 由 runtime 续跑投递兜底（D4②）。
  */

@@ -13,9 +13,10 @@
  * - abort 抢先收尾 token 比对检查语义不变。
  *
  * [MF-1-9] bash-end 转移后经 deps.notifyHoldRelease 唤醒投递内核持有期等待者（view
- * isBashRunning 复位的边沿源——等待者由 500ms 轮询收编为事件驱动）。
+ * occupancy bash 维复位（旧派生名 isBashRunning）的边沿源——等待者由 500ms 轮询收编为事件驱动）。
  */
 import type { IPiEngine } from '../ports/pi-engine.js'
+import { isGeneratingTurn } from './types.js'
 import type { PendingBashResultData, IManagedSessionView } from './types.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
 import { toErrorMessage } from '../../utils/errors.js'
@@ -95,7 +96,8 @@ export class BashDispatcher {
    * 与 sendMessage 共享 ensureActive 骨架，但 busy 预检语义不同（W2 起）：
    * sendBash 仅 bash↔bash / bash↔compacting 互斥，允许 AI streaming（isGenerating）期间执行 bash，
    * 对齐 pi-tui——pi 把 bash RPC 排入 _pendingBashMessages 待当前 turn 结束后按 JSONL 顺序回放，
-   * 对 RPC 透明。sendMessage 仍保留 isGenerating 三者互斥（spec OQ-1：本期不放宽 prompt 路径）。
+   * 对 RPC 透明。sendMessage 的 busy 预检已随「排队取代拒绝」退役（D5，对齐 message-dispatcher
+   * sendMessage 注释口径）——prompt 暂不可收时态由投递内核持有，消息不再被拒回 renderer。
    *
    * 不走 sendPrompt（bash 不调 client.prompt，不需 BeforeSend hook、不需图片附件、不触发 isGenerating 流式态）。
    *
@@ -132,7 +134,7 @@ export class BashDispatcher {
     // [时序不变量 timeout-tick-parity] 必须保持 HEAD 内联 try/await/catch 形态：
     // 任何 Promise 组合子（async 包装 / .catch 链）都会使衍生 promise 在 resolve 路径
     // 多一拍微任务，bashStart 广播与 reserveBashSlot 置位整体晚一拍，race 测试 W1 的
-    // 1-tick 断言（bashStart 已广播 / isBashRunning 已置位）即落空（U08 两轮实测）。
+    // 1-tick 断言（bashStart 已广播 / occupancy bash 维已置位）即落空（U08 两轮实测）。
     let client: IPiEngine
     try {
       client = await this.deps.ensureActive(sessionId)
@@ -152,11 +154,12 @@ export class BashDispatcher {
     // 原因（spec C1）：pi 把 bash RPC 排入 _pendingBashMessages，待当前 turn 结束后按 JSONL
     // 顺序回放——对 RPC 透明，runtime 侧无需排队等待。对齐 pi-tui 行为（pi-tui 允许 streaming 时发 bash）。
     // 保留的互斥（仍 reject）：
-    // - isBashRunning：bash↔bash 互斥——pi 单 bash slot，并发会乱序。
-    // - isCompacting：bash↔compact 互斥——compact 重写上下文，期间 bash 会读到半压缩状态。
-    // 注意：sendMessage（sendPrompt）预检仍保留 isGenerating/isBashRunning/isCompacting 三者互斥，
-    // 本期不放宽（spec OQ-1）——pi prompt 在 isStreaming 时强制要求 streamingBehavior 参数，
-    // sendMessage 预检拒 isGenerating 是安全网。
+    // - occupancy.bash（旧派生名 isBashRunning）：bash↔bash 互斥——pi 单 bash slot，并发会乱序。
+    // - occupancy.compacting（旧派生名 isCompacting）：bash↔compact 互斥——compact 重写上下文，
+    //   期间 bash 会读到半压缩状态。
+    // 注意：sendMessage（sendPrompt）的 busy 预检已随「排队取代拒绝」退役（D5，对齐
+    // message-dispatcher sendMessage 注释口径）——prompt 暂不可收时态由投递内核持有，
+    // 消息不再被拒回 renderer；bash 预检保留（bash 通道不经投递内核，行为不变）。
     // null = 预检拒绝（send.rejected 已广播）；activeSession 为 undefined 时原逻辑不拒直接执行。
     const reservation = this.reserveBashSlot(sessionId, client)
     // busy 预检拒绝 = 未执行 → 'rejected'（send.rejected 已广播，用户反馈由前端该 handler 承担）
@@ -194,14 +197,17 @@ export class BashDispatcher {
   ): { activeSession: IManagedSessionView | undefined; myToken: string | undefined } | null {
     const activeSession = this.deps.getSessionByClient(client)
     if (activeSession) {
-      if (activeSession.isCompacting || activeSession.isBashRunning) {
+      // [chat-flow-consistency D1] 派生布尔读口迁移：isCompacting ≡ occupancy.compacting、
+      // isBashRunning ≡ occupancy.bash（bash↔bash / bash↔compact 互斥语义不变）。
+      const occ = activeSession.occupancy
+      if (occ?.compacting === true || occ?.bash === true) {
         console.warn(`[bash-dispatcher] sendBash preemptive reject (busy), sid=${sessionId}`)
         const rejectMsg = { type: 'send.rejected' as const, payload: { sessionId, reason: 'busy' as const, message: 'Agent 正在处理' } }
         this.bus?.publish(sessionId, rejectMsg)
         return null
       }
-      // occupancy #7（D2 迁移）：sendBash 置位 → 'bash-start' 行（派生 isBashRunning=true +
-      // 合并 bash=true；与 turn 维度正交，streaming 中可并存）。
+      // occupancy #7（D2 迁移）：sendBash 置位 → 'bash-start' 行（合并 bash=true，旧派生名
+      // isBashRunning 随之成立；与 turn 维度正交，streaming 中可并存）。
       applySessionOccupancyTransition(activeSession, this.bus, 'bash-start')
       // [W1] 生成本次 sendBash 的代次令牌：abortBash 在广播 cancelled 终态前会旋转此 token
       // （清 undefined）。await 返回后比对 token，可判定是否被 abortBash 抢先收尾。
@@ -255,7 +261,8 @@ export class BashDispatcher {
       timestamp: Date.now(),
       ...(result.fullOutputPath !== undefined && { fullOutputPath: result.fullOutputPath }),
     }
-    if (activeSession?.isGenerating) {
+    // [chat-flow-consistency D1] 活跃 run 判定读口迁移：isGenerating ≡ isGeneratingTurn(occupancy.turn)。
+    if (activeSession && isGeneratingTurn(activeSession.occupancy?.turn)) {
       activeSession.pendingBashResults = [...(activeSession.pendingBashResults ?? []), bashResultData]
     } else {
       this.publishBashResult(sessionId, bashResultData)
@@ -310,14 +317,14 @@ export class BashDispatcher {
   }
 
   /**
-   * sendBash finally 清理：复位 isBashRunning + 条件复位 token。仅当 token 仍是本次 sendBash
+   * sendBash finally 清理：复位 occupancy bash 维（旧派生名 isBashRunning）+ 条件复位 token。仅当 token 仍是本次 sendBash
    * 的（未被 abortBash 旋转、也未被下一次 sendBash 覆盖）时才清，避免误清 abortBash 或后续
    * sendBash 的标记。
    */
   private releaseBashReservation(sessionId: string, activeSession: IManagedSessionView | undefined, myToken: string | undefined): void {
     if (activeSession) {
       // occupancy #7（D2 迁移）：sendBash finally（成功/失败/abort-skip 全路径）→ 'bash-end' 行
-      // （派生 isBashRunning=false + 合并 bash=false）。
+      // （合并 bash=false，旧派生名 isBashRunning 随之消失）。
       applySessionOccupancyTransition(activeSession, this.bus, 'bash-end')
       // [MF-1-9] bash 结束边沿：唤醒投递内核持有期等待者（bash hold 释放）。
       this.deps.notifyHoldRelease?.(sessionId)
@@ -364,7 +371,8 @@ export class BashDispatcher {
    * 取消进行中的 bash 执行（pi abort_bash）。
    *
    * 与 abort() 对称：失败不 throw（console.error 兜底），finally 兜底广播 message.bashAborted
-   * 独立帧——与 abort 广播 message.complete{aborted} 对称，前端据 bashAborted 收尾 isBashRunning 态。
+   * 独立帧——与 abort 广播 message.complete{aborted} 对称，前端据 bashAborted 收尾 bash 执行态
+   *（executingBash；旧派生名 isBashRunning 已随 D1 删除）。
    *
    * 返回 sent = abort_bash 是否真的发出且 pi 确认（P6 断言④回执真实化）：调用方
    * （session-message-handler）据此决定回执——sent=true 才回 message.status{aborted}，
@@ -376,9 +384,9 @@ export class BashDispatcher {
       throw new Error(`Session ${sessionId} not found`)
     }
     const activeSession = this.deps.getSessionByClient(client)
-    // 检查：isBashRunning（runtime 在等待）→ 放行；否则（空闲 session 的重复/误触取消）
-    // 短路 { sent: false }，由调用方回执真实化。
-    if (!activeSession?.isBashRunning) return { sent: false }
+    // 检查：bash 维置位（runtime 在等待）→ 放行；否则（空闲 session 的重复/误触取消）
+    // 短路 { sent: false }，由调用方回执真实化。[chat-flow-consistency D1] 读口迁移。
+    if (activeSession?.occupancy?.bash !== true) return { sent: false }
     // sent = abort_bash 是否发出且 pi 确认（sendCommand 对 success:false reject，resolve =
     // pi 已执行 abort）。失败不提前 return：兜底 bashAborted 广播必须照发（T8b 既有契约）。
     let sent = true

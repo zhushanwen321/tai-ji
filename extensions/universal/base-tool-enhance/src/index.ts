@@ -64,7 +64,7 @@ export default function baseToolEnhanceExtension(pi: ExtensionAPI): void {
 	// handler 消费该 promise，runner.js:632），
 	// promise 由其消费不产生 unhandled rejection；错误在维护链内 async 捕获
 	pi.on("session_start", (event: SessionStartEvent, ctx: ExtensionContext) => {
-		// 统一投递端口装配（unified-delivery 波 2，设计 §3.7 装配点）：custom 车道
+		// 统一投递端口装配（unified-delivery 波 2，设计 §3.7 装配点）：custom 投递路径
 		// 唯一执行者、恒装配（本扩展为 infrastructure 档必载——两套装配并存违背
 		// 装配单一归属，§3.7）。每次 session_start 重绑（dispose 旧实例 + 新实例
 		// recover 差集重放）；消费方（notifier / session-manager / workflow，

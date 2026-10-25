@@ -188,10 +188,10 @@ export const HIDDEN_ALLOWLIST = new Map([
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:271', '插件 ui.updateHeaderAction hidden 透传'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:331', '插件 ui.updateHeaderAction 方法签名 hidden 形参（跨行断言的声明行）'],
   ['packages/runtime/src/services/plugin-service/api/ui-api.ts:346', '插件 ui.updateHeaderAction 实现签名 hidden 形参（跨行断言的声明行）'],
-  ['packages/shared/src/protocol.ts:611', '协议 plugin headerAction 条目 hidden 字段声明'],
+  ['packages/shared/src/protocol.ts:624', '协议 plugin headerAction 条目 hidden 字段声明（HeaderActionUpdatePayload；611→624 随 fix-chat-flow-order 合并加字段漂移）'],
   // document.hidden（浏览器 API）
   ['packages/renderer/src/composables/features/settings/use-app-update-autocheck.ts:166', 'document.hidden（浏览器 API：页面可见性）'],
-  ['packages/ui/src/features/chat/composables/useTurnElapsed.ts:125', 'document.hidden（浏览器 API：页面可见性，计时器暂停判据）'],
+  ['packages/ui/src/features/chat/composables/useTurnElapsed.ts:123', 'document.hidden（浏览器 API：页面可见性，计时器暂停判据）'],
   // canvas 布局 opts.hidden（节点显隐回调）
   ['packages/renderer/src/components/canvas/CanvasGraph.vue:249', 'canvas 布局 opts.hidden（节点显隐回调注入）'],
   ['packages/renderer/src/components/canvas/canvas-display.ts:229', 'canvas 布局 opts.hidden 形参声明'],
@@ -254,7 +254,7 @@ export const SURFACE_SAME_NAME_EXCLUDE = new Map([
  * IManagedSessionView → SessionSummary 的透传，非读取点）。
  */
 export const SURFACE_PASSTHROUGH_EXCLUDE = new Set([
-  'packages/runtime/src/services/session/session-summary.ts:35',
+  'packages/runtime/src/services/session/session-summary.ts:38',
 ])
 
 /**

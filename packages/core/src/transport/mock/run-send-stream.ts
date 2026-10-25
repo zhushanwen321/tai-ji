@@ -306,7 +306,11 @@ export async function runSendStream(
   if (!(await emitFileChanges(sessionId, messageId, deps))) return;
   if (!(await emitUiRequest(sessionId, text, deps))) return;
 
-  // complete（含 usage，证明 W05-A usage 回填）
+  // complete。[HISTORICAL] payload.usage 为 W05-A 时期回填通路残留：chat-flow-consistency D3
+  // 规则 5 定稿后 usage/endedAt 由 message_end(assistant) 逐条载荷唯一承担（real 通道经
+  // apply-entry-convert usageField 消费），message.complete 回合级覆写已退役——本 mock 流序
+  // 不 emit message.message_end，定稿重建链在 mock 模式不可达，此 usage 无消费方仅留存字段
+  // 形状（registry.ts 退役登记同口径）。
   if (isCancelled(sessionId)) return;
   await sleep(TIMING.done);
   emit(sessionId, {

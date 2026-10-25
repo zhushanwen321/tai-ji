@@ -106,7 +106,8 @@ function btwPrefixed(piId: string): string {
 
 // ── 容器 1/2 基建：SessionStateProjection 直测环境（session-state-projection.test.ts 同款形态）──
 
-/** 最小 IManagedSessionView stub（projection 只读 id/modelId/thinkingLevel/isGenerating） */
+/** 最小 IManagedSessionView stub（projection 只读 id/modelId/thinkingLevel 与 occupancy 派生；
+ *  occupancy 缺省 = idle，D1 迁移后原派生三布尔已删） */
 function makeSessionView(id: string): IManagedSessionView {
   return {
     id,
@@ -118,9 +119,6 @@ function makeSessionView(id: string): IManagedSessionView {
     lastActiveAt: 0,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
     bashRunToken: undefined,
   }
 }

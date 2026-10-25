@@ -5,6 +5,9 @@ import type { SessionGroup, SessionSummary, SessionStatus, SessionDataSource, Se
 import type { FileChange, ChangeSetStatus, Message } from './message'
 // delivery 域帧 DTO（投递所有权内核 D7/ADR-0043）：segments 快照供草稿恢复
 import type { Segment } from './segments'
+// session occupancy 域（chat-flow-consistency D1 契约根）：turn 相位值域 SSOT，
+// 形状与「回合进行中」判定集合 SSOT 在 ./session-occupancy
+import type { SessionTurnPhase } from './session-occupancy'
 import type { PiMessageEntry, PiToolCallEntryForm } from './pi-entry'
 import type { FileNode } from './file-tree'
 // 领域 DTO 已下沉到各自领域文件（E2 架构候选）：protocol.ts 仅保留 type→payload 映射 SSOT，
@@ -233,6 +236,9 @@ export type ClientMessageType =
   // [u5a 部分保留] send.rejected 条目仍保留：runtime bash 通道 busy 时 publish（reserveBashSlot，
   // bash 通道属设计 §1.3 Out of Scope）——renderer handler 已删，frames 面仅此一处生产路径。
   | 'delivery.submit' | 'delivery.cancel' | 'delivery.drain' | 'delivery.resync'
+  // delivery.peek / delivery.edit（chat-flow-consistency D6 队列区原位编辑）：✎ 编辑预填的
+  // 只读取回通道 + 发送侧原位替换原语（收回-保序重投是 runtime 编排内部细节，上层不可见）。
+  | 'delivery.peek' | 'delivery.edit'
   | 'message.bash' | 'message.abortBash'
   | 'config.getProviders' | 'config.setProvider' | 'config.deleteProvider' | 'config.setToolPermissions'
   | 'config.refreshProviderCatalogs' | 'config.setProviderCatalogWatch'
@@ -557,7 +563,14 @@ export type TerminalEnvelopeCode = TerminalErrorCode | TerminalUnknownErrorCode
 export type BatchDeleteResult = {
   cwd: string
   deleted: string[]
-  failed: Array<{ sessionId: string; error: string }>
+  /**
+   * failed 条目的 `code` 是封闭枚举（机器可读错误码，renderer 据此查 i18n 词条而非插值
+   * runtime 原文——原文语言随 runtime 编译期定，en 用户不可读）。新码在此登记 + 同 commit
+   * 补 renderer 映射（useSidebarSessionActions DELETE_FAILED_I18N_KEYS）与双语词条：
+   *   - 'delete_generating'：会话正在生成中，删除被拒绝（runtime session-lifecycle delete
+   *     生成中拒绝门，session-lifecycle-delete-gate.test.ts）
+   */
+  failed: Array<{ sessionId: string; error: string; code?: string }>
 }
 
 /**
@@ -866,6 +879,15 @@ export interface ClientMessageMap {
   // delivered/cancelled，renderer 据此丢弃本地残留）；存留条目的权威状态经 session.delivery
   // 全量快照帧恢复（last-value 单源，reply 不重复携带，防双源分叉）。
   'delivery.resync': { sessionId: string; clientUuids: string[] }
+  // delivery.peek（chat-flow-consistency D6）：✎ 编辑预填的只读取回通道——返回条目全文 +
+  // segments 快照（队列行 preview 是截断文本，禁止当全文消费）。found=false = 条目已不在
+  // 内核活跃集（已投递 / 已撤销 / runtime 重启），前端提示后放弃本次编辑（锚定随之解除）。
+  'delivery.peek': { sessionId: string; clientUuid: string }
+  // delivery.edit（chat-flow-consistency D6）：发送侧原位替换——语义 = 替换指定条目内容且
+  // 排队位置保持不变（条目 id 不变）；收回-全部-保序重投是 runtime 编排内部细节，上层不可
+  // 依赖。content/segments 形态与 delivery.submit 一致（segments 快照随替换更新，后续撤销
+  // 回草稿取新快照）。
+  'delivery.edit': { sessionId: string; clientUuid: string; content: string; segments?: Segment[] }
   'config.getProviders': Record<string, never>
   // 进入 Settings Provider 页时触发远程模型目录刷新（无参：刷新列表内全部 catalog provider）
   'config.refreshProviderCatalogs': Record<string, never>
@@ -1329,7 +1351,8 @@ export const MESSAGE_BLOCKED_CODE: MessageBlockedCode = 'message_blocked'
 export type ServerMessageType =
   | 'session.created' | 'session.deleted' | 'session.deletedByCwd' | 'config.sessions' | 'session.history' | 'session.switched'
   | 'session.compacting' | 'session.compacted' | 'session.renamed' | 'session.forkNotice' | 'session.skillNotice' | 'session.handoffStarted' | 'session.handoffComplete' | 'session.handoffAborted' | 'session.setProject'
-  // session.occupancy（session-occupancy-send-closure P3）：占用三维快照广播（state topic，
+  // session.occupancy（session-occupancy-send-closure P3）：占用四维快照（turn/compacting/
+  // bash/handingOff）广播（state topic，
   // last-value 语义——重连/切回 session 自动恢复，不依赖广播时序），renderer sessionPhase 唯一数据源。
   | 'session.occupancy'
   // session.delivery（投递所有权内核 D5）：队列状态全量快照帧（state topic，last-value 语义，
@@ -1488,6 +1511,8 @@ export type ServerMessageType =
   // delivery.* 四 RPC 的 reply 帧（投递所有权内核 D5，u-contracts）：与 request 同名
   //（backgroundTask 域 / session.subscribe 同款 payload 消费型同名模式，ADR-0046 配对）。
   | 'delivery.submit' | 'delivery.cancel' | 'delivery.drain' | 'delivery.resync'
+  // delivery.peek / delivery.edit 的 reply 帧（chat-flow-consistency D6）：与 request 同名。
+  | 'delivery.peek' | 'delivery.edit'
   | 'message.file_changes'
   | 'message.changeSetInvalidated'
   | 'message.customStart'
@@ -2229,6 +2254,37 @@ export interface DeliveryResyncReply {
 }
 
 /**
+ * delivery.peek 的 reply（chat-flow-consistency D6）：✎ 编辑预填取回通道。
+ * found=true 时 content = 条目全文（出站标记已在 runtime 出站层剥离，与 cancel reply 同口径）、
+ * segments = 提交时上网的快照（无快照的条目不带）；found=false = 条目已不在内核活跃集
+ * （已投递 / 已撤销 / runtime 重启），前端提示后放弃本次编辑。
+ */
+export interface DeliveryPeekReply {
+  clientUuid: string
+  found: boolean
+  /** 条目全文（found=true 恒携带；runtime 契约承诺非空文本）。 */
+  content?: string
+  /** 提交时随 delivery.submit 上网的原始 segments 快照（无提交快照的条目不带）。 */
+  segments?: Segment[]
+}
+
+/**
+ * delivery.edit 的 reply（chat-flow-consistency D6 + design-queue-delivery Q3 回执四值词表）。
+ * edited=true = 原位替换完成（条目 id 与排队位置不变，内容已按新文本保序重投/留守待投）。
+ * edited=false 四值 reason（前端处置同构：修改内容按普通新消息发出不丢，仅 toast 分型）：
+ * - 'delivered'：条目已进 transcript（真投递完成）。
+ * - 'unconfirmed'：投递状态未确认（注入悬空窗口 / 收回失败 / runtime 无权威证据）——用户
+ *   裁决采纳的第四值，回执如实化（既未编辑成功也未确定送达）。
+ * - 'cancelled'：条目已被撤销终结（含并发撤销他径兑现）。
+ * - 'not-found'：runtime 无此条目（重启 / drain / id 不曾存在）。
+ */
+export interface DeliveryEditReply {
+  clientUuid: string
+  edited: boolean
+  reason?: 'delivered' | 'unconfirmed' | 'cancelled' | 'not-found'
+}
+
+/**
  * 计划产物文档元数据（plan 模式重设计 D1）。
  * 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 同形（值形状镜像惯例）——
  * PlanLifecycleState 已 type-only 直引 extension-protocol（D2 裁决：plan 状态机处
@@ -2475,6 +2531,11 @@ export interface ServerMessageMapBase {
     // PLAN_REVIEW_MARKER select 通道，前端 C4 分流给 PlanReviewBar 不落 CompanionBand）。
     // 审批条文档清单由 usePlanState 派生视图链（session.planState）承载，本帧不携带 docs。
     planReview?: boolean
+    // permission 审批等待扩展（仅 dialogKind='select' 且 title 首行 = [pi-permission] Approval
+    // required 时存在；chat-flow-consistency U9/S4——runtime event-adapter 的
+    // isPermissionApprovalSelect 落键）。前端 extension-ui store 以本键计入侧栏 waiting 态
+    // （工具审批挂起可见，补齐未水合会话的等待可见性缺口）。
+    permission?: true
     // 统一提问表单扩展（仅 dialogKind='select' + form=true 时存在；ui-presentation-protocol D1：
     // UI_FORM_MARKER select 通道，前端 C4 分流给 FormOverlay 渲染类型化问题集）。
     // formQuestions 用 unknown[] 保持 shared 依赖最小化（与 askUserQuestions 同款先例），
@@ -2488,14 +2549,23 @@ export interface ServerMessageMapBase {
   // PiCompactionReason，驱动前端 compacting 浮层文案区分手动/自动。
   'session.compacting': { sessionId: string; status: 'compacting'; reason: 'manual' | 'threshold' | 'overflow' }
   'session.compacted': { sessionId: string; status: 'compacted'; error?: string }
-  // session.occupancy（session-occupancy-send-closure D3/P3）：占用三维结构快照，state topic
-  // （message-bus 分配 seq + 写 last-value 快照、不入 ring——重连/切回 session 经 stateSnapshot
-  // 回放自动恢复）。turn 三阶段：dispatching = prompt 已发、message_start 未到；
+  // session.occupancy（session-occupancy-send-closure D3/P3；chat-flow-consistency D1 扩
+  // handingOff 第四维）：占用结构快照，state topic（message-bus 分配 seq + 写 last-value 快照、
+  // 不入 ring——重连/切回 session 经 stateSnapshot 回放自动恢复）。turn 四相位值域 SSOT =
+  // SessionTurnPhase（./session-occupancy）：dispatching = prompt 已发、message_start 未到；
   // generating = turn-start..turn-end；settling = turn-end..agent-settled（pi post-run 收尾期）。
-  // 三维独立（compacting/bash 与 turn 各阶段可并存：settling+compacting 是 overflow 收尾常态，
+  // 维度独立（compacting/bash 与 turn 各阶段可并存：settling+compacting 是 overflow 收尾常态，
   // threshold 模式 turn 内自动压缩则 generating+compacting）。session.compacting/compacted 事件
   // 保留（浮层 reason 文案源），isCompacting 改由本消息派生。
-  'session.occupancy': { sessionId: string; turn: 'idle' | 'dispatching' | 'generating' | 'settling'; compacting: boolean; bash: boolean }
+  // handingOff（chat-flow-consistency §6「交接在途状态归属」裁决）：handoff（会话交接）编排
+  // 在途两态布尔，与 compacting/bash 同型正交——handingOff 与 turn=generating 可并存（交接
+  // turn 在跑，两维互不替代）。置位/复位 = U1 落地的 handingOff-start/end 转移行 +
+  // handoff-service 编排接线（本帧契约根先行，帧值由 runtime 展开构造点随 U1 补齐）。
+  // 可选性 = 跨波落地的过渡形态：U1 落地前 runtime 不发本字段，消费方按未置位（false）处理。
+  // U1 已落地（runtime 广播恒带四维：event-interpreter 广播点与 announceSessionOccupancy 均展开
+  // handingOff，runtime SessionOccupancy 必填）——收紧为必填 + IDLE_SESSION_PHASE 补 handingOff:false
+  // 待下次协议触碰顺带（收紧前消费方按 undefined ≡ false 处理仍正确）。
+  'session.occupancy': { sessionId: string; turn: SessionTurnPhase; compacting: boolean; bash: boolean; handingOff?: boolean }
   // session.delivery（投递所有权内核 D5/D9②）：条目状态全量快照（展示派生视图），state topic
   // last-value 语义（message-bus 不入 ring，重连/切回经 stateSnapshot 回放自动恢复）。
   // 数据源 = 内核 entries() 派生视图：活跃条目（queued/in-flight/failed）全量 + delivered
@@ -2514,6 +2584,9 @@ export interface ServerMessageMapBase {
   'delivery.cancel': DeliveryCancelReply
   'delivery.drain': DeliveryDrainReply
   'delivery.resync': DeliveryResyncReply
+  // delivery.peek / delivery.edit（chat-flow-consistency D6 队列区原位编辑）：reply 同名配对。
+  'delivery.peek': DeliveryPeekReply
+  'delivery.edit': DeliveryEditReply
   // session.subscribe（wave:runtime-wiring）：session.subscribe RPC 的 reply payload（IF6 契约）。
   // snapshot：订阅时刻 bus ring 内当前事件序列（元素为带 seq 的 ServerMessage），renderer 据此 reconcile。
   // stateSnapshot：全部 state topic 的 last-value 数组拷贝——快照来源清单不在此枚举，以
@@ -3001,13 +3074,16 @@ export interface ServerMessageMapBase {
   // 时机：源 session 的 pi 跑完 handoff turn（HANDOFF_PROMPT_TEMPLATE）→ runtime 从 agent_end 提取
   // 文档文本 → 新建空白 session → 用 wrapWithXmlTag(doc) + reply 注入新 session 触发新 turn 之后。
   // agent-driven 模式下 doc 由 runtime 直接发给新 session pi（wave1 已实现），不再经广播回传前端——
-  // 广播 payload 仅通知前端复位源 session handingOff + 刷新列表 + 跳转新 session（selectSession 内部
-  // 自带 hydrate + 订阅 + 命令/上下文兜底拉取，前端不再手动 ensureStreamSubscription/send）。
+  // 广播 payload 通知前端刷新列表 + 跳转新 session（selectSession 内部自带 hydrate + 订阅 +
+  // 命令/上下文兜底拉取，前端不再手动 ensureStreamSubscription/send）；源 session handingOff
+  // 复位不经本帧——裁决表行后由 session.occupancy 帧第四维承担（handoff-service cleanupInflight
+  // 统一复位点广播 'handingOff-end'，useHandoffEffect 自述「不再写任何状态」）。
   // sourceLabel：交接来源 session 名称（可选，前端用于构造 handoff badge segment）。
   'session.handoffComplete': { srcSessionId: string; newSessionId: string; sourceLabel?: string }
   // session.handoffAborted：fast-handoff 中断后的广播（agent-driven 模式 wave2）。
   // 时机：用户取消进行中的 handoff（或 abort 兜底）→ runtime 调 handoffService.abortHandoff
-  // （内部 client.abort + 清 inflight）→ 广播此帧让前端复位源 session 的 handingOff 态。
+  // （内部 client.abort + 清 inflight）→ 广播此帧。当前前端零消费（裁决表行：旧订阅的唯一副作用
+  // handingOffSessions Set 复位已随平行存储退役移除）——广播本体保留为语义记录。
   // srcSessionId：被中断的源 session id（与 handoffComplete 的 srcSessionId 同义，统一字段名）。
   'session.handoffAborted': { srcSessionId: string }
   // session.history：session.history 的成功 reply（显式历史拉取 RPC；wave:perf-w20 后 switch
@@ -3016,6 +3092,9 @@ export interface ServerMessageMapBase {
   // truncated=true 表示窗口外仍有历史；loadedTurns=本次返回的完整 turn 数；
   // totalTurnsEstimate=session 的 turn 总数估计（读到头为精确值，窗口截断时为下界）。
   // [u6] legacy historyTruncated 字段已退役（偏差表 D7 登记项完成：与 truncated 同值并存的双轨收尾）。
+  // [U8 重启中断标记] interrupted：可选，true = 离线读取判定文件尾部为中断形态
+  // （design-session-lifecycle 缺陷 4 方向 A：pi 落盘尾部形态 + 会话未附着联合判定，
+  // 推断性质）。活跃路径与游标翻页不出场（undefined）；旧前端忽略，向后兼容。
   'session.history': {
     sessionId: string
     session?: SessionSummary
@@ -3023,6 +3102,7 @@ export interface ServerMessageMapBase {
     truncated: boolean
     loadedTurns: number
     totalTurnsEstimate: number
+    interrupted?: boolean
   }
   // session.switched：session.switch 的成功 reply（wave:perf-w20 R-11 瘦身——switch reply 不再
   // 无条件全量 getHistory 塞 messages，被驱逐 session 切回走显式 session.history RPC（全量），
@@ -3193,7 +3273,14 @@ export interface ServerMessageMapBase {
   // 的持久化触发点，agent-session.ts:545-561），实时路径与文件重放（get_entries）喂同一个
   // core reducer（applyEntry）的权威载体。entry.id 恒缺省（pi 在 emit 之后才 appendMessage
   // 分配 uuidv7，事件上拿不到）——reducer 按 `e<N>` 确定性派生，W22 对账靠 get_entries。
-  'message.message_end': { sessionId: string; entry: PiMessageEntry }
+  // messageId（chat-flow-consistency §6「D3 定位升级」裁决；消费方 = U3 定稿重建定位 +
+  // textFinalized 标记）：message_end(assistant) 帧的翻译层锚点 = interpreter currentMessageId
+  // （runtime a-uuid，message_start 时设置，与 tool_call_start 帧 entry.messageId 同一空间），
+  // 使定稿重建升级为「id 锚定优先、位置兜底」，错挂形态类整体消除。可选性：仅 assistant
+  // 消息帧携带（翻译层同步附加）；user/toolResult/custom 帧不带。文件重放路径（get_entries）
+  // 无此字段——翻译层产物不入 PiMessageEntry（保持其 pi SessionEntry 结构镜像定位），
+  // 锚点挂在帧顶层。
+  'message.message_end': { sessionId: string; entry: PiMessageEntry; messageId?: string }
   // message.tool_call_start：tool_execution_start 重构的 toolCall entry 形态（替换直译平铺
   // payload——overlay 挂 running toolCall 从 entry 读取）。contentIndex/messageId 由
   // event-interpreter 从缓存补齐（产出顺序锚点 + 挂载目标）；turnId 恒缺省（值填充归
@@ -3703,6 +3790,9 @@ export interface ReplyPayloadMap {
   'delivery.cancel': ServerMessageMap['delivery.cancel']
   'delivery.drain': ServerMessageMap['delivery.drain']
   'delivery.resync': ServerMessageMap['delivery.resync']
+  // delivery.peek / delivery.edit（chat-flow-consistency D6）：reply 同名（payload 消费型）。
+  'delivery.peek': ServerMessageMap['delivery.peek']
+  'delivery.edit': ServerMessageMap['delivery.edit']
   // rollingRestart.status（crash-forensics-and-watchdog §3.3 D5，u7b）：只读查询 reply
   //（payload 消费型；与 request 同名——session.subscribe / backgroundTask.list 同款模式）。
   'rollingRestart.status': ServerMessageMap['rollingRestart.status']

@@ -539,7 +539,7 @@ describe('turn-attribution W4: trigger 起点行 + turn 内 notice', () => {
     } as Message
   }
 
-  it('W4-T1: trigger turn（user:null + trigger:bg-notify）工作态 → 起点行渲染且含从文案，UserBubble 不渲染；落成态起点行退役（specs/chat/system-notices.md §3：数据收进轮头行）', () => {
+  it('W4-T1: trigger turn（user:null + trigger:bg-notify）工作态 → 起点行渲染且含从文案，UserBubble 不渲染；落成态起点行退役（数据收进轮头行）', () => {
     const wrapper = mountTurn({ turn: makeTriggerTurn(), isSessionActive: true, isLastTurn: true })
     const row = wrapper.find('[data-testid="turn-trigger-bgnotify"]')
     expect(row.exists()).toBe(true)
@@ -1173,7 +1173,9 @@ describe('[actions-anchor] 操作栏只挂 trace 末单元为 text 的块', () =
 // pi 回合 =「assistant 消息 → 工具 → assistant 消息 → …」循环，mid-turn 气泡的 status
 // 要到回合级 message.complete 才收尾；streaming prop 若直接跟 status，长工具回合中已
 // 写完的正文一直滞留 streaming 灰。此处断言 Turn 的派生：streaming = status streaming
-// 且未 textFinalized（事实源 = core message_end 打标，见 registry markStreamingAssistantTextFinalized）。
+// 且未 textFinalized（事实源 = core message_end 定稿重建打标：effects/finalized-rebuild
+// 的 rebuildAssistantOnFinalize 在 registry message_end assistant 分支调用，textFinalized
+// 在该重建内写入——C2 统一后的唯一写入点）。
 describe('正文颜色逐消息派生（chat-flow-text-color D1）', () => {
   function makeTextTurn(status: Message['status'], textFinalized?: boolean): MessageTurn {
     const assistant: Message = {

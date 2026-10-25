@@ -76,8 +76,10 @@ export const formFilter: UIRequestFilter = (req) => req.form === true
  * planReview 审批请求（runtime event-adapter 检测 PLAN_REVIEW_MARKER 后在 extension.ui_request
  * 上附加的 `planReview: true` 标记，与 form 同构分流）。
  *
- * core 的 ExtensionUIRequest 契约不携带 plan 标记键（core 不反向依赖 extension-protocol，
- * 本地扩展惯例）；但响应回传的 `PlanReviewResponse` 与请求载荷字段**直接 import extension-protocol**
+ * core 的 ExtensionUIRequest 契约已随 wire SSOT 携带 planReview/permission 标记键
+ *（core/transport/api/domains/extension.ts 镜像注释——随 shared/protocol.ts 对齐声明，
+ * 消费方免 cast 直读）；PlanReviewUIRequest 的 `planReview: true` 是必有化收窄而非本地补键。
+ * 响应回传的 `PlanReviewResponse` 与请求载荷字段**直接 import extension-protocol**
  *（D2/D3④ regime——旧「renderer 不依赖 extension-protocol」表述已过时，renderer 早已依赖它；
  * PlanReviewComment / PlanReviewResponse 本地同形副本已删除迁移，consumers.md 一④）。
  * `selfReview`（D9③）：agent 自审结论，与 canonical `PlanReviewRequest.selfReview` 同名同义，

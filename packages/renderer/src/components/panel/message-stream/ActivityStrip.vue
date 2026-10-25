@@ -7,7 +7,7 @@
   executing bash 行），按优先级纵向堆叠（compacting > bash > thinking / settling）：
 
   bash 双数据源语义分工（occupancy OCC-7 登记，2026-09-07）：「bash 占用」在系统内有两
-  条帧路、语义不同不合并——① session.occupancy 帧（state topic 三维快照的 bash 布尔，
+  条帧路、语义不同不合并——① session.occupancy 帧（state topic 四维快照的 bash 布尔，
   runtime dispatcher sendBash 置位 / bashResult 复位）是**占用判定权威**，发送分流器
   （composer-shell effectivePhase → D6 路由表 bash 行）与发送位四态消费它；②
   message.bashStart / message.bashResult 事件帧 → core bash-effects ephemeral 分区
@@ -184,7 +184,7 @@ interface ActivityRow {
 
 /** 待发队列条目计数（chip 口径，[compact-defer-composer-queue §2.1 → u3c 内核化]）：
  *  数据源 = session.delivery 帧派生视图（内核权威），口径与 composer 队列区（useQueueRows）同源
- *  ——谓词 = core deliveryQueueEntries（U20 下沉唯一定义点），非 direct 车道且未 delivered
+ *  ——谓词 = core deliveryQueueEntries（U20 下沉唯一定义点），非 direct 投递路径且未 delivered
  *  的条目计待发。
  *  count === 0 时 chip 不渲染（活动行仍在，压缩状态本身独立成立）。 */
 const flushCount = computed(() => deliveryQueueEntries(getDeliveryProjectionRef().value.get(props.sessionId) ?? []).length)

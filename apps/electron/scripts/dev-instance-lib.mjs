@@ -95,14 +95,37 @@ export function fnv1a(str) {
   return h >>> 0
 }
 
+/**
+ * WHATWG fetch spec「bad port」清单（Chromium 导航/WS 与 undici fetch 一致执行——命中
+ * 端口的连接在发起前即被拒）。dev 实例的 vite 端口被浏览器加载、就绪探测用 fetch，撞上
+ * 清单会确定性「vite ready 但 Electron 判未就绪」死循环（A3 验收实证：verify-A3 哈希到
+ * 1719 h323hostcall）。清单成员落在本项目派生段内的已知点：1719/1720/1723（vite 段上界）
+ * 与 3659（runtime 段，实际步进 10 不可能命中，防御性保留）。全量清单照抄 fetch spec
+ * 「bad port」节，禁删项。
+ */
+const BLOCKED_PORTS = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101,
+  102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389,
+  427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636,
+  989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 5060, 5061, 6000, 6566,
+  6665, 6666, 6667, 6668, 6669, 6697, 6699,
+])
+
+/** 派生端口命中 blocked 清单时确定性 +1 顺延（罕见；顺延后仍在原端口段语义内）。 */
+function avoidBlockedPort(port) {
+  let p = port
+  while (BLOCKED_PORTS.has(p)) p += 1
+  return p
+}
+
 /** worktree 名 → 三端口段 + 数据目录（同名单参稳定；不同名三段互不重叠——
  *  vite/cdp 段取 hash 不同字节位，runtime offset 步进 10 段内不重叠）。 */
 export function deriveParams(name, instancesDir = INSTANCES_DIR) {
   const h = fnv1a(name)
   return {
     name,
-    vitePort: 1420 + (h % 300),
-    cdpPort: 9222 + ((h >>> 8) % 300),
+    vitePort: avoidBlockedPort(1420 + (h % 300)),
+    cdpPort: avoidBlockedPort(9222 + ((h >>> 8) % 300)),
     portOffset: 100 + ((h >>> 16) % 40) * 10,
     dataDir: path.join(instancesDir, name),
   }

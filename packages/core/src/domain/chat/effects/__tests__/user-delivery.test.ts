@@ -4,7 +4,7 @@
  * 修前该函数零直接测试（间接覆盖在 domain/chat/__tests__/effects-delivery-receipt.test.ts，
  * 经 dispatchMessageEvent 走全 handler 链）；本文件直接 import 函数，聚焦 ② 降级入流的
  * 豁免谓词分叉：
- * - 修前：`lane !== 'direct' && foreign`（direct 车道整体豁免——S4 缺陷：观看端 direct
+ * - 修前：`lane !== 'direct' && foreign`（direct 投递路径整体豁免——S4 缺陷：观看端 direct
  *   外来消息无人负责显示，切走切回才补显）
  * - 修后（D4）：`foreign && 无本地同 id 气泡`——foreign 判定本身含 hasLocalBubble 否定
  *   （`segments === undefined && !hasLocalBubble(...)`），故谓词收敛为 `foreign`：发送端
@@ -90,9 +90,9 @@ beforeEach(() => {
   resetDeliveryProjectionForTest()
 })
 
-describe('D4 foreign 入流豁免精确化（remote-use-shell-unification D4：V17 改变面 + V16 不变面）', () => {
-  it('D4-AC1: 观看端 foreign 无本地气泡的 direct 车道消息 → 入流补显（修前 direct 整体豁免不显示，S4 修复主体）', () => {
-    // 场景：双端同看会话，A 端 direct 车道发消息（session_manager 注入同形态），B 端
+describe('D4 foreign 入流豁免精确化（remote-use-shell-unification D4：V17 改变项 + V16 不变项）', () => {
+  it('D4-AC1: 观看端 foreign 无本地气泡的 direct 投递路径消息 → 入流补显（修前 direct 整体豁免不显示，S4 修复主体）', () => {
+    // 场景：双端同看会话，A 端 direct 投递路径发消息（session_manager 注入同形态），B 端
     // 无本地乐观气泡无 morph 段 → 降级入流剥标记纯文本（显示责任承接，不静默丢显示）
     replaceDeliveryProjection(SID, [entry({ lane: 'direct' })])
     const ctx = makeCtx()
@@ -109,7 +109,7 @@ describe('D4 foreign 入流豁免精确化（remote-use-shell-unification D4：V
     expect(ctx.inflightOf()).toBe(0)
   })
 
-  it('D4-AC2: foreign 无本地气泡的 steer 车道消息照旧入流（既有语义不变锚，V16 不变面）', () => {
+  it('D4-AC2: foreign 无本地气泡的 steer 投递路径消息照旧入流（既有语义不变锚，V16 不变项）', () => {
     replaceDeliveryProjection(SID, [entry({ lane: 'steer' })])
     const ctx = makeCtx()
     ctx.addInflight(1)
@@ -123,7 +123,7 @@ describe('D4 foreign 入流豁免精确化（remote-use-shell-unification D4：V
   })
 
   it('D4-AC3: 发送端 direct 有本地同 id 气泡 → 不入流（防双插语义不变，气泡原位保持）', () => {
-    // 场景：本端发送（direct 车道），乐观气泡已入流（id = clientUuid 保留原 id 同源）——
+    // 场景：本端发送（direct 投递路径），乐观气泡已入流（id = clientUuid 保留原 id 同源）——
     // hasLocalBubble 命中 → foreign=false → 降级入流豁免（修前由 lane 豁免、修后由 id 判定承接）
     replaceDeliveryProjection(SID, [entry({ lane: 'direct' })])
     const ctx = makeCtx([localBubble(CLIENT_UUID)])
@@ -138,7 +138,7 @@ describe('D4 foreign 入流豁免精确化（remote-use-shell-unification D4：V
     expect(ctx.inflightOf()).toBe(0)
   })
 
-  it('D4-AC4: direct 车道两端行为分叉对拍——同帧形态，观看端入流补显 vs 发送端不入流', () => {
+  it('D4-AC4: direct 投递路径两端行为分叉对拍——同帧形态，观看端入流补显 vs 发送端不入流', () => {
     const watcher = makeCtx([]) // 观看端：无本地气泡
     const sender = makeCtx([localBubble(CLIENT_UUID)]) // 发送端：乐观气泡已入流
     watcher.addInflight(1)

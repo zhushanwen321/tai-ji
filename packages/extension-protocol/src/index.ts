@@ -35,7 +35,7 @@ export type {
 
 // ── core：通用常量 ──
 export { PROTOCOL_VERSION } from './core/types'
-export { GUI_WIDGET_MARKER, PLAN_REVIEW_MARKER } from './core/markers'
+export { GUI_WIDGET_MARKER, PLAN_REVIEW_MARKER, PERMISSION_APPROVAL_TITLE } from './core/markers'
 
 // ── core：通用 helper ──
 export {

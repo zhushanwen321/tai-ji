@@ -136,6 +136,15 @@ export interface ExtensionUIRequest {
   // runtime event-adapter 第 4 marker 分支翻译 SCHEDULE_CREATE_MARKER select）
   scheduleCreate?: boolean
   scheduleDraft?: unknown  // ScheduleDraft（@zhushanwen/extension-protocol），前端检查收窄
+  // planReview / permission 审批扩展——行为契约 SSOT = shared/protocol.ts 'extension.dialog'
+  // 同名字段（本接口为 core 域镜像，随 SSOT 对齐声明，消费方免 cast 直读）。
+  // planReview：仅 dialogKind='select' + planReview=true 时存在（plan 模式重设计 D5：
+  // PLAN_REVIEW_MARKER select 通道，前端 C4 分流给 PlanReviewBar 不落 CompanionBand）。
+  // permission：仅 dialogKind='select' 且 title 首行 = [pi-permission] Approval required 时
+  // 存在（chat-flow-consistency U9/S4——runtime event-adapter isPermissionApprovalSelect 落键，
+  // 前端 extension-ui store 以本键计入侧栏 waiting 态）。
+  planReview?: boolean
+  permission?: true
   // 统一提问表单扩展（仅 dialogKind='select' + form=true 时存在；ui-presentation-protocol D1：
   // runtime event-adapter 翻译 UI_FORM_MARKER select，前端 FormOverlay 渲染类型化问题集）
   form?: true

@@ -58,7 +58,7 @@ const FRAME_STATE_OF: Readonly<Record<DeliveryEntryState, DeliveryFrameEntry['st
   cancelled: null,
 }
 
-/** 内核车道 → 帧车道（D1；同款编译期对齐表，三值全键）。 */
+/** 内核投递路径 → 帧投递路径（D1；同款编译期对齐表，三值全键）。 */
 const FRAME_LANE_OF: Readonly<Record<DeliveryLane, DeliveryFrameEntry['lane']>> = {
   direct: 'direct',
   steer: 'steer',
@@ -70,7 +70,7 @@ export function frameStateOf(state: DeliveryEntryState): DeliveryFrameEntry['sta
   return FRAME_STATE_OF[state]
 }
 
-/** 内核车道 → 帧车道（编译期对齐检查经 {@link FRAME_LANE_OF} 全键覆盖）。 */
+/** 内核投递路径 → 帧投递路径（编译期对齐检查经 {@link FRAME_LANE_OF} 全键覆盖）。 */
 export function frameLaneOf(lane: DeliveryLane): DeliveryFrameEntry['lane'] {
   return FRAME_LANE_OF[lane]
 }
@@ -121,6 +121,8 @@ export interface SessionDeliveryTopicDeps {
 export class SessionDeliveryTopic {
   /** sessionId → 已装配的（内核句柄身份 + 退订函数）；句柄变更（session 重建）即重装。 */
   private readonly wired = new Map<string, { handle: DeliveryHandleV2; unsub: () => void }>()
+  /** 运行时创建事件订阅守卫（一次性；registry 测试替身无该事件时缺省零行为）。 */
+  private runtimeCreatedWired = false
 
   constructor(private readonly deps: SessionDeliveryTopicDeps) {}
 
@@ -136,6 +138,7 @@ export class SessionDeliveryTopic {
     try {
       const registry = this.deps.getRegistry()
       if (!registry) return
+      this.ensureRuntimeCreatedWiring(registry)
       const handle = this.resolveHandle(registry, sessionId)
       if (!handle) {
         // 运行时不存在（未创建 / 已 dispose）：解绑残留订阅，不创建运行时（只读装配零副作用）
@@ -153,6 +156,18 @@ export class SessionDeliveryTopic {
       // 下一变更 / 下一次装配入口自动重试；warn 留痕（见文件头「零抛错」）。
       console.warn('[session-delivery-topic] sync failed (frame skipped; retried on next change/entry)', sessionId, e)
     }
+  }
+
+  /**
+   * 运行时创建事件接线（chat-flow-consistency D3 修复，一次性）：sync 早于运行时存在被调
+   * （建会即订阅 → 首个 delivery.submit 才建运行时）时本方法先于 resolveHandle 挂好创建
+   * 事件——运行时创建点尾接本 session 的 sync，消解「首订阅早于内核创建 → 整生命周期零帧」
+   * 缺口。订阅在首次 sync 时完成，无组合根接线改动。
+   */
+  private ensureRuntimeCreatedWiring(registry: SessionDeliveryRegistry): void {
+    if (this.runtimeCreatedWired) return
+    this.runtimeCreatedWired = true
+    registry.onRuntimeCreated?.((sessionId) => this.sync(sessionId))
   }
 
   /** 解绑单 session 订阅（session 销毁 / 运行时消失）。幂等。 */

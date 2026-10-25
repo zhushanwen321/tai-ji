@@ -1,5 +1,5 @@
 /**
- * 收纳完成通知的展示映射单点（specs/chat/system-notices.md §3.3/§3.4/§3.5）：
+ * 收纳完成通知的展示映射单点
  * TurnMeta（折叠分段标签 + 解释卡）与 Turn（展开明细行）共用——图标表、i18n 键表、
  * 明细行状态词派生都在此一处，渲染组件零第二份映射。数据行来自 core
  * deriveFoldedNoticeRows（载荷解析聚合轴 SSOT），本模块只做「行 → 文案/图标」。

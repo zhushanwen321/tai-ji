@@ -78,9 +78,12 @@
           <div class="flex min-w-0 items-center gap-[6px]">
             <!-- active 态：呼吸弧（微缩，复用 Block.vue 的 RUNNING_LOADER_SVG）。
                  图标色随选中节点提为 fg-2（demo .rail-node.on .rail-row svg 对弧同样生效）。
-                 loader 判据 isActiveTurn = sessionActive ∧ 视口位（activeTurnIndex），与占位判据
-                 （sessionActive ∧ 真末位）有意分离：上滑时占位留在末位节点、loader 随视口走，
-                 两判据同门反而错（占位会被视口态压空串，streaming/ask-user 等待击穿）。 -->
+                 loader 判据 [chat-flow-consistency C5] = sessionActive ∧ turn.isStreaming（回合
+                 数据派生，与 Turn 同源）——双工作态过渡期（插话回流开新回合、旧回合未收尾）
+                 两个回合各显 loader，与 D2 双展开期望形态一致。activeTurnIndex（视口位置）
+                 仅保留给 viewport indicator 与节点选中高亮（mini-map「你在哪」语义，视口
+                 派生本就正确）；占位判据（sessionActive ∧ 真末位）仍独立：占位必须钉在真
+                 末位（pending turn 还没有 streaming assistant 可依）。 -->
             <!-- eslint-disable-next-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
             <span v-if="isActiveTurn(turn, idx)" data-testid="rail-agent-icon" class="inline-flex size-[12px] shrink-0 items-center justify-center text-[color:var(--neutral-fg-2)] animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
             <!-- 非 active 态：Bot 图标（failed=danger 常驻 / 其余 neutral-ico；选中提 fg-2） -->
@@ -174,14 +177,24 @@ function isExpanded(idx: number): boolean {
 
 /**
  * 查询指定 turn 的「实际渲染展开态」（toggle 图标 + data-expanded 依据）。
- * = 用户态展开 OR sessionActive 时的激活节点强制展开。
+ * = 用户态展开 OR [chat-flow-consistency D2] 工作展开态数据派生。
  *
- * sessionActive 时 trace 由父组件强制展开（不看 expandedTurns），激活节点必然展开，
- * toggle 此时禁用但图标方向需保持准确（ChevronUp=已展开），否则会出现「点不动的 ChevronDown」
- * 语义错误。非激活节点仍看 isExpanded（sessionActive 不强制展开非激活节点）。
+ * 工作展开态与流内 Turn 的 isWorkingTurn 同构（同一数据源判定，构造性一致）：
+ * sessionActive ∧（真末位 ∨ turn.isStreaming）——真末位覆盖 pending turn（还没有 streaming
+ * assistant 可依，占位钉在真末位）；isStreaming 覆盖双工作态期的 streaming 回合（插话回流
+ * 开新回合、旧回合未收尾，两个回合各显展开）。
+ *
+ * 不再看 activeTurnIndex（视口派生）：D1 末位判定时代「sessionActive 时激活节点必然展开」
+ * 的前提已随 D2 失效——上翻后视口激活节点可既非末位也非 streaming，流内实际折叠，图标若
+ * 强制显示已展开即与流内不一致。toggle 在 sessionActive 时禁用（:disabled），禁用态图标
+ * 如实反映折叠/展开，不承担可点性承诺。
  */
 function isTurnExpanded(idx: number): boolean {
-  return (props.sessionActive && idx === props.activeTurnIndex) || isExpanded(idx)
+  const turn = props.turns[idx]
+  if (turn != null && props.sessionActive && (idx === props.turns.length - 1 || turn.isStreaming)) {
+    return true
+  }
+  return isExpanded(idx)
 }
 
 /**
@@ -209,11 +222,15 @@ function agentSummaryClass(turn: MessageTurn, idx: number): string {
 }
 
 /**
- * 判断指定 turn 是否为「激活态」（sessionActive 且当前激活）。
- * 激活态用呼吸弧图标（随选中节点 fg-2 提色），非激活态用 Bot 图标按 agentRowIconClass 着色。
+ * 判断指定 turn 是否为「运行中」（呼吸弧 loader 依据，[chat-flow-consistency C5]）：
+ * sessionActive ∧ turn.isStreaming（回合数据派生，与 Turn.vue 的 isWorkingTurn 同一数据源
+ * ——双工作态过渡期两个回合各显 loader）。activeTurnIndex 仅服务 viewport indicator 与
+ * 节点选中高亮（mini-map「你在哪」，视口派生），不再驱动 loader：上翻阅读时视口首回合
+ * 并非运行中回合，按视口显 loader 会指到错误节点（原 :79-83「loader 随视口走」论证只对
+ * 「进行中…」占位符成立——占位必须钉在真末位，见 isPlaceholderVisible 注释）。
  */
-function isActiveTurn(_turn: MessageTurn, idx: number): boolean {
-  return props.sessionActive && idx === props.activeTurnIndex
+function isActiveTurn(turn: MessageTurn, _idx: number): boolean {
+  return props.sessionActive && turn.isStreaming
 }
 
 /**

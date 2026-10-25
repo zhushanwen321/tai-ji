@@ -534,7 +534,7 @@ describe('L2 探针 create 链（readBackCreateState 消费）', () => {
  * → 预期 loadable 列表 = [normal-a, normal-c]（顺序 = discovered 顺序）。
  */
 function makeP2Env(userPresetsFile?: unknown) {
-  const root = mkdtempSync(join(tmpdir(), 'p2-probe-'))
+  const root = mkdtempSync(join(tmpdir(), 'p2-env-'))
   const configDir = join(root, 'config')
   mkdirSync(configDir)
   if (userPresetsFile !== undefined) {

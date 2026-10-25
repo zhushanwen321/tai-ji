@@ -121,7 +121,9 @@ describe('chat store message.complete 多 assistant 气泡收尾', () => {
   // [HISTORICAL] handoff 2026-07-04 L3：一个 turn 可能产生多个 streaming assistant 气泡
   // （如工具调用气泡 + 文字总结气泡，或历史/fork 路径残留）。旧实现用 findLastAssistantIndex
   // 只收尾最后一条，前面的 toolCall 气泡永远 streaming——内部状态机不一致，影响后续定位逻辑。
-  // 修复后 message.complete 收尾所有 status==='streaming' 的 assistant，usage 只回填最后一条。
+  // 修复后 message.complete 收尾所有 status==='streaming' 的 assistant。usage 不由 complete
+  // 回填（chat-flow-consistency D3 规则 5 退役回合级覆盖），per-message usage 由
+  // message_end(assistant) 帧载荷承担（同款锚见 fg5-message-stream.test.ts）。
   it('message.complete 收尾所有 streaming assistant 气泡（不只最后一条）', () => {
     const store = useChatStore()
     const sid = 'multi'
@@ -150,7 +152,7 @@ describe('chat store message.complete 多 assistant 气泡收尾', () => {
     expect(after[1].status).toBe('complete')
   })
 
-  it('message.complete usage 只回填最后一条 assistant（turn 级聚合，非末回填会语义错位）', () => {
+  it('complete.usage 不再回填任何 assistant（D3 规则 5 退役）；per-message usage 由 message_end 载荷承担', () => {
     const store = useChatStore()
     const sid = 'usage'
     store.applyMessageEvent(sid, {
@@ -171,9 +173,43 @@ describe('chat store message.complete 多 assistant 气泡收尾', () => {
       },
     })
 
+    // 回合级 complete.usage 不再覆盖末位 assistant（定稿重建按每条消息的 entry 载荷写入，
+    // 覆盖会把 turn 聚合值错误摊到单条消息——规则 5 退役锚）
+    const afterComplete = store.getMessages(sid)
+    expect(afterComplete[0].usage).toBeUndefined()
+    expect(afterComplete[1].usage).toBeUndefined()
+
+    // message_end(assistant) 帧载荷回填各条消息自己的 usage（live 与 reload 同源同值）
+    store.applyMessageEvent(sid, {
+      type: 'message.message_end',
+      payload: {
+        sessionId: sid,
+        messageId: 'bubble-a',
+        entry: {
+          type: 'message',
+          parentId: null,
+          timestamp: new Date(0).toISOString(),
+          message: { role: 'assistant', content: [{ type: 'text', text: 'a' }], usage: { input: 10, output: 5 }, stopReason: 'stop', timestamp: 0 },
+        },
+      },
+    } as never)
+    store.applyMessageEvent(sid, {
+      type: 'message.message_end',
+      payload: {
+        sessionId: sid,
+        messageId: 'bubble-b',
+        entry: {
+          type: 'message',
+          parentId: null,
+          timestamp: new Date(0).toISOString(),
+          message: { role: 'assistant', content: [{ type: 'text', text: 'b' }], usage: { input: 100, output: 50 }, stopReason: 'stop', timestamp: 0 },
+        },
+      },
+    } as never)
+
     const after = store.getMessages(sid)
-    expect(after[0].usage).toBeUndefined() // 非末不回填
-    expect(after[1].usage).toMatchObject({ inputTokens: 100, outputTokens: 50 })
+    expect(after[0].usage).toEqual({ inputTokens: 10, outputTokens: 5 })
+    expect(after[1].usage).toEqual({ inputTokens: 100, outputTokens: 50 })
   })
 
   it('message.complete stopReason error 时所有 streaming assistant 收尾为 error', () => {

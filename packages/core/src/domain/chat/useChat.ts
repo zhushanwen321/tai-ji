@@ -18,7 +18,7 @@
  *
  * abort：调 api.chat.abort（方法存在，中断流转 DEFERRED G-025）。
  */
-import type { Segment, ServerMessage, ServerMessageUnion, CompactErrorCode, MessageBlockedCode } from '@taiji/shared'
+import type { Segment, ServerMessage, ServerMessageUnion, CompactErrorCode, MessageBlockedCode, Message } from '@taiji/shared'
 import { segmentsToPrompt, restoreRevokedDraft, markerLiteral, MESSAGE_BLOCKED_CODE } from '@taiji/shared'
 import {
   subscribeSession,
@@ -32,6 +32,7 @@ import { isVirtualKey } from './lru'
 import { disposeImageCacheForSession } from './image-cache'
 import { toErrorMessage } from '../../utils/error-message'
 import { randomUuid } from '../../utils/random-uuid'
+import { isDevMode } from '../../platform/dev-mode'
 import type { EnsureStreamSubDeps, SessionLiveStateLike, SessionStoreLike, UseChatDeps } from './use-chat-types'
 import type { DeliveryFrameEntry, DeliveryCancelReply, DeliverySubmitReply } from './api-port'
 import type { RevokeMessageErrorCode } from '@taiji/shared'
@@ -166,7 +167,7 @@ const bashTerminalFrameCounts = new Map<string, number>()
  *
  * 操作域刻意收窄为登记在册的命令条目：普通消息条目终局必有 transcript 痕迹，气泡去留由
  * 回执链管（direct 原位保留 / morph 段重建入流）——孤儿对账若操作普通条目，会在「快照帧
- * 先于 message_end 回执到达」窗口把已送达的气泡清掉且降级入流被 direct 车道豁免，构成
+ * 先于 message_end 回执到达」窗口把已送达的气泡清掉且降级入流被 direct 投递路径豁免，构成
  * 文本丢失。命令条目撤销后清除恒正确（cancel 成功 → 内核删条目 → 下一帧「不在派生视图」
  * 分支清气泡，原文已回填草稿；cancel 竞态落败 → delivered 在场 → 命令已执行，清气泡同样
  * 正确），故无需单独的「本端取消中」豁免集合。
@@ -306,7 +307,7 @@ export function resetChatModuleStateForTest(): void {
  *   不进本判据）。
  *
  * 与下方 morph 循环是同函数相邻分支（impl-plan U2 检查点）：对账只清登记在册的命令条目、
- * morph 只处理非 direct 车道的活跃条目，操作域互斥不重叠。
+ * morph 只处理非 direct 投递路径的活跃条目，操作域互斥不重叠。
  * 清除动作 = finalizeHandledEntry（handled 同形态静默清除：移除乐观气泡 + 清 dispatching
  * 占位（clearPendingSend，纯 Set 操作）+ 递减在途计数，无错误提示 D1④）。
  */
@@ -424,10 +425,10 @@ function handleExtensionErrorFrame(
 /**
  * [投递所有权内核 u3b / D7] session.delivery 帧消费（state topic 全量快照，last-value）：
  * ① 派生视图整体替换（effects/user-delivery 模块级 ref，队列区/气泡 morph 的单一数据源，
- * u3c QueueBubble 单源化消费）；② 乐观气泡 morph 编排——非 direct 车道（steer/queued）的
+ * u3c QueueBubble 单源化消费）；② 乐观气泡 morph 编排——非 direct 投递路径（steer/queued）的
  * 活跃条目（queued/in-flight/failed）命中有乐观气泡时：气泡移出对话流（truncateFrom）+
  * 原始 segments 捕获（送达回执时按原段按序入流，不降级纯文本）+ dispatching 占位回收。
- * direct 车道气泡保持待确认（送达回执经 message_end ① 标记匹配抵消占位，D7「既有
+ * direct 投递路径气泡保持待确认（送达回执经 message_end ① 标记匹配抵消占位，D7「既有
  * inflightCounts 抵消机制保留服务 direct」）；delivered 条目无 morph 面（其 transcript
  * 权威由 reducer 喂入，回执/快照两侧幂等）。
  * [pi1-disposition-chat-flow U2②] 派生视图替换后插入孤儿对账相邻分支 + 「曾经在场」证据标记
@@ -470,8 +471,8 @@ function handleSessionDelivery(
         ? (bubble.content as unknown as Segment[])
         : [{ type: 'text', text: String(bubble.content ?? '') }],
     )
-    // morph = 非 direct 车道：无「本条即将触发 message_start」的 dispatching 空窗，
-    // 乐观占位立即回收（direct 车道占位仍由 message_start 自动清）
+    // morph = 非 direct 投递路径：无「本条即将触发 message_start」的 dispatching 空窗，
+    // 乐观占位立即回收（direct 投递路径占位仍由 message_start 自动清）
     chat.clearPendingSend(sid)
   }
 }
@@ -620,18 +621,79 @@ function handleSessionCompacted(sid: string, chat: ChatStoreInstance): void {
   chat.setCompactingReason(sid, undefined)
 }
 
+/** occupancy 三维全 idle 判定（D4 触发条件与下方 pendingSend 兜底共用的单一谓词）：
+ * turn=idle ∧ 非 compacting ∧ 非 bash = runtime 权威宣告无任何维度在途。 */
+function isFullyIdleOccupancy(payload: ServerMessage<'session.occupancy'>['payload']): boolean {
+  return payload.turn === 'idle' && !payload.compacting && !payload.bash
+}
+
+/** 本地 streaming 残留判定（D4 触发条件第二支）：∃ streaming assistant ∨ ∃ running
+ * toolCall——一次遍历同查两形态（message 已终态而 toolCall 仍 running 的半执行残留
+ * 同属「实际已结束却永远工作中」）。 */
+function hasStreamingResidue(messages: Message[]): boolean {
+  return messages.some(
+    (m) =>
+      (m.role === 'assistant' && m.status === 'streaming')
+      || (m.toolCalls?.some((tc) => tc.status === 'running') ?? false),
+  )
+}
+
+/**
+ * [chat-flow-consistency §3.3 D4 / 缺陷 5] 终态处理失败恢复（设计定稿两步形态）。
+ *
+ * 触发 = 三维全 idle 派生视图到达 且 本地存在 streaming assistant / running toolCall：
+ * 权威帧宣告回合已结束，本地却挂着「工作中」实体——终态消息处理半途失败的确定性矛盾
+ * （message.complete 帧的副作用链在 ensureStreamSubscription 的 dispatch 错误隔离点被
+ * 吞掉只 warn；事实驱动：锚定 idle 帧与本地残留两个确定性事实，不建时间推测兜底）。
+ * 两步按序：
+ * ① finalizeSession('stalled') 收尾残留（半成品定格、状态复位）——先收尾是合并保护的
+ *   要求：直接拉历史会被 mergeBaselineWithLive 尾部保护段把 streaming 实体保下来与权威
+ *   版本双显；先收尾使本地转终态，reconcile 后被权威版本自然替换（单显、内容正确）。
+ * ② 拉一次 getHistory 走 reconcileHistory 以真实落盘内容接管——本场景正是「恢复场景读盘」
+ *   的合法用途（ADR-0097 原则 4），回合往往实际成功完成，拉回真实内容优于停留在中断提示。
+ * fire-and-forget：拉取失败仅 warn 留痕（best-effort 对齐 handleRevokeMessage 同款降级——
+ * 本地已收尾无「永远工作中」残留，对话流由下次切入/刷新的既有主动拉收敛）。失败降级形态：
+ * stalled 定格文案（REASON_FALLBACK_ERROR_TEXT.stalled）保持可见，故该文案为完成时态 +
+ * 恢复动作指引（「重新打开会话可恢复完整内容」），与「恢复已终止」的定格事实一致。
+ * 频率契约：正常路径残留在 message.complete 已收尾，本编排零触发；恢复后残留实体已终态，
+ * 同帧重放（WS 重连 stateSnapshot 回放）不满足触发条件——每回合至多一次拉取。
+ */
+function recoverStalledSession(sid: string, chat: ChatStoreInstance, deps: EnsureStreamSubDeps): void {
+  // 触发可观测（设计 D4 三档裁决「简单设计档」：dev 日志留痕，生产日志可感知频率出现
+  // 时升级处置 = 修消息处理链而非加兜底）
+  if (isDevMode()) {
+    console.warn(`[useChat] occupancy idle but local streaming residue remains for session ${sid} — finalizing as stalled, pulling authoritative history`)
+  }
+  chat.finalizeSession(sid, 'stalled')
+  void deps.chatApi
+    .getHistory(sid)
+    .then((history) => {
+      chat.reconcileHistory(sid, history.messages, historyWindowFromReply(history))
+    })
+    .catch((e) => {
+      console.warn(`[useChat] stalled recovery history pull failed for session ${sid}:`, e)
+    })
+}
+
 /** [u5b / D1+D3 → u3b/D7 简化] occupancy 派生视图消费（state topic：live 广播 + subscribeSession 的
  * stateSnapshot 回放同路径到达——WS 重连 resubscribeAll / 切回 session 时快照恢复，G4）。
- * 写入 chat store 派生视图分区（sessionPhase 单一数据源；send-route 的 UI 预测消费）。
+ * 写入 chat store 派生视图分区（sessionPhase 单一数据源；发送位形态 / 角标 / Alt+⏎ 分流的统一读口——chat-flow-consistency D5 后判定源 = shared isActiveTurnPhase）。
  * [HISTORICAL → u3b 退役] defer 队列 flush 触发（「全 idle 且队列非空」→ 投递）已随 defer
  * 队列整体退役：投递时机由 runtime 内核驱动（occupancy 边沿是内核 lane 再判定的触发源，
- * renderer 只渲染派生视图）。本 handler 只保留派生视图写入。 */
+ * renderer 只渲染派生视图）。本 handler 保留派生视图写入 + idle 兜底清 pendingSend +
+ * [chat-flow-consistency D4] 终态处理失败恢复（recoverStalledSession，见其注释）。 */
 function handleSessionOccupancy(
   sid: string,
   chat: ChatStoreInstance,
   msg: ServerMessage<'session.occupancy'>,
+  deps: EnsureStreamSubDeps,
 ): void {
-  chat.setOccupancy(sid, { turn: msg.payload.turn, compacting: msg.payload.compacting, bash: msg.payload.bash })
+  chat.setOccupancy(sid, {
+    turn: msg.payload.turn,
+    compacting: msg.payload.compacting,
+    bash: msg.payload.bash,
+    ...(msg.payload.handingOff !== undefined && { handingOff: msg.payload.handingOff }),
+  })
   // [u5a 收尾扩展 / #12 对称路径] 权威帧兜底乐观态：三维全 idle 的权威派生视图到达 = runtime
   // 确认无 turn 在途 —— 此时本地 pendingSend 乐观置位（send 前置，正常由 message_start
   // 清）若仍在，说明该次发送走了「无 turn 回流」通路（pi 扩展命令同步执行：手敲
@@ -643,13 +705,14 @@ function handleSessionOccupancy(
   // 到达时 pendingSend 已被 message_start 清（幂等无副作用）。
   // （main 侧 u5a 原含的 defer flush 路径已随 defer 队列退役不合并——投递时机由 runtime
   // 内核驱动，见文件头 [HISTORICAL → u3b 退役] 注。）
-  if (
-    msg.payload.turn === 'idle'
-    && !msg.payload.compacting
-    && !msg.payload.bash
-    && chat.isPendingSend(sid)
-  ) {
+  const fullyIdle = isFullyIdleOccupancy(msg.payload)
+  if (fullyIdle && chat.isPendingSend(sid)) {
     chat.clearPendingSend(sid)
+  }
+  // [chat-flow-consistency §3.3 D4] 权威 idle 与本地 streaming 残留矛盾 = 终态处理失败的
+  // 确定性信号 → 两步恢复（收尾 + 拉权威），见 recoverStalledSession 注释。
+  if (fullyIdle && hasStreamingResidue(chat.getMessages(sid))) {
+    recoverStalledSession(sid, chat, deps)
   }
 }
 
@@ -759,7 +822,7 @@ function handleSessionFrame(
       break
     }
     case 'session.occupancy': {
-      handleSessionOccupancy(sid, chat, msg)
+      handleSessionOccupancy(sid, chat, msg, deps)
       break
     }
     // [投递所有权内核 u3b / D7] 内核条目状态快照：队列区/气泡 morph 的单一数据源
@@ -877,7 +940,7 @@ export function ensureStreamSubscription(
 /**
  * createUseChat —— chat 业务编排 factory（P3 chat 域 w5；[投递所有权内核 u3b] 发送链
  * 收敛为统一 submit——乐观气泡 + delivery.submit，lane 判定移交 runtime 内核（D1），
- * renderer 不再判定车道也不再做任何时序防御（defer flush/S1/timer/熔断已退役））。
+ * renderer 不再判定投递路径也不再做任何时序防御（defer flush/S1/timer/熔断已退役））。
  *
  * [TD1] factory + wrapper 模式（对齐 w4 createChatStore）：core 不绑 renderer 跨域依赖，
  * 全经 UseChatDeps 注入。renderer useChat() 薄包装注入 deps，20 消费方零 churn。
@@ -1004,16 +1067,22 @@ export function createUseChat(deps: UseChatDeps) {
     // S4：复用调用方算过的 promptText，避免 submitSegments 内部再调一次 segmentsToPrompt。
     const reply = await submitSegments(sid, segments, clientUuid, promptText)
     // 受理确认到达 → 气泡上屏 + 占位记账（此后送达回执 message_end(user) ① 标记匹配抵消，
-    // D7 direct 车道抵消机制保留）。极端时序检查：message_end 送达回执先于 submit reply
+    // D7 direct 投递路径抵消机制保留）。极端时序检查：message_end 送达回执先于 submit reply
     // 到达（reply 与事件帧异通道无顺序契约）时派生视图已 delivered——气泡照常上屏（事实成立），
     // 跳过 inflight 记账（回执已消费，记账永无抵消配额——泄漏）。判定谓词复用
     // findDeliveryEntry 单一实现（[MF-1-4] 禁内联 find 漂移）。
     chat.appendUser(sid, segments, clientUuid)
+    // [chat-flow-consistency F1] 提交序号 +1（提交事实在产生处标记）：本函数是 send /
+    // followUp / editAndResend 三通路的共同上提点（F-D 提交编排单点），此处递增即覆盖全部
+    // 用户提交路径。对话流滚动跟随的 force 回底 watch 消费本序号（不再从「尾部新增 user
+    // 消息」数据变化推断）——morph 回执重建 / 外来直发复用 user 消息身份尾插但不动本序号，
+    // 不再误触发强拉回底。递增置于受理确认后（与气泡上屏同点），RPC 失败路径不产生序号。
+    chat.bumpSubmitSeq(sid)
     if (findDeliveryEntry(sid, clientUuid)?.state !== 'delivered') {
       chat.incrementInflight(sid, 1)
     }
     // dispatching 空窗占位（填 isGenerating 空窗，让停止按钮/输入可用性立即翻转）：
-    // message_start 到达自动清；非 direct 车道由 session.delivery 帧的 morph 编排回收；
+    // message_start 到达自动清；非 direct 投递路径由 session.delivery 帧的 morph 编排回收；
     // 命令挂起（handled disposition 交互挂起等）由 session.deliveryHandled 终局清
     //（U2①）——事件驱动收尾，无墙钟兜底（ADR-0122）。
     chat.addPendingSend(sid)
@@ -1041,8 +1110,8 @@ export function createUseChat(deps: UseChatDeps) {
    * 流式状态由会话级订阅的事件驱动（message_start→true，complete/error→false），
    * 不依赖 submit 的 resolve 时机——避免 ack 早于首个 chunk 导致订阅被提前拆除。
    *
-   * [u3b/D1] B 策略（busy→steer 本地判定）退役：busy 期发送不再本地转车道，统一乐观气泡
-   * + delivery.submit——lane 判定移交 runtime 内核（queued/steer 车道气泡经 session.delivery
+   * [u3b/D1] B 策略（busy→steer 本地判定）退役：busy 期发送不再本地转投递路径，统一乐观气泡
+   * + delivery.submit——lane 判定移交 runtime 内核（queued/steer 投递路径气泡经 session.delivery
    * 帧 morph 为队列条目，D7）。
    *
    * 显式接收 sessionId：双 panel 下 Composer 各自有独立 sessionId（panel leaf 绑定），
@@ -1155,7 +1224,7 @@ export function createUseChat(deps: UseChatDeps) {
   }
 
   /**
-   * 追加 follow-up——[u3b/D1] 统一 submit 化（内核 queued 车道承接「当前回合
+   * 追加 follow-up——[u3b/D1] 统一 submit 化（内核 queued 投递路径承接「当前回合
    * 结束后另起一轮」语义）。
    * 非执行中按普通发送处理（避免 Alt+⏎ 死键）。
    *

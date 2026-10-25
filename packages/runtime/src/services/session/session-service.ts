@@ -28,7 +28,7 @@
  * 先行 → tombstone → dropPartition → trash」的跨文件顺序 + B5 禁止挂回本汇聚链）在该
  * 文件头**;本文件保留公开 wrapper（调用点与测试锁定侧不变）。
  */
-import { existsSync } from 'node:fs'
+import { existsSync, unlinkSync } from 'node:fs'
 import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView, SessionRevokeMessageReply, SendPromptReason, WorkflowRunEventsReply, WorkflowDagReply, SessionSurface } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 // subagent 流状态只读快照形状（B2 subagent-stream-chunk §4.1）：type-only import——
@@ -108,6 +108,7 @@ import { PresetService, type PresetResolution } from '../preset-service.js'
 // 未注入时所有 bus 调用 no-op（this.messageBus?.publish）。type-only import 避免运行时环
 //（MessageBus 不反向依赖 SessionService）。
 import type { IMessageBus } from '../message-bus/message-bus.js'
+import { isGeneratingTurn } from './types.js'
 import type { ForceQuitSource, UserStoppedMarkStore } from './types.js'
 
 /**
@@ -571,7 +572,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.sessionListQuery = new SessionListQueryService({
       listSidebarGroups: () => this.scanner.listPersistedSessions(),
       listBtwLines: () => this.btwService?.listAllLines?.() ?? [],
-      isLineGenerating: (sessionId) => this.lifecycle.get(sessionId)?.isGenerating,
+      // [chat-flow-consistency D1 合并修正] 派生布尔 isGenerating 已删，忙闲读口 = occupancy
+      // 派生（isGeneratingTurn 单点定义）；registry 未命中保持 undefined（与原 ?. 链同形）。
+      isLineGenerating: (sessionId) => {
+        const s = this.lifecycle.get(sessionId)
+        return s ? isGeneratingTurn(s.occupancy?.turn) : undefined
+      },
     })
 
     // 消息撤回编排域（message-revoke D2，U4）：deps 窄注入——occupancy 经 lifecycle 只读侧、
@@ -700,9 +706,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       //（renderer 全量订阅覆盖 list 内全部 session，见 useSessionStreamSync）。
       // occupancy #10（session-dead-structural-fixes D2 挂点迁移，u3b；失败路径进程异常退出路径）：
       // 占用中 pi 死亡时 agent_settled / compaction_end 永不会发出（二者只从 pi run/compact
-      // finally 触发），'full-reset' 行兜底——turn/compacting/bash 三维全复位 + 三布尔派生同步
-      // 复位（结构上不再有「只复位一边」），否则重连 renderer 经 stateSnapshot 回放恢复的是
-      // 永久的占用派生视图。须在 removeSessionEntry（内部 bus.clearSession）之前。
+      // finally 触发），'full-reset' 行兜底——四维全复位（turn 机器 idle 行 + compacting/bash/
+      // handingOff 布尔维全 false patch，结构上不再有「只复位一边」），否则重连 renderer 经
+      // stateSnapshot 回放恢复的是永久的占用派生视图。须在 removeSessionEntry（内部
+      // bus.clearSession）之前。
       // 注意：此处 session 是 delete 前缓存的引用，removeSessionEntry 后 Map 条目已删除
       // 统一经 removeSessionEntry（触发 onSessionDelete 清 pendingReload 等残留）
       try {
@@ -1328,14 +1335,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.projection.handleTurnUsageSideEffects(sessionId)
   }
 
-  /** agent_end 副作用（isGenerating 复位 + sidecar 兜底 + session_end 终态；语义注释随实现迁 session-state-projection.ts）。 */
-  handleTurnEndSideEffects(sessionId: string, stopReason?: string): void {
-    this.projection.handleTurnEndSideEffects(sessionId, stopReason)
+  /** agent_end 副作用（settling 转移 + sidecar 兜底 + session_end 终态，willRetry 中间失败跳终态；语义注释随实现迁 session-state-projection.ts）。 */
+  handleTurnEndSideEffects(sessionId: string, stopReason?: string, willRetry?: boolean): void {
+    this.projection.handleTurnEndSideEffects(sessionId, stopReason, willRetry)
   }
 
   /**
-   * agent_settled 副作用（run 级联结束 → isGenerating 复位；session-dead 2026-09-10 补丁，
-   * 语义注释随实现迁 session-state-projection.ts）。组合根 index.ts onAgentSettled 经本委托消费。
+   * agent_settled 副作用（run 级联结束 → occupancy 'idle' 转移，isGeneratingTurn 派生自然翻
+   * false；session-dead 2026-09-10 补丁，语义注释随实现迁 session-state-projection.ts）。
+   * 组合根 index.ts onAgentSettled 经本委托消费。
    */
   handleAgentSettledSideEffects(sessionId: string): void {
     this.projection.handleAgentSettledSideEffects(sessionId)
@@ -1345,11 +1353,50 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 写 session_end 终态 entry（W4，ADR 0042）。
    * 3 个终态点复用：正常完成（handleTurnEndSideEffects）/ abort（message-dispatcher）/ 进程崩溃（onSessionExit）。
    * sessionFilePath 不存在时静默跳过（首 turn 前崩溃 / pi 延迟写入窗口）。
+   *
+   * [chat-flow-consistency 第一终态优先下沉（design-turn-statemachine 缺陷 2 方案 2）]
+   * 写入前检查已有终态（done/error/stopped 任一在侧）则跳过——三个终态写点统一继承该纪律，
+   * 进程退出链（onSessionExit）保留既有内联检查（条目已删不能走内部 get，语义同构双实现）。
+   * 该检查的射程是**同一回合**的终态写入竞态（abort 与 pi 自发 agent_end 并发，stopped/done
+   * 写入顺序不定）：先写者赢——done 先写则 abort 跳过（回合自然完成）；stopped 先写则 done
+   * 跳过（对齐进程退出链既有裁决「abort reason 更具诊断价值」）。跨回合的新终态不归本检查
+   * 管：新回合受理入口（message-dispatcher.runAcceptance）先经 clearSessionOutcome 清旧
+   * sidecar（对齐 restore/fork 的「新周期清终态」惯例，V3 核实点同源），新周期终态可正常
+   * 写入——否则用户 abort 后继续对话，新回合正常完成的 done 被上一回合的 stopped 永久拦截，
+   * 重启后侧栏状态失真（scanner 按 outcome ?? 'idle' 派生最近状态）。
    */
   persistSessionOutcome(sessionId: string, outcome: SessionOutcome, reason?: string): void {
     const session = this.lifecycle.get(sessionId)
     if (!session?.sessionFilePath) return
+    const existing = this.sessionStore.extractSessionOutcome(session.sessionFilePath)
+    if (existing === 'done' || existing === 'error' || existing === 'stopped') return
     this.sessionStore.persistSessionEnd(session.sessionFilePath, outcome, reason)
+  }
+
+  /**
+   * 清除 session 终态 sidecar（persistSessionOutcome 的对称操作）：新回合受理入口
+   * （message-dispatcher.runAcceptance 受理成功后）调用，使跨回合新终态不被上一回合的
+   * 第一终态优先检查拦截。
+   *
+   * [dmg-r1-1 跨回合终态放行] 第一终态优先的射程限定为同回合写入竞态（见
+   * persistSessionOutcome 注释）；用户在终态后继续对话 = 开启新周期，旧终态的历史使命
+   * 随新回合受理结束——删除 `.meta.json` sidecar（对齐 session-lifecycle attachRestoreFile /
+   * fork 链在 switchSession 成功后 `unlinkSync(filePath + '.meta.json')` 的「新周期清终态」
+   * 惯例）。同回合并发竞态保护不受影响：abort（RPC）与 pi 自发 agent_end（事件）两条写点
+   * 均不经新回合受理，检查原样生效。
+   *
+   * 缓存纪律与 persistSessionEnd 写点对称：sessionMetaCache 键只含 JSONL 的 (mtimeMs, size)，
+   * 删 sidecar 不改 JSONL stat，不失效则 scanner 命中缓存继续返回旧 outcome——先删缓存条目
+   * 再失效目录级 TTL（与 persistSessionEnd 写后失效同一对原语）。
+   * sessionFilePath 缺失（pi 延迟写入窗口 / 条目无文件）静默跳过；sidecar 不存在是常态
+   *（无终态的进行中会话），unlink 失败静默吞（对齐 lifecycle 两处同型 unlink）。
+   */
+  clearSessionOutcome(sessionId: string): void {
+    const session = this.lifecycle.get(sessionId)
+    if (!session?.sessionFilePath) return
+    try { unlinkSync(session.sessionFilePath + '.meta.json') } catch { void 0 }
+    this.sessionStore.invalidateMetaCache(session.sessionFilePath)
+    this.sessionStore.invalidateScanCache()
   }
 
   /**

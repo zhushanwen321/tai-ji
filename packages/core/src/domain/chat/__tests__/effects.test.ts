@@ -665,28 +665,56 @@ describe('message.complete error 路径的 errorMessage 可见性（模型 400 �
   })
 })
 
-// ── message.complete 收尾矩阵（registry next 回调检查目标：多气泡收尾 / usage·content 末条定位）──
+// ── message.complete 收尾矩阵（registry next 回调检查目标：多气泡收尾 / 权威 content 末条定位）──
 //
 // [HISTORICAL] 一个 turn 可产出多个 streaming assistant 气泡（工具调用气泡 + 文字总结气泡）：
-// handler 的 map 回调必须收尾**所有** status==='streaming' 的 assistant，而 usage / 权威
-// content / errorMessage 只回填最后一条（turn 级聚合）。只收最后一条的历史形态会让前面的
-// toolCall 气泡永远 streaming；把 usage 回填到非末 assistant 则语义错位。
+// handler 的 map 回调必须收尾**所有** status==='streaming' 的 assistant，而权威
+// content / errorMessage 只落最后一条（turn 级聚合）。只收最后一条的历史形态会让前面的
+// toolCall 气泡永远 streaming。[chat-flow-consistency D3 规则 5] usage/endedAt 已退役出
+// 收尾 patch——live 写入点 = 各自 message_end 的定稿重建（逐条载荷唯一承担）。
 
-describe('message.complete 收尾矩阵：多 streaming 气泡全收尾 + turn 级聚合字段只落末条', () => {
+describe('message.complete 收尾矩阵：多 streaming 气泡全收尾 + 定稿重建字段不在收尾覆盖', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  it('多 streaming 气泡（toolCall 气泡 + 文字气泡）全部收尾；usage 只回填最后一条 assistant', () => {
+  it('多 streaming 气泡（toolCall 气泡 + 文字气泡）全部收尾；usage/endedAt 逐条由定稿重建承担、complete 不再覆盖（D3 规则 5）', () => {
     const ctx = makeCtx()
     // 气泡 1：含 running toolCall 的 assistant（工具调用气泡）
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
     dispatchMessageEvent(ctx, SID, msg('message.tool_call_start', { entry: toolCallEntry({ toolCallId: 'tc1', toolName: 'read', arguments: { path: '/x' } }) }))
+    dispatchMessageEvent(ctx, SID, msg('message.message_end', {
+      messageId: 'a1',
+      entry: {
+        type: 'message', parentId: null, timestamp: new Date(1700000001000).toISOString(),
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'tc1', name: 'read', arguments: { path: '/x' } }],
+          timestamp: 1700000001000,
+          usage: { input: 10, output: 20 },
+        },
+      },
+    }))
     // 气泡 2：文字总结气泡（同 turn 第二个 assistant）
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a2' }))
     dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: '总结' }))
+    dispatchMessageEvent(ctx, SID, msg('message.message_end', {
+      messageId: 'a2',
+      entry: {
+        type: 'message', parentId: null, timestamp: new Date(1700000002000).toISOString(),
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '总结' }],
+          timestamp: 1700000002000,
+          usage: { input: 30, output: 40 },
+        },
+      },
+    }))
 
+    // [chat-flow-consistency D3 规则 5] complete 的 usage/endedAt 覆盖已退役：payload.usage
+    // （回合级累计）若覆盖末位，deriveTurnAggregates 逐条求和会把末位双计。usage/endedAt 的
+    // live 写入点 = 各自 message_end 的定稿重建（rebuildAssistantOnFinalize）。
     dispatchMessageEvent(ctx, SID, msg('message.complete', {
       stopReason: 'stop',
-      usage: { inputTokens: 100, outputTokens: 50 },
+      usage: { inputTokens: 999, outputTokens: 999 },
     }))
 
     const list = getMsgs(ctx)
@@ -694,14 +722,12 @@ describe('message.complete 收尾矩阵：多 streaming 气泡全收尾 + turn �
     // 两个气泡都收尾（历史 bug：只收最后一条 → toolCall 气泡永远 streaming）
     expect(list[0].status).toBe('complete')
     expect(list[1].status).toBe('complete')
-    // usage 是 turn 级聚合：只回填最后一条 assistant（回填到非末条语义错位）
-    expect(list[0].usage).toBeUndefined()
-    expect(list[1].usage).toEqual({ inputTokens: 100, outputTokens: 50 })
-    // 产出结束时刻（turn 聚合口径时间轴右端）：只标末条 assistant；中间段保持缺省
-    // （live 不可知其真实结束时刻，消费侧回退 timestamp；reload 侧由 entry 时间戳补齐）
-    expect(list[0].endedAt).toBeUndefined()
-    expect(list[1].endedAt).toBeTypeOf('number')
-    expect(list[1].endedAt).toBeGreaterThanOrEqual(list[1].timestamp)
+    // usage 逐条 = 各自 message_end 载荷值；complete 的回合级值不覆盖
+    expect(list[0].usage).toEqual({ inputTokens: 10, outputTokens: 20 })
+    expect(list[1].usage).toEqual({ inputTokens: 30, outputTokens: 40 })
+    // endedAt 逐条 = 各自 entry 落盘时刻（与 reload 侧 applyEntryEndTimes 同源）；complete 不写
+    expect(list[0].endedAt).toBe(1700000001000)
+    expect(list[1].endedAt).toBe(1700000002000)
   })
 
   it('权威 content 覆盖最后一条 assistant（末 delta 异步渲染竞态防线）；非末气泡 content 不动', () => {

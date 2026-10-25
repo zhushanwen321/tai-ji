@@ -9,8 +9,8 @@
  * v2 增量（投递所有权内核，v2 设计批次——设计文档未入 git，裁决随本仓 commit
  * 历史可溯）：
  * 条目状态机/lane/条目双形态（活跃条目 + 终局记录）/entriesFull()+projection() 双视图；行为实现在
- * 本包 src/delivery.ts。lane 字面量中的 'steer' 是投递车道语义名（设计 §1.1 术语表
- * /D1），非 pi API 词汇——intent → 底层参数的翻译在适配器内部，本包只记录车道，
+ * 本包 src/delivery.ts。lane 字面量中的 'steer' 是投递路径语义名（设计 §1.1 术语表
+ * /D1），非 pi API 词汇——intent → 底层参数的翻译在适配器内部，本包只记录投递路径，
  * 零依赖纪律对 lane 不破例。
  *
  * v3 增量（统一消息投递内核，设计 .tmp/tech-design/unified-delivery.md §3.5）：
@@ -151,7 +151,7 @@ export interface DeliveryPort {
 
 /**
  * 送达凭据三档（v3，ADR-0074 词条扩展；提交方申报制，缺省 'marker'）：
- * - 'marker'：出站文本尾附裸标记、送达以回执命中为准（文本车道主通路）。
+ * - 'marker'：出站文本尾附裸标记、送达以回执命中为准（文本投递路径主通路）。
  * - 'acceptance'：受理即送达——无回执锚点条目的「受理 = 送达」是唯一可判事实，
  *   port.send 受理成功即落 delivered 终态（v1 记账口径 / D9⑤ 显式例外）。
  * - 'details-id'（v3 新增）：通知条目送达判定 = 对话记录中出现 details 携带本条目
@@ -165,19 +165,25 @@ export type DeliveryReceiptAnchor = 'marker' | 'acceptance' | 'details-id'
 
 /**
  * 失败保留策略（v3）：port.send 失败（首败，ADR-0122 无内核自动重试）时条目的处置。
- * - 'forget'：首败即停 + 显式上报后从内核移除（runtime 文本车道现状；重试决策归
+ * - 'forget'：首败即停 + 显式上报后从内核移除（缺省 text 现状；重试决策归
  *   消费方——人看页面通知可重发）。store 已 persist 的记录同步 discard（失败条目
  *   无判重语义，防重启后被 loadUndelivered 复活成死条目）。
  * - 'retain'：失败条目留守——内存态转回 queued 等下一 settled 边沿 / 外部 flush
  *   重入队（事件驱动，无定时器）；store 记录保留（不 ack 不 discard），重启后经
- *   loadUndelivered 重入队（通知车道无人值守语义，与账本现状同构）。
+ *   loadUndelivered 重入队（通知投递路径无人值守语义，与账本现状同构）。
+ * - 'failed'（chat-flow-consistency 第 11 条）：受理失败条目转 **failed 终态留守**——
+ *   不自动重投（无 retain 的边沿重投，等用户处置：resync 重试 / cancel 撤销）、
+ *   不 store.discard（重启后经 loadUndelivered 重放，重放带 transcript 判重防线），
+ *   与断连 failInFlight 的 failed 同态同出路（队列区一行 + 重试入口双呈现）。
  *
  * 缺省按载荷类型：custom = 'retain' / text = 'forget'（§3.4 提交选项缺省值表：
- * 交互在席 vs 无人值守），提交方可显式覆写。sendChecked 挂起条目恒 'forget'（同步
- * 失败回执契约与 retain 重投矛盾——调用方已收到失败，重投会产生「失败但送达」的
- * 矛盾观测；显式申报 retain 时按 forget 处置并一次性 warn）。
+ * 交互在席 vs 无人值守），提交方可显式覆写。sendChecked 挂起条目缺省/显式 'retain'
+ * 按 'forget' 处置（同步失败回执契约与 retain 边沿重投矛盾——调用方已收到失败，
+ * 自动重投会产生「失败但送达」的矛盾观测；一次性 warn）；显式 'failed' 放行——
+ * waiter reject 是受理口径通知，failed 留守是条目状态，两者不矛盾（failed 不自动
+ * 重投，「失败但送达」观测不存在）。
  */
-export type DeliveryFailurePolicy = 'forget' | 'retain'
+export type DeliveryFailurePolicy = 'forget' | 'retain' | 'failed'
 
 /**
  * 送达凭据检查函数（v3，'details-id' 凭据的判定承载形态）：判定「对话记录中是否已
@@ -195,7 +201,7 @@ export type DeliveryProofCheck = (id: string) => boolean
 export interface DeliveryStoreRecord {
   /** 客户端幂等 id（= 条目 id）。 */
   id: string
-  /** 投递车道（重入队时按原车道重报）。 */
+  /** 投递路径（重入队时按原路径重报）。 */
   lane: DeliveryLane
   /** 载荷（原样）。 */
   payload: DeliveryPayload
@@ -214,7 +220,7 @@ export interface DeliveryStoreRecord {
 /**
  * 持久化存储端口（v3，统一语言词条「持久化存储端口」）：内核与耐久面的唯一接口。
  * 两个实现在两半区适配层（本包零 fs 零 pi 知识）：runtime 半区 = 磁盘 outbox 文件
- * （文本车道，波 4 接线）；port 半区 = session entry 读写（通知车道，波 2 接线）。
+ * （文本投递路径，波 4 接线）；port 半区 = session entry 读写（通知投递路径，波 2 接线）。
  *
  * 内核行为契约（设计 §3.5.1）：
  * - persist：send 受理前调用（耐久承诺先于投递尝试，与账本 record 先于 deliver 同
@@ -270,7 +276,7 @@ export interface DeliveryConfig {
    * （受理 ≠ 送达——SendReceipt 注释口径的机制化落地）。**显式例外：sendChecked 的
    * 同步 settle 维持受理口径不变**——session_manager send 的「立即受理确认」契约
    * 锚定在受理时点，后移到送达会让 agent 工具调用阻塞至目标 session 当前 turn 结束
-   * （steer 类车道可达数十秒）。本注释即接口口径权威声明。
+   * （steer 类投递路径可达数十秒）。本注释即接口口径权威声明。
    *
    * outcome 'rejected' = 失败终局通知（ADR-0122 首败即停：send 失败一次即移除条目并
    * 逐条回调；断连事件 failInFlight 转 failed 终态同样逐条回调）。重试决策归消费方，
@@ -313,8 +319,8 @@ export interface DeliveryHandle {
 // ─── 条目状态机（D9①，内核 v2）────────────────────────────────
 
 /**
- * 投递车道（D1）。lane 在条目创建时由 runtime 内核适配层判定（读权威 occupancy
- * 派生视图 + 内核自身队列态，单一判定源）后记录，此后不变。三档为投递车道语义名
+ * 投递路径（D1）。lane 在条目创建时由 runtime 内核适配层判定（读权威 occupancy
+ * 派生视图 + 内核自身队列态，单一判定源）后记录，此后不变。三档为投递路径语义名
  * （设计 §1.1 术语表），非底层通道 API 词汇。
  */
 export type DeliveryLane = 'direct' | 'steer' | 'queued'
@@ -327,6 +333,11 @@ export type DeliveryLane = 'direct' | 'steer' | 'queued'
  * - in-flight/queued → cancelled：用户撤销（delivery.cancel）
  * - in-flight → failed：断连事件驱动的未确认终局（failInFlight，ADR-0122——pi 连接
  *   断开时结果未知，显式失败交用户处置）
+ * - queued → failed：出站投递受理失败（onFailure='failed'，chat-flow-consistency
+ *   第 11 条——文本投递受理失败留守 failed 行，与断连未确认同出路，等用户处置）
+ * - failed → delivered：确定性送达事实（resync transcript 预检命中 / 迟到送达回执，
+ *   第 11 条歧义性终结——首败时文本可能已进 transcript，delivered 事实终结 failed
+ *   猜测，行随事实消失）
  * - failed → queued：用户重试（resync 单条重报）；failed → cancelled：用户移除
  * 帧派生视图四态差异：cancelled 不进 session.delivery 帧（D5③），协议侧帧 state 无此值。
  */
@@ -341,7 +352,7 @@ export interface DeliveryEntry {
   /** 客户端幂等 id（= 协议层 clientUuid；裸标记身份源 D2，判重锚 D5②）。 */
   id: string
   state: DeliveryEntryState
-  /** 投递车道（创建时判定后记录，不变，D1）。 */
+  /** 投递路径（创建时判定后记录，不变，D1）。 */
   lane: DeliveryLane
   /** 载荷（一期仅 text，DeliveryPayload 联合保留扩展位）。 */
   payload: DeliveryPayload

@@ -216,7 +216,7 @@ export interface ISessionService {
    * 覆盖默认预算（缺省回落 HISTORY_BUDGET）。cursor 未命中返回空页 + truncated=false
    * （翻页到头，不报错）。
    */
-  getHistory(sessionId: string, query?: { cursor?: string; limitTurns?: number; maxBytes?: number }): Promise<{ messages: Message[]; truncated: boolean; loadedTurns: number; totalTurnsEstimate: number }>
+  getHistory(sessionId: string, query?: { cursor?: string; limitTurns?: number; maxBytes?: number }): Promise<{ messages: Message[]; truncated: boolean; loadedTurns: number; totalTurnsEstimate: number; interrupted?: boolean }>
   /**
    * 获取 session 派生的 subagent 列表（从主 session JSONL 的 subagent toolCall/toolResult 提取）。
    * 纯磁盘读取，不依赖 pi 进程活跃。文件不存在或无 subagent 调用时返回空数组。
@@ -353,9 +353,10 @@ export interface ISessionService {
   hasActiveSession(sessionId: string): boolean
   getSummary(sessionId: string): SessionSummary | undefined
   /**
-   * 取活跃 session 的运行时状态视图（isGenerating / isCompacting / isBashRunning /
-   * lastActiveAt 等可写字段；未激活/不存在返回 undefined）。sd-u5 起 delivery 装配
-   * 经此读 isIdle 判定标志；字段可写语义见 IManagedSessionView 注释。
+   * 取活跃 session 的运行时状态视图（occupancy 四维 / lastActiveAt 等可写字段；
+   * 未激活/不存在返回 undefined）。isGenerating 等忙闲判定从 occupancy 派生
+   * （chat-flow-consistency D1 派生布尔已删，读口 = types.ts isGeneratingTurn）。
+   * sd-u5 起 delivery 装配经此读 isIdle 判定标志；字段可写语义见 IManagedSessionView 注释。
    */
   getSession(sessionId: string): IManagedSessionView | undefined
   /**

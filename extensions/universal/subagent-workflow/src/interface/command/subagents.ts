@@ -115,7 +115,7 @@ async function rpcCancel(
 /**
  * 请求作用域结果文件写入（subagent-composer 2026-10-18）：client.prompt 对命令
  * handler 异常**不拒绝**（真机实测——异常被 pi 转为 UI notify，prompt 照常 resolve），
- * composer 车道的失败契约（toast + restoreSegments 恢复草稿）必须经结果文件传回。
+ * composer 投递路径的失败契约（toast + restoreSegments 恢复草稿）必须经结果文件传回。
  * 载体与 /subagent-model 通道同款（getSubagentMessageResultsDir，写后读、读后即删）。
  * requestId 缺省（手动 prompt / 旧调用方）= 无回执，跳过写入（runtime 侧读不到
  * 文件按通道失败处理——仅发生在带 --req 的新调用方，旧调用方 runtime 侧同样不带
@@ -170,7 +170,7 @@ async function rpcMessage(
     ctx.ui.notify(`Message delivered to subagent ${result.slug} (${result.subagentId})`, "info");
   } catch (err) {
     // 失败经结果文件传回（scope:error → runtime 抛分型错误 → WS error envelope →
-    // renderer composer 车道 toast + restoreSegments 恢复草稿）。prompt 通道本身
+    // renderer composer 投递路径 toast + restoreSegments 恢复草稿）。prompt 通道本身
     // 不携带命令异常（resolve 语义，真机实测），notify 只达 TUI/横幅不达回执面。
     writeMessageResultFile(requestId, resolveRootSessionId(ctx), {
       scope: "error",

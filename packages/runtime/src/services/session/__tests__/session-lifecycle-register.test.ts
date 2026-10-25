@@ -80,7 +80,6 @@ describe('SessionLifecycle.registerSession（S3 写点归位）', () => {
       id: 's1', cwd: '/repo', label: '测试', modelId: 'ov/m1',
       sessionFilePath: '/repo/s1.jsonl', surface: 'sidebar',
       parentSession: 'parent-1', forkEntryId: 'entry-9',
-      isGenerating: false, isCompacting: false, isBashRunning: false,
     })
     expect(session.adapter).toBeDefined()
     // adapter 经 adapterFactory 装配并 attach（#8 G1：cwd 透传工厂）

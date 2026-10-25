@@ -94,10 +94,11 @@ describe('EventInterpreter · W1 interpret 循环事件级隔离', () => {
       turnEnd(),
     ])
 
-    // turn-end 的 onTurnFinalize（复位 isGenerating）必须被触发，否则 session 永远 busy
+    // turn-end 的 onTurnFinalize（occupancy 终态收口）必须被触发，否则 session 永远占用
     expect(onTurnFinalize).toHaveBeenCalledTimes(1)
-    // onTurnFinalize 签名 (sessionId, stopReason?) —— 正常 turn-end 路径传 stopReason
-    expect(onTurnFinalize).toHaveBeenCalledWith('sid-iso', 'end_turn')
+    // onTurnFinalize 签名 (sessionId, stopReason?, willRetry?) —— 正常 turn-end 路径传
+    // stopReason + willRetry（本用例载荷无 willRetry 字段 → false）
+    expect(onTurnFinalize).toHaveBeenCalledWith('sid-iso', 'end_turn', false)
   })
 
   // ── ISO3：turn-end 自己抛错时 onTurnFinalize 兜底复位（B2 核心） ──
@@ -113,9 +114,10 @@ describe('EventInterpreter · W1 interpret 循环事件级隔离', () => {
     interpreter.interpret([turnEnd()])
 
     // B2: 即使 turn-end 自身 handler 抛错，catch 兜底也必须调 onTurnFinalize，
-    // 否则 isGenerating 永不复位 → session 永久 busy（AGENTS.md 规则 #3）
+    // 否则 occupancy 永不复位 → session 永久占用（AGENTS.md 规则 #3）
     // S4：catch 兜底也传 stopReason（对齐正常路径 + handleTurnEndSideEffects 的 outcome 映射）
+    // willRetry 同源透传（handleIsolatedEventError 与 handleTurnEnd 读同一帧载荷 → false）
     expect(onTurnFinalize).toHaveBeenCalledTimes(1)
-    expect(onTurnFinalize).toHaveBeenCalledWith('sid-iso', 'end_turn')
+    expect(onTurnFinalize).toHaveBeenCalledWith('sid-iso', 'end_turn', false)
   })
 })

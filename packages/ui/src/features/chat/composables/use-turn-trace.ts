@@ -59,7 +59,8 @@ export interface BlockUnitProps { // oe-exempt:20261013:framework:类型契约�
  * trace 窗口化编排 + 渲染单元派生。
  *
  * @param turn 当前 MessageTurn getter（props.turn；computed 内经 getter 读，保持响应式追踪）
- * @param isWorkingTurn 工作 turn 判定 getter（Turn.vue isWorkingTurn：sessionActive && isLastTurn）
+ * @param isWorkingTurn 工作 turn 判定 getter（Turn.vue isWorkingTurn：sessionActive ∧
+ *   (isLastTurn ∨ turn.isStreaming)，[chat-flow-consistency D2] 放宽后双工作态并存）
  */
 export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boolean) {
   const { isExpanded, isTakeover } = useChatViewDeps()
@@ -87,8 +88,10 @@ export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boole
 
   /**
  * 实际渲染的块序列：
- * - 折叠态（!showTrace）：每个 assistant 的末位 text（按 assistantId 分组各取 flatIndex 最大者）。
- *   多 assistant turn 下每个 assistant 的最终回复默认可见（与 computeTraceWindow ①规则一致）；
+ * - 折叠态（!showTrace）：全 turn 唯一末位 text（flatIndex 最大者，不按 assistant 分组——
+ *   内联注释 :100 同款口径）。语义 = 回合结论摘要：多 assistant 回合折叠态只显示最后一条
+ *   assistant 的正文，是合理默认（折叠态追求高度最小）；若产品要「每个 assistant 的结论
+ *   都可见」，那是 computeTraceWindow ①语义的展开，无诉求不立项。
  *   computeTraceWindow 不参与折叠态（无 trace 细节）。
  * - 工作展开态（showTrace && isWorkingTurn）：traceWindow.visible（窗口切片结果，含各 assistant
  *   末位 text + 过程块；takeover=true 时 visible=全量）。

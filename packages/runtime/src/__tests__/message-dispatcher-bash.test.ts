@@ -54,10 +54,7 @@ function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManaged
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
+        bashRunToken: undefined,
     ...overrides,
   }
 }
@@ -76,13 +73,9 @@ function makeMocks(opts: MockOpts = {}) {
   const isBashRunning = opts.isBashRunning ?? false
   const isGenerating = opts.isGenerating ?? false
   const isCompacting = opts.isCompacting ?? false
-  // [u3b 预检改读 occupancy] sendPrompt 预检输入源改为 occupancy 派生视图（sendBash 预检仍读
-  // 三布尔不动）。fixture 镜像真实链路的原子同步（原语「合并 + 派生」双写合一）。
+  // [u3b 预检改读 occupancy → D1 全量迁移] 预检读口统一 = occupancy 派生（fixture 直写四维）。
   const session = makeMockSession({
-    isBashRunning,
-    isGenerating,
-    isCompacting,
-    occupancy: { turn: isGenerating ? 'generating' : 'idle', compacting: isCompacting, bash: isBashRunning },
+    occupancy: { turn: isGenerating ? 'generating' : 'idle', compacting: isCompacting, bash: isBashRunning, handingOff: false },
   })
 
   const bashFn = opts.bashResult
@@ -118,6 +111,7 @@ function makeMocks(opts: MockOpts = {}) {
     getSessionByClient: vi.fn(() => session),
     getSession: vi.fn(() => session),
     persistSessionOutcome: vi.fn(),
+    clearSessionOutcome: vi.fn(),
     removeSessionEntry: vi.fn(),
     detachSession: vi.fn(),
   }
@@ -198,8 +192,8 @@ describe('MessageDispatcher sendBash —— 并发放宽 + 双分支延迟（w2 
       truncated: false,
       excludeFromContext: false,
     })
-    // finally isBashRunning 复位
-    expect(session.isBashRunning).toBe(false)
+    // finally bash 维复位（[D1] 读口迁移）
+    expect(session.occupancy?.bash).toBe(false)
     // 正常返回
     expect(result).toEqual({ status: 'settled' }) // 回执 settled（已执行并收尾）
 
@@ -294,7 +288,7 @@ describe('MessageDispatcher sendBash —— 正常路径（T5）', () => {
     expect(typeof end!.payload.timestamp).toBe('number')
 
     // isBashRunning 复位 false（finally 兜底）
-    expect(session.isBashRunning).toBe(false)
+    expect(session.occupancy?.bash).toBe(false)
     // 正常返回
     expect(result).toEqual({ status: 'settled' }) // 回执 settled（已执行并收尾）
   })
@@ -343,7 +337,7 @@ describe('MessageDispatcher sendBash —— 错误路径（T6, S2 对称兜底�
     expect(typeof end!.payload.output).toBe('string')
     expect(end!.payload.output).toContain('pi boom')
     // finally isBashRunning 复位
-    expect(session.isBashRunning).toBe(false)
+    expect(session.occupancy?.bash).toBe(false)
     // 回执 settled+error（已执行并收尾——执行失败非预检拒绝，消费方不得恢复草稿）
     expect(result).toEqual({ status: 'settled', error: 'pi boom' })
   })
@@ -385,7 +379,7 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
     expect(aborted!.payload).toMatchObject({ sessionId: 's1' })
     expect(typeof aborted!.payload.timestamp).toBe('number')
     // isBashRunning 复位（finally 兜底）
-    expect(session.isBashRunning).toBe(false)
+    expect(session.occupancy?.bash).toBe(false)
   })
 
   it('T8b: client.abortBash 抛异常 → 不向上抛 + sent:false（回执真实化：不得据此回 aborted）+ 兜底广播', async () => {
@@ -399,7 +393,7 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
     expect(aborted).toBeDefined()
     expect(aborted!.payload.sessionId).toBe('s1')
     // isBashRunning 仍复位
-    expect(session.isBashRunning).toBe(false)
+    expect(session.occupancy?.bash).toBe(false)
   })
 
   it('T8c: 无 bash 在跑 → 检查短路 { sent:false } + 不调 client.abortBash（回执真实化：不得回 aborted）', async () => {
@@ -411,7 +405,7 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
     expect(result).toEqual({ sent: false })
     // 短路不广播 bashAborted 兜底终态（既有行为：无条件广播会污染无 bash 场景）
     expect(findBashAborted(broadcasts)).toBeUndefined()
-    expect(session.isBashRunning).toBe(false)
+    expect(session.occupancy?.bash).toBe(false)
   })
 
 })
@@ -429,7 +423,7 @@ describe('MessageDispatcher sendBash 空命令（D4-3 哨兵不变式检查删�
     expect(bashFn).toHaveBeenCalledWith('', false)
     expect(findBashStart(broadcasts)).toBeDefined()
     expect(findBashResult(broadcasts)).toBeDefined()
-    expect(session.isBashRunning).toBe(false)
+    expect(session.occupancy?.bash).toBe(false)
     expect(result).toEqual({ status: 'settled' })
   })
 })

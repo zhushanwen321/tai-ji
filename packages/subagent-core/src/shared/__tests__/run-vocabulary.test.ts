@@ -24,7 +24,7 @@ import { describe, expect, it } from "vitest";
 import { SETTLEMENT_REASONS } from "@zhushanwen/extension-protocol";
 import { WORKFLOW_DONE_REASON_ALL } from "@taiji/shared";
 
-import { ALL_DONE_REASONS, type DoneReason } from "../../orchestration/models/types.ts";
+import { ALL_DONE_REASONS, type DoneReason } from "../agent-call-types.ts";
 import {
   ALL_RUN_OUTCOMES,
   ALL_SETTLEMENT_REASONS,

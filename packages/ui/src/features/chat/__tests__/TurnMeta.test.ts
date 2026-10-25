@@ -8,8 +8,9 @@
  * - W4TC2: sticky + streaming 状态（sticky 已移除；状态字恒 text-neutral-dim；
  *   运行态指示 = 呼吸弧 loader（animate-loader-spin，M3a 换持平 demo run-ic），恒 accent）
  *
- * W1 main-fusion 后：TurnMeta 直接调 useTurnExpansion（共享 store），不再走 expanded prop / update:expanded emit。
- * 测试需 setActivePinia + 传 turnIndex/sessionId，chevron 展开态通过 store 预置 isExpanded(sid, idx) 驱动。
+ * TurnMeta 经 ChatViewDeps inject 消费展开态（TurnMeta.vue `useChatViewDeps()`；renderer
+ * 壳把该 token 绑到 useTurnExpansion store），不再走 expanded prop / update:expanded emit。
+ * 测试经 mockChatProvide 注入 isExpanded / toggleExpand 替身，chevron 展开态由注入替身驱动。
  *
  * [chat-flow-timestamp U2] TurnMeta 区间（设计 §3 A1/A2）：
  * - A1 完成/历史态：`.tm-range` 渲染 `· HH:MM:SS → HH:MM:SS`（起止 = 整个 agent-turn 的
@@ -340,7 +341,7 @@ describe('长时生成分级配色已删除（回归锚点）', () => {
 })
 
 // ═════════════════════════════════════════════════════════
-// [bg-notice-fold specs/chat/system-notices.md §3.3/§3.5] settle 收纳折叠标签：
+// [bg-notice-fold] settle 收纳折叠标签：
 // 落成态状态字换为「已处理 …」分段（发生序去重 + · 连接），失败词标跨类型累计；
 // 工作态维持「工作中」（临时外部行由 Turn 渲染，两形态不重复出现）。
 // ui 包 i18n mock 回 key 本体（vitest.setup.ts），文案断言锚定键名 + 分段结构。

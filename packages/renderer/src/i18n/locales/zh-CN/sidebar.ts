@@ -20,6 +20,10 @@ export default {
   deleteFolderFailed: '删除文件夹会话失败：{msg}',
   // S3：带首个失败原因（error 占位符），让用户感知失败根因。zh-CN 无复数形态。
   deleteFolderPartialFailed: '{count} 个会话删除失败：{error}',
+  // failed[].code='delete_generating'（runtime delete 生成中拒绝门）的本地化短语，作
+  // deleteFolderPartialFailed 的 error 占位（替代 runtime 中文原文——原文对 en 用户不可读）。
+  // 封闭枚举新增码时同 commit 补词条 + useSidebarSessionActions 映射。
+  deleteFolderGenerating: '会话正在生成中，已跳过删除',
   renameFailed: '重命名失败：{msg}',
   retry: '重试',
   update: {
@@ -94,6 +98,10 @@ export default {
     // 子会话计数徽标（D9）：父条目右侧中性 chip 的 tooltip。数字口径 = 未完成子会话数
     // （非绿点：active / error / stopped / dead 都计入），故文案用「未完成」而非「运行中」。
     childCount: '{n} 个子会话未完成',
+    // 已交接徽标（chat-flow-consistency U9 / S8）：源会话完成 handoff 交接后的常驻小徽标
+    // （badge 本体）+ 悬停 title（{target} = 目标会话显示名，目标已删回退目标 id 前缀）。
+    handoffBadge: '已交接',
+    handedOffTo: '已交接至 {target}',
   },
   sessionList: {
     // R6.2 锚定分组（2026-10-11）：区头标题 + 组内空态 + 组头「+」提示；

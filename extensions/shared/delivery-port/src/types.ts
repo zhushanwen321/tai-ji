@@ -4,7 +4,7 @@
 // §3.7 pi 半区组件表 / §3.4 提交选项缺省值表）。
 //
 // 本包是「知 pi 又知内核」的适配层：把 pi 扩展运行时
-// 端口接线成 @zhushanwen/session-delivery v3 内核的 port 半区——custom 车道唯一
+// 端口接线成 @zhushanwen/session-delivery v3 内核的 port 半区——custom 投递路径唯一
 // 执行者（outbox 投递日志 / details-id 送达凭据 / session_start 差集重放 / 提交侧
 // 合批与批组隔离 / compaction 等待）。消费方（notifier / session-manager / bash）
 // 经 Symbol.for 进程级槽 getDeliveryPort() 获取实例（C-ext-06 惯例）。包依赖分层：
@@ -29,7 +29,7 @@ import type { MappedPendingStatus, SettlementReason } from "@zhushanwen/extensio
 export type DeliveryTiming = "steer" | "followUp";
 
 /**
- * 投递信封（进程内 custom 车道）：text 载荷属 runtime 半区端点，不出现在本端口面。
+ * 投递信封（进程内 custom 投递路径）：text 载荷属 runtime 半区端点，不出现在本端口面。
  *
  * to 字段刻意缺席：port 每 session 装配一份（session_start 重绑），投递目标恒为
  * 当前 session——进程内端口无跨 session 寻址语义（跨会话互投是设计 §9 非目标）。
@@ -192,7 +192,7 @@ export interface DeliveryPortHost { // oe-exempt:20261017:framework:pi 能力注
 // ─── handle（进程级槽暴露面）────────────────────────────────
 
 /**
- * 投递端口句柄（custom 车道唯一执行者的对外形态）。
+ * 投递端口句柄（custom 投递路径唯一执行者的对外形态）。
  * 同 session 必须单例（session_start 重绑 = 旧实例 dispose + 新实例 recover）。
  */
 export interface DeliveryPortHandle { // oe-exempt:20261017:framework:进程级槽交付的端口句柄契约（消费方读槽面）

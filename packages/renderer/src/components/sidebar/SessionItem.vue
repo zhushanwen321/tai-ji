@@ -159,6 +159,9 @@ const props = withDefaults(defineProps<{
   /** 父 session 显示名（SessionList 反查血缘注入，hover 详情卡血缘行展示「fork 自 <父名>」；
    *  缺省回退 session.parentSession 原值——卡片血缘行的 `parentLabel || parentSession`） */
   parentLabel?: string
+  /** 交接目标显示名（chat-flow-consistency U9 / S8，SessionList 按 handedOffTo 反查注入，
+   *  parentLabel 同款机制；查不到 = 空串）：Display 已交接徽标 title 用，回退显目标 id 前缀 */
+  handoffTargetLabel?: string
   /**
    * 刚恢复高亮（session-archive §5.1 恢复样例「accent-soft 高亮渐隐」）：unarchive 成功
    * 后由 SessionList 按 archive store restoredSessionId 注入，数秒后随 store 清除渐隐回
@@ -212,11 +215,19 @@ const canStop = computed(() => props.session.status === 'active')
 /**
  * 血缘展示用 session：把容器（SessionList.parentLabelOf）反查到的父名合并进展示对象。
  * parentLabel 是展示期注入字段（不污染 SessionSummary 实体），合并在展示边界完成——
+ * 此前 SessionList 传了 :parent-label 但 SessionItem 未声明该 prop，血缘 sub 行实际
+ * 回退到 parentSession 原值（文件路径/UUID，不可读），与 SessionList 注释声明的机制不符。
+ * [chat-flow-consistency U9 / S8] handoffTargetLabel 同款合并（已交接徽标 title 用）。
  * 列表主行（SessionItemDisplay）与 hover 详情卡都读本对象，不读 raw props.session。
  */
-const displaySession = computed<SessionItemSession>(() =>
-  props.parentLabel ? { ...props.session, parentLabel: props.parentLabel } : props.session,
-)
+const displaySession = computed<SessionItemSession>(() => {
+  let merged = props.session
+  if (props.parentLabel) merged = { ...merged, parentLabel: props.parentLabel }
+  if (props.handoffTargetLabel !== undefined) {
+    merged = { ...merged, handoffTargetLabel: props.handoffTargetLabel }
+  }
+  return merged
+})
 
 /**
  * 删除→归档两段式确认态（session-archive D6：确认 UI 在 Actions 子组件，经 v-model:confirming

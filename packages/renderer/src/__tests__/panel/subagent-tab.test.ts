@@ -103,7 +103,7 @@ const globalStubs = {
   BashOutputBlock: { name: 'BashOutputBlock', template: '<div />' },
   ForkNotice: { name: 'ForkNotice', template: '<div />' },
   Button: { name: 'Button', template: '<button><slot /></button>' },
-  // composer 车道行为有专属单测（subagent-composer-lane.test.ts）——本文件只断言
+  // composer 通道行为有专属单测（subagent-composer-lane.test.ts）——本文件只断言
   // SubagentTab 的挂载门（chatCapable），壳体 stub 掉避免拖入 composer 全依赖树。
   Composer: { name: 'Composer', template: '<div data-testid="composer-stub" />' },
 }

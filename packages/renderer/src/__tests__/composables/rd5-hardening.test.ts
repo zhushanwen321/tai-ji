@@ -39,7 +39,6 @@ vi.mock('@/api', () => ({
 vi.mock('@/stores/chat', () => ({
   useChatStore: () => ({
     getMessages: mocks.getMessages,
-    setHandingOff: vi.fn(),
   }),
 }))
 vi.mock('@/composables/panel/useHandoffModeChannel', () => ({

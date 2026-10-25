@@ -59,7 +59,7 @@ const deps: ChatViewDeps = {
 
   // 操作回调
   toggleExpand: (turnKey) => expansion.toggle(turnKey),
-  collapse: (turnKey) => expansion.collapse(turnKey),
+  // [chat-flow-consistency C3] ChatViewDeps.collapse 已随 Turn.vue onComplete 接线退役删除
   // 惰性接管写入（同 isTakeover：移动壳无接管态，no-op）
   setTakeover: () => {},
   abortBash: (sid) => {

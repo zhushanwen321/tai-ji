@@ -20,7 +20,7 @@
  * 边路由（正交）：全部边只走横竖两向，任何段不穿节点卡片；连线锚点只取节点四条
  * 边的中点（上/下/左/右共 4 个连线点，上边中点预留）——
  * - 顺序/数据流/条件边：源右中心 → 通道竖线 → 目标左中心的三段折线（同行退化直线）；
- *   跨列并行边（同源列且同目标列）竖线段默认重合，按纵向跨度重叠游程居中错开车道
+ *   跨列并行边（同源列且同目标列）竖线段默认重合，按纵向跨度重叠游程居中错开横向偏移
  *   （LANE_STEP_PX），fan-in/fan-out 不再叠成一根线；同列前向边（源与目标同列）
  *   走列右缘细道绕行——缺省通道中位竖线会落在节点列内穿卡片（绘制顺序遮住不可见）；
  * - loop-back（底边中点进出）：跨列回边在两端同列下方均无堆叠节点时四折点直连——
@@ -257,7 +257,7 @@ const LOOP_SIDE_OFFSET = 8
  *  （CLUSTER_PAD_BOTTOM=12）或下邻节点（NODE_GAP=18）之间的空隙带内——不压节点
  *  边框，进出锚点仍唯一落在底边中点。 */
 const LOOP_APPROACH_DROP = 5
-/** 同通道并行边的车道步长（竖线段错开间距；列间走廊 ~56px，容得下常规并行度）。 */
+/** 同通道并行边的错开步长（竖线段错开间距；列间走廊 ~56px，容得下常规并行度）。 */
 export const LANE_STEP_PX = 6
 /** 线段穿卡判定的外扩间隙（px，每侧）：车道/绕行带与卡片缘的最小净距——列间走廊
  * 56px 的容量口径（车道铺开 + 2×本值 ≤ 走廊宽）由它推导。 */
@@ -341,14 +341,14 @@ export interface ChannelMember {
   /** 竖线段纵向跨度（lo ≤ hi）。 */
   lo: number
   hi: number
-  /** 车道分配后的竖线 x（缺省 = 默认中位；装配前回填）。 */
+  /** 错开分配后的竖线 x（缺省 = 默认中位；装配前回填）。 */
   laneX: number
   /** 端点节点 id（穿卡检测排除横段自身锚定的端点卡片）。 */
   fromId: string
   toId: string
 }
 
-/** 待装配边（保持 dag.edges 序——输出序不因车道分遍打乱）：已定型路径或通道成员。 */
+/** 待装配边（保持 dag.edges 序——输出序不因错开分配分遍打乱）：已定型路径或通道成员。 */
 type PendingEdge =
   | { edge: WorkflowDagEdge; kind: 'fixed'; points: DagPoint[]; labelX?: number; labelY?: number }
   | { edge: WorkflowDagEdge; kind: 'channeled'; chan: ChannelMember }
@@ -416,8 +416,8 @@ function loopBackPoints(
 }
 
 /**
- * 车道分配（通道表原地回填 laneX）：通道内按 y1 升序贪心分「纵向跨度互相重叠」的
- * 游程（首碰归属，端点相触视作重叠）——游程序 = 车道序：同游程的边互不重叠可共线，
+ * 错开分配（通道表原地回填 laneX）：通道内按 y1 升序贪心分「纵向跨度互相重叠」的
+ * 游程（首碰归属，端点相触视作重叠）——游程序 = 错开序：同游程的边互不重叠可共线，
  * 跨游程必重叠必须分道；整通道按游程数以默认中位为中心居中错开（单游程回到中位不动）
  * ——fan-in/fan-out 不再叠成一根线。
  */
@@ -676,7 +676,7 @@ export function layoutEdges(dag: WorkflowDag, nodes: DagLayoutNode[]): DagLayout
     else channels.set(key, [chan])
   }
 
-  // 车道分配：同通道并行边按纵向跨度重叠游程序错开（机制见 assignChannelLanes）
+  // 错开分配：同通道并行边按纵向跨度重叠游程序错开（机制见 assignChannelLanes）
   assignChannelLanes(channels)
   // 通道竖线避让：穿卡通道整体平移到最近零穿卡走廊（机制见 avoidObstructedChannelMid）
   avoidObstructedChannelMid(channels, nodes)

@@ -12,6 +12,7 @@
  */
 import type { SessionStatus, SessionSummary } from '@taiji/shared'
 import type { IGitInfoReader } from '../ports/git-info.js'
+import { isGeneratingTurn } from './types.js'
 import type { IManagedSessionView } from './types.js'
 import type { ManagedSession } from './session-internal.js'
 import { detectBareWorkspaceCached } from '../worktree/workspace-detector.js'
@@ -27,7 +28,9 @@ export function buildSessionSummary(
     // R1：复用 WorkspaceDetector 检测 .bare workspace（带缓存），填 isBareWorkspace
     // 供前端 Landing.vue 派生「新建 worktree」动作项显隐。
     isBareWorkspace: detectBareWorkspaceCached(s.cwd),
-    status: s.isGenerating ? ('active' as SessionStatus) : ('idle' as SessionStatus),
+    // [chat-flow-consistency D1] active 判定读口迁移：isGenerating ≡ isGeneratingTurn(turn)
+    //（dispatching+generating 两段；settling 不算 active——收尾中的回合侧栏已可视为结束前夜）。
+    status: isGeneratingTurn(s.occupancy?.turn) ? ('active' as SessionStatus) : ('idle' as SessionStatus),
     lastActiveAt: s.lastActiveAt,
     // W3 surface 落地：注册表 surface 透传到 SessionSummary（active 路径记录恒有值——
     // registerSession 缺省 'sidebar'；btw 线显式 'btw'）。磁盘扫描路径的缺省在

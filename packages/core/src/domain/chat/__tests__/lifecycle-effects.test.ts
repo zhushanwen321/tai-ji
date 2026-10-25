@@ -163,7 +163,12 @@ describe('createLifecycleEffects.markSessionDead（exited core 序列）', () =>
     const unsub = vi.fn()
     const streamSubscribe = vi.fn(() => unsub)
     const deps: EnsureStreamSubDeps = {
-      chatApi: { streamSubscribe },
+      // [chat-flow-consistency D4 扩员] getHistory 形状补齐（本用例不触发）
+      chatApi: {
+        streamSubscribe,
+        getHistory: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
+      },
+      // [W1 状态层] session.* 状态帧唯一落点（本用例不触达 session.* 状态帧，注入真实 factory 保持契约形状）
       liveState: createSessionLiveState(),
       toast: { error: vi.fn(), warning: vi.fn() },
       t: (k: string) => k,

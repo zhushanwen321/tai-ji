@@ -459,7 +459,11 @@ export class SessionHistoryReader {
     // 无 RPC client（离线 session）：走尾读（分块扩窗预算窗口，D5②），
     // 避免大文件全量读（不读不写缓存——文件路径无 RPC leafId，活跃路径以窗口末条
     // entry 推导，见 session-history convertWindowEntries 的裁剪接入）。
-    return await this.tailReadOffline(sessionId, query)
+    // [U8 重启中断标记] 仅本分支（最新窗口请求 ∧ 会话未附着）开启尾部中断判定——
+    // 联合判定的「未附着」半边由此构造性保证：RPC 失败降级文件读（getLatestWindow/
+    // getCursorWindow 的 catch）走 tailReadOffline 缺省关闭，防活会话生成中文件尾 =
+    // user entry 的误标；游标翻页返回锚前区域，语义上也不适用。
+    return await this.tailReadOffline(sessionId, query, { detectInterrupted: true })
   }
 
   /**
@@ -589,17 +593,32 @@ export class SessionHistoryReader {
    * 键 = 线 session id = piSessionId——旧 isBtwVirtualId 前缀判别对 piId 形态恒 false，
    * 随键切换同批替换，设计 §3.3.6 迁移表），非 btw 路径逐字节原行为；cursor 翻页离线
    * 路径同走本方法，btw 线「加载更早」一并生效。
+   *
+   * [U8 重启中断标记] opts.detectInterrupted = 尾部中断形态判定开关（缺省 false）：只在
+   * doGetHistory 分支 3（最新窗口 ∧ 无 RPC client）开启；其余降级调用点（活跃 RPC 失败
+   * fall-through，含附着 btw 线的 rekey 通道）恒缺省，interrupted 不出场——判定性质 = 推断，
+   * 「会话未附着」是它的成立前提（design-session-lifecycle 缺陷 4 方向 A 联合判定）。
    */
-  private async tailReadOffline(sessionId: string, query?: HistoryWindowQuery): Promise<HistoryWindowResult> {
-    if (this.deps.resolveBtwThreadFile?.(sessionId) !== undefined) {
-      return await this.tailReadBtwOffline(sessionId, query)
-    }
-    return await getHistoryTailFromFile(
-      sessionId,
-      this.deps.sessionStore,
-      query?.limitTurns ?? HISTORY_BUDGET.RECENT_TURNS,
-      { cursor: query?.cursor, maxBytes: query?.maxBytes ?? HISTORY_BUDGET.MAX_BYTES },
-    )
+  private async tailReadOffline(
+    sessionId: string,
+    query?: HistoryWindowQuery,
+    opts?: { detectInterrupted?: boolean },
+  ): Promise<HistoryWindowResult> {
+    // btw 分支与通用链同受下方剥除门禁：附着 btw 线（rekey 进共享 pm 后活跃，走
+    // getLatestWindow/getIncrementalHistory 的 RPC catch 降级到此处）同样不得透传
+    // interrupted——「会话未附着」是判定的成立前提，与线类型无关（F1 修复：早退分支
+    // 曾绕过剥除行，把 tailReadHistory 判出的 interrupted 原样出场）。
+    const result = this.deps.resolveBtwThreadFile?.(sessionId) !== undefined
+      ? await this.tailReadBtwOffline(sessionId, query)
+      : await getHistoryTailFromFile(
+          sessionId,
+          this.deps.sessionStore,
+          query?.limitTurns ?? HISTORY_BUDGET.RECENT_TURNS,
+          { cursor: query?.cursor, maxBytes: query?.maxBytes ?? HISTORY_BUDGET.MAX_BYTES },
+        )
+    // 开关关闭时剥除（tailReadHistory 内 cursor 翻页本就不判，此处防未来判定面扩大后
+    // 降级路径误透传；字段可选，剥除 = 不出场而非 false——消费方按「无判定」处理）
+    return opts?.detectInterrupted === true ? result : { ...result, interrupted: undefined }
   }
 
   /**

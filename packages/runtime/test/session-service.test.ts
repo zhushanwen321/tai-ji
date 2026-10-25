@@ -123,6 +123,7 @@ vi.mock('../src/services/session-history.js', () => ({
 // ── Mock 之后再 import 被测对象 ─────────────────────────────────────
 
 import { SessionService } from '../src/services/session/session-service.js'
+import { applySessionOccupancyTransition } from '../src/services/session/event-interpreter.js'
 import {
   createSessionDeliveryRegistry,
 } from '../src/services/session/session-delivery-registry.js'
@@ -596,7 +597,7 @@ describe('SessionService · dispatcher', () => {
       await setup.service.initializeManagedSession('sid-1', client as unknown as IPiEngine, tmpdir(), 'label')
       await setup.service.sendMessage('sid-1', 'hello pi')
       await flushDelivery()
-      // [u2 投递所有权内核] 出站交接在适配层：正文 + 裸标记身份（D2），无图片、direct 车道
+      // [u2 投递所有权内核] 出站交接在适配层：正文 + 裸标记身份（D2），无图片、direct 投递路径
       expect(client.prompt).toHaveBeenCalledTimes(1)
       const [text, images] = client.prompt.mock.calls[0] as unknown as [string, unknown]
       expect(text).toContain('hello pi')
@@ -720,7 +721,12 @@ describe('SessionService · dispatcher', () => {
     // session-message-handler 的 message.status reply 走 pending 通道，不触发
     // chat store 收尾逻辑——必须走流式 message.complete 广播。
     it('abort broadcasts message.complete with stopReason aborted', async () => {
-      setup.mountClient('sid-a')
+      const client = setup.mountClient('sid-a')
+      // [U1 迁移] abort 入口三分型（message-dispatcher.ts abort）：型 1「有回合可中止」
+      // 才写 stopped 终态 + 广播 complete{aborted}，判定读 occupancy（isGeneratingTurn）
+      // ——「有回合在跑」场景须先注册 session 并经转移原语置 generating（禁止直写字段）。
+      await setup.service.initializeManagedSession('sid-a', client as unknown as IPiEngine, tmpdir(), 'label')
+      applySessionOccupancyTransition(setup.service.getSession('sid-a')!, setup.messageBus, 'generating')
       await setup.service.abort('sid-a')
       const complete = findBroadcast(setup, 'message.complete')
       expect(complete?.payload).toMatchObject({ sessionId: 'sid-a', stopReason: 'aborted' })
@@ -742,7 +748,7 @@ describe('SessionService · dispatcher', () => {
 
     // [MF-1-8 退役] steerMessage / followUpMessage 用例已删除：renderer/core 消费方经
     // delivery.submit 统一提交（u3b 内核化），dispatcher/sessionService 转发路径与协议条目
-    // message.steer / message.follow_up 同批退役——同语义覆盖由 sendMessage（steer 车道）
+    // message.steer / message.follow_up 同批退役——同语义覆盖由 sendMessage（steer 投递路径）
     // 与 useChat 提交链测试承接。
   })
 

@@ -33,13 +33,13 @@ export type SmartContextNoticeSource =
 	| "model-downshift";
 
 /**
- * 注入一条 smart-context 通知（nextTurn 车道，不自起 run）。
+ * 注入一条 smart-context 通知（nextTurn 投递路径，不自起 run）。
  *
- * `deliverAs:'nextTurn'` 是投递车道（pi 实装分支序：nextTurn 分支先命中，`triggerTurn`
+ * `deliverAs:'nextTurn'` 是投递路径之一（pi 实装分支序：nextTurn 分支先命中，`triggerTurn`
  * 不再参与判定）；`triggerTurn:false` 是意图的显式声明（双写防未来实现分支序漂移）。
- * `display:true` 使通知在对话流可见——分车道语义（D4①）：compact-result 两条（complete/
+ * `display:true` 使通知在对话流可见——可见性按投递路径区分（D4①）：compact-result 两条（complete/
  * failed）改造前即 display:true 系统消息，可见性保持；阈值提醒/模型跨界/downshift 三条
- * 改造前 display:false 静默（只进 LLM 上下文，不进对话流），随 nextTurn 车道统一转
+ * 改造前 display:false 静默（只进 LLM 上下文，不进对话流），随 nextTurn 投递路径统一转
  * display:true 可见。
  */
 export function sendSmartContextNotice(

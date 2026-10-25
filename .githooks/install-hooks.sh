@@ -164,6 +164,23 @@ if [ "$SKIP_ALL_CHECKS" = "1" ]; then
     exit 0
 fi
 
+# ============================================================================
+# [main 直提交守卫] 分支模型机器化（DEV-WORKFLOW.md §1/§6）：main 只经 GitHub PR
+#   合并与发布流程的版本 bump 推进，本地直接内容提交一律拦截。事故形态（2026-10-25）：
+#   dev-merge-gates 的 committer agent 把一轮分支审查修复误提交进 main worktree，
+#   把 main 从 e8b7bafbe 推到 94ea75386（事后 reset 恢复）——提示词级"提交前核实
+#   worktree"依赖 agent 遵守，此处改为确定性拦截。发布流程的三处 main 提交显式设
+#   TAIJI_ALLOW_MAIN_COMMIT=1 绕过（merge skill 阶段 4 / 4N.4 / 6.5.2 与
+#   prerelease-test.sh）；本地 merge commit 不拦（人工显式操作）。分支探测失败
+#   放行（|| true + 空串不等于 main）——守卫不制造新故障。
+# ============================================================================
+MAIN_GUARD_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+if [ "$MAIN_GUARD_BRANCH" = "main" ] && [ -z "$TAIJI_ALLOW_MAIN_COMMIT" ] && [ ! -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then
+    echo -e "${RED}[ERROR] 禁止直接向 main 提交（当前分支 = main，且非 merge commit、未设 TAIJI_ALLOW_MAIN_COMMIT）${NC}"
+    echo -e "${YELLOW}[FIX] main 只通过 GitHub PR 合并与发布流程版本 bump 推进（DEV-WORKFLOW.md §6）。确认是发布流程（merge skill 阶段 4 / 4N.4 / 6.5.2 或 prerelease-test.sh）→ 设 TAIJI_ALLOW_MAIN_COMMIT=1 后重试；否则 → cd 到目标 feat / dev worktree 再提交（agent workflow 误落 main 的典型形态）${NC}"
+    exit 1
+fi
+
 # 获取变更文件
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
 # [type-gate-coverage 2026-10-15] 前端域 = renderer + ui + mobile-renderer + core 四包。

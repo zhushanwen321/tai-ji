@@ -234,7 +234,7 @@
       />
 
       <!-- composer 带（subagent-composer 2026-10-18）：与主面板同一 band 壳
-           （COMPOSER_BAND_CLASS 单源，几何关系一致）+ 同一 Composer（subagent 车道形态：
+           （COMPOSER_BAND_CLASS 单源，几何关系一致）+ 同一 Composer（subagent 通道形态：
            发送/中止经 session.subagentAction 通道分流，左簇/指标/模型簇裁剪——模型入口
            留在本组件头部）。回显事实源 = SubagentTee entry 帧（含 user entry），与主
            agent 定向消息（@ mention）同一链路。 -->

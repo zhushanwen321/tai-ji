@@ -1,7 +1,7 @@
 // src/index.ts
 //
 // @zhushanwen/pi-delivery-port 公共出口：统一消息投递服务的 pi 半区投递端口
-// （custom 车道唯一执行者；设计 .tmp/tech-design/unified-delivery.md §3.7）。
+// （custom 投递路径唯一执行者；设计 .tmp/tech-design/unified-delivery.md §3.7）。
 //
 // 装配形态（§3.7）：共享库（非 pi extension）+ 装配点 = @zhushanwen/pi-base-tool-
 // enhance 的 session_start（infrastructure 档必载）。消费方（notifier / session-

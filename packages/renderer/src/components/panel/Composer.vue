@@ -2,13 +2,13 @@
 <template>
   <!--
     容器组件 · composer（panel/spec.md zone ④，draft-composer-states）。
-    发送位四态（u6b / D6 表）：send（↑ idle 直发）/ stop（■ turn 活跃 dispatching|generating 无 compacting；settling 单独；
-    **compacting 任意 turn 组合——中止压缩流程**）/ queue（↑ 时钟角标：bash、settling+bash，点击统一提交——排队 lane 由内核裁定）/
-    spinner（isSending）。staging 模式优先（fork/handoff）。
-    steer/followUp/queued 路由：⏎/Alt+⏎ 全部汇入统一发送分发器（D6，composer-shell
-    sendRoute——turn 活跃→steer、占用→queued、idle→direct），Alt+⏎ 在 steer 路由行保留
-    followUp 语义。**按钮形态与 Enter 车道分立**：压缩期按钮是「终止压缩」（中止入口），⏎ 仍走
-    内核 queued 排队（compaction-end flush）——两问题不混谈（2026-10 用户裁决）。
+    发送位内容驱动双形态（D5，判定源 composer-shell sendButtonState / sendButtonBadge /
+    sendButtonStopTarget）：输入框有内容 → 恒 send（↑ 发送；排队去向时叠加时钟角标——
+    角标判定 = isActiveTurnPhase ∨ compacting，bash 不参与）；无内容 → stop（■ 回合进行中/
+    收尾/压缩中，title 两档分型见 sendButtonStopTarget；bash 不触发停止，取消入口在其输出块）；
+    空闲无内容 → send 禁用占位（canSubmit 承担禁用）。模板优先级链 = spinner（isSending
+    提交在途）› staging（fork/handoff 横幅）› stop › send±角标。
+    ⏎/Alt+⏎ 统一提交（汇入统一发送分发器）；Alt 分流读 isActiveTurn（回合进行中 = 排队语义）。
     staging 优先（fork/handoff，与视觉层 boxClass/placeholder 优先级对齐）：staging 活跃时 ⏎/Alt+⏎
       均提交 staging（发送位也替换为 staging 发送按钮，streaming 中同样生效）；handoff 的
       streaming 拦截在 enterHandoffMode/handleHandoffSend（isSessionActive 检查）。
@@ -54,12 +54,19 @@
         <!-- QueueBubble（v6 §8.5：内嵌 composer-box 顶部，去独立卡片/pulse/标签/chevron，
              仅 border-b 分隔）——6 区第 1 位。
              [u3c/D7 单源化] 行数据 = session.delivery 状态帧派生视图（useQueueRows），
-             × 撤销 → delivery.cancel、failed 行重试 → delivery.resync -->
+             × 撤销 → delivery.cancel、failed 行重试 → delivery.resync、
+             +N 展开/重试全部 → 同一 useQueueRows 编排（Q2/Q5） -->
         <QueueBubble
           :rows="queueRows"
           :hint="queueHint"
+          :expanded="queueExpanded"
+          :editing-client-uuid="editingQueueClientUuid"
           @cancel="onCancelQueueEntry"
+          @edit="onEditQueueEntry"
+          @abandon-edit="onAbandonQueueEdit"
           @retry="onRetryQueueEntry"
+          @retry-all="onRetryAllQueueFailed"
+          @toggle-expand="toggleQueueExpanded"
         />
         <!-- Staging 模式 banner（fork/handoff 统一，demo .mode-banner 形态对齐）：composer-box 顶缘
              整条横幅，图标染 accent = 模式在途唯一染色点（标题粗体中性 fg，描述 fg-2，× 中性）。
@@ -218,18 +225,41 @@
             </template>
           </div>
 
-          <!-- 发送位四态（u6b / D6 表「发送位」列·序 0 不退化）：staging（fork/handoff，含 streaming 中）→
-             stop（■ 中止：turn 活跃 dispatching|generating 无 compacting；settling 单独；**compacting 任意 turn 组合——
-             点击中止压缩流程，title 分型「终止压缩」**）/ queue（bash、settling+bash）→ ↑ 带时钟角标（可点入队，flush 于占用
-             解除后自动投递）/ S5 sending→spinner / 全 idle→send。
-             派生源 = shell sendButtonState（与分发器 sendRoute 同源 effectivePhase）。
-             **按钮形态与 Enter 车道故意分立**（2026-10 用户裁决）：按钮回答「现在能中止什么」（忙 → 终止钮，
-             压缩期中止对象是压缩流程本身），Enter 回答「消息走哪条车道」（compacting → 内核 queued 排队，
-             compaction-end flush）——压缩期排队提交走 ⏎，按钮位专作中止入口，不再二选一。
-             staging 优先于 stop（用户决策）：streaming 中提交 fork 合法（对源只读）；需停止时
-             先 Esc 退出 staging 再点 stop。staging 发送中（isSending）仍走 spinner。 -->
+          <!-- 发送位（chat-flow-consistency D5 内容驱动双形态·序 0 不退化）。模板优先级链
+             （spinner 最高——发送提交后回执未返回的瞬间压过一切形态，含 stop/queue 占用交叉格）：
+             spinner（isSending）→ staging（fork/handoff 交接专用按钮，可空发无角标；staging 发送中
+             走 spinner）→ stop（sendButtonState='stop'：无内容 + 回合进行中/收尾/压缩中；title 两档
+             分型见 sendButtonStopTarget）→ send±时钟角标（sendButtonBadge：有内容 ∧ 回合进行中/
+             压缩中 = 消息将排队；Alt+⏎ 同判定同角标；空闲无角标；无内容空闲 = 禁用态发送占位）。
+             派生源 = shell sendButtonState / sendButtonBadge（D1 判定集合经 isActiveTurnPhase，
+             与 Alt+⏎ 分流共用同一函数——角标恒等于真实去向）。 -->
+        <!-- 发送中 spinner = 呼吸弧（chat 域统一 loader 规格同构：15px accent + 三重动画）。
+             svg 骨架与 ui 包 RUNNING_LOADER_SVG 同构（该常量未在 ui 包 exports 白名单，
+             共享需动 package.json 归交接项）；弧段动画原语 .ld-track/.ld-arc 仍由
+             style.css 全局单源承载，此处仅静态属性无独立样式。优先级链首档（D5）：提交
+             后回执未返回压过 stop/send 形态。 -->
+        <div
+          v-if="isSending"
+          class="ml-[4px] grid size-[var(--composer-btn-size)] place-items-center rounded-md bg-accent text-accent-fg"
+          :title="t('panel.composer.sending')"
+        >
+          <span class="inline-block size-[15px] animate-loader-spin" aria-hidden="true">
+            <svg
+              class="size-full"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle class="ld-track" cx="12" cy="12" r="10" opacity="0.16" />
+              <circle class="ld-arc" cx="12" cy="12" r="10" pathLength="100" />
+            </svg>
+          </span>
+        </div>
         <Button
-          v-if="staging.activeStaging.value && !isSending"
+          v-else-if="staging.activeStaging.value"
           variant="default"
           size="icon"
           class="ml-[4px] size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
@@ -250,53 +280,21 @@
         >
           <Square class="size-[13px]" />
         </Button>
-        <Button
-          v-else-if="sendButtonState === 'queue'"
-          variant="default"
-          size="icon"
-          class="queue-send-btn relative ml-[4px] size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
-          :disabled="!canSubmit"
-          :title="canSubmit ? `${t('panel.composer.queueSend')} · ⏎` : t('panel.composer.sendHint')"
-          @click="onSendClick"
-        >
-          <ArrowUp class="size-[16px]" />
-          <!-- 时钟角标（D6 场景 1）：排队语义视觉锚点，右上角 1/4 尺寸 -->
-          <Clock class="absolute right-[2px] top-[2px] size-[8px]" aria-hidden="true" />
-        </Button>
-        <!-- 发送中 spinner = 呼吸弧（chat 域统一 loader 规格同构：15px accent + 三重动画）。
-             svg 骨架与 ui 包 RUNNING_LOADER_SVG 同构（该常量未在 ui 包 exports 白名单，
-             共享需动 package.json 归交接项）；弧段动画原语 .ld-track/.ld-arc 仍由
-             style.css 全局单源承载，此处仅静态属性无独立样式。 -->
-        <div
-          v-else-if="isSending"
-          class="ml-[4px] grid size-[var(--composer-btn-size)] place-items-center rounded-md bg-accent text-accent-fg"
-          :title="t('panel.composer.sending')"
-        >
-          <span class="inline-block size-[15px] animate-loader-spin" aria-hidden="true">
-            <svg
-              class="size-full"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.7"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <circle class="ld-track" cx="12" cy="12" r="10" opacity="0.16" />
-              <circle class="ld-arc" cx="12" cy="12" r="10" pathLength="100" />
-            </svg>
-          </span>
-        </div>
+        <!-- 发送按钮（±排队角标）：有内容恒发送（任何占用组合）；无内容空闲 = 禁用态发送占位
+             （title「输入内容后发送」）。角标 = 时钟（D5 排队视觉锚点，右上角 1/4 尺寸）——
+             出现条件见 sendButtonBadge（bash 不参与、空闲无角标）。 -->
         <Button
           v-else
           variant="default"
           size="icon"
-          class="ml-[4px] size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
+          class="relative ml-[4px] size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
           :disabled="!canSubmit"
-          :title="canSubmit ? `${t('panel.composer.send')} · ⏎` : t('panel.composer.sendHint')"
+          data-testid="composer-send-btn"
+          :title="sendButtonBadge ? `${t('panel.composer.queueSend')} · ⏎` : canSubmit ? `${t('panel.composer.send')} · ⏎` : t('panel.composer.sendHint')"
           @click="onSendClick"
         >
           <ArrowUp class="size-[16px]" />
+          <Clock v-if="sendButtonBadge" class="absolute right-[2px] top-[2px] size-[8px]" aria-hidden="true" />
         </Button>
         </div>
       </div>
@@ -352,8 +350,8 @@ const props = withDefaults(
     /** btw 入口实例开关（D7，M3-b）：false 不出按钮（drawer 内 BtwPanel 的 Composer 传 false 防递归出 btw 入口；不传默认 true，主 panel 零改动） */
     showBtw?: boolean
     /**
-     * subagent 车道形态（subagent-composer 2026-10-18）：drawer subagent 详情页挂载时传 true。
-     * 消费面差异（发送/中止/占用分流在 composer-shell 车道层，本 prop 只管模板裁剪）：
+     * subagent 通道形态（subagent-composer 2026-10-18）：drawer subagent 详情页挂载时传 true。
+     * 消费面差异（发送/中止/占用分流在 composer-shell 通道层，本 prop 只管模板裁剪）：
      * 左簇（托盘/插件 toolbar 对 subagent 无数据面）与右簇指标/模型档位（模型入口在
      * SubagentTab 头部，单入口裁决）隐藏；四符号触发浮层抑制（@/#/$ 文本按字面发送）。
      */
@@ -448,9 +446,10 @@ const popoverQuery = computed(() => {
 const selectedSkillNames = ref<string[]>([])
 
 const isSending = ref(false)
-// [u6b] 本地 isCompacting computed 已退役：压缩维度唯一读口 = shell sendButtonState / sendButtonStopTarget
-// （与 sendRoute 同源 effectivePhase；压缩期按钮 = stop，title 分型见 sendButtonStopTarget——
-//   仅 turn 非生成中的压缩（idle /compact、settling+overflow）标「终止压缩」，生成中压缩标「停止」）
+// [u6b] 本地 isCompacting computed 已退役：压缩维度唯一读口 = shell sendButtonState /
+// sendButtonStopTarget（effectivePhase 派生；压缩期无输入按钮 = stop，title 分型见
+// sendButtonStopTarget——仅 turn 非生成中的压缩（idle /compact、settling+overflow）标
+// 「终止压缩」，生成中压缩标「停止」）
 
 // composer-box 容器 ref（拖拽落位 + 视觉）——先声明，再喂给 shell
 const composerBoxRef = ref<HTMLElement | null>(null)
@@ -481,7 +480,8 @@ const {
   handleArrowDown,
   resetBrowsing,
   isBrowsingFor,
-  getSavedDraft,
+  getSavedSegments,
+  restoreSegments,
   attachedItems,
   refreshAttachedItems,
   onRemoveContextChip,
@@ -494,8 +494,13 @@ const {
   onSend,
   // [u3c] 队列条目撤销/回收的文本回草稿（useQueueRows 的 restoreDraft 注入）
   restoreToDraft,
-  sendRoute,
+  // [D6] 队列编辑锚定：编辑入口 / 放弃编辑 / 编辑态（提示条显隐，chat-flow-consistency）
+  beginQueueEntryEdit,
+  abandonQueueEdit,
+  editingQueueClientUuid,
+  isActiveTurn,
   sendButtonState,
+  sendButtonBadge,
   sendButtonStopTarget,
   canSubmit,
   boxClass,
@@ -508,9 +513,21 @@ const {
 } = shell
 
 // [u3c/D7] 队列区行（session.delivery 帧派生视图）+ 撤销/重试编排（行数约束拆出 useQueueRows；
-// 依赖 shell 的 restoreToDraft，故在解构后调用）
-const { rows: queueRows, hint: queueHint, onCancelEntry: onCancelQueueEntry, onRetryEntry: onRetryQueueEntry } =
-  useQueueRows(sessionIdRef, { restoreDraft: restoreToDraft })
+// 依赖 shell 的 restoreToDraft，故在解构后调用）。expanded/toggle = +N 展开开关（Q2，
+// per-session 分区持有）；onRetryAllFailed = 重试全部失败项（Q5）
+const {
+  rows: queueRows,
+  hint: queueHint,
+  expanded: queueExpanded,
+  toggleExpanded: toggleQueueExpanded,
+  onCancelEntry: onCancelQueueEntry,
+  onEditEntry: onEditQueueEntry,
+  onRetryEntry: onRetryQueueEntry,
+  onRetryAllFailed: onRetryAllQueueFailed,
+} = useQueueRows(sessionIdRef, { restoreDraft: restoreToDraft, beginEdit: beginQueueEntryEdit })
+
+/** 放弃编辑（D6 提示条按钮）：解除锚定但草稿文本保留（shell 单点实现）。 */
+const onAbandonQueueEdit = abandonQueueEdit
 
 // composer-box 聚焦态 + 聚焦环视觉（v6 §6.1 .focused）：从本组件拆出（script 行数约束，
 // 见 composer-focus-ring.ts）；依赖 shell 的 boxClass/staging，故在解构后调用
@@ -523,22 +540,25 @@ watch(
   () => props.sessionId,
   (newId, oldId) => {
     if (oldId) {
-      // browsing 态 getText() 已被历史条目替换，用户真实输入存在 history navState.savedDraft。
-      // browsing 判定与草稿读取都按旧 sid 显式取分区——watch 回调触发时 sessionIdRef 已指向
-      // 新 session，isBrowsing 只能读到新分区恒 false（R2-A6：此前该分支恒死、存入的恒是
-      // 历史条目文本，用户切回后草稿不可见、重新输入即永久丢失）。
-      drafts.saveDraft(oldId, isBrowsingFor(oldId) ? getSavedDraft(oldId) : (inputRef.value?.getText() ?? ''))
+      // browsing 态输入区已被历史条目替换，用户真实输入（含 chips 结构）存在 history
+      // navState.savedSegments。browsing 判定与草稿读取都按旧 sid 显式取分区——watch 回调
+      // 触发时 sessionIdRef 已指向新 session，isBrowsing 只能读到新分区恒 false（R2-A6：
+      // 此前该分支恒死、存入的恒是历史条目文本，用户切回后草稿不可见、重新输入即永久丢失）。
+      // [U8 草稿 segments 化] 保存/恢复全链走 Segment[]（getSegments 快照 + restoreSegments
+      // 结构化回填）——纯文本形态会把 chips 序列化成标记污染文本，结构永久丢失。
+      drafts.saveDraft(oldId, isBrowsingFor(oldId) ? getSavedSegments(oldId) : (inputRef.value?.getSegments() ?? []))
     }
     // 切 session 退出活跃 staging 模式（fork/handoff），避免来源残留指向错误 session
     staging.exit()
     resetBrowsing()
     if (newId) {
       const saved = drafts.getDraft(newId)
-      if (saved) {
-        draft.value = saved
-        inputRef.value?.setText(saved, 'end')
+      if (saved.length > 0) {
+        // 恢复走 restoreSegmentsIntoInput 单点（text 重建 + 各类 chip 还原；与 D6 编辑预填、
+        // 发送失败恢复共用同一实现）——内含 draft 文本镜像同步
+        restoreSegments(saved)
       } else {
-        // saved 为空串 = 未保存 → 走清空分支（语义与原 Map.get 返回 undefined 一致：falsy）
+        // 空数组 = 未保存（saveDraft 已归一只含空 text 段的形态）→ 走清空分支
         draft.value = ''
         inputRef.value?.clear()
       }
@@ -565,16 +585,18 @@ function onInputChange(text: string): void {
 const { composing } = useCompositionFlag()
 
 /** 键盘分发（composer-keydown.ts，U02 拆出）：staging 优先 ⏎ 提交（fork/handoff，含 streaming 中）；
- *  ⏎ / Alt+⏎ 全部汇入统一发送分发器（D6，u5b——Enter 按 sessionPhase 路由 direct/steer/queued；
- *  Alt+⏎ 保留 followUp 语义：steer 路由行走 followUp 下一轮，其余经分发器）；⇧⏎ 换行，↑/↓ 翻历史。
+ *  ⏎ 汇入统一发送分发器（Enter 提交后去向由 runtime 内核裁定）；Alt+⏎ 读 D1「回合进行中」判定
+ *  集合（shell isActiveTurn，与发送按钮角标共用同一函数）分流：集合内（回合进行中/收尾）→
+ *  followUp 下一轮（等本回合结束后另起一轮，排队语义），其余 → onSend；⇧⏎ 换行，↑/↓ 翻历史。
  *  命令浮层 open 时优先路由到浮层。[HISTORICAL] isActive→onSteer 与 isCompacting→onSend 两套
- *  分散判定（优先级倒挂根因）已退役，路由判定收敛在 useComposerSend（core dispatch/send）。 */
+ *  分散判定（优先级倒挂根因）已退役；resolveSendRoute 六行预测表随 D5 退役（Alt 分流改读判定
+ *  集合）。 */
 const onKeydown = useComposerKeydown({
   cmdOpen,
   commandPopoverRef,
   inputRef: shellInputRef,
   staging,
-  sendRoute,
+  activeTurn: isActiveTurn,
   shortcutActions: shell.shortcutActions,
   handleArrowUp,
   handleArrowDown,
