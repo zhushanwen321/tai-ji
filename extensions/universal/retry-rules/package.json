@@ -20,6 +20,9 @@
   "pi": {
     "extensions": [
       "./index.ts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "keywords": [
@@ -33,6 +36,7 @@
     "src/",
     "!src/__tests__/",
     "index.ts",
+    "skills/",
     "vitest.config.ts"
   ],
   "scripts": {
@@ -40,6 +44,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@zhushanwen/pi-extension-logger": "workspace:*",
     "@zhushanwen/pi-llm-shared": "workspace:*"
   },
   "devDependencies": {

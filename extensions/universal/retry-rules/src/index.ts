@@ -24,10 +24,14 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
+
 import { loadRetryRulesConfig } from "./config.js";
 import { appendRetryMarker, evaluateRetryRules } from "./rules.js";
 
 type PiAPI = ExtensionAPI;
+
+const logger = getLogger("retry-rules");
 
 /** message_end 事件中本扩展消费的消息字段面（AgentMessage 判定所需的窄视图）。 */
 interface AssistantErrorMessage { // oe-exempt:20261024:test:message_end 改写入参的结构化窄面（pi 消息子集），单消费点 rewriteMessageForRetry；真实第二变体 = pi 消息形态演化，暂内联
@@ -54,7 +58,12 @@ export {
 export function rewriteMessageForRetry<T extends AssistantErrorMessage>(message: T): { message: T } | undefined {
 	if (message.role !== "assistant" || message.stopReason !== "error") return undefined;
 	if (typeof message.errorMessage !== "string" || message.errorMessage === "") return undefined;
-	const config = loadRetryRulesConfig();
+	// 非法配置 / 坏 JSON：loadConfig 已回落 defaults（空规则集，判定不生效——pi 原生词表兜底），
+	// 告警接 extension logger（appendEntry 持久化 + <agentDir>/logs/retry-rules-<日期>.log 文件日志），
+	// 不传回调则降级零痕迹。去重 = loadConfig 的 mtime+size 缓存（llm-shared config.ts：损坏文件
+	// 按 mtime+size 缓存 defaults，不重读不重复回调）——每条 message_end 判定虽直读本入口，
+	// 同一损坏文件版本只告警一次；用户修正保存（mtime/size 变化）后重读重校再告警。
+	const config = loadRetryRulesConfig((warning) => logger.warn(`${warning}（已回落空规则集，本扩展重试判定暂不生效；修正配置文件后自下一轮判定生效）`));
 	const decision = evaluateRetryRules(message.errorMessage, config.effectiveRules);
 	if (decision.action !== "rewrite") return undefined;
 	return { message: { ...message, errorMessage: appendRetryMarker(message.errorMessage) } };
@@ -63,6 +72,10 @@ export function rewriteMessageForRetry<T extends AssistantErrorMessage>(message:
 // ── Extension entry ────────────────────────────────────────────
 
 export default function retryRulesExtension(pi: PiAPI): void {
+	// 日志通道注入（extension-logger 两阶段初始化：工厂拿 pi → setPiHandle，最早期调用）；
+	// 注入后 module 级 logger 的 warn 经 appendEntry 落 session JSONL（不进 LLM 上下文）。
+	setPiHandle(pi);
+
 	pi.on("message_end", (event) => {
 		return rewriteMessageForRetry(event.message);
 	});
