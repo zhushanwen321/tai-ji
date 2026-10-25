@@ -1,22 +1,26 @@
-// 移动壳权限审批链装配 smoke（remote-use-mobile D7（移动壳 v1 功能集裁定）「权限审批 ✅ 手机可批」行接线）。
+// 移动壳权限审批链装配（remote-use-mobile-v2 §6.5/§6.18 消费半；v1 D7「权限审批 ✅ 手机可批」行的 v2 形态）。
 //
 // 链路锁定：bus 'plugin-permission-request'（companion-bridge 模块级 controller）→
-// App 内 PermissionRequestDialog 渲染 → 勾选/批准/拒绝 → transport RPC
-// （plugin.approvePermissions / plugin.denyPermissions）→ pending 收尾。
+// App watch(permission.pending) → openSheet('permission') → PermissionSheet 渲染
+// （reka Dialog portal 到 body）→ 允许/拒绝 → transport RPC
+// （plugin.approvePermissions / plugin.denyPermissions）→ pending 收尾关 Sheet。
 //
-// 状态机本体（畸形事件检查 / permissions 拷贝 / BM3 失败保持 / D3 expired 撤窗 /
-// 新请求覆盖）单测在 packages/ui extension-host
-// __tests__/permission-request-controller.test.ts（双壳共享 factory）；错误行渲染
-// 归 PermissionRequestDialog 组件测试。本文件只钉移动壳装配（App.vue provide +
-// Dialog 挂载 + bus 单例接线）。
+// 状态机本体（畸形事件检查 / BM3 失败保持 / D3 expired 撤窗 / 新请求覆盖）单测在
+// packages/ui extension-host __tests__/permission-request-controller.test.ts（双壳共享
+// factory）；本文件只钉移动壳装配（App.vue 挂载 + openSheet 联动 + bus 单例接线）。
+//
+// [v2 形态适配（原 v1 PermissionRequestDialog spec 重写）]：审批呈现由 App 内联 Dialog
+// 换为 PermissionSheet（sheet-manager 'permission' 槽位），交互 = 全量允许/拒绝（v1 的
+// 逐项勾选「部分批准」是 Dialog 形态呈现细节，v2 Sheet 形态按 §5.1「拒绝在左 + 作用域
+// 逐条列出」呈现；M-6 能力对账以 controller 复用为准）。
 //
 // mock 策略：
 // - plugin 域（approvePermissions/denyPermissions）模块级 vi.mock 隔离 WS（断言回传参数）；
-// - Dialog 家族 stub 内联渲染（reka-ui DialogContent 在 happy-dom 下 Teleport 到 body 且
-//   时序不稳定——ui PermissionRequestDialog.test.ts 同款先例），stub 尊重 open prop。
+// - Sheet 内容经 reka DialogPortal 渲染到 document.body（happy-dom 实测可达，断言走
+//   document 查询——SessionActionsSheet 组件测试同款）。
 //
 // 协议事实锚定（「无 sessionId」用例方向）：runtime permissionRequest 广播 payload 协议性
-// 无 sessionId（plugin-service onPermissionRequest 直发 activator payload），审批弹窗全局
+// 无 sessionId（plugin-service onPermissionRequest 直发 activator payload），审批全局
 // 单例 session 无关——无 sessionId 事件必须照常弹出。
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/__tests__/mobile-permission.spec.ts
@@ -27,6 +31,7 @@ import App from '../App.vue'
 import { i18n } from '../i18n'
 import { __testing, useMobilePermissionRequest } from '../shell/companion-bridge'
 import { shellConnectionState } from '../shell/connection-view'
+import { resetSheetManagerForTesting } from '../shell/sheet-manager'
 
 // vi.hoisted：mock 工厂被 hoist 到 import 前，工厂内引用的变量须经 vi.hoisted 创建
 const { mockApprove, mockDeny } = vi.hoisted(() => ({ mockApprove: vi.fn(), mockDeny: vi.fn() }))
@@ -36,17 +41,12 @@ vi.mock('@taiji/core/transport/api/domains/plugin', () => ({
   denyPermissions: mockDeny,
 }))
 
-// Dialog 家族 stub：内联渲染 slot，尊重 open（pending=false 时不渲染内容）
-const dialogStubs = {
-  Dialog: { props: ['open'], template: '<div><slot v-if="open" /></div>' },
-  DialogContent: { template: '<div><slot /></div>' },
-  DialogHeader: { template: '<div><slot /></div>' },
-  DialogTitle: { template: '<div><slot /></div>' },
-  DialogDescription: { template: '<div><slot /></div>' },
+function mountApp() {
+  return mount(App, { global: { plugins: [i18n] } })
 }
 
-function mountApp() {
-  return mount(App, { global: { plugins: [i18n], stubs: dialogStubs } })
+function sheetQuery<T extends Element = Element>(selector: string): T | null {
+  return document.querySelector<T>(selector)
 }
 
 /** 发一条 bridge 归一后的合法 permission-request 事件（sessionId 可选，协议性缺省） */
@@ -58,7 +58,7 @@ function emitPermissionRequest(pluginId: string, permissions: string[], sessionI
   })
 }
 
-describe('移动壳权限审批链装配（remote-use-mobile D7「权限审批 ✅ 手机可批」行）', () => {
+describe('移动壳权限审批链装配（§6.5 PermissionSheet 形态）', () => {
   let wrapper: ReturnType<typeof mountApp> | null = null
 
   beforeEach(() => {
@@ -70,49 +70,52 @@ describe('移动壳权限审批链装配（remote-use-mobile D7「权限审批 �
     perm.pluginId = ''
     perm.permissions = []
     perm.error = false
+    resetSheetManagerForTesting()
     shellConnectionState.value = 'connecting'
   })
 
   afterEach(() => {
     wrapper?.unmount()
     wrapper = null
+    resetSheetManagerForTesting()
     shellConnectionState.value = 'connecting'
   })
 
-  it('bus 事件 → 弹窗渲染（插件名 + 权限项）→ 部分批准 → transport 回传参数正确 → pending 收尾关弹窗', async () => {
+  it('bus 事件 → 审批 Sheet 弹出（插件名 + 权限项逐条）→ 允许 → transport 全量回传 → pending 收尾关 Sheet', async () => {
     wrapper = mountApp()
-    expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(false)
+    expect(sheetQuery('[data-testid="permission-sheet-permissions"]')).toBeNull()
 
     emitPermissionRequest('p1', ['fs.read', 'net.http'], 'sid-a')
     await nextTick()
+    await nextTick()
 
-    // 使用者视角：弹窗可见、插件名与权限项逐项渲染
-    expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="permission-dialog-title"]').text()).toBe('p1')
-    const items = wrapper.findAll('[data-testid="permission-item-label"]')
-    expect(items).toHaveLength(2)
-    expect(items[0]!.text()).toBe('fs.read')
-    expect(items[1]!.text()).toBe('net.http')
+    // 使用者视角：Sheet 可见（portal 在 body）、权限项逐条渲染
+    expect(sheetQuery('[data-testid="permission-sheet-permissions"]')).not.toBeNull()
+    expect(sheetQuery('[data-testid="permission-sheet-perm-fs.read"]')).not.toBeNull()
+    expect(sheetQuery('[data-testid="permission-sheet-perm-net.http"]')).not.toBeNull()
 
-    // 部分批准：只勾 fs.read
-    await wrapper.find('[data-testid="permission-item-fs.read"]').trigger('click')
-    await wrapper.find('[data-testid="permission-approve"]').trigger('click')
+    // 允许（全量作用域回传；拒绝在左/允许在右的布局由组件模板承载，此处锁回传参数）
+    await sheetQuery<HTMLElement>('[data-testid="permission-sheet-approve"]')!.click()
     await flushPromises()
 
     expect(mockApprove).toHaveBeenCalledTimes(1)
-    expect(mockApprove).toHaveBeenCalledWith('p1', ['fs.read'])
+    expect(mockApprove).toHaveBeenCalledWith('p1', ['fs.read', 'net.http'])
     expect(mockDeny).not.toHaveBeenCalled()
-    // 回传成功 → pending=false → 弹窗关闭（状态收尾）
+    // 回传成功 → pending=false → App watch 收 Sheet（状态收尾）
     expect(useMobilePermissionRequest().pending).toBe(false)
-    expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(false)
+    await nextTick()
+    expect(sheetQuery('[data-testid="permission-sheet-permissions"]')).toBeNull()
   })
 
-  it('拒绝 → transport.deny 回传（denyPermissions 命令，拒绝本次申请）→ 弹窗关闭', async () => {
+  it('拒绝 → transport.deny 回传（denyPermissions 命令，拒绝本次申请）→ Sheet 关闭', async () => {
     wrapper = mountApp()
     emitPermissionRequest('p2', ['fs.write'])
     await nextTick()
+    await nextTick()
+    expect(sheetQuery('[data-testid="permission-sheet-permissions"]')).not.toBeNull()
 
-    await wrapper.find('[data-testid="permission-reject"]').trigger('click')
+    // 拒绝（destructive 档；安全侧在左的布局由组件模板承载）
+    await sheetQuery<HTMLElement>('[data-testid="permission-sheet-deny"]')!.click()
     await flushPromises()
 
     expect(mockDeny).toHaveBeenCalledTimes(1)
@@ -120,15 +123,17 @@ describe('移动壳权限审批链装配（remote-use-mobile D7「权限审批 �
     expect(mockApprove).not.toHaveBeenCalled()
     expect(useMobilePermissionRequest().pending).toBe(false)
     expect(useMobilePermissionRequest().error).toBe(false)
-    expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(false)
+    await nextTick()
+    expect(sheetQuery('[data-testid="permission-sheet-permissions"]')).toBeNull()
   })
 
-  it('无 sessionId 事件照常弹出（协议事实：permissionRequest 广播无 sessionId，审批全局单例）', async () => {
+  it('无 sessionId 事件照常弹出（协议事实：permissionRequest 广播无 sessionId，审批全局单例；§6.18 无归属一等分支）', async () => {
     wrapper = mountApp()
     emitPermissionRequest('p3', ['net.http'])
     await nextTick()
+    await nextTick()
 
-    expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="permission-dialog-title"]').text()).toBe('p3')
+    expect(sheetQuery('[data-testid="permission-sheet-permissions"]')).not.toBeNull()
+    expect(sheetQuery('[data-testid="permission-sheet-perm-net.http"]')).not.toBeNull()
   })
 })
