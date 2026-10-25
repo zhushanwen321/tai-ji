@@ -79,34 +79,40 @@ export function scanPendingEntries(entries: readonly unknown[]): PendingEntriesS
     const entry = raw as { customType?: unknown; data?: unknown }
     const data = (entry.data ?? {}) as Record<string, unknown>
     if (entry.customType === PENDING_REGISTER_ENTRY_TYPE) {
-      scan.registerEntries.push({ data })
-      // 首见胜出（applyPendingDiff 首条 data 同口径）：占据即锁定，后续重复不覆盖；
-      // 首条无 type 则该 id 恒无映射（不补位）。字段视图跳过空串 id。
-      if (typeof data.id === 'string' && data.id !== '' && !seenRegisterIds.has(data.id)) {
-        seenRegisterIds.add(data.id)
-        if (typeof data.type === 'string') scan.registerTypes.set(data.id, data.type)
-      }
+      absorbRegisterEntry(scan, data, seenRegisterIds)
     } else if (entry.customType === PENDING_UNREGISTER_ENTRY_TYPE) {
-      if (typeof data.id === 'string') {
-        scan.unregisteredIds.add(data.id)
-        if (data.id !== '') {
-          const status = data.status
-          // 字段视图跳过空串 id；status 仅收词表成员（不虚构终态）
-          if (typeof status === 'string' && MAPPED_PENDING_STATUSES.has(status)) {
-            scan.unregisterStatuses.set(data.id, status as MappedPendingStatus)
-          }
-          // 结清视图读 reason 事实（§3.3.6 权威通道，不经 status 旧映射档）：词表外
-          // reason 解析为 unknown 照常入视图（fail-visible 诚实标注），非 string reason
-          // 是畸形 data 不入视图（不抹除前值）。
-          const reason = data.reason
-          if (typeof reason === 'string') {
-            scan.unregisterSettlements.set(data.id, resolveSettlementReason(reason))
-          }
-        }
-      }
+      absorbUnregisterEntry(scan, data)
     }
   }
   return scan
+}
+
+/** register 条目处置：原始 data 收集 + 首见 type 视图。首见胜出（applyPendingDiff 首条 data 同口径）：占据即锁定，后续重复不覆盖；首条无 type 则该 id 恒无映射（不补位）。字段视图跳过空串 id。 */
+function absorbRegisterEntry(
+  scan: PendingEntriesScan,
+  data: Record<string, unknown>,
+  seenRegisterIds: Set<string>,
+): void {
+  scan.registerEntries.push({ data })
+  if (typeof data.id === 'string' && data.id !== '' && !seenRegisterIds.has(data.id)) {
+    seenRegisterIds.add(data.id)
+    if (typeof data.type === 'string') scan.registerTypes.set(data.id, data.type)
+  }
+}
+
+/** unregister 条目处置：全局抵消集 + status 视图 + 结清视图（字段视图跳过空串 id；status 仅收词表成员不虚构终态；结清视图读 reason 事实——§3.3.6 权威通道不经 status 旧映射档，词表外 reason 解析为 unknown 照常入视图 fail-visible，非 string reason 是畸形 data 不入视图不抹除前值）。 */
+function absorbUnregisterEntry(scan: PendingEntriesScan, data: Record<string, unknown>): void {
+  if (typeof data.id !== 'string') return
+  scan.unregisteredIds.add(data.id)
+  if (data.id === '') return
+  const status = data.status
+  if (typeof status === 'string' && MAPPED_PENDING_STATUSES.has(status)) {
+    scan.unregisterStatuses.set(data.id, status as MappedPendingStatus)
+  }
+  const reason = data.reason
+  if (typeof reason === 'string') {
+    scan.unregisterSettlements.set(data.id, resolveSettlementReason(reason))
+  }
 }
 
 /** scanPendingFields 的结果：collect 链路消费的字段映射投影（首见 type + 注销 status 视图 + 注销结清视图）。 */

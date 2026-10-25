@@ -49,8 +49,9 @@ import {
   collectOutcome,
   describePromptAckFailure,
   type CollectedOutcome,
+  type CollectResultArgs,
 } from "./output-collector.ts";
-import { createPromptAckTracker, resolvePromptAckTimeoutMs, type PromptAckTracker } from "./prompt-ack.ts";
+import { createPromptAckTracker, resolvePromptAckTimeoutMs, type PromptAckResult, type PromptAckTracker } from "./prompt-ack.ts";
 import { createFd3RawMirrorWriter, type RawMirrorWriter } from "./raw-mirror.ts";
 import { toErrorMessage } from "./error-message.ts";
 import {
@@ -549,62 +550,110 @@ function collectRunResult(
   // [subagent-observability §3.3.1] 错误停因事实在场时死因事实优先于退出码裸文案
   //（结构化轮终事实的 errorMessage = provider 层真实死因）。
   const ackFailure = runEnd.promptAckFailure;
-  // [subagent-observability §3.3.1 P9 迟到终态顺序契约 — 结算点 abort 事实核对] abort
-  // 已裁决（宿主 signal 置位 / limiter 直杀置位，与 buildTranslatorOpts 的 isAbortDecided
-  // 同判据）的 run 在结算点不得落 success：「agent_end 已置 clean、settled 未到」竞窗
-  //（含 queue_update 缺失退化形态下中间边沿置 clean 的扩大窗口）被宿主杀链终止时，
-  // close 经 endedCleanly 短路归 0（normalizeExitCode），退出码事实不承载取消事实——
-  // 此处补落宿主取消停因事实（abortSource=host-cancel → FailureCause user.cancelled），
-  // 与 turn-budget 支经 collectOutcome 事实位收口同口径。收尾边沿事实在场时以边沿为
-  // 权威（不覆盖）；settled 已完成的轮（settledTurnCount 在场 = settled 先于取消到达）
-  // 不补落——取消晚于完成不翻案。
-  const terminalErrorFact: EngineRoundErrorFact | undefined =
-    runEnd.terminalErrorFact ??
-    (params.signal?.aborted === true && runEnd.settledTurnCount === undefined
-      ? {
-        stopReason: "aborted",
-        errorMessage: hostCancelReasonText(params.signal),
-        abortSource: "host-cancel",
-      }
-      : undefined);
-  // [subagent-observability §3.3.1 P4 静默空成功防伪] 退出 0 不再单独构成成功证据
-  //（pi 1.0.0 实装：stdin EOF → rpc-mode shutdown → 无条件 exit(0)，无 settled 的
-  // 0 退出可达）。成功公式 = 退出 0 ∧ 无送达失败 ∧ 无错误停因事实（含取消竞窗补落）
-  // ∧ 非未解释空轮——未解释空轮 = 无 agent_settled 快照、无被接管标记
-  //（promptHandledNoRun——被接管轮的空是「有解释的空」，见 p6 收条设计）、零轮：按
-  // 失联语义记失败，不产假成功。「end 与 settled 之间被杀」且无 abort 事实的形态
-  //（endedCleanly=true 且有真实轮数，如外部杀死）不受本判据影响（有轮 = 有工作证据，
-  // 非空成功）；abort 已裁决的同窗被杀由上方取消事实收口，不落成功。
-  const recordHasNoWork =
-    record.turnCount === 0 &&
-    record.turns.every((t) => t.text === "" && t.thinking === "" && t.toolCalls.length === 0);
-  const unexplainedEmptyExit =
-    exitCode === 0 &&
-    ackFailure === undefined &&
-    runEnd.settledTurnCount === undefined &&
-    runEnd.promptHandledNoRun !== true &&
-    recordHasNoWork;
-  const success =
-    exitCode === 0 && ackFailure === undefined && terminalErrorFact === undefined && !unexplainedEmptyExit;
-  // 错误文案优先序：送达失败（tracker 结算事实）> 停因事实（收尾边沿 / 取消竞窗补落，
-  // 死因事实优先于推断与裸退出码）> 未解释空轮（失联推断）> 退出码裸文案。
-  const error = success
-    ? undefined
-    : ackFailure !== undefined
-      ? describePromptAckFailure(ackFailure)
-      : terminalErrorFact !== undefined
-        ? terminalErrorFact.errorMessage
-        : unexplainedEmptyExit
-          ? "pi child exited with code 0 without any agent activity (no agent_settled, zero turns): " +
-            "treating as lost contact, not success. Recovery: retry the run; if it reproduces, " +
-            "inspect the pi child stderr tee for the shutdown cause."
-          : buildExitErrorText(exitCode, runEnd.childErrorMessage);
+  const terminalErrorFact = resolveTerminalErrorFact(runEnd, params);
+  const { success, error } = deriveRunVerdict(record, runEnd, exitCode, ackFailure, terminalErrorFact);
   if (ackFailure !== undefined) {
     // 送达失败路径同时发 error 事件（设计 §3.4.2：让 journal 有记录；既有退出码
     // 失败不加发，行为面不变）。
     callbacks.onEvent({ type: "error", message: error ?? "prompt delivery failed" });
   }
-  const outcome = collectOutcome(record, {
+  const outcome = collectOutcome(record, buildCollectOutcomeArgs(runEnd, identity, params, startTime, success, error, terminalErrorFact));
+  // [D5 诊断引用写入 journal 记录] 失败时随终态应答上报 stderr tee 路径（引擎应答 failed /
+  // 进程异常退出路径的共同汇聚点 = outcome.error 非空；成功不报——诊断引用只在
+  // 失败语义下有意义）。tee 缺席（无 stderr / dataDir 不可解析 / pid 缺失）= 字段
+  // 缺省，宿主按「无取证指针」消费。
+  const stderrTeePath = outcome.error !== undefined ? stderrTee?.path : undefined;
+  return {
+    ...outcome,
+    ...(stderrTeePath !== undefined ? { stderrTeePath } : {}),
+    sessionId: identity.sessionId,
+  };
+}
+
+/**
+ * [subagent-observability §3.3.1 P9 迟到终态顺序契约 — 结算点 abort 事实核对] abort
+ * 已裁决（宿主 signal 置位 / limiter 直杀置位，与 buildTranslatorOpts 的 isAbortDecided
+ * 同判据）的 run 在结算点不得落 success：「agent_end 已置 clean、settled 未到」竞窗
+ *（含 queue_update 缺失退化形态下中间边沿置 clean 的扩大窗口）被宿主杀链终止时，
+ * close 经 endedCleanly 短路归 0（normalizeExitCode），退出码事实不承载取消事实——
+ * 此处补落宿主取消停因事实（abortSource=host-cancel → FailureCause user.cancelled），
+ * 与 turn-budget 支经 collectOutcome 事实位收口同口径。收尾边沿事实在场时以边沿为
+ * 权威（不覆盖）；settled 已完成的轮（settledTurnCount 在场 = settled 先于取消到达）
+ * 不补落——取消晚于完成不翻案。
+ */
+function resolveTerminalErrorFact(runEnd: RunEndState, params: SpawnRunParams): EngineRoundErrorFact | undefined {
+  if (runEnd.terminalErrorFact !== undefined) return runEnd.terminalErrorFact;
+  if (params.signal?.aborted !== true || runEnd.settledTurnCount !== undefined) return undefined;
+  return {
+    stopReason: "aborted",
+    errorMessage: hostCancelReasonText(params.signal),
+    abortSource: "host-cancel",
+  };
+}
+
+/**
+ * 成功公式与错误文案优先序（collectRunResult 判定段单点）。
+ *
+ * [subagent-observability §3.3.1 P4 静默空成功防伪] 退出 0 不再单独构成成功证据
+ *（pi 1.0.0 实装：stdin EOF → rpc-mode shutdown → 无条件 exit(0)，无 settled 的
+ * 0 退出可达）。成功公式 = 退出 0 ∧ 无送达失败 ∧ 无错误停因事实（含取消竞窗补落）
+ * ∧ 非未解释空轮——未解释空轮 = 无 agent_settled 快照、无被接管标记
+ *（promptHandledNoRun——被接管轮的空是「有解释的空」，见 p6 收条设计）、零轮：按
+ * 失联语义记失败，不产假成功。「end 与 settled 之间被杀」且无 abort 事实的形态
+ *（endedCleanly=true 且有真实轮数，如外部杀死）不受本判据影响（有轮 = 有工作证据，
+ * 非空成功）；abort 已裁决的同窗被杀由取消事实收口，不落成功。
+ *
+ * 错误文案优先序：送达失败（tracker 结算事实）> 停因事实（收尾边沿 / 取消竞窗补落，
+ * 死因事实优先于推断与裸退出码）> 未解释空轮（失联推断）> 退出码裸文案。
+ */
+function deriveRunVerdict(
+  record: ReturnType<typeof createReplayRecord>,
+  runEnd: RunEndState,
+  exitCode: number,
+  ackFailure: PromptAckResult | undefined,
+  terminalErrorFact: EngineRoundErrorFact | undefined,
+): { success: boolean; error: string | undefined } {
+  const unexplainedEmptyExit =
+    exitCode === 0 &&
+    ackFailure === undefined &&
+    runEnd.settledTurnCount === undefined &&
+    runEnd.promptHandledNoRun !== true &&
+    recordHasNoWork(record);
+  const success =
+    exitCode === 0 && ackFailure === undefined && terminalErrorFact === undefined && !unexplainedEmptyExit;
+  if (success) return { success, error: undefined };
+  if (ackFailure !== undefined) return { success, error: describePromptAckFailure(ackFailure) };
+  if (terminalErrorFact !== undefined) return { success, error: terminalErrorFact.errorMessage };
+  if (unexplainedEmptyExit) {
+    return {
+      success,
+      error: "pi child exited with code 0 without any agent activity (no agent_settled, zero turns): " +
+        "treating as lost contact, not success. Recovery: retry the run; if it reproduces, " +
+        "inspect the pi child stderr tee for the shutdown cause.",
+    };
+  }
+  return { success, error: buildExitErrorText(exitCode, runEnd.childErrorMessage) };
+}
+
+/** [P4 静默空成功防伪] 零轮且全部轮无文本/思考/工具调用 = 无工作证据。 */
+function recordHasNoWork(record: ReturnType<typeof createReplayRecord>): boolean {
+  return (
+    record.turnCount === 0 &&
+    record.turns.every((t) => t.text === "" && t.thinking === "" && t.toolCalls.length === 0)
+  );
+}
+
+/** collectOutcome 入参装配（条件 spread 单点；事实位/计账切片的取舍判据见各 spread 注释源）。 */
+function buildCollectOutcomeArgs(
+  runEnd: RunEndState,
+  identity: SessionIdentityTracker,
+  params: SpawnRunParams,
+  startTime: number,
+  success: boolean,
+  error: string | undefined,
+  terminalErrorFact: EngineRoundErrorFact | undefined,
+): CollectResultArgs {
+  return {
     startTime,
     success,
     error,
@@ -633,16 +682,6 @@ function collectRunResult(
         retryAttempts: runEnd.settledAccounting.retryAttempts,
       }
       : {}),
-  });
-  // [D5 诊断引用写入 journal 记录] 失败时随终态应答上报 stderr tee 路径（引擎应答 failed /
-  // 进程异常退出路径的共同汇聚点 = outcome.error 非空；成功不报——诊断引用只在
-  // 失败语义下有意义）。tee 缺席（无 stderr / dataDir 不可解析 / pid 缺失）= 字段
-  // 缺省，宿主按「无取证指针」消费。
-  const stderrTeePath = outcome.error !== undefined ? stderrTee?.path : undefined;
-  return {
-    ...outcome,
-    ...(stderrTeePath !== undefined ? { stderrTeePath } : {}),
-    sessionId: identity.sessionId,
   };
 }
 

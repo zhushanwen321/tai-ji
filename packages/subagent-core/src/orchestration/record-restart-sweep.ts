@@ -245,50 +245,10 @@ export async function sweepInterruptedRecords(
   const now = Date.now();
   for (const recordsDir of recordsDirs) {
     const stream = createRecordEventStream(() => recordsDir);
-    let names: string[];
-    try {
-      names = await readdir(recordsDir);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        // 目录级真 IO 故障（EACCES/EIO）：折进 errors 继续（同 run 侧读错分通道纪律——
-        // 静默折叠会让持续 IO 故障伪装成「0 个 record 待清点」）。
-        const message = `${recordsDir}: ${err instanceof Error ? err.message : String(err)}`;
-        log.warn(`${LOG_PREFIX} records dir read failed, continuing: ${message}`);
-        result.errors.push(message);
-      }
-      continue; // ENOENT = 该 session 从未落 record，正常空态
-    }
+    const names = await listManifestNames(recordsDir, log, result.errors);
+    if (names === null) continue;
     for (const name of names) {
-      if (!name.endsWith(".json")) continue; // 候选 = manifest 快照（<sa-id>.json）
-      const id = name.slice(0, -".json".length);
-      let manifest: ManifestRecord;
-      try {
-        const content = await readFile(join(recordsDir, name), "utf-8");
-        const parsed: unknown = JSON.parse(content);
-        if (typeof parsed !== "object" || parsed === null || typeof (parsed as ManifestRecord).id !== "string") {
-          throw new Error("corrupt manifest snapshot (not a ManifestRecord shape)");
-        }
-        manifest = parsed as ManifestRecord;
-      } catch (err) {
-        // 损坏快照：warn 留痕跳过（不虚构在途判定——读侧重建通道自会按损坏处置）。
-        const message = `${recordsDir}/${name}: ${err instanceof Error ? err.message : String(err)}`;
-        log.warn(`${LOG_PREFIX} manifest read failed, skipping: ${message}`);
-        result.errors.push(message);
-        result.skipped += 1;
-        continue;
-      }
-      // ① 候选枚举：manifest 快照在途形态（快照通道，禁全量 fold）。
-      if (!manifestSnapshotInFlight(manifest)) continue;
-      try {
-        const outcome = await sweepSingleRecord(stream, recordsDir, id, manifest, now);
-        if (outcome === "swept") result.swept += 1;
-        else result.skipped += 1;
-      } catch (err) {
-        const message = `record ${id}: ${err instanceof Error ? err.message : String(err)}`;
-        log.warn(`${LOG_PREFIX} sweep failed, continuing: ${message}`);
-        result.errors.push(message);
-        result.skipped += 1;
-      }
+      await sweepManifestCandidate(stream, recordsDir, name, now, log, result);
     }
   }
   // 结果行只在有命中时落位（无失联的主路径不加日志行——startup-sweep 主结果行
@@ -297,4 +257,67 @@ export async function sweepInterruptedRecords(
     log.info(`${LOG_PREFIX} swept ${result.swept} interrupted record(s), skipped ${result.skipped}`);
   }
   return result;
+}
+
+/** 单目录 manifest 候选枚举：文件名列表；null = 跳过该目录（ENOENT 正常空态 / 真 IO 故障已折进 errors 继续——同 run 侧读错分通道纪律，静默折叠会让持续 IO 故障伪装成「0 个 record 待清点」）。 */
+async function listManifestNames(
+  recordsDir: string,
+  log: SweepLogChannel,
+  errors: string[],
+): Promise<string[] | null> {
+  try {
+    return await readdir(recordsDir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      const message = `${recordsDir}: ${err instanceof Error ? err.message : String(err)}`;
+      log.warn(`${LOG_PREFIX} records dir read failed, continuing: ${message}`);
+      errors.push(message);
+    }
+    return null; // ENOENT = 该 session 从未落 record，正常空态
+  }
+}
+
+/** 单个 manifest 快照读取 + 形状断言（读失败/坏形状 throw——调用方按损坏快照处置）。 */
+async function loadManifestSnapshot(filePath: string): Promise<ManifestRecord> {
+  const content = await readFile(filePath, "utf-8");
+  const parsed: unknown = JSON.parse(content);
+  if (typeof parsed !== "object" || parsed === null || typeof (parsed as ManifestRecord).id !== "string") {
+    throw new Error("corrupt manifest snapshot (not a ManifestRecord shape)");
+  }
+  return parsed as ManifestRecord;
+}
+
+/** 单候选处置：非 manifest 文件跳过 → 损坏快照 warn 留痕跳过（不虚构在途判定——读侧重建通道自会按损坏处置）→ 在途候选 sweepSingleRecord（结果折进 result）。 */
+async function sweepManifestCandidate(
+  stream: ReturnType<typeof createRecordEventStream>,
+  recordsDir: string,
+  name: string,
+  now: number,
+  log: SweepLogChannel,
+  result: RecordRestartSweepResult,
+): Promise<void> {
+  if (!name.endsWith(".json")) return; // 候选 = manifest 快照（<sa-id>.json）
+  const id = name.slice(0, -".json".length);
+  let manifest: ManifestRecord;
+  try {
+    manifest = await loadManifestSnapshot(join(recordsDir, name));
+  } catch (err) {
+    const message = `${recordsDir}/${name}: ${err instanceof Error ? err.message : String(err)}`;
+    log.warn(`${LOG_PREFIX} manifest read failed, skipping: ${message}`);
+    result.errors.push(message);
+    result.skipped += 1;
+    return;
+  }
+  // ① 候选枚举：manifest 快照在途形态（快照通道，禁全量 fold）。
+  if (!manifestSnapshotInFlight(manifest)) return;
+  try {
+    const outcome = await sweepSingleRecord(stream, recordsDir, id, manifest, now);
+    if (outcome === "swept") result.swept += 1;
+    else result.skipped += 1;
+  } catch (err) {
+    const message = `record ${id}: ${err instanceof Error ? err.message : String(err)}`;
+    log.warn(`${LOG_PREFIX} sweep failed, continuing: ${message}`);
+    result.errors.push(message);
+    result.skipped += 1;
+  }
 }

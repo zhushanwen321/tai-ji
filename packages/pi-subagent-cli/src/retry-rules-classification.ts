@@ -87,71 +87,89 @@ export function loadRetryRulesForClassification(
   return rules;
 }
 
+/** class 五值字面（FailureCause class 词表，与 KINDS_BY_CLASS 键域同源）。 */
+const RULE_CLASS_VALUES: readonly string[] = ["provider", "harness", "agent", "engine", "user"];
+
 /** 单条规则窄化（字段级防御式读取：关键字段合法才收；kind 提供但词表外 = 整条跳过）。 */
 function narrowClassificationRule(entry: unknown): RetryRuleClassificationView | undefined {
   if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return undefined;
   const r = entry as Record<string, unknown>;
+  const header = narrowRuleHeader(r);
+  if (header === undefined) return undefined;
+  const match = narrowMatchConditions(r["match"]);
+  if (match === undefined) return undefined;
+  const kind = narrowRuleKind(r);
+  if (kind === undefined) return undefined;
+  return { ...header, match, ...kind };
+}
+
+/** 头三字段（verdict/class/source）窄化；任一越词表 → undefined（整条跳过）。 */
+function narrowRuleHeader(
+  r: Record<string, unknown>,
+): Pick<RetryRuleClassificationView, "verdict" | "class" | "source"> | undefined {
   if (
     typeof r["verdict"] !== "string" ||
     !RULE_VERDICTS.includes(r["verdict"]) ||
     typeof r["class"] !== "string" ||
-    !["provider", "harness", "agent", "engine", "user"].includes(r["class"]) ||
+    !RULE_CLASS_VALUES.includes(r["class"]) ||
     typeof r["source"] !== "string" ||
-    !RULE_SOURCES.includes(r["source"]) ||
-    !Array.isArray(r["match"])
+    !RULE_SOURCES.includes(r["source"])
   ) {
     return undefined;
-  }
-  const match: RetryRuleMatchCondition[] = [];
-  for (const condition of r["match"]) {
-    if (typeof condition !== "object" || condition === null) return undefined;
-    const c = condition as Record<string, unknown>;
-    if (c["kind"] === "pattern" && typeof c["pattern"] === "string") {
-      match.push({ kind: "pattern", pattern: c["pattern"] });
-      continue;
-    }
-    if (
-      c["kind"] === "jsonPath" &&
-      typeof c["path"] === "string" &&
-      (c["operator"] === "equals" || c["operator"] === "contains" || c["operator"] === "exists")
-    ) {
-      match.push({
-        kind: "jsonPath",
-        path: c["path"],
-        operator: c["operator"],
-        ...(typeof c["value"] === "string" ? { value: c["value"] } : {}),
-      });
-      continue;
-    }
-    return undefined;
-  }
-  if (r["kind"] !== undefined) {
-    const kind = r["kind"];
-    const allowed =
-      typeof kind === "string"
-        ? r["class"] === "engine"
-          ? kind.startsWith("engine_")
-            ? kind
-            : undefined
-          : KINDS_BY_CLASS[r["class"]]?.includes(kind)
-            ? kind
-            : undefined
-        : undefined;
-    if (allowed === undefined) return undefined;
-    return {
-      verdict: r["verdict"] as RetryRuleClassificationView["verdict"],
-      class: r["class"] as RetryRuleClassificationView["class"],
-      kind: allowed,
-      match,
-      source: r["source"] as RetryRuleClassificationView["source"],
-    };
   }
   return {
     verdict: r["verdict"] as RetryRuleClassificationView["verdict"],
     class: r["class"] as RetryRuleClassificationView["class"],
-    match,
     source: r["source"] as RetryRuleClassificationView["source"],
   };
+}
+
+/** match[] 窄化：逐条条件合法才收；任一条非法 → undefined（整条跳过）。 */
+function narrowMatchConditions(match: unknown): RetryRuleMatchCondition[] | undefined {
+  if (!Array.isArray(match)) return undefined;
+  const conditions: RetryRuleMatchCondition[] = [];
+  for (const condition of match) {
+    const narrowed = narrowMatchCondition(condition);
+    if (narrowed === undefined) return undefined;
+    conditions.push(narrowed);
+  }
+  return conditions;
+}
+
+/** 单条匹配条件窄化（pattern / jsonPath 双通道；通道不符 → undefined）。 */
+function narrowMatchCondition(condition: unknown): RetryRuleMatchCondition | undefined {
+  if (typeof condition !== "object" || condition === null) return undefined;
+  const c = condition as Record<string, unknown>;
+  if (c["kind"] === "pattern") {
+    return typeof c["pattern"] === "string" ? { kind: "pattern", pattern: c["pattern"] } : undefined;
+  }
+  if (
+    c["kind"] === "jsonPath" &&
+    typeof c["path"] === "string" &&
+    (c["operator"] === "equals" || c["operator"] === "contains" || c["operator"] === "exists")
+  ) {
+    return {
+      kind: "jsonPath",
+      path: c["path"],
+      operator: c["operator"],
+      ...(typeof c["value"] === "string" ? { value: c["value"] } : {}),
+    };
+  }
+  return undefined;
+}
+
+/**
+ * kind 字段窄化：未提供 → 空对象（结果不带 kind 字段）；提供且词表内 → { kind }；
+ * 提供但词表外（engine 开放前缀面 / per-class 词表外 / 非字符串）→ undefined（整条跳过）。
+ */
+function narrowRuleKind(r: Record<string, unknown>): { kind?: string } | undefined {
+  const kind = r["kind"];
+  if (kind === undefined) return {};
+  if (typeof kind !== "string") return undefined;
+  if (r["class"] === "engine") {
+    return kind.startsWith("engine_") ? { kind } : undefined;
+  }
+  return KINDS_BY_CLASS[r["class"] as string]?.includes(kind) ? { kind } : undefined;
 }
 
 /** JSON 片段提取：文本中首个 `{` 起的括号平衡段（字符串字面量感知——引号内的括号不计深度）；无平衡段返回 null（镜像 shared extractJsonSegment）。 */

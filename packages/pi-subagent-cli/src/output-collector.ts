@@ -233,68 +233,14 @@ export function classifyFailureCause(input: FailureCauseInput, nowMs: number = D
   const raw = terminalError.errorMessage;
   // [§3.3.1 三源判别] aborted 的三源裁决在收尾边沿已定：宿主取消（中止非失败）/
   // limiter 耗尽（防御性同判——事实位路径已前置） / 引擎异常兜底。
-  if (terminalError.stopReason === "aborted") {
-    if (terminalError.abortSource === "host-cancel") {
-      return { class: "user", kind: "cancelled", retryable: false, raw };
-    }
-    if (terminalError.abortSource === "turn-budget") {
-      return {
-        class: "harness",
-        kind: "turn_budget_exhausted",
-        retryable: false,
-        raw,
-        // [§3.3.9/UC-10] 停因事实的 turnBudget 快照（EngineRoundErrorFact.turnBudget）
-        // 优先；无快照的竞窗形态事实不足不产结构（budget 缺省）。
-        ...(terminalError.turnBudget !== undefined ? { budget: terminalError.turnBudget } : {}),
-      };
-    }
-    return { class: "engine", kind: "engine_aborted", retryable: false, raw };
-  }
+  if (terminalError.stopReason === "aborted") return classifyAbortedCause(terminalError, raw);
   // stopReason=error：① provider 业务码层（分类码表消费，结构化输入优先——见
   // classificationMatchInputs）。
-  const retryRules = input.retryRules;
-  if (retryRules !== undefined && retryRules.length > 0) {
-    const hit = findClassificationRule(classificationMatchInputs(terminalError), retryRules);
-    if (hit !== undefined) {
-      const kind = deriveKindForRule(hit);
-      if (kind !== undefined) {
-        // class×kind 组合合法性由运行时 guard 保证（narrowClassificationRule 的词表
-        // 校验 / deriveKindForRule 只产合法缺省）——断言是对该 guard 的收口。
-        const base = {
-          class: hit.class,
-          kind,
-          retryable: verdictToRetryable(hit.verdict),
-          raw,
-        } as FailureCause;
-        // retryAfterMs 文本兜底通道对原始错误文本提取（规则的 waitHint 是展示文本
-        // 非时间值，不参与提取）。
-        const retryAfterMs = extractRetryAfterMsFromText(raw, nowMs);
-        return retryAfterMs !== undefined ? { ...base, retryAfterMs } : base;
-      }
-    }
-  }
+  const byRules = classifyByRetryRules(terminalError, raw, input.retryRules, nowMs);
+  if (byRules !== undefined) return byRules;
   // ② 机读主通道（status 前缀）→ 内置 HTTP 语义层。
-  const statusMatch = PROVIDER_STATUS_PREFIX_PATTERN.exec(raw);
-  if (statusMatch?.[1] !== undefined) {
-    const status = Number(statusMatch[1]);
-    if (Number.isFinite(status) && status >= HTTP_STATUS_CLASS_CLIENT_ERROR) {
-      if (RATE_LIMIT_STATUSES.has(status)) {
-        const base: FailureCause = {
-          class: "provider",
-          kind: "rate_limited",
-          retryable: "conditional",
-          raw,
-        };
-        const retryAfterMs = extractRetryAfterMsFromText(raw, nowMs);
-        return retryAfterMs !== undefined ? { ...base, retryAfterMs } : base;
-      }
-      if (isProtocolClassStatus(status)) {
-        return { class: "provider", kind: "protocol_unsupported", retryable: false, raw };
-      }
-      // 5xx / 其余：provider 业务码层缺席时不猜（保守 unknown，丢结构形态退化策略）。
-      return undefined;
-    }
-  }
+  const byStatus = classifyByStatusLayer(raw, nowMs);
+  if (byStatus !== undefined) return byStatus;
   // 兜底文案词表（pi 模块常量字面量）。
   for (const entry of PI_FALLBACK_ERROR_LITERALS) {
     if (raw.includes(entry.pattern)) {
@@ -303,6 +249,81 @@ export function classifyFailureCause(input: FailureCauseInput, nowMs: number = D
   }
   // 未分类形态不产 FailureCause（引擎停因原值承载事实）。
   return undefined;
+}
+
+/** aborted 停因三源判别（宿主取消 / limiter 耗尽 / 引擎异常兜底），cause 优先级内聚单点。 */
+function classifyAbortedCause(terminalError: EngineRoundErrorFact, raw: string): FailureCause {
+  if (terminalError.abortSource === "host-cancel") {
+    return { class: "user", kind: "cancelled", retryable: false, raw };
+  }
+  if (terminalError.abortSource === "turn-budget") {
+    return {
+      class: "harness",
+      kind: "turn_budget_exhausted",
+      retryable: false,
+      raw,
+      // [§3.3.9/UC-10] 停因事实的 turnBudget 快照（EngineRoundErrorFact.turnBudget）
+      // 优先；无快照的竞窗形态事实不足不产结构（budget 缺省）。
+      ...(terminalError.turnBudget !== undefined ? { budget: terminalError.turnBudget } : {}),
+    };
+  }
+  return { class: "engine", kind: "engine_aborted", retryable: false, raw };
+}
+
+/**
+ * ① provider 业务码层：分类码表命中即按规则 class/kind/verdict 裁决（码表硬约束
+ * 「retryable 必须由 provider 业务码层裁决」的结构承载）。未命中返回 undefined 落
+ * 下层。retryAfterMs 文本兜底通道对原始错误文本提取（规则的 waitHint 是展示文本
+ * 非时间值，不参与提取）。
+ */
+function classifyByRetryRules(
+  terminalError: EngineRoundErrorFact,
+  raw: string,
+  retryRules: readonly RetryRuleClassificationView[] | undefined,
+  nowMs: number,
+): FailureCause | undefined {
+  if (retryRules === undefined || retryRules.length === 0) return undefined;
+  const hit = findClassificationRule(classificationMatchInputs(terminalError), retryRules);
+  if (hit === undefined) return undefined;
+  const kind = deriveKindForRule(hit);
+  if (kind === undefined) return undefined;
+  // class×kind 组合合法性由运行时 guard 保证（narrowClassificationRule 的词表
+  // 校验 / deriveKindForRule 只产合法缺省）——断言是对该 guard 的收口。
+  const base = {
+    class: hit.class,
+    kind,
+    retryable: verdictToRetryable(hit.verdict),
+    raw,
+  } as FailureCause;
+  return withRetryAfterMs(base, raw, nowMs);
+}
+
+/** ② status 前缀机读主通道 → 内置 HTTP 语义层（稳定）。未命中/不判形态返回 undefined。 */
+function classifyByStatusLayer(raw: string, nowMs: number): FailureCause | undefined {
+  const statusMatch = PROVIDER_STATUS_PREFIX_PATTERN.exec(raw);
+  if (statusMatch?.[1] === undefined) return undefined;
+  const status = Number(statusMatch[1]);
+  if (!Number.isFinite(status) || status < HTTP_STATUS_CLASS_CLIENT_ERROR) return undefined;
+  if (RATE_LIMIT_STATUSES.has(status)) {
+    const base: FailureCause = {
+      class: "provider",
+      kind: "rate_limited",
+      retryable: "conditional",
+      raw,
+    };
+    return withRetryAfterMs(base, raw, nowMs);
+  }
+  if (isProtocolClassStatus(status)) {
+    return { class: "provider", kind: "protocol_unsupported", retryable: false, raw };
+  }
+  // 5xx / 其余：provider 业务码层缺席时不猜（保守 unknown，丢结构形态退化策略）。
+  return undefined;
+}
+
+/** retryAfterMs 提取与合并单点（undefined = 文本无可提取时间值，原样返回）。 */
+function withRetryAfterMs(base: FailureCause, raw: string, nowMs: number): FailureCause {
+  const retryAfterMs = extractRetryAfterMsFromText(raw, nowMs);
+  return retryAfterMs !== undefined ? { ...base, retryAfterMs } : base;
 }
 
 // ============================================================
@@ -583,6 +604,54 @@ export function collectOutcome(
 ): CollectedOutcome {
   const toolCalls = getAllToolCalls(record);
   const parsedOutput = extractParsedOutput(toolCalls);
+  const verdict = resolveOutcomeVerdict(args, toolCalls, parsedOutput);
+  return {
+    content: getFullText(record),
+    turns: record.turnCount,
+    durationMs: Date.now() - args.startTime,
+    success: verdict.success,
+    error: verdict.error,
+    sessionId: args.sessionId,
+    sessionFile: args.sessionFile,
+    toolCalls,
+    parsedOutput,
+    usage: aggregateUsageDelta(record, args.finalAttemptTurnBase),
+    // [D5-③ 改轨] failureKind 仅引擎送达错误码前缀保留确定性分诊（"unknown" =
+    // 结构化码事实非文案启发）；子串分诊退役，失败分类由 failure 承载。
+    failureKind:
+      verdict.error !== undefined && isEngineSpawnDeliveryErrorMsg(verdict.error) ? "unknown" : undefined,
+    // [§3.3.1/§3.3.3] 引擎停因原值：有收尾边沿事实用事实；被接管轮无停因（缺省）；
+    // 成功收尾轮 = stop；其余失败形态无停因事实不产推断（缺省）。
+    ...deriveEngineStopReason(args, verdict.success),
+    ...(verdict.failure !== undefined ? { failure: verdict.failure } : {}),
+    ...(args.promptHandledNoRun === true ? { promptDisposition: "handled" as const } : {}),
+    ...(verdict.observations.length > 0 ? { observations: verdict.observations } : {}),
+    ...(args.retryAttempts !== undefined && args.retryAttempts > 0
+      ? { retryAttempts: args.retryAttempts }
+      : {}),
+  };
+}
+
+/** collectOutcome 的轮成败判定产物（判定链只在此处写这四个值，装配层只读）。 */
+interface OutcomeVerdict {
+  success: boolean;
+  error: string | undefined;
+  failure: FailureCause | undefined;
+  observations: string[];
+}
+
+/**
+ * 轮成败判定链（collectOutcome 判定段单点）：
+ *   ① 真实失败事实（预算事实位 / 收尾边沿停因分类）最先裁决；
+ *   ②-A 被接管轮：回执层成功，无执行、无失败、无停因——不写 FailureCause；
+ *   ②-B [F-1 退役为 observations] 宣称成功但无结构化产出 → agent.no_deliverable
+ *      （诚实失败），归因摘要进 observations（不再产出 schema_deterministic 假死因）。
+ */
+function resolveOutcomeVerdict(
+  args: CollectResultArgs,
+  toolCalls: ReturnType<typeof getAllToolCalls>,
+  parsedOutput: unknown,
+): OutcomeVerdict {
   let success = args.success;
   let error = args.error;
   const observations: string[] = [];
@@ -592,56 +661,39 @@ export function collectOutcome(
   // 产点的事实位在场时，轮不得以 success 落账）。
   if (args.turnBudgetExhausted === true) success = false;
   if (!success) {
-    // ① 真实失败事实：分类只从收尾边沿结构化事实产出（一次产出，下游只读）。
-    // 分类码表只在错误停因形态读取（低频路径直读 ext-config——aborted/预算支不消费
-    // 规则，零读盘）。
-    failure = classifyFailureCause({
-      ...(args.terminalError !== undefined ? { terminalError: args.terminalError } : {}),
-      ...(args.turnBudgetExhausted === true ? { turnBudgetExhausted: true } : {}),
-      // [§3.3.9/UC-10] limiter 耗尽事实（{used, limit}）→ cause.budget。
-      ...(args.turnBudget !== undefined ? { turnBudget: args.turnBudget } : {}),
-      ...(args.terminalError?.stopReason === "error"
-        ? { retryRules: loadRetryRulesForClassification() }
-        : {}),
-    });
+    // 真实失败事实：分类只从收尾边沿结构化事实产出（一次产出，下游只读）。
+    failure = classifyFailureCause(buildFailureClassificationInput(args));
   } else if (args.promptHandledNoRun === true) {
-    // ②-A 被接管轮：回执层成功，无执行、无失败、无停因——不写 FailureCause。
+    // 被接管轮（见 ②-A 注）
   } else if (args.schemaExpected === true && parsedOutput === undefined) {
-    // ②-B [F-1 退役为 observations] 宣称成功但无结构化产出 → agent.no_deliverable
-    //（诚实失败），归因摘要进 observations（不再产出 schema_deterministic 假死因）。
     success = false;
     const detail = describeMissingParsedOutput(toolCalls) ?? "structured output expected but absent";
     error = detail;
     failure = { class: "agent", kind: "no_deliverable", retryable: false, raw: detail };
     observations.push(detail);
   }
+  return { success, error, failure, observations };
+}
+
+/** classifyFailureCause 输入装配（条件 spread 单点）。分类码表只在错误停因形态读取（低频路径直读 ext-config——aborted/预算支不消费规则，零读盘）。 */
+function buildFailureClassificationInput(args: CollectResultArgs): FailureCauseInput {
   return {
-    content: getFullText(record),
-    turns: record.turnCount,
-    durationMs: Date.now() - args.startTime,
-    success,
-    error,
-    sessionId: args.sessionId,
-    sessionFile: args.sessionFile,
-    toolCalls,
-    parsedOutput,
-    usage: aggregateUsageDelta(record, args.finalAttemptTurnBase),
-    // [D5-③ 改轨] failureKind 仅引擎送达错误码前缀保留确定性分诊（"unknown" =
-    // 结构化码事实非文案启发）；子串分诊退役，失败分类由 failure 承载。
-    failureKind:
-      error !== undefined && isEngineSpawnDeliveryErrorMsg(error) ? "unknown" : undefined,
-    // [§3.3.1/§3.3.3] 引擎停因原值：有收尾边沿事实用事实；被接管轮无停因（缺省）；
-    // 成功收尾轮 = stop；其余失败形态无停因事实不产推断（缺省）。
-    ...(args.terminalError !== undefined
-      ? { engineStopReason: args.terminalError.stopReason }
-      : success && args.promptHandledNoRun !== true
-        ? { engineStopReason: "stop" as const }
-        : {}),
-    ...(failure !== undefined ? { failure } : {}),
-    ...(args.promptHandledNoRun === true ? { promptDisposition: "handled" as const } : {}),
-    ...(observations.length > 0 ? { observations } : {}),
-    ...(args.retryAttempts !== undefined && args.retryAttempts > 0
-      ? { retryAttempts: args.retryAttempts }
+    ...(args.terminalError !== undefined ? { terminalError: args.terminalError } : {}),
+    ...(args.turnBudgetExhausted === true ? { turnBudgetExhausted: true } : {}),
+    // [§3.3.9/UC-10] limiter 耗尽事实（{used, limit}）→ cause.budget。
+    ...(args.turnBudget !== undefined ? { turnBudget: args.turnBudget } : {}),
+    ...(args.terminalError?.stopReason === "error"
+      ? { retryRules: loadRetryRulesForClassification() }
       : {}),
   };
+}
+
+/** engineStopReason 派生（条件 spread 单点；undefined = 不落该字段）。 */
+function deriveEngineStopReason(
+  args: CollectResultArgs,
+  success: boolean,
+): { engineStopReason?: "stop" | "error" | "aborted" } | Record<string, never> {
+  if (args.terminalError !== undefined) return { engineStopReason: args.terminalError.stopReason };
+  if (success && args.promptHandledNoRun !== true) return { engineStopReason: "stop" as const };
+  return {};
 }

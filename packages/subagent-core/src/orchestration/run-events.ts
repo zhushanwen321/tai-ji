@@ -1355,44 +1355,60 @@ export function foldRunEventCheckpoint(
     try {
       const { state } = transition(checkpoint.state, event);
       const { asks, phases } = applyAskFoldEvent(checkpoint.asks, checkpoint.phases, event);
-      checkpoint = {
+      checkpoint = advanceSkeletonFields(
+        checkpoint,
+        event,
         state,
-        lastSeq: typeof seq === "number" ? seq : checkpoint.lastSeq,
-        // 骨架半边（[W2 D7]）：状态机转移合法才推进——坏帧行整体不写，骨架与
-        // 状态同停在最近一致态。argsSummary 为写侧恒写载荷的透传（[可视化 U1，
-        // 设计 §3.3-D12]；旧格式行缺失即 undefined，读取面放行）。
-        created:
-          event.type === "run-created"
-            ? { runId: event.runId, workflowName: event.workflowName, argsSummary: event.argsSummary, ts: event.ts }
-            : checkpoint.created,
+        typeof seq === "number" ? seq : checkpoint.lastSeq,
         asks,
         phases,
-        interrupted:
-          event.type === "run-interrupted"
-            ? { errorCode: event.errorCode, reason: event.reason, ts: event.ts }
-            : checkpoint.interrupted,
-        resumed:
-          event.type === "run-resumed"
-            ? { reason: event.reason, host: event.host, ts: event.ts }
-            : checkpoint.resumed,
-        runSettled:
-          event.type === "run-settled"
-            ? {
-              outcome: event.outcome,
-              errorCode: event.errorCode,
-              reason: event.reason,
-              ts: event.ts,
-              ...(event.failedMembers !== undefined ? { failedMembers: event.failedMembers } : {}),
-              ...(event.partialMembers !== undefined ? { partialMembers: event.partialMembers } : {}),
-            }
-            : checkpoint.runSettled,
-      };
+      );
     } catch (err) {
       onBrokenFrame(err, event.type);
       break;
     }
   }
   return checkpoint;
+}
+
+/** 骨架半边推进（[W2 D7]）：created/interrupted/resumed/runSettled 各自只在对应帧写、其余帧保持既有值（骨架与状态同停在最近一致态）；argsSummary 为写侧恒写载荷的透传（[可视化 U1，设计 §3.3-D12]；旧格式行缺失即 undefined，读取面放行）。 */
+function advanceSkeletonFields(
+  checkpoint: RunEventFoldCheckpoint,
+  event: WorkflowRunEvent,
+  state: RunEventFoldCheckpoint["state"],
+  lastSeq: number,
+  asks: RunEventFoldCheckpoint["asks"],
+  phases: RunEventFoldCheckpoint["phases"],
+): RunEventFoldCheckpoint {
+  return {
+    state,
+    lastSeq,
+    created:
+      event.type === "run-created"
+        ? { runId: event.runId, workflowName: event.workflowName, argsSummary: event.argsSummary, ts: event.ts }
+        : checkpoint.created,
+    asks,
+    phases,
+    interrupted:
+      event.type === "run-interrupted"
+        ? { errorCode: event.errorCode, reason: event.reason, ts: event.ts }
+        : checkpoint.interrupted,
+    resumed:
+      event.type === "run-resumed"
+        ? { reason: event.reason, host: event.host, ts: event.ts }
+        : checkpoint.resumed,
+    runSettled:
+      event.type === "run-settled"
+        ? {
+          outcome: event.outcome,
+          errorCode: event.errorCode,
+          reason: event.reason,
+          ts: event.ts,
+          ...(event.failedMembers !== undefined ? { failedMembers: event.failedMembers } : {}),
+          ...(event.partialMembers !== undefined ? { partialMembers: event.partialMembers } : {}),
+        }
+        : checkpoint.runSettled,
+  };
 }
 
 /**

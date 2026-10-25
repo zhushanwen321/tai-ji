@@ -96,41 +96,52 @@ function collectMatchErrors(match: unknown, label: string): string[] {
 			errors.push(`${at} 必须是对象，请重新编辑该匹配条件`);
 			continue;
 		}
-		if (item["kind"] === "pattern") {
-			const pattern = item["pattern"];
-			if (!strWithin(pattern, PATTERN_MAX_LEN)) {
-				errors.push(`${at}（正则）为空或超过 ${PATTERN_MAX_LEN} 字符，请缩短正则表达式`);
-				continue;
-			}
-			if (isDangerousRetryPattern(pattern)) {
-				errors.push(`${at}（正则）包含嵌套量词等高回溯构造，存在卡死风险，请简化正则`);
-				continue;
-			}
-			try {
-				new RegExp(pattern, "i");
-			} catch {
-				errors.push(`${at}（正则）语法无效，请修正后保存`);
-			}
-			continue;
-		}
-		if (item["kind"] === "jsonPath") {
-			const path = item["path"];
-			const operator = item["operator"];
-			const value = item["value"];
-			if (!strWithin(path, JSON_PATH_MAX_LEN) || /\s/.test(path)) {
-				errors.push(`${at}（JSON 路径）为空、超过 ${JSON_PATH_MAX_LEN} 字符或含空白，请填写如 error.code 的点路径`);
-				continue;
-			}
-			if (typeof operator !== "string" || !OPERATORS.includes(operator)) {
-				errors.push(`${at}（JSON 路径）比较方式必须是 equals / contains / exists 之一`);
-				continue;
-			}
-			if (operator !== "exists" && !strWithin(value, MATCH_VALUE_MAX_LEN)) {
-				errors.push(`${at}（JSON 路径）比较值不能为空且不超过 ${MATCH_VALUE_MAX_LEN} 字符`);
-			}
-			continue;
-		}
-		errors.push(`${at} 匹配通道必须是 pattern 或 jsonPath，请重新选择匹配方式`);
+		errors.push(...collectOneMatchErrors(item, at));
+	}
+	return errors;
+}
+
+/** 单条匹配条件校验（按 kind 双通道分发；未知通道报错）。 */
+function collectOneMatchErrors(item: Record<string, unknown>, at: string): string[] {
+	if (item["kind"] === "pattern") return collectPatternMatchErrors(item, at);
+	if (item["kind"] === "jsonPath") return collectJsonPathMatchErrors(item, at);
+	return [`${at} 匹配通道必须是 pattern 或 jsonPath，请重新选择匹配方式`];
+}
+
+/** pattern 通道校验（长度上限 → 危险构造 → 语法有效性，逐项收集）。 */
+function collectPatternMatchErrors(item: Record<string, unknown>, at: string): string[] {
+	const errors: string[] = [];
+	const pattern = item["pattern"];
+	if (!strWithin(pattern, PATTERN_MAX_LEN)) {
+		errors.push(`${at}（正则）为空或超过 ${PATTERN_MAX_LEN} 字符，请缩短正则表达式`);
+		return errors;
+	}
+	if (isDangerousRetryPattern(pattern)) {
+		errors.push(`${at}（正则）包含嵌套量词等高回溯构造，存在卡死风险，请简化正则`);
+		return errors;
+	}
+	try {
+		new RegExp(pattern as string, "i");
+	} catch {
+		errors.push(`${at}（正则）语法无效，请修正后保存`);
+	}
+	return errors;
+}
+
+/** jsonPath 通道校验（点路径形态 → 比较方式词表 → 比较值非 exists 必填）。 */
+function collectJsonPathMatchErrors(item: Record<string, unknown>, at: string): string[] {
+	const errors: string[] = [];
+	const path = item["path"];
+	const operator = item["operator"];
+	const value = item["value"];
+	if (!strWithin(path, JSON_PATH_MAX_LEN) || /\s/.test(path)) {
+		return [`${at}（JSON 路径）为空、超过 ${JSON_PATH_MAX_LEN} 字符或含空白，请填写如 error.code 的点路径`];
+	}
+	if (typeof operator !== "string" || !OPERATORS.includes(operator)) {
+		return [`${at}（JSON 路径）比较方式必须是 equals / contains / exists 之一`];
+	}
+	if (operator !== "exists" && !strWithin(value, MATCH_VALUE_MAX_LEN)) {
+		errors.push(`${at}（JSON 路径）比较值不能为空且不超过 ${MATCH_VALUE_MAX_LEN} 字符`);
 	}
 	return errors;
 }
@@ -166,8 +177,18 @@ export function validateRetryRuleFields(rule: unknown): RetryRulesValidationResu
 	if (!isRecord(rule)) {
 		return { ok: false, errors: [`重试规则必须是对象: ${JSON.stringify(rule) ?? String(rule)}`] };
 	}
+	const errors = [
+		...collectRuleHeaderErrors(rule),
+		...collectMatchErrors(rule["match"], "匹配条件"),
+		...collectRuleOptionalFieldErrors(rule),
+	];
+	return errors.length > 0 ? { ok: false, errors } : { ok: true };
+}
+
+/** 头字段校验（id / name / verdict / class / kind / source，逐项收集不短路）。 */
+function collectRuleHeaderErrors(rule: Record<string, unknown>): string[] {
 	const errors: string[] = [];
-	const { id, name, verdict, match, class: failureClass, source } = rule;
+	const { id, name, verdict, class: failureClass, source } = rule;
 	if (!strWithin(id, ID_MAX_LEN) || /\s/.test(id)) {
 		errors.push(`规则 ID 为空、超过 ${ID_MAX_LEN} 字符或含空白，请填写如 zhipu-1302 的短标识`);
 	}
@@ -184,7 +205,12 @@ export function validateRetryRuleFields(rule: unknown): RetryRulesValidationResu
 	if (typeof source !== "string" || !SOURCES.includes(source)) {
 		errors.push(`规则出处（source）必须是 custom / remote / builtin 之一: ${JSON.stringify(source) ?? String(source)}`);
 	}
-	errors.push(...collectMatchErrors(match, "匹配条件"));
+	return errors;
+}
+
+/** 可选字段校验（httpStatusClass / waitHint，提供才校验）。 */
+function collectRuleOptionalFieldErrors(rule: Record<string, unknown>): string[] {
+	const errors: string[] = [];
 	if (rule["httpStatusClass"] !== undefined) {
 		const c = rule["httpStatusClass"];
 		if (typeof c !== "number" || !Number.isInteger(c) || c < HTTP_STATUS_CLASS_MIN || c > HTTP_STATUS_CLASS_MAX) {
@@ -194,7 +220,7 @@ export function validateRetryRuleFields(rule: unknown): RetryRulesValidationResu
 	if (rule["waitHint"] !== undefined && !strWithin(rule["waitHint"], WAIT_HINT_MAX_LEN)) {
 		errors.push(`等待提示为空或超过 ${WAIT_HINT_MAX_LEN} 字符，请留空或填写简短提示`);
 	}
-	return errors.length > 0 ? { ok: false, errors } : { ok: true };
+	return errors;
 }
 
 function validateRuleList(rules: unknown, label: string): string[] {

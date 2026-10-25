@@ -161,25 +161,31 @@ export function partialMembersFromScriptResult(scriptResult: unknown): PartialMe
   }
   const reports: PartialMemberReport[] = [];
   for (const item of raw) {
-    const missing = typeof item === "object" && item !== null
-      ? (item as { missing?: unknown }).missing
-      : undefined;
-    const taskIndex = typeof item === "object" && item !== null
-      ? (item as { taskIndex?: unknown }).taskIndex
-      : undefined;
-    if (
-      typeof taskIndex !== "number" || !Number.isInteger(taskIndex) || taskIndex < 0 ||
-      !Array.isArray(missing) || missing.some((m) => typeof m !== "string")
-    ) {
+    const report = parsePartialMemberEntry(item);
+    if (report === undefined) {
       logger.warn(
         `[workflow] scriptResult.partialMembers entry ignored (malformed): ` +
           `${JSON.stringify(item)?.slice(0, PARTIAL_MEMBER_JSON_PREVIEW_MAX_CHARS)}`,
       );
       continue;
     }
-    reports.push({ taskIndex, missing: missing as string[] });
+    reports.push(report);
   }
   return reports.length > 0 ? reports : undefined;
+}
+
+/** 单条部分交付条目校验（taskIndex 非负整数 + missing 字符串数组；畸形返回 undefined 由调用方 warn 留痕丢弃）。 */
+function parsePartialMemberEntry(item: unknown): PartialMemberReport | undefined {
+  if (typeof item !== "object" || item === null) return undefined;
+  const taskIndex = (item as { taskIndex?: unknown }).taskIndex;
+  const missing = (item as { missing?: unknown }).missing;
+  if (
+    typeof taskIndex !== "number" || !Number.isInteger(taskIndex) || taskIndex < 0 ||
+    !Array.isArray(missing) || missing.some((m) => typeof m !== "string")
+  ) {
+    return undefined;
+  }
+  return { taskIndex, missing: missing as string[] };
 }
 
 /**

@@ -1158,26 +1158,41 @@ function isRoundTerminalStopReason(v: string | undefined): v is (typeof ROUND_TE
 function hydrateRoundFactsAndError(record: ExecutionRecord, fold: RecordEventFoldState): void {
   const idle = fold.roundIdle;
   if (record.lastRound === undefined && idle !== undefined) {
-    const facts: RoundFacts = {
-      ...(isRoundTerminalStopReason(idle.engineStopReason) ? { engineStopReason: idle.engineStopReason } : {}),
-      ...(idle.failure !== undefined ? { failure: idle.failure } : {}),
-      ...(idle.promptDisposition !== undefined ? { promptDisposition: idle.promptDisposition } : {}),
-      // [F1-46] 收条轮终轮数随水合恢复（live 值下一轮会推进，回落会漂移上一轮收条）。
-      ...(idle.turns !== undefined ? { turns: idle.turns } : {}), ...(idle.stderrTeePath !== undefined ? { stderrTeePath: idle.stderrTeePath } : {}),
-      ...(idle.usage !== undefined ? { usage: idle.usage } : {}), ...(idle.retryAttempts !== undefined ? { retryAttempts: idle.retryAttempts } : {}),
-      ...(idle.observations !== undefined ? { observations: idle.observations } : {}),
-    };
+    const facts = roundFactsFromIdle(idle);
     if (Object.keys(facts).length > 0) record.lastRound = facts;
   }
-  if (record.lastError === undefined) {
-    // 最近帧带失败原文优先；最近帧无失败时回落另一收条槽（失败事实只追加不清空
-    // 的内存语义——成功收条不抹掉更早的失败原文）。
-    const newestIsSettled = fold.lastEvent?.type === "record-settled";
-    const newest = newestIsSettled ? fold.settled?.error : idle?.error;
-    const older = newestIsSettled ? idle?.error : fold.settled?.error;
-    const errorFact = newest ?? older;
-    if (errorFact !== undefined) record.lastError = errorFact;
-  }
+  hydrateLastError(record, fold, idle);
+}
+
+/** fold.roundIdle 收条帧 → record 内 RoundFacts（只收「派生不出来的事实」字段集，见 hydrateRoundFactsAndError 头注）。 */
+function roundFactsFromIdle(
+  idle: NonNullable<RecordEventFoldState["roundIdle"]>,
+): RoundFacts {
+  return {
+    ...(isRoundTerminalStopReason(idle.engineStopReason) ? { engineStopReason: idle.engineStopReason } : {}),
+    ...(idle.failure !== undefined ? { failure: idle.failure } : {}),
+    ...(idle.promptDisposition !== undefined ? { promptDisposition: idle.promptDisposition } : {}),
+    // [F1-46] 收条轮终轮数随水合恢复（live 值下一轮会推进，回落会漂移上一轮收条）。
+    ...(idle.turns !== undefined ? { turns: idle.turns } : {}),
+    ...(idle.stderrTeePath !== undefined ? { stderrTeePath: idle.stderrTeePath } : {}),
+    ...(idle.usage !== undefined ? { usage: idle.usage } : {}),
+    ...(idle.retryAttempts !== undefined ? { retryAttempts: idle.retryAttempts } : {}),
+    ...(idle.observations !== undefined ? { observations: idle.observations } : {}),
+  };
+}
+
+/** lastError 水合（缺省回填，非空不覆盖）：最近帧带失败原文优先；最近帧无失败时回落另一收条槽（失败事实只追加不清空的内存语义——成功收条不抹掉更早的失败原文）。 */
+function hydrateLastError(
+  record: ExecutionRecord,
+  fold: RecordEventFoldState,
+  idle: RecordEventFoldState["roundIdle"],
+): void {
+  if (record.lastError !== undefined) return;
+  const newestIsSettled = fold.lastEvent?.type === "record-settled";
+  const newest = newestIsSettled ? fold.settled?.error : idle?.error;
+  const older = newestIsSettled ? idle?.error : fold.settled?.error;
+  const errorFact = newest ?? older;
+  if (errorFact !== undefined) record.lastError = errorFact;
 }
 
 export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordEventFoldState | undefined): void {

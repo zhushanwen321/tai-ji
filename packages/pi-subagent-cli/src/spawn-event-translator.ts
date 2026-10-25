@@ -389,38 +389,55 @@ function accumulateMessageEnd(
   agentEvent: AgentEventSink,
 ): void {
   const msg = raw.message;
-  if (msg?.usage) {
-    const { cost: costObj } = msg.usage;
-    const usage = {
+  emitMessageEndUsage(msg, agentEvent);
+  accumulateStopReasonFact(msg, edge);
+  advancePendingErrorFact(raw, msg, edge, agentEvent);
+}
+
+/** message_end 帧 message 形态（SdkEvent 判别联合的 message 槽，optional）。 */
+type SdkMessagePayload = SdkEvent["message"];
+
+/** usage 折算发射（缺省 0 归一 + cost.total 在场才携带）。 */
+function emitMessageEndUsage(msg: SdkMessagePayload, agentEvent: AgentEventSink): void {
+  if (msg?.usage === undefined) return;
+  const { cost: costObj } = msg.usage;
+  agentEvent({
+    type: "message_end",
+    usage: {
       input: msg.usage.input ?? 0,
       output: msg.usage.output ?? 0,
       cacheRead: msg.usage.cacheRead ?? 0,
       cacheWrite: msg.usage.cacheWrite ?? 0,
       ...(costObj?.total !== undefined ? { cost: costObj.total } : {}),
-    };
-    agentEvent({ type: "message_end", usage });
-  }
+    },
+  });
+}
+
+/** 停因帧事实累积（[§3.3.2 结构化输入停止丢弃 + 同帧绑定]：停因词/原文/rawStopReason/diagnostics 原样留存随收尾边沿透传——diagnostics 是分类的结构化源（classificationMatchInputs 消费）；rawStopReason 仅留证不参与分类。结构化输入与停因事实同帧绑定（帧携带则记、帧不携带则清 = undefined）——收尾边沿的结构化事实恒属「最后一条停因帧」，auto_retry 重跑后再次失败的收尾边沿不会携带先前失败尝试的 diagnostics（死因错标防线）。）。 */
+function accumulateStopReasonFact(msg: SdkMessagePayload, edge: ClosingEdgeState): void {
   const stopReason = msg?.stopReason;
-  if (stopReason !== undefined) {
-    edge.lastStopReason = stopReason;
-    edge.lastErrorMessage = msg?.errorMessage;
-    // [§3.3.2 结构化输入停止丢弃 + 同帧绑定] 原样留存随收尾边沿事实透传：
-    // diagnostics 是分类的结构化源（classificationMatchInputs 消费）；rawStopReason
-    // 仅留证，不参与分类。结构化输入与停因事实同帧绑定（帧携带则记、帧不携带则清
-    // = undefined）——收尾边沿的结构化事实恒属「最后一条停因帧」，auto_retry 重跑
-    // 后再次失败的收尾边沿不会携带先前失败尝试的 diagnostics（死因错标防线）。
-    edge.rawStopReason = msg?.rawStopReason;
-    edge.lastDiagnostics = msg?.diagnostics;
+  if (stopReason === undefined) return;
+  edge.lastStopReason = stopReason;
+  edge.lastErrorMessage = msg?.errorMessage;
+  edge.rawStopReason = msg?.rawStopReason;
+  edge.lastDiagnostics = msg?.diagnostics;
+}
+
+/** pendingErrorFact 边沿推进：error/aborted 落事实 + 发 error 事件；非 error 停因 = 此前的失败尝试已被重试恢复（P5：auto_retry 重跑成功）——未消费 error 事实清除，收尾边沿不再据旧失败判终。 */
+function advancePendingErrorFact(
+  raw: SdkEvent,
+  msg: SdkMessagePayload,
+  edge: ClosingEdgeState,
+  agentEvent: AgentEventSink,
+): void {
+  const stopReason = msg?.stopReason;
+  if (stopReason !== "error" && stopReason !== "aborted") {
+    if (stopReason !== undefined) edge.pendingErrorFact = undefined;
+    return;
   }
-  if (stopReason === "error" || stopReason === "aborted") {
-    const errMsg = msg?.errorMessage ?? raw.reason ?? stopReason;
-    edge.pendingErrorFact = errMsg;
-    agentEvent({ type: "error", message: errMsg });
-  } else if (stopReason !== undefined) {
-    // 非 error 停因到达 = 此前的失败尝试已被重试恢复（P5：auto_retry 重跑成功）——
-    // 未消费 error 事实清除，收尾边沿不再据旧失败判终。
-    edge.pendingErrorFact = undefined;
-  }
+  const errMsg = msg?.errorMessage ?? raw.reason ?? stopReason;
+  edge.pendingErrorFact = errMsg;
+  agentEvent({ type: "error", message: errMsg });
 }
 
 /**

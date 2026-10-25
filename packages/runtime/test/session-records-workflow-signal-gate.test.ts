@@ -113,10 +113,13 @@ describe('SessionRecords workflowUpdate 发射链路 — 信号发出时数据�
       }),
     } as unknown as IMessageBus
     const sessionFilePath = join(tempDir, 'main.jsonl') // 冷扫描按缺文件空条目处理（pi 延迟写入窗口同形态）
+    // mtime 是文件属性：文件未写入时跨扫描稳定（真实 scanSessions = fstat）。每次调用
+    // 现取 Date.now() 会模拟出「每次 stat mtime 都变」的不可能形态，触发查询通道 mtime
+    // 对账（session-records rebuildProjectionIfSourceChanged）每查必重建投影——测试域
+    // 内会话文件从未变化，必须返回同一 mtime。
+    const scanTarget = { id: 'sid-gate', filePath: sessionFilePath, cwd: tempDir, timestamp: new Date().toISOString(), name: null, lastModified: Date.now(), size: 0, outcome: null }
     const sessionStore = {
-      scanSessions: () => [
-        { id: 'sid-gate', filePath: sessionFilePath, cwd: tempDir, timestamp: new Date().toISOString(), name: null, lastModified: Date.now(), size: 0, outcome: null },
-      ],
+      scanSessions: () => [scanTarget],
       invalidateScanCache: () => {},
       refreshAll: () => {},
     } as unknown as ISessionStore
