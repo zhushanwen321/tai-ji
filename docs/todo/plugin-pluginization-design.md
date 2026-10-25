@@ -324,7 +324,141 @@ interface TreeItem {
 
 ---
 
-## 7 与既有文档的关系
+## 7 包整合与多挂载点能力（2026-10-24 追加，用户裁决采纳）
+
+本节回答两个连带问题：① 22 个 pi extension 包要不要整合；② 一个 plugin 能否声明多个同类挂载点（多个 drawer tab / 多个 composer ICON）。
+
+### 7.1 结论先行
+
+| 问题 | 结论 |
+|---|---|
+| 是否大面积整合 extension | **不整合**。功能耦合只有 4 条边，其中 3 条是测试引用或 `Symbol.for` 跨包槽（设计上刻意不共享模块） |
+| 是否可包内配置禁用能力 | pi 侧**已可行**（`pi.setActiveTools` 有先例）；taiji plugin 侧需新增抽象。但**不构成整合理由**——会造出包内 if 堆积 |
+| 微型包整合 | **只并 2 个**：`agent-ext` + `msg-id-mapper`（同 group 同 tier 同子域）。原方案的 cache-probe 不能并（见 7.3） |
+| 一个 plugin 多 composer ICON | **已支持，无需改动** |
+| 一个 plugin 多 drawer tab | **机制已备，容器不肯读**——需补挂载点（GAP-2 具象化） |
+
+### 7.2 为什么不整合：实测证据
+
+**共享包被误读为耦合**。`extension-logger` 被 21/22 个包依赖、`ext-guards` 被 16/22 依赖——这是**横切基础设施**，不是功能耦合。合并它们等于把日志/守卫实现散进各包。
+
+**真实功能耦合只有 4 条边**：
+
+| 边 | 性质 | 是否该合并 |
+|---|---|---|
+| `plan → goal` | 仅 `import type { GoalInitFn }` + 一行 `Symbol.for('@zhushanwen/pi-goal.goalInit')` 跨包槽；`execution-notice.ts:37` 注释明写「两侧不共享运行时模块」 | **不该**。这是用约定替代依赖的标准做法 |
+| `base-tool-enhance → pending-notifications` | 运行时通路的 pi 引用刷新 | 不并（分属不同职责，且都在 infrastructure） |
+| `subagent-workflow → pending-notifications` | 仅测试文件引用 | **不该** |
+| `subagent-workflow → structured-output` | 仅测试注释提及 | **不该** |
+
+**规模极度不均**（实测生产行数，排除测试）：
+
+| 包 | 行数 | 包 | 行数 |
+|---|---:|---|---:|
+| `subagent-workflow` | 15501 | `ask-user` | 2261 |
+| `session-reader` | 9897 | `canvas` | 1564 |
+| `permission` | 6204 | `smart-context` | 1572 |
+| `scheduler` | 5401 | `todo` | 1326 |
+| `structured-output` | 4426 | `rename-session` | 1276 |
+| `goal` | 3825 | `session-manager` | 1079 |
+| `plan` | 3402 | `network-proxy` | 1014 |
+| `base-tool-enhance` | 2918 | `pending-notifications` | 948 |
+| | | `provider-live-sync` | 859 |
+| | | `system-prompt-trace` | 573 |
+| | | `system-prompt` | 495 |
+| | | `cache-probe` | 302 |
+| | | `msg-id-mapper` | 144 |
+| | | `agent-ext` | 84 |
+
+**硬约束：强制清单分层会被破坏**。`mandatory-extensions.json` 两层：infrastructure（8 个，不可禁）/ feature（13 个，可禁）。按「功能相关性」合并（如 todo+goal+plan）会**跨层合并**，导致无法单独禁用其中一个。
+
+**判据**（取代「有没有共用代码」）：
+
+1. 能否独立禁用——用户想关 A 留 B，合并后做不到
+2. 是否共享跨包状态——用 `Symbol.for()` 跨包槽说明设计上刻意不共享模块
+3. 生命周期是否一致——permission 的审批与 todo 的列表完全无关，只是都挂 `on()`
+
+### 7.3 可合并清单（实测后修正）
+
+原初稿列了 3 个微型包，实测发现 **`cache-probe` 不能并入 taiji 组**——它 `taiji.role=universal` 且不在 `mandatory-extensions.json`；而 `role=taiji` 的包必须在该清单里（`scripts/check-extension-dependencies.mjs:161-163` 强制）。并组会直接违反分组约束。
+
+**最终只并 1 组**：
+
+| 动作 | 内容 | 收益 | 约束核对 |
+|---|---|---|---|
+| **合并** | `taiji/agent-ext`（84 行）+ `taiji/msg-id-mapper`（144 行）→ `taiji/host-internals`（约 230 行） | 22 包 → 21 包 | 同 group（taiji）、同 tier（都是 infrastructure）、同子域（都是「pi 侧 taiji 内部协议设施」）、无互相依赖 |
+
+**合并需同批改的引用点**（漏改即断）：
+
+| 引用位置 | 内容 |
+|---|---|
+| `packages/shared/src/mandatory-extensions.json:53,63` | 两条清单条目 → 一条 |
+| `scripts/check-publish-surface.mjs:79-80` | 包名白名单两条 → 一条 |
+| `packages/shared/src/pi-preset.ts:20` | 注释举例里的包名 |
+| `packages/runtime/src/infra/pi/entry-tree-builder.ts:25,56,58,70` | 4 处注释引用 `pi-msg-id-mapper`（customType 契约说明） |
+| `packages/core/src/domain/chat/store.ts:680` | 注释引用包名 |
+| `extension-dependencies.json` | 依赖登记表重生成 |
+
+**明确不并（即使看起来相关）**：
+
+| 包对 | 不并理由 |
+|---|---|
+| `system-prompt` + `system-prompt-trace` | **跨 tier**（前者 infrastructure 不可禁、后者 feature 可禁）。合并后无法单独禁用 trace 留痕 |
+| `todo` + `goal` + `plan` | `plan→goal` 是刻意的 `Symbol.for()` 跨包槽；todo 与二者零耦合；且三者都属 feature 但独立可禁 |
+| `ask-user` + `permission` | 都属「拦截/交互」类但职责正交（提问 vs 审批），合并后 `on()` handler 会互相干扰 |
+| `session-reader` / `structured-output` 等大包 | 9900 / 4400 行，内部已有清晰子域；`structured-output` 还有独立跨包契约测试 |
+| `cache-probe` | role/tier 不匹配（见上）；且它是零影响诊断探针，与 taiji 集成包职责无关 |
+
+### 7.4 包内能力开关：能做什么、不能替代什么
+
+**pi 侧（可行，有先例）**：
+
+```ts
+// pi SDK 真实能力（dist/core/extensions/types.d.ts:1236-1246）
+getActiveTools(): string[]
+getAllTools(): ToolInfo[]
+setActiveTools(toolNames: string[]): void
+```
+
+`ToolExposure` 五档中 `hidden` = 注册但不可达（激活也无效）。现有先例两处：
+
+| 先例 | 位置 | 做法 |
+|---|---|---|
+| ask-user 条件禁用 | `ask-user/src/index.ts:51` | `pi.setActiveTools(pi.getActiveTools().filter(n => n !== 'ask_user'))` |
+| plan 模式工具收拢 | `plan/src/state.ts:237-251` | `getActiveTools()` 快照 → 进入时 `setActiveTools(PLAN_MODE_TOOLS)` → 退出恢复 |
+
+**taiji plugin 侧（需新增抽象）**：`contributes` 是 manifest 静态声明，现在只有整包开关（`disabled-packages.json`）。运行时撤回机制存在但不统一——`views.update(id, [], …)` 推空树 / `updateHeaderAction(id, {hidden:true})` / `commands.unregister`。若要做「单条贡献可关」，需引入统一的 capability 开关层。
+
+**为什么不因此整合**：包内 if 堆积与本设计 §2 要消除的「固定特殊实现」是同一种坏味道，只是从宿主搬到了 extension 内部。
+
+### 7.5 多挂载点能力矩阵（实测）
+
+| 挂载点 | 一个 plugin 能声明几个 | 机制现状 | 缺什么 |
+|---|---|---|---|
+| `panel.header`（headerAction，composer ICON） | **任意多个** | `headerActions?: [...]` 数组；`ContributionRegistry` key = `(pluginId, type, contributionId)` 不互相覆盖；渲染端 `buttons` computed 循环；`order` 排序 | **无** |
+| `composer.toolbar` | 任意多个 view | `views?: [...]` 数组；`ViewHost` 按 viewId 渲染 | **无**（如要多个 tool 条需各自 viewId） |
+| `sidebar.tab` | 任意多个 view | 已注册；`getViews` 过滤 `placement === 'sidebar.tab'` 后 map 全部 | **`icon` 字段缺失**——`PluginContributesView` 无 `icon`，`useExtensionHostBridge.ts:447` 硬编码 `icon: undefined` |
+| `drawer.tab` | **0（不支持）** | 挂载点未注册；`RightDrawerTab` 是 core 写死联合类型（8 员）；`PanelContainer.vue:146-176` 是 8 分支 `v-else-if` | **挂载点注册 + 类型去联合化 + 分支改 ViewHost**（本文阶段 1.3） |
+| `overlay.tab` | **0（不支持）** | 同上；`OverlayTab` 三员写死 | 同上 |
+| `settings.section` | **0（不支持）** | `SettingsModal.vue` `navGroups` 硬编码 17 项 | 同上 |
+
+**关键判断**：用户问的「一个 plugin 多个 drawer tab / 多个 ICON」——**ICON 已支持，drawer tab 卡在容器层而非数量层**。`views` 契约本来就是数组，`ContributionRegistry` 本来就支持一个 plugin 多 view，`ViewHost` 本来就能按 viewId 渲染任意树。**缺的只是「drawer 容器肯不肯读注册表」**。
+
+**顺带发现的真实缺口**：`PluginContributesView` 缺 `icon` / `order` / `emptyState` 三个字段（`packages/plugin-sdk/src/types.ts` 与 core 版都没有）。这正是 §3.2 `ContentSlotDeclaration` 要补的——补上后 sidebar / drawer / overlay / settings 四处 tab 才能有自己的图标与排序。
+
+### 7.6 落地顺序修正
+
+原 §4 阶段划分不变，但在**阶段 1.3 前插入一个前置**：
+
+| 新步骤 | 内容 | 为什么在前 |
+|---|---|---|
+| **1.3-pre** | `PluginContributesView` 补 `icon` / `order` / `emptyState`（两版契约同步） | 挂载点接上后若无图标字段，tab 全是默认图标——先补字段再接容器，避免改两遍 |
+| **1.3** | `ContentSlotRegistry` + 注册 `drawer.tab` / `overlay.tab` | 原计划 |
+| **阶段 5（新增，可选）** | 微型包合并 `agent-ext` + `msg-id-mapper` → `host-internals` | 与插件化主链无依赖，可作为独立清理项 |
+
+---
+
+## 8 与既有文档的关系
 
 | 文档 | 需要更新什么 |
 |---|---|
