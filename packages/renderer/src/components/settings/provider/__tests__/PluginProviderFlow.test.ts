@@ -13,7 +13,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/components/settings/provider
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import type { GuiComponent } from '@zhushanwen/extension-protocol'
@@ -487,5 +487,194 @@ describe('PluginProviderFlow U2 裁决①：离开授权段清挂载位快照分
     await flushPromises()
 
     expect(clearMountMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('PluginProviderFlow focus 直达的分支路径（focus 缺失 / update 意图）', () => {
+  it('focus 插件不在清单 → family 段错误条（focusMissing 文案），不进授权段不崩溃', async () => {
+    wrapper = mountFlow({ focus: { pluginId: 'gone-plugin', intent: 'authorize' } })
+    await flushPromises()
+    await nextTick()
+
+    const error = query('plugin-flow-error')
+    expect(error?.textContent).toContain('目标插件不在清单中')
+    expect(query('plugin-authorize-container')).toBeNull()
+    expect(pluginMock.preparePluginInstall).not.toHaveBeenCalled()
+  })
+
+  it('focus intent=update（已装家族更新入口）→ 直达确认卡（更新意图文案 + prepare 该包）', async () => {
+    wrapper = mountFlow({ focus: { pluginId: 'wool-workbuddy', intent: 'update' } })
+    await flushPromises()
+    await nextTick()
+
+    expect(pluginMock.preparePluginInstall).toHaveBeenCalledWith('@zhushanwen/plugin-wool-workbuddy')
+    const confirm = query('plugin-install-confirm')
+    expect(confirm).not.toBeNull()
+    expect(confirm?.textContent).toContain('将更新插件')
+    expect(confirm?.textContent).toContain('@zhushanwen/plugin-wool-workbuddy')
+  })
+
+  it('Dialog 内部关闭请求（update:open）→ 原样上抛（父侧 v-model:open 消费）', async () => {
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    // reka DialogRoot 的关闭请求（esc / 遮罩 / 关闭钮）→ Dialog 向上 emit → onDialogToggle 透传
+    const dialog = wrapper.findComponent({ name: 'Dialog' })
+    expect(dialog.exists()).toBe(true)
+    dialog.vm.$emit('update:open', false)
+    await nextTick()
+
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false])
+  })
+})
+
+describe('PluginProviderFlow 失败路径表（prepare/confirm/cancel/清理失败 + 通道未就绪）', () => {
+  /** 捕获 console.warn（降级可见性断言用），返回恢复函数 */
+  function spyWarn(): MockInstance {
+    return vi.spyOn(console, 'warn').mockImplementation(() => {})
+  }
+
+  it('prepare reject（下载/校验/NAMESPACE_MISMATCH）→ family 段错误条呈现 message，不进确认卡', async () => {
+    pluginMock.preparePluginInstall.mockRejectedValue(new Error('download failed'))
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    queryAll('plugin-family-card')[0].click()
+    await flushPromises()
+    await nextTick()
+
+    const error = query('plugin-flow-error')
+    expect(error?.textContent).toContain('download failed')
+    expect(query('plugin-install-confirm')).toBeNull()
+  })
+
+  it('确认提交失败（success=false）→ 确认卡错误条呈现 error 字段，停在确认停点', async () => {
+    pluginMock.confirmPluginInstall.mockResolvedValue({ success: false, error: 'activation failed: entry missing' })
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    queryAll('plugin-family-card')[0].click()
+    await flushPromises()
+    await nextTick()
+    query('plugin-install-confirm-btn')?.click()
+    await flushPromises()
+    await nextTick()
+
+    const error = query('plugin-install-error')
+    expect(error?.textContent).toContain('activation failed: entry missing')
+    // 停在确认卡（暂存保留可重试），未进入授权段
+    expect(query('plugin-install-confirm')).not.toBeNull()
+    expect(query('plugin-authorize-container')).toBeNull()
+  })
+
+  it('确认提交异常（reject）→ 确认卡错误条呈现异常 message', async () => {
+    pluginMock.confirmPluginInstall.mockRejectedValue(new Error('rpc down'))
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    queryAll('plugin-family-card')[0].click()
+    await flushPromises()
+    await nextTick()
+    query('plugin-install-confirm-btn')?.click()
+    await flushPromises()
+    await nextTick()
+
+    expect(query('plugin-install-error')?.textContent).toContain('rpc down')
+  })
+
+  it('取消清理失败 → warn 可见不阻断 UI（退回家族卡）', async () => {
+    const warn = spyWarn()
+    pluginMock.cancelPluginInstall.mockRejectedValue(new Error('cleanup failed'))
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    queryAll('plugin-family-card')[0].click()
+    await flushPromises()
+    await nextTick()
+    query('plugin-install-cancel')?.click()
+    await flushPromises()
+    await nextTick()
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('cancelPluginInstall failed'), expect.any(Error))
+    expect(queryAll('plugin-family-card')).toHaveLength(3)
+    warn.mockRestore()
+  })
+
+  it('带未确认暂存关闭对话框 + cancelPluginInstall 失败 → warn 降级不阻断复位', async () => {
+    const warn = spyWarn()
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+    queryAll('plugin-family-card')[0].click()
+    await flushPromises()
+    await nextTick()
+    expect(query('plugin-install-confirm')).not.toBeNull()
+
+    pluginMock.cancelPluginInstall.mockRejectedValue(new Error('cancel failed'))
+    await wrapper!.setProps({ open: false })
+    await flushPromises()
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('cancelPluginInstall on close failed'), expect.any(Error))
+    warn.mockRestore()
+  })
+
+  it('离开授权段清挂载位失败 → warn 降级不阻断关闭', async () => {
+    const warn = spyWarn()
+    pluginMock.clearPluginMountUi.mockRejectedValue(new Error('clear failed'))
+    wrapper = mountFlow({ focus: { pluginId: 'wool-trae', intent: 'authorize' } })
+    await flushPromises()
+    await nextTick()
+    expect(query('plugin-authorize-container')).not.toBeNull()
+
+    await wrapper!.setProps({ open: false })
+    await flushPromises()
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('clearPluginMountUi on authorize-exit failed'), expect.any(Error))
+    warn.mockRestore()
+  })
+
+  it('安装通道未就绪（port null）→ 家族卡点击呈 channelUnavailable 降级，不进确认卡', async () => {
+    // 缺省 stub 不挂安装三方法（optional 契约缺省 = 通道未就绪形态）
+    provideSettingsTransport(makeSettingsTransportStub({
+      listAvailablePlugins: pluginMock.listAvailablePlugins,
+      listPlugins: pluginMock.listPlugins,
+    }))
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+
+    queryAll('plugin-family-card')[0].click()
+    await flushPromises()
+    await nextTick()
+
+    expect(query('plugin-flow-error')?.textContent).toContain('安装通道未就绪')
+    expect(query('plugin-install-confirm')).toBeNull()
+  })
+
+  it('确认时通道失就绪（确认卡出现后 transport 切走）→ 确认点击呈 channelUnavailable', async () => {
+    wrapper = mountFlow()
+    await flushPromises()
+    await nextTick()
+    queryAll('plugin-family-card')[0].click()
+    await flushPromises()
+    await nextTick()
+    expect(query('plugin-install-confirm')).not.toBeNull()
+
+    // 确认卡在停点期间 runtime 重启/降级 → 端口收窄失败（每次点击时动态解析）
+    provideSettingsTransport(makeSettingsTransportStub({
+      listAvailablePlugins: pluginMock.listAvailablePlugins,
+      listPlugins: pluginMock.listPlugins,
+    }))
+    query('plugin-install-confirm-btn')?.click()
+    await flushPromises()
+    await nextTick()
+
+    expect(query('plugin-install-error')?.textContent).toContain('安装通道未就绪')
+    expect(pluginMock.confirmPluginInstall).not.toHaveBeenCalled()
   })
 })

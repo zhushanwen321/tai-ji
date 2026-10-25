@@ -63,6 +63,21 @@ vi.mock('@taiji/core/transport/ws-client', async (importOriginal) => {
   }
 })
 
+// mock plugin 域的 getPluginUiSnapshot（快照补拉出口）：默认转发真实实现（既有拉取用例
+// 走真实 command → send 链），用例经 pluginDomain.inject 注入受控回包——覆盖 refreshViewInScope
+// 成功分支（applyUiSnapshot 进 bus）时绕开 mock WS 的 connect 时序，回包形状即 runtime reply。
+const pluginDomain = vi.hoisted(() => ({
+  inject: null as null | ((filter: Record<string, unknown>) => Promise<unknown>),
+}))
+vi.mock('@taiji/core/transport/api/domains/plugin', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/core/transport/api/domains/plugin')>()
+  return {
+    ...actual,
+    getPluginUiSnapshot: (filter?: Record<string, unknown>) =>
+      pluginDomain.inject ? pluginDomain.inject(filter ?? {}) : actual.getPluginUiSnapshot(filter ?? {}),
+  }
+})
+
 /**
  * 模拟 bootstrap step 4+5（u6 注册收敛）：bridge 装配后不再自行触发注册，生产由 App.vue
  * onMounted 的 bootstrap 第 4/5 步执行；测试显式调用补齐该前置。两者均读
@@ -671,5 +686,61 @@ describe('插件 UI 快照拉取（ADR-0097 拉为主：connected 全量恢复 +
     const frame = snapshotCalls[0][0] as { type: string; payload: unknown }
     expect(frame.type).toBe('plugin.ui.snapshot')
     expect(frame.payload).toEqual({ mountId: 'provider.authorize', pluginId: 'plug-a', viewId: 'flow' })
+  })
+
+  it('refreshViewInScope 补拉回包 → applyUiSnapshot 进 bus（extension-widget 帧）；getViewInScope 读回缓存条目', async () => {
+    const provided = initBridge()
+    const viewSource = provided.find((p) => p.key === VIEW_HOST_SOURCE_KEY)?.value as
+      | { refreshViewInScope?: (scope: unknown, viewId: string) => void; getViewInScope?: (scope: unknown, viewId: string) => unknown }
+      | undefined
+
+    // 受控回包注入：捕获补拉 filter，返回 runtime reply 形状的快照（成功分支 → applyUiSnapshot）
+    const capturedFilters: Array<Record<string, unknown>> = []
+    pluginDomain.inject = (filter) => {
+      capturedFilters.push(filter)
+      return Promise.resolve({
+        headerActions: [],
+        views: [
+          {
+            mountId: 'provider.authorize',
+            viewId: 'flow',
+            pluginId: 'plug-a',
+            guiTree: [{ type: 'ansi-text', props: { lines: ['auth'] } }],
+            updatedAt: 1,
+          },
+        ],
+      })
+    }
+
+    const widgetFrames: Array<{ sessionId?: string; mountId?: string; viewId: string; pluginId: string }> = []
+    getExtensionBus().on('extension-widget', (e) => {
+      // applyUiSnapshot 帧形状：归属（sessionId ∨ mountId）在事件顶层，载荷在 e.widget
+      const frame = e as { sessionId?: string; mountId?: string; widget?: { viewId: string; pluginId: string } }
+      if (frame.widget) widgetFrames.push({ sessionId: frame.sessionId, mountId: frame.mountId, viewId: frame.widget.viewId, pluginId: frame.widget.pluginId })
+    })
+
+    viewSource!.refreshViewInScope!({ kind: 'global', mountId: 'provider.authorize', pluginId: 'plug-a' }, 'flow')
+    await vi.waitFor(() => {
+      expect(widgetFrames).toHaveLength(1)
+    })
+
+    // 补拉 filter 按全局域分区键组装（U2：mountId + pluginId + viewId 三元过滤）
+    expect(capturedFilters).toEqual([{ mountId: 'provider.authorize', pluginId: 'plug-a', viewId: 'flow' }])
+    expect(widgetFrames[0]).toMatchObject({ mountId: 'provider.authorize', viewId: 'flow', pluginId: 'plug-a' })
+    pluginDomain.inject = null
+
+    // 读路径真调（U2 scope 联合消费面）：会话域 scope 透传 store——先经正规通道推一条
+    // widget 帧（TC7 同款）建分区，再以 getViewInScope 反查（getView 纯透传，行级接线验证）
+    dispatchCrossSession({
+      type: 'extension:widgetGui',
+      payload: {
+        sessionId: 's1',
+        widgetKey: 'todo',
+        gui: { type: 'ansi-text', props: { lines: ['buy milk'] } },
+      },
+    })
+    await nextTick()
+    const cached = viewSource!.getViewInScope!({ kind: 'session', sessionId: 's1' }, 'todo')
+    expect(cached).toMatchObject({ viewId: 'todo' })
   })
 })
