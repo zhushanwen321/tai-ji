@@ -27,8 +27,7 @@
  *   ① 提取确认卡无渲染驱动：wool 插件只在 getAuthorizeView 被调用时推初始树，宿主
  *      renderer 无任何调用点（全仓 grep 零命中）→ 授权容器进入后呈占位空态。提取动作
  *      改以 plugin.executeCommand 驱动——与 action-bar 按钮点击完全同一命令派发通道
- *      （PluginProviderSource.createPluginActionExecutor → plugin.executeCommand），
- *      A12 计时起点 = 命令派发，终点 = 授权容器内「提取成功」卡 DOM 渲染。
+ *      （PluginProviderSource.createPluginActionExecutor → plugin.executeCommand）。
  *   ② 额度/昵称的条目行 DOM 呈现无驱动：凭据状态行（provider-plugin-status）期望
  *      { state, message } 形状，wool getStatus 返回 { status: { family, loggedIn, ... } }
  *      形状（parseStatusFields 恒 null）；详情扩展区树只在 getDetail 被调用时推送，
@@ -41,6 +40,14 @@
  *      入口；真实插件 main = src/index.ts → 激活必炸（d3-r2 实测：Sandbox: import
  *      resolves outside plugin directory）。剧本产物以根入口 shim（re-export 真实
  *      src）+ manifest main 指回根承载——插件源码零改动。
+ *   ⑤ api.events.emit 在沙箱子进程未接 plugin.event 通道（bootstrap NOT_IMPLEMENTED，
+ *      d3-r3 实测 wool-status 推送降级 warn）——D5 推补充通道断裂，「拉为主」仍可用。
+ *   ⑥ 提取结果树 DOM 不渲染：wool 插件推树 viewId='authorize'（plugin-kit views.update
+ *      首参），宿主 ViewHost 渲染 viewId='provider.authorize'（viewId=挂载位同名约定，
+ *      PluginProviderFlow AUTHORIZE_VIEW_ID）——跨仓契约错位，d3-r3 实测提取成功后
+ *      DOM 停留「加载中…」而宿主快照（viewId='authorize'）持有成功树。A12 的「结果
+ *      回显」以宿主快照持有成功相位为计时终点（runtime 数据层回显成立），DOM 呈现
+ *      断裂如实断言并登记。
  *
  * 凭据安全红线：apiKey/token 只验存在性与长度，剧本证据（日志/截图/attach）零明文凭据。
  *
@@ -155,7 +162,15 @@ fs.mkdirSync(dataDir0, { recursive: true })
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'a3a12-work-'))
 const typeboxDir = findTypeboxDir()
 
+/** 从 tgz 直读 package.json（tar -xO 到 stdout；供 packument 依赖元数据组装）。 */
+function readTgzPackageJson(tgzPath) {
+  const raw = execFileSync('tar', ['-xzOf', tgzPath, 'package/package.json'], { encoding: 'utf8' })
+  return JSON.parse(raw)
+}
+
 const packStep = { packed: [], assembled: [], copied: [] }
+/** tgz 拷贝文件名 → 真实 dependencies（packument 元数据；安装器递归装依赖消费）。 */
+const pkgExtraByCopyName = {}
 try {
   // pi-wool-shared 先 pack（插件组装要引用它的 tgz）
   const sharedTgzName = execFileSync('pnpm', ['pack', '--pack-destination', PACK_TMP_DIR], {
@@ -166,6 +181,9 @@ try {
   fs.copyFileSync(sharedTgzPath, path.join(distDir, sharedCopyName))
   packStep.packed.push(`pi-wool-shared@${SHARED_VERSION}`)
   packStep.copied.push(sharedCopyName)
+  // packument 依赖元数据（安装器递归装依赖读 packument，mock registry 元数据缺位 =
+  // 依赖递归不发生——见 mock-npm-registry.mjs pkgExtra 注释）
+  pkgExtraByCopyName[sharedCopyName] = readTgzPackageJson(sharedTgzPath).dependencies ?? {}
 
   for (const f of FAMILIES) {
     f.packTgzName = execFileSync('pnpm', ['pack', '--pack-destination', PACK_TMP_DIR], {
@@ -186,6 +204,7 @@ try {
     fs.copyFileSync(path.join(PACK_TMP_DIR, path.basename(extTgzName)), path.join(distDir, extCopyName))
     packStep.packed.push(`${f.extPkgName}@${f.extVersion}`)
     packStep.copied.push(extCopyName)
+    pkgExtraByCopyName[extCopyName] = readTgzPackageJson(path.join(PACK_TMP_DIR, path.basename(extTgzName))).dependencies ?? {}
   }
 } finally {
   fs.rmSync(workDir, { recursive: true, force: true })
@@ -265,11 +284,11 @@ export const meta = {
     'C: 双产物落盘——plugins/<scope__pkg>/ + npm/node_modules/<ext>/ + settings.json packages[]',
     'C: 安装链经本机 mock registry 流转（plugin/ext/shared 三包 packument 请求在案）',
     'A: 授权挂载位容器进入后无提取确认卡（占位空态——宿主无 getAuthorizeView 驱动，ISSUES-2 登记的事实断言）',
-    'A+B: Trae 提取（executeCommand 同通道驱动）→「提取成功」卡渲染 + A12 耗时 ≤ 1000ms（stats 计时）',
+    'A+B: Trae 提取（executeCommand 同通道驱动）→ 宿主持有「提取成功」结果树（快照 viewId=authorize）+ A12 耗时 ≤ 1000ms（stats 计时）；DOM 呈现缺口另断言',
     'B: Trae getStatus 上报 { family: trae, loggedIn: true, fetchedAt }（quota/nickname 设计性缺席，形状断言）',
     'C: models.json wool-trae 条目——apiKey 非空（只验长度）+ models ≥1 且 api=wool-trae',
     'B: wool-trae 真实对话出话——modelOverride 建 session → message.complete → assistant 文本非空',
-    'A+B: Qoder 提取（同构）→「提取成功」卡渲染 + A12 耗时 ≤ 1000ms（stats 计时）',
+    'A+B: Qoder 提取（同构）→ 宿主持有「提取成功」结果树 + A12 耗时 ≤ 1000ms（stats 计时）；DOM 呈现缺口另断言',
     'B: Qoder getStatus 上报 loggedIn=true + nickname 非空（quota 在场则数值形状核对）',
     'C: models.json wool-qoder 条目（apiKey 非空 + models ≥1）',
     'B: wool-qoder 真实对话出话（message.complete + assistant 文本非空）',
@@ -277,7 +296,7 @@ export const meta = {
   notProvable: [
     '额度/昵称的条目行 DOM 呈现——宿主凭据状态行期望 {state,message} 形状与 wool getStatus {status} 形状错位 + getDetail 无宿主调用方（ISSUES-2 登记）；本剧本以 B 通道插件上报为额度断言权威',
     '额度/模型目录数值与真实上游的一致性——真机口径只验插件上报形状与非空，不做上游数值核对',
-    'A12 的物理按钮点击起点——确认卡渲染缺口（ISSUES-2）下以 plugin.executeCommand 同通道派发替代；通道与按钮点击完全一致，缺的只是 DOM 点击动作',
+    'A12 的物理点击起点——确认卡渲染缺口（ISSUES-2 ①）下以 plugin.executeCommand 同通道派发替代（通道与按钮点击完全一致，缺 DOM 点击动作）；回显终点 = 宿主快照持有成功相位（DOM 呈现因 viewId 错位断裂——⑥）',
     'Trae 家族 quota/nickname 字段缺席的产品语义（SOLO 免费通道无账号信息 API，插件设计不伪造——按形状断言缺席）',
     'wool-manifest 远端发布链与 npm 远端发布链——经本地夹具 + mock registry 折本，版本配对校验代码路径为真、网络链为假',
     'Qoder 提取失败转 PAT 屏路径——环境探针确认凭据在位，失败路径归负例剧本（A21 族）',
@@ -324,7 +343,12 @@ export async function run(ctx) {
     const add = (name, version, file) => {
       const abs = path.join(distDir, file)
       if (!fs.existsSync(abs)) throw new Error(`缺 tarball：${abs}`)
-      map[name] = { versions: { [version]: abs }, latest: version }
+      const extra = pkgExtraByCopyName[file]
+      map[name] = {
+        versions: { [version]: abs },
+        latest: version,
+        ...(extra !== undefined ? { pkgExtra: { [version]: extra } } : {}),
+      }
     }
     add('@zhushanwen/pi-wool-shared', SHARED_VERSION, `a3a12-pi-wool-shared-${SHARED_VERSION}.tgz`)
     for (const f of FAMILIES) {
@@ -393,7 +417,8 @@ export async function run(ctx) {
         expected: '{family:trae, loggedIn:true, fetchedAt:number} 且无 quota/nickname',
         actual: JSON.stringify(traeStatusBody ?? traeStatus).slice(0, 200),
       })
-    ev.assert('B: Trae 提取后插件上报提取成功态（A3 主链第一语义）', traeStatusBody?.loggedIn === true && traeExtract.outcome === 'success', {
+    ev.assert('B: Trae 提取后插件上报提取成功态（A3 主链第一语义）', traeStatusBody?.loggedIn === true
+      && (traeExtract.outcome === 'snapshot-success' || traeExtract.outcome === 'dom-success'), {
       channel: 'B',
       expected: '提取成功 + loggedIn=true',
       actual: `outcome=${traeExtract.outcome} loggedIn=${traeStatusBody?.loggedIn}`,
@@ -575,54 +600,69 @@ async function assertAuthorizeMountGap(ui, page, f, ev) {
 
 /**
  * 驱动提取 + A12 计时：plugin.executeCommand（与 action-bar 点击完全同一命令派发通道）
- * → 轮询授权容器内「提取成功 / 提取失败 / PAT 屏」渲染 → 断言成功 + 耗时 ≤ 1000ms。
+ * → 轮询「提取结果树」的两个证据面：
+ *   ① 宿主快照（plugin.ui.snapshot，viewId='authorize'——插件实际推送的 viewId）持有
+ *      「提取成功」相位 = runtime 数据层回显成立（A12 计时终点）；
+ *   ② 授权容器 DOM 渲染成功卡 = 用户可见回显（viewId 错位下不发生——缺口 ⑥ 如实断言）。
  */
 async function driveExtractAndTime({ protocol, page, ui, ev, family: f }) {
   const t0 = Date.now()
   await protocol.call('plugin.executeCommand', { pluginId: f.pluginId, commandId: 'extract' }, { timeoutMs: 30_000 })
   ev.step({ step: `extract.dispatch.${f.family}`, channel: 'B', exitCode: 0, stats: { channel: 'plugin.executeCommand（按钮同通道）' } })
 
-  const outcome = await waitExtractOutcome(page, { timeoutMs: 60_000 })
-  const totalMs = Date.now() - t0
-  const successRendered = outcome.outcome === 'success'
-  ev.assert(`A: ${f.displayName} 提取成功卡渲染（${f.displayName} (Wool) 提取成功）`, successRendered, {
-    channel: 'A',
-    expected: '授权容器出现「提取成功」卡',
-    actual: `outcome=${outcome.outcome} text=${outcome.text.slice(0, 200)}`,
-  })
-  ev.assert(`A12: ${f.displayName} 提取回显耗时 ≤ 1000ms（派发 → 结果渲染）`, successRendered && totalMs <= 1000, {
-    channel: 'A',
-    expected: '≤1000ms',
-    actual: `${totalMs}ms（outcome=${outcome.outcome}）`,
-    stats: { elapsedMs: totalMs, budgetMs: 1000, family: f.family, channel: 'executeCommand→DOM' },
-  })
-  ev.attach(`a3a12-${f.family}-extract-outcome`, `outcome=${outcome.outcome} elapsedMs=${totalMs}\ntext=${outcome.text.slice(0, 600)}`)
-  await ui.screenshot(`a3a12-${f.family}-extract-outcome`)
-  return outcome
-}
-
-/** 轮询授权容器的提取结果渲染（40ms 粒度；计时含轮询开销 ≤ ~60ms，1s 预算内可忽略）。 */
-async function waitExtractOutcome(page, { timeoutMs }) {
   const container = page.locator('[data-testid="plugin-authorize-container"]')
-  const success = container.locator('[data-testid="gui-card"]:has-text("提取成功")')
-  const failure = container.locator('[data-testid="gui-card"]:has-text("提取失败")')
-  const patInput = container.locator('[data-testid="gui-text-input-field-wool-pat-input"]')
+  const domSuccess = () => container.locator('[data-testid="gui-card"]:has-text("提取成功")').count()
+  const domFailure = () => container.locator('[data-testid="gui-card"]:has-text("提取失败")').count()
+  const snapshotTree = async (viewId) => {
+    const reply = await protocol.call('plugin.ui.snapshot', { mountId: 'provider.authorize', pluginId: f.pluginId, viewId }, { timeoutMs: 15_000 })
+    return (reply?.views ?? []).map((v) => JSON.stringify(v?.components ?? v)).join(' ')
+  }
+
+  let outcome = 'timeout'
+  let domText = ''
   const start = Date.now()
   for (;;) {
-    if (await success.count()) {
-      return { outcome: 'success', elapsedMs: Date.now() - start, text: await safeText(container) }
-    }
-    if (await failure.count()) {
-      return { outcome: 'error', elapsedMs: Date.now() - start, text: await safeText(container) }
-    }
-    if (await patInput.count()) {
-      return { outcome: 'pat', elapsedMs: Date.now() - start, text: await safeText(container) }
-    }
-    if (Date.now() - start > timeoutMs) {
-      return { outcome: 'timeout', elapsedMs: Date.now() - start, text: await safeText(container) }
-    }
-    await new Promise((r) => setTimeout(r, 40))
+    if ((await domSuccess()) > 0) { outcome = 'dom-success'; domText = await safeText(container); break }
+    if ((await domFailure()) > 0) { outcome = 'dom-error'; domText = await safeText(container); break }
+    let tree = ''
+    try { tree = await snapshotTree('authorize') } catch { /* 快照通道异常按未就绪轮询 */ }
+    if (tree.includes('提取成功')) { outcome = 'snapshot-success'; break }
+    if (tree.includes('提取失败') || tree.includes('改用官方令牌')) { outcome = 'snapshot-error'; domText = tree.slice(0, 300); break }
+    if (Date.now() - start > 60_000) break
+    await new Promise((r) => setTimeout(r, 80))
   }
+  const totalMs = Date.now() - t0
+  const runtimeEchoOk = outcome === 'snapshot-success' || outcome === 'dom-success'
+  const domVisibleOk = outcome === 'dom-success'
+  if (domText === '') domText = await safeText(container)
+
+  ev.assert(`A12: ${f.displayName} 提取回显耗时 ≤ 1000ms（派发 → 宿主持有成功结果）`, runtimeEchoOk && totalMs <= 1000, {
+    channel: 'B',
+    expected: '≤1000ms（快照/DOM 任一先到为准）',
+    actual: `${totalMs}ms（outcome=${outcome}）`,
+    stats: { elapsedMs: totalMs, budgetMs: 1000, family: f.family, endpoint: 'plugin.ui.snapshot(viewId=authorize) 或 DOM 先到者' },
+  })
+  ev.assert(`A: ${f.displayName} 授权容器 DOM 呈现提取成功卡（用户可见回显）`, domVisibleOk, {
+    channel: 'A',
+    expected: 'DOM 出现「提取成功」卡',
+    actual: domVisibleOk ? 'DOM 命中' : `outcome=${outcome}（viewId 错位：宿主渲染 provider.authorize、插件推 authorize——ISSUES-2 ⑥） domText=${domText.slice(0, 160)}`,
+  })
+  // viewId 错位的双向证据（⑥ 坐实）：宿主约定 viewId 快照空、插件实际 viewId 快照有树
+  let hostViewTree = ''
+  let pluginViewTree = ''
+  try {
+    hostViewTree = await snapshotTree('provider.authorize')
+    pluginViewTree = await snapshotTree('authorize')
+  } catch { /* 快照通道异常时留空，由断言 actual 呈现 */ }
+  ev.assert(`B: viewId 契约错位证据（宿主 viewId=provider.authorize 无树 / 插件 viewId=authorize 有成功树）`,
+    runtimeEchoOk && !hostViewTree.includes('提取成功') && pluginViewTree.includes('提取成功'), {
+      channel: 'B',
+      expected: 'provider.authorize 空 + authorize 含「提取成功」（错位事实）',
+      actual: `hostView命中=${hostViewTree.includes('提取成功')} pluginView命中=${pluginViewTree.includes('提取成功')}`,
+    })
+  ev.attach(`a3a12-${f.family}-extract-outcome`, `outcome=${outcome} elapsedMs=${totalMs}\ndomText=${domText.slice(0, 400)}\npluginViewTree=${pluginViewTree.slice(0, 400)}`)
+  await ui.screenshot(`a3a12-${f.family}-extract-outcome`)
+  return { outcome, elapsedMs: totalMs, text: domText }
 }
 
 async function safeText(locator) {

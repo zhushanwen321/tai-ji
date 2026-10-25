@@ -41,7 +41,13 @@ export function registryEnv(repo) {
 
 /**
  * 起服务。pkgs 形态：
- *   { '<name>': { versions: { '<ver>': '<abs .tgz path>' }, latest: '<ver>' } }
+ *   { '<name>': { versions: { '<ver>': '<abs .tgz path>' }, latest: '<ver>',
+ *                 pkgExtra?: { '<ver>': { dependencies?: {...} } } }
+ * pkgExtra（可选）：合并进 packument versions[ver] 的附加元数据。为什么要它：
+ * NpmPluginInstaller.installPackageRecursive 的递归依赖安装读 packument 的
+ * dependencies 字段（不读 tgz 内 package.json）——mock registry 只发 tarball 路径时
+ * 依赖递归永不发生（A3/A12 真机批次实测根因）。场景侧从 tgz 解出真实 dependencies
+ * 传入即镜像真实 registry 行为。
  * 返回句柄 { url, port, setLatest(name, ver), requests, close() }。
  */
 export async function startMockNpmRegistry(repo, pkgs) {
@@ -84,6 +90,7 @@ export async function startMockNpmRegistry(repo, pkgs) {
         versions[ver] = {
           name: pkgName,
           version: ver,
+          ...(pkg.pkgExtra?.[ver] ?? {}),
           dist: {
             tarball: `${REGISTRY_URL}/${pkgName}/-/${tarballFile}`,
             // 不带 integrity/shasum → 下载端跳过完整性校验（本地夹具无此需求）
