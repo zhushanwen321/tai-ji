@@ -2,13 +2,17 @@ import { defaultExclude } from 'vitest/config'
 import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
 
 /**
- * vitest 分池维护契约（三池：main 满并行组 / real-pi 串行尾组 / integration 串行尾组）。
+ * vitest 分池维护契约（三池：main 满并行组 / real-pi 串行尾组 / integration 受控并行尾组）。
  *
  * 调度契约（vitest 4.1.9，权威源 node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js groupSpecs()）：
- * - `fileParallelism: false` 在配置解析层强制 `maxWorkers = 1`；`maxWorkers === 1` + 默认
- *   isolate/groupOrder 的文件进入 sequential 尾组（groups.push(sequential) 排在最后）。
- * - task groups 之间 `for...of` + `await Promise.allSettled` 严格串行：主组（main）满并行
- *   **完整结束、worker 全部释放后**，串行尾组文件才逐个以单 worker 执行——零时间重叠。
+ * - `fileParallelism: false` 在配置解析层强制 `maxWorkers = 1`（任何显式 maxWorkers 被覆盖）；
+ *   `maxWorkers === 1` + 默认 isolate/groupOrder 的文件进入 sequential 尾组（groups.push
+ *   (sequential) 恒排所有分组之后）。
+ * - `sequence.groupOrder` 是分桶键：同号 project 并入同一并行组（须同 maxWorkers），组号从低
+ *   到高严格串行执行（`for...of` + `await`，零时间重叠）。main = order 0 默认满并行；
+ *   integration = order 1 + 显式 maxWorkers 4 → main 完整结束、worker 全部释放后，integration
+ *   整组以 ≤4 路文件级并行开跑（受控并行尾组）。`--project=integration` 单跑时无 main 组，
+ *   integration 组直接并行执行。
  * - `poolOptions.forks.singleFork`（vitest 2/3 形态）在 vitest 4 已移除，勿再使用。
  * 入口命令不变（`npx vitest run` / scripts/pr-pre-merge.sh 不改）；分组只影响调度，不影响
  * 跑哪些用例；组内用例各自的 skip 门控（REAL_PI_READY / TAIJI_TEST_INTEGRATION）照常生效。
@@ -25,7 +29,19 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
  *   spawn 等）。建池理由 = 这些用例测的是「代码 + OS 组合行为」，没有确定性完成信号可等，
  *   负载下拉长无稳定上界，不满足单测层「只测逻辑、高负载下也极快」的定位（判据与整治
  *   清单见 docs/TEST-STRATEGY.md「新写测试判据」节）；与 real-pi 的分界 = 是否需要真实 LLM
- *   凭证（本池不依赖凭证，故可进 CI）。
+ *   凭证（本池不依赖凭证，故可进 CI）。组内文件级并行（非 real-pi 的串行）：等待窗口是
+ *   faux TPS 制造的本地计算（毫秒级、零网络），并行饿死风险不成立；组间与 main 串行，
+ *   满并行负载不与 main 重叠。
+ *
+ * integration 组内并行安全前提（新增成员必须满足，违反须先隔离改造）：
+ * - 临时目录一律 mkdtempSync 唯一（fixture 的 sessionDir/agentDir、测试侧 dataRoot/workDir），
+ *   禁固定路径共享；
+ * - env 注入（TAIJI_FAUX_TPS 等）只写本 worker fork 进程（vitest forks 池每文件独立进程，
+ *   spawn 子进程 env 经 {...process.env} 快照透传，天然隔离），禁依赖跨文件 env 残留；
+ * - pi 子进程 IPC 全走 stdin/stdout 管道（--mode rpc），无 TCP 端口 / 文件锁 / 共享 fs.watch
+ *   路径。
+ * maxWorkers = 4 的机器占用上限：4 个 fork + 各自 pi 子进程（每文件常态至多 1-2 个 pi 在场）
+ * ≈ ≤9 进程，不超 main 组满并行 9 worker（10 逻辑核 - 1）的总占用基线。
  *
  * 维护契约：
  * - 新增「真实 pi + 真实 LLM turn」的 equivalence 测试 → 文件路径同步加入 REAL_PI_TESTS
@@ -105,12 +121,15 @@ export default taijiTestConfig({
         }),
       },
       {
-        // 集成测试门控组：真进程 / 真 IO 用例，文件间串行、主组结束后开跑；本地不设
-        // TAIJI_TEST_INTEGRATION 时组内用例经 describe.skipIf 跳过（文件级集成组）。
+        // 集成测试门控组：真进程 / 真 IO 用例。受控并行尾组——sequence.groupOrder: 1 =
+        // main 组完整结束后整组开跑（调度契约见文件头），组内文件级并行 maxWorkers 4
+        //（并行安全前提与占用上限论证见文件头）；本地不设 TAIJI_TEST_INTEGRATION 时组内
+        // 用例经 describe.skipIf 跳过（文件级集成组）。
         test: guardProjectSetup({
           name: 'integration',
           include: [...INTEGRATION_TESTS],
-          fileParallelism: false,
+          maxWorkers: 4,
+          sequence: { groupOrder: 1 },
         }),
       },
     ],

@@ -1,9 +1,9 @@
 /**
  * U9-U1：full-e2e 探针基建的纯单元校验（不 spawn pi）。
  *
- * 覆盖两点：串行尾组注册（REAL_PI_TESTS / INTEGRATION_TESTS 两池——spawnPiFixture
- * 消费方必须登记其一，漏登记会在满并行下饿死，vitest.config 维护契约）的全量双向
- * diff 检查 + writeLine 的 stdin 写入形态（JSONL 行以换行结尾——rpc 协议按行解析）。
+ * 覆盖两点：尾组注册（REAL_PI_TESTS 串行尾组 / INTEGRATION_TESTS 受控并行尾组——
+ * spawnPiFixture 消费方必须登记其一，漏登记会在满并行下饿死，vitest.config 维护契约）
+ * 的全量双向 diff 检查 + writeLine 的 stdin 写入形态（JSONL 行以换行结尾——rpc 协议按行解析）。
  *
  * faux LLM 层豁免（L2.5）：只 import FAUX_PI_READY（无 REAL_PI_READY）的消费文件是纯
  * faux 层（凭证无关，门控只判 binary），属 main 满并行组——real-pi 池的饿死模式（真实 LLM
@@ -98,7 +98,7 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
     // 终态（数组保留为「新增真实 LLM 文件必须登记」的注册位）；检查的提取断言点 =
     // 数组声明可定位（上方 start），不再要求非空。
 
-    // 双向 diff：漏登记（消费方未进任一串行尾组，落回 main 满并行组复发饿死超时；纯 faux
+    // 双向 diff：漏登记（消费方未进任一尾组，落回 main 满并行组复发饿死超时；纯 faux
     // 层例外，见文件头豁免说明）+ 失效项（清单成员在磁盘已不存在，文件删除/改名后清单未同步）
     const unregistered = consumers
       .filter((p) => !registered.includes(p) && !fauxTrackFiles.includes(p) && !integrationGatedFiles.includes(p))
@@ -108,7 +108,7 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
     const problems: string[] = []
     if (unregistered.length > 0) {
       problems.push(
-        `以下 ${unregistered.length} 个文件 import spawnPiFixture 但未登记任一串行尾组（REAL_PI_TESTS / INTEGRATION_TESTS）：\n`
+        `以下 ${unregistered.length} 个文件 import spawnPiFixture 但未登记任一尾组（REAL_PI_TESTS / INTEGRATION_TESTS）：\n`
           + unregistered.map((p) => `  ${p}`).join('\n')
           + '\n👉 真实 LLM 层文件把该路径加入 packages/runtime/vitest.config.ts 的 REAL_PI_TESTS；'
           + '真进程 / 真 IO 集成组文件加入 INTEGRATION_TESTS（用例挂 TAIJI_TEST_INTEGRATION 门控）；'

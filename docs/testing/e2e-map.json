@@ -3164,7 +3164,7 @@
       "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/usage-queue-commands-invalidation.test.ts",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
-      "note": "R2 态 + 文件级集成组成员：路径登记在 packages/runtime/vitest.config.ts 的 integration project（include 登记 + main 的 exclude 同步加入，串行尾组），门控 = TAIJI_TEST_INTEGRATION（SSOT = test-guard/integration-gate.ts），本地不设 env 时组内用例经 describe.skipIf 跳过、CI test-runtime job 设 env=1 真跑。触发条件 = scope 内 usage 实例快照与失效收敛链（session-service / replicated-state / replicated-states.config / event-adapter / pi-protocol / interfaces / ports.pi-engine）任一 diff 命中时，开发阶段空载串行跑本文件。断言本质 = 实例快照 ≡ 权威 RPC 派生视图收敛；serial=真 的理由 = spawn 真 pi 进程 + 真 extension jiti 冷编译，CPU 满载下无稳定上界（整治判据见 docs/TEST-STRATEGY.md「新写测试判据」节）。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
+      "note": "R2 态 + 文件级集成组成员：路径登记在 packages/runtime/vitest.config.ts 的 integration project（include 登记 + main 的 exclude 同步加入，受控并行尾组），门控 = TAIJI_TEST_INTEGRATION（SSOT = test-guard/integration-gate.ts），本地不设 env 时组内用例经 describe.skipIf 跳过、CI test-runtime job 设 env=1 真跑。触发条件 = scope 内 usage 实例快照与失效收敛链（session-service / replicated-state / replicated-states.config / event-adapter / pi-protocol / interfaces / ports.pi-engine）任一 diff 命中时，开发阶段空载串行跑本文件。断言本质 = 实例快照 ≡ 权威 RPC 派生视图收敛；serial=真 的理由 = spawn 真 pi 进程 + 真 extension jiti 冷编译，CPU 满载下无稳定上界（整治判据见 docs/TEST-STRATEGY.md「新写测试判据」节）。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
     },
     {
       "id": "E2E-INTEG-02",
@@ -3283,7 +3283,7 @@
       "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
-      "note": "R2 态 + 文件级集成组成员（同 E2E-INTEG-01 的登记形态与门控口径）。触发条件同 E2E-INTEG-05（投递注册表 / 占用转移 / session 视图类型），另含 smart-context 通知与续跑通路变更（该面由 E2E-EQUIV-05 同资产登记，两 rule 的 run 命令不同：本组带 TAIJI_TEST_INTEGRATION=1 走 integration project，E2E-EQUIV-05 直跑该文件（不经本门控 env，落 integration 串行尾组））。断言本质 = 压缩窗口零投递 + 按序到达 + 标记确认 + delivered；serial=真 的理由同 E2E-INTEG-01。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
+      "note": "R2 态 + 文件级集成组成员（同 E2E-INTEG-01 的登记形态与门控口径）。触发条件同 E2E-INTEG-05（投递注册表 / 占用转移 / session 视图类型），另含 smart-context 通知与续跑通路变更（该面由 E2E-EQUIV-05 同资产登记，两 rule 的 run 命令不同：本组带 TAIJI_TEST_INTEGRATION=1 走 integration project，E2E-EQUIV-05 直跑该文件（不经本门控 env，落 integration 受控并行尾组））。断言本质 = 压缩窗口零投递 + 按序到达 + 标记确认 + delivered；serial=真 的理由同 E2E-INTEG-01。与 E2E-EQUIV-01 是同一 asset 的两个触发范围（该条 = equivalence 全量的凭证无关子集、不带本门控 env；本条 = 按门控单跑本文件）。"
     },
     {
       "id": "E2E-INTEG-07",
