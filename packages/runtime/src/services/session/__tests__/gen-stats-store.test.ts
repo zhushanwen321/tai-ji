@@ -1,11 +1,12 @@
 /**
  * gen-stats-store 单元测试（实施计划 u2-store / P2）。
  *
- * 覆盖（u2 验收②）：聚合加权平均对已知样本断言（与 pi-statusline 口径一致，且区分
- * 加权 vs 算术平均）、bogus 50/100 阈值边界语义、GC 删过期日键（本地时区）、
+ * 覆盖（u2 验收②）：分布五量对已知样本断言（逐样本口径 + 最近秩百分位下限/上限）、
+ * 命中率加权口径、bogus 50/100 阈值边界语义、GC 删过期日键（本地时区）、
  * safeModelFileName 单射（`a b`/`a_b`、大小写、超长截断）、null 语义（无样本 null、
  * 0 只作真实测量值）、文件损坏读→空+不抛（自愈）；TTFT（composer-genstats-ttft
- * §3.3）：aggregateTtft p50（奇偶样本/空 null/单样本/重尾稳健）+ S8 校验双向
+ * §3.3→分布五量）：summarizeDistribution（avg/p50/p99/max/min + 空 null + 最近秩不插值）
+ * + S8 校验双向
  * （ttft 单元素组过校验不丢 + speed 单元素畸形仍丢）+ ttft 路径独立落盘。
  *
  * 数据目录红线（TEST-STRATEGY / fs-guard）：全部写删目标 = mkdtempSync(
@@ -19,9 +20,11 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
-  aggregateSpeed,
+  aggregateSpeedDistribution,
+  aggregateTtftDistribution,
   aggregateCacheRatio,
-  aggregateTtft,
+  percentileNearestRank,
+  summarizeDistribution,
   isBogusSpeedSample,
   isDisplayedZeroCacheRatio,
   hasReportedCacheFields,
@@ -78,37 +81,156 @@ function writeRawFile(p: string, content: string): void {
   writeFileSync(p, content, 'utf-8')
 }
 
-describe('aggregateSpeed（D6 加权平均 Σtokens÷Σduration×1000）', () => {
-  it('已知样本：加权平均 = 100/2s 与 300/3s → 400/5000ms×1000 = 80 t/s', () => {
+describe('summarizeDistribution（分布五量：avg / p50 / p99 / max / min）', () => {
+  it('已知样本 [100,110,120,9000]：avg=2333 / p50=115 / p99=9000 / max=9000 / min=100', () => {
+    expect(summarizeDistribution([100, 110, 120, 9000])).toEqual({
+      avg: 2333,
+      p50: 115,
+      p99: 9000,
+      max: 9000,
+      min: 100,
+    })
+  })
+
+  it('空数组 → 五字段全 null（D4 纪律禁 0 充数）', () => {
+    expect(summarizeDistribution([])).toEqual({ avg: null, p50: null, p99: null, max: null, min: null })
+  })
+
+  it('单样本 → 五量全等该值（current 槽口径 = 单样本分布取 p50）', () => {
+    expect(summarizeDistribution([820])).toEqual({ avg: 820, p50: 820, p99: 820, max: 820, min: 820 })
+  })
+
+  it('偶数样本 p50 取双中位均值：[100,300,200,400] → 250', () => {
+    expect(summarizeDistribution([100, 300, 200, 400]).p50).toBe(250)
+  })
+
+  it('0 是合法真实测量值（非 null 充数）：[0,100] → min=0 / p50=50', () => {
+    const d = summarizeDistribution([0, 100])
+    expect(d.min).toBe(0)
+    expect(d.p50).toBe(50)
+  })
+
+  it('不修改入参（内部排序副本）', () => {
+    const values = [300, 100, 200]
+    summarizeDistribution(values)
+    expect(values).toEqual([300, 100, 200])
+  })
+})
+
+describe('percentileNearestRank（最近秩，不插值）', () => {
+  it('小样本 n<100 时 p99 必然 = max（如实呈现，不插值造不存在的值）', () => {
+    expect(percentileNearestRank([100, 200], 99)).toBe(200)
+  })
+
+  it('p50 的最近秩：4 个样本取第 2 个（ceil(0.5×4)=2 → 下标 1）', () => {
+    expect(percentileNearestRank([100, 200, 300, 400], 50)).toBe(200)
+  })
+
+  it('n=100 时 p99 取第 99 个（下标 98，ceil(0.99×100)=99）', () => {
+    const sorted = Array.from({ length: 100 }, (_, i) => i + 1)
+    expect(percentileNearestRank(sorted, 99)).toBe(99)
+  })
+})
+
+describe('aggregateSpeedDistribution（逐样本速度 t/s 分布）', () => {
+  it('已知样本 [100,2s] 与 [300,3s]：逐样本速度 50 / 100 → avg=75（非加权 80）', () => {
     const records: SpeedRecord[] = [
       [100, 2000],
       [300, 3000],
     ]
-    expect(aggregateSpeed(records)).toBe(80)
+    expect(aggregateSpeedDistribution(records)).toEqual({
+      avg: 75,
+      p50: 75,
+      p99: 100,
+      max: 100,
+      min: 50,
+    })
   })
 
-  it('单样本即 current 口径（会话槽/模型末条均按单条加权平均 = 样本本身）', () => {
-    expect(aggregateSpeed([[50, 1000]] as SpeedRecord[])).toBe(50)
-  })
-
-  it('加权而非算术平均：100 t/s×1s 与 1 t/s×10s → 10 t/s（算术平均会是 51）', () => {
+  it('[HISTORICAL] 口径变更钉：逐样本均值 ≠ 窗口总量加权（100t/s×1s + 1t/s×10s → 50.5 vs 10）', () => {
     const records: SpeedRecord[] = [
       [100, 1000],
       [10, 10000],
     ]
-    expect(aggregateSpeed(records)).toBe(10)
+    // 逐样本 100 / 1 → 等权均值 50.5 → 取整 51；旧加权口径为 10（长请求主导）
+    expect(aggregateSpeedDistribution(records).avg).toBe(51)
   })
 
-  it('四舍五入取整（蓝本 Math.round 口径）', () => {
-    expect(aggregateSpeed([[1, 3]] as SpeedRecord[])).toBe(333)
+  it('尾部可见：极慢短请求不被长请求稀释（[50,9000ms] 而非加权后被吞）', () => {
+    const records: SpeedRecord[] = [
+      [1000, 1000], // 1000 t/s
+      [1, 5000], // 0.2 t/s（极慢）
+    ]
+    const d = aggregateSpeedDistribution(records)
+    expect(d.min).toBe(0)
+    expect(d.max).toBe(1000)
   })
 
-  it('空数组 → null（无有效样本，D4 纪律禁止 0 充数）', () => {
-    expect(aggregateSpeed([])).toBeNull()
+  it('round 取整（蓝本 Math.round 口径）', () => {
+    expect(aggregateSpeedDistribution([[1, 3]]).avg).toBe(333)
   })
 
-  it('ΣdurationMs=0 → null', () => {
-    expect(aggregateSpeed([[10, 0], [20, 0]] as SpeedRecord[])).toBeNull()
+  it('空数组 → 五字段全 null', () => {
+    expect(aggregateSpeedDistribution([])).toEqual({
+      avg: null,
+      p50: null,
+      p99: null,
+      max: null,
+      min: null,
+    })
+  })
+
+  it('durationMs≤0 的退化样本被跳过（分母无信息量）', () => {
+    expect(
+      aggregateSpeedDistribution([
+        [10, 0],
+        [20, 0],
+      ]),
+    ).toEqual({ avg: null, p50: null, p99: null, max: null, min: null })
+  })
+})
+
+describe('aggregateTtftDistribution（逐样本 ttft ms 分布）', () => {
+  it('奇数样本：[300,100,200] → p50=200 / max=300 / min=100', () => {
+    expect(aggregateTtftDistribution([[300], [100], [200]])).toEqual({
+      avg: 200,
+      p50: 200,
+      p99: 300,
+      max: 300,
+      min: 100,
+    })
+  })
+
+  it('偶数样本：[100,300,200,400] → p50=(200+300)/2=250 / avg=250', () => {
+    expect(aggregateTtftDistribution([[100], [300], [200], [400]])).toEqual({
+      avg: 250,
+      p50: 250,
+      p99: 400,
+      max: 400,
+      min: 100,
+    })
+  })
+
+  it('偶数双中位均值四舍五入：[100,201] → 150.5 → 151', () => {
+    expect(aggregateTtftDistribution([[100], [201]]).p50).toBe(151)
+  })
+
+  it('空记录 → 五字段全 null（无值纪律 D4，禁 0 充数）', () => {
+    expect(aggregateTtftDistribution([])).toEqual({
+      avg: null,
+      p50: null,
+      p99: null,
+      max: null,
+      min: null,
+    })
+  })
+
+  it('重尾：p50=115 稳健 / p99=max=9000 补齐尾部体感（两读法并存，不再二选一）', () => {
+    const d = aggregateTtftDistribution([[100], [110], [120], [9000]])
+    expect(d.p50).toBe(115)
+    expect(d.p99).toBe(9000)
+    expect(d.max).toBe(9000)
+    expect(d.avg).toBe(2333)
   })
 })
 
@@ -143,36 +265,6 @@ describe('aggregateCacheRatio（D6 加权 Σread÷ΣpromptTotal×100）', () => 
 
   it('四舍五入取整', () => {
     expect(aggregateCacheRatio([[1, 3]] as CacheRatioRecord[])).toBe(33)
-  })
-})
-
-describe('aggregateTtft（composer-genstats-ttft §3.3：p50 中位数，重尾稳健）', () => {
-  it('奇数样本取中位元素（乱序输入不敏感）', () => {
-    expect(aggregateTtft([[300], [100], [200]])).toBe(200)
-  })
-
-  it('偶数样本取双中位均值：[100,300,200,400] → (200+300)/2 = 250', () => {
-    expect(aggregateTtft([[100], [300], [200], [400]])).toBe(250)
-  })
-
-  it('偶数双中位均值四舍五入：[100,201] → 150.5 → 151', () => {
-    expect(aggregateTtft([[100], [201]])).toBe(151)
-  })
-
-  it('空记录 → null（无值纪律 D4，禁 0 充数）', () => {
-    expect(aggregateTtft([])).toBeNull()
-  })
-
-  it('单样本 → 原值（current 槽口径 = aggregateTtft([单条])）', () => {
-    expect(aggregateTtft([[820]])).toBe(820)
-  })
-
-  it('0 是合法真实测量值（非 null 充数）：[0,100] p50 = 50', () => {
-    expect(aggregateTtft([[0], [100]])).toBe(50)
-  })
-
-  it('重尾稳健：[100,110,120,9000] → p50=115（均值 2332 被偶发慢请求拉飞，否决方案 D 不用均值）', () => {
-    expect(aggregateTtft([[100], [110], [120], [9000]])).toBe(115)
   })
 })
 

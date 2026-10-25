@@ -14,7 +14,12 @@
 import { mount } from '@vue/test-utils'
 import type { Component } from 'vue'
 import * as events from '@taiji/core/transport/api'
-import type { GenStatsFrame, ServerMessage } from '@taiji/shared'
+import type { GenStatsDistribution, GenStatsFrame, ServerMessage } from '@taiji/shared'
+
+/** 速度分布样例（五量各不相同——能抓「统计量读错字段」类漂移） */
+const SPEED_DIST: GenStatsDistribution = { avg: 28, p50: 22, p99: 19, max: 19, min: 9 }
+/** TTFT 分布样例（d7/d30；值与 today 区分开，便于断言窗口行各自取值） */
+const TTFT_DIST: GenStatsDistribution = { avg: 1100, p50: 1100, p99: 1300, max: 1300, min: 800 }
 
 /** HoverCard 家族 stub：内容常开渲染（观察者形态——浮层/聚合页内容行可 DOM 断言）。模块私有：仅 mountGenStatsPanel 内部消费 */
 const hoverCardStubs = {
@@ -28,9 +33,19 @@ const hoverCardStubs = {
 export function genStatsFrame(sessionId: string, overrides: Partial<GenStatsFrame> = {}): GenStatsFrame {
   return {
     sessionId,
-    speed: { current: 35, day: 28, d7: 22, d30: 19 },
+    speed: {
+      current: 35,
+      day: SPEED_DIST,
+      d7: SPEED_DIST,
+      d30: SPEED_DIST,
+    },
     cacheRatio: { current: 91, day: 87 },
-    ttft: { current: 820, day: 900, d7: 1100, d30: 1300 },
+    ttft: {
+      current: 820,
+      day: { avg: 900, p50: 820, p99: 2400, max: 2400, min: 640 },
+      d7: TTFT_DIST,
+      d30: TTFT_DIST,
+    },
     model: 'prov-a/m1',
     ...overrides,
   }

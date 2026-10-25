@@ -105,7 +105,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | system-prompt-trace | taiji:system-prompt 留痕 | 观测/调试 |
 | 用量统计页 | Settings → 用量 W1-W5 | 配额敏感用户 |
 | 视觉细节与动画 | 过渡动画、traffic light 布局数值；跨平台窗口外壳（win/linux 自绘圆点交互态/拖拽条带/圆角策略/窗口尺寸持久化） | 全体但纯视觉 |
-| 生成指标（gen-stats） | composer 指标聚合按钮 hover 聚合页：速度 t/s · 缓存命中率 · TTFT 首字延迟 p50 聚合（`ComposerMetricsAggregate` + runtime gen-stats 管道，设计 docs/design/composer-genstats-ttft.md） | 观测敏感用户（挂掉仅指标缺失，对话主链路不受影响——gen-stats 接入点均降级边界 + warn 日志） |
+| 生成指标（gen-stats） | composer 指标聚合按钮 hover 聚合页：速度 t/s · 缓存命中率 · TTFT 首字延迟；速度与 TTFT 的窗口口径 = **五量分布矩阵**（平均 / P50 / P99 / 最大 / 最小 × 今日 / 7 天 / 30 天，`GenStatsDistribution`），缓存为本次/今日加权单值（`ComposerMetricsAggregate` + runtime gen-stats 管道，设计 docs/design/composer-genstats-ttft.md） | 观测敏感用户（挂掉仅指标缺失，对话主链路不受影响——gen-stats 接入点均降级边界 + warn 日志） |
 | Mock 开发层 | VITE_MOCK 拦截层 | 仅开发者 |
 
 已移除条目（2026-09-12 用户裁决，功能已不存在）：双 Panel / split mode（UI 无活跃实现，仅 store 层 PanelTree 类型残留）；cw-tool / coding-workflow。

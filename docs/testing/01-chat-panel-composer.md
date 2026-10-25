@@ -345,6 +345,13 @@ testid 以组件 template 内 data-testid 属性为准。
 | `composer-bar` | Composer.vue | 恒显；容器 `flex-nowrap`（永不换行）；`data-fit`（0–3）/ `data-anchor-protected` / `data-slot-left-cluster` / `data-slot-metrics` / `data-slot-model-thinking` 与状态机输出同步（形态断言首选用 data 属性） |
 | `composer-metrics-aggregate` | ComposerMetricsAggregate.vue | 序 1 生效（`data-slot-metrics === 'aggregated'`，实测四枚平铺指标放不下；fit 0 保持平铺直挂触发器）；仅锚点保护态（`data-anchor-protected` / `data-slot-metrics === 'absent'`）隐藏；单图标指标聚合按钮（hover 弹聚合页） |
 | `composer-model-thinking-aggregate` | ModelThinkingAggregate.vue | 序 3 生效（`data-slot-model-thinking === 'aggregated'`，实测完整模型名+档位放不下）；单图标模型聚合按钮（click 弹层，hover 行内切换） |
+| `genstats-ttft-value` / `genstats-speed-value` / `genstats-cache-value` | GenStatsTriggers.vue | 仅 fit 0 平铺态；各维 `current` 有值才渲染（空值不占位，2026-10-11 裁决）；hover 出各自卡 |
+| `genstats-ttft-current` / `genstats-speed-current` | GenStatsTtftCard / GenStatsSpeedCard | 卡内「本次」行值（本会话最近一次请求，单样本，不入矩阵）；`—` = 本会话无该模型样本 |
+| `genstats-ttft-dist-{day,d7,d30}-{avg,p50,p99,max,min}` / `genstats-speed-dist-...` | GenStatsDistributionGrid（经两卡） | 分布矩阵单元格（5 统计量 × 3 窗口）；**testid 前缀带指标名**，同页两颗矩阵不串台；值 `—` = 该窗口无样本 |
+| `genstats-ttft-dist-row` / `genstats-ttft-dist-column`（`-speed-dist-` 同构） | 同上 | 矩阵行头（窗口名）/ 列头（统计量名），用于矩阵结构断言 |
+| `genstats-ttft-model` / `genstats-speed-model` / `genstats-cache-model` | 三张卡 head | 帧内 model（runtime 权威解析的复合 key）；`—` = 无合法帧 |
+| `genstats-cache-bar` / `genstats-cache-miss-note` | GenStatsCacheCard | 命中率进度条（宽度 = 数值）/ 归因说明行（仅已知成因的展示 0% 存在） |
+| `genstats-ttft-popover` | GenStatsTriggers.vue | TTFT 触发器浮层容器（TTFT 卡直挂） |
 | [HISTORICAL] `composer-overflow-menu` / `composer-overflow-capacity-metrics` / `composer-capacity-merged` / `composer-model-merged` | — | 已随三步聚合退役（`»` 入口与合流/截断态删除，2026-09-25）——存量测试/脚本再遇这些 id 即为旧代码 |
 
 **任务托盘（built-in 四件 + 协议 widget 区）**：

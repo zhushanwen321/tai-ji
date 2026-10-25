@@ -34,9 +34,10 @@
         <ContextUsageRing :session-id="props.sessionId" class="size-[16px] shrink-0" />
       </Button>
     </HoverCardTrigger>
-    <!-- 容器对齐 demo .stats-pop：右下锚 + 10px 间距 + r-lg 圆角；宽 300 保留 real
-         四卡布局宽（demo 240 是四行 sr 形态的宽，登记差异） -->
-    <HoverCardContent side="top" align="end" :side-offset="10" class="w-[300px] rounded-lg p-0">
+    <!-- 容器对齐 demo .stats-pop：右下锚 + 10px 间距 + r-lg 圆角；宽 340 承载速度/TTFT
+         两卡的 5 统计量分布矩阵（2026-10-24：矩阵 5 列 + 行头共 6 列，300px 下每格
+         40px 会把「1.2s」挤成换行；demo 240 是四行 sr 形态的宽，登记差异） -->
+    <HoverCardContent side="top" align="end" :side-offset="10" class="w-[340px] rounded-lg p-0">
       <ContextCapacityCard :session-id="props.sessionId" :model-id="props.modelId" />
       <span class="block h-px bg-[color:var(--hairline)]" aria-hidden="true" />
       <GenStatsTtftCard :session-id="props.sessionId" :model-id="props.modelId" />

@@ -507,7 +507,6 @@ export default {
     // D1（§6.2）字段级提示：显式白名单三键（'type' 走 D8 分支不配文案，见 §7.4）
     quotaMissingCookie: '这里必须填 —— 该平台的额度接口只认 Cookie，没有继承路径',
     quotaMissingApiKey: '这里必须填 —— 已选择「用专属 Key」，但还没有可用的 Key',
-    quotaMissingWorkspace: '这里必须填 —— 额度挂在具体 workspace 下，同一个 Cookie 可能对应多个',
     quotaSaveAndTestFail: '保存并测试失败',
     // A2-4 失败态文案（reason 透传后的恢复指引，Phase B 渲染）。
     // 动作必须指向本屏真实存在的控件（§5.2 路径 3）：设置页区块内只有「保存并测试」，

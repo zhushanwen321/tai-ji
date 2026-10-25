@@ -21,7 +21,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, enableAutoUnmount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { useGenStats, __clearInFlightGenStatsForTest } from '@/composables/features/model/useGenStats'
-import type { GenStatsFrame } from '@taiji/shared'
+import type { GenStatsDistribution, GenStatsFrame } from '@taiji/shared'
 
 // 恢复路径 RPC 面：按 sid 出帧（PENDING sid 恒挂起 = 无帧形态）；events 面走 actual
 const commandMock = vi.hoisted(() => vi.fn())
@@ -35,6 +35,9 @@ import GenStatsTriggers from '@/components/panel/GenStatsTriggers.vue'
 const SID = 's-stats'
 const PENDING_SID = 's-pending'
 
+/** 分布全 null 形态（触发器形态无浮层内容断言，窗口分布不参与可见性判据） */
+const NULL_DIST: GenStatsDistribution = { avg: null, p50: null, p99: null, max: null, min: null }
+
 function frameOf(over: {
   ttft?: number | null
   speed?: number | null
@@ -42,9 +45,9 @@ function frameOf(over: {
 }): GenStatsFrame {
   return {
     sessionId: SID,
-    speed: { current: over.speed ?? null, day: null, d7: null, d30: null },
+    speed: { current: over.speed ?? null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST },
     cacheRatio: { current: over.cache ?? null, day: null },
-    ttft: { current: over.ttft ?? null, day: null, d7: null, d30: null },
+    ttft: { current: over.ttft ?? null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST },
   } as GenStatsFrame
 }
 

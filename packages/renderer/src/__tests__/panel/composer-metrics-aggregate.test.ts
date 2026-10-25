@@ -117,22 +117,39 @@ describe('聚合页四段卡（观察者形态）', () => {
     expect(separators).toHaveLength(3)
   })
 
-  it('帧驱动：stats 帧直达聚合页（速度 35 t/s / 命中率 91% / TTFT 820ms 实时可见）', async () => {
+  it('帧驱动：stats 帧直达聚合页（本次值 + 5 统计量分布矩阵 + 命中率 + bar 实时可见）', async () => {
     const wrapper = mountAggregate(true)
     await flushPromises()
 
     pushSessionMsg('s1', { type: 'session.stats_update', payload: genFrame('s1') })
     await flushPromises()
 
-    // 卡内行实时值（同源分区：聚合页与触发器读同一份帧）
-    const text = wrapper.text()
-    expect(text).toContain('35 t/s')
-    expect(text).toContain('91%')
-    // TTFT 卡行值（GenStatsTtftCard 四行 p50：current 820 →「820ms」）
-    expect(text).toContain('820ms')
-    expect(text).toContain('近 7 天')
+    // 本次值（同源分区：聚合页各卡读同一份帧）
+    expect(wrapper.find('[data-testid="genstats-speed-current"]').text()).toBe('35 t/s')
+    expect(wrapper.find('[data-testid="genstats-ttft-current"]').text()).toBe('820ms')
+    expect(wrapper.text()).toContain('91%')
+
+    // 分布矩阵：列头五个统计量（每卡一份）+ 行头三个窗口（每卡一份）
+    const columnHeaders = wrapper.findAll('[data-testid$="-dist-column"]').map((n) => n.text())
+    expect(columnHeaders.filter((v) => v === '平均')).toHaveLength(2)
+    expect(columnHeaders.filter((v) => v === 'P50')).toHaveLength(2)
+    expect(columnHeaders.filter((v) => v === 'P99')).toHaveLength(2)
+    expect(columnHeaders.filter((v) => v === '最大')).toHaveLength(2)
+    expect(columnHeaders.filter((v) => v === '最小')).toHaveLength(2)
+    const rowHeaders = wrapper.findAll('[data-testid$="-dist-row"]').map((n) => n.text())
+    expect(rowHeaders.filter((v) => v === '今日')).toHaveLength(2)
+    expect(rowHeaders.filter((v) => v === '7 天')).toHaveLength(2)
+    expect(rowHeaders.filter((v) => v === '30 天')).toHaveLength(2)
+
+    // 矩阵单元格逐格取值（速度行不带单位；TTFT 行带 ms/s 量级）
+    expect(wrapper.find('[data-testid="genstats-speed-dist-day-avg"]').text()).toBe('28')
+    expect(wrapper.find('[data-testid="genstats-speed-dist-day-p99"]').text()).toBe('19')
+    expect(wrapper.find('[data-testid="genstats-speed-dist-day-min"]').text()).toBe('9')
+    expect(wrapper.find('[data-testid="genstats-ttft-dist-d7-p50"]').text()).toBe('1.1s')
+    expect(wrapper.find('[data-testid="genstats-ttft-dist-d30-max"]').text()).toBe('1.3s')
+
     expect(wrapper.find('[data-testid="genstats-speed-model"]').text()).toBe('prov-a/m1')
-    // 缓存 bar：宽度 = 命中率（观察者形态）
+    // 缓存 bar：宽度 = 命中率（观察者形态；缓存卡不动，仍是两行单值）
     const bar = wrapper.find('[data-testid="genstats-cache-bar"]')
     expect((bar.element as HTMLElement).style.width).toBe('91%')
   })

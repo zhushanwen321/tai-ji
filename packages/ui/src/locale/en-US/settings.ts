@@ -507,7 +507,6 @@ export default {
     // D1 (§6.2) field-level hints: explicit whitelist of three keys ('type' goes through the D8 branch, see §7.4)
     quotaMissingCookie: 'Required here — this platform’s quota API only accepts a Cookie, with no inheritance path',
     quotaMissingApiKey: 'Required here — "Use dedicated key" is selected, but no key is available yet',
-    quotaMissingWorkspace: 'Required here — quota is bound to a specific workspace, and one Cookie may map to several',
     quotaSaveAndTestFail: 'Save and test failed',
     // A2-4 failure-state copy (recovery guidance for reason passthrough, rendered in Phase B).
     // The action must point at a control that exists on this screen (§5.2 path 3): the settings

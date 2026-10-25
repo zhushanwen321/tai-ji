@@ -35,7 +35,15 @@
  *   0 只允许作为真实测量值出现。
  */
 
-import type { GenStatsCacheMiss, GenStatsCacheRatio, GenStatsFrame, GenStatsSpeed, GenStatsTtft, ServerMessage } from '@taiji/shared'
+import type {
+  GenStatsCacheMiss,
+  GenStatsCacheRatio,
+  GenStatsDistribution,
+  GenStatsFrame,
+  GenStatsSpeed,
+  GenStatsTtft,
+  ServerMessage,
+} from '@taiji/shared'
 import { parseModelSelector } from '@zhushanwen/subagent-core'
 import { logger } from '../../infra/logger.js'
 import type { ISessionService } from '../../interfaces.js'
@@ -44,8 +52,8 @@ import type { IProcessManager } from '../ports/pi-engine.js'
 import type { GenStatsSample } from './types.js'
 import {
   aggregateCacheRatio,
-  aggregateSpeed,
-  aggregateTtft,
+  aggregateSpeedDistribution,
+  aggregateTtftDistribution,
   cacheRatioFilePath,
   classifyCacheMiss,
   hasReportedCacheFields,
@@ -124,10 +132,21 @@ interface FreshDayRecords {
   ttft?: GenStatsDayRecords<TtftRecord>
 }
 
+/** 分布全 null 形态（无样本时窗口字段的值；常量共享，避免每次新建对象） */
+const NULL_DISTRIBUTION: GenStatsDistribution = { avg: null, p50: null, p99: null, max: null, min: null }
+
 /** 模型聚合层全 null 形态（降级链④走尽 / 模型无记录；current 由 composeFrame 单独合并） */
-const NULL_SPEED_AGGREGATE: Omit<GenStatsSpeed, 'current'> = { day: null, d7: null, d30: null }
+const NULL_SPEED_AGGREGATE: Omit<GenStatsSpeed, 'current'> = {
+  day: NULL_DISTRIBUTION,
+  d7: NULL_DISTRIBUTION,
+  d30: NULL_DISTRIBUTION,
+}
 const NULL_CACHE_AGGREGATE: Omit<GenStatsCacheRatio, 'current'> = { day: null }
-const NULL_TTFT_AGGREGATE: Omit<GenStatsTtft, 'current'> = { day: null, d7: null, d30: null }
+const NULL_TTFT_AGGREGATE: Omit<GenStatsTtft, 'current'> = {
+  day: NULL_DISTRIBUTION,
+  d7: NULL_DISTRIBUTION,
+  d30: NULL_DISTRIBUTION,
+}
 
 /** 滚动窗口天数（day/d7/d30，含当日；30 与 store SPEED_RETENTION_DAYS 的 GC 窗口对齐） */
 const WINDOW_DAYS = { day: 1, d7: 7, d30: 30 } as const
@@ -431,14 +450,20 @@ export class GenStatsService {
    */
   private composeFrame(sid: string, modelKey: string | null, aggregate: ModelAggregates): GenStatsFrame {
     const entry = this.sessionCurrent.get(sid)
+    // current 口径 = 单样本分布取其 **p50**（= 原值四舍五入，单条样本五种量全等）——
+    // 统一走 summarizeDistribution，不另设「单条样本直接取原值」旁路，防两条口径漂移
     const speedCurrent =
-      modelKey !== null && entry?.speed?.modelKey === modelKey ? aggregateSpeed([entry.speed.record]) : null
+      modelKey !== null && entry?.speed?.modelKey === modelKey
+        ? aggregateSpeedDistribution([entry.speed.record]).p50
+        : null
     const cacheSlot = modelKey !== null && entry?.cache?.modelKey === modelKey ? entry.cache : undefined
     const cacheCurrent = cacheSlot ? aggregateCacheRatio([cacheSlot.record]) : null
-    // ttft current = 本会话最近一次样本原值（单条 p50 = 原值取整，ttftMs 本为整数 ms 恒等）；
+    // ttft current = 本会话最近一次样本（单样本分布 p50 = 原值，ttftMs 本为整数 ms 恒等）；
     // modelKey 校验同 speed 槽（异模型残留 → null，无回落）
     const ttftCurrent =
-      modelKey !== null && entry?.ttft?.modelKey === modelKey ? aggregateTtft([entry.ttft.record]) : null
+      modelKey !== null && entry?.ttft?.modelKey === modelKey
+        ? aggregateTtftDistribution([entry.ttft.record]).p50
+        : null
     return {
       sessionId: sid,
       speed: { current: speedCurrent, ...aggregate.speed },
@@ -464,8 +489,13 @@ export class GenStatsService {
    * 完整复合 key，不做尾段截取。renderer 据此纯显示（useGenStats 消费侧 model 比对兜底
    * 已随归属上移删除；本地比对曾对 openrouter 系尾段失配、丢弃合法帧）。
    *
-   * day/d7/d30 = 本地日 key 滚动窗口加权聚合（含当日）；聚合无有效样本 → null（store null
-   * 纪律，禁止 0 充数）。
+   * day/d7/d30 = 本地日 key 滚动窗口**逐样本分布**（含当日；五量见 GenStatsDistribution）；
+   * 窗口无有效样本 → 五字段全 null（store null 纪律，禁止 0 充数）。
+   *
+   * [HISTORICAL] 速度原为窗口总量加权平均（两个 tuple 加总后相除），TTFT 原为 p50 单值；
+   * 两者均已改为逐样本分布（速度逐样本算 t/s 后汇总），同时给 avg/p50/p99/max/min，
+   * 否则「尾部卡顿」在任一单一聚合量下都不可见。旧写入样本无需迁移：分布是对同一批
+   * 原始 tuple 的另一组算法，磁盘格式零变化。
    *
    * 口径切换过渡态（genstats-speed-llm-window D4，排查勿误判）：落盘 append-only，旧口径
    * 样本（durationMs = turn 全程墙钟，含工具执行时间）不迁移，≤30 天 GC 出清前与新口径
@@ -488,17 +518,29 @@ export class GenStatsService {
       fresh?.ttft ?? readDayRecords<TtftRecord>(ttftFilePath(provider, model), TTFT_RECORD_TUPLE_LENGTH)
     return {
       speed: {
-        day: aggregateSpeed(entriesSince<SpeedRecord>(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.day))),
-        d7: aggregateSpeed(entriesSince<SpeedRecord>(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.d7))),
-        d30: aggregateSpeed(entriesSince<SpeedRecord>(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.d30))),
+        day: aggregateSpeedDistribution(
+          entriesSince<SpeedRecord>(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.day)),
+        ),
+        d7: aggregateSpeedDistribution(
+          entriesSince<SpeedRecord>(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.d7)),
+        ),
+        d30: aggregateSpeedDistribution(
+          entriesSince<SpeedRecord>(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.d30)),
+        ),
       },
       cacheRatio: {
         day: aggregateCacheRatio(entriesSince<CacheRatioRecord>(cacheRecords, rollingWindowCutoff(now, WINDOW_DAYS.day))),
       },
       ttft: {
-        day: aggregateTtft(entriesSince<TtftRecord>(ttftRecords, rollingWindowCutoff(now, WINDOW_DAYS.day))),
-        d7: aggregateTtft(entriesSince<TtftRecord>(ttftRecords, rollingWindowCutoff(now, WINDOW_DAYS.d7))),
-        d30: aggregateTtft(entriesSince<TtftRecord>(ttftRecords, rollingWindowCutoff(now, WINDOW_DAYS.d30))),
+        day: aggregateTtftDistribution(
+          entriesSince<TtftRecord>(ttftRecords, rollingWindowCutoff(now, WINDOW_DAYS.day)),
+        ),
+        d7: aggregateTtftDistribution(
+          entriesSince<TtftRecord>(ttftRecords, rollingWindowCutoff(now, WINDOW_DAYS.d7)),
+        ),
+        d30: aggregateTtftDistribution(
+          entriesSince<TtftRecord>(ttftRecords, rollingWindowCutoff(now, WINDOW_DAYS.d30)),
+        ),
       },
       model: modelKey,
     }
