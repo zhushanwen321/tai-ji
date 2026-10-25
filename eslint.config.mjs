@@ -784,8 +784,20 @@ export default [
   },
   {
     files: ['packages/subagent-core/src/execution/persistence/record-store-rebuild.ts'],
+    // [2026-10-25 base lint 债清理] 折算 713 > 700 微超 13——同型提额 720（先例：
+    // journal-projection 545→560 / provider-config-helper 920→950）。拆分属独立重构任务。
     rules: {
-      'max-lines': ['warn', { max: 700, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 720, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // retry-rules.ts：LLM 重试规则域 SSOT（类型 + 校验 + 判定管线纯函数 + 基线数据表
+  // RETRY_RULES_BASELINE，四个消费方共用同一套语义——见文件头注释）。跨包行为镜像
+  // 锁定测试以本文件为锚，拆分需连带迁移锚点，属独立重构任务。折算 506 > 500 微超
+  // ——「微超即提额，保留软上限告警」先例（pi-provider-store 508→520 同型）提额 520。
+  {
+    files: ['packages/shared/src/retry-rules.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
   // [W1 D4 双面证据判别 2026-09-26] record-store-terminal.ts：终局调和面增补收编
