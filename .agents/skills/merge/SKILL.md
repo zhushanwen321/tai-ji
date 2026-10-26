@@ -385,22 +385,12 @@ done
 gh run watch "$RUN_ID" --repo zhushanwen321/tai-ji --exit-status || { echo "✗ release-npm.yml 失败，先归因：gh run view $RUN_ID --log-failed（勿盲目重打 tag）"; exit 1; }
 
 # 第 2 段：registry 探测（必须带具体版本号查——packument 任何版本都返回 200，验不出新版本发布）。
-# registry 最终一致性：publish 成功 ≠ 版本端点立即可查，新版本索引传播有延迟（v0.10.3 实测 15/23 包首轮 404、60s 内收敛），
-# 带上限重试（30s × 6 次），禁无限等待；超限按发布失败处理（exit 1），禁止放宽为「CI 绿即过」
-FAIL=0
-for entry in "@zhushanwen/pi-<pkg> <version>"; do
-  pkg=${entry% *}; ver=${entry##* }
-  scoped=$(echo "$pkg" | sed 's|/|%2f|')
-  ok=""
-  for i in 1 2 3 4 5 6; do
-    code=$(curl -s -o /dev/null -w "%{http_code}" "https://registry.npmjs.org/${scoped}/${ver}")
-    if [ "$code" = "200" ]; then echo "✓ ${pkg}@${ver} 已发布（第 ${i} 次探测）"; ok=1; break; fi
-    echo "  ${pkg}@${ver} 第 ${i} 次探测 ${code}，30s 后重试"
-    sleep 30
-  done
-  [ -n "$ok" ] || { echo "✗ ${pkg}@${ver} 6 次重试后仍未上线，按发布失败处理（先查 release-npm.yml run 日志归因，勿盲目重打 tag）"; FAIL=1; }
-done
-[ "$FAIL" = "0" ] || exit 1
+# 探测逻辑与参数收在 scripts/probe-registry.mjs（单点）：重试 60s × 6（覆盖实测 4-6 分钟传播）、
+# 单次请求 20s 超时（无 curl 挂起）；超限时脚本输出「传播延迟 vs 真失败」的判断材料——
+# 延长等待（--retries 加大重跑）或按发布失败处理由执行方裁决，
+# 「逐包 200 才算过」底线不变（禁止放宽为「CI 绿即过」）。
+node scripts/probe-registry.mjs \
+  "@zhushanwen/pi-<pkg>@<version>"   # 4N.4 输出的待发布包@版本 清单，空格分隔逐个列出
 ```
 
 **[MANDATORY] 禁止本地 `pnpm changeset publish` / `npm publish`**：npm 发布由 CI 完成（NPM_TOKEN 认证）。本地只做 version bump + tag push。
