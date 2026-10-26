@@ -108,11 +108,9 @@ describe('probePackage：重试循环', () => {
 
 describe('runProbe：全量串行', () => {
   it('混合结果 → ok=false 且结果保序', async () => {
-    const okFetch = async () => 200
-    const badFetch = async () => 404
     const r = await runProbe(
       [{ pkg: 'a', ver: '1' }, { pkg: 'b', ver: '1' }],
-      { retries: 2, intervalMs: 1, timeoutMs: 10, fetchImpl: okFetch, sleep: async () => {} },
+      { retries: 2, intervalMs: 1, timeoutMs: 10, fetchImpl: async () => 200, sleep: async () => {} },
     )
     expect(r.ok).toBe(true)
     const mixed = await runProbe(
@@ -127,6 +125,5 @@ describe('runProbe：全量串行', () => {
     )
     expect(mixed.ok).toBe(false)
     expect(mixed.results.map((x) => `${x.pkg}:${x.ok}`)).toEqual(['a:true', 'b:false'])
-    expect(badFetch).toBeTypeOf('function')
   })
 })

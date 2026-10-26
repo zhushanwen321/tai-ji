@@ -99,8 +99,9 @@ if (PR_STATE === 'MERGED') {
 
   const verdict = await waitForRuns({
     fetchRuns: async () => filterDependabot(await fetchRunsRaw()),
-    // PR CI 含 e2e job（test-extensions job 超时预算 20min），10min 默认偏紧；超时是
-    // exit 1 人工介入语义，宁可宽
+    // PR CI 最长 job 是 e2e-visual/e2e-behavior（timeout-minutes: 30），10min 默认
+    // 必然不够；30min 与最长 job 预算同值仍贴线（runner 排队另计），超时是 exit 1
+    // 人工介入语义，宁可宽
     deadlineMs: 1_800_000,
     log: (m) => console.log(`  ${m}`),
   })

@@ -112,10 +112,12 @@ function printVerdict({ ok, results }) {
   const failed = results.filter((r) => !r.ok)
   if (!ok) {
     console.log(`──── 探测超限：已上线 ${results.length - failed.length}/${results.length} ────`)
-    console.log('判断材料（区分「传播延迟」vs「真发布失败」）：')
+    console.log('判断材料（区分「传播延迟」vs「真发布失败/笔误」）：')
     console.log('  1. 查本次 release-npm.yml run 的 publish 步骤日志（gh run view <run-id> --log）：')
     console.log('     - 日志中该包 publish 报错 → 真失败：按发布失败处理（勿盲目重打 tag）')
-    console.log('     - 日志全部成功 → 大概率是 registry 索引传播延迟（历史实测最长 6 分钟）')
+    console.log('     - 日志显示对该版本 skip（changeset publish 静默跳过已发布版本）或根本没有该包')
+    console.log('       → 核对版本号是否笔误 / changeset 是否被提前消费，不是传播延迟')
+    console.log('     - 日志全新成功且版本号无误 → 大概率是 registry 索引传播延迟（实测最长 6 分钟）')
     console.log('  2. 判定为传播延迟时可延长等待后重跑（例：--retries 10）')
     console.log('底线不变：逐包确认 200 才算发布完成，禁止放宽为「CI 绿即过」。')
   }

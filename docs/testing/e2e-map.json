@@ -4537,7 +4537,7 @@
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "npx vitest run scripts/__tests__/probe-registry.test.mjs",
+      "run": "pnpm exec vitest run scripts/__tests__/probe-registry.test.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R1 态：真实运行 = 发布验证阶段（merge 技能 4N.5）对 npm 版本端点逐包探测（重试 60s×6、单次 20s 超时；超限输出「传播延迟 vs 真失败」判断材料，逐包 200 底线不变）；判定语义由注入式单测零 token 锁定"

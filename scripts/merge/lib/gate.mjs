@@ -69,10 +69,25 @@ export async function waitForRuns(opts) {
   let elapsedMs = 0
   let announcedRuns = false
   for (;;) {
-    const runs = await fetchRuns()
+    let runs
+    try {
+      runs = await fetchRuns()
+    } catch {
+      runs = []
+    }
     if (!Array.isArray(runs) || runs.length === 0) {
+      // 曾检测到 runs 之后出现的空结果 = 查询抖动（gh 失败/解析失败被调用方归一为 []），
+      // 不是「CI 未触发」——继续轮询到 deadline，绝不回退成 no-runs（该分支在
+      // wait-for-ci 侧是 exit 0 放行语义，一次 gh 抖动误放行 = 跳过 CI 验证）
+      if (announcedRuns) {
+        log(`⏳ runs 查询返回空（疑似抖动），继续等待... (${String(Math.round(elapsedMs / 1000))}s/${String(Math.round(deadlineMs / 1000))}s)`)
+        if (elapsedMs >= deadlineMs) return { status: 'timeout' }
+        await sleep(pollMs)
+        elapsedMs += pollMs
+        continue
+      }
       if (elapsedMs < notTriggeredGraceMs) {
-        log(`⏳ CI 尚未触发，等待中... (${String(Math.round(elapsedMs / 1000))}s/${String(Math.round(deadlineMs / 1000))}s)`)
+        log(`⏳ CI 尚未触发，宽限等待中... (${String(Math.round(elapsedMs / 1000))}s/${String(Math.round(notTriggeredGraceMs / 1000))}s，超限判 no-runs)`)
         await sleep(pollMs)
         elapsedMs += pollMs
         continue

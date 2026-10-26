@@ -124,6 +124,15 @@ export function wiringFailures({ suites, exempt, stepRuns, filesOnDisk }) {
       })
     }
   }
+  // 豁免登记同样要对账磁盘：豁免文件被删除后登记残留 = 腐烂清单，红灯提示清理
+  for (const e of exempt) {
+    if (!onDisk.has(e.file)) {
+      failures.push({
+        kind: 'missing-ref',
+        message: `豁免登记指向不存在的测试文件：${e.file}（删除该豁免条目）`,
+      })
+    }
+  }
   return failures
 }
 

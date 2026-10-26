@@ -31,9 +31,8 @@
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { relative, resolve } from 'node:path'
 import { findUnversionable, loadPackageRegistry, parseChangesetFrontmatter } from './changeset-versionable.mjs'
 
 /**

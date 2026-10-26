@@ -85,4 +85,11 @@ describe('wiringFailures：三类漂移判定', () => {
     d.filesOnDisk = []
     expect(wiringFailures(d).map((x) => x.kind)).toEqual(['missing-ref'])
   })
+  it('豁免登记指向不存在的文件 → missing-ref（豁免清单同样对账磁盘）', () => {
+    const d = okDeps()
+    d.exempt = [{ file: 'scripts/__tests__/gone.test.mjs', reason: 'x' }]
+    const f = wiringFailures(d)
+    expect(f.map((x) => x.kind)).toEqual(['missing-ref'])
+    expect(f[0].message).toContain('豁免登记')
+  })
 })

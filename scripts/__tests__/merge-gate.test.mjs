@@ -105,6 +105,27 @@ describe('waitForRuns（等待编排——PR 合并判定与 wait-for-ci 共用�
     expect(v.failing[0].databaseId).toBe(3)
   })
 
+  it('【审查修复回归】已检测到 runs 后查询抖动（空结果）→ 继续轮询不回退 no-runs；恢复后正常裁决', async () => {
+    // 审查发现 1：旧实现把「gh 失败/解析失败归一的空」当「CI 未触发」，宽限耗尽后判
+    // no-runs——wait-for-ci 侧是 exit 0 放行语义，一次抖动即跳过 CI 验证
+    const seq = [
+      [runItem('in_progress', null)],
+      [],                                  // 抖动：曾检测到 runs 后的空结果
+      [runItem('in_progress', null)],
+      [runItem('completed', 'success')],
+    ]
+    let cursor = 0
+    const fetcher = async () => { const v = seq[Math.min(cursor, seq.length - 1)]; cursor += 1; return v }
+    const v = await waitForRuns({ fetchRuns: fetcher, sleep: async () => {}, pollMs: 15_000, notTriggeredGraceMs: 30_000 })
+    expect(v.status).toBe('pass')
+  })
+
+  it('【审查修复回归】已检测到 runs 后持续空结果 → timeout（绝不 no-runs 放行）', async () => {
+    const w = fakeWorld([[runItem('in_progress', null)], []])
+    const v = await waitForRuns({ fetchRuns: w.fetcher, sleep: w.sleep, deadlineMs: 60_000, pollMs: 15_000, notTriggeredGraceMs: 30_000 })
+    expect(v.status).toBe('timeout')
+  })
+
   it('30s 触发宽限内无 run → 继续等；宽限耗尽仍无 → no-runs（PR 侧 exit 1 人工确认 / main 侧 exit 0 放行，由调用方定）', async () => {
     const w = fakeWorld([[]])
     const v = await waitForRuns({ fetchRuns: w.fetcher, sleep: w.sleep, pollMs: 15_000, notTriggeredGraceMs: 30_000 })

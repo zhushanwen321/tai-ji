@@ -88,13 +88,13 @@ const wsData = JSON.parse(execFileSync(
 ));
 const packages = {};
 for (const p of wsData.packages) {
-  packages[p.name] = { name: p.name, dir: p.dir, version: p.version, private: p.private, wsDeps: p.wsDeps };
+  packages[p.name] = { name: p.name, dir: p.dir, version: p.version, private: p.private, versionable: p.versionable, wsDeps: p.wsDeps };
 }
 // linked 组参考仍读 config（ignore 判定已上收到 CLI 的 versionable 标记）
 const configPath = path.join(ROOT, '.changeset/config.json');
 const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
 const exists = (name) => Object.prototype.hasOwnProperty.call(packages, name);
-const isVersionable = (name) => exists(name) && wsData.packages.find((p) => p.name === name).versionable;
+const isVersionable = (name) => exists(name) && !!packages[name].versionable;
 function readPkgIfExists(rel) {
   const p = path.join(ROOT, rel);
   if (!fs.existsSync(p)) return null;

@@ -34,6 +34,9 @@
  * 用法：node scripts/quality-gates.mjs [--side dev-merge|pr-cr-fix] [--base <ref>] [--json]
  * 退出码：0 = 全绿；1 = 有 FAIL（typecheck / coverage / 盲区判定 / metrics fail 档）；
  *         2 = 用法/环境错误（py 实体缺失、base 无法解析、py 工具错误）
+ *
+ * 门清单：1 typecheck×4 / 2 coverage-gate / 3 机器盲区 / 4 metrics-gate /
+ * 5 test-suite（快速守卫测试族，scripts/test-suites.mjs 单一登记，恒跑不分 side）
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, linkSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -744,11 +747,15 @@ export function runTestSuiteGate(deps, gates) {
     }
     const r = deps.exec(step.args[0], step.args.slice(1), '')
     const ok = r.status === 0
-    gates.push({
-      name: step.name,
-      status: ok ? 'PASS' : 'FAIL',
-      detail: ok ? '' : tailLines((r.stderr || '') + (r.stdout || ''), 20),
-    })
+    let detail = ''
+    if (!ok) {
+      // spawn 失败（status null）时 stderr/stdout 恒空——同 typecheck 门实发过的哑 FAIL
+      // 形态（node 版本管理器漏 PATH），补恢复动作线索
+      detail = r.status === null && r.error
+        ? `命令无法执行：${step.args[0]} 不在 PATH 或不可执行（${r.error.message}）。恢复：确保 pnpm/npx 在 PATH 中（node 版本管理器环境需先加载）`
+        : tailLines((r.stderr || '') + (r.stdout || ''), 20)
+    }
+    gates.push({ name: step.name, status: ok ? 'PASS' : 'FAIL', detail })
   }
 }
 

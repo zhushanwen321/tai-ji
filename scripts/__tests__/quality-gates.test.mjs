@@ -513,4 +513,18 @@ describe('gate 5 test-suite：快速守卫测试族（SUITES 单一登记的执�
     expect(byName['test-suite:taste-lint'].detail).toContain('rule case failed')
     expect(byName['test-suite:scripts-guards'].status).toBe('PASS')
   })
+
+  it('spawn 失败（status null + error）→ FAIL 且 detail 含命令名与恢复动作（非哑 FAIL，同 typecheck 门实发形态）', async () => {
+    const m = await import('../quality-gates.mjs')
+    const deps = {
+      exec: (cmd) => (cmd === 'pnpm' ? { status: null, stdout: '', stderr: '', error: new Error('spawn pnpm ENOENT') } : { status: 0, stdout: '', stderr: '' }),
+    }
+    const gates = []
+    m.runTestSuiteGate(deps, gates)
+    const tl = gates.find((g) => g.name === 'test-suite:taste-lint')
+    expect(tl.status).toBe('FAIL')
+    expect(tl.detail).toContain('pnpm')
+    expect(tl.detail).toContain('PATH')
+    expect(tl.detail).toContain('spawn pnpm ENOENT')
+  })
 })

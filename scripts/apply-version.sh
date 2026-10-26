@@ -137,12 +137,12 @@ const wsData = JSON.parse(execFileSync(
 ));
 const packages = {}; // name -> { dir, version, private, wsDeps:[{dep,range,depType}] }
 for (const p of wsData.packages) {
-  packages[p.name] = { name: p.name, dir: p.dir, version: p.version, private: p.private, wsDeps: p.wsDeps };
+  packages[p.name] = { name: p.name, dir: p.dir, version: p.version, private: p.private, versionable: p.versionable, wsDeps: p.wsDeps };
 }
 // fixed/linked 组仍读 config（ignore 判定已上收到 CLI 的 versionable 标记）
 const configPath = path.join(ROOT, '.changeset/config.json');
 const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
-const isVersionable = (name) => packages[name] && wsData.packages.find((p) => p.name === name).versionable;
+const isVersionable = (name) => !!packages[name] && !!packages[name].versionable;
 
 // --- 解析 .changeset/*.md（body 供 CHANGED 包 CHANGELOG 条目）---
 const changesetDir = path.join(ROOT, '.changeset');
@@ -419,11 +419,11 @@ const touchedFiles = [];
 for (const name of Object.keys(plan)) {
   const p = packages[name];
   // package.json
-  const pjAbs = path.join(ROOT, p.pkgPath);
+  const pkgJsonRel = `${p.dir}/package.json`;
   writeJsonPreserve(pjAbs, (obj) => { obj.version = plan[name].newVer; });
-  touchedFiles.push(p.pkgPath);
+  touchedFiles.push(pkgJsonRel);
   // CHANGELOG
-  const { filePath: clAbs, out: clOut } = prependChangelog(p.pkgPath, name, buildSection(name));
+  const { filePath: clAbs, out: clOut } = prependChangelog(pkgJsonRel, name, buildSection(name));
   fs.writeFileSync(clAbs, clOut);
   touchedFiles.push(path.relative(ROOT, clAbs));
 }
