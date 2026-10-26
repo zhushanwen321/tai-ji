@@ -1,11 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises'
+import { describe, it, expect, beforeEach, afterEach, vi, beforeAll, afterAll } from 'vitest'
+import { PluginRegistry } from '../src/services/plugin-service/plugin-registry.js'
 import { existsSync } from 'node:fs'
+import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { PluginRegistry } from '../src/services/plugin-service/plugin-registry.js'
+// 本文件另为 plugin-registry 合并载体（plugin-foundation 折叠为分节）。
+
 
 /**
  * S1-W4（D3 信任级判定权回收）安全回归测试。
@@ -184,5 +186,73 @@ describe('PluginRegistry trust boundary (S1-W4 / D3)', () => {
     expect(src).toContain("path.join(process.resourcesPath, 'resources', 'plugins')")
     // dev 形态：repo 根 resources/plugins
     expect(src).toContain("path.join(repoRoot, 'resources', 'plugins')")
+  })
+})
+
+// ════════════════ 来源: plugin-foundation.test.ts ════════════════
+
+describe('plugin-foundation', () => {
+  let tmpDir: string
+
+  beforeAll(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'plugin-foundation-test-'))
+  })
+
+  afterAll(async () => {
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  describe('PluginRegistry built-in scan', () => {
+    it('scan() includes built-in path resources/plugins/', async () => {
+      const registry = new PluginRegistry(tmpDir, tmpDir)
+      // 获取 scan 的目录列表——通过创建 built-in 插件验证
+      const builtInDir = join(tmpDir, 'resources', 'plugins', 'core-tool')
+      await mkdir(builtInDir, { recursive: true })
+      await writeFile(
+        join(builtInDir, 'package.json'),
+        JSON.stringify({
+          name: 'core-tool',
+          version: '1.0.0',
+          taijiPlugin: {
+            manifestVersion: 1,
+            main: 'index.js',
+            activationEvents: ['onStartupFinished'],
+          },
+        }),
+        'utf-8',
+      )
+
+      const descriptors = await registry.scan()
+      const coreTool = descriptors.find(d => d.pluginId === 'core-tool')!
+      expect(coreTool).toBeTruthy()
+      expect(coreTool.source).toBe('built-in')
+      expect(coreTool.extensionDependencies).toEqual([])
+    })
+
+    it('external plugins are marked as external', async () => {
+      const pluginDir = join(tmpDir, '.taiji', 'plugins', 'ext-plugin')
+      await mkdir(pluginDir, { recursive: true })
+      await writeFile(
+        join(pluginDir, 'package.json'),
+        JSON.stringify({
+          name: 'ext-plugin',
+          version: '1.0.0',
+          taijiPlugin: {
+            manifestVersion: 1,
+            main: 'index.js',
+            activationEvents: [],
+            extensionDependencies: ['core-tool'],
+          },
+        }),
+        'utf-8',
+      )
+
+      const registry = new PluginRegistry(tmpDir, tmpDir)
+      const descriptors = await registry.scan()
+      const ext = descriptors.find(d => d.pluginId === 'ext-plugin')!
+      expect(ext).toBeTruthy()
+      expect(ext.source).toBe('external')
+      expect(ext.extensionDependencies).toEqual(['core-tool'])
+    })
   })
 })

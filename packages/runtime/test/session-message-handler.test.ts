@@ -17,13 +17,8 @@ import type { ClientMessage, ServerMessage } from '@taiji/shared'
 import { makeSessionServiceEnv } from '../src/services/session/__tests__/helpers/session-service-test-env.js'
 
 // ════════════════ 来源: session-message-handler.test.ts（原主文件）════════════════
-interface Captured {
-  replies: { id: string | undefined; type: string; payload: Record<string, unknown> }[]
-  errors: { id: string | undefined; code: string; message: string; details?: Record<string, unknown> }[]
-}
-
 function makeHandler(sessionOverrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
-  const cap: Captured = { replies: [], errors: [] }
+  const cap: Captured = { replies: [], errors: [], broadcasts: [] }
   const sessionService = {
     sendMessage: vi.fn().mockResolvedValue({ blocked: false }),
     ensureActive: vi.fn().mockResolvedValue(undefined),
@@ -229,13 +224,8 @@ describe('SessionMessageHandler — error envelope 回归', () => {
 // mock 模式参考 test/session-message-handler.test.ts（makeHandler + Captured reply/error）。
 // /
 
-interface Captured {
-  replies: { id: string | undefined; type: string; payload: Record<string, unknown> }[]
-  errors: { id: string | undefined; code: string; message: string; details?: Record<string, unknown> }[]
-}
-
 function makeBashHandler(sessionOverrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
-  const cap: Captured = { replies: [], errors: [] }
+  const cap: Captured = { replies: [], errors: [], broadcasts: [] }
   const sessionService = {
     sendBash: vi.fn().mockResolvedValue({ status: 'settled' }),
     // P6 断言④回执真实化：abortBash 返回 { sent }，默认 sent=true（abort_bash 发出且 pi 确认）
@@ -410,12 +400,6 @@ describe('SessionMessageHandler —— message.abortBash 路由', () => {
 // mock 模式参考 session-message-handler-bash.test.ts（makeHandler + Captured reply/error/broadcast）。
 // /
 
-interface Captured {
-  replies: { id: string | undefined; type: string; payload: Record<string, unknown> }[]
-  errors: { id: string | undefined; code: string; message: string; details?: Record<string, unknown> }[]
-  broadcasts: ServerMessage[]
-}
-
 interface MakeHandlerOpts {
   handoffService?: { abortHandoff: ReturnType<typeof vi.fn> } | undefined
 }
@@ -574,13 +558,8 @@ describe('SessionMessageHandler —— session.abortHandoff 路由', () => {
 // mock 模式参考 src/__tests__/session-message-handler-bash.test.ts（makeHandler + Captured reply/error）。
 // /
 
-interface Captured {
-  replies: { id: string | undefined; type: string; payload: Record<string, unknown> }[]
-  errors: { id: string | undefined; code: string; message: string; details?: Record<string, unknown> }[]
-}
-
 function makeImageHandler(sessionOverrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
-  const cap: Captured = { replies: [], errors: [] }
+  const cap: Captured = { replies: [], errors: [], broadcasts: [] }
   const sessionService = {
     writeImage: vi.fn().mockResolvedValue({ path: '/att/x.png', persisted: true }),
     migrateImage: vi.fn().mockResolvedValue({ path: '/att/y.png' }),
@@ -728,13 +707,8 @@ describe('SessionMessageHandler —— session.writeSegments 路由', () => {
 // mock 模式参考 session-message-handler-subscribe.test.ts（makeHandler + Captured）。
 // /
 
-interface Captured {
-  replies: { id: string | undefined; type: string; payload: Record<string, unknown> }[]
-  errors: { id: string | undefined; code: string; message: string }[]
-}
-
 function makeSwitchHandler(getSummaryResult: Record<string, unknown> | undefined) {
-  const cap: Captured = { replies: [], errors: [] }
+  const cap: Captured = { replies: [], errors: [], broadcasts: [] }
   const getHistory = vi.fn(async () => ({ messages: [], truncated: false }))
   const ctx = {
     send: vi.fn(),
@@ -795,7 +769,7 @@ describe('session.switch reply 瘦身（R-11）', () => {
   })
 
   it('restore 失败：仍走 error envelope（not_found），reply 不含历史 payload', async () => {
-    const cap: Captured = { replies: [], errors: [] }
+    const cap: Captured = { replies: [], errors: [], broadcasts: [] }
     const ctx = {
       send: vi.fn(),
       reply: vi.fn((_ws: unknown, id: string | undefined, type: string, payload: Record<string, unknown>) => {
@@ -953,12 +927,6 @@ describe('session.fetchCurrentSystemPrompt WS handler', () => {
 // session.rename 等纯转发抽样
 // - 未知 type 落空（不发任何消息、不抛错）
 // /
-
-interface Captured {
-  replies: { id: string | undefined; type: string; payload: Record<string, unknown> }[]
-  errors: { id: string | undefined; code: string; message: string; details?: Record<string, unknown> }[]
-  broadcasts: ServerMessage[]
-}
 
 function makeDispatchHandler(overrides: Record<string, ReturnType<typeof vi.fn>> = {}, ctxExtras: Record<string, unknown> = {}) {
   const cap: Captured = { replies: [], errors: [], broadcasts: [] }
@@ -1227,10 +1195,11 @@ describe('SessionMessageHandler 分发路由（W1 表驱动重构回归锚定）
 interface Captured {
   replies: { id: string | undefined; type: string; payload: Record<string, unknown> }[]
   errors: { id: string | undefined; code: string; message: string; details?: Record<string, unknown> }[]
+  broadcasts: ServerMessage[]
 }
 
 function makeErrCodeHandler(createImpl: ReturnType<typeof vi.fn>, forkImpl?: ReturnType<typeof vi.fn>, deleteImpl?: ReturnType<typeof vi.fn>) {
-  const cap: Captured = { replies: [], errors: [] }
+  const cap: Captured = { replies: [], errors: [], broadcasts: [] }
   const sessionService = {
     create: createImpl,
     forkSession: forkImpl ?? vi.fn().mockResolvedValue({ id: 'forked' }),

@@ -1,3 +1,6 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { listBuiltinProviders } from '../provider-config-helper.js'
+
 /**
  * listBuiltinProviders 畸形快照降级分支测试（S-15 补口）。
  *
@@ -10,8 +13,6 @@
  *
  * 运行：cd packages/runtime && npx vitest run src/services/__tests__/provider-config-helper-builtin-malformed.test.ts
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { listBuiltinProviders } from '../provider-config-helper.js'
 
 const builtinMock = vi.hoisted(() => ({
   providers: [] as unknown,

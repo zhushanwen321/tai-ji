@@ -1,4 +1,28 @@
 /**
+ * ProviderWriteProxy（providers.* 代理 / 写落点广播 / 磁盘断言 / manifest reader / credential roundtrip 真链路）合并测试。
+ *
+ * 来源（各来源节以基名 describe 包裹，节内顶层 hook/helper/mock 随节下沉）：
+ * - wool-provider-write-proxy.test.ts
+ * - provider-credential-roundtrip.test.ts
+ *
+ * 运行：cd packages/runtime && TAIJI_SKIP_REAL_PI=1 npx vitest run src/services/__tests__/wool-provider-write-proxy.test.ts
+ */
+
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { setModelsPath, readModels, getProviderConfig, upsertProvider, ensureProviderInWhitelist } from '../../infra/pi/pi-provider-store.js'
+import { AuthStorage } from '../auth/auth-storage.js'
+import { ProviderCredentialResolver } from '../auth/provider-credential-resolver.js'
+import { PluginRpcServer } from '../plugin-service/plugin-rpc-server.js'
+import type { RpcRequest, RpcResponse } from '../plugin-service/plugin-types.js'
+import { setProvider as setProviderImpl } from '../provider-config-helper.js'
+import type { ProviderWriteProxyDeps } from '../provider-write-proxy.js'
+import { registerProviderWriteProxy, createPluginManifestReader, PROVIDERS_WRITE_METHOD, PROVIDERS_DELETE_METHOD, PROVIDERS_CREDENTIAL_METHOD, WRITE_BROADCAST_DEBOUNCE_MS } from '../provider-write-proxy.js'
+
+describe('wool-provider-write-proxy', () => {
+/**
  * providers.* 三 RPC 代理测试（provider-plugin-access D4；S20/S21 宿主侧断言）。
  *
  * 覆盖：S20 正向回读（命名空间内 + network.http 已声明 → 定向 reply 携明文）；
@@ -10,22 +34,6 @@
  * 走真实 PluginRpcServer dispatch 链（wire response 形态即插件侧所见），依赖 stub 注入。
  * 测试框架：vitest。运行：cd packages/runtime && npx vitest run wool
  */
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { PluginRpcServer } from '../plugin-service/plugin-rpc-server.js'
-import type { RpcRequest } from '../plugin-service/plugin-types.js'
-import {
-  registerProviderWriteProxy,
-  createPluginManifestReader,
-  PROVIDERS_WRITE_METHOD,
-  PROVIDERS_DELETE_METHOD,
-  PROVIDERS_CREDENTIAL_METHOD,
-  WRITE_BROADCAST_DEBOUNCE_MS,
-  type ProviderWriteProxyDeps,
-} from '../provider-write-proxy.js'
-
 /** 羊毛形态插件清单：WorkBuddy 插件（ns=wool-workbuddy，含 network.http）。 */
 const WORKBUDDY_MANIFEST = { pkgName: '@zhushanwen/plugin-wool-workbuddy', capabilities: ['network.http'] as const }
 
@@ -456,4 +464,86 @@ describe('createPluginManifestReader（包根定位：entry 在子目录形态�
     const read = createPluginManifestReader({ getDescriptor: () => ({ pluginPath: join(pkgDir, 'index.js') }) })
     expect(read('plugin-bad')).toBeUndefined()
   })
+})
+})
+
+describe('provider-credential-roundtrip', () => {
+/**
+ * providers.write → providers.credential 真链路 roundtrip（⑦ 读写对称回归）。
+ *
+ * 既有 wool-provider-write-proxy.test.ts 全部 mock resolveProviderCredential——
+ * 「真实 setProvider 写策略链 → 真实 ProviderCredentialResolver」的读写对称从未被
+ * 体外覆盖（ISSUES-2 ⑦ 曾据此怀疑读写源不对称；本文件实测证明生产链在写后回读
+ * 命中同一 key——真机落空的根因在插件侧调用形态，见 plugin-provider-access-
+ * plugin-side.test.ts 的对象形态用例）。本文件用真实 pi-provider-store（setModelsPath
+ * 指向 tmp）+ 真实 setProvider + 真实 resolver 走完整 dispatch 链钉住该对称。
+ *
+ * 运行：cd packages/runtime && npx vitest run provider-credential-roundtrip
+ */
+let dir: string
+
+afterEach(() => {
+  if (dir) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+})
+
+/** 真实生产装配的最小复刻：pi-provider-store 模块单例 + AuthStorage + 真实 resolver。 */
+function wireProduction() {
+  dir = mkdtempSync(join(tmpdir(), 'provider-cred-roundtrip-'))
+  setModelsPath(join(dir, 'models.json'))
+  const authStorage = new AuthStorage(join(dir, 'auth.json'))
+  const configStore = {
+    readModels: () => readModels(),
+    getProviderConfig: (providerId: string) => getProviderConfig(providerId),
+    upsertProvider: (providerId: string, config: Record<string, unknown>) => upsertProvider(providerId, config as never),
+    ensureProviderInWhitelist: (providerId: string) => ensureProviderInWhitelist(providerId),
+  }
+  const resolver = new ProviderCredentialResolver({
+    authService: { getCredential: (providerId: string) => authStorage.get(providerId) },
+    authStorage,
+    configStore,
+  })
+  return { authStorage, configStore, resolver }
+}
+
+async function dispatch(rpcServer: PluginRpcServer, method: string, params: Record<string, unknown>): Promise<RpcResponse> {
+  const responses: RpcResponse[] = []
+  rpcServer.registerWorker('w1', { postMessage: (msg) => { responses.push((msg as { response: RpcResponse }).response) } }, {
+    trustLevel: 'sandbox',
+    pluginId: 'zhushanwen__plugin-wool-qoder',
+  })
+  const request: RpcRequest = { jsonrpc: '2.0', id: 1, method, params }
+  await rpcServer.dispatch('w1', request)
+  expect(responses.length).toBe(1)
+  return responses[0]
+}
+
+describe('providers.write → providers.credential 真链路 roundtrip（⑦ 读写对称）', () => {
+  it('插件条目（custom 通道落 models.json）写入后 credential 回读命中同一 key', async () => {
+    const { authStorage, configStore, resolver } = wireProduction()
+    const apiKey = 'dt-' + 'k'.repeat(24) // wool-qoder 真实发布形态的长度锚（dt- + 24）
+    const rpcServer = new PluginRpcServer()
+    registerProviderWriteProxy(rpcServer, {
+      setProvider: (providerId, data) => setProviderImpl(configStore as never, authStorage, undefined, undefined, providerId, data as never),
+      deleteProvider: async () => ({ removed: true }),
+      resolveProviderCredential: (providerId) => resolver.resolveProviderCredential(providerId),
+      readPluginManifest: () => ({ pkgName: '@zhushanwen/plugin-wool-qoder', capabilities: ['network.http'] }),
+      notifyProvidersMutated: () => {},
+    })
+
+    const writeReply = await dispatch(rpcServer, 'providers.write', {
+      providerId: 'wool-qoder',
+      apiKey,
+      models: [{ id: 'wool-qoder/basic', api: 'wool-qoder', baseUrl: 'https://example.invalid' }],
+    })
+    expect('result' in writeReply && (writeReply.result as { written?: boolean }).written).toBe(true)
+
+    const credReply = await dispatch(rpcServer, 'providers.credential', { providerId: 'wool-qoder' })
+    expect('result' in credReply ? credReply.result : undefined).toEqual({
+      providerId: 'wool-qoder',
+      key: apiKey,
+      source: 'models.json',
+      kind: 'api_key',
+    })
+  })
+})
 })

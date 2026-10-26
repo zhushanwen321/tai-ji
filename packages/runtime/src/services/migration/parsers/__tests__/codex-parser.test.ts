@@ -1,3 +1,9 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { parseCodexProviders } from '../codex-parser.js'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 /**
  * codex-parser 测试（W3）。
  *
@@ -16,12 +22,7 @@
  *   - T8：源目录不存在 → null。
  *   - T9：auth.json 的 OPENAI_API_KEY 作为 id 含 'openai' 的 provider 的默认 key 回退。
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 
-import { parseCodexProviders } from '../codex-parser.js'
 
 // ── fixture 内容（与 ./fixtures/*.toml 一致，假 key）──────────────
 const CODEX_CONFIG_RESPONSES_TOML = `model = "gpt-5.5"

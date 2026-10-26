@@ -41,7 +41,7 @@ function extractLastResponse(port: ReturnType<typeof createMockPort>): RpcRespon
 
 // ── Helper: mock PluginRpcClient ─────────────────────────────────────────
 
-interface MockRpcClient {
+interface MockRpcClient { // oe-exempt:20261027:test:测试夹具接口（合并产物内多节共用的 mock 形状契约）
   requestCalls: Array<{ method: string; params: Record<string, unknown> }>
   requestResults: Map<string, unknown>
   onNotificationHandlers: Map<string, (params: unknown) => void>

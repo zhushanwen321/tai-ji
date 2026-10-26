@@ -14,7 +14,8 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EventAdapter, translate } from '../event-adapter.js'
-import type { PiEvent, PiEventClient, PiMessageUpdateEvent, PiAgentEndEvent, PiTurnStartEvent } from '../pi-protocol.js'
+import type { PiEvent, PiMessageUpdateEvent, PiAgentEndEvent, PiTurnStartEvent, PiMessageEndEvent, PiAgentSettledEvent, PiEntryAppendedEvent } from '../pi-protocol.js'
+import type { PiEventClient } from '../event-adapter.js'
 import { setJournalReportSink } from '../../../services/session/journal-report-router.js'
 import { SUBAGENT_JOURNAL_MARKER, JOURNAL_REPORT_ACK } from '@zhushanwen/extension-protocol'
 import type { SubagentJournalReport } from '@zhushanwen/extension-protocol'

@@ -74,7 +74,7 @@ function makeClient(overrides: Partial<IPiEngine> = {}): IPiEngine {
   } as unknown as IPiEngine
 }
 
-interface MakeOpts {
+interface MakeOpts { // oe-exempt:20261027:test:测试夹具接口（合并产物内多节共用的 mock 形状契约）
   /** switchSession 抛错（触发第一个 catch 块） */
   switchFails?: boolean
   /** registerSession 抛错（触发第二个 catch 块；S3 迁移后经 adapterFactory 抛错注入） */

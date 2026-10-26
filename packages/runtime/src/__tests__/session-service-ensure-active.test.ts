@@ -1,4 +1,24 @@
 /**
+ * SessionService.ensureActive（exited 防御 / btw 分支 / W09 单通道验收）合并测试。
+ *
+ * 来源（各来源节以基名 describe 包裹，节内顶层 hook/helper/mock 随节下沉）：
+ * - session-service-ensure-active.test.ts
+ * - btw-ensure-branch.test.ts
+ * - w09-single-channel-v1.test.ts
+ *
+ * 运行：cd packages/runtime && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/session-service-ensure-active.test.ts
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type { ServerMessage, SessionSummary } from '@taiji/shared'
+import type { IMessageBroker } from '../interfaces.js'
+import { MessageBus } from '../services/message-bus/message-bus.js'
+import type { IPiEngine, IProcessManager } from '../services/ports/pi-engine.js'
+import { BtwError } from '../services/session/btw-service.js'
+import { SessionService } from '../services/session/session-service.js'
+
+describe('session-service-ensure-active', () => {
+/**
  * ensureActive exited 防御 + 恢复窗口注册态测试（fix-respawn-pi Wave 2 + switch-race-window）。
  *
  * 锁定语义：
@@ -22,12 +42,6 @@
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/session-service-ensure-active.test.ts
  */
-import { describe, it, expect, vi } from 'vitest'
-import { SessionService } from '../services/session/session-service.js'
-import type { IMessageBroker } from '../interfaces.js'
-import type { IPiEngine, IProcessManager } from '../services/ports/pi-engine.js'
-import type { ServerMessage, SessionSummary } from '@taiji/shared'
-
 /** 最小假 client：ensureActive 只消费身份 + exited 标志。 */
 function makeClient(exited: boolean): IPiEngine {
   return { exited } as unknown as IPiEngine
@@ -164,4 +178,258 @@ describe('SessionService.ensureActive（exited 防御 + 恢复窗口注册态）
     )
     await expect(svc.restoreSession('nope-session')).rejects.toThrow('请新建会话')
   })
+})
+})
+
+describe('btw-ensure-branch', () => {
+/**
+ * ensureActive 的 btw 分支（btw-question B3 裁决，M2-b）——回收后续问的附着入口。
+ *
+ * 锁定语义：
+ * - btw 线 session id + 已注入 BtwService → 转 ensureProcess（自建附着编排：alive → markActivity
+ *   直返 / 回收死亡 → spawn→switch→附着断言 reattach，D1⑥/V5），分支先于既有
+ *   pm.getClient / restore 链（restore 路径 findScannedSession 只扫 sessions/，对 btw 线
+ *   构造性失败——V5 核实结论）；
+ * - 非 btw sid + 已注入 → 分支不命中，既有链零变更；
+ * - btw 线 session id + 未注入 BtwService（存量测试构造）→ fall through 零变更；
+ * - 附着失败 BtwError 原样上抛（code 保留）——message.send 路径由
+ *   dispatcher.ensureActiveOrBroadcast 统一处理 message.error（错误文案带恢复指引）。
+ *
+ * 构造模式：session-service-ensure-active.test.ts 的 makeEnv 轻量桩（mock pm/broker/
+ * adapterFactory，未被测路径的依赖给最小桩）。
+ *
+ * 运行：cd packages/runtime && npx vitest run src/__tests__/btw-ensure-branch.test.ts
+ */
+/** btw 线 session id（W4a 键统一后 = pi 真实会话 id，与生产同形态）。 */
+const LINE_ID = 'thread-para'
+
+/** 最小假 client：ensureActive 分支只消费身份。 */
+function makeClient(exited: boolean): IPiEngine {
+  return { exited } as unknown as IPiEngine
+}
+
+function makeEnv(getClientImpl: (sessionId: string) => IPiEngine | undefined) {
+  const broker = { broadcast: vi.fn((_: ServerMessage) => {}) } as unknown as IMessageBroker
+  const getClient = vi.fn(getClientImpl)
+  const pm = {
+    onSessionExit: vi.fn(() => () => {}),
+    getClient,
+  } as unknown as IProcessManager
+  const svc = new SessionService(
+    pm,
+    broker,
+    () => ({ attach: vi.fn(), detach: vi.fn() }),
+    '/test/project-root',
+    {} as never, // extensionService：被测路径未消费
+    { getDefaultModel: () => ({ provider: 'test-provider', modelId: 'test-model' }) } as never, // configStore
+    { scanSessions: vi.fn(() => []), extractSessionOutcome: vi.fn(() => null), persistSessionEnd: vi.fn() } as never, // sessionStore
+    { readGitInfo: vi.fn(() => undefined) } as never, // gitInfoReader
+    {} as never, // workspaceService
+  )
+  return { svc, pm, getClient }
+}
+
+describe('SessionService.ensureActive · btw 分支（B3 裁决，M2-b）', () => {
+  it('btw 线 session id + 已注入 BtwService → 转 ensureProcess，不进 pm.getClient / restore 链', async () => {
+    const attached = makeClient(false)
+    const ensureProcess = vi.fn(async () => attached)
+    const { svc, getClient } = makeEnv(() => {
+      throw new Error('pm.getClient 不应被调用（btw 分支先于既有链）')
+    })
+    // W4a 判别器 = registry 成员查询（getLine 注入；旧 isBtwVirtualId 前缀判别已删）
+    svc.setBtwService({ ensureProcess, getLine: ((id: string) => (id === LINE_ID ? { mainSid: 'main-x' } : undefined)) as never })
+    const restoreSpy = vi.spyOn(svc, 'restoreSession')
+
+    const got = await svc.ensureActive(LINE_ID)
+
+    expect(got).toBe(attached)
+    expect(ensureProcess).toHaveBeenCalledTimes(1)
+    expect(ensureProcess).toHaveBeenCalledWith(LINE_ID)
+    expect(getClient).not.toHaveBeenCalled()
+    expect(restoreSpy).not.toHaveBeenCalled()
+    restoreSpy.mockRestore()
+  })
+
+  it('非 btw sid + 已注入 BtwService → 分支不命中，既有链零变更', async () => {
+    const live = makeClient(false)
+    const ensureProcess = vi.fn()
+    const { svc, getClient } = makeEnv(() => live)
+    svc.setBtwService({ ensureProcess })
+    // 快路径前提 = 完整注册态 [switch-race-window]：活 client + Map 缺条目 = 恢复窗口
+    // 半成品，会走恢复内核而非快路径——initializeManagedSession 播种注册态
+    await svc.initializeManagedSession('plain-session', live, '/test/cwd', 'label')
+
+    const got = await svc.ensureActive('plain-session')
+
+    expect(got).toBe(live)
+    expect(ensureProcess).not.toHaveBeenCalled()
+    expect(getClient).toHaveBeenCalledWith('plain-session')
+  })
+
+  it('btw 线 session id + 未注入 BtwService → fall through 既有链（存量构造零变更）', async () => {
+    const live = makeClient(false)
+    const { svc, getClient } = makeEnv(() => live)
+    // 快路径前提 = 完整注册态 [switch-race-window]（同上）
+    await svc.initializeManagedSession(LINE_ID, live, '/test/cwd', 'label')
+
+    const got = await svc.ensureActive(LINE_ID)
+
+    expect(got).toBe(live)
+    expect(getClient).toHaveBeenCalledWith(LINE_ID)
+  })
+
+  it('附着失败：BtwError 原样上抛且 code 保留（message.error 收尾链的输入契约）', async () => {
+    const ensureProcess = vi.fn(async () => {
+      throw new BtwError('thread_file_missing', `[btw] thread session file missing (line had never flushed): /x/${LINE_ID}`)
+    })
+    const { svc } = makeEnv(() => undefined)
+    // getLine 注入命中 = btw 线分支（W4a 判别器）
+    svc.setBtwService({ ensureProcess, getLine: ((id: string) => (id === LINE_ID ? { mainSid: 'main-x' } : undefined)) as never })
+
+    await expect(svc.ensureActive(LINE_ID)).rejects.toMatchObject({
+      name: 'BtwError',
+      code: 'thread_file_missing',
+      message: expect.stringContaining('line had never flushed'),
+    })
+  })
+})
+})
+
+describe('w09-single-channel-v1', () => {
+/**
+ * W09 单通道确定性验收（02 文档 §4 V1 的脚本化断言，wave:perf-w09 D1-2）。
+ *
+ * V1 原文：「同一 session 级消息在 send/bus 层只被 JSON.stringify 一次（ws 层打点计数 = 1）、
+ * 只推给订阅该 sid 的连接」。本文件把两条都做成确定性断言（不依赖真实 ws / 真实 pi）：
+ *
+ * - TC-V1a（bus 层）：publish 一条 stream 消息 → JSON.stringify 恰好 1 次；
+ *   订阅该 sid 的 ws 收到 1 条、订阅其它 sid 的 ws / 未订阅 ws 均 0 条。
+ * - TC-V1b（send 层集成）：SessionService 的 send 回调（EventAdapter 透传路径）转发
+ *   session 级消息 → 全程 JSON.stringify 恰好 1 次（只有 bus 的定向推送一次），
+ *   broker.broadcast 0 次（盲广播路径已删）。
+ * - TC-V1c（transient）：delta 类不占 seq，同一窗口 stringify 仍恰好 1 次。
+ *
+ * 运行：cd packages/runtime && npx vitest run src/__tests__/w09-single-channel-v1.test.ts
+ */
+/** mock ws（BusClient 契约：readyState + send），收集收到的原始 payload 字符串。 */
+function createMockWs() {
+  const sent: string[] = []
+  return {
+    readyState: 1 as const,
+    sent,
+    send: (payload: string) => { sent.push(payload) },
+  }
+}
+
+/**
+ * 构造真实 SessionService + 真实 MessageBus（对齐 session-service-w07-bus.test.ts 的 makeEnv），
+ * sendCb 捕获 initializeManagedSession 注入 adapterFactory 的 send 回调。
+ */
+function makeEnv() {
+  const broadcasts: ServerMessage[] = []
+  const broker = { broadcast: vi.fn((m: ServerMessage) => { broadcasts.push(m) }) } as unknown as IMessageBroker
+
+  const client = { getCommands: vi.fn(async () => []) } as unknown as IPiEngine
+  const pm = {
+    onSessionExit: vi.fn(),
+    getClient: vi.fn(() => client),
+  } as unknown as IProcessManager
+
+  let sendCb: ((msg: ServerMessage) => void) | null = null
+  const captureAdapterFactory = (_sid: string, send: (msg: ServerMessage) => void) => {
+    sendCb = send
+    return { attach: vi.fn(), detach: vi.fn() }
+  }
+
+  const bus = new MessageBus()
+  const svc = new SessionService(
+    pm,
+    broker,
+    captureAdapterFactory,
+    '/test/project-root',
+    {} as never, // extensionService：被测路径未消费
+    { getDefaultModel: () => ({ provider: 'test-provider', modelId: 'test-model' }) } as never,
+    { scanSessions: vi.fn(() => []), extractSessionOutcome: vi.fn(() => null), persistSessionEnd: vi.fn() } as never,
+    { pruneStaleCache: vi.fn() } as never,
+    {} as never, // workspaceService
+    bus,
+  )
+  svc.setMessageBus(bus)
+  return { svc, bus, broker, broadcasts, getSendCb: () => sendCb! }
+}
+
+describe('W09 单通道确定性验收（02 §4 V1）', () => {
+  let stringifySpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    stringifySpy = vi.spyOn(JSON, 'stringify')
+  })
+  afterEach(() => {
+    stringifySpy.mockRestore()
+  })
+
+  it('TC-V1a: bus.publish 一条 stream 消息 → JSON.stringify 恰好 1 次 + 只推订阅该 sid 的连接', () => {
+    const bus = new MessageBus()
+    const wsA = createMockWs() // 订阅 sid-1（目标 session）
+    const wsB = createMockWs() // 订阅 sid-2（其它 session）
+    const wsC = createMockWs() // 未订阅任何 session
+    bus.subscribe('sid-1', wsA)
+    bus.subscribe('sid-2', wsB)
+
+    stringifySpy.mockClear()
+    bus.publish('sid-1', { type: 'message.status', payload: { sessionId: 'sid-1', status: 'thinking' } })
+
+    // 只序列化一次（三个连接总共一次 stringify——序列化与订阅者数解耦）
+    expect(stringifySpy).toHaveBeenCalledTimes(1)
+    // 只有订阅 sid-1 的连接收到，恰好 1 条
+    expect(wsA.sent).toHaveLength(1)
+    expect(JSON.parse(wsA.sent[0]!)).toMatchObject({ type: 'message.status', seq: 1 })
+    // 订阅其它 sid 的连接、未订阅连接均未收到（V1：每个 panel 只收到自己 session 的消息）
+    expect(wsB.sent).toHaveLength(0)
+    expect(wsC.sent).toHaveLength(0)
+  })
+
+  it('TC-V1b: send 层（SessionService send 回调）转发 session 级消息 → 全程 stringify 恰好 1 次、broadcast 0 次', async () => {
+    const { svc, bus, broker, broadcasts, getSendCb } = makeEnv()
+    await svc.initializeManagedSession('s-v1', {} as unknown as IPiEngine, '/tmp', 'test')
+    const send = getSendCb()
+
+    const online = createMockWs()
+    bus.subscribe('s-v1', online)
+
+    stringifySpy.mockClear()
+    send({ type: 'message.status', payload: { sessionId: 's-v1', status: 'thinking' } })
+
+    // 单次序列化：send 回调 → bus.publish（seq + ring + 定向推送）是唯一出口，
+    // broker.broadcast 路径已删（D1-2），全程 stringify 计数 = 1。
+    // 注：registerSession 汇聚点原 session.surfaces 全局广播（W4a 判别器通道）已随 W4b
+    // 收编按协议收缩删除——本断言的对象是 send 层转发路径，全局注册事实帧不在单通道管辖范围。
+    expect(stringifySpy).toHaveBeenCalledTimes(1)
+    expect(broadcasts).toHaveLength(0)
+    // 订阅者收到 1 条带 seq 的消息
+    expect(online.sent).toHaveLength(1)
+    const parsed = JSON.parse(online.sent[0]!) as ServerMessage & { seq?: number }
+    expect(parsed.type).toBe('message.status')
+    expect(typeof parsed.seq).toBe('number')
+  })
+
+  it('TC-V1c: transient delta 不占 seq，同窗口 stringify 仍恰好 1 次', async () => {
+    const { svc, bus, getSendCb } = makeEnv()
+    await svc.initializeManagedSession('s-v1', {} as unknown as IPiEngine, '/tmp', 'test')
+    const send = getSendCb()
+
+    const online = createMockWs()
+    bus.subscribe('s-v1', online)
+
+    stringifySpy.mockClear()
+    send({ type: 'message.text_delta', payload: { sessionId: 's-v1', delta: 'hi' } })
+
+    expect(stringifySpy).toHaveBeenCalledTimes(1)
+    expect(online.sent).toHaveLength(1)
+    // transient 类不分配 seq（D5-1）
+    const parsed = JSON.parse(online.sent[0]!) as { type: string; seq?: number }
+    expect(parsed.type).toBe('message.text_delta')
+    expect(parsed.seq).toBeUndefined()
+  })
+})
 })
