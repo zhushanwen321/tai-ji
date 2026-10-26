@@ -252,11 +252,13 @@ async function sweepResidualChanges(): Promise<string[]> {
   const lines = await dirtyLines();
   if (lines.length === 0) return [];
   const paths = lines.map(porcelainPath);
-  const add = await world.run("git", ["add", "--", ...paths]);
+  const add = await world.run("git", ["add", "--", ...paths], { timeoutMs: 7_200_000 });
   if (add.exitCode !== 0) {
     throw new Error(`终态清扫 git add 失败（exit ${add.exitCode}）：${add.stderr.trim() || add.stdout.trim()}；人工 commit 后重新发起`);
   }
-  const cm = await world.run("git", ["commit", "-m", `chore: prl end-of-run sweep (${paths.length} files)`]);
+  // git commit 会触发 pre-commit 全套钩子（typecheck+lint 分钟级），引擎 world.run 默认 300s 会误杀
+  // （2026-10-26 用户裁决：子进程墙钟上限全部 ≥1h，下同）
+  const cm = await world.run("git", ["commit", "-m", `chore: prl end-of-run sweep (${paths.length} files)`], { timeoutMs: 7_200_000 });
   if (cm.exitCode !== 0) {
     throw new Error(`终态清扫 commit 失败（exit ${cm.exitCode}）：${cm.stderr.trim() || cm.stdout.trim()}；人工 commit 后重新发起`);
   }
@@ -1333,7 +1335,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
             skipped.push(p);
             continue;
           }
-          const r = await world.run("git", ["add", "--", p]);
+          const r = await world.run("git", ["add", "--", p], { timeoutMs: 7_200_000 });
           if (r.exitCode === 0) staged.push(p);
           else skipped.push(p);
         }
@@ -1342,7 +1344,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         }
         if (staged.length > 0) {
           const commitMsg = `fix: review round ${round} — ${mustFix} must-fix`;
-          let commitRes = await world.run("sh", ["-c", commitShScript(["commit", "-m", commitMsg])]);
+          let commitRes = await world.run("sh", ["-c", commitShScript(["commit", "-m", commitMsg])], { timeoutMs: 7_200_000 });
           if (commitRes.exitCode !== 0) {
             // 提交前自动检查（pre-commit hook）拦截 → 环境恢复 agent 读报错、执行报错写明的
             // 环境恢复命令后重跑同一 commit（对齐 review-fix-loop / dev-merge-gates 同源机制
@@ -1362,7 +1364,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
               ].join("\n"),
             );
             log(`环境恢复 agent 回复（末 15 行）：\n${envReply.split("\n").slice(-15).join("\n")}`);
-            commitRes = await world.run("sh", ["-c", commitShScript(["commit", "-m", commitMsg])]);
+            commitRes = await world.run("sh", ["-c", commitShScript(["commit", "-m", commitMsg])], { timeoutMs: 7_200_000 });
             if (commitRes.exitCode !== 0) {
               // ── content 补修子循环（设计 commit-content-self-heal §3.1）──
               // env 恢复后重跑仍被拦截 = 恢复需要修改仓库内文件（如 e2e-map 补登记）。
@@ -1444,9 +1446,9 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
                 const roundRepairFiles = [...new Set([...declared, ...actualNew])];
                 for (const f of roundRepairFiles) if (!allRepairFiles.includes(f)) allRepairFiles.push(f);
                 // 补修文件必须进 staged（e2e-map 等登记门禁按 --staged 模式只查暂存内容，不进 staged 则门禁原样再拦，补修白做）
-                await world.run("git", ["add", "--", ...roundRepairFiles]);
+                await world.run("git", ["add", "--", ...roundRepairFiles], { timeoutMs: 7_200_000 });
                 // 重跑同一条 commit（命令与参数与首次完全一致——journal 重放确定性保持）
-                commitRes = await world.run("sh", ["-c", commitShScript(["commit", "-m", commitMsg])]);
+                commitRes = await world.run("sh", ["-c", commitShScript(["commit", "-m", commitMsg])], { timeoutMs: 7_200_000 });
                 if (commitRes.exitCode === 0) {
                   log(`补修重试成功（第 ${repairTries} 次补修）：补修文件 ${allRepairFiles.join("、") || "（无）"}；报错首行：${lastContentErr.split("\n")[0] ?? ""}${lastNote !== "" ? `；补修说明：${lastNote}` : ""}`);
                   break;
@@ -1615,7 +1617,7 @@ await step("static-gate", async () => {
   const out = await gateFixLoop(
     "static-gate",
     "pr-pre-merge.sh --skip-tests",
-    () => world.run("bash", ["scripts/pr-pre-merge.sh", "--skip-tests", "--quiet"], { timeoutMs: 1_800_000 }),
+    () => world.run("bash", ["scripts/pr-pre-merge.sh", "--skip-tests", "--quiet"], { timeoutMs: 7_200_000 }),
     (res) => res,
   );
   changesetWarn = /WARN changeset-check/.test(out.stdout);
@@ -1781,7 +1783,7 @@ await step("pr-submit", async () => {
     "--title-file", `${prReviewDir}/pr-workflow/pr-title.txt`,
     "--body-file", `${prReviewDir}/pr-workflow/pr-body.md`,
     "--base", base,
-  ], { timeoutMs: 600_000 });
+  ], { timeoutMs: 7_200_000 });
   let res = await runSubmit();
   if (res.exitCode === 127) {
     const cwdRes = await world.run("pwd");
@@ -1919,8 +1921,8 @@ await step("gate-suite", async () => {
   for (let round = 1; round <= GATE_SUITE_ROUNDS; round++) {
     // 两道都跑完才进修复判定（聚合面完整：coverage 失败不阻塞 metrics 的诊断信息；
     // coverage exit 2 工具错误时跳过 metrics，直接走工具错误分支）
-    const cov = await world.run("python3", [".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra], { timeoutMs: 3_600_000 });
-    const met = cov.exitCode === 2 ? null : await world.run("python3", [".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base], { timeoutMs: 1_800_000 });
+    const cov = await world.run("python3", [".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra], { timeoutMs: 7_200_000 });
+    const met = cov.exitCode === 2 ? null : await world.run("python3", [".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base], { timeoutMs: 7_200_000 });
     if (cov.exitCode === 2 || met?.exitCode === 2) {
       throw new Error(
         `gate-suite exit 2（工具错误，不自动重试）：\n${tailLines(`${cov.stderr}\n${cov.stdout}${met ? `\n${met.stderr}\n${met.stdout}` : ""}`, 15)}\n按脚本输出指引处理（多为配置漂移/记账未完成，需人看）`,
@@ -2133,9 +2135,9 @@ await step("final-gates", async () => {
     "final-gates",
     "final-gates（coverage → metrics → pr-pre-merge --test-result，失败从 ① 头部重跑）",
     async () => {
-      const cov = await world.run("python3", [".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra], { timeoutMs: 3_600_000 });
+      const cov = await world.run("python3", [".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra], { timeoutMs: 7_200_000 });
       if (cov.exitCode !== 0) return cov;
-      const met = await world.run("python3", [".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base], { timeoutMs: 1_800_000 });
+      const met = await world.run("python3", [".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base], { timeoutMs: 7_200_000 });
       if (met.exitCode !== 0) {
         return { exitCode: met.exitCode, stdout: `${cov.stdout}\n${met.stdout}`, stderr: met.stderr };
       }
@@ -2144,7 +2146,7 @@ await step("final-gates", async () => {
       //（与 zsw 版同构——其 coverageTestInject 的 insufficient 分工分支同样不可达；
       //「测试跑红 → FAIL」的终局拦截由 runGate 短路本身承担，pre-merge 的 FAIL 注入
       // 判定路径保留在 pr-pre-merge.sh 内部）
-      const pre = await world.run("bash", ["scripts/pr-pre-merge.sh", "--test-result", "PASS", "--base", base, "--quiet"], { timeoutMs: 1_800_000 });
+      const pre = await world.run("bash", ["scripts/pr-pre-merge.sh", "--test-result", "PASS", "--base", base, "--quiet"], { timeoutMs: 7_200_000 });
       return {
         exitCode: pre.exitCode,
         stdout: `${cov.stdout}\n${met.stdout}\n${pre.stdout}`,

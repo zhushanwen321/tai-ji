@@ -900,7 +900,7 @@ async function main(): Promise<Record<string, unknown>> {
     for (let round = 1; round <= MAX_GATE_ROUNDS; round++) {
       // timeoutMs 必设：quality-gates 全量（typecheck 三处 + 增量 coverage + metrics）
       // 真机耗时在分钟级，300s 默认上限会把正常执行误判为超时拒绝（连续两跑实证）
-      const last = await world.run("node", [`${repoRoot}/${GATES_SCRIPT}`, "--side", "dev-merge", "--base", base, "--json"], { timeoutMs: 1_800_000 });
+      const last = await world.run("node", [`${repoRoot}/${GATES_SCRIPT}`, "--side", "dev-merge", "--base", base, "--json"], { timeoutMs: 7_200_000 }); // 2026-10-26 用户裁决：≥1h
       const lastJson = parseGatesJson(last.stdout);
       if (last.exitCode === 0) {
         gatesStatus = "pass";
@@ -977,7 +977,7 @@ async function main(): Promise<Record<string, unknown>> {
     }
     const smokeRoundFails: string[] = [];
     for (let round = 1; round <= MAX_GATE_ROUNDS; round++) {
-      const sm = await world.run("node", [`${repoRoot}/${SMOKE_SCRIPT}`, "--json"], { timeoutMs: 300_000 });
+      const sm = await world.run("node", [`${repoRoot}/${SMOKE_SCRIPT}`, "--json"], { timeoutMs: 7_200_000 }); // 2026-10-26 用户裁决：≥1h（真机剧本可长跑）
       let smJson: { status?: unknown; reason?: unknown; entryCount?: unknown } | null = null;
       try {
         // catch 分支必 throw，此处实指非空载荷；as 非 null 形态让控制流收窄生效

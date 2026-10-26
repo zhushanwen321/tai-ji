@@ -35,7 +35,8 @@
 //   终态处置后都重新发起（cr-fix 重跑 = loop 整体重跑，fix commit 已进历史，
 //   已修复问题不再报出，通常 1-2 轮收敛——与 zcode 版 failed 处置同语义）
 // - agent 超时：与 zcode 版一致不传 timeoutMs（任务级默认无超时，AGENTS.md 规则 19）；
-//   gate 脚本子进程保留 timeout（控制面单请求有界，两版同值）
+//   gate 脚本子进程保留 timeout（控制面单请求有界，两版同值）；2026-10-26 用户裁决：
+//   子进程墙钟上限全部 ≥1h——缺省 2h，显式 gate 值一律 2h（防负载下长 gate/commit 被误杀）
 // - failed-as-return：step 失败一律 return {status:"failed"}，不 throw（throw 的
 //   script-error 触发 engine rebuild 重跑且丢结构化 error）；参数校验错误除外
 //   （发起方配置错误，fail-fast 与 zcode 版 errored run 同语义）
@@ -212,7 +213,10 @@ function killGroup(child, sig) {
     // 进程/组已退出
   }
 }
-function runCmd(cmd, argsArr, timeoutMs) {
+// 2026-10-26 用户裁决：子进程缺省墙钟 2h（>1h）——git commit（pre-commit 全套钩子分钟级）
+// 等重子进程不再无界挂死，也防未来新增调用点漏传超时吃到隐性无界（回收层有界兑底，规则 19）
+const DEFAULT_RUN_TIMEOUT_MS = 7_200_000;
+function runCmd(cmd, argsArr, timeoutMs = DEFAULT_RUN_TIMEOUT_MS) {
   return new Promise((resolve) => {
     const child = spawn(cmd, argsArr, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -1800,7 +1804,7 @@ await step("static-gate", async () => {
   const out = await gateFixLoop(
     "static-gate",
     "pr-pre-merge.sh --skip-tests",
-    () => runCmd("bash", ["scripts/pr-pre-merge.sh", "--skip-tests", "--quiet"], 1_800_000),
+    () => runCmd("bash", ["scripts/pr-pre-merge.sh", "--skip-tests", "--quiet"], 7_200_000),
     (res) => res,
   );
   changesetWarn = /WARN changeset-check/.test(out.stdout);
@@ -1948,7 +1952,7 @@ await step("pr-submit", async () => {
     "--title-file", prReviewDir + "/pr-workflow/pr-title.txt",
     "--body-file", prReviewDir + "/pr-workflow/pr-body.md",
     "--base", base,
-  ], 600_000);
+  ], 7_200_000);
   if (res.exitCode === 0) {
     const urls = res.stdout.split("\n").map((s) => s.trim()).filter((l) => PR_URL_RE.test(l));
     if (urls.length === 0) {
@@ -2076,8 +2080,8 @@ await step("gate-suite", async () => {
   for (let round = 1; round <= GATE_SUITE_ROUNDS; round++) {
     // 两道都跑完才进修复判定（聚合面完整：coverage 失败不阻塞 metrics 的诊断信息；
     // coverage exit 2 工具错误时跳过 metrics，直接走工具错误分支）
-    const cov = await runCmd("python3", [".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra], 3_600_000);
-    const met = cov.exitCode === 2 ? null : await runCmd("python3", [".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base], 1_800_000);
+    const cov = await runCmd("python3", [".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra], 7_200_000);
+    const met = cov.exitCode === 2 ? null : await runCmd("python3", [".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base], 7_200_000);
     if (cov.exitCode === 2 || (met !== null && met.exitCode === 2)) {
       throw new Error(
         "gate-suite exit 2（工具错误，不自动重试）：\n" +
@@ -2296,9 +2300,9 @@ await step("final-gates", async () => {
     "final-gates",
     "final-gates（coverage → metrics → pr-pre-merge --test-result，失败从 ① 头部重跑）",
     async () => {
-      const cov = await runCmd("python3", [".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra], 3_600_000);
+      const cov = await runCmd("python3", [".agents/skills/pr-cr-fix/scripts/coverage-gate.py", "--base", base, ...extra], 7_200_000);
       if (cov.exitCode !== 0) return cov;
-      const met = await runCmd("python3", [".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base], 1_800_000);
+      const met = await runCmd("python3", [".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base], 7_200_000);
       if (met.exitCode !== 0) {
         return { exitCode: met.exitCode, stdout: cov.stdout + "\n" + met.stdout, stderr: met.stderr };
       }
@@ -2307,7 +2311,7 @@ await step("final-gates", async () => {
       //（与 zsw 版同构——其 coverageTestInject 的 insufficient 分工分支同样不可达；
       //「测试跑红 → FAIL」的终局拦截由 runGate 短路本身承担，pre-merge 的 FAIL 注入
       // 判定路径保留在 pr-pre-merge.sh 内部）
-      const pre = await runCmd("bash", ["scripts/pr-pre-merge.sh", "--test-result", "PASS", "--base", base, "--quiet"], 1_800_000);
+      const pre = await runCmd("bash", ["scripts/pr-pre-merge.sh", "--test-result", "PASS", "--base", base, "--quiet"], 7_200_000);
       return {
         exitCode: pre.exitCode,
         stdout: cov.stdout + "\n" + met.stdout + "\n" + pre.stdout,
