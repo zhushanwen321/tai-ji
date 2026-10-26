@@ -201,14 +201,20 @@ function isStatusMapValid(m: unknown): boolean {
   return isRecord(m) && Object.values(m).every(isFailReason)
 }
 
+/** bodyCode.success 词表元素合法性（protojson 枚举可为名称串或数值——双形态兼容）。 */
+function isBodyCodeSuccessElementValid(s: unknown): boolean {
+  return typeof s === 'string' || typeof s === 'number' || typeof s === 'boolean'
+}
+
+/** bodyCode.success 合法性：标量或非空数组（protojson 枚举双形态）。 */
+function isBodyCodeSuccessValid(success: unknown): boolean {
+  if (Array.isArray(success)) return success.length > 0 && success.every(isBodyCodeSuccessElementValid)
+  return isBodyCodeSuccessElementValid(success)
+}
+
 function isBodyCodeValid(b: unknown): boolean {
   if (!isRecord(b) || !isPathValid(b['path'])) return false
-  // success：标量或数组；元素限 string/number/boolean（protojson 枚举双形态）
-  const success = b['success']
-  const successValid = Array.isArray(success)
-    ? success.length > 0 && success.every((s) => typeof s === 'string' || typeof s === 'number' || typeof s === 'boolean')
-    : typeof success === 'number' || typeof success === 'boolean' || typeof success === 'string'
-  if (!successValid) return false
+  if (!isBodyCodeSuccessValid(b['success'])) return false
   if (b['map'] !== undefined && !isRecord(b['map'])) return false
   if (b['else'] !== undefined && !isFailReason(b['else'])) return false
   if (b['missing'] !== undefined && b['missing'] !== 'else' && b['missing'] !== 'parse') return false
@@ -527,6 +533,39 @@ function evalUsedLimit(
   return { used, limit, unit: (win.usedLimit.unit ?? 'requests') as NonNullable<QuotaWindow['unit']> }
 }
 
+/** pct.raw 经 via 变换（raw 已解析时调用）；usedOverLimit 无独立字段值 → null（由 usedLimit 派生）。 */
+function pctFromVia(via: PctVia, raw: number): number | null {
+  switch (via) {
+    case 'direct':
+      return raw
+    case 'percent01to100':
+      return raw * PERCENT_SCALE
+    case 'remainingToUsed':
+      return Math.max(0, Math.min(PERCENT_SCALE, PERCENT_SCALE - raw))
+    // fractionRemainingToUsed：输入是 0..1 剩余比例（stepfun leftRate），已用% = (1 - rate) * 100
+    case 'fractionRemainingToUsed':
+      return Math.round((1 - Math.max(0, Math.min(1, raw))) * PERCENT_SCALE * PERCENT_SCALE) / PERCENT_SCALE
+    // usedOverLimit：pct 由 usedLimit 派生（调用侧）
+    case 'usedOverLimit':
+      return null
+  }
+}
+
+/** 整窗 INFINITE_WIN 判定（主数据不可知 = 该窗 pct 的事实源缺席）。 */
+function isInfiniteWinFromPct(
+  win: DeclarativeWindow,
+  pct: number | null,
+  usedLimit: { used: number; limit: number } | undefined,
+): boolean {
+  // pct direct / fractionRemainingToUsed 缺失 = 主数据不可知 → 整窗 INFINITE_WIN（resetSec
+  // 同折 null，zhipu 现行语义「TOKENS_LIMIT percentage 缺失 → INFINITE_WIN」；percent01to100/
+  // remainingToUsed 的主数据是 percent 本身，缺失仅 pct=null、resetSec 独立输出——mimo/minimax 现行）
+  if ((win.pct?.via === 'direct' || win.pct?.via === 'fractionRemainingToUsed') && pct === null) return true
+  // pct 由绝对量派生时，绝对量缺失 = 主数据不可知 → 整窗 INFINITE_WIN（resetSec 同折 null，
+  // 对齐 opencode/kimi 现行语义——与 mimo「pct 缺失仅 pct=null、resetSec 独立输出」相区分）
+  return win.pct?.via === 'usedOverLimit' && !usedLimit
+}
+
 /** pct 求值；`infiniteWin` = 主数据不可知整窗 INFINITE_WIN（direct/usedOverLimit 派生链）。 */
 function evalWindowPct(
   win: DeclarativeWindow,
@@ -535,27 +574,12 @@ function evalWindowPct(
   usedLimit: { used: number; limit: number } | undefined,
 ): { pct: number | null; infiniteWin?: true } {
   let pct: number | null = null
-  if (win.pct && win.pct.path) {
+  if (win.pct?.path) {
     const raw = strictNumeric(pickPath(source, win.pct.path), strict)
-    if (raw !== undefined) {
-      if (win.pct.via === 'direct') pct = raw
-      else if (win.pct.via === 'percent01to100') pct = raw * PERCENT_SCALE
-      else if (win.pct.via === 'remainingToUsed') pct = Math.max(0, Math.min(PERCENT_SCALE, PERCENT_SCALE - raw))
-      // fractionRemainingToUsed：输入是 0..1 剩余比例（stepfun leftRate），已用% = (1 - rate) * 100
-      else if (win.pct.via === 'fractionRemainingToUsed') {
-        pct = Math.round((1 - Math.max(0, Math.min(1, raw))) * PERCENT_SCALE * PERCENT_SCALE) / PERCENT_SCALE
-      }
-      // usedOverLimit：pct 由 usedLimit 派生（下方）
-    }
+    if (raw !== undefined) pct = pctFromVia(win.pct.via, raw)
   }
-  // pct direct / fractionRemainingToUsed 缺失 = 主数据不可知 → 整窗 INFINITE_WIN（resetSec
-  // 同折 null，zhipu 现行语义「TOKENS_LIMIT percentage 缺失 → INFINITE_WIN」；percent01to100/
-  // remainingToUsed 的主数据是 percent 本身，缺失仅 pct=null、resetSec 独立输出——mimo/minimax 现行）
-  if ((win.pct?.via === 'direct' || win.pct?.via === 'fractionRemainingToUsed') && pct === null) return { pct, infiniteWin: true }
-  if (win.pct?.via === 'usedOverLimit') {
-    // pct 由绝对量派生时，绝对量缺失 = 主数据不可知 → 整窗 INFINITE_WIN（resetSec 同折 null，
-    // 对齐 opencode/kimi 现行语义——与 mimo「pct 缺失仅 pct=null、resetSec 独立输出」相区分）
-    if (!usedLimit) return { pct, infiniteWin: true }
+  if (isInfiniteWinFromPct(win, pct, usedLimit)) return { pct, infiniteWin: true }
+  if (win.pct?.via === 'usedOverLimit' && usedLimit) {
     pct = Math.round((usedLimit.used / usedLimit.limit) * PERCENT_SCALE)
   }
   return { pct }
@@ -652,6 +676,29 @@ function buildHeaders(config: DeclarativeFetcherConfig, credential: string, extr
   return headers
 }
 
+type DeclarativeBodyCode = NonNullable<DeclarativeFetcherConfig['bodyCode']>
+
+/** 决策字段形态归口（缺失/类型非法 → fail-visible，不静默当业务失败降级）：
+ *  - 缺失（undefined/null）按 missing 归口：'parse' = 漂移可见（mimo 现行 guard 拒收，
+ *    字段消失引导「查订阅」会误导排障）；缺省 'else' = 业务失败（minimax/zhipu 现行
+ *    「决策字段缺席 = 无订阅数据」语义）——缺失形态放行，由成功判定落 else。
+ *  - 存在但类型非法恒 parse（防对象/数组绕过类型检查命中 map）；string 仅在 success 词表
+ *    含字符串元素时合法（protojson 枚举名形态，词表即 wire 类型声明）。 */
+function assertBodyCodeUsable(code: unknown, bodyCode: DeclarativeBodyCode, allowsStringCode: boolean): void {
+  if (code === undefined || code === null) {
+    if (bodyCode.missing === 'parse') throw new WireDriftError(`missing body code at '${JSON.stringify(bodyCode.path)}'`)
+    return
+  }
+  const legal = typeof code === 'string' ? allowsStringCode : typeof code === 'number' || typeof code === 'boolean'
+  if (!legal) throw new WireDriftError(`illegal body code: ${JSON.stringify(code)}`)
+}
+
+/** 业务失败 reason 分派：map[码] 命中优先（仅标量码可作 map 键），缺省 else，末档 no-subscription。 */
+function bodyCodeMappedFailureReason(code: unknown, bodyCode: DeclarativeBodyCode): QuotaFetchFailureReason {
+  const mapped = (typeof code === 'string' || typeof code === 'number') ? bodyCode.map?.[String(code)] : undefined
+  return mapped ?? bodyCode.else ?? 'no-subscription'
+}
+
 /** 在体业务码判定（mimo code / minimax base_resp.status_code / zhipu success boolean /
  *  stepfun protojson 枚举名 'CODE_OK'）；返回非 null = 提前返回。 */
 function evaluateBodyCode(config: DeclarativeFetcherConfig, primaryData: unknown): { ok: false; reason: QuotaFetchFailureReason } | null {
@@ -663,22 +710,9 @@ function evaluateBodyCode(config: DeclarativeFetcherConfig, primaryData: unknown
   // 字符串 code 合法；否则（mimo/minimax/zhipu 的数值码）字符串 code = 类型漂移 → parse
   // （各配置的 success 词表即 wire 类型声明，不全局放宽也不全局收紧）。
   const allowsStringCode = successValues.some((s) => typeof s === 'string')
-  // 决策字段必须 string/number/boolean。缺失（undefined/null）按 missing 归口：'parse' =
-  // 漂移可见（mimo 现行 guard 拒收，字段消失引导「查订阅」会误导排障）；缺省 'else' = 业务
-  // 失败（minimax/zhipu 现行「决策字段缺席 = 无订阅数据」语义）。存在但类型非法恒 parse
-  // （防对象/数组绕过类型检查命中 map）
-  if (code === undefined || code === null) {
-    if (bodyCode.missing === 'parse') throw new WireDriftError(`missing body code at '${JSON.stringify(bodyCode.path)}'`)
-  } else if (typeof code === 'string' ? !allowsStringCode : typeof code !== 'number' && typeof code !== 'boolean') {
-    throw new WireDriftError(`illegal body code: ${JSON.stringify(code)}`)
-  }
+  assertBodyCodeUsable(code, bodyCode, allowsStringCode)
   const isSuccess = code !== undefined && code !== null && successValues.some((s) => s === code)
-  if (!isSuccess) {
-    const reason = (typeof code === 'string' || typeof code === 'number')
-      ? bodyCode.map?.[String(code)]
-      : undefined
-    return { ok: false, reason: reason ?? bodyCode.else ?? 'no-subscription' }
-  }
+  if (!isSuccess) return { ok: false, reason: bodyCodeMappedFailureReason(code, bodyCode) }
   if (bodyCode.successRequires !== undefined) {
     const required = pickPath(primaryData, bodyCode.successRequires)
     if (!isRecord(required)) return { ok: false, reason: 'parse' }

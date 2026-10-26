@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { EngineClient } from "../../client/engine-client.ts";
+import { localSpawnEnv } from "../local-spawn-env.ts";
 import { JournalWriter, replayJournal } from "../../common/event-journal.ts";
 import type { AgentEvent } from "../../../assembly/types.ts";
 import { assertAgentEventInvariants } from "./agent-event-invariants.ts";
@@ -103,11 +104,10 @@ function makeHarness(extraEnv: Record<string, string> = {}, routeRunId = fixture
     hostVersion: "w10-protocol-blackbox",
     dataDir,
     envPrefixes: [],
-    baseEnv: {
-      ...process.env,
+    baseEnv: localSpawnEnv({
       FAKE_PROTOCOL_FIXTURE: FIXTURE,
       ...extraEnv,
-    },
+    }),
   });
   // [D3] host/askUser 应答端经 host-ui-endpoint 槽注入（reverse-router 消费时现读）
   setHostUiRequestEndpoint(async (req) => {

@@ -493,6 +493,43 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   }
 
   /**
+   * cookie 粘贴格式前置校验（2026-10-18，用户手动复制路径）：归一化后为空（不含任何
+   * name=value 对，典型 = 从 DevTools Application → Cookies 表格复制的制表符文本）
+   * 当场拦下并给精确指引——不发 RPC，不落入 runtime 侧「凭证可能已失效」的误报。
+   * 归一化实现 SSOT 在 shared（与 runtime fetcher 同一函数，两端判据不得各写一份）。
+   * 掩码哨兵无 k=v 形态但不是用户输入，跳过校验。
+   */
+  function cookiePasteInvalid(cookieDraft: string): boolean {
+    return (
+      isCookieAuth.value &&
+      cookieDraft !== '' &&
+      cookieDraft !== QUOTA_SECRET_MASK &&
+      normalizeCookieHeader(cookieDraft) === ''
+    )
+  }
+
+  /**
+   * 用户维度参数草稿 → payload 段（2026-10 泛化，原 workspace）：明文回显字段，逐必填项取
+   * 归一化后的草稿值（D13：永不传 ''——空/非法本地拦截）。归一化分流按当前草稿 fetcher 的
+   * param spec（与 runtime 侧同源：同 input 同 spec 同规则）。
+   */
+  function buildParamsPayload(): { ok: true; params: Record<string, string> } | { ok: false; errorKey: string } {
+    const params: Record<string, string> = {}
+    for (const spec of paramSpecs.value) {
+      const raw = draft.value.params[spec.key]
+      if (raw === undefined || raw.trim() === '') {
+        // 必填项空值只在 readiness 被放行的不可能路径到达（直接调用 saveAndTest 的对称防御）
+        if (spec.required !== false) return { ok: false, errorKey: 'settings.providerEdit.quotaParamRequired' }
+        continue
+      }
+      const normalized = normalizeParamDraft(spec, raw)
+      if (!normalized.ok) return { ok: false, errorKey: normalized.errorKey }
+      params[spec.key] = normalized.payload
+    }
+    return { ok: true, params }
+  }
+
+  /**
    * 保存 payload 构造段（§7.2 细节 4 的构造表；从 saveAndTest 拆出，语义注释在彼处）。
    * cookie 粘贴格式 / param 归一化两类本地校验失败 = { ok:false, errorKey }，
    * 调用方落错误终止（不发 RPC）。
@@ -506,30 +543,13 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     const cookieMasked = cookieDraft === QUOTA_SECRET_MASK
     const apiKeyMasked = apiKeyDraft === QUOTA_SECRET_MASK
 
-    // cookie 粘贴格式前置校验（2026-10-18，用户手动复制路径）：归一化后为空（不含任何
-    // name=value 对，典型 = 从 DevTools Application → Cookies 表格复制的制表符文本）
-    // 当场拦下并给精确指引——不发 RPC，不落入 runtime 侧「凭证可能已失效」的误报。
-    // 归一化实现 SSOT 在 shared（与 runtime fetcher 同一函数，两端判据不得各写一份）。
-    // 掩码哨兵无 k=v 形态但不是用户输入，跳过校验
-    if (isCookieAuth.value && cookieDraft && !cookieMasked && normalizeCookieHeader(cookieDraft) === '') {
+    if (cookiePasteInvalid(cookieDraft)) {
       return { ok: false, errorKey: 'settings.providerEdit.quotaCookieFormatInvalid' }
     }
 
-    // 用户维度参数（2026-10 泛化，原 workspace）：明文回显字段，逐必填项取归一化后的
-    // 草稿值传入（D13：永不传 ''——空/非法本地拦截）。归一化分流按当前草稿 fetcher 的
-    // param spec（与 runtime 侧同源：同 input 同 spec 同规则）
-    const paramsPayload: Record<string, string> = {}
-    for (const spec of paramSpecs.value) {
-      const raw = draft.value.params[spec.key]
-      if (raw === undefined || raw.trim() === '') {
-        // 必填项空值只在 readiness 被放行的不可能路径到达（直接调用 saveAndTest 的对称防御）
-        if (spec.required !== false) return { ok: false, errorKey: 'settings.providerEdit.quotaParamRequired' }
-        continue
-      }
-      const normalized = normalizeParamDraft(spec, raw)
-      if (!normalized.ok) return { ok: false, errorKey: normalized.errorKey }
-      paramsPayload[spec.key] = normalized.payload
-    }
+    const params = buildParamsPayload()
+    if (!params.ok) return params
+    const paramsPayload = params.params
 
     return {
       ok: true,

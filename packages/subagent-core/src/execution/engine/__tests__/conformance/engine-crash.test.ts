@@ -34,6 +34,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { EngineClient } from "../../client/engine-client.ts";
+import { localSpawnEnv } from "../local-spawn-env.ts";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__", "engine-protocol");
 const FAKE_ENGINE = join(FIXTURE_DIR, "fake-engine-protocol.mjs");
@@ -67,13 +68,12 @@ function makeCrashHarness(): EngineClient {
     hostVersion: "w6-engine-crash",
     dataDir,
     envPrefixes: [],
-    baseEnv: {
-      ...process.env,
+    baseEnv: localSpawnEnv({
       FAKE_PROTOCOL_FIXTURE: FIXTURE,
       FAKE_PID_FILE: pidFile,
       FAKE_RUN_STDERR_HANG: "1",
       FAKE_STDERR_SAMPLE: STDERR_SAMPLE,
-    },
+    }),
   });
 }
 
