@@ -3,7 +3,9 @@
 // 顶层正文按来源包 describe 纯前缀分节，it 层名零改动。
 //
 // 来源：
-//   - src/__tests__/run-spawn-once-session-file-fallback.e2e.test.ts（1 用例，skip 1）
+//   （run-spawn-once-session-file-fallback.e2e 剔出独立保留为同名文件：其「三路全 miss」
+//   集成用例断言 sessionFile 缺失，与本产物 integration 节注入 SESSION_FILE 常量的 fake-pi
+//   桩结构性不相容——合并后集成门控真跑暴露，round5-g 终测剔出）
 //   - src/__tests__/run-spawn-once.integration.test.ts（36 用例，skip 4）
 
 import * as fs from 'node:fs'
@@ -32,149 +34,6 @@ vi.mock("@zhushanwen/subagent-engine-sdk", async (importOriginal) => {
       ? (spawnBoundary.realSpawn as typeof actual.spawnEngineChild)(opts)
       : (spawnBoundary.makeFake as (o: SpawnEngineChildOptions) => ChildProcess)(opts)) as typeof actual.spawnEngineChild;
   return { ...actual, spawnEngineChild: spawnEngineChildStub };
-});
-
-// ======== 来源：run-spawn-once-session-file-fallback.e2e.test.ts ========
-describe("run-spawn-once-session-file-fallback.e2e", () => {
-  /**
- * fake pi：rpc 形态子进程。
- * - `get_state` **全程不应答**（原事故形态；spawn 期握手同样收不到应答）；
- * - 收到 prompt 后正常收尾：message_end → agent_end → agent_settled（[modeless 波2]
-
- *   settled = run resolve + 收割点，触发 close）；不落任何 session 文件
- *   （sessionId 恒未知 → LC-4 无从反查）。
- */
-  const FAKE_PI_SCRIPT = `
-import readline from "node:readline";
-
-const send = (obj) => { process.stdout.write(JSON.stringify(obj) + "\\n"); };
-
-const rl = readline.createInterface({ input: process.stdin });
-
-rl.on("line", (line) => {
-  let msg;
-
-  try { msg = JSON.parse(line); } catch { return; }
-
-  if (msg.type === "extension_ui_response") return;
-
-  // 握手 / 后续的 get_state 一律不应答（不写 response 行）
-  if (msg.type === "get_state") return;
-
-  if (msg.type !== "prompt") return;
-
-  send({ type: "message_end", message: { stopReason: "stop" } });
-
-  send({ type: "agent_end", willRetry: false, reason: "end_turn" });
-
-  send({ type: "agent_settled" });
-
-});
-
-`;
-
-  let rootDir: string;
-
-  let sessionDir: string;
-
-  let scriptPath: string;
-
-  let argv1Saved: string | undefined;
-
-  let logs: Array<{ level: LogLevel; component: string; message: string }>;
-
-  interface Harness { // oe-exempt:20261027:test:测试夹具接口（合并产物内多节共用的 mock 形状契约）
-    handleReady: Array<{ sessionRef: Record<string, string> }>;
-    stateChanges: Array<{ state: "running" | "exited" }>;
-  }
-
-  /** 等待谓词成立（close 收尾事件在 run resolve 之后异步到达）。 */
-  async function waitFor(pred: () => boolean, timeoutMs = 2000): Promise<void> {
-    const start = Date.now();
-    while (!pred()) {
-      if (Date.now() - start > timeoutMs) throw new Error("waitFor timeout");
-      await new Promise((r) => setTimeout(r, 25));
-    }
-  }
-
-  function makeHarness(): Harness {
-    rootDir = fs.mkdtempSync(join(tmpdir(), "pi-cli-test-sfwarn-"));
-    sessionDir = join(rootDir, "sessions");
-    fs.mkdirSync(sessionDir, { recursive: true });
-    scriptPath = join(rootDir, "cli.js"); // pi 入口白名单词形（getPiInvocation 分支 1 资格）
-    fs.writeFileSync(scriptPath, FAKE_PI_SCRIPT);
-    argv1Saved = process.argv[1];
-    process.argv[1] = scriptPath; // getPiInvocation 分支 1：node <pi 入口> <args>
-    logs = [];
-    configureLoggerSink({
-      log: (level, component, message) => {
-        logs.push({ level, component, message });
-      },
-    });
-    return { handleReady: [], stateChanges: [] };
-  }
-
-  function callbacksOf(h: Harness): SpawnRunCallbacks {
-    return {
-      onEvent: () => {},
-      onHandleReady: (p) => h.handleReady.push(p),
-      onChildStateChanged: (p) => h.stateChanges.push({ state: p.state }),
-    };
-  }
-
-  function baseParams(): SpawnRunParams {
-    return {
-      recordId: "rec-warn-e2e",
-      task: "session file 全 miss 形态的任务 prompt",
-      agentName: "warn-agent",
-      model: "prov/model-1",
-      sessionDir,
-      cwd: rootDir,
-    };
-  }
-
-  afterEach(() => {
-    resetLoggerSinkForTests();
-    killAllActiveChildren();
-    process.argv[1] = argv1Saved ?? "";
-    if (rootDir !== undefined && fs.existsSync(rootDir)) {
-      fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-    }
-  });
-
-  // 真 pi 对端（fake 脚本真子进程）+ close 收尾 warn 留痕 = 代码 × OS 组合行为
-  // （进程存亡无完成信号可等）——移出默认单测层，集成门控启用时真跑。
-  describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
-    `close 时 sessionFile 缺失的响亮 warn（runSpawnOnce + fake pi 全程不应答）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
-  () => {
-    it("三路全 miss → warn 留痕（recordId + unobtainable + 排查指引）且 run 正常终态", async () => {
-      const h = makeHarness();
-
-      const result: SpawnRunResult = await runSpawnOnce(baseParams(), callbacksOf(h));
-
-      // run 正常终态：resolveExit 必达（await 不挂死）+ agent_settled resolve 的 exit 0 口径
-      expect(result.success).toBe(true);
-      expect(result.error).toBeUndefined();
-      // 全 miss 形态：身份信息无锚点（不自动认领）
-      expect(result.sessionFile).toBeUndefined();
-      expect(result.sessionId).toBeUndefined();
-      expect(h.handleReady).toHaveLength(0);
-
-      // 响亮 warn：含 recordId + unobtainable + 全路 miss 归因 + 人工排查指引。
-      // 等 exited 再断言：close finalizer 同帧内先报 exited 再发 warn，exited 到达
-      // 即 warn 已入 sink（run resolve 早于收割，不等则与 close 事件赛跑）。
-      await waitFor(() => h.stateChanges.some((s) => s.state === "exited"));
-      const warns = logs
-        .filter((l) => l.level === "warn" && l.message.includes("[sessionfile]"))
-        .map((l) => l.message);
-      expect(warns).toHaveLength(1);
-      expect(warns[0]).toContain("unobtainable for rec-warn-e2e");
-      expect(warns[0]).toContain("all acquisition paths missed: spawn handshake, late response, LC-4 suffix lookup");
-      expect(warns[0]).toContain("record finalized without transcript anchor");
-      expect(warns[0]).toContain("Recovery:");
-    }, 15_000);
-  },
-);
 });
 
 // ======== 来源：run-spawn-once.integration.test.ts ========
