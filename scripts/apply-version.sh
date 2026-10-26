@@ -420,7 +420,7 @@ for (const name of Object.keys(plan)) {
   const p = packages[name];
   // package.json
   const pkgJsonRel = `${p.dir}/package.json`;
-  writeJsonPreserve(pjAbs, (obj) => { obj.version = plan[name].newVer; });
+  writeJsonPreserve(path.join(ROOT, pkgJsonRel), (obj) => { obj.version = plan[name].newVer; });
   touchedFiles.push(pkgJsonRel);
   // CHANGELOG
   const { filePath: clAbs, out: clOut } = prependChangelog(pkgJsonRel, name, buildSection(name));
