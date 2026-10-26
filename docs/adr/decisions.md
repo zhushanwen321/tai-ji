@@ -1059,3 +1059,27 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 4. **改写落盘约束与停用通道**：改写写入的是 pi 拥有的持久状态（pi 会话记录）——硬约束 = 追加标记而非替换原文（`[taiji-retry:` 前缀为触发识别约定，保留原始 error 文本不丢失）；停用复用既有「LLM 调用重试」卡的 pi 原生 retry 配置（enabled 开关 / maxRetries 置 0——pi 重试决策点先检查配置再判词表，前置门关闭后改写不触发任何重试），停用即自然回落 [ADR-0158] 如实分类。远程误配风险登记：误配爆炸半径有界（每轮至多重试 maxRetries 次，0-20/0-10 上限结构性有界），回退 = revert commit 后客户端下个拉取周期生效；内置预设数据变更须对错误码实测锚点复核后 commit（锚点内联进基线文件头注释）。
 
 **效果**：可重试错误不再被判死；规则可配置化让新 provider 接入不发版；settings 可见让用户掌握判定口径。
+
+### ADR-0164 合并判定唯一数据源 = head SHA 的 workflow runs，check-rollup 轨删除（2026-10-26 发布门禁收敛，gate-verdict-ssot §6.1）
+
+**决策**：pr-merge 阶段 2 的 PR CI 判定数据从 `gh pr view --json statusCheckRollup`（平台聚合的二手视图）换为 `gh run list --commit <head SHA>`（一手拉取），经 waitForRuns「有 runs 必等全部完成才裁决」；deadline 30 分钟；judgeRollup/waitForPrChecks 删除（与 wait-for-ci 双轨归一，merge-gate.test.mjs 固化半注册窗口与 PR #45 同族回归）。
+
+**否决记录**：rollup 轨加「pass 后延迟 30s 复查」的稳定期——启发式，判定数据本身不是权威源，下一个窗口形状仍会漏（v0.11.16 实测：半注册窗口 + rollup 只含已结论的 Greptile 机器人检查，16 秒即判「全绿」合并）；点名 ci.yml job 名清单作期望集合——新增 job 漏登记 = 新的形状依赖。行为变化：机器人 check run 不再阻塞合并（CI 门禁只看本仓 workflow）。
+
+**效果**：注册窗口这一类形状被机制整体消灭而非逐形状补防；合并前后用同一判定器，修一处两边同时受益。
+
+### ADR-0165 「哪些包需要 changeset」收敛为 versionable-packages 单一出口（2026-10-26 发布门禁收敛，gate-verdict-ssot §6.2）
+
+**决策**：新增 scripts/versionable-packages.mjs（@manypkg 枚举 workspace globs + config.ignore，输出 name/dir/version/private/ignored/versionable/wsDeps）；check-version-changes.sh 与 apply-version.sh 的硬编码目录枚举替换为消费该 CLI；changeset-check.mjs 方向①（漏声明）的扫描范围从 extensions/ 正则改为按 registry 包目录最长前缀匹配（仅 `<dir>/src/`、仅可版本化包）。行为对拍验收：新旧脚本同 range 输出逐字节一致。
+
+**否决记录**：正则扩到 packages/ 前缀——形状驱动，apps/ 与未来新顶层目录继续漏（v0.11.16 六包漏声明直穿终局 PR 的结构性根因：dev 边界用的恰是四份平行枚举里最窄的 extensions/ 正则）；check-version-changes.sh 整体前置到 dev 边界——终局决策面（逐包人工定 type），搬进 dev 内环过重。
+
+**效果**：目录布局变化自动跟随 workspace 定义；dev 边界开始拦 packages/ 漏声明；private/ignore 包不再出现在漏声明警告（与 pkgOf 口径对齐）。
+
+### ADR-0166 测试族清单单一登记（SUITES）+ 机器对账器 + dev 边界执行（2026-10-26 发布门禁收敛，gate-verdict-ssot §6.3/§6.4）
+
+**决策**：scripts/test-suites.mjs 登记快速守卫测试族（taste-lint / resources-plugins / builtin-ext-bundle / scripts-guards，命令文本与 ci.yml 步骤精确一致由对账器保证）；scripts/check-test-suite-wiring.mjs 断言①清单命令 ↔ ci.yml 步骤文本、②scripts/__tests__ 文件全集 − 清单引用 − 显式豁免 = 空，挂 CI Invariants + pre-commit 双接线；quality-gates 新增恒跑 gate 5 执行 devGate 族（dev 合入边界 ~+20s，过期测试当天红）。
+
+**否决记录**：dev 集成分支触发全量 CI（push 加 dev-*）——每次合入 15-20 分钟全量（含 e2e）成本高且无门禁消费其结果，快速族前置已覆盖「终局 PR 才第一次跑」的主痛点，全量留终局 PR 是有意的分层；ci.yml 动态生成 steps——GitHub Actions 不支持运行时读仓库文件生成。
+
+**效果**：清单漂移与零执行点测试（v0.11.16 实测 6 个）从静默分叉变红灯；CI 测试步骤解掩蔽（continue-on-error + 聚合）使一次 run 暴露全部失败。
