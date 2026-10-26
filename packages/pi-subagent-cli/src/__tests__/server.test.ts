@@ -1,779 +1,738 @@
-// server.test.ts —— EngineProtocolServer 直测（照 zcode-subagent-cli/src/__tests__/
-// server.test.ts 形态，两包同构代码测试对齐——review round1 MF-2）。
+// server.test.ts —— pi-subagent-cli C08 簇合并产物（round5-G）。
+// 共同被测业务模块：`src/server.ts`。mock 相容：全簇零 vi.mock。
+// 顶层正文按来源包 describe 纯前缀分节，it 层名零改动。
 //
-// engine = EnginePort 内存 fake（无子进程 / 无真实数据目录——本文件零 fs 触碰），
-// stdout 写侧注入内存 sink。覆盖：
-//   ① 帧分类路由：请求帧分发 / 反向应答落位 / 入站反向请求 bad_frame / 坏帧静默；
-//   ② 10 正向方法表驱动路由（逐方法 → EnginePort 成员；[H1 U5] interact 已退役；
-//      [subagent-model-switch] setModel 含能力位防御分支）+
-//      未知方法 engine_protocol_unknown_method（错误原文含方法名与 request id）；
-//   ③ run 协议载荷还原：ctx.model 合回 task / ctxModel canonical 词形解析 /
-//      streamMode onDelta → host/streamDelta / 事件通知 seq 单调 / cancel abort /
-//      onChildSpawned 记录键锚定（非 chat = runId，chat = recordId）；
-//   ④ pi 专有通道：bindAskUser 两阶段绑定体（run 前绑定 + run 结束解绑；[H1 U3]
-//      会话形态轮 = run 派发形态同走 per-run 绑定）、run.resume recordId 前置校验 +
-//      conversation 能力位 gate（[H1 U5] bindHostChannels 构造期三分通道面已随
-//      chat-session.ts 删除）；
-//   ⑤ 反向请求客户端：rev-N 帧形状 / {ack:true} 两阶段第一段只 ack 不终结等待
-//      （R9-2，zcode 姊妹包无此语义）/ result+error 应答落位 / 超时兜底（fake timers）。
+// 来源：
+//   - src/__tests__/engine-query.test.ts（17 用例，skip 0）
+//   - src/__tests__/model-switch-control.test.ts（23 用例，skip 0）
 
-import { randomUUID } from "node:crypto";
-import * as os from "node:os";
-import * as path from "node:path";
+import { readFileSync } from 'node:fs'
+import * as fs from 'node:fs'
+import * as os from 'node:os'
+import { dirname, join } from 'node:path'
+import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
+import { ENGINE_PROTOCOL_VERSION, EngineSdkError, SET_MODEL_STAGE_TIMEOUT_MS } from '@zhushanwen/subagent-engine-sdk'
+import { listPiModels, resolvePiAgentDir, validatePiModel } from '../engine-query.ts'
+import { EngineProtocolServer } from '../server.ts'
+import { type ChildProcess } from 'node:child_process'
+import { EventEmitter } from 'node:events'
+import { registerActiveChild, unregisterActiveChild } from '../active-children.ts'
+import { dispatchControlResponse, setModelOnActiveChild } from '../control-responses.ts'
+import { PiEngine } from '../pi-engine.ts'
 
-import { describe, expect, it, vi, type Mock } from "vitest";
+// ======== 来源：engine-query.test.ts ========
+describe("engine-query", () => {
+  // ── fixture 基建 ──
 
-import {
-  ENGINE_PROTOCOL_VERSION,
-  type AgentEvent,
-  type EngineCapabilities,
-  type EngineHandleData,
-  type InitializeParams,
-  type ProbeReport,
-  type SessionView,
-  type UiRequest,
-  type UiResponse,
-} from "@zhushanwen/subagent-engine-sdk";
+  let fixtureDir: string | undefined;
 
-import { EngineProtocolServer } from "../server.ts";
-import { PI_ADAPTER_VERSION } from "../constants.ts";
-import type { AgentCallOpts, EnginePort, EngineRunResult, RunContext } from "../port-types.ts";
+  function writeFixture(relative: string, content: unknown | string): void {
+    if (fixtureDir === undefined) fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-engine-query-"));
+    fs.writeFileSync(path.join(fixtureDir, relative), typeof content === "string" ? content : JSON.stringify(content, null, 2));
+  }
 
-// ── fixture（合成的引擎数据形态；sessionFile 等路径只是内存字符串，无 fs 语义）──
+  /** 恒定 fixture 目录（无 fixture 写入时也返回一个空目录，防读真实系统 pi 目录）。 */
+  function fixtureDirOrAbsent(): string {
+    if (fixtureDir === undefined) fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-engine-query-"));
+    return fixtureDir;
+  }
 
-const CAPABILITIES: EngineCapabilities = {
-  schemaEnforcement: "native",
-  steer: "unsupported",
-  conversation: "native",
-  personaInjection: "flag",
-  eventGranularity: "stream",
-  sandbox: "emulated",
-  sessionRead: "full",
-  resume: "native",
-  interrupt: "kill-only",
-  permissionMode: "native",
-  maxTurns: true,
-};
+  afterEach(() => {
+    if (fixtureDir !== undefined) {
+      fs.rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      fixtureDir = undefined;
+    }
+  });
 
-const HANDLE: EngineHandleData = {
-  v: 1,
-  engineId: "pi",
-  sessionRef: { recordId: "rec_server_test_1", sessionFile: "/tmp/fake-pi-session.jsonl" },
-  adapterVersion: PI_ADAPTER_VERSION,
-};
-
-const PROBE_REPORT: ProbeReport = {
-  ok: true,
-  engineVersion: "9.9.9-fake",
-  checks: [{ name: "binary", ok: true }],
-};
-
-const SESSION_VIEW: SessionView = { engineId: "pi", turns: [], source: "native" };
-
-const INIT_PARAMS: InitializeParams = {
-  protocolVersion: ENGINE_PROTOCOL_VERSION,
-  hostInfo: { name: "vitest-server-test", version: "0.0.0", dataRoot: "/tmp/fake-host-root" },
-  engineConfig: {},
-};
-
-const FAKE_OUTCOME = { content: "你好", exitCode: 0, engineId: "pi", sessionId: HANDLE.sessionRef.recordId };
-
-interface OutFrame { // oe-exempt:20261006:test:测试专用出帧形态断言结构单实现为常态
-  id?: number | string;
-  method?: string;
-  params?: unknown;
-  result?: unknown;
-  error?: { code: string; message: string; recovery: string };
-}
-
-// ── 测试基建 ──
-
-/** 内存帧 sink：收集全部出站帧 + 轮询等待目标帧（dispatch 应答在微任务后写回）。 */
-function makeSink() {
-  const frames: OutFrame[] = [];
-  return {
-    frames,
-    write: (frame: unknown): void => {
-      frames.push(frame as OutFrame);
+  const MODELS_JSON = {
+    providers: {
+      "prov-a": {
+        name: "Provider A",
+        models: [
+          { id: "m1", name: "Model One" },
+          { id: "m2" },
+        ],
+      },
+      "prov-b": {
+        name: "Provider B (no credential)",
+        models: [{ id: "b1", name: "B One" }],
+      },
     },
-    async waitFor(pred: (f: OutFrame) => boolean, what: string, timeoutMs = 2_000): Promise<OutFrame> {
-      const deadline = Date.now() + timeoutMs;
-      for (;;) {
-        const hit = frames.find(pred);
-        if (hit !== undefined) return hit;
-        if (Date.now() > deadline) {
-          throw new Error(`frame not observed within ${timeoutMs}ms: ${what}; frames=${JSON.stringify(frames)}`);
-        }
-        await new Promise((r) => setTimeout(r, 2));
+  };
+
+  const AUTH_JSON = {
+    "prov-a": { type: "api_key", key: "sk-test" },
+  };
+
+  type ResponseFrame = {
+    id?: number | string;
+    result?: unknown;
+    error?: { code: string; message: string; recovery: string };
+  };
+
+  /** 轮询等待断言条件。 */
+  async function pollUntil<T>(pred: () => T | null | undefined, timeoutMs = 2_000): Promise<T> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const hit = pred();
+      if (hit !== null && hit !== undefined) return hit;
+      if (Date.now() > deadline) throw new Error("condition not observed in time");
+      await new Promise((r) => setTimeout(r, 2));
+    }
+  }
+
+  /** 查询范围请求往返：注入帧收集 sink 的 server + 一问一答。 */
+  async function queryServer(method: string, params?: unknown): Promise<ResponseFrame> {
+    const frames: ResponseFrame[] = [];
+    const server = new EngineProtocolServer({
+      write: (f) => frames.push(f as ResponseFrame),
+      piAgentDir: fixtureDirOrAbsent(),
+    });
+    server.handleFrame({ id: 1, method, ...(params === undefined ? {} : { params }) });
+    return pollUntil(() => frames.find((f) => f.id === 1 && (f.result !== undefined || f.error !== undefined)));
+  }
+
+  // ── resolvePiAgentDir ──
+
+  describe("resolvePiAgentDir", () => {
+    it("env PI_CODING_AGENT_DIR 优先（对齐 pi 上游 getAgentDir 惯例）", () => {
+      expect(resolvePiAgentDir({ PI_CODING_AGENT_DIR: "/data/root/agent" })).toBe("/data/root/agent");
+      expect(resolvePiAgentDir({ PI_CODING_AGENT_DIR: "  /spaced/agent  " })).toBe("/spaced/agent");
+    });
+
+    it("env 缺省 → 系统独立 pi 目录（os.homedir() 动态推导，不硬编码）", () => {
+      expect(resolvePiAgentDir({})).toBe(path.join(os.homedir(), ".pi", "agent"));
+      expect(resolvePiAgentDir({ PI_CODING_AGENT_DIR: "   " })).toBe(path.join(os.homedir(), ".pi", "agent"));
+    });
+
+    // 无参形态（读进程 env）= taiji 派发链注入的消费入口：宿主在引擎进程 env 注入
+    // PI_CODING_AGENT_DIR=<dataDir>/agent（原始登记文档 engine-default-provider-setting 已删、见 git 历史；
+    // 「新发现登记」节，2026-10-23 裁决），引擎进程内 resolvePiAgentDir() 读到托管目录。
+    it("无参形态读进程 env：宿主注入 <dataDir>/agent → 消费链读到托管目录", () => {
+      vi.stubEnv("PI_CODING_AGENT_DIR", "/taiji/hosted/data/agent");
+      try {
+        expect(resolvePiAgentDir()).toBe("/taiji/hosted/data/agent");
+      } finally {
+        vi.unstubAllEnvs();
       }
-    },
-  };
-}
-
-/** EnginePort 内存 fake（含 pi 专有 bindAskUser 绑定侧）：
- * 逐成员 vi.fn，overrides 直替换（undefined = 未实现分支）。 */
-type FakeEngine = EnginePort & {
-  bindAskUser(handler: ((req: UiRequest) => Promise<UiResponse>) | undefined): void;
-};
-
-function makeEngine(overrides: Partial<FakeEngine> = {}): FakeEngine {
-  const base: FakeEngine = {
-    id: "pi",
-    capabilities: vi.fn((): EngineCapabilities => ({ ...CAPABILITIES })),
-    probe: vi.fn(async (): Promise<ProbeReport> => ({ ...PROBE_REPORT })),
-    run: vi.fn(async (_task: AgentCallOpts, _ctx: RunContext): Promise<EngineRunResult> => {
-      return { handle: { data: { ...HANDLE } }, outcome: { ...FAKE_OUTCOME } };
-    }),
-    read: vi.fn(async (): Promise<SessionView> => ({ ...SESSION_VIEW })),
-    listModels: vi.fn((): Array<{ id: string; name?: string }> => [{ id: "prov/m1", name: "M1" }]),
-    validateModel: vi.fn((modelRef: string | undefined) => ({ canonicalRef: modelRef ?? "" })),
-    dispose: vi.fn(async (): Promise<void> => undefined),
-    bindAskUser: vi.fn((_handler: ((req: UiRequest) => Promise<UiResponse>) | undefined): void => undefined),
-  };
-  return { ...base, ...overrides };
-}
-
-/** 组合一个 server（缺省 clock 记录侧 + 内存 sink），返回全部观测点。
- * piAgentDir 缺省注入一个不存在的 tmp 路径——查询范围（listModels/validateModel，
- * 路由 engine-query）读不到任何数据文件 → null/结构化错误，测试既不触碰真实
- * 系统 pi 目录，也无需 fixture 文件（本文件保持零 fs 写删）。 */
-function makeServer(engine = makeEngine(), reverseTimeoutMs?: number, piAgentDir?: string) {
-  const sink = makeSink();
-  const clockCalls: Array<{ op: string; id: string }> = [];
-  const server = new EngineProtocolServer({
-    write: sink.write,
-    engine,
-    piAgentDir: piAgentDir ?? path.join(os.tmpdir(), `pi-server-test-absent-${randomUUID()}`),
-    reverseClock: {
-      started: (id: string) => clockCalls.push({ op: "started", id }),
-      acked: (id: string) => clockCalls.push({ op: "acked", id }),
-      settled: (id: string) => clockCalls.push({ op: "settled", id }),
-      dispose: () => clockCalls.push({ op: "dispose", id: "-" }),
-    },
-    ...(reverseTimeoutMs !== undefined ? { reverseTimeoutMs } : {}),
-  });
-  return { server, sink, engine, clockCalls };
-}
-
-/** 发一帧请求并等对应 id 的应答帧（result/error 二选一）。 */
-async function request(
-  server: EngineProtocolServer,
-  sink: ReturnType<typeof makeSink>,
-  id: number,
-  method: string,
-  params?: unknown,
-): Promise<OutFrame> {
-  server.handleFrame(params === undefined ? { id, method } : { id, method, params });
-  return sink.waitFor(
-    (f) => f.id === id && (f.result !== undefined || f.error !== undefined),
-    `response#${id} ${method}`,
-  );
-}
-
-// ── 帧分类路由 ──
-
-describe("handleFrame 帧分类路由", () => {
-  it("请求帧（数字 id）→ 分发到 handler 并写回 {id, result}", async () => {
-    const { server, sink } = makeServer();
-    const resp = await request(server, sink, 1, "ping", {});
-    expect(resp.error).toBeUndefined();
-    expect(resp.result).toEqual({ pong: true });
-  });
-
-  it("未知方法 → engine_protocol_unknown_method（错误原文含方法名与 request id 回显）", async () => {
-    const { server, sink } = makeServer();
-    const resp = await request(server, sink, 42, "host/greet", {});
-    expect(resp.error?.code).toBe("engine_protocol_unknown_method");
-    expect(resp.error?.message).toContain("unknown protocol method: host/greet");
-    expect(resp.error?.message).toContain("request id 42");
-    expect(resp.error?.recovery).toContain("protocol v1");
-  });
-
-  it("handler 抛普通 Error → engine_run_failed + 恢复指引（非结构化错误兜底）", async () => {
-    const engine = makeEngine({ probe: vi.fn(async (): Promise<ProbeReport> => { throw new Error("boom"); }) });
-    const { server, sink } = makeServer(engine);
-    const resp = await request(server, sink, 5, "probe", {});
-    expect(resp.error?.code).toBe("engine_run_failed");
-    expect(resp.error?.message).toBe("boom");
-    expect(resp.error?.recovery).toContain("logs");
-  });
-
-  it("入站反向请求帧 → engine_protocol_bad_frame（id 0）且不断流", async () => {
-    const { server, sink } = makeServer();
-    server.handleFrame({ id: "h-9", method: "host/askUser", params: {} });
-    const bad = await sink.waitFor((f) => f.id === 0, "bad_frame");
-    expect(bad.error?.code).toBe("engine_protocol_bad_frame");
-    expect(bad.error?.message).toContain("host/askUser");
-    const ping = await request(server, sink, 1, "ping", {});
-    expect(ping.result).toEqual({ pong: true });
-  });
-
-  it("无法归类的帧静默忽略（stdout 协议通道独占，不回显坏帧）", () => {
-    const { server, sink } = makeServer();
-    server.handleFrame({});
-    server.handleFrame("raw string");
-    server.handleFrame({ id: 3, method: 42 });
-    server.handleFrame({ id: "x" });
-    expect(sink.frames).toHaveLength(0);
-  });
-
-  it("应答帧 id 无在途反向请求 → 静默忽略不抛", () => {
-    const { server, sink } = makeServer();
-    expect(() => server.handleFrame({ id: "rev-ghost", result: { ok: true } })).not.toThrow();
-    expect(sink.frames).toHaveLength(0);
-  });
-});
-
-// ── 10 正向方法分发表 ──
-
-describe("dispatchTable 表驱动路由（逐方法 → EnginePort 成员）", () => {
-  it("initialize：版本协商 + 能力应答（查询范围 agentDir 无数据 → 应答不含 models 键）", async () => {
-    const engine = makeEngine();
-    const { server, sink } = makeServer(engine);
-    const resp = await request(server, sink, 1, "initialize", INIT_PARAMS);
-    expect(resp.error).toBeUndefined();
-    expect(resp.result).toEqual({
-      protocolVersion: ENGINE_PROTOCOL_VERSION,
-      engineId: "pi",
-      engineVersion: PI_ADAPTER_VERSION,
-      adapterVersion: PI_ADAPTER_VERSION,
-      capabilities: CAPABILITIES,
     });
   });
 
-  it("initialize：models 应答源 = 引擎查询范围（engine-query 读数据目录，不经 engine mock；models 派生视图仅 id）", async () => {
-    // engine.listModels mock 不再被分发位消费（pi-workflow-run-resource-model §3.3
-    // 决策 11：查询范围路由 engine-query）——数据范围断言归 engine-query.test.ts（fixture
-    // 注入形态），本用例锁定「mock 声明不泄漏进 initialize 应答」的改道路由事实。
-    const engine = makeEngine({ listModels: vi.fn((): Array<{ id: string; name?: string }> => [{ id: "mock-only/m", name: "Mock" }]) });
-    const { server, sink } = makeServer(engine);
-    const resp = await request(server, sink, 1, "initialize", INIT_PARAMS);
-    expect(resp.error).toBeUndefined();
-    expect(Object.keys(resp.result as object)).not.toContain("models");
-    expect(vi.mocked(engine.listModels)).not.toHaveBeenCalled();
-  });
+  // ── listPiModels ──
 
-  it("initialize 版本越界 → engine_protocol_mismatch（含双方版本与升级指引）", async () => {
-    const { server, sink } = makeServer();
-    const resp = await request(server, sink, 1, "initialize", { ...INIT_PARAMS, protocolVersion: 99 });
-    expect(resp.error?.code).toBe("engine_protocol_mismatch");
-    expect(resp.error?.message).toContain("99");
-    expect(resp.error?.message).toContain(`v${ENGINE_PROTOCOL_VERSION}`);
-  });
-
-  it("probe：对象 params 透传（force 面）；缺省/非对象 params → undefined", async () => {
-    const engine = makeEngine();
-    const { server, sink } = makeServer(engine);
-    const r1 = await request(server, sink, 1, "probe", { force: true });
-    expect(r1.result).toEqual(PROBE_REPORT);
-    expect(vi.mocked(engine.probe)).toHaveBeenLastCalledWith({ force: true });
-
-    await request(server, sink, 2, "probe");
-    expect(vi.mocked(engine.probe)).toHaveBeenLastCalledWith(undefined);
-
-    await request(server, sink, 3, "probe", "not-an-object");
-    expect(vi.mocked(engine.probe)).toHaveBeenLastCalledWith(undefined);
-  });
-
-  it("run 先于 initialize → engine_protocol_not_initialized（握手前置门）", async () => {
-    const { server, sink } = makeServer();
-    const resp = await request(server, sink, 1, "run", {
-      runId: "r-early",
-      task: { prompt: "p" },
-      ctx: { poolKey: "shared", cwd: "/w" },
+  describe("listPiModels", () => {
+    it("两数据文件都缺 → null（无枚举情形语义，RemoteEngine 消费契约对偶）", () => {
+      expect(listPiModels(fixtureDirOrAbsent())).toBeNull();
     });
-    expect(resp.error?.code).toBe("engine_protocol_not_initialized");
-  });
 
-  it("listModels：分发位路由 engine-query（agentDir 无数据 → {models:null}；数据范围 fixture 断言归 engine-query.test.ts）", async () => {
-    const { server, sink } = makeServer();
-    const r1 = await request(server, sink, 1, "listModels", {});
-    expect(r1.result).toEqual({ models: null });
-  });
-
-  it("validateModel：分发位路由 engine-query（无数据目录 + 无缺省声明 → engine_model_unknown 结构化错误）", async () => {
-    const { server, sink } = makeServer();
-    const r1 = await request(server, sink, 1, "validateModel", { modelRef: "prov/m1" });
-    expect(r1.error?.code).toBe("engine_model_unknown");
-    expect(r1.error?.recovery).toContain("listModels");
-
-    const r2 = await request(server, sink, 2, "validateModel", {});
-    expect(r2.error?.code).toBe("engine_model_unknown");
-    expect(r2.error?.recovery).toContain("pi /model");
-  });
-
-  it("read：handle 以 {data} 包装传给引擎（协议范围裸 handle）", async () => {
-    const engine = makeEngine();
-    const { server, sink } = makeServer(engine);
-    const r2 = await request(server, sink, 2, "read", { handle: HANDLE, dataDir: "/d" });
-    expect(r2.result).toEqual(SESSION_VIEW);
-    expect(vi.mocked(engine.read)).toHaveBeenLastCalledWith({ data: HANDLE });
-  });
-
-  it("dispose：引擎释放被调用且返回 {ok:true}；引擎未实现 dispose 仍 ok（幂等）", async () => {
-    const engine = makeEngine();
-    const { server, sink } = makeServer(engine);
-    const r1 = await request(server, sink, 1, "dispose", {});
-    expect(r1.result).toEqual({ ok: true });
-    expect(vi.mocked(engine.dispose!)).toHaveBeenCalledTimes(1);
-
-    const second = makeServer(makeEngine({ dispose: undefined }));
-    const r2 = await request(second.server, second.sink, 1, "dispose", {});
-    expect(r2.result).toEqual({ ok: true });
-  });
-
-  it("[subagent-model-switch] setModel：native 引擎路由 EnginePort.setModel（载荷透传 + result 写回）；缺省声明位（fixture 无 setModel 键 = unsupported）→ engine_capability_unsupported", async () => {
-    // 缺省 fake：capabilities 未声明 setModel（undefined = unsupported）→ 分发行能力位防御拒绝
-    const gate = makeEngine();
-    const g = makeServer(gate);
-    const rejected = await request(g.server, g.sink, 1, "setModel", {
-      runId: "rec-1",
-      model: { provider: "p", modelId: "m" },
+    it("返回 pi 数据目录内容：凭据 provider 全 ref 清单 + 显示名", () => {
+      writeFixture("models.json", MODELS_JSON);
+      writeFixture("auth.json", AUTH_JSON);
+      expect(listPiModels(fixtureDir!)).toEqual([
+        { id: "prov-a/m1", name: "Model One" },
+        { id: "prov-a/m2" },
+      ]);
     });
-    expect(rejected.error?.code).toBe("engine_capability_unsupported");
-    expect(vi.mocked(gate.setModel ?? vi.fn())).not.toHaveBeenCalled();
 
-    // native 声明 + 成员实装 → 路由 engine（协议载荷 cast 收敛在适配行）
-    const setModelFn = vi.fn(async (params: { runId: string; model: unknown }) => ({
-      effectiveModel: params.model,
-      effectiveThinkingLevel: "high",
-    }));
-    const native = makeEngine({
-      capabilities: vi.fn((): EngineCapabilities => ({ ...CAPABILITIES, setModel: "native" })),
-      setModel: setModelFn as unknown as FakeEngine["setModel"],
+    it("无凭据 provider 被过滤；全部无凭据 → []（有配置侧无凭据模型语义）", () => {
+      writeFixture("models.json", MODELS_JSON);
+      writeFixture("auth.json", {});
+      expect(listPiModels(fixtureDir!)).toEqual([]);
     });
-    const n = makeServer(native);
-    const routed = await request(n.server, n.sink, 2, "setModel", {
-      runId: "rec-2",
-      model: { provider: "p", modelId: "m" },
-    });
-    expect(routed.result).toEqual({
-      effectiveModel: { provider: "p", modelId: "m" },
-      effectiveThinkingLevel: "high",
-    });
-    expect(setModelFn).toHaveBeenCalledWith({ runId: "rec-2", model: { provider: "p", modelId: "m" } });
-  });
-});
 
-// ── run 协议载荷还原 + 事件/反向通道 ──
-
-describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
-  it("全字段还原：ctx.model 合回 task、ctxModel 解析、streamMode、反向通道、事件 seq 单调、终态拆包", async () => {
-    let captured: { task: AgentCallOpts; ctx: RunContext } | undefined;
-    const engine = makeEngine({
-      run: vi.fn(async (task: AgentCallOpts, ctx: RunContext): Promise<EngineRunResult> => {
-        captured = { task, ctx };
-        ctx.onHandleReady?.({ sessionRef: HANDLE.sessionRef });
-        ctx.onEvent?.({ type: "text_delta", delta: "你好" } satisfies AgentEvent);
-        ctx.onEvent?.({ type: "message_end", usage: { input: 3, output: 2, cacheRead: 0, cacheWrite: 0 } });
-        ctx.stream?.onDelta("你好");
-        return { handle: { data: { ...HANDLE } }, outcome: { ...FAKE_OUTCOME } };
-      }),
-    });
-    const { server, sink } = makeServer(engine);
-    const init = await request(server, sink, 1, "initialize", INIT_PARAMS);
-    expect(init.error).toBeUndefined();
-
-    server.handleFrame({
-      id: 2,
-      method: "run",
-      params: {
-        runId: "run-1",
-        // [D1] schema 本体经 wire task.schema 单字段承载（ctx 侧 env 字符串已退役）
-        task: { prompt: "做点什么", denyTools: ["bash"], schema: { type: "object" } },
-        ctx: {
-              cwd: "/w",
-          model: "prov/m1",
-          ctxModel: "prov/ctx-model",
-          streamMode: "stream",
-          sessionRootId: "root-sess-9",
-          sessionDir: "/host/agent-dir/subagents/--Users-x-proj--/sessions",
+    it("models-store.json 动态条目覆盖同 id 基线（pi mergeModels 语义）并补新条目", () => {
+      writeFixture("models.json", MODELS_JSON);
+      writeFixture("auth.json", AUTH_JSON);
+      writeFixture("models-store.json", {
+        "prov-a": {
+          checkedAt: 1,
+          models: [
+            { id: "m1", name: "Model One (refreshed)" },
+            { id: "m3", name: "Model Three" },
+          ],
         },
-      },
-    });
-
-    const ready = await sink.waitFor((f) => f.method === "host/handleReady", "handleReady");
-    server.handleFrame({ id: ready.id, result: { ok: true } });
-    expect(ready.params).toEqual({ runId: "run-1", sessionRef: HANDLE.sessionRef});
-
-    const delta = await sink.waitFor((f) => f.method === "host/streamDelta", "streamDelta");
-    server.handleFrame({ id: delta.id, result: { ok: true } });
-    expect(delta.params).toEqual({ runId: "run-1", delta: "你好" });
-
-    // 事件通知：runId 关联 + seq 单调递增
-    const ev1 = await sink.waitFor((f) => f.method === "event", "event#1");
-    const ev2 = await sink.waitFor((f) => f.method === "event" && f !== ev1, "event#2");
-    const p1 = ev1.params as { runId: string; seq: number; event: AgentEvent };
-    const p2 = ev2.params as { runId: string; seq: number; event: AgentEvent };
-    expect(p1).toMatchObject({ runId: "run-1", seq: 1, event: { type: "text_delta", delta: "你好" } });
-    expect(p2).toMatchObject({ runId: "run-1", seq: 2, event: { type: "message_end" } });
-
-    // 本地全量 task 还原（ctx.model/cwd 合回；task 其余字段透传——含 [D1] wire
-    // task.schema 本体直通）+ RunContext 断言
-    expect(captured?.task).toEqual({
-      prompt: "做点什么",
-      denyTools: ["bash"],
-      schema: { type: "object" },
-      model: "prov/m1",
-      cwd: "/w",
-    });
-    expect(captured?.ctx.taskId).toBe("run-1");
-    expect(captured?.ctx.ctxModel).toEqual({ provider: "prov", id: "ctx-model" });
-    // [D1] 负向断言：ctx 侧传输态 env 字符串字段已退役（防字段名复活）
-    expect("schemaEnv" in (captured?.ctx ?? {})).toBe(false);
-    // 运行期引擎 fallback 已删：ctx 不得重现留痕字段（防字段名复活）
-    expect(captured?.ctx).not.toHaveProperty("engineFallback");
-    expect(captured?.ctx.sessionRootId).toBe("root-sess-9");
-    // [Option C 协议化] ctx.sessionDir 还原透传（宿主权威值，引擎不自推导）
-    expect(captured?.ctx.sessionDir).toBe("/host/agent-dir/subagents/--Users-x-proj--/sessions");
-    expect(captured?.ctx.stream).toBeDefined();
-    expect(captured?.ctx.signal).toBeInstanceOf(AbortSignal);
-    expect(captured?.ctx.resume).toBeUndefined();
-
-    // 一次性 run：onChildSpawned 以 runId 锚定；pid 缺省不发包
-    captured?.ctx.onChildSpawned?.({ pid: 4242, killed: false });
-    const spawned = await sink.waitFor((f) => f.method === "host/childSpawned", "childSpawned");
-    expect(spawned.params).toEqual({ pid: 4242, recordId: "run-1" });
-    const spawnedCount = sink.frames.filter((f) => f.method === "host/childSpawned").length;
-    captured?.ctx.onChildSpawned?.({ pid: undefined, killed: false });
-    expect(sink.frames.filter((f) => f.method === "host/childSpawned")).toHaveLength(spawnedCount);
-
-    // [SR-4] onChildStateChanged：只有 exited 发帧（宿主镜像据此取消该 pid 的挂起 dialog）；
-    // running 由 childSpawned 覆盖，不发重复帧
-    const stateChangedCount = sink.frames.filter((f) => f.method === "host/childStateChanged").length;
-    captured?.ctx.onChildStateChanged?.({ pid: 4242, recordId: "run-1", state: "running", killed: false });
-    expect(sink.frames.filter((f) => f.method === "host/childStateChanged")).toHaveLength(stateChangedCount);
-
-    captured?.ctx.onChildStateChanged?.({
-      pid: 4242, recordId: "run-1", state: "exited", killed: true, exitCode: 1,
-    });
-    const exitedFrame = await sink.waitFor((f) => f.method === "host/childStateChanged", "childStateChanged");
-    expect(exitedFrame.params).toEqual({
-      pid: 4242, recordId: "run-1", state: "exited", killed: true, exitCode: 1,
-    });
-
-    // host/handleReady 反向请求必须先于事件到达（§3.4 不变量 3 帧序证据）
-    expect(sink.frames.indexOf(ready)).toBeLessThan(sink.frames.indexOf(ev1));
-
-    // 终态应答：进程内 {data} 包装拆掉（协议 RunResult.handle = EngineHandleData 本体）
-    const resp = await sink.waitFor(
-      (f) => f.id === 2 && (f.result !== undefined || f.error !== undefined),
-      "run response",
-    );
-    expect(resp.result).toEqual({ handle: HANDLE, outcome: FAKE_OUTCOME });
-  });
-
-  it("ctx.cwd 缺省（wire 不带）→ task 不合回 cwd（additive 语义——引擎回退自身进程 cwd）", async () => {
-    const engine = makeEngine();
-    const { server, sink } = makeServer(engine);
-    await request(server, sink, 0, "initialize", INIT_PARAMS);
-
-    server.handleFrame({
-      id: 20,
-      method: "run",
-      params: { runId: "r-cwd", task: { prompt: "p" }, ctx: { model: "prov/m1" } },
-    });
-    await sink.waitFor(
-      (f) => f.id === 20 && (f.result !== undefined || f.error !== undefined),
-      "run#cwd-absent",
-    );
-    const task = (engine.run as Mock).mock.calls[0]?.[0] as AgentCallOpts;
-    expect(task.cwd).toBeUndefined();
-  });
-
-  it("ctxModel 归一：空串/空白/无斜杠/前导斜杠/尾斜杠 → undefined（parseCtxModel 边界）", async () => {
-    const engine = makeEngine();
-    const { server, sink } = makeServer(engine);
-    await request(server, sink, 0, "initialize", INIT_PARAMS);
-
-    const malformed = ["", "   ", "noprovider", "/leading", "prov/"] as const;
-    for (const [i, ref] of malformed.entries()) {
-      server.handleFrame({
-        id: 10 + i,
-        method: "run",
-        params: { runId: `r-${i}`, task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: "/w", ctxModel: ref } },
       });
-      const resp = await sink.waitFor(
-        (f) => f.id === 10 + i && (f.result !== undefined || f.error !== undefined),
-        `run#${i}`,
-      );
-      expect(resp.error, `ctxModel=${JSON.stringify(ref)} 不应报错`).toBeUndefined();
-      const ctx = (engine.run as Mock).mock.calls[i]?.[1] as RunContext;
-      expect(ctx.ctxModel, `ctxModel=${JSON.stringify(ref)} 应归一为 undefined`).toBeUndefined();
-    }
-  });
-
-  it("[F6] ctx.sessionRootId 缺省 → 还原后的 RunContext 无该键（additive 语义，归属键缺省不注入）", async () => {
-    const engine = makeEngine();
-    const { server, sink } = makeServer(engine);
-    await request(server, sink, 0, "initialize", INIT_PARAMS);
-    await request(server, sink, 20, "run", {
-      runId: "run-f6",
-      task: { prompt: "p" },
-      ctx: { poolKey: "shared", cwd: "/w" },
+      expect(listPiModels(fixtureDir!)).toEqual([
+        { id: "prov-a/m1", name: "Model One (refreshed)" },
+        { id: "prov-a/m2" },
+        { id: "prov-a/m3", name: "Model Three" },
+      ]);
     });
-    const ctx = (engine.run as Mock).mock.calls[0]?.[1] as RunContext;
-    expect(ctx).not.toHaveProperty("sessionRootId");
+
+    it("models.json 坏 JSON → 该源降级（warn），store 源仍可用（凭据 provider 照常过滤）", () => {
+      writeFixture("models.json", "{ not valid json");
+      writeFixture("models-store.json", {
+        "prov-c": { models: [{ id: "c1" }] },
+        "prov-d": { models: [{ id: "d1" }] },
+      });
+      writeFixture("auth.json", { "prov-c": { type: "api_key" } });
+      expect(listPiModels(fixtureDir!)).toEqual([{ id: "prov-c/c1" }]);
+    });
+
+    it("条目 id 缺失/非串 → 丢弃该条目（unknown + 运行时 guard，不炸整清单）", () => {
+      writeFixture("models.json", {
+        providers: {
+          "prov-a": {
+            models: [{ id: "ok" }, { name: "no id" }, "not-an-object", null],
+          },
+        },
+      });
+      writeFixture("auth.json", AUTH_JSON);
+      expect(listPiModels(fixtureDir!)).toEqual([{ id: "prov-a/ok" }]);
+    });
   });
 
-  it("cancel：活跃 run 的 signal 被 abort（reason 透传）；收尾后 cancel 幂等 ok；迟到事件 seq 回落 0", async () => {
-    let capturedCtx: RunContext | undefined;
-    let release!: (value: EngineRunResult) => void;
-    const engine = makeEngine({
-      run: vi.fn((_task: AgentCallOpts, ctx: RunContext): Promise<EngineRunResult> => {
-        capturedCtx = ctx;
-        return new Promise<EngineRunResult>((resolve) => {
-          release = resolve;
+  // ── validatePiModel ──
+
+  describe("validatePiModel", () => {
+    it("缺席 ref → settings.json defaultProvider+defaultModel 拼全 ref", () => {
+      writeFixture("settings.json", { defaultProvider: "prov-a", defaultModel: "m1" });
+      expect(validatePiModel(undefined, fixtureDir!)).toEqual({ canonicalRef: "prov-a/m1" });
+      expect(validatePiModel("   ", fixtureDir!)).toEqual({ canonicalRef: "prov-a/m1" });
+    });
+
+    it("缺席 ref 且仅 defaultModel 有值 → 原样（可能为已含 provider 的全 ref 形态）", () => {
+      writeFixture("settings.json", { defaultModel: "solo-model" });
+      expect(validatePiModel(undefined, fixtureDir!)).toEqual({ canonicalRef: "solo-model" });
+    });
+
+    it("缺席 ref 且 settings 未声明缺省 → engine_model_unknown（pi 无静态缺省形态）", () => {
+      writeFixture("settings.json", { packages: [] });
+      try {
+        validatePiModel(undefined, fixtureDir!);
+        expect.unreachable("expected EngineSdkError");
+      } catch (err) {
+        expect((err as { code?: string }).code).toBe("engine_model_unknown");
+        expect((err as { recovery?: string }).recovery).toContain("pi /model");
+      }
+    });
+
+    it("有值 ref 清单全等命中 → canonicalRef = 全 ref；未命中 → engine_model_unknown", () => {
+      writeFixture("models.json", MODELS_JSON);
+      writeFixture("auth.json", AUTH_JSON);
+      expect(validatePiModel("prov-a/m1", fixtureDir!)).toEqual({ canonicalRef: "prov-a/m1" });
+      try {
+        validatePiModel("prov-a/m1-latest", fixtureDir!);
+        expect.unreachable("expected EngineSdkError");
+      } catch (err) {
+        expect((err as { code?: string }).code).toBe("engine_model_unknown");
+        expect((err as Error).message).toContain("prov-a/m1-latest");
+        expect((err as { recovery?: string }).recovery).toContain("listModels");
+      }
+    });
+  });
+
+  // ── server.ts 分发位接线（pi-workflow-run-resource-model §3.3 决策 11） ──
+
+  describe("EngineProtocolServer 查询范围接线（分发位路由 engine-query）", () => {
+    it("listModels 请求 → fixture 数据目录内容；initialize 应答 models 同源（派生视图仅 id）", async () => {
+      writeFixture("models.json", MODELS_JSON);
+      writeFixture("auth.json", AUTH_JSON);
+      const frames: ResponseFrame[] = [];
+      const server = new EngineProtocolServer({
+        write: (f) => frames.push(f as ResponseFrame),
+        piAgentDir: fixtureDirOrAbsent(),
+      });
+      server.handleFrame({ id: 7, method: "listModels" });
+      const listResp = await pollUntil(() => frames.find((f) => f.id === 7));
+      expect(listResp.result).toEqual({
+        models: [{ id: "prov-a/m1", name: "Model One" }, { id: "prov-a/m2" }],
+      });
+
+      server.handleFrame({
+        id: 8,
+        method: "initialize",
+        params: {
+          protocolVersion: ENGINE_PROTOCOL_VERSION,
+          hostInfo: { name: "t", version: "0", dataRoot: "/d" },
+          engineConfig: {},
+        },
+      });
+      const initResp = await pollUntil(() => frames.find((f) => f.id === 8));
+      expect((initResp.result as { models?: unknown }).models).toEqual([{ id: "prov-a/m1" }, { id: "prov-a/m2" }]);
+    });
+
+    it("validateModel 未命中 → error 帧 engine_model_unknown（结构化错误不断链）", async () => {
+      const frames: ResponseFrame[] = [];
+      const server = new EngineProtocolServer({
+        write: (f) => frames.push(f as ResponseFrame),
+        piAgentDir: fixtureDirOrAbsent(),
+      });
+      server.handleFrame({ id: 9, method: "validateModel", params: { modelRef: "nope/none" } });
+      const resp = await pollUntil(() => frames.find((f) => f.id === 9));
+      expect(resp.error?.code).toBe("engine_model_unknown");
+    });
+
+    it("两数据文件都缺的 agentDir → listModels 应答 {models: null}（无枚举情形）", async () => {
+      const resp = await queryServer("listModels");
+      expect(resp.result).toEqual({ models: null });
+    });
+  });
+
+  // ── 零新依赖红线（任务书验收 2） ──
+
+  describe("pi-subagent-cli 零新依赖", () => {
+    it("package.json dependencies 键集 = 既有两依赖（查询范围零新依赖红线）", () => {
+      const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json");
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { dependencies?: Record<string, string> };
+      expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual([
+        "@zhushanwen/pi-rpc",
+        "@zhushanwen/subagent-engine-sdk",
+      ]);
+    });
+  });
+});
+
+// ======== 来源：model-switch-control.test.ts ========
+describe("model-switch-control", () => {
+  // ── 测试基建 ──
+
+  /** 可控子进程 fake：EventEmitter 承载 close/error 事件 + 记录式 stdin 承载命令行。 */
+  class FakeChild extends EventEmitter {
+    stdin: { write: (chunk: string) => boolean; destroyed: boolean } | null;
+    pid: number | undefined;
+    exitCode: number | null = null;
+    signalCode: string | null = null;
+    /** stdin 收到的全部字节（记录式——读取不消耗，可反复断言累计内容）。 */
+    readonly written: string[] = [];
+
+    constructor(opts: { pid?: number; stdinDestroyed?: boolean; stdinNull?: boolean } = {}) {
+      super();
+      this.stdin = opts.stdinNull === true
+        ? null
+        : {
+            destroyed: opts.stdinDestroyed === true,
+            write: (chunk: string): boolean => {
+              this.written.push(chunk);
+              return true;
+            },
+          };
+      this.pid = opts.pid ?? 4242;
+    }
+
+    kill(): boolean {
+      return true;
+    }
+  }
+
+  /** stdin 已写入的全部命令行（累计、去空行、JSON 解析）。 */
+  function readStdinLines(child: FakeChild): Array<Record<string, unknown>> {
+    return child.written
+      .join("")
+      .split("\n")
+      .map((l: string) => l.trim())
+      .filter((l: string) => l.length > 0)
+      .map((l: string) => JSON.parse(l) as Record<string, unknown>);
+  }
+
+  /** 微任务 + 宏任务各一拍（保证编排链在 dispatch 之后推进到下一步同步写入）。
+ *  **禁止在 fake timers 激活时使用**——真实 setTimeout 会被 fake 挂起；fake 窗内
+ *  用 `vi.advanceTimersByTimeAsync(0)` 替代。 */
+  async function flushAsync(): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+
+  const MODEL_A = { provider: "prov-a", modelId: "model-a" };
+
+  const MODEL_B = { provider: "prov-b", modelId: "model-b" };
+
+  /** 标准 get_state 回读载荷（pi RpcSessionState 形状子集）。 */
+  function statePayload(provider: string, modelId: string, thinkingLevel: string): unknown {
+    return { model: { provider, id: modelId }, thinkingLevel };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  // ── A. setModelOnActiveChild：竞态窗口 + 三型映射 ──
+
+  describe("setModelOnActiveChild — 竞态窗口全覆盖（§7.3）", () => {
+    const RUN_ID = "rec-race";
+
+    it("定位时无活跃子进程 → not-active（无活进程形态）", async () => {
+      const outcome = await setModelOnActiveChild("rec-never-registered", MODEL_B);
+      expect(outcome).toEqual({ kind: "not-active" });
+    });
+
+    it("定位时已退出（exitCode 已置）→ not-active（定位窗口退出 = 无活进程，非回读失败）", async () => {
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      child.exitCode = 0;
+      try {
+        const outcome = await setModelOnActiveChild(RUN_ID, MODEL_B);
+        expect(outcome).toEqual({ kind: "not-active" });
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
+
+    it("写入窗口退出（stdin 已毁）→ not-active（投递判别式上浮，不悬挂不误判超时）", async () => {
+      const child = new FakeChild({ stdinDestroyed: true });
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const outcome = await setModelOnActiveChild(RUN_ID, MODEL_B);
+        expect(outcome).toEqual({ kind: "not-active" });
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
+
+    it("读应答窗口内退出（close 事件）→ not-active（退出 ≠ 超时，两结局互斥）", async () => {
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = setModelOnActiveChild(RUN_ID, MODEL_B);
+        await flushAsync();
+        child.emit("close", 1, null);
+        const outcome = await pending;
+        expect(outcome).toEqual({ kind: "not-active" });
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
+
+    it("存活但读应答超时 → readback-failed(set-model-response)（回读失败形态，非无活进程）", async () => {
+      vi.useFakeTimers();
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = setModelOnActiveChild(RUN_ID, MODEL_B);
+        await vi.advanceTimersByTimeAsync(SET_MODEL_STAGE_TIMEOUT_MS);
+        const outcome = await pending;
+        expect(outcome).toMatchObject({ kind: "readback-failed", stage: "set-model-response" });
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
+
+    it("超时但窗口内已退出（exit 标志已置、close 未及处理）→ not-active（终检兜住竞态归并）", async () => {
+      vi.useFakeTimers();
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = setModelOnActiveChild(RUN_ID, MODEL_B);
+        await vi.advanceTimersByTimeAsync(0); // fake timers 下推进微任务（替代 flushAsync）
+        child.exitCode = 1; // 模拟「超时窗满时进程已死但 close 事件尚未被消费」的竞态形态
+        await vi.advanceTimersByTimeAsync(SET_MODEL_STAGE_TIMEOUT_MS);
+        const outcome = await pending;
+        expect(outcome).toEqual({ kind: "not-active" });
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
+  });
+
+  describe("setModelOnActiveChild — pi 错误应答三型映射 + 成功路径", () => {
+    const RUN_ID = "rec-map";
+
+    it("set_model 应答 Model not found → model-not-in-snapshot（快照冻结，模型本身有效）", async () => {
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = setModelOnActiveChild(RUN_ID, MODEL_B);
+        await flushAsync();
+        const [cmd] = readStdinLines(child);
+        expect(cmd).toMatchObject({ type: "set_model", provider: "prov-b", modelId: "model-b" });
+        dispatchControlResponse(cmd["id"] as string, false, undefined, `Model not found: prov-b/model-b`);
+        const outcome = await pending;
+        expect(outcome).toEqual({
+          kind: "model-not-in-snapshot",
+          detail: "Model not found: prov-b/model-b",
         });
-      }),
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
     });
-    const { server, sink } = makeServer(engine);
-    await request(server, sink, 1, "initialize", INIT_PARAMS);
 
-    server.handleFrame({
-      id: 2,
-      method: "run",
-      params: { runId: "run-c", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: "/w" } },
+    it("set_model 应答 No API key → credential-missing（checkAuth 权威兜底）", async () => {
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = setModelOnActiveChild(RUN_ID, MODEL_B);
+        await flushAsync();
+        const [cmd] = readStdinLines(child);
+        dispatchControlResponse(cmd["id"] as string, false, undefined, "No API key for prov-b/model-b");
+        const outcome = await pending;
+        expect(outcome).toEqual({
+          kind: "credential-missing",
+          detail: "No API key for prov-b/model-b",
+        });
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
     });
-    await vi.waitFor(() => expect(capturedCtx).toBeDefined());
 
-    const cancelResp = await request(server, sink, 3, "cancel", { runId: "run-c", reason: "host timeout" });
-    expect(cancelResp.result).toEqual({ ok: true });
-    expect(capturedCtx?.signal?.aborted).toBe(true);
-    expect((capturedCtx?.signal?.reason as Error).message).toContain("cancelled by host: host timeout");
+    it("set_model 应答未知错误消息 → readback-failed（三型词表封闭映射的残余收尾：生效状态不可信）", async () => {
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = setModelOnActiveChild(RUN_ID, MODEL_B);
+        await flushAsync();
+        const [cmd] = readStdinLines(child);
+        dispatchControlResponse(cmd["id"] as string, false, undefined, "pi internal boom");
+        const outcome = await pending;
+        expect(outcome).toMatchObject({ kind: "readback-failed", stage: "set-model-response" });
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
 
-    // 释放 run（activeRuns 清理路径）→ 终态应答照常写回
-    release({ handle: { data: { ...HANDLE } }, outcome: { ...FAKE_OUTCOME } });
-    const resp = await sink.waitFor((f) => f.id === 2 && f.result !== undefined, "run response");
-    expect(resp.error).toBeUndefined();
+    it("成功路径：set_model 成功 → get_state 回读生效值（不信命令应答即真——回读值 ≠ 请求值时以回读为准）", async () => {
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = setModelOnActiveChild(RUN_ID, MODEL_B);
+        await flushAsync();
+        const [setCmd] = readStdinLines(child);
+        // 命令应答是意图回显（pi 快照条目）——刻意给一个 ≠ 最终生效值的 data
+        dispatchControlResponse(setCmd["id"] as string, true, { provider: "prov-a", id: "model-a" }, undefined);
+        await flushAsync();
+        const lines = readStdinLines(child);
+        expect(lines).toHaveLength(2);
+        expect(lines[1]).toMatchObject({ type: "get_state" });
+        dispatchControlResponse(lines[1]!["id"] as string, true, statePayload("prov-b", "model-b", "high"), undefined);
+        const outcome = await pending;
+        expect(outcome).toEqual({
+          kind: "switched",
+          effectiveModel: { provider: "prov-b", modelId: "model-b" },
+          effectiveThinkingLevel: "high",
+        });
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
 
-    // 已收尾 runId 再 cancel → 无活跃登记，仍受理 ok
-    const lateCancel = await request(server, sink, 4, "cancel", { runId: "run-c", reason: "late" });
-    expect(lateCancel.result).toEqual({ ok: true });
+    it("set_model 成功后、get_state 窗口内退出 → not-active（回读期间退出行——四窗口同一处置）", async () => {
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = setModelOnActiveChild(RUN_ID, MODEL_B);
+        await flushAsync();
+        const [setCmd] = readStdinLines(child);
+        dispatchControlResponse(setCmd["id"] as string, true, { provider: "prov-b", id: "model-b" }, undefined);
+        await flushAsync();
+        child.emit("close", 0, null);
+        const outcome = await pending;
+        expect(outcome).toEqual({ kind: "not-active" });
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
 
-    // 引擎迟到事件：无活跃登记 → seq 回落 0（通知照发，不丢事件）
-    capturedCtx?.onEvent?.({ type: "turn_end" });
-    const late = await sink.waitFor((f) => f.method === "event", "late event");
-    expect(late.params).toMatchObject({ runId: "run-c", seq: 0 });
+    it("get_state 失败应答 → readback-failed(state-readback)（生效值未知如实报）", async () => {
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = setModelOnActiveChild(RUN_ID, MODEL_B);
+        await flushAsync();
+        const [setCmd] = readStdinLines(child);
+        dispatchControlResponse(setCmd["id"] as string, true, { provider: "prov-b", id: "model-b" }, undefined);
+        await flushAsync();
+        const [, stateCmd] = readStdinLines(child);
+        dispatchControlResponse(stateCmd!["id"] as string, false, undefined, "state unavailable");
+        const outcome = await pending;
+        expect(outcome).toMatchObject({ kind: "readback-failed", stage: "state-readback" });
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
+
+    it("get_state 数据不完整（缺 model/thinkingLevel）→ readback-failed(state-readback)，不虚构生效值", async () => {
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = setModelOnActiveChild(RUN_ID, MODEL_B);
+        await flushAsync();
+        const [setCmd] = readStdinLines(child);
+        dispatchControlResponse(setCmd["id"] as string, true, { provider: "prov-b", id: "model-b" }, undefined);
+        await flushAsync();
+        const [, stateCmd] = readStdinLines(child);
+        dispatchControlResponse(stateCmd!["id"] as string, true, { thinkingLevel: "high" }, undefined);
+        const outcome = await pending;
+        expect(outcome).toMatchObject({ kind: "readback-failed", stage: "state-readback" });
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
+
+    it("存活但 get_state 回读超时 → readback-failed(state-readback)（回读失败形态，非无活进程）", async () => {
+      vi.useFakeTimers();
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = setModelOnActiveChild(RUN_ID, MODEL_B);
+        await vi.advanceTimersByTimeAsync(0); // fake timers 下推进微任务（替代 flushAsync）
+        const [setCmd] = readStdinLines(child);
+        dispatchControlResponse(setCmd["id"] as string, true, { provider: "prov-b", id: "model-b" }, undefined);
+        await vi.advanceTimersByTimeAsync(SET_MODEL_STAGE_TIMEOUT_MS);
+        const outcome = await pending;
+        expect(outcome).toMatchObject({ kind: "readback-failed", stage: "state-readback" });
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
   });
-});
 
-// ── pi 专有：askUser 绑定侧 + run.resume 帧校验 ──
+  // ── B. pi-engine setModel：原始结局 → 协议错误码映射 ──
 
-describe("bindAskUser 两阶段绑定体（pi 专有）", () => {
-  it("非 chat run：run 前绑定 askUser 等待体（host/askUser 载荷 {runId, request}），run 结束解绑", async () => {
-    let release!: (value: EngineRunResult) => void;
-    const engine = makeEngine({
-      run: vi.fn((_task: AgentCallOpts, _ctx: RunContext): Promise<EngineRunResult> =>
-        new Promise<EngineRunResult>((resolve) => {
-          release = resolve;
-        })),
+  describe("PiEngine.setModel — 协议错误码映射（U3）", () => {
+    const RUN_ID = "rec-engine";
+    let engine: PiEngine;
+
+    beforeEach(() => {
+      engine = new PiEngine();
     });
-    const { server, sink } = makeServer(engine);
-    await request(server, sink, 1, "initialize", INIT_PARAMS);
 
-    server.handleFrame({
-      id: 2,
-      method: "run",
-      params: { runId: "run-ask", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: "/w" } },
+    it("capabilities().setModel = 'native'（链路接通后的声明位）", () => {
+      expect(engine.capabilities().setModel).toBe("native");
     });
-    await vi.waitFor(() => expect(vi.mocked(engine.bindAskUser)).toHaveBeenCalledTimes(1));
-    const handler = vi.mocked(engine.bindAskUser).mock.calls[0]![0]!;
-    expect(handler).toBeTypeOf("function");
 
-    // run 期间经等待体发 askUser → host/askUser 反向帧（runId 关联）
-    const req: UiRequest = { method: "select", id: "ui-1", title: "选一个" };
-    const answerP = handler(req);
-    const ask = await sink.waitFor((f) => f.method === "host/askUser", "askUser frame");
-    expect(ask.params).toEqual({ runId: "run-ask", request: req });
-    server.handleFrame({ id: ask.id, result: { value: "A" } });
-    await expect(answerP).resolves.toEqual({ value: "A" });
+    it("switched 结局 → SetModelResult（生效值 = 回读值）", async () => {
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = engine.setModel({ runId: RUN_ID, model: MODEL_B });
+        await flushAsync();
+        const [setCmd] = readStdinLines(child);
+        dispatchControlResponse(setCmd["id"] as string, true, { provider: "prov-b", id: "model-b" }, undefined);
+        await flushAsync();
+        const [, stateCmd] = readStdinLines(child);
+        dispatchControlResponse(stateCmd!["id"] as string, true, statePayload("prov-b", "model-b", "max"), undefined);
+        await expect(pending).resolves.toEqual({
+          effectiveModel: { provider: "prov-b", modelId: "model-b" },
+          effectiveThinkingLevel: "max",
+        });
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
 
-    // run 结束（finally）：bindAskUser(undefined) 解绑，防跨 run 串扰
-    release({ handle: { data: { ...HANDLE } }, outcome: { ...FAKE_OUTCOME } });
-    await sink.waitFor((f) => f.id === 2 && f.result !== undefined, "run response");
-    expect(vi.mocked(engine.bindAskUser)).toHaveBeenLastCalledWith(undefined);
+    it("not-active 结局 → error code engine_run_not_active（无活进程形态，非三型失败）", async () => {
+      const err = await engine.setModel({ runId: "rec-never-registered", model: MODEL_B }).catch(
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(EngineSdkError);
+      expect((err as EngineSdkError).code).toBe("engine_run_not_active");
+    });
+
+    it("model-not-in-snapshot 结局 → error code engine_model_not_in_snapshot（message 含 pi 原文）", async () => {
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = engine.setModel({ runId: RUN_ID, model: MODEL_B });
+        await flushAsync();
+        const [setCmd] = readStdinLines(child);
+        dispatchControlResponse(setCmd["id"] as string, false, undefined, "Model not found: prov-b/model-b");
+        const err = await pending.catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(EngineSdkError);
+        expect((err as EngineSdkError).code).toBe("engine_model_not_in_snapshot");
+        expect((err as EngineSdkError).message).toContain("Model not found: prov-b/model-b");
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
+
+    it("credential-missing 结局 → error code engine_credential_missing", async () => {
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        const pending = engine.setModel({ runId: RUN_ID, model: MODEL_B });
+        await flushAsync();
+        const [setCmd] = readStdinLines(child);
+        dispatchControlResponse(setCmd["id"] as string, false, undefined, "No API key for prov-b/model-b");
+        const err = await pending.catch((e: unknown) => e);
+        expect((err as EngineSdkError).code).toBe("engine_credential_missing");
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
+
+    it("readback-failed 结局 → error code engine_state_readback_failed（生效值未知如实报）", async () => {
+      vi.useFakeTimers();
+      const child = new FakeChild();
+      registerActiveChild(RUN_ID, child as unknown as ChildProcess);
+      try {
+        // catch 在超时触发前挂上（ rejection 发生在 advanceTimers 期间——后挂会被判 unhandled）
+        const pending = engine.setModel({ runId: RUN_ID, model: MODEL_B }).catch((e: unknown) => e);
+        await vi.advanceTimersByTimeAsync(SET_MODEL_STAGE_TIMEOUT_MS);
+        const err = await pending;
+        expect((err as EngineSdkError).code).toBe("engine_state_readback_failed");
+      } finally {
+        unregisterActiveChild(RUN_ID, child as unknown as ChildProcess);
+      }
+    });
   });
 
-  it("chat run：同走 per-run 绑定（[H1 U3] 每轮一进程，run 结束解绑）；recordId 锚定镜像帧", async () => {
-    let release!: (value: EngineRunResult) => void;
-    const engine = makeEngine({
-      run: vi.fn((_task: AgentCallOpts, _ctx: RunContext): Promise<EngineRunResult> =>
-        new Promise<EngineRunResult>((resolve) => {
-          release = resolve;
-        })),
-    });
-    const { server, sink } = makeServer(engine);
-    await request(server, sink, 1, "initialize", INIT_PARAMS);
+  // ── C. server dispatch：协议一致性 + 声明镜像核对 ──
 
-    server.handleFrame({
-      id: 2,
-      method: "run",
-      params: {
-        runId: "run-chat",
-        task: { prompt: "hi" },
-        ctx: { poolKey: "shared", cwd: "/w" },
-        resume: { recordId: "rec-chat-9" },
+  interface OutFrame { // oe-exempt:20261006:test:测试专用出帧形态断言结构单实现为常态
+    id?: number | string;
+    result?: unknown;
+    error?: { code: string; message: string; recovery: string };
+  }
+
+  function makeSink() {
+    const frames: OutFrame[] = [];
+    return {
+      frames,
+      write: (frame: unknown): void => {
+        frames.push(frame as OutFrame);
       },
+      async waitFor(pred: (f: OutFrame) => boolean, timeoutMs = 2_000): Promise<OutFrame> {
+        const deadline = Date.now() + timeoutMs;
+        for (;;) {
+          const hit = frames.find(pred);
+          if (hit !== undefined) return hit;
+          if (Date.now() > deadline) {
+            throw new Error(`frame not observed within ${timeoutMs}ms; frames=${JSON.stringify(frames)}`);
+          }
+          await new Promise((r) => setTimeout(r, 2));
+        }
+      },
+    };
+  }
+
+  describe("server setModel dispatch — 协议一致性（U3）", () => {
+    it("引擎 capability 声明非 native → setModel 请求回 engine_capability_unsupported 结构化错误（明确错误而非崩）", async () => {
+      const engine = new PiEngine();
+      // manifest/实装漂移模拟：声明位翻 unsupported（实装仍在——防御的是声明侧）
+      vi.spyOn(engine, "capabilities").mockReturnValue({
+        ...engine.capabilities(),
+        setModel: "unsupported",
+      });
+      const sink = makeSink();
+      const server = new EngineProtocolServer({ write: sink.write, engine });
+      server.handleFrame({ id: 7, method: "setModel", params: { runId: "rec-1", model: MODEL_B } });
+      const frame = await sink.waitFor((f) => f.id === 7 && f.error !== undefined);
+      expect(frame.error?.code).toBe("engine_capability_unsupported");
+      expect(frame.error?.message).toContain("setModel");
     });
-    await vi.waitFor(() => expect(vi.mocked(engine.bindAskUser)).toHaveBeenCalledTimes(1));
-    const handler = vi.mocked(engine.bindAskUser).mock.calls[0]![0]!;
-    expect(handler).toBeTypeOf("function");
 
-    // 会话形态轮 ctx.resume 透传（引擎读端锚定 recordId）
-    const ctx = (engine.run as Mock).mock.calls[0]![1] as RunContext;
-    expect(ctx.resume).toEqual({ recordId: "rec-chat-9" });
-
-    // run 期间 askUser 等待体可用（per-run 绑定与 one-shot 同构——chat 轮短命 run）
-    const req: UiRequest = { method: "select", id: "ui-2", title: "选一个" };
-    const answerP = handler(req);
-    const ask = await sink.waitFor((f) => f.method === "host/askUser", "chat askUser frame");
-    expect(ask.params).toEqual({ runId: "run-chat", request: req });
-    server.handleFrame({ id: ask.id, result: { value: "B" } });
-    await expect(answerP).resolves.toEqual({ value: "B" });
-
-    // 会话形态轮 run：onChildSpawned 以 recordId 锚定（区别于一次性 run 的 runId 锚定）
-    ctx.onChildSpawned?.({ pid: 777, killed: false });
-    const spawned = await sink.waitFor((f) => f.method === "host/childSpawned", "childSpawned");
-    expect(spawned.params).toEqual({ pid: 777, recordId: "rec-chat-9" });
-
-    // [SR-4] 会话形态同键锚定：childStateChanged 用 recordId（非 runId）
-    ctx.onChildStateChanged?.({ pid: 777, recordId: "rec-chat-9", state: "exited", killed: true });
-    const exitedChat = await sink.waitFor((f) => f.method === "host/childStateChanged", "childStateChanged");
-    expect(exitedChat.params).toEqual({
-      pid: 777, recordId: "rec-chat-9", state: "exited", killed: true,
+    it("引擎声明 native 但未实装 setModel 成员（实装漂移）→ engine_run_failed 结构化错误，不崩", async () => {
+      const engine = new PiEngine();
+      // 摘除成员模拟实装漂移（capabilities 仍 native）
+      (engine as { setModel?: unknown }).setModel = undefined;
+      const sink = makeSink();
+      const server = new EngineProtocolServer({ write: sink.write, engine });
+      server.handleFrame({ id: 8, method: "setModel", params: { runId: "rec-1", model: MODEL_B } });
+      const frame = await sink.waitFor((f) => f.id === 8 && f.error !== undefined);
+      expect(frame.error?.code).toBe("engine_run_failed");
     });
 
-    // run 结束（finally）：bindAskUser(undefined) 解绑，防跨 run 串扰
-    release({ handle: { data: { ...HANDLE } }, outcome: { ...FAKE_OUTCOME } });
-    await sink.waitFor((f) => f.id === 2 && f.result !== undefined, "run response");
-    expect(vi.mocked(engine.bindAskUser)).toHaveBeenLastCalledWith(undefined);
-  });
-
-  it("run.resume 空 recordId → engine_protocol_bad_frame（前置校验，run 不进引擎）", async () => {
-    const engine = makeEngine();
-    const { server, sink } = makeServer(engine);
-    await request(server, sink, 1, "initialize", INIT_PARAMS);
-    const resp = await request(server, sink, 2, "run", {
-      runId: "run-bad",
-      task: { prompt: "p" },
-      ctx: { poolKey: "shared", cwd: "/w" },
-      resume: { recordId: "" },
+    it("声明点两处镜像同批核对：PiEngine.capabilities().setModel ↔ package.json manifest（guide §3 纪律）", () => {
+      // 本文件位于 <pkg>/src/__tests__；manifest 在 <pkg>/package.json
+      const manifestPath = join(dirname(dirname(import.meta.dirname)), "package.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+        taiji: { subagentEngine: { capabilities: { setModel: string } } };
+      };
+      expect(manifest.taiji.subagentEngine.capabilities.setModel).toBe("native");
+      expect(new PiEngine().capabilities().setModel).toBe(
+        manifest.taiji.subagentEngine.capabilities.setModel,
+      );
     });
-    expect(resp.error?.code).toBe("engine_protocol_bad_frame");
-    expect(resp.error?.message).toContain("recordId");
-    expect(vi.mocked(engine.run)).not.toHaveBeenCalled();
-  });
-
-  it("run.resume conversation 位 unsupported 引擎 → engine_capability_unsupported（能力位 gate）", async () => {
-    const engine = makeEngine({
-      capabilities: vi.fn((): EngineCapabilities => ({ ...CAPABILITIES, conversation: "unsupported" })),
-    });
-    const { server, sink } = makeServer(engine);
-    await request(server, sink, 1, "initialize", INIT_PARAMS);
-    const resp = await request(server, sink, 2, "run", {
-      runId: "run-gate",
-      task: { prompt: "hi" },
-      ctx: { poolKey: "shared", cwd: "/w" },
-      resume: { recordId: "rec-gate" },
-    });
-    expect(resp.error?.code).toBe("engine_capability_unsupported");
-    expect(vi.mocked(engine.run)).not.toHaveBeenCalled();
-  });
-});
-
-// [H1 U5] bindHostChannels 构造期三分通道接线（streamDelta/轮次相位/会话级
-// askUser）已随 chat-session.ts 删除——askUser/runId 键 streamDelta/childStateChanged
-// 的 run 域形态断言保留在上方「run：协议载荷还原」与「bindAskUser」用例中。
-
-// ── 反向请求客户端 ──
-
-describe("reverseRequest 客户端", () => {
-  it("帧形状（rev-N 单调 id + method/params）+ result 应答落位 + clock started/acked/settled", async () => {
-    const { server, sink, clockCalls } = makeServer();
-    const p1 = server.reverseRequest("host/log", { message: "hello" });
-    const f1 = await sink.waitFor((f) => f.id === "rev-1" && f.method === "host/log", "rev-1");
-    expect(f1.params).toEqual({ message: "hello" });
-    expect(clockCalls).toEqual([{ op: "started", id: "rev-1" }]);
-
-    server.handleFrame({ id: "rev-1", result: { ok: true } });
-    await expect(p1).resolves.toEqual({ ok: true });
-    expect(clockCalls).toEqual([
-      { op: "started", id: "rev-1" },
-      { op: "acked", id: "rev-1" },
-      { op: "settled", id: "rev-1" },
-    ]);
-
-    // id 单调递增
-    const p2 = server.reverseRequest("host/log", {});
-    await sink.waitFor((f) => f.id === "rev-2", "rev-2");
-    server.handleFrame({ id: "rev-2", result: { ok: true } });
-    await expect(p2).resolves.toEqual({ ok: true });
-  });
-
-  it("ack 两阶段（R9-2）：{ack:true} 只 ack 计时侧不终结等待，最终帧才 settle", async () => {
-    const { server, sink, clockCalls } = makeServer();
-    const p = server.reverseRequest("host/askUser", { runId: "r", request: { method: "select", id: "1" } });
-    await sink.waitFor((f) => f.id === "rev-1", "rev-1");
-    expect(clockCalls).toEqual([{ op: "started", id: "rev-1" }]);
-
-    // 第一段：ack 帧 → 仅 acked（移出 in-flight 自灭计时），p 仍 pending
-    server.handleFrame({ id: "rev-1", result: { ack: true } });
-    expect(clockCalls).toEqual([
-      { op: "started", id: "rev-1" },
-      { op: "acked", id: "rev-1" },
-    ]);
-    let settledOrRejected = false;
-    void p.then(
-      () => { settledOrRejected = true; },
-      () => { settledOrRejected = true; },
-    );
-    await new Promise((r) => setTimeout(r, 5));
-    expect(settledOrRejected).toBe(false);
-
-    // 第二段：最终结果帧 → settle + clock.settled。现状断言：settleReverse 对任何
-    // 带在途登记的应答帧先调 acked（含终结帧本身）→ 终结帧产生第二次 acked
-    // （幂等无害，登记 settleReverse 双 acked 现状，见任务汇报）
-    server.handleFrame({ id: "rev-1", result: { value: "picked" } });
-    await expect(p).resolves.toEqual({ value: "picked" });
-    expect(clockCalls).toEqual([
-      { op: "started", id: "rev-1" },
-      { op: "acked", id: "rev-1" },
-      { op: "acked", id: "rev-1" },
-      { op: "settled", id: "rev-1" },
-    ]);
-  });
-
-  it("error 应答 → reject（文案含 rejected 前缀与结构化 error 帧）", async () => {
-    const { server, sink } = makeServer();
-    const p = server.reverseRequest("host/askUser", { request: { kind: "select" } });
-    await sink.waitFor((f) => f.id === "rev-1", "rev-1");
-    server.handleFrame({ id: "rev-1", error: { code: "host_unavailable", message: "no ui", recovery: "retry" } });
-    // A8 修复落地（round1 business-logic S1）：toErrorMessage(非 Error object) 改
-    // JSON.stringify——结构化 error 帧（含原始 code/message/recovery）直进 reject 文案，
-    // 不再退化为 "[object Object]"（与 zcode 包 settleReverse 同批修复）
-    await expect(p).rejects.toThrow(
-      'reverse request rev-1 rejected: {"code":"host_unavailable","message":"no ui","recovery":"retry"}',
-    );
-  });
-
-  it("缺省 60s 超时兜底：reject + clock.settled + 迟到应答不再落位（fake timers）", async () => {
-    vi.useFakeTimers();
-    try {
-      const { server, sink, clockCalls } = makeServer();
-      const p = server.reverseRequest("host/log", {});
-      expect(sink.frames).toHaveLength(1);
-      const assertion = expect(p).rejects.toThrow(/host\/log \(rev-1\) timed out after 60000ms/);
-      await vi.advanceTimersByTimeAsync(60_000);
-      await assertion;
-      expect(clockCalls).toContainEqual({ op: "started", id: "rev-1" });
-      expect(clockCalls).toContainEqual({ op: "settled", id: "rev-1" });
-      // 迟到应答：pending 已清理 → 无副作用
-      const before = sink.frames.length;
-      server.handleFrame({ id: "rev-1", result: { ok: true } });
-      expect(sink.frames).toHaveLength(before);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });

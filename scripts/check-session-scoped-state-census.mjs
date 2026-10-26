@@ -2,7 +2,7 @@
 /**
  * useSessionScopedState 全仓调用点 census 检查（独立脚本）。
  *
- * 扫描设施迁自 packages/core/src/foundation/use-session-scoped-state.test.ts 的
+ * 扫描设施迁自 packages/core/src/domain/chat/__tests__/store-merged-merged.test.ts 的
  * 「C-1 census 静态锁」describe 块（该测试后续改为薄包装消费本脚本）。锁的目标：
  * per-session 状态 composable（ADR-0049 useSessionScopedState 工厂）的调用入口边界——
  * 清单外出现新调用点（新文件，或已有文件内新增）即红，审阅其 scope 上下文

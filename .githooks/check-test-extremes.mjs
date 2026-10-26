@@ -46,7 +46,7 @@ const STOCK = {
   'extensions/universal/base-tool-enhance/src/__tests__/pending-reconcile.test.ts': null,
   'packages/dom-core/src/__tests__/smoke.test.ts': null,
   'packages/extension-protocol/src/background-task-process.test.ts': null,
-  'packages/pi-subagent-cli/src/__tests__/spawn-event-adapter-rpc.test.ts': null,
+  'packages/pi-subagent-cli/src/__tests__/spawn-runner.test.ts': null,
   'packages/pi-subagent-cli/src/__tests__/ui-request-queue.test.ts': null,
   'packages/runtime/src/infra/git-executor.test.ts': null,
   'packages/runtime/src/infra/shell-runner.test.ts': null,
@@ -71,6 +71,8 @@ for (const k of Object.keys(STOCK)) STOCK[k] = '存量：二波清单外文件�
 
 const EXEMPT = {
   ...STOCK,
+  // payload 字段 timeout:30000 是 extension_ui_request 的业务数据（fixture），非测试超时预算
+  'packages/pi-subagent-cli/src/__tests__/spawn-event-adapter.test.ts': 'X2 误报：30000 是 UI 请求 payload 的业务 timeout 字段（fixture 数据），非测试超时预算',
   // —— 检查器黑盒自测（spawn 检查脚本本体，亚秒级） ——
   'scripts/__tests__/check-test-extremes.test.mjs': '本检查器黑盒自测（spawn 检查器本体，单处 <300ms）',
   'scripts/__tests__/check-test-blind-wait.test.mjs': '盲等检查器黑盒自测（每处 spawn <300ms，裁决保留）',

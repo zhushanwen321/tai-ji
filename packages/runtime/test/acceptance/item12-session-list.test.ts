@@ -15,7 +15,7 @@
  * 与既有覆盖的分工（本文件只补 D3 验收视角的缺口，不重复单元层断言）：
  * - `src/services/session/__tests__/session-list-query.test.ts`（u-w4b）已覆盖 ①（含
  *   负例）与 ② 的纯逻辑面——但用字面量 id（'line-a1' 等），未锁定「id 为 piId 形态」；
- * - `packages/core/src/transport/mock/__tests__/mock-domains.test.ts`（u-w4b）已覆盖
+ * - `packages/core/src/transport/mock/__tests__/run-send-stream.test.ts`（u-w4b）已覆盖
  *   mock 侧 ①② + 抑制类成员判别的数据层等价（session.list {surface:'btw'} id 集合 =
  *   注册表线全集）；
  * - 本文件补的缺口：① 的 id 形态断言（真实 UUID piId、无 `btw:` 前缀形态）+ ② 的
