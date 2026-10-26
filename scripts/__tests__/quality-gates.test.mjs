@@ -459,8 +459,6 @@ describe('acquireGateLock：互斥获取 / 幂等释放 / 无主偷锁三通道 
 })
 
 describe('gate 5 test-suite：快速守卫测试族（SUITES 单一登记的执行面）', () => {
-  const { buildSuiteSteps, runTestSuiteGate } = globalThis.__qgExports ?? {}
-
   it('buildSuiteSteps：devGate 族展开为 needs + args（命令与 SUITES.cmd 一致）', async () => {
     const m = await import('../quality-gates.mjs')
     const steps = m.buildSuiteSteps()
