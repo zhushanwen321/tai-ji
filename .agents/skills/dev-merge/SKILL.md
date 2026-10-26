@@ -54,7 +54,7 @@ description: >-
 
 ```bash
 node scripts/quality-gates.mjs --side dev-merge   # 质量门聚合：typecheck 四处（含 mobile-renderer）+ 增量 coverage（含新增文件机器盲区判定，coverage-file-gate-exempt 可豁免）+ metrics + test-suite 快速守卫族（taste-lint / resources-plugins / builtin-ext-bundle / scripts-guards，清单单一登记 = scripts/test-suites.mjs——过期测试合入 dev 当天红，不再等终局 PR）
-node scripts/changeset-check.mjs                  # changeset 双向检查：①diff 触及 extensions/**/src/** 且包缺 .changeset/*.md → WARN 清单；②.changeset/*.md 声明了 private/config.ignore 包 → FAIL（声明永不生效，残留/阻断 version）
+node scripts/changeset-check.mjs --base <dev-branch>   # changeset 双向检查（--base = 目标 dev 分支，与 PR 路径 Gate-1a.5 同口径——不传时回退 main，diff 会混入整条 dev 线未发布内容，WARN 清单反复列非本分支的包）：①diff 触及任一可版本化包（versionable-packages 全 workspace 枚举，含 packages/）的 src/** 且包缺 .changeset/*.md → WARN 清单；②.changeset/*.md 声明了 private/config.ignore 包 → FAIL（声明永不生效，残留/阻断 version）
 node "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/scripts/pi-extension-smoke.mjs" --json   # pi extension 启动冒烟：本 worktree 全部 extension 源码入口（extensions/{taiji,universal}/*/package.json 的 main）经 pi 真实加载一遍（--mode rpc + stdin EOF，零 LLM 调用），抓 main 声明指向缺失文件 / 入口加载期即崩——这类问题装进 pi 宿主才暴露，前置到合并边界
 ```
 
@@ -62,7 +62,7 @@ node "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/scripts/pi-exten
 - **FAIL（exit 1）**：派 fixer 修复后重跑——quality-gates、pi-extension-smoke 与 changeset-check 的 FAIL 各走同款修复子循环：脚本累计执行各 ≤3 次、fixer 各最多派发 2 次（fixer 只修失败输出直接相关的问题——质量门失败修对应门项，冒烟失败修对应 extension 包的 main 声明或加载期问题，changeset-check fail 删该 changeset 文件或从 frontmatter 移除对应包行；修完自行 commit（显式路径，禁 `git add -A`）、每轮修完重跑对应脚本验证）；预算用尽仍 FAIL 停下呈报人工处置，不进后续步骤。
 - **exit 2**：工具/环境错误不进 fixer 循环，按脚本输出的缺失路径与恢复指引处置。
 - **changeset WARN**：主 agent 按 Gate-1a.5 同款分类逻辑处置（不弹窗问用户）——实质改动（包有对外语义变化）→ 起草 `.changeset/*.md` 且理由列明；非发布改动（纯注释/文档/无对外语义变化的内部整理）→ 跳过起草并列明理由。skip/pass → 无动作，汇报记一句。
-- **base 口径**：`--side dev-merge` = 分支增量（`git merge-base github/main HEAD`，脚本自解析），与第 1.7 步审查对象同口径；禁止传 `--base main`（那是 pr-cr-fix 侧的累积口径，两侧差异有意）。
+- **base 口径（两个脚本两个维度，互不影响）**：quality-gates 的 `--side dev-merge` = 分支增量（`git merge-base github/main HEAD`，脚本自解析），与第 1.7 步审查对象同口径；禁止给 quality-gates 传 `--base main`（那是 pr-cr-fix 侧的累积口径，两侧差异有意）。changeset-check 的 `--base` 是另一维度 = 目标 dev 分支（与 PR 路径 Gate-1a.5 同口径，DEV-WORKFLOW §3「PR base = 目标 dev 分支」）：三点 diff（merge-base…HEAD）即本分支增量，不含整条 dev 线未发布内容；不传则回退 main，WARN 清单会反复列出非本分支的包（changeset-check.mjs 用法注释自述）。
 
 **存在性检查（zcode/pi 两侧通用）**：跑前 `test -f scripts/quality-gates.mjs` 检查脚本存在——脚本随 git 分支传播，skill 实体经 symlink 即时生效，feature 分支未含新脚本 commit 时必然缺失（介质错速）。缺失 → 显式输出「quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露」，继续第 1.7 步；不崩溃、不静默。changeset-check.mjs 缺失同款处置。恢复通道：源 worktree `git merge dev-0.10.5`（或发布后 merge main）主动吸收后重跑。pi-extension-smoke.mjs 不同：它在 skill 实体内（workspace 根 `.agents/skills/dev-merge/scripts/` 共享，不入 git、无介质错速窗口），缺失 = skill 实体损坏（worktree 内 `.agents` symlink 断裂等），按 exit 2 环境错误处置（恢复：检查 workspace 根 skill 目录完整性），不得按介质错速语义静默跳过——那是关掉 gate 的假绿。
 

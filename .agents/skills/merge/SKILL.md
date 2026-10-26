@@ -114,7 +114,7 @@ git push github HEAD --force-with-lease
 cd $WS_ROOT/main && bash .agents/skills/merge/scripts/pre-merge-check.sh "$WS_ROOT/<worktree-dir>"
 ```
 
-阶段 1 调用项目内 pre-merge-check.sh（依赖安装、类型检查、lint、守卫测试、构建，以及第 5 步 Git 状态检查——有未提交变更或未推送 commits 会 FAIL 阻塞合并）。类型检查与守卫测试的出口 = `scripts/quality-gates.mjs`（typecheck 四处：extensions/runtime/renderer/mobile-renderer + SUITES 四族守卫——单一登记处，不再由本脚本自带清单）。`set -e` 运行，任一检查失败即以非零退出码中断，失败项上下文（命令输出尾部 / 失败文件清单）随错误打印，须按输出定位修复后重跑同一命令。
+阶段 1 调用项目内 pre-merge-check.sh（依赖安装、类型检查 + 守卫测试（单次 quality-gates `--only typecheck,test` 调用，ADR-0169 ① 口径）、lint、构建，以及第 4 步 Git 状态检查——有未提交变更或未推送 commits 会 FAIL 阻塞合并）。类型检查与守卫测试的出口 = `scripts/quality-gates.mjs`（typecheck 四处：extensions/runtime/renderer/mobile-renderer + SUITES 四族守卫——单一登记处，不再由本脚本自带清单）。`set -e` 运行，任一检查失败即以非零退出码中断，失败项上下文（命令输出尾部 / 失败文件清单）随错误打印，须按输出定位修复后重跑同一命令。
 
 **全量单测不在阶段 1 本地重跑**：同一 commit 的完整 CI（test job 全量）由阶段 2 的 PR CI 等待裁决，本地重复跑只加时长不加覆盖。**merge 门禁不跑 e2e**——e2e / 真实进程 / 真实 LLM 用例只在开发阶段按改动范围跑（清单由 tech-design 的 e2e 影响面评估 + dev-flow 验收计划表圈定），执行准则 SSOT = AGENTS.md「测试」节。GitHub CI 同样从不跑 e2e（`TAIJI_SKIP_REAL_PI=1` + 无凭证注入 + 无 darwin pi binary）。
 
@@ -167,7 +167,7 @@ bash .agents/skills/merge/scripts/wait-for-ci.sh "$MAIN_SHA"
 
 > ⏱ **超时语义**：默认 2400s 超时（15s 一轮轮询；main push CI 含 e2e-visual/e2e-behavior 两个 30 分钟档 job，600s 旧默认必超时）。超时时 exit 2 并提示仍有几个 workflow 在运行——此时询问用户处理，或用 `--timeout 3600` 拉长重跑：`bash .agents/skills/merge/scripts/wait-for-ci.sh "$MAIN_SHA" --timeout 3600`。
 
-> ⚠️ **边界**：commit 在约 30s 内无任何 workflow run 时，wait-for-ci.sh 视为「无 CI」直接放行（exit 0）——merge commit 因 ci.yml 路径过滤可能未触发任何 run。此时 exit 0 ≠「CI 通过」，须先用 `gh run list --commit "$MAIN_SHA" --repo zhushanwen321/tai-ji` 人工确认是否存在 run；确认无 run 属预期（如纯 docs 改动）才可继续，不得把该放行误判为「CI 通过」。
+> ⚠️ **边界**：commit 在约 30s 内「查询成功且无任何 workflow run」时，wait-for-ci.sh 视为「无 CI」直接放行（exit 0）——merge commit 因 ci.yml 路径过滤可能未触发任何 run。此时 exit 0 ≠「CI 通过」，须先用 `gh run list --commit "$MAIN_SHA" --repo zhushanwen321/tai-ji` 人工确认是否存在 run；确认无 run 属预期（如纯 docs 改动）才可继续，不得把该放行误判为「CI 通过」。gh 查询持续失败（网络/限流/登录态）与此分流：轮询到超时后 exit 2 工具错误，不放行——按超时同样处理（先 `gh auth status` / 手动 `gh run list` 核查，恢复后重跑）。
 
 ### [MANDATORY] 阶段 3.5: 版本校验
 

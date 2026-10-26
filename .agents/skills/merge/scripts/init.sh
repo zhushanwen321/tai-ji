@@ -78,20 +78,18 @@ CURRENT_VERSION=$(node -p "require('$MAIN_WT/package.json').version" 2>/dev/null
 # ── 发布互斥检查 + 新管线状态落盘（阶段 0 = 管线开启点）──
 # 互斥依据 = .merge-state/current.json：非终态且 12h 内活跃的管线视为「发布进行中」
 # （两会话并发启动发布链是数据丢失源——bump/tag/push 全是写操作）；终态或超窗不阻塞。
+# 判定谓词 isPipelineBusy（含 12h 窗口与终态词表）单一源自 state.mjs，
+# 与 pr-merge.mjs 开线入口同源共用，本文件不重复定义互斥口径。
 # 状态写入用 { reset: true }——清掉上一轮 release 的 tag/releasedAt 等字段，防跨轮残留。
 STATE_MSG=$(node --input-type=module -e '
 import { pathToFileURL } from "node:url"
 // node -e 模式下 argv 无 script 路径位：argv = [execPath, <四个参数>...]，故 slice(1)
 const [root, mainWt, branch, prArg] = process.argv.slice(1)
-const { readMergeState, writeMergeState, TERMINAL_STAGES } = await import(
+const { readMergeState, writeMergeState, isPipelineBusy } = await import(
   pathToFileURL(mainWt + "/scripts/merge/lib/state.mjs").href
 )
 const prev = readMergeState(root)
-const WINDOW_MS = 12 * 60 * 60 * 1000
-const active = prev != null && typeof prev.stage === "string" && prev.stage !== ""
-  && !TERMINAL_STAGES.includes(prev.stage)
-  && Date.now() - Date.parse(prev.updatedAt ?? "0") < WINDOW_MS
-if (active) {
+if (isPipelineBusy(prev)) {
   console.log("BUSY " + JSON.stringify({ stage: prev.stage, branch: prev.branch, pr: prev.pr, updatedAt: prev.updatedAt }))
 } else {
   const next = writeMergeState(root, {

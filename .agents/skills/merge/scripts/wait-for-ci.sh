@@ -1,9 +1,9 @@
 #!/bin/bash
 # wait-for-ci.sh — 薄壳：实现在仓库 scripts/merge/wait-for-ci.mjs（经 main worktree
 # 调起，恒取 main 分支最新版）。用法与功能契约不变:
-#   wait-for-ci.sh <commit-sha> [--timeout 600] [--workflow <name>] [--verify-release <tag>] [--repo <owner/repo>]
-# 新增：省略 <commit-sha> 时自动读取 merge 状态文件（pr-merge 写入的 headSha）。
-# 退出码：0 = 通过/无 CI 放行，1 = 失败，2 = 超时（AI 应询问用户）。
+#   wait-for-ci.sh <commit-sha> [--timeout 2400] [--workflow <name>] [--verify-release <tag>] [--repo <owner/repo>]
+# 省略 <commit-sha> 时读 merge 状态文件的 mergeSha（仅 stage=merged 时消费，否则 usage 错误）。
+# 退出码：0 = 通过/无 CI 放行，1 = 失败，2 = 超时或 CI 状态查询持续失败（AI 应询问用户）。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"

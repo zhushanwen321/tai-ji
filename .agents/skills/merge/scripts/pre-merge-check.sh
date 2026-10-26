@@ -92,7 +92,7 @@ get_script() {
 
 # ── 步骤 0: 确保依赖已安装 ──────────────────────────
 
-section "步骤 0/5: 检查依赖"
+section "步骤 0/4: 检查依赖"
 
 if [[ -f "package.json" ]]; then
     # pnpm 项目：根目录 pnpm install --frozen-lockfile 一次装完所有 workspace + hoisted deps。
@@ -107,22 +107,29 @@ else
     skip "未检测到 package.json，跳过依赖安装"
 fi
 
-# ── 步骤 1: TypeScript 类型检查 ─────────────────────
+# ── 步骤 1/4: TypeScript 类型检查 + 快速守卫测试族 ──
+#
+# 单次 quality-gates --only typecheck,test 调用（ADR-0169 ① 口径）：typecheck 四处
+# （extensions / runtime / renderer / mobile-renderer，单一登记）+ SUITES 单一登记的
+# 四族守卫（taste-lint / resources-plugins / builtin-ext-bundle / scripts-guards）。
+# 不传 --base：typecheck/test 组不消费 base。
+# [e2e 执行准则]（SSOT = AGENTS.md「测试」节）：e2e / 真实进程 / 真实 LLM 用例只在
+# 开发阶段按改动范围跑；**merge / PR 门禁一律不跑 e2e**。全量单测不在阶段 1 本地重跑
+# ——同一 commit 的完整 CI（test job 全量）由阶段 2 的 PR CI 等待裁决，本地重复跑只
+# 加时长不加覆盖。
 
-section "步骤 1/5: TypeScript 类型检查"
+section "步骤 1/4: TypeScript 类型检查 + 快速守卫测试族"
 
-# 类型检查出口 = scripts/quality-gates.mjs 的 typecheck 四处（extensions / runtime /
-# renderer / mobile-renderer，单一登记）。不传 --base：typecheck 组不消费 base。
 if [[ -f "scripts/quality-gates.mjs" ]]; then
-    echo "  运行 quality-gates --only typecheck（四处） ..."
-    run_check "TypeScript 类型检查（quality-gates typecheck 四处）" node scripts/quality-gates.mjs --side pr-cr-fix --only typecheck
+    echo "  运行 quality-gates --only typecheck,test（四处 + 四族） ..."
+    run_check "类型检查 + 守卫测试族（quality-gates typecheck,test）" node scripts/quality-gates.mjs --side pr-cr-fix --only typecheck,test
 else
-    fail "scripts/quality-gates.mjs 缺失（仓库布局变更？）——类型检查无法执行"
+    fail "scripts/quality-gates.mjs 缺失（仓库布局变更？）——类型检查与守卫测试无法执行"
 fi
 
 # ── 步骤 2: Lint ───────────────────────────────────
 
-section "步骤 2/5: Lint 检查"
+section "步骤 2/4: Lint 检查"
 
 LINT_RAN=false
 
@@ -136,28 +143,9 @@ if [[ -f "package.json" ]]; then
     fi
 fi
 
+# ── 步骤 3: 构建 ───────────────────────────────────
 
-# ── 步骤 3: 快速守卫测试族 ──
-#
-# [e2e 执行准则]（SSOT = AGENTS.md「测试」节）：e2e / 真实进程 / 真实 LLM 用例只在
-# 开发阶段按改动范围跑；**merge / PR 门禁一律不跑 e2e**。
-# 出口 = quality-gates --only test（SUITES 单一登记的四族守卫：taste-lint /
-# resources-plugins / builtin-ext-bundle / scripts-guards）。全量单测不在阶段 1 本地重跑
-# ——同一 commit 的完整 CI（test job 全量）由阶段 2 的 PR CI 等待裁决，本地重复跑只
-# 加时长不加覆盖。
-
-section "步骤 3/5: 快速守卫测试族"
-
-if [[ -f "scripts/quality-gates.mjs" ]]; then
-    echo "  运行 quality-gates --only test（四族） ..."
-    run_check "快速守卫测试族（quality-gates test）" node scripts/quality-gates.mjs --side pr-cr-fix --only test
-else
-    fail "scripts/quality-gates.mjs 缺失（仓库布局变更？）——守卫测试无法执行"
-fi
-
-# ── 步骤 4: 构建 ───────────────────────────────────
-
-section "步骤 4/5: 构建检查"
+section "步骤 3/4: 构建检查"
 
 BUILD_RAN=false
 
@@ -170,9 +158,9 @@ if [[ -f "package.json" ]]; then
     fi
 fi
 
-# ── 步骤 5: Git 状态 ──────────────────────────────
+# ── 步骤 4: Git 状态 ──────────────────────────────
 
-section "步骤 5/5: Git 状态检查"
+section "步骤 4/4: Git 状态检查"
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     # 刷新 index stat 缓存，避免 tsc/vite 构建修改文件 mtime 后导致的误报
