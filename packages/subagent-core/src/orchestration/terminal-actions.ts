@@ -67,6 +67,8 @@ export {
   runEventJournalPathOf,
   scanRunEvents,
 } from "../execution/persistence/run-event-journal.ts";
+// [subagent-observability §3.3.8] 成员交付结算派生面（纯派生模块——finalizeRun 合成链消费）。
+import { settleMembersIntoFinalSettlement } from "./run-member-settlement.ts";
 // [W1 / D1] v2 条目契约（两族小条目）：customType 同 v1（kind 判别），构造器与
 // 写点在本文件（见「v2 条目接驳」段）。
 import {
@@ -84,6 +86,7 @@ import type {
   DoneReason,
   WorkerLogEntry,
 } from "./models/types.ts";
+import type { FailedMemberReport, PartialMemberReport } from "./run-events.ts";
 
 const logger = getLogger("subagents");
 const runEventLogger = getLogger("run-event-dispatch");
@@ -715,7 +718,10 @@ export function dispatchAgentStarted(
 /** `agent-settled` 写入 journal 记录（引擎终态应答：call.result；attempt = call.attempts 终局尝试
  *  序号；signal abort = agent 粒度 cancelled——run 中止连带在途 agent 终止）。
  *  [D5 诊断引用写入 journal 记录] 失败时从 result.stderrTeePath 填充取证文件指针（成功/cancelled
- *  不带）。 */
+ *  不带）。
+ *  [subagent-observability §3.3.8 P6 定稿] 被接管轮（promptDisposition=handled——回执层成功
+ *  但引擎未执行）跳写本帧：resume 恢复计划按帧有无划分回放/重派集，无帧 = 重派集续聊重派
+ *  （任务从未执行，无双跑风险）；帧照写会被误当已提交结果回放（永不重派）。 */
 export function dispatchAgentSettled(run: WorkflowRun, call: AgentCall, aborted: boolean): void {
   const result = call.result;
   if (!result) {
@@ -727,7 +733,23 @@ export function dispatchAgentSettled(run: WorkflowRun, call: AgentCall, aborted:
     );
     return;
   }
-  const outcome: RunOutcome = aborted ? "cancelled" : result.error === undefined ? "done" : "failed";
+  // 被接管轮跳帧（P6 定稿）：debug 留痕（fail-visible——帧缺席是设计内形态，防误诊丢帧缺陷）。
+  if (result.promptDisposition === "handled") {
+    runEventLogger.debug(`agent-settled skipped: adopted round (runId=${run.runId}, callId=${call.id})`);
+    return;
+  }
+  // call 级 outcome 值域 = done/failed/cancelled 三值（run 级词表收窄——run-vocabulary
+  // 注释明示）。[subagent-observability §3.3.8] closeOutInFlightCalls 的 call 枚举补
+  // cancelled：被 run 终局收尾的成员（IN_FLIGHT_CALL_CANCELLED_MSG 固定取消文案）
+  // 判 cancelled 不判 failed——「未交付且非失败」，UC-16 取消不产生 partially_succeeded
+  // 的成员面语义（若让位窗口内补写 settled 帧，取消成员不得冒充失败）。
+  const outcome: RunOutcome = aborted
+    ? "cancelled"
+    : result.error === undefined
+      ? "done"
+      : result.error === IN_FLIGHT_CALL_CANCELLED_MSG
+        ? "cancelled"
+        : "failed";
   const errorCode: RunErrorCode | undefined =
     outcome === "failed" ? (result.failureKind ?? "unknown") : undefined;
   const stderrTeePath = outcome === "failed" ? result.stderrTeePath : undefined;
@@ -800,12 +822,16 @@ export function dispatchAgentRetrying(
  * 字段与 record run-settled 帧同源同构；`reason` 是帧载荷的诊断文本（非
  * DoneReason——DoneReason 由 {@link runSettledOutcomeToDoneReason} 从
  * (outcome, errorCode) 联合派生，五处统一派生源）。
+ * [subagent-observability §3.3.8] failedMembers/partialMembers = 成员交付结算明细
+ * （帧同源透传；cancelled 族终局不产失败成员——UC-16）。
  */
 export interface RunSettlementRecord { // oe-exempt:20260929:framework:settlement record domain contract per design D15
   outcome: RunOutcome;
   errorCode?: RunErrorCode;
   reason?: string;
   settledAt: number;
+  failedMembers?: FailedMemberReport[];
+  partialMembers?: PartialMemberReport[];
 }
 
 /** 进程内终局记录注册表（key = runId；两个记源——活体 dispatch 链 terminal 写入 journal 记录
@@ -823,11 +849,15 @@ export function settlementRecordOfRunSettledFrame(frame: {
   errorCode?: RunErrorCode;
   reason?: string;
   ts: number;
+  failedMembers?: FailedMemberReport[];
+  partialMembers?: PartialMemberReport[];
 }): RunSettlementRecord {
   return {
     outcome: frame.outcome,
     ...(frame.errorCode !== undefined ? { errorCode: frame.errorCode } : {}),
     ...(frame.reason !== undefined ? { reason: frame.reason } : {}),
+    ...(frame.failedMembers !== undefined ? { failedMembers: frame.failedMembers } : {}),
+    ...(frame.partialMembers !== undefined ? { partialMembers: frame.partialMembers } : {}),
     settledAt: frame.ts,
   };
 }
@@ -1178,6 +1208,10 @@ export async function settleRunAccounting(
     outcome: record.outcome,
     ...(record.errorCode !== undefined ? { errorCode: record.errorCode } : {}),
     ...(record.reason !== undefined ? { reason: record.reason } : {}),
+    // [subagent-observability §3.3.8] 成员交付结算明细随帧落 record（runtime 派生
+    // 视图与 wf-done 通知的载荷源；cancelled 族终局无失败成员——字段缺省）。
+    ...(record.failedMembers !== undefined ? { failedMembers: record.failedMembers } : {}),
+    ...(record.partialMembers !== undefined ? { partialMembers: record.partialMembers } : {}),
     artifactsDir: resolveRunEventJournal(opts?.journalDir).dir,
     ts: record.settledAt,
   });
@@ -1208,7 +1242,9 @@ export async function settleRunAccounting(
  *  原语（[D2] 映射表：time_limited 直判 outcome、budget_limited = failed + 同名
  *  终局码）。返回终局记录（RunSettlementRecord）——finalizeRun coda 的派生源。 */
 async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneReason): Promise<RunSettlementRecord> {
-  const record = composeFinalSettlement(run, doneReason);
+  // [subagent-observability §3.3.8] 成员交付结算派生先于帧构造（run 级终局优先级
+  // 在 settleMembersIntoFinalSettlement 内裁决——cancelled 族不被成员集合覆盖）。
+  const record = settleMembersIntoFinalSettlement(run, composeFinalSettlement(run, doneReason));
   if (doneReason === "aborted") {
     await dispatchRunTrigger(run, {
       type: "cancel-requested",
@@ -1224,10 +1260,12 @@ async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneReason):
  * [OR-8] run 到达终态时，把 calls Map 残留的 in-flight call（status !== "done"）
  * 收尾为取消终态（不删除条目——保留调用痕迹）。
  *
- * 收尾语义（trace/call 状态枚举封闭，无 "cancelled" 态）：AgentCall 补齐
- * pending→running→done 状态机，result 以 IN_FLIGHT_CALL_CANCELLED_MSG 承载取消
- * 原因；trace 节点置 failed + 固定取消文案 + completedAt。调用点约定：终局/
- * 中断转移成功后、save 之前——先收尾再落盘，内存态与持久化在同一时点收敛。
+ * 收尾语义（[subagent-observability §3.3.8] trace 状态枚举补 "cancelled"）：AgentCall
+ * 状态机保持封闭（pending→running→done），result 以 IN_FLIGHT_CALL_CANCELLED_MSG
+ * 承载取消原因；trace 节点置 cancelled + 固定取消文案 + completedAt（journal 侧
+ * agent-settled 帧 outcome 同判 cancelled——dispatchAgentSettled 的 IN_FLIGHT_CALL_
+ * CANCELLED_MSG 分支，与 TUI/快照呈现一致）。调用点约定：终局/中断转移成功后、
+ * save 之前——先收尾再落盘，内存态与持久化在同一时点收敛。
  * 返回被收尾的 callId 数组（升序）供调用方记日志。
  */
 export function closeOutInFlightCalls(run: WorkflowRun): number[] {
@@ -1244,7 +1282,7 @@ export function closeOutInFlightCalls(run: WorkflowRun): number[] {
       call.markDone({ content: "", error: IN_FLIGHT_CALL_CANCELLED_MSG });
     }
     run.state.trace.update(callId, {
-      status: "failed",
+      status: "cancelled",
       result: { content: "", error: IN_FLIGHT_CALL_CANCELLED_MSG },
       error: IN_FLIGHT_CALL_CANCELLED_MSG,
       completedAt,

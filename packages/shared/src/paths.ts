@@ -503,8 +503,8 @@ export function getImageCacheDir(sessionId: string, dataDir?: string): string {
  * local-file 白名单的既有成员 `<dataDir>` 前缀内——预览无需任何白名单改动。
  *
  * **路径穿越防护**：sessionId 统一过 assertPiSessionId（与 `isPiSessionId` 同域：
- * 首尾字母数字、中间允许 `[A-Za-z0-9._-]`、禁 `:`），非法 id throw——btw 虚拟 id
- * （`btw:<sid>`）含冒号必拒。
+ * 首尾字母数字、中间允许 `[A-Za-z0-9._-]`、禁 `:`），非法 id throw——带冒号的虚拟
+ * id（旧 btw 两段式 / subagent 三段式 / agentcall 两段式）必拒。
  *
  * 跨包边界：extensions 侧不 import shared，以同公式镜像推导（system-prompt 包内
  * `SESSION_STORE_DIR_SEGMENT` + `SESSION_ARTIFACTS_DIR_SEGMENT` 与同域正则），两侧

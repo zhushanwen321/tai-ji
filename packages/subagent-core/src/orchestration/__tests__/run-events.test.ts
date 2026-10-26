@@ -266,8 +266,14 @@ describe("事件词表（D5 → [D4] 对齐 pi）", () => {
     ]);
   });
 
-  it("ALL_RUN_OUTCOMES 四值（done / failed / cancelled / time_limited——[D2] completed→done 改名、interrupted 移出入 lifecycle、time_limited 升格）", () => {
-    expect(ALL_RUN_OUTCOMES).toEqual(["done", "failed", "cancelled", "time_limited"]);
+  it("ALL_RUN_OUTCOMES 五值（done / failed / cancelled / time_limited / partially_succeeded——[D2] completed→done 改名、interrupted 移出入 lifecycle、time_limited 升格、[subagent-observability §3.3.8] 成员交付结算派生独立档）", () => {
+    expect(ALL_RUN_OUTCOMES).toEqual([
+      "done",
+      "failed",
+      "cancelled",
+      "time_limited",
+      "partially_succeeded",
+    ]);
   });
 
   it("RunErrorCode 承载引擎/分类/终局/中断四族词表（编译期赋值由 tsc 把关）", () => {
@@ -1500,13 +1506,14 @@ describe("foldRunEventCheckpoint（seq 检查，D6 域 fold 去重）", () => {
 // ── DoneReason 终止性判定（词表语义单点；消费方 = 壳 workflow-notify 防偷懒收尾指令）──
 
 describe("isTerminalDoneReason", () => {
-  it("全词表表驱动：completed 唯一非终止性，其余成员均为终止性", () => {
+  it("全词表表驱动：completed 唯一非终止性，其余成员均为终止性（[subagent-observability §3.3.8] partially_succeeded 含失败成员归终止性）", () => {
     const expected: Record<string, boolean> = {
       completed: false,
       failed: true,
       aborted: true,
       budget_limited: true,
       time_limited: true,
+      partially_succeeded: true,
     };
     // ALL_DONE_REASONS 是词表 SSOT——遍历它而非本地重抄，词表增删成员时本用例自适应
     for (const reason of ALL_DONE_REASONS) {
@@ -1521,6 +1528,7 @@ describe("isTerminalDoneReason", () => {
       "aborted",
       "budget_limited",
       "time_limited",
+      "partially_succeeded",
     ];
     expect([...ALL_DONE_REASONS].sort()).toEqual([...expectedMembers].sort());
   });
@@ -1537,9 +1545,10 @@ describe("doneReasonToRunOutcome 映射表定稿（[D2] time_limited 升格后�
     aborted: "cancelled", // 用户主动取消
     budget_limited: "failed", // 预算耗尽 = 用户视角的诚实失败归因（errorCode='budget_limited'）
     time_limited: "time_limited", // [D2] 活体墙钟预算超时升格独立 outcome（无码）
+    partially_succeeded: "partially_succeeded", // [subagent-observability §3.3.8] 部分成功独立档（不折进 failed）
   };
 
-  it("五值逐行与定稿表一致", () => {
+  it("六值逐行与定稿表一致", () => {
     for (const reason of ALL_DONE_REASONS) {
       expect(doneReasonToRunOutcome(reason)).toBe(expectedRows[reason]);
     }

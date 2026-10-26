@@ -767,7 +767,7 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
 
 // ── steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + §4 AC-7）→ [投递所有权内核 u3b] 机制迁移 ──
 //
-// 锁定对象（断言强度不变）：steer/followUp 等非 direct 车道投递的用户气泡，live 通路与
+// 锁定对象（断言强度不变）：steer/followUp 等非 direct 投递路径的用户气泡，live 通路与
 // reload 通路逐字段等价。live 侧走**真实 store + 真实 registry 回执链 + session.delivery
 // 派生视图**（applyMessageEvent，custom-start-equivalence 同款范式），重放侧 = 同内容 pi 持久化
 // entry（uuidv7 id）直接 replayEntries——归一后逐字段 deep-equal。
@@ -776,7 +776,7 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
 // 分区 FIFO）随 defer 队列与 pendingBuffer 计数路径整体退役（设计 §3.1 删除范围；D7 队列区数据源
 // 改 session.delivery 状态帧单一源）。新机制的两条显示通路与原三例职责一一对应：
 // - morph 回填（E5a/E5c）：统一 submit 的乐观气泡（appendUser，原 segments 引用）→
-//   session.delivery 帧非 direct 车道 morph（truncateFrom 移出对话流 + captureMorphSegments
+//   session.delivery 帧非 direct 投递路径 morph（truncateFrom 移出对话流 + captureMorphSegments
 //   捕获原段）→ message_end(user) 裸标记 id 命中派生视图条目 → appendUser(原 segments) 回填
 //   （非降级恢复）。morph 编排的锁定点 = useChat.test.ts「session.delivery 帧消费与气泡
 //   morph」组（本文件只驱动同一组原语，不复制编排）。
@@ -856,7 +856,7 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     replaceDeliveryProjection(sid, [{ clientUuid, preview: 'p', state: 'in-flight', lane }])
   }
 
-  /** 非 direct 车道 morph（handleSessionDelivery 第二步：气泡移出对话流 + 原 segments 捕获；
+  /** 非 direct 投递路径 morph（handleSessionDelivery 第二步：气泡移出对话流 + 原 segments 捕获；
    *  编排锁定点见 useChat.test.ts「session.delivery 帧消费与气泡 morph」组）。返回捕获引用。 */
   function morphBubbleOut(store: ChatStoreInstance, sid: string, clientUuid: string): Segment[] {
     const bubble = store.getMessages(sid).find((m) => m.id === clientUuid)
@@ -898,7 +898,7 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     const sid = 's-morph-segments'
     const text = 'streaming 中追加的补充说明'
     const segments: Segment[] = [{ type: 'text', text }]
-    // live 前置链：统一 submit 乐观气泡（appendUser + inflight 占位）→ 内核判定非 direct 车道
+    // live 前置链：统一 submit 乐观气泡（appendUser + inflight 占位）→ 内核判定非 direct 投递路径
     // → session.delivery 帧 morph（气泡移出对话流，原段暂存待回执回填）
     const bubbleId = s.store.appendUser(sid, segments)
     s.store.incrementInflight(sid, 1)
@@ -1031,7 +1031,7 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     const sid = 's-receipt-idempotent'
     const text = '注意用中文回复'
     const segments: Segment[] = [{ type: 'text', text }]
-    // live 前置链：统一 submit 乐观气泡 → queued 车道帧 morph（气泡移出，段暂存）
+    // live 前置链：统一 submit 乐观气泡 → queued 投递路径帧 morph（气泡移出，段暂存）
     const bubbleId = s.store.appendUser(sid, segments)
     s.store.incrementInflight(sid, 1)
     seedDeliveryEntry(sid, bubbleId, 'queued')

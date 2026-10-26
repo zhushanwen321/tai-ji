@@ -80,7 +80,7 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 
 **时间平抑类逻辑红线（2026-09-26 用户裁决）**：防抖、稳定窗、抑制窗、定时兜底、延迟重试这类「用时间换一致」的代码，**默认视为通道设计缺陷的症状而非解法**——出现前必须先回答「为什么不能靠事件顺序或单一事实源自然解决」，答不出不得合入；已存在的每处须登记它补偿的根因与退役条件（根因修复后即删）。判别法：删掉该时间逻辑，若数据仍然最终一致（只是瞬态显示抖动），说明事实源/通道该修；若数据会错，说明事件顺序契约本身未定义，先定义契约。
 
-**事实驱动原则体系（[ADR-0122](docs/adr/decisions.md)，2026-10-05 用户裁决）**：总原则 = 事实驱动，不做补偿性猜测——状态判定锚定确定性事实（回执/断连信号/同步查询/磁盘记录），不建时间推测、补偿掩盖、乐观呈现类机制。分则：① 本机故障模型 = 进程生死二态（消息不丢，没收到 = 对端死了，有 OS 断连信号）；② 活状态走订阅推送，存储只做恢复源，禁止监视存储模拟实时（tail/watch/轮询表）；③ 推管即时拉管正确（推送丢失靠水位补读收敛，事实源读取不可绕过）；④ 单一事实源，消费方只持水位；⑤ 状态判定来源严格递减：同步查询 > 确定性事件 > （禁止）时间推测；⑥ 竞态用顺序契约与事实查询消解，不用宽限窗；⑦ 知识与决策同地，内核不建自动重试/自动恢复；⑧ 失败显式上报（人看通知、agent 收失败回执），首败即停；⑨ UI 跟随事实（成功才呈现、未知显式标注、无乐观回显）；⑩ 机制服务可达场景，信任边界内不设防。删除判据：删后数据仍最终一致 = 补偿补丁删之；不一致 = 契约未定义，先定义契约。原则面前无存量豁免。保留白名单：产品功能定时、显式配置超时、恢复读文件、锁语义、事件驱动对账、构建脚本。存量清查与退役清单 = [docs/todo/defense-mechanism-cleanup.md](docs/todo/defense-mechanism-cleanup.md)。
+**事实驱动原则体系（[ADR-0122](docs/adr/decisions.md)，2026-10-05 用户裁决）**：总原则 = 事实驱动，不做补偿性猜测——状态判定锚定确定性事实（回执/断连信号/同步查询/磁盘记录），不建时间推测、补偿掩盖、乐观呈现类机制。分则：① 本机故障模型 = 进程生死二态（消息不丢，没收到 = 对端死了，有 OS 断连信号）；② 活状态走订阅推送，存储只做恢复源，禁止监视存储模拟实时（tail/watch/轮询表）；③ 推管即时拉管正确（推送丢失靠水位补读收敛，事实源读取不可绕过）；④ 单一事实源，消费方只持水位；⑤ 状态判定来源严格递减：同步查询 > 确定性事件 > （禁止）时间推测；⑥ 竞态用顺序契约与事实查询消解，不用宽限窗；⑦ 知识与决策同地，内核不建自动重试/自动恢复；⑧ 失败显式上报（人看通知、agent 收失败回执），首败即停；⑨ UI 跟随事实（成功才呈现、未知显式标注、无乐观回显）；⑩ 机制服务可达场景，信任边界内不设防。删除判据：删后数据仍最终一致 = 补偿补丁删之；不一致 = 契约未定义，先定义契约。原则面前无存量豁免。保留白名单：产品功能定时、显式配置超时、恢复读文件、锁语义、事件驱动对账、构建脚本。存量清查已完结、例外保留清单（含 PingProbe 无进展检测、外部网络端点墙钟、trace-sync 过渡轮询）= [ADR-0122](docs/adr/decisions.md) 保留白名单段。
 
 **runtime ↔ 前端编码核心**：
 
@@ -152,6 +152,8 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 ## pi 资源放置
 
 agent.md / workflow.js 归位：与 extension 强相关（tools 受限某 extension / 离开该 extension 不可用）→ `extensions/<group>/<pkg>/agents|workflows/` + package.json `pi.agents`/`pi.workflows`；项目自用 → `.agents/agents|workflows/`；跨项目通用 → `~/.agents/`。发现机制：resource-discovery 扫 7 源同名 last-writer-wins（project-agents 最高）；extension 内置 agent 须装到 npm 扫描目录才被发现（dev-link 不发现 agent）；skill 走 `pi.skills` 独立通路（first-writer-wins）。SSOT：`packages/subagent-core/src/shared/resource-discovery.ts`。
+
+**review-fix-loop 双平台单源管线（2026-10-23 起）**：zcode 版（`~/.zcode/workflows/review-fix-loop.dwf.ts`）与 pi 内置版（`packages/subagent-core/workflows/review-fix-loop.js`）由单源生成，**禁手改产物**——改机制只改 `packages/subagent-core/workflows/src/`（`review-fix-loop.shared.ts` 机制单源段 + 两壳模板），然后 `pnpm --filter @zhushanwen/subagent-core build:workflows` 重建三产物（仓内 pi/zcode 产物 + saved 同步）；改源忘构建由 `src/__tests__/review-fix-loop-build.test.ts` 拦截。同族 pr-lifecycle 双胞胎尚未纳入（后续可循同管线收编）。
 
 ## 架构约定
 

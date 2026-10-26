@@ -77,7 +77,8 @@ interface Fixture {
   getClient: ReturnType<typeof vi.fn>
   getState: ReturnType<typeof vi.fn>
   setOnSessionDestroyed: ReturnType<typeof vi.fn>
-  getSummary: ReturnType<typeof vi.fn>
+  /** [W3] 降级链③读点：lifecycle 注册表记录（IManagedSessionView.modelId 双写缓存）。 */
+  getSession: ReturnType<typeof vi.fn>
 }
 
 function makeService(getStateImpl?: () => Promise<unknown>): Fixture {
@@ -85,13 +86,15 @@ function makeService(getStateImpl?: () => Promise<unknown>): Fixture {
   const getState = vi.fn(getStateImpl ?? (async () => undefined))
   const getClient = vi.fn(() => (getStateImpl === null ? undefined : ({ getState } as unknown)))
   const setOnSessionDestroyed = vi.fn()
-  const getSummary = vi.fn(() => undefined)
+  // W3：SessionSummary.modelId 已删（三状态字段退役），降级链③读点从 getSummary
+  // 改到 getSession（注册表记录的同名双写缓存字段）。
+  const getSession = vi.fn(() => undefined)
   const service = new GenStatsService({
     publish: (sid, msg) => published.push({ sid, msg }),
     pm: { getClient } as unknown as IProcessManager,
-    sessionService: { setOnSessionDestroyed, getSummary } as unknown as ISessionService,
+    sessionService: { setOnSessionDestroyed, getSession } as unknown as ISessionService,
   })
-  return { service, published, getClient, getState, setOnSessionDestroyed, getSummary }
+  return { service, published, getClient, getState, setOnSessionDestroyed, getSession }
 }
 
 /** 无活跃 pi 进程（降级链①不可用）形态 */
@@ -116,6 +119,19 @@ const NORMAL_SAMPLE = {
   input: 500,
   cacheRead: 300,
   cacheWrite: 100,
+}
+
+/** 分布全 null 形态（无样本窗口值；断言可读性辅助——五字段全 null 一字排开太长） */
+const NULL_DIST = { avg: null, p50: null, p99: null, max: null, min: null }
+
+/** 单样本分布（单条样本五量全等该值，round 取整） */
+function distOfOne(v: number): { avg: number; p50: number; p99: number; max: number; min: number } {
+  return { avg: v, p50: v, p99: v, max: v, min: v }
+}
+
+/** 已知样本分布（显式写出，避免测试内再算一遍聚合逻辑） */
+function dist(avg: number, p50: number, p99: number, max: number, min: number) {
+  return { avg, p50, p99, max, min }
 }
 
 describe('GenStatsService.recordSample（写 1 + bogus guard + 落盘）', () => {
@@ -197,7 +213,7 @@ describe('GenStatsService.recordSample ttft（composer-genstats-ttft §3.3 逐�
 
     expect(readJson(ttftFilePath('prov', 'mdl'))).toEqual({ [localDayKey()]: [[820]] })
     const frame = published[0]!.msg.payload as GenStatsFrame
-    expect(frame.ttft).toEqual({ current: 820, day: 820, d7: 820, d30: 820 })
+    expect(frame.ttft).toEqual({ current: 820, day: distOfOne(820), d7: distOfOne(820), d30: distOfOne(820) })
   })
 
   it('逐字段独立：durationMs=null 不阻 ttft 落盘（speed 跳过 / ttft+cache 照常）', () => {
@@ -258,7 +274,8 @@ describe('GenStatsService 映射三写一清 + 扩展广播（D4）', () => {
       const payload = p.msg.payload as GenStatsFrame
       expect(payload.sessionId).toBe(p.sid)
       expect(payload.model).toBe('prov/mdl')
-      expect(payload.speed.day).toBe(50) // 聚合共享：(100+100)/(2000+2000)×1000
+      // 聚合共享：两次样本各 50 t/s → 分布五量同值 50
+      expect(payload.speed.day).toEqual(distOfOne(50))
       expect(payload.cacheRatio.day).toBe(33)
     }
     // current 会话隔离：sA 取本会话样本；sB 无本会话样本 → null（无回落，读不到 sA 的值）
@@ -278,9 +295,9 @@ describe('GenStatsService 映射三写一清 + 扩展广播（D4）', () => {
     const lastForB = [...frames].reverse().find((f) => f.sessionId === 'sB')!
     expect(lastForA.speed.current).toBe(50) // sA 自己的样本未被 sB 覆盖
     expect(lastForB.speed.current).toBe(100) // sB 自己的样本
-    // 聚合共享：sB 采样后两 session 的 day 同步更新（(100+400)/(2000+4000)×1000 = 83）
-    expect(lastForA.speed.day).toBe(83)
-    expect(lastForB.speed.day).toBe(83)
+    // 聚合共享：sB 采样后两 session 的 day 同步更新（逐样本 50 / 100 t/s → avg=75 / p50=75 / max=100）
+    expect(lastForA.speed.day).toEqual(dist(75, 75, 100, 100, 50))
+    expect(lastForB.speed.day).toEqual(dist(75, 75, 100, 100, 50))
   })
 
   it('模型切换来回：切到无本会话样本模型 current=null；切回恢复本会话旧样本', () => {
@@ -321,7 +338,7 @@ describe('GenStatsService 映射三写一清 + 扩展广播（D4）', () => {
     const frame = published[1]!.msg.payload as GenStatsFrame
     expect(published[1]!.sid).toBe('s1')
     expect(frame.model).toBe('prov/mdl2')
-    expect(frame.speed).toEqual({ current: null, day: null, d7: null, d30: null })
+    expect(frame.speed).toEqual({ current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST })
     expect(frame.cacheRatio).toEqual({ current: null, day: null })
   })
 
@@ -416,7 +433,7 @@ describe('GenStatsService 帧归属：openrouter 系复合 key 完整性（A4/S1
     expect(service.sessionsOfModel('openrouter/anthropic/claude-3')).toEqual(['s1'])
     const frame = published[0]!.msg.payload as GenStatsFrame
     expect(frame.model).toBe('openrouter/anthropic/claude-3')
-    expect(frame.speed).toEqual({ current: null, day: null, d7: null, d30: null })
+    expect(frame.speed).toEqual({ current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST })
   })
 
   it('误杀修复（恢复路径降级链①）：get_state 的 Model.id 自含 / → 复合解析完整 key + 写 3 回填', async () => {
@@ -440,14 +457,25 @@ describe('GenStatsService.frameFor（混合视角：current 会话槽 + 聚合�
 
     const snap = service.frameFor('s1', 'prov/mdl')
     expect(snap.model).toBe('prov/mdl')
-    // current = 本会话末条 300/3s = 100 t/s；day = (100+300)/(2000+3000)×1000 = 80 t/s
-    expect(snap.speed).toEqual({ current: 100, day: 80, d7: 80, d30: 80 })
+    // current = 本会话末条 300/3s = 100 t/s；窗口 = 逐样本 50 / 100 t/s 的分布
+    // （avg=75 / p50=75 / p99=100 / max=100 / min=50；[HISTORICAL] 旧加权口径此处为 80）
+    expect(snap.speed).toEqual({
+      current: 100,
+      day: dist(75, 75, 100, 100, 50),
+      d7: dist(75, 75, 100, 100, 50),
+      d30: dist(75, 75, 100, 100, 50),
+    })
     // 命中率：本会话末条 300/900 = 33%；day 加权同值（两样本相同）
     expect(snap.cacheRatio.current).toBe(33)
     expect(snap.cacheRatio.day).toBe(33)
     // 他会话视角：聚合同值、current 不共享（会话隔离）
     const other = service.frameFor('s-other', 'prov/mdl')
-    expect(other.speed).toEqual({ current: null, day: 80, d7: 80, d30: 80 })
+    expect(other.speed).toEqual({
+      current: null,
+      day: dist(75, 75, 100, 100, 50),
+      d7: dist(75, 75, 100, 100, 50),
+      d30: dist(75, 75, 100, 100, 50),
+    })
   })
 
   it('无回落钉：磁盘有该模型样本但本会话无槽（重启 / 他会话存量）→ current null，聚合照常', () => {
@@ -459,7 +487,7 @@ describe('GenStatsService.frameFor（混合视角：current 会话槽 + 聚合�
     const snap = service.frameFor('s-fresh', 'prov/mdl')
     expect(snap.speed.current).toBeNull()
     expect(snap.cacheRatio.current).toBeNull()
-    expect(snap.speed.day).toBe(50)
+    expect(snap.speed.day).toEqual(distOfOne(50))
     expect(snap.cacheRatio.day).toBe(33)
   })
 
@@ -467,7 +495,7 @@ describe('GenStatsService.frameFor（混合视角：current 会话槽 + 聚合�
     const { service } = makeOfflineService()
     const snap = service.frameFor('s1', 'other/model-x')
     expect(snap.model).toBe('other/model-x')
-    expect(snap.speed).toEqual({ current: null, day: null, d7: null, d30: null })
+    expect(snap.speed).toEqual({ current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST })
     expect(snap.cacheRatio).toEqual({ current: null, day: null })
   })
 
@@ -475,7 +503,7 @@ describe('GenStatsService.frameFor（混合视角：current 会话槽 + 聚合�
     const { service } = makeOfflineService()
     const snap = service.frameFor('s1', null)
     expect(snap.model).toBeUndefined()
-    expect(snap.speed).toEqual({ current: null, day: null, d7: null, d30: null })
+    expect(snap.speed).toEqual({ current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST })
     expect(snap.cacheRatio).toEqual({ current: null, day: null })
   })
 
@@ -491,9 +519,10 @@ describe('GenStatsService.frameFor（混合视角：current 会话槽 + 聚合�
 
     const snap = service.frameFor('s1', 'prov/mdl')
     expect(snap.speed.current).toBeNull() // 直写文件无本会话槽 → 无回落
-    expect(snap.speed.day).toBe(50)
-    expect(snap.speed.d7).toBe(50)
-    expect(snap.speed.d30).toBe(80) // (100+300)/(2000+3000)×1000
+    expect(snap.speed.day).toEqual(distOfOne(50))
+    expect(snap.speed.d7).toEqual(distOfOne(50))
+    // d30 含 8 天前 300/3s=100 t/s：逐样本 [50, 100] → avg=75 / max=100 / min=50
+    expect(snap.speed.d30).toEqual(dist(75, 75, 100, 100, 50))
   })
 })
 
@@ -648,16 +677,24 @@ describe('GenStatsService.frameFor ttft（composeFrame 真实聚合 + current �
     service.recordSample('s1', { ...NORMAL_SAMPLE, ttftMs: 200 })
 
     const snap = service.frameFor('s1', 'prov/mdl')
-    // p50 [100,200,300] = 200；current = 末条 200 原值（整数 ms 恒等）
-    expect(snap.ttft).toEqual({ current: 200, day: 200, d7: 200, d30: 200 })
-    expect(snap.ttft.day).not.toBeNull() // 覆写核验：U3 已把 D1 全 null 占位换为真实聚合
+    // 分布 [100,200,300]：avg/p50=200 / p99=max=300 / min=100；current = 末条 200 原值
+    const expected = dist(200, 200, 300, 300, 100)
+    expect(snap.ttft).toEqual({ current: 200, day: expected, d7: expected, d30: expected })
+    expect(snap.ttft.day.p50).not.toBeNull() // 覆写核验：U3 已把 D1 全 null 占位换为真实聚合
   })
 
   it('偶数样本 p50 取整：820/1000 → (820+1000)/2 = 910；current=末条原值', () => {
     const { service } = makeOfflineService()
     service.recordSample('s1', { ...NORMAL_SAMPLE, ttftMs: 820 })
     service.recordSample('s1', { ...NORMAL_SAMPLE, ttftMs: 1000 })
-    expect(service.frameFor('s1', 'prov/mdl').ttft).toEqual({ current: 1000, day: 910, d7: 910, d30: 910 })
+    // [820,1000]：avg=910 / p50=910 / p99=max=1000 / min=820
+    const expected = dist(910, 910, 1000, 1000, 820)
+    expect(service.frameFor('s1', 'prov/mdl').ttft).toEqual({
+      current: 1000,
+      day: expected,
+      d7: expected,
+      d30: expected,
+    })
   })
 
   it('current 槽 modelKey 校验同 speed 槽：切模型 → 新模型 current null（无回落），旧模型槽保留', () => {
@@ -685,7 +722,7 @@ describe('GenStatsService.frameFor ttft（composeFrame 真实聚合 + current �
 
     const snap = service.frameFor('s-fresh', 'prov/mdl')
     expect(snap.ttft.current).toBeNull()
-    expect(snap.ttft.day).toBe(820)
+    expect(snap.ttft.day).toEqual(distOfOne(820))
   })
 
   it('恢复路径回填（S4）：重启形态（磁盘存量 + 内存槽清零）经 getSnapshotForSession 回填一致', async () => {
@@ -701,9 +738,10 @@ describe('GenStatsService.frameFor ttft（composeFrame 真实聚合 + current �
     const frame = await service.getSnapshotForSession('s-fresh')
     expect(frame.model).toBe('prov/mdl')
     expect(frame.ttft.current).toBeNull() // 重启后本会话槽清零 →「—」；day/d7/d30 从磁盘回填
-    expect(frame.ttft.day).toBe(820)
-    expect(frame.ttft.d7).toBe(820)
-    expect(frame.ttft.d30).toBe(4910) // 双中位均值 (820+9000)/2
+    expect(frame.ttft.day).toEqual(distOfOne(820))
+    expect(frame.ttft.d7).toEqual(distOfOne(820))
+    // d30 = [820, 9000]：avg=4910 / p50=(820+9000)/2=4910 / p99=max=9000
+    expect(frame.ttft.d30).toEqual(dist(4910, 4910, 9000, 9000, 820))
   })
 })
 
@@ -717,7 +755,7 @@ describe('GenStatsService.getSnapshotForSession（恢复路径降级链，D4）'
     expect(frame.sessionId).toBe('sLive')
     expect(frame.model).toBe('prov/mdl')
     expect(frame.speed.current).toBeNull() // sLive 无本会话样本 → 无回落（sOther 的值不共享）
-    expect(frame.speed.day).toBe(50) // 聚合全局可见
+    expect(frame.speed.day).toEqual(distOfOne(50)) // 聚合全局可见
     // 写 3：解析成功即登记，live 帧此后可达
     expect(service.sessionsOfModel('prov/mdl')).toContain('sLive')
   })
@@ -731,14 +769,14 @@ describe('GenStatsService.getSnapshotForSession（恢复路径降级链，D4）'
     expect(frame.speed.current).toBe(50)
   })
 
-  it('③ get_state 失败 + 无映射 → replicated states 缓存值（getSummary 的 modelId 双写缓存）', async () => {
-    const { service, getSummary } = makeService(async () => { throw new Error('pi offline') })
-    getSummary.mockReturnValue({ id: 's1', modelId: 'prov/mdl-cached' })
+  it('③ get_state 失败 + 无映射 → 注册表记录缓存值（getSession 的 modelId 双写缓存）', async () => {
+    const { service, getSession } = makeService(async () => { throw new Error('pi offline') })
+    getSession.mockReturnValue({ id: 's1', modelId: 'prov/mdl-cached' })
 
     const frame = await service.getSnapshotForSession('s1')
-    expect(getSummary).toHaveBeenCalledWith('s1')
+    expect(getSession).toHaveBeenCalledWith('s1')
     expect(frame.model).toBe('prov/mdl-cached')
-    expect(frame.speed).toEqual({ current: null, day: null, d7: null, d30: null })
+    expect(frame.speed).toEqual({ current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST })
   })
 
   it('④ 全部未命中：全 null 帧 + model 缺省（不卡加载）', async () => {
@@ -746,9 +784,9 @@ describe('GenStatsService.getSnapshotForSession（恢复路径降级链，D4）'
     const frame = await service.getSnapshotForSession('sUnknown')
     expect(frame).toEqual({
       sessionId: 'sUnknown',
-      speed: { current: null, day: null, d7: null, d30: null },
+      speed: { current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST },
       cacheRatio: { current: null, day: null },
-      ttft: { current: null, day: null, d7: null, d30: null },
+      ttft: { current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST },
     })
     expect(frame.model).toBeUndefined()
   })
@@ -1045,9 +1083,9 @@ describe('SessionMessageHandler session.getGenStats case', () => {
   it('注入 → reply session.stats_update，payload = 降级链快照帧（handler 只透传）', async () => {
     const frame: GenStatsFrame = {
       sessionId: 's9',
-      speed: { current: 50, day: 50, d7: null, d30: null },
+      speed: { current: 50, day: distOfOne(50), d7: NULL_DIST, d30: NULL_DIST },
       cacheRatio: { current: null, day: null },
-      ttft: { current: null, day: null, d7: null, d30: null },
+      ttft: { current: null, day: NULL_DIST, d7: NULL_DIST, d30: NULL_DIST },
       model: 'prov/mdl',
     }
     const getSnapshotForSession = vi.fn(async () => frame)

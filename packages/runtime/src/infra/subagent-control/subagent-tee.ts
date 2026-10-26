@@ -42,7 +42,7 @@
  * （行缓冲/累积文本/锚点缓存全释放）。
  */
 import type { ServerMessage, ServerMessageMap } from '@taiji/shared'
-import { subagentVirtualId, isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
+import { subagentVirtualId } from '@taiji/shared'
 import type { PiEntry, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
 import { logger } from '../logger.js'
 import { toErrorMessage } from '../../utils/errors.js'
@@ -122,14 +122,12 @@ export class SubagentTee {
   private readonly virtualId: string
 
   constructor(private readonly opts: SubagentTeeOptions) {
-    // [btw-question D9③ / M1-a 键中段位约定] 虚拟键中段 = owner 会话的 piSessionId：
-    // btw 线的 tee 以线 vid 归属（opts.mainSessionId 是 bus 路由键，发布范围保持 vid 原样），
-    // 键构造前先 extract——vid 不入键，INVAR-1.1 三段式不破（M1a 值域断言对 `btw:` 前缀
-    // fail-fast，未翻译即 throw）。非 btw 输入零变化。
-    this.virtualId = subagentVirtualId(
-      isBtwVirtualId(opts.mainSessionId) ? extractBtwPiSessionId(opts.mainSessionId) : opts.mainSessionId,
-      opts.recordId,
-    )
+    // [btw-question D9③ / M1-a 键中段位约定] 虚拟键中段 = owner 会话的 piSessionId。
+    // W4a 键统一后 opts.mainSessionId 本身就是 pi 真实会话 id（btw 线按 piId 注册、
+    // bus 路由键 = piId）——旧的「btw vid 先 extract 再入键」翻译层删除，直接传参
+    // （设计 §3.3.6 迁移表：2 处直接传参之一）。INVAR-1.1 值域断言（中段禁冒号）
+    // 对 pi id 恒过。
+    this.virtualId = subagentVirtualId(opts.mainSessionId, opts.recordId)
   }
 
   /** tee 分支是否已放弃（放弃后读取侧停止喂入，live 流降级快照 + reload 路径）。 */

@@ -1,22 +1,34 @@
 #!/usr/bin/env node
 /**
- * check-subagent-core-value-cycles.mjs —— subagent-core 包内**值依赖环**检查（§2.3 配套）。
+ * check-subagent-core-value-cycles.mjs —— subagent-core 包内**值依赖环 + 反向依赖边**检查
+ * （C-data-27 配套）。
  *
  * 背景：packages/subagent-core 内部按领域分家（execution 记录/执行域 vs orchestration
  * 编排域），依赖方向应为单向向下。历史上两域互指（workflow 服务住在 execution/service、
  * 跨域共享词汇没有中立住所），文件级图上形成环时没有任何检查覆盖——既有三个相关检查
  * 分别管「闭包不含 pi SDK」「六聚合 vs 壳」「record 写入口单一」，都不看包内方向。
  *
- * 判据（先只查值边）：静态 import/export-from、动态 import()、require() 构成的**值**
+ * 判据一（值依赖环）：静态 import/export-from、动态 import()、require() 构成的**值**
  * 依赖图上不得存在环（含自环）。`import type` / 全 `type` 修饰的具名导入 / `export type
- * from` 是编译期擦除边，不参与判定（环里只剩它们时运行期无环，属可接受形态）；这类
+ * from` 是编译期擦除边，不参与环判定（环里只剩它们时运行期无环，属可接受形态）；这类
  * 类型环单独统计并打印为提示，不红。
  *
+ * 判据二（反向依赖边零容忍，值边与类型边同等拦截）：src 下 orchestration 以外的全部
+ * 文件（层子目录 execution / shared / core、包根测试目录 `src/__tests__/` 及未来新增的
+ * 顶层目录与文件；生产与测试，无豁免白名单）不得依赖 orchestration/** 或包入口 barrel
+ * `src/index.ts`。射程定界：barrel 自身的 re-export 出边豁免（包公共 API 出口）；
+ * orchestration/** 内文件（含其 `__tests__/`，后者不收集）同层消费射程外；入 barrel 边
+ * 照拦（`from "../index.ts"` 与无扩展名 `from "../index"` 均命中）。
+ *
+ * 收集范围：orchestration 子树的 `__tests__` 不收集，其余目录的 `__tests__` 一并收集
+ * （生产与测试同射程）；值环判据在全部收集文件上运行（orchestration 生产文件仍参与，
+ * 不回退）。
+ *
  * 用法：node scripts/check-subagent-core-value-cycles.mjs [--json] [--root <dir>]
- * 退出码：0 = 无值环；1 = 存在值环（打印每个 SCC 的成员与内部边）。
+ * 退出码：0 = 无值环且无反向边；1 = 存在值环或反向边（逐条打印）。
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import process from "node:process";
 
 const ARGS = process.argv.slice(2);
@@ -24,9 +36,19 @@ const ROOT_FLAG = ARGS.indexOf("--root");
 const ROOT = resolve(process.cwd(), ROOT_FLAG >= 0 ? ARGS[ROOT_FLAG + 1] : "packages/subagent-core/src");
 const EXTS = [".ts", ".mts", ".cts"];
 const CANDIDATES = [".ts", ".mts", ".cts", "/index.ts", "/index.mts", "/index.cts"];
+const ORCHESTRATION_DIR = join(ROOT, "orchestration");
+const BARREL = join(ROOT, "index.ts");
 
-/** 递归收集源文件（跳过 __tests__ 与声明文件）。 */
-function collect(dir, out = []) {
+/** orchestration 子树判定（src 下第一段目录为 orchestration 的全部文件）。 */
+function inOrchestration(file) {
+  return relative(ROOT, file).split(sep)[0] === "orchestration";
+}
+
+/**
+ * 递归收集源文件。仅 orchestration 子树内的 `__tests__` 不收集；其余目录的
+ * `__tests__` 一并收集（生产与测试同射程，反向零容忍不分生产/测试）。
+ */
+function collect(dir, out = [], inOrch = false) {
   let entries;
   try {
     entries = readdirSync(dir);
@@ -34,11 +56,18 @@ function collect(dir, out = []) {
     return out;
   }
   for (const name of entries) {
-    if (name === "__tests__" || name === "node_modules") continue;
+    if (name === "node_modules") continue;
     const full = join(dir, name);
-    const st = statSync(full);
+    let st;
+    try {
+      st = statSync(full);
+    } catch {
+      continue;
+    }
+    const childInOrch = inOrch || full === ORCHESTRATION_DIR;
     if (st.isDirectory()) {
-      collect(full, out);
+      if (childInOrch && name === "__tests__") continue;
+      collect(full, out, childInOrch);
       continue;
     }
     if (name.endsWith(".d.ts")) continue;
@@ -171,6 +200,23 @@ for (const file of files) {
   typeEdges.set(file, [...value, ...typeOnly]);
 }
 
+/**
+ * 反向依赖边（判据二）：源 = 非 orchestration 文件且非 barrel（barrel 出边豁免）；
+ * 目标 = orchestration/** 或 barrel（入 barrel 边照拦）。值边与类型边同等拦截
+ * （typeEdges = 值 ∪ 类型，反向零容忍不分值/类型）。
+ */
+function collectReverseEdges() {
+  const out = [];
+  for (const file of files) {
+    if (inOrchestration(file)) continue;
+    if (file === BARREL) continue;
+    for (const target of new Set(typeEdges.get(file) ?? [])) {
+      if (inOrchestration(target) || target === BARREL) out.push({ from: file, to: target });
+    }
+  }
+  return out;
+}
+
 /** 自环单列（Tarjan 会把自环节点单独成一个 SCC）。 */
 function hasSelfLoop(file, edges) {
   return (edges.get(file) ?? []).includes(file);
@@ -182,20 +228,36 @@ const valueSccs = stronglyConnected(files, valueEdges).filter(
 const typeSccs = stronglyConnected(files, typeEdges).filter(
   (members) => members.length > 1 || hasSelfLoop(members[0], typeEdges),
 );
+const reverseEdges = collectReverseEdges();
 
 if (process.argv.includes("--json")) {
   console.log(JSON.stringify({
     files: files.length,
     valueCycles: valueSccs.map((m) => m.map((f) => relative(process.cwd(), f))),
     typeCycles: typeSccs.map((m) => m.map((f) => relative(process.cwd(), f))),
+    reverseEdges: reverseEdges.map((e) => ({ from: relative(process.cwd(), e.from), to: relative(process.cwd(), e.to) })),
   }, null, 1));
 } else {
   console.log(
     `[core-value-cycles] 扫描 ${files.length} 个源文件 · 值环 ${valueSccs.length} 个 · ` +
-    `含类型边的环 ${typeSccs.length} 个`,
+    `含类型边的环 ${typeSccs.length} 个 · 反向边 ${reverseEdges.length} 条`,
   );
   for (const members of typeSccs) {
     console.log(`[core-value-cycles][提示] 含类型边的环（不红，编译期擦除）：\n${formatCycle(members, typeEdges)}`);
+  }
+}
+
+if (reverseEdges.length > 0) {
+  console.error(
+    "[core-reverse-edges] 检出反向依赖边——src 下 orchestration 以外的文件（生产与测试，无豁免）" +
+    "不得依赖 orchestration/** 或包入口 barrel src/index.ts（值边与类型边同等拦截；约束 C-data-27）：",
+  );
+  console.error("  修复方向（三选一）：");
+  console.error("    1) 符号下沉 shared/（两侧都可 import 的中立层）");
+  console.error("    2) 本体搬迁 execution/（消费方在执行域时）");
+  console.error("    3) 消费点或测试归属迁移（消费留守编排符号的测试搬 orchestration/__tests__/）");
+  for (const e of reverseEdges) {
+    console.error(`    ${relative(process.cwd(), e.from)} → ${relative(process.cwd(), e.to)}`);
   }
 }
 
@@ -204,5 +266,6 @@ if (valueSccs.length > 0) {
   for (const members of valueSccs) console.error(formatCycle(members, valueEdges));
   process.exit(1);
 }
-console.log("[core-value-cycles] OK：包内无值依赖环");
+if (reverseEdges.length > 0) process.exit(1);
+console.log("[core-value-cycles] OK：包内无值依赖环、无反向依赖边");
 process.exit(0);

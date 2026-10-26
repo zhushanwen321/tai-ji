@@ -37,7 +37,7 @@
   壳经 emits 暴露回落链所需语义（close / select / retry-dag），fallback 动作序列
   （关 overlay；重开即重试，Guard :key 重挂复位）的接线归 U6（WorkflowVizOverlayHost）。
 
-  数据边界（u4 与 u5 的派生单处分工）：节点六态映射（nodeStates）与已用时长
+  数据边界（u4 与 u5 的派生单处分工）：节点七态映射（nodeStates）与已用时长
   （elapsedMs，含 D9 中断停走口径）为已派生输入——单点实现在 renderer 侧
   gantt-segments 派生（deriveNodeStatus）与 workflowStore（deriveWorkflowRunElapsedMs），
   由容器 Host 统一派生后经 props 透传（单 header 终态 D2：时长仅壳 header 呈现，
@@ -181,7 +181,7 @@
             :active-phase="activePhase"
             @select="(payload) => emit('select', payload)"
           />
-          <!-- D4 状态图例（workflow-overlay-refine）：六态 dot + 词，dot 类从 dag/tone.ts
+          <!-- D4 状态图例（workflow-overlay-refine）：七态 dot + 词，dot 类从 dag/tone.ts
                同源取（「图例 = DAG 的图例」）；停止叠加两档说明由容器 title 承载；绝对
                定位层不占画布布局流，pointer-events-none 不拦截节点点击与缩放手势（V3-wf⑤） -->
           <div
@@ -363,7 +363,7 @@ const props = withDefaults(
     tab?: OverlayTab
     /** scheduler tab 内容的所属会话（ViewHost per-session 分区键；缺省 = 取不到树走 hidden 空态）。 */
     schedulerSessionId?: string
-    /** 节点六态映射（已派生输入，透传画布；派生单处在 u5）。 */
+    /** 节点七态映射（已派生输入，透传画布；派生单处在 u5）。 */
     nodeStates?: Record<string, WorkflowVizDagNodeStatus>
     /** 当前 phase 分区（已派生输入，透传画布）。 */
     activePhase?: string | null
@@ -437,12 +437,13 @@ function onTabClick(value: OverlayTab): void {
   emit('update:tab', value)
 }
 
-// ── D4 状态图例（六态 + 停止叠加说明；挂 DAG 区左下，绝对定位不占布局流）──
+// ── D4 状态图例（七态 + 停止叠加说明；挂 DAG 区左下，绝对定位不占布局流）──
 
 /**
  * 图例 dot 类消费 dag/tone.ts 的 dotTone（与节点 dot 同源的单一事实源，模板内
  * `dotTone(entry.status)` 逐条取类）；词用既有状态词族现值（与 RunTraceTable
- * statusLabel 同映射），skipped 为 workflow-overlay-refine D4 新增词条。
+ * statusLabel 同映射），skipped 为 workflow-overlay-refine D4 新增词条；cancelled
+ * （§3.3.8 run 终局收尾在途成员，中性档）与 run 级 outcome 文案同词「已取消」。
  * 停止叠加两档不进常驻图例，由图例容器 title 承载说明（i18n legendStopTitle）。
  */
 const LEGEND_STATUS_LABEL_KEYS = {
@@ -451,10 +452,11 @@ const LEGEND_STATUS_LABEL_KEYS = {
   done: 'panel.workflowViz.statusDone',
   failed: 'panel.workflowViz.statusFailed',
   retrying: 'panel.workflowViz.statusRetrying',
+  cancelled: 'panel.workflowViz.statusCancelled',
   skipped: 'panel.workflowViz.statusSkipped',
 } as const satisfies Record<WorkflowVizDagNodeStatus, string>
 
-/** 图例条目（序 = 六态词表序：pending / running / done / failed / retrying / skipped）。 */
+/** 图例条目（序 = 七态词表序：pending / running / done / failed / retrying / cancelled / skipped）。 */
 const legendEntries = computed(() =>
   (Object.keys(LEGEND_STATUS_LABEL_KEYS) as WorkflowVizDagNodeStatus[]).map((status) => ({
     status,
@@ -468,8 +470,8 @@ function close(): void {
   emit('close')
 }
 
-// ── header 状态 pill（文案单源：outcome 四值 = shared LABELS；interrupted 复用
-// tray「已中断（可续跑）」词源；running/done 缺省为本域文案）──
+// ── header 状态 pill（文案单源：outcome 五值 = shared WORKFLOW_RUN_OUTCOME_LABELS；
+// interrupted 复用 tray「已中断（可续跑）」词源；running/done 缺省为本域文案）──
 
 const pillLabel = computed(() => {
   const run = props.run

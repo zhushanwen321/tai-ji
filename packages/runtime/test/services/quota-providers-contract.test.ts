@@ -356,31 +356,31 @@ describe('opencodeFetcher — A2-1 错误通道', () => {
 
   it('HTTP 401（cookie 过期）→ reason=unauthorized', async () => {
     mockFetch.mockResolvedValue(jsonResponse({ _tag: 'Unauthorized' }, 401))
-    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { quotaParams: { workspaceUrl: OPENCODE_WS_URL } })
     expect(outcome).toEqual({ ok: false, reason: 'unauthorized' })
   })
 
   it('HTTP 404（workspace id 不属于该账号）→ reason=no-subscription', async () => {
     mockFetch.mockResolvedValue(jsonResponse({ _tag: 'NotFound' }, 404))
-    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { quotaParams: { workspaceUrl: OPENCODE_WS_URL } })
     expect(outcome).toEqual({ ok: false, reason: 'no-subscription' })
   })
 
   it('HTTP 500 → reason=network', async () => {
     mockFetch.mockResolvedValue(jsonResponse(null, 500))
-    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { quotaParams: { workspaceUrl: OPENCODE_WS_URL } })
     expect(outcome).toEqual({ ok: false, reason: 'network' })
   })
 
   it('fetch 网络异常 → reason=network', async () => {
     mockFetch.mockRejectedValue(new TypeError('fetch failed'))
-    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { quotaParams: { workspaceUrl: OPENCODE_WS_URL } })
     expect(outcome).toEqual({ ok: false, reason: 'network' })
   })
 
   it('200 但无三窗口数据 → reason=no-subscription', async () => {
     mockFetch.mockResolvedValue(jsonResponse({ access: { meters: {} } }, 200))
-    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { quotaParams: { workspaceUrl: OPENCODE_WS_URL } })
     expect(outcome).toEqual({ ok: false, reason: 'no-subscription' })
   })
 
@@ -388,14 +388,14 @@ describe('opencodeFetcher — A2-1 错误通道', () => {
     mockFetch.mockResolvedValue(
       jsonResponse({ access: { meters: { fiveHour: goMeter({ usedMicroCents: 'abc' }) } } }, 200),
     )
-    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { quotaParams: { workspaceUrl: OPENCODE_WS_URL } })
     expect(outcome).toEqual({ ok: false, reason: 'parse' })
   })
 
   it('成功：三窗口解析，请求 = 固定端点 + org id 进 x-org-id header（D1-4：URL 不含 id）', async () => {
     mockFetch.mockResolvedValue(jsonResponse({ access: { meters: fullMeters } }, 200))
 
-    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { quotaParams: { workspaceUrl: OPENCODE_WS_URL } })
 
     expect(mockFetch).toHaveBeenCalledTimes(1)
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit]

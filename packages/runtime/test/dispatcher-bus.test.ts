@@ -12,7 +12,9 @@
  * - hook blocked → bus.publish(message.error)
  * - hook error → bus.publish(message.error)
  * - abort failure → bus.publish(message.error)
- * - abort success → bus.publish(message.complete)
+ * - abort success（三分型型1: 有回合可中止）→ bus.publish(message.complete)；
+ *   idle 入口（型3）/ 用户压缩取消（型2）→ no-op 零广播
+ * - abort convergence（型1）→ 终态 reason 'Convergence abort (auto)'
  * - sendBash ensureActive fail → bus.publish(message.error)
  * - sendBash busy → bus.publish(send.rejected)
  * - sendBash start → bus.publish(message.bashStart)
@@ -47,10 +49,7 @@ function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManaged
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
+        bashRunToken: undefined,
     ...overrides,
   }
 }
@@ -69,10 +68,7 @@ function makeMocks(opts: {
   // [u3b 预检改读 occupancy] sendPrompt 预检输入源改为 occupancy 派生视图。fixture 镜像真实
   // 链路的原子同步（原语「合并 + 派生」双写合一）。
   const session = opts.session ?? makeMockSession({
-    isGenerating,
-    isCompacting,
-    isBashRunning,
-    occupancy: { turn: isGenerating ? 'generating' : 'idle', compacting: isCompacting, bash: isBashRunning },
+    occupancy: { turn: isGenerating ? 'generating' : 'idle', compacting: isCompacting, bash: isBashRunning, handingOff: false },
   })
   const promptFn = opts.promptError
     ? vi.fn(async () => { throw opts.promptError! })
@@ -96,12 +92,13 @@ function makeMocks(opts: {
     touchActivity: vi.fn(),
   } as unknown as IPiEngine
 
-  // S2 ISP 化：结构性满足 dispatcher 窄接口（6 方法 = 消费方实际用到的全部），无强转；
+  // S2 ISP 化：结构性满足 dispatcher 窄接口（7 方法 = 消费方实际用到的全部），无强转；
   // applyContextUpdate 不在窄接口（event-interpreter 组合根回调消费），随迁移移除
   const svc: IDispatcherSessionOps = {
     ensureActive: vi.fn(async () => client),
     getSessionByClient: vi.fn(() => session),
     persistSessionOutcome: vi.fn(),
+    clearSessionOutcome: vi.fn(),
     getSession: vi.fn(),
     removeSessionEntry: vi.fn(),
     detachSession: vi.fn(),
@@ -191,13 +188,28 @@ describe('message-dispatcher bus integration', () => {
     }))
   })
 
-  it('abort success → bus.publish(message.complete{stopReason:aborted})', async () => {
-    const { dispatcher, messageBus } = makeMocks()
+  it('abort success（型1: turn=generating 有回合可中止）→ bus.publish(message.complete{stopReason:aborted})', async () => {
+    // [chat-flow-consistency abort 入口三分型] 成功路径收尾只在型 1（入口快照 turn ∈
+    // {dispatching, generating}）发生：stopped 终态 + complete{aborted} 广播。
+    // 旧用例在 idle 入口断言广播——三分型后 idle/settling 入口为型 3 no-op（见下一条）。
+    const { dispatcher, messageBus, svc } = makeMocks({ isGenerating: true })
     await dispatcher.abort('s1')
+    expect(svc.persistSessionOutcome).toHaveBeenCalledWith('s1', 'stopped', 'User aborted')
     expect(messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({
       type: 'message.complete',
       payload: expect.objectContaining({ sessionId: 's1', stopReason: 'aborted' }),
     }))
+  })
+
+  it('abort 已空闲（型3: turn=idle 无回合可中止）→ no-op：零 stopped 终态 + 零 message.complete', async () => {
+    // 三分型：idle/settling 入口 pi 侧 abort 幂等 no-op——done 终态已写不覆盖（覆盖即谎报
+    // 「回合被中止」）、无流式实体可收尾不广播 complete、occupancy 不动；队列对账照跑。
+    const { dispatcher, svc, messageBus } = makeMocks()
+    await dispatcher.abort('s1')
+    expect(svc.persistSessionOutcome).not.toHaveBeenCalled()
+    const types = messageBus.publish.mock.calls.map(([, m]) => (m as { type: string }).type)
+    expect(types).not.toContain('message.complete')
+    expect(types).not.toContain('message.error')
   })
 
   // ── [compaction-cancel] 压缩期中止（composer 发送位「终止压缩」钮，2026-10 用户裁决）──
@@ -226,10 +238,12 @@ describe('message-dispatcher bus integration', () => {
     }))
   })
 
-  it('abort 压缩期但 source=convergence → 不走压缩取消语义（收敛环保持 stopped 终态）', async () => {
-    // 压缩取消语义仅限 source='user'（composer/sidebar 停止路径）；收敛环/静默 abort 的
-    // 诊断终态不受按钮形态变化影响。
-    const { dispatcher, svc } = makeMocks({ isCompacting: true })
+  it('abort source=convergence（型1: turn=generating）→ 终态 reason 写 Convergence abort (auto)', async () => {
+    // [U2 + abort 三分型] 收敛环掐的是 runtime 自动收敛的补发 turn，终态 reason 不得谎报
+    // 用户操作语义（'Convergence abort (auto)' ≠ 'User aborted'）。压缩取消语义仅限
+    // source='user'——收敛环在压缩期（无回合可中止）落型 3 no-op，可观测行为与用户停止
+    // 同型（零终态零广播），旧用例锁的「压缩期 convergence 写 stopped」已随三分型退役。
+    const { dispatcher, svc } = makeMocks({ isGenerating: true })
     await dispatcher.abort('s1', 'convergence')
     expect(svc.persistSessionOutcome).toHaveBeenCalledWith('s1', 'stopped', 'Convergence abort (auto)')
   })
@@ -292,7 +306,7 @@ describe('message-dispatcher bus integration', () => {
   // ── abortBash path ──
 
   it('abortBash → bus.publish(message.bashAborted)（D4-3 兜底终态独立帧）', async () => {
-    const session = makeMockSession({ isBashRunning: true, bashRunToken: 'bash_123_abc' })
+    const session = makeMockSession({ bashRunToken: 'bash_123_abc', occupancy: { turn: 'idle', compacting: false, bash: true, handingOff: false } })
     const { dispatcher, messageBus } = makeMocks({ session })
     await dispatcher.abortBash('s1')
     const bashAbortedCall = messageBus.publish.mock.calls.find(
@@ -365,12 +379,10 @@ describe('message-dispatcher bus integration', () => {
     compactFn.mockImplementation(() => firstGate)
 
     const first = dispatcher.compact('s1')
-    // async 函数体同步执行到第一个 await（client.compact）：置位（'compacting-start' →
-    // isCompacting=true 派生）已落 session 视图
-    expect(session.isCompacting).toBe(true)
+    // async 函数体同步执行到第一个 await（client.compact）：置位（compacting-start）已落 session 视图
     expect(session.occupancy?.compacting).toBe(true)
 
-    // 第二发：预检读 isCompacting=true → 拒绝（不发出第二个 RPC）
+    // 第二发：预检读 compacting=true → 拒绝（不发出第二个 RPC）
     const second = dispatcher.compact('s1')
     await expect(second).rejects.toThrow('Cannot compact while compaction already running')
     // 锁定 error envelope code 属性（产生点 = message-dispatcher compact 预检的
@@ -381,7 +393,6 @@ describe('message-dispatcher bus integration', () => {
     // 第一发完成：finally 复位（compacting-end）
     releaseFirst({ summary: 'ok', tokensBefore: 100, estimatedTokensAfter: 50 })
     await first
-    expect(session.isCompacting).toBe(false)
     expect(session.occupancy?.compacting).toBe(false)
   })
 
@@ -389,7 +400,6 @@ describe('message-dispatcher bus integration', () => {
     const { dispatcher, compactFn, session } = makeMocks()
     compactFn.mockRejectedValue(new Error('transport gone'))
     await expect(dispatcher.compact('s1')).rejects.toThrow('transport gone')
-    expect(session.isCompacting).toBe(false)
     expect(session.occupancy?.compacting).toBe(false)
   })
 
@@ -403,6 +413,7 @@ describe('message-dispatcher bus integration', () => {
       ensureActive: vi.fn(async () => client),
       getSessionByClient: vi.fn(() => session),
       persistSessionOutcome: vi.fn(),
+      clearSessionOutcome: vi.fn(),
       getSession: vi.fn(),
       removeSessionEntry: vi.fn(),
       detachSession: vi.fn(),
@@ -422,6 +433,7 @@ describe('message-dispatcher bus integration', () => {
     const svc: IDispatcherSessionOps = {
       getSessionByClient: vi.fn(() => session),
       persistSessionOutcome: vi.fn(),
+      clearSessionOutcome: vi.fn(),
       ensureActive: vi.fn(),
       getSession: vi.fn(),
       removeSessionEntry: vi.fn(),
@@ -444,6 +456,7 @@ describe('message-dispatcher bus integration', () => {
       getSessionByClient: vi.fn(() => session),
       ensureActive: vi.fn(),
       persistSessionOutcome: vi.fn(),
+      clearSessionOutcome: vi.fn(),
       getSession: vi.fn(),
       removeSessionEntry: vi.fn(),
       detachSession: vi.fn(),

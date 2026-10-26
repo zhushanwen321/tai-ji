@@ -332,4 +332,27 @@ describe('活跃路径裁剪（message-revoke U6a 文件源路径）', () => {
     expect(tail.messages.map((m) => m.piEntryId)).toEqual(['q', 'a1', 'n'])
     expect(tail.messages.some((m) => m.piEntryId === 'm' || m.piEntryId === 'am')).toBe(false)
   })
+
+  it('撤回尾巴 + 未附着尾读：中断判定读活跃路径——被撤子树 user 尾不误标 interrupted', async () => {
+    // 撤回最后一条 user 消息后未发新消息：文件尾 = label 锚，被撤子树（m）按文件序先于
+    // label。判定喂数为活跃路径裁剪后 entries——从尾向前落在 a1（assistant 终稿）上，
+    // 健康会话不被误标（若读裁剪前窗口，label 被跳过后落在被撤 user entry 上 → 误标 true）。
+    const label = {
+      type: 'label',
+      id: 'lbl',
+      parentId: 'a1',
+      timestamp: '2026-01-01T00:00:00Z',
+      label: 'taiji:revoked',
+      targetId: 'm',
+    } as PiSessionEntry
+    const entries: PiSessionEntry[] = [
+      { ...msgEntry('q', 'user', '问题'), parentId: null },
+      { ...msgEntry('a1', 'assistant', '回答'), parentId: 'q' },
+      { ...msgEntry('m', 'user', '发错的消息'), parentId: 'a1' },
+      label,
+    ]
+    const tail = await tailReadHistory(writeJsonl(entries), realStore, 20)
+    expect(tail.messages.map((m) => m.piEntryId)).toEqual(['q', 'a1'])
+    expect(tail.interrupted).toBe(false)
+  })
 })

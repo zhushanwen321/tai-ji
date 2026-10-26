@@ -239,7 +239,7 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
     expect(h.pi?.emitted ?? []).toHaveLength(0);
   });
 
-  it("终态 subagent record（磁盘 idle+closedReason，桥接判据命中）→ 补发注销（reason 透传 closedReason，未知值 status 兜底 completed）", () => {
+  it("终态 subagent record（磁盘 idle+closedReason，桥接判据命中）→ 补发注销（reason 透传 closedReason；[subagent-observability §3.3.11④] 词表外值 status 落 unknown fail-visible）", () => {
     setup();
     writeRegister("bg-old", "subagent");
     const h = makeBinding({ sessionFile });
@@ -248,8 +248,11 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
       makeDiskRecord(sessionFile, { id: "bg-old", status: "idle", closedReason: "gc" }),
     );
     runPendingReconcileSweepForService(h.binding, false);
+    // [subagent-observability] reason "gc" 在历史六值通道（mapReasonToStatus）落
+    // unknown（fail-open=completed 方向整体废除，u1 落地映射侧）；结清语义经
+    // resolveSettlementReason("gc") = no_result 新权威通道解析。
     expect(h.pi?.appended).toEqual([
-      { customType: "pending:unregister", data: { id: "bg-old", reason: "gc", status: "completed" } },
+      { customType: "pending:unregister", data: { id: "bg-old", reason: "gc", status: "unknown" } },
     ]);
   });
 
@@ -263,7 +266,35 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
     ]);
   });
 
-  it("[W4 收敛] v2 收编 record（findLightById 未命中 + 收编 manifest 停因在场）→ 注销 reason=interrupted-by-restart status=aborted（expired 误注销回归钉）", () => {
+  it("[subagent-observability §3.3.4 失联结清] 磁盘 record 轮收条停因=宿主重启打断（idle + interrupted-by-restart）→ 结清 lost（在途被重启打断，债未经轮终发射点②结清）", () => {
+    setup();
+    writeRegister("bg-lost", "subagent");
+    const h = makeBinding({ sessionFile });
+    h.store.disk.set(
+      "bg-lost",
+      makeDiskRecord(sessionFile, { id: "bg-lost", status: "idle", stopReason: "interrupted-by-restart" }),
+    );
+    runPendingReconcileSweepForService(h.binding, false);
+    // reason = SettlementReason lost（结清枚举）；历史六值通道对 lost 未知 →
+    // unknown（fail-visible 如实），新权威通道 resolveSettlementReason("lost") 原样解析。
+    expect(h.pi?.appended).toEqual([
+      { customType: "pending:unregister", data: { id: "bg-lost", reason: "lost", status: "unknown" } },
+    ]);
+  });
+
+  it("[subagent-observability 判据边界] 正常轮终（stopReason completed/failed）→ 维持 active 不补注销（债已随轮终发射点②结清，不在册）", () => {
+    setup();
+    writeRegister("bg-normal", "subagent");
+    const h = makeBinding({ sessionFile });
+    h.store.disk.set(
+      "bg-normal",
+      makeDiskRecord(sessionFile, { id: "bg-normal", status: "idle", stopReason: "completed" }),
+    );
+    runPendingReconcileSweepForService(h.binding, false);
+    expect(h.pi?.appended ?? []).toHaveLength(0);
+  });
+
+  it("[W4 收敛] v2 收编 record（findLightById 未命中 + 收编 manifest 停因=宿主重启打断）→ 结清 lost（[subagent-observability u3] 收编停因同被重启打断——expired 误注销回归钉保持）", () => {
     setup();
     writeRegister("bg-adopted", "subagent");
     const h = makeBinding({ sessionFile });
@@ -274,8 +305,8 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
     );
     expect(entry?.data).toMatchObject({
       id: "bg-adopted",
-      reason: "interrupted-by-restart",
-      status: "aborted",
+      reason: "lost",
+      status: "unknown",
     });
   });
 

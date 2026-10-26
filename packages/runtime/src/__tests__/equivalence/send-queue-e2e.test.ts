@@ -75,10 +75,7 @@ function makeView(id: string, cwd: string, label: string): IManagedSessionView {
     lastActiveAt: Date.now(),
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
+        bashRunToken: undefined,
     sessionFilePath: undefined,
   }
 }
@@ -217,7 +214,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`send queue e2e faux pi（集成测�
         content: `${PROBE_MARK} The counting task is over now. Reply with exactly: ${ACK_MARK} and nothing else.`,
         clientUuid: PROBE_UUID,
       })
-      expect(submitReply, `受理回执应落 steer 车道（受理即出站，不排队）：${JSON.stringify(submitReply)}`).toMatchObject({
+      expect(submitReply, `受理回执应落 steer 投递路径（受理即出站，不排队）：${JSON.stringify(submitReply)}`).toMatchObject({
         clientUuid: PROBE_UUID,
         lane: 'steer',
         state: 'queued',

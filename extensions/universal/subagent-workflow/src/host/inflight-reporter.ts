@@ -21,8 +21,9 @@
 // 实测无限闪框），此时不启动上报（ask-user channel-handler 的 mode 二值判定同款
 // 先例）。非 rpc 会话的 inFlight 判定归 runtime 侧镜像（spawn 预置 0），无信息损失。
 //
-// 语义（D5）：每帧携带**绝对计数**（getInFlightSnapshot，谓词与 core 内
-// hasRunningBackground 同源），非增量；初始上报触发时点 = extension 加载完成
+// 语义（D5）：每帧携带**绝对计数**（getInFlightSnapshot，双谓词过滤与 core 内
+// 既有快照同源——原 hasRunningBackground 同源表述随该谓词退役删除，
+// subagent-observability §3.3.7③），非增量；初始上报触发时点 = extension 加载完成
 // （session_start 是 pi 启动序列里最早带 ctx 的钩子 = 「session 就绪」，即设计所指
 // 加载完成时点；不挂任何懒触发（无 subagent 的 session 也必上报）。
 //

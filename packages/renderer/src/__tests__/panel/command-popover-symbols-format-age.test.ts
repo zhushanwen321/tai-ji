@@ -7,7 +7,8 @@
  * - formatAge 分档全覆盖：<1m 'now' / <1h 'Nm' / <1d 'Nh' / >=1d 'Nd' 封顶 + 未来时间钳 0；
  *   now 显式传参，不依赖真实当前时间。
  * - buildSessionCandidates（D1 删 hasSessionId 参）：landing/panel 统一「有数据就列」——
- *   空 sessions → []；有数据不过滤 landing/panel 区别（D7 口径不变：hidden 排除 + 子串过滤 + 降序）。
+ *   空 sessions → []；有数据不过滤 landing/panel 区别（D7 口径不变：surface==='sidebar'
+ *   正向谓词排除 + 子串过滤 + 降序；W5 切换，登记于 docs/constraints.json C-data-28）。
  * - buildSubagentCandidates：hasSessionId 参数保留（@ landing 空语义，G3/A5 护栏）。
  * - open-fetch file 路（mount）：landing 无 sid 有 cwd 边沿拉、无 cwd 不拉、panel 有 sid 不拉、
  *   1s 节流、拉取失败（session cwd 已删 runtime not_found）降级空候选。
@@ -69,8 +70,8 @@ describe('formatAge 相对时间分档', () => {
 const NOW = 1_000_000_000_000
 
 const SESSIONS: SessionSummary[] = [
-  { id: 'sess-alpha', label: 'alpha 设计讨论', cwd: '/p/a', status: 'idle', lastActiveAt: NOW - 60_000, modelId: 'm', tokenCount: 0 },
-  { id: 'sess-beta', label: 'beta review', cwd: '/p/b', status: 'idle', lastActiveAt: NOW - 3 * 3_600_000, modelId: 'm', tokenCount: 0 },
+  { id: 'sess-alpha', label: 'alpha 设计讨论', cwd: '/p/a', status: 'idle', lastActiveAt: NOW - 60_000, surface: 'sidebar' },
+  { id: 'sess-beta', label: 'beta review', cwd: '/p/b', status: 'idle', lastActiveAt: NOW - 3 * 3_600_000, surface: 'sidebar' },
 ]
 
 describe('buildSessionCandidates 删 hasSessionId 参（D1/D7）', () => {
@@ -89,9 +90,9 @@ describe('buildSessionCandidates 删 hasSessionId 参（D1/D7）', () => {
     expect(items[1].subText).toContain('3h')
   })
 
-  it('hidden 排除 + label/id 子串过滤口径维持（删参仅删门，非删过滤）', () => {
-    const withHidden: SessionSummary[] = [...SESSIONS, { ...SESSIONS[0], id: 'sess-h', label: 'hidden one', hidden: true }]
-    expect(buildSessionCandidates(withHidden, '', NOW)).toHaveLength(2)
+  it('surface 非 sidebar 排除 + label/id 子串过滤口径维持（W5 切换：删 hidden 读点、非删过滤）', () => {
+    const withBtwLine: SessionSummary[] = [...SESSIONS, { ...SESSIONS[0], id: 'sess-h', label: 'btw line', surface: 'btw' }]
+    expect(buildSessionCandidates(withBtwLine, '', NOW)).toHaveLength(2)
     expect(buildSessionCandidates(SESSIONS, 'beta', NOW)).toHaveLength(1)
     expect(buildSessionCandidates(SESSIONS, 'sess-beta', NOW)).toHaveLength(1) // id 子串命中
     expect(buildSessionCandidates(SESSIONS, 'zzz', NOW)).toEqual([])

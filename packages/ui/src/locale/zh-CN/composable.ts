@@ -1,7 +1,6 @@
 export default {
   sendFailed: '消息发送失败：{msg}',
   nextTurnSendFailed: '下轮消息发送失败：{msg}',
-  stopFailed: '停止失败：{msg}',
   compactFailed: '压缩失败：{msg}',
   bashFailed: 'Bash 执行失败：{msg}',
   // [U5 消息撤回 D8] 撤回编排 toast 文案（D8 错误规格表呈现列为 SSOT，与 core useChat 的

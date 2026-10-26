@@ -14,7 +14,5 @@ export * from './staging'
 export * from './submit'
 export * from './bash'
 export * from './send'
-// [session-occupancy u5b / D6] 发送路由表纯函数（sessionPhase → sendRoute，统一发送分发器判定核心）
-export * from './send-route'
 export * from './fork-mode'
 export * from './handoff-mode'

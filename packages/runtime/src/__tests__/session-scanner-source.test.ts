@@ -1,9 +1,12 @@
 /**
- * SessionScanner W15 磁盘占位值检查——扫描产出侧测试。
+ * SessionScanner 磁盘扫描产出侧测试（W15 来源标记 + W3 surface 缺省）。
  *
- * 锁定（data-source-governance W15，#2 空串覆盖事故防线）：
- * - scannedToSummary 产出的持久化条目带 source:'scan' 显式标记 + modelId:''/tokenCount:0
- *   占位值（占位语义显式化——合并侧 core mergeViewSnapshot 按 source 分流检查）；
+ * 锁定：
+ * - scannedToSummary 产出的持久化条目带 source:'scan' 显式标记 + surface 显式缺省
+ *   'sidebar'（W3：磁盘路径只见得到主会话；W5 两处过滤点切 surface === 'sidebar' 正向
+ *   谓词后，缺该缺省 = 全部冷会话从侧栏消失——验收项 10① 集合等价断言兜底）；
+ * - W3 同批删除后 modelId/thinkingLevel/tokenCount 三状态字段不再出现在扫描条目
+ *   （状态归 live-state 状态层，列表只承载导航；原 W15 占位值检查随字段删除退役）；
  * - 活跃实例条目（getActiveSummaries 透传）不标 source（缺省 = owner 权威，D1b 正常覆盖）；
  * - 回归：扫描全量后列表条目数与 sessions 目录 .jsonl 文件数一致（扫描不丢条目），
  *   活跃条目按 filePath 去重（活跃真值优先，扫描副本不进列表）。
@@ -69,7 +72,7 @@ describe('SessionScanner W15 磁盘占位值来源标记', () => {
     return new SessionScanner(svc, new PiSessionStore(), gitInfoReader)
   }
 
-  it('扫描条目带 source:"scan" 标记 + modelId/tokenCount 占位值（W15 占位语义显式化）', () => {
+  it('扫描条目带 source:"scan" 标记 + surface 显式缺省 "sidebar"（W3 磁盘条目缺省）', () => {
     writeSessionFile(sessionsDir, 'proj-a', 'sess-1', '/work/a')
 
     const groups = makeScanner([], new Set()).listPersistedSessions()
@@ -77,10 +80,15 @@ describe('SessionScanner W15 磁盘占位值来源标记', () => {
     expect(groups).toHaveLength(1)
     const scanned = groups[0].sessions[0]
     expect(scanned.id).toBe('sess-1')
-    // 占位语义显式化：''/0 不是真值，source:'scan' 让合并侧能按来源分流检查
+    // 来源标记：'scan' = 磁盘扫描条目（owner 来源不标）
     expect(scanned.source).toBe('scan')
-    expect(scanned.modelId).toBe('')
-    expect(scanned.tokenCount).toBe(0)
+    // W3 surface 落地：磁盘条目显式缺省 'sidebar'（W5 正向谓词 surface === 'sidebar' 的
+    // 取数来源；undefined 会让全部冷会话从侧栏消失）
+    expect(scanned.surface).toBe('sidebar')
+    // W3 三状态字段删除：扫描条目不再携带 modelId/thinkingLevel/tokenCount
+    expect(scanned).not.toHaveProperty('modelId')
+    expect(scanned).not.toHaveProperty('thinkingLevel')
+    expect(scanned).not.toHaveProperty('tokenCount')
   })
 
   it('活跃实例条目不标 source（缺省 = owner 权威，D1b 正常覆盖路径）', () => {
@@ -91,8 +99,8 @@ describe('SessionScanner W15 磁盘占位值来源标记', () => {
       cwd: '/work/a',
       status: 'idle',
       lastActiveAt: 1,
-      modelId: 'provider/m-true',
-      tokenCount: 77,
+      // W3：活跃条目透传注册表 surface（buildSessionSummary 透传；registerSession 缺省 'sidebar'）
+      surface: 'sidebar',
     }
 
     const groups = makeScanner([active], new Set()).listPersistedSessions()
@@ -100,9 +108,10 @@ describe('SessionScanner W15 磁盘占位值来源标记', () => {
     const all = groups.flatMap((g) => g.sessions)
     const live = all.find((s) => s.id === 'sess-live')
     expect(live?.source).toBeUndefined()
-    expect(live?.modelId).toBe('provider/m-true')
+    expect(live?.surface).toBe('sidebar')
     const scanned = all.find((s) => s.id === 'sess-1')
     expect(scanned?.source).toBe('scan')
+    expect(scanned?.surface).toBe('sidebar')
   })
 
   it('回归：扫描全量条目数与 sessions 目录 .jsonl 文件数一致（不丢条目；活跃 filePath 去重）', () => {
@@ -119,8 +128,7 @@ describe('SessionScanner W15 磁盘占位值来源标记', () => {
       cwd: '/work/c',
       status: 'active',
       lastActiveAt: 2,
-      modelId: 'provider/m-live',
-      tokenCount: 9,
+      surface: 'sidebar',
       sessionFile: livePath,
     }
 
@@ -130,9 +138,9 @@ describe('SessionScanner W15 磁盘占位值来源标记', () => {
     // 目录 6 个文件；f6 活跃去重后总条目数 = 5 个扫描 + 1 个活跃（不重复计入）
     expect(all).toHaveLength(6)
     expect(all.filter((s) => s.source === 'scan')).toHaveLength(5)
-    // 活跃去重的 f6 走实例版本（真值 modelId，非扫描占位 ''）
+    // 活跃去重的 f6 走实例版本（owner 来源不标 source；surface 透传注册表值）
     const f6 = all.find((s) => s.id === 'f6')
-    expect(f6?.modelId).toBe('provider/m-live')
+    expect(f6?.surface).toBe('sidebar')
     expect(f6?.source).toBeUndefined()
   })
 

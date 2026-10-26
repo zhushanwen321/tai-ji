@@ -168,6 +168,16 @@ describe('AgentStreamDrawer · 开合（黑盒 DOM）', () => {
     expect(wrapper.find('[data-testid="wf-viz-agent-drawer-tab-strip"]').exists()).toBe(true)
   })
 
+  it('cancelled call（§3.3.8）openAgent → meta 条渲染中性档状态词（不再折进 failed）', async () => {
+    const cancelledCall = makeCall({ id: 4, status: 'cancelled' })
+    const wrapper = await mountDrawer(makeRun({ agentCalls: [cancelledCall] }))
+    ;(wrapper.vm as unknown as DrawerVM).openAgent(cancelledCall)
+    await flushPromises()
+    const statusSpan = wrapper.find('[data-testid="wf-viz-agent-meta"] span[data-status="cancelled"]')
+    expect(statusSpan.exists()).toBe(true)
+    expect(statusSpan.text()).toContain('panel.workflowViz.statusCancelled')
+  })
+
   it('收起钮：只收起不清 tab（重开恢复既有 tab 集）；卸载归宿在宿主 v-if', async () => {
     const wrapper = await mountDrawer()
     const vm = wrapper.vm as unknown as DrawerVM

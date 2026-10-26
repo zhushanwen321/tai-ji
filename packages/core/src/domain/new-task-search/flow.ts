@@ -220,13 +220,17 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     () => currentSession.value?.cwd ?? pendingCwd.value,
   )
   /**
-   * 当前 flow 选定模型（Composer 显示用）：session 已建用 session.modelId，
-   * 否则用 landing 选定的 pendingModel。两者均空时 Composer 侧经 resolveLaunchConfig
+   * 当前 flow 选定模型（Composer 显示用）：landing 态记的 pendingModel。
+   *
+   * [W3] session 已建后的 modelId 读取分支已删——SessionSummary.modelId 字段随三状态
+   * 字段删除一并退役（状态归 live-state 状态层，composer 显示读状态层而非列表载荷）；
+   * 本 computed 是 landing 态 chip 的取数源（延迟 create 下 landing 态恒无绑定
+   * session，旧分支本就在死路径上）。两者均空时 Composer 侧经 resolveLaunchConfig
    * 全序解析兜底（preset.modelOverride → lastUsedModel（D4 校验）→ 全局默认），
    * 不直接落全局默认。
    */
   const currentModel: ComputedRef<string | null> = computed(
-    () => currentSession.value?.modelId ?? pendingModel.value,
+    () => pendingModel.value,
   )
 
   // 选目录子模块（需在 gitInfo 前创建：gitInfo landing 态 fallback 读 dirSelect.mode/worktreeItems）

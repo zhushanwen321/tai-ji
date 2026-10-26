@@ -11,7 +11,7 @@
 //
 // 依赖方向：只依赖 `./record-types.ts`（同层词汇）与 SDK 契约类型（`Turn` /
 // `ToolCall` / `WorktreeHandle` / `AgentFailureKind` / `AgentUsageTotal`）——**不 import
-// assembly / orchestration**，领域层在下由构造保证（值依赖环检查 C-data-26 同批覆盖）。
+// assembly / orchestration**，领域层在下由构造保证（值依赖环检查 C-data-27 同批覆盖）。
 //
 // 刻意**不迁** `SubagentRecord`：字段证据（`eventLog: AgentEventLogEntry[]` +
 // `displayItems: DisplayItem[]`）表明它是**应用层读模型**（同时携带领域字段与展示
@@ -22,14 +22,19 @@
 
 import type {
   AgentFailureKind,
+  AgentOutcome,
+  AgentOutcomeUsage,
   AgentUsageTotal,
+  ErrorFact,
+  FailureCause,
+  EngineStopReason,
   ModelRef,
   ToolCall,
   Turn,
   WorktreeHandle,
 } from "@zhushanwen/subagent-engine-sdk";
 
-import { STOP_REASONS } from "./record-types.ts";
+import { ROUND_TERMINAL_STOP_REASONS, STOP_REASONS } from "./record-types.ts";
 import type {
   AbandonedRoundMark,
   ClosedReason,
@@ -117,6 +122,52 @@ export function isPiTranscriptRef(ref: TranscriptRef): ref is PiTranscriptRef {
   return ref.engine === "pi";
 }
 
+/**
+ * 协议 usage → 轮收条 usage 快照（AgentOutcomeUsage → AgentUsageTotal 单点适配）。
+ * 两域形状差异：协议终态带 contextTokens/turns、无 total；轮收条快照（AgentResult.usage
+ * / RoundSettlementOutcome.usage / RoundFacts.usage 同一词表）按 {@link AgentUsageTotal}
+ * 字段口径派生 total = 四项之和。contextTokens/turns 不进快照（轮收条轮数由轮终帧
+ * turns 字段承载）。settle 两调用点（one-shot / chat 轮）共用，防两处手写漂移。
+ */
+export function roundUsageSnapshot(usage: AgentOutcomeUsage): AgentUsageTotal {
+  const { input, output, cacheRead, cacheWrite, cost } = usage;
+  return { input, output, cacheRead, cacheWrite, cost, total: input + output + cacheRead + cacheWrite };
+}
+
+/**
+ * settle 站点事实载荷形状（全可选，缺省字段不落键）——{@link settlementFactsOf} 的
+ * 返回型，settleRoundFailed 的 facts 入参同型复用。
+ */
+export type SettlementFacts = Partial<{
+  failure: FailureCause;
+  engineStopReason: EngineStopReason;
+  retryAttempts: number;
+  promptDisposition: "started" | "queued" | "handled";
+  usage: AgentUsageTotal;
+  observations: string[];
+  stderrTeePath: string;
+}>;
+
+/**
+ * 协议 AgentOutcome → settle 站点事实载荷单点（收尾边沿七字段条件收集；usage 经
+ * {@link roundUsageSnapshot} 适配轮收条词形）。消费站点：one-shot 域 outcomeToAgentResult
+ * 同构段与 chat 域 onRunSettled 失败分流 / settleRoundSuccess——多站点共用单构造器，
+ * 防逐字段手写漂移（漏字段 = 轮收条事实静默缺失）。
+ */
+export function settlementFactsOf(outcome: AgentOutcome): SettlementFacts {
+  return {
+    ...(outcome.failure !== undefined ? { failure: outcome.failure } : {}),
+    ...(outcome.engineStopReason !== undefined ? { engineStopReason: outcome.engineStopReason } : {}),
+    ...(outcome.retryAttempts !== undefined ? { retryAttempts: outcome.retryAttempts } : {}),
+    ...(outcome.promptDisposition !== undefined ? { promptDisposition: outcome.promptDisposition } : {}),
+    ...(outcome.usage !== undefined ? { usage: roundUsageSnapshot(outcome.usage) } : {}),
+    ...(outcome.observations !== undefined ? { observations: outcome.observations } : {}),
+    // [§3.3.6 evidence 取证指针] 失败轮的引擎诊断 tee 路径透传（AgentOutcome.stderrTeePath
+    // ——轮收条事实 → evidence 装配供源；仅诊断引用，读侧不假设文件永存）。
+    ...(outcome.stderrTeePath !== undefined ? { stderrTeePath: outcome.stderrTeePath } : {}),
+  };
+}
+
 /** 判别联合收窄检查：zcode 锚分支。 */
 export function isZcodeTranscriptRef(ref: TranscriptRef): ref is ZcodeTranscriptRef {
   return ref.engine === "zcode";
@@ -130,11 +181,49 @@ export interface AgentResult { // oe-exempt:20260930:framework:领域值对象�
   success: boolean;
   error?: string;
   /**
-   * [D5-③] 失败分诊结构化标签（类型 SSOT 在 orchestration/models/types.ts 的
-   * AgentFailureKind——消费语义「unknown=可重试」与其文档同源）。collectResult 对
-   * 最终 error 分类后写入；缺省 = unknown（可重试）。type-only 引用零运行时依赖。
+   * 失败分诊结构化标签（type-only 引用零运行时依赖）。
+   * @deprecated [subagent-observability §3.4，ADR-0158] 随 AgentFailureKind 保留为旧
+   * record 帧与历史 journal 的解析兼容；新写入方失败分类一律产 {@link FailureCause}
+   * （下方 failure 字段）。产出侧残留仅引擎送达错误码前缀确定性分诊
+   * （AgentOutcome.failureKind 透传）；缺省 = undefined（字段缺位），不承载重试判定
+   * （重试判定在 FailureCause.retryable 三态）。
    */
   failureKind?: AgentFailureKind;
+  /**
+   * [subagent-observability §3.3.8/§3.3.3] 失败分类（AgentOutcome.failure 透传——
+   * 收尾边沿一次产出）。settleOneShotOutcome 消费：随轮收条 rec.lastRound.failure
+   * 落盘，list/通知消费方读事实分类；缺省 = 未分类（旧格式 / 合成结果放行）。
+   */
+  failure?: FailureCause;
+  /**
+   * [subagent-observability §3.3.3] 轮终停因引擎原值（AgentOutcome.engineStopReason
+   * 透传）。settleOneShotOutcome 消费：「正常收尾」派生判据（stop 且无失败分类 =
+   * completed）的事实输入；缺省 = 事实缺席，宿主回落派生展示词。
+   */
+  engineStopReason?: EngineStopReason;
+  /** [subagent-observability §3.3.3 P5] 本 run 内 pi 原生重试的失败尝试计数
+   *  （AgentOutcome.retryAttempts 透传；缺省 = 无重试/旧格式）。 */
+  retryAttempts?: number;
+  /**
+   * [subagent-observability §3.3.1/§3.3.3] 本轮被接管收尾的标注（AgentOutcome.promptDisposition
+   * 透传；handled = 本条 prompt 未启动任何 run）。settleOneShotOutcome 消费：随轮收条
+   * rec.lastRound.promptDisposition 落盘——被接管轮结清走 no_result、通知走接管分支；
+   * 缺省 = 无接管事实。
+   */
+  promptDisposition?: "started" | "queued" | "handled";
+  /**
+   * [subagent-observability §3.3.2/§3.3.10] 观察性事实数组（AgentOutcome.observations
+   * 透传——引擎产出侧摘要，不改写 failure）。settleOneShotOutcome 消费：随轮收条
+   * rec.lastRound.observations 落盘；缺省 = 无观察项。
+   */
+  observations?: string[];
+  /**
+   * [§3.3.6 evidence 取证指针] 引擎子进程 stderr tee 文件绝对路径（AgentOutcome.stderrTeePath
+   * 透传，失败轮诊断引用；settleOneShotOutcome 消费：随轮收条 rec.lastRound.stderrTeePath
+   * 落盘 → list evidence 装配）。仅诊断引用——文件受引擎侧轮转与过期清理管辖，
+   * 读侧不假设其永存；缺省 = 成功轮 / 引擎未上报。
+   */
+  stderrTeePath?: string;
   sessionId: string;
   toolCalls: ToolCall[];
   usage?: AgentUsageTotal;
@@ -142,6 +231,38 @@ export interface AgentResult { // oe-exempt:20260930:framework:领域值对象�
   sessionFile?: string;
   /** schema 模式下，structured-output tool 的 result.details（已通过 schema 校验）。 */
   parsedOutput?: unknown;
+}
+
+/**
+ * 轮收条事实快照（[subagent-observability §3.3.3] markRoundIdle 写点产出，附录在
+ * {@link ExecutionRecord.lastRound}）——只承载「派生不出来的事实」：结果正文已在
+ * 聚合字段 result 上（正文摘要由读侧 summarize 派生），不重复存储；turns 收进
+ * 快照——聚合字段 turnCount 是 live 计数器（下一轮轮始起继续累加），收条自身的
+ * 「轮终时点累计轮数」只能随收条定格（markRoundIdle 写点快照）。
+ * 结构镜像 shared SubagentLastRound 的事实子集（wire 形状 SSOT = shared；core 读模型
+ * 只取事实维度——跨包形状一致由 runtime 投影产出侧 + 对拍测试锚定）。
+ */
+export interface RoundFacts { // oe-exempt:20260930:framework:领域值对象——轮收条事实快照（subagent-observability §3.3.3）
+  /** 引擎停因原值（值域 = ROUND_TERMINAL_STOP_REASONS；undefined = 迁移期回落帧 / 被接管轮）。 */
+  engineStopReason?: (typeof ROUND_TERMINAL_STOP_REASONS)[number];
+  /** 失败分类（收尾边沿一次产出，只读不可替换——§3.3.2）。undefined = 无失败发生。 */
+  failure?: FailureCause;
+  /** pi 接管三态（handled = 被接管——引擎未执行，§3.3.1 P6）。undefined = 无 disposition 事实。 */
+  promptDisposition?: "started" | "queued" | "handled";
+  /** 本轮结束时的累计轮数（markRoundIdle 写点定格——live turnCount 在下一轮会推进，非收条值）。 */
+  turns?: number;
+  /** 轮收条 usage 快照（最终尝试值，P5 计账）。undefined = 引擎未上报。 */
+  usage?: AgentUsageTotal;
+  /** 重试尝试计数（auto_retry_start 帧数）。undefined = 无重试事实。 */
+  retryAttempts?: number;
+  /** 观察性事实（§3.3.10 降级通道，不改写 failure）。undefined = 无观察项。 */
+  observations?: string[];
+  /**
+   * 引擎子进程 stderr tee 文件绝对路径（失败轮的诊断引用，AgentOutcome.stderrTeePath
+   * 透传；成功轮引擎不上报）。仅诊断引用——文件受引擎侧轮转与过期清理管辖，读侧
+   * 不得假设其永存。
+   */
+  stderrTeePath?: string;
 }
 
 /**
@@ -274,10 +395,12 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   // ── 永久会话模型新维度（§3.2.1；u-foundation 类型范围，U2 实装写点）──
   // 全部可选、缺省 undefined = 旧语义零迁移（现有 record 构造不破坏）。
   /**
-   * 展示维度：上一轮为什么停（旧 7 值 + 4 新展示值，见 {@link StopReason}）。
-   * undefined = 从未收尾 / 旧数据。展示+排障；U6 起参与 isOccupied 占用判定
-   * （`running && stopReason === undefined`——W4 死亡纳管态 stopReason=failed 据此
-   * 排除，[U5/D4] adoptEngineDeath 写点）。
+   * 展示维度：上一轮为什么停（值域见 {@link StopReason}——引擎原值 + 宿主中断族 +
+   * 旧推断值迁移位）。undefined = 从未收尾 / 旧数据 / 被接管轮（引擎未执行无停因）。
+   * 展示+排障；参与 isOccupied 占用判定（`running && stopReason === undefined`——
+   * 轮收条已写 = 本轮不在途的等价信号）。写入点 = markRoundIdle 轮终簿记（引擎死亡
+   * 走正常轮终——退出码非 0 → error 停因，无独立死亡写点）；在途期被轮始清点族清空
+   * （markRoundStarted / revive 格）。
    */
   stopReason?: StopReason;
   /**
@@ -302,8 +425,26 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   /** turn 计数（= turns.filter(closed).length，冗余存储供派生视图直接读）。 */
   turnCount: number;
   totalTokens: number;
-  /** 运行期最近一次 error 事件的消息（getEventLog 派生 error 条目用）。 */
+  /**
+   * 最后一个非空轮失败（§3.3.5 派生展示——权威事实在 {@link errors} 只追加数组，
+   * 本字段由 reducer appendErrorFact 单点派生刷新，不因轮终/新轮清空；undefined =
+   * 无失败事实）。
+   */
   lastError: string | undefined;
+  /**
+   * 轮失败事实只追加数组（subagent-observability §3.3.5；ErrorFact 权威定义在 SDK
+   * journal-replay.ts）。append-only，不因轮终清除；lastError 由「最后一个非空轮
+   * 失败」派生刷新（reducer appendErrorFact 单点）。undefined = 旧数据（reducer
+   * 侧 `??=` 兜底初始化，读侧按空数组理解）。
+   */
+  errors?: ErrorFact[];
+  /**
+   * 最近一轮的轮收条事实快照（[subagent-observability §3.3.3] markRoundIdle 写点
+   * 一次写入、下轮轮始不清理——「上一轮怎么收尾」的内存读侧权威源，recordToSubagent
+   * 派生视图直读）。停因词表值（rec.stopReason 旧展示位）与事实快照并存（迁移期
+   * 双写，§3.4）。undefined = 本进程内尚无轮终（重启后经 fold 重建路径恢复）。
+   */
+  lastRound?: RoundFacts;
   /**
    * 对话轮次计数（modeless 波1 起全 record 语义）。首轮运行时 = 0；每完成一轮
    * （finalizeRoundToIdle 进 idle）+1。undefined 时视为 0。

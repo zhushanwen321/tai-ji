@@ -18,15 +18,15 @@
  *   泄漏，理由与 panel 同款）；切走（viewed 清空）的线不刷新，照常参与阈值驱逐
  * - 驱逐用 delete key（与 disposeSession 一致，D13）
  * - subagent:xxx 三段式虚拟 key 按 owner 段前缀同步驱逐（M7 修复，AC-2；owner 段 = 主 sid
- *   或 btw 线 piSessionId，见 evictDerivedPartitions）
- * - [btw-question D5/M2-c] btw 键（`btw:<piSessionId>`）保持**普通驱逐候选**——不加
- *   isVirtualKey 特例豁免（线会话文件持久可回填，内存分区该逐就逐；豁免会把它变成
- *   不可回收的常驻分区）；主会话驱逐**不**联动清 btw 分区（删除挂 deleteSession / 显式关线，
- *   不挂内存回收——btw 键非 `subagent:<mainSid>:` 前缀、不进 main 的 workflow 映射，构造性成立）；
- *   btw 分区被驱逐时其派生键**同驱**（D9③ 两半边：subagent 段以线 piSessionId 前缀匹配 +
- *   agentcall 段走 B9 同构回调 agentCallEvictionsOf（线 vid 形态透传，workflow 映射按线 vid
- *   挂名 ∖ viewedVids）——当前无生产方按线 vid 挂名（D9③ no-opener），该半边为防御性预留，
- *   统一入口 evictDerivedPartitions，两驱逐路径共用）
+ *   或 btw 线 session id，见 evictDerivedPartitions）
+ * - [btw-question D5/M2-c] btw 线分区键（W4a 键统一后 = 线 pi 真实会话 id，普通 key）
+ *   保持**普通驱逐候选**——不加 isVirtualKey 特例豁免（线会话文件持久可回填，内存分区该逐就逐；
+ *   豁免会把它变成不可回收的常驻分区）；主会话驱逐**不**联动清 btw 分区（删除挂 deleteSession /
+ *   显式关线，不挂内存回收——btw 键非 `subagent:<mainSid>:` 前缀、不进 main 的 workflow 映射，
+ *   构造性成立）；btw 分区被驱逐时其派生键**同驱**（D9③ 两半边：subagent 段以线 session id
+ *   前缀匹配 + agentcall 段走 B9 同构回调 agentCallEvictionsOf（线 session id 形态透传，
+ *   workflow 映射按线 session id 挂名 ∖ viewedVids）——当前无生产方按线 id 挂名（D9③ no-opener），
+ *   该半边为防御性预留，统一入口 evictDerivedPartitions，两驱逐路径共用）
  * - agentcall:xxx 两段式虚拟 key 经注入回调联动驱逐（B9，memory-leak-remediation §3.3-B9）：
  *   主 session 被驱逐时由装配侧回调（agentCallEvictionsOf，workflow store 映射 ∖ viewedVids
  *   豁免）返回待释放的 agentcall virtualId，本模块执行删除——豁免源固定为 panel 枚举
@@ -45,9 +45,6 @@
 // 相对路径直达定义处（mutations.ts）：经 '@taiji/core' barrel 回引会成环
 // （index re-export 本模块，本模块又 import index），ESM 序隐患
 import { deleteMessages } from './mutations'
-// [btw-question D2/D9③ M2-c] btw vid 结构判定与映射即 extract（shared 工厂 SSOT）：
-// 派生键 owner 段 = 线 piSessionId（vid 去 `btw:` 前缀），见 evictDerivedPartitions。
-import { isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 
 /**
  * LRU 保留阈值：最近 8 个 session（D6）。
@@ -111,7 +108,7 @@ export function touchLru(sessionId: string): void {
 /**
  * 判断 sessionId 是否为虚拟 key（subagent/agentcall 派生）。
  *
- * [btw-question D5] `btw:` 两段式**刻意不进**本判定——btw 键是普通驱逐候选
+ * [btw-question D5] btw 线分区键**刻意不进**本判定——btw 分区是普通驱逐候选
  * （阈值照常参与、无虚拟 key 特例豁免）：线会话文件是唯一持久载体，分区被阈值驱逐后
  * 重开经重载链回填（D5）。豁免只会让 btw 分区在内存里只增不减。
  */
@@ -160,19 +157,20 @@ export interface LruEvictDeps {
    * defineStore 装配环）。未装配时（core 单测 / 无 renderer 装配环境）默认空数组 = 不联动。
    *
    * 两驱逐路径共用（evictIfNeeded 阈值路径 + evictSessionWithVirtual 显式路径）——
-   * 显式路径消费方 deleteSession 会在 hooks.evictVirtualKeys 再全量清一次（含豁免 vid），
+   * 显式路径消费方 deleteSession 会在 hooks.evictVirtualKeys 再全量清一次（含豁免 id），
    * 双重调用幂等（deleteMessageKey 有 has 检查）。
    *
    * [btw-question D9③/M2-c] 形参按**被驱逐 sid 原形态**透传：主会话 = mainSid；btw 分区
-   * 被驱逐时 = 线 vid（`btw:<piSessionId>`）——workflow 映射按线 vid 挂名（D9「btw 线名下
-   * 挂 btw vid」），装配侧同一回调零改动即可服务两形态（即设计「B9 同构回调：线派生枚举
-   * ∖ viewedVids」的执行侧）。当前无生产方按线 vid 挂名（D9③ no-opener），该形态为
+   * 被驱逐时 = 线 session id（W4a 后即 pi 真实 id）——workflow 映射按线 id 挂名（D9「btw
+   * 线名下挂线 id」），装配侧同一回调零改动即可服务两形态（即设计「B9 同构回调：线派生枚举
+   * ∖ viewedVids」的执行侧）。当前无生产方按线 id 挂名（D9③ no-opener），该形态为
    * 防御性预留。
    */
   agentCallEvictionsOf: (mainSid: string) => string[]
   /**
-   * [btw-question D5/AU1] 查询当前正在查看的 vid 集（= core drawer control getViewedVids：
-   * panel 枚举 → 各分区 isOpen + activeTab + 选中 id 三分量组合）。
+   * [btw-question D5/AU1] 查询当前正在查看的 key 集（= core drawer control getViewedVids：
+   * panel 枚举 → 各分区 isOpen + activeTab + 选中 id 三分量组合；成员 = subagent/agentcall
+   * 虚拟 id + btw 线 session id 的并集）。
    *
    * evictIfNeeded 入口对其中**非虚拟**成员刷新 recency（lru-panel-exempt-fix 同款 recency
    * 保护形态，非 isExempt 豁免判据——值域三族中 subagent/agentcall 虚拟键本不进候选，
@@ -205,8 +203,9 @@ export function evictIfNeeded(deps: LruEvictDeps): void {
   // 非虚拟成员（正在查看的 btw 线）刷到最新 → 排序后恒在保留区，构造性「查看中不驱逐」。
   // 只刷非虚拟：subagent/agentcall 虚拟键被下方 isVirtualKey skip，本就不进候选。
   // 切走（viewed 清空 = 关 drawer / 切 tab / panel 焦点离开）不刷新，旧 recency 照常逐。
-  for (const vid of deps.viewedVids()) {
-    if (!isVirtualKey(vid)) touchLru(vid)
+  // 成员 = subagent/agentcall 虚拟 id + btw 线 session id（W4a 后混合集，故用 key 通称）
+  for (const key of deps.viewedVids()) {
+    if (!isVirtualKey(key)) touchLru(key)
   }
   // 每次调用现读生效上限（默认 8 或 relief 压窗覆盖值，#28②）。
   const maxSessions = getLruMaxSessions()
@@ -264,15 +263,16 @@ export function evictSessionWithVirtual(sessionId: string, deps: LruEvictDeps): 
  * [AC-2 + D9③/M2-c] 派生键联动驱逐——主会话与 btw 线两形态共用，两驱逐路径
  * （evictIfNeeded 阈值 / evictSessionWithVirtual 显式）统一走本入口。
  *
- * owner 段（btw-question D9③ 键中段位约定）：主会话 = sid 本身；btw 线 = 线 piSessionId
- * （vid 去 `btw:` 前缀，映射即 extract）——`subagent:<owner>:*` 三段式前缀匹配与 AC-2 同构
- * （btw 键不进 isVirtualKey，但其派生键仍按 owner 段联动，防孤儿泄漏）。
+ * owner 段（btw-question D9③ 键中段位约定）：主会话 = sid 本身；btw 线 = 线 session id
+ * （W4a 键统一后即 sid 本身——旧「vid 去 `btw:` 前缀」翻译层删除，设计 §3.3.6 迁移表
+ * 2 处直接传参之一）——`subagent:<owner>:*` 三段式前缀匹配与 AC-2 同构（btw 分区键不进
+ * isVirtualKey，但其派生键仍按 owner 段联动，防孤儿泄漏）。
  * agentcall 半边走 B9 回调 agentCallEvictionsOf（sid 原形态透传）：主会话按 mainSid、
- * btw 线按线 vid 查 workflow 映射（D9「btw 线名下挂 btw vid」），豁免 ∖ viewedVids 已在
- * 装配侧应用——即设计「B9 同构回调：线派生枚举 ∖ viewedVids」的执行侧。当前无生产方按
- * 线 vid 挂名（D9③ no-opener），该半边为防御性预留。
+ * btw 线按线 session id 查 workflow 映射（D9「btw 线名下挂线 id」），豁免 ∖ viewedVids
+ * 已在装配侧应用——即设计「B9 同构回调：线派生枚举 ∖ viewedVids」的执行侧。当前无生产方
+ * 按线 id 挂名（D9③ no-opener），该半边为防御性预留。
  *
- * 反向不变量（D5「主驱逐不联动清 btw 分区」）：主会话驱逐时 btw 键不命中
+ * 反向不变量（D5「主驱逐不联动清 btw 分区」）：主会话驱逐时 btw 分区键不命中
  * `subagent:<mainSid>:` 前缀、线名下 agentcall 不落 main 的 workflow 映射，构造性不动；
  * btw 分区的删除唯一触发点 = deleteSession 级联 / 显式关线，不挂内存回收。
  *
@@ -281,9 +281,9 @@ export function evictSessionWithVirtual(sessionId: string, deps: LruEvictDeps): 
  * 循环内替换 .value 不影响迭代安全，行为与快照拷贝版一致。
  */
 function evictDerivedPartitions(sid: string, deps: LruEvictDeps): void {
-  const owner = isBtwVirtualId(sid) ? extractBtwPiSessionId(sid) : sid
+  // W4a 键统一：owner 即 sid 本身（btw 线 session id 即 pi 真实 id，无前缀翻译层）。
   for (const virtualKey of deps.messagesValue().keys()) {
-    if (isVirtualKeyOf(virtualKey, owner)) {
+    if (isVirtualKeyOf(virtualKey, sid)) {
       deps.deleteMessageKey(virtualKey)
       sessionLastAccessed.delete(virtualKey)
     }

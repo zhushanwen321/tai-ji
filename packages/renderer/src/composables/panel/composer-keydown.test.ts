@@ -6,12 +6,13 @@
  * 直接注入 fake deps 单测返回的 handler。断言到依赖调用层面（哪个 dep 被调/未被调 +
  * preventDefault 次数），非「不抛错」式弱断言。
  *
- * 覆盖矩阵（与源文件头部分发语义逐条对应，u5b D6 + composer-pi-shortcuts U1② 改造后）：
+ * 覆盖矩阵（与源文件头部分发语义逐条对应，chat-flow-consistency D5 + composer-pi-shortcuts
+ * U1② 改造后）：
  *   bare-arrow：裸 ↑/↓ → preventDefault + moveCaretVertical；moved 不翻历史；
  *   at-edge ↑/↓ 翻历史；修饰键 + ↑/↓ 放行原生。
- *   Enter：staging 优先（⏎/Alt+⏎ 均提交 staging）；Alt+⏎ steer 路由行 → onFollowUp；
- *   Alt+⏎ queued/direct 行 → onSend（经统一分发器）；裸 ⏎ 恒 onSend（路由判定收敛在
- *   core dispatch/send，keydown 层不分流）；⇧⏎ 放行换行。
+ *   Enter：staging 优先（⏎/Alt+⏎ 均提交 staging）；Alt+⏎ 回合进行中（activeTurn，D1 判定
+ *   集合读口）→ onFollowUp；Alt+⏎ 非集合成员 → onSend（经统一分发器）；裸 ⏎ 恒 onSend
+ *   （去向判定收归 runtime 内核，keydown 层不分流）；⇧⏎ 放行换行。
  *   动作表接线（composer-pi-shortcuts）：链序（动作表先于 staging Esc）、消费短路（命中
  *   返回 true → 链终止）、未命中放行（返回 false → 既有段照常触达）、浮层未消费仍咨询
  *   （cmdOpen 入口检查归动作表自判）、IME 段先行（组合中动作表不被咨询）。
@@ -20,7 +21,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { computed, nextTick, ref } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import type { SendRoute, StagingAction } from '@taiji/core/domain/composer'
+import type { StagingAction } from '@taiji/core/domain/composer'
 import { useComposerKeydown, type ComposerKeydownDeps } from './composer-keydown'
 import type { ShellInputInstance } from './composer-shell'
 import CommandPopover from '@/components/panel/CommandPopover.vue'
@@ -65,8 +66,8 @@ function makeKeyEvent(key: string, mods: KeyMods = {}) {
 function makeDeps(overrides: {
   /** moveCaretVertical 返回值（默认 at-edge → 触发翻历史路径） */
   caret?: 'moved' | 'at-edge'
-  /** D6 发送路由（默认 direct） */
-  route?: SendRoute
+  /** 回合进行中判定（chat-flow-consistency D1 判定集合读口；默认 false = 空闲） */
+  activeTurn?: boolean
   stagingActive?: boolean
   /** 命令动作表返回值（composer-pi-shortcuts U1②；默认 false = 未命中放行） */
   shortcutConsumed?: boolean
@@ -98,7 +99,7 @@ function makeDeps(overrides: {
     commandPopoverRef: ref(popoverHandle) as ComposerKeydownDeps['commandPopoverRef'],
     inputRef: ref({ moveCaretVertical } as unknown as ShellInputInstance),
     staging,
-    sendRoute: computed(() => overrides.route ?? 'direct'),
+    activeTurn: computed(() => overrides.activeTurn ?? false),
     shortcutActions,
     handleArrowUp,
     handleArrowDown,
@@ -194,9 +195,9 @@ describe('useComposerKeydown', () => {
     })
   })
 
-  describe('Enter 分发矩阵（u5b D6：路由判定收敛在 core dispatch/send）', () => {
+  describe('Enter 分发矩阵（chat-flow-consistency D5：Alt 分流读 D1 判定集合，裸 ⏎ 恒统一提交）', () => {
     it('staging 活跃：裸 Enter → onSend（staging 提交优先）', () => {
-      const { deps, onFollowUp, onSend } = makeDeps({ stagingActive: true, route: 'steer' })
+      const { deps, onFollowUp, onSend } = makeDeps({ stagingActive: true, activeTurn: true })
       const onKeydown = useComposerKeydown(deps)
       const { e, preventDefault } = makeKeyEvent('Enter')
 
@@ -219,8 +220,8 @@ describe('useComposerKeydown', () => {
       expect(onFollowUp).not.toHaveBeenCalled()
     })
 
-    it('Alt+Enter + steer 路由行 → onFollowUp（turn 活跃保留下一轮投递语义），不走 onSend', () => {
-      const { deps, onFollowUp, onSend } = makeDeps({ route: 'steer' })
+    it('Alt+Enter + 回合进行中（activeTurn，判定集合成员）→ onFollowUp（下一轮语义保留），不走 onSend', () => {
+      const { deps, onFollowUp, onSend } = makeDeps({ activeTurn: true })
       const onKeydown = useComposerKeydown(deps)
       const { e, preventDefault } = makeKeyEvent('Enter', { alt: true })
 
@@ -231,8 +232,8 @@ describe('useComposerKeydown', () => {
       expect(onSend).not.toHaveBeenCalled()
     })
 
-    it('Alt+Enter + queued 路由行 → onSend（统一分发器提交；queued 行不保留 followUp 语义，排队 lane 由内核裁定）', () => {
-      const { deps, onFollowUp, onSend } = makeDeps({ route: 'queued' })
+    it('Alt+Enter + 非集合成员（compacting/bash 忙，activeTurn=false）→ onSend（统一分发器提交；排队去向由内核裁定）', () => {
+      const { deps, onFollowUp, onSend } = makeDeps({ activeTurn: false })
       const onKeydown = useComposerKeydown(deps)
       const { e, preventDefault } = makeKeyEvent('Enter', { alt: true })
 
@@ -243,8 +244,8 @@ describe('useComposerKeydown', () => {
       expect(onFollowUp).not.toHaveBeenCalled()
     })
 
-    it('Alt+Enter + direct → onSend（followUp 非活跃退化路径的语义收尾）', () => {
-      const { deps, onFollowUp, onSend } = makeDeps({ route: 'direct' })
+    it('Alt+Enter + 空闲（activeTurn=false）→ onSend（followUp 非活跃退化路径的语义收尾）', () => {
+      const { deps, onFollowUp, onSend } = makeDeps({ activeTurn: false })
       const onKeydown = useComposerKeydown(deps)
       const { e, preventDefault } = makeKeyEvent('Enter', { alt: true })
 
@@ -255,8 +256,8 @@ describe('useComposerKeydown', () => {
       expect(onFollowUp).not.toHaveBeenCalled()
     })
 
-    it('裸 Enter + steer 路由行 → onSend（统一分发器：steer 路由并入当前回合，[HISTORICAL] isActive→onSteer 直调退役）', () => {
-      const { deps, onFollowUp, onSend } = makeDeps({ route: 'steer' })
+    it('裸 Enter + 回合进行中 → onSend（统一分发器：去向由内核裁定，[HISTORICAL] isActive→onSteer 直调退役）', () => {
+      const { deps, onFollowUp, onSend } = makeDeps({ activeTurn: true })
       const onKeydown = useComposerKeydown(deps)
       const { e, preventDefault } = makeKeyEvent('Enter')
 
@@ -267,8 +268,8 @@ describe('useComposerKeydown', () => {
       expect(onFollowUp).not.toHaveBeenCalled()
     })
 
-    it('裸 Enter + idle（direct）→ onSend', () => {
-      const { deps, onFollowUp, onSend } = makeDeps({ route: 'direct' })
+    it('裸 Enter + idle → onSend', () => {
+      const { deps, onFollowUp, onSend } = makeDeps({ activeTurn: false })
       const onKeydown = useComposerKeydown(deps)
       const { e, preventDefault } = makeKeyEvent('Enter')
 
@@ -445,7 +446,7 @@ describe('useComposerKeydown', () => {
         commandPopoverRef: ref(popoverWrapper!.vm as never),
         inputRef: ref(null),
         staging: { handleEsc: vi.fn(() => false), activeStaging: computed(() => null) },
-        sendRoute: computed(() => 'direct' as SendRoute),
+        activeTurn: computed(() => false),
         shortcutActions: vi.fn(() => false),
         handleArrowUp: vi.fn(),
         handleArrowDown: vi.fn(),

@@ -24,4 +24,10 @@ export type SessionItemSession = {
   /** 会话 JSONL 文件绝对路径（SessionSummary.sessionFile 透传）：右键「导出 JSONL」用。
    *  缺失 = pi 延迟写入窗口（首条消息前文件未落盘），菜单项禁用。 */
   sessionFile?: string
+  /** 目标会话 id（chat-flow-consistency U9 / S8，SessionSummary.handedOffTo 透传）：
+   *  该会话已完成 handoff 交接。非空 → 侧栏「已交接」徽标。 */
+  handedOffTo?: string
+  /** 交接目标显示名（chat-flow-consistency U9 / S8，SessionList 容器按 id 反查注入，
+   *  parentLabel 同款容器注入机制）：目标已删时为空串，徽标 title 回退显 id 前缀。 */
+  handoffTargetLabel?: string
 }

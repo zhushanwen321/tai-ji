@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EngineClient } from "../../client/engine-client.ts";
 import { RemoteEngine } from "../../client/remote-engine.ts";
 import { FAKE_CAPABILITIES } from "./fake-engine-capabilities.ts";
+import { localSpawnEnv } from "../local-spawn-env.ts";
 import type { ProbeReport } from "../../types.ts";
 
 const FAKE_ENGINE = join(
@@ -63,7 +64,7 @@ function makeEngine(extraEnv: Record<string, string> = {}): RemoteEngine {
     hostVersion: "w10-c1-probe",
     dataDir,
     envPrefixes: [],
-    baseEnv: { ...process.env, FAKE_PROTOCOL_FIXTURE: FIXTURE, ...extraEnv },
+    baseEnv: localSpawnEnv({ FAKE_PROTOCOL_FIXTURE: FIXTURE, ...extraEnv }),
   });
   return new RemoteEngine({
     engineId: "fake",

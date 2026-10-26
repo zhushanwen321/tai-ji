@@ -12,12 +12,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { AgentCallOpts } from "../../../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../../../shared/agent-call-types.ts";
 import { EngineClient } from "../../client/engine-client.ts";
 import { RemoteEngine } from "../../client/remote-engine.ts";
 import type { RunContext } from "../../port.ts";
 import type { AgentEvent } from "../../types.ts";
 import { FAKE_CAPABILITIES } from "./fake-engine-capabilities.ts";
+import { localSpawnEnv } from "../local-spawn-env.ts";
 
 const FAKE_ENGINE = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -52,7 +53,7 @@ function makeEngine(): { engine: RemoteEngine; client: EngineClient; dispose: ()
     hostVersion: "w10-c4-abort",
     dataDir,
     envPrefixes: [],
-    baseEnv: { ...process.env, FAKE_PROTOCOL_FIXTURE: FIXTURE, FAKE_RUN_HANG: "1" },
+    baseEnv: localSpawnEnv({ FAKE_PROTOCOL_FIXTURE: FIXTURE, FAKE_RUN_HANG: "1" }),
   });
   const engine = new RemoteEngine({
     engineId: "fake",

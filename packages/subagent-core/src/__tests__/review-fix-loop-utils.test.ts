@@ -35,7 +35,9 @@ import {
   matchByTitle,
   nextFreeId,
   resolveIssueIdentity,
-  applyCarryoverRegression,
+  // applyCarryoverRegression（随 pi 模板迁移，用例在 review-fix-loop-script.test.ts
+  // 函数段抽取法）与 inheritCarryoverFields（单源化进 workflows/src/review-fix-loop.shared.ts，
+  // 用例在 review-fix-loop-shared.test.ts）已迁出 utils，import 不再含两者
   translateId,
   validateFixResult,
   reconcileIssues,
@@ -50,7 +52,6 @@ import {
   resolveRunRoot,
   computeOrigin,
   recordDormant,
-  inheritCarryoverFields,
   dormantRevivalTitle,
   filterActiveIds,
   filterDormantFromRecon,
@@ -1525,30 +1526,7 @@ describe("B3 recordDormant / filterActiveIds（dormant 落盘 + 消费侧过滤�
   });
 });
 
-describe("B3b 延续条目字段继承（wf-1792073055433 空壳缺陷修复；AC1 收窄签名）", () => {
-  const mkTracked = (extra: Record<string, unknown> = {}): { title?: string; severity?: string; [key: string]: unknown } => ({
-    id: "MF-1", status: "open", ...extra,
-  });
-  it("inheritCarryoverFields：清单缺 title 时从重报回填（防跨轮身份锚点断链）", () => {
-    const tracked = mkTracked({ severity: "major" });
-    expect(inheritCarryoverFields(tracked, { id: "S-1", severity: "major", title: "fit 容器尺寸竞态" })).toBe(true);
-    expect(tracked.title).toBe("fit 容器尺寸竞态");
-  });
-
-  it("inheritCarryoverFields：清单已有 title 为权威，重报不覆盖（措辞漂移不污染身份锚点）", () => {
-    const tracked = mkTracked({ title: "原始标题", severity: "major" });
-    expect(inheritCarryoverFields(tracked, { id: "MF-1", severity: "major", title: "同题换措辞" })).toBe(false);
-    expect(tracked.title).toBe("原始标题");
-  });
-
-  it("inheritCarryoverFields：severity 采信本轮显式标注（聚合权威语义，与 regressed 分支一致）", () => {
-    const tracked = mkTracked({ title: "t", severity: "minor" });
-    expect(inheritCarryoverFields(tracked, { id: "MF-1", severity: "critical" })).toBe(true);
-    expect(tracked.severity).toBe("critical");
-    // 相同值不记变更
-    expect(inheritCarryoverFields(tracked, { id: "MF-1", severity: "critical" })).toBe(false);
-  });
-
+describe("B3b dormant 复活 title 继承（wf-1792073055433 空壳缺陷修复；inheritCarryoverFields 用例已迁 review-fix-loop-shared.test.ts）", () => {
   it("dormantRevivalTitle：聚合器无 title 时从 dormant 条目继承（复活不丢身份锚点）", () => {
     const dormantHit = { id: "MF-D1", title: "callId 静默回退", reason: "adjudication-downgraded" };
     expect(dormantRevivalTitle(dormantHit, { id: "MF-D1", severity: "major" })).toBe("callId 静默回退");
@@ -2299,37 +2277,9 @@ describe("resolveIssueIdentity — 三级身份对齐", () => {
   });
 });
 
-describe("applyCarryoverRegression — 「重报 → regressed」转移纯函数（merge 路径单点实装，C2）", () => {
-  const trackedBase = (status: string) => ({
-    firstSeen: 1, severity: "major", status, openStreak: 0,
-    history: [{ round: 1, status: "open" }], fixAttempts: 0,
-  });
-  it("fix-attempted + 重报 → regressed、fixAttempts+1、openStreak+1、history 追加（B1 逐字段等价）", () => {
-    const tracked = trackedBase("fix-attempted");
-    applyCarryoverRegression(tracked, { id: "MF-1", severity: "major" }, 3);
-    expect(tracked.status).toBe("regressed");
-    expect(tracked.fixAttempts).toBe(1);
-    expect(tracked.openStreak).toBe(1);
-    expect(tracked.history).toContainEqual({ round: 3, status: "regressed" });
-  });
-  it("fixed + 重报 → 同样转 regressed（复发同计修复失败，needs-redesign 可达）", () => {
-    const tracked = { ...trackedBase("fixed"), fixAttempts: 1, openStreak: 2, history: [{ round: 1, status: "open" }, { round: 2, status: "fixed" }] };
-    applyCarryoverRegression(tracked, { id: "MF-1", severity: "major" }, 4);
-    expect(tracked.status).toBe("regressed");
-    expect(tracked.fixAttempts).toBe(2);
-    expect(tracked.openStreak).toBe(3);
-  });
-  it("severity 继承：采信本轮显式标注（与延续继承同一权威语义，无第二份 severity 写法）", () => {
-    const tracked = trackedBase("fix-attempted");
-    applyCarryoverRegression(tracked, { id: "MF-1", severity: "critical" }, 2);
-    expect(tracked.severity).toBe("critical");
-  });
-  it("title 清单权威：转换不覆盖既有 title（title 继承只由调用方继承点承担）", () => {
-    const tracked = { ...trackedBase("fix-attempted"), title: "原始标题" };
-    applyCarryoverRegression(tracked, { id: "MF-1", severity: "major", title: "重报换措辞" }, 2);
-    expect(tracked.title).toBe("原始标题");
-  });
-});
+// applyCarryoverRegression 用例已迁 review-fix-loop-script.test.ts（函数随 pi 模板
+// workflows/src/review-fix-loop.pi.tpl.js 迁移——依赖单源版 inheritCarryoverFields，
+// CJS utils 模块作用域无法引用脚本顶层）
 
 describe("translateId — 表格号→条目清单键翻译（条目清单键优先）", () => {
   const idMap = { "MF-3": "MF-5", "MF-9": "MF-2" };

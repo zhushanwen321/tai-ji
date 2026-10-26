@@ -145,6 +145,10 @@ export function loggerModule() {
     // D10：crash-correlation 采样门——测试 sink 恒关（不采样，无 log show 副作用），
     // 需要验证接线本身的用例在各自文件内覆写为 true
     isPiCrashLogEnabled: () => false,
+    // 族③根因修复（W3.5）：process-manager withEphemeralPi finally 的 ephemeral 树回收——
+    // mock 面随源码 import 面同步（process-manager 现直接 import 本模块）
+    EPHEMERAL_SESSION_ID_PREFIX: 'ephemeral-',
+    removeEphemeralSessionTree: () => {},
   }
 }
 

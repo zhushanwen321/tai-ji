@@ -228,7 +228,13 @@ async function copyWorkflowDir(outDir, extraAssets) {
 			`workflows dir missing: ${SUBAGENT_CORE_WORKFLOWS_DIR}（subagent-core 包 workflow 资产缺失 = 打包配置回归）`,
 		);
 	}
-	await cp(SUBAGENT_CORE_WORKFLOWS_DIR, join(outDir, "workflows"), { recursive: true });
+	// staged 禁收 *.ts（prepare-builtin-extensions.sh R3 守卫：resolver fallback 会旁路 bundle）
+	// ——u1-move 后 workflows 源含 zcode 产物 .dwf.ts 与 src/ 构建模板，pi 侧只消费 .js；
+	// 不过滤则整目录拷入即触守卫（2026-10-26 v0.11.16 发布期首次全量构建暴露）。
+	await cp(SUBAGENT_CORE_WORKFLOWS_DIR, join(outDir, "workflows"), {
+		recursive: true,
+		filter: (src) => !src.endsWith(".ts"),
+	});
 	extraAssets.push("workflows/");
 }
 

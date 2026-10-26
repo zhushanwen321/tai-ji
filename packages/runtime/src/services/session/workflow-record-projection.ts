@@ -16,6 +16,10 @@ import type {
   WorkflowAgentCall,
   WorkflowRunPhaseFoldEntry,
 } from "@taiji/shared";
+// [subagent-observability §3.3.8 消费链②] 值域对账锚：收窄 Set 改从 shared
+// WORKFLOW_DONE_REASON_ALL 单源构造——扩值单点（联合 + 元组 + 本 Set 三处收敛为
+// 两处），runtime 双包值级等价断言的对账范围声明覆盖本派生视图收窄点。
+import { WORKFLOW_DONE_REASON_ALL } from "@taiji/shared";
 import type { SessionMetaRef } from "./model-override-query.js";
 import { extractRecordEngine } from "./subagent-engine-history.js";
 
@@ -24,14 +28,9 @@ function toIso(ms: number): string {
   return new Date(ms).toISOString()
 }
 
-/** shared WorkflowDoneReason 词表集合（core DoneReason 收窄用，值级检查）。 */
-const WORKFLOW_DONE_REASON_SET: ReadonlySet<string> = new Set([
-  'completed',
-  'failed',
-  'aborted',
-  'budget_limited',
-  'time_limited',
-])
+/** shared WorkflowDoneReason 词表集合（core DoneReason 收窄用，值级检查；单源 =
+ *  shared WORKFLOW_DONE_REASON_ALL 元组——partially_succeeded 扩值随 shared 同步）。 */
+const WORKFLOW_DONE_REASON_SET: ReadonlySet<string> = new Set<string>(WORKFLOW_DONE_REASON_ALL)
 
 /** 值级检查（Set.has 无类型窄化能力——显式谓词窄化到 shared 信号侧词表）。 */
 function isWorkflowDoneReason(value: string): value is NonNullable<WorkflowRunRecord['reason']> {
@@ -88,12 +87,17 @@ function projectAskStepsToAgentCalls(fold: RunEventFoldCheckpoint): WorkflowAgen
  *   cacheWrite/cost 无 shared 消费位不透出）；attempts/lastRetry 缺省 = 无重试记录不造键。
  */
 function projectAskStepToAgentCall(ask: RunAskStepFold): WorkflowAgentCall {
+  // outcome → status 映射：call 级 outcome 值域 = done/failed/cancelled（run-events
+  // RunAskStepFold.settled 契约）——cancelled 是「未交付且非失败」的中性档（run 终局
+  // 收尾成员），不得冒充 failed（§3.3.8 closeOutInFlightCalls call 枚举补 cancelled）。
   const stepStatus: WorkflowAgentCall['status'] =
     ask.settled === undefined
       ? 'running'
       : ask.settled.outcome === 'done'
         ? 'done'
-        : 'failed'
+        : ask.settled.outcome === 'cancelled'
+          ? 'cancelled'
+          : 'failed'
   return {
     id: ask.taskIndex,
     agent: ask.agentName,

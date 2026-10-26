@@ -19,7 +19,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { PiEntry, ServerMessageMap, SubagentRecord } from '@taiji/shared'
-import { isSubagentVirtualId, extractBtwPiSessionId, extractMainSessionId } from '@taiji/shared'
+import { isSubagentVirtualId, extractMainSessionId } from '@taiji/shared'
 import { isVirtualKeyOf, setSubscriptionPorts, resetSubscriptionStates, resetChatModuleStateForTest } from '@taiji/core'
 
 const storeMocks = vi.hoisted(() => ({
@@ -304,7 +304,7 @@ describe('handleRuntimeUnavailable（T5 runtime 崩溃清理接线）', () => {
   })
 })
 
-describe('[B1 / btw-question D9③] 生产半边：onSubagentEntries 对 btw 线 vid 的键中段翻译', () => {
+describe('[B1 / btw-question D9③] 生产半边：onSubagentEntries 的键中段（W4a 后线 id 即 pi 真实 id，无翻译层）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -318,17 +318,17 @@ describe('[B1 / btw-question D9③] 生产半边：onSubagentEntries 对 btw 线
     },
   ]
 
-  it('① 线 vid 输入 → subagent:<线piSid>:<s> 三段键（不 throw）+ ② 命中 M4-a 清理前缀谓词（闭环）', () => {
-    const vid = 'btw:line-fx-b1'
-    expect(() => effects.onSubagentEntries!(vid, 'rec-b1', entries)).not.toThrow()
+  it('① 线 session id 输入 → subagent:<线id>:<s> 三段键（不 throw）+ ② 命中 M4-a 清理前缀谓词（闭环）', () => {
+    const lineId = 'line-fx-b1' // W4a：帧 sessionId 对 btw 线就是 pi 真实 id（无前缀翻译层）
+    expect(() => effects.onSubagentEntries!(lineId, 'rec-b1', entries)).not.toThrow()
 
     const key = 'subagent:line-fx-b1:rec-b1'
     expect(storeMocks.applySubagentEntries).toHaveBeenCalledWith(key, entries)
     expect(isSubagentVirtualId(key)).toBe(true)
-    expect(extractMainSessionId(key)).toBe('line-fx-b1') // 中段 = 线 piSessionId（M1-a 约定）
+    expect(extractMainSessionId(key)).toBe('line-fx-b1') // 中段 = 线 session id（M1-a 约定）
     // ② 清理闭环：该键命中 disposeBtwLinePartitions 使用的同一前缀谓词
-    //（isVirtualKeyOf(key, owner) —— owner = extractBtwPiSessionId(vid)）
-    expect(isVirtualKeyOf(key, extractBtwPiSessionId(vid))).toBe(true)
+    //（isVirtualKeyOf(key, owner) —— owner = 线 session id 本身）
+    expect(isVirtualKeyOf(key, lineId)).toBe(true)
   })
 
   it('③ 非 btw 输入零变化回归（直译不翻译）', () => {

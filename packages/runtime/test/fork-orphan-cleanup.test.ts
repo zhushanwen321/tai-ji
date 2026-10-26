@@ -98,7 +98,8 @@ function makeLifecycle(opts: MakeOpts = {}) {
 
   const session: IManagedSessionView = {
     id: forkMock.forkedId, cwd: '/repo', label: 'fork', modelId: 'p/m',
-    createdAt: 1, lastActiveAt: 1, tokenCount: 0, inputTokens: 0, isGenerating: false, isCompacting: false, isBashRunning: false, bashRunToken: undefined,
+    createdAt: 1, lastActiveAt: 1, tokenCount: 0, inputTokens: 0,
+    occupancy: { turn: 'idle', compacting: false, bash: false, handingOff: false }, bashRunToken: undefined,
   }
 
   const svc: ILifecycleSessionOps = {
@@ -116,7 +117,7 @@ function makeLifecycle(opts: MakeOpts = {}) {
     // 源未注册进 Map（未活跃 / 已落盘），走 source.filePath 主路径。
     toSummary: vi.fn((): SessionSummary => ({
       id: session.id, cwd: session.cwd, label: session.label, status: 'idle',
-      lastActiveAt: 1, tokenCount: 0, modelId: 'p/m',
+      lastActiveAt: 1,
     })),
     fetchAndBroadcastContext: vi.fn(async () => {}),
     // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 消费方实际用到的全部），无强转

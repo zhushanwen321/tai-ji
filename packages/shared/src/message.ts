@@ -568,7 +568,8 @@ export function parseBackgroundBashDetails(details: unknown): BackgroundBashDeta
  * - completed：reason === 'completed'（正常完成）
  * - failed：reason 属失败族（failed / aborted / budget_limited / time_limited）
  * - neutral：reason 缺失或不在 shared WorkflowDoneReason 镜像词表内（枚举漂移防御——词表外
- *   一律中性，不静默当成功；消费侧并入 neutralCount，与 cancelled 同档）
+ *   一律中性，不静默当成功；消费侧并入 neutralCount，与 cancelled 同档）；
+ *   partially_succeeded 同落 neutral（部分成功非全败非全成，见镜像表行注）
  *
  * bg-notify 载荷的成败判据不在此列（仍复用 deriveClosedDisplay，D5 两段式判据）。
  */
@@ -586,6 +587,12 @@ const WORKFLOW_DONE_REASON_OUTCOME: Record<WorkflowDoneReason, WorkflowResultOut
   aborted: 'failed',
   budget_limited: 'failed',
   time_limited: 'failed',
+  // [subagent-observability §3.3.8] 部分成功 = 存在失败成员但非全败——不落 failed
+  // 计数（夸大失败数）也不落 completed（吞失败成分，即本设计反对的 done 吞失败）。
+  // 「部分成功」独立档呈现已落（u4，f64d98dbe）：TUI display-state.ts 独立档 +
+  // GUI WORKFLOW_RUN_OUTCOME_LABELS 档 + runtime 消费链 Set 单源对账；计数档 = 本表
+  // neutral（中立计数）。
+  partially_succeeded: 'neutral',
 }
 
 /** reason 词表成员判定（hasOwnProperty.call 检查原型链键如 toString/constructor；不用
@@ -719,9 +726,13 @@ export interface Message {
    * 实标记；status 不动（sealed guard isLastAssistantStreaming 依赖 streaming 态定位
    * 工具事件属主，提前翻 complete 会丢 tool_execution_* 帧）。
    *
-   * 写入点唯一：core registry message.message_end（按位置标记——live 气泡 id 是 runtime
-   * 随机 a-uuid（event-adapter assistantTurnStart），与 pi entry 的原生 message.id 不相交，
-   * 无法按 id 匹配；pi 串行协议下 end 时刻的末条 streaming assistant 即属主）。
+   * 写入点唯一：core effects/finalized-rebuild.rebuildAssistantOnFinalize（registry
+   * message.message_end assistant 分支调用——定稿权威重建与打标共用同一次定位）。定位 =
+   * id 锚定优先：帧级 messageId 即 interpreter currentMessageId（runtime a-uuid，
+   * event-adapter assistantTurnStart，与 live 气泡同一 id 空间，构造性可匹配；
+   * chat-flow-consistency §6「D3 定位升级」裁决，wire 锚点见 protocol.ts
+   * message.message_end 帧注），锚点缺失（旧 runtime / 异常帧）时回退末条 streaming
+   * assistant 位置定位（升级前行为的兼容路径，pi 串行协议下即属主）。
    * reload 基线消息不设置（status 已是 complete，消费侧无需本字段）。
    */
   textFinalized?: boolean
@@ -757,6 +768,14 @@ export interface Message {
    *  shared.Message 是聚合类型含非 custom 消息，故 optional——
    *  仅 false 隐藏，undefined/true 都显示（undefined 来自无 customType 的普通消息或旧数据）。 */
   display?: boolean
+  /**
+   * 交接指令行标记（chat-flow-consistency U9 / 特殊流程 S2）：该消息原是 user entry，
+   * 内容逐字等于 HANDOFF_PROMPT_TEMPLATE（runtime handoff turn 的固定 prompt）→
+   * reducer 派生段转为 system 提示行（「交接指令（内部）」），原文携带在 text 供悬停
+   * 详情展示。live 帧与 reload 重放经同一转换点（convertMessageBody），识别恒一致。
+   * 分组层据此作 turn 锚（其后 assistant 回合挂「交接文档」标签）。undefined = 普通消息。
+   */
+  handoffInstruction?: { text: string }
   /** Bash 执行结果（composer-bash-execute）。system 消息有值：实时经 message.bashResult
    *  effect 创建 system 消息，历史经 converter 还原为 system 消息，统一走 BashOutputBlock 渲染。
    *  与 toolCall 互斥（bash 不走工具链）。 */

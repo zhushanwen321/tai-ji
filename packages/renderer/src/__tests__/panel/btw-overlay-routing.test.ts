@@ -2,13 +2,14 @@
  * btw-overlay-routing —— M3-c 探针 P-overlay 单测（D8 降级路径：drawer 内联确认条）。
  *
  * 覆盖范围（设计 §3 探针 P-overlay + 验收 S9/S9b + 实施计划 M3-c 验收①-⑤）：
- * - vid 路由：五类请求（ask-user 富表单 / scheduler 表单 / plan 审批 / 权限审批 select /
- *   confirm 简单 dialog）按 vid 现 drawer 内联确认条；主视图 CompanionBand（主 sid 分区）
+ * - 线 id 路由：五类请求（ask-user 富表单 / scheduler 表单 / plan 审批 / 权限审批 select /
+ *   confirm 简单 dialog）按线 session id 现 drawer 内联确认条；主视图 CompanionBand（主 sid 分区）
  *   零浮出（P-overlay 正向）；三模态面既有测试族回归绿 = 反向分支（见运行证据）。
- * - 并发隔离（S9b DOM 面）：主 sid dialog band 与 btw vid 确认条同屏互不抢占；btw 提交后
- *   主 band 原样保留（提交态 per-vid/实例隔离）。
- * - 终态机四行：应答清 / 撤回·失效清 + 行内提示 / 回收提醒置位清 / 未读归 useBtwTabData
- *   既有族（本文件不重复）；重试仅限投递失败态（未送达保持挂起）；已终结应答丢弃 + 提示失效。
+ * - 并发隔离（S9b DOM 面）：主 sid dialog band 与 btw 线确认条同屏互不抢占；btw 提交后
+ *   主 band 原样保留（提交态 per-line/实例隔离）。
+ * - 终态机三行：应答清 / 撤回·失效清 + 行内提示 / 未读归 useBtwTabData 既有族（本文件不
+ *   重复；原第四行「回收提醒置位清」随 btw.list 退役与 renderer 半死表一并删除）；重试仅限
+ *   投递失败态（未送达保持挂起）；已终结应答丢弃 + 提示失效。
  * - 状态区退役（2026-10-15 用户裁决；StatusBar 数据链随后 ADR-0141 整体退役，本文件仅余
  *   setWidget 注入可构造）：per-session 源存在也不渲染——btw 状态区恒空（原「第四面状态区」
  *   移除，扩展状态行不进旁路线面板）。
@@ -23,7 +24,7 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/btw-overlay-routing.test.ts
  */
 // helper import 必须先于项目内模块（@/api mock factory 在模块图加载期执行，TDZ 约束同 composer-mount 各消费文件）
-import { composerApiModuleActualWithBtw, composerBtwApiMock } from '../helpers/composer-mount'
+import { composerApiModuleActualWithBtw, composerBtwApiMock,  btwLineGroups } from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 import { defineComponent, nextTick, ref, effectScope } from 'vue'
@@ -46,8 +47,8 @@ import {
   createUiResponseTransport,
 } from '@taiji/ui/extension-host'
 import { __testing, useExtensionUI } from '@/composables/useExtensionUI'
-import { setBtwReclaimReminder } from '@/composables/panel/btw-pending-bookkeeping'
 import { __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwTabData'
+import { __resetBtwLineMembershipForTest, noteBtwLinesPulled } from '@/composables/panel/btw-line-membership'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useToast } from '@/composables/useToast'
@@ -90,7 +91,7 @@ vi.mock('@/components/panel/Composer.vue', async () => {
 })
 
 const MAIN = 's-m3c-main'
-const VID = 'btw:pi-m3c-1'
+const VID = 'pi-m3c-1' // 线 session id（W4a 后 = pi 真实 id）
 
 let boundSid: Ref<string | null>
 
@@ -164,22 +165,26 @@ beforeEach(() => {
   __clearSessionCleanupRegistryForTest()
   __testing.__resetExtensionBusSubscriptionForTesting()
   __resetBtwPendingBookkeepingForTest()
+  // W4b 收编判别器播种：btw 簿记订阅壳的 ui-request/requests-invalidated 路由判据 =
+  // session.list {surface:'btw'} 拉取缓存成员判别（btw-line-membership）——VID（线 session
+  // id）按线预热（等价抽屉拉取产物喂入）。
+  __resetBtwLineMembershipForTest()
+  noteBtwLinesPulled([VID])
   extMock.sendExtensionUIResponse.mockReturnValue(true)
   // 快照镜像 store 现态（真实 runtime 缓存 pending 并在快照回填——切走切回不被僵尸修剪误伤）
   extMock.getPendingRequests.mockImplementation(async (sid?: string) =>
     sid ? useExtensionUIStore().getRequestsBySession(sid) : [],
   )
-  apiMock.list.mockResolvedValue([{ vid: VID }])
+  apiMock.list.mockResolvedValue(btwLineGroups({ id: VID }))
   apiMock.create.mockReset()
   apiMock.remove.mockReset()
 })
 
 afterEach(() => {
-  setBtwReclaimReminder(VID, false)
   useExtensionUIStore().clearAllPending()
 })
 
-describe('① vid 路由：五类请求 drawer 内联确认条 + 主视图零浮出（P-overlay 正向）', () => {
+describe('① 线 id 路由：五类请求 drawer 内联确认条 + 主视图零浮出（P-overlay 正向）', () => {
   it('ask-user 富表单降档：text 问题现 drawer 确认条（DOM 问题文本），主 sid 不入条', async () => {
     const w = mountPanel(MAIN)
     await settle(w)
@@ -191,7 +196,7 @@ describe('① vid 路由：五类请求 drawer 内联确认条 + 主视图零浮
     expect(bar.text()).toContain('问题甲？')
     expect(w.find('[data-testid="btw-form-submit"]').exists()).toBe(true)
 
-    // 主 sid 的请求不进本面板确认条（vid 分区隔离；主 sid 渲染范围归 Panel/FormOverlay 族）
+    // 主 sid 的请求不进本面板确认条（线 id 分区隔离；主 sid 渲染范围归 Panel/FormOverlay 族）
     emitUIRequest(MAIN, formFrame('r-main', '主会话问题？'))
     await settle(w)
     expect(bar.text()).toContain('问题甲？')
@@ -220,7 +225,7 @@ describe('① vid 路由：五类请求 drawer 内联确认条 + 主视图零浮
     await settle(band)
     expect(band.find('[data-testid="companion-band"]').exists()).toBe(true)
     expect(band.find('[data-testid="companion-band-message"]').text()).toBe('主面消息')
-    // btw 请求仍未把主 band 顶到 vid 内容
+    // btw 请求仍未把主 band 顶到线内容
     expect(band.find('[data-testid="companion-band-message"]').text()).not.toContain('rm -rf')
   })
 
@@ -306,12 +311,12 @@ describe('① vid 路由：五类请求 drawer 内联确认条 + 主视图零浮
 })
 
 describe('④ 并发：同屏互不抢占 + 提交态隔离（S9b DOM 面）', () => {
-  it('主 sid dialog band 与 btw vid 确认条同屏并存；btw 提交后主 band 原样保留', async () => {
+  it('主 sid dialog band 与 btw 线确认条同屏并存；btw 提交后主 band 原样保留', async () => {
     const w = mountPanel(MAIN)
     const band = mountMainBand(MAIN)
     await settle(w)
     emitUIRequest(MAIN, dialogFrame('r-main-dlg', { message: '主面待决' }))
-    emitUIRequest(VID, formFrame('r-vid-form', '旁路问题？'))
+    emitUIRequest(VID, formFrame('r-line-form', '旁路问题？'))
     await settle(w)
 
     // 两面同屏并存、互不抢占
@@ -364,20 +369,6 @@ describe('②③ badge 待处理态 + 终态机四行（D8 SSOT 表）', () => {
     expect(w.find('[data-testid="btw-request-expired"]').exists()).toBe(false)
   })
 
-  it('行4 回收提醒（非终态）：setter 置位 → 待处理点在；清除支 → 点清', async () => {
-    const w = mountPanel(MAIN)
-    await settle(w)
-    expect(w.find('[data-testid="btw-thread-pending"]').exists()).toBe(false)
-
-    setBtwReclaimReminder(VID, true)
-    await settle(w)
-    expect(w.find('[data-testid="btw-thread-pending"]').exists()).toBe(true)
-
-    setBtwReclaimReminder(VID, false)
-    await settle(w)
-    expect(w.find('[data-testid="btw-thread-pending"]').exists()).toBe(false)
-  })
-
   it('快照镜像重挂：已入快照的 store 族挂起不被修剪误伤（条与待处理保留、无失效提示）', async () => {
     const w = mountPanel(MAIN)
     await settle(w)
@@ -421,7 +412,7 @@ describe('②③ badge 待处理态 + 终态机四行（D8 SSOT 表）', () => {
     await settle(w)
     // 模拟已终结（失效链已移除 store 记录）后迟到的提交：active 已随 store 清空 →
     // 确认条不在 DOM、无按钮可点——改直调 useExtensionUI 的 respond 语义侧
-    // （同 useBtwInteraction 挂载形态：vid ref + 全放行 filter）
+    // （同 useBtwInteraction 挂载形态：线 id ref + 全放行 filter）
     useExtensionUIStore().removeRequest(VID, 'r-gone')
     await settle(w)
     expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
@@ -474,7 +465,7 @@ describe('⑤ 状态区退役（2026-10-15 用户裁决）：extension GUI 状�
       getViewIds: (sid: string) => (sid === VID ? ['w1'] : []),
     }
     // 选中一条线：状态区退役的断言范围在 composer 带（btw-interaction）内，非空态非澄清命中
-    apiMock.list.mockResolvedValue([{ vid: VID }])
+    apiMock.list.mockResolvedValue(btwLineGroups({ id: VID }))
     const w = mount(BtwPanel, {
       props: { sessionId: MAIN },
       global: {
@@ -530,22 +521,22 @@ describe('⑤ 运行期错误边界：btw 交互异常不外溢主面板', () =>
 
 describe('D7⑤ 提交态 per-vid/表单实例隔离：切走切回草稿不丢，终结即清（U2 修复）', () => {
   it('切线再切回：已填草稿仍在输入框；应答送达终结后同 requestId 重建为空', async () => {
-    apiMock.list.mockResolvedValue([{ vid: 'btw:d7a' }, { vid: 'btw:d7b' }])
+    apiMock.list.mockResolvedValue(btwLineGroups({ id: 'd7a' }, { id: 'd7b' }))
     const w = mountPanel(MAIN)
     await settle(w)
     // 默认选中最新线 d7b → 切到 d7a（跨 vid 面）
-    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7a"]').trigger('click')
+    await w.find('[data-testid="btw-thread-chip"][data-session-id="d7a"]').trigger('click')
     await nextTick()
-    emitUIRequest('btw:d7a', formFrame('r-d7', '草稿问题？'))
+    emitUIRequest('d7a', formFrame('r-d7', '草稿问题？'))
     await settle(w)
     await w.find('[data-testid="btw-form-text"]').setValue('半途草稿')
     await nextTick()
 
     // 切走（另一条线，active 变 null/异 vid）→ 切回：草稿仍在（提交态不丢）
-    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7b"]').trigger('click')
+    await w.find('[data-testid="btw-thread-chip"][data-session-id="d7b"]').trigger('click')
     await nextTick()
     expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
-    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7a"]').trigger('click')
+    await w.find('[data-testid="btw-thread-chip"][data-session-id="d7a"]').trigger('click')
     await nextTick()
     const back = w.find('[data-testid="btw-form-text"]')
     expect(back.exists()).toBe(true)
@@ -555,7 +546,7 @@ describe('D7⑤ 提交态 per-vid/表单实例隔离：切走切回草稿不丢�
     await w.find('[data-testid="btw-form-submit"]').trigger('click')
     await settle(w)
     expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
-    emitUIRequest('btw:d7a', formFrame('r-d7', '草稿问题？'))
+    emitUIRequest('d7a', formFrame('r-d7', '草稿问题？'))
     await settle(w)
     const again = w.find('[data-testid="btw-form-text"]')
     expect(again.exists()).toBe(true)
@@ -563,27 +554,27 @@ describe('D7⑤ 提交态 per-vid/表单实例隔离：切走切回草稿不丢�
   })
 
   it('分键 vid 维度负向锚定：同 requestId 两条线各填不同草稿，切换互不串', async () => {
-    apiMock.list.mockResolvedValue([{ vid: 'btw:d7a' }, { vid: 'btw:d7b' }])
+    apiMock.list.mockResolvedValue(btwLineGroups({ id: 'd7a' }, { id: 'd7b' }))
     const w = mountPanel(MAIN)
     await settle(w)
     // 默认选中最新线 d7b → 切到 d7a 填草稿
-    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7a"]').trigger('click')
+    await w.find('[data-testid="btw-thread-chip"][data-session-id="d7a"]').trigger('click')
     await nextTick()
-    emitUIRequest('btw:d7a', formFrame('r-vid-key', 'A 线问题？'))
+    emitUIRequest('d7a', formFrame('r-vid-key', 'A 线问题？'))
     await settle(w)
     await w.find('[data-testid="btw-form-text"]').setValue('A 线草稿')
     await nextTick()
 
     // 切到 d7b：同 requestId 再挂一个表单，填另一份草稿
-    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7b"]').trigger('click')
+    await w.find('[data-testid="btw-thread-chip"][data-session-id="d7b"]').trigger('click')
     await nextTick()
-    emitUIRequest('btw:d7b', formFrame('r-vid-key', 'B 线问题？'))
+    emitUIRequest('d7b', formFrame('r-vid-key', 'B 线问题？'))
     await settle(w)
     await w.find('[data-testid="btw-form-text"]').setValue('B 线草稿')
     await nextTick()
 
     // 切回 A：A 的问题 + A 的草稿原样（分键若退化为裸 requestId，B 线草稿会覆写 A → 此处红）
-    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7a"]').trigger('click')
+    await w.find('[data-testid="btw-thread-chip"][data-session-id="d7a"]').trigger('click')
     await nextTick()
     const aBar = w.find('[data-testid="btw-inline-confirm"]')
     expect(aBar.exists()).toBe(true)
@@ -592,7 +583,7 @@ describe('D7⑤ 提交态 per-vid/表单实例隔离：切走切回草稿不丢�
     expect((aInput.element as HTMLInputElement).value).toBe('A 线草稿')
 
     // 再切 B：B 的问题 + B 的草稿同样原样
-    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7b"]').trigger('click')
+    await w.find('[data-testid="btw-thread-chip"][data-session-id="d7b"]').trigger('click')
     await nextTick()
     const bBar = w.find('[data-testid="btw-inline-confirm"]')
     expect(bBar.exists()).toBe(true)

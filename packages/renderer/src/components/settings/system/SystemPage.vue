@@ -1,7 +1,7 @@
 <template>
   <!--
     Settings · System 菜单页（v6 §6.4 + §5.8）。
-    容器：header + 7 Section 纵向编排。业务逻辑在各 Section 内。
+    容器：header + 8 Section 纵向编排。业务逻辑在各 Section 内。
     （v6 demo 回填：版本检查区块已移至 UpdatePage 自动更新卡，本页不再渲染。）
     （rename-prompt-config：会话自动重命名区块已迁至独立 RenameSessionPage 菜单页。）
     [w2] 卡间距 = demo `.pg-set .gcard + .gcard` 16px：容器不设 gap，靠 GroupCard
@@ -20,6 +20,7 @@
     <SystemShortcutSection :system="system" @update="emit('update', $event)" />
     <SystemSmartContextSection />
     <SystemLlmRetrySection />
+    <SystemRetryRulesSection />
     <SystemCodemodeSection />
     <SystemDiagnosticsSection />
   </div>
@@ -32,6 +33,7 @@ import SystemSoundSection from './SystemSoundSection.vue'
 import SystemShortcutSection from './SystemShortcutSection.vue'
 import SystemSmartContextSection from './SystemSmartContextSection.vue'
 import SystemLlmRetrySection from './SystemLlmRetrySection.vue'
+import SystemRetryRulesSection from './SystemRetryRulesSection.vue'
 import SystemCodemodeSection from './SystemCodemodeSection.vue'
 import SystemDiagnosticsSection from './SystemDiagnosticsSection.vue'
 import type { SystemSettings } from '@taiji/core'

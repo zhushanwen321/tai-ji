@@ -5,21 +5,23 @@
  * （direct/steer/queued）收归 runtime 投递所有权内核，renderer 只提交不判定：六行占用形态
  * （turn 活跃 / compacting / bash / settling）Enter 一律走**统一提交**（useChat.send →
  * 乐观气泡 + delivery.submit），占用期不再有特殊路径（内核排队/入槽承接）。
- * 保留的 UI 预测面：Alt+⏎ 在 steer 路由行仍走 followUp（下一轮语义，composer-keydown 按
- * sendRoute 分流）——sendRoute 仍是发送位形态的数据源，不再是投递决策。
+ * 保留的 UI 分流面：Alt+⏎ 在回合进行中（D1 判定集合：dispatching/generating/settling）仍走
+ * followUp（下一轮语义，composer-keydown 按 shell isActiveTurn 分流——chat-flow-consistency D5
+ * 后判定源 = shared isActiveTurnPhase，六行预测表已退役）。
  *
  * 锁定：
  * - 行 3（generating + compacting）/ 行 2（dispatching）/ 行 4（settling）/ 行 6（bash 忙）
  *   Enter → deps.send 恰一次（steer/followUp 均不被调）
  * - 行 1（全 idle）Enter → deps.send（与占用期同路径）
- * - Alt+⏎：steer 路由行（turn 活跃）→ followUp；其余行 → send
- * - steer 路由行 + 空输入 → 不提交（分发器空输入检查）
+ * - Alt+⏎：回合进行中（turn ∈ 判定集合，含 settling）→ followUp；其余行（空闲/压缩/bash）→ send
+ * - 回合进行中 + 空输入 → 不提交（分发器空输入检查）
  *
  * 装配（真 pinia + 真 chatStore + mount Composer）：mock useChat / api（chat 组）/
  * useToast / ComposerInput + 壳 stub + 逐用例重置统一经 composer-queue-mount.ts 装配，
  * 断言引用 composerChatApiSpy 单例。
  *
- * occupancy 由 chat.setOccupancy 驱动（store 派生视图 = composer-shell sendRoute 的数据源）。
+ * occupancy 由 chat.setOccupancy 驱动（store 派生视图 = composer-shell isActiveTurn/
+ * sendButtonState 的数据源）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-dispatch-route.test.ts
  */
@@ -126,7 +128,7 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
     expect(composerChatApiSpy.send).toHaveBeenCalledWith('s1', textToSegments('普通消息'))
   })
 
-  it('Alt+⏎ steer 路由行（generating）→ followUp（下一轮语义保留，非 steer）', async () => {
+  it('Alt+⏎ 回合进行中（generating）→ followUp（下一轮语义保留，非 steer）', async () => {
     setPhase('generating')
     seedLocalBusy()
     const wrapper = mountComposer()
@@ -139,7 +141,21 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
     expect(composerChatApiSpy.send).not.toHaveBeenCalled()
   })
 
-  it('Alt+⏎ non-steer 路由行（compacting）→ 统一提交（sendRoute 仅 UI 预测，非 followUp）', async () => {
+  it('Alt+⏎ 回合进行中（settling，D1 判定集合成员）→ followUp（收尾期排队语义）', async () => {
+    // [chat-flow-consistency D5] 六行预测表退役后 Alt 分流读 ACTIVE_TURN_PHASES——settling
+    // 从「queued → onSend」变「集合成员 → followUp」，是 settling 纳入判定集合的设计语义
+    setPhase('settling')
+    const wrapper = mountComposer()
+    wrapper.findComponent(ComposerInputMock).vm.$emit('input', '收尾期下一轮')
+    await wrapper.vm.$nextTick()
+
+    await pressKey(wrapper, { altKey: true })
+
+    expect(composerChatApiSpy.followUp).toHaveBeenCalledTimes(1)
+    expect(composerChatApiSpy.send).not.toHaveBeenCalled()
+  })
+
+  it('Alt+⏎ 非集合成员（compacting）→ 统一提交（压缩期 Alt 排队走分发器，非 followUp）', async () => {
     setPhase('idle', true)
     const wrapper = mountComposer()
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', '压缩后发')
@@ -151,7 +167,7 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
     expect(composerChatApiSpy.send).toHaveBeenCalledWith('s1', textToSegments('压缩后发'))
   })
 
-  it('steer 路由行 + 空输入 ⏎ → 不提交（分发器空输入检查）', async () => {
+  it('回合进行中 + 空输入 ⏎ → 不提交（分发器空输入检查）', async () => {
     setPhase('generating')
     seedLocalBusy()
     const wrapper = mountComposer()

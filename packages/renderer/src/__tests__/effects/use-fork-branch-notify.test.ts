@@ -16,7 +16,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/effects/use-fork-branch-notify.test.ts
  */
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { effectScope, nextTick } from 'vue'
 import { createPinia, setActivePinia, storeToRefs } from 'pinia'
 import * as events from '@taiji/core/transport/api'
@@ -31,6 +31,15 @@ import {
 // 测试同步为直接消费 useForkBranchNotify 的模块级单例。
 import { clearUnread, unreadByBranch } from '@/composables/features/fork-handoff/useForkBranchNotify'
 import { useSessionStore } from '@/stores/session'
+import { __resetBtwLineMembershipForTest, noteBtwLinesPulled } from '@/composables/panel/btw-line-membership'
+
+// W4b 收编：btw 线成员判别（ForkNotice suppress 读口）经 session.list {surface:'btw'}
+// 拉取缓存供数——mock 掉 @/api 门面的 listSessions（spread actual 保其余域）。
+const sessionListMock = vi.hoisted(() => ({ listSessions: vi.fn() }))
+vi.mock('@/api', async (importActual) => {
+  const actual = await importActual<typeof import('@/api')>()
+  return { ...actual, session: { ...actual.session, listSessions: sessionListMock.listSessions } }
+})
 
 function session(overrides: Partial<SessionSummary>): SessionSummary {
   return {
@@ -39,8 +48,6 @@ function session(overrides: Partial<SessionSummary>): SessionSummary {
     cwd: '/tmp/proj',
     status: 'active',
     lastActiveAt: Date.now(),
-    modelId: 'm-test',
-    tokenCount: 0,
     ...overrides,
   }
 }
@@ -71,6 +78,10 @@ beforeEach(() => {
   setActivePinia(createPinia())
   scope?.stop()
   resetForkNoticeFeed()
+  // W4b 收编判别器：ForkNotice suppress 读口 = session.list {surface:'btw'} 拉取缓存成员
+  // 判别（登记于 docs/constraints.json C-data-28 抑制类清单）——逐用例清零 + 按线预热。
+  __resetBtwLineMembershipForTest()
+  sessionListMock.listSessions.mockResolvedValue([])
   scope = effectScope()
   scope.run(() => {
     bindForkNoticeEffect()
@@ -156,16 +167,18 @@ describe('fork 分支角标（V7：产生 → 读后清除 → 切会话保持�
 })
 
 describe('ForkNotice suppress（btw 流）', () => {
-  it('notice 推给 btw vid → notices(vid) 构造性空；主会话同型推送照常可见', () => {
-    pushForkNoticeAsk('btw:line-fn-1', 'new-branch-1', '旁路提问预览')
+  it('notice 推给 btw 线 → notices(线 id) 构造性空；主会话同型推送照常可见', () => {
+    // W4b 收编判别器 = 拉取缓存成员判别：线 session id 经缓存预热（= 抽屉拉取产物喂入）
+    noteBtwLinesPulled(['line-fn-1'])
+    pushForkNoticeAsk('line-fn-1', 'new-branch-1', '旁路提问预览')
     pushForkNoticeAsk('main-fn-1', 'new-branch-2', '主分支预览')
 
     const feed = useForkNoticeFeed()
-    expect(feed.notices('btw:line-fn-1')).toHaveLength(0) // btw 流 suppress（D4）
+    expect(feed.notices('line-fn-1')).toHaveLength(0) // btw 流 suppress（D4）
     expect(feed.notices('main-fn-1')).toHaveLength(1) // 主会话行为不变（回归对照）
 
     // suppress 对交互幂等：dismiss/clear 对空表零动作不抛
-    expect(() => feed.dismissNotice('btw:line-fn-1', 1)).not.toThrow()
-    expect(() => feed.clearSession('btw:line-fn-1')).not.toThrow()
+    expect(() => feed.dismissNotice('line-fn-1', 1)).not.toThrow()
+    expect(() => feed.clearSession('line-fn-1')).not.toThrow()
   })
 })

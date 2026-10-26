@@ -31,7 +31,7 @@ export function createMockDeps(overrides: Partial<ChatViewDeps> = {}): ChatViewD
     speakStateOf: () => 'idle',
 
     toggleExpand: vi.fn(),
-    collapse: vi.fn(),
+    // [chat-flow-consistency C3] ChatViewDeps.collapse 已随 Turn.vue onComplete 接线退役删除
     setTakeover: vi.fn(),
     abortBash: vi.fn(),
     editAndResend: vi.fn(),

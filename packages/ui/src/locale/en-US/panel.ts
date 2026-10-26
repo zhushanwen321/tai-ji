@@ -79,7 +79,11 @@ export default {
     // [HISTORICAL] the former mode-chip single-key label (forkChip/handoffChip) and placeholder
     // swap (forkHint/handoffHint) presentation channels retired with the banner form
     forkBannerTitle: 'Fork new branch',
-    forkBannerDesc: 'Your input will go to a new branch, isolated from the main line',
+    // [chat-flow-consistency U9 / S5] fork-point truncation note: while the anchor message is
+    // still streaming it is not persisted by pi yet, so the actual fork point falls back to the
+    // last persisted message — phrased conditionally (inactive when the anchor is already done);
+    // the user can wait or accept the truncation (non-blocking)
+    forkBannerDesc: 'Your input will go to a new branch, isolated from the main line; if the selected message is still streaming, the fork point will be the latest completed message before it',
     handoffHint: 'Enter text to send as the first message in the new session (optional)… (⏎ handoff & send, Esc to exit)',
     handoffChip: 'Hand off to new session · your input goes to the new session',
     handoffSend: 'Hand off & send to new session',
@@ -94,6 +98,15 @@ export default {
     // Composer shortcut action table copy feedback (composer-pi-shortcuts decision 4 / §3.5)
     copyLastReply: 'Copied last reply',
     copyLastReplyFailed: 'Copy failed',
+    // ✎ queue entry edit (chat-flow-consistency D6): anchor-judgement feedback + edit-reply
+    // four-value toasts (Q3 uniform handling: content always goes out as a new message, only the toast differs)
+    queueEditConflict: 'Already editing another message — abandon that edit first',
+    queueEditGone: 'Original message is no longer in the queue',
+    queueEditPeekFailed: 'Failed to fetch original text: {msg}',
+    queueEditDelivered: 'Original message was delivered; your edit was sent as a new message',
+    queueEditCancelled: 'Original message was cancelled; your edit was sent as a new message',
+    queueEditNotFound: 'Original message is gone; your edit was sent as a new message',
+    queueEditUnconfirmed: 'Delivery status of the original message unconfirmed; your edit was sent as a new message',
   },
   message: {
     copy: 'Copy',
@@ -161,6 +174,15 @@ export default {
     itemRenderFailed: 'This item failed to render',
     itemRenderRetry: 'Retry',
     renderErrorToast: 'A rendering error occurred and has been logged',
+    // [U8 restart-interrupted notice] tail notice after a generating turn was cut off by restart (runtime tail-shape detection)
+    interruptedNotice: 'The last session was interrupted here — content may be incomplete',
+    // [chat-flow-consistency defects 3/7] liveOnly notice row copy (core key injection, wired via
+    // effects/notice-text.ts configureChatNoticeText)
+    chatNotice: {
+      stoppedBeforeStart: 'Stopped: the reply had not started',
+      truncatedMaxTokens: 'Reply was truncated at the length limit',
+      truncatedContentFilter: 'Reply was terminated by content filtering',
+    },
     // [RD-3#7] toast in-flight overflow collapse summary (UI consumer of droppedCount)
     toastDropped: '{count} more notification(s) hidden',
     toastDroppedDismiss: 'Dismiss collapsed-notification notice',
@@ -170,6 +192,15 @@ export default {
     // phrase, tokens move out to the right-pinned mono meta (compactedTokens drops parentheses)
     compacted: 'Context compacted',
     compactedTokens: '{tokens} tokens',
+    // [chat-flow-consistency U9 / S6] compaction summary hover-detail title (SystemNotice
+    // compaction branch; body = AI-generated context summary, with a copy button)
+    compactionSummaryLabel: 'Compaction summary',
+    // [chat-flow-consistency U9 / S2] handoff turn presentation: the fixed handoff prompt
+    // (content === HANDOFF_PROMPT_TEMPLATE) collapses into the system line below, original
+    // text in the hover detail; the following assistant turn gets the TurnMeta tag
+    handoffInstruction: 'Handoff instruction (internal)',
+    handoffInstructionLabel: 'Instruction text',
+    handoffDocTag: 'Handoff document',
     branchCreated: 'Branch created (from {from})',
     branchCreatedNoFrom: 'Branch created',
     thinkCount: 'Think ×{count}',
@@ -222,7 +253,7 @@ export default {
     // Turn.vue): dedicated key, not reusing traceFailed ("{count} failed" belongs to the
     // TraceCompactorRow compacted-row phrasing — different semantic domain)
     turnTriggerBgNotifyFailed: '{count} failed',
-    // [bg-notice-fold specs/chat/system-notices.md §3.3] settled-turn folded label: segmented by
+    // [bg-notice-fold] settled-turn folded label: segmented by
     // type (occurrence order deduped, "·" joined; elapsed stays as the single trailing number).
     // Managed session is the fourth member — its wording awaits user ruling (spec §6); the
     // fold-into-meta demo proposal lands for now
@@ -349,11 +380,20 @@ export default {
     // hover note for the "Last turn" label (C4): current has no window filter and is session-scoped (this session's most recent request)
     genStatsCurrentNote: "From this session's most recent request",
     genStatsCurrentReq: 'Last request',
-    genStatsDay: 'Today avg (this model)',
-    genStatsD7: 'Last 7 days',
-    genStatsD30: 'Last 30 days',
     genStatsDayShort: 'Today weighted (this model)',
-    genStatsSpeedNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model (weighted avg); based on single LLM request duration, excluding tool execution time',
+    // Distribution matrix (2026-10-24 user decision): 5 statistical columns × 3 window rows.
+    // Column header states the stat once, row header states the window once — an order of
+    // magnitude more information than "one single value per window row" at the same size.
+    genStatsColAvg: 'Avg',
+    genStatsColP50: 'P50',
+    genStatsColP99: 'P99',
+    genStatsColP99Note: 'Nearest-rank percentile: with fewer than 100 samples P99 equals the max (no interpolation — reported as-is)',
+    genStatsColMax: 'Max',
+    genStatsColMin: 'Min',
+    genStatsWindowDay: 'Today',
+    genStatsWindowD7: '7d',
+    genStatsWindowD30: '30d',
+    genStatsSpeedNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model as a five-statistic distribution of per-request speed (equal-weighted average, not duration-weighted); based on single LLM request duration, excluding tool execution time',
     genStatsCacheNote: '"Last turn" is this session\'s most recent request; "Today weighted" aggregates across all sessions on this model; cacheRead ÷ (input + cacheRead + cacheWrite); shows "—" when the model does not support caching',
     // Miss attribution (2026-09-19 D-A): expected 0% causes — all non-fault, rendered in neutral tone
     genStatsCacheMissColdStart: 'First request',
@@ -367,14 +407,12 @@ export default {
     // [RD-2#7] runtime-ahead-of-renderer protocol drift (unknown reason) — generic fallback copy (default branch + warn)
     genStatsCacheMissUnknown: 'Cache miss',
     genStatsNoData: 'No data yet',
-    // composer-genstats-ttft TTFT trigger (U4). p50 row labels get dedicated keys, not
-    // reusing genStatsDay ("Today avg" contradicts p50 median semantics, design §3.1);
-    // the "Last turn" row reuses genStatsCurrent* keys (same semantics)
+    // composer-genstats-ttft TTFT card (U4). [HISTORICAL] The dedicated genStatsTtftDay/D7/D30
+    // row labels ("Today p50 (this model)") were retired with the distribution matrix (2026-10-24):
+    // window names now use the shared genStatsWindowDay/D7/D30 keys and statistic names the shared
+    // genStatsCol* keys, so the two sides no longer need their own label keys
     genStatsTtftTitle: 'First token latency (TTFT)',
-    genStatsTtftDay: 'Today p50 (this model)',
-    genStatsTtftD7: 'Last 7 days p50',
-    genStatsTtftD30: 'Last 30 days p50',
-    genStatsTtftNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model (p50 median); latency from request dispatch to the first output token, based on single LLM requests, excluding tool execution time',
+    genStatsTtftNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model as a five-statistic distribution of per-request latency; P50 is the typical experience, P99/max are the tail (on a heavy-tailed distribution these diverge sharply); latency from request dispatch to the first output token, based on single LLM requests, excluding tool execution time',
   },
   sideDrawer: {
     title: 'Side drawer',
@@ -594,11 +632,13 @@ export default {
     // [D1] occupancy-typed hover hints (long bash occupation makes "what ends" actionable)
     pendingHintCompacting: 'Will be sent after context compaction completes',
     pendingHintBash: 'Will be sent after the command finishes',
+    pendingHintHandingOff: 'Handing off — will deliver when it ends',
     pendingHintSettling: 'Will be sent after the current turn ends',
-    // Kernel entry state labels (G3: every undelivered message has an explicit shape + state)
+    // Kernel entry state labels (G3: every undelivered message has an explicit shape + state;
+    // failed = unified "unconfirmed" — outcome unknown, row shows state while the error bubble carries details)
     stateQueued: 'Queued',
     stateInFlight: 'Sending',
-    stateFailed: 'Failed',
+    stateFailed: 'Unconfirmed',
     cancelQueued: 'Cancel queued message',
     cancelUnavailable: 'Already delivered — cannot be cancelled',
     cancelUnavailableWithReason: 'Cannot cancel: {reason}',
@@ -607,7 +647,19 @@ export default {
     restoreDraftFailed: 'Cancelled, but restoring to the composer failed: {msg}',
     restoreContentMissing: 'Message cancelled, but its original text could not be recovered — please re-enter it',
     retry: 'Retry sending',
+    // failed-row dedup note (second line of row hover title: retrying never delivers twice)
+    retryDedupHint: 'Retrying auto-deduplicates — it will not deliver twice',
     retryFailed: 'Retry failed: {msg}',
+    // Batch retry and +N expand toggle
+    retryAll: 'Retry all failed',
+    expandQueued: 'Show {n} more queued messages',
+    collapseQueued: 'Collapse',
+    // ✎ edit (chat-flow-consistency D6: peek prefill + anchor, available on all rows incl. failed — E7)
+    editQueued: 'Edit queued message',
+    // Editing banner (rendered while an anchor is held; auto-released by the frame watch when the entry leaves)
+    editingBanner: 'Editing queued message · replaces it in place on send',
+    editingBannerAbandon: 'Abandon edit',
+    editingBannerAbandonHint: 'Release the anchor and keep the text — it can be sent as a new message',
   },
   contextChips: {
     removeFromContext: 'Remove from context',

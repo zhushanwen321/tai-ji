@@ -32,7 +32,7 @@
  * 文件定位链（[D1] record 单源后）：
  * 主 session JSONL（session.create reply 的 sessionFile）
  *   → workflow-record v2 registered 条目的 data.recordPath → record 事件流
- *     （<sessionDir>/workflow-state/<runId>.record.jsonl，jsonl-run-store.ts）
+ *     （<dataDir>/ext-sessions/<sid>/workflow/runs/<runId>.record.jsonl，ADR-0141 树）
  *   → agent-settled 帧 result.sessionFile → 子进程 session 文件
  *     （缺失时全量扫描 dataDir 下 sessions/*.jsonl 按首行 session.id 匹配，
  *     session-service.ts findAgentCallFile 同策略，更健壮）
@@ -202,7 +202,7 @@ function readSessionEntries(file: string): any[] | null {
  * pi 侧落盘形状（workflow-record-entry.ts v2 schema）：主 session 每 run 两条小
  * 条目——registered（`{v:2, kind:"registered", runId, recordPath, ...}`，含 record
  * 流绝对路径锚点）与 settled（`{v:2, kind:"settled", runId, status, ...}`）。唯一
- * 事实源 = recordPath 指向的 record 事件流（`<sessionDir>/workflow-state/
+ * 事实源 = recordPath 指向的 record 事件流（`<dataDir>/ext-sessions/<sid>/workflow/runs/
  * <runId>.record.jsonl`，jsonl-run-store.ts 头注），条目本身可随时从 record 重建。
  *
  * 返回 null = 主 session 文件不可读；内层字段 null = 文件可读但对应条目缺失

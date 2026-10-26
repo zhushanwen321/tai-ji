@@ -1,6 +1,6 @@
 // fan-out.js workflow 脚本行为契约直测（u-fanout-template 单元：成员对象化 + 通知
-// 截断 + 全员失败收尾语义，各用例自述为准。原引用「设计 D4/D5/D9」为历史设计稿
-// 决策编号，现行设计文档与 impl-plan 均无对应——git 可追溯）。
+// 截断 + 全员失败收尾语义，各用例自述为准；源码注释与行为描述同批去历史设计稿
+// D 编号——现行锚点见 subagent-observability §3.3.10，历史编号 git 可追溯）。
 //
 // 测试方法（同 review-fix-loop-script.test.ts 先例）：fan-out.js 是 pi worker 模板
 // 脚本——顶层执行 + 顶层 return，不可作为 ES module import。用 AsyncFunction 在
@@ -25,11 +25,12 @@
 //   - D5 通知体积保序截断（truncated 标记 + taskIndex/status 恒完整）
 //   - D4 aggregate 可选归约（末尾一个 agent()；归约失败不炸 run）
 //   - @pi-meta parameters 对象-only（additionalProperties:false + task minLength + pattern ^/）
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { THINKING_ORDER } from "../shared/model-ref.ts";
 
@@ -47,6 +48,8 @@ interface AgentBehavior {
   failMode?: "reject" | "resolve-string";
   /** aggregate 成员行为：ok / reject / none（不派 aggregate） */
   aggregate?: "ok" | "reject" | "none";
+  /** 按派发序下标覆盖成功成员的返回对象（structured_output 谓词缺失形态等）。 */
+  resultOverrides?: Record<number, Record<string, unknown>>;
 }
 
 interface AgentCallRecord {
@@ -68,10 +71,12 @@ interface ProbeResult {
       summary?: string;
       fullReportPath?: string;
       error?: string;
+      observations?: string[];
     }>;
     aggregate?: unknown;
     truncated?: boolean;
     message?: string;
+    partialMembers?: Array<{ taskIndex: number; missing: string[] }>;
   };
   agentCalls: AgentCallRecord[];
   logs: string[];
@@ -102,6 +107,9 @@ function makeFakeAgent(behavior: AgentBehavior, agentCalls: AgentCallRecord[]) {
           return Promise.resolve("plain error text " + idx);
         }
         return Promise.reject(new Error("boom-" + idx));
+      }
+      if (behavior.resultOverrides?.[idx] !== undefined) {
+        return Promise.resolve(behavior.resultOverrides[idx]);
       }
       return Promise.resolve({
         summary: behavior.summaryOf ?? "summary-" + idx,
@@ -308,7 +316,7 @@ describe("fan-out.js 失败语义（D4/G2：allSettled partial 收尾）", () =>
     expect(r.outcome.results[1].task).toBe(THREE_TASKS[1].task);
     // 三个成员都被派发（失败不阻断派发集合）
     expect(r.agentCalls).toHaveLength(3);
-    // §3.3.5 partial 收尾文案：指向失败 taskIndex 的局部重派，不是全批重跑
+    // subagent-tool-interface-refactor §3.1.4 partial 收尾文案：指向失败 taskIndex 的局部重派，不是全批重跑
     expect(r.outcome.message).toContain("taskIndex");
     expect(r.outcome.message).toContain("失败 1");
   });
@@ -440,5 +448,167 @@ describe("fan-out.js 模块形态与参数侧契约", () => {
     expect(FANOUT_SOURCE).not.toContain("parseAgentRefs");
     expect(FANOUT_SOURCE).not.toContain("agentRefs");
     expect(FANOUT_SOURCE).not.toContain("agentFor");
+  });
+});
+
+// ── [subagent-observability §3.3.10/UC-11/UC-12] 产物契约（deliverables 谓词）──
+// 两形态封闭：{kind:"file", path, minBytes} / {kind:"structured_output"}（{kind:"none"}
+// 已否决删除）；校验时机 = 成员交付结算前；全不满足 → agent.no_deliverable；部分
+// 满足 → partialMembers + observations（不进失败集合）；成员死于上游失败时上游
+// 事实优先（UC-12 cause 优先级）。缺省不传 = 不做交付校验（场景 7 存量零回归）。
+
+describe("fan-out.js 产物契约（deliverables 谓词，§3.3.10）", () => {
+  // file 谓词经真实 fs.stat 校验（fan-out.js 内 require("node:fs") 直读）——
+  // tmp 自建自删（fs-guard 白名单形态），不触碰共享推导路径。
+  let dir: string;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "fan-out-deliverables-"));
+  });
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const realReport = (): string => {
+    const p = join(dir, "report.md");
+    writeFileSync(p, "# report body");
+    return p;
+  };
+
+  it("两形态谓词封闭枚举：@pi-meta kind enum 恰为 file/structured_output（无 none）+ items additionalProperties:false（验收④）", () => {
+    const metaStart = FANOUT_SOURCE.indexOf("/* @pi-meta");
+    const metaEnd = FANOUT_SOURCE.indexOf("*/", metaStart);
+    const metaBlock = FANOUT_SOURCE.slice(metaStart, metaEnd);
+    const enumMatch = metaBlock.match(/kind: \{ type: string, enum: \[([^\]]+)\]/);
+    expect(enumMatch).not.toBeNull();
+    const kinds = (enumMatch?.[1] ?? "").split(",").map((s) => s.trim().replace(/"/g, ""));
+    expect(kinds).toEqual(["file", "structured_output"]);
+    // 谓词形态封闭（对象层 additionalProperties:false）+ deliverables 数组 minItems
+    expect(metaBlock).toMatch(/deliverables:\n            type: array\n            minItems: 1/);
+    expect(metaBlock).toContain('required: [kind]');
+  });
+
+  it("缺省不传 deliverables = 不做交付校验：outcome 无 partialMembers、条目无 observations（场景 7 存量零回归）", async () => {
+    const r = await runScript({ tasks: THREE_TASKS }, { failIndexes: [2], aggregate: "none" });
+    expect(r.outcome.status).toBe("partial");
+    expect(r.outcome.partialMembers).toBeUndefined();
+    for (const entry of r.outcome.results) {
+      expect(entry.observations).toBeUndefined();
+    }
+    expect(r.outcome.message).not.toContain("partialMembers");
+  });
+
+  it("UC-11 部分交付：2 项 deliverables 仅 file 落盘 → status ok（不进失败）+ partialMembers[{taskIndex, missing}] + 条目 observations", async () => {
+    const r = await runScript(
+      { tasks: [{ task: "t0", deliverables: [{ kind: "file", path: "/nonexistent/fan-out-missing.md", minBytes: 10 }, { kind: "structured_output" }] }] },
+      { aggregate: "none" },
+    );
+    expect(r.outcome.status).toBe("ok");
+    expect(r.outcome.results[0].status).toBe("ok");
+    expect(r.outcome.results[0].error).toBeUndefined();
+    expect(r.outcome.partialMembers).toEqual([
+      { taskIndex: 0, missing: ["file:/nonexistent/fan-out-missing.md (not readable (ENOENT))"] },
+    ]);
+    expect(r.outcome.results[0].observations).toEqual([
+      "deliverable missing: file:/nonexistent/fan-out-missing.md (not readable (ENOENT))",
+    ]);
+    expect(r.outcome.message).toContain("partialMembers");
+  });
+
+  it("全部谓词满足 → 成功交付：无 partialMembers、无 observations（真实临时文件过 file 谓词）", async () => {
+    const reportPath = realReport();
+    const r = await runScript(
+      { tasks: [{ task: "t0", deliverables: [{ kind: "file", path: reportPath, minBytes: 5 }, { kind: "structured_output" }] }] },
+      { aggregate: "none" },
+    );
+    expect(r.outcome.status).toBe("ok");
+    expect(r.outcome.partialMembers).toBeUndefined();
+    expect(r.outcome.results[0].observations).toBeUndefined();
+  });
+
+  it("minBytes 缺省 1（存在且非空）；size 不足 → 未满足带原因（多项中单缺 = 部分交付进 partialMembers）", async () => {
+    const tiny = join(dir, "tiny.md");
+    writeFileSync(tiny, "ab");
+    const r = await runScript(
+      { tasks: [
+        { task: "t0", deliverables: [{ kind: "file", path: tiny }] },
+        { task: "t1", deliverables: [{ kind: "file", path: tiny, minBytes: 100 }, { kind: "structured_output" }] },
+      ] },
+      { aggregate: "none" },
+    );
+    expect(r.outcome.results[0].status).toBe("ok"); // 缺省 minBytes：2 字节 ≥ 1
+    expect(r.outcome.results[0].observations).toBeUndefined();
+    expect(r.outcome.results[1].status).toBe("ok"); // 2 项缺 1 = 部分交付（不进失败）
+    expect(r.outcome.results[1].observations?.[0]).toContain("size 2 < minBytes 100");
+    expect(r.outcome.partialMembers).toEqual([
+      { taskIndex: 1, missing: [`file:${tiny} (size 2 < minBytes 100)`] },
+    ]);
+  });
+
+  it("UC-11 全不满足 → 成员 failed（agent.no_deliverable）+ failedCount 计入 partial 收尾", async () => {
+    const r = await runScript(
+      { tasks: [
+        { task: "t0", deliverables: [{ kind: "file", path: "/nonexistent/a.md" }, { kind: "structured_output" }] },
+        { task: "t1" },
+      ] },
+      { resultOverrides: { 0: { summary: "" } }, aggregate: "none" }, // summary 空 = structured_output 亦未满足
+    );
+    expect(r.outcome.results[0].status).toBe("failed");
+    expect(r.outcome.results[0].error).toContain("agent.no_deliverable");
+    expect(r.outcome.results[0].error).toContain("2 deliverable(s) missing");
+    expect(r.outcome.results[0].observations?.[0]).toContain("deliverable missing:");
+    expect(r.outcome.status).toBe("partial"); // 另一成员正常 → partial 收尾
+    expect(r.outcome.partialMembers).toBeUndefined(); // 全缺走失败集合，不进 partialMembers
+  });
+
+  it("UC-12 cause 优先级：成员死于上游失败 + deliverables 全缺 → 保持原失败事实，不冒充 agent.no_deliverable（全缺降级 observation）", async () => {
+    const r = await runScript(
+      { tasks: [
+        { task: "t0", deliverables: [{ kind: "file", path: "/nonexistent/x.md" }] },
+        { task: "t1" },
+      ] },
+      { failIndexes: [0], aggregate: "none" },
+    );
+    expect(r.outcome.results[0].status).toBe("failed");
+    expect(r.outcome.results[0].error).toContain("boom-0"); // 上游事实原样保留
+    expect(r.outcome.results[0].error).not.toContain("agent.no_deliverable");
+    expect(r.outcome.results[0].observations?.[0]).toContain("member failed upstream");
+    expect(r.outcome.results[0].observations?.[0]).toContain("agent.no_deliverable not assigned");
+  });
+
+  it("deliverables 纵深校验：空数组 / kind=file 缺 path / structured_output 带 path / 词表外 kind → 入口 throw 带修正形态", async () => {
+    await expect(runScriptExpectThrow(
+      { tasks: [{ task: "t0", deliverables: [] }] },
+      { aggregate: "none" },
+    )).resolves.toContain("must be a non-empty array");
+    await expect(runScriptExpectThrow(
+      { tasks: [{ task: "t0", deliverables: [{ kind: "file" }] }] },
+      { aggregate: "none" },
+    )).resolves.toContain('kind="file" requires a non-empty "path"');
+    await expect(runScriptExpectThrow(
+      { tasks: [{ task: "t0", deliverables: [{ kind: "structured_output", path: "/x" }] }] },
+      { aggregate: "none" },
+    )).resolves.toContain('kind="structured_output" takes no path/minBytes');
+    await expect(runScriptExpectThrow(
+      { tasks: [{ task: "t0", deliverables: [{ kind: "none" }] }] },
+      { aggregate: "none" },
+    )).resolves.toContain('kind must be "file" or "structured_output"');
+  });
+
+  it("通知体积截断时 observations 恒完整（归因侧，与 taskIndex/status/fullReportPath 同级保留）", async () => {
+    const behavior: AgentBehavior = { summaryOf: "x".repeat(3000), aggregate: "none" };
+    const r = await runScript(
+      { tasks: [
+        { task: "t0", deliverables: [{ kind: "file", path: "/nonexistent/m0" }, { kind: "structured_output" }] },
+        { task: "t1", deliverables: [{ kind: "file", path: "/nonexistent/m1" }, { kind: "structured_output" }] },
+        { task: "t2" },
+        { task: "t3" },
+        { task: "t4" },
+      ] },
+      behavior,
+    );
+    expect(r.outcome.truncated).toBe(true);
+    r.outcome.results.slice(0, 2).forEach((entry, i) => {
+      expect(entry.status).toBe("ok");
+      expect(entry.observations?.[0]).toContain("/nonexistent/m" + i);
+    });
   });
 });

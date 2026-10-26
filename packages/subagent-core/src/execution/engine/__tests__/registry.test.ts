@@ -34,7 +34,7 @@ import {
 } from "../registry.ts";
 import { buildEngineModelsPromptAppend, buildSubagentEngineSection } from "../model-prompt.ts";
 import type { SessionView } from "../types.ts";
-import type { AgentCallOpts } from "../../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../../shared/agent-call-types.ts";
 
 /** 最小可运行假引擎（完整实现 EnginePort 五面——不 cast，防接口漂移失检）。 */
 function makeFakeEngine(id: string): EnginePort {

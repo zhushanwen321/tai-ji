@@ -28,7 +28,7 @@ async function seedPhaseCrashed(env: ReturnType<typeof mkScenarioEnv>): Promise<
     runCreated({ ts: T0, runId: RUN_ID, scriptSource: PHASE_CROSS_SCRIPT }),
     { type: "phase-started", phase: "p1", ts: T0 + 100 },
     { type: "agent-started", taskIndex: 0, agentName: "shared", attempt: 1, phase: "p1", memberRecordId: "rec-shared-1", ts: T0 + 200 },
-    { type: "agent-settled", taskIndex: 0, attempt: 1, outcome: "done", durationMs: 100, result: { content: "p1-result", sessionFile: "/abs/sessions/shared.jsonl" }, ts: T0 + 300 },
+    { type: "agent-settled", taskIndex: 0, attempt: 1, outcome: "done", durationMs: 100, result: { content: "p1-content", sessionFile: "/abs/sessions/shared.jsonl" }, ts: T0 + 300 },
     { type: "phase-settled", phase: "p1", ts: T0 + 400 },
     { type: "phase-started", phase: "p2", ts: T0 + 500 },
     { type: "agent-started", taskIndex: 1, agentName: "shared", attempt: 1, phase: "p2", memberRecordId: "rec-shared-1", ts: T0 + 600 },

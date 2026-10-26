@@ -2,7 +2,7 @@
 // 设计 §3.1.3 / §3.3.3 / §3.4；impl-plan u-foundation 验收条款①）。
 //
 // 覆盖：
-// - state 映射四态（record 规则含存量回落 + trace 兜底行映射；cancelled 与兜底 failed 的粒度差异）
+// - state 映射四态（record 规则含存量回落 + trace 兜底行映射；cancelled 两源对齐——§3.3.8 trace 枚举补 cancelled）
 // - stepIndex 去重（running 优先 / startedAt 最新 / trace 兜底 last-wins / 合并后每 stepIndex 至多一行）
 // - trace 兜底折行（records undefined 不抛错；字段回落链）
 // - 8K 截断省略行（failed/cancelled 行优先保留；未超预算全保留）
@@ -22,6 +22,8 @@ import {
   type RunMemberView,
 } from "../run-member-view.ts";
 import { Budget } from "../models/budget.ts";
+import type { AgentCall } from "../models/agent-call.ts";
+import type { AgentCallOpts } from "../models/types.ts";
 import { Trace } from "../models/trace.ts";
 import type { ExecutionTraceNode } from "../models/types.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
@@ -48,6 +50,28 @@ function makeNode(overrides: Partial<ExecutionTraceNode> & { stepIndex: number }
   return { agent: "fan-out-0", task: "t", model: "default", status: "running", ...overrides };
 }
 
+/** 构造带 calls / 自定义 budget 的 run（budget 四轴派生测试用——派生纯函数只读声明值）。 */
+function makeRunWithState(
+  calls: Map<number, AgentCall>,
+  budgetOpts: ConstructorParameters<typeof Budget>[0] = {},
+  recoveredCallOpts?: Map<number, AgentCallOpts>,
+): WorkflowRun {
+  return WorkflowRun.reconstruct(
+    "wf-mv",
+    { scriptSource: "async function execute() {}", args: {}, scriptName: "fan-out", scriptPath: "/fake/fan-out.js" },
+    { budget: new Budget(budgetOpts), calls, trace: Trace.fromArray([]), errorLogs: [] },
+    {
+      startedAt: new Date(T0).toISOString(),
+      ...(recoveredCallOpts !== undefined && recoveredCallOpts.size > 0 ? { recoveredCallOpts } : {}),
+    },
+  );
+}
+
+/** 预算声明轴的 call 形态（派生只读 opts——真实 AgentCall 的方法面与本测试无关）。 */
+function callWithOpts(opts: { prompt: string; maxTurns?: number; timeoutMs?: number }): AgentCall {
+  return { id: 0, opts, status: "done", attempts: 1 } as unknown as AgentCall;
+}
+
 // ── state 映射 ───────────────────────────────────────────────
 
 describe("runMemberViews — state 映射四态", () => {
@@ -63,21 +87,28 @@ describe("runMemberViews — state 映射四态", () => {
     expect(views.map((v) => v.state)).toEqual(["running", "completed", "failed", "cancelled"]);
   });
 
-  it("cancelled 与兜底 failed 的粒度差异（设计 §3.1.3 诚实注记）：record 行可 cancelled；trace 兜底行只能是 failed", () => {
+  it("cancelled 两源对齐（§3.3.8 trace 状态枚举补 cancelled）：record 行与 trace 兜底行同判 cancelled", () => {
     const cancelled = runMemberViews(makeRun(), {
       records: [makeRecord({ stepIndex: 0, outcome: "cancelled", endedAt: T0 + 1_000 })],
       now: NOW,
     });
     expect(cancelled[0]!.state).toBe("cancelled");
 
-    // 同一 abort 场景，record 查询不可用时：trace 节点无 cancelled 状态（取消语义由
-    // 错误文案承载），兜底行折 failed——降级形态，粒度差异可接受。
+    // 同一 abort 场景，record 查询不可用时：trace 节点 cancelled（closeOutInFlightCalls
+    // 写点，§3.3.8）——兜底行与 record 行取消语义对齐，无降级形态差异。
     const fallback = runMemberViews(
-      makeRun([makeNode({ stepIndex: 0, status: "failed", error: "aborted: user cancelled" })]),
+      makeRun([makeNode({ stepIndex: 0, status: "cancelled", error: "aborted: user cancelled" })]),
       { now: NOW },
     );
-    expect(fallback[0]!.state).toBe("failed");
+    expect(fallback[0]!.state).toBe("cancelled");
     expect(fallback[0]!.lastError).toBe("aborted: user cancelled");
+
+    // trace 节点 failed 仍判 failed（真实失败形态不因枚举扩展漂移）。
+    const failedFallback = runMemberViews(
+      makeRun([makeNode({ stepIndex: 0, status: "failed", error: "boom" })]),
+      { now: NOW },
+    );
+    expect(failedFallback[0]!.state).toBe("failed");
   });
 
   it("存量 record（idle 且无 outcome）：设计表未定义形态——回落 trace 节点映射，再回落 record 事实，缺省 running", () => {
@@ -322,6 +353,206 @@ describe("runMemberViews — record 行字段回落链与 now 耗时", () => {
     const runWithLabel = makeRun([makeNode({ stepIndex: 0, status: "running", agent: "fan-out-2" })]);
     const agentFallback = runMemberViews(runWithLabel, { records: [makeRecord({ stepIndex: 0, status: "running", agent: "" })], now: NOW });
     expect(agentFallback[0]!.agent).toBe("fan-out-2");
+  });
+});
+
+// ── budget 四轴分轴显式（§3.3.6/§3.3.9）──────────────────────
+
+describe("runMemberViews — budget 四轴分轴显式", () => {
+  it("per-call 轴取同 stepIndex call opts（maxTurns/timeoutMs）；run 级轴取 state.budget 声明值", () => {
+    const run = makeRunWithState(
+      new Map([[0, callWithOpts({ prompt: "t", maxTurns: 5, timeoutMs: 60_000 })]]),
+      { maxTokens: 1000, maxTimeMs: 120_000 },
+    );
+    const views = runMemberViews(run, { records: [makeRecord({ stepIndex: 0, status: "running", startedAt: T0 })], now: NOW });
+    expect(views[0]!.budget).toEqual({
+      maxTurns: 5,
+      timeoutMs: 60_000,
+      budgetTokens: 1000,
+      budgetTimeMs: 120_000,
+    });
+  });
+
+  it("未声明轴 = null（显式无界）：无 call 的 stepIndex 两轴 null；budget 未设轴 null", () => {
+    const run = makeRunWithState(new Map(), { maxTokens: 1000 });
+    const views = runMemberViews(run, { records: [makeRecord({ stepIndex: 3, status: "running", startedAt: T0 })], now: NOW });
+    expect(views[0]!.budget).toEqual({
+      maxTurns: null,
+      timeoutMs: null,
+      budgetTokens: 1000,
+      budgetTimeMs: null,
+    });
+  });
+
+  it("<=0 与未传同语义（执法点「不限」）→ null；trace 兜底行同样附加 budget", () => {
+    const run = makeRunWithState(
+      new Map([[0, callWithOpts({ prompt: "t", maxTurns: 0, timeoutMs: -1 })]]),
+      { maxTokens: 0 },
+    );
+    const views = runMemberViews(run, { now: NOW }); // 无 records → trace 兜底行为空集
+    expect(views).toEqual([]);
+
+    // trace 兜底行（stepIndex 0）也附加 budget（声明事实不随行来源变化）
+    const runWithNode = WorkflowRun.reconstruct(
+      "wf-mv",
+      { scriptSource: "async function execute() {}", args: {}, scriptName: "fan-out", scriptPath: "/fake/fan-out.js" },
+      {
+        budget: new Budget({ maxTokens: 0 }),
+        calls: new Map([[0, callWithOpts({ prompt: "t", maxTurns: 0, timeoutMs: -1 })]]),
+        trace: Trace.fromArray([makeNode({ stepIndex: 0, status: "completed" })]),
+        errorLogs: [],
+      },
+      { startedAt: new Date(T0).toISOString() },
+    );
+    const fallbackViews = runMemberViews(runWithNode, { now: NOW });
+    expect(fallbackViews[0]!.budget).toEqual({ maxTurns: null, timeoutMs: null, budgetTokens: null, budgetTimeMs: null });
+  });
+
+  it("重派集窗口（calls miss）：budget 回落 meta.recoveredCallOpts 的声明值——已声明上界不显示为显式无界；record 行与 trace 兜底行同域", () => {
+    // 重建形态：重派集成员 calls 不建条目、声明入参经 agent-started input 载荷恢复进
+    // meta（resume-run-rebuild）；行来源两形态（record 行 / trace 兜底行）走同一回落。
+    const recovered = new Map<number, AgentCallOpts>([[2, { prompt: "t", maxTurns: 7, timeoutMs: 30_000 }]]);
+    const run = WorkflowRun.reconstruct(
+      "wf-mv",
+      { scriptSource: "async function execute() {}", args: {}, scriptName: "fan-out", scriptPath: "/fake/fan-out.js" },
+      {
+        budget: new Budget({ maxTokens: 800 }),
+        calls: new Map(),
+        trace: Trace.fromArray([makeNode({ stepIndex: 2, status: "running" })]),
+        errorLogs: [],
+      },
+      { startedAt: new Date(T0).toISOString(), recoveredCallOpts: recovered },
+    );
+    const expected = { maxTurns: 7, timeoutMs: 30_000, budgetTokens: 800, budgetTimeMs: null };
+
+    const traceRow = runMemberViews(run, { now: NOW }); // 无 records → trace 兜底行
+    expect(traceRow[0]!.budget).toEqual(expected);
+
+    const recordRow = runMemberViews(run, {
+      records: [makeRecord({ stepIndex: 2, status: "running", startedAt: T0 })],
+      now: NOW,
+    });
+    expect(recordRow[0]!.budget).toEqual(expected);
+  });
+
+  it("worker 重派后 calls 条目优先于陈旧恢复表；恢复表未覆盖的 stepIndex 仍 = 未声明 null", () => {
+    const run = makeRunWithState(
+      new Map([[0, callWithOpts({ prompt: "t", maxTurns: 5 })]]),
+      { maxTokens: 100 },
+      new Map<number, AgentCallOpts>([
+        [0, { prompt: "stale", maxTurns: 9 }], // 陈旧条目：calls 已重建，须被真值覆盖
+        [3, { prompt: "t3", timeoutMs: 15_000 }], // calls miss 的回落条目
+      ]),
+    );
+    const views = runMemberViews(run, {
+      records: [
+        makeRecord({ stepIndex: 0, status: "running", startedAt: T0 }),
+        makeRecord({ stepIndex: 1, status: "running", startedAt: T0 }),
+      ],
+      now: NOW,
+    });
+    expect(views[0]!.budget).toEqual({ maxTurns: 5, timeoutMs: null, budgetTokens: 100, budgetTimeMs: null });
+    // stepIndex 1：calls 与恢复表皆无 → 未声明 = null（显式无界）
+    expect(views[1]!.budget).toEqual({ maxTurns: null, timeoutMs: null, budgetTokens: 100, budgetTimeMs: null });
+  });
+});
+
+// ── 交付校验缺口与成员行渲染段（subagent-observability §3.3.6/§3.3.10 对齐）──
+
+describe("runMemberViews — 交付校验缺口事实（scriptResult.partialMembers 对齐成员行）", () => {
+  it("部分交付成员行携带 missingDeliverables（按 stepIndex 对齐）；畸形条目不入行", () => {
+    const run = makeRun();
+    run.state.scriptResult = {
+      status: "partial",
+      partialMembers: [
+        { taskIndex: 1, missing: ["file:/abs/report.md (not readable (ENOENT))"] },
+        { taskIndex: "2", missing: ["x"] }, // taskIndex 非数字 → 畸形丢弃
+      ],
+    };
+    const views = runMemberViews(run, {
+      records: [
+        makeRecord({ stepIndex: 0, outcome: "completed", endedAt: T0 + 1_000 }),
+        makeRecord({ stepIndex: 1, outcome: "completed", endedAt: T0 + 2_000 }),
+      ],
+      now: NOW,
+    });
+    expect(views[0]!.missingDeliverables).toBeUndefined(); // 全满足成员无缺口事实
+    expect(views[1]!.missingDeliverables).toEqual(["file:/abs/report.md (not readable (ENOENT))"]);
+  });
+
+  it("scriptResult 无 partialMembers 载荷 → 全行无缺口字段（缺省不写词）", () => {
+    const run = makeRun();
+    run.state.scriptResult = { status: "ok", results: [] };
+    const views = runMemberViews(run, {
+      records: [makeRecord({ stepIndex: 0, outcome: "completed", endedAt: T0 + 1_000 })],
+      now: NOW,
+    });
+    expect("missingDeliverables" in views[0]!).toBe(false);
+  });
+});
+
+describe("memberViewLine — 失败分类 / budget 上界 / 交付缺口渲染段（§3.3.6 成员行对齐）", () => {
+  it("failed 行缀 failure 点拼段 + error 尾缀；无失败事实行不产 failure 段", () => {
+    const withFailure = memberViewLine({
+      stepIndex: 1,
+      state: "failed",
+      agent: "explorer",
+      model: "m",
+      durationMs: 5_100,
+      failure: "provider.rate_limited",
+      lastError: "Request timed out.",
+    });
+    expect(withFailure).toContain("failure: provider.rate_limited");
+    expect(withFailure.endsWith("error: Request timed out.")).toBe(true);
+
+    const noFailure = memberViewLine({
+      stepIndex: 2,
+      state: "completed",
+      agent: "writer",
+      model: "m",
+      durationMs: 1_000,
+    });
+    expect(noFailure).not.toContain("failure:");
+  });
+
+  it("budget 段只渲染声明了生效上界的轴；全无界行与缺 budget 字段行不产段", () => {
+    const bounded = memberViewLine({
+      stepIndex: 0,
+      state: "running",
+      agent: "writer",
+      model: "m",
+      budget: { maxTurns: 5, timeoutMs: null, budgetTokens: 1000, budgetTimeMs: null },
+    });
+    expect(bounded).toContain("budget: maxTurns=5 budgetTokens=1000");
+
+    const unbounded = memberViewLine({
+      stepIndex: 0,
+      state: "running",
+      agent: "writer",
+      model: "m",
+      budget: { maxTurns: null, timeoutMs: null, budgetTokens: null, budgetTimeMs: null },
+    });
+    expect(unbounded).not.toContain("budget:");
+
+    const noBudgetField = memberViewLine({
+      stepIndex: 0,
+      state: "running",
+      agent: "writer",
+      model: "m",
+    });
+    expect(noBudgetField).not.toContain("budget:");
+  });
+
+  it("部分交付成员行缀 deliverables 缺口段", () => {
+    const line = memberViewLine({
+      stepIndex: 3,
+      state: "completed",
+      agent: "writer",
+      model: "m",
+      durationMs: 2_000,
+      missingDeliverables: ["file:/abs/a.md", "structured_output"],
+    });
+    expect(line).toContain("deliverables: 2 missing");
   });
 });
 

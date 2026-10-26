@@ -5,6 +5,8 @@
 //   - 投递生命周期（port.deliver 受理 / 回执 / 降级直发）/ content 分支矩阵全文锚定（主体）
 //   - 终局载荷 D7（三态 outcome + resultSummary/errorCode + 产物与 journal 指针）
 //     ← workflow-notify-notify-payload.test.ts
+//   - 成员结算明细透传（[subagent-observability §3.3.8]：Agent Trace 行结清事实
+//     + details 明细数组 + 帧→settledRecordOf→notifyDone 全链用例）
 //   - bounded 序列化等价锚定 + 截断边界 ← workflow-notify-bounded-serialize.test.ts
 //   - GUI 协议 + trackNotifiedRunId 有界 FIFO ← workflow-notify-gui.test.ts
 //   - stale ctx 检查（notifyDone 降级直发分支）← notify-stale-guard.test.ts
@@ -36,7 +38,8 @@
 // 顺序——port 路径用例注入后，降级直发 / GUI / stale / bounded 用例恒从缺席
 // 状态起步。
 
-import { readFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import * as os from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -44,6 +47,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { STALE_CTX_MARKER } from "@zhushanwen/pi-ext-guards";
+import { RUN_EVENTS_SUFFIX } from "@zhushanwen/subagent-core";
 
 const { loggerFns } = vi.hoisted(() => ({
   loggerFns: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -63,6 +67,8 @@ import {
   trackNotifiedRunId,
   WORKFLOW_DONE_NOTIFY_ID_PREFIX,
 } from "../workflow-notify.ts";
+import { JsonlRunStore, type RunSettlementRecord } from "../jsonl-run-store.ts";
+import { runSettledEffects, type RunSettledEffectsEnv } from "../workflow-events.ts";
 
 // ── 通道词表（extension-protocol SSOT 值的本地镜像；值锚定锁 =
 // contract.notify-custom-types.test.ts） ──────────────────────────
@@ -530,6 +536,113 @@ describe("notifyDone 终局载荷（D7）", () => {
     const summary = (mock.sentMessages[0]!.details as Record<string, unknown>)["resultSummary"] as string;
     expect(summary.length).toBeLessThanOrEqual(600); // 500 + 截断标记余量
     expect(summary).toContain("x");
+  });
+});
+
+// ── 成员结算明细透传（[subagent-observability §3.3.8]）─────────────────────
+//
+// 终局帧携带 failedMembers[].cause（`"<class>.<kind>"` 点拼）/ partialMembers
+// 明细后，通知链两呈现面同帧可见：① Agent Trace 行追加结清事实（failed 成员
+// 点拼 cause、部分交付成员 missing 清单；无明细行字节不变——既有全文锚不受
+// 影响）；② done details 透传明细数组（无明细终局恒缺省，与帧缺省形态一致）。
+// 全链用例经真 JsonlRunStore 读 record 流帧走 runSettledEffects 管线——
+// 帧 → settledRecordOf → notifyDone 全链 failedMembers 可见（通知载荷断裂点
+// 回归防线；runSettledEffects 的 settledRecordOf 注入形态由 workflow-events
+// 测试锁定，此处按生产装配形态接线真 store）。
+
+describe("notifyDone — 成员结算明细透传（§3.3.8）", () => {
+  it("Agent Trace 行：failed 成员追加点拼 cause、partial 成员追加 missing 清单，无明细行字节不变", () => {
+    const { pi, sendMessage } = makePi();
+    const run = makeRun({
+      trace: [
+        { stepIndex: 0, agent: "builder", status: "completed" },
+        { stepIndex: 1, agent: "explorer", status: "failed" },
+        { stepIndex: 2, agent: "coder", status: "completed" },
+      ],
+    });
+    const settlement: RunSettlementRecord = {
+      outcome: "partially_succeeded",
+      settledAt: 0,
+      failedMembers: [{ taskIndex: 1, cause: "provider.rate_limited" }],
+      partialMembers: [{ taskIndex: 2, missing: ["report.md", "data.json"] }],
+    };
+
+    notifyDone(pi, "wf-members-trace", runAsParam(run), new Set(), undefined, settlement);
+
+    const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
+    expect(msg.content).toContain("[1] explorer: failed (provider.rate_limited)");
+    expect(msg.content).toContain("[2] coder: completed (partial: missing report.md, data.json)");
+    // 无成员明细的 trace 行不带后缀（既有形态逐字节不变）
+    expect(msg.content).toContain("[0] builder: completed\n");
+  });
+
+  it("done details：failedMembers/partialMembers 帧同源透传；无明细终局两字段缺省", () => {
+    const { pi, sendMessage } = makePi();
+    const run = makeRun();
+    const settlement: RunSettlementRecord = {
+      outcome: "partially_succeeded",
+      settledAt: 0,
+      failedMembers: [{ taskIndex: 1, cause: "harness.turn_budget_exhausted" }],
+      partialMembers: [{ taskIndex: 0, missing: ["a.txt"] }],
+    };
+
+    notifyDone(pi, "wf-members-details", runAsParam(run), new Set(), undefined, settlement);
+    const details = sentDetails(sendMessage) as Record<string, unknown>;
+    expect(details["failedMembers"]).toEqual([{ taskIndex: 1, cause: "harness.turn_budget_exhausted" }]);
+    expect(details["partialMembers"]).toEqual([{ taskIndex: 0, missing: ["a.txt"] }]);
+
+    const bare = makePi();
+    notifyDone(bare.pi, "wf-members-bare", runAsParam(run), new Set(), undefined, settlementFor("completed"));
+    const bareDetails = sentDetails(bare.sendMessage) as Record<string, unknown>;
+    expect(bareDetails["failedMembers"]).toBeUndefined();
+    expect(bareDetails["partialMembers"]).toBeUndefined();
+  });
+
+  it("全链：record 流 run-settled 帧含成员明细 → JsonlRunStore.settledRecordOf → runSettledEffects 通知载荷可见", async () => {
+    const runsDir = mkdtempSync(join(os.tmpdir(), "wf-members-chain-"));
+    try {
+      const store = new JsonlRunStore({ runsDir });
+      const runId = "wf-members-chain";
+      appendFileSync(
+        join(runsDir, `${runId}${RUN_EVENTS_SUFFIX}`),
+        `${JSON.stringify({
+          type: "run-settled",
+          seq: 1,
+          ts: Date.now() - 100,
+          outcome: "partially_succeeded",
+          artifactsDir: runsDir,
+          failedMembers: [{ taskIndex: 1, cause: "provider.rate_limited" }],
+          partialMembers: [{ taskIndex: 2, missing: ["report.md"] }],
+        })}\n`,
+        "utf8",
+      );
+
+      const { pi, sendMessage } = makePi();
+      const env: RunSettledEffectsEnv = {
+        resolvePi: () => pi,
+        notifiedRunIds: new Set(),
+        state: { runsDir, runs: new Map() },
+        settledRecordOf: (id) => store.settledRecordOf(id),
+        lsRef: { lastSessionId: "sess-members" },
+      };
+      // runId 是 runSettledEffects 的 settlement 查询键（须与 record 流文件名一致）——
+      // 本文件 makeRun 的 RunMock 不含 runId，此处显式补齐。
+      const run = {
+        ...makeRun({ trace: [{ stepIndex: 1, agent: "explorer", status: "failed" }] }),
+        runId,
+      };
+
+      runSettledEffects(env, run as never);
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      const [msg] = sendMessage.mock.calls[0] as [{ details: Record<string, unknown>; content: string }];
+      expect(msg.details["failedMembers"]).toEqual([{ taskIndex: 1, cause: "provider.rate_limited" }]);
+      expect(msg.details["partialMembers"]).toEqual([{ taskIndex: 2, missing: ["report.md"] }]);
+      expect(msg.content).toContain("[1] explorer: failed (provider.rate_limited)");
+      await store.dispose();
+    } finally {
+      rmSync(runsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
   });
 });
 

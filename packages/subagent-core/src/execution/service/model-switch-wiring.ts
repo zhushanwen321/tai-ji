@@ -4,15 +4,14 @@
 // subagent-service.setModel deps 闭包；实现独立成文件 = 壳装配段保持单行委托，
 // 编排本体 model-switch.ts 只依赖注入范围不持有装配实现）。
 //
-//   - assertRunNotTerminalForSwitch：run 非终局判定（§7.2 步骤①附加校验）——run
-//     registry fold 终局唯一权威；
+//   - assertRunNotTerminalForSwitch：run 非终局判定（§7.2 步骤①附加校验）——直读
+//     run-settled 帧判终局（findRunSettledEvent 具名单点）；
 //   - listAcceptedMemberRunIdsForSwitch：已受理成员清单（§7.4 全量切走的转发）；
 //   - resolveMemberEnginePortForSwitch：成员到引擎的转发（U5 ResolveMemberEnginePort
 //     生产实装）——与派发链同一裁决单点与窗口实例解析。
 
 import type { RecordStore } from "../persistence/record-store.ts";
-import { scanRunEvents } from "../persistence/run-event-journal.ts";
-import { projectRunRegistryEvents } from "../../orchestration/run-registry.ts";
+import { findRunSettledEvent, scanRunEvents } from "../persistence/run-event-journal.ts";
 import type { EnginePort } from "../engine/port.ts";
 import { resolveEngineRouteId } from "../engine/common/session-view-service.ts";
 import { resolveWorkflowWindowEnginePort } from "../engine/routing.ts";
@@ -29,16 +28,19 @@ export const MODEL_SWITCH_MEMBER_LIST_LIMIT = 500;
 
 /**
  * workflow run 非终局检查（§7.2 步骤①附加校验——终局 fail-fast，§7.5「run 已终局」
- * 行）。终局判法 = run 事件流 fold 唯一权威（run-registry 派生视图——record fold 无第二
- * 判据可分叉，run-registry.ts 头注释）；phase=terminal 即拒绝，interrupted（可
- * resume）/ missing 放行。磁盘扫描 IO → async，编排层步骤① await（写入前拦截）。
+ * 行）。终局判法 = 直读 run-settled 帧（findRunSettledEvent 具名单点——不变量
+ * 「终局 ⟺ 事件流存在 run-settled 帧」，转移表构造性保证；run-state-evidence 同款
+ * 直读先例，不经编排层 fold 派生视图）。存在终局帧即拒绝，outcome 从 run-settled
+ * 帧载荷取（与 fold 的 terminalOutcome fromEvent 同源）；无终局帧 = 未终局，
+ * interrupted（可 resume）/ missing 放行。磁盘扫描 IO → async，编排层步骤①
+ * await（写入前拦截）。
  */
 export async function assertRunNotTerminalForSwitch(runId: string): Promise<void> {
   const events = await scanRunEvents(runId);
-  const projection = projectRunRegistryEvents(events, runId);
-  if (projection.phase !== "terminal") return;
+  const settled = findRunSettledEvent(events);
+  if (settled === undefined) return;
   throw new Error(
-    `workflow run 已终局（${projection.state.outcome ?? "settled"}），无后续步骤可应用模型覆盖，` +
+    `workflow run 已终局（${settled.outcome ?? "settled"}），无后续步骤可应用模型覆盖，` +
       `不可切换（runId=${runId}）`,
   );
 }

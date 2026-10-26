@@ -89,7 +89,7 @@ import {
   QUOTA_FLOAT_WIDTH_EXPANDED,
 } from './plan-quota-float'
 import { useQuotaPlanList } from '@/composables/features/model/useQuotaPlanList'
-import { useSessionStore } from '@/stores/session'
+import { useSessionLiveState } from '@/composables/features/session/useSessionLiveState'
 
 const props = defineProps<{
   /** 当前会话（「当前」标记的模型真值来源） */
@@ -104,13 +104,20 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const { entries } = useQuotaPlanList()
-const sessionStore = useSessionStore()
+// 选择器统一：与 composer / 移动壳同源（useSessionLiveState → core createSessionLiveStateSelector）
+const { modelId: currentModelId } = useSessionLiveState(computed(() => props.sessionId))
 
-/** 当前会话生效模型的 providerId（modelId 形如 "provider/model"；无 session/未选模型 → null） */
+/**
+ * 当前会话生效模型的 providerId（modelId 形如 "provider/model"；无 session/未选模型 → null）。
+ *
+ * [W1 会话架构四层分离] 读状态层（按会话 id 寄存），不再读 sessionStore.list 条目——
+ * applySnapshot 已不再写 modelId，列表查找会使本判定恒 null。
+ * 状态尚未观测（undefined）= 显式未知 → null（UI 不标「当前」，禁止猜测）。
+ */
 const currentProviderId = computed<string | null>(() => {
   const sid = props.sessionId
   if (!sid) return null
-  const modelId = sessionStore.list.find((s) => s.id === sid)?.modelId ?? ''
+  const modelId = currentModelId.value ?? ''
   const slash = modelId.indexOf('/')
   return slash > 0 ? modelId.slice(0, slash) : null
 })

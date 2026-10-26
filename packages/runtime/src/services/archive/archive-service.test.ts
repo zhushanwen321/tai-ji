@@ -165,8 +165,6 @@ function summaryOf(sid: string, cwd: string): SessionSummary {
     cwd,
     status: 'idle',
     lastActiveAt: 1,
-    modelId: '',
-    tokenCount: 0,
   }
 }
 
@@ -191,8 +189,8 @@ function scanPersistedSummary(sessionsRoot: string, sid: string): SessionSummary
         cwd: header.cwd,
         status: 'idle',
         lastActiveAt: statSync(filePath).mtimeMs,
-        modelId: '',
-        tokenCount: 0,
+        // W3：磁盘扫描条目显式缺省 surface 'sidebar'（与 scannedToSummary 同口径）
+        surface: 'sidebar',
         source: 'scan',
         sessionFile: filePath,
       }

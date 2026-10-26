@@ -145,6 +145,7 @@
             :status="statusOf(s.id)"
             :child-count="childCountOf(s)"
             :parent-label="parentLabelOf(s)"
+            :handoff-target-label="handoffTargetLabelOf(s)"
             :restored-highlight="s.id === restoredSessionId"
             @select="emit('select', $event)"
             @rename="emit('rename', $event)"
@@ -184,6 +185,7 @@
             :status="statusOf(s.id)"
             :child-count="childCountOf(s)"
             :parent-label="parentLabelOf(s)"
+            :handoff-target-label="handoffTargetLabelOf(s)"
             :restored-highlight="s.id === restoredSessionId"
             @select="emit('select', $event)"
             @rename="emit('rename', $event)"
@@ -236,6 +238,7 @@
                 :status="statusOf(s.id)"
                 :child-count="childCountOf(s)"
                 :parent-label="parentLabelOf(s)"
+                :handoff-target-label="handoffTargetLabelOf(s)"
                 :restored-highlight="s.id === restoredSessionId"
                 @select="emit('select', $event)"
                 @rename="emit('rename', $event)"
@@ -300,6 +303,7 @@
                   :status="statusOf(s.id)"
                   :child-count="childCountOf(s)"
                   :parent-label="parentLabelOf(s)"
+                  :handoff-target-label="handoffTargetLabelOf(s)"
                   :restored-highlight="s.id === restoredSessionId"
                   @select="emit('select', $event)"
                   @rename="emit('rename', $event)"
@@ -435,8 +439,8 @@ function childCountOf(s: SessionSummary): number {
 /**
  * 反查分支 session 的父 session label（P3 修复血缘显示）。
  *
- * SessionItem 模板用 `session.parentLabel || session.parentSession` 展示血缘，本 helper 按
- * session.parentSession 反查父 session，取其 label 注入 parentLabel。
+ * SessionItem 详情卡用 `displaySession.parentLabel || displaySession.parentSession` 展示血缘，
+ * 本 helper 按 session.parentSession 反查父 session，取其 label 注入 parentLabel。
  *
  * 匹配规则（FR-20 双键兜底）：parentSession 可能是父的 sessionFile（活跃 session
  * 落盘路径）或父的 id（源未落盘时用 sessionId 作血缘键），两种 key 取并集保证命中。
@@ -450,6 +454,21 @@ function parentLabelOf(s: SessionSummary): string {
     .flatMap((g) => g.sessions)
     .find((p) => p.sessionFile === s.parentSession || p.id === s.parentSession)
   return parent?.label ?? ''
+}
+
+/**
+ * 反查交接目标的显示名（chat-flow-consistency U9 / S8）：源会话的 handedOffTo 记录目标
+ * session id，按 id 在全量 groups 内反查其 label 注入展示对象（已交接徽标 title 用）。
+ * 目标已删 / 不在列表 → 空串，Display 回退显目标 id 前缀（已发生事实不回滚，徽标照显）。
+ * 与 parentLabelOf 的差异：交接目标是 runtime 新建的独立会话（通常同 cwd 但不限），
+ * 按精确 id 全量查找，无双键兜底需要。
+ */
+function handoffTargetLabelOf(s: SessionSummary): string {
+  if (!s.handedOffTo) return ''
+  const target = props.groups
+    .flatMap((g) => g.sessions)
+    .find((p) => p.id === s.handedOffTo)
+  return target?.label ?? ''
 }
 
 /**

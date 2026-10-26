@@ -2,21 +2,25 @@
  * btw-replay —— btw 重载链 renderer 接线（btw-question D5「持久化 + 重载链」/ M2-c 验收 ③）。
  *
  * 职责（一件事）：**重开线时文件 → chatStore 分区回放**——drawer 选中某条 btw 线时，
- * 经既有回放通路 `chatApi.getHistory(vid)`（session.history，runtime 侧 = getEntries →
+ * 经既有回放通路 `chatApi.getHistory(sessionId)`（session.history，runtime 侧 = getEntries →
  * liftHistoryToEntries → replayEntries 对 pi 会话文件的 applyEntry 派生视图）拉取快照，注入
- * chatStore 的 `btw:` 分区（store.hydrate，内部 mergeBaselineWithLive 保尾部 live 实体）。
+ * chatStore 的线分区（W4a 后键 = 线 pi 真实会话 id；store.hydrate，内部 mergeBaselineWithLive
+ * 保尾部 live 实体）。
  * live ≡ reload 由共用同一 applyEntry reducer 构造性成立（等价性断言见本目录测试
  * btw-replay.test.ts + core apply-entry-equivalence 家族）。
  *
  * 触发范围 = 复合谓词单一源「drawer 开 + btw tab + 选中线」（selection/predicates.ts 的
- * useViewedBtwVid，display-containers §7.1 迁出不变量——与 getViewedVids 的 D5 豁免、
- * useBtwTabData 视口命中同源；selectedBtwVid 唯一源 = BtwPanel setBtwView，M3-a；不设第二副本）：
+ * useViewedBtwSession，display-containers §7.1 迁出不变量——与 getViewedVids 的 D5 豁免、
+ * useBtwTabData 视口命中同源；selectedBtwSessionId 唯一源 = BtwPanel setBtwView，M3-a；
+ * 不设第二副本）：
  * - 重开线（重启后自动选中 / 点 chip / 关 drawer 再开 / 切回焦点会话分区）→ 源值翻转即回放；
  * - 已 hydrate → 早退（幂等，关开 drawer 不重复拉取）；被 LRU 驱逐 → hydrated 标记随驱逐
  *   清除 → 再开触发重新回放（文件持久可回填，D5 chat-lru 语义的 renderer 半边）。
+ * W4a 键统一：选中值/分区键 = 线 session id（pi 真实 id）；旧 `btw:` 前缀判别
+ * （isBtwVirtualId）随 vid 退役删除——选中源只产线 id，防御降级为「非空即回放」。
  *
  * 数据源纪律（M2-c 边界）：只走既有 snapshot/history 通路（chatApi.getHistory），不碰
- * transport 层 / 不新增帧（transport 归 M2-b）；快照回写失败 → markHistoryFailed（vid 入
+ * transport 层 / 不新增帧（transport 归 M2-b）；快照回写失败 → markHistoryFailed（线 id 入
  * failedHistory，P2 降级：live 帧仍可填充分区，下次重开触发重试），不拖垮面板。
  *
  * 装配点选 stores/chat.ts（defineStore setup）：watch 绑定 store effect scope，
@@ -24,8 +28,7 @@
  * useBtwTabData 领地（数据编排下沉 composable 归 M3-b，本文件是 chatStore 自身的回放接线）。
  */
 import { watch } from 'vue'
-import { useViewedBtwVid } from '@taiji/core/domain/drawer'
-import { isBtwVirtualId } from '@taiji/shared'
+import { useViewedBtwSession } from '@taiji/core/domain/drawer'
 import {
   collectImagesFromMessages,
   historyWindowFromReply,
@@ -46,49 +49,49 @@ export type BtwReplayTarget = Pick<
 /**
  * 安装重开线回放 watch（stores/chat.ts defineStore setup 内调用一次）。
  *
- * 源 = 复合谓词 useViewedBtwVid（isOpen ∧ activeTab==='btw' ∧ selectedBtwVid，单一拼装点）：
- * 关 drawer / 切走 tab / 清选中折叠为 null，重开/切回/选中翻出 vid——恰好覆盖「重开线」
+ * 源 = 复合谓词 useViewedBtwSession（isOpen ∧ activeTab==='btw' ∧ selectedBtwSessionId，
+ * 单一拼装点）：关 drawer / 切走 tab / 清选中折叠为 null，重开/切回/选中翻出线 id——
+ * 恰好覆盖「重开线」
  * 全部形态（含驱逐后重开：选中值在内容域分区内持久，靠 isOpen 翻转重新触发）。watch 跑在
  * store 的 effect scope 内，$dispose 即停。
  *
- * 在途回放去重 = 本闭包内 Set（复合源在 drawer 状态抖动窗口内可连续翻转，同 vid 只放行
+ * 在途回放去重 = 本闭包内 Set（复合源在 drawer 状态抖动窗口内可连续翻转，同线只放行
  * 一次 getHistory——hydrate 幂等，但重复 RPC 是纯浪费；finally 必清，失败也重试可达）：
  * 随 store 实例隔离，不设模块级可变状态（taste/require-data-owner 面收敛 + 跨 store 隔离）。
  */
 export function setupBtwReplayWatch(store: BtwReplayTarget): void {
   const inflight = new Set<string>()
 
-  /** 单线回放（文件 → 分区）：getHistory(vid) → store.hydrate + 窗口状态 + 图片落盘编排。 */
-  async function replay(vid: string): Promise<void> {
-    if (!isBtwVirtualId(vid)) return // 防御：选中源只产 btw vid，异常值不发 RPC
-    if (store.isHydrated(vid)) return // 已回放（关开 drawer / 重复选中幂等）
-    if (inflight.has(vid)) return // 同 vid 在途去重
-    inflight.add(vid)
+  /** 单线回放（文件 → 分区）：getHistory(sessionId) → store.hydrate + 窗口状态 + 图片落盘编排。 */
+  async function replay(sessionId: string): Promise<void> {
+    if (store.isHydrated(sessionId)) return // 已回放（关开 drawer / 重复选中幂等）
+    if (inflight.has(sessionId)) return // 同线在途去重
+    inflight.add(sessionId)
     try {
-      const reply = await chatApi.getHistory(vid)
+      const reply = await chatApi.getHistory(sessionId)
       // 空历史可观测（G4 重载缺陷修复的 renderer 半边）：hydrate 层空历史与真实空线不可
       // 区分，runtime 返回空 = 线从未 flush 或线文件缺失（异常态，runtime 侧同点另有含
       // 期望路径的 warn）。轻量 console.warn，不做 UI 错误条——live 帧仍可填充分区。
       if (reply.messages.length === 0) {
-        console.warn(`[btw-replay] empty history replayed for ${vid} — line has no persisted content (never flushed) or session file missing`)
+        console.warn(`[btw-replay] empty history replayed for ${sessionId} — line has no persisted content (never flushed) or session file missing`)
       }
-      store.hydrate(vid, reply.messages, historyWindowFromReply(reply))
-      store.clearHistoryError(vid)
+      store.hydrate(sessionId, reply.messages, historyWindowFromReply(reply))
+      store.clearHistoryError(sessionId)
       // toolResult 图片落盘编排（fire-and-forget，headless 无 write port 时内部 no-op）。
       // 编排对齐 core useChat.hydrateHistory / use-session.reconcileFromReply 两通路同款三件
       // （Gate B A9③ 缺陷#2：历史注入通路漏挂图片落盘即旁路，此处照挂）。
-      void persistImagesNewestFirst(vid, collectImagesFromMessages(reply.messages))
+      void persistImagesNewestFirst(sessionId, collectImagesFromMessages(reply.messages))
     } catch (e) {
-      // P2 降级：回放失败不写分区（live 帧仍可填充），vid 入 failedHistory 留重试面；
+      // P2 降级：回放失败不写分区（live 帧仍可填充），线 id 入 failedHistory 留重试面；
       // 下次重开源值翻转（关→开 / 切回）时 hydrated=false → 自动重试。
-      console.warn(`[btw-replay] history replay failed for ${vid}:`, e)
-      store.markHistoryFailed(vid)
+      console.warn(`[btw-replay] history replay failed for ${sessionId}:`, e)
+      store.markHistoryFailed(sessionId)
     } finally {
-      inflight.delete(vid)
+      inflight.delete(sessionId)
     }
   }
 
-  watch(useViewedBtwVid(), (vid) => {
-    if (vid) void replay(vid)
+  watch(useViewedBtwSession(), (sessionId) => {
+    if (sessionId) void replay(sessionId)
   })
 }

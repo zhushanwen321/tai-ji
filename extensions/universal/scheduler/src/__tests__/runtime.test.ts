@@ -100,16 +100,19 @@ describe('SchedulerRuntime', () => {
   })
 
   describe('dispatchTask', () => {
-    // steer 直投模型（scheduler-steer-direct-dispatch）：全任务统一 backend.sendMessage 直投，
+    // steer 直投模型（scheduler-steer-direct-dispatch + unified-delivery 迁移）：全任务统一
+    // backend.deliverDispatch 投递（生产实现经投递端口，注入参数与直发逐字一致），
     // 受理即记账；runtime 层无 idle/busy 判定（pi 侧 steer 分支处理）、无 delivery 内核。
 
-    it('dispatches task via direct send', async () => {
+    it('dispatches task via delivery port path', async () => {
       const task = await runtime.addTask('test', { mode: 'interval', intervalMs: 60000 })
       await runtime.dispatchTask(task)
       expect(backend.sentMessages).toHaveLength(1)
       expect(backend.sentMessages[0]!.msg).toEqual(expect.objectContaining({ content: 'test', customType: 'pi-scheduler:dispatched' }))
-      // steer 直投契约（runtime.ts sendMessage 第二参）：丢 opts = pi idle 时定时任务静默不开轮次
+      // steer 直投契约（deliverDispatch 注入参数逐字一致）：丢 opts = pi idle 时定时任务静默不开轮次
       expect(backend.sentMessages[0]!.opts).toEqual({ deliverAs: 'steer', triggerTurn: true })
+      // 幂等键形态（unified-delivery 迁移）：`${taskId}:${epoch}`
+      expect(backend.sentMessages[0]!.idempotencyKey).toMatch(new RegExp(`^${task.id}:\\d+`))
     })
 
     it('skips disabled task', async () => {
@@ -119,10 +122,10 @@ describe('SchedulerRuntime', () => {
       expect(backend.sentMessages).toHaveLength(0)
     })
 
-    it('sendMessage 失败 → 记 failed 状态但不 rethrow', async () => {
+    it('deliverDispatch 拒收（端口 rejected）→ 记 failed 状态但不 rethrow', async () => {
       const task = await runtime.addTask('test', { mode: 'interval', intervalMs: 60000 })
-      // backend.sendMessage 抛错模拟注入失败
-      backend.sendMessage = async () => { throw new Error('inject failed') }
+      // backend.deliverDispatch 抛错模拟端口拒收（persist-failed / disposed）
+      backend.deliverDispatch = async () => { throw new Error('rejected by delivery port') }
       const dispatched = await runtime.dispatchTask(task)
       expect(dispatched).toBe(false)
       expect(task.lastStatus).toBe('failed')
@@ -135,6 +138,45 @@ describe('SchedulerRuntime', () => {
       task.lastError = 'cron expression invalid'
       await runtime.dispatchTask(task)
       expect(task.lastError).toBeUndefined()
+    })
+
+    // ── 幂等键每轮唯一（unified-delivery 迁移，2026-10-25 裁决）──
+    // 恒定 taskId 会被投递端口按终局条目永久判重吞掉（第二轮起 swallowed → 任务
+    // 永不再提醒）；键 = `${taskId}:${epoch}`，epoch 事实源见 nextDispatchEpoch 注释。
+
+    it('幂等键跨轮唯一：同 taskId 两轮 dispatch（固定时钟不推进）键仍不同', async () => {
+      // 固定时钟（backend.now 恒定）是最严苛形态：时间戳基底相同，唯一性由同毫秒
+      // 序号补齐——两轮键必不同；端口侧「不同键各自注入 / 同键被吞」对照锁见
+      // backend-delivery.test.ts
+      const task = await runtime.addTask('repeat', { mode: 'interval', intervalMs: 60000 })
+      await runtime.dispatchTask(task)
+      await runtime.dispatchTask(task)
+      expect(task.runCount).toBe(2)
+
+      const keys = backend.sentMessages.map(m => m.idempotencyKey)
+      expect(keys).toHaveLength(2)
+      for (const key of keys) expect(key).toMatch(new RegExp(`^${task.id}:\\d+`))
+      expect(keys[0]).not.toBe(keys[1])
+    })
+
+    it('failed 重试轮幂等键不复用上轮（上轮 discard 终局不吞重试）', async () => {
+      const task = await runtime.addTask('retry', { mode: 'interval', intervalMs: 60000 })
+      const keys: string[] = []
+      backend.deliverDispatch = vi.fn(async (_msg, _opts, key: string) => {
+        keys.push(key)
+        if (keys.length === 1) throw new Error('rejected by delivery port')
+      })
+
+      // 第一轮拒收 → failed 记账；nextRunAt 未推进，重置到期后下 tick 重试
+      expect(await runtime.dispatchTask(task)).toBe(false)
+      expect(task.lastStatus).toBe('failed')
+      task.nextRunAt = 0
+      await runtime.tickScheduler()
+      expect(task.lastStatus).toBe('success')
+
+      expect(keys).toHaveLength(2)
+      expect(keys[0]).not.toBe(keys[1])
+      for (const key of keys) expect(key).toMatch(new RegExp(`^${task.id}:\\d+`))
     })
   })
 
@@ -155,31 +197,31 @@ describe('SchedulerRuntime', () => {
       vi.useRealTimers()
     })
 
-    it('sendMessage 挂起期间下一 tick 同任务被跳过：不双注入、warn in-flight、完成后 runCount=1', async () => {
+    it('deliverDispatch 挂起期间下一 tick 同任务被跳过：不双注入、warn in-flight、完成后 runCount=1', async () => {
       loggerMock.warn.mockClear()
       let resolveSend: (() => void) | undefined
       const sendPromise = new Promise<void>(resolve => { resolveSend = resolve })
-      backend.sendMessage = vi.fn(() => sendPromise)
+      backend.deliverDispatch = vi.fn(() => sendPromise)
 
       const task = await runtime.addTask('in-flight', { mode: 'interval', intervalMs: 60000 })
       task.nextRunAt = Date.now() - 1000
 
-      // tick1：dispatch 进入 sendMessage 挂起（同步段已置 in-flight 标记）
+      // tick1：dispatch 进入 deliverDispatch 挂起（同步段已置 in-flight 标记）
       const tick1 = runtime.tickScheduler()
-      expect(backend.sendMessage).toHaveBeenCalledTimes(1)
+      expect(backend.deliverDispatch).toHaveBeenCalledTimes(1)
       expect(task.pending).toBe(true) // dispatch 未完成，pending 未清
 
       // tick2（模拟 30s 后 pi 仍卡死）：同任务再标 pending → step3 dispatchTask 命中
       // in-flight 检查 → skip + warn（修复前：同一 prompt 双注入）
       await runtime.tickScheduler()
-      expect(backend.sendMessage).toHaveBeenCalledTimes(1)
+      expect(backend.deliverDispatch).toHaveBeenCalledTimes(1)
       const warnText = loggerMock.warn.mock.calls.map(c => String(c[0])).join('\n')
       expect(warnText).toContain('already in flight')
 
-      // 放行挂起的 sendMessage：tick1 正常收尾（状态推进恰好一次）
+      // 放行挂起的 deliverDispatch：tick1 正常收尾（状态推进恰好一次）
       resolveSend!()
       await tick1
-      expect(backend.sendMessage).toHaveBeenCalledTimes(1)
+      expect(backend.deliverDispatch).toHaveBeenCalledTimes(1)
       expect(task.runCount).toBe(1)
       expect(task.pending).toBe(false)
     })
@@ -187,7 +229,7 @@ describe('SchedulerRuntime', () => {
     it('挂起 dispatch 只挡同任务：其他任务在下一 tick 正常 dispatch 不受影响', async () => {
       let resolveSend: (() => void) | undefined
       const sendPromise = new Promise<void>(resolve => { resolveSend = resolve })
-      backend.sendMessage = vi.fn(() => sendPromise)
+      backend.deliverDispatch = vi.fn(() => sendPromise)
 
       const task1 = await runtime.addTask('first', { mode: 'interval', intervalMs: 60000 })
       const task2 = await runtime.addTask('second', { mode: 'interval', intervalMs: 60000 })
@@ -196,15 +238,15 @@ describe('SchedulerRuntime', () => {
 
       // tick1：task1 dispatch 挂起（step3 顺序 await，task2 尚未轮到）
       const tick1 = runtime.tickScheduler()
-      expect(backend.sendMessage).toHaveBeenCalledTimes(1)
+      expect(backend.deliverDispatch).toHaveBeenCalledTimes(1)
 
       // tick2：task1 命中检查跳过，task2 无在途 → 正常 dispatch（检查按 taskId 粒度隔离）。
       // 注：tick2 挂起在 task1 的 await dispatchTask（检查命中即 resolved promise）与 task2
-      // 的 await sendMessage 上，先放行再 await，完成态统一断言
+      // 的 await deliverDispatch 上，先放行再 await，完成态统一断言
       const tick2 = runtime.tickScheduler()
       resolveSend!()
       await Promise.all([tick1, tick2])
-      expect(backend.sendMessage).toHaveBeenCalledTimes(2)
+      expect(backend.deliverDispatch).toHaveBeenCalledTimes(2)
       expect(task1.runCount).toBe(1)
       expect(task2.runCount).toBe(1)
     })
@@ -212,16 +254,16 @@ describe('SchedulerRuntime', () => {
     // ── 调用方 API 层 ──
     it('调用方检查：同一 taskId 并发 dispatchTask → 第二次被拦截（send 只调 1 次 + warn）', async () => {
       loggerMock.warn.mockClear()
-      // 可控延迟的 sendMessage：让第一次 dispatch 挂起
+      // 可控延迟的 deliverDispatch：让第一次 dispatch 挂起
       let resolveSend: (() => void) | undefined
       const sendPromise = new Promise<void>(resolve => { resolveSend = resolve })
-      backend.sendMessage = vi.fn(() => sendPromise)
+      backend.deliverDispatch = vi.fn(() => sendPromise)
 
       const task = await runtime.addTask('inflight-test', { mode: 'interval', intervalMs: 60_000 })
 
-      // 第一次 dispatch（挂起），sendMessage 被调 1 次
+      // 第一次 dispatch（挂起），deliverDispatch 被调 1 次
       const first = runtime.dispatchTask(task)
-      expect(backend.sendMessage).toHaveBeenCalledTimes(1)
+      expect(backend.deliverDispatch).toHaveBeenCalledTimes(1)
 
       // 第二次 dispatch（同一 taskId，在途被拦截）
       const second = await runtime.dispatchTask(task)
@@ -231,8 +273,8 @@ describe('SchedulerRuntime', () => {
       const warnText = loggerMock.warn.mock.calls.map(c => String(c[0])).join('\n')
       expect(warnText).toContain('already in flight')
 
-      // sendMessage 仍只有 1 次（拦截有效）
-      expect(backend.sendMessage).toHaveBeenCalledTimes(1)
+      // deliverDispatch 仍只有 1 次（拦截有效）
+      expect(backend.deliverDispatch).toHaveBeenCalledTimes(1)
 
       // 放行第一次 dispatch
       resolveSend!()
@@ -253,13 +295,13 @@ describe('SchedulerRuntime', () => {
       const second = await runtime.dispatchTask(task)
       expect(second).toBe(true)
 
-      // send 被调 2 次（串行完成）
+      // deliver 被调 2 次（串行完成）
       expect(backend.sentMessages).toHaveLength(2)
     })
   })
 
   // ── M10b：rate-limit ──
-  // dispatchTask 受 RATE_LIMIT_PER_MINUTE=6 限制。前 6 次成功（sendMessage 被调），
+  // dispatchTask 受 RATE_LIMIT_PER_MINUTE=6 限制。前 6 次成功（deliverDispatch 被调），
   // 第 7 次被 hasDispatchCapacity 拒绝（dispatchTimestamps.length 已达 6）。
   describe('rate-limit', () => {
     beforeEach(() => {
@@ -283,7 +325,7 @@ describe('SchedulerRuntime', () => {
         await runtime.dispatchTask(task)
       }
 
-      // 前 6 次成功，第 7 次被限流：sendMessage 只被调 6 次
+      // 前 6 次成功，第 7 次被限流：deliver 只被调 6 次
       expect(backend.sentMessages).toHaveLength(6)
     })
 
@@ -357,7 +399,7 @@ describe('SchedulerRuntime', () => {
     // ── TC1：cron 失效任务不死循环 ──
     // tick1 dispatch 成功、重算 nextRunAt 失败停用；tick2/3 因 enabled=false 不再 dispatch。
     // 旧实现 `?? Date.now()` 会把 nextRunAt 设为 now → 每 tick 立即重触发 → 死循环。
-    it('TC1: cron 失效任务不死循环（sendMessage 只触发 1 次）', async () => {
+    it('TC1: cron 失效任务不死循环（dispatch 只触发 1 次）', async () => {
       const task = await runtime.addTask('tick me', { mode: 'cron', cronExpression: '*/10 * * * *' })
       // 手动把 cron 表达式改为无效（模拟表达式随环境失效），并使任务到期
       task.schedule = { mode: 'cron', cronExpression: 'invalid * *' }

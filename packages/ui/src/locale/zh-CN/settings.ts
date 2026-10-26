@@ -507,7 +507,6 @@ export default {
     // D1（§6.2）字段级提示：显式白名单三键（'type' 走 D8 分支不配文案，见 §7.4）
     quotaMissingCookie: '这里必须填 —— 该平台的额度接口只认 Cookie，没有继承路径',
     quotaMissingApiKey: '这里必须填 —— 已选择「用专属 Key」，但还没有可用的 Key',
-    quotaMissingWorkspace: '这里必须填 —— 额度挂在具体 workspace 下，同一个 Cookie 可能对应多个',
     quotaSaveAndTestFail: '保存并测试失败',
     // A2-4 失败态文案（reason 透传后的恢复指引，Phase B 渲染）。
     // 动作必须指向本屏真实存在的控件（§5.2 路径 3）：设置页区块内只有「保存并测试」，
@@ -529,12 +528,11 @@ export default {
     quotaFetchFailNoCredential: '额度查询失败：未找到可用凭证。请在上方「凭据」区填写 API Key，或在此填写专属 API Key',
     // §5.2 路径 4 cookie 变体（幽灵态：cookieSet=true 但 secrets 缺失，只能重贴 Cookie 恢复）
     quotaFetchFailNoCredentialCookie: '额度查询失败：未找到可用凭证。请在下方重新粘贴该平台的 Cookie 后重试',
-    // Workspace 地址（资源维度 fetcher 如 opencode-go，D1-1）
-    quotaWorkspaceLabel: 'Workspace 地址',
-    quotaWorkspacePlaceholder: '粘贴 workspace 页 URL 或 wrk_ id',
-    quotaWorkspaceHelp: '打开 opencode.ai 控制台进入你的 workspace，从浏览器地址栏复制页面 URL（形如 https://opencode.ai/workspace/wrk_xxx/go）',
-    quotaWorkspaceRequired: '请先输入 Workspace 地址',
-    quotaWorkspaceInvalid: 'Workspace 地址无效：请粘贴 opencode.ai 的 workspace 页 URL（形如 https://opencode.ai/workspace/wrk_xxx/go）或裸 wrk_ id',
+    // 用户维度参数（2026-10 泛化，原 quotaWorkspace 五键）：标签/占位/说明移入 preset 的
+    // param spec（逐平台不同，见 QUOTA_PRESETS.params）；此处只留通用校验与缺口文案
+    quotaParamRequired: '请先填写必填参数',
+    quotaParamInvalid: '参数无效：请检查输入格式',
+    quotaMissingParam: '参数未填写',
     // B-3 失败态旧缓存折叠入口（design §3.4 展示语义）
     quotaLastSuccessToggle: '查看上次成功数据',
     quotaLastSuccessAt: '数据截至 {time}',
@@ -734,6 +732,34 @@ export default {
     llmRetryUnitMs: '毫秒',
     llmRetryEmptyAsZero: '留空 = 0',
     llmRetryTimeoutPlaceholder: '留空 = 跟随全局',
+    // ── 重试规则（SystemRetryRulesSection，subagent-observability §3.3.12）──
+    retryRulesTitle: '可重试错误规则',
+    retryRulesDesc: '限流类 provider 错误自动进入 pi 原生重试循环；规则分内置预设（远程热更新）与自定义两层，判定先排除不可重试项再按自定义 > 远程 > 内置放行',
+    retryRulesBuiltinToggle: '内置预设（{n} 条）',
+    retryRulesBuiltinEmpty: '暂无内置预设',
+    retryRulesCustomHint: '命中的错误按裁决处理：retryable 追加可重试标记触发重试；non_retryable / conditional 本机制不改写该类错误（不自动追加标记，pi 自身的重试行为不受影响——展示口径见等待提示）',
+    retryRulesAddRule: '添加规则',
+    retryRulesRemove: '移除',
+    retryRulesNamePlaceholder: '规则名称',
+    retryRulesIdPlaceholder: '规则 ID（如 my-provider-1302）',
+    retryRulesVerdictLabel: '裁决',
+    retryRulesMatchKindLabel: '匹配方式',
+    retryRulesMatchPattern: '正则（错误文本）',
+    retryRulesMatchJsonPath: 'JSON 路径（错误 body）',
+    retryRulesPatternPlaceholder: '正则表达式，如 tier_limit_exceeded',
+    retryRulesPathPlaceholder: '点路径，如 error.code',
+    retryRulesOperatorLabel: '比较',
+    retryRulesValuePlaceholder: '比较值，如 1302',
+    retryRulesWaitHintPlaceholder: '等待提示（可选，仅展示）',
+    retryRulesMultiMatchLocked: '多条件规则请直接编辑配置文件，本行编辑已锁定以防丢失条件',
+    retryRulesSave: '保存规则',
+    retryRulesSavedToast: '重试规则已保存，下一轮判定生效',
+    retryRulesSaveFailed: '保存失败，请重试',
+    retryRulesInvalidInput: '规则校验未通过：{error}',
+    retryRulesDisableHint: '停用自动重试 = 关闭上方「LLM 调用」卡的自动重试开关，或将重试次数上限置 0——关闭后规则改写不再触发任何重试，失败按实际原因如实记录',
+    retryRulesSourceBuiltin: '内置',
+    retryRulesSourceRemote: '远程',
+    retryRulesSourceCustom: '自定义',
     // ── Code Mode（脚本模式）（codemode 设计 D3，SystemCodemodeSection）──
     codemodeTitle: 'Code Mode（脚本模式）',
     codemodeEnable: '启用 Code Mode',

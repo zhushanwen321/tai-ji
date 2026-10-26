@@ -23,8 +23,8 @@ import { basename } from 'node:path'
 import { existsSync, unlinkSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import type { SessionSummary, BatchDeleteResult, ServerMessage } from '@taiji/shared'
-import { BUILTIN_PRESET_IDS, isBtwVirtualId } from '@taiji/shared'
+import type { SessionSummary, BatchDeleteResult, ServerMessage, SessionSurface } from '@taiji/shared'
+import { BUILTIN_PRESET_IDS } from '@taiji/shared'
 // 缺省 clientUuid 生成走 core 唯一入口（禁直调 crypto.randomUUID，secure context/Node 版本防御）
 import { randomUuid } from '@taiji/core/utils/random-uuid'
 // session 存储树根（`<dataDir>/ext-sessions`，D5 整树软删的目标树父目录）
@@ -51,12 +51,13 @@ import type { PresetResolution } from '../preset-service.js'
 import type { IConfigStore } from '../ports/config.js'
 import type { ISessionStore } from '../ports/session.js'
 import type { WorkspaceService } from '../workspace/workspace-service.js'
-import { toErrorMessage, errorWithCode, MODEL_NOT_CONFIGURED, SESSION_NOT_FOUND } from '../../utils/errors.js'
+import { toErrorMessage, errorCodeOf, errorWithCode, MODEL_NOT_CONFIGURED, SESSION_NOT_FOUND } from '../../utils/errors.js'
 import { createForkedSessionFile, resolveEntryIdByTimestamp } from './session-fork.js'
-// session-dead-structural-fixes D2/D4：转移原语（宣告帧 announce-idle 行）+ userStopped 门面
+// session-dead-structural-fixes D2/D4：occupancy 宣告原语 + userStopped 门面
 //（restore 标记检测 / delete 清理 / 收敛环）。event-interpreter 是唯一无环的兄弟依赖方向
 //（session-service 值导入本文件与本文件引用的两者，反向 import 成环）。
-import { applySessionOccupancyTransition, userStoppedGate } from './event-interpreter.js'
+import { announceSessionOccupancy, userStoppedGate } from './event-interpreter.js'
+import { isGeneratingTurn } from './types.js'
 // restore 附着辅助（F2/F3 归一化 + U2/D1 生效值播种 + get_state 共用解析）——
 // 自本文件迁出（max-lines 行数合规），函数体逐字节等价，见 restore-seeding.ts。
 import { normalizeInactiveSessionFileIfNeeded, readEffectiveModelFromState, seedRestoreMetaOverride } from './restore-seeding.js'
@@ -176,7 +177,14 @@ export function getMigrationGate(): Promise<unknown> {
 
 /** create options 形状（create() 公共签名与本文件 helper 签名共用，字段 doc 为权威）。 */
 interface CreateOptions {
-  hidden?: boolean
+  /**
+   * 展示归属（surface）：'sidebar'（缺省）= 进左侧边栏的主会话；'btw' = 进右侧抽屉的
+   * 旁路提问线。经 registerCreateSession 透传到 registerSession 尾部参数（缺省
+   * 'sidebar'），供 W5 工作区历史判据（本文件 createNew 内 registerSession 之后读
+   * 注册后记录 lifecycle.get(id).surface）取值。生产 create 路径永不传（协议无
+   * surface 入参），btw 线不经 createNew（走 BtwService 直注册）。
+   */
+  surface?: SessionSurface
   /** Launch preset id（设计文档 §5，绑定到新 session 并解析为 pi 启动参数）。 */
   presetId?: string
   /** 归属 project id（D14 语义修正，2026-08-04）：创建时归属当前 activeProject；空 = 默认项目兜底。 */
@@ -288,21 +296,26 @@ function resolveCreateEffectiveThinkingLevel(
 
 /**
  * [M4-a / btw-question D4 消费面① + D9④] btw 级联操作注入面（组合根在 BtwService 构造后
- * 经 setBtwCascadeOps 注入；结构化窄依赖 = BtwService 的 closeLine / closeAllForMain 两原语
- * 结构性满足，测试注入 fake / 置 null 复位）。
+ * 经 setBtwCascadeOps 注入；结构化窄依赖 = BtwService 的 closeLine / closeAllForMain /
+ * getLine 三原语结构性满足，测试注入 fake / 置 null 复位）。
  *
- * 三路并发收敛单入口 = closeLine（本模块的 delete 对 btw vid 直删、deleteByCwd 批内连带、
+ * 三路并发收敛单入口 = closeLine（本模块的 delete 对 btw 线直删、deleteByCwd 批内连带、
  * 主删级联经 closeAllForMain 逐线转调——三条路都落到同一原语，删除/abort 幂等由其保证）。
+ *
+ * W4a 键统一：入参全部为线 session id（= piSessionId，registry 键）；getLine 兼作
+ * 「是否 btw 线」的成员查询判别器（替代 isBtwVirtualId 前缀判别，设计 §3.3.6 迁移表）。
  */
 export interface BtwCascadeOps {
   /** 关单线（btw.remove 同一原语）：杀进程 + 注册表移除 +（可选）删线文件；未知线返 false。 */
-  closeLine(vid: string, opts?: { deleteSessionFile?: boolean }): Promise<boolean>
+  closeLine(sessionId: string, opts?: { deleteSessionFile?: boolean }): Promise<boolean>
   /**
    * 主删级联：关主会话名下全部线 + 删 `btw/<encodeCwd>/<mainSid>/` 线目录（best-effort）。
    * 返回本次快照枚举到的线 sessionId 清单（枚举先于逐线关闭）——delete 编排侧据此
    * 解绑各线画布绑定（解绑规则唯一化：级联真删除的线与主会话同一规则，F1-11）。
    */
   closeAllForMain(mainSid: string, cwd: string): Promise<string[]>
+  /** 成员查询（键 = 线 session id；undefined = 非 btw 线）。W4a 判别器来源。 */
+  getLine(sessionId: string): { mainSid: string } | undefined
 }
 
 /** 级联 ops 槽（模块级单例——对照 inflightMirror / userStoppedGate 先例；null = 未接线零变更）。 */
@@ -376,8 +389,8 @@ export class SessionLifecycle implements ISessionRegistry {
    * 三入口的注册汇聚点：session 对象构造 + sessions.set + onSessionRegistered
    * 同步直发。
    *
-   * hidden 标记隐藏 session。parentSession/forkEntryId 透传 fork 血缘（FR-2 active
-   * 路径回传），存入 session 对象后经 toSummary 输出到 SessionSummary。
+   * parentSession/forkEntryId 透传 fork 血缘（FR-2 active 路径回传），存入 session
+   * 对象后经 toSummary 输出到 SessionSummary。
    *
    * modelOverride：新 session 实际启动模型（"provider/modelId" 格式，已含 C-RL-6
    * 优先级解析）。传入时写入 session.modelId 元数据，让前端 composer chip 正确显示
@@ -389,14 +402,22 @@ export class SessionLifecycle implements ISessionRegistry {
    * / preset 解析结果，D5 ① per-session 可用性判定的输入）。缺省 = 未注入（测试/历史
    * 注册点）。五 spawn 形态（新 session / respawn / reattach / lazy restore / fork）全部
    * 经本汇聚点，injected 随之天然覆盖。
+   *
+   * surface：展示归属（W3 surface 落地）。**尾部追加的可选参数，不动既有 11 个位置
+   * 参数顺序**；缺省 `'sidebar'`（主会话）。btw 直注册链（BtwService → deps.registerSession
+   * → 组合根 adapter → initializeManagedSession → 本方法）三处签名同批扩参，两条注册
+   * 路径显式传 `'btw'`——只改本方法尾部传不到 btw 线。restore / fork 传 undefined
+   * （主会话缺省态）。
    */
   async registerSession(
-    id: string, client: IPiEngine, cwd: string, label: string, sessionFilePath?: string, hidden?: boolean,
+    id: string, client: IPiEngine, cwd: string, label: string, sessionFilePath?: string,
     parentSession?: string, forkEntryId?: string, modelOverride?: string,
     /** U2: restore/create get_state 读回的生效值播种，优先级高于 modelOverride/全局默认。 */
     metaOverride?: { modelId?: string; thinkingLevel?: string },
     /** D5 ①：本次 spawn 的 extension 注入列表（见方法 docstring）。 */
     spawnExtensionPaths?: readonly string[],
+    /** W3：展示归属（缺省 'sidebar'；btw 线显式 'btw'）。 */
+    surface?: SessionSurface,
   ): Promise<IManagedSessionRecord> {
     const send = (msg: ServerMessage) => {
       // wave:perf-w09（02 文档 D1-2）：session 级消息单通道——payload 带 sessionId 的消息
@@ -436,19 +457,21 @@ export class SessionLifecycle implements ISessionRegistry {
       // W10：inputTokens/tokenCount 退化为恒 0 派生基线（types 必填字段保留）——真值由
       // usage 实例快照持有，读点（getInputTokens / toSummary.tokenCount）从实例派生，
       // 任何路径不再直写这两个字段（旧外部 setter / applyContextUpdate 直写已删）。
-      tokenCount: 0, inputTokens: 0, isGenerating: false, isCompacting: false, isBashRunning: false, bashRunToken: undefined,
+      // [chat-flow-consistency D1] 派生三布尔已删（读口 = occupancy 派生），构造点同步收缩。
+      tokenCount: 0, inputTokens: 0, bashRunToken: undefined,
       // occupancy 初值 = 全 idle（session-occupancy-send-closure D3 转移 #10 respawn 衔接）：
       // create/fork/restore（respawn）三入口共用本注册汇聚点，pi 重 spawn 后无活跃 run，
-      // idle 起步成立（与上方三 flag 全 false 同语义）。idle 的 renderer 可观测性由下方
+      // idle 起步成立。idle 的 renderer 可观测性由下方
       // 显式宣告帧保证（写 state 快照 + 重订阅回放），不依赖「无帧 = idle 缺省」假设。
-      occupancy: { turn: 'idle', compacting: false, bash: false },
+      occupancy: { turn: 'idle', compacting: false, bash: false, handingOff: false },
       adapter, sessionFilePath,
-      hidden,
+      // W3 surface 落地：缺省 'sidebar'（主会话）；btw 直注册链显式传 'btw'。
+      surface: surface ?? 'sidebar',
       parentSession,
       forkEntryId,
     }
     this.sessions.set(id, session)
-    // occupancy idle 宣告帧（session-dead-structural-fixes D2：收编为转移原语 announce-idle
+    // occupancy idle 宣告帧（session-dead-structural-fixes D2 收编、chat-flow-consistency D1 起归广播层
     // 行，Gate B V6b 反例修复）：原语对该行合并/派生均为 no-op、跳过全等去重强制广播当前
     // 投影（对象初值即 idle，「转移」的全等去重会短路广播，而本帧职责恰恰是「宣告」），
     // 广播走原语既有 state-topic 通路（实时广播 + 快照写入/重订阅回放双腿随通路保留，
@@ -465,7 +488,7 @@ export class SessionLifecycle implements ISessionRegistry {
     //    restore RPC resolve 之后），无竞态。
     // [合并修正 2026-09] 删除此处我方 crash-resilience 的裸 publish 残留——对方
     // session-dead-structural-fixes D2 已将其收编为下方 applySessionOccupancyTransition
-    // ('announce-idle') 原语行（state-topic 通路双腿：实时广播 + 快照回放），两份并存
+    // 宣告原语（state-topic 通路双腿：实时广播 + 快照回放），两份并存
     // 会双发同一宣告帧（occupancy-runtime registerSession 用例的 publish 次数哨兵拦截）。
     // D5 ① injected 接线（crash-forensics §3.3 D5）：injected = 该 session 装有会上报
     // in-flight 的 extension（subagent-workflow），errsShape 的 absent-report 形态以此
@@ -480,7 +503,8 @@ export class SessionLifecycle implements ISessionRegistry {
       // best-effort 降级：injected 写失败仅退化为 errsShape 判「无在途」（errs-safe 方向），不打断注册主链。
       console.error(`[session-lifecycle] mirror setInjected failed (sessionId=${id}):`, e)
     }
-    applySessionOccupancyTransition(session, this.registerDeps.getMessageBus(), 'announce-idle')
+    // [chat-flow-consistency D1] 宣告事件退出转移词表（宣告语义归广播层原语，不进机器）
+    announceSessionOccupancy(session, this.registerDeps.getMessageBus())
     // 注册事件同步直发（sessions.set 之后——订阅者可经 Registry 读到条目）：S3 期订阅者
     // = Facade（组装根接线），按迁移前体内顺序执行 registerReplicatedStates →
     // ensureRecordEntriesCache → reconciler 对账（fire-and-forget）。
@@ -490,12 +514,15 @@ export class SessionLifecycle implements ISessionRegistry {
     //   ① checkpoint 建档（session-service 的 upsert 挂点）→ **豁免**：本点采用「写-撤销」
     //      等价形态——upsert 在上方 emit 内同步发生，随后 removeSession 即达「从未建档」的
     //      post-condition（单线程同步序；崩溃恰落两调用之间的最坏后果 = 维持豁免前行为：
-    //      重启 reattach 白跑一趟）。撤销后无回写路径：reaper 搭车 refreshSessions 只更
-    //      **已存在**条目、不新增。不豁免的后果：btw 线目录不在 sessions/ 扫描面，
-    //      reattach 编排按 checkpoint 对 vid 走 restore → resolveRestoreTarget 构造性
+    //      重启 reattach 白跑一趟）。撤销后无回写路径：checkpoint 条目只在注册汇聚点整条
+    //      写入（crash-forensics-hooks upsertSession），removeSession 摘除后无任何回写/
+    //      新增路径——周期刷新已随 ADR-0122 reaper 退役；保留的 refreshSessions 搭车接口
+    //      （当前无生产调用方，见 runtime-checkpoint.ts）语义上也只更**已存在**条目、
+    //      不新增。不豁免的后果：btw 线目录不在 sessions/ 扫描面，
+    //      reattach 编排按 checkpoint 对线走 restore → resolveRestoreTarget 构造性
     //      SESSION_NOT_FOUND → 台账噪音 + 无效恢复尝试。
-    //      根修应在 session-service 订阅体内按 isBtwVirtualId 早退——该文件不入本单元领地，
-    //      写-撤销为行为等价落点（登记于 impl-plan §5 偏差表）。
+    //      判别器 = registry 成员查询（W4a：btwCascadeOps.getLine，键 = 线 session id；
+    //      旧 isBtwVirtualId 前缀判别随键切换同批替换，设计 §3.3.6 迁移表）。
     //   ② projection / records / capability-reconciler / inflight-mirror.presetZero → **保留**
     //      （D6：btw 线是一等会话，消息通路与状态投影白得；mirror 的 injected 写点在 emit
     //      之前已内联执行）。
@@ -503,7 +530,7 @@ export class SessionLifecycle implements ISessionRegistry {
     //      reap 判据③按「任一 --extension/--skill 与清单精确相等」匹配，btw spawn 与主
     //      spawn 共享 mandatory staged 段、判别力不变；且崩溃遗留的 btw 线孤儿 pi 与主 pi
     //      同样烧 token，正是 reap 要收殓的对象——建档正确而非泄漏。
-    if (isBtwVirtualId(id)) {
+    if (btwCascadeOps?.getLine(id) !== undefined) {
       try {
         getRuntimeCheckpointStore().removeSession(id)
       } catch (e: unknown) {
@@ -511,6 +538,10 @@ export class SessionLifecycle implements ISessionRegistry {
         console.error(`[session-lifecycle] checkpoint btw exemption failed (sessionId=${id}):`, e)
       }
     }
+    // [W4b 收编] 原 session.surfaces 注册事实派生视图广播（W4a 判别器通道）已按协议收缩
+    // 删除：renderer 抑制类判别改读 session.list {surface:'btw'} 拉取缓存
+    // （设计 §5-W4b 四步之③——surfaceBySessionId 零读取方后广播帧删除），注册/rekey 后
+    // 不再全量重发该帧。
     return session
   }
 
@@ -647,10 +678,12 @@ export class SessionLifecycle implements ISessionRegistry {
 
     this.persistCreateBindings(session, presetId, options, presetClientOptions, createMetaOverride)
 
-    // hidden session（公共 session）不记工作区历史——cwd 是数据目录，不应污染最近工作区列表。
-    // homedir 过滤（含降级 homedir）由 WorkspaceService.record 统一负责（方案A，一处堵死全部路径），
-    // lifecycle 层不再关心 cwd 是否降级。
-    if (!options?.hidden) {
+    // 工作区历史判据（切换随 W3 `e57d1ada9` 落地、登记随 W5 `b2775435b` 的 hidden 停写同批建立）：读注册后记录的 surface，**不读
+    // options?.surface**——生产 create 路径永不传 surface（协议无 surface 入参、
+    // btw 线不经 createNew），读 options 会使全部生产 create 停记工作区历史。
+    // 仅 sidebar 会话记录（btw 线的 cwd = 主会话 cwd，记录会污染最近工作区列表）。
+    // 谓词取正向（=== 'sidebar'）：未知枚举值不落工作区历史。
+    if (this.get(id)?.surface === 'sidebar') {
       this.workspaceService.record(sessionCwd)
     }
     const createdSummary = this.svc.toSummary(session)
@@ -771,9 +804,11 @@ export class SessionLifecycle implements ISessionRegistry {
       // Staging Mode（ADR-0056）：透传 effectiveModel（presetClientOptions.model，已含 C-RL-6 优先级解析）
       // 让 session 元数据 modelId 反映实际启动模型，前端 composer chip 正确显示。
       // U2: metaOverride（get_state 读回值）优先级高于 presetClientOptions.model。
+      // W3: surface 经 options 透传到 registerSession 尾部参数（缺省 'sidebar'）——
+      // 生产 create 路径不传（协议无 surface 入参），btw 线不经 createNew。
       return await this.registerSession(
-        id, client, sessionCwd, label ?? basename(sessionCwd), sessionFilePath, options?.hidden,
-        undefined, undefined, presetClientOptions.model, createMetaOverride, spawnExtensionPaths,
+        id, client, sessionCwd, label ?? basename(sessionCwd), sessionFilePath,
+        undefined, undefined, presetClientOptions.model, createMetaOverride, spawnExtensionPaths, options?.surface,
       )
     } catch (initErr) {
       await this.safeDestroy(id)
@@ -1012,6 +1047,20 @@ export class SessionLifecycle implements ISessionRegistry {
    * 段间顺序与失败语义的权威在 session-content-cascade.ts 文件头。
    */
   async delete(sessionId: string): Promise<void> {
+    // [U8 生成中拒绝门] 与归档门同款（archive-service 门 1）：isGenerating = turn ∈
+    // {dispatching, generating}（不含 settling——settling 定稿 entry 已落盘，杀 pi 无内容
+    // 损失），判定读口与归档门同源（[chat-flow-consistency D1] 派生布尔读口迁移 =
+    // isGeneratingTurn(occupancy.turn)，唯一权威 = applySessionOccupancyTransition 原语）。
+    // 杀 pi 会丢尾部未落盘 entry；不采用自动 abort
+    // （删除语义 = 数据全弃，显式拒绝 + 可操作文案优于静默多步编排）。位置 = 在册判定
+    // 之前、disposeForDelete 之后：门拒绝时不留 userStopped 清理副作用，btw 分支在门后
+    // 不受影响（虚拟线无独立 pi 生成态语义，isGenerating 读不到 → 门短路放行）。
+    if (isGeneratingTurn(this.get(sessionId)?.occupancy?.turn)) {
+      throw errorWithCode(
+        `会话正在生成中，无法删除；请先停止生成或等待完成 (sessionId=${sessionId})`,
+        'delete_generating',
+      )
+    }
     // D4 清理路径：delete = 彻底删除，userStopped 标记随 session 一起清理（收敛环定时器
     // 一并停——active 分支的 removeSessionEntry 只停环不清标记，本调用补齐标记清理）。
     // 两分支共用（非 active 分支不经过 removeSessionEntry 也必须清）。
@@ -1023,8 +1072,10 @@ export class SessionLifecycle implements ISessionRegistry {
     // 在册（onLineTerminated → removeSessionEntry 同样消费标）、冷线不在册且终结扇出早退，
     // 均按在册判据如实取值。
     // btwOps 本地 const 捕获：供 isBtwLine 别名判定在 if 处收窄（模块级 let 不走别名收窄）。
+    // W4a：判别器 = registry 成员查询（btwOps.getLine，键 = 线 session id = piSessionId）——
+    // 旧 isBtwVirtualId 前缀判别对 piId 形态恒 false，随键切换同批替换（设计 §3.3.6 迁移表）。
     const btwOps = btwCascadeOps
-    const isBtwLine = isBtwVirtualId(sessionId) && btwOps !== null
+    const isBtwLine = btwOps !== null && btwOps.getLine(sessionId) !== undefined
     const session = this.get(sessionId)
     // [notify-once D5] 死亡汇聚点立 latch（先于任何杀进程/文件处置，覆盖 active 与
     // scanned 两分支——检查点①：pm.destroySession 之前）：'delete' 发声销账 + clearSession，
@@ -1037,8 +1088,9 @@ export class SessionLifecycle implements ISessionRegistry {
     // 发生、被 fireLineTerminated 捕获（删除不整体失败但销毁回调被跳过）——两形态标滞留
     // 同为单条 bounded，净风险不变。
     fireDeathDisposition(sessionId, 'delete', { hasDestroySink: session !== undefined })
-    // [M4-a / btw-question D4+D9④] btw 线直删分支（下一段）：deleteByCwd 收集面「故意含 hidden」的
-    // 既有不变量保留（活跃线 vid 进批内 cwdSessions），本分支让直删与级联/btw.remove
+    // [M4-a / btw-question D4+D9④] btw 线直删分支（下一段）：deleteByCwd 收集面「按 cwd
+    // 彻底删除、与被删会话的 surface 无关」的既有不变量保留（活跃线 session id 进批内
+    // cwdSessions），本分支让直删与级联/btw.remove
     // **三路收敛单入口 closeLine**——杀进程 + 注册表移除 + 线文件删除（路径限定 btw 根内）
     // 全在 btw 侧完成，不落主会话 trash/sidecar 清理面；线已不在（并发双删 / 主删级联先行 /
     // 重复调用）= 幂等 no-op 不抛——deleteByCwd 批内不得因重复处置记 failed。
@@ -1098,8 +1150,8 @@ export class SessionLifecycle implements ISessionRegistry {
         // 与主会话同一解绑规则——closeAllForMain 返回快照枚举到的线 sessionId 清单，
         // 逐线解绑（级联失败不上抛：清单拿不到时维持 best-effort 原语义，漏解绑的线
         // 绑定由活跃交集在回推派发侧排除，不留错误状态）。
-        for (const vid of closedLines) {
-          unbindCanvasOnSessionDeleted(vid)
+        for (const lineSessionId of closedLines) {
+          unbindCanvasOnSessionDeleted(lineSessionId)
         }
       } catch (e: unknown) {
         // best-effort 降级（非吞错）：走到本级联时主 session 本体已 trash/purge 完成，
@@ -1149,10 +1201,10 @@ export class SessionLifecycle implements ISessionRegistry {
    * cwd 匹配用字面 === ：依赖 caller 传入与 summary.cwd 一致的字符串
    *（前端 folder 删除按钮传的是 listPersistedSessions 返回的原始 cwd，不经规范化）。
    *
-   * 故意包含 hidden session（与 SessionScanner.listAll 的 !s.hidden 过滤不同）：
-   * folder 删除是按 cwd 的彻底清理，hidden session 也属于该 cwd。
-   * 若未来要改为排除 hidden，需同步评估前端列表（listAll 过滤）与删除的语义对齐。
-   * [M4-a / D4] 批内 btw 连带处置：活跃 btw 线 vid 经 getActiveSummaries 进批 → 逐 vid 走
+   * 按 cwd 彻底删除，与被删会话的 surface 无关（btw 线同属该 cwd，随批内直删分支
+   * 收敛到 closeLine 单入口）：
+   * folder 删除是按 cwd 的彻底清理，任何 surface 的会话都属于该 cwd。
+   * [M4-a / D4] 批内 btw 连带处置：活跃 btw 线 session id 经 getActiveSummaries 进批 → 逐线走
    * delete 的 btw 直删分支（单入口 closeLine，幂等）；名下线目录由主会话的级联支线删除
    *（与 session.delete 同路径）——批内主/线任意顺序处置均不重复、不互抛（单入口幂等）。
    *
@@ -1170,14 +1222,31 @@ export class SessionLifecycle implements ISessionRegistry {
       if (s.cwd === cwd) cwdSessions.add(s.id)
     }
     const deleted: string[] = []
-    const failed: Array<{ sessionId: string; error: string }> = []
+    const failed: Array<{ sessionId: string; error: string; code?: string }> = []
     for (const id of cwdSessions) {
       try {
         await this.delete(id)
         deleted.push(id)
       } catch (e) {
+        // 批内幂等（M4-a 设计意图「批内主/线任意顺序处置均不重复、不互抛」）：主删级联
+        // （closeAllForMain → closeLine → onLineTerminated → removeSessionEntry）先关线后，
+        // 批内后续 delete(线 id) 面对「已不在册」形态。旧 isBtwVirtualId 前缀判别对该形态
+        // 恒真（幂等 no-op 不抛）；W4a 成员查询判别下会落 not-found throw。判据 = 错误是
+        // 「Session <id> not found」（delete 的两分支双 miss 抛点）且现已不在册（Registry +
+        // 扫描面双无）= 批内已被删，记 deleted 不记 failed——与旧行为等价（force:true 扫描
+        // 已排除快照陈旧假红，见上方 wave:perf-w26 修正）。其余错误（EPERM 等真实失败）
+        // 照常记 failed，不吞。
+        const isNotFound = e instanceof Error && e.message === `Session ${id} not found`
+        const alreadyGone = isNotFound && this.get(id) === undefined && this.svc.findScannedSession(id) === undefined
+        if (alreadyGone) {
+          deleted.push(id)
+          continue
+        }
         console.warn(`[session-lifecycle] deleteByCwd: failed to delete ${id}`, toErrorMessage(e))
-        failed.push({ sessionId: id, error: toErrorMessage(e) })
+        // code 透传（errorWithCode 载体 = Error.code 属性，errorCodeOf 结构化提取）：门级
+        // 拒绝（如 delete_generating）带码给 renderer 查本地化词条；意外错误无码，字段
+        // undefined 经 JSON 序列化自然省略，wire 形态对存量消费方零变化。
+        failed.push({ sessionId: id, error: toErrorMessage(e), code: errorCodeOf(e) })
       }
     }
     return { cwd, deleted, failed }
@@ -1437,7 +1506,7 @@ export class SessionLifecycle implements ISessionRegistry {
     try {
       return await this.registerSession(
         sessionId, client, sessionCwd, target.name ?? basename(sessionCwd), target.filePath,
-        undefined, undefined, undefined, undefined, restoreMetaOverride, spawnExtensionPaths,
+        undefined, undefined, undefined, restoreMetaOverride, spawnExtensionPaths,
       )
     } catch (initErr) {
       await this.safeDestroy(sessionId)
@@ -1817,7 +1886,7 @@ export class SessionLifecycle implements ISessionRegistry {
       // 元数据 modelId 反映实际启动模型（override > 源 preset.modelOverride）。
       return await this.registerSession(
         forkedId, client, sessionCwd, label ?? basename(sessionCwd), forkedFilePath,
-        undefined, parentSessionKey, resolvedEntryId, presetClientOptions.model, undefined, spawnExtensionPaths,
+        parentSessionKey, resolvedEntryId, presetClientOptions.model, undefined, spawnExtensionPaths,
       )
     } catch (initErr) {
       // L5: registerSession 失败时清理孤儿 fork 文件（已写出但 session 未进 Map）

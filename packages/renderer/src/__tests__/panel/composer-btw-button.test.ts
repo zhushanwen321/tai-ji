@@ -29,7 +29,7 @@ import type { Message } from '@taiji/shared'
 // helper import 先于 Composer：其链上 import '@/api' 即触发 api mock 工厂执行（sync
 // 工厂在 import 求值期解引用 helper 绑定），彼时须已初始化
 import '../helpers/composer-shell-mount'
-import { composerApiModuleWithChatAndBtw, composerBtwApiSpy, composerChildStubs, makeComposerInputMock } from '../helpers/composer-mount'
+import { btwLineGroups, composerApiModuleWithChatAndBtw, composerBtwApiSpy, composerChildStubs, makeComposerInputMock } from '../helpers/composer-mount'
 import {
   bindDrawerSessionId,
   drawerControl,
@@ -46,10 +46,11 @@ import { COMPOSER_BTW_BUTTON_DEGRADATION_ORDER } from '@/components/panel/tray/u
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import { makeTrayCountsStub } from './tray/tray-counts-stub'
 import { useChatStore } from '@/stores/chat'
-import { setBtwReclaimReminder } from '@/composables/panel/btw-pending-bookkeeping'
-import { __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwTabData'
+import { invalidateBtwRequests } from '@/composables/panel/btw-pending-bookkeeping'
+import { ensureBtwPendingBookkeeping, __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwTabData'
+import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
+import { __resetBtwLineMembershipForTest, noteBtwLinesPulled } from '@/composables/panel/btw-line-membership'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
-import { dispatchGlobal } from '@taiji/core/transport/api'
 
 // ── tray 数据范围替身：全无条目（三态「全无」→ 托盘不渲染，左簇位次断言无干扰）──
 vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
@@ -167,7 +168,7 @@ async function dispatchWidth(width: number): Promise<void> {
 
 /** 单线 badge 用例共用起步：list=[t1] + 挂载 + settle，返回真 chatStore（setMessages 驱动） */
 async function mountSingleLineWithChat(): Promise<ReturnType<typeof useChatStore>> {
-  composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1' }])
+  composerBtwApiSpy.list.mockResolvedValue(btwLineGroups({ id: 't1' }))
   mountComposer()
   await settle()
   return useChatStore()
@@ -182,8 +183,22 @@ beforeEach(() => {
   bindDrawerSessionId(boundSid)
   _resetDrawerForTest()
   __clearSessionCleanupRegistryForTest()
-  __resetBtwPendingBookkeepingForTest() // 模块级待处理簿记（含回收提醒集合）逐用例清零
+  __resetBtwPendingBookkeepingForTest() // 模块级待处理簿记逐用例清零
+  // 待处理簿记的线判别 = session.list {surface:'btw'} 拉取缓存成员判别
+  // （btw-line-membership，W4b 收编）——本文件线 id 按线预热（等价抽屉拉取产物喂入）。
+  __resetBtwLineMembershipForTest()
+  noteBtwLinesPulled(['t1', 't2', 'ta', 'tb'])
 })
+
+/** 经真实 bus 入账一条挂起 dialog 族请求（confirm——簿记五类之一；待处理徽点的活数据源） */
+function seedPending(lineId: string, requestId: string): void {
+  ensureBtwPendingBookkeeping()
+  getExtensionBus().emit({
+    kind: 'ui-request',
+    sessionId: lineId,
+    request: { requestId, method: 'confirm', title: '允许执行？', message: 'm' },
+  } as never)
+}
 
 afterEach(() => {
   ManualResizeObserverStub.uninstall()
@@ -223,7 +238,7 @@ describe('入口渲染与 show-btw 实例开关（D7 ③入口）', () => {
 
 describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（§1.4 / D8 未读行）', () => {
   it('聚合 = 当前主会话名下线的 Σ：逐线累加、aria-label 换计数文案、>9 封顶 9+', async () => {
-    composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1' }, { vid: 'btw:t2' }])
+    composerBtwApiSpy.list.mockResolvedValue(btwLineGroups({ id: 't1' }, { id: 't2' }))
     mountComposer()
     await settle()
     const chat = useChatStore()
@@ -231,21 +246,21 @@ describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（
     // 常态归零：有线无未读 → 不渲染角标
     expect(badge().exists()).toBe(false)
 
-    chat.setMessages('btw:t1', [msg('a1')])
+    chat.setMessages('t1', [msg('a1')])
     await settle()
     expect(badge().text()).toBe('1')
     expect(bar().find('[data-testid="composer-btw-button"]').attributes('aria-label')).toBe('1 条未读旁路回复')
 
     // Σ per-line：t1 再来一条 + t2 一条 = 3
-    chat.setMessages('btw:t1', [msg('a1'), msg('a2')])
-    chat.setMessages('btw:t2', [msg('b1')])
+    chat.setMessages('t1', [msg('a1'), msg('a2')])
+    chat.setMessages('t2', [msg('b1')])
     await settle()
     expect(badge().text()).toBe('3')
     expect(bar().find('[data-testid="composer-btw-button"]').attributes('aria-label')).toBe('3 条未读旁路回复')
 
     // 封顶 9+
     chat.setMessages(
-      'btw:t1',
+      't1',
       Array.from({ length: 12 }, (_, i) => msg(`x${i}`)),
     )
     await settle()
@@ -255,38 +270,38 @@ describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（
   it('清除 = 线内容进视口；视口内新回复不计；关面板后再计', async () => {
     const chat = await mountSingleLineWithChat()
 
-    chat.setMessages('btw:t1', [msg('a1')])
+    chat.setMessages('t1', [msg('a1')])
     await settle()
     expect(badge().text()).toBe('1')
 
     // 进视口 = drawer 开在 btw tab + 选中该线（BtwPanel 自动选中的等价写入）
     openDrawerTab('btw')
-    setBtwView('btw:t1')
+    setBtwView('t1')
     await settle()
     expect(badge().exists()).toBe(false) // 用户可见 DOM：角标消失
 
     // 视口内到达：不计
-    chat.setMessages('btw:t1', [msg('a1'), msg('a2')])
+    chat.setMessages('t1', [msg('a1'), msg('a2')])
     await settle()
     expect(badge().exists()).toBe(false)
 
     // 关面板：离开视口，新回复再计
     drawerControl.close()
     await settle()
-    chat.setMessages('btw:t1', [msg('a1'), msg('a2'), msg('a3')])
+    chat.setMessages('t1', [msg('a1'), msg('a2'), msg('a3')])
     await settle()
     expect(badge().text()).toBe('1')
   })
 
   it('badge 归属各自主会话：切走不串台、切回恢复（D7③④，S10 单测）', async () => {
-    composerBtwApiSpy.list.mockImplementation((sid: string) =>
-      Promise.resolve(sid === SID ? [{ vid: 'btw:ta' }] : [{ vid: 'btw:tb' }]),
+    composerBtwApiSpy.list.mockImplementation((q: { mainSessionId?: string }) =>
+      Promise.resolve(q.mainSessionId === SID ? btwLineGroups({ id: 'ta' }) : btwLineGroups({ id: 'tb' })),
     )
     const w = mountComposer()
     await settle()
     const chat = useChatStore()
 
-    chat.setMessages('btw:ta', [msg('a1')])
+    chat.setMessages('ta', [msg('a1')])
     await settle()
     expect(badge().text()).toBe('1')
 
@@ -295,7 +310,7 @@ describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（
     await settle()
     expect(badge().exists()).toBe(false)
 
-    chat.setMessages('btw:tb', [msg('b1')])
+    chat.setMessages('tb', [msg('b1')])
     await settle()
     expect(badge().text()).toBe('1')
 
@@ -308,7 +323,7 @@ describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（
 
 describe('badge 两态：待处理徽点与 unread 计数并列呈现（§1.4 裁决 U1 + D8 终态机）', () => {
   it('双零（unread=0 且 pending=0）：计数角标与待处理徽点都不渲染，aria-label 保持入口语义', async () => {
-    composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1' }])
+    composerBtwApiSpy.list.mockResolvedValue(btwLineGroups({ id: 't1' }))
     mountComposer()
     await settle()
 
@@ -319,46 +334,26 @@ describe('badge 两态：待处理徽点与 unread 计数并列呈现（§1.4 �
   })
 
   it('pending>0：待处理徽点渲染 + aria-label 换待处理计数文案（Σ per-line 待处理线数）；清除后归零不显', async () => {
-    composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1' }, { vid: 'btw:t2' }])
+    composerBtwApiSpy.list.mockResolvedValue(btwLineGroups({ id: 't1' }, { id: 't2' }))
     mountComposer()
     await settle()
     expect(pendingDot().exists()).toBe(false)
 
-    // 置位一条线（回收提醒 setter = D8 终态机第四行数据源）→ 徽点 + 计数 aria-label
-    setBtwReclaimReminder('btw:t1', true)
+    // 入账一条挂起请求（dialog 族——D8 终态机「待处理」的活数据源）→ 徽点 + 计数 aria-label
+    seedPending('t1', 'r1')
     await settle()
     expect(pendingDot().exists()).toBe(true)
     expect(buttonTitle()).toBe('1 条旁路线待处理')
 
-    // Σ per-line：第二条线也待处理 → 2
-    setBtwReclaimReminder('btw:t2', true)
+    // Σ per-line：第二条线也挂起 → 2
+    seedPending('t2', 'r2')
     await settle()
     expect(buttonTitle()).toBe('2 条旁路线待处理')
 
-    // 清除支：提醒全清 → 双零不显、title 回入口语义
-    setBtwReclaimReminder('btw:t1', false)
-    setBtwReclaimReminder('btw:t2', false)
+    // 清除支：失效（requests-invalidated）→ 双零不显、title 回入口语义
+    invalidateBtwRequests('t1', ['r1'], 'turn-aborted')
+    invalidateBtwRequests('t2', ['r2'], 'turn-aborted')
     await settle()
-    expect(pendingDot().exists()).toBe(false)
-    expect(buttonTitle()).toBe('旁路提问')
-  })
-
-  it('reclaimImminent 消费接线：拉取置位 → 徽点 + 计数 aria-label 可见；state 帧广播翻转 false → 双双回落（用户可见 DOM）', async () => {
-    composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1', reclaimImminent: true }])
-    mountComposer()
-    await settle()
-
-    // 使用者黑盒：数据源 = 拉取 reply 的 reclaimImminent（非直接 setter）→ badge 待处理态可见
-    expect(pendingDot().exists()).toBe(true)
-    expect(buttonTitle()).toBe('1 条旁路线待处理')
-
-    // runtime 回收提醒翻转广播（live 帧 global 通道路由）→ 集合清除 → badge 聚合回落
-    dispatchGlobal({
-      type: 'btw.list',
-      payload: { mainSid: SID, threads: [{ vid: 'btw:t1', reclaimImminent: false }] },
-    })
-    await settle()
-
     expect(pendingDot().exists()).toBe(false)
     expect(buttonTitle()).toBe('旁路提问')
   })
@@ -366,10 +361,10 @@ describe('badge 两态：待处理徽点与 unread 计数并列呈现（§1.4 �
   it('两态并列：unread 计数角标（右上）与待处理徽点（右下）同屏共存；title 待处理优先', async () => {
     const chat = await mountSingleLineWithChat()
 
-    // 先让消息增长落地（D8 回收提醒清除支 = 线内容增长即清；与置位同拍会被抢先清掉）
-    chat.setMessages('btw:t1', [msg('a1')])
+    // 先让消息增长落地，再入账挂起请求（两个徽态数据源互不抢占）
+    chat.setMessages('t1', [msg('a1')])
     await settle()
-    setBtwReclaimReminder('btw:t1', true)
+    seedPending('t1', 'r-parallel')
     await settle()
 
     // 并列呈现：计数与徽点各自可见（drawer 关着也可见，U1 修的正是这个静默盲区）

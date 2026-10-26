@@ -1728,7 +1728,7 @@
       {
         "pkg": "pi-coding-agent",
         "distPath": "dist/modes/rpc/rpc-mode.js",
-        "symbol": "case \"prompt\"（preflightResult → output(success)；.catch 的 !preflightSucceeded 守卫）",
+        "symbol": "case \"prompt\"（preflightResult → output(success)；.catch 的 !preflightSucceeded 检查）",
         "note": ":298-313 —— 启动 prompt 时声明 `preflightSucceeded = false`；`preflightResult: (disposition) => { preflightSucceeded = true; output(success(id, \"prompt\", { disposition })); }`（success 唯一发送点）；`.catch` :308-312 仅在 `!preflightSucceeded` 时 `output(error(id, \"prompt\", e.message))`【行号锚基于 pi@1.0.0；复核按符号名定位】"
       },
       {

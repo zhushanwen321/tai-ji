@@ -3,8 +3,9 @@
 /**
  * useTurnExpansion 单测——w1 wave IF1 契约验证（w4 store 重构后底层为 turn-expansion store）。
  *
- * 覆盖：默认折叠、per-session 隔离、toggle/expand/collapse 边沿、批量操作、
+ * 覆盖：默认折叠、per-session 隔离、toggle/expand/collapse 边沿、
  * null sid no-op、cleanup 后重置、响应式（expand 触发下游 effect 重跑）。
+ * [chat-flow-consistency C9] expandAll/collapseAll/hasAnyExpanded 死导出已删除，TC-w1-4/8 随之退役。
  *
  * w4 改造：底层由 useSessionScopedState（per-instance Map）改为 Pinia store 单例。
  * 每个 case 通过 setActivePinia(createPinia()) 获得独立 store，互不污染。
@@ -31,77 +32,66 @@ describe('useTurnExpansion (w1 wave IF1)', () => {
   it('TC-w1-1 isExpanded 默认折叠（key 不存在返回 false）', () => {
     const sid = ref<string | null>('s1')
     const { isExpanded } = useTurnExpansion(sid)
-    expect(isExpanded(0)).toBe(false)
+    expect(isExpanded('turn-0')).toBe(false)
   })
 
-  it('TC-w1-2 per-session 隔离：s1 expand(0) 不影响 s2', () => {
+  it('TC-w1-2 per-session 隔离：s1 expand(\'turn-0\') 不影响 s2', () => {
     const sid = ref<string | null>('s1')
     const { isExpanded, expand } = useTurnExpansion(sid)
-    expand(0)
-    expect(isExpanded(0)).toBe(true)
+    expand('turn-0')
+    expect(isExpanded('turn-0')).toBe(true)
 
     // 切到 s2：store 按 sid 分区查 s2 分区（空），isExpanded 返回默认 false
     sid.value = 's2'
-    expect(isExpanded(0)).toBe(false)
+    expect(isExpanded('turn-0')).toBe(false)
 
     // 切回 s1：s1 分区数据保留（store Map 切 sid 不丢数据），仍 true
     sid.value = 's1'
-    expect(isExpanded(0)).toBe(true)
+    expect(isExpanded('turn-0')).toBe(true)
   })
 
   it('TC-w1-3 toggle 边沿：两次翻转回到原态', () => {
     const sid = ref<string | null>('s1')
     const { toggle, isExpanded } = useTurnExpansion(sid)
 
-    toggle(1)
-    expect(isExpanded(1)).toBe(true)
+    toggle('turn-1')
+    expect(isExpanded('turn-1')).toBe(true)
 
-    toggle(1)
-    expect(isExpanded(1)).toBe(false)
+    toggle('turn-1')
+    expect(isExpanded('turn-1')).toBe(false)
   })
 
-  it('TC-w1-4 expandAll/collapseAll 批量设置', () => {
+  it('TC-w1-4 [C9 退役] 批量操作导出已删除（expandAll/collapseAll/hasAnyExpanded 不在公开面）', () => {
     const sid = ref<string | null>('s1')
-    const { expandAll, collapseAll, isExpanded } = useTurnExpansion(sid)
-    const indices = [0, 1, 2]
-
-    expandAll(indices)
-    for (const i of indices) {
-      expect(isExpanded(i)).toBe(true)
-    }
-
-    collapseAll(indices)
-    for (const i of indices) {
-      expect(isExpanded(i)).toBe(false)
-    }
+    const api = useTurnExpansion(sid)
+    expect('expandAll' in api).toBe(false)
+    expect('collapseAll' in api).toBe(false)
+    expect('hasAnyExpanded' in api).toBe(false)
   })
 
   it('TC-w1-5 null sessionId：所有写方法 no-op 不抛，isExpanded 返回 false', () => {
     const sid = ref<string | null>(null)
-    const { isExpanded, toggle, expand, collapse, expandAll, collapseAll } = useTurnExpansion(sid)
+    const { isExpanded, toggle, expand } = useTurnExpansion(sid)
 
     expect(() => {
-      toggle(0)
-      expand(0)
-      collapse(0)
-      expandAll([0, 1, 2])
-      collapseAll([0, 1, 2])
+      toggle('turn-0')
+      expand('turn-0')
     }).not.toThrow()
 
-    expect(isExpanded(0)).toBe(false)
+    expect(isExpanded('turn-0')).toBe(false)
   })
 
   it('TC-w1-6 cleanup 后状态重置（triggerSessionCleanups 移除分区）', () => {
     const sid = ref<string | null>('s1')
     const { isExpanded, expand } = useTurnExpansion(sid)
-    expand(0)
-    expect(isExpanded(0)).toBe(true)
+    expand('turn-0')
+    expect(isExpanded('turn-0')).toBe(true)
 
     // 触发该 sid 的所有 cleanup（turn-expansion store 注册了 clearSession 到 cleanup registry）
     triggerSessionCleanups('s1')
 
     // store 分区被 clearSession 删除，下次访问惰性新建空分区 → isExpanded 回到默认 false
-    expect(isExpanded(0)).toBe(false)
+    expect(isExpanded('turn-0')).toBe(false)
   })
 
   it('TC-w1-7 响应式：expand 后下游 effect 重跑（依赖失效）', () => {
@@ -113,74 +103,49 @@ describe('useTurnExpansion (w1 wave IF1)', () => {
     scope.run(() => {
       effect(() => {
         // 读 isExpanded 建立对 reactive 容器中该 key 的响应式依赖
-        void isExpanded(0)
+        void isExpanded('turn-0')
         runCount++
       })
     })
 
     expect(runCount).toBe(1) // 首次跑建立依赖
 
-    expand(0) // mutate reactive 容器，effect 应失效重跑
+    expand('turn-0') // mutate reactive 容器，effect 应失效重跑
 
     expect(runCount).toBe(2) // effect 重跑
-    expect(isExpanded(0)).toBe(true)
+    expect(isExpanded('turn-0')).toBe(true)
 
     scope.stop() // 清理 effect
   })
 
-  describe('TC-w1-8 hasAnyExpanded（IF1 公开方法）', () => {
-    it('全折叠时 hasAnyExpanded([0,1,2]) 返回 false', () => {
-      const sid = ref<string | null>('s1')
-      const { hasAnyExpanded } = useTurnExpansion(sid)
-      expect(hasAnyExpanded([0, 1, 2])).toBe(false)
-    })
-
-    it('部分展开（expand(1) 后）hasAnyExpanded([0,1,2]) 返回 true', () => {
-      const sid = ref<string | null>('s1')
-      const { expand, hasAnyExpanded } = useTurnExpansion(sid)
-      expand(1)
-      expect(hasAnyExpanded([0, 1, 2])).toBe(true)
-    })
-
-    it('空数组 hasAnyExpanded([]) 返回 false', () => {
-      const sid = ref<string | null>('s1')
-      const { hasAnyExpanded } = useTurnExpansion(sid)
-      expect(hasAnyExpanded([])).toBe(false)
-    })
-
-    it('展开的 turnIndex 不在传入数组时不受其他 idx 影响（expand(5) 后 hasAnyExpanded([0,1]) 仍 false）', () => {
-      const sid = ref<string | null>('s1')
-      const { expand, hasAnyExpanded } = useTurnExpansion(sid)
-      expand(5)
-      expect(hasAnyExpanded([0, 1])).toBe(false)
-    })
-  })
-
-  it('TC-w1-9 响应式：collapse（false↔true 来回切）effect 持续重跑', () => {
+  it('TC-w1-9 响应式：写方法 false↔true 来回切 effect 持续重跑（collapse 赋值范式经 store 层验证）', () => {
     const sid = ref<string | null>('s1')
-    const { isExpanded, expand, collapse } = useTurnExpansion(sid)
+    // toggle 不解构：本用例 true→false 回切走 store 层 collapse（[C3]），toggle 路径由 TC-w1-3 覆盖
+    const { isExpanded, expand } = useTurnExpansion(sid)
 
     let runCount = 0
     const scope = effectScope()
     scope.run(() => {
       effect(() => {
         // 读 isExpanded 建立对 reactive 容器中该 key 的响应式依赖
-        void isExpanded(0)
+        void isExpanded('turn-0')
         runCount++
       })
     })
 
     expect(runCount).toBe(1) // 首次跑建立依赖
 
-    expand(0) // mutate reactive 容器（false→true），effect 失效重跑
+    expand('turn-0') // mutate reactive 容器（false→true），effect 失效重跑
     expect(runCount).toBe(2)
-    expect(isExpanded(0)).toBe(true)
+    expect(isExpanded('turn-0')).toBe(true)
 
-    collapse(0) // 再次 mutate（true→false，赋值不 delete），effect 应再次失效重跑
+    // [C3] 包装层 collapse 已随 deps.collapse 退役删除——true→false 回切走 store 层
+    // collapse（赋值不 delete，保响应式链）等价驱动，效果一致：effect 应再次失效重跑
+    useTurnExpansionStore().collapse('s1', 'turn-0')
     expect(runCount).toBe(3)
-    expect(isExpanded(0)).toBe(false)
+    expect(isExpanded('turn-0')).toBe(false)
 
-    scope.stop() // 清理 effect
+    scope.stop()
   })
 })
 
@@ -196,10 +161,10 @@ describe('useTurnExpansionStore per-session 隔离（w4）', () => {
 
   it('TC-w4-9 store per-session 隔离', () => {
     const store = useTurnExpansionStore()
-    store.expand('s1', 0)
-    expect(store.isExpanded('s1', 0)).toBe(true)
-    // 隔离：s2 同 idx 默认折叠（独立分区）
-    expect(store.isExpanded('s2', 0)).toBe(false)
+    store.expand('s1', 'turn-1')
+    expect(store.isExpanded('s1', 'turn-1')).toBe(true)
+    // 隔离：s2 同 key 默认折叠（独立分区）
+    expect(store.isExpanded('s2', 'turn-1')).toBe(false)
   })
 
   it('TC-w4-10 store 跨调用方共享（w4 接线修复目标：Turn.vue 与 MessageStream.vue 共享展开态）', () => {
@@ -208,14 +173,14 @@ describe('useTurnExpansionStore per-session 隔离（w4）', () => {
     const callerA = useTurnExpansion(sid)
     const callerB = useTurnExpansion(sid)
 
-    // A 展开 turn 0 → B 立即可见（w1 的 per-instance Map 不共享，w4 store 共享）
-    callerA.expand(0)
-    expect(callerA.isExpanded(0)).toBe(true)
-    expect(callerB.isExpanded(0)).toBe(true)
+    // A 展开 turn 'turn-0' → B 立即可见（w1 的 per-instance Map 不共享，w4 store 共享）
+    callerA.expand('turn-0')
+    expect(callerA.isExpanded('turn-0')).toBe(true)
+    expect(callerB.isExpanded('turn-0')).toBe(true)
 
-    // B collapse → A 立即可见
-    callerB.collapse(0)
-    expect(callerA.isExpanded(0)).toBe(false)
-    expect(callerB.isExpanded(0)).toBe(false)
+    // B 折叠（[C3] 包装层 collapse 已退役——true→false 回切走 store 层 collapse）→ A 立即可见
+    useTurnExpansionStore().collapse('shared-1', 'turn-0')
+    expect(callerA.isExpanded('turn-0')).toBe(false)
+    expect(callerB.isExpanded('turn-0')).toBe(false)
   })
 })

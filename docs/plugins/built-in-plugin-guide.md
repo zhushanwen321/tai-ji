@@ -371,7 +371,7 @@ api.config.set(key: string, value: unknown): Promise<void>
 
 ## 4. 案例走读
 
-完整可运行的内置插件案例见 `resources/plugins/scheduler-manager/`（headerAction 入口 + overlay 树内容供给 + 命令通路，trusted 权限面收敛为 `sessions.readState` 单权限）。
+完整可运行的内置插件案例见 `resources/plugins/scheduler-manager/`（headerAction 入口 + overlay 树内容供给 + 命令通路，trusted 权限范围收敛为 `sessions.readState` 单权限）。
 
 
 ---

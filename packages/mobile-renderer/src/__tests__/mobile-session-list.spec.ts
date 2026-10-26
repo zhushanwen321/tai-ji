@@ -39,6 +39,8 @@ vi.mock('../shell/app-runtime', async () => {
       activeId: ref<string | null>(null),
     },
     sessionList: testState.list,
+    // [W1] 列表行模型/思考档读状态层（行组件消费的读口；本文件默认未观测，A5 用例播种）
+    liveStateOf: vi.fn((_id: string) => undefined),
     chatStore: testState.chatStore,
     loadSessions: vi.fn(async () => {}),
     selectSession: vi.fn(async () => {}),
@@ -48,7 +50,7 @@ vi.mock('../shell/app-runtime', async () => {
 import MobileSessionList from '../views/MobileSessionList.vue'
 import { i18n } from '../i18n'
 import { applySubagentRecords, __testing } from '../views/SubagentStatusLine.vue'
-import { loadSessions, selectSession, sessionStore } from '../shell/app-runtime'
+import { liveStateOf, loadSessions, selectSession, sessionStore } from '../shell/app-runtime'
 
 function mountList() {
   return mount(MobileSessionList, { global: { plugins: [i18n] } })
@@ -59,8 +61,6 @@ function makeSummary(overrides: Partial<SessionSummary> & Pick<SessionSummary, '
     label: `会话-${overrides.id}`,
     cwd: '/tmp/project',
     status: 'idle',
-    modelId: 'test-model',
-    tokenCount: 0,
     ...overrides,
   }
 }
@@ -98,6 +98,8 @@ function resetSessionListTestState(): void {
   testState.chatStore.getMessages.mockReturnValue([])
   testState.chatStore.getRetryState.mockReturnValue(undefined)
   __testing.resetSubagentPartitionsForTest()
+  vi.mocked(liveStateOf).mockReset()
+  vi.mocked(liveStateOf).mockReturnValue(undefined as never)
   vi.mocked(loadSessions).mockClear()
   vi.mocked(selectSession).mockClear()
   vi.mocked(loadSessions).mockResolvedValue(undefined)
@@ -233,10 +235,13 @@ describe('MobileSessionList 会话列表（remote-use-mobile D7 列表行）', (
     wrapper.unmount()
   })
 
-  it('模型/思考档标签：行内可见 modelId 与 thinkingLevel（u13/A5，V11 列表行面）', () => {
+  it('模型/思考档标签：状态层 modelId 与 thinkingLevel 行内可见（u13/A5，V11 列表行面）', () => {
     testState.list.value = [
-      makeSummary({ id: 's-1', modelId: 'm-list', thinkingLevel: 'high', lastActiveAt: Date.now() }),
+      makeSummary({ id: 's-1', lastActiveAt: Date.now() }),
     ]
+    vi.mocked(liveStateOf).mockImplementation((id: string) =>
+      id === 's-1' ? { modelId: 'm-list', thinkingLevel: 'high' } : undefined,
+    )
     const wrapper = mountList()
     const modelLine = wrapper.get('[data-testid="mobile-session-item-s-1"] [data-testid="mobile-session-model-line"]')
     expect(modelLine.text()).toBe('m-list · high')

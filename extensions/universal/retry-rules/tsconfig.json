@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "lib": ["ES2022"],
+    "types": ["node", "vitest/globals"],
+    "noEmit": true
+  },
+  "include": ["."],
+  "exclude": ["node_modules", "**/__tests__", "**/*.test.ts", "vitest.config.ts"]
+}

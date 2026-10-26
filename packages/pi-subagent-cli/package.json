@@ -84,6 +84,7 @@
     "@zhushanwen/subagent-engine-sdk": "workspace:*"
   },
   "devDependencies": {
+    "@taiji/shared": "workspace:*",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.9",
     "tsup": "^8.5.1",

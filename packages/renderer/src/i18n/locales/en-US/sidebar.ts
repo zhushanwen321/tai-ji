@@ -22,6 +22,11 @@ export default {
   // S7：用 vue-i18n 复数（'|' 分隔单/复数，调用方 t(key, count, { count, error })），
   // 替换原 '(s)' hack；带 error 占位符让用户感知首个失败原因（S3）。
   deleteFolderPartialFailed: '{count} session failed to delete: {error} | {count} sessions failed to delete: {error}',
+  // Localized phrase for failed[].code='delete_generating' (runtime delete generating-state
+  // gate), interpolated into deleteFolderPartialFailed's {error} slot in place of the raw
+  // runtime message (which is compiled Chinese, unreadable to en users). Closed enum: add
+  // the entry + useSidebarSessionActions mapping in the same commit for new codes.
+  deleteFolderGenerating: 'session is generating, delete skipped',
   renameFailed: 'Rename failed: {msg}',
   retry: 'Retry',
   update: {
@@ -99,6 +104,11 @@ export default {
     // counts unfinished children (non-green: active / error / stopped / dead), hence "unfinished"
     // rather than "running".
     childCount: '{n} child session unfinished | {n} child sessions unfinished',
+    // Handed-off badge (chat-flow-consistency U9 / S8): persistent small badge on the source
+    // session after a completed handoff (badge body) + hover title ({target} = target session
+    // display name, falling back to the target id prefix when the target is deleted).
+    handoffBadge: 'Handed off',
+    handedOffTo: 'Handed off to {target}',
   },
   sessionList: {
     // R6.2 anchored groups (2026-10-11): section header + in-group empty hint; the old

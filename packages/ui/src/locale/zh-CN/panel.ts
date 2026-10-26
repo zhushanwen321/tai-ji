@@ -78,7 +78,10 @@ export default {
     // [HISTORICAL] 前身 mode-chip 单 key 标签（forkChip/handoffChip）+ placeholder 换文案
     // （forkHint/handoffHint）呈现通道已随 banner 形态退役（demo：图标染 accent 唯一染色点）
     forkBannerTitle: 'Fork 新分支',
-    forkBannerDesc: '当前输入将发到新分支，与主线隔离',
+    // [chat-flow-consistency U9 / S5] 补分叉点截断说明：锚点消息仍在流式时 pi 侧落盘不到它，
+    // 实际分叉点会回退到最后一条已落盘消息——文案以条件语气承载（锚点已完成时该半句不激活），
+    // 用户知情后自选等待或接受截断（不阻断）
+    forkBannerDesc: '当前输入将发到新分支，与主线隔离；所选消息仍在生成中时，分叉点将落在它之前最新完成的消息',
     handoffHint: '输入内容将作为新 session 的首条消息发送给 AI（可选）…（⏎ 交接并发送，Esc 退出）',
     handoffChip: '交接到新 session · 当前输入将发送到新会话',
     handoffSend: '交接并发送到新 session',
@@ -92,6 +95,15 @@ export default {
     // composer 命令动作表复制反馈（composer-pi-shortcuts 决策 4 / §3.5）
     copyLastReply: '已复制最后回复',
     copyLastReplyFailed: '复制失败',
+    // ✎ 队列编辑（chat-flow-consistency D6）：锚定判定反馈 + edit 回执四值分型
+    //（Q3 处置同构：失败形态的内容一律按普通新消息发出不丢，仅提示文案分型）
+    queueEditConflict: '正在编辑另一条消息，请先放弃编辑',
+    queueEditGone: '原消息已不在队列',
+    queueEditPeekFailed: '取回原文失败：{msg}',
+    queueEditDelivered: '原消息已投递，修改内容已作为新消息发送',
+    queueEditCancelled: '原消息已撤销，修改内容已作为新消息发送',
+    queueEditNotFound: '原消息已不在队列，修改内容已作为新消息发送',
+    queueEditUnconfirmed: '原消息投递状态未确认，修改内容已作为新消息发送',
   },
   message: {
     copy: '复制',
@@ -157,6 +169,16 @@ export default {
     itemRenderFailed: '本条渲染失败',
     itemRenderRetry: '重试',
     renderErrorToast: '界面渲染出现异常，已记录日志',
+    // [U8 重启中断提示条] 重启打断生成中回合后重开的尾部提示（runtime 尾部形态判定，
+    // 文案族对齐 D4 stalled「回复已中断」）
+    interruptedNotice: '上次会话在此处被中断，内容可能不完整',
+    // [chat-flow-consistency 缺陷 3/7] liveOnly 提示行文案（core 键注入，消费点 =
+    // effects/notice-text.ts configureChatNoticeText 注入）
+    chatNotice: {
+      stoppedBeforeStart: '已停止：回复尚未开始',
+      truncatedMaxTokens: '回复因达到长度上限被截断',
+      truncatedContentFilter: '回复因内容过滤被终止',
+    },
     // [RD-3#7] toast 在列上限溢出折叠摘要（droppedCount 的 UI 消费方）
     toastDropped: '还有 {count} 条通知未显示',
     toastDroppedDismiss: '关闭折叠通知提示',
@@ -166,6 +188,15 @@ export default {
     // tokens 从文案拆出为钉右 mono meta（compactedTokens 去括号）
     compacted: '已压缩上下文',
     compactedTokens: '{tokens} tokens',
+    // [chat-flow-consistency U9 / S6] 压缩摘要悬停详情标题（SystemNotice compaction 分支，
+    // body = AI 生成的上下文摘要全文，附复制按钮）
+    compactionSummaryLabel: '压缩摘要',
+    // [chat-flow-consistency U9 / S2] 交接回合呈现：handoff turn 的固定 prompt（内容 ===
+    // HANDOFF_PROMPT_TEMPLATE）折叠为系统行「交接指令（内部）」，原文进悬停详情；
+    // 其后 assistant 回合（交接文档）在 TurnMeta 挂标签
+    handoffInstruction: '交接指令（内部）',
+    handoffInstructionLabel: '指令原文',
+    handoffDocTag: '交接文档',
     branchCreated: '已创建分支（自 {from}）',
     branchCreatedNoFrom: '已创建分支',
     thinkCount: '思考 ×{count}',
@@ -215,7 +246,7 @@ export default {
     // [system-notice-rendering-upgrade U6] 边界行失败分句（D5「· M 失败」，Turn.vue 消费）：
     // 专用键不复用 traceFailed（「含 {count} 次失败」属 TraceCompactorRow 收编行句式，两者语义域不同）
     turnTriggerBgNotifyFailed: '{count} 失败',
-    // [bg-notice-fold specs/chat/system-notices.md §3.3] settle 收纳后轮头行折叠标签：按类型
+    // [bg-notice-fold] settle 收纳后轮头行折叠标签：按类型
     // 分段（发生序去重，「·」连接，耗时沿用 elapsed 段单数字）。托管会话为第四成员，折叠词
     // 待用户裁决（spec §6），暂按 fold-into-meta demo 提案值落地
     noticeFoldedBash: '已处理后台任务',
@@ -341,11 +372,19 @@ export default {
     // 「本次」label 的 hover 补句（C4）：current 无窗口过滤且为会话私有样本（本会话最近一次请求）
     genStatsCurrentNote: '本会话最近一次请求的记录',
     genStatsCurrentReq: '本次请求',
-    genStatsDay: '今日均值（此模型）',
-    genStatsD7: '近 7 天',
-    genStatsD30: '近 30 天',
     genStatsDayShort: '今日加权（此模型）',
-    genStatsSpeedNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计（加权平均）；按单次 LLM 请求耗时计算，不含工具执行时间',
+    // 分布矩阵（2026-10-24 用户裁决）：5 统计量列 × 3 窗口行。列头只写一次，
+    // 行头只写窗口名——同一尺寸下信息量比「每窗口一行单值」高一个量级。
+    genStatsColAvg: '平均',
+    genStatsColP50: 'P50',
+    genStatsColP99: 'P99',
+    genStatsColP99Note: '最近秩百分位：样本不足 100 次时 P99 等于最大值（不插值，如实呈现）',
+    genStatsColMax: '最大',
+    genStatsColMin: '最小',
+    genStatsWindowDay: '今日',
+    genStatsWindowD7: '7 天',
+    genStatsWindowD30: '30 天',
+    genStatsSpeedNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计，逐请求速度的五量分布（等权平均，非按耗时分摊）；按单次 LLM 请求耗时计算，不含工具执行时间',
     genStatsCacheNote: '「本次」为本会话最近一次请求；今日加权为该模型跨会话累计；cacheRead ÷ (input + cacheRead + cacheWrite)；模型不支持缓存时显示「—」',
     // 归因降噪（2026-09-19 D-A）：预期内 0% 的成因文案——三值均非故障，以中性色呈现
     genStatsCacheMissColdStart: '首次请求',
@@ -359,13 +398,11 @@ export default {
     // [RD-2#7] runtime 领先 renderer 的协议漂移（未知 reason）→ 通用文案兜底（default 分支 + warn）
     genStatsCacheMissUnknown: '缓存未命中',
     genStatsNoData: '暂无数据',
-    // composer-genstats-ttft TTFT 触发器（U4）。p50 行 label 独立成键，不复用 genStatsDay
-    //（「今日均值」与 p50 中位数语义矛盾，设计 §3.1）；「本次」行 label/补句复用 genStatsCurrent 系（同语义）
+    // composer-genstats-ttft TTFT 卡（U4）。[HISTORICAL] 原有 genStatsTtftDay/D7/D30 三个
+    // 「今日 p50（此模型）」式行 label，随分布矩阵（2026-10-24）退役——窗口名走共用
+    // genStatsWindowDay/D7/D30，统计量名走共用 genStatsCol*，两侧语义不再需要专属键
     genStatsTtftTitle: '首字延迟 TTFT',
-    genStatsTtftDay: '今日 p50（此模型）',
-    genStatsTtftD7: '近 7 天 p50',
-    genStatsTtftD30: '近 30 天 p50',
-    genStatsTtftNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计（p50 中位数）；「请求发出 → 首个输出 token 到达」的延迟，按单次 LLM 请求计算，不含工具执行时间',
+    genStatsTtftNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计，逐请求延迟的五量分布；P50 是典型体验、P99/最大是尾部体感（重尾分布下两者会明显背离）；「请求发出 → 首个输出 token 到达」的延迟，按单次 LLM 请求计算，不含工具执行时间',
   },
   sideDrawer: {
     title: '侧边抽屉',
@@ -579,11 +616,13 @@ export default {
     // [D1] 按占用类型分档的 hover 文案（小时级 bash 等长占用下「等什么结束」可操作）
     pendingHintCompacting: '等待上下文压缩完成后发送',
     pendingHintBash: '等待命令执行结束后发送',
+    pendingHintHandingOff: '交接中，结束后投递',
     pendingHintSettling: '等待当前回合结束后发送',
-    // 内核条目态文案（G3：每条未送达消息有明确形态与状态）
+    // 内核条目态文案（G3：每条未送达消息有明确形态与状态；failed 统一「发送未确认」——
+    // 结果未确定（断连/受理失败两成因共用上界口径），行=状态、错误气泡=事件详情分层）
     stateQueued: '排队中',
     stateInFlight: '投递中',
-    stateFailed: '发送失败',
+    stateFailed: '发送未确认',
     cancelQueued: '撤销排队',
     cancelUnavailable: '消息已投递，无法撤销',
     cancelUnavailableWithReason: '无法撤销：{reason}',
@@ -592,7 +631,19 @@ export default {
     restoreDraftFailed: '已撤销，但恢复到输入框失败：{msg}',
     restoreContentMissing: '消息已撤销，但原文未能取回——请重新输入',
     retry: '重试发送',
+    // failed 行判重说明（行 hover title 第二行：重试入口不重复投递的保证，Q6）
+    retryDedupHint: '点重试会自动判重，不会重复投递',
     retryFailed: '重试失败：{msg}',
+    // 批量重试（Q5）与 +N 展开开关（Q2）
+    retryAll: '重试全部失败项',
+    expandQueued: '展开折叠的 {n} 条消息',
+    collapseQueued: '收起',
+    // ✎ 编辑（chat-flow-consistency D6：peek 预填 + 锚定登记，全行可用含 failed——E7）
+    editQueued: '编辑排队消息',
+    // 编辑态提示条（锚定在册渲染；条目离场由帧驱动自动解除 → 提示条随之消失）
+    editingBanner: '正在编辑排队消息 · 发送后原位替换',
+    editingBannerAbandon: '放弃编辑',
+    editingBannerAbandonHint: '解除保位并保留文本，可作为新消息发送',
   },
   contextChips: {
     removeFromContext: '从上下文移除',

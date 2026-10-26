@@ -58,8 +58,6 @@ function makeSummary(overrides: Record<string, unknown> = {}): Record<string, un
     cwd: '/test/cwd',
     status: 'active',
     lastActiveAt: 1_755_000_000_000,
-    modelId: 'openai/gpt-4',
-    tokenCount: 0,
     // 归属校验默认材料：发起方一律 'sid-parent'，目标 s1 默认是其 managed child
     spawnSource: 'agent',
     parentAgentSessionId: 'sid-parent',
@@ -84,6 +82,9 @@ function makeFakeSessionView(overrides: Record<string, unknown> = {}): Record<st
     isCompacting: false,
     isBashRunning: false,
     lastActiveAt: 1_755_000_000_000,
+    // W3：handler 的 modelId 读点从 summary 改到注册表记录（IManagedSessionView.modelId
+    // 双写缓存），fake 记录带同值缓存。
+    modelId: 'openai/gpt-4',
     ...overrides,
   }
 }
@@ -108,6 +109,8 @@ function makeFakeSessionService(overrides: Partial<ISessionService> = {}): ISess
       { cwd: '/test/cwd', sessions: [makeSummary({ id: 'agent-1', spawnSource: 'agent', parentAgentSessionId: 'sid-parent' }), makeSummary({ id: 'user-1', spawnSource: 'user' })] },
     ]),
     abort: vi.fn().mockResolvedValue(undefined),
+    // 受理成功后清旧终态 sidecar（session-manager-send-sidecar-stale）
+    clearSessionOutcome: vi.fn(),
     getRpcClient: vi.fn(),
     getActiveSessionIds: vi.fn().mockReturnValue([]),
     ...overrides,

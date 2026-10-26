@@ -34,6 +34,17 @@
         class="shrink-0 rounded-sm bg-accent-soft px-1 py-0.5 text-[length:var(--text-3xs)] leading-none text-accent transition-opacity duration-200"
         :class="freshImportState === 'fading' ? 'opacity-0' : ''"
       >{{ t('importSession.freshBadge') }}</span>
+      <!-- 已交接徽标（chat-flow-consistency U9 / S8）：handedOffTo 非空（源会话已完成
+           handoff 交接，runtime handoff_marker sidecar 持久 + 扫描恢复）→ 常驻小徽标。
+           中性 dim 描边形态（不用 accent——accent 已被 [AI] 来源与 fresh 徽标占用，
+           交接是既成事实元信息非待办信号）；title 显目标名（容器反查注入，目标已删
+           回退 id 前缀——已发生事实不回滚，徽标照显）。 -->
+      <span
+        v-if="session.handedOffTo"
+        data-testid="session-handoff-badge"
+        class="shrink-0 cursor-default rounded-sm border border-border-strong px-1 py-0.5 font-mono text-[length:var(--text-3xs)] leading-none text-neutral-dim"
+        :title="t('sidebar.sessionItem.handedOffTo', { target: handoffTargetTitle })"
+      >{{ t('sidebar.sessionItem.handoffBadge') }}</span>
     </div>
   </div>
 
@@ -113,6 +124,14 @@ const isDead = computed(() => props.session.status === 'dead')
 
 // ── agent-spawned 标记（U8）：标题旁 [AI] badge 只标来源 ──
 const isAgentSpawned = computed(() => props.session.spawnSource === 'agent')
+
+// ── 已交接徽标（chat-flow-consistency U9 / S8）：title 目标名 = 容器反查注入的显示名，
+//    查不到（目标已删/跨组）回退目标 id 前缀（uuid 前 HANDOFF_ID_PREFIX 位已可辨识）。 ──
+const HANDOFF_ID_PREFIX = 8
+const handoffTargetTitle = computed(() => {
+  const target = props.session.handedOffTo ?? ''
+  return props.session.handoffTargetLabel || target.slice(0, HANDOFF_ID_PREFIX)
+})
 
 // ── 未读 + 标记完成状态（读 useSessionMarkers 模块级响应式集合）──
 // 未读两源合流（D9，ForkGroup 退役）：① 后台完成（useCompletionNotify → markUnread）；

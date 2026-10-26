@@ -24,6 +24,7 @@ import {
 } from '../events-projection.js'
 import { projectV2Workflow } from '../workflow-record-projection.js'
 import { scanRecordFamilyEntriesFromSessionFile } from '../session-file-extraction.js'
+import { resolveSubagentLastRound } from '../events-projection-last-round.js'
 import type { SubagentJournalEvent } from '@zhushanwen/extension-protocol'
 import {
   foldRunEventCheckpoint,
@@ -929,6 +930,31 @@ describe('projectV2Workflow（run 域定界 + 事件 fold 骨架）', () => {
     expect(record.outcome).toBe('done')
   })
 
+  it('agent-settled outcome=cancelled → agentCalls 行 status=cancelled（§3.3.8 取消收尾成员不冒充 failed）', () => {
+    const registered = {
+      v: 2 as const,
+      kind: 'registered' as const,
+      runId: 'wf-cancel',
+      workflowName: 'flow',
+      scriptName: 'test-flow',
+      slug: 'tf',
+      startedAt: 1000,
+      recordPath: '/tmp/ws/wf-cancel.events.jsonl',
+    }
+    const fold = foldRunEventCheckpoint(
+      [
+        runEvent({ type: 'run-created', runId: 'wf-cancel', workflowName: 'flow', argsSummary: '', ts: 1000 }),
+        runEvent({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
+        // run 取消：在途成员被收尾（dispatchAgentSettled 的 aborted 分支）→ outcome=cancelled
+        runEvent({ type: 'agent-settled', taskIndex: 0, attempt: 1, outcome: 'cancelled', durationMs: 500, ts: 1500 }),
+        runEvent({ type: 'run-settled', outcome: 'cancelled', artifactsDir: '/tmp/a', ts: 3000 }),
+      ],
+      () => {},
+    )
+    const record = projectV2Workflow(registered, undefined, fold)!
+    expect(record.agentCalls[0]).toMatchObject({ id: 0, status: 'cancelled' })
+  })
+
   it('agent-started 带 phase → fold 骨架与派生视图 call.phase 透传；无 phase 行 undefined（W1 D6 分组供源）', () => {
     const fold = foldRunEventCheckpoint(
       [
@@ -1263,5 +1289,58 @@ describe('SessionEventProjection（冷启动 + 推送增量 + dispose）', () =>
     appendFileSync(join(recordsDir, 'sa-1.events'), `${recordEventLine(settledRecordEvent())}\n`)
     expect(projection.applyJournalReport(journalReport('record', 'sa-1', [settledRecordEvent()]))).toBe(false)
     expect(projection.subagents.get('sa-1')?.status).toBe('running')
+  })
+})
+
+// ── [subagent-observability u3 F4] resolveSubagentLastRound 直测（wire 产出单点）──
+// 锚定 roundIdle 收条帧 → SubagentRecord.lastRound 的 8 字段条件展开（投影输入含
+// lastRound 变化能否到达 wire 的第一环——展开漏字段/缺字段产键都是红点判据失真）。
+
+describe('resolveSubagentLastRound（roundIdle → lastRound 条件展开）', () => {
+  it('roundIdle 缺席 → undefined（从未收尾/存量旧流——wire 不产空对象）', () => {
+    expect(resolveSubagentLastRound(undefined)).toBeUndefined()
+  })
+
+  it('8 字段条件展开：在场事实字段逐一透出（resultSummary 映射为 result）', () => {
+    const lastRound = resolveSubagentLastRound({
+      type: 'record-round-idle',
+      seq: 4,
+      ts: 4000,
+      round: 2,
+      stopReason: 'stop',
+      engineStopReason: 'stop',
+      failure: { class: 'provider', kind: 'rate_limited', retryable: 'conditional', retryAfterMs: 1200, raw: '429' },
+      promptDisposition: 'handled',
+      resultSummary: 'round reply',
+      turns: 3,
+      totalTokens: 500,
+      usage: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, total: 4 },
+      retryAttempts: 2,
+      observations: ['structured output was not invoked'],
+    })
+    expect(lastRound).toEqual({
+      engineStopReason: 'stop',
+      failure: { class: 'provider', kind: 'rate_limited', retryable: 'conditional', retryAfterMs: 1200, raw: '429' },
+      promptDisposition: 'handled',
+      result: 'round reply',
+      turns: 3,
+      usage: { input: 3, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, total: 4 },
+      retryAttempts: 2,
+      observations: ['structured output was not invoked'],
+    })
+  })
+
+  it('缺席字段不产键（条件展开——最小收条帧只透出在场事实，无 undefined 值键）', () => {
+    const lastRound = resolveSubagentLastRound({
+      type: 'record-round-idle',
+      seq: 1,
+      ts: 1000,
+      round: 1,
+      turns: 1,
+      totalTokens: 0,
+    })
+    // turns 是帧必填事实 → 透出；其余 7 字段缺席 → 不产键（含 undefined 值键）。
+    expect(lastRound).toEqual({ turns: 1 })
+    expect(Object.keys(lastRound!)).toEqual(['turns'])
   })
 })

@@ -435,7 +435,7 @@ const MS_PER_SEC = 1000;
  * [D2] 重新加载进内存时的中断派生视图——displayStatusOf 三态输出的第三值，与 core runSummary
  * 派生视图 / shared WorkflowRunStatus 同词）+ DoneReason（completed/failed/aborted/
  * budget_limited/time_limited）+ ExecutionTraceNode.status（含 "pending"——trace
- * 节点的初始态）。
+ * 节点的初始态；"cancelled" = run 终局收尾在途成员，§3.3.8——中性档）。
  *
  * 收窄自 string → 显式联合，编译器会在新增 status 时强制 switch 补齐分支。
  */
@@ -444,7 +444,8 @@ export type StatusText =
   | "interrupted"
   | "done"
   | DoneReason
-  | "pending";
+  | "pending"
+  | "cancelled";
 
 // ── Workflow status helpers ──────────────────────────────────
 
@@ -458,6 +459,8 @@ function statusColorToken(
     case "failed": case "aborted": case "budget_limited": case "time_limited": return "error";
     case "completed": case "done": return "success";
     case "running": return "warning";
+    // cancelled（§3.3.8 run 终局收尾在途成员）=「未交付且非失败」中性档（muted）
+    case "cancelled": return "muted";
     default: return "muted";
   }
 }
@@ -469,15 +472,17 @@ export function statusDotStr(
   return theme.fg(statusColorToken(status), "●");
 }
 
-/** Format a status badge with color for the header area. */
+/**
+ * 状态徽标（§2.2 后的保留项）：生产消费点已由 display-state.ts formatRunBadge 取代
+ * （同一徽标文案表），现仅测试对拍锚保活——display-state.test.ts 以它逐值比对
+ * formatRunBadge 输出（文案/色档漂移即红）；done 终局与 completed 同形
+ * （success ✓ completed）。
+ */
 export function formatStatusBadge(
   status: StatusText,
   theme: ThemeLike,
 ): string {
   switch (status) {
-    // [§2.2 终局徽标修复] displayStatusOf（唯一生产入参）的终局值是 "done"，此前无该
-    // 分支 → 落 default 显示 muted 裸字 "done"；补成分支后与 completed 同形（success
-    // ✓ completed），TUI 头部不再出现无色的裸状态字。
     case "done": case "completed": return theme.fg("success", "\u2713 completed");
     case "running": return theme.fg("warning", "\u25CF running");
     case "interrupted": return theme.fg("muted", "\u25CB interrupted");

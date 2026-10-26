@@ -1,5 +1,5 @@
 // sessionEntry 端口束装配断言（remote-use D2/U5）+ core toast 通道装配断言（remote-use
-// A7/U14）。
+// A7/U14）+ [W2] 状态层拉取装配断言（sessionApiPort.getState + createUseSession liveState deps）。
 //
 // 锁定移动壳切入链装配对齐桌面的三件事（验收口径 = 装配面，非 12 步链本体——链编排在
 // core use-session.test.ts 既有覆盖）：
@@ -16,34 +16,65 @@
 // U14（A7）：core toast 通道（coreChannelDeps + subDeps 两处注入）= 错误条通道（error-bar
 // 单槽单例），非 console——core 失败情形（revoke/stop/bash/compact 等 RPC 失败）对用户可见。
 //
-// mock 策略：仅 transport 出口（streamSubscribe/unsubscribe）模块级 vi.mock 隔离 WS，
-// app-runtime 组装与 core 链保持全真实（对齐 mobile-new-task.spec「mock 组件层会变成
-// 断言 mock 自身」的同款立场）。断言入口 = __testing 命名空间（对齐 companion-bridge
-// __testing 先例：生产代码禁止消费，仅测试 import——不扩大 API 面常驻语义）。
-import { describe, expect, it, beforeEach, vi } from 'vitest'
+// [W2] 状态层拉取装配：移动壳冷会话模型/思考档标签恒空的根因是**壳侧两个装配缺口**——
+// ① sessionApiPort 无 getState 成员；② createUseSession deps 未注入 liveState。二者任一
+// 缺失都命中 core use-session.ts refreshLiveState 的首行门控（`if (!liveState || !getState)
+// return`），三时机拉取整体跳过，而状态层唯一写入方是 useChat 的 liveState dep（冷会话无
+// state_changed 帧，registerReplicatedStates 只在 onSessionRegistered 调）。本文件锁这两
+// 处接线：getState 经 command 直发 session.getState（对齐桌面 api/session-api-port.ts），
+// 且 selectSession 切入链尾部的拉取能落到 liveStateStore。
+//
+// mock 策略：仅 transport 出口（streamSubscribe/unsubscribe/switchSession/getHistory/
+// command）模块级 vi.mock 隔离 WS，app-runtime 组装与 core 链保持全真实（对齐
+// mobile-new-task.spec「mock 组件层会变成断言 mock 自身」的同款立场）。断言入口 =
+// __testing 命名空间（对齐 companion-bridge __testing 先例：生产代码禁止消费，仅测试
+// import——不扩大 API 面常驻语义）。
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import {
   _lruSizeForTest,
   _resetLruForTest,
   resetChatModuleStateForTest,
 } from '@taiji/core'
+import { RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 // app-runtime 组装在 vi.mock 注册（hoist 先于全部 import 生效）后解析——transport 出口
 // 已是替身，组装链其余保持真实
-import { __testing, chatStore } from '../app-runtime'
+import { __testing, chatStore, liveStateStore, selectSession } from '../app-runtime'
 import { errorBarMessage, __testing as errorBarTesting } from '../error-bar'
 
-const { mockStreamSubscribe, mockUnsubscribe, mockArchive } = vi.hoisted(() => ({
+const {
+  mockStreamSubscribe,
+  mockUnsubscribe,
+  mockArchive,
+  mockSwitchSession,
+  mockGetHistory,
+  mockCommand,
+} = vi.hoisted(() => ({
   mockStreamSubscribe: vi.fn(() => vi.fn()),
   mockUnsubscribe: vi.fn(() => Promise.resolve()),
   mockArchive: vi.fn(() => Promise.resolve({ sessionId: 'arc-sid' })),
+  mockSwitchSession: vi.fn(() => Promise.resolve()),
+  mockGetHistory: vi.fn(() =>
+    Promise.resolve({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
+  ),
+  mockCommand: vi.fn(),
 }))
 
+vi.mock('@taiji/core/transport/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/core/transport/api')>()
+  return { ...actual, command: mockCommand }
+})
 vi.mock('@taiji/core/transport/api/domains/chat', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@taiji/core/transport/api/domains/chat')>()
-  return { ...actual, streamSubscribe: mockStreamSubscribe }
+  return { ...actual, streamSubscribe: mockStreamSubscribe, getHistory: mockGetHistory }
 })
 vi.mock('@taiji/core/transport/api/domains/session', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@taiji/core/transport/api/domains/session')>()
-  return { ...actual, unsubscribe: mockUnsubscribe, archive: mockArchive }
+  return {
+    ...actual,
+    unsubscribe: mockUnsubscribe,
+    archive: mockArchive,
+    switchSession: mockSwitchSession,
+  }
 })
 
 const sessionEntry = __testing.sessionEntry
@@ -144,5 +175,66 @@ describe('core toast 通道装配（A7/U14）', () => {
     __testing.errorBarToast.error('second')
 
     expect(errorBarMessage.value).toBe('second')
+  })
+})
+
+describe('[W2] 状态层拉取装配（sessionApiPort.getState + liveState deps）', () => {
+  beforeEach(() => {
+    _resetLruForTest()
+    resetChatModuleStateForTest()
+    mockStreamSubscribe.mockClear()
+    mockUnsubscribe.mockClear()
+    mockSwitchSession.mockClear()
+    mockSwitchSession.mockResolvedValue(undefined)
+    mockGetHistory.mockClear()
+    mockGetHistory.mockResolvedValue({
+      messages: [],
+      truncated: false,
+      loadedTurns: 0,
+      totalTurnsEstimate: 0,
+    })
+    mockCommand.mockReset()
+  })
+
+  afterEach(() => {
+    liveStateStore.removeLiveState('w2-port-sid')
+    liveStateStore.removeLiveState('w2-pull-sid')
+  })
+
+  it('端口形状：sessionApiPort.getState 存在且经 command 直发 session.getState（对齐桌面 api/session-api-port.ts:51-54）', async () => {
+    mockCommand.mockResolvedValue({ sessionId: 'w2-port-sid', modelId: 'prov-a/model-a' })
+
+    await expect(__testing.sessionApiPort.getState!('w2-port-sid')).resolves.toEqual({
+      sessionId: 'w2-port-sid',
+      modelId: 'prov-a/model-a',
+    })
+
+    expect(mockCommand).toHaveBeenCalledWith(
+      'session.getState',
+      { sessionId: 'w2-port-sid' },
+      RPC_BACKSTOP_TIMEOUT_MS,
+    )
+  })
+
+  it('deps 注入 liveState：selectSession 切入链尾部拉取状态层（缓存缺失门控放行，reply 落 liveStateStore）', async () => {
+    mockCommand.mockResolvedValue({
+      sessionId: 'w2-pull-sid',
+      modelId: 'prov-w2/model-w2',
+      thinkingLevel: 'high',
+    })
+
+    await selectSession('w2-pull-sid')
+    // 拉取是切入链步 13 的 fire-and-forget；微任务清空等其落库
+    for (let i = 0; i < 6; i++) await Promise.resolve()
+
+    expect(mockCommand).toHaveBeenCalledWith(
+      'session.getState',
+      { sessionId: 'w2-pull-sid' },
+      RPC_BACKSTOP_TIMEOUT_MS,
+    )
+    expect(liveStateStore.liveStateOf('w2-pull-sid')).toEqual({
+      modelId: 'prov-w2/model-w2',
+      thinkingLevel: 'high',
+    })
   })
 })

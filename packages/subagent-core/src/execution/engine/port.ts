@@ -31,9 +31,9 @@
 //   probe      —— 探针（D7：二进制存在/版本解析/干跑校验）。
 // capabilities() 同步无副作用——「调用前拒绝」（D11 处置三级）的判据。
 
-import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
+import type { ModelCatalogEntry, ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
-import type { AgentCallOpts } from "../../orchestration/models/types.ts";
+import type { AgentCallOpts } from "../../shared/agent-call-types.ts";
 import type { ModelInfo } from "../assembly/model-resolver.ts";
 import type { ExecutionMode } from "../domain/record-types.ts";
 import type { AgentStreamSink } from "../../shared/agent-stream.ts";
@@ -198,8 +198,16 @@ export interface EnginePort {
    * 映射，system prompt 落「与主 agent 模型体系一致」声明段）。
    * engine-neutral：未来引擎（AcpEngine 等）实现本方法即自动获得注入与展示，宿主
    * 侧零改动。
+   *
+   * [listModels 异步面 2026-10-25] 返回 union：同步面 = manifest 注册期静态快照
+   * （引擎进程内实现恒同步；RemoteEngine 静态目录可枚举时同样同步返回——prompt
+   * 注入/错误文案等同步消费方经 syncEngineModelList 窄化保形）；异步面 = 协议
+   * listModels 帧的活清单（RemoteEngine 无静态枚举的 dynamic 引擎走 async RPC——
+   * engineDefaults 偏好层成员校验（resolveEngineModelWithTranslation）await 消费，
+   * RPC 失败放行 + per-engine 一次性 warn）。同步上下文消费 Promise 侧按 null 降级
+   * （无静态枚举语义，与快照 null 同形态）。
    */
-  listModels?(): Array<{ id: string; name?: string }> | null;
+  listModels?(): EngineModelList | Promise<EngineModelList>;
 
   /**
    * [u-h2 D2-2] 可选能力部分：派发同步期 model 校验（引擎 registry 单源裁决）。实现引擎复用其
@@ -287,6 +295,41 @@ export interface EnginePort {
  * validateModelForEngine；跨包镜像侧见 EnginePort.validateModel 注释的边界裁决）。
  */
 export type EngineModelSelectorInput = string | undefined;
+
+/**
+ * [listModels 异步面] listModels 单侧返回形态（union 的同步分支本体）：
+ * 数组 = 有枚举；null = 无静态枚举情形（port 契约语义，见 EnginePort.listModels 注释）。
+ */
+export type EngineModelList = Array<{ id: string; name?: string }> | null;
+
+/**
+ * [listModels 异步面] 同步上下文消费 union 的统一窄化：Promise 侧（协议 RPC 活清单）
+ * 在同步上下文不可达，按 null 降级——与 manifest 快照 null 同形态（无静态枚举语义，
+ * prompt 注入落「与主 agent 模型体系一致」段、错误文案省略清单行），不是错误。
+ * 消费方：model-prompt（system prompt 注入）/ model-validation（错误文案清单）。
+ */
+export function syncEngineModelList(list: EngineModelList | Promise<EngineModelList>): EngineModelList {
+  return list instanceof Promise ? null : list;
+}
+
+/**
+ * [listModels 异步面] manifest modelCatalog → listModels 同步面的四态映射（单一权威源，
+ * 两处消费：RemoteEngine.listModelsFromManifest / registry readOnlyEngineProxy——
+ * registry 依赖纪律禁 import client/，故落本契约层）：
+ *   省略 / null → null（buildCoreAlignedHint 语义）；
+ *   dynamic:true 且 models:[] → null（「无静态枚举情形」：静态空目录 ≠ 无模型——
+ *     若映射为 []，model-prompt 会走 buildEmptyModelsHint「no credentialed models」
+ *     误导文案，模型据此错误拒绝派发，B1 缺陷根因）；
+ *   dynamic:false 且 models:[] → []（显式空清单语义）；
+ *   静态非空数组 → 原样返回（dynamic 任意；dynamic:true 非空仍返回静态部分作提示面）。
+ */
+export function staticModelListOf(
+  catalog: { dynamic: boolean; models: ModelCatalogEntry[] } | null | undefined,
+): EngineModelList {
+  if (catalog === undefined || catalog === null) return null;
+  if (catalog.dynamic === true && catalog.models.length === 0) return null;
+  return catalog.models;
+}
 
 /**
  * [D4] record → 身份信封（宿主侧**唯一构造点**）：引擎把它整封写进任务子进程的

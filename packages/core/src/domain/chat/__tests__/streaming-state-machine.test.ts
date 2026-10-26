@@ -2,9 +2,11 @@
  * streaming-state-machine 独立单测（B6 深模块）。
  *
  * 直接调 createStreamingStateMachine 工厂：refs 用 vue 原语构造，commitMessages /
- * findLastAssistantIndex 走真实实现（mutations / chunk-processor），clearOccupancy /
- * setHandingOff 用 vi.fn()——不 mock 被测模块内部依赖，避免假绿。
+ * findLastAssistantIndex 走真实实现（mutations / chunk-processor），clearOccupancy 用
+ * vi.fn()——不 mock 被测模块内部依赖，避免假绿。
  * store.test.ts 保留为 createChatStore 委托后的集成回归（行为等价锁定）。
+ * [chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] handingOffSessions Set / setHandingOff 随平行存储退役
+ * 从 deps 移除——handingOff membership 归 occupancies 派生视图（第四维）。
  */
 import { describe, it, expect, vi } from 'vitest'
 import type { ShallowRef } from 'vue'
@@ -33,22 +35,18 @@ function makeMachine(opts: { subagentStreamPull?: (virtualId: string, recordId: 
   // W10 D-1 容器范式：外层 Map 恒等稳定，每 sid 分区是独立 ShallowRef
   const messages = shallowRef<Map<string, ShallowRef<Message[]>>>(new Map())
   const occupancies = ref<Map<string, SessionOccupancyState>>(new Map())
-  const handingOffSessions = ref<Set<string>>(new Set())
   const retryStates = ref<Map<string, unknown>>(new Map())
   const pendingSend = ref<Set<string>>(new Set())
   const clearOccupancy = vi.fn<(sessionId: string) => void>()
-  const setHandingOff = vi.fn<(sessionId: string, value: boolean) => void>()
   const sm = createStreamingStateMachine({
     messages,
     occupancies,
-    handingOffSessions,
     retryStates,
     pendingSend,
     clearOccupancy,
-    setHandingOff,
     subagentStreamPull: opts.subagentStreamPull,
   })
-  return { sm, messages, retryStates, clearOccupancy, setHandingOff }
+  return { sm, messages, retryStates, clearOccupancy }
 }
 
 describe('applySubagentStreamDelta', () => {
@@ -295,21 +293,21 @@ describe('finalizeMessages', () => {
 })
 
 describe('collectFinalizeCandidates', () => {
-  it('TC6 并集：messages ∪ compacting ∪ handingOff ∪ retry ∪ pendingSend（[u5a] queue 源已退役）', () => {
-    // 5 源各贡献一个独有 sid，验证并集不漏
+  it('TC6 并集：messages ∪ occupancy(compacting/handingOff) ∪ retry ∪ pendingSend（[u5a] queue 源 / [§6 裁决表行] handingOff Set 源已退役）', () => {
+    // 5 源各贡献一个独有 sid，验证并集不漏（c 经 occupancy 第四维 handingOff 贡献）
     const messages = shallowRef<Map<string, ShallowRef<Message[]>>>(new Map([['a', shallowRef([streamingAssistant('a1')])]]))
-    const occupancies = ref<Map<string, SessionOccupancyState>>(new Map([['b', { turn: 'idle', compacting: true, bash: false }]]))
-    const handingOff = ref<Set<string>>(new Set(['c']))
+    const occupancies = ref<Map<string, SessionOccupancyState>>(new Map([
+      ['b', { turn: 'idle', compacting: true, bash: false }],
+      ['c', { turn: 'idle', compacting: false, bash: false, handingOff: true }],
+    ]))
     const retryStates = ref<Map<string, unknown>>(new Map([['d', {}]]))
     const pendingSend = ref<Set<string>>(new Set(['e']))
     const sm = createStreamingStateMachine({
       messages,
       occupancies,
-      handingOffSessions: handingOff,
       retryStates,
       pendingSend,
       clearOccupancy: vi.fn(),
-      setHandingOff: vi.fn(),
     })
 
     const candidates = sm.collectFinalizeCandidates()
@@ -318,14 +316,14 @@ describe('collectFinalizeCandidates', () => {
 })
 
 describe('clearIndependentTransient', () => {
-  it('TC7 清 compacting/handingOff 置位 + retry 删除；无 sid 时 no-op（[u5a] queue 维度已退役）', () => {
-    const { sm, retryStates, clearOccupancy, setHandingOff } = makeMachine()
+  it('TC7 清 occupancy 分区（含 handingOff 维）+ retry 删除；无 sid 时 no-op（[u5a] queue 维度已退役）', () => {
+    const { sm, retryStates, clearOccupancy } = makeMachine()
     retryStates.value = new Map([['s1', { attempt: 1 }]])
 
     sm.clearIndependentTransient('s1')
 
+    // handingOff 复位随 occupancy 分区删除一并成立（membership = 第四维，无独立 setHandingOff）
     expect(clearOccupancy).toHaveBeenCalledWith('s1')
-    expect(setHandingOff).toHaveBeenCalledWith('s1', false)
     expect(retryStates.value.has('s1')).toBe(false)
 
     // 无该 sid 的态：不再清（no-op 幂等）

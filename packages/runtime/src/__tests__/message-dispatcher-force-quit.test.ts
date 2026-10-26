@@ -41,10 +41,7 @@ function makeMockSession(): IManagedSessionView {
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
+        bashRunToken: undefined,
   }
 }
 
@@ -78,13 +75,14 @@ function makeMocks(opts: MockOpts = {}): ForceQuitMocks {
   const persistOutcomeFn = vi.fn(() => { callOrder.push('persist') })
   const removeEntryFn = vi.fn(() => { callOrder.push('remove') })
 
-  // S2 ISP 化：结构性满足 dispatcher 窄接口（6 方法 = 消费方实际用到的全部），无强转。
+  // S2 ISP 化：结构性满足 dispatcher 窄接口（7 方法 = 消费方实际用到的全部），无强转。
   // ensureActive/getSession 不在 forceQuit/abort 收敛路径上，空 mock 即可。
   const svcGetSession = vi.fn()
   const svc: IDispatcherSessionOps = {
     getSessionByClient: vi.fn(() => makeMockSession()),
     detachSession: detachSessionFn,
     persistSessionOutcome: persistOutcomeFn,
+    clearSessionOutcome: vi.fn(),
     removeSessionEntry: removeEntryFn,
     ensureActive: vi.fn(),
     getSession: svcGetSession,
@@ -152,7 +150,7 @@ describe('MessageDispatcher forceQuit —— sidebar 强制退出', () => {
     // [code-harden RT-4#1] 旧行为：无 client 一律「幂等成功」返回——占用态卡死且事件源
     // 已断（无进程可产生 agent_settled）时，isGenerating/turn 派生视图永久滞留。改为继续收敛。
     const m = makeMocks({ active: false })
-    const stuckSession = { ...makeMockSession(), occupancy: { turn: 'generating', compacting: false, bash: false } }
+    const stuckSession = { ...makeMockSession(), occupancy: { turn: 'generating', compacting: false, bash: false, handingOff: false } }
     ;(m.svcGetSession as ReturnType<typeof vi.fn>).mockReturnValue(stuckSession)
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
@@ -173,7 +171,7 @@ describe('MessageDispatcher forceQuit —— sidebar 强制退出', () => {
 
   it('FQ6: 无活跃进程且占用已复位（occupancy=idle）→ 保持幂等成功（真实竞态兜底不受影响）', async () => {
     const m = makeMocks({ active: false })
-    const idleSession = { ...makeMockSession(), occupancy: { turn: 'idle', compacting: false, bash: false } }
+    const idleSession = { ...makeMockSession(), occupancy: { turn: 'idle', compacting: false, bash: false, handingOff: false } }
     ;(m.svcGetSession as ReturnType<typeof vi.fn>).mockReturnValue(idleSession)
 
     await expect(m.dispatcher.forceQuit('s1')).resolves.toBeUndefined()

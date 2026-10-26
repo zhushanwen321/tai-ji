@@ -288,7 +288,7 @@ test.describe('新建任务 E2E', () => {
 ---
 
 
-> 覆盖：消息输入框（contenteditable）、slash 命令浮层（@ 引用 / # 文件 / / 命令）、发送位三态（send/streaming-stop/sending-spinner）、steer/followUp、发送终局行为分型（命令 disposition handled 即终局：不注标出站、不挂 30s 空窗——pi1-disposition-chat-flow D1/D2/D14③，见「sendMessage 全链路时序」§4.4）
+> 覆盖：消息输入框（contenteditable）、slash 命令浮层（@ 引用 / # 文件 / / 命令）、发送位内容驱动双形态（send±角标 / stop；spinner 在模板优先级链最高位——chat-flow-consistency D5）、steer/followUp、发送终局行为分型（命令 disposition handled 即终局：不注标出站、不挂 30s 空窗——pi1-disposition-chat-flow D1/D2/D14③，见「sendMessage 全链路时序」§4.4）
 >
 > 先读 [00-overview.md](./00-overview.md) 理解双轨制和公共前置。
 
@@ -304,14 +304,14 @@ Composer 是消息输入核心组件，有两种 variant：
 用户输入 / → 触发 slash 浮层（CommandPopover）→ 实时过滤命令 → 选中插入 slash chip
 用户输入 @ / # → 触发 mention/file 浮层 → 选中插入 mention chip
 用户按 ⏎ → 发送（landing 走 submitFirstMessage，panel 走 chat.send）
-流式中（isStreaming）→ composer 蓝呼吸 ring + ⏎ 变 steer + 发送位变 stop 按钮
+流式中（isStreaming）→ composer 蓝呼吸 ring + ⏎ 变 steer（排队语义）；发送位按内容驱动双形态判定（无内容 → stop）
 ```
 
 ## 2. 组件结构概述
 
 `Composer.vue`（`data-testid="composer-box"`，variant=landing|panel）是容器，内部组合：RetryIndicator / QueueBubble（排队与重试指示）、`CommandPopover`（slash/mention/file 浮层，portal 到 body）、ContextChipsBar（已附上下文 chip 行）、`ComposerInput`（contenteditable 输入区，位于 `packages/ui/src/features/composer/`，内含插入的 slash chip 与 mention chip）、工具条（AddMenuPopover / ComposerMetricsAggregate 指标聚合 / ModelSelectPopover / ThinkingLevelPopover）。landing 态还有 meta-row chip 行（见 [01-chat-panel-composer.md](./01-chat-panel-composer.md)）。
 
-发送位四态（sendButtonState，shell effectivePhase 派生）：compacting（任意 turn，含 generating/settling）→ stop 按钮（title="终止压缩"，点击 → abort 中止**压缩流程**：pi session.abort → abortCompaction，runtime 对 isCompacting ∧ ¬isGenerating 的 abort 走压缩取消语义——不写 stopped 终态、不广播 message.complete，排队消息经 abort-idle 对账立即投出）；turn=dispatching/generating（无 compacting）→ stop 按钮（title="停止"，中止当前回合）；turn=settling 单独 → stop / settling+bash → queue；bash 且 turn 不活跃 → queue 按钮（↑ 时钟角标，title="排队发送 · ⏎"）；全 idle → send 按钮（title="发送 · ⏎" / "输入内容后发送"）。发送中（isSending 受理往返）→ spinner。**按钮形态与 Enter 车道是两个问题**（2026-10 用户裁决）：按钮回答「现在能中止什么」（忙 → 终止钮，压缩期中止对象是压缩流程本身），Enter 回答「消息走哪条车道」（sendRoute：compacting → 内核 queued 排队，compaction-end flush）——压缩期排队提交走 ⏎，按钮位专作中止入口。手动 /compact 期间不锁输入（压缩期输入/发送由投递内核 queued 车道承接）。
+发送位内容驱动双形态（sendButtonState，chat-flow-consistency D5；判定源 = composer-shell `sendButtonState` / `sendButtonBadge` / `sendButtonStopTarget`，2026-10-23 用户裁决）：输入框有内容 → 恒 send 按钮（title="发送 · ⏎"；排队去向时叠加时钟角标——`sendButtonBadge` 判定 = isActiveTurnPhase（turn ∈ ACTIVE_TURN_PHASES）∨ compacting，bash 不参与，角标恒等于真实投递去向）；无内容 + 回合进行中/收尾/压缩中 → stop 按钮（title 两档分型见 `sendButtonStopTarget`：干活/收尾 = "停止"中止当前回合；仅压缩 = "终止压缩"，点击 abort 中止**压缩流程**：pi session.abort → abortCompaction，runtime 对 compacting ∧ 非生成中的 abort 走压缩取消语义——不写 stopped 终态、不广播 message.complete，排队消息经 abort-idle 对账立即投出；压缩与干活并存按回合中止优先）；无内容 + 全 idle → send 禁用占位（title="输入内容后发送"，禁用由 canSubmit 承担）。bash 不触发停止（取消入口在其输出块自身，不占发送位）。发送中（isSending 受理往返）→ spinner（模板优先级链最高位：spinner › staging › stop › send±角标）。消息去向（steer/queued/direct）由投递内核 lane 判定统一裁定，发送位只呈现「现在能中止什么」——排队提交经发送按钮 / ⏎ 均可（有内容恒可发送）。手动 /compact 期间不锁输入（压缩期输入/发送由投递内核排队承接）。
 
 ## 3. data-testid 清单
 
@@ -323,6 +323,14 @@ testid 以组件 template 内 data-testid 属性为准。
 | *(密度类)* | 见 §3.1 单点登记（`composer-bar` / `composer-metrics-aggregate` / `composer-model-thinking-aggregate`）；本表不重复登记，避免两处漂移 |
 | `composer-mode-banner` / `composer-handoff-banner` | 仅 fork / handoff staging 态（staging 模式横幅，demo `.mode-banner` 形态；2026-10-11 前身为 `composer-mode-chip` / `composer-handoff-chip`，已随 banner 形态退役） |
 | `fork-send-btn` / `handoff-send-btn` | staging 态发送位 |
+| `queue-edit-banner` / `queue-edit-abandon` | 队列原位编辑态（D6）：锚定在册时 QueueBubble 顶部渲染编辑态提示条 / 提示条内「放弃编辑」按钮（放弃 = 解除锚定，草稿文本保留） |
+| `queue-edit-anchor-<uuid>` / `queue-edit-<uuid>` | 队列行内 hover 揭示的编辑钮容器 / ✎ 编辑按钮（与 × 同范式 hover 揭示；queued/in-flight/failed 行均可编辑；点击 = 进入编辑态） |
+| `queue-bubble` | 队列区容器（QueueBubble）：会话存在排队/进行中/失败条目（rows>0）时恒显 |
+| `queue-item-<uuid>` / `queue-state-<uuid>` | 队列行（每条可见行一个）/ 行内状态 chip（queued/in-flight/failed 三态分型着色） |
+| `queue-retry-<uuid>` | 仅 failed 行恒显的重试钮（行内顺序 = 重试 → 撤销；撤销钮在其后 hover 揭示） |
+| `queue-cancel-anchor-<uuid>` / `queue-cancel-<uuid>` | 行内 hover 揭示的撤销钮容器 / × 撤销按钮（成功 = 回执携带全文 + segments 回填草稿） |
+| `queue-expand` / `queue-collapse` | +N 展开开关（溢出行 >0 时显示，aria-expanded 承载开关态）/ 收起钮（展开态且收起后仍有溢出行时显示；Q2） |
+| `queue-retry-all` | 重试全部失败项（failed ≥2 时显示；一次 RPC 保序重投全部失败条目，Q5） |
 
 ### 3.1 底栏密度 / 任务托盘 / 模式可见性 testid（u6 / u4 / u5 落地）
 
@@ -337,6 +345,13 @@ testid 以组件 template 内 data-testid 属性为准。
 | `composer-bar` | Composer.vue | 恒显；容器 `flex-nowrap`（永不换行）；`data-fit`（0–3）/ `data-anchor-protected` / `data-slot-left-cluster` / `data-slot-metrics` / `data-slot-model-thinking` 与状态机输出同步（形态断言首选用 data 属性） |
 | `composer-metrics-aggregate` | ComposerMetricsAggregate.vue | 序 1 生效（`data-slot-metrics === 'aggregated'`，实测四枚平铺指标放不下；fit 0 保持平铺直挂触发器）；仅锚点保护态（`data-anchor-protected` / `data-slot-metrics === 'absent'`）隐藏；单图标指标聚合按钮（hover 弹聚合页） |
 | `composer-model-thinking-aggregate` | ModelThinkingAggregate.vue | 序 3 生效（`data-slot-model-thinking === 'aggregated'`，实测完整模型名+档位放不下）；单图标模型聚合按钮（click 弹层，hover 行内切换） |
+| `genstats-ttft-value` / `genstats-speed-value` / `genstats-cache-value` | GenStatsTriggers.vue | 仅 fit 0 平铺态；各维 `current` 有值才渲染（空值不占位，2026-10-11 裁决）；hover 出各自卡 |
+| `genstats-ttft-current` / `genstats-speed-current` | GenStatsTtftCard / GenStatsSpeedCard | 卡内「本次」行值（本会话最近一次请求，单样本，不入矩阵）；`—` = 本会话无该模型样本 |
+| `genstats-ttft-dist-{day,d7,d30}-{avg,p50,p99,max,min}` / `genstats-speed-dist-...` | GenStatsDistributionGrid（经两卡） | 分布矩阵单元格（5 统计量 × 3 窗口）；**testid 前缀带指标名**，同页两颗矩阵不串台；值 `—` = 该窗口无样本 |
+| `genstats-ttft-dist-row` / `genstats-ttft-dist-column`（`-speed-dist-` 同构） | 同上 | 矩阵行头（窗口名）/ 列头（统计量名），用于矩阵结构断言 |
+| `genstats-ttft-model` / `genstats-speed-model` / `genstats-cache-model` | 三张卡 head | 帧内 model（runtime 权威解析的复合 key）；`—` = 无合法帧 |
+| `genstats-cache-bar` / `genstats-cache-miss-note` | GenStatsCacheCard | 命中率进度条（宽度 = 数值）/ 归因说明行（仅已知成因的展示 0% 存在） |
+| `genstats-ttft-popover` | GenStatsTriggers.vue | TTFT 触发器浮层容器（TTFT 卡直挂） |
 | [HISTORICAL] `composer-overflow-menu` / `composer-overflow-capacity-metrics` / `composer-capacity-merged` / `composer-model-merged` | — | 已随三步聚合退役（`»` 入口与合流/截断态删除，2026-09-25）——存量测试/脚本再遇这些 id 即为旧代码 |
 
 **任务托盘（built-in 四件 + 协议 widget 区）**：
@@ -376,6 +391,22 @@ testid 以组件 template 内 data-testid 属性为准。
 - 发送按钮：`page.getByTitle('发送 · ⏎')` / `page.getByTitle('停止')`
 
 > **改进建议**（非本次范围）：给 CommandPopover 列表项加 `data-testid="cmd-item-{name}"`，给 ComposerInput 加 `data-testid="composer-input"`，提升 E2E 稳定性。
+
+### 3.2 移动壳队列条 testid（mobile-renderer QueueStrip，remote-use D7 / chat-flow-consistency D6）
+
+> 登记边界：本册正文以桌面壳（packages/renderer）为准；移动壳（packages/mobile-renderer）的 testid 当前仅登记队列条一族（下表，与 §3 queue-* 系同批交付对账），其余 mobile-* 系 testid 未纳入本册登记——移动壳验收/回归直接以组件 template 内 `data-testid` 属性为准，本节是快捷索引而非完整性清单。组件源码：`packages/mobile-renderer/src/views/QueueStrip.vue`。
+
+| testid | 触发/可见条件 |
+|--------|--------------|
+| `mobile-queue-strip` | 队列条容器：会话存在排队/进行中/失败条目（rows>0）时渲染；空队列结构性不渲染（无占位空态） |
+| `mobile-queue-edit-banner` | 队列原位编辑态（D6 移动壳）：编辑锚定在册时条带顶部渲染编辑态提示条；条目离场由投递状态帧自动解除锚定，本条随之消失 |
+| `mobile-queue-edit-abandon` | 编辑态提示条内「放弃编辑」按钮（与提示条同显隐；点击 = 解除锚定，草稿文本保留） |
+| `mobile-queue-edit-notice` | 编辑相关提示行（编辑他行 conflict 拦截 / peek 失败 / 条目已离场，role=status）；每次新编辑尝试开头清空，conflict 提示与编辑条并存可见 |
+| `mobile-queue-strip-error` | 取消失败内联错误行（role=alert；新取消尝试时清空，不跨条目残留旧错） |
+| `mobile-queue-row` | 队列行（每条可见行一个，与桌面 `queue-item-<uuid>` 对位） |
+| `mobile-queue-state-<state>` | 行内三态徽标：`mobile-queue-state-queued` / `-in-flight` / `-failed`（delivered 被投递谓词滤除，渲染不可达） |
+| `mobile-queue-edit` | 行内 ✎ 编辑按钮（常驻触达——触屏无 hover 揭示，与桌面 hover 揭示为双壳真差异）；queued/in-flight/failed 行均可编辑，点击 = 进入编辑态 |
+| `mobile-queue-cancel` | 行内 × 撤销按钮（常驻触达；成功 = 回执携带全文经 composerInjection 通道回输入框草稿） |
 
 ## 4. slash 命令浮层（CommandPopover）数据流
 
@@ -688,7 +719,7 @@ test.describe('Composer E2E', () => {
 
 - **发送链路**：`chat.send` → `chatApi.send`（ack）+ `streamSubscribe`（长订阅收 chunk）
 - **流式 chunk 处理**：`chatStore.appendAssistantChunk` → `applyChunk` 分发到 messages Map
-- **回合分组**：`messageTurns.toRenderItems` 纯函数动态计算（user + assistants 成一组）；三车道含 `toRenderItemsIncremental` 尾部快车道——streaming 每合帧批只处理尾部变化区（O(n)→O(delta)），`toRenderItems` 并存签名零变化
+- **回合分组**：`messageTurns.toRenderItems` 纯函数动态计算（user + assistants 成一组）；三路径含 `toRenderItemsIncremental` 尾部快路径——streaming 每合帧批只处理尾部变化区（O(n)→O(delta)），`toRenderItems` 并存签名零变化
 - **session 隔离**：所有状态按 sessionId 分区（messages/retry/queue/changeSetStatuses）
 
 ## 2. 组件结构概述
@@ -728,7 +759,7 @@ testid 以组件 template 内 data-testid 属性为准。对话流相关已落�
 ```
 Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑定，不读全局 session.activeId，防 standby panel 串台）
   ├─ 检查1: segmentsToPrompt(segments).trim() 空 → return
-  ├─ 检查2（投递所有权内核 D1）：不再本地判车道——统一乐观气泡 + delivery.submit，lane 判定在 runtime 内核（busy 期由内核 queued/steer 承接，气泡按 session.delivery 帧 lane morph 为队列条目）
+  ├─ 检查2（投递所有权内核 D1）：不再本地判投递方式——统一乐观气泡 + delivery.submit，lane 判定在 runtime 内核（busy 期由内核 queued/steer 承接，气泡按 session.delivery 帧 lane morph 为队列条目）
   ├─ chat.appendUser(sid, segments)           ← 立即写 user 消息；返回 clientUuid（segments 数组 + clientUuid↔pi 映射 + inflight 占位挂钩）
   ├─ ensureStreamSubscription(sid, chat)     ← 幂等：首次订阅，二次 no-op
   │    └─ chatApi.streamSubscribe(sid, handler)
@@ -776,7 +807,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 
 | type | payload 关键字段 | 前端处理 |
 |------|----------------|---------|
-| `message.message_start` | `{ sessionId, messageId }` | 新建 streaming assistant（status:'streaming', content=''）；无队列区副作用（队列区数据源 = `session.delivery` 内核状态帧，queueStates 分区已退役） |
+| `message.message_start` | `{ sessionId, messageId }` | 新建 streaming assistant（status:'streaming', content=''）；无队列区副作用（队列区数据源 = `session.delivery` 内核状态广播，queueStates 分区已退役） |
 | `message.text_delta` | `{ sessionId, delta }` | content += delta（追加最后 assistant） |
 | `message.thinking_start` | `{ sessionId, thinkingId }` | 追加 ThinkingBlock（content:'', collapsed:true） |
 | `message.thinking_delta` | `{ sessionId, delta }` | 追加最后 ThinkingBlock.content |
@@ -792,7 +823,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 | `message.file_changes` | `{ sessionId, messageId, fileChanges[], changeSetStatus, isFullSet }` | accumulating 增量合并 / ready 全集替换 |
 | `message.auto_retry_start` | `{ sessionId, attempt, maxAttempts?, ... }` | 写 retryStates[sid] |
 | `message.auto_retry_end` | `{ sessionId, success, attempt, ... }` | 清 retryStates[sid] |
-| `message.queue_update` | `{ sessionId, steering?, followUp? }` | 内核内部回执（受理/滞留判定用），不直驱 UI——队列区渲染读 `session.delivery` 状态帧（内核条目派生视图） |
+| `message.queue_update` | `{ sessionId, steering?, followUp? }` | 内核内部回执（受理/滞留判定用），不直驱 UI——队列区渲染读 `session.delivery` 状态广播（内核条目派生视图） |
 
 **ToolCall.status 枚举**：`'running' | 'completed' | 'error' | 'end_not_received'`
 **ChangeSetStatus 5 态**：`'accumulating' | 'ready' | 'partially-reviewed' | 'resolved' | 'superseded'`
@@ -1115,7 +1146,7 @@ expect(m.tableScrollW).toBeLessThanOrEqual(m.hostW + 1)         // 不撑爆宿�
 | tool 失败流式 | tool_call_end status='error' → 红框 + 强制展开 | 集成测试（block-working.test.ts U8），E2E 用 s1 历史 fixture（CF-5 已覆盖静态态） | 低 |
 | thinking 完整文本 | 收起态点展开 → 完整 thinking 可见 | E2E（点击「思考」header toggle 后断言全文） | 低 |
 | ChangeSetCard 审查交互 | 用户 Accept/Reject → partially-reviewed/resolved | E2E（需补 ChangeSetCard testid + 审查按钮锚点） | 中 |
-| queue steer/followUp | 流式中发送 → 内核判 lane=steer → 队列条目（in-flight 行）→ 送达回执入流 | E2E（队列区 testid 已备：`queue-bubble` / `queue-item-<uuid>`） | 低 |
+| queue steer/followUp | 流式中发送 → 内核判 lane=steer → 队列条目（in-flight 行）→ 送达回执入流 | E2E（队列区 testid 已备：`queue-bubble` / `queue-item-<uuid>` / `queue-edit-<uuid>`——队列原位编辑见 §3 queue-edit 系条目） | 低 |
 
 ## 12. 约束与盲区
 

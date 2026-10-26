@@ -202,10 +202,10 @@ describe('W1/L7: switchModel fail-fast & 无 client 不假装成功', () => {
 
     // 3. switchModel：激活路径会尝试 restore；该 session 无落盘文件（进程在首次保存前退出）→
     //    激活失败显性化（SESSION_NOT_FOUND 既有码透传），且**不写缓存**（不假装成功）。
-    const beforeModelId = service.getSummary('s1')?.modelId
+    const beforeModelId = service.getSession('s1')?.modelId
     await expect(service.switchModel('s1', 'new' as ProviderId, 'model'))
       .rejects.toMatchObject({ code: SESSION_NOT_FOUND })
-    expect(service.getSummary('s1')?.modelId).toBe(beforeModelId)
+    expect(service.getSession('s1')?.modelId).toBe(beforeModelId)
     // 未广播 session.state_changed（失败不产生状态假信号）
     expect(findBroadcast(broker, 'session.state_changed')).toBeUndefined()
   })

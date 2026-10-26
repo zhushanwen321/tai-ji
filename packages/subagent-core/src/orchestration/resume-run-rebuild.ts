@@ -165,6 +165,14 @@ export function rebuildRunFromRecord(
   const trace = Trace.fromArray(nodes);
   const sharedNodes = new Map(trace.toArray().map((n) => [n.stepIndex, n]));
   const calls = draftsToReplayCalls(drafts, sharedNodes, nodes);
+  // [subagent-observability §3.3.6/§3.3.9] 重派集成员（result 缺省——calls 不建条目）
+  // 的声明入参挂 meta：budgetViewOf 对 calls miss 的 stepIndex 回落本表读声明值，
+  // 「已声明上界」不因 replay 重派前的窗口显示为「显式无界」（语义见
+  // WorkflowRunMeta.recoveredCallOpts 注释）。回放集成员不入表（calls 条目持真值）。
+  const recoveredCallOpts = new Map<number, AgentCallOpts>();
+  for (const [taskIndex, d] of drafts) {
+    if (d.result === undefined && d.opts !== undefined) recoveredCallOpts.set(taskIndex, d.opts);
+  }
   return WorkflowRun.reconstruct(
     runId,
     spec,
@@ -180,7 +188,10 @@ export function rebuildRunFromRecord(
       trace,
       errorLogs: [],
     },
-    { startedAt: new Date(created.ts).toISOString() },
+    {
+      startedAt: new Date(created.ts).toISOString(),
+      ...(recoveredCallOpts.size > 0 ? { recoveredCallOpts } : {}),
+    },
   );
 }
 

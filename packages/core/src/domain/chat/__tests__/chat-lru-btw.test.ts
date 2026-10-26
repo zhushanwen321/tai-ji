@@ -42,7 +42,7 @@ function msgOf(id: string, content: string): Message {
 interface Harness {
   store: ChatStoreInstance
   dispose: () => void
-  /** agentCallEvictionsOf 回调收到的 sid（原形态：mainSid 或 btw 线 vid）调用记录 */
+  /** agentCallEvictionsOf 回调收到的 sid（原形态：mainSid 或 btw 线 session id）调用记录 */
   callbackCalls: string[]
 }
 
@@ -77,10 +77,11 @@ afterEach(() => {
 })
 
 describe('btw 键形态语义：普通驱逐候选（D5，无 isVirtualKey 特例豁免）', () => {
-  it('isVirtualKey 不含 btw 前缀豁免；isVirtualKeyOf 不把 btw 键算进任何主会话名下', () => {
-    expect(isVirtualKey('btw:pi-1')).toBe(false)
-    expect(isVirtualKey('btw:pi-1')).toBe(false)
-    expect(isVirtualKeyOf('btw:pi-1', 's-main')).toBe(false)
+  it('isVirtualKey 不含 btw 线分区键豁免；isVirtualKeyOf 不把 btw 线键算进任何主会话名下', () => {
+    // W4a 键统一：btw 线分区键 = pi 真实会话 id（普通 key，无前缀形态）
+    expect(isVirtualKey('pi-line-1')).toBe(false)
+    expect(isVirtualKey('pi-line-1')).toBe(false)
+    expect(isVirtualKeyOf('pi-line-1', 's-main')).toBe(false)
     // 既有两族不受影响
     expect(isVirtualKey('subagent:s1:c1')).toBe(true)
     expect(isVirtualKey('agentcall:acs-1')).toBe(true)
@@ -89,14 +90,14 @@ describe('btw 键形态语义：普通驱逐候选（D5，无 isVirtualKey 特�
   it('超阈值时 btw 分区照常按 recency 被驱逐（不豁免、不驻留）', () => {
     const h = makeHarness()
     try {
-      const sids = ['btw:pi-old', ...Array.from({ length: 8 }, (_, i) => `s${i}`)]
+      const sids = ['pi-line-old', ...Array.from({ length: 8 }, (_, i) => `s${i}`)]
       for (const sid of sids) {
         h.store.setMessages(sid, [msgOf(sid, `content-${sid}`)])
         h.store.touchLru(sid) // touch 序 = recency 序（Date.now spy 单调）→ btw 最旧
       }
       h.store.evictIfNeeded()
       // 9 候选 > LRU_MAX(8) → 驱逐最旧的 btw 分区（普通候选，无豁免）
-      expect(h.store.getMessages('btw:pi-old')).toEqual([])
+      expect(h.store.getMessages('pi-line-old')).toEqual([])
       expect(h.store.getMessages('s7')).toEqual([msgOf('s7', 'content-s7')])
     } finally {
       h.dispose()
@@ -108,15 +109,15 @@ describe('主会话驱逐与 btw 分区的边界（D5「主驱逐不联动」+ D
   it('主会话驱逐后 btw 分区存活 + 回填一致', () => {
     const h = makeHarness({
       's-main': ['agentcall:acs-main'],
-      'btw:pi-1': ['agentcall:acs-btw'],
+      'pi-line-1': ['agentcall:acs-btw'],
     })
     try {
       const mainHistory = [msgOf('m1', '主对话正文')]
       const btwHistory = [msgOf('b1', '旁路线回复')]
       h.store.hydrate('s-main', mainHistory)
-      h.store.hydrate('btw:pi-1', btwHistory)
+      h.store.hydrate('pi-line-1', btwHistory)
       h.store.setMessages('subagent:s-main:c1', [msgOf('sa-main', '主名下子任务')])
-      h.store.setMessages('subagent:pi-1:c1', [msgOf('sa-btw', '线名下子任务')])
+      h.store.setMessages('subagent:pi-line-1:c1', [msgOf('sa-btw', '线名下子任务')])
       h.store.setMessages('agentcall:acs-main', [msgOf('ac-main', '主名下运行')])
       h.store.setMessages('agentcall:acs-btw', [msgOf('ac-btw', '线名下运行')])
 
@@ -128,20 +129,20 @@ describe('主会话驱逐与 btw 分区的边界（D5「主驱逐不联动」+ D
       expect(h.store.getMessages('agentcall:acs-main')).toEqual([])
 
       // ① btw 分区存活（D5：删除挂 deleteSession，不挂内存回收）
-      expect(h.store.getMessages('btw:pi-1')).toEqual(btwHistory)
-      expect(h.store.isHydrated('btw:pi-1')).toBe(true)
+      expect(h.store.getMessages('pi-line-1')).toEqual(btwHistory)
+      expect(h.store.isHydrated('pi-line-1')).toBe(true)
       // ② 主驱逐不动 btw 派生键（D9③：m7 前缀联动只匹配主会话名下键）
-      expect(h.store.getMessages('subagent:pi-1:c1')).toEqual([msgOf('sa-btw', '线名下子任务')])
+      expect(h.store.getMessages('subagent:pi-line-1:c1')).toEqual([msgOf('sa-btw', '线名下子任务')])
       expect(h.store.getMessages('agentcall:acs-btw')).toEqual([msgOf('ac-btw', '线名下运行')])
-      // ③ B9 回调只以 mainSid 查询（未按 btw vid 枚举、线名下映射不落 main）
+      // ③ B9 回调只以 mainSid 查询（未按线 id 枚举、线名下映射不落 main）
       expect(h.callbackCalls).toEqual(['s-main'])
 
       // ④ 回填一致：btw 分区随后被逐（普通候选）→ 重载链再注入 → 内容与逐前一致
-      h.store.evictSessionWithVirtual('btw:pi-1')
-      expect(h.store.getMessages('btw:pi-1')).toEqual([])
-      expect(h.store.isHydrated('btw:pi-1')).toBe(false) // 回填门禁重开（重开线可再回放）
-      h.store.hydrate('btw:pi-1', btwHistory)
-      expect(h.store.getMessages('btw:pi-1')).toEqual(btwHistory)
+      h.store.evictSessionWithVirtual('pi-line-1')
+      expect(h.store.getMessages('pi-line-1')).toEqual([])
+      expect(h.store.isHydrated('pi-line-1')).toBe(false) // 回填门禁重开（重开线可再回放）
+      h.store.hydrate('pi-line-1', btwHistory)
+      expect(h.store.getMessages('pi-line-1')).toEqual(btwHistory)
     } finally {
       h.dispose()
     }
@@ -151,8 +152,8 @@ describe('主会话驱逐与 btw 分区的边界（D5「主驱逐不联动」+ D
     const h = makeHarness({ 's-main': ['agentcall:acs-main'] })
     try {
       // btw 分区与线派生键在场（不 touch：非候选，只作为「不得被联动清」的在场面）
-      h.store.setMessages('btw:pi-1', [msgOf('b1', '旁路线回复')])
-      h.store.setMessages('subagent:pi-1:c1', [msgOf('sa-btw', '线名下子任务')])
+      h.store.setMessages('pi-line-1', [msgOf('b1', '旁路线回复')])
+      h.store.setMessages('subagent:pi-line-1:c1', [msgOf('sa-btw', '线名下子任务')])
       h.store.setMessages('agentcall:acs-btw', [msgOf('ac-btw', '线名下运行')])
 
       // 9 个普通候选（s-main 最旧）→ 阈值驱逐恰好 1 个
@@ -165,8 +166,8 @@ describe('主会话驱逐与 btw 分区的边界（D5「主驱逐不联动」+ D
 
       expect(h.store.getMessages('s-main')).toEqual([])
       // btw 分区与其派生键全部不被主驱逐触碰
-      expect(h.store.getMessages('btw:pi-1')).toEqual([msgOf('b1', '旁路线回复')])
-      expect(h.store.getMessages('subagent:pi-1:c1')).toEqual([msgOf('sa-btw', '线名下子任务')])
+      expect(h.store.getMessages('pi-line-1')).toEqual([msgOf('b1', '旁路线回复')])
+      expect(h.store.getMessages('subagent:pi-line-1:c1')).toEqual([msgOf('sa-btw', '线名下子任务')])
       expect(h.store.getMessages('agentcall:acs-btw')).toEqual([msgOf('ac-btw', '线名下运行')])
       expect(h.callbackCalls).toEqual(['s-main'])
     } finally {
@@ -178,12 +179,12 @@ describe('主会话驱逐与 btw 分区的边界（D5「主驱逐不联动」+ D
 describe('btw 分区被驱逐时派生键同驱（D9③ 两半边：subagent 前缀 + agentcall B9 回调）', () => {
   it('btw 驱逐同驱派生键（阈值路径；B9 同构回调：线派生枚举 ∖ viewedVids）', () => {
     const h = makeHarness({
-      // 装配侧等价物：workflow 映射按线 vid 挂名，返回值已 ∖ viewedVids（viewed 项不返回）
-      'btw:pi-1': ['agentcall:acs-unviewed'],
+      // 装配侧等价物：workflow 映射按线 session id 挂名，返回值已 ∖ viewedVids（viewed 项不返回）
+      'pi-line-1': ['agentcall:acs-unviewed'],
     })
     try {
-      h.store.hydrate('btw:pi-1', [msgOf('b1', '旁路线回复')]) // touch 序最前 + hydrated 标记
-      h.store.setMessages('subagent:pi-1:c1', [msgOf('sa', '线名下子任务')])
+      h.store.hydrate('pi-line-1', [msgOf('b1', '旁路线回复')]) // touch 序最前 + hydrated 标记
+      h.store.setMessages('subagent:pi-line-1:c1', [msgOf('sa', '线名下子任务')])
       h.store.setMessages('agentcall:acs-unviewed', [msgOf('ac-un', '未查看运行')])
       h.store.setMessages('agentcall:acs-viewed', [msgOf('ac-v', '查看中运行')]) // 豁免项
       for (let i = 0; i < 8; i++) {
@@ -191,17 +192,17 @@ describe('btw 分区被驱逐时派生键同驱（D9③ 两半边：subagent 前
         h.store.touchLru(`f${i}`) // recency 晚于 hydrate 的 touch
       }
 
-      h.store.evictIfNeeded() // 9 候选 > 8 → 驱逐最旧的 btw:pi-1
+      h.store.evictIfNeeded() // 9 候选 > 8 → 驱逐最旧的 btw 线分区（pi-line-1）
 
-      expect(h.store.getMessages('btw:pi-1')).toEqual([])
-      expect(h.store.isHydrated('btw:pi-1')).toBe(false)
-      // subagent 半边：owner 段 = 线 piSessionId（vid 去 btw: 前缀）前缀匹配同驱
-      expect(h.store.getMessages('subagent:pi-1:c1')).toEqual([])
-      // agentcall 半边：B9 同构回调以线 vid 形态查询，返回项同驱
+      expect(h.store.getMessages('pi-line-1')).toEqual([])
+      expect(h.store.isHydrated('pi-line-1')).toBe(false)
+      // subagent 半边：owner 段 = 线 session id（W4a 后即 sid 本身）前缀匹配同驱
+      expect(h.store.getMessages('subagent:pi-line-1:c1')).toEqual([])
+      // agentcall 半边：B9 同构回调以线 session id 形态查询，返回项同驱
       expect(h.store.getMessages('agentcall:acs-unviewed')).toEqual([])
       // ∖ viewedVids：装配回调未返回的豁免项存活（查看中的派生分区不白屏）
       expect(h.store.getMessages('agentcall:acs-viewed')).toEqual([msgOf('ac-v', '查看中运行')])
-      expect(h.callbackCalls).toContain('btw:pi-1')
+      expect(h.callbackCalls).toContain('pi-line-1')
       // 阈值面收敛：剩余候选恰为 8 个 fill
       expect(h.store.getMessages('f0')).toEqual([msgOf('f0', 'fill')])
       expect(h.store.getMessages('f7')).toEqual([msgOf('f7', 'fill')])
@@ -210,25 +211,25 @@ describe('btw 分区被驱逐时派生键同驱（D9③ 两半边：subagent 前
     }
   })
 
-  it('显式路径同构：evictSessionWithVirtual(btw vid) 同驱派生键 + 时序记录不残留', () => {
-    const h = makeHarness({ 'btw:pi-2': ['agentcall:acs-x'] })
+  it('显式路径同构：evictSessionWithVirtual(线 session id) 同驱派生键 + 时序记录不残留', () => {
+    const h = makeHarness({ 'pi-line-2': ['agentcall:acs-x'] })
     try {
-      h.store.setMessages('btw:pi-2', [msgOf('b2', '线回复')])
-      h.store.setMessages('subagent:pi-2:c1', [msgOf('sa', '线名下子任务')])
+      h.store.setMessages('pi-line-2', [msgOf('b2', '线回复')])
+      h.store.setMessages('subagent:pi-line-2:c1', [msgOf('sa', '线名下子任务')])
       h.store.setMessages('agentcall:acs-x', [msgOf('ac', '线名下运行')])
       h.store.setMessages('agentcall:acs-other', [msgOf('ac-o', '别处运行')]) // 不在映射 → 存活
-      h.store.touchLru('btw:pi-2')
-      h.store.touchLru('subagent:pi-2:c1')
+      h.store.touchLru('pi-line-2')
+      h.store.touchLru('subagent:pi-line-2:c1')
       h.store.touchLru('agentcall:acs-x')
       expect(_lruSizeForTest()).toBe(3)
 
-      h.store.evictSessionWithVirtual('btw:pi-2')
+      h.store.evictSessionWithVirtual('pi-line-2')
 
-      expect(h.store.getMessages('btw:pi-2')).toEqual([])
-      expect(h.store.getMessages('subagent:pi-2:c1')).toEqual([])
+      expect(h.store.getMessages('pi-line-2')).toEqual([])
+      expect(h.store.getMessages('subagent:pi-line-2:c1')).toEqual([])
       expect(h.store.getMessages('agentcall:acs-x')).toEqual([])
       expect(h.store.getMessages('agentcall:acs-other')).toEqual([msgOf('ac-o', '别处运行')])
-      expect(h.callbackCalls).toEqual(['btw:pi-2'])
+      expect(h.callbackCalls).toEqual(['pi-line-2'])
       // 同驱路径同步清时序记录（防 sessionLastAccessed 慢增长）
       expect(_lruSizeForTest()).toBe(0)
     } finally {
@@ -252,19 +253,19 @@ describe('AU1 D5 查看态保护：查看中的 btw 线不落阈值驱逐（evic
   })
 
   /** 建立查看态（生产链：BtwPanel 选中线 → setBtwView；panel 枚举 = 装配侧 bind） */
-  function startViewing(vid: string): void {
+  function startViewing(sessionId: string): void {
     const sid = ref<string | null>('A')
     bindDrawerSessionId(sid)
     openDrawerTab('btw') // 写 A 分区 isOpen + activeTab='btw'
-    setBtwView(vid)
+    setBtwView(sessionId)
     bindViewedVidPanels(ref<Array<string | null>>(['A']))
   }
 
   /** 构造 9 候选（> LRU_MAX=8）：viewed 线 touch 序最前（recency 最旧），f0..f7 较新 */
   function seedNineCandidates(h: Harness): void {
     // hydrate 置 hydrated 标记（面板在场语义），显式 touchLru 钉 recency 序最前
-    h.store.hydrate('btw:pi-view', [msgOf('v1', '查看中的旁路线')])
-    h.store.touchLru('btw:pi-view') // 最旧（无查看保护时必被逐）
+    h.store.hydrate('pi-line-view', [msgOf('v1', '查看中的旁路线')])
+    h.store.touchLru('pi-line-view') // 最旧（无查看保护时必被逐）
     for (let i = 0; i < 8; i++) {
       h.store.setMessages(`f${i}`, [msgOf(`f${i}`, 'fill')])
       h.store.touchLru(`f${i}`)
@@ -275,14 +276,14 @@ describe('AU1 D5 查看态保护：查看中的 btw 线不落阈值驱逐（evic
     const h = makeHarness()
     try {
       seedNineCandidates(h)
-      startViewing('btw:pi-view')
-      expect(getViewedVids()).toEqual(new Set(['btw:pi-view'])) // 查看态三分量齐
+      startViewing('pi-line-view')
+      expect(getViewedVids()).toEqual(new Set(['pi-line-view'])) // 查看态三分量齐
 
       h.store.evictIfNeeded() // 9 候选 > 8 → 无保护时最旧的 btw 线必被逐
 
       // 查看保护生效：btw 分区与其 hydrated 标记存活（面板不空白）
-      expect(h.store.getMessages('btw:pi-view')).toEqual([msgOf('v1', '查看中的旁路线')])
-      expect(h.store.isHydrated('btw:pi-view')).toBe(true)
+      expect(h.store.getMessages('pi-line-view')).toEqual([msgOf('v1', '查看中的旁路线')])
+      expect(h.store.isHydrated('pi-line-view')).toBe(true)
       // 被逐的换成刷新后次旧的 f0；保留区尾部 f7 存活
       expect(h.store.getMessages('f0')).toEqual([])
       expect(h.store.getMessages('f7')).toEqual([msgOf('f7', 'fill')])
@@ -295,14 +296,14 @@ describe('AU1 D5 查看态保护：查看中的 btw 线不落阈值驱逐（evic
     const h = makeHarness()
     try {
       seedNineCandidates(h)
-      startViewing('btw:pi-view')
+      startViewing('pi-line-view')
       setDrawerTab('git') // 切走 btw tab → 三分量破 → viewed 清空
       expect(getViewedVids()).toEqual(new Set())
 
       h.store.evictIfNeeded() // 无查看保护 → 最旧的 btw 线照常被逐
 
-      expect(h.store.getMessages('btw:pi-view')).toEqual([])
-      expect(h.store.isHydrated('btw:pi-view')).toBe(false) // 回填门禁重开（D5 可回填）
+      expect(h.store.getMessages('pi-line-view')).toEqual([])
+      expect(h.store.isHydrated('pi-line-view')).toBe(false) // 回填门禁重开（D5 可回填）
       expect(h.store.getMessages('f0')).toEqual([msgOf('f0', 'fill')])
       expect(h.store.getMessages('f7')).toEqual([msgOf('f7', 'fill')])
     } finally {

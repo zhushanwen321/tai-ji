@@ -43,6 +43,8 @@ import type { FileChange } from '@taiji/shared'
 import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES } from '@taiji/shared'
 // subagent-record / workflow-record 词表单源 core（与 subagent-extractor/event-adapter 同源消费）
 import { SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
+// [chat-flow-consistency D1] occupancy turn 维声明式状态机基建（ADR-0152 第 5 条承接）
+import { defineStateMachine } from '@zhushanwen/state-machine'
 import { CompactionNotifier } from './event-interpreter-compaction.js'
 import { LlmWindowSampler } from './event-interpreter-gen-stats.js'
 import { PingProbe } from './event-interpreter-ping.js'
@@ -65,6 +67,7 @@ import type {
   SessionOccupancy,
   SessionOccupancyStateStore,
   SessionOccupancyTransition,
+  SessionTurnPhase,
   UserStoppedMarkStore,
 } from './types.js'
 // pi 事件名经常量表具名出口引用（pi1-disposition-chat-flow U3⑦，D5⑥ 字面量单点化——
@@ -75,11 +78,87 @@ import { PI_EVENT } from '../../infra/pi/pi-protocol.js'
  * occupancy 的 idle 初值（session-occupancy-send-closure D3）：registerSession 初始化与
  * updateSessionOccupancy 对「记录尚无 occupancy 字段」的兜底合并共用。
  */
-export const IDLE_SESSION_OCCUPANCY: SessionOccupancy = { turn: 'idle', compacting: false, bash: false }
+export const IDLE_SESSION_OCCUPANCY: SessionOccupancy = {
+  turn: 'idle',
+  compacting: false,
+  bash: false,
+  handingOff: false,
+}
+
+/**
+ * turn 维声明式状态机（chat-flow-consistency §3.3 D1 采用 1，ADR-0152 第 5 条 session 域
+ * 立项承接）：表形态 = **全组合合法表**——每事件 × 每状态一行（数组 from 定义期展开为逐态
+ * 规范行，幂等 no-op 也是行）。现状「事件 → 目标值」的绝对式幂等 patch 是有意设计（任何
+ * 事件在任何当前态都合法、写目标值幂等，乱序/重复事件不产生错误状态），不收紧为「只声明
+ * 合法转移、表外拒绝」——否则会把现状合法的乱序形态（如 settling 中再收 turn-end）变成
+ * illegal 抛错，违背「读侧零回归」。
+ *
+ * 迁移收益三件：转移表即文档（本声明即行为权威）；定义期词表外事件拦截（新事件未声明即
+ * 定义期 throw——原靠 TS 联合类型静态拦、运行时无拦）；`generateTableTests` 穷举测试替代
+ * 人肉（见 session-turn-machine.test.ts，4 态 × 6 事件全组合）。
+ *
+ * 只管 turn 维度：compacting/bash/handingOff 是正交两态布尔维（ADR-0080 先例，两态域
+ * 布尔判定更严，不建机器），由原语层直接 patch（编排拆解见 applySessionOccupancyTransition）。
+ * 挂点纪律（哪些链路允许发 'idle' 转移）：唯一合法来源 = agent_settled 副作用
+ * （session-state-projection.ts）+ abort 型 1（有回合被中止，message-dispatcher）+ abort
+ * await 失败收尾（message-dispatcher——pi 已退出/流错误时 agent_settled 不会再到的必要复位）
+ * + 异常兜底（handleIsolatedEventError 的 settling 兜底、runAgentSettledEffects 的 idle 兜底）
+ * + handled 终局回落（session-delivery-registry settleDispatching——命令接管后输入已消费，
+ * 无回合要跑，dispatching 态直接回落 idle 终态事实）。
+ *
+ * 导出仅供测试消费（generateTableTests 穷举 + 词表派发点审计，session-turn-machine.test.ts）。
+ */
+export const SESSION_TURN_MACHINE = defineStateMachine({
+  name: 'session-turn',
+  states: {
+    idle: {},
+    dispatching: {},
+    generating: {},
+    settling: {},
+  },
+  initial: 'idle',
+  events: {
+    dispatching: {},
+    generating: {},
+    settling: {},
+    idle: {},
+    'reject-other': {},
+    'full-reset': {},
+  },
+  // 全组合合法表：每事件 × 每状态一行（数组 from = 定义期展开逐态行），目标值即事件语义
+  // （绝对式幂等 patch：任何态收事件都写目标值）。
+  transitions: [
+    { from: ['idle', 'dispatching', 'generating', 'settling'], on: 'dispatching', to: 'dispatching' },
+    { from: ['idle', 'dispatching', 'generating', 'settling'], on: 'generating', to: 'generating' },
+    { from: ['idle', 'dispatching', 'generating', 'settling'], on: 'settling', to: 'settling' },
+    { from: ['idle', 'dispatching', 'generating', 'settling'], on: 'idle', to: 'idle' },
+    { from: ['idle', 'dispatching', 'generating', 'settling'], on: 'reject-other', to: 'idle' },
+    { from: ['idle', 'dispatching', 'generating', 'settling'], on: 'full-reset', to: 'idle' },
+  ],
+  errorPolicy: 'throw',
+})
+
+/** turn 机器事件词表（原语层编排用：该事件归机器裁决还是布尔维 patch）。 */
+const TURN_MACHINE_EVENTS: ReadonlySet<string> = new Set(SESSION_TURN_MACHINE.events)
+
+/**
+ * 正交布尔维事件的 patch 语义（「转移表即文档」的布尔维部分）：事件 → SessionOccupancy
+ * 布尔维 patch。turn 维事件不在表内（归机器）。full-reset 的布尔维全复位也在此声明
+ * （与机器行「任意态 → idle」配对，二者由原语编排为一次合并写）。
+ */
+const BOOLEAN_DIMENSION_PATCHES: Partial<Record<SessionOccupancyTransition, Partial<SessionOccupancy>>> = {
+  'compacting-start': { compacting: true },
+  'compacting-end': { compacting: false },
+  'bash-start': { bash: true },
+  'bash-end': { bash: false },
+  'handingOff-start': { handingOff: true },
+  'handingOff-end': { handingOff: false },
+  'full-reset': { compacting: false, bash: false, handingOff: false },
+}
 
 /**
  * occupancy 幂等写（session-occupancy-send-closure D3 十一挂点的统一写原语）：
- * patch 合并 → 三维全等比较 → **值变化才**写回 session 记录 + 广播 session.occupancy 帧。
+ * patch 合并 → 四维全等比较 → **值变化才**写回 session 记录 + 广播 session.occupancy 帧。
  *
  * - 幂等：每个挂点直写目标值（非增量状态机），乱序/重复事件不产生错误状态——settling 中
  *   再收 turn-end 仍写 settling，retry/followUp 续跑（settling→generating）天然覆盖。
@@ -92,11 +171,18 @@ export const IDLE_SESSION_OCCUPANCY: SessionOccupancy = { turn: 'idle', compacti
  * onSessionExit 全复位）均已改调 applySessionOccupancyTransition（u3b 迁移完成）；
  * 本函数降级为原语的内部机制（合并 + 去重 + state-topic 广播路径），不再被挂点直调。
  * OccupancyPublisher 取 IMessageBus 的结构化窄视图（只依赖 publish，test mock 友好）。
- *
- * [session-dead-structural-fixes D2] 本函数自 u2 起降级为 applySessionOccupancyTransition
- * 原语的内部机制（u3b 挂点迁移完成后原语是唯一写入口，u3c readonly 收紧后绕开原语的
- * 直写在编译期红）。
  */
+/** session.occupancy 帧载荷（wire 形态单一来源：update 与 announce 两站点共用）。 */
+function occupancyFramePayload(sessionId: string, occupancy: SessionOccupancy) {
+  return {
+    sessionId,
+    turn: occupancy.turn,
+    compacting: occupancy.compacting,
+    bash: occupancy.bash,
+    handingOff: occupancy.handingOff,
+  }
+}
+
 export function updateSessionOccupancy(
   session: Pick<IManagedSessionView, 'id' | 'occupancy'>,
   publish: { publish(sessionId: string, msg: ServerMessage): void } | null | undefined,
@@ -104,97 +190,71 @@ export function updateSessionOccupancy(
 ): void {
   const prev = session.occupancy ?? IDLE_SESSION_OCCUPANCY
   const next: SessionOccupancy = { ...prev, ...patch }
-  if (prev.turn === next.turn && prev.compacting === next.compacting && prev.bash === next.bash) return
+  if (
+    prev.turn === next.turn
+    && prev.compacting === next.compacting
+    && prev.bash === next.bash
+    && prev.handingOff === next.handingOff
+  ) return
   session.occupancy = next
-  publish?.publish(session.id, {
-    type: 'session.occupancy',
-    payload: { sessionId: session.id, turn: next.turn, compacting: next.compacting, bash: next.bash },
-  })
+  publish?.publish(session.id, { type: 'session.occupancy', payload: occupancyFramePayload(session.id, next) })
 }
 
 /**
- * 转移表（session-dead-structural-fixes D2，「转移表即文档」）：封闭枚举每行的
- * occupancy 三维 patch + 三布尔派生。派生布尔是既有挂点「同点双写」的转正——迁移后
- * 原语一次调用原子完成「合并 occupancy → 派生三布尔 → 幂等比较 → 广播」，结构上
- * 消灭「只写一边」的漂移写点（deliverText 只写布尔 / message_start 只写 occupancy 类）。
- *
- * 派生语义对齐现状（读侧零回归）：
- * - dispatching/generating → isGenerating=true（#1 markSessionActive / turn-start 语义）；
- * - settling/idle → isGenerating=false（#3 onTurnFinalize 先复位再写 settling 的既有顺序，
- *   派生后二者合一）；
- * - reject-processing → isGenerating=true（A1 止血转正：pi 拒绝「已有一个 turn 在跑」是
- *   权威信号，反转幽灵空闲）；
- * - reject-other → isGenerating=false（compacting 拒绝与非 busy 真失败：turn 没跑起来）；
- * - full-reset / abort-stall-force-kill → 三布尔全复位（进程死亡路径，agent_settled 永不到达）；
- * - abort-stall-converged → idle（预留行：兄弟分支 abort 阶梯「重试收敛」收尾，挂点接线
- *   由 fix-subagent-no-notification 合并方完成，本单元只登记派生定义）。
+ * occupancy 宣告原语（chat-flow-consistency D1 定稿裁决：宣告事件不进机器——它是
+ * 「强制广播当前值」的宣告语义（registerSession 宣告帧收编，Gate B V6b④），全等去重短路
+ * 时的必达补发，归写回/广播层保留为原语特例）：合并/转移均为 no-op，跳过全等去重强制广播
+ * 当前派生视图——对象初值即 idle 时全等去重会短路广播，而宣告帧职责恰恰是「宣告」（重订阅
+ * 回放必达），不是「转移」。走 state-topic 通路双路径。
  */
-const SESSION_OCCUPANCY_TRANSITIONS: Record<
-  SessionOccupancyTransition,
-  | {
-      patch: Partial<SessionOccupancy>
-      flags: Partial<Pick<IManagedSessionView, 'isGenerating' | 'isCompacting' | 'isBashRunning'>>
-    }
-  | 'announce'
-> = {
-  'dispatching': { patch: { turn: 'dispatching' }, flags: { isGenerating: true } },
-  'generating': { patch: { turn: 'generating' }, flags: { isGenerating: true } },
-  'settling': { patch: { turn: 'settling' }, flags: { isGenerating: false } },
-  'idle': { patch: { turn: 'idle' }, flags: { isGenerating: false } },
-  'compacting-start': { patch: { compacting: true }, flags: { isCompacting: true } },
-  'compacting-end': { patch: { compacting: false }, flags: { isCompacting: false } },
-  'bash-start': { patch: { bash: true }, flags: { isBashRunning: true } },
-  'bash-end': { patch: { bash: false }, flags: { isBashRunning: false } },
-  'full-reset': {
-    patch: { turn: 'idle', compacting: false, bash: false },
-    flags: { isGenerating: false, isCompacting: false, isBashRunning: false },
-  },
-  'reject-processing': { patch: { turn: 'generating' }, flags: { isGenerating: true } },
-  'reject-other': { patch: { turn: 'idle' }, flags: { isGenerating: false } },
-  'announce-idle': 'announce',
-  'abort-stall-converged': { patch: { turn: 'idle' }, flags: { isGenerating: false } },
-  'abort-stall-force-kill': {
-    patch: { turn: 'idle', compacting: false, bash: false },
-    flags: { isGenerating: false, isCompacting: false, isBashRunning: false },
-  },
+export function announceSessionOccupancy(
+  session: SessionOccupancyStateStore,
+  publish: { publish(sessionId: string, msg: ServerMessage): void } | null | undefined,
+): void {
+  const current = session.occupancy ?? IDLE_SESSION_OCCUPANCY
+  publish?.publish(session.id, { type: 'session.occupancy', payload: occupancyFramePayload(session.id, current) })
 }
 
 /**
- * 单一转移写原语（session-dead-structural-fixes D2）：封闭转移枚举的唯一入口，内部原子完成
- * 「合并 occupancy 三维 → 按转移类型派生三布尔 → 幂等比较 → 广播」。
+ * 单一转移写原语（session-dead-structural-fixes D2；chat-flow-consistency D1 迁移为
+ * 机器声明 + transition 唯一入口）：封闭转移枚举的唯一入口，内部原子完成「turn 维机器
+ * transition（SESSION_TURN_MACHINE 全组合合法表裁决）+ 布尔维 patch 合并 → 幂等比较 →
+ * 广播」。
  *
  * - 通路归属：广播走既有 state-topic 通路（bus.publish = 实时广播 + 快照写入/重订阅回放
  *   双路径，见 MessageBus topicOf 分流），禁止绕过 state topic 裸 publish。
- * - announce-idle 特例（registerSession 宣告帧收编行，Gate B V6b④）：合并/派生均为 no-op，
- *   跳过全等去重强制广播当前派生视图——对象初值即 idle 时全等去重会短路广播，而宣告帧职责
- *   恰恰是「宣告」（重订阅回放必达），不是「转移」。
- * - 三布尔直写在 session 记录（派生存储，幂等无广播语义）；occupancy 合并与去重复用
- *   updateSessionOccupancy 既有机制。
+ * - 跨维事件编排拆解（D1 §3.4）：机器只管 turn 维度；compacting/bash/handingOff 布尔维
+ *   由原语直接 patch——full-reset 同时动 turn 与三布尔，拆为「机器 transition + 布尔维
+ *   patch」一次合并写。
+ * - 机器 errorPolicy 'throw'：词表外事件在枚举类型层已拦；运行时兜底（as 绕过类型）由
+ *   defineStateMachine 定义期自检 + 表外抛错承接。
  *
- * u3b 挂点迁移完成后本原语是唯一写入口；u3c readonly 收紧已落地——三布尔在 IManagedSessionView
- * 为 readonly 派生存储，原语经 SessionOccupancyStateStore 写视图（types.ts）完成内部派生写，
- * 绕开原语的直写在编译期红（约束 C-data-19）。
+ * u3b 挂点迁移完成后本原语是唯一写入口；绕开原语的直写在编译期红（约束 C-data-19）。
  */
 export function applySessionOccupancyTransition(
   session: SessionOccupancyStateStore,
   publish: { publish(sessionId: string, msg: ServerMessage): void } | null | undefined,
   transition: SessionOccupancyTransition,
 ): void {
-  const row = SESSION_OCCUPANCY_TRANSITIONS[transition]
-  if (row === 'announce') {
-    const current = session.occupancy ?? IDLE_SESSION_OCCUPANCY
-    publish?.publish(session.id, {
-      type: 'session.occupancy',
-      payload: { sessionId: session.id, turn: current.turn, compacting: current.compacting, bash: current.bash },
-    })
+  if (TURN_MACHINE_EVENTS.has(transition)) {
+    const prev = session.occupancy ?? IDLE_SESSION_OCCUPANCY
+    // 枚举成员判定收窄：transition 经 Set.has 判定后仍是宽枚举类型（含布尔维事件），
+    // 机器 events 词表是 turn 事件子集——此处收窄为机器事件类型（词表成员运行时恒真）。
+    const machineEvent = transition as keyof typeof SESSION_TURN_MACHINE.definition.events
+    const result = SESSION_TURN_MACHINE.transition(prev.turn, machineEvent)
+    // full-reset 同属两表（机器行「任意态 → idle」+ 布尔维全 false patch），合并为一次写；
+    // 其余纯 turn 事件无布尔维声明，展开为 no-op。
+    const booleanPatch = BOOLEAN_DIMENSION_PATCHES[transition]
+    updateSessionOccupancy(session, publish, { turn: result.state as SessionTurnPhase, ...booleanPatch })
     return
   }
-  for (const [flag, value] of Object.entries(row.flags) as Array<
-    [keyof Pick<IManagedSessionView, 'isGenerating' | 'isCompacting' | 'isBashRunning'>, boolean]
-  >) {
-    session[flag] = value
+  const patch = BOOLEAN_DIMENSION_PATCHES[transition]
+  if (patch !== undefined) {
+    updateSessionOccupancy(session, publish, patch)
+    return
   }
-  updateSessionOccupancy(session, publish, row.patch)
+  // 枚举封闭 + 机器/布尔维两表覆盖全词表，此分支运行时不可达；防御性兜底保持 fail-fast。
+  throw new Error(`[event-interpreter] unknown occupancy transition: ${String(transition)}`)
 }
 
 // ── userStopped 标记门面（ADR-0122 事件顺序契约）──
@@ -214,7 +274,7 @@ export function applySessionOccupancyTransition(
  * 显式意图事件驱动——用户显式投递（consumeForExplicitDelivery）、会话删除
  * （disposeForDelete）、shutdown（disposeAll）。不做任何自动收敛：
    * 「settled 到达即清标记」会被同边沿的重投击穿——被掐 turn 的 settled 边沿正是文本
-   * 车道对账器的重投触发点（对账器为现行旁路 turn 源之一；custom 通知旁路源 = port
+   * 文本投递路径对账器的重投触发点（对账器为现行旁路 turn 源之一；custom 通知旁路源 = port
    * session_start 差集重放），清标记后同边沿重投开的新 turn 不再被拦；「窗满清标记」=
    * 时间窗猜事实（原 D4，已删）。
  *
@@ -365,10 +425,12 @@ export interface EventInterpreterOptions {
   /**
    * pi agent_end 整循环结束时触发（组合根注入 sessionService.handleTurnEndSideEffects）。
    *
-   * 承载副作用：复位 isGenerating=false（不迁移则正常生成完成后 session 永远 busy，下条消息被拒）
-   * + project sidecar 兜底 + session_end 终态写入。
+   * 承载副作用：occupancy 'settling' 转移 + project sidecar 兜底 + session_end 终态写入。
+   * [chat-flow-consistency willRetry 分层] willRetry=true（pi 自动重试的中间失败，turn 未
+   * 结束）时终态写入跳过（design-turn-statemachine 缺陷 1 方案 A）——settling 转移保留
+   * （attempt 间隙的真实阶段就是 settling，retry 续跑 turn-start 会推回 generating）。
    */
-  onTurnFinalize?: (sessionId: string, stopReason?: string) => void
+  onTurnFinalize?: (sessionId: string, stopReason?: string, willRetry?: boolean) => void
   /**
    * session_info_changed 的内存态回写（组合根注入 sessionService.setLabelCache——
    * session.label 事件路径的唯一写方，toSummary/config.sessions 读它；session.renamed
@@ -411,11 +473,15 @@ export interface EventInterpreterOptions {
    */
   onSilentAbort?: (payload: { sessionId: string }) => void
   /**
-   * compaction 生命周期态切换（M4 事件驱动）—— interpreter 从 compaction_start/end 唯一置位/复位
-   * runtime active.isCompacting（sendPrompt/sendBash 预检互斥依据）。
+   * compaction 生命周期态切换（M4 事件驱动）—— interpreter 从 compaction_start/end 唯一触发
+   * runtime 占用置位/复位。
    *
-   * 组合根注入：(sid, v) => 写 sessionService.getSession(sid).isCompacting（与原 dispatcher 手动
-   * 路径置位对称）。事件驱动后 dispatcher 不再置位，复位责任转移到 interpreter（三路对称复位）。
+   * 组合根接线（index.ts）：(sid, v) => applySessionOccupancyTransition 'compacting-start' /
+   * 'compacting-end' 原语行（occupancy.compacting 置位/复位 + 合并写 + state 帧广播原子完成；
+   * 原 sessionService.getSession(sid).isCompacting 平行存储字段已随 chat-flow-consistency D1
+   * 删除，读口 = occupancy.compacting 派生）。本通道是「与原语 compacting± 行幂等的冗余通道」
+   * （u3c 裁决，勿新增使用——新挂点一律走 onOccupancyTransition 通道；sendPrompt busy 预检
+   * 已随「排队取代拒绝」退役，sendBash 预检读 occupancy.compacting，bash-dispatcher.ts）。
    */
   onCompactingStateChange?: (sessionId: string, isCompacting: boolean) => void
   /**
@@ -423,11 +489,11 @@ export interface EventInterpreterOptions {
    * 挂点（turn-start→'generating' / turn-end→'settling' / agent-settled→'idle' /
    * compaction-start→'compacting-start' / compaction-end→'compacting-end' / turn-end 处理
    * 异常兜底→'settling'）经本回调由组合根接线到 applySessionOccupancyTransition（封闭转移
-   * 枚举唯一入口：合并 occupancy 三维 + 派生三布尔 + 幂等比较 + 广播 state 帧）。
+   * 枚举唯一入口：合并 occupancy 四维 + 幂等比较 + 广播 state 帧）。
    *
    * 回调只传转移类型（封闭枚举值），合并/派生/去重在原语内——interpreter 是 per-session
-   * 实例但不持有全量 occupancy（bash/dispatching 维度由 dispatcher 侧挂点写入），必须经
-   * session 记录（权威聚合点）合并，否则会以 stale 维度广播错误三维。
+   * 实例但不持有全量 occupancy（bash/handoff 等维度由 dispatcher/handoff 侧挂点写入），必须经
+   * session 记录（权威聚合点）合并，否则会以 stale 维度广播错误的占用派生视图。
    * 未注入时（存量单测）no-op，不广播。
    */
   onOccupancyTransition?: (transition: SessionOccupancyTransition) => void
@@ -673,10 +739,14 @@ export class EventInterpreter {
     // 兜底强制执行。onTurnFinalize 幂等（finalizeSession 幂等，见 chat.ts），重复调用无副作用。
     if (ev.kind === 'turn-end') {
       try {
-        // S4：传 ev.stopReason 而非 undefined——对齐正常路径（handleTurnEnd L352）。
+        // S4：传 ev.stopReason 而非 undefined——对齐正常路径（handleTurnEnd）。
         // handleTurnEndSideEffects 在 stopReason undefined 时 outcome 走 'done' 分支，
         // 对「handler 抛错」场景写 'done' 是错的；turn-end 事件本身携带 stopReason（types.ts L120）。
-        this.opts.onTurnFinalize?.(this.sessionId, ev.stopReason)
+        // willRetry 同源透传（与正常路径 handleTurnEnd 一致——中间失败 handler 抛错同样
+        // 不写终态，terminal-frame failure recovery（D4）由前端权威空闲信号接管）。
+        const willRetry =
+          (ev.message.payload as { willRetry?: unknown } | undefined)?.willRetry === true
+        this.opts.onTurnFinalize?.(this.sessionId, ev.stopReason, willRetry)
       } catch (finalizeErr) {
         // best-effort: onTurnFinalize 本身就是 handle(ev) 抛错后的兜底，此处失败无更上层可传播，静默降级
         console.debug('[event-interpreter] onTurnFinalize fallback failed:', finalizeErr)
@@ -759,6 +829,18 @@ export class EventInterpreter {
       case 'noop':
         return true
       case 'message':
+        // [chat-flow-consistency D3 定位升级] assistant 帧附加 messageId——必须在 send 之前
+        // 改写 payload（后写则帧已发出、前端收不到锚点）。翻译层同步附加：message 帧无 hook
+        // 延迟、捕获时机无竞态；currentMessageId = message_start 翻译产物（assistantTurnStart
+        // 的 a-uuid），与前端 live 气泡 id 同一 id 空间——前端定稿重建 / textFinalized 定位
+        // 升级为「id 锚定优先、位置兜底」。user/toolResult/custom 帧不带。
+        if (ev.message.type === 'message.message_end') {
+          const anchorPayload = ev.message.payload as { entry?: unknown; messageId?: string }
+          const anchorEntry = anchorPayload?.entry as { message?: { role?: unknown } } | undefined
+          if (anchorEntry?.message?.role === 'assistant' && this.currentMessageId !== undefined) {
+            anchorPayload.messageId = this.currentMessageId
+          }
+        }
         this.opts.send(ev.message)
         // pi1-disposition-chat-flow U4⑤（D7③ stdout 单一通路）：message_end 的 onPiEvent
         // 观测登记点——bridge 转发链退役后插件事件感知唯一通路 = 本 stdout 触发点族
@@ -991,6 +1073,11 @@ export class EventInterpreter {
   private async handleToolCallStart(ev: PiTranslatedEvent & { kind: 'tool-call-start' }): Promise<void> {
     const { toolCallId, toolName } = ev
     let input = ev.input
+    // [chat-flow-consistency C1] 锚点捕获前移：在任何 await 之前同步读 currentMessageId。
+    // hook 是异步的——迟到形态下（帧后置于下一回合 message_start）await 期间 turn-start
+    // 可能已把 currentMessageId 改写为新回合 id，await 后再读会把迟到帧错锚到新回合；
+    // 事件到达时刻的归属事实必须在此刻捕获（前端三级定位的 ② 级精确锚点依赖此保证）。
+    const messageIdAtEvent = this.currentMessageId
 
     let blocked = false
     if (this.opts.executeHooks) {
@@ -1036,7 +1123,7 @@ export class EventInterpreter {
     ev.entry.arguments = isPlainRecord(input) ? input : {}
     const contentIndex = this.toolCallContentIndex.get(toolCallId)
     if (contentIndex !== undefined) ev.entry.contentIndex = contentIndex
-    if (this.currentMessageId !== undefined) ev.entry.messageId = this.currentMessageId
+    if (messageIdAtEvent !== undefined) ev.entry.messageId = messageIdAtEvent
 
     this.opts.send({
       type: 'message.tool_call_start',
@@ -1126,8 +1213,14 @@ export class EventInterpreter {
       this.opts.onContextUpdate?.(this.sessionId, { inputTokens: ev.inputTokens, totalTokens: ev.totalTokens ?? 0 })
     }
 
-    // 副作用：复位 isGenerating=false + project sidecar 兜底 + session_end 终态写入（W4）
-    this.opts.onTurnFinalize?.(this.sessionId, ev.stopReason)
+    // 副作用：occupancy 'settling' 转移 + project sidecar 兜底 + session_end 终态写入（W4）。
+    // [chat-flow-consistency willRetry 分层] willRetry 从 message.complete 帧载荷读取
+    // （event-adapter handleAgentEnd 恒透传 pi agent_end 的 willRetry；turn-end 事件对象的
+    // message 字段即该帧——读取点与帧同源，无需翻译层加字段）。willRetry=true = pi 自动
+    // 重试的中间失败、turn 未结束 → onTurnFinalize 内跳过终态 sidecar 写入，settling 转移保留。
+    const willRetry =
+      (ev.message.payload as { willRetry?: unknown } | undefined)?.willRetry === true
+    this.opts.onTurnFinalize?.(this.sessionId, ev.stopReason, willRetry)
 
     // occupancy #3（D2 迁移）：turn-end（agent_end）→ 'settling'。pi post-run 收尾期从「空闲」中
     // 显式分离。onTurnFinalize（handleTurnEndSideEffects）已先以 'settling' 原子完成

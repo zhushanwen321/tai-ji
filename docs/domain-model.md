@@ -1,6 +1,6 @@
 # taiji 领域模型登记
 
-> **本文件定位**：领域聚合、不变量与状态机的登记处（统一语言词条在 [CONTEXT.md](CONTEXT.md)）。当前登记域：**画布（problem-solve canvas，聚合与不变量，2026-10）**；**状态机基建与五域状态机（run / 画布节点 / plan / goal / permanent-session + 归档单元，2026-10，见下「状态机基建」节）**；**session 存储归档域（归档单元聚合 + 不变量 + 转移表，2026-10，见下「session 存储归档域」节）**。
+> **本文件定位**：领域聚合、不变量与状态机的登记处（统一语言词条在 [CONTEXT.md](CONTEXT.md)）。当前登记域：**画布（problem-solve canvas，聚合与不变量，2026-10）**；**状态机基建与六域状态机（run / 画布节点 / plan / goal / permanent-session + 归档单元 + session occupancy turn，2026-10，见下「状态机基建」节）**；**session 存储归档域（归档单元聚合 + 不变量 + 转移表，2026-10，见下「session 存储归档域」节）**；**subagent 会话轮债权域（record 会话 / 轮 / 债权聚合不变量，2026-10，见下「subagent 会话轮债权域」节）**。
 >
 ## 状态机基建（@zhushanwen/state-machine）
 
@@ -22,11 +22,24 @@
 | goal 目标状态 | active / paused / blocked / complete / budget_limited / cancelled（后三 terminal） | `GOAL_MACHINE`（extensions/universal/goal/src/engine/goal.ts；`transitionStatus` 保形包装对外） | throw |
 | permanent-session 两态 | running / idle（词表与 ExecutionStatus satisfies 双向锁定） | `permanentSessionStatusMachine`（packages/subagent-core/src/execution/domain/record-status-machine.ts） | result——表外拒绝经域内原语转 return false（两态 CAS 语义保形） |
 | 归档单元（session 归档子域，基建首个新消费者） | staging / archived / restoring | `archiveEntryMachine`（packages/runtime/src/services/archive/archive-entry-machine.ts） | throw——对外错误码由服务层承载 |
+| session occupancy turn 维（对话回合进行阶段，chat-flow-consistency D1 承接 ADR-0152 第 5 条 session 域立项） | idle / dispatching / generating / settling（无 terminal——回合状态可任意重入） | `SESSION_TURN_MACHINE`（packages/runtime/src/services/session/event-interpreter.ts） | throw（词表外事件在枚举类型层拦截 + 机器定义期自检兜底；**全组合合法表**形态——每事件 × 每状态一行、幂等 no-op 也是行，表外仅词表外值可达，详见下「session occupancy turn 状态机」节） |
 
-边界登记：session / background-task 两个域尚无转移表（显式化各自独立立项，ADR-0152）；core 的 streaming-state-machine.ts 是消费顺序 factory 深模块、非转移表状态机，不属本基建范畴；归档子域的聚合与不变量登记见下「session 存储归档域」节（本节只登记其状态机实现载体）。
+边界登记：background-task 域尚无转移表（显式化独立立项，ADR-0152）；core 的 streaming-state-machine.ts 是消费顺序 factory 深模块、非转移表状态机，不属本基建范畴；归档子域的聚合与不变量登记见下「session 存储归档域」节（本节只登记其状态机实现载体）。
+
+## session occupancy turn 状态机（chat-flow-consistency D1，2026-10）
+
+session 的会话占用（occupancy）是四维结构：turn 维（状态机，见上表 `SESSION_TURN_MACHINE`）+ compacting / bash / handingOff 三个与 turn 正交的两态布尔维（ADR-0080 先例：两态域布尔判定比表级 fail-fast 更早更严，不建机器）。唯一写入口 = `applySessionOccupancyTransition`（event-interpreter.ts），内部编排「turn 机器 transition + 布尔维 patch」一次合并写；值变化才广播 `session.occupancy` 状态事件（全等去重）。原「同点双写」的派生三布尔（isGenerating/isCompacting/isBashRunning）已删除，消费方一律从 occupancy 派生（`isGeneratingTurn` = turn ∈ {dispatching, generating} 单点定义；「回合进行中」判定集合 = shared `ACTIVE_TURN_PHASES`，含 settling——投递判定、发送位预测、前端回合判定引用判定集合；活动条（ActivityStrip）消费 sessionPhase 派生视图按阶段分行，不直接引用集合）。
+
+- **事件词表与挂点**（词表派发点静态审计锁定每项必有派发点）：dispatching（投递受理出站）/ generating（message_start）/ settling（agent_end）/ idle（agent_settled + abort 型 1 + abort await 失败收尾 + 异常兜底 + handled 终局回落）/ reject-other（prompt 真失败收尾）/ full-reset（进程死亡四维全复位）；compacting± / bash±（压缩与 bash 窗口）/ handingOff±（交接编排在途，挂点 handoff-service：编排开始置位、cleanupInflight 统一复位）。announce-idle 事件退出词表（宣告语义归广播层原语 `announceSessionOccupancy`，跳过全等去重强制广播）；abort-stall 两死行与 reject-processing（随 u5a 忙闲门禁退役——processing 分型重试随忙闲门禁退役、转移行零消费）已删（派发点审计防死行复发，退役词清单一一对应 session-turn-machine.test.ts 静态审计 it.each 清单）。
+- **不变量**：
+  1. occupancy 四维唯一合法写点 = 转移原语（绕开直写在编译期红）；session 记录不存任何平行忙闲布尔
+  2. turn 维转移行为 = 全组合合法表（绝对式幂等 patch 保形：任何状态收任何事件都写事件目标值，乱序/重复事件不产生错误状态——读侧零回归是迁移约束）
+  3. abort 链的 idle 转移只允许在型 1（入口快照 turn ∈ {dispatching, generating}，有回合被中止）内调用；压缩取消与收尾窗口不写终态、不广播、不动 turn
+  4. 终态 sidecar 写入纪律 = 第一终态优先（persistSessionOutcome 统一层：已有 done/error/stopped 则跳过；willRetry=true 的 attempt 级中间失败跳过终态写入、settling 转移保留）
+- **穷举与审计**：`generateTableTests` 全组合穷举（4 态 × 6 事件）+ 词表派发点静态审计 + 退役词零残留断言（session-turn-machine.test.ts）。
 
 ## 画布域
-> 机制纪律：不变量与状态机转移表的实现单点在 runtime CanvasService（`packages/runtime/src/services/canvas/`）——renderer / extension 侧不复制领域规则，全部写操作经唯一入口 `mutate`（契约 = `packages/extension-protocol/src/extensions/canvas/`，agent 工具面 = `extensions/taiji/canvas/`，GUI 写通道 = WS RPC `canvas.mutate`）。
+> 机制纪律：不变量与状态机转移表的实现单点在 runtime CanvasService（`packages/runtime/src/services/canvas/`）——renderer / extension 侧不复制领域规则，全部写操作经唯一入口 `mutate`（契约 = `packages/extension-protocol/src/extensions/canvas/`，agent 工具实现 = `extensions/taiji/canvas/`，GUI 写通道 = WS RPC `canvas.mutate`）。
 
 
 问题解决画布是 tech-design-wf 之前的方向规划层，一个独立限界上下文：与会话上下文经回推 prompt（文本防腐）交互、与 workflow 上下文无直接依赖（审查 subagent 只复用派发基建）、与计划上下文（plan）互不感知；对下游 tech-design-wf 经需求卡（requirement card）防腐对接。状态权威 = runtime CanvasService；持久化 = session 存储树域 8 `<dataDir>/ext-sessions/<ownerSessionId>/canvases/<canvasId>/` 下 `events.jsonl`（append-only 领域事件流，唯一权威）+ `canvas.json`（可由事件流全量重放推导的加速快照，写入顺序恒「先事件后快照」——快照允许滞后、永不超前）。归属即路径：一张画布恒归属创建它的 session（ownerSessionId），一个 session 可有多个画布（1:N）。
@@ -50,7 +63,7 @@
 9. 用户对节点内容的改动（patch / select / comment）在 mutate 事务内自动计算传播范围进待重审集合：一般改动 = 从该节点上溯到根的路径；换选 = 上溯路径 + 旧选中方案整个子树。dispatch 只在已 passed 的执行叶子上登记下游产物指针、decide-direction 只拍板画布方向元数据，均不改变可审内容，不进传播集
 10. 规划收敛终态的前置 = 待重审集合为空 + must-fix 清零 + 执行叶子全部 passed/dispatched（收敛确认与 export 均校验此不变量；export 另要求收敛确认已执行——converged 终态，GUI 与 agent 代执行两条表面同一前置）
 11. 唯一入口：图元素增删改、状态转移、评价、派发均经画布聚合根的操作（actor 字段区分 user / agent / review；per-action × actor 合法性矩阵在契约模块，表外组合 fail-fast）
-12. 一张画布有且仅有一个归属 session；画布的创建与访问校验归属（GUI 清单与 agent 工具面 canvas_list 按归属过滤，跨会话访问返回 `forbidden` 结构化拒绝）；session 删除级联删除其全部画布（画布落归属 session 的存储树内，随整树回收）
+12. 一张画布有且仅有一个归属 session；画布的创建与访问校验归属（GUI 清单与 agent 侧工具 canvas_list 按归属过滤，跨会话访问返回 `forbidden` 结构化拒绝）；session 删除级联删除其全部画布（画布落归属 session 的存储树内，随整树回收）
 
 **节点状态机**（生命周期 × 派发二维正交，禁止直写状态字段）：
 
@@ -97,7 +110,7 @@ session 存储域（SessionLifecycle 写、SessionScanner 读、文件系统为�
 1. **互斥存在**：同一 session 的主文件（sessions/ 树内 `.jsonl`）与归档单元（archive/ 树内 `.archive.json` / `.restoring` 簿记）不得同时存在于稳定态——恢复前冲突检测（`archive_restore_conflict`）与启动自愈（双存在归位）保证
 2. **压缩体消费前校验**：恢复与 purge 引用枚举两条路径消费压缩体前 sha256 校验必须通过（agent 引用只读簿记明文，不消费压缩体，不涉校验；purge 侧校验不过 = 引用状态不可知 → 级联 keep-all 保守保留，宁保留不误删）
 3. **列表派生**：归档列表条目恒等于 `archive/**/*.archive.json` 扫描结果——不允许存在独立登记渠道（`.restoring` 标记不在列表，恢复中条目对用户不可见）
-4. **扫描范围互斥**：归档目录永不进 SessionScanner 的 sessions 扫描范围（物理隔离，构造性保证——两根互不为对方子树）
+4. **扫描范围互斥**：归档目录永不进 SessionScanner 的 sessions 扫描范围（物理隔离，构造性保证——构造性 = 由结构本身保证、无需额外验证；两根互不为对方子树）
 
 **归档单元状态机**（`@zhushanwen/state-machine` 声明，实现载体登记见上「状态机基建」节；表外转移一律 fail-fast）：
 
@@ -114,3 +127,16 @@ session 存储域（SessionLifecycle 写、SessionScanner 读、文件系统为�
 状态判定唯一权威 = 读磁盘（无簿记 = 无单元；status 字段 = staging / archived；`.restoring` 后缀 = restoring）。同 session 的归档域操作（后台压缩任务 / unarchive / purgeArchive）按到达顺序串行执行，后到者对已消失归档单元按簿记存在性门 fail-fast（`archive_not_found`，拒绝时零副作用）；操作中途崩溃由启动自愈归位（七行表覆盖全部中间态，含压缩收尾窗口〔明文已删 + 压缩体在场 + 簿记仍 staging〕：archive / unarchive 态自动归位，purge 态簿记保持可见、重试幂等达终态）。
 
 **唯一入口**：领域规则单实现 = `ArchiveService`（archive / unarchive / purgeArchive 三操作 + 启动自愈，`packages/runtime/src/services/archive/`）；transport 入口两条，均只调该服务、不各自持有归档规则——① 三条 WS RPC（`session.archive` / `session.unarchive` / `session.purgeArchive`，分发表挂 session 域，命名避开已承载「重开 dead session」语义的 `session.restore`；GUI 侧栏 / 归档视图的调用通道）② session-manager select 通道 `archive` action（agent 工具 `archive_session` → `SessionManagerHandler.handleArchive`：归属校验〔仅限该 agent 管理的子会话〕后调 `archiveService.archive(sessionId)`；仅开放 archive 一操作，unarchive / purgeArchive 不开放给 agent）；彻底删除复用 session 删除级联原语（cascadeDeleteSessionContent + 引用枚举源入参扩展），不自建删除清单。
+
+## subagent 会话轮债权域
+> 机制纪律：record 会话状态权威 = subagent-core RecordStore 意图原语族（唯一写入口，C-data-20），轮成败判定唯一产点 = 引擎收尾边沿（pi 引擎适配层），债权结清唯一裁决 = 轮终事实（pending 注销枚举 SettlementReason）。统一语言词条（轮收条 / 失败分类 / 债权结清 / 失联清点 / 被接管轮）见 [CONTEXT.md](CONTEXT.md)；决策登记 [ADR-0158](adr/decisions.md)～[ADR-0163](adr/decisions.md)。
+
+subagent 体系的领域模型在「会话 + 轮 + 债权」框架下组织（permanent-session 模型，万物可续）：**record 是会话**不是任务——两态（running/idle）+ 归档 + 复活（归档唤醒续聊），没有也不需要任务终局（失败可续聊、成功也可续聊）；**轮**（round）是一次有边界的执行（一进程、一问一答），是成败判定与收条的承载单位；**债权**是一笔「等待这轮结果」的请求（派发即欠、轮终结清、失联也是结清形态，对齐 managed session 债权模型 ADR-0087）；**run** 是一次性编排，有终局（与 record 无终局不矛盾——run 终局由成员交付结算集合派生，见 [ADR-0159](adr/decisions.md)）。
+
+不变量（全部可核对，违反即缺陷；词表锚与枚举完整性测试 = `packages/subagent-engine-sdk/src/__tests__/failure-cause-vocabulary.test.ts` / `packages/subagent-core/src/execution/domain/__tests__/record-types.test.ts` / `packages/subagent-core/src/shared/__tests__/run-vocabulary.test.ts`）：
+
+1. **record 事件流 append-only**，历史不可改写——派生层禁止反写事实源（失败事实只追加进轮级 `errors: ErrorFact[]`，`lastError` 由「最后一个非空轮失败」派生，`applyTurnEnd` 不清空）
+2. **轮成败判定只产自引擎收尾边沿**（看见 stopReason / exitCode / 引擎 error 事件的层）——最后一条 assistant 消息停因 ∈ {error, aborted} 或存在未消费引擎 error 事件 → 轮失败；`agent_settled` 是 run 结束信号不是成功证据，不构成任何置成功依据；aborted 三源判别（用户/run 取消 → user.cancelled；turn 预算耗尽 → harness.turn_budget_exhausted；其余引擎异常 → engine.*），禁止把中止一律记失败
+3. **轮收条只存事实**（引擎停因原值 + FailureCause + 结果正文），推断词只派生不存储——「completed」这类「没报错=成功」的推断只允许作为展示层派生词（引擎停因 = stop 且无失败分类 → 派生「正常收尾」）；被接管轮（promptDisposition=handled）无停因、构造性不满足派生判据，不产生假成功
+4. **派生视图只读事实源**（manifest / 通知文案 / list 字段 / 展示词 / renderer 失败红点判据全部消费轮收条事实字段，禁止自建成败推断）
+5. **债权结清状态如实**（SettlementReason 封闭五值 completed/failed/cancelled/lost/no_result，fail-visible——词表外解析缺省 unknown，「遇未知按成功」的 fail-open 方向废除）；run 终局如实吸收成员交付（partially_succeeded 入 RunOutcome 值域，一半失败不再显示 done）

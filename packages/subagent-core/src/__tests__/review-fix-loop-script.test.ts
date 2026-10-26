@@ -344,6 +344,52 @@ describe("review-fix-loop.js buildRemaining（终态残留四字段清单）", (
   });
 });
 
+// ── applyCarryoverRegression（自 utils.cjs 迁入 pi 模板顶层——它依赖 shared 单源段
+//    inheritCarryoverFields，两函数都在产物源码内，函数段抽取求值时一并取出）──
+describe("review-fix-loop.js applyCarryoverRegression — 「重报 → regressed」转移（merge 路径单点实装，C2）", () => {
+  const loadFns = () =>
+    vm.runInNewContext(
+      [extractFn("inheritCarryoverFields"), extractFn("applyCarryoverRegression"), "({ inheritCarryoverFields, applyCarryoverRegression })"].join("\n"),
+      {},
+    ) as {
+      inheritCarryoverFields: (t: Record<string, unknown>, e: Record<string, unknown>) => boolean;
+      applyCarryoverRegression: (t: Record<string, unknown>, e: Record<string, unknown>, round: number) => void;
+    };
+  const trackedBase = (status: string) => ({
+    firstSeen: 1, severity: "major", status, openStreak: 0,
+    history: [{ round: 1, status: "open" }], fixAttempts: 0,
+  });
+  it("fix-attempted + 重报 → regressed、fixAttempts+1、openStreak+1、history 追加（B1 逐字段等价）", () => {
+    const { applyCarryoverRegression } = loadFns();
+    const tracked = trackedBase("fix-attempted");
+    applyCarryoverRegression(tracked, { id: "MF-1", severity: "major" }, 3);
+    expect(tracked.status).toBe("regressed");
+    expect(tracked.fixAttempts).toBe(1);
+    expect(tracked.openStreak).toBe(1);
+    expect(tracked.history).toContainEqual({ round: 3, status: "regressed" });
+  });
+  it("fixed + 重报 → 同样转 regressed（复发同计修复失败，needs-redesign 可达）", () => {
+    const { applyCarryoverRegression } = loadFns();
+    const tracked = { ...trackedBase("fixed"), fixAttempts: 1, openStreak: 2, history: [{ round: 1, status: "open" }, { round: 2, status: "fixed" }] };
+    applyCarryoverRegression(tracked, { id: "MF-1", severity: "major" }, 4);
+    expect(tracked.status).toBe("regressed");
+    expect(tracked.fixAttempts).toBe(2);
+    expect(tracked.openStreak).toBe(3);
+  });
+  it("severity 继承：采信本轮显式标注（shared 单源 inheritCarryoverFields 同一权威语义）", () => {
+    const { applyCarryoverRegression } = loadFns();
+    const tracked = trackedBase("fix-attempted");
+    applyCarryoverRegression(tracked, { id: "MF-1", severity: "critical" }, 2);
+    expect(tracked.severity).toBe("critical");
+  });
+  it("title 清单权威：转换不覆盖既有 title（title 继承只由调用方继承点承担）", () => {
+    const { applyCarryoverRegression } = loadFns();
+    const tracked = { ...trackedBase("fix-attempted"), title: "原始标题" };
+    applyCarryoverRegression(tracked, { id: "MF-1", severity: "major", title: "重报换措辞" }, 2);
+    expect(tracked.title).toBe("原始标题");
+  });
+});
+
 // ── RX2-F2：fixAgent=fallow-scan 显式拒收（脚本顶层参数校验，非函数段） ──
 // 拒收逻辑位于脚本顶层（FIX_AGENT_RAW 解析后、resolveAgentDefs 前），函数段抽取法
 // 覆盖不到；改用「AsyncFunction 包装」在本进程内跑整脚本顶层（worker 模板宿主形态：

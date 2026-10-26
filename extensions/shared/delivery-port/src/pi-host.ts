@@ -23,8 +23,6 @@ export interface CreatePiDeliveryPortHostOptions { // oe-exempt:20261017:framewo
   component: string;
   /** 降级与诊断出口（@zhushanwen/pi-extension-logger 的 ExtensionLogger）。 */
   logger: DeliveryPortHost["logger"];
-  /** 攒批条件谓词（有活跃后台任务；base-tool-enhance 注入 task-store 计数）。 */
-  hasRunningBackground(): boolean;
 }
 
 /** 接线 pi 扩展运行时端口为 DeliveryPortHost（纯端口面，无业务状态）。 */
@@ -62,7 +60,6 @@ export function createPiDeliveryPortHost(
 			pi.on("session_compact_failed", () => {
 				handler();
 			}),
-		hasRunningBackground: () => options.hasRunningBackground(),
 		logger: options.logger,
 	};
 }

@@ -11,14 +11,16 @@
  *   用户裁决 A）；直接读聚合值（core 派生，两条链路同一公式）。
  *
  * 计时驱动（转 live 停 freeze 的唯一判据）：
- * - `getIsTurnRunning` = 本 turn 是否仍在进行（工作 turn：会话活跃 + 末位 turn）。
+ * - `getIsTurnRunning` = 本 turn 是否仍在进行（工作 turn：会话活跃 +（末位 ∨ streaming），
+ *   [chat-flow-consistency D2] 后非末位的 streaming 回合同样为 true）。
  *   true → 秒级 tick，elapsed 跟随 Date.now()（含长工具执行、等待用户输入）；false → 定格读
  *   endedAt（不再回跳：收尾当下就写入 endedAt，定格值 = 最后一帧 live 值）。
  *   [口径修正 2026-09] 旧判据是「末位 assistant 仍在 streaming」——ask-user 等待期间 pi 已
  *   agent_end（assistant 转 complete）但会话仍在进行，旧判据下计时冻住、作答后才跳变（定格
  *   值含等待而显示不含）。整 turn 墙钟口径要求含等待，故改为 turn 进行中。
- * - 完成收起（onComplete）看 `getIsSessionActive`（对话真正结束才收起：ask-user 期间会话仍
- *   waiting，不应收起未传时退化为跟随 getIsProducing）。
+ * - [chat-flow-consistency C3] 完成收起（onComplete / getIsSessionActive 参数）已退役：
+ *   Turn.vue 的显式 collapse 对工作回合自身冗余（收起是派生态），唯一净效果是清挂载回合的
+ *   手动展开态（有害无益）——收起纯派生后两个参数失去消费方，随接线一并删除。
  *
  * 可见性停表（Q1-7）：页面失焦（visibilitychange hidden）停止每秒 tick——elapsed 是绝对
  * 差值计算，停 tick 不丢时间；恢复可见时一次重算即补算失焦期间耗时并重启 tick。
@@ -28,8 +30,6 @@
  *
  * @param getAggregates 当前 turn 的聚合事实 getter（core deriveTurnAggregates 产物）
  * @param getIsTurnRunning 本 turn 是否仍在进行（驱动秒级 tick 与 isLive）
- * @param getIsSessionActive 对话进行中态 getter（仅驱动 onComplete 收起；不传则跟随 getIsTurnRunning）
- * @param onComplete optional isSessionActive true→false 回调（Turn.vue 用它复位 expanded）
  */
 import { computed, ref, watch, onUnmounted, type ComputedRef, type Ref } from 'vue'
 import type { TurnAggregates } from '@taiji/core/domain/chat'
@@ -42,8 +42,6 @@ const SEC_PAD_WIDTH = 2
 export function useTurnElapsed(
   getAggregates: () => TurnAggregates,
   getIsTurnRunning: () => boolean,
-  getIsSessionActive?: () => boolean,
-  onComplete?: () => void,
 ): {
   elapsed: Ref<string>
   startedAt: ComputedRef<number>
@@ -170,19 +168,6 @@ export function useTurnElapsed(
       if (!isLive.value) elapsed.value = formatElapsed()
     },
   )
-
-  // 完成收起：isSessionActive true→false 触发（对话真正结束才收起 trace）。
-  // ask-user 时序：sessionActive 保持 true 直到 respond 后收尾 → 不提前收起。
-  // 若未提供 getIsSessionActive（旧调用方），退化为跟随 getIsTurnRunning 收起。
-  const activeGetter = getIsSessionActive ?? getIsTurnRunning
-  if (onComplete) {
-    watch(
-      () => activeGetter(),
-      (nw, old) => {
-        if (old && !nw) onComplete()
-      },
-    )
-  }
 
   onUnmounted(() => {
     // 兜底清理：producing 中卸载也清干净（stopElapsedTimer 内含 tick + listener）

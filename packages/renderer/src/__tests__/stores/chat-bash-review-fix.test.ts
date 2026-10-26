@@ -248,7 +248,8 @@ describe('B2: useChat.abortBash RPC 失败 → markBashError 写回 store 真 re
     expect(after[0].status).toBe('error')
     expect(after[0].bashExecution?.cancelled).toBe(true)
     expect(after[0].error).toBe('rpc boom')
-    // toast 也被调（与 abort 错误处理对齐）
-    expect(toastError).toHaveBeenCalledOnce()
+    // [chat-flow R4] 停止失败 toast 已删：错误文本经 markBashError 写入 bash 消息 error 字段
+    // （上方断言 2 已覆盖），不再弹 toast
+    expect(toastError).not.toHaveBeenCalled()
   })
 })

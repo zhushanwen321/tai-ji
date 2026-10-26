@@ -1,8 +1,12 @@
 /**
  * domain/chat readers 迁移单测（语义等价锁定，w1 原样迁移）。
  *
- * 锁定 11 个 payload 窄化纯函数：安全读取语义——非法形状一律回退默认值
+ * 锁定 10 个 payload 窄化纯函数：安全读取语义——非法形状一律回退默认值
  * （undefined / {} / [] / 'accumulating'），绝不 throw。
+ * [HISTORICAL] readUsage（message.complete.usage 消费端）已随 chat-flow-consistency D3 规则 5
+ * 退役删除——usage/endedAt 由逐条载荷（apply-entry-convert usageField）唯一承担，
+ * message.complete 回合级覆写与发端 payload.usage（runtime event-adapter sumTurnUsage）
+ * 同批退役，本测试随之不再覆盖。
  */
 import { describe, it, expect } from 'vitest'
 import {
@@ -12,7 +16,6 @@ import {
   readBool,
   readStringArray,
   readDetail,
-  readUsage,
   readCompactionSummary,
   readBranchSummary,
   readFileChanges,
@@ -99,23 +102,6 @@ describe('readDetail', () => {
     expect(readDetail({ a: 42 }, 'a')).toBeUndefined()
     expect(readDetail({ a: true }, 'a')).toBeUndefined()
     expect(readDetail({ a: [1] }, 'a')).toBeUndefined()
-  })
-})
-
-describe('readUsage', () => {
-  it('inputTokens/outputTokens 齐全返回窄化对象（totalTokens 舍弃）', () => {
-    expect(readUsage({ usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 } })).toEqual({
-      inputTokens: 10,
-      outputTokens: 20,
-    })
-  })
-  it('缺任一 token 字段回退 undefined', () => {
-    expect(readUsage({ usage: { inputTokens: 10 } })).toBeUndefined()
-    expect(readUsage({ usage: { outputTokens: 20 } })).toBeUndefined()
-  })
-  it('usage 空对象/缺失回退 undefined', () => {
-    expect(readUsage({ usage: {} })).toBeUndefined()
-    expect(readUsage({})).toBeUndefined()
   })
 })
 

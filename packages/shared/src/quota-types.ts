@@ -119,15 +119,17 @@ export type QuotaFetchOutcome =
 /**
  * per-provider 只读查询配置（D1-2，timeout-audit-hygiene-batch）：QuotaService 从
  * providers.json 读出后经 fetchQuota 第三参数注入。可选签名——账号维度 fetcher
- * （kimi/mimo/minimax/zhipu）忽略该参数，零改动范围。
+ * （kimi/mimo/minimax/zhipu/stepfun）忽略该参数，零改动范围。
  */
 export interface QuotaFetcherConfig {
   /**
-   * 资源维度 fetcher（opencode / opendesign）的 workspace 归一化地址（经
-   * normalizeQuotaWorkspaceUrl 产出的规范 URL）。缺失 = 未配置，资源维度 fetcher
-   * 返回 not_configured（不发请求）。
+   * 用户维度隔离参数（2026-10 泛化，原 workspaceUrl 单字段）：不同账号/工作区的额度
+   * 归属不同，fetcher 按 preset 声明的 param spec（QuotaPreset.params）键名取值。
+   * 典型：opencode/opendesign 的 workspaceUrl（规范 URL，经 normalizeQuotaParamValue
+   * 产出）、组织类平台的 orgId/memberUid 等。缺失 = 未配置，依赖它的 fetcher 返回
+   * not_configured（不发请求）。
    */
-  workspaceUrl?: string
+  quotaParams?: Record<string, string>
 }
 
 /** Provider 额度查询 fetcher 接口（可插拔，为 Phase 2 plugin 化铺路）。 */
@@ -146,7 +148,7 @@ export interface ProviderQuotaFetcher {
    * @param kind 凭证形态（= 命中的 auth 数组元素），fetcher 可区分凭证语义
    *   （如个别平台 oauth 与 api key 请求头不同）。
    * @param config per-provider 只读配置（D1-2，可选）：资源维度 fetcher（opencode / opendesign）从中取
-   *   workspaceUrl；账号维度 fetcher 忽略。
+   *   quotaParams.workspaceUrl；账号维度 fetcher 忽略。
    * @returns QuotaFetchOutcome。失败不 throw，reason 可区分。
    */
   fetchQuota(credential: string, kind: QuotaAuthKind, config?: QuotaFetcherConfig): Promise<QuotaFetchOutcome>
@@ -199,13 +201,21 @@ export interface QuotaConfigurePayload {
   credentialSource?: QuotaCredentialSource
   cookie?: string
   apiKey?: string
-  workspace?: string
+  /**
+   * 用户维度隔离参数（2026-10 泛化，原 workspace 单字段）：键 = QuotaPreset.params 声明
+   * 的 param key；值语义——string = 归一化写入；null = 清除该键；键缺省 = 本次不动
+   * （persist 继承链，与 cookie/apiKey 的「明确传入才动」同构）。
+   */
+  params?: Record<string, string | null>
 }
 
-// ── workspace 输入归一化（P1-1，timeout-audit-hygiene-batch D1-1）──
+// ── 用户维度参数输入归一化（P1-1 起源，2026-10 泛化：workspace → quota params）──
 //
-// 归一化规则按 fetcher 分流（资源维度 fetcher 各家的 workspace 形态与额度 URL 不同）：
-// opencode（缺省，向后兼容）与 opendesign 两族。
+// 归一化规则按 param spec 的 normalize 键分流（资源维度 fetcher 各家的 workspace 形态与
+// 额度 URL 不同）：opencode-workspace 与 opendesign-workspace 两族 + raw 直通。
+
+/** 参数归一化分流键（QuotaParamSpec.normalize；缺省/raw = 去空白原样透传）。 */
+export type QuotaParamNormalize = 'opencode-workspace' | 'opendesign-workspace' | 'raw'
 
 /** opencode 额度页规范前缀：`<BASE>/workspace/<wrk_id>/go`。 */
 const OPENCODE_BASE = 'https://opencode.ai'
@@ -225,40 +235,38 @@ const OPENDESIGN_WORKSPACE_ID_RE = /^[a-z0-9]{6,64}$/
 /** OpenDesign URL pathname 中的 workspace 段提取（/api/v1/workspaces/<id>/...）。 */
 const OPENDESIGN_WORKSPACE_PATH_RE = /\/api\/v1\/workspaces\/([a-z0-9]{6,64})(?:\/|$)/
 
-/** workspace 地址归一化结果：ok=true 带规范 URL；ok=false 带面向用户的报错文案。 */
-export type QuotaWorkspaceNormalizeResult =
-  | { ok: true; url: string }
+/** 参数归一化结果：ok=true 带规范值；ok=false 带面向用户的报错文案。 */
+export type QuotaParamNormalizeResult =
+  | { ok: true; value: string }
   | { ok: false; error: string }
 
 /**
- * workspace 输入归一化（P1-1）：完整 URL 与裸 id 两种输入均可解析为该 fetcher 的规范
- * 额度查询 URL。规则按 fetcherId 分流；缺省/未知 fetcher 走 opencode 规则（历史调用方
- * 兼容——最早只支持 opencode，其余 fetcher 均为账号维度无 workspace）。
- *
- * 归一化产物是规范 URL 而非裸 id（D1-2 config 字段名 workspaceUrl 名副其实）。
+ * 用户维度参数输入归一化：完整 URL 与裸 id 两种输入均可解析为该 param 的规范值。
+ * 规则按 normalize 键分流（spec 驱动，不再按 fetcherId——一个 fetcher 可声明多个
+ * 不同形态的 param）。raw = 去空白原样透传（非 URL 类参数，如 orgId/memberUid）。
  *
  * hostname 白名单是安全必要而非格式洁癖：fetchQuota 携带用户 cookie 请求归一化产物——
  * 放行任意域等于把 cookie 泄露给第三方域。
  *
+ * @param kind 归一化分流键（param spec 的 normalize 字段）
  * @param input 用户输入（完整 URL 或裸 id；空串/空白由调用方按「清除/未填」语义处理，
  *   本函数对空输入返回 error）
- * @param fetcherId 目标 fetcher（匹配 QuotaPreset.fetcher；缺省按 opencode 规则）
  */
-export function normalizeQuotaWorkspaceUrl(input: string, fetcherId?: string): QuotaWorkspaceNormalizeResult {
+export function normalizeQuotaParamValue(kind: QuotaParamNormalize, input: string): QuotaParamNormalizeResult {
   const trimmed = input.trim()
   if (!trimmed) {
-    return { ok: false, error: 'workspace url is empty' }
+    return { ok: false, error: 'parameter is empty' }
   }
-  return fetcherId === 'opendesign'
-    ? normalizeOpendesignWorkspace(trimmed)
-    : normalizeOpencodeWorkspace(trimmed)
+  if (kind === 'opendesign-workspace') return normalizeOpendesignWorkspace(trimmed)
+  if (kind === 'opencode-workspace') return normalizeOpencodeWorkspace(trimmed)
+  return { ok: true, value: trimmed }
 }
 
 /** opencode workspace 归一化：裸 `wrk_` id / 完整 opencode.ai URL → 规范额度页 URL。 */
-function normalizeOpencodeWorkspace(trimmed: string): QuotaWorkspaceNormalizeResult {
+function normalizeOpencodeWorkspace(trimmed: string): QuotaParamNormalizeResult {
   // 形态 1：裸 wrk_ id → 直接拼规范 URL
   if (WORKSPACE_ID_RE.test(trimmed)) {
-    return { ok: true, url: `${OPENCODE_BASE}/workspace/${trimmed}/go` }
+    return { ok: true, value: `${OPENCODE_BASE}/workspace/${trimmed}/go` }
   }
 
   // 形态 2：完整 URL → 校验域 + 提取 workspace id + 重构规范 URL
@@ -287,14 +295,14 @@ function normalizeOpencodeWorkspace(trimmed: string): QuotaWorkspaceNormalizeRes
     }
   }
 
-  return { ok: true, url: `${OPENCODE_BASE}/workspace/${id}/go` }
+  return { ok: true, value: `${OPENCODE_BASE}/workspace/${id}/go` }
 }
 
 /** OpenDesign workspace 归一化：裸 workspace id / 完整 amr-api URL → 规范额度查询 URL。 */
-function normalizeOpendesignWorkspace(trimmed: string): QuotaWorkspaceNormalizeResult {
+function normalizeOpendesignWorkspace(trimmed: string): QuotaParamNormalizeResult {
   // 形态 1：裸 workspace id → 直接拼规范 URL
   if (OPENDESIGN_WORKSPACE_ID_RE.test(trimmed)) {
-    return { ok: true, url: opendesignUsageUrl(trimmed) }
+    return { ok: true, value: opendesignUsageUrl(trimmed) }
   }
 
   // 形态 2：完整 URL → 校验域 + 提取 workspace id + 重构规范 URL
@@ -323,7 +331,7 @@ function normalizeOpendesignWorkspace(trimmed: string): QuotaWorkspaceNormalizeR
     }
   }
 
-  return { ok: true, url: opendesignUsageUrl(id) }
+  return { ok: true, value: opendesignUsageUrl(id) }
 }
 
 function opendesignUsageUrl(id: string): string {
@@ -334,9 +342,10 @@ function opendesignUsageUrl(id: string): string {
  * 从已配置的 workspace 地址提取 workspace id（读侧反提取——opencode fetcher 请求
  * console API 时以 id 作 `x-org-id` header）。
  *
- * 写侧产物是规范 URL（normalizeQuotaWorkspaceUrl → `/workspace/<id>/go`）；本函数同时
- * 容忍裸 `wrk_` id 与其他路径形态（读侧不做二次归一化，存量数据形态不保证）。提取不到
- * 返回 null，调用方按配置不可用处理（恢复指引指向重填配置）。
+ * 写侧产物是规范 URL（normalizeQuotaParamValue('opencode-workspace', …) →
+ * `/workspace/<id>/go`）；本函数同时容忍裸 `wrk_` id 与其他路径形态（读侧不做二次
+ * 归一化，存量数据形态不保证）。提取不到返回 null，调用方按配置不可用处理（恢复指引
+ * 指向重填配置）。
  */
 export function extractQuotaWorkspaceId(workspaceUrl: string): string | null {
   const trimmed = workspaceUrl.trim()

@@ -253,7 +253,7 @@ export class ServerMessageBroker implements IMessageBroker {
     // archiveCount（session-archive 设计 D5 协议变更点）：归档角标随广播帧即时——计数 =
     // 归档列表条目数（listArchiveEntries 过滤 .restoring，与 config.archives 列表同数据源，
     // 角标与「已归档 (N)」头恒一致）。广播频度 = 用户动作级（create/delete/rename/归档域操作），
-    // 每帧一次目录扫描可接受；archiveService 未注入时字段缺省（协议 optional）。
+    // 每帧一次目录扫描可接受；archiveService 未注入时字段缺省（协议 optional 字段语义）。
     const archiveCount = this.services.archiveService?.listArchiveEntries().length
     return {
       type: 'config.sessions',

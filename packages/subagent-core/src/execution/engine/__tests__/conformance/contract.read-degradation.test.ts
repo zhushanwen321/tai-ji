@@ -22,6 +22,7 @@ import { JournalWriter } from "../../common/event-journal.ts";
 import { EngineClient } from "../../client/engine-client.ts";
 import { RemoteEngine } from "../../client/remote-engine.ts";
 import type { AgentEvent, EngineHandle } from "../../types.ts";
+import { localSpawnEnv } from "../local-spawn-env.ts";
 import { FAKE_CAPABILITIES } from "./fake-engine-capabilities.ts";
 
 const FAKE_ENGINE = join(
@@ -79,7 +80,7 @@ describe("conformance C5：read 降级链（协议黑盒 + reducer 等价性）"
       hostVersion: "w10-c5",
       dataDir,
       envPrefixes: [],
-      baseEnv: { ...process.env, FAKE_PROTOCOL_FIXTURE: FIXTURE },
+      baseEnv: localSpawnEnv({ FAKE_PROTOCOL_FIXTURE: FIXTURE }),
     });
     const engine = new RemoteEngine({
       engineId: "fake",
@@ -106,7 +107,7 @@ describe("conformance C5：read 降级链（协议黑盒 + reducer 等价性）"
       hostVersion: "w10-c5",
       dataDir,
       envPrefixes: [],
-      baseEnv: { ...process.env, FAKE_PROTOCOL_FIXTURE: FIXTURE, FAKE_PROTOCOL_ERROR: "unknown_method" },
+      baseEnv: localSpawnEnv({ FAKE_PROTOCOL_FIXTURE: FIXTURE, FAKE_PROTOCOL_ERROR: "unknown_method" }),
     });
     try {
       await client.ensureConnected();

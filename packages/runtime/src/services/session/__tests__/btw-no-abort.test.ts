@@ -53,9 +53,10 @@ describe('P-no-abort 结构侧：建线路径与主会话零耦合', () => {
 
     // deps 全集只含进程/注册/解析/追踪面——不存在任何「向主进程发命令」的通道（构造性证明）
     expect(Object.keys(h.deps).sort()).toEqual([
-      'buildLineSpawnOptions', 'forkSession', 'onWillReclaim', 'processes',
+      'buildLineSpawnOptions', 'forkSession', 'processes',
       'registerSession', 'resolveMainSessionFile', 'resolvePiCommand', 'traceContractInjection',
       'trashDirectory', // D5 线树软删通道（C-comm-03 deps 注入形态；仍非主进程命令通道）
+      // W5：onWillReclaim 挂点随闲置回收机制残留删除（ADR-0122 清查收尾）已不在 deps 面
     ])
 
     const res = await svc.createLine({ mainSid: MAIN_SID, cwd: CWD })
@@ -68,10 +69,10 @@ describe('P-no-abort 结构侧：建线路径与主会话零耦合', () => {
     for (const key of [...h.spawned.map(s => s.key), ...h.rekeyed.map(([, to]) => to)]) {
       expect(key).not.toBe(MAIN_SID)
     }
-    expect(res.vid).toBe('btw:sid-n1')
+    expect(res.sessionId).toBe('sid-n1')
   })
 
-  it('建线只产生 btw 自己的进程条目（spawn 键全部为 btw 临时/虚拟键）', async () => {
+  it('建线只产生 btw 自己的进程条目（spawn 键 = btw 临时键，rekey 到线 pi 真实 id）', async () => {
     h.deps.resolveMainSessionFile = vi.fn(() => undefined)
     h.state = { sessionId: 'sid-n2', sessionFile: join(fx, 't', 'x.jsonl') }
 
@@ -79,8 +80,8 @@ describe('P-no-abort 结构侧：建线路径与主会话零耦合', () => {
 
     expect(h.spawned).toHaveLength(1)
     expect(h.rekeyed[0][0]).toMatch(/^btw-create-/)
-    expect(h.rekeyed[0][1]).toMatch(/^btw:/)
-    // 主进程 destroy 面零触达：destroyed 只可能含 btw 自己的键
-    expect(h.destroyed.every(k => k.startsWith('btw'))).toBe(true)
+    expect(h.rekeyed[0][1]).toBe('sid-n2') // rekey 目标 = 线 pi 真实 id（W4a：pm 键 ≡ 注册 id）
+    // 主进程 destroy 面零触达：destroyed 只可能含 btw 自己的键（临时键或线 pi 真实 id）
+    expect(h.destroyed.every(k => k.startsWith('btw-create-') || k === 'sid-n2')).toBe(true)
   })
 })

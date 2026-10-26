@@ -25,8 +25,6 @@ function makeSession(id: string, cwd: string, over: Partial<SessionSummary> = {}
     cwd,
     status: 'idle',
     lastActiveAt: 1,
-    modelId: 'm',
-    tokenCount: 0,
     ...over,
   }
 }

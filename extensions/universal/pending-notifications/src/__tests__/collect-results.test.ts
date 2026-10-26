@@ -412,6 +412,76 @@ describe("collect_results tool", () => {
 		]);
 	});
 
+	it("[结清五值回填 §3.3.6] 注销 reason 事实经结清解析回填 outcome：completed/failed/cancelled/lost/no_result 分别可达", async () => {
+		// 回填权威 = 结清视图（reason 事实 → resolveSettlementReason），不经
+		// mapReasonToStatus 旧映射——lost/no_result 在旧 status 副档恒落 unknown，
+		// 本用例五值逐一可达即锁定断层修复（真 listener 落盘 → 全链路回填）。
+		const cases: Array<[string, string]> = [
+			["ok-1", "completed"],
+			["ok-2", "failed"],
+			["ok-3", "cancelled"],
+			["ok-4", "lost"],
+			["ok-5", "no_result"],
+		];
+		for (const [id] of cases) setup.entries.push(makeRegisterEntry(id));
+		setup.port.collectArm.mockReturnValue(cases.map(([id]) => ({ id, state: "waiting" })));
+
+		const promise = runCollect(setup, { ids: cases.map(([id]) => id) });
+		const arrivalCb = setup.port.onCollectArrival.mock.calls[0][0] as () => void;
+		// 真实 listener 落盘注销 entry：reason 事实 + mapReasonToStatus 的 status 副档
+		// （lost/no_result 的 status 落 unknown——旧映射通道下 outcome 恒 unknown 的缺陷形态）
+		for (const [id, reason] of cases) setup.handlers.pendingUnregister!({ id, reason });
+		// 端口 consume 真实返回形态（MF-1-6）：只含载荷，type/outcome 归回填
+		setup.port.consume.mockReturnValueOnce(cases.map(([id]) => ({ id, content: `payload-${id}` })));
+
+		arrivalCb();
+		const res = await promise;
+
+		expect(res.details.collected).toEqual(
+			cases.map(([id, outcome]) => ({
+				id,
+				type: "workflow",
+				outcome,
+				content: `payload-${id}`,
+			})),
+		);
+	});
+
+	it("[畸形 data 兜底 §3.3.6] 结清视图缺位（reason 非 string）取 legacy status 副档，与端口快照通道同规则", async () => {
+		// 两通道统一填充规则（结清优先 + legacy status 兜底）：注销 entry 的 reason
+		// 非 string 是畸形 data（结清视图不入，pending-entries.ts absorbUnregisterEntry），
+		// status 合法在册——回填取 status 值，与端口快照通道（collectFieldsFor 同款
+		// `??` 形态）对同一 id 产出一致；reason 合法时结清视图优先（兜底不触发）；
+		// 两视图皆缺位保持 undefined（诚实缺省）。status 值经真 listener 落盘契约同源
+		// （mapReasonToStatus 映射产物），此处直插 entry 镜像落盘形态。
+		setup.entries.push(
+			makeRegisterEntry("ok-1"),
+			makeRegisterEntry("mf-1"),
+			makeRegisterEntry("nil-1"),
+			{ customType: "pending:unregister", data: { id: "ok-1", reason: "completed", status: "completed" } },
+			{ customType: "pending:unregister", data: { id: "mf-1", reason: 42, status: "cancelled" } },
+			{ customType: "pending:unregister", data: { id: "nil-1", reason: 42, status: "not-a-status" } },
+		);
+		setup.port.collectArm.mockReturnValue(
+			["ok-1", "mf-1", "nil-1"].map((id) => ({ id, state: "waiting" })),
+		);
+
+		const promise = runCollect(setup, { ids: ["ok-1", "mf-1", "nil-1"] });
+		const arrivalCb = setup.port.onCollectArrival.mock.calls[0][0] as () => void;
+		setup.port.consume.mockReturnValueOnce(
+			["ok-1", "mf-1", "nil-1"].map((id) => ({ id, content: `payload-${id}` })),
+		);
+
+		arrivalCb();
+		const res = await promise;
+
+		expect(res.details.collected).toEqual([
+			{ id: "ok-1", type: "workflow", outcome: "completed", content: "payload-ok-1" },
+			{ id: "mf-1", type: "workflow", outcome: "cancelled", content: "payload-mf-1" },
+			{ id: "nil-1", type: "workflow", outcome: undefined, content: "payload-nil-1" },
+		]);
+	});
+
 	it("超时路径：已收部分进 collected、未完成进 stillOpen（诚实返回，不抛错）", async () => {
 		setup.entries.push(makeRegisterEntry("fast"), makeRegisterEntry("slow"));
 		setup.port.collectArm.mockReturnValue([

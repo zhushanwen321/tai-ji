@@ -25,8 +25,10 @@
  * - subagent：`subagentStore.recordsOf(sid)` 过滤 `origin !== 'workflow'`（workflow 派发的
  *   record 由 workflow 面板承载；该过滤口径原在侧栏任务计数内，已随侧栏任务视图退役、
  *   托盘为唯一实现）+ subagent-bucket SSOT 谓词：
- *   进行中 = `isRunningProjection`（running 且无 stopReason——死亡纳管态 running+failed 不落
- *   进行中）；已结束 = `!isRunningProjection`（两态语义：idle 与死亡纳管态全落此桶）。
+ *   进行中 = `isRunningProjection`（running 且无 stopReason——占用信号 = 「轮收条已写
+ *   = 本轮不在途」的等价信号，[subagent-observability §3.3.3]；原「W4 死亡纳管态
+ *   排除」措辞随 adoptEngineDeath 写点退役删除，不再单列，登记见 lib/subagent-bucket）；
+ *   已结束 = `!isRunningProjection`（两态语义：idle 与带停因的 running 全落此桶）。
  * - workflow：`workflowStore.recordsOf(sid)`；进行中 = `status === 'running'`，
  *   已结束 = 其余（done / interrupted——[D2] 显式裁决：interrupted 计 ended 桶，
  *   托盘计数语义 = 正在进行的活动，interrupted 是无活体暂停态不算进行中）。
@@ -42,8 +44,8 @@
  *   inversion D4 隔离化）：**native 直连 canvas store**（经 useCanvasSync 的单条订阅——
  *   首拉 + `canvas.updated` 失效重拉在订阅链内收敛，本数据面只读 store 清单投影）。
  *   画布按归属会话隔离（runtime 清单只返回本会话画布）：本件计数 = 本会话画布；
- *   btw 线（vid）托盘构造性归零（[D9③ 抑制执行点③]——画布已是会话维度资源，vid 非
- *   合法归属分区键，线内画布经线 owner 会话托盘承载）。计数口径 = 未收敛即进行中
+ *   btw 线托盘构造性归零（[D9③ 抑制执行点③]——画布已是会话维度资源，线内画布经线
+ *   owner 会话托盘承载）。计数口径 = 未收敛即进行中
  *   （生长中 / 审查中都在活动），converged 终态落已结束；阶段徽标（生长中/审查中/已收敛）
  *   是面板行的派生展示值，不在数据面建第二词表。
  *
@@ -56,7 +58,7 @@
  * useTrayCountsContext inject 消费外壳实例，**不自建实例**）。本文件不渲染 UI、不发任何
  * 写类 RPC（行内操作在面板组件内）。
  */
-import { computed, inject, watch } from 'vue'
+import { computed, inject, shallowRef, watch } from 'vue'
 import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
@@ -69,7 +71,7 @@ import { filterBackgroundTasks } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
-import { isBtwVirtualId } from '@taiji/shared'
+import { isKnownBtwLine, ensureBtwLineMembership } from '@/composables/panel/btw-line-membership'
 
 /** built-in 三件（任务域面板类型 / TrayNativePanel 分桶键 / retry 分派键） */
 export type TrayTaskKind = 'bash' | 'subagent' | 'workflow'
@@ -213,14 +215,29 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
 
   // ── subagent：origin 过滤（workflow 派发 record 归 workflow 面板）→ 两视图分桶 ──
   // excludeOrigin 选项式（S1 判据单源化，与 hasRunning 同形态；禁止内联 filter 第二判据）
-  // [M4-a / D9③ 派生视图收窄·任务托盘抑制执行点①] btw 线（sessionId=vid，drawer 内 Composer
-  // 同样挂载本托盘）不派生虚拟任务：subagent/workflow-run 两件按线 owner 分区读，
-  // 在此构造性归零——派生过程仅在消息流工具调用中可见，托盘不为线内派生提供 opener
-  //（对齐 zcode）。bash（线自身后台命令）与 session件（真实子会话）非派生虚拟键，照常。
-  const derivedSuppressed = computed(() => {
-    const sid = normalizedSid.value
-    return sid !== null && isBtwVirtualId(sid)
-  })
+  // [M4-a / D9③ 派生视图收窄·任务托盘抑制执行点①] btw 线（drawer 内 Composer 同样挂载
+  // 本托盘）不派生虚拟任务：subagent/workflow-run 两件按线 owner 分区读，在此构造性
+  // 归零——派生过程仅在消息流工具调用中可见，托盘不为线内派生提供 opener（对齐 zcode）。
+  // bash（线自身后台命令）与 session件（真实子会话）非派生虚拟键，照常。
+  // W4b 收编判别器 = session.list {surface:'btw'} 拉取缓存成员判别（登记于
+  // docs/constraints.json C-data-28 抑制类清单——语义抑制本体、非性能优化，故保留判别器；
+  // 旧 isBtwVirtualId 前缀判别随 vid 退役、session.surfaces 派生表随 W4b 收编删除，
+  // 设计 §5-W4b 四步之①）。渲染路径同步读缓存；焦点切换（托盘事件）落空时按需补拉一次
+  // 再判（拉取失败 = 显式未知，当次不抑制——失败方向 = 偶发托盘派生，已接受）。
+  const derivedSuppressed = shallowRef(false)
+  watch(
+    normalizedSid,
+    async (sid) => {
+      const suppressed = sid !== null && (isKnownBtwLine(sid) || (await ensureBtwLineMembership(sid)))
+      // 时效守卫：回写前校验 sid 仍是当前焦点会话。在途补拉期间从「未缓存主会话」切回
+      // 「已缓存线会话」时，旧 sid 的 Promise 续写会把 derivedSuppressed 覆写为 false
+      // （线的 subagent/workflow 派生任务漏进托盘计数），且 knownLines 写入不触发本
+      // watch、无自纠触发点，错误状态会停留到下次会话切换。只用当前焦点 sid 的判定结果回写。
+      if (sid !== normalizedSid.value) return
+      derivedSuppressed.value = suppressed
+    },
+    { immediate: true },
+  )
   const subagentRecords = computed(() => {
     if (derivedSuppressed.value) return []
     return subagentStore
@@ -272,9 +289,9 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   // ── canvas（第 5 件，u-tray-entry）：native 直连 canvas store（per-session 分区读）──
   // 订阅生命周期归 useCanvasSync（模块级单条订阅 + per-session 分流，见其文件头）：首拉与
   // canvas.updated 失效重拉在订阅链内收敛，本数据面只读清单投影、零新协议。[D9③ 抑制
-  // 执行点③] btw 线（vid）托盘构造性归零——画布按归属会话隔离（D4）后已是会话维度资源，
-  // vid 非合法归属分区键（线内画布经线 owner 会话托盘承载）。进行中 = 未收敛（生长中 /
-  // 审查中都在活动），已结束 = converged 终态（回看资产）。
+  // 执行点③] btw 线托盘构造性归零——画布按归属会话隔离（D4）后已是会话维度资源，
+  // 线内画布经线 owner 会话托盘承载。进行中 = 未收敛（生长中 / 审查中都在活动），
+  // 已结束 = converged 终态（回看资产）。
   const canvasStore = useCanvasSync(normalizedSid)
   const canvasEntries = computed<CanvasListEntry[]>(() => {
     if (derivedSuppressed.value) return []
@@ -317,9 +334,12 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   watch(
     normalizedSid,
     (sid) => {
-      // [D9③ 抑制] btw 线不发首次拉取（getSubagents/getWorkflows 对线 vid 零消费方——
-      // 行集已构造性归零，拉取只是无效 RPC）。
-      if (!sid || isBtwVirtualId(sid)) return
+      // [D9③ 抑制·性能防护分支] W4a 删除判别器：旧实现对 btw 线 vid 跳过首次拉取
+      // （线 vid 零消费方）。键切换后判别器来源只剩派生表查询，而本分支是纯性能优化
+      // （行集仍由 derivedSuppressed 构造性归零，拉取只是无效 RPC）——不为一个性能
+      // 优化保留判别器：代价 = 对线会话多发几次空 RPC + hasBackgroundWork/deriveStatus/
+      // loadError 对线派生值改变（线不进托盘汇总范围、不可见，已接受，§6 取舍表）。
+      if (!sid) return
       void subagentStore.loadSubagents(sid)
       void workflowStore.loadWorkflows(sid)
     },
@@ -330,13 +350,12 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   async function retry(kind: TrayTaskKind): Promise<void> {
     const sid = normalizedSid.value
     if (!sid) return
+    // W4a：两处 retry 分支的 btw 判别器同上方首次拉取分支一并删除（性能防护，代价已接受）。
     if (kind === 'subagent') {
-      if (isBtwVirtualId(sid)) return // D9③ 抑制范围同口径（retry 不绕过构造性归零）
       await subagentStore.loadSubagents(sid)
       return
     }
     if (kind === 'workflow') {
-      if (isBtwVirtualId(sid)) return
       await workflowStore.loadWorkflows(sid)
       return
     }

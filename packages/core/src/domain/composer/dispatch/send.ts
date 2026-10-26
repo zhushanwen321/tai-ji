@@ -25,7 +25,7 @@
  *
  * [W3 迁移] 迁自 renderer composables/panel/useComposerSend.ts。
  * [u5b 改造] isCompacting dep 退役（路由判定统一由 getSendRoute 承担）→ [u3b 再退役]
- * getSendRoute/steer/enqueueCompact 三 deps 退役（D1 车道判定收归 runtime）。
+ * getSendRoute/steer/enqueueCompact 三 deps 退役（D1 投递路径判定收归 runtime）。
  */
 import type { ComputedRef, Ref } from 'vue'
 import type { Segment } from '@taiji/shared'
@@ -232,7 +232,7 @@ async function sendLandingFirstMessage(deps: ComposerSendDeps, segments: Segment
 
 /**
  * active 态分支（priority 4-6）：bash 分流（!/!! 前缀，必须在 /compact 前）→ /compact →
- * 统一 submit（u3b/D1：direct/steer/queued 全车道收敛）。
+ * 统一 submit（u3b/D1：direct/steer/queued 全投递路径收敛）。
  *
  * [R2-A5 失败恢复] send / compact 失败信号（false）→ restoreSegments 恢复完整草稿
  * （slash chip + 文本，W8 通路复活）——useChat 侧已回滚乐观气泡（u3b）并 toast/对话流分型
@@ -320,7 +320,7 @@ export function useComposerSend(deps: ComposerSendDeps): { onSend: () => Promise
    * 各优先级分支提取为模块级 helper（routeStaging / sendLandingFirstMessage /
    * sendActiveMessage），此处只留编排；text 在门检查前捕获（computed 读纯函数，时序等价）。
    * [u3b/D1] 原 steer 路由（routeSteer）与 defer 路由（enqueueDuringDefer）分支退役——
-   * 车道判定收归 runtime 内核，终端统一 deps.send。
+   * 投递路径判定收归 runtime 内核，终端统一 deps.send。
    */
   async function onSend(): Promise<void> {
     const text = deps.draft.value

@@ -42,7 +42,7 @@ import type { CustomEntry } from "@earendil-works/pi-coding-agent";
 import { Budget, isRunSettled } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
-import { runSummary } from "@zhushanwen/subagent-core";
+import { runMemberViews, runSummary } from "@zhushanwen/subagent-core";
 import {
   RUN_EVENTS_SUFFIX,
   WORKFLOW_RECORD_CUSTOM_TYPE,
@@ -147,6 +147,35 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     const store = new JsonlRunStore({ runsDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
     const restored = await store.loadAll();
     expect(restored[0]!.spec.budgetTimeMs).toBe(600_000);
+  });
+
+  it("[§3.3.6/§3.3.9 budget] agent-started input 载荷 → call.opts 声明值恢复（budgetViewOf 消费）；旧格式帧回落占位不误报", async () => {
+    const runId = "run-rt-input-opts";
+    const recordPath = appendRecordLine(tmpDir, runId, {
+      type: "run-created", seq: 1, ts: 1000, runId, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')",
+    });
+    // taskIndex 0：input 载荷携带声明入参（maxTurns/timeoutMs——重派集窗口的预算事实源）。
+    appendRecordLine(tmpDir, runId, {
+      type: "agent-started", seq: 2, ts: 1100, taskIndex: 0, agentName: "worker", attempt: 1,
+      input: JSON.stringify({ prompt: "p0", maxTurns: 3, timeoutMs: 45_000 }),
+    });
+    appendRecordLine(tmpDir, runId, { type: "agent-settled", seq: 3, ts: 1200, taskIndex: 0, attempt: 1, outcome: "done", durationMs: 100, result: { content: "r0" } });
+    // taskIndex 1：旧格式帧（无 input 载荷）——无可恢复声明值，opts 占位（未声明语义）。
+    appendRecordLine(tmpDir, runId, { type: "agent-started", seq: 4, ts: 1250, taskIndex: 1, agentName: "reviewer", attempt: 1 });
+    appendRecordLine(tmpDir, runId, { type: "agent-settled", seq: 5, ts: 1300, taskIndex: 1, attempt: 1, outcome: "done", durationMs: 50, result: { content: "r1" } });
+    appendRecordLine(tmpDir, runId, { type: "run-settled", seq: 6, ts: 1400, outcome: "done", artifactsDir: tmpDir });
+
+    const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
+    const store = new JsonlRunStore({ runsDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const restored = await store.loadAll();
+    const calls = restored[0]!.state.calls;
+    expect(calls.get(0)?.opts).toEqual({ prompt: "p0", maxTurns: 3, timeoutMs: 45_000 });
+    expect(calls.get(1)?.opts).toEqual({ prompt: "" });
+
+    // 端到端：成员表 budget 分轴从恢复的声明值派生（已声明上界不显示为「显式无界」）。
+    const members = runMemberViews(restored[0]!, { now: 2000 });
+    expect(members[0]!.budget).toEqual({ maxTurns: 3, timeoutMs: 45_000, budgetTokens: null, budgetTimeMs: null });
+    expect(members[1]!.budget).toEqual({ maxTurns: null, timeoutMs: null, budgetTokens: null, budgetTimeMs: null });
   });
 
   it("[§2.1 / ADR-0094] loadAll round-trip: worker-log 诊断帧 → run.state.errorLogs 重建（此前重启即空）", async () => {

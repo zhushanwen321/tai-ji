@@ -405,10 +405,12 @@ describe('EventAdapter: new event translations (FR-1~FR-6)', () => {
       expect(sent[0].type).toBe('message.complete')
       expect(sent[0].payload).toMatchObject({
         stopReason: 'end_turn',
-        usage: { inputTokens: 100, outputTokens: 50 },
         responseModel: 'gpt-4o',
         diagnostics: { latency: 1.2 },
       })
+      // payload.usage 已随 chat-flow-consistency D3 规则 5 退役：usage 由 message_end(assistant)
+      // 逐条载荷唯一承担（event-adapter-turn-usage-sum.test.ts 同口径锁定）。
+      expect((sent[0].payload as Record<string, unknown>).usage).toBeUndefined()
     })
   })
 
@@ -439,8 +441,9 @@ describe('EventAdapter: new event translations (FR-1~FR-6)', () => {
         stopReason: 'error',
         errorMessage: 'provider overloaded',
         content: 'part1 part2',
-        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
       })
+      // 同上：payload.usage 退役（D3 规则 5），turn-end 顶层 totalTokens 仍 = 末次调用总量。
+      expect((sent[0].payload as Record<string, unknown>).usage).toBeUndefined()
     })
 
     it('stopReason=stop drops errorMessage (field stays absent from payload)', async () => {

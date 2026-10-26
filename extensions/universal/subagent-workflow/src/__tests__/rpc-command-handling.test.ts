@@ -682,7 +682,7 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
 
   it("message 目标不存在（getRecordForAction throw）→ 错误经 --req 结果文件传回，不留痕、notify 不再走", async () => {
     // [结果回执契约 2026-10-18] messageHandler 同步拒绝经结果文件传回（scope:error →
-    // runtime 抛分型错误 → WS error envelope → composer 车道 toast + restoreSegments
+    // runtime 抛分型错误 → WS error envelope → composer 投递路径 toast + restoreSegments
     // 恢复草稿）；notify 只达 TUI/横幅不达回执面，旧 warning 通道已删
     const receipt = pinReceiptEnv();
     ctx.cwd = receipt.cwd;

@@ -82,7 +82,11 @@ describe('isQuotaPreset（QuotaPreset wire 形状守卫）', () => {
     ['namePattern 非字符串', validPreset({ match: { namePattern: 42 } })],
     ['helpUrl 类型漂移', validPreset({ helpUrl: 42 })],
     ['helpText 类型漂移', validPreset({ helpText: 42 })],
-    ['requiresWorkspace 类型漂移', validPreset({ requiresWorkspace: 'yes' })],
+    ['params 类型漂移（非数组）', validPreset({ params: 'workspaceUrl' })],
+    ['params 元素畸形（缺 key）', validPreset({ params: [{ label: 'L' }] })],
+    ['params 元素 key 空串', validPreset({ params: [{ key: '' }] })],
+    ['params normalize 非法值', validPreset({ params: [{ key: 'x', normalize: 'bogus' }] })],
+    ['params key 重复', validPreset({ params: [{ key: 'x' }, { key: 'x' }] })],
   ])('%s → false', (_name, v) => {
     expect(isQuotaPreset(v)).toBe(false)
   })

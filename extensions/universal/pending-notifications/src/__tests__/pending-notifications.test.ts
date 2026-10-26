@@ -422,7 +422,7 @@ describe("pendingNotificationsExtension factory", () => {
 			}
 		});
 
-		it("U7c: 未知 reason 落 default 兜底 completed（兜底语义的显式登记——未来若改兜底口径，此用例同步更新）", () => {
+		it("U7c: 未知 reason 落 default 兜底 unknown（fail-visible 缺省——§3.3.11④ fail-open=completed 废除，不产假成功）", () => {
 			fireSessionStart(setup);
 			setup.handlers.pendingRegister!({ id: "w-unknown", type: "workflow", name: "op" });
 			setup.appendEntryMock.mockClear();
@@ -431,7 +431,24 @@ describe("pendingNotificationsExtension factory", () => {
 
 			expect(setup.appendEntryMock).toHaveBeenCalledWith(
 				"pending:unregister",
-				expect.objectContaining({ id: "w-unknown", reason: "some-future-reason", status: "completed" }),
+				expect.objectContaining({ id: "w-unknown", reason: "some-future-reason", status: "unknown" }),
+			);
+		});
+
+		it("[subagent-observability §3.3.11④] reason 缺失（emit 方漏传的畸形 data）→ 结清 reason = no_result，不产 completed 假成功", () => {
+			fireSessionStart(setup);
+			setup.handlers.pendingRegister!({ id: "w-no-reason", type: "workflow", name: "op" });
+			setup.appendEntryMock.mockClear();
+
+			setup.handlers.pendingUnregister!({ id: "w-no-reason" });
+
+			expect(setup.appendEntryMock).toHaveBeenCalledWith(
+				"pending:unregister",
+				expect.objectContaining({ id: "w-no-reason", reason: "no_result", status: "unknown" }),
+			);
+			expect(setup.appendEntryMock).not.toHaveBeenCalledWith(
+				"pending:unregister",
+				expect.objectContaining({ reason: "completed" }),
 			);
 		});
 	});

@@ -62,7 +62,6 @@ const NEW_UI_KEYS_REQUIRED = [
   'quotaReadyHint',
   'quotaMissingCookie',
   'quotaMissingApiKey',
-  'quotaMissingWorkspace',
   'quotaSaveAndTestFail',
   'quotaFetchFailUnauthorizedCookie',
   'quotaFetchFailNoCredential',

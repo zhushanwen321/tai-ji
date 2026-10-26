@@ -76,8 +76,10 @@ export const formFilter: UIRequestFilter = (req) => req.form === true
  * planReview 审批请求（runtime event-adapter 检测 PLAN_REVIEW_MARKER 后在 extension.ui_request
  * 上附加的 `planReview: true` 标记，与 form 同构分流）。
  *
- * core 的 ExtensionUIRequest 契约不携带 plan 标记键（core 不反向依赖 extension-protocol，
- * 本地扩展惯例）；但响应回传的 `PlanReviewResponse` 与请求载荷字段**直接 import extension-protocol**
+ * core 的 ExtensionUIRequest 契约已随 wire SSOT 携带 planReview/permission 标记键
+ *（core/transport/api/domains/extension.ts 镜像注释——随 shared/protocol.ts 对齐声明，
+ * 消费方免 cast 直读）；PlanReviewUIRequest 的 `planReview: true` 是必有化收窄而非本地补键。
+ * 响应回传的 `PlanReviewResponse` 与请求载荷字段**直接 import extension-protocol**
  *（D2/D3④ regime——旧「renderer 不依赖 extension-protocol」表述已过时，renderer 早已依赖它；
  * PlanReviewComment / PlanReviewResponse 本地同形副本已删除迁移，consumers.md 一④）。
  * `selfReview`（D9③）：agent 自审结论，与 canonical `PlanReviewRequest.selfReview` 同名同义，
@@ -490,20 +492,20 @@ export function useExtensionUI(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// btw 内联确认条草稿分键表（D7⑤ 提交态 per-vid 隔离的模块级载体）——确认条编排本体
+// btw 内联确认条草稿分键表（D7⑤ 提交态 per-line 隔离的模块级载体）——确认条编排本体
 // （D8 降级路径：请求合并排序 / 降档表单 / 提交回路）在 panel/useBtwInteraction.ts，
 // 本模块只承载草稿状态本体：终结清理入口挂在本模块失效链（invalidated 订阅）与
 // 快照差集修剪（retainOnly diff）两路，故状态留此与挂起请求生命周期同文件管理。
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 确认条草稿（四组提交态）——按 `${vid}:${requestId}` 分键保存（D7⑤ per-vid/表单实例双隔离） */
+/** 确认条草稿（四组提交态）——按 `${sessionId}:${requestId}` 分键保存（D7⑤ per-line/表单实例双隔离） */
 export type BtwBarDraft = { sel: Record<string, string[]>; text: Record<string, string>; planComment: string; dialogSelect: string; dialogText: string }
 
 export const emptyBtwBarDraft = (): BtwBarDraft => ({ sel: {}, text: {}, planComment: '', dialogSelect: '', dialogText: '' })
 
-// taste:allow-no-data-owner W24-EX（btw-question M3-c 行内豁免，登记表⑧已落定（2026-09-22，阶段 3 审查 U2 修复随批）——EX-A：`btwBarDrafts` 分键草稿 Map，D7⑤ 挂起表单提交态 per-vid 隔离的持久草稿本体）：
+// taste:allow-no-data-owner W24-EX（btw-question M3-c 行内豁免，登记表⑧已落定（2026-09-22，阶段 3 审查 U2 修复随批）——EX-A：`btwBarDrafts` 分键草稿 Map，D7⑤ 挂起表单提交态 per-line 隔离的持久草稿本体）：
 // 确认条草稿分键表（用户输入暂存、终结即删，非 GUI 数据本体；D7⑤ 切走切回不丢的模块级载体）
 export const btwBarDrafts = reactive(new Map<string, BtwBarDraft>())
 
 /** 终结清理：应答送达 / 失效 / 快照修剪三支共用（幂等） */
-export function clearBtwBarDrafts(vid: string, requestIds: readonly string[]): void { for (const rid of requestIds) btwBarDrafts.delete(`${vid}:${rid}`) }
+export function clearBtwBarDrafts(sessionId: string, requestIds: readonly string[]): void { for (const rid of requestIds) btwBarDrafts.delete(`${sessionId}:${rid}`) }

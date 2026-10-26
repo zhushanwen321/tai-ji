@@ -12,7 +12,8 @@
  *    调用复用既有成员，若误建新成员会出现第二条缺省绑定的 started 帧）、agentName
  *    同为 solo-worker、agent-settled 恰 2 全 done；record 介质面（W1 权威介质）=
  *    主 session 文件 subagent-record v2 registered/settled 各恰 1 + record 事件
- *    文件 record-round-started/idle 各恰 2（同一 record 两轮 revive 续写）。
+ *    文件 record-created 恰 1（单 record 实体；多轮证据由 agent-started
+ *    memberRecordId 绑定单帧承载，见用例内注记）。
  *
  * 自定义模板：e2e/fixtures/wl-seq-two.js / wl-name-reuse.js（@pi-meta 头齐全；经
  * workflow tool run action 的绝对路径 name 派发——subagent_batch tool 恒转译 fan-out，
@@ -84,9 +85,10 @@ interface JournalView { // oe-exempt:20260927:test:e2e 剧本内视图形状声�
   frames: Record<string, unknown>[]
 }
 
-function readJournal(agentDir: string): JournalView[] {
+function readJournal(dataDir: string): JournalView[] {
   // run 域 record 事件流后缀（<runId>.record.jsonl，core RUN_EVENTS_SUFFIX 同源；D1 起唯一 journal 介质）
-  return listFilesRecursive(agentDir, '.record.jsonl').map((f) => ({
+  // 搜索根 = <dataDir>/ext-sessions（ADR-0141 session 存储树，workflow/runs/ 域按 rootSessionId 分区）
+  return listFilesRecursive(path.join(dataDir, 'ext-sessions'), '.record.jsonl').map((f) => ({
     file: f,
     runId: path.basename(f).replace(/\.record\.jsonl$/, ''),
     frames: parseJsonlLines(f).entries,
@@ -127,21 +129,21 @@ async function dispatchTemplateRun(
   sub.events.length = 0
 }
 
-/** 等待 journal 出现 run-settled 帧并返回该 run 的 JournalView。 */
-async function waitForRunSettled(agentDir: string, deadlineMs: number, tag: string): Promise<JournalView> {
+/** 等待 journal 出现 run-settled 帧并返回该 run 的 JournalView（搜索根 <dataDir>/ext-sessions）。 */
+async function waitForRunSettled(dataDir: string, deadlineMs: number, tag: string): Promise<JournalView> {
   const settled = await waitUntil(
-    () => readJournal(agentDir).some((j) => j.frames.some((f) => f['type'] === 'run-settled')),
+    () => readJournal(dataDir).some((j) => j.frames.some((f) => f['type'] === 'run-settled')),
     deadlineMs,
     2_000,
   )
   if (!settled) {
     writeDiag(`batch-wrr-${tag}-not-settled.json`, {
-      journals: readJournal(agentDir).map((j) => ({ runId: j.runId, types: j.frames.map((f) => String(f['type'])) })),
-      piLogsTail: readPiLogs(agentDir.replace(/\/agent$/, '')).slice(-3000),
+      journals: readJournal(dataDir).map((j) => ({ runId: j.runId, types: j.frames.map((f) => String(f['type'])) })),
+      piLogsTail: readPiLogs(dataDir).slice(-3000),
     })
   }
   expect(settled, `run 应在 ${deadlineMs}ms 内落 run-settled 帧（diag 见 journal 帧型）`).toBe(true)
-  return readJournal(agentDir).find((j) => j.frames.some((f) => f['type'] === 'run-settled'))!
+  return readJournal(dataDir).find((j) => j.frames.some((f) => f['type'] === 'run-settled'))!
 }
 
 // ── A6/V6：窗口内薄壳崩溃自愈 ────────────────────────────────────────────
@@ -213,8 +215,6 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
       secondTask: SECOND_TASK_SEQ,
     }, 'a6-dispatch', sub, app.consoleCap.errors, app.dataDir)
 
-    const agentDir = path.join(app.dataDir, 'agent')
-
     // r1 在途证据：薄壳新 pid + sleep 30 进程
     const shellUp = await waitUntil(() => {
       const now = shellProcessSnapshot()
@@ -272,7 +272,7 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
     expect(sleep2Up, 'r2 成员 sleep 20 进程应出现（respawn 薄壳承载第二条 ask）').toBe(true)
 
     // run 收尾：done（r1 crashed 是设计内合成形态，不放大 run 失败）
-    const run = await waitForRunSettled(agentDir, SETTLE_TIMEOUT_MS, 'a6')
+    const run = await waitForRunSettled(app.dataDir, SETTLE_TIMEOUT_MS, 'a6')
     const settledFrames = run.frames.filter((f) => f['type'] === 'run-settled')
     expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
     expect(settledFrames[0]?.['outcome'], 'run 应 done 收尾（崩溃不放大失败）').toBe('done')
@@ -324,8 +324,9 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
  * [A8 test 拆分] record 介质面断言（W1 权威介质口径——「同一 record 多轮」的最硬
  * 证据）：① 主 session 文件的 subagent-record v2 条目 registered 恰 1 + settled 恰 1
  * （origin=workflow + parentRunId=本 run；第二次调用若新建成员会有第二对条目）。
- * ② record 事件文件（<recordsDir>/<sa-id>.events，注册条目 id 直接定址）：
- * record-round-started 恰 2（revive 续写轮）+ record-round-idle 恰 2。
+ * ② record 事件文件（<recordsDir>/<sa-id>.events，注册条目 id 直接定址；
+ * <recordsDir> = <dataDir>/ext-sessions/<rootSessionId>/subagents/records/）：
+ * record-created 恰 1（单 record 实体——多轮证据注记见用例内）。
  * 注：pi 成员 session 文件（sessions/ 树）的落盘时序对本 spec 不可靠（多轮实测
  * 只见主 session 落盘），不作为断言范围——session 连续性由 record 单 id + 两轮
  * 事件承载（BATCH-08 通过标准的介质同型锚）。v2 条目落盘经 pi appendEntry
@@ -334,7 +335,8 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
 async function assertA8RecordMediaFace(
   sessionsNow: string[],
   run: { runId: string },
-  agentDir: string,
+  dataDir: string,
+  rootSessionId: string,
 ): Promise<{ registered: Record<string, unknown>[] }> {
   const mainSessionFile = sessionsNow.find((f) => {
     try { return fs.readFileSync(f, 'utf8').includes('[a8-dispatch]') } catch { return false }
@@ -385,8 +387,7 @@ test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（membe
     const { sid, sub } = await openMainListenWs(app.port, createReply)
     app.listen.current = sub
 
-    const agentDir = path.join(app.dataDir, 'agent')
-    const sessionsDir = path.join(agentDir, 'sessions')
+    const sessionsDir = path.join(app.dataDir, 'agent', 'sessions')
     const shellBase = shellProcessSnapshot()
 
     await dispatchTemplateRun(app.port, sid, REUSE_TEMPLATE, {
@@ -395,7 +396,7 @@ test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（membe
     }, 'a8-dispatch', sub, app.consoleCap.errors, app.dataDir)
 
     // run 收尾
-    const run = await waitForRunSettled(agentDir, SETTLE_TIMEOUT_MS, 'a8')
+    const run = await waitForRunSettled(app.dataDir, SETTLE_TIMEOUT_MS, 'a8')
     const settledFrames = run.frames.filter((f) => f['type'] === 'run-settled')
     expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
     expect(settledFrames[0]?.['outcome'], 'run 应 done 收尾').toBe('done')
@@ -428,18 +429,18 @@ test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（membe
     ).toBe(true)
 
     const sessionsNow = listFilesRecursive(sessionsDir, '.jsonl')
-    const { registered } = await assertA8RecordMediaFace(sessionsNow, run, agentDir)
+    const { registered } = await assertA8RecordMediaFace(sessionsNow, run, app.dataDir, sid)
 
-    // record 事件文件：round 两轮（encodeCwd 同源公式：--<cwd 斜杠转->>--）
-    const encCwd = '--' + SAMPLE_PROJECT.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-') + '--'
-    const recordsDir = path.join(agentDir, 'subagents', encCwd, 'records')
+    // record 事件文件（ADR-0141 session 存储树：<root>/<rootSessionId>/subagents/records/
+    // <sa-id>.events，分区键 = rootSessionId、无 encodeCwd 层）
+    const recordsDir = path.join(app.dataDir, 'ext-sessions', sid, 'subagents', 'records')
     const runRecordId = String(registered[0]?.['id'])
     const recordEventsFile = path.join(recordsDir, `${runRecordId}.events`)
     if (!fs.existsSync(recordEventsFile)) {
       writeDiag('batch-wrr-a8-record-events-missing.json', {
         recordsDir,
         runRecordId,
-        subagentsTree: listFilesRecursive(path.join(agentDir, 'subagents'), '').slice(0, 40),
+        subagentsTree: listFilesRecursive(path.join(app.dataDir, 'ext-sessions'), '').slice(0, 40),
       })
     }
     expect(fs.existsSync(recordEventsFile), `record 事件文件应存在（${recordEventsFile}；diag 含 subagents 树）`).toBe(true)

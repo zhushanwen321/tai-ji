@@ -91,7 +91,7 @@ describe('drawer types：plan tab 扩展（plan 模式重设计 u1-drawer-tab）
 
 // ── btw tab 扩展（btw-question D7，M3-a 第 10 员）──
 // 形态照 bashTask 先例：编译期断言由 tsc 系执行，运行期影子验证成员合法 + 可选字段
-// selectedBtwVid 零加员即可满足接口（默认分区不写该字段的结构保证）。
+// selectedBtwSessionId 零加员即可满足接口（默认分区不写该字段的结构保证）。
 
 // 'btw' 可赋给 RightDrawerTab（成员缺失即 vue-tsc 红）
 const btwTab: RightDrawerTab = 'btw'
@@ -107,15 +107,15 @@ describe('drawer types：btw tab 扩展（btw-question D7，M3-a）', () => {
   })
 
   it('btw 选中态默认未查看；分区内写入可读回（selection/btw.ts，§6.6① 迁出后落点）', () => {
-    // 可选性锚：minimalBtwSelection 字面量（上方）未含 selectedBtwVid 仍满足接口，
+    // 可选性锚：minimalBtwSelection 字面量（上方）未含 selectedBtwSessionId 仍满足接口，
     // 若未来改必填则该字面量 tsc 红，createDefaultBtwSelection 构造点同步被迫改。
-    expect(minimalBtwSelection.selectedBtwVid).toBeUndefined()
+    expect(minimalBtwSelection.selectedBtwSessionId).toBeUndefined()
     bindDrawerSessionId(ref<string | null>('sess-btw'))
-    expect(useBtwSelection().selectedBtwVid.value).toBeUndefined()
-    setBtwView('btw:pi-1')
-    expect(useBtwSelection().selectedBtwVid.value).toBe('btw:pi-1')
+    expect(useBtwSelection().selectedBtwSessionId.value).toBeUndefined()
+    setBtwView('pi-line-1')
+    expect(useBtwSelection().selectedBtwSessionId.value).toBe('pi-line-1')
     setBtwView(undefined)
-    expect(useBtwSelection().selectedBtwVid.value).toBeUndefined()
+    expect(useBtwSelection().selectedBtwSessionId.value).toBeUndefined()
   })
 
   it("'btw' 作 activeTab 写入分区可读回（DrawerPanel tab 元信息消费方）", () => {
@@ -154,7 +154,7 @@ type ParasiteFieldsRemoved = 'docked' extends keyof DrawerControlState
   ? false
   : 'selectedSubagentId' extends keyof DrawerControlState
     ? false
-    : 'selectedBtwVid' extends keyof DrawerControlState
+    : 'selectedBtwSessionId' extends keyof DrawerControlState
       ? false
       : true
 const controlStateSlimAnchor: ParasiteFieldsRemoved = true

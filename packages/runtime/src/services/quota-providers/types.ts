@@ -35,6 +35,14 @@ export function statusToReason(status: number): QuotaFetchFailureReason {
   return 'network'
 }
 
+/** failReason 封闭词表（declarative-engine 与 header-froms 两处 guard 共用的单一来源）。 */
+export const FAIL_REASONS: readonly string[] = ['unauthorized', 'network', 'no-subscription', 'parse', 'not_configured', 'no-credential', 'credential-unavailable', 'credential-unsupported', 'cookie-invalid-format']
+
+/** failReason 词表 guard（两处 guard 共用，防词表漂移）。 */
+export function isFailReason(v: unknown): v is QuotaFetchFailureReason {
+  return typeof v === 'string' && (FAIL_REASONS as readonly string[]).includes(v)
+}
+
 /** shape guard 公共前置：v 是非 null 对象（各平台 guard 首行统一用）。 */
 export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null

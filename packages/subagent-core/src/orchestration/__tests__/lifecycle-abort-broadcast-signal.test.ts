@@ -190,10 +190,10 @@ describe("[OR-3] abort 广播（abortRun / terminateRunningRuns）", () => {
 
     await abortRun(runId, deps, "mid-flight abort");
 
-    // 收尾：call done + trace failed（Cancelled 文案；[H2 W3] trace.live 已删除）
+    // 收尾：call done + trace cancelled（§3.3.8「未交付且非失败」中性档；Cancelled 文案；[H2 W3] trace.live 已删除）
     expect(call.status).toBe("done");
     expect(call.result?.error).toContain("Cancelled");
-    expect(findByStep(run.state.trace, 1)?.status).toBe("failed");
+    expect(findByStep(run.state.trace, 1)?.status).toBe("cancelled");
     // 落盘在收尾之后：save 时 run 已无 running 节点
     expect(run.state.trace.toArray().every((n) => n.status !== "running")).toBe(true);
   });

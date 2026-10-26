@@ -44,12 +44,18 @@ function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManaged
     lastActiveAt: 1,
     tokenCount: 0,
     inputTokens: 0,
-    isGenerating: false,
-    isCompacting: false,
-    isBashRunning: false,
-    bashRunToken: undefined,
+        bashRunToken: undefined,
     ...overrides,
   }
+}
+
+/** 测试视图占用写一律经转移原语（fixture 直写禁令；publish 传 null 不广播）。范式先例：src/transport/session-manager-send-queue.test.ts setBusy。 */
+function driveOccupancy(
+  session: IManagedSessionView,
+  ...transitions: SessionOccupancyTransition[]
+): IManagedSessionView {
+  for (const t of transitions) applySessionOccupancyTransition(session, null, t)
+  return session
 }
 
 /** 从 publish 调用记录里抽取全部 occupancy 帧的 payload（帧序）。 */
@@ -90,13 +96,13 @@ describe('occupancy 写原语（经转移原语驱动）', () => {
     session = makeMockSession()
   })
 
-  it('写入目标值并广播全量三维帧（payload 与 shared protocol 形状一致）', () => {
+  it('写入目标值并广播全量四维帧（payload 与 shared protocol 形状一致）', () => {
     applySessionOccupancyTransition(session, { publish }, 'dispatching')
-    expect(session.occupancy).toEqual({ turn: 'dispatching', compacting: false, bash: false })
+    expect(session.occupancy).toEqual({ turn: 'dispatching', compacting: false, bash: false, handingOff: false })
     expect(publish).toHaveBeenCalledTimes(1)
     const msg = publish.mock.calls[0][1] as ServerMessage
     expect(msg.type).toBe('session.occupancy')
-    expect(msg.payload).toEqual({ sessionId: 's1', turn: 'dispatching', compacting: false, bash: false })
+    expect(msg.payload).toEqual({ sessionId: 's1', turn: 'dispatching', compacting: false, bash: false, handingOff: false })
   })
 
   it('值未变化时不重复广播（④）：重复写同值零帧，跨维度变化才发帧', () => {
@@ -107,7 +113,7 @@ describe('occupancy 写原语（经转移原语驱动）', () => {
     applySessionOccupancyTransition(session, { publish }, 'bash-start') // 重复
     const frames = occupancyFrames(publish)
     expect(frames).toHaveLength(2)
-    expect(frames[1]).toMatchObject({ turn: 'generating', bash: true }) // 全量三维合并
+    expect(frames[1]).toMatchObject({ turn: 'generating', bash: true }) // 全量四维合并
   })
 
   it('幂等写（②）：乱序/回退事件直写目标值不产生中间态', () => {
@@ -124,7 +130,7 @@ describe('occupancy 写原语（经转移原语驱动）', () => {
   it('occupancy 字段缺省（undefined）按 idle 兜底合并（存量 mock/构造点零改动）', () => {
     expect(session.occupancy).toBeUndefined()
     applySessionOccupancyTransition(session, { publish }, 'compacting-start')
-    expect(session.occupancy).toEqual({ turn: 'idle', compacting: true, bash: false })
+    expect(session.occupancy).toEqual({ turn: 'idle', compacting: true, bash: false, handingOff: false })
   })
 
   it('publish 未注入（null/undefined）时状态照写、广播跳过（null-safe）', () => {
@@ -206,7 +212,7 @@ describe('EventInterpreter occupancy 挂点（#2-#6）', () => {
     expect(sent.map((m) => m.type)).toContain('session.compacted')
   })
 
-  it('真实接线形态：onOccupancyTransition → applySessionOccupancyTransition，端到端帧序与最终三维正确（含乱序重复）', () => {
+  it('真实接线形态：onOccupancyTransition → applySessionOccupancyTransition，端到端帧序与最终四维正确（含乱序重复）', () => {
     const publish = vi.fn()
     const session = makeMockSession()
     const interpreter = new EventInterpreter('s1', {
@@ -222,7 +228,7 @@ describe('EventInterpreter occupancy 挂点（#2-#6）', () => {
     ])
     const frames = occupancyFrames(publish)
     expect(frames.map((f) => f.turn)).toEqual(['generating', 'settling', 'idle']) // 重复 settling 去重为一帧
-    expect(session.occupancy).toEqual({ turn: 'idle', compacting: false, bash: false })
+    expect(session.occupancy).toEqual({ turn: 'idle', compacting: false, bash: false, handingOff: false })
   })
 })
 
@@ -273,6 +279,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
       ensureActive: vi.fn(async () => client),
       getSessionByClient: vi.fn(() => session),
       persistSessionOutcome: vi.fn(),
+      clearSessionOutcome: vi.fn(),
       getSession: vi.fn(() => session),
       removeSessionEntry: vi.fn(),
       detachSession: vi.fn(),
@@ -304,7 +311,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
     await flushDelivery()
     expect(promptFn).toHaveBeenCalled()
     const frames = occupancyFrames(publish)
-    expect(frames).toEqual([{ sessionId: 's1', turn: 'dispatching', compacting: false, bash: false }])
+    expect(frames).toEqual([{ sessionId: 's1', turn: 'dispatching', compacting: false, bash: false, handingOff: false }])
     // 帧序（[RT-4#10] 合并收尾）：occupancy 置位先于 prompt——RPC 往返窗内对预检/回收豁免
     // 不再呈 idle；lastActiveAt/record 记账侧（D-18「成功才显示 working」）仍在 prompt
     // 受理成功后（markSessionActive 尾置，occupancy 同值转移去重不二播）
@@ -314,7 +321,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
 
   it('#1 busy（generating）不再预检拒绝：零 send.rejected + 按 lane=steer 承接投递（D5 排队取代拒绝）', async () => {
     const { dispatcher, publish, promptFn, registry } = makeDispatcher({
-      session: makeMockSession({ occupancy: { turn: 'generating', compacting: false, bash: false } }),
+      session: driveOccupancy(makeMockSession(), 'generating'),
     })
     await dispatcher.sendMessage('s1', 'hello')
     await flushDelivery()
@@ -347,8 +354,8 @@ describe('MessageDispatcher occupancy 挂点', () => {
     // promptAwaitingCompaction（classifyBusyRejection 分型）内复位 idle + 置
     // piCompactingBlocked（持有等 compaction_end）——显式收尾帧序列，而非旧的「零帧」
     expect(occupancyFrames(publish)).toEqual([
-      { sessionId: 's1', turn: 'dispatching', compacting: false, bash: false },
-      { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
+      { sessionId: 's1', turn: 'dispatching', compacting: false, bash: false, handingOff: false },
+      { sessionId: 's1', turn: 'idle', compacting: false, bash: false, handingOff: false },
     ])
     // 原断言意图保留（防卡 dispatching）：终态 turn 不得停留 dispatching
     expect(session.occupancy?.turn ?? 'idle').not.toBe('dispatching')
@@ -365,8 +372,8 @@ describe('MessageDispatcher occupancy 挂点', () => {
     // 帧序（[RT-4#10] 合并收尾）：投递路径起始写 dispatching → 非 busy 真失败由投递路径 catch 面
     // 收敛回 idle（不卡 dispatching）；原断言意图保留：终态不得停留 dispatching
     expect(occupancyFrames(publish)).toEqual([
-      { sessionId: 's1', turn: 'dispatching', compacting: false, bash: false },
-      { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
+      { sessionId: 's1', turn: 'dispatching', compacting: false, bash: false, handingOff: false },
+      { sessionId: 's1', turn: 'idle', compacting: false, bash: false, handingOff: false },
     ])
     expect(session.occupancy?.turn ?? 'idle').not.toBe('dispatching')
   })
@@ -375,32 +382,33 @@ describe('MessageDispatcher occupancy 挂点', () => {
     // 真实 abort 场景 = 生成中（occupancy generating）；pi 卡死时 agent_settled 不到达，
     // abort 是唯一复位来源（#9 失败路径语义）。
     const { dispatcher, publish } = makeDispatcher({
-      session: makeMockSession({ isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } }),
+      session: driveOccupancy(makeMockSession(), 'generating'),
     })
     await dispatcher.abort('s1')
     expect(frameTypes(publish)).toContain('message.complete')
-    expect(occupancyFrames(publish)).toEqual([{ sessionId: 's1', turn: 'idle', compacting: false, bash: false }])
+    expect(occupancyFrames(publish)).toEqual([{ sessionId: 's1', turn: 'idle', compacting: false, bash: false, handingOff: false }])
     await dispatcher.abort('s1') // 重复 abort：idle→idle 幂等，零帧
     expect(occupancyFrames(publish)).toHaveLength(1)
   })
 
   it('#9b abort RPC 失败（非超时）→ 兜底复位 turn=idle（pi 卡死 agent_settled 不到达）', async () => {
     const { dispatcher, publish } = makeDispatcher({
-      session: makeMockSession({ isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } }),
+      session: driveOccupancy(makeMockSession(), 'generating'),
       abortBehavior: 'error',
     })
     await dispatcher.abort('s1')
     expect(frameTypes(publish)).toContain('message.error')
-    expect(occupancyFrames(publish)).toEqual([{ sessionId: 's1', turn: 'idle', compacting: false, bash: false }])
+    expect(occupancyFrames(publish)).toEqual([{ sessionId: 's1', turn: 'idle', compacting: false, bash: false, handingOff: false }])
   })
 
   it('#10 forceQuit → 全复位帧 + session.exited 保留（占用中 pi 死亡链路）', async () => {
     const { dispatcher, publish } = makeDispatcher({
-      session: makeMockSession({ occupancy: { turn: 'settling', compacting: true, bash: false } }),
+      // settling + compacting=true 双维前置：settling 归 turn 机器，compacting 归布尔维 patch。
+      session: driveOccupancy(makeMockSession(), 'settling', 'compacting-start'),
     })
     await dispatcher.forceQuit('s1')
     const frames = occupancyFrames(publish)
-    expect(frames).toEqual([{ sessionId: 's1', turn: 'idle', compacting: false, bash: false }])
+    expect(frames).toEqual([{ sessionId: 's1', turn: 'idle', compacting: false, bash: false, handingOff: false }])
     expect(frameTypes(publish)).toContain('session.exited')
   })
 
@@ -409,8 +417,8 @@ describe('MessageDispatcher occupancy 挂点', () => {
     await dispatcher.sendBash('s1', 'ls')
     const frames = occupancyFrames(publish)
     expect(frames).toEqual([
-      { sessionId: 's1', turn: 'idle', compacting: false, bash: true },
-      { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
+      { sessionId: 's1', turn: 'idle', compacting: false, bash: true, handingOff: false },
+      { sessionId: 's1', turn: 'idle', compacting: false, bash: false, handingOff: false },
     ])
   })
 
@@ -426,7 +434,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
 
   it('#7 streaming 并存：isGenerating 期间 bash 结果入待落列，occupancy 仍 bash=true→false（turn 不受影响）', async () => {
     const { dispatcher, publish, session } = makeDispatcher({
-      session: makeMockSession({ isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } }),
+      session: driveOccupancy(makeMockSession(), 'generating'),
     })
     await dispatcher.sendBash('s1', 'ls')
     expect(session.pendingBashResults).toHaveLength(1) // 双分支延迟保留（存量）
@@ -437,14 +445,12 @@ describe('MessageDispatcher occupancy 挂点', () => {
 
   it('#11 abortBash → bash=false（成败皆兜底，bashAborted 兜底终态帧保留）', async () => {
     const { dispatcher, publish } = makeDispatcher({
-      session: makeMockSession({
-        isBashRunning: true, bashRunToken: 'bash_1_abc',
-        occupancy: { turn: 'idle', compacting: false, bash: true },
-      }),
+      // bash=true 前置：布尔维 patch（'bash-start' 不动 turn 维，turn 保持 idle）。
+      session: driveOccupancy(makeMockSession({ bashRunToken: 'bash_1_abc' }), 'bash-start'),
     })
     await dispatcher.abortBash('s1')
     const frames = occupancyFrames(publish)
-    expect(frames).toEqual([{ sessionId: 's1', turn: 'idle', compacting: false, bash: false }])
+    expect(frames).toEqual([{ sessionId: 's1', turn: 'idle', compacting: false, bash: false, handingOff: false }])
     expect(frameTypes(publish)).toContain('message.bashAborted')
   })
 
@@ -463,8 +469,8 @@ describe('MessageDispatcher occupancy 挂点', () => {
     })
     await expect(dispatcher.compact('s1')).rejects.toThrow('compact transport exploded')
     expect(occupancyFrames(publish)).toEqual([
-      { sessionId: 's1', turn: 'idle', compacting: true, bash: false },
-      { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
+      { sessionId: 's1', turn: 'idle', compacting: true, bash: false, handingOff: false },
+      { sessionId: 's1', turn: 'idle', compacting: false, bash: false, handingOff: false },
     ])
   })
 
@@ -480,6 +486,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
       ensureActive: vi.fn(async () => client),
       getSessionByClient: vi.fn(() => session),
       persistSessionOutcome: vi.fn(),
+      clearSessionOutcome: vi.fn(),
       getSession: vi.fn(() => session),
       removeSessionEntry: vi.fn(),
       detachSession: vi.fn(),
@@ -499,7 +506,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
     await dispatcher.sendMessage('s1', 'hello')
     await flushDelivery()
     await dispatcher.abort('s1')
-    expect(session.occupancy).toEqual({ turn: 'idle', compacting: false, bash: false }) // 状态照写
+    expect(session.occupancy).toEqual({ turn: 'idle', compacting: false, bash: false, handingOff: false }) // 状态照写
   })
 })
 
@@ -541,9 +548,9 @@ describe('SessionLifecycle.registerSession occupancy 初值（respawn 衔接）'
   it('respawn（restore）/create/fork 共用注册汇聚点：occupancy 从 idle 起步', async () => {
     const lifecycle = makeLifecycle()
     const session = await lifecycle.registerSession('s1', {} as unknown as IPiEngine, '/repo', 'r')
-    // pi 重 spawn 后无活跃 run → idle 起步（与三 flag 全 false 同语义）；renderer 可观测性
+    // pi 重 spawn 后无活跃 run → idle 起步（与四维全 false 同语义）；renderer 可观测性
     // 由宣告帧保证（下方用例），bus 未注入（null）时状态照写不抛（null-safe）。
-    expect(session.occupancy).toEqual({ turn: 'idle', compacting: false, bash: false })
+    expect(session.occupancy).toEqual({ turn: 'idle', compacting: false, bash: false, handingOff: false })
   })
 
   it('Gate B V6b 回归：注册即写 occupancy idle 快照——restore 后重订阅回放 idle 帧修正 stale 分区', async () => {
@@ -553,7 +560,7 @@ describe('SessionLifecycle.registerSession occupancy 初值（respawn 衔接）'
     // renderer 分区 stale 只能靠 respawn 后的快照回放修正）。
     bus.publish('s1', {
       type: 'session.occupancy',
-      payload: { sessionId: 's1', turn: 'generating', compacting: true, bash: false },
+      payload: { sessionId: 's1', turn: 'generating', compacting: true, bash: false, handingOff: false },
     } as ServerMessage)
     bus.clearSession('s1')
 
@@ -564,7 +571,7 @@ describe('SessionLifecycle.registerSession occupancy 初值（respawn 衔接）'
     // setOccupancy(idle) 修正 stale + flush 触发条件（收到全 idle 帧）成立，队列可续投。
     const replay = bus.subscribe('s1', makeWs())
     const occ = replay.stateSnapshot.find((m) => m.type === 'session.occupancy')
-    expect(occ?.payload).toEqual({ sessionId: 's1', turn: 'idle', compacting: false, bash: false })
+    expect(occ?.payload).toEqual({ sessionId: 's1', turn: 'idle', compacting: false, bash: false, handingOff: false })
   })
 
   it('create（全新 sid）同样落 idle 快照：三入口汇聚点语义一致（renderer 缺省分区本就 idle，无行为变化）', async () => {
@@ -574,7 +581,7 @@ describe('SessionLifecycle.registerSession occupancy 初值（respawn 衔接）'
 
     const replay = bus.subscribe('fresh', makeWs())
     const occ = replay.stateSnapshot.find((m) => m.type === 'session.occupancy')
-    expect(occ?.payload).toEqual({ sessionId: 'fresh', turn: 'idle', compacting: false, bash: false })
+    expect(occ?.payload).toEqual({ sessionId: 'fresh', turn: 'idle', compacting: false, bash: false, handingOff: false })
   })
 
   it('宣告帧经 IMessageBus.publish 下发（payload 形状与 shared protocol 一致）', async () => {

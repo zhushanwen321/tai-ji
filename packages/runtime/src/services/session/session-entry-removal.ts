@@ -160,7 +160,9 @@ export class SessionEntryRemovalOrchestrator {
     // Map 无条目（防御路径）时构造最小形状——id 之外的字段无从得知，宁发少知不发错。
     // toSummary 失败同样降级最小形状（宁发少知不发错；步骤 6 的条目删除不得被打断）。
     const session = this.deps.getSession(sessionId)
-    const minimalDestroyedSummary: SessionSummary = { id: sessionId, label: sessionId, cwd: '', status: 'dead', lastActiveAt: 0, modelId: '', tokenCount: 0 }
+    // W3：minimalDestroyedSummary 不再带 modelId/tokenCount 占位（SessionSummary
+    // 三状态字段已删，状态归状态层；销毁通知只消费 SessionInfo 描述字段）。
+    const minimalDestroyedSummary: SessionSummary = { id: sessionId, label: sessionId, cwd: '', status: 'dead', lastActiveAt: 0 }
     let destroyedSummary: SessionSummary = minimalDestroyedSummary
     if (session) {
       runDestroyStepIsolated('toSummary', sessionId, () => {

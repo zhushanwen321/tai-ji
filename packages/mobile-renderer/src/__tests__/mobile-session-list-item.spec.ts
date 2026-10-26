@@ -5,23 +5,27 @@
 // active 高亮）+ A14 派生态渲染（9 态语义色/文案 + dead 进程态红点特判——进程态权威于
 // 对话派生，A3 分流视觉锚）。
 //
-// 纯组件测试：无 app-runtime 依赖（props 驱动，derivedStatus 直接给定——判定谓词的
-// 输入收集与行为矩阵归 core session-derivations.test.ts 与列表接线测试），i18n 真实装配。
+// 纯组件测试：props 驱动（derivedStatus 直接给定——判定谓词的输入收集与行为矩阵归 core
+// session-derivations.test.ts 与列表接线测试），i18n 真实装配。
+// [W1 会话架构四层分离] 模型/思考档改读状态层（app-runtime.liveStateOf）——本文件 mock
+// 该读口（模块级 spy 单例，用例播种/断言共用），不再从 SessionSummary 字段取值。
 // 运行：cd packages/mobile-renderer && npx vitest run src/__tests__/mobile-session-list-item.spec.ts
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { DerivedStatus } from '@taiji/core'
 import type { SessionSummary } from '@taiji/shared'
 import SessionListItem from '../views/SessionListItem.vue'
 import { i18n } from '../i18n'
 
+// [W1] 状态层读口（组件唯一消费的 app-runtime 导出；SessionSummary 字段降级为种子不参与显示）
+const liveStateOf = vi.hoisted(() => vi.fn((_id: string) => undefined as { modelId?: string; thinkingLevel?: string } | undefined))
+vi.mock('../shell/app-runtime', () => ({ liveStateOf }))
+
 function makeItem(overrides: Partial<SessionSummary> & Pick<SessionSummary, 'id'>): SessionSummary {
   return {
     label: `会话-${overrides.id}`,
     cwd: '/tmp/project',
     status: 'idle',
-    modelId: 'test-model',
-    tokenCount: 0,
     lastActiveAt: new Date(2001, 1, 3).getTime(),
     ...overrides,
   }
@@ -42,6 +46,8 @@ describe('SessionListItem 会话列表行（u13/A5）', () => {
   beforeEach(() => {
     // i18n 是模块级单例：同 worker 前序测试可能把 locale 切到 en-US，此处固定中文
     i18n.global.locale.value = 'zh-CN'
+    liveStateOf.mockReset()
+    liveStateOf.mockReturnValue(undefined)
   })
 
   it('外迁内容等价：label + 状态点配色 + 状态文案 + 时间（跨日 M/D）', () => {
@@ -74,20 +80,31 @@ describe('SessionListItem 会话列表行（u13/A5）', () => {
     dead.unmount()
   })
 
-  it('A5 模型标签：modelId 可见（行内独立 testid）', () => {
-    const wrapper = mountItem(makeItem({ id: 's-1', modelId: 'claude-opus-4' }))
+  it('A5 模型标签：状态层 modelId 可见（行内独立 testid）', () => {
+    liveStateOf.mockImplementation((id: string) => (id === 's-1' ? { modelId: 'claude-opus-4' } : undefined))
+    const wrapper = mountItem(makeItem({ id: 's-1' }))
+    // 状态层权威：显示状态层值而非列表种子字段
     expect(wrapper.get('[data-testid="mobile-session-model-line"]').text()).toBe('claude-opus-4')
     wrapper.unmount()
   })
 
-  it('A5 思考档标签：thinkingLevel 有值时以「modelId · level」拼接；缺失时仅 modelId', () => {
-    const withLevel = mountItem(makeItem({ id: 's-1', modelId: 'm-1', thinkingLevel: 'high' }))
+  it('A5 思考档标签：状态层 thinkingLevel 有值时以「modelId · level」拼接；缺失时仅 modelId', () => {
+    liveStateOf.mockImplementation((id: string) =>
+      id === 's-1' ? { modelId: 'm-1', thinkingLevel: 'high' } : id === 's-2' ? { modelId: 'm-2' } : undefined,
+    )
+    const withLevel = mountItem(makeItem({ id: 's-1' }))
     expect(withLevel.get('[data-testid="mobile-session-model-line"]').text()).toBe('m-1 · high')
     withLevel.unmount()
 
-    const withoutLevel = mountItem(makeItem({ id: 's-2', modelId: 'm-2' }))
+    const withoutLevel = mountItem(makeItem({ id: 's-2' }))
     expect(withoutLevel.get('[data-testid="mobile-session-model-line"]').text()).toBe('m-2')
     withoutLevel.unmount()
+  })
+
+  it('[W1] 状态层缺失 → 模型标签显式未知（空串，不回退 SessionSummary 种子字段）', () => {
+    const wrapper = mountItem(makeItem({ id: 's-unobserved' }))
+    expect(wrapper.get('[data-testid="mobile-session-model-line"]').text()).toBe('')
+    wrapper.unmount()
   })
 
   it('交互：click 与 keydown.enter 均 emit("open", item.id)', async () => {

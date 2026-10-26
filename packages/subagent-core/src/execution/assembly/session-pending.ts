@@ -20,7 +20,9 @@
 //
 // [D5 消亡登记（chat-domain-v1x-liveness-governance W3）] listActivePendingFromSessionFile
 // （后代补杀清单口径）随 inproc session-runner（已删） 删除消亡——其消费方全在该待删
-// 文件；「层主死后孤儿后代止损」语义由 W4 轮次活性监督器逐 record 三态（该放弃）承接，
+// 文件；「层主死后孤儿后代止损」语义的承接方 W4 轮次活性监督器已随 commit 924ace33f
+// 整机清退（生产不可达 + supervised set 恒空），现由孤儿恢复 + registry reconcile sweep
+// 承接，
 // 禁止按旧「不过滤跨 session」语义把补杀迁入新路径（翻档后 fork 残留会进补杀清单，
 // 误杀父 session 活跃后代）。readActivePendingFromSessionFile（count 口径）保留：
 // 判定语义仍由其单测锁守，生产消费方随删件清零（存活面 = 机制本体，勿误认清理仍在工作）。

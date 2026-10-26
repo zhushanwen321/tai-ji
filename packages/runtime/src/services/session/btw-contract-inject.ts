@@ -20,9 +20,10 @@
 export const BTW_BEHAVIOR_CONTRACT =
   '父任务快照仅供背景；只回答本线新问题、不自动续主任务；仅本线明确要求时才改工作区'
 
-/** 行为契约注入 trace 记录（D9⑤ 最终裁决挂点；V6 钉固载体后与 system-prompt-trace 对账）。 */
+/** 行为契约注入 trace 记录（D9⑤ 最终裁决挂点；V6 钉固载体后与 system-prompt-trace 对账）。
+ *  W4a 键统一：vid → sessionId（线 pi 真实会话 id）。 */
 export interface BtwContractInjectionTrace {
-  vid: string
+  sessionId: string
   /** 第几轮会话建立（create=1，每次 reattach +1）。 */
   round: number
   carrier: 'append-system-prompt'

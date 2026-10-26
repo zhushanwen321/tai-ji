@@ -73,6 +73,11 @@ export const panelSessionMock = {
   list: [] as Array<{ id: string; status: string; modelId?: string }>,
 }
 
+/** 状态层 mock 单例（[W1]：会话运行时状态按 id 寄存，缺省未观测）。 */
+export const panelLiveStateMock = {
+  liveStateOf: (_id: string): { modelId?: string; thinkingLevel?: string } | undefined => undefined,
+}
+
 // 顶层注册 useNewTaskFlow（空转 idle 态——Panel 挂载测试不驱动新建任务流）
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
   useNewTaskFlow: () => ({ state: ref('idle'), isActive: ref(false) }),
@@ -81,6 +86,11 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
 // 顶层注册 chat/session store（单例引用见上方导出；同三连时序语义：工厂惰性执行时绑定已初始化）
 vi.mock('@/stores/chat', () => ({ useChatStore: () => panelChatMock }))
 vi.mock('@/stores/session', () => ({ useSessionStore: () => panelSessionMock }))
+// [W1 会话架构四层分离] 状态层读口（Panel 内 PlanQuotaFloatPanel 的「当前」provider 判定源）：
+// 缺省未观测 = 无「当前」标记；用例经 panelLiveStateMock 播种。
+vi.mock('@/stores/session-live-state', () => ({
+  useSessionLiveStateStore: () => panelLiveStateMock,
+}))
 
 // 顶层注册三连（vitest 将 vi.mock 调用提升到模块顶部，工厂惰性执行时上方绑定已初始化）
 vi.mock('@/composables/features/sidebar/useSidebar', () => panelSidebarMockModule())

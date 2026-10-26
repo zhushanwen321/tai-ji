@@ -196,7 +196,8 @@ export { registerNativeSessionReader } from "./execution/engine/common/session-v
 // tool 面 / interface 渲染层 / bg-notify 共同消费）。CLOSED_REASONS / DEFAULT_AGENT_NAME
 // 为值常量，ResurrectDeniedError 为错误类（值 + 类型双形态）。
 // stopReason 词表族（NEW_STOP_REASONS 中断+重开 4 值 / ROUND_TERMINAL_STOP_REASONS
-// 正常轮终 2 值 / STOP_REASONS 13 值全集）单源在 types.ts——runtime workflow-step-merge
+// 引擎原值 3 值 / STOP_REASONS 16 值全集——另有 LEGACY_INFERRED_STOP_REASONS 迁移期
+// 旧值 2 值未导出）单源在 execution/domain/record-types.ts——runtime workflow-step-merge
 // 的步骤状态映射按词表判定（消费方引用常量，勿手抄字面量清单）。
 export { CLOSED_REASONS, NEW_STOP_REASONS, ROUND_TERMINAL_STOP_REASONS, STOP_REASONS, ResurrectDeniedError } from "./execution/domain/record-types.ts";
 export { DEFAULT_AGENT_NAME } from "./execution/domain/record-model.ts";
@@ -516,9 +517,8 @@ export type {
   ToolCallEntry,
   WorkerLogEntry,
 } from "./orchestration/models/types.ts";
-// SLUG_MAX_LENGTH 单源（merge 收敛完成）：唯一定义在 orchestration/models/types.ts；
-// 原 execution/execute-options-mapper.ts 重复定义已删（改 import 消费，深路径消费者
-// subagent-actions-core 同步切到 models/types 单源）。
+// SLUG_MAX_LENGTH 单源：权威定义在 shared/run-vocabulary.ts；本行经 orchestration/
+// models/types.ts 壳面再导出取值（壳保留使外部包深导入消费方路径零改动）。
 export { SLUG_MAX_LENGTH } from "./orchestration/models/types.ts";
 // isTerminalDoneReason：DoneReason 终止性判定（穷举 switch，词表新增成员 tsc 强制归类）。
 // 壳 workflow-notify 的防偷懒收尾指令按它判定——词表镜像收编 core 单源。

@@ -178,6 +178,11 @@ ALLOWLIST: dict[str, str] = {
     # 互斥不变量 1）；fixture 构造器写点全在 mkdtemp tmp 树。
     "packages/runtime/src/services/archive/archive-service.ts": "session 归档域服务：压缩体/簿记/解压 tmp 三类写点（登记表 §4 ⑳，ADR-0153）",
     "packages/runtime/src/services/archive/archive-fixture.ts": "session 归档测试构造器：写点全在 mkdtemp tmp 树（登记表 §4 ⑳）",
+    # 登记表 §4 ㉑（u-w5s-orphan-sweep，session-identity-visibility-state W5 批 2）：
+    # 存量磁盘孤儿清扫脚本三写点——点检记录 JSON（--record CLI 指定路径，验收项 14
+    # 判定独立性取数源）+ selftest tmp 树 fixture/点检记录构造（mkdtemp，禁触真实
+    # 数据目录），均非 pi session JSONL 本体；删除动作经 trashDirectory 端口。
+    "scripts/sweep-orphan-session-dirs.mjs": "存量孤儿清扫脚本：点检记录 + selftest tmp 树 fixture 三写点（登记表 §4 ㉑）",
 }
 
 # ---------------------------------------------------------------------------
@@ -200,6 +205,10 @@ ALLOWLIST_STMT_PATTERNS: dict[str, tuple[re.Pattern, ...]] = {
         re.compile(r"\bwriteFileSync\s*\("),
     ),
     "packages/runtime/src/services/archive/archive-fixture.ts": (
+        re.compile(r"\bwriteFileSync\s*\("),
+    ),
+    # 登记表 §4 ㉑：三写点均为裸 writeFileSync( 形态（点检记录 / mkFile fixture / selftest 记录）
+    "scripts/sweep-orphan-session-dirs.mjs": (
         re.compile(r"\bwriteFileSync\s*\("),
     ),
 }

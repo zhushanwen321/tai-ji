@@ -49,30 +49,31 @@ function stubCleanSource(): { src: string; forkFile: string } {
 }
 
 describe('分支①：源已落盘 → 正常 fork（pi 原生 --fork 链路）', () => {
-  it('fork → switch_session 附着 → registerSession(hidden) → 注册表登记', async () => {
+  it('fork → switch_session 附着 → registerSession(surface:btw) → 注册表登记', async () => {
     const { forkFile } = stubCleanSource()
     h.state = { sessionId: 'sid-f1', sessionFile: forkFile }
 
     const res = await svc.createLine({ mainSid: MAIN_SID, cwd: CWD })
 
-    expect(res).toEqual({ vid: 'btw:sid-f1', mainSid: MAIN_SID, snapshotKind: 'forked', sessionFilePath: forkFile })
-    // spawn 键 = tempKey（日志文件名避冒号）→ rekey 到 vid（pm 键 ≡ 注册 id）
+    expect(res).toEqual({ sessionId: 'sid-f1', mainSid: MAIN_SID, snapshotKind: 'forked', sessionFilePath: forkFile })
+    // spawn 键 = tempKey → rekey 到线 pi 真实 id（W4a：pm 键 ≡ 注册 id ≡ lifecycle 键）
     expect(h.spawned).toHaveLength(1)
     expect(h.rekeyed[0][0]).toMatch(/^btw-create-/)
-    expect(h.spawned[0].key).toBe('btw:sid-f1') // rekey 后 pm 键 ≡ 注册 id
-    expect(h.rekeyed).toEqual([[expect.stringMatching(/^btw-create-/), 'btw:sid-f1']])
+    expect(h.spawned[0].key).toBe('sid-f1') // rekey 后 pm 键 ≡ 注册 id
+    expect(h.rekeyed).toEqual([[expect.stringMatching(/^btw-create-/), 'sid-f1']])
     // 附着编排：switchSession(forkFile)
     expect(h.spawned[0].client.switchSession).toHaveBeenCalledWith(forkFile)
-    // hidden:true 注册（6 参 = 不含 parentSession 血缘——关联不进展示链，D4 结构性成立）
+    // surface:'btw' 注册（6 参 = 尾部 surface，W5 hidden 形参已删；仍不含 parentSession
+    // 血缘——关联不进展示链，D4 结构性成立）
     expect(h.registered).toHaveLength(1)
-    expect(h.registered[0]).toMatchObject({ id: 'btw:sid-f1', file: forkFile, hidden: true, cwd: CWD, label: 'proj' })
+    expect(h.registered[0]).toMatchObject({ id: 'sid-f1', file: forkFile, surface: 'btw', cwd: CWD, label: 'proj' })
     expect(h.registered[0].argc).toBe(6)
     // 落点不变量（V2②③）：env session-dir 强制覆写为线目录
     expect(h.spawned[0].options.env?.PI_CODING_AGENT_SESSION_DIR).toBe(getBtwThreadDir(MAIN_SID))
     // 注册表
-    const rec = svc.getLine('btw:sid-f1')!
-    expect(rec).toMatchObject({ mainSid: MAIN_SID, piSessionId: 'sid-f1', hidden: true, snapshotKind: 'forked', contractRounds: 1 })
-    expect(svc.listLines(MAIN_SID).map(l => l.vid)).toEqual(['btw:sid-f1'])
+    const rec = svc.getLine('sid-f1')!
+    expect(rec).toMatchObject({ mainSid: MAIN_SID, piSessionId: 'sid-f1', surface: 'btw', snapshotKind: 'forked', contractRounds: 1 })
+    expect(svc.listLines(MAIN_SID).map(l => l.piSessionId)).toEqual(['sid-f1'])
   })
 
   it('label 覆写透传 registerSession', async () => {
@@ -93,10 +94,10 @@ describe('分支②：源不存在/为空 → 回落无 fork 新建（落点 = �
     expect(res.snapshotKind).toBe('no-source')
     expect(h.deps.forkSession).not.toHaveBeenCalled()
     expect(h.spawned[0].client.switchSession).not.toHaveBeenCalled()
-    expect(h.registered[0]).toMatchObject({ id: 'btw:sid-b2', hidden: true, file: join(fx, 'threadB', 'x.jsonl') })
+    expect(h.registered[0]).toMatchObject({ id: 'sid-b2', surface: 'btw', file: join(fx, 'threadB', 'x.jsonl') })
     // 回落 spawn 落点继承：env session-dir = 线目录（V2② 实测同款通道）
     expect(h.spawned[0].options.env?.PI_CODING_AGENT_SESSION_DIR).toBe(getBtwThreadDir(MAIN_SID))
-    expect(svc.getLine('btw:sid-b2')?.snapshotKind).toBe('no-source')
+    expect(svc.getLine('sid-b2')?.snapshotKind).toBe('no-source')
     // 不静默：warn 登记不可用原因
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('fork source unavailable'))
   })

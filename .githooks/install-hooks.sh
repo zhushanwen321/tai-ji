@@ -164,6 +164,23 @@ if [ "$SKIP_ALL_CHECKS" = "1" ]; then
     exit 0
 fi
 
+# ============================================================================
+# [main 直提交守卫] 分支模型机器化（DEV-WORKFLOW.md §1/§6）：main 只经 GitHub PR
+#   合并与发布流程的版本 bump 推进，本地直接内容提交一律拦截。事故形态（2026-10-25）：
+#   dev-merge-gates 的 committer agent 把一轮分支审查修复误提交进 main worktree，
+#   把 main 从 e8b7bafbe 推到 94ea75386（事后 reset 恢复）——提示词级"提交前核实
+#   worktree"依赖 agent 遵守，此处改为确定性拦截。发布流程的三处 main 提交显式设
+#   TAIJI_ALLOW_MAIN_COMMIT=1 绕过（merge skill 阶段 4 / 4N.4 / 6.5.2 与
+#   prerelease-test.sh）；本地 merge commit 不拦（人工显式操作）。分支探测失败
+#   放行（|| true + 空串不等于 main）——守卫不制造新故障。
+# ============================================================================
+MAIN_GUARD_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+if [ "$MAIN_GUARD_BRANCH" = "main" ] && [ -z "$TAIJI_ALLOW_MAIN_COMMIT" ] && [ ! -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then
+    echo -e "${RED}[ERROR] 禁止直接向 main 提交（当前分支 = main，且非 merge commit、未设 TAIJI_ALLOW_MAIN_COMMIT）${NC}"
+    echo -e "${YELLOW}[FIX] main 只通过 GitHub PR 合并与发布流程版本 bump 推进（DEV-WORKFLOW.md §6）。确认是发布流程（merge skill 阶段 4 / 4N.4 / 6.5.2 或 prerelease-test.sh）→ 设 TAIJI_ALLOW_MAIN_COMMIT=1 后重试；否则 → cd 到目标 feat / dev worktree 再提交（agent workflow 误落 main 的典型形态）${NC}"
+    exit 1
+fi
+
 # 获取变更文件
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
 # [type-gate-coverage 2026-10-15] 前端域 = renderer + ui + mobile-renderer + core 四包。
@@ -2041,7 +2058,7 @@ if echo "$SUBAGENT_CORE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/ch
 fi
 
 # ============================================================================
-# subagent-core 包内值依赖环检查（C-data-26，§2.3 配套）
+# subagent-core 包内值依赖环检查（C-data-27，§2.3 配套）
 #   packages/subagent-core/** 或检查脚本自身变更时触发：
 #   scripts/check-subagent-core-value-cycles.mjs —— 值 import 图不得成环（类型擦除边
 #   豁免，仅提示）。与 H3 聚合边界检查互补：后者只看六聚合子图，本检查覆盖整包。
@@ -2051,11 +2068,11 @@ SUBAGENT_CORE_CYCLE_STAGED=$(git diff --cached --name-only -- packages/subagent-
 if echo "$SUBAGENT_CORE_CYCLE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/check-subagent-core-value-cycles\.mjs$"; then
     print_section "[subagent-core 包内值依赖环检查]"
     if [ ! -f "scripts/check-subagent-core-value-cycles.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-value-cycles.mjs（C-data-26 检查缺失）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-value-cycles.mjs（C-data-27 检查缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-subagent-core-value-cycles.mjs; then
-        echo -e "${RED}[ERROR] subagent-core 包内检出值依赖环（C-data-26）——按上方 SCC 成员与内部边处理（端口反转/装配注入/共享词汇下沉契约层）${NC}"
+        echo -e "${RED}[ERROR] subagent-core 包内检出值依赖环（C-data-27）——按上方 SCC 成员与内部边处理（端口反转/装配注入/共享词汇下沉契约层）${NC}"
         echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
@@ -2743,6 +2760,44 @@ if echo "$SESSION_CENSUS_STAGED" | grep -qE "\.(tsx?|vue)$|^scripts/check-sessio
     echo -e "${GREEN}[OK] 调用点 census 与快照一致（E2E-CENSUS-01）${NC}"
 else
     echo -e "${GREEN}[OK] 无 .ts/.tsx/.vue 变更，跳过调用点 census 检查${NC}"
+fi
+
+# ============================================================================
+# 会话 hidden 退场 + surface 读取点白名单门禁（C-data-28 / C-data-29，E2E-PIPE-20
+#   的 pre-commit 执行点）
+#   staged 命中 packages/<任意包>/src 下 .ts/.tsx/.vue 或检查脚本自身（含其单测）时
+#   触发：scripts/check-session-hidden-surface.mjs —— 全仓扫描两族判据（hidden 同名
+#   白名单 + surface 四形态读取点清单，清单外命中即红，ALLOWLIST/READ_POINTS 为唯一
+#   登记处）。触发范围与脚本扫描范围同构（packages/*/src 全域 glob——目录清单式触发
+#   范围必有洞，同 record-write-surface / session-census 段教训）。触发范围天然含
+#   staged 删除（scope 内文件被删 = 清单条目消失，同样必须红）：单独 staged 删除
+#   检查脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的防线。全仓扫描毫秒
+#   级，无增量模式。退出码 0=合规 / 3=清单外命中 / 1=脚本自身异常，非零一律拦截。
+#   检查脚本或其单测 staged 时同跑 vitest 单测（e2e-map 段同款惯例）。
+#   不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+SESSION_HIDDEN_SURFACE_STAGED=$(git diff --cached --name-only -- '*.ts' '*.tsx' '*.vue' scripts/check-session-hidden-surface.mjs scripts/__tests__/check-session-hidden-surface.test.mjs)
+if echo "$SESSION_HIDDEN_SURFACE_STAGED" | grep -qE "^packages/[^/]+/src/.*\.(tsx?|vue)$|^scripts/(__tests__/)?check-session-hidden-surface(\.test)?\.mjs$"; then
+    print_section "[会话 hidden/surface 白名单检查]"
+    if [ ! -f "scripts/check-session-hidden-surface.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-session-hidden-surface.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-session-hidden-surface.mjs; then
+        echo -e "${RED}[ERROR] hidden/surface 清单外命中——按上方明细审阅语义：非会话同名命中附理由登记进 ALLOWLIST/SAME_NAME_EXCLUDE，会话读取点带 usage 登记进 READ_POINTS 后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${BLUE}[INFO] 运行 hidden/surface 检查脚本单测...${NC}"
+    if ! npx vitest run scripts/__tests__/check-session-hidden-surface.test.mjs --silent; then
+        echo -e "${RED}[ERROR] hidden/surface 检查脚本单测失败——按上方失败明细修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] hidden/surface 白名单检查通过（C-data-28 / C-data-29，E2E-PIPE-20）${NC}"
+else
+    echo -e "${GREEN}[OK] 无 packages/*/src 载体变更，跳过 hidden/surface 白名单检查${NC}"
 fi
 
 # ============================================================================

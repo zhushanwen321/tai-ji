@@ -22,12 +22,15 @@
  *   running = 本轮有任务在途；idle = 无任务在途，随时可接下一条 message。
  *
  * 「上一轮为什么停」由 {@link StopReason} 承载（纯展示 + 排障；U6 起 stopReason
- * 参与 isOccupied 占用判定——`running && stopReason === undefined`，W4 死亡纳管态
- * 靠它排除）；旧 running 的隐性子态（resumable/纳管态）由「idle + transcriptRef 在」统一表达。
+ * 参与 isOccupied 占用判定——`running && stopReason === undefined`，带停因的 running
+ * 不算占用；原「W4 死亡纳管态靠它排除」措辞随 adoptEngineDeath 写点退役删除，
+ * 登记见 record-store.ts:179）；旧 running 的隐性子态（resumable）由「idle + transcriptRef 在」统一表达。
  *
  * [U2 桥接不变量 → U5 后现状] 旧「closed 终态」读判据 = `idle && closedReason !==
- * undefined`（读侧兼容位）：写侧只剩 workflow D7 例外族与监督器放弃继续产出
- * （out-of-scope 维持现状）；收尾动作（U5）走 markSettled 只写 stopReason 不写
+ * undefined`（读侧兼容位）：写侧只剩 workflow D7 例外族继续产出
+ *（trySettleLegacyClosed ← settleWorkflowRecord 收尾单点；completeLegacyClosed ←
+ * doFinalizeRecord 编排性收尾）——旧监督器放弃支已随轮次活性监督器整机清退删除
+ *（out-of-scope 维持现状）；收尾动作（U5）走 markSettled 只写 stopReason 不写
  * closedReason（不终态化），close 收尾写入 journal 记录走 markSettledOut（不动占用位）——
  * closedReason 不再由 cancel/close/编排性关闭产出。
  *
@@ -54,9 +57,10 @@ export type RecordOrigin = "tool" | "workflow";
  * [U2 桥接期地位 → W2/V3 后现状] 终态概念已删除（{@link ExecutionStatus} 两态），
  * 本枚举退役为**读侧兼容位**：值域完整并入 {@link StopReason}（旧 7 值 = 旧 closed
  * 的展示迁移）。写侧遗留终态原语（trySettleLegacyClosed / completeLegacyClosed——
- * workflow D7 例外族 + 监督器放弃两个生产者）继续写本字段 + stopReason 双写，
- * 消费方（deriveOutcome/notifier 等）零改动；本字段随读侧谓词 isLegacyClosedSettled
- * 一并在 W4 sunset 退役。
+ * 均只服务 workflow D7 例外族：settleWorkflowRecord 收尾单点 / doFinalizeRecord
+ * 编排性收尾；旧监督器放弃支已随轮次活性监督器清退删除）继续写本字段 +
+ * stopReason 双写，消费方（deriveOutcome/notifier 等）零改动；本字段随读侧谓词
+ * isLegacyClosedSettled 一并在 W4 sunset 退役。
  *
  * 值语义（历史）：
  *   parent-shutdown  — 父进程 session_shutdown 时回收子进程
@@ -83,7 +87,8 @@ export class ResurrectDeniedError extends Error {}
 /**
  * ClosedReason 中 6 个可写终态原因（运行时检查用——防御性解析外部输入时校验成员资格）。
  * disconnected 是历史数据读侧兜底、现行链路无写点（sidecar 读侧已退场），不在本清单；
- * StopReason 全枚举 = 本清单 + disconnected + NEW_STOP_REASONS + ROUND_TERMINAL_STOP_REASONS。
+ * StopReason 全枚举 = 本清单 + disconnected + NEW_STOP_REASONS + ROUND_TERMINAL_STOP_REASONS
+ * + LEGACY_INFERRED_STOP_REASONS（2 迁移期旧值），共 16 值（见 STOP_REASONS 注释）。
  */
 export const CLOSED_REASONS: readonly ClosedReason[] = [
   'parent-shutdown',
@@ -141,25 +146,39 @@ export type ExternalState = "active" | "idle";
 export type ExecutionMode = "background";
 
 /**
- * 展示维度（§3.2.1）：上一轮为什么停。值域 = 旧 ClosedReason 7 值沿用 + 4 个新展示值
- * + 2 个正常轮终展示值：
- *   interrupted              — 用户 cancel 中断当前轮（§3.2.5 cancel = 暂停这一轮）
- *   interrupted-by-restart   — 宿主重启中断（§3.2.2 host shutdown 行）
- *   interrupted-by-parent    — 编排性关闭打断在途轮（宿主 session fork/new 自动收尾）
- *   reopened                 — 锚失效带历史重开（§3.2.3 reopen 降级，epoch+1 的首轮）
- *   completed / failed       — [A-lite] 正常轮终展示位（markRoundIdle 成功/失败轮写入；
- *                              status 翻 idle——[two-state-convergence U4/D3] 翻边后
- *                              本值承担「上一轮为什么停」的展示 + `.state` 收条 reason
- *                              词；中断族走 markSettled interrupted 族不经 markRoundIdle，
- *                              与上 4 值无冲突）
+ * 展示维度（§3.2.1）：上一轮为什么停。[subagent-observability §3.3.3] 轮收条
+ * 事实化后的三层词表（停因只存事实，不存推断）：
+ *   引擎原值（{@link ROUND_TERMINAL_STOP_REASONS}）
+ *     stop / error / aborted       — 引擎停因事实（markRoundIdle 存引擎原值；
+ *                                    completed/failed 从「存储值 + 独立写入」降为
+ *                                    派生展示词——引擎停因=stop 且无失败分类 → 展示
+ *                                    「正常收尾」，写入判据「没报错 = completed」废除）
+ *   宿主中断族（事实词——宿主打断时引擎没机会报停因）
+ *     interrupted                  — 用户 cancel 中断当前轮（§3.2.5 cancel = 暂停这一轮）
+ *     interrupted-by-restart       — 宿主重启中断（§3.2.2 host shutdown 行；失联清点
+ *                                    的轮收条补写复用本值，清点事实落轮收条附注）
+ *     interrupted-by-parent        — 编排性关闭打断在途轮（宿主 session fork/new 自动收尾）
+ *     reopened                     — 锚失效带历史重开（§3.2.3 reopen 降级，epoch+1 的首轮）
+ *   归档族（ClosedReason 可写 6 值沿用 + disconnected 读侧兜底——历史帧解析放行的事实词）
+ *   迁移期旧值（completed / failed——旧推断值存储位退役中）
+ *     历史帧解析按解析词表纪律放行；写侧产出随 u3 判定链接线改引擎原值后，双写期
+ *     并行产出结束即删（§3.4「迁移完删旧值」——删除时撞类型错/测试红有既定归宿：
+ *     本联合成员 + STOP_REASONS 成员 + ROUND_TERMINAL 旧展示断言同批清理）。
+ *
+ * 「cancelled 族」是 cause 分型（FailureCause user.cancelled）不是停因值——不新增
+ * cancelled 停因成员，防第二套中止词表（§3.3.3 三层词表映射裁决）。
+ *
  * 展示 + 排障（列表主展示用派生 outcome）+ [U6] 占用资格判定（isOccupied =
- * `running && stopReason === undefined`——W4 死亡纳管态据此排除，见下方字段注释）；
+ * `running && stopReason === undefined`——轮收条已写 = 本轮不在途的等价信号）；
  * 复活资格判据仍是物理三件套（§3.2.3）。在途期本字段被轮始清点族清空
  *（markRoundStarted / revive 格，[U6/D4]）——「stopReason 不参与任何资格判定」的
  * 旧裁决随 two-state-convergence U6 退役。
  */
 export type StopReason =
   | ClosedReason
+  | "stop"
+  | "error"
+  | "aborted"
   | "interrupted"
   | "interrupted-by-restart"
   | "interrupted-by-parent"
@@ -167,7 +186,7 @@ export type StopReason =
   | "completed"
   | "failed";
 
-/** StopReason 的 4 个新展示值（运行时检查与枚举完整性测试锚；值域见类型注释）。 */
+/** 宿主中断/重开事实词 4 值（§3.3.3 三层词表成员，口径同上方类型注释「宿主中断族」——受成员同 commit 登记纪律约束，非展示词；运行时检查与枚举完整性测试锚；值域见类型注释）。 */
 export const NEW_STOP_REASONS = [
   "interrupted",
   "interrupted-by-restart",
@@ -175,21 +194,35 @@ export const NEW_STOP_REASONS = [
   "reopened",
 ] as const satisfies readonly StopReason[];
 
-/** [A-lite] 正常轮终展示值（markRoundIdle 成功/失败轮写入；值域见 StopReason 注释）。 */
-export const ROUND_TERMINAL_STOP_REASONS = ["completed", "failed"] as const satisfies readonly StopReason[];
+/**
+ * 轮终停因写入值域（[subagent-observability §3.3.3] 引擎原值事实词——markRoundIdle
+ * 停因存引擎事实：stop=正常收尾 / error=引擎报错 / aborted=引擎侧中止）。u3 判定链
+ * 接线后为本词表的唯一轮终写入方；旧推断值 completed/failed 的写入病句随接线废除，
+ * 双写期两族并存（迁移期双写，§3.4）。
+ */
+export const ROUND_TERMINAL_STOP_REASONS = ["stop", "error", "aborted"] as const satisfies readonly StopReason[];
+
+/**
+ * [迁移期] 旧推断值 completed/failed（原 ROUND_TERMINAL 成员，[A-lite] 独立写入位）：
+ * 存储位退役中——历史帧解析放行 + 双写期写侧兼容（u3 接线前现状写点仍产此值），
+ * 迁移完删旧值（§3.4，退役条件登记于 StopReason 类型注释）。
+ */
+export const LEGACY_INFERRED_STOP_REASONS = ["completed", "failed"] as const satisfies readonly StopReason[];
 
 /**
  * StopReason 全枚举（运行时检查用——防御性解析外部输入时校验成员资格）。
  * = CLOSED_REASONS（6 个可写终态原因）+ disconnected（读侧兜底产出，不写入，
- * 见 CLOSED_REASONS 注释）+ NEW_STOP_REASONS（4 新展示值）+
- * ROUND_TERMINAL_STOP_REASONS（2 正常轮终展示值），共 13 值。
- * 完整性由 permanent-session-types.test.ts 断言（值数 + 成员逐一）。
+ * 见 CLOSED_REASONS 注释）+ NEW_STOP_REASONS（4 宿主中断/重开事实词）+ ROUND_TERMINAL_STOP_REASONS
+ * （3 引擎原值）+ LEGACY_INFERRED_STOP_REASONS（2 迁移期旧值，退役条件见注释），
+ * 共 16 值。
+ * 完整性由 execution/domain/__tests__/record-types.test.ts 断言（值数 + 成员逐一）。
  */
 export const STOP_REASONS: readonly StopReason[] = [
   ...CLOSED_REASONS,
   "disconnected",
   ...NEW_STOP_REASONS,
   ...ROUND_TERMINAL_STOP_REASONS,
+  ...LEGACY_INFERRED_STOP_REASONS,
 ];
 
 /**

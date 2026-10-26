@@ -3,10 +3,12 @@
 // [U1 / record 持久化收敛 §3.1] RecordStore 意图级操作 API 对外接口专属测试。
 //
 // 覆盖（验收条款 A1/A5/A6）：
-//   - A1 九意图原语齐备（register/appendEvent/markRoundStarted/markRoundIdle/
-//     markFinalized/markCancelled/adoptEngineDeath/markResurrected，
+//   - A1 八意图原语齐备（register/appendEvent/markRoundStarted/markRoundIdle/
+//     markFinalized/markCancelled/markResurrected/markSettledOut，
 //     [collect 退役] 原 markBatchFinalized 已删；[u-arch] 原 markArchived 更名
-//     markSettledOut 随意图机制退役收尾）+ acquireWriteLease（A6）；
+//     markSettledOut 随意图机制退役收尾；[subagent-observability u3 退役] 原
+//     adoptEngineDeath 已随判定事实化删除，同下方 fns 数组注记口径）
+//     + acquireWriteLease（A6）；
 //   - A5 markResurrected D3c 三中间形态（(ii) acquire 后中断 / (iii) 全成 /
 //     acquire 失败）+ running 候选接管形态（跳删终态位仍 acquire）；
 //   - §3.4 失败语义：`.state` 写失败 → 零持久化副作用、record 留 running 形态。
@@ -199,7 +201,8 @@ describe("RecordStore 意图 API 对外接口（U1 A1/A2/A5/A6）", () => {
         "markRoundIdle",
         "markFinalized",
         "markCancelled",
-        "adoptEngineDeath",
+        // [subagent-observability u3 退役] adoptEngineDeath 已随判定事实化删除——
+        // 引擎死亡走正常轮终（退出码非 0 → error 停因），W4 死亡纳管态写点退役。
         "markResurrected",
         "markSettledOut",
         "acquireWriteLease", // A6
@@ -420,7 +423,10 @@ describe("RecordStore 意图 API 对外接口（U1 A1/A2/A5/A6）", () => {
       // ⑥ idleSince 已退役（30 天空闲回收判据锚，ADR-0081）——无簿记动作。
       expect(order).toEqual([]); // ⑦ `.alive` 保留——无 release 动作
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true); // ⑦ 落盘文件仍持声明
-      expect(unregister).toHaveBeenCalledWith("chat-2", "running"); // ⑧ 发射点②
+      // ⑧ 发射点②：[subagent-observability §3.3.6 结清枚举新写入方] 按轮终事实产
+      // SettlementReason（成功轮 → completed）——旧恒发字面量 "running"（词表外）
+      // 随写入方退役。
+      expect(unregister).toHaveBeenCalledWith("chat-2", "completed");
       // [W1/D3 表行 4] ⑨ 过程面改走事件文件——record-round-idle 帧携带轮统计快照
       //（result 全文不进事件行，轮结果留在内存/条目；stopReason=completed）。
       expect(appendEntryMock).not.toHaveBeenCalled();
@@ -487,9 +493,13 @@ describe("RecordStore 意图 API 对外接口（U1 A1/A2/A5/A6）", () => {
   });
 
   // ============================================================
-  // appendEvent / adoptEngineDeath（过程原语）
+  // appendEvent（过程原语）
+  // [subagent-observability u3 退役] adoptEngineDeath 用例已随写点退役删除——
+  // 退役与归属语义锚（run-orchestration-write-lease.test.ts 用例 2/5）同批清理；
+  // 引擎死亡收尾的现行语义锚 = 轮终失败事实（markRoundIdle failed 载荷 + 轮收条
+  // 事实字段，见 record-store-round-idle-settle.test.ts）。
   // ============================================================
-  describe("appendEvent / adoptEngineDeath", () => {
+  describe("appendEvent", () => {
     it("appendEvent：事件归约进 turns + entry 变迁上报；id 不在内存 → false", () => {
       const record = makeRecord("ev-1");
       store.register(record);
@@ -501,21 +511,6 @@ describe("RecordStore 意图 API 对外接口（U1 A1/A2/A5/A6）", () => {
       //（轮统计在轮终 round-idle 帧快照），引擎域未变零追加。
       expect(appendEntryMock).not.toHaveBeenCalled();
       expect(store.appendEvent("nope", { type: "text_delta", delta: "x" })).toBe(false);
-    });
-
-    it("adoptEngineDeath：error/result/stopReason 三写（[U5/D4] stopReason='failed' W4 新态）；[W1/D2] 过程 entry 停写；id 不在内存 → false", () => {
-      const record = makeRecord("adopt-1");
-      record.result = "partial";
-      store.register(record);
-      appendEntryMock.mockClear();
-
-      expect(store.adoptEngineDeath("adopt-1", { error: "engine crashed" })).toBe(true);
-      expect(record.error).toBe("engine crashed"); // ⑩
-      expect(record.result).toBeUndefined();
-      expect(record.stopReason).toBe("failed"); // 内存三写保真（[U5/D4] W4 新态）
-      // [W1/D2 停写写点] 过程 entry 停写——纳管态留内存（监督器接管/轮终链续写）
-      expect(appendEntryMock).not.toHaveBeenCalled();
-      expect(store.adoptEngineDeath("nope", { error: "x" })).toBe(false);
     });
   });
 

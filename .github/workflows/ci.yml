@@ -745,9 +745,9 @@ jobs:
       - name: Subagent-core closure guard (D9-①)
         run: node scripts/check-subagent-core-closure.mjs
 
-      # C-data-26 subagent-core 包内值依赖环检查（与 pre-commit 同源直调）：整包值
+      # C-data-27 subagent-core 包内值依赖环检查（与 pre-commit 同源直调）：整包值
       # import 图零环，类型擦除边豁免——CI 面是全量等价拦截点（D7 通则）。
-      - name: Subagent-core value-cycle guard (C-data-26)
+      - name: Subagent-core value-cycle guard (C-data-27)
         run: node scripts/check-subagent-core-value-cycles.mjs
 
       # C-state-20 进程级全局槽键归属检查（与 pre-commit 同源直调）：Symbol.for 字面量

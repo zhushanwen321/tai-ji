@@ -27,8 +27,9 @@ const CACHE_VERSION = 1
 const JSON_INDENT = 2
 const HTTP_NOT_MODIFIED = 304
 
-/** 当前已接入的配置域（quota-fetchers = quota presets + fetcher 声明式配置，域 2）。 */
-export type RemoteConfigDomain = 'builtin-providers' | 'quota-fetchers'
+/** 当前已接入的配置域（quota-fetchers = quota presets + fetcher 声明式配置，域 2；
+ * retry-rules = 重试规则远程覆盖层，域 3，subagent-observability §3.3.12）。 */
+export type RemoteConfigDomain = 'builtin-providers' | 'quota-fetchers' | 'retry-rules'
 
 /** 落盘缓存 envelope（元数据与域数据分离；内容比较只比 data）。 */
 interface RemoteCacheEnvelope { // oe-exempt:20261019:framework:taiji 远程配置域内形状/依赖注入面——接口先立单实现常态（本仓架构偏好），W3 quota-fetchers 域将复用同族形状

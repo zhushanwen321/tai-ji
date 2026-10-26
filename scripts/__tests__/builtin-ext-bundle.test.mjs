@@ -157,9 +157,12 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
 		const skillEntries = existsSync(skillsDir) ? readdirSync(skillsDir, { withFileTypes: true }).filter((e) => e.isDirectory()) : [];
 		expect(skillEntries.length, "skills/ 含 skill 子目录（拷贝了内容）").toBeGreaterThan(0);
 
-		// staged workflows/（u1-staged 起源 packages/subagent-core/workflows/，bundle 经
-		// cp recursive 全量拷贝）与源目录文件集合一致且逐文件同字节（含 _shared/ 递归）
-		// ——对齐「逐字节一致」验收语义：拷贝环节任何过滤/截断/编码漂移在此拦截。
+		// staged workflows/（u1-staged 起源 packages/subagent-core/workflows/）与源目录
+		// 文件集合一致且逐文件同字节（含 _shared/ 递归）——对齐「逐字节一致」验收语义：
+		// 拷贝环节任何过滤/截断/编码漂移在此拦截。
+		// 例外（2026-10-26 v0.11.16 发布期）：*.ts 不进 staged——zcode 产物 .dwf.ts 与
+		// src/ 构建模板不属 pi 运行时资产，且 prepare-builtin-extensions.sh R3 守卫禁
+		// staged 收 .ts（resolver fallback 会旁路 bundle）；契约 = 源集合去 *.ts。
 		const wfSrcDir = join(REPO, "packages/subagent-core/workflows");
 		const wfStagedDir = join(swDir, "workflows");
 		expect(existsSync(wfStagedDir), "staged workflows/ 目录存在").toBe(true);
@@ -173,10 +176,12 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
 			}
 			return out;
 		}
-		const wfSrcFiles = listWorkflowFiles(wfSrcDir).sort();
+		const wfSrcFiles = listWorkflowFiles(wfSrcDir)
+			.filter((f) => !f.endsWith(".ts"))
+			.sort();
 		const wfStagedFiles = listWorkflowFiles(wfStagedDir).sort();
-		expect(wfStagedFiles, "staged workflows 文件集合与源一致").toEqual(wfSrcFiles);
-		for (const f of wfSrcFiles) {
+		expect(wfStagedFiles, "staged workflows 文件集合与源一致（*.ts 除外，R3 守卫契约）").toEqual(wfSrcFiles);
+		for (const f of wfStagedFiles) {
 			const srcBuf = readFileSync(join(wfSrcDir, f));
 			const stagedBuf = readFileSync(join(wfStagedDir, f));
 			expect(stagedBuf.equals(srcBuf), `workflows/${f} 逐字节一致`).toBe(true);

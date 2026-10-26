@@ -41,6 +41,23 @@ import {
   type UsageSnapshot,
   type CommandsSnapshot,
 } from './replicated-states.config.js'
+// 权威拉取与冷读（W2，session.getState 后端）：薄查询服务。构造点在本模块（deps 的
+// pm + replicated states 全在投影内部，投影是活/冷同入口的天然所有者——设计 §3.3.3
+// 「新增一个按 id 的公开查询入口」的落点），消费方经模块槽 getSessionStateQuery() 触达。
+import {
+  SessionStateQuery,
+  bindSessionStateQuery,
+} from './session-state-query.js'
+// 冷读主会话分叉的两段定位（sessionMetaCache 全表遍历 / scanPiSessions force 全扫）
+// 与 btw 线兜底定位（存储树布局公式）——单文件一概念的定位模块（不经 file-utils 转手，
+// 避免 file-utils ⇄ locator 的 import 环：locator 要 import file-utils 的 scanPiSessions）。
+import {
+  findCachedSessionFileById,
+  findScannedSessionFileById,
+  findBtwLineFileByLayout,
+} from '../../infra/pi/session-file-locator.js'
+// 冷路径埋点落点（设计 §3.1「可观测」栏）：runtime logger，与 patched console 同源同文件。
+import { logger } from '../../infra/logger.js'
 
 /**
  * per-session ReplicatedState 实例组（W7 + W8 data-source-governance，四实例）。
@@ -167,8 +184,51 @@ export class SessionStateProjection {
   private readonly replicatedStates = new Map<string, SessionReplicatedStates>()
   /** W12：state_changed 组合派生视图的 diff 基线（per-session，onSessionDisposed 一并清除）。 */
   private readonly lastPublishedStateChanged = new Map<string, SessionStateChangedBaseline>()
+  /**
+   * W2：按会话 id 的权威状态查询薄服务（session.getState 后端）。构造期固定（deps 全部
+   * 只读、无状态），并绑定为进程实例供 transport 读（模块槽 getSessionStateQuery）。
+   * 与 replicatedStates 的分工：实例组是**活会话**的模型/档位事实源（含失效与防抖），
+   * 本查询服务只做「活读快照 / 冷读文件」的分派，自身无定时器、无 dirty、不 spawn。
+   */
+  readonly stateQuery: SessionStateQuery
 
-  constructor(private readonly deps: SessionStateProjectionDeps) {}
+  constructor(private readonly deps: SessionStateProjectionDeps) {
+    this.stateQuery = new SessionStateQuery({
+      // 风险点 1：只准 getClient（禁 ensureActive——它会转 ensureProcess/ensureRestored → spawn）
+      getClient: (sessionId) => this.deps.pm.getClient(sessionId),
+      // 风险点 2：只读实例快照；undefined = 未就绪，查询服务不触发 restore
+      getReplicatedStates: (sessionId) => this.replicatedStates.get(sessionId),
+      // 风险点 3：filePath 只准来自扫描两段（主会话）或 btw 线的注册表记录 / 存储树布局
+      locateMainSessionFileFromCache: (sessionId) => findCachedSessionFileById(sessionId),
+      locateMainSessionFileFromDisk: (sessionId) => findScannedSessionFileById(sessionId),
+      // btw 判别两步（dmg-r1-3，判别成本从低到高）：
+      // ① 注册表判别（本注入，冷读第一步）：lifecycle 记录 surface==='btw' 的
+      //    sessionFilePath（= BtwLineRecord.sessionFilePath 在 lifecycle 记录上的镜像）。
+      //    纯内存读、无磁盘枚举；主会话（surface 'sidebar' / 未注册）返 undefined，
+      //    冷读走主会话两段。
+      locateBtwLineFile: (sessionId) => {
+        const rec = this.deps.getSession(sessionId)
+        if (rec?.surface === 'btw') return rec.sessionFilePath
+        return undefined
+      },
+      // ② 布局兜底（查询链两段均未命中后才调）：重启后的线不在 lifecycle.sessions
+      //    （rebuildFromDisk 只重建 BtwService.registry），由存储树布局公式定位——
+      //    与注册表记录读同一个文件，寻址方式不同（见 findBtwLineFileByLayout）。
+      //    伴生返回本轮枚举的 mainSid 目录数，进冷读埋点 scannedDirCount。
+      locateBtwLineFileByLayout: (sessionId) => findBtwLineFileByLayout(sessionId),
+      // 冷路径埋点（设计 §3.1「可观测」栏）：单次耗时 + 扫描目录数 + 定位来源 + 是否命中。
+      // 四要素重审触发（单次冷开 > 200ms 或 cwd 目录数 > 200）的数据来源；debug 级——
+      // 冷读频度低（打开视图/缓存缺失/重连三时机各一次），不占常规日志量。
+      onColdRead: (trace) => logger.debug('[session-state-query] cold read', {
+        sessionId: trace.sessionId,
+        source: trace.source,
+        durationMs: trace.durationMs,
+        scannedDirCount: trace.scannedDirCount,
+        found: trace.found,
+      }),
+    })
+    bindSessionStateQuery(this.stateQuery)
+  }
 
   /**
    * 组装期订阅接线（S5/D2②「换订阅者」）：向 lifecycle 注册本模块的播种 handler。
@@ -243,9 +303,7 @@ export class SessionStateProjection {
    *   1. occupancy #3 'settling' 转移（session-dead-structural-fixes D2 挂点迁移，u3b）——
    *      原直写 isGenerating=false 与 interpreter 侧 #3（turn-end → settling）是「agent_end
    *      两边各写一处且非原子」的漂移形态（设计 §2.3 根因 1），改调 'settling' 行后原语原子
-   *      完成「isGenerating=false 派生 + turn='settling' 合并 + state 帧广播」，双写合一；
-   *      interpreter #3 保留为幂等去重的防御性冗余。不迁移则正常生成完成后 session 永远
-   *      isGenerating=true，下一条消息被 busy 拒绝（message-dispatcher preemptive reject）。
+   *      完成合并与广播。interpreter #3 保留为幂等去重的防御性冗余。
    *   2. project sidecar 兜底补写 —— turn_end 时仍未落盘则在此补写（label 持久化已不在此
    *      承载：W1 起活跃 label 唯一写入口 = set_session_name RPC）。
    *   3. session_end 终态写入（W4，ADR 0042）—— 让 scanner 读到终态，前端无需预加载历史。
@@ -254,14 +312,22 @@ export class SessionStateProjection {
    *   outcome 映射：'error'→error，'aborted'→stopped，其余→done。
    *   aborted 走 stopped 与 message-dispatcher.abort 路径一致（abort 写 stopped 后若 pi 仍发
    *   agent_end{stopReason:'aborted'}，此处也写 stopped，两条 session_end 一致不冲突）。
+   * @param willRetry [chat-flow-consistency willRetry 分层，design-turn-statemachine 缺陷 1
+   *   方案 A] pi agent_end 恒带的中间失败标志：true = 本次 error 是 pi 自动重试的中间失败、
+   *   turn 并未结束（attempt 级终态而非回合级终态）——**跳过终态 sidecar 写入**（否则重试
+   *   成功前的每次中间失败都写 error 终态，重试期间进程崩溃会停在 error）。'settling' 转移
+   *   与 project sidecar 兜底保留——attempt 间隙的真实阶段就是 settling（retry 续跑的
+   *   turn-start 会把 turn 推回 generating，机器全组合表已覆盖该路径）。
    */
-  handleTurnEndSideEffects(sessionId: string, stopReason?: string): void {
+  handleTurnEndSideEffects(sessionId: string, stopReason?: string, willRetry?: boolean): void {
     const session = this.deps.getSession(sessionId)
     if (!session) return
     applySessionOccupancyTransition(session, this.deps.getMessageBus(), 'settling')
     // D14 语义修正：agent_end 兜底补写归属（turn_end 时仍未落盘则在此补写）。
     this.deps.tryPersistProjectBinding(session)
-    // W4：写 session_end 终态。aborted→stopped（与 abort 路径一致），error→error，其余→done
+    // W4：写 session_end 终态。aborted→stopped（与 abort 路径一致），error→error，其余→done。
+    // willRetry=true（中间失败）跳过——终态写入是回合级副作用，attempt 级失败不落盘。
+    if (willRetry === true) return
     const outcome = stopReason === 'error' ? 'error'
       : stopReason === 'aborted' ? 'stopped'
         : 'done'
@@ -279,18 +345,19 @@ export class SessionStateProjection {
    * 的 `finally` 中 `_emitAgentSettled()`（pi dist/core/agent-session.js:772-786），且存在
    * 「post-run 尾段返回 false 直接 settle」这条不含 agent_end 的收尾路径（同文件 :787+）。
    *
-   * 缺本挂点的后果：message-dispatcher 的 processing 分支在 pi 拒绝「already processing」时
-   * 置 isGenerating=true（'reject-processing' 行，见 handlePromptFailure 注释），其复位原先只
-   * 依赖 agent_end。若 prompt 恰落在「post-run 尾段」（_flushPendingBashMessages 等 I/O，可达
-   * 百毫秒级、**每次 run 结束都经过**）窗口，则 agent_end 已发而 settle 未完成 → isGenerating
-   * 永久残留 true：occupancy 已被 #4 复位为 idle（前端照常 flush），但 busy 预检读 occupancy
-   * → 后续每条消息被拒，只能等 abort / 进程退出（幽灵忙碌，与本次事故同类）。
+   * 缺本挂点的后果：occupancy 的占用复位只依赖 agent_end。若 prompt 恰落在「post-run 尾段」
+   *（_flushPendingBashMessages 等 I/O，可达百毫秒级、**每次 run 结束都经过**）窗口，则
+   * agent_end 已发而 settle 未完成 → isGenerating 永久残留 true：occupancy 已被 #4 复位为
+   * idle（前端照常 flush），但 busy 预检读 occupancy → 后续每条消息被拒，只能等 abort /
+   * 进程退出（幽灵忙碌，与本次事故同类）。
    *
    * 语义依据：agent_settled = run 级联结束（pi finally），此刻必无 turn 在跑 → 'idle' 转移正确。
-   * 反向竞态（本复位晚于「新 run 受理 prompt」的置位）存在但可自愈：pi 对活跃 run 的 prompt
-   * 会拒绝 processing（锚点 pi 1.0.0 dist/core/agent-session.js prompt 的
-   * "Agent is already processing" throw，run 活跃时 prompt 直拒），由 handlePromptFailure 的 processing 分支
-   * （'reject-processing'）重新纠偏。
+   * 反向竞态（本复位晚于「新 run 受理 prompt」的置位）由 pi 的活跃 run 直拒兜住：pi 对活跃
+   * run 的 prompt 抛 "Agent is already processing"（锚点 pi 1.0.0 dist/core/agent-session.js
+   * prompt，run 活跃时 prompt 直拒）——投递内核按真失败首败即停显式上报、不反转 occupancy
+   *（原 busy 反转纠偏转移已随忙闲门禁退役，u5a：受理即出站下文本投递恒带 streamingBehavior，
+   * pi 忙时入队不拒，见 session-delivery-registry promptAwaitingCompaction 注释），occupancy
+   * 以本挂点的 'idle' 复位为准。
    */
   handleAgentSettledSideEffects(sessionId: string): void {
     const session = this.deps.getSession(sessionId)

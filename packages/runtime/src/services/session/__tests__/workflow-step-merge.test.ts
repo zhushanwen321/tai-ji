@@ -361,19 +361,20 @@ describe('合并矩阵全形态（D2 R2/R3）', () => {
   })
 })
 
-// ── 2. R1 映射矩阵 13 值域逐行 ────────────────────────────────────────────
+// ── 2. R1 映射矩阵 StopReason 词表成员逐行 ────────────────────────────────
 
-describe('R1 两态→四态映射矩阵（D2 R1，StopReason 13 值域逐行）', () => {
+describe('R1 两态→四态映射矩阵（D2 R1，StopReason 词表成员逐行）', () => {
   it('running（无论 stopReason 残留）→ running，error 清空', () => {
     expect(mapStepStatusFromRecord({ status: 'running' })).toEqual({ status: 'running', error: undefined })
     // 防御：running + stopReason 脏残留（轮始清点前的瞬态）同样 running
     expect(mapStepStatusFromRecord({ status: 'running', stopReason: 'failed', error: 'x' }).status).toBe('running')
   })
 
-  // 13 值逐行（gc 双语义拆两行）：completed/failed 显式行；gc 按 error 分叉（写侧
-  // D7 例外族——workflow origin 成功/失败 settle 均写 gc，error 区分）；cancelled
-  // 文案填充；中断族三值原文填充；legacy 家族剩余四值 + disconnected + reopened
-  // 走通用文案兜底。第四列 = 注入 record.error（其余行 undefined = 不注入）。
+  // 词表成员逐行（gc 双语义拆两行）：completed/failed（迁移期旧值）显式行；gc 按
+  // error 分叉（写侧 D7 例外族——workflow origin 成功/失败 settle 均写 gc，error 区分）；
+  // cancelled 文案填充；中断族三值原文填充；legacy 家族剩余四值 + disconnected +
+  // reopened + 引擎原值 stop/error/aborted（落通用兜底分支，不单列）走通用文案兜底。
+  // 第四列 = 注入 record.error（其余行 undefined = 不注入）。
   it.each([
     ['completed', 'done', undefined, undefined],
     ['failed', 'failed', undefined, undefined],

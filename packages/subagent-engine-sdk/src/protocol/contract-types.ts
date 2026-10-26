@@ -161,7 +161,22 @@ export type AgentEvent =
   | { type: EventName<"compaction"> }
   | { type: EventName<"activity"> }
   | { type: EventName<"error">; message: string }
-  | { type: EventName<"armed">; schemaEnvVar: string; extensionPkg: string };
+  | { type: EventName<"armed">; schemaEnvVar: string; extensionPkg: string }
+  | {
+      type: EventName<"auto_retry">;
+      /** start = 失败尝试结束即将重跑；end = 重试波次收束（成功或最终失败）。 */
+      phase: "start" | "end";
+      /** 重试波次序号（pi 原生 _retryAttempt，1 起）。 */
+      attempt: number;
+      /** start 独有：重试上限与退避等待（pi _prepareRetry 发射事实）。 */
+      maxAttempts?: number;
+      delayMs?: number;
+      /** start 携带被重试的错误文本；end 失败波携带最终错误（成功波缺省）。 */
+      errorMessage?: string;
+      /** end 独有：该波重试最终是否恢复（true = 后续尝试成功，false = 重试耗尽）。 */
+      success?: boolean;
+      finalError?: string;
+    };
 
 // ============================================================
 // 事件词表锁（AgentEvent ⟷ AGENT_EVENT_TYPE_NAMES 同源互证）
@@ -200,6 +215,7 @@ export const AGENT_EVENT_TYPE_NAMES = [
   "activity", // noop-safe: 纯活性信号，双侧 reducer 恒 no-op（协议语义见 AgentEvent 头注），丢弃零差异
   "error", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 lastError 诊断留痕，已写状态不回滚
   "armed", // noop-safe: 旧宿主无武装等待窗消费点（fail-fast 属宿主新增逻辑），丢弃仅缺武装留痕，schema 强制第一道防线（引擎自查断言）不受损
+  "auto_retry", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺重试边界留痕（journal 不可查失败尝试轨迹），轮成败判定与 turns/usage 计账不受损（P5 计账锚在引擎侧收尾快照，不依赖宿主消费本帧）
 ] as const satisfies readonly AgentEvent["type"][];
 
 /** 词表派生的事件名联合（编译锁②/③的词表侧源；schema enum 与测试取值同源）。 */
@@ -214,7 +230,10 @@ type EventName<T extends AgentEventTypeName> = T;
 
 // 编译锁③（兜底）：union 成员绕过 EventName 约束裸加字面量 → 本断言赋值处爆红
 // （union ⊆ 词表 的精确落点由锁①承担，此处兜住绕过约束的裸写形态）。
-const _EventVocabSyncLock: AssertMutuallyAssignable<AgentEvent["type"], AgentEventTypeName> = true;
+// 导出 = noUnusedLocals 跨配置安全（shared 依赖本包后，renderer/runtime 等更严
+// tsconfig 的源码闭包会编译到本文件——shared WORKFLOW_RUN_OUTCOME_COVERAGE_LOCK
+// 同款先例：「编译锁消费点导出以通过 noUnusedLocals」）。
+export const _EventVocabSyncLock: AssertMutuallyAssignable<AgentEvent["type"], AgentEventTypeName> = true;
 
 // ============================================================
 // handle / read 视图
@@ -389,7 +408,142 @@ export interface ProbeReport {
 // 终态 / 任务声明
 // ============================================================
 
-/** 失败分诊结构化标签。unknown（含缺省）= 可重试（语义守恒）。 */
+/**
+ * [subagent-observability §3.3.2] 失败分类权威契约（五维正交，原位替换
+ * AgentFailureKind 三值词表——本文件是引擎协议词表家址）。
+ *
+ * 由收尾边沿（判定链）一次产出并写入轮收条，下游只读不可替换（三硬规则①②——
+ * 只有知道事实的层能填 class；写入后观察性事实降级 observations，不改写 cause）。
+ * 跨进程 wire 载体 = shared `SubagentRecord.lastRound.failure`（type-only re-export，
+ * 判别联合逐字序列化）。消费锚：轮应答恢复指引（§3.3.7）、run 终局 failedMembers[].cause
+ * （§3.3.8——序列化为 `"<class>.<kind>"` 点拼字符串，retryable/retryAfterMs 不进终局
+ * 事件、由成员轮收条承载）。
+ *
+ * cause 优先级（分类边沿裁决序，严格递减）：provider 事实 > harness 预算/契约 >
+ * agent 行为 > engine 崩溃 > unknown（未分类形态不产 FailureCause，落引擎停因原值）。
+ */
+export type FailureCauseClass = "provider" | "harness" | "agent" | "engine" | "user";
+
+/**
+ * retryable 三态（§3.3.2 硬规则③，与重试规则 extension 的 verdict 同词表）：
+ *   true         = 等待后重发可恢复；
+ *   false        = 重发必然同样失败；
+ *   "conditional" = 条件恢复——等限额重置窗口或人/账户先动作（执行层对 conditional
+ *                   不自动重试，呈现层如实展示）。
+ */
+export type FailureRetryability = true | false | "conditional";
+
+/**
+ * FailureCause 公共字段面（class×kind 判别联合各成员共享）。
+ *   retryable    — 三态（{@link FailureRetryability}）；429 不全可重试，禁止仅按
+ *                  HTTP 状态码判可重试（provider 业务码层裁决，§3.3.2 码表硬约束）；
+ *   retryAfterMs — 恢复等待毫秒（错误文本内重置时间字样提取——pi 消息模型不暴露
+ *                  HTTP 头，头通道结构性不可得，设计 §3.3.2 单文本通道），
+ *                  皆无 → 缺省 unknown（undefined，不产假 0）；
+ *   raw          — 分类输入的原始错误文本（取证链：分类不丢原文）。
+ */
+interface FailureCauseFields {
+  retryable: FailureRetryability;
+  retryAfterMs?: number;
+  raw: string;
+}
+
+/**
+ * class×kind 合法组合矩阵（判别联合构造性成立——非法组合写不出来）：
+ *   provider.rate_limited / provider.protocol_unsupported / harness.turn_budget_exhausted /
+ *   harness.timeout / agent.no_deliverable / user.cancelled / engine.*（`engine_${string}`
+ *   引擎自报透传族，开放前缀面——对齐 RunErrorCode 的 engine_ 透传契约，core 不解释文案）。
+ *
+ * kind 是封闭登记词表：新增成员同 commit 登记下方 {@link FAILURE_CAUSE_CLOSED_KINDS}
+ * （解析词表纪律），漏登记由 {@link FAILURE_CAUSE_KIND_VOCAB_LOCK} 编译锁拦截。
+ */
+export type FailureCause =
+  | (FailureCauseFields & { class: "provider"; kind: "rate_limited" | "protocol_unsupported" })
+  | (FailureCauseFields & {
+      class: "harness";
+      kind: "turn_budget_exhausted" | "timeout";
+      /**
+       * [subagent-observability §3.3.9/UC-10] turn 预算耗尽事实（limiter abort 边沿
+       * 一次产出）：used = abort 时轮数、limit = 显式 maxTurns 上界。undefined =
+       * 极端竞窗下收尾边沿只有 aborted 停因而 limiter 快照缺席（防御性同判形态，
+       * 事实不足不产结构——轮失败事实不受影响）。与 §3.3.6 查询侧 budget 分轴
+       * 结构（{maxTurns, ...}）同构的 {used, limit} 形态。仅 turn_budget_exhausted
+       * 承载；timeout（§3.3.6 超时轮失败分类，宿主结算点产出——timeoutMs 墙钟预算
+       * 耗尽是宿主独有事实，引擎收尾边沿只有「宿主取消 vs 引擎异常」两源判别）
+       * 不落本字段。
+       */
+      budget?: { used: number; limit: number };
+    })
+  | (FailureCauseFields & { class: "agent"; kind: "no_deliverable" })
+  | (FailureCauseFields & { class: "user"; kind: "cancelled" })
+  | (FailureCauseFields & { class: "engine"; kind: `engine_${string}` });
+
+/**
+ * FailureCause.kind 闭合成员词表（运行时枚举完整性测试锚；engine 透传族
+ * `engine_${string}` 开放前缀面不进闭合表——逐成员断言见 failure-cause-vocabulary.test.ts）。
+ * 新增 kind 成员 = 联合与本元组同 commit 同批（编译锁双向拦截漏改）。
+ */
+export const FAILURE_CAUSE_CLOSED_KINDS = [
+  "rate_limited",
+  "protocol_unsupported",
+  "turn_budget_exhausted",
+  "timeout",
+  "no_deliverable",
+  "cancelled",
+] as const satisfies readonly Exclude<FailureCause["kind"], `engine_${string}`>[];
+
+/**
+ * 词表编译锁（双向）：kind 联合闭合面 ⊆ 且 ⊇ FAILURE_CAUSE_CLOSED_KINDS。
+ * 联合扩值漏登元组（或元组多配联合外值）→ 本赋值 tsc 红，错误指向漏改侧。
+ */
+export const FAILURE_CAUSE_KIND_VOCAB_LOCK: AssertMutuallyAssignable<
+  Exclude<FailureCause["kind"], `engine_${string}`>,
+  (typeof FAILURE_CAUSE_CLOSED_KINDS)[number]
+> = true;
+
+/**
+ * per-class kind 合法值域（运行时可用——重试规则条目的 kind 字段按 class 校验的
+ * 唯一依据；消费方 = shared validateRetryRuleFields / retry-rules extension 侧镜像）。
+ * engine 透传族是 `engine_${string}` 开放前缀面（无闭合枚举），不进本表——engine 规则
+ * 的 kind 校验走前缀形态判定，由各消费方按 {@link FailureCause} 的 `engine_${string}`
+ * 契约自行落地。
+ *
+ * 词表编译锁：每个 class 的成员元组与 {@link FailureCause} 判别联合的对应 kind 联合
+ * 双向可赋值——判别联合扩值漏登本表（或本表多配联合外值）→ 对应行 tsc 红。
+ */
+export const FAILURE_CAUSE_KINDS_BY_CLASS = {
+  provider: ["rate_limited", "protocol_unsupported"],
+  harness: ["turn_budget_exhausted", "timeout"],
+  agent: ["no_deliverable"],
+  user: ["cancelled"],
+} as const;
+
+/**
+ * per-class 词表编译锁（双向）：本表各 class 成员元组 ↔ 判别联合对应 kind 联合。
+ * 任一 class 漏登/多配 → 本赋值 tsc 红，错误指向漏改侧。
+ */
+export const FAILURE_CAUSE_KINDS_BY_CLASS_LOCK: AssertMutuallyAssignable<
+  {
+    provider: (typeof FAILURE_CAUSE_KINDS_BY_CLASS)["provider"][number];
+    harness: (typeof FAILURE_CAUSE_KINDS_BY_CLASS)["harness"][number];
+    agent: (typeof FAILURE_CAUSE_KINDS_BY_CLASS)["agent"][number];
+    user: (typeof FAILURE_CAUSE_KINDS_BY_CLASS)["user"][number];
+  },
+  {
+    provider: Extract<FailureCause, { class: "provider" }>["kind"];
+    harness: Extract<FailureCause, { class: "harness" }>["kind"];
+    agent: Extract<FailureCause, { class: "agent" }>["kind"];
+    user: Extract<FailureCause, { class: "user" }>["kind"];
+  }
+> = true;
+
+/**
+ * @deprecated [subagent-observability §3.3.2，ADR-0158 终态] 三值分诊词表已由
+ * {@link FailureCause} 取代（class×kind 封闭矩阵 + retryable 三态）。本类型保留为
+ * 历史解析兼容、不删——旧 record 帧与历史 journal 的 failureKind 解析仍依赖该
+ * 通道（设计 §3.4「历史解析兼容保留项」）；新写入方失败分类一律产 FailureCause，
+ * 产出侧分类器 classifyFailureKind 已退役。
+ */
 export type AgentFailureKind = "stale_context" | "schema_deterministic" | "unknown";
 
 /**
@@ -428,10 +582,29 @@ export interface WorktreeHandle {
  * 一次引擎执行的终态（协议 run 终态应答的 outcome 载荷）。锚定 core
  * orchestration AgentResult 并追加引擎层字段（engineId / exitCode）。
  */
+/** [subagent-observability §3.3.3] 轮终停因引擎原值三态（引擎收尾边沿事实；宿主
+ *  ROUND_TERMINAL_STOP_REASONS 词表的协议侧同源镜像）。 */
+export type EngineStopReason = "stop" | "error" | "aborted";
+
 export interface AgentOutcome {
   content: string;
-  /** 失败分诊标签。产出侧 = 引擎；缺省 = unknown = 可重试。 */
+  /**
+   * 失败分诊标签（历史解析兼容残留）。
+   * @deprecated [subagent-observability §3.4，ADR-0158] 新写入方失败分类一律产
+   * {@link FailureCause}（下方 failure 字段）；本字段随 {@link AgentFailureKind} 保留为
+   * 旧 record 帧与历史 journal 的解析兼容。产出侧残留仅引擎送达错误码前缀确定性分诊
+   * （pi 引擎 output-collector，[D5-③ 改轨]）；缺省 = undefined（字段缺位），
+   * 不承载重试判定（重试判定在 FailureCause.retryable 三态）。
+   */
   failureKind?: AgentFailureKind;
+  /**
+   * [subagent-observability §3.3.8] 失败分类（收尾边沿一次产出——CollectedOutcome.failure
+   * 经引擎适配层 toOutcome 透传上协议）。run 终局成员交付结算消费本字段点拼
+   * `"<class>.<kind>"` 进 failedMembers[].cause；缺省 = 未分类（cause 回落
+   * error 前缀协议码 / "unknown"）。可选 = 读取面对旧格式应答放行（字段落地前
+   * 的引擎缺省，写侧契约由引擎适配层承担）。
+   */
+  failure?: FailureCause;
   /** native 引擎直传 / 仿真层 ajv 产出（D4 硬分流：native 路径宿主不做二次校验）。 */
   parsedOutput?: unknown;
   usage?: AgentOutcomeUsage;
@@ -467,6 +640,38 @@ export interface AgentOutcome {
    * 仅诊断引用——文件受引擎侧尺寸轮转与过期清理管辖，读侧不得假设其永存。
    */
   stderrTeePath?: string;
+  /**
+   * [subagent-observability §3.3.3] 轮终停因引擎原值（收尾边沿事实一次产出，值域
+   * 三态与宿主 ROUND_TERMINAL_STOP_REASONS 同源）。宿主 one-shot 轮收条
+   * rec.lastRound.engineStopReason 的数据源——「正常收尾」派生判据（stop 且无失败
+   * 分类 = completed）依赖本事实。additive 可选（宪法判据③同 stderrTeePath 先例）：
+   * 旧引擎缺省 = 宿主回落派生展示词，零行为差。
+   */
+  engineStopReason?: EngineStopReason;
+  /**
+   * [subagent-observability §3.3.3 P5] 本 run 内 pi 原生重试的失败尝试计数
+   * （auto_retry_start 帧数；引擎 >0 时上报）。宿主轮收条 lastRound.retryAttempts
+   * 的数据源——重试轨迹可观测（失败尝试不静默计入 turns/usage）。additive 可选：
+   * 旧引擎/无重试缺省不落键。
+   */
+  retryAttempts?: number;
+  /**
+   * [subagent-observability §3.3.1/§3.3.3] 本轮被人类接管收尾的标注（引擎判定链
+   * prompt-ack 命中 handled 时产出，值恒 "handled"）。宿主轮收条
+   * lastRound.promptDisposition 的数据源——被接管轮不产失败分类、结清走 no_result、
+   * 通知走接管分支、run 聚合按未交付非失败计。additive 可选（宪法判据③同
+   * engineStopReason 先例）：旧引擎缺省 = 无接管标注，零行为差。
+   */
+  promptDisposition?: "handled";
+  /**
+   * [subagent-observability §3.3.2/§3.3.10] 观察性事实数组（引擎产出侧摘要，如
+   * 「结构化输出未调用」）。宿主轮收条 lastRound.observations 的
+   * 数据源——查询出口 list lastRound.observations 直读。additive 可选：旧引擎
+   * 缺省不落键。注意承载分源：交付谓词缺项（deliverables 未满足）在 worker 脚本
+   * 侧执行，不经本字段——落脚本结果 observations / run 终局帧 partialMembers /
+   * workflow_control 成员行 missingDeliverables 三面（§3.3.10 分源表述）。
+   */
+  observations?: string[];
 }
 
 // ============================================================

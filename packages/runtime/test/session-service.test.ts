@@ -123,6 +123,7 @@ vi.mock('../src/services/session-history.js', () => ({
 // ── Mock 之后再 import 被测对象 ─────────────────────────────────────
 
 import { SessionService } from '../src/services/session/session-service.js'
+import { applySessionOccupancyTransition } from '../src/services/session/event-interpreter.js'
 import {
   createSessionDeliveryRegistry,
 } from '../src/services/session/session-delivery-registry.js'
@@ -241,7 +242,7 @@ interface Setup {
     cwd?: string
     sessionFile?: string
     commands?: Array<{ name: string; source: string; sourceInfo?: Record<string, unknown> }>
-    hidden?: boolean
+    surface?: 'sidebar' | 'btw'
   }) => Promise<{ id: string; client: MockClient }>
 }
 
@@ -380,7 +381,16 @@ function createSetup(): Setup {
     // 让 createSession mock 本次返回该 client
     vi.mocked(pm.createSession).mockResolvedValueOnce(client as unknown as IPiEngine)
     clientMap.set(piSid, client)
-    await service.create(opts.cwd ?? tmpdir(), opts.label ?? 'seed', { hidden: opts.hidden })
+    if (opts.surface === 'btw') {
+      // surface 只经 registerSession 尾部参数落地（生产 create 协议无 surface 入参）——
+      // btw 归属条目走兼容委托直注册（与 btw 直注册链同形态）
+      await service.initializeManagedSession(
+        piSid, client as unknown as IPiEngine, opts.cwd ?? tmpdir(), opts.label ?? 'seed',
+        opts.sessionFile ?? `/fake/${piSid}.jsonl`, undefined, undefined, undefined, undefined, undefined, 'btw',
+      )
+    } else {
+      await service.create(opts.cwd ?? tmpdir(), opts.label ?? 'seed')
+    }
     return { id: piSid, client }
   }
 
@@ -587,7 +597,7 @@ describe('SessionService · dispatcher', () => {
       await setup.service.initializeManagedSession('sid-1', client as unknown as IPiEngine, tmpdir(), 'label')
       await setup.service.sendMessage('sid-1', 'hello pi')
       await flushDelivery()
-      // [u2 投递所有权内核] 出站交接在适配层：正文 + 裸标记身份（D2），无图片、direct 车道
+      // [u2 投递所有权内核] 出站交接在适配层：正文 + 裸标记身份（D2），无图片、direct 投递路径
       expect(client.prompt).toHaveBeenCalledTimes(1)
       const [text, images] = client.prompt.mock.calls[0] as unknown as [string, unknown]
       expect(text).toContain('hello pi')
@@ -711,7 +721,12 @@ describe('SessionService · dispatcher', () => {
     // session-message-handler 的 message.status reply 走 pending 通道，不触发
     // chat store 收尾逻辑——必须走流式 message.complete 广播。
     it('abort broadcasts message.complete with stopReason aborted', async () => {
-      setup.mountClient('sid-a')
+      const client = setup.mountClient('sid-a')
+      // [U1 迁移] abort 入口三分型（message-dispatcher.ts abort）：型 1「有回合可中止」
+      // 才写 stopped 终态 + 广播 complete{aborted}，判定读 occupancy（isGeneratingTurn）
+      // ——「有回合在跑」场景须先注册 session 并经转移原语置 generating（禁止直写字段）。
+      await setup.service.initializeManagedSession('sid-a', client as unknown as IPiEngine, tmpdir(), 'label')
+      applySessionOccupancyTransition(setup.service.getSession('sid-a')!, setup.messageBus, 'generating')
       await setup.service.abort('sid-a')
       const complete = findBroadcast(setup, 'message.complete')
       expect(complete?.payload).toMatchObject({ sessionId: 'sid-a', stopReason: 'aborted' })
@@ -733,7 +748,7 @@ describe('SessionService · dispatcher', () => {
 
     // [MF-1-8 退役] steerMessage / followUpMessage 用例已删除：renderer/core 消费方经
     // delivery.submit 统一提交（u3b 内核化），dispatcher/sessionService 转发路径与协议条目
-    // message.steer / message.follow_up 同批退役——同语义覆盖由 sendMessage（steer 车道）
+    // message.steer / message.follow_up 同批退役——同语义覆盖由 sendMessage（steer 投递路径）
     // 与 useChat 提交链测试承接。
   })
 
@@ -1044,7 +1059,7 @@ describe('SessionService · Facade', () => {
       // U6 回执普查：返回 get_state 读回的生效模型复合串（非 sessionId）
       expect(returned).toBe('anthropic/claude-x')
       expect(client.setModel).toHaveBeenCalledWith('anthropic', 'claude-x')
-      expect(setup.service.getSummary(id)?.modelId).toBe('anthropic/claude-x')
+      expect(setup.service.getSession(id)?.modelId).toBe('anthropic/claude-x')
     })
 
     it('session 不在 Map → 先 ensureActive（U2/D5）；该 session 无落盘文件 → 既有码 SESSION_NOT_FOUND 透传（fail-fast，不静默成功）', async () => {
@@ -1145,7 +1160,7 @@ describe('SessionService · Facade', () => {
       vi.mocked(client.setThinkingLevel).mockClear()
       await setup.service.setThinkingLevel(id, 'high')
       expect(client.setThinkingLevel).toHaveBeenCalledWith('high')
-      expect(setup.service.getSummary(id)?.thinkingLevel).toBe('high')
+      expect(setup.service.getSession(id)?.thinkingLevel).toBe('high')
     })
   })
 
@@ -1312,12 +1327,11 @@ describe('SessionService · Facade', () => {
     //   - applyContextUpdate(sid, inputTokens, totalTokens)：只失效 usage 实例 + 即时广播
     //   - getInputTokens / tokenCount（toSummary）：usage 实例快照派生
     //   - handleTurnEndSideEffects(sid)：复位 isGenerating（agent_end 副作用）
-    it('getInputTokens / tokenCount 均派生自 usage 实例快照（唯一数据源）', async () => {
+    it('getInputTokens 派生自 usage 实例快照（唯一数据源）', async () => {
       const { id, client } = await setup.seedSession()
-      // 播种权威快照（事件链路三条路径 totalTokens 与 inputTokens 同值，tokenCount 同语义派生）
+      // 播种权威快照（事件链路三条路径 totalTokens 与 inputTokens 同值）
       await seedUsageSnapshot(setup, id, client, { tokens: 15000, contextWindow: 100000, percent: 15 })
       expect(setup.service.getInputTokens(id)).toBe(15000)
-      expect(setup.service.getSummary(id)?.tokenCount).toBe(15000)
     })
 
     it('agent_end 无 usage（inputTokens=0）时 applyContextUpdate 早退，快照保持', async () => {
@@ -1648,17 +1662,17 @@ describe('SessionService · Facade', () => {
       expect(allIds.filter(x => x === id).length).toBe(1)
     })
 
-    it('excludes hidden sessions (公共 session 不进 sidebar 列表)', async () => {
+    it('excludes non-sidebar sessions (surface=btw 不进 sidebar 列表)', async () => {
       const cwd = tmpdir()
       // 普通session：可见
       const { id: visibleId } = await setup.seedSession({ cwd, label: 'visible' })
-      // 隐藏 session（公共 session）：应被过滤
-      const { id: hiddenId } = await setup.seedSession({ cwd, label: 'public', hidden: true })
+      // btw 线（surface=btw）：应被过滤
+      const { id: btwId } = await setup.seedSession({ cwd, label: 'line', surface: 'btw' })
 
       const groups = setup.service.listPersistedSessions()
       const allIds = groups.flatMap(g => g.sessions.map(s => s.id))
       expect(allIds).toContain(visibleId)
-      expect(allIds).not.toContain(hiddenId)
+      expect(allIds).not.toContain(btwId)
     })
   })
 

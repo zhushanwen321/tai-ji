@@ -125,10 +125,20 @@ describe('refreshHistory（U9/A6 对账编排公开方法）', () => {
 
     await f.session.refreshHistory(SID)
 
-    const ids = f.chatStore.getMessages(SID).map((m) => m.id)
+    const msgs = f.chatStore.getMessages(SID)
+    const ids = msgs.map((m) => m.id)
     // 更早历史 m-e1 保留（负面场景①的终端效果：裸 reconcileHistory 无 window 时整体
-    // 合并，m-e1 被基线清掉）；窗口段被响应刷新（w1→w1b 替换 + 新增 w3）
-    expect(ids).toEqual(['m-e1', 'm-w1b', 'm-w2b', 'm-w3'])
+    // 合并，m-e1 被基线清掉）；窗口段被响应刷新 + 新增 w3。[turn-key 身份保留
+    // 2026-10-24（store.ts mergeBaselineWithLive）] 已确认消息跨 reconcile 保留分区已
+    // 建立 id（重连对账正是该修复点名场景——turnStableId/展开态跨对账稳定），窗口段
+    // 同 piEntryId 命中 → id 取分区版本 m-w1/m-w2 而非响应的 m-w1b/m-w2b。
+    expect(ids).toEqual(['m-e1', 'm-w1', 'm-w2', 'm-w3'])
+    // 内容权威仍在基线副本：id 保留 ≠ 分区原样保留——窗口段内容已被响应刷新
+    // （m-w1 的 content 来自响应副本 m-w1b），证明窗口合并非 no-op
+    const w1 = msgs.find((m) => m.id === 'm-w1')!
+    expect(w1.content).toBe('msg-m-w1b')
+    expect(w1.piEntryId).toBe('pi-w1')
+    expect(msgs.find((m) => m.id === 'm-w3')!.content).toBe('msg-m-w3')
   })
 
   it('截断窗口状态随对账响应刷新（truncated=true 保持「加载更早」入口；loadedTurns/totalTurnsEstimate 归一写入）', async () => {

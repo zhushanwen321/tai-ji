@@ -3,11 +3,11 @@
  *
  * 合法迁移逐条锁定：queued→in-flight（受理）/ in-flight→delivered（confirmDelivered）/
  * in-flight→queued（requeue 对账回收）/ queued→cancelled（cancel 本地移除）/
- * in-flight→cancelled（两段式收回确认）/ in-flight→failed（重试耗尽）/ failed→queued
+ * in-flight→cancelled（两段式收回确认）/ in-flight→failed（断连未确认）/ failed→queued
  * （requeue 重试）/ failed→cancelled（× 移除）/ queued→delivered（实施扩展①：rebuild
- * 直确认 / 出站中回执先到）。
- * 非法迁移拒绝：终态不可 requeue（防复活）、failed 不可直 confirmDelivered、
- * 未知 id no-op。
+ * 直确认 / 出站中回执先到）/ queued→failed（受理失败留守，第 11 条）/ failed→delivered
+ * （迟到送达回执终结 failed 猜测，事实优先）。
+ * 非法迁移拒绝：终态不可 requeue（防复活）、未知 id no-op。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
@@ -285,7 +285,10 @@ describe('u1-state 非法迁移拒绝', () => {
     }
   })
 
-  it('confirmDelivered(failed) 拒绝：failed 未投递成功，不构成送达事实', () => {
+  it('confirmDelivered(failed) 接受：迟到送达回执终结 failed 猜测（delivered 事实优先）', () => {
+    // failed 语义 = 结果未知（failInFlight「可能已送达未及回执」/ 第 11 条受理失败
+    // 歧义性）——message_end 回执命中是确定性送达事实，终结 failed 留守，行随事实
+    // 消失（与 queued 扩展①同构：事实 > 状态猜测）
     const port = makeMockPort()
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port)
@@ -294,9 +297,9 @@ describe('u1-state 非法迁移拒绝', () => {
     handle.failInFlight('pi connection lost')
     expect(handle.entriesFull().active[0]!.state).toBe('failed')
 
-    expect(handle.confirmDelivered('u-1')).toBe(false)
-    expect(handle.entriesFull().active[0]!.state).toBe('failed') // 状态不变
-    expect(handle.entriesFull().tombstones).toHaveLength(0)
+    expect(handle.confirmDelivered('u-1')).toBe(true)
+    expect(handle.entriesFull().active).toHaveLength(0) // 行随送达事实消失
+    expect(handle.entriesFull().tombstones[0]).toMatchObject({ id: 'u-1', state: 'delivered' })
 
     warnSpy.mockRestore()
     handle.dispose()

@@ -18,14 +18,28 @@ import type { AgentFailureKind, EngineProtocolErrorCode } from "@zhushanwen/suba
  * 终局原因词表（`DoneReason` 的 shared 侧镜像）。
  *
  * 为什么在这里重声明而不是 import：`DoneReason` 定义在 `orchestration/models/types.ts`
- * （编排层），shared 是更低层，import 它会把依赖方向倒置。两侧由
- * `packages/runtime/test/workflow-status-vocab-parity.test.ts` 一族的词表断言与
- * `run-vocabulary` 的映射测试共同钉住值级一致。
+ * （编排层），shared 是更低层，import 它会把依赖方向倒置。两侧值级一致由
+ * `src/shared/__tests__/run-vocabulary.test.ts` 的「DoneReason 三词表跨词表对拍」
+ * 钉住（core ALL_DONE_REASONS ≡ shared WORKFLOW_DONE_REASON_ALL 值级对拍 + 镜像
+ * 联合双向编译锚——runtime vocab-parity 测试族只对账 status/outcome 轴）。
+ *
+ * [subagent-observability §3.3.8] 增 partially_succeeded：run 终局吸收成员交付的
+ * 独立档——存在失败且存在非失败成员（或无失败但部分交付）时 run 不折进 failed
+ * （「一半成功」与全败不可分辨 = 故障 B 的反方向失真）。聚合派生归 u4
+ * terminal-actions；词表通道本单元先行扩齐（core DoneReason / RunDoneReason /
+ * shared WorkflowDoneReason 三份同批）。
  */
-export type RunDoneReason = "completed" | "failed" | "aborted" | "budget_limited" | "time_limited";
+export type RunDoneReason =
+  | "completed"
+  | "failed"
+  | "aborted"
+  | "budget_limited"
+  | "time_limited"
+  | "partially_succeeded";
 
 /**
- * run 终局形态词表（四值，[D2] 词表变更登记后的形态——workflow-run-resume-revision）。
+ * run 终局形态词表（五值：done/failed/cancelled/time_limited/partially_succeeded——
+ * [D2] 词表变更登记形态 + [subagent-observability §3.3.8] 第五值）。
  *
  * 与 DoneReason（completed/failed/aborted/budget_limited/time_limited，五因单
  * 维度）的关系：outcome 是终态正交化后的「run 自身怎么死的」维度（harness 系统
@@ -34,7 +48,7 @@ export type RunDoneReason = "completed" | "failed" | "aborted" | "budget_limited
  * aborted 在本词表命名为 cancelled（对齐 D5 词表；DoneReason 存量词表不动，映射
  * 归 journal 写入方实现）。
  *
- * [D2] 词表变更登记（现行四值与重构前四值的差异，逐条显式登记）：
+ * [D2] 词表变更登记（现行值域与重构前四值的差异，逐条显式登记）：
  * 1. **completed → done 改名**：与 shared `WorkflowRunStatus` 终局值 'done' 统一
  *    字面量——status 域与 outcome 域的成功/终局值同词，派生视图链无需两套叫法；
  * 2. **interrupted 移出 outcome（入 lifecycle 暂停态）**：「终局了却又没死透」的
@@ -49,15 +63,24 @@ export type RunDoneReason = "completed" | "failed" | "aborted" | "budget_limited
  *    三值（time_limited 为 run 级终局、interrupted 已移出 outcome——均不出现在
  *    call 帧，沿用「ask 级实装取值 = result.failureKind 映射」的值域边界纪律）。
  *
+ * [subagent-observability §3.3.8] **partially_succeeded 第五值（行为反转登记）**：
+ * run 级 outcome 从「result.error 有无」改为成员交付债结算集合的派生物——存在失败
+ * 且存在非失败 → partially_succeeded；无失败但存在部分交付（产物契约部分满足）同值。
+ * run 级终局（budget_limited/time_limited/cancelled）优先于成员集合派生；call 级
+ * （agent-settled 载荷）实际值域仍 = done/failed/cancelled 三值（time_limited 为
+ * run 级终局；partially_succeeded 是 run 级聚合形态，不出现在 call 帧）。
+ *
  * 值域跟随锚：shared `WorkflowRunOutcome`（派生视图推算的输出口径的第三份字面量，
  * core↔shared 依赖方向不允许物理单源）经 runtime 侧双包值级等价断言钉住
- * （core ALL_RUN_OUTCOMES ≡ extractor 集合 ≡ shared 词表成员，runtime 单测）。
+ * （core ALL_RUN_OUTCOMES ≡ shared 词表成员，runtime 单测——对账范围含派生视图
+ * 收窄点 WORKFLOW_DONE_REASON_SET 与 TUI isFailedTerminal 消费链，扩值接线归 u4）。
  */
 export const ALL_RUN_OUTCOMES = [
   "done",
   "failed",
   "cancelled",
   "time_limited",
+  "partially_succeeded",
 ] as const;
 /** run 终局形态（run-settled 与 agent-settled 共用——agent 粒度的 cancelled = run 中止连带在途 agent 终止；call 级实际值域 = done/failed/cancelled 三值）。 */
 export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
@@ -69,8 +92,10 @@ export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
  *   （engine_ 前缀、core 不解释文案的 passthrough 契约）。显式并列
  *   EngineProtocolErrorCode 而非只留模板面——固定词表是该 union 的权威枚举源，
  *   SDK 侧词表演进（含非 engine_ 前缀的新码）自动跟进；
- * - 失败分类：AgentFailureKind（stale_context / schema_deterministic / unknown，
- *   产出侧 classifyFailureKind 词表，经 orchestration/models/types.ts re-export）。
+ * - 失败分类：AgentFailureKind（stale_context / schema_deterministic / unknown——
+ *   已 @deprecated（ADR-0158：FailureCause 五维判别联合替换），保留为历史帧解析
+ *   兼容；新写入方失败分类 = FailureCause，产出侧分类器 classifyFailureKind 已
+ *   退役。类型经 orchestration/models/types.ts re-export）。
  *
  * unknown 是合法成员：分类不出来的失败照记事件（词表漂移的失效模式 = 保守
  * 可诊断，不是拒记）。
@@ -113,6 +138,42 @@ export type RunErrorCode =
   | "idle-evicted"
   | "crashed"
   | "terminated";
+
+/**
+ * [subagent-observability §3.3.6] 债权结清枚举（pending 注销 reason 的新写入词表，
+ * 封闭五值——「债权」= pending-notifications 的 collect 挂起债，结清 = 该债以何种
+ * 事实形态兑现或消灭）：
+ *   completed — 轮正常收尾兑现；
+ *   failed    — 轮失败结清（含预算/超时轮失败）；
+ *   cancelled — 轮中止、run 取消、编排性收尾打断（interrupted 族宿主侧打断）；
+ *   lost      — 失联清点（宿主重启代际 + pid 探活事实，§3.3.4 合并清点产物）；
+ *   no_result — 无果：退出无 settle 无结果、清理扫描无事实可依、或轮被扩展接管
+ *               （细因经轮收条 promptDisposition 披露；与 lost 的边界 = 有无
+ *               「宿主重启」事实）。
+ *
+ * 权威落点 = 本文件（core 写侧产值）；extension-protocol 的六值 MappedPendingStatus
+ * 保留为历史 reason 解析兼容通道（解析词表纪律：expired → no_result、
+ * time_limited → failed、aborted → cancelled、其余同名），双通道以新写入方为权威，
+ * mapReasonToStatus 的 fail-open 废除与显式映射改写归 u1（pending-entries.ts）。
+ * 枚举完整性测试锚 = shared/__tests__/run-vocabulary.test.ts 同位（词表漂移静态
+ * 防线，§3.4）。
+ */
+export const ALL_SETTLEMENT_REASONS = [
+  "completed",
+  "failed",
+  "cancelled",
+  "lost",
+  "no_result",
+] as const;
+/** 债权结清词表（封闭五值；值域语义见 {@link ALL_SETTLEMENT_REASONS}）。 */
+export type SettlementReason = (typeof ALL_SETTLEMENT_REASONS)[number];
+
+/**
+ * 结清解析产出类型：词表外 reason 解析缺省 `unknown`（fail-visible——解析词表
+ * 纪律的缺省方向与旧 fail-open=completed 相反：不可判读时如实标注，不产假成功）。
+ * 解析函数落点 = u1（extension-protocol pending-entries 改写处消费本类型）。
+ */
+export type ResolvedSettlementReason = SettlementReason | "unknown";
 /**
  * run record 事件流文件名尾段（`<runId>.record.jsonl` 的 `.record.jsonl`）。
  *
@@ -144,14 +205,11 @@ export const RUN_EVENTS_SUFFIX = ".record.jsonl";
 export const SLUG_MAX_LENGTH = 35;
 
 /**
- * [D1 Class B1] run journal 事件词表（**词表本体**下沉；事件载荷接口仍留
- * orchestration/run-events.ts，因为它们引用 workflow 侧 AgentResult——那是待归位的
- * 同名类型）。
- *
- * 为什么先下沉词表：journal 实现要搬到 `execution/persistence/`（Class B2），行校验
- * 需要 `RUN_EVENT_TYPES` 这个**值**；值不能反向依赖 orchestration（值依赖环检查禁），
- * 而事件接口只作**类型**导入即可（类型边被值依赖环检查忽略）。故词表下沉、接口留原位，
- * B2 才成立。
+ * [D1] run journal 事件词表（值权威在本文件）。run 事件载荷契约（信封 + 事件
+ * 接口 + journal 接口形态）同居 shared 层：权威在 `shared/run-event-contracts.ts`，
+ * journal 实装（`execution/persistence/run-event-journal.ts`）按类型同层导入；
+ * orchestration/run-events.ts 保留 re-export 壳（状态机 / fold 与 barrel 消费零改动）。
+ * 值依赖环检查只拦值边——事件接口的类型导入不构成反向依赖。
  */
 export const RUN_EVENT_TYPES = [
   "run-created",
@@ -173,7 +231,9 @@ export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
  * 五处 reason 统一本派生源）。budget_limited 恢复同名细分（与帧生产侧
  * finalRunErrorCodeOf 恒等映射互逆——纯 outcome 反推会把预算终局静默折叠成
  * "failed"，通知串与条目 reason 细分丢失，不采用）；time_limited outcome 直返
- * 同名 DoneReason（[D2] 升格后双向恒等）。DoneReason 无 interrupted 成员——
+ * 同名 DoneReason（[D2] 升格后双向恒等）；partially_succeeded 直返同名 DoneReason
+ * （[subagent-observability §3.3.8]——折叠成 failed 即丢「部分成功」终局原因，
+ * runtime 派生视图 reason 归值依赖本行）。DoneReason 无 interrupted 成员——
  * [D2] 后 interrupted 已移出 outcome，无该分支。
  */
 export function runSettledOutcomeToDoneReason(outcome: RunOutcome, errorCode?: RunErrorCode): RunDoneReason {
@@ -187,6 +247,8 @@ export function runSettledOutcomeToDoneReason(outcome: RunOutcome, errorCode?: R
       return "aborted";
     case "time_limited":
       return "time_limited";
+    case "partially_succeeded":
+      return "partially_succeeded";
     case "failed":
       return "failed";
     default:

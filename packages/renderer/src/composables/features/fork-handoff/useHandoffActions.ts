@@ -9,8 +9,10 @@
  *   （runtime 让源 session 跑 handoff turn 生成文档），无 fromMessageId 参数。
  * - fork 完成后留原线 + forkNotice 反馈行；handoff 完成后跳转到新 session（useHandoffEffect
  *   订阅 session.handoffComplete → selectSession(newSessionId)），无反馈行组件。
- * - handoff 进行中状态记录在 chat store（isHandingOff，handingOffSessions Set），供 LRU 豁免、
- *   clearIndependentTransient 等逻辑控制；取消入口在 composer stop 按钮（后续读 isHandingOff 路由 abort）。
+ * - handoff 进行中状态 = occupancy.handingOff 派生（chat store isHandingOff 读口，单源；
+ *   [chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] 前端 handingOffSessions Set 乐观叠加已退役——runtime
+ *   handoff-service 经转移原语置位/复位，广播帧即权威）；取消入口在 composer stop 按钮
+ *   （读 isHandingOff 路由 abort）。
  *
  * 拆分原因：与 useForkActions 对称，独立 composable 职责内聚。参照 useForkActions 范式
  * （调用方注入 focusedSessionId ref，内部自行获取 stores/api）。
@@ -37,8 +39,12 @@ export function useHandoffActions(focusedSessionId: Ref<string | null>) {
   /**
    * 触发 handoff：runtime 让源 session 跑 handoff turn 生成文档 → runtime 从 agent_end 提取 text
    * → 新建 session 注入 doc 触发新 turn。reply sanitize 后拼到 handoff prompt 末尾告知 agent 下一 session 关注点。
-   * 置 handingOff=true 给 UI 即时反馈；完成由 useHandoffEffect 订阅 session.handoffComplete 复位 + 跳转。
-   * 失败时复位 handingOff + rethrow（调用方决定 toast 反馈，参照 forkSession 的 rethrow 模式）。
+   * 进行中状态由 runtime 权威承载：handoff-service 受理即经转移原语置 occupancy.handingOff
+   * （'handingOff-start'）并广播 session.occupancy 帧，前端 isHandingOff 读派生视图；
+   * 完成由 useHandoffEffect 订阅 session.handoffComplete 跳转（复位 = 'handingOff-end' 原语，
+   * cleanupInflight 统一收束）。RPC 失败 = 请求未达 runtime，occupancy 未置位，前端无需回滚
+   * （[chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] Set 乐观置位/复位随平行存储退役删除）；
+   * rethrow（调用方决定 toast 反馈，参照 forkSession 的 rethrow 模式）。
    *
    * Staging Mode（ADR-0056）：staging 传 composer 暂存的模型/thinking 覆盖，用于新 session 创建。
    * 源 session turn 仍用源 session 自身模型，不受 override 影响。
@@ -52,29 +58,21 @@ export function useHandoffActions(focusedSessionId: Ref<string | null>) {
     reply?: string,
     staging?: { modelOverride?: string; thinkingOverride?: string },
   ): Promise<void> {
-    chat.setHandingOff(srcSessionId, true)
-    try {
-      await sessionApi.handoff(srcSessionId, reply, staging)
-    } catch (e) {
-      // 触发失败 → 复位 handingOff（等不到 handoffComplete 广播），避免 UI 卡「正在交接」
-      chat.setHandingOff(srcSessionId, false)
-      throw e
-    }
+    await sessionApi.handoff(srcSessionId, reply, staging)
   }
 
   /**
-   * 取消进行中的 handoff（乐观清 handingOff 反馈 + 委托 abortHandoff RPC 中断 handoff inflight）。
+   * 取消进行中的 handoff：委托 abortHandoff RPC 中断 handoff inflight。
    * runtime abort（client.abort + 清 listener/timer）后不会广播 session.handoffComplete
-   * （onTurnEnd 检测 aborted 跳过新建），故乐观清 handingOff（与 fork 的 abort 对称）。
-   * RPC 失败时恢复 handingOff 状态 + toast 通知用户——handoff turn 仍在跑，UI 需保持「正在交接」。
+   * （onTurnEnd 检测 aborted 跳过新建）；occupancy.handingOff 复位 = 'handingOff-end'
+   * 原语（cleanupInflight 统一收束）经 occupancy 帧到达，前端不做乐观清
+   * （[chat-flow-consistency §6 裁决表「状态机｜交接在途状态归属」行] Set 乐观叠加退役；RPC 失败 = handoff turn 仍在跑，
+   * UI 由权威帧保持「正在交接」，与事实驱动原则 9 一致）。
    */
   async function abortHandoff(sessionId: string): Promise<void> {
-    chat.setHandingOff(sessionId, false)
     try {
       await sessionApi.abortHandoff(sessionId)
     } catch (e) {
-      // RPC 失败 → 恢复 handingOff（handoff turn 仍在跑，稍后 handoffComplete 会跳新 session）
-      chat.setHandingOff(sessionId, true)
       const msg = toErrorMessage(e)
       toastError(t('panel.message.handoffAbortFailed', { error: msg }))
       console.warn('[handoff] abortHandoff RPC failed, handoff turn may continue:', e)

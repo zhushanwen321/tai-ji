@@ -94,7 +94,7 @@ describe('deriveNotifySummary · managed-session-notify 分支', () => {
   })
 })
 
-// ── deriveFoldedNoticeRows · 收纳明细行（specs/chat/system-notices.md §3.4）────────────
+// ── deriveFoldedNoticeRows · 收纳明细行
 // settle 后 TurnMeta 展开区逐条明细行的数据派生：三通道 + 托管会话的载荷 → 行视图单点。
 
 import { deriveFoldedNoticeRows } from '../notify-summary'

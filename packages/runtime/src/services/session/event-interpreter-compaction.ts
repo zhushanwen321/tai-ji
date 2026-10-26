@@ -3,7 +3,7 @@
  *
  * [协作对象，T4 拆分] 从 event-interpreter.ts 按变化原因抽出：compaction_start/end 到 WS 帧
  * 广播（session.compacting / session.compacted / message.compactionSummary / message.error）
- * 与副作用回调（isCompacting 置复位 / occupancy 转移 / context 用量刷新 / trace 补充拉取）的
+ * 与副作用回调（compacting 置复位 / occupancy 转移 / context 用量刷新 / trace 补充拉取）的
  * 纯同步编排自成一体，无内部状态、与 interpreter 主循环无时序耦合（case 直调、无 await）。
  * 本对象不持有 interpreter 主引用（send 与四个回调经窄依赖注入）。
  */
@@ -15,7 +15,7 @@ export interface CompactionNotifierDeps {
   sessionId: string
   /** WS 帧发送。 */
   send: (msg: ServerMessage) => void
-  /** compaction 生命周期态切换（M4 事件驱动，sendPrompt/sendBash 预检互斥依据）。 */
+  /** compaction 生命周期态切换（M4 事件驱动；组合根接线到 'compacting-start'/'compacting-end' 原语行的冗余通道，u3c 裁决勿新增使用）。 */
   onCompactingStateChange?: (sessionId: string, isCompacting: boolean) => void
   /** occupancy 挂点回调（'compacting-start' / 'compacting-end' 转移，经原语合并派生广播）。 */
   onOccupancyTransition?: (transition: SessionOccupancyTransition) => void
@@ -43,10 +43,12 @@ export class CompactionNotifier {
   constructor(private readonly deps: CompactionNotifierDeps) {}
 
   /**
-   * compaction_start → 广播 session.compacting{reason} + 置 runtime active.isCompacting=true。
+   * compaction_start → 广播 session.compacting{reason} + 触发占用置位（occupancy.compacting=true）。
    *
    * reason 透传给前端，驱动 compacting 浮层文案区分手动（'manual'）/自动（'threshold'|'overflow'）。
-   * runtime active.isCompacting 经 onCompactingStateChange 回调置位，sendPrompt/sendBash 预检据此互斥。
+   * 占用置位经 onCompactingStateChange 回调由组合根接线到 'compacting-start' 原语行（冗余通道，
+   * u3c 裁决勿新增使用）；sendBash 预检读 occupancy.compacting（sendPrompt busy 预检已随
+   * 「排队取代拒绝」退役）。
    */
   onCompactionStart(reason: string): void {
     const { sessionId, send } = this.deps
@@ -69,11 +71,11 @@ export class CompactionNotifier {
    * 形态在 errorMessage 真值层面一致（extension cancel/signal abort 无 key；手动 catch 取消类
    * errorMessage 为 undefined）。分叉干净。
    *
-   * 三路均复位 isCompacting（与 compaction_start 置位对称，SUG-新2）—— 否则 auto compact 结束后
-   * active.isCompacting 永远 true，sendPrompt 预检永远拒，session 卡死。
+   * 三路均复位占用（occupancy.compacting=false，与 compaction_start 置位对称，SUG-新2）——
+   * 否则 auto compact 结束后 compacting 永远 true，sendBash 预检永远拒，session 卡死。
    *
    * 孤儿 end 容错（SUG-新3）：overflow「已 retry 过一次」早退路径无 preceding start，end handler
-   * 复位对「本来就 false 的 isCompacting」幂等无害；不维护 start/end 配对状态机。
+   * 复位对「本来就 false 的 compacting」幂等无害；不维护 start/end 配对状态机。
    */
   onCompactionEnd(ev: CompactionEndFields): void {
     const { sessionId, send } = this.deps

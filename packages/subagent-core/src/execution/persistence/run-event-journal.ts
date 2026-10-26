@@ -9,7 +9,7 @@
 // 方向反转：orchestration 反过来 import 本模块。
 //
 // 依赖方向说明：本模块对事件**载荷接口**（`WorkflowRunEvent` 一族）只做 `import type`
-// ——类型边在编译期擦除，值依赖环检查（C-data-26）不看它；词表值
+// ——类型边在编译期擦除，值依赖环检查（C-data-27）不看它；词表值
 // （`RUN_EVENT_TYPES` / `RUN_EVENTS_SUFFIX`）已在 shared，不构成反向值边。
 //
 // [D1 拆边 Class C 第 3 步] 本模块同时承接 **journal 目录解析集群 + record 读面**
@@ -24,7 +24,14 @@ import { join } from "node:path";
 import { getLogger } from "../../core/logger.ts";
 import { JsonlEventStream } from "../../shared/jsonl-event-stream.ts";
 import { ALL_RUN_OUTCOMES, RUN_EVENTS_SUFFIX, RUN_EVENT_TYPES } from "../../shared/run-vocabulary.ts";
-import type { RunEventJournal, WorkflowRunEvent, WorkflowRunEventInput } from "../../orchestration/run-events.ts";
+import type {
+  ModelOverrideEvent,
+  RunEventJournal,
+  RunSettledEvent,
+  WorkflowModelOverride,
+  WorkflowRunEvent,
+  WorkflowRunEventInput,
+} from "../../shared/run-event-contracts.ts";
 // 【D1 拆边 Class C 第 3 步】默认 journal 目录的模块锚推导（原 terminal-actions 依赖，
 // 随目录解析集群一并迁入；assembly 叶子方向，persistence → assembly 既有先例）。
 // [session-store-layout-inversion D2/D3] 模块锚 = 进程级当前 rootSessionId 绑定的
@@ -381,4 +388,56 @@ export function runEventJournalDirOf(journalDir?: string): string | undefined {
 export async function scanRunEvents(runId: string, journalDir?: string): Promise<readonly WorkflowRunEvent[]> {
   const { journal } = resolveRunEventJournal(journalDir);
   return journal.scan(runId);
+}
+
+// ── 读侧折叠原语（纯函数，消费已 scan 的事件流；无 IO 无时钟）──
+
+/**
+ * 事件流 → 最新模型覆盖记账值（subagent-model-switch §6.2 折叠语义：生效覆盖值 =
+ * 最新一条，覆盖旧覆盖值不叠加——设计不变量 2；无覆盖 undefined）。
+ *
+ * 单点辅助，直接调用面枚举（消费面扩大时同步本清单，锚 grep
+ * `latestModelOverride(` 生产调用点）：① 壳侧 foldRecordStreamToRun 挂
+ * WorkflowRunMeta.modelOverride（重启重建的派生视图）；② core resume-run 生效
+ * 模型三档回落的中档（决策七，resume-run.ts）；③ U4b 派发侧内存表 miss 重建
+ * （subagent-service.ts rebuildRunOverride 闭包，workflow-dispatch 派发链消费）；
+ * 另有 runtime 侧等价尾读第四面（model-override-query.ts 的独立实装，自注释
+ * 「构造性等价」——不调用本函数、按尾块倒序读同源 journal 文件）。
+ * 尾向扫描首条命中即返回（与 findLatestRunResumed 同款手写循环——findLast 属
+ * ES2023 lib，本包 target ES2022）。
+ */
+/** 尾向扫描首条指定类型事件（下方两读侧函数共用的机械循环；findLast 属 ES2023 lib，本包 target ES2022）。 */
+function lastEventOfType<T extends WorkflowRunEvent>(
+  events: readonly WorkflowRunEvent[],
+  type: T["type"],
+): T | undefined {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]!;
+    // 判别联合按运行时 type 收窄到 T：TS 无法对泛型 type 参数做字面量收窄，此转型安全。
+    if (event.type === type) return event as T;
+  }
+  return undefined;
+}
+
+export function latestModelOverride(
+  events: readonly WorkflowRunEvent[],
+): WorkflowModelOverride | undefined {
+  const event = lastEventOfType<ModelOverrideEvent>(events, "model-override");
+  if (!event) return undefined;
+  return { model: event.model, ...(event.thinkingLevel !== undefined ? { thinkingLevel: event.thinkingLevel } : {}), ts: event.ts };
+}
+
+/**
+ * 事件流 → 终局帧（不变量「终局 ⟺ 事件流存在 run-settled 帧」的具名单点——该
+ * 不变量由状态机转移表构造性保证：terminal 必经 run-settled 转移写入；无命中 =
+ * 未终局）。判终局消费方（model-switch-wiring 的切换前检查、run-state-evidence 的
+ * 终态证据判读、run-registry fold 的 terminal 判定源）经本函数共享同一判据，防
+ * 各写一份扫描循环漂移。tail 向扫描（单终局不变量下至多一帧，任一方向等价；
+ * 与 latestModelOverride 同款手写循环——findLast 属 ES2023 lib，本包 target
+ * ES2022）。
+ */
+export function findRunSettledEvent(
+  events: readonly WorkflowRunEvent[],
+): RunSettledEvent | undefined {
+  return lastEventOfType<RunSettledEvent>(events, "run-settled");
 }

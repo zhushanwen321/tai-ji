@@ -102,7 +102,7 @@ beforeEach(() => {
 describe('QueueStrip 条目渲染（D7 验收①：core 谓词单源）', () => {
   it('行集合 = core deliveryQueueEntries 谓词输出：非 direct 且未 delivered 三态可见、帧序保持、preview 直显', () => {
     setProjection(SID, [
-      entry('d1', 'in-flight', 'direct', 'direct 气泡原位'), // direct 车道：乐观气泡原位保留 → 不进队列条
+      entry('d1', 'in-flight', 'direct', 'direct 气泡原位'), // direct 投递路径：乐观气泡原位保留 → 不进队列条
       entry('q1', 'queued', 'queued', '排队消息甲'),
       entry('f1', 'in-flight', 'steer', '投递中消息乙'),
       entry('x1', 'delivered', 'steer', '已入流消息'), // delivered：transcript 权威已入流 → 隐去

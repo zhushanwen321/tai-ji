@@ -1,4 +1,39 @@
 {
   "version": 1,
-  "providers": []
+  "providers": [
+    {
+      "id": "stepfun",
+      "name": "StepFun（阶跃星辰）",
+      "api": "openai-completions",
+      "baseUrl": "https://api.stepfun.com/v1",
+      "helpUrl": "https://platform.stepfun.com/docs/zh/quickstart/overview",
+      "helpText": "在 platform.stepfun.com → API Keys 创建密钥；Step Plan 套餐用户把 Base URL 换成 https://api.stepfun.com/step_plan/v1（套餐 Key 专用集群）",
+      "models": [
+        {
+          "id": "step-3.5-flash",
+          "name": "Step 3.5 Flash",
+          "contextWindow": 262144,
+          "maxTokens": 65536,
+          "reasoning": true,
+          "input": ["text"]
+        },
+        {
+          "id": "step-3.7-flash",
+          "name": "Step 3.7 Flash",
+          "contextWindow": 262144,
+          "maxTokens": 230400,
+          "reasoning": true,
+          "input": ["text", "image"]
+        },
+        {
+          "id": "step-5-preview",
+          "name": "Step 5 Preview",
+          "contextWindow": 1024000,
+          "maxTokens": 65536,
+          "reasoning": true,
+          "input": ["text", "image"]
+        }
+      ]
+    }
+  ]
 }

@@ -31,7 +31,7 @@ export interface OpenDrawerOptions { // oe-exempt:20261003:framework:类型契�
 
 /** per-session 控制态（ADR-0053 Map 分区）。
  * [display-containers §6.6①/③ W0 还债] 收窄为容器控制态两字段：选中态字段
- * （selectedSubagentId/selectedBackgroundTaskId/selectedBtwVid）
+ * （selectedSubagentId/selectedBackgroundTaskId/selectedBtwSessionId）
  * 迁出至 selection/ 各内容域分区（各回各的内容域）；死状态 docked 全链删除（§7.6）。 */
 export interface DrawerControlState { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费方
   isOpen: boolean

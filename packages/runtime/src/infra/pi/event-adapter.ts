@@ -32,7 +32,7 @@
  */
 import type { ServerMessage, ServerMessageType, ExtensionInteractMethod, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
 import { EXTENSION_EVENTS, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
-import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, SUBAGENT_JOURNAL_MARKER, JOURNAL_REPORT_ACK, CANVAS_MARKER, isCanvasMarkerRequest, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion, isSubagentJournalReport } from '@zhushanwen/extension-protocol'
+import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, SUBAGENT_JOURNAL_MARKER, JOURNAL_REPORT_ACK, CANVAS_MARKER, PERMISSION_APPROVAL_TITLE, isCanvasMarkerRequest, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion, isSubagentJournalReport } from '@zhushanwen/extension-protocol'
 import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
 import type { PiEventListener } from '../../services/ports/pi-engine.js'
 import type { PiTranslatedEvent } from '../../services/session/types.js'
@@ -425,63 +425,6 @@ function extractFinalContent(extras: AgentEndRuntimeExtras): string {
     .join('')
 }
 
-/**
- * pi usage → WS payload usage（taiji 字段名翻译：input/output/totalTokens → inputTokens/outputTokens/totalTokens）。
- * [D4 无值编码纪律，对齐 handleTurnEndPi] 无值编码 = 字段缺省（wire 上省键），禁折 0——
- * 0 只允许作为真实测量值出现；消费端 readUsage（core readers）对缺省/非 number 字段丢样本，
- * 折 0 会把「未知」伪装成真实测量流向前端 token 统计。
- */
-function toUsageTokens(usage: PiAgentEndEvent['messages'][number]['usage']): {
-  inputTokens?: number
-  outputTokens?: number
-  totalTokens?: number
-} | undefined {
-  if (!usage) return undefined
-  return {
-    ...(typeof usage.input === 'number' ? { inputTokens: usage.input } : {}),
-    ...(typeof usage.output === 'number' ? { outputTokens: usage.output } : {}),
-    ...(typeof usage.totalTokens === 'number' ? { totalTokens: usage.totalTokens } : {}),
-  }
-}
-
-/**
- * turn 级 usage 累计（Σ agent_end.messages 中 role='assistant' 的 usage）。
- *
- * 徽标 live≡reload 的关键：重放径逐条 assistant 消息求和（core turn-aggregates
- * Σ usage.outputTokens），live 径此前只取 lastMsg.usage = 末次调用量的结构性缺失在此补齐
- * ——pi agent_end.messages 携带本次 agent run 全部消息，多 LLM 调用 turn 的每条 assistant
- * 消息各带自身 usage（pi bundle runLoop newMessages 累积实装；失败 attempt 为空用量，
- * 计入 0 与重放径 usageField 同值）。只累计 role==='assistant'：toolResult 消息的 usage
- * 是嵌套 subagent 合并量，重放径不计（usageField 仅 assistant role），此处同口径防双算。
- * 字段级求和（某字段全程缺省则结果缺该字段，不折 0——D4 无值编码纪律）。
- */
-function sumTurnUsage(messages: PiAgentEndEvent['messages']): {
-  inputTokens?: number
-  outputTokens?: number
-  totalTokens?: number
-} | undefined {
-  let input = 0
-  let output = 0
-  let total = 0
-  let hasInput = false
-  let hasOutput = false
-  let hasTotal = false
-  for (const m of messages) {
-    if (m.role !== 'assistant') continue
-    const u = m.usage
-    if (!u) continue
-    if (typeof u.input === 'number') { input += u.input; hasInput = true }
-    if (typeof u.output === 'number') { output += u.output; hasOutput = true }
-    if (typeof u.totalTokens === 'number') { total += u.totalTokens; hasTotal = true }
-  }
-  if (!hasInput && !hasOutput && !hasTotal) return undefined
-  return {
-    ...(hasInput ? { inputTokens: input } : {}),
-    ...(hasOutput ? { outputTokens: output } : {}),
-    ...(hasTotal ? { totalTokens: total } : {}),
-  }
-}
-
 /** agent_end — extract stop reason, usage, responseModel, diagnostics, errorMessage, content */
 function handleAgentEnd(event: PiAgentEndEvent, sid: string): PiTranslatedEvent[] {
   // [retry-sound] willRetry 恒读（pi 恒发；degraded 路径同样透传，U3②）
@@ -509,9 +452,6 @@ function handleAgentEnd(event: PiAgentEndEvent, sid: string): PiTranslatedEvent[
       sessionId: sid,
       stopReason,
       willRetry,
-      // turn 累计（徽标 live≡reload，见 sumTurnUsage）；sum 空手时回退末次调用量（防御，
-      // 正常 path lastMsg role='assistant' 必被累计覆盖）
-      usage: sumTurnUsage(event.messages) ?? toUsageTokens(usage),
       responseModel,
       diagnostics,
       errorMessage,
@@ -1027,7 +967,27 @@ function tryTranslateFormSelect(
  * [HISTORICAL] options 透传修复：pi select 严格传 string[]（types.ts select 签名 +
  * rpc-mode.js 原样透传），旧代码把 rawOptions 断言为 Array<{label,value}> 后 .map(o=>o.label)
  * 对 string 元素调 .label 产出 undefined[]——普通 select 在前端是坏的。改为 .map(String) 透传。
+ *
+ * [chat-flow-consistency U9 / S4] permission 等待判定键：title 首行为
+ * PERMISSION_APPROVAL_TITLE（常量单源 @zhushanwen/extension-protocol core/markers；
+ * pi-permission 扩展审批 select 的固定 title 首行，extensions/universal/permission
+ * approval.ts buildApprovalFieldSet 单点构造——双端 import 同一符号，防文案漂移
+ * 静默失联）的 select → payload 附加 permission: true。先例 = planReview 键
+ * （runtime 检测 marker 后附加，renderer extension-ui store 消费）——同款机制
+ * 不新发明。消费链：renderer
+ * hasPendingBlockingOverlay 判定键扩 permission → deriveStatus waiting → 侧栏警示点对
+ * 未水合会话（chat 分区无消息、toolCall running 输入不可见）同样生效。
  */
+
+/** permission 审批 select 判定：select 方法 + title 首行精确匹配（title 可多行，首行恒为标记串）。 */
+function isPermissionApprovalSelect(method: string, title: unknown): boolean {
+  return (
+    method === 'select' &&
+    typeof title === 'string' &&
+    (title.split('\n', 1)[0] ?? '') === PERMISSION_APPROVAL_TITLE
+  )
+}
+
 function translatePlainDialogRequest(
   event: PiExtensionUiRequestEvent,
   sid: string,
@@ -1047,6 +1007,9 @@ function translatePlainDialogRequest(
     default: event.default as string | undefined,
     level: event.level as 'info' | 'warn' | 'error' | undefined,
     prefill: method === 'editor' ? (event.prefill as string | undefined) : undefined,
+    // [chat-flow-consistency U9 / S4] permission 等待判定键（条件落键——帧上不出现 undefined
+    // 值键，planReview expectTurn 同纪律）；非 pi-permission 形态不落键，行为回落现状
+    ...(isPermissionApprovalSelect(method, event.title) ? { permission: true } : {}),
   }
   return dialogRequestEvents(dialogMethod, requestId, sid, requestPayload)
 }
@@ -1252,8 +1215,9 @@ const MESSAGE_END_SILENT_SKIP_ROLES = new Set(['system'])
  * entry 字段：
  * - id 恒缺省：pi 在 emit **之后**才 appendMessage 分配 uuidv7 entry id，事件上拿不到。
  *   reducer 按 `e<N>` 确定性派生；W22 权威对账（broadcast≡get_state）靠 get_entries。
- * - timestamp 取 message.timestamp（message 对象内字段，与持久化 entry 的 .message 同源），
- *   缺失时降级当前时间（与 liftHistoryToEntries 同点位，保 reducer 输入确定后输出确定）。
+ * - timestamp = 运行时到达时刻（Date.now()，≈ pi appendMessage 落盘时刻）——与 reload 侧
+ *   JSONL entry 级 timestamp 同义（[chat-flow-consistency D3 修正]， rationale 见下方内联
+ *   注释：message 级 timestamp 是消息开始时刻，用作 entry timestamp 会致回合定格恒 1s）。
  * - turnId 不填：pi 事件不带 turn 边界信息，值填充归 fix-chat-flow-order 分组 wave（类型契约
  *   字段稳定存在即可，不写投机代码——pi 上游若补 turnId 只改本构造点，reducer 不动）。
  *
@@ -1287,7 +1251,13 @@ function handleMessageEnd(event: PiMessageEndEvent, sid: string): PiTranslatedEv
     )
     return [{ kind: 'noop' }]
   }
-  const tsMs = typeof msg.timestamp === 'number' ? msg.timestamp : Date.now()
+  // [chat-flow-consistency D3 修正] 合成 entry.timestamp = 到达时刻（≈ pi appendMessage 落盘
+  // 时刻），不用 msg.timestamp——pi 的 message 级 timestamp 是消息开始时刻（faux 更早：播种
+  // 即预创建），而 JSONL entry 级 timestamp 是追加时刻（≈ 产出结束，session-entry-mapper
+  // applyEntryEndTimes 的 reload 回填语义）。live 帧自称落盘 entry 镜像，timestamp 必须与
+  // 持久化 entry 同义，否则定稿重建写出的 endedAt ≈ 开始时刻（回合定格恒 1s + 区间倒挂，
+  // A1b 验收判定项 4 实证）——live ≡ reload 的同源对齐由此恢复。
+  const tsMs = Date.now()
   const entry: PiMessageEntry = {
     type: 'message',
     parentId: null,

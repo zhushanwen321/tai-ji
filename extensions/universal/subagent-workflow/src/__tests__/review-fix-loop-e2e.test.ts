@@ -347,11 +347,14 @@ function miniValidator(schema: unknown, value: unknown, path: string): void {
   }
 }
 
-/** 按 schema 形状识别调用阶段（review / aggregator / fix）。 */
-function classifyCall(opts: { schema?: unknown }): "review" | "aggregate" | "fix" {
+/** 按 schema 形状识别调用阶段（review / aggregator / fix / repair）。
+ *  repair = 统一 commit 补修子循环的补修 agent（commitRepairSchema：repairedFiles/note，
+ *  autoCommit 补修链专用——mock 剧本经 scenario.repair 提供）。 */
+function classifyCall(opts: { schema?: unknown }): "review" | "aggregate" | "fix" | "repair" {
   const props = (opts.schema as JsonSchema | undefined)?.properties ?? {};
   if ("must_fix_ids" in props) return "aggregate";
   if ("fixed_count" in props) return "fix";
+  if ("repairedFiles" in props) return "repair";
   return "review";
 }
 
@@ -434,6 +437,12 @@ interface Scenario {
   aggregate: (prompt: string) => ScenarioReturn;
   /** fix 剧本；回调收到 prompt 文本（fail-fast / 分组用例按 "group G<k>/<n>" header 分流）。 */
   fix: (prompt: string) => ScenarioReturn;
+  /**
+   * 补修 agent 剧本（可选；autoCommit 补修链用例提供）。返回 CommitRepairReport 形态
+   * （{repairedFiles, note}）——空申报 = 补修 agent 判不可修（unrepairable 终态的最短路径）。
+   * 未配置而补修调用发生 = 用例剧本错配，立即抛错可见。
+   */
+  repair?: (prompt: string) => ScenarioReturn;
 }
 
 /**
@@ -442,7 +451,7 @@ interface Scenario {
  */
 function makeScenarioRunner(scenario: Scenario) {
   const reviewCalls: Array<{ prompt: string; result: Record<string, unknown> }> = [];
-  const calls: Array<{ kind: "review" | "aggregate" | "fix"; prompt: string; agent?: string; schema?: unknown; model?: string }> = [];
+  const calls: Array<{ kind: "review" | "aggregate" | "fix" | "repair"; prompt: string; agent?: string; schema?: unknown; model?: string }> = [];
   const run = vi.fn(async (opts: { prompt?: string; schema?: unknown; agent?: string; model?: string }): Promise<AgentResult> => {
     const kind = classifyCall(opts);
     const prompt = opts.prompt ?? "";
@@ -470,6 +479,12 @@ function makeScenarioRunner(scenario: Scenario) {
       parsed = unwrapped.parsed; error = unwrapped.error; failureKind = unwrapped.failureKind; skipContractCheck = unwrapped.skipContractCheck;
     } else if (kind === "aggregate") {
       const unwrapped = unwrapScenario(scenario.aggregate(prompt));
+      parsed = unwrapped.parsed; error = unwrapped.error; failureKind = unwrapped.failureKind; skipContractCheck = unwrapped.skipContractCheck;
+    } else if (kind === "repair") {
+      if (!scenario.repair) {
+        throw new Error(`测试剧本错配：补修 agent 调用发生但 scenario.repair 未配置（prompt 首行：${prompt.split("\n")[0] ?? ""}）`);
+      }
+      const unwrapped = unwrapScenario(scenario.repair(prompt));
       parsed = unwrapped.parsed; error = unwrapped.error; failureKind = unwrapped.failureKind; skipContractCheck = unwrapped.skipContractCheck;
     } else {
       const unwrapped = unwrapScenario(scenario.fix(prompt));
@@ -1087,6 +1102,69 @@ describe("review-fix-loop 编排（faux worker 宿主 in-process + 场景化 moc
       const objBranch = aggSchema!.properties.must_fix_ids.items.oneOf.find((b) => "properties" in b);
       expect(objBranch!.properties.title).toBeDefined();
       expect(objBranch!.properties.title.type).toBe("string");
+    },
+    FAUX_RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "E2E-9：聚合器空壳重报（无 title/severity 的延续条目）不抹已追踪身份锚点——正常销账 clean 终止（need-design 8 空壳缺陷 e2e 锁定）",
+    async () => {
+      // wf-1792073055433 空壳缺陷现象链：聚合器延续条目无 title/severity → 旧无条件
+      // 赋值把已追踪条目抹成空壳 → 跨轮身份锚点（title）断链 → 后续 clean 轮对账
+      // 无法销账 → 连续 clean 轮误判 stuck。修复（inheritCarryoverFields：title 缺失
+      // 侧才回填、severity 采信本轮显式标注）的 e2e 执法点：R2 空壳重报后字段保留 +
+      // R3 正常销账终止 clean。
+      let aggRound9 = 0;
+      const runner = makeScenarioRunner({
+        review: [
+          // R1：首次发现
+          () => ({ report_file: "/tmp/e2e9-r1.md", must_fix: 1, suggestion: 0, reconciliation: [] }),
+          // R2：对账 not-fixed（同号重报，无改键）
+          () => ({ report_file: "/tmp/e2e9-r2.md", must_fix: 1, suggestion: 0, reconciliation: [{ prev_id: "MF-1", status: "not-fixed", evidence: "still wrong" }] }),
+          // R3：对账 fixed → 全员销账
+          () => ({ report_file: "/tmp/e2e9-r3.md", must_fix: 0, suggestion: 0, reconciliation: [{ prev_id: "MF-1", status: "fixed", evidence: "read confirmed" }] }),
+        ],
+        aggregate: () => {
+          aggRound9++;
+          if (aggRound9 === 1) {
+            // R1：条目带完整身份锚点（title + severity）
+            return { report_file: "/tmp/e2e9-agg.md", must_fix: 1, suggestion: 0, must_fix_ids: [{ id: "MF-1", severity: "major", title: "Parser null check missing" }], fixes_caution: [] };
+          }
+          // R2：空壳重报——同 id 延续条目缺 title/severity（schema required 仅 id，合法）
+          return { report_file: "/tmp/e2e9-agg.md", must_fix: 1, suggestion: 0, must_fix_ids: [{ id: "MF-1" }], fixes_caution: [] };
+        },
+        fix: () => ({
+          fixed_count: 1,
+          fixes: [{ issue_id: "MF-1", description: "mock fix", self_check: "grep: 1 hit; synced", affected_files: [] }],
+          deferred: [],
+        }),
+      });
+      const deps = makeFauxDeps(runner);
+
+      const result = await runWorkflowToSettled(
+        wf("review-fix-loop"),
+        { targetType: "file", target: "README.md", agents: agentMd("reviewer"), maxRounds: 4, _runId: RUN_ID() },
+        deps,
+        FAUX_RUN_TIMEOUT_MS,
+      );
+
+      expect(result.reason).toBe("completed");
+      expect(result.error).toBeUndefined();
+      const outcome = assertScriptOutcome(result.scriptResult);
+      // 空壳重报不断身份链：R3 对账销账成功，clean 终止（修复前该链路误判 stuck）
+      expect(outcome.terminated).toBe("clean");
+      expect(outcome.totalFixed).toBe(2); // R1/R2 两轮 fix 各申报 1 次修复的累计计数
+      const { reviewCalls } = runner.stats();
+      expect(reviewCalls.length).toBe(3);
+      // 终态问题清单：延续条目保留 R1 身份锚点（title 未被 R2 空壳抹掉；severity 仍为合法值）
+      const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
+        issues: Record<string, { title?: string; severity?: string; status?: string }>;
+      };
+      const issue = st.issues["MF-1"];
+      expect(issue).toBeDefined();
+      expect(issue.status).toBe("fixed");
+      expect(issue.title).toBe("Parser null check missing");
+      expect(issue.severity).toBe("major");
     },
     FAUX_RUN_TIMEOUT_MS,
   );
@@ -2263,7 +2341,12 @@ describe("review-fix-loop fail-fast（结构化返回失败立即终判）", () 
       { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID(), ...args },
       deps, undefined, FAUX_RUN_TIMEOUT_MS,
     );
-    expect(result.reason).toBe("completed");
+    // [subagent-observability §3.3.8 行为反转连带] run 终局吸收成员交付：fail-fast
+    // case 的失败成员（reviewer/fixer 结构化 error）传导 run 终局——reason 落
+    // completed（无失败成员形态）/ partially_succeeded（部分失败）/ failed（全失败）
+    // 三者之一；终判语义由脚本返回值承载（assertScriptOutcome），run 级断言只锁
+    // 「正常收尾族 + 无 run 级错误」（time_limited/budget_limited/aborted 均非本组语义）。
+    expect(["completed", "partially_succeeded", "failed"]).toContain(result.reason);
     expect(result.error).toBeUndefined();
     return assertScriptOutcome(result.scriptResult) as FailFastOutcome;
   }
@@ -2584,7 +2667,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
     );
 
     it(
-      "MF-1-1b: 统一 commit 的 git add 失败（index.lock 争用）→ fix-failure 结构化终止 + state.json 落盘",
+      "MF-1-1b: 统一 commit 的 git add 失败（index.lock 争用）→ 环境恢复重试仍败 → 补修子循环 → fix-failure 结构化终止 + state.json 落盘",
       async () => {
         const repo = makeTmpGitRepo();
         mkdirSync(join(repo, "src"), { recursive: true });
@@ -2608,6 +2691,8 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
               fixes: [{ issue_id: "MF-1", description: "mock fix", self_check: "grep: 1 hit; synced", affected_files: ["src/a.ts"] }],
               deferred: [],
             }),
+            // 补修 agent：锁争用报错未写明可改文件的恢复动作 → 空申报（unrepairable 最短路径）
+            repair: () => ({ repairedFiles: [], note: "index.lock 争用是环境态问题，报错未写明可改文件的恢复动作" }),
           });
           const deps = makeDeps(runner);
           const result = await runWorkflowToSettled(
@@ -2616,14 +2701,26 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
             deps, undefined, RUN_TIMEOUT_MS,
           );
 
-          expect(result.reason).toBe("completed"); // 结构化终止而非抛错
+          // 结构化终止而非抛错：run 终局吸收失败成员（subagent-observability §3.3.8
+          // 行为反转），reason 落正常收尾族——终判语义由 scriptResult 承载（对齐 W3
+          // runFailFastCase 的 run 级断言约定）
+          expect(["completed", "partially_succeeded", "failed"]).toContain(result.reason);
           expect(result.error).toBeUndefined();
           const outcome = assertScriptOutcome(result.scriptResult);
           // git add 抛错 → terminated='fix-failure'（结构化终止语义）
           expect(outcome.terminated).toBe("fix-failure");
           expect(outcome.message).toContain("[UNRESOLVED]");
-          expect(outcome.message).toContain("统一 commit 环境恢复重试后仍失败");
+          // 恢复链完整走过：env 恢复 agent 先行（重试 add+commit 仍败）→ 补修子循环
+          //（空申报判不可修）→ fix-failure。终态文案 = buildRepairFailureMessage 信息全集。
+          expect(outcome.message).toContain("补修 agent 判定不可修");
+          expect(outcome.message).toContain("统一 git commit 补修 1 次仍被拦截");
+          expect(outcome.message).toContain("Unable to create"); // index.lock 报错原文进终态（证据可溯）
           expect(outcome.message).toContain("git status"); // 恢复动作指引
+          const { prompts, kinds } = runner.stats();
+          // 环境恢复通道先行锁定：env-fix agent 派发过（prompt 含 pre-commit 拦截语境）
+          expect(prompts.some((p) => p.includes("pre-commit hook"))).toBe(true);
+          // 补修 agent 恰 1 次（空申报立即终止：不回注、不消耗剩余补修次数）
+          expect(kinds.filter((k) => k === "repair").length).toBe(1);
           // 终止路径 saveState 已落盘（断点恢复依据）
           expect(existsSync(join(outcome.runDir!, "state.json"))).toBe(true);
           // 无 commit 产生（add 失败在 commit 之前；空仓 HEAD 仍不存在）

@@ -10,7 +10,7 @@
  * - ①a 标记回执：命中派生视图条目 → 派生视图转 delivered + morph 段按序入流（捕获过才入）+
  *   inflight 占位回收 + 帧消费终止（不走 ②）
  * - 双形态匹配契约桥：裸 uuid（期望形态）/ u-<uuid> 原文都命中（跨 u1 契约错配消除面）
- * - direct 车道回执：发送端有本地同 id 气泡 → 不重复入流（防双插由 hasLocalBubble
+ * - direct 投递路径回执：发送端有本地同 id 气泡 → 不重复入流（防双插由 hasLocalBubble
  *   承接，D4），仅占位回收；观看端无气泡 direct 消息入流补显（V17，锚
  *   effects/__tests__/user-delivery.test.ts）
  * - 未命中下落 ②：无标记 / 标记不命中派生视图 → 纯计数兜底（现状链）
@@ -136,7 +136,7 @@ describe('message_end(user) 送达回执（u3b / D2① 泛化，C-data-08 修订
   })
 
   it('AC3: direct 条目回执 → 无 morph 段且本地有同 id 气泡不重复入流（D4 后防双插由 id 判定承接，气泡原位保持）', () => {
-    // [D4 修订] 修前本用例锁定「direct 车道整体豁免」（无气泡也不入流）；D4
+    // [D4 修订] 修前本用例锁定「direct 投递路径整体豁免」（无气泡也不入流）；D4
     //（remote-use-shell-unification）后 direct 豁免由 hasLocalBubble 精确承接——观看端
     // foreign 无气泡 → 入流补显（直调侧谓词锚见 effects/__tests__/user-delivery.test.ts
     // D4-AC1/AC4），本用例改为发送端形态（本地有同 id 乐观气泡），经全 handler 链锁定
@@ -362,5 +362,81 @@ describe('送达回执入流保留原 id（消息撤回 U8：重建气泡沿用�
       [{ type: 'text', text: '裸 uuid 条目' }],
       bareUuid,
     )
+  })
+})
+
+// ── ③ 守卫降级（rpc-direct-send-user-bubble：标记未命中派生视图 + 无记账的显示承接）──
+
+describe('③ 守卫降级：派生视图缺条目 + 无记账的 message_end(user) 不再静默丢弃', () => {
+  it('AC-D1: 协议直发形态（派生视图无条目 + inflight=0）→ 降级入流剥标记原文（修前静默消费 = live 缺失）', () => {
+    // 派生视图刻意不置条目（订阅 sync 早退窗口 / 补齐时序缺口形态）；协议直发无乐观气泡
+    // 无 inflight 记账——③ 分支修前 hasKernelDeliveryMarker 命中即静默，消息不入流。
+    const ctx = makeCtx()
+
+    dispatchMessageEvent(ctx, SID, userEndFrame(SID, '直发消息', UUID))
+
+    // 降级入流：appendUser 收到剥标记纯文本（乐观气泡等价形态，status complete 由 appendUser 契约产出）
+    expect(ctx.appendUser).toHaveBeenCalledTimes(1)
+    expect(ctx.appendUser).toHaveBeenCalledWith(SID, [{ type: 'text', text: '直发消息' }], UUID)
+    // 权威喂 reducer 照常（调用方无条件承担，不受 ③ 分支影响）
+    expect(ctx.applyEntryFrame).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC-D2: 降级入流后派生视图补齐 + 迟到重复回执（同 id 第二帧）→ 不双显（去重防插）', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, userEndFrame(SID, '直发消息', UUID))
+    expect(ctx.appendUser).toHaveBeenCalledTimes(1)
+
+    // 派生视图补齐（条目已 delivered——内核回执先于帧序到达 renderer 的补齐形态）
+    replaceDeliveryProjection(SID, [{ clientUuid: CLIENT_UUID, preview: '直发消息', state: 'delivered', lane: 'direct' }])
+    // 迟到重复回执帧（E5c 同款）：① 因 state=delivered 不命中 → 落 ③ → 已显示集合命中 → 静默
+    dispatchMessageEvent(ctx, SID, userEndFrame(SID, '直发消息', UUID))
+
+    expect(ctx.appendUser).toHaveBeenCalledTimes(1)
+    expect(ctx.applyEntryFrame).toHaveBeenCalledTimes(2)
+  })
+
+  it('AC-D3: ① 命中的 m- 收养条目降级入流后迟到重复回执 → 不双显（修前 hasLocalBubble 双形态 miss 会双插）', () => {
+    // m- 收养形态气泡 id 无 u- 前缀：迟到回执经 ③ 的气泡双形态判定（裸 / u-）构造性 miss，
+    // ① 命中入流落点的已显示登记补齐该缺口
+    const ADOPTED = 'm-mustgqln-3'
+    replaceDeliveryProjection(SID, [{ clientUuid: ADOPTED, preview: '收养消息', state: 'in-flight', lane: 'direct' }])
+    const ctx = makeCtx()
+    ctx.addInflight(1)
+
+    dispatchMessageEvent(ctx, SID, userEndFrame(SID, '收养消息', ADOPTED))
+    expect(ctx.appendUser).toHaveBeenCalledTimes(1)
+
+    // 内核回执先至：条目转 delivered；随后迟到重复回执帧
+    replaceDeliveryProjection(SID, [{ clientUuid: ADOPTED, preview: '收养消息', state: 'delivered', lane: 'direct' }])
+    dispatchMessageEvent(ctx, SID, userEndFrame(SID, '收养消息', ADOPTED))
+
+    expect(ctx.appendUser).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC-D4: 多标记帧降级入流一次（挂首个未显示 id），全部标记登记已显示集合', () => {
+    const ctx = makeCtx()
+
+    dispatchMessageEvent(ctx, SID, composedEndFrame(SID, [
+      { text: '整批 A', marker: UUID },
+      { text: '整批 B', marker: UUID_B },
+    ]))
+
+    // 整帧文本一次入流（同 ① 降级分支的整帧互斥语义），挂首个未显示 id。
+    // 剥除口径 = DEFER_FLUSH_MARKER_RE_GLOBAL 只剥标记本体（前导换行保留，trimEnd 只剥尾部）
+    // ——与 ① 降级分支同一变换，合批分隔前的标记换行残留是既有语义（AC-D1 单标记帧无此差异）。
+    expect(ctx.appendUser).toHaveBeenCalledTimes(1)
+    expect(ctx.appendUser).toHaveBeenCalledWith(SID, [{ type: 'text', text: '整批 A\n\n\n---\n\n整批 B' }], UUID)
+    // 迟到重复回执（任一标记）不再二次入流
+    dispatchMessageEvent(ctx, SID, userEndFrame(SID, '整批 B', UUID_B))
+    expect(ctx.appendUser).toHaveBeenCalledTimes(1)
+  })
+
+  it('AC-D5: 发送端已有同 id 乐观气泡（composer 路径形态）→ ③ 保持静默防双插（现状语义不变）', () => {
+    const ctx = makeCtx([{ id: CLIENT_UUID, role: 'user', content: [{ type: 'text', text: 'hi' }], status: 'complete', timestamp: 0 }])
+
+    dispatchMessageEvent(ctx, SID, userEndFrame(SID, '直发消息', UUID))
+
+    expect(ctx.appendUser).not.toHaveBeenCalled()
   })
 })

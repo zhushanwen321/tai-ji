@@ -66,6 +66,7 @@ import {
   noteRebuiltSettlement,
   settlementRecordOfRunSettledFrame,
   type AgentResult,
+  type AgentCallOpts,
   type Budget,
   type ExecutionTraceNode,
   type RunEventLineIssue,
@@ -156,16 +157,15 @@ type RunSettledFrame = Extract<WorkflowRunEvent, { type: "run-settled" }>;
 export { runSettledOutcomeToDoneReason } from "@zhushanwen/subagent-core";
 
 /**
- * 终局记录（record run-settled 帧载荷的进程内派生视图——与 core 侧
- * RunSettlementRecord 同构）。reason/errorCode 直取帧载荷；DoneReason 由
- * runSettledOutcomeToDoneReason 联合派生（不在本形状内预计算）。
+ * 终局记录（record run-settled 帧载荷的进程内派生视图）。形状单源 = core
+ * {@link settlementRecordOfRunSettledFrame} 的返回类型（含成员交付结算明细
+ * failedMembers/partialMembers——[subagent-observability §3.3.8] 终局帧与通知
+ * 携带成员结算明细）；DoneReason 由 runSettledOutcomeToDoneReason 联合派生
+ * （不在本形状内预计算）。壳侧两个读者（{@link JsonlRunStore.settledRecordOf}
+ * 的通知载荷链与 noteRebuiltSettlement 的终局记录注册表）经同一 core 映射器
+ * 生产，形状构造性归一。
  */
-export interface RunSettlementRecord {
-  outcome: RunOutcome;
-  errorCode?: RunSettledFrame["errorCode"];
-  reason?: string;
-  settledAt: number;
-}
+export type RunSettlementRecord = ReturnType<typeof settlementRecordOfRunSettledFrame>;
 
 // ── record 流读原语（严格解析 + 完整性拒绝）────────────────────
 
@@ -277,6 +277,11 @@ interface CallDraft {
   phase?: string;
   startedAtIso: string;
   attempts: number;
+  /**
+   * agent-started 帧 input 载荷解析出的声明入参（[U13] 载荷；预算派生
+   * budgetViewOf 消费 maxTurns/timeoutMs）。undefined = 旧格式帧 / 载荷不可解析。
+   */
+  opts?: AgentCallOpts;
   /** 有 settled 帧 = done；无 = 在途（running）。 */
   result?: AgentResult;
   settledOutcome?: RunOutcome;
@@ -343,12 +348,32 @@ function collectRunCallDrafts(events: readonly WorkflowRunEvent[]): Map<number, 
         ...(event.phase !== undefined ? { phase: event.phase } : {}),
         startedAtIso: new Date(event.ts).toISOString(),
         attempts: event.attempt,
+        ...(event.input !== undefined ? { opts: parseStartedInputOpts(event.input) } : {}),
       });
     } else if (event.type === "agent-settled") {
       applySettledToRunDraft(drafts, event);
     }
   }
   return drafts;
+}
+
+/**
+ * agent-started 帧 input 载荷 → AgentCallOpts（core resume-run-rebuild
+ * parseAgentInput 的壳侧镜像——写点同源 canonical 序列化，两侧行为等价由
+ * record-mode 测试锁定）。不可解析/非对象 = 流被篡改或写入器 bug：warn 留痕
+ * 回落 undefined（opts 占位形态，预算派生按未声明处理——宁缺不误报）。
+ */
+function parseStartedInputOpts(input: string): AgentCallOpts | undefined {
+  try {
+    const parsed: unknown = JSON.parse(input);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as AgentCallOpts;
+    }
+  } catch (err) {
+    logger.debug("[workflow] run-store: agent-started input JSON.parse failed", err);
+  }
+  logger.warn("[workflow] run-store: agent-started input payload is not parseable opts — call opts rebuilt as placeholder");
+  return undefined;
 }
 
 /** [collectRunCallDrafts 拆分] agent-settled 归并（无 started 行时占位兜底成行）。 */
@@ -397,9 +422,9 @@ function draftsToExecutionTraceNodes(drafts: Map<number, CallDraft>): ExecutionT
 }
 
 /** [foldRecordStreamToRun 拆分] 中间形态 → AgentCall（直接构造 done/running 终态，
- * bypass markRunning/markDone 状态机检查——重建已知良好持久态的既定先例；opts 最小
- * 形态：record 流现行载荷不携带入参全文，重建聚合的 opts 仅满足 AgentCallOpts
- * 契约形状，prompt 占位空串）。 */
+ * bypass markRunning/markDone 状态机检查——重建已知良好持久态的既定先例；opts =
+ * agent-started 帧 input 载荷恢复的声明入参（预算派生 budgetViewOf 消费），旧格式
+ * 帧 / 载荷不可解析回落占位 {prompt:""}（core draftsToReplayCalls 同款回落）。 */
 function draftsToAgentCalls(
   drafts: Map<number, CallDraft>,
   sharedNodes: Map<number, ExecutionTraceNode>,
@@ -408,7 +433,7 @@ function draftsToAgentCalls(
   const calls = new Map<number, AgentCall>();
   for (const d of drafts.values()) {
     const linked = sharedNodes.get(d.taskIndex) ?? nodes.find((n) => n.stepIndex === d.taskIndex)!;
-    const call = new AgentCall(d.taskIndex, { prompt: "" }, linked);
+    const call = new AgentCall(d.taskIndex, d.opts ?? { prompt: "" }, linked);
     call.attempts = d.attempts;
     call.status = d.settledOutcome === undefined ? "running" : "done";
     if (d.result !== undefined) {
@@ -739,11 +764,12 @@ export class JsonlRunStore implements RunStore {
   }
 
   /**
-   * 终局记录查询（record run-settled 帧派生视图）：生产消费方 = 通知载荷链
-   * （runSettledEffects——载荷源帧直取）。miss = 无终局帧（未终局，或流读失败
-   * 降级——调用方按「不可判定」处置：通知跳过 + error 留痕，不回退兜底）。
-   * 流损坏（RecordStreamCorruptionError）与 IO 错误同走 miss + warn（通知链
-   * 不是恢复侧，保守 miss 可诊断；恢复侧的拒绝语义在 loadAll）。
+   * 终局记录查询（record run-settled 帧派生视图，映射经 core
+   * settlementRecordOfRunSettledFrame 单源）：生产消费方 = 通知载荷链
+   * （runSettledEffects——载荷源帧直取，成员结算明细随帧透传）。miss = 无终局帧
+   * （未终局，或流读失败降级——调用方按「不可判定」处置：通知跳过 + error 留痕，
+   * 不回退兜底）。流损坏（RecordStreamCorruptionError）与 IO 错误同走 miss + warn
+   * （通知链不是恢复侧，保守 miss 可诊断；恢复侧的拒绝语义在 loadAll）。
    */
   settledRecordOf(runId: string): RunSettlementRecord | undefined {
     let events: readonly WorkflowRunEvent[];
@@ -759,12 +785,10 @@ export class JsonlRunStore implements RunStore {
     }
     const settled = lastRunSettledEvent(events);
     if (settled === undefined) return undefined;
-    return {
-      outcome: settled.outcome,
-      ...(settled.errorCode !== undefined ? { errorCode: settled.errorCode } : {}),
-      ...(settled.reason !== undefined ? { reason: settled.reason } : {}),
-      settledAt: settled.ts,
-    };
+    // 帧载荷 → 终局记录经 core 映射器单源（与 noteRebuiltSettlement 的注册表读者
+    // 同一构造）：成员交付结算明细 failedMembers/partialMembers 随帧透传进通知
+    // 载荷链（[subagent-observability §3.3.8] 终局帧与通知携带成员结算明细）。
+    return settlementRecordOfRunSettledFrame(settled);
   }
 
   /**

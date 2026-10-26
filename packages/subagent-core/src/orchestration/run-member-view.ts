@@ -13,13 +13,14 @@
 
 import { TRACE_RESULT_MAX_CHARS } from "./models/trace.ts";
 import type { ExecutionTraceNode } from "./models/types.ts";
+import { partialMembersFromScriptResult } from "./run-member-settlement.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
 
 // ── 类型契约 ──────────────────────────────────────────────────
 
 /**
  * 成员四态词表（设计 §3.1.3；不设 unknown——run 正常终局前 closeOutInFlightCalls
- * 把在途 call 写成 failed + 取消文案，resume 同 stepIndex 重复 record 由去重规则取
+ * 把在途 call 写成 cancelled + 取消文案，resume 同 stepIndex 重复 record 由去重规则取
  * 当前尝试，旧尝试不会以终局形态冒充新尝试）。
  */
 export type MemberState = "running" | "completed" | "failed" | "cancelled";
@@ -56,6 +57,14 @@ export interface RunMemberRecordView { // oe-exempt:20261022:framework:设计 §
   readonly error?: string;
   readonly eventLog?: readonly RunMemberEventView[];
   readonly currentActivity?: { readonly type: "tool" | "text" | "thinking"; readonly label: string };
+  /**
+   * [subagent-observability §3.3.6 成员行对齐] 轮收条事实快照（最小消费视图——
+   * SubagentRecord.lastRound 结构性满足；本行只消费失败分类维）。undefined =
+   * 尚无已完成的轮 / 存量。
+   */
+  readonly lastRound?: {
+    readonly failure?: { readonly class: string; readonly kind: string };
+  };
 }
 
 /** 单成员行（8 字段，设计 §3.1.3 的 RunMemberView）。 */
@@ -78,6 +87,37 @@ export interface RunMemberView { // oe-exempt:20261022:framework:设计 §3.1.3 
   turns?: number;
   /** 仅运行中：record 派生（如 "tool: bash"）。 */
   currentActivity?: string;
+  /**
+   * [subagent-observability §3.3.6 成员行对齐] 失败分类（点拼 `"<class>.<kind>"`——
+   * 终局事件 cause 同款序列化形态，§3.3.8；record.lastRound.failure 派生）。
+   * undefined = 无失败事实。
+   */
+  failure?: string;
+  /**
+   * [§3.3.6/§3.3.9 budget 分轴显式] 四轴预算结构（null = 该轴生效上界无界）。
+   * 事实源（runMemberViews 派生——本类型不单独产词）：maxTurns/timeoutMs = 同
+   * stepIndex call 的 AgentCallOpts 显式传参（callId = stepIndex 单源，
+   * dispatchAgentCall 落 AgentCall.opts；calls miss 回落重建侧恢复的声明值
+   * meta.recoveredCallOpts）；budgetTokens/budgetTimeMs = run 级声明轴
+   * （run.state.budget.maxTokens/maxTimeMs——fresh run 从 spec 构造、重建 run 从
+   * run-created 帧恢复，两形态同源，resume-run-rebuild.ts 同款注释锚）。
+   * 生产输出恒在场（runMemberViews 逐行附加）；类型保持 optional 仅为兼容既有
+   * 测试/消费方的字面量构造形态。
+   */
+  budget?: {
+    maxTurns: number | null;
+    timeoutMs: number | null;
+    budgetTokens: number | null;
+    budgetTimeMs: number | null;
+  };
+  /**
+   * [subagent-observability §3.3.6/§3.3.10 成员行对齐] 交付校验缺口事实（部分交付
+   * 成员的未满足 deliverable 清单）。事实源 = run.state.scriptResult.partialMembers
+   * 按 stepIndex 对齐（worker 脚本交付校验的宿主落点，与 run-settled 帧
+   * partialMembers 同源同解析）；undefined = 无交付校验缺口事实（未声明
+   * deliverables / 全满足 / 全不满足〔全缺走失败成员语义，不落本字段〕/ 脚本未返回）。
+   */
+  missingDeliverables?: string[];
 }
 
 // ── 单行派生 ──────────────────────────────────────────────────
@@ -122,7 +162,59 @@ export function runMemberViews(
     if (rows.has(stepIndex)) continue;
     rows.set(stepIndex, memberViewFromTraceNode(node, options.now));
   }
+  // [§3.3.6/§3.3.9 budget 分轴显式] 四轴预算逐行附加（record 行与 trace 兜底行同域
+  // ——预算是 run/call 的声明事实，不随行来源变化）。
+  const missingByStepIndex = missingDeliverablesByStepIndex(run);
+  for (const view of rows.values()) {
+    view.budget = budgetViewOf(run, view.stepIndex);
+    // [§3.3.6/§3.3.10 成员行对齐] 交付校验缺口逐行附加（脚本层交付校验事实，
+    // 与 run-settled 帧 partialMembers 同源）。
+    const missing = missingByStepIndex.get(view.stepIndex);
+    if (missing !== undefined) view.missingDeliverables = missing;
+  }
   return [...rows.values()].sort((a, b) => a.stepIndex - b.stepIndex);
+}
+
+/**
+ * 脚本层交付校验缺口按 stepIndex 倒排（run.state.scriptResult.partialMembers →
+ * Map<taskIndex, missing[]>；解析复用结算模块单点——畸形条目 warn 留痕后丢弃，
+ * 缺席/全畸形 = 空 Map）。
+ */
+function missingDeliverablesByStepIndex(run: WorkflowRun): Map<number, string[]> {
+  const reports = partialMembersFromScriptResult(run.state.scriptResult);
+  const byIndex = new Map<number, string[]>();
+  if (reports === undefined) return byIndex;
+  for (const report of reports) {
+    byIndex.set(report.taskIndex, report.missing);
+  }
+  return byIndex;
+}
+
+/**
+ * 单成员行 budget 四轴派生（[§3.3.6/§3.3.9] 分轴显式——§3.3.9 执法点（引擎进程内
+ * limiter）的声明值镜像）：
+ * - maxTurns/timeoutMs：同 stepIndex call 的 AgentCallOpts 显式传参（callId =
+ *   stepIndex 单源）；calls miss 时回落重建侧恢复的 agent-started 声明值
+ *   （meta.recoveredCallOpts——重派集成员 replay 重派前的窗口，resume-run-rebuild
+ *   从 input 载荷恢复）；两源皆无 = 未声明 = null；
+ * - budgetTokens/budgetTimeMs：run 级声明轴（run.state.budget.maxTokens/maxTimeMs，
+ *   fresh run 从 spec 构造 / 重建 run 从 run-created 帧恢复——两形态同源）。
+ * 值语义与执法点一致：未传 / <=0 = 不限（AgentCallOpts 预算语义对齐注释），
+ * 映射为 null（显式无界）。
+ */
+function budgetViewOf(run: WorkflowRun, stepIndex: number): NonNullable<RunMemberView["budget"]> {
+  const call = run.state.calls.get(stepIndex);
+  // calls 条目（AgentCall.opts 必有）优先；miss 才回落重建侧恢复表——worker 重派后
+  // dispatchAgentCall 落真值条目，陈旧恢复表自然失效。
+  const opts = call?.opts ?? run.meta.recoveredCallOpts?.get(stepIndex);
+  const positiveOr = (v: number | undefined): number | null =>
+    typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+  return {
+    maxTurns: positiveOr(opts?.maxTurns),
+    timeoutMs: positiveOr(opts?.timeoutMs),
+    budgetTokens: positiveOr(run.state.budget.maxTokens),
+    budgetTimeMs: positiveOr(run.state.budget.maxTimeMs),
+  };
 }
 
 // ── 拆分 helper ───────────────────────────────────────────────
@@ -198,6 +290,10 @@ function memberViewFromRecord(
     agent: agentOf(record, node),
     model: firstNonEmpty(record.model, node?.model) ?? "default",
   };
+  // [subagent-observability §3.3.6 成员行对齐] 失败分类随轮收条事实（点拼序列化，
+  // 与终局事件 cause 同形——record 事实优先，trace 兜底节点无分类维）。
+  const failure = record.lastRound?.failure;
+  if (failure !== undefined) view.failure = `${failure.class}.${failure.kind}`;
   if (state === "running") applyRunningFields(view, record, now);
   else applyFinalFields(view, record, node);
   const turns = record.turns ?? node?.result?.usage?.turns;
@@ -231,15 +327,18 @@ function applyFinalFields(
 }
 
 /**
- * trace 兜底行组装（record 查询不可用或该 stepIndex 无 record 时）。粒度差异（设计
- * §3.1.3 诚实注记）：abort 场景下 record 行显示 cancelled，兜底行只能显示 failed
- * （trace 节点无 cancelled 状态，取消语义由错误文案承载）——兜底是降级形态。
+ * trace 兜底行组装（record 查询不可用或该 stepIndex 无 record 时）。trace 状态枚举
+ * 已补 cancelled（[subagent-observability §3.3.8] closeOutInFlightCalls 写点）——
+ * 兜底行与 record 行的取消语义对齐，无降级形态差异。
  */
 function memberViewFromTraceNode(node: ExecutionTraceNode, now: number): RunMemberView {
-  // 节点 completed → completed；failed → failed；pending/running → running
-  // （设计 §3.1.3 状态表「record 缺失，trace 节点兜底」行）。
+  // 节点 completed → completed；failed → failed；cancelled → cancelled；pending/
+  // running → running（设计 §3.1.3 状态表「record 缺失，trace 节点兜底」行）。
   const state: MemberState =
-    node.status === "completed" ? "completed" : node.status === "failed" ? "failed" : "running";
+    node.status === "completed" ? "completed"
+      : node.status === "failed" ? "failed"
+        : node.status === "cancelled" ? "cancelled"
+          : "running";
   const startedMs = parseIsoMs(node.startedAt);
   const view: RunMemberView = {
     stepIndex: node.stepIndex,
@@ -280,7 +379,11 @@ export interface MemberViewsBudget { // oe-exempt:20261022:framework:设计 §3.
 /**
  * 单成员行 → 单行渲染文本（成员表文本渲染与截断预算的同一度量单位——两侧同源
  * 防漂移）。列式对齐设计 §3.1.3 示例：`[0] running    writer  <model>  6.0s  turns: 4 · tool: bash`；
- * 终局行带 error 时缀 `error: <lastError>`（failed / cancelled 的取消文案均走此位）。
+ * 终局行带失败事实时先缀失败分类（`failure: <class>.<kind>`——§3.3.6 成员行对齐，
+ * 与终局事件 cause 同形）、原文 error 尾缀（`error: <lastError>`——failed / cancelled
+ * 的取消文案均走此位）；声明了生效上界的 budget 轴以 `budget: <axis>=<N> …` 段渲染
+ * （null 轴 = 显式无界不入行）；部分交付成员缀 `deliverables: N missing`（§3.3.10
+ * 交付校验结果，明细清单在 details 载荷 missingDeliverables）。
  */
 export function memberViewLine(view: RunMemberView): string {
   // 终端成员表列宽（`[idx] state agent model …` 对齐，与 tool 端 README 示例同形态）
@@ -295,13 +398,31 @@ export function memberViewLine(view: RunMemberView): string {
     view.model.padEnd(MODEL_COL),
   ];
   if (view.durationMs !== undefined) parts.push(`${(view.durationMs / MS_PER_SECOND).toFixed(1)}s`);
+  const boundedBudget = budgetLineSegment(view.budget);
+  if (boundedBudget !== undefined) parts.push(`budget: ${boundedBudget}`);
+  if (view.missingDeliverables !== undefined) {
+    parts.push(`deliverables: ${view.missingDeliverables.length} missing`);
+  }
   if (view.state === "running") {
     if (view.turns !== undefined) parts.push(`turns: ${view.turns}`);
     if (view.currentActivity !== undefined) parts.push(`· ${view.currentActivity}`);
-  } else if (view.lastError !== undefined) {
-    parts.push(`error: ${view.lastError}`);
+  } else {
+    if (view.failure !== undefined) parts.push(`failure: ${view.failure}`);
+    if (view.lastError !== undefined) parts.push(`error: ${view.lastError}`);
   }
   return parts.join(" ").trimEnd();
+}
+
+/** budget 四轴的行内段（仅声明了生效上界的轴；全无界 = undefined 不入行——
+ *  「null = 显式无界」的完整四轴结构在 details 载荷，行内只呈现生效约束）。 */
+function budgetLineSegment(budget: RunMemberView["budget"]): string | undefined {
+  if (budget === undefined) return undefined;
+  const axes: string[] = [];
+  if (budget.maxTurns !== null) axes.push(`maxTurns=${budget.maxTurns}`);
+  if (budget.timeoutMs !== null) axes.push(`timeoutMs=${budget.timeoutMs}`);
+  if (budget.budgetTokens !== null) axes.push(`budgetTokens=${budget.budgetTokens}`);
+  if (budget.budgetTimeMs !== null) axes.push(`budgetTimeMs=${budget.budgetTimeMs}`);
+  return axes.length > 0 ? axes.join(" ") : undefined;
 }
 
 /**

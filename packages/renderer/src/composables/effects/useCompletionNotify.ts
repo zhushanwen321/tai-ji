@@ -17,12 +17,14 @@
  *     只有重试链终态（成功/重试用尽/不可重试错误）才响
  *   1s 防抖（多 session 同时完成只响一次）
  *   读取 settingsStore.system.completionSound 开关
+ *   btw 线完成不进全局通知（W4b 收编后判别器 = session.list {surface:'btw'} 拉取缓存
+ *   成员判别，见 handleCompletion 步骤 0 注释）
  */
 import { playSuccess, playError } from '@/composables/effects/useCompletionSound'
 import { markUnread } from '@/composables/useSessionMarkers'
 import { useBackgroundWork } from '@/composables/features/chat/useBackgroundWork'
 import { getSettingsStore } from '@taiji/core'
-import { isBtwVirtualId } from '@taiji/shared'
+import { ensureBtwLineMembership } from '@/composables/panel/btw-line-membership'
 
 /** 上次播放提示音的时间戳（模块级，防抖用） */
 let lastPlayTime = 0
@@ -39,18 +41,22 @@ const DEBOUNCE_MS = 1000
  *   是重试链中的中间失败，turn 未结束——静音且不标未读，等 pi 续跑后的终态 complete 再响。
  *   缺省/undefined（旧 runtime / 非重试终态）保持原行为。
  */
-export function handleCompletion(
+export async function handleCompletion(
   sessionId: string,
   stopReason: string,
   focusedSessionId: string | null,
   willRetry?: boolean,
-): void {
+): Promise<void> {
   // 0. [M4-a / btw-question D9③ 派生视图收窄·通知方抑制执行点②] btw 线完成不进全局通知：
   // 提示音与 sidebar 未读标记都是主视图范围——线的回复/完成通知走 drawer badge per-line
-  // 通道（D7/D8 终态表），不落 `taiji:session-markers` localStorage（否则已删线的 vid
+  // 通道（D7/D8 终态表），不落 `taiji:session-markers` localStorage（否则已删线的 id
   // 会成为永久死标记条目，违背 G4「不留下痕迹」）。派生键结构上到不了本范围（message.complete
-  // 只携会话 id），本检查针对线 vid 本体。
-  if (isBtwVirtualId(sessionId)) return
+  // 只携会话 id），本检查针对线 session id 本体。
+  // W4b 收编判别器 = session.list {surface:'btw'} 拉取缓存成员判别
+  // （ensureBtwLineMembership，登记于 docs/constraints.json C-data-28 抑制类清单——为何无
+  // 构造性替代见该条；旧 isBtwVirtualId 前缀判别随 vid 退役、session.surfaces 派生表随
+  // W4b 收编删除，设计 §5-W4b 四步之①）。查找落空补充拉取一次再判；已确认非线的 id 命中负向缓存、不再重复补充拉取（否则主会话每 turn 完成都多发一次全量 RPC，未读与提示音被拖慢）；拉取失败 warn + 当次不抑制。
+  if (await ensureBtwLineMembership(sessionId)) return
   // 1. 过滤 stopReason：aborted 不触发
   if (stopReason === 'aborted') return
 
@@ -101,7 +107,7 @@ export function handleCompletion(
 export function useCompletionNotify(focusedSessionId: () => string | null) {
   return {
     handleCompletion: (sessionId: string, stopReason: string, willRetry?: boolean) =>
-      handleCompletion(sessionId, stopReason, focusedSessionId(), willRetry),
+      void handleCompletion(sessionId, stopReason, focusedSessionId(), willRetry),
   }
 }
 

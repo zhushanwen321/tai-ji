@@ -3,7 +3,7 @@
  * Extracted from RuntimeServer to reduce file size.
  */
 import type { WebSocket as WsType } from 'ws'
-import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView, SessionSummary, SessionRevokeMessageReply, WorkflowRunEventsReply, WorkflowDagReply } from '@taiji/shared'
+import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView, SessionSummary, SessionRevokeMessageReply, WorkflowRunEventsReply, WorkflowDagReply, SessionSurface, SessionGroup } from '@taiji/shared'
 // hook 否决类分类码值常量（词表 SSOT = shared MessageBlockedCode）：message.send /
 // message.bash / delivery.submit 三落码点统一引用，不手抄字面量。
 import { MESSAGE_BLOCKED_CODE } from '@taiji/shared'
@@ -37,11 +37,15 @@ import type { ArchiveService } from '../services/archive/archive-service.js'
 // BusClient（wave:bus-core）：ws 适配为 bus 订阅者的最小契约 { readyState, send }。
 // ws 库的 WebSocket 天然满足，但类型不完全一致，用 as unknown as BusClient 显式标记边界（R2）。
 import type { BusClient } from '../services/message-bus/types.js'
-// delivery 域（投递所有权内核 D5，u3a）：session.delivery state topic 装配 + 四 RPC。
+// delivery 域（投递所有权内核 D5，u3a）：session.delivery state topic 装配 + 六 RPC。
 // type-only：注册表由组合根经 server.setServices({ delivery }) 注入（与 SessionManagerHandler
 // 同一实例——sessionId 单例约束），transport 不构造它。
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import { SessionDeliveryTopic, frameLaneOf, frameStateOf, stripDeliveryMarkers } from './session-delivery-topic.js'
+// 权威拉取与冷读（W2，session.getState 后端）：按会话 id 的薄查询服务。实例由
+// SessionStateProjection 构造期创建并经模块槽 getSessionStateQuery 绑定（构造依赖
+// pm + replicated states 全在投影内部，而投影是 Facade 私有域），transport 不构造它。
+import { getSessionStateQuery, type SessionStateQuery } from '../services/session/session-state-query.js'
 
 /**
  * backgroundTask 域 WS 消费端口（background-task-sidebar D3，u-runtime-rpc）：
@@ -112,6 +116,14 @@ export interface SessionHandlerContext extends MessageHandlerContext {
      * 先例——缺省仅出现在测试最小 mock 中，case 内判空走 *_unsupported 防御分支。
      */
     getMessageCount?(sessionId: string): Promise<number>
+    /**
+     * session.list 通用查询（W4b，设计 §3.3.1）：按 surface / mainSessionId 派生分组列表
+     * （btw 线进通用列表的读取入口）。可选成员形态对齐 getPlanState 先例——实现在
+     * SessionService（session-list-query.ts），ISessionService 接口声明在 runtime
+     * interfaces.ts（跨单元单文件序列，本处按既有 optional 成员形态登记，缺省仅出现在
+     * 测试最小 mock 中，case 内判空走 session_list_unsupported 防御分支）。
+     */
+    listSessions?(query: { surface?: SessionSurface; mainSessionId?: string }): SessionGroup[]
   }
   /** fast-handoff 编排层（session.handoff 路由用）。可选：未注入时该 case 报 unsupported。 */
   handoffService?: HandoffService
@@ -131,7 +143,7 @@ export interface SessionHandlerContext extends MessageHandlerContext {
    */
   genStatsService?: GenStatsService
   /**
-   * 投递所有权内核注册表（投递所有权内核 D5，u3a）：delivery.* 四 RPC 与 session.delivery
+   * 投递所有权内核注册表（投递所有权内核 D5，u3a）：delivery.* 六 RPC 与 session.delivery
    * state topic（帧装配数据源）共用。组合根经 server.setServices({ delivery }) 注入
    * （与 SessionManagerHandler 同一实例——registry 的 sessionId 单例约束）。
    * 可选：未注入时 delivery.* 报 delivery_unsupported 防御分支（组合根保证注入；
@@ -230,6 +242,11 @@ export class SessionMessageHandler {
     'session.getContext': (msg, ws) => this.handleSessionGetContext(msg, ws),
     // 悬停详情卡消息计数（通道 2）：按需拉取（悬停时拉即最新，拉为主、推补充第一原则，无订阅）。
     'session.getMessageCount': (msg, ws) => this.handleSessionGetMessageCount(msg, ws),
+    // 权威拉取与冷读（W2）：活/冷会话同一入口读 modelId / thinkingLevel，不 spawn pi 进程。
+    'session.getState': (msg, ws) => this.handleSessionGetState(msg, ws),
+    // 通用查询（W4b，设计 §3.3.1）：按 surface / mainSessionId 拉分组列表——btw 线进通用
+    // 列表（取代 renderer 侧 btw.list）+ 全局/新任务搜索的 sidebar 口径迁移同吃本消息。
+    'session.list': (msg, ws) => this.handleSessionList(msg, ws),
     'session.getGenStats': (msg, ws) => this.handleSessionGetGenStats(msg, ws),
     'session.rename': (msg, ws) => this.handleSessionRename(msg, ws),
     'session.setProject': (msg, ws) => this.handleSessionSetProject(msg, ws),
@@ -247,11 +264,13 @@ export class SessionMessageHandler {
     'message.abort': (msg, ws) => this.handleMessageAbort(msg, ws),
     'message.bash': (msg, ws) => this.handleMessageBash(msg, ws),
     'message.abortBash': (msg, ws) => this.handleMessageAbortBash(msg, ws),
-    // delivery 域（投递所有权内核 D5，u3a）：四 RPC（reply 与 request 同名，payload 消费型）。
+    // delivery 域（投递所有权内核 D5，u3a；D6 扩 peek/edit）：六 RPC（reply 与 request 同名，payload 消费型）。
     'delivery.submit': (msg, ws) => this.handleDeliverySubmit(msg, ws),
     'delivery.cancel': (msg, ws) => this.handleDeliveryCancel(msg, ws),
     'delivery.drain': (msg, ws) => this.handleDeliveryDrain(msg, ws),
     'delivery.resync': (msg, ws) => this.handleDeliveryResync(msg, ws),
+    'delivery.peek': (msg, ws) => this.handleDeliveryPeek(msg, ws),
+    'delivery.edit': (msg, ws) => this.handleDeliveryEdit(msg, ws),
     // backgroundTask 域（background-task-sidebar D3，u-runtime-rpc）：后台命令拉取/详情/终止 3 RPC。
     // 变更广播不经此处（SessionService 组装的 onTasksChanged → bus.publish 单向推送）。
     'backgroundTask.list': (msg, ws) => this.handleBackgroundTaskList(msg, ws),
@@ -311,7 +330,7 @@ export class SessionMessageHandler {
   }
 
   /**
-   * delivery 域可选注册表检查（四 RPC 共用）：缺省时回 delivery_unsupported error envelope
+   * delivery 域可选注册表检查（六 RPC 共用）：缺省时回 delivery_unsupported error envelope
    * 并返回 undefined（调用方早退）；命中返回注册表实例。
    */
   private requireDeliveryRegistry(ws: WsType, msg: { id?: string }, sessionId: string): SessionDeliveryRegistry | undefined {
@@ -354,12 +373,13 @@ export class SessionMessageHandler {
   private async handleSessionCreate(msg: Extract<ClientMessage, { type: 'session.create' }>, ws: WsType): Promise<void> {
     // B3：透传 modelOverride / thinkingOverride（Landing Chip 覆盖值，设计文档 §5.2）。
     // 优先级：Landing Chip override > preset.modelOverride/thinkingLevel > 全局默认。
-    // 之前只透传了 hidden/presetId，覆盖值在 transport 层被丢弃，导致 Landing Chip 选型不生效。
+    // 覆盖值必须在 transport 层透传——丢弃即 Landing Chip 选型不生效。
     // projectId：D14 语义修正（2026-08-04），创建时归属当前 activeProject（空 = 默认项目兜底）。
     // 错误路径直通 server 中央 catch（S2 收敛）：create payload 无 sessionId 字段，中央
     // code 透传（含 MODEL_NOT_CONFIGURED L4 差异化引导）产出的信封与原 per-case 特判逐字节一致。
     const session = await this.ctx.sessionService.create(msg.payload.cwd, msg.payload.label, {
-      hidden: msg.payload.hidden,
+      // W5 hidden 字段退场：协议字段 session.create.hidden 与 SessionCreateOptions.hidden
+      // 已删（协议收缩，已核实无生产调用方），内部 options 无 hidden 透传位。
       presetId: msg.payload.presetId,
       projectId: msg.payload.projectId,
       modelOverride: msg.payload.modelOverride,
@@ -744,14 +764,17 @@ export class SessionMessageHandler {
     // cursor=turn 边界锚点 entryId 时返回锚点之前的最近窗口（活跃/离线共用语义）；
     // cursor 未命中 → 空页 + truncated=false（翻页到头，不报错）。
     // [u6] legacy historyTruncated 字段退役（偏差表 D7 关闭：与 truncated 同值并存的双轨收敛）。
+    // [U8 重启中断标记] interrupted 可选透传（离线最新窗口判定文件尾部中断形态；
+    // 活跃/翻页路径 service 不产出该字段）。
     const { sessionId, cursor, limitTurns, maxBytes } = msg.payload
-    const { messages, truncated, loadedTurns, totalTurnsEstimate } = await this.ctx.sessionService.getHistory(sessionId, { cursor, limitTurns, maxBytes })
+    const { messages, truncated, loadedTurns, totalTurnsEstimate, interrupted } = await this.ctx.sessionService.getHistory(sessionId, { cursor, limitTurns, maxBytes })
     return this.ctx.reply(ws, msg.id, 'session.history', {
       sessionId,
       messages,
       truncated,
       loadedTurns,
       totalTurnsEstimate,
+      ...(interrupted !== undefined && { interrupted }),
     })
   }
 
@@ -1086,6 +1109,70 @@ export class SessionMessageHandler {
     }
   }
 
+  // ── 权威拉取与冷读（W2，session.getState）──
+
+  /**
+   * 按 sessionId 拉会话运行时状态（modelId / thinkingLevel）。
+   *
+   * handler 只透传：活/冷分派 + 两条文件定位分叉 + 冷读解析全在 SessionStateQuery
+   * （对齐 getPlanState / getMessageCount 的 handler 透传形态）。三条实现约定落在
+   * 查询服务内部（设计 §3.3.3 三个 spawn 风险点）：禁 ensureActive 代替 getClient、
+   * live 分支只读实例快照不触发 restore、filePath 只准来自主会话两段扫描或 btw 线的
+   * 注册表记录 / 存储树布局定位（禁 withEphemeralPi）。
+   *
+   * 错误形态：会话不存在（两段扫描 + btw 定位都未命中）= 结构化错误
+   * SESSION_NOT_FOUND（不返回空对象伪装成功）；查询服务未装配（仅测试最小 mock 形态）
+   * = session_state_query_unavailable，与 getPlanState 防御分支同口径。
+   */
+  private async handleSessionGetState(msg: Extract<ClientMessage, { type: 'session.getState' }>, ws: WsType): Promise<void> {
+    const { sessionId } = msg.payload
+    const query: SessionStateQuery | undefined = getSessionStateQuery()
+    if (!query) {
+      return this.ctx.sendError(
+        ws,
+        'session_state_query_unavailable',
+        'session state query service not available',
+        msg.id,
+        { sessionId },
+      )
+    }
+    try {
+      const state = await query.getState(sessionId)
+      return this.ctx.reply(ws, msg.id, 'session.getState', state)
+    } catch (e) {
+      // SESSION_NOT_FOUND 走结构化错误码（renderer 按 code 分流为「显式未知」）；
+      // 其余（读文件失败等）归 session_get_state_failed，留痕同 reportFailure 口径。
+      const code = (e as { code?: unknown })?.code === SESSION_NOT_FOUND
+        ? SESSION_NOT_FOUND
+        : 'session_get_state_failed'
+      return this.reportFailure(ws, msg.id, code, e, { scope: 'session.getState', sessionId })
+    }
+  }
+
+  /**
+   * 通用列表查询（W4b，设计 §3.3.1/§5-W4b）。
+   *
+   * handler 只做「payload 透传 → reply」：surface / mainSessionId 两过滤参数的条目合成
+   * （侧栏分组 + btw 线合成）全在 SessionListQueryService（session-list-query.ts）。
+   * 与 config.sessions 的分工：后者是「无参全量查询 + 全量广播」双用消息（广播侧 28 处
+   * 零参调用点不可传参），过滤维度只存在于本纯查询消息；reply 与 config.sessions 同形
+   * （{ groups: SessionGroup[] }，无 archiveCount——角标是广播侧归档视图语义）。
+   *
+   * 防御分支对齐 getPlanState：listSessions 未组装（仅测试最小 mock 形态）→
+   * session_list_unsupported 显式报错，不留静默空回复。
+   */
+  private async handleSessionList(msg: Extract<ClientMessage, { type: 'session.list' }>, ws: WsType): Promise<void> {
+    const svc = this.ctx.sessionService
+    if (!svc.listSessions) {
+      return this.ctx.sendError(ws, 'session_list_unsupported', 'session list query not available', msg.id)
+    }
+    const groups = svc.listSessions({
+      ...(msg.payload.surface !== undefined ? { surface: msg.payload.surface } : {}),
+      ...(msg.payload.mainSessionId !== undefined ? { mainSessionId: msg.payload.mainSessionId } : {}),
+    })
+    return this.ctx.reply(ws, msg.id, 'session.list', { groups })
+  }
+
   private async handleSessionRename(msg: Extract<ClientMessage, { type: 'session.rename' }>, ws: WsType): Promise<void> {
     await this.ctx.sessionService.renameSession(msg.payload.sessionId, msg.payload.name)
     this.ctx.reply(ws, msg.id, 'session.renamed', { sessionId: msg.payload.sessionId, name: msg.payload.name })
@@ -1248,7 +1335,7 @@ export class SessionMessageHandler {
     // （P6 断言④回执真实化）。sent=true（abort_bash 已发出且 pi 确认取消）→ reply
     // message.status{aborted}；sent=false（检查短路：无 bash 在跑且无孤儿标记，或
     // abort_bash 发送失败）→ 不得谎报 aborted，走 error envelope（renderer useChat.abortBash
-    // catch → stopFailed toast 兜底）。兜底终态经独立帧 message.bashAborted 广播推回
+    // catch → markStreamingBashError 内联呈现兜底，chat-flow R4 后无 toast）。兜底终态经独立帧 message.bashAborted 广播推回
     // （msg-pipeline-debloat D4-3 帧类型化，dispatcher.abortBash 兜底广播），不依赖 reply。
     const abortBashSid = msg.payload.sessionId
     const abortResult = await this.ctx.sessionService.abortBash(abortBashSid)
@@ -1260,7 +1347,7 @@ export class SessionMessageHandler {
 
   // ── delivery 域（投递所有权内核 D5，u3a）────────────────────────────────
   //
-  // 四 RPC = 内核适配器（u2 registry）的协议范围：handler 只做「payload 校验 → 委托 →
+  // 六 RPC = 内核适配器（u2 registry）的协议范围：handler 只做「payload 校验 → 委托 →
   // reply」，lane 判定 / 队列收回 / 判重全在 registry（D1 单一判定源）。
   // 帧单发（msg-pipeline-debloat D4-4）：RPC 入口不再 sync()——内核每次真实变更经
   // onChange 内联同步发一帧（先于 reply 到达 renderer，reply 语义落地时 UI 状态已在位），
@@ -1369,6 +1456,44 @@ export class SessionMessageHandler {
     // 首配快照帧 + reattach 变更的 onChange 帧（无变更零帧，D4-4）。
     const deduped = await registry.resync(sessionId, clientUuids)
     return this.ctx.reply(ws, msg.id, 'delivery.resync', { sessionId, deduped })
+  }
+
+  /** 条目全文取回（chat-flow-consistency D6）：✎ 编辑预填只读通道，条目不动。 */
+  private async handleDeliveryPeek(msg: Extract<ClientMessage, { type: 'delivery.peek' }>, ws: WsType): Promise<void> {
+    const { sessionId, clientUuid } = msg.payload
+    const registry = this.requireDeliveryRegistry(ws, msg, sessionId)
+    if (!registry) return
+    if (typeof sessionId !== 'string' || sessionId === '' || typeof clientUuid !== 'string' || clientUuid === '') {
+      return this.ctx.sendError(ws, 'invalid_payload', 'delivery.peek requires non-empty sessionId and clientUuid', msg.id, { sessionId })
+    }
+    const outcome = registry.peek(sessionId, clientUuid)
+    if (!outcome) {
+      return this.ctx.reply(ws, msg.id, 'delivery.peek', { clientUuid, found: false })
+    }
+    // content 剥除出站裸标记（编辑预填是用户侧文本——cancel reply 同口径，单点剥离）
+    const content = outcome.content !== undefined ? stripDeliveryMarkers(outcome.content) : undefined
+    return this.ctx.reply(ws, msg.id, 'delivery.peek', {
+      clientUuid,
+      found: true,
+      ...(content !== undefined ? { content } : {}),
+      ...(outcome.segments !== undefined ? { segments: outcome.segments } : {}),
+    })
+  }
+
+  /** 原位编辑（chat-flow-consistency D6）：发送侧替换条目内容且排队位置保持不变。 */
+  private async handleDeliveryEdit(msg: Extract<ClientMessage, { type: 'delivery.edit' }>, ws: WsType): Promise<void> {
+    const { sessionId, clientUuid, content, segments } = msg.payload
+    const registry = this.requireDeliveryRegistry(ws, msg, sessionId)
+    if (!registry) return
+    if (typeof sessionId !== 'string' || sessionId === '' || typeof clientUuid !== 'string' || clientUuid === '' || typeof content !== 'string' || content.trim() === '') {
+      return this.ctx.sendError(ws, 'invalid_payload', 'delivery.edit requires non-empty sessionId, clientUuid and content', msg.id, { sessionId })
+    }
+    // segments 快照随替换更新（仅接受数组形态，同 delivery.submit 的 JSON 防御先例）
+    const outcome = await registry.edit(sessionId, clientUuid, {
+      content,
+      ...(Array.isArray(segments) && segments.length > 0 ? { segments } : {}),
+    })
+    return this.ctx.reply(ws, msg.id, 'delivery.edit', { clientUuid, ...outcome })
   }
 
   // ── 消息撤回（message-revoke 设计 §3.3 D2，U4）────────────────────────────

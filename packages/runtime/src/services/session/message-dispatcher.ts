@@ -34,7 +34,13 @@
 import type { IDispatcherSessionOps } from './session-internal.js'
 import { runDestroyStepIsolated } from './session-entry-removal.js'
 import type { IPiEngine, IProcessManager } from '../ports/pi-engine.js'
-import type { SendMessageHook, ForceQuitSource } from './types.js'
+import type {
+  SendMessageHook,
+  ForceQuitSource,
+  SessionOccupancy,
+  IManagedSessionView,
+} from './types.js'
+import { isGeneratingTurn } from './types.js'
 import type { WorkspaceService } from '../workspace/workspace-service.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
 import { toErrorMessage } from '../../utils/errors.js'
@@ -204,6 +210,15 @@ export class MessageDispatcher {
     }
 
     const receipt = this.submitToKernel(sessionId, hookOutcome.modifiedContent ?? content, { images, clientUuid })
+    // [dmg-r1-1 跨回合终态放行] 内核受理成功 = 新回合周期开启：清上一回合的终态 sidecar，
+    // 使本周期终态（新回合完成 done / 失败 error / 再次 abort stopped）不被第一终态优先
+    // 检查拦截（否则用户 abort 后继续对话，重启后侧栏永久滞留旧终态——失真根因）。
+    // 放在 hook/requireCommand 全通过后：被拦截的提交不开启新周期，旧终态保留。
+    // submit 失败（registry 未接线的显式失败）同样保留旧终态。同回合并发竞态（abort vs
+    // pi 自发 agent_end）不经本受理点，persistSessionOutcome 的先写者赢保护原样生效。
+    if (receipt) {
+      this.svc.clearSessionOutcome(sessionId)
+    }
     return { blocked: false, receipt }
   }
 
@@ -241,7 +256,7 @@ export class MessageDispatcher {
    * - **不经 runBeforeSendHook**：系统指令不是用户消息，不暴露给插件 veto/transform 改写侧
    *   （hook 的 transform 可破坏命令形态，D1 否决记录的第三缺陷）；
    * - **不经 registry.submit**：无裸标记尾附（标记会污染 command args 使 navigateTree throw）、
-   *   无内核条目、无车道判定——信令不被 hold/排队（撤回编排自持 revoking hold，若经内核
+   *   无内核条目、无投递路径判定——信令不被 hold/排队（撤回编排自持 revoking hold，若经内核
    *   提交会自锁死等）；
    * - **复用 ensureCommandAvailable 探测**（requireCommand 语义保留：命令未注册 fail-closed
    *   extension-missing，命令串不进模型）；
@@ -357,24 +372,31 @@ export class MessageDispatcher {
    * ——收敛环掐的是 runtime 自动收敛的补发 turn，终态/日志不得谎报用户操作语义。
    * aborted 完成帧广播两种 source 均保持不变（前端 no-op，U2 明确不动广播逻辑）。
    *
-   * [compaction-cancel] 压缩取消形态（source='user' ∧ 入口态 isCompacting ∧ ¬isGenerating）：
-   * composer 发送位在压缩期是「终止压缩」钮（2026-10 用户裁决），点击走本方法。此时没有
-   * turn 在中止（pi compact() 自身已先 abort 过回合；idle 手动 /compact 更无回合），用户
-   * 中止的是压缩流程本身——成功路径因此**不写 stopped 终态**（会话仍存活且空闲，写了会在
-   * 重启/重扫后把健康会话误标成 stopped + 骗出一个 restore 入口）、**不广播
-   * message.complete{aborted}**（无流式实体可收尾，帧语义谎报「回合被中止」）。占用
-   * idle 复位与 abort-idle 对账保持（压缩期排队的消息立即投出，compacting 维度由 pi
-   * compaction_end{aborted} 事件复位）。入口态在 await 前快照——compaction_end 事件与 RPC
-   * reply 的到达序不定，await 后读 isCompacting 会漂移。
+   * [chat-flow-consistency abort 入口三分型（design-turn-statemachine 缺陷 2 + 缺陷 10，
+   * 同批落地）] 成功路径按入口快照 turnAtEntry 分三型：
+   * - 型 1「有回合可中止」（turnAtEntry ∈ {dispatching, generating}）：现状路径不变
+   *   （'idle' 转移 + stopped 终态 + complete{aborted} 广播 + reconcile）。
+   * - 型 2「压缩取消」（compactionCancel，原分支语义保留）：不写终态、不广播、**不动
+   *   turn**（'idle' 调用已移入型 1——缺陷 10：原实现在判型前无条件复位 turn，settling+
+   *   compacting 时把 settling 提前旁路为 idle；压缩取消期 turn 原值只能是 idle/settling，
+   *   settling 留给 agent_settled 收口，compacting 维由 pi compaction_end{aborted} 事件复位）。
+   * - 型 3「收尾窗口无回合可中止」（turnAtEntry = settling，含已空闲）：pi 侧 abort 对
+   *   idle/settling 幂等 no-op——不写 stopped 终态（done 已写，覆盖即谎报「回合被中止」）、
+   *   不广播 complete{aborted}（无实体可收尾）、occupancy 不动（settling 留给 agent_settled
+   *   的 'idle' 转移正常收口）、reconcile('abort-idle') 照跑（队列滞留回收幂等无害）。
+   * 入口快照在 await 前取——事件流与 RPC reply 到达序不定，await 后读会漂移。
    */
   async abort(sessionId: string, source: AbortSource = 'user'): Promise<void> {
     const client = this.getClientOrThrow(sessionId)
-    // [compaction-cancel] 中止意图快照先于 await 取（事件流与 RPC reply 到达序不定，await 后
-    // 读 isCompacting 会因 compaction_end 已处理而漂移）。压缩期无 turn 在跑（isGenerating=false）
-    // 时用户的「停止」中止的是压缩流程而非回合——成功路径走压缩取消语义（见方法头注）。
+    // 中止意图快照先于 await 取（事件流与 RPC reply 到达序不定，await 后读会因
+    // compaction_end / agent_settled 已处理而漂移）。压缩期无回合在跑（¬isGenerating）时
+    // 用户的「停止」中止的是压缩流程而非回合——成功路径走压缩取消语义（见方法头注）。
     const activeAtEntry = this.svc.getSessionByClient(client)
+    const entryOcc = activeAtEntry?.occupancy
     const compactionCancel =
-      source === 'user' && !!activeAtEntry && activeAtEntry.isCompacting && !activeAtEntry.isGenerating
+      source === 'user' && !!activeAtEntry && entryOcc?.compacting === true && !isGeneratingTurn(entryOcc.turn)
+    // 型 1 判定（有回合可中止）：dispatching/generating 两相；settling/idle 归型 3。
+    const turnAbortableAtEntry = isGeneratingTurn(entryOcc?.turn)
     try {
       await client.abort()
     } catch (e) {
@@ -390,7 +412,7 @@ export class MessageDispatcher {
       if (active) {
         // occupancy #9（D2 迁移）：abort await 失败收尾 → 'idle' 行（进入此分支的都是 pi 已
         // 退出/流错误等显式失败，agent_settled 不会再到达，turn 不能停留在
-        // dispatching/generating/settling）。isGenerating=false 由原语 flags 派生。
+        // dispatching/generating/settling）。
         applySessionOccupancyTransition(active, this.messageBus, 'idle')
       }
 
@@ -401,30 +423,35 @@ export class MessageDispatcher {
       this.messageBus?.publish(sessionId, abortErrMsg)
       return
     }
-    // [HISTORICAL] abort 成功后必须主动广播 message.complete{stopReason:'aborted'} + 重置
-    // isGenerating。不能依赖 pi 自发 agent_end——pi 卡死（静默不退出）时永远不会发。
+    // [HISTORICAL] abort 成功后必须主动广播 message.complete{stopReason:'aborted'} + 复位
+    // occupancy。不能依赖 pi 自发 agent_end——pi 卡死（静默不退出）时永远不会发。
     // session-message-handler 的 message.status{status:'aborted'} reply 走 pending 通道，
     // 只让 renderer 的 abort() Promise resolve，不触发 chat store 的 message.complete 收尾
     // 逻辑（chat-message-effects 只认 'message.complete' type），isStreaming 仍为 true。
     // 广播流式 message.complete 让前端正常收尾（与 sendPrompt 错误路径广播 message.error 对称）。
+    // [缺陷 10] 'idle' 转移只允许在型 1（有回合被中止）内调用——型 2/型 3 不动 turn：
+    // compactionCancel 期 turn 原值 idle/settling；settling 由 agent_settled 正常收口。
     const active = this.svc.getSessionByClient(client)
-    if (active) {
-      // occupancy #9（D2 迁移）：abort 成功 → 'idle' 行（与上方的 message.complete{aborted}
-      // 收尾对称）。isGenerating=false 由原语 flags 派生。compacting 维度不在此行复位
-      // （'idle' 行只动 turn）——由 pi compaction_end{aborted} 事件的 'compacting-end'
-      // 转移复位（压缩取消与压缩成功/失败同路，三路对称）。
+    if (active && turnAbortableAtEntry) {
       applySessionOccupancyTransition(active, this.messageBus, 'idle')
     }
-    // [compaction-cancel] 压缩取消：无 turn 被中止（入口态 ¬isGenerating）→ 不写 stopped
-    // 终态、不广播 message.complete{aborted}（理由见方法头注）；占用复位与队列 flush 保持。
-    if (compactionCancel) {
-      console.warn(`[message-dispatcher] compaction cancel accepted (no turn in flight), sid=${sessionId}`)
+    // 型 2（压缩取消）/ 型 3（收尾窗口/已空闲，无回合可中止）：无 turn 被中止 → 不写 stopped
+    // 终态、不广播 message.complete{aborted}（理由见方法头注）；队列对账照跑（压缩期/收尾期
+    // 排队的消息按对账器正常投出）。
+    if (!turnAbortableAtEntry) {
+      if (compactionCancel) {
+        console.warn(`[message-dispatcher] compaction cancel accepted (no turn in flight), sid=${sessionId}`)
+      } else {
+        console.warn(`[message-dispatcher] abort no-op (turn not abortable at entry), sid=${sessionId}`)
+      }
       void this.delivery?.reconcile(sessionId, 'abort-idle')
       return
     }
     // W4：abort 写 stopped 终态。[U2] reason 按发起方分型：收敛环 re-abort（restore-abort
     // 收敛环掐补发 turn / 掐 idle pi）是 runtime 自动收敛而非用户操作，写区分性文案——
     // 终态 entry 是「谁 stopped 了 session」的权威记录，语义不得谎报。
+    // [第一终态优先] persistSessionOutcome 统一层已带已有终态跳过（abort 与 pi 自发 agent_end
+    // 并发的竞态兜底：done 先写则本写跳过——回合自然完成）。
     if (source === 'convergence') {
       console.warn(`[message-dispatcher] convergence abort (runtime auto, userStopped convergence loop), sid=${sessionId}`)
       this.svc.persistSessionOutcome(sessionId, 'stopped', 'Convergence abort (auto)')
@@ -515,9 +542,9 @@ export class MessageDispatcher {
       console.error(`[message-dispatcher] forceQuitSession pre-terminal steps failed (sessionId=${sessionId}):`, e)
     } finally {
       // occupancy #10（D2 迁移，forceQuit/abort 超时收敛路径）：进程被强杀后 agent_settled /
-      // compaction_end 永不到达，'full-reset' 行三维全复位 + 三布尔派生同步复位（结构上不再有
-      // 「只复位一边」）——session.exited 广播前发，且必须在 removeSessionEntry（内部
-      // bus.clearSession）之前，否则帧送空集合。
+      // compaction_end 永不到达，'full-reset' 行四维全复位（turn 机器 idle 行 + compacting/
+      // bash/handingOff 布尔维全 false patch，结构上不再有「只复位一边」）——session.exited
+      // 广播前发，且必须在 removeSessionEntry（内部 bus.clearSession）之前，否则帧送空集合。
       runDestroyStepIsolated('full-reset', sessionId, () => {
         const exiting = this.svc.getSession(sessionId)
         if (exiting) applySessionOccupancyTransition(exiting, this.messageBus, 'full-reset')
@@ -576,6 +603,46 @@ export class MessageDispatcher {
     return client
   }
 
+  /**
+   * busy 预检的拒绝原因（null = 不忙）。判定序 = compacting 优先（A 置位后 B 进来预检
+   * 能看到）、bash 次之、生成中最后——文案与 rejectIfBusy 的 warn 日志共用。
+   */
+  private busyCompactReason(
+    occ: SessionOccupancy | undefined,
+  ): 'compaction already running' | 'bash running' | 'agent generating' | null {
+    if (occ?.compacting === true) return 'compaction already running'
+    if (occ?.bash === true) return 'bash running'
+    if (isGeneratingTurn(occ?.turn)) return 'agent generating'
+    return null
+  }
+
+  /**
+   * [W3 + M4] busy 预检：与 sendBash 预检的 occupancy.compacting 拒绝对称 + 防并发 compact 重入。
+   * 补 compacting 维：A 置位（interpreter 从 compaction_start 事件）后，B 进来预检若无 compacting
+   * 看不到 A → 两个 client.compact RPC 并发 → 双 compaction 事件流。补上后事件层 P-dedup by construction 成立。
+   *
+   * 事件驱动（M4）：compaction 生命周期广播全删——由 interpreter 从 compaction_start/compaction_end
+   * 唯一编排（session.compacting / message.compactionSummary / session.compacted / 对话流错误提示）。
+   * dispatcher 退化为「预检 + RPC 触发 + 失败复位」三件事。
+   */
+  private rejectCompactIfBusy(sessionId: string, active: IManagedSessionView | undefined): void {
+    const reason = this.busyCompactReason(active?.occupancy)
+    if (reason === null) return
+    const errMsg = `Cannot compact while ${reason}`
+    console.warn(`[message-dispatcher] compact preemptive reject (busy), sid=${sessionId}, reason=${reason}`)
+    // 对话流内联呈现（msg-pipeline-debloat D4-2）：busy 拒绝的可见部分从 renderer toast
+    // 改为对话流 system 提示条目——走 message.stream_warn（非终结性提示通道：仅追加
+    // system 消息、不调 finalizeSession，正在流式的 turn 不受影响；runtime 自产提示、
+    // pi 无 entry 的正确入流形态）。不能用 message.error——其终态 effect 会把生成中的
+    // assistant 误收尾为 error。renderer catch 见 compact_busy 分类码抑制 toast，双呈现
+    // 不叠加。零生命周期广播不变：不广播 session.compacted{error}（预检在 RPC 前，pi
+    // 未发 compaction_start，interpreter 状态机不参与）。
+    this.messageBus?.publish(sessionId, { type: 'message.stream_warn', payload: { sessionId, content: errMsg } })
+    // throw 扁平错误携带分类码（WorktreeService 同款 Object.assign 模式）→ handler
+    // error envelope 原样透传 → renderer catch 按分类码路由（抑制 toast）。
+    throw Object.assign(new Error(errMsg), { code: 'compact_busy' })
+  }
+
   async compact(sessionId: string, customInstructions?: string): Promise<void> {
     const startTime = Date.now()
     const client = this.pm.getClient(sessionId)
@@ -586,32 +653,10 @@ export class MessageDispatcher {
 
     console.log('[message-dispatcher] compact: start, sessionId=' + sessionId + ', customInstructions=' + (customInstructions ? `"${customInstructions}"` : '(none)'))
 
-    // [W3 + M4] busy 预检：与 sendBash/sendMessage 的 isCompacting 拒绝对称 + 防并发 compact 重入。
-    // 补 isCompacting：A 置位（interpreter 从 compaction_start 事件）后，B 进来预检若无 isCompacting
-    // 看不到 A → 两个 client.compact RPC 并发 → 双 compaction 事件流。补上后事件层 P-dedup by construction 成立。
-    //
-    // 事件驱动（M4）：compaction 生命周期广播全删——由 interpreter 从 compaction_start/compaction_end
-    // 唯一编排（session.compacting / message.compactionSummary / session.compacted / 对话流错误提示）。
-    // dispatcher 退化为「预检 + RPC 触发 + 失败复位」三件事。
     const active = this.svc.getSessionByClient(client)
-    if (active && (active.isBashRunning || active.isGenerating || active.isCompacting)) {
-      const reason = active.isCompacting ? 'compaction already running'
-        : active.isBashRunning ? 'bash running'
-          : 'agent generating'
-      const errMsg = `Cannot compact while ${reason}`
-      console.warn(`[message-dispatcher] compact preemptive reject (busy), sid=${sessionId}, reason=${reason}`)
-      // 对话流内联呈现（msg-pipeline-debloat D4-2）：busy 拒绝的可见部分从 renderer toast
-      // 改为对话流 system 提示条目——走 message.stream_warn（非终结性提示通道：仅追加
-      // system 消息、不调 finalizeSession，正在流式的 turn 不受影响；runtime 自产提示、
-      // pi 无 entry 的正确入流形态）。不能用 message.error——其终态 effect 会把生成中的
-      // assistant 误收尾为 error。renderer catch 见 compact_busy 分类码抑制 toast，双呈现
-      // 不叠加。零生命周期广播不变：不广播 session.compacted{error}（预检在 RPC 前，pi
-      // 未发 compaction_start，interpreter 状态机不参与）。
-      this.messageBus?.publish(sessionId, { type: 'message.stream_warn', payload: { sessionId, content: errMsg } })
-      // throw 扁平错误携带分类码（WorktreeService 同款 Object.assign 模式）→ handler
-      // error envelope 原样透传 → renderer catch 按分类码路由（抑制 toast）。
-      throw Object.assign(new Error(errMsg), { code: 'compact_busy' })
-    }
+    // [chat-flow-consistency D1] 派生三布尔已删，忙闲读口 = occupancy 派生（isGeneratingTurn /
+    // compacting / bash 维），语义与原读点逐字等价。
+    this.rejectCompactIfBusy(sessionId, active)
 
     // [RT-4#10] 预检与置位原子化：预检通过后立即写 'compacting-start'（原语义 = 只在 pi
     // compaction_start 事件回流后由 interpreter 置位，事件往返窗内第二个 compact 的预检

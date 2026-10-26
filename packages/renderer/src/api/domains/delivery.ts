@@ -1,10 +1,11 @@
 /**
- * delivery 域门面（投递所有权内核 u3c 建，u5a 收编）——cancel/drain/resync 三 RPC 的
- * renderer 侧唯一入口，形态对齐 `@/api` 门面：构建期按 VITE_MOCK 切换 real / mock。
+ * delivery 域门面（投递所有权内核 u3c 建，u5a 收编；D6 扩 peek/edit 后五 RPC）——
+ * delivery 域 RPC 的 renderer 侧唯一入口，形态对齐 `@/api` 门面：构建期按 VITE_MOCK
+ * 切换 real / mock。
  *
  * 为什么独立于 `@/api` 门面三元：门面聚合的 `chat` 是 `isMock ? mockApi.chat : realChat`
  * 的联合类型，直取 union 成员在读侧可行但会把整域 chat 面暴露给调用方；本模块把
- * delivery 三方法收窄为 `DeliverySurface`，签名从 core real 域类型派生（`Pick` 派生 alias），
+ * delivery 方法收窄为 `DeliverySurface`，签名从 core real 域类型派生（`Pick` 派生 alias），
  * 漂移在编译期红。
  *
  * [u5a 收编] 前身 mock 层分支（u3c 自建的三方法空响应对象）已删除：core mock
@@ -19,16 +20,22 @@ import * as realChat from '@taiji/core/transport/api/domains/chat'
 import * as mockChat from '@taiji/core/transport/mock'
 
 /**
- * 三方法的签名契约：直接从 core real 域类型派生（`Pick`）——签名漂移在编译期红，不复制字面量。
+ * 方法签名契约：直接从 core real 域类型派生（`Pick`）——签名漂移在编译期红，不复制字面量。
  */
 export type DeliveryCancel = typeof realChat.cancelDelivery
 export type DeliveryDrain = typeof realChat.drainDelivery
 export type DeliveryResync = typeof realChat.resyncDelivery
+export type DeliveryPeek = typeof realChat.peekDelivery
+export type DeliveryEdit = typeof realChat.editDelivery
 
 export interface DeliverySurface {
   cancelDelivery: DeliveryCancel
   drainDelivery: DeliveryDrain
   resyncDelivery: DeliveryResync
+  /** 条目全文取回（chat-flow-consistency D6）：✎ 编辑预填只读通道 */
+  peekDelivery: DeliveryPeek
+  /** 原位编辑（chat-flow-consistency D6）：发送侧替换条目内容且排队位置保持不变 */
+  editDelivery: DeliveryEdit
 }
 
 const isMock = import.meta.env.VITE_MOCK === 'true'

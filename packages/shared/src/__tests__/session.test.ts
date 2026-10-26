@@ -10,8 +10,6 @@ describe('SessionSummary', () => {
       cwd: '/tmp/test',
       status: 'idle',
       lastActiveAt: Date.now(),
-      modelId: 'model-x',
-      tokenCount: 0,
     }
     expect(summary.launchPresetId).toBeUndefined()
     expect(summary.id).toBe('sess-1')
@@ -25,8 +23,6 @@ describe('SessionSummary', () => {
       cwd: '/tmp/test',
       status: 'active',
       lastActiveAt: Date.now(),
-      modelId: 'model-x',
-      tokenCount: 100,
       launchPresetId: 'builtin:full',
     }
     expect(summary.launchPresetId).toBe('builtin:full')
@@ -40,8 +36,6 @@ const _withoutPreset: SessionSummary = {
   cwd: '/',
   status: 'idle',
   lastActiveAt: 0,
-  modelId: 'm',
-  tokenCount: 0,
 }
 const _withPreset: SessionSummary = {
   ..._withoutPreset,

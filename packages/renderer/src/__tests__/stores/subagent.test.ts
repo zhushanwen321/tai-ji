@@ -579,7 +579,8 @@ describe('subagent store — hasRunning / isStreamingSubagent 窄口径（轮终
     ])
     expect(store.hasRunning('session-1')).toBe(false)
     expect(store.isStreamingSubagent('session-1', 'bg-2')).toBe(false)
-    // 宽口径（running 字面）不计 stopReason——SubagentTab 订阅语义保留（死亡纳管态仍可被接管链活动）
+    // 宽口径（running 字面）不计 stopReason——SubagentTab 订阅语义保留（带停因 running 仍可
+    // 被接管链活动；原「死亡纳管态」措辞随 adoptEngineDeath 写点退役，登记见 record-store.ts:179）
     expect(store.isRunning('session-1', 'bg-2')).toBe(true)
   })
 

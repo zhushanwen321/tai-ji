@@ -28,7 +28,9 @@ import type {
 // ── agent-settled outcome → 段收束态映射 ─────────────────────────────────────
 // agent-settled.outcome 协议值域 = done/failed/cancelled（time_limited 为 run 级、
 // shared/workflow.ts 注释明示）；time_limited 分支是值域外防御兜底，落失败色系——
-// 不猜新语义，注释声明兜底性质。
+// 不猜新语义，注释声明兜底性质。[subagent-observability §3.3.8] partially_succeeded
+// 是 run 级聚合形态（call 级实际值域三值，core run-vocabulary 注释明示）——到达即
+// 数据异常，fail-visible 抛出不静默渲染成败任一档。
 function outcomeToSegmentState(outcome: WorkflowRunOutcome): WorkflowGanttSegmentState {
   switch (outcome) {
     case 'done':
@@ -38,10 +40,8 @@ function outcomeToSegmentState(outcome: WorkflowRunOutcome): WorkflowGanttSegmen
       return 'failed'
     case 'cancelled':
       return 'cancelled'
-    default: {
-      const exhaustive: never = outcome
-      throw new Error(`unreachable outcome: ${String(exhaustive)}`)
-    }
+    case 'partially_succeeded':
+      throw new Error(`unreachable outcome: ${outcome} (run-level aggregate never appears on agent-settled frames)`)
   }
 }
 
@@ -383,10 +383,11 @@ export function deriveWorkflowGanttSegments(events: readonly WorkflowRunEventEnt
 // ── §3.3-D9：节点/行状态派生（trace 表与 DAG 共用同一函数——S2 构造性一致）────
 
 /**
- * call 级渲染态词表（D9：派生视图四值 + retrying 派生态；skipped 是节点级派生态、
- * 不在 call 行出现）。
+ * call 级渲染态词表（D9：派生视图四值 + retrying 派生态 + cancelled 中性档；skipped
+ * 是节点级派生态、不在 call 行出现）。cancelled = run 终局收尾的在途成员（「未交付
+ * 且非失败」，§3.3.8）——展示形态中性灰系，不落失败红。
  */
-export type WorkflowCallDerivedStatus = 'pending' | 'running' | 'done' | 'failed' | 'retrying'
+export type WorkflowCallDerivedStatus = 'pending' | 'running' | 'done' | 'failed' | 'retrying' | 'cancelled'
 
 export interface WorkflowCallDerivedView { // oe-exempt:20261002:framework:workflow-viz 分段视图模型/派生契约类型——类型契约先行、单实现常态
   status: WorkflowCallDerivedStatus
@@ -429,6 +430,7 @@ export function deriveCallView(
     case 'pending':
     case 'done':
     case 'failed':
+    case 'cancelled':
       status = call.status
       break
     default: {
@@ -442,13 +444,14 @@ export function deriveCallView(
   }
 }
 
-/** DAG 节点级渲染态词表（D9 六态；retrying/skipped 为渲染层派生、不进协议）。 */
+/** DAG 节点级渲染态词表（D9 七态；retrying/skipped/cancelled 为渲染层派生、不进协议）。 */
 export type WorkflowNodeDerivedStatus =
   | 'pending'
   | 'running'
   | 'done'
   | 'failed'
   | 'retrying'
+  | 'cancelled'
   | 'skipped'
 
 export interface WorkflowNodeDerivedInput { // oe-exempt:20261002:framework:workflow-viz 分段视图模型/派生契约类型——类型契约先行、单实现常态
@@ -463,9 +466,10 @@ export interface WorkflowNodeDerivedInput { // oe-exempt:20261002:framework:work
  * - skipped = 仅在 run 终局后判定（status === 'done'）的零实例挂接节点——含条件
  *   phase 整段未执行；run 运行中/中断（暂停态）零实例节点一律 pending，防循环重入
  *   场景「phase 第一轮收束、第二轮未到」时下轮才执行的调用点被误判 skipped 而震荡。
- * - 有实例：按实例渲染态聚合，优先级 retrying > running > failed > done > pending
- *   （failed > done：含失败实例的节点显示失败——「含 failed 即 failed」先例；
- *   retrying/running 优先表达进行中故障与活动）。
+ * - 有实例：按实例渲染态聚合，优先级 retrying > running > failed > cancelled > done >
+ *   pending（failed > done：含失败实例的节点显示失败——「含 failed 即 failed」先例；
+ *   cancelled 先于 done：含取消实例的节点按中性取消档呈现（「未交付且非失败」，
+ *   §3.3.8），不冒充全成功也不回落 pending；retrying/running 优先表达进行中故障与活动）。
  */
 export function deriveNodeStatus(input: WorkflowNodeDerivedInput): WorkflowNodeDerivedStatus {
   if (input.calls.length === 0) {
@@ -475,6 +479,7 @@ export function deriveNodeStatus(input: WorkflowNodeDerivedInput): WorkflowNodeD
   if (views.some((v) => v.status === 'retrying')) return 'retrying'
   if (views.some((v) => v.status === 'running')) return 'running'
   if (views.some((v) => v.status === 'failed')) return 'failed'
+  if (views.some((v) => v.status === 'cancelled')) return 'cancelled'
   if (views.every((v) => v.status === 'done')) return 'done'
   return 'pending'
 }

@@ -59,7 +59,10 @@ const { t } = useI18n()
 
 // 占用判据：running 且无 stopReason——镜像桌面 lib/subagent-bucket isRunningProjection SSOT
 // 口径（移动壳不依赖 renderer 包；U20 状态派生谓词下沉 core 后双壳同源）。
-// stopReason 子句排除 W4 死亡纳管态（running + stopReason='failed' 非后台真在跑）。
+// [subagent-observability §3.3.3⑦ u8 同批核对] 轮收条事实化后信号语义 = 「轮收条已写
+// （stopReason 在场）= 本轮不在途」的等价信号——判据表达式不变（前提显式登记：实施
+// 不得把本信号换轨到移动壳读不到的新字段表达，桌面侧替换已遵守）；原「W4 死亡纳管态
+// 排除」措辞随 adoptEngineDeath 写点退役删除，不再单列。
 const runningSubagents = computed(() => {
   const records = recordsBySession.value.get(props.sessionId) ?? []
   return records.filter((r) => r.status === 'running' && r.stopReason === undefined)

@@ -398,7 +398,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --shadow-2: 0 8px 24px rgba(0,0,0,0.4);
 --shadow-3: 0 12px 32px rgba(0,0,0,0.45);   /* 顶级浮层 */
 --shadow-glow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent);
---shadow-drawer-left: -24px 0 48px rgba(0,0,0,0.4);  /* 定向左投影：抽屉自右滑入的左侧落影（浓度与 shadow-2 同档；Tailwind 映射 shadow-drawer-left）*/
+--shadow-drawer-left: -24px 0 48px rgba(0,0,0,0.4);  /* 定向左阴影：抽屉自右滑入的左侧落影（浓度与 shadow-2 同档；Tailwind 映射 shadow-drawer-left）*/
 
 /* 弹层遮罩（modal/overlay 背后全场最暗层；黑基六主题共用一值，demo .cmask 同值）*/
 --scrim: rgba(0,0,0,0.8);   /* Tailwind 映射 bg-scrim；消费点 = DialogContent overlay / SearchModal / workflow-viz OverlayShell */
@@ -539,7 +539,7 @@ pin:        不设（2026-10-04 用户裁决全链移除）
 - 静态容器只用一个表面色，**不叠加 border**
 - border 仅保留：浮起可交互容器（popover/dialog/composer）+ focus 态
 - drawer 内 header 分隔：去 `border-b`，改 `bg-surface-2` 浮起分层
-- drawer 与 main 间：D2 一体化（同 surface）+ SplitterResizeHandle 透明化（仅 hover/drag 显 accent）。〔2026-09-09〕弱投影 `--shadow-drawer` 已移除——drawer-area `overflow-hidden` 裁剪后代 box-shadow，从未实际可见
+- drawer 与 main 间：D2 一体化（同 surface）+ SplitterResizeHandle 透明化（仅 hover/drag 显 accent）。〔2026-09-09〕弱阴影 `--shadow-drawer` 已移除——drawer-area `overflow-hidden` 裁剪后代 box-shadow，从未实际可见
 - 行分隔 hairline：`--hairline`（0.05）
 
 ### 5.6 状态指示统一（§3.3 + §3.5.2）
@@ -647,7 +647,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 **IME 检查**：Composer 的 `isComposing` 期间不拦截回车（中文/日文输入法 composing 态不发送）。
 
-**composer-bar popover 锚点范式**：absolute 相对 composer-bar，`bottom: calc(100% + 6px)`，`z-modal`，`bg-bg + border + shadow-2 + radius-lg`（2026-10-13 用户裁决 demo 方案 A：composer 同源底/边、仅靠投影浮起——旧 `bg-elevated + border-strong` 规格退役，elevated 容器下 surface-hover 行高亮反而更暗成反向对比度；CommandPopover 首发落地后 PopoverContent/HoverCardContent/SelectContent 原语默认类同批切换，全族浮层一致）。popover open 时触发按钮 `.bar-btn--active` = `accent-soft 底 + accent 字`（锁高亮）。
+**composer-bar popover 锚点范式**：absolute 相对 composer-bar，`bottom: calc(100% + 6px)`，`z-modal`，`bg-bg + border + shadow-2 + radius-lg`（2026-10-13 用户裁决 demo 方案 A：composer 同源底/边、仅靠阴影浮起——旧 `bg-elevated + border-strong` 规格退役，elevated 容器下 surface-hover 行高亮反而更暗成反向对比度；CommandPopover 首发落地后 PopoverContent/HoverCardContent/SelectContent 原语默认类同批切换，全族浮层一致）。popover open 时触发按钮 `.bar-btn--active` = `accent-soft 底 + accent 字`（锁高亮）。
 
 ### 5.13 标签族语义四分 + 空状态三要素〔2026-09-13 自 design-system.md 并入〕
 
@@ -899,7 +899,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | # | 裁决 | 决定 |
 |---|---|---|
 | D1 | 设置形态 | 全屏覆盖（FullSettingsOverlay） |
-| D2 | Drawer 模型 | 一体化生长 + 保留弱投影(0.16) |
+| D2 | Drawer 模型 | 一体化生长 + 保留弱阴影(0.16) |
 | D3 | tasks tab | 移除（goal/todo 回归对话流，删 HIDDEN_TOOL_NAMES） |
 | D4 | plugin 范围 | 补登记架构授权（v6-design 决策 #15） |
 | D8 | 选中态冲突 | 按组件类型二分（tab 型 bg-elevated / 列表项型 bg-surface+蓝字） |
@@ -918,7 +918,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | R10 | 列宽 | 整 turn 居中、气泡列内右浮 |
 | R11 | block icon | 14px |
 | R13 | SegmentedTab 圆角 | 12px（radius-lg） |
-| R14 | drawer 投影 | 弱投影 0.15-0.18 |
+| R14 | drawer 阴影 | 弱阴影 0.15-0.18 |
 | R22 | 圆角档位提升 | tr-git/fg-pill 等升 6px；tt-close 保留 3px 例外 |
 
 ### 9.3 文档裁决

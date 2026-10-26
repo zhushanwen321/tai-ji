@@ -11,16 +11,40 @@
 //                   旧「创建时必填」不变量随模型可选化显式反转：poll 路径丢 model
 //                   的原始缺陷已由「identity 字段创建时一次确定」的收拢本身消解，
 //                   undefined 是合法缺席语义而非丢失）
-//   updateFromEvent 唯一事件更新入口（累积进 turns[]，消灭闭包旁路累积器）
-//   completeLegacyClosed 唯一 legacy 终态冻结入口（D7 例外族 / 监督器放弃，W4 sunset）
+//   updateFromEvent 唯一事件更新入口（薄委托 SDK reducer 单源，见下）
+//   completeLegacyClosed 唯一 legacy 终态冻结入口（workflow D7 例外族——settleWorkflowRecord
+//   收尾 / doFinalizeRecord 编排性收尾；旧监督器放弃支已随 924ace33f 清退，W4 sunset）
 //   project/snapshot 唯一派生视图入口（两路径字段一致）
 //
-// Core 层叶子原语：仅依赖 types.ts。零 Pi / Runtime / TUI 依赖。
+// reducer 单源（subagent-observability §3.3.5 双 reducer 合一）：updateFromEvent 的唯一
+// 实现在 SDK `journal-replay.ts`（与 journal 事件流 fold 共用同一实现——「重放 ≡ live」
+// 由构造性成立 + reducer-parity 等价断言锁定），本模块薄委托。经 `./journal-replay`
+// 子导出 deep import（不经 SDK barrel——barrel 会把 spawn/env/child_process 整图拖进
+// core 持久化模块，与持久化测试的 vi.mock("node:child_process") 冲突）。
+// addUsage / emptyTurn 同源收编：磁盘重建路径（session-reconstructor）经本模块
+// re-export 消费，路径零改动。
+//
+// Core 层叶子原语：领域类型依赖 types.ts；事件归约委托 SDK journal-replay（纯类型
+// 依赖模块，零 child_process 图）。零 Pi / Runtime / TUI 依赖。
+
+import { addUsage as sdkAddUsage, emptyTurn as sdkEmptyTurn, updateFromEvent as foldAgentEvent } from "@zhushanwen/subagent-engine-sdk/journal-replay";
 
 import { permanentSessionStatusMachine } from "../domain/record-status-machine.ts";
 import type { ClosedReason, ExecutionMode, ExecutionOutcome, ExecutionStatus, ProjectedOutcome, RecordOrigin, StopReason } from "../domain/record-types.ts";
 import type { AgentResult, ExecutionRecord, SubagentModelSource } from "../domain/record-model.ts";
-import type { AgentEvent, AgentEventLogEntry, AgentUsage, AgentUsageTotal, DisplayItem, InternalToolCall, RecordSnapshot, SubagentToolDetails, ToolCall, Turn } from "../assembly/types.ts";
+import type { AgentEvent, AgentEventLogEntry, AgentUsageTotal, DisplayItem, InternalToolCall, RecordSnapshot, SubagentToolDetails, ToolCall, Turn } from "../assembly/types.ts";
+
+/** 空 turn 构造单源（SDK reducer 同源收编；导出保 session-reconstructor 消费路径）。 */
+export const emptyTurn = sdkEmptyTurn;
+/**
+ * usage 累加单源（SDK reducer 同源收编；导出保 session-reconstructor 消费路径）。
+ * const 拷贝形态（同 emptyTurn）——`export { addUsage }` 纯 re-export 形态在 vitest
+ * SSR 变换下绑定解析为 undefined（实测：直接 import 命名空间成员是 function，经本
+ * 模块 re-export 后是 undefined，session-reconstructor.test 33 用例「addUsage is not
+ * a function」假红；u2 reducer 合一的遗留形态，u3 当场修复——函数引用等价拷贝，
+ * 语义零变化）。
+ */
+export const addUsage = sdkAddUsage;
 
 // ============================================================
 // 常量
@@ -91,47 +115,9 @@ function truncateLabel(label: string): string {
   return label.length > TOOL_LABEL_MAX ? label.slice(0, TOOL_LABEL_MAX) : label;
 }
 
-/** usage 单字段求和（undefined 视为 0——与旧 `(a ?? 0) + (b ?? 0)` 内联式逐字等价）。 */
-function sumUsageField(a: number | undefined, b: number | undefined): number {
-  return (a ?? 0) + (b ?? 0);
-}
-
-/** prev 为空时 next 的规范化拷贝（cost 保留原值，可能 undefined——与旧首条分支逐字等价）。 */
-function usageFromNext(next: AgentUsage): AgentUsage {
-  return {
-    input: next.input ?? 0,
-    output: next.output ?? 0,
-    cacheRead: next.cacheRead ?? 0,
-    cacheWrite: next.cacheWrite ?? 0,
-    cost: next.cost,
-  };
-}
-
-/**
- * 累加两个 AgentUsage（field-wise）。prev 为空时返回 next 的拷贝。
- * 供 message_end 把 usage 增量并入 turn.usageDelta。
- * 导出单源：活态 record 与磁盘重建（session-reconstructor）共用，副本已删。
- */
-export function addUsage(prev: AgentUsage | undefined, next: AgentUsage): AgentUsage {
-  if (prev === undefined) return usageFromNext(next);
-  return {
-    input: sumUsageField(prev.input, next.input),
-    output: sumUsageField(prev.output, next.output),
-    cacheRead: sumUsageField(prev.cacheRead, next.cacheRead),
-    cacheWrite: sumUsageField(prev.cacheWrite, next.cacheWrite),
-    cost: sumUsageField(prev.cost, next.cost),
-  };
-}
-
 // ============================================================
 // 创建（唯一入口）
 // ============================================================
-
-/** 创建一个空 turn（text/thinking 空，无 toolCalls，未结束）。
- *  导出单源：活态创建与磁盘重建（session-reconstructor）共用，副本已删。 */
-export function emptyTurn(): Turn {
-  return { text: "", thinking: "", toolCalls: [], usageDelta: undefined, closed: false };
-}
 
 /**
  * 唯一创建入口。identity 字段（agent/model/thinkingLevel/mode/task）一次确定不可变。
@@ -205,6 +191,9 @@ export function createRecord(
     turnCount: 0,
     totalTokens: 0,
     lastError: undefined,
+    // 轮失败事实只追加数组（§3.3.5；lastError 由 appendErrorFact 派生刷新，
+    // 不再被 turn_end 清空）。reducer 侧对缺省 undefined 另有 ??= 兜底。
+    errors: [],
     // 对话轮次计数（首轮 = 0，每完成一轮 finalizeRoundToIdle +1）。modeless 波1 起
     // 全 record 自增（万物可续）。
     round: 0,
@@ -221,269 +210,27 @@ export function createRecord(
 }
 
 // ============================================================
-// 事件更新（core 活体路径唯一更新点；SDK journal-replay.ts 持逐字等价副本，
-// 两侧等价由 __tests__/reducer-parity.test.ts 差分对拍锁定——不要只改一侧）
+// 事件更新（薄委托 SDK reducer 单源——journal-replay.ts 是 updateFromEvent 唯一实现，
+// live 累积与 journal 事件流 fold 共用；「record 事件流 fold ≡ 内存单源」等价断言 =
+// __tests__/reducer-parity.test.ts）
 // ============================================================
 
 /**
- * 取当前正在进行（未 closed）的 turn；若全部 closed 则开新 turn。
- * 保证调用后返回的 turn 一定 closed===false，可安全累积内容。
- */
-function currentTurn(record: ExecutionRecord): Turn {
-  const last = record.turns[record.turns.length - 1];
-  if (last !== undefined && !last.closed) return last;
-  const fresh = emptyTurn();
-  record.turns.push(fresh);
-  return fresh;
-}
-
-/**
- * 在 record.turns[] 范围内倒序找最后一个同名且仍 running 的 toolCall。
+ * 从 AgentEvent 更新 record。唯一事件更新入口——实现体在 SDK journal-replay.ts
+ * （§3.3.5 双 reducer 合一：core ExecutionRecord 结构满足 ReplayRecordView，
+ * 直接作为 fold 容器传入；新语义 = turn_end 不再清 lastError、error 经
+ * appendErrorFact 入账 errors 只追加数组）。
  *
- * 扫描所有 turn（非仅当前 turn）——SDK 在 turn_end 后仍可能补发滞后的 tool_end，
- * 仅扫当前 turn 会漏配对、误 push 幽灵 ToolCall。跨 turn 扫描兜底滞后事件。
- *
- * 返回 [turn, index]；未找到返回 undefined。
- */
-function findRunningToolCall(
-  record: ExecutionRecord,
-  toolName: string,
-): readonly [Turn, number] | undefined {
-  for (let t = record.turns.length - 1; t >= 0; t--) {
-    const turn = record.turns[t];
-    if (turn === undefined) continue;
-    for (let i = turn.toolCalls.length - 1; i >= 0; i--) {
-      const tc = turn.toolCalls[i];
-      if (tc?._status === "running" && tc.toolName === toolName) {
-        return [turn, i] as const;
-      }
-    }
-  }
-  return undefined;
-}
-
-/**
- * [perf] running toolCall 倒序索引：tool_start push 位置入索引，tool_end 弹尾定位
- *（尾部 = 最后 push 的同名项，与 findRunningToolCall 倒序全扫的语义等价），把每次
- * tool_end 的 O(所有 turns × toolCalls) 扫描降为 O(1)。WeakMap 按 record 实例隔离
- *（createRecord 新实例从空索引开始，不影响旧实例）。
- * 索引 miss（重建 record 的历史 running toolCall / 外部注入工具无 tool_start）
- * 回退 findRunningToolCall 全扫兜底——正确性不依赖索引完整性。
- */
-const runningToolIndex = new WeakMap<ExecutionRecord, Map<string, Array<{ turn: Turn; idx: number }>>>();
-
-function indexToolStart(record: ExecutionRecord, turn: Turn, toolName: string): void {
-  let byName = runningToolIndex.get(record);
-  if (byName === undefined) {
-    byName = new Map();
-    runningToolIndex.set(record, byName);
-  }
-  const arr = byName.get(toolName);
-  if (arr === undefined) {
-    byName.set(toolName, [{ turn, idx: turn.toolCalls.length - 1 }]);
-  } else {
-    arr.push({ turn, idx: turn.toolCalls.length - 1 });
-  }
-}
-
-// ── 各事件处理器（updateFromEvent 按 case 分发，每个处理器单一职责）──
-
-/** text_delta：流式累积进当前 turn 的 text（完整内容，非切片）。 */
-function applyTextDelta(
-  record: ExecutionRecord,
-  event: Extract<AgentEvent, { type: "text_delta" }>,
-): void {
-  currentTurn(record).text += event.delta;
-}
-
-/** thinking_delta：流式累积进当前 turn 的 thinking（完整内容）。 */
-function applyThinkingDelta(
-  record: ExecutionRecord,
-  event: Extract<AgentEvent, { type: "thinking_delta" }>,
-): void {
-  currentTurn(record).thinking += event.delta;
-}
-
-/** tool_start：push 一个 running 的 InternalToolCall（带 startedTs）+ 弹尾索引入册。 */
-function applyToolStart(
-  record: ExecutionRecord,
-  event: Extract<AgentEvent, { type: "tool_start" }>,
-): void {
-  const tc: InternalToolCall = {
-    toolName: event.toolName,
-    args: event.args,
-    result: undefined,
-    isError: false,
-    _status: "running",
-    startedTs: Date.now(),
-  };
-  const turn = currentTurn(record);
-  turn.toolCalls.push(tc);
-  indexToolStart(record, turn, event.toolName);
-}
-
-/**
- * tool_end 定位：索引弹尾 O(1) 命中 running 同名 toolCall；索引 miss（无记录 / 槽位
- * 已非 running）回退 findRunningToolCall 跨 turn 倒序全扫兜底。
- * 返回 [turn, index]；两路都 miss 返回 undefined。
- */
-function matchRunningToolCall(
-  record: ExecutionRecord,
-  toolName: string,
-): readonly [Turn, number] | undefined {
-  const byName = runningToolIndex.get(record);
-  const arr = byName?.get(toolName);
-  if (arr !== undefined && arr.length > 0) {
-    const item = arr[arr.length - 1];
-    arr.pop();
-    const tc = item.turn.toolCalls[item.idx];
-    if (tc !== undefined && tc._status === "running") {
-      return [item.turn, item.idx] as const;
-    }
-  }
-  // 兜底：重建 record 的历史 running toolCall（索引未覆盖）、索引项被外部路径
-  // 置非 running 等场景——保持与旧实现一致的跨 turn 倒序全扫。
-  return findRunningToolCall(record, toolName);
-}
-
-/**
- * tool_end：命中则回填 result/isError/_status；未命中（SDK 发了 tool_end 但无对应
- * tool_start，如外部注入的工具）直接 push 一个已完成的 InternalToolCall，避免数据丢失。
- */
-function applyToolEnd(
-  record: ExecutionRecord,
-  event: Extract<AgentEvent, { type: "tool_end" }>,
-): void {
-  const matched = matchRunningToolCall(record, event.toolName);
-  if (matched !== undefined) {
-    const [turn, i] = matched;
-    const tc = turn.toolCalls[i]!;
-    tc.args = event.args ?? tc.args;
-    tc.result = event.result;
-    tc.isError = event.isError ?? false;
-    tc._status = event.isError ? "failed" : "done";
-    return;
-  }
-  currentTurn(record).toolCalls.push({
-    toolName: event.toolName,
-    args: event.args,
-    result: event.result,
-    isError: event.isError ?? false,
-    _status: event.isError ? "failed" : "done",
-    startedTs: Date.now(),
-  });
-}
-
-/**
- * turn_end：结束当前 turn，记 closedTs（真实墙钟），turnCount++，清 lastError。
- * 正常结束清 lastError：瞬态 error 恢复后不应误判 success=false
- * （若 turn_end 后 message_end 报 error，会在 message_end 处理器重新写回）。
- */
-function applyTurnEnd(record: ExecutionRecord): void {
-  const turn = currentTurn(record);
-  turn.closed = true;
-  turn.closedTs = Date.now();
-  record.turnCount += 1;
-  record.lastError = undefined;
-}
-
-/**
- * message_end：usage 增量存进末 turn.usageDelta（直接写末 turn，不开新 turn）；
- * totalTokens 累加；error（stopReason=error）记进 lastError。
- *
- * usageDelta 按 message_end **累加**（非覆盖）——同一 turn 内若多次 message_end
- * 到达（或 turn_end 后的滞后 message_end 落到 currentTurn 开的新 turn），
- * 累加保证不丢 usage。getTotalUsage 扁平求和所有 turn，归属 turn 的精确性
- * 不影响最终 total（无消费方读单 turn usage）。
- */
-function applyMessageEnd(
-  record: ExecutionRecord,
-  event: Extract<AgentEvent, { type: "message_end" }>,
-): void {
-  if (event.usage) {
-    const turn = currentTurn(record);
-    turn.usageDelta = addUsage(turn.usageDelta, event.usage);
-    // totalTokens 累加四项之和（保留旧语义，派生视图直接读）
-    record.totalTokens +=
-      (event.usage.input ?? 0) + (event.usage.output ?? 0) +
-      (event.usage.cacheRead ?? 0) + (event.usage.cacheWrite ?? 0);
-  }
-  if (event.error) {
-    record.lastError = event.error;
-  }
-}
-
-/** error：存 record.lastError（getEventLog 派生 error 条目用）。 */
-function applyErrorEvent(
-  record: ExecutionRecord,
-  event: Extract<AgentEvent, { type: "error" }>,
-): void {
-  record.lastError = event.message;
-}
-
-/**
- * 从 AgentEvent 更新 record。所有数据收拢进 record.turns[]。
- *   - text/thinking：流式累积进 currentTurn()（完整内容，非切片）
- *   - tool_start/end：push 进 currentTurn().toolCalls（含完整 result）
- *     tool_end 跨 turn 扫描找 running 同名 toolCall（兜底滞后事件）
- *   - turn_end：结束当前 turn，记 closedTs（真实墙钟，供 getEventLog）；
- *     正常结束清 lastError（瞬态 error 恢复后不应误判 success=false）
- *   - message_end：usage 增量存进末 turn.usageDelta（直接写末 turn，不开新 turn）；
- *     totalTokens 累加
- *   - error：存 record.lastError（getEventLog 派生 error 条目用）
- *
- * 唯一写点——session-runner 闭包不再旁路累积，collectResult 从 record 读。
- *
- * 穷尽性：switch 覆盖 AgentEvent 全部 variant；default 的 `never` 断言保证
- * 新增 variant 时编译期报错（而非静默 no-op）。
+ * 穷尽性：switch 覆盖 AgentEvent 全部 variant 的检查随实现体在 SDK 侧
+ * （default 的 `never` 断言——新增 variant 时 SDK 编译期报错，本模块委托链随之覆盖）。
  */
 export function updateFromEvent(record: ExecutionRecord, event: AgentEvent): void {
-  switch (event.type) {
-    // ── text / thinking：流式累积进当前 turn ──
-    case "text_delta":
-      return applyTextDelta(record, event);
-    case "thinking_delta":
-      return applyThinkingDelta(record, event);
-
-    // ── tool_start/end：push 进 currentTurn().toolCalls（含完整 result）──
-    case "tool_start":
-      return applyToolStart(record, event);
-    case "tool_end":
-      return applyToolEnd(record, event);
-
-    // ── turn_end：结束当前 turn ──
-    case "turn_end":
-      return applyTurnEnd(record);
-
-    // ── message_end：usage 增量累加 + totalTokens 累加 ──
-    case "message_end":
-      return applyMessageEnd(record, event);
-
-    // ── error：存 record.lastError ──
-    case "error":
-      return applyErrorEvent(record, event);
-
-    // ── compaction：不产生数据（不变）──
-    case "compaction":
-      return;
-
-    // ── activity：纯活性信号，reducer no-op（协议语义见 SDK contract-types）──
-    case "activity":
-      return;
-
-    // ── armed：武装确认回执（[D3 协议版 P6]，协议语义见 SDK contract-types）——
-    //    监控信号不进 record 派生视图，消费方 = 宿主等待门 + run 事件 journal（C3 第④步
-    //    双侧 reducer no-op 义务的 core 侧）
-    case "armed":
-      return;
-
-    default: {
-      // 穷尽性检查：新增 AgentEvent variant 时编译期报错
-      const _exhaustive: never = event;
-      return _exhaustive;
-    }
-  }
+  foldAgentEvent(record, event);
 }
+
+// [§3.3.5 合一] 旧私有 handler 副本（currentTurn / findRunningToolCall /
+// runningToolIndex 索引 / applyTextDelta ~ applyErrorEvent）已随 reducer 单源化
+// 删除——实现体唯一存在于 SDK journal-replay.ts，本模块不再持有同形副本。
 
 // ============================================================
 // 派生视图（从 turns[] 推导，不存储）
@@ -713,10 +460,11 @@ export function getTotalUsage(record: ExecutionRecord): AgentUsageTotal | undefi
  * 目标恒为 legacy closed 形态（idle + closedReason/stopReason 双写，桥接不变量
  * 「closed ⟺ idle ∧ closedReason≠undefined」的写侧半边）。
  *
- * 写侧生产者仅剩两处（types.ts ExecutionStatus 头注登记）：workflow D7 例外族
- * （settleWorkflowRecord 收尾单点）与监督器放弃产出（service-binding giveUp）；
- * 读侧对偶 = isLegacyClosedSettled 单一谓词。轮收尾（非终态）走 store.markSettled
- * （不写 closedReason），与本原语语义分界清晰。
+ * 写侧生产者唯一：workflow D7 例外族的 settleWorkflowRecord 收尾单点（本文件
+ * settleWorkflowRecord 内 CAS 抢锁）；旧第二生产者「监督器放弃产出（giveUp）」已随
+ * 轮次活性监督器整机清退删除（commit 924ace33f，service-binding → sweep-binding
+ * 改名同批）。读侧对偶 = isLegacyClosedSettled 单一谓词。轮收尾（非终态）走
+ * store.markSettled（不写 closedReason），与本原语语义分界清晰。
  *
  * @param closedReason 旧终态 L2 原因（同时镜像进 stopReason 展示位）。
  *   缺省 "gc"（通用完成/失败）。
@@ -802,7 +550,8 @@ export function markReconstructedStatus(
 }
 
 /**
- * 意图原语：legacy closed 终态冻结（D7 例外族 / 监督器放弃的终态写点）。
+ * 意图原语：legacy closed 终态冻结（workflow D7 例外族的终态写点；旧监督器放弃
+ * 支已随 924ace33f 清退）。
  * 冻结状态（写 endedAt/agentResult/result/error/outcome）。
  * 不修改 turns/totalTokens——已由 updateFromEvent 累积，本函数只读不重置。
  *
@@ -908,7 +657,7 @@ export function deriveOutcome(
  *
  * 桥接不变量（两态迁移，U2 起）：旧 closed 终态读形态 ⟺ idle ∧ closedReason 有值。
  * markSettled/markRoundIdle 产出的轮间 idle 不携带 closedReason（新侧语义——settle
- * 不是终态），不命中本谓词；旧终态遗留（D7 例外族终态、监督器放弃、v1 数据、manifest
+ * 不是终态），不命中本谓词；旧终态遗留（D7 例外族终态、v1 数据、manifest
  * 读侧）命中。
  *
  * [W2 D5 兼容位] closedReason 是读侧兼容位（设计 D5：随 W4 sunset 退役），本谓词是

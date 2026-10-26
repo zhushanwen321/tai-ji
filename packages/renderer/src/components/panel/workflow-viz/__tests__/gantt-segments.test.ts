@@ -453,6 +453,11 @@ describe('gantt-segments：D9 call 级派生（deriveCallView）', () => {
     expect(deriveCallView({ status: 'pending' }, 'done').stoppedInFlight).toBe(false)
     expect(deriveCallView({ status: 'done' }, 'done').stoppedInFlight).toBe(false)
   })
+
+  it('cancelled 直投（§3.3.8 run 终局收尾在途成员——「未交付且非失败」中性档，不冒充 failed/pending）', () => {
+    expect(deriveCallView({ status: 'cancelled' }, 'done').status).toBe('cancelled')
+    expect(deriveCallView({ status: 'cancelled' }, 'done').stoppedInFlight).toBe(false) // 终局已收束，非在途
+  })
 })
 
 describe('gantt-segments：D9 节点级派生（deriveNodeStatus）', () => {
@@ -462,11 +467,16 @@ describe('gantt-segments：D9 节点级派生（deriveNodeStatus）', () => {
     expect(deriveNodeStatus({ runStatus: 'interrupted', calls: [] })).toBe('pending')
   })
 
-  it('有实例聚合优先级：retrying > running > failed > done > pending', () => {
-    const mk = (status: 'pending' | 'running' | 'done' | 'failed', attempts?: number) => ({ status, attempts })
+  it('有实例聚合优先级：retrying > running > failed > cancelled > done > pending', () => {
+    const mk = (status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled', attempts?: number) => ({ status, attempts })
     expect(deriveNodeStatus({ runStatus: 'running', calls: [mk('done'), mk('running', 2)] })).toBe('retrying')
     expect(deriveNodeStatus({ runStatus: 'running', calls: [mk('done'), mk('running')] })).toBe('running')
     expect(deriveNodeStatus({ runStatus: 'done', calls: [mk('done'), mk('failed')] })).toBe('failed')
+    // cancelled（§3.3.8）：先于 done（含取消实例按中性取消档，不冒充全成功）；
+    // failed 仍优先于 cancelled（含失败实例显示失败）。
+    expect(deriveNodeStatus({ runStatus: 'done', calls: [mk('done'), mk('cancelled')] })).toBe('cancelled')
+    expect(deriveNodeStatus({ runStatus: 'done', calls: [mk('cancelled'), mk('cancelled')] })).toBe('cancelled')
+    expect(deriveNodeStatus({ runStatus: 'done', calls: [mk('failed'), mk('cancelled')] })).toBe('failed')
     expect(deriveNodeStatus({ runStatus: 'done', calls: [mk('done'), mk('done')] })).toBe('done')
     expect(deriveNodeStatus({ runStatus: 'running', calls: [mk('pending'), mk('pending')] })).toBe('pending')
   })

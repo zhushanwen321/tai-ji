@@ -114,6 +114,10 @@ vi.mock('../infra/logger.js', () => ({
   // signal-forensics（process-manager 退出链 import）的落点门：测试态恒 false——
   // 无落点不采样，exit 主链的 Map 清理/回调通知不受取证影响
   isPiCrashLogEnabled: () => false,
+  // 族③根因修复（W3.5）：withEphemeralPi finally 的 ephemeral 树回收——mock 面随
+  // process-manager import 面同步（本测试不走该路径，no-op 即可）
+  EPHEMERAL_SESSION_ID_PREFIX: 'ephemeral-',
+  removeEphemeralSessionTree: () => {},
 }))
 
 // ── Helpers ──────────────────────────────────────────────────────

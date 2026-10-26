@@ -1,7 +1,7 @@
 <!--
   WorkflowVizDagNode —— DAG 画布的单节点卡片内容（SVG 子组件）。
 
-  只承担节点形态渲染：状态点 + 调用点名（截断）+ kind 标签 + 执行实例行；六态着色经
+  只承担节点形态渲染：状态点 + 调用点名（截断）+ kind 标签 + 执行实例行；七态着色经
   dag/tone.ts 模块映射（nodeTone）整组切换 Tailwind 工具类（互斥防同名工具类的
   class 顺序胜负——pending 灰 / running accent 脉冲 / done 绿 / failed 红 / retrying
   warn 脉冲 / skipped 中性虚线淡化；映射单处在 tone.ts——workflow-overlay-refine D4：
@@ -171,7 +171,7 @@ function truncate(text: string, max: number): string {
 const kindLabel = computed(() => (props.node.kind === 'agent' ? 'agent' : 'script'))
 
 /**
- * 六态着色（D9 渲染层派生态）+ 停止叠加（run 停止时不蓝脉冲、着色随 stop-tone）。
+ * 七态着色（D9 渲染层派生态）+ 停止叠加（run 停止时不蓝脉冲、着色随 stop-tone）。
  * 映射单处在 dag/tone.ts（D4：节点与图例共同消费；互斥整组切换语义见模块注释）。
  * 实例行小点复用 dotTone 同源取色（与状态图例/节点 dot 同一颜色事实源）。
  */

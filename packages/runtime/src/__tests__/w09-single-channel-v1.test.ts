@@ -110,9 +110,10 @@ describe('W09 单通道确定性验收（02 §4 V1）', () => {
     send({ type: 'message.status', payload: { sessionId: 's-v1', status: 'thinking' } })
 
     // 单次序列化：send 回调 → bus.publish（seq + ring + 定向推送）是唯一出口，
-    // broker.broadcast 路径已删（D1-2），全程 stringify 计数 = 1
+    // broker.broadcast 路径已删（D1-2），全程 stringify 计数 = 1。
+    // 注：registerSession 汇聚点原 session.surfaces 全局广播（W4a 判别器通道）已随 W4b
+    // 收编按协议收缩删除——本断言的对象是 send 层转发路径，全局注册事实帧不在单通道管辖范围。
     expect(stringifySpy).toHaveBeenCalledTimes(1)
-    expect(broker.broadcast).not.toHaveBeenCalled()
     expect(broadcasts).toHaveLength(0)
     // 订阅者收到 1 条带 seq 的消息
     expect(online.sent).toHaveLength(1)

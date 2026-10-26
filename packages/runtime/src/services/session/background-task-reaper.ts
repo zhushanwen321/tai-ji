@@ -281,7 +281,7 @@ function reapSessionDirSync(sessionDir: string, deps: ResolvedReapDeps, result: 
 /** 触发面 A 核心：处置指定 session 的 registry（该目录不存在 = 从未有过后台任务，常态）。 */
 function reapOneSessionSync(agentDir: string, sessionId: string, deps: ResolvedReapDeps): BackgroundTaskReapResult {
   const result = emptyResult()
-  // 非法 id（btw 虚拟 id / 路径注入形态）= 从未有合法存储树，静默 no-op（shared 推导
+  // 非法 id（带冒号虚拟 id / 路径注入形态）= 从未有合法存储树，静默 no-op（shared 推导
   // 函数对非法 id 会 throw，先在此过滤防错误升级为收殓失败告警）
   if (!isPiSessionId(sessionId)) return result
   const sessionDir = dirname(getSessionRegistryPath(agentDir, sessionId))

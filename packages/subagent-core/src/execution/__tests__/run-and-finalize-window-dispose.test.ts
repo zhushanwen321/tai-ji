@@ -70,6 +70,9 @@ function makeOrchestration(result: AgentResult) {
     getSessionRootId: vi.fn(() => null),
     // origin=tool 的 settleOneShotOutcome 簿记（record.status=running 时走 markRoundIdle）
     getStore: vi.fn(() => ({ markRoundIdle: vi.fn(), markSettled: vi.fn() })),
+    // [subagent-observability §3.3.7② one-shot 通道放行（u4 并行接线）] 轮应答通知经
+    // getNotifyHost().notifyComplete——本文件断言面是窗口收尾配对，替身 no-op 即可。
+    getNotifyHost: vi.fn(() => ({ notifyComplete: vi.fn() })),
     // pooled（modeless 后恒 background）的池槽路径：acquire 恒成功 / release no-op
     getPool: vi.fn(() => ({ acquire: vi.fn(async () => {}), release: vi.fn(), maxConcurrent: 2 })),
   };

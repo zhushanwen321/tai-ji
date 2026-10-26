@@ -28,9 +28,8 @@
  * 先行 → tombstone → dropPartition → trash」的跨文件顺序 + B5 禁止挂回本汇聚链）在该
  * 文件头**;本文件保留公开 wrapper（调用点与测试锁定侧不变）。
  */
-import { existsSync } from 'node:fs'
-import { isBtwVirtualId } from '@taiji/shared'
-import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView, SessionRevokeMessageReply, SendPromptReason, WorkflowRunEventsReply, WorkflowDagReply } from '@taiji/shared'
+import { existsSync, unlinkSync } from 'node:fs'
+import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView, SessionRevokeMessageReply, SendPromptReason, WorkflowRunEventsReply, WorkflowDagReply, SessionSurface } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 // subagent 流状态只读快照形状（B2 subagent-stream-chunk §4.1）：type-only import——
 // services 层不 value import 有状态 IO infra（control server 句柄归组合根 index.ts，
@@ -85,7 +84,7 @@ import type { DeliverySubmitResult, SessionDeliveryRegistry } from './session-de
 import type { WorkspaceService } from '../workspace/workspace-service.js'
 import { SessionLifecycle } from './session-lifecycle.js'
 import { RevokeOrchestrator } from './revoke-orchestrator.js'
-// B3 ensure 链分支（btw-question M2-b 授权）：ensureActive 对 btw vid 转自建附着编排。
+// B3 ensure 链分支（btw-question M2-b 授权）：ensureActive 对 btw 线转自建附着编排。
 // type-only（本文件对 btw-service 零 value 依赖，无环——btw-service 不反向 import 本文件）。
 import type { BtwService } from './btw-service.js'
 // [T8 有限拆分 2026-09] removeSessionEntry 销毁收敛链编排（顺序约束 SSOT，含文件头收敛
@@ -101,6 +100,7 @@ import { MessageDispatcher } from './message-dispatcher.js'
 import { LateBoundSkillSource, SkillInjector, type SkillMappingSource } from './skill-injector.js'
 import { applySessionOccupancyTransition, userStoppedGate } from './event-interpreter.js'
 import { SessionScanner } from './session-scanner.js'
+import { SessionListQueryService } from './session-list-query.js'
 import { AttachmentStore } from './attachment-store.js'
 import { SessionStateProjection, type SessionReplicatedStates } from './session-state-projection.js'
 import { PresetService, type PresetResolution } from '../preset-service.js'
@@ -108,6 +108,7 @@ import { PresetService, type PresetResolution } from '../preset-service.js'
 // 未注入时所有 bus 调用 no-op（this.messageBus?.publish）。type-only import 避免运行时环
 //（MessageBus 不反向依赖 SessionService）。
 import type { IMessageBus } from '../message-bus/message-bus.js'
+import { isGeneratingTurn } from './types.js'
 import type { ForceQuitSource, UserStoppedMarkStore } from './types.js'
 
 /**
@@ -176,6 +177,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   private dispatcher!: MessageDispatcher
   private scanner!: SessionScanner
   /**
+   * session.list 通用查询（W4b，设计 §3.3.1）：侧栏分组 + btw 线条目合成的单一入口。
+   * 组装在 scanner 之后（依赖 scanner 实例），deps 全部经晚绑定闭包动态读——btwService
+   * 由组合根 setBtwService 后置注入，查询时刻才求值（与 getLine 的 late-bound 闭包同模式）。
+   */
+  private sessionListQuery!: SessionListQueryService
+  /**
    * 消息撤回编排域（message-revoke 设计 §3.3 D2，U4）：revokeMessage 七步编排——
    * revoking hold 置位/释放 + cancel active + 定位 + 清缓存 + 信令前校验 + nav 信令 +
    * reply。构造点在 dispatcher 之后（sendSystemCommand 依赖其实例），见 assembleSubmodules。
@@ -221,18 +228,19 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    */
   private presetService: PresetService | null = null
   /**
-   * BtwService 引用（组合根注入，btw-question B3 裁决 + M2-b）：ensureActive 对 btw vid
+   * BtwService 引用（组合根注入，btw-question B3 裁决 + M2-b）：ensureActive 对 btw 线
    * 转自建附着编排（restore 路径 findScannedSession 只扫 sessions/，btw 线目录不在其扫描范围
    * ——V5 核实结论；D1⑥ 回收后续问的附着入口）。经 setter 注入（同 setConfigService
-   * 模式，避免破坏现有测试构造点）；未注入时 btw vid fall through 既有 restore 链
-   *（存量测试零变更，对 btw vid 的失败形态与注入前一致）。
+   * 模式，避免破坏现有测试构造点）；未注入时 btw 线 fall through 既有 restore 链
+   *（存量测试零变更，对 btw 线的失败形态与注入前一致）。
    */
   /**
    * btw 能力注入（组合根 setBtwService 晚于构造）。ensureProcess 必选（ensureActive 主链
-   * 必经）；getLine 可选（btw vid 离线尾读的线文件解析增强——缺失时 historyReader 的
-   * resolve 返回 undefined，尾读按异常态 warn 空页，主链不受影响）。
+   * 必经）；getLine 可选（btw 线离线尾读的线文件解析增强——缺失时 historyReader 的
+   * resolve 返回 undefined，尾读按异常态 warn 空页，主链不受影响）；listAllLines 可选
+   * （session.list 的线条目合成源——缺失时查询只返侧栏口径，线查询返回空组）。
    */
-  private btwService: (Pick<BtwService, 'ensureProcess'> & Partial<Pick<BtwService, 'getLine'>>) | null = null
+  private btwService: (Pick<BtwService, 'ensureProcess'> & Partial<Pick<BtwService, 'getLine' | 'listAllLines'>>) | null = null
   /**
    * subagent 流状态数据源（B2 subagent-stream-chunk §4.1，组合根晚绑定注入）：实现与
    * 语义见文件头 SubagentStreamStateSource。未注入（存量测试构造 / control 未启用）时
@@ -467,14 +475,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     })
     // history 读编排域（S6 迁出至 history-rebuild-cache.ts）：deps 窄注入——pm（活跃判定
     // + RPC client）与 sessionStore（重建/尾读/全量文件读转换链），无私有状态耦合。
-    // [btw-question 重载链修复] resolveBtwThreadFile：btw vid 离线尾读的线文件解析，查
+    // [btw-question 重载链修复] resolveBtwThreadFile：btw 线离线尾读的线文件解析，查
     // BtwService 注册表（rebuildFromDisk 启动重建的内存派生视图）。late-bound 闭包——btwService
     // 在组合根晚于本构造（setBtwService 注入），未注入（存量测试构造）时 resolve 返回
     // undefined → btw 尾读 warn 空页，主会话路径零影响。
     this.historyReader = new SessionHistoryReader({
       pm: this.pm,
       sessionStore: this.sessionStore,
-      resolveBtwThreadFile: (vid) => this.btwService?.getLine?.(vid)?.sessionFilePath,
+      resolveBtwThreadFile: (sessionId) => this.btwService?.getLine?.(sessionId)?.sessionFilePath,
     })
     // 状态派生视图域（S5 迁出至 session-state-projection.ts）：deps 窄注入——session 查询经
     // lifecycle（Map 所有者）只读侧，messageBus 经 getter 每次调用动态读（setter 晚期注入
@@ -560,6 +568,17 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     // registry 构造点（runtime/src/index.ts）传 sessionService.skillMappingSource 共源。
     this.dispatcher = new MessageDispatcher(this, this.pm, this.workspaceService, messageBus)
     this.scanner = new SessionScanner(this, this.sessionStore, this.gitInfoReader)
+    // session.list 通用查询（W4b）：deps 经晚绑定闭包动态读（btwService/lifecycle 均可后置注入）
+    this.sessionListQuery = new SessionListQueryService({
+      listSidebarGroups: () => this.scanner.listPersistedSessions(),
+      listBtwLines: () => this.btwService?.listAllLines?.() ?? [],
+      // [chat-flow-consistency D1 合并修正] 派生布尔 isGenerating 已删，忙闲读口 = occupancy
+      // 派生（isGeneratingTurn 单点定义）；registry 未命中保持 undefined（与原 ?. 链同形）。
+      isLineGenerating: (sessionId) => {
+        const s = this.lifecycle.get(sessionId)
+        return s ? isGeneratingTurn(s.occupancy?.turn) : undefined
+      },
+    })
 
     // 消息撤回编排域（message-revoke D2，U4）：deps 窄注入——occupancy 经 lifecycle 只读侧、
     // workflow 检查经 records 磁盘扫描（W17 workflow-record entry，run 启动冷路径立即落盘）、
@@ -687,9 +706,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       //（renderer 全量订阅覆盖 list 内全部 session，见 useSessionStreamSync）。
       // occupancy #10（session-dead-structural-fixes D2 挂点迁移，u3b；失败路径进程异常退出路径）：
       // 占用中 pi 死亡时 agent_settled / compaction_end 永不会发出（二者只从 pi run/compact
-      // finally 触发），'full-reset' 行兜底——turn/compacting/bash 三维全复位 + 三布尔派生同步
-      // 复位（结构上不再有「只复位一边」），否则重连 renderer 经 stateSnapshot 回放恢复的是
-      // 永久的占用派生视图。须在 removeSessionEntry（内部 bus.clearSession）之前。
+      // finally 触发），'full-reset' 行兜底——四维全复位（turn 机器 idle 行 + compacting/bash/
+      // handingOff 布尔维全 false patch，结构上不再有「只复位一边」），否则重连 renderer 经
+      // stateSnapshot 回放恢复的是永久的占用派生视图。须在 removeSessionEntry（内部
+      // bus.clearSession）之前。
       // 注意：此处 session 是 delete 前缓存的引用，removeSessionEntry 后 Map 条目已删除
       // 统一经 removeSessionEntry（触发 onSessionDelete 清 pendingReload 等残留）
       try {
@@ -762,8 +782,8 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
 
   /**
    * 注入 BtwService（组合根在 BtwService 构造后、server.start 前调用，M2-b/B2 授权接线）。
-   * ensureActive 的 btw 分支依赖——窄接口只取 ensureProcess（alive → markActivity 直返；
-   * 回收/死亡 → spawn→switch→附着断言 reattach）。
+   * ensureActive 的 btw 分支依赖——窄接口只取 ensureProcess（alive → ensureProcess 直返；
+   * 进程死亡 → spawn→switch→附着断言 reattach）。
    */
   setBtwService(btwService: Pick<BtwService, 'ensureProcess'> & Partial<Pick<BtwService, 'getLine'>>): void {
     this.btwService = btwService
@@ -1000,6 +1020,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async compact(sessionId: string, customInstructions?: string): Promise<void> { return this.dispatcher.compact(sessionId, customInstructions) }
   setSendMessageHook(hook: SendMessageHook): void { this.dispatcher.setSendMessageHook(hook) }
   listPersistedSessions(): SessionGroup[] { return this.scanner.listPersistedSessions() }
+  /**
+   * session.list 通用查询（W4b，设计 §3.3.1/§5-W4b）：按 surface / mainSessionId 派生分组
+   * 列表——btw 线进通用列表的 runtime 侧入口（取代 renderer 侧 btw.list 拉取）。与
+   * listPersistedSessions（config.sessions 广播/查询同源）的分工：后者恒为侧栏全量口径
+   * （广播语义不可带过滤参数），本方法承载过滤维度。条目合成规则见 session-list-query.ts。
+   */
+  listSessions(query: { surface?: SessionSurface; mainSessionId?: string }): SessionGroup[] {
+    return this.sessionListQuery.list(query)
+  }
 
   // ── ISessionService:Facade 直接实现(查 sessions / 经 rpc,轻量)─────
 
@@ -1108,13 +1137,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 迁入 pi-respawn 编排器（ensureRestored，join 状态单一所有者）。
    */
   async ensureActive(sessionId: string): Promise<IPiEngine> {
-    // [btw-question B3 裁决] btw 线的 ensure 链走自建附着编排：alive → markActivity 直返；
-    // 闲置回收/进程死亡 → spawn→switch→附着断言 reattach（D1⑥ 回收后续问）。restore 路径
-    //（findScannedSession 只扫 sessions/）对 btw vid 构造性失败（V5 核实结论），故分支
+    // [btw-question B3 裁决] btw 线的 ensure 链走自建附着编排：alive → ensureProcess 直返；
+    // 进程死亡 → spawn→switch→附着断言 reattach（D1⑥ 回收后续问）。restore 路径
+    //（findScannedSession 只扫 sessions/）对 btw 线构造性失败（V5 核实结论），故分支
     // 先于既有 getClient/restore 链。附着失败 BtwError 原样上抛——message.send 路径由
     // dispatcher.ensureActiveOrBroadcast 收尾为 message.error（错误文案含恢复指引），
     // 不静默。未注入 btwService（存量测试构造）→ fall through 零变更。
-    if (this.btwService !== null && isBtwVirtualId(sessionId)) {
+    // W4a 判别器 = registry 成员查询（getLine，键 = 线 session id = piSessionId）——
+    // 旧 isBtwVirtualId 前缀判别对 piId 形态恒 false，随键切换同批替换（§3.3.6 迁移表）。
+    if (this.btwService !== null && this.btwService.getLine?.(sessionId) !== undefined) {
       return await this.btwService.ensureProcess(sessionId)
     }
     const existing = this.pm.getClient(sessionId)
@@ -1304,14 +1335,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.projection.handleTurnUsageSideEffects(sessionId)
   }
 
-  /** agent_end 副作用（isGenerating 复位 + sidecar 兜底 + session_end 终态；语义注释随实现迁 session-state-projection.ts）。 */
-  handleTurnEndSideEffects(sessionId: string, stopReason?: string): void {
-    this.projection.handleTurnEndSideEffects(sessionId, stopReason)
+  /** agent_end 副作用（settling 转移 + sidecar 兜底 + session_end 终态，willRetry 中间失败跳终态；语义注释随实现迁 session-state-projection.ts）。 */
+  handleTurnEndSideEffects(sessionId: string, stopReason?: string, willRetry?: boolean): void {
+    this.projection.handleTurnEndSideEffects(sessionId, stopReason, willRetry)
   }
 
   /**
-   * agent_settled 副作用（run 级联结束 → isGenerating 复位；session-dead 2026-09-10 补丁，
-   * 语义注释随实现迁 session-state-projection.ts）。组合根 index.ts onAgentSettled 经本委托消费。
+   * agent_settled 副作用（run 级联结束 → occupancy 'idle' 转移，isGeneratingTurn 派生自然翻
+   * false；session-dead 2026-09-10 补丁，语义注释随实现迁 session-state-projection.ts）。
+   * 组合根 index.ts onAgentSettled 经本委托消费。
    */
   handleAgentSettledSideEffects(sessionId: string): void {
     this.projection.handleAgentSettledSideEffects(sessionId)
@@ -1321,11 +1353,51 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 写 session_end 终态 entry（W4，ADR 0042）。
    * 3 个终态点复用：正常完成（handleTurnEndSideEffects）/ abort（message-dispatcher）/ 进程崩溃（onSessionExit）。
    * sessionFilePath 不存在时静默跳过（首 turn 前崩溃 / pi 延迟写入窗口）。
+   *
+   * [chat-flow-consistency 第一终态优先下沉（design-turn-statemachine 缺陷 2 方案 2）]
+   * 写入前检查已有终态（done/error/stopped 任一在侧）则跳过——三个终态写点统一继承该纪律，
+   * 进程退出链（onSessionExit）保留既有内联检查（条目已删不能走内部 get，语义同构双实现）。
+   * 该检查的射程是**同一回合**的终态写入竞态（abort 与 pi 自发 agent_end 并发，stopped/done
+   * 写入顺序不定）：先写者赢——done 先写则 abort 跳过（回合自然完成）；stopped 先写则 done
+   * 跳过（对齐进程退出链既有裁决「abort reason 更具诊断价值」）。跨回合的新终态不归本检查
+   * 管：新回合受理入口（message-dispatcher.runAcceptance）先经 clearSessionOutcome 清旧
+   * sidecar（对齐 restore/fork 的「新周期清终态」惯例，V3 核实点同源），新周期终态可正常
+   * 写入——否则用户 abort 后继续对话，新回合正常完成的 done 被上一回合的 stopped 永久拦截，
+   * 重启后侧栏状态失真（scanner 按 outcome ?? 'idle' 派生最近状态）。
    */
   persistSessionOutcome(sessionId: string, outcome: SessionOutcome, reason?: string): void {
     const session = this.lifecycle.get(sessionId)
     if (!session?.sessionFilePath) return
+    const existing = this.sessionStore.extractSessionOutcome(session.sessionFilePath)
+    if (existing === 'done' || existing === 'error' || existing === 'stopped') return
     this.sessionStore.persistSessionEnd(session.sessionFilePath, outcome, reason)
+  }
+
+  /**
+   * 清除 session 终态 sidecar（persistSessionOutcome 的对称操作）：新回合受理成功后调用，
+   * 使跨回合新终态不被上一回合的第一终态优先检查拦截。受理点两处：message-dispatcher
+   * .runAcceptance（GUI 通路）与 session-manager-handler handleSend（agent send_to_session
+   * 通路，session-manager-send-sidecar-stale 登记的对齐修复）。
+   *
+   * [dmg-r1-1 跨回合终态放行] 第一终态优先的射程限定为同回合写入竞态（见
+   * persistSessionOutcome 注释）；用户在终态后继续对话 = 开启新周期，旧终态的历史使命
+   * 随新回合受理结束——删除 `.meta.json` sidecar（对齐 session-lifecycle attachRestoreFile /
+   * fork 链在 switchSession 成功后 `unlinkSync(filePath + '.meta.json')` 的「新周期清终态」
+   * 惯例）。同回合并发竞态保护不受影响：abort（RPC）与 pi 自发 agent_end（事件）两条写点
+   * 均不经新回合受理，检查原样生效。
+   *
+   * 缓存纪律与 persistSessionEnd 写点对称：sessionMetaCache 键只含 JSONL 的 (mtimeMs, size)，
+   * 删 sidecar 不改 JSONL stat，不失效则 scanner 命中缓存继续返回旧 outcome——先删缓存条目
+   * 再失效目录级 TTL（与 persistSessionEnd 写后失效同一对原语）。
+   * sessionFilePath 缺失（pi 延迟写入窗口 / 条目无文件）静默跳过；sidecar 不存在是常态
+   *（无终态的进行中会话），unlink 失败静默吞（对齐 lifecycle 两处同型 unlink）。
+   */
+  clearSessionOutcome(sessionId: string): void {
+    const session = this.lifecycle.get(sessionId)
+    if (!session?.sessionFilePath) return
+    try { unlinkSync(session.sessionFilePath + '.meta.json') } catch { void 0 }
+    this.sessionStore.invalidateMetaCache(session.sessionFilePath)
+    this.sessionStore.invalidateScanCache()
   }
 
   /**
@@ -1411,8 +1483,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
 
   toSummary(s: IManagedSessionView): SessionSummary {
     // 实现迁 session-summary.ts（buildSessionSummary，行为保持抽取）：纯派生视图不依赖
-    // Facade 其余状态，gitInfoReader / replicated states 读点参数化后模块级化。
-    return buildSessionSummary(s, this.gitInfoReader, (id) => this.projection.getReplicatedStates(id))
+    // Facade 其余状态，gitInfoReader 读点参数化后模块级化。W3 起三状态字段（modelId /
+    // thinkingLevel / tokenCount）已从 SessionSummary 删除，replicated states 读点
+    // （原 tokenCount 派生）随形参一并退役。
+    return buildSessionSummary(s, this.gitInfoReader)
   }
 
   getSession(sessionId: string): IManagedSessionView | undefined { return this.lifecycle.get(sessionId) }
@@ -1495,14 +1569,18 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 生产注册路径 = lifecycle create/restore/fork 内部直调 this.registerSession；
    * 本方法保留给测试/历史调用点，行为与迁移前等价：session 构造 + sessions Map 写入 +
    * onSessionRegistered 同步直发（订阅者 = 本 Facade 构造器接线的各域注册）。
+   *
+   * W3 surface 落地：尾部追加 surface 形参（btw 直注册链第三处签名——BtwService dep
+   * 类型 → 组合根 adapter → 本方法三处同批扩参，两条注册路径显式传 'btw'）。
    */
   async initializeManagedSession(
-    id: string, client: IPiEngine, cwd: string, label: string, sessionFilePath?: string, hidden?: boolean,
+    id: string, client: IPiEngine, cwd: string, label: string, sessionFilePath?: string,
     parentSession?: string, forkEntryId?: string, modelOverride?: string,
     metaOverride?: { modelId?: string; thinkingLevel?: string },
     spawnExtensionPaths?: readonly string[],
+    surface?: SessionSurface,
   ): Promise<IManagedSessionView> {
-    return this.lifecycle.registerSession(id, client, cwd, label, sessionFilePath, hidden, parentSession, forkEntryId, modelOverride, metaOverride, spawnExtensionPaths)
+    return this.lifecycle.registerSession(id, client, cwd, label, sessionFilePath, parentSession, forkEntryId, modelOverride, metaOverride, spawnExtensionPaths, surface)
   }
 
   // ── 私有协作者 ────────────────────────────────────────────────
