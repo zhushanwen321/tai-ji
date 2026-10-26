@@ -5,14 +5,15 @@
 // 数据源：app-runtime 的 sessionList（runtime 组序派生，A13 客户端不重排——组内过滤不重排）
 // + 本段落位的分组谓词 groupSessions（§6.19 双源：已订阅走 core 9 态完整派生；未订阅按
 // SessionSummary.status 二分，dead 优先「最近」组）+ 未读集合（§6.3 客户端 diff）。
-// hasBlockingOverlay 输入经 app-runtime 注册口喂入（§6.19 waiting 态会话行点亮；分区数据
-// 的 companion-bridge 侧接线归呈现出口改造单元——注册口未接线时恒 false，v1 形态无回归）。
+// hasBlockingOverlay 输入经 sessions-runtime 注册口（registerOverlayPendingReader）喂入，
+// 分区数据接线已由 companion-bridge 落位（form/planReview 分区 + dialog 计数）——waiting 态可达。
 //
 // 交互：点击行 → markSessionVisited（点入即清）→ core selectSession 12 步切入链 →
 // navigateRoute('chat')（路由状态机单点转移，dead 会话同样可入——F14 已退出历史只读 +
 // 动作 Sheet 重新打开链路）；长按 480ms 打开 SessionActionsSheet（移动 >8px 取消）；
-// 新建入口上抛 new-task（NewTaskSheet 挂载归 App，u-sheets 交付后迁 openSheet 通道）。
-import { computed, onUnmounted, ref } from 'vue'
+// 新建入口上抛 new-task 由 App 转 openSheet('newTask')（现 wiring 即终态：Sheet 槽位
+// 统一归 App 的 sheet-manager 单例编排）。
+import { computed, onBeforeUnmount, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessageSquare, Plus, Search } from '@lucide/vue'
 import { Button, EmptyState, Input } from '@taiji/ui'
@@ -21,7 +22,10 @@ import {
   groupSessions,
   isSessionUnread,
   overlayPendingOf,
+  saveSessionsListScroll,
   sessionExcerptOf,
+  sessionsListScrollRestore,
+  sessionsQuery,
 } from '../shell/sessions-runtime'
 import {
   chatStore,
@@ -63,7 +67,9 @@ const grouped = computed(() => groupSessions(sessionList.value, groupingDeps))
 
 // ── 搜索（§7.1 会话列表「搜索」）──────────────────────────────────────────────
 
-const query = ref('')
+// §6.7「列表滚动位置与搜索词恢复」：屏随路由 v-if 卸载，搜索词直绑 sessions-runtime
+// 模块级 ref（跨挂载存活；往返 chat → 列表不清空）
+const query = sessionsQuery
 
 function matchesQuery(model: MobileSessionRowModel): boolean {
   const q = query.value.trim().toLowerCase()
@@ -145,10 +151,21 @@ function clearPressTimer(): void {
   }
 }
 
+// §6.7 列表滚动位置恢复：列表体容器（挂载回填模块级记录、卸载前记录 scrollTop）
+const listEl = ref<HTMLElement | null>(null)
+
+onMounted(() => {
+  if (listEl.value) listEl.value.scrollTop = sessionsListScrollRestore()
+})
+
 // 屏卸载（路由切走）时长按计时器与 actionSheet 槽位不残留（Sheet 生命周期联动 §7.1 的
-// 消费方事件点职责——manager 不反向 watch）
-onUnmounted(() => {
+// 消费方事件点职责——manager 不反向 watch）；滚动位置先于卸载记录（onUnmounted 时
+// DOM 已摘除读不到 scrollTop，onBeforeUnmount 仍在）
+onBeforeUnmount(() => {
+  if (listEl.value) saveSessionsListScroll(listEl.value.scrollTop)
   clearPressTimer()
+})
+onUnmounted(() => {
   if (activeSheet.value === 'sessionActions') closeSheet()
 })
 
@@ -183,8 +200,8 @@ function onClearSearch(): void {
       <Input v-model="query" :placeholder="t('mobile.sessions.searchPlaceholder')" data-testid="sessions-search" />
     </div>
 
-    <!-- 列表体 -->
-    <div class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+    <!-- 列表体（滚动容器：卸载前记录/挂载回填 scrollTop，§6.7 滚动位置恢复） -->
+    <div ref="listEl" class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
       <p
         v-if="loadError"
         data-testid="sessions-error"

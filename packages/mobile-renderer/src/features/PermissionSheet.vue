@@ -10,8 +10,9 @@
 //   触发链不携带会话上下文）→ protocol `sessionId` 恒 undefined → 权限请求恒为进程级
 //   全局请求——本组件恒全局呈现，不渲染任何会话归属锚点（无会话名/会话行），归属信息
 //   呈现位在 V-6 重审（插件激活链重构）通过、组装点填值后由消费方扩展；
-// - 过期自动关 + 原因（§6.4/§7.1）：plugin:permissionRequestExpired 由 companion-bridge
-//   呈现联动 closeSheet + 错误条提示；RPC 失败假成功红线（BM3）由 controller 承接
+// - 过期自动关 + 原因（§6.4/§7.1）：plugin:permissionRequestExpired 的收层由 App
+//   pending watch 权威处理（A7 收层与提示解耦）、companion-bridge 仅错误条提示；
+//   RPC 失败假成功红线（BM3）由 controller 承接
 //   （pending 保持 + error 显形），本组件 error prop 直出错误行。
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'

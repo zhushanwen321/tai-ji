@@ -149,13 +149,15 @@
     <!-- hover actions：复制常驻 hover；编辑仅 AI 停止（非活跃态）时显示；撤回单入口（D6，路由判定在 core）。
          流内固定槽位（2026-10 用户裁决）：常驻于气泡行下方（mt-1 + h-6），不占气泡内部、
          不悬浮遮挡轮头；显隐走 opacity 零布局跳动（槽位恒在，悬停/键盘焦点才可命中——
-         pointer-events 默认 none 消除「隐形按钮拦截点击」形态）。DOM 序在气泡行之后 =
+         pointer-events 默认 none 消除「隐形按钮拦截点击」形态）。mobile 密度档例外：触屏
+         无 hover，actions 常显（opacity-100 + pointer-events-auto，§6.2 撤回按钮常显），
+         desktop 类串逐字不变（见 actionsClass）。DOM 序在气泡行之后 =
          「下方固定位置」的结构保证（测试锁 .group/user > [data-testid=user-bubble-actions]
          晚于 .group/ts 出现）。 -->
     <div
       v-if="!isEditingThisUser"
       data-testid="user-bubble-actions"
-      class="mt-1 flex h-6 items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/user:opacity-100 group-hover/user:pointer-events-auto group-focus-within/user:opacity-100 group-focus-within/user:pointer-events-auto"
+      :class="actionsClass"
     >
       <Button
         variant="ghost"
@@ -250,6 +252,17 @@ const bubbleClass = computed(() =>
   density === 'mobile'
     ? 'user-bubble-md max-w-[82%] min-w-0 [overflow-wrap:anywhere] rounded-lg rounded-br-sm border border-hairline bg-[var(--bubble-bg)] px-[15px] py-[10px] text-[length:var(--text-md)] leading-[1.7] text-neutral-fg'
     : 'user-bubble-md max-w-[min(72%,64ch)] min-w-0 [overflow-wrap:anywhere] rounded-lg border border-hairline bg-[var(--bubble-bg)] px-[15px] py-[10px] text-[length:var(--text-md)] leading-[1.7] text-neutral-fg',
+)
+
+/**
+ * actions 容器类串（§6.2 撤回按钮常显）：desktop 分支 = 原静态类串逐字一致（悬停/键盘
+ * 焦点显隐，缺省桌面路径字节不变）；mobile 分支 = 触屏无 hover，opacity-100 +
+ * pointer-events-auto 常驻可命中。
+ */
+const actionsClass = computed(() =>
+  density === 'mobile'
+    ? 'mt-1 flex h-6 items-center gap-0.5 opacity-100 pointer-events-auto transition-opacity duration-[var(--duration-fast)]'
+    : 'mt-1 flex h-6 items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/user:opacity-100 group-hover/user:pointer-events-auto group-focus-within/user:opacity-100 group-focus-within/user:pointer-events-auto',
 )
 
 /** 点击 skill badge → 打开 drawer Doc tab */

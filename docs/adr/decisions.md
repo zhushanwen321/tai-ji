@@ -1076,7 +1076,7 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **效果**：双壳共享同一套 chat 渲染单源；桌面零回归由 additive-only 约束 + 像素基线门禁结构性保证；逃生通道（个别组件无法 additive 时降级移动壳局部 CSS 覆盖并登记）未触发。
 
-### ADR-0166 spec F16 表单超时条款收窄：失效事件消费，不设墙钟（2026-10-25 设计落地，remote-use-mobile-v2 §6.4）
+### ADR-0166 spec F16 表单超时条款收窄：失效事件消费，不设墙钟（2026-10-25 设计落地，remote-use-mobile-v2 §6.4 + §6.23 断连不清表单请求、时间平抑类逻辑退役）
 
 **决策**：移动端表单/权限请求的「超时」表现全部消费既有失效信号，不新增任何墙钟——extension 域（ask-user/planReview）无超时（runtime 2026-07-16 既有裁决 + 超时默认原则：任务级正常路径禁止自带墙钟超时，「等用户回答」不是时间问题），消费 `extension:requestsInvalidated`（撤销即失效）；plugin 域消费既有真超时事件 `plugin:uiRequestExpired` / `plugin:permissionRequestExpired`（30min，env 可调）。断连不清表单分区（v1 定时清空形态退役）：分区保留作对账基线，重连后 getPendingRequests reconcile 收敛；runtime 重启分支恢复前禁提交（封「旧 runtime 静默忽略已终结 requestId」的假成功窗口），恢复恒经对账完成事件、无定时器。「表单取消回传 null」用既有 `extension.ui_response result:null`。
 

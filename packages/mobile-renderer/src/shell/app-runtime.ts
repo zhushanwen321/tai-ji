@@ -639,9 +639,10 @@ export function markConnectedNow(): void {
  * 保留；刷新/重开该会话后不在（历史来自 runtime 重拉，本地插入行不进 pi JSONL）。
  * 文案经 i18n（mobile.notices.*），渲染 = ui SystemNotice 既有 system 行形态（壳零新渲染路径）。
  *
- * 触发点分布（五类已接线，均在本端动作回执成功点调用）：中断生成 Composer / 重试本轮
- * ChatScreen 出错条 / 提交回答与允许/拒绝 App.vue（FormSheet 作答回执、审批 pending 翻
- * false 的本端动作回执两处）/ 停止子代理 SubagentSheet。会话重新打开不经本出口——走 core
+ * 触发点分布（六类通知、五处触发点已接线，均在本端动作回执成功点调用）：中断生成
+ * Composer（turnAborted）/ 重试本轮 ChatScreen 出错条（turnRetried）/ 提交回答与允许/
+ * 拒绝 App.vue（answerSubmitted + permissionApproved/permissionDenied，审批 pending 翻
+ * false 的本端动作回执）/ 停止子代理 SubagentSheet（subagentStopped）。会话重新打开不经本出口——走 core
  * appendRespawnNotice 既有路径（lifecycle-effects.ts appendNotice → deps.chat.
  * appendRespawnNotice，respawn 收尾消费），与本出口平行的同族插入路径。
  */

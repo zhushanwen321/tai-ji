@@ -1,13 +1,17 @@
 <script setup lang="ts">
 // TokenInputView —— 移动壳 token 输入视图（remote-use D4 皆无分支 / D8 验身失败的恢复入口）。
 //
-// 哑组件：App.vue 多视图挂载消费，提交经 submit 事件上抛；重试编排（adoptManualToken →
-// 抑制位 reset → 重走连接编排）在 bootstrap 的 submitRemoteToken，组件零 core import。
-// submitting/error 由 App 传入（bootstrap tokenSubmit 态派生视图）：提交中禁用防重复触发，
-// 验身失败给可见错误（红线⑤——用户必须能区分「提交中/失败/token 错误」，禁静默回弹）。
+// 哑组件：ConnectScreen 挂载消费（token-input 态分流），提交经 submit 事件上抛；重试编排
+// （adoptManualToken → 抑制位 reset → 重走连接编排）在 connection-view 的 submitRemoteToken
+// （连接装配独立模块），组件零 core import。
+// submitting/error 由 ConnectScreen 传入（connection-view tokenSubmit 态派生视图）：提交中
+// 禁用防重复触发，验身失败给可见错误（红线⑤——用户必须能区分「提交中/失败/token 错误」，
+// 禁静默回弹）。
 //
 // 文案走 vue-i18n（mobile.tokenInput 命名空间，双侧 locales 对齐由 mobile-locale.test 检查）；
 // 视觉：太极纯灰 token，无 emoji；表单原语经 @taiji/ui Input/Button（原生元素由 ui 单点承载）。
+// 字号口径：text-xs/text-sm 为 Tailwind 固定字号、不随 --m-font-scale 缩放——验身过渡屏的
+// 有意选择（见挂载方 ConnectScreen 头注「字号口径」段）。
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button, Input } from '@taiji/ui'

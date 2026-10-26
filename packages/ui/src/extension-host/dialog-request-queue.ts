@@ -19,7 +19,10 @@
  */
 import { computed, onScopeDispose, reactive, ref } from 'vue'
 import type { Ref } from 'vue'
-import { useSessionScopedState } from '@taiji/core/foundation/use-session-scoped-state'
+import {
+  registerSessionCleanup,
+  useSessionScopedState,
+} from '@taiji/core/foundation/use-session-scoped-state'
 
 // ── IF1: DialogRequest（统一内部协议，bridge → queue 的契约，ui 包本地定义） ──
 
@@ -99,8 +102,8 @@ export interface DialogRequestQueue {
    * 跨分区 pending 计数（remote-use-mobile-v2 §6.18 待办聚合半：「需要你处理」区与导航
    * 计数要聚合全部会话的 dialog 待答，而 currentRequest/pendingCount 只读当前活跃分区）。
    * 键 = 有非空 pending 队列的会话 id，值 = 该分区 pending 条数；不可变替换触发响应式。
-   * 计数登记与分区写点同函数同步维护（enqueue/dequeueByRequestId/resetFor 三点封闭），
-   * 请求内容权威仍在分区——本读口只承载计数，不做内容镜像（禁双轨副本）。
+   * 计数登记与分区写点同函数同步维护（enqueue/dequeueByRequestId/resetFor/session 销毁
+   * 清理四点封闭），请求内容权威仍在分区——本读口只承载计数，不做内容镜像（禁双轨副本）。
    */
   readonly pendingCountBySession: Readonly<Ref<ReadonlyMap<string, number>>>
   /** 当前 session 是否有匹配的 pending 请求（filter 可选；非响应式查询） */
@@ -146,7 +149,7 @@ export function createDialogRequestQueue(
   const current = state.current
 
   // 跨分区 pending 计数登记（pendingCountBySession 的承载；与分区写点同函数同步维护，
-  // 漂移面封闭于本文件三个写点——见接口成员注释）。不可变替换触发响应式。
+  // 漂移面封闭于本文件四个写点——见接口成员注释）。不可变替换触发响应式。
   const pendingCountBySid = ref(new Map<string, number>())
 
   function shiftPendingCount(sid: string, delta: number): void {
@@ -156,6 +159,16 @@ export function createDialogRequestQueue(
     else next.set(sid, count)
     pendingCountBySid.value = next
   }
+
+  // 第四写点（session 删除路径）：分区由 useSessionScopedState 自动注册的 cleanup 删除
+  // （triggerSessionCleanups 驱动），计数登记表是分区外辅助表，须同口径挂清理——否则
+  // 删除后 resetFor 被 hasPartition 早退、dequeueByRequestId 被 deletedSids 拦截，残留计数
+  // 永久无法清除（「需要你处理」区与导航计数聚合到已删会话的僵尸待办）。模块级单例无
+  // scope 时条目保留（与 useSessionScopedState 自身注册同语义）。
+  const unregisterCountCleanup = registerSessionCleanup((sid) => {
+    const count = pendingCountBySid.value.get(sid)
+    if (count) shiftPendingCount(sid, -count)
+  })
 
   // ── 出队工具：按 requestId 精确移除（不假设队首）+ 刷新队首 ──
   function dequeueByRequestId(sid: string, requestId: string): void {
@@ -193,10 +206,12 @@ export function createDialogRequestQueue(
   // 无匹配 pending 时 dequeueByRequestId 内建静默忽略（ERR1，miss noop 幂等）。
   const unsubUiRequestExpired = source.onUiRequestExpired((e) => dequeueByRequestId(e.sessionId, e.requestId))
 
-  // scope dispose 退订（防 listener 翻倍，项目规则 #2）
+  // scope dispose 退订（防 listener 翻倍，项目规则 #2）；计数清理注册同点反注册
+  // （无 scope 上下文时 onScopeDispose 落空、条目保留，与 useSessionScopedState 同语义）
   onScopeDispose(() => {
     unsubUiRequest()
     unsubUiRequestExpired()
+    unregisterCountCleanup()
   })
 
   /** 当前待响应的请求（队首；null sid 时为 undefined） */

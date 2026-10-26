@@ -520,6 +520,9 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 ### Sheet（移动壳浮层原语）
 `@taiji/ui` 的移动端浮层原语（底部滑出面板），移动壳全部浮层的唯一出口——禁止手写 `fixed inset-0 z-*` 浮层（L0 grep 机器检查）。壳侧经 sheet-manager 单例互斥消费（同一时刻至多一个活动 Sheet，打开新的先关旧的；八名封闭词表：form/permission/newTask/model/command/subagentList/subagentDetail/sessionActions）。聚焦管理与退场动画由原语承载。
 
+### 待回答条（pending form bar）
+聊天输入区上方的待办入口条（remote-use-mobile-v2 §6.5/§7.1 输入区固定顺序之一）：form/planReview/dialog 三型请求任一在场时呈现（黄色提示色），点击打开 FormSheet 作答；ask-user 表单在场时 Composer 隐藏（互斥面仅 ask-user，planReview/dialog 与 Composer 并存）。数据源与「进行中」页聚合区、底部导航计数消费同一份待办状态（sessions-runtime 待回答覆盖读口 + companion-bridge 分区，同源构造性一致）；作答回传通道与桌面一致（extension.ui_response / dialog queue 双源路由）。
+
 ### remote token
 远程访问的持久凭据：64 位 hex 小写字符串（32 字节随机值的 hex 编码）。main 生成与轮换——重写 `remote-access.json` 即生效（runtime 每次 WS auth 握手热读文件，轮换不重启 runtime、不中断在途 turn）；文件缺失/损坏 → remote 集合为空退化为仅 spawn token（fail-closed）。存量已认证连接不随轮换踢除（auth 只门禁握手）——「怀疑泄漏」的完整处置 = 面板轮换（断新接入）+ 关开开关（重启 runtime 踢全部存量连接）。移动壳侧 token 经验身成功才写 localStorage（key `taiji.remote-access.token`）；URL query 携带的 token 验身失败**不动**既有 storage（坏链接不毁好凭据），storage 来源验身失败才清空（落 token 输入视图重扫恢复）。
 

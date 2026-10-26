@@ -7,14 +7,15 @@
 // - token-input / failed → navigateRoute('connect')（验身页：ConnectScreen 三态分流呈现）
 // - connected 且当前在 connect → navigateRoute('sessions')（首连进初始目的域）
 // 瞬时断连（connected → connecting）不换视图：路由保持挂载，仅顶部插轻量断线条（BM5 语义
-// 保留——composer 卸载会丢输入草稿；u-chat 交付后草稿/视图保持语义随 ChatScreen 落位）。
+// 保留——composer 卸载会丢输入草稿；草稿/视图保持语义已由 ChatScreen 落位：草稿分区在
+// sessions-runtime（draftOf/setDraft，跨挂载存活），返回列表即丢弃 §7.1）。
 //
 // chat 态 BottomNav 整体隐藏（聊天是详情页不占目的域，§7.1；返回经 popstate 回 chatFrom）。
 // 路由内容区分段：
 // - sessions → SessionsScreen（搜索/分组/未读/长按动作 Sheet；会话行切入导航内聚屏内，
 //   新建入口上抛 new-task 走 openSheet('newTask') 通道）
-// - activity → 占位锚（v1 无对应视图；u-activity 交付 ActivityScreen）
-// - chat     → ChatScreen（u-chat：页头/计时/模型 chip/更多 + 消息流 density=mobile +
+// - activity → ActivityScreen（回合面板 + 「需要你处理」聚合 + 子代理行直落 SubagentSheet）
+// - chat     → ChatScreen（页头/计时/模型 chip/更多 + 消息流 density=mobile +
 //   输入区固定顺序；待回答/待授权状态经 props 传入，App 单点订阅 companion-bridge hooks）
 //
 // companion 区（§6.5 三通道 Sheet 化，本单元呈现出口改造落位）：v1 呈现三件
@@ -223,7 +224,7 @@ watch(() => shellConnectionState.value === 'connected', (connected) => {
 </script>
 
 <template>
-  <!-- 壳根吃顶部 + 横向 safe-area（A16 顶栏/横向职责）；高度走 --shell-viewport-h
+  <!-- 壳根吃顶部 + 横向 safe-area（remote-use A16 顶栏/横向职责）；高度走 --shell-viewport-h
        （visualViewport 接管，§6.16——静态满屏高在 iOS 不可靠，audit P2 修复）；
        底部 inset 分治给贴底 chrome BottomNav（此处不挂 pb，防双倍扣除） -->
   <div
@@ -249,7 +250,7 @@ watch(() => shellConnectionState.value === 'connected', (connected) => {
     <!-- 验身页（connect 路由态）：骨架/连接中/验身入口/失败指引三态分流在屏内 -->
     <ConnectScreen v-if="shellRoute === 'connect'" />
 
-    <!-- 三目的域 + 聊天详情页（路由态内容区；v1 视图暂留段见文件头） -->
+    <!-- 三目的域 + 聊天详情页（路由态内容区） -->
     <template v-else>
       <!-- sessions：u-sessions SessionsScreen（W3 交付接线；搜索/分组/未读/长按动作 Sheet） -->
       <section

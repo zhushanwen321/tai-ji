@@ -109,6 +109,17 @@ const thinkingBusy = ref(false)
 /** 就近呈现段（非段值 off/minimal→low、xhigh→max；段外值同时显示原值短词） */
 const nearestSegment = computed(() => nearestSegmentOf(thinkingLevel.value))
 
+/**
+ * 段控选中段（§7.2：非段值不点亮段选中态）：仅当前值精确等于段值才传给段控点亮；
+ * off/minimal/xhigh 传空串（四段全不选中，就近段的视觉邻位呈现 + 段外原值提示行），
+ * 就近段 nearestSegment 只用于 offSegmentHint 显隐判据，不进段控选中态。
+ */
+const selectedSegment = computed(() => {
+  const nearest = nearestSegment.value
+  if (nearest === null) return ''
+  return isSegmentSelected(thinkingLevel.value, nearest) ? nearest : ''
+})
+
 const segmentOptions = THINKING_SEGMENTS.map((s) => ({ value: s, label: t(`mobile.model.segment.${s}`) }))
 
 async function onSelectSegment(segment: string): Promise<void> {
@@ -197,7 +208,7 @@ function onClose(): void {
         {{ t('mobile.model.offSegmentHint', { level: thinkingShortWord(thinkingLevel) }) }}
       </p>
       <SegmentedControl
-        :model-value="nearestSegment ?? ''"
+        :model-value="selectedSegment"
         :options="segmentOptions"
         :label="t('mobile.model.thinkingLabel')"
         data-testid="model-sheet-thinking-segments"

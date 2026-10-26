@@ -3,7 +3,7 @@
 // 聊天是详情页不占目的域，chat 态本导航整体隐藏，返回经聊天页顶部返回按钮 → popstate 回源）。
 //
 // v-model 驱动（状态驱动切换，项目约定不用 vue-router；route.ts 状态机是唯一权威）。
-// safe-area 分治（A16）：壳内贴底 chrome，底部 inset 由本组件 pb 避让（iOS 形态：bar 背景
+// safe-area 分治（remote-use A16）：壳内贴底 chrome，底部 inset 由本组件 pb 避让（iOS 形态：bar 背景
 // 延伸进 Home Indicator 区，内容经 padding 避让）——变量唯一点 = styles/tokens.css。
 //
 // 计数角标段（u-activity 落位）：进行中目的域的待办计数（§6.18 聚合半）。数据源 =

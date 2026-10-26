@@ -201,6 +201,28 @@ describe('SessionsScreen（使用者视角 DOM 断言）', () => {
     expect(wrapper.emitted('new-task')).toHaveLength(1)
     wrapper.unmount()
   })
+
+  it('搜索词与滚动位置跨挂载保持（§6.7：搜索 → 点入会话 → 返回列表，上下文不丢）', async () => {
+    // 第一次挂载：写入搜索词 + 模拟滚动列表体
+    const first = await mountScreen()
+    await first.find('[data-testid="sessions-search"]').setValue('周报')
+    const listBody = first.find('.overflow-y-auto').element as HTMLElement
+    listBody.scrollTop = 321
+    // 点入会话 → App 路由 v-if 卸载屏
+    first.unmount()
+    await nextTick()
+
+    // 返回列表：重挂载（同 App.vue v-if 路由形态，无 KeepAlive）
+    const second = await mountScreen()
+    const searchInput = second.find('[data-testid="sessions-search"]').element as HTMLInputElement
+    expect(searchInput.value).toBe('周报')
+    // 过滤结果与搜索词一致（s-done 命中「周报」，s-active 被滤除）
+    expect(row(second, 's-done').exists()).toBe(true)
+    expect(row(second, 's-active').exists()).toBe(false)
+    // 滚动位置回填（卸载前记录 → 挂载时恢复）
+    expect((second.find('.overflow-y-auto').element as HTMLElement).scrollTop).toBe(321)
+    second.unmount()
+  })
 })
 
 describe('未读点亮与点入即清（§6.3，使用者可见）', () => {

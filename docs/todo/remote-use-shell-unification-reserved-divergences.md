@@ -4,12 +4,7 @@
 
 设计源：remote-use-shell-unification 设计 §3.3 D9（设计档案已随 .tmp 清理；防复发 = 双壳共享装配检查 helper + 真差异白名单）。
 
-## 1. 列表状态派生谓词 blockingOverlay 输入：移动恒 false（U20/A14）
-
-- **差异**：core `deriveSessionStatus`（`packages/core/src/domain/session/store.ts`，SessionStatusInputs 参数化输入契约）的 `hasBlockingOverlay` 输入——桌面全量派生视图（extensionUI store `hasPendingBlockingOverlay`，form/planReview 键，D12 拓宽口径）→ waiting 态；移动壳无 extensionUI store（面板族 Phase 2 裁剪的既定壳形态），输入源不存在，恒缺省 false。
-- **语义损失（登记的代价面）**：移动会话列表状态点对「富交互表单/plan 审批 pending」不显 waiting——移动的表单请求呈现是页面级 MobileFormCard（呈现即用户可感知），列表状态点不承载该信号；waiting 态在移动列表仅由 toolCall running 分支达成（A14 裁决的收益面「运行中/流式中可见」不受影响）。
-- **判定**：真差异（数据源在移动壳形态下不存在，非漏接——extensionUI 请求通道的移动呈现载体是 MobileFormCard 页面而非状态点），非装配缺口，不补。
-- **退役/复审条件**：移动壳若引入 extensionUI 分区（W4/W5 通知体系立项时），该输入按桌面同式接入本谓词，本条随之删除。
+原条目 1（blockingOverlay 输入移动恒 false）已按其自写退役条件删除（2026-10-26 终态同步）：remote-use-mobile-v2 §6.19 已接线——sessions-runtime `registerOverlayPendingReader` 注册口 + companion-bridge 分区数据接线（form/planReview 分区 + dialog 计数），waiting 态移动可达。
 
 ## 2. exited 清理形态双壳差异（D5/D9②）
 
@@ -20,7 +15,7 @@
 
 ## 3. sessionEntry 合法缺省成员（D9② × 装配检查 helper 对齐）
 
-- **差异**：SessionEntryPort 的 `cancelActiveFlow` / `preloadFileTree` / `clearUnread` 三成员——桌面全接线（useSidebar），移动壳缺省 no-op（无 new-task flow 取消面 / 文件树 / 未读体系，core use-session 链内 `?? noop` 解析是契约允许形态）。
+- **差异**：SessionEntryPort 的 `cancelActiveFlow` / `preloadFileTree` / `clearUnread` 三成员——桌面全接线（useSidebar），移动壳缺省 no-op（无 new-task flow 取消面 / 文件树；未读体系已随 remote-use-mobile-v2 §6.3 落地，未读清走壳层本地 markSessionVisited（lastVisitedAt 对照）通道、不经 sessionEntry.clearUnread；core use-session 链内 `?? noop` 解析是契约允许形态）。
 - **判定**：真差异（移动壳无对应功能面），不补。
 - **对齐锚点**：装配检查 helper（`packages/core/src/assembly/assembly-check.ts`）的断言清单 = `ensureStreamSubscription` / `touchRecency` / `evictLru` 三成员（双壳必接，EXEMPT_SESSION_ENTRY_MEMBERS = 本条三成员）；两清单的互斥覆盖由 core 侧契约测试锁死。
 

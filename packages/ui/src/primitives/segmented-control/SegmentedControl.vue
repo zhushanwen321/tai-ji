@@ -10,6 +10,7 @@
  * cva 基类（inline-flex/rounded-md/text-sm/transition）经 tailwind-merge 与段级类
  * 合并，字号/高度等冲突档由本组件类（后写）胜出。
  */
+import { computed } from 'vue'
 import { cn } from '../../lib/utils'
 import { Button } from '../button'
 
@@ -18,7 +19,7 @@ export interface SegmentedOption {
   label: string
 }
 
-defineProps<{
+const props = defineProps<{
   modelValue: string
   options: SegmentedOption[]
   /** tablist 的读屏名称（aria-label，必填——段控没有可见标题时读屏唯一锚点） */
@@ -26,17 +27,26 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{ (e: 'update:modelValue', value: string): void }>()
+
+/**
+ * roving tabindex 锚点段下标：选中段；无选中（非段值形态 modelValue 为空串、四段全不
+ * 点亮）落首段——全 -1 会把段控整体键盘锁死（tab 进不去），首段 0 保 tablist 可达。
+ */
+const anchorIndex = computed(() => {
+  const i = props.options.findIndex((o) => o.value === props.modelValue)
+  return i >= 0 ? i : 0
+})
 </script>
 
 <template>
   <div class="flex rounded-lg bg-surface-2 p-1" role="tablist" :aria-label="label" data-testid="segmented-control">
     <Button
-      v-for="option in options"
+      v-for="(option, index) in options"
       :key="option.value"
       variant="ghost"
       role="tab"
       :aria-selected="option.value === modelValue"
-      :tabindex="option.value === modelValue ? 0 : -1"
+      :tabindex="index === anchorIndex ? 0 : -1"
       class="min-h-[var(--m-tap)] flex-1 text-[length:var(--m-text-sub)]"
       :class="
         cn(

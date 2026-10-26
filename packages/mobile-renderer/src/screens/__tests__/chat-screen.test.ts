@@ -389,6 +389,12 @@ describe('M-7/M-8 对账 DOM 断言（验收条款 2：老能力重写不丢失�
 
     const revokeBtn = wrapper.find('[data-testid="msg-revoke-button"]')
     expect(revokeBtn.exists()).toBe(true)
+    // 常显断言（§6.2）：mobile density 下 actions 容器不走桌面 hover 显隐（opacity-0），
+    // 而是常驻可命中——exists() 在 jsdom 下锁不住「常显」（opacity-0 元素同样 DOM 在场）
+    const actions = wrapper.find('[data-testid="user-bubble-actions"]')
+    expect(actions.classes()).not.toContain('opacity-0')
+    expect(actions.classes()).toContain('opacity-100')
+    expect(actions.classes()).toContain('pointer-events-auto')
     await revokeBtn.trigger('click')
     await flushPromises()
     expect(revokeMessageMock).toHaveBeenCalledTimes(1)

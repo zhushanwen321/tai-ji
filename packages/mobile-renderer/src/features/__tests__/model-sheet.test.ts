@@ -128,3 +128,42 @@ describe('ModelSheet（§7.2 F9：liveState 复合串比对呈现面）', () => 
     wrapper.unmount()
   })
 })
+
+describe('ModelSheet 思考档段控（§7.2：非段值不点亮段选中态）', () => {
+  function segments(): HTMLElement[] {
+    return Array.from(document.body.querySelectorAll('[data-testid="model-sheet-thinking-segments"] [role="tab"]'))
+  }
+
+  it('段值权威值：对应段 aria-selected=true + 选中底（tab 型），他段不点亮', async () => {
+    liveStateStore.applyLiveState(SID, { thinkingLevel: 'low' })
+    const wrapper = await mountSheet()
+
+    const tabs = segments()
+    expect(tabs).toHaveLength(4)
+    expect(tabs[0].getAttribute('aria-selected')).toBe('true')
+    expect(tabs[0].className).toContain('bg-bg-elevated')
+    expect(tabs[1].getAttribute('aria-selected')).toBe('false')
+    // 段值形态无段外提示行
+    expect(bodyEl('model-sheet-thinking-offsegment')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('非段值 off：四段全不点亮（aria-selected 全 false、无选中底），段外提示行在场，就近段无键盘锁死', async () => {
+    liveStateStore.applyLiveState(SID, { thinkingLevel: 'off' })
+    const wrapper = await mountSheet()
+
+    const tabs = segments()
+    for (const tab of tabs) {
+      expect(tab.getAttribute('aria-selected')).toBe('false')
+      expect(tab.className).not.toContain('bg-bg-elevated')
+      expect(tab.className).not.toContain('shadow-1')
+    }
+    // 段外原值提示行在场（就近段视觉邻位 + 原值标注的呈现分支）
+    const hint = bodyEl('model-sheet-thinking-offsegment')
+    expect(hint).not.toBeNull()
+    // roving tabindex 锚点落首段（无选中不锁键盘）
+    expect(tabs[0].getAttribute('tabindex')).toBe('0')
+    expect(tabs[1].getAttribute('tabindex')).toBe('-1')
+    wrapper.unmount()
+  })
+})

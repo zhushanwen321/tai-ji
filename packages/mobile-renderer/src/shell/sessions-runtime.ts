@@ -63,7 +63,9 @@ export function isSessionUnread(sid: string): boolean {
 // 基线」保守语义）。边界：status 翻转无落盘快照，播种只对照时间戳——访问后仅终态翻转而
 // lastActiveAt 未推进的会话刷新后不恢复（§6.3 权威源仅含 lastVisitedAt 时间戳）。异步读回
 // 护栏：会话已从最新快照消失（基线被后续帧摘除）不点亮；存储失败降级不点亮（best-effort，
-// 与写口同策略）。
+// 与写口同策略）。时钟域口径：lastActiveAt 为 runtime 时钟（服务端帧）、lastVisitedAt 为
+// 本端时钟（Date.now() 落盘）——客户端钟慢于服务端时，刚访问过的会话刷新后可能一次性误
+// 恢复未读（点入即清自愈；钟快方向保守不点亮）；diff 主路径（帧间比较同源时钟）不受影响。
 function seedUnreadFromLastVisited(s: SessionSummary): void {
   void getPlatform()
     .storage.get(lastVisitedKey(s.id))
@@ -132,6 +134,24 @@ export function draftOf(sid: string): string {
 export function setDraft(sid: string, text: string): void {
   if (text === '') draftsBySid.delete(sid)
   else draftsBySid.set(sid, text)
+}
+
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：会话列表上下文（§6.7 效果
+// 「列表滚动位置与搜索词恢复」——屏随路由 v-if 卸载、无 KeepAlive，搜索词与滚动位置
+// 提升为模块级状态跨挂载存活：搜索词响应式（SessionsScreen v-model 直绑模块 ref）、
+// 滚动位置非响应式数值（挂载回填一次、卸载前记录）。
+export const sessionsQuery = ref('')
+
+let sessionsListScrollTop = 0
+
+/** 列表滚动位置记录（SessionsScreen 卸载前调） */
+export function saveSessionsListScroll(scrollTop: number): void {
+  sessionsListScrollTop = scrollTop
+}
+
+/** 列表滚动位置回填值（SessionsScreen 挂载时读一次） */
+export function sessionsListScrollRestore(): number {
+  return sessionsListScrollTop
 }
 
 // hasBlockingOverlay 输入源注册口（§6.19）：「该会话待回答请求非空（form/planReview/dialog）」
@@ -279,10 +299,12 @@ registerSessionCleanup((sid) => {
   }
 })
 
-/** 测试复位（生产代码禁止消费）：未读基线/未读集/草稿分区归零 + overlay 注册口摘除。 */
+/** 测试复位（生产代码禁止消费）：未读基线/未读集/草稿分区归零 + overlay 注册口摘除 + 列表上下文复位。 */
 export function resetSessionsRuntimeForTesting(): void {
   unreadBaseline.clear()
   unreadSessionIds.value = new Set<string>()
   draftsBySid.clear()
   overlayPendingReader = null
+  sessionsQuery.value = ''
+  sessionsListScrollTop = 0
 }

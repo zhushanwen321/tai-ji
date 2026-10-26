@@ -17,9 +17,10 @@
 // 提交禁用的第二输入 = submitSuspended（§6.23 restart 重连对账完成前禁答，companion-bridge
 // useFormSubmitSuspended 驱动）；三节任一在场的提交/取消钮同受其禁用。
 //
-// 失效信号消费（§6.4/§7.1）：extension:requestsInvalidated / plugin:uiRequestExpired /
-// plugin:permissionRequestExpired 命中呈现中请求时由 companion-bridge 联动 closeSheet +
-// 原因提示（数据源摘除 → 本组件三 prop 变 undefined → 节消失），Sheet 内不残留僵尸请求。
+// 失效信号消费（§6.4/§7.1）：extension:requestsInvalidated / plugin:uiRequestExpired 命中
+// 呈现中请求时由 companion-bridge 联动 closeSheet + 原因提示（数据源摘除 → 本组件三 prop
+// 变 undefined → 节消失），Sheet 内不残留僵尸请求。plugin:permissionRequestExpired 例外：
+// 收层由 App pending watch 权威处理、companion-bridge 仅错误条提示（A7 收层与提示解耦）。
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button, Input, Sheet, Textarea } from '@taiji/ui'

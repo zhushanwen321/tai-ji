@@ -21,6 +21,7 @@ import {
   type DialogRequestSource,
   type UiResponseTransport,
 } from '../dialog-request-queue'
+import { triggerSessionCleanups } from '@taiji/core/foundation/use-session-scoped-state'
 
 // TC-14 观测锚点：init 调用计数（「分区是否被建立」的唯一可区分信号——分区建立与否在
 // 队列公开 API 上行为同形，内存常驻差异只能经 init 计数观测）。vi.hoisted 供 mock 工厂
@@ -445,6 +446,29 @@ describe('DialogRequestQueue', () => {
       expect(q.pendingCountBySession.value.get('B')).toBe(1) // 他分区不受影响
       q.resetFor('never-existed') // no-op 不误建登记（与 TC-14 分区侧同语义）
       expect(q.pendingCountBySession.value.size).toBe(1)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-19 session 删除清理计数：triggerSessionCleanups 后 pendingCountBySession 不再含该 sid（他分区不受影响）', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      const q = getQueue()
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r2' })
+      source.triggerUiRequest({ sessionId: 'B', requestId: 'b1' })
+      expect(q.pendingCountBySession.value.get('A')).toBe(2)
+      // 会话删除路径（triggerSessionCleanups）：分区由工厂自动注册的 cleanup 删除，
+      // 计数登记表须同口径清条目——否则删除后三点全部不可达（resetFor 被 hasPartition
+      // 早退、dequeueByRequestId 被 deletedSids 拦截），残留计数永久无法清除
+      triggerSessionCleanups('A')
+      expect(q.pendingCountBySession.value.has('A')).toBe(false)
+      expect(q.pendingCountBySession.value.get('B')).toBe(1) // 他分区不受影响
+      // 删除后迟到入队不复活计数（updateFor 对已删 sid no-op，计数写点在 updater 内不触）
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r3' })
+      expect(q.pendingCountBySession.value.has('A')).toBe(false)
     } finally {
       scope.stop()
     }

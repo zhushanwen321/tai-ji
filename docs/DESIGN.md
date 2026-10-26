@@ -459,7 +459,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 
 移动端在桌面尺度之上叠加一层移动专属尺度 token（设计 remote-use-mobile-v2 §6.8）：手机阅读距离 30cm / 单手 / 动态光线，正文基准从桌面 14px 提到 16px，触控目标最小 44px。**只新增尺度不新增颜色**——任何颜色必须先在桌面色板（§4.1-4.7）存在，移动层派生色（如 `--m-scrim`）全部 `color-mix` 自桌面 token，随 `data-theme` 自动跟随；桌面同源层（颜色/圆角/阴影/动效）维持「style.css ↔ mobile-renderer tokens.css 手工镜像」现状。
 
-- **载体与消费**：`packages/ui/src/styles/mobile-tokens.css`（`@taiji/ui` 包出口 `./mobile-tokens.css`），移动壳入口 import 一次；`@taiji/ui` 移动原语（Sheet/StatusDot/StatusPill/EmptyState/SegmentedControl/InlineNotice/Skeleton）与 ChatView `density=mobile` 档直接消费变量。桌面壳不 import，渲染零感知（ChatView 缺省 desktop 档产出类名与现状逐字一致）。
+- **载体与消费**：`packages/ui/src/styles/mobile-tokens.css`（`@taiji/ui` 包出口 `./mobile-tokens.css`），移动壳入口 import 一次；`@taiji/ui` 移动原语中 Sheet/StatusPill/EmptyState/SegmentedControl/InlineNotice 五件（Button 经 button-variants 同源）直接消费 `--m-*` 变量，StatusDot/Skeleton 仅消费桌面语义色 token 与消费方传入 class（StatusDot 8px/6px 是规格固定尺寸、Skeleton 尺寸契约归消费方——两者无需 `--m-*` 尺度）；ChatView `density=mobile` 档直接消费变量。桌面壳不 import，渲染零感知（ChatView 缺省 desktop 档产出类名与现状逐字一致）。
 - **字号缩放槽位**：`--m-font-scale` 跟随根节点 `data-font-size` 三档（small 0.94 / medium 1 / large 1.08），与桌面 root font-size 档位语义对齐；六档字号（display 22 / title 17 / body 16 / callout 15 / sub 13 / cap 12）全部 `calc(px * var(--m-font-scale))`。
 - **值表**（真值源 = 该 css 文件，此处登记用途）：
 

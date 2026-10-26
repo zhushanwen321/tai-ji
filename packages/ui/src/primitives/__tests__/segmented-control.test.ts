@@ -42,4 +42,18 @@ describe('SegmentedControl（spec §6.6 段控）', () => {
     await w.find('[data-testid="segmented-option-high"]').trigger('click')
     expect(w.emitted('update:modelValue')).toEqual([['high']])
   })
+
+  it('空 modelValue（非段值形态）：全段 aria-selected=false 无选中底，roving tabindex 锚首段保键盘可达', () => {
+    const w = mount(SegmentedControl, { props: { modelValue: '', options: OPTIONS, label: '思考档' } })
+    const tabs = w.findAll('[role="tab"]')
+    for (const tab of tabs) {
+      expect(tab.attributes('aria-selected')).toBe('false')
+      expect(tab.classes()).not.toContain('bg-bg-elevated')
+      expect(tab.classes()).not.toContain('shadow-1')
+    }
+    // 全 -1 会把段控整体键盘锁死——无选中时锚点落首段（tabindex=0），其余 -1
+    expect(tabs[0].attributes('tabindex')).toBe('0')
+    expect(tabs[1].attributes('tabindex')).toBe('-1')
+    expect(tabs[2].attributes('tabindex')).toBe('-1')
+  })
 })

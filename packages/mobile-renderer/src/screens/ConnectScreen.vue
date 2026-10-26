@@ -9,6 +9,10 @@
 //   不毁既有凭据的凭据三分支在 platform/connection-profile 既有装配层，提交重试经
 //   submitRemoteToken）
 // - failed → 重连预算用尽指引（可行动恢复文案；重试 = 刷新页面重走验身链）
+//
+// 字号口径：本屏与 TokenInputView 的辅助文案走 Tailwind 固定字号（text-xs/text-sm，
+// 不随 --m-font-scale 档位缩放）——验身页是「进入壳前的过渡屏」，文案短且无阅读密度
+// 压力，固定字号为有意选择；进壳后各屏（设置/会话/聊天）统一走 var(--m-text-*) 移动尺度层。
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Skeleton } from '@taiji/ui'

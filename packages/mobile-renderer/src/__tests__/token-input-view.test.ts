@@ -1,8 +1,8 @@
-// TokenInputView 组件测试（remote-use U1.3 独立交付组件；App.vue 接线归 U1.4c）。
+// TokenInputView 组件测试（remote-use U1.3 独立交付组件；ConnectScreen 接线消费）。
 //
 // 哑组件契约：渲染锚点 testid + submit 事件（trim 后上抛；空值不发）。
-// 重试编排（adoptManualToken → 抑制位 reset → 重连）在 bootstrap.submitRemoteToken，
-// 组件零 core import——本文件只测组件自身行为。
+// 重试编排（adoptManualToken → 抑制位 reset → 重连）在 connection-view.submitRemoteToken
+// （连接装配独立模块），组件零 core import——本文件只测组件自身行为。
 //
 // 文案走 vue-i18n（mobile.tokenInput 命名空间）：挂 i18n 插件 + 双语渲染断言
 //（硬编码中文回归防线，阶段 3 一致性修复）。
@@ -68,7 +68,7 @@ describe('TokenInputView（D4/D8 恢复入口）', () => {
   })
 })
 
-describe('TokenInputView 提交中/错误反馈派生视图（submitting/error props，App 呈现 bootstrap tokenSubmit 态）', () => {
+describe('TokenInputView 提交中/错误反馈派生视图（submitting/error props，ConnectScreen 呈现 connection-view tokenSubmit 态）', () => {
   beforeEach(() => {
     i18n.global.locale.value = 'zh-CN'
   })

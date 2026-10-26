@@ -8,7 +8,7 @@
 // - 步数 = 本回合工具调用完成计数：从回合起点消息索引起（上升沿观察时的分区尾部锚点，
 //   user 消息总在回合起点前入分区——锚点至多回看一条无工具的 user/占位消息），统计各
 //   消息 toolCalls 中 status ≠ 'running' 的条数（overlay 语义：running → completed 原地
-//   翻转，见 core store applyToolCallOverlay）。
+//   翻转，见 core effects/entry-overlay applyEntryFrameWithOverlay）。
 // - 仅对已订阅会话显示：isGenerating 只在订阅后可观察，「仅生成中显示」构造性蕴含
 //   「未订阅不显示」（§6.21 口径限制的落点）。
 import type { Message } from '@taiji/shared'
