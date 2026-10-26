@@ -1,6 +1,6 @@
 /**
- * Composer 发送位与统一发送分发器合并测试（单文件多源合并：2 个源文件同 SUT
- * （Composer.vue）、mock 骨架同构——queue 族 harness 单源）。
+ * Composer 发送位与统一发送分发器合并测试（单文件多源合并：3 个源文件同 SUT
+ * （Composer.vue / Panel inline 表单渲染）、mock 骨架同构——queue 族 harness 单源）。
  *
  * 为什么单文件：vitest 按测试文件隔离模块图——单文件让全部用例共享一份 Composer 全树
  * 装载与环境初始化；拆文件会让每个文件各付一次装载，合并后只装一份。
@@ -8,34 +8,86 @@
  * 来源文件（describe/it 块原样搬运，测试名零改动）：
  *  - composer-send-button-states.test.ts（发送位内容驱动双形态 D5）
  *  - composer-dispatch-route.test.ts（统一发送分发器 u3b/D1）
+ *  - ask-user-inline.test.ts（Panel inline 统一表单渲染 W2 U4-U5；round 5-G S13 并入）
  *
  * mock 统一（原 send-button-states 手写 chatApiMock 单例与 dispatch-route 的
  * composerChatApiSpy 是同构形态——resolve 基线 + 同键集，合并后统一为 spy 单例，
  * 断言锚不分裂；send-button 节内以别名 const chatApiMock = composerChatApiSpy
- * 保持 it 体零改动）：
- *  - useChat / useNewTaskFlow / @/stores/session：composer-shell-mount 转注册
- *  - @/api（composerApiModuleWithChat：基础五组 + chat 组 spy 转发）/ useToast：
- *    composer-queue-mount 顶层注册
- * 未并入同簇的 ask-user-inline.test.ts：useExtensionUI/Panel overlay 域 mock 与
- * Composer 族 mock 组合行为未验证，保持独立（与 schedule-create-inline.test.ts
- * 同款形态，可后续归并）。
+ * 保持 it 体零改动）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-send-button-states.test.ts
+ * S13 并入 ask-user-inline 后的注册改造（不再 import composer-queue-mount /
+ * composer-shell-mount 的副作用注册，产物内自行注册全部目标，工厂仍引用
+ * composer-mount 导出）：
+ *  - '@/api' → 保留式：spread 真实门面 + 仅覆写 composerApiModuleWithChat 的 6 组
+ *    （spy 断言锚不变）。原因：ask-user-inline 节挂真实 Panel 全树，useSidebar 链消费
+ *    @/api 的 chat.getHistory / session 多成员 / extension 域，原窄替换缺这些成员；
+ *    spread 后恢复 VITE_MOCK 下的 transport/mock 全量域（与该文件独立运行时等价）。
+ *  - '@/composables/features/new-task/useNewTaskFlow' → composerFlowModule 局部增强：
+ *    补 isActive ref——usePanelView 读 flow.isActive.value，原工厂缺该键，ask-user-inline
+ *    节挂 Panel 会 TypeError；对 Composer 节为无害多余键。
+ *  - '@/composables/features/chat/useChat'（composerChatSpyModule）与
+ *    '@/stores/session'（composerSessionStoreModule）与 '@/composables/useToast'
+ *    （toastSpyModule）注册同 shell-mount 原状。
+ *  - '@/composables/useExtensionUI'（ask-user-inline 窄 mock：useExtensionUI /
+ *    formFilter / planReviewFilter）——已核 Composer.vue / ActivityStrip 不消费该模块，
+ *    对 Composer 两节无泄漏。
+ *
+ * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/composer-send-button-states.test.ts
  */
 // helper import 必须先于项目内模块（@/api mock factory 在模块图加载期执行，TDZ 约束）；
-// composer-queue-mount import 即注册 @/api / useToast（并转注册 shell-mount 三枚）
-import { composerApiModule, composerChildStubs, makeComposerInputMock } from '../helpers/composer-mount'
-import { composerChatApiSpy, setupComposerQueueHarness } from '../helpers/composer-queue-mount'
+// mock 注册工厂全部引用 composer-mount 导出（vi.hoisted 单例与 spy 转发单源）
+import { composerApiModuleWithChat, composerChildStubs, makeComposerInputMock, composerChatSpyModule, composerFlowModule, composerSessionStoreModule, resetComposerMountState } from '../helpers/composer-mount'
+import { composerChatApiSpy } from '../helpers/composer-mount'
+import { toastSpyModule } from '../helpers/i18n-toast-mock'
+import { resetChatModuleState } from '@/composables/features/chat/useChat'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
-import { defineComponent } from 'vue'
+import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { textToSegments } from '@taiji/shared'
 import Composer from '@/components/panel/Composer.vue'
 import ActivityStrip from '@/components/panel/message-stream/ActivityStrip.vue'
+import Panel from '@/components/panel/Panel.vue'
 import { useChatStore } from '@/stores/chat'
+import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
+
+vi.mock('@/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api')>()
+  return { ...actual, ...composerApiModuleWithChat() }
+})
+vi.mock('@/composables/useToast', () => toastSpyModule())
+vi.mock('@/composables/features/chat/useChat', () => composerChatSpyModule())
+vi.mock('@/stores/session', () => composerSessionStoreModule())
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => {
+  const mod = composerFlowModule()
+  return {
+    ...mod,
+    useNewTaskFlow: () => ({ ...mod.useNewTaskFlow(), isActive: ref(false) }),
+  }
+})
+
+// ── ask-user-inline 节的 useExtensionUI 窄 mock（Panel 经 usePanelView 透传消费）──
+// vi.hoisted：mock 状态在 vi.mock 工厂执行前就绪，且可在 it 中改值。
+// 不用 vue ref（hoisted 回调先于 import 初始化，引用 ref 触发 TDZ）；
+// 用普通可变对象 { value }，Panel 里同样 .value 读写，行为等价 Ref。
+const mockState = vi.hoisted(() => ({
+  formReq: { value: undefined as ExtensionUIRequest | undefined },
+  respond: () => {},
+  cancel: () => {},
+}))
+
+vi.mock('@/composables/useExtensionUI', () => ({
+  useExtensionUI: () => ({
+    currentFormRequest: mockState.formReq,
+    respond: mockState.respond,
+    cancel: mockState.cancel,
+  }),
+  formFilter: (req: { form?: boolean }) => req.form === true,
+  // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出清单
+  planReviewFilter: (req: { planReview?: boolean }) => req.planReview === true,
+}))
 
 // ══════════ 来源：composer-send-button-states.test.ts ══════════
 {
@@ -362,7 +414,17 @@ import { useChatStore } from '@/stores/chat'
 
 // ══════════ 来源：composer-dispatch-route.test.ts ══════════
 {
-  const { ComposerInputMock, otherStubs } = setupComposerQueueHarness()
+  // 原 setupComposerQueueHarness（composer-queue-mount）的产物内等价装配：
+  // ComposerInput mock + 壳 stub 组合 + 逐用例重置（mock 清零 + 输入捕获清空 +
+  // resetChatModuleState——该函数自身已被 useChat mock 覆写为 no-op，等价原状）
+  const { lastInputText, ComposerInputMock: inputMock } = makeComposerInputMock()
+  const otherStubs = { ComposerInput: inputMock, ...composerChildStubs }
+  const ComposerInputMock = inputMock
+
+  beforeEach(() => {
+    resetComposerMountState(lastInputText)
+    resetChatModuleState()
+  })
 
   function mountComposer(): ReturnType<typeof mount> {
     return mount(Composer, { props: { sessionId: 's1' }, global: { stubs: otherStubs } })
@@ -501,6 +563,68 @@ import { useChatStore } from '@/stores/chat'
       await pressKey(wrapper, {})
 
       expect(composerChatApiSpy.send).not.toHaveBeenCalled()
+    })
+  })
+}
+
+// ══════════ 来源：ask-user-inline.test.ts（round 5-G S13 并入）══════════
+{
+  // stub 子组件（除 FormOverlay，断言其挂载）
+  const stubs = {
+    PanelHeader: { template: '<div />' },
+    MessageStream: { template: '<div data-testid="msg-stream" />' },
+    // Composer stub testid 对齐真实 Composer.vue（data-testid="composer-box"，见 Composer.vue L25）
+    Composer: { template: '<div data-testid="composer-box" />' },
+    Landing: { template: '<div data-testid="landing">landing</div>' },
+  }
+
+  function mountPanel(sessionId: string | null) {
+    return mount(Panel, {
+      props: {
+        panelId: 'panel-root',
+        sessionId,
+        sessionLabel: sessionId ?? '',
+        sessionDir: '/repo',
+        status: 'done' as never,
+      },
+      global: { stubs },
+    })
+  }
+
+  /** form 帧造数（新 form 帧原生形状；legacy askUser 帧经归一同形） */
+  const formReq: ExtensionUIRequest = {
+    sessionId: 'session-A',
+    requestId: 'req-1',
+    dialogKind: 'select',
+    form: true,
+    formQuestions: [{ type: 'choice', header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
+  }
+
+  beforeEach(() => {
+    mockState.formReq.value = undefined
+  })
+
+  describe('Panel inline 统一表单渲染（FormOverlay 单渲染器）', () => {
+    it('U4: 有表单请求 → 渲染 FormOverlay，不渲染 Composer', () => {
+      mockState.formReq.value = formReq
+
+      const wrapper = mountPanel('session-A')
+
+      // 统一表单 overlay 渲染
+      expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(true)
+      // Composer 互斥隐藏（Composer 组件 v-else-if 不挂载，其 testid 不存在于 DOM）
+      expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
+    })
+
+    it('U5: 无表单请求 → 渲染 Composer，不渲染 FormOverlay', () => {
+      mockState.formReq.value = undefined
+
+      const wrapper = mountPanel('session-A')
+
+      // Composer 渲染
+      expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
+      // 统一表单 overlay 不渲染
+      expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(false)
     })
   })
 }

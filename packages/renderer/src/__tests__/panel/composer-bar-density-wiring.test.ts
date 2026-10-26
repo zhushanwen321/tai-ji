@@ -1,7 +1,12 @@
 /**
- * Composer 底栏密度接线测试（D6 修订「三步聚合」版）。
+ * Composer 底栏密度接线 + slash 注入合并产物（round 5-G U9，单文件多源：2 个源文件同
+ * SUT（Composer.vue）、环境全默认 happy-dom）。
  *
- * 覆盖（三视角，用户可见 DOM 断言优先）：
+ * 来源文件（describe/it 块原样搬运，测试名零改动）：
+ *  - composer-bar-density-wiring.test.ts（底栏三步聚合接线，19 例）
+ *  - composer-slash-injection.test.ts（pendingSlash 注入 watch，9 例；round 5-G U9 并入）
+ *
+ * 覆盖（bar-density 节，三视角，用户可见 DOM 断言优先）：
  * - 使用者（黑盒）：① 实测溢出逐级触发 指标聚合 → 左簇聚合 → 模型+思考聚合（累计，右簇先压）；
  *   ② 锚点保护：顶格仍溢出 → 中部让位，`+` 与发送按钮恒在且为首末按钮（零裁剪）；
  *   ③ 不留死入口：托盘全无 + 插件零贡献 → 无聚合入口；`»` Ellipsis 菜单在任何状态都不出现（退役回归）。
@@ -12,23 +17,34 @@
  *   / 同宽不抖 / 卸载断开）；状态机判据本体在 composer-density.test.ts（穷举），此处只证
  *   「实测 → 状态机 → DOM」链路导通。
  *
- * 策略：
- * - `useTrayCounts` 替身（托盘三态计数注入）——真 ComposerTray 渲染，聚合入口是真实组件；
- * - `VIEW_HOST_SOURCE_KEY` provide（插件 toolbar 贡献点：有 entry → 贡献数 1）；`getViewIds` 返回空
- *   （该 mock 只服务挂载点查询，不冒充 widget 区条目）；
- * - `ManualResizeObserverStub`（`../effects/_virtua-mock-helper` 定稿件）确定性派发；
- * - 真 pinia + 真 chat store（与 composer-send-button-states 同范式），mock useChat / useNewTaskFlow /
- *   api / session store；ComposerInput 与重子组件 stub（聚合组件 stub 带契约 testid——
- *   断言「哪个组件被挂载」，组件内部行为归各自组件测试）。
+ * 覆盖（slash-injection 节，Wave C，U12-U16/U18）：
+ *  - U12 匹配时注入 + 注入顺序（insertSlashChip 先于 clearPendingSlash）
+ *  - U13 不匹配时不消费（不误清留给其他 Composer 的 pendingSlash）
+ *  - U14 landing 态匹配（双方 null）／U15 watch 非 immediate／U16 重复点击同命令触发
+ *  - U18 split 双 Composer 竞争消费／U19-U20b SearchModal 注入按 isSkill 分流
+ *
+ * U9 解锁改造记录：
+ *  - 原 slash-injection 的 '@/stores/chat' 窄 mock（composerChatStoreModule：useChatStore
+ *    仅 7 动作键）撤销——bar-density 节策略是真 pinia + 真 chat store（send-button-states
+ *    同范式），模块级窄 mock 会砍掉真实 store 全成员。slash 节直接用真实 store：Composer
+ *    构造期只读 isActive / getRetryState（真实成员，无活跃 session 时恒 false / undefined，
+ *    与原窄 mock 下该 computed 未被求值的净效果等价且更真实）；send/steer 等动作方法在
+ *    useChat composable 上不在 store 上，本节用例不触发，无需处置。
+ *  - '@/stores/session' 双文件同指纹 mock 去重为顶层一份（composerSessionStoreModule）。
+ *  - slash 节 ComposerInput mock（'@taiji/ui/features/composer' spread 覆写）保留：bar-density
+ *    节的 ComposerInput 走 global.stubs 名称匹配拦截（mock 组件 name 相同被 stub 替换，
+ *    不进 DOM）。
+ *  - bar-density 节的 useTrayCounts / useChat / useNewTaskFlow / @/api mock 对 slash 节
+ *    泄漏无害（slash 用例不触发其调用路径，挂载期消费的形态兼容）。
  *
  * [HISTORICAL] 旧版用例断言的 data-tier 三档（640/520 阈值）、data-slot-capacity/model merged、
  * `composer-overflow-menu` / `composer-capacity-merged` / `composer-model-merged` testid、
  * 合流发丝分隔（separatorsInBar）已随三步聚合击败的旧语义删除。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-bar-density-wiring.test.ts
+ * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/composer-bar-density-wiring.test.ts
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
@@ -43,6 +59,7 @@ import {
 import { HEADER_ACTIONS_SOURCE_KEY } from '@/composables/shell/useExtensionHostBridge'
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import Composer from '@/components/panel/Composer.vue'
+import { useCommandStore, __testing } from '@/composables/features/command/useCommandStore'
 
 // ── 托盘三态替身：计数可注入（数组型行集对本文件无消费方，恒空）──
 // state = mock 工厂挂载的 reactive 计数（挂载前 null）：mount 前定值与 mount 后中途变更
@@ -97,6 +114,40 @@ vi.mock('@/api', () => ({
   chat: { send: vi.fn(() => Promise.resolve()), steer: vi.fn(() => Promise.resolve()), streamSubscribe: vi.fn(() => () => {}) },
 }))
 vi.mock('@/stores/session', () => composerSessionStoreModule())
+
+// ── slash 节的 ComposerInput mock（U9 并入自 composer-slash-injection）：
+//    defineExpose 暴露 insertSlashChip / insertSkillChip 为独立 vi.fn() spy。
+//    每个测试 mount 前重新生成 spy：通过 factory 读取最新 spy 引用。
+//    insertSkillChip 供 pendingSlash.isSkill 分流断言（搜索注入的 skill 项不走 insertSlashChip）。
+//    bar-density 节的 ComposerInput 走 global.stubs 名称匹配（mock 组件 name 相同被 stub
+//    替换不进 DOM，spy 不误收集）。
+let composerInputSpies: Array<{
+  insertSlashChip: ReturnType<typeof vi.fn>
+  insertSkillChip: ReturnType<typeof vi.fn>
+}> = []
+// W4：ComposerInput 迁 ui 包（@taiji/ui/features/composer），mock 目标是 ui 包路径
+vi.mock('@taiji/ui/features/composer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/ui/features/composer')>()
+  return {
+    ...actual,
+    ComposerInput: defineComponent({
+    name: 'ComposerInput',
+    emits: ['input', 'keydown', 'slash-trigger', 'file-trigger'],
+    setup() {
+      const insertSlashChip = vi.fn()
+      const insertSkillChip = vi.fn()
+      const spy = { insertSlashChip, insertSkillChip }
+      composerInputSpies.push(spy)
+      return { insertSlashChip, insertSkillChip }
+    },
+    template: '<div data-testid="composer-input" />',
+    }),
+  }
+})
+
+// ══════════ 来源节：composer-bar-density-wiring（原文件顶层 hook/helper 下沉包裹层内）══════════
+
+describe('Composer 底栏密度（composer-bar-density-wiring 合并节）', () => {
 
 // ── 子组件 stub（ComposerInput mock 收敛 composer-mount 共用部分工厂）──
 const { lastInputText, ComposerInputMock } = makeComposerInputMock()
@@ -503,5 +554,221 @@ describe('fit 收敛回路（宽度矩阵驱动）', () => {
     observer?.dispatch([{ contentRect: { width: 700 } as DOMRectReadOnly }])
     await nextTick()
     expect(document.querySelector('[data-testid="composer-bar"]')).toBeNull()
+  })
+})
+}) // ── 底栏密度包裹层结束（本节 hook 作用域收口）
+
+// ══════════ 来源节：composer-slash-injection（U9 并入；@/stores/chat 窄 mock 撤销，
+// 改节内对真实 chat store 的 7 动作方法 spy——策略：真 pinia + 真 commandStore
+// （需观察 pendingSlash 真实值 / clearPendingSlash 真实副作用）+ 真 chat store）══════════
+
+describe('Composer slash 注入（composer-slash-injection 合并节）', () => {
+  /** mount Composer，返回 wrapper + 最近一次 ComposerInput 的 insertSlashChip / insertSkillChip spy */
+  function mountSlashComposer(props: { sessionId: string | null; variant?: 'panel' | 'landing' }) {
+    const wrapper = mount(Composer, {
+      props,
+      global: { stubs: composerChildStubs },
+    })
+    const spy = composerInputSpies.at(-1)?.insertSlashChip
+    const skillSpy = composerInputSpies.at(-1)?.insertSkillChip
+    if (!spy || !skillSpy) throw new Error('ComposerInput spy 未生成')
+    return { wrapper, spy, skillSpy }
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    composerInputSpies = []
+    // [w5] 壳单例跨测试共享：reset 让每个用例拿到全新实例（旧 Composer watch 订阅旧实例，不再干扰）
+    __testing.__resetCommandStoreForTesting()
+    // U9 改造：原模块窄 mock（useChatStore 仅 7 动作键）撤销——改用真实 store。
+    // Composer 构造期只读 isActive / getRetryState（真实成员，无活跃 session 时恒
+    // false/undefined，与原窄 mock 下「computed 未被求值」的净效果等价且更真实）；
+    // 动作方法（send/steer 等）在 useChat composable 上，不在 store 上，无需 spy。
+  })
+
+  // ───────────────────────── U12 匹配时注入 + 注入顺序 ─────────────────────────
+
+  describe('Composer slash 注入 watch（Wave C）', () => {
+    it('U12 匹配时注入并按序先 insert 后 clear（含 icon 透传）', async () => {
+      const { spy: insertSpy } = mountSlashComposer({ sessionId: 's1' })
+      const commandStore = useCommandStore()
+      const clearSpy = vi.spyOn(commandStore, 'clearPendingSlash')
+
+      commandStore.requestSlashInjection({
+        command: '/goal',
+        icon: 'star',
+        sessionId: 's1',
+      })
+      await nextTick()
+
+      // insertSlashChip 收到 command + icon（透传）
+      expect(insertSpy).toHaveBeenCalledOnce()
+      expect(insertSpy).toHaveBeenCalledWith('/goal', 'star')
+      // pendingSlash 被消费清空
+      expect(commandStore.pendingSlash.value).toBeNull()
+      expect(clearSpy).toHaveBeenCalledOnce()
+      // 注入顺序：先 insertSlashChip 后 clearPendingSlash（防先清后注入读到 null）
+      expect(insertSpy).toHaveBeenCalledBefore(clearSpy)
+    })
+
+    // ───────────────────────── U13 不匹配时不消费（不误清）─────────────────────────
+
+    it('U13 不匹配 sessionId 时不消费（不误清留给其他 Composer 的请求）', async () => {
+      const { spy: insertSpy } = mountSlashComposer({ sessionId: 's1' })
+      const commandStore = useCommandStore()
+      const clearSpy = vi.spyOn(commandStore, 'clearPendingSlash')
+
+      commandStore.requestSlashInjection({ command: '/x', sessionId: 's2' })
+      await nextTick()
+
+      // 不注入
+      expect(insertSpy).not.toHaveBeenCalled()
+      // 不清空（显式断言调用次数 0，防「无论匹配都 clear」误实现清掉 s2 的请求）
+      expect(clearSpy).not.toHaveBeenCalled()
+      // pendingSlash 仍非 null（留给 sid=s2 的 Composer 消费）
+      expect(commandStore.pendingSlash.value).not.toBeNull()
+      expect(commandStore.pendingSlash.value?.sessionId).toBe('s2')
+    })
+
+    // ───────────────────────── U14 landing 态匹配（双方 null）─────────────────────────
+
+    it('U14 landing 态（sessionId=null）匹配 null 请求时注入', async () => {
+      const { spy: insertSpy } = mountSlashComposer({ sessionId: null, variant: 'landing' })
+      const commandStore = useCommandStore()
+
+      commandStore.requestSlashInjection({
+        command: '/goal',
+        icon: 'star',
+        sessionId: null,
+      })
+      await nextTick()
+
+      expect(insertSpy).toHaveBeenCalledOnce()
+      expect(insertSpy).toHaveBeenCalledWith('/goal', 'star')
+      expect(commandStore.pendingSlash.value).toBeNull()
+    })
+
+    // ───────────────────────── U15 watch 非 immediate（残留值不误注入）─────────────────────────
+
+    it('U15 watch 非 immediate（挂载前残留 pendingSlash 不误注入）', async () => {
+      const commandStore = useCommandStore()
+      // 挂载前预设 pendingSlash（模拟 store 残留前一个 Composer 的请求）
+      commandStore.requestSlashInjection({
+        command: '/goal',
+        icon: 'star',
+        sessionId: 's1',
+      })
+      expect(commandStore.pendingSlash.value).not.toBeNull() // 预设存在
+
+      // 然后才 mount Composer（非 immediate：初始值不应触发 watch）
+      const { spy: insertSpy } = mountSlashComposer({ sessionId: 's1' })
+      await nextTick()
+      await flushPromises()
+
+      expect(insertSpy).not.toHaveBeenCalled()
+      // 残留值未被本 Composer 误消费（应留给真正触发的消费时机）
+      expect(commandStore.pendingSlash.value).not.toBeNull()
+    })
+
+    // ───────────────────────── U16 重复点击同命令触发（ts 变化）─────────────────────────
+
+    it('U16 重复点击同命令（ts 变化）→ insertSlashChip 调用 2 次', async () => {
+      const { spy: insertSpy } = mountSlashComposer({ sessionId: 's1' })
+      const commandStore = useCommandStore()
+
+      // 第一次请求 → watch 触发 → insertSlashChip + clearPendingSlash（pendingSlash 变 null）
+      commandStore.requestSlashInjection({ command: '/goal', icon: 'star', sessionId: 's1' })
+      await nextTick()
+      expect(insertSpy).toHaveBeenCalledOnce()
+
+      // 第二次请求（ts 不同）→ pendingSlash 从 null 变非 null → watch 再触发
+      // 两次请求间隔需让第一次的 watch 执行完（clearPendingSlash 已将值置 null）
+      await nextTick()
+      commandStore.requestSlashInjection({ command: '/goal', icon: 'star', sessionId: 's1' })
+      await nextTick()
+
+      expect(insertSpy).toHaveBeenCalledTimes(2)
+      expect(commandStore.pendingSlash.value).toBeNull()
+    })
+
+    // ───────────────────────── U18 split 双 Composer 竞争消费 ─────────────────────────
+
+    it('U18 split 双 Composer：仅目标 session 的 Composer 消费（竞争不重复注入）', async () => {
+      // 同一 pinia 下 mount 两个 Composer（s1 + s2），各自 ComposerInput mock spy 独立
+      const { spy: spy1 } = mountSlashComposer({ sessionId: 's1' })
+      const { spy: spy2 } = mountSlashComposer({ sessionId: 's2' })
+      const commandStore = useCommandStore()
+
+      // 注入目标 s1
+      commandStore.requestSlashInjection({ command: '/goal', sessionId: 's1' })
+      await nextTick()
+      await flushPromises()
+
+      // 仅 s1 的 Composer 注入（1 次），s2 不被调
+      expect(spy1).toHaveBeenCalledOnce()
+      expect(spy1).toHaveBeenCalledWith('/goal', undefined)
+      expect(spy2).not.toHaveBeenCalled()
+
+      // 全局注入总次数 === 1（无重复/广播消费）
+      expect(spy1.mock.calls.length + spy2.mock.calls.length).toBe(1)
+      // pendingSlash 最终为 null（被 s1 消费方清一次）
+      expect(commandStore.pendingSlash.value).toBeNull()
+    })
+  })
+
+  // ───────────────── U19/U20 SearchModal 注入按 isSkill 分流（第三条 skill 入口合流）─────────────────
+  // pi 的 skill 命令名是裸 `skill:<name>`（无前导 /），命令通路（insertSlashChip）内 `/skill:` 前缀
+  // 判定为假 ⇒ 不分流会落成命令 chip。本组锁：isSkill 真 → insertSkillChip(裸名, location, icon)；
+  // 缺省 → 维持 insertSlashChip(命令通路回归锁)。
+
+  describe('Composer pendingSlash 按 isSkill 分流（SearchModal ⌘K 注入）', () => {
+    it('U19 isSkill:true → insertSkillChip(裸名, location, icon)，不走 insertSlashChip，通道被清', async () => {
+      const { spy: slashSpy, skillSpy } = mountSlashComposer({ sessionId: 's1' })
+      const commandStore = useCommandStore()
+
+      commandStore.requestSlashInjection({
+        command: 'skill:code-review',
+        icon: 'star',
+        sessionId: 's1',
+        isSkill: true,
+        location: '/skills/code-review/SKILL.md',
+      })
+      await nextTick()
+
+      // 裸名（剥 `skill:` 前缀）+ location + icon 透传
+      expect(skillSpy).toHaveBeenCalledOnce()
+      expect(skillSpy).toHaveBeenCalledWith('code-review', '/skills/code-review/SKILL.md', 'star')
+      // 命令通路未被调用（不落命令 chip）
+      expect(slashSpy).not.toHaveBeenCalled()
+      expect(commandStore.pendingSlash.value).toBeNull()
+    })
+
+    it('U20 回归锁：isSkill 缺省/false → 仍走 insertSlashChip，不调 insertSkillChip', async () => {
+      const { spy: slashSpy, skillSpy } = mountSlashComposer({ sessionId: 's1' })
+      const commandStore = useCommandStore()
+
+      commandStore.requestSlashInjection({ command: 'goal', icon: 'goal', sessionId: 's1', isSkill: false })
+      await nextTick()
+
+      expect(slashSpy).toHaveBeenCalledOnce()
+      expect(slashSpy).toHaveBeenCalledWith('goal', 'goal')
+      expect(skillSpy).not.toHaveBeenCalled()
+      expect(commandStore.pendingSlash.value).toBeNull()
+    })
+
+    it('U19b isSkill:true 且 location 缺省 → insertSkillChip(裸名, undefined, icon)（不兜底不报错）', async () => {
+      const { skillSpy } = mountSlashComposer({ sessionId: 's1' })
+      const commandStore = useCommandStore()
+
+      commandStore.requestSlashInjection({
+        command: 'skill:code-review',
+        icon: 'star',
+        sessionId: 's1',
+        isSkill: true,
+      })
+      await nextTick()
+
+      expect(skillSpy).toHaveBeenCalledWith('code-review', undefined, 'star')
+    })
   })
 })
