@@ -11,7 +11,7 @@
 
 import type { QuotaFetchFailureReason } from './types.js'
 import { extractQuotaWorkspaceId } from '@taiji/shared'
-import { isRecord } from './types.js'
+import { isFailReason, isRecord } from './types.js'
 
 /** headerFroms 元素（与 declarative-engine DeclarativeHeaderFrom 同构；经 engine 类型再导出）。 */
 export interface HeaderFrom { // oe-exempt:20261025:framework:taiji 远程配置域内形状——接口先立单实现常态（本仓架构偏好），与 declarative-engine 各 Declarative* 形状同族
@@ -25,12 +25,7 @@ export interface HeaderFrom { // oe-exempt:20261025:framework:taiji 远程配置
   failReason?: QuotaFetchFailureReason
 }
 
-const FAIL_REASONS: readonly string[] = ['unauthorized', 'network', 'no-subscription', 'parse', 'not_configured', 'no-credential', 'credential-unavailable', 'credential-unsupported', 'cookie-invalid-format']
 const HEADER_FROM_SOURCES: readonly string[] = ['params', 'cookie']
-
-function isFailReason(v: unknown): v is QuotaFetchFailureReason {
-  return typeof v === 'string' && (FAIL_REASONS as readonly string[]).includes(v)
-}
 
 /** headerFroms 元素 guard：来源封闭词表 + key/header 非空 + extractor 封闭词表 + failReason 合法。 */
 export function isHeaderFromValid(h: unknown): boolean {

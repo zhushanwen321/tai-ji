@@ -516,31 +516,23 @@ export class GenStatsService {
       fresh?.cache ?? readDayRecords<CacheRatioRecord>(cacheRatioFilePath(provider, model), PAIR_RECORD_TUPLE_LENGTH)
     const ttftRecords =
       fresh?.ttft ?? readDayRecords<TtftRecord>(ttftFilePath(provider, model), TTFT_RECORD_TUPLE_LENGTH)
+    // 滚动窗口截止点只算一次（speed 与 ttft 两个聚合块共用同三档）。
+    const cutoffDay = rollingWindowCutoff(now, WINDOW_DAYS.day)
+    const cutoffD7 = rollingWindowCutoff(now, WINDOW_DAYS.d7)
+    const cutoffD30 = rollingWindowCutoff(now, WINDOW_DAYS.d30)
     return {
       speed: {
-        day: aggregateSpeedDistribution(
-          entriesSince<SpeedRecord>(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.day)),
-        ),
-        d7: aggregateSpeedDistribution(
-          entriesSince<SpeedRecord>(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.d7)),
-        ),
-        d30: aggregateSpeedDistribution(
-          entriesSince<SpeedRecord>(speedRecords, rollingWindowCutoff(now, WINDOW_DAYS.d30)),
-        ),
+        day: aggregateSpeedDistribution(entriesSince<SpeedRecord>(speedRecords, cutoffDay)),
+        d7: aggregateSpeedDistribution(entriesSince<SpeedRecord>(speedRecords, cutoffD7)),
+        d30: aggregateSpeedDistribution(entriesSince<SpeedRecord>(speedRecords, cutoffD30)),
       },
       cacheRatio: {
-        day: aggregateCacheRatio(entriesSince<CacheRatioRecord>(cacheRecords, rollingWindowCutoff(now, WINDOW_DAYS.day))),
+        day: aggregateCacheRatio(entriesSince<CacheRatioRecord>(cacheRecords, cutoffDay)),
       },
       ttft: {
-        day: aggregateTtftDistribution(
-          entriesSince<TtftRecord>(ttftRecords, rollingWindowCutoff(now, WINDOW_DAYS.day)),
-        ),
-        d7: aggregateTtftDistribution(
-          entriesSince<TtftRecord>(ttftRecords, rollingWindowCutoff(now, WINDOW_DAYS.d7)),
-        ),
-        d30: aggregateTtftDistribution(
-          entriesSince<TtftRecord>(ttftRecords, rollingWindowCutoff(now, WINDOW_DAYS.d30)),
-        ),
+        day: aggregateTtftDistribution(entriesSince<TtftRecord>(ttftRecords, cutoffDay)),
+        d7: aggregateTtftDistribution(entriesSince<TtftRecord>(ttftRecords, cutoffD7)),
+        d30: aggregateTtftDistribution(entriesSince<TtftRecord>(ttftRecords, cutoffD30)),
       },
       model: modelKey,
     }

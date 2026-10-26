@@ -20,7 +20,7 @@
  */
 
 import type { QuotaAuthKind, QuotaFetchFailureReason, QuotaFetchOutcome, QuotaWindow } from '@taiji/shared'
-import { INFINITE_WIN, isRecord, isoResetRemaining, numericField } from './types.js'
+import { INFINITE_WIN, isFailReason, isRecord, isoResetRemaining, numericField } from './types.js'
 import { isHeaderFromsValid, resolveHeaderFroms, type HeaderFrom } from './header-froms.js'
 import { fetchAuxiliaryRequests, fetchPrimary } from './declarative-fetch.js'
 import { normalizeCookieHeader } from '@taiji/shared'
@@ -105,11 +105,6 @@ const SLOTS: readonly QuotaSlot[] = ['fiveHour', 'week', 'month']
 const RESET_MODES: readonly ResetSecMode[] = ['iso', 'epochMs', 'relativeLabel', 'zonelessUtcWallClock', 'epochMsElseRelativeLabel', 'relativeMs', 'epochSecOrMs']
 const PCT_VIAS: readonly PctVia[] = ['direct', 'percent01to100', 'usedOverLimit', 'remainingToUsed', 'fractionRemainingToUsed']
 const REQUEST_METHODS: readonly QuotaRequestMethod[] = ['GET', 'POST']
-const FAIL_REASONS: readonly string[] = ['unauthorized', 'network', 'no-subscription', 'parse', 'not_configured', 'no-credential', 'credential-unavailable', 'credential-unsupported', 'cookie-invalid-format']
-
-function isFailReason(v: unknown): v is QuotaFetchFailureReason {
-  return typeof v === 'string' && (FAIL_REASONS as readonly string[]).includes(v)
-}
 
 /** 路径字段形态：单路径串或双形态数组（protojson camelCase / snake_case 皆合法，首命中生效）。 */
 function isPathValid(v: unknown): boolean {

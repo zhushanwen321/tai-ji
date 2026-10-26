@@ -218,17 +218,22 @@ export interface FailureCauseInput {
  * 裁决」的结构承载）；② 未命中 → status→class 的 HTTP 语义层（引擎内置，稳定）+
  * pi 兜底文案词表；③ 皆未命中 → 不产（保守 unknown，不猜）。
  */
+/** harness 预算耗尽 FailureCause 骨架（两产点共用：事实位直杀路径与 aborted 停因路径；raw/budget 来源各异）。 */
+function harnessBudgetCause(raw: string, budget: TurnBudgetExhaustion | undefined): FailureCause {
+  return {
+    class: "harness",
+    kind: "turn_budget_exhausted",
+    retryable: false,
+    raw,
+    ...(budget !== undefined ? { budget } : {}),
+  };
+}
+
 export function classifyFailureCause(input: FailureCauseInput, nowMs: number = Date.now()): FailureCause | undefined {
   const { terminalError } = input;
   // harness 预算：limiter 耗尽是 SIGKILL 直杀路径（无停因事实可采），事实位优先。
   if (input.turnBudgetExhausted === true) {
-    return {
-      class: "harness",
-      kind: "turn_budget_exhausted",
-      retryable: false,
-      raw: "turn budget exhausted after grace turns (limiter abort)",
-      ...(input.turnBudget !== undefined ? { budget: input.turnBudget } : {}),
-    };
+    return harnessBudgetCause("turn budget exhausted after grace turns (limiter abort)", input.turnBudget);
   }
   if (terminalError === undefined) return undefined;
   const raw = terminalError.errorMessage;
@@ -258,15 +263,9 @@ function classifyAbortedCause(terminalError: EngineRoundErrorFact, raw: string):
     return { class: "user", kind: "cancelled", retryable: false, raw };
   }
   if (terminalError.abortSource === "turn-budget") {
-    return {
-      class: "harness",
-      kind: "turn_budget_exhausted",
-      retryable: false,
-      raw,
-      // [§3.3.9/UC-10] 停因事实的 turnBudget 快照（EngineRoundErrorFact.turnBudget）
-      // 优先；无快照的竞窗形态事实不足不产结构（budget 缺省）。
-      ...(terminalError.turnBudget !== undefined ? { budget: terminalError.turnBudget } : {}),
-    };
+    // [§3.3.9/UC-10] 停因事实的 turnBudget 快照（EngineRoundErrorFact.turnBudget）
+    // 优先；无快照的竞窗形态事实不足不产结构（budget 缺省）。
+    return harnessBudgetCause(raw, terminalError.turnBudget);
   }
   return { class: "engine", kind: "engine_aborted", retryable: false, raw };
 }

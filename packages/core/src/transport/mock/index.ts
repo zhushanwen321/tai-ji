@@ -281,18 +281,15 @@ function buildSessionListGroups(query: { surface?: SessionSurface; mainSessionId
   const wantSidebar = query.surface === undefined || query.surface === 'sidebar'
   const wantBtw = query.surface === undefined || query.surface === 'btw'
   const byCwd = new Map<string, SessionSummary[]>()
-  const order: string[] = []
   const push = (s: SessionSummary): void => {
     const bucket = byCwd.get(s.cwd)
     if (bucket) bucket.push(s)
-    else {
-      byCwd.set(s.cwd, [s])
-      order.push(s.cwd)
-    }
+    else byCwd.set(s.cwd, [s])
   }
   if (wantSidebar) for (const g of buildGroups()) for (const s of g.sessions) push(s)
   if (wantBtw) for (const s of buildBtwLineEntries(query)) push(s)
-  return order.map((cwd) => ({ cwd, sessions: byCwd.get(cwd) as SessionSummary[] }))
+  // Map 迭代序 = 首次插入序（与原平行 order 数组同序），分组顺序不变。
+  return [...byCwd].map(([cwd, sessions]) => ({ cwd, sessions }))
 }
 
 // ── session 归档域 mock（session-archive 设计 D5；行为对齐 real 域四函数签名）──────────
@@ -1449,7 +1446,7 @@ const networkProxySub = makeMockSubscription(() => ({ config: cloneMockNetworkPr
 // retry-rules mock 内存态（get/set/onRetryRules 消费；builtin 快照自 shared 基线）
 let mockRetryRulesCustom: RetryableErrorRule[] = []
 const retryRulesSub = makeMockSubscription(() => ({
-  builtinRules: structuredClone(RETRY_RULES_BASELINE) as RetryableErrorRule[],
+  builtinRules: mockRetryRulesBuiltin(),
   customRules: structuredClone(mockRetryRulesCustom),
 }))
 function mockRetryRulesBuiltin(): RetryableErrorRule[] {

@@ -311,8 +311,7 @@ function handleAgentEnd(
   // [subagent-observability §3.3.1] 停因事实优先：错误停因（error/aborted）或存在
   // 未消费的引擎 error 事实 → onErroredEnd（失败收口），settled 门控在 spawn-runner
   // 同点覆盖（settled 不再是任何置 0 依据）。
-  const stopReasonIsErrorFact =
-    edge.lastStopReason === "error" || edge.lastStopReason === "aborted";
+  const stopReasonIsErrorFact = isErrorStopReason(edge.lastStopReason);
   if (stopReasonIsErrorFact || edge.pendingErrorFact !== undefined) {
     const stopReason: "error" | "aborted" = edge.lastStopReason === "aborted" ? "aborted" : "error";
     // [§3.3.1 aborted 三源判别] 同一收尾边沿裁决：宿主取消 > limiter 耗尽 > 引擎异常。
@@ -370,7 +369,7 @@ function handleAgentSettled(
       // 引擎停因词表展示口径（stop/error/aborted）：非 error/aborted 的正常停因
       // （toolUse/length/deferred）统一记 stop——成功收尾事实。
       stopReason:
-        edge.lastStopReason === "error" || edge.lastStopReason === "aborted"
+        isErrorStopReason(edge.lastStopReason)
           ? edge.lastStopReason
           : edge.lastStopReason !== undefined
             ? "stop"
@@ -379,6 +378,11 @@ function handleAgentSettled(
     record.turnCount = 0;
     limiter.reset();
   }
+}
+
+/** 停因是否错误族（error/aborted）——两收尾边沿（onErroredEnd 判终 / settled 停因词表）共用判定。 */
+function isErrorStopReason(reason: string | undefined): boolean {
+  return reason === "error" || reason === "aborted";
 }
 
 /**

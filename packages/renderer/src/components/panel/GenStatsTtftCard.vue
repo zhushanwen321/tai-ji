@@ -55,9 +55,8 @@
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { GenStatsDistribution } from '@taiji/shared'
 import { useGenStats } from '@/composables/features/model/useGenStats'
-import { formatTtftDuration, formatDistributionValue } from './gen-stats-display'
+import { formatTtftDuration, formatDistributionValue, distributionColumns, distributionRows } from './gen-stats-display'
 import type { DistributionColumn, DistributionRow } from './gen-stats-display'
 import GenStatsDistributionGrid from './GenStatsDistributionGrid.vue'
 
@@ -76,30 +75,15 @@ const { current: frame } = useGenStats(toRef(props, 'sessionId'), toRef(props, '
 /** 本次（本会话最近一次请求）：单样本原值，不进分布矩阵 */
 const ttftCurrent = computed(() => frame.value?.ttft.current ?? null)
 
-/** 矩阵列 = 五个统计量。列头只写一次统计量名（单位见列头 note），行头只写窗口名。 */
-const ttftColumns = computed<DistributionColumn[]>(() => [
-  { key: 'avg', label: t('panel.context.genStatsColAvg') },
-  { key: 'p50', label: t('panel.context.genStatsColP50') },
-  { key: 'p99', label: t('panel.context.genStatsColP99'), note: t('panel.context.genStatsColP99Note') },
-  { key: 'max', label: t('panel.context.genStatsColMax') },
-  { key: 'min', label: t('panel.context.genStatsColMin') },
-])
+/** 矩阵列 = 五个统计量（列头/矩阵行/缺省值与速度卡共用 gen-stats-display 单一来源；列头只写一次统计量名，单位见列头 note） */
+const ttftColumns = computed<DistributionColumn[]>(() => distributionColumns(t))
 
 /** 矩阵行 = 三个滚动窗口（本会话 current 已在矩阵上方单列，不入表） */
-const ttftRows = computed<DistributionRow[]>(() => {
-  const d = frame.value?.ttft
-  return [
-    { key: 'day', label: t('panel.context.genStatsWindowDay'), values: d?.day ?? NULL_DISTRIBUTION },
-    { key: 'd7', label: t('panel.context.genStatsWindowD7'), values: d?.d7 ?? NULL_DISTRIBUTION },
-    { key: 'd30', label: t('panel.context.genStatsWindowD30'), values: d?.d30 ?? NULL_DISTRIBUTION },
-  ]
-})
+const ttftRows = computed<DistributionRow[]>(() => distributionRows(t, frame.value?.ttft))
 
 /** 单元格格式化：ms →「820ms」/「1.2s」（逐格带单位——延迟量级跨毫秒到秒，不标单位读不出量级） */
 function formatCell(v: number | null): string {
   return formatDistributionValue(v, formatTtftDuration)
 }
 
-/** 矩阵缺省值（帧存在但窗口无样本时的兜底；与 GenStatsDistribution 五量 null 同形） */
-const NULL_DISTRIBUTION: GenStatsDistribution = { avg: null, p50: null, p99: null, max: null, min: null }
 </script>

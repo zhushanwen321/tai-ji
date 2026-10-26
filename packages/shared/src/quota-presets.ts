@@ -183,10 +183,11 @@ const PARAM_NORMALIZE_KINDS: readonly string[] = ['opencode-workspace', 'opendes
 function isQuotaParamSpec(v: unknown): boolean {
   if (!isPlainRecord(v)) return false
   if (typeof v['key'] !== 'string' || v['key'] === '') return false
-  if (v['label'] !== undefined && typeof v['label'] !== 'string') return false
-  if (v['placeholder'] !== undefined && typeof v['placeholder'] !== 'string') return false
-  if (v['helpText'] !== undefined && typeof v['helpText'] !== 'string') return false
-  if (v['required'] !== undefined && typeof v['required'] !== 'boolean') return false
+  // 可选字段统一走 isOptionalField（缺省放行 / 提供即校验，与 match/顶层同口径）
+  if (!isOptionalField(v, 'label', 'string')) return false
+  if (!isOptionalField(v, 'placeholder', 'string')) return false
+  if (!isOptionalField(v, 'helpText', 'string')) return false
+  if (!isOptionalField(v, 'required', 'boolean')) return false
   return v['normalize'] === undefined || (typeof v['normalize'] === 'string' && PARAM_NORMALIZE_KINDS.includes(v['normalize']))
 }
 
