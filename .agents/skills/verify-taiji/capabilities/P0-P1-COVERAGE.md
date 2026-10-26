@@ -196,3 +196,23 @@
 | `p1-retry-rules-extension` | retryable 增强 extension 执行层（验收项 A8，非核心组） | ✅ pass（45 断言） | 三段：改写触发（错误文案追加 `[taiji-retry: …]` 标记 → pi 原生词表命中 → 真实重试请求打到 mock，`tier_limit_exceeded` 对 pi 双词表零命中保证改写是重试的唯一触发源）+ settings round-trip（`config.setRetryConfig` 开关/参数经 runtime WS 产品通道）+ 停用回落（extension 关闭后错误文案无追加标记、不触发重试）。notProvable：settings UI 面（testid 归 UI 剧本）、重试请求 messages 含标记（pi `_omitRecoveryAttempt` 结构性剔除，证据走持久化侧）、指数退避节奏（baseDelayMs=0 短路换速度） |
 
 **本批次登记的机制边界（三剧本共性，驱动复用前必读）**：① mock-http 的错误注入唯一出口 = 成员剧本队列置空命中 404（`scripts/lib/mock-llm.mjs` 文件头职责边界）——404 在范本剧本里是噪音、在本批次剧本里是被注入的故障本身，直接作铁证；② mock 回复无真实模型语义——限流重试行为/编排质量/真实耗时与 token 成本不可断言（沿用已知空洞 #6）；③ 成员级 model 必须显式指定（`$ARGS.models` / 成员对象 model），否则继承主 agent 模型与主队共享游标。
+
+## 四、移动壳验收剧本（remote-use-mobile-v2 D3 批次，2026-10-26 补登）
+
+> 远程访问移动壳（packages/mobile-renderer v2）为独立功能面（FEATURE-PRIORITIES 远程访问行），与本表桌面 P0/P1 行不重叠。11 个场景全部 `scenario` 态（D3 正式验收实跑 exit 0，runId `<nodeId>-20261026-d3`，证据 `~/.agents/skill-data/dev-flow/refactor-remote-use-ui-22acbeb9/verify-nodes/<nodeId>/`）；装配底座 = `scenarios/lib/mobile-shell-helper.mjs`（remote-access 预置 + iPhone 13 仿真 + token 交接）+ `lib/mobile-task-flow.mjs`（建会话/发送/轮询）+ `lib/mobile-drive.mjs`（开壳落位/分组未读读侧/滚动几何）+ run.mjs `meta.remoteAccess` 预置钩子。移动壳验身的真实用户路径 = runtime HTTP 静态托管 dist（非 vite dev），剧本前必 `pnpm --filter @taiji/mobile-renderer build`。
+
+| 场景 | 断言 | 覆盖面 | 备注 |
+|---|---|---|---|
+| `mobile-shell-boot-three-states` | 17 | 首屏三态/token 抹除/坏 token 不毁凭据 | |
+| `mobile-sessions-grouping-unread` | 23 | 分组双源谓词/未读双触发帧级取证/点入即清 | |
+| `mobile-session-actions-delete` | 22 | 长按 480ms/删除二次确认/级联双证（localStorage+runtime） | |
+| `mobile-chat-stream-interrupt` | 22 | 贴底跟流/上滑不抢滚/回到最新/停止 | |
+| `mobile-queue-state-machine` | 24 | steer 注入/queued 可取消/failed 重试全链（含崩溃恢复重投） | 修复 A5 后全绿 |
+| `mobile-form-sheet-four-kinds` | 31 | form/planReview/dialog 作答/取消 result:null 协议层取证 | |
+| `mobile-permission-sheet-attribution` | 36 | 无归属一等分支/拒绝在左/过期关 Sheet+错误条 | 修复 A7 后全绿 |
+| `mobile-model-switch-ui` | 26 | 思考档四段映射/chip 短词/回执一致 | 修复 A8 后全绿 |
+| `mobile-subagent-panel` | 27 | 两级 Sheet/停止/执行记录历史派生 | 修复 A9 后全绿 |
+| `mobile-disconnect-reconnect` | 22 | 断线条/视图草稿保持/预算耗尽落连接页 | |
+| `mobile-preferences-session-exit` | 27 | 偏好持久化/已退出会话恢复链路 | A11 裁决后断言形态（2026-10-25 主 agent 裁决：点开 dead 即惰性恢复为产品机制，语义修订呈报 D5） |
+
+**已知边界**：真机形态族（触控手感/真机 Safari 地址栏/相机扫码）为仿真等价覆盖，a13-visual degraded 登记待真机复验；A8 段外值（xhigh/max）呈现 faux 域钳制不可达（映射纯函数包内单测覆盖）。
