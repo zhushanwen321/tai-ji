@@ -13,7 +13,13 @@
  * [cw wave w4] 删除 useResizeReport 旧路径用例（W4T1 RO 上报 + W4T1b registry 降级）：
  * w3 切到 virtua 后 BashOutputBlock 不再注册 useResizeReport（virtua ListItem 内部 RO 接管测高）。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/components/BashOutputBlock.test.ts
+ * ── 波 2a 簇 4-9 合并说明 ──
+ * 节 2（本文件尾部追加）= Turn.smoke.test.ts：Turn.vue 编排器冒烟（锚块/TurnSummary 挂载）。
+ * 两节同域（@taiji/ui 聊天流消息组件）、同 mockChatProvide provide 形态、零 vi.mock；
+ * Turn.smoke 的 vi.stubGlobal('__APP_VERSION__') 对本节零消费。FormOverlay.test.ts
+ * 属 extension 表单域（不消费 mockChatProvide），语义异域剔除保持独立。
+ *
+ * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/components/BashOutputBlock.test.ts --pool=threads
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -26,6 +32,8 @@ import { mockChatProvide } from '@/__tests__/helpers/chat-view-deps'
 
 // Mock deps.abortBash（BashOutputBlock 取消按钮的唯一外部依赖）
 const mockAbortBash = vi.fn()
+import type { MessageTurn } from '@/composables/logic/messageTurns'
+import { Turn } from '@taiji/ui'
 
 function makeMessage(overrides: Partial<Message> = {}): Message {
   return {
@@ -381,5 +389,88 @@ describe('BashOutputBlock W4 — 视觉降级', () => {
     // 极简风保留 py-2（turn 级 notice 间距；trace 块自身 py 节奏已随决策 4 退役，
     // 块间间距权威 = Turn.vue trace 相邻选择器）
     expect(classes).toContain('py-2')
+  })
+})
+
+// ══════════ 节 2/2 — 来源: Turn.smoke.test.ts ══════════
+
+/**
+ * Turn.vue 首屏冒烟测试（fast-handoff wave）。
+ *
+ * Turn.vue 是编排器：fork/handoff 按钮下沉到 TurnSummary 子组件；[actions-anchor] 起
+ * TurnSummary 经末位 text 块（Block）的 #turn-actions 插槽挂载，悬停区 = text 块本身。
+ * 冒烟验证：
+ * - 有 assistant（含 text 块）时锚块包装层存在，TurnSummary 挂载并透传 lastAssistant
+ * - 无 assistant（无 text 块）时无锚块，TurnSummary 不挂载
+ *
+ * mount 真实 Block + stub 其余子组件（shallowMount 的 stub 不渲染具名插槽，探不到插槽挂载的
+ * TurnSummary）。fork/handoff 按钮的 data-testid / disabled 检查单测在 TurnSummary 维度覆盖
+ * （本文件 TurnSummary 以 stub 出现，断言 testid 无意义）。Turn.vue 维度只校验编排挂载了
+ * 正确的子组件。
+ */
+// __APP_VERSION__ 是 vite define 注入的全局常量，vitest 下不存在，stub 之
+
+vi.stubGlobal('__APP_VERSION__', '0.0.0-test')
+
+/** 构造最小 MessageTurn（含一条 assistant，触发 handoff/fork 按钮渲染） */
+function makeTurn(overrides: Partial<MessageTurn> = {}): MessageTurn {
+  const assistant: Message = {
+    id: 'a-1',
+    role: 'assistant',
+    content: 'hello',
+    status: 'complete',
+    timestamp: Date.now(),
+  }
+  return {
+    index: 0,
+    user: null,
+    assistants: [assistant],
+    isStreaming: false,
+    hasFoldable: false,
+    ...overrides,
+  }
+}
+
+/** mount Turn（真实 Block）：stub 编排器其余子组件 + provide mock ChatViewDeps */
+function mountTurn(turn: MessageTurn, depsOverrides: Record<string, unknown> = {}) {
+  return mount(Turn, {
+    props: { turn, sessionId: 'test-session' },
+    global: {
+      plugins: [createPinia()],
+      provide: mockChatProvide(depsOverrides),
+      stubs: {
+        UserBubble: true,
+        TurnMeta: true,
+        TurnSummary: true,
+        ChangeSetCard: true,
+        MarkdownRenderer: true,
+        TraceCompactorRow: true,
+        BashOutputBlock: true,
+        SystemNotice: true,
+      },
+    },
+  })
+}
+
+describe('Turn.vue 冒烟', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('有 assistant 时锚块包装层存在，TurnSummary 挂载并透传 lastAssistant（handoff/fork 按钮宿主）', () => {
+    const turn = makeTurn()
+    const wrapper = mountTurn(turn)
+    // [actions-anchor] 操作栏插槽包装层挂在末位 text 块行内（group/text）
+    expect(wrapper.find('[data-testid="turn-actions-anchor"]').exists()).toBe(true)
+    const summary = wrapper.findComponent({ name: 'TurnSummary' })
+    expect(summary.exists()).toBe(true)
+    expect(summary.props('lastAssistant')).toEqual(turn.assistants[0])
+  })
+
+  it('无 assistant（无 text 块）时无锚块，TurnSummary 不挂载', () => {
+    const wrapper = mountTurn(makeTurn({ assistants: [] }))
+    expect(wrapper.find('[data-testid="turn-actions-anchor"]').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'TurnSummary' }).exists()).toBe(false)
   })
 })

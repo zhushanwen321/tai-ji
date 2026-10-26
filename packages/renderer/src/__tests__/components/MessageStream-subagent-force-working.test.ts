@@ -1,6 +1,36 @@
 /**
- * MessageStream 虚拟 session forceWorking 接线测试（review round2 R1-遗留-1）。
+ * MessageStream 聊天流测试合并文件（波 2a 簇 4-2）。
  *
+ * 节 1 — MessageStream-subagent-force-working：虚拟 session forceWorking 接线
+ *        （review round2 R1-遗留-1；forceWorking → 末位 turn.isStreaming → Turn prop）。
+ * 节 2 — SubagentDirectiveStream：subagent.directive live 广播 → 定向气泡 DOM
+ *        （U2b 集成，§3.3.3a live 链路）。
+ *
+ * 合并说明：两节同壳（helpers/message-stream-shell-mount 顶层注册壳 mock 三连 +
+ * virtua/vue 工厂去重为一份）。同名绑定按节重命名（globalStubs → fwStubs / dsStubs、
+ * mountStream → mountStreamFw / mountStreamDs），describe/it 名零改动。
+ * 各节 beforeEach 幂等（resetMessageStreamEnv），保持节内原样。
+ *
+ * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/components/MessageStream-subagent-force-working.test.ts --pool=threads
+ */
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import '@/__tests__/helpers/message-stream-shell-mount'
+import { virtuaVueMockModule, messageStreamStubs, resetMessageStreamEnv, makeStreamMessageFactory } from '@/__tests__/helpers/chat-stream-mount'
+import { mount, flushPromises } from '@vue/test-utils'
+import { nextTick, effectScope } from 'vue'
+import { createUseChat, resetChatModuleStateForTest } from '@taiji/core'
+import type { ChatStoreInstance, UseChatDeps } from '@taiji/core'
+import type { ServerMessage, Segment, Message, SubagentRecord } from '@taiji/shared'
+import { useChatStore } from '@/stores/chat'
+import { useSubagentStore, subagentVirtualId } from '@/stores/subagent'
+import { SUBAGENT_OUTCOME_PLACEHOLDER } from '@taiji/shared'
+import MessageStream from '@/components/panel/MessageStream.vue'
+
+vi.mock('virtua/vue', () => virtuaVueMockModule())
+
+// ══════════ 节 1/2 — 来源: MessageStream-subagent-force-working.test.ts ══════════
+
+/**
  * 验证完整接线：虚拟 session id → subagentStore.isStreamingSubagent（窄口径，
  * running 且无轮终 result）→ toRenderItemsIncremental 的 forceWorking → 末位
  * turn.isStreaming → Turn prop。轮终 running-resumable（running + result）不再把
@@ -15,23 +45,10 @@
  * 完整论证：happy-dom 无布局，Virtualizer stub 全量渲染 scoped slot）；简化版
  * virtua mock 工厂在 helpers/chat-stream-mount.ts，壳 mock 三连经
  * helpers/message-stream-shell-mount.ts 顶层注册。
- *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/components/MessageStream-subagent-force-working.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import '@/__tests__/helpers/message-stream-shell-mount'
-import { virtuaVueMockModule, messageStreamStubs, resetMessageStreamEnv, makeStreamMessageFactory } from '@/__tests__/helpers/chat-stream-mount'
-import { mount } from '@vue/test-utils'
-import { useChatStore } from '@/stores/chat'
-import { useSubagentStore, subagentVirtualId } from '@/stores/subagent'
-import MessageStream from '@/components/panel/MessageStream.vue'
-import { SUBAGENT_OUTCOME_PLACEHOLDER } from '@taiji/shared'
-import type { Message, SubagentRecord } from '@taiji/shared'
-
-vi.mock('virtua/vue', () => virtuaVueMockModule())
 
 /** Turn stub：透出末位 turn.isStreaming（forceWorking 的接线终点，Turn prop 形态） */
-const globalStubs = messageStreamStubs({
+const fwStubs = messageStreamStubs({
   name: 'Turn',
   props: { turn: { type: Object, required: true } },
   template: '<div data-testid="turn-stub" :data-streaming="String(turn.isStreaming)" />',
@@ -41,7 +58,7 @@ const MAIN_SID = 's-fw-main'
 const SUB_ID = 'sub-fw-1'
 const VIRTUAL_ID = subagentVirtualId(MAIN_SID, SUB_ID)
 
-/** 消息工厂：role 缺省 assistant（本文件聚焦 turn 末位 isStreaming 接线） */
+/** 消息工厂：role 缺省 assistant（本节聚焦 turn 末位 isStreaming 接线） */
 const makeMsg = makeStreamMessageFactory('assistant')
 
 /** 虚拟分区消息：历史拉取形态（user + assistant 均 complete——JSONL 读出 status 恒 complete） */
@@ -64,16 +81,16 @@ function makeSubagentRecord(overrides: Partial<SubagentRecord>): SubagentRecord 
   }
 }
 
-function mountStream(sessionId: string) {
+function mountStreamFw(sessionId: string) {
   return mount(MessageStream, {
     props: { sessionId },
-    global: { stubs: globalStubs },
+    global: { stubs: fwStubs },
     attachTo: document.body,
   })
 }
 
 async function mountAndReadStreaming(): Promise<string> {
-  const wrapper = mountStream(VIRTUAL_ID)
+  const wrapper = mountStreamFw(VIRTUAL_ID)
   await wrapper.vm.$nextTick()
   await wrapper.vm.$nextTick()
   const turnStub = wrapper.find('[data-testid="turn-stub"]')
@@ -108,7 +125,7 @@ describe('MessageStream 虚拟 session forceWorking 接线（R1-遗留-1）', ()
     const sub = useSubagentStore()
     sub.applyRecords(MAIN_SID, [makeSubagentRecord({ status: 'running' })])
 
-    const wrapper = mountStream(MAIN_SID)
+    const wrapper = mountStreamFw(MAIN_SID)
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
     // 主 session 的 streaming 判定走 assistant.status（complete）→ false（working 指示归
@@ -135,7 +152,7 @@ describe('MessageStream → ActivityStrip subagentThinking 接线（u3-thinking 
     const sub = useSubagentStore()
     sub.applyRecords(MAIN_SID, [makeSubagentRecord({ subagentId: 'sub-fw-2', status: 'running' })])
 
-    const wrapper = mountStream(sidB)
+    const wrapper = mountStreamFw(sidB)
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="activity-strip-row-thinking"]').exists()).toBe(true)
@@ -147,7 +164,7 @@ describe('MessageStream → ActivityStrip subagentThinking 接线（u3-thinking 
     const sub = useSubagentStore()
     sub.applyRecords(MAIN_SID, [makeSubagentRecord({ status: 'running' })])
 
-    const wrapper = mountStream(VIRTUAL_ID)
+    const wrapper = mountStreamFw(VIRTUAL_ID)
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="activity-strip-row-thinking"]').exists()).toBe(false)
@@ -159,7 +176,7 @@ describe('MessageStream → ActivityStrip subagentThinking 接线（u3-thinking 
     const sub = useSubagentStore()
     sub.applyRecords(MAIN_SID, [makeSubagentRecord({ status: 'running' })])
 
-    const wrapper = mountStream(MAIN_SID)
+    const wrapper = mountStreamFw(MAIN_SID)
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="activity-strip-row-thinking"]').exists()).toBe(false)
@@ -185,7 +202,7 @@ describe('MessageStream subagentThinking 占位反例（D6）', () => {
     const sub = useSubagentStore()
     sub.applyRecords(MAIN_SID, [makeSubagentRecord({ subagentId: 'sub-fw-ph', status: 'running' })])
 
-    const wrapper = mountStream(sidP)
+    const wrapper = mountStreamFw(sidP)
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="activity-strip-row-thinking"]').exists()).toBe(true)
@@ -201,10 +218,148 @@ describe('MessageStream subagentThinking 占位反例（D6）', () => {
     const sub = useSubagentStore()
     sub.applyRecords(MAIN_SID, [makeSubagentRecord({ subagentId: 'sub-fw-real', status: 'running' })])
 
-    const wrapper = mountStream(sidR)
+    const wrapper = mountStreamFw(sidR)
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="activity-strip-row-thinking"]').exists()).toBe(false)
     wrapper.unmount()
+  })
+})
+
+// ══════════ 节 2/2 — 来源: SubagentDirectiveStream.test.ts ══════════
+
+/**
+ * 全链路（真实段）：core createUseChat 的会话级订阅 handler（subagent.directive 分支）→
+ * renderer pinia chatStore（appendSubagentDirective）→ MessageStream 渲染 → SystemNotice
+ * 定向气泡 DOM。唯一 mock：chatApi RPC 层（streamSubscribe 捕获 handler 供测试 emit 广播）
+ * 与 MessageStream 的外围壳依赖（virtua / useChatViewDeps / useChat / useSidebar，
+ * 对齐 MessageStream-kind.test.ts 模式）——数据与渲染链路全部真实。
+ *
+ * 覆盖：
+ * - 匹配 sid 的 subagent.directive 广播 → 聊天流出现「@slug：text」定向气泡 DOM
+ * - 不匹配 sid 的广播 → 不出现（ADR-0049 per-session 隔离，架构约定 7）
+ */
+
+/** stub 仅外围组件；SystemNotice 刻意不 stub——定向气泡 DOM 是断言对象 */
+const dsStubs = {
+  Turn: { name: 'Turn', template: '<div data-testid="turn-stub" />' },
+  BashOutputBlock: { name: 'BashOutputBlock', template: '<div />' },
+  TurnRail: { name: 'TurnRail', template: '<div />' },
+  ForkNotice: { name: 'ForkNotice', template: '<div />' },
+  Button: { name: 'Button', template: '<button><slot /></button>' },
+}
+
+interface Fixture {
+  useChat: ReturnType<typeof createUseChat>
+  chatStore: ReturnType<typeof useChatStore>
+  subagentAction: ReturnType<typeof vi.fn>
+  emit: (sid: string, m: ServerMessage) => void
+  mountStreamDs: () => ReturnType<typeof mount>
+  dispose: () => void
+}
+
+function makeFixture(sid: string): Fixture {
+  const scope = effectScope(true)
+  const streamHandlers = new Map<string, (m: ServerMessage) => void>()
+  const chatStore = scope.run(() => useChatStore())!
+  const chatApi = {
+    send: vi.fn().mockResolvedValue(undefined),
+    subagentAction: vi.fn().mockResolvedValue(undefined),
+    steer: vi.fn().mockResolvedValue(undefined),
+    followUp: vi.fn().mockResolvedValue(undefined),
+    abort: vi.fn().mockResolvedValue(undefined),
+    compact: vi.fn().mockResolvedValue(undefined),
+    bash: vi.fn().mockResolvedValue(undefined),
+    abortBash: vi.fn().mockResolvedValue(undefined),
+    getHistory: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
+    streamSubscribe: vi.fn((s: string, h: (m: ServerMessage) => void) => {
+      streamHandlers.set(s, h)
+      return () => streamHandlers.delete(s)
+    }),
+  }
+  const deps: UseChatDeps = {
+    chatApi,
+    writeSegments: vi.fn().mockResolvedValue(undefined),
+    // pinia store → core ChatStoreInstance 的类型鸿沟 cast（renderer useChat.ts 同款，运行时等价）
+    getChatStore: () => chatStore as unknown as ChatStoreInstance,
+    getSessionStore: () => ({ applySnapshot: vi.fn() }),
+    getLiveStateStore: () => ({ applyLiveState: vi.fn(), liveStateOf: () => undefined, removeLiveState: vi.fn() }),
+    // [session-dead 第三环] warning 注入点（本用例不触发）
+    toast: { error: vi.fn(), warning: vi.fn() },
+    t: (k: string) => k,
+    // [u3c] getCompactQueue 注入已随 useCompactQueue 退役摘除（UseChatDeps 无该成员）
+  }
+  const useChat = createUseChat(deps)
+  return {
+    useChat,
+    chatStore,
+    subagentAction: chatApi.subagentAction,
+    emit: (s, m) => streamHandlers.get(s)?.(m),
+    mountStreamDs: () =>
+      mount(MessageStream, {
+        props: { sessionId: sid },
+        global: { stubs: dsStubs },
+        attachTo: document.body,
+      }),
+    dispose: () => scope.stop(),
+  }
+}
+
+function directiveMsg(sid: string, slug: string, text: string): ServerMessage {
+  return {
+    type: 'subagent.directive',
+    payload: { sessionId: sid, subagentId: 'rec-1', slug, direction: 'user', text },
+  } as ServerMessage
+}
+
+describe('subagent.directive live 广播 → 聊天流定向气泡（U2b 集成）', () => {
+  beforeEach(() => {
+    resetMessageStreamEnv()
+    resetChatModuleStateForTest()
+  })
+
+  it('匹配 sid 的广播 → 聊天流出现「@slug：text」定向气泡 DOM', async () => {
+    const sid = 'live-1'
+    const f = makeFixture(sid)
+    // 定向发送（真实分流链路：subagentAction 而非 send + 建立会话级订阅）
+    const segments: Segment[] = [
+      { type: 'subagent', subagentId: 'rec-1', slug: 'build-api' },
+      { type: 'text', text: '汇报当前进度' },
+    ]
+    await f.useChat.send(sid, segments)
+    expect(f.subagentAction).toHaveBeenCalledTimes(1)
+    // runtime 广播到达（extension 留痕 entry 落盘后）
+    f.emit(sid, directiveMsg(sid, 'build-api', '汇报当前进度'))
+    await flushPromises()
+
+    const wrapper = f.mountStreamDs()
+    await nextTick()
+    const bubble = wrapper.find('[data-testid="subagent-directive-bubble"]')
+    expect(bubble.exists()).toBe(true)
+    expect(bubble.find('[data-testid="subagent-directive-slug"]').text()).toBe('@build-api')
+    expect(bubble.text()).toContain('汇报当前进度')
+    // 定向消息不是对话回合：无 user 气泡 / turn 渲染（主 agent 无新 turn，§3.3.8）
+    expect(wrapper.find('[data-testid="turn-stub"]').exists()).toBe(false)
+    wrapper.unmount()
+    f.dispose()
+  })
+
+  it('不匹配 sid 的广播 → 定向气泡不出现（per-session 隔离）', async () => {
+    const sid = 'live-2'
+    const f = makeFixture(sid)
+    await f.useChat.send(sid, [
+      { type: 'subagent', subagentId: 'rec-1', slug: 'build-api' },
+      { type: 'text', text: 'hi' },
+    ])
+    // 伪造异 session 广播到达本 session handler（防御层 payload.sessionId 校验）
+    f.emit(sid, directiveMsg('other-session', 'build-api', '串台消息'))
+    await flushPromises()
+
+    const wrapper = f.mountStreamDs()
+    await nextTick()
+    expect(wrapper.find('[data-testid="subagent-directive-bubble"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('串台消息')
+    wrapper.unmount()
+    f.dispose()
   })
 })

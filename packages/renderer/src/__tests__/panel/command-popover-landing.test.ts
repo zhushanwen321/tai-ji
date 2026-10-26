@@ -17,7 +17,16 @@
  * AC-8 反向断言：slash 命令源不读 settingsStore.skills（FR-5）。验证：即使 settingsStore.skills
  * 有值，landing 不显示（globalSkills prop 空时 landing 为空）。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/panel/command-popover-landing.test.ts
+ * ── 波 2a 簇 2-10 合并说明 ──
+ * 节 2（本文件尾部）= model-thinking-aggregate.test.ts：ModelThinkingAggregate 聚合按钮
+ * （click 弹层 + hover 即切 D2 + pending 单飞锁）。
+ * 节 3（本文件尾部）= model-select-popover.test.ts：ModelSelectPopover 纯受控 + store 数据源。
+ * 三节同域（composer 模型/命令弹层）。'@/api' mock 由原窄化替换改造为保留式部分 mock
+ * （见下方 mock 块注释）；MODELS 常量按节改名 TA_MODELS / MSP_MODELS；节 2/3 原
+ * 文件级 beforeEach 下沉为节内（节 2 经 taBeforeEach 挂 5 个 describe、节 3 单
+ * describe），防止三重文件级 beforeEach 重建 pinia 互踩 models 注入。describe/it 名零改动。
+ *
+ * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/panel/command-popover-landing.test.ts --pool=threads
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -29,6 +38,9 @@ import { getSettingsStore, provideSettingsTransport, provideSettingsStore, creat
 import { makeSkillsReloadTransportStub } from '../helpers/settings-transport-stub'
 import { __testing } from '@/composables/features/command/useCommandStore'
 import CommandPopover from '@/components/panel/CommandPopover.vue'
+import type { VueWrapper } from '@vue/test-utils'
+import ModelThinkingAggregate from '@/components/panel/ModelThinkingAggregate.vue'
+import ModelSelectPopover from '@/components/panel/ModelSelectPopover.vue'
 
 // Wave3 TC5：useGlobalSkills 走真实 events 订阅链路（dispatchGlobal → handler → loadGlobal(true) → DOM 刷新）。
 // onSkillCacheInvalidated 接真实 events.onGlobalType，使广播能端到端触达 composable。
@@ -37,10 +49,17 @@ const getGlobalSkillsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]))
 // useCommandSync 依赖 session.getCommands，landing 态 sessionId 为 undefined 时不触发拉取，
 // 但 mock 须声明 session 导出防 vi.mock 的严格校验。
 const getCommandsMock = vi.hoisted(() => vi.fn().mockResolvedValue({ sessionId: '', commands: [] }))
-vi.mock('@/api', async () => {
+// [波 2a 合并改造] 保留式部分 mock（importOriginal spread actual + 仅覆写目标成员）：
+// 原窄化替换（只返回 config/session 两域）会砍掉门面其余全部域导出，泄漏进同文件
+// model-thinking-aggregate / model-select-popover 节的组件链（settingsStore 装配等
+// 消费 @/api 其他成员 → undefined → 全节红）。
+vi.mock('@/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api')>()
   const realEvents = await import('@taiji/core/transport/api')
   return {
+    ...actual,
     config: {
+      ...actual.config,
       getGlobalSkills: getGlobalSkillsMock,
       onSkillCacheInvalidated: (handler: (p: { scope: 'global' | 'project'; cwd?: string }) => void) =>
         realEvents.onGlobalType('config.skillCacheInvalidated', (msg) => {
@@ -48,6 +67,7 @@ vi.mock('@/api', async () => {
         }),
     },
     session: {
+      ...actual.session,
       getCommands: getCommandsMock,
     },
   }
@@ -610,5 +630,487 @@ describe('CommandPopover landing 态用 globalSkills prop（L1-L14，W4）', () 
       expect(btns.some((b) => b.textContent?.includes('skill1'))).toBe(true)
       expect(btns.some((b) => b.textContent?.includes('skill2'))).toBe(true)
     })
+  })
+})
+
+// ══════════ 节 2/3 — 来源: model-thinking-aggregate.test.ts ══════════
+
+/**
+ * ModelThinkingAggregate 测试 —— W3a 模型+思考聚合按钮（D2：click 出弹层，hover 行即切换）。
+ *
+ * 三视角：
+ * - 使用者黑盒：click 触发器出弹层（body portal 内可见模型列表 + 思考档位行），
+ *   hover / click 行为后的弹层开合状态以用户可见 DOM 断言；
+ * - 观察者形态：emit 面（selectModel 同形 payload / selectThinking 发 runtime 实际值）；
+ * - 构建者白盒：同值 hover 不 emit（去抖）——空 emit 断言（not.toBeDefined）。
+ *
+ * 数据注入：setActivePinia + 直赋 getSettingsStore().models（与 model-select-popover 节同模式）。
+ */
+const TA_MODELS: ModelInfo[] = [
+  { id: 'claude-4', name: 'Claude 4', providerId: 'anthropic' as ProviderId, providerName: 'Anthropic' },
+  { id: 'gpt-4', name: 'GPT-4', providerId: 'openai' as ProviderId, providerName: 'OpenAI' },
+]
+
+/** 高低两档映射（max 发 xhigh，与 ThinkingLevelPopover 测试同款 fixture） */
+const LEVEL_MAP = { off: 'off', high: 'high', max: 'xhigh' }
+
+let wrapper: VueWrapper | null = null
+
+function mountAggregate(props: Record<string, unknown> = {}): VueWrapper {
+  wrapper = mount(ModelThinkingAggregate, {
+    props: {
+      selected: 'anthropic/claude-4',
+      level: 'high',
+      levelMap: LEVEL_MAP,
+      supportedLevels: ['off', 'high', 'max'],
+      ...props,
+    },
+    attachTo: document.body,
+  })
+  return wrapper
+}
+
+/** click 触发器开弹层（reka Popover click 语义；打开后内容进 body portal） */
+async function openAggregate(w: VueWrapper): Promise<void> {
+  await w.find('[data-testid="composer-model-thinking-aggregate"]').trigger('click')
+  await flushPromises()
+}
+
+function pickerPanel(): Element | null {
+  return document.body.querySelector('[data-testid="model-picker-panel"]')
+}
+
+/** 对 portal 内元素派发 pointerenter（teleport 到 body，wrapper.find 够不到） */
+async function hover(el: Element): Promise<void> {
+  el.dispatchEvent(new Event('pointerenter'))
+  await nextTick()
+}
+
+/** 对 portal 内元素派发 click（bubbles 模拟真实指针点击） */
+async function click(el: Element): Promise<void> {
+  el.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  await flushPromises()
+}
+
+/** portal 内直查弹层行并断言在场（teleport 到 body，wrapper.find 够不到；hover/click 用例公共开场） */
+function pickerRow(testid: string): Element {
+  const row = document.body.querySelector(`[data-testid="${testid}"]`)
+  expect(row).not.toBeNull()
+  return row!
+}
+
+/** 断言事件已 emit 且取回首条 payload（emitted[0][0]；已发 N 条的追加断言由调用方自写） */
+function firstEmit(w: VueWrapper, event: string): unknown {
+  const emitted = w.emitted(event)
+  expect(emitted).toBeTruthy()
+  return emitted![0][0]
+}
+
+/** 节级 beforeEach（原文件级下沉：models 注入必须晚于文件级 landing beforeEach 的 pinia 重建）。 */
+function taBeforeEach() {
+  setActivePinia(createPinia())
+  provideSettingsStore(createSettingsStore())
+  getSettingsStore().models.value = TA_MODELS
+  document.body.innerHTML = ''
+  wrapper = null
+}
+
+describe('触发器与弹层（使用者黑盒）', () => {
+  beforeEach(taBeforeEach)
+
+  it('触发器：单图标 Boxes 按钮，title「模型 · 思考等级」（用户可见 DOM）', () => {
+    const w = mountAggregate()
+    const btn = w.find('[data-testid="composer-model-thinking-aggregate"]')
+    expect(btn.exists()).toBe(true)
+    expect(btn.attributes('title')).toBe('模型 · 思考等级')
+    expect(btn.findAll('svg')).toHaveLength(1)
+  })
+
+  it('click 触发器 → 弹层打开：模型列表 + 思考档位行同屏可见', async () => {
+    const w = mountAggregate()
+    await openAggregate(w)
+
+    // 模型段（用户可见 DOM）
+    expect(pickerPanel()).not.toBeNull()
+    expect(document.body.textContent ?? '').toContain('Claude 4')
+    expect(document.body.textContent ?? '').toContain('GPT-4')
+    // 思考段：三档行（off/high/max）+ 当前档（high）带选中态文案可见
+    expect(document.body.querySelector('[data-testid="thinking-level-row-off"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-testid="thinking-level-row-high"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-testid="thinking-level-row-max"]')).not.toBeNull()
+  })
+})
+
+describe('hover 切换（D2：hover 即切，不关弹层；同值不 emit）', () => {
+  beforeEach(taBeforeEach)
+
+  it('hover 模型行（值有变化）→ emit selectModel（同形 payload），弹层保持打开', async () => {
+    const w = mountAggregate()
+    await openAggregate(w)
+
+    const gptRow = pickerRow('model-picker-item-gpt-4')
+    await hover(gptRow)
+
+    expect(firstEmit(w, 'selectModel')).toEqual({ modelId: 'gpt-4', provider: 'openai' })
+    // hover 切换不关弹层（用户还要继续瞄别的行）
+    expect(pickerPanel()).not.toBeNull()
+  })
+
+  it('hover 当前选中模型行（裸 id 同值）→ 不 emit（天然去抖）', async () => {
+    const w = mountAggregate()
+    await openAggregate(w)
+
+    const claudeRow = document.body.querySelector('[data-testid="model-picker-item-claude-4"]')
+    expect(claudeRow).not.toBeNull()
+    await hover(claudeRow!)
+
+    expect(w.emitted('selectModel')).toBeUndefined()
+    expect(pickerPanel()).not.toBeNull()
+  })
+
+  it('hover 思考行（档位有变化）→ emit selectThinking（map 映射后的实际值 xhigh），弹层保持打开', async () => {
+    const w = mountAggregate()
+    await openAggregate(w)
+
+    await hover(pickerRow('thinking-level-row-max'))
+
+    expect(firstEmit(w, 'selectThinking')).toBe('xhigh')
+    expect(pickerPanel()).not.toBeNull()
+  })
+
+  it('hover 当前思考档行（同值）→ 不 emit（天然去抖）', async () => {
+    const w = mountAggregate()
+    await openAggregate(w)
+
+    const highRow = document.body.querySelector('[data-testid="thinking-level-row-high"]')
+    expect(highRow).not.toBeNull()
+    await hover(highRow!)
+
+    expect(w.emitted('selectThinking')).toBeUndefined()
+  })
+
+  it('hover 启动切换后同目标 click 幂等：只发一条 selectModel（pending 去重）', async () => {
+    const w = mountAggregate()
+    await openAggregate(w)
+
+    // hover 已 emit 启动切换（pending = gpt-4），随后指针落定同目标的 click 不得再发第二条 RPC
+    const gptRow = pickerRow('model-picker-item-gpt-4')
+    await hover(gptRow)
+    await click(gptRow)
+
+    expect(w.emitted('selectModel')).toHaveLength(1)
+    expect(firstEmit(w, 'selectModel')).toEqual({ modelId: 'gpt-4', provider: 'openai' })
+  })
+
+  it('switching=true（U4 单飞锁）→ hover/click 均不 emit，click 仅关弹层', async () => {
+    const w = mountAggregate({ switching: true })
+    await openAggregate(w)
+
+    const gptRow = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')
+    const maxRow = document.body.querySelector('[data-testid="thinking-level-row-max"]')
+    expect(gptRow).not.toBeNull()
+    expect(maxRow).not.toBeNull()
+
+    // 切换中：hover 模型行 / 思考行均不触发 emit
+    await hover(gptRow!)
+    await hover(maxRow!)
+    expect(w.emitted('selectModel')).toBeUndefined()
+    expect(w.emitted('selectThinking')).toBeUndefined()
+
+    // click 同样不 emit，仅保留关浮层语义
+    await click(gptRow!)
+    expect(w.emitted('selectModel')).toBeUndefined()
+    expect(w.emitted('selectThinking')).toBeUndefined()
+    expect(pickerPanel()).toBeNull()
+  })
+})
+
+describe('pending 回流/终态清理（emit 去重基准复位，U4 单飞锁配套）', () => {
+  beforeEach(taBeforeEach)
+
+  it('模型 hover 启动切换后 selected 回流同目标 → pending 清除；切走后同目标可再次 emit', async () => {
+    const w = mountAggregate() // selected=anthropic/claude-4
+    await openAggregate(w)
+    const gptRow = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')!
+    await hover(gptRow) // pending=gpt-4，emit 第 1 条
+    // 切换回流：runtime 确认 selected=gpt-4 → watch(selectedBare) 清 pending
+    await w.setProps({ selected: 'openai/gpt-4' })
+    // 用户又切回 claude-4（基准值离开 gpt-4）→ 再次 hover gpt-4 应重新 emit
+    // （若 pending 未清，第二次 hover 被幂等拦截，只有 1 条）
+    await w.setProps({ selected: 'anthropic/claude-4' })
+    await hover(gptRow)
+    const emitted = w.emitted('selectModel')
+    expect(emitted).toBeTruthy()
+    expect(emitted).toHaveLength(2)
+    expect(emitted![1][0]).toEqual({ modelId: 'gpt-4', provider: 'openai' })
+  })
+
+  it('switching true→false 回落（切换终态）→ pending 清除；同目标可再次 emit', async () => {
+    const w = mountAggregate()
+    await openAggregate(w)
+    const gptRow = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')!
+    await hover(gptRow) // pending=gpt-4，emit 第 1 条
+    await w.setProps({ switching: true })
+    await w.setProps({ switching: false }) // 切换终态回落（覆盖失败/超时）→ 清 pending
+    await hover(gptRow) // pending 已清 → 重新 emit（允许用户重试同目标）
+    const emitted = w.emitted('selectModel')
+    expect(emitted).toBeTruthy()
+    expect(emitted).toHaveLength(2)
+  })
+
+  it('思考档 hover 后 level 回流同目标 → pending 清除；切走后同档位可再次 emit', async () => {
+    const w = mountAggregate() // level=high
+    await openAggregate(w)
+    const maxRow = document.body.querySelector('[data-testid="thinking-level-row-max"]')!
+    await hover(maxRow) // pendingLevelKey='max'，emit 第 1 条（实际值 xhigh）
+    // 切换回流：level=xhigh → currentLevelKey 反查为 'max' → watch 清 pending
+    await w.setProps({ level: 'xhigh' })
+    // 基准值离开 max → 再次 hover max 应重新 emit（若 pending 未清则被幂等拦截）
+    await w.setProps({ level: 'high' })
+    await hover(maxRow)
+    const emitted = w.emitted('selectThinking')
+    expect(emitted).toBeTruthy()
+    expect(emitted).toHaveLength(2)
+    expect(emitted![1][0]).toBe('xhigh')
+  })
+})
+
+describe('click 选中（关弹层）', () => {
+  beforeEach(taBeforeEach)
+
+  it('click 模型行 → emit selectModel 后弹层关闭', async () => {
+    const w = mountAggregate()
+    await openAggregate(w)
+
+    await click(pickerRow('model-picker-item-gpt-4'))
+
+    expect(firstEmit(w, 'selectModel')).toEqual({ modelId: 'gpt-4', provider: 'openai' })
+    expect(pickerPanel()).toBeNull()
+  })
+
+  it('click 思考行 → emit selectThinking（实际值）后弹层关闭', async () => {
+    const w = mountAggregate()
+    await openAggregate(w)
+
+    await click(pickerRow('thinking-level-row-max'))
+
+    expect(firstEmit(w, 'selectThinking')).toBe('xhigh')
+    expect(pickerPanel()).toBeNull()
+  })
+})
+
+describe('数据范围与 ModelSelectPopover 同源（model-picker-data）', () => {
+  beforeEach(taBeforeEach)
+
+  it('enabled===false 的模型不进聚合列表（双保险过滤同源）', async () => {
+    const mixed: ModelInfo[] = [
+      ...TA_MODELS,
+      { id: 'claude-haiku', name: 'Claude Haiku', providerId: 'anthropic' as ProviderId, providerName: 'Anthropic', enabled: false },
+    ]
+    getSettingsStore().models.value = mixed
+
+    const w = mountAggregate()
+    await openAggregate(w)
+
+    expect(document.body.querySelector('[data-testid="model-picker-item-claude-4"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-testid="model-picker-item-claude-haiku"]')).toBeNull()
+  })
+
+  it('selected 带 provider 前缀时按裸 id 高亮（复合串拆段，同值判定同源）', async () => {
+    // selected 已是 'anthropic/claude-4'（fixture 默认）——hover claude-4 不 emit 即反证裸 id 对齐；
+    // 此处补 DOM 侧选中态断言（选中指示 = 行尾对勾显隐，demo R3：弹层行无底无框）
+    const w = mountAggregate()
+    await openAggregate(w)
+
+    const claudeRow = document.body.querySelector('[data-testid="model-picker-item-claude-4"]')
+    // 选中行无底/框选中态类（demo R3：弹层行不进选中范式），行尾对勾显形（opacity-100）——
+    // 非选中行对勾隐藏——裸 id 反查对齐的 DOM 侧证
+    expect(claudeRow?.className ?? '').not.toContain('shadow-[inset')
+    expect(claudeRow?.className ?? '').not.toContain('bg-bg-elevated')
+    const claudeCheck = claudeRow?.querySelector('svg')
+    expect(claudeCheck?.getAttribute('class') ?? '').toContain('opacity-100')
+    const gptCheck = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')?.querySelector('svg')
+    expect(gptCheck?.getAttribute('class') ?? '').not.toContain('opacity-100')
+  })
+})
+
+
+// ══════════ 节 3/3 — 来源: model-select-popover.test.ts ══════════
+
+/**
+ * ModelSelectPopover 单测（数据源 store 化 + 竞态回归）。
+ *
+ * 锁定两条主轴：
+ * 1. 纯受控：去掉本地 selected ref + watch（旧实现 onSelect 后本地态被旧 props 拉回，UI 闪退）
+ *    - currentName 解析复合串 "provider/modelId" → 裸 modelId → 查 ModelInfo.name
+ *    - props.selected 变化时触发器文案跟随更新，不依赖本地副本
+ * 2. 数据源 store 化（2026-07-01 竞态修复）：模型列表不再组件内 onMounted 订阅 onModels，
+ *    改从 settingsStore.models 常驻订阅读取。旧实现随 Composer v-if 重新挂载会错过
+ *    sendInitialState 一次性推送 → 列表空；新实现读 store，store 已有数据则立即可见。
+ *
+ * 数据注入：setActivePinia(createPinia()) 后直接赋 getSettingsStore().models（不 mock store，
+ * 与 landing 节同模式——验证组件真实读 store）。
+ */
+const MSP_MODELS: ModelInfo[] = [
+  { id: 'claude-4', name: 'Claude 4', providerId: 'anthropic', providerName: 'Anthropic' },
+  { id: 'gpt-4', name: 'GPT-4', providerId: 'openai', providerName: 'OpenAI' },
+] as unknown as ModelInfo[]
+
+
+describe('ModelSelectPopover 纯受控 + store 数据源', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    provideSettingsStore(createSettingsStore())
+    document.body.innerHTML = ''
+  })
+
+  it('U18: props.selected 为复合串时，触发器显示对应模型名', async () => {
+    getSettingsStore().models.value = MSP_MODELS
+    const wrapper = mount(ModelSelectPopover, {
+      props: { selected: 'anthropic/claude-4' },
+    })
+    await wrapper.vm.$nextTick()
+    // 触发器文案含模型名（title="切换模型" 的 Button 内 span）
+    expect(wrapper.text()).toContain('Claude 4')
+  })
+
+  it('U18b: props.selected 变化时，触发器文案跟随更新（纯受控，不依赖本地副本）', async () => {
+    getSettingsStore().models.value = MSP_MODELS
+    const wrapper = mount(ModelSelectPopover, {
+      props: { selected: 'anthropic/claude-4' },
+    })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('Claude 4')
+
+    // 父组件更新 selected（模拟 Composer 切换回执生效后的 props 回传）
+    await wrapper.setProps({ selected: 'openai/gpt-4' })
+    expect(wrapper.text()).toContain('GPT-4')
+    expect(wrapper.text()).not.toContain('Claude 4')
+  })
+
+  it('U19: onSelect 后 emit modelId+provider，不依赖本地态回写', async () => {
+    getSettingsStore().models.value = MSP_MODELS
+    const wrapper = mount(ModelSelectPopover, {
+      props: { selected: 'anthropic/claude-4' },
+    })
+    await wrapper.vm.$nextTick()
+
+    // 直接调组件实例方法（绕过 Popover 交互）
+    ;(wrapper.vm as unknown as { onSelect: (id: string, p: string) => void }).onSelect('gpt-4', 'openai')
+    const emitted = wrapper.emitted('select')
+    expect(emitted).toBeTruthy()
+    // emitted('select')[0] = 第一次 emit 的参数数组，[0] = payload 对象
+    expect(emitted![0][0]).toEqual({ modelId: 'gpt-4', provider: 'openai' })
+  })
+
+  it('U15: props.selected 为空串时，触发器显示占位文案（…）而非空串', async () => {
+    getSettingsStore().models.value = MSP_MODELS
+    const wrapper = mount(ModelSelectPopover, {
+      props: { selected: '' },
+    })
+    await wrapper.vm.$nextTick()
+    // D3：已建 session modelId 为空 → 显示占位「…」，不兜底全局默认
+    expect(wrapper.find('[title="切换模型"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('…')
+  })
+
+  it('U9: store 已有数据时 mount，触发器立即显示模型名（竞态回归——模拟 v-if 翻转后重新 mount，无任何推送）', async () => {
+    // 旧实现：组件内 onMounted 订阅 onModels，重新挂载会错过 sendInitialState 一次性推送 → 列表空。
+    // 新实现：读 settingsStore.models，store 已有数据则立即可见。此处不触发任何推送。
+    getSettingsStore().models.value = MSP_MODELS
+    const wrapper = mount(ModelSelectPopover, {
+      props: { selected: 'anthropic/claude-4' },
+    })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('Claude 4')
+  })
+
+  it('U10: 分组渲染——2 个 provider 各 1 model，groups 有 2 组', async () => {
+    getSettingsStore().models.value = MSP_MODELS
+    const wrapper = mount(ModelSelectPopover, {
+      props: { selected: 'anthropic/claude-4' },
+    })
+    await wrapper.vm.$nextTick()
+    const groups = (wrapper.vm as unknown as { groups: { provider: string; providerId: string; models: ModelInfo[] }[] }).groups
+    expect(groups).toHaveLength(MSP_MODELS.length)
+    // 两个 provider 名都出现
+    const providers = groups.map((g) => g.provider)
+    expect(providers).toContain('Anthropic')
+    expect(providers).toContain('OpenAI')
+  })
+
+  it('U11: 搜索过滤——输入 "cla" 仅渲染 Claude 相关（经 ModelPickerPanel 搜索框）', async () => {
+    getSettingsStore().models.value = MSP_MODELS
+    const wrapper = mount(ModelSelectPopover, {
+      props: { selected: 'anthropic/claude-4' },
+    })
+    await wrapper.vm.$nextTick()
+    // 打开 popover（内容 teleport 到 body）
+    ;(wrapper.vm as unknown as { open: boolean }).open = true
+    await wrapper.vm.$nextTick()
+    // 搜索框由抽出的 ModelPickerPanel 提供（用户可见 DOM 断言）
+    const search = document.body.querySelector('[data-testid="model-picker-search"]') as HTMLInputElement | null
+    expect(search).not.toBeNull()
+    search!.value = 'cla'
+    search!.dispatchEvent(new Event('input', { bubbles: true }))
+    await wrapper.vm.$nextTick()
+    const bodyText = document.body.textContent ?? ''
+    expect(bodyText).toContain('Claude 4')
+    expect(bodyText).not.toContain('GPT-4')
+  })
+
+  it('U12: store 空时渲染引导空态（P2：模型池为空 → 引导导入凭据/配置，区别于搜索无结果）', async () => {
+    getSettingsStore().models.value = []
+    const wrapper = mount(ModelSelectPopover, {
+      props: { selected: '' },
+    })
+    await wrapper.vm.$nextTick()
+    const groups = (wrapper.vm as unknown as { groups: unknown[] }).groups
+    expect(groups).toHaveLength(0)
+    // groups.length===0 且模型池为空 → PopoverContent 内渲染「暂无可用模型」引导空态。
+    // reka-ui PopoverContent teleport 到 body：打开 popover 后查 body 文案。
+    ;(wrapper.vm as unknown as { open: boolean }).open = true
+    await wrapper.vm.$nextTick()
+    expect(document.body.textContent).toContain('暂无可用模型，请先在设置中导入凭据或配置供应商')
+    expect(document.body.textContent).not.toContain('无匹配模型')
+  })
+
+  it('U6: enabled===false 的 model 不出现在分组列表（runtime aggregateModels 已过滤，前端兜底）', async () => {
+    // 双保险：runtime aggregateModels 已过滤 enabled===false，但 ModelSelectPopover 直读
+    // settingsStore.models（与 providers 同源广播），若某次广播未过滤则会泄漏禁用模型到切换器。
+    // 故前端在 groups computed 内也过滤 enabled===false。
+    const mixed: ModelInfo[] = [
+      { id: 'claude-4', name: 'Claude 4', providerId: 'anthropic', providerName: 'Anthropic', enabled: true },
+      { id: 'claude-haiku', name: 'Claude Haiku', providerId: 'anthropic', providerName: 'Anthropic', enabled: false },
+      { id: 'gpt-4', name: 'GPT-4', providerId: 'openai', providerName: 'OpenAI', enabled: true },
+    ] as unknown as ModelInfo[]
+    getSettingsStore().models.value = mixed
+    const wrapper = mount(ModelSelectPopover, {
+      props: { selected: 'anthropic/claude-4' },
+    })
+    await wrapper.vm.$nextTick()
+    const groups = (wrapper.vm as unknown as { groups: { provider: string; models: ModelInfo[] }[] }).groups
+    const allIds = groups.flatMap((g) => g.models.map((m) => m.id))
+    expect(allIds).toContain('claude-4')
+    expect(allIds).toContain('gpt-4')
+    // enabled===false 的 claude-haiku 被过滤
+    expect(allIds).not.toContain('claude-haiku')
+  })
+
+  it('S4: 默认触发器模型名不带 truncate/max-w 截断 class（非聚合态恒完整，两态规格）', async () => {
+    // 三步聚合 S4：模型名只有「完整展示 / 聚合按钮」两态——展开态 DOM 不得携带任何截断 class；
+    // 名字过长由 fit 实测回路升级到聚合按钮，而非在展开态内省略（验收判据 1，2026-09-25）。
+    getSettingsStore().models.value = MSP_MODELS
+    const wrapper = mount(ModelSelectPopover, {
+      props: { selected: 'anthropic/claude-4' },
+    })
+    await wrapper.vm.$nextTick()
+    const trigger = wrapper.find('[title="切换模型"]')
+    expect(trigger.exists()).toBe(true)
+    expect(trigger.text()).toContain('Claude 4')
+    const nameSpan = trigger.find('span')
+    expect(nameSpan.exists()).toBe(true)
+    expect(nameSpan.classes()).not.toContain('truncate')
+    expect(trigger.html()).not.toContain('max-w-[')
   })
 })

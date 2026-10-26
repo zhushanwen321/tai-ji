@@ -1,31 +1,37 @@
 // @vitest-environment node
 
 /**
- * fileTreeStore 单测（#3，D-021 结构 + T2.2/T2.6/T2.7/T2.8/T2.8b/T2.9/T4.6）。
+ * stores 域测试合并文件（波 2a 簇 4-18）。
  *
- * 验证 D-021 目标结构（非骨架旧结构）：
- * - nodeStates: Map<sid, Map<path, NodeState>>（对象化 + per-session）
- * - gitOverlay: Map<sid, Map<path, GitFileStatus>>（per-session）
- * - setNodeState 原子入口（status + children merge 同 step）
+ * 节 1 — fileTree：useFileTreeStore 结构/缓存复用/git overlay/invalidate/徽章/展开态/
+ *        detail 多文件 tab。
+ * 节 2 — chat-bash-review-fix：B1/M1/M2 streaming 与 bash 收尾互斥 + B2 abortBash
+ *        RPC 失败 markBashError 写回（chat-bash 事故回归）。
+ * 节 3 — quota-store：useQuotaStore 配额行归一化。
  *
- * 覆盖用例：
- * - T2.2 loaded 复用缓存（setTree + getTree）
- * - T2.6 overlay 先到后挂载（setGitOverlay 独立于 tree）
- * - T2.7 git.status 失败 → overlay 空（不调 setGitOverlay，树仍在）
- * - T2.8/T2.8b 角标全态（setGitOverlay M/A/D/U/untracked）
- * - T2.9 非 git 仓库（isRepo=false 不设 overlay）
- * - T4.6 invalidated 态过滤 graceful（invalidate 不报错）
- * - W2 getDirChangeCount（目录改动文件数徽章）
- * - W15/D-7.1 徽章预聚合；展开态 rehydrate
- * - W3 detail 多文件 tab（selectFile per-session 注入 / openDetailTab forceDiff 升级 /
- *   closeDetailTab 激活转移+清选中态，display-containers §6.3；u-w3-detail ed2492242 新增）
+ * 合并说明：全 node 环境；节 2 的 '@/api' 窄化 mock（project/chat/session 三域）与
+ * useToast mock 经波 1 读码核实对节 1/3 零泄漏（fileTree/quota store 不 import '@/api'
+ * 不消费 toast）；节 1/3 的文件级 beforeEach（均 setActivePinia）合并为一份。
+ * describe/it 名零改动。波 1 死于拼装残留重复 import（esbuild 单文件 parse 不查
+ * 重复绑定、vitest 实跑才红）——本轮 header 手工去重。
  *
- * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/stores/fileTree.test.ts
+ * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/stores/fileTree.test.ts --pool=threads
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useFileTreeStore } from '@/stores/fileTree'
 import type { GitFileStatus } from '@taiji/shared'
+import { apiProjectMock } from '../helpers/api-facade-mock'
+import { useChatStore } from '@/stores/chat'
+import { useChat, resetChatModuleState } from '@/composables/features/chat/useChat'
+import { getExecutingBash } from '@taiji/core'
+import type { Message, ServerMessage } from '@taiji/shared'
+import { useQuotaStore } from '@/stores/quota'
+import type { NormalizedQuotaRow } from '@taiji/shared'
+
+beforeEach(() => setActivePinia(createPinia()))
+
+// ══════════ 节 1/3 — 来源: fileTree.test.ts ══════════
 
 beforeEach(() => setActivePinia(createPinia()))
 
@@ -400,5 +406,323 @@ describe('fileTreeStore detail 多文件 tab（display-containers W3 §6.3）', 
     store.updateDetailTab('s1', 'a.ts', { status: 'content' })
     expect(store.getDetailTabs('s1')).toEqual([])
     expect(store.getSelectedPath('s1')).toBeNull()
+  })
+})
+
+// ══════════ 节 2/3 — 来源: chat-bash-review-fix.test.ts ══════════
+
+// ── api mock（B2 用：abortBash reject 触发 catch）──
+const apiMock = vi.hoisted(() => ({
+  // bash 回执契约（dmg-r1-2）：默认 = 已执行并收尾
+  bash: vi.fn(() => Promise.resolve({ status: 'settled' as const })),
+  abortBash: vi.fn(() => Promise.resolve()),
+  streamSubscribe: vi.fn((_sid: string, _handler: (msg: ServerMessage) => void) => () => {}),
+}))
+vi.mock('@/api', () => ({ project: apiProjectMock(),
+  chat: {
+    bash: apiMock.bash,
+    abortBash: apiMock.abortBash,
+    streamSubscribe: apiMock.streamSubscribe,
+  },
+  // w5：useChat 薄包装 import session.writeSegments（写 segments sidecar），mock 补全
+  session: {
+    writeSegments: vi.fn(() => Promise.resolve()),
+  },
+}))
+
+// ── useToast mock：捕获 error 调用 ──
+const toastError = vi.hoisted(() => vi.fn())
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ error: toastError }),
+}))
+
+
+describe('B1: streamingSessionIds 仅扫 role:assistant —— 纯 bash 不阻塞', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('纯 bash 执行（streaming bash 消息，无 assistant streaming）→ isGenerating=false / isActive=false', () => {
+    const store = useChatStore()
+    const sid = 's-b1'
+    // [W1 fix-chat-flow-order] bashStart 只写 ephemeral executingBash，不建消息项
+    store.applyMessageEvent(sid, {
+      type: 'message.bashStart',
+      payload: { sessionId: sid, command: 'sleep 30', excludeFromContext: false, timestamp: 1000 },
+    } as ServerMessage)
+
+    const msgs = store.getMessages(sid)
+    expect(msgs).toHaveLength(0)
+
+    // 核心断言：纯 bash 执行期间不应被当作 assistant 生成态
+    expect(store.isGenerating(sid)).toBe(false)
+    expect(store.isActive(sid)).toBe(false)
+  })
+
+  it('bash 完成后 isGenerating 仍为 false（无回归）', () => {
+    const store = useChatStore()
+    const sid = 's-b1-done'
+    store.applyMessageEvent(sid, {
+      type: 'message.bashStart',
+      payload: { sessionId: sid, command: 'echo hi', excludeFromContext: false, timestamp: 1000 },
+    } as ServerMessage)
+    store.applyMessageEvent(sid, {
+      type: 'message.bashResult',
+      payload: { sessionId: sid, command: 'echo hi', output: 'hi', exitCode: 0, cancelled: false, truncated: false, timestamp: 2000 },
+    } as ServerMessage)
+    expect(store.isGenerating(sid)).toBe(false)
+    expect(store.isActive(sid)).toBe(false)
+  })
+
+  it('assistant streaming 仍被正确识别（回归防护：assistant 不被 bash 改动误伤）', () => {
+    const store = useChatStore()
+    const sid = 's-b1-assistant'
+    store.applyMessageEvent(sid, {
+      type: 'message.message_start',
+      payload: { sessionId: sid, messageId: 'a1' },
+    } as ServerMessage)
+    expect(store.isGenerating(sid)).toBe(true)
+    expect(store.isActive(sid)).toBe(true)
+  })
+})
+
+describe('M1: finalizeMessagesImpl 跳过 bash —— assistant error 不误杀共存 streaming bash', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('assistant 与 bash 并发 → assistant error 收尾后，bash 仍 streaming，后续 bashResult 可正常收尾', () => {
+    const store = useChatStore()
+    const sid = 's-m1'
+    // assistant turn streaming
+    store.applyMessageEvent(sid, {
+      type: 'message.message_start',
+      payload: { sessionId: sid, messageId: 'a-streaming' },
+    } as ServerMessage)
+    // [W1 fix-chat-flow-order] bashStart 不建消息项——streaming bash 消息手动种子
+    // （防御场景：entry 化后正常流转不产生，仅手动注入可验证 finalizeMessages 的跳过语义）
+    store.setMessages(sid, [...store.getMessages(sid), {
+      id: 'bash-m1',
+      role: 'system',
+      content: '',
+      status: 'streaming',
+      bashExecution: { command: 'longcmd', output: '', exitCode: null, cancelled: false, truncated: false, excludeFromContext: false, timestamp: 1000 },
+    } as Message])
+
+    const before = store.getMessages(sid)
+    expect(before[0].status).toBe('streaming') // assistant
+    expect(before[1].status).toBe('streaming') // bash
+
+    // assistant error 收尾（finalizeSession('error') 走 finalizeMessagesImpl）
+    store.applyMessageEvent(sid, {
+      type: 'message.error',
+      payload: { sessionId: sid, message: 'assistant boom' },
+    } as ServerMessage)
+
+    const after = store.getMessages(sid)
+    // assistant 被收尾为 error
+    expect(after[0].status).toBe('error')
+    // 核心断言：bash 仍 streaming（不被 finalizeMessagesImpl 误杀）
+    expect(after[1].status).toBe('streaming')
+    expect(after[1].bashExecution?.cancelled).toBe(false)
+  })
+
+  it('entry 化形态：assistant streaming 中执行 bash → assistant error 后 bash 延迟帧照常 entry 入流', () => {
+    const store = useChatStore()
+    const sid = 's-m1b'
+    store.applyMessageEvent(sid, {
+      type: 'message.message_start',
+      payload: { sessionId: sid, messageId: 'a-streaming' },
+    } as ServerMessage)
+    store.applyMessageEvent(sid, {
+      type: 'message.bashStart',
+      payload: { sessionId: sid, command: 'longcmd', excludeFromContext: false, timestamp: 1000 },
+    } as ServerMessage)
+
+    // assistant error 收尾（run 崩溃），bash 执行态仍 ephemeral 存在
+    store.applyMessageEvent(sid, {
+      type: 'message.error',
+      payload: { sessionId: sid, message: 'assistant boom' },
+    } as ServerMessage)
+    expect(getExecutingBash(sid)).toBeDefined()
+
+    // 后续 bashResult 延迟帧到达（级联结束 flush）→ entry 入流 append（不依赖 streaming bash 消息）
+    store.applyMessageEvent(sid, {
+      type: 'message.bashResult',
+      payload: { sessionId: sid, command: 'longcmd', output: 'real output', exitCode: 0, cancelled: false, truncated: false, timestamp: 2000 },
+    } as ServerMessage)
+    const final = store.getMessages(sid)
+    expect(final).toHaveLength(2)
+    expect(final[1].bashExecution?.output).toBe('real output')
+    expect(final[1].status).toBe('complete')
+    expect(getExecutingBash(sid)).toBeUndefined()
+  })
+})
+
+describe('M2: message.complete 正常收尾 —— 状态复位且推进 10min 无二次收尾', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    setActivePinia(createPinia())
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('message.complete 收尾后状态复位，推进 10min 无二次收尾', () => {
+    const store = useChatStore()
+    const sid = 's-m2'
+    store.applyMessageEvent(sid, {
+      type: 'message.message_start',
+      payload: { sessionId: sid, messageId: 'a1' },
+    } as ServerMessage)
+    expect(store.isGenerating(sid)).toBe(true)
+
+    // 正常 complete 收尾（reason='normal'）
+    store.applyMessageEvent(sid, {
+      type: 'message.complete',
+      payload: { sessionId: sid, stopReason: 'end_turn' },
+    } as ServerMessage)
+    expect(store.isGenerating(sid)).toBe(false)
+    expect(store.getMessages(sid)[0].status).toBe('complete')
+
+    // spy console.warn：finalizeSession 异常 reason 会打 dev warn（timeout 会命中此分支）。
+    // message.complete 走 normal，不打 warn。断言推进 10min 后无任何异常收尾 warn（无二次收尾）。
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    // 推进 10min + 1s（远超正常收尾所需时间）
+    vi.advanceTimersByTime(600_000 + 1_000)
+
+    // 核心断言：推进 10min 后无 timeout 收尾，消息保持 complete（未被二次收尾为 error）
+    const timeoutWarns = warnSpy.mock.calls.filter((c) => String(c[0]).includes('reason=timeout'))
+    expect(timeoutWarns).toHaveLength(0)
+    // 消息仍 complete（未被二次收尾为 error）
+    expect(store.getMessages(sid)[0].status).toBe('complete')
+
+    warnSpy.mockRestore()
+  })
+})
+
+describe('B2: useChat.abortBash RPC 失败 → markBashError 写回 store 真 ref', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    resetChatModuleState()
+    vi.clearAllMocks()
+  })
+
+  it('abortBash RPC reject → executingBash 被清（markBashError 兜底），手动种子消息写回真 ref', async () => {
+    apiMock.abortBash.mockRejectedValueOnce(new Error('rpc boom'))
+
+    const { abortBash } = useChat()
+    const store = useChatStore()
+    const sid = 's-b2'
+
+    // bashStart 写 ephemeral 执行态（模拟 bash 正在执行）+ 手动种子 streaming bash 消息
+    //（防御路径：验证 markBashError 对真 ref 的写回在新形态下仍有效）
+    store.applyMessageEvent(sid, {
+      type: 'message.bashStart',
+      payload: { sessionId: sid, command: 'sleep 999', excludeFromContext: false, timestamp: 1000 },
+    } as ServerMessage)
+    expect(getExecutingBash(sid)).toBeDefined()
+    store.setMessages(sid, [{
+      id: 'bash-b2',
+      role: 'system',
+      content: '',
+      status: 'streaming',
+      bashExecution: { command: 'sleep 999', output: '', exitCode: null, cancelled: false, truncated: false, excludeFromContext: false, timestamp: 1000 },
+    } as Message])
+
+    // abortBash RPC 失败 → catch 调 markBashError（B2 修复后写回 store 真 ref）
+    await expect(abortBash(sid)).resolves.toBeUndefined()
+
+    // 核心断言 1：executingBash 被清（abortBash RPC 失败时无 bashResult 帧到达的唯一兜底清点）
+    expect(getExecutingBash(sid)).toBeUndefined()
+    // 核心断言 2：手动种子消息被标 error（旧实现 { value: chat.messages } 写入丢失，
+    // store 不会更新，消息会仍 streaming）。cancelled=true。
+    const after = store.getMessages(sid)
+    expect(after[0].status).toBe('error')
+    expect(after[0].bashExecution?.cancelled).toBe(true)
+    expect(after[0].error).toBe('rpc boom')
+    // [chat-flow R4] 停止失败 toast 已删：错误文本经 markBashError 写入 bash 消息 error 字段
+    // （上方断言 2 已覆盖），不再弹 toast
+    expect(toastError).not.toHaveBeenCalled()
+  })
+})
+
+// ══════════ 节 3/3 — 来源: quota-store.test.ts ══════════
+
+describe('useQuotaStore', () => {
+  const mockRow: NormalizedQuotaRow = {
+    label: '智谱 GLM Coding Plan',
+    wins: [
+      { pct: 68, resetSec: 4980 },
+      { pct: 42, resetSec: 266400 },
+      { pct: null, resetSec: null },
+    ],
+  }
+
+  it('setCache + getEntry：写入后可读取', () => {
+    const store = useQuotaStore()
+    store.setCache('zhipu', mockRow, 1000)
+
+    const entry = store.getEntry('zhipu')
+    expect(entry).toBeDefined()
+    expect(entry!.data).toEqual(mockRow)
+    expect(entry!.lastFetchAt).toBe(1000)
+  })
+
+  it('getEntry：不存在的 key 返回 undefined', () => {
+    const store = useQuotaStore()
+    expect(store.getEntry('nonexistent')).toBeUndefined()
+  })
+
+  it('setCache：覆盖写入', () => {
+    const store = useQuotaStore()
+    store.setCache('zhipu', mockRow, 1000)
+    store.setCache('zhipu', null, 2000)
+
+    const entry = store.getEntry('zhipu')
+    expect(entry!.data).toBeNull()
+    expect(entry!.lastFetchAt).toBe(2000)
+  })
+
+  it('markPending：首次标记返回 true，重复标记返回 false', () => {
+    const store = useQuotaStore()
+    expect(store.markPending('zhipu')).toBe(true)
+    expect(store.markPending('zhipu')).toBe(false)
+    expect(store.isPending('zhipu')).toBe(true)
+  })
+
+  it('unmarkPending：取消后可重新标记', () => {
+    const store = useQuotaStore()
+    store.markPending('zhipu')
+    store.unmarkPending('zhipu')
+    expect(store.isPending('zhipu')).toBe(false)
+    expect(store.markPending('zhipu')).toBe(true)
+  })
+
+  it('isPending：未标记的 key 返回 false', () => {
+    const store = useQuotaStore()
+    expect(store.isPending('zhipu')).toBe(false)
+  })
+
+  it('clearCache：清除指定 provider 缓存', () => {
+    const store = useQuotaStore()
+    store.setCache('zhipu', mockRow, 1000)
+    store.clearCache('zhipu')
+    expect(store.getEntry('zhipu')).toBeUndefined()
+  })
+
+  it('clearCache：不影响其他 provider', () => {
+    const store = useQuotaStore()
+    store.setCache('zhipu', mockRow, 1000)
+    store.setCache('kimi', mockRow, 2000)
+    store.clearCache('zhipu')
+    expect(store.getEntry('zhipu')).toBeUndefined()
+    expect(store.getEntry('kimi')).toBeDefined()
+  })
+
+  it('多 provider 隔离：pending 和 cache 互不干扰', () => {
+    const store = useQuotaStore()
+    store.markPending('zhipu')
+    store.setCache('kimi', mockRow, 1000)
+
+    expect(store.isPending('zhipu')).toBe(true)
+    expect(store.isPending('kimi')).toBe(false)
+    expect(store.getEntry('zhipu')).toBeUndefined()
+    expect(store.getEntry('kimi')).toBeDefined()
   })
 })
