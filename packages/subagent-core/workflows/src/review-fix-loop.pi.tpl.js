@@ -845,7 +845,7 @@ function buildReviewCall(def, round, max, batchIndex, roundDir, scoped) {
     model: MODEL,
     schema: reviewerSchema,
     description: def.name,
-    timeoutMs: 3_600_000, // 1h（只读审查 + retry 退避余量）
+    timeoutMs: 7_200_000, // 2h（2026-10-26 用户裁决：会话墙钟全部 >1h）
     // returnMeta: true — 失败时 resolve
     // {value, error}，raw.error 可检测（结构化终止可达）；成功时
     // value = parsedOutput ?? content，parseResult 作用于 raw.value（MF-1）。
@@ -1204,7 +1204,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       model: AGG_MODEL,
       schema: aggregatorSchema,
       description: "aggregate",
-      timeoutMs: 3_600_000, // 1h
+      timeoutMs: 7_200_000, // 2h（2026-10-26 用户裁决：会话墙钟全部 >1h）
       returnMeta: true,
     });
     phaseTimings.aggregate = [aggT0, Date.now()];
@@ -1234,7 +1234,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         model: AGG_MODEL,
         schema: aggregatorSchema,
         description: "aggregate",
-        timeoutMs: 1_200_000, // 20min：确定性失败（context overflow 等）不该在终判前再烧 1h（S-4）
+        timeoutMs: 7_200_000, // 2h（2026-10-26 用户裁决：全部 >1h；S-4 原 20min 短墙钟经用户显式覆盖）
         returnMeta: true,
       });
       recordCall(buildCallRecord({
@@ -1851,7 +1851,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
               ].join("\n"),
               description: "commit-env-fix-b" + batchIndex + "-r" + round,
               model: MODEL,
-              timeoutMs: 600_000,
+              timeoutMs: 7_200_000, // 2h（2026-10-26 用户裁决：agent 墙钟全部 >1h）
               returnMeta: true,
             });
             envNote = envRaw && typeof envRaw.value === "string" ? envRaw.value : "";
@@ -1902,10 +1902,10 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
               maxRepairs: MAX_COMMIT_REPAIRS,
               initialErr: errMsg2.slice(0, 4000),
               initialExitCode: typeof e2.status === "number" ? e2.status : 1,
-              retryCommit: () => runGit(commitPlan.commitArgs, 60_000),
-              stageFiles: (ps) => runGit(["add", "--", ...ps], 30_000),
+              retryCommit: () => runGit(commitPlan.commitArgs, 7_200_000), // 2026-10-26 用户裁决：commit 带 pre-commit 钩子，原 60s 必炸
+              stageFiles: (ps) => runGit(["add", "--", ...ps], 7_200_000),
               dirtyPaths: () => {
-                const st = runGit(["status", "--porcelain"], 30_000);
+                const st = runGit(["status", "--porcelain"], 7_200_000);
                 if (st.exitCode !== 0) {
                   throw new Error("git status --porcelain 失败（exit " + st.exitCode + "）: " + st.stderr);
                 }
@@ -1917,7 +1917,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
                   description: "commit-content-fix-b" + batchIndex + "-r" + round + "-a" + attemptNo,
                   model: MODEL,
                   schema: commitRepairSchema,
-                  timeoutMs: 600_000,
+                  timeoutMs: 7_200_000, // 2h（2026-10-26 用户裁决：agent 墙钟全部 >1h）
                   returnMeta: true,
                 }).then((raw) => (raw && !raw.error && raw.value !== undefined ? raw.value : undefined)),
               log,

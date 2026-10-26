@@ -136,7 +136,8 @@ const shq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`;
 let envRecoverySeq = 0;
 
 async function safeRun(kind: "sh" | "git", argv: string[], label: string): Promise<RunResult> {
-  const attempt = (): Promise<RunResult> => (kind === "sh" ? world.run("sh", argv) : world.run("git", argv));
+  // 2026-10-26 用户裁决：git/sh 子进程（含 commit——pre-commit 钩子分钟级）墙钟 >1h；引擎 world.run 默认 300s 会误杀
+  const attempt = (): Promise<RunResult> => (kind === "sh" ? world.run("sh", argv, { timeoutMs: 7_200_000 }) : world.run("git", argv, { timeoutMs: 7_200_000 }));
   try {
     return await attempt();
   } catch (e) {
