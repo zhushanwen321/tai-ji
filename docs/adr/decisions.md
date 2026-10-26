@@ -1083,3 +1083,27 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **否决记录**：dev 集成分支触发全量 CI（push 加 dev-*）——每次合入 15-20 分钟全量（含 e2e）成本高且无门禁消费其结果，快速族前置已覆盖「终局 PR 才第一次跑」的主痛点，全量留终局 PR 是有意的分层；ci.yml 动态生成 steps——GitHub Actions 不支持运行时读仓库文件生成。
 
 **效果**：清单漂移与零执行点测试（v0.11.16 实测 6 个）从静默分叉变红灯；CI 测试步骤解掩蔽（continue-on-error + 聚合）使一次 run 暴露全部失败。
+
+### ADR-0167 判定基点单一权威 PR_BASE（2026-10-26 merge 流程架构审查·发现 1）
+
+**决策**：「本 PR 增量」的 diff 基点以单一变量 PR_BASE 贯通全部机器门禁：pr-cr-fix SKILL 开局先定（= 目标 dev 分支，DEV-WORKFLOW §3；dev→main 终局 PR 才为 main）；changeset-check.mjs 新增 `--base`（显式基点解析失败 exit 2，不静默 skip 成「无检查即绿」）；pr-pre-merge.sh 的 `--base` 透传给 changeset-check（原只用于 coverage 口径校验）；coverage/metrics/select-constraints/select-affected-e2e 的命令示例与 pr-lifecycle 的 `args.base` 同步改传 PR_BASE。缺省回退 main 仅供历史形态（dev→main 终局 PR 与无参调用）。
+
+**否决记录**：门禁继续按 main 累积口径——随发布周期推进，每个 feature PR 为整条 dev 线未发布内容重复举证（coverage 增量按 dev 全线行数、changeset WARN 反复列 dev 线包、Gate-1a.5 为非本 PR 的包起草多余 changeset），pr-lifecycle 已被迫用 prompt 散文纠偏机器判错的集合（机器判错、人工兜住），周期后段误判率必然上升。
+
+**效果**：基点错位（政策 base=dev vs 机器 base=main）消除；DEV-WORKFLOW §10 两条过期登记（dev-merge changeset 缺口、skill --base main 待修）随本决策落地清理。
+
+### ADR-0168 merge 管线状态机最小落地 + main 同步防护 + 发布互斥（2026-10-26 merge 流程架构审查·发现 2/3/7/8/17）
+
+**决策**：①管线状态（.merge-state/current.json）升级为带身份的最小状态机：阶段 0 init 以 `{reset:true}` 开启新管线（pipelineId + stage=init，清上一轮 release 字段防跨轮残留）；阶段 2 pr-merge 落 mergeSha（merge commit）+ stage=merged；wait-for-ci 无参路径经 stage 门只消费 stage=merged 的 mergeSha——headSha 是 PR head（判的是阶段 2 已裁决过的 PR 侧 runs），禁止复用为阶段 3 判定对象；release 落 stage=released（终态）。②阶段 2 的 main 同步（lib/sync.mjs）加数据丢失防护：fetch/checkout 退出码逐一检查，reset --hard 前判本地 main 是否领先远端（领先 = 发布在途 bump/notes 未 push 或未知改动，fail-fast 给处置指引，绝不拨回仅 reflog 可救的 commit）。③init 以「非终态 + 12h 活跃窗」作发布互斥（两会话并发启动发布链是 bump/tag/push 写操作的并发数据丢失源）。④wait-for-ci 默认超时 600s→2400s（main push CI 含两个 30 分钟档 e2e job，旧默认常态首跑必超时）。
+
+**否决记录**：wait-for-ci 无参继续读 headSha（PR head）——阶段 3 是合并后唯一 CI 验证点，判错对象 = 验证了个已裁决过的东西，post-merge main CI 从未进判定（PR #61 实测 head sha 与 merge commit 对应不同 runs）；无条件 reset --hard——发布流程自身制造领先窗口（阶段 4/5 commit 后 push 前），误清在途发布产物。
+
+**效果**：跨管线字段残留（磁盘实证 pr:61 与 tag:v0.11.15 叠在同一对象）、判定对象错位、reset 数据丢失三类形态各有回归测试（merge-sync / merge-state / merge-wait-for-ci 三文件）。
+
+### ADR-0169 验证出口收敛 quality-gates（--only）+ CI 解掩蔽全 job 化 + 内联镜像退役 + repo slug 单源对账（2026-10-26 merge 流程架构审查·发现 4/6/11/12/13）
+
+**决策**：①merge 阶段 1 的 pre-merge-check.sh 收敛为 taiji 专用（退役 npm/frontend 通用分支——其自引保留依据「AGENTS.md §5」已不存在），类型检查与守卫测试出口改为 `quality-gates.mjs --only typecheck,test`；quality-gates 新增 `--only` 门组过滤（排除 py 门时不做 py 实体检查/不解析 base），全量单测不在阶段 1 本地重跑（同一 commit 的完整 CI 由阶段 2 PR CI 等待承担）。②CI 解掩蔽（continue-on-error + if:always() 聚合步）从 2 个 job 扩到全部：typecheck（11 检查步）与 invariants（29 检查步），前置依赖步（checkout/安装/Materialize .agents/Build dist）保持阻塞语义。③invariants job 两段 ci.yml 内联镜像（runtime CJS 禁令 + noExternal 对账，原注释自认「与 validate-runtime-bundle.sh 同步维护」）退役为直调 `validate-runtime-bundle.sh --static-only`（静态段函数化，等效性经本地对拍验证）。④仓库标识 slug 收敛：Node 消费方 import repo.mjs 的 DEFAULT_REPO、shell 消费方从 `git remote get-url github` 一手推导、check-repo-literal.test.mjs 对账白名单外零字面量（verify-plugin-contract 与 verify-taiji 场景作为 runtime 常量镜像登记在案）。⑤ci.yml run 值解析器收敛 scripts/lib/ci-yaml-runs.mjs 单实现双口径（命令清点 ' && ' / 文本对账 ' '），双侧 import 再导出。
+
+**否决记录**：阶段 1 保留自带 tsconfig 扫描——find -maxdepth 2 只能发现 extensions 一个 tsconfig（包级在深度 3），类型检查范围结构性小于 pr-cr-fix 静态门，是「本地验证门」的第 4 份平行清单且无对账；阶段 1 本地全量 pnpm test——与阶段 2 PR CI（同一 commit 全量 test job）完全重复，只加时长不加覆盖。
+
+**效果**：「修一轮才见下一个失败」的 CI 形态在全部 job 消除；无对账双实现（ci 内联、双解析器、散落 slug）各收敛为单一来源或红灯对账。

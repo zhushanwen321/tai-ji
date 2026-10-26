@@ -13,7 +13,13 @@ set -euo pipefail
 # 检查失败原则：任何非 0 退出都输出
 trap '[ $? -ne 0 ] && echo "[原则] 预发布失败，请检查上方错误信息。可手动还原：git checkout main && git branch -D dev-npm-*" >&2' EXIT
 
-REPO="zhushanwen321/tai-ji"
+# 仓库标识从 github remote 一手推导（本仓唯一远端，AGENTS.md git 规范）——不硬编码
+# slug，仓库迁移/改名后脚本零改动；remote 缺失时 fail-fast 而非拼出空 --repo
+REPO="$(git remote get-url github 2>/dev/null | sed -E 's#.*[:/]([^/]+/[^/.]+)(\.git)?/?$#\1#')"
+if [[ -z "$REPO" ]]; then
+    echo "ERROR: 无法从 github remote 推导仓库标识——先确认 git remote get-url github 可用" >&2
+    exit 2
+fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WS_ROOT="${WS_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 GITHUB_REMOTE="github"

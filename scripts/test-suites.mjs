@@ -44,6 +44,7 @@ const SCRIPTS_GUARD_FILES = [
   'scripts/__tests__/pi-env-admission-gate.test.mjs',
   'scripts/__tests__/merge-gate.test.mjs',
   'scripts/__tests__/merge-state.test.mjs',
+  'scripts/__tests__/merge-sync.test.mjs',
   'scripts/__tests__/merge-wait-for-ci.test.mjs',
   'scripts/__tests__/merge-release.test.mjs',
   'scripts/__tests__/merge-verify-ci-release.test.mjs',
@@ -53,6 +54,7 @@ const SCRIPTS_GUARD_FILES = [
   'scripts/__tests__/check-prompt-outposts.test.mjs',
   'scripts/__tests__/check-pi-subtree-shared-imports.test.mjs',
   'scripts/__tests__/probe-registry.test.mjs',
+  'scripts/__tests__/check-repo-literal.test.mjs',
   // 以下四个为 2026-10-26 收编的原「零执行点」测试（此前不在任何 CI 步骤/本地门禁）
   'scripts/__tests__/quality-gates.test.mjs',
   'scripts/__tests__/check-test-extremes.test.mjs',

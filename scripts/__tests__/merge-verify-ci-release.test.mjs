@@ -99,6 +99,22 @@ describe('findRunForTag（tag 触发的 run 匹配）', () => {
     expect(findRunForTag([], 'v1.2.3')).toBeNull()
     expect(findRunForTag(undefined, 'v1.2.3')).toBeNull()
   })
+
+  it('tag 前缀互斥：v0.11.1 不得命中标题 v0.11.15（裸 includes 会把新 release 的结论当本次结论）', () => {
+    const runs = [run({ databaseId: 12, headBranch: 'main', displayTitle: 'Release v0.11.15' })]
+    expect(findRunForTag(runs, 'v0.11.1')).toBeNull()
+  })
+
+  it('边界判定锚定：tag 后跟数字/字母/点视为更长版本号不命中，跟其他字符或行尾命中', () => {
+    const titles = (t) => [run({ databaseId: 13, headBranch: 'main', displayTitle: t })]
+    // 后跟 [0-9a-zA-Z.]（更长版本号的延续字符）→ 不命中
+    expect(findRunForTag(titles('Release v0.11.15'), 'v0.11.1')).toBeNull()
+    expect(findRunForTag(titles('bump v0.11.1a1'), 'v0.11.1')).toBeNull()
+    expect(findRunForTag(titles('bump v0.11.1.2'), 'v0.11.1')).toBeNull()
+    // 后跟空格 / 括号 / 行尾 → 命中
+    expect(findRunForTag(titles('Release v0.11.1 (hotfix)'), 'v0.11.1')?.databaseId).toBe(13)
+    expect(findRunForTag(titles('chore: bump to v0.11.1'), 'v0.11.1')?.databaseId).toBe(13)
+  })
 })
 
 describe('assetCompleteness（产物完整性判定）', () => {

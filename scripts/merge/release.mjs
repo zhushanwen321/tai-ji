@@ -257,8 +257,13 @@ function updateExistingRelease(rel, { TAG, GH_REPO, MAIN_WT, FINAL_NOTES_FILE, a
   } else {
     console.log(updateMessage)
     ensureNotesNoEmoji(MAIN_WT, FINAL_NOTES_FILE)
-    // 对应原 bash `|| true`：edit 失败容忍继续（终局产物验证仍反映真实状态）
-    run('gh', ['release', 'edit', TAG, '--repo', GH_REPO, '--notes-file', FINAL_NOTES_FILE])
+    // 对应原 bash `|| true`：edit 失败容忍继续（终局产物验证仍反映真实状态）。
+    // 容忍 ≠ 静默：失败分支必须出声（WARN + 恢复动作），否则 gh 的 stderr 淹没在
+    // 输出流里，notes 未写入 Release 这件事没有任何脚本侧标记
+    const editRes = run('gh', ['release', 'edit', TAG, '--repo', GH_REPO, '--notes-file', FINAL_NOTES_FILE])
+    if (!editRes.ok) {
+      console.log(`  ${YELLOW}⚠️  Warning: gh release edit 失败（notes 未写入 Release），容忍继续。恢复：手动 gh release edit ${TAG} --repo ${GH_REPO} --notes-file ${FINAL_NOTES_FILE} 重试${NC}`)
+    }
   }
   if (isDraft) {
     console.log('  发布 Draft Release...')

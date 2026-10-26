@@ -22,7 +22,10 @@
  * `grep -qF`），包名互为前缀时（pi-foo vs pi-foobar）按「已声明」放行——误放方向，
  * 变更须连带评估 Gate-1a.5 消费行为。
  *
- * 用法：node scripts/changeset-check.mjs [--json]
+ * 用法：node scripts/changeset-check.mjs [--json] [--base <ref>]
+ *   --base 显式指定 diff 基点（PR 路径应传 PR 的 base = 目标 dev 分支——DEV-WORKFLOW
+ *   §3「PR base = 目标 dev 分支」；不传时回退 main/github/main——此时「分支增量」会
+ *   混入整条 dev 线未发布内容，周期后段 WARN 清单反复列出非本 PR 的包）。
  *   默认输出人可读文案行；--json 输出单行 JSON：
  *   {status: skip|pass|warn|fail, base, changed: [pkg], missing: [pkg],
  *    unversionable: [{file, name, bumpType}], lines: [文案行]}
@@ -60,8 +63,22 @@ function gitOut(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
 }
 
-/** 解析 diff 基点：main 优先、github/main 兜底（与原实现 verify 顺序一致）；都无 → null（skip）。 */
-export function resolveBase(git) {
+/**
+ * 解析 diff 基点：显式 --base 优先（PR base = 目标 dev 分支，DEV-WORKFLOW §3）；
+ * 未显式时 main 优先、github/main 兜底（与原实现 verify 顺序一致）；都无 → null（skip）。
+ * 显式基点解析失败直接抛错（exit 2）——显式输入写错若静默 skip 会退化成「无检查即绿」。
+ */
+export function resolveBase(git, explicitBase = null) {
+  if (explicitBase) {
+    try {
+      git(['rev-parse', '--verify', explicitBase])
+    } catch {
+      const err = new Error(`--base ${explicitBase} 无法解析（rev-parse --verify 失败）——确认目标分支/引用存在后重试`)
+      err.exitCode = 2
+      throw err
+    }
+    return explicitBase
+  }
   for (const ref of ['main', 'github/main']) {
     try {
       git(['rev-parse', '--verify', ref])
@@ -148,7 +165,7 @@ export function runCheck(deps) {
   if (unversionable.length > 0) {
     return { status: 'fail', base: null, changed: [], missing: [], unversionable }
   }
-  const base = resolveBase(deps.git)
+  const base = resolveBase(deps.git, deps.base ?? null)
   if (!base) {
     return { status: 'skip', base: null, changed: [], missing: [], unversionable: [] }
   }
@@ -199,7 +216,16 @@ function createDefaultDeps(cwd = process.cwd()) {
 
 export function main(argv) {
   const json = argv.includes('--json')
-  const deps = createDefaultDeps()
+  let base = null
+  const baseIdx = argv.indexOf('--base')
+  if (baseIdx !== -1) {
+    base = argv[baseIdx + 1]
+    if (!base) {
+      console.error('Missing value for option: --base')
+      process.exit(2)
+    }
+  }
+  const deps = { ...createDefaultDeps(), base }
   let result
   try {
     result = runCheck(deps)

@@ -5,14 +5,14 @@
  * 覆盖，此处不重复；本组只固化命令行契约与 verify-release 的判定分支。
  */
 import { describe, it, expect } from 'vitest'
-import { parseArgs, verifyReleasePayload } from '../merge/wait-for-ci.mjs'
+import { parseArgs, verifyReleasePayload, resolveShaFromState } from '../merge/wait-for-ci.mjs'
 
 describe('parseArgs（argv 解析）', () => {
-  it('全缺省值：仅位置参数，timeout=600 其余空串', () => {
+  it('全缺省值：仅位置参数，timeout=2400（main push CI 含 30 分钟档 e2e job）其余空串', () => {
     expect(parseArgs(['abc123'])).toEqual({
       ok: true,
       sha: 'abc123',
-      timeout: 600,
+      timeout: 2400,
       workflow: '',
       verifyReleaseTag: '',
       repo: '',
@@ -39,7 +39,7 @@ describe('parseArgs（argv 解析）', () => {
   })
 
   it('位置参数可省略（sha 为空串，读 merge 状态由主流程负责）', () => {
-    expect(parseArgs([])).toEqual({ ok: true, sha: '', timeout: 600, workflow: '', verifyReleaseTag: '', repo: '' })
+    expect(parseArgs([])).toEqual({ ok: true, sha: '', timeout: 2400, workflow: '', verifyReleaseTag: '', repo: '' })
     expect(parseArgs(['--timeout', '60'])).toEqual({ ok: true, sha: '', timeout: 60, workflow: '', verifyReleaseTag: '', repo: '' })
   })
 
@@ -67,6 +67,33 @@ describe('parseArgs（argv 解析）', () => {
       expect(v.ok).toBe(false)
       expect(v.error).toBe(`Missing value for option: ${flag}`)
     }
+  })
+})
+
+describe('resolveShaFromState（无参路径的判定对象门）', () => {
+  it('stage=merged 且有 mergeSha → 放行（判定对象 = merge commit 的 push CI）', () => {
+    expect(resolveShaFromState({ stage: 'merged', mergeSha: 'deadbeef', pr: 61 })).toEqual({
+      ok: true,
+      sha: 'deadbeef',
+      pr: 61,
+    })
+  })
+
+  it('只有 headSha（PR head）而无 mergeSha → 拒绝——判的是阶段 2 已裁决过的 PR 侧 runs，禁止复用', () => {
+    const v = resolveShaFromState({ stage: 'merged', headSha: 'aaa', pr: 61 })
+    expect(v.ok).toBe(false)
+    expect(v.reason).toContain('无 mergeSha')
+  })
+
+  it('stage 非 merged（init/released/缺失）→ 拒绝', () => {
+    for (const state of [{ stage: 'init' }, { stage: 'released' }, null, undefined, {}]) {
+      const v = resolveShaFromState(state)
+      expect(v.ok).toBe(false)
+    }
+  })
+
+  it('mergeSha 空串视为无值（写入失败的防护）', () => {
+    expect(resolveShaFromState({ stage: 'merged', mergeSha: '' }).ok).toBe(false)
   })
 })
 

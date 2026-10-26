@@ -10,8 +10,11 @@
 # 6. 产物能正常启动（health check）
 # 7. 插件系统非 mock 端到端验收（隔离 runtime + 真实插件，~8s；verify-plugin-e2e.sh）
 #
-# 用法: ./scripts/validate-runtime-bundle.sh [--ci]
-#   --ci    CI 模式：严格模式，任何失败都会退出码非 0
+# 用法: ./scripts/validate-runtime-bundle.sh [--ci | --static-only]
+#   --ci           CI 模式：严格模式，任何失败都会退出码非 0
+#   --static-only  只执行静态检查段（[2/6] noExternal 对账 + [3/6] 源码 CJS 兼容
+#                  禁令），跳过需构建产物/需运行环境的段——CI invariants job 的
+#                  免构建直调形态，与全量跑共享同一段实现
 
 set -e
 
@@ -28,8 +31,12 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 CI_MODE=false
+STATIC_ONLY=false
 if [ "$1" = "--ci" ]; then
     CI_MODE=true
+fi
+if [ "$1" = "--static-only" ]; then
+    STATIC_ONLY=true
 fi
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,7 +45,10 @@ cd "$PROJECT_ROOT"
 # Gate 0：pnpm store 布局检查——布局被沙箱执行体（zsw 引擎 HOME 覆盖）翻转时，
 # 下方 verify-plugin-e2e 的自含 install 会以 ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY
 # 硬崩；先拦下给出可操作指引（见 docs/TROUBLESHOOTING.md「pnpm store 布局双向翻转」）。
-bash "$PROJECT_ROOT/.githooks/check_pnpm_store_layout.sh" || exit 1
+# --static-only 跳过：布局预检的服务对象是 verify-plugin-e2e 的自含 install，静态段不跑它。
+if [ "$STATIC_ONLY" != true ]; then
+    bash "$PROJECT_ROOT/.githooks/check_pnpm_store_layout.sh" || exit 1
+fi
 
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}[Runtime Bundle 验证]${NC}"
@@ -50,6 +60,95 @@ BUNDLE_PATH="$DIST_RUNTIME/index.cjs"
 BOOTSTRAP_PATH="$DIST_RUNTIME/plugin-bootstrap.cjs"
 BOOTSTRAP_PROCESS_PATH="$DIST_RUNTIME/plugin-bootstrap-process.cjs"
 ESM_LOADER_PATH="$DIST_RUNTIME/plugin-esm-loader.cjs"
+
+# ── 静态检查段（--static-only 与全量路径共用实现）────────────────────
+# [2/6] 与 [3/6] 段体函数化：CI invariants job 直调 `--static-only` 免构建获得
+# 同两段检查，全量路径按原段序调用同一函数——静态检查单一实现，无 CI 内联镜像。
+# 失败路径输出 ::error 注解（GitHub Actions 注解格式；本地全量跑时为普通文本）。
+check_noexternal_parity() {
+  echo ""
+  echo -e "${BLUE}[2/6] 检查依赖是否打包（noExternal）...${NC}"
+
+  # 从 package.json 读取 dependencies（过滤 workspace:* 协议依赖——它们被 tsup inline，
+  # 包名在 bundle 中消失是预期行为，第 4 步 grep 包名检查不适用）
+  RUNTIME_PKG="$RUNTIME_DIR/package.json"
+  DEPS=$(node -e "
+  const p=require('$RUNTIME_PKG');
+  const deps=p.dependencies||{};
+  console.log(Object.keys(deps).filter(k=>!deps[k].startsWith('workspace:')).join('\n'));
+  ")
+
+  # 从 tsup.config.ts 读取 noExternal 配置
+  TSUP_CONFIG="$RUNTIME_DIR/tsup.config.ts"
+  NO_EXTERNAL=$(node -e "
+  const fs=require('fs');
+  const content=fs.readFileSync('$TSUP_CONFIG','utf-8');
+  const match=content.match(/noExternal:\\s*\\[([^\\]]+)\\]/);
+  if(match) console.log(match[1].split(/[,\n]/).map(s=>s.trim().replace(/['\"]/g,'')).filter(Boolean).join('\n'));
+  else console.log('');
+  ")
+
+  MISSING=""
+  NATIVE_SKIPPED=""
+  for dep in $DEPS; do
+      if [ -z "$dep" ]; then continue; fi
+      if echo "$NO_EXTERNAL" | grep -qx "$dep"; then continue; fi
+      # [HISTORICAL] native module（含 .node 二进制）必须保持 external，不能 bundle：
+      # bundle 后 __dirname 变 dist/runtime，node-gyp-build 找不到 prebuilds/*.node。
+      # 判定：dep 目录下有 binding.gyp / prebuilds 目录 / .node 文件。
+      DEP_DIR="$PROJECT_ROOT/node_modules/$dep"
+      if [ -f "$DEP_DIR/binding.gyp" ] || [ -d "$DEP_DIR/prebuilds" ] || find "$DEP_DIR" -name '*.node' 2>/dev/null | grep -q .; then
+          NATIVE_SKIPPED="$NATIVE_SKIPPED $dep"
+          continue
+      fi
+      MISSING="$MISSING $dep"
+  done
+
+  [ -n "$NATIVE_SKIPPED" ] && echo -e "${GREEN}[OK] native module (external 正确，不打包):$NATIVE_SKIPPED${NC}"
+  if [ -n "$MISSING" ]; then
+      echo "::error::runtime 依赖未在 tsup noExternal 中:$MISSING —— 修复：packages/runtime/tsup.config.ts 的 noExternal 追加该依赖"
+      echo -e "${RED}[ERROR] 以下 runtime 依赖未在 tsup noExternal 中：$MISSING${NC}"
+      echo -e "${YELLOW}[FIX] 编辑 $RUNTIME_DIR/tsup.config.ts，noExternal 追加:$MISSING${NC}"
+      exit 1
+  fi
+  [ -z "$NATIVE_SKIPPED" ] && echo -e "${GREEN}[OK] 所有 runtime dependencies 已打包 (noExternal: $NO_EXTERNAL)${NC}"
+  # 尾部 `[ ... ] && echo` 形态在 NATIVE_SKIPPED 非空时返回 1；函数化后它会成为函数
+  # 返回码、在 set -e 下令调用点静默退出——显式 return 0 保持原段序继续语义。
+  return 0
+}
+
+check_cjs_source_bans() {
+  echo ""
+  echo -e "${BLUE}[3/6] 检查 CJS 兼容性（禁止无 guard 的 import.meta / globalThis.__dirname）...${NC}"
+
+  # 扫描根 = runtime src + tsup noExternal 所列 workspace 包 src（C-build-01 前置化，
+  # dev-0.11.8 残余 S-12：workspace 包内联进 bundle 后其源码形态同样是 CJS 失效面）。
+  # 判定/豁免/guard 语义的单一权威 = .githooks/check_runtime_meta_url.py——本步骤曾经的
+  # 三段 grep 已收编进该脚本：任意 import.meta 属性访问（规则 A，强度不降）、
+  # fileURLToPath(import.meta（规则 A 子集）、globalThis.__dirname（规则 B）；且 grep
+  # 不剥注释，扩展扫描根后对 workspace 包 JSDoc 内的 import.meta 字样会误报。
+  # [HISTORICAL] 2026-08-05：排除 __tests__ 目录——测试文件不走 tsup CJS bundle（entry 只含
+  # index.ts + bootstrap），vitest 在 ESM 环境直接跑源码，import.meta 有效（收编后由脚本内
+  # 同款排除承载）。[HISTORICAL] 2026-08-17：fileURLToPath 全量匹配误报收窄（security slice
+  # W3）与 [D8b] globalThis.__dirname 禁令的语义均由脚本规则 A/B 承载。
+  if ! python3 "$PROJECT_ROOT/.githooks/check_runtime_meta_url.py"; then
+      echo "::error::runtime 打包面源码存在无 guard 的 import.meta / globalThis.__dirname（违规清单见上方输出，修复指引见下方 [FIX]）"
+      echo -e "${YELLOW}[FIX] 路径解析用 typeof __dirname !== 'undefined' ? __dirname : undefined guard（参照 plugin-host.ts）；双形态 guard 实现登记脚本 allowlist（参照 d8-compat.ts）${NC}"
+      exit 1
+  fi
+
+  echo -e "${GREEN}[OK] 打包面源码（runtime + noExternal workspace 包）无未加 guard 的 import.meta / globalThis.__dirname 引用${NC}"
+}
+
+# --static-only：只执行静态检查段，跳过需构建产物/需运行环境的段（Gate 0 / [1/*] /
+# [2b] / [4]-[7]）——构建失败之外的红灯（noExternal 漏配 / 源码 CJS 禁令）免构建即暴露。
+if [ "$STATIC_ONLY" = true ]; then
+    echo -e "${BLUE}[Runtime Bundle 验证 --static-only（[2/6] noExternal 对账 + [3/6] 源码 CJS 禁令）]${NC}"
+    check_noexternal_parity
+    check_cjs_source_bans
+    echo -e "${GREEN}[OK] 静态检查段通过（--static-only）${NC}"
+    exit 0
+fi
 
 # ── 1. Build 产物存在（index.cjs + plugin-bootstrap.cjs + 子进程产物）──
 echo ""
@@ -118,51 +217,7 @@ for (const d of dirs) {
 fi
 
 # ── 2. 依赖打包检查 ─────────────────────────────────────────────────
-echo ""
-echo -e "${BLUE}[2/6] 检查依赖是否打包（noExternal）...${NC}"
-
-# 从 package.json 读取 dependencies（过滤 workspace:* 协议依赖——它们被 tsup inline，
-# 包名在 bundle 中消失是预期行为，第 4 步 grep 包名检查不适用）
-RUNTIME_PKG="$RUNTIME_DIR/package.json"
-DEPS=$(node -e "
-const p=require('$RUNTIME_PKG');
-const deps=p.dependencies||{};
-console.log(Object.keys(deps).filter(k=>!deps[k].startsWith('workspace:')).join('\n'));
-")
-
-# 从 tsup.config.ts 读取 noExternal 配置
-TSUP_CONFIG="$RUNTIME_DIR/tsup.config.ts"
-NO_EXTERNAL=$(node -e "
-const fs=require('fs');
-const content=fs.readFileSync('$TSUP_CONFIG','utf-8');
-const match=content.match(/noExternal:\\s*\\[([^\\]]+)\\]/);
-if(match) console.log(match[1].split(/[,\n]/).map(s=>s.trim().replace(/['\"]/g,'')).filter(Boolean).join('\n'));
-else console.log('');
-")
-
-MISSING=""
-NATIVE_SKIPPED=""
-for dep in $DEPS; do
-    if [ -z "$dep" ]; then continue; fi
-    if echo "$NO_EXTERNAL" | grep -qx "$dep"; then continue; fi
-    # [HISTORICAL] native module（含 .node 二进制）必须保持 external，不能 bundle：
-    # bundle 后 __dirname 变 dist/runtime，node-gyp-build 找不到 prebuilds/*.node。
-    # 判定：dep 目录下有 binding.gyp / prebuilds 目录 / .node 文件。
-    DEP_DIR="$PROJECT_ROOT/node_modules/$dep"
-    if [ -f "$DEP_DIR/binding.gyp" ] || [ -d "$DEP_DIR/prebuilds" ] || find "$DEP_DIR" -name '*.node' 2>/dev/null | grep -q .; then
-        NATIVE_SKIPPED="$NATIVE_SKIPPED $dep"
-        continue
-    fi
-    MISSING="$MISSING $dep"
-done
-
-[ -n "$NATIVE_SKIPPED" ] && echo -e "${GREEN}[OK] native module (external 正确，不打包):$NATIVE_SKIPPED${NC}"
-if [ -n "$MISSING" ]; then
-    echo -e "${RED}[ERROR] 以下 runtime 依赖未在 tsup noExternal 中：$MISSING${NC}"
-    echo -e "${YELLOW}[FIX] 编辑 $RUNTIME_DIR/tsup.config.ts，noExternal 追加:$MISSING${NC}"
-    exit 1
-fi
-[ -z "$NATIVE_SKIPPED" ] && echo -e "${GREEN}[OK] 所有 runtime dependencies 已打包 (noExternal: $NO_EXTERNAL)${NC}"
+check_noexternal_parity
 
 # ── 2b. 裸 require 说明符全量白名单（W11/A5 + 传递内联断链防线 dmg-r1-6）──
 # 第 2 步把 workspace:* 协议依赖从 DEPS 断言中过滤（它们被 tsup inline 是预期），
@@ -226,25 +281,7 @@ fi
 echo -e "${GREEN}[OK] 产物裸 require 白名单检查通过（node 内建 + external 登记项 + 可选 native 之外零外漏）${NC}"
 
 # ── 3. CJS 兼容性检查 ───────────────────────────────────────────────
-echo ""
-echo -e "${BLUE}[3/6] 检查 CJS 兼容性（禁止无 guard 的 import.meta / globalThis.__dirname）...${NC}"
-
-# 扫描根 = runtime src + tsup noExternal 所列 workspace 包 src（C-build-01 前置化，
-# dev-0.11.8 残余 S-12：workspace 包内联进 bundle 后其源码形态同样是 CJS 失效面）。
-# 判定/豁免/guard 语义的单一权威 = .githooks/check_runtime_meta_url.py——本步骤曾经的
-# 三段 grep 已收编进该脚本：任意 import.meta 属性访问（规则 A，强度不降）、
-# fileURLToPath(import.meta（规则 A 子集）、globalThis.__dirname（规则 B）；且 grep
-# 不剥注释，扩展扫描根后对 workspace 包 JSDoc 内的 import.meta 字样会误报。
-# [HISTORICAL] 2026-08-05：排除 __tests__ 目录——测试文件不走 tsup CJS bundle（entry 只含
-# index.ts + bootstrap），vitest 在 ESM 环境直接跑源码，import.meta 有效（收编后由脚本内
-# 同款排除承载）。[HISTORICAL] 2026-08-17：fileURLToPath 全量匹配误报收窄（security slice
-# W3）与 [D8b] globalThis.__dirname 禁令的语义均由脚本规则 A/B 承载。
-if ! python3 "$PROJECT_ROOT/.githooks/check_runtime_meta_url.py"; then
-    echo -e "${YELLOW}[FIX] 路径解析用 typeof __dirname !== 'undefined' ? __dirname : undefined guard（参照 plugin-host.ts）；双形态 guard 实现登记脚本 allowlist（参照 d8-compat.ts）${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}[OK] 打包面源码（runtime + noExternal workspace 包）无未加 guard 的 import.meta / globalThis.__dirname 引用${NC}"
+check_cjs_source_bans
 
 # ── 4. 产物自包含验证 ────────────────────────────────────────────────
 echo ""

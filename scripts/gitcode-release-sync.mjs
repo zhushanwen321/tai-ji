@@ -29,6 +29,7 @@
  *   - API 限流：实测 8 并发即 429 → 全程串行 + 每次调用间隔 1.5s
  */
 
+import { DEFAULT_REPO } from './merge/lib/repo.mjs'
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdtempSync, rmSync, mkdirSync, existsSync, renameSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -762,7 +763,7 @@ const positionalArgs = (args) => args.filter((a) => !a.startsWith('--'));
 /** --github-repo 取值：缺省用默认仓，显式给出但值缺失时为 undefined（与原 argv 直取一致） */
 function githubRepoFromArgs(args) {
   const idx = args.indexOf('--github-repo');
-  return idx >= 0 ? args[idx + 1] : 'zhushanwen321/tai-ji';
+  return idx >= 0 ? args[idx + 1] : DEFAULT_REPO;
 }
 
 const USAGE = `用法：

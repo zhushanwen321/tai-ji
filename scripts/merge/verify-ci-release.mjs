@@ -73,15 +73,20 @@ export function parseArgs(argv) {
  * 从 Release workflow runs 中找 tag 触发的那条（纯函数，供测试导入）。
  *
  * 主匹配：headBranch 精确等于 tag 或 'refs/tags/' + tag（原 jq select 两分支）；
- * 无命中时备选 displayTitle 包含 tag（原 jq test() 正则模糊匹配——真实 tag 形态
- * 下字面 includes 等价）。各自取数组第一个命中；主匹配优先于备选（原 bash 先跑
- * 主 jq、空了才跑备选 jq）。无命中返回 null。
+ * 无命中时备选 displayTitle 含 tag——带尾部边界：tag 后必须紧跟非 [0-9a-zA-Z.]
+ * 字符或行尾（裸 includes 会把标题 v0.11.15 当成 v0.11.1 命中，新 release 的
+ * conclusion 被误当本次结论）。各自取数组第一个命中；主匹配优先于备选（原 bash
+ * 先跑主 jq、空了才跑备选 jq）。无命中返回 null。
  */
 export function findRunForTag(runs, tag) {
   const list = Array.isArray(runs) ? runs : []
   const byHeadBranch = list.find((r) => r?.headBranch === tag || r?.headBranch === `refs/tags/${tag}`)
   if (byHeadBranch !== undefined) return byHeadBranch
-  const byTitle = list.find((r) => typeof r?.displayTitle === 'string' && r.displayTitle.includes(tag))
+  // tag 里的 . 是版本分隔符不是通配符，先转义再拼边界（负向先行断言等价于
+  // 「后跟非 [0-9a-zA-Z.] 字符或行尾」）
+  const escaped = String(tag).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const tagWithBoundary = new RegExp(`${escaped}(?![0-9a-zA-Z.])`)
+  const byTitle = list.find((r) => typeof r?.displayTitle === 'string' && tagWithBoundary.test(r.displayTitle))
   return byTitle ?? null
 }
 

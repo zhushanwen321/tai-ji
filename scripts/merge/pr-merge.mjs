@@ -11,7 +11,8 @@
  *   2. gh pr merge --merge --delete-branch --match-head-commit <sha>（merge commit，
  *      绝不 squash；match-head-commit 保证「判定时的 head = 合并时的 head」——判定
  *      通过后 PR 又被推新提交时 gh 拒绝合并，封住客户端侧的检查-合并竞态窗口）
- *   3. sync 本地 main（fetch + reset --hard github/main）
+ *   3. sync 本地 main（fetch + 领先防护 + reset --hard github/main——本地 main 领先
+ *      远端时 fail-fast，见 lib/sync.mjs）
  *   4. main 依赖补装（lockfile 变化时；一致时快速跳过）
  *
  * 前置：阶段 0（init）已执行，PR 处于 OPEN 状态
@@ -27,7 +28,8 @@ import { RED, GREEN, YELLOW, BOLD, NC } from './lib/output.mjs'
 import { DEFAULT_REPO } from './lib/repo.mjs'
 import { filterDependabot, waitForRuns } from './lib/gate.mjs'
 import { findWorkspaceRoot, mainWorktreePath } from './lib/workspace.mjs'
-import { writeMergeState } from './lib/state.mjs'
+import { writeMergeState, readMergeState } from './lib/state.mjs'
+import { syncMain } from './lib/sync.mjs'
 
 const GH_REMOTE = 'github'
 
@@ -163,23 +165,22 @@ if (!existsSync(MAIN_WT)) {
   process.exit(1)
 }
 
-run('git', ['-C', MAIN_WT, 'fetch', GH_REMOTE, 'main'])
-
-// 强制切到 main 分支（reset --hard 只移动当前分支 HEAD，不切换分支。
-// 若 main worktree checkout 在其他分支，reset 会把该分支指针移到 github/main，
-// 导致后续 bump/commit/push 落错分支 + tag 指向错误分支）
-run('git', ['-C', MAIN_WT, 'checkout', 'main'])
-run('git', ['-C', MAIN_WT, 'reset', '--hard', `${GH_REMOTE}/main`])
-
-// 校验当前分支确实是 main（checkout 失败时 reset 仍会移动错误分支指针）
-const branchRes = run('git', ['-C', MAIN_WT, 'branch', '--show-current'], { stdio: 'capture' })
-const CURRENT_BRANCH = branchRes.stdout.trim()
-if (CURRENT_BRANCH !== 'main') {
-  fail(`Error: main worktree 当前分支为 ${CURRENT_BRANCH}（非 main）`)
-  console.log(`  reset 无法切换分支，手动执行: git -C ${MAIN_WT} checkout main`)
+const sync = syncMain({ run, mainWt: MAIN_WT, ghRemote: GH_REMOTE })
+if (!sync.ok) {
+  if (sync.step === 'ahead-guard') {
+    fail(`Error: 本地 main 领先 ${GH_REMOTE}/main ${sync.ahead} 个未 push 的 commit，reset --hard 会丢弃它们（仅 reflog 可恢复）`)
+    console.log('  领先 = 疑似发布在途（阶段 4 bump / 阶段 5 notes 已 commit 未 push）或未知本地改动。处置:')
+    console.log(`    1. 在途发布: 先完成后续阶段（push: git -C ${MAIN_WT} push ${GH_REMOTE} main），再重跑本脚本`)
+    console.log(`    2. 确认丢弃: git -C ${MAIN_WT} reset --hard ${GH_REMOTE}/main（丢弃后重跑，幂等）`)
+  } else if (sync.hint !== undefined) {
+    fail(`Error: main 同步在 ${sync.step} 步失败`)
+    console.log(`  手动恢复后重跑本脚本（幂等，已合并的 PR 会跳过合并步骤）: ${sync.hint}`)
+  } else {
+    fail(`Error: main 同步在 ${sync.step} 步失败——手动检查: git -C ${MAIN_WT} status`)
+  }
   process.exit(1)
 }
-console.log(`${GREEN}✅ 本地 main 已同步到 ${GH_REMOTE}/main${NC}`)
+console.log(`${GREEN}✅ 本地 main 已同步到 ${GH_REMOTE}/main（HEAD ${sync.mainSha.slice(0, 8)}）${NC}`)
 
 // 依赖一致性：合入可能前进 main 的 lockfile（集成分支带新依赖/版本 bump），
 // node_modules 已存在时 pre-merge-check 的缺失性安装不会触发——此处按 lockfile 补装。
@@ -204,14 +205,19 @@ if (!installRes.ok) {
 }
 console.log(`${GREEN}✅ main 依赖与 lockfile 一致${NC}`)
 
-// ── 状态落盘（供后续阶段消费：wait-for-ci 缺省 sha 时读取 headSha）──
+// ── 状态落盘（供后续阶段消费：wait-for-ci 无参时校验 stage=merged 后读 mergeSha）──
+// reset 开启：清掉上一轮 release 的 tag/releasedAt 等字段（跨轮残留会让读者无法分辨
+// 管线归属）；pipelineId 若阶段 0（init）已写入则延续，否则此处生成
+const prevState = readMergeState(WS_ROOT)
 const written = writeMergeState(WS_ROOT, {
-  branch: HEAD_BRANCH,
+  pipelineId: prevState?.pipelineId ?? `${Date.now()}-${process.pid}`,
+  branch: HEAD_BRANCH || prevState?.branch || '',
   pr: Number(PR_NUMBER),
-  headSha: HEAD_SHA,
+  headSha: HEAD_SHA || prevState?.headSha || '',
+  mergeSha: sync.mainSha,
   stage: 'merged',
   mergedAt: new Date().toISOString(),
-})
+}, { reset: true })
 if (written === null) {
   console.log(`  ${YELLOW}Warning: merge 状态写入失败（不影响本阶段；后续阶段需手传 commit sha）${NC}`)
 }

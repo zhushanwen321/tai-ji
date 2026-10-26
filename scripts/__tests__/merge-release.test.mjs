@@ -14,7 +14,9 @@ import {
   notesFinalized,
 } from '../merge/release.mjs'
 
-const REPO_URL = 'https://github.com/zhushanwen321/tai-ji'
+import { DEFAULT_REPO } from '../merge/lib/repo.mjs'
+
+const REPO_URL = `https://github.com/${DEFAULT_REPO}`
 
 /** 手写行序列 → 落盘字节串（bash echo 逐行输出：每行一个换行，串尾恒以 \n 结束）。 */
 const md = (lines) => `${lines.join('\n')}\n`
@@ -114,7 +116,7 @@ describe('buildBilingualNotes（双语 notes 模板，逐字节断言）', () =>
         '## Bug Fixes',
         '  - 修复会话切换竞态',
         '',
-        '**Full Changelog**: https://github.com/zhushanwen321/tai-ji/compare/v0.6.4...v0.6.5',
+        '**Full Changelog**: ' + REPO_URL + '/compare/v0.6.4...v0.6.5',
         '',
         '<!-- LANG:zh -->',
         '## 重大变更',
@@ -130,7 +132,7 @@ describe('buildBilingualNotes（双语 notes 模板，逐字节断言）', () =>
         '## 修复缺陷',
         '  - 修复会话切换竞态',
         '',
-        '**完整变更**: https://github.com/zhushanwen321/tai-ji/compare/v0.6.4...v0.6.5',
+        '**完整变更**: ' + REPO_URL + '/compare/v0.6.4...v0.6.5',
         '',
       ]),
     )
@@ -144,13 +146,13 @@ describe('buildBilingualNotes（双语 notes 模板，逐字节断言）', () =>
         '## New Features',
         '  - 新增 xx',
         '',
-        '**Full Changelog**: https://github.com/zhushanwen321/tai-ji/compare/v0.6.4...v0.6.5',
+        '**Full Changelog**: ' + REPO_URL + '/compare/v0.6.4...v0.6.5',
         '',
         '<!-- LANG:zh -->',
         '## 新增功能',
         '  - 新增 xx',
         '',
-        '**完整变更**: https://github.com/zhushanwen321/tai-ji/compare/v0.6.4...v0.6.5',
+        '**完整变更**: ' + REPO_URL + '/compare/v0.6.4...v0.6.5',
         '',
       ]),
     )
@@ -162,10 +164,10 @@ describe('buildBilingualNotes（双语 notes 模板，逐字节断言）', () =>
     expect(notes).toBe(
       md([
         '<!-- LANG:en -->',
-        '**Full Changelog**: https://github.com/zhushanwen321/tai-ji/compare/v0.6.4...v0.6.5',
+        '**Full Changelog**: ' + REPO_URL + '/compare/v0.6.4...v0.6.5',
         '',
         '<!-- LANG:zh -->',
-        '**完整变更**: https://github.com/zhushanwen321/tai-ji/compare/v0.6.4...v0.6.5',
+        '**完整变更**: ' + REPO_URL + '/compare/v0.6.4...v0.6.5',
         '',
       ]),
     )
@@ -191,14 +193,14 @@ describe('buildPrTitleFallbackNotes（PR 标题兜底模板，逐字节断言）
         '',
         '- Merge PR #45: fix session race',
         '',
-        '**Full Changelog**: https://github.com/zhushanwen321/tai-ji/compare/v0.6.4...v0.6.5',
+        '**Full Changelog**: ' + REPO_URL + '/compare/v0.6.4...v0.6.5',
         '',
         '<!-- LANG:zh -->',
         '## 新增功能',
         '',
         '- Merge PR #45: fix session race',
         '',
-        '**完整变更**: https://github.com/zhushanwen321/tai-ji/compare/v0.6.4...v0.6.5',
+        '**完整变更**: ' + REPO_URL + '/compare/v0.6.4...v0.6.5',
       ]),
     )
   })

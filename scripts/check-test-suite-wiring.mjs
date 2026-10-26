@@ -25,61 +25,16 @@ import { join } from 'node:path'
 import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { SUITES, NON_CI_EXEMPT } from './test-suites.mjs'
+import { extractStepRuns } from './lib/ci-yaml-runs.mjs'
+
+// 再导出维持既有测试导入路径（scripts/__tests__/check-test-suite-wiring.test.mjs）
+export { extractStepRuns }
 
 /** 空白归一：多空格/换行折叠为单空格（ci.yml 块标量与单行 run 的等价比对基准）。 */
 export function normCmd(text) {
   return String(text).replace(/\s+/g, ' ').trim()
 }
 
-/**
- * ci.yml 文本 → Map<步骤名, {cmd, line}>。name: 与紧随其后的 run: 配对
- * （中间允许 uses/with/env 行；块标量 run: | 逐行拼接、行间以空格连接——与
- * normCmd 归一口径一致）。
- */
-export function extractStepRuns(yamlText) {
-  const out = new Map()
-  const lines = yamlText.split('\n')
-  let currentName = null
-  let pendingRun = false
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]
-    const nm = line.match(/^\s*-\s+name:\s*(.+)$/)
-    if (nm) {
-      currentName = nm[1].trim()
-      pendingRun = true
-      continue
-    }
-    if (!currentName || !pendingRun) continue
-    if (/^\s*-\s/.test(line)) {
-      pendingRun = false // 下一个列表项开始，name 与 run 配对失效
-      continue
-    }
-    const rm = line.match(/^(\s*)run:\s*(.*)$/)
-    if (!rm) continue
-    const indent = rm[1].length
-    const rhs = rm[2].trim()
-    if (/^[|>][+-]?$/.test(rhs)) {
-      const parts = []
-      let j = i + 1
-      while (j < lines.length) {
-        const l = lines[j]
-        if (l.trim() === '') {
-          j += 1
-          continue
-        }
-        if (l.match(/^\s*/)[0].length <= indent) break
-        parts.push(l.trim())
-        j += 1
-      }
-      out.set(currentName, { cmd: parts.join(' '), line: i + 1 })
-      i = j - 1
-    } else {
-      out.set(currentName, { cmd: rhs, line: i + 1 })
-    }
-    pendingRun = false
-  }
-  return out
-}
 
 /**
  * 对账核心（纯函数，全注入）。返回 failures: [{ kind, message }]。

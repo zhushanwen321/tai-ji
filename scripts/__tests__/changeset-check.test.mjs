@@ -262,6 +262,36 @@ describe('端到端（临时 git 仓库跑真实脚本进程）', () => {
     expect(result.changed).toEqual([])
   })
 
+  it('--base 显式基点：分支增量只含本 PR 改动，不混入 base 分支自身的 dev 线内容（发现 1 回归）', () => {
+    const { dir, git } = makeRepo()
+    const mk = (name) => {
+      const pkgDir = join(dir, 'extensions/universal', name)
+      mkdirSync(join(pkgDir, 'src'), { recursive: true })
+      writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: `@zhushanwen/pi-${name}` }))
+      writeFileSync(join(pkgDir, 'src', 'index.ts'), 'export const a = 1\n')
+    }
+    mk('todo')
+    mk('bar')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'init'])
+    git(['checkout', '-qb', 'dev-0.11.16'])
+    writeFileSync(join(dir, 'extensions/universal/bar/src/index.ts'), 'export const a = 2\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'dev line change'])
+    git(['checkout', '-qb', 'feat'])
+    writeFileSync(join(dir, 'extensions/universal/todo/src/index.ts'), 'export const a = 3\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'feat change'])
+    // 缺省（main）：分支增量混入 dev 线的 bar——周期后段每个 PR 都为整条 dev 线举证
+    const byMain = runCheck({ root: dir, git })
+    expect(byMain.base).toBe('main')
+    expect(byMain.changed.sort()).toEqual(['@zhushanwen/pi-bar', '@zhushanwen/pi-todo'])
+    // 显式 --base dev-0.11.16：只判本分支的 todo
+    const byDev = runCheck({ root: dir, git, base: 'dev-0.11.16' })
+    expect(byDev.base).toBe('dev-0.11.16')
+    expect(byDev.changed).toEqual(['@zhushanwen/pi-todo'])
+  })
+
   it('--json 单行输出含 status/changed/missing/lines（pr-pre-merge.sh 消费契约）', () => {
     const { dir, git } = makeRepo()
     writeFileSync(join(dir, 'x.txt'), 'x')
@@ -278,7 +308,19 @@ describe('端到端（临时 git 仓库跑真实脚本进程）', () => {
   })
 })
 
-describe('resolveBase：main 优先、github/main 兜底、全无 → null', () => {
+describe('resolveBase：显式 --base 优先；缺省 main 优先、github/main 兜底、全无 → null', () => {
+  it('显式 base 直接采用（不试探 main）；解析失败抛 exitCode 2 错误（不静默 skip 成「无检查即绿」）', () => {
+    expect(resolveBase(fakeGit({ 'rev-parse --verify dev-0.11.16': 'ok\n' }), 'dev-0.11.16')).toBe('dev-0.11.16')
+    const throwsForGone = (args) => {
+      if (args.join(' ').includes('dev-gone')) throw new Error('unknown revision')
+      return 'ok\n'
+    }
+    let caught = null
+    try { resolveBase(throwsForGone, 'dev-gone') } catch (e) { caught = e }
+    expect(caught).not.toBeNull()
+    expect(caught.exitCode).toBe(2)
+    expect(String(caught.message)).toContain('dev-gone')
+  })
   it('解析顺序与原实现对拍（main → github/main）', () => {
     expect(resolveBase(fakeGit({ 'rev-parse --verify main': 'ok\n' }))).toBe('main')
     const gitNoMain = (args) => {

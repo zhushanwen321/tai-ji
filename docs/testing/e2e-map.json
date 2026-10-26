@@ -1185,6 +1185,7 @@
         ".githooks/check-test-extremes.mjs",
         "scripts/test-suites.mjs",
         "scripts/check-test-suite-wiring.mjs",
+        "scripts/lib/ci-yaml-runs.mjs",
         "scripts/__tests__/check-test-suite-wiring.test.mjs"
       ],
       "layer": "L1",
@@ -2948,6 +2949,7 @@
         "scripts/merge/**",
         "scripts/__tests__/merge-gate.test.mjs",
         "scripts/__tests__/merge-state.test.mjs",
+        "scripts/__tests__/merge-sync.test.mjs",
         "scripts/__tests__/merge-wait-for-ci.test.mjs"
       ],
       "layer": "L1",
@@ -2967,6 +2969,10 @@
         {
           "kind": "spec",
           "ref": "scripts/__tests__/merge-state.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/merge-sync.test.mjs"
         },
         {
           "kind": "spec",
@@ -2991,10 +2997,31 @@
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "pnpm exec vitest run scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs",
+      "run": "pnpm exec vitest run scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-sync.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "merge skill 判定承载脚本（pr-merge/wait-for-ci 的 Node 实装 + lib）迁入仓库后的登记：真实运行形态 = merge skill 薄壳经 main worktree 调起（.agents/skills/merge/scripts 同名 .sh），本表 run = 零 token fixture 回归（79 用例）；CI 固定环节 = ci.yml「Test - scripts guards」步骤同批文件"
+    },
+    {
+      "id": "E2E-REPO-01",
+      "summary": "仓库标识（slug）字面量对账：脚本域内 zhushanwen321/tai-ji 只允许出现在登记白名单（repo.mjs / _lib/repo.sh / runtime 常量镜像两处），其余脚本一律从单一来源取值（Node import DEFAULT_REPO / shell git remote 推导）——仓库改名漏改即红（xyz-agent→tai-ji 教训）",
+      "scope": [
+        "scripts/merge/lib/repo.mjs",
+        "scripts/__tests__/check-repo-literal.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-repo-literal.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm exec vitest run scripts/__tests__/check-repo-literal.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "发现 12 修复（2026-10-26 merge 流程架构审查）：白名单带理由登记在测试文件 ALLOW；CI 固定环节 = ci.yml「Test - scripts guards」步骤同批文件"
     },
     {
       "id": "E2E-CHANGESET-01",

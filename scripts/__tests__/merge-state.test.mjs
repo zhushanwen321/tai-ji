@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest'
 import { mkdtempSync, mkdirSync, existsSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readMergeState, writeMergeState, mergeStatePath } from '../merge/lib/state.mjs'
+import { readMergeState, writeMergeState, mergeStatePath, TERMINAL_STAGES } from '../merge/lib/state.mjs'
 import { findWorkspaceRoot, mainWorktreePath } from '../merge/lib/workspace.mjs'
 
 function makeTmp() {
@@ -33,6 +33,33 @@ describe('merge 状态文件', () => {
       writeMergeState(root, { pr: 1 })
       expect(mergeStatePath(root)).toBe(join(root, '.merge-state', 'current.json'))
       expect(existsSync(mergeStatePath(root))).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('reset 开启新管线：上一轮 release 字段（tag/releasedAt 等）整体清除，不跨轮残留', () => {
+    const root = makeTmp()
+    try {
+      writeMergeState(root, { pr: 45, tag: 'v0.11.15', releaseUrl: 'x', releasedAt: '2026-10-23T00:00:00Z', stage: 'released' })
+      writeMergeState(root, { pipelineId: 'p2', pr: 61, stage: 'init' }, { reset: true })
+      const next = readMergeState(root)
+      expect(next).toMatchObject({ pipelineId: 'p2', pr: 61, stage: 'init' })
+      expect(next.tag).toBeUndefined()
+      expect(next.releaseUrl).toBeUndefined()
+      expect(next.releasedAt).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('reset 缺省时保持浅合并（同一管线内阶段推进不丢字段）；终态词表含 released', () => {
+    const root = makeTmp()
+    try {
+      writeMergeState(root, { pipelineId: 'p1', pr: 61, mergeSha: 'aa', stage: 'merged' })
+      writeMergeState(root, { stage: 'released', tag: 'v0.11.16' })
+      expect(readMergeState(root)).toMatchObject({ pipelineId: 'p1', pr: 61, mergeSha: 'aa', stage: 'released', tag: 'v0.11.16' })
+      expect(TERMINAL_STAGES).toContain('released')
     } finally {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }

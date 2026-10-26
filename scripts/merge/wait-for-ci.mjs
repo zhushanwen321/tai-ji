@@ -2,9 +2,11 @@
 /**
  * wait-for-ci.mjs — 等待 GitHub Actions CI 完成（.agents/skills/merge/scripts/wait-for-ci.sh 的 Node 移植）
  *
- * 用法: wait-for-ci.mjs [<commit-sha>] [--timeout 600] [--workflow <name>] [--verify-release <tag>] [--repo <owner/repo>]
- *   commit-sha 可省略：读 merge 状态文件（<workspace 根>/.merge-state/current.json，pr-merge
- *   阶段落盘）的 headSha；状态缺失时按 usage 错误退出。
+ * 用法: wait-for-ci.mjs [<commit-sha>] [--timeout 2400] [--workflow <name>] [--verify-release <tag>] [--repo <owner/repo>]
+ *   commit-sha 可省略：读 merge 状态文件（<workspace 根>/.merge-state/current.json）的
+ *   mergeSha——且仅当 stage === 'merged' 时消费（merge commit 的 push CI 才是阶段 3 的
+ *   判定对象；headSha 是 PR head，判的是阶段 2 已裁决过的 PR 侧 runs，禁止复用）。
+ *   状态缺失/未到 merged 态时按 usage 错误退出（要求显式传 sha）。
  *
  * 场景 1: gh pr merge 后，push 到 main 触发 ci.yml
  * 场景 2: 推送修复后等待 CI 重新运行
@@ -36,7 +38,7 @@ import { findWorkspaceRoot } from './lib/workspace.mjs'
 import { readMergeState } from './lib/state.mjs'
 
 const USAGE =
-  'Usage: wait-for-ci.mjs [<commit-sha>] [--timeout 600] [--workflow <name>] [--verify-release <tag>] [--repo <owner/repo>]'
+  'Usage: wait-for-ci.mjs [<commit-sha>] [--timeout 2400] [--workflow <name>] [--verify-release <tag>] [--repo <owner/repo>]'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -47,9 +49,11 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
  * 与原 bash 一致：位置参数唯一，多余位置参数与未识别参数一律 Unknown option。
  * 增强点：--timeout 解析期校验为有限数字——原 bash 对非数字值会在数值比较处崩出
  * 晦涩错误，Node 侧 NaN 比较恒 false 会让超时判定永不触发（防线失效），必须前置拒绝。
+ * 默认 2400s：main push CI 含 e2e-visual / e2e-behavior 两个 timeout-minutes: 30 的
+ * job，600s 必超时（旧默认，已上调——超时应是异常而非常态首跑体验）。
  */
 export function parseArgs(argv) {
-  const out = { sha: '', timeout: 600, workflow: '', verifyReleaseTag: '', repo: '' }
+  const out = { sha: '', timeout: 2400, workflow: '', verifyReleaseTag: '', repo: '' }
   const rest = [...argv]
   while (rest.length > 0) {
     const a = rest.shift()
@@ -123,19 +127,36 @@ function fetchReleasePayload(tag, repo) {
   }
 }
 
-/** ── 定位 commit：显式 sha 优先；缺省读 merge 状态文件（pr-merge 阶段落盘的 headSha）── */
+/**
+ * 无参路径的判定对象裁决（纯函数，供测试导入）。
+ * 只接受 stage === 'merged' 且有 mergeSha 的状态——merge commit 的 push CI 才是
+ * 阶段 3 要等的对象；headSha（PR head）是阶段 2 已裁决过的 PR 侧 runs，禁止复用。
+ */
+export function resolveShaFromState(state) {
+  if (state?.stage === 'merged' && typeof state?.mergeSha === 'string' && state.mergeSha !== '') {
+    return { ok: true, sha: state.mergeSha, pr: state.pr ?? null }
+  }
+  return {
+    ok: false,
+    reason: state?.stage === 'merged'
+      ? '状态已到 merged 但无 mergeSha（pr-merge 旧版写入，或写入失败）'
+      : `状态 stage 为 ${state?.stage ?? '无'}（未到 merged——阶段 2 未跑或状态属上一轮管线）`,
+  }
+}
+
+/** ── 定位 commit：显式 sha 优先；缺省读 merge 状态文件的 mergeSha（经 stage 门）── */
 function resolveRefOrFail(parsed) {
   if (parsed.sha) return parsed.sha
   const root = findWorkspaceRoot()
-  const headSha = root === null ? null : readMergeState(root)?.headSha ?? null
-  if (!headSha) {
+  const resolved = resolveShaFromState(root === null ? null : readMergeState(root))
+  if (!resolved.ok) {
     console.error(USAGE)
-    console.error('（未提供 commit-sha，且 merge 状态文件缺失或无 headSha）')
+    console.error(`（未提供 commit-sha，且 merge 状态不可作为判定对象：${resolved.reason}）`)
+    console.error('  恢复：显式传入 main 最新 commit sha 重跑——git -C <main-worktree> rev-parse HEAD')
     process.exit(1)
   }
-  const REF = headSha
-  console.log(`  从 merge 状态读取 commit=${REF}`)
-  return REF
+  console.log(`  从 merge 状态读取 mergeSha=${resolved.sha}（PR #${resolved.pr ?? '?'} 的 merge commit）`)
+  return resolved.sha
 }
 
 /** ── 前置检查：gh 安装/登录（原 bash 的 jq 检查随 JSON.parse 移除，见文件头）── */
@@ -217,7 +238,7 @@ function printCiTimeout(verdict, TIMEOUT, REF, ciLog) {
   console.log('')
   console.log('  建议:')
   console.log(`    1. 手动检查: gh run list --commit ${REF}`)
-  console.log(`    2. 增加超时: wait-for-ci.mjs ${REF} --timeout 1200`)
+  console.log(`    2. 增加超时: wait-for-ci.mjs ${REF} --timeout 3600`)
   console.log('    3. 确认通过后继续后续流程')
   process.exit(2) // exit 2 = timeout, AI 应询问用户
 }

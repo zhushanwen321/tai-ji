@@ -83,8 +83,14 @@ function makeDeps(overrides = {}) {
 }
 
 describe('parseGateArgs', () => {
-  it('默认 side = pr-cr-fix', () => {
-    expect(parseGateArgs([])).toEqual({ side: 'pr-cr-fix', base: null, json: false })
+  it('默认 side = pr-cr-fix（only=null 全跑）', () => {
+    expect(parseGateArgs([])).toEqual({ side: 'pr-cr-fix', base: null, json: false, only: null })
+  })
+  it('--only 组过滤：合法列表解析、未知组与缺值 fail-fast', () => {
+    expect(parseGateArgs(['--only', 'typecheck,test']).only).toEqual(['typecheck', 'test'])
+    expect(parseGateArgs(['--only', 'typecheck, test']).only).toEqual(['typecheck', 'test'])
+    expect(() => parseGateArgs(['--only', 'bogus'])).toThrow('--only')
+    expect(() => parseGateArgs(['--only'])).toThrow('--only')
   })
   it('接受 --side dev-merge 与 --base', () => {
     expect(parseGateArgs(['--side', 'dev-merge', '--base', 'dev-0.10.4', '--json']).side).toBe('dev-merge')
@@ -181,6 +187,32 @@ describe('runGates 聚合编排（fake 子进程，不真跑重型命令）', ()
     ])
     expect(result.gates.every((g) => g.status === 'PASS')).toBe(true)
   })
+  it('--only typecheck,test → 只跑指定门组；py 实体缺失不再 fail-fast、base 不解析（merge 阶段 1 调用形态）', async () => {
+    const deps = makeDeps({ exists: () => false }) // py 实体全缺
+    const { exitCode, result } = await runGates(deps, { side: 'pr-cr-fix', base: null, only: ['typecheck', 'test'] })
+    expect(exitCode).toBe(0)
+    expect(result.verdict).toBe('pass')
+    expect(result.base).toBeNull()
+    expect(result.gates.map((g) => g.name)).toEqual([
+      'typecheck:extensions',
+      'typecheck:runtime',
+      'typecheck:renderer',
+      'typecheck:mobile-renderer',
+      'test-suite:taste-lint',
+      'test-suite:resources-plugins',
+      'test-suite:builtin-ext-bundle',
+      'test-suite:scripts-guards',
+    ])
+  })
+
+  it('--only 含 coverage 时 py 实体缺失保持 fail-fast（exit 2，不白跑）', async () => {
+    const deps = makeDeps({ exists: () => false })
+    const { exitCode, result } = await runGates(deps, { side: 'pr-cr-fix', base: null, only: ['typecheck', 'coverage'] })
+    expect(exitCode).toBe(2)
+    expect(result.verdict).toBe('error')
+    expect(result.gates).toEqual([])
+  })
+
   it('typecheck 一处 FAIL → exitCode 1，其余门照跑', async () => {
     const deps = makeDeps({
       exec: (cmd, args, cwd) => {

@@ -37,6 +37,10 @@
  *
  * 门清单：1 typecheck×4 / 2 coverage-gate / 3 机器盲区 / 4 metrics-gate /
  * 5 test-suite（快速守卫测试族，scripts/test-suites.mjs 单一登记，恒跑不分 side）
+ *
+ * --only <组,组>：只跑指定门组（typecheck / coverage / metrics / test；缺省全跑）。
+ * 排除 coverage+metrics 时不做 py 实体检查、不解析 base（merge 阶段 1 的 pre-merge-check
+ * 以 --only typecheck,test 调用——类型检查与守卫族的完整单测覆盖由阶段 2 的 PR CI 等待承担）。
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, linkSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -64,8 +68,10 @@ function usageError(msg) {
   return err
 }
 
+const ONLY_GROUPS = ['typecheck', 'coverage', 'metrics', 'test']
+
 export function parseGateArgs(argv) {
-  const out = { side: 'pr-cr-fix', base: null, json: false }
+  const out = { side: 'pr-cr-fix', base: null, json: false, only: null }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--side') {
@@ -77,11 +83,18 @@ export function parseGateArgs(argv) {
     } else if (a === '--base') {
       out.base = argv[++i]
       if (!out.base) throw usageError('--base 需要一个 ref 参数')
+    } else if (a === '--only') {
+      const v = argv[++i]
+      if (!v) throw usageError(`--only 需要组名列表（${ONLY_GROUPS.join(',')}，逗号分隔）`)
+      const groups = v.split(',').map((x) => x.trim()).filter(Boolean)
+      const bad = groups.filter((g) => !ONLY_GROUPS.includes(g))
+      if (bad.length > 0) throw usageError(`--only 只接受 ${ONLY_GROUPS.join(',')}，得到：${bad.join(',')}`)
+      out.only = groups
     } else if (a === '--json') {
       out.json = true
     } else {
       throw usageError(
-        `未知参数：${a}。用法：node scripts/quality-gates.mjs [--side dev-merge|pr-cr-fix] [--base <ref>] [--json]`,
+        `未知参数：${a}。用法：node scripts/quality-gates.mjs [--side dev-merge|pr-cr-fix] [--base <ref>] [--only ${ONLY_GROUPS.join(',')}] [--json]`,
       )
     }
   }
@@ -624,9 +637,13 @@ export function createDefaultDeps(cwd = process.cwd()) {
 export async function runGates(deps, args) {
   const gates = []
   const { side, base: explicitBase } = args
+  const groups = args.only ?? null
+  const on = (g) => groups === null || groups.includes(g)
+  const needsPy = on('coverage') || on('metrics')
 
-  // fail-fast：py 实体缺失在跑任何门之前报错（不静默跳过、也不白跑重型 typecheck）
-  const missing = missingPythonEntities(deps)
+  // fail-fast：py 实体缺失在跑任何门之前报错（不静默跳过、也不白跑重型 typecheck）；
+  // --only 排除 py 门时不检查（merge 阶段 1 的 typecheck,test 调用不应因 .agents 缺 py 而阻断）
+  const missing = needsPy ? missingPythonEntities(deps) : []
   if (missing.length > 0) {
     return {
       exitCode: 2,
@@ -644,7 +661,15 @@ export async function runGates(deps, args) {
     }
   }
 
-  const { base, source } = resolveBase({ side, explicitBase }, deps.git)
+  // base 只被 py 门（coverage/metrics）消费；--only 排除 py 门时无需解析（也避免
+  // 在与 base 无关的环境因 ref 缺失而 exit 2）
+  let base = null
+  let source = 'not-selected(--only 未含 coverage/metrics)'
+  if (needsPy) {
+    const r = resolveBase({ side, explicitBase }, deps.git)
+    base = r.base
+    source = r.source
+  }
 
   // worktree 级互斥：同 worktree 同时只允许一个 quality-gates 整体运行（并发两次
   // 会让两个 vitest coverage 跑互删 .tmp 覆盖文件、报 ENOENT 哑 FAIL，根因与修法
@@ -670,23 +695,26 @@ export async function runGates(deps, args) {
 
   try {
     // 1. typecheck 四处（自跑）
-    runTypecheckGates(deps, gates)
+    if (on('typecheck')) runTypecheckGates(deps, gates)
 
-    // 2. coverage-gate（py）
-    const covError = runCoverageGate(deps, base, gates)
-    if (covError) return finish(deps, base, source, gates, covError)
+    // 2. coverage-gate（py）+ 3. 机器盲区判定（消费 coverage.json；py fail 时产物仍在，判定照跑并叠加明细）
+    if (on('coverage')) {
+      const covError = runCoverageGate(deps, base, gates)
+      if (covError) return finish(deps, base, source, gates, covError)
 
-    // 3. 机器盲区判定（消费 coverage.json；py fail 时产物仍在，判定照跑并叠加明细）
-    const blindspotError = runBlindspotGate(deps, gates)
-    if (blindspotError) return finish(deps, base, source, gates, blindspotError)
+      const blindspotError = runBlindspotGate(deps, gates)
+      if (blindspotError) return finish(deps, base, source, gates, blindspotError)
+    }
 
     // 4. metrics-gate（py；coverage 之后——消费同 base coverage.json）
-    const metricsError = runMetricsGate(deps, base, gates)
-    if (metricsError) return finish(deps, base, source, gates, metricsError)
+    if (on('metrics')) {
+      const metricsError = runMetricsGate(deps, base, gates)
+      if (metricsError) return finish(deps, base, source, gates, metricsError)
+    }
 
     // 5. 快速守卫测试族（test-suites.mjs 单一登记；恒跑不分 side——过期测试在
     //    dev 合入边界当天红，不再等终局 PR 第一次跑，v0.11.16 两连红的根因修复）
-    runTestSuiteGate(deps, gates)
+    if (on('test')) runTestSuiteGate(deps, gates)
 
     const hasFail = gates.some((g) => g.status === 'FAIL')
     return { exitCode: hasFail ? 1 : 0, result: { verdict: hasFail ? 'fail' : 'pass', base, baseSource: source, gates, metrics: buildMetricsBrief(deps) } }
