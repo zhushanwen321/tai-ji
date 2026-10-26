@@ -597,7 +597,7 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/remove-worktree.sh <branch
 
 - 所有阶段脚本必须在 workspace root 或其子目录（非目标 worktree）内执行
 - 阶段 1 和阶段 6 的检查**零容忍**，所有错误必须当场直接修复
-- bash timeout >= 1200s（Release CI 含 Electron build 可能耗时 10 分钟以上）
+- bash timeout >= 2100s（verify-ci-release 内部 CI 等待预算默认 30 分钟 + 阶段 2 等待，外层 timeout 必须大于内部预算，否则慢构建被外层截断）
 
 ### 3. 故障恢复
 
