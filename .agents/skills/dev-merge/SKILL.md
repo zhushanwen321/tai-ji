@@ -53,7 +53,7 @@ description: >-
 机器可判的合入门禁前置到分支边界（审查项唯一主责：质量门与 changeset 归分支边界承担，终局 PR 期只做复核兜底）。cwd = 当前 feat worktree 根，依次跑：
 
 ```bash
-node scripts/quality-gates.mjs --side dev-merge   # 质量门聚合：typecheck 四处（含 mobile-renderer）+ 增量 coverage（含新增文件机器盲区判定，coverage-file-gate-exempt 可豁免）+ metrics
+node scripts/quality-gates.mjs --side dev-merge   # 质量门聚合：typecheck 四处（含 mobile-renderer）+ 增量 coverage（含新增文件机器盲区判定，coverage-file-gate-exempt 可豁免）+ metrics + test-suite 快速守卫族（taste-lint / resources-plugins / builtin-ext-bundle / scripts-guards，清单单一登记 = scripts/test-suites.mjs——过期测试合入 dev 当天红，不再等终局 PR）
 node scripts/changeset-check.mjs                  # changeset 双向检查：①diff 触及 extensions/**/src/** 且包缺 .changeset/*.md → WARN 清单；②.changeset/*.md 声明了 private/config.ignore 包 → FAIL（声明永不生效，残留/阻断 version）
 node "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/scripts/pi-extension-smoke.mjs" --json   # pi extension 启动冒烟：本 worktree 全部 extension 源码入口（extensions/{taiji,universal}/*/package.json 的 main）经 pi 真实加载一遍（--mode rpc + stdin EOF，零 LLM 调用），抓 main 声明指向缺失文件 / 入口加载期即崩——这类问题装进 pi 宿主才暴露，前置到合并边界
 ```
