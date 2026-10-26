@@ -522,13 +522,15 @@ let rflHomeDir: string;
 beforeEach(() => {
   runsDir = mkdtempSync(join(tmpdir(), "rfl-e2e-"));
   fixtureDir = mkdtempSync(join(tmpdir(), "rfl-e2e-agents-"));
-  // rfl 仪表（tier-1 T3）：state.json 现落 <HOME>/.agents/skill-data/review-fix-loop/rfl/
-  // ——HOME 重定向到临时目录，防测试写真实 home（worker_threads 在 new Worker 时拷贝
-  // 主线程 env 快照，stubEnv 先于起 run 即可让 worker 侧 os.homedir() 读到隔离值）；
-  // SKILL_DATA_DIR 一并置空，防宿主残留值把存储根重定向出隔离树。
+  // rfl 仪表（tier-1 T3）：state.json 现落 skill-data 根下 review-fix-loop/rfl/
+  // ——根隔离主通道 = SKILL_DATA_DIR 直指隔离树（被测代码的根替代 SSOT，经
+  // process.env JS 读，forks/threads 双池一致；threads 池下 worker 的 env 拷贝
+  // JS 写不传导 os.homedir() 读的 C environ，置空回退 HOME 通道会落回真实 HOME）。
+  // 值取隔离树内 .agents/skill-data，与 HOME 形态的落盘路径逐字同构；HOME 一并
+  // stub，防真 fork 子进程（faux 外通道）读宿主 HOME。
   rflHomeDir = mkdtempSync(join(tmpdir(), "rfl-e2e-home-"));
   vi.stubEnv("HOME", rflHomeDir);
-  vi.stubEnv("SKILL_DATA_DIR", "");
+  vi.stubEnv("SKILL_DATA_DIR", join(rflHomeDir, ".agents", "skill-data"));
   // 压缩 script-error 重试矩阵的真实指数退避（1+2+4s → 3ms；fail-fast 用例走完
   // 重试矩阵才收敛 failed，退避占单用例耗时大头）。生产默认不变，见
   // worker-message-pump RETRY_BACKOFF_BASE_ENV 测试通道。
@@ -1375,8 +1377,8 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       const outcome = assertScriptOutcome(result.scriptResult);
       expect(outcome.terminated).toBe("clean");
 
-      // T3 存储迁移：runDir 位于 HOME（已 stub 到 rflHomeDir）下
-      // .agents/skill-data/review-fix-loop/rfl/<slug>/<runId>
+      // T3 存储迁移：runDir 位于隔离 skill-data 根（SKILL_DATA_DIR 直指
+      // rflHomeDir 树）下 .agents/skill-data/review-fix-loop/rfl/<slug>/<runId>
       expect(typeof outcome.runDir).toBe("string");
       expect(outcome.runDir).toContain(join(rflHomeDir, ".agents", "skill-data", "review-fix-loop", "rfl"));
       // 引擎注入的 _runId 覆盖用户预传值（A3 语义）——state 目录名 = 引擎 runId

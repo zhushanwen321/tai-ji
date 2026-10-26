@@ -10,8 +10,9 @@
  *     该 import 语句同时是静态依赖边，使依赖分析把 scripts/rfl.mjs 纳入测试可达域。
  *
  * 驱动方式（单测层拆分层，docs/TEST-STRATEGY.md「新写测试判据」节 第二波）：全部用例
- * 进程内加载 rfl.mjs（vi.resetModules + 动态 import，HOME 指向 fixture 临时目录），
- * 零子进程——真 execFile 冒烟由 rfl-cli.test.ts 承担（每包真进程缩到 1-2 条）。
+ * 进程内加载 rfl.mjs（vi.resetModules + 动态 import，SKILL_DATA_DIR 直指 fixture
+ * 临时树隔离 skill-data 根），零子进程——真 execFile 冒烟由 rfl-cli.test.ts 承担
+ * （每包真进程缩到 1-2 条）。
  */
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -61,7 +62,7 @@ function writeRun(repoSlug: string, runId: string, state: Record<string, unknown
 
 /**
  * 进程内驱动 rfl.mjs：rfl.mjs 的 main 在 import 时执行（读 process.argv），
- * SKILL_DATA_ROOT 在模块加载期求值——HOME/SKILL_DATA_DIR 须先指向 fixture。
+ * SKILL_DATA_ROOT 在模块加载期求值——SKILL_DATA_DIR 须先指向 fixture。
  * process.exit 拦截为 no-op 记录（switch 分支 break 后模块正常完成，不杀 worker），
  * console.log/error 捕获为行数组 = execFile stdout 的进程内等价物；exitCodes 即
  * execFile 版的 exit status（含非零分支，免 promisify reject 取 err.stdout 的形态）。
@@ -73,11 +74,13 @@ async function rflInProcess(args: string[]): Promise<{ out: string; lines: strin
   const realErr = console.error;
   const realExit = process.exit;
   const realArgv = process.argv;
-  const realHome = process.env.HOME;
   const realSkillDataDir = process.env.SKILL_DATA_DIR;
-  process.env.HOME = home;
-  // SKILL_DATA_DIR 显式清空：ROOT 在 import 时求值，防宿主残留值重定向出 HOME 隔离树
-  delete process.env.SKILL_DATA_DIR;
+  // 根隔离主通道 = SKILL_DATA_DIR 直指隔离树（rfl.mjs 的根替代 SSOT：非空时短路
+  // homedir() 回退，经 process.env JS 读，forks/threads 双池一致）。置空回退 HOME
+  // 通道在 threads 池失效——worker 的 env 拷贝 JS 写不传导 os.homedir() 读的
+  // C environ，会落回真实 HOME。值取隔离树内 .agents/skill-data，与置空时
+  // forks 形态的落盘路径逐字同构（writeRun 的 fixture 路径即按此树写）。
+  process.env.SKILL_DATA_DIR = join(home, ".agents", "skill-data");
   process.argv = ["node", "rfl.mjs", ...args];
   console.log = ((...a: unknown[]) => { lines.push(a.map(String).join(" ")); }) as typeof console.log;
   console.error = ((...a: unknown[]) => { lines.push(a.map(String).join(" ")); }) as typeof console.error;
@@ -91,7 +94,6 @@ async function rflInProcess(args: string[]): Promise<{ out: string; lines: strin
     console.error = realErr;
     process.exit = realExit;
     process.argv = realArgv;
-    process.env.HOME = realHome;
     if (realSkillDataDir === undefined) delete process.env.SKILL_DATA_DIR;
     else process.env.SKILL_DATA_DIR = realSkillDataDir;
   }

@@ -1,7 +1,7 @@
 /**
  * A7: rfl.mjs CLI smoke（rfl 仪表 T4，tier-1 §7.4）。
  *
- * HOME 指向临时目录 + 预置 fixture state.json，覆盖：
+ * skill-data 根指向临时目录（SKILL_DATA_DIR 隔离）+ 预置 fixture state.json，覆盖：
  *   - list：列出两 run（runId/时间/terminated/轮数）
  *   - stats latest：token 汇总 + 缓存命中率 + per-role + 轮次时间线
  *   - trends：跨 run 行
@@ -74,7 +74,7 @@ async function rfl(args: string[]): Promise<{ stdout: string; stderr: string }> 
 
 /**
  * 进程内驱动 rfl.mjs（输出断言主通道）：rfl.mjs 的 main 在 import 时执行（读
- * process.argv），SKILL_DATA_ROOT 在模块加载期求值——HOME/SKILL_DATA_DIR 须先指向
+ * process.argv），SKILL_DATA_ROOT 在模块加载期求值——SKILL_DATA_DIR 须先指向
  * fixture。process.exit 拦截为 no-op 记录（switch 分支 break 后模块正常完成，不杀
  * worker），console.log/error 捕获为行数组 = execFile stdout 的进程内等价物。
  */
@@ -85,11 +85,13 @@ async function rflInProcess(args: string[]): Promise<{ out: string; lines: strin
   const realErr = console.error;
   const realExit = process.exit;
   const realArgv = process.argv;
-  const realHome = process.env.HOME;
   const realSkillDataDir = process.env.SKILL_DATA_DIR;
-  process.env.HOME = home;
-  // SKILL_DATA_DIR 显式清空：ROOT 在 import 时求值，防宿主残留值重定向出 HOME 隔离树
-  delete process.env.SKILL_DATA_DIR;
+  // 根隔离主通道 = SKILL_DATA_DIR 直指隔离树（rfl.mjs 的根替代 SSOT：非空时短路
+  // homedir() 回退，经 process.env JS 读，forks/threads 双池一致）。置空回退 HOME
+  // 通道在 threads 池失效——worker 的 env 拷贝 JS 写不传导 os.homedir() 读的
+  // C environ，会落回真实 HOME。值取隔离树内 .agents/skill-data，与置空时
+  // forks 形态的落盘路径逐字同构（writeRun 的 fixture 路径即按此树写）。
+  process.env.SKILL_DATA_DIR = join(home, ".agents", "skill-data");
   process.argv = ["node", "rfl.mjs", ...args];
   console.log = ((...a: unknown[]) => { lines.push(a.map(String).join(" ")); }) as typeof console.log;
   console.error = ((...a: unknown[]) => { lines.push(a.map(String).join(" ")); }) as typeof console.error;
@@ -103,7 +105,6 @@ async function rflInProcess(args: string[]): Promise<{ out: string; lines: strin
     console.error = realErr;
     process.exit = realExit;
     process.argv = realArgv;
-    process.env.HOME = realHome;
     if (realSkillDataDir === undefined) delete process.env.SKILL_DATA_DIR;
     else process.env.SKILL_DATA_DIR = realSkillDataDir;
   }
