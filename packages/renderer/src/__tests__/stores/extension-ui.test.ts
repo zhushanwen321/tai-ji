@@ -1,33 +1,43 @@
 // @vitest-environment node
-
 /**
- * extension-ui store 单测 —— TC1：ask-user/dialog pending 的 session 级 SSOT。
+ * stores 单文件多源合并（round5-d 分区 4 簇 4-11 的 node 环境子集）。
  *
- * 覆盖：
- * - hasPendingBlockingOverlay 查询（核心：derivedStatus 入口）
- * - D12 waiting 谓词加 planReview 员：planReview 挂起计入 hasPendingBlockingOverlay
- *   （waiting 态数据源）；B 会话挂 planReview →
- *   侧栏 waiting 标记（derivedStatus=waiting）且焦点 A 会话不受影响
- * - addRequest requestId dedup（迁移自 useExtensionUI push 去重）
- * - removeRequest（respond/cancel/timeout 出队）
- * - retainOnly 快照差集剔除（renderer 僵尸表单修剪主算法，§6.2 采用项④ v6.1）
- * - clearSession（deleteSession 分区释放）
- * - clearAllPending（runtime 重连全局清理）
- * - recordsOf 响应式视图（组件订阅自动更新）
- * - per-sessionId 分区隔离（A/B 互不干扰）
+ * 为什么单文件：vitest 按测试文件隔离模块图——本簇 4 个 node 环境文件共同装载
+ * vue / shared / extension-protocol / zh-CN locale / core chat domain 等重模块，
+ * 单文件共享一份装载；拆文件会让每个文件各付一次全树装载（每份秒级 CPU）。
  *
- * store 只 import 类型，无 API 依赖，故无需 mock。
+ * 来源文件（describe/it 块原样搬运，测试名零改动；四文件全零 vi.mock）：
+ *  - extension-ui.test.ts（extension-ui store pending SSOT，主体）
+ *  - session-store-state.test.ts（applySnapshot + markDead/revive）
+ *  - preset-store.test.ts（preset 纯状态容器）
+ *  - extension-ui-schedule-create.test.ts（form 键判定 legacy scheduler 表单）
+ *
+ * 冲突处理（试点模式）：
+ *  - 四文件顶层 beforeEach（全部同为 setActivePinia(createPinia()) 幂等重置）
+ *    合并为文件级公共 hook 一份
+ *  - extension-ui-schedule-create 的 makeForm/makeDialog 与主体同名异签名
+ *    （前者 string 参数、后者 overrides 对象参数），按节重命名局部副本为
+ *    makeSchedForm/makeSchedDialog（仅函数名，用例名与断言零改动）
+ *
+ * 环境注：同簇的 chat-occupancy-phase.test.ts 与 sidebar-store.test.ts 为
+ * happy-dom（默认）环境，与 node 异类，不并入（保持原文件原样）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/extension-ui.test.ts
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useExtensionUIStore } from '@/stores/extension-ui'
+import { useSessionStore } from '@/stores/session'
+import { usePresetStore } from '@/stores/preset'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
+import type { SessionGroup, PiLaunchPreset } from '@taiji/shared'
 
+// 公共 hook（四源文件顶层 beforeEach 的幂等并集，全同构）
 beforeEach(() => {
   setActivePinia(createPinia())
 })
+
+// ══════════ 主体：原 extension-ui.test.ts 全部 ══════════
 
 /** 构造测试 ExtensionUIRequest（默认统一表单请求——form 键，D5 收敛判定键） */
 function makeForm(overrides: Partial<ExtensionUIRequest> = {}): ExtensionUIRequest {
@@ -356,5 +366,246 @@ describe('D12 waiting 谓词加 planReview 员（plan 审批挂起 → 侧栏 wa
     // 应答出队 → 回落 done
     store.removeRequest('sess-B', 'pr-1')
     expect(derivedStatus('sess-B').value).toBe('done')
+  })
+})
+
+// ══════════ 来源：session-store-state.test.ts（applySnapshot + markDead/revive） ══════════
+
+function seedSession(): ReturnType<typeof useSessionStore> {
+  const store = useSessionStore()
+  const group: SessionGroup = {
+    cwd: '/repo',
+    sessions: [
+      { id: 's1', label: 'test', cwd: '/repo', status: 'idle', lastActiveAt: 100 },
+      { id: 's2', label: 'other', cwd: '/repo', status: 'idle', lastActiveAt: 100 },
+    ],
+  }
+  store.applySnapshot({ groups: [group] })
+  return store
+}
+
+describe('sessionStore.applySnapshot（单 session 快照合并）', () => {
+  it('U11: 更新 label，其余字段不变', () => {
+    const store = seedSession()
+    store.applySnapshot('s1', { label: '新名' })
+    const s1 = store.list.find((s) => s.id === 's1')
+    expect(s1?.label).toBe('新名')
+    expect(s1?.status).toBe('idle') // 不变
+    expect(s1?.cwd).toBe('/repo') // 其余描述字段不动
+  })
+
+  it('U12: 未知 sessionId 不抛错，groups 不变', () => {
+    const store = seedSession()
+    expect(() => store.applySnapshot('ghost', { label: 'x' })).not.toThrow()
+    expect(store.list.length).toBe(2)
+    expect(store.list.find((s) => s.id === 's1')?.label).toBe('test')
+  })
+
+  it('U13: 只更新 status，label 不变', () => {
+    const store = seedSession()
+    store.applySnapshot('s1', { status: 'active' })
+    const s1 = store.list.find((s) => s.id === 's1')
+    expect(s1?.status).toBe('active')
+    expect(s1?.label).toBe('test') // 不变
+  })
+
+  it('label 为 undefined 时不更新（保留旧值）', () => {
+    const store = seedSession()
+    store.applySnapshot('s1', { label: undefined, status: 'done' })
+    const s1 = store.list.find((s) => s.id === 's1')
+    expect(s1?.status).toBe('done')
+    expect(s1?.label).toBe('test') // undefined 跳过，保留旧值
+  })
+
+  // ── [W1 会话架构四层分离] 状态字段不再由列表承载（反向锁定；W3 起三字段已不在
+  //    SessionSummary 上，写入分支同批删除——本用例锁定无人把它们加回列表条目）────────
+  it('W1: 单条快照的状态字段（modelId/thinkingLevel/tokenCount）不写入列表条目', () => {
+    const store = seedSession()
+    store.applySnapshot('s1', { modelId: 'anthropic/claude-4', thinkingLevel: 'max', tokenCount: 999 })
+    const s1 = store.list.find((s) => s.id === 's1')
+    // 列表条目只持描述字段；状态字段即使随快照传入也不落列表（W3 起类型上已无这三字段）
+    expect(s1).toMatchObject({ id: 's1', label: 'test', status: 'idle' })
+    expect(s1).not.toHaveProperty('modelId')
+    expect(s1).not.toHaveProperty('thinkingLevel')
+    expect(s1).not.toHaveProperty('tokenCount')
+  })
+})
+
+function seedIdleStore(): ReturnType<typeof useSessionStore> {
+  const store = useSessionStore()
+  const group: SessionGroup = {
+    cwd: '/repo',
+    sessions: [
+      { id: 's1', label: 'idle-session', cwd: '/repo', status: 'idle', lastActiveAt: 100 },
+      { id: 's2', label: 'active-session', cwd: '/repo', status: 'active', lastActiveAt: 200 },
+    ],
+  }
+  store.applySnapshot({ groups: [group] })
+  return store
+}
+
+describe('sessionStore.markDead', () => {
+  it('idle session 标记为 dead', () => {
+    const store = seedIdleStore()
+    store.markDead('s1')
+    expect(store.list.find((s) => s.id === 's1')?.status).toBe('dead')
+  })
+
+  it('active session 标记为 dead（流式中进程崩溃的场景）', () => {
+    const store = seedIdleStore()
+    store.markDead('s2')
+    expect(store.list.find((s) => s.id === 's2')?.status).toBe('dead')
+  })
+
+  it('未知 sessionId 为 no-op（不抛错，列表不变）', () => {
+    const store = seedIdleStore()
+    expect(() => store.markDead('ghost')).not.toThrow()
+    expect(store.list.length).toBe(2)
+    expect(store.list.every((s) => s.status !== 'dead')).toBe(true)
+  })
+
+  it('只改目标 session，其余 session 状态不变', () => {
+    const store = seedIdleStore()
+    store.markDead('s1')
+    expect(store.list.find((s) => s.id === 's1')?.status).toBe('dead')
+    expect(store.list.find((s) => s.id === 's2')?.status).toBe('active')
+  })
+})
+
+describe('sessionStore.revive', () => {
+  it('dead session 重置为 idle', () => {
+    const store = seedIdleStore()
+    store.markDead('s1')
+    expect(store.list.find((s) => s.id === 's1')?.status).toBe('dead')
+
+    store.revive('s1')
+    expect(store.list.find((s) => s.id === 's1')?.status).toBe('idle')
+  })
+
+  it('非 dead 态不受 revive 影响（防止误改 active）', () => {
+    const store = seedIdleStore()
+    // s2 是 active，revive 应 no-op
+    store.revive('s2')
+    expect(store.list.find((s) => s.id === 's2')?.status).toBe('active')
+  })
+
+  it('未知 sessionId 为 no-op', () => {
+    const store = seedIdleStore()
+    expect(() => store.revive('ghost')).not.toThrow()
+    expect(store.list.length).toBe(2)
+  })
+})
+
+// ══════════ 来源：preset-store.test.ts（preset 纯状态容器） ══════════
+
+describe('preset store 初值', () => {
+  it('初值：presets=[]、defaultPresetId=""', () => {
+    const store = usePresetStore()
+    expect(store.presets).toEqual([])
+    expect(store.defaultPresetId).toBe('')
+  })
+})
+
+describe('preset store setPresets（TC-3）', () => {
+  it('setPresets([a,b]) → store.presets === [a,b]', () => {
+    const store = usePresetStore()
+    const presets: PiLaunchPreset[] = [
+      { id: 'builtin:full', name: '全工具模式', builtin: true, order: 0, toolMode: 'all', extensionMode: 'all' },
+      { id: 'builtin:readonly', name: '只读模式', builtin: true, order: 2, toolMode: 'allowlist', allowedTools: ['read'], extensionMode: 'all' },
+    ]
+    store.setPresets(presets)
+    expect(store.presets).toEqual(presets)
+    expect(store.presets).toHaveLength(2)
+  })
+})
+
+describe('preset store setDefaultPresetId（TC-3）', () => {
+  it('setDefaultPresetId("builtin:full") → store.defaultPresetId === "builtin:full"', () => {
+    const store = usePresetStore()
+    store.setDefaultPresetId('builtin:full')
+    expect(store.defaultPresetId).toBe('builtin:full')
+  })
+
+  it('重复 setDefaultPresetId 覆盖（纯写入幂等覆盖）', () => {
+    const store = usePresetStore()
+    store.setDefaultPresetId('builtin:full')
+    store.setDefaultPresetId('builtin:readonly')
+    expect(store.defaultPresetId).toBe('builtin:readonly')
+  })
+})
+
+// ══════════ 来源：extension-ui-schedule-create.test.ts（form 键判定 legacy scheduler
+//             表单；makeForm/makeDialog 与主体同名异签名，按节重命名为
+//             makeSchedForm/makeSchedDialog，用例名与断言零改动） ══════════
+
+/** 构造 legacy scheduler 表单请求（归一后形状：scheduleCreate/scheduleDraft 原键 + form 附加） */
+function makeScheduleCreate(overrides: Partial<ExtensionUIRequest> = {}): ExtensionUIRequest {
+  return {
+    sessionId: 'sess-A',
+    requestId: 'r1',
+    dialogKind: 'select',
+    form: true,
+    scheduleCreate: true,
+    scheduleDraft: {
+      kind: 'recurring',
+      schedule: '0 9 * * *',
+      prompt: '总结昨天的工作进展',
+      models: ['m-1'],
+      currentModel: 'm-1',
+    },
+    ...overrides,
+  }
+}
+
+/** 构造表单请求（form 帧形状；原名 makeForm，与主体 helper 同名异签名故按节重命名） */
+function makeSchedForm(requestId: string): ExtensionUIRequest {
+  return { sessionId: 'sess-A', requestId, dialogKind: 'select', form: true }
+}
+
+/** 构造 dialog 请求（原名 makeDialog，同上重命名） */
+function makeSchedDialog(requestId: string): ExtensionUIRequest {
+  return { sessionId: 'sess-A', requestId, dialogKind: 'confirm' }
+}
+
+describe('form 键判定：hasPendingBlockingOverlay 覆盖 legacy scheduler 表单（有 pending 阻塞 overlay）', () => {
+  it('只有 legacy scheduler 表单请求 → hasPendingBlockingOverlay true（waiting/豁免消费方的数据源）', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeScheduleCreate({ requestId: 'r1' }))
+
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)
+  })
+
+  it('respond 后回落 false（响应式由不可变 Map 替换保证）', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeScheduleCreate({ requestId: 'r1' }))
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)
+
+    store.removeRequest('sess-A', 'r1')
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
+  })
+
+  it('form 帧与 legacy scheduler 表单双请求并存 → 恒 true；逐个移除后才 false', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeSchedForm('r1'))
+    store.addRequest('sess-A', makeScheduleCreate({ requestId: 'r2' }))
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)
+
+    store.removeRequest('sess-A', 'r1')
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)  // scheduler 表单仍在等
+
+    store.removeRequest('sess-A', 'r2')
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
+  })
+
+  it('判定侧收敛语义：裸 legacy 形状（无 form 键、未经归一）不命中 overlay 判定', () => {
+    // store 判定键只认 form——无 form 键的形状只在归一层之前存在
+    //（useExtensionUI 双挂点保证入 store 前必经归一，此处裸形状 = 归一层回归的探针）
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', { sessionId: 'sess-A', requestId: 'r1', dialogKind: 'select', scheduleCreate: true })
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
+
+    store.clearSession('sess-A')
+    store.addRequest('sess-A', makeSchedDialog('r2'))
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
   })
 })

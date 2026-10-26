@@ -15,6 +15,12 @@
  * 的用例已随语义删除——它们曾断言「放得下也截模型名」的行为，正是本次重做的根因。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-density.test.ts
+ *
+ * 单文件多源合并（3 源同装载簇，全 node 环境纯函数/常量断言、零 mock）：
+ * composer-density（本节，最大源）+ thinking-levels + gen-stats-i18n——三者均无
+ * vi.mock、无 DOM 依赖，合并零冲突（同 `@vitest-environment node` pragma）。
+ * 未并入同簇的 panel-container-lazy-retry-detail / subagent-composer-lane /
+ * live-state-selector：happy-dom 环境文件（环境实质冲突），归 happy-dom 侧文件。
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -31,6 +37,16 @@ import type {
   ComposerDensityCapabilities,
   ComposerDensityLayout,
 } from '@/components/panel/composer-density'
+import {
+  resolveThinkingValue,
+  resolveThinkingKey,
+  highestAvailableLevel,
+  isSameThinkingScheme,
+  getDisplayLabel,
+  THINKING_LEVELS,
+} from '@/components/panel/thinking-levels'
+import zhPanel from '@taiji/ui/locale/zh-CN/panel'
+import enPanel from '@taiji/ui/locale/en-US/panel'
 
 /** 穷举矩阵的维度：fit 0–3 × 能力组合 × 锚点保护开关 */
 const ALL_LEVELS = [0, 1, 2, 3]
@@ -227,3 +243,195 @@ describe('纯函数契约', () => {
     expect(caps).toEqual({ hasTrayItems: true, pluginToolbarContributionCount: 2 })
   })
 })
+
+// ══════════ 来源：thinking-levels.test.ts ══════════
+{
+  // 真实预设（从 useProviderEdit.ts THINKING_PRESETS 同步）：map + 对应 supportedLevels
+  const ON_OFF_MAP = { off: 'off', high: 'high' }
+  const HIGH_MAX_MAP = { off: 'off', high: 'high', max: 'xhigh' }
+  const ON_OFF_SUPPORTED = ['off', 'high']
+  const HIGH_MAX_SUPPORTED = ['off', 'high', 'max']
+  // 默认五档（supportedLevels 未下发 / all-levels 预设的 pi 同源计算产物）
+  const DEFAULT_FIVE = ['off', 'minimal', 'low', 'medium', 'high']
+
+  describe('resolveThinkingValue（UI 档位 key → 发 runtime 的 value）', () => {
+    it('high-max: max 档发 xhigh（展示是 max，传递 value 是 xhigh）', () => {
+      expect(resolveThinkingValue('max', HIGH_MAX_MAP)).toBe('xhigh')
+    })
+
+    it('high-max: high 档发 high', () => {
+      expect(resolveThinkingValue('high', HIGH_MAX_MAP)).toBe('high')
+    })
+
+    it('on-off: off 档发 off', () => {
+      expect(resolveThinkingValue('off', ON_OFF_MAP)).toBe('off')
+    })
+
+    it('all-levels（map 空）→ 发 key 自身', () => {
+      expect(resolveThinkingValue('medium', undefined)).toBe('medium')
+    })
+  })
+
+  describe('resolveThinkingKey（runtime value → UI 档位 key）', () => {
+    it('high-max: value xhigh → key max（反查）', () => {
+      expect(resolveThinkingKey('xhigh', HIGH_MAX_MAP)).toBe('max')
+    })
+
+    it('high-max: value high → key high', () => {
+      expect(resolveThinkingKey('high', HIGH_MAX_MAP)).toBe('high')
+    })
+
+    it('on-off: value off → key off', () => {
+      expect(resolveThinkingKey('off', ON_OFF_MAP)).toBe('off')
+    })
+
+    it('all-levels（map 空）→ value 直接是 key', () => {
+      expect(resolveThinkingKey('medium', undefined)).toBe('medium')
+    })
+
+    it('无法映射时 fallback 缺省 high（U6：动态最高档推导已删）；显式传 fallback 按传入档位集', () => {
+      expect(resolveThinkingKey('unknown', HIGH_MAX_MAP)).toBe('high')
+      // 调用方（Popover/sync）传 supportedLevels 推导的精确 fallback
+      expect(resolveThinkingKey('unknown', HIGH_MAX_MAP, 'max')).toBe('max')
+    })
+  })
+
+  describe('getDisplayLabel', () => {
+    it('on-off 模式 high → 「开」', () => {
+      expect(getDisplayLabel('high', ON_OFF_MAP)).toBe('开')
+    })
+
+    it('high-max 模式 high → 「高」（通用 label）', () => {
+      expect(getDisplayLabel('high', HIGH_MAX_MAP)).toBe('高')
+    })
+
+    it('high-max 模式 max → 「最高」', () => {
+      expect(getDisplayLabel('max', HIGH_MAX_MAP)).toBe('最高')
+    })
+  })
+
+  describe('highestAvailableLevel（U6：入参是 supportedLevels 档位集）', () => {
+    it('high-max 档位集 → max（强度最高的可用档）', () => {
+      expect(highestAvailableLevel(HIGH_MAX_SUPPORTED)).toBe('max')
+    })
+
+    it('on-off 档位集 → high（强度最高的可用档）', () => {
+      expect(highestAvailableLevel(ON_OFF_SUPPORTED)).toBe('high')
+    })
+
+    it('undefined → high（默认五档最高档）', () => {
+      expect(highestAvailableLevel(undefined)).toBe('high')
+    })
+
+    it('返回值始终是合法 ThinkingLevel', () => {
+      const validLevels = THINKING_LEVELS.map((o) => o.level)
+      expect(validLevels).toContain(highestAvailableLevel(HIGH_MAX_SUPPORTED))
+      expect(validLevels).toContain(highestAvailableLevel(ON_OFF_SUPPORTED))
+      expect(validLevels).toContain(highestAvailableLevel(undefined))
+    })
+  })
+
+  describe('isSameThinkingScheme（U6：入参是各自模型的 supportedLevels 档位集）', () => {
+    it('on-off vs on-off → 同体系', () => {
+      expect(isSameThinkingScheme(ON_OFF_SUPPORTED, ON_OFF_SUPPORTED)).toBe(true)
+    })
+
+    it('high-max vs high-max → 同体系', () => {
+      expect(isSameThinkingScheme(HIGH_MAX_SUPPORTED, HIGH_MAX_SUPPORTED)).toBe(true)
+    })
+
+    it('on-off vs high-max → 跨体系（档位集不同：{off,high} ≠ {off,high,max}）', () => {
+      expect(isSameThinkingScheme(ON_OFF_SUPPORTED, HIGH_MAX_SUPPORTED)).toBe(false)
+    })
+
+    it('high-max vs on-off → 跨体系（不对称也成立）', () => {
+      expect(isSameThinkingScheme(HIGH_MAX_SUPPORTED, ON_OFF_SUPPORTED)).toBe(false)
+    })
+
+    it('未下发(undefined) vs 未下发 → 同体系（两者均归一默认五档）', () => {
+      expect(isSameThinkingScheme(undefined, undefined)).toBe(true)
+    })
+
+    it('未下发(undefined) vs on-off → 跨体系（归一五档 ≠ {off,high}）', () => {
+      expect(isSameThinkingScheme(undefined, ON_OFF_SUPPORTED)).toBe(false)
+    })
+
+    it('未下发(undefined) vs high-max → 跨体系', () => {
+      expect(isSameThinkingScheme(undefined, HIGH_MAX_SUPPORTED)).toBe(false)
+    })
+
+    it('自定义档位集 {off,high,xhigh} vs on-off → 跨体系', () => {
+      const custom = ['off', 'high', 'xhigh']
+      expect(isSameThinkingScheme(custom, ON_OFF_SUPPORTED)).toBe(false)
+    })
+
+    it('同档位集乱序 → 同体系（归一后集合比较）', () => {
+      expect(isSameThinkingScheme(['high', 'off', 'max'], HIGH_MAX_SUPPORTED)).toBe(true)
+    })
+  })
+}
+
+// ══════════ 来源：gen-stats-i18n.test.ts ══════════
+{
+  /** 运行时类型收窄（禁裸 as / 禁 any）：locale 段必须是可索引对象 */
+  function asRecord(v: unknown): Record<string, unknown> {
+    if (v == null || typeof v !== 'object') throw new Error('locale 段形状异常：期望对象')
+    return v as Record<string, unknown>
+  }
+
+  /** 拍平嵌套对象为 '.' 路径集合 */
+  function flattenKeys(obj: Record<string, unknown>, prefix = ''): Set<string> {
+    const out = new Set<string>()
+    for (const [k, v] of Object.entries(obj)) {
+      const full = prefix ? `${prefix}.${k}` : k
+      if (v != null && typeof v === 'object') {
+        for (const sub of flattenKeys(asRecord(v), full)) out.add(sub)
+      } else {
+        out.add(full)
+      }
+    }
+    return out
+  }
+
+  describe('genStats i18n zh/en 双侧对齐', () => {
+    it('panel context 段 zh/en 拍平 key 集合完全一致（含 genStats* 全部 key）', () => {
+      const zhKeys = flattenKeys(asRecord(asRecord(zhPanel).context))
+      const enKeys = flattenKeys(asRecord(asRecord(enPanel).context))
+      const missingInEn = [...zhKeys].filter((k) => !enKeys.has(k))
+      const extraInEn = [...enKeys].filter((k) => !zhKeys.has(k))
+      expect({ missingInEn, extraInEn }).toEqual({ missingInEn: [], extraInEn: [] })
+    })
+
+    it('genStats* key 逐 key 双侧存在且为字符串文案', () => {
+      const zhCtx = asRecord(asRecord(zhPanel).context)
+      const enCtx = asRecord(asRecord(enPanel).context)
+      const genStatsKeys = Object.keys(zhCtx).filter((k) => k.startsWith('genStats'))
+      // 防空转：本用例的意义在于 genStats 段确实存在（删光 key 时红）
+      expect(genStatsKeys.length).toBeGreaterThan(0)
+      for (const k of genStatsKeys) {
+        expect(typeof zhCtx[k], `zh-CN panel.context.${k}`).toBe('string')
+        expect(typeof enCtx[k], `en-US panel.context.${k}`).toBe('string')
+      }
+    })
+
+    it('composer-genstats-ttft 新增 key 双侧齐（U4：title/note/day/d7/d30 五键，不复用 genStatsDay）', () => {
+      const zhCtx = asRecord(asRecord(zhPanel).context)
+      const enCtx = asRecord(asRecord(enPanel).context)
+      const TTFT_KEYS = [
+        'genStatsTtftTitle',
+        'genStatsTtftNote',
+        'genStatsTtftDay',
+        'genStatsTtftD7',
+        'genStatsTtftD30',
+      ] as const
+      for (const k of TTFT_KEYS) {
+        expect(typeof zhCtx[k], `zh-CN panel.context.${k}`).toBe('string')
+        expect(typeof enCtx[k], `en-US panel.context.${k}`).toBe('string')
+      }
+      // p50 语义独立锁：genStatsTtftDay 与 genStatsDay（今日均值）双侧均非同文
+      //（设计 §3.1 采纳 R1-suggestion——「今日均值」与 p50 中位数语义矛盾，禁复用）
+      expect(zhCtx.genStatsTtftDay).not.toBe(zhCtx.genStatsDay)
+      expect(enCtx.genStatsTtftDay).not.toBe(enCtx.genStatsDay)
+    })
+  })
+}

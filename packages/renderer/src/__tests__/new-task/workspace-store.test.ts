@@ -9,11 +9,16 @@
  * - T3.4: RPC reject 降级（records 置 [] 不抛）
  *
  * mock 策略：mock workspaceApi.listRecent 返回值。
+ *
+ * 单文件多源合并（2 源同装载簇，全 node 环境）：workspace-store（本节，最大源）+
+ * session-api——mock 正交（本节 mock '@/api' 门面；session-api 节不 mock @/api，
+ * 只 mock core ws-client 与 core pending 相对路径，core domains/session 真实实现
+ * 不经门面），零冲突。各节以裸块隔离。
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/new-task/workspace-store.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { RecentWorkspaceRecord } from '@taiji/shared'
+import type { RecentWorkspaceRecord, SessionSummary } from '@taiji/shared'
 
 // mock @/api 门面的 workspace（store 走门面，mock 路径须与 store import 一致；vi.mock 自动 hoist）
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
@@ -22,6 +27,7 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
 
 import { useWorkspaceStore } from '@/stores/workspace'
 import { workspace } from '@/api'
+import { create } from '@taiji/core/transport/api/domains/session'
 
 // store 现经门面调 workspace.listRecent / workspace.record；mock 后此处即 vi.fn 实例
 const mockListRecent = workspace.listRecent as unknown as ReturnType<typeof vi.fn>
@@ -211,3 +217,88 @@ describe('workspaceStore.setPinned（pin/unpin）', () => {
     }
   })
 })
+
+// ══════════ 来源：session-api.test.ts ══════════
+// 其 ws-client / core pending mock 与 hoisted 常量在模块顶层（vi.mock 块内声明不被
+// hoisting 提升，顶层 create import 期模块图已解析，块内 mock 会失效）
+/**
+ * sessionApi.create cwd 透传契约单测（#1，T1.1 配套 api 层片段）。
+ *
+ * 覆盖：
+ * - create(cwd) → WS payload 含 cwd 字段（AC-1.1）
+ * - create() 无参 → payload 不含 cwd 字段（runtime 回退 process.cwd()，AC-1.2 回归）
+ * - create(cwd, label) → label 透传
+ *
+ * mock 策略：mock core ws-client（捕获 send payload）+ core pending 源文件相对路径
+ * （返回可控 id/Promise），验证 session.create 消息 payload 形状。不 mock @/api
+ * （直接测 domains/session 真实实现）。request 已下沉 core（tc u1），mock 目标须与
+ * core 内相对 import 同一模块 ID 才能拦截。
+ *
+ * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/new-task/session-api.test.ts
+ */
+
+// 捕获 transport.send 收到的消息（含 payload 形状）
+// （send 返回 true = 消息已送出，符合 transport.send 的 boolean 契约：
+// request.command 对 send false 会走 fast-fail reject）
+const transportMock = vi.hoisted(() => {
+  const sent: Array<{ type: string; id: string; payload: Record<string, unknown> }> = []
+  return {
+    sent,
+    send: vi.fn((msg: { type: string; id: string; payload: Record<string, unknown> }): boolean => {
+      sent.push(msg)
+      return true
+    }),
+  }
+})
+
+vi.mock('@taiji/core/transport/ws-client', () => ({ send: transportMock.send }))
+vi.mock('../../../../core/src/transport/api/pending', () => ({
+  RPC_BACKSTOP_TIMEOUT_MS: 65_000,
+  createCommandId: vi.fn(() => 'pid-1'),
+  register: vi.fn(() =>
+    Promise.resolve({ session: { id: 's1', cwd: '/x', status: 'idle' } as SessionSummary }),
+  ),
+  reject: vi.fn(),
+}))
+
+{
+beforeEach(() => {
+  transportMock.sent.length = 0
+  transportMock.send.mockClear()
+})
+
+describe('sessionApi.create cwd 透传', () => {
+  it('create(cwd) → payload 含 cwd 字段（AC-1.1）', async () => {
+    await create('/repo')
+    expect(transportMock.send).toHaveBeenCalledTimes(1)
+    const msg = transportMock.sent[0]
+    expect(msg.type).toBe('session.create')
+    expect(msg.payload).toHaveProperty('cwd', '/repo')
+  })
+
+  it('create() 无参 → payload 不含 cwd 字段（AC-1.2 回归，runtime 回退）', async () => {
+    await create()
+    const msg = transportMock.sent[0]
+    expect(msg.payload).not.toHaveProperty('cwd')
+  })
+
+  it('create(cwd, label) → label 透传，cwd 透传', async () => {
+    await create('/repo', 'my-label')
+    const msg = transportMock.sent[0]
+    expect(msg.payload).toHaveProperty('cwd', '/repo')
+    expect(msg.payload).toHaveProperty('label', 'my-label')
+  })
+
+  it('create() 无参 → label 也不强制写入（undefined 不写入键）', async () => {
+    await create()
+    const msg = transportMock.sent[0]
+    // label 为 undefined 时同样不写入 payload 键，保持 payload 干净
+    expect(msg.payload).not.toHaveProperty('label')
+  })
+
+  it('解包 reply envelope .session 返回 SessionSummary', async () => {
+    const result = await create('/repo')
+    expect(result).toMatchObject({ id: 's1', cwd: '/x', status: 'idle' })
+  })
+})
+}

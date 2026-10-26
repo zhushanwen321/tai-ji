@@ -1,17 +1,28 @@
 /**
- * ProviderEditBody 契约 v2 接线测试（真实 useQuotaConfigure 驱动 DOM 与 RPC payload）。
+ * ProviderEditBody 契约 v2 + ProviderImportPreviewDialog 单文件合并
+ * （round5-d 分区 4 簇 4-5 相容子集）。
  *
- * B-1 凭证区条件化 / B-2 模型区混合列表的组件契约由 @taiji/ui 包归属测试守护
- * （packages/ui/src/features/settings/__tests__/provider-edit-body.test.ts），本文件不再重复。
+ * 为什么单文件：vitest 按测试文件隔离模块图——两文件同域（provider 设置导入/
+ * 编辑）、同装载 @taiji/ui features/settings 全树，单文件共享一份装载。
  *
- * 测试框架：vitest（从 vitest 导入 describe/it/expect/beforeEach/afterEach/vi，禁 node:test）。
- * 运行命令：cd packages/renderer && npx vitest run src/__tests__/settings/provider-edit-body-phase-b.test.ts
+ * 来源文件（describe/it 块原样搬运，测试名零改动）：
+ *  - provider-edit-body-phase-b.test.ts（契约 v2 接线：readiness/enabled/saveAndTest，主体）
+ *  - provider-import-preview.test.ts（孤儿凭据组 2 渲染 sa3 F1 · B.6）
  *
- * mock 策略：
- *  - vue-i18n 全局 mock（vitest-i18n-setup.ts，t() 从 zh-CN 取值）
- *  - provideSettingsTransport 注入 spy transport（save 路径断言）
- *  - QUOTA_CONFIGURE_FACTORY_KEY provide 真实 useQuotaConfigure（'@taiji/core/transport/api/domains/quota' mock）
- *  - Dialog（形态切换确认）teleport 到 body：attachTo + document.body 查询（对齐 provider-builtin-ui 模式）
+ * 冲突处理（试点模式）：
+ *  - 两文件顶层 hook 同构（pinia 重建 + wrapper 卸载 + body 清），幂等并集为
+ *    文件级公共 hook 一份，共享一个模块级 wrapper 槽（两节用例互不重叠使用）
+ *  - 主体的 quota 域 mock（全 vi.fn 带温和默认 impl）为文件级——import-preview
+ *    节的 ProviderImportPreviewDialog 为纯展示对话框，不消费 quota 域，零泄漏
+ *  - 主体的 beforeEach 大量 provide（platform/settingsStore/transport）对
+ *    import-preview 节无害（Dialog 不消费注入槽）
+ *
+ * 簇注：同簇的 ProviderPage / settings-resource-page / system-diagnostics-section
+ * 不并入——ProviderPage 的 '@/api' config 域 mock、settings-resource 的
+ * '@/api/domains/settings' 窄 mock、system-diagnostics 的 '@/lib/ipc' 窄 mock
+ * 与 useToast mock 相互泄漏进对方组件树的路径无法静态排除。三文件保持原样。
+ *
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/provider-edit-body-phase-b.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -30,6 +41,7 @@ import {
 } from '@taiji/core'
 import {
   ProviderEditBody,
+  ProviderImportPreviewDialog,
   SETTINGS_TOAST_KEY,
   QUOTA_CONFIGURE_FACTORY_KEY,
 } from '@taiji/ui/features/settings'
@@ -38,6 +50,8 @@ import { useToast } from '@/composables/useToast'
 import i18n from '@/i18n'
 import * as quotaApi from '@taiji/core/transport/api/domains/quota'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import { clickBody } from '../helpers/body-portal-harness'
+import type { ProviderImportPreview, ProviderPreviewItem, ProviderPreviewOrphanItem } from '@taiji/shared'
 import { inMemoryStorage } from '../helpers/platform-storage-stub'
 
 // [C3] useQuotaConfigure 经 SettingsTransport seam 消费 quota RPC——本域模块 mock 作为 seam 桩
@@ -288,5 +302,195 @@ describe('契约 v2 接线：readiness / setEnabled / saveAndTest（真实 compo
     await wrapper.find('[data-testid="provider-edit-apikey"]').setValue('')
     await flushPromises()
     expect(warn().text()).toContain('还没有可用的 API Key')
+  })
+})
+
+
+// ══════════ 来源：provider-import-preview.test.ts（孤儿凭据组 2 渲染；顶层 hook 已并入
+//             文件级公共 hook，wrapper 槽共享主体声明） ══════════
+
+/** 构造组 1 项（models.json provider）。 */
+function g1(overrides: Partial<ProviderPreviewItem> = {}): ProviderPreviewItem {
+  return {
+    id: 'zhipu',
+    name: 'zhipu',
+    protocol: 'openai-completions',
+    modelCount: 2,
+    apiKeyExtracted: true,
+    credentialType: 'plaintext',
+    conflict: 'none',
+    warnings: [],
+    ...overrides,
+  }
+}
+
+/** 构造组 2 项（孤儿凭据）。 */
+function g2(overrides: Partial<ProviderPreviewOrphanItem> = {}): ProviderPreviewOrphanItem {
+  return {
+    providerId: 'openai',
+    name: 'OpenAI',
+    credentialType: 'plaintext',
+    builtinTemplateMatched: true,
+    modelCount: 38,
+    modelNames: ['gpt-4', 'gpt-4o', 'gpt-5'],
+    apiKeyExtracted: true,
+    warnings: [],
+    ...overrides,
+  }
+}
+
+function previewWith(orphans: ProviderPreviewOrphanItem[], providers: ProviderPreviewItem[] = [g1()]): ProviderImportPreview {
+  return { source: 'pi', providers, orphanCredentials: orphans }
+}
+
+async function mountDialog(preview: ProviderImportPreview): Promise<void> {
+  wrapper = mount(ProviderImportPreviewDialog, {
+    props: { open: true, preview },
+    attachTo: document.body,
+  })
+  await flushPromises()
+}
+
+describe('ProviderImportPreviewDialog · orphan credentials group (sa3 F1)', () => {
+  it('t1: 组 2 渲染——标题 + 内置模板徽章 + 凭据形式 + 底部常驻提示', async () => {
+    await mountDialog(previewWith([g2()]))
+
+    // 组 2 标题
+    const group2 = document.body.querySelector('[data-testid="group-2-title"]')
+    expect(group2).toBeTruthy()
+    expect(group2!.textContent).toContain('额外凭据')
+    // 孤儿凭据项 + 内置模板徽章
+    const item = document.body.querySelector('[data-testid="preview-orphan-item"]')
+    expect(item).toBeTruthy()
+    expect(item!.textContent).toContain('OpenAI')
+    expect(document.body.querySelector('[data-testid="orphan-builtin-badge"]')).toBeTruthy()
+    // 底部常驻提示（auth.json 不含模型信息）
+    const hint = document.body.querySelector('[data-testid="orphan-bottom-hint"]')
+    expect(hint).toBeTruthy()
+    expect(hint!.textContent).toContain('auth.json 不含模型信息')
+    // 统计含孤儿凭据数
+    expect(document.body.textContent).toContain('1 个额外凭据')
+  })
+
+  it('t2: 展开内置 model 列表——chevron 点击 → model 名 + 模型数 + 模型来源说明', async () => {
+    await mountDialog(previewWith([g2()]))
+
+    // 初始未展开
+    expect(document.body.querySelector('[data-testid="orphan-models-expand"]')).toBeNull()
+    clickBody('[data-testid="orphan-expand-toggle"]')
+    await flushPromises()
+
+    const expand = document.body.querySelector('[data-testid="orphan-models-expand"]')
+    expect(expand).toBeTruthy()
+    expect(expand!.textContent).toContain('38 个内置模型')
+    // model 名列表
+    expect(expand!.textContent).toContain('gpt-4')
+    expect(expand!.textContent).toContain('gpt-5')
+    // 模型来源说明（B.6）
+    expect(expand!.textContent).toContain('pi-ai 内置 catalog')
+  })
+
+  it('t3: 孤儿凭据默认勾选 → confirm emit 的 selectedIds 含孤儿 providerId', async () => {
+    wrapper = mount(ProviderImportPreviewDialog, {
+      props: { open: true, preview: previewWith([g2({ providerId: 'anthropic', name: 'Anthropic' })]) },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    clickBody('[data-testid="confirm-import-btn"]')
+    await flushPromises()
+
+    // 组 1 默认勾选项（zhipu）+ 孤儿默认勾选项（anthropic）
+    const emitted = wrapper!.emitted('confirm')
+    expect(emitted).toBeTruthy()
+    const ids = emitted![0][0] as string[]
+    expect(ids).toContain('anthropic')
+    expect(ids).toContain('zhipu')
+  })
+
+  it('t4: 组 2 六态徽章全分支可渲染（plaintext/env/env-bundle/oauth/command/missing）', async () => {
+    const orphans = [
+      g2({ providerId: 'a', name: 'A', credentialType: 'plaintext' }),
+      g2({ providerId: 'b', name: 'B', credentialType: 'env', envVarName: 'MY_VAR' }),
+      g2({ providerId: 'c', name: 'C', credentialType: 'env-bundle', apiKeyExtracted: false }),
+      g2({ providerId: 'd', name: 'D', credentialType: 'oauth', apiKeyExtracted: false }),
+      g2({ providerId: 'e', name: 'E', credentialType: 'command' }),
+      g2({ providerId: 'f', name: 'F', credentialType: 'missing', apiKeyExtracted: false }),
+    ]
+    await mountDialog(previewWith(orphans))
+
+    const testids = [
+      'orphan-badge-plaintext',
+      'orphan-badge-env',
+      'orphan-badge-env-bundle',
+      'orphan-badge-oauth',
+      'orphan-badge-command',
+      'orphan-badge-missing',
+    ]
+    for (const tid of testids) {
+      expect(document.body.querySelector(`[data-testid="${tid}"]`)).toBeTruthy()
+    }
+    // env-bundle 徽章文案（新态）
+    const envBundleBadge = document.body.querySelector('[data-testid="orphan-badge-env-bundle"]')
+    expect(envBundleBadge!.textContent).toContain('Env 包')
+  })
+
+  it('t5: 组 1 env-bundle 新徽章分支（六态补齐）', async () => {
+    const providers = [
+      g1({ id: 'deepseek', name: 'deepseek', credentialType: 'env-bundle', apiKeyExtracted: false }),
+      g1({ id: 'copilot', name: 'copilot', credentialType: 'oauth', apiKeyExtracted: false }),
+    ]
+    await mountDialog(previewWith([], providers))
+
+    expect(document.body.querySelector('[data-testid="credential-badge-env-bundle"]')).toBeTruthy()
+    expect(document.body.querySelector('[data-testid="credential-badge-oauth"]')).toBeTruthy()
+  })
+
+  it('t6: 凭据形式占位串——$VAR / OAuth token / !Command / API Key（不含 key 明文）', async () => {
+    const orphans = [
+      g2({ providerId: 'envp', name: 'EnvP', credentialType: 'env', envVarName: 'OPENAI_API_KEY' }),
+      g2({ providerId: 'oau', name: 'Oau', credentialType: 'oauth', apiKeyExtracted: false }),
+      g2({ providerId: 'cmd', name: 'Cmd', credentialType: 'command' }),
+      g2({ providerId: 'plain', name: 'Plain', credentialType: 'plaintext' }),
+    ]
+    await mountDialog(previewWith(orphans))
+
+    const bodyText = document.body.textContent!
+    // $VAR 占位（env 态具体变量名）
+    expect(bodyText).toContain('$OPENAI_API_KEY')
+    expect(bodyText).not.toContain('sk-') // 占位串，无 key 明文
+    // OAuth token / !Command / API Key 形式占位
+    expect(bodyText).toContain('OAuth token')
+    expect(bodyText).toContain('!Command')
+    expect(bodyText).toContain('API Key')
+  })
+
+  it('t7: 未匹配孤儿凭据不进组 2（runtime 侧已进 preview.warnings，UI 顶层横幅展示跳过提示）', async () => {
+    const preview: ProviderImportPreview = {
+      source: 'pi',
+      providers: [g1()],
+      warnings: ['credential unknown-provider-taiji: no built-in template match, skipped'],
+    }
+    await mountDialog(preview)
+
+    // 无组 2（未匹配项不进 orphanCredentials）
+    expect(document.body.querySelector('[data-testid="orphan-group"]')).toBeNull()
+    // 顶层警告横幅含跳过提示（B.6）
+    const banner = document.body.querySelector('[data-testid="preview-top-warnings"]')
+    expect(banner).toBeTruthy()
+    expect(banner!.textContent).toContain('no built-in template match')
+  })
+
+  it('t8: 组 1 + 组 2 混合渲染——两组标题同时存在，组 1 项不受影响', async () => {
+    await mountDialog(previewWith([g2()], [g1({ id: 'deepseek', name: 'deepseek', modelCount: 2 })]))
+
+    expect(document.body.querySelector('[data-testid="group-1-title"]')).toBeTruthy()
+    expect(document.body.querySelector('[data-testid="group-2-title"]')).toBeTruthy()
+    // 组 1 项正常渲染
+    const g1Items = document.body.querySelectorAll('[data-testid="preview-provider-item"]')
+    expect(g1Items.length).toBe(1)
+    expect(g1Items[0].textContent).toContain('deepseek')
+    // 组 2 项
+    expect(document.body.querySelectorAll('[data-testid="preview-orphan-item"]').length).toBe(1)
   })
 })

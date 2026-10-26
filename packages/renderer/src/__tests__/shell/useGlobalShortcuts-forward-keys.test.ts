@@ -1,26 +1,27 @@
 /**
- * view 转发键清单 renderer 半边（display-containers §7.4 [MANDATORY]，F1-17 补齐）。
+ * shell composables 单文件合并（round5-d 分区 4 簇 4-19）。
  *
- * 与 apps/electron/main/test/browser-forward-keys.test.ts（主进程半边）配对：
- * **两侧各跑同一键矩阵断言同判定**（§7.4 双端匹配配对契约）。MATRIX 逐行同源镜像——
- * 修改任一侧须同步另一侧（渲染侧不可跨层 import 主进程模块，矩阵以常量复制 + 注释锚同步）。
+ * 为什么单文件：vitest 按测试文件隔离模块图——两文件共同装载 vue / pinia /
+ * shared / @taiji/core 等重模块，单文件共享一份装载。
  *
- * 覆盖：
- * 1. 键矩阵：非 alt 行 renderer 判定 ≡ 主进程期望（mod 两分皆认 / shift 严格双分 / 裸键不命中）；
- *    alt 行 = 登记的已知不对称（F1-18）：renderer matchOverrideKey/默认路径不拒绝未声明修饰键、
- *    主进程严格拒绝——方向安全（严格侧只会少转发不会误转发），断言 renderer ⊇ 主进程。
- * 2. 入清单约束（deriveForwardAccelerators 镜像 parseForwardAccelerator）：仅 mod 前缀组合；
- *    裸键/shift-only/alt/Esc override 不入清单（页面聚焦态不生效，§7.4 已知边界）。
- * 3. 上报触发范围：setup 即全量重报（browserSetForwardKeys，覆盖初始化/renderer 重载/崩溃恢复）；
- *    overrides 变化 → browserUpdateForwardKeys 注册/注销增量（settings 重录触发范围）。
- * 4. 转发派发：onBrowserForwardKey 回执 accelerator → 同一 keymap 派发动作（guardComposerFocus
- *    不适用——转发事件蕴含焦点在 WebContentsView，composer 非输入态）。
+ * 来源文件（describe/it 块原样搬运，测试名零改动）：
+ *  - useGlobalShortcuts-forward-keys.test.ts（view 转发键清单 renderer 半边 §7.4，主体）
+ *  - use-narrow-window-collapse.test.ts（窄窗自动折叠 matchMedia 接线）
+ *
+ * 冲突处理（试点模式）：
+ *  - 主体的三处 vi.mock（'@/lib/ipc' 与 '@taiji/core' 均 spread actual 只换转发/
+ *    useSearchModal；useCommandStore 窄 mock）为文件级——已静态核实窄窗节
+ *    （useNarrowWindowCollapse + sidebar store）不消费 ipc / commandStore / useSearchModal，零泄漏
+ *  - 窄窗节顶层 beforeEach（pinia 重建 + unstubAllGlobals + localStorage 清理，
+ *    均幂等）提升为文件级公共 hook——主体的 matchMedia stub 无（其 describe 内
+ *    beforeEach 原样在节内），公共 unstub 对其零影响
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/shell/useGlobalShortcuts-forward-keys.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { effectScope } from 'vue'
+import { effectScope, defineComponent, h } from 'vue'
+import { mount } from '@vue/test-utils'
 
 /** ipc mock：转发三 API 可控（其余导出走真实实现——纯类型 + 无副作用模块） */
 const ipcMock = vi.hoisted(() => ({
@@ -77,6 +78,8 @@ import {
   type UseGlobalShortcutsOptions,
 } from '@/composables/shell/useGlobalShortcuts'
 import { useNavigationStore } from '@/stores/navigation'
+import { useNarrowWindowCollapse } from '@/composables/shell/useNarrowWindowCollapse'
+import { useSidebarStore } from '@/stores/sidebar'
 
 /** 键矩阵行：input × accelerator × 主进程期望判定（与 apps/electron/main/test/
  *  browser-forward-keys.test.ts 的 MATRIX 逐行同源——改任一侧必须同步另一侧） */
@@ -113,6 +116,15 @@ function entryFor(accelerator: string): { key: string; shift?: boolean } {
 function toShortcutInput(input: { key: string; meta?: boolean; control?: boolean; alt?: boolean; shift?: boolean }) {
   return { key: input.key, metaKey: input.meta, ctrlKey: input.control, altKey: input.alt, shiftKey: input.shift }
 }
+
+
+// 公共 hook（窄窗节顶层 beforeEach 提升为文件级：pinia 重建 + unstubAllGlobals +
+// localStorage 清理，均幂等重置；主体节无 stubGlobal，unstub 零影响）
+beforeEach(() => {
+  setActivePinia(createPinia())
+  vi.unstubAllGlobals()
+  localStorage.removeItem('taiji:side-collapsed')
+})
 
 describe('键矩阵：renderer 判定与主进程同判定（§7.4 配对契约）', () => {
   for (const row of MATRIX) {
@@ -246,5 +258,120 @@ describe('上报与派发（useGlobalShortcuts 装配点）', () => {
     } finally {
       document.body.innerHTML = ''
     }
+  })
+})
+
+
+// ══════════ 来源：use-narrow-window-collapse.test.ts（窄窗自动折叠；顶层 beforeEach
+//             已提升为文件级公共 hook） ══════════
+
+/** 可控假 MQL：matches 可写 + 手动派发 change（事件对象含 matches 字段） */
+interface FakeMql { // oe-exempt:20261011:test:matchMedia 测试替身类型（jsdom 无 MQL 实装），单实现即终态非等待变体
+  matches: boolean
+  listeners: Array<(e: { matches: boolean }) => void>
+  addEventListener(type: string, fn: (e: { matches: boolean }) => void): void
+  removeEventListener(type: string, fn: (e: { matches: boolean }) => void): void
+  dispatch(matches: boolean): void
+}
+
+function installFakeMatchMedia(initialMatches: boolean): FakeMql {
+  const mql: FakeMql = {
+    matches: initialMatches,
+    listeners: [],
+    addEventListener(_type, fn) {
+      this.listeners.push(fn)
+    },
+    removeEventListener(_type, fn) {
+      const i = this.listeners.indexOf(fn)
+      if (i >= 0) this.listeners.splice(i, 1)
+    },
+    dispatch(matches) {
+      this.matches = matches
+      this.listeners.forEach((fn) => fn({ matches }))
+    },
+  }
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn().mockReturnValue(mql as unknown as MediaQueryList),
+  )
+  return mql
+}
+
+/** 挂载宿主组件（composable 需组件实例上下文） */
+function mountHost() {
+  const Host = defineComponent({
+    setup() {
+      useNarrowWindowCollapse()
+      return () => h('div')
+    },
+  })
+  return mount(Host)
+}
+
+describe('useNarrowWindowCollapse（demo shell spec §3.6，两事实源合成）', () => {
+  it('首屏即窄窗（matches=true）→ 挂载即折叠（视口强制位生效）', () => {
+    installFakeMatchMedia(true)
+    const wrapper = mountHost()
+    const sidebar = useSidebarStore()
+    expect(sidebar.viewportNarrow).toBe(true)
+    expect(sidebar.collapsed).toBe(true)
+    expect(sidebar.userCollapsed).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('宽窗进入断点 → 折叠；放宽（无用户意图）→ 自动弹回', () => {
+    const mql = installFakeMatchMedia(false)
+    const wrapper = mountHost()
+    const sidebar = useSidebarStore()
+    expect(sidebar.collapsed).toBe(false)
+
+    mql.dispatch(true)
+    expect(sidebar.viewportNarrow).toBe(true)
+    expect(sidebar.collapsed).toBe(true)
+
+    mql.dispatch(false)
+    expect(sidebar.viewportNarrow).toBe(false)
+    expect(sidebar.collapsed).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('宽窗手动收起（用户显式意图）→ 缩窗 → 放宽 → 保持收起', () => {
+    const mql = installFakeMatchMedia(false)
+    const wrapper = mountHost()
+    const sidebar = useSidebarStore()
+
+    sidebar.toggleCollapsed()
+    expect(sidebar.collapsed).toBe(true)
+
+    mql.dispatch(true)
+    expect(sidebar.collapsed).toBe(true)
+
+    mql.dispatch(false)
+    expect(sidebar.viewportNarrow).toBe(false)
+    expect(sidebar.userCollapsed).toBe(true)
+    expect(sidebar.collapsed).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('卸载摘除 matchMedia listener（重挂不残留双监听）', () => {
+    const mql = installFakeMatchMedia(false)
+    const wrapper = mountHost()
+    expect(mql.listeners.length).toBe(1)
+
+    wrapper.unmount()
+    expect(mql.listeners.length).toBe(0)
+
+    // 卸载后派发 change 不再触达 store
+    mql.dispatch(true)
+    expect(useSidebarStore().collapsed).toBe(false)
+  })
+
+  it('matchMedia 缺失（老环境）→ 静默跳过，视口位保持 false', () => {
+    vi.stubGlobal('matchMedia', undefined)
+    const wrapper = mountHost()
+    const sidebar = useSidebarStore()
+    expect(sidebar.viewportNarrow).toBe(false)
+    expect(sidebar.collapsed).toBe(false)
+    wrapper.unmount()
   })
 })

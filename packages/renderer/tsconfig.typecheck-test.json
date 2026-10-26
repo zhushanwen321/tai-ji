@@ -1,7 +1,13 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@taiji/shared": ["../shared/src"],
+      "@taiji/ui": ["../ui/src"],
+      "@taiji/ui/*": ["../ui/src/*"]
+    }
   },
   "include": [
     "src/__tests__/api/rpc-type-pairing.test.ts",

@@ -1,21 +1,29 @@
 /**
- * BackgroundTaskDetailPanel 组件测试（u-drawer，background-task-sidebar-view D5/D7 + §3.1 失败路径）。
+ * BackgroundTaskDetailPanel + FileView 真实 virtua 单文件合并
+ * （round5-d 分区 4 簇 4-10 相容子集）。
  *
- * 三视角（TEST-STRATEGY §3）：
- * - 构建者（白盒）：分区数据经 mock 的 useBackgroundTasks 注入（状态根归 u-renderer-store，
- *   本组件只读分区；跟随/kill 的启停条件直接驱动断言）
- * - 使用者（黑盒 DOM）：每条用例至少一个用户可见断言——命令全文、元信息（pid/开始/时长/
- *   exit/reason）、输出尾部、不可用文案、两段式按钮文本与 armed 形态、toast 内容
- * - 观察者（形态）：终态无 kill 按钮、跟随 interval 的启停（fake timers 计次）
+ * 为什么单文件：vitest 按测试文件隔离模块图——两文件共同装载 lucide-vue /
+ * reka-ui-slim / vue / shared / zh-CN locale 等重模块，单文件共享一份装载。
  *
- * mock 策略：
- * - useBackgroundTasks mock：分区内容由测试直接 mutate（广播/终态翻转的注入点）；组件零
- *   listener 的契约使 mock 形态与真实 store 分区同构（reactive { tasks, loaded }）
- * - api/domains/background-task mock：output/kill RPC 回执可控
- * - vue-i18n 文件内 override（ui vitest.setup 先例）：t(key, named) 返回 `key(k=v)` 形态——
- *   locale 未落地（u-i18n-docs 后置单元）时也能断言 key 引用 + named 参数正确性，且不随
- *   locale 文案落地而破
- * - 时间：vi.useFakeTimers({ now: FIXED_NOW })——running 时长 / 输出 interval 双确定性
+ * 来源文件（describe/it 块原样搬运，测试名零改动）：
+ *  - background-task-detail-panel.test.ts（u-drawer 元信息/输出跟随/两段式终止，主体）
+ *  - FileView-virtua.test.ts（P-D7-1 真实 virtua 虚拟滚动）
+ *
+ * 冲突处理（试点模式）：
+ *  - 主体的 fake timers hook（beforeEach useFakeTimers({now}) + afterEach
+ *    useRealTimers）下沉到其三个 describe 节内——FileView 节的 flushVirtua 依赖
+ *    真实 setTimeout(10ms) 链，fake timers 泄漏会让其永不触发；两节 timers 语义互不渗漏
+ *  - 两节顶层 beforeEach 的幂等部分（pinia 重建 + clearAllMocks）与 afterEach
+ *    （clearAllTimers + useRealTimers + wrapper 卸载语义归节内）取并集为文件级公共
+ *  - FileView 节的 '@/api' 与 useSideDrawer mock、模块级 FakeResizeObserver
+ *    stubGlobal + offsetParent patch 为文件级——已静态核实 BackgroundTaskDetailPanel
+ *    不 import '@/api'/useSideDrawer、不消费 ResizeObserver，零泄漏
+ *  - 主体的 vue-i18n mock（t(key,named) → key(k=v)）为文件级——FileView 节无任何
+ *    文案断言（断言全部为 testid/类名/DOM 行数），无断言影响
+ *
+ * 簇注：同簇的 archive-summary-view / plan-comment-popover 不并入——两者有大量
+ * 中文文案断言（「已归档」「用户摘要」「评论」「修订中」等），依赖真实 i18n setup，
+ * 与主体的 vue-i18n mock 实质冲突。两文件保持原样。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/background-task-detail-panel.test.ts
  */
@@ -29,6 +37,10 @@ import BackgroundTaskDetailPanel from '@/components/extension/BackgroundTaskDeta
 import * as backgroundTaskApi from '@taiji/core/transport/api/domains/background-task'
 import { useToast } from '@/composables/useToast'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
+import FileView from '@/components/sidebar/FileView.vue'
+import { useFileTreeStore } from '@/stores/fileTree'
+import { nextTick } from 'vue'
+import type { FileNode } from '@taiji/shared'
 
 // ── mock：任务分区状态根（测试直接 mutate 模拟 list reply / 广播 / 终态翻转）──
 let partitionState: { tasks: BackgroundTaskEntry[]; loaded: boolean }
@@ -108,7 +120,6 @@ beforeEach(() => {
   // output 默认回执：非跟随用例（元信息/kill 组）挂载首次拉取不落 debug 噪音
   vi.mocked(backgroundTaskApi.output).mockResolvedValue(outputReply())
   useToast().toasts.value = []
-  vi.useFakeTimers({ now: FIXED_NOW })
 })
 
 afterEach(() => {
@@ -116,6 +127,12 @@ afterEach(() => {
 })
 
 describe('BackgroundTaskDetailPanel 元信息渲染（G2）', () => {
+  // 本节专用 fake timers（原文件顶层，下沉节内——不渗漏到 FileView 节的真实 setTimeout 链）
+  beforeEach(() => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+  })
+
+
   it('running：命令全文 + taskId + pid + 开始时间 + 已运行时长 DOM 可见，kill 按钮存在', async () => {
     partitionState.tasks = [makeEntry()]
     selectTask(TASK_ID)
@@ -199,6 +216,12 @@ describe('BackgroundTaskDetailPanel 元信息渲染（G2）', () => {
 })
 
 describe('BackgroundTaskDetailPanel 输出跟随（D7：2s interval + 停止条件）', () => {
+  // 本节专用 fake timers（原文件顶层，下沉节内——不渗漏到 FileView 节的真实 setTimeout 链）
+  beforeEach(() => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+  })
+
+
   it('running：挂载首次拉取一次，随后每 2s 重新拉取（fake timers 计次）', async () => {
     partitionState.tasks = [makeEntry()]
     selectTask(TASK_ID)
@@ -326,6 +349,12 @@ describe('BackgroundTaskDetailPanel 输出跟随（D7：2s interval + 停止条�
 })
 
 describe('BackgroundTaskDetailPanel 两段式终止（G3/D10④）+ 分支④⑤ toast', () => {
+  // 本节专用 fake timers（原文件顶层，下沉节内——不渗漏到 FileView 节的真实 setTimeout 链）
+  beforeEach(() => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+  })
+
+
   it('两段式：第一次点击仅进确认态（不发 RPC），第二次点击才发 kill（参数 sessionId+taskId）', async () => {
     partitionState.tasks = [makeEntry()]
     selectTask(TASK_ID)
@@ -412,6 +441,198 @@ describe('BackgroundTaskDetailPanel 两段式终止（G3/D10④）+ 分支④⑤
     await flushPromises()
     await wrapper.find('[data-testid="bash-task-copy"]').trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(makeEntry().command)
+    wrapper.unmount()
+  })
+})
+
+
+// ══════════ 来源：FileView-virtua.test.ts（真实 virtua 虚拟滚动；顶层 hook 已并入文件级
+//             公共 hook，FakeResizeObserver/offsetParent patch 为模块级原样保留） ══════════
+
+const mockFileTree = vi.fn()
+const mockGitStatus = vi.fn()
+vi.mock('@/api', () => ({
+  project: {
+    load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }),
+    save: vi.fn().mockResolvedValue(undefined),
+  },
+  file: {
+    tree: (...args: unknown[]) => mockFileTree(...args),
+    expand: (...args: unknown[]) => vi.fn()(...args),
+  },
+  git: { status: (...args: unknown[]) => mockGitStatus(...args) },
+}))
+
+vi.mock('@/composables/features/drawer/useSideDrawer', () => ({
+  useSideDrawer: () => ({ open: vi.fn() }),
+}))
+
+/**
+ * fake ResizeObserver：happy-dom 无布局引擎，virtua 依赖 RO 回调拿视口/条目尺寸。
+ * 同步回填：滚动容器（scroll-stub，无 item 语义）报告 400px 视口，其余（条目）报告 24px。
+ * 与真实浏览器行为等价的部分：窗口化计算（视口大小 / 条目尺寸）由真实 virtua 执行。
+ * 两个 happy-dom 缺口需显式补齐（实测）：
+ * - offsetParent 恒 undefined → virtua RO 回调 `if (i.offsetParent)` 全跳过（视口尺寸永远不更新）
+ * - RO 本身存在但回调不触发 → 用同步回填的 fake RO
+ */
+const ITEM_H = 24
+const VIEWPORT_H = 400
+class FakeResizeObserver {
+  private cb: ResizeObserverCallback
+  constructor(cb: ResizeObserverCallback) {
+    this.cb = cb
+  }
+  observe(el: Element): void {
+    queueMicrotask(() => {
+      const isContainer = el.hasAttribute('data-reka-scroll-area-viewport')
+      this.cb(
+        [
+          {
+            target: el,
+            contentRect: {
+              height: isContainer ? VIEWPORT_H : ITEM_H,
+              width: 300,
+            } as DOMRectReadOnly,
+          } as ResizeObserverEntry,
+        ],
+        this as unknown as ResizeObserver,
+      )
+    })
+  }
+  unobserve(): void {}
+  disconnect(): void {}
+}
+vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+// happy-dom offsetParent 恒 undefined（实测）——virtua RO 回调要求 truthy 才处理
+Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+  get(this: HTMLElement) {
+    return this.parentElement ?? document.body
+  },
+  configurable: true,
+})
+
+/** 大文件目录 fixture：big/ 下 1000 个文件（万级缩量：1000 行下窗口化逻辑等价可证，
+ *  TEST-STRATEGY「新写测试判据」类型码 d——fixture 缩量，断言强度不变） */
+function buildBigTree(): FileNode[] {
+  return [
+    {
+      path: 'big',
+      name: 'big',
+      type: 'dir',
+      children: Array.from({ length: 1000 }, (_, i) => ({
+        path: `big/f${i}.ts`,
+        name: `f${i}.ts`,
+        type: 'file' as const,
+      })),
+    },
+  ]
+}
+
+async function mountView(nodes: FileNode[]): Promise<ReturnType<typeof mount>> {
+  mockFileTree.mockResolvedValueOnce(nodes)
+  mockGitStatus.mockResolvedValueOnce({
+    sessionId: 's1',
+    isRepo: false,
+    files: [],
+    stagedCount: 0,
+    unstagedCount: 0,
+    stats: { add: 0, del: 0 },
+    hasConflict: false,
+  })
+  const wrapper = mount(FileView, {
+    props: { sessionId: 's1' },
+    attachTo: document.body,
+  })
+  await flushPromises()
+  return wrapper
+}
+
+/**
+ * 等 virtua 窗口化链稳定：onMounted rAF（容器 RO 注册）→ fake RO queueMicrotask 回填
+ * 尺寸 → 窗口计算 → item 挂载 → item RO 回填。happy-dom 下 nextTick 不冲刷 rAF/
+ * microtask 链，需真实 macrotask 延时（实测 3×nextTick + 2×setTimeout(10ms) 足够）。
+ */
+async function flushVirtua(): Promise<void> {
+  for (let i = 0; i < 3; i++) {
+    await nextTick()
+    await new Promise((r) => setTimeout(r, 10))
+  }
+}
+
+/** big/ 千行目录 mount + 展开单源（loaded 置位 → addExpanded → flush virtua）。 */
+async function mountExpandedBigTree() {
+  const wrapper = await mountView(buildBigTree())
+  const store = useFileTreeStore()
+  store.setNodeState('s1', 'big', { status: 'loaded' })
+  store.addExpanded('s1', 'big')
+  await flushVirtua()
+  return { wrapper, store }
+}
+
+describe('FileView 真实 virtua 虚拟滚动（P-D7-1：千级可见行 DOM 行数远小于总行数）', () => {
+  it('展开 1000 文件目录 → DOM 只挂载视口 ± 缓冲的行（< 200），远小于 1001 总行', async () => {
+    const wrapper = await mountView(buildBigTree())
+    // 展开 big/（useFileTree.expandNode：loaded 早退 → addExpanded → 派生视图产出 1001 行）
+    const store = useFileTreeStore()
+    store.setNodeState('s1', 'big', { status: 'loaded' })
+    store.addExpanded('s1', 'big')
+    await flushVirtua()
+
+    // 真实 FileTreeRow 渲染（未 stub）——断言 DOM 中的实际行节点数。
+    // 目录徽章（file-tree-dir-badge-*）2026-10-10 起目录恒渲染，前缀 ^="file-tree-dir-" 会同时
+    // 命中徽章节点，行计数必须排除徽章。
+    const dirRows = wrapper.findAll('[data-testid^="file-tree-dir-"]:not([data-testid*="-badge-"])')
+    const fileRows = wrapper.findAll('[data-testid^="file-tree-file-"]')
+    expect(dirRows.length).toBe(1) // big 目录行在 DOM
+    expect(wrapper.findAll('[data-testid="file-tree-dir-badge-big"]').length).toBe(1) // 徽章恒渲染
+    expect(fileRows.length).toBeGreaterThan(0) // 视口内至少渲染了若干文件行
+    // P-D7-1 量化 bound：DOM 行数 < 200（总可见行 1001）
+    expect(fileRows.length + dirRows.length).toBeLessThan(200)
+    expect(fileRows.length + dirRows.length).toBeLessThan(1001)
+
+    wrapper.unmount()
+  })
+
+  it('scrollRef 显式绑定生效：滚动 reka viewport → 窗口跟随移动（绑定错误时窗口不动，全量渲染形态）', async () => {
+    const { wrapper, store } = await mountExpandedBigTree()
+
+    // 绑定正确时 virtua 监听 reka viewport：滚动驱动窗口移动；曾因 parentElement 探测
+    // 被 reka 内部 wrapper 隔断而监听落空——虚拟化静默失效（全量渲染）
+    const viewport = wrapper.find('[data-reka-scroll-area-viewport]').element as HTMLElement
+    const firstFileBefore = wrapper.find('[data-testid^="file-tree-file-"]').attributes('data-testid')
+
+    viewport.scrollTop = 100 * ITEM_H
+    viewport.dispatchEvent(new Event('scroll'))
+    await flushVirtua()
+
+    const firstFileAfter = wrapper.find('[data-testid^="file-tree-file-"]').attributes('data-testid')
+    expect(firstFileAfter).toBeTruthy()
+    expect(firstFileAfter).not.toBe(firstFileBefore) // 窗口已移过 ~100 行
+
+    wrapper.unmount()
+  })
+
+  it('大数据量派生视图 + 虚拟滚动下过滤仍工作（命中后派生视图重算，DOM 行随派生视图收缩）', async () => {
+    const { wrapper, store } = await mountExpandedBigTree()
+
+    // 无匹配过滤 → 空态（派生视图 [] → file-empty）
+    store.setFilter('zzz_no_match')
+    await flushVirtua()
+    expect(wrapper.find('[data-testid="file-empty"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid^="file-tree-file-"]').length).toBe(0)
+
+    wrapper.unmount()
+  })
+
+  it('折叠后派生视图收缩（可见行 10001 → 1），DOM 行数跟随', async () => {
+    const { wrapper, store } = await mountExpandedBigTree()
+    expect(wrapper.findAll('[data-testid^="file-tree-file-"]').length).toBeGreaterThan(0)
+
+    store.removeExpanded('s1', 'big')
+    await flushVirtua()
+    expect(wrapper.findAll('[data-testid^="file-tree-file-"]').length).toBe(0)
+    expect(wrapper.find('[data-testid="file-tree-dir-big"]').exists()).toBe(true)
+
     wrapper.unmount()
   })
 })

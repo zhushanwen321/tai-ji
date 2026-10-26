@@ -1,18 +1,26 @@
 /**
- * WorkflowLivePanel 面板组件测试（workflow-visualization U5——三视角，TEST-STRATEGY §3）：
+ * WorkflowLivePanel + workflowStore 事件流 + panel-tabs 单文件合并
+ * （round5-d 分区 4 簇 4-15，全簇合并）。
  *
- * - 构建者（白盒）：事件流数据经 mock RPC 注入 workflowStore 缓存分区；tab 模型经 expose
- *   与 DOM 事件直接驱动；store 挂载编排（活跃 run 登记 / 事件流首次拉取）断言 mock 调用
- * - 使用者（黑盒 DOM）：每条用例至少一个用户可见断言——header 去重形态（D2 单 header
- *   终态：三槽零渲染）、trace 行状态与空值回归（D5 盘点锚）、
- *   事件流行与 ✂ 截断标注、错误二分形态（静态指引 vs 重试按钮）、phase 头卡轮次、tab 关闭回落
- * - 观察者（形态）：data-testid 结构（wf-viz-* 树）与 data-status/data-active 属性
+ * 为什么单文件：vitest 按测试文件隔离模块图——三文件共同装载 vue / pinia /
+ * extension-protocol / shared / core transport 等重模块，单文件共享一份装载。
  *
- * mock 策略：
- * - api/domains/session mock（getWorkflowRunEvents / getWorkflows）+ @/api 门面回指
- *   （同 workflow.test.ts 先例——store 与断言用同一 vi.fn()）
- * - vue-i18n 文件内 override（t(key, named) → `key(k=v)`，key 引用 + 参数双断言范围）
- * - MessageStream / useSubagentTabData mock（agent tab 对话流编排接线验证，渲染树 stub）
+ * 来源文件（describe/it 块原样搬运，测试名零改动）：
+ *  - workflow-live-panel.test.ts（U5 面板组件三视角，主体）
+ *  - workflow-store-run-events.test.ts（D11 生命周期五条 store 层）
+ *  - panel-tabs.test.ts（一级 tab 模型纯逻辑）
+ *
+ * 冲突处理（试点模式）：
+ *  - 两文件的 session 域 mock 与 @/api 门面回指 mock 工厂逐字相同，去重一份；
+ *    mockGetRunEvents = vi.mocked(sessionApi.getWorkflowRunEvents) 为同一 mock 实例
+ *    引用，去重一份（vi.clearAllMocks 公共 beforeEach 每用例清）
+ *  - store 节顶层 beforeEach 的 mockGetRunEvents 默认值（eventsReply(RUN_A) 两行
+ *    形态）与主体默认值（七行形态）语义冲突——下沉为该节各 describe 内 beforeEach
+ *    一行（执行顺序在文件级之后，节内默认值正确覆盖；主体节不受影响）
+ *  - store 节同名异值 helper 按节重命名：SID → STORE_SID、eventsReply →
+ *    storeEventsReply
+ *  - 主体的 vue-i18n / useSubagentTabData / MessageStream.vue mock 为文件级——
+ *    store 节（纯 store 层）与 panel-tabs 节（纯逻辑，零 import）不消费三者，零泄漏
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/workflow-viz/__tests__/workflow-live-panel.test.ts
  */
@@ -22,6 +30,13 @@ import { h, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import WorkflowLivePanel from '../panel/WorkflowLivePanel.vue'
 import { useWorkflowStore } from '@/stores/workflow'
+import {
+  WORKFLOW_FIXED_TAB_KEY,
+  closeLiveTab,
+  openLiveTab,
+  phaseTabKey,
+} from '../panel/panel-tabs'
+import type { WorkflowLiveTab } from '../panel/panel-tabs'
 import type { WorkflowAgentCall, WorkflowRunRecord } from '@taiji/shared'
 
 // ── mock：RPC 域 + @/api 门面回指 ─────────────────────────────────────────────
@@ -481,5 +496,406 @@ describe('WorkflowLivePanel · store 挂载编排（构建者白盒）', () => {
     expect(wrapper.find('[data-testid="l2-tab-phase\\:alpha"]').exists()).toBe(false)
     // 事件流换 run 拉取
     expect(mockGetRunEvents).toHaveBeenCalledWith(SID, 'wf-2')
+  })
+})
+
+
+// ══════════ 来源：workflow-store-run-events.test.ts（D11 生命周期五条；session 域与
+//             @/api mock 共享主体注册，STORE_SID/storeEventsReply 为按节重命名，
+//             默认值 hook 已下沉各 describe） ══════════
+
+// （session 域 mock / @/api 门面回指 mock / mockGetRunEvents 声明与主体逐字同构，已去重共享）
+
+const STORE_SID = 's-main'
+const RUN_A = 'wf-run-a'
+const RUN_B = 'wf-run-b'
+
+/** 事件流 reply 样本（骨架两行形态；截断标注语义归 gantt-segments 测试） */
+function storeEventsReply(runId: string): { runId: string; events: Array<{ type: string; ts: number }> } {
+  return {
+    runId,
+    events: [
+      { type: 'run-created', ts: 1000 },
+      { type: 'run-settled', ts: 2000 },
+    ],
+  }
+}
+
+describe('workflowStore 事件流缓存：拉取与缓存复用', () => {
+  // 节内默认值（原文件顶层 beforeEach 下沉：覆盖主体的七行 events 形态为本节两行形态）
+  beforeEach(() => {
+    mockGetRunEvents.mockResolvedValue(storeEventsReply(RUN_A))
+  })
+
+
+  it('成功拉取写入 runId 分区（ready + events），缓存条目携带归属 session', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    const entry = store.runEventsOf(RUN_A)
+    expect(entry?.status).toBe('ready')
+    expect(entry?.sessionId).toBe(STORE_SID)
+    expect(entry?.events).toHaveLength(2)
+    expect(mockGetRunEvents).toHaveBeenCalledWith(STORE_SID, RUN_A)
+  })
+
+  it('ready 缓存复用：非 force 重复调用不重发 RPC（D11② 重开秒显）', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
+  })
+
+  it('force 覆盖 ready 缓存重新拉取（workflowUpdate 信号 / 重试按钮语义）', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A, { force: true })
+    expect(mockGetRunEvents).toHaveBeenCalledTimes(2)
+  })
+
+  it('loading 在途合并：在途期间的重复调用不另起 RPC', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    let resolveRpc!: (v: unknown) => void
+    mockGetRunEvents.mockReturnValueOnce(new Promise((resolve) => (resolveRpc = resolve)))
+    const first = store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    const second = store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
+    resolveRpc(storeEventsReply(RUN_A))
+    await Promise.all([first, second])
+    expect(store.runEventsOf(RUN_A)?.status).toBe('ready')
+  })
+
+  it('force 调用在途窗口内到达：并入在途拉取不另起 RPC（去重由 runEventsInflight 承载，缓存条目三态不兼任）', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    let resolveRpc!: (v: unknown) => void
+    mockGetRunEvents.mockReturnValueOnce(new Promise((resolve) => (resolveRpc = resolve)))
+    const first = store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    // 信号触发的 force 重新拉取在首次拉取在途窗口到达——同 runId 仅首次发起，复用者共享 promise
+    const forced = store.loadWorkflowRunEvents(STORE_SID, RUN_A, { force: true })
+    expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
+    resolveRpc(storeEventsReply(RUN_A))
+    await Promise.all([first, forced])
+    expect(store.runEventsOf(RUN_A)?.status).toBe('ready')
+  })
+
+  it('空 sid / runId 检查：不发起 RPC 不写分区', async () => {
+    const store = useWorkflowStore()
+    await store.loadWorkflowRunEvents('', RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, '')
+    expect(mockGetRunEvents).not.toHaveBeenCalled()
+    expect(store.runEventsOf(RUN_A)).toBeUndefined()
+  })
+})
+
+describe('workflowStore 事件流缓存：错误二分数据形态', () => {
+  // 节内默认值（原文件顶层 beforeEach 下沉：覆盖主体的七行 events 形态为本节两行形态）
+  beforeEach(() => {
+    mockGetRunEvents.mockResolvedValue(storeEventsReply(RUN_A))
+  })
+
+
+  it('record_not_found 结构化回执 → status error + errorCode（静态指引数据源）', async () => {
+    mockGetRunEvents.mockResolvedValue({ runId: RUN_A, code: 'record_not_found', message: '无记录' })
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    expect(store.runEventsOf(RUN_A)).toMatchObject({ status: 'error', errorCode: 'record_not_found' })
+  })
+
+  it('RPC 通道错误（reject）→ status error + errorMessage（重试按钮数据源）', async () => {
+    mockGetRunEvents.mockRejectedValue(new Error('transport down'))
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    expect(store.runEventsOf(RUN_A)).toMatchObject({ status: 'error', errorMessage: 'transport down' })
+    expect(store.runEventsOf(RUN_A)?.errorCode).toBeUndefined()
+  })
+
+  it('oversize 降级（成功臂 + oversize 标志）→ status ready + events 恒空 + oversize=true（「不可用 ≠ 无数据」分形透传）', async () => {
+    mockGetRunEvents.mockResolvedValue({ runId: RUN_A, events: [], oversize: true })
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    expect(store.runEventsOf(RUN_A)).toMatchObject({ status: 'ready', events: [], oversize: true })
+  })
+
+  it('error 态非 force 不自动重新拉取（重试 = 用户显式 force）', async () => {
+    mockGetRunEvents.mockResolvedValue({ runId: RUN_A, code: 'record_not_found', message: '无记录' })
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('workflowStore 事件流缓存：D11① 在途丢弃检查', () => {
+  // 节内默认值（原文件顶层 beforeEach 下沉：覆盖主体的七行 events 形态为本节两行形态）
+  beforeEach(() => {
+    mockGetRunEvents.mockResolvedValue(storeEventsReply(RUN_A))
+  })
+
+
+  it('settle 时活跃锚已切走（切换 run）→ 结果丢弃、loading 占位撤除（防幻影 loading）', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    let resolveRpc!: (v: unknown) => void
+    mockGetRunEvents.mockReturnValueOnce(new Promise((resolve) => (resolveRpc = resolve)))
+    const pending = store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    // overlay 切换到 run B
+    store.setActiveWorkflowRun(STORE_SID, RUN_B)
+    resolveRpc(storeEventsReply(RUN_A))
+    await pending
+    // 丢弃 = loading 占位一并撤除——残留 loading 会被后续调用的在途合并误判为在途而
+    // no-op（重开该 run 永远加载中的幻影 loading）
+    expect(store.runEventsOf(RUN_A)).toBeUndefined()
+    // 丢弃后重开（活跃锚切回）可正常重新拉取写入
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    expect(store.runEventsOf(RUN_A)?.status).toBe('ready')
+    expect(mockGetRunEvents).toHaveBeenCalledTimes(2)
+  })
+
+  it('settle 时活跃锚已清（overlay 关闭）→ 结果丢弃不写缓存', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    let rejectRpc!: (e: Error) => void
+    mockGetRunEvents.mockReturnValueOnce(new Promise((_, reject) => (rejectRpc = reject)))
+    const pending = store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    store.releaseActiveWorkflowRun(STORE_SID, RUN_A)
+    rejectRpc(new Error('late failure'))
+    await pending
+    expect(store.runEventsOf(RUN_A)).toBeUndefined() // 丢弃 = 条目不出现（loading 占位撤除）
+  })
+})
+
+describe('workflowStore 事件流缓存：D11② LRU 与关闭不清', () => {
+  // 节内默认值（原文件顶层 beforeEach 下沉：覆盖主体的七行 events 形态为本节两行形态）
+  beforeEach(() => {
+    mockGetRunEvents.mockResolvedValue(storeEventsReply(RUN_A))
+  })
+
+
+  it('overlay 关闭（活跃锚清）后缓存保留——重开秒显', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    store.releaseActiveWorkflowRun(STORE_SID, RUN_A)
+    expect(store.runEventsOf(RUN_A)?.status).toBe('ready')
+  })
+
+  it('releaseActiveWorkflowRun 条件释放：锚已切走时不误清新 run 的锚', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    store.setActiveWorkflowRun(STORE_SID, RUN_B) // 切换（新面板登记）
+    store.releaseActiveWorkflowRun(STORE_SID, RUN_A) // 旧面板晚到的卸载清理
+    // 锚未被误清：后续 loadWorkflowRunEvents 丢弃检查仍以 RUN_B 为活跃
+    let resolveRpc!: (v: unknown) => void
+    mockGetRunEvents.mockReturnValueOnce(new Promise((resolve) => (resolveRpc = resolve)))
+    const pending = store.loadWorkflowRunEvents(STORE_SID, RUN_B)
+    resolveRpc(storeEventsReply(RUN_B))
+    await pending
+    expect(store.runEventsOf(RUN_B)?.status).toBe('ready') // 锚在 → 结果未被丢弃
+  })
+
+  it('LRU 上界 5：写入第 6 个 run 驱逐最旧非活跃者', async () => {
+    const store = useWorkflowStore()
+    // 模拟真实打开路径：逐个切换活跃 run 后拉取（非活跃 run 的拉取结果被 D11① 丢弃，
+    // 不入缓存——LRU 填充只发生在「曾打开」的 run 上）
+    const runIds = ['wf-1', 'wf-2', 'wf-3', 'wf-4', 'wf-5', 'wf-6']
+    for (const runId of runIds) {
+      mockGetRunEvents.mockResolvedValue(storeEventsReply(runId))
+      store.setActiveWorkflowRun(STORE_SID, runId)
+      await store.loadWorkflowRunEvents(STORE_SID, runId)
+    }
+    // 6 个 run 全 ready → 超界，最旧（wf-1）被驱逐
+    expect(store.runEventsOf('wf-1')).toBeUndefined()
+    expect(store.runEventsOf('wf-2')?.status).toBe('ready')
+    expect(store.runEventsOf('wf-6')?.status).toBe('ready')
+  })
+
+  it('LRU 驱逐豁免活跃 run（正在显示的 run 不被驱逐）', async () => {
+    const store = useWorkflowStore()
+    // 填满 5 个（逐个切换活跃锚）
+    for (const runId of ['wf-1', 'wf-2', 'wf-3', 'wf-4', 'wf-5']) {
+      mockGetRunEvents.mockResolvedValue(storeEventsReply(runId))
+      store.setActiveWorkflowRun(STORE_SID, runId)
+      await store.loadWorkflowRunEvents(STORE_SID, runId)
+    }
+    // 活跃锚切回最早写入的 wf-1，再写入 wf-6 → 驱逐跳过 wf-1、淘汰次旧 wf-2
+    store.setActiveWorkflowRun(STORE_SID, 'wf-1')
+    mockGetRunEvents.mockResolvedValue(storeEventsReply('wf-6'))
+    await store.loadWorkflowRunEvents(STORE_SID, 'wf-6')
+    expect(store.runEventsOf('wf-1')?.status).toBe('ready')
+    expect(store.runEventsOf('wf-2')).toBeUndefined()
+  })
+})
+
+describe('workflowStore 事件流缓存：生命周期清理', () => {
+  // 节内默认值（原文件顶层 beforeEach 下沉：覆盖主体的七行 events 形态为本节两行形态）
+  beforeEach(() => {
+    mockGetRunEvents.mockResolvedValue(storeEventsReply(RUN_A))
+  })
+
+
+  async function seedTwoSessions(store: ReturnType<typeof useWorkflowStore>): Promise<void> {
+    mockGetRunEvents.mockResolvedValue(storeEventsReply(RUN_A))
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    mockGetRunEvents.mockResolvedValue(storeEventsReply(RUN_B))
+    store.setActiveWorkflowRun('s-other', RUN_B)
+    await store.loadWorkflowRunEvents('s-other', RUN_B)
+  }
+
+  it('D11⑤ clearSession：清该 session 名下 run 缓存与活跃锚，其他 session 分区保留', async () => {
+    const store = useWorkflowStore()
+    await seedTwoSessions(store)
+    store.setActiveWorkflowRun(STORE_SID, RUN_A) // 活跃锚回到 s-main 名下
+    store.clearSession(STORE_SID)
+    expect(store.runEventsOf(RUN_A)).toBeUndefined()
+    expect(store.runEventsOf(RUN_B)?.status).toBe('ready') // 其他 session 保留
+    expect(store.runEventsOf(RUN_B)?.sessionId).toBe('s-other')
+  })
+
+  it('clearSession 清活跃锚（归属该 session 时）', async () => {
+    const store = useWorkflowStore()
+    await seedTwoSessions(store)
+    // 活跃锚指 RUN_B（s-other），清 s-main 不动锚；清 s-other 才动
+    store.setActiveWorkflowRun('s-other', RUN_B)
+    store.clearSession(STORE_SID)
+    expect(store.runEventsOf(RUN_B)).toBeDefined()
+    store.clearSession('s-other')
+    expect(store.runEventsOf(RUN_B)).toBeUndefined()
+  })
+
+  it('clearSession 在途窗口释放去重簿记：后续同 runId 调用重新发起 RPC（不并入注定丢弃的在途拉取）', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    let resolveRpc!: (v: unknown) => void
+    mockGetRunEvents.mockReturnValueOnce(new Promise((resolve) => (resolveRpc = resolve)))
+    const stale = store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
+
+    // session 删除时首次拉取仍在途：分区 + 活跃锚 + 在途簿记一并释放
+    store.clearSession(STORE_SID)
+    // 重开该 run（分区重建后的重挂载形态）：新调用发起独立 RPC——若在途簿记未释放，
+    // 会静默并入已删除分区的陈旧在途（结果无 loading 占位可显示的空窗）
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    const fresh = store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    expect(mockGetRunEvents).toHaveBeenCalledTimes(2)
+    await fresh
+    expect(store.runEventsOf(RUN_A)?.status).toBe('ready')
+
+    // 陈旧在途 settle：活跃锚已重指本 run（非丢弃路径），写回同源数据无害
+    resolveRpc(storeEventsReply(RUN_A))
+    await stale
+    expect(store.runEventsOf(RUN_A)?.status).toBe('ready')
+  })
+
+  it('clearWorkflows：事件流缓存 + LRU 序 + 活跃锚全清', async () => {
+    const store = useWorkflowStore()
+    await seedTwoSessions(store)
+    store.clearWorkflows()
+    expect(store.runEventsOf(RUN_A)).toBeUndefined()
+    expect(store.runEventsOf(RUN_B)).toBeUndefined()
+    // 清空后重新拉取可正常写入（无残留 LRU 序干扰）
+    mockGetRunEvents.mockResolvedValue(storeEventsReply(RUN_A))
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    expect(store.runEventsOf(RUN_A)?.status).toBe('ready')
+  })
+})
+
+describe('workflowStore：triggerWorkflowReload 活跃 run 事件流联动（§3.1-4 信号接线）', () => {
+  // 节内默认值（原文件顶层 beforeEach 下沉：覆盖主体的七行 events 形态为本节两行形态）
+  beforeEach(() => {
+    mockGetRunEvents.mockResolvedValue(storeEventsReply(RUN_A))
+  })
+
+
+  it('活跃 run 命中信号 session → force 重新拉取事件流', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
+    mockGetWorkflowsResolved()
+    store.triggerWorkflowReload(STORE_SID)
+    await vi.waitFor(() => expect(mockGetRunEvents).toHaveBeenCalledTimes(2))
+    expect(mockGetRunEvents).toHaveBeenLastCalledWith(STORE_SID, RUN_A)
+  })
+
+  it('信号 session 与活跃 run 不归属 → 不触发事件流拉取', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(STORE_SID, RUN_A)
+    await store.loadWorkflowRunEvents(STORE_SID, RUN_A)
+    mockGetWorkflowsResolved()
+    store.triggerWorkflowReload('s-other')
+    // 等待微任务排空确认无新增调用
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
+  })
+
+  /** getWorkflows mock（triggerWorkflowReload 内 loadWorkflows 的伴随调用）默认 resolve 空列表 */
+  function mockGetWorkflowsResolved(): void {
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [] })
+  }
+})
+
+
+// ══════════ 来源：panel-tabs.test.ts（一级 tab 模型纯逻辑；零 mock 零组件依赖） ══════════
+
+function phaseTab(name: string): WorkflowLiveTab {
+  return { key: phaseTabKey(name), kind: 'phase', title: name, phase: name }
+}
+
+describe('panel-tabs：openLiveTab', () => {
+  it('新 tab 追加到尾部并激活；已存在仅激活不重复追加', () => {
+    const base = [phaseTab('alpha')]
+    const opened = openLiveTab(base, phaseTab('beta'))
+    expect(opened.tabs.map((t) => t.title)).toEqual(['alpha', 'beta'])
+    expect(opened.activeKey).toBe(phaseTabKey('beta'))
+
+    const again = openLiveTab(opened.tabs, phaseTab('alpha'))
+    expect(again.tabs.map((t) => t.title)).toEqual(['alpha', 'beta']) // 不重复
+    expect(again.activeKey).toBe(phaseTabKey('alpha'))
+  })
+})
+
+describe('panel-tabs：closeLiveTab', () => {
+  it('固定 tab 不可关（原样返回）', () => {
+    const tabs = [phaseTab('alpha')]
+    const result = closeLiveTab(tabs, phaseTabKey('alpha'), WORKFLOW_FIXED_TAB_KEY)
+    expect(result.tabs).toHaveLength(1)
+    expect(result.activeKey).toBe(phaseTabKey('alpha'))
+  })
+
+  it('关闭激活 tab 激活左侧相邻；首个动态 tab 关闭后回 workflow 固定 tab', () => {
+    const tabs = [phaseTab('alpha'), phaseTab('beta'), phaseTab('gamma')]
+    // 关最右（gamma）→ 激活左侧 beta
+    const closeRight = closeLiveTab(tabs, phaseTabKey('gamma'), phaseTabKey('gamma'))
+    expect(closeRight.tabs.map((t) => t.title)).toEqual(['alpha', 'beta'])
+    expect(closeRight.activeKey).toBe(phaseTabKey('beta'))
+    // 关首个（alpha，当前激活）→ 无左侧相邻 → 回 workflow 固定 tab
+    const closeFirst = closeLiveTab(tabs, phaseTabKey('alpha'), phaseTabKey('alpha'))
+    expect(closeFirst.tabs.map((t) => t.title)).toEqual(['beta', 'gamma'])
+    expect(closeFirst.activeKey).toBe(WORKFLOW_FIXED_TAB_KEY)
+  })
+
+  it('关闭非激活 tab 激活键不变', () => {
+    const tabs = [phaseTab('alpha'), phaseTab('beta')]
+    const result = closeLiveTab(tabs, phaseTabKey('beta'), phaseTabKey('alpha'))
+    expect(result.tabs.map((t) => t.title)).toEqual(['beta'])
+    expect(result.activeKey).toBe(phaseTabKey('beta'))
+  })
+
+  it('关闭不存在的 tab 原样返回（防御）', () => {
+    const tabs = [phaseTab('alpha')]
+    const result = closeLiveTab(tabs, phaseTabKey('alpha'), phaseTabKey('ghost'))
+    expect(result.tabs).toHaveLength(1)
+    expect(result.activeKey).toBe(phaseTabKey('alpha'))
   })
 })

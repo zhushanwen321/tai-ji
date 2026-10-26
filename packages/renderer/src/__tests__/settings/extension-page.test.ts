@@ -1,21 +1,29 @@
 /**
- * ExtensionPage 渲染测试（W8）。
+ * ExtensionPage + SubagentEngineSection 单文件合并（round5-d 分区 4 簇 4-6 相容子集）。
  *
- * 覆盖：
- *  - 首屏冒烟：user-installed 项渲染升级按钮 + 自动升级开关；built-in 项不渲染。
- *  - 升级交互：点击升级按钮 → extension.upgrade 被调。
+ * 为什么单文件：vitest 按测试文件隔离模块图——两文件共同装载 lucide-vue /
+ * reka-ui-slim / vue / zh-CN locale / @taiji/core settings 域等重模块，单文件
+ * 共享一份装载；拆文件会让每个文件各付一次全树装载（每份秒级 CPU）。
  *
- * mock 策略：
- *  - extension 门面捕获单例 + '@/api' mock 工厂 + seam 桩接线单源在
- *    helpers/extension-page-harness（fetchRecommended 空数组避免 onMounted 拉取报错；
- *    upgrade/setAutoUpgrade 捕获断言）。
- *  - ConfirmDialog 走 reka-ui Dialog，teleport 到 body；ExtensionPage 默认 open=false 不会渲染内容，
- *    故无需 stub。Switch/Checkbox/Label 等 ui 原语直接渲染。
+ * 来源文件（describe/it 块原样搬运，测试名零改动）：
+ *  - extension-page.test.ts（ExtensionPage 渲染/升级/乐观更新/安装流/toast（主体））
+ *  - subagent-engine-section.test.ts（子代理引擎选择器 U7 + D5 模型行）
+ *
+ * 冲突处理（试点模式）：
+ *  - subagent 的顶层 beforeEach（clearAllMocks + toasts 清空 + provideSettingsTransport
+ *    注入 session 桩）下沉到其 describe 节内——文件级 transport 槽归 extension 节的
+ *    setupExtensionPageTest 每用例重 wire，节内 provide 只作用于本节用例，不互相覆盖
+ *  - SubagentEngineSection 组件树不 import '@/api' 与 '@/api/domains/settings'
+ *    （走 @taiji/core 的 getSettingsTransport seam），主体两 mock 无泄漏
+ *
+ * 簇注：同簇的 network-page.test.ts 不并入——其 useToast mock 与本文件两节的
+ * 真实 useToast 单例断言（toasts.value）实质冲突。该文件保持原样。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/settings/extension-page.test.ts
  */
-import { describe, it, expect, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
 import type { ExtensionItem } from '@taiji/core'
 import { getSettingsStore, provideSettingsStore, createSettingsStore, provideSettingsTransport } from '@taiji/core'
 import {
@@ -24,7 +32,9 @@ import {
   setupExtensionPageTest,
   teardownExtensionPage,
 } from '../helpers/extension-page-harness'
-import type { SkillDirConfig } from '@taiji/shared'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import { openRekaDropdown, pickRekaOption } from '../helpers/reka-select-harness'
+import type { SkillDirConfig, ServerMessageMap } from '@taiji/shared'
 
 vi.mock('@/api', () => extensionApiModule())
 
@@ -37,6 +47,7 @@ vi.mock('@/api/domains/settings', () => settingsDomainMock)
 
 import ExtensionPage from '@/components/settings/extension/ExtensionPage.vue'
 import { useToast } from '@/composables/useToast'
+import zhCN from '@taiji/ui/locale/zh-CN/settings'
 
 /** user-installed 扩展 fixture（source='user-installed'，应渲染升级按钮 + 自动升级开关） */
 function userExt(): ExtensionItem {
@@ -537,5 +548,273 @@ describe('ExtensionPage getDataDir 读取失败显形（RD-4#11）', () => {
     expect(forcedRows.length).toBe(2)
     expect(forcedRows[0].textContent).toContain('~/.taiji-dev/extensions')
     expect(forcedRows[1].textContent).toContain('.taiji/extensions')
+  })
+})
+
+
+// ══════════ 来源：subagent-engine-section.test.ts（子代理引擎选择器；顶层 beforeEach
+//             已下沉至本 describe 节内——transport 槽与 extension 节互不覆盖） ══════════
+
+/** getSubagentEngineConfig 的 reply 契约（engineModels/engineDefaults 两 D5 扩展键 optional） */
+const sessionApiMock = vi.hoisted(() => ({
+  getSubagentEngineConfig: vi.fn(
+    async (): Promise<SubagentEngineConfigReply> => ({ engines: ['pi', 'zcode'], defaultEngine: 'zcode' }),
+  ),
+  setSubagentDefaultEngine: vi.fn(async () => ({ engineId: 'pi' })),
+  setSubagentEngineDefaultModel: vi.fn(async (engineId: string, modelRef: string) => ({ engineId, modelRef })),
+}))
+
+import SubagentEngineSection from '@/components/settings/agent/SubagentEngineSection.vue'
+
+function makeI18n() {
+  return createI18n({
+    legacy: false,
+    locale: 'zh-CN',
+    messages: { 'zh-CN': { settings: zhCN.default ?? zhCN } },
+  })
+}
+
+function mountSection() {
+  return mount(SubagentEngineSection, {
+    global: { plugins: [makeI18n()] },
+  })
+}
+
+/** 挂载前注入一次引擎读取失败，断言 loadError 已显形（两个重试用例的共同前奏）。 */
+async function mountWithLoadFailure(): Promise<ReturnType<typeof mountSection>> {
+  sessionApiMock.getSubagentEngineConfig.mockRejectedValueOnce(new Error('ws down'))
+  const wrapper = mountSection()
+  await flushPromises()
+  expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(true)
+  return wrapper
+}
+
+/** saved toast 断言单源（module 统一成功反馈，域文案 settings.subagentEngine.saved）。 */
+function expectSavedToast() {
+  const { toasts } = useToast()
+  expect(toasts.value.some((t) => t.type === 'info' && t.message.includes('已保存'))).toBe(true)
+}
+
+describe('SubagentEngineSection（U7 引擎选择器）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // 清空全局 toasts（useToast 模块级单例，跨用例共享）
+    useToast().toasts.value = []
+    provideSettingsTransport(makeSettingsTransportStub(sessionApiMock))
+  })
+
+  it('渲染动态引擎清单与当前选中态（选项来自 RPC 非硬编码）', async () => {
+    sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({
+      engines: ['pi', 'zcode', 'acp'],
+      defaultEngine: 'zcode',
+    })
+    const wrapper = mountSection()
+    await flushPromises()
+
+    // 用户可见 DOM：分区标题 + 引擎名出现在 Select 选项数据中
+    expect(wrapper.find('[data-testid=subagent-engine-section]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('子代理引擎')
+    // Select 的 model-value 绑定当前 defaultEngine（触发器展示 zcode）
+    expect(wrapper.find('[data-testid=subagent-engine-select]').text()).toContain('zcode')
+    expect(sessionApiMock.getSubagentEngineConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it('选择变更 → 调用 setSubagentDefaultEngine（engineId 透传）+ 选中态更新 + saved toast', async () => {
+    sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({
+      engines: ['pi', 'zcode'],
+      defaultEngine: 'zcode',
+    })
+    const wrapper = mountSection()
+    await flushPromises()
+
+    await wrapper.findComponent({ name: 'Select' }).vm.$emit('update:modelValue', 'pi')
+    await flushPromises()
+
+    expect(sessionApiMock.setSubagentDefaultEngine).toHaveBeenCalledWith('pi')
+    expect(wrapper.find('[data-testid=subagent-engine-select]').text()).toContain('pi')
+    // module 统一成功反馈：saved toast（域文案 settings.subagentEngine.saved）
+    expectSavedToast()
+  })
+
+  it('同值选择不发写请求（幂等）', async () => {
+    sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({
+      engines: ['pi', 'zcode'],
+      defaultEngine: 'pi',
+    })
+    const wrapper = mountSection()
+    await flushPromises()
+
+    await wrapper.findComponent({ name: 'Select' }).vm.$emit('update:modelValue', 'pi')
+    await flushPromises()
+
+    expect(sessionApiMock.setSubagentDefaultEngine).not.toHaveBeenCalled()
+  })
+
+  it('切换写失败 → 选中态回滚旧值 + toastError 显形（RD-4#3，不再仅 console）', async () => {
+    sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({
+      engines: ['pi', 'zcode'],
+      defaultEngine: 'zcode',
+    })
+    sessionApiMock.setSubagentDefaultEngine.mockRejectedValueOnce(new Error('disk write failed'))
+    const { toasts } = useToast()
+
+    const wrapper = mountSection()
+    await flushPromises()
+
+    await wrapper.findComponent({ name: 'Select' }).vm.$emit('update:modelValue', 'pi')
+    await flushPromises()
+
+    expect(sessionApiMock.setSubagentDefaultEngine).toHaveBeenCalledWith('pi')
+    // 回滚：Select 受控于 current（仅写成功后前进），触发器仍显示旧值 zcode
+    expect(wrapper.find('[data-testid=subagent-engine-select]').text()).toContain('zcode')
+    expect(wrapper.find('[data-testid=subagent-engine-select]').text()).not.toContain('pi')
+    // 失败显形：error toast 携带 runtime 原始文案
+    expect(toasts.value.some((t) => t.type === 'error' && t.message.includes('disk write failed'))).toBe(true)
+    // 回滚路径无成功反馈（saved toast 仅在写成功出现）
+    expect(toasts.value.some((t) => t.type === 'info')).toBe(false)
+  })
+
+  it('RPC 失败 → loadError 显形：控件禁用 + 顶部常驻提示（RD-4#8，不再 best-effort 冒充已存值）', async () => {
+    sessionApiMock.getSubagentEngineConfig.mockRejectedValueOnce(new Error('ws down'))
+    const wrapper = mountSection()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid=subagent-engine-section]').exists()).toBe(true)
+    // 默认 'pi' 仍占位渲染，但明确标注为默认值（控件禁用，禁止当已存值操作）
+    expect(wrapper.find('[data-testid=subagent-engine-select]').text()).toContain('pi')
+    // RD-4#8：读取失败常驻提示 + 重试入口
+    expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('读取失败')
+    // Select 禁用（loadError 时不可操作）
+    expect(wrapper.findComponent({ name: 'Select' }).props('disabled')).toBe(true)
+  })
+
+  it('RD-4#8：重试成功后清除 loadError + 控件恢复可用', async () => {
+    const wrapper = await mountWithLoadFailure()
+
+    // 重试：mock 改成功
+    sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({ engines: ['pi', 'zcode'], defaultEngine: 'zcode' })
+    await wrapper.find('[data-testid=subagent-engine-load-retry]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'Select' }).props('disabled')).toBe(false)
+    // 重新拉取成功后权威值回填：触发器从占位 pi 前进到已存默认 zcode（field reset 回填基准）
+    expect(wrapper.find('[data-testid=subagent-engine-select]').text()).toContain('zcode')
+  })
+
+  it('RD-4#8：重试仍失败 → loadError 保持 + 控件保持禁用（占位值不冒充已存值）', async () => {
+    const wrapper = await mountWithLoadFailure()
+
+    // 重试：mock 依旧失败
+    sessionApiMock.getSubagentEngineConfig.mockRejectedValueOnce(new Error('ws down again'))
+    await wrapper.find('[data-testid=subagent-engine-load-retry]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'Select' }).props('disabled')).toBe(true)
+  })
+
+  // ── D5 per-engine 默认模型行（engine-provider-unification §3.3 D5 / §3.1 S2/S4）──
+
+  it('D5 三形态：zcode 行渲染模型 Select（选项来自 mock 清单）+ pi 行说明文案 + 无清单引擎不渲染行', async () => {
+    sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({
+      engines: ['pi', 'zcode', 'acp'],
+      defaultEngine: 'zcode',
+      engineModels: {
+        zcode: [
+          { id: 'prov-a/m-1', name: 'Prov A · m-1' },
+          { id: 'prov-b/m-2' },
+        ],
+      },
+      engineDefaults: { zcode: 'prov-a/m-1' },
+    })
+    const wrapper = mountSection()
+    await flushPromises()
+
+    // zcode 模型行：trigger 存在 + 当前偏好（engineDefaults）回显
+    const modelTrigger = wrapper.find('[data-testid=subagent-engine-model-zcode]')
+    expect(modelTrigger.exists()).toBe(true)
+    expect(modelTrigger.text()).toContain('Prov A · m-1')
+    // 打开下拉：选项来自 mock 清单（name 显示名优先，无 name 回落 id）
+    const options = await openRekaDropdown(modelTrigger.element)
+    expect(options).toHaveLength(2)
+    expect(options[0].textContent).toContain('Prov A · m-1')
+    expect(options[1].textContent).toContain('prov-b/m-2')
+    // pi 行：说明文案行渲染（S4 零配置叙事），无模型 Select
+    const piNote = wrapper.find('[data-testid=subagent-engine-pi-note]')
+    expect(piNote.exists()).toBe(true)
+    expect(piNote.text()).toContain('pi 引擎模型由 pi 自身解析')
+    // acp 无清单：不渲染模型行
+    expect(wrapper.find('[data-testid=subagent-engine-model-acp]').exists()).toBe(false)
+  })
+
+  it('D5：模型选择 → 调用 setSubagentEngineDefaultModel（engineId + modelRef 透传）+ 权威回填 + saved toast', async () => {
+    sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({
+      engines: ['pi', 'zcode'],
+      defaultEngine: 'zcode',
+      engineModels: {
+        zcode: [
+          { id: 'prov-a/m-1', name: 'Prov A · m-1' },
+          { id: 'prov-b/m-2', name: 'Prov B · m-2' },
+        ],
+      },
+      engineDefaults: { zcode: 'prov-a/m-1' },
+    })
+    sessionApiMock.setSubagentEngineDefaultModel.mockResolvedValueOnce({ engineId: 'zcode', modelRef: 'prov-b/m-2' })
+    const wrapper = mountSection()
+    await flushPromises()
+
+    await pickRekaOption(wrapper.find('[data-testid=subagent-engine-model-zcode]').element, 'Prov B · m-2')
+
+    expect(sessionApiMock.setSubagentEngineDefaultModel).toHaveBeenCalledWith('zcode', 'prov-b/m-2')
+    // reply modelRef = 权威回填（触发器前进到新选中）
+    expect(wrapper.find('[data-testid=subagent-engine-model-zcode]').text()).toContain('Prov B · m-2')
+    // 保存交互与既有区块一致：saved toast（settings.subagentEngine.saved）
+    expectSavedToast()
+  })
+
+  it('D5：模型保存失败 → 选中态回滚旧值 + modelSaveFailed toast（带 reason）', async () => {
+    sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({
+      engines: ['pi', 'zcode'],
+      defaultEngine: 'zcode',
+      engineModels: {
+        zcode: [
+          { id: 'prov-a/m-1', name: 'Prov A · m-1' },
+          { id: 'prov-b/m-2', name: 'Prov B · m-2' },
+        ],
+      },
+      engineDefaults: { zcode: 'prov-a/m-1' },
+    })
+    sessionApiMock.setSubagentEngineDefaultModel.mockRejectedValueOnce(new Error('model not available'))
+    const { toasts } = useToast()
+
+    const wrapper = mountSection()
+    await flushPromises()
+
+    await pickRekaOption(wrapper.find('[data-testid=subagent-engine-model-zcode]').element, 'Prov B · m-2')
+
+    expect(sessionApiMock.setSubagentEngineDefaultModel).toHaveBeenCalledWith('zcode', 'prov-b/m-2')
+    // 回滚：触发器回到已保存基准（旧偏好 Prov A）
+    const triggerText = wrapper.find('[data-testid=subagent-engine-model-zcode]').text()
+    expect(triggerText).toContain('Prov A · m-1')
+    expect(triggerText).not.toContain('Prov B')
+    // 失败显形：modelSaveFailed toast 携带 runtime 原始文案（reason 插值）
+    expect(toasts.value.some((t) => t.type === 'error' && t.message.includes('保存失败') && t.message.includes('model not available'))).toBe(true)
+  })
+
+  it('D5：同值选择不发写请求（幂等，与引擎切换同款短路）', async () => {
+    sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({
+      engines: ['pi', 'zcode'],
+      defaultEngine: 'zcode',
+      engineModels: { zcode: [{ id: 'prov-a/m-1', name: 'Prov A · m-1' }] },
+      engineDefaults: { zcode: 'prov-a/m-1' },
+    })
+    const wrapper = mountSection()
+    await flushPromises()
+
+    await pickRekaOption(wrapper.find('[data-testid=subagent-engine-model-zcode]').element, 'Prov A · m-1')
+
+    expect(sessionApiMock.setSubagentEngineDefaultModel).not.toHaveBeenCalled()
   })
 })

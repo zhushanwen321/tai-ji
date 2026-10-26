@@ -1748,7 +1748,7 @@ fi
 # i18n 使用面 vs 定义面比对守卫（源码引用的 key 必须在 zh-CN 聚合树存在——
 #   problem-solve-canvas D3 真机 9 个错位 key 渲染原文的根因防线；locale-sync
 #   只查双语一致，此段查使用面。检查本体 = renderer 的
-#   usage-definition-check.test.ts（import 真实聚合树，白名单与动态前缀提取
+#   locale-key-usage-guard.test.ts（usage-definition-check.test.ts 并入后的宿主；import 真实聚合树，白名单与动态前缀提取
 #   在测试文件内维护）。无独立 SKIP 开关（R1 后惯例，SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
@@ -1758,13 +1758,13 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     if [ -n "$I18N_USAGE_TRIGGER" ]; then
         echo -e "${BLUE}[INFO] 运行 i18n 使用面-定义面比对守卫...${NC}"
 
-        (cd packages/renderer && npx vitest run src/__tests__/i18n/usage-definition-check.test.ts)
+        (cd packages/renderer && npx vitest run src/__tests__/i18n/locale-key-usage-guard.test.ts)
         EXIT_CODE=$?
 
         if [ $EXIT_CODE -ne 0 ]; then
             echo ""
             echo -e "${RED}[ERROR] i18n 使用面-定义面守卫失败：源码引用的 key 在定义树不存在（或动态前缀无落点）${NC}"
-            echo -e "${RED}[FIX] 修 key 拼写 / 补词条（zh+en 双侧同步），确认合法的非 i18n 同形字面量登记白名单（usage-definition-check.test.ts 的 USAGE_WHITELIST，附理由）${NC}"
+            echo -e "${RED}[FIX] 修 key 拼写 / 补词条（zh+en 双侧同步），确认合法的非 i18n 同形字面量登记白名单（locale-key-usage-guard.test.ts 的 USAGE_WHITELIST，附理由）${NC}"
             exit 1
         fi
     fi

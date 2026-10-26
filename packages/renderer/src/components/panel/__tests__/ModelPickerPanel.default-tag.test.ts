@@ -1,14 +1,22 @@
 /**
- * ModelPickerPanel 行尾「默认」标签测试（demo .pt，demo 对齐）。
+ * ModelPickerPanel 默认标签 + ContextChipsBar 缩略图 单文件合并
+ * （round5-d 分区 4 簇 4-3 相容子集）。
  *
- * 覆盖：
- *  - 命中 defaultModel 的行渲染行尾标签（i18n 文案），非默认行无标签（demo mock 存在空 tag 行，
- *    空是合法态）
- *  - 同 short-id 多 provider 双匹配：只标对应 provider 组的行（与 isRowSelected 同构语义）
- *  - defaultModel 空（未配置）→ 全部行无标签
- *  - ModelSelectPopover 集成：settingsStore.defaultModel → panel 数据范围接线（弹层内出现标签）
+ * 为什么单文件：vitest 按测试文件隔离模块图——两文件共同装载 lucide-vue /
+ * reka-ui-slim / vue / shared 等重模块，且全零 vi.mock，单文件共享一份装载。
  *
- * 每条用例至少一个用户可见 DOM 断言（TEST-STRATEGY §3 三视角纪律）。
+ * 来源文件（describe/it 块原样搬运，测试名零改动）：
+ *  - ModelPickerPanel.default-tag.test.ts（行尾「默认」标签，主体）
+ *  - ContextChipsBar.thumb.test.ts（image chip 真图缩略）
+ *
+ * 冲突处理（试点模式）：
+ *  - 两文件顶层 afterEach 同构（wrapper 卸载 + body 清），去重一份公共；
+ *    主体的 beforeEach pinia 重建提升文件级（ContextChips 不消费 pinia，幂等无害）
+ *
+ * 簇注：同簇其余三文件不并入——SubagentTab.model-popover 的 vue-i18n mock 会毁掉
+ * 本两节的中文文案断言（「默认」等），且其 @/stores 系窄 mock 与 Panel.plan-quota/
+ * dead-diagnostics 挂载的完整 Panel.vue（真实 store 依赖）实质冲突。三文件保持原样。
+ *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/__tests__/ModelPickerPanel.default-tag.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -18,6 +26,7 @@ import { getSettingsStore } from '@taiji/core'
 import type { ProviderId } from '@taiji/shared'
 import ModelPickerPanel from '@/components/panel/ModelPickerPanel.vue'
 import ModelSelectPopover from '@/components/panel/ModelSelectPopover.vue'
+import ContextChipsBar from '@/components/panel/ContextChipsBar.vue'
 
 let wrapper: ReturnType<typeof mount> | null = null
 
@@ -112,5 +121,61 @@ describe('ModelPickerPanel 行尾「默认」标签（demo .pt）', () => {
     // 标签行 = gpt-5（默认模型），非当前选中行 gpt-4o——「默认」与「当前选中」是两个独立语义
     const gpt5Row = document.body.querySelector('[data-testid="model-picker-item-gpt-5"]')
     expect(gpt5Row?.contains(tags[0])).toBe(true)
+  })
+})
+
+
+// ══════════ 来源：ContextChipsBar.thumb.test.ts（image chip 真图缩略；wrapper 槽与
+//             afterEach 共享主体声明，零 mock 零泄漏） ══════════
+
+const THUMB_SELECTOR = '[data-testid="context-chip-thumb"]'
+
+function makeItems(count: number): Array<{ id: string; name: string; path: string; type: 'image' }> {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `chip-${i + 1}`,
+    name: `img${i + 1}.png`,
+    path: `/tmp/attachments/s1/img${i + 1}.png`,
+    type: 'image' as const,
+  }))
+}
+
+describe('ContextChipsBar image chip 真图缩略（demo .ctxchip .thumb）', () => {
+  it('image 项 lead 渲染 img 缩略（local-file src + demo 四值类），非 image 形态无 img', () => {
+    wrapper = mount(ContextChipsBar, { props: { items: makeItems(2) } })
+    const thumbs = wrapper.findAll(THUMB_SELECTOR)
+    expect(thumbs.length).toBe(2)
+    // src 经 shared localFileUrl 单点构造（local-file 协议 + 路径段编码）
+    expect(thumbs[0].attributes('src')).toBe(
+      'local-file:///' + encodeURIComponent('/tmp/attachments/s1/img1.png'),
+    )
+    expect(thumbs[0].attributes('alt')).toBe('img1.png')
+    // demo .ctxchip .thumb 四值：16px（size-4）/ r-3.5px / object-fit cover / flex none（shrink-0）
+    expect(thumbs[0].classes()).toContain('size-4')
+    expect(thumbs[0].classes()).toContain('rounded-[3.5px]')
+    expect(thumbs[0].classes()).toContain('object-cover')
+    expect(thumbs[0].classes()).toContain('shrink-0')
+  })
+
+  it('img 加载失败 → 该 chip 回退 ImageIcon 占位（img 消失，svg 出现）', async () => {
+    wrapper = mount(ContextChipsBar, { props: { items: makeItems(1) } })
+    const img = wrapper.find(THUMB_SELECTOR)
+    expect(img.exists()).toBe(true)
+
+    await img.trigger('error')
+    // img 消失（不留破图），ImageIcon 占位渲染（lucide 组件 → svg）
+    expect(wrapper.find(THUMB_SELECTOR).exists()).toBe(false)
+    const fallback = wrapper.find('svg')
+    expect(fallback.exists()).toBe(true)
+  })
+
+  it('失败回退按 chipId 隔离：失败项回退占位，未失败项保持 img', async () => {
+    wrapper = mount(ContextChipsBar, { props: { items: makeItems(2) } })
+    await wrapper.findAll(THUMB_SELECTOR)[0]!.trigger('error')
+
+    expect(wrapper.findAll(THUMB_SELECTOR).length).toBe(1)
+    // 剩下的 img 是第二个 chip 的
+    expect(wrapper.find(THUMB_SELECTOR).attributes('src')).toContain(
+      encodeURIComponent('/tmp/attachments/s1/img2.png'),
+    )
   })
 })
