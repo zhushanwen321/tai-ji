@@ -1,4 +1,8 @@
-// src/__tests__/model-resolver.test.ts
+// src/execution/__tests__/model-resolver.test.ts
+//
+// [round5-g 合并产物] 吸收同被测模块（resolveModel）姊妹件：
+// - model-resolver-override.test.ts（原 src/__tests__/ 下；解析链第 0 层用户覆盖短路）。
+//   其 makeModel/makeRegistry/ctxModel/logger 桩与本文件原有实现同构，已去重共用。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // core logger 桩：断言缺省推导路径留 debug 痕迹（显式不可用路径为抛错，不经日志）。
@@ -9,6 +13,7 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import {
   availableThinkingLevels,
+  type AgentConfig,
   type ModelInfo,
   type ModelRegistryLike,
   resolveModel,
@@ -577,5 +582,139 @@ describe("ModelConfigService: ctx.model plumb-through (EA-4)", () => {
 
     const r = svc.resolveModel("worker", { model: "p1/explicit" });
     expect(r.model.id).toBe("explicit");
+  });
+});
+
+// ══════ 来源: model-resolver-override.test.ts ══════
+
+// ============================================================
+// 第 0 层短路（不变量 4）
+// ============================================================
+
+describe("resolveModel — 第 0 层用户覆盖短路（不变量 4）", () => {
+  it("覆盖在场：产物 = 覆盖值，三层整体不触达（paramOverride/agentConfig/ctxModel 均被顶住）", () => {
+    const overrideTarget = makeModel({ id: "override-target", provider: "ovr" });
+    const paramModel = makeModel({ id: "param-model", provider: "prm" });
+    const agentModel = makeModel({ id: "agent-model", provider: "agt" });
+    // registry 只注册覆盖目标与 agent 模型——paramModel 刻意不入 registry：
+    // 若三层被触达（paramOverride.model = prm/param-model），assertCanonicalModelRef
+    // 会抛 not found；第 0 层短路下永不触达，解析成功且产物 = 覆盖值。
+    const reg = makeRegistry([overrideTarget, agentModel]);
+    const agentConfig: AgentConfig = { name: "worker", systemPrompt: "", model: "agt/agent-model" };
+    const r = resolveModel(
+      agentConfig,
+      reg,
+      { model: "prm/param-model" },
+      ctxModel,
+      { model: "ovr/override-target" },
+    );
+    expect(r.model.provider).toBe("ovr");
+    expect(r.model.id).toBe("override-target");
+  });
+
+  it("覆盖在场且其余三层全部非法/缺席：仍解析成功（短路的独立可满足性）", () => {
+    const overrideTarget = makeModel({ id: "target", provider: "ovr" });
+    const reg = makeRegistry([overrideTarget]);
+    // ctxModel 不在 registry（第三层若触达，modelRefFromVerified 孪生检查不炸但产物
+    // 是 main-model）——产物必须仍是覆盖值，证明第三层未触达。
+    const r = resolveModel(undefined, reg, undefined, makeModel({ id: "off-registry", provider: "nowhere" }), {
+      model: "ovr/target",
+    });
+    expect(r.model.id).toBe("target");
+    expect(r.model.provider).toBe("ovr");
+  });
+
+  it("覆盖缺席：现行三层原样（现状回归——L1 paramOverride / L2 agentConfig / L3 ctxModel）", () => {
+    const paramModel = makeModel({ id: "param-model", provider: "prm" });
+    const agentModel = makeModel({ id: "agent-model", provider: "agt" });
+    const reg = makeRegistry([paramModel, agentModel]);
+
+    // L1。
+    const l1 = resolveModel({ name: "w", systemPrompt: "", model: "agt/agent-model" }, reg, { model: "prm/param-model" }, ctxModel);
+    expect(l1.model.id).toBe("param-model");
+    // L2。
+    const l2 = resolveModel({ name: "w", systemPrompt: "", model: "agt/agent-model" }, reg, undefined, ctxModel);
+    expect(l2.model.id).toBe("agent-model");
+    // L3。
+    const l3 = resolveModel(undefined, reg, undefined, ctxModel);
+    expect(l3.model.id).toBe("main-model");
+    // userOverride 形状传 undefined 与不传完全同形（可选末位参数零回归）。
+    const l1Again = resolveModel({ name: "w", systemPrompt: "" }, reg, { model: "prm/param-model" }, ctxModel, undefined);
+    expect(l1Again.model.id).toBe("param-model");
+  });
+});
+
+// ============================================================
+// 覆盖路径的档位候选链（§6.2 记账形状）
+// ============================================================
+
+describe("resolveModel — 覆盖路径档位候选链", () => {
+  const levels = { off: true, medium: true, high: true, xhigh: true };
+  const target = () => makeModel({ id: "target", provider: "ovr", reasoning: true, thinkingLevelMap: levels });
+
+  it("无显式候选 → 最高可用档兜底（现役链缺省推导语义）", () => {
+    const r = resolveModel(undefined, makeRegistry([target()]), undefined, undefined, { model: "ovr/target" });
+    expect(r.thinkingLevel).toBe("xhigh");
+  });
+
+  it("paramOverride.thinkingLevel > userOverride.thinkingLevel（调用参数档位仍最权威）", () => {
+    const r = resolveModel(
+      undefined,
+      makeRegistry([target()]),
+      { thinkingLevel: "medium" },
+      undefined,
+      { model: "ovr/target", thinkingLevel: "high" },
+    );
+    expect(r.thinkingLevel).toBe("medium");
+  });
+
+  it("userOverride.thinkingLevel > agentConfig.thinkingLevel（覆盖内联档位高于 frontmatter）", () => {
+    const r = resolveModel(
+      { name: "w", systemPrompt: "", thinkingLevel: "medium" },
+      makeRegistry([target()]),
+      undefined,
+      undefined,
+      { model: "ovr/target", thinkingLevel: "high" },
+    );
+    expect(r.thinkingLevel).toBe("high");
+  });
+
+  it("覆盖档位缺席 → agentConfig.thinkingLevel 递补（frontmatter 显式档位沿用）", () => {
+    const r = resolveModel(
+      { name: "w", systemPrompt: "", thinkingLevel: "medium" },
+      makeRegistry([target()]),
+      undefined,
+      undefined,
+      { model: "ovr/target" },
+    );
+    expect(r.thinkingLevel).toBe("medium");
+  });
+
+  it("显式候选档位对新模型不可用 → 抛错（不静默降级，§6.2）", () => {
+    const onlyMedium = makeModel({ id: "target", provider: "ovr", reasoning: true, thinkingLevelMap: { medium: true } });
+    expect(() =>
+      resolveModel(undefined, makeRegistry([onlyMedium]), undefined, undefined, { model: "ovr/target", thinkingLevel: "xhigh" }),
+    ).toThrow(/thinkingLevel "xhigh" is not available/);
+  });
+});
+
+// ============================================================
+// 不变量 3：覆盖值经同一 canonical ref 全等裁决
+// ============================================================
+
+describe("resolveModel — 覆盖值 canonical ref 裁决（不变量 3）", () => {
+  it("覆盖 ref 不在 registry → 抛错（不能把用户带进注定启动失败的模型）", () => {
+    const reg = makeRegistry([makeModel({ id: "other", provider: "ovr" })]);
+    expect(() => resolveModel(undefined, reg, undefined, undefined, { model: "ovr/missing-model" })).toThrow(
+      /is not a registry entry/,
+    );
+  });
+
+  it("覆盖 ref 全等命中但 auth 未配置 → 抛错（凭据校验与显式指定同链）", () => {
+    const target = makeModel({ id: "target", provider: "ovr" });
+    const reg = makeRegistry([target], []); // 无任何已鉴权模型
+    expect(() => resolveModel(undefined, reg, undefined, undefined, { model: "ovr/target" })).toThrow(
+      /auth is not configured/,
+    );
   });
 });

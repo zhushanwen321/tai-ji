@@ -1,5 +1,10 @@
 // src/execution/__tests__/worktree-reconcile.integration.test.ts
 //
+// [round5-g 合并产物] 吸收同 harness（fakeIo fake-git）姊妹件：
+// - worktree-reconcile-aging.test.ts（对账歧义跳过老化 PS-12）。共享 harness
+//   （ORIG_TMPDIR/fakeIo/git/createFakeGit/useFakeGit）字节级相同已去重；其
+//   logger 桩提升为文件级（本文件原用真实 logger，仅静默无断言影响）。
+//
 // D5b 对账双向 diff：物理（磁盘）侧 ↔ 注册表。
 //
 // 两种形态道（判据三档：只测逻辑、高负载极快）：
@@ -31,7 +36,16 @@ import {
 } from "../../../../../test-guard/integration-gate.ts";
 import { encodeCwd, getSessionSubagentSessionsDir } from "@taiji/shared/paths";
 import { WorktreeRegistry } from "../worktree/worktree-registry.ts";
-import { WorktreeManager } from "../worktree/worktree-manager.ts";
+import { RECONCILE_SKIP_ESCALATION_CYCLES, WorktreeManager } from "../worktree/worktree-manager.ts";
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: {
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
+
 
 /** 原始 TMPDIR（beforeEach 重定向、afterEach 还原）。 */
 const ORIG_TMPDIR = os.tmpdir();
@@ -465,6 +479,336 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 
       expect(fs.existsSync(checkout)).toBe(false);
       expect(git(repo, "branch", "--list", "pi-sub-*")).toBe("");
+    });
+  },
+);
+
+// ══════ 来源: worktree-reconcile-aging.test.ts ══════
+
+/** 升级 warn 调用（按消息锚文本过滤）。 */
+function escalationCalls(): Array<{ msg: string; data: Record<string, unknown> }> {
+  return loggerMock.warn.mock.calls
+    .filter((c) => typeof c[0] === "string" && c[0].includes("manual cleanup may be needed"))
+    .map((c) => ({ msg: c[0] as string, data: (c[1] ?? {}) as Record<string, unknown> }));
+}
+
+// ============================================================
+// 默认组道：in-process fixture（无真 git、无 spawn sleep）
+// ============================================================
+
+describe("WorktreeManager 对账歧义跳过老化（PS-12 措施⑤，in-process fixture）", () => {
+  let outerDir: string;
+  let agentDir: string;
+  let repo: string;
+  let enc: string;
+  let registry: WorktreeRegistry;
+  let mgr: WorktreeManager;
+  let fakeGit: FakeGitState;
+
+  beforeEach(() => {
+    outerDir = fs.mkdtempSync(path.join(ORIG_TMPDIR, "wt-reconcile-aging-"));
+    process.env.TMPDIR = outerDir;
+    // [session-store-layout-inversion] 对账活信号根 = session 存储树
+    // getSessionStoreDir()（env dataDir）——重定向进 outerDir 内（rmSync 外层一并清），
+    // 构造 WorktreeManager 前置（reconciler 构造期解析 storeRoot）
+    process.env.TAIJI_AGENT_DATA_DIR = path.join(outerDir, "engine-data");
+
+    agentDir = path.join(outerDir, "agent");
+    repo = path.join(outerDir, "repo");
+    enc = encodeCwd(repo);
+
+    fakeGit = createFakeGit();
+    useFakeGit(fakeGit);
+    fakeIo.alive = true;
+    fakeIo.alivePids.clear();
+
+    registry = new WorktreeRegistry(agentDir);
+    mgr = new WorktreeManager(agentDir);
+    loggerMock.warn.mockClear();
+  });
+
+  afterEach(() => {
+    fakeIo.git = false;
+    fakeIo.gitScript = null;
+    fakeIo.alive = false;
+    process.env.TMPDIR = ORIG_TMPDIR;
+    delete process.env.TAIJI_AGENT_DATA_DIR;
+    fs.rmSync(outerDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** 建一个物理 worktree：checkout 目录 + .git 指针文件（repo 推导源）+ fake git 分支登记。 */
+  function makePhysicalWorktree(branch: string): string {
+    const checkout = path.join(outerDir, "pi-subagents", enc, branch);
+    fs.mkdirSync(checkout, { recursive: true });
+    fs.writeFileSync(
+      path.join(checkout, ".git"),
+      `gitdir: ${path.join(repo, ".git", "worktrees", branch)}\n`,
+      "utf-8",
+    );
+    fakeGit.branches.set(repo, (fakeGit.branches.get(repo) ?? new Set()).add(branch));
+    fakeGit.checkoutByBranch.set(branch, checkout);
+    return checkout;
+  }
+
+  /** 在 <storeRoot>/<sid>/subagents/sessions/ 下写一个 .alive marker
+   *  （[session-store-layout-inversion] 活信号随 subagent 文族落 session 存储树），
+   *  并把 pid 注册进探活桩的活集合。 */
+  function writeAliveMarker(sessionId: string, pid: number): void {
+    const sessions = getSessionSubagentSessionsDir(sessionId);
+    fs.mkdirSync(sessions, { recursive: true });
+    fs.writeFileSync(
+      path.join(sessions, `${sessionId}.jsonl.alive`),
+      JSON.stringify({ pid, id: sessionId, startedAt: Date.now() }),
+      "utf-8",
+    );
+    fakeIo.alivePids.add(pid);
+  }
+
+  it("阈值前保持普通 warn，第 N 周期升级含磁盘路径与清理指引（资源不动）", async () => {
+    const c1 = makePhysicalWorktree("pi-sub-a1");
+    const c2 = makePhysicalWorktree("pi-sub-a2");
+    writeAliveMarker("s-a1", 1001);
+    writeAliveMarker("s-a2", 1002);
+
+    // 阈值前（N-1 周期）：无升级消息，资源原样（宁延迟勿误删语义不变）
+    for (let i = 0; i < RECONCILE_SKIP_ESCALATION_CYCLES - 1; i++) {
+      await mgr.scan();
+    }
+    expect(escalationCalls()).toEqual([]);
+    expect(fs.existsSync(c1)).toBe(true);
+    expect(fs.existsSync(c2)).toBe(true);
+
+    // 第 N 周期：升级 warn——每个残留路径一条，含路径与人工清理指引
+    await mgr.scan();
+    const calls = escalationCalls();
+    expect(calls.length).toBe(2); // c1 / c2 各一条
+    for (const checkout of [c1, c2]) {
+      const hit = calls.find((c) => c.msg.includes(checkout));
+      expect(hit).toBeDefined();
+      expect(hit?.msg).toContain("worktree list");
+      expect(hit?.msg).toContain("worktree remove --force");
+      expect(hit?.msg).toContain("branch -D");
+      expect(hit?.msg).toContain("rm -rf");
+      expect(hit?.msg).toContain(`skipped for ${RECONCILE_SKIP_ESCALATION_CYCLES} consecutive cycles`);
+    }
+    // 结构化字段：branch/checkout/skippedCycles 可机读。
+    // （in-process 轨道的 repo 来自 .git 指针文件内容——本用例自己写的字面路径；
+    //  真实 git 轨道下它是 git 解析产物，macOS 上为 realpath 形态 /private/var/...）
+    const data1 = calls.find((c) => c.data.checkout === c1)?.data;
+    expect(data1?.branch).toBe("pi-sub-a1");
+    expect(data1?.repo).toBe(repo);
+    expect(data1?.skippedCycles).toBe(RECONCILE_SKIP_ESCALATION_CYCLES);
+
+    // 升级 warn 是提醒不是清理动作：物理资源与注册表未动
+    expect(fs.existsSync(c1)).toBe(true);
+    expect(fs.existsSync(c2)).toBe(true);
+    expect(registry.load()).toEqual([]);
+  });
+
+  it("重置语义：自愈补写（出现对应）后计数清零，重现歧义需重新连续 N 周期", async () => {
+    const c1 = makePhysicalWorktree("pi-sub-r1");
+    const c2 = makePhysicalWorktree("pi-sub-r2");
+    writeAliveMarker("s-r1", 1001);
+    writeAliveMarker("s-r2", 1002);
+
+    // 累计 N-1 周期歧义（未达阈值）
+    for (let i = 0; i < RECONCILE_SKIP_ESCALATION_CYCLES - 1; i++) {
+      await mgr.scan();
+    }
+    expect(escalationCalls()).toEqual([]);
+
+    // 出现对应：s-r2 pid 死 + c2 删除 → 1 活 pid ↔ 1 残留 → 自愈补写 c1
+    fakeIo.alivePids.delete(1002);
+    fs.rmSync(c2, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    await mgr.scan();
+    expect(registry.load().map((e) => e.branch)).toEqual(["pi-sub-r1"]);
+    expect(escalationCalls()).toEqual([]);
+
+    // 重现歧义：c1 退出注册表 + 新残留 c3 + 新活 pid。
+    // c1 的历史歧义计数已被自愈轮清零——若未清零（陈账 N-1），下面第 1 轮就达
+    // 阈值升级；断言 N-1 轮内无升级即证明重置生效。
+    await registry.remove("pi-sub-r1");
+    const c3 = makePhysicalWorktree("pi-sub-r3");
+    writeAliveMarker("s-r3", 1003);
+    for (let i = 0; i < RECONCILE_SKIP_ESCALATION_CYCLES - 1; i++) {
+      await mgr.scan();
+    }
+    expect(escalationCalls()).toEqual([]);
+
+    // 第 N 轮：升级（新计数从 1 起步走满阈值）
+    await mgr.scan();
+    const msgs = escalationCalls().map((c) => c.msg);
+    expect(msgs.some((m) => m.includes(c1))).toBe(true);
+    expect(msgs.some((m) => m.includes(c3))).toBe(true);
+  });
+});
+
+// ============================================================
+// CI-only 轨道：真实 git repo + 真实 sleep 子进程（真 pid 探活）
+// ============================================================
+
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `WorktreeManager 对账歧义跳过老化（PS-12 措施⑤，真实 git + 真进程）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
+    let outerDir: string;
+    let agentDir: string;
+    let repo: string;
+    let enc: string;
+    let registry: WorktreeRegistry;
+    let mgr: WorktreeManager;
+
+    beforeEach(() => {
+      outerDir = fs.mkdtempSync(path.join(ORIG_TMPDIR, "wt-reconcile-aging-"));
+      process.env.TMPDIR = outerDir;
+      // [session-store-layout-inversion] 对账活信号根 = session 存储树
+      // getSessionStoreDir()（env dataDir）——重定向进 outerDir 内（rmSync 外层一并清），
+      // 构造 WorktreeManager 前置（reconciler 构造期解析 storeRoot）
+      process.env.TAIJI_AGENT_DATA_DIR = path.join(outerDir, "engine-data");
+
+      agentDir = path.join(outerDir, "agent");
+      repo = path.join(outerDir, "repo");
+      fs.mkdirSync(repo, { recursive: true });
+      git(repo, "init", "-q");
+      git(repo, "config", "user.email", "test@test.local");
+      git(repo, "config", "user.name", "test");
+      fs.writeFileSync(path.join(repo, "a.txt"), "init\n", "utf-8");
+      git(repo, "add", "-A");
+      git(repo, "commit", "-q", "-m", "init");
+
+      enc = encodeCwd(repo);
+      registry = new WorktreeRegistry(agentDir);
+      mgr = new WorktreeManager(agentDir);
+      loggerMock.warn.mockClear();
+    });
+
+    afterEach(() => {
+      process.env.TMPDIR = ORIG_TMPDIR;
+      delete process.env.TAIJI_AGENT_DATA_DIR;
+      fs.rmSync(outerDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    });
+
+    /** 建一个物理 worktree（绕过 WorktreeManager.create 的脏树校验，路径布局同 create）。 */
+    function makePhysicalWorktree(branch: string): string {
+      const checkout = path.join(outerDir, "pi-subagents", enc, branch);
+      git(repo, "worktree", "add", "-q", "-b", branch, checkout, "HEAD");
+      return checkout;
+    }
+
+    /** 在 <storeRoot>/<sid>/subagents/sessions/ 下写一个 .alive marker
+     *  （[session-store-layout-inversion] 活信号随 subagent 文族落 session 存储树）。 */
+    function writeAliveMarker(sessionId: string, pid: number): void {
+      const sessions = getSessionSubagentSessionsDir(sessionId);
+      fs.mkdirSync(sessions, { recursive: true });
+      fs.writeFileSync(
+        path.join(sessions, `${sessionId}.jsonl.alive`),
+        JSON.stringify({ pid, id: sessionId, startedAt: Date.now() }),
+        "utf-8",
+      );
+    }
+
+    /** 真实子进程等待：等 pid 死透（isProcessAlive 翻 false，SIGKILL 后的短暂窗口）。 */
+    async function waitPidDead(pid: number): Promise<void> {
+      for (let i = 0; i < 50; i++) {
+        try {
+          process.kill(pid, 0);
+        } catch {
+          return; // ESRCH = 已死
+        }
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    }
+
+    it("阈值前保持普通 warn，第 N 周期升级含磁盘路径与清理指引（资源不动）", async () => {
+      const c1 = makePhysicalWorktree("pi-sub-a1");
+      const c2 = makePhysicalWorktree("pi-sub-a2");
+      const sleeper = spawn("sleep", ["60"]);
+      try {
+        expect(sleeper.pid).toBeTruthy();
+        writeAliveMarker("s-a1", process.pid);
+        writeAliveMarker("s-a2", sleeper.pid as number);
+
+        // 阈值前（N-1 周期）：无升级消息，资源原样（宁延迟勿误删语义不变）
+        for (let i = 0; i < RECONCILE_SKIP_ESCALATION_CYCLES - 1; i++) {
+          await mgr.scan();
+        }
+        expect(escalationCalls()).toEqual([]);
+        expect(fs.existsSync(c1)).toBe(true);
+        expect(fs.existsSync(c2)).toBe(true);
+
+        // 第 N 周期：升级 warn——每个残留路径一条，含路径与人工清理指引
+        await mgr.scan();
+        const calls = escalationCalls();
+        expect(calls.length).toBe(2); // c1 / c2 各一条
+        for (const checkout of [c1, c2]) {
+          const hit = calls.find((c) => c.msg.includes(checkout));
+          expect(hit).toBeDefined();
+          expect(hit?.msg).toContain("worktree list");
+          expect(hit?.msg).toContain("worktree remove --force");
+          expect(hit?.msg).toContain("branch -D");
+          expect(hit?.msg).toContain("rm -rf");
+          expect(hit?.msg).toContain(`skipped for ${RECONCILE_SKIP_ESCALATION_CYCLES} consecutive cycles`);
+        }
+        // 结构化字段：branch/checkout/skippedCycles 可机读
+        // （repo 是 git .git 指针解析产物，macOS 上为 realpath 形态 /private/var/...）
+        const data1 = calls.find((c) => c.data.checkout === c1)?.data;
+        expect(data1?.branch).toBe("pi-sub-a1");
+        expect(data1?.repo).toBe(fs.realpathSync(repo));
+        expect(data1?.skippedCycles).toBe(RECONCILE_SKIP_ESCALATION_CYCLES);
+
+        // 升级 warn 是提醒不是清理动作：物理资源与注册表未动
+        expect(fs.existsSync(c1)).toBe(true);
+        expect(fs.existsSync(c2)).toBe(true);
+        expect(registry.load()).toEqual([]);
+      } finally {
+        sleeper.kill("SIGKILL");
+      }
+    });
+
+    it("重置语义：自愈补写（出现对应）后计数清零，重现歧义需重新连续 N 周期", async () => {
+      const c1 = makePhysicalWorktree("pi-sub-r1");
+      const c2 = makePhysicalWorktree("pi-sub-r2");
+      const sleeper = spawn("sleep", ["60"]);
+      try {
+        writeAliveMarker("s-r1", process.pid);
+        writeAliveMarker("s-r2", sleeper.pid as number);
+
+        // 累计 N-1 周期歧义（未达阈值）
+        for (let i = 0; i < RECONCILE_SKIP_ESCALATION_CYCLES - 1; i++) {
+          await mgr.scan();
+        }
+        expect(escalationCalls()).toEqual([]);
+      } finally {
+        sleeper.kill("SIGKILL");
+      }
+
+      // 出现对应：s-r2 pid 死 + c2 删除 → 1 活 pid ↔ 1 残留 → 自愈补写 c1
+      await waitPidDead(sleeper.pid as number);
+      fs.rmSync(c2, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      await mgr.scan();
+      expect(registry.load().map((e) => e.branch)).toEqual(["pi-sub-r1"]);
+      expect(escalationCalls()).toEqual([]);
+
+      // 重现歧义：c1 退出注册表 + 新残留 c3 + 新活 pid。
+      // c1 的历史歧义计数已被自愈轮清零——若未清零（陈账 N-1），下面第 1 轮就达
+      // 阈值升级；断言 N-1 轮内无升级即证明重置生效。
+      await registry.remove("pi-sub-r1");
+      const c3 = makePhysicalWorktree("pi-sub-r3");
+      const sleeper2 = spawn("sleep", ["60"]);
+      try {
+        writeAliveMarker("s-r3", sleeper2.pid as number);
+        for (let i = 0; i < RECONCILE_SKIP_ESCALATION_CYCLES - 1; i++) {
+          await mgr.scan();
+        }
+        expect(escalationCalls()).toEqual([]);
+
+        // 第 N 轮：升级（新计数从 1 起步走满阈值）
+        await mgr.scan();
+        const msgs = escalationCalls().map((c) => c.msg);
+        expect(msgs.some((m) => m.includes(c1))).toBe(true);
+        expect(msgs.some((m) => m.includes(c3))).toBe(true);
+      } finally {
+        sleeper2.kill("SIGKILL");
+      }
     });
   },
 );

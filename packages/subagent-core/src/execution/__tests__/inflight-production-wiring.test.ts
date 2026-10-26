@@ -64,7 +64,7 @@ function makeFakeChild(pid = 4242): ChildProcess & EventEmitter {
   return child;
 }
 
-interface ServiceInternals {
+interface ServiceInternals { // oe-exempt:20261027:test:测试夹具接口（合并产物内多节共用的 mock 形状契约）
   store: RecordStore;
 }
 

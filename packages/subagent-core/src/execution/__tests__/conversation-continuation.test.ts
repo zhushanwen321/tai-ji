@@ -8,6 +8,15 @@
 // §3.3 D4 状态迁移表 / D5 双写点 gate / D7 轮末分流。Continuation 单测 = mock host
 //（编排能力全注入，次序断言用 order 账本）；集成测试侧 = registerFakePiEngine 协议替身
 //（与 delivery-methods.test.ts 同源 setup 形态）。
+//
+// [round5-g 合并产物] 本文件吸收同 mock 形态（logger + spawned-children kill spy）的服务终止语义姊妹件：
+// - cancel-close-after-round.test.ts（cancel / disposeAllRecords 打断作废 closeAfterRound 挂起）
+// - subagent-service-recovery-bounds.test.ts（回收上界 kill 收敛 + record-access 越界）
+// 同簇另五件（inflight-production-wiring / notify-round-chain / record-binding /
+// run-orchestration-write-lease / run-orchestration-zcode-chat）经复筛否决并入：
+// inflight 依赖真实 killRecordChildWithEscalation 置死镜像（spy 泄漏必红），其余五件
+// 共同绑定是服务栈底座而非同一业务模块，详见执行报告。
+
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -70,7 +79,7 @@ import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
+import { _resetLifecycleState, armIdleTimer, hasIdleTimer } from "../lifecycle/lifecycle-manager.ts";
 import {
   _resetCoreSpawnedChildrenMirrorForTest,
   registerSpawnedChildForRecord,
@@ -849,7 +858,7 @@ describe("ConversationContinuation — 轮末分流（D7）与通知侧", () => 
 // SubagentService 集成测试侧（fake engine 协议替身）
 // ============================================================
 
-interface ServiceInternals {
+interface ServiceInternals { // oe-exempt:20261027:test:测试夹具接口（合并产物内多节共用的 mock 形状契约）
   store: RecordStore;
 }
 
@@ -2092,5 +2101,251 @@ describe("[§1.4 (c)] 轮终链断头保护（voidRoundFinalChain）", () => {
     const [msg, detail] = loggerMock.error.mock.calls.at(-1)! as [string, { detail: unknown }];
     expect(msg).toContain("dispatchRoundAsync (round-final chain)");
     expect(String(detail.detail)).toContain("round-start bookkeeping exploded");
+  });
+});
+
+// ══════ 来源: cancel-close-after-round.test.ts ══════
+
+describe("集成：cancel × closeAfterRound（[区1-U2] cancel / 编排性关闭打断作废优雅收尾挂起）", () => {
+  let agentDir: string;
+  let service: SubagentService;
+  let store: RecordStore;
+  let pi: PiMock;
+  let fake: FakePiEnginePort;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    killChildSpy.mockClear();
+    ({ agentDir, service, store, pi, fake } = makeService());
+  });
+
+  afterEach(() => {
+    service.dispose();
+    clearEngines();
+    _resetLifecycleState();
+    _resetCoreSpawnedChildrenMirrorForTest();
+    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  it("close 挂起 → cancel 抢先 settle（挂起作废）→ message 新轮 → 轮终不收尾，record 保持可续聊", async () => {
+    const record = makeChatRecord("sa-cancel-close", agentDir);
+    store.register(record);
+    await service.chatActions.deliverChatMessage(record, "long round");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+
+    // close 优雅收尾挂起（在途轮不打断——closeAfterRound=true）。
+    await service["closeSubagent"](record, false);
+    expect(record.closeAfterRound).toBe(true);
+
+    // cancel 抢先 settle：打断在途轮 + settle interrupted——挂起随打断作废
+    //（cancel 语义 = 暂停这一轮可以继续聊，与「收尾下一轮」意愿相反）。
+    const cancelled = service.cancel(record.id);
+    expect(cancelled).toBe(true);
+    expect(record.status).toBe("idle");
+    expect(record.stopReason).toBe("interrupted");
+    expect(record.closeAfterRound).toBeUndefined();
+
+    // 中断轮的收敛应答迟到：onRunSettled 被 status 检查拦截（不簿记、不清队列）
+    //——挂起清除只能由 cancel 侧承担（本修复的缺陷链环节）。
+    fake.runs[0]!.settle({ content: "interrupted round partial" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // 用户 message：cancel 后的正常续聊轮（idle 复活 + 新轮派发）。
+    await service.chatActions.deliverChatMessage(record, "new round after cancel");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(2));
+    fake.runs[1]!.settle({ content: "continuation reply" });
+
+    // 轮终：通知送达但**不收尾**——残留挂起会在此触发 archiveAfterClosingRound
+    // 意外收尾（回归失败信号）。cancel = 暂停这一轮：record 留 idle 可续聊，
+    // 占用位不动。
+    await vi.waitFor(() => expect(record.result).toBe("continuation reply"));
+    expect(record.round).toBe(2);
+    expect(record.closeAfterRound).toBeUndefined();
+    expect(record.status).toBe("idle");
+  });
+
+  it("close 挂起 → disposeAllRecords 编排性关闭（挂起作废 + 立即收尾写入 journal 记录）", async () => {
+    const record = makeChatRecord("sa-dispose-close", agentDir);
+    store.register(record);
+    await service.chatActions.deliverChatMessage(record, "long round");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+
+    await service["closeSubagent"](record, false);
+    expect(record.closeAfterRound).toBe(true);
+
+    const count = service.disposeAllRecords("parent-fork");
+
+    // 编排性关闭 = 立即打断 + settle interrupted-by-parent + 收尾写入 journal 记录——
+    // 挂起（等轮终收尾）意愿被立即收尾完全取代，随打断作废。
+    expect(count).toBe(1);
+    expect(record.closeAfterRound).toBeUndefined();
+    expect(record.status).toBe("idle");
+    expect(record.stopReason).toBe("interrupted-by-parent");
+    expect(record.hadWorktree === true || record.worktreeHandle === undefined).toBe(true);
+  });
+});
+
+// ══════ 来源: subagent-service-recovery-bounds.test.ts ══════
+
+function makeTmpAgentDir(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "svc-recovery-bounds-"));
+}
+
+function makeRecoveryRecord(overrides: Partial<ExecutionRecord> & { id?: string } = {}): ExecutionRecord {
+  const { id = "sa-test", ...rest } = overrides;
+  const r = createRecord(id, {
+    agent: "general-purpose",
+    model: "test/model",
+    mode: "background",
+    task: "test",
+    slug: "test",
+    startedAt: 1000,
+    rootSessionId: "root-session",
+    controller: new AbortController(),
+  });
+  Object.assign(r, rest);
+  return r;
+}
+
+type MockPi = PiMock;
+
+function setup(): { agentDir: string; service: SubagentService; store: RecordStore; pi: MockPi; fake: FakePiEnginePort } {
+  const agentDir = makeTmpAgentDir();
+  clearEngines();
+  const fake = registerFakePiEngine();
+  const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
+  const service = new SubagentService({ cwd: agentDir, modelService });
+  const pi = makePi();
+  service.initSession({ pi, sessionId: "root-session" });
+  const store = (service as unknown as ServiceInternals).store;
+  return { agentDir, service, store, pi, fake };
+}
+
+/** bracket 调 private 方法（ServiceInternals cast 先例的扩展形态）。 */
+function privateFn<K extends string>(service: SubagentService, key: K): (...args: never[]) => unknown {
+  return (service as unknown as Record<string, (...args: never[]) => unknown>)[key];
+}
+
+/**
+ * message 投递入口（[H1 U6] Continuation 编排：deliverChatMessage → onMessage →
+ * 新 run + resume 锚点）。
+ */
+async function deliverChat(
+  service: SubagentService,
+  record: ExecutionRecord,
+  text: string,
+): Promise<void> {
+  return (
+    privateFn(service, "deliverChatMessage") as (
+      this: SubagentService,
+      r: ExecutionRecord,
+      t: string,
+    ) => Promise<void>
+  ).call(service, record, text);
+}
+
+describe("T2④ service-side kill convergence", () => {
+  let agentDir: string;
+  let service: SubagentService;
+  let store: RecordStore;
+  let pi: MockPi;
+  let fake: FakePiEnginePort;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    killChildSpy.mockClear();
+    ({ agentDir, service, store, pi, fake } = setup());
+  });
+
+  afterEach(() => {
+    service.dispose();
+    clearEngines();
+    _resetLifecycleState();
+    _resetCoreSpawnedChildrenMirrorForTest();
+    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  it("cancelBackground (via cancel) routes through killRecordChildWithEscalation + [U5] settle interrupted + 放弃轮标记", async () => {
+    const record = makeRecoveryRecord({ id: "sa-cancel" });
+    store.register(record);
+    const ok = service.cancel(record.id);
+    expect(ok).toBe(true);
+    expect(killChildSpy).toHaveBeenCalledWith(record.id, "cancelBackground");
+    // [H1 U6] 在途 run 的实际终止经 controller.abort → 轮级 signal（cancel 帧 + 杀链）；
+    // 旧 interact cancel 受理断言随 interact 面退役。
+    // [U5] cancel 新语义：settle idle + interrupted + 放弃轮标记——不终态化
+    //（无 closedReason；worktree 不动）。
+    expect(record.status).toBe("idle");
+    expect(record.stopReason).toBe("interrupted");
+    expect(record.closedReason).toBeUndefined();
+    expect(record.lastAbandonedRound).toEqual({ epoch: 0, round: 0 });
+    expect(record.hadWorktree).toBeUndefined(); // cancel ≠ 收尾
+  });
+
+  it("archiveIdleRecord (via closeSubagent force:false on idle) routes through killRecordChildWithEscalation and disarms timers", async () => {
+    const record = makeRecoveryRecord({ id: "sa-close-idle", status: "idle" });
+    store.register(record);
+    armIdleTimer(record.id, () => {}); // Path A：idle timer armed（进程保活）
+    await service["closeSubagent"](record, false);
+    // [U5] close = 收尾写入 journal 记录（archiveIdleRecord——kill 链保留 + disarm；不终态化）。
+    expect(killChildSpy).toHaveBeenCalledWith(record.id, "archiveIdleRecord");
+    expect(hasIdleTimer(record.id)).toBe(false);
+    expect(record.status).toBe("idle");
+    // [H1 U6] 旧引擎侧 close force 受理断言随 interact 面退役（无在跑轮无需进程回收，
+    // Path A 保活进程由镜像记账 + reaper 兜底回收）。
+  });
+
+  it("disposeAllRecords applies all recovery surfaces: abort + escalation kill + disarm idle timer", () => {
+    const running = makeRecoveryRecord({ id: "sa-dispose-run" });
+    const idle = makeRecoveryRecord({ id: "sa-dispose-idle" });
+    store.register(running);
+    store.register(idle);
+    armIdleTimer(idle.id, () => {});
+
+    const count = service.disposeAllRecords("parent-new");
+
+    expect(count).toBe(2);
+    // 回收侧 i：controller.abort
+    expect(running.controller?.signal.aborted).toBe(true);
+    expect(idle.controller?.signal.aborted).toBe(true);
+    // 回收侧 ii：kill 收敛到 escalation 入口
+    expect(killChildSpy).toHaveBeenCalledWith(running.id, "disposeAllRecords (parent-new)");
+    expect(killChildSpy).toHaveBeenCalledWith(idle.id, "disposeAllRecords (parent-new)");
+    // 回收侧 iii：idle timer disarm
+    expect(hasIdleTimer(idle.id)).toBe(false);
+    // [U5] 编排性关闭：settle idle + interrupted-by-parent + 收尾写入 journal 记录（不终态化
+    // ——closedReason 恒 undefined，stopReason 承载展示位）；在途轮置放弃轮标记。
+    expect(running.status).toBe("idle");
+    expect(idle.status).toBe("idle");
+    expect(running.closedReason).toBeUndefined();
+    expect(running.stopReason).toBe("interrupted-by-parent");
+    expect(running.lastAbandonedRound).toEqual({ epoch: 0, round: 0 });
+    expect(running.worktreeHandle).toBeUndefined(); // 收尾写入 journal 记录 worktreeHandle 清句（S5）
+  });
+});
+
+describe("record-access 越界检查（S11）", () => {
+  let agentDir: string;
+  let service: SubagentService;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    killChildSpy.mockClear();
+    ({ agentDir, service } = setup());
+  });
+
+  afterEach(() => {
+    service.dispose();
+    clearEngines();
+    _resetLifecycleState();
+    _resetCoreSpawnedChildrenMirrorForTest();
+    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  // [S11] record-access 越界检查（review batch 回填）：disposed 后读侧返回 undefined 不抛。
+  it("record-access 越界检查：disposed 后 lookupRecordAnyState → undefined（不抛）", async () => {
+    service.dispose();
+    const record = service.queries.lookupRecordAnyState("any-id");
+    expect(record).toBeUndefined();
   });
 });

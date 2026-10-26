@@ -93,7 +93,7 @@ const EXEMPT = {
   'packages/zcode-subagent-cli/src/__tests__/session-channel.test.ts': '二波裁决形态：8 条真进程冒烟留默认组（实测单条 <300ms），其余 33 处已桩化',
   // —— 锁 / 进程语义本身是被测物 ——
   'apps/electron/main/test/update-self-healer.test.ts': 'argv 级进程识别是被测物：1 条真 bash 阳性 + 其余注入 ps 输出（二波裁决形态）',
-  'packages/subagent-core/src/__tests__/transport-local.test.ts': '谓词层留一次确定性 ps -p 探活（不可达 pid、ENOENT 立返、零时间窗；E2E-INTEG-28 登记）',
+  'packages/subagent-core/src/execution/engine/client/__tests__/engine-client.test.ts': '谓词层留一次确定性 ps -p 探活（不可达 pid、ENOENT 立返、零时间窗；E2E-INTEG-28 登记）',
   // —— performance.now 作轮询时钟（fake Date 用例下 Date.now 冻结的替代），非性能断言 ——
   'apps/electron/main/logs/__tests__/main-logger.test.ts': 'performance.now 作轮询 deadline 时钟（fake Date 下 Date.now 冻结会死循环），非时延断言',
   'apps/electron/main/logs/__tests__/stderr-sink-rotation.test.ts': 'performance.now 作轮询 deadline 时钟（同上），非时延断言',

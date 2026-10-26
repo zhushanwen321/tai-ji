@@ -2550,7 +2550,8 @@ fi
 #   全部是 SDK 包内编译期断言（contract-types.ts + contract-closure.test.ts）。
 #   core 侧锁：C-proc-23 四张词表锁的镜像副本——SDK SSOT ↔ core 镜像类型双向可赋值 +
 #   engine-manifest 两表键集互等，断言在 packages/subagent-core/src/execution/engine/
-#   client/__tests__/protocol-closure.test.ts，只在 core 包 typecheck 下生效（SDK 类型
+#   __tests__/engine-manifest.test.ts（round5-g 合并产物，原 protocol-closure.test.ts 并入），
+#   只在 core 包 typecheck 下生效（SDK 类型
 #   改动只编译 SDK 恒绿，core 锚点不在其 include 内；缺 core 侧执行点则镜像锁为纸面）。
 #   检查路径自身变更不触发（typecheck 断言在两包内自持，由包 staged 必然连带触发）。
 #   触发范围用 pathspec 清单式（与相邻段同款；天然含 staged 删除，删除不构成风险敞口）。
@@ -2570,7 +2571,7 @@ if echo "$SDK_CORE_TYPECHECK_STAGED" | grep -qE "^packages/(subagent-engine-sdk|
     if ! (cd packages/subagent-core && npx tsc --noEmit 2>&1); then
         echo ""
         echo -e "${RED}[ERROR] subagent-core typecheck 失败——C-proc-23 引擎协议词表锁 core 侧锚点检出漂移（SDK SSOT ↔ core 镜像类型双向可赋值 / 能力位两表键集互等）${NC}"
-        echo -e "${YELLOW}[INFO] 断言本体：packages/subagent-core/src/execution/engine/client/__tests__/protocol-closure.test.ts + src/execution/engine/engine-manifest.ts（CONSERVATIVE_CAPABILITIES / CAPABILITY_ENUMS 两表）；SDK 与 core 任一侧漏同步即在此红，按上方 ✗ 明细修复后重试${NC}"
+        echo -e "${YELLOW}[INFO] 断言本体：packages/subagent-core/src/execution/engine/__tests__/engine-manifest.test.ts + src/execution/engine/engine-manifest.ts（CONSERVATIVE_CAPABILITIES / CAPABILITY_ENUMS 两表）；SDK 与 core 任一侧漏同步即在此红，按上方 ✗ 明细修复后重试${NC}"
         echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi

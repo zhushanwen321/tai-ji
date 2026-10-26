@@ -679,7 +679,7 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建
 // C. SubagentService 集成（写入点 + 跨重启全链）
 // ============================================================
 
-interface ServiceInternals {
+interface ServiceInternals { // oe-exempt:20261027:test:测试夹具接口（合并产物内多节共用的 mock 形状契约）
   store: RecordStore;
 }
 

@@ -3,6 +3,10 @@
 // 覆盖三路回退：段缺失/坏型 = 全保守；缺键/坏值 = 该键保守；未知键 = 忽略（additive
 // 友好——引擎新增能力位时旧解析器不炸，协议演进宪法 C2 的依赖前提）。
 // 纯函数测试，零 fs 触点。
+//
+// 整合来源（round 5-g 测试提速，主被测对象 = 引擎契约面：manifest 解析 + 类型闭包锁）：
+//   protocol-closure.test.ts（SDK↔core 契约类型双向可赋值 + 键集锁——其能力位锁直接
+//   消费本文件两表）。import 路径已按本产物目录归一。
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -95,5 +99,134 @@ describe("parseModelTranslation trim 入库（S-6）", () => {
     expect(parseModelTranslation("e1", undefined)).toBeUndefined();
     expect(parseModelTranslation("e1", null)).toBeUndefined();
     expect(parseModelTranslation("e1", { "a/b": "c/d" })).toEqual({ "a/b": "c/d" });
+  });
+});
+// 来源段：protocol-closure.test.ts —— 协议契约类型双向可赋值断言（W2 挂靠，impl-plan §2.1「core 侧双向可赋值断言」）。
+//
+// SDK 契约类型（@zhushanwen/subagent-engine-sdk，SSOT）与 core 中立类型是结构等价
+// 闭包——任一侧字段漂移（字段缺失 / 可选性漂移 / 联合分支不齐）在本文件编译期报错；
+// 可选字段的单侧改名/删除在双向可赋值下不红（可选属性缺席不破坏结构可赋值），由
+// 下方 keyof 配对锁在键集层补拦（[F3-3]）。运行时无逻辑；`const _assert: true =
+// <expr>` 形态让断言结果进入类型检查。
+//
+// UiRequest / UiResponse / UiRequestHandler / UiMethod 的 core 侧出口 =
+// execution/ui/dialog-queue.ts 的 SDK 再导出（W7 已切换，SSOT = SDK ui-types）——
+// 本断言的 Core* 别名现在与 Sdk* 同源，保留断言形态防未来回退为本地定义后漂移。
+// [H1 U5/U6] InteractAction / InteractResult 断言对已随 chat 域 interact 面退役删除。
+
+import type {
+  AssertMutuallyAssignable,
+  AgentEvent as SdkAgentEvent,
+  AgentCallOpts as SdkAgentCallOpts,
+  AgentOutcome as SdkAgentOutcome,
+  EngineCapabilities as SdkEngineCapabilities,
+  EngineHandleData as SdkEngineHandleData,
+  ProbeReport as SdkProbeReport,
+  SessionView as SdkSessionView,
+  UiRequest as SdkUiRequest,
+  UiRequestHandler as SdkUiRequestHandler,
+  UiResponse as SdkUiResponse,
+  UiMethod as SdkUiMethod,
+  WorktreeHandle as SdkWorktreeHandle,
+} from "@zhushanwen/subagent-engine-sdk";
+
+import type { AgentCallOpts as CoreAgentCallOpts } from "../../../shared/agent-call-types.ts";
+import type {
+  AgentEvent as CoreAgentEvent,
+  WorktreeHandle as CoreWorktreeHandle,
+} from "../../assembly/types.ts";
+import type {
+  AgentOutcome as CoreAgentOutcome,
+  EngineCapabilities as CoreEngineCapabilities,
+  EngineHandleData as CoreEngineHandleData,
+  ProbeReport as CoreProbeReport,
+  SessionView as CoreSessionView,
+} from "../types.ts";
+import type {
+  UiMethod as CoreUiMethod,
+  UiRequest as CoreUiRequest,
+  UiRequestHandler as CoreUiRequestHandler,
+  UiResponse as CoreUiResponse,
+} from "../../ui/dialog-queue.ts";
+import type { CAPABILITY_ENUMS } from "../engine-manifest.ts";
+
+// ── 引擎侧契约类型（SDK SSOT ↔ core execution/engine/types.ts）──
+type _CoreSdkAgentEvent = AssertMutuallyAssignable<CoreAgentEvent, SdkAgentEvent>;
+type _CoreSdkAgentOutcome = AssertMutuallyAssignable<CoreAgentOutcome, SdkAgentOutcome>;
+type _CoreSdkEngineCapabilities = AssertMutuallyAssignable<CoreEngineCapabilities, SdkEngineCapabilities>;
+type _CoreSdkEngineHandleData = AssertMutuallyAssignable<CoreEngineHandleData, SdkEngineHandleData>;
+type _CoreSdkProbeReport = AssertMutuallyAssignable<CoreProbeReport, SdkProbeReport>;
+type _CoreSdkSessionView = AssertMutuallyAssignable<CoreSessionView, SdkSessionView>;
+type _CoreSdkWorktreeHandle = AssertMutuallyAssignable<CoreWorktreeHandle, SdkWorktreeHandle>;
+
+// ── Ui 请求契约三类型 + UiMethod（SDK ui-types ↔ core dialog-queue）──
+type _CoreSdkUiRequest = AssertMutuallyAssignable<CoreUiRequest, SdkUiRequest>;
+type _CoreSdkUiResponse = AssertMutuallyAssignable<CoreUiResponse, SdkUiResponse>;
+type _CoreSdkUiRequestHandler = AssertMutuallyAssignable<CoreUiRequestHandler, SdkUiRequestHandler>;
+type _CoreSdkUiMethod = AssertMutuallyAssignable<CoreUiMethod, SdkUiMethod>;
+
+// ── AgentCallOpts：SDK 版是 core 版的引擎侧子集（结构互赋——core 多出的宿主自持
+//    可选字段不影响赋值方向；worktree 的 WorktreeHandle 结构副本经上行断言互证）──
+type _CoreSdkAgentCallOpts = AssertMutuallyAssignable<CoreAgentCallOpts, SdkAgentCallOpts>;
+
+const _assertions: Array<true> = [
+  true as _CoreSdkAgentEvent,
+  true as _CoreSdkAgentOutcome,
+  true as _CoreSdkEngineCapabilities,
+  true as _CoreSdkEngineHandleData,
+  true as _CoreSdkProbeReport,
+  true as _CoreSdkSessionView,
+  true as _CoreSdkWorktreeHandle,
+  true as _CoreSdkUiRequest,
+  true as _CoreSdkUiResponse,
+  true as _CoreSdkUiRequestHandler,
+  true as _CoreSdkUiMethod,
+  true as _CoreSdkAgentCallOpts,
+];
+
+// ── 字段键集配对锁（[F3-3]）：补双向可赋值断言的洞——可选字段单侧改名/删除时
+//    互赋值两方向仍成立（可选属性缺席不破坏可赋值），只有键集互等断言能拦。直槽
+//    元组承载：断言退化为 never 时对应槽的 true 赋值编译红（never 不被静默吞掉，
+//    与下方能力位键集锁同一理由）。仓内先例 = runtime workflow-run-events-reader.ts
+//    的 DagFamily 双侧锁同款形态。覆盖 = 上方七个 Core*↔Sdk* 断言的顶层键集
+//    （Ui* 四型 core 侧与 SDK 同源，无漂移情形，不设锁）。
+type _CoreSdkKeyPairLock = [
+  AssertMutuallyAssignable<keyof CoreAgentEvent, keyof SdkAgentEvent>,
+  AssertMutuallyAssignable<keyof CoreAgentOutcome, keyof SdkAgentOutcome>,
+  AssertMutuallyAssignable<keyof CoreEngineCapabilities, keyof SdkEngineCapabilities>,
+  AssertMutuallyAssignable<keyof CoreEngineHandleData, keyof SdkEngineHandleData>,
+  AssertMutuallyAssignable<keyof CoreProbeReport, keyof SdkProbeReport>,
+  AssertMutuallyAssignable<keyof CoreSessionView, keyof SdkSessionView>,
+  AssertMutuallyAssignable<keyof CoreWorktreeHandle, keyof SdkWorktreeHandle>,
+];
+const _keyPairLock: _CoreSdkKeyPairLock = [true, true, true, true, true, true, true];
+
+// ── 能力位键集锁（U5 词表锁扩展：问题点 7「漏登 core 两表 → undefined 透传 → gate
+//    放行」的编译期堵截）──
+// engine-manifest.ts 两表以 `satisfies` 声明（保留字面键集），`keyof typeof` 即真实键集：
+//   A：CONSERVATIVE_CAPABILITIES（12 键，含 maxTurns:false + setModel）⟷ EngineCapabilities
+//      全集（12=12；[subagent-model-switch] setModel 为首个可选新轴，两表同批登记）；
+//   B：CAPABILITY_ENUMS（11 键——maxTurns 走 engine-manifest.ts parseCapabilities 的
+//      boolean 专用解析分支，不经保守表）⟷ Exclude<keyof EngineCapabilities, "maxTurns">（11=11）。
+// 新增能力轴漏登任一表 = 此处编译红。直槽承载（不用 Array<true> 的 `true as _X` 槽：
+// 断言结果为 never 时该槽会被静默吞掉，直槽 `[_A, _B] = [true, true]` 令 never 显形）。
+type _CapConservativeKeys = AssertMutuallyAssignable<
+  keyof typeof CONSERVATIVE_CAPABILITIES,
+  keyof SdkEngineCapabilities
+>;
+type _CapEnumKeys = AssertMutuallyAssignable<
+  keyof typeof CAPABILITY_ENUMS,
+  Exclude<keyof SdkEngineCapabilities, "maxTurns">
+>;
+const _capKeyLocks: [_CapConservativeKeys, _CapEnumKeys] = [true, true];
+
+describe("协议契约类型双向可赋值（编译期断言的运行时锚）", () => {
+  it("全部断言成立（漂移会在 tsc --noEmit 报 never → 本文件编译失败）", () => {
+    expect(_assertions).toHaveLength(12);
+    expect(_assertions.every((v) => v === true)).toBe(true);
+  });
+
+  it("能力位键集锁：12=12 与 11=11 双向互等成立（U5；[subagent-model-switch] setModel 新轴两表同批登记；漏登新轴 = typecheck 红指向本文件）", () => {
+    expect(_capKeyLocks).toEqual([true, true]);
   });
 });

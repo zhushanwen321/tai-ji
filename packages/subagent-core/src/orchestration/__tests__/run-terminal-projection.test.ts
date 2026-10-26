@@ -11,6 +11,11 @@
 //    无结构化码——manifest 不落 errorCode 键）。
 // 3. 派生视图生成时机：终局转移前的中间态零派生视图（manifest 文件不存在），转移后恰一次。
 // 4. 派生视图生成失败不阻断终局（journal 侧断言独立成立——coda 权威路径与取证路径分离）。
+//
+// [round5-g 合并产物] 吸收同被测链路（terminal-actions 终局派生视图）姊妹件：
+// - stderr-tee-diagnostic-reference.test.ts（stderrTeePath 全链 + 旧 manifest 读兼容）。
+//   两件原有文件级 journal hook 互斥（全局目录后写者胜），已统一为本文件顶层的
+//   projectionDir hook；tee 的 fixtureDir/teeFixtures hook 下沉其各 describe。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -20,12 +25,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   dispatchAgentSettled,
+  dispatchAgentStarted,
   dispatchRunCreated,
   dispatchRunTrigger,
   finalizeRun,
   setRunEventJournalDirForTest,
 } from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
+import type { WorkflowRunEvent } from "../run-events.ts";
+import { flushMicrotasks } from "./helpers/flush-microtasks.ts";
 import { readRunTerminalManifest } from "../../execution/persistence/manifest-store.ts";
 import { AgentCall } from "../models/agent-call.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
@@ -318,5 +326,196 @@ describe("生产链 errorCode 派生视图（finalizeRun 构造 → manifest，S
     dispatchAgentSettled(okRun, okCall, false);
     await finalizeRun(okRun, makeDeps(), "completed", { context: "test" });
     expect(await readRunTerminalManifest(projectionDir, okRun.runId)).not.toHaveProperty("stderrTeePath");
+  });
+});
+
+// ══════ 来源: stderr-tee-diagnostic-reference.test.ts ══════
+
+// src/orchestration/__tests__/stderr-tee-diagnostic-reference.test.ts
+//
+// [D5 诊断引用写入 journal 记录] stderrTeePath 生产链测试（2026-09-22 一致性审查 P1 修复）。
+//
+// 锁四面（S2「stderr tee 文件路径在事件载荷中且文件存在」的 L1 等价用例）：
+// 1. 全链三段：引擎上报（call.result.stderrTeePath 注入——真实引擎段由
+//    pi-subagent-cli run-spawn-once.integration 覆盖）→ dispatchAgentSettled 事件
+//    载荷含路径 → 失败终局 manifest 含路径（事件流派生视图取值）。
+// 2. 失败伴随纪律：成功 ask / cancelled 终局不带 stderrTeePath（成功/cancel 不写）。
+// 3. 旧 manifest 读兼容：无 stderrTeePath 字段的存量形态读回 undefined 不炸。
+// 4. journal 目录测试注入（setRunEventJournalDirForTest + mkdtemp 自建自删）；
+//    tee fixture 落真实临时文件并断言存在性（S2 L1 等价——不 mock 文件存在性）。
+
+
+
+
+// ── helpers ──────────────────────────────────────────────────
+
+let fixtureDir: string;
+/** 各用例自建的 tee fixture（真实文件——存在性断言的目标），afterEach 统一清理。 */
+const teeFixtures: string[] = [];
+
+/** 落一个真实 tee fixture 文件（S2 L1 等价：事件载荷里的路径必须指向存在的文件）。 */
+function writeTeeFixture(name: string, content: string): string {
+  const teePath = path.join(fixtureDir, name);
+  fs.writeFileSync(teePath, content, "utf8");
+  teeFixtures.push(teePath);
+  return teePath;
+}
+
+function scanRunEvents(runId: string): Promise<readonly WorkflowRunEvent[]> {
+  return createRunEventJournal(projectionDir).scan(runId);
+}
+
+/** 构造真实 WorkflowRun（真实状态机 transition）。 */
+function makeRealRun(runId: string): WorkflowRun {
+  const run = new WorkflowRun(
+    runId,
+    {
+      scriptName: "test-wf",
+      scriptSource: "agent('hi')",
+      args: {},
+      scriptPath: "/tmp/test-wf.js",
+    },
+    {
+      budget: new Budget(),
+      calls: new Map(),
+      trace: new Trace(),
+      errorLogs: [],
+    },
+    { startedAt: new Date().toISOString() },
+  );
+  const worker = {
+    postMessage: vi.fn(),
+    terminate: vi.fn(async () => {}),
+  } as unknown as WorkerHandle;
+  run.assignRuntime(new RunRuntime(worker, new AbortController()));
+  return run;
+}
+
+// ── 1. 全链三段（引擎上报 → 事件载荷 → manifest） ────────────
+
+describe("stderrTeePath 全链（引擎上报 → agent-settled 载荷 → 失败终局 manifest）", () => {
+
+  beforeEach(() => {
+    fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "stderr-tee-fixture-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    teeFixtures.length = 0;
+  });
+  it("失败 ask → 事件载荷含 stderrTeePath 且文件存在；终局 failed → manifest 派生视图同路径", async () => {
+    const teePath = writeTeeFixture("pi-task-stderr-4242.log", "fake-pi stderr boot\n");
+    const run = makeRealRun("wf-tee-1");
+    const deps = makeDeps();
+    await dispatchRunCreated(run);
+    dispatchAgentStarted(run, 0, "reviewer");
+    // 引擎上报段：call.result.stderrTeePath（真实产出链 = AgentOutcome.stderrTeePath
+    // → outcomeToWorkflowResult → call.result，引擎段由 pi-subagent-cli 集成测试覆盖）
+    const call = makeSettledCall(0, {
+      content: "",
+      error: "pi child exited with code 3",
+      failureKind: "unknown",
+      stderrTeePath: teePath,
+      durationMs: 21_000,
+      toolCalls: [],
+    });
+    dispatchAgentSettled(run, call, false);
+    await flushMicrotasks(20);
+
+    // 事件载荷段：agent-settled(failed) 携带路径 + 文件真实存在（S2 L1 等价断言）
+    const events = await scanRunEvents("wf-tee-1");
+    const settled = events.find((e) => e.type === "agent-settled");
+    expect(settled).toMatchObject({
+      type: "agent-settled",
+      taskIndex: 0,
+      attempt: 1,
+      outcome: "failed",
+      stderrTeePath: teePath,
+    });
+    expect(fs.existsSync(teePath)).toBe(true);
+
+    // manifest 段：失败终局派生视图同路径（事件流派生视图取值，非第二写点）
+    const ok = await finalizeRun(run, deps, "failed", { context: "test" });
+    expect(ok).toBe(true);
+    const manifest = await readRunTerminalManifest(projectionDir, "wf-tee-1");
+    expect(manifest).toMatchObject({
+      id: "wf-tee-1",
+      outcome: "failed",
+      stderrTeePath: teePath,
+    });
+    expect(fs.existsSync(teePath)).toBe(true);
+  });
+
+  it("成功 ask + 失败终局（脚本错误）：journal 无带路径帧 → manifest 不落 stderrTeePath", async () => {
+    const run = makeRealRun("wf-tee-2");
+    const deps = makeDeps();
+    await dispatchRunCreated(run);
+    dispatchAgentStarted(run, 0, "reviewer");
+    const call = makeSettledCall(0, { content: "ok", durationMs: 5, toolCalls: [] });
+    dispatchAgentSettled(run, call, false);
+    await flushMicrotasks(20);
+
+    const ok = await finalizeRun(run, deps, "failed", { context: "script error" });
+    expect(ok).toBe(true);
+    const manifest = await readRunTerminalManifest(projectionDir, "wf-tee-2");
+    expect(manifest).toMatchObject({ outcome: "failed" });
+    expect(manifest?.stderrTeePath).toBeUndefined();
+  });
+
+  it("失败 ask 后 cancelled 终局：manifest 不写 stderrTeePath（成功/cancel 不写纪律）", async () => {
+    const teePath = writeTeeFixture("pi-task-stderr-1111.log", "boom\n");
+    const run = makeRealRun("wf-tee-3");
+    const deps = makeDeps();
+    await dispatchRunCreated(run);
+    dispatchAgentStarted(run, 0, "reviewer");
+    const call = makeSettledCall(0, {
+      content: "",
+      error: "pi child exited with code 1",
+      failureKind: "unknown",
+      stderrTeePath: teePath,
+      durationMs: 3_000,
+      toolCalls: [],
+    });
+    dispatchAgentSettled(run, call, false);
+    await flushMicrotasks(20);
+
+    const ok = await finalizeRun(run, deps, "aborted", { context: "abortRun" });
+    expect(ok).toBe(true);
+    const manifest = await readRunTerminalManifest(projectionDir, "wf-tee-3");
+    expect(manifest).toMatchObject({ outcome: "cancelled" });
+    expect(manifest?.stderrTeePath).toBeUndefined();
+  });
+});
+
+// ── 2. 旧 manifest 读兼容 ────────────────────────────────────
+
+describe("RunTerminalManifest 旧形态读兼容", () => {
+
+  beforeEach(() => {
+    fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "stderr-tee-fixture-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    teeFixtures.length = 0;
+  });
+  it("无 stderrTeePath 字段的旧 manifest（无 errorCode 同批存量形态）读回 undefined 不炸", async () => {
+    // 手写旧形态磁盘文件（绕过 writeRunTerminalManifest——模拟存量数据）
+    const legacy = {
+      id: "wf-tee-legacy",
+      workflowName: "review-fix-loop",
+      outcome: "failed",
+      errorCode: "engine_crashed",
+      settledAt: 1_758_000_000_000,
+    };
+    fs.writeFileSync(
+      path.join(projectionDir, "wf-tee-legacy.json"),
+      JSON.stringify(legacy, null, 2),
+      "utf8",
+    );
+    const manifest = await readRunTerminalManifest(projectionDir, "wf-tee-legacy");
+    expect(manifest).not.toBeNull();
+    expect(manifest).toMatchObject({ id: "wf-tee-legacy", outcome: "failed", errorCode: "engine_crashed" });
+    expect(manifest?.stderrTeePath).toBeUndefined();
   });
 });
