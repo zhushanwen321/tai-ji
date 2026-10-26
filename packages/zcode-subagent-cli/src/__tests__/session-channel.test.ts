@@ -1,32 +1,17 @@
-// session-channel.test.ts —— R3 会话层测试。覆盖验收条款：
-// A.2 帧序列逐字断言（create 参数键集与值形态 / subscribe deliveryKind 必填 /
-// send 字段是 content 不是 text）/ sessionId 从 result.session.sessionId 提取且不用
-// projection / 终态判定（turn.terminal 权威 + 缺失时收尾帧宽松判定 + error status
-// 亦终态）/ read 兜底全文拼接 == delta 拼接（不变量 1，四方双来源）/ usage 收尾帧
-// 提取并随 resolve 返回（step-finish tokens 宽容兜底）/ close 成功与失败路径都被
-// 调用（try/finally）/ -32601/-32602 结构化透传（R5 降级链地基）/ resolve 严格晚于
-// 末事件回调（不变量 2）/ golden 双副本 diff + 帧序列语料四类样本全链回放。
-//
-// 分层（判据三档，docs/TEST-STRATEGY.md「新写测试判据」节；2026-10-22 单测层整治）：
-// - 默认组主体 = 进程内可编程假连接（makeMockChannel）：SessionChannel 全部行为
-//   逻辑。假连接实现连接层接口（request / onNotification / onClose）并按 scenario
-//   编程应答与推送帧——推送帧在 session/send 应答前同步发出（与真 fake 同序：先
-//   push 后 reply，runTurn 的 await send 期间完成归因、终态落定与迟到帧丢弃判定）。
-//   await 请求/事件即确定性完成信号（第二档），与负载无关；出站帧断言读假连接
-//   记录的请求流水（method + params——帧级 {id, method, params} 组装与 JSON
-//   序列化归连接层，由 connection.test.ts 真进程用例逐字断言）；error 帧形态复刻
-//   连接层 settlePending 的 AppServerRpcError 转换（连接层自身形态同在
-//   connection.test.ts 真进程断言）。
-// - 真进程组 = makeChannel（__fixtures__/fake-appserver.mjs 子进程，scenario 注入
-//   会话场景，绝不 spawn 真 zcode.cjs）：8 条端到端冒烟——fake 侧 recv 流水可见的
-//   出站帧逐字（create 键集 / 请求帧序 / error+close）、push→终态归因、read 兜底
-//   四方一致、usage 收尾帧提取、真进程崩溃收割（test/suicide 的真实进程死亡无法
-//   进程内注入）、golden 全链回放。本次整治真 spawn 40→8。
-// - 连接层原语（post fire-and-forget / shutdown 幂等 / 死后重建代）已移入
-//   connection.test.ts 关闭原语组（与其余连接层用例同组）。
+// session-channel.test.ts —— C03 簇合并产物（round5-F）：连接层 + 会话层测试。
+// 三个来源同以 src/connection.ts / src/session-channel.ts 为被测业务模块：
+//   - connection.test.ts（R2 连接层：四帧型分发 / id 关联 / 反向请求应答 /
+//     崩溃收割 / stderr tee / env 惯例 / 关闭原语 / protocol 自报）
+//   - session-channel.test.ts（R3 会话层：A.2 帧序列 / 终态判定 / onActivity /
+//     迟到分级日志 / read 兜底与不变量 1 / usage / close / 错误透传 / golden 双副本）
+//   - session-channel-dispose-harvest.test.ts（P0-1 U5 dispose 前收割机制层）
+// 合一说明：TMP / CONNECTIONS / connSeq / readState 等同名同语义 helper 合一；
+// 三个来源的文件级 afterEach 合一为超集（close+shutdown 全部连接 + dispose 全部
+// channel——对各分节互为 no-op）；dispose-harvest 来源的 makeMockChannel 与
+// session-channel 来源同名不同构，改名 makeHarvestMockChannel 消歧。
 
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,9 +24,11 @@ import {
   type LogLevel,
 } from "@zhushanwen/subagent-engine-sdk";
 
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "./integration-gate.local.ts";
 import { ZCODE_APPSERVER_STDERR_TAIL_CHARS } from "../constants.ts";
 import {
   AppServerConnection,
+  RUNTIME_PREFERENCES,
   type AppServerRpcError,
   buildAppServerEnv,
   isAppServerRpcError,
@@ -54,9 +41,13 @@ import {
   extractCreatedSessionId,
   extractReadUsage,
   stableWorkspaceKey,
+  type SessionTurnOptions,
+  type SessionTurnResult,
 } from "../session-channel.ts";
 
-const TMP = mkdtempSync(join(tmpdir(), "zcode-sess-"));
+// ── 簇内共享常量与状态 ──
+
+const TMP = mkdtempSync(join(tmpdir(), "zcode-ch-"));
 const FAKE_CLI = fileURLToPath(
   new URL("./__fixtures__/fake-appserver.mjs", import.meta.url)
 );
@@ -81,6 +72,503 @@ const GOLDEN_READ_TOKENS = {
   cache: 512,
   total: 12616,
 };
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** fake 侧事件流水条目（JSONL：boot/env/recv/reverse-answer）。 */
+interface StateEvent { // oe-exempt:20261026:test:fake 侧事件流水条目（测试局部类型，非对外契约）
+  seq: number;
+  ev: string;
+  [key: string]: unknown;
+}
+
+function readState(file: string): StateEvent[] {
+  try {
+    return readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as StateEvent);
+  } catch {
+    return [];
+  }
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** 轮询等待 fake 侧异步效果可见（fake 异步处理 stdin，不能假设即时）。 */
+async function waitFor(cond: () => boolean, ms = 5_000, step = 25): Promise<boolean> {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (cond()) return true;
+    await sleep(step);
+  }
+  return cond();
+}
+
+const CONNECTIONS: AppServerConnection[] = [];
+let connSeq = 0;
+let mockSeq = 0;
+
+// ── 簇内共享顶层 hook（三来源文件级 afterEach 合一超集） ──
+
+const enginesChannels: SessionChannel[] = [];
+afterEach(async () => {
+  const conns = CONNECTIONS.splice(0);
+  for (const conn of conns) conn.close(); // 同步 SIGTERM 面快速收割；shutdown 幂等收尸
+  await Promise.allSettled(conns.map((c) => c.shutdown({ graceMs: 1_000 })));
+  for (const ch of enginesChannels.splice(0)) ch.dispose();
+});
+
+// ══════════════════════════════════════════════════════════════
+// 来源：connection.test.ts —— R2 连接层测试：默认组跑
+// __fixtures__/fake-appserver.mjs 子进程，绝不 spawn 真 zcode.cjs。
+// 门禁组（TAIJI_TEST_INTEGRATION，「惰性启动与惰性重建（真进程代管理）」）：
+// 首次 spawn / 进程死后重建 / spawn 失败收割——进程存亡是「代码 + OS 组合行为」
+//（第三档，无完成信号可等），本地默认跳过、CI 或按改动范围触发时真跑。
+// ══════════════════════════════════════════════════════════════
+
+interface FakeHandle {
+  conn: AppServerConnection;
+  stateFile: string;
+  stderrLog: string;
+  cwd: string;
+}
+
+interface FakeOpts {
+  /** FAKE_STDERR=1：启动时往 stderr 写两行。 */
+  stderrLines?: boolean;
+  /** FAKE_EXTRA_KEYS=1：fake 应答/推送帧携带未知键（客户端宽容解析断言）。 */
+  extraKeys?: boolean;
+  /** FAKE_PROTOCOL_PUSH=1：协议自报走 {method:'protocol'} 推送形态。 */
+  protocolPush?: boolean;
+  /** 基 env 预置引擎原生嵌套标记（nesting guard 剥离断言）。 */
+  polluteNested?: boolean;
+  /** 注入故障反向 handler（fire-and-forget catch 断言）。 */
+  reverseHandlers?: Readonly<Record<string, (params: unknown) => unknown>>;
+}
+
+/** 建一个连到 fake 的连接（env 面向子进程固化，测试间零共享状态）。 */
+function makeConnection(opts: FakeOpts = {}): FakeHandle {
+  connSeq += 1;
+  const stateFile = join(TMP, `state-${connSeq}.jsonl`);
+  const stderrLog = join(TMP, `stderr-${connSeq}.log`);
+  const cwd = join(TMP, `cwd-${connSeq}`);
+  const base: NodeJS.ProcessEnv = {
+    PATH: process.env.PATH ?? "",
+    HOME: "/fake-host-home",
+    FAKE_STATE_FILE: stateFile,
+    ...(opts.stderrLines ? { FAKE_STDERR: "1" } : {}),
+    ...(opts.extraKeys ? { FAKE_EXTRA_KEYS: "1" } : {}),
+    ...(opts.protocolPush ? { FAKE_PROTOCOL_PUSH: "1" } : {}),
+    ...(opts.polluteNested ? { ZSW_NESTED: "1", CLAUDECODE: "1", PI_SUBAGENT_DEPTH: "2" } : {}),
+  };
+  const conn = new AppServerConnection({
+    cliPath: FAKE_CLI,
+    cwd,
+    env: buildAppServerEnv(base),
+    stderrLogPath: stderrLog,
+    ...(opts.reverseHandlers ? { reverseHandlers: opts.reverseHandlers } : {}),
+  });
+  CONNECTIONS.push(conn);
+  return { conn, stateFile, stderrLog, cwd };
+}
+
+// ------------------------------------------- 惰性启动与重建（D1 / 不变量 4）
+
+describe("惰性启动与惰性重建", () => {
+  it("构造不 spawn：无流水、无 pid、alive=false（连接构建零成本）", async () => {
+    const { conn, stateFile } = makeConnection();
+    expect(conn.alive).toBe(false);
+    expect(conn.pid).toBeUndefined();
+    // 负向断言（验证「未发生」）无完成信号可等——用分片采样替换单点 sleep(80)：
+    // 每片让出事件循环后立即断言，构造若被误触发 spawn 会在任一片被抓住
+    // （总采样窗口量级与原 80ms 相当；CPU 忙时负向条件只会更稳，无假红风险）
+    for (let slice = 0; slice < 8; slice += 1) {
+      await sleep(10);
+      expect(existsSync(stateFile), `第 ${slice} 片发现 stateFile——构造路径被误触发 spawn`).toBe(false);
+      expect(conn.pid).toBeUndefined();
+      expect(conn.alive).toBe(false);
+    }
+  });
+});
+
+// 真进程代管理（首次 spawn / 死后重建 / spawn 失败收割）验证的是「代码 + OS 组合
+// 行为」（判据第三档，docs/TEST-STRATEGY.md「新写测试判据」节：进程存亡没有「完成」
+// 信号可等，观测窗口在负载下无稳定上界）——拆分层：本地默认跳过，CI 或按改动范围
+// 触发时设 TAIJI_TEST_INTEGRATION=1 真跑（门控 SSOT = test-guard/integration-gate.ts）。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `惰性启动与惰性重建（真进程代管理：首次 spawn / 死后重建 / spawn 失败收割）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
+    it("首次请求才 spawn：boot 流水出现，argv 形态 = `app-server --cwd <dir>`（D10 基线，不带 --stdio/--surface）", async () => {
+      const { conn, stateFile, cwd } = makeConnection();
+      const r = await conn.request("test/echo", { marker: "first" });
+      expect(r).toEqual({ marker: "first" });
+      const boots = readState(stateFile).filter((e) => e.ev === "boot");
+      expect(boots).toHaveLength(1);
+      expect(boots[0].argv).toEqual(["app-server", "--cwd", cwd]);
+      expect(conn.pid).toBeGreaterThan(0);
+      expect(conn.alive).toBe(true);
+    }, 10_000);
+
+    it("进程死后下次请求自动重建（与惰性启动同路径）：boot 两次、pid 变化", async () => {
+      const { conn, stateFile } = makeConnection();
+      await conn.request("test/echo", { n: 1 });
+      const pidBefore = conn.pid;
+      await expect(conn.request("test/suicide")).rejects.toThrow(/app-server/);
+      expect(await waitFor(() => !conn.alive)).toBe(true);
+      const r2 = await conn.request("test/echo", { n: 2 });
+      expect(r2).toEqual({ n: 2 });
+      const boots = readState(stateFile).filter((e) => e.ev === "boot");
+      expect(boots).toHaveLength(2);
+      expect(boots[1].pid).not.toBe(boots[0].pid);
+      expect(conn.pid).not.toBe(pidBefore);
+    }, 15_000);
+
+    it("spawn 失败（nodeBin ENOENT）走同一收割路径：请求 reject 带 spawn 失败语境，连接不悬挂", async () => {
+      const conn = new AppServerConnection({
+        cliPath: FAKE_CLI,
+        cwd: TMP,
+        nodeBin: join(TMP, "no-such-node-bin"),
+        env: { PATH: process.env.PATH ?? "" },
+        stderrLogPath: join(TMP, "enoent.log"),
+      });
+      CONNECTIONS.push(conn);
+      await expect(conn.request("test/echo", {})).rejects.toThrow(/spawn 失败/);
+      expect(await waitFor(() => !conn.alive)).toBe(true);
+    }, 10_000);
+  },
+);
+
+// ------------------------------------------- 四帧型分发（附录 A.1）
+
+describe("四帧型分发（NDJSON，无 jsonrpc 字段）", () => {
+  it("客户端请求帧：出站精确键集 {id, method, params}——无 jsonrpc、无未知键（对面 strict 拒未知键）", async () => {
+    const { conn, stateFile } = makeConnection();
+    await conn.request("test/echo", { a: 1 });
+    const frames = readState(stateFile)
+      .map((e) => (e as Record<string, unknown>).frame)
+      .filter((f): f is Record<string, unknown> => isRecord(f) && f.method === "test/echo");
+    expect(frames).toHaveLength(1);
+    expect(Object.keys(frames[0]).sort()).toEqual(["id", "method", "params"]);
+    expect(typeof frames[0].id).toBe("number");
+    expect("jsonrpc" in frames[0]).toBe(false);
+  });
+
+  it("应答帧（result）：resolve 应答值；帧级未知键宽容解析（我们是客户端，strict 校验是对面）", async () => {
+    const { conn } = makeConnection({ extraKeys: true });
+    const r = await conn.request<{ marker: string }>("test/echo", { marker: "lenient" });
+    expect(r).toEqual({ marker: "lenient" });
+    // 推送帧携带未知键同样不破坏分发
+    const received: unknown[] = [];
+    conn.onNotification("test/notification", (p) => received.push(p));
+    await conn.request("test/push", { pushMethod: "test/notification", pushParams: { delta: "hi" } });
+    expect(received).toEqual([{ delta: "hi" }]);
+  });
+
+  it("应答帧（error）：code/message/data 挂到 reject Error（A.3 错误码通道，-32602 zod 诊断随 data 带出）", async () => {
+    const { conn } = makeConnection();
+    const err = await conn
+      .request("test/fail", {
+        code: -32602,
+        message: "Invalid params",
+        data: [{ path: ["model"], message: "not an object" }],
+      })
+      .then(
+        () => {
+          throw new Error("should reject");
+        },
+        (e: unknown) => e,
+      );
+    expect(isAppServerRpcError(err)).toBe(true);
+    if (isAppServerRpcError(err)) {
+      expect(err.code).toBe(-32602);
+      expect(err.data).toEqual([{ path: ["model"], message: "not an object" }]);
+      expect(err.message).toContain("[-32602]");
+      expect(err.message).toContain("Invalid params");
+    }
+  });
+
+  it("服务端推送帧：onNotification(method) 收到 params；handler 异常不拖死帧泵；退订生效", async () => {
+    const { conn } = makeConnection();
+    const received: unknown[] = [];
+    const receivedBoom: unknown[] = [];
+    const receivedOff: unknown[] = [];
+    conn.onNotification("test/notification", (params) => {
+      received.push(params);
+    });
+    conn.onNotification("test/notification", (params) => {
+      receivedBoom.push(params);
+      throw new Error("handler boom");
+    });
+    const off = conn.onNotification("test/notification", (params) => {
+      receivedOff.push(params);
+    });
+    off();
+    await conn.request("test/push", { pushMethod: "test/notification", pushParams: { delta: "hello" } });
+    await conn.request("test/push", { pushMethod: "test/notification", pushParams: { delta: "again" } });
+    expect(received).toEqual([{ delta: "hello" }, { delta: "again" }]);
+    expect(receivedBoom).toEqual([{ delta: "hello" }, { delta: "again" }]);
+    expect(receivedOff).toEqual([]);
+    // 抛过异常后连接仍可用
+    const r = await conn.request("test/echo", { ok: 1 });
+    expect(r).toEqual({ ok: 1 });
+  });
+});
+
+// ------------------------------------------- 请求-应答 id 关联
+
+describe("请求-应答 id 关联", () => {
+  it("并发多请求不串线：3 个在途请求各自 resolve 自己的回显；id 自增互异", async () => {
+    const { conn, stateFile } = makeConnection();
+    const [a, b, c] = await Promise.all([
+      conn.request("test/delay-echo", { who: "a", delayMs: 60 }),
+      conn.request("test/delay-echo", { who: "b", delayMs: 30 }),
+      conn.request("test/echo", { who: "c" }),
+    ]);
+    expect(a).toEqual({ who: "a", delayMs: 60 });
+    expect(b).toEqual({ who: "b", delayMs: 30 });
+    expect(c).toEqual({ who: "c" });
+    const ids = readState(stateFile)
+      .map((e) => (e as Record<string, unknown>).frame)
+      .filter((f): f is { id: number } => isRecord(f) && typeof f.method === "string" && typeof f.id === "number")
+      .map((f) => f.id);
+    expect(ids).toHaveLength(3);
+    expect(new Set(ids).size).toBe(3);
+    expect([...ids].sort((x, y) => x - y)).toEqual([1, 2, 3]);
+  });
+
+  it("超时预算参数化：小预算 reject 超时，pending 清理后后续请求正常", async () => {
+    const { conn } = makeConnection();
+    await expect(conn.request("test/delay-echo", { delayMs: 5_000 }, { timeoutMs: 120 })).rejects.toThrow(/超时/);
+    const r = await conn.request("test/echo", { after: "timeout" });
+    expect(r).toEqual({ after: "timeout" });
+  }, 10_000);
+});
+
+// ------------------------------------------- 反向请求应答（D9）
+
+describe("反向请求应答（D9）", () => {
+  it("session/requestRuntimePreferences → 常量表应答逐字段（真实协议：create 先发反向请求并等应答）", async () => {
+    const { conn, stateFile } = makeConnection();
+    const created = await conn.request<{ session: { sessionId: string } }>("session/create", {
+      workspace: { workspacePath: "/w", workspaceKey: "ws-x" },
+      mode: "yolo",
+    });
+    expect(typeof created.session.sessionId).toBe("string");
+    const answers = readState(stateFile).filter((e) => e.ev === "reverse-answer");
+    expect(answers).toHaveLength(1);
+    const result = (answers[0].answer as { result?: Record<string, unknown> }).result;
+    // 逐字段断言（D9 常量逐字来自旧实现实测）
+    expect(result).toEqual({ ...RUNTIME_PREFERENCES });
+    expect(result?.nativeSearchEnhancementsEnabled).toBe(true);
+    expect(result?.memoryEnabled).toBe(false);
+    expect(result?.askUserQuestionAutoResolutionEnabled).toBe(true);
+    expect(result?.modelContextBudgetStrategy).toBe("preflight-v1");
+    expect(Object.keys(result ?? {}).sort()).toEqual([
+      "askUserQuestionAutoResolutionEnabled",
+      "memoryEnabled",
+      "modelContextBudgetStrategy",
+      "nativeSearchEnhancementsEnabled",
+    ]);
+    // 反向应答帧出站精确键集 {id, result}（无 jsonrpc、无未知键）
+    const answerFrame = readState(stateFile)
+      .map((e) => (e as Record<string, unknown>).frame)
+      .find((f): f is Record<string, unknown> => isRecord(f) && typeof f.id === "string");
+    expect(answerFrame).toBeDefined();
+    expect(Object.keys(answerFrame!).sort()).toEqual(["id", "result"]);
+  });
+
+  it("未知反向请求 → 回 {id, result:{}}（不答会 15s 超时断连，旧实测 -32022）", async () => {
+    const { conn, stateFile } = makeConnection();
+    await conn.request("test/reverse", { reverseMethod: "permission/request", reverseParams: { tool: "Bash" } });
+    const answers = readState(stateFile).filter((e) => e.ev === "reverse-answer");
+    expect(answers).toHaveLength(1);
+    const answer = answers[0].answer as { result?: unknown; error?: unknown };
+    expect(answer.result).toEqual({});
+    expect(answer.error).toBeUndefined();
+  });
+
+  it("应答失败不拖死连接（fire-and-forget + catch）：故障 handler → 回 error 帧，连接仍可用", async () => {
+    const { conn, stateFile } = makeConnection({
+      reverseHandlers: {
+        "session/requestRuntimePreferences": () => {
+          throw new Error("prefs boom");
+        },
+      },
+    });
+    const created = await conn.request("session/create", {});
+    expect(created).toBeTruthy();
+    const answers = readState(stateFile).filter((e) => e.ev === "reverse-answer");
+    expect(answers).toHaveLength(1);
+    const answer = answers[0].answer as { error?: { code?: number; message?: string } };
+    expect(answer.error?.code).toBe(-32000);
+    expect(answer.error?.message).toContain("prefs boom");
+    const r = await conn.request("test/echo", { still: "alive" });
+    expect(r).toEqual({ still: "alive" });
+  });
+});
+
+// ------------------------------------------- 崩溃收割（onClose）
+
+describe("崩溃收割（onClose/exit）", () => {
+  it("进程意外退出：全部在途 reject，错误信息附 stderr 尾（400 字符截断）", async () => {
+    const { conn } = makeConnection();
+    await conn.request("test/echo", { warm: true });
+    const errors = await Promise.all(
+      [
+        conn.request("test/delay-echo", { who: "a", delayMs: 10_000 }),
+        conn.request("test/delay-echo", { who: "b", delayMs: 10_000 }),
+        conn.request("test/suicide"),
+      ].map((p) => p.then(
+        () => {
+          throw new Error("should reject");
+        },
+        (e: unknown) => e,
+      )),
+    );
+    expect(errors).toHaveLength(3);
+    for (const err of errors) {
+      expect(err).toBeInstanceOf(Error);
+      const msg = (err as Error).message;
+      expect(msg).toContain("app-server");
+      expect(msg).toContain("code=1");
+      expect(msg).toContain("CRASH-MARK-TAIL");
+      // 截断到常量值：600 个 A 只保留尾部（< 400），整段噪声不允许进错误信息
+      expect(msg).not.toMatch(new RegExp(`A{${ZCODE_APPSERVER_STDERR_TAIL_CHARS}}`));
+    }
+    expect(await waitFor(() => !conn.alive)).toBe(true);
+  }, 15_000);
+});
+
+// ------------------------------------------- stderr tee 落盘
+
+describe("stderr tee 落盘", () => {
+  it("stderr 实时 append 到参数化路径（引擎数据目录注入点；测试用 tmp）", async () => {
+    const { conn, stderrLog } = makeConnection({ stderrLines: true });
+    await conn.request("test/echo", {});
+    const ok = await waitFor(() => {
+      try {
+        const text = readFileSync(stderrLog, "utf8");
+        return text.includes("fake-appserver stderr line A") && text.includes("fake-appserver stderr line B");
+      } catch {
+        return false;
+      }
+    });
+    expect(ok).toBe(true);
+  });
+});
+
+// ------------------------------------------- env 惯例（构造注入点）
+
+describe("env 惯例（共享宿主 HOME 形态）", () => {
+  it("buildAppServerEnv：HOME 正向透传（共享宿主）+ 遥测关闭 + nesting guard 剥离/注入（fake 侧 env 快照）", async () => {
+    const { conn, stateFile } = makeConnection({ polluteNested: true });
+    await conn.request("test/echo", {});
+    const envEvents = readState(stateFile).filter((e) => e.ev === "env");
+    expect(envEvents).toHaveLength(1);
+    const snap = envEvents[0] as {
+      home?: string;
+      telemetry?: string;
+      nested?: string;
+      unifiedNested?: string;
+    };
+    // 共享宿主 HOME 契约（2026-09 起）：base env 携带的宿主 HOME 值原样透传到子进程
+    // env（不覆写、不剥离——db/plugins/MCP 全继承宿主 HOME）
+    expect(snap.home).toBe("/fake-host-home");
+    expect(snap.telemetry).toBe("false");
+    expect(snap.nested).toBeUndefined();
+    expect(snap.unifiedNested).toBe("1");
+  });
+});
+
+// ------------------------------------------- 关闭原语（R4 dispose 的连接侧原语）
+
+describe("关闭原语", () => {
+  it("close()：同步 SIGTERM 面——进程随后死亡；幂等；只起过一代", async () => {
+    const { conn, stateFile } = makeConnection();
+    await conn.request("test/echo", {});
+    expect(conn.alive).toBe(true);
+    conn.close();
+    conn.close();
+    expect(await waitFor(() => !conn.alive)).toBe(true);
+    expect(readState(stateFile).filter((e) => e.ev === "boot")).toHaveLength(1);
+  }, 10_000);
+
+  it("shutdown()：杀链走完进程退出；幂等；之后首个请求自动重建（不变量 4：与崩溃重建同路径）", async () => {
+    const { conn, stateFile } = makeConnection();
+    await conn.request("test/echo", {});
+    await conn.shutdown({ graceMs: 1_500 });
+    await conn.shutdown();
+    expect(await waitFor(() => !conn.alive)).toBe(true);
+    const r = await conn.request("test/echo", { reborn: true });
+    expect(r).toEqual({ reborn: true });
+    expect(readState(stateFile).filter((e) => e.ev === "boot")).toHaveLength(2);
+  }, 15_000);
+
+  it("close() 后调 shutdown()：await close 发起的同一杀链，resolve 不早于进程退出（幂等——同一 promise）", async () => {
+    const { conn, stateFile } = makeConnection();
+    await conn.request("test/echo", {});
+    const pid = conn.pid;
+    conn.close();
+    let shutdownSettled = false;
+    const shutdownPromise = conn.shutdown().then(() => {
+      shutdownSettled = true;
+    });
+    await shutdownPromise;
+    expect(shutdownSettled).toBe(true);
+    // killChain 挂 exit 事件 resolve（Node exit 前已收尸）——shutdown resolve 时进程
+    // 必已退出：kill(0) 探活抛 ESRCH 即「resolve 不早于杀链完成」的机制性证据
+    expect(() => process.kill(pid ?? -1, 0)).toThrow(/ESRCH/);
+    // 幂等：再次 shutdown 复用同一 promise，无新杀链、无新进程
+    await conn.shutdown();
+    expect(readState(stateFile).filter((e) => e.ev === "boot")).toHaveLength(1);
+  }, 10_000);
+
+  it("post：fire-and-forget 帧不等待应答（活连接 true；返回布尔不抛）；shutdown 后重建代复又可用", async () => {
+    // 连接层原语（dispose 编排的 close 帧「发出即算」通道）
+    const { conn } = makeConnection();
+    expect(typeof conn.post).toBe("function");
+    expect(conn.post("session/close", { sessionId: "sess_x" })).toBe(true);
+    await conn.shutdown({ graceMs: 1_000 });
+    // 死连接：ensureStarted 重建一代（D1 重建语义）→ post 复又可用；不抛即可
+    expect(typeof conn.post("session/close", { sessionId: "sess_x" })).toBe("boolean");
+    await conn.shutdown({ graceMs: 1_000 });
+  }, 10_000);
+});
+
+// ------------------------------------------- protocol 自报与宽容解析
+
+describe("protocol 自报与宽容解析", () => {
+  it("首帧 {protocol:{name,version}} 自报忽略不抛，protocolInfo 记录，连接可用", async () => {
+    const { conn } = makeConnection();
+    const r = await conn.request("test/echo", { ok: 1 });
+    expect(r).toEqual({ ok: 1 });
+    expect(conn.protocolInfo).toEqual({ name: "ZCode Protocol", version: 1 });
+  });
+
+  it("protocol 推送形态 {method:'protocol'} 同样收敛到 protocolInfo", async () => {
+    const { conn } = makeConnection({ protocolPush: true });
+    await conn.request("test/echo", {});
+    expect(conn.protocolInfo).toEqual({ name: "ZCode Protocol", version: 1 });
+  });
+
+  it("坏行跳过不断流：非 JSON 行之后正常应答", async () => {
+    const { conn } = makeConnection();
+    const r = await conn.request("test/malformed-first", {});
+    expect(r).toEqual({ survived: true });
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 来源：session-channel.test.ts —— R3 会话层测试。
+// 默认组主体 = 进程内可编程假连接（makeMockChannel）：SessionChannel 全部行为
+// 逻辑；真进程组 = makeChannel（fake-appserver 子进程，scenario 注入）8 条端到端
+// 冒烟；出站帧断言读假连接记录的请求流水（帧级组装与 JSON 序列化归连接层，由
+// 上方 connection 分节真进程用例逐字断言）。
+// ══════════════════════════════════════════════════════════════
 
 /** 任意 RPC error 注入形态（fake scenario 的 error 三件套）。 */
 interface RpcErrorSpec {
@@ -119,10 +607,6 @@ interface MockHandle {
   requests: Array<{ method: string; params: unknown }>;
   workspacePath: string;
 }
-
-const CONNECTIONS: AppServerConnection[] = [];
-let connSeq = 0;
-let mockSeq = 0;
 
 /** NDJSON 行 / 帧对象统一规范化为帧对象（golden 语料是 NDJSON 行，fake 需要对象逐字回放）。 */
 function toFrame(f: string | Record<string, unknown>): Record<string, unknown> {
@@ -172,7 +656,7 @@ function makeChannel(overrides: ScenarioOverrides = {}): ChannelHandle {
   writeFileSync(scenarioFile, JSON.stringify(scenario));
   // buildAppServerEnv 2026-09 共享宿主 HOME 改版后只收单参 baseEnv（不再覆写 HOME）；
   // 旧两参形态 (homeDir, extraEnv) 的第一参被展开成字符索引对象——PATH 进不了子 env，
-  // spawn("node") 无 PATH 可查 → ENOENT。此处传 env 对象本体（与 zcode-engine-*
+  // spawn("node") 无 PATH 可查 → ENOENT。此处传 env 对象本体（与 zcode-engine
   // 引擎测试的 deps.processEnv 同模式）。
   const conn = new AppServerConnection({
     cliPath: FAKE_CLI,
@@ -188,34 +672,15 @@ function makeChannel(overrides: ScenarioOverrides = {}): ChannelHandle {
   return { ch: new SessionChannel(conn), conn, stateFile, workspacePath };
 }
 
-afterEach(async () => {
-  const conns = CONNECTIONS.splice(0);
-  for (const conn of conns) conn.close(); // 同步 SIGTERM 面快速收割；shutdown 幂等收尸
-  await Promise.allSettled(conns.map((c) => c.shutdown({ graceMs: 1_000 })));
-});
-
-// ------------------------------------------- 流水读取 helpers（fake 侧 recv 帧）
-
-interface StateEvent {
-  seq: number;
-  ev: string;
-  [key: string]: unknown;
-}
-
-function readState(file: string): StateEvent[] {
-  try {
-    return readFileSync(file, "utf8")
-      .trim()
-      .split("\n")
-      .filter(Boolean)
-      .map((l) => JSON.parse(l) as StateEvent);
-  } catch {
-    return [];
-  }
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
+/** 客户端请求帧的 method 序列（我方反向应答帧无 method 不计入）。 */
+function sentMethods(stateFile: string): string[] {
+  return readState(stateFile)
+    .map((e) => e.frame)
+    .filter(
+      (f): f is Record<string, unknown> =>
+        isRecord(f) && typeof f.method === "string"
+    )
+    .map((f) => f.method as string);
 }
 
 interface SentFrame {
@@ -235,19 +700,6 @@ function sentFrames(stateFile: string, method: string): SentFrame[] {
         typeof f.id === "number"
     );
 }
-
-/** 客户端请求帧的 method 序列（我方反向应答帧无 method 不计入）。 */
-function sentMethods(stateFile: string): string[] {
-  return readState(stateFile)
-    .map((e) => e.frame)
-    .filter(
-      (f): f is Record<string, unknown> =>
-        isRecord(f) && typeof f.method === "string"
-    )
-    .map((f) => f.method as string);
-}
-
-// ------------------------------------------- 进程内可编程假连接（默认组）
 
 /**
  * 复刻连接层 settlePending 的 error 应答转换（connection.ts）：code/data 挂到
@@ -273,7 +725,7 @@ function rpcError(method: string, spec: RpcErrorSpec): Error {
  * reply）——runTurn 的 await send 期间完成归因、终态落定与迟到帧丢弃判定，迟到帧
  * 追加在默认帧序之后（同真 fake 的 extraSendPushes 语义）。不实现进程存亡：崩溃
  * 收割走真进程冒烟（进程死亡无法进程内注入），onClose 订阅面的机制层覆盖见
- * session-channel-dispose-harvest.test.ts 的同形态 mock 连接。
+ * 下方 dispose 收割分节的同形态 mock 连接。
  */
 function makeMockChannel(overrides: ScenarioOverrides = {}): MockHandle {
   mockSeq += 1;
@@ -723,7 +1175,7 @@ describe("权威终态迟到分级日志", () => {
   // 真机实证（P-Z2）：该形态唯一可达路径是 success 终态常态迟到——每个成功任务
   // 必经。原无条件 warn 经 SDK cli-entry stderr 兜底 → runtime [rpc:stderr] 全量
   // console.error 链路，每个成功任务产一条零区分度 ERROR 级日志。此处分级断言
-  // （stderr 链路侧的取证在 protocol-e2e：bin 真进程 stderr 捕获）。
+  // （stderr 链路侧的取证在 bin e2e 分节：bin 真进程 stderr 捕获）。
   interface CapturedLog {
     level: LogLevel;
     component: string;
@@ -1141,5 +1593,223 @@ describe("golden 双副本与四类样本", () => {
     expect(r.response).toBe(GOLDEN_FULL_TEXT); // delta 拼接 == read 全文 == 收尾帧
     expect(r.usage).toEqual(GOLDEN_FINAL_USAGE);
     expect(r.terminal).toEqual({ status: "success", source: "turn.terminal" });
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 来源：session-channel-dispose-harvest.test.ts —— P0-1 U5 dispose 前收割
+// 单测（机制层）。设计锚点：退化路径、dispose 收割兜底（D7）、close 吞没 →
+// dispose 触发 failAllTurns（P-Z3）。P-Z3 的「close 事件吞没」在真实子进程形态
+// 不可确定性注入——真实现场归 Gate B；本节用 mock 连接承载机制层可判定形态。
+// 与 zcode-engine.test.ts 的 dispose 分节（fake-appserver 子进程集成测试）互补。
+// ══════════════════════════════════════════════════════════════
+
+interface HarvestMockChannel {
+  ch: SessionChannel;
+  /** 我方发出的请求帧流水（method 序可断言）。 */
+  requests: Array<{ method: string; params: unknown }>;
+  /** 手动触发连接崩溃广播（close 吞没形态 = 不触发；正常形态 = 测试显式触发）。 */
+  emitClose: (reason: string) => void;
+  emit: (method: string, params: unknown) => void;
+  emitTerminal: (sessionId: string | undefined, status: string) => void;
+}
+
+let sidSeq = 0;
+
+function makeHarvestMockChannel(): HarvestMockChannel {
+  const notifications = new Map<string, (params: unknown) => void>();
+  const requests: Array<{ method: string; params: unknown }> = [];
+  const closeHandlers = new Set<(reason: string) => void>();
+  const conn = {
+    alive: true,
+    onNotification: (method: string, h: (params: unknown) => void) => {
+      notifications.set(method, h);
+      return () => notifications.delete(method);
+    },
+    onClose: (h: (reason: string) => void) => {
+      closeHandlers.add(h);
+      return () => closeHandlers.delete(h);
+    },
+    request: (method: string, params: unknown) => {
+      requests.push({ method, params });
+      if (method === "session/create") {
+        sidSeq += 1;
+        return Promise.resolve({ session: { sessionId: `sess_h${sidSeq}` } });
+      }
+      if (method === "session/send") return Promise.resolve({ accepted: true });
+      if (method === "session/read") return Promise.resolve({ messages: [] });
+      return Promise.resolve({});
+    },
+  } as unknown as AppServerConnection;
+  const ch = new SessionChannel(conn);
+  return {
+    ch,
+    requests,
+    emitClose: (reason) => {
+      for (const fn of [...closeHandlers]) fn(reason);
+    },
+    emit: (method, params) => notifications.get(method)?.(params),
+    emitTerminal: (sessionId, status) =>
+      notifications
+        .get("v4/telemetry/event")
+        ?.({ kind: "turn.terminal", status, sessionId }),
+  };
+}
+
+interface TurnTracker {
+  outcome: "pending" | "fulfilled" | "rejected";
+  result: SessionTurnResult | undefined;
+  error: unknown;
+  promise: Promise<SessionTurnResult>;
+  /** onSessionCreated 回填（getter——回调晚于 tracker 构造，值拷贝会恒空）。 */
+  readonly sessionId: string;
+}
+
+function startTurn(ch: SessionChannel, opts: SessionTurnOptions = {}): TurnTracker {
+  let sessionId = "";
+  const promise = ch.runTurn({ workspacePath: "/tmp/ws-harvest", mode: "yolo" }, "任务", {
+    onSessionCreated: (sid) => {
+      sessionId = sid;
+    },
+    ...opts,
+  });
+  const t: TurnTracker = {
+    outcome: "pending",
+    result: undefined,
+    error: undefined,
+    promise,
+    get sessionId(): string {
+      return sessionId;
+    },
+  };
+  void promise.then(
+    (r) => {
+      t.outcome = "fulfilled";
+      t.result = r;
+    },
+    (e) => {
+      t.outcome = "rejected";
+      t.error = e;
+    },
+  );
+  return t;
+}
+
+/** 排空微任务链（create→subscribe→send 全是已 resolve 的 promise——一拍 setTimeout 足够）。 */
+function flushHarvest(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function settle(t: TurnTracker): Promise<void> {
+  await t.promise.then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
+// ============================================================
+// dispose 收割（P0-1 U5/D7：close 缺失/被吞没的退化路径完成）
+// ============================================================
+
+describe("dispose 收割（P-Z3 机制层：close 吞没 → dispose 触发 failAllTurns）", () => {
+  it("close 吞没形态：dispose 时在途 turn 收割为明确失败，迟到终态不再改写", async () => {
+    const m = makeHarvestMockChannel();
+    enginesChannels.push(m.ch);
+    const t = startTurn(m.ch);
+    await flushHarvest();
+    expect(t.outcome).toBe("pending"); // send 已发、无终态——在途
+
+    m.ch.dispose(); // close 吞没（onClose 未触发）→ dispose 收割兜底
+    await settle(t);
+
+    expect(t.outcome).toBe("rejected");
+    const err = t.error as Error;
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain("已 dispose");
+    expect(err.message).toContain("收割");
+    expect(err.message).toContain("恢复指引");
+    // 收割后到达的权威终态：settled 检查——落定结果不改写
+    m.emitTerminal(t.sessionId, "success");
+    expect(t.outcome).toBe("rejected");
+    expect((t.error as Error).message).toBe(err.message);
+  });
+
+  it("grace 窗口内全部终态化：并发双会话 turn 全量收割，不留永久 pending", async () => {
+    const m = makeHarvestMockChannel();
+    enginesChannels.push(m.ch);
+    const t1 = startTurn(m.ch);
+    const t2 = startTurn(m.ch);
+    await flushHarvest();
+    expect(t1.sessionId).not.toBe(t2.sessionId); // 双会话确实并发
+    expect(t1.outcome).toBe("pending");
+    expect(t2.outcome).toBe("pending");
+
+    m.ch.dispose();
+    await Promise.all([settle(t1), settle(t2)]);
+
+    expect(t1.outcome).toBe("rejected");
+    expect(t2.outcome).toBe("rejected");
+    expect((t1.error as Error).message).toContain("已 dispose");
+    expect((t2.error as Error).message).toContain("已 dispose");
+  });
+
+  it("正常 close 主路径零回归：onClose 收割先行（错误=连接层 reason），dispose no-op 不改写", async () => {
+    const m = makeHarvestMockChannel();
+    enginesChannels.push(m.ch);
+    const t = startTurn(m.ch);
+    await flushHarvest();
+
+    m.emitClose("进程退出（code=0 signal=SIGTERM）"); // onClose 主路径收割（正常 close 到达）
+    await settle(t);
+    expect(t.outcome).toBe("rejected");
+    const onCloseErr = t.error as Error;
+    expect(onCloseErr.message).toContain("app-server 进程退出");
+
+    m.ch.dispose(); // activeTurns 已空——幂等 no-op，收割错误不被 dispose 文案改写
+    expect(t.outcome).toBe("rejected");
+    expect((t.error as Error).message).toBe(onCloseErr.message);
+  });
+
+  it("终态已落定（成功）后 dispose：settled 检查不改写已成功结果", async () => {
+    const m = makeHarvestMockChannel();
+    enginesChannels.push(m.ch);
+    const t = startTurn(m.ch);
+    await flushHarvest();
+    m.emitTerminal(t.sessionId, "success");
+    await settle(t);
+    expect(t.outcome).toBe("fulfilled");
+
+    m.ch.dispose(); // 已成功收尾的 turn 不受 dispose 收割影响
+    expect(t.outcome).toBe("fulfilled");
+    expect(t.result?.terminal).toEqual({ status: "success", source: "turn.terminal" });
+  });
+
+  it("dispose 收割后 closeSession 短路：finally 不发 session/close（防写死进程/惰性重建）；正常完成对照=发 close", async () => {
+    const m1 = makeHarvestMockChannel();
+    enginesChannels.push(m1.ch);
+    const t1 = startTurn(m1.ch);
+    await flushHarvest();
+    m1.ch.dispose();
+    await settle(t1);
+    await flushHarvest(); // runTurn finally 的 closeSession 已过
+    expect(t1.outcome).toBe("rejected");
+    expect(m1.requests.map((r) => r.method)).not.toContain("session/close");
+
+    // 对照：正常完成的 turn，finally 发 session/close（D4 用后即毁——零回归测试）
+    const m2 = makeHarvestMockChannel();
+    enginesChannels.push(m2.ch);
+    const t2 = startTurn(m2.ch);
+    await flushHarvest();
+    m2.emitTerminal(t2.sessionId, "success");
+    await settle(t2);
+    expect(t2.outcome).toBe("fulfilled");
+    expect(m2.requests.map((r) => r.method)).toContain("session/close");
+  });
+
+  it("二次 dispose 幂等：无在途 turn 时 dispose 是 no-op 不抛", async () => {
+    const m = makeHarvestMockChannel();
+    enginesChannels.push(m.ch);
+    expect(() => m.ch.dispose()).not.toThrow();
+    expect(() => m.ch.dispose()).not.toThrow();
   });
 });

@@ -1143,7 +1143,7 @@ ForkGroup（当前会话的「本会话的分支」折叠区）已整体退役�
 
 | testid | 原所在组件 | 处置 |
 |--------|-----------|------|
-| `fork-group-*` 全族（`fork-group` / `fork-group-header` / `fork-group-item` 等，此前以 `[data-testid^="fork-group"]` 概括断言） | `ForkGroup.vue`（已删除） | 侧栏退役不聚合；回归断言改为**反向断言零命中**：`wrapper.find('[data-testid^="fork-group"]').exists() === false`（见 `packages/renderer/src/__tests__/sidebar/fork-group.test.ts` 与 `packages/renderer/src/__tests__/panel/fast-fork-e2e-journeys.test.ts`） |
+| `fork-group-*` 全族（`fork-group` / `fork-group-header` / `fork-group-item` 等，此前以 `[data-testid^="fork-group"]` 概括断言） | `ForkGroup.vue`（已删除） | 侧栏退役不聚合；回归断言改为**反向断言零命中**：`wrapper.find('[data-testid^="fork-group"]').exists() === false`（见 `packages/renderer/src/__tests__/sidebar/sidebar-session-bundle.test.ts` 的 fork-group 节与 `packages/renderer/src/__tests__/panel/fast-fork-e2e-journeys.test.ts`） |
 
 **退役不丢能力**（两项独家能力处置，均不新增平行元素）：
 

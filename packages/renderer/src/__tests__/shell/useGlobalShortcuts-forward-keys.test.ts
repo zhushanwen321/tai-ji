@@ -1,5 +1,6 @@
 /**
- * shell composables 单文件合并（round5-d 分区 4 簇 4-19）。
+ * shell composables 单文件合并（round5-d 分区 4 簇 4-19；round5-f S11 二级合并并入
+ * useSidebar-reconnect-reconcile，describe/it 原样搬运，环境均默认）。
  *
  * 为什么单文件：vitest 按测试文件隔离模块图——两文件共同装载 vue / pinia /
  * shared / @taiji/core 等重模块，单文件共享一份装载。
@@ -80,6 +81,9 @@ import {
 import { useNavigationStore } from '@/stores/navigation'
 import { useNarrowWindowCollapse } from '@/composables/shell/useNarrowWindowCollapse'
 import { useSidebarStore } from '@/stores/sidebar'
+import { resetAppBootstrap, useSidebar } from '@/composables/features/sidebar/useSidebar'
+import { useChatStore } from '@/stores/chat'
+import { usePanelStore } from '@/stores/panel'
 
 /** 键矩阵行：input × accelerator × 主进程期望判定（与 apps/electron/main/test/
  *  browser-forward-keys.test.ts 的 MATRIX 逐行同源——改任一侧必须同步另一侧） */
@@ -373,5 +377,113 @@ describe('useNarrowWindowCollapse（demo shell spec §3.6，两事实源合成�
     expect(sidebar.viewportNarrow).toBe(false)
     expect(sidebar.collapsed).toBe(false)
     wrapper.unmount()
+  })
+})
+
+// ═══ 来源：useSidebar-reconnect-reconcile.test.ts ═══
+const mockGetHistory = vi.fn(() => Promise.resolve({
+  messages: [],
+  truncated: false,
+  loadedTurns: 0,
+  totalTurnsEstimate: 0,
+}))
+
+// api 域 mock：chat.getHistory 是断言目标（core refreshHistory 的 RPC 出口）；其余为
+// onConnected 链路（workspace.load / extension.scan / subagent/workflow 列表 / initApp
+// 编排）的 no-op 壳，防 unhandled rejection。
+vi.mock('@/api', () => ({
+  chat: { getHistory: (...args: unknown[]) => mockGetHistory(...(args as [])), streamSubscribe: vi.fn(() => () => {}) },
+  session: {
+    list: vi.fn(() => Promise.resolve([])),
+    create: vi.fn(() => Promise.resolve({ id: 'mock', label: 'mock', cwd: '/proj', status: 'idle', lastActiveAt: 1, modelId: 'm1', tokenCount: 0 })),
+    switchSession: vi.fn(() => Promise.resolve()),
+    remove: vi.fn(() => Promise.resolve()),
+    removeByCwd: vi.fn(() => Promise.resolve({ cwd: '/proj', deleted: [], failed: [] })),
+    rename: vi.fn(() => Promise.resolve()),
+    restoreSession: vi.fn(() => Promise.resolve({ id: 'mock', label: 'mock', cwd: '/proj', status: 'idle', lastActiveAt: 1, modelId: 'm1', tokenCount: 0 })),
+    getCommands: vi.fn(() => Promise.resolve({ sessionId: 'mock', commands: [] })),
+    getContext: vi.fn(() => Promise.resolve({ inputTokens: 0, contextLimit: 0, usagePercent: 0 })),
+    getSubagents: vi.fn(() => Promise.resolve({ subagents: [], oversize: false, found: true })),
+    getWorkflows: vi.fn(() => Promise.resolve({ workflows: [], oversize: false, found: true })),
+    setProject: vi.fn(() => Promise.resolve()),
+    setThinkingLevel: vi.fn(() => Promise.resolve()),
+    unsubscribe: vi.fn(() => Promise.resolve()),
+  },
+  extension: { scan: vi.fn(() => Promise.resolve({ extensions: [] })) },
+  workspace: {
+    listRecent: vi.fn(() => Promise.resolve([])),
+    defaultSessionDir: vi.fn(() => Promise.resolve('')),
+  },
+  project: { load: vi.fn(() => Promise.resolve({ projects: [], activeProjectId: '' })), save: vi.fn(() => Promise.resolve()) },
+  file: { tree: vi.fn(() => Promise.resolve([])), expand: vi.fn(() => Promise.resolve([])) },
+  git: { status: vi.fn(() => Promise.resolve({ sessionId: 'mock', isRepo: false, files: [] })) },
+}))
+
+// initApp 编排的 landing 入口（newSession → startFlow）：no-op 壳（本测试不消费 landing 态）
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
+  useNewTaskFlow: () => ({
+    isActive: { value: false },
+    currentSession: { value: null },
+    currentCwd: { value: null },
+    currentModel: { value: null },
+    startFlow: vi.fn(() => Promise.resolve()),
+    presetCwd: vi.fn(),
+    cancelFlow: vi.fn(),
+  }),
+  resetNewTaskFlow: vi.fn(),
+}))
+
+/** 最小 user 消息（hydrate 分区置位用） */
+function userMsg(id: string): Parameters<ReturnType<typeof useChatStore>['hydrate']>[1][number] {
+  return { id, role: 'user', content: '历史消息', status: 'complete', timestamp: 0 }
+}
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+  vi.clearAllMocks()
+  resetAppBootstrap()
+})
+
+describe('useSidebar onConnected 重连对账接线（U8）', () => {
+  it('重连边沿：已 hydrate 的聚焦 session 经 core refreshHistory 触发 chat.getHistory 对账', async () => {
+    const scope = effectScope()
+    const sidebar = scope.run(() => useSidebar())!
+    // 首连：走 initApp 分支（hasConnectedBefore 置位；此阶段不产生对账拉取）
+    await sidebar.onConnected()
+    expect(mockGetHistory).not.toHaveBeenCalled()
+
+    // 准备已 hydrate 的聚焦 session（refreshHistory 的 no-op 保护对未 hydrate 会话短路）
+    const chat = useChatStore()
+    chat.hydrate('rc-sid', [userMsg('u1')])
+    usePanelStore().loadSession(usePanelStore().activePanelId, 'rc-sid')
+
+    // 重连边沿：refreshHistory 接线生效（getHistory RPC 直读 = 对账执行的可观测锚点）
+    await sidebar.onConnected()
+    expect(mockGetHistory).toHaveBeenCalledTimes(1)
+    expect(mockGetHistory).toHaveBeenCalledWith('rc-sid')
+    scope.stop()
+  })
+
+  it('重连边沿 + 未 hydrate 聚焦 session：refreshHistory 内部 no-op，不产生拉取（射程保护）', async () => {
+    const scope = effectScope()
+    const sidebar = scope.run(() => useSidebar())!
+    await sidebar.onConnected()
+    usePanelStore().loadSession(usePanelStore().activePanelId, 'fresh-sid')
+
+    await sidebar.onConnected()
+    expect(mockGetHistory).not.toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('首连（hasConnectedBefore 未置位）：走 initApp，不触发对账拉取', async () => {
+    const scope = effectScope()
+    const sidebar = scope.run(() => useSidebar())!
+    const chat = useChatStore()
+    chat.hydrate('rc-sid', [userMsg('u1')])
+    usePanelStore().loadSession(usePanelStore().activePanelId, 'rc-sid')
+
+    await sidebar.onConnected()
+    expect(mockGetHistory).not.toHaveBeenCalled()
+    scope.stop()
   })
 })

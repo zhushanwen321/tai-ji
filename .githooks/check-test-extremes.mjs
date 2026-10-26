@@ -65,7 +65,7 @@ const STOCK = {
   'packages/subagent-engine-sdk/src/__tests__/cli-entry.test.ts': null,
   'packages/ui/src/features/chat/__tests__/markdown-filepath.test.ts': null,
   'packages/ui/src/features/chat/__tests__/markdown-renderer-incremental.test.ts': null,
-  'packages/zcode-subagent-cli/src/__tests__/zcode-engine-appserver.test.ts': null,
+  'packages/zcode-subagent-cli/src/__tests__/zcode-engine.test.ts': null,
 }
 for (const k of Object.keys(STOCK)) STOCK[k] = '存量：二波清单外文件（2026-10-22 盘点登记），信号待后续波次处置（确定性化/挂门控/豁免细分）'
 
