@@ -148,9 +148,9 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/pr-merge.sh <pr-number>
 
 检查 PR CI 状态并通过 PR 合并（`gh pr merge --merge --delete-branch --match-head-commit`，merge commit 绝不 squash；match-head-commit 保证判定时的 head 与合并时的 head 一致——判定通过后 PR 又被推新提交时 gh 拒绝合并，脚本会提示直接重跑（幂等），封住检查-合并竞态窗口）。
 
-> 实现位置：判定与流程逻辑在仓库 `scripts/merge/pr-merge.mjs`（skill 内本脚本是薄壳，经 main worktree 调起恒取 main 最新版）；CI 判定口径 = 结构性 null 比对（未完成检查的 conclusion 为 null → 等待），不再做字符串词表匹配。
+> 实现位置：判定与流程逻辑在仓库 `scripts/merge/pr-merge.mjs`（skill 内本脚本是薄壳，经 main worktree 调起恒取 main 最新版）；CI 判定数据 = PR head commit 的 **workflow runs**（`gh run list --commit <sha>`，与阶段 3 wait-for-ci 同源同判定器）——「有 runs 必等全部完成才裁决」，不依赖 check-rollup 的注册窗口形状（Greptile 等机器人 check run 不进判定）；等待上限 30 分钟。
 
-**空 checks 防误判**：PR 的 `statusCheckRollup` 为空（CI checks 尚未注册）时，脚本不判「CI 通过」，而是每 15s 重查、最多 4 次；仍为空则 exit 1 并输出排查指引（确认 PR head commit 是否触发 CI / 人工核实），不会在 CI 完全未运行时开始合并。
+**无 run 防误判**：30 秒宽限内未检测到 head commit 触发的 workflow run 时，脚本不判「CI 通过」，exit 1 并输出排查指引（ci.yml 路径过滤如只改 docs/ 可能不触发 → 确认无需 CI 时人工合并），不会在 CI 完全未运行时开始合并。
 
 脚本内部自动 sync 本地 main（`git fetch github && git reset --hard github/main`），无需手动执行。sync 后自动按 lockfile 同步 main 依赖（`pnpm install --frozen-lockfile`，一致时快速跳过）——合入可能前进 lockfile 而 `node_modules` 已存在不会触发缺失性安装，漏装会让 pi 实装版本滞留旧版、被后续 pi-semantics 守卫拦截。
 
