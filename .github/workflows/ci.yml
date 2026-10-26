@@ -47,6 +47,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: ESLint
+        id: eslint
+        continue-on-error: true
         run: pnpm run lint
 
       # taste-lint 规则用例（taste-lint/**/*.test.mjs，vitest）：lint 插件规则本体的回归
@@ -57,7 +59,20 @@ jobs:
       # `vitest run taste-lint` 收集不到任何文件（曾实发 No test files found）——专用
       # config + 目标非空检查见 scripts/check-ci-vitest-targets.mjs（G2，invariants）。
       - name: Test - taste-lint rules
+        id: taste-lint
+        continue-on-error: true
         run: pnpm run test:taste-lint
+
+      # 解掩蔽：同 job 多测试步骤遇红即止会掩蔽后续失败（v0.11.16 实测：TC8 先红
+      # ⇒ scripts 守卫整轮不跑，修一轮才见下一个）——测试步骤 continue-on-error
+      # + 末尾聚合判定，一次 run 暴露全部失败；前置步骤失败即止仍正确。
+      - name: Aggregate test results
+        if: always()
+        run: |
+          failed=0
+          if [ "${{ steps.eslint.outcome }}" = "failure" ]; then echo "::error title=ESLint::failed"; failed=1; fi
+          if [ "${{ steps.taste-lint.outcome }}" = "failure" ]; then echo "::error title=taste-lint::failed"; failed=1; fi
+          exit $failed
 
   typecheck:
     name: TypeCheck
@@ -348,6 +363,8 @@ jobs:
         run: pnpm --filter @zhushanwen/pi-subagent-cli build
 
       - name: Test
+        id: ext-test
+        continue-on-error: true
         run: pnpm extensions:test
         env:
           # 集成测试门控（SSOT = test-guard/integration-gate.ts）：本地默认跳过的
@@ -357,6 +374,8 @@ jobs:
           TAIJI_TEST_INTEGRATION: '1'
 
       - name: Slow-case gate (default track)
+        id: slow-gate
+        continue-on-error: true
         # 判据 = docs/TEST-STRATEGY.md「新写测试判据」：默认组单用例 >2s 红；
         # e2e-map E2E-INTEG-* 门控资产豁免（耗时属集成组语义）
         run: node scripts/check-slow-tests.mjs
@@ -366,6 +385,8 @@ jobs:
       # check-ci-vitest-targets 检查覆盖；当前成员 scheduler-manager，新插件装配测试后
       # 在 script 追加同形 --config 段。
       - name: Test - builtin plugins (resources)
+        id: resources-plugins
+        continue-on-error: true
         run: pnpm test:resources-plugins
 
       # builtin-ext-bundle vitest 套件（scripts/__tests__/builtin-ext-bundle.test.mjs，TC3/TC4/TC7/TC8
@@ -387,6 +408,8 @@ jobs:
         run: bash scripts/prepare-builtin-extensions.sh
 
       - name: Test - builtin-ext-bundle
+        id: builtin-ext-bundle
+        continue-on-error: true
         run: pnpm exec vitest run scripts/__tests__/builtin-ext-bundle.test.mjs
 
       # R1-R3 新增 scripts 层护栏测试（check-unsafe-stream-writes / check-core-dist-gate /
@@ -429,7 +452,19 @@ jobs:
       # '@taiji/shared/paths' 回归无拦截；tmp mirror × spawnSync 直测静态/动态/多行
       # import 判定与注释、测试文件排除语义，另断言真仓当前干净，不依赖 staged 产物）。
       - name: Test - scripts guards
-        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-subagent-core-value-cycles.test.mjs scripts/__tests__/check-global-slot-keys.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs scripts/__tests__/check-domain-type-path.test.mjs scripts/__tests__/check-capability-allowlist-sync.test.mjs scripts/__tests__/check-artifact-dir-formula-sync.test.mjs scripts/__tests__/check-posix-resolve-mirror-sync.test.mjs scripts/__tests__/pi-env-admission-gate.test.mjs scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs scripts/__tests__/merge-release.test.mjs scripts/__tests__/merge-verify-ci-release.test.mjs scripts/__tests__/changeset-versionable.test.mjs scripts/__tests__/changeset-check.test.mjs scripts/__tests__/check-test-blind-wait.test.mjs scripts/__tests__/check-prompt-outposts.test.mjs scripts/__tests__/check-pi-subtree-shared-imports.test.mjs scripts/__tests__/probe-registry.test.mjs
+        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-subagent-core-value-cycles.test.mjs scripts/__tests__/check-global-slot-keys.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs scripts/__tests__/check-domain-type-path.test.mjs scripts/__tests__/check-capability-allowlist-sync.test.mjs scripts/__tests__/check-artifact-dir-formula-sync.test.mjs scripts/__tests__/check-posix-resolve-mirror-sync.test.mjs scripts/__tests__/pi-env-admission-gate.test.mjs scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs scripts/__tests__/merge-release.test.mjs scripts/__tests__/merge-verify-ci-release.test.mjs scripts/__tests__/changeset-versionable.test.mjs scripts/__tests__/changeset-check.test.mjs scripts/__tests__/check-test-blind-wait.test.mjs scripts/__tests__/check-prompt-outposts.test.mjs scripts/__tests__/check-pi-subtree-shared-imports.test.mjs scripts/__tests__/probe-registry.test.mjs scripts/__tests__/quality-gates.test.mjs scripts/__tests__/check-test-extremes.test.mjs scripts/__tests__/cross-branch-overlap.test.mjs scripts/__tests__/zcode-session-db-cleanup.test.mjs scripts/__tests__/check-test-suite-wiring.test.mjs
+
+      # 解掩蔽（同 lint job 聚合语义）：五个测试/门步骤并列暴露，任一失败由聚合步骤判红。
+      - name: Aggregate test results
+        if: always()
+        run: |
+          failed=0
+          if [ "${{ steps.ext-test.outcome }}" = "failure" ]; then echo "::error title=Test(extensions)::failed"; failed=1; fi
+          if [ "${{ steps.slow-gate.outcome }}" = "failure" ]; then echo "::error title=slow-case-gate::failed"; failed=1; fi
+          if [ "${{ steps.resources-plugins.outcome }}" = "failure" ]; then echo "::error title=resources-plugins::failed"; failed=1; fi
+          if [ "${{ steps.builtin-ext-bundle.outcome }}" = "failure" ]; then echo "::error title=builtin-ext-bundle::failed"; failed=1; fi
+          if [ "${{ steps['scripts-guards'].outcome }}" = "failure" ]; then echo "::error title=scripts-guards::failed"; failed=1; fi
+          exit $failed
 
   # E2E 视觉回归（mock 层 visual-chromium）：只跑像素 diff baseline（S2 W3 交付的
   # visual-chromium project，testMatch **/visual/** + chromium.launch + spawn vite @ VITE_MOCK=true）。
@@ -831,6 +866,11 @@ jobs:
       # files found，每轮 CI 烧到该步才红）。
       - name: CI vitest targets non-empty guard (G2)
         run: node scripts/check-ci-vitest-targets.mjs
+
+      # 测试族清单对账（SUITES ↔ ci.yml ↔ 测试文件全集）：命令漂移 / 孤儿测试即红。
+      # 清单唯一登记 = scripts/test-suites.mjs；与 pre-commit 触发式双接线。
+      - name: Test suite wiring reconciliation
+        run: node scripts/check-test-suite-wiring.mjs
 
       # G3 hook 脚本反模式检查：install-hooks.sh 内 `VAR=$(cmd)` 赋值后紧跟 `EXIT=$?`
       # 的组合在 set -e 下是死代码 + 吞诊断输出（赋值失败即整脚退出，$? 行永不可达），

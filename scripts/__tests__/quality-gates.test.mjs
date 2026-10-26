@@ -162,7 +162,7 @@ describe('子进程命令构建（py 参数侧锚点）', () => {
 })
 
 describe('runGates 聚合编排（fake 子进程，不真跑重型命令）', () => {
-  it('全绿 → exitCode 0，六个 gate 全 PASS', async () => {
+  it('全绿 → exitCode 0，全部 gate PASS（typecheck×4 + coverage/blindspot/metrics + 快速守卫族×4）', async () => {
     const { exitCode, result } = await runGates(makeDeps(), { side: 'pr-cr-fix', base: null })
     expect(exitCode).toBe(0)
     expect(result.verdict).toBe('pass')
@@ -174,6 +174,10 @@ describe('runGates 聚合编排（fake 子进程，不真跑重型命令）', ()
       'coverage-gate',
       'coverage-blindspot',
       'metrics-gate',
+      'test-suite:taste-lint',
+      'test-suite:resources-plugins',
+      'test-suite:builtin-ext-bundle',
+      'test-suite:scripts-guards',
     ])
     expect(result.gates.every((g) => g.status === 'PASS')).toBe(true)
   })
@@ -451,5 +455,64 @@ describe('acquireGateLock：互斥获取 / 幂等释放 / 无主偷锁三通道 
       release()
       expect(existsSync(lockPath)).toBe(false)
     })
+  })
+})
+
+describe('gate 5 test-suite：快速守卫测试族（SUITES 单一登记的执行面）', () => {
+  const { buildSuiteSteps, runTestSuiteGate } = globalThis.__qgExports ?? {}
+
+  it('buildSuiteSteps：devGate 族展开为 needs + args（命令与 SUITES.cmd 一致）', async () => {
+    const m = await import('../quality-gates.mjs')
+    const steps = m.buildSuiteSteps()
+    expect(steps.map((s) => s.name)).toEqual([
+      'test-suite:taste-lint',
+      'test-suite:resources-plugins',
+      'test-suite:builtin-ext-bundle',
+      'test-suite:scripts-guards',
+    ])
+    const bundle = steps.find((s) => s.name === 'test-suite:builtin-ext-bundle')
+    expect(bundle.needs).toEqual([['bash', 'scripts/prepare-builtin-extensions.sh']])
+    expect(bundle.args[0]).toBe('pnpm')
+    expect(bundle.args).toContain('scripts/__tests__/builtin-ext-bundle.test.mjs')
+  })
+
+  it('全部命令 exit 0 → 每族 PASS，needs 先于本体执行', async () => {
+    const m = await import('../quality-gates.mjs')
+    const calls = []
+    const deps = {
+      exec: (cmd, args) => {
+        calls.push([cmd, ...args].join(' '))
+        return { status: 0, stdout: '', stderr: '' }
+      },
+    }
+    const gates = []
+    m.runTestSuiteGate(deps, gates)
+    expect(gates.every((g) => g.status === 'PASS')).toBe(true)
+    expect(gates).toHaveLength(4)
+    // builtin-ext-bundle：prepare 前置先跑，vitest 本体后跑
+    const prepIdx = calls.findIndex((c) => c.includes('prepare-builtin-extensions.sh'))
+    const vitIdx = calls.findIndex((c) => c.includes('builtin-ext-bundle.test.mjs'))
+    expect(prepIdx).toBeGreaterThanOrEqual(0)
+    expect(vitIdx).toBeGreaterThan(prepIdx)
+  })
+
+  it('前置失败 → 该族 FAIL 且不跑本体；本体失败 → FAIL 带 detail', async () => {
+    const m = await import('../quality-gates.mjs')
+    const deps = {
+      exec: (cmd, args) => {
+        const joined = [cmd, ...args].join(' ')
+        if (joined.includes('prepare-builtin-extensions.sh')) return { status: 1, stdout: '', stderr: 'staged 残留' }
+        if (joined.includes('test:taste-lint')) return { status: 1, stdout: '', stderr: 'rule case failed' }
+        return { status: 0, stdout: '', stderr: '' }
+      },
+    }
+    const gates = []
+    m.runTestSuiteGate(deps, gates)
+    const byName = Object.fromEntries(gates.map((g) => [g.name, g]))
+    expect(byName['test-suite:builtin-ext-bundle'].status).toBe('FAIL')
+    expect(byName['test-suite:builtin-ext-bundle'].detail).toContain('prepare-builtin-extensions.sh')
+    expect(byName['test-suite:taste-lint'].status).toBe('FAIL')
+    expect(byName['test-suite:taste-lint'].detail).toContain('rule case failed')
+    expect(byName['test-suite:scripts-guards'].status).toBe('PASS')
   })
 })

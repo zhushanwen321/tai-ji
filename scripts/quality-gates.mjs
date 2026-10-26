@@ -43,6 +43,7 @@ import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { skillDataDir } from './skill-data-dir.mjs'
+import { SUITES } from './test-suites.mjs'
 
 const PY_REL_DIR = join('.agents', 'skills', 'pr-cr-fix', 'scripts')
 const COVERAGE_PY = 'coverage-gate.py'
@@ -680,6 +681,10 @@ export async function runGates(deps, args) {
     const metricsError = runMetricsGate(deps, base, gates)
     if (metricsError) return finish(deps, base, source, gates, metricsError)
 
+    // 5. 快速守卫测试族（test-suites.mjs 单一登记；恒跑不分 side——过期测试在
+    //    dev 合入边界当天红，不再等终局 PR 第一次跑，v0.11.16 两连红的根因修复）
+    runTestSuiteGate(deps, gates)
+
     const hasFail = gates.some((g) => g.status === 'FAIL')
     return { exitCode: hasFail ? 1 : 0, result: { verdict: hasFail ? 'fail' : 'pass', base, baseSource: source, gates, metrics: buildMetricsBrief(deps) } }
   } finally {
@@ -703,6 +708,46 @@ function runTypecheckGates(deps, gates) {
       name: step.name,
       status: ok ? 'PASS' : 'FAIL',
       detail: ok ? '' : typecheckFailDetail(step, r),
+    })
+  }
+}
+
+/** gate 5 的执行计划（devGate 族 + 前置 needs），导出供单测锁定。 */
+export function buildSuiteSteps() {
+  return SUITES
+    .filter((s) => s.devGate)
+    .map((s) => ({
+      name: `test-suite:${s.id}`,
+      needs: s.needs.map((n) => n.split(/\s+/)),
+      args: s.cmd.split(/\s+/),
+    }))
+}
+
+/**
+ * [runGates 拆分] gate 5：快速守卫测试族（恒跑）。清单 = scripts/test-suites.mjs 的
+ * SUITES（devGate: true 子集）；needs（如 prepare-builtin-extensions）先跑，失败即
+ * 该族 FAIL 不再跑本体。命令与 ci.yml 对应步骤文本一致（对账器保证不漂移）。
+ */
+export function runTestSuiteGate(deps, gates) {
+  for (const step of buildSuiteSteps()) {
+    let needFail = null
+    for (const need of step.needs) {
+      const r = deps.exec(need[0], need.slice(1), '')
+      if (r.status !== 0) {
+        needFail = `前置 ${need.join(' ')} 失败：${tailLines((r.stderr || '') + (r.stdout || ''), 15)}`
+        break
+      }
+    }
+    if (needFail) {
+      gates.push({ name: step.name, status: 'FAIL', detail: needFail })
+      continue
+    }
+    const r = deps.exec(step.args[0], step.args.slice(1), '')
+    const ok = r.status === 0
+    gates.push({
+      name: step.name,
+      status: ok ? 'PASS' : 'FAIL',
+      detail: ok ? '' : tailLines((r.stderr || '') + (r.stdout || ''), 20),
     })
   }
 }

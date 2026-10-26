@@ -1174,7 +1174,7 @@
     },
     {
       "id": "E2E-PIPE-01",
-      "summary": "review-pipeline 工程门脚本组：quality-gates（typecheck 三处 + coverage/metrics 聚合 + 盲区判定）/ changeset-check（check_changeset 唯一实装）/ cross-branch-overlap（兄弟线 diff 交集）单测锁 + pr-pre-merge 一体化脚本 + skill-data-dir（gate 产物目录解析单一出口）；单测层极端形态静态检查 + CI 慢用例门禁自测",
+      "summary": "review-pipeline 工程门脚本组：quality-gates（typecheck 三处 + coverage/metrics 聚合 + 盲区判定）/ changeset-check（check_changeset 唯一实装）/ cross-branch-overlap（兄弟线 diff 交集）单测锁 + pr-pre-merge 一体化脚本 + skill-data-dir（gate 产物目录解析单一出口）；单测层极端形态静态检查 + CI 慢用例门禁自测；测试族清单单一登记（test-suites SUITES）+ 对账器（ci.yml 命令/孤儿测试双向红灯，CI Invariants 与 pre-commit 双接线）+ quality-gates gate5 快速守卫族执行面",
       "scope": [
         "scripts/quality-gates.mjs",
         "scripts/changeset-check.mjs",
@@ -1182,7 +1182,10 @@
         "scripts/pr-pre-merge.sh",
         "scripts/skill-data-dir.mjs",
         "scripts/check-slow-tests.mjs",
-        ".githooks/check-test-extremes.mjs"
+        ".githooks/check-test-extremes.mjs",
+        "scripts/test-suites.mjs",
+        "scripts/check-test-suite-wiring.mjs",
+        "scripts/__tests__/check-test-suite-wiring.test.mjs"
       ],
       "layer": "L1",
       "assets": [
@@ -1221,6 +1224,18 @@
         {
           "kind": "spec",
           "ref": "scripts/__tests__/check-test-extremes.test.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/test-suites.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/check-test-suite-wiring.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-test-suite-wiring.test.mjs"
         }
       ],
       "trigger": "on-diff",

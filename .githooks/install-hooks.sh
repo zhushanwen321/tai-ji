@@ -2515,6 +2515,35 @@ else
 fi
 
 # ============================================================================
+# 测试族清单对账（SUITES ↔ ci.yml ↔ 测试文件全集）
+#   staged 命中 ci.yml / scripts/test-suites.mjs / 对账器本体或其单测时触发：
+#   node scripts/check-test-suite-wiring.mjs ——
+#   ① SUITES 各族命令与 ci.yml 对应步骤文本精确一致（清单是数据源、ci.yml 是被校验
+#     副本，改一侧漏另一侧 = 红灯，不再是静默漂移）
+#   ② scripts/__tests__/*.test.mjs 全集 − SUITES 引用 − 显式豁免 = 空（零执行点测试
+#     结构性不可再发生——v0.11.16 实测 6 个测试文件不在任何执行点）
+#   挂载：本触发段 + ci.yml Invariants job（双接线；清单唯一登记 = scripts/test-suites.mjs）
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关兜底）。
+# ============================================================================
+
+SUITE_WIRING_STAGED=$(git diff --cached --name-only -- .github/workflows/ci.yml scripts/test-suites.mjs scripts/check-test-suite-wiring.mjs scripts/__tests__/check-test-suite-wiring.test.mjs)
+if echo "$SUITE_WIRING_STAGED" | grep -qE "^\.github/workflows/ci\.yml$|^scripts/test-suites\.mjs$|^scripts/check-test-suite-wiring\.mjs$|^scripts/__tests__/check-test-suite-wiring\.test\.mjs$"; then
+    print_section "[测试族清单对账]"
+    if [ ! -f "scripts/check-test-suite-wiring.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-test-suite-wiring.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-test-suite-wiring.mjs; then
+        echo -e "${RED}[ERROR] 测试族清单对账失败——按上方明细同步 scripts/test-suites.mjs 与 ci.yml（两处一起改）或登记豁免后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] 测试族清单对账通过${NC}"
+else
+    echo -e "${GREEN}[OK] 无清单/ci.yml 变更，跳过测试族清单对账${NC}"
+fi
+
+# ============================================================================
 # hook 脚本反模式检查（G3）
 #   staged 命中 install-hooks.sh / 检查自身时触发：
 #   .githooks/check_hook_exitcode_antipattern.py —— install-hooks.sh 内 `VAR=$(cmd)`
