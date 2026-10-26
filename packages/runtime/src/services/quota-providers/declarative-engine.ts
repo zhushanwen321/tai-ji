@@ -503,8 +503,7 @@ function evalWindowGate(
   if (win.gate) {
     const hit = pickPath(source, win.gate.path)
     if (hit === undefined || hit === null) {
-      if (win.gate.missing === 'query-fail') return { win: INFINITE_WIN, queryFail: true }
-      return { win: INFINITE_WIN }
+      return win.gate.missing === 'query-fail' ? { win: INFINITE_WIN, queryFail: true } : { win: INFINITE_WIN }
     }
   }
   if (win.gateValue) {
@@ -579,9 +578,7 @@ function evalWindowPct(
     if (raw !== undefined) pct = pctFromVia(win.pct.via, raw)
   }
   if (isInfiniteWinFromPct(win, pct, usedLimit)) return { pct, infiniteWin: true }
-  if (win.pct?.via === 'usedOverLimit' && usedLimit) {
-    pct = Math.round((usedLimit.used / usedLimit.limit) * PERCENT_SCALE)
-  }
+  if (win.pct?.via === 'usedOverLimit' && usedLimit) pct = Math.round((usedLimit.used / usedLimit.limit) * PERCENT_SCALE)
   return { pct }
 }
 
@@ -638,9 +635,7 @@ function prevalidateWindowPaths(config: DeclarativeFetcherConfig, primary: unkno
   const primaryDef = config.requests.find(r => r.role !== 'auxiliary') ?? config.requests[0]
   for (const win of config.windows) {
     const source = win.fromRequest ? reqsByName(primary, primaryDef.name, win.fromRequest) : primary
-    const touch = (p: string | string[] | undefined): void => {
-      if (p) pickPath(source, p)
-    }
+    const touch = (p: string | string[] | undefined): void => { if (p) pickPath(source, p) }
     if (win.gate) touch(win.gate.path)
     if (win.gateValue) touch(win.gateValue.path)
     if (win.pct?.path) touch(win.pct.path)
@@ -713,18 +708,13 @@ function evaluateBodyCode(config: DeclarativeFetcherConfig, primaryData: unknown
   assertBodyCodeUsable(code, bodyCode, allowsStringCode)
   const isSuccess = code !== undefined && code !== null && successValues.some((s) => s === code)
   if (!isSuccess) return { ok: false, reason: bodyCodeMappedFailureReason(code, bodyCode) }
-  if (bodyCode.successRequires !== undefined) {
-    const required = pickPath(primaryData, bodyCode.successRequires)
-    if (!isRecord(required)) return { ok: false, reason: 'parse' }
-  }
+  if (bodyCode.successRequires !== undefined && !isRecord(pickPath(primaryData, bodyCode.successRequires))) return { ok: false, reason: 'parse' }
   return null
 }
 
 /** 数据源存在性判定（kimi limits/usage、opencode 三 meter 对象级）。 */
 function evaluateRequires(config: DeclarativeFetcherConfig, primaryData: unknown): { ok: false; reason: QuotaFetchFailureReason } | null {
-  if (config.requires && allRequiresMissing(primaryData, config.requires)) {
-    return { ok: false, reason: 'no-subscription' }
-  }
+  if (config.requires && allRequiresMissing(primaryData, config.requires)) return { ok: false, reason: 'no-subscription' }
   return null
 }
 
@@ -758,9 +748,7 @@ export async function runDeclarativeFetcher(
   // 契约：归一后为空 → 调用方按 cookie-invalid-format 处理，与「服务端拒绝」的 unauthorized
   // 分流——前者根本没发出 HTTP 请求，恢复动作是「换正确的复制路径重贴」）。
   const resolvedCredential = config.credential === 'cookie' ? normalizeCookieHeader(credential) : credential
-  if (!resolvedCredential) {
-    return { ok: false, reason: config.credential === 'cookie' ? 'cookie-invalid-format' : 'unauthorized' }
-  }
+  if (!resolvedCredential) return { ok: false, reason: config.credential === 'cookie' ? 'cookie-invalid-format' : 'unauthorized' }
 
   const extra = { ...(config.extraHeaders ?? {}) }
   const resolvedHeaders = resolveHeaderFroms(config.headerFroms ?? [], resolvedCredential, fetcherConfig?.quotaParams)
