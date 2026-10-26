@@ -125,10 +125,10 @@ describe('A14 deriveSessionStatus ≡ deriveStatus（参数化输入 vs 桌面�
     expect(expectParity('s1', { isActive: false, isCompacting: false, hasBackgroundWork: false })).toBe('waiting')
   })
 
-  it('hasBlockingOverlay=true → waiting；缺省（undefined）与显式 false 同输出（移动恒 false 白名单语义）', () => {
+  it('hasBlockingOverlay=true → waiting；缺省（undefined）与显式 false 同输出（缺省输入契约）', () => {
     // 桌面输入：extensionUI pending → waiting
     expect(expectParity('s1', { isActive: false, isCompacting: false, hasBackgroundWork: false, hasBlockingOverlay: true })).toBe('waiting')
-    // 移动输入：无该源，缺省与显式 false 等价（均为非 waiting 的回落分支）
+    // 缺省输入契约：不传该字段与显式 false 等价（均为非 waiting 的回落分支）
     sut.store.hydrate('s2', [assistantMsg('m2')])
     const byDefault = deriveSessionStatus('s2', sut.store, { isActive: false, isCompacting: false, hasBackgroundWork: false })
     const byExplicitFalse = deriveSessionStatus('s2', sut.store, { isActive: false, isCompacting: false, hasBackgroundWork: false, hasBlockingOverlay: false })

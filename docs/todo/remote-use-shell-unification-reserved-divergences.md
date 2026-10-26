@@ -4,8 +4,6 @@
 
 设计源：remote-use-shell-unification 设计 §3.3 D9（设计档案已随 .tmp 清理；防复发 = 双壳共享装配检查 helper + 真差异白名单）。
 
-原条目 1（blockingOverlay 输入移动恒 false）已按其自写退役条件删除（2026-10-26 终态同步）：remote-use-mobile-v2 §6.19 已接线——sessions-runtime `registerOverlayPendingReader` 注册口 + companion-bridge 分区数据接线（form/planReview 分区 + dialog 计数），waiting 态移动可达。
-
 ## 2. exited 清理形态双壳差异（D5/D9②）
 
 - **差异**：同一防御语义（M8：死会话的残留 dialog/form 请求不重弹、作答不石沉大海）下的两种实现形态——桌面 = `extensionUIStore.clearSession` 单点（`packages/renderer/src/composables/effects/useMessageEffects.ts` exited 回调内具名清理）；移动 = 分通道重置编排（`packages/mobile-renderer/src/bootstrap.ts` onSessionExited：core lifecycle factory 序列 + `resetCompanionChannelsForExitedSession`——dialog `queue.resetFor` + form Map 具名清理）。

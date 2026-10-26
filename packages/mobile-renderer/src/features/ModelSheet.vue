@@ -11,7 +11,8 @@
 //   = pi 生效值（静默换模防线，禁请求值乐观写）、思考档回执 = pi 钳制值。
 // 思考档 UI（§7.2 思考档行）：四段 SegmentedControl（低/中/高/最高）↔ 七值映射 +
 // chip 短词表，映射纯函数单点 ./thinking-levels（值域权威 shared PI_THINKING_LEVELS，
-// A-03 禁手写）；非段值（off/minimal/xhigh）不点亮段选中态，就近段显示 + 段外原值标注。
+// A-03 禁手写）；非段值（off/minimal/xhigh）四段全不选中（aria-selected 全 false，
+// roving tabindex 锚首段保键盘可达），段外原值经 chip 短词 + offSegmentHint 提示行标注。
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button, Sheet, SegmentedControl } from '@taiji/ui'
@@ -106,13 +107,13 @@ async function onSelectModel(m: ModelInfo): Promise<void> {
 const thinkingLevel = computed(() => current.value?.thinkingLevel)
 const thinkingBusy = ref(false)
 
-/** 就近呈现段（非段值 off/minimal→low、xhigh→max；段外值同时显示原值短词） */
+/** 就近段派生（非段值 off/minimal→low、xhigh→max）——唯一消费 = offSegmentHint 提示行显隐判据，不进段控 */
 const nearestSegment = computed(() => nearestSegmentOf(thinkingLevel.value))
 
 /**
  * 段控选中段（§7.2：非段值不点亮段选中态）：仅当前值精确等于段值才传给段控点亮；
- * off/minimal/xhigh 传空串（四段全不选中，就近段的视觉邻位呈现 + 段外原值提示行），
- * 就近段 nearestSegment 只用于 offSegmentHint 显隐判据，不进段控选中态。
+ * off/minimal/xhigh 传空串（四段全不选中、无选中底，roving tabindex 锚首段保键盘可达），
+ * 段外原值经 chip 短词 + offSegmentHint 提示行标注；nearestSegment 不进段控选中态。
  */
 const selectedSegment = computed(() => {
   const nearest = nearestSegment.value

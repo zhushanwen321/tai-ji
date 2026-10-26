@@ -12,7 +12,9 @@
 //
 // 字号口径：本屏与 TokenInputView 的辅助文案走 Tailwind 固定字号（text-xs/text-sm，
 // 不随 --m-font-scale 档位缩放）——验身页是「进入壳前的过渡屏」，文案短且无阅读密度
-// 压力，固定字号为有意选择；进壳后各屏（设置/会话/聊天）统一走 var(--m-text-*) 移动尺度层。
+// 压力，固定字号为有意选择。壳内字号现状两套并存：设置屏与 Sheet 族走
+// var(--m-text-*) 移动尺度层（随档缩放），会话/进行中/聊天三屏走 Tailwind 固定字号
+// （不随档缩放）；是否统一收敛到移动尺度层待产品裁决。
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Skeleton } from '@taiji/ui'

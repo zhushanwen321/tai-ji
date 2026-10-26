@@ -22,8 +22,9 @@
 // （CompanionBand 顶部条 / PermissionRequestDialog / MobileFormCard 聊天内卡片）挂载摘除，
 // 统一走 sheet-manager activeSheet 驱动的 Sheet 族（FormSheet 三源三节 / PermissionSheet）；
 // 数据源与回传通路零变化（§6.5 回传通道不变——dialog queue 宿主已迁 companion-bridge
-// 模块级，无需 provide 注入键）。请求到达自动开 Sheet = u-chat 待回答条交付前的呈现出口
-// 兜底（条点击 openSheet 幂等，单槽覆盖语义天然互斥）；条↔Sheet 联动断言归 D3 验收（A6）。
+// 模块级，无需 provide 注入键）。请求到达自动开 Sheet = 与 u-chat 待回答条并存的常驻
+// 呈现出口（ChatScreen 已交付待回答条 :ask-pending，条点击 openSheet 幂等，单槽覆盖
+// 语义天然互斥）；条↔Sheet 联动断言归 D3 验收（A6）。
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@taiji/ui'
@@ -125,7 +126,7 @@ function onPermissionDeny(payload: { pluginId: string }): void {
 const { t } = useI18n()
 
 // ── 请求呈现联动（§6.5/§7.1 Sheet 生命周期）──────────────────────────────
-// 请求到达自动开对应 Sheet（u-chat 待回答条交付前的呈现出口兜底；不抢已打开的 Sheet——
+// 请求到达自动开对应 Sheet（与 u-chat 待回答条并存的常驻呈现出口；不抢已打开的 Sheet——
 // activeSheet 为 null 才开，用户正在操作的浮层不被新请求顶掉，关掉后条仍可再开）；
 // form 槽三源全空时收槽（最后一个请求作答/摘除后 Sheet 不留空壳）。
 watch([pendingFormRequest, pendingPlanReview], ([f, p]) => {

@@ -158,7 +158,7 @@ describe('ModelSheet 思考档段控（§7.2：非段值不点亮段选中态）
       expect(tab.className).not.toContain('bg-bg-elevated')
       expect(tab.className).not.toContain('shadow-1')
     }
-    // 段外原值提示行在场（就近段视觉邻位 + 原值标注的呈现分支）
+    // 段外原值提示行在场（原值短词标注；就近段不进段控——无段级视觉呈现）
     const hint = bodyEl('model-sheet-thinking-offsegment')
     expect(hint).not.toBeNull()
     // roving tabindex 锚点落首段（无选中不锁键盘）
