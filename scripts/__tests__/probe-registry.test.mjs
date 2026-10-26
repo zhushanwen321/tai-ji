@@ -41,9 +41,9 @@ describe('buildUrl：版本端点 URL（scoped 名斜杠编码）', () => {
 })
 
 describe('parseArgs：flags 与默认值', () => {
-  it('缺省：retries=6 / intervalMs=60000 / timeoutMs=20000', () => {
+  it('缺省：retries=7 / intervalMs=60000 / timeoutMs=20000', () => {
     const a = parseArgs(['a@1.0.0'])
-    expect(a.retries).toBe(6)
+    expect(a.retries).toBe(7)
     expect(a.intervalMs).toBe(60000)
     expect(a.timeoutMs).toBe(20000)
     expect(a.specs).toEqual([{ pkg: 'a', ver: '1.0.0' }])

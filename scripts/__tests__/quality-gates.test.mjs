@@ -92,6 +92,11 @@ describe('parseGateArgs', () => {
     expect(() => parseGateArgs(['--only', 'bogus'])).toThrow('--only')
     expect(() => parseGateArgs(['--only'])).toThrow('--only')
   })
+  it('--only 纯分隔符（, / ,, / 空白）解析为空组列表 → 报用法错误（防零门执行的「无检查即绿」）', () => {
+    expect(() => parseGateArgs(['--only', ','])).toThrow('至少需要一个有效组名')
+    expect(() => parseGateArgs(['--only', ',,'])).toThrow('至少需要一个有效组名')
+    expect(() => parseGateArgs(['--only', ' , '])).toThrow('至少需要一个有效组名')
+  })
   it('接受 --side dev-merge 与 --base', () => {
     expect(parseGateArgs(['--side', 'dev-merge', '--base', 'dev-0.10.4', '--json']).side).toBe('dev-merge')
     expect(parseGateArgs(['--base', 'v9']).base).toBe('v9')

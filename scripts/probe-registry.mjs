@@ -7,7 +7,7 @@
  *
  * registry 最终一致性：publish 成功 ≠ 版本端点立即可查，新版本索引传播有延迟
  * （v0.10.3 实测 60s 内收敛；v0.11.16 实测 2 包第 4-6 分钟才可查、超出旧 3 分钟窗口）。
- * 带上限重试（默认 60s × 6，覆盖实测最长传播），禁无限等待；单次请求 20s 超时
+ * 带上限重试（默认 60s × 7，末次探测 t=360s 覆盖实测最长传播），禁无限等待；单次请求 20s 超时
  * （fetch + AbortSignal.timeout，无 curl 依赖、无挂起——旧 inline bash 的 curl
  * 无超时上限曾整批挂起）。
  *
@@ -17,14 +17,14 @@
  *
  * 用法: node scripts/probe-registry.mjs [flags] <pkg@ver> [<pkg@ver> ...]
  *   pkg@ver 形如 @zhushanwen/extension-protocol@0.24.0（scoped 名取最后一个 @ 分割）
- * flags: --retries <n>（默认 6） --interval-ms <n>（默认 60000） --timeout-ms <n>（默认 20000）
+ * flags: --retries <n>（默认 7） --interval-ms <n>（默认 60000） --timeout-ms <n>（默认 20000）
  * 退出码: 0 = 全部上线；1 = 有包超限；2 = 用法错误
  */
 import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 export const REGISTRY_BASE = 'https://registry.npmjs.org'
-export const DEFAULTS = { retries: 6, intervalMs: 60_000, timeoutMs: 20_000 }
+export const DEFAULTS = { retries: 7, intervalMs: 60_000, timeoutMs: 20_000 }
 
 /** 拆 pkg@ver。scoped 名内部含 @，取最后一个 @ 为版本分隔。 */
 export function parseSpec(spec) {

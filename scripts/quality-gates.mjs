@@ -87,6 +87,9 @@ export function parseGateArgs(argv) {
       const v = argv[++i]
       if (!v) throw usageError(`--only 需要组名列表（${ONLY_GROUPS.join(',')}，逗号分隔）`)
       const groups = v.split(',').map((x) => x.trim()).filter(Boolean)
+      // 纯分隔符输入（--only ,）过滤后为空 → 全门组关闭、零 FAIL、exit 0 的「无检查即绿」
+      // 形态，fail-fast 拒绝（ADR-0167 反对的输入边缘）
+      if (groups.length === 0) throw usageError(`--only 至少需要一个有效组名（${ONLY_GROUPS.join(',')}）——「${v}」解析后无有效组`)
       const bad = groups.filter((g) => !ONLY_GROUPS.includes(g))
       if (bad.length > 0) throw usageError(`--only 只接受 ${ONLY_GROUPS.join(',')}，得到：${bad.join(',')}`)
       out.only = groups

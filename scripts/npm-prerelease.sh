@@ -15,7 +15,9 @@ trap '[ $? -ne 0 ] && echo "[原则] 预发布失败，请检查上方错误信�
 
 # 仓库标识从 github remote 一手推导（本仓唯一远端，AGENTS.md git 规范）——不硬编码
 # slug，仓库迁移/改名后脚本零改动；remote 缺失时 fail-fast 而非拼出空 --repo
-REPO="$(git remote get-url github 2>/dev/null | sed -E 's#.*[:/]([^/]+/[^/.]+)(\.git)?/?$#\1#')"
+# （管道尾 || true 不可省：set -e + pipefail 下 remote 缺失会使本赋值行静默退出，
+#   且 git 报错已被 2>/dev/null 吞掉，下方 -z 守卫的显式报错分支将不可达）
+REPO="$(git remote get-url github 2>/dev/null | sed -E 's#.*[:/]([^/]+/[^/.]+)(\.git)?/?$#\1#' || true)"
 if [[ -z "$REPO" ]]; then
     echo "ERROR: 无法从 github remote 推导仓库标识——先确认 git remote get-url github 可用" >&2
     exit 2
@@ -207,28 +209,22 @@ fi
 # ── 阶段 5/6: 验证 npm 版本 ──
 log "=== 阶段 5/6: 验证 npm 版本 ==="
 
-# [HISTORICAL] 用 curl 查官方 registry 而非 npm view：
-# npm view 受本地 registry 配置影响（如 npmmirror 镜像），镜像同步新包有延迟，
-# 导致脚本误报「验证失败」。curl 直接查 registry.npmjs.org 是 publish 的真实目标。
-NPM_REGISTRY="https://registry.npmjs.org"
-PKG_URL="${NPM_REGISTRY}/$(echo "$PKG_NAME" | sed 's|/|%2f|')/${NEW_VERSION}"
-
-NPM_VERIFIED=0
-for i in $(seq 1 10); do
-  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$PKG_URL" 2>/dev/null || echo "000")
-  if [ "$HTTP_CODE" = "200" ]; then
-    log "npm 验证通过: ${PKG_NAME}@${NEW_VERSION} 已在官方 registry 上线"
-    NPM_VERIFIED=1
-    break
-  fi
-  info "等待 npm registry 同步... ($i/10, HTTP $HTTP_CODE)"
-  sleep 10
-done
-
-if [ "$NPM_VERIFIED" -ne 1 ]; then
-  warn "npm 版本未确认上线（预期 ${NEW_VERSION}）"
-  warn "可能是 registry 延迟，手动验证: curl -s ${PKG_URL}"
-fi
+# [HISTORICAL] 验证必须直查官方 registry 而非 npm view：npm view 受本地 registry
+# 配置影响（如 npmmirror 镜像），镜像同步新包有延迟，曾致脚本误报「验证失败」；
+# registry.npmjs.org 是 publish 的真实目标。旧内联 bash 探测（无超时上限曾整批
+# 挂起、100s 预算低于实测 4-6 分钟传播窗口）已收敛到 probe-registry.mjs——node
+# fetch 单次 20s 超时 + 默认 60s × 7 重试覆盖实测最长传播窗口，超限时输出
+# 「传播延迟 vs 真失败」分流材料；同概念全仓唯一实现（merge 阶段 4N.5 同源）。
+PROBE_EXIT=0
+node "$SCRIPT_DIR/probe-registry.mjs" "${PKG_NAME}@${NEW_VERSION}" || PROBE_EXIT=$?
+case "$PROBE_EXIT" in
+  0) log "npm 验证通过: ${PKG_NAME}@${NEW_VERSION} 已在官方 registry 上线" ;;
+  1) # prerelease 容忍语义：dev tag 试验性质，不硬判失败；分流材料已在上方输出
+     warn "npm 版本未确认上线（预期 ${NEW_VERSION}），可能是 registry 延迟"
+     warn "判定为传播延迟时可加大重跑: node scripts/probe-registry.mjs --retries 10 ${PKG_NAME}@${NEW_VERSION}" ;;
+  *) err "probe-registry.mjs 用法错误（exit ${PROBE_EXIT}）——检查包名/版本参数"
+     exit 2 ;;
+esac
 
 echo ""
 echo "════════════════════════════════════════════════════════════"

@@ -1,10 +1,14 @@
 /**
  * lib/sync.mjs（阶段 2 的 main 同步）回归测试。
  *
- * 核心防线：reset --hard 前的领先防护——本地 main 领先远端（发布在途的 bump/notes
- * commit 未 push，或未知本地改动）时必须 fail-fast，而不是把未 push commit 拨回；
- * fetch/checkout 退出码必须逐一检查（fetch 失败 reset 到陈旧引用；checkout 失败
- * reset 移动的是错误分支的指针）。全部用注入的假 run 驱动，不触真实 git。
+ * 核心防线：reset --hard 前的两道防护——①领先防护（本地 main 领先远端——发布在途
+ * 的 bump/notes commit 未 push，或未知本地改动——时必须 fail-fast，而不是把未 push
+ * commit 拨回）；②脏树防护（工作区有未提交的 tracked 改动时拒绝——reset --hard 会
+ * 静默抹掉且 reflog 不可恢复；untracked 文件 reset --hard 不删，不属本防线损害
+ * 形态，status 用 --untracked-files=no 排除）。fetch/checkout/status 退出码必须逐
+ * 一检查（fetch 失败 reset 到
+ * 陈旧引用；checkout 失败 reset 移动的是错误分支的指针；status 失败被当「干净」放行
+ * = 脏树防线静默失效）。全部用注入的假 run 驱动，不触真实 git。
  */
 import { describe, it, expect } from 'vitest'
 import { syncMain } from '../merge/lib/sync.mjs'
@@ -31,7 +35,7 @@ const OK_PATH = {
 }
 
 describe('syncMain（main 同步与数据丢失防护）', () => {
-  it('全通路径：fetch → 领先检查 → checkout → reset → 取 HEAD，返回 mainSha', () => {
+  it('全通路径：fetch → 领先检查 → checkout → 脏树检查 → reset → 取 HEAD，返回 mainSha', () => {
     const run = makeRun(OK_PATH)
     const r = syncMain({ run, mainWt: '/wt', ghRemote: 'github' })
     expect(r).toEqual({ ok: true, mainSha: 'abc123' })
@@ -39,6 +43,7 @@ describe('syncMain（main 同步与数据丢失防护）', () => {
       'git -C /wt fetch github main',
       'git -C /wt rev-list --count github/main..main',
       'git -C /wt checkout main',
+      'git -C /wt status --porcelain --untracked-files=no',
       'git -C /wt reset --hard github/main',
       'git -C /wt rev-parse HEAD',
     ])
@@ -49,6 +54,34 @@ describe('syncMain（main 同步与数据丢失防护）', () => {
     const r = syncMain({ run, mainWt: '/wt' })
     expect(r).toEqual({ ok: false, step: 'ahead-guard', ahead: 7 })
     expect(run.calls).not.toContain('git -C /wt checkout main')
+    expect(run.calls).not.toContain('git -C /wt reset --hard github/main')
+  })
+
+  it('工作区有未提交的 tracked 改动（M/A/D 行）→ dirty-tree 拒绝并给处置提示，reset 不执行', () => {
+    const run = makeRun({
+      ...OK_PATH,
+      'git -C /wt status --porcelain --untracked-files=no': ' M packages/app/src/a.ts\nA  packages/app/src/new.ts\n',
+    })
+    const r = syncMain({ run, mainWt: '/wt' })
+    expect(r).toEqual({ ok: false, step: 'dirty-tree', hint: '未提交的 tracked 改动先 commit/stash 或确认丢弃后重跑' })
+    expect(run.calls).toContain('git -C /wt status --porcelain --untracked-files=no')
+    expect(run.calls).not.toContain('git -C /wt reset --hard github/main')
+  })
+
+  it('仅 untracked 文件（--untracked-files=no 下 status 无输出）→ 放行 reset——reset --hard 不删 untracked，不属本防线损害形态', () => {
+    const run = makeRun({
+      ...OK_PATH,
+      'git -C /wt status --porcelain --untracked-files=no': '',
+    })
+    const r = syncMain({ run, mainWt: '/wt' })
+    expect(r).toEqual({ ok: true, mainSha: 'abc123' })
+    expect(run.calls).toContain('git -C /wt reset --hard github/main')
+  })
+
+  it('status 失败 → status 步失败而非当「干净」放行（脏树防线不静默失效）', () => {
+    const run = makeRun({ ...OK_PATH, 'git -C /wt status --porcelain --untracked-files=no': { code: 128 } })
+    const r = syncMain({ run, mainWt: '/wt' })
+    expect(r).toEqual({ ok: false, step: 'status' })
     expect(run.calls).not.toContain('git -C /wt reset --hard github/main')
   })
 

@@ -140,6 +140,23 @@ export function notesFinalized(body, isDraft) {
   return String(body ?? '').includes('<!-- LANG:')
 }
 
+/**
+ * draft 发布失败的动作裁决（纯函数，供测试导入）。
+ *
+ * 与上方 notes edit 失败的容忍语义不同：draft 发布是阶段 5 的核心交付动作
+ * （release 从不可见 draft 态转为正式发布），失败必须 fatal——若容忍继续，
+ * release 滞留 draft、阶段末照常落盘 stage:'released'，发布失败被管线全绿
+ * 掩盖（第二道防线 = verify-ci-release.mjs 阶段 3 的非 draft 断言）。
+ * 发布成功返回 null（正常路径无动作）。
+ */
+export function draftPublishOutcome(publishOk, { TAG, GH_REPO }) {
+  if (publishOk) return null
+  return {
+    fatal: `❌ Draft Release 发布失败（${TAG} 滞留 draft，未对用户发布）`,
+    hint: `手动恢复: gh release edit ${TAG} --repo ${GH_REPO} --draft=false，完成后重跑阶段 6 验证`,
+  }
+}
+
 /** gh release --json 的 assets 数量；字段缺失/非数组按 0（对应 jq `length // 0`）。 */
 function releaseAssetCount(rel) {
   return Array.isArray(rel?.assets) ? rel.assets.length : 0
@@ -225,7 +242,17 @@ function ensureNotesNoEmoji(MAIN_WT, notesFile) {
   }
 }
 
-/** 查现有 release；gh 失败/输出非 JSON（未创建）→ null。 */
+/**
+ * 查现有 release；gh 失败/输出非 JSON（未创建）→ null。
+ *
+ * 设计裁决（保留两态，不改三态）：与 verify-ci-release.mjs releaseExists 同款
+ * ——gh release view 对「release 不存在」与「gh 查询故障」返回相同退出码 1，
+ * 退出码通道无法区分二者，三态化只能依赖 stderr 文案匹配（脆弱、随 gh 版本
+ * 漂移）。残余风险：查询通道故障被误判为「未创建」→ waitForCiDraft 空转 120s
+ * 后转手动创建，release 实际已存在时 gh release create 失败 fail-fast（见
+ * createReleaseManually 的分流提示），产物缺失另由阶段 6 verify-ci-release
+ * 的产物完整性校验拦截——方向失败安全（无假绿通道，重跑幂等恢复）。
+ */
 function fetchExistingRelease(TAG, GH_REPO) {
   const res = run('gh', ['release', 'view', TAG, '--repo', GH_REPO, '--json', 'isDraft,id,body,assets'], { stdio: 'capture' })
   if (!res.ok) return null
@@ -267,7 +294,13 @@ function updateExistingRelease(rel, { TAG, GH_REPO, MAIN_WT, FINAL_NOTES_FILE, a
   }
   if (isDraft) {
     console.log('  发布 Draft Release...')
-    run('gh', ['release', 'edit', TAG, '--repo', GH_REPO, '--draft=false'])
+    const publishRes = run('gh', ['release', 'edit', TAG, '--repo', GH_REPO, '--draft=false'])
+    const failure = draftPublishOutcome(publishRes.ok, { TAG, GH_REPO })
+    if (failure !== null) {
+      fail(failure.fatal)
+      console.log(`  ${YELLOW}⚠️  ${failure.hint}${NC}`)
+      process.exit(1)
+    }
   }
   return `https://github.com/${GH_REPO}/releases/tag/${TAG}`
 }
@@ -298,6 +331,10 @@ function createReleaseManually(TAG, GH_REPO, MAIN_WT, FINAL_NOTES_FILE) {
     { stdio: 'capture' },
   )
   if (!createRes.ok) {
+    // 诊断分流：上游 fetchExistingRelease 两态化后，「gh 查询故障误判未创建 →
+    // 实际已存在 → create 因 already-exists 失败」与「真创建失败」在此同形
+    // 出现，不提示则 gh 全程故障被误诊为单纯的创建失败
+    console.log(`  ${YELLOW}⚠️  若疑 gh 网络故障，release 可能实际已存在——先 gh release view ${TAG} --repo ${GH_REPO} 核实再处置${NC}`)
     fail('❌ Release 创建失败')
     process.exit(1)
   }

@@ -1,11 +1,15 @@
 /**
  * 阶段 2 的 main 同步（fetch → 领先防护 → checkout → reset → 取 HEAD）。
  *
- * 数据丢失防护：reset --hard 前必须确认本地 main 不领先远端。发布流程自身会制造
- * 领先窗口（阶段 4 bump commit / 阶段 5 notes commit 之后、push 之前重跑阶段 2 即是），
- * 无条件 reset 会把未 push 的 commit 拨回——仅 reflog 可恢复。同理 fetch / checkout
- * 的退出码必须逐一检查：fetch 失败后 reset 到的是陈旧远端引用；checkout 失败时 reset
- * 移动的是当前 checkout 分支的指针（无论那是什么分支）。
+ * 数据丢失防护（reset --hard 前两道）：①本地 main 不领先远端（领先防护——发布流程
+ * 自身会制造领先窗口：阶段 4 bump commit / 阶段 5 notes commit 之后、push 之前重跑
+ * 阶段 2 即是，无条件 reset 会把未 push 的 commit 拨回，仅 reflog 可恢复）；②工作区
+ * 无未提交的 tracked 改动（脏树防护——阶段 4 bump 中途崩溃的半成品、AI/人工留下的
+ * 改动会被 reset --hard 静默抹掉且 reflog 不可恢复；untracked 文件 reset --hard
+ * 不删，不属本防线损害形态）。同理 fetch / checkout / status 的退出码
+ * 必须逐一检查：fetch 失败后 reset 到的是陈旧远端引用；checkout 失败时 reset 移动的
+ * 是当前 checkout 分支的指针（无论那是什么分支）；status 失败被当「干净」放行 =
+ * 脏树防线静默失效。
  *
  * 纯依赖注入（run 注入）——供 scripts/__tests__/merge-sync.test.mjs 做回归测试。
  */
@@ -16,7 +20,8 @@
  * 返回 { ok: true, mainSha } ——mainSha = 同步后 main HEAD（merge commit 或其后的
  * 远端 tip），供阶段 3 wait-for-ci 作为 push CI 的判定对象落盘（mergeSha）。
  * 返回 { ok: false, step, ... } ——step ∈ fetch / ahead-count / ahead-guard /
- * checkout / reset / head-sha；ahead-guard 附 ahead 数，fetch/checkout 附手动恢复命令。
+ * checkout / status / dirty-tree / reset / head-sha；ahead-guard 附 ahead 数，
+ * fetch/checkout 附手动恢复命令，dirty-tree 附处置提示。
  */
 export function syncMain({ run, mainWt, ghRemote = 'github' }) {
   const fetchRes = run('git', ['-C', mainWt, 'fetch', ghRemote, 'main'])
@@ -35,6 +40,15 @@ export function syncMain({ run, mainWt, ghRemote = 'github' }) {
   const checkoutRes = run('git', ['-C', mainWt, 'checkout', 'main'])
   if (!checkoutRes.ok) {
     return { ok: false, step: 'checkout', hint: `git -C ${mainWt} checkout main` }
+  }
+  // 脏树防护：reset --hard 会抹掉未提交的 tracked 改动（reflog 不可恢复，领先防护
+  // 不覆盖），故 status 只查 tracked 改动（--untracked-files=no）——reset --hard
+  // 不删 untracked 文件，?? 行计入即误挡无损害场景。status 退出码必须检查——失败
+  // 被当「干净」放行即防线静默失效（同 ahead-count 的空输出显式拒绝）
+  const statusRes = run('git', ['-C', mainWt, 'status', '--porcelain', '--untracked-files=no'], { stdio: 'capture' })
+  if (!statusRes.ok) return { ok: false, step: 'status' }
+  if (statusRes.stdout.trim() !== '') {
+    return { ok: false, step: 'dirty-tree', hint: '未提交的 tracked 改动先 commit/stash 或确认丢弃后重跑' }
   }
   const resetRes = run('git', ['-C', mainWt, 'reset', '--hard', `${ghRemote}/main`])
   if (!resetRes.ok) return { ok: false, step: 'reset' }

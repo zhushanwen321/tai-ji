@@ -51,10 +51,18 @@ export function judgeRuns(runs) {
 /**
  * 等待 commit 上的 workflow runs 全部完成。
  *
- * 时序与移植前一致：15s 轮询；runs 为空给 30s 触发宽限，超宽限返回
- * { status: 'no-runs' }——语义由调用方定：wait-for-ci（main）按「该 commit
- * 未触发 CI 属预期」exit 0 放行；pr-merge（PR 合并判定）exit 1 人工确认
- * （paths-ignore 的纯文档 PR 走此分支，不自动放行合并）。超时返回 { status: 'timeout' }。
+ * fetchRuns 契约（三态，两类空结果绝不容许混淆）：返回 runs 数组 = 查询成功
+ * （空数组 = 查询成功且该 commit 无 run）；返回 null / 抛错 / 返回非数组 =
+ * 查询失败（gh 网络/限流/登录态/输出畸形）。no-runs 在 wait-for-ci 侧是
+ * exit 0 放行语义，查询失败被归一成「无 runs」会让首窗持续失败的 gh 查询
+ * 在 30s 宽限耗尽后静默跳过 main push CI 验证——失败必须分流到 fetch-error。
+ *
+ * 时序与移植前一致：15s 轮询；「查询成功且空」给 30s 触发宽限（查询失败轮次
+ * 不消耗宽限），超宽限返回 { status: 'no-runs' }——语义由调用方定：
+ * wait-for-ci（main）按「该 commit 未触发 CI 属预期」exit 0 放行；pr-merge
+ * （PR 合并判定）exit 1 人工确认（paths-ignore 的纯文档 PR 走此分支，不自动
+ * 放行合并）。查询失败持续到 deadline 返回 { status: 'fetch-error' }（工具
+ * 错误，调用方按不可判定处理，绝不放行）。超时返回 { status: 'timeout' }。
  */
 export async function waitForRuns(opts) {
   const {
@@ -67,18 +75,30 @@ export async function waitForRuns(opts) {
   } = opts
 
   let elapsedMs = 0
+  // 「查询成功且空」的累计时长：no-runs 宽限只由这类轮次消耗，查询失败轮次
+  // 不消耗——否则 gh 抖动 30s 后首次查到空会被立刻判成「CI 未触发」放行
+  let emptyQueryElapsedMs = 0
   let announcedRuns = false
   for (;;) {
     let runs
     try {
       runs = await fetchRuns()
     } catch {
-      runs = []
+      runs = null
     }
-    if (!Array.isArray(runs) || runs.length === 0) {
-      // 曾检测到 runs 之后出现的空结果 = 查询抖动（gh 失败/解析失败被调用方归一为 []），
-      // 不是「CI 未触发」——继续轮询到 deadline，绝不回退成 no-runs（该分支在
-      // wait-for-ci 侧是 exit 0 放行语义，一次 gh 抖动误放行 = 跳过 CI 验证）
+    if (!Array.isArray(runs)) {
+      // 查询失败（null/非数组/抛错归一）：不是「CI 未触发」，不推进 no-runs 宽限，
+      // 持续轮询到 deadline 返回 fetch-error——绝不走 no-runs 的 exit 0 放行路径
+      log(`⚠️ runs 查询失败（gh 网络/限流/输出畸形），继续重试... (${String(Math.round(elapsedMs / 1000))}s/${String(Math.round(deadlineMs / 1000))}s)`)
+      if (elapsedMs >= deadlineMs) return { status: 'fetch-error' }
+      await sleep(pollMs)
+      elapsedMs += pollMs
+      continue
+    }
+    if (runs.length === 0) {
+      // 曾检测到 runs 之后出现的空结果 = 查询抖动，不是「CI 未触发」——继续轮询到
+      // deadline，绝不回退成 no-runs（该分支在 wait-for-ci 侧是 exit 0 放行语义，
+      // 一次 gh 抖动误放行 = 跳过 CI 验证）
       if (announcedRuns) {
         log(`⏳ runs 查询返回空（疑似抖动），继续等待... (${String(Math.round(elapsedMs / 1000))}s/${String(Math.round(deadlineMs / 1000))}s)`)
         if (elapsedMs >= deadlineMs) return { status: 'timeout' }
@@ -86,10 +106,11 @@ export async function waitForRuns(opts) {
         elapsedMs += pollMs
         continue
       }
-      if (elapsedMs < notTriggeredGraceMs) {
-        log(`⏳ CI 尚未触发，宽限等待中... (${String(Math.round(elapsedMs / 1000))}s/${String(Math.round(notTriggeredGraceMs / 1000))}s，超限判 no-runs)`)
+      if (emptyQueryElapsedMs < notTriggeredGraceMs) {
+        log(`⏳ CI 尚未触发，宽限等待中... (${String(Math.round(emptyQueryElapsedMs / 1000))}s/${String(Math.round(notTriggeredGraceMs / 1000))}s，超限判 no-runs)`)
         await sleep(pollMs)
         elapsedMs += pollMs
+        emptyQueryElapsedMs += pollMs
         continue
       }
       return { status: 'no-runs' }

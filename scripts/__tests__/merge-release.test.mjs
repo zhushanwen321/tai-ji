@@ -12,6 +12,7 @@ import {
   buildBilingualNotes,
   buildPrTitleFallbackNotes,
   notesFinalized,
+  draftPublishOutcome,
 } from '../merge/release.mjs'
 
 import { DEFAULT_REPO } from '../merge/lib/repo.mjs'
@@ -236,5 +237,17 @@ describe('notesFinalized（覆盖保护判定）', () => {
   it('body 缺失（null/undefined）按未定稿处理', () => {
     expect(notesFinalized(null, false)).toBe(false)
     expect(notesFinalized(undefined, false)).toBe(false)
+  })
+})
+
+describe('draftPublishOutcome（draft 发布失败裁决）', () => {
+  it('发布成功 → null（正常路径无动作）', () => {
+    expect(draftPublishOutcome(true, { TAG: 'v0.6.5', GH_REPO: DEFAULT_REPO })).toBeNull()
+  })
+
+  it('发布失败 → fatal 文案 + 手动恢复命令（核心交付动作不可容忍，区别于 notes edit 失败的 WARN 容忍）', () => {
+    const v = draftPublishOutcome(false, { TAG: 'v0.6.5', GH_REPO: DEFAULT_REPO })
+    expect(v.fatal).toBe('❌ Draft Release 发布失败（v0.6.5 滞留 draft，未对用户发布）')
+    expect(v.hint).toBe(`手动恢复: gh release edit v0.6.5 --repo ${DEFAULT_REPO} --draft=false，完成后重跑阶段 6 验证`)
   })
 })

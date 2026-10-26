@@ -1,9 +1,10 @@
 /**
- * check-test-suite-wiring.mjs 单测：对账器判定语义（ci.yml 步骤解析 + 三类漂移判定）。
+ * check-test-suite-wiring.mjs 单测：对账器判定语义（ci.yml 步骤解析 + 断言①②③判定）。
  * 真实仓库全量对账 = 脚本本体（CI Invariants + pre-commit 挂载），此处锁定纯函数语义。
  */
 import { describe, it, expect } from 'vitest'
-import { normCmd, extractStepRuns, wiringFailures } from '../check-test-suite-wiring.mjs'
+import { normCmd, extractStepRuns, wiringFailures, aggregateFailures } from '../check-test-suite-wiring.mjs'
+import { extractJobStepOutcomes } from '../lib/ci-yaml-runs.mjs'
 
 const suite = (over = {}) => ({
   id: 'demo',
@@ -91,5 +92,182 @@ describe('wiringFailures：三类漂移判定', () => {
     const f = wiringFailures(d)
     expect(f.map((x) => x.kind)).toEqual(['missing-ref'])
     expect(f[0].message).toContain('豁免登记')
+  })
+})
+
+describe('extractJobStepOutcomes：continue-on-error 与聚合步引用提取', () => {
+  const yaml = [
+    'name: CI',
+    'on:',
+    '  push:',
+    '    branches: [main]',
+    'jobs:',
+    '  lint:',
+    '    steps:',
+    '      - uses: actions/checkout@v4',
+    '      - name: ESLint',
+    '        id: eslint',
+    '        continue-on-error: true',
+    '        run: pnpm run lint',
+    '      - name: Guards',
+    '        id: scripts-guards',
+    '        continue-on-error: true',
+    '        run: pnpm exec vitest run scripts/__tests__/a.test.mjs',
+    '      - name: Upload',
+    '        if: always()',
+    '        uses: actions/upload-artifact@v4',
+    '      - name: Aggregate test results',
+    '        if: always()',
+    '        run: |',
+    '          failed=0',
+    "          if [ \"${{ steps.eslint.outcome }}\" = \"failure\" ]; then failed=1; fi",
+    "          if [ \"${{ steps['scripts-guards'].outcome }}\" = \"failure\" ]; then failed=1; fi",
+    '          exit $failed',
+    '  other:',
+    '    steps:',
+    '      - name: Orphan guard',
+    '        id: orphan-guard',
+    '        continue-on-error: true',
+    '        run: node scripts/check-orphan.mjs',
+  ].join('\n')
+
+  it('按 job 提取 continue-on-error 步骤；聚合步 run 内 dot 与 bracket 两形态引用都入集合；纯 uses 的 if:always() 步不产出引用', () => {
+    const m = extractJobStepOutcomes(yaml)
+    expect([...m.keys()]).toEqual(['lint', 'other'])
+    const lint = m.get('lint')
+    expect(lint.continueOnError.map((s) => s.id)).toEqual(['eslint', 'scripts-guards'])
+    expect(lint.continueOnError[0]).toMatchObject({ id: 'eslint', name: 'ESLint' })
+    expect(lint.outcomeRefs).toEqual(new Set(['eslint', 'scripts-guards']))
+    // other job 无聚合步 → 只有 continueOnError 侧，无引用
+    expect(m.get('other').outcomeRefs).toEqual(new Set())
+  })
+
+  it('无 continue-on-error 且无聚合引用的 job 不入 Map；jobs: 之前的块不误判', () => {
+    const pre = 'name: CI\non:\n  push:\n    branches: [main]\n'
+    const m = extractJobStepOutcomes(pre + yaml)
+    expect([...m.keys()]).toEqual(['lint', 'other'])
+  })
+
+  it('短横线行内联键（- id:/- continue-on-error:）与 8 空格独立行同语义提取', () => {
+    const y = [
+      'jobs:',
+      '  lint:',
+      '    steps:',
+      '      - id: inline-coe',
+      '        continue-on-error: true',
+      '        run: pnpm run lint',
+      '      - continue-on-error: true',
+      '        id: dash-coe',
+      '        run: node x.mjs',
+    ].join('\n')
+    const m = extractJobStepOutcomes(y)
+    expect(m.get('lint').continueOnError).toEqual([
+      { id: 'inline-coe', name: undefined, line: 4 },
+      { id: 'dash-coe', name: undefined, line: 7 },
+    ])
+  })
+})
+
+describe('aggregateFailures：断言③（continue-on-error ↔ 聚合步）判定', () => {
+  const build = (yaml) => aggregateFailures(extractJobStepOutcomes(yaml))
+
+  it('全部被同 job 聚合步引用 → 零漂移', () => {
+    const yaml = [
+      'jobs:',
+      '  lint:',
+      '    steps:',
+      '      - name: ESLint',
+      '        id: eslint',
+      '        continue-on-error: true',
+      '        run: pnpm run lint',
+      '      - name: Aggregate test results',
+      '        if: always()',
+      '        run: |',
+      "          if [ \"${{ steps.eslint.outcome }}\" = \"failure\" ]; then failed=1; fi",
+    ].join('\n')
+    expect(build(yaml)).toEqual([])
+  })
+
+  it('continue-on-error 步骤未被同 job 聚合步引用 → agg-unwired（跨 job 引用不掩护）', () => {
+    const yaml = [
+      'jobs:',
+      '  lint:',
+      '    steps:',
+      '      - name: ESLint',
+      '        id: eslint',
+      '        continue-on-error: true',
+      '        run: pnpm run lint',
+      '  other:',
+      '    steps:',
+      '      - name: Aggregate',
+      '        if: always()',
+      '        run: |',
+      "          if [ \"${{ steps.eslint.outcome }}\" = \"failure\" ]; then failed=1; fi",
+    ].join('\n')
+    const f = build(yaml)
+    expect(f).toHaveLength(1)
+    expect(f[0].kind).toBe('agg-unwired')
+    expect(f[0].message).toContain('eslint')
+    expect(f[0].message).toContain('lint')
+  })
+
+  it('continue-on-error 步骤无 id → agg-unwired（聚合步无法引用）', () => {
+    const yaml = [
+      'jobs:',
+      '  lint:',
+      '    steps:',
+      '      - name: ESLint',
+      '        continue-on-error: true',
+      '        run: pnpm run lint',
+    ].join('\n')
+    const f = build(yaml)
+    expect(f).toHaveLength(1)
+    expect(f[0].kind).toBe('agg-unwired')
+    expect(f[0].message).toContain('无 id')
+  })
+
+  it('反向幽灵引用（聚合步引用不存在的 id）不报——不掩蔽任何 coe 步骤（掩蔽必伴随未被引用的 coe 步骤，正向断言必红），单向断言', () => {
+    const yaml = [
+      'jobs:',
+      '  lint:',
+      '    steps:',
+      '      - name: Aggregate',
+      '        if: always()',
+      '        run: |',
+      "          if [ \"${{ steps.ghost.outcome }}\" = \"failure\" ]; then failed=1; fi",
+    ].join('\n')
+    expect(build(yaml)).toEqual([])
+  })
+
+  it('内联 - id: 的 coe 步骤被同 job 聚合步引用 → 零漂移（不误报「无 id」）', () => {
+    const yaml = [
+      'jobs:',
+      '  lint:',
+      '    steps:',
+      '      - id: inline-coe',
+      '        continue-on-error: true',
+      '        run: pnpm run lint',
+      '      - name: Aggregate',
+      '        if: always()',
+      '        run: |',
+      "          if [ \"${{ steps.inline-coe.outcome }}\" = \"failure\" ]; then failed=1; fi",
+    ].join('\n')
+    expect(build(yaml)).toEqual([])
+  })
+
+  it('内联 - id: 的 coe 步骤未被引用 → 报「未引用 steps.<id>.outcome」而非「无 id」', () => {
+    const yaml = [
+      'jobs:',
+      '  lint:',
+      '    steps:',
+      '      - id: inline-coe',
+      '        continue-on-error: true',
+      '        run: pnpm run lint',
+    ].join('\n')
+    const f = build(yaml)
+    expect(f).toHaveLength(1)
+    expect(f[0].kind).toBe('agg-unwired')
+    expect(f[0].message).toContain('steps.inline-coe.outcome')
+    expect(f[0].message).not.toContain('无 id')
   })
 })

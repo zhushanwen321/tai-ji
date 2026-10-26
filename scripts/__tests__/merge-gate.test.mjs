@@ -151,9 +151,34 @@ describe('waitForRuns（等待编排——PR 合并判定与 wait-for-ci 共用�
     expect(v.pending).toBe(1)
   })
 
-  it('fetchRuns 抛错/返回非数组 → 按 no-runs 宽限路径处理（对应原 `|| echo "[]"`）', async () => {
-    const w = { sleep: async () => {} }
-    const v = await waitForRuns({ fetchRuns: async () => undefined, sleep: w.sleep, pollMs: 0, notTriggeredGraceMs: 0 })
-    expect(v.status).toBe('no-runs')
+  it('【审查修复回归】首窗全程查询失败（null）→ fetch-error，绝不 no-runs（no-runs 在 wait-for-ci 侧是 exit 0 放行语义，静默跳过 main push CI 验证）', async () => {
+    // 契约提醒：waitForRuns 的全部终态（pass/no-runs/fail/timeout/fetch-error）由
+    // 两个消费方各自枚举处理——wait-for-ci.mjs 与 pr-merge.mjs；gate 新增终态必须
+    // 同步补两侧分支（pr-merge 侧是白名单消费：非 pass 一律 exit 1 不放行合并）
+    const w = fakeWorld([null])
+    const v = await waitForRuns({ fetchRuns: w.fetcher, sleep: w.sleep, deadlineMs: 60_000, pollMs: 15_000, notTriggeredGraceMs: 30_000 })
+    expect(v.status).toBe('fetch-error')
+  })
+
+  it('【审查修复回归】查询失败轮次不消耗 no-runs 宽限：抖动 30s 后首次「成功且空」仍走宽限，不立即判未触发放行', async () => {
+    // 若宽限共用 elapsedMs，轮 3 的成功空查询（elapsed 已 30s）会立刻 no-runs——
+    // 实际 CI 可能已触发只是此前查不到，宽限必须只由「成功且空」的轮次消耗
+    let cursor = 0
+    const seq = [
+      null,                                 // 查询失败（elapsed 0s → 15s）
+      null,                                 // 查询失败（elapsed 15s → 30s）
+      [],                                   // 成功空：宽限计时 0s < 30s → 宽限等待
+      [runItem('completed', 'success')],    // 恢复：run 出现，正常裁决
+    ]
+    const fetcher = async () => { const v = seq[Math.min(cursor, seq.length - 1)]; cursor += 1; return v }
+    const v = await waitForRuns({ fetchRuns: fetcher, sleep: async () => {}, pollMs: 15_000, deadlineMs: 600_000, notTriggeredGraceMs: 30_000 })
+    expect(v.status).toBe('pass')
+  })
+
+  it('fetchRuns 抛错/返回非数组 → 与查询失败同归 fetch-error（原 `|| echo "[]"` 的归一语义已拆除：畸形输出绝不当「查询成功且空」放行）', async () => {
+    for (const bad of [async () => undefined, async () => { throw new Error('boom') }]) {
+      const v = await waitForRuns({ fetchRuns: bad, sleep: async () => {}, pollMs: 15_000, deadlineMs: 30_000, notTriggeredGraceMs: 0 })
+      expect(v.status).toBe('fetch-error')
+    }
   })
 })
