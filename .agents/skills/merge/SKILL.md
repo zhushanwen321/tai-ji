@@ -385,7 +385,7 @@ done
 gh run watch "$RUN_ID" --repo zhushanwen321/tai-ji --exit-status || { echo "✗ release-npm.yml 失败，先归因：gh run view $RUN_ID --log-failed（勿盲目重打 tag）"; exit 1; }
 
 # 第 2 段：registry 探测（必须带具体版本号查——packument 任何版本都返回 200，验不出新版本发布）。
-# 探测逻辑与参数收在 scripts/probe-registry.mjs（单点）：重试 60s × 6（覆盖实测 4-6 分钟传播）、
+# 探测逻辑与参数收在 scripts/probe-registry.mjs（单点）：重试 60s × 7（末次探测 t=360s 覆盖实测最长传播）、
 # 单次请求 20s 超时（无 curl 挂起）；超限时脚本输出「传播延迟 vs 真失败」的判断材料——
 # 延长等待（--retries 加大重跑）或按发布失败处理由执行方裁决，
 # 「逐包 200 才算过」底线不变（禁止放宽为「CI 绿即过」）。
