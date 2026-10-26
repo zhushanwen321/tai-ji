@@ -1853,7 +1853,7 @@ await step("pr-meta", async () => {
         "",
         "【任务一：changeset 缺失兜底起草（先做）】",
         changesetWarn
-          ? "背景：changeset 复核发现缺失——部分 extension 包改了 src/ 但没有对应 changeset（WARN changeset-check，检测口径 git diff main...HEAD——base 非 main 的 stacked PR 上 WARN 可能由 base 分支已有改动触发，分类时以本分支实际触及的包为准）。起草主责在 dev-merge gates 环节，本分支未经 dev-merge 或其侧未带齐，此处按 Gate-1a.5 原逻辑补起草兜底。"
+          ? "背景：changeset 复核发现缺失——部分 extension 包改了 src/ 但没有对应 changeset（WARN changeset-check，检测口径 git diff <base>...HEAD（base = 调用方传入的 PR base，未传回退 main——回退口径下 WARN 可能由 base 分支已有改动触发，分类时以本分支实际触及的包为准；发起方应按 pr-cr-fix SKILL 的 PR_BASE 约定传目标 dev 分支））。起草主责在 dev-merge gates 环节，本分支未经 dev-merge 或其侧未带齐，此处按 Gate-1a.5 原逻辑补起草兜底。"
           : "背景：static gate 被发起方跳过，changeset 复核无法执行（状态未知）——请按 diff 自行判断，宁可起草。",
         "按 diff 逐包分类并处理：",
         "- 实质行为改动（逻辑/接口/行为变化）→ 直接写入 .changeset/<slug>.md：",
