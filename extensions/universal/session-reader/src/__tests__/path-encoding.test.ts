@@ -1,26 +1,29 @@
+// path-encoding.test.ts —— session-reader C06 簇合并产物（round5-G）。
+// 共同被测业务模块：`core:@zhushanwen/subagent-core/execution/assembly/path-encoding.ts`。mock 相容：全簇零 vi.mock。
+// 顶层正文按来源包 describe 纯前缀分节，it 层名零改动。
+//
+// 来源：
+//   - src/__tests__/cross-package-subagent-core.test.ts（2 用例，skip 0）
+//   - src/__tests__/rebuild-manifest-dual-write.test.ts（2 用例，skip 0）
+
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-
 import { handleSessionRead } from '../tool-handler.js'
 // barrel 符号走包根；ManifestStore / ModelRegistryLike / path-encoding 函数未进 barrel
 // （D3 判定不进），按 subagent-workflow 测试同款包名 .ts 深路径消费，vitest alias 解析。
-import {
-  ModelConfigService,
-  RecordStore,
-  SUBAGENT_RECORD_CUSTOM_TYPE,
-  SubagentService,
-  type SubagentRecord,
-} from '@zhushanwen/subagent-core'
+import { ModelConfigService, RecordStore, SUBAGENT_RECORD_CUSTOM_TYPE, SubagentService, type SubagentRecord } from '@zhushanwen/subagent-core'
 import { ManifestStore } from '@zhushanwen/subagent-core/execution/persistence/manifest-store.ts'
-import type { ModelRegistryLike } from '@zhushanwen/subagent-core/execution/assembly/model-resolver.ts'
-import {
-  getSubagentRecordsDir,
-  getSubagentSessionDir,
-} from '@zhushanwen/subagent-core/execution/assembly/path-encoding.ts'
+import { type ModelRegistryLike } from '@zhushanwen/subagent-core/execution/assembly/model-resolver.ts'
+import { getSubagentRecordsDir, getSubagentSessionDir } from '@zhushanwen/subagent-core/execution/assembly/path-encoding.ts'
+// barrel 外符号按包名 .ts 深路径消费（vitest alias 重写，同 cross-package 先例）
+import { createRecord } from '@zhushanwen/subagent-core/execution/persistence/execution-record.ts'
+import { listRecordManifests, type RecordManifest } from '../discovery/subagents.js'
 
-/**
+// ======== 来源：cross-package-subagent-core.test.ts ========
+describe("cross-package-subagent-core", () => {
+  /**
  * W4 跨包集成测试（[collect 退役] 改造保留：原「E1 落标出口产出 manifest」驱动侧
  * 随 sync 批机制删除，现行真实派生视图出口 = store 重建通道 rebuildIndexes——manifest
  * 是可丢缓存，boot 全量路径按磁盘子文件锚幂等补缺）。「subagent-core 真实 tmpdir
@@ -42,26 +45,26 @@ import {
  * mkdtemp(tmpdir) 自建自删（红线：零真实数据目录触碰）。
  */
 
-/** 剥身份 env（subagent-core 测试纪律同款）：身份 env 会让 service 误判自己是
+  /** 剥身份 env（subagent-core 测试纪律同款）：身份 env 会让 service 误判自己是
  *  子进程跳过恢复扫描。 */
-const ENV_KEYS_TO_STRIP = [
-  'PI_SUBAGENT_ROOT_SESSION_ID',
-  'PI_SUBAGENT_SELF_RECORD_ID',
-  'PI_SUBAGENT_DEPTH',
-  'PI_SUBAGENT_ROOT_CWD',
-  'PI_SUBAGENT_FORK_DEPTH',
-] as const
+  const ENV_KEYS_TO_STRIP = [
+    'PI_SUBAGENT_ROOT_SESSION_ID',
+    'PI_SUBAGENT_SELF_RECORD_ID',
+    'PI_SUBAGENT_DEPTH',
+    'PI_SUBAGENT_ROOT_CWD',
+    'PI_SUBAGENT_FORK_DEPTH',
+  ] as const
 
-const ROOT_SESSION = 'root-cross-pkg'
+  const ROOT_SESSION = 'root-cross-pkg'
 
-/** 驱动 SubagentService 的最小 pi 形状：appendEntry 真写主 session JSONL（pi 落盘
+  /** 驱动 SubagentService 的最小 pi 形状：appendEntry 真写主 session JSONL（pi 落盘
  *  形态同构），其余面 no-op（本链路 E1 全终态直达补发，settled 重扫不注册）。 */
-function makeWritingPi(mainFile: string) {
-  return {
-    appendEntry(customType: string, data: unknown): void {
-      fs.appendFileSync(
-        mainFile,
-        `${JSON.stringify({
+  function makeWritingPi(mainFile: string) {
+    return {
+      appendEntry(customType: string, data: unknown): void {
+        fs.appendFileSync(
+          mainFile,
+          `${JSON.stringify({
           type: 'custom',
           id: `seed-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           parentId: null,
@@ -346,3 +349,164 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
     expect(d.items.every((i) => !i.truncated)).toBe(true)
   })
 })
+});
+
+// ======== 来源：rebuild-manifest-dual-write.test.ts ========
+describe("rebuild-manifest-dual-write", () => {
+  const ROOT_SESSION = 'root-dual-write'
+
+  /** session-reader identity 派生视图（manifestIdentityData）消费的字段集——重建窗口
+ *  前后必须逐字段一致（降级 = 任一字段缺失/漂移）。 */
+  function identityView(m: RecordManifest) {
+    return {
+      id: m.id,
+      rootSessionId: m.rootSessionId,
+      agentName: m.agentName,
+      task: m.task,
+      slug: m.slug,
+      model: m.model,
+      status: m.status,
+      sessionFile: m.sessionFile,
+      parentRecordId: m.parentRecordId,
+    }
+  }
+
+  describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → session-reader 投影不降级', () => {
+    let dataDir: string
+    let agentDir: string
+    let sessionsDir: string
+    let recordsDir: string
+    let childFile: string
+
+    beforeEach(() => {
+      // 生产拓扑复刻（[session-store-layout-inversion 域 9]）：agentDir = <dataDir>/agent
+      //（session-reader 的 agentDir 语义），subagent-core 写侧经新公式落存储树
+      // <dataDir>/ext-sessions/<rootSid>/subagents/——listRecordManifests 双根扫描的新根
+      //（dirname(agentDir)/ext-sessions）与写侧落点相遇
+      dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-rebuild-dualwrite-'))
+      agentDir = path.join(dataDir, 'agent')
+      sessionsDir = getSubagentSessionDir(ROOT_SESSION, dataDir)
+      recordsDir = getSubagentRecordsDir(ROOT_SESSION, dataDir)
+      fs.mkdirSync(sessionsDir, { recursive: true })
+      fs.mkdirSync(recordsDir, { recursive: true })
+
+      // 子 session 文件：session header + model_change（light 重建的 model 源——
+      // identity 前途经 entry best-effort 提取）+ identity entry（session-reader
+      // 步骤 2 首行 header 探测 + manifest 主路径的数据锚）
+      childFile = path.join(sessionsDir, '20260912T000000_sa-dw.jsonl')
+      const ts = new Date(1000).toISOString()
+      fs.writeFileSync(
+        childFile,
+        [
+          JSON.stringify({ type: 'session', version: 3, id: 'sess-sa-dw', timestamp: ts, cwd: agentDir }),
+          JSON.stringify({ type: 'model_change', id: 'mc-1', parentId: null, timestamp: ts, provider: 'prov', modelId: 'm1' }),
+          JSON.stringify({
+            type: 'custom',
+            id: 'id-1',
+            parentId: null,
+            timestamp: ts,
+            customType: 'subagent-identity',
+            data: {
+              id: 'sa-dw',
+              agent: 'worker',
+              mode: 'background',
+              task: 'dual write task',
+              slug: 'dual',
+              startedAt: 1000,
+              rootSessionId: ROOT_SESSION,
+              parentRecordId: 'sa-parent',
+              depth: 1,
+            },
+          }),
+        ].join('\n') + '\n',
+        'utf-8',
+      )
+    })
+
+    afterEach(() => {
+      fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    })
+
+    it('S5③: manifest 删除 → rebuildIndexes 重建 → identity 派生视图字段集前后一致（双写字段在场）', async () => {
+      // ── 初始 manifest：subagent-core 终态写侧（markFinalized）真实产出 ──
+      const record = createRecord('sa-dw', {
+        agent: 'worker',
+        model: 'prov/m1',
+        mode: 'background',
+        task: 'dual write task',
+        slug: 'dual',
+        startedAt: 1000,
+        rootSessionId: ROOT_SESSION,
+        parentRecordId: 'sa-parent',
+        depth: 1,
+        chatMode: false,
+        controller: new AbortController(),
+      })
+      Object.assign(record, {
+        sessionFile: childFile,
+        status: 'closed' as const,
+        closedReason: 'gc' as const,
+        endedAt: 2000,
+      })
+      // [u-subagent dir 晚绑定] RecordStore 构造 = 目录取值函数（非目录字符串）
+      const writer = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir)
+      expect(writer.markFinalized(record, 'gc')).toBe(true)
+      writer.dispose()
+
+      const before = (await listRecordManifests(agentDir)).find((m) => m.id === 'sa-dw')
+      expect(before).toBeDefined()
+      const viewBefore = identityView(before!)
+
+      // 双写过渡字段在写侧就位（本包不消费，但前向兼容锚要求其在场）。
+      // [U2 两态] executionStatus 是内部权威词汇（running|idle 两态，终态概念删除）
+      // → 终态化后恒 'idle'；status 旧三态是 session-reader 直读派生视图（永久保留）→ 'closed'。
+      const rawBefore = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
+      expect(rawBefore.executionStatus).toBe('idle')
+      expect(rawBefore.status).toBe('closed')
+
+      // ── S5 场景：人为删除全部 manifest（缓存可丢）→ 全量重建 ──
+      for (const f of fs.readdirSync(recordsDir)) fs.rmSync(path.join(recordsDir, f))
+      expect((await listRecordManifests(agentDir)).filter((m) => m.id === 'sa-dw')).toHaveLength(0)
+
+      const rebuilder = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir)
+      expect(rebuilder.rebuildIndexes()).toBe(1)
+      rebuilder.dispose()
+
+      // ── session-reader 视角：重建后 identity 派生视图不降级 ──
+      const after = (await listRecordManifests(agentDir)).find((m) => m.id === 'sa-dw')
+      expect(after).toBeDefined()
+      // 字段集保真（身份/富字段逐字段一致）；仅 legacy status 按 ③ 后重建语义如实
+      // 派生 running（终态权威 = 事件流 record-settled 帧，磁盘重建无 closedReason 载体）。
+      expect(identityView(after!)).toEqual({ ...viewBefore, status: 'running' })
+
+      const rawAfter = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
+      expect(rawAfter.status).toBe('running')
+      expect(rawAfter.executionStatus).toBe('idle')
+      // closedReason 无重建载体（`.state` 退场）→ 如实缺席。
+      expect(rawAfter.closedReason).toBeUndefined()
+    })
+
+    it('惰性通道：查询结果（collectRecords）补建的 manifest 同样可被本包读取派生视图', async () => {
+      // 不经终态写侧（无 manifest 初始形态）：磁盘 record 只有 identity + 无 sidecar
+      // → 查询触发惰性补建。
+      const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir)
+      expect(store.collectRecords(10).map((r) => r.id)).toContain('sa-dw')
+      store.dispose()
+
+      const manifests = await listRecordManifests(agentDir)
+      const found = manifests.find((m) => m.id === 'sa-dw')
+      expect(found).toBeDefined()
+      expect(found!.status).toBe('running')
+      expect(found!.task).toBe('dual write task')
+      expect(found!.agentName).toBe('worker')
+      expect(found!.sessionFile).toBe(childFile)
+      expect(found!.parentRecordId).toBe('sa-parent')
+      // 双写过渡字段（[U3 重建单规则] 无 sidecar 重建一律 idle：executionStatus 如实
+      // 派生两态词汇；legacy status 经桥接判据派生——无 closedReason 遗留位的 idle
+      // 派生 "running"（session-reader 视角的活跃成员，§3.2.8 下行映射）。
+      const raw = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
+      expect(raw.executionStatus).toBe('idle')
+      expect(raw.status).toBe('running')
+    })
+  })
+});
