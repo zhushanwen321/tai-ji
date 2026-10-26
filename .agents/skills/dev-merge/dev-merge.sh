@@ -115,6 +115,13 @@ scan_write_occupants() { lsof -wn +D "$CUR_DIR" 2>/dev/null | awk 'NR>1 && $4 ~ 
 
 case "$SUBCMD" in
   merge)
+    # 互斥检查：目标 worktree 的 git 目录存在 MERGE_HEAD / CHERRY_PICK_HEAD 即拒绝发起
+    # （上一轮 merge 冲突未收尾时再发起会被 git 拒绝或搅乱两轮操作；git 目录定位与
+    # 上方自动创建分支同款推导：--git-common-dir/worktrees/<worktree 名>）
+    DEV_GIT_DIR="$(git -C "$CUR_DIR" rev-parse --git-common-dir)/worktrees/$DEV_BRANCH"
+    if [[ -e "$DEV_GIT_DIR/MERGE_HEAD" || -e "$DEV_GIT_DIR/CHERRY_PICK_HEAD" ]]; then
+      die "目标 worktree $DEV_DIR 已有进行中的合并/拣选（git 目录存在 MERGE_HEAD/CHERRY_PICK_HEAD），先处理完再发起：git -C $DEV_DIR status 看冲突并解决提交，或中断 git -C $DEV_DIR merge --abort / git -C $DEV_DIR cherry-pick --abort 后重跑"
+    fi
     check_clean "$CUR_DIR" "当前 worktree ($CUR_BRANCH)"
     check_clean "$DEV_DIR" "$DEV_BRANCH"
 

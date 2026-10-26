@@ -15,7 +15,7 @@ description: >-
 
 ## 前置条件 [MANDATORY]
 
-- taiji git worktree 中，当前分支相对 main 有 commits（`git log main..HEAD` 非空）
+- taiji git worktree 中，当前分支相对 main 有 commits（`git log "$PR_BASE"..HEAD` 非空）
 - 有 GitHub CLI（`gh`）认证
 - 全局安装 fallow（`npm i -g fallow`）——阶段 1.5 度量门禁依赖
 - pi 环境走路径 1（原生 workflow）：完整生命周期 = workflow 工具 `action:"run"` + `name=<repo 根>/.agents/workflows/pr-lifecycle.js 绝对路径>`（从 `<available_workflows>` 清单的 location 取路径；实体在 workspace 根共享，ADR-0074）+ args；只跑 review+fix 循环（不进门禁、不开 PR）时用内置 `review-fix-loop`
@@ -52,11 +52,15 @@ bash scripts/pr-pre-merge.sh --skip-tests --quiet
 
 changeset 文件随 PR diff 可审可改；type 终判仍在 merge 阶段人工定（与「PR 阶段初判、merge 人工定」SSOT 一致）。缺失 changeset 的后果：merge 时 `changeset version` 不 bump → publish 不发 → bug fix 静默丢失。dev-merge 第 1.6 步 gates 恒跑 `node scripts/changeset-check.mjs`（缺失时 WARN + 起草指令，见 dev-merge SKILL），dev 线 changeset 缺失在合入时点即暴露。
 
+### [MANDATORY] PR_BASE：判定基点单一变量（阶段 1 开局先定）
+
+**开局先确定 `PR_BASE`，后续所有 diff/增量口径统一用它**：`PR_BASE` = 本分支的 base 分支 = 目标 dev 分支（DEV-WORKFLOW §3「PR base = 目标 dev 分支」；从 dev 队列登记或分支创建记录确认，如 `dev-0.11.16`）。只有 dev→main 的终局 PR 才用 `PR_BASE=main`。所有门禁命令的 `--base`、`git log/diff <base>..HEAD` 口径一律传 `"$PR_BASE"`（pr-lifecycle workflow 发起时同理传 `args.base = "$PR_BASE"`）。口径错位的后果：按 main 举证时「分支增量」= 整条 dev 线未发布内容 + 本分支改动——周期后段 coverage/metrics 增量按 dev 全线行数计算（红的不是本 PR 的问题）、changeset WARN 反复列出 dev 线包、Gate-1a.5 为非本 PR 的包起草多余 changeset。
+
 ### 1.2 自动生成 PR title 和 body
 
 **[MANDATORY] 从分支所有 commit 自动生成，英文，无需用户提供。**
 
-1. 收集分支所有 commit：`git log main..HEAD --format="%s%n%b---"` + `git diff main..HEAD --stat`
+1. 收集分支所有 commit：`git log "$PR_BASE"..HEAD --format="%s%n%b---"` + `git diff "$PR_BASE"..HEAD --stat`
 2. 生成 PR title：conventional commit 风格（`fix(scope): short summary`；多 scope 取最核心的，或省略 scope）
 3. 生成 PR body：`## Summary`（改动目的）+ `## Changes`（逐条列各 commit 关键改动，合并相关条目；有 `.changeset/*.md` 一并展示）+ `## Test plan`（typecheck/test/lint 结果）。breaking changes 必须标明
 
@@ -66,7 +70,7 @@ changeset 文件随 PR diff 可审可改；type 终判仍在 merge 阶段人工�
 
 ```bash
 # 方式 A：用 pr-submit.sh（自动检测 PR 是否已存在、仅内容变化时更新）
-bash scripts/pr-submit.sh --title "$PR_TITLE" --body "$PR_BODY" --base main
+bash scripts/pr-submit.sh --title "$PR_TITLE" --body "$PR_BODY" --base "$PR_BASE"
 
 # 方式 B：直接 gh 命令
 git push github HEAD
@@ -101,7 +105,7 @@ python3 <workspace 根>/.agents/skills/pr-cr-fix/scripts/validate-skill-yaml.py 
 ### 执行（主 agent 直接跑）
 
 ```bash
-python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base main
+python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base "$PR_BASE"
 ```
 
 - 产出 metrics.json 于 pr-review 产物目录 `~/.agents/skill-data/pr-review/<project-slug>/`（fail/warn 清单 + 高 CRAP 靶子清单；实际目录经 `node scripts/skill-data-dir.mjs pr-review` 解析，本节下称「pr-review 产物目录」）；exit 1 = fail，exit 2 = 工具错误（中止；fallow 缺失时同样 exit 2 并给出安装命令）
@@ -141,9 +145,9 @@ python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base main
 **运行位置必须是 feature worktree 根目录**：repo 根按当前 cwd 解析，在 main worktree（HEAD=base）本脚本得到空 diff，会按「无带 src/ 改动的 vitest 包」打印 pass 并覆写 pr-review 产物目录的 coverage.json 为空报告（exit 0 静默假 pass）。脚本侧有守卫：HEAD 与 base 指向同一 commit 时打印 WARN 提示可能跑错 worktree。
 
 ```bash
-python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main
+python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base "$PR_BASE"
 # diff 含 packages/shared/**/src/** 时传下游追加（extension 下游已自动传播，无需传参）：
-python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main --extra-packages packages/runtime,packages/renderer
+python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base "$PR_BASE" --extra-packages packages/runtime,packages/renderer
 ```
 
 - 参数按空格分隔取值（`--flag value`）；等号写法（`--base=develop`）与未识别参数会 fail-fast exit 2，`--flag` 缺值同样 exit 2 并给出用法
@@ -153,14 +157,14 @@ python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main --extra-pa
   - **shared 手工传播**：包选择只收自身有 `src/` 改动的包，shared 改动不传播下游；diff 含 `packages/shared/**/src/**` 时传 `--extra-packages packages/runtime,packages/renderer`——实跑两包全量插桩测试，作为 shared 改动的下游兜底。**连带效应**：renderer vitest.config 内的全量 thresholds（CI 强制口径）随之生效，thresholds breach 视同测试失败走 FAIL 路径（与本次改动无关的全量退化同样拦截；该失败输出与 uncovered_files 增量口径不同源，排障注意区分）
   - **extension 下游自动传播**（2026-10-16 增；数据源 = 仓库根 `extension-dependencies.json` 反向映射，与 check-extension-dependencies.mjs 同源）：diff 含被 extensions 依赖的 `packages/*/src/**` 时，依赖方 extension 目录**自动**并入包集实跑测试，无需传参——下游包无 src/ 改动、增量口径恒过（total=0 → 100%），价值在测试执行：依赖方测试失败即 FAIL。当前映射：`packages/extension-protocol` → 10 个 extension；`packages/subagent-core` → notify-ledger-host / canvas / session-manager / subagent-workflow；`packages/session-core`、`packages/zcode-session-source` → session-reader；`packages/session-delivery`、`packages/zcode-subagent-cli`、`packages/pi-subagent-cli` → subagent-workflow。**背景**：#42 subagent-core 重构（dormant 复活即迁出）破坏 subagent-workflow 的 B6 e2e 旧断言，PR 阶段零可见、靠 merge 前全量套件兜住（595a02acb 补救）——本机制把该盲区前移到 PR 门禁。**边界**：传播源只含 `packages/*`（extension→extension 不传播）；一跳不递归；`--packages` 探针模式不自动传播（探针 = 定向读数）；stdout 打 `DOWNSTREAM` 行、报告包条目带 `downstream_of` 字段，不静默
 - `--packages <pkg[,pkg2...]>` 是交集过滤器（支持逗号分隔多包；单包/子集探针用，会以探针产物覆盖 coverage.json，探针后重跑全量恢复）；`--extra-packages <pkg[,pkg2...]>` 是追加器（同样支持逗号分隔多包），两者语义不同、可共存。**注意**：修复 worker 还在运行时本地读数会被污染——Gate-1.6 必须在干净工作区（全部改动已 commit）跑
-- 排障降载开关：时序类随机失败（单包复跑绿、gate 跑红）时用 `TAIJI_COVERAGE_GATE_SERIAL=1 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main` 串行复跑——该 env 使测试文件串行执行，只排除 CPU 并发对时序敏感用例的干扰，不改变断言与覆盖范围
+- 排障降载开关：时序类随机失败（单包复跑绿、gate 跑红）时用 `TAIJI_COVERAGE_GATE_SERIAL=1 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base "$PR_BASE"` 串行复跑——该 env 使测试文件串行执行，只排除 CPU 并发对时序敏感用例的干扰，不改变断言与覆盖范围
 
 **Gate-1.6 判定**：fail → 派测试专项 subagent 补测试 → 重跑（上限 3 轮）。补测试优先级看 coverage.json 的 uncovered_files 清单（按可执行新增行缺口排序）。
 
 ### 怎么看覆盖率（人工排查）
 
 - 单包全量 + HTML 报告：`cd <pkg> && npx vitest run --coverage`（renderer 已配 thresholds，跌破 exit 非 0；产物 `<pkg>/coverage/index.html` 浏览器逐行看）
-- 增量口径（本 PR 新增可执行行的覆盖率）：`python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main`
+- 增量口径（本 PR 新增可执行行的覆盖率）：`python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base "$PR_BASE"`
 - CI 产物：PR checks 页 Test (renderer) job → artifact "coverage-report"（lcov + html）
 
 renderer 全量阈值（lines 68 / stmts 66 / branches 56 / functions 60）由 CI 强制；其余包 provider 已全部声明（增量口径由 Gate-1.6 覆盖），全量 thresholds 先测量后设阈（见 TEST-STRATEGY §7）。
@@ -191,7 +195,7 @@ metrics.json（阶段 1.5 必然产出）与 coverage.json（阶段 1.6）落在
 进入阶段 2 前主 agent 先跑（三路径共用，workflow 派的 review agent 与手工派的 subagent 都按 agent 定义内的消费约定自读）：
 
 ```bash
-node scripts/select-constraints.mjs --base main
+node scripts/select-constraints.mjs --base "$PR_BASE"
 ```
 
 按 diff 范围从 `docs/constraints.json`（架构约束登记 SSOT）选择命中约束，落盘 pr-review 产物目录的 constraints.md：scope 为 `global` 的核心不变量每次必载，其余按改动路径前缀命中（只改 renderer 不载 extension 约束）。6 个 review agent 定义均含消费约定——清单「执行」列含 `review:review-<本维度>` 的条目必须逐条核对（条目归属以执行列 enforcement.agent 为权威，dimensions 分类值不参与归属判定）；需要完整表述时 Read「权威源」列指向的文档原文（清单里的 summary 仅导航）。
@@ -309,7 +313,7 @@ electron-build 排除条件刻意收得很紧：`packages/runtime/**` 任何改�
 **Step 1 — 确认变更范围**（主 agent 自己跑）：
 ```bash
 git diff main...HEAD --stat
-node scripts/select-constraints.mjs --base main   # 产出 pr-review 产物目录的 constraints.md（命中约束清单，reviewer 消费）
+node scripts/select-constraints.mjs --base "$PR_BASE"   # 产出 pr-review 产物目录的 constraints.md（命中约束清单，reviewer 消费）
 ```
 
 **Step 2 — 并行派 reviewer subagent**：选中维度全派。**并行上限 ≤5**（全局 AGENTS.md subagent 约束），按维度子集数分批（超过 5 个维度分两批；不足 5 个一批派完；或按全局规则「一般用 3 个」分三批）。每个 subagent 的 task 必须包含：
@@ -371,9 +375,9 @@ Pi Extension 接口契约 checklist（SDK 签名核对 / spec 偏差记录 / sch
 
 ```bash
 # ① coverage-gate：测试第 2 遍（插桩口径）+ 覆盖率终值；diff 含 shared src 时同样传 --extra-packages（见 1.6；extension 下游自动传播无需传参）
-python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main
+python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base "$PR_BASE"
 # ② metrics-gate：结构度量终值
-python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base main
+python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base "$PR_BASE"
 # ③ pre-merge 终局：typecheck 三处 + lint 实跑；test:runtime 实跑；test:extensions/renderer 以注入值计
 bash scripts/pr-pre-merge.sh --test-result <PASS|FAIL> --quiet
 ```

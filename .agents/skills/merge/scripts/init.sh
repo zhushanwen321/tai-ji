@@ -75,6 +75,55 @@ PR_STATE=$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json state --jq '.state' 
 PR_TITLE=$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json title --jq '.title' 2>/dev/null || echo "")
 CURRENT_VERSION=$(node -p "require('$MAIN_WT/package.json').version" 2>/dev/null || echo "unknown")
 
+# ── 发布互斥检查 + 新管线状态落盘（阶段 0 = 管线开启点）──
+# 互斥依据 = .merge-state/current.json：非终态且 12h 内活跃的管线视为「发布进行中」
+# （两会话并发启动发布链是数据丢失源——bump/tag/push 全是写操作）；终态或超窗不阻塞。
+# 状态写入用 { reset: true }——清掉上一轮 release 的 tag/releasedAt 等字段，防跨轮残留。
+STATE_MSG=$(node --input-type=module -e '
+import { pathToFileURL } from "node:url"
+// node -e 模式下 argv 无 script 路径位：argv = [execPath, <四个参数>...]，故 slice(1)
+const [root, mainWt, branch, prArg] = process.argv.slice(1)
+const { readMergeState, writeMergeState, TERMINAL_STAGES } = await import(
+  pathToFileURL(mainWt + "/scripts/merge/lib/state.mjs").href
+)
+const prev = readMergeState(root)
+const WINDOW_MS = 12 * 60 * 60 * 1000
+const active = prev != null && typeof prev.stage === "string" && prev.stage !== ""
+  && !TERMINAL_STAGES.includes(prev.stage)
+  && Date.now() - Date.parse(prev.updatedAt ?? "0") < WINDOW_MS
+if (active) {
+  console.log("BUSY " + JSON.stringify({ stage: prev.stage, branch: prev.branch, pr: prev.pr, updatedAt: prev.updatedAt }))
+} else {
+  const next = writeMergeState(root, {
+    pipelineId: `${Date.now()}-${process.pid}`,
+    branch: branch,
+    pr: Number(prArg),
+    stage: "init",
+    startedAt: new Date().toISOString(),
+  }, { reset: true })
+  if (next === null) console.log("WARN: 管线状态写入失败（不阻塞；阶段 2 会再写）")
+  else console.log("OK " + next.pipelineId)
+}
+' "$WS_ROOT" "$MAIN_WT" "$BRANCH_NAME" "$PR_NUMBER" 2>&1) || { echo -e "${RED}Error: 管线状态检查/写入执行失败${NC}"; echo "  $STATE_MSG"; exit 1; }
+
+case "$STATE_MSG" in
+    BUSY*)
+        echo -e "${RED}Error: 检测到疑似进行中的发布管线，拒绝并发启动${NC}"
+        echo "  既有管线: ${STATE_MSG#BUSY }"
+        echo "  处置: 先完成该管线；确认废弃后手动删除 $WS_ROOT/.merge-state/current.json 再发起"
+        exit 1
+        ;;
+    WARN*)
+        echo -e "${YELLOW}⚠️  $STATE_MSG${NC}"
+        ;;
+    OK*)
+        echo -e "${GREEN}✅ 新发布管线已登记（pipelineId ${STATE_MSG#OK }），上一轮字段已重置${NC}"
+        ;;
+    *)
+        echo -e "${YELLOW}⚠️  管线状态输出异常（不阻塞）: $STATE_MSG${NC}"
+        ;;
+esac
+
 echo "══════════════════════════════════════════════════"
 echo -e "${BOLD}taiji 合并发布流程${NC}"
 echo "  workspace:  $WS_ROOT"

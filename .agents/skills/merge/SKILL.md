@@ -114,9 +114,9 @@ git push github HEAD --force-with-lease
 cd $WS_ROOT/main && bash .agents/skills/merge/scripts/pre-merge-check.sh "$WS_ROOT/<worktree-dir>"
 ```
 
-阶段 1 调用项目内 pre-merge-check.sh（依赖安装、类型检查、lint、测试、构建，以及第 5 步 Git 状态检查——有未提交变更或未推送 commits 会 FAIL 阻塞合并）。脚本自包含在项目 skill 目录内，不依赖全局脚本；`set -e` 运行，任一检查失败即以非零退出码中断，失败项上下文（命令输出尾部 / 失败文件清单）随错误打印，须按输出定位修复后重跑同一命令。
+阶段 1 调用项目内 pre-merge-check.sh（依赖安装、类型检查、lint、守卫测试、构建，以及第 5 步 Git 状态检查——有未提交变更或未推送 commits 会 FAIL 阻塞合并）。类型检查与守卫测试的出口 = `scripts/quality-gates.mjs`（typecheck 四处：extensions/runtime/renderer/mobile-renderer + SUITES 四族守卫——单一登记处，不再由本脚本自带清单）。`set -e` 运行，任一检查失败即以非零退出码中断，失败项上下文（命令输出尾部 / 失败文件清单）随错误打印，须按输出定位修复后重跑同一命令。
 
-**测试步骤 = unit 轨**（`TAIJI_SKIP_REAL_PI=1 pnpm test`，与 CI runtime job 同口径）。**merge 门禁不跑 e2e**——e2e / 真实进程 / 真实 LLM 用例只在开发阶段按改动范围跑（清单由 tech-design 的 e2e 影响面评估 + dev-flow 验收计划表圈定），执行准则 SSOT = AGENTS.md「测试」节。GitHub CI 同样从不跑 e2e（`TAIJI_SKIP_REAL_PI=1` + 无凭证注入 + 无 darwin pi binary）。
+**全量单测不在阶段 1 本地重跑**：同一 commit 的完整 CI（test job 全量）由阶段 2 的 PR CI 等待裁决，本地重复跑只加时长不加覆盖。**merge 门禁不跑 e2e**——e2e / 真实进程 / 真实 LLM 用例只在开发阶段按改动范围跑（清单由 tech-design 的 e2e 影响面评估 + dev-flow 验收计划表圈定），执行准则 SSOT = AGENTS.md「测试」节。GitHub CI 同样从不跑 e2e（`TAIJI_SKIP_REAL_PI=1` + 无凭证注入 + 无 darwin pi binary）。
 
 **[HISTORICAL] real-pi 失败归因纪律（2026-09-15 事故，禁止盲目重试）**：事故前 premerge 曾全量并发扫并跑了真实 LLM 等价性用例，`send-queue-e2e` 120s 事件超时——根因是跨包并发饱和 CPU 使真实轮次延迟越过预算，不是代码缺陷（junit 的 seen types 显示 LLM 在推进）。处置是结构性的：门禁只跑单测、e2e 移出 merge/PR；若开发期按改动范围跑 e2e 失败，先读 `packages/runtime/test-results/vitest-junit.xml` 的 failure 详情（seen types 区分「LLM 在推进但慢」与「真死锁」），禁止不经归因就直接重试，禁止放宽断言或膨胀预算换绿灯。
 
@@ -163,9 +163,9 @@ MAIN_SHA=$(git rev-parse github/main)
 bash .agents/skills/merge/scripts/wait-for-ci.sh "$MAIN_SHA"
 ```
 
-等待 main 分支 CI 通过。wait-for-ci.sh 是薄壳（实现在仓库 `scripts/merge/wait-for-ci.mjs`，经 main worktree 恒取 main 最新版）。需传入 commit SHA；**省略 SHA 时自动读取 merge 状态文件**（`<workspace 根>/.merge-state/current.json`，pr-merge 阶段写入的 headSha）——阶段 2 正常跑过后可直接 `bash .agents/skills/merge/scripts/wait-for-ci.sh` 不带参数。
+等待 main 分支 CI 通过。wait-for-ci.sh 是薄壳（实现在仓库 `scripts/merge/wait-for-ci.mjs`，经 main worktree 恒取 main 最新版）。需传入 commit SHA（推荐 `$MAIN_SHA` = main 最新 HEAD）；**省略 SHA 时读取 merge 状态文件**（`<workspace 根>/.merge-state/current.json`）的 `mergeSha`——仅当 `stage === 'merged'` 时消费（pr-merge 阶段落盘的 merge commit；`headSha` 是 PR head，对应的是阶段 2 已裁决过的 PR 侧 runs，不能作为本阶段判定对象）——阶段 2 正常跑过后可直接 `bash .agents/skills/merge/scripts/wait-for-ci.sh` 不带参数。
 
-> ⏱ **超时语义**：默认 600s 超时（15s 一轮轮询），超时时 exit 2 并提示仍有几个 workflow 在运行——此时询问用户处理，或用 `--timeout 1200` 拉长重跑：`bash .agents/skills/merge/scripts/wait-for-ci.sh "$MAIN_SHA" --timeout 1200`。
+> ⏱ **超时语义**：默认 2400s 超时（15s 一轮轮询；main push CI 含 e2e-visual/e2e-behavior 两个 30 分钟档 job，600s 旧默认必超时）。超时时 exit 2 并提示仍有几个 workflow 在运行——此时询问用户处理，或用 `--timeout 3600` 拉长重跑：`bash .agents/skills/merge/scripts/wait-for-ci.sh "$MAIN_SHA" --timeout 3600`。
 
 > ⚠️ **边界**：commit 在约 30s 内无任何 workflow run 时，wait-for-ci.sh 视为「无 CI」直接放行（exit 0）——merge commit 因 ci.yml 路径过滤可能未触发任何 run。此时 exit 0 ≠「CI 通过」，须先用 `gh run list --commit "$MAIN_SHA" --repo zhushanwen321/tai-ji` 人工确认是否存在 run；确认无 run 属预期（如纯 docs 改动）才可继续，不得把该放行误判为「CI 通过」。
 
