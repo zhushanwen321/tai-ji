@@ -5,7 +5,9 @@
  * pr-merge.mjs — merge 流程阶段 2：PR CI 等待 + 合并 + sync 本地 main
  *
  * 做什么：
- *   1. 等待 PR CI 通过（最多 10 分钟）
+ *   1. 等待 PR CI 通过（判定数据 = head SHA 的 workflow runs，与阶段 3 wait-for-ci
+ *      同源；等全部 run 完成才裁决，上限 30 分钟。机器人检查（Greptile 等 check
+ *      run）不进判定——CI 门禁只看本仓 workflow）
  *   2. gh pr merge --merge --delete-branch --match-head-commit <sha>（merge commit，
  *      绝不 squash；match-head-commit 保证「判定时的 head = 合并时的 head」——判定
  *      通过后 PR 又被推新提交时 gh 拒绝合并，封住客户端侧的检查-合并竞态窗口）
@@ -23,7 +25,7 @@ import { existsSync } from 'node:fs'
 import { run } from './lib/exec.mjs'
 import { RED, GREEN, YELLOW, BOLD, NC } from './lib/output.mjs'
 import { DEFAULT_REPO } from './lib/repo.mjs'
-import { waitForPrChecks } from './lib/gate.mjs'
+import { filterDependabot, waitForRuns } from './lib/gate.mjs'
 import { findWorkspaceRoot, mainWorktreePath } from './lib/workspace.mjs'
 import { writeMergeState } from './lib/state.mjs'
 
@@ -70,46 +72,58 @@ if (PR_STATE === 'MERGED') {
   fail(`Error: PR 状态为 ${PR_STATE}，无法处理（需 OPEN 或 MERGED；gh 调用失败时也落此处——检查 gh 登录态）`)
   process.exit(1)
 } else {
-  // ── PR CI 门禁（判定实现 = lib/gate.mjs，结构性 null 判定）──
-  console.log('  检查 PR CI 状态...')
-  const fetchRollup = async () => {
+  // ── PR CI 门禁（判定实现 = lib/gate.mjs；数据源 = head SHA 的 workflow runs，
+  //    与阶段 3 wait-for-ci 同源——「有 runs 必等全部完成才裁决」，不依赖
+  //    check-rollup 的注册窗口形状；机器人检查 run（非本仓 workflow）不进判定）──
+  if (!HEAD_SHA) {
+    fail('Error: 未取到 PR head commit sha，无法按 commit 查询 CI runs（检查 gh 登录态）')
+    process.exit(1)
+  }
+  console.log(`  检查 PR CI 状态（head ${HEAD_SHA.slice(0, 8)} 的 workflow runs）...`)
+  const fetchRunsRaw = async () => {
     const res = run(
       'gh',
-      ['pr', 'view', PR_NUMBER, '--repo', DEFAULT_REPO, '--json', 'statusCheckRollup'],
+      ['run', 'list', '--commit', HEAD_SHA, '--repo', DEFAULT_REPO, '--json', 'databaseId,status,conclusion,name,workflowName'],
       { stdio: 'capture' },
     )
     if (!res.ok) {
-      console.log(`  ${YELLOW}Warning: 无法获取 CI 状态，按 checks 未注册处理${NC}`)
+      console.log(`  ${YELLOW}Warning: 无法获取 CI runs，按未触发处理${NC}`)
       return []
     }
     try {
-      return JSON.parse(res.stdout).statusCheckRollup ?? []
+      return JSON.parse(res.stdout) ?? []
     } catch {
       return []
     }
   }
 
-  const verdict = await waitForPrChecks({ fetchRollup, log: (m) => console.log(`  ${m}`) })
+  const verdict = await waitForRuns({
+    fetchRuns: async () => filterDependabot(await fetchRunsRaw()),
+    // PR CI 含 e2e job（test-extensions job 超时预算 20min），10min 默认偏紧；超时是
+    // exit 1 人工介入语义，宁可宽
+    deadlineMs: 1_800_000,
+    log: (m) => console.log(`  ${m}`),
+  })
 
-  if (verdict.status === 'no-checks') {
-    fail('❌ CI checks 持续未注册（重查 4 次共 60s），无法确认 PR CI 状态')
+  if (verdict.status === 'no-runs') {
+    fail('❌ 30 秒内未检测到本次 head commit 触发的 workflow run，无法确认 PR CI 状态')
     console.log('  排查指引:')
-    console.log('    1. 取 PR head commit，确认是否触发了 CI（ci.yml 路径过滤如只改 docs/ 可能不触发）:')
-    console.log(`       gh pr view ${PR_NUMBER} --repo ${DEFAULT_REPO} --json headRefOid --jq .headRefOid`)
-    console.log(`       gh run list --repo ${DEFAULT_REPO} --commit ${HEAD_SHA || '<head-sha>'}`)
-    console.log('    2. 人工核实 checks 状态:')
-    console.log(`       gh pr view ${PR_NUMBER} --repo ${DEFAULT_REPO} --json statusCheckRollup`)
-    console.log('    3. 确认无需 CI 时人工执行合并，不依赖本脚本的自动判定')
+    console.log('    1. 确认是否触发了 CI（ci.yml 路径过滤：只改 docs/ 或 .md 可能不触发）:')
+    console.log(`       gh run list --repo ${DEFAULT_REPO} --commit ${HEAD_SHA}`)
+    console.log('    2. 确认无需 CI 时（如纯文档 PR）人工执行合并，不依赖本脚本的自动判定')
     process.exit(1)
   }
   if (verdict.status === 'fail') {
     fail('❌ PR CI 有失败项:')
-    for (const f of verdict.failing) console.log(`    ❌ ${f.name} (${f.conclusion})`)
+    for (const f of verdict.failing) {
+      console.log(`    ❌ ${f.name} (${f.conclusion})`)
+      if (f.databaseId != null) console.log(`       日志: gh run view ${f.databaseId} --repo ${DEFAULT_REPO} --log-failed`)
+    }
     process.exit(1)
   }
   if (verdict.status === 'timeout') {
-    fail('❌ PR CI 在 10 分钟内未完成（checks 仍无结论）')
-    console.log(`  排查: gh pr view ${PR_NUMBER} --repo ${DEFAULT_REPO} --json statusCheckRollup`)
+    fail('❌ PR CI 在 30 分钟内未完成（runs 仍未全部结束）')
+    console.log(`  排查: gh run list --repo ${DEFAULT_REPO} --commit ${HEAD_SHA}`)
     process.exit(1)
   }
 
