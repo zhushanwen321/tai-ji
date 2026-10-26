@@ -7,7 +7,41 @@
       "api": "openai-completions",
       "baseUrl": "https://api.stepfun.com/v1",
       "helpUrl": "https://platform.stepfun.com/docs/zh/quickstart/overview",
-      "helpText": "在 platform.stepfun.com → API Keys 创建密钥；Step Plan 套餐用户把 Base URL 换成 https://api.stepfun.com/step_plan/v1（套餐 Key 专用集群）",
+      "helpText": "在 platform.stepfun.com → API Keys 创建密钥（按量计费 API Key）。Step Plan 套餐用户请选择下方「StepFun Step Plan（阶跃星辰套餐）」条目，Base URL 已按套餐集群配好",
+      "models": [
+        {
+          "id": "step-3.5-flash",
+          "name": "Step 3.5 Flash",
+          "contextWindow": 262144,
+          "maxTokens": 65536,
+          "reasoning": true,
+          "input": ["text"]
+        },
+        {
+          "id": "step-3.7-flash",
+          "name": "Step 3.7 Flash",
+          "contextWindow": 262144,
+          "maxTokens": 230400,
+          "reasoning": true,
+          "input": ["text", "image"]
+        },
+        {
+          "id": "step-5-preview",
+          "name": "Step 5 Preview",
+          "contextWindow": 1024000,
+          "maxTokens": 65536,
+          "reasoning": true,
+          "input": ["text", "image"]
+        }
+      ]
+    },
+    {
+      "id": "stepfun-step-plan",
+      "name": "StepFun Step Plan（阶跃星辰套餐）",
+      "api": "openai-completions",
+      "baseUrl": "https://api.stepfun.com/step_plan/v1",
+      "helpUrl": "https://platform.stepfun.com/docs/zh/quickstart/overview",
+      "helpText": "Step Plan 套餐专用集群（Base URL 固定为 https://api.stepfun.com/step_plan/v1，无需修改）。在 platform.stepfun.com → API Keys 创建或复制套餐 Key；额度查询需在该 provider 设置页的「Coding Plan 额度查询」区用浏览器 Cookie 授权",
       "models": [
         {
           "id": "step-3.5-flash",
