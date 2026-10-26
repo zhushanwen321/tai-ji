@@ -230,11 +230,11 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/renderer/src/__tests__/composables/use-plan-drawer-sync.test.ts"
+          "ref": "packages/renderer/src/__tests__/composables/use-plan-sync.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/renderer/src/__tests__/composables/use-extension-ui-plan-review.test.ts"
+          "ref": "packages/renderer/src/__tests__/composables/useExtensionUI.test.ts"
         },
         {
           "kind": "spec",
@@ -412,7 +412,7 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/equivalence/subagent-live-reload.test.ts"
+          "ref": "packages/runtime/src/__tests__/infra/subagent-control/subagent-tee.test.ts"
         },
         {
           "kind": "spec",
@@ -1540,7 +1540,7 @@
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-03-terminal-resume-rejection.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario.test.ts"
         },
         {
           "kind": "spec",
@@ -1556,15 +1556,15 @@
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-07-failed-terminal-rejection.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-08-orphan-reap.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-orphan-reap.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-09-cross-process-resume.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario.test.ts"
         },
         {
           "kind": "spec",
@@ -1576,7 +1576,7 @@
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-12-session-switch-keepalive.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-merged.test.ts"
         },
         {
           "kind": "spec",
@@ -1596,15 +1596,15 @@
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-17-resume-then-abort.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-18-corruption-rejection.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-19-orphan-reap-legacy.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-orphan-reap.test.ts"
         },
         {
           "kind": "spec",
@@ -1616,11 +1616,11 @@
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-23-phase-statemachine.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-merged.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-24-args-mismatch-rejection.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool/__tests__/tool-workflow.test.ts"
         },
         {
           "kind": "spec",
@@ -1660,7 +1660,7 @@
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/interface/command/__tests__/commands-resume.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/commands.test.ts"
         },
         {
           "kind": "spec",
@@ -2370,23 +2370,23 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-mutate-matrix.test.ts"
+          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-invariants.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-persistence.test.ts"
+          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-invariants.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-review-loop.test.ts"
+          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-invariants.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-state-machine.test.ts"
+          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-invariants.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-ownership.test.ts"
+          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-invariants.test.ts"
         },
         {
           "kind": "harness",
@@ -2434,11 +2434,11 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/renderer/src/components/canvas/canvas-display.test.ts"
+          "ref": "packages/renderer/src/components/canvas/canvas-pane.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/renderer/src/components/canvas/canvas-graph.test.ts"
+          "ref": "packages/renderer/src/components/canvas/canvas-pane.test.ts"
         },
         {
           "kind": "spec",
@@ -2576,11 +2576,11 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/pi-subagent-cli/src/__tests__/spawn-runner-prompt-ack.test.ts"
+          "ref": "packages/pi-subagent-cli/src/__tests__/spawn-runner.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/pi-subagent-cli/src/__tests__/raw-mirror.test.ts"
+          "ref": "packages/pi-subagent-cli/src/__tests__/spawn-runner.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -2686,13 +2686,13 @@
       "scope": [
         "packages/shared/src/subagent.ts",
         "packages/subagent-core/src/execution/domain/record-model.ts",
-        "packages/subagent-core/src/execution/__tests__/subagent-model-source-parity.test.ts"
+        "packages/subagent-core/src/__tests__/record-model-override.test.ts"
       ],
       "layer": "L1",
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/subagent-core/src/execution/__tests__/subagent-model-source-parity.test.ts"
+          "ref": "packages/subagent-core/src/__tests__/record-model-override.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3530,15 +3530,15 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-sandbox-escape.test.ts"
+          "ref": "packages/runtime/test/plugin-sandbox.test.ts"
         }
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run test/plugin-sandbox-escape.test.ts",
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run test/plugin-sandbox.test.ts",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
-      "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）。触发条件 = scope 内沙箱边界与 loader 本体任一 diff 命中。断言本质 = ESM loader 拦截在真实 fork 子进程 + register hook 下的逃逸边界（CJS interceptor / BLOCKED_BUILTINS SSOT 的 in-process 面 8 条留默认组）；serial=真 的理由 = loader 经 register() 自注册会污染测试进程，只能真 fork 验证，无进程内完成信号。"
+      "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）。触发条件 = scope 内沙箱边界与 loader 本体任一 diff 命中。断言本质 = ESM loader 拦截在真实 fork 子进程 + register hook 下的逃逸边界（CJS interceptor / BLOCKED_BUILTINS SSOT 的 in-process 面 8 条留默认组）；serial=真 的理由 = loader 经 register() 自注册会污染测试进程，只能真 fork 验证，无进程内完成信号。[2026-10-26 测试整合批 2 归并] 逃逸 spec 并入 test/plugin-sandbox.test.ts（in-process 快用例与门控用例同文件、用例级门控不变），assets/run 随产物更新。"
     },
     {
       "id": "E2E-INTEG-18",
@@ -3584,7 +3584,7 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-host.test.ts"
+          "ref": "packages/runtime/test/plugin-host-process.test.ts"
         },
         {
           "kind": "spec",
@@ -3592,20 +3592,20 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-host-process-exit.test.ts"
+          "ref": "packages/runtime/test/plugin-host-process.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-host-sandbox-wiring.test.ts"
+          "ref": "packages/runtime/test/plugin-host-process.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-sandbox-escape.test.ts"
+          "ref": "packages/runtime/test/plugin-sandbox.test.ts"
         }
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run test/lifecycle-races.test.ts test/plugin-host.test.ts test/plugin-host-process.test.ts test/plugin-host-process-exit.test.ts test/plugin-host-sandbox-wiring.test.ts test/plugin-sandbox-escape.test.ts",
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/runtime exec vitest run test/lifecycle-races.test.ts test/plugin-host.test.ts test/plugin-host-process.test.ts test/plugin-host-process-exit.test.ts test/plugin-host-sandbox-wiring.test.ts test/plugin-sandbox.test.ts",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
       "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）。触发条件 = scope 内 fork 宿主入口与插件装载链任一 diff 命中。断言本质 = LC-U1-ENTRY 真实 IPC null/2MB 消息防御与回复归属匹配（同语义消息注入形态已 fork 桩化留默认组 13 条）；serial=真 的理由 = 真实 fork IPC 往返，满并行下复发实录在案。"
@@ -3838,7 +3838,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/subagent-core/src/execution/__tests__/worktree-reconcile-aging.test.ts"
+          "ref": "packages/subagent-core/src/execution/__tests__/worktree-reconcile.integration.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3860,7 +3860,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/subagent-core/src/execution/__tests__/terminal-write-latency.test.ts"
+          "ref": "packages/subagent-core/src/execution/__tests__/record-store-persistence-suite.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3929,7 +3929,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/subagent-core/src/__tests__/transport-local.test.ts"
+          "ref": "packages/subagent-core/src/execution/engine/client/__tests__/engine-client.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3992,7 +3992,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/pi-subagent-cli/src/__tests__/run-spawn-once.integration.test.ts"
+          "ref": "packages/pi-subagent-cli/src/__tests__/run-spawn.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4013,7 +4013,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/pi-subagent-cli/src/__tests__/run-spawn-once-session-file-fallback.e2e.test.ts"
+          "ref": "packages/pi-subagent-cli/src/__tests__/run-spawn.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4034,7 +4034,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/zcode-subagent-cli/src/__tests__/protocol-e2e.test.ts"
+          "ref": "packages/zcode-subagent-cli/src/__tests__/zcode-session-db.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4055,7 +4055,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/zcode-subagent-cli/src/__tests__/connection.test.ts"
+          "ref": "packages/zcode-subagent-cli/src/__tests__/session-channel.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4181,7 +4181,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/__tests__/review-fix-loop-e2e.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/workflows-e2e.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4202,7 +4202,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-09-cross-process-resume.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4332,7 +4332,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "apps/electron/main/test/updater-script-integration.test.ts"
+          "ref": "apps/electron/main/test/updater.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4356,7 +4356,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-esm-loader.test.ts"
+          "ref": "packages/runtime/src/services/plugin-service/__tests__/plugin-host-process.test.ts"
         },
         {
           "kind": "spec",
@@ -4430,11 +4430,11 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-invoke-channel.test.ts"
+          "ref": "packages/runtime/test/plugin-commands-executor-timeout.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-openurl-scheme.test.ts"
+          "ref": "packages/runtime/test/plugin-rpc-setup.test.ts"
         },
         {
           "kind": "spec",
@@ -4581,7 +4581,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/subagent-core/src/execution/__tests__/notifier-round-facts.test.ts"
+          "ref": "packages/subagent-core/src/execution/__tests__/notifier.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4675,6 +4675,86 @@
       "owner": "scripts/",
       "authority": "scripts/test-related.mjs",
       "note": "使用说明/默认 base/上限保护/回退名单的权威源 = 脚本头注释。2026-10-26 首版 30 merge 回放达标率 6/30（B2 不达标结论与归因见 round2 报告，.tmp 不入库）；脚本不接入任何现有技能命令，接入与否是后续独立变更。"
+    },
+    {
+      "id": "E2E-SESSFILE-01",
+      "summary": "session-file-utils 单测合并产物：sidecar 绑定写点 × 目录级 TTL 缓存一致性 / 退役 .model.json 残留清扫 / tmp 迁移四态 / scanPiSessions 降级显形 / persistSessionEnd + extractSessionOutcome round-trip（零 token）",
+      "scope": [
+        "packages/runtime/src/infra/pi/session-file-utils.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/session-file-utils.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "cd packages/runtime && npx vitest run test/session-file-utils.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#2-测试分层",
+      "note": "测试整合批 2 合并产物（6 个源文件并入，来源分节注释见产物头；preset-sidecar-io 与 scan-external 两节因 mock 工厂导出集截断 / 被测对象不同未并入）。runtime/test 资产族防漏门禁（--staged）对新增文件要求 rule 覆盖而登记。"
+    },
+    {
+      "id": "E2E-SESSFILE-02",
+      "summary": "EventAdapter extension 域合并产物：extension 事件翻译 / message_update 矩阵与畸形检查 / FR-1~6 新事件翻译 / toolResult 修正（零 token）",
+      "scope": [
+        "packages/runtime/src/infra/pi/event-adapter.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/event-adapter.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "cd packages/runtime && npx vitest run test/event-adapter.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#2-测试分层",
+      "note": "round5-g 收尾波合并产物（event-adapter-new-events / -extension / -message-stream / -toolresult 四源节，来源分节注释见产物头），与 src/infra/pi/__tests__/event-adapter.test.ts（C07 产物，协议翻译域）为同被测对象的两个分层产物。防漏门禁对新增文件要求 rule 覆盖而登记。"
+    },
+    {
+      "id": "E2E-SESSFILE-03",
+      "summary": "plugin-service api 层合并产物：commands-api 命令注册与 RPC handler / session-api 分发 / ui-api 运行时出口 / esm-loader argv 契约（零 token）",
+      "scope": [
+        "packages/runtime/src/services/plugin-service/api/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-service.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "cd packages/runtime && npx vitest run test/plugin-service.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#2-测试分层",
+      "note": "round5-g 收尾波合并产物（plugin-commands-views / plugin-modal-headeraction-contract / plugin-esm-loader-argv 三源节，来源分节注释见产物头）。防漏门禁对新增文件要求 rule 覆盖而登记。"
+    },
+    {
+      "id": "E2E-MANIFEST-01",
+      "summary": "subagent-core ManifestStore 持久化合并产物：parentRecordId 落盘与向后兼容 / sweepTmpFiles 静默清扫 / rootSessionId 树物理隔离 / run 级终局派生视图写读（零 token）",
+      "scope": [
+        "packages/subagent-core/src/execution/persistence/manifest-store.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/subagent-core/src/execution/__tests__/manifest-store-suite.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "cd packages/subagent-core && npx vitest run src/execution/__tests__/manifest-store-suite.test.ts",
+      "owner": "packages/subagent-core",
+      "authority": "docs/TEST-STRATEGY.md#2-测试分层",
+      "note": "round5-g 合并产物（manifest-parentid / manifest-store-tmp-recovery / records-cwd-isolation / run-terminal-manifest 四源节，来源清单见产物头）。防漏门禁对新增文件要求 rule 覆盖而登记。"
     }
   ]
 }

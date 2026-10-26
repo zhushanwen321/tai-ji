@@ -694,11 +694,11 @@ cd packages/renderer && npx vitest run src/__tests__/lib/match-engine.test.ts  #
 
 | 用例 | 文件 | 测试执行层 | 覆盖点 |
 |------|------|----------|--------|
-| T1.8/T1.9/T1.16/T1.17/T1.18 | `packages/core/src/domain/new-task-search/__tests__/recents.test.ts`（8 测）| unit | recents 空库/持久化/脏数据降级/配额满/FIFO |
-| T2.4/T2.5 | `packages/core/src/domain/new-task-search/__tests__/command-registry.test.ts`（4 测）+ `command-store.test.ts`（8 测）| unit | 命令注册表聚合/物理隔离/同名不撞/无 session |
+| T1.8/T1.9/T1.16/T1.17/T1.18 | `packages/core/src/domain/new-task-search/__tests__/port.test.ts`（8 测）| unit | recents 空库/持久化/脏数据降级/配额满/FIFO |
+| T2.4/T2.5 | `packages/core/src/domain/new-task-search/__tests__/port.test.ts`（4 测）+ `command-store.test.ts`（8 测）| unit | 命令注册表聚合/物理隔离/同名不撞/无 session |
 | AC-1.1~1.4 | `packages/core/src/domain/new-task-search/__tests__/match-engine.test.ts`（10 测）| unit | matchFilter/segments 纯函数 + 边界 |
-| T1.10/T1.12/T2.1/T3.1~3.5/T3.9/T4.1/T4.2/T4.4~4.9/T5.1/T5.2 | `packages/core/src/domain/new-task-search/__tests__/search.test.ts`（16 测）| unit | 编排/loadSeq/缓存/WS 超时 race/DTO 映射 |
-| T2.2/T2.3/T2.6/T2.7/T3.4/T3.6/T4.3/T4.6/T4.7/T5.3 | `packages/core/src/domain/new-task-search/__tests__/search-jump.test.ts`（13 测）| unit | 跳转分发/异常恢复/AC-6.9 直调 |
+| T1.10/T1.12/T2.1/T3.1~3.5/T3.9/T4.1/T4.2/T4.4~4.9/T5.1/T5.2 | `packages/core/src/domain/new-task-search/__tests__/port.test.ts`（16 测）| unit | 编排/loadSeq/缓存/WS 超时 race/DTO 映射 |
+| T2.2/T2.3/T2.6/T2.7/T3.4/T3.6/T4.3/T4.6/T4.7/T5.3 | `packages/core/src/domain/new-task-search/__tests__/port.test.ts`（13 测）| unit | 跳转分发/异常恢复/AC-6.9 直调 |
 
 **集成测试（mount SearchModal，mock composable，查 document.body）**：
 
