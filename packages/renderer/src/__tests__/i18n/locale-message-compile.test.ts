@@ -14,7 +14,7 @@ import zhCN from '@/i18n/locales/zh-CN'
  *
  * 本测试遍历 renderer 装配后的全量 messages（ui 域经 @taiji/ui/locale/* 传入 +
  * renderer 自有域），对每条叶子文案跑真实编译器——SSOT 聚合层另有同型检查
- * （packages/ui/src/locale/__tests__/locale-message-compile.test.ts）。
+ * （packages/ui/src/locale/__tests__/locale.test.ts）。
  *
  * onError 必须挂「收集不抛」形态：裸调 baseCompile 不挂 onError 时解析器静默吞错，
  * 任何不挂 onError 的体检都是假绿。

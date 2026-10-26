@@ -63,8 +63,8 @@ const STOCK = {
   'packages/subagent-core/src/execution/engine/__tests__/conformance/static-spawn-guard.test.ts': null,
   'packages/subagent-core/src/orchestration/__tests__/rebuild-sample-fixture.test.ts': null,
   'packages/subagent-engine-sdk/src/__tests__/cli-entry.test.ts': null,
-  'packages/ui/src/features/chat/__tests__/markdown-filepath.test.ts': null,
-  'packages/ui/src/features/chat/__tests__/markdown-renderer-incremental.test.ts': null,
+  'packages/ui/src/features/chat/__tests__/markdown.test.ts': null,
+  'packages/ui/src/features/chat/__tests__/mermaid.test.ts': null,
   'packages/zcode-subagent-cli/src/__tests__/zcode-engine.test.ts': null,
 }
 for (const k of Object.keys(STOCK)) STOCK[k] = '存量：二波清单外文件（2026-10-22 盘点登记），信号待后续波次处置（确定性化/挂门控/豁免细分）'

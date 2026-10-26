@@ -1,8 +1,36 @@
+/**
+ * locale 模块合并测试产物（round5-g ui idx9）。
+ *
+ * 来源节（每来源文件包以基名命名的 describe）：
+ *   locale-message-compile / locale-structure
+ *
+ * 同被测单元 = src/locale 聚合模块族（index.ts 双侧聚合 + zh-CN/en-US 域文件不变量）。
+ * 零 vi.mock；compile 节用 @intlify 真实编译器扫描，structure 节做结构/自包含静态断言。
+ *
+ * 运行：cd packages/ui && npx vitest run src/locale/__tests__/locale.test.ts
+ */
 import { baseCompile } from '@intlify/message-compiler'
 import type { CompileError } from '@intlify/message-compiler'
 import { describe, expect, it } from 'vitest'
 import { enUS, zhCN } from '../index'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import zhCNAggregate from '../zh-CN'
+import enUSAggregate from '../en-US'
 
+/**
+ * locale 模块合并测试产物（round5-g ui idx9）。
+ *
+ * 来源节（每来源文件包以基名命名的 describe）：
+ *   locale-message-compile / locale-structure
+ *
+ * 同被测单元 = src/locale 聚合模块族（index.ts 双侧聚合 + zh-CN/en-US 域文件不变量）。
+ * 零 vi.mock；compile 节用 @intlify 真实编译器扫描，structure 节做结构/自包含静态断言。
+ *
+ * 运行：cd packages/ui && npx vitest run src/locale/__tests__/locale.test.ts
+ */
+
+describe('locale-message-compile', () => {
 /**
  * locale 消息编译检查测试。
  *
@@ -65,4 +93,48 @@ describe('locale 消息编译检查', () => {
     const issues = collectCompileIssues(locale, aggregate, '')
     expect(issues).toEqual([])
   })
+})
+
+})
+
+describe('locale-structure', () => {
+/**
+ * ui locale 模块结构测试。
+ *
+ * 域文件级下沉规则：被 ui 组件消费任何 key 的 i18n 域文件整体迁入本模块（zh/en
+ * 双侧逐域镜像）。本测试检查两层不变量：
+ * 1. 迁移域清单锚定（每侧恰好 7 域，多域/缺域即红）
+ * 2. 域文件自包含（纯文案数据，零 import——域文件引入壳层依赖即红）
+ *
+ * zh/en 双侧 key 结构一致性由 pre-commit check_i18n_locale_sync.py 检查
+ * （拍平 key 完整路径集合比对，glob 覆盖 renderer 与 ui 两组 locale 根目录）。
+ */
+
+const EXPECTED_DOMAINS = ['common', 'composable', 'extensionUI', 'newTask', 'panel', 'search', 'settings'] as const
+
+describe('ui locale 聚合形态', () => {
+  it.each([
+    ['zh-CN', zhCNAggregate],
+    ['en-US', enUSAggregate],
+  ])('%s 单侧聚合恰好含迁移域全集，无多域无缺域', (_locale, aggregate) => {
+    expect(Object.keys(aggregate).sort()).toEqual([...EXPECTED_DOMAINS].sort())
+  })
+
+  it('index 双侧导出与单侧聚合文件同一对象形态', () => {
+    expect(zhCN).toEqual(zhCNAggregate)
+    expect(enUS).toEqual(enUSAggregate)
+  })
+})
+
+describe('域文件自包含（纯文案数据）', () => {
+  it.each(EXPECTED_DOMAINS)('%s 域 zh/en 双侧文件零 import', (domain) => {
+    for (const side of ['zh-CN', 'en-US'] as const) {
+      const source = readFileSync(resolve(__dirname, `../${side}/${domain}.ts`), 'utf8')
+      // 断言模块级 import 语句（行首）而非单词——英文文案值可合法含 "import" 字样
+      expect(source).not.toMatch(/^import\s/m)
+      expect(source).toMatch(/export default/)
+    }
+  })
+})
+
 })
