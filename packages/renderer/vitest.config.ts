@@ -44,6 +44,12 @@ export default taijiTestConfig({
       '@taiji/shared': resolve(__dirname, '../shared/src'),
       '@taiji/core': resolve(__dirname, '../core/src'),
       '@taiji/ui': resolve(__dirname, '../ui/src'),
+      // reka-ui 桶装载削减（仅测试侧）：'reka-ui' → 瘦入口 shim（12 个在用组件子树的
+      // 逐文件 re-export，见 shim 文件头）。dist/index.js 桶每测试文件装载 ~280ms
+      // （265 文件合计 ~75s CPU，装载成本第一热点，数据见 .tmp/round4-a-import-durations.md）；
+      // shim 后仅装载在用子树。新增 reka-ui 组件 import 须同步补 shim（缺导出 import 期
+      // 即报错，fail-fast）。生产构建（vite.config.ts）与 typecheck 不经此 alias。
+      'reka-ui': resolve(__dirname, 'src/__tests__/helpers/reka-ui-slim.ts'),
     },
   },
 })
