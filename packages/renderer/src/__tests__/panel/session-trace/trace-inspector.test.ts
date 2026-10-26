@@ -31,16 +31,41 @@ vi.mock('@/composables/features/chat/useSessionDerivations', () => ({
   useSessionDerivations: () => ({ derivedStatus: () => ({ value: 'done' }) }),
 }))
 
-// ── 静态重面板 vi.mock（import 期替换：global.stubs 只在渲染期替换，import 期仍加载原
-// 模块触发 PanelContainer 整图 transform；占位组件与原 stubs 等价——同名 testid）。两点
-// 边界：① TraceInspector 本体不 mock——组件级用例直接 mount 本体（L74 静态 import），
-// mock 会污染本体；② 懒加载 DetailPane/TerminalView（PanelContainer 动态 import，不在
-// 静态图内）保留渲染期 stub。──
+// ── 静态重面板 + 壳层组件 vi.mock（import 期替换：global.stubs 只在渲染期替换，import 期
+// 仍加载原模块触发 PanelContainer 整图 transform；mock 集对齐 panel-container-drawer-mode.test.ts
+// ——Panel/PanelHeader/ToastContainer/PlanDocsPanel/BtwPanel/BackgroundTaskDetailPanel 在本文件
+// 零断言，占位只砍 transform；工厂零外部引用（普通 options 对象组件），规避 vi.mock hoisting
+// 对顶层绑定的限制）。两点边界：① TraceInspector 本体不 mock——组件级用例直接 mount 本体
+// （L74 静态 import），mock 会污染本体（@taiji/ui/extension-host 链经 PanelHeader 引入，
+// PanelHeader 已 mock 即被切断，无需直 mock）；② 懒加载 DetailPane/TerminalView
+// （PanelContainer 动态 import，不在静态图内）保留渲染期 stub。──
 vi.mock('@/components/panel/GitPanel.vue', () => ({
   default: { name: 'GitPanel', template: '<div data-testid="git-panel" />' },
 }))
 vi.mock('@/components/panel/CommandDocPanel.vue', () => ({
   default: { name: 'CommandDocPanel', template: '<div data-testid="doc-panel" />' },
+}))
+vi.mock('@/components/extension/BackgroundTaskDetailPanel.vue', () => ({
+  default: { name: 'BackgroundTaskDetailPanel', template: '<div data-testid="bash-task-detail-panel" />' },
+}))
+vi.mock('@/components/panel/plan/PlanDocsPanel.vue', () => ({
+  default: { name: 'PlanDocsPanel', template: '<div data-testid="plan-docs-panel" />' },
+}))
+vi.mock('@/components/panel/BtwPanel.vue', () => ({
+  default: { name: 'BtwPanel', template: '<div data-testid="btw-panel" />' },
+}))
+vi.mock('@/components/panel/Panel.vue', () => ({
+  default: {
+    name: 'Panel',
+    props: { panelId: String, sessionId: { type: String, default: null } },
+    template: '<div data-testid="panel" :data-panel-id="panelId" />',
+  },
+}))
+vi.mock('@/components/panel/PanelHeader.vue', () => ({
+  default: { name: 'PanelHeader', template: '<div />' },
+}))
+vi.mock('@/components/ui/ToastContainer.vue', () => ({
+  default: { name: 'ToastContainer', template: '<div />' },
 }))
 vi.mock('@/components/panel/SubagentTab.vue', () => ({
   default: { name: 'SubagentTab', template: '<div data-testid="subagent-panel" />' },
@@ -147,12 +172,6 @@ function buildSnapshot(): ServerMessageMap['session.traceEntries'] {
 const DesktopStub = (name: string, testid: string) =>
   defineComponent({ name, template: `<div data-testid="${testid}" />` })
 
-const PanelStub = defineComponent({
-  name: 'Panel',
-  props: { panelId: String, sessionId: { type: String, default: null } },
-  template: '<div data-testid="panel" :data-panel-id="panelId" />',
-})
-
 // PanelContainer 组件构造器（beforeAll 预热填充）：整图 transform 首载成本（junit 实测
 // 单条 13s+）一次性移入文件级 beforeAll，不落在任何单条用例预算内（TEST-STRATEGY「新写测试判据」
 // h 类处置：模块图首载预热共享；vi.mock 声明提升到文件顶部，预热 import 时 mock 已生效）
@@ -166,7 +185,6 @@ async function mountContainer() {
   return mount(PanelContainerCtor, {
     global: {
       stubs: {
-        Panel: PanelStub,
         DetailPane: DesktopStub('DetailPane', 'detail-panel'),
         TerminalView: DesktopStub('TerminalView', 'terminal-panel'),
       },
