@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/session-delivery",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Session message delivery kernel: zero-pi-dependency strategy layer for idempotent, accept-time dispatch of messages into pi sessions",
   "main": "src/index.ts",
   "module": "src/index.ts",

@@ -1,5 +1,11 @@
 # @zhushanwen/session-delivery
 
+## 2.1.0
+
+### Minor Changes
+
+- da658a786: Wire the session.delivery topic on delivery runtime creation; settlement backfill now reads the authoritative reason channel.
+
 ## 2.0.0
 
 ### Major Changes
