@@ -2983,13 +2983,14 @@
     },
     {
       "id": "E2E-CHANGESET-01",
-      "summary": "changeset 声明包合法性双防线：pre-commit staged 拦截 + Gate-1a.5/dev-merge gates 无条件 fail 方向——private/ignore 包声明永不生效（纯 private 被 version 静默跳过残留、混合声明阻断 version）",
+      "summary": "changeset 声明包合法性双防线：pre-commit staged 拦截 + Gate-1a.5/dev-merge gates 无条件 fail 方向——private/ignore 包声明永不生效（纯 private 被 version 静默跳过残留、混合声明阻断 version）；包枚举出口 versionable-packages.mjs（workspace globs + config.ignore 单一 CLI，check-version-changes.sh / apply-version.sh / changeset-check 方向① 三处消费，四份平行枚举归一）",
       "scope": [
         "scripts/changeset-versionable.mjs",
         "scripts/changeset-check.mjs",
         ".githooks/check_changeset_packages.mjs",
         "scripts/__tests__/changeset-versionable.test.mjs",
-        "scripts/__tests__/changeset-check.test.mjs"
+        "scripts/__tests__/changeset-check.test.mjs",
+        "scripts/versionable-packages.mjs"
       ],
       "layer": "L1",
       "assets": [
@@ -3012,6 +3013,10 @@
         {
           "kind": "spec",
           "ref": "scripts/__tests__/changeset-check.test.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/versionable-packages.mjs"
         }
       ],
       "trigger": "on-diff",

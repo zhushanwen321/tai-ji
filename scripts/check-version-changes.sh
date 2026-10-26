@@ -78,60 +78,28 @@ function git(args) {
   return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
 }
 
-// --- 包发现：精确扫 4 类根（extensions/*、extensions/shared/*、packages/*、apps/*）---
-function listDirs(rel) {
-  const p = path.join(ROOT, rel);
-  if (!fs.existsSync(p)) return [];
-  return fs.readdirSync(p, { withFileTypes: true })
-    .filter(e => e.isDirectory() && e.name !== 'node_modules')
-    .map(e => e.name);
+// --- 包发现：单一 CLI（scripts/versionable-packages.mjs；枚举唯一源 = workspace globs
+//     (@manypkg) + config.ignore，与 changeset-versionable.mjs 方向②同源）——历史上此处
+//     与 apply-version.sh 各持硬编码目录、changeset-check.mjs 方向① 持 extensions/ 正则，
+//     四份平行枚举已收敛，目录布局变化自动跟随 workspace 定义 ---
+const wsData = JSON.parse(execFileSync(
+  'node', [path.join(ROOT, 'scripts', 'versionable-packages.mjs'), '--json'],
+  { cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] },
+));
+const packages = {};
+for (const p of wsData.packages) {
+  packages[p.name] = { name: p.name, dir: p.dir, version: p.version, private: p.private, wsDeps: p.wsDeps };
 }
+// linked 组参考仍读 config（ignore 判定已上收到 CLI 的 versionable 标记）
+const configPath = path.join(ROOT, '.changeset/config.json');
+const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+const exists = (name) => Object.prototype.hasOwnProperty.call(packages, name);
+const isVersionable = (name) => exists(name) && wsData.packages.find((p) => p.name === name).versionable;
 function readPkgIfExists(rel) {
   const p = path.join(ROOT, rel);
   if (!fs.existsSync(p)) return null;
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
 }
-const pkgJsons = [];
-// extensions 分组布局（taiji/universal，2026-08-22 目录重组）：分组目录 + shared 库 + 顶层
-// 兜底（未来新增分组单点追加）。旧一层扫描在重组后漏掉全部分组包，此为根因防御。
-for (const base of ['extensions/taiji', 'extensions/universal', 'extensions', 'packages', 'apps']) {
-  for (const name of listDirs(base)) {
-    if (base === 'extensions' && ['shared', 'taiji', 'universal'].includes(name)) continue; // 分组目录/shared 单独扫
-    if (fs.existsSync(path.join(ROOT, base, name, 'package.json'))) {
-      pkgJsons.push(`${base}/${name}/package.json`);
-    }
-  }
-}
-for (const name of listDirs('extensions/shared')) {
-  if (fs.existsSync(path.join(ROOT, 'extensions/shared', name, 'package.json'))) {
-    pkgJsons.push(`extensions/shared/${name}/package.json`);
-  }
-}
-
-// config.ignore 是 changeset 自己的「不版本化」名单，沿用同一语义
-const configPath = path.join(ROOT, '.changeset/config.json');
-const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
-const ignoreSet = new Set(config.ignore || []);
-
-// packages: name -> { dir, version, private, wsDeps:[{dep,range,depType}] }
-const packages = {};
-for (const rel of pkgJsons) {
-  const raw = readPkgIfExists(rel);
-  if (!raw || !raw.name) continue;
-  const dir = path.dirname(rel).replace(/\/package\.json$/, '');
-  const wsDeps = [];
-  for (const depType of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
-    const sec = raw[depType] || {};
-    for (const [dep, range] of Object.entries(sec)) {
-      if (typeof range === 'string' && range.startsWith('workspace')) {
-        wsDeps.push({ dep, range, depType });
-      }
-    }
-  }
-  packages[raw.name] = { name: raw.name, dir, version: raw.version, private: !!raw.private, wsDeps };
-}
-const exists = (name) => Object.prototype.hasOwnProperty.call(packages, name);
-const isVersionable = (name) => exists(name) && !packages[name].private && !ignoreSet.has(name);
 
 // --- 解析 range 成 base/head ref（git show <ref>:<path> 取基线版本）---
 let baseRef, headRef;

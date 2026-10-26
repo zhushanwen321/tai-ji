@@ -32,27 +32,27 @@ function fakeGit(routes) {
   }
 }
 
-describe('extractChangedPkgs：三种布局 + src 过滤 + 去重（对拍原 grep/sed 逻辑）', () => {
-  const names = {
-    'extensions/universal/todo': '@zhushanwen/pi-todo',
-    'extensions/taiji/system-prompt': '@zhushanwen/pi-system-prompt',
-    'extensions/shared/file-lock': '@zhushanwen/pi-file-lock',
-    'extensions/legacy-flat': '@zhushanwen/pi-legacy',
-  }
-  const readPkgName = (dir) => names[dir] ?? null
+describe('extractChangedPkgs：registry 目录匹配 + src 过滤 + 去重 + 最长前缀', () => {
+  // pkgEntries 形态 = runCheck 从 loadPackageRegistry 推导的可版本化包（dir 仓库相对）
+  const entries = [
+    { name: '@zhushanwen/pi-todo', dir: 'extensions/universal/todo' },
+    { name: '@zhushanwen/pi-system-prompt', dir: 'extensions/taiji/system-prompt' },
+    { name: '@zhushanwen/pi-file-lock', dir: 'extensions/shared/file-lock' },
+    { name: '@zhushanwen/session-delivery', dir: 'packages/session-delivery' },
+  ]
 
-  it('分组布局（taiji/universal/shared）与旧扁平布局都识别', () => {
+  it('分组布局（taiji/universal/shared）与 packages/ 都识别——packages/ 是 v0.11.16 漏声明直穿的形态', () => {
     const files = [
       'extensions/universal/todo/src/index.ts',
       'extensions/taiji/system-prompt/src/foo.ts',
       'extensions/shared/file-lock/src/lock.ts',
-      'extensions/legacy-flat/src/a.ts',
+      'packages/session-delivery/src/a.ts',
     ]
-    expect(extractChangedPkgs(files, readPkgName)).toEqual([
+    expect(extractChangedPkgs(files, entries)).toEqual([
       '@zhushanwen/pi-todo',
       '@zhushanwen/pi-system-prompt',
       '@zhushanwen/pi-file-lock',
-      '@zhushanwen/pi-legacy',
+      '@zhushanwen/session-delivery',
     ])
   })
   it('非 src 改动（README/docs/examples/workflows）不算发布改动', () => {
@@ -61,19 +61,23 @@ describe('extractChangedPkgs：三种布局 + src 过滤 + 去重（对拍原 gr
       'extensions/universal/todo/docs/guide.md',
       'extensions/universal/todo/examples/demo.ts',
       'extensions/universal/todo/workflows/wf.js',
+      'packages/session-delivery/package.json',
     ]
-    expect(extractChangedPkgs(files, readPkgName)).toEqual([])
+    expect(extractChangedPkgs(files, entries)).toEqual([])
   })
-  it('package.json 读不到的包（含已删除的包）自然跳过', () => {
+  it('不在 registry 清单内的目录（含已删除的包 / workspace 外目录）不触发', () => {
     const files = ['extensions/universal/removed-pkg/src/x.ts', 'extensions/universal/todo/src/y.ts']
-    expect(extractChangedPkgs(files, readPkgName)).toEqual(['@zhushanwen/pi-todo'])
+    expect(extractChangedPkgs(files, entries)).toEqual(['@zhushanwen/pi-todo'])
   })
-  it('同包多文件去重', () => {
-    const files = [
-      'extensions/universal/todo/src/a.ts',
-      'extensions/universal/todo/src/b.ts',
+  it('同包多文件去重；嵌套目录取最长前缀', () => {
+    const nested = [
+      ...entries,
+      { name: '@zhushanwen/nested', dir: 'packages/session-delivery/sub' },
     ]
-    expect(extractChangedPkgs(files, readPkgName)).toEqual(['@zhushanwen/pi-todo'])
+    expect(
+      extractChangedPkgs(['packages/session-delivery/src/a.ts', 'packages/session-delivery/src/b.ts'], nested),
+    ).toEqual(['@zhushanwen/session-delivery'])
+    expect(extractChangedPkgs(['packages/session-delivery/sub/src/c.ts'], nested)).toEqual(['@zhushanwen/nested'])
   })
 })
 
@@ -98,19 +102,19 @@ describe('renderLines：文案与原 check_changeset 逐字对拍（缺 [pr-pre-
       '↷ skip（找不到 main 分支，无法对比）',
     ])
   })
-  it('pass（无 ext 改动）', () => {
+  it('pass（无发布包改动）', () => {
     expect(renderLines({ status: 'pass', changed: [], missing: [] })).toEqual([
-      '✓ 无 extension src/ 改动，跳过 changeset 检查',
+      '✓ 无发布包 src/ 改动，跳过 changeset 检查',
     ])
   })
   it('pass（全部有 changeset）', () => {
     expect(renderLines({ status: 'pass', changed: ['@a/b', '@c/d'], missing: [] })).toEqual([
-      '✓ 所有改动的 extension 包都有 changeset（2 个包）',
+      '✓ 所有改动的发布包都有 changeset（2 个包）',
     ])
   })
   it('warn：缺 changeset 清单 + 发布/忽略指引（Gate-1a.5 消费形态）', () => {
     expect(renderLines({ status: 'warn', changed: ['@a/b'], missing: ['@a/b'] })).toEqual([
-      '⚠ 1 个 extension 改了 src/ 但无 changeset：',
+      '⚠ 1 个发布包改了 src/ 但无 changeset：',
       '  - @a/b',
       '如需发布，运行: pnpm changeset',
       '如是纯文档/测试/重构改动无需发布，可忽略此警告',
@@ -120,11 +124,14 @@ describe('renderLines：文案与原 check_changeset 逐字对拍（缺 [pr-pre-
 
 describe('端到端（临时 git 仓库跑真实脚本进程）', () => {
   const dirs = []
-  // 方向②（scanUnversionable）经 @manypkg 扫包全景：fixture 需最小 workspace 定义
-  //（真实仓库恒为 pnpm workspace，非 workspace 目录 getPackagesSync 直接 throw）
+  // 方向②（scanUnversionable）与方向①（registry 目录匹配）都经 @manypkg 扫包全景：
+  // fixture 需 workspace 定义，glob 集合镜像真实仓库（packages/apps/extensions 三分组）
   function writeWorkspaceDefs(dir) {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fixture-root', private: true }))
-    writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n')
+    writeFileSync(
+      join(dir, 'pnpm-workspace.yaml'),
+      'packages:\n  - packages/*\n  - apps/*\n  - extensions/taiji/*\n  - extensions/universal/*\n  - extensions/shared/*\n',
+    )
   }
   function makeRepo() {
     const dir = mkdtempSync(join(tmpdir(), 'changeset-check-test-'))
@@ -182,7 +189,41 @@ describe('端到端（临时 git 仓库跑真实脚本进程）', () => {
     const result = runCheck({ root: dir, git })
     expect(result.status).toBe('warn')
     expect(result.missing).toEqual(['@zhushanwen/pi-todo'])
-    expect(renderLines(result)[0]).toBe('⚠ 1 个 extension 改了 src/ 但无 changeset：')
+    expect(renderLines(result)[0]).toBe('⚠ 1 个发布包改了 src/ 但无 changeset：')
+  })
+
+  it('packages/ 包改 src 无 changeset → warn（v0.11.16 六包漏声明直穿的回归形态——旧 extensions/ 正则结构性扫不到）', () => {
+    const { dir, git } = makeRepo()
+    const pkgDir = join(dir, 'packages/session-delivery')
+    mkdirSync(join(pkgDir, 'src'), { recursive: true })
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: '@zhushanwen/session-delivery' }))
+    writeFileSync(join(pkgDir, 'src', 'topic.ts'), 'export const a = 1\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'init'])
+    git(['checkout', '-qb', 'feat'])
+    writeFileSync(join(pkgDir, 'src', 'topic.ts'), 'export const a = 2\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'feat'])
+    const result = runCheck({ root: dir, git })
+    expect(result.status).toBe('warn')
+    expect(result.missing).toEqual(['@zhushanwen/session-delivery'])
+  })
+
+  it('private 包改 src 不触发 WARN（不发 npm、无 changeset 语义——与 pkgOf 口径对齐）', () => {
+    const { dir, git } = makeRepo()
+    const pkgDir = join(dir, 'packages/internal-tool')
+    mkdirSync(join(pkgDir, 'src'), { recursive: true })
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: '@zhushanwen/internal-tool', private: true }))
+    writeFileSync(join(pkgDir, 'src', 'a.ts'), 'export const a = 1\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'init'])
+    git(['checkout', '-qb', 'feat'])
+    writeFileSync(join(pkgDir, 'src', 'a.ts'), 'export const a = 2\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'feat'])
+    const result = runCheck({ root: dir, git })
+    expect(result.status).toBe('pass')
+    expect(result.changed).toEqual([])
   })
 
   it('带齐 changeset → pass（发布判定边界另一侧）', () => {

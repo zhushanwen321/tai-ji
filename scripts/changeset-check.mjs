@@ -6,9 +6,13 @@
  * 唯一实现：pr-pre-merge.sh 改调本脚本（--json），Gate-1a.5 与 dev-merge gates 消费其输出。
  * 禁止在任何调用方复制判定逻辑（WARN 文案单源 = 本脚本 lines 字段）。
  *
- * 判定（两个方向）：
- * ① 漏声明（WARN）：diff 触及 extensions/<pkg>/src/** 且该包无 .changeset/*.md 声明 → WARN 清单。
- *    WARN 不阻断（退出码 0），与现行 check_changeset 行为一致。
+ * 判定（两个方向，包集合同源）：
+ * ① 漏声明（WARN）：diff 触及任一可版本化包的 src/** 且该包无 .changeset/*.md 声明 → WARN 清单。
+ *    WARN 不阻断（退出码 0）。包范围 = loadPackageRegistry（@manypkg 枚举 workspace 全量
+ *    + config.ignore，经 versionable-packages.mjs 同一出口口径）——历史上本方向持
+ *    extensions/ 正则，packages/ 完全不在范围（v0.11.16 六包漏声明直穿终局的根因）；
+ *    收敛后目录布局变化自动跟随 workspace 定义。范围仅限可版本化包（private/ignore
+ *    包不发 npm、无 changeset 语义），与 check-version-changes.sh 的 pkgOf 对齐。
  * ② 无效声明（FAIL）：.changeset/*.md 声明了不可版本化包（private ∨ config.ignore）→ FAIL。
  *    该声明永不生效（纯 private 被 version 静默跳过残留、混合声明阻断 version），无任何
  *    合法场景，无条件扫描（不依赖 base 解析成功），退出码 1 阻断。判定唯一源 =
@@ -26,18 +30,32 @@
  * 退出码：0 = pass/warn/skip；1 = fail（无效声明）；2 = 工具错误（git 异常等）
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 import { findUnversionable, loadPackageRegistry, parseChangesetFrontmatter } from './changeset-versionable.mjs'
 
-// 三种包目录布局：旧扁平 extensions/<name>/、2026-08-22 分组后 extensions/<group>/<name>/
-// （group ∈ shared|taiji|universal）。[HISTORICAL] 曾只特判 shared/ 一个分组，
-// universal/ taiji/ 下的包全被漏检（WARN 少报 6 包）。
-// match[0] = 含 extensions/ 前缀的包目录路径段（与原实现 pkg_dir 同值）
-const PKG_DIR_RE = /^extensions\/(?:(?:shared|taiji|universal)\/[^/]+|[^/]+)\//
-const PKG_SRC_RE = /^extensions\/(?:(?:shared|taiji|universal)\/[^/]+|[^/]+)\/src\//
+/**
+ * diff 文件清单 → 改动了 src/ 的可版本化包名（去重保序）。
+ * pkgEntries = [{ name, dir }]（dir = 仓库相对路径，仅可版本化包，来自 registry）；
+ * 文件落在 <dir>/src/ 下才计入（排除 README、docs、examples、workflows）。
+ * 嵌套包目录取最长前缀（与 check-version-changes.sh 的 pkgOf 同语义）。
+ */
+export function extractChangedPkgs(files, pkgEntries) {
+  const changed = []
+  for (const file of files) {
+    let best = null
+    for (const entry of pkgEntries) {
+      if (file.startsWith(`${entry.dir}/src/`)) {
+        if (!best || entry.dir.length > best.dir.length) best = entry
+      }
+    }
+    if (!best) continue
+    if (!changed.includes(best.name)) changed.push(best.name)
+  }
+  return changed
+}
 
 function gitOut(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -54,27 +72,6 @@ export function resolveBase(git) {
     }
   }
   return null
-}
-
-/**
- * diff 文件清单 → 改动了 src/ 的包名（去重保序）。
- * readPkgName(pkgDirRel) 返回包名或 null——包目录读不到 package.json（含已删除的包）
- * 时自然跳过，与原实现 `node -p ... || echo ""` 行为一致。
- */
-export function extractChangedPkgs(files, readPkgName) {
-  const changed = []
-  for (const file of files) {
-    const m = file.match(PKG_DIR_RE)
-    if (!m) continue
-    if (!PKG_SRC_RE.test(file)) continue // 只关心改了 src/ 的（排除 README、docs、examples、workflows）
-    // 包目录 = 完整 repo 相对路径（含 extensions/ 前缀，与原实现 pkg_dir 一致：
-    // 原 sh 读 './<pkg_dir>/package.json'）
-    const pkgDirRel = m[0].replace(/\/$/, '')
-    const name = readPkgName(pkgDirRel)
-    if (!name) continue
-    if (!changed.includes(name)) changed.push(name)
-  }
-  return changed
 }
 
 /** .changeset/*.md 全文 → 声明的包名（单双引号 frontmatter 两种格式，sort -u 语义）。 */
@@ -110,10 +107,10 @@ export function renderLines({ status, changed, missing, unversionable = [] }) {
       '从该 changeset 的 frontmatter 删除对应行，或删除整个 changeset 文件（git rm .changeset/<文件>），然后重跑本检查',
     ]
   }
-  if (status === 'pass' && changed.length === 0) return ['✓ 无 extension src/ 改动，跳过 changeset 检查']
-  if (status === 'pass') return [`✓ 所有改动的 extension 包都有 changeset（${changed.length} 个包）`]
+  if (status === 'pass' && changed.length === 0) return ['✓ 无发布包 src/ 改动，跳过 changeset 检查']
+  if (status === 'pass') return [`✓ 所有改动的发布包都有 changeset（${changed.length} 个包）`]
   return [
-    `⚠ ${missing.length} 个 extension 改了 src/ 但无 changeset：`,
+    `⚠ ${missing.length} 个发布包改了 src/ 但无 changeset：`,
     ...missing.map((pkg) => `  - ${pkg}`),
     '如需发布，运行: pnpm changeset',
     '如是纯文档/测试/重构改动无需发布，可忽略此警告',
@@ -166,16 +163,14 @@ export function runCheck(deps) {
     err.exitCode = 2
     throw err
   }
-  const changed = extractChangedPkgs(files, (pkgDirRel) => {
-    const pkgJson = join(root, pkgDirRel, 'package.json')
-    if (!existsSync(pkgJson)) return null
-    try {
-      const name = JSON.parse(readFileSync(pkgJson, 'utf-8')).name
-      return typeof name === 'string' && name ? name : null
-    } catch {
-      return null
-    }
-  })
+  // 方向① 判定输入：可版本化包的仓库相对目录（枚举唯一源 = registry / workspace globs；
+  // byName 的 dir 是绝对路径，转仓库相对以匹配 git diff 输出）
+  const pkgEntries = []
+  for (const [name, meta] of registry.byName) {
+    if (meta.private || registry.ignoreSet.has(name)) continue
+    pkgEntries.push({ name, dir: relative(root, meta.dir).split('\\').join('/') })
+  }
+  const changed = extractChangedPkgs(files, pkgEntries)
   if (changed.length === 0) {
     return { status: 'pass', base, changed, missing: [], unversionable: [] }
   }
