@@ -842,6 +842,36 @@ if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
 fi
 
 # ============================================================================
+# 2f-5. 零特征共享池健康度检查（round6 Wave5 三包 isolate:false 双池）
+#     scripts/check-zero-mock-pool.mjs：docs/testing/zero-mock-pool.json 是三包
+#     （subagent-core / core / zcode-subagent-cli）共享池成员清单的单一权威源，
+#     消费方 = test-guard/zero-mock-pool.ts（三包 vitest.config.ts 的 shared
+#     project include）。检查 G1-G7：结构 / 存在性 / 池内文件特征复扫（G3：给
+#     池内文件新增 vi.mock 等特征 = 共享 worker 污染源，红）/ 门控复扫（G4）/
+#     动态出场表 / 消费方接线 / 未登记漂移提示。触发条件 = 权威源 / 检查脚本 /
+#     加载器 / 三包 config / 三包测试文件任一 staged（测试文件并入触发：池内
+#     文件被改出特征必须当场拦下，不能等下次登记表变更才发现）。
+#     复用 SKIP_CODE_RULES_CHECK 开关（与 2f 族一致）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^docs/testing/zero-mock-pool\.json$|^scripts/check-zero-mock-pool\.mjs$|^test-guard/zero-mock-pool\.ts$|^packages/(subagent-core|core|zcode-subagent-cli)/(vitest\.config\.ts|.+\.test\.ts)$"; then
+    print_section "[零特征共享池健康度检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if [ ! -f "scripts/check-zero-mock-pool.mjs" ]; then
+            echo -e "${RED}[ERROR] 找不到 scripts/check-zero-mock-pool.mjs（检查脚本被删除）${NC}"
+            exit 1
+        fi
+        if ! node scripts/check-zero-mock-pool.mjs; then
+            echo -e "${RED}[ERROR] 零特征共享池检查未通过——按上方 ✗ 明细修复后重试（池内文件引入 mock/门控特征会污染共享 worker）${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] 零特征共享池健康度检查已跳过${NC}"
+    fi
+fi
+
+# ============================================================================
 # 2g. review-fix-loop 双实现锁步检查
 #     scripts/check-rfl-parity.mjs：review+fix 循环有两份实现（pi 内置
 #     packages/subagent-core/workflows/review-fix-loop-utils.cjs / zcode 原生
@@ -3061,6 +3091,7 @@ echo -e "  ${GREEN}[+]${NC} oe-assert 过度设计自动初筛（code-overdesign
 echo -e "  ${GREEN}[+]${NC} chat store facet 双清单对账（E2E-CHATOPS-01：store.ts ChatStoreOps × taste-lint OPS_FIELDS 双向差集，载体变更时触发）"
 echo -e "  ${GREEN}[+]${NC} useSessionScopedState 调用点 census 静态锁（E2E-CENSUS-01：ADR-0049 入口边界快照对账，.ts/.tsx/.vue 变更时触发）"
 echo -e "  ${GREEN}[+]${NC} 跨进程契约字面量多侧对账（taiji.client-msg-id / taiji:revoked 登记侧变更时触发：AST 字面量同串断言）"
+echo -e "  ${GREEN}[+]${NC} 零特征共享池健康度检查（三包测试/config/登记表变更时触发：G1-G7，池内文件引入 mock/门控特征即红）"
 echo ""
 echo -e "${CYAN}Hook 脚本位置:${NC} .githooks/"
 echo ""
