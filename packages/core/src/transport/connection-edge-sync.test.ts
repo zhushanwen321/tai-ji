@@ -205,6 +205,116 @@ describe('命令×同步交错（验收 3：命令回执先于在途 load 回执
   })
 })
 
+describe('带重入守卫的 store 集成形态（F1-27：命令回执先行 → load 回执判旧丢弃 → 补发轮收敛）', () => {
+  /**
+   * 带重入守卫的 fake project store（集成形态，镜像 renderer stores/project.ts 的 sync
+   * 接线面）：loadState 状态机 + 「loading 态 sync 重入守卫」+「残留 loading 收尾（放弃
+   * 在途）」。无守卫的 fake 检不出死锁形态（补发轮撞守卫被拒 → 在途状态永久卡 loading，
+   * F1-27 正是经此缺口全绿放行）——本节用例锁定丢弃点补发在守卫 store 下可达且收敛。
+   */
+  type FakeReceipt = { revision: number; data: string }
+  type FakeLoadState = 'idle' | 'loading' | 'loaded'
+  function createGuardedProjectStore(rpc: () => Promise<FakeReceipt>) {
+    const store = {
+      loadState: 'idle' as FakeLoadState,
+      stateBeforeLoading: 'idle' as FakeLoadState,
+      revision: null as number | null,
+      data: '',
+      rpcPending: false,
+    }
+    const sync = vi.fn(async (): Promise<FakeReceipt> => {
+      if (store.loadState === 'loading') {
+        if (store.rpcPending) {
+          throw new Error(
+            '[project-store] syncLoad re-entered while loading — load attempts must go through connection-edge-sync coalescing (requestDomainSync)',
+          )
+        }
+        // 残留 loading（上一轮回执被判旧丢弃，本 store 的 RPC 已落定）：放弃在途回滚
+        // 到发起前状态再重拉——镜像 stores/project.ts syncLoad 的收尾形态
+        store.loadState = store.stateBeforeLoading
+      }
+      store.stateBeforeLoading = store.loadState
+      store.loadState = 'loading'
+      store.rpcPending = true
+      try {
+        return await rpc()
+      } finally {
+        store.rpcPending = false
+      }
+    })
+    const apply = (receipt: FakeReceipt): void => {
+      store.data = receipt.data
+      store.revision = receipt.revision
+      store.loadState = 'loaded'
+    }
+    const isStaleReceipt = (receipt: FakeReceipt): boolean =>
+      store.revision !== null && receipt.revision < store.revision
+    return { store, sync, apply, isStaleReceipt }
+  }
+
+  it('命令回执先提交后，在途旧 revision load 回执判旧丢弃，丢弃点补发收敛且 loadState 终态正确', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const gate1 = createGate<FakeReceipt>()
+      const gate2 = createGate<FakeReceipt>()
+      const gate3 = createGate<FakeReceipt>()
+      const loadGates = [gate1, gate2, gate3]
+      const { store, sync, apply, isStaleReceipt } = createGuardedProjectStore(() => {
+        const gate = loadGates.shift()
+        return gate
+          ? gate.promise
+          : Promise.resolve({ revision: store.revision ?? 0, data: 'x' })
+      })
+      registerDataDomain({
+        id: 'project',
+        sync,
+        apply,
+        whenToSync: () => true,
+        failure: 'blocking',
+        isStaleReceipt,
+      })
+
+      notifyConnectedEdge() // gen 1：首轮 load 发起（gate1 在途）
+      expect(store.loadState).toBe('loading')
+      gate1.resolve({ revision: 5, data: 'v5' })
+      await flushMicrotasks()
+      expect(store.loadState).toBe('loaded') // 首轮回执提交
+      expect(store.revision).toBe(5)
+
+      notifyConnectedEdge() // gen 2：重连边沿重拉（重拉子形态，gate2 在途）
+      expect(store.loadState).toBe('loading')
+
+      // 重拉在途窗口内命令回执先提交（等价命令通道 commandApplied，revision 5 → 6）
+      store.revision = 6
+      store.data = 'cmd-v6'
+      requestDomainSync('project') // changed 触发重拉：撞在途 load，并发合流跳过
+      expect(sync).toHaveBeenCalledTimes(2)
+
+      // 在途 load 回执（revision 5，命令执行前旧快照）到达 → 判旧丢弃 + 丢弃点补发
+      gate2.resolve({ revision: 5, data: 'stale-snapshot' })
+      await flushMicrotasks()
+      // 丢弃不提交：命令结果不回滚
+      expect(store.data).toBe('cmd-v6')
+      // 死锁锁定点：补发轮必须可达且成功——残留 loading 未收尾时补发轮 sync 撞重入
+      // 守卫被拒（error 出声、无在途、loadState 永久卡 loading）
+      expect(errorSpy).not.toHaveBeenCalled()
+      expect(sync).toHaveBeenCalledTimes(3)
+      expect(store.loadState).toBe('loading') // 补发轮在途（gate3）
+
+      // 补发轮回执（最新 revision）→ 提交收敛
+      gate3.resolve({ revision: 6, data: 'v6' })
+      await flushMicrotasks()
+      expect(store.loadState).toBe('loaded')
+      expect(store.data).toBe('v6')
+      expect(store.revision).toBe(6)
+      expect(sync).toHaveBeenCalledTimes(3) // 收敛，不再补发
+      expect(errorSpy).not.toHaveBeenCalled()
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+})
+
 describe('首次落定 promise', () => {
   it('成功落定：whenSettled 在边沿前调用时 ensure 发起首轮（序收敛，不死等）', async () => {
     const sync = vi.fn(() => Promise.resolve('v1'))

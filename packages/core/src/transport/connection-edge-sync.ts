@@ -176,7 +176,11 @@ function attemptSync(domain: DomainRuntime, generation: number): void {
       const staleByRevision = domain.descriptor.isStaleReceipt?.(receipt) ?? false
       if (staleByGeneration || staleByRevision) {
         // 丢弃点补发（携带最新连接代；合流保证补发前无在途——断连恢复的刷新诉求由
-        // 补发轮达成，任一时刻至多一个在途的不变量保持）
+        // 补发轮达成，任一时刻至多一个在途的不变量保持）。一体式 sync 侧若持有自身
+        // 在途状态机（如 project 加载状态机的 loading）：回执判旧丢弃不经 store，在途
+        // 状态残留由 sync 侧在下一轮入口自行收尾（本模块在丢弃点立即补发，补发轮对
+        // sync 的调用即触发收尾）——store 侧不收尾则补发轮撞在途守卫被拒，该域重拉
+        // 能力永久失效（F1-27 死锁形态，收尾实装见 stores/project.ts syncLoad）。
         attemptSync(domain, connectionGeneration)
         return
       }

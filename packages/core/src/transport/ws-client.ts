@@ -524,8 +524,11 @@ export function connect(url: string, credentials: ConnectCredentials): void {
           }
           markConnected()
         } else {
-          // runtime 拒绝（token 失效，如 runtime 已换 token 重启）→ close 走重连链，
-          // 新 token 由 use-connection 的 onRuntimePort 路径刷新；
+          // runtime 拒绝（token 失效，如 runtime 已换 token 重启）→ 凭据已失效，自动
+          // 退避重连只复用旧凭据必再拒：有消费方形态在下方置重连抑制位短路退避链，
+          // 重连改由消费方驱动——本地形态 = use-connection recoverAfterAuthRejection
+          // 重拉目标快照、携新快照凭据重连（新连接 auth 成功 markConnected 时抑制位
+          // 复位）；远程形态 = 壳层 D8 凭据重摄路径换凭据；
           // pre-auth 队列清空 + 通知（入队消息的 pending 由 onQueueDrop 消费方快速 reject）
           dropPreAuthQueue('auth-failed')
           // D8 显式信号：先置抑制位 + 触发消费方（移动壳切 token 输入视图），再 close——

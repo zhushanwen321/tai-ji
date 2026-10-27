@@ -4,7 +4,9 @@
  * connection-datasync-ssot §6.5/§6.6/§6.9 改造：本 store 从「权威内存」降为 runtime
  * projects.json 的**缓存视图**——
  * - 加载走 4 值状态机 idle/loading/loaded/failed（§6.5 转移表见 transition()；loaded 态
- *   单条命令失败不改状态机，内存保持命令前状态）；failed 态禁止一切回写（RD-3#3 语义
+ *   单条命令失败不改状态机，内存保持命令前状态）；另有 loadAbandoned 出口（loading→
+ *   发起前状态，被丢弃尝试的收尾——域同步器判旧丢弃不经 store，残留 loading 由下一轮
+ *   syncLoad 入口回滚，丢弃点补发轮才可达）；failed 态禁止一切回写（RD-3#3 语义
  *   保留并扩展为「无有效数据形态禁命令」，§6.9）。
  * - 编辑动作命令化（§6.6）：createProject/renameProject/removeProject/setActiveProject
  *   发 project.* 命令、以回执更新本地视图；同窗口命令**串行排队**（上一条回执到达后才
@@ -40,6 +42,11 @@ export type ProjectLoadState = 'idle' | 'loading' | 'loaded' | 'failed'
  * - loadSucceeded：loading→loaded（提交回执整表 + revision 水位；stale 回执由域同步器
  *   交错裁决拦截，不进本转移）。
  * - loadFailed：loading→failed（RPC 拒绝 / 兜底超时 / 错误信封三类失败，原因入 loadError）。
+ * - loadAbandoned：loading→发起前状态（被丢弃尝试的收尾，放弃在途）——域同步器判旧
+ *   丢弃回执（旧连接代 / 过时 revision）的路径不经本 store（loadSucceeded/loadFailed
+ *   均不触发），loading 会残留；下一轮 syncLoad 入口先经本转移回滚，丢弃点补发轮才
+ *   可达（否则补发轮恒被重入守卫拒绝，project 域重拉能力永久失效）。仅回滚加载状态，
+ *   不动数据与 revision（丢弃 = 本轮回执不提交，非失败）。
  * - commandApplied：命令回执提交（仅更新数据视图与 revision，不改加载状态机——命令按
  *   editingEnabled 判据被接受（loaded 或重拉子形态，§6.9），单条命令失败即无回执、
  *   内存保持命令前状态）。
@@ -48,6 +55,7 @@ type ProjectLoadEvent =
   | { type: 'loadStarted' }
   | { type: 'loadSucceeded'; receipt: ProjectLoadReply }
   | { type: 'loadFailed'; error: unknown }
+  | { type: 'loadAbandoned' }
   | { type: 'commandApplied'; reply: ProjectCommandReply }
 
 /** 默认 project 工厂（name 空 = 未命名默认项目，未归类 session 的兜底聚合）。 */
@@ -74,6 +82,12 @@ export const useProjectStore = defineStore('project', () => {
 
   // ── 状态机（§6.5 转移表唯一执行体；表外转移 warn 不动作，正常路径由域同步器合流保证不发生）──
 
+  /**
+   * 进入 loading 前的状态（loadAbandoned 的回退目标）：loading 只经 loadStarted 进入，
+   * 该值在进入时捕获即恒与当前在途尝试对应。
+   */
+  let stateBeforeLoading: ProjectLoadState = 'idle'
+
   function transition(event: ProjectLoadEvent): void {
     switch (event.type) {
       case 'loadStarted':
@@ -81,6 +95,7 @@ export const useProjectStore = defineStore('project', () => {
           console.warn('[project-store] loadStarted while loading — ignored (sync coalescing owns in-flight uniqueness)')
           return
         }
+        stateBeforeLoading = loadState.value
         loadState.value = 'loading'
         return
       case 'loadSucceeded':
@@ -103,6 +118,13 @@ export const useProjectStore = defineStore('project', () => {
         loadError.value = event.error instanceof Error ? event.error.message : String(event.error)
         console.warn('[project-store] project load failed — sidebar shows failure bar; retry via connection edge or manual retry', event.error)
         return
+      case 'loadAbandoned':
+        if (loadState.value !== 'loading') {
+          console.warn(`[project-store] loadAbandoned in state=${loadState.value} — ignored (out-of-table transition)`)
+          return
+        }
+        loadState.value = stateBeforeLoading
+        return
       case 'commandApplied':
         // 命令回执只更新数据视图与水位，不改加载状态机（§6.5：loaded 态命令失败不改状态机；
         // 成功同理——命令通道与加载通道正交）。守卫 = 命令按 editingEnabled 判据被接受
@@ -115,23 +137,39 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /**
+   * 本 store 自身 load RPC 是否在途：区分 loading 态的两种重入形态——真重入（上一轮
+   * RPC 还在途，拒绝）与残留 loading（上一轮回执被域同步器判旧丢弃，丢弃路径不经本
+   * store、RPC 已落定，放行并先收尾）。域同步器在丢弃点立即补发（connection-edge-sync
+   * 丢弃分支），补发轮对本函数的调用即触发收尾，故 store 侧无需机制回调。
+   */
+  let loadRpcPending = false
+
+  /**
    * 发起一轮 project 域同步拉取（域同步器 descriptor.sync 的接线形态）：进入 loading、
    * 拉取回执；失败转 failed 后把错误 rethrow 交域同步器按 failure='blocking' 留痕——
    * 失败呈现走本状态机（侧栏失败状态条），本函数不自建重试（重试通道 = 连接边沿或
    * 手动重试钮，均经域同步器 requestDomainSync('project')，ADR-0097 事实驱动）。
-   * loading 态重入 = 绕过域同步器并发合流的装配错误（表外转移 fail-fast，不静默吞）：
-   * 拒绝拉取，防同一窗口出现重复在途加载。
+   * loading 态重入分两型：RPC 仍在途 = 绕过域同步器并发合流的装配错误（表外转移
+   * fail-fast，不静默吞），拒绝拉取，防同一窗口出现重复在途加载；RPC 已落定 = 上一轮
+   * 回执被判旧丢弃的残留 loading，先经 loadAbandoned 回滚到发起前状态再重新 loadStarted
+   * （丢弃点补发轮由此可达，回执/丢弃/补发三代语义收敛不变）。
    */
   async function syncLoad(): Promise<ProjectLoadReply> {
     if (loadState.value === 'loading') {
-      throw new Error('[project-store] syncLoad re-entered while loading — load attempts must go through connection-edge-sync coalescing (requestDomainSync)')
+      if (loadRpcPending) {
+        throw new Error('[project-store] syncLoad re-entered while loading — load attempts must go through connection-edge-sync coalescing (requestDomainSync)')
+      }
+      transition({ type: 'loadAbandoned' })
     }
     transition({ type: 'loadStarted' })
+    loadRpcPending = true
     try {
       return await projectApi.load()
     } catch (e) {
       transition({ type: 'loadFailed', error: e })
       throw e
+    } finally {
+      loadRpcPending = false
     }
   }
 

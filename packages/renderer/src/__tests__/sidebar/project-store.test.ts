@@ -102,21 +102,6 @@ function makeCommandReply(
 // ══════════════════════════════════════════════════════════════════════════
 
 /**
- * Project store 测试（D14 语义修正 + 2026-08-04 持久化迁 runtime projects.json）。
- *
- * 覆盖：
- * - 同步初始态：默认 project 兜底（UI 永不空态）
- * - init()：RPC load 权威数据；RPC 失败降级默认；localStorage 一次性迁移（有旧数据 → 用之 + save 回 runtime）
- * - addProject / setActiveProject / removeProject CRUD + lastUsedAt 排序
- * - isDefaultProject 判定（name 空）
- * - deep watch 变化 → RPC save 被调
- *
- * mock 策略：mock @/api 门面的 project 域（store 走门面）。
- * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/project-store.test.ts
- */
-
-
-/**
  * Project store 测试（connection-datasync-ssot §6.5/§6.6/§6.9 改造后重写）。
  *
  * 覆盖：
@@ -237,6 +222,35 @@ describe('Project store: 状态机转移全表（§6.5）', () => {
     resolveLoad(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 0))
     store.applyLoadReceipt(await first)
     expect(store.loadState).toBe('loaded')
+  })
+
+  it('被丢弃尝试的残留 loading：回执落定未提交（域同步器判旧丢弃形态）→ 下轮 syncLoad 放弃在途后重拉收敛', async () => {
+    // F1-27 锁定：域同步器判旧丢弃路径不经 store（applyLoadReceipt / loadFailed 均不调用），
+    // loading 残留而本 store 的 RPC 已落定；下轮 syncLoad（丢弃点补发轮）必须区分
+    // 「真重入」（RPC 在途 → 拒绝）与「残留 loading」（RPC 已落定 → 放弃在途回滚后重拉），
+    // 否则补发轮恒被重入守卫拒绝 → project 域重拉能力永久失效直至刷新页面。
+    let resolveLoad!: (v: ReturnType<typeof makeLoadReply>) => void
+    mockLoad.mockReturnValueOnce(new Promise((resolve) => { resolveLoad = resolve }))
+    const store = useProjectStore()
+    const first = store.syncLoad()
+    expect(store.loadState).toBe('loading')
+    resolveLoad(makeLoadReply([makeProject(DEFAULT_PROJECT_ID, '')], DEFAULT_PROJECT_ID, 5))
+    await first
+    // 丢弃形态：回执已返回但 applyLoadReceipt 未被调用 → loading 残留、RPC 不再在途
+    expect(store.loadState).toBe('loading')
+    expect(mockLoad).toHaveBeenCalledTimes(1)
+
+    // 丢弃点补发轮：不撞重入守卫，放弃在途后重新拉取并提交收敛
+    // （第二发用 base 实现——用例中途失败时不残留未消费的 once 实现污染后续用例）
+    mockLoad.mockResolvedValue(
+      makeLoadReply([makeProject(DEFAULT_PROJECT_ID, ''), makeProject('proj-a', 'Alpha')], 'proj-a', 6),
+    )
+    store.applyLoadReceipt(await store.syncLoad())
+    expect(mockLoad).toHaveBeenCalledTimes(2)
+    expect(store.loadState).toBe('loaded')
+    expect(store.loadError).toBe('')
+    expect(store.revision).toBe(6)
+    expect(store.projects.map((p) => p.id)).toEqual([DEFAULT_PROJECT_ID, 'proj-a'])
   })
 })
 
