@@ -10,7 +10,7 @@
  *    transport/api 真实模块，壳不再注入）
  * 2. setConnectionPorts 注入（模块级一次，幂等）
  * 3. useConnection() = core useConnection() 薄包装（App.vue 的
- *    { state, init, teardown, retryRuntime } 接口不变）
+ *    { state, init, teardown, retryRuntime, retrySnapshot } 接口不变）
  *
  * 依赖方向：useConnection（装配）→ core use-connection + lib/ipc + useMessageEffects
  *   + i18n。

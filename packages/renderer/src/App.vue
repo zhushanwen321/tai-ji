@@ -1,7 +1,9 @@
 <template>
   <!-- 非连接态分四种展示：
-       - waiting-runtime：logo + 「正在启动 runtime」（已请求目标快照未获得，§6.8——
-         无连接可发起，与「连接中」显式区分，避免「转圈但根本没在连」误导）
+       - waiting-runtime：logo + 「正在启动 runtime」+ 重试按钮（已请求目标快照未获得，
+         §6.8——无连接可发起，与「连接中」显式区分，避免「转圈但根本没在连」误导；
+         重试 = 主动重拉一次目标快照，F1-13：supervisor 广播不重播，初始拉取失败 + 广播
+         已错发形态下原实现只剩应用重载一条恢复路径）
        - connecting/disconnected/reconnecting：logo + 「连接中…」（过渡屏）
        - restarting：logo + 「runtime 重启中…」（崩溃自动恢复，主进程在拉起新实例）
        - failed：logo + 错误提示 + 重试按钮（自动重启用尽，需用户手动触发）
@@ -14,10 +16,20 @@
         <Loader2 class="size-4 animate-spin text-neutral-dim" />
         <span class="text-[12.5px] text-neutral-dim">{{ t('connection.restarting') }}</span>
       </template>
-      <!-- 等待 runtime 启动（目标快照未获得——冷启动 dev 延迟编译期即此态，快照到达即转连接） -->
+      <!-- 等待 runtime 启动（目标快照未获得——冷启动 dev 延迟编译期即此态，快照到达即转连接）。
+           重试 = 主动重拉目标快照（非蛮重连）；拉取中禁用防连点，失败停留本态可再点。 -->
       <template v-else-if="connectionState === 'waiting-runtime'">
         <Loader2 class="size-4 animate-spin text-neutral-dim" />
         <span class="text-[12.5px] text-neutral-dim">{{ t('connection.waitingRuntime') }}</span>
+        <Button
+          variant="default"
+          size="sm"
+          data-testid="waiting-retry-btn"
+          :disabled="snapshotRetrying"
+          @click="onRetrySnapshot"
+        >
+          {{ t('connection.retry') }}
+        </Button>
       </template>
       <!-- runtime 重启用尽，需手动重试。runtimeStartError = 最近一次启动失败真因
            （RD-3#2：binary 缺失/端口占用等，main 经 runtime-error 推送/拉取兜底到达；
@@ -127,7 +139,7 @@ const { error: toastError } = useToast()
 watch(locale, () => {
   document.title = t('app.title') + (isDevMode() ? ' - dev' : '')
 }, { immediate: true })
-const { state: connectionState, teardown, retryRuntime } = useConnection()
+const { state: connectionState, teardown, retryRuntime, retrySnapshot } = useConnection()
 // RD-3#2：runtime 启动失败真因（binary 缺失/端口占用等）。此前 main 发 runtime-error
 // 全仓零消费——启动失败用户只能干等 60s 后看到通用 failed，真因永不可见。
 // 挂点选 App.vue 而非 core 编排：① failed 屏（真因显示位）就在本组件；② 状态转移
@@ -264,6 +276,22 @@ function onRetry(): void {
   retryRuntime().catch((err: unknown) => {
     toastError(t('connection.restartRequestFailed', { message: err instanceof Error ? err.message : String(err) }))
   })
+}
+
+// waiting 态重试的拉取进行中标记（按钮禁用数据源，防连点触发并发重拉）
+const snapshotRetrying = ref(false)
+/** waiting 态用户点击「重试」：主动重拉目标快照（core retrySnapshot，与 init 首连同一
+ *  快照裁决入口）。拉取中禁用按钮；重拉失败核心停留 waiting-runtime（不转 failed——
+ *  failed 语义属连接控制器裁决表），按钮恢复可再点。core 侧拉取容错不抛错，finally
+ *  复位为防御性配对（异常路径不留死禁用钮）。 */
+async function onRetrySnapshot(): Promise<void> {
+  if (snapshotRetrying.value) return
+  snapshotRetrying.value = true
+  try {
+    await retrySnapshot()
+  } finally {
+    snapshotRetrying.value = false
+  }
 }
 
 onBeforeUnmount(() => {

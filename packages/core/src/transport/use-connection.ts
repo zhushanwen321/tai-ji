@@ -729,6 +729,28 @@ export function useConnection() {
   }
 
   /**
+   * waiting-runtime 态手动重试（用户从「正在启动 runtime」屏点重试触发）：主动重拉一次
+   * 目标快照并按 §6.3 裁决表行动——与 init 首连 / HMR 重连同走 ensureConnectedToTarget
+   * 单一入口（拉到快照 → applyTargetSnapshot 发起连接；仍 null → setWaitingRuntime 停留
+   * 等待态）。重试失败不置 failed——failed 语义属连接控制器裁决表（重启用尽 / auth 核对
+   * 失败），快照重拉只是重新触发拉取。背景（F1-13）：supervisor 4 广播点都是启动/重启
+   * 事件、不重播，「初始拉取失败 + 广播已错发」形态下原实现只剩应用重载一条恢复路径。
+   * 非本地形态无快照通道可拉，warn 落日志 no-op（对齐 retryRuntime 体例）。
+   */
+  async function retrySnapshot(): Promise<void> {
+    const ports = requirePorts()
+    if (!ports) return
+    const mode = resolveConnectionMode(ports)
+    if (mode.kind !== 'local') {
+      console.warn(
+        '[core/use-connection] retrySnapshot ignored — target snapshot re-pull requires ConnectionPorts.ipc (local mode)',
+      )
+      return
+    }
+    await ensureConnectedToTarget(mode.ipc)
+  }
+
+  /**
    * 手动重试（用户从「runtime 不可用」状态条点重试触发）。
    * 委托 IPC runtime-restart → 主进程 supervisor.restartRuntime。
    * supervisor 重启成功会广播快照（onRuntimePort 监听 → applyTargetSnapshot 迁移目标）。
@@ -808,5 +830,5 @@ export function useConnection() {
     runtimeIdMismatchStreak = 0
   }
 
-  return { state, init, teardown, retryRuntime }
+  return { state, init, teardown, retryRuntime, retrySnapshot }
 }

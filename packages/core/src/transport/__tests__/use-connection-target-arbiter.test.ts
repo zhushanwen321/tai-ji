@@ -225,6 +225,51 @@ describe('连接控制器目标裁决表（§6.3）', () => {
   })
 })
 
+describe('waiting-runtime 态手动重试（retrySnapshot，F1-13）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    installTestPlatform()
+    stubSnapshot = null
+    snapshotCb = null
+    disconnect()
+  })
+  afterEach(() => {
+    useConnection().teardown()
+    disconnect()
+    vi.useRealTimers()
+  })
+
+  it('重试时快照仍 null → 停留等待态（不置 failed、不发起连接，可再次重试）', async () => {
+    stubSnapshot = null
+    setConnectionPorts(makePorts())
+    await useConnection().init()
+    expect(getState().value).toBe('waiting-runtime')
+    expect(fakes.length).toBe(0)
+
+    // supervisor 仍无目标（重拉失败的形态）→ 等待态原样保留
+    await useConnection().retrySnapshot()
+    expect(getState().value).toBe('waiting-runtime')
+    expect(fakes.length).toBe(0)
+  })
+
+  it('重试时快照已就位（广播已错发形态）→ 按裁决表发起连接，auth 握手后 connected', async () => {
+    stubSnapshot = null
+    setConnectionPorts(makePorts())
+    await useConnection().init()
+    expect(getState().value).toBe('waiting-runtime')
+
+    // 初始拉取失败后 supervisor 才 spawn 成功——广播已错发，重拉是唯一恢复路径
+    stubSnapshot = snap(1, 4000, 'tok-1', 'rt-1')
+    await useConnection().retrySnapshot()
+    expect(fakes.length).toBe(1)
+    const f = fakes[0]
+    f.triggerOpen()
+    expect(JSON.parse(f.sent[0])).toEqual({ type: 'auth', payload: { token: 'tok-1' } })
+    f.triggerMessage(authResult(true, 'rt-1'))
+    expect(getState().value).toBe('connected')
+  })
+})
+
 describe('ws-client 等待态与 auth 接受信号（§6.8/§6.1）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
