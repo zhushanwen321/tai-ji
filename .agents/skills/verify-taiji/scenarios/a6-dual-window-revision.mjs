@@ -206,7 +206,22 @@ export async function run(ctx) {
   })
 
   // ── 段 3：终态对账（磁盘权威源 + 双窗收敛） ─────────────────────
-  const finalFile = readJsonFile(projectsFile)
+  // 落盘收敛：同段 1 注释——DOM 收敛（回执驱动）早于 WriteBackCache debounce 落盘
+  // （flushMs=500，project-store.ts:113），直接读文件会读到新建前的旧状态。
+  // 等文件含两条新建且 revision 为数字（不预判值，线性性留给下方断言校验）再取终态。
+  const finalFile = await pollUntil(
+    async () => {
+      try {
+        const f = readJsonFile(projectsFile)
+        const names = f.projects.map((p) => p.name).filter(Boolean)
+        if (names.includes('A6-NEW-W1') && names.includes('A6-NEW-W2') && typeof f.revision === 'number') return f
+      } catch {
+        /* 写盘中（atomicWrite tmp+rename 窗口） */
+      }
+      return null
+    },
+    { timeoutMs: 15_000, intervalMs: 200, label: '终态落盘收敛（两条新建 debounce flush）' },
+  )
   const finalNames = finalFile.projects.map((p) => p.name).filter(Boolean).sort()
   const expectedFinal = [...namedProjects.map((p) => p.name).filter((n) => n !== target.name), rounds[2].convergedTo, 'A6-NEW-W1', 'A6-NEW-W2'].sort()
   ev.assert('A6: 最终 projects.json 与最后一命令一致且含全部新建（无整表互相覆盖丢数据）', JSON.stringify(finalNames) === JSON.stringify(expectedFinal), {
