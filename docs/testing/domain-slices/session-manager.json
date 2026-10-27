@@ -1,14 +1,39 @@
 {
   "name": "session-manager",
-  "summary": "会话管理器（session-manager 扩展 + runtime notify-claims/watch 桥）",
+  "summary": "托管子会话（extensions/universal/session-manager 整包 + 协议 + runtime notify-claims 债权/watch 桥与 session-manager-handler/send-queue；renderer TraySessionPanel 测试 W2-B 冻结在 panel/tray 域）",
   "layers": [
     "extension",
-    "runtime",
-    "renderer"
+    "protocol",
+    "runtime"
   ],
-  "scope": {},
-  "tests": [],
+  "scope": {
+    "extension": [
+      "extensions/universal/session-manager/**"
+    ],
+    "protocol": [
+      "packages/extension-protocol/src/extensions/session-manager/**"
+    ],
+    "runtime": [
+      "packages/runtime/src/transport/session-manager-handler.ts",
+      "packages/runtime/src/services/session/notify-claims.ts"
+    ]
+  },
+  "tests": [
+    "extensions/universal/session-manager/**",
+    "packages/extension-protocol/src/extensions/session-manager/**",
+    "packages/runtime/src/services/session/notify-claims.test.ts",
+    "packages/runtime/src/services/session/notify-claims-state.test.ts",
+    "packages/runtime/src/__tests__/session-manager-handler.test.ts",
+    "packages/runtime/src/transport/session-manager-send-queue.test.ts",
+    "packages/runtime/src/__tests__/equivalence/session-manager-full-e2e.test.ts"
+  ],
   "sharedBy": {},
-  "contracts": [],
+  "contracts": [
+    {
+      "carrier": "packages/runtime/src/services/session/notify-claims.ts",
+      "on": ["subagent"],
+      "note": "通知债权 watch 桥：SETTLEMENT_REASONS 结清词表与 subagent-core run-vocabulary 双处对齐，改债权登记/结清语义需联跑 subagent 域（domain-slicing-analysis §3.2 例证 3）"
+    }
+  ],
   "e2eRules": []
 }

@@ -1,15 +1,42 @@
 {
   "name": "tts",
-  "summary": "TTS 朗读（runtime tts + infra/tts + ui 朗读；renderer tts 页面冻结在 settings 域）",
+  "summary": "TTS 朗读（runtime tts-service/tts-audio + transport/tts-message-handler + infra/tts + renderer use-tts-enabled 与 useTtsPlayer + shared speech-text 朗读清洗；renderer tts 页面 W2-B 冻结在 settings 域，ui 朗读按钮暂无测试）",
   "layers": [
     "runtime",
     "infra",
     "renderer",
-    "ui"
+    "shared"
   ],
-  "scope": {},
-  "tests": [],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/tts-service.ts",
+      "packages/runtime/src/services/tts-audio.ts",
+      "packages/runtime/src/transport/tts-message-handler.ts"
+    ],
+    "infra": [
+      "packages/runtime/src/infra/tts/**"
+    ],
+    "renderer": [
+      "packages/renderer/src/composables/features/chat/useTtsPlayer.ts",
+      "packages/renderer/src/components/settings/tts/**"
+    ],
+    "shared": [
+      "packages/shared/src/speech-text.ts"
+    ]
+  },
+  "tests": [
+    "packages/runtime/src/infra/tts/**",
+    "packages/renderer/src/composables/features/chat/__tests__/useTtsPlayer.test.ts",
+    "packages/shared/src/__tests__/speech-text.test.ts"
+  ],
   "sharedBy": {},
+  "contracts": [
+    {
+      "carrier": "packages/renderer/src/components/settings/tts/**",
+      "on": ["settings"],
+      "note": "tts 设置页源码属本域触发范围，但 use-tts-enabled.test.ts 归属批 B settings 域（settings 树整树收编）；改 tts 页面源码需联跑 settings 域补齐该测试（超集方向，不漏）"
+    }
+  ],
   "contracts": [],
   "e2eRules": []
 }

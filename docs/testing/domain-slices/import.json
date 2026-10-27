@@ -1,12 +1,30 @@
 {
   "name": "import",
-  "summary": "导入源（runtime 单点服务 + shared 契约）",
+  "summary": "导入源（runtime services/session import-*×4 + 外部会话扫描 + shared/import-session 契约 + renderer useImportSession 侧栏导入；session.import RPC 测试在 Wave3 混合 bundle，见批 C 报告 sharedBy 建议）",
   "layers": [
     "runtime",
+    "renderer",
     "shared"
   ],
-  "scope": {},
-  "tests": [],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/session/import-service.ts",
+      "packages/runtime/src/services/session/import-source.ts",
+      "packages/runtime/src/services/session/import-source-external-file.ts",
+      "packages/runtime/src/services/session/import-source-zcode.ts",
+      "packages/runtime/src/infra/pi/session-file-external-scan.ts"
+    ],
+    "shared": [
+      "packages/shared/src/import-session.ts"
+    ],
+    "renderer": [
+      "packages/renderer/src/composables/features/sidebar/useImportSession.ts"
+    ]
+  },
+  "tests": [
+    "packages/runtime/src/__tests__/scan-external.test.ts",
+    "packages/renderer/src/__tests__/composables/use-import-session-close.test.ts"
+  ],
   "sharedBy": {},
   "contracts": [],
   "e2eRules": []

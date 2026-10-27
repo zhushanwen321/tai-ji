@@ -1,11 +1,17 @@
 {
   "name": "todo",
-  "summary": "待办（todo 扩展整包）",
+  "summary": "待办（extensions/universal/todo 整包单域；renderer 经 setWidget 进托盘 widget 区，无专属 store/组件目录）",
   "layers": [
     "extension"
   ],
-  "scope": {},
-  "tests": [],
+  "scope": {
+    "extension": [
+      "extensions/universal/todo/**"
+    ]
+  },
+  "tests": [
+    "extensions/universal/todo/**"
+  ],
   "sharedBy": {},
   "contracts": [],
   "e2eRules": []

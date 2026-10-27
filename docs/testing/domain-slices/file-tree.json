@@ -1,12 +1,26 @@
 {
   "name": "file-tree",
-  "summary": "文件树（runtime file-service + renderer stores/fileTree + workspace 组件）",
+  "summary": "文件树（runtime file-service/file-error + transport/file-message-handler + renderer stores/fileTree、file-tree composables 与 workspace 组件；runtime 侧无专属测试，git-file-bundle 的 diff 节归 git 域）",
   "layers": [
     "runtime",
     "renderer"
   ],
-  "scope": {},
-  "tests": [],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/file-service.ts",
+      "packages/runtime/src/services/file-error.ts",
+      "packages/runtime/src/transport/file-message-handler.ts"
+    ],
+    "renderer": [
+      "packages/renderer/src/stores/fileTree.ts",
+      "packages/renderer/src/composables/features/file-tree/**"
+    ]
+  },
+  "tests": [
+    "packages/renderer/src/__tests__/composables/useFileTree.test.ts",
+    "packages/renderer/src/__tests__/composables/useFileChangeInvalidation.test.ts",
+    "packages/renderer/src/__tests__/composables/queue-detail-bundle.test.ts"
+  ],
   "sharedBy": {},
   "contracts": [],
   "e2eRules": []

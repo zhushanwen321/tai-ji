@@ -1,18 +1,50 @@
 {
   "name": "terminal",
-  "summary": "终端（runtime terminal + transport + core bottom-drawer + renderer 终端件）",
+  "summary": "终端（runtime services/terminal + transport terminal handler + core domain/bottom-drawer（底抽屉仅承载终端）+ renderer 终端件（TerminalView/instance-bar/write-queue）+ shared terminal 契约；terminal 设置页按 W2-B 冻结归 settings 域）",
   "layers": [
     "runtime",
     "core",
-    "renderer"
+    "renderer",
+    "shared"
   ],
-  "scope": {},
-  "tests": [],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/terminal/**",
+      "packages/runtime/src/transport/terminal-message-handler.ts",
+      "packages/runtime/src/services/session/bash-dispatcher.ts"
+    ],
+    "core": [
+      "packages/core/src/domain/bottom-drawer/**"
+    ],
+    "renderer": [
+      "packages/renderer/src/stores/terminal-write-queue.ts",
+      "packages/renderer/src/composables/features/terminal/**",
+      "packages/renderer/src/components/panel/TerminalView.vue",
+      "packages/renderer/src/components/panel/TerminalInstanceBar.vue"
+    ],
+    "shared": [
+      "packages/shared/src/terminal-id.ts"
+    ]
+  },
+  "tests": [
+    "packages/runtime/src/services/terminal/**",
+    "packages/core/src/domain/bottom-drawer/**",
+    "packages/renderer/src/__tests__/landing-terminal-traffic.test.ts",
+    "packages/renderer/src/__tests__/terminal/terminal-write-queue.test.ts",
+    "packages/renderer/src/__tests__/terminal/use-terminal-raf-queue.test.ts",
+    "packages/renderer/src/components/panel/__tests__/terminal-instance-bar.test.ts",
+    "packages/renderer/src/composables/features/terminal/__tests__/use-terminal.test.ts",
+    "packages/shared/src/__tests__/protocol-terminal.test.ts",
+    "packages/shared/src/__tests__/terminal-id.test.ts",
+    "packages/shared/src/__tests__/terminal-instance-contract.test.ts"
+  ],
   "sharedBy": {},
   "contracts": [],
-  "e2eRules": [],
+  "e2eRules": [
+    "E2E-TERMINAL-01"
+  ],
   "w2bMountCompat": {
     "mountSource": "docs/testing/domain-map.json",
-    "status": "pending"
+    "status": "enforced"
   }
 }

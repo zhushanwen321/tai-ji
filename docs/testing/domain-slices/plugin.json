@@ -1,11 +1,48 @@
 {
   "name": "plugin",
-  "summary": "插件（runtime plugin-service + plugin-sdk 契约测试寄宿 runtime）",
+  "summary": "taiji 插件系统（runtime services/plugin-service 整目录 + transport/plugin-message-handler + test/plugin-* 契约族 + plugin-sdk 契约寄宿 runtime + core transport/api plugin 域 + shared plugin 契约三件；renderer PluginProviderFlow W2-B 冻结在 settings 域）",
   "layers": [
-    "runtime"
+    "runtime",
+    "core",
+    "shared"
   ],
-  "scope": {},
-  "tests": [],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/plugin-service/**",
+      "packages/runtime/src/transport/plugin-message-handler.ts"
+    ],
+    "sdk": [
+      "packages/plugin-sdk/**",
+      "packages/create-taiji-plugin/**"
+    ],
+    "core": [
+      "packages/core/src/transport/api/domains/plugin.ts"
+    ],
+    "shared": [
+      "packages/shared/src/plugin.ts",
+      "packages/shared/src/plugin-capability-map.ts",
+      "packages/shared/src/plugin-namespace.ts",
+      "packages/shared/src/plugin-view-scope.ts"
+    ]
+  },
+  "tests": [
+    "packages/runtime/src/services/plugin-service/**",
+    "packages/runtime/test/plugin-catalog.test.ts",
+    "packages/runtime/test/plugin-commands-executor-timeout.test.ts",
+    "packages/runtime/test/plugin-host-process.test.ts",
+    "packages/runtime/test/plugin-hot-reload.test.ts",
+    "packages/runtime/test/plugin-permission-approval-wake.test.ts",
+    "packages/runtime/test/plugin-permission-push.test.ts",
+    "packages/runtime/test/plugin-permission-timeout.test.ts",
+    "packages/runtime/test/plugin-registry-bundle.test.ts",
+    "packages/runtime/test/plugin-rpc-bundle.test.ts",
+    "packages/runtime/test/plugin-service-bundle.test.ts",
+    "packages/runtime/test/plugin-ui-timeout-authority.test.ts",
+    "packages/core/src/transport/api/__tests__/plugin-domain-rpc.test.ts",
+    "packages/shared/src/__tests__/plugin-capability-map.test.ts",
+    "packages/shared/src/__tests__/plugin-namespace.test.ts",
+    "packages/shared/src/__tests__/plugin-view-scope.test.ts"
+  ],
   "sharedBy": {},
   "contracts": [],
   "e2eRules": []

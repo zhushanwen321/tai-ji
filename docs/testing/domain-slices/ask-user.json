@@ -1,11 +1,22 @@
 {
   "name": "ask-user",
-  "summary": "向用户提问（ask-user 扩展；ui-form 共享协议归 foundation，契约闭包覆盖）",
+  "summary": "向用户提问（extensions/universal/ask-user 整包 + extension-protocol extensions/ask-user 协议；ui-form 共享表单协议归 foundation，契约闭包覆盖）",
   "layers": [
-    "extension"
+    "extension",
+    "protocol"
   ],
-  "scope": {},
-  "tests": [],
+  "scope": {
+    "extension": [
+      "extensions/universal/ask-user/**"
+    ],
+    "protocol": [
+      "packages/extension-protocol/src/extensions/ask-user/**"
+    ]
+  },
+  "tests": [
+    "extensions/universal/ask-user/**",
+    "packages/extension-protocol/src/extensions/ask-user/**"
+  ],
   "sharedBy": {},
   "contracts": [],
   "e2eRules": []

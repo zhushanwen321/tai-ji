@@ -1,14 +1,43 @@
 {
   "name": "extension-host",
-  "summary": "扩展宿主（runtime extension-service + core/ui extension-host 通道 + renderer extension-ui）",
+  "summary": "扩展宿主通道（runtime extension-service/resolver/filter + transport/extension-message-handler + server 扩展路由 + core extension-host 四件 + ui ViewHost 通道 + renderer extension-ui store/composable；ui-form 共享表单协议归 foundation）",
   "layers": [
     "runtime",
     "core",
     "ui",
     "renderer"
   ],
-  "scope": {},
-  "tests": [],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/extension-service.ts",
+      "packages/runtime/src/services/extension-filter.ts",
+      "packages/runtime/src/services/extension-startup-config.ts",
+      "packages/runtime/src/services/extension-timeout-manager.ts",
+      "packages/runtime/src/services/ext-config-rmw.ts",
+      "packages/runtime/src/transport/extension-message-handler.ts"
+    ],
+    "core": [
+      "packages/core/src/extension-host/**"
+    ],
+    "ui": [
+      "packages/ui/src/extension-host/ViewHost.vue",
+      "packages/ui/src/extension-host/view-host-source.ts",
+      "packages/ui/src/extension-host/views-source.ts"
+    ],
+    "renderer": [
+      "packages/renderer/src/stores/extension-ui.ts",
+      "packages/renderer/src/composables/useExtensionUI.ts",
+      "packages/renderer/src/components/extension/**"
+    ]
+  },
+  "tests": [
+    "packages/runtime/test/extension-bundle.test.ts",
+    "packages/runtime/test/extension-resolver.test.ts",
+    "packages/runtime/test/server-extension.test.ts",
+    "packages/core/src/extension-host/**",
+    "packages/ui/src/extension-host/__tests__/ViewHost.test.ts",
+    "packages/renderer/src/__tests__/composables/useExtensionUI.test.ts"
+  ],
   "sharedBy": {},
   "contracts": [],
   "e2eRules": []

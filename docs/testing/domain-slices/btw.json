@@ -1,17 +1,39 @@
 {
   "name": "btw",
-  "summary": "旁路线会话（runtime btw-*×7 + renderer BtwPanel）",
+  "summary": "旁路线会话（runtime services/session btw-*×5 + transport/btw-message-handler + renderer BtwPanel/btw-line-membership/btw-replay store + composer btw 入口）",
   "layers": [
     "runtime",
     "renderer"
   ],
-  "scope": {},
-  "tests": [],
+  "scope": {
+    "runtime": [
+      "packages/runtime/src/services/session/btw-contract-inject.ts",
+      "packages/runtime/src/services/session/btw-error.ts",
+      "packages/runtime/src/services/session/btw-fork-exec.ts",
+      "packages/runtime/src/services/session/btw-line-spawn-options.ts",
+      "packages/runtime/src/services/session/btw-service.ts",
+      "packages/runtime/src/transport/btw-message-handler.ts"
+    ],
+    "renderer": [
+      "packages/renderer/src/components/panel/BtwPanel.vue",
+      "packages/renderer/src/stores/btw-replay.ts",
+      "packages/renderer/src/composables/panel/btw-line-membership.ts",
+      "packages/renderer/src/composables/panel/useBtwTabData.ts"
+    ]
+  },
+  "tests": [
+    "packages/runtime/src/services/session/__tests__/btw-bundle.test.ts",
+    "packages/runtime/src/services/session/__tests__/btw-lifecycle.test.ts",
+    "packages/renderer/src/__tests__/panel/btw-panel.test.ts",
+    "packages/renderer/src/__tests__/panel/composer-btw-button.test.ts",
+    "packages/renderer/src/__tests__/panel/btw-overlay-routing.test.ts",
+    "packages/renderer/src/__tests__/composables/panel/btw-line-membership.test.ts"
+  ],
   "sharedBy": {},
   "contracts": [],
   "e2eRules": [],
   "w2bMountCompat": {
     "mountSource": "docs/testing/domain-map.json",
-    "status": "pending"
+    "status": "enforced"
   }
 }
