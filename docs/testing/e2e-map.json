@@ -5163,6 +5163,27 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#测试执行三档",
       "note": "掩码状态机剥离注释/字符串后提取两表并逐用例判定 skipIf 覆盖；解析不足输出 WARNING 放行不 fail（防守卫自身误报拖死提交）。挂 pre-commit 2f-2。"
+    },
+    {
+      "id": "E2E-PIPE-25",
+      "summary": "两段式调度退出码聚合判定（check-test-results）：pnpm --no-bail 保全貌但退出码恒 0，调度最终退出码改由各包 junit（工厂 DEFAULT 统一落点）聚合判定；--clean 防上一轮 stale 误判",
+      "scope": [
+        "scripts/check-test-results.mjs",
+        "package.json"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-test-results.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-test-results.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#测试执行三档",
+      "note": "test / test:integration 两段调度的收尾判定。改调度脚本或 junit 落点时：注入一个必败用例跑 test:small 应 exit 1 且列出 suite，还原后 exit 0。"
     }
   ]
 }
