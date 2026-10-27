@@ -782,3 +782,30 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **机制**：provider 上游渠道对超窗口请求返回**不含 usage 字段**的错误响应，pi openai-completions 适配层解析时未对 usage 缺失做防御。凭据/通路无问题（同 provider 小上下文请求成功）。
 - **处置建议**：先排除渠道窗口限制（换小会话/先 compact 压缩再续聊）；根治需 pi 适配层对缺 usage 错误响应健壮降级——pi 上游问题按项目规则不改 pi 源码，待上游修复或由 taiji 侧降级链吸收。
 
+
+### 37. 连接目标快照与连接状态词排查（connection-datasync-ssot，2026-10-27 登记；机制 SSOT = ADR-0167）
+
+**连接状态词表**（App.vue 非连接态四分支，`connectionState`）：`waiting-runtime`（已请求目标快照但尚未获得——dev tsx 冷编译 60-90s 期即此态，快照经拉取或推送到达即转 connecting；与「连接中…」显式区分，防「转圈但根本没在连」误导）/ `connecting`·`disconnected`·`reconnecting`（过渡屏「连接中…」）/ `restarting`（主进程正在拉起新 runtime 实例，崩溃自动恢复中）/ `failed`（自动重启用尽或启动失败，需用户手动重试；屏上 `runtime-error-cause` 显示最近一次真因）。connected 才挂载 AppShell。
+
+**快照是什么**：`{seq, runtimeId, port, token}`——runtime 每次 spawn 由 supervisor 与 token 同点签发（runtimeId = 8 字节 hex，经 env `TAIJI_RUNTIME_ID` 注入；auth 成功应答回传）。seq 随 spawn 成功单调递增。连接控制器按目标比较裁决：同 seq 不动作、seq 更高或未认证断旧连新、auth 拒绝重拉快照换凭据、实例变更必经断连→connected 边沿。**旧「裸端口 + 备用端口猜连」双通道已删**——看到按端口公式猜连的代码/日志即为回退，按 ADR-0167 决策 2 处置。
+
+**取证**：
+
+```bash
+# 快照与端口（IPC 读口，renderer 上下文）：electronAPI.getRuntimeTargetSnapshot()
+# 磁盘侧：<数据目录>/runtime.port + runtime-token（spawn 时成对写入）
+# 主进程 supervisor 决策（console 走装配器日志 verify-launch.log；kill decision 走 mainLogger）：
+grep -a "runtime\] Starting on port\|Ready on port\|Restart succeeded\|Restart attempt" <数据目录>/verify-launch.log
+grep -a "kill decision\|restart decision" <数据目录>/logs/main-*.log
+# 端口占用跳过（identity gate：占用者一律跳过不清杀）：
+grep -a "port-cleanup" <数据目录>/logs/main-*.log
+# auth 双侧核对（P-3）：runtime 进程 env vs auth.result.payload.runtimeId
+lsof -ti :<runtimePort> -P -sTCP:LISTEN   # runtime PID（勿用不带 -sTCP:LISTEN 的形态——会把 renderer 的 ESTABLISHED 连接当 runtime）
+ps eww -p <runtimePid> | tr ' ' '\n' | grep TAIJI_RUNTIME_ID
+```
+
+**症状一：侧栏项目分组区显示失败状态条（`project-load-failed-bar`）**——project 域加载失败（RPC 兜底 65s 超时 / 错误信封 / runtime 不可用）。条上带原因与重试钮；连接边沿恢复或点重试即重新拉取。判定看 `<数据目录>/logs/renderer-console-*.log` 的 `[project-store] project load failed` 行（含真因）。**失败期间编辑入口置灰是设计行为**（§6.9：无有效数据形态禁写），不是卡死。
+
+**症状二：项目操作报 `project_revision_mismatch`**——命令携带的 revision 与文件当前水位不一致（多窗口/旧状态）。恢复 = 重新 `project.load` 取最新状态与 revision 后重试；双窗口并发由 runtime 串行队列 + revision 校验保证不互相覆盖，后至命令被拒是**设计内保护**（窗口经 `project.changed` 广播自动重拉收敛）。
+
+**症状三：runtime 反复重启 / 卡 `restarting`**——supervisor 退避序列 1s/2s/4s/8s/16s、上限 5 次（`MAX_RESTARTS`），耗尽广播 runtime-failed 转 failed 屏等手动重试。半活进程（进程活着但 HTTP 无响应）由存活探针（30s×3）强杀重启，日志特征 `Liveness probe failed threshold — forcing restart of half-alive process`。
