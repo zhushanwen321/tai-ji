@@ -210,11 +210,11 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/renderer/src/__tests__/components/plan-mode-bar.test.ts"
+          "ref": "packages/renderer/src/components/panel/plan/__tests__/plan-bars-bundle.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/renderer/src/__tests__/components/plan-review-bar.test.ts"
+          "ref": "packages/renderer/src/components/panel/plan/__tests__/plan-bars-bundle.test.ts"
         },
         {
           "kind": "spec",
@@ -222,7 +222,7 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/renderer/src/__tests__/components/plan-comment-popover.test.ts"
+          "ref": "packages/renderer/src/components/panel/plan/__tests__/plan-bars-bundle.test.ts"
         },
         {
           "kind": "spec",
@@ -2450,7 +2450,7 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/renderer/src/components/panel/tray/tray-canvas-panel.test.ts"
+          "ref": "packages/renderer/src/components/panel/tray/__tests__/tray-widget-bundle.test.ts"
         },
         {
           "kind": "spec",

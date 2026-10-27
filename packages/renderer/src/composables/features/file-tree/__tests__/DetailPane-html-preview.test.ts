@@ -46,7 +46,7 @@ vi.mock('@/composables/features/file-tree/useDetailPane', async () => {
   }
 })
 
-type Fixture = {
+type Fixture = {  // oe-exempt:20261027:test:
   state: { value: Record<string, unknown> }
 }
 

@@ -26,7 +26,7 @@
 //
 // mock 策略：仅 transport 出口（streamSubscribe/unsubscribe/switchSession/getHistory/
 // command）模块级 vi.mock 隔离 WS，app-runtime 组装与 core 链保持全真实（对齐
-// mobile-new-task.spec「mock 组件层会变成断言 mock 自身」的同款立场）。断言入口 =
+// mobile-connection-flow.test.ts「mock 组件层会变成断言 mock 自身」的同款立场）。断言入口 =
 // __testing 命名空间（对齐 companion-bridge __testing 先例：生产代码禁止消费，仅测试
 // import——不扩大 API 面常驻语义）。
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'

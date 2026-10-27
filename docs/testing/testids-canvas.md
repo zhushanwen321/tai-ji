@@ -2,7 +2,7 @@
 
 > 口径：testid 以组件 template 内 `data-testid` 属性为准（手册总则 [00-overview.md](./00-overview.md)）。
 > 覆盖范围 = `packages/renderer/src/components/canvas/` 十个组件 + `packages/renderer/src/components/panel/tray/TrayCanvasPanel.vue`；消费测试 =
-> `packages/renderer/src/components/canvas/*.test.ts` 四件 + `src/components/panel/tray/tray-canvas-panel.test.ts` + `src/stores/canvas.test.ts` +
+> `packages/renderer/src/components/canvas/*.test.ts` 四件 + `src/components/panel/tray/__tests__/tray-widget-bundle.test.ts` + `src/stores/canvas.test.ts` +
 > `src/composables/use-canvas-sync.test.ts` + overlay 两件（资产与触发范围登记见 [e2e-map.json](./e2e-map.json) E2E-CANVAS-01）。
 > 本账随 problem-solve-canvas D5 终态同步建立（2026-10-15，登记类批次 F1-27）：设计 §3.1(3) UI 规范要求 testid 全量登记，
 > 建账前 docs/testing 零 canvas 条目。建账实测：模板共 103 处 data-testid（81 静态 + 22 动态绑定），去重 100 个唯一值，
