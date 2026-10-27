@@ -1,0 +1,14 @@
+{
+  "name": "git",
+  "summary": "git 集成（runtime services/git + infra/git + renderer GitPanel）",
+  "layers": [
+    "runtime",
+    "infra",
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

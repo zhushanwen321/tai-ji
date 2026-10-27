@@ -1,0 +1,16 @@
+{
+  "name": "sidebar",
+  "summary": "侧栏与会话列表（renderer）",
+  "layers": [
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "pending"
+  }
+}

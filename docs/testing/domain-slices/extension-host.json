@@ -1,0 +1,15 @@
+{
+  "name": "extension-host",
+  "summary": "扩展宿主（runtime extension-service + core/ui extension-host 通道 + renderer extension-ui）",
+  "layers": [
+    "runtime",
+    "core",
+    "ui",
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

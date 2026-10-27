@@ -1,0 +1,12 @@
+{
+  "name": "uncategorized",
+  "summary": "夹具池：混合 bundle owner 归此，sharedBy 注记内含域",
+  "layers": [],
+  "scope": {},
+  "tests": ["packages/runtime/src/services/mixed/__tests__/mixed-bundle.test.ts"],
+  "sharedBy": {
+    "packages/runtime/src/services/mixed/__tests__/mixed-bundle.test.ts": ["chat"]
+  },
+  "contracts": [],
+  "e2eRules": []
+}

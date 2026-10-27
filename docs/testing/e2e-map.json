@@ -5409,6 +5409,73 @@
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md",
       "note": "Wave3 runtime 测试文件合并（593→250）产物：7 个来源测试文件合并，来源清单见文件头横幅；junit 用例名多重集对基线 LEAF-MATCH 全守恒。"
+    },
+    {
+      "id": "E2E-PIPE-26",
+      "summary": "功能域垂直切分引擎（Wave4 批 A）：domain-slices/ 注册表 38 域骨架（owner 唯一 + sharedBy 触发 + W2-B 14 域前向兼容）+ select-affected-domain 按变更选域 + check-domain-slices 健康度守卫 + run-domain-tests 多域/双源升级",
+      "scope": [
+        "scripts/select-affected-domain.mjs",
+        "scripts/check-domain-slices.mjs",
+        "scripts/run-domain-tests.mjs",
+        "docs/testing/domain-slices/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/select-affected-domain.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/check-domain-slices.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/select-affected-domain.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-domain-slices.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/fixtures/domain-slices/ok/chat.json"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/fixtures/domain-slices/bad/drift.json"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/fixtures/domain-slices/bad/overlap.json"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/fixtures/domain-slices/ok/_meta.json"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/fixtures/domain-slices/ok/archive.json"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/fixtures/domain-slices/ok/domain-map.json"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/fixtures/domain-slices/ok/e2e-map.json"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/fixtures/domain-slices/ok/uncategorized.json"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-domain-slices.mjs && pnpm exec vitest run scripts/__tests__/select-affected-domain.test.mjs scripts/__tests__/check-domain-slices.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#测试执行三档",
+      "note": "Wave4 批 A（引擎）。域注册清单漂移由 check-domain-slices 拦（pre-commit 2f-4 接线随批 D）；批 B/C/D 按 .tmp/round6/wave4-batchA-report.md §4 填写规范登记域文件。"
     }
   ]
 }

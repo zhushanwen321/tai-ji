@@ -1,0 +1,6 @@
+{
+  "purpose": "夹具注册表元信息（单测在 tmp 组装夹具仓后消费；结构与字段语义同真实 docs/testing/domain-slices/_meta.json）",
+  "broadcastCarriers": ["packages/shared/src/protocol.ts"],
+  "uncategorizedBaseline": 1,
+  "coverageEnforced": false
+}

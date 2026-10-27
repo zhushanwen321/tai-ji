@@ -1,0 +1,16 @@
+{
+  "name": "app-shell",
+  "summary": "应用装配壳（App/boot/快捷键 + renderer 根目录横切散测）",
+  "layers": [
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "pending"
+  }
+}

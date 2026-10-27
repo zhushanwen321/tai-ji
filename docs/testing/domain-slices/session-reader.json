@@ -1,0 +1,13 @@
+{
+  "name": "session-reader",
+  "summary": "会话读取（session-reader 扩展 + session-core 基座 + zcode-session-source）",
+  "layers": [
+    "extension",
+    "core"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

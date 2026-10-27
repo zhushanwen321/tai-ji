@@ -1,0 +1,16 @@
+{
+  "name": "foundation",
+  "summary": "池：基础层（shared 协议枢纽 / extension-protocol core / state-machine / core 基座与 transport / ui 原语 / extensions/shared；域独占契约文件随域走）",
+  "layers": [
+    "shared",
+    "core",
+    "ui",
+    "protocol",
+    "extension"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

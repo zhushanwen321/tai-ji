@@ -1,0 +1,13 @@
+{
+  "name": "handoff",
+  "summary": "交接（runtime 单点服务 + shared 契约）",
+  "layers": [
+    "runtime",
+    "shared"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

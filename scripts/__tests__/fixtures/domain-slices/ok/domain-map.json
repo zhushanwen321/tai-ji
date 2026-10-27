@@ -1,0 +1,13 @@
+{
+  "meta": { "purpose": "夹具：W2-B 挂载排除表最小形态（两域各一文件，均 ⊆ 同名切片域展开）" },
+  "domains": {
+    "chat": {
+      "summary": "夹具挂载域 chat",
+      "files": ["packages/core/src/domain/chat/__tests__/chat-flow.test.ts"]
+    },
+    "archive": {
+      "summary": "夹具挂载域 archive",
+      "files": ["packages/core/src/domain/archive/__tests__/archive-store.test.ts"]
+    }
+  }
+}

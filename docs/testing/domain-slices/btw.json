@@ -1,0 +1,17 @@
+{
+  "name": "btw",
+  "summary": "旁路线会话（runtime btw-*×7 + renderer BtwPanel）",
+  "layers": [
+    "runtime",
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "pending"
+  }
+}

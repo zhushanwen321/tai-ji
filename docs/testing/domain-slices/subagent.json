@@ -1,0 +1,21 @@
+{
+  "name": "subagent",
+  "summary": "subagent/workflow 垂直切片（extensions/universal/subagent-workflow + packages/subagent-core + infra/subagent-control + renderer 视图与协议；v1 不做域内分级）",
+  "layers": [
+    "extension",
+    "core",
+    "runtime",
+    "renderer",
+    "protocol",
+    "infra"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "pending"
+  }
+}

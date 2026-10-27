@@ -1,0 +1,15 @@
+{
+  "name": "chat",
+  "summary": "夹具域：对话（core domain/chat 目录整域）",
+  "layers": ["core"],
+  "scope": {
+    "core": ["packages/core/src/domain/chat/**"]
+  },
+  "tests": ["packages/core/src/domain/chat/__tests__/**"],
+  "sharedBy": {},
+  "contracts": [
+    { "carrier": "packages/core/src/domain/chat/contract.ts", "on": ["archive"], "note": "夹具契约：改 chat 附加触发 archive" }
+  ],
+  "e2eRules": ["E2E-CHAT-01"],
+  "w2bMountCompat": { "mountSource": "docs/testing/domain-map.json", "status": "enforced" }
+}

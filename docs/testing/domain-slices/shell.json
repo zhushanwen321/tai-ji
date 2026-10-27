@@ -1,0 +1,17 @@
+{
+  "name": "shell",
+  "summary": "ui 容器原语 + core drawer/rendering-protocol",
+  "layers": [
+    "ui",
+    "core"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "pending"
+  }
+}

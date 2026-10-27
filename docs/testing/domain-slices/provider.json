@@ -1,0 +1,14 @@
+{
+  "name": "provider",
+  "summary": "provider/模型（runtime provider-* 服务 + model-service + provider-live-sync 扩展；renderer provider 页面冻结在 settings 域）",
+  "layers": [
+    "runtime",
+    "extension",
+    "shared"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

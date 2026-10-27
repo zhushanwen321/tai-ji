@@ -1,0 +1,13 @@
+{
+  "name": "file-tree",
+  "summary": "文件树（runtime file-service + renderer stores/fileTree + workspace 组件）",
+  "layers": [
+    "runtime",
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

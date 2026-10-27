@@ -1,35 +1,44 @@
 #!/usr/bin/env node
 /**
- * run-domain-tests.mjs — 按功能域触发挂载渲染重型测试（round6 Wave2 范围收缩）。
+ * run-domain-tests.mjs — 按功能域触发测试（Wave2 域触发入口，Wave4 升级为多域/双源/泛化包）。
  *
- * 背景：docs/testing/domain-map.json 登记的挂载渲染重型测试文件已移出默认档
- * （pnpm test 不收集不装载，排除机制见 test-guard/domain-exclusions.ts）。
- * 本脚本按域取回清单并触发执行：设置 TAIJI_TEST_DOMAIN（config 据此取消排除）
- * + 给 vitest 传该域的显式文件清单（精确选中，不跑其他域）。
+ * 域执行清单 = 双源并集（Wave4 §4.2）：
+ *   1. docs/testing/domain-slices/<domain>.json 的 tests glob 展开（切片 SSOT；展开语义
+ *      复用 scripts/check-domain-slices.mjs 导出的 expandTestGlobs，单一实现）
+ *   2. 全部切片的 sharedBy 反查（本域 ∈ 某文件注记域数组 → 该文件并入本域执行清单）
+ *   3. docs/testing/domain-map.json 同名域 files（W2-B 挂载子集，归属冻结；check-domain-slices
+ *      保证切片填充后包含它，未填充时本源是唯一来源——W2-B 14 域在批 B/C/D 填充前行为不回归）
+ *
+ * 包前缀泛化：文件路径 → 向上找最近 package.json 定位包 cwd（覆盖 packages/apps/extensions
+ * 任意包），vitest 在包 cwd 下接收包内相对路径。TAIJI_TEST_DOMAIN（config 据此取消默认档
+ * 排除，多域时值为逗号连接——消费方只判真值）与 TAIJI_SKIP_REAL_PI（默认池跳过真进程层）
+ * 注入逻辑与 Wave2 相同。
  *
  * 用法：
- *   node scripts/run-domain-tests.mjs <domain>          跑指定域（跨包逐包执行，汇总退出码）
- *   node scripts/run-domain-tests.mjs <domain> --list   只打印将执行的文件清单，不执行
- *   node scripts/run-domain-tests.mjs --domains         列出全部域名与文件数
+ *   node scripts/run-domain-tests.mjs <domain> [<domain>...]      跑指定域（多域取并集，跨包逐包执行，汇总退出码）
+ *   node scripts/run-domain-tests.mjs <domain> [<domain>...] --list 只打印将执行的文件清单
+ *   node scripts/run-domain-tests.mjs --domains                   列出全部域名与文件数（双源并集口径）
  *
- * 域清单的唯一权威源 = docs/testing/domain-map.json（本脚本只消费，不持清单）；
- * 表健康度由 scripts/check-domain-map.mjs 机器校验。
+ * 域清单权威源 = docs/testing/domain-slices/（切片）+ docs/testing/domain-map.json（挂载），
+ * 表健康度由 scripts/check-domain-slices.mjs（切片/交叉）与 scripts/check-domain-map.mjs（挂载）机器校验。
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { expandTestGlobs, readRegistry } from './check-domain-slices.mjs'
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(SCRIPT_DIR, '..')
+const SLICES_DIR = path.join(ROOT, 'docs', 'testing', 'domain-slices')
 const MAP_PATH = path.join(ROOT, 'docs', 'testing', 'domain-map.json')
 /** 与 test-guard/domain-exclusions.ts 的 DOMAIN_GATE_ENV 同名（mjs 侧不能 import ts，字面量 + check 脚本对拍）。 */
 const DOMAIN_GATE_ENV = 'TAIJI_TEST_DOMAIN'
 
-/** 包前缀 → 包 cwd（相对仓库根）。域内文件按此前缀分组到对应包的 vitest 实例。 */
-const PKG_PREFIXES = ['packages/renderer/', 'packages/ui/']
+// ---------- 纯函数（scripts/__tests__ 消费） ----------
 
-function loadMap() {
+/** 加载 W2-B 挂载表（domain-map.json，冻结 SSOT）。 */
+export function loadMountMap() {
   const raw = JSON.parse(readFileSync(MAP_PATH, 'utf-8'))
   const domains = raw?.domains
   if (!domains || typeof domains !== 'object') {
@@ -39,90 +48,162 @@ function loadMap() {
   return domains
 }
 
-function printHelp() {
-  const domains = loadMap()
-  console.error('用法: node scripts/run-domain-tests.mjs <domain> [--list]')
-  console.error('      node scripts/run-domain-tests.mjs --domains')
-  console.error('')
-  console.error('可用域（docs/testing/domain-map.json）：')
-  for (const [name, entry] of Object.entries(domains)) {
-    console.error(`  ${name.padEnd(12)} ${String(entry.files.length).padStart(3)} 文件  ${entry.summary ?? ''}`)
+/**
+ * 双源收集：names 各域的执行文件并集。
+ * slices 来自 readRegistry()（切片），mountDomains 来自 domain-map.json，expand(root, globs)
+ * 注入（= expandTestGlobs）便于单测脱离真实磁盘。
+ * 返回 Map<domain, {sliceFiles, sharedByFiles, mountFiles, files(并集排序)}>。
+ */
+export function collectDomainFiles(slices, mountDomains, names, expand) {
+  const byName = new Map(slices.map((s) => [s.name, s]))
+  const out = new Map()
+  for (const name of names) {
+    const slice = byName.get(name)
+    if (!slice && !mountDomains[name]) continue
+    const sliceFiles = slice ? expand(slice.tests ?? []) : []
+    const sharedByFiles = []
+    for (const s of slices) {
+      for (const [file, domains] of Object.entries(s.sharedBy ?? {})) {
+        if ((domains ?? []).includes(name)) sharedByFiles.push(file)
+      }
+    }
+    const mountFiles = mountDomains[name]?.files ?? []
+    const files = [...new Set([...sliceFiles, ...sharedByFiles, ...mountFiles])].sort()
+    out.set(name, { sliceFiles, sharedByFiles, mountFiles, files })
   }
+  return out
+}
+
+/** 文件路径 → 最近的包根（含 package.json 的祖先目录，仓库根为上界）；找不到返回 null。 */
+export function packageRootFor(root, file) {
+  let dir = path.dirname(path.join(root, file))
+  const stop = path.resolve(root)
+  while (true) {
+    if (existsSync(path.join(dir, 'package.json'))) return path.relative(root, dir) || '.'
+    if (path.resolve(dir) === stop) return null
+    const parent = path.dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
+}
+
+/** 按包分组：Map<包相对路径, 包内相对路径数组>；无法定位包的文件记入 problems。 */
+export function groupFilesByPackage(root, files) {
+  const byPkg = new Map()
+  const problems = []
+  for (const file of files) {
+    const pkg = packageRootFor(root, file)
+    if (!pkg) {
+      problems.push(file)
+      continue
+    }
+    if (!byPkg.has(pkg)) byPkg.set(pkg, [])
+    byPkg.get(pkg).push(path.relative(pkg, file))
+  }
+  return { byPkg, problems }
+}
+
+// ---------- main ----------
+
+function availableDomains(slices, mountDomains) {
+  const names = new Set([...slices.map((s) => s.name), ...Object.keys(mountDomains)])
+  return [...names].sort()
 }
 
 function main() {
   const args = process.argv.slice(2)
-  const domains = loadMap()
+  const { slices } = readRegistry(SLICES_DIR)
+  const mountDomains = loadMountMap()
+  // 展开漂移 fail-fast：死 glob / 失踪文件若静默跳过，域触发会漏跑且绿灯误导（junit 守恒威胁），
+  // 恢复动作指向健康度脚本
+  const expand = (globs) => {
+    const { files, problems } = expandTestGlobs(ROOT, globs)
+    if (problems.length > 0) {
+      console.error(`[run-domain-tests] 切片展开漂移（登记与磁盘不一致，拒绝半清单执行）：`)
+      for (const p of problems) console.error(`  - ${p}`)
+      console.error('  恢复动作：node scripts/check-domain-slices.mjs 定位违规并同步 docs/testing/domain-slices/<domain>.json')
+      process.exit(1)
+    }
+    return files
+  }
 
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-    printHelp()
+    console.error('用法: node scripts/run-domain-tests.mjs <domain> [<domain>...] [--list]')
+    console.error('      node scripts/run-domain-tests.mjs --domains')
+    console.error('')
+    console.error('可用域（docs/testing/domain-slices/ 切片 ∪ docs/testing/domain-map.json 挂载）：')
+    for (const name of availableDomains(slices, mountDomains)) {
+      const slice = slices.find((s) => s.name === name)
+      const src = slice && mountDomains[name] ? 'slice+mount' : slice ? 'slice' : 'mount'
+      console.error(`  ${name.padEnd(20)} ${src.padEnd(11)} ${slice?.summary ?? mountDomains[name]?.summary ?? ''}`)
+    }
     process.exit(args.length === 0 ? 1 : 0)
   }
   if (args.includes('--domains')) {
-    for (const [name, entry] of Object.entries(domains)) {
-      console.log(`${name}\t${entry.files.length}`)
+    for (const name of availableDomains(slices, mountDomains)) {
+      console.log(`${name}\t${collectDomainFiles(slices, mountDomains, [name], expand).get(name)?.files.length ?? 0}`)
     }
     return
   }
 
-  const domain = args[0]
   const listOnly = args.includes('--list')
-  const entry = domains[domain]
-  if (!entry) {
-    console.error(`[run-domain-tests] 未知域 "${domain}"——可用域见 node scripts/run-domain-tests.mjs --domains`)
+  const names = args.filter((a) => !a.startsWith('--'))
+  if (names.length === 0) {
+    console.error('[run-domain-tests] 未指定域——用法见 node scripts/run-domain-tests.mjs --help')
     process.exit(1)
   }
-  const files = entry.files
-  if (!Array.isArray(files) || files.length === 0) {
-    console.error(`[run-domain-tests] 域 "${domain}" 文件清单为空（domain-map.json 登记异常，先跑 node scripts/check-domain-map.mjs）`)
+  const known = new Set(availableDomains(slices, mountDomains))
+  const unknown = names.filter((n) => !known.has(n))
+  if (unknown.length > 0) {
+    console.error(`[run-domain-tests] 未知域 "${unknown.join('", "')}"——可用域见 node scripts/run-domain-tests.mjs --domains`)
     process.exit(1)
   }
 
-  // 按包分组：文件条目以包前缀开头，vitest 在包 cwd 下接收包内相对路径
-  const byPkg = new Map()
-  for (const file of files) {
-    const prefix = PKG_PREFIXES.find((p) => file.startsWith(p))
-    if (!prefix) {
-      console.error(`[run-domain-tests] 文件 "${file}" 不在任何已知包前缀（${PKG_PREFIXES.join(' / ')}）下——domain-map.json 登记异常`)
-      process.exit(1)
-    }
-    if (!byPkg.has(prefix)) byPkg.set(prefix, [])
-    byPkg.get(prefix).push(path.relative(prefix, file))
+  const collected = collectDomainFiles(slices, mountDomains, names, expand)
+  const files = [...new Set(names.flatMap((n) => collected.get(n)?.files ?? []))].sort()
+  if (files.length === 0) {
+    console.error(`[run-domain-tests] 域 "${names.join('", "')}" 双源文件清单均为空（登记异常，先跑 node scripts/check-domain-slices.mjs）`)
+    process.exit(1)
+  }
+
+  const { byPkg, problems } = groupFilesByPackage(ROOT, files)
+  if (problems.length > 0) {
+    console.error(`[run-domain-tests] 以下文件无法定位所属包（向上找不到 package.json）——登记异常：`)
+    for (const f of problems) console.error(`  - ${f}`)
+    process.exit(1)
   }
 
   if (listOnly) {
-    for (const [prefix, pkgFiles] of byPkg) {
-      for (const f of pkgFiles) console.log(`${prefix}${f}`)
-    }
+    for (const f of files) console.log(f)
     return
   }
 
+  const domainLabel = names.join(',')
   let failed = 0
-  for (const [prefix, pkgFiles] of byPkg) {
-    const pkgDir = prefix.replace(/\/$/, '')
-    console.log(`\n[run-domain-tests] 域 "${domain}" · ${pkgDir} · ${pkgFiles.length} 文件`)
+  for (const [pkg, pkgFiles] of byPkg) {
+    console.log(`\n[run-domain-tests] 域 "${domainLabel}" · ${pkg} · ${pkgFiles.length} 文件`)
     const result = spawnSync('pnpm', ['exec', 'vitest', 'run', ...pkgFiles], {
-      cwd: path.join(ROOT, pkgDir),
+      cwd: path.join(ROOT, pkg),
       stdio: 'inherit',
       env: {
         ...process.env,
-        // 域触发档：config 据此取消默认档排除，显式文件清单才能被收集
-        [DOMAIN_GATE_ENV]: domain,
+        // 域触发档：config 据此取消默认档排除，显式文件清单才能被收集（多域逗号连接，消费方只判真值）
+        [DOMAIN_GATE_ENV]: domainLabel,
         // 与默认档同口径（AGENTS.md 测试章：跳过真进程层）
         TAIJI_SKIP_REAL_PI: '1',
       },
     })
     if (result.status !== 0) {
       failed++
-      console.error(`[run-domain-tests] ${pkgDir} 退出码 ${result.status}`)
+      console.error(`[run-domain-tests] ${pkg} 退出码 ${result.status}`)
     }
   }
 
   if (failed > 0) {
-    console.error(`\n[run-domain-tests] 域 "${domain}" 完成：${failed}/${byPkg.size} 包失败`)
+    console.error(`\n[run-domain-tests] 域 "${domainLabel}" 完成：${failed}/${byPkg.size} 包失败`)
     process.exit(1)
   }
-  console.log(`\n[run-domain-tests] 域 "${domain}" 全绿（${byPkg.size} 包，${files.length} 文件）`)
+  console.log(`\n[run-domain-tests] 域 "${domainLabel}" 全绿（${byPkg.size} 包，${files.length} 文件）`)
 }
 
 main()

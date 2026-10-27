@@ -1,0 +1,18 @@
+{
+  "name": "goal",
+  "summary": "目标跟踪（extensions/universal/goal 整包单域：goal 工具与服务状态机）",
+  "layers": [
+    "extension"
+  ],
+  "scope": {
+    "extension": [
+      "extensions/universal/goal/**"
+    ]
+  },
+  "tests": [
+    "extensions/universal/goal/**"
+  ],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

@@ -1,0 +1,19 @@
+{
+  "name": "plan",
+  "summary": "计划模式（plan 扩展 + 协议 + runtime 提取器 + renderer plan-store/plan 组件）",
+  "layers": [
+    "extension",
+    "protocol",
+    "runtime",
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "pending"
+  }
+}

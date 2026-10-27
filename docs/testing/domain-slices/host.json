@@ -1,0 +1,14 @@
+{
+  "name": "host",
+  "summary": "池：壳装配（electron-main / mobile-renderer / renderer 装配横切；electron-main 内各域文件按精确路径划出归域）",
+  "layers": [
+    "electron",
+    "mobile",
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

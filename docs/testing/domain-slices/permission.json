@@ -1,0 +1,13 @@
+{
+  "name": "permission",
+  "summary": "权限（permission 扩展 + runtime 放行）",
+  "layers": [
+    "extension",
+    "runtime"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

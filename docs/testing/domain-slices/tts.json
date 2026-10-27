@@ -1,0 +1,15 @@
+{
+  "name": "tts",
+  "summary": "TTS 朗读（runtime tts + infra/tts + ui 朗读；renderer tts 页面冻结在 settings 域）",
+  "layers": [
+    "runtime",
+    "infra",
+    "renderer",
+    "ui"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

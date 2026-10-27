@@ -1,0 +1,12 @@
+{
+  "name": "ask-user",
+  "summary": "向用户提问（ask-user 扩展；ui-form 共享协议归 foundation，契约闭包覆盖）",
+  "layers": [
+    "extension"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

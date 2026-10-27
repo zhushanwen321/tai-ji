@@ -1,0 +1,19 @@
+{
+  "name": "chat",
+  "summary": "对话与交付（core domain/chat + session-delivery + runtime session 窄义 + renderer 对话流渲染；窄义 session，import/gen-stats/workflow 提取器独立成域）",
+  "layers": [
+    "core",
+    "runtime",
+    "renderer",
+    "shared"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "pending"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "remote-access",
+  "summary": "远程访问（transport connection-manager + electron main remote + mobile + renderer 页面冻结在 settings 域）",
+  "layers": [
+    "runtime",
+    "electron",
+    "mobile",
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

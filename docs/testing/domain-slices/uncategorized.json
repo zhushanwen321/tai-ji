@@ -1,0 +1,10 @@
+{
+  "name": "uncategorized",
+  "summary": "池：孤儿与在途混合（无法唯一归类的混合 bundle / equivalence 混沌组 / i18n 主题横切；显式文件清单登记 + sharedBy 注记内含域，棘轮只降不升）",
+  "layers": [],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

@@ -1,0 +1,13 @@
+{
+  "name": "pending-notifications",
+  "summary": "待处理通知（runtime 单点服务 + 扩展）",
+  "layers": [
+    "runtime",
+    "extension"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

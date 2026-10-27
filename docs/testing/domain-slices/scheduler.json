@@ -1,0 +1,14 @@
+{
+  "name": "scheduler",
+  "summary": "调度（scheduler 扩展 + 协议 + renderer 调度件；调度内联卡等页面件冻结在 panel 域）",
+  "layers": [
+    "extension",
+    "protocol",
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

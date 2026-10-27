@@ -1,0 +1,13 @@
+{
+  "name": "preset",
+  "summary": "预设/模式（runtime preset-service + shared pi-preset；renderer preset-chip 冻结在 panel 域）",
+  "layers": [
+    "runtime",
+    "shared"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

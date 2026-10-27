@@ -1,0 +1,13 @@
+{
+  "name": "worktree",
+  "summary": "worktree（runtime 单点服务；renderer worktree 页面冻结在 settings 域）",
+  "layers": [
+    "runtime",
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

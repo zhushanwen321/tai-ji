@@ -1,0 +1,16 @@
+{
+  "name": "panel",
+  "summary": "工作台面板容器与 Composer 工具条（含冻结的调度内联卡/preset-chip 等页面件）",
+  "layers": [
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "pending"
+  }
+}

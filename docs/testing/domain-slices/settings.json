@@ -1,0 +1,19 @@
+{
+  "name": "settings",
+  "summary": "设置/配置（renderer settings 树 + ui features/settings + core domain/settings + runtime pi 配置存储）",
+  "layers": [
+    "renderer",
+    "ui",
+    "core",
+    "runtime"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "pending"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "session-manager",
+  "summary": "会话管理器（session-manager 扩展 + runtime notify-claims/watch 桥）",
+  "layers": [
+    "extension",
+    "runtime",
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

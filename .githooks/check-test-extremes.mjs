@@ -81,6 +81,7 @@ const EXEMPT = {
   'scripts/__tests__/check-test-blind-wait.test.mjs': '盲等检查器黑盒自测（每处 spawn <300ms，裁决保留）',
   'scripts/__tests__/check-prompt-outposts.test.mjs': '出站调用点检查黑盒自测（fixture 由被测脚本常量生成，spawn 亚秒级）',
   'scripts/__tests__/check-domain-type-path.test.mjs': '检查器黑盒自测（spawn 检查脚本本体，亚秒级）',
+  'scripts/__tests__/check-domain-slices.test.mjs': '域切分守卫黑盒自测（spawn 检查脚本本体，亚秒级，沿检查器自测先例）',
   'scripts/__tests__/check-global-slot-keys.test.mjs': '检查器黑盒自测（spawn 检查脚本本体，亚秒级）',
   'scripts/__tests__/check-guide-contract-projection.test.mjs': '检查器黑盒自测（spawn 检查脚本本体，亚秒级）',
   'scripts/__tests__/check-infra-services-import.test.mjs': '检查器黑盒自测（spawn 检查脚本本体，亚秒级）',

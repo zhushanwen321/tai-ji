@@ -1,0 +1,20 @@
+{
+  "name": "canvas",
+  "summary": "问题解决画布全链（runtime 聚合 + taiji 扩展 + 协议 + renderer 组件/store + core overlay）",
+  "layers": [
+    "extension",
+    "protocol",
+    "runtime",
+    "renderer",
+    "core"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "pending"
+  }
+}

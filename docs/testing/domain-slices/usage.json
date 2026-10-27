@@ -1,0 +1,13 @@
+{
+  "name": "usage",
+  "summary": "用量/配额/统计三合一（runtime usage/quota/gen-stats + renderer 量卡）",
+  "layers": [
+    "runtime",
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

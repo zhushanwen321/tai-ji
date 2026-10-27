@@ -1,0 +1,13 @@
+{
+  "name": "workspace",
+  "summary": "workspace/project 两小域合并（runtime 单点服务 + renderer 组件）",
+  "layers": [
+    "runtime",
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

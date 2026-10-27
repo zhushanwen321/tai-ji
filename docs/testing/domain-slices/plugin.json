@@ -1,0 +1,12 @@
+{
+  "name": "plugin",
+  "summary": "插件（runtime plugin-service + plugin-sdk 契约测试寄宿 runtime）",
+  "layers": [
+    "runtime"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}

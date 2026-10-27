@@ -1,0 +1,16 @@
+{
+  "name": "tray",
+  "summary": "任务托盘（tray widget / native 桶 / 后台任务详情面板）",
+  "layers": [
+    "renderer"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "pending"
+  }
+}

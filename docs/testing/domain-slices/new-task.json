@@ -1,0 +1,18 @@
+{
+  "name": "new-task",
+  "summary": "新任务落地页（renderer landing + ui 套件 + core new-task-search）",
+  "layers": [
+    "renderer",
+    "ui",
+    "core"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": [],
+  "w2bMountCompat": {
+    "mountSource": "docs/testing/domain-map.json",
+    "status": "pending"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "todo",
+  "summary": "待办（todo 扩展整包）",
+  "layers": [
+    "extension"
+  ],
+  "scope": {},
+  "tests": [],
+  "sharedBy": {},
+  "contracts": [],
+  "e2eRules": []
+}
