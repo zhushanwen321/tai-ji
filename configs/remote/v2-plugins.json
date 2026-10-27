@@ -7,7 +7,7 @@
       "displayName": "Qoder (Wool)",
       "description": "taiji plugin for the Qoder (Alibaba) wool provider family — local credential extraction, PAT fallback, account/quota status, model catalog refresh.",
       "pluginVersion": "0.1.0",
-      "piExtensionVersion": "0.2.0",
+      "piExtensionVersion": "0.2.1",
       "family": {
         "id": "wool-qoder",
         "displayName": "Qoder",
@@ -54,7 +54,7 @@
       "displayName": "WorkBuddy",
       "description": "taiji plugin for the WorkBuddy (Tencent) wool provider family — OAuth authorization, account/check-in status, daily check-in, model catalog refresh.",
       "pluginVersion": "0.1.0",
-      "piExtensionVersion": "0.2.0",
+      "piExtensionVersion": "0.2.1",
       "family": {
         "id": "wool-workbuddy",
         "displayName": "WorkBuddy",
