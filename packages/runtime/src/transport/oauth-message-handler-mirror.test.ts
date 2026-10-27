@@ -124,7 +124,7 @@ describe('OauthMessageHandler · 凭据域变更触发 zcode provider 镜像（M
     await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(
       '[oauth-message-handler] zcode provider mirror sync failed:',
       'mirror boom',
-    ))
+    ), { interval: 1 })
 
     expect(replies.some(r => r.type === 'config.oauthLogoutReply')).toBe(true)
   })

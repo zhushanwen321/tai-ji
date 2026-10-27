@@ -58,7 +58,7 @@ describe('EventAdapter: onHookExecute callback', () => {
     })
 
     // Wait for async handleEvent
-    await vi.waitFor(() => expect(hookFn).toHaveBeenCalled())
+    await vi.waitFor(() => expect(hookFn).toHaveBeenCalled(), { interval: 1 })
 
     expect(hookFn).toHaveBeenCalledWith('onBeforeToolCall', {
       toolName: 'read_file',
@@ -84,7 +84,7 @@ describe('EventAdapter: onHookExecute callback', () => {
       },
     })
 
-    await vi.waitFor(() => expect(hookFn).toHaveBeenCalled())
+    await vi.waitFor(() => expect(hookFn).toHaveBeenCalled(), { interval: 1 })
 
     expect(hookFn).toHaveBeenCalledWith('onAfterToolResult', {
       toolCallId: 'tc-200',
@@ -113,7 +113,7 @@ describe('EventAdapter: onHookExecute callback', () => {
       },
     })
 
-    await vi.waitFor(() => expect(hookFn).toHaveBeenCalled())
+    await vi.waitFor(() => expect(hookFn).toHaveBeenCalled(), { interval: 1 })
 
     // Event is blocked — no message forwarded to frontend
     expect(sent).toHaveLength(0)
@@ -141,7 +141,7 @@ describe('EventAdapter: onHookExecute callback', () => {
       },
     })
 
-    await vi.waitFor(() => expect(sent).toHaveLength(1))
+    await vi.waitFor(() => expect(sent).toHaveLength(1), { interval: 1 })
 
     expect(sent[0].type).toBe('message.tool_call_start')
     // [w21] hook 改写同步回 entry.arguments（payload 换 entry 形态）
@@ -170,7 +170,7 @@ describe('EventAdapter: onHookExecute callback', () => {
       },
     })
 
-    await vi.waitFor(() => expect(sent).toHaveLength(1))
+    await vi.waitFor(() => expect(sent).toHaveLength(1), { interval: 1 })
 
     expect(sent[0].type).toBe('message.tool_call_end')
     // [w21] hook 改写同步回 entry.message.content（text block 数组，pi 持久化形态）
@@ -195,7 +195,7 @@ describe('EventAdapter: onHookExecute callback', () => {
           return () => {}
         },
       })
-      await vi.waitFor(() => expect(sent).toHaveLength(1))
+      await vi.waitFor(() => expect(sent).toHaveLength(1), { interval: 1 })
 
       const payload = sent[0].payload as { entry: { arguments?: unknown } }
       expect(payload.entry.arguments).toEqual(original) // 原始 input 保留
@@ -214,7 +214,7 @@ describe('EventAdapter: onHookExecute callback', () => {
           return () => {}
         },
       })
-      await vi.waitFor(() => expect(sent).toHaveLength(1))
+      await vi.waitFor(() => expect(sent).toHaveLength(1), { interval: 1 })
 
       const payload = sent[0].payload as { entry: { message: { content?: unknown } } }
       expect(payload.entry.message.content).toEqual([{ type: 'text', text: 'original output' }]) // 原始 output 保留
@@ -232,7 +232,7 @@ describe('EventAdapter: onHookExecute callback', () => {
         return () => {}
       },
     })
-    await vi.waitFor(() => expect(sent).toHaveLength(1))
+    await vi.waitFor(() => expect(sent).toHaveLength(1), { interval: 1 })
 
     const payload = sent[0].payload as { entry: { arguments?: unknown } }
     expect(payload.entry.arguments).toEqual({})
@@ -265,7 +265,7 @@ describe('EventAdapter: onHookExecute callback', () => {
     await vi.waitFor(() => {
       const start = sent.find((m) => m.type === 'message.tool_call_start')
       expect(start).toBeDefined()
-    })
+    }, { interval: 1 })
 
     const start = sent.find((m) => m.type === 'message.tool_call_start')!
     const payload = start.payload as { entry: { contentIndex?: number; messageId?: string } }
@@ -289,7 +289,7 @@ describe('EventAdapter: onHookExecute callback', () => {
     })
 
     // handleEvent is async even without hook — wait for it
-    await vi.waitFor(() => expect(sent).toHaveLength(1))
+    await vi.waitFor(() => expect(sent).toHaveLength(1), { interval: 1 })
     expect(sent[0].type).toBe('message.tool_call_start')
     expect((sent[0].payload as { entry: { toolName?: string } }).entry.toolName).toBe('read_file')
   })
@@ -312,7 +312,7 @@ describe('EventAdapter: onHookExecute callback', () => {
       },
     })
 
-    await vi.waitFor(() => expect(sent).toHaveLength(1))
+    await vi.waitFor(() => expect(sent).toHaveLength(1), { interval: 1 })
 
     // Hook error → proceed with original data
     expect(sent[0].type).toBe('message.tool_call_start')

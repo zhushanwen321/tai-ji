@@ -338,7 +338,7 @@ describe('S#7 update-handlers: preload orchestration in update:check', () => {
     // 预下载是 fire-and-forget promise，需 await 一轮微任务让 preloadUpdateSilently 跑完。
     await vi.waitFor(() => {
       expect(orch.downloadUpdate).toHaveBeenCalledTimes(1)
-    })
+    }, { interval: 1 })
     expect(orch.downloadUpdate).toHaveBeenCalledWith(FIXTURE)
     // 下载成功 → 写 preloaded-update.json（供 update:download 快路径命中）
     expect(preloadedMocks.writePreloadedUpdate).toHaveBeenCalledTimes(1)
@@ -401,7 +401,7 @@ describe('S#7 update-handlers: preload orchestration in update:check', () => {
 
     // 第一次 check：触发预下载，downloadUpdate 挂起在 gate 上（preDownloading=true）
     await handler({}, {})
-    await vi.waitFor(() => expect(orch.downloadUpdate).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(orch.downloadUpdate).toHaveBeenCalledTimes(1), { interval: 1 })
 
     // 第二次 check：preDownloading 仍为 true（首次未完成）→ 不重复触发 downloadUpdate
     await handler({}, {})
@@ -410,7 +410,7 @@ describe('S#7 update-handlers: preload orchestration in update:check', () => {
 
     // 释放首次预下载，让其正常结束（finally 重置 preDownloading），避免污染后续用例
     releaseGate()
-    await vi.waitFor(() => expect(preloadedMocks.writePreloadedUpdate).toHaveBeenCalled())
+    await vi.waitFor(() => expect(preloadedMocks.writePreloadedUpdate).toHaveBeenCalled(), { interval: 1 })
   })
 
   it('preDownload=true 但 downloadUpdate 抛错 → 静默 warn，不 reject check 响应', async () => {
@@ -430,7 +430,7 @@ describe('S#7 update-handlers: preload orchestration in update:check', () => {
     expect(result).toEqual({ info: FIXTURE, rateLimited: false })
 
     // 预下载失败 → warn + 不写 preloaded 元信息
-    await vi.waitFor(() => expect(orch.downloadUpdate).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(orch.downloadUpdate).toHaveBeenCalledTimes(1), { interval: 1 })
     expect(preloadedMocks.writePreloadedUpdate).not.toHaveBeenCalled()
     expect(warnSpy).toHaveBeenCalled()
     warnSpy.mockRestore()
@@ -519,7 +519,7 @@ describe('T4 update-handlers: update:download / update:install / update:getPrelo
     // 触发 update:check 启动后台预下载（挂起在 gate）
     const checkHandler = handlers.get('update:check')!
     await checkHandler({}, { force: true })
-    await vi.waitFor(() => expect(orch.downloadUpdate).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(orch.downloadUpdate).toHaveBeenCalledTimes(1), { interval: 1 })
 
     // 此时后台预下载挂起中，preDownloadPromise 非 null
     // readPreloadedUpdate 返回 null（产物未写）
@@ -532,7 +532,7 @@ describe('T4 update-handlers: update:download / update:install / update:getPrelo
 
     // 释放后台预下载 → downloadPromise 继续
     releaseGate()
-    await vi.waitFor(() => expect(preloadedMocks.writePreloadedUpdate).toHaveBeenCalled())
+    await vi.waitFor(() => expect(preloadedMocks.writePreloadedUpdate).toHaveBeenCalled(), { interval: 1 })
 
     // 后台预下载完成后 readPreloadedUpdate 应命中（模拟后台写入了产物）
     preloadedMocks.readPreloadedUpdate.mockResolvedValue('/tmp/bg.zip')

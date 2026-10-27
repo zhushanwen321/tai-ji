@@ -233,7 +233,7 @@ describe('plugin-commands-views', () => {
           handlerId,
           result: 'result-ok',
         })
-      })
+      }, { interval: 1 })
       // 收尾：resolve invoke.result 的挂起 request（避免 30s 超时 timer 悬挂）
       resolveLastRequest({ ok: true })
     })

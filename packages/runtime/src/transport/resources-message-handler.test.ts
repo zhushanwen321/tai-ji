@@ -53,7 +53,7 @@ describe('ResourcesMessageHandler config.setSkillDirs 失效编排（缓存治�
     await expect(handler.handle(msg('config.setSkillDirs', { dirs: ['/project/.agents/skills'] }), ws))
       .resolves.toBe(true)
 
-    await vi.waitFor(() => expect(skillRegistry.invalidateAllProjects).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(skillRegistry.invalidateAllProjects).toHaveBeenCalledTimes(1), { interval: 1 })
     expect(ctx.broadcastSkillCacheInvalidated).toHaveBeenCalledWith('project')
     // 失败不阻塞 WS 消息处理：reply 正常发出
     expect(ctx.reply).toHaveBeenCalled()
@@ -79,7 +79,7 @@ describe('ResourcesMessageHandler config.setSkillDirs 失效编排（缓存治�
 
     // 操作（目录管道写入，rebuild 失败）：失败分支清 projectCache
     await handler.handle(msg('config.setSkillDirs', { dirs: ['/project/.agents/skills'] }), ws)
-    await vi.waitFor(() => expect(skillRegistry.invalidateAllProjects).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(skillRegistry.invalidateAllProjects).toHaveBeenCalledTimes(1), { interval: 1 })
 
     // 操作后：下次读为新值（invalidate 清缓存 → getProjectSkills 重扫）
     await handler.handle(msg('config.getProjectSkills', { cwd: '/project' }), ws)
@@ -99,7 +99,7 @@ describe('ResourcesMessageHandler config.setSkillDirs 失效编排（缓存治�
 
     await handler.handle(msg('config.setSkillDirs', { dirs: ['/project/.agents/skills'] }), ws)
 
-    await vi.waitFor(() => expect(skillRegistry.invalidateAllProjects).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(skillRegistry.invalidateAllProjects).toHaveBeenCalledTimes(1), { interval: 1 })
     expect(ctx.broadcastSkillCacheInvalidated).toHaveBeenCalledWith('project')
     expect(ctx.broadcastSkillDirs).toHaveBeenCalled()
     expect(ctx.broadcastSkillList).toHaveBeenCalled()

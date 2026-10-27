@@ -107,7 +107,7 @@ describe('SEC-U2 WS transport hardening (loopback + maxPayload + auth handshake)
       // warn 已发生即该消息已按丢弃路径处理完毕）——替代固定 300ms 盲等
       await vi.waitFor(() => {
         expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('dropping pre-auth'))).toBe(true)
-      })
+      }, { interval: 1 })
       expect(onMessage).not.toHaveBeenCalled()
       ws.close()
     } finally {
@@ -131,7 +131,7 @@ describe('SEC-U2 WS transport hardening (loopback + maxPayload + auth handshake)
       ws.send(JSON.stringify({ type: 'plugin.toggle', id: 'evil-1', payload: { pluginId: 'x', enabled: false } }))
       await vi.waitFor(() => {
         expect(droppingCalls().length).toBe(1)
-      })
+      }, { interval: 1 })
       expect(String(droppingCalls()[0]?.[0])).toContain('type=plugin.toggle')
       // 第二条：静默丢弃，不再 warn。其处理完毕的确定性信号 = 随后的错误 token auth
       // 走完拒绝链（close 1008 到达）——WS 消息按序处理，close 到达即前一条已处理完

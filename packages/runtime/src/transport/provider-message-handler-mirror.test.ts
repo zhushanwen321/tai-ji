@@ -125,7 +125,7 @@ describe('ProviderMessageHandler · mirrorAfterMutation write-through 触发链�
     expect(handled).toBe(true)
     expect(replies.some(r => r.type === 'config.providersImported')).toBe(true)
     // 同步一次（mutation 落盘后）+ refreshProviderCatalogs resolve 后 .then 一次
-    await vi.waitFor(() => expect(providersMutatedSync).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(providersMutatedSync).toHaveBeenCalledTimes(2), { interval: 1 })
     expect(configService.applyImportProviders).toHaveBeenCalledWith('imp-1', ['stepfun'])
   })
 
@@ -141,7 +141,7 @@ describe('ProviderMessageHandler · mirrorAfterMutation write-through 触发链�
     const handled = await handler.handle(msg('config.setProvider', { providerId: 'stepfun' }), WS)
 
     expect(handled).toBe(true)
-    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled(), { interval: 1 })
     const warnText = warnSpy.mock.calls.map(args => args.map(String).join(' ')).join('\n')
     expect(warnText).toContain('[provider-message-handler] zcode provider mirror sync failed')
     expect(warnText).toContain('mirror write failed')

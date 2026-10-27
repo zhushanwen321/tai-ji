@@ -1,5 +1,6 @@
 import { defaultExclude } from 'vitest/config'
 import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
+import { INTEGRATION_TESTS_ENABLED } from '../../test-guard/integration-gate.ts'
 
 /**
  * vitest 分池维护契约（三池：main 满并行组 / real-pi 串行尾组 / integration 受控并行尾组）。
@@ -47,10 +48,17 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
  * - 新增「真实 pi + 真实 LLM turn」的 equivalence 测试 → 文件路径同步加入 REAL_PI_TESTS
  *   （漏加会落回 main 满并行组，复发饿死超时）；纯 mock / fixture 重放用例不加。
  * - 新增「真进程 / 真 IO / 真实挂钟窗口」的集成用例 → 两种形态二选一：① 整文件都是门控
- *   用例 → 路径加入 INTEGRATION_TESTS（该数组同时喂 integration project 的 include 与
- *   main project 的 exclude，漏加 = 文件落回 main 满并行组）；② 文件内只有部分用例需门控
- *   → 文件留在 main 组，用 `describe.skipIf(!INTEGRATION_TESTS_ENABLED)` 包裹（用例级
- *   门控）。选型判据 = 文件内是否还有快用例值得留在默认组。
+ *   用例 → 路径加入 INTEGRATION_TESTS（该数组喂 main project 的 exclude 与门控开启时
+ *   integration project 的 include，漏加 = 文件落回 main 满并行组）；② 文件内只有部分
+ *   用例需门控 → 文件留在 main 组，用 `describe.skipIf(!INTEGRATION_TESTS_ENABLED)` 包裹
+ *   （用例级门控）。选型判据 = 文件内是否还有快用例值得留在默认组。
+ * - INTEGRATION_TESTS 成员若含未包门控的用例（门控关闭时仍要跑），必须同时登记
+ *   INTEGRATION_UNGATED_CARRIERS——门控关闭时 integration project 只收集该表，漏登记
+ *   = 该文件的非门控用例静默不收集（无报错、无 skip 记录）。
+ * - real-pi 组不按门控条件化：成员 session-manager-full-e2e 含 7 条 faux 层用例
+ *   （不依赖凭证，REAL_PI_READY 关闭时照跑），按门控关闭跳过整个组会静默丢掉这 7 条
+ *   断言；该文件的串行尾组注册理由见 REAL_PI_TESTS 注释（满并行下 faux 层整体红），
+ *   故既不能跳过收集也不能并回 main。
  * - faux LLM 层用例（spawnPiFixture 传 fauxResponses：真 pi 进程 + 真 extension 加载 + 假 LLM，
  *   门控 FAUX_PI_READY）**不进 real-pi 池**——该池的存在理由是真实 LLM 轮次的长等待窗口
  *   在 CPU 饱和下饿死，faux 轮次是毫秒级本地计算、零网络，该模式结构性不存在。但 faux 层
@@ -96,6 +104,28 @@ const INTEGRATION_TESTS = [
   'test/skill-registry-watcher-real.test.ts',
 ] as const
 
+/**
+ * integration 组内「门控关闭时仍有可执行用例」的成员（本表 ⊆ INTEGRATION_TESTS）。
+ *
+ * 门控关闭时 integration project 只收集本表成员：其余成员整文件被
+ * `describe.skipIf(!INTEGRATION_TESTS_ENABLED)` 跳过，收集它们只付装载成本
+ * （实测安静窗口 9 个空转文件 = 0.7s 墙钟，高负载窗口 ~2.4s），产出 0 条断言。
+ * 本表成员混有未包门控的用例（如 mock RPC 层快用例），不收集会静默丢断言。
+ *
+ * 维护契约：文件级集成组新增成员时，若该文件含未包门控的用例，必须同时登记本表；
+ * 漏登记 = 该文件的非门控用例在门控关闭时静默消失（无报错、无 skip 记录）。
+ * 判据 = 文件内是否每条用例都被 skipIf 门控包裹。
+ */
+const INTEGRATION_UNGATED_CARRIERS = [
+  'src/__tests__/equivalence/usage-queue-commands-invalidation.test.ts',
+] as const
+
+/** integration project 的 include：门控开 = 全部成员；门控关 = 只留非门控载体。
+ *  门控关闭时若整表都收集，9 个全 skip 文件是纯空转（实测 0 断言、0.7~2.4s 墙钟随负载）。 */
+const integrationInclude = INTEGRATION_TESTS_ENABLED
+  ? [...INTEGRATION_TESTS]
+  : [...INTEGRATION_UNGATED_CARRIERS]
+
 export default taijiTestConfig({
   test: {
     // cw 验收标记行 reporter：e2e-mock 型验收（如 trace-runtime A31）要求 stdout 含
@@ -123,11 +153,12 @@ export default taijiTestConfig({
       {
         // 集成测试门控组：真进程 / 真 IO 用例。受控并行尾组——sequence.groupOrder: 1 =
         // main 组完整结束后整组开跑（调度契约见文件头），组内文件级并行 maxWorkers 4
-        //（并行安全前提与占用上限论证见文件头）；本地不设 TAIJI_TEST_INTEGRATION 时组内
-        // 用例经 describe.skipIf 跳过（文件级集成组）。
+        //（并行安全前提与占用上限论证见文件头）；include 按门控组装（见
+        // integrationInclude 注释）：门控关闭时只收集非门控载体文件，其余成员全 skip
+        // 的 9 个文件不付装载成本。
         test: guardProjectSetup({
           name: 'integration',
-          include: [...INTEGRATION_TESTS],
+          include: integrationInclude,
           maxWorkers: 4,
           sequence: { groupOrder: 1 },
         }),

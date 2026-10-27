@@ -366,7 +366,7 @@ describe('u8 组装级（SessionService 接线：崩溃上报 + 惰性恢复 joi
     // 等内核推进到附着挂起（client 已入进程表）
     await vi.waitFor(() => {
       if (!setup.clientMap.has('s-win')) throw new Error('kernel spawn not yet run')
-    })
+    }, { interval: 1 })
     // 窗口态断言（事故复现前提）：client 已在进程表、summary 不可查
     expect(setup.clientMap.get('s-win')).toBeDefined()
     expect(setup.service.getSummary('s-win')).toBeUndefined()

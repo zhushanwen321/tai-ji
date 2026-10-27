@@ -318,7 +318,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     const { service, zcode, piEngine } = setup(agentDir);
 
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode", agent: path.join(agentDir, "agent-pi.md") }));
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1), { interval: 1 });
 
     expect(piEngine.runs.length).toBe(0);
     expect(runningEngineTag(service, handle.subagentId)).toBe("zcode");
@@ -329,7 +329,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     const { service, zcode, piEngine } = setup(agentDir);
 
     const handle = await service.execute(baseOpts(agentDir, { agent: path.join(agentDir, "agent-zcode.md") }));
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1), { interval: 1 });
 
     expect(piEngine.runs.length).toBe(0);
     expect(runningEngineTag(service, handle.subagentId)).toBe("zcode");
@@ -340,7 +340,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     const { service, zcode, piEngine } = setup(agentDir);
 
     await service.execute(baseOpts(agentDir));
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1), { interval: 1 });
     expect(piEngine.runs.length).toBe(0);
     expect(mockSpawn).not.toHaveBeenCalled();
   });
@@ -366,7 +366,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     await vi.waitFor(() => {
       const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
       expect(rec?.status).toBe("idle");
-    });
+    }, { interval: 1 });
   });
 
   // ============================================================
@@ -380,7 +380,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     vi.stubEnv("PI_SUBAGENT_ROOT_SESSION_ID", undefined);
     const { service, piEngine } = setup(agentDir);
     const handle = await service.execute(baseOpts(agentDir));
-    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1));
+    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1), { interval: 1 });
     // initSession({sessionId: "test-session"}) 无 env → sessionRootId = "test-session"；
     // kickOffChatRound 是 pi 引擎 background 派发主路径（isPiRoute 恒路由至此，含
     // workflow 域一次性 run），漏注 = GUI pi 派发 relay 拒绝 exit 13（Gate B F6 形态）。
@@ -391,7 +391,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
   it("[D5] 全缺省 pi record：engine===undefined 且 entry JSON 不含 engine 键", async () => {
     const { service, piEngine } = setup(agentDir);
     const handle = await service.execute(baseOpts(agentDir));
-    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1));
+    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1), { interval: 1 });
 
     const rec = service.queries.collectRecords(10, "running").find((r) => r.id === handle.subagentId);
     expect(rec).toBeDefined();
@@ -404,7 +404,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
   it("[D5] 显式 engine:'pi' 路由回 pi：record 不盖章 engine", async () => {
     const { service, piEngine, zcode } = setup(agentDir);
     const handle = await service.execute(baseOpts(agentDir, { engine: "pi" }));
-    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1));
+    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1), { interval: 1 });
 
     expect(zcode.runs.length).toBe(0);
     // [W3] pi chat 路由 = registry 'pi' port（cli 形态替身）——显式 pi 请求命中它
@@ -420,7 +420,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
   it("[预检·modeless 波5] engine='zcode'（conversation unsupported）start 照常派发——conversation 参数分支已删，续聊资格拒绝归 message 面", async () => {
     const { service, zcode } = setup(agentDir);
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1), { interval: 1 });
     expect(service.queries.collectRecords(10, "all")).toHaveLength(1);
     expect(handle.mode).toBe("background");
   });
@@ -460,12 +460,12 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     const { service, piEngine, zcode } = setup(agentDir);
     // maxTurns=3（V4⑤ 场景原样）：正常进入 pi 轮次（engine.run 被调），无同步拒绝
     const handle = await service.execute(baseOpts(agentDir, { maxTurns: 3 }));
-    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1));
+    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1), { interval: 1 });
     expect(zcode.runs.length).toBe(0);
     expect(service.queries.collectRecords(10, "running").find((r) => r.id === handle.subagentId)).toBeDefined();
     // fork 组合同样直通（第二次 run 被调，无 engine_capability_unsupported）
     await service.execute(baseOpts(agentDir, { fork: true }));
-    await vi.waitFor(() => expect(piEngine.runs.length).toBeGreaterThanOrEqual(2));
+    await vi.waitFor(() => expect(piEngine.runs.length).toBeGreaterThanOrEqual(2), { interval: 1 });
     // pi + worktree：预检放行（caps.sandbox='emulated'）——execute 不因能力被拒而
     // reject（worktree 创建成败是另一维度，与拦截无关）
     await expect(service.execute(baseOpts(agentDir, { worktree: true }))).resolves.toBeTypeOf("object");
@@ -500,7 +500,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
         appendSystemPrompt: ["extra"],
       }),
     );
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1), { interval: 1 });
     const { task, ctx } = zcode.runs[0];
     // [D6 合流] task = AgentCallOpts（host-task-spec 从 ExecuteOptions 直译）
     expect(task.prompt).toBe("do work");
@@ -523,12 +523,12 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
       expect(rec?.status).toBe("idle");
       expect(rec?.result).toBe("hello result");
       expect(rec?.round).toBe(1);
-    });
+    }, { interval: 1 });
     // 轮终通知（chat 域宿主职责）：notifier 立即 flush（无其他 running）→ result 进 sendMessage 正文
     await vi.waitFor(() => {
       const sent = pi.sendMessage.mock.calls.some((c) => String(c[0]?.content).includes("hello result"));
       expect(sent).toBe(true);
-    });
+    }, { interval: 1 });
   });
 
   it("[骨架] outcome.error → 失败轮 settle（idle 可恢复 + 失败通知）", async () => {
@@ -544,17 +544,17 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
       expect(rec?.status).toBe("idle");
       expect(rec?.stopReason).toBe("failed");
       expect(rec?.result).toContain("engine_run_failed: boom");
-    });
+    }, { interval: 1 });
     await vi.waitFor(() => {
       const sent = pi.sendMessage.mock.calls.some((c) => String(c[0]?.content).includes("boom"));
       expect(sent).toBe(true);
-    });
+    }, { interval: 1 });
   });
 
   it("[D10] cancel abort 后 signal 触达引擎（kill-chain 第一级）", async () => {
     const { service, zcode } = setup(agentDir);
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1), { interval: 1 });
 
     // cancel → controller.abort → engine 收到的 signal aborted（kill-chain 两级的第一级）
     expect(zcode.runs[0].ctx.signal?.aborted).toBe(false);
@@ -578,7 +578,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
 
       // chat 域 background 派发（kickOffChatRound 的 runCtx 构造点）
       await service.execute(baseOpts(agentDir, { engine: "zcode" }));
-      await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+      await vi.waitFor(() => expect(zcode.runs.length).toBe(1), { interval: 1 });
       expect(zcode.runs[0].ctx.sessionRootId).toBe("test-session");
 
       // workflow 域 sync 派发（runAndFinalize 的 runCtx 构造点；其引擎解析恒走
@@ -596,7 +596,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
           throw new Error(`executeAndAwait rejected before engine.run: ${String(awaitErr)}`);
         }
         expect(piEngine.runs.length).toBe(1);
-      });
+      }, { interval: 1 });
       expect(piEngine.runs[0].ctx.sessionRootId).toBe("test-session");
     } finally {
       if (prevRootEnv !== undefined) process.env["PI_SUBAGENT_ROOT_SESSION_ID"] = prevRootEnv;
@@ -672,7 +672,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
     await vi.waitFor(() => {
       const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
       expect(rec?.status).toBe("idle");
-    });
+    }, { interval: 1 });
 
     // [modeless 波1] chat 域不接 journal（pi 子 session / zcode 会话库即原生数据源；
     // journal 接线仅 workflow 域 SAR）——无 journal 文件落盘。
@@ -712,7 +712,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
       const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
       expect(rec?.status).toBe("idle");
       expect(rec?.stopReason).toBe("failed");
-    });
+    }, { interval: 1 });
 
     // [W1/D2·D3] 失败轮 modeless 收口 = markRoundIdle（round-idle 帧 stopReason:
     // failed，不终态化）——engineHandle 部分回填形态经 record-bound 帧承载。
@@ -746,7 +746,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
       });
     };
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1), { interval: 1 });
 
     // run 尚未 resolve（record 仍 running）：engineHandle 已回填且 [W1/D2 停写点→
     // 事件面] record-bound 帧已落事件文件（bound manifest 物化同步可见——运行中
@@ -758,7 +758,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
       expect(bound[bound.length - 1]).toMatchObject({
         engineHandle: { sessionRef: { dbPath: ".zcode/cli/db/db.sqlite", sessionId: "sess-live-1" } },
       });
-    });
+    }, { interval: 1 });
     const running = service["collectRecords"](10, "running").find((r) => r.id === handle.subagentId);
     // [modeless 波1] chat 域不接 journal——engineHandle 无 eventsPath 键
     expect(running?.engineHandle).toEqual({
@@ -771,7 +771,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
     await vi.waitFor(() => {
       const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
       expect(rec?.status).toBe("idle");
-    });
+    }, { interval: 1 });
   }, 10_000);
 
   it("[onHandleReady F1] sessionId 先落 + 迟到只补 sessionFile → 按字段补缺落位；已有值不被迟到值覆盖（幂等）", async () => {
@@ -799,7 +799,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
       });
     };
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1), { interval: 1 });
 
     const running = service["collectRecords"](10, "running").find((r) => r.id === handle.subagentId);
     // 补缺落位：sessionFile 进 record.engineHandle（①级会话取证 / 冷续 resume 锚点钥匙）
@@ -827,7 +827,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
     await vi.waitFor(() => {
       const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
       expect(rec?.status).toBe("idle");
-    });
+    }, { interval: 1 });
   }, 10_000);
 
   it("[onHandleReady] 引擎不回调（spawn 形态）时零回填——终态回填仍兜底（行为不变）", async () => {
@@ -847,7 +847,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
     await vi.waitFor(() => {
       const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
       expect(rec?.status).toBe("idle");
-    });
+    }, { interval: 1 });
     const entries = pi.appendEntry.mock.calls.filter((c) => c[0] === "subagent-record");
     // [modeless 波1] onHandleReady 是唯一锚点通道（resolved handle 不再终态回填）：
     // 引擎不回调 → engineHandle 恒缺省（读链经 ①级 sessionRef 降级由引擎侧兜底）。
@@ -859,7 +859,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
   it("[D5 回归] pi 纯缺省路径 entry 不含 engine/engineHandle 键", async () => {
     const { service, piEngine, pi } = setup(agentDir);
     const handle = await service.execute(baseOpts(agentDir));
-    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1));
+    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1), { interval: 1 });
 
     const rec = service.queries.collectRecords(10, "running").find((r) => r.id === handle.subagentId);
     // [v1 兼容层删除] engine/engineHandle 的持久载体 = v2 终态条目——此处保留缺位断言
@@ -887,7 +887,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
       await vi.waitFor(() => {
         const rec = service.queries.collectRecords(10, "all").find((r) => r.id === h.subagentId);
         expect(rec?.status).toBe("idle");
-      });
+      }, { interval: 1 });
     }
     // 7 次引擎 run 全部真实执行（第 7 次未被泄漏槽阻塞）
     expect(zcode.runs.length).toBe(7);
@@ -1110,7 +1110,7 @@ describe("chat 轮窗口实例接线（U3）", () => {
     await vi.waitFor(() => {
       expect(record.sessionFile).toBeDefined();
       expect(ports[0]!.disposed).toBe(1);
-    });
+    }, { interval: 1 });
     expect(gateway.created()).toBe(1); // 轮内恰一次创建（轮内复用窗口实例）
     expect(ports[0]!.runCalls).toHaveLength(1);
     expect(record.sessionFile).toBe(ports[0]!.sessionFile); // pi 锚经 run 应答回填
@@ -1125,7 +1125,7 @@ describe("chat 轮窗口实例接线（U3）", () => {
 
     // 轮 1：跑完落 idle，实例随轮 idle 释放
     chatRounds.startFirstChatRound(record, { task: "round-1", slug: "chat-window" });
-    await vi.waitFor(() => expect(ports[0]!.disposed).toBe(1));
+    await vi.waitFor(() => expect(ports[0]!.disposed).toBe(1), { interval: 1 });
 
     // pi 锚可解析判据 = session 文件在盘（isAnchorResolvable fs.existsSync）——
     // 冷续写锚源落盘后 revive 才走「原样 resume 续写」分支
@@ -1138,7 +1138,7 @@ describe("chat 轮窗口实例接线（U3）", () => {
     await vi.waitFor(() => {
       expect(ports[1]).toBeDefined();
       expect(ports[1]!.runCalls).toHaveLength(1);
-    });
+    }, { interval: 1 });
     expect(ports[1]!).not.toBe(ports[0]!); // respawn：新实例 ≠ 旧实例
     expect(ports[0]!.disposed).toBe(1); // 旧实例保持已释放
     expect(gateway.created()).toBe(2); // 恰一次新创建（登记后轮内复用，零多余创建）
@@ -1152,7 +1152,7 @@ describe("chat 轮窗口实例接线（U3）", () => {
 
     // 新实例登记的构造性证明：dispose 只经窗口表 disposeAll 触达——未登记实例
     // 不可能被收尾释放；轮 2 idle 后新实例被释放 = 登记发生过的唯一通路。
-    await vi.waitFor(() => expect(ports[1]!.disposed).toBe(1));
+    await vi.waitFor(() => expect(ports[1]!.disposed).toBe(1), { interval: 1 });
   });
 
   it("验收③：shared-service 引擎（缺省网关）解析透传 registry 单例，轮 idle 不误杀", async () => {
@@ -1168,7 +1168,7 @@ describe("chat 轮窗口实例接线（U3）", () => {
     await vi.waitFor(() => {
       expect(record.sessionFile).toBe(sharedPort.sessionFile);
       expect(sharedPort.runCalls).toHaveLength(1);
-    });
+    }, { interval: 1 });
     // 非 pi 分支经窗口解析单点透传 registry：run 走注册表单例本体（缺省网关零创建）
     // 轮 idle 收尾不误杀 shared-service 单例（dispose 通道归 registry/停机链，现状保形）
     expect(sharedPort.disposed).toBe(0);
@@ -1337,7 +1337,7 @@ describe("[fire-and-forget 收割] 轮终通知不被窗口引擎 dispose 时延
     await vi.waitFor(() => {
       expect(ports[0]).toBeDefined();
       expect(ports[0]!.disposeEntered).toBe(true);
-    });
+    }, { interval: 1 });
     // dispose 仍挂起（门未放行）的同时，失败轮 settle 链已走完：
     // 簿记落 idle + 失败通知发出（通知不被资源回收时延阻塞的核心断言）。
     expect(record.status).toBe("idle");
@@ -1348,7 +1348,7 @@ describe("[fire-and-forget 收割] 轮终通知不被窗口引擎 dispose 时延
     expect(notifyPayload?.error).toContain("engine boom");
 
     ports[0]!.release();
-    await vi.waitFor(() => expect(ports[0]!.disposed).toBe(1));
+    await vi.waitFor(() => expect(ports[0]!.disposed).toBe(1), { interval: 1 });
   });
 });
 // 来源段：explicit-agent-ref-guard.test.ts
@@ -1695,7 +1695,7 @@ function makeHarness(
 
 /** 等待首个 run 落地并断言 create 帧 model（引擎默认值三层解析的判别面）。 */
 async function waitForFirstRunModel<R extends { task: { model?: string } }>(runs: R[], model: string) {
-  await vi.waitFor(() => expect(runs.length).toBe(1));
+  await vi.waitFor(() => expect(runs.length).toBe(1), { interval: 1 });
   expect(runs[0]!.task.model).toBe(model);
 }
 
@@ -1777,7 +1777,7 @@ describe("D6 四层优先级：chat 域（run-orchestration）", () => {
       slug: "d6-layer4",
       engine: NON_PI_ENGINE_ID,
     });
-    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
+    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1), { interval: 1 });
     expect("model" in nonPi.runs[0]!.task).toBe(false);
     expect(store.getMutable(handle.subagentId)?.model).toBeUndefined();
     // [subagent-detail-model-info] 全缺席 = default 来源（未指定也如实标注）
@@ -1791,7 +1791,7 @@ describe("D6 四层优先级：chat 域（run-orchestration）", () => {
       [NON_PI_ENGINE_ID]: "prov/pref-model",
     });
     await service.execute({ task: "d6 pi route", slug: "d6-pi" });
-    await vi.waitFor(() => expect(fakePi.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fakePi.runs.length).toBe(1), { interval: 1 });
     // pi 链自有三层解析：无显式 model → ctxModel 兜底（p/m）；若误插偏好层则为
     // prov/pi-pref——本断言即判别面
     expect(fakePi.runs[0]!.task.model).toBe(PI_CTX_MODEL_REF);
@@ -1802,7 +1802,7 @@ describe("D6 四层优先级：chat 域（run-orchestration）", () => {
     const { service, fakePi, store } = makeHarness({ pi: "prov/pi-pref" }, undefined, registryWith({ provider: "prov", id: "front-model" }));
     const agentPath = writeFrontmatterAgent(openHarnesses[0]!.tmpRoot, "s2-agent", "prov/front-model");
     const handle = await service.execute({ task: "s2 pi front", slug: "s2-pi-front", agent: agentPath });
-    await vi.waitFor(() => expect(fakePi.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fakePi.runs.length).toBe(1), { interval: 1 });
     // 修复前 pi 路由标注 = explicit|default 二层：frontmatter 声明被误标「default」
     //（引擎缺省）——与「pi 链消费 agent .md 声明」的事实不符。偏好键不消费（上用例）
     // 与 frontmatter 层标注并存：pi 路由不插 taiji 级偏好，但 frontmatter 属 pi 链自解析层。
@@ -1819,7 +1819,7 @@ describe("D6 四层优先级：chat 域（run-orchestration）", () => {
       slug: "d6-direct-read",
       engine: NON_PI_ENGINE_ID,
     });
-    await vi.waitFor(() => expect(h.nonPi.runs.length).toBe(1));
+    await vi.waitFor(() => expect(h.nonPi.runs.length).toBe(1), { interval: 1 });
     expect(h.nonPi.runs[0]!.task.model).toBe("prov/late-pref");
     h.nonPi.runs[0]!.settle();
   });
@@ -1851,7 +1851,7 @@ describe("engine-ref-translation：chat 域派发期翻译", () => {
       engine: NON_PI_ENGINE_ID,
       model: "zai-coding-cn/glm-5.3-flash",
     });
-    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
+    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1), { interval: 1 });
     expect(nonPi.runs[0]!.task.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
     expect(store.getMutable(handle.subagentId)?.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
     // [subagent-detail-model-info] 翻译不改来源标注：task 显式 = explicit
@@ -1869,7 +1869,7 @@ describe("engine-ref-translation：chat 域派发期翻译", () => {
       slug: "d6-tr-pref-hit",
       engine: NON_PI_ENGINE_ID,
     });
-    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
+    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1), { interval: 1 });
     expect(nonPi.runs[0]!.task.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
     expect(store.getMutable(handle.subagentId)?.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
     // [subagent-detail-model-info] 偏好补缺来源标注
@@ -1891,7 +1891,7 @@ describe("engine-ref-translation：chat 域派发期翻译", () => {
       slug: "d6-tr-pref-miss",
       engine: NON_PI_ENGINE_ID,
     });
-    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
+    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1), { interval: 1 });
     expect("model" in nonPi.runs[0]!.task).toBe(false);
     expect(store.getMutable(handle.subagentId)?.model).toBeUndefined();
     expect(store.getMutable(handle.subagentId)?.modelSource).toBe("default");
@@ -1922,7 +1922,7 @@ describe("engine-ref-translation：chat 域派发期翻译", () => {
       slug: "d6-tr-pref-throw",
       engine: NON_PI_ENGINE_ID,
     });
-    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
+    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1), { interval: 1 });
     expect("model" in nonPi.runs[0]!.task).toBe(false);
     expect(store.getMutable(handle.subagentId)?.model).toBeUndefined();
     expect(store.getMutable(handle.subagentId)?.modelSource).toBe("default");
@@ -2029,7 +2029,7 @@ describe("D6 四层优先级：workflow 域（workflow-dispatch）同层序", ()
   it("第四层：无偏好（本引擎键 miss）→ create 帧省略 model 键", async () => {
     const { service, nonPi } = makeHarness({ "other-engine": "prov/other" });
     const pending = service.executeWorkflowAgent(baseOpts(), "run-d6-wf-4");
-    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
+    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1), { interval: 1 });
     expect("model" in nonPi.runs[0]!.task).toBe(false);
     nonPi.runs[0]!.settle();
     await pending;
@@ -2070,7 +2070,7 @@ describe("D6 四层优先级：workflow 域（workflow-dispatch）同层序", ()
       { prompt: "s2 wf pi", description: "s2-wf-pi", agent: agentPath },
       "run-s2-wf",
     );
-    await vi.waitFor(() => expect(fakePi.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fakePi.runs.length).toBe(1), { interval: 1 });
     const running = store.listRunningMutable();
     expect(running).toHaveLength(1);
     expect(running[0]!.modelSource).toBe("frontmatter");

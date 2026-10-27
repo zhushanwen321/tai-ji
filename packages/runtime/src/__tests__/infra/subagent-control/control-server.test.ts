@@ -670,7 +670,7 @@ describe('subagent-control server：协议与治理编排（引擎进程内桩�
     const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     await vi.waitFor(() => {
       expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('connection queue overflow'))).toBe(true)
-    })
+    }, { interval: 1 })
     // m-rt-2 关键断言：overflow 后不得立即 destroy——error 帧需先 flush（有界等待），
     // 客户端暂停读取期间连接必须仍登记（回退成「写完即 destroy」时这里已为 0）。
     expect(server.getConnectionCountForTest()).toBe(1)

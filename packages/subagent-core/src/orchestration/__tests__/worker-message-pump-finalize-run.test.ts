@@ -589,7 +589,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     h.fake.runs[0]!.settle({ content: "ok", sessionId: "sess-1", sessionFile, durationMs: 5 });
     await vi.waitFor(() => {
       expect(findAgentResultPost(h.postMessage, 1)).toBeDefined();
-    });
+    }, { interval: 1 });
 
     const posted = findAgentResultPost(h.postMessage, 1);
     expect(posted).toBeDefined();
@@ -642,7 +642,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     h.fake.runs[0]!.settle({ content: "", error: "engine blew up", durationMs: 3, usage: { input: 1_000_000, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 } });
     await vi.waitFor(() => {
       expect(findAgentResultPost(h.postMessage, 2)).toBeDefined();
-    });
+    }, { interval: 1 });
 
     const posted = findAgentResultPost(h.postMessage, 2);
     expect(posted).toBeDefined();

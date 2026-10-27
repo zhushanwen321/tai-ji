@@ -252,7 +252,7 @@ describe('SettingsMessageHandler', () => {
         await handler.handleSettingsMessage(msg('config.setSkillDirs', { dirs: ['/x'] }), WS)
         await vi.waitFor(() => {
           expect(ctx.broadcastSkillCacheInvalidated).toHaveBeenCalledTimes(2)
-        })
+        }, { interval: 1 })
         // 失败分支先补发 global（partial=true 标注降级），finally 再发 project——
         // 修复前 global 失效广播随通知链一起丢失，前端 global 派生视图陈旧无信号。
         const invalidations = (ctx.broadcastSkillCacheInvalidated as ReturnType<typeof vi.fn>).mock.calls as unknown as Array<[string, ...(undefined | boolean)[]]>
@@ -288,7 +288,7 @@ describe('SettingsMessageHandler', () => {
     it('成功 → reply discoveredModels success:true', async () => {
       const { replies, handler } = makeHandler({ discover: vi.fn().mockResolvedValue([{ id: 'm1' }]) })
       await handler.handleSettingsMessage(msg('config.discoverModels', { baseUrl: 'http://x', apiKey: 'k' }), WS)
-      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0), { interval: 1 })
       expect(replies[0].payload).toMatchObject({ success: true, models: [{ id: 'm1' }] })
     })
     it('service 抛错 → handler 透传 error.message（不再做翻译）', async () => {
@@ -296,14 +296,14 @@ describe('SettingsMessageHandler', () => {
       // handler 只 reply service 给的 message，不硬编码中文。
       const { replies, handler } = makeHandler({ discover: vi.fn().mockRejectedValue(new Error('请求失败：Base URL 或 API Key 包含 HTTP 不支持的字符')) })
       await handler.handleSettingsMessage(msg('config.discoverModels', { baseUrl: 'http://x' }), WS)
-      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0), { interval: 1 })
       expect(replies[0].payload.success).toBe(false)
       expect(replies[0].payload.error).toContain('不支持的字符')
     })
     it('其他错误 → 原始消息透传', async () => {
       const { replies, handler } = makeHandler({ discover: vi.fn().mockRejectedValue(new Error('rate limited')) })
       await handler.handleSettingsMessage(msg('config.discoverModels', { baseUrl: 'http://x' }), WS)
-      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0), { interval: 1 })
       expect(replies[0].payload.error).toBe('rate limited')
     })
     it('providerId 解析 apiKey（resolvedApiKey 传给 service）', async () => {
@@ -312,7 +312,7 @@ describe('SettingsMessageHandler', () => {
         resolver: { resolveProviderCredential: vi.fn().mockResolvedValue({ key: 'resolved-key', source: 'models.json' }) },
       })
       await handler.handleSettingsMessage(msg('config.discoverModels', { baseUrl: 'http://x', providerId: 'p1' }), WS)
-      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0), { interval: 1 })
       expect(ctx.modelService.discoverModelsFromApi).toHaveBeenCalledWith('http://x', 'resolved-key', undefined)
     })
     it('注入 resolver：凭据只在 auth.json（models.json 无 apiKey）时命中（链 2 断链修复）', async () => {
@@ -325,7 +325,7 @@ describe('SettingsMessageHandler', () => {
       // models.json 无该 provider（旧路径必 miss 的可证伪信号）
       ctx.configService.getProvider = vi.fn().mockReturnValue(undefined) as never
       await handler.handleSettingsMessage(msg('config.discoverModels', { baseUrl: 'http://x', providerId: 'anthropic' }), WS)
-      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0), { interval: 1 })
       expect(resolver.resolveProviderCredential).toHaveBeenCalledWith('anthropic')
       expect(ctx.modelService.discoverModelsFromApi).toHaveBeenCalledWith('http://x', 'auth-json-key', undefined)
     })
@@ -333,7 +333,7 @@ describe('SettingsMessageHandler', () => {
       const resolver = { resolveProviderCredential: vi.fn().mockResolvedValue({ key: 'ignored', source: 'auth.json' }) }
       const { ctx, replies, handler } = makeHandler({ resolver })
       await handler.handleSettingsMessage(msg('config.discoverModels', { baseUrl: 'http://x', apiKey: 'form-key', providerId: 'p1' }), WS)
-      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0), { interval: 1 })
       expect(resolver.resolveProviderCredential).not.toHaveBeenCalled()
       expect(ctx.modelService.discoverModelsFromApi).toHaveBeenCalledWith('http://x', 'form-key', undefined)
     })
@@ -341,7 +341,7 @@ describe('SettingsMessageHandler', () => {
       // M2fg：默认 miss 形态 resolver → resolvedApiKey undefined（降级链已删除，恒注入可证伪）
       const { ctx, replies, handler } = makeHandler()
       await handler.handleSettingsMessage(msg('config.discoverModels', { baseUrl: 'http://x', providerId: 'anthropic' }), WS)
-      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0), { interval: 1 })
       expect(ctx.configService.getProvider).not.toHaveBeenCalled()
       expect(ctx.modelService.discoverModelsFromApi).toHaveBeenCalledWith('http://x', undefined, undefined)
     })
@@ -359,7 +359,7 @@ describe('SettingsMessageHandler', () => {
       })
       const { ctx, replies, handler } = makeHandler({ testProviderConnections })
       await handler.handleSettingsMessage(msg('config.discoverModels', { baseUrl: '', providerId: 'opencode-go', mode: 'test' }), WS)
-      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0), { interval: 1 })
       expect(ctx.modelService.discoverModelsFromApi).not.toHaveBeenCalled()
       expect(replies[0].type).toBe('config.discoveredModels')
       expect(replies[0].payload).toEqual({
@@ -377,7 +377,7 @@ describe('SettingsMessageHandler', () => {
       const testProviderConnections = vi.fn().mockResolvedValue({ success: true, results: [] })
       const { ctx, handler } = makeHandler({ resolver, testProviderConnections })
       await handler.handleSettingsMessage(msg('config.discoverModels', { baseUrl: '', providerId: 'anthropic', apiKey: 'form-key', mode: 'test' }), WS)
-      await vi.waitFor(() => expect(testProviderConnections).toHaveBeenCalled())
+      await vi.waitFor(() => expect(testProviderConnections).toHaveBeenCalled(), { interval: 1 })
       expect(resolver.resolveProviderCredential).toHaveBeenCalledWith('anthropic')
       // 第 1 参 providerId、第 2 参 = resolver 明文、第 3 参 = infra tester（组合点）
       expect(testProviderConnections.mock.calls[0][0]).toBe('anthropic')
@@ -397,7 +397,7 @@ describe('SettingsMessageHandler', () => {
     it('modelService 未装配 testProviderConnections → test_unavailable 防御分支', async () => {
       const { replies, handler } = makeHandler()
       await handler.handleSettingsMessage(msg('config.discoverModels', { baseUrl: '', providerId: 'p1', mode: 'test' }), WS)
-      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0), { interval: 1 })
       expect(replies[0].payload).toMatchObject({ success: false, error: 'test_unavailable' })
     })
 
@@ -409,7 +409,7 @@ describe('SettingsMessageHandler', () => {
       })
       const { ctx, replies, handler } = makeHandler({ testProviderConnections })
       await handler.handleSettingsMessage(msg('config.discoverModels', { baseUrl: '', providerId: 'p1', mode: 'test' }), WS)
-      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0), { interval: 1 })
       expect(seenThis).toBe(ctx.modelService)
     })
 
@@ -418,7 +418,7 @@ describe('SettingsMessageHandler', () => {
       const discover = vi.fn().mockResolvedValue([{ id: 'm1' }])
       const { ctx, replies, handler } = makeHandler({ discover, testProviderConnections })
       await handler.handleSettingsMessage(msg('config.discoverModels', { baseUrl: 'http://x', apiKey: 'k' }), WS)
-      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0), { interval: 1 })
       expect(testProviderConnections).not.toHaveBeenCalled()
       expect(ctx.modelService.discoverModelsFromApi).toHaveBeenCalledWith('http://x', 'k', undefined)
       expect(replies[0].payload).toMatchObject({ success: true, models: [{ id: 'm1' }] })
@@ -428,7 +428,7 @@ describe('SettingsMessageHandler', () => {
       const testProviderConnections = vi.fn()
       const { ctx, replies, handler } = makeHandler({ testProviderConnections })
       await handler.handleSettingsMessage(msg('config.discoverModels', { baseUrl: 'http://x', apiKey: 'k', mode: 'discover' }), WS)
-      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0), { interval: 1 })
       expect(testProviderConnections).not.toHaveBeenCalled()
       expect(ctx.modelService.discoverModelsFromApi).toHaveBeenCalledOnce()
     })
@@ -442,7 +442,7 @@ describe('SettingsMessageHandler', () => {
       const { ctx, replies, handler } = makeHandler()
       await handler.handleSettingsMessage(msg('config.setSkillDirs', { dirs: ['~/.pi/agent/skills', '~/.claude/skills'] }), WS)
       // rebuildGlobal 是 fire-and-forget（.then 微任务），用 waitFor 等链路完成
-      await vi.waitFor(() => expect(ctx.skillRegistry.invalidateAllProjects).toHaveBeenCalled())
+      await vi.waitFor(() => expect(ctx.skillRegistry.invalidateAllProjects).toHaveBeenCalled(), { interval: 1 })
 
       // 写 discovery.skillDirs
       expect(ctx.configService.setSkillDirs).toHaveBeenCalledWith(['~/.pi/agent/skills', '~/.claude/skills'])
@@ -916,7 +916,7 @@ describe('M2c: RuntimeServer.setServices 透传 providerCredentialResolver（D3 
       ws as never,
     )
 
-    await vi.waitFor(() => expect(discoverModelsFromApi).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(discoverModelsFromApi).toHaveBeenCalledTimes(1), { interval: 1 })
     expect(resolveProviderCredential).toHaveBeenCalledWith('p1')
     expect(discoverModelsFromApi).toHaveBeenCalledWith('https://api.example', 'resolved-by-resolver', undefined)
     expect(getProvider).not.toHaveBeenCalled()

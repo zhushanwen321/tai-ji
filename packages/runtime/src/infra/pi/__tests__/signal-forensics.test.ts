@@ -507,7 +507,7 @@ describe('reportPiExitSignalForensics', () => {
       await vi.waitFor(() => {
         // 布局反转：合法 sid 落树内 <root>/<sid>/logs/signal-forensics-<date>.jsonl（文件名去 sid）
         expect(readdirSync(join(dataDir, 'ext-sessions', 'sess-enabled', 'logs')).some(f => f.startsWith('signal-forensics-'))).toBe(true)
-      })
+      }, { interval: 1 })
       const fileName = readdirSync(join(dataDir, 'ext-sessions', 'sess-enabled', 'logs')).find(f => f.startsWith('signal-forensics-'))
       expect(fileName).toBeDefined()
       expect(fileName).toMatch(/^signal-forensics-\d{4}-\d{2}-\d{2}\.jsonl$/)

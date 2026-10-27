@@ -139,7 +139,7 @@ describe('A2-MF-C：deliverText 挂 skill 注入', () => {
     // idle 边沿（settled + 标志复位）→ flush：此刻才注入 + prompt
     applySessionOccupancyTransition(h.view, null, 'idle')
     h.emitSettled()
-    await vi.waitFor(() => expect(handle.depth()).toBe(0))
+    await vi.waitFor(() => expect(handle.depth()).toBe(0), { interval: 1 })
     expect(h.inject).toHaveBeenCalledTimes(1)
     expect(h.inject.mock.calls[0][1]).toBe('排队的消息')
     expect(h.client.prompt).toHaveBeenCalledWith('<<injected:排队的消息>>', undefined, 'steer')

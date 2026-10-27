@@ -109,7 +109,7 @@ describe("嵌套护栏 / 并发池 / 节流（D-030~D-033 回归锁）", () => {
 
     const execPromise = service.execute({ task: "bg in pool", slug: "test", ctxModel });
     // detached kickOffChatRound → acquire。等替身 run 到位再驱动应答。
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     fake.runs[0]!.settle({ content: "ok" });
 
     // 等 detached promise 链跑完（kickOffChatRound 的 .then notify）
@@ -154,7 +154,7 @@ describe("嵌套护栏 / 并发池 / 节流（D-030~D-033 回归锁）", () => {
     const execPromise = execNesting.run({ recordId: "parent", depth: MAX_FORK_DEPTH - 1 }, () =>
       service.execute({ task: "at limit", slug: "test", ctxModel }),
     );
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     fake.runs[0]!.settle({ content: "ok" });
     const result = await execPromise;
 

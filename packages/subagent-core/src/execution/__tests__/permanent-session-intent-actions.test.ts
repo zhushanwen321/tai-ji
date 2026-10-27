@@ -403,7 +403,7 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
 
     cont.onRunSettled({ content: "closing round", engineId: "pi" });
 
-    await vi.waitFor(() => expect(order).toEqual(["finalize", "route", "archive"]));
+    await vi.waitFor(() => expect(order).toEqual(["finalize", "route", "archive"]), { interval: 1 });
     // 收尾后标志消费
     expect(record.closeAfterRound).toBeUndefined();
   });
@@ -433,7 +433,7 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
 
     cont.onRunSettled({ content: "normal round", engineId: "pi" });
 
-    await vi.waitFor(() => expect(host.notifyComplete).toHaveBeenCalled());
+    await vi.waitFor(() => expect(host.notifyComplete).toHaveBeenCalled(), { interval: 1 });
     await new Promise((r) => {
       setTimeout(r, 10);
     });
@@ -479,7 +479,7 @@ describe("[U5 / §3.2.2 事件表] 已收尾会话 + message → revive 翻 runn
     const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
     const cont = new ConversationContinuation(record, host);
     cont.onMessage("revive after close");
-    await vi.waitFor(() => expect(record.status).toBe("running"));
+    await vi.waitFor(() => expect(record.status).toBe("running"), { interval: 1 });
     expect(host.reviveClosedRecord).toHaveBeenCalled();
     store.dispose();
   });
@@ -561,7 +561,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
 
     cont.onMessage("continue after restart");
 
-    await vi.waitFor(() => expect(calls.dispatched).toHaveLength(1));
+    await vi.waitFor(() => expect(calls.dispatched).toHaveLength(1), { interval: 1 });
     expect(record.worktreeHandle).toBe(handle); // handle 回填
     expect(calls.notified).toEqual([]); // 无失败通知（原地续聊）
   });
@@ -575,7 +575,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
 
     cont.onMessage("continue after conflict");
 
-    await vi.waitFor(() => expect(calls.dispatched).toHaveLength(1));
+    await vi.waitFor(() => expect(calls.dispatched).toHaveLength(1), { interval: 1 });
     expect(record.worktreeHandle).toBe(handle);
     // 形态②不降级 reopen：续轮 resume 锚照常携带（sessionFile 原样续写）
     expect(calls.dispatched[0]!.resume).not.toBeNull();
@@ -596,7 +596,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
 
     cont.onMessage("continue after loss");
 
-    await vi.waitFor(() => expect(calls.dispatched).toHaveLength(1));
+    await vi.waitFor(() => expect(calls.dispatched).toHaveLength(1), { interval: 1 });
     // fresh session（resume:undefined）+ 摘要前缀（历史轮数反映重开前形态）
     expect(calls.dispatched[0]!.resume).toBeUndefined();
     expect(calls.dispatched[0]!.task).toContain("Session reopened");
@@ -618,7 +618,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
 
     // 失败通知（独立载荷——error = 失败原因原文；恢复指引由轮应答五分支尾部单点
     // 承载一次，不在 error 字段重复嵌入——notifier-round-facts.test.ts 锁定）
-    await vi.waitFor(() => expect(calls.notified).toHaveLength(1));
+    await vi.waitFor(() => expect(calls.notified).toHaveLength(1), { interval: 1 });
     expect(calls.notified[0]!.error).toContain("git worktree failed: disk full");
     expect(calls.dispatched).toHaveLength(0); // 派发作废
   });
@@ -634,7 +634,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
 
     cont.onMessage("running dispatch bypasses gate");
 
-    await vi.waitFor(() => expect(calls.dispatched).toHaveLength(1));
+    await vi.waitFor(() => expect(calls.dispatched).toHaveLength(1), { interval: 1 });
     expect(calls.dispatched[0]!.task).toBe("running dispatch bypasses gate");
     expect(calls.notified).toEqual([]); // gate=false 不产生失败通知（gate 未参与 running 直派）
     expect(record.status).toBe("running");

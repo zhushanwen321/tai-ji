@@ -174,7 +174,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     expect(fs.readdirSync(recordsDir).sort()).toEqual(["sa-closed.json", "sa-running.json"]);
 
     // sessions-index 经首扫自愈重写（fire-and-forget，等待落盘）
-    await vi.waitFor(() => expect(fs.existsSync(path.join(rootDir, INDEX_FILENAME))).toBe(true));
+    await vi.waitFor(() => expect(fs.existsSync(path.join(rootDir, INDEX_FILENAME))).toBe(true), { interval: 1 });
     const index = JSON.parse(fs.readFileSync(path.join(rootDir, INDEX_FILENAME), "utf-8")) as {
       version: number;
       entries: Record<string, unknown>;

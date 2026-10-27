@@ -141,7 +141,7 @@ describe('RuntimeServer.handleMessage 异常漏斗（RT-1#3）', () => {
     // catch 是异步链：等微任务flush后断言
     await vi.waitFor(() => {
       expect(sendError).toHaveBeenCalledTimes(1)
-    })
+    }, { interval: 1 })
     expect(sendError).toHaveBeenCalledWith(
       ws,
       'handler_error',

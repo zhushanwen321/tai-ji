@@ -111,7 +111,7 @@ describe("settleRunAccounting 原语（[W2/V1 D1] journal 帧 + manifest 两件�
     // manifest 补写（冷路径 spec 缺省 → 原语承接；原子写有 IO 窗——轮询落定）
     await vi.waitFor(() => {
       expect(fs.existsSync(path.join(dir, "wf-sa-1.json"))).toBe(true);
-    });
+    }, { interval: 1 });
     const manifest = JSON.parse(fs.readFileSync(path.join(dir, "wf-sa-1.json"), "utf8")) as {
       outcome?: string;
       errorCode?: string;

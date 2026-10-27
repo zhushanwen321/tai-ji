@@ -23,7 +23,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import lockfile from 'proper-lockfile'
-import { SessionRecords } from '../services/session/session-records.js'
+import { SessionRecords, setSessionConfigLockTimingForTest } from '../services/session/session-records.js'
 
 const PREV_DATA_DIR = process.env['TAIJI_AGENT_DATA_DIR']
 let tmpDataRoot: string
@@ -106,6 +106,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // 锁预算注入只服务 ELOCKED 用例：逐例复位，避免压缩预算泄漏到后续用例
+  setSessionConfigLockTimingForTest({})
   if (PREV_DATA_DIR === undefined) delete process.env['TAIJI_AGENT_DATA_DIR']
   else process.env['TAIJI_AGENT_DATA_DIR'] = PREV_DATA_DIR
   fs.rmSync(tmpDataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
@@ -244,6 +246,9 @@ describe('setSubagentDefaultEngine', () => {
   it('RMW 持跨进程锁：他方持同锁期间写入 fail-fast（ELOCKED），锁释放后重试成功且其他字段不被覆盖回滚', async () => {
     // review round1 MUST_FIX：config.json 是多写方共享文件（runtime RMW / agent bash /
     // 用户手编），RMW 必须持 withFileLockSync（lockfile = <config.json>.lock）。
+    // 压缩重试预算（10ms/次 × 60ms）：断言语义 = 预算耗尽 → ELOCKED 且零写入，
+    // 预算数值不是被测契约（默认 1s 由 test/file-lock-parity.test.ts 常量断言保护）。
+    setSessionConfigLockTimingForTest({ retryDelayMs: 10, retryBudgetMs: 60 })
     writeJson('engines.json', { v: 1, engines: ['pi', 'zcode'], updatedAt: 1 })
     writeJson('config.json', { version: 1, maxConcurrent: 5, futureKey: { keep: true } })
     const p = configPath()
@@ -334,6 +339,8 @@ describe('[D5] setSubagentEngineDefaultModel', () => {
   })
 
   it('RMW 持跨进程锁（与 setSubagentDefaultEngine 同锁）：他方持锁期间 fail-fast（ELOCKED）零写入，释放后重试成功', async () => {
+    // 同上一锁用例：压缩重试预算（10ms/次 × 60ms），断言对象仍是「预算耗尽 → ELOCKED 零写入」
+    setSessionConfigLockTimingForTest({ retryDelayMs: 10, retryBudgetMs: 60 })
     writeJson('engines.json', { v: 1, engines: ['pi', 'zcode'], updatedAt: 1 })
     writeJson('config.json', { version: 1, maxConcurrent: 5 })
     writeProviderConfig(zcodeRealPath, [{ providerId: 'stepfun', models: ['step-1v'] }])

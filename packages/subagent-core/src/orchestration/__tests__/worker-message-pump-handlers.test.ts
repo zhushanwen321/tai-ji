@@ -516,7 +516,7 @@ describe("agent-call schema 入参形状（fail-fast）", () => {
         | { result?: { error?: string } }
         | undefined;
       expect(String(settled?.result?.error ?? "")).toContain("Invalid schema param");
-    });
+    }, { interval: 1 });
 
     // 错误回传 worker：agent() 的 pending 收敛，不悬挂
     const postMessage = run.runtime!.worker.postMessage as unknown as ReturnType<typeof vi.fn>;

@@ -236,7 +236,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
       engine: "zcode",
     });
 
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1), { interval: 1 });
     expect(piEngine.runs.length).toBe(0);
     const record = recordOf(handle.subagentId);
     // [modeless 波1] 会话轮协议键恒传（recordId 关联键）；首轮无 resume 锚
@@ -248,7 +248,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     // （finalizeEngineOutcome（已删）：status='idle' + closedReason='gc' + round 不推进）
     // 的判别断言
     zcode.runs[0]!.settle("round one done");
-    await vi.waitFor(() => expect(record.round).toBe(1));
+    await vi.waitFor(() => expect(record.round).toBe(1), { interval: 1 });
     expect(record.status).toBe("idle");
     expect(record.closedReason).toBeUndefined();
     expect(record.result).toBe("round one done");
@@ -261,7 +261,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
       slug: "u6b-second",
       engine: "zcode",
     });
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1), { interval: 1 });
     const record = recordOf(handle.subagentId);
     // 首轮 create 应答 → onHandleReady 回填锚（sessionRef；poolKey 恒 'shared' 为
     // 持久化形状成员——RecordStore engineHandle 断言用 record.engineHandle 自身核对）
@@ -271,11 +271,11 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     });
     expect(record.engineHandle?.poolKey).toBe("shared");
     zcode.runs[0]!.settle("round one done");
-    await vi.waitFor(() => expect(record.round).toBe(1));
+    await vi.waitFor(() => expect(record.round).toBe(1), { interval: 1 });
 
     // 续轮：message → Continuation → kickOffChatRound 按 record.engine 路由
     await service.chatActions.deliverChatMessage(record, "second round");
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(2));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(2), { interval: 1 });
     expect(piEngine.runs.length).toBe(0);
     // resume 锚 = engineHandle.sessionRef 派生的 zcode cold 形态（引擎侧据此
     // session/resume 读历史 + session/create 新会话注入）
@@ -293,14 +293,14 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
       slug: "u6b-anchor",
       engine: "zcode",
     });
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1), { interval: 1 });
     const record = recordOf(handle.subagentId);
     zcode.runs[0]!.emitHandleReady({ sessionId: "sess_cold_1", dbPath: zcodeDb });
     zcode.runs[0]!.settle("round one done");
-    await vi.waitFor(() => expect(record.round).toBe(1));
+    await vi.waitFor(() => expect(record.round).toBe(1), { interval: 1 });
 
     await service.chatActions.deliverChatMessage(record, "second round");
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(2));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(2), { interval: 1 });
     // 第二轮 create 应答 → 新 sessionRef 覆写（补缺语义会把 'sess_cold_1' 残留成锚，
     // 引擎侧下一轮注入的历史就缺最新一轮——本用例锁定覆写）
     zcode.runs[1]!.emitHandleReady({ sessionId: "sess_cold_2", dbPath: zcodeDb });
@@ -317,12 +317,12 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     });
 
     zcode.runs[1]!.settle("round two done");
-    await vi.waitFor(() => expect(record.round).toBe(2));
+    await vi.waitFor(() => expect(record.round).toBe(2), { interval: 1 });
     // 第三轮 resume 锚已推进到新 session（闭环：锚随轮自更新）——seed 新条目对齐
     // 真实形态（库条目在；zcode 锚预检查已退役，seed 与否不再影响派发分流）
     await seedZcodeSession("sess_cold_2");
     await service.chatActions.deliverChatMessage(record, "third round");
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(3));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(3), { interval: 1 });
     expect(zcode.runs[2]!.ctx.resume).toEqual({
       recordId: record.id,
       resume: { sessionRef: { sessionId: "sess_cold_2", dbPath: zcodeDb } },
@@ -336,11 +336,11 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
       slug: "u6b-unreg",
       engine: "zcode",
     });
-    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1), { interval: 1 });
     const record = recordOf(handle.subagentId);
     zcode.runs[0]!.emitHandleReady({ sessionId: "sess_cold_1", dbPath: zcodeDb });
     zcode.runs[0]!.settle("round one done");
-    await vi.waitFor(() => expect(record.round).toBe(1));
+    await vi.waitFor(() => expect(record.round).toBe(1), { interval: 1 });
 
     // 引擎从 registry 摘除（模拟宿主重启后引擎包不可达的续轮形态）
     clearEngines();
@@ -360,14 +360,14 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
 
   it("[防御] pi 缺省路由的会话轮：RunContext 不挂 onHandleReady（pi 锚面 = outcome.sessionFile 回填，不引入新回填通道）", async () => {
     const handle = await service.execute({ task: "pi chat", slug: "u6b-pi" });
-    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1));
+    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1), { interval: 1 });
     expect(zcode.runs.length).toBe(0);
     const record = recordOf(handle.subagentId);
     expect(piEngine.runs[0]!.ctx.onHandleReady).toBeUndefined();
     // pi 会话轮协议键形态保持（recordId 关联键；首轮无锚——[modeless 波1] 恒传）
     expect(piEngine.runs[0]!.ctx.resume).toEqual({ recordId: record.id });
     piEngine.runs[0]!.settle({ content: "pi round done" });
-    await vi.waitFor(() => expect(record.round).toBe(1));
+    await vi.waitFor(() => expect(record.round).toBe(1), { interval: 1 });
     expect(record.status).toBe("idle");
   });
 });

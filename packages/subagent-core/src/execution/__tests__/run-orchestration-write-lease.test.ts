@@ -105,11 +105,11 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
     try {
       const sessionFile = path.join(h.agentDir, "oneshot-session.jsonl");
       const handle = await h.service.execute({ task: "lease probe", slug: "lease" });
-      await vi.waitFor(() => expect(h.fake.runs.length).toBe(1));
+      await vi.waitFor(() => expect(h.fake.runs.length).toBe(1), { interval: 1 });
       h.fake.runs[0]!.settle({ content: "done text", sessionFile });
 
       const record = h.store.getMutable(handle.subagentId);
-      await vi.waitFor(() => expect(record?.status).toBe("idle"));
+      await vi.waitFor(() => expect(record?.status).toBe("idle"), { interval: 1 });
       // SP-5：成功轮落 idle 可续聊（markRoundIdle 簿记；[two-state-convergence
       // U4/D3] 翻边后 idle 即 resumable）
       expect(record?.closedReason).toBeUndefined();
@@ -147,7 +147,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
       // settleRoundFailed（MF-6：idle 可恢复 + 失败通知）——旧 adopt 接管链（error
       // 三写 + 监督器纳管 + merged notice）随 one-shot engine-run 编排消亡。
       await h.service.chatActions.deliverChatMessage(record, "risky round");
-      await vi.waitFor(() => expect(h.fake.runs.length).toBe(1));
+      await vi.waitFor(() => expect(h.fake.runs.length).toBe(1), { interval: 1 });
       h.fake.runs[0]!.fail(Object.assign(new Error("engine process exited unexpectedly: signal SIGKILL"), {
         name: "EngineSdkError",
       }));
@@ -155,7 +155,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
       await vi.waitFor(() => {
         expect(record.status).toBe("idle");
         expect(record.lastError).toContain("engine process exited");
-      });
+      }, { interval: 1 });
       expect(record.round).toBe(1);
     } finally {
       h.service.dispose();
@@ -169,7 +169,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
     try {
       const sessionFile = path.join(h.agentDir, "wf-session.jsonl");
       const execP = h.service.executeAndAwait({ task: "wf lease", slug: "wf" });
-      await vi.waitFor(() => expect(h.fake.runs.length).toBe(1));
+      await vi.waitFor(() => expect(h.fake.runs.length).toBe(1), { interval: 1 });
       h.fake.runs[0]!.settle({ content: "wf done", sessionFile });
       const result = await execP;
 

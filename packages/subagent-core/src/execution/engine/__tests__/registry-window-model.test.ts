@@ -263,7 +263,7 @@ describe("registry D6：覆盖重注册 → 活窗口旧实例 dispose + 后续�
     registerEngineDescriptor("pw", makeCliDescriptor("pw", { command: "/bin/fake-pw-v2", ports: portsV2 }));
 
     // 活窗口旧实例被 dispose（触发不等待——waitFor 收敛）
-    await vi.waitFor(() => expect(portsV1[0]!.disposed).toBe(1));
+    await vi.waitFor(() => expect(portsV1[0]!.disposed).toBe(1), { interval: 1 });
 
     // 窗口状态已被清（触发侧先摘后放）：后续解析 = 新 descriptor 重建（respawn 用新代码）
     const revived = resolveWorkflowWindowEnginePort(runId, "pw");

@@ -1234,7 +1234,7 @@ describe("RecordStore", () => {
             }),
           }),
         );
-      });
+      }, { interval: 1 });
       // 升级语义：warn 而非 debug（debug 层不再承载该信号）
       const debugIndexMsgs = loggerMock.debug.mock.calls.filter((c) =>
         String(c[0]).includes("sessions-index write failed"),
@@ -1253,7 +1253,7 @@ describe("RecordStore", () => {
 
       const store = new RecordStore(() => tmpDir);
       store.collectRecords(100);
-      await vi.waitFor(() => expect(saveIndexMock).toHaveBeenCalled());
+      await vi.waitFor(() => expect(saveIndexMock).toHaveBeenCalled(), { interval: 1 });
 
       const warnIndexMsgs = loggerMock.warn.mock.calls.filter((c) =>
         String(c[0]).includes("sessions-index write failed"),

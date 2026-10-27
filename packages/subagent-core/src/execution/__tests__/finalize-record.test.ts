@@ -212,7 +212,7 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
     // ── 核心 claim 5：manifest 写失败被 logger.error 记录（store 内 reportManifestWriteFailure）──
     await vi.waitFor(() => {
       expect(loggerMock.error).toHaveBeenCalledWith(expect.stringContaining("manifest write failed"));
-    });
+    }, { interval: 1 });
     const errMsg = loggerMock.error.mock.calls[0]?.[0];
     expect(errMsg).toContain("rec-cleanup-first");
     expect(errMsg).toContain("disk full");

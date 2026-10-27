@@ -238,7 +238,7 @@ describe('B5 触发点收窄：真删除才清 plugin sessionData（§3.1 trash 
     await service.delete(sid)
 
     // 清理是 void…catch 分发（异步路径），trash 到达是微任务
-    await vi.waitFor(() => expect(trashState.calls).toContain(dataFile(sid)))
+    await vi.waitFor(() => expect(trashState.calls).toContain(dataFile(sid)), { interval: 1 })
     expect(isSessionDataCleared(sid)).toBe(true)
     expect(existsSync(dataFile(sid))).toBe(false)
     expect(service.getSummary(sid)).toBeUndefined() // 真销毁完成（内存条目已收殓）
@@ -265,7 +265,7 @@ describe('B5 触发点收窄：真删除才清 plugin sessionData（§3.1 trash 
 
     await service.delete(sid)
 
-    await vi.waitFor(() => expect(trashState.calls).toContain(dataFile(sid)))
+    await vi.waitFor(() => expect(trashState.calls).toContain(dataFile(sid)), { interval: 1 })
     expect(trashState.calls).toContain(bodyFile) // session 本体同trash（§3.1 一同进废纸篓）
     expect(isSessionDataCleared(sid)).toBe(true)
     expect(existsSync(dataFile(sid))).toBe(false)

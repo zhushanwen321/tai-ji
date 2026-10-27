@@ -82,7 +82,7 @@ describe('AuthService.login', () => {
     // 等异步 flow 完成
     await vi.waitFor(() => {
       expect(deps.events.some((e) => e.type === 'auth.success')).toBe(true)
-    })
+    }, { interval: 1 })
 
     expect(runOAuthLogin).toHaveBeenCalledWith('xai', OAUTH_CONFIG, expect.any(Object), expect.any(AbortSignal))
     expect(deps.authStorage.set).toHaveBeenCalledWith('xai', expect.objectContaining({ type: 'oauth', access: 'at' }))
@@ -114,7 +114,7 @@ describe('AuthService.login', () => {
     svc.login('xai')
     await vi.waitFor(() => {
       expect(deps.events.some((e) => e.type === 'auth.error')).toBe(true)
-    })
+    }, { interval: 1 })
 
     expect(deps.events.find((e) => e.type === 'auth.error')?.payload).toEqual({
       providerId: 'xai', message: 'OAuth device code expired',
@@ -130,7 +130,7 @@ describe('AuthService.login', () => {
     const onAuthenticated = vi.fn()
 
     svc.login('xai', onAuthenticated)
-    await vi.waitFor(() => expect(onAuthenticated).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(onAuthenticated).toHaveBeenCalledTimes(1), { interval: 1 })
     // 回调时点 = 凭据已落盘 + 成功事件已广播（消费方按 auth.json 现状重跑）
     expect(deps.authStorage.set).toHaveBeenCalled()
     expect(deps.events.some((e) => e.type === 'auth.success')).toBe(true)
@@ -146,7 +146,7 @@ describe('AuthService.login', () => {
     failed.login('xai', onAuthenticated)
     await vi.waitFor(() => {
       expect(failedDeps.events.some((e) => e.type === 'auth.error')).toBe(true)
-    })
+    }, { interval: 1 })
     expect(onAuthenticated).not.toHaveBeenCalled()
   })
 
@@ -159,7 +159,7 @@ describe('AuthService.login', () => {
     svc.login('xai', () => { throw new Error('consumer boom') })
     await vi.waitFor(() => {
       expect(deps.events.some((e) => e.type === 'auth.success')).toBe(true)
-    })
+    }, { interval: 1 })
     expect(deps.events.some((e) => e.type === 'auth.error')).toBe(false)
     expect(warn).toHaveBeenCalledWith('[auth-service] onAuthenticated callback failed for xai:', expect.any(Error))
     warn.mockRestore()
@@ -173,7 +173,7 @@ describe('AuthService.login', () => {
     svc.login('xai')
     await vi.waitFor(() => {
       expect(deps.events.some((e) => e.type === 'auth.success')).toBe(true)
-    })
+    }, { interval: 1 })
     const serialized = JSON.stringify(deps.events)
     expect(serialized).not.toContain('SUPER-SECRET-TOKEN')
   })
@@ -199,17 +199,17 @@ describe('AuthService.cancel', () => {
     svc.login('xai')
     await vi.waitFor(() => {
       expect(signal).toBeDefined()
-    })
+    }, { interval: 1 })
     expect(svc.cancel('xai')).toEqual({ cancelled: true })
 
     // flow 因 abort 结束：没有 auth.error 事件
     await vi.waitFor(() => {
       expect(deps.events.some((e) => e.type === 'auth.error')).toBe(false)
-    })
+    }, { interval: 1 })
     // 结束后 activeFlows 已清空：再次 cancel 幂等返回 false
     await vi.waitFor(() => {
       expect(svc.cancel('xai')).toEqual({ cancelled: false })
-    })
+    }, { interval: 1 })
   })
 
   it('cancel 后立即重新 login 不被拒（activeFlows 同步清理，exec-review must-fix #1 回归）', async () => {
@@ -226,7 +226,7 @@ describe('AuthService.cancel', () => {
     })
 
     svc.login('xai')
-    await vi.waitFor(() => expect(signal).toBeDefined())
+    await vi.waitFor(() => expect(signal).toBeDefined(), { interval: 1 })
     expect(svc.cancel('xai')).toEqual({ cancelled: true })
     // 立即重新 login：必须成功（cancel 已同步清理 activeFlows）
     expect(svc.login('xai')).toEqual({ started: true })
@@ -249,7 +249,7 @@ describe('AuthService.cancel', () => {
     })
 
     svc.login('xai')
-    await vi.waitFor(() => expect(signal).toBeDefined())
+    await vi.waitFor(() => expect(signal).toBeDefined(), { interval: 1 })
     expect(svc.cancel('xai')).toEqual({ cancelled: true })
     // cancel 同步清条目后立即 re-login：新 controller 入 Map（ABA 的 B 状态）
     expect(svc.login('xai')).toEqual({ started: true })
@@ -264,7 +264,7 @@ describe('AuthService.cancel', () => {
     // 清理：确认两个 flow 均已收尾（无 auth.error——abort 是用户主动取消非错误）
     await vi.waitFor(() => {
       expect(deps.events.some((e) => e.type === 'auth.error')).toBe(false)
-    })
+    }, { interval: 1 })
   })
 
   it('S-7: cancel 落在「token 获取完成 → 写盘」窗口时不落盘、不发 auth.success', async () => {
@@ -280,7 +280,7 @@ describe('AuthService.cancel', () => {
     })
 
     svc.login('xai')
-    await vi.waitFor(() => expect(signal).toBeDefined())
+    await vi.waitFor(() => expect(signal).toBeDefined(), { interval: 1 })
     expect(svc.cancel('xai')).toEqual({ cancelled: true })
 
     // flow 在 abort 后带着已获取的 token 返回：不得写 auth.json / 清 apiKey / 广播 success
@@ -288,11 +288,11 @@ describe('AuthService.cancel', () => {
       expect(deps.authStorage.set).not.toHaveBeenCalled()
       expect(deps.clearApiKey).not.toHaveBeenCalled()
       expect(deps.events.some((e) => e.type === 'auth.success')).toBe(false)
-    })
+    }, { interval: 1 })
     // 结束后 activeFlows 已清空：再次 cancel 幂等返回 false
     await vi.waitFor(() => {
       expect(svc.cancel('xai')).toEqual({ cancelled: false })
-    })
+    }, { interval: 1 })
   })
 
   it('S-8: cancel 落在 set() 锁等待期间（凭据已写盘）时不广播 auth.success，且移除刚写入的凭据', async () => {
@@ -311,7 +311,7 @@ describe('AuthService.cancel', () => {
     // flow 已进入 set() 锁等待（凭据已写盘，broadcast 前）
     await vi.waitFor(() => {
       expect(deps.authStorage.set).toHaveBeenCalledWith('xai', expect.objectContaining({ type: 'oauth' }))
-    })
+    }, { interval: 1 })
     expect(svc.cancel('xai')).toEqual({ cancelled: true })
     // 释放锁：set() 返回后必须复查 abort——不得清 apiKey / 广播 success，且移除刚写入的凭据
     releaseSet?.()
@@ -319,11 +319,11 @@ describe('AuthService.cancel', () => {
       expect(deps.authStorage.remove).toHaveBeenCalledWith('xai')
       expect(deps.clearApiKey).not.toHaveBeenCalled()
       expect(deps.events.some((e) => e.type === 'auth.success')).toBe(false)
-    })
+    }, { interval: 1 })
     // 结束后 activeFlows 已清空：再次 cancel 幂等返回 false
     await vi.waitFor(() => {
       expect(svc.cancel('xai')).toEqual({ cancelled: false })
-    })
+    }, { interval: 1 })
   })
   it('委托 authStorage.hasOAuth', async () => {
     const deps = makeDeps()
@@ -344,7 +344,7 @@ describe('AuthService.logout', () => {
       return new Promise(() => {}) // 挂起模拟进行中 flow
     })
     svc.login('xai')
-    await vi.waitFor(() => expect(signal).toBeDefined())
+    await vi.waitFor(() => expect(signal).toBeDefined(), { interval: 1 })
 
     // remove 执行瞬间记录 abort 状态——「先 cancel 再 remove」的行为证据
     //（logout 的核心语义：防 remove 后 flow 完成把新凭证写回，见方法头注释 B-1 场景 C）

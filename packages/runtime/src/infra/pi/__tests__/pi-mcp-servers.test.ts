@@ -342,7 +342,7 @@ describe('PiMcpServers.test（D3 异步任务形态 + 墙钟公式）', () => {
     const handle = servers.test('fs')
     expect(handle.testId).toMatch(/^mcp-test-\d+$/)
     expect(runner).toHaveBeenCalledOnce()
-    await vi.waitFor(() => expect(runner.mock.results[0]?.value).resolves.toBeTruthy())
+    await vi.waitFor(() => expect(runner.mock.results[0]?.value).resolves.toBeTruthy(), { interval: 1 })
   })
 
   it('无显式 timeout = 默认墙钟下限 150 秒（D3 量级依据）', () => {
@@ -390,7 +390,7 @@ describe('PiMcpServers.testCancel（D3「取消」按钮——等价于超时到
     const servers = new PiMcpServers({ probeRunner: runner, onTestResult: (e) => events.push(e) })
     const handle = servers.test('fs')
     expect(servers.testCancel(handle.testId)).toBe(true)
-    await vi.waitFor(() => expect(runner.mock.results[0]?.value).resolves.toEqual({ kind: 'cancelled' }))
+    await vi.waitFor(() => expect(runner.mock.results[0]?.value).resolves.toEqual({ kind: 'cancelled' }), { interval: 1 })
     // 收敛后微任务排空仍无徽标回填（cancelled 不广播——renderer 已在取消分支恢复原徽标）
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(events).toHaveLength(0)
@@ -403,7 +403,7 @@ describe('PiMcpServers.testCancel（D3「取消」按钮——等价于超时到
     const runner = makeProbeRunner({ kind: 'ok', exitCode: 0, servers: [], configErrors: [] })
     const servers = new PiMcpServers({ probeRunner: runner, onTestResult: (e) => events.push(e) })
     const handle = servers.test('fs')
-    await vi.waitFor(() => expect(runner.mock.results[0]?.value).resolves.toBeTruthy())
+    await vi.waitFor(() => expect(runner.mock.results[0]?.value).resolves.toBeTruthy(), { interval: 1 })
     expect(servers.testCancel(handle.testId)).toBe(false)
     expect(events).toHaveLength(1)
   })
@@ -433,7 +433,7 @@ describe('PiMcpServers.onTestResult（probe 终态回填回调，u5b 打回接�
       ],
     })
     const handle = servers.test('fs')
-    await vi.waitFor(() => expect(events).toHaveLength(1))
+    await vi.waitFor(() => expect(events).toHaveLength(1), { interval: 1 })
     expect(events[0]).toMatchObject({
       name: 'fs',
       testId: handle.testId,
@@ -452,7 +452,7 @@ describe('PiMcpServers.onTestResult（probe 终态回填回调，u5b 打回接�
       ],
     })
     servers.test('broken')
-    await vi.waitFor(() => expect(events).toHaveLength(1))
+    await vi.waitFor(() => expect(events).toHaveLength(1), { interval: 1 })
     expect(events[0]).toMatchObject({
       name: 'broken',
       badge: { source: 'probe', state: 'failed', errorDetail: 'spawn /nonexistent ENOENT' },
@@ -469,7 +469,7 @@ describe('PiMcpServers.onTestResult（probe 终态回填回调，u5b 打回接�
       ],
     })
     servers.test('gone')
-    await vi.waitFor(() => expect(events).toHaveLength(2))
+    await vi.waitFor(() => expect(events).toHaveLength(2), { interval: 1 })
     expect(events[0]).toMatchObject({ name: 'other', badge: { source: 'probe', state: 'connected', toolCount: 1 } })
     expect(events[1]).toMatchObject({ name: 'gone', badge: { source: 'ui-local', state: 'timeout' } })
   })
@@ -485,7 +485,7 @@ describe('PiMcpServers.onTestResult（probe 终态回填回调，u5b 打回接�
       ],
     })
     const handle = servers.test('fs')
-    await vi.waitFor(() => expect(events).toHaveLength(2))
+    await vi.waitFor(() => expect(events).toHaveLength(2), { interval: 1 })
     for (const event of events) {
       expect(event).toMatchObject({ testId: handle.testId })
     }
@@ -496,14 +496,14 @@ describe('PiMcpServers.onTestResult（probe 终态回填回调，u5b 打回接�
   it('probe 整体超时 → ui-local timeout 徽标（D3 整体无本次结果）', async () => {
     const { servers, events } = makeServersWithCallback({ kind: 'timeout', timeoutMs: 150_000 })
     servers.test('fs')
-    await vi.waitFor(() => expect(events).toHaveLength(1))
+    await vi.waitFor(() => expect(events).toHaveLength(1), { interval: 1 })
     expect(events[0]).toMatchObject({ badge: { source: 'ui-local', state: 'timeout' } })
   })
 
   it('probe spawn-failed → failed 徽标携带降级原因全文', async () => {
     const { servers, events } = makeServersWithCallback({ kind: 'spawn-failed', message: 'pi 可执行文件定位失败' })
     servers.test('fs')
-    await vi.waitFor(() => expect(events).toHaveLength(1))
+    await vi.waitFor(() => expect(events).toHaveLength(1), { interval: 1 })
     expect(events[0]).toMatchObject({
       badge: { source: 'probe', state: 'failed', errorDetail: 'pi 可执行文件定位失败' },
     })

@@ -828,7 +828,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     expect(record.status).toBe("running");
 
     // detached：等协议 run 被调（续聊 = ctx.resume 锚点）
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     const run = fake.runs[0]!;
     expect(run.task.prompt).toBe("next round msg");
     expect(run.ctx.resume).toEqual({
@@ -843,7 +843,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
 
     // 等 detached 完成：round 累加、轮终翻 idle（[two-state-convergence U4/D3] 写侧
     // 翻边——idle 即 resumable，续聊经 revive 过站，SP-5 寻址链不查 status）
-    await vi.waitFor(() => expect(record.round).toBe(beforeRound! + 1));
+    await vi.waitFor(() => expect(record.round).toBe(beforeRound! + 1), { interval: 1 });
     expect(record.status).toBe("idle");
     expect(record.result).toBe("round text");
     expect(record.stopReason).toBe("completed");
@@ -854,9 +854,9 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     // 等 stopReason（轮终产物）而非 round——makeIdleRecord 预置 round=1，round 判据
     // 会在 settle 前立即通过。
     await service.chatActions.deliverChatMessage(record, "first round");
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     fake.runs[0]!.settle({ content: "first round text" });
-    await vi.waitFor(() => expect(record.stopReason).toBe("completed"));
+    await vi.waitFor(() => expect(record.stopReason).toBe("completed"), { interval: 1 });
     // 翻边形态自检：轮终落 idle（resumable 无、closedReason 清、stopReason=completed）
     expect(record.status).toBe("idle");
     expect(record.closedReason).toBeUndefined();
@@ -897,7 +897,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     expect(record.closedReason).toBeUndefined();
     expect(record.result).toBeUndefined();
     // 新轮派发：fake 引擎收到续轮 run（resume 续写原文件）
-    await vi.waitFor(() => expect(fake.runs.length).toBe(2));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(2), { interval: 1 });
     expect(fake.runs[1]!.task.prompt).toBe("revive after idle round");
     expect(entrySnapshots).toHaveLength(2);
   });
@@ -908,7 +908,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     // 不参与资格判定——message 到达直接翻回 running 派发新轮（万物可续）。
     record.closedReason = "gc";
     await service.chatActions.deliverChatMessage(record, "msg");
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     expect(record.status).toBe("running");
     expect(record.closedReason).toBeUndefined(); // 翻边清遗留位（notifyGate 门判据）
   });
@@ -919,7 +919,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     // 直接翻回 running 派发新轮（万物可续）
     expect(record.closedReason).toBeUndefined();
     await service.chatActions.deliverChatMessage(record, "msg after settle");
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     expect(record.status).toBe("running");
   });
 
@@ -928,7 +928,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     // [U4 / §3.2.3] 原锚点缺失同步拒绝格消亡：无锚 = 无历史可摘要，按全新 session
     // 派发承接（新锚由 run 应答回填）。
     await service.chatActions.deliverChatMessage(record, "msg");
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     expect(fake.runs[0]!.ctx.resume?.resume).toBeUndefined();
     expect(fake.runs[0]!.task.prompt).toBe("msg"); // 无锚无历史，不注入 reopen 摘要
   });
@@ -980,7 +980,7 @@ describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）"
     await service.chatActions.deliverChatMessage(record, "after you finish");
 
     // [H1 U2] 每轮 = 新 run + resume 锚点（§3.4 dispatchRound）
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     const run = fake.runs[0]!;
     expect(run.task.prompt).toBe("after you finish");
     expect(run.ctx.resume?.recordId).toBe(record.id);
@@ -1031,7 +1031,7 @@ describe("deliverChatMessage 并发检查（review round2 MF1）", () => {
   it("同 record 轮在途连续两条 message → 第二条入队不打断单飞（构造性单写者），轮终 drain 聚合派发", async () => {
     // 第一条：派发新轮（run 挂起不 resolve——模拟在途轮）
     await expect(service.chatActions.deliverChatMessage(record, "first msg")).resolves.toBeUndefined();
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
 
     // 第二条：run 在途 → [H1 U2 / D2 打断语义] abort 在途轮 signal + 入队（不打断单飞、
     // 不二次派发——修复前双 kickOff 双写 session 的检查由 Continuation 单飞构造性承接）
@@ -1048,7 +1048,7 @@ describe("deliverChatMessage 并发检查（review round2 MF1）", () => {
 
     // 轮终（应答收敛）→ drain → 队列消息派发为下一轮（单写者前置满足）
     fake.runs[0]!.settle({ content: "done" });
-    await vi.waitFor(() => expect(fake.runs.length).toBe(2));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(2), { interval: 1 });
     expect(fake.runs[1]!.task.prompt).toBe("second msg");
   });
 
@@ -1059,19 +1059,19 @@ describe("deliverChatMessage 并发检查（review round2 MF1）", () => {
     (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(recordB);
 
     await service.chatActions.deliverChatMessage(record, "A msg");
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
 
     // B 的续聊轮不受 A 在途影响（Continuation per-record 实例）
     await expect(service.chatActions.deliverChatMessage(recordB, "B msg")).resolves.toBeUndefined();
-    await vi.waitFor(() => expect(fake.runs.length).toBe(2));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(2), { interval: 1 });
     expect(fake.runs[1]!.ctx.resume?.recordId).toBe(recordB.id);
 
     fake.runs[0]!.settle({ content: "A done" });
     fake.runs[1]!.settle({ content: "B done" });
     // 轮终簿记完成（Continuation 无全局在途集合——终态检查由 per-record 实例承载），
     // 断言两轮各自 round+1 即单飞收尾的可观察结果。
-    await vi.waitFor(() => expect(record.round).toBe(2));
-    await vi.waitFor(() => expect(recordB.round).toBe(2));
+    await vi.waitFor(() => expect(record.round).toBe(2), { interval: 1 });
+    await vi.waitFor(() => expect(recordB.round).toBe(2), { interval: 1 });
   });
 });
 
@@ -1169,7 +1169,7 @@ describe("T4① notify gate 二元组（[U5 / §3.2.7] 放弃轮标记阻断 + �
     record.status = "idle";
     store.register(record);
     await service.chatActions.deliverChatMessage(record, "go");
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     record.lastAbandonedRound = { epoch: record.epoch ?? 0, round: record.round ?? 0 };
     store.markSettledOut(record);
     fake.runs[0]!.settle({ content: "late round text" });
@@ -1203,9 +1203,9 @@ describe("T4① notify gate 二元组（[U5 / §3.2.7] 放弃轮标记阻断 + �
     record.closedReason = "gc";
     store.register(record);
     await service.chatActions.deliverChatMessage(record, "continue");
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1), { interval: 1 });
     fake.runs[0]!.settle({ content: "round" });
-    await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled());
+    await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled(), { interval: 1 });
     service.dispose();
     clearEngines();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });

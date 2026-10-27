@@ -97,7 +97,7 @@ describe('ConnectionManager.stop() — A4 rolling-restart hang regression', () =
     expect(harness.conn.clients.size).toBe(1)
     await withDeadline(harness.conn.stop(), 'stop() with authed client')
     // stop 后服务端连接池清空（客户端被服务端关闭触发 handleClose）。
-    await vi.waitFor(() => { expect(harness.conn.clients.size).toBe(0) })
+    await vi.waitFor(() => { expect(harness.conn.clients.size).toBe(0) }, { interval: 1 })
   })
 
   it('resolves while an idle keep-alive HTTP connection is open', async () => {

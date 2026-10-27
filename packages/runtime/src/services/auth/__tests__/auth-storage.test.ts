@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AuthStorage, type OAuthCredential, type Credential, type ApiKeyCredential } from '../auth-storage.js'
+import { AuthStorage, setAuthLockMinRetryTimeoutForTest, type OAuthCredential, type Credential, type ApiKeyCredential } from '../auth-storage.js'
 
 let dir: string
 let file: string
@@ -30,6 +30,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // 退避下限注入只服务并发用例：逐例复位，避免压缩退避泄漏到后续用例
+  setAuthLockMinRetryTimeoutForTest(undefined)
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
@@ -55,6 +57,9 @@ describe('AuthStorage', () => {
   })
 
   it('并发 set 多个 provider：全部保留（mutex 串行化 RMW）', async () => {
+    // 压缩等锁退避（下限 5ms，默认 100ms）：断言对象是「并发写全部保留」，
+    // 退避时长不是被测契约（默认值由 utils/file-lock.ts 常量与 pi 侧对齐测试保护）
+    setAuthLockMinRetryTimeoutForTest(5)
     await Promise.all(
       Array.from({ length: 10 }, (_, i) => storage.set(`p${i}`, oauthCred(`t${i}`))),
     )

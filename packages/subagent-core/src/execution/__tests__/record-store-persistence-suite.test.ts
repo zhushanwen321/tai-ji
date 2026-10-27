@@ -2058,7 +2058,7 @@ describe("dispose-manifest-recovery", () => {
       // .alive release（markSettledOut 内部删——§3.2.4 release 出口①收尾即放弃写权）
       expect(fs.existsSync(`${promoted}.alive`)).toBe(false);
       // manifest 落真实锚点（重启 revive/fork-from 可直接定位子文件）
-      await vi.waitFor(() => expect(fs.existsSync(manifestPath(agentDir, "sa-promote"))).toBe(true));
+      await vi.waitFor(() => expect(fs.existsSync(manifestPath(agentDir, "sa-promote"))).toBe(true), { interval: 1 });
       const manifest = JSON.parse(fs.readFileSync(manifestPath(agentDir, "sa-promote"), "utf-8")) as Record<string, unknown>;
       expect(manifest.sessionFile).toBe(promoted);
       expect(manifest.closedReason).toBeUndefined();
@@ -2068,7 +2068,7 @@ describe("dispose-manifest-recovery", () => {
       const record = makeRecord({ id: "sa-m1" });
       (service as unknown as ServiceInternals).store.register(record);
       service.disposeAllRecords("parent-shutdown");
-      await vi.waitFor(() => expect(fs.existsSync(manifestPath(agentDir, "sa-m1"))).toBe(true));
+      await vi.waitFor(() => expect(fs.existsSync(manifestPath(agentDir, "sa-m1"))).toBe(true), { interval: 1 });
       service.dispose();
 
       // 重启：新 Service 实例（内存空、fileCache 空、manifest 缓存空）+ initSession
@@ -2110,7 +2110,7 @@ describe("dispose-manifest-recovery", () => {
       const restarted = makeServiceOn(agentDir, { mainSessionFile });
       extraServices.push(restarted);
 
-      await vi.waitFor(() => expect(fs.existsSync(manifestPath(agentDir, "sa-remat"))).toBe(true));
+      await vi.waitFor(() => expect(fs.existsSync(manifestPath(agentDir, "sa-remat"))).toBe(true), { interval: 1 });
       const manifest = JSON.parse(fs.readFileSync(manifestPath(agentDir, "sa-remat"), "utf-8")) as Record<string, unknown>;
       // 收编 manifest 派生视图 = legacy running + executionStatus idle + 收编停因
       //（v2 条目契约不承载 closedReason——旧终态兼容位随 v1 全量快照删除）
@@ -2175,7 +2175,7 @@ describe("dispose-manifest-recovery", () => {
       (service as unknown as ServiceInternals).store.register(record);
       expect(service.cancel("sa-cx")).toBe(true);
 
-      await vi.waitFor(() => expect(fs.existsSync(manifestPath(agentDir, "sa-cx"))).toBe(true));
+      await vi.waitFor(() => expect(fs.existsSync(manifestPath(agentDir, "sa-cx"))).toBe(true), { interval: 1 });
       // [U5] cancel = 中断轮 settle（不终态化）：markSettled 派生视图 legacy "running"
       //（idle 无 closedReason）、closedReason undefined；`.state` 新格式收条
       // {status:"idle", stopReason:"interrupted"}。

@@ -130,7 +130,7 @@ describe("U7a: catch 分支兜底回发 agent-result（非 Abort 异常）", () 
       // dispatchAgentCall 内 void withSlot(...)（fire-and-forget），需等微任务完成
       await vi.waitFor(() => {
         expect(findAgentResultPost(postMessage, 2)).toBeDefined();
-      });
+      }, { interval: 1 });
 
       const posted = findAgentResultPost(postMessage, 2)!;
       expect(posted.type).toBe("agent-result");
@@ -165,7 +165,7 @@ describe("U7a: catch 分支兜底回发 agent-result（非 Abort 异常）", () 
 
       await vi.waitFor(() => {
         expect(findAgentResultPost(postMessage, 7)).toBeDefined();
-      });
+      }, { interval: 1 });
 
       const posted = findAgentResultPost(postMessage, 7)!;
       expect(posted.result.error).toBe("string failure");

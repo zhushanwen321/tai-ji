@@ -91,7 +91,7 @@ import { getSubagentMessageResultsDir, translateByTableReverse } from '@zhushanw
 import { isStrictlyUnder } from '../../utils/path-utils.js'
 import type { ISessionStore, ScannedSessionMeta } from '../ports/session.js'
 import { toErrorMessage } from '../../utils/errors.js'
-import { withFileLockSync } from '../../utils/file-lock.js'
+import { withFileLockSync, type SyncFileLockOptions } from '../../utils/file-lock.js'
 import { atomicWrite } from '../../utils/fs-utils.js'
 import { isEntryNotFoundError } from './trace-sync.js'
 import { SCALAR_STATE_DEBOUNCE_MS } from './replicated-states.config.js'
@@ -336,6 +336,27 @@ export interface SessionRecordsDeps {
 
 /** JSON 落盘缩进（全仓 JSON_INDENT = 2 约定）。 */
 const JSON_INDENT = 2
+
+/**
+ * config.json 写锁参数覆盖（仅测试用）。生产保持 file-lock.ts 默认值
+ * （stale 30s / 重试间隔 25ms / 预算 1s），与 pi-settings-store / rename-session-config
+ * 同协议。
+ *
+ * 为什么需要注入缝：ELOCKED fail-fast 用例必须在「他方持锁」窗口内跑完，默认预算
+ * 1s 使每条用例固定耗满 1s；断言语义是「预算耗尽 → ELOCKED 且零写入」，预算数值
+ * 不是被测契约（默认值另有 test/file-lock-parity.test.ts 常量断言保护）。
+ */
+let sessionConfigLockOptions: SyncFileLockOptions = {}
+
+/** 覆盖 config.json 写锁参数（仅测试用）。传 {} 恢复默认。 */
+export function setSessionConfigLockTimingForTest(opts: SyncFileLockOptions): void {
+  sessionConfigLockOptions = opts
+}
+
+/** config.json RMW 的统一取锁入口（引擎配置两个 setter 共用；锁参数可测试注入）。 */
+function withConfigLock<T>(configPath: string, fn: () => T): T {
+  return withFileLockSync(configPath, fn, sessionConfigLockOptions)
+}
 
 /**
  * config.json 锁内读取（引擎配置两 RMW 方法共用的读半段）：无文件 / 坏 JSON /
@@ -1296,7 +1317,7 @@ export class SessionRecords {
       throw new Error(`unknown subagent engine '${engineId}' (available: ${view.engines.join(', ')})`)
     }
     const configPath = join(getPiAgentDir(), 'subagents', 'config.json')
-    withFileLockSync(configPath, () => {
+    withConfigLock(configPath, () => {
       // 无既有配置 / 坏 JSON / 非对象 → 新建（extension 读侧对缺字段的容忍与 DEFAULT_CONFIG 对齐）
       const conf = readConfigJsonForRmw(configPath)
       if (conf['defaultEngine'] === engineId) return
@@ -1336,7 +1357,7 @@ export class SessionRecords {
       )
     }
     const configPath = join(getPiAgentDir(), 'subagents', 'config.json')
-    withFileLockSync(configPath, () => {
+    withConfigLock(configPath, () => {
       // 无既有配置 / 坏 JSON / 非对象 → 新建（与 setSubagentDefaultEngine 同款取舍）
       const conf = readConfigJsonForRmw(configPath)
       // 既有偏好经 readGlobalConfig sanitize 后取用（用户手编脏条目不连坐合法偏好）；

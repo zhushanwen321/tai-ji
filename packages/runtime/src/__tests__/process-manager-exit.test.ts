@@ -241,7 +241,7 @@ describe('ProcessManager 信号取证环 restart 路径（MF-3）', () => {
     expect(psProbeCalls.count).toBeGreaterThan(0)
 
     const before = psProbeCalls.count
-    await vi.waitFor(() => expect(psProbeCalls.count).toBeGreaterThan(before))
+    await vi.waitFor(() => expect(psProbeCalls.count).toBeGreaterThan(before), { interval: 1 })
 
     // 重启路径：同 id 再 createSession → destroySession（受管清零 → 环停）→ 再 spawn。
     // 修复前：start 已在 destroy 前消费，环停在 destroy 尾部无人再 start，此后计数冻结，
@@ -249,7 +249,7 @@ describe('ProcessManager 信号取证环 restart 路径（MF-3）', () => {
     await pm.createSession('s1', '/project')
 
     const atRestartEnd = psProbeCalls.count
-    await vi.waitFor(() => expect(psProbeCalls.count).toBeGreaterThan(atRestartEnd))
+    await vi.waitFor(() => expect(psProbeCalls.count).toBeGreaterThan(atRestartEnd), { interval: 1 })
   })
 
   it('受管清零停环后心跳冻结；新 session 到来环再度启动（stop 后可再 start 的一般正确性）', async () => {
@@ -267,6 +267,6 @@ describe('ProcessManager 信号取证环 restart 路径（MF-3）', () => {
     // 新 session 到来 → start 再武装
     await pm.createSession('b', '/project')
     const atStart = psProbeCalls.count
-    await vi.waitFor(() => expect(psProbeCalls.count).toBeGreaterThan(atStart))
+    await vi.waitFor(() => expect(psProbeCalls.count).toBeGreaterThan(atStart), { interval: 1 })
   })
 })
