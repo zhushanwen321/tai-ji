@@ -111,7 +111,7 @@ describe("resolveAgentOpts schema prompt wording + M2 content passthrough", () =
       expect(content).not.toContain("value.");
       // Rules 首条同样是 object 根口径
       expect(content).toContain(
-        "- Call the structured-output tool with your result data as its arguments.",
+        "- Call the structured_output tool with your result data as its arguments.",
       );
       expect(content).not.toContain("{value: <your result data>}");
     });
@@ -130,10 +130,10 @@ describe("resolveAgentOpts schema prompt wording + M2 content passthrough", () =
       // 互斥：object 根专属文案不得出现
       expect(content).not.toContain("Your call arguments ARE the result data itself");
       expect(content).not.toContain(
-        "- Call the structured-output tool with your result data as its arguments.",
+        "- Call the structured_output tool with your result data as its arguments.",
       );
       // Rules 首条切换为包装口径
-      expect(content).toContain("- Call the structured-output tool with `{value: <your result data>}`.");
+      expect(content).toContain("- Call the structured_output tool with `{value: <your result data>}`.");
     });
 
     it("组合根（anyOf，可能接受非 object 值）→ 按非 object 包装口径", () => {
@@ -156,7 +156,7 @@ describe("resolveAgentOpts schema prompt wording + M2 content passthrough", () =
 // 锁定 formatSchemaInstruction 契约：构造 schema enforcement 的 MANDATORY 指令。
 // [审查项#2] 注入链变更：指令仅经 agent-opts-resolver 进 appendSystemPrompt
 // （ASP 单点），runSpawn 的 task + instruction 后缀拼接已删除——本测试随之改锁
-// resolver 导出的同名函数。一旦漏掉 "structured-output" 关键词或 JSON 序列化漂移，
+// resolver 导出的同名函数。一旦漏掉 "structured_output" 关键词或 JSON 序列化漂移，
 // schema 模式会静默失效——agent 可能直接把 JSON 写进文本响应。
 //
 // [审查项#4] 锁定 AP 告知句：注入侧校验用 additionalProperties:false 收窄后的
@@ -170,13 +170,13 @@ describe("formatSchemaInstruction", () => {
 
   it("contains the structured-output tool keyword", () => {
     const out = formatSchemaInstruction({ type: "object" });
-    expect(out).toContain("structured-output");
+    expect(out).toContain("structured_output");
   });
 
   it("emits a MANDATORY structured-output directive (not free-form JSON)", () => {
     const out = formatSchemaInstruction({ type: "object" });
     expect(out).toContain("MANDATORY");
-    expect(out).toContain("must be calling the `structured-output` tool");
+    expect(out).toContain("must be calling the `structured_output` tool");
     expect(out).toContain("Do NOT output JSON in your text response");
   });
 
@@ -218,7 +218,7 @@ describe("formatSchemaInstruction", () => {
         "## MANDATORY: Structured Output Requirement",
         "",
         "This task requires structured output.",
-        "Your FINAL action must be calling the `structured-output` tool.",
+        "Your FINAL action must be calling the `structured_output` tool.",
         "",
         "Your call arguments ARE the result data itself — the tool's parameter schema IS the required shape of your result.",
         "Your result must conform to this schema:",
@@ -227,10 +227,10 @@ describe("formatSchemaInstruction", () => {
         "```",
         "",
         "Rules:",
-        "- Call the structured-output tool with your result data as its arguments. The system validates them against the schema above automatically.",
-        "- Do NOT output JSON in your text response — use the structured-output tool.",
-        "- Do NOT skip this step. The structured-output call IS your result.",
-        "- Complete all other work FIRST, then call structured-output as the last action.",
+        "- Call the structured_output tool with your result data as its arguments. The system validates them against the schema above automatically.",
+        "- Do NOT output JSON in your text response — use the structured_output tool.",
+        "- Do NOT skip this step. The structured_output call IS your result.",
+        "- Complete all other work FIRST, then call structured_output as the last action.",
         "- Fields not defined in this schema are rejected — do not add extra fields.",
       ].join("\n"),
     );
@@ -241,7 +241,7 @@ describe("formatSchemaInstruction", () => {
     // 新口径双支柱必须共存：① 参数即数据（arguments ARE the data）② 必须调用工具
     expect(out).toContain("arguments ARE the result data itself");
     expect(out).toContain("parameter schema IS the required shape of your result");
-    expect(out).toContain("must be calling the `structured-output` tool");
+    expect(out).toContain("must be calling the `structured_output` tool");
     // 旧双参数警告语义不得回流（工具已是单参数形态，警告失去对象）
     expect(out).not.toMatch(/do NOT pass a .schema. parameter/i);
     expect(out).not.toContain("ONLY the `data` parameter");
@@ -279,7 +279,7 @@ describe("formatSchemaInstruction", () => {
 
   it("handles empty schema object", () => {
     const out = formatSchemaInstruction({});
-    expect(out).toContain("structured-output");
+    expect(out).toContain("structured_output");
     expect(out).toContain("{}");
   });
 
@@ -351,7 +351,7 @@ describe("M2 append-content probe (design.json TC1)", () => {
     const item = result.opts.appendSystemPrompt![0];
 
     // 内容语义：含 structured-output 关键词
-    expect(item).toContain("structured-output");
+    expect(item).toContain("structured_output");
     // 非路径：不匹配 /tmp 或 var/folders（M2 bug 旧实现 push 路径字符串）
     expect(item).not.toMatch(/\/tmp\/|\/var\/folders\//);
     // 不以 .md 结尾（路径特征）

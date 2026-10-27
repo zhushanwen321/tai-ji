@@ -201,7 +201,7 @@ function applyCarryoverRegression(tracked, entry, round) {
 // 错误信息带恢复动作是要求而非兜底。两处终判分支共用（结构化 error / 结果无效），
 // 追加到 finalMessage 末尾，文风对齐 fixer 终判既有「恢复动作：」格式
 //（错误 → 权威源 → 重试闭环）。
-const REVIEWER_RECOVERY_HINT = "；恢复动作：检查该 agent 的结构化返回链路——agent 定义 tools 白名单须放行 structured-output（受限 tools 会过滤 schema 工具致返回缺 must_fix）、引擎须支持 schema 结构化返回（旧引擎信封丢失形态同症）；修正后重跑 workflow";
+const REVIEWER_RECOVERY_HINT = "；恢复动作：检查该 agent 的结构化返回链路——agent 定义 tools 白名单须放行 structured_output（受限 tools 会过滤 schema 工具致返回缺 must_fix）、引擎须支持 schema 结构化返回（旧引擎信封丢失形态同症）；修正后重跑 workflow";
 
 // reviewer 解析失败的原位重试后缀（对齐 dev-merge-gates 同源机制 2026-09-30）：追加到
 // 原 prompt 重新派发一次——agent() 为一次性派发（无跨调用上下文），重试 = 增强提示重问；
@@ -1101,7 +1101,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         agentRoundResults.push({ name: def.name, must_fix: parsed.must_fix, suggestion: parsed.suggestion ?? 0, clean: agentAllClean });
       } else {
         // (b) 无 error + 值解析失败 → 直接终判（弱格式恢复已拆除）：tools 受限的 agent
-        //（如 tools: read）会过滤掉 structured-output → schema 失效，结果缺 must_fix；
+        //（如 tools: read）会过滤掉 structured_output → schema 失效，结果缺 must_fix；
         // 或旧引擎信封丢失形态（value 为多轮拼接文本）。结构化终止（MF-3），raw 完整
         // dump 便于定位。W8：当前轮条目落 batchRounds（phase 时长保留在时间线）；
         // F3：聚合未发生，mustFix/suggestion 未知非 0（null，消费侧 ?? "-" 兜底）。

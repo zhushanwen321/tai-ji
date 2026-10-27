@@ -74,7 +74,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
     });
     const msg = (payload as { content: string }).content;
     expect(msg).toContain("FAILED validation");
-    expect(msg).not.toContain("MUST call the structured-output tool");
+    expect(msg).not.toContain("MUST call the structured_output tool");
     expect(opts).toEqual({ deliverAs: "steer", triggerTurn: true });
   });
 

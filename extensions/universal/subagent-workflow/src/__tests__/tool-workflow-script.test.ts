@@ -556,7 +556,7 @@ describe("tool-workflow-script", () => {
   function captureScriptTool(registry: ReturnType<typeof makeRegistry>): ScriptResultToolView {
     return captureTool<ScriptResultToolView>(
       (pi) => registerWorkflowScriptTool(pi as never, registry as never, () => false),
-      "workflow-script",
+      "workflow_script",
     );
   }
 
@@ -571,7 +571,7 @@ describe("tool-workflow-script", () => {
   describe("workflow-script exposure 注册终态（C-ext-05）", () => {
     it("direct 常驻：不写 exposure 字段（SDK 缺省 direct）", () => {
       const tool = captureScriptExecuteTool();
-      expect(tool.name).toBe("workflow-script");
+      expect(tool.name).toBe("workflow_script");
       expect(tool.exposure).toBeUndefined();
     });
   });

@@ -32,6 +32,7 @@ import {
   createMockPi,
   FAILED_TOOL_END,
   loadExtension,
+  NESTED_SUCCESS_TOOL_END,
   restoreSchemaEnv,
   SCHEMA,
   SCHEMA_ENV_NAME,
@@ -277,7 +278,7 @@ describe("Workflow hook: structured-output failure retry", () => {
 
     expect(pi.sendMessage).toHaveBeenCalledTimes(1);
     const msg = (pi.sendMessage.mock.calls[0]![0] as { content: string }).content;
-    expect(msg).toContain("MUST call the structured-output tool");
+    expect(msg).toContain("MUST call the structured_output tool");
     expect(msg).not.toContain("FAILED validation");
     // 与 failed 分支对齐：断言 steer 关键文案（参数即数据，单参数口径）
     expect(msg).toContain("Your arguments ARE the data");
@@ -296,7 +297,7 @@ describe("Workflow hook: structured-output failure retry", () => {
 
     expect(pi.sendMessage).toHaveBeenCalledTimes(1);
     const msg = (pi.sendMessage.mock.calls[0]![0] as { content: string }).content;
-    expect(msg).toContain("MUST call the structured-output tool");
+    expect(msg).toContain("MUST call the structured_output tool");
     expect(msg).toContain("{value: <data>}");
     expect(msg).toContain("`value`");
     // object 根专属文案不得出现在非 object 根分支
@@ -311,6 +312,24 @@ describe("Workflow hook: structured-output failure retry", () => {
     await pi.emit("turn_end", turnEndPayload());
 
     expect(pi.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("nested success (codemode tools.xxx, toolCallId contains '/') does NOT count — still steers", async () => {
+    // 2026-10-27 fanout 事故形态：模型直调名字错（not found）→ 经 codemode 嵌套调用
+    // 成功 → 事件 toolName 相同、isError=false。嵌套结果 pi 不持久化，workflow 引擎
+    // 只采顶层 toolCalls——若记账，soSucceededEver 置位 → 不 steer → 父层判 never
+    // called。判定 = toolCallId 含 "/"（pi 嵌套管线 id 形态 callerId/序号）。
+    const pi = createMockPi();
+    await loadExtension(pi, SCHEMA);
+
+    await pi.emit("tool_execution_end", NESTED_SUCCESS_TOOL_END);
+    await pi.emit("turn_end", turnEndPayload());
+
+    // 嵌套成功不算数：turn_end 仍 steer，且文案引导直接调用
+    expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+    const msg = (pi.sendMessage.mock.calls[0]![0] as { content: string }).content;
+    expect(msg).toContain("MUST call the structured_output tool");
+    expect(msg).toContain("NOT via codemode");
   });
 
   it("stops steering after MAX_HOOK_RETRIES (=2) exhausted", async () => {
@@ -912,7 +931,7 @@ describe("index assembly fork (D1)", () => {
       description: string;
       parameters: unknown;
     };
-    expect(toolDef.name).toBe("structured-output");
+    expect(toolDef.name).toBe("structured_output");
     // 模型可见 parameters = 权威 schema + 根级 additionalProperties 注入（D4）
     expect(toolDef.parameters).toEqual({ ...authSchema, additionalProperties: false });
     // description 为单参数口径（模型首读信息源自洽，G1/G3）
@@ -954,7 +973,7 @@ describe("index assembly fork (D1)", () => {
       description: string;
       parameters: unknown;
     };
-    expect(toolDef.name).toBe("structured-output");
+    expect(toolDef.name).toBe("structured_output");
     // 日常变体：双参数 envelope（mock typebox 的 Type.Object 输出形态）
     expect(toolDef.parameters).toEqual({
       type: "object",

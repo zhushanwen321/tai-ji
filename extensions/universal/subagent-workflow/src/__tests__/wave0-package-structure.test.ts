@@ -87,7 +87,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
       expect(mounted.tools).toContain("subagent_batch");
       expect(mounted.tools).toContain("workflow_run");
       expect(mounted.tools).toContain("workflow_control");
-      expect(mounted.tools).toContain("workflow-script");
+      expect(mounted.tools).toContain("workflow_script");
       expect(mounted.tools.length).toBeGreaterThanOrEqual(7);
     });
 

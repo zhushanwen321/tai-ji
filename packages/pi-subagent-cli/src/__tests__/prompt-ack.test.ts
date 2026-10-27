@@ -59,9 +59,9 @@ describe("output-collector", () => {
 
     it("returns undefined when structured-output has no result.details", () => {
       const calls: ToolCall[] = [
-        { toolName: "structured-output", result: { content: [] } },
-        { toolName: "structured-output", result: {} },
-        { toolName: "structured-output" },
+        { toolName: "structured_output", result: { content: [] } },
+        { toolName: "structured_output", result: {} },
+        { toolName: "structured_output" },
       ];
       expect(extractParsedOutput(calls)).toBeUndefined();
     });
@@ -69,24 +69,41 @@ describe("output-collector", () => {
     it("returns details when exactly one structured-output call has details", () => {
       const calls: ToolCall[] = [
         { toolName: "bash" },
-        { toolName: "structured-output", result: { details: { answer: 42 } } },
+        { toolName: "structured_output", result: { details: { answer: 42 } } },
       ];
       expect(extractParsedOutput(calls)).toEqual({ answer: 42 });
     });
 
+    // 旧名（连字符，工具命名规范改下划线前）重放兼容：resume / 结果补收读旧 run 的
+    // session/journal 记录时 toolName 是旧名——读侧双名识别，不误判 never called。
+    it("recognizes legacy hyphen name 'structured-output' (old-run replay)", () => {
+      const calls: ToolCall[] = [
+        { toolName: "structured-output", result: { details: { legacy: true } } },
+      ];
+      expect(extractParsedOutput(calls)).toEqual({ legacy: true });
+    });
+
+    it("legacy-name replay also feeds describeMissingParsedOutput three-way attribution", () => {
+      const calls: ToolCall[] = [
+        { toolName: "structured-output", isError: true, result: { content: [{ type: "text", text: "validation boom" }] } },
+      ];
+      const detail = describeMissingParsedOutput(calls)!;
+      expect(detail).toContain("1 structured_output call(s) failed");
+    });
+
     it("returns the LAST structured-output details (reverse iteration)", () => {
       const calls: ToolCall[] = [
-        { toolName: "structured-output", result: { details: "first" } },
+        { toolName: "structured_output", result: { details: "first" } },
         { toolName: "bash" },
-        { toolName: "structured-output", result: { details: "second" } },
+        { toolName: "structured_output", result: { details: "second" } },
       ];
       expect(extractParsedOutput(calls)).toBe("second");
     });
 
     it("ignores isError structured-output calls without details, picks one with details", () => {
       const calls: ToolCall[] = [
-        { toolName: "structured-output", isError: true, result: { content: [{ type: "text", text: "bad" }] } },
-        { toolName: "structured-output", result: { details: { ok: true } } },
+        { toolName: "structured_output", isError: true, result: { content: [{ type: "text", text: "bad" }] } },
+        { toolName: "structured_output", result: { details: { ok: true } } },
       ];
       expect(extractParsedOutput(calls)).toEqual({ ok: true });
     });
@@ -97,15 +114,15 @@ describe("output-collector", () => {
     it("skips failed structured-output call with details:{} (isError=true) — no parsedOutput", () => {
       const calls: ToolCall[] = [
         { toolName: "bash", result: { content: [] } },
-        { toolName: "structured-output", isError: true, result: { details: {}, content: [{ type: "text", text: "Schema validation failed: /target is required" }] } },
+        { toolName: "structured_output", isError: true, result: { details: {}, content: [{ type: "text", text: "Schema validation failed: /target is required" }] } },
       ];
       expect(extractParsedOutput(calls)).toBeUndefined();
     });
 
     it("skips failed call with details, still picks later valid call (reverse order)", () => {
       const calls: ToolCall[] = [
-        { toolName: "structured-output", isError: true, result: { details: {} } },
-        { toolName: "structured-output", result: { details: { fixed: true } } },
+        { toolName: "structured_output", isError: true, result: { details: {} } },
+        { toolName: "structured_output", result: { details: { fixed: true } } },
       ];
       expect(extractParsedOutput(calls)).toEqual({ fixed: true });
     });
@@ -113,7 +130,7 @@ describe("output-collector", () => {
     it("isError on non-structured-output calls does not affect extraction", () => {
       const calls: ToolCall[] = [
         { toolName: "bash", isError: true, result: { details: "ignored" } },
-        { toolName: "structured-output", result: { details: { answer: 1 } } },
+        { toolName: "structured_output", result: { details: { answer: 1 } } },
       ];
       expect(extractParsedOutput(calls)).toEqual({ answer: 1 });
     });
@@ -126,19 +143,19 @@ describe("output-collector", () => {
   describe("describeMissingParsedOutput", () => {
     it("returns undefined when a valid parsedOutput exists", () => {
       const calls: ToolCall[] = [
-        { toolName: "structured-output", isError: true, result: { details: {} } },
-        { toolName: "structured-output", result: { details: { ok: 1 } } },
+        { toolName: "structured_output", isError: true, result: { details: {} } },
+        { toolName: "structured_output", result: { details: { ok: 1 } } },
       ];
       expect(describeMissingParsedOutput(calls)).toBeUndefined();
     });
 
     it("state 1: validation failure — isError calls present, error carries last summary", () => {
       const calls: ToolCall[] = [
-        { toolName: "structured-output", isError: true, result: { details: {}, content: [{ type: "text", text: "Schema validation failed: /target is required" }] } },
+        { toolName: "structured_output", isError: true, result: { details: {}, content: [{ type: "text", text: "Schema validation failed: /target is required" }] } },
       ];
       const msg = describeMissingParsedOutput(calls);
       expect(msg).toContain("failed");
-      expect(msg).toContain("1 structured-output call(s) failed");
+      expect(msg).toContain("1 structured_output call(s) failed");
       expect(msg).toContain("Schema validation failed: /target is required");
     });
 
@@ -148,13 +165,13 @@ describe("output-collector", () => {
         { toolName: "read", result: { content: [] } },
       ];
       const msg = describeMissingParsedOutput(calls);
-      expect(msg).toContain("structured-output tool was never called");
+      expect(msg).toContain("structured_output tool was never called");
       expect(msg).toContain("structured-output extension is installed");
     });
 
     it("state 3: SO called successfully but no details", () => {
       const calls: ToolCall[] = [
-        { toolName: "structured-output", result: { content: [] } },
+        { toolName: "structured_output", result: { content: [] } },
       ];
       const msg = describeMissingParsedOutput(calls);
       expect(msg).toContain("none of the successful calls carried result details");
@@ -167,7 +184,7 @@ describe("output-collector", () => {
     it("summary truncates long error text (300 chars cap)", () => {
       const longText = "x".repeat(500);
       const calls: ToolCall[] = [
-        { toolName: "structured-output", isError: true, result: { details: {}, content: [{ type: "text", text: longText }] } },
+        { toolName: "structured_output", isError: true, result: { details: {}, content: [{ type: "text", text: longText }] } },
       ];
       const msg = describeMissingParsedOutput(calls);
       expect(msg).toContain("...");
@@ -179,8 +196,8 @@ describe("output-collector", () => {
     it("messages avoid STALE_CONTEXT_PATTERNS substrings (no false stale-context triage)", () => {
       const samples = [
         describeMissingParsedOutput([])!,
-        describeMissingParsedOutput([{ toolName: "structured-output", isError: true, result: { details: {} } }])!,
-        describeMissingParsedOutput([{ toolName: "structured-output", result: { content: [] } }])!,
+        describeMissingParsedOutput([{ toolName: "structured_output", isError: true, result: { details: {} } }])!,
+        describeMissingParsedOutput([{ toolName: "structured_output", result: { content: [] } }])!,
       ];
       for (const msg of samples) {
         const lower = msg.toLowerCase();
@@ -199,7 +216,7 @@ describe("output-collector", () => {
     describe("F-R1: 态2 错误摘要 STALE_CONTEXT_PATTERNS 中和", () => {
       function failedSoCallsWith(text: string): ToolCall[] {
         return [
-          { toolName: "structured-output", isError: true, result: { details: {}, content: [{ type: "text", text }] } },
+          { toolName: "structured_output", isError: true, result: { details: {}, content: [{ type: "text", text }] } },
         ];
       }
 
@@ -230,7 +247,7 @@ describe("output-collector", () => {
 
       it("无动态内容时整条归因也不命中（防御回归锁定）", () => {
         const msg = describeMissingParsedOutput([
-          { toolName: "structured-output", isError: true, result: { details: {} } },
+          { toolName: "structured_output", isError: true, result: { details: {} } },
         ])!;
         expect(isStaleContextErrorMsg(msg)).toBe(false);
       });
@@ -247,7 +264,7 @@ describe("output-collector", () => {
     describe("F-R4: 态2 失败原因分类", () => {
       it("最后错误含 'validation failed'（大小写不敏感）→ (schema validation)", () => {
         const calls: ToolCall[] = [
-          { toolName: "structured-output", isError: true, result: { details: {}, content: [{ type: "text", text: "Schema validation failed: /target is required" }] } },
+          { toolName: "structured_output", isError: true, result: { details: {}, content: [{ type: "text", text: "Schema validation failed: /target is required" }] } },
         ];
         const msg = describeMissingParsedOutput(calls)!;
         expect(msg).toContain("(schema validation)");
@@ -256,7 +273,7 @@ describe("output-collector", () => {
 
       it("最后错误为非校验失败（如 provider 错误）→ (execution failure)", () => {
         const calls: ToolCall[] = [
-          { toolName: "structured-output", isError: true, result: { details: {}, content: [{ type: "text", text: "provider socket hang up" }] } },
+          { toolName: "structured_output", isError: true, result: { details: {}, content: [{ type: "text", text: "provider socket hang up" }] } },
         ];
         const msg = describeMissingParsedOutput(calls)!;
         expect(msg).toContain("(execution failure)");
@@ -284,7 +301,7 @@ describe("output-collector", () => {
 
     it("态② isError/schema validation 子类 → error 以确定性标记开头（不可重试）", () => {
       const msg = describeMissingParsedOutput([
-        { toolName: "structured-output", isError: true, result: { details: {}, content: [{ type: "text", text: "Schema validation failed: /target is required" }] } },
+        { toolName: "structured_output", isError: true, result: { details: {}, content: [{ type: "text", text: "Schema validation failed: /target is required" }] } },
       ])!;
       expect(msg.startsWith(DETERMINISTIC_SCHEMA_FAILURE_PREFIX)).toBe(true);
       expect(isDeterministicSchemaFailureMsg(msg)).toBe(true);
@@ -292,21 +309,21 @@ describe("output-collector", () => {
 
     it("态② execution failure 子类（provider 瞬态）同样带标记（isError 态整体不重试）", () => {
       const msg = describeMissingParsedOutput([
-        { toolName: "structured-output", isError: true, result: { details: {}, content: [{ type: "text", text: "provider socket hang up" }] } },
+        { toolName: "structured_output", isError: true, result: { details: {}, content: [{ type: "text", text: "provider socket hang up" }] } },
       ])!;
       expect(isDeterministicSchemaFailureMsg(msg)).toBe(true);
     });
 
     it("态③ 调用过但无 details → 不带标记（可重试语义保留）", () => {
       const msg = describeMissingParsedOutput([
-        { toolName: "structured-output", result: { content: [] } },
+        { toolName: "structured_output", result: { content: [] } },
       ])!;
       expect(isDeterministicSchemaFailureMsg(msg)).toBe(false);
     });
 
     it("有有效 parsedOutput → 无归因无标记（不适用矩阵）", () => {
       expect(
-        describeMissingParsedOutput([{ toolName: "structured-output", result: { details: { ok: 1 } } }]),
+        describeMissingParsedOutput([{ toolName: "structured_output", result: { details: { ok: 1 } } }]),
       ).toBeUndefined();
     });
 
@@ -344,7 +361,7 @@ describe("output-collector", () => {
 
     it("schemaExpected + failed SO call (details:{}) + success=true → success=false + error attributed", () => {
       const record = makeRecordWithCalls([
-        { toolName: "structured-output", isError: true, result: { details: {}, content: [{ type: "text", text: "validation boom" }] } },
+        { toolName: "structured_output", isError: true, result: { details: {}, content: [{ type: "text", text: "validation boom" }] } },
       ]);
       const result = collectOutcome(record, { ...baseArgs, success: true, error: undefined, schemaExpected: true });
       expect(result.success).toBe(false);
@@ -361,7 +378,7 @@ describe("output-collector", () => {
 
     it("schemaExpected + valid details → success preserved (S3 e2e semantics no regression)", () => {
       const record = makeRecordWithCalls([
-        { toolName: "structured-output", result: { details: { answer: 42 } } },
+        { toolName: "structured_output", result: { details: { answer: 42 } } },
       ]);
       const result = collectOutcome(record, { ...baseArgs, success: true, error: undefined, schemaExpected: true });
       expect(result.success).toBe(true);
@@ -385,7 +402,7 @@ describe("output-collector", () => {
 
     it("[MF-1] F-1 标注的 error 携带确定性标记（流到 executeAgentCall 即不可重试）", () => {
       const record = makeRecordWithCalls([
-        { toolName: "structured-output", isError: true, result: { details: {}, content: [{ type: "text", text: "Schema validation failed: /target is required" }] } },
+        { toolName: "structured_output", isError: true, result: { details: {}, content: [{ type: "text", text: "Schema validation failed: /target is required" }] } },
       ]);
       const result = collectOutcome(record, { ...baseArgs, success: true, error: undefined, schemaExpected: true });
       expect(result.success).toBe(false);
@@ -481,7 +498,7 @@ describe("output-collector", () => {
 
     it("态③归因（调用过但无 details）→ agent.no_deliverable + observations（分类面承接，failureKind 退役）", () => {
       const record = makeRecordWithCalls([
-        { toolName: "structured-output", result: { content: [] } },
+        { toolName: "structured_output", result: { content: [] } },
       ]);
       const result = collectOutcome(record, { ...baseArgs, success: true, error: undefined, schemaExpected: true });
       expect(result.success).toBe(false);

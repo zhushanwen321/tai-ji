@@ -303,7 +303,7 @@ export function registerWorkflowTool(
       "Refs come from <available_workflows>; for parameter details read the <location> script file (@pi-meta header: parameters + usage + phases).",
       "Call shape (JSON): {\"name\":\"<script>\",\"args\":{...}} (+ optional tokens/time/model/thinkingLevel).",
       "Anti-patterns: flattening args sub-fields (task/items/...) to the top level — they belong inside args.",
-      "CRITICAL: for orchestration patterns ALWAYS use workflow_run with the listed workflow's <location> path — NEVER use workflow-script action:generate to recreate covered patterns; generate is ONLY for novel patterns.",
+      "CRITICAL: for orchestration patterns ALWAYS use workflow_run with the listed workflow's <location> path — NEVER use workflow_script action:generate to recreate covered patterns; generate is ONLY for novel patterns.",
     ],
     parameters: WorkflowRunParams,
 

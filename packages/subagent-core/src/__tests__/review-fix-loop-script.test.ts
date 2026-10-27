@@ -733,7 +733,7 @@ describe("review-fix-loop.js 结构化失败终判恢复指引锚点", () => {
   it("恢复指引常量单一声明 + 语义覆盖结构化链路检查动作与重试闭环", () => {
     expect(WORKFLOW_SOURCE).toContain("const REVIEWER_RECOVERY_HINT = ");
     // 语义三要素：tools 白名单检查（受限 tools 过滤 schema 工具）/ 引擎 schema 支持 / 重跑闭环
-    expect(WORKFLOW_SOURCE).toContain("tools 白名单须放行 structured-output");
+    expect(WORKFLOW_SOURCE).toContain("tools 白名单须放行 structured_output");
     expect(WORKFLOW_SOURCE).toContain("schema 结构化返回");
     expect(WORKFLOW_SOURCE).toContain("重跑 workflow");
   });

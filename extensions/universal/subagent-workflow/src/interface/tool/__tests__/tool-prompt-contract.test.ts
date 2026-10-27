@@ -812,7 +812,7 @@ describe("tool-prompt-contract", () => {
       // LLM 需要知道"先 list 再 run"的发现路径——两个 tool 之间必须有交叉引用。
       // 「action:list 先行」的教学落点在 workflow-script 侧 guidelines（拆分后 run 侧
       // 无 list 语义）；run 侧锁 generate 禁令交叉引用。
-      expect(RUN_SECTION).toContain("workflow-script");
+      expect(RUN_SECTION).toContain("workflow_script");
     });
 
     it("workflow_run promptGuidelines 含 run 正例（无 action 键的拆分形态）", () => {
@@ -862,7 +862,7 @@ describe("tool-prompt-contract", () => {
     it("workflow_run promptGuidelines 强化 anti-generate（直接 run，不要 generate）", () => {
       // session 证据：弱模型看到 workflow list 后倾向 workflow-script generate 而非直接 run。
       // 提示词必须显式禁止对内置编排使用 generate。
-      expect(TOOL_WORKFLOW_SRC).toContain("NEVER use workflow-script action:generate");
+      expect(TOOL_WORKFLOW_SRC).toContain("NEVER use workflow_script action:generate");
     });
 
     it("tool-workflow-script.ts promptGuidelines 强化 anti-generate（CRITICAL ANTI-PATTERN）", () => {

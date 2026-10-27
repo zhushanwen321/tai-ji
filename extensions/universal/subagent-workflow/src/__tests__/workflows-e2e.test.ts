@@ -2399,7 +2399,7 @@ describe("review-fix-loop-e2e", () => {
     /** F-1 形态 error 哨兵：前缀逐字 = 引擎 SSOT 常量 + failureKind 分类段（对齐
    *  真实引擎确定性失败形态）。 */
     const F1_ERROR = DETERMINISTIC_SCHEMA_FAILURE_PREFIX
-      + " failureKind=schema_mismatch (structured-output tool absent) — mock F-1 sentinel";
+      + " failureKind=schema_mismatch (structured_output tool absent) — mock F-1 sentinel";
 
     /** 从 review prompt 的 "Write report to: <roundDir>/<report>.md" 行解析 roundDir。 */
     function roundDirFromReviewPrompt(prompt: string): string {
@@ -2468,7 +2468,7 @@ describe("review-fix-loop-e2e", () => {
         expect(outcome.message).toContain("审查 agent 调用失败 reviewer");
         expect(outcome.message).toContain(DETERMINISTIC_SCHEMA_FAILURE_PREFIX);
         expect(outcome.message).toContain("恢复动作");
-        expect(outcome.message).toContain("structured-output");
+        expect(outcome.message).toContain("structured_output");
         expect(outcome.message).toContain("[UNRESOLVED]");
         // fail-fast 立即收敛：R2 未派发（review 恰 1 次）、聚合/修复未发生
         const { kinds } = runner.stats();

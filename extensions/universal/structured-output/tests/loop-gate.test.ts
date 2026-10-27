@@ -47,7 +47,7 @@ afterEach(() => {
 describe("WorkflowGate state machine (D3, hard-kill side of the D2 unified machine)", () => {
 	it("① 同签名计数递增：连续同签名失败 1→2 未达阈值不 terminal", () => {
 		const gate = new WorkflowGate();
-		const err = 'Validation failed for tool "structured-output":\n  - magic: must be equal to constant';
+		const err = 'Validation failed for tool "structured_output":\n  - magic: must be equal to constant';
 		expect(gate.onToolExecEnd(true, err)).toEqual({ terminal: false, newlyTerminal: false });
 		expect(gate.consecutiveFailures).toBe(1);
 		expect(gate.onToolExecEnd(true, err)).toEqual({ terminal: false, newlyTerminal: false });
@@ -347,7 +347,7 @@ describe("additionalProperties 渐进删除签名区分（AP 回归：D4 默认�
 	});
 
 	it("回显段 JSON 损坏 / 非 plain object → keys 不贡献，退化为错误行块口径（解析失败降级）", () => {
-		const errorOnly = `Validation failed for tool "structured-output":\n${AP_ERROR_LINE}`;
+		const errorOnly = `Validation failed for tool "structured_output":\n${AP_ERROR_LINE}`;
 		// 截断损坏的回显段：JSON.parse 失败 → 跳过 keys，与无回显段同签名
 		const corrupted = `${errorOnly}\n\nReceived arguments:\n{"summary": "trunca`;
 		expect(normalizeErrorSignature(corrupted)).toBe(normalizeErrorSignature(errorOnly));
@@ -476,7 +476,7 @@ describe("AP marker 精确化（R4-F3：行级固定文案，子串版伪触发�
 	it("message 位含 AP 字样但非完整固定文案收尾 → 不触发（整句匹配非子串）", () => {
 		// 行尾是 "…inside" 而非固定文案收束：旧子串版会伪触发，精确版不触发
 		const notAp = paramLayerErrorText("  - config: must not have additional properties inside", "{}");
-		const noEcho = "Validation failed for tool \"structured-output\":\n  - config: must not have additional properties inside";
+		const noEcho = "Validation failed for tool \"structured_output\":\n  - config: must not have additional properties inside";
 		expect(normalizeErrorSignature(notAp)).toBe(normalizeErrorSignature(noEcho));
 	});
 

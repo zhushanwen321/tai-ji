@@ -100,8 +100,8 @@ export function formatSchemaInstruction(schema: Record<string, unknown>): string
       "Validation errors may reference paths starting with `value.` (e.g. `value.0`, `value.name`): " +
       "that prefix addresses the wrapper, not your data.";
   const rulesCallLine = isObjectRoot
-    ? "- Call the structured-output tool with your result data as its arguments. The system validates them against the schema above automatically."
-    : "- Call the structured-output tool with `{value: <your result data>}`. The system validates the `value` field against the schema above automatically.";
+    ? "- Call the structured_output tool with your result data as its arguments. The system validates them against the schema above automatically."
+    : "- Call the structured_output tool with `{value: <your result data>}`. The system validates the `value` field against the schema above automatically.";
   // [AP 告知条件化] 根级 additionalProperties 未声明时 D4 注入 false（见
   // structured-output tool-definition）——额外字段恒拒绝，强承诺成立；作者显式声明
   // true / 子 schema 时 injection 侧尊重不动，额外字段按作者声明放行，无条件
@@ -113,7 +113,7 @@ export function formatSchemaInstruction(schema: Record<string, unknown>): string
     "## MANDATORY: Structured Output Requirement",
     "",
     "This task requires structured output.",
-    "Your FINAL action must be calling the `structured-output` tool.",
+    "Your FINAL action must be calling the `structured_output` tool.",
     "",
     argsContractLine,
     `Your result must conform to this schema:`,
@@ -123,9 +123,9 @@ export function formatSchemaInstruction(schema: Record<string, unknown>): string
     "",
     "Rules:",
     rulesCallLine,
-    "- Do NOT output JSON in your text response — use the structured-output tool.",
-    "- Do NOT skip this step. The structured-output call IS your result.",
-    "- Complete all other work FIRST, then call structured-output as the last action.",
+    "- Do NOT output JSON in your text response — use the structured_output tool.",
+    "- Do NOT skip this step. The structured_output call IS your result.",
+    "- Complete all other work FIRST, then call structured_output as the last action.",
     apLine,
   ].join("\n");
 }
