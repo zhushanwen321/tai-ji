@@ -1111,7 +1111,7 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **决策**：九条。
 
-1. **实例标识与目标快照单一权威**（§6.1）：runtime 子进程每次 spawn 时 supervisor 与 token 同点签发 runtimeId（8 字节 hex）并经 env `TAIJI_RUNTIME_ID` 注入；连接目标统一为快照 `{seq, runtimeId, port, token}`——seq 随 spawn 成功单调递增（失败半途清理不消耗代数），端口文件与 IPC 推送均承载快照而非裸端口。auth 成功应答回传 runtimeId（`{ok:true, runtimeId}`），连接控制器与期望快照核对「连的是谁」，不一致 fail-fast（streak 计数 + 重拉快照，禁静默续用）。旧客户端只读 `payload.ok` 不受影响（多余字段无消费者）。
+1. **实例标识与目标快照单一权威**（§6.1）：runtime 子进程每次 spawn 时 supervisor 与 token 同点签发 runtimeId（8 字节 hex）并经 env `TAIJI_RUNTIME_ID` 注入；连接目标统一为快照 `{seq, runtimeId, port, token}`——seq 随 spawn 成功单调递增（失败半途清理不消耗代数），连接目标 IPC 通道（快照读口与推送）承载快照而非裸端口。磁盘端口文件（runtime.port）不在连接目标通道内，仍写裸端口数字，消费方是 CLI 端口发现与单实例互斥判活（`packages/runtime/src/cli/port-discovery.ts` / `src/infra/single-instance-guard.ts`），renderer 连接不读它。auth 成功应答回传 runtimeId（`{ok:true, runtimeId}`），连接控制器与期望快照核对「连的是谁」，不一致 fail-fast（streak 计数 + 重拉快照，禁静默续用）。旧客户端只读 `payload.ok` 不受影响（多余字段无消费者）。
 2. **删除备用端口猜连**（§6.2）：`resolveFallbackPort` 链及其唯一消费通道 `get-runtime-port-offset` IPC 同批删除；权威目标确认前不连接、不初始化——init 拉取快照为 null 即进 waiting-runtime 等待态（连接状态词表新增该态，与「连接中…」显式区分），快照经拉取或推送到达即转 connecting。HMR 重连改为重拉快照连接。
 3. **唯一连接控制器按目标比较裁决**（§6.3）：4 处 runtime-port 广播点统一改推快照（同 channel 载荷升级）；`use-connection.ts` 收敛为裁决表——同 seq 不动作；seq 更高或期望未建立且未认证 → 断旧连新；auth 拒绝 → 重拉快照换凭据重连；实例变更（新 runtimeId）必经断连→connected 边沿。终端域 `getCurrentToken` 世代判据语义与调用点不变（回归项，真机验收覆盖）。
 4. **连接边沿统一域同步器**（§6.4）：`connection-edge-sync.ts`（core，headless：零 DOM/零 store import）以 `DomainSyncDescriptor` 声明式登记数据域（project/sessions/workspace）与辅助刷新层；连接边沿（首次认证成功、每次重连认证成功）触发登记域同步，取代「initApp 一次性编排 + 重连分支逐域手写」两套。机制约束：并发合流（同域同时刻至多一个在途）、仅最新代提交（连接代单调计数，旧代回执丢弃并在丢弃点补发）、每域首次落定 promise（启动编排消费——initApp 等 project 域落定后才进落地页）、命令×同步交错判据（project 域在途 load 回执携带的 revision 早于 store 已提交值时按过时丢弃 + 补发，防旧快照回滚命令结果）。workspace 域失败语义由「置空」改为「失败保留旧值」（显式行为改进）。
@@ -1119,7 +1119,7 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 6. **project 写通道命令化，runtime 唯一写入口**（§6.6）：四命令（createProject/renameProject/removeProject/setActiveProject）经 runtime 串行队列执行，revision 水位校验（失配抛 `project_revision_mismatch`），成功回执 = 归一化后完整新状态 + revision 新值，并广播 `project.changed` 失效信号（各窗口据此重拉）；存量文件无 revision 字段按 0 读、首写补 1；归一化为读时修复（load 只改回执视图不写盘）。旧 `project.save` 端点 + payload/reply 映射 + core save 封装 + mock 实现 + 前端 localStorage legacy 迁移同批拆除（全仓 grep 零命中）。
 7. **分组派生按加载状态降级**（§6.7）：分组区三形态——loaded 正常渲染；无数据形态（idle 或从未成功过的 loading）渲染加载占位（禁把兜底默认表渲染成「只有一个空默认组」——本次事故可见症状）；failed 整体替换为失败状态条（原因 + 重试钮）；重拉子形态（loaded→loading）保留最后已知分组（缓存视图更新时机构造性成立）。
 8. **连接状态词表新增 waiting-runtime**（§6.8）：见决策 2；App.vue 非连接态四分支（waiting-runtime / restarting / failed / 过渡屏）显式分呈。
-9. **加载失败期间禁用项目编辑**（§6.9）：编辑入口（新建项目 + 组头动作）在无有效数据形态（failed / 无回执的 loading）置灰并带原因提示；store 层二次检查（入队与执行时双检 loaded + revision 非空）保底。失败窗口内首发会话归入未分组（projectId 空），数据恢复后不被追溯改动。
+9. **加载失败期间禁用项目编辑**（§6.9）：无有效数据形态（failed / 无回执的 loading）下编辑入口不可用——区头新建「+」显式置灰带原因提示，组头动作（重命名/删除/锚定切换/默认区新建）随 §6.7 分组区三形态替换构造性不可达（入口不渲染）；store 层二次检查（入队与执行时双检 loaded + revision 非空）保底。失败窗口内首发会话归入未分组（projectId 空），数据恢复后不被追溯改动。
 
 **不采用**：保留备用端口猜连做 dev 延迟启动兜底（猜测公式是双轨端口源，冷启分组丢失的直接触发路径）；前端 localStorage 继续做 project 写通道（双写无水位，并发互相覆盖的根因）；用时间窗/平抑逻辑掩盖瞬态（ADR-0122：删后数据仍最终一致 = 补偿补丁删之）；恢复读文件/轮询表模拟实时（存储只做恢复源）。
 

@@ -806,7 +806,7 @@ lsof -ti :<runtimePort> -P -sTCP:LISTEN   # runtime PID（勿用不带 -sTCP:LIS
 ps eww -p <runtimePid> | tr ' ' '\n' | grep TAIJI_RUNTIME_ID
 ```
 
-**症状一：侧栏项目分组区显示失败状态条（`project-load-failed-bar`）**——project 域加载失败（RPC 兜底 65s 超时 / 错误信封 / runtime 不可用）。条上带原因与重试钮；连接边沿恢复或点重试即重新拉取。判定看 `<数据目录>/logs/renderer-console-*.log` 的 `[project-store] project load failed` 行（含真因）。**失败期间编辑入口置灰是设计行为**（§6.9：无有效数据形态禁写），不是卡死。
+**症状一：侧栏项目分组区显示失败状态条（`project-load-failed-bar`）**——project 域加载失败（RPC 兜底 65s 超时 / 错误信封 / runtime 不可用）。条上带原因与重试钮；连接边沿恢复或点重试即重新拉取。判定看 `<数据目录>/logs/renderer-console-*.log` 的 `[project-store] project load failed` 行（含真因）。**失败期间项目编辑入口不可达是设计行为**（§6.9：无有效数据形态禁写——失败状态条整体替换分组区，重命名/删除/锚定入口不渲染，仅区头新建「+」呈置灰），不是卡死。
 
 **症状二：项目操作报 `project_revision_mismatch`**——命令携带的 revision 与文件当前水位不一致（多窗口/旧状态）。恢复 = 重新 `project.load` 取最新状态与 revision 后重试；双窗口并发由 runtime 串行队列 + revision 校验保证不互相覆盖，后至命令被拒是**设计内保护**（窗口经 `project.changed` 广播自动重拉收敛）。
 

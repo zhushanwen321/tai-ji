@@ -15,16 +15,16 @@
 ```
 渲染进程
   ├─ WebSocket (ws-client)  → Runtime   业务/数据（session/config/model/plugin...）
-  └─ IPC (electronAPI)       → Main     系统/窗口/进程生命周期（getRuntimePort, createWindow...）
+  └─ IPC (electronAPI)       → Main     系统/窗口/进程生命周期（getRuntimeTargetSnapshot, createWindow...）
 ```
 
-最关键的隐式契约是**启动时序**：渲染进程必须先经 IPC 向 Main 取 runtime 端口，才能连 WS。
+最关键的隐式契约是**启动时序**：渲染进程必须先经 IPC 向 Main 拉取连接目标快照（`{seq, runtimeId, port, token}`，ADR-0167），才能连 WS。
 
 **Main 进程的 3 个真实职责**（原架构统称「Electron 壳」，掩盖了它的重量）：
 
 | 子系统 | 职责 | 对应 IPC API |
 |--------|------|-------------|
-| **M1 Process Supervisor** | Runtime 子进程的 spawn/kill/端口发现/健康检查 | `getRuntimePort`、`onRuntimePort`、`onRuntimeError` |
+| **M1 Process Supervisor** | Runtime 子进程的 spawn/kill/端口发现/健康检查，持有连接目标快照单一权威 | `getRuntimeTargetSnapshot`、`onRuntimePort`（载荷 = 快照）、`onRuntimeError` |
 | **M2 Window Manager** | 原生窗口创建/聚焦/销毁 + 跨窗口注册表 | `createWindow`、`getWindows`、`focusWindow` |
 | **M3 OS Gateway** | 需要 OS 特权的原语：对话框、外链、快捷键、全屏 | `pickDirectory`、`openExternal`、`onShortcut` |
 
@@ -35,12 +35,14 @@
 ```
 1. Main 启动
 2. Main 创建 BrowserWindow（渲染进程立即可见）
-3. RuntimeManager spawn Runtime 子进程（后台，端口探测 BASE_PORT..+10）
+3. RuntimeManager spawn Runtime 子进程（后台，supervisor 探测可用端口 BASE_PORT..+10）
 4. 渲染进程启动 → 连接初始化
-5. 渲染进程注册 onRuntimePort 监听器（Runtime 重启后重连）
-6. 渲染进程 IPC getRuntimePort() → connect WS(port)
-7. WS 连通 → 业务就绪
-8. （运行期）Runtime 重启 → Main 经 onRuntimePort 推新端口 → 渲染进程重连
+5. 渲染进程注册 onRuntimePort 监听器（载荷 = 连接目标快照；Runtime 重启后重连）
+6. 渲染进程 IPC getRuntimeTargetSnapshot() 拉取快照 → null = runtime 未就绪，
+   进 waiting-runtime 等待态（不连接）；快照到达（拉取/推送）→ connect WS（快照 port/token）
+7. WS 连通（auth 核对 runtimeId）→ 业务就绪
+8. （运行期）Runtime 重启 → Main 经 onRuntimePort 推新快照 → 渲染进程按目标
+   比较裁决表消费（seq 更高 → 断旧连新；ADR-0167 决策 3）
 ```
 
 **理由**：端口发现链路是「runtime 崩溃自愈」「多实例端口隔离」「热重启」的前提；把 Main 的 3 个职责命名出来后，「Electron 壳不放业务逻辑」才可检查——Window Manager 持有的窗口注册表是领域状态而非壳。

@@ -36,7 +36,7 @@
 - **② WebSocket 边界**：主进程用 `ELECTRON_RUN_AS_NODE=1` spawn Runtime 为独立 Node 进程，前端通过 WS 与之双向通信。ServerMessage 流式回推（pi 的 assistant 输出、工具调用、文件变更等）。Runtime 监听姿态：默认绑定 `127.0.0.1`（纯回环，唯一客户端 = 桌面 renderer）；远程访问开启后改绑 `0.0.0.0` 并在同一端口同源托管移动壳构建产物（手机浏览器接入，remote token 鉴权集合，开启信号 = supervisor 拼参 argv `--remote-access`）。术语与机制详见 [CONTEXT.md](CONTEXT.md)「远程访问」词条。
 - **③ subagent 引擎进程层**：托管态（runtime 存活）下引擎进程 spawn 权归 runtime（subagent control server），extension 经 control socket 发 `hello`/`engine_open` 并搬运 engine-protocol v1 帧；standalone（无 control env）由 extension local spawn——pi 引擎两层嵌套（subagent-core → `pi-subagent-cli` 引擎 CLI → pi 任务子进程）；zcode 引擎常驻 app-server 子进程（spawn env 覆写 `ZCODE_SESSION_DB_PATH`，会话库隔离 `<engineDataDir>/engines/zcode/session-db/`，不进 ZCode GUI 侧边栏）。设计见 [zcode-engine-appserver-resident.md](architecture/zcode-engine-appserver-resident.md) / [zcode-session-db-isolation.md](architecture/zcode-session-db-isolation.md)，结构导航见 [subagents 架构](extensions/subagents/architecture.md)。
 
-**组合根与启动时序契约**：renderer 经 API Client（`renderer/src/api/`）统一门面访问两条通道，对组件屏蔽走哪条。启动时序必须显式守护：Main createWindow（先）→ runtimeManager.start()（后）→ renderer init → IPC getRuntimePort() → connect WS → 业务就绪。Runtime 重启经 `onRuntimePort` 推新端口触发重连。
+**组合根与启动时序契约**：renderer 经 API Client（`renderer/src/api/`）统一门面访问两条通道，对组件屏蔽走哪条。启动时序必须显式守护：Main createWindow（先）→ runtimeManager.start()（后）→ renderer init → IPC `getRuntimeTargetSnapshot()` 拉取连接目标快照（null = runtime 未就绪，进 waiting-runtime 等待态，不连接）→ 快照到达（拉取/推送）→ connect WS（快照 port/token，auth 核对 runtimeId）→ 业务就绪。Runtime 重启经 `onRuntimePort` 推新快照触发重连（按目标比较裁决表消费，[ADR-0167](adr/decisions.md)）。
 
 ## 渲染进程（renderer）
 

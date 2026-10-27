@@ -37,10 +37,6 @@ const HTTP_OK = 200
 const HTTP_NOT_FOUND = 404
 /** WS 1001 Going Away（RFC 6455）——服务端计划内关停时发给全部存量连接的 close 码。 */
 const WS_CLOSE_GOING_AWAY = 1001
-/**
- * stop 等待存量连接优雅退出的有界上界：本机回环 close 握手毫秒级，2s = 20 倍极端余量，
- * 正常路径不触发；超时后 closeAllConnections 强制断开属回收层兜底（非正常路径依赖）。
- */
 /** WS policy violation 关闭码（RFC 6455）——auth 失败 / fail-closed 拒绝统一用它。 */
 const WS_CLOSE_POLICY_VIOLATION = 1008
 
@@ -121,7 +117,6 @@ export class ConnectionManager {
   private wss: WebSocketServer
   /** 连接池（仅 authed 连接）——broker.broadcast 遍历此集合向所有客户端推送。 */
   readonly clients = new Set<WsType>()
-  /** 未认证连接的握手超时计时器（auth 成功/连接关闭时清除）。 */
   /** 已通过 auth 的连接集合（与 clients 池同步维护）。 */
   private authedConnections = new Set<WsType>()
   /**
