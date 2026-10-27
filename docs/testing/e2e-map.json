@@ -3843,7 +3843,7 @@
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @zhushanwen/subagent-core exec vitest run src/execution/__tests__/worktree-reconcile-aging.test.ts",
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @zhushanwen/subagent-core exec vitest run src/execution/__tests__/worktree-reconcile.integration.test.ts",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
       "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）。触发条件 = scope 内 worktree 老化升级链 diff 命中。断言本质 = 阈值前普通 warn / 第 N 周期升级 + 资源不动 / 自愈后计数清零（同语义 2 条 in-process fixture 留默认组）；serial=真 的理由 = 真实 git + spawn sleep 长驻子进程。"
@@ -3865,7 +3865,7 @@
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @zhushanwen/subagent-core exec vitest run src/execution/__tests__/terminal-write-latency.test.ts",
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @zhushanwen/subagent-core exec vitest run src/execution/__tests__/record-store-persistence-suite.test.ts",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
       "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）。触发条件 = scope 内终态写路径（record-settled 事件 + 终态 manifest 派生视图 + binding 快照）diff 命中。断言本质 = 终态双写性能水位的采样测量，数字经 console.info 落盘追踪、无阈值断言（负载态墙钟并行组无稳定上界，原 10ms→200ms 抬升阈值已随拆层退役；「双写发生且 persisted + 写序水位」逻辑断言留默认组）；serial=真 的理由 = N=100 真实磁盘同步写。"
@@ -3997,7 +3997,7 @@
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @zhushanwen/pi-subagent-cli exec vitest run src/__tests__/run-spawn-once.integration.test.ts",
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @zhushanwen/pi-subagent-cli exec vitest run src/__tests__/run-spawn.test.ts",
       "owner": "packages/pi-subagent-cli",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
       "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）（门控 import 走包内副本 integration-gate.local.ts）。触发条件 = 引擎包 src 或 bin 任一 diff 命中。断言本质 = spawn-runner → pump → translator 在真子进程上的全链（翻译/分诊类 18 条已 stub 化留默认组，零显式 timeout）；serial=真 的理由 = 真 node 子进程单条 >1s。CI test-extensions job 已带 env=1 且前置 build。"
@@ -4186,7 +4186,7 @@
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @zhushanwen/pi-subagent-workflow exec vitest run src/__tests__/review-fix-loop-e2e.test.ts",
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @zhushanwen/pi-subagent-workflow exec vitest run src/__tests__/workflows-e2e.test.ts",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
       "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）。触发条件 = 编排链（orchestration / rfl workflow 脚本 / jsonl-run-store）任一 diff 命中。断言本质 = 真实 worker 线程消息协议与真 git 集成的 commit 收敛 / index.lock 争用失败路径（28 条编排/对账用例已 faux worker 化留默认组，断言逐字保留）；serial=真 的理由 = 真线程 + 真 git 子进程。CI test-extensions job 已带 env=1。"
@@ -4207,7 +4207,7 @@
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @zhushanwen/pi-subagent-workflow exec vitest run src/__tests__/scenario-09-cross-process-resume.test.ts",
+      "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @zhushanwen/pi-subagent-workflow exec vitest run src/__tests__/scenario.test.ts",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
       "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）。触发条件 = resume 编排（resume-run / record-mode 场景 kit）diff 命中。断言本质 = proper-lockfile 跨进程真互斥的恰一进入 + 终局无交错（锁协议语义已注入锁桩确定性化留默认组）；serial=真 的理由 = 真双子进程 mkdir 锁竞争，真跑 ~21s。CI test-extensions job 已带 env=1。"
@@ -5115,6 +5115,54 @@
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
       "note": "R2 态 + 用例级门控（2026-10-27 测试范围收缩：两簇门控——>5MB 保尾截断（真 5MB jsonl 写入 + 截断）与并发追加写（4 个真子进程 writer 验证 O_APPEND 单行原子性）；聚合求和 / 水位 / 坏行跳过等纯逻辑用例留无门控默认组）。触发条件 = scope 内代理统计读侧 diff 命中。断言本质 = 截断保尾行边界对齐 + 并发写全量可解析无交错坏行。serial=真 的理由 = 真进程 / 真磁盘吞吐在满载下无稳定上界。"
+    },
+    {
+      "id": "E2E-PIPE-23",
+      "summary": "测试执行域触发档机制（round6 Wave2）：domain-map.json 单一权威源（14 域 / 99 个挂载渲染重型文件）+ run-domain-tests 按域跑 + check-domain-map 健康度守卫（结构/存在性/唯一归属/挂载特征/消费方接线）+ 两包 vitest exclude 派生",
+      "scope": [
+        "scripts/run-domain-tests.mjs",
+        "scripts/check-domain-map.mjs",
+        "test-guard/domain-exclusions.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-domain-map.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/run-domain-tests.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-domain-map.mjs && node scripts/run-domain-tests.mjs --list",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#测试执行三档",
+      "note": "域映射清单漂移由 check-domain-map 拦（挂 pre-commit 2f-3）；改 run 脚本选文件逻辑或 exclusions 派生时跑 run 命令冒烟（--list 便宜，任选一域实跑更稳）。"
+    },
+    {
+      "id": "E2E-PIPE-24",
+      "summary": "集成载体守卫（round6 Wave2）：INTEGRATION_TESTS 成员文件内未被 describe.skipIf 包裹的用例必须登记 INTEGRATION_UNGATED_CARRIERS——漏登记 = 门控关闭时该用例静默不收集",
+      "scope": [
+        "scripts/check-integration-carriers.mjs",
+        "packages/runtime/vitest.config.ts",
+        "test-guard/integration-gate.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-integration-carriers.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-integration-carriers.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#测试执行三档",
+      "note": "掩码状态机剥离注释/字符串后提取两表并逐用例判定 skipIf 覆盖；解析不足输出 WARNING 放行不 fail（防守卫自身误报拖死提交）。挂 pre-commit 2f-2。"
     }
   ]
 }

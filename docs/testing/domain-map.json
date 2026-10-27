@@ -1,0 +1,181 @@
+{
+  "meta": {
+    "purpose": "挂载渲染重型测试的域归属登记（round6 Wave2 范围收缩）：默认档（pnpm test）不收集不装载这些文件，改哪个功能域用 node scripts/run-domain-tests.mjs <domain> 按域触发。本文件是域→文件映射的单一权威源，消费方：packages/renderer/vitest.config.ts、packages/ui/vitest.config.ts（默认档排除）、scripts/run-domain-tests.mjs（域触发）、scripts/check-domain-map.mjs（机器校验）。",
+    "criterion": "迁入判据 = 挂载型且重型，双条件同时满足。挂载型（静态）：文件挂载业务组件树——@vue/test-utils 直挂、mountXxx 页面 helper（mountPage/mountSection 等）、或 harness 页面 helper（openSettingsModalPage 等内部 mount）；composable/store 测试的文件内 defineComponent 轻宿主范式不算。重型（实测）：junit 用例时间 ≥300ms（2026-10-27 全量基线口径，load 5→12；挂载文件的模块图固定成本 ~2.3 worker-秒/文件不受负载口径影响，是迁移主收益）。",
+    "smokeNote": "留守默认档的现成冒烟：packages/renderer/src/__tests__/panel/composer-smoke.test.ts（首屏渲染 gate）、packages/renderer/src/__tests__/settings/settings-modal-smoke.test.ts（设置页冒烟）——文件头声明的冒烟职责保留在默认档，其余各域默认档零挂载覆盖属预期（改哪个域跑哪个域）。",
+    "gateEnv": "TAIJI_TEST_DOMAIN",
+    "runCommand": "node scripts/run-domain-tests.mjs <domain> [--list]",
+    "checkCommand": "node scripts/check-domain-map.mjs"
+  },
+  "domains": {
+    "app-shell": {
+      "summary": "应用装配壳（App 根组件 / 启动错误上报 / fork 快捷键 / 模态面 Esc 分层）",
+      "files": [
+        "packages/renderer/src/__tests__/App.test.ts",
+        "packages/renderer/src/__tests__/boot/error-reporter.test.ts",
+        "packages/renderer/src/__tests__/composables/fork-keymap.test.ts",
+        "packages/renderer/src/__tests__/composables/modal-surface-registry/local-esc-two-tier.test.ts"
+      ]
+    },
+    "archive": {
+      "summary": "归档列表（ArchiveListView 密度档位与批量清理）",
+      "files": [
+        "packages/renderer/src/__tests__/density-archive-bundle.test.ts"
+      ]
+    },
+    "btw": {
+      "summary": "旁路线会话（BtwPanel 与 composer btw 入口）",
+      "files": [
+        "packages/renderer/src/__tests__/panel/btw-panel.test.ts",
+        "packages/renderer/src/__tests__/panel/composer-btw-button.test.ts"
+      ]
+    },
+    "canvas": {
+      "summary": "问题解决画布（canvas-pane 挂载）",
+      "files": [
+        "packages/renderer/src/components/canvas/canvas-pane.test.ts"
+      ]
+    },
+    "chat": {
+      "summary": "对话流渲染（消息流 / 回合 / markdown 块，renderer + ui 跨包）",
+      "files": [
+        "packages/renderer/src/__tests__/chat-panel-bundle.test.ts",
+        "packages/renderer/src/__tests__/effects/tool-status-flip.test.ts",
+        "packages/renderer/src/components/panel/__tests__/message-stream-bundle.test.ts",
+        "packages/renderer/src/components/panel/message-stream/__tests__/ActivityStrip.test.ts",
+        "packages/renderer/src/components/panel/message-stream/__tests__/MessageStream.wire.test.ts",
+        "packages/ui/src/features/chat/__tests__/SystemNotice.test.ts",
+        "packages/ui/src/features/chat/__tests__/Turn.test.ts",
+        "packages/ui/src/features/chat/__tests__/block-suite.test.ts",
+        "packages/ui/src/features/chat/__tests__/chat-view-suite.test.ts",
+        "packages/ui/src/features/chat/__tests__/markdown-extras.test.ts",
+        "packages/ui/src/features/chat/__tests__/markdown.test.ts",
+        "packages/ui/src/features/chat/__tests__/media-suite.test.ts",
+        "packages/ui/src/features/chat/__tests__/turn-suite.test.ts"
+      ]
+    },
+    "new-task": {
+      "summary": "新任务落地页（renderer landing + ui 套件）",
+      "files": [
+        "packages/renderer/src/__tests__/new-task/landing.test.ts",
+        "packages/ui/src/features/new-task/__tests__/new-task-suite.test.ts"
+      ]
+    },
+    "panel": {
+      "summary": "工作台面板容器与 Composer 工具条（含上下文容量、调度内联卡、命令浮层）",
+      "files": [
+        "packages/renderer/src/__tests__/panel/BrowserPane.test.ts",
+        "packages/renderer/src/__tests__/panel/command-popover-landing.test.ts",
+        "packages/renderer/src/__tests__/panel/command-popover-symbols-format-age.test.ts",
+        "packages/renderer/src/__tests__/panel/composer-bar-density-wiring.test.ts",
+        "packages/renderer/src/__tests__/panel/composer-compact-queue.test.ts",
+        "packages/renderer/src/__tests__/panel/composer-file-popover.test.ts",
+        "packages/renderer/src/__tests__/panel/composer-fork-mode.test.ts",
+        "packages/renderer/src/__tests__/panel/composer-hash-trigger.test.ts",
+        "packages/renderer/src/__tests__/panel/composer-send-button-states.test.ts",
+        "packages/renderer/src/__tests__/panel/composer-session-injection.test.ts",
+        "packages/renderer/src/__tests__/panel/composer-skill-trigger.test.ts",
+        "packages/renderer/src/__tests__/panel/composer-slash-trigger.test.ts",
+        "packages/renderer/src/__tests__/panel/context-capacity-quota.test.ts",
+        "packages/renderer/src/__tests__/panel/fast-fork-e2e-journeys.test.ts",
+        "packages/renderer/src/__tests__/panel/panel-container-drawer-mode.test.ts",
+        "packages/renderer/src/__tests__/panel/panel-view.test.ts",
+        "packages/renderer/src/__tests__/panel/preset-chip.test.ts",
+        "packages/renderer/src/__tests__/panel/schedule-create-inline.test.ts",
+        "packages/renderer/src/__tests__/panel/skill-notice-stream.test.ts",
+        "packages/renderer/src/__tests__/panel/turn-working.test.ts",
+        "packages/renderer/src/components/panel/__tests__/Panel.test.ts",
+        "packages/renderer/src/composables/panel/__tests__/composables-panel-mock-bundle.test.ts"
+      ]
+    },
+    "plan": {
+      "summary": "计划模式渲染件（plan bars / plan docs 面板）",
+      "files": [
+        "packages/renderer/src/__tests__/components/plan-docs-panel.test.ts",
+        "packages/renderer/src/components/panel/plan/__tests__/plan-bars-bundle.test.ts"
+      ]
+    },
+    "settings": {
+      "summary": "设置页全部区块（renderer 页面 + ui provider 组件，跨包）",
+      "files": [
+        "packages/renderer/src/__tests__/composables/settings-domain-bundle.test.ts",
+        "packages/renderer/src/__tests__/provider-builtin-ui.test.ts",
+        "packages/renderer/src/__tests__/settings/ProviderPage.test.ts",
+        "packages/renderer/src/__tests__/settings/appearance-page.test.ts",
+        "packages/renderer/src/__tests__/settings/extension-page-bundle.test.ts",
+        "packages/renderer/src/__tests__/settings/mcp-section.test.ts",
+        "packages/renderer/src/__tests__/settings/pi-presets-page.test.ts",
+        "packages/renderer/src/__tests__/settings/provider-edit-body-phase-b.test.ts",
+        "packages/renderer/src/__tests__/settings/remote-access-page.test.ts",
+        "packages/renderer/src/__tests__/settings/settings-page-bundle.test.ts",
+        "packages/renderer/src/__tests__/settings/settings-transport-sections.test.ts",
+        "packages/renderer/src/__tests__/settings/system-page-update.test.ts",
+        "packages/renderer/src/__tests__/settings/system-prompt-bundle.test.ts",
+        "packages/renderer/src/__tests__/settings/terminal-page.test.ts",
+        "packages/renderer/src/__tests__/settings/worktree-page.test.ts",
+        "packages/renderer/src/components/settings/__tests__/settings-models-bundle.test.ts",
+        "packages/renderer/src/components/settings/preset/__tests__/pi-presets-page.test.ts",
+        "packages/renderer/src/components/settings/preset/__tests__/preset-sections.spec.ts",
+        "packages/renderer/src/components/settings/provider/__tests__/PluginProviderFlow.test.ts",
+        "packages/renderer/src/components/settings/provider/__tests__/ProviderPage-import.spec.ts",
+        "packages/renderer/src/components/settings/provider/__tests__/ProviderPage.test.ts",
+        "packages/renderer/src/components/settings/tts/__tests__/tts-page.test.ts",
+        "packages/ui/src/features/settings/__tests__/ProviderQuickSetup.test.ts",
+        "packages/ui/src/features/settings/__tests__/ProviderTemplatePicker.test.ts",
+        "packages/ui/src/features/settings/__tests__/provider-edit-body.test.ts",
+        "packages/ui/src/features/settings/__tests__/settings-suite.test.ts",
+        "packages/ui/src/features/settings/common/__tests__/ScopedModelSection.test.ts"
+      ]
+    },
+    "shell": {
+      "summary": "ui 容器原语（搜索弹窗 / 确认框 / 下拉项 / 抽屉面板 / 渲染协议原语）",
+      "files": [
+        "packages/ui/src/features/drawer/__tests__/DrawerPanel.test.ts",
+        "packages/ui/src/overlays/__tests__/search-modal.test.ts",
+        "packages/ui/src/primitives/dialog/__tests__/ConfirmDialog.test.ts",
+        "packages/ui/src/primitives/select/__tests__/SelectItem.test.ts",
+        "packages/ui/src/rendering-protocol/__tests__/primitives.test.ts"
+      ]
+    },
+    "sidebar": {
+      "summary": "侧边栏与会话列表（含 AppShell 侧栏缩放手柄）",
+      "files": [
+        "packages/renderer/src/__tests__/shell/sidebar-resize-handle.test.ts",
+        "packages/renderer/src/__tests__/sidebar/session-item-message-count.test.ts",
+        "packages/renderer/src/__tests__/sidebar/session-item-quote.test.ts",
+        "packages/renderer/src/__tests__/sidebar/session-list-bundle.test.ts",
+        "packages/renderer/src/__tests__/sidebar/sidebar-misc-bundle.test.ts",
+        "packages/renderer/src/__tests__/sidebar/sidebar-mount-bundle.test.ts",
+        "packages/renderer/src/__tests__/sidebar/sidebar-session-bundle.test.ts",
+        "packages/renderer/src/components/sidebar/__tests__/sidebar-dialogs.test.ts"
+      ]
+    },
+    "subagent": {
+      "summary": "subagent/workflow 视图（SubagentTab / workflow-viz / session-trace）",
+      "files": [
+        "packages/renderer/src/__tests__/panel/session-trace/trace-i18n.test.ts",
+        "packages/renderer/src/__tests__/panel/session-trace/trace-inspector.test.ts",
+        "packages/renderer/src/__tests__/panel/session-trace/trace-view.test.ts",
+        "packages/renderer/src/__tests__/panel/subagent-tab-bundle.test.ts",
+        "packages/renderer/src/components/panel/__tests__/SubagentTab.bundle.test.ts",
+        "packages/renderer/src/components/panel/workflow-viz/__tests__/workflow-viz-live-bundle.test.ts",
+        "packages/renderer/src/components/panel/workflow-viz/__tests__/workflow-viz-pure-bundle.test.ts",
+        "packages/renderer/src/components/panel/workflow-viz/overlay/__tests__/workflow-viz-overlay-bundle.test.ts"
+      ]
+    },
+    "terminal": {
+      "summary": "终端（落地态终端流量渲染）",
+      "files": [
+        "packages/renderer/src/__tests__/landing-terminal-traffic.test.ts"
+      ]
+    },
+    "tray": {
+      "summary": "任务托盘（tray widget / native 桶 / 后台任务详情面板）",
+      "files": [
+        "packages/renderer/src/__tests__/components/background-task-detail-panel.test.ts",
+        "packages/renderer/src/__tests__/panel/tray/tray-native-bundle.test.ts",
+        "packages/renderer/src/components/panel/tray/__tests__/tray-widget-bundle.test.ts"
+      ]
+    }
+  }
+}
