@@ -1,0 +1,1200 @@
+import type { ChatViewDeps } from '@taiji/ui';
+import type { Component } from 'vue';
+import type { FileNode } from '@taiji/shared';
+import type { FoldedNoticeRow } from '@taiji/core/domain/chat';
+import type { FoldedNoticeType } from '@taiji/core/domain/chat';
+import type { Message } from '@taiji/shared';
+import type { Segment } from '@taiji/shared';
+import AmbiguousFilePopover from '../AmbiguousFilePopover.vue';
+import { useCopy } from '../composables/useCopy';
+import { FOLDED_TYPE_DESC_KEY, FOLDED_TYPE_ICON, FOLDED_TYPE_LABEL_KEY, FOLDED_TYPE_WORD_KEY, foldedStatusText } from '../folded-notice';
+import { createMockDeps, mockChatProvide } from './helpers';
+import type { MessageTurn } from '@taiji/core/domain/chat';
+import { buildSkillMarker, segmentsToPrompt, segmentsToText } from '@taiji/shared';
+import { ChatView, ChatViewDepsKey, UserBubble } from '@taiji/ui';
+import { mount } from '@vue/test-utils';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { defineComponent, h, type PropType } from 'vue';
+// 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
+
+// ======================================================================
+// ← ChatView.test.ts
+// ======================================================================
+
+function mountChatView(messages: Message[]) {
+  return mount(ChatView, {
+    props: { messages, sessionId: 's1', isSessionActive: false },
+    global: {
+      provide: mockChatProvide(),
+    },
+  })
+}
+
+describe('ChatView (AC1 冒烟)', () => {
+  it('空 messages：渲染 chat-view 容器 + composer 占位', () => {
+    const wrapper = mountChatView([])
+    expect(wrapper.find('[data-testid="chat-view"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="composer-placeholder"]').exists()).toBe(true)
+  })
+
+  it('有 user+assistant messages：渲染 Turn（消息列表 DOM 存在）', () => {
+    const messages: Message[] = [
+      { id: 'u1', role: 'user', content: 'hello', status: 'complete' } as unknown as Message,
+      { id: 'a1', role: 'assistant', content: 'hi', status: 'complete', thinking: [], toolCalls: [] } as unknown as Message,
+    ]
+    const wrapper = mountChatView(messages)
+    expect(wrapper.find('[data-testid="turn-1"]').exists()).toBe(true)
+  })
+})
+
+// ======================================================================
+// ← UserBubble.test.ts
+// ======================================================================
+
+const NOW = Date.now()
+
+function makeTurn(over: Partial<MessageTurn> = {}): MessageTurn {
+  return {
+    index: 1,
+    user: { id: 'u1', role: 'user', content: 'hello world', status: 'complete', timestamp: NOW },
+    assistants: [],
+    isStreaming: false,
+    hasFoldable: false,
+    ...over,
+  }
+}
+
+function mountBubble(props: {
+  turn?: MessageTurn
+  sessionId?: string
+  canEdit?: boolean
+  isSessionEditable?: boolean
+} = {}, deps: Partial<ChatViewDeps> = {}) {
+  return mount(UserBubble, {
+    props: {
+      turn: props.turn ?? makeTurn(),
+      sessionId: props.sessionId ?? 's1',
+      canEdit: props.canEdit ?? false,
+      isSessionEditable: props.isSessionEditable ?? false,
+    },
+    global: {
+      provide: mockChatProvide(deps),
+      stubs: { MarkdownRenderer: true, ImageThumb: true },
+    },
+  })
+}
+
+describe('W4TC3: UserBubble 展示态', () => {
+  it('user 气泡存在且含 content 文本', () => {
+    const wrapper = mountBubble()
+    // 气泡容器：rounded-lg（demo .user-bubble 12px 统一圆角）+ bubble-bg 底
+    const bubble = wrapper.find('.rounded-lg')
+    expect(bubble.exists()).toBe(true)
+    expect(bubble.classes()).toContain('bg-\[var\(--bubble-bg\)\]')
+  })
+
+  it('N3 宽度纪律：气泡 max-width min(72%, 64ch) + overflow-wrap anywhere（锁 class 机制部分）', () => {
+    // 测试环境无布局引擎，锁 DOM 机制部分：宽度纪律与长令牌折行由这两个 class 承载，
+    // 实际宽度/折行视觉随场景 7③ 真机走查验收。
+    const wrapper = mountBubble()
+    const bubble = wrapper.find('.rounded-lg')
+    expect(bubble.classes()).toContain('max-w-[min(72%,64ch)]')
+    expect(bubble.classes()).toContain('[overflow-wrap:anywhere]')
+  })
+
+  it('气泡行 self-stretch 占满列宽（百分比 max-width 基准确定，锁 class 机制部分）', () => {
+    // 行若回到收缩适配（shrink-to-fit）宽度，气泡 max-width 的 72% 百分比基准 = 行自身
+    // 宽度 → 循环依赖下布局引擎解出的行宽 < 内容单行自然宽，短 CJK+Latin 消息被折成
+    // 「删除 / installe / r」三行（ff4f0bb04）。self-stretch 让行占满列宽、百分比有确定
+    // 基准，气泡恢复内容自适应——删掉该 class 即复发，故与 N3 同形态锁定。
+    const wrapper = mountBubble()
+    const row = wrapper.find('.group\\/ts')
+    expect(row.exists()).toBe(true)
+    expect(row.classes()).toContain('self-stretch')
+  })
+
+  it('展示态 hover actions 容器存在（group-hover 可见）', () => {
+    const wrapper = mountBubble()
+    // hover actions 容器：opacity-0 group-hover:opacity-100
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    expect(actions.exists()).toBe(true)
+    // 容器内至少有 1 个 button（复制）
+    expect(actions.findAll('button').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('canEdit=true + 非 sessionEditable → 编辑按钮存在', () => {
+    const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
+    // hover actions 容器内有 3 个 button（复制 + 编辑 + 撤回 [U5]）
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    expect(actions.findAll('button').length).toBe(3)
+  })
+
+  it('canEdit=false → 复制 + 撤回按钮（编辑不显示）', () => {
+    const wrapper = mountBubble({ canEdit: false })
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    expect(actions.findAll('button').length).toBe(2)
+  })
+
+  it('isSessionEditable=true → 复制 + 撤回按钮（活跃态禁止编辑，撤回入口不受限）', () => {
+    const wrapper = mountBubble({ canEdit: true, isSessionEditable: true })
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    expect(actions.findAll('button').length).toBe(2)
+  })
+})
+
+// ── [user-bubble-edit-composer] hover actions 摆位：气泡下方流内固定槽位（2026-10 用户裁决）──
+// 原形态 = absolute bottom-0 right-0 钉在气泡右下角**内侧**（压气泡内容）；现形态 = 气泡行
+// 之后的常驻流内行（mt-1 + h-6），显隐仍走 opacity 零布局跳动。
+describe('[user-bubble-edit-composer] hover actions 位于气泡下方固定槽位', () => {
+  it('actions DOM 序在气泡行之后（下方固定位置，不在气泡框内）', () => {
+    const wrapper = mountBubble()
+    const root = wrapper.find('.group\\/user').element
+    const children = Array.from(root.children)
+    const bubbleIdx = children.findIndex((el) => el.classList.contains('group/ts'))
+    const actionsIdx = children.findIndex(
+      (el) => el.getAttribute('data-testid') === 'user-bubble-actions',
+    )
+    expect(bubbleIdx).toBeGreaterThanOrEqual(0)
+    expect(actionsIdx).toBeGreaterThan(bubbleIdx)
+  })
+
+  it('槽位为流内常驻行：非 absolute 定位，mt-1 + h-6 固定高度（零布局跳动）', () => {
+    const wrapper = mountBubble()
+    const actions = wrapper.find('[data-testid="user-bubble-actions"]')
+    expect(actions.exists()).toBe(true)
+    expect(actions.classes()).not.toContain('absolute')
+    expect(actions.classes()).toContain('mt-1')
+    expect(actions.classes()).toContain('h-6')
+    // 显隐机制不变：默认 opacity-0 + pointer-events-none，悬停/焦点两翼显现
+    expect(actions.classes()).toContain('opacity-0')
+    expect(actions.classes()).toContain('pointer-events-none')
+    expect(actions.classes()).toContain('group-hover/user:opacity-100')
+    expect(actions.classes()).toContain('group-focus-within/user:opacity-100')
+  })
+})
+
+// ── [user-bubble-edit-composer] 编辑态富编辑器注入路径（ChatViewDeps.editComposerRenderer）──
+// deps 提供注入组件 → 渲染注入组件（简化版 composer：ComposerInput + CommandPopover）；
+// 未提供（本 describe 之外的存量用例）= Textarea 回退路径，行为不变。
+describe('[user-bubble-edit-composer] UserBubble 编辑态富编辑器注入路径', () => {
+  /** 注入组件 stub：透传 props，submit/cancel 经按钮触发（契约见 EditComposerProps） */
+  const EditStub = defineComponent({
+    name: 'EditComposerStub',
+    props: {
+      sessionId: { type: String, required: true },
+      messageId: { type: String, required: true },
+      segments: { type: Array as PropType<Segment[]>, required: true },
+      disabled: { type: Boolean, default: false },
+    },
+    emits: ['submit', 'cancel'],
+    setup(_props, { emit }) {
+      return () =>
+        h('div', { 'data-testid': 'edit-composer-stub' }, [
+          h('button', {
+            'data-testid': 'stub-submit',
+            onClick: () => emit('submit', [{ type: 'text', text: 'edited text' }]),
+          }),
+          h('button', { 'data-testid': 'stub-cancel', onClick: () => emit('cancel') }),
+        ])
+    },
+  })
+
+  /** 进入编辑态（点 hover actions 第 2 个按钮 = 编辑） */
+  async function enterEdit(wrapper: ReturnType<typeof mountBubble>): Promise<void> {
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    await actions.findAll('button')[1].trigger('click')
+  }
+
+  it('deps 提供 editComposerRenderer → 编辑态渲染注入组件（非 textarea 回退）', async () => {
+    const wrapper = mountBubble(
+      { canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EditStub },
+    )
+    await enterEdit(wrapper)
+    expect(wrapper.find('[data-testid="edit-composer-stub"]').exists()).toBe(true)
+    expect(wrapper.find('textarea').exists()).toBe(false)
+  })
+
+  it('注入组件收到 segments 回填 + sessionId/messageId 契约字段', async () => {
+    const turn = makeTurn({
+      user: {
+        id: 'u1',
+        role: 'user',
+        content: [
+          { type: 'text', text: '总结' },
+          { type: 'slash', name: 'compact' },
+        ],
+        status: 'complete',
+        timestamp: NOW,
+      },
+    })
+    const wrapper = mountBubble(
+      { turn, canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EditStub },
+    )
+    await enterEdit(wrapper)
+    const stub = wrapper.findComponent({ name: 'EditComposerStub' })
+    expect(stub.props('sessionId')).toBe('s1')
+    expect(stub.props('messageId')).toBe('u1')
+    expect(stub.props('segments')).toEqual([
+      { type: 'text', text: '总结' },
+      { type: 'slash', name: 'compact' },
+    ])
+  })
+
+  it('string content（reload 单文档态）→ segments 补 text 段回填（不回退空编辑框）', async () => {
+    const wrapper = mountBubble(
+      { canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EditStub },
+    )
+    await enterEdit(wrapper)
+    const stub = wrapper.findComponent({ name: 'EditComposerStub' })
+    expect(stub.props('segments')).toEqual([{ type: 'text', text: 'hello world' }])
+  })
+
+  it('注入组件 submit(segments) → editAndResend(sid, msgId, segments) + 编辑态收尾', async () => {
+    const editAndResend = vi.fn()
+    const wrapper = mountBubble(
+      { canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EditStub, editAndResend },
+    )
+    await enterEdit(wrapper)
+    await wrapper.find('[data-testid="stub-submit"]').trigger('click')
+    expect(editAndResend).toHaveBeenCalledTimes(1)
+    expect(editAndResend).toHaveBeenCalledWith('s1', 'u1', [{ type: 'text', text: 'edited text' }])
+    // 收尾：编辑态退出（注入组件卸载）
+    expect(wrapper.find('[data-testid="edit-composer-stub"]').exists()).toBe(false)
+  })
+
+  it('注入组件 cancel → 编辑态退出 + emit edit-state-change false', async () => {
+    const wrapper = mountBubble(
+      { canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EditStub },
+    )
+    await enterEdit(wrapper)
+    await wrapper.find('[data-testid="stub-cancel"]').trigger('click')
+    expect(wrapper.find('[data-testid="edit-composer-stub"]').exists()).toBe(false)
+    const events = wrapper.emitted('edit-state-change')!
+    expect(events[events.length - 1]).toEqual([{ editing: false, turnKey: 'u1' }])
+  })
+
+  it('[D3] isPendingSend=true → submit 早退：编辑态保持 + 不调 editAndResend（双发锁同链）', async () => {
+    const editAndResend = vi.fn()
+    const wrapper = mountBubble(
+      { canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EditStub, editAndResend, isPendingSend: () => true },
+    )
+    await enterEdit(wrapper)
+    await wrapper.find('[data-testid="stub-submit"]').trigger('click')
+    expect(editAndResend).not.toHaveBeenCalled()
+    // 编辑态保持（草稿不丢，提交收尾后可重试）
+    expect(wrapper.find('[data-testid="edit-composer-stub"]').exists()).toBe(true)
+  })
+
+  it('空稿 submit（segments 序列化为空）→ 早退不收尾（与 Textarea 回退路径同语义）', async () => {
+    const editAndResend = vi.fn()
+    const EmptyStub = defineComponent({
+      name: 'EmptySubmitStub',
+      props: {
+        sessionId: { type: String, required: true },
+        messageId: { type: String, required: true },
+        segments: { type: Array as PropType<Segment[]>, required: true },
+        disabled: { type: Boolean, default: false },
+      },
+      emits: ['submit', 'cancel'],
+      setup(_props, { emit }) {
+        return () =>
+          h('button', {
+            'data-testid': 'stub-submit-empty',
+            onClick: () => emit('submit', [{ type: 'text', text: '   ' }]),
+          })
+      },
+    })
+    const wrapper = mountBubble(
+      { canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EmptyStub, editAndResend },
+    )
+    await enterEdit(wrapper)
+    await wrapper.find('[data-testid="stub-submit-empty"]').trigger('click')
+    expect(editAndResend).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="stub-submit-empty"]').exists()).toBe(true)
+  })
+})
+
+describe('W4TC3: UserBubble skill badge', () => {
+  it('Segment[] content 含 skill segment → 渲染紫色 badge', () => {
+    const segments: Segment[] = [
+      { type: 'skill', name: 'code-review' } as Segment,
+      { type: 'text', text: 'please review' } as Segment,
+    ]
+    const wrapper = mountBubble({
+      turn: makeTurn({
+        user: { id: 'u1', role: 'user', content: segments, status: 'complete', timestamp: NOW } as Message,
+      }),
+    })
+    // skill badge 存在（text-reasoning class）
+    const badge = wrapper.find('.text-reasoning')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toContain('code-review')
+  })
+
+  it('Segment[] content 含 file segment → 渲染绿色 file badge', () => {
+    const segments: Segment[] = [
+      { type: 'file', path: '/tmp/foo.ts', lineRange: [1, 10] } as Segment,
+    ]
+    const wrapper = mountBubble({
+      turn: makeTurn({
+        user: { id: 'u1', role: 'user', content: segments, status: 'complete', timestamp: NOW } as Message,
+      }),
+    })
+    // file badge 存在（text-success class）
+    const badge = wrapper.find('.text-success')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toContain('foo.ts')
+  })
+
+  // ── U2b：session / subagent 段徽标（四符号 # / @）──
+
+  it('Segment[] content 含 session segment → 渲染 # label 徽标（warn 色，title 悬浮 sessionId）', () => {
+    const segments: Segment[] = [
+      { type: 'text', text: '参考 ' },
+      { type: 'session', sessionId: '019e-abc', label: '设计讨论' } as Segment,
+    ]
+    const wrapper = mountBubble({
+      turn: makeTurn({
+        user: { id: 'u1', role: 'user', content: segments, status: 'complete', timestamp: NOW } as Message,
+      }),
+    })
+    const badge = wrapper.find('[data-testid="msg-session-badge-1"]')
+    expect(badge.exists()).toBe(true)
+    // 徽标显示 # + label（人可读标题，非 uuid）
+    expect(badge.text()).toContain('#')
+    expect(badge.text()).toContain('设计讨论')
+    expect(badge.classes()).toContain('text-warn')
+    expect(badge.attributes('title')).toBe('019e-abc')
+  })
+
+  it('Segment[] content 含 subagent segment → 渲染 @slug 去向徽标（accent 色，序列化空串仅作标记）', () => {
+    const segments: Segment[] = [
+      { type: 'subagent', subagentId: 'rec-1', slug: 'build-api' } as Segment,
+      { type: 'text', text: '汇报进度' },
+    ]
+    const wrapper = mountBubble({
+      turn: makeTurn({
+        user: { id: 'u1', role: 'user', content: segments, status: 'complete', timestamp: NOW } as Message,
+      }),
+    })
+    const badge = wrapper.find('[data-testid="msg-subagent-badge-0"]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toContain('@build-api')
+    expect(badge.classes()).toContain('text-accent')
+  })
+})
+
+// ── [D12] 混排消息 inline 化渲染（is-mixed 修饰 class）──
+// badge 是 inline span、text 段经 MarkdownRenderer 渲染为块级（.md-render div + markdown-it <p>），
+// 混排时块级边界使 badge 前后必然换行。isMixedContent 判定「同时含 text 段与非 text 段」时给
+// 气泡容器加 is-mixed，组件 scoped CSS 据此把 .md-render/段容器 div/p 置 inline（badge 与正文
+// 同流）。测试环境无布局引擎，锁定 DOM 机制部分：修饰 class 的加与不加 + badge/text 段均可见。
+describe('[D12] UserBubble 混排 inline 化（is-mixed）', () => {
+  /** 渲染 content prop 的 MarkdownRenderer stub（默认 stub 不输出文本） */
+  const MarkdownContentStub = {
+    name: 'MarkdownRenderer',
+    props: { content: { type: String, default: '' }, sessionId: { type: String, default: '' } },
+    template: '<span>{{ content }}</span>',
+  }
+
+  function mountWithContent(content: Segment[] | string) {
+    return mount(UserBubble, {
+      props: {
+        turn: makeTurn({
+          user: { id: 'u1', role: 'user', content, status: 'complete', timestamp: NOW } as Message,
+        }),
+        sessionId: 's1',
+        canEdit: false,
+        isSessionEditable: false,
+      },
+      global: {
+        provide: mockChatProvide(),
+        stubs: { MarkdownRenderer: MarkdownContentStub, ImageThumb: true },
+      },
+    })
+  }
+
+  function bubble(wrapper: ReturnType<typeof mount>) {
+    return wrapper.find('.rounded-lg')
+  }
+
+  it('[text, skill, text] 混排 → 气泡带 is-mixed，badge 与前后 text 段同处气泡可见流', () => {
+    const wrapper = mountWithContent([
+      { type: 'text', text: '先用' },
+      { type: 'skill', name: 'code-review' } as Segment,
+      { type: 'text', text: '再总结' },
+    ])
+    const el = bubble(wrapper)
+    // 修饰 class 生效（inline 化开关，组件 scoped CSS 据此选择器生效）
+    expect(el.classes()).toContain('is-mixed')
+    // 用户可见 DOM：badge 与前后 text 都在气泡内（同内联流的成员面）
+    expect(el.text()).toContain('先用')
+    expect(el.find('.text-reasoning').text()).toBe('code-review')
+    expect(el.text()).toContain('再总结')
+  })
+
+  it('file badge 混排（[text, file, text]）同样命中 is-mixed（场景 10-⑤ 非 skill badge 正向）', () => {
+    const wrapper = mountWithContent([
+      { type: 'text', text: '改一下' },
+      { type: 'file', path: 'src/a.ts' } as Segment,
+      { type: 'text', text: '这个文件' },
+    ])
+    const el = bubble(wrapper)
+    expect(el.classes()).toContain('is-mixed')
+    expect(el.find('[data-testid="msg-file-badge-1"]').exists()).toBe(true)
+    expect(el.text()).toContain('这个文件')
+  })
+
+  it('纯 text 多段消息（无 badge）→ 不加 is-mixed（复杂 markdown 排版不受影响的回归锁）', () => {
+    const wrapper = mountWithContent([
+      { type: 'text', text: '第一段' },
+      { type: 'text', text: '第二段' },
+    ])
+    const el = bubble(wrapper)
+    expect(el.classes()).not.toContain('is-mixed')
+    expect(el.text()).toContain('第一段')
+    expect(el.text()).toContain('第二段')
+  })
+
+  it('纯 string content（reload 侧单文档渲染）→ 不加 is-mixed', () => {
+    const wrapper = mountWithContent('纯文本消息')
+    const el = bubble(wrapper)
+    expect(el.classes()).not.toContain('is-mixed')
+    expect(el.text()).toContain('纯文本消息')
+  })
+
+  it('仅 badge 无 text（[skill]）→ 不加 is-mixed（无 text 段无需 inline 化）', () => {
+    const wrapper = mountWithContent([{ type: 'skill', name: 'code-review' } as Segment])
+    const el = bubble(wrapper)
+    expect(el.classes()).not.toContain('is-mixed')
+    expect(el.find('.text-reasoning').text()).toBe('code-review')
+  })
+})
+
+// ── [MF-1] slash 段渲染：命令文本不消失 + live ≡ reload ──
+// live content 段序是 DOM 序（命令 chip 就地插，D4-a），reload 侧是 textToSegments(归位文本)
+// 的单 text 段（apply-entry-convert）；气泡只有按归位序渲染 slash 段为 `/name` 纯文本，
+// 两侧可见文本才逐字一致（AGENTS.md 关键规则 9）。默认 MarkdownRenderer stub 不渲染
+// content，无法断言气泡可见文本，故本组改用渲染 content 的 stub。
+//
+// **等价锁的范围（轮 3-4 收窄）**：`text() === segmentsToText(段)` 只在**段序仅含 slash/text
+// 段**（无 badge 类型段）时成立——`UserBubble.boundarySpaceBefore` 只对 prev 为 slash 时渲染
+// 边界空格、且只有 slash 段按纯文本渲染；一旦含 badge 段就不等价：file 显示
+// `fileBasename(path)`、session 显示 `label`（序列化为 `#sessionId`）、skill/subagent 显示
+// name/slug、image 显示缩略图，均 ≠ 序列化形态；且 `segmentsToText` 经 `needsBoundarySpace`
+// 对 chip→text 边界补空格，气泡只对 prev 为 slash 时渲染空格、其余 badge 走自身 `mr-1` 间距
+// ——两条原因并存。该展示派生视图与序列化的差异是本分支之前既有（normalizeContent 纯文本派生视图范围），
+// 不在本组用例锁定范围。
+//
+// **等价锁的层次（轮 3-5 复审 N-3a）**：本锁在下方 `MarkdownContentStub`（显式注册、只回显
+// content prop）下成立——锁定的是**段/序列化层**等价（归位序 + 边界空格 + 命令文本不消失），
+// **不是产线 DOM 层等价**：产线 `MarkdownRenderer` 会把正文作为独立 markdown 文档块级渲染，
+// 与 reload 侧把「命令 + 正文」作为单文档渲染的块级边界可能不同（段落/换行归属不同）。
+// 该产线 markdown 块级渲染边界不在本锁范围（真实 MarkdownRenderer 在本测试环境渲染为空，
+// 无法在此证伪或证实）。
+describe('[MF-1] UserBubble slash 段（归位序渲染 + live ≡ reload）', () => {
+  /** 渲染 content prop 的 MarkdownRenderer stub（默认 stub 不输出文本） */
+  const MarkdownContentStub = {
+    name: 'MarkdownRenderer',
+    props: { content: { type: String, default: '' }, sessionId: { type: String, default: '' } },
+    template: '<span>{{ content }}</span>',
+  }
+
+  function mountWithSlash(content: Segment[]) {
+    return mount(UserBubble, {
+      props: {
+        turn: makeTurn({
+          user: { id: 'u1', role: 'user', content, status: 'complete', timestamp: NOW } as Message,
+        }),
+        sessionId: 's1',
+        canEdit: false,
+        isSessionEditable: false,
+      },
+      global: {
+        provide: mockChatProvide(),
+        stubs: { MarkdownRenderer: MarkdownContentStub, ImageThumb: true },
+      },
+    })
+  }
+
+  function bubbleText(wrapper: ReturnType<typeof mount>): string {
+    return wrapper.find('.rounded-lg').text()
+  }
+
+  it('含 slash 段 → 气泡渲染 `/name`（此前无分支，命令文本静默消失）', () => {
+    const segments: Segment[] = [
+      { type: 'text', text: '总结' },
+      { type: 'slash', name: 'compact' },
+    ]
+    expect(bubbleText(mountWithSlash(segments))).toContain('/compact')
+  })
+
+  it('slash 段后接 text 段（段序无 badge 段）渲染文本 === segmentsToText(同段)：命令在前 + 边界空格', () => {
+    const segments: Segment[] = [
+      { type: 'text', text: '总结' },
+      { type: 'slash', name: 'compact' },
+    ]
+    // 该字符串即 reload 侧 textToSegments(deliveryText) 的渲染文本
+    expect(bubbleText(mountWithSlash(segments))).toBe(segmentsToText(segments))
+    // 归位序（命令在前）；按 DOM 序渲染会得到 `总结/compact`
+    expect(bubbleText(mountWithSlash(segments))).toBe('/compact 总结')
+  })
+
+  it('slash-only content（landing `/tasks` 首发）渲染 `/tasks`，与 segmentsToText 一致（单 slash 段退化情形）', () => {
+    const segments: Segment[] = [{ type: 'slash', name: 'tasks' }]
+    expect(bubbleText(mountWithSlash(segments))).toBe(segmentsToText(segments))
+    expect(bubbleText(mountWithSlash(segments))).toBe('/tasks')
+  })
+
+  // 对照：badge 段（file）的显示形态 ≠ 序列化文本，故上面的等价锁不覆盖这类边界
+  // （file badge 显示 basename，序列化是完整 path；见组注释的登记指向）。
+  it('对照 · slash + file + text：slash 仍纯文本，但 file badge 显示 basename ⇒ 与 segmentsToText 不等', () => {
+    const segments: Segment[] = [
+      { type: 'slash', name: 'compact' },
+      { type: 'file', path: 'src/a.ts' },
+      { type: 'text', text: '正文' },
+    ]
+    // 序列化形态：完整路径
+    expect(segmentsToText(segments)).toBe('/compact src/a.ts 正文')
+    // 气泡文本：slash 纯文本 + file badge（basename）+ text；不等价是既有展示派生视图差异
+    const text = bubbleText(mountWithSlash(segments))
+    expect(text).toContain('/compact')
+    expect(text).toContain('a.ts')
+    expect(text).not.toBe(segmentsToText(segments))
+  })
+})
+
+describe('W4TC3: UserBubble 编辑态', () => {
+  it('canEdit=true 点编辑按钮 → 进入编辑态 + emit edit-state-change', async () => {
+    const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
+    // hover actions 容器的第 2 个 button 是编辑（[U5] 撤回按钮在编辑之后，index 2）
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    const buttons = actions.findAll('button')
+    expect(buttons.length).toBe(3)
+    // 点编辑按钮
+    await buttons[1].trigger('click')
+    // emit edit-state-change（D2：负载携带 turnKey = turnStableId(turn) = 'u1'）
+    expect(wrapper.emitted('edit-state-change')).toBeTruthy()
+    expect(wrapper.emitted('edit-state-change')![0]).toEqual([{ editing: true, turnKey: 'u1' }])
+  })
+
+  it('编辑态渲染 textarea', async () => {
+    const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    const buttons = actions.findAll('button')
+    await buttons[1].trigger('click')
+    // 编辑态有 textarea
+    expect(wrapper.find('textarea').exists()).toBe(true)
+  })
+
+  it('N3 编辑态气泡同宽同纪律：max-width min(72%, 64ch) + overflow-wrap anywhere（锁 class 机制部分）', async () => {
+    // 设计决策 8 N3「编辑态气泡同宽」：编辑态容器与展示态气泡持同一宽度/折行纪律。
+    // w-full 是编辑态不进「百分比基准循环」的凭据：宽度 100% 基准 = items-end 列
+    // （确定宽），不像展示态行那样依赖内容解宽——与展示态 self-stretch 用例成对。
+    // [user-bubble-edit-composer] 宽度纪律挂编辑态**外层容器**（富编辑器/Textarea 回退
+    // 两条分支共用同一几何壳，盒子视觉由分支各自承载）——内层盒子只留视觉 class。
+    const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    await actions.findAll('button')[1].trigger('click')
+    // 外层容器 = 根列的第一个（且编辑态下唯一）流内子元素
+    const editRoot = wrapper.find('.group\\/user').element.firstElementChild!
+    expect(editRoot.className).toContain('w-full')
+    expect(editRoot.className).toContain('max-w-[min(72%,64ch)]')
+    expect(editRoot.className).toContain('[overflow-wrap:anywhere]')
+    // 回退路径盒子视觉仍在（accent 边 + 14px 圆角）
+    const editBubble = wrapper.find('.rounded-\\[14px\\]')
+    expect(editBubble.exists()).toBe(true)
+  })
+
+  it('编辑态取消 → emit edit-state-change false', async () => {
+    const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    const buttons = actions.findAll('button')
+    await buttons[1].trigger('click')
+    // 编辑态内有取消按钮（variant="ghost"）
+    const editButtons = wrapper.findAll('button')
+    const cancelBtn = editButtons.find(b => b.text().includes('panel.message.cancel'))
+    expect(cancelBtn).toBeDefined()
+    await cancelBtn!.trigger('click')
+    // 最后一次 emit 是 false（D2：负载携带 turnKey）
+    const events = wrapper.emitted('edit-state-change')!
+    expect(events[events.length - 1]).toEqual([{ editing: false, turnKey: 'u1' }])
+  })
+
+  // D3 卸载清理（C2 检查点）：编辑态中组件卸载时必须补发解除信号——切 session 等
+  // 路径卸载本组件时 watch 随作用域失效、显式清理动作不会执行，父组件钉住状态
+  // 只能靠这条 emit 复位。C2 实测：onUnmounted 内 emit 父监听器可达。
+  it('编辑态中卸载 → 父组件收到 { editing: false, turnKey }（D3 卸载清理）', async () => {
+    const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    const buttons = actions.findAll('button')
+    await buttons[1].trigger('click')
+    expect(wrapper.emitted('edit-state-change')!.length).toBe(1)
+    // 不退出编辑直接卸载（模拟切 session 时 UserBubble 被连根卸载）
+    wrapper.unmount()
+    // test-utils 的 wrapper.unmount() 会先 removeEventHistory 清掉卸载前的 emit 记录，
+    // 故数组里只剩卸载流程中钩子补发的那一条——恰好证明它来自卸载清理而非先前操作
+    expect(wrapper.emitted('edit-state-change')).toEqual([[{ editing: false, turnKey: 'u1' }]])
+  })
+})
+
+// ── [D3] submitEdit 双发锁（isPendingSend 互斥，adversarial-review-fixes u3）──
+// 防 send 与 editAndResend 并发覆盖 useChat 的 pendingDirectSends（per-sid 单条 Map）：
+// 提交在途（pendingSend 瞬时态）时 submitEdit 直接 return——编辑态保持、草稿不丢。
+
+describe('[D3] submitEdit 双发锁', () => {
+  /** 进入编辑态并输入草稿；返回 wrapper + editAndResend spy */
+  async function enterEditAndType(provideOverrides: Parameters<typeof mockChatProvide>[0], draft: string) {
+    const editAndResend = vi.fn()
+    const wrapper = mount(UserBubble, {
+      props: { turn: makeTurn(), sessionId: 's1', canEdit: true, isSessionEditable: false },
+      global: {
+        provide: mockChatProvide({ editAndResend, ...provideOverrides }),
+        stubs: { MarkdownRenderer: true, ImageThumb: true },
+      },
+    })
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    await actions.findAll('button')[1]!.trigger('click')
+    await wrapper.find('textarea').setValue(draft)
+    return { wrapper, editAndResend }
+  }
+
+  /** 编辑态里的发送按钮（文本 = t key panel.composer.send） */
+  function findSendButton(wrapper: ReturnType<typeof mount>) {
+    const btn = wrapper.findAll('button').find(b => b.text().includes('panel.composer.send'))
+    expect(btn).toBeDefined()
+    return btn!
+  }
+
+  it('isPendingSend=true（提交在途）→ submitEdit 早退：不提交 + 编辑态保持 + 草稿不丢', async () => {
+    const { wrapper, editAndResend } = await enterEditAndType({ isPendingSend: () => true }, '编辑后的内容')
+    await findSendButton(wrapper).trigger('click')
+    expect(editAndResend).not.toHaveBeenCalled()
+    // 早退置于 editingUserId=null 之前：编辑态保持、draftText 保留（提交收尾后可重试）
+    expect(wrapper.find('textarea').exists()).toBe(true)
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('编辑后的内容')
+  })
+
+  it('isPendingSend=false → 正常提交（segments 重建 + editAndResend）+ 编辑态收尾', async () => {
+    const { wrapper, editAndResend } = await enterEditAndType({ isPendingSend: () => false }, '编辑后的内容')
+    await findSendButton(wrapper).trigger('click')
+    expect(editAndResend).toHaveBeenCalledTimes(1)
+    expect(editAndResend).toHaveBeenCalledWith('s1', 'u1', [{ type: 'text', text: '编辑后的内容' }])
+    expect(wrapper.find('textarea').exists()).toBe(false)
+  })
+
+  // （「未 provide isPendingSend 旧壳层兼容降级」用例随 D6 收敛删除——isPendingSend 改必填后
+  // 缺位场景在类型层不可构造，降级分支已从 submitEdit 删除。）
+})
+
+// ── [MF-2] submitEdit 编辑含命令的消息：prompt 中命令只出现一次 ──
+// 草稿展示归位全文（命令可见、可改）；提交时 rebuildSegmentsWithEditedText 剥离与 slash 段
+// 重复的前缀命令并保留 slash 段，避免序列化归位后命令翻倍（`/compact /compact …`）。
+describe('[MF-2] submitEdit 编辑重发 slash 段不翻倍', () => {
+  /** 挂载含 live content = [text('总结'), slash('compact')] 的气泡（DOM 序，命令 chip 就地插） */
+  function mountCommandMessage(prompts: string[]) {
+    const editAndResend = vi.fn((_sid: string, _uid: string, segs: Segment[]) => {
+      prompts.push(segmentsToPrompt(segs))
+    })
+    const segments: Segment[] = [
+      { type: 'text', text: '总结' },
+      { type: 'slash', name: 'compact' },
+    ]
+    const wrapper = mount(UserBubble, {
+      props: {
+        turn: makeTurn({
+          user: { id: 'u1', role: 'user', content: segments, status: 'complete', timestamp: NOW } as Message,
+        }),
+        sessionId: 's1',
+        canEdit: true,
+        isSessionEditable: false,
+      },
+      global: {
+        provide: mockChatProvide({ editAndResend }),
+        stubs: { MarkdownRenderer: true, ImageThumb: true },
+      },
+    })
+    return wrapper
+  }
+
+  it('草稿展示归位全文（命令可见可改）→ 直接发送：prompt = `/compact 总结`（命令仅一次）', async () => {
+    const prompts: string[] = []
+    const wrapper = mountCommandMessage(prompts)
+    await wrapper.find('.group\\/user > .opacity-0').findAll('button')[1]!.trigger('click')
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('/compact 总结')
+    const sendBtn = wrapper.findAll('button').find((b) => b.text().includes('panel.composer.send'))
+    expect(sendBtn).toBeDefined()
+    await sendBtn!.trigger('click')
+    // 修复前为 `/compact /compact 总结`（命令翻倍）；现在命令只由 slash 段承担一次
+    expect(prompts).toEqual(['/compact 总结'])
+    expect(prompts[0]!.split('/compact').length - 1).toBe(1)
+  })
+
+  it('用户改了正文后发送：prompt 命令仍仅一次且与命令名一致', async () => {
+    const prompts: string[] = []
+    const wrapper = mountCommandMessage(prompts)
+    await wrapper.find('.group\\/user > .opacity-0').findAll('button')[1]!.trigger('click')
+    await wrapper.find('textarea').setValue('/compact 总结一下')
+    const sendBtn = wrapper.findAll('button').find((b) => b.text().includes('panel.composer.send'))
+    await sendBtn!.trigger('click')
+    expect(prompts).toEqual(['/compact 总结一下'])
+    expect(prompts[0]!.split('/compact').length - 1).toBe(1)
+  })
+
+  it('用户改命令名（/compact → /goal）：prompt 只含新命令，旧命令不残留', async () => {
+    const prompts: string[] = []
+    const wrapper = mountCommandMessage(prompts)
+    await wrapper.find('.group\\/user > .opacity-0').findAll('button')[1]!.trigger('click')
+    await wrapper.find('textarea').setValue('/goal 总结')
+    const sendBtn = wrapper.findAll('button').find((b) => b.text().includes('panel.composer.send'))
+    await sendBtn!.trigger('click')
+    expect(prompts).toEqual(['/goal 总结'])
+  })
+})
+
+// ── [轮 3 收尾] submitEdit 编辑含 skill 段的消息：prompt 中标记只出现一次 ──
+// 草稿由 normalizeContent 回填标记文本（视觉退化，已登记 §3.5-⑤②）；提交时
+// rebuildSegmentsWithEditedText 剥离编辑稿中与该段重复的标记并保留段——修复前标记翻倍，
+// runtime 注入器按标记逐个展开 ⇒ 同一 SKILL.md 注入两遍。
+describe('[轮 3] submitEdit 编辑重发 skill 段标记不翻倍', () => {
+  const SKILL: Segment = { type: 'skill', name: 'review', location: '/skills/review/SKILL.md' }
+  const MARKER = buildSkillMarker('review', '/skills/review/SKILL.md')
+
+  /** 挂载含 live content = [text('正文'), skill] 的气泡（D4-a：chip 就地插在正文之后） */
+  function mountSkillMessage(prompts: string[]) {
+    const editAndResend = vi.fn((_sid: string, _uid: string, segs: Segment[]) => {
+      prompts.push(segmentsToPrompt(segs))
+    })
+    const segments: Segment[] = [{ type: 'text', text: '正文' }, SKILL]
+    return mount(UserBubble, {
+      props: {
+        turn: makeTurn({
+          user: { id: 'u1', role: 'user', content: segments, status: 'complete', timestamp: NOW } as Message,
+        }),
+        sessionId: 's1',
+        canEdit: true,
+        isSessionEditable: false,
+      },
+      global: {
+        provide: mockChatProvide({ editAndResend }),
+        stubs: { MarkdownRenderer: true, ImageThumb: true },
+      },
+    })
+  }
+
+  async function submitDraft(wrapper: ReturnType<typeof mount>, draft?: string) {
+    await wrapper.find('.group\\/user > .opacity-0').findAll('button')[1]!.trigger('click')
+    if (draft !== undefined) await wrapper.find('textarea').setValue(draft)
+    const sendBtn = wrapper.findAll('button').find((b) => b.text().includes('panel.composer.send'))
+    expect(sendBtn).toBeDefined()
+    await sendBtn!.trigger('click')
+  }
+
+  it('草稿回填标记文本 → 直接提交：prompt 标记仅一次（修复前为两次）', async () => {
+    const prompts: string[] = []
+    const wrapper = mountSkillMessage(prompts)
+    await wrapper.find('.group\\/user > .opacity-0').findAll('button')[1]!.trigger('click')
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe(`正文${MARKER}`)
+    const sendBtn = wrapper.findAll('button').find((b) => b.text().includes('panel.composer.send'))
+    await sendBtn!.trigger('click')
+    expect(prompts).toEqual([`正文${MARKER}`])
+    expect(prompts[0]!.split('<taiji-skill').length - 1).toBe(1)
+  })
+
+  it('用户只改正文后提交：prompt 标记仍仅一次且正文更新', async () => {
+    const prompts: string[] = []
+    const wrapper = mountSkillMessage(prompts)
+    await submitDraft(wrapper, `改后的正文${MARKER}`)
+    expect(prompts).toEqual([`改后的正文${MARKER}`])
+    expect(prompts[0]!.split('<taiji-skill').length - 1).toBe(1)
+  })
+
+  it('用户删掉标记只留正文：prompt 无标记（段不被复活）', async () => {
+    const prompts: string[] = []
+    const wrapper = mountSkillMessage(prompts)
+    await submitDraft(wrapper, '改后的正文')
+    expect(prompts).toEqual(['改后的正文'])
+    expect(prompts[0]!.split('<taiji-skill').length - 1).toBe(0)
+  })
+})
+
+/* ── [chat-flow-timestamp U2 + D2 悬停化] UserBubble 行尾时刻 ──
+ * turn.user.timestamp 有值 → 气泡左侧 user-timestamp 槽显本地时刻；编辑态（textarea 分支）
+ * 与展示态是 v-if / v-else 互斥分支，编辑态下整个展示分支（含时间槽）被替换。
+ * [D2] 槽从常驻改悬停按需：DOM 恒在（timestamp 有值时），可见度由
+ * `opacity-0 + group-hover/ts:opacity-100 + group-focus-within/ts:opacity-100` 三件套控制
+ * （时刻与气泡同处 group/ts 行；悬停该行 / 键盘焦点进入该行两翼显现）。happy-dom 无真实
+ * hover（PR-2 探针结论：纯 CSS 手法下断言类名三件套，V2/V3 的形态等价物）。
+ * 期望时刻用本地 Date getter 构造（clockOf，与 formatClock 同口径；禁硬编码时区串）。 */
+function clockOf(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+describe('chat-flow-timestamp U2: UserBubble 行尾时刻（A4 + D2 悬停化）', () => {
+  // 固定 epoch（非 Date.now()）：失败时可复现的确定值
+  const USER_TS = 1700000000000
+
+  function makeTurnWithTs(): MessageTurn {
+    return makeTurn({
+      user: { id: 'u1', role: 'user', content: 'hello world', status: 'complete', timestamp: USER_TS },
+    })
+  }
+
+  it('turn.user.timestamp 有值 → user-timestamp 槽文本 = formatClock(该值)（本地时刻）', () => {
+    const wrapper = mountBubble({ turn: makeTurnWithTs() })
+    const slot = wrapper.find('[data-testid="user-timestamp"]')
+    expect(slot.exists()).toBe(true)
+    expect(slot.text().replace(/\s+/g, '')).toBe(clockOf(USER_TS))
+  })
+
+  it('V2: user-timestamp 无常驻时刻——opacity-0 默认隐藏 + 悬停/键盘焦点两翼显现类（group/ts 行）', () => {
+    const wrapper = mountBubble({ turn: makeTurnWithTs() })
+    const slot = wrapper.find('[data-testid="user-timestamp"]')
+    expect(slot.exists()).toBe(true)
+    // 未悬停视觉隐藏
+    expect(slot.classes()).toContain('opacity-0')
+    expect(slot.classes()).not.toContain('opacity-100')
+    // 悬停该行 / 键盘焦点进入该行两翼显现
+    expect(slot.classes()).toContain('group-hover/ts:opacity-100')
+    expect(slot.classes()).toContain('group-focus-within/ts:opacity-100')
+  })
+
+  it('编辑态不渲染 user-timestamp 槽（v-if/v-else 互斥：编辑分支替换含时间槽的展示分支）', async () => {
+    // 编辑态触发与上方编辑态组同款：canEdit=true + 非 sessionEditable + hover actions 第 2 个按钮
+    // （该触发在本测试环境轻量可行，故直测而非仅靠 v-if 语义说明）
+    const wrapper = mountBubble({ turn: makeTurnWithTs(), canEdit: true, isSessionEditable: false })
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    await actions.findAll('button')[1]!.trigger('click')
+    // 已进入编辑态（textarea 渲染）
+    expect(wrapper.find('textarea').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="user-timestamp"]').exists()).toBe(false)
+  })
+})
+
+// ── [U5 消息撤回 D6] 撤回按钮单入口（生成中置灰 + 单回调透传）──
+// D6 收敛后 UI 不做路由判定（在途 cancel / 已送达树内回退的分派在 core useChat.revokeMessage
+// 单点，其派生视图复核由 core 侧测试覆盖），UI 仅用 isActive 谓词做展示态（置灰 + tooltip）；
+// 此处锁定单回调透传与生成中检查。
+describe('[U5] UserBubble 撤回单入口（D6）', () => {
+  const onRevokeMessage = vi.fn()
+
+  function mountRevokeBubble(isActive = false) {
+    return mount(UserBubble, {
+      props: { turn: makeTurn(), sessionId: 's1', canEdit: false, isSessionEditable: false },
+      global: {
+        provide: mockChatProvide({ onRevokeMessage, isActive: () => isActive }),
+        stubs: { MarkdownRenderer: true, ImageThumb: true },
+      },
+    })
+  }
+
+  function revokeButton(wrapper: ReturnType<typeof mount>) {
+    const btn = wrapper.find('[data-testid="msg-revoke-button"]')
+    expect(btn.exists()).toBe(true)
+    return btn
+  }
+
+  beforeEach(() => {
+    onRevokeMessage.mockClear()
+  })
+
+  it('点击撤回 → 单回调 onRevokeMessage 透传 (sessionId, targetId)，路由判定不在 UI', async () => {
+    const wrapper = mountRevokeBubble()
+    await revokeButton(wrapper).trigger('click')
+    expect(onRevokeMessage).toHaveBeenCalledTimes(1)
+    expect(onRevokeMessage).toHaveBeenCalledWith('s1', 'u1')
+  })
+
+  it('生成中（isActive）→ 置灰（aria-disabled）+ tooltip 文案，点击不触达撤回回调（D2 附带裁决）', async () => {
+    const wrapper = mountRevokeBubble(true)
+    const btn = revokeButton(wrapper)
+    expect(btn.attributes('aria-disabled')).toBe('true')
+    // tooltip 文案断言（title = i18n key；测试环境 t 回显 key）
+    expect(btn.attributes('title')).toBe('panel.message.revokeGenerating')
+    await btn.trigger('click')
+    expect(onRevokeMessage).not.toHaveBeenCalled()
+  })
+
+  it('非生成中 → tooltip 为撤回默认文案（可撤态）', () => {
+    const wrapper = mountRevokeBubble()
+    expect(revokeButton(wrapper).attributes('title')).toBe('panel.message.revoke')
+    expect(revokeButton(wrapper).attributes('aria-disabled')).toBe('false')
+  })
+})
+
+// ======================================================================
+// ← folded-notice.test.ts
+// ======================================================================
+
+/** i18n stub：返回键名本身，断言「走了哪个键」不依赖真实词表 */
+const t = (key: string, _named?: Record<string, unknown>): string => key
+
+const TYPES: FoldedNoticeType[] = ['bash', 'subagent', 'workflow', 'managed']
+
+/** 最小合法 FoldedNoticeRow：显式传 outcome / exitCode / endReason 的用例按参数覆盖 */
+function row(overrides: Partial<FoldedNoticeRow> = {}): FoldedNoticeRow {
+  return {
+    type: 'bash',
+    summary: '',
+    fullText: '',
+    outcome: 'neutral',
+    id: 'id-1',
+    ...overrides,
+  }
+}
+
+// ── 四个映射表 · 键集合完备 + 逐成员值 ────────────────────────────────────────────
+
+describe('FOLDED_TYPE_ICON', () => {
+  it('四类型键集合完备且成员值正确', () => {
+    expect(Object.keys(FOLDED_TYPE_ICON).sort()).toEqual([...TYPES].sort())
+    const expected: Record<FoldedNoticeType, Component> = {
+      bash: FOLDED_TYPE_ICON.bash,
+      subagent: FOLDED_TYPE_ICON.subagent,
+      workflow: FOLDED_TYPE_ICON.workflow,
+      managed: FOLDED_TYPE_ICON.managed,
+    }
+    // 逐成员与源表同引用（表是唯一映射点，断言守住每个键不被误改/误删）
+    expect(FOLDED_TYPE_ICON).toEqual(expected)
+    // 图标组件四类型互不相同（bash 终端 / subagent 机器人 / workflow 流程 / managed 层叠）
+    expect(new Set(Object.values(FOLDED_TYPE_ICON)).size).toBe(4)
+  })
+})
+
+describe('FOLDED_TYPE_LABEL_KEY', () => {
+  it('四类型键集合完备且成员值正确', () => {
+    expect(Object.keys(FOLDED_TYPE_LABEL_KEY).sort()).toEqual([...TYPES].sort())
+    expect(FOLDED_TYPE_LABEL_KEY.bash).toBe('panel.message.noticeFoldedBash')
+    expect(FOLDED_TYPE_LABEL_KEY.subagent).toBe('panel.message.noticeFoldedSubagent')
+    expect(FOLDED_TYPE_LABEL_KEY.workflow).toBe('panel.message.noticeFoldedWorkflow')
+    expect(FOLDED_TYPE_LABEL_KEY.managed).toBe('panel.message.noticeFoldedManagedSession')
+  })
+})
+
+describe('FOLDED_TYPE_WORD_KEY', () => {
+  it('四类型键集合完备且成员值正确', () => {
+    expect(Object.keys(FOLDED_TYPE_WORD_KEY).sort()).toEqual([...TYPES].sort())
+    expect(FOLDED_TYPE_WORD_KEY.bash).toBe('panel.message.noticeTypeBash')
+    expect(FOLDED_TYPE_WORD_KEY.subagent).toBe('panel.message.noticeTypeSubagent')
+    expect(FOLDED_TYPE_WORD_KEY.workflow).toBe('panel.message.noticeTypeWorkflow')
+    expect(FOLDED_TYPE_WORD_KEY.managed).toBe('panel.message.noticeTypeManagedSession')
+  })
+})
+
+describe('FOLDED_TYPE_DESC_KEY', () => {
+  it('四类型键集合完备且成员值正确', () => {
+    expect(Object.keys(FOLDED_TYPE_DESC_KEY).sort()).toEqual([...TYPES].sort())
+    expect(FOLDED_TYPE_DESC_KEY.bash).toBe('panel.message.noticeTypeDescBash')
+    expect(FOLDED_TYPE_DESC_KEY.subagent).toBe('panel.message.noticeTypeDescSubagent')
+    expect(FOLDED_TYPE_DESC_KEY.workflow).toBe('panel.message.noticeTypeDescWorkflow')
+    expect(FOLDED_TYPE_DESC_KEY.managed).toBe('panel.message.noticeTypeDescManagedSession')
+  })
+})
+
+// ── foldedStatusText · bash 分支（§3.4：显 exit N 字面量 / 超时词 / 中性不显）──────
+
+describe('foldedStatusText · bash', () => {
+  it('endReason=timeout → 超时词键（timeout 优先于 outcome 字面量）', () => {
+    const text = foldedStatusText(
+      row({ type: 'bash', endReason: 'timeout', outcome: 'neutral', exitCode: null }),
+      t,
+    )
+    expect(text).toBe('panel.message.noticeStatusTimeout')
+  })
+
+  it('outcome=success → exit 0 字面量（不走 i18n）', () => {
+    const text = foldedStatusText(row({ type: 'bash', outcome: 'success', exitCode: 0 }), t)
+    expect(text).toBe('exit 0')
+  })
+
+  it('outcome=failed → exit <code> 字面量', () => {
+    const text = foldedStatusText(row({ type: 'bash', outcome: 'failed', exitCode: 127 }), t)
+    expect(text).toBe('exit 127')
+  })
+
+  it('中性（outcome=neutral 且 endReason 缺失）→ 空串，不冒充成败', () => {
+    const text = foldedStatusText(row({ type: 'bash', outcome: 'neutral' }), t)
+    expect(text).toBe('')
+  })
+})
+
+// ── foldedStatusText · 非 bash 三类型 × 三态（全走 t() 键）────────────────────────
+
+describe('foldedStatusText · subagent / workflow / managed', () => {
+  const nonBashTypes: FoldedNoticeType[] = ['subagent', 'workflow', 'managed']
+
+  it.each(nonBashTypes)('%s: outcome=success → noticeStatusSuccess 键', (type) => {
+    const text = foldedStatusText(row({ type, outcome: 'success' }), t)
+    expect(text).toBe('panel.message.noticeStatusSuccess')
+  })
+
+  it.each(nonBashTypes)('%s: outcome=failed → noticeStatusFailed 键', (type) => {
+    const text = foldedStatusText(row({ type, outcome: 'failed' }), t)
+    expect(text).toBe('panel.message.noticeStatusFailed')
+  })
+
+  it.each(nonBashTypes)('%s: outcome=neutral → noticeStatusNeutral 键', (type) => {
+    const text = foldedStatusText(row({ type, outcome: 'neutral' }), t)
+    expect(text).toBe('panel.message.noticeStatusNeutral')
+  })
+})
+
+// ======================================================================
+// ← ambiguous-file-popover.test.ts
+// ======================================================================
+
+function makeNode(path: string): FileNode {
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  return { path, name, type: 'file' }
+}
+
+const CANDIDATES = [makeNode('docs/design.md'), makeNode('src/design.md')]
+
+function mountPopover() {
+  return mount(AmbiguousFilePopover, {
+    props: { open: true, basename: 'design.md', candidates: CANDIDATES, anchorEl: null },
+  })
+}
+
+/** 在 body 目标元素上真实派发 keydown（bubbles 冒泡到 window capture）。
+ * 返回 { ev, targetSpy }：targetSpy = 目标元素 bubble 监听（stopPropagation 生效时不可达） */
+function pressKey(key: string, opts: { isComposing?: boolean } = {}) {
+  const target = document.createElement('div')
+  document.body.appendChild(target)
+  const targetSpy = vi.fn()
+  target.addEventListener('keydown', targetSpy)
+  const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+  if (opts.isComposing) Object.defineProperty(ev, 'isComposing', { value: true })
+  target.dispatchEvent(ev)
+  target.remove()
+  return { ev, targetSpy }
+}
+
+describe('AmbiguousFilePopover 键盘导航（window capture）', () => {
+  it('非组合态 Enter → emit select(首项) + preventDefault + stopPropagation 截断 target 传播', () => {
+    const wrapper = mountPopover()
+    const { ev, targetSpy } = pressKey('Enter')
+    expect(ev.defaultPrevented).toBe(true)
+    expect(targetSpy).not.toHaveBeenCalled()
+    expect(wrapper.emitted('select')).toEqual([['docs/design.md']])
+    wrapper.unmount()
+  })
+
+  it('非组合态 Tab → 同 Enter：emit select + preventDefault + stopPropagation', () => {
+    const wrapper = mountPopover()
+    const { ev, targetSpy } = pressKey('Tab')
+    expect(ev.defaultPrevented).toBe(true)
+    expect(targetSpy).not.toHaveBeenCalled()
+    expect(wrapper.emitted('select')).toEqual([['docs/design.md']])
+    wrapper.unmount()
+  })
+
+  it('e.isComposing:true 的 Enter → 放行：不 select 不 preventDefault 不截断', () => {
+    const wrapper = mountPopover()
+    const { ev, targetSpy } = pressKey('Enter', { isComposing: true })
+    expect(ev.defaultPrevented).toBe(false)
+    expect(targetSpy).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('select')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('compositionstart 置位组合态：Enter/Tab 放行，compositionend 后恢复选中', () => {
+    const wrapper = mountPopover()
+    window.dispatchEvent(new CompositionEvent('compositionstart'))
+    const during = pressKey('Tab')
+    expect(during.ev.defaultPrevented).toBe(false)
+    expect(during.targetSpy).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('select')).toBeUndefined()
+
+    window.dispatchEvent(new CompositionEvent('compositionend'))
+    const after = pressKey('Tab')
+    expect(after.ev.defaultPrevented).toBe(true)
+    expect(after.targetSpy).not.toHaveBeenCalled()
+    expect(wrapper.emitted('select')).toEqual([['docs/design.md']])
+    wrapper.unmount()
+  })
+
+  it('Esc → 关闭浮层（update:open false）+ preventDefault，不 emit select', () => {
+    const wrapper = mountPopover()
+    const { ev } = pressKey('Escape')
+    expect(ev.defaultPrevented).toBe(true)
+    expect(wrapper.emitted('update:open')).toEqual([[false]])
+    expect(wrapper.emitted('select')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('ArrowDown/ArrowUp 循环导航后 Enter 选中高亮项；Arrow 键不 emit select', () => {
+    const wrapper = mountPopover()
+    pressKey('ArrowDown')
+    expect(wrapper.emitted('select')).toBeUndefined()
+    const { ev } = pressKey('Enter')
+    expect(ev.defaultPrevented).toBe(true)
+    expect(wrapper.emitted('select')).toEqual([['src/design.md']])
+    wrapper.unmount()
+  })
+
+  it('组件卸载后 window 监听移除：Enter 不再触发 select', () => {
+    const wrapper = mountPopover()
+    wrapper.unmount()
+    const { ev } = pressKey('Enter')
+    expect(ev.defaultPrevented).toBe(false)
+  })
+})
+
+// ======================================================================
+// ← useCopy.test.ts
+// ======================================================================
+
+describe('useCopy', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('正常路径：writeText resolve → copied 置 key', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const { copied, copy } = useCopy()
+    copy('hello', 'k1')
+    expect(writeText).toHaveBeenCalledWith('hello')
+    expect(copied.value).toBe('k1')
+  })
+
+  it('writeText reject：静默吞错（.catch），反馈态照常置位', () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'))
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const { copied, copy } = useCopy()
+    expect(() => copy('hello', 'k1')).not.toThrow()
+    expect(copied.value).toBe('k1')
+  })
+
+  it('非安全上下文（clipboard undefined）：检查早退不抛错、不置 copied 反馈', () => {
+    // LAN http 下 navigator.clipboard 为 undefined——直调 .writeText 是同步 TypeError，
+    // .catch 接不住；回归锚 = 检查分支（早退，无 writeText 调用无反馈态）。
+    vi.stubGlobal('navigator', {})
+    const { copied, copy } = useCopy()
+    expect(() => copy('hello', 'k1')).not.toThrow()
+    expect(copied.value).toBeNull()
+  })
+
+  it('反馈清除：COPIED_FEEDBACK_MS 后 copied 归 null；连续复制重置定时', () => {
+    vi.useFakeTimers()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const { copied, copy } = useCopy()
+    copy('a', 'k1')
+    copy('b', 'k2')
+    expect(copied.value).toBe('k2')
+    vi.advanceTimersByTime(2000)
+    expect(copied.value).toBeNull()
+  })
+})
