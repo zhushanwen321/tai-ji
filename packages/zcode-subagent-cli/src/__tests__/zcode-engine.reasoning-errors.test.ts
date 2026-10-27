@@ -11,6 +11,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+// 2026-10-27 测试范围收缩：本文件每例经 makeEngine 真实 spawn fake appserver 子进程（真进程 reasoning 镜像与
+// 错误分类，e2e-map E2E-INTEG-65），整文件迁入集成门控 TAIJI_TEST_INTEGRATION——门控关闭时 skip，CI 或按改动
+// 范围触发时真跑。门控 import 走包内副本 integration-gate.local.ts（SSOT = test-guard/integration-gate.ts）。
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "./integration-gate.local.ts";
 import { describe, expect, it } from "vitest";
 
 import type { AgentEvent } from "@zhushanwen/subagent-engine-sdk";
@@ -87,7 +91,9 @@ async function expectReasoningPick(
   expect(create.params["thoughtLevel"]).toBe(expected);
 }
 
-describe("reasoningLevel 择档（目录值域 × thinkingLevel）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `reasoningLevel 择档（目录值域 × thinkingLevel）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("无 thinkingLevel → 值域首值（最小档）且镜像到 thoughtLevel（CLI 只认 thoughtLevel 通道）", async () => {
     await expectReasoningPick(["disabled", "low", "high"], undefined, "disabled");
   }, 15_000);
@@ -151,7 +157,9 @@ describe("reasoningLevel 择档（目录值域 × thinkingLevel）", () => {
 // 多会话并发（RA3 双会话地基：FAKE_STAMP_SESSION——推送按会话归因）
 // ============================================================
 
-describe("多会话并发（单常驻进程双会话不串线）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `多会话并发（单常驻进程双会话不串线）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("并发两 runTurn：各自 sessionId/事件流/结果独立，boot 计数 1（同进程共享）", async () => {
     // distinctSessionIds：fake 缺省 create 应答每会话独立 sess_<请求id>；stamp 后
     // 推送按目标会话归因（telemetry 帧补 sid——并发下不再依赖「唯一在途」兜底）
@@ -249,7 +257,9 @@ function makeDegradeCtx(overrides?: Partial<RunContext>): RunContext {
 // 错误分类表（非漂移类：-32603 / -32004 / -32010 不降级）
 // ============================================================
 
-describe("错误分类（错误规格表）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `错误分类（错误规格表）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("-32603 'Model config is missing' → engine_credential_missing，不降级（第二任务仍走 app-server）", async () => {
     const { engine, stateFile, workspace } = makeDegradeEngine({
       createError: { code: -32603, message: "Model config is missing" },

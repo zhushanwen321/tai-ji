@@ -246,7 +246,9 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 
 // ------------------------------------------- 四帧型分发（附录 A.1）
 
-describe("四帧型分发（NDJSON，无 jsonrpc 字段）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `四帧型分发（NDJSON，无 jsonrpc 字段）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("客户端请求帧：出站精确键集 {id, method, params}——无 jsonrpc、无未知键（对面 strict 拒未知键）", async () => {
     const { conn, stateFile } = makeConnection();
     await conn.request("test/echo", { a: 1 });
@@ -322,7 +324,9 @@ describe("四帧型分发（NDJSON，无 jsonrpc 字段）", () => {
 
 // ------------------------------------------- 请求-应答 id 关联
 
-describe("请求-应答 id 关联", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `请求-应答 id 关联${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("并发多请求不串线：3 个在途请求各自 resolve 自己的回显；id 自增互异", async () => {
     const { conn, stateFile } = makeConnection();
     const [a, b, c] = await Promise.all([
@@ -352,7 +356,9 @@ describe("请求-应答 id 关联", () => {
 
 // ------------------------------------------- 反向请求应答（D9）
 
-describe("反向请求应答（D9）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `反向请求应答（D9）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("session/requestRuntimePreferences → 常量表应答逐字段（真实协议：create 先发反向请求并等应答）", async () => {
     const { conn, stateFile } = makeConnection();
     const created = await conn.request<{ session: { sessionId: string } }>("session/create", {
@@ -415,7 +421,9 @@ describe("反向请求应答（D9）", () => {
 
 // ------------------------------------------- 崩溃收割（onClose）
 
-describe("崩溃收割（onClose/exit）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `崩溃收割（onClose/exit）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("进程意外退出：全部在途 reject，错误信息附 stderr 尾（400 字符截断）", async () => {
     const { conn } = makeConnection();
     await conn.request("test/echo", { warm: true });
@@ -447,7 +455,9 @@ describe("崩溃收割（onClose/exit）", () => {
 
 // ------------------------------------------- stderr tee 落盘
 
-describe("stderr tee 落盘", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `stderr tee 落盘${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("stderr 实时 append 到参数化路径（引擎数据目录注入点；测试用 tmp）", async () => {
     const { conn, stderrLog } = makeConnection({ stderrLines: true });
     await conn.request("test/echo", {});
@@ -465,7 +475,9 @@ describe("stderr tee 落盘", () => {
 
 // ------------------------------------------- env 惯例（构造注入点）
 
-describe("env 惯例（共享宿主 HOME 形态）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `env 惯例（共享宿主 HOME 形态）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("buildAppServerEnv：HOME 正向透传（共享宿主）+ 遥测关闭 + nesting guard 剥离/注入（fake 侧 env 快照）", async () => {
     const { conn, stateFile } = makeConnection({ polluteNested: true });
     await conn.request("test/echo", {});
@@ -488,7 +500,9 @@ describe("env 惯例（共享宿主 HOME 形态）", () => {
 
 // ------------------------------------------- 关闭原语（R4 dispose 的连接侧原语）
 
-describe("关闭原语", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `关闭原语${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("close()：同步 SIGTERM 面——进程随后死亡；幂等；只起过一代", async () => {
     const { conn, stateFile } = makeConnection();
     await conn.request("test/echo", {});
@@ -543,7 +557,9 @@ describe("关闭原语", () => {
 
 // ------------------------------------------- protocol 自报与宽容解析
 
-describe("protocol 自报与宽容解析", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `protocol 自报与宽容解析${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("首帧 {protocol:{name,version}} 自报忽略不抛，protocolInfo 记录，连接可用", async () => {
     const { conn } = makeConnection();
     const r = await conn.request("test/echo", { ok: 1 });
@@ -815,7 +831,9 @@ function makeMockChannel(overrides: ScenarioOverrides = {}): MockHandle {
 // A.2 帧序列逐字断言（出站精确键集——对面 zod strict 拒未知键）
 // ============================================================
 
-describe("A.2 帧序列逐字断言", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `A.2 帧序列逐字断言${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   // 真进程冒烟：fake 侧 recv 流水证明帧经真实管道收发后的逐字形态（含帧级
   // {id, method, params} 键集——序列化归连接层，此处顺带在对端视角确认）
   it("create 帧：参数键集恰 {workspace, mode, persistence}；workspaceKey='ws-'+sha256 前 16；persistence:'immediate'", async () => {
@@ -930,7 +948,9 @@ describe("A.2 帧序列逐字断言", () => {
 // sessionId 提取（projection.sessionId 恒 "unknown" 勿用）
 // ============================================================
 
-describe("sessionId 提取", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `sessionId 提取${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("golden create 应答：从 result.session.sessionId 提取，不用 projection.sessionId（恒 'unknown'）", async () => {
     const { ch, workspacePath } = makeMockChannel();
     const sid = await ch.createSession({ workspacePath, mode: "yolo" });
@@ -966,7 +986,9 @@ describe("sessionId 提取", () => {
 // 终态判定（D4 + 不变量 1）
 // ============================================================
 
-describe("终态判定", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `终态判定${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   // 真进程冒烟：golden 推送流经真实管道归因到在途 turn（telemetry 帧无 sid 的
   // 唯一在途兜底归因也在真实分发链上验证）
   it("turn.terminal 权威：success → resolve，terminal={status:'success', source:'turn.terminal'}", async () => {
@@ -1084,7 +1106,9 @@ describe("终态判定", () => {
 // [PR3] onActivity：非终态非增量 session/event 帧的活性回调
 // ============================================================
 
-describe("onActivity（tool 执行期活性）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `onActivity（tool 执行期活性）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   // 真机探针实证（/tmp/zcode-activity-probe.log，2026-09-10）：工具执行期
   // session/event 每隔 ~1.0s 推一帧 tool.updated {kind:"progress"}——既非
   // final-frame（无 response）也非 delta（无 delta 字段），此前不产生任何宿主可见
@@ -1173,7 +1197,9 @@ describe("onActivity（tool 执行期活性）", () => {
 // 权威终态迟到分级日志（P-Z2 常态迟到降噪：final-frame 先落定 + turn.terminal 迟到）
 // ============================================================
 
-describe("权威终态迟到分级日志", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `权威终态迟到分级日志${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   // 真机实证（P-Z2）：该形态唯一可达路径是 success 终态常态迟到——每个成功任务
   // 必经。原无条件 warn 经 SDK cli-entry stderr 兜底 → runtime [rpc:stderr] 全量
   // console.error 链路，每个成功任务产一条零区分度 ERROR 级日志。此处分级断言
@@ -1274,7 +1300,9 @@ describe("权威终态迟到分级日志", () => {
 // read 兜底与不变量 1（text_delta 拼接 == read 全文，双来源）
 // ============================================================
 
-describe("read 兜底与不变量 1", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `read 兜底与不变量 1${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   // 真进程冒烟：不变量 1 四方一致（delta 拼接 / resolve.response / read 全文 /
   // 收尾帧 response）在真实读写两来源上成立
   it("golden 全链：delta 拼接 === resolve.response === read 全文 === 收尾帧 response（四方一致）", async () => {
@@ -1332,7 +1360,9 @@ describe("read 兜底与不变量 1", () => {
 // usage（收尾帧权威 → read step-finish tokens 宽容兜底）
 // ============================================================
 
-describe("usage", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `usage${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   // 真进程冒烟：收尾帧 usage 经真实管道到达并随 resolve 返回
   it("usage 从收尾帧提取并随 resolve 返回（A.2 权威形态，精确对象——read tokens 不遮蔽）", async () => {
     const { ch, workspacePath } = makeChannel();
@@ -1364,7 +1394,9 @@ describe("usage", () => {
 // close（D4 用后即毁：成功/失败路径都 close——try/finally）
 // ============================================================
 
-describe("close（D4 用后即毁）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `close（D4 用后即毁）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   // 真进程冒烟：fake 侧 recv 流水证明完整请求帧序经真实管道到达对端
   it("成功路径：请求帧序恰 create→subscribe→send→read→close（close 最后）", async () => {
     const { ch, stateFile, workspacePath } = makeChannel();
@@ -1413,7 +1445,9 @@ describe("close（D4 用后即毁）", () => {
 // 错误透传（R5 降级链地基：-32601/-32602 结构化透传）
 // ============================================================
 
-describe("错误透传（-32601/-32602 漂移类）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `错误透传（-32601/-32602 漂移类）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("create -32602：reject 形态 isAppServerRpcError，code/message/data 原样（zod 诊断随 data 带出）；无会话故无 close 帧", async () => {
     const zodIssues = [{ path: ["model"], message: "not an object" }];
     const { ch, requests, workspacePath } = makeMockChannel({
@@ -1482,7 +1516,9 @@ describe("错误透传（-32601/-32602 漂移类）", () => {
 // resolve 时序（不变量 2：resolve 严格晚于全部事件回调）
 // ============================================================
 
-describe("resolve 时序（不变量 2）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `resolve 时序（不变量 2）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("事件回调序在前、resolve 严格最后（终态判定 → read 兜底 → 才 resolve）", async () => {
     const order: string[] = [];
     const { ch, workspacePath } = makeMockChannel();

@@ -997,7 +997,9 @@ describe("engine-client", () => {
 });
 
 // ── 来源区块：remote-engine.test.ts ────────────────────────────────────────────────
-describe("remote-engine", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `remote-engine${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   const FAKE_ENGINE = fileURLToPath(new URL("./__fixtures__/fake-engine.mjs", import.meta.url));
 
   /**
@@ -1940,7 +1942,9 @@ describe("remote-engine", () => {
 });
 
 // ── 来源区块：transport-runtime.test.ts ────────────────────────────────────────────────
-describe("transport-runtime", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `transport-runtime${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   const K = SUBAGENT_CONTROL_FRAME_KINDS;
 
   /** 轮询等待谓词成立（真实 socket/子进程时序有毫秒级延迟）。 */

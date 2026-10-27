@@ -1,14 +1,18 @@
 /**
- * subagent control server 协议与治理编排单测。
+ * subagent control server 协议与治理编排单测（整文件属集成门控组）。
  *
- * 分层（判据三档，docs/TEST-STRATEGY.md「新写测试判据」节）：
- * - 默认组（本文件主体）：引擎侧换成进程内桩 fake-engine.ts（spawn 注入），控制面全部
- *   经 await 帧/事件收尾——第 ② 档「异步但有确定性完成信号」，与负载无关。覆盖协议状态机
- *   （hello/engine_open 失败面/幂等/通道上限）、帧双向与 UTF-8 跨 chunk、帧超限归因、
- *   背压与双上限、engine_close 有界等待、递归树杀 fan-out、pid 文件形状与原子写、日志口径。
- * - 门控组（文件尾部，TAIJI_TEST_INTEGRATION）：真进程组治理——组杀是否真收割孤儿、
- *   kill-on-disconnect 真fan-out、Windows 树杀兜底。这些是「代码 + OS 组合行为」（第 ③ 档，
- *   无完成信号可等），本地默认跳过、CI 或按改动范围触发时真跑。
+ * 2026-10-27 测试范围收缩：本文件登记为文件级集成组成员（packages/runtime/vitest.config.ts
+ * 的 INTEGRATION_TESTS，e2e-map E2E-INTEG-11）——真 unix socket 往返 + 真实超时窗用例
+ * 在负载下无稳定上界，第二类（无门控默认档）不再收集本文件；本地默认跳过，CI 或按改动
+ * 范围触发时（TAIJI_TEST_INTEGRATION=1）真跑——单跑本文件须带该 env（run 命令见 e2e-map E2E-INTEG-11）。
+ *
+ * 用例分两簇（形态沿袭，未随迁移改动）：
+ * - 协议与治理编排：引擎侧换成进程内桩 fake-engine.ts（spawn 注入），控制面经 await
+ *   帧/事件收尾。覆盖协议状态机（hello/engine_open 失败面/幂等/通道上限）、帧双向与
+ *   UTF-8 跨 chunk、帧超限归因、背压与双上限、engine_close 有界等待、递归树杀 fan-out、
+ *   pid 文件形状与原子写、日志口径。
+ * - 门控组（文件尾部）：真进程组治理——组杀是否真收割孤儿、kill-on-disconnect 真
+ *   fan-out、Windows 树杀兜底（「代码 + OS 组合行为」，无完成信号可等）。
  *
  * 桩边界（fake-engine.ts 头注释）：被测逻辑一件不 mock——只换掉「引擎进程」这个协作者；
  * 引擎 argv 语义与 fixtures/fake-engine-cli.mjs 逐条对齐。
@@ -141,7 +145,9 @@ function spyIntentionalCloseLogs(): { warnSpy: LogSpy; logSpy: LogSpy } {
   };
 }
 
-describe('subagent-control server：协议与治理编排（引擎进程内桩）', () => {
+// 文件级集成组成员：门控关闭时本文件不被收集（main exclude + integration include 条件化），
+// 此 skipIf 是防配置漂移的二道防线（直接单跑本文件时同样不落默认组）。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)('subagent-control server：协议与治理编排（引擎进程内桩）', () => {
   it('hello：合法 → hello_ok（runtimePid/protocolVersion）；版本不匹配 → hello_reject version + 断连', async () => {
     const { server } = await setupServer()
 

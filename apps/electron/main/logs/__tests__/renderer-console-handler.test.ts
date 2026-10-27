@@ -21,6 +21,7 @@
  * 运行：cd apps/electron/main && npx vitest run logs/__tests__/renderer-console-handler.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../test-guard/integration-gate.ts'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -64,7 +65,9 @@ function makeParams(overrides: Partial<{ level: string; message: string; lineNum
   }
 }
 
-describe('renderer-console-handler', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `renderer-console-handler${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   let tmpDir: string
   let savedDataDir: string | undefined
   let savedConsoleOff: string | undefined

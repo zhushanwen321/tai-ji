@@ -13,6 +13,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// 2026-10-27 测试范围收缩：本文件每例经 makeEngine 真实 spawn fake appserver 子进程（真进程 abort 链 / dispose
+// 收割，e2e-map E2E-INTEG-64），整文件迁入集成门控 TAIJI_TEST_INTEGRATION——门控关闭时 skip，CI 或按改动范围
+// 触发时真跑。门控 import 走包内副本 integration-gate.local.ts（SSOT = test-guard/integration-gate.ts）。
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "./integration-gate.local.ts";
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineRunResult, RunContext } from "../port-types.ts";
@@ -55,7 +59,9 @@ type EngineRunResult_ = EngineRunResult;
 // abort 链（D3：stop → grace → killChain；stop 成功不 kill）
 // ============================================================
 
-describe("abort 链（D3）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `abort 链（D3）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   /** 无终态推送的挂起场景（仅 state.updated——turn 永不自然落定；scenario 每引擎
    * 固化，故「后续任务」同样挂起——复用形态断言用再次 abort 收尾，不 await 自然终态）。 */
   const hangPushes = [ZCODE_APPSERVER_GOLDEN.pushStream[0]];
@@ -161,7 +167,9 @@ describe("abort 链（D3）", () => {
 // dispose（D6 主体：幂等 / close 帧先于 SIGTERM / dispose 后 run 重建）
 // ============================================================
 
-describe("dispose", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `dispose${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("在途会话：close 帧发出（fake 收到且记入流水）→ 进程收割 → 挂起任务走崩溃路径收尾", async () => {
     const { engine, stateFile, workspace } = makeEngine({
       replaceSendPushes: [ZCODE_APPSERVER_GOLDEN.pushStream[0]], // 挂起不落定
@@ -303,7 +311,9 @@ function makeDisposeCtx(overrides?: Partial<RunContext>): RunContext {
 // dispose 收割（P0-1 U5/D7：在途 turn 收敛 + 不重试 + 窗口量级）
 // ============================================================
 
-describe("dispose 收割（P0-1 U5：引擎集成测试）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `dispose 收割（P0-1 U5：引擎集成测试）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("dispose 时在途 turn 收敛为明确失败且不重试：engine_run_failed、boot 1、create×1（收割≠瞬时崩溃，u-z4 disposed 短路）", async () => {
     // 本用例的失败终态只能来自 dispose 收割链（onClose failAllTurns → dispose
     // no-op 幂等；close 吞没变体由 channel 层 mock 测试承载）——channel 已无

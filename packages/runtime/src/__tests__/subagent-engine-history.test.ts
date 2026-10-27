@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it, afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../test-guard/integration-gate.ts'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -253,7 +254,9 @@ afterAll(async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
-describe('W8 runtime 协议客户端接线（subagent-engine-history）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `W8 runtime 协议客户端接线（subagent-engine-history）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   it('①+② 三级发现消费 + read 走协议：L1 env 根的 fake 引擎被 spawn，①级内容来自协议 read', async () => {
     const messages = await readEngineSubagentHistory(makeRecord(), dataDir)
     // 'fake turn' 只可能来自 fake CLI 的协议 read 应答——内建 reader 链对该 id 落
@@ -457,7 +460,9 @@ describe('extractRecordEngine（record 路由段）', () => {
   })
 })
 
-describe('readEngineSubagentHistory（zcode 三级降级）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `readEngineSubagentHistory（zcode 三级降级）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   it('W8 反转：runtime ①级走协议 read，隔离库 dbPath 在白名单内也不再直读——降②级 journal', async () => {
     // [W8 D9 反转] runtime 不再 import 引擎实现直读 sqlite：①级 = 协议 read（spawn
     // 引擎 CLI）。db fixture 存在且路径在白名单集合内也不被 runtime 消费——本用例

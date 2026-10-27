@@ -102,6 +102,13 @@ const INTEGRATION_TESTS = [
   'src/__tests__/equivalence/thinking-level-effective-e2e.test.ts',
   'src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts',
   'test/skill-registry-watcher-real.test.ts',
+  // 2026-10-27 测试范围收缩（round6 wave2）：真进程 / 真 socket / 真 PTY 的整文件门控族。
+  // 本批 5 个文件内每条用例都包了 describe.skipIf，故不进 INTEGRATION_UNGATED_CARRIERS。
+  'src/__tests__/infra/subagent-control/control-server.test.ts',
+  'test/server-subagent.test.ts',
+  'test/server-subagent-boundary.test.ts',
+  'test/cli-error-envelope.integration.test.ts',
+  'src/services/terminal/__tests__/terminal-service.test.ts',
 ] as const
 
 /**

@@ -17,6 +17,7 @@
  * 运行：cd apps/electron/main && npx vitest run logs/__tests__/crash-journal.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../test-guard/integration-gate.ts'
 import { mkdtempSync, mkdirSync, rmSync, readdirSync, readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -50,7 +51,9 @@ function readSegmentsOldestFirst(dir: string): Array<{ name: string; events: Arr
   }))
 }
 
-describe('crash-journal writer', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `crash-journal writer${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   let tmpDir: string
   let crashesDir: string
   let savedDataDir: string | undefined

@@ -15,6 +15,7 @@
  * 运行：cd apps/electron/main && npx vitest run logs/__tests__/stderr-sink-rotation.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../test-guard/integration-gate.ts'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, rmSync, readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -51,7 +52,9 @@ class FakeChild extends EventEmitter {
   kill = vi.fn(() => true)
 }
 
-describe('electron-runtime-stderr.log size rotation', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `electron-runtime-stderr.log size rotation${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   let tmpDir: string
   let logsDir: string
   const ENV_KEYS = ['TAIJI_AGENT_DATA_DIR', 'TAIJI_LOG_MAX_BYTES'] as const

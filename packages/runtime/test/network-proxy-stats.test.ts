@@ -6,6 +6,7 @@
  * mkdtemp tmp（测试禁触碰真实数据目录）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../test-guard/integration-gate.ts'
 import { spawn } from 'node:child_process'
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -180,7 +181,9 @@ describe('getNetworkProxyStats（聚合 / 水位 / 坏行 / 时间范围）', ()
   })
 })
 
-describe('超 5MB 保尾截断（读聚合入口触发，runtime 唯一截断主体）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `超 5MB 保尾截断（读聚合入口触发，runtime 唯一截断主体）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   function buildBigLines(totalBytes: number, startSeq: number): string[] {
     const lines: string[] = []
     let bytes = 0
@@ -236,7 +239,9 @@ describe('超 5MB 保尾截断（读聚合入口触发，runtime 唯一截断主
   })
 })
 
-describe('并发追加写（子进程形态 N writer × M 行，O_APPEND 单行原子性）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `并发追加写（子进程形态 N writer × M 行，O_APPEND 单行原子性）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   it('4 个并发子进程 writer 各追加 200 行，读侧全部解析无交错坏行', async () => {
     const WRITERS = 4
     const LINES_PER_WRITER = 200

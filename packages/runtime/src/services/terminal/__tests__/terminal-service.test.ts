@@ -7,6 +7,7 @@
  * 运行：cd packages/runtime && npx vitest run src/services/terminal/__tests__/terminal-service.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED } from '../../../../../../test-guard/integration-gate.ts'
 import type { ServerMessage } from '@taiji/shared'
 
 // ── mock node-pty ─────────────────────────────────────────────────────────
@@ -104,7 +105,11 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('TerminalService', () => {
+// 文件级集成组成员（packages/runtime/vitest.config.ts INTEGRATION_TESTS，e2e-map E2E-INTEG 登记）：
+// 门控关闭时本文件不被收集（main exclude + integration include 条件化），下方 skipIf 是
+// 防配置漂移的二道防线。2026-10-27 测试范围收缩（真 WS server / 真 CLI spawn / 真 PTY 迁出无门控默认档）：
+// 单跑本文件须带 TAIJI_TEST_INTEGRATION=1（run 命令见 e2e-map 对应 E2E-INTEG 规则）。
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)('TerminalService', () => {
   it('TS-1: spawn 后广播 terminal.alive，ptyMap 持有 sid', async () => {
     const { messages, publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
@@ -466,7 +471,7 @@ describe('TerminalService', () => {
 // deps.publish 注入真实 MessageBus.publish，锁定 topic 三分类语义在 terminal 三类消息上的落地：
 // terminal.data=transient（订阅者收到、无 seq、不占 ring、不动 seq 计数）、
 // terminal.alive/exit=stream（带 seq 入 ring，重连订阅可回放）。
-describe('TerminalService × MessageBus（wave:perf-w07）', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)('TerminalService × MessageBus（wave:perf-w07）', () => {
   it('W07-1: terminal.data publish 后订阅者收到且无 seq；ring 长度不变、seq 计数不变（transient 语义）', async () => {
     const bus = new MessageBus()
     const ws = createMockWs()

@@ -14,6 +14,7 @@
  * 运行：cd apps/electron/main && npx vitest run logs/__tests__/renderer-log-handler.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../test-guard/integration-gate.ts'
 import { mkdtempSync, rmSync, mkdirSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -77,7 +78,9 @@ function readErrorLines(dataDir: string): ErrorLine[] {
     .map((l) => JSON.parse(l) as ErrorLine)
 }
 
-describe('renderer-log-handler', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `renderer-log-handler${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   let tmpDir: string
   let savedDataDir: string | undefined
 
@@ -211,7 +214,9 @@ describe('renderer-log-handler', () => {
 })
 
 // ── 结构化标记：inbound-frame-dropped → 崩溃登记清单（crash-forensics §3.3 D8 / u10a）──
-describe('renderer-log-handler inbound-frame-dropped 登记清单承接', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `renderer-log-handler inbound-frame-dropped 登记清单承接${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   let tmpDir: string
   let savedDataDir: string | undefined
 

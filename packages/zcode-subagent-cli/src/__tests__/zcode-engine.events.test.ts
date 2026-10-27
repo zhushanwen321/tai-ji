@@ -15,6 +15,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// 2026-10-27 测试范围收缩：本文件每例经 makeEngine 真实 spawn fake appserver 子进程做协议往返（真进程，
+// e2e-map E2E-INTEG-63），整文件迁入集成门控 TAIJI_TEST_INTEGRATION——门控关闭时 skip（名字带 ｜skip：后缀），
+// CI 或按改动范围触发时真跑。门控 import 走包内副本 integration-gate.local.ts（SSOT = test-guard/integration-gate.ts）。
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "./integration-gate.local.ts";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentEvent } from "@zhushanwen/subagent-engine-sdk";
@@ -54,7 +58,9 @@ function bootEnv(stateFile: string): Record<string, unknown> {
 // 事件时序前移 + usage 映射 + 句柄回调时点（不变量 2/3）
 // ============================================================
 
-describe("事件流与回调时点（缺省 appserver 路径）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `事件流与回调时点（缺省 appserver 路径）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("text_delta 逐个实时流出 + 终态 message_end(usage)/turn_end + resolve 严格晚于末事件", async () => {
     const { engine, workspace } = makeEngine();
     const order: string[] = [];
@@ -398,7 +404,9 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
 // 引擎进程重启才生效；跨任务连接复用本身仍是 D1 不变量）
 // ============================================================
 
-describe("连接复用", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `连接复用${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("第二任务复用常驻连接（boot 1），两会话独立 create", async () => {
     const { engine, stateFile, workspace } = makeEngine();
     await engine.run(makeTask({ cwd: workspace }), makeCtx());
@@ -412,7 +420,9 @@ describe("连接复用", () => {
 // capabilities（D5）+ eventGranularity 生产零消费方检查
 // ============================================================
 
-describe("capabilities（D5：仅 eventGranularity 变）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `capabilities（D5：仅 eventGranularity 变）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("单一 app-server 形态声明 eventGranularity='stream'，其余能力位与设计声明一致", () => {
     const { engine } = makeEngine();
     expect(engine.capabilities()).toEqual({

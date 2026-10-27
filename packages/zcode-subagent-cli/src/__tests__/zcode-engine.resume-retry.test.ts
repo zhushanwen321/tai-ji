@@ -11,6 +11,11 @@
 
 import * as path from "node:path";
 
+// 2026-10-27 测试范围收缩：本文件中经 makeEngine 真实 spawn fake appserver 子进程的三簇用例（resume 注入 /
+// 自动重试 / 不可重试形态，e2e-map E2E-INTEG-66）迁入集成门控 TAIJI_TEST_INTEGRATION——门控关闭时 skip，
+// CI 或按改动范围触发时真跑。三个纯函数 describe（extractResume* / buildResume*）留无门控默认档。
+// 门控 import 走包内副本 integration-gate.local.ts（SSOT = test-guard/integration-gate.ts）。
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "./integration-gate.local.ts";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentCallOpts, EngineRunResult, RunContext } from "../port-types.ts";
@@ -150,7 +155,9 @@ function resumeCtxWithDbPath(dbPath: string): RunContext {
   };
 }
 
-describe("interact(resume)：resume 读 → 新 session 注入（P-1 选型行为锁定）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `interact(resume)：resume 读 → 新 session 注入（P-1 选型行为锁定）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("resume 锚 → 先 session/resume 读历史 → 前缀注入新会话首轮 → 只向新会话 send（旧会话 send 恒 -32031 不回退）", async () => {
     const { engine, stateFile } = makeResumeEngine({ resumeResult: syntheticResumeResult() });
 
@@ -384,7 +391,9 @@ function makeRetryCtx(overrides?: Partial<RunContext>): RunContext {
 // 集成：重试一次成功（连接崩溃形态，D6/F-4 主路径）
 // ============================================================
 
-describe("瞬时失败自动重试一次（P0-1 U4：新会话重跑）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `瞬时失败自动重试一次（P0-1 U4：新会话重跑）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("连接崩溃 → 重试轮新会话重跑成功：boot 2（惰性重建）+ create×2 + 自然终态（默认配置，无显式预算）", async () => {
     // 首代 hang + crash（收割 conn-closed）；重建代（重试轮）走完整 golden 流自然终态
     // ——run 整体 await 无法经 rewriteScenario 插手重试轮，rebootSendPushes 是代感知通道
@@ -419,7 +428,9 @@ describe("瞬时失败自动重试一次（P0-1 U4：新会话重跑）", () => 
 // 不可重试形态不重试（D6 不采用其余方案的理由 + 形态排除）
 // ============================================================
 
-describe("不可重试形态不重试（一次会话收尾，无补句）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `不可重试形态不重试（一次会话收尾，无补句）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   it("RPC 错误（-32004 busy）：非瞬时形态 → 不重试（create×1）", async () => {
     const f = makeRetryEngine({ sendError: { code: -32004, message: "Session is busy" } });
     const r = await f.engine.run(makeTask({ cwd: f.workspace }), makeRetryCtx());

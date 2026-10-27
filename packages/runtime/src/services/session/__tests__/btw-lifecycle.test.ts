@@ -10,6 +10,7 @@
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/btw-lifecycle.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from '../../../../../../test-guard/integration-gate.ts'
 import { getBtwThreadDir } from '../../../infra/pi/pi-paths.js'
 import { trashDirectory as realTrashDirectory } from '../../../infra/system/trash.js'
 import { BtwError, BtwService, BTW_BEHAVIOR_CONTRACT, forkViaCliPi, inspectSourceState } from '../btw-service.js'
@@ -511,7 +512,9 @@ describe('btw-create-branches', () => {
 
 // ════════════════ 来源: btw-fork-cli.test.ts ════════════════
 
-describe('btw-fork-cli', () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `btw-fork-cli${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ''}`,
+  () => {
   const MAIN_SID = 'main-sid-001'
   const CWD = '/Users/x/proj'
 

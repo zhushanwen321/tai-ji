@@ -21,6 +21,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { resolveEngineDataDir, resolvePoolDir, SHARED_POOL_KEY, TAIJI_DATA_DIR_ENV } from "@zhushanwen/subagent-engine-sdk";
 
+// 2026-10-27 测试范围收缩：本文件中经 EngineProc 真实 spawn 引擎 CLI 子进程的两簇用例（引擎终态 status 消费 /
+// env 注入探针，同 e2e-map E2E-INTEG-39 资产）迁入集成门控 TAIJI_TEST_INTEGRATION——门控关闭时 skip，CI 或按
+// 改动范围触发时真跑。路径契约 / 池 GC 结构 / 集合成员判定等纯逻辑 describe 留无门控默认档。
 import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "./integration-gate.local.ts";
 import type { AgentCallOpts, EngineRunResult, RunContext } from "../port-types.ts";
 import { readZcodeSessionView } from "../reader.ts";
@@ -257,7 +260,9 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-describe("env 注入（探针④：create 帧后子进程 env 快照）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `env 注入（探针④：create 帧后子进程 env 快照）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   let engines: ZcodeEngine[] = [];
   let tmpRoot: string;
   let dataDir: string;
@@ -359,7 +364,9 @@ let personalPath: string;
 // 无需 env stub。
 // ══════════════════════════════════════════════════════════════
 
-describe("引擎终态 status 消费（P0-1 U3：来源合并节）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
+  `引擎终态 status 消费（P0-1 U3：来源合并节）${INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : ""}`,
+  () => {
   /** 真实协议 failed 终态帧（⛔P-Z2 门 credfail 实测帧形：errorCode/errorMessage 携带）。 */
   const TERMINAL_FAILED_REAL =
     '{"method":"v4/telemetry/event","params":{"kind":"turn.terminal","status":"failed","errorCode":"model_request_failed","errorMessage":"Provider marked the request as failed (bad port / credential invalid)"}}';
