@@ -167,6 +167,37 @@ describe('use-connection auth 拒绝信号消费（D8）', () => {
     expect(JSON.parse(f2.sent[0])).toEqual({ type: 'auth', payload: { token: 'tok-new' } })
   })
 
+  it('本地形态：onclose 早到侧（close 事件先于 IPC 重拉回包）→ 复位后重连调度被确定性重启，不静默挂 disconnected', async () => {
+    // 真实时序（主形态）：auth 拒绝同步置抑制位 + ws.close() 后，真实 WS 的 onclose 异步
+    // 到达早于 IPC 重拉回包——退避链在抑制期被短路（无定时器残留）；IPC 回包（同 seq）
+    // 复位抑制位后必须由确定性路径重启调度，否则连接静默挂 disconnected（F1-11）。
+    const { ports, onAuthRejected } = makePorts({ remote: false })
+    await initFresh(ports)
+    expect(fakes.length).toBe(1)
+    const f = fakes[0]
+    f.triggerOpen()
+    expect(JSON.parse(f.sent[0])).toEqual({ type: 'auth', payload: { token: 'tok-local' } })
+    // 同 seq 快照（凭据未变——拒绝另有原因的异常态）：stubSnapshot 未变
+    f.triggerMessage(authResult(false))
+    // 同步段：抑制位置位 + 消费方触发（重拉进入微任务等待）；fake 的 close() 不触发 onclose
+    //（helper 契约），此刻 onclose 尚未发生
+    expect(onAuthRejected).not.toHaveBeenCalled()
+    expect(isAuthRejectedSuppressed()).toBe(true)
+    // 早到侧：onclose 先于 IPC 回包到达（手动 triggerClose 模拟真实 WS 的异步 close 事件）。
+    // scheduleReconnect 被抑制短路：不进 reconnecting、无重连定时器。
+    f.triggerClose()
+    expect(getState().value).toBe('disconnected')
+    // IPC 重拉回包（同 seq）到达：复位抑制位 + 重启重连调度
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(isAuthRejectedSuppressed()).toBe(false)
+    expect(getState().value).toBe('reconnecting') // 修复点：不再是静默挂死的 disconnected
+    vi.advanceTimersByTime(1_000)
+    expect(fakes.length).toBe(2) // 退避链重启：1s 到点以旧凭据重试（重试必再拒则退避到 60s 上限置 failed）
+    fakes[1].triggerOpen()
+    expect(JSON.parse(fakes[1].sent[0])).toEqual({ type: 'auth', payload: { token: 'tok-local' } })
+  })
+
   it('本地形态：auth 拒绝后重拉同 seq 快照（凭据未变）→ 复位抑制位，退避链接管重试', async () => {
     const { ports } = makePorts({ remote: false })
     await initFresh(ports)
@@ -179,10 +210,12 @@ describe('use-connection auth 拒绝信号消费（D8）', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(isAuthRejectedSuppressed()).toBe(false) // 同代快照 → 复位，退避链可接管
-    f.triggerClose()
+    // 本用例是晚到侧（复位先于 close 事件）：复位点已确定性重启调度（F1-11 修复）；fake 的
+    // close() 无 CLOSING 中间态（triggerMessage 内即置 CLOSED），该首次调度放行推进簿记
+    // 一次，onclose 到达的调度覆盖定时器再推进一次 → 退避 delay 为第二次调度的 2s。
     expect(getState().value).toBe('reconnecting') // 复位后 close 走原退避重连链
-    vi.advanceTimersByTime(1_000)
-    expect(fakes.length).toBe(2) // 1s 退避到 → 以旧凭据重试（现状行为）
+    vi.advanceTimersByTime(2_000)
+    expect(fakes.length).toBe(2) // 退避到点 → 以旧凭据重试（现状行为）
   })
 
   it('teardown 拆卸信号监听：重装后转发目标跟随最新装配（不串台）', async () => {

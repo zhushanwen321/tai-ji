@@ -45,6 +45,7 @@ import {
   onQueueDrop,
   probeAlive,
   resetAuthRejectionSuppression,
+  scheduleReconnect,
   setFailed,
   setRestarting,
   setWaitingRuntime,
@@ -409,22 +410,31 @@ async function recoverAfterMismatch(ipc: RuntimeIpcPorts): Promise<void> {
  * 短路，重连责任移交本控制器）。处置三分支：
  * - 重拉推进 seq（runtime 已重启换凭据的主形态）→ 断旧连新（applyTargetSnapshot 内
  *   connect 先于退避链，抑制位在新连接 auth 成功（markConnected）时自然复位。
- * - 重拉同 seq（凭据未变——拒绝另有原因的异常态）→ 复位抑制位让退避链按现状重试
- *   （重试必再拒则退避到 MAX_RECONNECT_DURATION_MS 上限置 failed，行为有界）。
- * - 重拉失败（IPC 不可用）→ 同上复位退避链（终态与现状空凭据探测路径一致：必拒 →
+ * - 重拉同 seq（凭据未变——拒绝另有原因的异常态）→ 复位抑制位交还退避链 + 确定性重启
+ *   调度（scheduleReconnect；重试必再拒则退避到 MAX_RECONNECT_DURATION_MS 上限置
+ *   failed，行为有界）。
+ * - 重拉失败（IPC 不可用）→ 同上复位 + 重启调度（终态与现状空凭据探测路径一致：必拒 →
  *   60s 时长上限 failed）。
+ *
+ * 「交还退避链」两分支必须显式重启调度（F1-11）：真实 WS 的 onclose 与本函数的 IPC 回包
+ * 竞速——早到形态（onclose 先至，主形态）下退避链已在抑制期被短路且无定时器残留，复位
+ * 抑制位本身不恢复调度，缺重启调用则连接静默挂 disconnected（无 failed 呈现、无自动恢复，
+ * 直到切前台或重启 runtime）；晚到形态下 socket 未死透，scheduleReconnect 的 socket 死透
+ * 检查 no-op，由 onclose 到达时的调度接力（单定时器覆盖前清旧，无双链）。
  */
 async function recoverAfterAuthRejection(ipc: RuntimeIpcPorts): Promise<void> {
   const snapshot = await pullSnapshotQuietly(ipc)
   if (!snapshot) {
     console.warn(
-      '[core/use-connection] snapshot re-pull failed after auth rejection; handing back to existing reconnect chain',
+      '[core/use-connection] snapshot re-pull failed after auth rejection; resuming suppressed reconnect chain',
     )
     resetAuthRejectionSuppression()
+    scheduleReconnect()
     return
   }
   if (!applyTargetSnapshot(ipc, snapshot)) {
     resetAuthRejectionSuppression()
+    scheduleReconnect()
   }
 }
 
