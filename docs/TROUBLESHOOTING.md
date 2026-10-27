@@ -810,4 +810,4 @@ ps eww -p <runtimePid> | tr ' ' '\n' | grep TAIJI_RUNTIME_ID
 
 **症状二：项目操作报 `project_revision_mismatch`**——命令携带的 revision 与文件当前水位不一致（多窗口/旧状态）。恢复 = 重新 `project.load` 取最新状态与 revision 后重试；双窗口并发由 runtime 串行队列 + revision 校验保证不互相覆盖，后至命令被拒是**设计内保护**（窗口经 `project.changed` 广播自动重拉收敛）。
 
-**症状三：runtime 反复重启 / 卡 `restarting`**——supervisor 退避序列 1s/2s/4s/8s/16s、上限 5 次（`MAX_RESTARTS`），耗尽广播 runtime-failed 转 failed 屏等手动重试。半活进程（进程活着但 HTTP 无响应）由存活探针强杀重启：逐请求 30s 超时（fetch 不挂 undici 默认 300s headersTimeout）× 连续 3 次失败（30s 轮询间隔）≈ 90s 判死，日志特征 `Liveness probe failed threshold — forcing restart of half-alive process`。
+**症状三：runtime 反复重启 / 卡 `restarting`**——supervisor 退避序列 1s/2s/4s/8s/16s、上限 5 次（`MAX_RESTARTS`），耗尽广播 runtime-failed 转 failed 屏等手动重试。半活进程（进程活着但 HTTP 无响应）由存活探针强杀重启：逐请求 2s 超时（fetch 不挂 undici 默认 300s headersTimeout）× 连续 3 次失败（5s 轮询间隔）≈ 12s 判死，日志特征 `Liveness probe failed threshold — forcing restart of half-alive process`。

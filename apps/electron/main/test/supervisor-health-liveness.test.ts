@@ -87,7 +87,7 @@ describe('W5 checkHealthEndpoint 存活探针（纯函数）', () => {
     expect(typeof result.ms).toBe('number')
   })
 
-  it('fetch 携带逐请求 30s 超时（AbortSignal.timeout，判死窗口 30s×3≈90s 承诺的兑现点）', async () => {
+  it('fetch 携带逐请求 2s 超时（AbortSignal.timeout，判死窗口 2s×3×5s 间隔≈12s 的兑现点）', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({ ok: true, status: 200 }),
@@ -95,7 +95,7 @@ describe('W5 checkHealthEndpoint 存活探针（纯函数）', () => {
 
     await checkHealthEndpoint(12345)
 
-    expect(LIVENESS_PROBE_TIMEOUT_MS).toBe(30_000)
+    expect(LIVENESS_PROBE_TIMEOUT_MS).toBe(2_000)
     const init = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit
     expect(init.signal).toBeInstanceOf(AbortSignal)
   })

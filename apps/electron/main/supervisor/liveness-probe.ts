@@ -24,17 +24,23 @@
  * 依赖方向：liveness-probe → 全局 fetch（Electron/Node 18+ 内置）
  */
 
-/** 连续失败达此阈值则判定「半活」，触发强制重启（逐请求 30s 超时 × 3 次 × 30s 间隔 = 最迟 ~90s 发现卡死） */
+/** 连续失败达此阈值则判定「半活」，触发强制重启（逐请求 2s 超时 × 3 次 × 5s 间隔 = 最迟 ~12s 发现卡死） */
 export const LIVENESS_FAIL_THRESHOLD = 3
 
-/** 存活探针轮询间隔（ms）：30s 一次，平衡「发现速度」与「对 runtime 的压力」 */
-export const LIVENESS_INTERVAL_MS = 30_000
+/**
+ * 存活探针轮询间隔（ms）：本地回环 GET 轮询（0.2 QPS）对 runtime 压力可忽略，
+ * 间隔只服务「发现速度」——紧事实采样，不留宽间隔慢判死。
+ */
+export const LIVENESS_INTERVAL_MS = 5_000
 
 /**
- * 单次探针请求超时（ms）：fetch 逐请求硬超时（AbortSignal.timeout），保证 SIGSTOP 冻结
- * 等无响应形态不会挂到 undici 默认 headersTimeout（300s）——判死窗口按上式 ~90s 兑现。
+ * 单次探针请求超时（ms）：/health 为本地回环轻端点（正常响应毫秒级，2s = 20 倍裕度），
+ * fetch 逐请求硬超时（AbortSignal.timeout）保证 SIGSTOP 冻结等无响应形态快速判死，
+ * 不会挂到 undici 默认 headersTimeout（300s）——判死窗口按上式 ~12s 兑现。
+ * 健康期 event loop 短暂抖动至多误计一次失败（成功即清零），连续 3 次失败 = 持续 ~12s
+ * 无响应，本身即半活判定，无误杀面。
  */
-export const LIVENESS_PROBE_TIMEOUT_MS = 30_000
+export const LIVENESS_PROBE_TIMEOUT_MS = 2_000
 
 /** 健康端点 URL（仅本地回环） */
 const HEALTH_ENDPOINT = (port: number) => `http://127.0.0.1:${port}/health`
