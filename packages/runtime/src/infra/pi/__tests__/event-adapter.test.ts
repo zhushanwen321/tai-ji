@@ -1,27 +1,18 @@
-/**
- * EventAdapter 合并测试（cluster runtime-C07：8 文件折叠）。
- *
- * 来源（分节注释见内）：
- * - event-adapter-delta（contentIndex 透传）/ -journal-marker（journal 旁路）
- * - event-adapter-nested-tool-execution（嵌套工具过滤）/ -retry-sound（willRetry 透传）
- * - event-adapter-tool-update（三形态分发）/ -trace-trigger（组合注册）
- * - event-adapter-ttft-anchors（TTFT 锚点）/ -turn-usage-sum（context 占用）
- *
- * journal-marker 节引入顶层 afterEach（setJournalReportSink(null) 全局 sink 清理），
- * 对其余节无副作用，保留在顶层。
- *
- * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/event-adapter.test.ts
- */
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { EventAdapter, translate } from '../event-adapter.js'
-import type { PiEvent, PiMessageUpdateEvent, PiAgentEndEvent, PiTurnStartEvent, PiMessageEndEvent, PiAgentSettledEvent, PiEntryAppendedEvent } from '../pi-protocol.js'
-import type { PiEventClient } from '../event-adapter.js'
-import { setJournalReportSink } from '../../../services/session/journal-report-router.js'
-import { SUBAGENT_JOURNAL_MARKER, JOURNAL_REPORT_ACK } from '@zhushanwen/extension-protocol'
-import type { SubagentJournalReport } from '@zhushanwen/extension-protocol'
-import type { PiExtensionUiRequestEvent } from '../pi-protocol.js'
-import { stripAnsi } from '../normalize-tool-result.js'
-import { expectCompleteMessage } from './event-adapter-test-helpers'
+import { setJournalReportSink } from '../../../services/session/journal-report-router.js';
+import { EventAdapter, translate, type PiEventClient } from '../event-adapter.js';
+import { stripAnsi } from '../normalize-tool-result.js';
+import { PiAgentEndEvent, PiAgentSettledEvent, PiEntryAppendedEvent, PiHistoryMessage, PiMessageEndEvent, PiMessageUpdateEvent, PiSessionBranchSummaryEntry, PiSessionCompactionEntry, PiSessionCustomEntry, PiSessionCustomMessageEntry, PiSessionLabelEntry, PiSessionMessageEntry, PiTurnStartEvent, type PiEvent, type PiExtensionUiRequestEvent, type PiSessionEntry } from '../pi-protocol.js';
+import { applyEntryEndTimes, computeActivePathEntries, isInterruptedTail, mapSessionEntries } from '../session-entry-mapper.js';
+import { expectCompleteMessage } from './event-adapter-test-helpers';
+import type { Message } from '@taiji/shared';
+import { JOURNAL_REPORT_ACK, SUBAGENT_JOURNAL_MARKER, type SubagentJournalReport } from '@zhushanwen/extension-protocol';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
+
+
+// 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
+
 
 // ════════════════ 来源: event-adapter-delta.test.ts ════════════════
 // ---- 原文件头注释 ----
@@ -38,6 +29,7 @@ function messageUpdate(sub: Record<string, unknown>): PiMessageUpdateEvent {
   return { type: 'message_update', assistantMessageEvent: sub } as unknown as PiMessageUpdateEvent
 }
 
+
 /** 从 translate 产出中取出唯一 message（断言前收窄 kind 联合）。 */
 function soleMessage(events: ReturnType<typeof translate>) {
   expect(events).toHaveLength(1)
@@ -48,31 +40,6 @@ function soleMessage(events: ReturnType<typeof translate>) {
   return ev.message
 }
 
-describe('EventAdapter delta contentIndex 透传（wave:perf-w07 微项 1）', () => {
-  it('W07-5: thinking_delta 透传 contentIndex（对齐 text_delta 契约）', () => {
-    const msg = soleMessage(
-      translate(messageUpdate({ type: 'thinking_delta', delta: '思考中', contentIndex: 2 }), 's1'),
-    )
-    expect(msg.type).toBe('message.thinking_delta')
-    expect(msg.payload).toEqual({ sessionId: 's1', delta: '思考中', contentIndex: 2 })
-  })
-
-  it('W07-5b: thinking_delta 无 contentIndex 时省略字段（向后兼容旧 pi）', () => {
-    const msg = soleMessage(translate(messageUpdate({ type: 'thinking_delta', delta: 'x' }), 's1'))
-    expect(msg.payload).toEqual({ sessionId: 's1', delta: 'x' })
-  })
-
-  it('W07-5c: text_delta 对照组——既有 contentIndex 透传不回归', () => {
-    const msg = soleMessage(
-      translate(messageUpdate({ type: 'text_delta', delta: 'hi', contentIndex: 0 }), 's1'),
-    )
-    expect(msg.type).toBe('message.text_delta')
-    expect(msg.payload).toEqual({ sessionId: 's1', delta: 'hi', contentIndex: 0 })
-  })
-
-  // [HISTORICAL] W07-5d「translate 纯函数同输入同输出」用例已删（2026-09 测试舰队审查 r2-22）：
-  // 对任意纯函数恒真，不锁任何 delta 特有行为；纯函数性由全文件 toEqual 精确断言隐式承担。
-})
 
 // ════════════════ 来源: event-adapter-journal-marker.test.ts ════════════════
 // ---- 原文件头注释 ----
@@ -88,13 +55,16 @@ describe('EventAdapter delta contentIndex 透传（wave:perf-w07 微项 1）', (
 
 const SID_JOURNAL = 'sess-journal-1'
 
+
 function selectEvent(overrides: Partial<PiExtensionUiRequestEvent> = {}): PiExtensionUiRequestEvent {
   return { type: 'extension_ui_request', method: 'select', id: 'req-1', ...overrides }
 }
 
+
 function reportFrame(report: SubagentJournalReport, id = 'req-1'): PiExtensionUiRequestEvent {
   return selectEvent({ title: SUBAGENT_JOURNAL_MARKER, id, options: [JSON.stringify(report)] })
 }
+
 
 function validReport(): SubagentJournalReport {
   return {
@@ -105,6 +75,7 @@ function validReport(): SubagentJournalReport {
     emittedAt: 42,
   }
 }
+
 
 /** 可控 sink（记录路由调用，应答由用例裁决）。 */
 function makeSink(result = true) {
@@ -118,9 +89,6 @@ function makeSink(result = true) {
   return calls
 }
 
-afterEach(() => {
-  setJournalReportSink(null)
-})
 
 /** 构造带可控回包通道的 adapter + client（照 rt2-hardening 形态）。 */
 function makeAdapter() {
@@ -141,90 +109,6 @@ function makeAdapter() {
   return { adapter, interpret, responses, emit }
 }
 
-describe('translate 检查分支（marker 帧恒零产出）', () => {
-  it('journal marker 帧零产出（不进任何前端广播）', () => {
-    const events = translate(
-      selectEvent({ title: SUBAGENT_JOURNAL_MARKER, options: [JSON.stringify(validReport())] }) as unknown as Parameters<typeof translate>[0],
-      SID_JOURNAL,
-    )
-    expect(events).toHaveLength(0)
-  })
-})
-
-describe('attach 旁路（路由 + 生效回执）', () => {
-  it('合法报告 → sink 以连接 sessionId 路由 → 回 JOURNAL_REPORT_ACK（D7 生效回执）', () => {
-    const calls = makeSink(true)
-    const { interpret, responses, emit } = makeAdapter()
-
-    emit(reportFrame(validReport()))
-
-    expect(calls).toHaveLength(1)
-    expect(calls[0]!.sessionId).toBe(SID_JOURNAL)
-    expect(calls[0]!.report.domain).toBe('run')
-    expect(calls[0]!.report.fileKey).toBe('wf-1')
-    expect(responses).toEqual([{ id: 'req-1', response: JOURNAL_REPORT_ACK }])
-    expect(interpret).not.toHaveBeenCalled() // marker 帧不进翻译/编排
-  })
-
-  it('sink 拒绝（派生视图未就绪返回 false）→ 帧消费但不 ack（写侧按 D5 失败折叠）', () => {
-    makeSink(false)
-    const { responses, emit } = makeAdapter()
-
-    emit(reportFrame(validReport()))
-    expect(responses).toHaveLength(0)
-  })
-
-  it('sink 未注册 → 帧消费但不 ack、不抛', () => {
-    setJournalReportSink(null)
-    const { responses, emit, interpret } = makeAdapter()
-
-    expect(() => emit(reportFrame(validReport()))).not.toThrow()
-    expect(responses).toHaveLength(0)
-    expect(interpret).not.toHaveBeenCalled()
-  })
-})
-
-describe('坏载荷防御（不抛不 ack 不进翻译）', () => {
-  it('非 JSON payload → 消费（返回即吞掉）但不 ack', () => {
-    makeSink(true)
-    const { responses, emit } = makeAdapter()
-
-    emit(selectEvent({ title: SUBAGENT_JOURNAL_MARKER, options: ['not-json'] }))
-    expect(responses).toHaveLength(0)
-  })
-
-  it('形状非法（domain 词表外 / events 缺失）→ 消费但不 ack', () => {
-    makeSink(true)
-    const { responses, emit } = makeAdapter()
-
-    emit(selectEvent({ title: SUBAGENT_JOURNAL_MARKER, options: [JSON.stringify({ domain: 'bogus', fileKey: 'x', events: [], emittedAt: 1 })] }))
-    emit(selectEvent({ title: SUBAGENT_JOURNAL_MARKER, options: [JSON.stringify({ domain: 'run', fileKey: 'wf-1', emittedAt: 1 })] }))
-    expect(responses).toHaveLength(0)
-  })
-
-  it('sessionId 缺席 → 无法归属，整帧丢弃（消费但不 ack，不路由）', () => {
-    const calls = makeSink(true)
-    const { responses, emit } = makeAdapter()
-
-    const frame = validReport()
-    delete (frame as { sessionId?: string }).sessionId
-    emit(reportFrame(frame))
-    expect(calls).toHaveLength(0)
-    expect(responses).toHaveLength(0)
-  })
-})
-
-describe('旁路不干扰事件流', () => {
-  it('marker 帧后的普通事件照常 interpret（隔离边界内零传染）', () => {
-    makeSink(true)
-    const { interpret, emit } = makeAdapter()
-
-    emit(reportFrame(validReport()))
-    emit({ type: 'agent_start' })
-
-    expect(interpret).toHaveBeenCalledTimes(1)
-  })
-})
 
 // ════════════════ 来源: event-adapter-nested-tool-execution.test.ts ════════════════
 // ---- 原文件头注释 ----
@@ -251,6 +135,7 @@ describe('旁路不干扰事件流', () => {
 
 const NESTED_PARENT_ID = 'call_outer_1'
 
+
 /** 构造 tool_execution_start 事件（parentToolCallId 缺省 = 顶层调用）。 */
 function startEvent(parentToolCallId?: string): PiEvent {
   return {
@@ -261,6 +146,7 @@ function startEvent(parentToolCallId?: string): PiEvent {
     ...(parentToolCallId !== undefined && { parentToolCallId }),
   }
 }
+
 
 /** 构造 tool_execution_end 事件（result 形态对齐 pi AgentToolResult）。 */
 function endEvent(parentToolCallId?: string): PiEvent {
@@ -274,6 +160,7 @@ function endEvent(parentToolCallId?: string): PiEvent {
   }
 }
 
+
 /** 构造 tool_execution_update 事件（嵌套 id 形态对齐 pi nested-tool-calls.js）。 */
 function updateEvent(toolCallId: string, parentToolCallId?: string): PiEvent {
   return {
@@ -285,12 +172,14 @@ function updateEvent(toolCallId: string, parentToolCallId?: string): PiEvent {
   }
 }
 
+
 /** 行期望：filtered = 零产出；其余 = 产出的判别形态。 */
 type RowExpectation =
   | { out: 'filtered' }
   | { out: 'tool-call-start'; toolCallId: string }
   | { out: 'tool-call-end'; toolCallId: string }
   | { out: 'tool-call-update'; toolCallId: string }
+
 
 const ROWS: Array<{ name: string; event: PiEvent; expected: RowExpectation }> = [
   {
@@ -330,6 +219,265 @@ const ROWS: Array<{ name: string; event: PiEvent; expected: RowExpectation }> = 
   },
 ]
 
+
+// ════════════════ 来源: event-adapter-retry-sound.test.ts ════════════════
+// ---- 原文件头注释 ----
+// [retry-sound] agent_end → message.complete 的 willRetry 透传回归锁。
+// 背景：pi 每个 LLM attempt 失败都结束当次 agent loop 并发 agent_end（重试经
+// agent.continue() 续跑），且 agent_end 恒带 willRetry（pi-protocol.ts PiAgentEndEvent，
+// W6 A-10 探针验证）。此前 handleAgentEnd 丢弃该字段 → 前端把「中间失败」当终态，
+// 完成提示音误响（重试成功双响 / 多次重试连响）。本锁保证 payload.willRetry 不再丢失：
+// - willRetry=true（pi 将自动重试）→ 前端静音中间失败（useCompletionNotify 门控）；
+// - willRetry=false（终态：成功/重试用尽/不可重试错误）→ 前端正常发声；
+// - 空 messages 降级路径 → willRetry=false（拿不到 pi 字段，按不重试终态处理）。
+// translate 是纯函数（event-adapter.ts 头注释），直接调用断言产出（同
+// event-adapter-trace-trigger.test.ts 范式）。
+// /
+
+const SID_RETRY = 's-retry-sound'
+
+
+/**
+ * 构造 agent_end 事件：lastMsg 取 messages 末位（与 handleAgentEnd 取法一致）。
+ * errorMessage 是 pi 运行时扩展字段（超出 PiAgentEndMessage 声明，event-adapter 经
+ * AgentEndRuntimeExtras as 提取）——测试构造同样以扩展形态传入。
+ */
+function agentEndEvent(
+  willRetry: boolean,
+  lastMsg: PiAgentEndEvent['messages'][number] & { errorMessage?: string },
+): PiAgentEndEvent {
+  return { type: 'agent_end', messages: [lastMsg], willRetry } as PiAgentEndEvent
+}
+
+
+/** 从 translate 产物中取 turn-end 的 message.complete 帧（共享单源，只取 payload）。 */
+function completeOf(translated: ReturnType<typeof translate>): { payload: Record<string, unknown> } {
+  return expectCompleteMessage(translated)
+}
+
+
+// ════════════════ 来源: event-adapter-tool-update.test.ts ════════════════
+// ---- 原文件头注释 ----
+// handleToolExecutionUpdate 流式输出归一测试（bash-running-stream-output U1）。
+// 锁定设计 §6.1 判别式 + §6.4 D4 两分支截断：
+// - 三形态分发：content 数组 → output/outputRaw/detail；string → 仅 detail；
+// 无 content 数组对象 → detail = 整个对象、无 output。
+// - 尾窗截断不变式：截断后原文 ≤ cap 无例外；当 outputRaw 存在时
+// output === stripAnsi(outputRaw)（截断在 stripAnsi 之前的原文上做，同源派生）。
+// translate 是纯函数（event-adapter.ts 头注释），直接调用断言产出消息。
+// /
+
+const CAP = 8 * 1024
+
+
+/** 构造 tool_execution_update 事件。 */
+function toolUpdate(partialResult: unknown): PiEvent {
+  return { type: 'tool_execution_update', toolCallId: 'call-1', partialResult } as unknown as PiEvent
+}
+
+
+/** 从 translate 产出中取出唯一 message（payload 收窄为 Record，运行时 guard）。 */
+function soleToolMessage(
+  events: ReturnType<typeof translate>,
+): { type: string; payload: Record<string, unknown> } {
+  expect(events).toHaveLength(1)
+  const [ev] = events
+  if (!ev || ev.kind !== 'message') {
+    throw new Error(`expected single message event, got: ${JSON.stringify(ev)}`)
+  }
+  if (typeof ev.message.payload !== 'object' || ev.message.payload === null) {
+    throw new Error(`expected object payload, got: ${JSON.stringify(ev.message.payload)}`)
+  }
+  return ev.message as { type: string; payload: Record<string, unknown> }
+}
+
+
+// ════════════════ 来源: event-adapter-trace-trigger.test.ts ════════════════
+// ---- 原文件头注释 ----
+// withTraceTrigger 组合点回归测试（session-trace A33，round3 review S2 / mutation M4）。
+// 锁定：message_end / agent_settled / entry_appended 三事件经 translate() 输出
+// 同时**含 main 侧 handler 产物（W21 实时 feed / W1 bash flush / W18 派生缓存失效）
+// 与** trace-trigger 中间事件（interpreter 调 onTraceSync 做追赶式 since 拉取），
+// 且 main 产物在前、trace-trigger 追加在后。[reload-closeout D2] 起 agent_settled
+// 在 trace-trigger 之后**再**追加 record-reconcile-trigger（onRecordReconcile 送达
+// 水位对账路径，只挂 agent_settled——run 级联结束边界信号）。
+// 回归背景：本 PR merge 曾修「两组 DISPATCHER.set 叠加互相覆盖」bug（Map 后写覆盖
+// 前写，丢一组产物）。若退回单 handler 覆盖形态（丢 trace-trigger 追加），本文件
+// 用例必须红——session-trace.test.ts 只测 interpreter 消费侧（直接喂构造好的
+// trace-trigger 事件），adapter 产出侧此前零锚定。
+// translate 是纯函数（event-adapter.ts 头注释），直接调用断言产出。
+
+const SID_TRACE = 's-trace-trigger'
+
+
+// ════════════════ 来源: event-adapter-ttft-anchors.test.ts ════════════════
+// ---- 原文件头注释 ----
+// EventAdapter TTFT 锚点翻译测试（composer-genstats-ttft U2，设计 §3.2）。
+// 锁定：
+// - turn_start 移出 NULL_EVENTS → 翻译为 llm-request-start（TTFT 起算锚点，无前端行为）
+// - text_start / thinking_start / toolcall_start 三子类型追加 llm-first-output（首输出信号，
+// 单点收）；既有行为不变——text/toolcall 原 noop 保留、message.thinking_start 帧行为保留
+// - delta / end / error 子类型不产 llm-first-output（否决表 E：无 delta 兜底钩——adapter 是
+// 唯一信号源，delta 路径零新增开销）
+// translate 是纯函数（event-adapter.ts 头注释），直接调用断言产出消息。
+// /
+
+/** 构造 message_update 事件（assistantMessageEvent 子事件形状）。 */
+/** 构造 turn_start 事件（wire 无 payload）。 */
+function turnStart(): PiTurnStartEvent {
+  return { type: 'turn_start' } as unknown as PiTurnStartEvent
+}
+
+
+/** 取产出中的 llm-first-output 个数。 */
+function firstOutputCount(events: ReturnType<typeof translate>): number {
+  return events.filter((e) => e.kind === 'llm-first-output').length
+}
+
+
+/** 取产出中的 llm-request-start 个数。 */
+function requestStartCount(events: ReturnType<typeof translate>): number {
+  return events.filter((e) => e.kind === 'llm-request-start').length
+}
+
+
+// ════════════════ 来源: event-adapter-turn-usage-sum.test.ts ════════════════
+// ---- 原文件头注释 ----
+// [turn-badge-tokens → chat-flow-consistency D3 规则 5] agent_end 翻译的 usage 语义回归锁。
+// [HISTORICAL] payload.usage（message.complete 回合级累计，sumTurnUsage 发端）已随
+// chat-flow-consistency D3 规则 5 退役：usage/endedAt 由 message_end(assistant) 逐条载荷
+// 唯一承担（core apply-entry-convert usageField 消费，live ≡ reload 同一转换函数）——
+// message.complete 回合级覆写与发端 payload.usage 死链同批删除（core 消费端 readUsage 与
+// 本发端在终态同步 F1-21/F1-26 清理），本文件不再断言 payload.usage。
+// 现存断言：turn-end 顶层 inputTokens/totalTokens（context 占用）= 末次调用 totalTokens
+// （calculateContextTokens 同源语义，不随多调用累计变化）。
+// /
+
+const SID_USAGE = 's-turn-usage-sum'
+
+
+function assistantMsg(usage: { input: number; output: number; totalTokens: number } | undefined) {
+  return { role: 'assistant', content: [], stopReason: 'stop', ...(usage ? { usage } : {}) }
+}
+
+
+function agentEnd(messages: unknown[], willRetry = false): PiAgentEndEvent {
+  return { type: 'agent_end', messages, willRetry } as unknown as PiAgentEndEvent
+}
+
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('event-adapter', () => {
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('event-adapter', () => {
+describe('EventAdapter delta contentIndex 透传（wave:perf-w07 微项 1）', () => {
+  it('W07-5: thinking_delta 透传 contentIndex（对齐 text_delta 契约）', () => {
+    const msg = soleMessage(
+      translate(messageUpdate({ type: 'thinking_delta', delta: '思考中', contentIndex: 2 }), 's1'),
+    )
+    expect(msg.type).toBe('message.thinking_delta')
+    expect(msg.payload).toEqual({ sessionId: 's1', delta: '思考中', contentIndex: 2 })
+  })
+
+  it('W07-5b: thinking_delta 无 contentIndex 时省略字段（向后兼容旧 pi）', () => {
+    const msg = soleMessage(translate(messageUpdate({ type: 'thinking_delta', delta: 'x' }), 's1'))
+    expect(msg.payload).toEqual({ sessionId: 's1', delta: 'x' })
+  })
+
+  it('W07-5c: text_delta 对照组——既有 contentIndex 透传不回归', () => {
+    const msg = soleMessage(
+      translate(messageUpdate({ type: 'text_delta', delta: 'hi', contentIndex: 0 }), 's1'),
+    )
+    expect(msg.type).toBe('message.text_delta')
+    expect(msg.payload).toEqual({ sessionId: 's1', delta: 'hi', contentIndex: 0 })
+  })
+
+  // [HISTORICAL] W07-5d「translate 纯函数同输入同输出」用例已删（2026-09 测试舰队审查 r2-22）：
+  // 对任意纯函数恒真，不锁任何 delta 特有行为；纯函数性由全文件 toEqual 精确断言隐式承担。
+})
+afterEach(() => {
+  setJournalReportSink(null)
+})
+describe('translate 检查分支（marker 帧恒零产出）', () => {
+  it('journal marker 帧零产出（不进任何前端广播）', () => {
+    const events = translate(
+      selectEvent({ title: SUBAGENT_JOURNAL_MARKER, options: [JSON.stringify(validReport())] }) as unknown as Parameters<typeof translate>[0],
+      SID_JOURNAL,
+    )
+    expect(events).toHaveLength(0)
+  })
+})
+describe('attach 旁路（路由 + 生效回执）', () => {
+  it('合法报告 → sink 以连接 sessionId 路由 → 回 JOURNAL_REPORT_ACK（D7 生效回执）', () => {
+    const calls = makeSink(true)
+    const { interpret, responses, emit } = makeAdapter()
+
+    emit(reportFrame(validReport()))
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.sessionId).toBe(SID_JOURNAL)
+    expect(calls[0]!.report.domain).toBe('run')
+    expect(calls[0]!.report.fileKey).toBe('wf-1')
+    expect(responses).toEqual([{ id: 'req-1', response: JOURNAL_REPORT_ACK }])
+    expect(interpret).not.toHaveBeenCalled() // marker 帧不进翻译/编排
+  })
+
+  it('sink 拒绝（派生视图未就绪返回 false）→ 帧消费但不 ack（写侧按 D5 失败折叠）', () => {
+    makeSink(false)
+    const { responses, emit } = makeAdapter()
+
+    emit(reportFrame(validReport()))
+    expect(responses).toHaveLength(0)
+  })
+
+  it('sink 未注册 → 帧消费但不 ack、不抛', () => {
+    setJournalReportSink(null)
+    const { responses, emit, interpret } = makeAdapter()
+
+    expect(() => emit(reportFrame(validReport()))).not.toThrow()
+    expect(responses).toHaveLength(0)
+    expect(interpret).not.toHaveBeenCalled()
+  })
+})
+describe('坏载荷防御（不抛不 ack 不进翻译）', () => {
+  it('非 JSON payload → 消费（返回即吞掉）但不 ack', () => {
+    makeSink(true)
+    const { responses, emit } = makeAdapter()
+
+    emit(selectEvent({ title: SUBAGENT_JOURNAL_MARKER, options: ['not-json'] }))
+    expect(responses).toHaveLength(0)
+  })
+
+  it('形状非法（domain 词表外 / events 缺失）→ 消费但不 ack', () => {
+    makeSink(true)
+    const { responses, emit } = makeAdapter()
+
+    emit(selectEvent({ title: SUBAGENT_JOURNAL_MARKER, options: [JSON.stringify({ domain: 'bogus', fileKey: 'x', events: [], emittedAt: 1 })] }))
+    emit(selectEvent({ title: SUBAGENT_JOURNAL_MARKER, options: [JSON.stringify({ domain: 'run', fileKey: 'wf-1', emittedAt: 1 })] }))
+    expect(responses).toHaveLength(0)
+  })
+
+  it('sessionId 缺席 → 无法归属，整帧丢弃（消费但不 ack，不路由）', () => {
+    const calls = makeSink(true)
+    const { responses, emit } = makeAdapter()
+
+    const frame = validReport()
+    delete (frame as { sessionId?: string }).sessionId
+    emit(reportFrame(frame))
+    expect(calls).toHaveLength(0)
+    expect(responses).toHaveLength(0)
+  })
+})
+describe('旁路不干扰事件流', () => {
+  it('marker 帧后的普通事件照常 interpret（隔离边界内零传染）', () => {
+    makeSink(true)
+    const { interpret, emit } = makeAdapter()
+
+    emit(reportFrame(validReport()))
+    emit({ type: 'agent_start' })
+
+    expect(interpret).toHaveBeenCalledTimes(1)
+  })
+})
 describe('嵌套工具调用产块事件过滤（codemode u5 / D4，表驱动）', () => {
   for (const row of ROWS) {
     it(row.name, () => {
@@ -370,40 +518,6 @@ describe('嵌套工具调用产块事件过滤（codemode u5 / D4，表驱动）
     expect(events.map((e) => e.kind)).toEqual(['tool-call-start', 'tool-call-end'])
   })
 })
-
-// ════════════════ 来源: event-adapter-retry-sound.test.ts ════════════════
-// ---- 原文件头注释 ----
-// [retry-sound] agent_end → message.complete 的 willRetry 透传回归锁。
-// 背景：pi 每个 LLM attempt 失败都结束当次 agent loop 并发 agent_end（重试经
-// agent.continue() 续跑），且 agent_end 恒带 willRetry（pi-protocol.ts PiAgentEndEvent，
-// W6 A-10 探针验证）。此前 handleAgentEnd 丢弃该字段 → 前端把「中间失败」当终态，
-// 完成提示音误响（重试成功双响 / 多次重试连响）。本锁保证 payload.willRetry 不再丢失：
-// - willRetry=true（pi 将自动重试）→ 前端静音中间失败（useCompletionNotify 门控）；
-// - willRetry=false（终态：成功/重试用尽/不可重试错误）→ 前端正常发声；
-// - 空 messages 降级路径 → willRetry=false（拿不到 pi 字段，按不重试终态处理）。
-// translate 是纯函数（event-adapter.ts 头注释），直接调用断言产出（同
-// event-adapter-trace-trigger.test.ts 范式）。
-// /
-
-const SID_RETRY = 's-retry-sound'
-
-/**
- * 构造 agent_end 事件：lastMsg 取 messages 末位（与 handleAgentEnd 取法一致）。
- * errorMessage 是 pi 运行时扩展字段（超出 PiAgentEndMessage 声明，event-adapter 经
- * AgentEndRuntimeExtras as 提取）——测试构造同样以扩展形态传入。
- */
-function agentEndEvent(
-  willRetry: boolean,
-  lastMsg: PiAgentEndEvent['messages'][number] & { errorMessage?: string },
-): PiAgentEndEvent {
-  return { type: 'agent_end', messages: [lastMsg], willRetry } as PiAgentEndEvent
-}
-
-/** 从 translate 产物中取 turn-end 的 message.complete 帧（共享单源，只取 payload）。 */
-function completeOf(translated: ReturnType<typeof translate>): { payload: Record<string, unknown> } {
-  return expectCompleteMessage(translated)
-}
-
 describe('[retry-sound] agent_end willRetry 透传 message.complete payload', () => {
   it('中间失败：willRetry=true + stopReason=error → payload.willRetry=true 透传', () => {
     const message = completeOf(
@@ -464,40 +578,6 @@ describe('[retry-sound] agent_end willRetry 透传 message.complete payload', ()
     expect(message.payload.willRetry).toBe(false)
   })
 })
-
-// ════════════════ 来源: event-adapter-tool-update.test.ts ════════════════
-// ---- 原文件头注释 ----
-// handleToolExecutionUpdate 流式输出归一测试（bash-running-stream-output U1）。
-// 锁定设计 §6.1 判别式 + §6.4 D4 两分支截断：
-// - 三形态分发：content 数组 → output/outputRaw/detail；string → 仅 detail；
-// 无 content 数组对象 → detail = 整个对象、无 output。
-// - 尾窗截断不变式：截断后原文 ≤ cap 无例外；当 outputRaw 存在时
-// output === stripAnsi(outputRaw)（截断在 stripAnsi 之前的原文上做，同源派生）。
-// translate 是纯函数（event-adapter.ts 头注释），直接调用断言产出消息。
-// /
-
-const CAP = 8 * 1024
-
-/** 构造 tool_execution_update 事件。 */
-function toolUpdate(partialResult: unknown): PiEvent {
-  return { type: 'tool_execution_update', toolCallId: 'call-1', partialResult } as unknown as PiEvent
-}
-
-/** 从 translate 产出中取出唯一 message（payload 收窄为 Record，运行时 guard）。 */
-function soleToolMessage(
-  events: ReturnType<typeof translate>,
-): { type: string; payload: Record<string, unknown> } {
-  expect(events).toHaveLength(1)
-  const [ev] = events
-  if (!ev || ev.kind !== 'message') {
-    throw new Error(`expected single message event, got: ${JSON.stringify(ev)}`)
-  }
-  if (typeof ev.message.payload !== 'object' || ev.message.payload === null) {
-    throw new Error(`expected object payload, got: ${JSON.stringify(ev.message.payload)}`)
-  }
-  return ev.message as { type: string; payload: Record<string, unknown> }
-}
-
 describe('handleToolExecutionUpdate 三形态分发（判别式）', () => {
   it('content 数组形态 → detail=details + output + outputRaw（含 ANSI）', () => {
     const partialResult = {
@@ -530,7 +610,6 @@ describe('handleToolExecutionUpdate 三形态分发（判别式）', () => {
     expect('outputRaw' in msg.payload).toBe(false)
   })
 })
-
 describe('D4 尾窗截断两分支', () => {
   it('换行锚分支：超 cap 且截断点后有换行 → 尾窗从首个换行起整行保留', () => {
     const line = 'x'.repeat(100) + '\n'
@@ -608,24 +687,6 @@ describe('D4 尾窗截断两分支', () => {
     }
   })
 })
-
-// ════════════════ 来源: event-adapter-trace-trigger.test.ts ════════════════
-// ---- 原文件头注释 ----
-// withTraceTrigger 组合点回归测试（session-trace A33，round3 review S2 / mutation M4）。
-// 锁定：message_end / agent_settled / entry_appended 三事件经 translate() 输出
-// 同时**含 main 侧 handler 产物（W21 实时 feed / W1 bash flush / W18 派生缓存失效）
-// 与** trace-trigger 中间事件（interpreter 调 onTraceSync 做追赶式 since 拉取），
-// 且 main 产物在前、trace-trigger 追加在后。[reload-closeout D2] 起 agent_settled
-// 在 trace-trigger 之后**再**追加 record-reconcile-trigger（onRecordReconcile 送达
-// 水位对账路径，只挂 agent_settled——run 级联结束边界信号）。
-// 回归背景：本 PR merge 曾修「两组 DISPATCHER.set 叠加互相覆盖」bug（Map 后写覆盖
-// 前写，丢一组产物）。若退回单 handler 覆盖形态（丢 trace-trigger 追加），本文件
-// 用例必须红——session-trace.test.ts 只测 interpreter 消费侧（直接喂构造好的
-// trace-trigger 事件），adapter 产出侧此前零锚定。
-// translate 是纯函数（event-adapter.ts 头注释），直接调用断言产出。
-
-const SID_TRACE = 's-trace-trigger'
-
 describe('withTraceTrigger 组合注册不互相覆盖（session-trace A33 回归锁）', () => {
   it('组合注册不互相覆盖：三事件输出 main handler + trace-trigger（agent_settled 另追加 record-reconcile-trigger）', () => {
     // message_end：main = W21 实时 feed（message.message_end entry 帧）
@@ -737,35 +798,6 @@ describe('withTraceTrigger 组合注册不互相覆盖（session-trace A33 回�
     ])
   })
 })
-
-// ════════════════ 来源: event-adapter-ttft-anchors.test.ts ════════════════
-// ---- 原文件头注释 ----
-// EventAdapter TTFT 锚点翻译测试（composer-genstats-ttft U2，设计 §3.2）。
-// 锁定：
-// - turn_start 移出 NULL_EVENTS → 翻译为 llm-request-start（TTFT 起算锚点，无前端行为）
-// - text_start / thinking_start / toolcall_start 三子类型追加 llm-first-output（首输出信号，
-// 单点收）；既有行为不变——text/toolcall 原 noop 保留、message.thinking_start 帧行为保留
-// - delta / end / error 子类型不产 llm-first-output（否决表 E：无 delta 兜底钩——adapter 是
-// 唯一信号源，delta 路径零新增开销）
-// translate 是纯函数（event-adapter.ts 头注释），直接调用断言产出消息。
-// /
-
-/** 构造 message_update 事件（assistantMessageEvent 子事件形状）。 */
-/** 构造 turn_start 事件（wire 无 payload）。 */
-function turnStart(): PiTurnStartEvent {
-  return { type: 'turn_start' } as unknown as PiTurnStartEvent
-}
-
-/** 取产出中的 llm-first-output 个数。 */
-function firstOutputCount(events: ReturnType<typeof translate>): number {
-  return events.filter((e) => e.kind === 'llm-first-output').length
-}
-
-/** 取产出中的 llm-request-start 个数。 */
-function requestStartCount(events: ReturnType<typeof translate>): number {
-  return events.filter((e) => e.kind === 'llm-request-start').length
-}
-
 describe('EventAdapter TTFT 锚点翻译（composer-genstats-ttft U2）', () => {
   it('T1: turn_start → 恰一个 llm-request-start（sessionId 归属，无其他产出）', () => {
     const events = translate(turnStart(), 's1')
@@ -844,29 +876,6 @@ describe('EventAdapter TTFT 锚点翻译（composer-genstats-ttft U2）', () => 
     expect(firstOutputCount(events)).toBe(0)
   })
 })
-
-// ════════════════ 来源: event-adapter-turn-usage-sum.test.ts ════════════════
-// ---- 原文件头注释 ----
-// [turn-badge-tokens → chat-flow-consistency D3 规则 5] agent_end 翻译的 usage 语义回归锁。
-// [HISTORICAL] payload.usage（message.complete 回合级累计，sumTurnUsage 发端）已随
-// chat-flow-consistency D3 规则 5 退役：usage/endedAt 由 message_end(assistant) 逐条载荷
-// 唯一承担（core apply-entry-convert usageField 消费，live ≡ reload 同一转换函数）——
-// message.complete 回合级覆写与发端 payload.usage 死链同批删除（core 消费端 readUsage 与
-// 本发端在终态同步 F1-21/F1-26 清理），本文件不再断言 payload.usage。
-// 现存断言：turn-end 顶层 inputTokens/totalTokens（context 占用）= 末次调用 totalTokens
-// （calculateContextTokens 同源语义，不随多调用累计变化）。
-// /
-
-const SID_USAGE = 's-turn-usage-sum'
-
-function assistantMsg(usage: { input: number; output: number; totalTokens: number } | undefined) {
-  return { role: 'assistant', content: [], stopReason: 'stop', ...(usage ? { usage } : {}) }
-}
-
-function agentEnd(messages: unknown[], willRetry = false): PiAgentEndEvent {
-  return { type: 'agent_end', messages, willRetry } as unknown as PiAgentEndEvent
-}
-
 describe('[turn-badge-tokens] agent_end turn-end context 占用（payload.usage 发端已退役）', () => {
   it('turn-end 顶层 inputTokens/totalTokens（context 占用）仍 = 末次调用 totalTokens，不随累计变化', () => {
     const turnEnd = translate(
@@ -888,3 +897,581 @@ describe('[turn-badge-tokens] agent_end turn-end context 占用（payload.usage 
     expect(payload.message?.payload?.usage).toBeUndefined()
   })
 })
+});
+
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('event-adapter-detach', () => {
+describe('EventAdapter.detach 转调 onDetach（销毁收尾契约）', () => {
+  it('attach 后 detach：unsub 与 onDetach 各被调 1 次', () => {
+    const onDetach = vi.fn()
+    const adapter = new EventAdapter('sid-1', vi.fn(), undefined, onDetach)
+    const unsub = vi.fn()
+    adapter.attach({ onEvent: () => unsub })
+    adapter.detach()
+    expect(unsub).toHaveBeenCalledTimes(1)
+    expect(onDetach).toHaveBeenCalledTimes(1)
+  })
+
+  it('未 attach 直接 detach：onDetach 仍被转调 1 次（收尾不依赖 attach 前置）', () => {
+    const onDetach = vi.fn()
+    const adapter = new EventAdapter('sid-1', vi.fn(), undefined, onDetach)
+    adapter.detach()
+    expect(onDetach).toHaveBeenCalledTimes(1)
+  })
+})
+});
+});
+
+// ======================================================================
+// ← session-entry-mapper.test.ts
+// ======================================================================
+
+// 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
+
+// ======================================================================
+// ← a.test.ts
+// ======================================================================
+
+// ── factories ──────────────────────────────────────────────────────
+
+function msgEntry(id: string, role: 'user' | 'assistant' = 'user', text = `msg-${id}`): PiSessionMessageEntry {
+  const historyMsg: PiHistoryMessage = {
+    role,
+    content: [{ type: 'text', text }],
+    timestamp: 1000,
+  }
+  return { type: 'message', id, parentId: null, timestamp: '2026-01-01T00:00:00Z', message: historyMsg }
+}
+
+
+function compactionEntry(id: string, summary = `compact-${id}`, tokensBefore = 5000): PiSessionCompactionEntry {
+  return { type: 'compaction', id, parentId: null, timestamp: '2026-01-01T00:00:00Z', summary, firstKeptEntryId: 'k1', tokensBefore }
+}
+
+
+function branchSummaryEntry(id: string, fromId = 'f1', summary = `branch-${id}`): PiSessionBranchSummaryEntry {
+  return { type: 'branch_summary', id, parentId: null, timestamp: '2026-01-01T00:00:00Z', fromId, summary }
+}
+
+
+function customMessageEntry(
+  id: string,
+  customType: string,
+  opts: { content?: string; display?: boolean; details?: Record<string, unknown> } = {},
+): PiSessionCustomMessageEntry {
+  return {
+    type: 'custom_message',
+    id,
+    parentId: null,
+    timestamp: '2026-01-01T00:00:00Z',
+    customType,
+    content: opts.content ?? `content-${id}`,
+    ...(opts.display !== undefined && { display: opts.display }),
+    ...(opts.details !== undefined && { details: opts.details }),
+  }
+}
+
+
+function customEntry(id: string, customType: string, data: unknown): PiSessionCustomEntry {
+  return { type: 'custom', id, parentId: null, timestamp: '2026-01-01T00:00:00Z', customType, data }
+}
+
+
+function labelEntry(id: string): PiSessionLabelEntry {
+  return { type: 'label', id, parentId: null, timestamp: '2026-01-01T00:00:00Z', label: 'bookmark', targetId: 't1' }
+}
+
+
+// ======================================================================
+// ← b.test.ts
+// ======================================================================
+
+/** 最小 message entry 构造（判定只读 type/message.role/content[].type） */
+function msgEntry_m2(role: 'user' | 'assistant' | 'toolResult' | 'system', content: Array<Record<string, unknown>> = []): PiSessionEntry {
+  return {
+    type: 'message',
+    id: `e-${Math.random().toString(36).slice(2, 8)}`,
+    parentId: null,
+    timestamp: '2026-10-24T00:00:00.000Z',
+    message: { role, content, timestamp: 0 },
+  } as unknown as PiSessionEntry
+}
+
+
+/** 非回合 entry（custom entry，taiji.client-msg-id 映射形态） */
+function customEntry_m2(): PiSessionEntry {
+  return {
+    type: 'custom',
+    id: `c-${Math.random().toString(36).slice(2, 8)}`,
+    parentId: null,
+    timestamp: '2026-10-24T00:00:00.000Z',
+    customType: 'taiji.client-msg-id',
+    data: { clientUuid: 'u1', userEntryId: 'e1' },
+  } as unknown as PiSessionEntry
+}
+
+
+const assistantText = () => msgEntry_m2('assistant', [{ type: 'text', text: '终稿回复' }])
+
+
+const assistantToolCall = () => msgEntry_m2('assistant', [
+  { type: 'toolCall', id: 'tc1', name: 'read_file', arguments: {} },
+])
+
+
+const toolResult = () => msgEntry_m2('toolResult', [{ type: 'text', text: '工具输出' }])
+
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('session-entry-mapper', () => {
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('session-entry-mapper', () => {
+// ── TC1：四类 entry 映射 + custom 分流 + label 跳过 ─────────────────
+
+describe('TC1 四类 entry 映射 + custom 分流', () => {
+  it('message/compaction/branch_summary/custom_message 进 messages（顺序保持）；custom 进 customDataEntries；label 跳过', () => {
+    const entries: PiSessionEntry[] = [
+      msgEntry('e1'),
+      compactionEntry('e2'),
+      customEntry('e3', 'taiji.client-msg-id', { clientUuid: 'u1' }),
+      customMessageEntry('e4', 'status-bar'),
+      branchSummaryEntry('e5'),
+      labelEntry('e6'), // 应被跳过
+    ]
+
+    const { messages, customDataEntries } = mapSessionEntries(entries)
+
+    // messages 含 4 条伪消息（label 跳过、custom 分流，不计入 messages）
+    expect(messages).toHaveLength(4)
+    // 顺序保持：message → compaction → custom_message → branch_summary
+    expect((messages[0] as PiHistoryMessage).role).toBe('user')
+    expect((messages[0] as { content: unknown[] }).content[0]).toMatchObject({ type: 'text', text: 'msg-e1' })
+    expect((messages[1] as { role: string }).role).toBe('compactionSummary')
+    expect((messages[2] as { role: string }).role).toBe('custom')
+    expect((messages[3] as { role: string }).role).toBe('branchSummary')
+
+    // custom 进 customDataEntries（不进 messages）
+    expect(customDataEntries).toHaveLength(1)
+    expect(customDataEntries[0].customType).toBe('taiji.client-msg-id')
+    expect(customDataEntries[0].data).toEqual({ clientUuid: 'u1' })
+  })
+
+  it('message 透传 message 体（引用相等，不注入 __entryId）', () => {
+    const entry = msgEntry('e1', 'assistant', 'hello')
+    const { messages } = mapSessionEntries([entry])
+    // 透传 = 直接传 message 体引用（浅拷贝不必要，消费侧只读）
+    expect(messages[0]).toBe(entry.message)
+    // 不注入 __entryId（M1 改用平行 entryIds）
+    expect('__entryId' in (messages[0] as object)).toBe(false)
+  })
+
+  it('compaction → { role, summary, tokensBefore, timestamp }', () => {
+    const { messages } = mapSessionEntries([compactionEntry('e1', '摘要', 9999)])
+    const m = messages[0] as { role: string; summary: string; tokensBefore: number; timestamp: number }
+    expect(m).toMatchObject({ role: 'compactionSummary', summary: '摘要', tokensBefore: 9999 })
+    expect(typeof m.timestamp).toBe('number')
+  })
+
+  it('branch_summary → { role, summary, fromId, timestamp }', () => {
+    const { messages } = mapSessionEntries([branchSummaryEntry('e1', 'fromX', '分支摘要')])
+    const m = messages[0] as { role: string; summary: string; fromId: string; timestamp: number }
+    expect(m).toMatchObject({ role: 'branchSummary', summary: '分支摘要', fromId: 'fromX' })
+    expect(typeof m.timestamp).toBe('number')
+  })
+
+  it('空数组 → 三个产物都为空', () => {
+    const result = mapSessionEntries([])
+    expect(result.messages).toEqual([])
+    expect(result.entryIds).toEqual([])
+    expect(result.customDataEntries).toEqual([])
+  })
+})
+// ── TC2：完成通知 custom_message display 覆写 false（方案 Z）────────
+
+describe('TC2 完成通知 custom_message display 覆写 false', () => {
+  it('subagent-bg-notify：pi 持久化 display:true → 覆写为 false', () => {
+    const { messages } = mapSessionEntries([
+      customMessageEntry('e1', 'subagent-bg-notify', { content: 'done', display: true }),
+    ])
+    expect((messages[0] as { display: boolean }).display).toBe(false)
+  })
+
+  it('workflow-result：pi 持久化 display:true → 覆写为 false', () => {
+    const { messages } = mapSessionEntries([
+      customMessageEntry('e1', 'workflow-result', { content: 'ok', display: true }),
+    ])
+    expect((messages[0] as { display: boolean }).display).toBe(false)
+  })
+
+  it('非完成通知 custom_message：display 不覆写（保留 pi 持久化值）', () => {
+    const { messages } = mapSessionEntries([
+      customMessageEntry('e1', 'status-bar', { content: 'x', display: true }),
+    ])
+    expect((messages[0] as { display: boolean }).display).toBe(true)
+  })
+
+  it('完成通知无 display 字段时仍覆写为 false（不依赖 pi 持久化值）', () => {
+    const { messages } = mapSessionEntries([
+      customMessageEntry('e1', 'subagent-bg-notify', { content: 'done' }),
+    ])
+    expect((messages[0] as { display: boolean }).display).toBe(false)
+  })
+})
+// ── TC3：平行 entryIds 与 messages 对齐 ────────────────────────────
+
+describe('TC3 平行 entryIds 与 messages 对齐', () => {
+  it('entryIds[i] = messages[i] 来源 entry 的 id；长度一致', () => {
+    const entries: PiSessionEntry[] = [
+      msgEntry('m1'),
+      compactionEntry('c1'),
+      customMessageEntry('cm1', 'status-bar'),
+      branchSummaryEntry('b1'),
+      msgEntry('m2', 'assistant'),
+    ]
+    const { messages, entryIds } = mapSessionEntries(entries)
+
+    expect(entryIds).toHaveLength(messages.length)
+    expect(entryIds).toEqual(['m1', 'c1', 'cm1', 'b1', 'm2'])
+  })
+
+  it('custom/label 不产生 entryId（不进 messages，不对齐）', () => {
+    const entries: PiSessionEntry[] = [
+      msgEntry('m1'),
+      customEntry('d1', 'taiji.client-msg-id', {}),
+      labelEntry('l1'),
+      compactionEntry('c1'),
+    ]
+    const { messages, entryIds } = mapSessionEntries(entries)
+
+    expect(messages).toHaveLength(2)
+    expect(entryIds).toEqual(['m1', 'c1'])
+  })
+})
+// ── TC4：畸形 data 降级（不抛错）──────────────────────────────────
+
+describe('TC4 畸形 data 降级', () => {
+  it('custom_message 无 content → content 默认空串，不抛错', () => {
+    // 模拟 session JSONL 截断/损坏：custom_message entry 缺 content 字段。
+    // 类型契约（PiSessionCustomMessageEntry.content: string）描述 pi 正常输出，
+    // mapper 作为系统边界必须对畸形数据降级，故测试用 as 模拟不合规输入。
+    const malformed = [
+      { type: 'custom_message', id: 'e1', parentId: null, timestamp: '2026-01-01T00:00:00Z', customType: 'status-bar' },
+    ] as unknown as PiSessionEntry[]
+
+    const { messages } = mapSessionEntries(malformed)
+    const m = messages[0] as { content: string; display?: boolean }
+    expect(m.content).toBe('')
+    // 非完成通知 + 无 display → display undefined（不覆写）
+    expect(m.display).toBeUndefined()
+  })
+
+  it('custom_message content 为非字符串（number）→ 默认空串', () => {
+    const malformed = [
+      { type: 'custom_message', id: 'e1', parentId: null, timestamp: '2026-01-01T00:00:00Z', customType: 'x', content: 123 },
+    ] as unknown as PiSessionEntry[]
+
+    const { messages } = mapSessionEntries(malformed)
+    expect((messages[0] as { content: string }).content).toBe('')
+  })
+
+  it('custom 无 data → 仍进 customDataEntries，不抛错', () => {
+    const malformed = [
+      { type: 'custom', id: 'e1', parentId: null, timestamp: '2026-01-01T00:00:00Z', customType: 'taiji.client-msg-id' },
+    ] as unknown as PiSessionEntry[]
+
+    const { customDataEntries } = mapSessionEntries(malformed)
+    expect(customDataEntries).toHaveLength(1)
+  })
+
+  it('RT-3#6：compaction 缺 timestamp → 省略 timestamp 字段（不伪造时刻），warn 计数', () => {
+    const malformed = [
+      { type: 'compaction', id: 'e1', parentId: null, summary: 's', firstKeptEntryId: 'k', tokensBefore: 1 },
+    ] as unknown as PiSessionEntry[]
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { messages } = mapSessionEntries(malformed)
+      // 旧兜底 Date.now() 已禁（伪造原始时刻不可追溯）：字段省略，消费侧 lift 单点兜底
+      expect('timestamp' in (messages[0] as Record<string, unknown>)).toBe(false)
+      expect(warnSpy.mock.calls.some(c => String(c[0]).includes('missing or malformed timestamp'))).toBe(true)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('RT-3#6：畸形 timestamp（不可解析串）→ 省略字段（NaN 不入产物，不抛错）', () => {
+    const malformed = [
+      { type: 'branch_summary', id: 'e1', parentId: null, timestamp: 'not-a-date', fromId: 'f', summary: 's' },
+      { type: 'custom_message', id: 'e2', parentId: null, timestamp: '2026-13-45T99:99:99Z', customType: 't', content: 'c' },
+    ] as unknown as PiSessionEntry[]
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { messages } = mapSessionEntries(malformed)
+      expect('timestamp' in (messages[0] as Record<string, unknown>)).toBe(false)
+      expect('timestamp' in (messages[1] as Record<string, unknown>)).toBe(false)
+      const warn = warnSpy.mock.calls.map(c => String(c[0])).find(m => m.includes('mapSessionEntries'))
+      expect(warn).toBeDefined()
+      expect(warn).toContain('2 entry/entries')
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('RT-3#6：合法 timestamp 正常产出（正向对照，字段仍在）', () => {
+    const { messages } = mapSessionEntries([compactionEntry('e-ok')])
+    expect((messages[0] as { timestamp: number }).timestamp).toBe(new Date('2026-01-01T00:00:00Z').getTime())
+  })
+})
+// ── applyEntryEndTimes：产出结束时刻回填（整个 agent-turn 聚合口径的时间轴右端）──────
+//
+// 语义：pi 在 appendMessage（message_end 之后）写 entry → entry.timestamp ≈ 该 assistant
+// 消息产出结束；body message.timestamp 是其开始。两者差值即生成时长，是「单条 assistant 的
+// turn 恒显 1s」修复的数据源。展示字段回填，不进 reducer（保 apply-entry 两路喂入同构）。
+
+describe('applyEntryEndTimes assistant 产出结束时刻回填', () => {
+  const ENTRY_TS = '2026-01-01T00:01:00.000Z'
+  const ENTRY_MS = new Date(ENTRY_TS).getTime()
+
+  function assistantMsg(over: Partial<Message> = {}): Message {
+    return { id: 'm1', role: 'assistant', content: 'hi', status: 'complete', timestamp: ENTRY_MS - 5_000, ...over }
+  }
+
+  /** message entry 工厂（entry 时间戳独立于消息体时间戳） */
+  function entryWithTs(id: string, role: 'user' | 'assistant'): PiSessionEntry {
+    return { type: 'message', id, parentId: null, timestamp: ENTRY_TS, message: { role, content: [], timestamp: ENTRY_MS - 5_000 } as PiHistoryMessage }
+  }
+
+  it('assistant 消息按 piEntryId 回填 entry 时间戳（ISO → ms）——同一条消息 live/reload 同一语义', () => {
+    const msgs = [assistantMsg({ piEntryId: 'e1' })]
+    applyEntryEndTimes(msgs, [entryWithTs('e1', 'assistant')])
+    expect(msgs[0].endedAt).toBe(ENTRY_MS)
+  })
+
+  it('user 消息不回填（无「产出结束」语义，不得污染「已工作」时长起点/终点）', () => {
+    const msgs: Message[] = [{ id: 'u1', piEntryId: 'e1', role: 'user', content: [], status: 'complete', timestamp: ENTRY_MS - 5_000 }]
+    applyEntryEndTimes(msgs, [entryWithTs('e1', 'user')])
+    expect(msgs[0].endedAt).toBeUndefined()
+  })
+
+  it('entry 时间戳早于消息开始（时钟回拨/畸形数据）→ 不回填（消费侧回退 timestamp）', () => {
+    const msgs = [assistantMsg({ piEntryId: 'e1', timestamp: ENTRY_MS + 1_000 })]
+    applyEntryEndTimes(msgs, [entryWithTs('e1', 'assistant')])
+    expect(msgs[0].endedAt).toBeUndefined()
+  })
+
+  it('窗口内无对应 entry（截断窗口）/ 无 piEntryId → 不回填（降级 = 修复前行为）', () => {
+    const noEntry = [assistantMsg({ piEntryId: 'e-missing' })]
+    applyEntryEndTimes(noEntry, [entryWithTs('e1', 'assistant')])
+    expect(noEntry[0].endedAt).toBeUndefined()
+
+    const noPiEntryId = [assistantMsg()]
+    applyEntryEndTimes(noPiEntryId, [entryWithTs('e1', 'assistant')])
+    expect(noPiEntryId[0].endedAt).toBeUndefined()
+  })
+
+  it('空 entries → 早退不抛错（空 session / 全非 message entry）', () => {
+    const msgs = [assistantMsg({ piEntryId: 'e1' })]
+    expect(() => applyEntryEndTimes(msgs, [])).not.toThrow()
+    expect(msgs[0].endedAt).toBeUndefined()
+  })
+
+  it('RT-3#6：entry timestamp 畸形（不可解析/非字符串）→ 不回填 endedAt（NaN 不得入产物）+ warn', () => {
+    const msgs = [assistantMsg({ piEntryId: 'e1' })]
+    const badEntries = [
+      { type: 'message', id: 'e1', parentId: null, timestamp: 'not-a-date', message: { role: 'assistant', content: [], timestamp: 1 } },
+      { type: 'message', id: 'e2', parentId: null, timestamp: 12345, message: { role: 'assistant', content: [], timestamp: 1 } },
+    ] as unknown as PiSessionEntry[]
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      applyEntryEndTimes(msgs, badEntries)
+      expect(msgs[0].endedAt).toBeUndefined()
+      const warn = warnSpy.mock.calls.map(c => String(c[0])).find(m => m.includes('applyEntryEndTimes'))
+      expect(warn).toBeDefined()
+      expect(warn).toContain('2 entry/entries')
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+})
+// ── 活跃路径裁剪（message-revoke U6a）：computeActivePathEntries + mapSessionEntries leafId ──
+
+describe('computeActivePathEntries（活跃路径裁剪纯函数，message-revoke U6a）', () => {
+  /**
+   * 有分支 fixture（真实 pi 撤回形态，单根链式树）：
+   * r(root) → u1 → a1 → [旧分支 m1(被撤消息) → a2(其回复)] / [label(撤回锚，parent=a1) → u2 → a3]
+   * leafId = a3（文件尾）；被撤子树 {m1, a2} 按文件序在 label 之前但不在活跃路径上。
+   */
+  function branchedEntries(): PiSessionEntry[] {
+    const withParent = (e: PiSessionEntry, parentId: string | null): PiSessionEntry => ({ ...e, parentId })
+    return [
+      withParent(msgEntry('r', 'user', 'root'), null),
+      withParent(msgEntry('u1', 'user', '第一句'), 'r'),
+      withParent(msgEntry('a1', 'assistant', '回复一'), 'u1'),
+      // 旧分支（被撤）：撤回 m1 → 叶子回退到其父 a1
+      withParent(msgEntry('m1', 'user', '发错的'), 'a1'),
+      withParent(msgEntry('a2', 'assistant', '对发错的回复'), 'm1'),
+      // label entry（撤回持久化锚，parent = 回退后叶子 a1）+ 新分支
+      withParent({ type: 'label', id: 'lbl', timestamp: '2026-01-01T00:00:00Z', label: 'taiji:revoked', targetId: 'm1' } as PiSessionEntry, 'a1'),
+      withParent(msgEntry('u2', 'user', '撤回后新消息'), 'lbl'),
+      withParent(msgEntry('a3', 'assistant', '新回复'), 'u2'),
+    ]
+  }
+
+  it('有分支：leafId 沿 parentId 回溯，旧分支条目被滤，输出保持输入（文件）序', () => {
+    const out = computeActivePathEntries(branchedEntries(), 'a3')
+    expect(out.map((e) => e.id)).toEqual(['r', 'u1', 'a1', 'lbl', 'u2', 'a3'])
+    expect(out.some((e) => e.id === 'm1' || e.id === 'a2')).toBe(false)
+  })
+
+  it('无分支（链式单根）：leafId 缺省与传「文件尾 entry id」输出逐条一致（回归不变）', () => {
+    const linear = [
+      { ...msgEntry('e1', 'user'), parentId: null },
+      { ...msgEntry('e2', 'assistant'), parentId: 'e1' },
+      { ...msgEntry('e3', 'user'), parentId: 'e2' },
+    ]
+    const untouched = computeActivePathEntries(linear, undefined)
+    expect(untouched).toBe(linear) // 缺省 = 原数组原样返回（同一引用）
+    expect(computeActivePathEntries(linear, 'e3')).toEqual(linear) // 尾 id = 全链，逐条一致
+  })
+
+  it('leafId 指向中间节点：裁剪到该节点为止（leafId 驱动，非文件序）', () => {
+    const out = computeActivePathEntries(branchedEntries(), 'a1')
+    expect(out.map((e) => e.id)).toEqual(['r', 'u1', 'a1'])
+  })
+
+  it('leafId 不在 entries 的 id 集合 → warn 后原样返回（fail-safe，不清空历史）', () => {
+    const entries = branchedEntries()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const out = computeActivePathEntries(entries, 'no-such-leaf')
+      expect(out).toBe(entries)
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('leafId no-such-leaf not found'))).toBe(true)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('多根病态树（合法 pi 文件恰一个根）→ warn 后原样返回（活跃路径未定义，退回裁剪前行为）', () => {
+    const multiRoot = [msgEntry('e1', 'user'), msgEntry('e2', 'user')] // 两条 parentId 均为 null
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const out = computeActivePathEntries(multiRoot, 'e2')
+      expect(out).toBe(multiRoot)
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('without parent link'))).toBe(true)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('窗口切片（无根、首条 parent 在集合外）→ 回溯到窗口边界即止，窗口内非链条目被滤', () => {
+    // 尾读窗口形态：首条 parent 指向窗口外（rootLikeCount = 0，单根检查不触发）
+    const window = [
+      { ...msgEntry('x1', 'assistant', '窗口内旧分支残余'), parentId: 'outside' },
+      { ...msgEntry('y1', 'user', '活跃路径上的窗口首条'), parentId: 'outside' },
+      { ...msgEntry('y2', 'assistant'), parentId: 'y1' },
+    ]
+    // leafId = 窗口末条 y2：链 y2→y1→outside（边界止）；x1 不在链上被滤
+    expect(computeActivePathEntries(window, 'y2').map((e) => e.id)).toEqual(['y1', 'y2'])
+  })
+
+  it('环状 parentId（文件损坏）→ 已访问集防御不死循环', () => {
+    const cyclic = [
+      { ...msgEntry('c1', 'user'), parentId: 'c2' },
+      { ...msgEntry('c2', 'user'), parentId: 'c1' },
+    ]
+    const out = computeActivePathEntries(cyclic, 'c1') // 若无防御此处死循环挂死测试
+    expect(out.map((e) => e.id).sort()).toEqual(['c1', 'c2'])
+  })
+})
+describe('mapSessionEntries leafId 参数（活跃路径裁剪接入，message-revoke U6a）', () => {
+  function branchedEntriesWithCustom(): PiSessionEntry[] {
+    const withParent = (e: PiSessionEntry, parentId: string | null): PiSessionEntry => ({ ...e, parentId })
+    return [
+      withParent(msgEntry('r', 'user', 'root'), null),
+      withParent(msgEntry('m1', 'user', '发错的'), 'r'),
+      // 被撤消息的 custom entry（parent = m1，随旧分支同生死）
+      withParent({ type: 'custom', customType: 'taiji.client-msg-id', id: 'cus1', timestamp: '2026-01-01T00:00:00Z', data: { clientUuid: 'u-x', userEntryId: 'm1' } } as PiSessionEntry, 'm1'),
+      withParent({ type: 'label', id: 'lbl', timestamp: '2026-01-01T00:00:00Z', label: 'taiji:revoked', targetId: 'm1' } as PiSessionEntry, 'r'),
+      withParent(msgEntry('u2', 'user', '新消息'), 'lbl'),
+    ]
+  }
+
+  it('有分支：旧分支的 message 与 custom entry 均被滤（映射失效即正确语义）', () => {
+    const { messages, entryIds, customDataEntries } = mapSessionEntries(branchedEntriesWithCustom(), 'u2')
+    expect(entryIds).toEqual(['r', 'u2']) // m1 不在 messages；label 走 default 跳过
+    expect(messages.map((m) => (m as { role: string }).role)).toEqual(['user', 'user'])
+    expect(customDataEntries).toHaveLength(0) // 被撤消息的映射 entry 随分支滤除
+  })
+
+  it('无分支回归：leafId 缺省与传文件尾 entry id，三个产物数组逐条一致', () => {
+    const linear = [
+      { ...msgEntry('e1', 'user'), parentId: null },
+      { ...customMessageEntry('e2', 'subagent-bg-notify'), parentId: 'e1' },
+      { ...msgEntry('e3', 'assistant'), parentId: 'e2' },
+    ]
+    const withoutLeaf = mapSessionEntries(linear)
+    const withLeaf = mapSessionEntries(linear, 'e3')
+    expect(withLeaf.messages).toEqual(withoutLeaf.messages)
+    expect(withLeaf.entryIds).toEqual(withoutLeaf.entryIds)
+    expect(withLeaf.customDataEntries).toEqual(withoutLeaf.customDataEntries)
+  })
+})
+});
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('session-entry-interrupted-tail', () => {
+describe('isInterruptedTail 中断三形态（true）', () => {
+  it('形态 1：尾部 = user entry（assistant 未产出，内容损失最大）', () => {
+    expect(isInterruptedTail([msgEntry_m2('user', [{ type: 'text', text: 'hi' }])])).toBe(true)
+  })
+
+  it('形态 2：尾部 = 带 toolCall 的 assistant entry（工具结果丢失）', () => {
+    expect(isInterruptedTail([assistantToolCall()])).toBe(true)
+  })
+
+  it('形态 3：尾部 = toolResult entry（下一轮 assistant 丢失）', () => {
+    expect(isInterruptedTail([assistantToolCall(), toolResult()])).toBe(true)
+  })
+})
+describe('isInterruptedTail 正常/零损失形态（false）', () => {
+  it('正常完成：尾部 = 无 toolCall 的 assistant entry', () => {
+    expect(isInterruptedTail([
+      msgEntry_m2('user', [{ type: 'text', text: 'hi' }]),
+      assistantText(),
+    ])).toBe(false)
+  })
+
+  it('主动 abort：落盘 stopReason=aborted 的完整 assistant entry，同形态不触发', () => {
+    const aborted = msgEntry_m2('assistant', [{ type: 'text', text: '半截回复' }])
+    ;(aborted as { message: { stopReason?: string } }).message.stopReason = 'aborted'
+    expect(isInterruptedTail([msgEntry_m2('user'), aborted])).toBe(false)
+  })
+
+  it('空数组 / 仅 header 无 message entry：无回合不标', () => {
+    expect(isInterruptedTail([])).toBe(false)
+    expect(isInterruptedTail([customEntry_m2()])).toBe(false)
+  })
+
+  it('system 尾部（pi 1.0.0 系统消息）：非回合产出尾部，不标', () => {
+    expect(isInterruptedTail([msgEntry_m2('system', [{ type: 'text', text: 'system prompt' }])])).toBe(false)
+  })
+})
+describe('isInterruptedTail 非回合尾部 entry 跳过（从尾向前找最后 message entry）', () => {
+  it('client-msg-id custom entry 盖在 user 尾上（每次发消息的常态序列）：仍判中断', () => {
+    // 高频路径：pi 发消息落 user entry 后，msg-id-mapper extension 紧跟写 custom entry
+    expect(isInterruptedTail([
+      assistantText(),
+      msgEntry_m2('user', [{ type: 'text', text: '新消息' }]),
+      customEntry_m2(),
+    ])).toBe(true)
+  })
+
+  it('custom entry 盖在完整 assistant 尾上：不误标', () => {
+    expect(isInterruptedTail([
+      msgEntry_m2('user'),
+      assistantText(),
+      customEntry_m2(),
+    ])).toBe(false)
+  })
+})
+});
+});

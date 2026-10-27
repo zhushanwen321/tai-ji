@@ -662,7 +662,7 @@ describe("truncateRunMemberViews — 总字符预算截断", () => {
 // [subagent-observability §3.3.8] run 终局吸收成员交付的行为锁（u4 验收①③）：
 // - 场景 2 断言：fan-out 半数失败 → partially_succeeded + failedMembers[].cause 点拼
 //   （reason 不丢由 runtime WORKFLOW_DONE_REASON_SET 扩值承接——runtime 侧词表对账
-//   在 packages/runtime/test/workflow-outcome-vocab-parity.test.ts，不在本包）；
+//   在 packages/runtime/test/domains-bundle.test.ts，不在本包）；
 // - UC-16 断言：run 主动取消不产生 partially_succeeded（cancelled 优先于成员集合派生，
 //   被收尾成员判 cancelled 不判 failed）；
 // - 脚本层失败（worker error / replay mismatch，run.state.error 有值）不被成员派生

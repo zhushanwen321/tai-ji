@@ -2,7 +2,7 @@
  * plugin 域新增 RPC 薄封装单测（provider-plugin-access D9 / D8 / U5，验收⑤「core domain
  * 方法」段）：invokePlugin / listAvailablePlugins / getPluginCatalog / sendPluginUiEvent
  * 的帧 type、payload 形状、超时取值与 reply 解包。runtime 注册与 reply 组装由
- * packages/runtime/test/plugin-catalog-rpc.test.ts / plugin-invoke-channel.test.ts 承载；
+ * packages/runtime/test/plugin-rpc-bundle.test.ts / plugin-commands-executor-timeout.test.ts 承载；
  * 本文件只验 renderer 侧发帧契约（两侧合起来 = RPC 往返）。
  *
  * 注意：core 包不在 u-protocol 的 testCommand（runtime plugin + ui rendering-protocol）

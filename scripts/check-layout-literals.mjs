@@ -59,7 +59,7 @@ export const LAYOUT_LITERAL_EXEMPT = [
       'bundled 资源同步源 join(process.cwd(), pi, agent)（app 资源布局，打包 stage 产物）+ 启动 WARN 残留探测判据（<dataDir>/pi 存在且含 agent|sessions 子目录）+ 迁移史注释——文件职责即新旧布局兼容',
   },
   {
-    file: 'packages/runtime/src/infra/pi/__tests__/pi-maintenance.test.ts',
+    file: 'packages/runtime/src/infra/pi/__tests__/pi-store-bundle.test.ts',
     reason: 'WARN 残留探测 fixture 必须构造旧布局形态（pi/agent、pi/sessions 目录）——探测对象即旧布局残留，语义耦合',
   },
   {

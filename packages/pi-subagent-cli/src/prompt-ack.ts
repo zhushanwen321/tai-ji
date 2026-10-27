@@ -4,7 +4,7 @@
 //
 // 语义锚点（pi@1.0.0 实装 + 设计 D3 用户裁决；机器登记 = docs/pi-semantics.json PS-81）：
 //   pi 侧锚点（行号基于 pi@1.0.0；复核按符号名定位，探针 =
-//   packages/runtime/src/infra/pi/__tests__/pi-semantics-prompt-response.test.ts）：
+//   packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts）：
 //   - `pi-coding-agent dist/modes/rpc/rpc-mode.js` `case "prompt"`（:298-313）：
 //     `success(id, "prompt", { disposition })` 唯一发送点 = `session.prompt(...)` 的
 //     `preflightResult` 回调内（先置 `preflightSucceeded = true`）；`.catch`（:308-312）

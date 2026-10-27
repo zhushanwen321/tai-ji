@@ -18,7 +18,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-model-resolution.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -35,7 +35,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-thinking-gating.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-3.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -52,7 +52,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-rpc-surface.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -69,7 +69,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-agent-session.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -86,7 +86,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-steering-drain.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-3.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -103,7 +103,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-agent-session.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -120,7 +120,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-agent-session.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -137,7 +137,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-agent-session.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -154,7 +154,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-session-entries.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -177,7 +177,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-rpc-surface.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -211,7 +211,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-thinking-gating.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-3.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -423,7 +423,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-prompt-rejection.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -440,7 +440,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-prompt-rejection.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -516,7 +516,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-turn-usage-model.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-3.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -551,7 +551,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-defer-marker-survival.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -574,7 +574,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-skill-expansion-static.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-3.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -597,7 +597,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-details.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -620,7 +620,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-session-entries.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -866,7 +866,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-model-snapshot.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -895,7 +895,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-model-snapshot.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -918,7 +918,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-model-snapshot.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -964,7 +964,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-select-no-turn.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -987,7 +987,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-ttft-anchors.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-3.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1040,7 +1040,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-ttft-anchors.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-3.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1171,7 +1171,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-tool-error-flag.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-3.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1194,7 +1194,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-stdout-fifo.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-3.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1223,7 +1223,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-steer-drain-cascade.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-3.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1240,7 +1240,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-select-long-pending.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1350,7 +1350,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-session-replay.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1373,7 +1373,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1402,7 +1402,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1419,7 +1419,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1442,7 +1442,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-reclaim-primitives.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1465,7 +1465,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-reclaim-primitives.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1488,7 +1488,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-reclaim-primitives.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1505,7 +1505,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-codemode-settings.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-store-bundle.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1522,7 +1522,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-extension-command-error.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1539,7 +1539,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-mcp-store.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-store-bundle.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1631,7 +1631,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-model-snapshot.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-1.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1677,7 +1677,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-codemode-settings.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-store-bundle.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1717,7 +1717,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-signal-exit-codes.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1740,7 +1740,7 @@
     ],
     "guard": {
       "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-prompt-response.test.ts"
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-bundle-2.test.ts"
     },
     "verifiedWith": "1.0.0"
   },

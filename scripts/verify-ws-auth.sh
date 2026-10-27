@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # verify-ws-auth.sh — SEC-B1（S1-W1，spec §3.3 D4）：WS auth 握手 + 回环绑定真实进程验收。
 #
-# 与 packages/runtime/test/ws-listen-hardening.test.ts（进程内 SEC-U2）互补：
+# 与 packages/runtime/test/mcp-codemode-bundle.test.ts（进程内 SEC-U2）互补：
 # 本脚本起真实 runtime 进程（tsx 源码直跑 + 隔离数据目录 + TAIJI_RUNTIME_TOKEN 注入），
 # 覆盖三条通路：
 #

@@ -40,7 +40,7 @@ export const SESSION_ID_SHAPE = /^[A-Za-z0-9][A-Za-z0-9._-]{3,127}$/;
 // 以下后缀与 @zhushanwen/subagent-engine-sdk src/zcode-db-paths.ts（路径段常量 SSOT，
 // zcode-cli db-path.ts 与 runtime sqlite-access.ts 同源 import）同值。脚本为 ESM 无法
 // import TS 源（scripts/ 无构建链），按 db-path.ts 等价 JS 实现复用其语义；一致性由
-// packages/runtime/test/host-db-suffix-parity.test.ts 的脚本派生视图文本比对检查。
+// packages/runtime/test/test-extra4.test.ts 的脚本派生视图文本比对检查。
 const HOST_DB_SUFFIX = [".zcode", "cli", "db", "db.sqlite"];
 const INDEX_DB_SUFFIX = [".zcode", "v2", "tasks-index.sqlite"];
 

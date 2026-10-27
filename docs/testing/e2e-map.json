@@ -404,11 +404,11 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/equivalence/live-reload.test.ts"
+          "ref": "packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts"
+          "ref": "packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts"
         },
         {
           "kind": "spec",
@@ -424,7 +424,7 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/equivalence/session-manager-e2e-fixture-unit.test.ts"
+          "ref": "packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts"
         },
         {
           "kind": "spec",
@@ -436,7 +436,7 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts"
+          "ref": "packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts"
         },
         {
           "kind": "spec",
@@ -473,7 +473,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts"
+          "ref": "packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts"
         }
       ],
       "trigger": "on-pi-bump",
@@ -493,7 +493,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts"
+          "ref": "packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts"
         }
       ],
       "trigger": "on-pi-bump",
@@ -1748,7 +1748,7 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/session-manager-e2e-probe.test.ts"
+          "ref": "packages/runtime/src/__tests__/src-__tests__-extra1.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -2394,7 +2394,7 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/transport/canvas-message-handler.test.ts"
+          "ref": "packages/runtime/src/transport/handler-misc-bundle.test.ts"
         },
         {
           "kind": "spec",
@@ -2536,15 +2536,15 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/infra/subagent-control/control-frames.test.ts"
+          "ref": "packages/runtime/src/__tests__/infra/subagent-control/subagent-control-bundle.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/infra/subagent-control/channel-tree.test.ts"
+          "ref": "packages/runtime/src/__tests__/infra/subagent-control/subagent-control-bundle.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/infra/subagent-control/mirror-integration.test.ts"
+          "ref": "packages/runtime/src/__tests__/infra/subagent-control/subagent-control-bundle.test.ts"
         },
         {
           "kind": "spec",
@@ -2556,7 +2556,7 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/infra/subagent-control/engine-launch-env.test.ts"
+          "ref": "packages/runtime/src/__tests__/infra/subagent-control/subagent-control-bundle.test.ts"
         },
         {
           "kind": "spec",
@@ -2785,7 +2785,7 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/services/session/__tests__/delivery-outbox-crash-recovery.test.ts"
+          "ref": "packages/runtime/src/services/session/__tests__/session-projection-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3420,7 +3420,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/infra/subagent-control/channel-tree.test.ts"
+          "ref": "packages/runtime/src/__tests__/infra/subagent-control/subagent-control-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3466,7 +3466,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/infra/subagent-control/real-engine-integration.test.ts"
+          "ref": "packages/runtime/src/__tests__/infra/subagent-control/subagent-control-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3487,7 +3487,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/file-lock-parity.test.ts"
+          "ref": "packages/runtime/test/test-extra4.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3530,7 +3530,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-sandbox.test.ts"
+          "ref": "packages/runtime/test/domains-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3551,7 +3551,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-sandbox-process-guards.test.ts"
+          "ref": "packages/runtime/test/domains-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3600,7 +3600,7 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-sandbox.test.ts"
+          "ref": "packages/runtime/test/domains-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3620,7 +3620,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/pi-settings-store.test.ts"
+          "ref": "packages/runtime/test/test-extra4.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3686,7 +3686,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/services/plugin-service/__tests__/plugin-esm-loader.test.ts"
+          "ref": "packages/runtime/src/services/plugin-service/__tests__/plugin-host-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3708,7 +3708,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts"
+          "ref": "packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3731,7 +3731,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/equivalence/live-reload.test.ts"
+          "ref": "packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -3751,7 +3751,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts"
+          "ref": "packages/runtime/src/__tests__/equivalence/equivalence-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4356,11 +4356,11 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/services/plugin-service/__tests__/plugin-host-process.test.ts"
+          "ref": "packages/runtime/src/services/plugin-service/__tests__/plugin-host-bundle.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/src/services/plugin-service/__tests__/plugin-esm-loader.test.ts"
+          "ref": "packages/runtime/src/services/plugin-service/__tests__/plugin-host-bundle.test.ts"
         },
         {
           "kind": "spec",
@@ -4406,7 +4406,7 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-catalog-rpc.test.ts"
+          "ref": "packages/runtime/test/plugin-rpc-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4434,15 +4434,15 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-rpc-setup.test.ts"
+          "ref": "packages/runtime/test/plugin-rpc-bundle.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-ui-event-channel.test.ts"
+          "ref": "packages/runtime/test/domains-bundle.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-host-actions.test.ts"
+          "ref": "packages/runtime/test/test-extra1.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4465,7 +4465,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-capability-wiring.test.ts"
+          "ref": "packages/runtime/test/plugin-rpc-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4491,7 +4491,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-provider-access-plugin-side.test.ts"
+          "ref": "packages/runtime/test/domains-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4541,11 +4541,11 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/acceptance/item1-fork-coldread.test.ts"
+          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/acceptance/item6-getstate-cold.test.ts"
+          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
         },
         {
           "kind": "spec",
@@ -4553,15 +4553,15 @@
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/acceptance/item11-host-invariants.test.ts"
+          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/acceptance/item12-session-list.test.ts"
+          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/acceptance/item13-w5-behavior.test.ts"
+          "ref": "packages/runtime/test/acceptance/acceptance-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4642,7 +4642,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/retry-rules-config-message-handler.test.ts"
+          "ref": "packages/runtime/test/mcp-codemode-bundle.test.ts"
         },
         {
           "kind": "spec",
@@ -4686,15 +4686,15 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/session-file-utils.test.ts"
+          "ref": "packages/runtime/test/git-file-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "cd packages/runtime && npx vitest run test/session-file-utils.test.ts",
+      "run": "cd packages/runtime && npx vitest run test/git-file-bundle.test.ts",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#2-测试分层",
-      "note": "测试整合批 2 合并产物（6 个源文件并入，来源分节注释见产物头；preset-sidecar-io 与 scan-external 两节因 mock 工厂导出集截断 / 被测对象不同未并入）。runtime/test 资产族防漏门禁（--staged）对新增文件要求 rule 覆盖而登记。"
+      "note": "测试整合批 2 合并产物（6 个源文件并入，来源分节注释见产物头；preset-sidecar-io 与 scan-external 两节因 mock 工厂导出集截断 / 被测对象不同未并入）。runtime/test 资产族防漏门禁（--staged）对新增文件要求 rule 覆盖而登记。 wave3 收尾：session-file-utils.test.ts 并入 git-file-bundle.test.ts（同目录零 mock 对），asset/run 同步重指。"
     },
     {
       "id": "E2E-SESSFILE-02",
@@ -4706,7 +4706,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/event-adapter.test.ts"
+          "ref": "packages/runtime/test/domains-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -4726,7 +4726,7 @@
       "assets": [
         {
           "kind": "spec",
-          "ref": "packages/runtime/test/plugin-service.test.ts"
+          "ref": "packages/runtime/test/plugin-service-bundle.test.ts"
         }
       ],
       "trigger": "on-diff",
@@ -5184,6 +5184,231 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#测试执行三档",
       "note": "test / test:integration 两段调度的收尾判定。改调度脚本或 junit 落点时：注入一个必败用例跑 test:small 应 exit 1 且列出 suite，还原后 exit 0。"
+    },
+    {
+      "id": "E2E-RTBUNDLE-01",
+      "summary": "runtime 扩展系统 单测合并 bundle 看护：scope 内被测源码 diff 时跑承载 bundle（Wave3 合并产物）",
+      "scope": [
+        "packages/runtime/src/services/extension-service/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/extension-bundle.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime exec vitest run test/extension-bundle.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "Wave3 runtime 测试文件合并（593→250）产物：4 个来源测试文件合并，来源清单见文件头横幅；junit 用例名多重集对基线 LEAF-MATCH 全守恒。"
+    },
+    {
+      "id": "E2E-RTBUNDLE-02",
+      "summary": "runtime new-task git 集成单测合并 bundle 看护：git 服务/状态/消息处理被测源码 diff 时跑承载 bundle（Wave3 合并产物）",
+      "scope": [
+        "packages/runtime/src/services/git-service.ts",
+        "packages/runtime/src/services/git/**",
+        "packages/runtime/src/transport/git-message-handler.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/new-task/new-task-bundle.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime exec vitest run test/new-task/new-task-bundle.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "Wave3 runtime 测试文件合并（593→250）产物：2 个来源测试文件合并，来源清单见文件头横幅；junit 用例名多重集对基线 LEAF-MATCH 全守恒。"
+    },
+    {
+      "id": "E2E-RTBUNDLE-03",
+      "summary": "runtime 插件系统注册/安装/权限/存储 单测合并 bundle 看护：scope 内被测源码 diff 时跑承载 bundle（Wave3 合并产物）",
+      "scope": [
+        "packages/runtime/src/services/plugin-service/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/plugin-registry-bundle.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime exec vitest run test/plugin-registry-bundle.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "Wave3 runtime 测试文件合并（593→250）产物：9 个来源测试文件合并，来源清单见文件头横幅；junit 用例名多重集对基线 LEAF-MATCH 全守恒。"
+    },
+    {
+      "id": "E2E-RTBUNDLE-04",
+      "summary": "runtime 预设与 pi 配置存储 单测合并 bundle 看护：scope 内被测源码 diff 时跑承载 bundle（Wave3 合并产物）",
+      "scope": [
+        "packages/runtime/src/services/preset-service/**",
+        "packages/runtime/src/infra/pi/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/preset-pi-store-bundle.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime exec vitest run test/preset-pi-store-bundle.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "Wave3 runtime 测试文件合并（593→250）产物：4 个来源测试文件合并，来源清单见文件头横幅；junit 用例名多重集对基线 LEAF-MATCH 全守恒。"
+    },
+    {
+      "id": "E2E-RTBUNDLE-05",
+      "summary": "runtime 进程管理（fork/reap/respawn/shell） 单测合并 bundle 看护：scope 内被测源码 diff 时跑承载 bundle（Wave3 合并产物）",
+      "scope": [
+        "packages/runtime/src/infra/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/process-bundle.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime exec vitest run test/process-bundle.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "Wave3 runtime 测试文件合并（593→250）产物：5 个来源测试文件合并，来源清单见文件头横幅；junit 用例名多重集对基线 LEAF-MATCH 全守恒。"
+    },
+    {
+      "id": "E2E-RTBUNDLE-06",
+      "summary": "runtime 模型服务与配额 单测合并 bundle 看护：scope 内被测源码 diff 时跑承载 bundle（Wave3 合并产物）",
+      "scope": [
+        "packages/runtime/src/services/model-service/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/quota-model-bundle.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime exec vitest run test/quota-model-bundle.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "Wave3 runtime 测试文件合并（593→250）产物：4 个来源测试文件合并，来源清单见文件头横幅；junit 用例名多重集对基线 LEAF-MATCH 全守恒。"
+    },
+    {
+      "id": "E2E-RTBUNDLE-07",
+      "summary": "runtime pi RPC 客户端 单测合并 bundle 看护：scope 内被测源码 diff 时跑承载 bundle（Wave3 合并产物）",
+      "scope": [
+        "packages/runtime/src/infra/pi/rpc-client.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/rpc-server-bundle.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime exec vitest run test/rpc-server-bundle.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "Wave3 runtime 测试文件合并（593→250）产物：0 个来源测试文件合并，来源清单见文件头横幅；junit 用例名多重集对基线 LEAF-MATCH 全守恒。"
+    },
+    {
+      "id": "E2E-RTBUNDLE-08",
+      "summary": "runtime 会话生命周期 单测合并 bundle 看护：scope 内被测源码 diff 时跑承载 bundle（Wave3 合并产物）",
+      "scope": [
+        "packages/runtime/src/services/session/session-lifecycle.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/session-lifecycle-bundle.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime exec vitest run test/session-lifecycle-bundle.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "Wave3 runtime 测试文件合并（593→250）产物：2 个来源测试文件合并，来源清单见文件头横幅；junit 用例名多重集对基线 LEAF-MATCH 全守恒。"
+    },
+    {
+      "id": "E2E-RTBUNDLE-09",
+      "summary": "runtime 会话扫描与 jsonl 格式 单测合并 bundle 看护：scope 内被测源码 diff 时跑承载 bundle（Wave3 合并产物）",
+      "scope": [
+        "packages/runtime/src/services/scanners/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/session-scanner-bundle.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime exec vitest run test/session-scanner-bundle.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "Wave3 runtime 测试文件合并（593→250）产物：5 个来源测试文件合并，来源清单见文件头横幅；junit 用例名多重集对基线 LEAF-MATCH 全守恒。"
+    },
+    {
+      "id": "E2E-RTBUNDLE-10",
+      "summary": "runtime 会话服务 单测合并 bundle 看护：scope 内被测源码 diff 时跑承载 bundle（Wave3 合并产物）",
+      "scope": [
+        "packages/runtime/src/services/session/session-service.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/session-service-bundle.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime exec vitest run test/session-service-bundle.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "Wave3 runtime 测试文件合并（593→250）产物：4 个来源测试文件合并，来源清单见文件头横幅；junit 用例名多重集对基线 LEAF-MATCH 全守恒。"
+    },
+    {
+      "id": "E2E-RTBUNDLE-11",
+      "summary": "runtime 扩展提示词/预设组合/配置健壮性杂项 单测合并 bundle 看护：scope 内被测源码 diff 时跑承载 bundle（Wave3 合并产物）",
+      "scope": [
+        "packages/runtime/src/services/extension-service/**",
+        "packages/runtime/src/services/preset-service/**",
+        "packages/runtime/src/services/config-service/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/test/test-extra3.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime exec vitest run test/test-extra3.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "Wave3 runtime 测试文件合并（593→250）产物：7 个来源测试文件合并，来源清单见文件头横幅；junit 用例名多重集对基线 LEAF-MATCH 全守恒。"
     }
   ]
 }

@@ -1,0 +1,1622 @@
+import { logger } from '../src/infra/logger.js';
+import { PiConfigStore } from '../src/infra/pi/pi-config-store.js';
+import { scanPiSessions, persistHandoffSidecar, invalidateScanDirCache, _resetSessionMetaCacheForTest } from '../src/infra/pi/session-file-utils.js';
+import { ArchiveService, type ArchiveServiceDeps } from '../src/services/archive/archive-service.js';
+import type { DiscoveredExtension } from '../src/services/ports/installer.js';
+import type { IPiEngine } from '../src/services/ports/pi-engine.js';
+import { PresetGuardError, PresetService } from '../src/services/preset-service.js';
+import { fireDeathDisposition, setBtwCascadeOps, subscribeSessionDeathDisposition } from '../src/services/session/session-lifecycle.js';
+import { PresetMessageHandler } from '../src/transport/preset-message-handler.js';
+import { makeSessionLifecycleFixture, scannedEntry, trashMock } from './helpers/session-lifecycle-fixture.js';
+import { BUILTIN_PRESET_IDS, ClientMessage, DEFAULT_PRESETS, PiPresetsFile, type PiLaunchPreset } from '@taiji/shared';
+import { encodeCwd } from '@taiji/shared/paths';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync as statSyncInternal, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WebSocket } from 'ws';
+
+// 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
+
+
+// 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
+
+
+// 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
+
+// ======================================================================
+// ← test/preset-service.test.ts
+// ======================================================================
+
+/** readFileSync 第一个参数类型（number fd 或 string 路径）。 */
+type PathOrFd = Parameters<typeof import('node:fs')['readFileSync']>[0]
+
+
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs')
+  return {
+    ...actual,
+    readFileSync: vi.fn((path: PathOrFd, encoding?: unknown) => {
+      const p = typeof path === 'string' ? path : ''
+      // 让假路径的 package.json 返回真实包名（命中 mandatory SSOT）
+      if (p.includes('pi-pending-notifications')) return JSON.stringify({ name: '@zhushanwen/pi-pending-notifications' })
+      if (p.includes('pi-goal')) return JSON.stringify({ name: '@zhushanwen/pi-goal' })
+      // normal-a / normal-b 不匹配 mandatory → 普通包
+      if (p.includes('normal-a')) return JSON.stringify({ name: 'normal-a' })
+      if (p.includes('normal-b')) return JSON.stringify({ name: 'normal-b' })
+      // 其他文件（pi-presets.json / settings.json / disabled-packages.json 等）走真实 fs
+      return actual.readFileSync(path, encoding as Parameters<typeof actual.readFileSync>[1])
+    }),
+  }
+})
+
+
+// ======================================================================
+// ← session-lifecycle-death-disposition.test.ts
+// ======================================================================
+
+/** 捕获到的一次死亡处置 fire（detail.hasDestroySink 是本文件的断言本体） */
+interface DispositionFire {
+  sessionId: string
+  disposition: 'delete' | 'suppress' | 'archive'
+  hasDestroySink: boolean
+}
+
+
+let fires: DispositionFire[] = []
+
+
+let unsubscribe: () => void = () => {}
+
+
+let tmpDir_m2: string
+
+
+let tmpFile: string
+
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('preset-pi-store-bundle', () => {
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('preset-pi-store-bundle', () => {
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('preset-service', () => {
+describe('preset-service', () => {
+/**
+ * PresetService 单测（wave 1: 存储内核 + CRUD / wave 2: resolve + extension mode 过滤）。
+ *
+ * wave 1（10 个 testCase）：CRUD + builtin 保护 + IO 容错。
+ * wave 2（6 个 testCase）：resolve 各 mode 分支 + infrastructure 保活 + toolArgs 映射 + flags 透传。
+ *
+ * mock 策略：fake ConfigStore（getConfigDir 返回 tmpdir）+ fake ExtensionService
+ * （wave1 用空占位；wave2 注入固定 getDiscoveredAndDisabled 返回值）。
+ */
+/**
+ * vi.mock node:fs：只拦截 extension 相关路径（resolveExtensions 内 readPkgMeta 读 package.json），
+ * 让假路径返回真实包名（@zhushanwen/pi-pending-notifications 等），使 resolveExtensions 真正走
+ * infrastructure/feature 分支。其他文件（pi-presets.json/settings.json）透传 actual.readFileSync，
+ * 保证 wave1 / 其他 wave2 测试的真实 fs 读取不受影响。
+ */
+
+/** 只暴露 getConfigDir 的最小 fake configStore。 */
+function makeFakeConfigStore(configDir: string) {
+  return { getConfigDir: () => configDir }
+}
+
+/** 占位 fake extensionService（wave1 不调用）。wave2 用 makeFakeExtensionStoreForResolve。 */
+function makeFakeExtensionStore() {
+  return {
+    scanExtensions: vi.fn(async () => []),
+    getExtensionPaths: vi.fn(async () => []),
+    getSkillPaths: vi.fn(async () => []),
+  }
+}
+
+/**
+ * wave2 resolve 测试用的 fake extensionService：可控的 discovered/disabled。
+ *
+ * resolveExtensionPaths 调 getDiscoveredAndDisabled（返回原始 discovered + disabledSet），
+ * 本地再 resolveExtensions + applyPresetMode。所以 fake 需 mock getDiscoveredAndDisabled
+ * （不再 mock scanExtensions/getExtensionPaths，resolve 不再调它们；保留方法占位给可能用到的地方）。
+ *
+ * discovered: getDiscoveredAndDisabled 返回的原始发现结果（path + source；npm 化 builtin
+ * infrastructure 包也经此集合进入——builtin npm 化后无独立路径注入）。
+ * disabledNames: 包名数组（不含 npm: 前缀），fake 内部转成 `npm:<name>` 形式的 Set。
+ */
+function makeFakeExtensionStoreForResolve(
+  discovered: DiscoveredExtension[],
+  disabledNames: string[],
+) {
+  return {
+    getDiscoveredAndDisabled: vi.fn(async () => ({
+      discovered,
+      disabledSet: new Set(disabledNames.map(n => `npm:${n}`)),
+    })),
+    getSkillPaths: vi.fn(async () => []),
+    // 保留 scanExtensions/getExtensionPaths 占位（resolve 不再调，但保留兼容其他可能用到的地方）
+    scanExtensions: vi.fn(async () => []),
+    getExtensionPaths: vi.fn(async () => []),
+  }
+}
+
+/** 构造最小 PiLaunchPreset（仅本 wave resolve 关心的字段，其余缺省）。 */
+function makePreset(overrides: Partial<PiLaunchPreset>): PiLaunchPreset {
+  return {
+    id: 'test-preset',
+    name: 'test',
+    builtin: false,
+    order: 0,
+    toolMode: 'all',
+    extensionMode: 'all',
+    ...overrides,
+  }
+}
+
+let tmpDir: string
+let presetService: PresetService
+
+beforeEach(() => {
+  tmpDir = mkdtempSync(join(tmpdir(), 'preset-service-test-'))
+  const configStore = makeFakeConfigStore(tmpDir)
+  const extensionStore = makeFakeExtensionStore()
+  presetService = new PresetService(
+    configStore as unknown as ConstructorParameters<typeof PresetService>[0],
+    extensionStore as unknown as ConstructorParameters<typeof PresetService>[1],
+  )
+})
+
+afterEach(() => {
+  rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+})
+
+function piPresetsPath(): string {
+  return join(tmpDir, 'pi-presets.json')
+}
+
+function writeFile(file: PiPresetsFile): void {
+  writeFileSync(piPresetsPath(), JSON.stringify(file, null, 2), 'utf-8')
+}
+
+function readFile(): PiPresetsFile | undefined {
+  if (!existsSync(piPresetsPath())) return undefined
+  return JSON.parse(readFileSync(piPresetsPath(), 'utf-8')) as PiPresetsFile
+}
+
+describe('PresetService · wave 1 存储内核', () => {
+  // ── 读路径 ──────────────────────────────────────────────────
+
+  it('w1-tc1: getAllPresets 用户文件不存在时返回 DEFAULT_PRESETS', () => {
+    expect(existsSync(piPresetsPath())).toBe(false)
+    const all = presetService.getAllPresets()
+    expect(all).toHaveLength(DEFAULT_PRESETS.length)
+    expect(all.map(p => p.id)).toEqual(DEFAULT_PRESETS.map(p => p.id))
+    // 按 order 升序
+    expect(all.map(p => p.order)).toEqual([...DEFAULT_PRESETS].map(p => p.order).sort((a, b) => a - b))
+  })
+
+  it('w1-tc2: getAllPresets 用户覆盖 builtin 字段按 id 合并 + 自定义追加', () => {
+    const file: PiPresetsFile = {
+      version: 1,
+      defaultPresetId: BUILTIN_PRESET_IDS.FULL,
+      presets: [
+        // 覆盖 builtin:full 的 description
+        {
+          ...DEFAULT_PRESETS[0]!,
+          id: BUILTIN_PRESET_IDS.FULL,
+          name: '全工具模式',
+          builtin: true,
+          order: 0,
+          description: '我被用户改了',
+        },
+        // 一个自定义
+        {
+          id: 'uuid-custom-1',
+          name: '我的预设',
+          builtin: false,
+          order: 10,
+          toolMode: 'all',
+          extensionMode: 'all',
+        },
+      ],
+    }
+    writeFile(file)
+
+    const all = presetService.getAllPresets()
+    // 4 个 DEFAULT + 1 个自定义
+    expect(all).toHaveLength(5)
+    const full = all.find(p => p.id === BUILTIN_PRESET_IDS.FULL)!
+    expect(full.description).toBe('我被用户改了')
+    expect(full.toolMode).toBe('all') // 来自 DEFAULT 兜底（用户未传则保留 DEFAULT 值）
+    const custom = all.find(p => p.id === 'uuid-custom-1')
+    expect(custom).toBeDefined()
+    expect(custom!.builtin).toBe(false)
+    // 按 order 升序：0(full), 1(orch), 2(ro), 3(dispatch), 10(custom)
+    expect(all.map(p => p.order)).toEqual([0, 1, 2, 3, 10])
+  })
+
+  it('w1-tc9: getPreset 找不到返回 undefined，builtin:full 总能找到', () => {
+    expect(presetService.getPreset('nope')).toBeUndefined()
+    const full = presetService.getPreset(BUILTIN_PRESET_IDS.FULL)
+    expect(full).toBeDefined()
+    expect(full!.id).toBe(BUILTIN_PRESET_IDS.FULL)
+  })
+
+  // ── 写路径 ──────────────────────────────────────────────────
+
+  it('w1-tc3: savePreset 对 builtin preset 保护 id/builtin/order/name', () => {
+    presetService.savePreset({
+      id: BUILTIN_PRESET_IDS.FULL,
+      name: 'hacked', // 应被忽略（保留 DEFAULT '全工具模式'）
+      builtin: true,
+      order: 99, // 应被忽略（保留 DEFAULT 0）
+      toolMode: 'allowlist',
+      allowedTools: ['read'],
+      extensionMode: 'all',
+    })
+
+    const full = presetService.getPreset(BUILTIN_PRESET_IDS.FULL)!
+    expect(full.name).toBe('全工具模式') // 保护
+    expect(full.order).toBe(0) // 保护
+    expect(full.builtin).toBe(true)
+    expect(full.toolMode).toBe('allowlist') // 用户值生效
+    expect(full.allowedTools).toEqual(['read'])
+  })
+
+  it('w1-tc4: savePreset 传 builtin id 但 builtin:false 抛 PresetGuardError', () => {
+    expect(() => {
+      presetService.savePreset({
+        id: BUILTIN_PRESET_IDS.FULL,
+        name: 'x',
+        builtin: false, // 试图降级逃逸
+        order: 0,
+        toolMode: 'all',
+        extensionMode: 'all',
+      })
+    }).toThrow(PresetGuardError)
+
+    // 文件未写入（savePreset 在校验阶段就抛错）
+    // 直接读 pi-presets.json 应不存在或不含该篡改项
+    const onDisk = readFile()
+    expect(onDisk?.presets ?? []).toEqual([])
+  })
+
+  it('w1-tc5: deletePreset 内置 preset 抛 PresetGuardError，文件不变', () => {
+    // 先写一个合法 pi-presets.json
+    writeFile({
+      version: 1,
+      presets: [
+        { ...DEFAULT_PRESETS[0]!, description: 'preset' },
+      ],
+    })
+
+    expect(() => {
+      presetService.deletePreset(BUILTIN_PRESET_IDS.FULL)
+    }).toThrow(PresetGuardError)
+
+    // 文件未变更
+    const onDisk = readFile()
+    expect(onDisk!.presets).toHaveLength(1)
+  })
+
+  it('w1-tc6: deletePreset 自定义 preset 从文件移除', () => {
+    writeFile({
+      version: 1,
+      presets: [
+        { id: 'uuid-del', name: 'a', builtin: false, order: 5, toolMode: 'all', extensionMode: 'all' },
+        { id: 'uuid-keep', name: 'b', builtin: false, order: 6, toolMode: 'all', extensionMode: 'all' },
+      ],
+    })
+
+    presetService.deletePreset('uuid-del')
+
+    const all = presetService.getAllPresets()
+    expect(all.find(p => p.id === 'uuid-del')).toBeUndefined()
+    expect(all.find(p => p.id === 'uuid-keep')).toBeDefined()
+  })
+
+  it('w1-tc7: getDefaultPresetId 空文件兜底 builtin:full，setDefault 后读回新值', () => {
+    expect(presetService.getDefaultPresetId()).toBe(BUILTIN_PRESET_IDS.FULL)
+
+    presetService.setDefaultPresetId(BUILTIN_PRESET_IDS.ORCHESTRATOR)
+
+    expect(presetService.getDefaultPresetId()).toBe(BUILTIN_PRESET_IDS.ORCHESTRATOR)
+    const onDisk = readFile()
+    expect(onDisk!.defaultPresetId).toBe(BUILTIN_PRESET_IDS.ORCHESTRATOR)
+  })
+
+  // ── IO 容错 ────────────────────────────────────────────────
+
+  it('w1-tc10: savePreset 新增自定义 preset 强制 builtin:false', () => {
+    presetService.savePreset({
+      id: 'uuid-1',
+      name: '我的预设',
+      // builtin 缺省
+      order: 10,
+      toolMode: 'all',
+      extensionMode: 'all',
+    } as PiLaunchPreset)
+
+    const all = presetService.getAllPresets()
+    const custom = all.find(p => p.id === 'uuid-1')
+    expect(custom).toBeDefined()
+    expect(custom!.builtin).toBe(false)
+
+    // 即使传 builtin:true 也应被强制为 false
+    presetService.savePreset({
+      id: 'uuid-2',
+      name: '伪造内置',
+      builtin: true, // 试图伪造
+      order: 11,
+      toolMode: 'all',
+      extensionMode: 'all',
+    })
+    const forged = presetService.getPreset('uuid-2')
+    expect(forged).toBeDefined()
+    expect(forged!.builtin).toBe(false)
+  })
+})
+
+// ── wave 2: resolve + builtin 提取 ──────────────────────────────
+
+describe('PresetService · wave 2 resolve', () => {
+  // 本 describe 用独立的 presetService 构造（带可控 mock extensionService）
+  let svcWithMock: PresetService
+  let mockExt: ReturnType<typeof makeFakeExtensionStoreForResolve>
+
+  beforeEach(() => {
+    // 复用顶层 tmpDir（已是 presetService 的 configDir），但用新 mock 构造 svcWithMock
+    // fixture 含三类包：infrastructure(pi-pending-notifications) + feature(pi-goal) + 2 普通(normal-a/normal-b)
+    // 假路径配合文件顶部 vi.mock('node:fs') 返回真实包名，使 resolveExtensions 真正走 infra/feature 分支
+    mockExt = makeFakeExtensionStoreForResolve(
+      [
+        // 用真实 infrastructure 包名，让 resolveExtensions 真正走 infra 分支
+        { path: '/fake/ext/pi-pending-notifications', source: 'npm' },
+        // feature 包
+        { path: '/fake/ext/pi-goal', source: 'npm' },
+        // 普通包
+        { path: '/fake/ext/normal-a', source: 'user' },
+        { path: '/fake/ext/normal-b', source: 'user' },
+      ],
+      [], // 不 disable 任何包
+    )
+    svcWithMock = new PresetService(
+      makeFakeConfigStore(tmpDir) as unknown as ConstructorParameters<typeof PresetService>[0],
+      mockExt as unknown as ConstructorParameters<typeof PresetService>[1],
+    )
+  })
+
+  it('w2-tc4: resolve extensionMode=allowlist infrastructure 存活即使不在 allowlist（S2 核心）', async () => {
+    const result = await svcWithMock.resolve(
+      makePreset({ extensionMode: 'allowlist', allowedExtensions: ['normal-a'] }),
+      '/cwd',
+    )
+    // infra（pi-pending-notifications 存活，即使不在 allowlist 也留）+ normal-a（在 allowlist）
+    // 不含 pi-goal（feature 不在 allowlist）、normal-b（不在 allowlist）
+    expect(result.extensionPaths).toEqual([
+      '/fake/ext/pi-pending-notifications',
+      '/fake/ext/normal-a',
+    ])
+  })
+
+  it('w2-tc5: resolve extensionMode=denylist infrastructure 存活即使被列入 denylist（S2 核心）', async () => {
+    const result = await svcWithMock.resolve(
+      makePreset({
+        extensionMode: 'denylist',
+        deniedExtensions: ['@zhushanwen/pi-pending-notifications', '@zhushanwen/pi-goal', 'normal-a'],
+      }),
+      '/cwd',
+    )
+    // infra（pi-pending-notifications 扛住 denylist！即使被列入也留）
+    // 不含 pi-goal / normal-a（被 deny）；normal-b 未 deny 但…保留
+    expect(result.extensionPaths).toEqual([
+      '/fake/ext/pi-pending-notifications',
+      '/fake/ext/normal-b',
+    ])
+  })
+
+  it('w2-tc7: resolve 4 种 toolMode 映射正确', async () => {
+    // all → {}
+    const rAll = await svcWithMock.resolve(makePreset({ toolMode: 'all' }), '/cwd')
+    expect(rAll.toolArgs).toEqual({})
+
+    // allowlist → { tools: allowedTools }
+    const rAllow = await svcWithMock.resolve(
+      makePreset({ toolMode: 'allowlist', allowedTools: ['read', 'grep'] }),
+      '/cwd',
+    )
+    expect(rAllow.toolArgs).toEqual({ tools: ['read', 'grep'] })
+
+    // denylist → { excludeTools: deniedTools }
+    const rDeny = await svcWithMock.resolve(
+      makePreset({ toolMode: 'denylist', deniedTools: ['bash'] }),
+      '/cwd',
+    )
+    expect(rDeny.toolArgs).toEqual({ excludeTools: ['bash'] })
+
+    // none → { noTools: true }
+    const rNone = await svcWithMock.resolve(makePreset({ toolMode: 'none' }), '/cwd')
+    expect(rNone.toolArgs).toEqual({ noTools: true })
+  })
+
+  it('w2-tc8: resolve flags/noSkills/noContextFiles + modelOverride/thinkingLevel 透传', async () => {
+    const result = await svcWithMock.resolve(
+      makePreset({
+        noSkills: true,
+        noContextFiles: true,
+        modelOverride: 'anthropic/x',
+        thinkingLevel: 'high',
+      }),
+      '/cwd',
+    )
+    expect(result.flags).toEqual({ noSkills: true, noContextFiles: true })
+    expect(result.skillPaths).toEqual([]) // noSkills=true 清空（B1：返 [] 真清空）
+    expect(result.modelOverride).toBe('anthropic/x')
+    expect(result.thinkingLevel).toBe('high')
+  })
+
+  // ── B1 修复验证：resolveSkillPaths 在 noSkills=false/undefined 时返 undefined ──
+
+  it.each([
+    ['未设（缺省）', {}],
+    ['显式 false', { noSkills: false }],
+  ] as const)('B1: resolve noSkills %s → skillPaths 为 undefined（让 lifecycle ?? fallback 到 getSkillPaths）', async (_label, overrides) => {
+    const result = await svcWithMock.resolve(makePreset(overrides), '/cwd')
+    // 关键断言：undefined 而非 []。[] 是 truthy，会让 lifecycle 的 ?? fallback 失效，
+    // 所有用 presetId 启动的 session 拿到空 skillPaths，所有 skill 失效（BLOCKER 根因）。
+    expect(result.skillPaths).toBeUndefined()
+    expect(result.flags.noSkills).toBe(false) // noSkills 默认 false
+  })
+
+  // ── 模式提示词透传（scope 微扩：PresetResolution.prompt）──
+
+  it('模式提示词透传：resolve 返回 prompt，replace/append 逐段相等', async () => {
+    const presetWithPrompt = makePreset({
+      id: 'uuid-resolve-prompt',
+      prompt: {
+        replace: { enabled: true, prompt: '替换段' },
+        append: { enabled: true, prompt: '追加段' },
+      },
+    })
+    const result = await svcWithMock.resolve(presetWithPrompt, '/cwd')
+    expect(result.prompt).toEqual({
+      replace: { enabled: true, prompt: '替换段' },
+      append: { enabled: true, prompt: '追加段' },
+    })
+    // 逐段相等（字段不丢失 / 不重写）
+    expect(result.prompt!.replace).toEqual(presetWithPrompt.prompt!.replace)
+    expect(result.prompt!.append).toEqual(presetWithPrompt.prompt!.append)
+  })
+
+  it('模式提示词透传：未配置 prompt → resolution.prompt 为 undefined', async () => {
+    const result = await svcWithMock.resolve(makePreset({}), '/cwd')
+    expect(result.prompt).toBeUndefined()
+  })
+})
+
+// ── PR #117 review fixes: W-RT-1 / W-RT-2 / W-RT-3 / S-RT-2 ──────────
+
+describe('PresetService · PR #117 review fixes', () => {
+  // ── W-RT-1: coercePreset 枚举白名单校验 ──
+
+  it('W-RT-1: getAllPresets 丢弃 toolMode 非法枚举值的脏数据 preset', () => {
+    writeFile({
+      version: 1,
+      presets: [
+        // 合法自定义 preset（应保留）
+        { id: 'uuid-ok', name: 'ok', builtin: false, order: 1, toolMode: 'all', extensionMode: 'all' },
+        // 脏数据：toolMode 非法（不在 all/allowlist/denylist/none）
+        { id: 'uuid-bad-tool', name: 'bad', builtin: false, order: 2, toolMode: 'DROP TABLE' as PiLaunchPreset['toolMode'], extensionMode: 'all' },
+        // 脏数据：extensionMode 非法
+        { id: 'uuid-bad-ext', name: 'bad', builtin: false, order: 3, toolMode: 'all', extensionMode: 'HACKED' as PiLaunchPreset['extensionMode'] },
+      ],
+    })
+
+    const all = presetService.getAllPresets()
+    // 3 个 DEFAULT + 1 个合法自定义 = 4 个；2 个脏数据被丢弃
+    expect(all).toHaveLength(DEFAULT_PRESETS.length + 1)
+    expect(all.find(p => p.id === 'uuid-ok')).toBeDefined()
+    expect(all.find(p => p.id === 'uuid-bad-tool')).toBeUndefined()
+    expect(all.find(p => p.id === 'uuid-bad-ext')).toBeUndefined()
+  })
+
+  it('W-RT-1: importPresets 丢弃 toolMode/extensionMode 非法的 preset（导入脏数据防御）', () => {
+    const dirtyJson = JSON.stringify({
+      version: 1,
+      presets: [
+        { id: 'imp-ok', name: 'ok', builtin: false, order: 5, toolMode: 'allowlist', extensionMode: 'none' },
+        { id: 'imp-bad', name: 'bad', builtin: false, order: 6, toolMode: 'EVIL', extensionMode: 'all' },
+      ],
+    })
+    const count = presetService.importPresets(dirtyJson)
+    // 只导入合法的 1 个
+    expect(count).toBe(1)
+    expect(presetService.getPreset('imp-ok')).toBeDefined()
+    expect(presetService.getPreset('imp-bad')).toBeUndefined()
+  })
+
+  // ── W-RT-2: deletePreset 清理 defaultPresetId ──
+
+  it('W-RT-2: deletePreset 清理指向被删 preset 的 defaultPresetId', () => {
+    writeFile({
+      version: 1,
+      defaultPresetId: 'uuid-default',
+      presets: [
+        { id: 'uuid-default', name: 'to-be-deleted', builtin: false, order: 1, toolMode: 'all', extensionMode: 'all' },
+      ],
+    })
+    expect(presetService.getDefaultPresetId()).toBe('uuid-default')
+
+    presetService.deletePreset('uuid-default')
+
+    // defaultPresetId 被清空 → getDefaultPresetId 回退 builtin:full（W-RT-3 校验存在性兜底）
+    expect(presetService.getDefaultPresetId()).toBe(BUILTIN_PRESET_IDS.FULL)
+    const onDisk = readFile()
+    expect(onDisk!.defaultPresetId).toBeUndefined()
+  })
+
+  it('W-RT-2: deletePreset 不存在的 preset 是 no-op（不抛错、不写盘）', () => {
+    writeFile({
+      version: 1,
+      defaultPresetId: BUILTIN_PRESET_IDS.FULL,
+      presets: [
+        { id: 'uuid-x', name: 'x', builtin: false, order: 1, toolMode: 'all', extensionMode: 'all' },
+      ],
+    })
+    const beforeStat = statSyncOptional(piPresetsPath())
+
+    expect(() => presetService.deletePreset('nonexistent')).not.toThrow()
+
+    // 文件未变（no-op 不写盘）
+    const afterStat = statSyncOptional(piPresetsPath())
+    expect(afterStat?.mtimeMs).toBe(beforeStat?.mtimeMs)
+    const onDisk = readFile()
+    expect(onDisk!.presets).toHaveLength(1)
+  })
+
+  // ── W-RT-3: defaultPresetId 存在性校验 ──
+
+  it('W-RT-3: getDefaultPresetId 指向已删 preset 时回退 builtin:full', () => {
+    // defaultPresetId 指向一个不在 presets 列表里的「僵尸」id（手工构造脏文件）
+    writeFile({
+      version: 1,
+      defaultPresetId: 'uuid-zombie',
+      presets: [],
+    })
+    expect(presetService.getDefaultPresetId()).toBe(BUILTIN_PRESET_IDS.FULL)
+  })
+
+  // ── FR-15 下线：存量 perCwdDefaults 字段惰性清除（state-truth-sync U9）──
+
+  it('FR-15 下线：存量 perCwdDefaults 字段在 load 时被惰性剥离并重写，其余字段原样保留', () => {
+    // 存量旧数据已不是合法的现行 PiPresetsFile 形状（字段已删），用裸 JSON 直写模拟磁盘遗留
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify(
+        {
+          version: 1,
+          defaultPresetId: 'uuid-legacy',
+          usage: { 'uuid-legacy': { count: 2, lastUsed: 7 } },
+          perCwdDefaults: { '/legacy-cwd': 'uuid-legacy' },
+          presets: [
+            { id: 'uuid-legacy', name: 'keep', builtin: false, order: 1, toolMode: 'all', extensionMode: 'all' },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    )
+    // 任一 load 路径触发剥离重写
+    expect(presetService.getDefaultPresetId()).toBe('uuid-legacy')
+    // 磁盘文件不再含 perCwdDefaults，其余字段原样保留
+    const onDisk = readFile()
+    expect('perCwdDefaults' in onDisk!).toBe(false)
+    expect(onDisk!.defaultPresetId).toBe('uuid-legacy')
+    expect(onDisk!.usage).toEqual({ 'uuid-legacy': { count: 2, lastUsed: 7 } })
+    expect(onDisk!.presets).toHaveLength(1)
+  })
+
+  // ── S-RT-2: mtime 缓存 ──
+
+  it('S-RT-2: getPreset 重复调用命中缓存（文件未变不重复读盘）', () => {
+    writeFile({
+      version: 1,
+      presets: [
+        { id: 'uuid-cache', name: 'cache-test', builtin: false, order: 1, toolMode: 'all', extensionMode: 'all' },
+      ],
+    })
+    // 可观测断言：以 readFileSync 调用计数验证缓存命中。文件顶部 vi.mock('node:fs') 的
+    // readFileSync 对 pi-presets.json 透传真实 fs（内容仍真实），但计数在该 mock fn 上累加；
+    // 生产 loadPresetsFile 在 statSync 的 (mtimeMs, size) 键命中时跳过 readPresetsObject 的
+    // readFileSync。mockClear 只清计数、不动透传实现，不影响其他用例。
+    const readFileMock = vi.mocked(readFileSync)
+    readFileMock.mockClear()
+
+    // 第一次读：缓存 miss → 读盘（readFileSync ≥ 1 次）
+    expect(presetService.getPreset('uuid-cache')).toBeDefined()
+    const readsAfterFirst = readFileMock.mock.calls.length
+    expect(readsAfterFirst).toBeGreaterThan(0)
+
+    // 第二次读（文件未变）：缓存命中 → readFileSync 计数不增加
+    expect(presetService.getPreset('uuid-cache')).toBeDefined()
+    expect(readFileMock.mock.calls.length).toBe(readsAfterFirst)
+  })
+
+  it('S-RT-2: savePreset 后缓存失效，下次读拿到新值', () => {
+    writeFile({
+      version: 1,
+      presets: [
+        { id: 'uuid-invalidate', name: 'before', builtin: false, order: 1, toolMode: 'all', extensionMode: 'all' },
+      ],
+    })
+    expect(presetService.getPreset('uuid-invalidate')!.name).toBe('before')
+
+    // savePreset 改 name → 内部 invalidate 缓存
+    presetService.savePreset({
+      id: 'uuid-invalidate',
+      name: 'after',
+      builtin: false,
+      order: 1,
+      toolMode: 'all',
+      extensionMode: 'all',
+    })
+
+    // 下次读拿到新值（缓存已失效，重新读盘）
+    expect(presetService.getPreset('uuid-invalidate')!.name).toBe('after')
+  })
+
+  it('S-RT-2: 缓存返回的是深拷贝，调用方 mutation 不污染缓存', () => {
+    writeFile({
+      version: 1,
+      presets: [
+        { id: 'uuid-clone', name: 'original', builtin: false, order: 1, toolMode: 'all', extensionMode: 'all' },
+      ],
+    })
+    // 第一次读拿到对象，故意 mutate
+    const first = presetService.getPreset('uuid-clone')!
+    first.name = 'mutated'
+    // 注意：getPreset 返回的是 getAllPresets().find()，每次都 new 对象，但底层 loadPresetsFile
+    // 命中缓存返回的是 clonePresetsFile 的拷贝，所以 mutate 不影响缓存内部 file。
+
+    // 第二次读应仍是原值（缓存未被污染）
+    const second = presetService.getPreset('uuid-clone')!
+    expect(second.name).toBe('original')
+  })
+})
+
+describe('PresetService · parsePresetsFileFromDisk 容错分支覆盖', () => {
+  it('顶层是 JSON 数组 → 空骨架兜底不抛错（getAllPresets 返回 DEFAULT）', () => {
+    writeFileSync(piPresetsPath(), JSON.stringify([{ id: 'x' }]), 'utf-8')
+    expect(presetService.getAllPresets().map(p => p.id)).toEqual(DEFAULT_PRESETS.map(p => p.id))
+  })
+
+  it('顶层是 JSON null → 空骨架兜底不抛错', () => {
+    writeFileSync(piPresetsPath(), 'null', 'utf-8')
+    expect(presetService.getAllPresets().map(p => p.id)).toEqual(DEFAULT_PRESETS.map(p => p.id))
+  })
+
+  it('presets 字段非数组（对象）→ presets 兜底空，usage/defaultPresetId 仍透传', () => {
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        presets: { id: 'not-an-array' },
+        usage: { 'custom-1': { count: 3, lastUsed: 42 } },
+        defaultPresetId: 'custom-1',
+      }),
+      'utf-8',
+    )
+    // 无合法 preset → defaultPresetId 指向不存在的 id，getDefaultPresetId 兜底 builtin:full（W-RT-3 语义）
+    expect(presetService.getDefaultPresetId()).toBe(BUILTIN_PRESET_IDS.FULL)
+    expect(presetService.getUsage()).toEqual({ 'custom-1': { count: 3, lastUsed: 42 } })
+  })
+
+  it('usage 非 Record 形状（数组/标量）→ 丢弃为 undefined，不抛错', () => {
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        presets: [],
+        usage: ['bad'],
+        defaultPresetId: 123,
+      }),
+      'utf-8',
+    )
+    expect(presetService.getUsage()).toEqual({})
+    // defaultPresetId 非字符串 → undefined → 兜底 builtin:full
+    expect(presetService.getDefaultPresetId()).toBe(BUILTIN_PRESET_IDS.FULL)
+  })
+})
+
+/** stat 文件，不存在返回 undefined（测试辅助）。 */
+function statSyncOptional(path: string): { mtimeMs: number; size: number } | undefined {
+  try {
+    const s = statSyncInternal(path)
+    return { mtimeMs: s.mtimeMs, size: s.size }
+  } catch {
+    return undefined
+  }
+}
+
+// ── 模式提示词：写路整条拒 + 读路段级折叠 + 导入路整条拒 ──────────
+
+describe('PresetService · 模式提示词校验', () => {
+  /** 生成指定长度的提示词占位文本。 */
+  const longPrompt = (n: number): string => 'x'.repeat(n)
+
+  it('写路整条拒：replace 9000 + append 9000（合计 18000）→ savePreset 抛错，文案含实际合计值 18000', () => {
+    expect(() => {
+      presetService.savePreset(
+        makePreset({
+          id: 'uuid-prompt-total',
+          prompt: {
+            replace: { enabled: true, prompt: longPrompt(9000) },
+            append: { enabled: true, prompt: longPrompt(9000) },
+          },
+        }),
+      )
+    }).toThrow(PresetGuardError)
+    // 错误文案含实际合计值（形如「模式提示词合计 18000 / 16000 字符，请精简总长」）
+    expect(() => {
+      presetService.savePreset(
+        makePreset({
+          id: 'uuid-prompt-total-2',
+          prompt: {
+            replace: { enabled: true, prompt: longPrompt(9000) },
+            append: { enabled: true, prompt: longPrompt(9000) },
+          },
+        }),
+      )
+    }).toThrow(/模式提示词合计 18000 \/ 16000/)
+    // 整条拒绝 → 未写盘
+    expect(readFile()?.presets ?? []).toEqual([])
+  })
+
+  it('写路整条拒：段限 单段 16001 → 抛错且文案含该段实际长度', () => {
+    expect(() => {
+      presetService.savePreset(
+        makePreset({
+          id: 'uuid-prompt-seg',
+          prompt: { append: { enabled: true, prompt: longPrompt(16001) } },
+        }),
+      )
+    }).toThrow(/16001/)
+    expect(readFile()?.presets ?? []).toEqual([])
+  })
+
+  it('写路整条拒：prompt 段形状非法 → 抛 PresetGuardError', () => {
+    // prompt 非对象
+    expect(() => {
+      presetService.savePreset(
+        makePreset({ id: 'uuid-prompt-shape-1', prompt: 'not-an-object' as unknown as PiLaunchPreset['prompt'] }),
+      )
+    }).toThrow(PresetGuardError)
+    // enabled 非 boolean
+    expect(() => {
+      presetService.savePreset(
+        makePreset({
+          id: 'uuid-prompt-shape-2',
+          prompt: { append: { enabled: 'yes' as unknown as boolean, prompt: 'x' } },
+        }),
+      )
+    }).toThrow(PresetGuardError)
+    // prompt 非 string
+    expect(() => {
+      presetService.savePreset(
+        makePreset({
+          id: 'uuid-prompt-shape-3',
+          prompt: { append: { enabled: true, prompt: 42 as unknown as string } },
+        }),
+      )
+    }).toThrow(PresetGuardError)
+  })
+
+  it('写路：合法提示词（合计恰为 16000 边界）正常写入并可读回', () => {
+    presetService.savePreset(
+      makePreset({
+        id: 'uuid-prompt-ok',
+        prompt: {
+          replace: { enabled: true, prompt: longPrompt(8000) },
+          append: { enabled: false, prompt: longPrompt(8000) },
+        },
+      }),
+    )
+    const saved = presetService.getPreset('uuid-prompt-ok')
+    expect(saved).toBeDefined()
+    expect(saved!.prompt!.replace!.enabled).toBe(true)
+    expect(saved!.prompt!.replace!.prompt.length).toBe(8000)
+    expect(saved!.prompt!.append!.enabled).toBe(false)
+  })
+
+  it('读路段级折叠：两段各 16000（各不超段限、合计 32000）→ 保留 preset，丢 append、留 replace，issues 记合计与丢弃项', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        version: 1,
+        presets: [
+          {
+            id: 'uuid-prompt-fold-total',
+            name: 'fold-total',
+            builtin: false,
+            order: 1,
+            toolMode: 'all',
+            extensionMode: 'all',
+            prompt: {
+              replace: { enabled: true, prompt: longPrompt(16000) },
+              append: { enabled: true, prompt: longPrompt(16000) },
+            },
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    const folded = presetService.getAllPresets().find(p => p.id === 'uuid-prompt-fold-total')
+    // 不整条丢：preset 仍在
+    expect(folded).toBeDefined()
+    // replace 保留（语义更重 / 用户更难自恢复），append 优先丢弃
+    expect(folded!.prompt!.replace).toBeDefined()
+    expect(folded!.prompt!.replace!.prompt.length).toBe(16000)
+    expect(folded!.prompt!.append).toBeUndefined()
+    // issues 记录实际合计值与丢弃项（经 warn 日志可观测）
+    const warnText = warnSpy.mock.calls.map(c => c.join(' ')).join('\n')
+    expect(warnText).toContain('32000')
+    expect(warnText).toContain('append')
+    warnSpy.mockRestore()
+  })
+
+  it('读路段级折叠：单段超段限（16001）→ 只丢该段，preset 与另一段保留', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        version: 1,
+        presets: [
+          {
+            id: 'uuid-prompt-fold-seg',
+            name: 'fold-seg',
+            builtin: false,
+            order: 1,
+            toolMode: 'all',
+            extensionMode: 'all',
+            prompt: {
+              replace: { enabled: true, prompt: longPrompt(16001) },
+              append: { enabled: true, prompt: 'kept' },
+            },
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    const folded = presetService.getAllPresets().find(p => p.id === 'uuid-prompt-fold-seg')
+    expect(folded).toBeDefined()
+    expect(folded!.prompt!.replace).toBeUndefined()
+    expect(folded!.prompt!.append!.prompt).toBe('kept')
+    expect(warnSpy.mock.calls.map(c => c.join(' ')).join('\n')).toContain('16001')
+    warnSpy.mockRestore()
+  })
+
+  it('读路段级折叠：prompt 形状非法 → 丢 prompt 字段，preset 整条保留', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        version: 1,
+        presets: [
+          {
+            id: 'uuid-prompt-fold-shape',
+            name: 'fold-shape',
+            builtin: false,
+            order: 1,
+            toolMode: 'all',
+            extensionMode: 'all',
+            prompt: 'not-an-object',
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    const folded = presetService.getAllPresets().find(p => p.id === 'uuid-prompt-fold-shape')
+    expect(folded).toBeDefined()
+    expect(folded!.prompt).toBeUndefined()
+    warnSpy.mockRestore()
+  })
+
+  it('读路段级折叠：容器无任何可识别段（{foo:1}）→ 仍丢弃 prompt，但产出 issue + warn（可观测）', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        version: 1,
+        presets: [
+          {
+            id: 'uuid-prompt-fold-unknown',
+            name: 'fold-unknown',
+            builtin: false,
+            order: 1,
+            toolMode: 'all',
+            extensionMode: 'all',
+            // 普通对象但无可识别段（replace/append 都不在）——旧行为静默丢弃，无可观测信号
+            prompt: { foo: 'SECRET_VALUE' },
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    const folded = presetService.getAllPresets().find(p => p.id === 'uuid-prompt-fold-unknown')
+    // 行为不变：preset 保留、prompt 容器仍被丢弃
+    expect(folded).toBeDefined()
+    expect(folded!.prompt).toBeUndefined()
+    // 可观测：warn 恰一次，文案含「无可识别段」与键名 foo（只记键名不记值）
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    const warnText = warnSpy.mock.calls.map(c => c.join(' ')).join('\n')
+    expect(warnText).toContain('无可识别段')
+    expect(warnText).toContain('foo')
+    // 值不进日志（值可能是用户提示词正文）
+    expect(warnText).not.toContain('SECRET_VALUE')
+    warnSpy.mockRestore()
+  })
+
+  it('读路字段级折叠：数组型可选字段形状非法 → 只丢该字段，preset 整条保留 + warn 可观测', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    writeFileSync(
+      piPresetsPath(),
+      JSON.stringify({
+        version: 1,
+        presets: [
+          {
+            id: 'uuid-array-fold',
+            name: 'array-fold',
+            builtin: false,
+            order: 1,
+            toolMode: 'allowlist',
+            extensionMode: 'denylist',
+            // 脏数据：字符串形态（下游 `?? []` 不设防）与混合类型数组
+            allowedTools: 'read',
+            deniedTools: ['read', 42],
+            allowedExtensions: 'pi-goal',
+            deniedExtensions: ['@zhushanwen/pi-goal'],
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    const folded = presetService.getAllPresets().find(p => p.id === 'uuid-array-fold')
+    // 不整条丢：preset 仍在
+    expect(folded).toBeDefined()
+    // 非法字段被丢弃，合法数组原样保留
+    expect(folded!.allowedTools).toBeUndefined()
+    expect(folded!.deniedTools).toBeUndefined()
+    expect(folded!.allowedExtensions).toBeUndefined()
+    expect(folded!.deniedExtensions).toEqual(['@zhushanwen/pi-goal'])
+    // 可观测：一条 warn 记录全部被折叠字段（字段级与提示词段级合并为一次调用）
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    const warnText = warnSpy.mock.calls.map(c => c.join(' ')).join('\n')
+    expect(warnText).toContain('allowedTools')
+    expect(warnText).toContain('deniedTools')
+    expect(warnText).toContain('allowedExtensions')
+    warnSpy.mockRestore()
+  })
+
+  it('导入路整条拒：超限项导入 → 拒绝且不写盘（合法项也不落盘）', () => {
+    // 盘上放一个既有合法 preset，用于验证导入失败后磁盘内容不变
+    writeFile({
+      version: 1,
+      presets: [
+        { id: 'uuid-existing', name: 'existing', builtin: false, order: 1, toolMode: 'all', extensionMode: 'all' },
+      ],
+    })
+    const before = readFile()
+
+    const json = JSON.stringify({
+      version: 1,
+      presets: [
+        {
+          id: 'imp-ok',
+          name: 'ok',
+          builtin: false,
+          order: 5,
+          toolMode: 'all',
+          extensionMode: 'all',
+          prompt: { append: { enabled: true, prompt: longPrompt(100) } },
+        },
+        {
+          id: 'imp-over',
+          name: 'over',
+          builtin: false,
+          order: 6,
+          toolMode: 'all',
+          extensionMode: 'all',
+          prompt: {
+            replace: { enabled: true, prompt: longPrompt(9000) },
+            append: { enabled: true, prompt: longPrompt(9000) },
+          },
+        },
+      ],
+    })
+
+    expect(() => presetService.importPresets(json)).toThrow(PresetGuardError)
+
+    // 不写盘：既有内容逐字不变，合法项 imp-ok 也未落盘（整条语义）
+    const after = readFile()
+    expect(after!.presets.map(p => p.id)).toEqual(before!.presets.map(p => p.id))
+    expect(presetService.getPreset('imp-ok')).toBeUndefined()
+  })
+
+  it('导入路：合法提示词正常导入（与写路同契约）', () => {
+    const json = JSON.stringify({
+      version: 1,
+      presets: [
+        {
+          id: 'imp-prompt-ok',
+          name: 'ok',
+          builtin: false,
+          order: 5,
+          toolMode: 'all',
+          extensionMode: 'all',
+          prompt: { append: { enabled: true, prompt: '你好' } },
+        },
+      ],
+    })
+    expect(presetService.importPresets(json)).toBe(1)
+    expect(presetService.getPreset('imp-prompt-ok')!.prompt!.append!.prompt).toBe('你好')
+  })
+})
+})
+describe('preset-message-handler', () => {
+/**
+ * PresetMessageHandler 单测 —— preset.* 消息路由 + PresetService 调用验证。
+ *
+ * 覆盖：
+ * - preset.list → reply { presets }（getAllPresets 返回值）
+ * - preset.getDefault → reply { presetId }（getDefaultPresetId 返回值）
+ * - preset.setDefault → reply ack（setDefaultPresetId 被调用）
+ * - preset.create → reply { preset }（savePreset + getPreset）
+ * - preset.update → reply { preset }（savePreset + getPreset）
+ * - preset.delete → reply ack（deletePreset 被调用）
+ * - PresetGuardError → error envelope（code='preset_guard_error'）
+ *
+ * mock 策略：mock PresetService 方法，捕获 reply/sendError 调用。
+ * 运行：cd packages/runtime && npx vitest run test/preset-message-handler.test.ts
+ */
+// ── Fixtures ──────────────────────────────────────────────────────
+
+const fullPreset: PiLaunchPreset = {
+  id: 'builtin:full',
+  name: '全工具模式',
+  builtin: true,
+  order: 0,
+  toolMode: 'all',
+  extensionMode: 'all',
+}
+
+const customPreset: PiLaunchPreset = {
+  id: 'custom:test-uuid',
+  name: '自定义预设',
+  builtin: false,
+  order: 3,
+  toolMode: 'allowlist',
+  allowedTools: ['read', 'grep'],
+  extensionMode: 'all',
+}
+
+// ── Mocks ─────────────────────────────────────────────────────────
+
+function createMockWs(): WebSocket {
+  return {} as WebSocket
+}
+
+function createMockPresetService() {
+  const mock = {
+    getAllPresets: vi.fn().mockReturnValue([fullPreset, customPreset]),
+    getPreset: vi.fn().mockImplementation((id: string) => {
+      if (id === 'builtin:full') return fullPreset
+      if (id === 'custom:test-uuid') return customPreset
+      return undefined
+    }),
+    getDefaultPresetId: vi.fn().mockReturnValue('builtin:full'),
+    setDefaultPresetId: vi.fn(),
+    savePreset: vi.fn(),
+    deletePreset: vi.fn(),
+    recordUsage: vi.fn(),
+    getUsage: vi.fn().mockReturnValue({}),
+    exportPresets: vi.fn().mockReturnValue('{}'),
+    importPresets: vi.fn().mockReturnValue(0),
+  }
+  return { mock, service: mock as unknown as import('../src/services/preset-service.js').PresetService }
+}
+
+function createMockContext() {
+  const { mock, service: presetService } = createMockPresetService()
+  return {
+    mock,
+    presetService,
+    send: vi.fn(),
+    sendError: vi.fn(),
+    reply: vi.fn(),
+  }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────
+
+describe('PresetMessageHandler', () => {
+  let ctx: ReturnType<typeof createMockContext>
+  let handler: PresetMessageHandler
+  let ws: WebSocket
+
+  beforeEach(() => {
+    ctx = createMockContext()
+    handler = new PresetMessageHandler(ctx)
+    ws = createMockWs()
+  })
+
+  it('handles 消息类型清单包含 10 个 preset.* 类型', () => {
+    expect(handler.handles).toEqual([
+      'preset.list',
+      'preset.getDefault',
+      'preset.setDefault',
+      'preset.create',
+      'preset.update',
+      'preset.delete',
+      'preset.recordUsage',
+      'preset.getUsage',
+      'preset.export',
+      'preset.import',
+    ])
+  })
+
+  describe('preset.list', () => {
+    it('调用 getAllPresets 并 reply { presets }', async () => {
+      const msg = { type: 'preset.list' as const, id: 'req-1', payload: {} }
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.mock.getAllPresets).toHaveBeenCalledTimes(1)
+      expect(ctx.reply).toHaveBeenCalledWith(ws, 'req-1', 'preset.list', { presets: [fullPreset, customPreset] })
+    })
+  })
+
+  describe('preset.getDefault', () => {
+    it('调用 getDefaultPresetId 并 reply { presetId }', async () => {
+      const msg = { type: 'preset.getDefault' as const, id: 'req-2', payload: {} }
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.mock.getDefaultPresetId).toHaveBeenCalledTimes(1)
+      expect(ctx.reply).toHaveBeenCalledWith(ws, 'req-2', 'preset.getDefault', { presetId: 'builtin:full' })
+    })
+  })
+
+  describe('preset.setDefault', () => {
+    it('调用 setDefaultPresetId 并 reply ack（S-TR-1：ack 型 reply 占位对象）', async () => {
+      const msg = { type: 'preset.setDefault' as const, id: 'req-3', payload: { presetId: 'custom:test-uuid' } }
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.mock.setDefaultPresetId).toHaveBeenCalledWith('custom:test-uuid')
+      // S-TR-1：reply() 用 ServerMessageMap[T] 占位对象（domain register<void> 忽略 payload）
+      expect(ctx.reply).toHaveBeenCalledWith(ws, 'req-3', 'preset.setDefault', expect.any(Object))
+    })
+  })
+
+  describe('preset.create', () => {
+    it('调用 savePreset 并 reply { preset }（W-TR-1：直接用传入 preset，不再二次 getPreset）', async () => {
+      const msg = { type: 'preset.create' as const, id: 'req-4', payload: { preset: customPreset } }
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.mock.savePreset).toHaveBeenCalledWith(customPreset)
+      // W-TR-1：handler 不再调 getPreset（避免二次 loadPresetsFile），直接用传入 preset reply。
+      expect(ctx.mock.getPreset).not.toHaveBeenCalled()
+      expect(ctx.reply).toHaveBeenCalledWith(ws, 'req-4', 'preset.create', { preset: customPreset })
+    })
+  })
+
+  describe('preset.update', () => {
+    it('调用 savePreset 并 reply { preset }（W-TR-1：直接用传入 preset）', async () => {
+      const updated = { ...customPreset, name: '新名称' }
+      const msg = { type: 'preset.update' as const, id: 'req-5', payload: { preset: updated } }
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.mock.savePreset).toHaveBeenCalledWith(updated)
+      // W-TR-1：用传入的 updated（含改名）reply，不是 getPreset 返回的旧值。
+      expect(ctx.reply).toHaveBeenCalledWith(ws, 'req-5', 'preset.update', { preset: updated })
+    })
+  })
+
+  describe('preset.delete', () => {
+    it('调用 deletePreset 并 reply ack（S-TR-1：ack 型 reply 占位对象）', async () => {
+      const msg = { type: 'preset.delete' as const, id: 'req-6', payload: { presetId: 'custom:test-uuid' } }
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.mock.deletePreset).toHaveBeenCalledWith('custom:test-uuid')
+      expect(ctx.reply).toHaveBeenCalledWith(ws, 'req-6', 'preset.delete', expect.any(Object))
+    })
+  })
+
+  // ── FR-14/FR-15/FR-13 测试 ──
+
+  describe('preset.recordUsage (FR-14)', () => {
+    it('调用 recordUsage 并 reply ack（S-TR-1：ack 型 reply 占位对象）', async () => {
+      const msg = { type: 'preset.recordUsage' as const, id: 'req-7', payload: { presetId: 'builtin:full' } }
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.mock.recordUsage).toHaveBeenCalledWith('builtin:full')
+      expect(ctx.reply).toHaveBeenCalledWith(ws, 'req-7', 'preset.recordUsage', expect.any(Object))
+    })
+  })
+
+  describe('preset.getUsage (FR-14)', () => {
+    it('调用 getUsage 并 reply { usage }', async () => {
+      ctx.mock.getUsage.mockReturnValue({ 'builtin:full': { count: 5, lastUsed: 1000 } })
+      const msg = { type: 'preset.getUsage' as const, id: 'req-8', payload: {} }
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.reply).toHaveBeenCalledWith(ws, 'req-8', 'preset.getUsage', { usage: { 'builtin:full': { count: 5, lastUsed: 1000 } } })
+    })
+  })
+
+  describe('preset.export (FR-13)', () => {
+    it('调用 exportPresets 并 reply { json }', async () => {
+      ctx.mock.exportPresets.mockReturnValue('{"presets":[],"version":1}')
+      const msg = { type: 'preset.export' as const, id: 'req-11', payload: {} }
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.reply).toHaveBeenCalledWith(ws, 'req-11', 'preset.export', { json: '{"presets":[],"version":1}' })
+    })
+  })
+
+  describe('preset.import (FR-13)', () => {
+    it('调用 importPresets 并 reply { count }', async () => {
+      ctx.mock.importPresets.mockReturnValue(3)
+      const msg = { type: 'preset.import' as const, id: 'req-12', payload: { json: '{"presets":[],"version":1}' } }
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.mock.importPresets).toHaveBeenCalledWith('{"presets":[],"version":1}')
+      expect(ctx.reply).toHaveBeenCalledWith(ws, 'req-12', 'preset.import', { count: 3 })
+    })
+  })
+
+  describe('错误处理', () => {
+    it('PresetGuardError → sendError envelope（code=preset_guard_error）', async () => {
+      ctx.mock.savePreset.mockImplementationOnce(() => {
+        throw new PresetGuardError('cannot delete builtin preset')
+      })
+      const msg = { type: 'preset.create' as const, id: 'err-1', payload: { preset: fullPreset } }
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.sendError).toHaveBeenCalledWith(ws, 'preset_guard_error', 'cannot delete builtin preset', 'err-1')
+    })
+
+    it('普通 Error → sendError envelope（code=preset_guard_error 兜底）', async () => {
+      ctx.mock.deletePreset.mockImplementationOnce(() => {
+        throw new Error('disk full')
+      })
+      const msg = { type: 'preset.delete' as const, id: 'err-2', payload: { presetId: 'custom:x' } }
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.sendError).toHaveBeenCalledWith(ws, 'preset_guard_error', 'disk full', 'err-2')
+    })
+
+    it('带 code 的 Error → 透传 code', async () => {
+      const err = new Error('custom error') as Error & { code: string }
+      err.code = 'CUSTOM_CODE'
+      ctx.mock.deletePreset.mockImplementationOnce(() => { throw err })
+      const msg = { type: 'preset.delete' as const, id: 'err-3', payload: { presetId: 'custom:x' } }
+      await handler.handlePresetMessage(msg, ws)
+      expect(ctx.sendError).toHaveBeenCalledWith(ws, 'CUSTOM_CODE', 'custom error', 'err-3')
+    })
+
+    // S-TR-4：importPresets 的格式错误用独立 code 'preset_import_format_error'，
+    // 不混用 guard code（guard 是 builtin 保护语义，格式错误不算 guard 违规）。
+    // 覆盖 preset-service.importPresets 抛的三种格式错误消息。
+    it.each([
+      'Invalid JSON format',
+      'Import file must be a JSON object',
+      'No valid presets found in import file',
+    ])('importPresets 格式错误（%s）→ code=preset_import_format_error', async (errMsg) => {
+      ctx.mock.importPresets.mockImplementationOnce(() => { throw new Error(errMsg) })
+      const msg = { type: 'preset.import' as const, id: 'err-imp', payload: { json: 'bad' } }
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.sendError).toHaveBeenCalledWith(ws, 'preset_import_format_error', errMsg, 'err-imp')
+    })
+  })
+
+  // S-TR-2：参数化覆盖每个 handle 类型——发一条 msg 断言 result===true 且 reply 被调，
+  // 避免 handles 清单与实际路由脱节（新增 handle 类型但 switch 漏 case 时此处会失败）。
+  describe('S-TR-2：每个 handle 类型都能被认领并 reply', () => {
+    const cases: Array<{ type: string; payload: Record<string, unknown>; setup?: () => void }> = [
+      { type: 'preset.list', payload: {} },
+      { type: 'preset.getDefault', payload: {} },
+      { type: 'preset.setDefault', payload: { presetId: 'builtin:full' } },
+      { type: 'preset.create', payload: { preset: customPreset } },
+      { type: 'preset.update', payload: { preset: customPreset } },
+      { type: 'preset.delete', payload: { presetId: 'custom:test-uuid' } },
+      { type: 'preset.recordUsage', payload: { presetId: 'builtin:full' } },
+      { type: 'preset.getUsage', payload: {} },
+      { type: 'preset.export', payload: {} },
+      { type: 'preset.import', payload: { json: '{}' } },
+    ]
+    it.each(cases)('$type → result===true 且 reply 被调', async ({ type, payload }) => {
+      const msg = { type, id: `s-tr-2-${type}`, payload } as unknown as ClientMessage
+      const result = await handler.handlePresetMessage(msg, ws)
+      expect(result).toBe(true)
+      expect(ctx.reply).toHaveBeenCalled()
+    })
+  })
+})
+})
+});
+// ======================================================================
+// ← test/pi-config-store.test.ts
+// ======================================================================
+
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('pi-config-store', () => {
+// W1：applyTypeTranslation 改为透传。
+// 历史背景：曾经存在 mapTypeToApi 别名翻译表（ollama → openai-completions 等），
+// 但前端已直接发送 pi 终值（anthropic-messages / openai-completions），
+// runtime 再翻译属于死代码，且 ollama 翻译会掩盖前端 bug。
+// W1 要求 runtime 透传，不再做别名翻译。
+describe('PiConfigStore.applyTypeTranslation — 透传（W1）', () => {
+  const store = new PiConfigStore()
+
+  it('pi 原生终值 anthropic-messages 原样透传', () => {
+    expect(store.applyTypeTranslation('anthropic-messages')).toBe('anthropic-messages')
+  })
+
+  it('pi 原生终值 openai-completions 原样透传', () => {
+    expect(store.applyTypeTranslation('openai-completions')).toBe('openai-completions')
+  })
+
+  it('未知值原样透传，不阻断', () => {
+    expect(store.applyTypeTranslation('unknown-foo')).toBe('unknown-foo')
+  })
+
+  it('不再有 ollama → openai-completions 的别名翻译（原样透传）', () => {
+    // 旧 mapTypeToApi 会把 ollama 翻成 openai-completions，现必须透传
+    expect(store.applyTypeTranslation('ollama')).toBe('ollama')
+  })
+
+  it('不再有 anthropic → anthropic-messages 的别名翻译', () => {
+    expect(store.applyTypeTranslation('anthropic')).toBe('anthropic')
+  })
+
+  it('不再有 openai → openai-completions 的别名翻译', () => {
+    expect(store.applyTypeTranslation('openai')).toBe('openai')
+  })
+})
+});
+});
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('session-lifecycle-death-disposition', () => {
+describe('delete 立标判据 hasDestroySink（unreasonable#3 回归防线）', () => {
+  beforeEach(() => {
+    trashMock.mockReset().mockResolvedValue(undefined)
+    fires = []
+    // 组合根同款订阅侧（本文件是唯一 fire 源消费者；afterEach 退订防跨用例串音）
+    unsubscribe = subscribeSessionDeathDisposition((sessionId, disposition, detail) => {
+      fires.push({ sessionId, disposition, hasDestroySink: detail.hasDestroySink })
+    })
+    tmpDir_m2 = mkdtempSync(join(tmpdir(), 'death-disposition-'))
+    tmpFile = join(tmpDir_m2, 'session.jsonl')
+    writeFileSync(tmpFile, '{}\n', 'utf-8')
+  })
+
+  afterEach(() => {
+    unsubscribe()
+    rmSync(tmpDir_m2, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('active（在册 ⇒ 销毁回调消费点存在）→ hasDestroySink true，且 removeSessionEntry 确被调用', async () => {
+    const { lifecycle, svc } = makeSessionLifecycleFixture()
+    await lifecycle.registerSession('s-active', {} as unknown as IPiEngine, '/p', 'label', tmpFile)
+
+    await lifecycle.delete('s-active')
+
+    expect(fires).toEqual([{ sessionId: 's-active', disposition: 'delete', hasDestroySink: true }])
+    // 消费点存在性与判据同向：在册分支确实走到 removeSessionEntry（销毁回调扇出宿主）
+    expect(svc.removeSessionEntry).toHaveBeenCalledWith('s-active')
+  })
+
+  it('scanned（非在册 ⇒ 无销毁回调）→ hasDestroySink false，且不走 removeSessionEntry', async () => {
+    const { lifecycle, svc } = makeSessionLifecycleFixture()
+    ;(svc.findScannedSession as ReturnType<typeof vi.fn>).mockReturnValue(scannedEntry('s-scanned', tmpFile))
+
+    await lifecycle.delete('s-scanned')
+
+    expect(fires).toEqual([{ sessionId: 's-scanned', disposition: 'delete', hasDestroySink: false }])
+    expect(svc.removeSessionEntry).not.toHaveBeenCalled()
+  })
+
+  it('not-found throw：fire 在 throw 之前已发且判据为 false（发声 latch 不因失败路径丢失、标不立）', async () => {
+    const { lifecycle, svc } = makeSessionLifecycleFixture()
+    ;(svc.findScannedSession as ReturnType<typeof vi.fn>).mockReturnValue(undefined)
+
+    await expect(lifecycle.delete('s-missing')).rejects.toThrow('Session s-missing not found')
+
+    // 关键断言：即便方法以 throw 收场，fire 已在入口发出（检查点①）且未立标（无滞留源）
+    expect(fires).toEqual([{ sessionId: 's-missing', disposition: 'delete', hasDestroySink: false }])
+    expect(svc.removeSessionEntry).not.toHaveBeenCalled()
+  })
+
+  it('btw 活线（在册线 session id + ops 注入 → closeLine 终结扇出的销毁回调存在）→ hasDestroySink true，走 closeLine 不落主会话清理侧', async () => {
+    const { lifecycle, svc } = makeSessionLifecycleFixture()
+    // 组合根同款注入点（setBtwCascadeOps，官方「测试注入 fake / 置 null 复位」语义）：
+    // 本用例钉审查 finding 1 的回退形态——判据若改回 `session !== undefined && !isBtwLine`
+    //（btw 活线在册被错判无 sink），既有 3 用例全绿测不出，唯本象限红。真实装配下
+    // hasDestroySink true 的消费点 = closeLine → fireLineTerminated → onLineTerminated →
+    // removeSessionEntry（组合根镜像主会话 delete 收尾序），fake ops 只钉 delete 分支形态。
+    const closeLine = vi.fn().mockResolvedValue(true)
+    const closeAllForMain = vi.fn().mockResolvedValue(undefined)
+    // W4a：判别器 = registry 成员查询（getLine 注入；键 = 线 session id = piId）
+    const getLine = vi.fn((id: string) => (id === 's-line' ? { mainSid: 's-main' } : undefined))
+    setBtwCascadeOps({ closeLine, closeAllForMain, getLine })
+    try {
+      await lifecycle.registerSession('s-line', {} as unknown as IPiEngine, '/p', 'label', tmpFile)
+
+      await lifecycle.delete('s-line')
+
+      expect(fires).toEqual([{ sessionId: 's-line', disposition: 'delete', hasDestroySink: true }])
+      // btw 直删分支形态：单入口 closeLine（删线文件），不落主会话 trash/sidecar 清理侧，
+      // 也不经 lifecycle 直调 removeSessionEntry（那是 onLineTerminated 扇出的事）
+      expect(closeLine).toHaveBeenCalledWith('s-line', { deleteSessionFile: true })
+      expect(closeAllForMain).not.toHaveBeenCalled()
+      expect(trashMock).not.toHaveBeenCalled()
+      expect(svc.removeSessionEntry).not.toHaveBeenCalled()
+    } finally {
+      setBtwCascadeOps(null)
+    }
+  })
+})
+describe("'archive' 处置登记（条目 28：GUI 归档路径的收尾触发点）", () => {
+  let archiveFires: DispositionFire[] = []
+  let unsubscribeArchive: () => void = () => {}
+  let archiveRoot: string
+
+  beforeEach(() => {
+    trashMock.mockReset().mockResolvedValue(undefined)
+    archiveFires = []
+    // 组合根同款订阅侧（index.ts subscribeSessionDeathDisposition 消费 'archive' →
+    // speakSessionDeath('exit')；本文件只记录，收尾三步的闭环在 session-manager-handler
+    // 与 archive-service 两侧测试锚定）。
+    unsubscribeArchive = subscribeSessionDeathDisposition((sessionId, disposition, detail) => {
+      archiveFires.push({ sessionId, disposition, hasDestroySink: detail.hasDestroySink })
+    })
+    archiveRoot = mkdtempSync(join(tmpdir(), 'archive-disposition-'))
+  })
+
+  afterEach(() => {
+    unsubscribeArchive()
+    rmSync(archiveRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('GUI 归档路径（session.archive → ArchiveService.archive）触发 disposition=archive、hasDestroySink=true，且先于杀进程（检查点①）', async () => {
+    // GUI 侧栏归档按钮的唯一 runtime 半边 = handleSessionArchive 薄调
+    // archiveService.archive()——收尾触发点全在归档执行体内，本用例直驱真实
+    // ArchiveService（deps 面 fake，处置登记经真实登记器 fireDeathDisposition）。
+    const calls: string[] = []
+    const sid = 'sess-gui-arch'
+    const sessionsRoot = join(archiveRoot, 'agent', 'sessions')
+    const cwd = join(archiveRoot, 'proj') // 真实存在（realpath 可解析）
+    const bucket = join(sessionsRoot, encodeCwd(cwd))
+    mkdirSync(bucket, { recursive: true })
+    const mainPath = join(bucket, `2026-10-23T00-00-00-000Z_${sid}.jsonl`)
+    writeFileSync(mainPath, `${JSON.stringify({ type: 'session', id: sid, cwd, timestamp: '2026-10-23T00:00:00.000Z' })}\n`)
+    const deps: ArchiveServiceDeps = {
+      isGenerating: () => false,
+      getActiveSession: (s) => (s === sid ? { cwd, sessionFilePath: mainPath } : undefined),
+      findScannedSession: () => undefined,
+      disposeUserStopped: () => {},
+      // 生产接线同款（index.ts：fireArchiveDisposition → fireDeathDisposition('archive')）
+      fireArchiveDisposition: (s, hasDestroySink) => { calls.push(`archive-disp:${s}`); fireDeathDisposition(s, 'archive', { hasDestroySink }) },
+      closeAllBtwLines: async () => [],
+      detachSession: (s) => { calls.push(`detach:${s}`) },
+      destroyPiSession: async (s) => { calls.push(`destroy:${s}`) },
+      removeSessionEntry: () => {},
+      reapBackgroundTasks: async () => {},
+      clearRemovedSessionData: () => {},
+      unbindCanvas: () => {},
+      trash: async () => {},
+      trashDirectory: async () => {},
+      invalidateScanCache: () => {},
+      broadcastSessionList: () => {},
+      getSessionSummary: () => undefined,
+      warn: () => {},
+    }
+    const service = new ArchiveService(deps, { dataDir: archiveRoot, archiveRoot: join(archiveRoot, 'agent', 'archive'), agentDir: join(archiveRoot, 'agent'), sessionsRoot })
+
+    await service.archive(sid)
+
+    // GUI 路径触发处置收尾：组合根订阅侧收到 'archive'（hasDestroySink=true——活跃在册，
+    // 随后必有 removeSessionEntry 销毁回调消费抑制标）。
+    expect(archiveFires).toEqual([{ sessionId: sid, disposition: 'archive', hasDestroySink: true }])
+    // 检查点①：处置登记先于任何杀进程（detach/destroy）。
+    expect(calls.indexOf(`archive-disp:${sid}`)).toBeLessThan(calls.indexOf(`detach:${sid}`))
+    expect(calls.indexOf(`archive-disp:${sid}`)).toBeLessThan(calls.indexOf(`destroy:${sid}`))
+  })
+})
+});
+});
+
+// ======================================================================
+// ← session-handoff-sidecar-scan.test.ts
+// ======================================================================
+
+// getSessionsDir 指向测试临时目录（每个用例独立 mkdtemp，dir 键防串）
+const pathsMock = vi.hoisted(() => ({ getSessionsDir: vi.fn(() => '/tmp/placeholder') }))
+
+vi.mock('../src/infra/pi/pi-paths.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/infra/pi/pi-paths.js')>()
+  return { ...actual, getSessionsDir: pathsMock.getSessionsDir }
+})
+/** 写一个 pi 格式 session JSONL（header + assistant message，已 flush 形态）。 */
+function writeSessionFile(dir: string, id: string, cwd: string): string {
+  const filePath = join(dir, `${id}.jsonl`)
+  writeFileSync(filePath, [
+    JSON.stringify({ type: 'session', version: 3, id, timestamp: '2026-08-01T00:00:00Z', cwd }),
+    JSON.stringify({ type: 'message', id: `${id}-a1`, parentId: null, timestamp: '2026-08-01T00:00:01Z', message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] } }),
+  ].join('\n') + '\n')
+  return filePath
+}
+
+// wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
+describe('session-handoff-sidecar-scan', () => {
+describe('handoff sidecar × 扫描链（W11）', () => {
+  let sessionDir: string
+
+  beforeEach(() => {
+    sessionDir = mkdtempSync(join(tmpdir(), 'w11-handoff-'))
+    pathsMock.getSessionsDir.mockReturnValue(sessionDir)
+    invalidateScanDirCache()
+    _resetSessionMetaCacheForTest()
+  })
+
+  afterEach(() => {
+    rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('persistHandoffSidecar 后扫描提取 handedOffTo（scanSessionMeta 消费不变 + 写后缓存失效）', () => {
+    const filePath = writeSessionFile(sessionDir, 'h-1', '/proj')
+
+    // 第一次扫描：无交接标记（缓存写入）
+    expect(scanPiSessions().find(s => s.id === 'h-1')?.handedOffTo).toBeUndefined()
+
+    persistHandoffSidecar(filePath, 'handoff-target-9')
+
+    // sidecar 变更不变 JSONL 的 (mtime,size)——写后失效保证下次扫描读到新值
+    const meta = scanPiSessions({ force: true }).find(s => s.id === 'h-1')
+    expect(meta?.handedOffTo).toBe('handoff-target-9')
+  })
+
+  it('存量旧 session（JSONL 内 handoff_marker entry）经扫描链可读（fallback 兼容）', () => {
+    const filePath = join(sessionDir, 'legacy-h.jsonl')
+    writeFileSync(filePath, [
+      JSON.stringify({ type: 'session', version: 3, id: 'legacy-h', timestamp: '2026-08-01T00:00:00Z', cwd: '/proj' }),
+      JSON.stringify({ type: 'message', id: 'legacy-h-a1', parentId: null, timestamp: '2026-08-01T00:00:01Z', message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] } }),
+      // W11 前的直写形态：JSONL 尾部 handoff_marker entry
+      JSON.stringify({ type: 'handoff_marker', handedOffTo: 'legacy-target', timestamp: '2026-08-10T00:00:00Z' }),
+    ].join('\n') + '\n')
+
+    const meta = scanPiSessions().find(s => s.id === 'legacy-h')
+    expect(meta?.handedOffTo).toBe('legacy-target')
+  })
+
+  it('扫描侧 label 一致派生：死路径 cwd 的未命名 session，label 派生 = basename(死路径)（W11 步骤 5 接受的行为差异）', () => {
+    // patchSessionCwd 迁 tmp 后源文件 header 永久保持死路径 cwd；scanner label fallback
+    // （scannedToSummary 的 s.name ?? basename(s.cwd)）按真实历史值派生。断言扫描结果
+    // 的 cwd/name 满足该派生（name=null → label=basename(cwd)，非空非 undefined）。
+    const deadCwd = '/gone/dead-worktree-foo'
+    writeSessionFile(sessionDir, 'dead-cwd', deadCwd)
+
+    const meta = scanPiSessions().find(s => s.id === 'dead-cwd')
+    expect(meta).toBeDefined()
+    expect(meta?.name).toBeNull()
+    expect(meta?.cwd).toBe(deadCwd)
+    // 一致派生（与 session-scanner.ts:73 label: s.name ?? basename(s.cwd) 同式）
+    const label = meta?.name ?? basename(meta?.cwd ?? '')
+    expect(label).toBe(basename(deadCwd))
+    expect(label).toBeTruthy()
+    expect(label).not.toBe(basename(homedir()))
+  })
+})
+});

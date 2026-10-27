@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { deriveClosedDisplay } from '../src/subagent'
 
-// normalizeSubagentStatus 的测试随函数下沉至 packages/runtime/test/subagent-status.test.ts；
+// normalizeSubagentStatus 的测试随函数下沉至 packages/runtime/test/domains-bundle.test.ts；
 // 本文件只测留在 shared 的展示派生（runtime 归一层消费：
 // packages/runtime/src/services/session/subagent-status.ts）。
 describe('deriveClosedDisplay（closed 统一终态的展示派生，v4 B-1）', () => {

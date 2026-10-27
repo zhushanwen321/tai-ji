@@ -5,7 +5,7 @@
 #   test-type: create | manage | malformed
 #
 # 三个模式全部委托 vitest 探针驱动仓库真实实现
-# （packages/runtime/src/__tests__/session-manager-e2e-probe.test.ts：
+# （packages/runtime/src/__tests__/src-__tests__-extra1.test.ts：
 # 真实 event-adapter marker 翻译 + EventInterpreter + SessionManagerHandler）。
 # 探针 import 实现符号，无实现基线树上 import 即挂 → 有红阶段区分力。
 #

@@ -2148,7 +2148,7 @@ export type BtwForkState =
 // `XxxMutationReply` interface，生效值/回显字段**类型必需、不 optional**（编译期强制）。
 // 乐观/回执两分支裁决标准与新 mutation 接入检查单见 docs/adr/decisions.md（ADR-0065 条目）；
 // 清单检查（新增 mutation 不入 MUTATION_RPC_REGISTRY 即测试红）在
-// packages/runtime/src/__tests__/mutation-reply-contract.test.ts。
+// packages/runtime/src/__tests__/wiring-bundle.test.ts。
 //
 // 分支一（后端可变换请求值——pi 钳制/pattern 换模，reply 生效值是显示态唯一合法来源）：
 
