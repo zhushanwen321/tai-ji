@@ -19,7 +19,8 @@
  *   不存在 Workspace 实体。~~Project → Workspace → Session 三层结构~~ 已废弃（2026-08-04
  *   语义修正：workspace 是展示概念，不该进模型）。
  *
- * 持久化：project 列表存 renderer localStorage（未来迁移 runtime RPC projects.json）；
+ * 持久化：project 列表存 runtime projects.json（唯一权威持久化，runtime ProjectStore
+ * 唯一读写入口含 revision 校验；legacy renderer localStorage 持久化已删除）；
  * session 归属存 runtime sidecar `<sessionFile>.project.json`（磁盘权威，删除 session
  * 归属自动消失，fork 继承父归属）。
  *
@@ -38,7 +39,7 @@ export interface Project {
   lastUsedAt: number
 }
 
-/** project store 持久化结构（localStorage / 未来 runtime projects.json） */
+/** project store 持久化结构（runtime projects.json，ProjectStore 唯一读写入口） */
 export interface ProjectStoreState {
   projects: Project[]
   activeProjectId: string

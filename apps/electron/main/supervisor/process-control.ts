@@ -338,7 +338,7 @@ export function buildRemoteAccessSpawnArgs(env: MobileDistEnv, enabled: boolean)
  * @param port runtime 监听端口
  * @param onExit 子进程退出回调（传入 code），supervisor 用它清理状态
  * @returns { child, token, runtimeId }——child 为已绑定 stdout/stderr/exit 事件的进程实例；
- *          token 为本次 spawn 生成的 WS auth token（supervisor 持有并经 get-runtime-token IPC 暴露给 renderer）；
+ *          token 为本次 spawn 生成的 WS auth token（supervisor 持有并经 get-runtime-target-snapshot 快照并置暴露给 renderer）；
  *          runtimeId 为本次 spawn 签发的实例标识（supervisor 并入目标快照经 IPC 暴露）
  * @throws runtime 入口文件不存在
  */

@@ -76,7 +76,8 @@ export interface IRuntimeSupervisor {
 
   /**
    * 当前 runtime 的 WS auth token（S1-W1，spec §3.3 D4；未启动为 null）。
-   * renderer 经 get-runtime-token IPC 读取后作为 WS 首条 auth 消息发送。
+   * renderer 经 get-runtime-target-snapshot 快照并置读取（RuntimeTargetSnapshot.token）
+   * 后作为 WS 首条 auth 消息发送。
    */
   readonly token: string | null
 
@@ -239,7 +240,7 @@ export interface IReleaseChecker {
 export interface IpcHandlerDeps {
   /** 读取主窗口（供 privileged handler 发送事件） */
   getMainWindow: () => BrowserWindow | null
-  /** Runtime 监管者（桥接 handler 读 port / token / 目标快照（get-runtime-port / get-runtime-token / get-runtime-target-snapshot）） */
+  /** Runtime 监管者（桥接 handler 经唯一读口 get-runtime-target-snapshot 读连接目标快照，token 随快照并置） */
   runtime: IRuntimeSupervisor
   /** 是否开发模式（决定 createWindow 加载 URL） */
   isDev: boolean

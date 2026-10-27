@@ -52,7 +52,7 @@ vi.mock('../ws-client', () => ({
 }))
 
 // ── 端口 mock ────────────────────────────────────────────────────
-// ipc：全部返回空（init 会调 getRuntimePort 等）
+// ipc：全部返回空（init 会调 getRuntimeTargetSnapshot 等拉取口）
 const mockRejectAll = vi.fn()
 const mockPendingResolve = vi.fn()
 const mockPendingReject = vi.fn()

@@ -190,7 +190,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     return this._port
   }
 
-  /** 当前 runtime 的 WS auth token（未启动为 null）。renderer 经 get-runtime-token IPC 读取 */
+  /** 当前 runtime 的 WS auth token（未启动为 null）。renderer 经 get-runtime-target-snapshot 快照并置读取（RuntimeTargetSnapshot.token） */
   get token(): string | null {
     return this._token
   }

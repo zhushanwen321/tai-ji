@@ -31,7 +31,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const defaultSessionDir = ref('')
 
   /**
-   * 拉取默认会话目录（initApp 编排，landing 打开前就绪；失败降级空串不阻断启动）。
+   * 拉取默认会话目录（workspace 数据域同步函数，§6.4③：随连接边沿重拉——
+   * useSidebar.ts workspace 域登记 sync 内串行于 load 之后；失败降级空串不阻断同步）。
    */
   async function loadDefaultSessionDir(): Promise<void> {
     try {

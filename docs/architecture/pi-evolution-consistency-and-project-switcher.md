@@ -113,7 +113,7 @@ taiji = Electron 主进程 + Vue 3 渲染层 + Node.js runtime（WebSocket RPC�
 
 **数据模型现状（干净，无架构失败模式）**：`Project = { id, name, lastUsedAt }`（`shared/project.ts`）；持久化链路 = renderer pinia store 发 project.* 编辑命令（携带期望 revision）→ runtime ProjectStore 串行队列执行（revision 校验 + 原子落盘）→ `~/.taiji/projects.json`（整表替换、零转换）；读 = `project.load` 回执（connection-datasync-ssot §6.6：runtime 唯一写入口，legacy 整表写端点已拆除）。**文件内数组顺序 = runtime 命令执行顺序**（id 由 runtime 生成追加）。
 
-**待补的能力**：无 `userOrder` 字段（全仓 grep 零命中）；无 per-project 会话数（数据已全量在 renderer 内存 `session.groups`，但无现成 computed）；无拖拽基建（全仓无 dnd 库、无 draggable 用法先例）。
+**待补的能力**：无 `userOrder` 字段（全仓 grep 零命中）；无 per-project 会话数（数据已全量在 renderer 内存 `session.groups`，但无现成 computed）；无拖拽基建（无 dnd 库依赖；已有原生 HTML5 draggable 先例——SessionItem.vue 会话拖入项目分组）。
 
 **根因定位**：问题 3 不存在架构问题——是排序语义决策（用户手动序 vs lastUsedAt 稳定序）+ 一个小数据模型扩展（`userOrder`）。**结论：不需要架构优化，需要一次干净的功能设计。**
 

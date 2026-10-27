@@ -793,7 +793,9 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 
 ```bash
 # 快照与端口（IPC 读口，renderer 上下文）：electronAPI.getRuntimeTargetSnapshot()
-# 磁盘侧：<数据目录>/runtime.port + runtime-token（spawn 时成对写入）
+# 磁盘侧：<数据目录>/runtime-token（spawn 即写，process-control.ts issueRuntimeToken）
+#   + <数据目录>/runtime.port（waitForHealth 通过后才写，runtime-supervisor.ts start 时序
+#   / port-file.ts writePortFile）——启动中途失败现场只有 token 无 port，两文件非成对写入
 # 主进程 supervisor 决策（console 走装配器日志 verify-launch.log；kill decision 走 mainLogger）：
 grep -a "runtime\] Starting on port\|Ready on port\|Restart succeeded\|Restart attempt" <数据目录>/verify-launch.log
 grep -a "kill decision\|restart decision" <数据目录>/logs/main-*.log

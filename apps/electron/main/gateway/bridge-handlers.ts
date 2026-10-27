@@ -1,8 +1,8 @@
 /**
  * 桥接 IPC handler（纯转发，无副作用）。
  *
- * 对应 spec §4.2 M4「桥接 handler」：getRuntimePort /
- * getWindows / focusWindow / createWindow。
+ * 对应 spec §4.2 M4「桥接 handler」：getRuntimeTargetSnapshot /
+ * getRuntimeStartError / restartRuntime / getWindows / focusWindow / createWindow。
  * 只读 Main 内部状态或委托给 windowManager/runtime，无 OS 副作用。
  * remote-access 域（get-remote-access-info / rotate-remote-access-token /
  * set-remote-access-enabled）是本文件的受控例外：写配置文件 + 触发 runtime 重启，
@@ -43,7 +43,7 @@ import { readRemoteAccessConfig, rotateRemoteAccessToken, setRemoteAccessEnabled
 import { isValidRemoteAccessEnabled } from './input-validators.js'
 
 /**
- * 注册桥接 IPC handler（runtime port / 窗口管理系列）。
+ * 注册桥接 IPC handler（runtime 连接目标 / 窗口管理系列）。
  *
  * @param deps 注入的依赖（runtime/windowManager/createWindow）
  */

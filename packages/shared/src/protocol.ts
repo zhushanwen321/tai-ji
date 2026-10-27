@@ -896,7 +896,7 @@ export interface PluginConfirmInstallReply {
 export interface ClientMessageMap {
   'ping': Record<string, never>
   // auth：WS 传输层握手凭据（S1-W1）。token = Electron 主进程 spawn runtime 时生成的
-  // 随机 32B hex（renderer 经 preload getRuntimeToken IPC / CLI 经 <dataDir>/runtime-token 文件获取）。
+  // 随机 32B hex（renderer 经 get-runtime-target-snapshot 快照并置读取 RuntimeTargetSnapshot.token / CLI 经 <dataDir>/runtime-token 文件获取）。
   'auth': { token: string }
   // presetId：session 创建时锁定的 pi 启动预设 id（设计文档 §4.1）。runtime 写入 .preset.json sidecar，
   // restoreSession 据此重建 pi args。可选——省略时 runtime 用默认预设。透传链路见 wave3。
