@@ -58,8 +58,11 @@ export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
   ipcMain.handle(GET_RUNTIME_TOKEN, () => deps.runtime.token)
   // connection-datasync-ssot §6.1：连接目标快照单一权威读口（与 get-runtime-port 同模式
   // 只读 supervisor 状态）——{seq, runtimeId, port, token} 并置，替代零散的 port/token 两路
-  // 读取；未启动返回 null（renderer 连接控制器进等待态）。本单元只加不删：旧
-  // get-runtime-port 通道保留，消费切换后由后续单元统一清理。
+  // 读取；未启动返回 null（renderer 连接控制器进等待态）。get-runtime-port 旧通道保留
+  // （连接链已切目标快照读口，现供诊断取端口值）；get-runtime-port-offset 读口已随 §6.2
+  // 备用猜连链删除同批清理（连带 ipc-channels 常量 / preload 暴露 / lib/ipc wrapper 三处，
+  // renderer 消费链 composables/useConnection.ts → core resolveFallbackPort 随连接控制器
+  // 单元一并删除）。
   ipcMain.handle(GET_RUNTIME_TARGET_SNAPSHOT, () => deps.runtime.targetSnapshot)
   // RD-3#2：启动失败真因拉取（与 get-runtime-port 同模式只读 supervisor 状态）。
   // runtime-error 推送可能早于 renderer 订阅安装（boot 竞态，webContents.send 静默丢失）

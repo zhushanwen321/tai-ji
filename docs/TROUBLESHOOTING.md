@@ -783,7 +783,7 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **处置建议**：先排除渠道窗口限制（换小会话/先 compact 压缩再续聊）；根治需 pi 适配层对缺 usage 错误响应健壮降级——pi 上游问题按项目规则不改 pi 源码，待上游修复或由 taiji 侧降级链吸收。
 
 
-### 37. 连接目标快照与连接状态词排查（connection-datasync-ssot，2026-10-27 登记；机制 SSOT = ADR-0167）
+### 42. 连接目标快照与连接状态词排查（connection-datasync-ssot，2026-10-27 登记；机制 SSOT = ADR-0167）
 
 **连接状态词表**（App.vue 非连接态四分支，`connectionState`）：`waiting-runtime`（已请求目标快照但尚未获得——dev tsx 冷编译 60-90s 期即此态，快照经拉取或推送到达即转 connecting；与「连接中…」显式区分，防「转圈但根本没在连」误导）/ `connecting`·`disconnected`·`reconnecting`（过渡屏「连接中…」）/ `restarting`（主进程正在拉起新 runtime 实例，崩溃自动恢复中）/ `failed`（自动重启用尽或启动失败，需用户手动重试；屏上 `runtime-error-cause` 显示最近一次真因）。connected 才挂载 AppShell。
 

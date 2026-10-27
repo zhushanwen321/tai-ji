@@ -107,15 +107,15 @@ taiji = Electron 主进程 + Vue 3 渲染层 + Node.js runtime（WebSocket RPC�
 
 **根因**：「什么是有效模型」没有单一权威。overlay 合并逻辑写在展示视图内部（listProviders 内联），校验视图（pi-provider-store）基于另一份独立索引（快照 builtinModelsById），执行视图归 pi。三个视图对同一问题给出不同答案——G2 要求三者对齐（taiji 侧能控制前两者）。
 
-### 2.3 问题 3 现状：切换 2 步 + 自动重排，数据模型干净
+### 2.3 问题 3 现状：项目分组已锚定化，数据模型干净
 
-**现状交互**：ProjectSwitcher 为 inline 手风琴（`ProjectSwitcher.vue`）——折叠态显示当前项目，点击展开列表，再点项目才切换（2 步）；列表按「active 置顶 + lastUsedAt 降序」自动重排（`stores/project.ts:78-90` recentProjects）。
+**现状交互**：ProjectSwitcher 已退役（侧栏项目分组现为锚定分组形态，仓内无 ProjectSwitcher 组件）——项目切换 = 点侧栏组头锚定（1 步）；组序 SSOT = `projectStore.orderedProjects`（lastUsedAt 稳定序 + 默认项目固定最后、锚定切换不重排，`stores/project.ts:184`；同规则注释见 `useProjectGroups.ts:9` 与 `SessionList.vue:19`），不存在「active 置顶 + lastUsedAt 降序」自动重排。
 
 **数据模型现状（干净，无架构失败模式）**：`Project = { id, name, lastUsedAt }`（`shared/project.ts`）；持久化链路 = renderer pinia store 发 project.* 编辑命令（携带期望 revision）→ runtime ProjectStore 串行队列执行（revision 校验 + 原子落盘）→ `~/.taiji/projects.json`（整表替换、零转换）；读 = `project.load` 回执（connection-datasync-ssot §6.6：runtime 唯一写入口，legacy 整表写端点已拆除）。**文件内数组顺序 = runtime 命令执行顺序**（id 由 runtime 生成追加）。
 
 **待补的能力**：无 `userOrder` 字段（全仓 grep 零命中）；无 per-project 会话数（数据已全量在 renderer 内存 `session.groups`，但无现成 computed）；无拖拽基建（全仓无 dnd 库、无 draggable 用法先例）。
 
-**根因定位**：问题 3 不存在架构问题——是交互升级（2 步→1 步）+ 一个排序语义决策（用户手动序 vs lastUsedAt 自动序）+ 一个小数据模型扩展。**结论：不需要架构优化，需要一次干净的功能设计。**
+**根因定位**：问题 3 不存在架构问题——是排序语义决策（用户手动序 vs lastUsedAt 稳定序）+ 一个小数据模型扩展（`userOrder`）。**结论：不需要架构优化，需要一次干净的功能设计。**
 
 ### 2.4 合并诊断：是否需要架构优化？
 
