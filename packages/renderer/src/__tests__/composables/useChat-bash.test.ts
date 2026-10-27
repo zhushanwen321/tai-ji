@@ -39,7 +39,7 @@ const apiMock = vi.hoisted(() => {
   }
 })
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   chat: {
     bash: apiMock.bash,
     abortBash: apiMock.abortBash,

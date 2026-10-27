@@ -18,7 +18,7 @@ import type { SessionGroup, SessionSummary } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
 
 // mock sessionApi：getCommands/getContext 用 spy 断言「不被调用」。
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   session: {
     list: vi.fn(() => Promise.resolve([])),
     switchSession: vi.fn(() => Promise.resolve()),

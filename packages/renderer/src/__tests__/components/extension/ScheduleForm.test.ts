@@ -61,7 +61,6 @@ const mockGitStatus = vi.fn()
 vi.mock('@/api', () => ({
   project: {
     load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }),
-    save: vi.fn().mockResolvedValue(undefined),
   },
   file: {
     tree: (...args: unknown[]) => mockFileTree(...args),

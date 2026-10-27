@@ -46,7 +46,7 @@ import { composerInjectionStore } from '@/composables/panel/composer-injection-s
 
 // ── mock ──
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   // session.getContext：组件经 useContextUsage 恢复路径挂载即调（Phase 2.2 纯读改造）——
   // mock 为永不 resolve 的 pending（本文件只测 quota 区与帧直驱显示，恢复路径行为在
   // use-context-usage.test.ts / context-usage-journeys.test.ts 覆盖）

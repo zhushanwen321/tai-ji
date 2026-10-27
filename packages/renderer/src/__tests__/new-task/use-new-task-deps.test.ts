@@ -21,7 +21,6 @@ import type { RecentWorkspaceRecord } from '@taiji/shared'
 vi.mock('@/api', () => ({
   project: {
     load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }),
-    save: vi.fn().mockResolvedValue(undefined),
   },
   workspace: {
     listRecent: vi.fn().mockResolvedValue([]),

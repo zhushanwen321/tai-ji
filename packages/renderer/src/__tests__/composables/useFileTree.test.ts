@@ -24,7 +24,7 @@ import type { FileNode } from '@taiji/shared'
 const mockFileTree = vi.fn()
 const mockFileExpand = vi.fn()
 const mockGitStatus = vi.fn()
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   file: {
     tree: (...args: unknown[]) => mockFileTree(...args),
     expand: (...args: unknown[]) => mockFileExpand(...args),

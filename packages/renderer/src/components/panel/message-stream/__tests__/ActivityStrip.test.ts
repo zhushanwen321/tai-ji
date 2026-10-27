@@ -52,7 +52,7 @@ function setProjection(sid: string, entries: DeliveryFrameEntry[]): void {
   ref.value = next
 }
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   chat: { send: apiMock.send, streamSubscribe: apiMock.streamSubscribe },
   session: {},
 }))

@@ -225,7 +225,6 @@ export function composerApiModule() {
   return {
     project: {
       load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }),
-      save: vi.fn().mockResolvedValue(undefined),
     },
     model: { switchModel: vi.fn() },
     // W4b：session.listSessions 进公共 session 组（useBtwTabData badge 数据源——btw 线进

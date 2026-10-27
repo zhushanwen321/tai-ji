@@ -68,7 +68,7 @@ const switchSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const getHistoryMock = vi.hoisted(() => vi.fn(() => Promise.resolve({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })))
 const getCommandsMock = vi.hoisted(() => vi.fn(() => Promise.resolve({ commands: [] })))
 const getContextMock = vi.hoisted(() => vi.fn(() => Promise.resolve({})))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   chat: { getHistory: getHistoryMock, streamSubscribe: vi.fn(() => () => {}) },
   extension: {},
   session: {

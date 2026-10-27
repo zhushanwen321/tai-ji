@@ -74,10 +74,9 @@ vi.mock('@taiji/core/transport/api/domains/workspace', async (importActual) => {
   const actual = await importActual<typeof import('@taiji/core/transport/api/domains/workspace')>()
   return { ...actual, listRecent: mocks.workspaceListRecent }
 })
-// project domain 全量 stub（initApp 的 useProjectStore().init 依赖；仅 load/save 两导出）
+// project domain stub（initApp 的 useProjectStore().init 依赖；消费 load——写通道走四命令，见 domains/project.ts）
 vi.mock('@taiji/core/transport/api/domains/project', () => ({
   load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }),
-  save: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock('@/api', async (importActual) => {
   const actual = await importActual<typeof import('@/api')>()

@@ -31,7 +31,6 @@ import { project as projectApi } from '@/api'
 vi.mock('@/api', () => ({
   project: {
     load: vi.fn(),
-    save: vi.fn(),
     createProject: vi.fn(),
     renameProject: vi.fn(),
     removeProject: vi.fn(),

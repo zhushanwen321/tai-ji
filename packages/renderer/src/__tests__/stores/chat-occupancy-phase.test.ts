@@ -38,7 +38,7 @@ const { streamCbHolder, streamSubscribeMock, sendMock } = vi.hoisted(() => ({
   }),
 }))
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   chat: {
     send: sendMock,
     steer: vi.fn(() => Promise.resolve()),

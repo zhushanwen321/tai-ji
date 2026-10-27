@@ -86,7 +86,7 @@ vi.mock('@/api', () => ({
   },
   extension: { scan: vi.fn(() => Promise.resolve({ extensions: [] })) },
   workspace: { listRecent: vi.fn(() => Promise.resolve([])), defaultSessionDir: vi.fn(() => Promise.resolve('')) },
-  project: { load: vi.fn(() => Promise.resolve({ projects: [], activeProjectId: '' })), save: vi.fn(() => Promise.resolve()) },
+  project: { load: vi.fn(() => Promise.resolve({ projects: [], activeProjectId: '' })) },
   file: { tree: vi.fn(() => Promise.resolve([])), expand: vi.fn(() => Promise.resolve([])) },
   git: { status: vi.fn(() => Promise.resolve({ sessionId: 'mock', isRepo: false, files: [] })) },
 }))

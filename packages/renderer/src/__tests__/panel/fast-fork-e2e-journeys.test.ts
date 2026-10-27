@@ -63,7 +63,7 @@ const { sessionApiMock, submitDeliveryMock, useChatAbortMock } = vi.hoisted(() =
   // 软停止上层联动断言锚点（useSidebarSessionActions.onAbortSession → useChat().abort）
   useChatAbortMock: vi.fn(() => Promise.resolve()),
 }))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   session: sessionApiMock,
   // chat 域 = helper spy 单例展开（send/steer/... 与 useChat mock 同源锚点）+ fork 统一提交路径
   chat: { ...composerChatApiSpy, submitDelivery: submitDeliveryMock },

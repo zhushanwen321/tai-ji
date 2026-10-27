@@ -42,7 +42,6 @@ export function presetApiModule(presetMock: PresetMock) {
   return {
     project: {
       load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }),
-      save: vi.fn().mockResolvedValue(undefined),
     },
     preset: presetMock,
     default: { preset: presetMock },

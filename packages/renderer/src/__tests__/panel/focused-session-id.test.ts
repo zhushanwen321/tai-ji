@@ -20,7 +20,7 @@ import { effectScope } from 'vue'
 import type { SessionGroup, SessionSummary } from '@taiji/shared'
 
 // features 层调用 api 域；本测试只验 focusedSessionId 派生，mock 成 no-op。
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
   chat: { getHistory: vi.fn(() => Promise.resolve([])) },
   session: {
     create: vi.fn(() => Promise.resolve(makeSummary('mock'))),

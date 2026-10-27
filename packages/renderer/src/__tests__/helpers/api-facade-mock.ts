@@ -5,7 +5,7 @@
  * 工厂经顶层 import 转发本 helper 导出。
  *
  * 收敛两类逐字重复：
- * - project 域空载基座（load/save resolve 空项目）——Sidebar/Composer mount 链
+ * - project 域空载基座（load resolve 空项目）——Sidebar/Composer mount 链
  *   onMounted 消费 project.load，缺则 unhandled rejection 崩 mount
  * - chat 域方法 resolve 基线（send/steer/followUp/abort/compact 五方法）——文件专属
  *   方法（bash/abortBash/getHistory/editAndResend/...）由调用方展开后追加
@@ -19,11 +19,10 @@
 import type { ServerMessage } from '@taiji/shared'
 import { vi } from 'vitest'
 
-/** project 域 mock（空项目基座，load/save 均 resolve）。 */
+/** project 域 mock（空项目基座，load resolve 空项目；写通道走四命令，见 domains/project.ts）。 */
 export function apiProjectMock() {
   return {
     load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }),
-    save: vi.fn().mockResolvedValue(undefined),
   }
 }
 

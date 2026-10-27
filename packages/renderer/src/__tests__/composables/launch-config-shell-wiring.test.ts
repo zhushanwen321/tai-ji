@@ -73,7 +73,7 @@ vi.mock('@/api', async (importActual) => {
     ...actual,
     session,
     preset: presetApiMock,
-    project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+    project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }) },
     model: { switchModel: vi.fn() },
     composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
   }
