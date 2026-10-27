@@ -98,8 +98,10 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** 轮询等待 fake 侧异步效果可见（fake 异步处理 stdin，不能假设即时）。 */
-async function waitFor(cond: () => boolean, ms = 5_000, step = 25): Promise<boolean> {
+/** 轮询等待 fake 侧异步效果可见（fake 异步处理 stdin，不能假设即时）。
+ *  节拍 1ms：条件先立即求值、之后按节拍重查——节拍只决定「条件成立 → 被发现」的延迟
+ *  上限，超时语义不变（25ms 节拍让每次等待白付一个节拍）。 */
+async function waitFor(cond: () => boolean, ms = 5_000, step = 1): Promise<boolean> {
   const end = Date.now() + ms;
   while (Date.now() < end) {
     if (cond()) return true;
@@ -571,13 +573,13 @@ describe("protocol 自报与宽容解析", () => {
 // ══════════════════════════════════════════════════════════════
 
 /** 任意 RPC error 注入形态（fake scenario 的 error 三件套）。 */
-interface RpcErrorSpec {
+interface RpcErrorSpec {  // oe-exempt:20261027:test:
   code: number;
   message: string;
   data?: unknown;
 }
 
-interface ScenarioOverrides {
+interface ScenarioOverrides {  // oe-exempt:20261027:test:
   /** 终态帧组去掉 turn.terminal（宽松判定场景）。 */
   dropTurnTerminal?: boolean;
   /** 终态帧组去掉收尾帧（delta 聚合 / read tokens 兜底场景）。 */
@@ -1513,7 +1515,7 @@ describe("连接崩溃收割（R4 onClose 面）", () => {
     // 等 send 已达（fake 流水可观测）后在同一连接上触发自杀（崩溃收割的触发范围）
     await vi.waitFor(() => {
       expect(sentFrames(stateFile, "session/send")).toHaveLength(1);
-    }, { timeout: 5_000 });
+    }, { timeout: 5_000, interval: 1 });
     // suicide 不回应答——崩溃时该请求随 pending 一起 reject（预期，吞掉）
     await conn.request("test/suicide").then(
       () => undefined,

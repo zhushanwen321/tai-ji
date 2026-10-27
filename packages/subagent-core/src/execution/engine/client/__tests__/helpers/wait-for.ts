@@ -5,8 +5,11 @@
  *
  * 消费方：同目录 engine-client.test.ts / remote-engine.test.ts、
  * src/__tests__/transport-local.test.ts。
+ *
+ * 节拍 1ms：谓词先立即求值、之后按节拍重查——节拍只影响「条件已成立」到「被发现」的
+ * 延迟上限，不影响超时语义；25ms 节拍会让每次 ready/退出等待白付一个节拍。
  */
-export async function waitFor(predicate: () => boolean, timeoutMs = 5_000, stepMs = 25): Promise<void> {
+export async function waitFor(predicate: () => boolean, timeoutMs = 5_000, stepMs = 1): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (predicate()) return;

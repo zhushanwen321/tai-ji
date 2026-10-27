@@ -65,7 +65,9 @@ const STOCK = {
   'packages/subagent-engine-sdk/src/__tests__/cli-entry.test.ts': null,
   'packages/ui/src/features/chat/__tests__/markdown.test.ts': null,
   
-  'packages/zcode-subagent-cli/src/__tests__/zcode-engine.test.ts': null,
+  // zcode-engine.test.ts 拆分产物（abort/dispose 分片）：vi.waitFor 预算随迁自原文件的
+  // 存量登记（等的是真 fake app-server 子进程的 create/send 流水，非新增形态）。
+  'packages/zcode-subagent-cli/src/__tests__/zcode-engine.abort-dispose.test.ts': null,
 }
 for (const k of Object.keys(STOCK)) STOCK[k] = '存量：二波清单外文件（2026-10-22 盘点登记），信号待后续波次处置（确定性化/挂门控/豁免细分）'
 

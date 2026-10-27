@@ -1469,14 +1469,14 @@ describe("remote-engine", () => {
       const { engine, client, cleanup } = makeEngine(
         undefined,
         { args: [FAKE_ENGINE, "--run-hang", "1"] }, // 不收敛（FAKE_CANCEL_SETTLE 缺省 0）
-        { cancelSettleGraceMs: 500 },
+        { cancelSettleGraceMs: 100 },
       );
       const { ctx } = makeCtx({ signal: controller.signal });
       const runPromise = engine.run({ prompt: "p" }, ctx);
       await waitForReady(client); // abort 抢在连接完成前会打断握手重建循环——先等 ready
       const enginePid = client.enginePid!;
       controller.abort();
-      const result = await runPromise; // 注入 500ms 兜底窗超时 → 本地合成终态（record 必须收尾）
+      const result = await runPromise; // 注入 100ms 兜底窗超时 → 本地合成终态（record 必须收尾）
       expect(result.outcome.error).toContain("engine_run_failed");
       expect(result.outcome.error).toContain("aborted before terminal answer");
       expect(result.outcome.exitCode).toBeNull();
@@ -1492,7 +1492,7 @@ describe("remote-engine", () => {
       const { engine, client, cleanup } = makeEngine(
         { processModel: "shared-service" },
         { args: [FAKE_ENGINE, "--run-hang", "1"] }, // 不收敛
-        { cancelSettleGraceMs: 500 },
+        { cancelSettleGraceMs: 100 },
       );
       const { ctx } = makeCtx({ signal: controller.signal });
       const runPromise = engine.run({ prompt: "p" }, ctx);
@@ -1501,7 +1501,7 @@ describe("remote-engine", () => {
       // spy 目标 = core logger（remote-engine.ts 的留痕载体），非 SDK logger。
       const warnSpy = vi.spyOn(coreGetLogger("remote-engine"), "warn");
       controller.abort();
-      const result = await runPromise; // 注入 500ms 兜底窗超时 → 本地合成终态
+      const result = await runPromise; // 注入 100ms 兜底窗超时 → 本地合成终态
       expect(result.outcome.error).toContain("aborted before terminal answer");
       // [D1] shared-service 降级出口：不杀任何进程、不触发 dispose（dispose 对其是
       // 宿主停机/退役语义）——无进展 warn 出声（ADR-0047 静默 ≠ 卡死）。
@@ -1766,11 +1766,11 @@ describe("remote-engine", () => {
     }, 20_000);
 
     it("native + schema 任务：窗满无回执 → 合成失败 outcome fail-fast（不 reject），错误含双形态恢复指引 + 旧引擎支", async () => {
-      // 等待窗（500ms）< 引擎 run 应答时延（5s delay）：fail-fast 返回发生在 run 应答
+      // 等待窗（80ms）< 引擎 run 应答时延（1s delay）：fail-fast 返回发生在 run 应答
       // 之前 = 「秒级失败」时序的直接证明（G1：断链 run 不得烧完整时长）。
-      process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "500";
+      process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "80";
       const { engine, cleanup } = makeNativeEngineActions(undefined, [
-        { op: "delay", ms: 5000 },
+        { op: "delay", ms: 1000 },
       ]);
       const { ctx } = makeCtx();
       try {
@@ -1795,11 +1795,11 @@ describe("remote-engine", () => {
     }, 20_000);
 
     it("emulated 引擎豁免：schema 任务、窗满无回执也不 fail-fast（run 照常收敛）", async () => {
-      // 缺省 manifest/应答 = emulated；run 应答时延（1.2s）> 等待窗（400ms）——若门
+      // 缺省 manifest/应答 = emulated；run 应答时延（300ms）> 等待窗（80ms）——若门
       // 未豁免必合成失败，本用例断言成功即豁免的构造性证明。
-      process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "400";
+      process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "80";
       const { engine, cleanup } = makeEngine(undefined, {
-        args: [FAKE_ENGINE, "--run-actions", JSON.stringify([{ op: "delay", ms: 1200 }])],
+        args: [FAKE_ENGINE, "--run-actions", JSON.stringify([{ op: "delay", ms: 300 }])],
       });
       const { ctx } = makeCtx();
       try {
@@ -1813,9 +1813,9 @@ describe("remote-engine", () => {
     }, 20_000);
 
     it("native + 无 schema 任务豁免：不建门，无回执不 fail-fast（H1 判据 = task.schema 声明形态）", async () => {
-      process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "400";
+      process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "80";
       const { engine, cleanup } = makeNativeEngineActions(undefined, [
-        { op: "delay", ms: 1200 },
+        { op: "delay", ms: 300 },
       ]);
       const { ctx } = makeCtx();
       try {
@@ -1835,10 +1835,10 @@ describe("remote-engine", () => {
     // 孙进程同进程组连带收割）；shared-service 引擎 stall 出声不回收（D3 裁决行）。
 
     it("[D3] armed 窗满 fail-fast + cancel 受理失败 → error 留痕 + 兜底窗武装（grace 到点 per-window 实例 dispose，引擎进程消亡）", async () => {
-      process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "400";
+      process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "80";
       const { engine, client, cleanup } = makeNativeEngineActions(undefined, [
-        { op: "delay", ms: 5000 },
-      ], { cancelSettleGraceMs: 300 });
+        { op: "delay", ms: 1000 },
+      ], { cancelSettleGraceMs: 60 });
       const { ctx } = makeCtx();
       const coreLogger = coreGetLogger("remote-engine");
       const errorSpy = vi.spyOn(coreLogger, "error");
@@ -1865,15 +1865,15 @@ describe("remote-engine", () => {
     }, 20_000);
 
     it("[D3] armed 窗满 fail-fast + 引擎不收敛 → 兜底到点 per-window 实例 dispose（孙进程同进程组连带收割）", async () => {
-      process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "400";
+      process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "80";
       // run 受理后 spawn 孙进程（armed 永不到达——actions 无 emit）再长 delay 不应答：
       // armed 合成 + cancel 帧（受理成功但 CANCEL_SETTLES 缺省 0 不收敛）后孙进程仍活着，
-      // 唯一回收者 = 武装的兜底 timer（grace 500ms）→ dispose 请求 → 按进程组终止兜底
+      // 唯一回收者 = 武装的兜底 timer（grace 100ms）→ dispose 请求 → 按进程组终止兜底
       //（薄壳死 = 孙进程同组连带收割，P3）。
       const { engine, client, cleanup } = makeNativeEngineActions(undefined, [
         { op: "spawnGrandchild", recordId: "@runId" },
-        { op: "delay", ms: 10_000 },
-      ], { cancelSettleGraceMs: 500 });
+        { op: "delay", ms: 1500 },
+      ], { cancelSettleGraceMs: 100 });
       const { ctx } = makeCtx();
       try {
         const runPromise = engine.run({ prompt: "p", schema: { type: "object" } }, ctx);
@@ -1882,7 +1882,7 @@ describe("remote-engine", () => {
         const child = client.mirror.snapshot().find((e) => e.recordId === "run-1");
         expect(child).toBeDefined();
         const result = await runPromise;
-        expect(result.outcome.error).toContain("armed receipt"); // fail-fast 先于引擎应答（delay 10s）
+        expect(result.outcome.error).toContain("armed receipt"); // fail-fast 先于引擎应答（delay 1.5s）
         // 兜底窗到点 → 实例 dispose → 薄壳与孙进程一并消亡（进程组连带）
         await waitForTrue(() => probePidAliveness(child!.pid) === false);
         await waitForTrue(() => client.currentState === "disposed");
@@ -1893,7 +1893,7 @@ describe("remote-engine", () => {
     }, 20_000);
 
     it("[D3] armed 窗满 fail-fast + shared-service 引擎 → 兜底到点 stall 出声不回收（引擎宿主存活）", async () => {
-      process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "400";
+      process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "80";
       const { engine, client, cleanup } = makeEngine(
         { capabilities: { ...FAKE_MATCHED_CAPS, schemaEnforcement: "native" }, processModel: "shared-service" },
         {
@@ -1902,10 +1902,10 @@ describe("remote-engine", () => {
             "--caps-override",
             JSON.stringify({ schemaEnforcement: "native" }),
             "--run-actions",
-            JSON.stringify([{ op: "delay", ms: 5000 }]),
+            JSON.stringify([{ op: "delay", ms: 1000 }]),
           ],
         },
-        { cancelSettleGraceMs: 300 },
+        { cancelSettleGraceMs: 60 },
       );
       const { ctx } = makeCtx();
       const coreLogger = coreGetLogger("remote-engine");
@@ -1923,7 +1923,7 @@ describe("remote-engine", () => {
         const enginePid = client.enginePid!;
         const result = await runPromise;
         expect(result.outcome.error).toContain("armed receipt");
-        // 兜底 timer（grace 300ms）到点 → shared-service 分支 stall 出声（不回收）
+        // 兜底 timer（grace 60ms）到点 → shared-service 分支 stall 出声（不回收）
         await waitForTrue(() => warnSpy.mock.calls.some((c) => String(c[0]).includes("armed receipt timeout fallback")));
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("stalled, not stopped"));
         // shared-service 不触发 dispose（G4：误触发破坏 app-server 单例常驻）
@@ -2209,7 +2209,7 @@ describe("transport-runtime", () => {
       connectTimeoutMs: 1_000,
       helloTimeoutMs: 1_000,
       openTimeoutMs: 1_000,
-      closeGraceMs: 400,
+      closeGraceMs: 60,
       ...overrides,
     });
   }
@@ -2397,11 +2397,11 @@ describe("transport-runtime", () => {
     it("engine_close 宽限：server 不回 engine_closed → close 在宽限后放弃该通道（不关共享连接）", async () => {
       const server = await startServer();
       server.autoCloseOnEngineClose = false;
-      const transport = makeTransport(server, { closeGraceMs: 120 });
+      const transport = makeTransport(server, { closeGraceMs: 60 });
       await transport.open(makeSpec());
       const startedAt = Date.now();
       await transport.close();
-      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(40);
       // 共享连接仍活（通道放弃不影响连接）：第二次 open 复用同一连接成功
       const again = makeTransport(server);
       await again.open(makeSpec());
@@ -2495,7 +2495,7 @@ describe("transport-runtime", () => {
     it("engine_open_timeout：runtime 迟不回应答 → open 以超时码 reject", async () => {
       const server = await startServer();
       server.holdOpen = true;
-      const transport = makeTransport(server, { openTimeoutMs: 120 });
+      const transport = makeTransport(server, { openTimeoutMs: 50 });
       await expect(transport.open(makeSpec())).rejects.toMatchObject({ code: "engine_open_timeout" });
     });
 
@@ -2507,7 +2507,7 @@ describe("transport-runtime", () => {
         hostKind: "test",
         connectTimeoutMs: 1_000,
         helloTimeoutMs: 1_000,
-        openTimeoutMs: 100,
+        openTimeoutMs: 50,
       });
       await client.connect();
       const handlers: ControlChannelHandlers = { onFrame: () => {}, onExit: () => {}, onError: () => {} };
@@ -2612,7 +2612,7 @@ describe("transport-runtime", () => {
       const deadline = Date.now() + 5_000;
       while (errors.length === 0 && Date.now() < deadline) {
         transport.writeFrame(payload);
-        await new Promise((resolve) => setTimeout(resolve, 1));
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
       expect(errors[0]?.code).toBe("engine_backpressure_overflow");
       expect(transport.writeFrame(payload)).toBe(false);
@@ -2651,7 +2651,7 @@ describe("transport-runtime", () => {
       await expect(missing.open(makeSpec())).rejects.toMatchObject({ code: "engine_transport_unavailable" });
 
       server.holdHello = true;
-      const transport = makeTransport(server, { helloTimeoutMs: 120 });
+      const transport = makeTransport(server, { helloTimeoutMs: 60 });
       await expect(transport.open(makeSpec())).rejects.toMatchObject({ code: "engine_transport_unavailable" });
     });
 
