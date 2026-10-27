@@ -1,11 +1,11 @@
 /**
  * ProjectStore — project 列表持久化 + runtime 唯一写入口（connection-datasync-ssot §6.6）。
  *
- * 写通道两代并存（旧代由 u6b 拆除）：
- * - 命令通道（现行权威）：createProject / renameProject / removeProject / setActiveProject，
- *   经显式进程内串行队列执行（前提 4：消息派发是异步 fire-and-forget，偶然串行不作
- *   正确性依赖），命令携带期望 revision，校验一致才执行、执行后 +1，回执完整新状态；
- * - save 通道（legacy，renderer deep-watch 整表回写的旧载体）：全量替换原样保留，随 u6b 删除。
+ * 写通道唯一入口 = 命令通道：createProject / renameProject / removeProject /
+ * setActiveProject，经显式进程内串行队列执行（前提 4：消息派发是异步
+ * fire-and-forget，偶然串行不作正确性依赖），命令携带期望 revision，校验一致才
+ * 执行、执行后 +1，回执完整新状态。legacy 整表写方法（renderer deep-watch 回写
+ * 的旧载体）已随命令化拆除（§6.6③）。
  *
  * revision = 文件写入代数水位：文件内 revision 字段每次写 +1；存量文件无该字段按 0 读。
  *
@@ -16,7 +16,8 @@
  * 不变量：
  * - INV-1: 文件损坏返空态，不抛
  * - INV-2: 路径从 configDir 动态推导，无硬编码
- * - INV-3: save 全量替换（legacy 通道，前端 store deep watch 变化后全量 save）
+ * - INV-3: 命令执行 = cache 变更（set/delete）+ 原子落盘：删除的 project 必须从
+ *   文件消失（cache 清空重建语义），幂等
  * - INV-4: 归一化由 runtime 承载（§6.6①）：默认项目（DEFAULT_PROJECT_ID）存在 +
  *   activeProjectId 指向存在的 project。load 路径 = 读时修复（仅修返回视图不写盘，
  *   失配存量文件在首次编辑命令后自然收敛）；命令执行路径 = 随命令落盘一并承载修复
@@ -127,25 +128,6 @@ export class ProjectStore {
   getRevision(): number {
     this.cache.keys(PARTITION_KEY)
     return this.revision
-  }
-
-  /**
-   * 全量保存（legacy 通道，renderer deep watch 变化后调用；随 u6b 拆除）。INV-3：替换式，幂等。
-   * 删除的 project 必须从文件消失（cache 清空重建）。也是一次写 → revision +1。
-   */
-  save(state: ProjectStoreState): void {
-    if (!state || !Array.isArray(state.projects)) return
-    this.cache.keys(PARTITION_KEY)
-    this.activeProjectId = state.activeProjectId ?? ''
-    for (const key of this.cache.keys(PARTITION_KEY)) {
-      this.cache.delete(PARTITION_KEY, key)
-    }
-    for (const p of state.projects) {
-      if (p && typeof p.id === 'string' && p.id) {
-        this.cache.set(PARTITION_KEY, p.id, p)
-      }
-    }
-    this.revision += 1
   }
 
   /**
@@ -282,7 +264,7 @@ export class ProjectStore {
     }
   }
 
-  /** 按给定序整体重建分区（INV-3 save 同款清空重建形态）。 */
+  /** 按给定序整体重建分区（INV-3 同款清空重建形态）。 */
   private rewriteCache(projects: Project[]): void {
     for (const key of this.cache.keys(PARTITION_KEY)) {
       this.cache.delete(PARTITION_KEY, key)

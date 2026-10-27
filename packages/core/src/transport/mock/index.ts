@@ -2449,11 +2449,6 @@ const projectImpl = {
   async load(): Promise<ProjectLoadReply> {
     return { ...mockNormalize(), revision: mockRevision }
   },
-  // [G4 锚定 ProjectDomain] 对齐 real 契约返回 void（原 mock 返回 state 属未登记偏差，随锚定收尾；
-  // mock 无持久化，save 即 ack——legacy 通道，随 u6b 与 real 同批删除）
-  async save(state: ProjectStoreState): Promise<void> {
-    void state
-  },
   async createProject(name: string, revision: number): Promise<ProjectCommandReply> {
     mockAssertRevision(revision)
     const trimmed = name.trim()

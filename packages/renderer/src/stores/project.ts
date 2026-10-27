@@ -12,8 +12,7 @@
  * - revision 跟随回执更新（load 回执学得水位、命令回执推进），对域同步器暴露
  *   isStaleLoadReceipt 判据（§6.4 命令×同步交错裁决的输入）。
  * - 归一化（默认项补插 + stale id 回退）已迁 runtime 权威侧（§6.6①，load 回执即归一化
- *   视图）；legacy localStorage 一次性迁移随视图形态退役（旧通道整表写与缓存视图矛盾，
- *   §6.6②——提前承接 u6b 的迁移删除子项）。
+ *   视图）；legacy localStorage 一次性迁移已删除（旧通道整表写与缓存视图矛盾，§6.6②）。
  *
  * 关系模型（SSOT 见 shared/project.ts + docs/architecture/project-session-model.md）：
  * Project 直接关联 Session（session.projectId，创建时归属，runtime sidecar 持久化）。

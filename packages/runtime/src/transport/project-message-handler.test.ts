@@ -8,9 +8,9 @@
  * services/project/project-store.test.ts（真 store + tmp 目录）；本文件锚定 handler 编排
  * 契约：回执形态 / 拒绝转 error envelope / project.changed 广播时机 / 并发到达端到端保序。
  *
- * 核心契约锚定：「校验失败仍必须 reply（防前端 pending 悬挂）」——project.save 的
- * payload 结构不合法时不能静默吞掉请求（reply 契约破坏 = 前端 Promise 永不 resolve）；
- * 命令通道的失败对应形态 = error envelope（pending reject，同样不悬挂）。
+ * 核心契约锚点：「失败不悬挂」——命令拒绝走 error envelope（pending reject），与 load
+ * 恒 reply 同属 RPC 契约：任何请求不得静默吞掉（前端 Promise 永不 resolve / 永不 reject）。
+ * legacy 整表写端点已随命令化拆除（§6.6③），本文件不再覆盖其校验分支。
  *
  * 测试框架：vitest（从 vitest 导入 describe/it/expect/vi）。
  * 运行命令：cd packages/runtime && npx vitest run src/transport/project-message-handler.test.ts
@@ -31,20 +31,19 @@ function mockWs(): WsType {
   return { send: vi.fn(), readyState: 1 } as unknown as WsType
 }
 
-/** store.load() 返回的全量状态（模拟磁盘现状；save mock 不改返回值）。 */
+/** store.load() 返回的全量状态（模拟磁盘现状；命令 mock 不改返回值）。 */
 const diskState: ProjectStoreState = {
   projects: [{ id: 'proj-1', name: 'demo', lastUsedAt: 100 }],
   activeProjectId: 'proj-1',
 }
 
 /**
- * 部分实现 mock：handler 只调 load/save/getRevision 入口，全接口 mock 无断言价值
+ * 部分实现 mock：handler 只调 load/getRevision 与四命令入口，全接口 mock 无断言价值
  * （与 worktree-message-handler.test.ts 的 mockGitService 同策略）。
  */
 function mockProjectStore() {
   return {
     load: vi.fn((): ProjectStoreState => diskState),
-    save: vi.fn(),
     getRevision: vi.fn((): number => 0),
   }
 }
@@ -67,7 +66,6 @@ function mockContext(overrides?: Partial<ProjectHandlerContext>): ProjectHandler
 function msg(
   type:
     | 'project.load'
-    | 'project.save'
     | 'project.createProject'
     | 'project.renameProject'
     | 'project.removeProject'
@@ -87,11 +85,10 @@ function realStore(): { store: ProjectStore; dir: string } {
 // ── handles 清单 ────────────────────────────────────────────
 
 describe('ProjectMessageHandler.handles', () => {
-  it('认领 load/save（legacy）与四写命令（§6.6）', () => {
+  it('认领 load 与四写命令（§6.6；legacy 整表写端点已拆除）', () => {
     const handler = new ProjectMessageHandler(mockContext())
     expect(handler.handles).toEqual([
       'project.load',
-      'project.save',
       'project.createProject',
       'project.renameProject',
       'project.removeProject',
@@ -103,7 +100,7 @@ describe('ProjectMessageHandler.handles', () => {
 // ── project.load ────────────────────────────────────────────
 
 describe('ProjectMessageHandler project.load', () => {
-  it('reply project.loaded 携带 store.load() 全量 + revision，不触发 save / sendError', async () => {
+  it('reply project.loaded 携带 store.load() 全量 + revision，不触发 sendError / 广播', async () => {
     const ctx = mockContext()
     const handler = new ProjectMessageHandler(ctx)
     const ws = mockWs()
@@ -112,7 +109,6 @@ describe('ProjectMessageHandler project.load', () => {
 
     expect(ctx.projectStore.load).toHaveBeenCalledTimes(1)
     expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'project.loaded', { ...diskState, revision: 0 })
-    expect(ctx.projectStore.save).not.toHaveBeenCalled()
     expect(ctx.sendError).not.toHaveBeenCalled()
     expect(ctx.broadcastProjectChanged).not.toHaveBeenCalled()
   })
@@ -125,118 +121,6 @@ describe('ProjectMessageHandler project.load', () => {
     await handler.handleProjectMessage(msg('project.load', {}, 'msg-42'), ws)
 
     expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-42', 'project.loaded', { ...diskState, revision: 0 })
-  })
-})
-
-// ── project.save 成功路径 ────────────────────────────────────
-
-describe('ProjectMessageHandler project.save 成功路径', () => {
-  it('合法 payload → save(state) 后 reply project.loaded 携带 store.load() 最新值', async () => {
-    const ctx = mockContext()
-    const handler = new ProjectMessageHandler(ctx)
-    const ws = mockWs()
-    const incoming: ProjectStoreState = {
-      projects: [{ id: 'p2', name: 'new', lastUsedAt: 1 }],
-      activeProjectId: 'p2',
-    }
-
-    await handler.handleProjectMessage(msg('project.save', incoming), ws)
-
-    expect(ctx.projectStore.save).toHaveBeenCalledWith(incoming)
-    expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'project.loaded', { ...diskState, revision: 0 })
-    expect(ctx.sendError).not.toHaveBeenCalled()
-  })
-
-  it('reply 的 payload 取自 save 之后的 load()（save → load → reply 顺序）', async () => {
-    const store = mockProjectStore()
-    // 持有原始 mock（ctx 类型里 load/save 是具体签名，.mock 不可达）——用
-    // invocationCallOrder 全局单调序断言 reply 反映的是保存后的 store 状态
-    const reply = vi.fn()
-    const ctx = mockContext({
-      projectStore: store as unknown as ProjectStoreType,
-      reply: reply as unknown as ProjectHandlerContext['reply'],
-    })
-    const handler = new ProjectMessageHandler(ctx)
-    const ws = mockWs()
-
-    await handler.handleProjectMessage(
-      msg('project.save', { projects: [], activeProjectId: '' }),
-      ws,
-    )
-
-    const saveOrder = store.save.mock.invocationCallOrder[0]
-    const loadOrder = store.load.mock.invocationCallOrder[0]
-    const replyOrder = reply.mock.invocationCallOrder[0]
-    expect(saveOrder).toBeDefined()
-    expect(loadOrder).toBeDefined()
-    expect(replyOrder).toBeDefined()
-    expect(saveOrder).toBeLessThan(loadOrder)
-    expect(loadOrder).toBeLessThan(replyOrder)
-  })
-
-  it('空 projects 数组是合法 payload（清空所有 project 的语义走 save，不被结构校验拦截）', async () => {
-    const ctx = mockContext()
-    const handler = new ProjectMessageHandler(ctx)
-    const ws = mockWs()
-
-    await handler.handleProjectMessage(msg('project.save', { projects: [], activeProjectId: '' }), ws)
-
-    expect(ctx.projectStore.save).toHaveBeenCalledTimes(1)
-    expect(ctx.reply).toHaveBeenCalledTimes(1)
-  })
-})
-
-// ── 校验失败仍必须 reply（防前端 pending 悬挂，核心契约）─────────
-
-describe('ProjectMessageHandler project.save 校验失败仍必须 reply', () => {
-  it('payload 为 null → 不 save，但 reply project.loaded 兜底当前 store 状态（不走 sendError）', async () => {
-    const ctx = mockContext()
-    const handler = new ProjectMessageHandler(ctx)
-    const ws = mockWs()
-
-    await handler.handleProjectMessage(msg('project.save', null), ws)
-
-    // 契约：校验失败不能静默——不 reply 则前端 pending Promise 永不 resolve
-    expect(ctx.projectStore.save).not.toHaveBeenCalled()
-    expect(ctx.reply).toHaveBeenCalledTimes(1)
-    expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'project.loaded', { ...diskState, revision: 0 })
-    expect(ctx.sendError).not.toHaveBeenCalled()
-  })
-
-  it('payload.projects 非数组（对象）→ 不 save，reply 兜底（结构校验拒绝非数组形态）', async () => {
-    const ctx = mockContext()
-    const handler = new ProjectMessageHandler(ctx)
-    const ws = mockWs()
-
-    await handler.handleProjectMessage(
-      msg('project.save', { projects: { 'proj-1': {} }, activeProjectId: 'proj-1' }),
-      ws,
-    )
-
-    expect(ctx.projectStore.save).not.toHaveBeenCalled()
-    expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'project.loaded', { ...diskState, revision: 0 })
-  })
-
-  it('payload.projects 为字符串 → 不 save，reply 兜底', async () => {
-    const ctx = mockContext()
-    const handler = new ProjectMessageHandler(ctx)
-    const ws = mockWs()
-
-    await handler.handleProjectMessage(msg('project.save', { projects: 'proj-1' }), ws)
-
-    expect(ctx.projectStore.save).not.toHaveBeenCalled()
-    expect(ctx.reply).toHaveBeenCalledTimes(1)
-  })
-
-  it('payload 缺 projects 字段 → 不 save，reply 兜底', async () => {
-    const ctx = mockContext()
-    const handler = new ProjectMessageHandler(ctx)
-    const ws = mockWs()
-
-    await handler.handleProjectMessage(msg('project.save', { activeProjectId: 'x' }), ws)
-
-    expect(ctx.projectStore.save).not.toHaveBeenCalled()
-    expect(ctx.reply).toHaveBeenCalledTimes(1)
   })
 })
 

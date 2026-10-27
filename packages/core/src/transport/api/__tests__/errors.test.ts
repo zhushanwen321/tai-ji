@@ -435,14 +435,33 @@ describe("domains", () => {
 
   // ── project 域 ─────────────────────────────────────────────────────────────
   describe('project 域', () => {
-    it('load 全量拉取 / save 全量写入', async () => {
+    it('load 全量拉取；四写命令携带期望 revision 并解包回执', async () => {
       const state = { projects: [{ id: 'pj' }] } as never
       mockCommand.mockResolvedValueOnce(state)
       await expect(project.load()).resolves.toEqual(state)
       expect(mockCommand).toHaveBeenCalledWith('project.load', {}, RPC_BACKSTOP_TIMEOUT_MS)
 
-      await expect(project.save(state)).resolves.toBeUndefined()
-      expect(mockCommand).toHaveBeenCalledWith('project.save', state, RPC_BACKSTOP_TIMEOUT_MS)
+      mockCommand.mockResolvedValueOnce({ state, revision: 1 })
+      await expect(project.createProject('n', 0)).resolves.toEqual({ state, revision: 1 })
+      expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['project.createProject', { name: 'n', revision: 0 }])
+
+      mockCommand.mockResolvedValueOnce({ state, revision: 2 })
+      await expect(project.renameProject('pj', 'n2', 1)).resolves.toEqual({ state, revision: 2 })
+      expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual([
+        'project.renameProject',
+        { projectId: 'pj', name: 'n2', revision: 1 },
+      ])
+
+      mockCommand.mockResolvedValueOnce({ state, revision: 3 })
+      await expect(project.removeProject('pj', 2)).resolves.toEqual({ state, revision: 3 })
+      expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['project.removeProject', { projectId: 'pj', revision: 2 }])
+
+      mockCommand.mockResolvedValueOnce({ state, revision: 4 })
+      await expect(project.setActiveProject('pj', 3)).resolves.toEqual({ state, revision: 4 })
+      expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual([
+        'project.setActiveProject',
+        { projectId: 'pj', revision: 3 },
+      ])
     })
   })
 

@@ -57,8 +57,10 @@ cwd（session 属性）→ 仅前端展示聚合（侧栏按目录分组 Session
   - 空 projectId 不写 sidecar（等价未归类，读取侧统一兜底默认项目）
 - **project 列表**：runtime `<configDir>/projects.json`（2026-08-04 迁 runtime，
   ProjectStore 对齐 recent-workspaces.json 模式：WriteBackCache debounce 落盘，
-  跨实例一致）。前端 deep watch 变化 → `project.save` RPC 全量写入；
-  localStorage 仅作首启一次性迁移源（2026-08-04 前旧数据），迁移后废弃。
+  跨实例一致）。写入唯一入口 = runtime 命令通道（project.createProject /
+  renameProject / removeProject / setActiveProject，携带期望 revision，串行执行 +
+  校验，connection-datasync-ssot §6.6）；读 = `project.load` 回执。legacy 整表写
+  端点与 localStorage 首启迁移已随命令化拆除。
 
 ## 数据流
 

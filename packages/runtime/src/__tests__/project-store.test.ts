@@ -1,10 +1,11 @@
 /**
- * ProjectStore 单测（D14，2026-08-04：project 列表迁 runtime projects.json）。
+ * ProjectStore 单测（D14，2026-08-04：project 列表迁 runtime projects.json；
+ * 写通道命令化 connection-datasync-ssot §6.6 后，写路径 = 命令通道）。
  *
  * 覆盖：
- * - save → load 往返（projects + activeProjectId 持久化）
- * - 删除的 project 从文件消失（全量替换语义）
- * - 文件损坏 → 空态不抛（INV-1）
+ * - 命令 → load 往返（projects + activeProjectId 持久化）
+ * - 删除的 project 从文件消失（命令路径 cache 清空重建语义）
+ * - 文件损坏 / 非法结构 / 首启无文件 → 兜底默认项不抛（INV-1 + §6.6① 归一化）
  * - flushAll 立即落盘 + 文件内容为 ProjectStoreState 结构
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/project-store.test.ts
@@ -13,11 +14,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import type { ProjectStoreState, Project } from '@taiji/shared'
+import type { Project } from '@taiji/shared'
 import { ProjectStore } from '../services/project/project-store.js'
 
-function mkProject(id: string, name: string, lastUsedAt = 0): Project {
-  return { id, name, lastUsedAt }
+/** projects.json 磁盘形态（与 persistToFile 写入结构对齐；revision 由 store 维护）。 */
+interface RawFileState {
+  projects: Project[]
+  activeProjectId: string
+  revision?: number
 }
 
 describe('ProjectStore', () => {
@@ -31,75 +35,68 @@ describe('ProjectStore', () => {
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  it('save → load 往返：projects + activeProjectId 都持久化', () => {
-    const state: ProjectStoreState = {
-      projects: [mkProject('proj-a', 'Alpha'), mkProject('proj-default', '', 0)],
-      activeProjectId: 'proj-a',
-    }
-    store.save(state)
+  it('命令 → load 往返：projects + activeProjectId 都持久化', async () => {
+    await store.createProject('Alpha', 0)
+    await store.createProject('Beta', 1)
     store.flushAll()
 
     const reloaded = new ProjectStore(dir)
     const loaded = reloaded.load()
-    expect(loaded.projects.map((p) => p.id)).toEqual(['proj-a', 'proj-default'])
-    expect(loaded.projects[0]!.name).toBe('Alpha')
-    expect(loaded.activeProjectId).toBe('proj-a')
+    // ensureInvariants 补插默认项（name 空）在头部；锚定 = 最后创建项
+    expect(loaded.projects.map((p) => p.name)).toEqual(['', 'Alpha', 'Beta'])
+    expect(loaded.activeProjectId).toBe(loaded.projects.find((p) => p.name === 'Beta')?.id)
   })
 
-  it('文件内容为 ProjectStoreState 结构（{ projects, activeProjectId }）', () => {
-    const state: ProjectStoreState = {
-      projects: [mkProject('proj-a', 'Alpha')],
-      activeProjectId: 'proj-a',
-    }
-    store.save(state)
+  it('文件内容为 ProjectStoreState 结构（{ projects, activeProjectId }）', async () => {
+    await store.createProject('Alpha', 0)
     store.flushAll()
 
-    const raw = JSON.parse(readFileSync(join(dir, 'projects.json'), 'utf-8'))
+    const raw = JSON.parse(readFileSync(join(dir, 'projects.json'), 'utf-8')) as RawFileState
     expect(Array.isArray(raw.projects)).toBe(true)
-    expect(raw.activeProjectId).toBe('proj-a')
-    expect(raw.projects[0].id).toBe('proj-a')
+    expect(raw.projects.map((p) => p.name)).toEqual(['', 'Alpha'])
+    expect(raw.activeProjectId).toBe(raw.projects.find((p) => p.name === 'Alpha')?.id)
   })
 
-  it('全量替换语义：save 后删除的 project 从文件消失', () => {
-    store.save({ projects: [mkProject('a', 'A'), mkProject('b', 'B')], activeProjectId: 'a' })
+  it('删除的 project 从文件消失（命令路径 cache 清空重建语义）', async () => {
+    await store.createProject('A', 0)
+    const b = await store.createProject('B', 1)
     store.flushAll()
-    // 第二次 save 只保留 a（b 被删）
-    store.save({ projects: [mkProject('a', 'A')], activeProjectId: 'a' })
+    await store.removeProject(b.state.projects.find((p) => p.name === 'B')!.id, 2)
     store.flushAll()
 
-    const raw = JSON.parse(readFileSync(join(dir, 'projects.json'), 'utf-8'))
-    expect(raw.projects.map((p: Project) => p.id)).toEqual(['a'])
+    const raw = JSON.parse(readFileSync(join(dir, 'projects.json'), 'utf-8')) as RawFileState
+    expect(raw.projects.map((p) => p.name)).toEqual(['', 'A'])
   })
 
-  it('首启无文件 → 空态（不抛）', () => {
+  it('首启无文件 → 归一化兜底默认项（不抛）', () => {
     const loaded = store.load()
-    expect(loaded.projects).toEqual([])
-    expect(loaded.activeProjectId).toBe('')
+    expect(loaded.projects.map((p) => p.id)).toEqual(['proj-default'])
+    expect(loaded.activeProjectId).toBe('proj-default')
+    expect(store.getRevision()).toBe(0)
   })
 
-  it('文件损坏 → 空态不抛（INV-1）', () => {
+  it('文件损坏 → 隔离后空态兜底默认项，不抛（INV-1）', () => {
     writeFileSync(join(dir, 'projects.json'), '{broken json', 'utf-8')
     const loaded = store.load()
-    expect(loaded.projects).toEqual([])
+    expect(loaded.projects.map((p) => p.id)).toEqual(['proj-default'])
   })
 
-  it('非法结构（非 ProjectStoreState）→ 空态不抛', () => {
+  it('非法结构（非 ProjectStoreState）→ 空态兜底默认项，不抛', () => {
     writeFileSync(join(dir, 'projects.json'), JSON.stringify([{ id: 'a' }]), 'utf-8')
     const loaded = store.load()
-    expect(loaded.projects).toEqual([])
+    expect(loaded.projects.map((p) => p.id)).toEqual(['proj-default'])
   })
 
-  it('load 触发 WriteBackCache 懒加载（save 后新实例能读到已落盘数据）', () => {
-    store.save({ projects: [mkProject('p1', 'One')], activeProjectId: 'p1' })
+  it('load 触发 WriteBackCache 懒加载（命令落盘后新实例能读到已落盘数据）', async () => {
+    await store.createProject('One', 0)
     store.flushAll()
     const s2 = new ProjectStore(dir)
     const loaded = s2.load()
-    expect(loaded.projects).toHaveLength(1)
-    expect(loaded.projects[0]!.name).toBe('One')
+    expect(loaded.projects.some((p) => p.name === 'One')).toBe(true)
   })
 
-  it('existsSync 确认文件确实落盘', () => {
-    store.save({ projects: [mkProject('p1', 'One')], activeProjectId: 'p1' })
+  it('existsSync 确认文件确实落盘', async () => {
+    await store.createProject('One', 0)
     store.flushAll()
     expect(existsSync(join(dir, 'projects.json'))).toBe(true)
   })

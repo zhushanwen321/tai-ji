@@ -768,7 +768,7 @@ describe("mock-domains", () => {
       expect(await quota.configure({ providerId: 'p', enabled: true })).toEqual({ ok: true })
     })
 
-    it('project：load 默认项基态 + 命令通道内存运转（connection-datasync-ssot u6a 对齐 real）+ save ack', async () => {
+    it('project：load 默认项基态 + 命令通道内存运转（connection-datasync-ssot u6a 对齐 real）', async () => {
       // load 基态 = 默认项兜底 + revision 水位（real 的 runtime ProjectStore 读时归一化同语义）
       expect(await project.load()).toEqual({
         projects: [{ id: 'proj-default', name: '', lastUsedAt: 0 }],
@@ -780,9 +780,6 @@ describe("mock-domains", () => {
       expect(created.revision).toBe(1)
       expect(created.state.projects.some((p) => p.name === 'mock-proj')).toBe(true)
       await expect(project.createProject('x', 0)).rejects.toMatchObject({ code: 'project_revision_mismatch' })
-      // save（legacy 通道，随 u6b 与 real 同批删除）ack 语义不变
-      const state = { projects: [], activeProjectId: 'p1' }
-      await expect(project.save(state)).resolves.toBeUndefined()
     })
 
     it('preset：内置目录非空 + CRUD + default', async () => {

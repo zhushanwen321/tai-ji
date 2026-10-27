@@ -98,11 +98,11 @@ describe('ProjectStore revision 水位', () => {
     expect(store.getRevision()).toBe(1)
   })
 
-  it('save（legacy 通道）也是一次写：revision +1 且文件带 revision 字段', () => {
+  it('命令落盘带 revision 字段（一次写 → 文件内 revision +1）', async () => {
     const { store, dir } = newStore()
     const path = join(dir, 'projects.json')
 
-    store.save({ projects: [{ id: 'p1', name: 'a', lastUsedAt: 1 }], activeProjectId: 'p1' })
+    await store.createProject('a', 0)
     expect(store.getRevision()).toBe(1)
     store.flushAll()
 

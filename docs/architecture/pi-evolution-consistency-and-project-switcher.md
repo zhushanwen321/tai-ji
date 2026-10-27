@@ -111,7 +111,7 @@ taiji = Electron 主进程 + Vue 3 渲染层 + Node.js runtime（WebSocket RPC�
 
 **现状交互**：ProjectSwitcher 为 inline 手风琴（`ProjectSwitcher.vue`）——折叠态显示当前项目，点击展开列表，再点项目才切换（2 步）；列表按「active 置顶 + lastUsedAt 降序」自动重排（`stores/project.ts:78-90` recentProjects）。
 
-**数据模型现状（干净，无架构失败模式）**：`Project = { id, name, lastUsedAt }`（`shared/project.ts:29-38`）；持久化链路 = renderer pinia store（deep watch 全量 save）→ `project.save` RPC → runtime `WriteBackCache`（500ms debounce）→ `~/.taiji/projects.json`（全量替换、零转换）。**文件内数组顺序天然等于前端发送顺序**（`project-store.ts:118-126`）。
+**数据模型现状（干净，无架构失败模式）**：`Project = { id, name, lastUsedAt }`（`shared/project.ts`）；持久化链路 = renderer pinia store 发 project.* 编辑命令（携带期望 revision）→ runtime ProjectStore 串行队列执行（revision 校验 + 原子落盘）→ `~/.taiji/projects.json`（整表替换、零转换）；读 = `project.load` 回执（connection-datasync-ssot §6.6：runtime 唯一写入口，legacy 整表写端点已拆除）。**文件内数组顺序 = runtime 命令执行顺序**（id 由 runtime 生成追加）。
 
 **待补的能力**：无 `userOrder` 字段（全仓 grep 零命中）；无 per-project 会话数（数据已全量在 renderer 内存 `session.groups`，但无现成 computed）；无拖拽基建（全仓无 dnd 库、无 draggable 用法先例）。
 

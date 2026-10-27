@@ -302,12 +302,12 @@ export type ClientMessageType =
   | 'git.status' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.checkoutCwd' | 'git.createBranch'
   | 'workspace.listRecent' | 'workspace.record' | 'workspace.detect'
   | 'workspace.setPinned' | 'workspace.defaultSessionDir'
-  | 'project.load' | 'project.save'
+  | 'project.load'
   // project 写通道命令化（connection-datasync-ssot §6.6）：runtime 唯一写入口的四个
-  // 编辑命令，替代 renderer deep-watch 整表回写（project.save）。请求携带期望 revision
-  // （最近一次读到的），runtime 校验一致才执行、执行后 +1，不匹配拒绝（过时窗口保护）；
-  // 成功回执 = ProjectCommandReply（完整新状态 + revision 新值）。payload 见 ClientMessageMap
-  // project 命令登记段。
+  // 编辑命令，替代 renderer deep-watch 整表回写（legacy 整表写端点已随命令化拆除）。
+  // 请求携带期望 revision（最近一次读到的），runtime 校验一致才执行、执行后 +1，
+  // 不匹配拒绝（过时窗口保护）；成功回执 = ProjectCommandReply（完整新状态 + revision
+  // 新值）。payload 见 ClientMessageMap project 命令登记段。
   | 'project.createProject' | 'project.renameProject' | 'project.removeProject' | 'project.setActiveProject'
   | 'worktree.create' | 'worktree.listBranches' | 'worktree.list'
   | 'terminal.spawn' | 'terminal.write' | 'terminal.resize' | 'terminal.kill' | 'terminal.attach'
@@ -1277,10 +1277,10 @@ export interface ClientMessageMap {
   /** workspace.defaultSessionDir：取默认会话目录（<dataDir>/defaultSession/，启动时已确保存在；
    *  handler 内幂等 ensureDir 自愈），reply 附 dir（ensure 失败 = 空串，前端隐藏入口）。 */
   'workspace.defaultSessionDir': Record<string, never>
-  // project.load / project.save：project 列表持久化（D14，2026-08-04 迁 runtime projects.json，
-  // 对齐 recent-workspaces.json 模式；localStorage 仅首启迁移源）。
+  // project.load：project 列表读取（D14，2026-08-04 迁 runtime projects.json，
+  // 对齐 recent-workspaces.json 模式）。写通道 = 下方 project 命令四件套（§6.6），
+  // legacy 整表写端点已拆除。
   'project.load': Record<string, never>
-  'project.save': ProjectStoreState
   // project 写命令四件套（connection-datasync-ssot §6.6）：请求携带期望 revision（最近一次
   // 读到的文件写入代数），runtime 校验「命令 revision === 当前 revision」才执行、执行后 +1，
   // 不匹配拒绝（过时窗口保护——多窗口/重拉在途窗口的并发写防护）。回执见 ReplyPayloadMap
@@ -3929,7 +3929,6 @@ export interface ReplyPayloadMap {
   'workspace.setPinned': ServerMessageMap['workspace.recentList']
   'workspace.defaultSessionDir': ServerMessageMap['workspace.defaultSessionDir:result']
   'project.load': ServerMessageMap['project.loaded']
-  'project.save': void                  // ack 型（保存成功即 resolve）
   // project 写命令四件套（connection-datasync-ssot §6.6）：回执 = 执行成功后的完整新状态
   // + revision 新值（payload 消费型，改状态命令回生效值口径，C-pi-13）；失败走统一
   // error envelope（renderer 保持命令前状态），不设独立失败回执形态。

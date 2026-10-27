@@ -31,8 +31,8 @@
  *     选 pi/zcode 进入候选列表（RPC 带 source / zcode 不显示换根按钮 / zcode 导入
  *     payload 带 sessionId）→ 返回重选（同源不重新拉取 / 切源重新拉取）
  *
- * mock 策略：vi.mock('@/api'（session 两方法模拟 runtime D5 S7 匹配语义 + project save
- * 供 store 持久化 watch）+ vi.mock('@/composables/useToast')（捕获 info/warning 通道）
+ * mock 策略：vi.mock('@/api'（session 两方法模拟 runtime D5 S7 匹配语义 + project load
+ * 供 store 同步拉取）+ vi.mock('@/composables/useToast')（捕获 info/warning 通道）
  * + vi.mock('@/lib/ipc')（pickDirectory 目录选择器，useCommandPopoverTrigger 先例）。
  * vue-i18n 由 vitest-i18n-setup.ts 全局 mock（zh-CN 取值）。Dialog 经 reka DialogPortal
  * teleport 到 body：DOM 断言统一走 document.body（project-switcher.test.ts 先例）。
@@ -51,7 +51,7 @@ import { useProjectStore, DEFAULT_PROJECT_ID } from '@/stores/project'
 import { IMPORT_SEARCH_DEBOUNCE_MS } from '@/composables/features/sidebar/useImportSession'
 import zhCN from '@/i18n/locales/zh-CN/importSession'
 
-// ── api mock：session 域两方法（默认实现模拟 runtime 匹配语义，用例可覆写）；project.save 供 store 持久化 watch ──
+// ── api mock：session 域两方法（默认实现模拟 runtime 匹配语义，用例可覆写）；project.load 供 store 同步拉取 ──
 const apiMocks = vi.hoisted(() => ({
   importCandidates: vi.fn(),
   importSession: vi.fn(),
@@ -63,7 +63,6 @@ vi.mock('@/api', () => ({
   },
   project: {
     load: vi.fn(async () => undefined),
-    save: vi.fn(async () => undefined),
   },
 }))
 
@@ -191,6 +190,11 @@ function seedProjects(): void {
   ]
   projectStore.projects = projects
   projectStore.activeProjectId = 'stock-id'
+  // 编辑入口可用性由加载状态机裁决（§6.9）：只 projects/activeProjectId 不够——
+  // loadState 停在 idle 时 editingEnabled=false，目标下拉被禁用。装载回执形态 =
+  // loaded + 已提交 revision 水位。
+  projectStore.loadState = 'loaded'
+  projectStore.revision = 0
 }
 
 /**

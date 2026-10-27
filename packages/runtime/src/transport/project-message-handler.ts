@@ -5,13 +5,12 @@
  * 结构对称 workspace-message-handler：handles 清单 + switch 内编译期类型收窄。
  * transport handler 零业务（只 ctx.reply / sendError / 广播），业务逻辑在 ProjectStore。
  *
- * 写通道两代并存（旧代由 u6b 拆除）：
- * - 命令通道（现行权威）：createProject / renameProject / removeProject / setActiveProject
- *   （ProjectStore 串行队列 + revision 校验），成功回执 ProjectCommandReply（reply type
- *   与 request 同名，preset.create 同款 payload 消费型同名模式）并广播 project.changed
- *   （失效信号——各窗口据此重拉，拉为主、推补充 ADR-0097）；拒绝（revision 失配 /
- *   语义校验失败）走统一 error envelope，renderer 保持命令前状态。
- * - save 通道（legacy，deep-watch 整表回写旧载体）：原样保留，随 u6b 删除。
+ * 写通道唯一入口 = 命令通道（§6.6）：createProject / renameProject / removeProject /
+ * setActiveProject（ProjectStore 串行队列 + revision 校验），成功回执
+ * ProjectCommandReply（reply type 与 request 同名，preset.create 同款 payload 消费型
+ * 同名模式）并广播 project.changed（失效信号——各窗口据此重拉，拉为主、推补充
+ * ADR-0097）；拒绝（revision 失配 / 语义校验失败）走统一 error envelope，renderer
+ * 保持命令前状态。legacy 整表写端点已随命令化拆除（§6.6③）。
  */
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, ClientMessageType, ProjectCommandReply } from '@taiji/shared'
@@ -38,7 +37,6 @@ export class ProjectMessageHandler {
   /** 本 handler 认领的 ClientMessageType 清单。 */
   readonly handles: ClientMessageType[] = [
     'project.load',
-    'project.save',
     'project.createProject',
     'project.renameProject',
     'project.removeProject',
@@ -49,17 +47,6 @@ export class ProjectMessageHandler {
     switch (msg.type) {
       case 'project.load':
         return this.ctx.reply(ws, msg.id, 'project.loaded', this.loadReply())
-      case 'project.save': {
-        // 校验失败仍必须 reply，否则前端 pending Promise 永不 resolve（破坏 RPC 契约）。
-        // 结构校验：projects 必须是数组（元素级校验在 store 内兜底）。
-        const state = msg.payload
-        if (!state || !Array.isArray(state.projects)) {
-          this.ctx.reply(ws, msg.id, 'project.loaded', this.loadReply())
-          return
-        }
-        this.ctx.projectStore.save(state)
-        return this.ctx.reply(ws, msg.id, 'project.loaded', this.loadReply())
-      }
       case 'project.createProject':
         return this.runCommand(ws, msg.id, msg.type, () =>
           this.ctx.projectStore.createProject(msg.payload.name, msg.payload.revision),
