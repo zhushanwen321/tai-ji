@@ -17,7 +17,7 @@
  *   选中线时带壳不渲染（与 composer 同生命周期，无空壳占位）
  *
  * mock 策略：Panel 复用 panel-mount-mocks 三连 + chat/session 窄 mock（同
- * Panel.inbound-frame-notice.test.ts 装配方）；BtwPanel 复用 btw-panel.test.ts 范式
+ * Panel.test.ts 入站丢帧终止阀提示节的装配方）；BtwPanel 复用 btw-panel.test.ts 范式
  * （@/api 局部替换 btw 域 + MessageStream/Composer 占位 stub）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-band-alignment.test.ts

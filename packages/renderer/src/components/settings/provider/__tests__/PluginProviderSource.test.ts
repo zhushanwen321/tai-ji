@@ -1,7 +1,7 @@
 /**
  * PluginProviderSource 单测 —— 工厂函数与拉取链失败降级（失败路径表「warn 可见，保持现状」）。
  *
- * 组件级测试（PluginProviderFlow.test.ts / ProviderPage-plugin.test.ts）覆盖正常路径接线；
+ * 组件级测试（PluginProviderFlow.test.ts / ProviderPage.test.ts 的 ProviderPage-plugin 节）覆盖正常路径接线；
  * 本文件定点覆盖 source 层的降级分支：
  * - createPluginUiEventSender / createPluginActionExecutor（D8/D7 出口工厂）：直发 +
  *   pluginId 缺省静默 + 发送失败 warn 降级

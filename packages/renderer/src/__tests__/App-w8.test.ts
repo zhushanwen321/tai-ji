@@ -72,7 +72,7 @@ vi.mock('@/composables/effects/useSessionStreamSync', () => ({
 
 // stub 入站检查装配（u-init P0 接线：App setup 顶层 install + onBeforeUnmount uninstall）。
 // 真实 composable 依赖 active pinia（usePanelStore），本文件不装 pinia——stub 保用例隔离，
-// 接线契约由 spy 断言（真实链路见 Panel.inbound-frame-notice.test.ts）。
+// 接线契约由 spy 断言（真实链路见 Panel.test.ts 的入站丢帧终止阀提示节）。
 vi.mock('@/composables/useInboundFrameGuard', () => ({
   installInboundFrameGuard: (...args: unknown[]) => {
     effectSpies.installInboundFrameGuard(...args)
