@@ -4324,7 +4324,7 @@
     },
     {
       "id": "E2E-INTEG-53",
-      "summary": "升级脚本集成组：mac DMG 端到端 / 状态机中断注入 + linux mv 备份回滚（真 hdiutil + 真 bash，TAIJI_TEST_INTEGRATION 门控；mac 磁盘满段已迁 E2E 档见 E2E-UPDATER-01）",
+      "summary": "升级脚本集成组：linux mv 备份/回滚决策树（真 bash 子进程，TAIJI_TEST_INTEGRATION 门控；mac 真链三段（端到端/中断注入/磁盘满 P10）已全部归 E2E 档见 E2E-UPDATER-01）",
       "scope": [
         "apps/electron/main/update/updater-script.ts"
       ],
@@ -4340,7 +4340,7 @@
       "run": "TAIJI_TEST_INTEGRATION=1 pnpm --filter @taiji/electron run test:main test/updater.test.ts",
       "owner": "apps/electron",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
-      "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）（三段门控 describe：mac 两段另叠加 MAC_SUITE_READY 判据；mac 磁盘满段（P10）走 TAIJI_E2E_UPDATER E2E 档，登记 = E2E-UPDATER-01；单测层保留 bash -n 语法 3 条 + CLI 工具可用性 2 条）。触发条件 = 升级脚本本体 diff 命中。断言本质 = 升级脚本对真实 DMG / bash 的组合行为（门控用例断言体零改动，文件级 60s 预算只辖门控组）；serial=真 的理由 = 真 hdiutil/ditto/bash 子进程，重执行用例 3-12s。run 命令唯一正确入口 = test:main script（vitest 直跑因 config 上浮 no tests found，见 TEST-STRATEGY.md 已知坑）。CI test-main job 已带 env=1。"
+      "note": "R2 态 + 用例级门控（文件留 main 默认组，快用例继续占默认组；门控 = TAIJI_TEST_INTEGRATION，SSOT = test-guard/integration-gate.ts，skip 理由注入 describe 名）（现仅一段门控 describe：linux mv 段（4 例，无 hdiutil 依赖、CI ubuntu 可跑）；mac 真链三段（端到端/中断注入/磁盘满 P10）全部走 TAIJI_E2E_UPDATER E2E 档，登记 = E2E-UPDATER-01；单测层保留 bash -n 语法 3 条 + CLI 工具可用性 2 条 + mock 模板断言 12 条）。触发条件 = 升级脚本本体 diff 命中。断言本质 = 升级脚本对真实 bash 的组合行为（门控用例断言体零改动，文件级 60s 预算只辖门控组）；serial=真 的理由 = 真 bash 子进程与真实等待窗，重执行用例 1-5s。run 命令唯一正确入口 = test:main script（vitest 直跑因 config 上浮 no tests found，见 TEST-STRATEGY.md 已知坑）。CI test-main job 已带 env=1（mac 真链段在该 env 下 skip，属 E2E 档语义）。"
     },
     {
       "id": "E2E-PLUGINPERM-01",
@@ -5139,7 +5139,7 @@
       "serial": false,
       "run": "node scripts/check-domain-map.mjs && node scripts/run-domain-tests.mjs --list",
       "owner": "scripts/",
-      "authority": "docs/TEST-STRATEGY.md#测试执行三档",
+      "authority": "docs/TEST-STRATEGY.md#测试执行四档",
       "note": "域映射清单漂移由 check-domain-map 拦（挂 pre-commit 2f-3）；改 run 脚本选文件逻辑或 exclusions 派生时跑 run 命令冒烟（--list 便宜，任选一域实跑更稳）。"
     },
     {
@@ -5161,7 +5161,7 @@
       "serial": false,
       "run": "node scripts/check-integration-carriers.mjs",
       "owner": "scripts/",
-      "authority": "docs/TEST-STRATEGY.md#测试执行三档",
+      "authority": "docs/TEST-STRATEGY.md#测试执行四档",
       "note": "掩码状态机剥离注释/字符串后提取两表并逐用例判定 skipIf 覆盖；解析不足输出 WARNING 放行不 fail（防守卫自身误报拖死提交）。挂 pre-commit 2f-2。"
     },
     {
@@ -5182,7 +5182,7 @@
       "serial": false,
       "run": "node scripts/check-test-results.mjs",
       "owner": "scripts/",
-      "authority": "docs/TEST-STRATEGY.md#测试执行三档",
+      "authority": "docs/TEST-STRATEGY.md#测试执行四档",
       "note": "test / test:integration 两段调度的收尾判定。改调度脚本或 junit 落点时：注入一个必败用例跑 test:small 应 exit 1 且列出 suite，还原后 exit 0。"
     },
     {
@@ -5474,12 +5474,32 @@
       "serial": false,
       "run": "node scripts/check-domain-slices.mjs && pnpm exec vitest run scripts/__tests__/select-affected-domain.test.mjs scripts/__tests__/check-domain-slices.test.mjs",
       "owner": "scripts/",
-      "authority": "docs/TEST-STRATEGY.md#测试执行三档",
+      "authority": "docs/TEST-STRATEGY.md#测试执行四档",
       "note": "Wave4 批 A（引擎）。域注册清单漂移由 check-domain-slices 拦（pre-commit 2f-4 接线随批 D）；批 B/C/D 按 .tmp/round6/wave4-batchA-report.md §4 填写规范登记域文件。"
     },
     {
+      "id": "E2E-PIPE-27",
+      "summary": "日常档测试入口（round6 第二类测试按域分流）：run-daily-tests 编排 diff→受影响域（复用 select-affected-domain 纯函数）→ foundation/host 基础池 core 快集 ∪ 命中域全量，pnpm test 即本档；全量两段式移至 pnpm test:all",
+      "scope": [
+        "scripts/run-daily-tests.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/run-daily-tests.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/run-daily-tests.mjs --list",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#测试执行四档",
+      "note": "改日常档编排（base 口径 / 池分级 / 清单构建）时跑 run 命令冒烟（--list 便宜且覆盖 base 解析+选域+清单构建全链）。基础池分级依据（POOL_SLOW_PREFIXES）与实测账目见脚本常量注释；引擎行为（vitestRootFor / runPackages）随 E2E-PIPE-26 的单测与冒烟覆盖。"
+    },
+    {
       "id": "E2E-UPDATER-01",
-      "summary": "升级脚本磁盘满 E2E 档：1MB HFS+ 小容量卷上 ditto 拷入 2MB 不可压产物 ENOSPC 四断言（exit 1 / error=ditto copy failed / 旧 app 完好 / ditto 自报错误；真 hdiutil + 真 ditto，TAIJI_E2E_UPDATER 门控）",
+      "summary": "升级脚本 mac 真链全部段 E2E 档：端到端 5 例 / 状态机中断注入 8 例 / 磁盘满（P10，1MB HFS+ 小容量卷上 ditto 拷入 2MB 不可压产物 ENOSPC）1 例——真 hdiutil + 真 ditto + 真 bash 全链（TAIJI_E2E_UPDATER 门控，带 env 跑整个文件）",
       "scope": [
         "apps/electron/main/update/updater-script.ts"
       ],
@@ -5492,10 +5512,10 @@
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "TAIJI_E2E_UPDATER=1 pnpm --filter @taiji/electron run test:main test/updater.test.ts -t \"磁盘满\"",
+      "run": "TAIJI_E2E_UPDATER=1 pnpm --filter @taiji/electron run test:main test/updater.test.ts",
       "owner": "apps/electron",
       "authority": "docs/TEST-STRATEGY.md#集成测试门控约定taiji_test_integration",
-      "note": "R2 态 + E2E 档（与同文件的 E2E-INTEG-53 同资产不同档：53 走 TAIJI_TEST_INTEGRATION 随 CI test-main job 常驻，本条门控 = TAIJI_E2E_UPDATER、CI 不设该 env 故不跑，升级脚本本体 diff 命中或手动跑）。单跑该段经 -t 磁盘满 选中（段名含 P10 标识，vitest list 可对账）；run 命令唯一正确入口 = test:main script（同 53）。断言本质 = 升级脚本 S4 ditto 落 staging 撞 ENOSPC 的失败路径（四断言一条不减）；serial=真 的理由 = 真 hdiutil/ditto 子进程 + 挂载点生命周期。档位语义登记 = docs/TEST-STRATEGY.md「集成测试门控约定」节 E2E 档段。"
+      "note": "R2 态 + E2E 档（与同文件的 E2E-INTEG-53 同资产不同档：53 走 TAIJI_TEST_INTEGRATION 随 CI test-main job 常驻，本条门控 = TAIJI_E2E_UPDATER、CI 不设该 env 故不跑，升级脚本本体 diff 命中或手动跑）。覆盖 = 文件内全部 mac 真链段（端到端 / 中断注入 / 磁盘满 P10，E2E env 下跑整个文件；同文件 linux mv 段与 mock 段不受本 env 影响——linux 段随 53 的集成门控）；run 命令唯一正确入口 = test:main script（同 53）。断言本质 = 升级脚本对真实 DMG / 磁盘卷 / bash 的组合行为（含 P10 的 S4 ditto 落 staging 撞 ENOSPC 失败路径，四断言一条不减）；serial=真 的理由 = 真 hdiutil/ditto/bash 子进程 + 挂载点生命周期，重执行用例 3-30s。档位语义登记 = docs/TEST-STRATEGY.md「集成测试门控约定」节 E2E 档段。"
     }
   ]
 }

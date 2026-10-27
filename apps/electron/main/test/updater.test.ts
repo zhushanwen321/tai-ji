@@ -17,7 +17,8 @@ import { buildUpdaterScript, buildLinuxUpdaterScript, type UpdaterScriptVars, ty
 
 // ======== 来源：updater-script-integration.test.ts ========
 describe("updater-script-integration", () => {
-  // 文件级超时预算：管辖四段集成门控 describe 的真执行用例（本地默认跳过时不生效）。
+  // 文件级超时预算：管辖四段门控 describe（mac 真链三段走 E2E 档 env、linux 一段走
+  // 集成门控，见下方 E2E_UPDATER_* 注释）的真执行用例（本地默认跳过时不生效）。
   // 用例构造真实 dmg 并经 hdiutil/ditto/shasum 全链执行，
   // CI 的 mac runner 上 hdiutil 比本地慢约 3 倍（happy path 本地 ~7s、CI 实测 21-23s），
   // vitest 默认 20s 在 CI 必撞线（2026-09-07 v0.9.15 post-merge CI 两连挂）；
@@ -54,11 +55,13 @@ describe("updater-script-integration", () => {
   // mac 三段（端到端/中断注入/磁盘满）共用的环境就绪条件（原 describe.skipIf 条件收编）
   const MAC_SUITE_READY = IS_MAC && HAS_HDIUTIL && HAS_DITTO && HAS_SHASUM
 
-  // P10（mac 磁盘满）专属 E2E 档门控：env TAIJI_E2E_UPDATER——不随 TAIJI_TEST_INTEGRATION
-  // 走（CI test-main job 设了集成 env 但不设本 env，故 P10 在 CI 不跑），按 e2e-map
-  // E2E-UPDATER-01 触发或手动跑。理由：它是本文件最重单点（双缩前满并发 34.1s /
-  // 安静单跑 11.06s，占 updater 文件墙钟 91%），不适合随 CI 常驻；档位语义登记 =
-  // docs/TEST-STRATEGY.md「集成测试门控约定」节。
+  // mac 真链三段（端到端 / 状态机中断注入 / 磁盘满 P10）共用的 E2E 档门控：env
+  // TAIJI_E2E_UPDATER——不随 TAIJI_TEST_INTEGRATION 走（CI test-main job 设了集成 env
+  // 但不设本 env，故 mac 真链段在 CI 不跑），按 e2e-map E2E-UPDATER-01 触发或手动跑。
+  // 理由：三段都经 hdiutil/ditto/bash 真挂载全链（P10 双缩前满并发 34.1s / 安静单跑
+  // 11.06s，占 updater 文件墙钟 91%，是最重单点），重载荷不适合随 CI 常驻；同文件
+  // linux mv 段无 hdiutil 依赖（纯 bash），CI ubuntu 可跑，保留集成门控。
+  // 档位语义登记 = docs/TEST-STRATEGY.md「集成测试门控约定」节。
   const E2E_UPDATER_ENV = 'TAIJI_E2E_UPDATER'
   const E2E_UPDATER_ENABLED =
     process.env[E2E_UPDATER_ENV] === '1' || process.env[E2E_UPDATER_ENV] === 'true'
@@ -67,7 +70,7 @@ describe("updater-script-integration", () => {
     : `env ${E2E_UPDATER_ENV} 未设置或取值非 '1'/'true'（E2E 档：CI 不跑，按 e2e-map E2E-UPDATER-01 触发或手动跑，见 docs/TEST-STRATEGY.md「集成测试门控约定」）`
 
   /** 门控 describe 名：跳过时显式携带理由（env 未设置 = 本地默认跳过），不静默消失。
-   *  skipReason 默认走集成门控理由；P10 段传 E2E 档理由（E2E_UPDATER_SKIP_REASON）。 */
+   *  skipReason 默认走集成门控理由（linux 段）；mac 真链三段传 E2E 档理由（E2E_UPDATER_SKIP_REASON）。 */
   function gatedTitle(name: string, skipReason: string = INTEGRATION_TESTS_ENABLED ? '' : INTEGRATION_TESTS_SKIP_REASON): string {
     return name + (skipReason ? `｜skip：${skipReason}` : '')
   }
@@ -464,11 +467,13 @@ describe("updater-script-integration", () => {
   })
 
   // ════════════════════════════════════════════════════════════════
-  // MAC 脚本：端到端 happy path（真 .app + 真 dmg + 真 attach/ditto/detach）【集成门控】
+  // MAC 脚本：端到端 happy path（真 .app + 真 dmg + 真 attach/ditto/detach）【E2E 档】
+  // 门控 = TAIJI_E2E_UPDATER（非 TAIJI_TEST_INTEGRATION）：CI 不跑，按 e2e-map
+  // E2E-UPDATER-01 触发或手动跑（见文件头 E2E_UPDATER_* 常量注释）。
   // 本段 { concurrent: true }：与中断注入 / 磁盘满段交叠共享全局 3 槽并发池
   // （见文件头 vi.setConfig 注释）；happy path 与 hollow 首造（不同键）可并发进行。
   // ════════════════════════════════════════════════════════════════
-  describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 端到端'), { concurrent: true }, () => {
+  describe.skipIf(!E2E_UPDATER_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 端到端', E2E_UPDATER_SKIP_REASON), { concurrent: true }, () => {
     it<TestScope>(
       'happy path（M1 脚本侧）：S0→S5 走通 → exit 0、新 .app 就位、result done（合法 JSON）、无任何残留',
       async ({ tmpDir }) => {
@@ -636,7 +641,9 @@ describe("updater-script-integration", () => {
   })
 
   // ════════════════════════════════════════════════════════════════
-  // MAC 脚本：状态机中断注入（kill 进程组）与失败分支【集成门控】
+  // MAC 脚本：状态机中断注入（kill 进程组）与失败分支【E2E 档】
+  // 门控 = TAIJI_E2E_UPDATER（非 TAIJI_TEST_INTEGRATION）：CI 不跑，按 e2e-map
+  // E2E-UPDATER-01 触发或手动跑（见文件头 E2E_UPDATER_* 常量注释）。
   // 本段 { concurrent: true }：段内用例受控并发（maxConcurrency=3，见文件头
   // vi.setConfig 注释）。安全前提（round3-a 探针）：每用例独立 dmg 副本 +
   // 独立挂载点（脚本侧 mktemp）+ per-test tmpDir + 同键首造互斥。
@@ -644,7 +651,7 @@ describe("updater-script-integration", () => {
   // describe.concurrent.skipIf(cond) 链会静默丢并发语义（探针实测并发度 1，
   // /tmp/round3a-probe skipif-probe2）。
   // ════════════════════════════════════════════════════════════════
-  describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 状态机中断注入'), { concurrent: true }, () => {
+  describe.skipIf(!E2E_UPDATER_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 状态机中断注入', E2E_UPDATER_SKIP_REASON), { concurrent: true }, () => {
     it<TestScope>(
       'S1 中断（M2 脚本侧）：staging 解压完成后 kill → 正式位置零接触 + staging 残留 + result 未写',
       async ({ tmpDir }) => {
@@ -980,6 +987,8 @@ describe("updater-script-integration", () => {
   // LINUX 脚本：mv 备份/回滚决策树 + 检查（不真 spawn AppImage）【集成门控】
   // 真真 bash 子进程执行整脚本（含压缩后的真实等待窗），与 mac 三段同属「代码 + OS
   // 组合行为」——retry:2 与 bash 预算 15s 正是本段负载敏感症状，一并挂门控。
+  // 本段无 hdiutil 依赖（纯 bash 子进程），CI ubuntu 可跑，保留集成门控
+  // TAIJI_TEST_INTEGRATION（mac 真链三段走 E2E 档，见文件头 E2E_UPDATER_* 注释）。
   // ════════════════════════════════════════════════════════════════
   describe.skipIf(!INTEGRATION_TESTS_ENABLED)(gatedTitle('updater-script integration: linux mv 备份/回滚'), () => {
     function makeLinuxVars(tmpDir: string, opts: { appImagePath?: string; newFilePath?: string } = {}): LinuxUpdaterScriptVars {

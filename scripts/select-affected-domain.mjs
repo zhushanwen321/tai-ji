@@ -7,7 +7,7 @@
  *     （受影响域的 contracts 逐条附加对侧域，fixpoint）→ 输出受影响域 + 逐域触发原因
  *     + 可执行命令 `pnpm test:domain a b c`
  *   - 广播：diff 命中 _meta.json 的 broadcastCarriers（基础层契约枢纽）→ 输出
- *     「建议全量 pnpm test」并退出（宁全勿缺，与 e2e-map 保守策略同款）
+ *     「建议全量 pnpm test:all」并退出（宁全勿缺，与 e2e-map 保守策略同款）
  *   - --check 门禁：watched roots 下且不被任何域/池覆盖的变更文件 → exit 1（防漏归域）
  *   - --staged 暂存门禁：同 --check 判定，输入换 git diff --cached（--diff-filter=AR，
  *     新增/改名进看护根才产生登记义务）——pre-commit 形态（接线归批 D，pre-commit 2f-4）
@@ -251,7 +251,7 @@ function main() {
   if (broadcastHits.length > 0) {
     console.error(`\n[select-affected-domain] 广播载体命中（基础层契约枢纽，宁全勿缺）：`)
     for (const f of broadcastHits) console.error(`  - ${f}`)
-    console.error('  建议全量：pnpm test')
+    console.error('  建议全量：pnpm test:all')
   }
 
   if (args.includes('--check')) {

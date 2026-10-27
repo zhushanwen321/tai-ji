@@ -195,6 +195,11 @@ def check_test_script_value(test_script: object) -> list[str]:
         return [f"段 1（F5）: scripts.test 不是字符串（实际 {type(test_script).__name__}），无法检查"]
     if "--no-bail" in test_script:
         return []
+    if test_script.startswith("node scripts/"):
+        # 自编排入口（如 run-daily-tests.mjs）：逐包 spawn 跑完全部包再由 junit
+        # 聚合判定退出码，不存在 pnpm 递归的 first-fail 中止路径，--no-bail 语义
+        # 由入口自身承载（全量口径仍走 scripts.test:all 的 --no-bail 形态）
+        return []
     lines = [
         "段 1（F5）: 根 package.json scripts.test 缺 --no-bail",
         f"  当前值: {test_script}",
