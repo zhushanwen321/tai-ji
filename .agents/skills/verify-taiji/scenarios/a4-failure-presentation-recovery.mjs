@@ -6,9 +6,11 @@
  *     server→page 方向丢弃 project.loaded 回执（= 冻结 runtime 对在途 RPC 的用户可见形态：
  *     请求已发出、回执永不到达），65s RPC 兜底（RPC_BACKSTOP_TIMEOUT_MS）拒绝 → 侧栏失败
  *     状态条 + 重试钮；放行后点重试 → 恢复动作立即发起 → 分组回来。
- *   段 2（真 SIGSTOP + 存活探针强杀重启）：SIGSTOP 真实 runtime 进程 > 90s（覆盖 65s RPC
- *     兜底 + 存活探针 30s×3 判死窗口），冻结期连接不断（无 OS 断连信号即无重连——ADR-0122
- *     事实驱动），存活探针强杀重启 → 连接迁移 + 连接边沿自动重拉 → 分组恢复。
+ *   段 2（真 SIGSTOP 冻结 + 强杀触发崩溃重启链）：SIGSTOP 真实 runtime 进程 > 90s（覆盖
+ *     65s RPC 兜底超时），冻结期连接不断（无 OS 断连信号即无重连——ADR-0122 事实驱动），
+ *     随后强杀（SIGKILL）冻结进程 → supervisor 崩溃重启 → 连接迁移 + 连接边沿自动重拉 →
+ *     分组恢复（存活探针秒级判死不可达：探针 fetch 无逐请求超时、冻结进程端口仍 accept，
+ *     「探针判死后强杀」链路未实测——见 notProvable 与段内偏差登记）。
  *
  * 通过标准（设计 §8 场景 4）：
  *   失败出现后侧栏显示失败状态条 + 重试钮；恢复后经连接迁移与连接边沿自动重拉成功、
@@ -157,11 +159,11 @@ export async function run(ctx) {
   })
   await ev.shot(page, 'a4-recovered-groups')
 
-  // ── 段 2：真 SIGSTOP > 90s → 存活探针强杀重启 → 连接迁移恢复 ─────
+  // ── 段 2：真 SIGSTOP > 90s → 强杀冻结进程触发崩溃重启 → 连接迁移恢复 ─────
   const pidToFreeze = runtimePidOf(dataDir)
   signalPid(pidToFreeze, 'SIGSTOP')
   ev.step({ step: 'runtime.sigstop', channel: 'C', exitCode: 0, stats: { pid: pidToFreeze } })
-  log(`SIGSTOP runtime pid=${pidToFreeze}，等待存活探针判死（30s×3）…`)
+  log(`SIGSTOP runtime pid=${pidToFreeze}（冻结 90s+）；存活探针秒级判死不可达，随后直接强杀触发崩溃重启链…`)
 
   // 冻结期连接不断（无 OS 断连信号即无重连——ADR-0122）：20s 采样 AppShell 不卸载
   const freezeSamples = []

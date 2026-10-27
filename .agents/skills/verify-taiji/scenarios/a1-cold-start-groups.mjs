@@ -172,7 +172,7 @@ export async function run(ctx) {
     rounds.push({ round, runtimePort: ready.runtimePort, runtimeId: echo.runtimeId, elapsedMs: ready.elapsedMs })
   }
 
-  // ── P-4 读侧：存量无 revision 文件按 0 读（自建协议连接，B 通道） ──
+  // ── P-4 读侧：存量文件 revision 按文件实值读（自建协议连接，B 通道） ──
   const { createProtocol } = await import('../scripts/lib/protocol.mjs')
   const proto = await createProtocol({ dataDir, runtimePort: rounds[rounds.length - 1].runtimePort })
   try {
@@ -182,9 +182,13 @@ export async function run(ctx) {
       expected: 'projects 数组',
       actual: `len=${loadReply.projects?.length ?? 'n/a'}`,
     })
-    ev.assert('P-4 读侧：存量文件 revision 按 0 读', loadReply.revision === 0, {
+    // 断言按文件实值：读 fixture 当前实际 revision（无字段按 0），断言回执与之一致——
+    // 不假设种子文件必无 revision 字段（未来存量文件带 revision≥1 时不产生假红）。
+    const seededJson = readJsonFile(projectsFile)
+    const fileRevision = typeof seededJson?.revision === 'number' ? seededJson.revision : 0
+    ev.assert('P-4 读侧：load 回执 revision 与存量文件实值一致（无字段按 0）', loadReply.revision === fileRevision, {
       channel: 'B',
-      expected: 0,
+      expected: fileRevision,
       actual: loadReply.revision,
     })
   } finally {
