@@ -28,7 +28,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFile
 import { tmpdir } from 'node:os';
 import path, { dirname, join } from 'node:path';
 import lockfile from 'proper-lockfile';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
 
@@ -218,13 +218,17 @@ describe('session-history', () => {
   // ── 临时 JSONL 文件管理 ────────────────────────────────────────────
 
   let tmpDir: string
+  // [round6 慢用例治理] 删除推迟 afterAll：每例 mkdtempSync 独占目录（隔离不变；
+  // 用例内 chmod 0o700 恢复权限的约定同样满足——afterAll 删除晚于用例体）。
+  const histTestDirs: string[] = []
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'session-history-test-'))
+    histTestDirs.push(tmpDir)
   })
 
-  afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  afterAll(() => {
+    for (const d of histTestDirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   /** 把 entries 序列化成 JSONL 文件，返回文件路径。 */
@@ -532,13 +536,16 @@ describe('session-history-reverse-window', () => {
 
   let tmpDir: string
   const realStore: ISessionStore = new PiSessionStore()
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const revWindowDirs: string[] = []
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'session-history-reverse-window-'))
+    revWindowDirs.push(tmpDir)
   })
 
-  afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  afterAll(() => {
+    for (const d of revWindowDirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   // ── fixture 构造（真实 JSONL 行形态，A11 同型）────────────────────
@@ -735,14 +742,17 @@ describe('tail-read-history', () => {
   describe('W1 tailReadHistory 尾读 + turn 边界截断', () => {
     let tmpDir: string
     let store: ISessionStore
+    // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+    const tailReadDirs: string[] = []
 
     beforeEach(() => {
       tmpDir = mkdtempSync(join(tmpdir(), 'tail-read-'))
+      tailReadDirs.push(tmpDir)
       store = makePassthroughStore()
     })
 
-    afterEach(() => {
-      rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    afterAll(() => {
+      for (const d of tailReadDirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     })
 
     /** 构造一个 pi JSONL session 文件 */
@@ -942,14 +952,17 @@ describe('tail-read-history', () => {
   describe('D4 离线尾读字节预算 + A6 truncated 精确判定', () => {
     let tmpDir: string
     let store: ISessionStore
+    // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+    const tailBudgetDirs: string[] = []
 
     beforeEach(() => {
       tmpDir = mkdtempSync(join(tmpdir(), 'tail-read-budget-'))
+      tailBudgetDirs.push(tmpDir)
       store = makePassthroughStore()
     })
 
-    afterEach(() => {
-      rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    afterAll(() => {
+      for (const d of tailBudgetDirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     })
 
     function writeSessionFile(lines: string[]): string {

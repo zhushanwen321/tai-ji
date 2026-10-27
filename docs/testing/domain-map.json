@@ -1,7 +1,7 @@
 {
   "meta": {
     "purpose": "挂载渲染重型测试的域归属登记（round6 Wave2 范围收缩）：默认档（pnpm test）不收集不装载这些文件，改哪个功能域用 node scripts/run-domain-tests.mjs <domain> 按域触发。本文件是域→文件映射的单一权威源，消费方：packages/renderer/vitest.config.ts、packages/ui/vitest.config.ts（默认档排除）、scripts/run-domain-tests.mjs（域触发）、scripts/check-domain-map.mjs（机器校验）。",
-    "criterion": "迁入判据 = 挂载型且重型，双条件同时满足。挂载型（静态）：文件挂载业务组件树——@vue/test-utils 直挂、mountXxx 页面 helper（mountPage/mountSection 等）、或 harness 页面 helper（openSettingsModalPage 等内部 mount）；composable/store 测试的文件内 defineComponent 轻宿主范式不算。重型（实测）：junit 用例时间 ≥300ms（2026-10-27 全量基线口径，load 5→12；挂载文件的模块图固定成本 ~2.3 worker-秒/文件不受负载口径影响，是迁移主收益）。",
+    "criterion": "迁入判据 = 挂载型且重型，双条件同时满足。挂载型（静态）：文件挂载业务组件树——@vue/test-utils 直挂、mountXxx 页面 helper（mountPage/mountSection 等）、或 harness 页面 helper（openSettingsModalPage 等内部 mount）；composable/store 测试的文件内 defineComponent 轻宿主范式不算。重型（实测）：junit 用例时间 ≥300ms（2026-10-27 全量基线口径，load 5→12；挂载文件的模块图固定成本 ~2.3 worker-秒/文件不受负载口径影响，是迁移主收益），或文件级 tests 段 ≥1s 的挂载型（round6 慢用例治理：单例 <300ms 但整文件重 mount/beforeAll transform 同族成本形态，如 panel-container-lazy-retry-detail）。",
     "smokeNote": "留守默认档的现成冒烟：packages/renderer/src/__tests__/panel/composer-smoke.test.ts（首屏渲染 gate）、packages/renderer/src/__tests__/settings/settings-modal-smoke.test.ts（设置页冒烟）——文件头声明的冒烟职责保留在默认档，其余各域默认档零挂载覆盖属预期（改哪个域跑哪个域）。",
     "gateEnv": "TAIJI_TEST_DOMAIN",
     "runCommand": "node scripts/run-domain-tests.mjs <domain> [--list]",
@@ -79,6 +79,8 @@
         "packages/renderer/src/__tests__/panel/context-capacity-quota.test.ts",
         "packages/renderer/src/__tests__/panel/fast-fork-e2e-journeys.test.ts",
         "packages/renderer/src/__tests__/panel/panel-container-drawer-mode.test.ts",
+        "packages/renderer/src/__tests__/panel/panel-container-lazy-retry-detail.test.ts",
+        "packages/renderer/src/__tests__/panel/panel-container-lazy-retry.test.ts",
         "packages/renderer/src/__tests__/panel/panel-view.test.ts",
         "packages/renderer/src/__tests__/panel/preset-chip.test.ts",
         "packages/renderer/src/__tests__/panel/schedule-create-inline.test.ts",

@@ -28,7 +28,7 @@ import { existsSync, mkdirSync, mkdtemp, mkdtempSync, readFileSync, readdirSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 机械合并产物（同目录合并，vi.mock 相对路径不变）；源文件见各节横幅。重名顶层标识符已加 _mN 后缀。
 
@@ -100,8 +100,12 @@ let store: TaijiProviderStore
 describe('provider-extras-store', () => {
 // wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
 describe('provider-extras-cleanup', () => {
+// [round6 慢用例治理] 删除推迟 afterAll：每例 mkdtempSync 独占目录（隔离不变——
+// env/路径注入各例指向各自目录），rmSync 重试参数收进单次路径。
+const cleanupDirs: string[] = []
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'provider-extras-cleanup-'))
+  cleanupDirs.push(dir)
   agentDir = join(dir, 'agent')
   mkdirSync(join(agentDir, 'config'), { recursive: true })
   process.env.TAIJI_AGENT_DATA_DIR = dir
@@ -114,7 +118,9 @@ beforeEach(() => {
 })
 afterEach(() => {
   delete process.env.TAIJI_AGENT_DATA_DIR
-  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+})
+afterAll(() => {
+  for (const d of cleanupDirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 // ══ S1: 删除链清 providers.json extras ═══════════════════════════════════════
 
@@ -310,14 +316,17 @@ describe('S3: setProvider remoteSource 标记落盘（QuickSetup 从 taiji 清�
 });
 // wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
 describe('provider-extras-store', () => {
+// [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+const storeDirs: string[] = []
 beforeEach(() => {
   dir_m2 = mkdtempSync(join(tmpdir(), 'provider-extras-store-'))
+  storeDirs.push(dir_m2)
   mkdirSync(join(dir_m2, 'config'), { recursive: true })
   file = join(dir_m2, 'config', 'providers.json')
   store = new TaijiProviderStore(file)
 })
-afterEach(() => {
-  rmSync(dir_m2, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+afterAll(() => {
+  for (const d of storeDirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 describe('TaijiProviderStore', () => {
   it('文件不存在时 readAll 返回空对象且不物化文件（读路径无副作用）', async () => {
@@ -1262,12 +1271,15 @@ describe('D9: applyImportProviders 成功路径触发 refreshProviderCatalogs（
 describe('T10: previewImport 端到端（真实 parseProviders + 真实 Pi fixture）', () => {
   let prevHome: string | undefined
   let fakeHome: string
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const previewE2eDirs: string[] = []
 
   beforeEach(() => {
     vi.clearAllMocks()
     _resetCacheForTest()
     prevHome = process.env.HOME
     fakeHome = mkdtempSync(join(tmpdir(), 'pi-e2e-'))
+    previewE2eDirs.push(fakeHome)
     // 写真实 Pi fixture 到 <fakeHome>/.pi/agent/
     const piAgentDir = join(fakeHome, '.pi', 'agent')
     mkdirSync(piAgentDir, { recursive: true })
@@ -1279,7 +1291,10 @@ describe('T10: previewImport 端到端（真实 parseProviders + 真实 Pi fixtu
   afterEach(() => {
     if (prevHome === undefined) delete process.env.HOME
     else process.env.HOME = prevHome
-    rmSync(fakeHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  afterAll(() => {
+    for (const d of previewE2eDirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('previewImport(pi) 返回真实 Pi provider（deepseek-router + zhipu，gemini 丢弃），非 Mock 固定值', () => {
@@ -1340,12 +1355,15 @@ describe('T11: 孤儿凭据端到端（sa3 F1 · B.3/B.4/B.6）', () => {
   let prevModelsPath: string | undefined
   let fakeHome: string
   let fakeModelsPath: string
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const orphanE2eDirs: string[] = []
 
   beforeEach(() => {
     vi.clearAllMocks()
     _resetCacheForTest()
     prevHome = process.env.HOME
     fakeHome = mkdtempSync(join(tmpdir(), 'pi-orphan-e2e-'))
+    orphanE2eDirs.push(fakeHome)
     // 写真实 Pi fixture：models.json 只有 zhipu（无 openai）+ auth.json 含 openai 孤儿凭据
     const piAgentDir = join(fakeHome, '.pi', 'agent')
     mkdirSync(piAgentDir, { recursive: true })
@@ -1366,7 +1384,10 @@ describe('T11: 孤儿凭据端到端（sa3 F1 · B.3/B.4/B.6）', () => {
     if (prevHome === undefined) delete process.env.HOME
     else process.env.HOME = prevHome
     if (prevModelsPath !== undefined) setModelsPath(prevModelsPath)
-    rmSync(fakeHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  afterAll(() => {
+    for (const d of orphanE2eDirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('孤儿凭据 auth.json → preview 组 2 → catalog 无 credentialWriter → failed，且不写模板 artifact/apiKey 进 models.json（D1④）', async () => {
@@ -1411,14 +1432,19 @@ describe('T11: 孤儿凭据端到端（sa3 F1 · B.3/B.4/B.6）', () => {
 });
 // wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
 describe('config-service-catalog-overlay', () => {
+// [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+const overlayDirs: string[] = []
 beforeEach(() => {
   dataDir = mkdtempSync(join(tmpdir(), 'overlay-integration-'))
+  overlayDirs.push(dataDir)
   mkdirSync(join(dataDir, 'agent'), { recursive: true })
   vi.stubEnv('TAIJI_AGENT_DATA_DIR', dataDir)
 })
 afterEach(() => {
   vi.unstubAllEnvs()
-  rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+})
+afterAll(() => {
+  for (const d of overlayDirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 describe('catalog 聚合 ⊕ 远程 overlay', () => {
   it('overlay 新 id 追加到快照模型之后（glm-5.3 场景）', () => {
@@ -1846,8 +1872,12 @@ describe('config-service-model-source', () => {
     return p!.models
   }
 
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const modelSourceDirs: string[] = []
+
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'config-service-model-source-'))
+    modelSourceDirs.push(dir)
     agentDir = join(dir, 'agent')
     mkdirSync(join(agentDir, 'config'), { recursive: true })
     process.env.TAIJI_AGENT_DATA_DIR = dir
@@ -1859,7 +1889,10 @@ describe('config-service-model-source', () => {
 
   afterEach(() => {
     delete process.env.TAIJI_AGENT_DATA_DIR
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  afterAll(() => {
+    for (const d of modelSourceDirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   describe('B-2：catalog provider 无 override → 全部标 source:"builtin"', () => {
@@ -2226,10 +2259,13 @@ describe('config-service-removebykind', () => {
   describe('边界3(a): cleanEnabledModelsResidue 重算空 → clearEnabledModels（delete 字段，CL2）', () => {
     let dir: string
     let agentDir: string
+    // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+    const residueDirs: string[] = []
 
     beforeEach(() => {
       vi.clearAllMocks()
       dir = mkdtempSync(join(tmpdir(), 'clean-residue-'))
+      residueDirs.push(dir)
       agentDir = join(dir, 'agent')
       mkdirSync(agentDir, { recursive: true })
       process.env.TAIJI_AGENT_DATA_DIR = dir
@@ -2237,7 +2273,10 @@ describe('config-service-removebykind', () => {
 
     afterEach(() => {
       delete process.env.TAIJI_AGENT_DATA_DIR
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    })
+
+    afterAll(() => {
+      for (const d of residueDirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     })
 
     it('多 pattern 移除后非空 → setEnabledModels(remaining)；再清至空 → delete enabledModels 字段', async () => {
@@ -2642,10 +2681,13 @@ describe('config-service-toggle', () => {
   describe('边界3 持久化（CL2）：clearEnabledModels 后 settings.json 物理无 enabledModels key', () => {
     let dir: string
     let agentDir: string
+    // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+    const bd3Dirs: string[] = []
 
     beforeEach(() => {
       vi.clearAllMocks()
       dir = mkdtempSync(join(tmpdir(), 'toggle-bd3-'))
+      bd3Dirs.push(dir)
       agentDir = join(dir, 'agent')
       mkdirSync(agentDir, { recursive: true })
       process.env.TAIJI_AGENT_DATA_DIR = dir
@@ -2656,7 +2698,10 @@ describe('config-service-toggle', () => {
 
     afterEach(() => {
       delete process.env.TAIJI_AGENT_DATA_DIR
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    })
+
+    afterAll(() => {
+      for (const d of bd3Dirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     })
 
     it("setEnabledModels(['openai/*']) 后 clearEnabledModels → settings.json 无 enabledModels key", () => {
@@ -2739,8 +2784,12 @@ describe('provider-read-source-switch', () => {
     return Object.fromEntries(svc.listProviders().map(p => [p.id, p]))
   }
 
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const readSwitchDirs: string[] = []
+
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'provider-read-source-switch-'))
+    readSwitchDirs.push(dir)
     agentDir = join(dir, 'agent')
     mkdirSync(join(agentDir, 'config'), { recursive: true })
     process.env.TAIJI_AGENT_DATA_DIR = dir
@@ -2753,7 +2802,10 @@ describe('provider-read-source-switch', () => {
 
   afterEach(() => {
     delete process.env.TAIJI_AGENT_DATA_DIR
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  afterAll(() => {
+    for (const d of readSwitchDirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   describe('A1-3 验收 1：聚合层读源（providers.json 优先）', () => {
@@ -2936,8 +2988,12 @@ describe('config-service', () => {
     })
   }
 
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtemp 独占目录，隔离不变）。
+  const configSvcDirs: string[] = []
+
   beforeEach(async () => {
     tmpDir = await mkdtempP(join(tmpdir(), 'config-service-test-'))
+    configSvcDirs.push(tmpDir)
     mkdirSync(join(tmpDir, 'agent'), { recursive: true })
     // 指向临时目录，避免污染真实 ~/.taiji/agent
     setModelsPath(join(tmpDir, 'agent', 'models.json'))
@@ -2948,8 +3004,8 @@ describe('config-service', () => {
     configService = new ConfigService(tmpDir, configStore, undefined, undefined, undefined, makeResolver(configStore))
   })
 
-  afterEach(async () => {
-    await rmP(tmpDir, { recursive: true, force: true })
+  afterAll(async () => {
+    for (const d of configSvcDirs) await rmP(d, { recursive: true, force: true })
   })
 
   // ── U1: listProviders 返回 provider 级 api 字段 ────────────────────
@@ -3502,6 +3558,11 @@ describe('ExtensionService.getExtensionPaths 同名去重（P7）', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     setSettingsPath(getActiveSettingsPath())
+  })
+
+  // [round6 慢用例治理] 删除推迟 afterAll：registeredRoots 每例各一条（mkdtempSync
+  // 独占目录，隔离不变），汇总一次删替代逐例删。
+  afterAll(() => {
     for (const r of registeredRoots.splice(0)) {
       rmSync(r, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }

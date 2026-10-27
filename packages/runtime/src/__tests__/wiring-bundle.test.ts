@@ -1697,13 +1697,16 @@ describe('MUTATION_RPC_REGISTRY 清单检查（ADR-0065 / C-pi-14，D8 机器强
 });
 // wave3 包装：本段原文件顶层语句收进 describe 作用域（顶层 hook 不再外溢到同文件其他来源的用例）
 describe('extension-startup-config', () => {
+// [round6 慢用例治理] 删除推迟 afterAll：每例 mkdtempSync 独占目录（隔离不变）。
+const extStartupRoots: string[] = []
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'ext-startup-config-'))
+  extStartupRoots.push(root)
   agentDir = join(root, 'agent')
   mkdirSync(agentDir, { recursive: true })
 })
-afterEach(() => {
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+afterAll(() => {
+  for (const d of extStartupRoots) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 describe('readDeclaredStartupConfigs', () => {
   it('收集合法声明并保留 content 深结构', () => {

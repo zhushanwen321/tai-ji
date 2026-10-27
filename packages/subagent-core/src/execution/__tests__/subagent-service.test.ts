@@ -26,7 +26,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
@@ -70,9 +70,13 @@ function makeModelService(agentDir: string): ModelConfigService {
 describe("SubagentService", () => {
   let agentDir: string;
   let modelService: ModelConfigService;
+  // [round6 慢用例治理] 删除推迟 afterAll：每例 mkdtempSync 独占目录（隔离不变——
+  // stubEnv 收进各自目录，records 树仍零共享）。
+  const mainAgentDirs: string[] = [];
 
   beforeEach(() => {
     agentDir = makeTmpAgentDir();
+    mainAgentDirs.push(agentDir);
     modelService = makeModelService(agentDir);
     // [session-store-layout-inversion] 生产 store 目录经
     // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
@@ -83,7 +87,10 @@ describe("SubagentService", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  afterAll(() => {
+    for (const d of mainAgentDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   // ============================================================
@@ -696,9 +703,12 @@ describe("SubagentService", () => {
 describe("[§1.4 (a)] pi 绑定作废（dispose 收尾 + 显式作废转发）", () => {
   let agentDir: string;
   let modelService: ModelConfigService;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const bindInvalDirs: string[] = [];
 
   beforeEach(() => {
     agentDir = makeTmpAgentDir();
+    bindInvalDirs.push(agentDir);
     modelService = makeModelService(agentDir);
     // [session-store-layout-inversion] 生产 store 目录经
     // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
@@ -709,7 +719,10 @@ describe("[§1.4 (a)] pi 绑定作废（dispose 收尾 + 显式作废转发）",
 
   afterEach(() => {
     vi.unstubAllEnvs();
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  afterAll(() => {
+    for (const d of bindInvalDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   /** baselines 私有字段读侧（深绑测试先例：Reflect.get(service, "字段")）。 */
@@ -794,9 +807,12 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
   let service: SubagentService;
   let record: ExecutionRecord;
   let fake: FakePiEnginePort;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const resumeAnchorDirs: string[] = [];
 
   beforeEach(() => {
     agentDir = makeTmpAgentDir();
+    resumeAnchorDirs.push(agentDir);
     clearEngines();
     fake = registerFakePiEngine();
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
@@ -816,7 +832,10 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
   afterEach(() => {
     service.dispose();
     clearEngines();
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  afterAll(() => {
+    for (const d of resumeAnchorDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   it("续聊 message → run 收到 resume 锚点（ctx.resume 唯一会话形态键）；轮终 round+1 翻 idle（[two-state-convergence U4] 写侧翻边）", async () => {
@@ -949,9 +968,12 @@ describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）"
   let service: SubagentService;
   let record: ExecutionRecord;
   let fake: FakePiEnginePort;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const deliverDirs: string[] = [];
 
   beforeEach(() => {
     agentDir = makeTmpAgentDir();
+    deliverDirs.push(agentDir);
     clearEngines();
     fake = registerFakePiEngine();
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
@@ -971,7 +993,10 @@ describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）"
     service.dispose();
     clearEngines();
     lifecycle._resetLifecycleState();
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  afterAll(() => {
+    for (const d of deliverDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   it("轮间 message → Continuation 派发新轮 + 执行态信号清除（[H1 U2] 承接原冷路径语义）", async () => {
@@ -1004,9 +1029,12 @@ describe("deliverChatMessage 并发检查（review round2 MF1）", () => {
   let service: SubagentService;
   let record: ExecutionRecord;
   let fake: FakePiEnginePort;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const mf1Dirs: string[] = [];
 
   beforeEach(() => {
     agentDir = makeTmpAgentDir();
+    mf1Dirs.push(agentDir);
     clearEngines();
     fake = registerFakePiEngine();
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
@@ -1025,7 +1053,10 @@ describe("deliverChatMessage 并发检查（review round2 MF1）", () => {
     service.dispose();
     clearEngines();
     lifecycle._resetLifecycleState();
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  afterAll(() => {
+    for (const d of mf1Dirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   it("同 record 轮在途连续两条 message → 第二条入队不打断单飞（构造性单写者），轮终 drain 聚合派发", async () => {
@@ -1316,9 +1347,12 @@ describe("[v4 A-5 / P7] getRecordForAction 直接父校验", () => {
   let store: RecordStore;
   let sessionRootId: string;
   let internals: ParentGuardInternals;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const guardDirs: string[] = [];
 
   beforeEach(() => {
     agentDir = makeTmpAgentDir();
+    guardDirs.push(agentDir);
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
     service = new SubagentService({ cwd: agentDir, modelService });
     // initSession 建立 sessionRootId=sessionId（本 session 树的根）。execCtxBaseline 的
@@ -1333,7 +1367,11 @@ describe("[v4 A-5 / P7] getRecordForAction 直接父校验", () => {
 
   afterEach(() => {
     service.dispose();
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  afterAll(() => {
+    // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+    for (const d of guardDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   // ---------- 身份 sa-A：直接父，放行孙级 B ----------
@@ -1462,9 +1500,12 @@ describe("SubagentService.setModel 壳接线（§7.2 目标 5）", () => {
   let dir: string;
   let service: SubagentService;
   let store: RecordStore;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const shellSwitchDirs: string[] = [];
 
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "shell-model-switch-"));
+    shellSwitchDirs.push(dir);
     // [session-store-layout-inversion] 生产 store 目录经
     // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
     // stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）。
@@ -1481,7 +1522,10 @@ describe("SubagentService.setModel 壳接线（§7.2 目标 5）", () => {
     _resetCoreSpawnedChildrenMirrorForTest();
     service.dispose();
     delete process.env["TAIJI_AGENT_DATA_DIR"];
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  afterAll(() => {
+    for (const d of shellSwitchDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   function makeRecord(id: string): ReturnType<typeof createRecord> {

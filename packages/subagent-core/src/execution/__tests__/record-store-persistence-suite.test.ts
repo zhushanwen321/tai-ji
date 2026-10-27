@@ -30,7 +30,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SET_MODEL_ERROR_CODES } from "@zhushanwen/subagent-engine-sdk";
 
@@ -117,14 +117,18 @@ describe("manifest-store", () => {
   describe("ManifestStore", () => {
     let store: ManifestStore;
     let tmpDir: string;
+    // [round6 慢用例治理] 逐例递归 rmSync 推迟到 afterAll 汇总一次：mkdtempSync 每例
+    // 独占新目录（隔离语义不变——目录树唯一性不变），删除合并削掉逐例递归删除的固定 IO。
+    const tmpDirs: string[] = [];
 
     beforeEach(() => {
       tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-test-"));
+      tmpDirs.push(tmpDir);
       store = new ManifestStore(() => tmpDir);
     });
 
-    afterEach(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    afterAll(() => {
+      for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     });
 
     describe("writeManifest", () => {
@@ -467,16 +471,19 @@ describe("manifest-store", () => {
     let rootDir: string;
     let sessionsDir: string;
     let recordsDir: string;
+    // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+    const rootDirs: string[] = [];
 
     beforeEach(() => {
       rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-v2-bound-guard-"));
+      rootDirs.push(rootDir);
       sessionsDir = path.join(rootDir, "sessions");
       recordsDir = path.join(rootDir, "records");
       fs.mkdirSync(sessionsDir, { recursive: true });
       fs.mkdirSync(recordsDir, { recursive: true });
     });
-    afterEach(() => {
-      fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    afterAll(() => {
+      for (const d of rootDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     });
 
     function makeStore(): RecordStore {
@@ -559,13 +566,16 @@ describe("manifest-store", () => {
 
   describe("record 域 manifest 写入路径自由函数（W1/U2a/D2）", () => {
     let dir: string;
+    // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+    const wfaceDirs: string[] = [];
 
     beforeEach(() => {
       dir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-wface-"));
+      wfaceDirs.push(dir);
     });
 
-    afterEach(() => {
-      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    afterAll(() => {
+      for (const d of wfaceDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     });
 
     function makeManifest(id: string): ManifestRecord {
@@ -656,16 +666,19 @@ describe("terminal-write-latency", () => {
     let tmpDir: string;
     let recordsDir: string;
     let store: RecordStore;
+    // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+    const terminalWriteDirs: string[] = [];
 
     beforeEach(() => {
       tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "terminal-write-"));
+      terminalWriteDirs.push(tmpDir);
       recordsDir = path.join(tmpDir, "records");
       // 生产形态全接线：manifestStore 与 manifestDir（同步写通道，D8 v7）同源同目录。
       store = new RecordStore(() => tmpDir, new ManifestStore(() => recordsDir), { appendEntry: () => {} }, () => recordsDir);
     });
 
-    afterEach(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    afterAll(() => {
+      for (const d of terminalWriteDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     });
 
     it("record-settled 事件帧 + 终态 manifest 双写发生，返回 true，record 出册", () => {
@@ -805,9 +818,12 @@ describe("record-store-round-manifest", () => {
     let manifestDir: string;
     let sessionFile: string;
     let store: RecordStore;
+    // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+    const roundManifestDirs: string[] = [];
 
     beforeEach(() => {
       tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "round-manifest-"));
+      roundManifestDirs.push(tmpDir);
       sessionsDir = path.join(tmpDir, "sessions");
       manifestDir = path.join(tmpDir, "records");
       store = makeStore(sessionsDir, manifestDir);
@@ -815,8 +831,8 @@ describe("record-store-round-manifest", () => {
       fs.writeFileSync(sessionFile, "{}\n", "utf-8"); // pi 锚文件在盘（binding 快照写 sidecar 同目录）
     });
 
-    afterEach(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    afterAll(() => {
+      for (const d of roundManifestDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     });
 
     const readManifest = (id: string): Record<string, unknown> =>
@@ -909,9 +925,12 @@ describe("record-store-round-manifest", () => {
     let manifestDir: string;
     let sessionFile: string;
     let store: RecordStore;
+    // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+    const identityDirs: string[] = [];
 
     beforeEach(() => {
       tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "round-manifest-identity-"));
+      identityDirs.push(tmpDir);
       sessionsDir = path.join(tmpDir, "sessions");
       manifestDir = path.join(tmpDir, "records");
       store = makeStore(sessionsDir, manifestDir);
@@ -919,8 +938,8 @@ describe("record-store-round-manifest", () => {
       fs.writeFileSync(sessionFile, "{}\n", "utf-8");
     });
 
-    afterEach(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    afterAll(() => {
+      for (const d of identityDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     });
 
     const readManifest = (id: string): Record<string, unknown> =>
@@ -1016,16 +1035,19 @@ describe("record-store-round-manifest", () => {
 // ── 来源区块：record-store-orphan-revive.test.ts ────────────────────────────────────────────────
 describe("record-store-orphan-revive", () => {
   let tmpDir = "";
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const reviveDirs: string[] = [];
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rs-revive-"));
+    reviveDirs.push(tmpDir);
     loggerMock.debug.mockClear();
     loggerMock.warn.mockClear();
     loggerMock.error.mockClear();
   });
 
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  afterAll(() => {
+    for (const d of reviveDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   /** 第一/第二段共用的目录布局：sessions 子目录（磁盘重建源）+ records 目录（事件/
@@ -1307,17 +1329,20 @@ describe("record-store-orphan-revive", () => {
     let sessionsDir: string;
     let recordsDir: string;
     let mainFile: string;
+    // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+    const adoptDirs: string[] = [];
 
     beforeEach(() => {
       rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-v2-adopt-"));
+      adoptDirs.push(rootDir);
       sessionsDir = path.join(rootDir, "sessions");
       recordsDir = path.join(rootDir, "records");
       fs.mkdirSync(sessionsDir, { recursive: true });
       fs.mkdirSync(recordsDir, { recursive: true });
       mainFile = path.join(rootDir, "main.jsonl");
     });
-    afterEach(() => {
-      fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    afterAll(() => {
+      for (const d of adoptDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     });
 
     /** 崩溃前形态种子：v2 注册条目 + created/bound 帧、无终态（kill -9 等价）。 */
@@ -1590,19 +1615,23 @@ describe("sync-collect-recovery", () => {
   describe("[collect 退役] 存量 entry 读侧检查 + entry-born orphan 收编（真实文件通路）", () => {
     let agentDir: string;
     let mainFile: string;
+    // [round6 慢用例治理] 删除推迟 afterAll：每例 mkdtempSync 独占目录（隔离不变），
+    // 且与 fire 写的 ENOTEMPTY 竞态间隔更长（原逐例删除紧贴用例结束）。
+    const recoveryDirs: string[] = [];
 
     beforeEach(() => {
       for (const k of ENV_KEYS_TO_STRIP) delete process.env[k];
       agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "core-sync-recovery-"));
+      recoveryDirs.push(agentDir);
       fs.mkdirSync(getSubagentSessionDir(ROOT_SESSION, agentDir), { recursive: true });
       mainFile = path.join(agentDir, "main-session.jsonl");
     });
 
-    afterEach(() => {
+    afterAll(() => {
       // maxRetries：sessions-index fire 写可能与删除并发（ENOTEMPTY 竞态，根级全量
       // 并行时机器负载高会放大窗口）——同款修法见 get-record-for-action-restart.test.ts /
       // record-store-index.test.ts。
-      fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      for (const d of recoveryDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     });
 
     /** 种子：v2 条目族经写入 pi 的真实 appendEntry 通路落主 session JSONL（注册条目
@@ -1974,6 +2003,9 @@ describe("dispose-manifest-recovery", () => {
     let agentDir: string;
     let service: SubagentService;
     const extraServices: SubagentService[] = [];
+    // [round6 慢用例治理] 删除推迟 afterAll：每例 makeTmpAgentDir()（mkdtempSync）独占
+    // 目录（隔离不变）；fire 写已由各例 afterEach flush 等尽，删除不再与之竞态。
+    const gateBAgentDirs: string[] = [];
 
     beforeEach(() => {
       // 身份/目录贯穿 env 净化（本包 vitest.setup 不覆盖；字面量同 subagent-service 模块私有常量，
@@ -1982,6 +2014,7 @@ describe("dispose-manifest-recovery", () => {
       delete process.env.PI_SUBAGENT_ROOT_CWD;
       delete process.env.PI_SUBAGENT_ROOT_SESSION_ID;
       agentDir = makeTmpAgentDir();
+      gateBAgentDirs.push(agentDir);
       // [session-store-layout-inversion] 生产 store 目录经
       // getSubagentRecordsDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
       // stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）。
@@ -1990,11 +2023,14 @@ describe("dispose-manifest-recovery", () => {
     });
 
     afterEach(async () => {
-      await flushAsyncWrites(); // 先等 fire-and-forget 写落盘，再拆 tmp 目录（防 ENOENT 竞态噪声）
+      await flushAsyncWrites(); // 等该例 fire-and-forget 写落盘（fire 写晚于用例结束，跨例无碍——目录独占）
       for (const s of extraServices.splice(0)) s.dispose();
       service.dispose();
       vi.unstubAllEnvs();
-      fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    });
+
+    afterAll(() => {
+      for (const d of gateBAgentDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     });
 
     it("M1: disposeAllRecords(parent-shutdown) 补写 manifest（legacy status running + executionStatus idle 双写）", async () => {

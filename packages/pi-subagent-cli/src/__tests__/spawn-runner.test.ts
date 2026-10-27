@@ -845,10 +845,13 @@ describe("spawn-run-pump-session-file-fallback", () => {
 // ======== 来源：spawn-runner-prompt-ack.test.ts ========
 describe("spawn-runner-prompt-ack", () => {
   /**
- * 注入窗（真机 30s 不可等）。S7 用真实时钟验证窗口必须到期；S7b/S8b 的窗口由测试
- * 时钟冻结到 pi 就绪后（见文件头 [确定性]）——窗口值不变，变的是起算点。
- */
-  const ACK_WINDOW_MS = 300;
+   * 注入窗（真机 30s 不可等）。S7 用真实时钟验证窗口必须到期；S7b/S8b 的窗口由测试
+   * 时钟冻结到 pi 就绪后（见文件头 [确定性]）——窗口值不变，变的是起算点。
+   * 窗值是被测参数而非语义常量：50ms 已足够区分「窗口到期」与「立即失败」两类
+   * 时序形态（S7 断言 elapsed < 窗×10、错误文案引用注入值），round6 慢用例治理
+   * 自 300ms 收紧；S8b 的 fake pi 延迟（100ms）保持 > 窗 的相对关系。
+   */
+  const ACK_WINDOW_MS = 50;
 
   /**
  * [m-pi-2 / S9] 立即失败用例的注入窗（拉大只为区分「立即失败」与「等窗口超时」：
@@ -888,7 +891,7 @@ rl.on("line", (line) => {
   if (mode === "silent") return;
 
   if (mode === "get-state-only") {
-    // S8b：get_state 已应答、prompt response 延迟（600ms > 注入窗 300ms）
+    // S8b：get_state 已应答、prompt response 延迟（100ms > 注入窗 50ms）
     setTimeout(() => {
       send({ type: "response", command: "prompt", success: true, id: msg.id, data: { disposition: "started" } });
 
@@ -898,7 +901,7 @@ rl.on("line", (line) => {
 
       send({ type: "agent_settled" });
 
-    }, 600);
+    }, 100);
 
     return;
 
@@ -1099,7 +1102,7 @@ if (mode === "silent") { setInterval(() => {}, 1000); } // 零输出形态：不
         vi.advanceTimersByTime(ACK_WINDOW_MS * 2);
         const result: SpawnRunResult = await run;
 
-        // run 正常完成（response 延迟 600ms > 窗 300ms——若误杀此处即失败）
+        // run 正常完成（response 延迟 100ms > 窗 50ms——若误杀此处即失败）
         expect(result.success).toBe(true);
         expect(result.error).toBeUndefined();
         expect(result.sessionId).toBe("fake-ack-sess");

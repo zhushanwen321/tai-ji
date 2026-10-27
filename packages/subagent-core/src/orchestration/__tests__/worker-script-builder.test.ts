@@ -20,6 +20,13 @@ import { Worker } from "node:worker_threads";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildWorkerScript } from "../worker-script-builder.ts";
+// 集成测试门控（TAIJI_TEST_INTEGRATION）：真 Worker 线程生命周期用例本地默认跳过（SSOT =
+// test-guard/integration-gate.ts）。subagent-core 无 integration project 基建，按「用例级
+// skipIf + 文件留 main 组」形态（runtime vitest.config.ts 维护契约形态 ②同款）。
+import { INTEGRATION_TESTS_ENABLED, INTEGRATION_TESTS_SKIP_REASON } from "../../../../../test-guard/integration-gate.ts";
+
+/** 门控 describe 名后缀（门控关闭时显示 skip 理由，开启时零后缀——junit leaf 名不受影响）。 */
+const INTEGRATION_DESCRIBE_SUFFIX = INTEGRATION_TESTS_SKIP_REASON ? `｜skip：${INTEGRATION_TESTS_SKIP_REASON}` : "";
 
 
 
@@ -639,7 +646,7 @@ afterEach(() => {
 
 // ── 回归测试：_safePost 作用域 bug（核心防线） ──────────────────────
 
-describe("buildWorkerScript runtime — _safePost scope regression (exit code 1 bug)", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`buildWorkerScript runtime — _safePost scope regression (exit code 1 bug)${INTEGRATION_DESCRIBE_SUFFIX}`, () => {
   it("脚本正常 return 时发出 return 消息，Worker 不崩溃（exit code 0）", async () => {
     const script = `return { status: "ok", value: 42 };`;
     const res = await runWorker(script);
@@ -730,7 +737,7 @@ describe("buildWorkerScript runtime — _safePost scope regression (exit code 1 
 
 // ── S4-S7：覆盖此前缺失的运行时路径 ──────────────────────────────────
 
-describe("buildWorkerScript runtime — 之前缺失的路径覆盖", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`buildWorkerScript runtime — 之前缺失的路径覆盖${INTEGRATION_DESCRIBE_SUFFIX}`, () => {
   it("S4 abort 消息：pending agent() 被 reject → WorkflowAbortedError", async () => {
     // 脚本 await 一个 agent()，主线程回发 abort → agent reject → 脚本抛错进 .catch
     const script = `
@@ -797,7 +804,7 @@ describe("buildWorkerScript runtime — 之前缺失的路径覆盖", () => {
 // 消息，主线程 handleWorkerLog 即时消费（error-recovery.ts）；崩溃场景丢 log 条目
 // 可接受（log 是 T7 补充可观测）。
 
-describe("buildWorkerScript runtime — [B-3] log() 单通路", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`buildWorkerScript runtime — [B-3] log() 单通路${INTEGRATION_DESCRIBE_SUFFIX}`, () => {
   it("log() 发出独立 {type:\"log\"} 消息且携带 phase（主线程即时消费的唯一通路）", async () => {
     const script = `
       phase("build");
@@ -846,7 +853,7 @@ describe("buildWorkerScript runtime — [B-3] log() 单通路", () => {
 // 无法验证「真实 Worker 线程执行时 agent({returnMeta:true}) resolve 出对象、
 // 不设 returnMeta resolve 单值」。此处补运行时验证（对称 handler 9b 分支）。
 
-describe("buildWorkerScript runtime — W2 agent() returnMeta mode", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`buildWorkerScript runtime — W2 agent() returnMeta mode${INTEGRATION_DESCRIBE_SUFFIX}`, () => {
   it("agent({prompt, returnMeta:true}) resolve 出 {value, sessionFile, worktreePath, error}（非单值）", async () => {
     // returnMeta:true → worker handler 走 9b 分支，resolve 包含 4 字段的对象。
     // 主线程回发的 result 带 sessionFile/worktreePath/error，验证它们被原样透传。
@@ -944,7 +951,7 @@ describe("buildWorkerScript runtime — W2 agent() returnMeta mode", () => {
 // $MODEL/$THINKING_LEVEL global（L1：验证「运行时 agent-call 携带正确 override」）。
 // 对应 docs/testing/ 断言价值层级 L1（真实 Worker 产物，非源码字符串）。
 
-describe("buildWorkerScript runtime — P3/P4 run-level model/thinkingLevel override 真实注入", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`buildWorkerScript runtime — P3/P4 run-level model/thinkingLevel override 真实注入${INTEGRATION_DESCRIBE_SUFFIX}`, () => {
   it("workerData.model 经 $MODEL global 注入到 object 分支 agent() opts.model", async () => {
     const script = `await agent({ prompt: "hi" }); return { done: true };`;
     const res = await runWorker(script, { model: "anthropic/claude-sonnet-4-5" });
@@ -999,7 +1006,7 @@ describe("buildWorkerScript runtime — P3/P4 run-level model/thinkingLevel over
   });
 });
 
-describe("buildWorkerScript runtime — string 分支 maxTurns ?? 语义保真（F-2）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`buildWorkerScript runtime — string 分支 maxTurns ?? 语义保真（F-2）${INTEGRATION_DESCRIBE_SUFFIX}`, () => {
   // 旧实现 `(cond && secondArg.maxTurns) || undefined` 把显式 0 抹成 undefined →
   // 落 runSpawn 的 env 兜底（SPAWN_WATCHDOG env 设置时误挂 watchdog），与对象分支
   // （直接透传保真）语义分裂。锁定运行时行为：string 分支传 0 → postMessage
@@ -1021,7 +1028,7 @@ describe("buildWorkerScript runtime — string 分支 maxTurns ?? 语义保真�
 });
 
 
-describe("buildWorkerScript runtime — schema 出口契约（ADR-0092 保留项）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`buildWorkerScript runtime — schema 出口契约（ADR-0092 保留项）${INTEGRATION_DESCRIBE_SUFFIX}`, () => {
   // [ADR-0092] 带 schema 却既无 parsedOutput 也无显式 error = 结果出口断裂：
   // 对象形态是 schema 调用唯一合法结果，无文本回落选项——出口不得静默把正文
   // 文本当结果（脚本无感知）。违规出口 resolve 错误说明（returnMeta 走 error 字段）。
@@ -1229,7 +1236,7 @@ function trackUnhandledRejections(): { reasons: unknown[]; dispose: () => void }
 
 // ── [OR-3] per-call timeoutMs（消息层自己的超时） ─────────────
 
-describe("[OR-3] agent() pending per-call timeoutMs", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`[OR-3] agent() pending per-call timeoutMs${INTEGRATION_DESCRIBE_SUFFIX}`, () => {
   it("主线程不回话 + timeoutMs=50 → pending 以错误 resolve（[B-5] 单值错误消息字符串）", async () => {
     const script = `
       const r = await agent("never answered", { timeoutMs: 50 });
@@ -1295,7 +1302,7 @@ describe("[OR-3] agent() pending per-call timeoutMs", () => {
 
 // ── [OR-3] abort 广播（worker 侧接收） ───────────────────────
 
-describe("[OR-3] abort 广播接收（P-T3：交错不产 unhandledRejection）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`[OR-3] abort 广播接收（P-T3：交错不产 unhandledRejection）${INTEGRATION_DESCRIBE_SUFFIX}`, () => {
   it("await 中的 agent() 收到 abort → WorkflowAbortedError → 脚本 catch 后自然 return → exit 0", async () => {
     const script = `
       try {
@@ -1457,7 +1464,7 @@ function runWorkerPassthrough(
 
 const META_SCRIPT = "const meta = await agent({ prompt: 'passthrough probe', returnMeta: true }); return meta;";
 
-describe("A1 returnMeta live resolve 透传（tier-1 §7.1）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`A1 returnMeta live resolve 透传（tier-1 §7.1）${INTEGRATION_DESCRIBE_SUFFIX}`, () => {
   it("A1 agent-result 回发完整 AgentResult 时 resolve 对象含 usage/durationMs/sessionId（七字段全集）", async () => {
     const outcome = await runWorkerPassthrough(META_SCRIPT, {
       agentResult: {
@@ -1497,7 +1504,7 @@ describe("A1 returnMeta live resolve 透传（tier-1 §7.1）", () => {
   });
 });
 
-describe("A2 returnMeta 缓存重放重建透传（对称点，tier-1 §7.1）", () => {
+describe.skipIf(!INTEGRATION_TESTS_ENABLED)(`A2 returnMeta 缓存重放重建透传（对称点，tier-1 §7.1）${INTEGRATION_DESCRIBE_SUFFIX}`, () => {
   it("A2 workerData.callCache 命中时重建对象含 usage/durationMs/sessionId（不回发 agent-call）", async () => {
     const outcome = await runWorkerPassthrough(META_SCRIPT, {
       callCache: {

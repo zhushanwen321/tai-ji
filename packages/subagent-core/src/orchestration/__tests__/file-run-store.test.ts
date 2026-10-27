@@ -17,7 +17,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, utimesSync, e
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { configureCore, resetCoreForTests } from "../../core/host-services.ts";
 import {
@@ -46,17 +46,24 @@ import { createPiHostRunEnumeration } from "../../execution/assembly/pi-host-run
 import type { HostServices } from "../../core/host-services.js";
 
 let dataRoot: string;
+// [round6 慢用例治理] 删除推迟 afterAll：每例 mkdtempSync 独占目录（隔离不变——
+// configureCore 的 dataRoot 指针每例刷新），rmSync 重试参数收进单次路径。
+const fileRunRoots: string[] = [];
 
 beforeEach(() => {
   resetCoreForTests();
   dataRoot = mkdtempSync(join(tmpdir(), "file-run-store-"));
+  fileRunRoots.push(dataRoot);
   // RecordStore 构造/首写经 core logger facade 动态解析宿主实现——注入 no-op 宿主
   configureCore({ dataRoot: () => dataRoot, log: () => {} });
 });
 
 afterEach(() => {
   resetCoreForTests();
-  rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+});
+
+afterAll(() => {
+  for (const d of fileRunRoots) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 /** 30 天窗口（ms）——测试统一注入，不依赖 env。 */
@@ -450,17 +457,20 @@ describe("createPiHostRunEnumeration", () => {
   let dataRoot: string;
   let wsA: string;
   let wsB: string;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const enumRoots: string[] = [];
 
   beforeEach(() => {
     dataRoot = mkdtempSync(join(tmpdir(), "pi-host-run-store-"));
+    enumRoots.push(dataRoot);
     // 新布局：<root>/<sid>/workflow/runs/（sid = 合法 sessionId 形态 fixture）
     wsA = runsDirOf(dataRoot, "sid-fixture-a");
     wsB = runsDirOf(dataRoot, "sid-fixture-b");
     for (const dir of [wsA, wsB]) mkdirSync(dir, { recursive: true });
   });
 
-  afterEach(() => {
-    rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  afterAll(() => {
+    for (const d of enumRoots) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   it("枚举存储树全部 sid 目录的 runs 目录（same/cross-session 两形态一次覆盖）", async () => {
@@ -541,15 +551,18 @@ describe("createPiHostRunEnumeration", () => {
 describe("createPiHostRunEnumeration status 映射（判定核三态）", () => {
   let dataRoot: string;
   let wsA: string;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const mapRoots: string[] = [];
 
   beforeEach(() => {
     dataRoot = mkdtempSync(join(tmpdir(), "pi-host-run-store-map-"));
+    mapRoots.push(dataRoot);
     wsA = runsDirOf(dataRoot, "sid-fixture-map");
     mkdirSync(wsA, { recursive: true });
   });
 
-  afterEach(() => {
-    rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  afterAll(() => {
+    for (const d of mapRoots) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   it("running（journal 无 run-settled 帧）→ \"running\"", async () => {
@@ -623,15 +636,21 @@ describe("createPiHostRunEnumeration status 映射（判定核三态）", () => 
 
 describe("runtime 形态：journalDir 参数显式传入时收编链读写正确落位", () => {
   let journalDir: string;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const runtimeDirs: string[] = [];
 
   beforeEach(() => {
     journalDir = mkdtempSync(join(tmpdir(), "pi-host-run-store-runtime-"));
+    runtimeDirs.push(journalDir);
   });
 
   afterEach(() => {
     // 复位模块锚 + 清活体态/终局记录注册表/keyed journal 缓存（pump teardown 纪律）
     setRunEventJournalDirForTest(undefined);
-    rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  afterAll(() => {
+    for (const d of runtimeDirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   /** 落 running 形态事件流（run-created + agent-started → fold = running）。 */

@@ -1011,13 +1011,16 @@ describe("⛔4 forkFromHandler（检查链 + slug 派生 + prompt 包装，快�
   let forkDir: string;
   /** [U4] 锚可解析性 fixture（fork-from 正常路径要求源文件真实在盘）。 */
   let forkAnchor: string;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const forkDirs: string[] = [];
   beforeEach(() => {
     forkDir = fs.mkdtempSync(path.join(os.tmpdir(), "actions-core-fork-"));
+    forkDirs.push(forkDir);
     forkAnchor = path.join(forkDir, "sess-1.jsonl");
     fs.writeFileSync(forkAnchor, "{}\n", "utf-8");
   });
-  afterEach(() => {
-    fs.rmSync(forkDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  afterAll(() => {
+    for (const d of forkDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   function makeForkService(source: SubagentRecord | undefined, execute = vi.fn(async (_opts: { task: string; slug?: string; agent?: string }): Promise<ExecutionHandle> => ({
@@ -1614,14 +1617,17 @@ function makeDeps(o: DepOverrides = {}): ColdLookupDeps {
 
 describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
   let dir: string;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const coldLookupDirs: string[] = [];
 
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "cold-lookup-"));
+    coldLookupDirs.push(dir);
     currentSessionsDir = dir;
   });
 
-  afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  afterAll(() => {
+    for (const d of coldLookupDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   /** tmpdir 下建 session 文件 + 可选终态 sidecar（.state / legacy .finalized）+ 可选
@@ -2013,14 +2019,17 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
 describe("[U6] transcriptAnchorOf / isAnchorResolvable 引擎分派", () => {
   let zcodeDir: string;
   let zcodeDb: string;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const zcodeDirs: string[] = [];
 
   beforeEach(() => {
     zcodeDir = fs.mkdtempSync(path.join(os.tmpdir(), "cold-zcode-"));
+    zcodeDirs.push(zcodeDir);
     zcodeDb = path.join(zcodeDir, "db.sqlite");
   });
 
-  afterEach(() => {
-    fs.rmSync(zcodeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  afterAll(() => {
+    for (const d of zcodeDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   /** 最小隔离库（session 表 + 目标条目）。 */
@@ -2241,10 +2250,14 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
   let recordsDir: string;
   let service: SubagentService;
   let store: RecordStore;
+  // [round6 慢用例治理] 删除推迟 afterAll：每例 mkdtempSync 独占目录（隔离不变），
+  // fire 写与删除的间隔更长（原逐例删除紧贴用例结束，ENOTEMPTY 竞态窗口更大）。
+  const restartDirs: string[] = [];
 
   beforeEach(() => {
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "restart-recon-"));
+    restartDirs.push(agentDir);
     // [session-store-layout-inversion] 生产 store 目录经
     // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
     // stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）。
@@ -2262,11 +2275,14 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
 
   afterEach(() => {
     service.dispose();
-    // maxRetries：collectRecords 触发的 fire-and-forget sessions-index 写可能与删除
-    // 并发（ENOTEMPTY 竞态，全量并行跑时机器负载高会放大窗口）
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     vi.unstubAllEnvs();
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
+  });
+
+  afterAll(() => {
+    // maxRetries：collectRecords 触发的 fire-and-forget sessions-index 写可能与删除
+    // 并发（ENOTEMPTY 竞态，全量并行跑时机器负载高会放大窗口）
+    for (const d of restartDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   it("内存 miss + 磁盘 running（无 .alive）→ 重建 record：chatMode 水合保留（无持久化为 false，[H1 U6]）、sessionFile 回填、register 进内存", () => {
@@ -2478,10 +2494,13 @@ describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一�
   let service: SubagentService;
   let pi: PiMock;
   let fake: FakePiEnginePort;
+  // [round6 慢用例治理] 删除推迟 afterAll（每例 mkdtempSync 独占目录，隔离不变）。
+  const universalDirs: string[] = [];
 
   beforeEach(() => {
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "ps-universal-"));
+    universalDirs.push(agentDir);
     // [session-store-layout-inversion] 生产 store 目录经
     // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
     // stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）；分区键 = initSession sid。
@@ -2513,9 +2532,12 @@ describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一�
     service.dispose();
     clearEngines();
     await new Promise((r) => setTimeout(r, 0));
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     vi.unstubAllEnvs();
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
+  });
+
+  afterAll(() => {
+    for (const d of universalDirs) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   // ── ① closedReason（旧 7 值）× message：全部放行（可重连集 gate 消亡）──────
