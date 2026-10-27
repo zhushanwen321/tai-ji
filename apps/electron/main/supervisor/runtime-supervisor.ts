@@ -148,8 +148,6 @@ export function classifyRuntimeExit(input: {
 export class RuntimeSupervisor implements IRuntimeSupervisor {
   private child: ChildProcess | null = null
   private _port: number | null = null
-  /** 当前 runtime 的 WS auth token（S1-W1：spawn 时生成，随进程生命周期存续；stop/exit 清 null） */
-  private _token: string | null = null
   /**
    * 当前 runtime 的实例标识（connection-datasync-ssot §6.1）：spawn 时与 token 同点签发，
    * 随进程生命周期存续（stop/exit 清 null）。快照字段之一，不单独暴露。
@@ -188,11 +186,6 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
   /** 当前监听端口（未启动为 null） */
   get port(): number | null {
     return this._port
-  }
-
-  /** 当前 runtime 的 WS auth token（未启动为 null）。renderer 经 get-runtime-target-snapshot 快照并置读取（RuntimeTargetSnapshot.token） */
-  get token(): string | null {
-    return this._token
   }
 
   /**
@@ -347,8 +340,6 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     console.log(`[runtime] Starting on port ${port}`)
     const spawned = spawnRuntimeProcess(port, (code) => this.onRuntimeExit(code))
     this.child = spawned.child
-    // S1-W1：持有本生命周期 token（spawnRuntimeProcess 已注入 env + 写 token 文件）
-    this._token = spawned.token
     // §6.1：持有本生命周期实例标识（spawnRuntimeProcess 已与 token 同点签发并注入 env）
     this._runtimeId = spawned.runtimeId
 
@@ -382,7 +373,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     this._port = port
     // §6.1：目标快照随启动成功落定（seq 递增在 spawn 落定后——快照只在「健康检查通过」
     // 的目标上成立；失败半途清理不消耗代数，下次 spawn 仍是新代）。字段直取局部 spawned
-    // （this._token/_runtimeId 经 await 后类型窄化失效且语义等价——同一次 spawn 的产物）。
+    // （this._runtimeId 经 await 后类型窄化失效且语义等价——同一次 spawn 的产物）。
     this.spawnSeq += 1
     this._snapshot = {
       seq: this.spawnSeq,
@@ -478,8 +469,6 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     await stopRuntimeProcess(this.child, timeoutMs)
     this.child = null
     this._port = null
-    // token 随进程生命周期结束失效（下次 start 重新生成）
-    this._token = null
     // 快照与实例标识同生命周期（下次 start 重新签发；seq 不清零——代数单调）
     this._runtimeId = null
     this._snapshot = null
@@ -555,11 +544,10 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
   private onRuntimeExit(code: number | null): void {
     // 先捕获 pid 再清状态：杀链决策日志需要「谁死了」（u5b kill decision 的 target 语义）
     const pid = this.child?.pid
-    // 清状态（幂等检查据此判定无活进程）；token / 实例标识 / 目标快照随进程死亡失效
-    // （防旧 token 复用、旧代快照把重连目标拉回死实例）
+    // 清状态（幂等检查据此判定无活进程）；实例标识 / 目标快照随进程死亡失效
+    // （防旧代快照——含其中 token——把重连目标拉回死实例）
     this.child = null
     this._port = null
-    this._token = null
     this._runtimeId = null
     this._snapshot = null
 

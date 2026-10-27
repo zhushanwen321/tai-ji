@@ -75,13 +75,6 @@ export interface IRuntimeSupervisor {
   readonly port: number | null
 
   /**
-   * 当前 runtime 的 WS auth token（S1-W1，spec §3.3 D4；未启动为 null）。
-   * renderer 经 get-runtime-target-snapshot 快照并置读取（RuntimeTargetSnapshot.token）
-   * 后作为 WS 首条 auth 消息发送。
-   */
-  readonly token: string | null
-
-  /**
    * 当前连接目标快照（connection-datasync-ssot §6.1；未启动为 null）。
    * 单一权威读口：renderer 启动与重连前经 get-runtime-target-snapshot IPC 拉取；
    * runtime-port 广播载荷同形态（{seq, runtimeId, port, token}）。
