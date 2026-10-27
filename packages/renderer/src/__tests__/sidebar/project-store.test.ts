@@ -25,7 +25,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import type { Project, SessionGroup, UpdateErrorPayload, ProxyTestResult } from '@taiji/shared'
+import type { Project, SessionGroup, SessionSummary, UpdateErrorPayload, ProxyTestResult } from '@taiji/shared'
 import SessionList from '@/components/sidebar/SessionList.vue'
 import { useProjectStore, DEFAULT_PROJECT_ID } from '@/stores/project'
 import { sessionBelongsToProject } from '@/composables/logic/project-session'
@@ -415,13 +415,13 @@ describe('Project store: 查询派生', () => {
 // ── 三形态呈现（§6.7 组件测试，用户可见 DOM 断言；§6.9 编辑入口禁用）──────────
 
 describe('SessionList 项目分组区三形态呈现（§6.7）+ 编辑入口禁用（§6.9）', () => {
-  function mountList() {
+  function mountList(groups: SessionGroup[] = [
+    { cwd: '/repo', sessions: [{ id: 'sa', label: '会话 sa', cwd: '/repo', status: 'idle', lastActiveAt: 1, projectId: 'proj-a' } as SessionSummary] },
+  ]) {
     return mount(SessionList, {
       attachTo: document.body,
       props: {
-        groups: [
-          { cwd: '/repo', sessions: [{ id: 'sa', label: '会话 sa', cwd: '/repo', status: 'idle', lastActiveAt: 1, projectId: 'proj-a' } as SessionSummary] },
-        ],
+        groups,
         activeId: null,
         statusOf: () => 'done' as never,
       },
@@ -484,6 +484,29 @@ describe('SessionList 项目分组区三形态呈现（§6.7）+ 编辑入口禁
     expect(wrapper.find('[data-testid="session-body-flat"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="session-body-flat"]').findAll('.session-item')).toHaveLength(1)
     wrapper.unmount()
+  })
+
+  it('目录模式 failed：失败状态条照常替换分组区；会话本体按 cwd 目录标签序列照常呈现、无默认项目头行（§5.2 会话列表本体（目录分组视图）+ §6.7）', () => {
+    localStorage.setItem('taiji:sidebar-session-mode', 'groups')
+    const store = useProjectStore()
+    store.loadState = 'failed'
+    store.loadError = 'runtime not ready'
+    const wrapper = mountList([
+      { cwd: '/repo', sessions: [{ id: 'sa', label: '会话 sa', cwd: '/repo', status: 'idle', lastActiveAt: 1, projectId: 'proj-a' } as SessionSummary] },
+      { cwd: '/lib', sessions: [{ id: 'sb', label: '会话 sb', cwd: '/lib', status: 'idle', lastActiveAt: 2 } as SessionSummary] },
+    ])
+
+    // 失败状态条（§5.2）的渲染判据是 projectAreaMode，与侧栏 flat/groups 模式无关
+    expect(wrapper.find('[data-testid="project-load-failed-bar"]').exists()).toBe(true)
+    // §6.7 会话本体不受影响（目录形态）：降级渲染不经项目切分，目录标签序列（每 cwd 一行
+    // SessionDirLabel）+ 会话行照常呈现——degradedZone.dirs 渲染路径（SessionList 目录分支）
+    expect(wrapper.findAll('[data-testid="folder-actions"]')).toHaveLength(2)
+    expect(wrapper.findAll('.session-item')).toHaveLength(2)
+    // 降级形态不派生「默认项目」展示概念：无默认项目头行、无项目组（与平铺态 failed 断言同型）
+    expect(wrapper.find('[data-testid="default-project-head"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="project-group"]').exists()).toBe(false)
+    wrapper.unmount()
+    localStorage.removeItem('taiji:sidebar-session-mode')
   })
 
   it('重拉子形态（loading + 已持有回执）：保留最后已知分组渲染、不闪占位；编辑入口不禁用（§6.9）', async () => {
