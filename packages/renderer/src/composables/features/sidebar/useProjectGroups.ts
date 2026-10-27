@@ -81,10 +81,16 @@ export function useProjectGroups(options: {
    * 跨项目归并见 spec sidebar §6 待裁决）。
    *
    * 切分输入 = projectStore.projects（缓存视图）+ sessions（props 派生）。重拉子形态
-   * 下 projects 未被替换（回执未到），切分结果即「最后已知分组」——渲染层由
-   * projectAreaMode 把无数据/失败形态挡在分组渲染之外，本派生无需感知加载状态。
+   * 下 projects 未被替换（回执未到），切分结果即「最后已知分组」。
+   *
+   * §6.7 前置条件：项目切分仅在持有有效回执数据时执行（loaded，或 loaded→loading 的
+   * 重拉子形态——判据即 projectAreaMode==='groups'）。无数据形态与 failed 态不派生
+   * 项目分组：「未分组/默认组」这个展示概念只在 loaded 态由真实项目清单派生，不把
+   * 兜底默认表（idle 初值）或上次已知表（failed 态保留在缓存视图里）渲染成分组——
+   * 失败态由状态条整体替换项目分组区，会话本体照常呈现见 degradedZone。
    */
   const projectGroups = computed<ProjectGroupVM[]>(() => {
+    if (projectAreaMode.value !== 'groups') return []
     const namedIds = collectNamedProjectIds(projectStore.projects)
     return projectStore.orderedProjects.map((p) => {
       const isDefault = isDefaultProjectOf(p)
@@ -108,6 +114,22 @@ export function useProjectGroups(options: {
   const totalCount = computed(() =>
     groups().reduce((sum, g) => sum + g.sessions.length, 0),
   )
+
+  /**
+   * 降级形态的会话本体（§6.7「会话列表本体（目录/分组视图的 cwd 结构，来自 runtime
+   * 会话清单）不受影响正常呈现」）：projectAreaMode !== 'groups' 时项目分组区由
+   * ProjectLoadStatus（失败状态条 / 无数据加载占位行）替换，会话本体按 runtime 会话
+   * 清单的 cwd 目录结构照常呈现。
+   *
+   * 与 projectGroups 的关键差异：不经项目切分——不渲染默认项目头行、不渲染兜底默认表，
+   * 数据源只有 groups()（与 project 域正交，project 加载失败/在途都不影响它可取）。
+   * 形状取 ProjectGroupVM 的渲染源子集（dirs / items），目录模式与平铺模式共用。
+   */
+  const degradedZone = computed<Pick<ProjectGroupVM, 'dirs' | 'items'> | null>(() => {
+    if (projectAreaMode.value === 'groups') return null
+    const dirs = groups().filter((g) => g.sessions.length > 0)
+    return { dirs, items: sessionsInRuntimeGroupOrder(dirs) }
+  })
 
   // ── 锚定分组交互（显式锚定 + 多开：展开态按组独立记忆，不与锚定互斥）──
 
@@ -239,6 +261,7 @@ export function useProjectGroups(options: {
     projectGroups,
     totalCount,
     projectAreaMode,
+    degradedZone,
     editingEnabled,
     retryProjectLoad,
     flatClosed,

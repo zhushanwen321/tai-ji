@@ -440,13 +440,18 @@ describe('SessionList 项目分组区三形态呈现（§6.7）+ 编辑入口禁
     document.body.innerHTML = ''
   })
 
-  it('无数据形态（idle）：分组区渲染加载占位行，不渲染项目组/默认平铺区', () => {
+  it('无数据形态（idle）：分组区渲染加载占位行，不渲染项目组；会话本体照常呈现（§6.7）', () => {
     useProjectStore() // idle 初态（未 load）
     const wrapper = mountList()
 
     expect(wrapper.find('[data-testid="project-group-loading-placeholder"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="project-group-loading-placeholder"]').text()).toContain('加载')
+    // §6.7：会话列表本体（cwd 结构来自 runtime 会话清单）不受影响，正常显示
+    expect(wrapper.find('[data-testid="session-body-flat"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="session-body-flat"]').findAll('.session-item')).toHaveLength(1)
+    // 无数据形态不派生项目分组概念（不渲染兜底默认表 / 默认项目头行）
     expect(wrapper.find('[data-testid="default-project-flat-zone"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="default-project-head"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="project-group"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="project-load-failed-bar"]').exists()).toBe(false)
     wrapper.unmount()
@@ -472,8 +477,12 @@ describe('SessionList 项目分组区三形态呈现（§6.7）+ 编辑入口禁
     const addBtn = wrapper.find('[data-testid="project-add-btn"]')
     expect(addBtn.attributes('disabled')).toBeDefined()
     expect(addBtn.attributes('title')).toContain('不可用')
-    // 分组区不渲染（失败形态不显示兜底默认组）
+    // 项目分组区不渲染（失败形态不渲染兜底默认表 / 默认项目头行）
     expect(wrapper.find('[data-testid="project-group"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="default-project-head"]').exists()).toBe(false)
+    // §6.7 / §5.2：失败窗口会话列表本体照常呈现（失败窗口 65-90s 用户仍看得到会话）
+    expect(wrapper.find('[data-testid="session-body-flat"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="session-body-flat"]').findAll('.session-item')).toHaveLength(1)
     wrapper.unmount()
   })
 
