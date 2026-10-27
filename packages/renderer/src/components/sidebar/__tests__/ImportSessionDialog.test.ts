@@ -7,7 +7,9 @@
  *  2. 搜索过滤三通道：名称 / 完整+短 Session ID / .jsonl 绝对路径前缀
  *  3. 路径模式切换：query 以 '/' '~' 开头时列表隐藏、路径行展示命中元信息（demo 方案 A path-bar）
  *  4. 已导入候选项禁用：徽标 + 行按钮 disabled + 选中后底部导入仍不可用
- *  5. 选目标 project：下拉默认当前活跃 project、可改、导入 payload 跟随
+ *  5. 选目标 project：下拉默认当前活跃 project、可改、导入 payload 跟随；
+ *     §6.9 括注——project 域无有效数据（loadState=idle）时下拉禁用（loaded→idle 同节点
+ *     两态对照的 DOM 负向断言）
  *  6. 导入成功 emit('imported') + 结果 toast（u7：info 成功 / warning 预警合并——
  *     sidecar_failed / conversion_degraded（droppedCount 计数汇总）/ conversion_unclassified
  *     （计数 + 首条 sample）与死 cwd 追加同一条消息；显示名回退短 ID）
@@ -619,6 +621,24 @@ describe('ImportSessionDialog（U5 验收）', () => {
         sourcePath: fixture[0].sourcePath,
         projectId: 'stock-id',
       })
+    })
+
+    it('§6.9 括注：project 域无有效数据（loadState=idle）时目标下拉禁用（DOM 负向断言）', async () => {
+      await mountDialog()
+
+      // 对照态：loaded（有回执事实）下拉可用——同一节点前后两态对照，证明下方断言有
+      // 区分度（绑定若被误删成恒 enabled 或误改成恒 disabled，两态断言其一即红）
+      const trigger = () => byTestId('import-project-select')!
+      expect(trigger().attributes('disabled')).toBeUndefined()
+
+      // §6.9：idle = 从未成功装载，目标列表是兜底默认表而非回执事实 → editingEnabled=false
+      // → 归属编辑入口（目标下拉）禁用
+      useProjectStore().loadState = 'idle'
+      await flushPromises()
+      expect(trigger().attributes('disabled')).toBeDefined()
+
+      // 禁用只锁归属编辑入口（导入确认钮不属禁用意图）——本用例不发起导入，导入 RPC 零调用
+      expect(apiMocks.importSession).not.toHaveBeenCalled()
     })
   })
 

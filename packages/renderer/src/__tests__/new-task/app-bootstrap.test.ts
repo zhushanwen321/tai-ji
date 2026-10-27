@@ -23,7 +23,6 @@ import { notifyConnectedEdge } from '@taiji/core'
 // 可控依赖：project.load（project 域同步）、session.list/create/switchSession/remove
 const projectCtrl = vi.hoisted(() => ({
   load: vi.fn<() => Promise<{ projects: unknown[]; activeProjectId: string }>>(),
-  save: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
 }))
 const sessionCtrl = vi.hoisted(() => ({
   list: vi.fn<() => Promise<SessionGroup[]>>(),
@@ -37,7 +36,7 @@ const chatCtrl = vi.hoisted(() => ({
 }))
 
 vi.mock('@/api', () => ({
-  project: { load: projectCtrl.load, save: projectCtrl.save },
+  project: { load: projectCtrl.load },
   session: {
     list: sessionCtrl.list,
     create: sessionCtrl.create,

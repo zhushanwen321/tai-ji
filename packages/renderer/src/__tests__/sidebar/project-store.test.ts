@@ -14,7 +14,8 @@
  *
  * 环境说明：合并文件走默认 happy-dom；原 node 环境节均为纯逻辑 / fs 扫描测试，兼容。
  *
- * vi.mock 说明：'@/api' 门面 mock（project 域 load/save）由 project-store 与
+ * vi.mock 说明：'@/api' 门面 mock（project 域现行成员，load/createProject/rename/
+ * removeProject/setActiveProject——project.save 端点已随 §6.6/u6b 删除）由 project-store 与
  * project-ordering 两节共享（原两文件工厂逐字相同，各节 beforeEach mockClear 保实现）；
  * 其余六节不消费 '@/api'。[读码] 核实于合并时点。
  *
@@ -49,7 +50,6 @@ import { usageBarClass } from '@/components/panel/context-usage-display'
 vi.mock('@/api', () => ({
   project: {
     load: vi.fn(),
-    save: vi.fn().mockResolvedValue(undefined), // legacy 通道（u6b 拆除），现行用例不再断言
     createProject: vi.fn(),
     renameProject: vi.fn(),
     removeProject: vi.fn(),
