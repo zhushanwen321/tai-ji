@@ -55,18 +55,28 @@ async function startManager(authToken: string | null, options: ConnectionManager
   return { port: addr.port, conn, httpServer }
 }
 
-/** 建立连接并完成一次 auth 尝试，返回握手结果与 close 码（不改变量状态，供负面/正面共用）。 */
-async function tryAuth(port: number, token: string): Promise<{ ok: boolean; closeCode: number | null }> {
+/** auth.result 应答 payload（§6.1 补充断言消费：runtimeId 回传）。 */
+interface AuthReplyPayload {
+  ok?: boolean
+  reason?: string
+  runtimeId?: string | null
+}
+
+/**
+ * 建立连接并完成一次 auth 尝试，返回握手结果、应答 payload 与 close 码
+ * （不改变量状态，供负面/正面共用；payload 供 §6.1 runtimeId 回传断言消费）。
+ */
+async function tryAuth(port: number, token: string): Promise<{ ok: boolean; closeCode: number | null; payload: AuthReplyPayload }> {
   const ws = new WebSocket(`ws://127.0.0.1:${port}`)
   const opened = new Promise<void>((resolve, reject) => {
     ws.on('open', resolve)
     ws.on('error', reject)
   })
-  const authResult = new Promise<boolean>((resolve, reject) => {
+  const reply = new Promise<AuthReplyPayload>((resolve, reject) => {
     ws.once('message', (data) => {
       try {
-        const msg = JSON.parse(String(data)) as { type: string; payload?: { ok?: boolean } }
-        if (msg.type === 'auth.result') resolve(msg.payload?.ok === true)
+        const msg = JSON.parse(String(data)) as { type: string; payload?: AuthReplyPayload }
+        if (msg.type === 'auth.result') resolve(msg.payload ?? {})
         else reject(new Error(`expected auth.result, got ${msg.type}`))
       } catch (e) { reject(e) }
     })
@@ -76,15 +86,16 @@ async function tryAuth(port: number, token: string): Promise<{ ok: boolean; clos
   })
   await opened
   ws.send(JSON.stringify({ type: 'auth', payload: { token } }))
-  const ok = await authResult
+  const payload = await reply
+  const ok = payload.ok === true
   // 成功路径连接保持存活（无 close 帧）；close 码断言只对拒绝路径（rejectAuth 主动 close）有意义。
   if (ok) {
     ws.terminate()
-    return { ok, closeCode: null }
+    return { ok, closeCode: null, payload }
   }
   const closeCode = await closed
   ws.terminate()
-  return { ok, closeCode }
+  return { ok, closeCode, payload }
 }
 
 function writeRemoteAccessFile(dir: string, content: string): string {
@@ -271,6 +282,39 @@ describe('ConnectionManager remote-access (U0.1)', () => {
       fs.rmSync(filePath)
       expect(readRemoteAccessToken()).toBeNull() // 复发 → 重新响亮（防长期降级掩盖复发）
       expect(errorSpy).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  // ── auth 应答回传实例标识（connection-datasync-ssot §6.1）───────────────────
+  // 注入形态回传原值（supervisor spawn 经 env 注入的 16 hex）；未注入（裸跑/env 缺失）
+  // 置 null——缺失容忍不 fail-closed（对照 token 的 fail-closed，见 index.ts
+  // resolveRuntimeId）。旧客户端兼容（只读 payload.ok，P-1 已核实多余字段无消费者）
+  // 由本文件全部既有用例的 ok 断言承载——它们在新应答形态下不改一字仍须全绿。
+
+  describe('auth 应答回传实例标识（§6.1）', () => {
+    it('注入 runtimeId → 应答回传原值', async () => {
+      const harness = await startManager(SPAWN_TOKEN, { runtimeId: 'cafebabedeadbeef' })
+      opened.push(harness)
+      const result = await tryAuth(harness.port, SPAWN_TOKEN)
+      expect(result.ok).toBe(true)
+      expect(result.payload).toMatchObject({ ok: true, runtimeId: 'cafebabedeadbeef' })
+    })
+
+    it('未注入 → runtimeId 为 null（缺失容忍，auth 仍通过）', async () => {
+      const harness = await startManager(SPAWN_TOKEN)
+      opened.push(harness)
+      const result = await tryAuth(harness.port, SPAWN_TOKEN)
+      expect(result.ok).toBe(true)
+      expect(result.payload).toMatchObject({ ok: true, runtimeId: null })
+    })
+
+    it('拒绝路径应答不含 runtimeId（ok:false 只带 reason）', async () => {
+      const harness = await startManager(SPAWN_TOKEN, { runtimeId: 'cafebabedeadbeef' })
+      opened.push(harness)
+      const result = await tryAuth(harness.port, 'wrong-token')
+      expect(result.ok).toBe(false)
+      expect(result.payload.ok).toBe(false)
+      expect('runtimeId' in result.payload).toBe(false)
     })
   })
 

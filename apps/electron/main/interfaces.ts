@@ -14,7 +14,7 @@
  * @see docs/architecture/design.md §4.2 M1–M5
  */
 import type { BrowserWindow } from 'electron'
-import type { WindowState, LatestReleaseInfo, LaunchResult, UpdateSource } from '@taiji/shared'
+import type { WindowState, LatestReleaseInfo, LaunchResult, UpdateSource, RuntimeTargetSnapshot } from '@taiji/shared'
 import type { BrowserViewManager } from './browser/browser-view-manager.js'
 import type { IUpdateOrchestrator } from './update/orchestrator.js'
 
@@ -77,6 +77,13 @@ export interface IRuntimeSupervisor {
    * renderer 经 get-runtime-token IPC 读取后作为 WS 首条 auth 消息发送。
    */
   readonly token: string | null
+
+  /**
+   * 当前连接目标快照（connection-datasync-ssot §6.1；未启动为 null）。
+   * 单一权威读口：renderer 启动与重连前经 get-runtime-target-snapshot IPC 拉取；
+   * runtime-port 广播载荷同形态（{seq, runtimeId, port, token}）。
+   */
+  readonly targetSnapshot: RuntimeTargetSnapshot | null
 
   /**
    * 最近一次启动失败原因（RD-3#2 启动失败真因可见性；成功启动后清除，null = 当前无已知失败）。

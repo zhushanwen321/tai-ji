@@ -303,6 +303,12 @@ export type ClientMessageType =
   | 'workspace.listRecent' | 'workspace.record' | 'workspace.detect'
   | 'workspace.setPinned' | 'workspace.defaultSessionDir'
   | 'project.load' | 'project.save'
+  // project 写通道命令化（connection-datasync-ssot §6.6）：runtime 唯一写入口的四个
+  // 编辑命令，替代 renderer deep-watch 整表回写（project.save）。请求携带期望 revision
+  // （最近一次读到的），runtime 校验一致才执行、执行后 +1，不匹配拒绝（过时窗口保护）；
+  // 成功回执 = ProjectCommandReply（完整新状态 + revision 新值）。payload 见 ClientMessageMap
+  // project 命令登记段。
+  | 'project.createProject' | 'project.renameProject' | 'project.removeProject' | 'project.setActiveProject'
   | 'worktree.create' | 'worktree.listBranches' | 'worktree.list'
   | 'terminal.spawn' | 'terminal.write' | 'terminal.resize' | 'terminal.kill' | 'terminal.attach'
   | 'terminal.list'
@@ -407,6 +413,61 @@ export type ClientMessageType =
   | 'canvas.list' | 'canvas.get' | 'canvas.mutate'
 
 // ── Payload 类型定义 ────────────────────────────────────────────
+
+/**
+ * runtime 目标快照（connection-datasync-ssot §6.1）：连接目标的单一权威形态。
+ *
+ * 生产方 = Electron main 侧 supervisor（每次 spawn 更新并递增 seq）；消费方 = renderer
+ * 连接控制器（启动与重连前经 GET_RUNTIME_TARGET_SNAPSHOT IPC 拉取，广播推送同形态载荷）。
+ * 四字段并置消解「端口 / token / 实例」三路零散读取的目标判定歧义：
+ * - seq：supervisor 进程内 spawn 计数，每次 spawn +1。唯一职责 = 过期快照防护——
+ *   期望快照建立后仅接受更高 seq（同 seq 幂等、更低 seq 丢弃），防旧代快照把连接
+ *   目标拉回旧实例（§6.3 裁决表）。seq 单调性以 supervisor 进程生命周期为界。
+ * - runtimeId：spawn 时签发的实例标识（randomBytes 8 字节 hex，与 token 同点签发）。
+ *   本职 = 「连的是谁」的核对锚（auth 应答回传值与此比对，不一致 fail-fast）；
+ *   不用 token 兼任（凭据可热轮换，凭据变化 ≠ 进程变化）也不用端口兼任（重启常
+ *   落回原端口，漏判重启）。
+ * - port / token：runtime WS 端口与 auth 凭据（token 热轮换时快照随更新）。
+ */
+export interface RuntimeTargetSnapshot {
+  /** 目标代数：supervisor 进程内 spawn 计数，每次 spawn +1（过期快照防护，见上注）。 */
+  seq: number
+  /** 实例标识：spawn 时签发的 randomBytes(8) hex。 */
+  runtimeId: string
+  /** runtime WS 监听端口。 */
+  port: number
+  /** runtime WS auth token。 */
+  token: string
+}
+
+/**
+ * project 写命令统一回执（connection-datasync-ssot §6.6）：runtime 唯一写入口的
+ * 四命令（project.createProject / renameProject / removeProject / setActiveProject）
+ * 共用形态——执行成功后的完整新状态整表回执（小表免增量 diff）+ revision 新值。
+ *
+ * revision 与状态并列（不并入 ProjectStoreState 类型）：revision 是文件写入代数
+ * 水位，由命令执行 +1；load 回执（project.loaded）为 ProjectLoadReply（状态整表
+ * + 当前 revision，命令首发 revision 的唯一来源）。
+ * 回执同时供 §6.4 命令×同步交错判据（在途 load 回执按 revision 判旧丢弃）。
+ * 失败不走本形态：统一 error envelope（renderer 保持命令前状态 + toast）。
+ */
+export interface ProjectCommandReply {
+  /** 执行成功后的完整项目状态（整表）。 */
+  state: ProjectStoreState
+  /** 执行后的 revision 新值（命令执行成功恒 +1）。 */
+  revision: number
+}
+
+/**
+ * project.load 回执（connection-datasync-ssot §6.6）：完整项目状态整表（纯读，
+ * 不改变 revision）+ 文件当前 revision 水位。存量文件无 revision 字段按 0 读。
+ * revision 必填不并入 ProjectStoreState（那是磁盘/内存纯状态形态，见 shared/project.ts）：
+ * 消费方（renderer project store）以本回执学得首发命令携带的期望 revision。
+ */
+export interface ProjectLoadReply extends ProjectStoreState {
+  /** 文件当前 revision（存量无该字段的文件按 0 读）。 */
+  revision: number
+}
 
 /** quota fetch/getCached/refresh 三 reply 的共享 payload（A2-4）：
  *  data=null 失败态时携带 reason（getCached 为内存中最近一次失败原因，
@@ -1220,6 +1281,14 @@ export interface ClientMessageMap {
   // 对齐 recent-workspaces.json 模式；localStorage 仅首启迁移源）。
   'project.load': Record<string, never>
   'project.save': ProjectStoreState
+  // project 写命令四件套（connection-datasync-ssot §6.6）：请求携带期望 revision（最近一次
+  // 读到的文件写入代数），runtime 校验「命令 revision === 当前 revision」才执行、执行后 +1，
+  // 不匹配拒绝（过时窗口保护——多窗口/重拉在途窗口的并发写防护）。回执见 ReplyPayloadMap
+  // project 命令段（ProjectCommandReply：完整新状态 + revision 新值）。
+  'project.createProject': { name: string; revision: number }
+  'project.renameProject': { projectId: string; name: string; revision: number }
+  'project.removeProject': { projectId: string; revision: number }
+  'project.setActiveProject': { projectId: string; revision: number }
   /** workspace.detect：检测 cwd 所在 git 仓库模式（bare-workspace / plain-repo / not-repo）。
    *  返回三态 { mode, wsRoot, barePath, repoRoot, defaultBranch }。 */
   'workspace.detect': { cwd: string }
@@ -1573,6 +1642,15 @@ export type ServerMessageType =
   // 同名——delivery.* / session.subscribe 同款 payload 消费型同名模式）。
   | 'session.revokeMessage'
   | 'project.loaded'
+  // project 写命令四件套的 reply type（connection-datasync-ssot §6.6，与 request 同名——
+  // preset.create / session.revokeMessage 同款 payload 消费型同名模式）：payload =
+  // ProjectCommandReply（完整新状态 + revision 新值），失败走统一 error envelope。
+  | 'project.createProject' | 'project.renameProject' | 'project.removeProject' | 'project.setActiveProject'
+  // project.changed（connection-datasync-ssot §6.6）：project 写命令执行成功后的全局
+  // 失效信号广播（runtime 唯一写入口的变更通知）。只作失效信号不带数据——各窗口收到后
+  // 触发 project 域重新拉取（拉为主、推补充，ADR-0097）；payload 仅携带 revision 水位
+  // 供消费方判「是否比自己已知更新」，不做回执合流。
+  | 'project.changed'
   | 'session.subagents' | 'session.subagentHistory'
   // session.getSubagentStreamState（B2 subagent-stream-chunk §4.1）：运行中 subagent 流状态
   // 拉取 RPC 的 reply type（与 request 同名——session.subscribe / delivery.* 同款 payload
@@ -2669,7 +2747,11 @@ export interface ServerMessageMapBase {
   'pong': Record<string, never>
   // auth.result：WS auth 握手结果（S1-W1）。ok=false 时 reason 描述拒绝原因
   // （bad_token / no_token_configured），客户端据此提示。握手失败连接随后被 close 1008。
-  'auth.result': { ok: boolean; reason?: string }
+  // runtimeId（connection-datasync-ssot §6.1）：ok=true 时回传 runtime 进程实例标识
+  // （supervisor spawn 时经 env 注入，auth 应答是 runtime → 客户端方向唯一回传点），
+  // 供连接控制器与目标快照核对「连的是谁」；env 未注入（裸跑形态）时为 null——
+  // 运行时侧容忍缺失，fail-closed 只对 token。旧客户端只读 ok 不受影响（P-1）。
+  'auth.result': { ok: boolean; reason?: string; runtimeId?: string | null }
   'error': { code: string; message: string; sessionId?: string; details?: Record<string, unknown> }
   // 流式异步推送失败（server-push 通道，区别于请求级 error envelope；见错误契约文档）
   'message.error': { sessionId: string; message: string }
@@ -3249,8 +3331,18 @@ export interface ServerMessageMapBase {
   // session.deletedByCwd：session.deleteByCwd reply（session-message-handler.ts reply BatchDeleteResult，
   // 含 deleted/failed 聚合列表，前端据此 toast 部分失败）。
   'session.deletedByCwd': BatchDeleteResult
-  // project.loaded：project.load reply（project 列表全量，D14 迁 runtime projects.json）。
-  'project.loaded': ProjectStoreState
+  // project.loaded：project.load reply（project 列表全量，D14 迁 runtime projects.json；
+  // connection-datasync-ssot §6.6 起附带 revision 水位——命令首发 revision 的来源）。
+  'project.loaded': ProjectLoadReply
+  // project 写命令四件套 reply（与 request 同名，connection-datasync-ssot §6.6）：
+  // payload = ProjectCommandReply（完整新状态 + revision 新值）。
+  'project.createProject': ProjectCommandReply
+  'project.renameProject': ProjectCommandReply
+  'project.removeProject': ProjectCommandReply
+  'project.setActiveProject': ProjectCommandReply
+  // project.changed：写命令执行成功后的失效信号广播（connection-datasync-ssot §6.6）。
+  // revision = 执行后的文件写入代数新值；不带状态数据，消费方据此触发 project 域重拉。
+  'project.changed': { revision: number }
   // session.renamed：session.rename reply（session-message-handler.ts:162 reply { sessionId, name }）。
   // [C-pi-14/ADR-0065] mutation reply（分支二原样存储）：wire 回显请求名 + broadcastSessionList
   // 全量广播兜底；ReplyPayloadMap 登记为 ack 型（豁免理由见 ADR-0065 豁免清单）。
@@ -3838,6 +3930,13 @@ export interface ReplyPayloadMap {
   'workspace.defaultSessionDir': ServerMessageMap['workspace.defaultSessionDir:result']
   'project.load': ServerMessageMap['project.loaded']
   'project.save': void                  // ack 型（保存成功即 resolve）
+  // project 写命令四件套（connection-datasync-ssot §6.6）：回执 = 执行成功后的完整新状态
+  // + revision 新值（payload 消费型，改状态命令回生效值口径，C-pi-13）；失败走统一
+  // error envelope（renderer 保持命令前状态），不设独立失败回执形态。
+  'project.createProject': ServerMessageMap['project.createProject']
+  'project.renameProject': ServerMessageMap['project.renameProject']
+  'project.removeProject': ServerMessageMap['project.removeProject']
+  'project.setActiveProject': ServerMessageMap['project.setActiveProject']
   'workspace.detect': ServerMessageMap['workspace.detected']
   'worktree.create': ServerMessageMap['worktree.created']
   'config.getTerminalConfig': ServerMessageMap['config.terminalConfig']

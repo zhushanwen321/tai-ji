@@ -1,7 +1,7 @@
 /**
  * 桥接 IPC handler（纯转发，无副作用）。
  *
- * 对应 spec §4.2 M4「桥接 handler」：getRuntimePort / getRuntimePortOffset /
+ * 对应 spec §4.2 M4「桥接 handler」：getRuntimePort /
  * getWindows / focusWindow / createWindow。
  * 只读 Main 内部状态或委托给 windowManager/runtime，无 OS 副作用。
  * remote-access 域（get-remote-access-info / rotate-remote-access-token /
@@ -24,8 +24,8 @@ import { sep } from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
 import {
   GET_RUNTIME_PORT,
-  GET_RUNTIME_PORT_OFFSET,
   GET_RUNTIME_TOKEN,
+  GET_RUNTIME_TARGET_SNAPSHOT,
   GET_RUNTIME_START_ERROR,
   RUNTIME_RESTART,
   GET_DATA_DIR,
@@ -52,11 +52,15 @@ import { isValidRemoteAccessEnabled } from './input-validators.js'
 export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
   // ── runtime 端口 / token（只读 supervisor 状态）───────────────────
   ipcMain.handle(GET_RUNTIME_PORT, () => deps.runtime.port)
-  ipcMain.handle(GET_RUNTIME_PORT_OFFSET, () => deps.runtime.portOffset)
   // S1-W1（spec §3.3 D4）：WS auth token 下发通道①——renderer 经 preload
   // getRuntimeToken 读取（与 get-runtime-port 同模式），连接 open 后作首条 auth 消息发送。
   // 通道②（<dataDir>/runtime-token 文件）面向 CLI / 脚本，不经此 IPC。
   ipcMain.handle(GET_RUNTIME_TOKEN, () => deps.runtime.token)
+  // connection-datasync-ssot §6.1：连接目标快照单一权威读口（与 get-runtime-port 同模式
+  // 只读 supervisor 状态）——{seq, runtimeId, port, token} 并置，替代零散的 port/token 两路
+  // 读取；未启动返回 null（renderer 连接控制器进等待态）。本单元只加不删：旧
+  // get-runtime-port 通道保留，消费切换后由后续单元统一清理。
+  ipcMain.handle(GET_RUNTIME_TARGET_SNAPSHOT, () => deps.runtime.targetSnapshot)
   // RD-3#2：启动失败真因拉取（与 get-runtime-port 同模式只读 supervisor 状态）。
   // runtime-error 推送可能早于 renderer 订阅安装（boot 竞态，webContents.send 静默丢失）
   // ——renderer 连接编排 init 时主动拉取，徒劳自动重试短路 + 连接屏显示真实原因。

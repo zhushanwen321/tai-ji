@@ -43,3 +43,11 @@ export interface ProjectStoreState {
   projects: Project[]
   activeProjectId: string
 }
+
+/**
+ * 默认项目 id（connection-datasync-ssot §6.6① 归一化迁 runtime 时上移的领域常量）：
+ * nameless 默认项目 = 未归类/孤儿 session 的兜底聚合。消费方 = runtime ProjectStore
+ * 归一化（默认项缺失补插 + activeProjectId 失配回退链终点）与 renderer project store
+ * （本地导出随 u6b 收敛对齐此单一登记处）。跨包禁止手抄字面量。
+ */
+export const DEFAULT_PROJECT_ID = 'proj-default'

@@ -63,6 +63,13 @@ export type {
   // 两段式安装 reply（provider-plugin-access U4/U6）：确认卡知情面 + 提交结果
   //（core plugin 域 preparePluginInstall/confirmPluginInstall 跨包具名消费）
   PluginPrepareInstallReply, PluginConfirmInstallReply,
+  // 连接目标快照 + project 写命令统一回执（connection-datasync-ssot u-foundation）：
+  // 快照形状 = supervisor 生产（main/preload IPC 链）与 core 连接控制器消费跨包共用；
+  // 命令回执 = runtime 写通道（u6a）与 renderer project store（u5）跨包共用
+  RuntimeTargetSnapshot, ProjectCommandReply,
+  // project.load 回执（connection-datasync-ssot u6a）：状态整表 + revision 水位——
+  // core mock project 域 / renderer project store 首发命令 revision 来源，跨包共用
+  ProjectLoadReply,
 } from './protocol'
 // 消息撤回（U3）：__taiji_nav__ 信令命令名常量——U4 runtime 编排跨包消费；
 // 本文件对 protocol.ts 是显式 allowlist（非 export *），漏登记会使常量对下游不可达。
@@ -250,11 +257,16 @@ export type { ProviderApiType } from './constants'
 // 但 renderer 严禁调用（process 未定义 ReferenceError）；main / runtime 专用，
 // 完整警示见 constants.ts 内 JSDoc。
 export { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES, PLUGIN_EVENT_PAYLOAD_MAX_BYTES, RING_BUDGET_BYTES, READ_PRECHECK_MAX_BYTES, BYTES_PER_MB, HISTORY_BUDGET, DEFAULT_LOG_KEEP_DAYS, readLogKeepDays, RUNTIME_PLANNED_EXIT_CODE } from './constants'
+// runtime 实例标识 env 名（connection-datasync-ssot §6.1：main spawn 注入方与
+// runtime auth 应答读取方跨包共用，禁字面量分叉）。
+export { RUNTIME_ID_ENV } from './constants'
 // Electron IPC 通道名 SSOT（u-foundation：全量 invoke / 推送通道常量——preload 与
 // main 两侧注册 import 消费，renderer 经 preload electronAPI 方法面间接使用）。
 export {
   RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, SESSION_EXPORT_JSONL, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ,
-  RUNTIME_PORT, RUNTIME_ERROR, RUNTIME_RESTARTING, RUNTIME_FAILED, GET_RUNTIME_PORT, GET_RUNTIME_PORT_OFFSET, GET_RUNTIME_TOKEN, GET_RUNTIME_START_ERROR, RUNTIME_RESTART,
+  RUNTIME_PORT, RUNTIME_ERROR, RUNTIME_RESTARTING, RUNTIME_FAILED, GET_RUNTIME_PORT, GET_RUNTIME_TOKEN, GET_RUNTIME_START_ERROR, RUNTIME_RESTART,
+  // 连接目标快照读口（connection-datasync-ssot §6.1，u1 同批接线 preload / renderer ipc）
+  GET_RUNTIME_TARGET_SNAPSHOT,
   CREATE_WINDOW, GET_WINDOWS, FOCUS_WINDOW, WINDOW_LIST_UPDATED, WINDOW_MINIMIZE, WINDOW_TOGGLE_MAXIMIZE, WINDOW_CLOSE, FULLSCREEN_CHANGED,
   PICK_DIRECTORY, PICK_FILE, OPEN_EXTERNAL, REVEAL_IN_FOLDER, GET_DATA_DIR,
   SHORTCUT, SHORTCUT_FORWARD,
@@ -358,6 +370,9 @@ export * from './file-tree'
 export * from './local-file-url'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
+// 默认项目 id（connection-datasync-ssot §6.6① 归一化迁 runtime）：runtime ProjectStore
+// 与 renderer project store 共用的领域常量，单一登记处禁止手抄字面量。
+export { DEFAULT_PROJECT_ID } from './project'
 // [subagent-observability §3.3.3⑤] FailureCause 族 = sdk 权威的 type-only re-export
 // （subagent.ts 内转出口；wire 载体 = SubagentRecord.lastRound.failure，renderer 红点
 // 判据与 u8 测试的数据源）。SubagentLastRound = 轮收条事实快照契约（F4）。

@@ -43,6 +43,7 @@ import { createWriteStream, existsSync, mkdirSync, renameSync, statSync, writeFi
 import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import { app } from 'electron'
+import { RUNTIME_ID_ENV } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import { readMainLogMaxBytes, mainLogger } from '../logs/main-logger.js'
 import { buildSafeEnv } from './safe-env.js'
@@ -263,14 +264,22 @@ export const SPAWN_ERROR_EXIT_CODE = -1
  * spawn 结果：child 进程 + 本次生成的 WS auth token（S1-W1，spec §3.3 D4）。
  * token 双通道分发——env TAIJI_RUNTIME_TOKEN（runtime 自身 + renderer 经 IPC 读 supervisor）+
  * <dataDir>/runtime-token 文件（CLI / 脚本消费）。每次 spawn 重新生成（旧 token 随旧进程死亡）。
+ * runtimeId（connection-datasync-ssot §6.1）：本次 spawn 的实例标识（randomBytes 8 字节 hex），
+ * 与 token 同点签发、经 env TAIJI_RUNTIME_ID 注入 runtime（auth 成功应答回传，供连接
+ * 控制器与目标快照核对「连的是谁」）。与 token 的职责分工：token 是鉴权凭据，runtimeId 是
+ * 进程身份——凭据可热轮换，身份只在 spawn 时签发。
  */
 export interface SpawnRuntimeResult {
   child: ChildProcess
   token: string
+  runtimeId: string
 }
 
 /** runtime WS auth token 熵：32 字节 = 256 bit（hex 编码后 64 字符）。 */
 const RUNTIME_TOKEN_BYTES = 32
+
+/** runtime 实例标识熵：8 字节 = 64 bit（hex 编码后 16 字符），协议 RuntimeTargetSnapshot.runtimeId 约束。 */
+const RUNTIME_ID_BYTES = 8
 
 /**
  * runtime-token 文件权限：owner 读写（0600）。token 等同 WS 凭据，
@@ -328,13 +337,17 @@ export function buildRemoteAccessSpawnArgs(env: MobileDistEnv, enabled: boolean)
  *
  * @param port runtime 监听端口
  * @param onExit 子进程退出回调（传入 code），supervisor 用它清理状态
- * @returns { child, token }——child 为已绑定 stdout/stderr/exit 事件的进程实例；
- *          token 为本次 spawn 生成的 WS auth token（supervisor 持有并经 get-runtime-token IPC 暴露给 renderer）
+ * @returns { child, token, runtimeId }——child 为已绑定 stdout/stderr/exit 事件的进程实例；
+ *          token 为本次 spawn 生成的 WS auth token（supervisor 持有并经 get-runtime-token IPC 暴露给 renderer）；
+ *          runtimeId 为本次 spawn 签发的实例标识（supervisor 并入目标快照经 IPC 暴露）
  * @throws runtime 入口文件不存在
  */
 export function spawnRuntimeProcess(port: number, onExit?: (code: number | null) => void): SpawnRuntimeResult {
-  // S1-W1：每次 spawn 生成新 token（env 注入 + 文件双通道），renderer 重连时经 IPC 拿新值
+  // S1-W1：每次 spawn 生成新 token（env 注入 + 文件双通道），renderer 重连时经 IPC 拿新值。
+  // runtimeId（§6.1）：与 token 同点签发的实例标识（每次 spawn 必新——身份随进程生灭，
+  // 复用旧值会让重启后的 runtime 被误判为同一实例）。
   const runtimeToken = issueRuntimeToken()
+  const runtimeId = randomBytes(RUNTIME_ID_BYTES).toString('hex')
 
   // 根据打包状态选择 runtime 启动方式
   const projectRoot = app.getAppPath()
@@ -430,6 +443,9 @@ export function spawnRuntimeProcess(port: number, onExit?: (code: number | null)
       // S1-W1：WS auth token（token 分发通道①env；通道② <dataDir>/runtime-token 文件
       // 在 issueRuntimeToken 内写入）。TAIJI_ 前缀在 ENV_WHITELIST_PREFIXES 白名单内。
       TAIJI_RUNTIME_TOKEN: runtimeToken,
+      // 实例标识（connection-datasync-ssot §6.1）：与 token 同点签发同点注入（buildSafeEnv
+      // 同一批 extras）。env 名 SSOT = shared RUNTIME_ID_ENV；TAIJI_ 前缀同在白名单内。
+      [RUNTIME_ID_ENV]: runtimeId,
     }),
   }
   const child = spawn(cmd, args, spawnOptions)
@@ -495,7 +511,7 @@ export function spawnRuntimeProcess(port: number, onExit?: (code: number | null)
     onExit?.(code)
   })
 
-  return { child, token: runtimeToken }
+  return { child, token: runtimeToken, runtimeId }
 }
 
 /**

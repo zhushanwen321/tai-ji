@@ -268,14 +268,15 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
         ws.on('error', reject)
       })
       ws.send(JSON.stringify({ type: 'auth', payload: { token: REMOTE_TOKEN_A } }))
-      const authOk = await new Promise<boolean>((resolve) => {
+      const authReply = await new Promise<{ type: string; payload?: { ok?: boolean; runtimeId?: string | null } }>((resolve) => {
         ws.once('message', (data) => {
-          const msg = JSON.parse(String(data)) as { type: string; payload?: { ok?: boolean } }
-          resolve(msg.type === 'auth.result' && msg.payload?.ok === true)
+          resolve(JSON.parse(String(data)) as { type: string; payload?: { ok?: boolean; runtimeId?: string | null } })
         })
       })
       ws.terminate()
-      expect(authOk).toBe(true)
+      // E5 降级只关静态托管，WS auth 照常——应答同时回传实例标识（connection-datasync-ssot
+      // §6.1；本 harness 未注入 runtimeId → null 缺省形态，缺失容忍不 fail-closed）。
+      expect(authReply).toMatchObject({ type: 'auth.result', payload: { ok: true, runtimeId: null } })
     })
   })
 

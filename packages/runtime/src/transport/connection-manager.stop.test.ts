@@ -56,9 +56,18 @@ async function connectAndAuth(port: number): Promise<WsType> {
   const authResult = new Promise<boolean>((resolve, reject) => {
     ws.once('message', (data) => {
       try {
-        const msg = JSON.parse(String(data)) as { type: string; payload?: { ok?: boolean } }
-        if (msg.type === 'auth.result') resolve(msg.payload?.ok === true)
-        else reject(new Error(`expected auth.result, got ${msg.type}`))
+        const msg = JSON.parse(String(data)) as {
+          type: string
+          payload?: { ok?: boolean; runtimeId?: string | null }
+        }
+        if (msg.type !== 'auth.result') {
+          reject(new Error(`expected auth.result, got ${msg.type}`))
+          return
+        }
+        // auth 应答实例标识回传（connection-datasync-ssot §6.1）：本 harness 未注入
+        // runtimeId → 缺省 null 形态（缺失容忍，不 fail-closed——对照 token）。
+        expect(msg.payload).toMatchObject({ ok: true, runtimeId: null })
+        resolve(msg.payload?.ok === true)
       } catch (e) { reject(e) }
     })
   })
