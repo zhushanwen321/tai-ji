@@ -3,6 +3,7 @@ export default {
   connecting: '连接中…',
   connected: '已连接',
   reconnecting: '重新连接中…',
+  waitingRuntime: '正在启动 runtime…',
   restarting: 'runtime 重启中…',
   failed: 'runtime 不可用，重试多次仍失败',
   // 重试按钮 IPC 失败的用户可见反馈（含「重试」恢复动作）

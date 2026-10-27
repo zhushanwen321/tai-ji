@@ -8,7 +8,7 @@
  * 之后 ask-user 的 extension.ui_request Promise 永远不会被 resolve（runtime 重启是全新
  * 实例），必须清空 pending，否则 UI 卡 waiting 态 + Promise 永挂。
  *
- * 注意：onRuntimePort（正常端口重连，pi 还活着）不清 pending、不触发清理。
+ * 注意：幂等快照重播（§6.3 裁决表第一行，seq 相同不动作）不清 pending、不触发清理。
  *
  * 迁移改造（§10.2 D-1）：store 调用已迁 renderer useMessageEffects（该层由
  * useMessageEffects.test.ts 覆盖），本测试断言 core 侧端口行为：
@@ -44,6 +44,11 @@ vi.mock('../ws-client', () => ({
   },
   onMessage: vi.fn(() => () => {}),
   onQueueDrop: vi.fn(() => () => {}),
+  setWaitingRuntime: vi.fn(),
+  onAuthAccepted: vi.fn(() => () => {}),
+  onAuthRejected: vi.fn(() => () => {}),
+  resetAuthRejectionSuppression: vi.fn(),
+  isAuthRejectedSuppressed: vi.fn(() => false),
 }))
 
 // ── pending 真实模块 + spyOn（D9 消 vi.mock 模块内部）─────────────────
@@ -57,7 +62,7 @@ const rejectAllSpy = vi.spyOn(pendingApi, 'rejectAll')
 // 每个 onRuntime* 返回一个 unregister，同时把传入的 cb 暴露给测试触发。
 let restartingCb: (() => void) | null = null
 let failedCb: (() => void) | null = null
-let portCb: ((port: number) => void) | null = null
+let portCb: ((snapshot: import('@taiji/shared').RuntimeTargetSnapshot) => void) | null = null
 let errorCb: ((error: { message: string }) => void) | null = null
 const mockRuntimeCleanup = vi.fn()
 const mockT = vi.fn((key: string) => `[${key}]`)
@@ -65,10 +70,8 @@ const mockT = vi.fn((key: string) => `[${key}]`)
 function makePorts(): ConnectionPorts {
   return {
     ipc: {
-      getRuntimePort: vi.fn().mockResolvedValue(undefined),
-      getRuntimePortOffset: vi.fn().mockResolvedValue(undefined),
-getRuntimeToken: vi.fn(async () => null),
-      onRuntimePort: (cb: (port: number) => void) => {
+      getRuntimeTargetSnapshot: vi.fn().mockResolvedValue(null),
+      onRuntimePort: (cb: (snapshot: import('@taiji/shared').RuntimeTargetSnapshot) => void) => {
         portCb = cb
         return () => {
           portCb = null
@@ -168,16 +171,19 @@ describe('T5: runtime 重连清理 ask-user pending（clearAllPending）', () =>
     teardown()
   })
 
-  it('onRuntimePort（正常端口变化）→ 不触发清理（pi 还活着，pending 有效）', async () => {
+  it('幂等快照重播（seq 相同）→ 不动作：不断连、不清 pending（§6.3 裁决表第一行）', async () => {
     const { init, teardown } = useConnection()
     await init()
     expect(portCb).not.toBeNull()
 
-    // 模拟 runtime 重启成功推新端口（state 非 disconnected 才会重连，但清理与 connect 无关）
+    // 先推一个快照建立期望（seq 1），再模拟幂等重播（同 seq 1——4 广播点重复发送形态）
     mockStateRef.value = 'connected'
     await nextTick()
-    portCb!(9999)
-    // 关键断言：正常端口重连不清 pending、不触发清理（state 未离开 connected）
+    portCb!({ seq: 1, runtimeId: 'rt-a', port: 4000, token: 'tok-a' })
+    mockDisconnect.mockClear()
+    portCb!({ seq: 1, runtimeId: 'rt-a', port: 4000, token: 'tok-a' })
+    // 关键断言：重复快照不拆连（不 disconnect）→ 不触发任何清理路径
+    expect(mockDisconnect).not.toHaveBeenCalled()
     expect(mockRuntimeCleanup).not.toHaveBeenCalled()
     expect(rejectAllSpy).not.toHaveBeenCalled()
     teardown()

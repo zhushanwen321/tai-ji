@@ -63,6 +63,7 @@ export type ConnectionState =
   | 'reconnecting'
   | 'restarting' // runtime 崩溃，主进程正在拉起新实例（来自 IPC runtime-restarting）
   | 'failed'     // runtime 重启用尽，需用户手动重试（来自 IPC runtime-failed）
+  | 'waiting-runtime' // 已请求目标快照但尚未获得，无连接可发起（connection-datasync-ssot §6.8；快照推送/拉取到达即转 connecting）
 
 /**
  * connect 凭据对象（S4 凭据语义显式化）：auth 意图由调用方显式声明，替代旧
@@ -217,6 +218,28 @@ export function isAuthRejectedSuppressed(): boolean {
   return authRejectedSuppressed
 }
 
+// ── auth 接受信号（实例核对，connection-datasync-ssot §6.1/§6.3）─────────────
+
+/**
+ * auth 接受回调（单槽，对齐 onAuthRejected 体例）：auth.result ok:true 时、**先于
+ * connected 化**触发，携带应答 runtimeId（runtime 侧 env 注入缺失/旧 runtime 时为 null）。
+ *
+ * 消费方 = use-connection 本地形态连接控制器（核对期望快照 runtimeId，不一致 fail-fast）。
+ * 回调返回 false = 消费方裁决拒绝该连接（连到非预期实例）——ws-client 停止 connected 化
+ * 并主动断开（不走自动重连；重拉快照/失败呈现由消费方编排）。返回 true（或未注册）=
+ * 继续 markConnected。未注册时行为与旧客户端逐字节一致（P-1 兼容：仅读 payload.ok 的
+ * 消费路径不破坏）。
+ */
+let authAcceptedHandler: ((info: { runtimeId: string | null }) => boolean) | null = null
+
+/** 注册 auth 接受回调，返回取消函数。 */
+export function onAuthAccepted(cb: (info: { runtimeId: string | null }) => boolean): () => void {
+  authAcceptedHandler = cb
+  return () => {
+    if (authAcceptedHandler === cb) authAcceptedHandler = null
+  }
+}
+
 /**
  * 显式解除 auth 拒绝重连抑制（token 重试路径专用）：移动壳 token 输入视图提交新凭据后、
  * 重新发起连接前调用。markConnected（auth 成功）会自行复位，本入口覆盖「重试再次失败 →
@@ -365,6 +388,19 @@ export function setFailed(): void {
 }
 
 /**
+ * 设置为 waiting-runtime 态（connection-datasync-ssot §6.2/§6.8：init 拉取目标快照为
+ * null 时调，use-connection 连接控制器编排）。语义 = 「已请求目标快照但尚未获得，无连接
+ * 可发起」——与 connecting（已发起连接正在握手）显式区分，连接屏呈现「正在启动 runtime」。
+ *
+ * disconnect 先清残留连接与退避定时器（等待期不做任何自动重连——无目标可连，退避重试
+ * 是备用猜连时代的残留形态）；快照到达（推送或拉取）后控制器 connect() 转入 connecting。
+ */
+export function setWaitingRuntime(): void {
+  disconnect()
+  state.value = 'waiting-runtime'
+}
+
+/**
  * 建立连接（已连接/连接中时幂等 no-op）。
  *
  * @param url         连接地址（纯路由标识，由 platform 的 webSocket factory 消费；mock 装配
@@ -469,11 +505,23 @@ export function connect(url: string, credentials: ConnectCredentials): void {
     noteParsedInboundFrame(parsed)
     // auth 握手期：只消费 auth.result，其余消息（握手期不应出现）丢弃
     if (!connectionAuthed) {
-      const r = parsed as { type?: unknown; payload?: { ok?: unknown } | null }
+      const r = parsed as { type?: unknown; payload?: { ok?: unknown; runtimeId?: unknown } | null }
       if (r.type === 'auth.result' && r.payload != null) {
         clearAuthTimer()
         if (r.payload.ok === true) {
           connectionAuthed = true
+          // 实例标识核对（connection-datasync-ssot §6.3）：应答 runtimeId 先交消费方
+          // 裁决再 connected 化——false = 连到非预期实例，fail-fast 断开（不 markConnected：
+          // 不置 connected、不启心跳、不 flush 队列；重拉快照/失败呈现由消费方编排）。
+          if (authAcceptedHandler) {
+            const rawId = r.payload.runtimeId
+            const accepted = authAcceptedHandler({ runtimeId: typeof rawId === 'string' ? rawId : null })
+            if (!accepted) {
+              console.warn('[ws] auth accepted but rejected by identity check (runtimeId mismatch), disconnecting')
+              disconnect()
+              return
+            }
+          }
           markConnected()
         } else {
           // runtime 拒绝（token 失效，如 runtime 已换 token 重启）→ close 走重连链，

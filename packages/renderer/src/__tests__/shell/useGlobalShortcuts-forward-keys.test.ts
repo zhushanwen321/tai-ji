@@ -23,6 +23,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { effectScope, defineComponent, h } from 'vue'
 import { mount } from '@vue/test-utils'
+import { notifyConnectedEdge } from '@taiji/core'
 
 /** ipc mock：转发三 API 可控（其余导出走真实实现——纯类型 + 无副作用模块） */
 const ipcMock = vi.hoisted(() => ({
@@ -388,6 +389,12 @@ const mockGetHistory = vi.fn(() => Promise.resolve({
   totalTurnsEstimate: 0,
 }))
 
+/** 排空重连对账链微任务（域同步器边沿 → 辅助刷新 refreshHistory 的 RPC 就绪等待）。 */
+async function flushReconcile(): Promise<void> {
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
+}
+
 // api 域 mock：chat.getHistory 是断言目标（core refreshHistory 的 RPC 出口）；其余为
 // onConnected 链路（workspace.load / extension.scan / subagent/workflow 列表 / initApp
 // 编排）的 no-op 壳，防 unhandled rejection。
@@ -444,11 +451,11 @@ beforeEach(() => {
   resetAppBootstrap()
 })
 
-describe('useSidebar onConnected 重连对账接线（U8）', () => {
+describe('useSidebar 重连对账接线（U8；connection-datasync-ssot §6.4 起对账刷新由域同步器边沿触发）', () => {
   it('重连边沿：已 hydrate 的聚焦 session 经 core refreshHistory 触发 chat.getHistory 对账', async () => {
     const scope = effectScope()
     const sidebar = scope.run(() => useSidebar())!
-    // 首连：走 initApp 分支（hasConnectedBefore 置位；此阶段不产生对账拉取）
+    // 首连：走 initApp 分支（启动编排；辅助对账刷新只挂连接边沿，此阶段不产生对账拉取）
     await sidebar.onConnected()
     expect(mockGetHistory).not.toHaveBeenCalled()
 
@@ -457,8 +464,9 @@ describe('useSidebar onConnected 重连对账接线（U8）', () => {
     chat.hydrate('rc-sid', [userMsg('u1')])
     usePanelStore().loadSession(usePanelStore().activePanelId, 'rc-sid')
 
-    // 重连边沿：refreshHistory 接线生效（getHistory RPC 直读 = 对账执行的可观测锚点）
-    await sidebar.onConnected()
+    // 重连边沿（connected 迁移）：辅助刷新接线生效（getHistory RPC 直读 = 对账执行的可观测锚点）
+    notifyConnectedEdge()
+    await flushReconcile()
     expect(mockGetHistory).toHaveBeenCalledTimes(1)
     expect(mockGetHistory).toHaveBeenCalledWith('rc-sid')
     scope.stop()
@@ -470,12 +478,13 @@ describe('useSidebar onConnected 重连对账接线（U8）', () => {
     await sidebar.onConnected()
     usePanelStore().loadSession(usePanelStore().activePanelId, 'fresh-sid')
 
-    await sidebar.onConnected()
+    notifyConnectedEdge()
+    await flushReconcile()
     expect(mockGetHistory).not.toHaveBeenCalled()
     scope.stop()
   })
 
-  it('首连（hasConnectedBefore 未置位）：走 initApp，不触发对账拉取', async () => {
+  it('首连（启动编排 initApp）：不走边沿辅助刷新，不触发对账拉取', async () => {
     const scope = effectScope()
     const sidebar = scope.run(() => useSidebar())!
     const chat = useChatStore()

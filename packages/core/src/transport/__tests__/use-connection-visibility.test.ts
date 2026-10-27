@@ -45,6 +45,10 @@ vi.mock('../ws-client', () => ({
   // mock 缺省实现保 import 面完整
   onAuthRejected: vi.fn(() => () => {}),
   isAuthRejectedSuppressed: vi.fn(() => false),
+  // 连接控制器新消费面（connection-datasync-ssot）：本地 init 会注册/调用
+  setWaitingRuntime: vi.fn(),
+  onAuthAccepted: vi.fn(() => () => {}),
+  resetAuthRejectionSuppression: vi.fn(),
 }))
 
 // ── 端口 mock ────────────────────────────────────────────────────
@@ -91,9 +95,7 @@ let visHandler: (() => void) | null = null
 function makePorts(): ConnectionPorts {
   return {
     ipc: {
-      getRuntimePort: vi.fn().mockResolvedValue(undefined),
-      getRuntimePortOffset: vi.fn().mockResolvedValue(undefined),
-getRuntimeToken: vi.fn(async () => null),
+      getRuntimeTargetSnapshot: vi.fn().mockResolvedValue(null),
       onRuntimePort: vi.fn().mockReturnValue(() => {}),
       onRuntimeRestarting: vi.fn().mockReturnValue(() => {}),
       onRuntimeFailed: vi.fn().mockReturnValue(() => {}),

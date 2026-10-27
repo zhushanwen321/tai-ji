@@ -4,8 +4,9 @@
  * 背景：workspaceStore.load() 只在 initApp 调一次，appBootstrapped 检查阻止重连后重跑 initApp。
  * WS 断连重连后（runtime 可能重启重载磁盘新记录，或另一窗口写入），前端 records 停留 stale。
  *
- * 修复：onConnected 在 useSidebar 内用模块级 hasConnectedBefore 区分首次 vs 重连（见 useSidebar
- * 单测验证该逻辑）。App.vue 只负责 watch connectionState 并调 onConnected——本测试钉住这层调用契约。
+ * 修复：onConnected 在 useSidebar 内收敛为启动编排触发壳（首连 initApp；connection-datasync-ssot
+ * §6.4 起重连数据刷新由 core 域同步器边沿承载）。App.vue 只负责 watch connectionState 并调
+ * onConnected——本测试钉住这层调用契约。
  *
  * Mock 策略：vi.mock useConnection（返回可控 state ref），vi.mock useSidebar（捕获 onConnected 调用），
  * vi.mock AppShell/ToastContainer（避免渲染依赖树）。

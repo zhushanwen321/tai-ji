@@ -61,6 +61,12 @@ vi.mock('../ws-client', () => ({
     }
   },
   onQueueDrop: vi.fn(() => () => {}),
+  // 连接控制器新消费面（connection-datasync-ssot）：本地 init 会注册/调用
+  setWaitingRuntime: vi.fn(),
+  onAuthAccepted: vi.fn(() => () => {}),
+  onAuthRejected: vi.fn(() => () => {}),
+  resetAuthRejectionSuppression: vi.fn(),
+  isAuthRejectedSuppressed: vi.fn(() => false),
 }))
 
 // ── dispatcher 注入（D9）：经真实 configureRouteInbound 显式传 TransportPorts fake ──
@@ -96,9 +102,7 @@ const portsFake: TransportPorts = {
 function makePorts(): ConnectionPorts {
   return {
     ipc: {
-      getRuntimePort: vi.fn().mockResolvedValue(undefined),
-      getRuntimePortOffset: vi.fn().mockResolvedValue(undefined),
-getRuntimeToken: vi.fn(async () => null),
+      getRuntimeTargetSnapshot: vi.fn().mockResolvedValue(null),
       onRuntimePort: vi.fn().mockReturnValue(() => {}),
       onRuntimeRestarting: vi.fn().mockReturnValue(() => {}),
       onRuntimeFailed: vi.fn().mockReturnValue(() => {}),

@@ -1,5 +1,7 @@
 <template>
-  <!-- 非连接态分三种展示：
+  <!-- 非连接态分四种展示：
+       - waiting-runtime：logo + 「正在启动 runtime」（已请求目标快照未获得，§6.8——
+         无连接可发起，与「连接中」显式区分，避免「转圈但根本没在连」误导）
        - connecting/disconnected/reconnecting：logo + 「连接中…」（过渡屏）
        - restarting：logo + 「runtime 重启中…」（崩溃自动恢复，主进程在拉起新实例）
        - failed：logo + 错误提示 + 重试按钮（自动重启用尽，需用户手动触发）
@@ -11,6 +13,11 @@
       <template v-if="connectionState === 'restarting'">
         <Loader2 class="size-4 animate-spin text-neutral-dim" />
         <span class="text-[12.5px] text-neutral-dim">{{ t('connection.restarting') }}</span>
+      </template>
+      <!-- 等待 runtime 启动（目标快照未获得——冷启动 dev 延迟编译期即此态，快照到达即转连接） -->
+      <template v-else-if="connectionState === 'waiting-runtime'">
+        <Loader2 class="size-4 animate-spin text-neutral-dim" />
+        <span class="text-[12.5px] text-neutral-dim">{{ t('connection.waitingRuntime') }}</span>
       </template>
       <!-- runtime 重启用尽，需手动重试。runtimeStartError = 最近一次启动失败真因
            （RD-3#2：binary 缺失/端口占用等，main 经 runtime-error 推送/拉取兜底到达；
@@ -231,12 +238,11 @@ onMounted(() => {
     setFailed()
   })
 })
-// [W8] onConnected 内部用模块级 hasConnectedBefore 区分首次 vs 重连：
-// - 首次 connected → initApp（内部含 workspaceStore.load + presetCwd）
-// - 重连 connected → initApp 因 appBootstrapped 检查直接 return，records 停留在断连前 stale 数据
-//   （runtime 可能重启后从磁盘重载了新记录，如另一窗口写入），故额外 fire-and-forget load() 刷新。
-//   hasConnectedBefore 与 appBootstrapped 同为模块级，组件卸载重挂（非模块重载）时保留值，
-//   避免新实例误判为「首次」再调 initApp（被检查吞）导致 load 不刷新。
+// [W8 → connection-datasync-ssot §6.4] onConnected 已收敛为启动编排触发壳：首次 connected
+// → initApp（注册命令 + 等 project 域首次落定进落地页）；重连边沿的数据刷新（workspace/
+// sessions/project 域重拉 + extension/subagent/workflow/liveState/history 辅助刷新）由 core
+// 域同步器（connection-edge-sync）在 connected 边沿自动触发，不经本 watch——重连时 initApp
+// 幂等跳过，域同步器独立承载刷新。
 watch(connectionState, (s) => {
   if (s === 'connected') {
     // RD-3#2：连接成功即清除启动失败真因（陈旧原因不再出现在后续 failed 屏）

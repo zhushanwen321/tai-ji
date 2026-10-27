@@ -2402,16 +2402,95 @@ const workspaceImpl = {
 export type WorkspaceDomainParamsExact = AssertExact<DomainParamsExact<WorkspaceDomain, typeof workspaceImpl>>
 export const workspace: WorkspaceDomain = workspaceImpl
 
-// project 域 mock 占位（D14，2026-08-04）：mock 模式无 runtime，project 列表回退默认空态。
-// 与 真实进程层 api/domains/project.ts 签名同构（load/save），避免门面三元崩溃。
+// project 域 mock（D14，2026-08-04；命令通道 connection-datasync-ssot §6.6/u6a 补齐）：
+// mock 模式无 runtime 持久化，load/命令在内存态上运转（命令语义与 runtime ProjectStore
+// 对齐：默认项兜底 + revision 计数 + 校验），签名与 真实进程层 api/domains/project.ts
+// 同构（[G4] AssertExact 断言强制），避免门面三元崩溃。
+import {
+  DEFAULT_PROJECT_ID as PROJECT_DEFAULT_ID,
+  type ProjectCommandReply,
+  type ProjectLoadReply,
+  type ProjectStoreState,
+} from '@taiji/shared'
+
+function mockDefaultProject(): ProjectStoreState['projects'][number] {
+  return { id: PROJECT_DEFAULT_ID, name: '', lastUsedAt: 0 }
+}
+
+const mockProjects: ProjectStoreState['projects'] = [mockDefaultProject()]
+let mockActiveProjectId = PROJECT_DEFAULT_ID
+let mockRevision = 0
+let mockProjectSeq = 0
+
+function mockNormalize(): ProjectStoreState {
+  if (!mockProjects.some((p) => p.id === PROJECT_DEFAULT_ID)) {
+    mockProjects.unshift(mockDefaultProject())
+  }
+  if (!mockProjects.some((p) => p.id === mockActiveProjectId)) {
+    mockActiveProjectId = mockProjects.find((p) => !p.name)?.id ?? mockProjects[0]?.id ?? PROJECT_DEFAULT_ID
+  }
+  return { projects: mockProjects.map((p) => ({ ...p })), activeProjectId: mockActiveProjectId }
+}
+
+function mockCommit(): ProjectCommandReply {
+  mockRevision += 1
+  return { state: mockNormalize(), revision: mockRevision }
+}
+
+function mockAssertRevision(revision: number): void {
+  if (revision !== mockRevision) {
+    throw Object.assign(new Error(`revision 失配：当前 ${mockRevision}，命令携带 ${revision}`), {
+      code: 'project_revision_mismatch',
+    })
+  }
+}
+
 const projectImpl = {
-  async load(): Promise<import('@taiji/shared').ProjectStoreState> {
-    return { projects: [], activeProjectId: '' }
+  async load(): Promise<ProjectLoadReply> {
+    return { ...mockNormalize(), revision: mockRevision }
   },
   // [G4 锚定 ProjectDomain] 对齐 real 契约返回 void（原 mock 返回 state 属未登记偏差，随锚定收尾；
-  // mock 无持久化，save 即 ack）
-  async save(state: import('@taiji/shared').ProjectStoreState): Promise<void> {
+  // mock 无持久化，save 即 ack——legacy 通道，随 u6b 与 real 同批删除）
+  async save(state: ProjectStoreState): Promise<void> {
     void state
+  },
+  async createProject(name: string, revision: number): Promise<ProjectCommandReply> {
+    mockAssertRevision(revision)
+    const trimmed = name.trim()
+    if (!trimmed) throw Object.assign(new Error('project name 不能为空'), { code: 'project_invalid_name' })
+    mockProjectSeq += 1
+    const id = `proj-${Date.now()}-${mockProjectSeq}`
+    mockProjects.push({ id, name: trimmed, lastUsedAt: Date.now() })
+    mockActiveProjectId = id
+    return mockCommit()
+  },
+  async renameProject(projectId: string, name: string, revision: number): Promise<ProjectCommandReply> {
+    mockAssertRevision(revision)
+    const trimmed = name.trim()
+    if (!trimmed) throw Object.assign(new Error('project name 不能为空'), { code: 'project_invalid_name' })
+    const target = mockProjects.find((p) => p.id === projectId)
+    if (!target) throw Object.assign(new Error(`project 不存在：${projectId}`), { code: 'project_not_found' })
+    if (!target.name) throw Object.assign(new Error('默认项目不可改名'), { code: 'project_default_protected' })
+    target.name = trimmed
+    return mockCommit()
+  },
+  async removeProject(projectId: string, revision: number): Promise<ProjectCommandReply> {
+    mockAssertRevision(revision)
+    if (projectId === PROJECT_DEFAULT_ID) {
+      throw Object.assign(new Error('默认项目不可删除'), { code: 'project_default_protected' })
+    }
+    const idx = mockProjects.findIndex((p) => p.id === projectId)
+    if (idx === -1) throw Object.assign(new Error(`project 不存在：${projectId}`), { code: 'project_not_found' })
+    mockProjects.splice(idx, 1)
+    if (mockActiveProjectId === projectId) mockActiveProjectId = PROJECT_DEFAULT_ID
+    return mockCommit()
+  },
+  async setActiveProject(projectId: string, revision: number): Promise<ProjectCommandReply> {
+    mockAssertRevision(revision)
+    const target = mockProjects.find((p) => p.id === projectId)
+    if (!target) throw Object.assign(new Error(`project 不存在：${projectId}`), { code: 'project_not_found' })
+    mockActiveProjectId = projectId
+    return mockCommit()
   },
 }
 

@@ -14,9 +14,9 @@ import { workspace } from '@/api'
 export const useWorkspaceStore = defineStore('workspace', () => {
   const records = ref<RecentWorkspaceRecord[]>([])
   /**
-   * RD-3#4：load 失败标记（最近工作区读失败 ≠ 无历史）。仅观测留痕——**不改** AC-4.5
-   * 验收口径「RPC reject → records 置 [] 不抛、不阻断启动」，故不加错误条/重试（与该规格冲突）。
-   * 置位让「读失败」与「真无历史」在日志/观测范围可分（修复此前 catch 零日志零标记）。
+   * RD-3#4：load 失败标记（最近工作区读失败 ≠ 无历史）。失败时 records 保留旧值
+   * （connection-datasync-ssot §6.4 降级型显式行为改进：断连重拉失败不闪空列表），
+   * 仅观测留痕——不加错误条/重试（失败呈现通道 = console.warn + loadError）。
    */
   const loadError = ref<string | null>(null)
 
@@ -59,19 +59,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   /**
-   * 加载最近工作区记录（initApp INV-6 时序：在 presetCwd 前调用）。
-   * AC-4.5：RPC reject → records 置 [] 不抛（降级为空态，不阻断启动）。
+   * 加载最近工作区记录（workspace 数据域同步函数，§6.4③：随连接边沿重拉）。
+   * 失败降级：records 保留旧值不抛（§6.4 降级型显式行为改进——断连重拉失败不闪空
+   * 列表）+ console.warn 留痕 + loadError 标记，让「读失败」与「真无历史」在观测
+   * 范围可分；不阻断启动。
    */
   async function load(): Promise<void> {
     try {
       records.value = await workspace.listRecent()
       loadError.value = null
     } catch (e) {
-      // AC-4.5：reject → records 置 [] 不抛（降级空态，不阻断启动）。RD-3#4：补一次 console.warn
-      // + loadError 标记，让「读失败」与「真无历史」在日志/观测范围可分（修复此前 catch 零日志零标记）。
-      records.value = []
       loadError.value = e instanceof Error ? e.message : String(e)
-      console.warn('[workspace] load failed, degraded to empty recent list:', loadError.value)
+      console.warn('[workspace] load failed, keeping previous records:', loadError.value)
     }
   }
 
@@ -87,8 +86,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       records.value = await workspace.record(cwd)
     } catch (e) {
-      // 降级：record 失败时保留旧 records（stale 但有用，不清空——与 load() 清空语义不同：
-      // load 是首次加载失败则无数据可显；record 是增量更新失败，旧列表仍有效）。不阻断选目录流程。
+      // 降级：record 失败时保留旧 records（stale 但有用，不清空——与 load() 同款
+      // 保留旧值语义：重拉失败不清用户已见数据）。不阻断选目录流程。
       console.warn('[workspace] record failed, keeping stale records', e)
     }
   }
