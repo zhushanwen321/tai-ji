@@ -54,9 +54,22 @@ describe("updater-script-integration", () => {
   // mac 三段（端到端/中断注入/磁盘满）共用的环境就绪条件（原 describe.skipIf 条件收编）
   const MAC_SUITE_READY = IS_MAC && HAS_HDIUTIL && HAS_DITTO && HAS_SHASUM
 
-  /** 门控 describe 名：跳过时显式携带理由（env 未设置 = 本地默认跳过），不静默消失。 */
-  function gatedTitle(name: string): string {
-    return name + (INTEGRATION_TESTS_ENABLED ? '' : `｜skip：${INTEGRATION_TESTS_SKIP_REASON}`)
+  // P10（mac 磁盘满）专属 E2E 档门控：env TAIJI_E2E_UPDATER——不随 TAIJI_TEST_INTEGRATION
+  // 走（CI test-main job 设了集成 env 但不设本 env，故 P10 在 CI 不跑），按 e2e-map
+  // E2E-UPDATER-01 触发或手动跑。理由：它是本文件最重单点（双缩前满并发 34.1s /
+  // 安静单跑 11.06s，占 updater 文件墙钟 91%），不适合随 CI 常驻；档位语义登记 =
+  // docs/TEST-STRATEGY.md「集成测试门控约定」节。
+  const E2E_UPDATER_ENV = 'TAIJI_E2E_UPDATER'
+  const E2E_UPDATER_ENABLED =
+    process.env[E2E_UPDATER_ENV] === '1' || process.env[E2E_UPDATER_ENV] === 'true'
+  const E2E_UPDATER_SKIP_REASON = E2E_UPDATER_ENABLED
+    ? ''
+    : `env ${E2E_UPDATER_ENV} 未设置或取值非 '1'/'true'（E2E 档：CI 不跑，按 e2e-map E2E-UPDATER-01 触发或手动跑，见 docs/TEST-STRATEGY.md「集成测试门控约定」）`
+
+  /** 门控 describe 名：跳过时显式携带理由（env 未设置 = 本地默认跳过），不静默消失。
+   *  skipReason 默认走集成门控理由；P10 段传 E2E 档理由（E2E_UPDATER_SKIP_REASON）。 */
+  function gatedTitle(name: string, skipReason: string = INTEGRATION_TESTS_ENABLED ? '' : INTEGRATION_TESTS_SKIP_REASON): string {
+    return name + (skipReason ? `｜skip：${skipReason}` : '')
   }
 
   // ──────────────────────────────────────────────────────────────────
@@ -180,7 +193,7 @@ describe("updater-script-integration", () => {
     binaryName?: string
     /** 塞进 .app 根的版本标记文件内容（如 'NEW-V-B'），中断用例断言残留物完整性 */
     versionMarker?: string
-    /** 主二进制填充大小（字节，随机不可压内容），磁盘满用例用 5MB 撑爆小卷 */
+    /** 主二进制填充大小（字节，随机不可压内容），磁盘满用例用 2MB 撑爆小卷 */
     binarySize?: number
     /** true = 空壳 .app（无 Contents/MacOS/<binary>），主二进制检查拦截用例用 */
     hollow?: boolean
@@ -907,22 +920,26 @@ describe("updater-script-integration", () => {
   })
 
   // ════════════════════════════════════════════════════════════════
-  // MAC 脚本：磁盘满（M4 + P10：ditto 磁盘满必须非 0 退出）【集成门控】
+  // MAC 脚本：磁盘满（M4 + P10：ditto 磁盘满必须非 0 退出）【E2E 档】
+  // 门控 = TAIJI_E2E_UPDATER（非 TAIJI_TEST_INTEGRATION）：CI 不跑，按 e2e-map
+  // E2E-UPDATER-01 触发或手动跑（见文件头 E2E_UPDATER_* 常量注释）。
   // 本段 { concurrent: true }：段内并发声明（现仅 1 用例，标记统一并发契约、
   // 后续新增用例自动受限控并发管辖；语义同上两段）。
   // ════════════════════════════════════════════════════════════════
-  describe.skipIf(!INTEGRATION_TESTS_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 磁盘满（P10）'), { concurrent: true }, () => {
+  describe.skipIf(!E2E_UPDATER_ENABLED || !MAC_SUITE_READY)(gatedTitle('updater-script integration: mac 磁盘满（P10）', E2E_UPDATER_SKIP_REASON), { concurrent: true }, () => {
     it<TestScope>(
-      '小容量卷上 ditto 拷入 5MB 不可压产物 → ENOSPC → ditto 非零退出、error=ditto copy failed、旧 app 完好',
+      '小容量卷上 ditto 拷入 2MB 不可压产物 → ENOSPC → ditto 非零退出、error=ditto copy failed、旧 app 完好',
       async (ctx) => {
         const { tmpDir } = ctx
-        // 3MB HFS+ 镜像当「应用卷」；5MB 随机字节二进制必撑爆（ditto 无压缩）。
+        // 1MB HFS+ 镜像当「应用卷」；2MB 随机字节二进制 > 卷总容量 1MB，必撑爆
+        //（ditto 无压缩，ENOSPC 语义保留）。旧 app 仅 OLD_MARKER 小文件，
+        // 1MB 卷可用空间足够容纳，「装得下旧版、装不下新版」约束不变。
         // 更新 dmg 挂载在 $TMPDIR（S1 选址约束），只有 ditto 落 staging 在小卷上。
         const imgPath = path.join(tmpDir, 'tiny.dmg')
         const mountDir = path.join(tmpDir, 'mnt')
         mkdirSync(mountDir, { recursive: true })
 
-        const cr = await execCapture('hdiutil', ['create', '-size', '3m', '-fs', 'HFS+', '-volname', 'UPDTEST', '-ov', imgPath])
+        const cr = await execCapture('hdiutil', ['create', '-size', '1m', '-fs', 'HFS+', '-volname', 'UPDTEST', '-ov', imgPath])
         if (cr.status !== 0) ctx.skip(`hdiutil create 失败: ${cr.stderr}`)
         const at = await execCapture('hdiutil', ['attach', imgPath, '-mountpoint', mountDir, '-nobrowse'])
         if (at.status !== 0) ctx.skip(`hdiutil attach 失败: ${at.stderr}`)
@@ -934,7 +951,7 @@ describe("updater-script-integration", () => {
           mkdirSync(path.join(appBundle, 'Contents', 'MacOS'), { recursive: true })
           writeFileSync(path.join(appBundle, 'OLD_MARKER'), 'old-vA-on-tiny-vol')
 
-          const { dmgPath, sha256, binaryName } = await buildMinimalAppDmg(tmpDir, { appBundleName, binaryName: 'TaiJi', binarySize: 5 * 1024 * 1024 })
+          const { dmgPath, sha256, binaryName } = await buildMinimalAppDmg(tmpDir, { appBundleName, binaryName: 'TaiJi', binarySize: 2 * 1024 * 1024 })
           const vars = makeMacVars(tmpDir, { dmgPath, sha256, appBundleName, binaryName, appBundle })
 
           const script = stripOpenLine(buildUpdaterScript(vars))
