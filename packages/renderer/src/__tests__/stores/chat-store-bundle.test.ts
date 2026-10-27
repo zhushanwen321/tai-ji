@@ -1,30 +1,322 @@
-// @vitest-environment node
 /**
- * chat store 单文件多源合并（round5-d 分区 4 簇 4-8 的 node 环境子集）。
+ * chat store 零 mock / spread mock 域合并产物（round 6 renderer 测试压缩）：三文件同产物，
+ * 环境统一默认（happy-dom；chat-finalize-reason 原为 node 环境注释的 round5 合并产物，
+ * 纯 pinia store 状态机无 DOM 依赖无 node 特有 API，迁移实证兼容；round5 曾因「同簇
+ * node 子集」归类不与 happy-dom 两文件并入，本轮按 mock 兼容性重聚）。
  *
- * 为什么单文件：vitest 按测试文件隔离模块图——本簇 4 个 node 环境文件共同装载
- * vue / shared / extension-protocol / zh-CN locale / core chat domain 等重模块，
- * 单文件共享一份装载；拆文件会让每个文件各付一次全树装载（每份秒级 CPU）。
+ * 并入来源（基名）：
+ *  - chat-finalize-reason（round5 产物：finalize reason 映射 + sealed guard + isGenerating
+ *    scan + bash effect + disposeSession，43 例，原 node）
+ *  - chat-interrupted-window（window.interrupted 链路，4 例）
+ *  - btw-replay（btw 重载链接线 + live≡reload 等价 + 三消费方谓词对账，7 例）
  *
- * 来源文件（describe/it 块原样搬运，测试名零改动；四文件全零 vi.mock、
- * 全部 beforeEach/afterEach 原本就在 describe 节内，无顶层 hook 冲突）：
- *  - chat-finalize-reason.test.ts（finalizeSession reason→终态映射 + sealed guard，主体）
- *  - chat-isgenerating-scan.test.ts（isGenerating 派生 scan + finalizeAllStreaming）
- *  - chat-message-effects-bash.test.ts（bashStart/bashResult effect）
- *  - chat-dispose-session.test.ts（disposeSession per-session 清理）
+ * mock 注册与互斥核查：
+ *  - chat-finalize-reason / chat-interrupted-window 零 vi.mock（真 @/api 门面链，
+ *    VITE_MOCK=true 下与 core transport/mock 同对象引用）。
+ *  - btw-replay mock '@/api' 为 spread actual 仅覆写 chat.getHistory（回放数据源）——
+ *    门面其余域真成员保留，零 mock 两节的 store 装配链与同引用断言不受截断；
+ *    两节用例均不消费 chat.getHistory（纯 applyMessageEvent/finalizeSession/hydrate
+ *    直调，无拉取路径）。
+ *  - btw-replay 原文件级 beforeEach/afterEach（drawer 绑定 + store dispose）已下沉进
+ *    其三个 describe（测试名零改动）。
  *
- * 环境注：同簇的 btw-replay.test.ts 与 chat-interrupted-window.test.ts 为
- * happy-dom（默认）环境，与 node 异类，不并入（保持原文件原样）。
- *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/chat-finalize-reason.test.ts
+ * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/stores/chat-store-bundle.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
+import { ref, type Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import { getExecutingBash, replayEntries } from '@taiji/core'
+import { historyWindowFromReply } from '@taiji/core/domain/chat/truncated-window'
+import {
+  bindDrawerSessionId,
+  drawerControl,
+  setBtwView,
+  bindViewedVidPanels,
+  getViewedVids,
+  isViewingBtwSession,
+  useViewedBtwSession,
+  _resetDrawerForTest,
+} from '@taiji/core/domain/drawer'
 import { useChatStore } from '@/stores/chat'
-import { getExecutingBash } from '@taiji/core'
-import type { Message, ServerMessage } from '@taiji/shared'
+import type { Message, PiEntry, PiMessageBody, PiMessageEntry, ServerMessage } from '@taiji/shared'
 
-// ══════════ 主体：原 chat-finalize-reason.test.ts 全部 ══════════
+// ── btw-replay 节的 @/api 门面局部 mock：只替换 chat.getHistory（回放数据源），其余域走 actual ──
+const getHistoryMock = vi.hoisted(() => vi.fn())
+vi.mock('@/api', async (importActual) => {
+  const actual = await importActual<typeof import('@/api')>()
+  return { ...actual, chat: { ...actual.chat, getHistory: getHistoryMock } }
+})
+// ═══════ 来源节：btw-replay（顶层 hooks 已下沉进各 describe）═══════
+
+const MAIN = 's-replay-main'
+
+/** 构造最小 Message（回放快照派生视图形态）。 */
+function msgOf(id: string, content: string): Message {
+  return { id, role: 'user', content, status: 'complete', timestamp: 1 }
+}
+
+/** PiMessageEntry 工厂（真实形态：ISO timestamp / parentId 链，core helpers/fixtures 同构的本地版）。 */
+function msgEntry(id: string, body: PiMessageBody, parentId: string | null = null): PiMessageEntry {
+  return { type: 'message', id, parentId, timestamp: '2026-09-22T10:00:00.000Z', message: body }
+}
+
+/** session.history 应答（u4d 窗口契约三字段必填）。 */
+function reply(messages: Message[]): {
+  messages: Message[]
+  truncated: boolean
+  loadedTurns: number
+  totalTurnsEstimate: number
+} {
+  return { messages, truncated: false, loadedTurns: 1, totalTurnsEstimate: 1 }
+}
+
+let store: ReturnType<typeof useChatStore>
+let boundSid: Ref<string | null>
+
+/** watch flush:'pre' + 回放链两跳（触发 → getHistory resolve → hydrate）——双 flushPromises 收敛。 */
+async function settle(): Promise<void> {
+  await flushPromises()
+  await flushPromises()
+}
+
+/** 打开 btw tab 并选中线（生产链 = BtwPanel autoSelect / chip 点击 → setBtwView）。 */
+async function openThread(sessionId: string): Promise<void> {
+  drawerControl.open('btw')
+  setBtwView(sessionId)
+  await settle()
+}
+
+
+describe('重开线回放接线（D5 重载链：文件 → chatStore 分区）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    boundSid = ref<string | null>(MAIN)
+    bindDrawerSessionId(boundSid)
+    _resetDrawerForTest()
+    store = useChatStore()
+    getHistoryMock.mockReset()
+  })
+  afterEach(() => {
+    store.$dispose() // 停 store effect scope（含回放 watch），防跨用例监听残留
+    _resetDrawerForTest()
+  })
+  it('选中 btw 线 → getHistory(sessionId) 回放注入分区（hydrated + 窗口状态同写）', async () => {
+    const history = [msgOf('r1', '线内历史'), msgOf('r2', '第二条')]
+    getHistoryMock.mockResolvedValue(reply(history))
+
+    await openThread('pi-9')
+
+    expect(getHistoryMock).toHaveBeenCalledTimes(1)
+    expect(getHistoryMock).toHaveBeenCalledWith('pi-9')
+    expect(store.getMessages('pi-9')).toEqual(history)
+    expect(store.isHydrated('pi-9')).toBe(true)
+    expect(store.getHistoryWindow('pi-9')).toEqual({
+      truncated: false,
+      loadedTurns: 1,
+      totalTurnsEstimate: 1,
+    })
+  })
+
+  it('触发门控：非 btw tab 不回放；切到 btw tab 触发一次；关 drawer 再开幂等不重新拉取', async () => {
+    getHistoryMock.mockResolvedValue(reply([msgOf('r1', '回填')]))
+    store.hydrate(MAIN, [msgOf('m1', '主对话')]) // 主分区已回放态（不参与触发范围）
+
+    // 门控①：drawer 开在其他 tab、selectedBtwSessionId 在场（切走残留）→ 不回放
+    drawerControl.open('git')
+    setBtwView('pi-1')
+    await settle()
+    expect(getHistoryMock).not.toHaveBeenCalled()
+
+    // 门控②：切到 btw tab（源 null → 线 id 翻出）→ 回放一次
+    drawerControl.setTab('btw')
+    await settle()
+    expect(getHistoryMock).toHaveBeenCalledTimes(1)
+    expect(store.isHydrated('pi-1')).toBe(true)
+
+    // 幂等：关 drawer（线 id → null）再开（null → 线 id）→ 已 hydrate，不重复拉取
+    drawerControl.close()
+    await settle()
+    drawerControl.open('btw')
+    await settle()
+    expect(getHistoryMock).toHaveBeenCalledTimes(1)
+    // 主分区回放态未被打扰（触发范围只写 btw 分区）
+    expect(store.getMessages(MAIN)).toEqual([msgOf('m1', '主对话')])
+  })
+
+  it('驱逐后重开：hydrated 随驱逐清除 → 再回放，分区内容回填一致', async () => {
+    const history = [msgOf('b1', '线回复')]
+    getHistoryMock.mockResolvedValue(reply(history))
+    await openThread('pi-r')
+    expect(store.getMessages('pi-r')).toEqual(history)
+
+    // LRU 驱逐（btw 键普通候选，core chat-lru-btw 断言范围）：分区 + hydrated 标记同清
+    store.evictSessionWithVirtual('pi-r')
+    expect(store.getMessages('pi-r')).toEqual([])
+    expect(store.isHydrated('pi-r')).toBe(false)
+
+    // 关 drawer 再开（选中值在 drawer 分区内持久，靠 isOpen 翻转重新触发）→ 回填
+    drawerControl.close()
+    await settle()
+    drawerControl.open('btw')
+    await settle()
+    expect(getHistoryMock).toHaveBeenCalledTimes(2)
+    expect(store.getMessages('pi-r')).toEqual(history)
+  })
+
+  it('回放失败：markHistoryFailed 收尾不写分区；重开自动重试成功后清除失败态', async () => {
+    getHistoryMock.mockRejectedValueOnce(new Error('session not registered'))
+
+    await openThread('pi-fail')
+    expect(store.failedHistory.has('pi-fail')).toBe(true)
+    expect(store.getMessages('pi-fail')).toEqual([])
+
+    // 重开（关 → 开）触发重试：成功回填 + 失败态清除
+    getHistoryMock.mockResolvedValue(reply([msgOf('r1', '重试成功')]))
+    drawerControl.close()
+    await settle()
+    drawerControl.open('btw')
+    await settle()
+    expect(getHistoryMock).toHaveBeenCalledTimes(2)
+    expect(store.failedHistory.has('pi-fail')).toBe(false)
+    expect(store.getMessages('pi-fail')).toEqual([msgOf('r1', '重试成功')])
+  })
+})
+
+describe('live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性覆盖范围）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    boundSid = ref<string | null>(MAIN)
+    bindDrawerSessionId(boundSid)
+    _resetDrawerForTest()
+    store = useChatStore()
+    getHistoryMock.mockReset()
+  })
+  afterEach(() => {
+    store.$dispose() // 停 store effect scope（含回放 watch），防跨用例监听残留
+    _resetDrawerForTest()
+  })
+  it('同线 session id：live message_end 帧链累积 ≡ 文件回放派生视图注入（两路径同一 applyEntry reducer）', async () => {
+    const vid = 'pi-eq' // 线 session id（W4a 后 = pi 真实 id）
+    const entries: PiEntry[] = [
+      msgEntry('e1', { role: 'user', content: [{ type: 'text', text: '你好' }], timestamp: 1000 }),
+      msgEntry(
+        'e2',
+        { role: 'assistant', content: [{ type: 'text', text: '答复' }], timestamp: 2000 },
+        'e1',
+      ),
+    ]
+
+    // live 路径：entry 载体帧喂 applyEntryFrame（W21 实时侧权威累积；ref 派生视图不参与本口径）
+    for (const entry of entries) {
+      store.applyMessageEvent(vid, { type: 'message.message_end', payload: { sessionId: vid, entry } })
+    }
+    const liveState = store.testInternals._entryStatesForTest.get(vid)?.state
+    expect(liveState).toBeDefined()
+
+    // reload 路径：文件回放派生视图（runtime getEntries → lift → replayEntries 同一 reducer）经接线注入
+    getHistoryMock.mockResolvedValue(reply(replayEntries(entries).messages))
+    await openThread(vid)
+
+    expect(getHistoryMock).toHaveBeenCalledWith(vid)
+    expect(store.getMessages(vid)).toEqual(liveState!.messages)
+    expect(store.isHydrated(vid)).toBe(true)
+  })
+
+  it('V8 回放侧：半截 entry（悬空 toolCall，无 toolResult）重开按已落盘内容呈现——悬空调用 status=completed 无 output，不悬挂 running', async () => {
+    const entries: PiEntry[] = [
+      msgEntry('e-u', { role: 'user', content: [{ type: 'text', text: '跑一下' }], timestamp: 1000 }),
+      msgEntry(
+        'e-a',
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '执行中' },
+            { type: 'toolCall', id: 'tc-1', name: 'bash', arguments: { command: 'ls' } },
+          ],
+          timestamp: 2000,
+        },
+        'e-u',
+      ),
+    ]
+    getHistoryMock.mockResolvedValue(reply(replayEntries(entries).messages))
+
+    await openThread('pi-half')
+
+    const msgs = store.getMessages('pi-half')
+    expect(msgs).toHaveLength(2)
+    const assistant = msgs[1]!
+    expect(assistant.role).toBe('assistant')
+    expect(assistant.status).toBe('complete')
+    expect(assistant.toolCalls).toHaveLength(1)
+    expect(assistant.toolCalls![0]!.status).toBe('completed')
+    expect(assistant.toolCalls![0]!.output).toBeUndefined()
+  })
+})
+
+describe('三消费方复合谓词不变量（真实事件序对账，display-containers §7.1 迁出不变量）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    boundSid = ref<string | null>(MAIN)
+    bindDrawerSessionId(boundSid)
+    _resetDrawerForTest()
+    store = useChatStore()
+    getHistoryMock.mockReset()
+  })
+  afterEach(() => {
+    store.$dispose() // 停 store effect scope（含回放 watch），防跨用例监听残留
+    _resetDrawerForTest()
+  })
+  // 回放触发范围（本文件消费方②）必须与 getViewedVids（①chat LRU 豁免）、
+  // isViewingBtwSession（③useBtwTabData 视口命中）同值同变（读取单一源 selection/predicates.ts）。
+  // 真实事件序 = 真实响应式写入逐步推进（开/切 tab/切 session），每步对账三读数一致。
+  it('开 btw → 选线 → 切 tab → 切 session：回放触发与①③读数每步一致', async () => {
+    const V = 'pi-1'
+    getHistoryMock.mockResolvedValue(reply([msgOf('r1', '线内历史')]))
+    bindViewedVidPanels(ref<Array<string | null>>([MAIN]))
+
+    // 开 btw tab + 选线 → 复合谓词翻出：三读数同变，回放恰一次
+    drawerControl.open('btw')
+    setBtwView(V)
+    await settle()
+    expect(useViewedBtwSession().value).toBe(V)
+    expect(isViewingBtwSession(V)).toBe(true)
+    expect(getViewedVids()).toEqual(new Set([V]))
+    expect(getHistoryMock).toHaveBeenCalledTimes(1)
+
+    // 切走 tab → 三读数同落；回放不追加
+    drawerControl.setTab('git')
+    await settle()
+    expect(useViewedBtwSession().value).toBe(null)
+    expect(isViewingBtwSession(V)).toBe(false)
+    expect(getViewedVids()).toEqual(new Set())
+    expect(getHistoryMock).toHaveBeenCalledTimes(1)
+
+    // 切回 btw tab → 三读数同恢复；已 hydrate 幂等不重新拉取
+    drawerControl.setTab('btw')
+    await settle()
+    expect(useViewedBtwSession().value).toBe(V)
+    expect(isViewingBtwSession(V)).toBe(true)
+    expect(getViewedVids()).toEqual(new Set([V]))
+    expect(getHistoryMock).toHaveBeenCalledTimes(1)
+
+    // 切 session（焦点换分区）→ 消费方②③读当前分区即落；①per-sid 读 MAIN 分区仍豁免
+    // （panel 枚举含 MAIN——LRU 保护不随焦点丢失，查看中不驱逐的数据丢失防线）
+    boundSid.value = 's-other'
+    await settle()
+    expect(useViewedBtwSession().value).toBe(null)
+    expect(isViewingBtwSession(V)).toBe(false)
+    expect(getViewedVids()).toEqual(new Set([V]))
+
+    // 切回 MAIN：三读数同恢复
+    boundSid.value = MAIN
+    await settle()
+    expect(useViewedBtwSession().value).toBe(V)
+    expect(isViewingBtwSession(V)).toBe(true)
+    expect(getViewedVids()).toEqual(new Set([V]))
+    expect(getHistoryMock).toHaveBeenCalledTimes(1)
+  })
+})
 
 function seedStreamingAssistant(sid: string, overrides: Partial<Message> = {}): Message {
   return {
@@ -865,5 +1157,47 @@ describe('chat store disposeSession（W1：清理 per-session 全部状态）', 
     expect(store.getMessages('s1')).toEqual([])
     expect(store.getMessages('s2')).toHaveLength(2)
     expect(store.isHydrated('s2')).toBe(true)
+  })
+})
+
+// ═══════ 来源节：chat-interrupted-window ═══════
+
+function userMsg(id: string): Message {
+  return { id, role: 'user', content: '被打断前的提问', status: 'complete', timestamp: 0 }
+}
+
+describe('chat store window.interrupted 链路（U8）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('historyWindowFromReply：interrupted 出场透传、缺省不出场（归一单点）', () => {
+    expect(historyWindowFromReply({ truncated: false, loadedTurns: 1, totalTurnsEstimate: 1, interrupted: true }))
+      .toEqual({ truncated: false, loadedTurns: 1, totalTurnsEstimate: 1, interrupted: true })
+    // 活跃路径 / 游标翻页 / 旧 runtime：无 interrupted 字段 → window 无该键（「无判定」语义）
+    const noMark = historyWindowFromReply({ truncated: false, loadedTurns: 1, totalTurnsEstimate: 1 })
+    expect('interrupted' in noMark).toBe(false)
+  })
+
+  it('hydrate 带 interrupted window：getHistoryWindow 读回置位（重开 hydrate 链渲染条件源）', () => {
+    const chat = useChatStore()
+    chat.hydrate('int-sid', [userMsg('u1')], historyWindowFromReply({ truncated: false, loadedTurns: 1, totalTurnsEstimate: 1, interrupted: true }))
+    expect(chat.getHistoryWindow('int-sid')?.interrupted).toBe(true)
+  })
+
+  it('无判定 window：interrupted 不出场，消费方按 undefined（不渲染提示条）处理', () => {
+    const chat = useChatStore()
+    chat.hydrate('plain-sid', [userMsg('u1')], historyWindowFromReply({ truncated: false, loadedTurns: 1, totalTurnsEstimate: 1 }))
+    // MessageStream 派生同款判定：interrupted === true 才渲染
+    expect(chat.getHistoryWindow('plain-sid')?.interrupted === true).toBe(false)
+  })
+
+  it('reconcileHistory 覆盖语义：中断标记随最新响应整体覆盖（重新切入后以最新判定为准）', () => {
+    const chat = useChatStore()
+    chat.hydrate('rc-sid', [userMsg('u1')], historyWindowFromReply({ truncated: false, loadedTurns: 1, totalTurnsEstimate: 1, interrupted: true }))
+    expect(chat.getHistoryWindow('rc-sid')?.interrupted).toBe(true)
+    // 后续响应无中断（如会话被重新落盘收尾）→ 覆盖为无判定
+    chat.reconcileHistory('rc-sid', [userMsg('u1')], historyWindowFromReply({ truncated: false, loadedTurns: 1, totalTurnsEstimate: 1 }))
+    expect(chat.getHistoryWindow('rc-sid')?.interrupted).toBeUndefined()
   })
 })

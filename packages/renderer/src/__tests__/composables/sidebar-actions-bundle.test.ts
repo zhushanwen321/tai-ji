@@ -1,57 +1,233 @@
 /**
- * useArchiveView 归档视图编排测试（session-archive 设计 D10/D11，u-renderer-entry）。
+ * sidebar 会话动作 + 归档视图合并产物（round 6 renderer 测试压缩）：三文件同产物，
+ * 环境默认（happy-dom；archive-view mount 需要 DOM）。
  *
- * 覆盖验收条款「恢复成功切回会话列表」+ 归档列表拉取/选中编排：
- * - restoreArchive 成功：切回会话列表（viewOpen=false）+ 主区导航回 chat + selected 清空
- *   + reply.id 登记恢复高亮（D5 步骤 7 前端消费点——restoredSessionId 置位）+ 归档列表
- *   刷新（会话列表刷新走 runtime 广播回流，owner 纪律零 store 直呼）
- * - restoreArchive 失败（RPC reject）：viewOpen 保持 + toast 错误 + 无恢复高亮
- * - openSummary：登记 selected + navigation.push({view:'archive'})
- * - refreshArchives：拉取产物落地 + archiveCount 对账；失败置 listError
- * - handleConfigSessionsFrame（压缩完成帧的 renderer 消费点，D11）：视图关闭仅更新
- *   角标；归档视图/摘要视图打开时顺带刷新归档列表——selected 持 staging 对象时
- *   重拉后按 sessionId 重锚为 archived 态新对象（「摘要生成中」占位清除的判据），
- *   条目消失置 null（主区空态占位）
- * - purgeArchiveEntry keep-all 分支：keptSubagentsDir 携带 → warning toast（D5 步骤 7
- *   失败显式上报）；主区呈现该条目时同步离开
+ * 并入来源（基名）：
+ *  - use-sidebar-session-actions-export-jsonl（onExportSessionJsonl，3 例）
+ *  - use-sidebar-session-actions-forcequit（onForceQuitSession 强杀分流，2 例）
+ *  - use-archive-view（归档列表/恢复/批量删除编排，23 例）
  *
- * mock：@/api（session 域四函数）+ toast；store/navigation/session 用真实 pinia
- * （模块级单例编排消费 pinia 单例——函数级测试形态）。
+ * mock 注册与互斥核查（三源统一）：
+ *  - '@/api'：forcequit（session.forceQuit 砍成员）与 archive（session 四成员砍成员）
+ *    双工厂 → 统一为 spread actual + session 域覆写五成员（forceQuit/listArchives/
+ *    unarchive/purgeArchive/list）；export-jsonl 节原走真门面，spread 保留真成员不受
+ *    截断（session-export 深路径另立 mock）。
+ *  - '@/composables/useToast'：三源统一为四键单例工厂（error/success/info 驻
+ *    helpers/sidebar-mount 的 sidebarToastTripleMocks，warning 为本产物新增单例——
+ *    archive 节断言 toastMocks.warning，triple 原缺该键）；archive 的 toastMocks
+ *    别名指向同一批实例。export-jsonl/forcequit 的 toastError/Success/Info 别名
+ *    合并去重（同引用）。
+ *  - useChat mock（forcequit：仅 abort）——useSidebarSessionActions 源码面消费仅
+ *    abort（grep 核实）；export-jsonl 节原真 useChat 未触 abort 路径，mock 在场无害；
+ *    useArchiveView 不消费 useChat。
+ *  - delivery / session-export 深路径 mock 独立 spec，无冲突。
+ *  - 各文件级 beforeEach/afterEach 已下沉进各自 describe。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/use-archive-view.test.ts
+ * 互斥登记：useForkActions（真 useToast 单例 + clearToasts 队列断言，与本产物 useToast
+ * mock 结构性互斥）保留独立；useSidebar / useSidebar-deletefolder（15+ mock 生态，
+ * 与本产物 @/api/useToast/useChat 工厂全面冲突，统一改造成本大于收益）保留独立。
+ *
+ * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/composables/sidebar-actions-bundle.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { sidebarToastTripleMocks } from '../helpers/sidebar-mount'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { defineComponent } from 'vue'
+import { defineComponent, ref } from 'vue'
 
+// ── 共享替身 ──
+const exportSessionJsonlMock = vi.hoisted(() => vi.fn())
+const forceQuitMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const apiMocks = vi.hoisted(() => ({
   listArchives: vi.fn(),
   unarchive: vi.fn(),
   purgeArchive: vi.fn(),
   list: vi.fn(),
 }))
+// toast 四键单例：三键驻 sidebar-mount triple，warning 为本产物新增（archive 节断言面）
+const toastWarningMock = vi.hoisted(() => vi.fn())
+const toastErrorMock = sidebarToastTripleMocks.error
+const toastSuccessMock = sidebarToastTripleMocks.success
+const toastInfoMock = sidebarToastTripleMocks.info
+const toastMocks = { error: toastErrorMock, info: toastInfoMock, warning: toastWarningMock }
 
-const toastMocks = vi.hoisted(() => ({
-  error: vi.fn(),
-  info: vi.fn(),
-  warning: vi.fn(),
+vi.mock('@/api', async (importActual) => {
+  const actual = await importActual<typeof import('@/api')>()
+  return {
+    ...actual,
+    session: {
+      ...actual.session,
+      forceQuit: forceQuitMock,
+      listArchives: apiMocks.listArchives,
+      unarchive: apiMocks.unarchive,
+      purgeArchive: apiMocks.purgeArchive,
+      list: apiMocks.list,
+    },
+  }
+})
+
+vi.mock('@/api/domains/session-export', () => ({
+  exportSessionJsonl: exportSessionJsonlMock,
 }))
 
-vi.mock('@/api', () => ({
-  session: apiMocks,
+// [u3c/D10] forceQuit 全量回收改走内核 drain（delivery.drain RPC）；本文件只锁 RPC 编排，
+// 返回空条目集（文本回收与提示断言见 __tests__/sidebar/force-quit-queue-recovery.test.ts）
+vi.mock('@/api/domains/delivery', () => ({
+  delivery: { drainDelivery: vi.fn(async (sessionId: string) => ({ sessionId, entries: [] })) },
+}))
+
+vi.mock('@/composables/features/chat/useChat', () => ({
+  // [u5a] 前身 clearQueueState stub（session-dead G1）已删：该 API 随 queueStates 分区退役
+  useChat: () => ({ abort: vi.fn() }),
 }))
 
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => toastMocks,
+  useToast: () => ({
+    error: toastErrorMock,
+    success: toastSuccessMock,
+    info: toastInfoMock,
+    warning: toastWarningMock,
+  }),
 }))
 
+import { useSidebarSessionActions } from '@/composables/features/sidebar/useSidebarSessionActions'
+import { consumeForcedExit, resetForcedExitMarks } from '@/composables/effects/forced-exit-marks'
 import { useArchiveView, useArchiveCountBroadcast } from '@/composables/features/sidebar/useArchiveView'
 import { dispatchGlobal } from '@taiji/core/transport/api'
 import { useArchiveStore } from '@/stores/archive'
 import { useNavigationStore } from '@/stores/navigation'
 import { useSessionStore } from '@/stores/session'
 import type { ArchiveSummary } from '@taiji/shared'
+
+
+// ═══════════ 来源节：use-sidebar-session-actions-export-jsonl ═══════════
+
+function makeOptions() {
+  return {
+    selectSession: vi.fn(),
+    restoreSession: vi.fn(),
+    newSession: vi.fn(),
+    loadSessions: vi.fn(),
+    renameSession: vi.fn(),
+    deleteSession: vi.fn(),
+    deleteFolder: vi.fn(),
+    assignSessionToProject: vi.fn(),
+    renameOpen: ref(false),
+    targetSessionId: ref(''),
+  }
+}
+
+const PAYLOAD = {
+  sessionId: 'exp-1',
+  sessionFile: '/data/agent/sessions/c-p/exp-1.jsonl',
+  suggestedName: '我的会话.jsonl',
+}
+
+describe('useSidebarSessionActions.onExportSessionJsonl', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('EXH1: exported → IPC 域函数收到原样 payload + toast「会话已导出到 <path>」', async () => {
+    exportSessionJsonlMock.mockResolvedValueOnce({ status: 'exported', path: '/Users/x/导出.jsonl', bytes: 128 })
+    const actions = useSidebarSessionActions(makeOptions())
+
+    await actions.onExportSessionJsonl(PAYLOAD)
+
+    expect(exportSessionJsonlMock).toHaveBeenCalledWith(PAYLOAD)
+    expect(toastInfoMock).toHaveBeenCalledTimes(1)
+    expect(String(toastInfoMock.mock.calls[0][0])).toContain('会话已导出到')
+    expect(String(toastInfoMock.mock.calls[0][0])).toContain('/Users/x/导出.jsonl')
+    expect(toastErrorMock).not.toHaveBeenCalled()
+  })
+
+  it('EXH2: error → toast「导出失败（<code>）：<message>」，不向上抛', async () => {
+    exportSessionJsonlMock.mockResolvedValueOnce({
+      status: 'error',
+      error: { code: 'EPATH', message: '会话文件路径不在会话数据目录内，已拒绝导出' },
+    })
+    const actions = useSidebarSessionActions(makeOptions())
+
+    await expect(actions.onExportSessionJsonl(PAYLOAD)).resolves.toBeUndefined()
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1)
+    expect(String(toastErrorMock.mock.calls[0][0])).toContain('导出失败')
+    expect(String(toastErrorMock.mock.calls[0][0])).toContain('EPATH')
+    expect(toastInfoMock).not.toHaveBeenCalled()
+  })
+
+  it('EXH3: canceled → 静默（双 toast 通道均不出声）', async () => {
+    exportSessionJsonlMock.mockResolvedValueOnce({ status: 'canceled' })
+    const actions = useSidebarSessionActions(makeOptions())
+
+    await actions.onExportSessionJsonl(PAYLOAD)
+
+    expect(toastInfoMock).not.toHaveBeenCalled()
+    expect(toastErrorMock).not.toHaveBeenCalled()
+    expect(toastSuccessMock).not.toHaveBeenCalled()
+  })
+})
+
+// ═══════════ 来源节：use-sidebar-session-actions-forcequit ═══════════
+
+function makeForceQuitOptions() {
+  return {
+    selectSession: vi.fn(),
+    restoreSession: vi.fn(),
+    newSession: vi.fn(),
+    loadSessions: vi.fn(),
+    renameSession: vi.fn(),
+    deleteSession: vi.fn(),
+    deleteFolder: vi.fn(),
+    assignSessionToProject: vi.fn(),
+    renameOpen: ref(false),
+    targetSessionId: ref(''),
+  }
+}
+
+describe('useSidebarSessionActions.onForceQuitSession', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    // forced-exit 标记是模块级 Set：复位防跨用例泄漏（FQH1 断言本身已 consume，双保险）
+    resetForcedExitMarks()
+  })
+
+  it('FQH1: 成功 → 调 sessionApi.forceQuit(sessionId)，播种意图标记且不被 handler 消费，无 toast', async () => {
+    const actions = useSidebarSessionActions(makeForceQuitOptions())
+
+    await actions.onForceQuitSession('fq-1')
+
+    expect(forceQuitMock).toHaveBeenCalledWith('fq-1')
+    // 标记读写对：handler 进入时 markForcedExit 播种；成功路径不消费（消费归 session.exited
+    // 帧的 handleSessionExited，读后即清）——consume 命中 = 播种存在且未被 handler 提前消费
+    expect(consumeForcedExit('fq-1')).toBe(true)
+    // FQH1「无 toast」完整面：error/success/info 三通道均不得出声（UI 收敛靠 session.exited 广播）
+    expect(toastErrorMock).not.toHaveBeenCalled()
+    expect(toastSuccessMock).not.toHaveBeenCalled()
+    expect(toastInfoMock).not.toHaveBeenCalled()
+  })
+
+  it('FQH2: RPC reject → 撤销意图标记 + toast「强制退出失败：<msg>」，不向上抛', async () => {
+    forceQuitMock.mockRejectedValueOnce(new Error('session not active'))
+    const actions = useSidebarSessionActions(makeForceQuitOptions())
+
+    await expect(actions.onForceQuitSession('fq-2')).resolves.toBeUndefined()
+
+    // 标记读写对：失败路径 consumeForcedExit 撤销播种——consume 未命中 = 标记已被 handler
+    // 撤销（无残留把该 session 下次意外崩溃误判为强制退出）
+    expect(consumeForcedExit('fq-2')).toBe(false)
+    expect(toastErrorMock).toHaveBeenCalledTimes(1)
+    expect(String(toastErrorMock.mock.calls[0][0])).toContain('强制退出失败')
+    expect(String(toastErrorMock.mock.calls[0][0])).toContain('session not active')
+  })
+})
+
+// ═══════════ 来源节：use-archive-view ═══════════
 
 const MB = 1024 * 1024
 
@@ -85,13 +261,6 @@ function makeStagingArchive(sessionId = 'arc-1'): ArchiveSummary {
   }
 }
 
-beforeEach(() => {
-  setActivePinia(createPinia())
-  vi.clearAllMocks()
-  apiMocks.listArchives.mockResolvedValue([])
-  apiMocks.list.mockResolvedValue([])
-})
-
 /**
  * 主区摘要视图布景（openSummary 呈现该条目）+ purge 成功回复与列表刷新 mock 置备，
  * 返回条目与导航 store 供删除编排与离开断言（单条 purgeArchiveEntry / 批量
@@ -108,6 +277,13 @@ function stageSummaryViewForPurge(purgeReply: Record<string, unknown>) {
 }
 
 describe('openSummary / refreshArchives（D11 摘要视图入口 + D10 列表拉取）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    apiMocks.listArchives.mockResolvedValue([])
+    apiMocks.list.mockResolvedValue([])
+  })
+
   it('openSummary：登记 selected + navigation.push({view:"archive"})', () => {
     const { openSummary } = useArchiveView()
     const archive = makeArchive()
@@ -169,6 +345,13 @@ describe('openSummary / refreshArchives（D11 摘要视图入口 + D10 列表拉
 })
 
 describe('restoreArchive（验收条款：恢复成功切回会话列表）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    apiMocks.listArchives.mockResolvedValue([])
+    apiMocks.list.mockResolvedValue([])
+  })
+
   it('成功：viewOpen=false + 主区回 chat + selected 清空 + 恢复高亮登记（reply.id 消费）+ 归档列表刷新 + 成功 toast', async () => {
     const { restoreArchive, openArchiveView, openSummary } = useArchiveView()
     const archive = makeArchive()
@@ -227,6 +410,13 @@ describe('restoreArchive（验收条款：恢复成功切回会话列表）', ()
 })
 
 describe('markRestored 恢复高亮生命周期（§5.1「accent-soft 高亮渐隐」）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    apiMocks.listArchives.mockResolvedValue([])
+    apiMocks.list.mockResolvedValue([])
+  })
+
   it('置位后 5s 自动清除（渐隐触发）；重复恢复重置计时', async () => {
     vi.useFakeTimers()
     try {
@@ -250,6 +440,13 @@ describe('markRestored 恢复高亮生命周期（§5.1「accent-soft 高亮渐�
 })
 
 describe('config.sessions 帧消费（D11 压缩完成刷新 + 角标更新）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    apiMocks.listArchives.mockResolvedValue([])
+    apiMocks.list.mockResolvedValue([])
+  })
+
   /** 挂载一个调用 useArchiveCountBroadcast 的空组件（setup 顶层订阅真实事件总线）。 */
   function mountSubscriber() {
     return mount(defineComponent({ setup: () => { useArchiveCountBroadcast(); return () => null } }))
@@ -327,6 +524,13 @@ describe('config.sessions 帧消费（D11 压缩完成刷新 + 角标更新）',
 })
 
 describe('purgeArchiveEntry（D5 步骤 7：keep-all 保守分支显式上报）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    apiMocks.listArchives.mockResolvedValue([])
+    apiMocks.list.mockResolvedValue([])
+  })
+
   it('干净删除：info toast + 归档列表刷新', async () => {
     const { purgeArchiveEntry } = useArchiveView()
     apiMocks.purgeArchive.mockResolvedValue({ sessionId: 'arc-1' })
@@ -366,6 +570,13 @@ describe('purgeArchiveEntry（D5 步骤 7：keep-all 保守分支显式上报）
 })
 
 describe('purgeArchivesBatch（筛选行批量彻底删除：串行循环 + 结果分流）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    apiMocks.listArchives.mockResolvedValue([])
+    apiMocks.list.mockResolvedValue([])
+  })
+
   it('全部成功：串行逐条 purgeArchive + info toast + 列表刷新 + batchPurging 全程置位后复位', async () => {
     const { purgeArchivesBatch } = useArchiveView()
     const store = useArchiveStore()
