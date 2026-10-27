@@ -2,7 +2,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, BrowserFrameState, LocalFileServableResult, LocalFileReadResult, RuntimeTargetSnapshot } from '@taiji/shared'
 import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, SESSION_EXPORT_JSONL, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ,
-  RUNTIME_PORT, RUNTIME_ERROR, RUNTIME_RESTARTING, RUNTIME_FAILED, GET_RUNTIME_PORT, GET_RUNTIME_TOKEN, GET_RUNTIME_TARGET_SNAPSHOT, GET_RUNTIME_START_ERROR, RUNTIME_RESTART,
+  RUNTIME_PORT, RUNTIME_ERROR, RUNTIME_RESTARTING, RUNTIME_FAILED, GET_RUNTIME_TARGET_SNAPSHOT, GET_RUNTIME_START_ERROR, RUNTIME_RESTART,
   CREATE_WINDOW, GET_WINDOWS, FOCUS_WINDOW, WINDOW_LIST_UPDATED, WINDOW_MINIMIZE, WINDOW_TOGGLE_MAXIMIZE, WINDOW_CLOSE, FULLSCREEN_CHANGED,
   PICK_DIRECTORY, PICK_FILE, OPEN_EXTERNAL, REVEAL_IN_FOLDER, GET_DATA_DIR,
   SHORTCUT, SHORTCUT_FORWARD,
@@ -38,14 +38,6 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
   restartRuntime(): Promise<void>
   /** 监听快捷键事件（替代 @tauri-apps/api/event 的 listen('shortcut')） */
   onShortcut(callback: (type: string) => void): () => void
-  /** 获取 runtime 端口 */
-  getRuntimePort(): Promise<number>
-  /**
-   * 获取当前 runtime 的 WS auth token（S1-W1）：连接 open 后作首条 auth 消息发送。
-   * runtime 重启后 token 刷新（supervisor 每次 spawn 重新生成），重连时需重新获取。
-   * 未启动（无 IPC / mock）时由调用方兜底 undefined。
-   */
-  getRuntimeToken(): Promise<string | null>
   /**
    * 拉取当前连接目标快照（connection-datasync-ssot §6.1 单一权威连接目标）：
    * {seq, runtimeId, port, token} 并置读取，未启动（无 runtime / mock）为 null。
@@ -333,8 +325,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(SHORTCUT, handler)
     return () => ipcRenderer.removeListener(SHORTCUT, handler)
   },
-  getRuntimePort: () => ipcRenderer.invoke(GET_RUNTIME_PORT),
-  getRuntimeToken: () => ipcRenderer.invoke(GET_RUNTIME_TOKEN),
   getRuntimeTargetSnapshot: () => ipcRenderer.invoke(GET_RUNTIME_TARGET_SNAPSHOT),
 
   // ── 窗口管理 ──────────────────────────────────────────────────

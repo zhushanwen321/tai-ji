@@ -15,27 +15,9 @@ import type { ImageCacheWritePort } from '@taiji/core'
 const api = typeof window !== 'undefined' ? window.electronAPI : undefined
 
 /**
- * 读取已知 runtime 端口（main 已 spawn）。无 IPC 或未启动返回 undefined。
- * 连接控制器已切换目标快照（getRuntimeTargetSnapshot）——本通道不再被连接链消费，
- * 保留供诊断/排查取端口值（connection-datasync-ssot §7：通道清理仅删 offset 猜连带）。
- */
-export function getRuntimePort(): Promise<number | undefined> {
-  return api ? api.getRuntimePort() : Promise.resolve(undefined)
-}
-
-/**
- * 读取当前 runtime 的 WS auth token（S1-W1）。无 IPC（web/mock）返回 undefined。
- * 连接控制器已切换目标快照（token 随快照并置读取）——本通道不再被连接链消费，
- * 保留供诊断/排查取凭据值。
- */
-export function getRuntimeToken(): Promise<string | null | undefined> {
-  return api?.getRuntimeToken ? api.getRuntimeToken() : Promise.resolve(undefined)
-}
-
-/**
  * 拉取当前连接目标快照（connection-datasync-ssot §6.1 单一权威连接目标）：
  * {seq, runtimeId, port, token} 并置读取——启动与重连前的目标判定依据（seq 裁决），
- * 替代零散的 getRuntimePort / getRuntimeToken 两路。无 IPC（web/mock）返回
+ * port/token 的零散读口已随连接链切快照并置读取删除（M1-2）。无 IPC（web/mock）返回
  * undefined，调用方（连接控制器）进入等待态。
  */
 export function getRuntimeTargetSnapshot(): Promise<RuntimeTargetSnapshot | null | undefined> {

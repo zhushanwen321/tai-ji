@@ -531,12 +531,13 @@ export class RuntimeServer implements IMessageBroker {
         ...messaging,
         projectStore: project,
         // 命令执行成功后的 project.changed 失效信号广播（connection-datasync-ssot §6.6，
-        // broadcastProviderList 同款注入形态）：payload 仅携带 revision 水位，不带状态数据。
-        broadcastProjectChanged: (revision) => {
+        // broadcastProviderList 同款注入形态）：空负载失效信号——不带状态数据也不带
+        // revision（交错判据走命令回执的 revision，M1-1/M1-3 裁决）。
+        broadcastProjectChanged: () => {
           this.broker.broadcast({
             type: 'project.changed',
             id: this.broker.nextPushId(),
-            payload: { revision },
+            payload: {},
           })
         },
       })

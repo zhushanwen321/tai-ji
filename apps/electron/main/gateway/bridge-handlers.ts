@@ -23,8 +23,6 @@ import { homedir, networkInterfaces } from 'node:os'
 import { sep } from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
 import {
-  GET_RUNTIME_PORT,
-  GET_RUNTIME_TOKEN,
   GET_RUNTIME_TARGET_SNAPSHOT,
   GET_RUNTIME_START_ERROR,
   RUNTIME_RESTART,
@@ -50,21 +48,11 @@ import { isValidRemoteAccessEnabled } from './input-validators.js'
  * @param deps 注入的依赖（runtime/windowManager/createWindow）
  */
 export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
-  // ── runtime 端口 / token（只读 supervisor 状态）───────────────────
-  ipcMain.handle(GET_RUNTIME_PORT, () => deps.runtime.port)
-  // S1-W1（spec §3.3 D4）：WS auth token 下发通道①——renderer 经 preload
-  // getRuntimeToken 读取（与 get-runtime-port 同模式），连接 open 后作首条 auth 消息发送。
-  // 通道②（<dataDir>/runtime-token 文件）面向 CLI / 脚本，不经此 IPC。
-  ipcMain.handle(GET_RUNTIME_TOKEN, () => deps.runtime.token)
-  // connection-datasync-ssot §6.1：连接目标快照单一权威读口（与 get-runtime-port 同模式
-  // 只读 supervisor 状态）——{seq, runtimeId, port, token} 并置，替代零散的 port/token 两路
-  // 读取；未启动返回 null（renderer 连接控制器进等待态）。get-runtime-port 旧通道保留
-  // （连接链已切目标快照读口，现供诊断取端口值）；get-runtime-port-offset 读口已随 §6.2
-  // 备用猜连链删除同批清理（连带 ipc-channels 常量 / preload 暴露 / lib/ipc wrapper 三处，
-  // renderer 消费链 composables/useConnection.ts → core resolveFallbackPort 随连接控制器
-  // 单元一并删除）。
+  // ── runtime 连接目标（只读 supervisor 状态）───────────────────
+  // connection-datasync-ssot §6.1：连接目标快照单一权威读口——{seq, runtimeId, port, token}
+  // 并置只读 supervisor 状态；未启动返回 null（renderer 连接控制器进等待态）。
   ipcMain.handle(GET_RUNTIME_TARGET_SNAPSHOT, () => deps.runtime.targetSnapshot)
-  // RD-3#2：启动失败真因拉取（与 get-runtime-port 同模式只读 supervisor 状态）。
+  // RD-3#2：启动失败真因拉取（同款只读 supervisor 状态）。
   // runtime-error 推送可能早于 renderer 订阅安装（boot 竞态，webContents.send 静默丢失）
   // ——renderer 连接编排 init 时主动拉取，徒劳自动重试短路 + 连接屏显示真实原因。
   ipcMain.handle(GET_RUNTIME_START_ERROR, () => deps.runtime.startError)

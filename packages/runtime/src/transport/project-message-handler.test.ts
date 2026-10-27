@@ -173,9 +173,9 @@ describe('ProjectMessageHandler 命令通道成功路径（mock store）', () =>
     // reply type 与 request 同名（payload 消费型同名模式），payload = ProjectCommandReply 原样
     expect(ctx.reply).toHaveBeenCalledTimes(1)
     expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', type, commandReply)
-    // 失效信号：revision = 执行后新值
+    // 失效信号：空负载（每命令恰好一次，不带数据——交错判据走回执 revision）
     expect(ctx.broadcastProjectChanged).toHaveBeenCalledTimes(1)
-    expect(ctx.broadcastProjectChanged).toHaveBeenCalledWith(commandReply.revision)
+    expect(ctx.broadcastProjectChanged).toHaveBeenCalledWith()
     expect(ctx.sendError).not.toHaveBeenCalled()
   })
 })

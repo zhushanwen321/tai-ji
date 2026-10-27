@@ -1648,8 +1648,8 @@ export type ServerMessageType =
   | 'project.createProject' | 'project.renameProject' | 'project.removeProject' | 'project.setActiveProject'
   // project.changed（connection-datasync-ssot §6.6）：project 写命令执行成功后的全局
   // 失效信号广播（runtime 唯一写入口的变更通知）。只作失效信号不带数据——各窗口收到后
-  // 触发 project 域重新拉取（拉为主、推补充，ADR-0097）；payload 仅携带 revision 水位
-  // 供消费方判「是否比自己已知更新」，不做回执合流。
+  // 触发 project 域重新拉取（拉为主、推补充，ADR-0097）；payload 为空负载（不带任何
+  // 数据，含 revision——交错判据走命令回执携带的 revision，不经本信号）。
   | 'project.changed'
   | 'session.subagents' | 'session.subagentHistory'
   // session.getSubagentStreamState（B2 subagent-stream-chunk §4.1）：运行中 subagent 流状态
@@ -3341,8 +3341,9 @@ export interface ServerMessageMapBase {
   'project.removeProject': ProjectCommandReply
   'project.setActiveProject': ProjectCommandReply
   // project.changed：写命令执行成功后的失效信号广播（connection-datasync-ssot §6.6）。
-  // revision = 执行后的文件写入代数新值；不带状态数据，消费方据此触发 project 域重拉。
-  'project.changed': { revision: number }
+  // 空负载失效信号（§6.6 字面「失效信号不带数据」）：不带状态数据也不带 revision——
+  // 交错判据走命令回执的 revision，消费方收到后触发 project 域重拉。
+  'project.changed': Record<string, never>
   // session.renamed：session.rename reply（session-message-handler.ts:162 reply { sessionId, name }）。
   // [C-pi-14/ADR-0065] mutation reply（分支二原样存储）：wire 回显请求名 + broadcastSessionList
   // 全量广播兜底；ReplyPayloadMap 登记为 ack 型（豁免理由见 ADR-0065 豁免清单）。

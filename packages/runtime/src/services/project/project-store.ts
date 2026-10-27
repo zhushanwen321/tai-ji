@@ -69,7 +69,7 @@ function makeDefaultProject(): Project {
 }
 
 /**
- * 归一化（§6.6① 自 renderer normalizeLoadedProjects 迁入，行为对齐）：
+ * 归一化（§6.6①，runtime 侧权威实现）：
  * ① nameless 默认项缺失（legacy/外部编辑数据）→ 按 id 占用判定补插头部（按 nameless
  *    判占用会在默认项被改名时补插第二个同 id 项）；
  * ② activeProjectId 失配 → 回退链「nameless 默认项 → 首个 → DEFAULT_PROJECT_ID」。
@@ -94,7 +94,7 @@ export class ProjectStore {
   private activeProjectId = ''
   /** 文件写入代数水位（内存权威，随 flush 落盘；loadFromFile 读入，每次写 +1） */
   private revision = 0
-  /** 同毫秒内多次 createProject 的 id 去重（对齐 renderer projectSeq 形态） */
+  /** 同毫秒内多次 createProject 的 id 去重（Date.now() 同毫秒撞值时以自增序号区分） */
   private projectSeq = 0
   /** 命令串行队列尾（见 enqueueCommand） */
   private commandQueueTail: Promise<unknown> = Promise.resolve()
@@ -116,9 +116,9 @@ export class ProjectStore {
 
   /**
    * 全量加载 project 列表（前端启动 init 用）。
-   * 文件不存在（首启）→ 空态 { projects: [], activeProjectId: '' }，前端兜底默认 project。
-   * INV-4 读时修复：返回视图恒满足不变量；失配仅存在于返回视图的变换，不写盘
-   * （cache 无 dirty，load 前后文件字节一致）。
+   * 首启（文件不存在）→ 经 normalizeState 补插默认项，返回不变量满足视图（renderer
+   * 回执直装载，无前端兜底）。INV-4 读时修复：返回视图恒满足不变量；失配仅存在于
+   * 返回视图的变换，不写盘（cache 无 dirty，load 前后文件字节一致）。
    */
   load(): ProjectStoreState {
     return normalizeState({ projects: this.listRaw(), activeProjectId: this.activeProjectId })
@@ -250,11 +250,15 @@ export class ProjectStore {
   /**
    * 命令路径不变量修复（§6.6①）：变更前把 INV-4 施加到权威数据（cache + 内存字段）。
    * 修复产生的 dirty 与命令写盘同窗口 flush，不产生第二次写盘。
+   *
+   * [裁决登记 D5 R1 F1-34] 语义校验拒绝路径（本函数已执行、后续校验抛
+   * ProjectCommandError）的修复 dirty 仍随 debounce 落盘且不带 revision+1——读侧
+   * 修复语义：修复幂等、拒绝不广播不改 revision 语义，数据面无实害。
    */
   private ensureInvariants(): void {
     const projects = this.listRaw()
     if (!projects.some((p) => p.id === DEFAULT_PROJECT_ID)) {
-      // 补插默认项取头部序（对齐 normalizeState 视图与 renderer unshift 语义）——
+      // 补插默认项取头部序（对齐 normalizeState 视图）——
       // cache Map 只能追加，delete+set 重建键序；同一 flush 窗口，无第二次写盘。
       this.rewriteCache([makeDefaultProject(), ...projects])
     }

@@ -24,11 +24,17 @@
  * 依赖方向：liveness-probe → 全局 fetch（Electron/Node 18+ 内置）
  */
 
-/** 连续失败达此阈值则判定「半活」，触发强制重启（3 次 × 30s = 最迟 ~90s 发现卡死） */
+/** 连续失败达此阈值则判定「半活」，触发强制重启（逐请求 30s 超时 × 3 次 × 30s 间隔 = 最迟 ~90s 发现卡死） */
 export const LIVENESS_FAIL_THRESHOLD = 3
 
 /** 存活探针轮询间隔（ms）：30s 一次，平衡「发现速度」与「对 runtime 的压力」 */
 export const LIVENESS_INTERVAL_MS = 30_000
+
+/**
+ * 单次探针请求超时（ms）：fetch 逐请求硬超时（AbortSignal.timeout），保证 SIGSTOP 冻结
+ * 等无响应形态不会挂到 undici 默认 headersTimeout（300s）——判死窗口按上式 ~90s 兑现。
+ */
+export const LIVENESS_PROBE_TIMEOUT_MS = 30_000
 
 /** 健康端点 URL（仅本地回环） */
 const HEALTH_ENDPOINT = (port: number) => `http://127.0.0.1:${port}/health`
@@ -44,7 +50,7 @@ export interface HealthProbeResult {
  *
  * [HISTORICAL] 不变量：
  * - 永不向调用方抛错（探针失败由调用方累计计数处理，而非崩溃）
- * - 仅 2xx 视为健康（response.ok）；非 2xx / fetch reject 均返回 ok=false
+ * - 仅 2xx 视为健康（response.ok）；非 2xx / fetch reject（含逐请求超时 AbortError）均返回 ok=false
  * - 健康时附带 ms（响应耗时，用于日志诊断慢响应）；不健康时不带（无意义）
  *
  * @param port runtime 监听端口
@@ -53,7 +59,9 @@ export interface HealthProbeResult {
 export async function checkHealthEndpoint(port: number): Promise<HealthProbeResult> {
   const startedAt = Date.now()
   try {
-    const response = await fetch(HEALTH_ENDPOINT(port))
+    const response = await fetch(HEALTH_ENDPOINT(port), {
+      signal: AbortSignal.timeout(LIVENESS_PROBE_TIMEOUT_MS),
+    })
     if (response.ok) {
       return { ok: true, ms: Date.now() - startedAt }
     }

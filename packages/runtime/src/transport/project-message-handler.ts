@@ -27,8 +27,8 @@ type ProjectCommandType = Extract<
 /** Project handler 的上下文（extends 共享发消息契约 + 领域依赖） */
 export interface ProjectHandlerContext extends MessageHandlerContext {
   projectStore: ProjectStore
-  /** 命令执行成功后的 project.changed 广播（失效信号，payload 仅携带 revision 水位）。 */
-  broadcastProjectChanged: (revision: number) => void
+  /** 命令执行成功后的 project.changed 广播（空负载失效信号，不带数据——§6.6）。 */
+  broadcastProjectChanged: () => void
 }
 
 export class ProjectMessageHandler {
@@ -88,7 +88,7 @@ export class ProjectMessageHandler {
       }
       throw e
     }
-    this.ctx.broadcastProjectChanged(reply.revision)
+    this.ctx.broadcastProjectChanged()
     return this.ctx.reply(ws, msgId, replyType, reply)
   }
 
