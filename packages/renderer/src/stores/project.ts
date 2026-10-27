@@ -105,7 +105,8 @@ export const useProjectStore = defineStore('project', () => {
         return
       case 'commandApplied':
         // 命令回执只更新数据视图与水位，不改加载状态机（§6.5：loaded 态命令失败不改状态机；
-        // 成功同理——命令通道与加载通道正交）。守卫 = 命令仅在 loaded 态被接受（runCommand）。
+        // 成功同理——命令通道与加载通道正交）。守卫 = 命令按 editingEnabled 判据被接受
+        // （loaded 或重拉子形态，§6.9，runCommand）。
         projects.value = event.reply.state.projects
         activeProjectId.value = event.reply.state.activeProjectId || DEFAULT_PROJECT_ID
         revision.value = event.reply.revision
