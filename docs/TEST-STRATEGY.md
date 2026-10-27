@@ -73,6 +73,20 @@ node scripts/verify-scheduler-e2e.cjs
 - **写删目标约束**：新测试的写删目标必须 `mkdtempSync(join(tmpdir(), ...))` 自建自删，禁止删除 `getSessionsDir()` 等共享推导路径；禁止绕过 guard（restore 原始 fs / 子进程删真实目录）
 - **运行边界 [HISTORICAL]**（2026-09-16 事故）：禁止从包目录外触发 vitest 扫描式跑测——根目录是唯一合法全仓入口（防线齐备）；单包测试固定 `cd <包目录> && npx vitest run`（见上「运行命令（cwd 敏感）」）。根目录入口指 test-guard 防线覆盖位置，不是可执行全量跑法——根级兜底 config 无各包 environment，DOM 测试从根跑全挂（document is not defined）；全量回归 = 改动范围 + 依赖闭包，逐个子包目录跑 `vitest run`
 
+### 测试执行三档（快档 / 重型档 / 域触发档）
+
+> 三档是**执行入口**档位（什么改动跑哪一档）；「新写测试判据」节的三档判据是**用例形态**档位（新用例落哪一层），两者正交。回归排序按功能分级（P0-P3），见 [docs/FEATURE-PRIORITIES.md](FEATURE-PRIORITIES.md)。
+
+| 档 | 入口 | 内容 | 何时跑 |
+|----|------|------|--------|
+| 快档（默认） | `pnpm test` | 两段式全量单测层：10 小包（concurrency=3）→ 8 大包（串行）；逻辑层 + mock 冒烟，真进程 / 真 IO 用例默认跳过（门控关闭），挂载渲染重型文件默认排除（域触发档承接） | 每次提交前本地验证；CI 全部 test job 同口径（`TAIJI_SKIP_REAL_PI=1`） |
+| 重型档 | `pnpm test:integration` | 与快档同一两条链，带 `TAIJI_TEST_INTEGRATION=1`：runtime integration 组（`packages/runtime/vitest.config.ts` 的 INTEGRATION_TESTS 表）真跑 + 各包 `describe.skipIf` 门控用例真跑 | 改动触及集成门控资产时：`node scripts/select-affected-e2e.mjs --base <ref>` 命中 `E2E-INTEG-*` 规则即跑对应子集（单文件触发形态 = e2e-map 各规则的 run 命令），全量口径 = 本入口 |
+| 域触发档 | `pnpm test:domain <域>`（= `node scripts/run-domain-tests.mjs <domain>`；`--domains` 列域） | 挂载渲染重型用例按功能域触发：设 `TAIJI_TEST_DOMAIN` 取消默认档排除 + 显式文件清单精确选中，单域秒级 | 改动命中某功能域的挂载渲染文件时跑该域；全量渲染回归 = 逐域跑或临时清空排除（不回流默认档） |
+
+**域触发档的登记与排除契约**（权威源 = [docs/testing/domain-map.json](testing/domain-map.json)，域清单以该文件实际条目为准）：挂载渲染重型测试文件（含 `@vue/test-utils` 引用或 `mount(` 调用）按功能域登记进 `domains` 表，每文件唯一归属；默认档排除与域触发选中都从该表派生——renderer / ui 的 vitest.config.ts 经 `test-guard/domain-exclusions.ts` 加载排除清单，域触发经 `scripts/run-domain-tests.mjs` 取清单，禁止任何一侧手抄文件副本。登记义务：新增挂载渲染重型文件须同 commit 登记进对应域（漏登记 = 文件落回默认档拖慢快档）；逻辑层文件禁止登记（域清单只收挂载渲染）。健康度机器校验 = `scripts/check-domain-map.mjs`（结构 / 存在性 / 唯一归属 / 挂载特征 / 消费方接线五项；pre-commit 以权威源、消费方 config、两个脚本或 `test-guard/` 任一 staged 触发）。
+
+**重型档的门控与载体登记维护契约**（SSOT = `packages/runtime/vitest.config.ts` 文件头维护契约 + [下方「集成测试门控约定」](#集成测试门控约定taiji_test_integration)）：真进程 / 真 IO 用例两种门控形态（用例级 `describe.skipIf` / 文件级 INTEGRATION_TESTS 登记）的选型、载体表登记义务见该节。漏登记（成员文件内存在未包裹用例却不在 INTEGRATION_UNGATED_CARRIERS）= 门控关闭时该文件不被收集、用例静默消失——机器守卫 `scripts/check-integration-carriers.mjs`（pre-commit 以 runtime vitest.config.ts / `test-guard/` / runtime 测试文件任一 staged 触发；复用 `SKIP_CODE_RULES_CHECK` 开关）。
+
 ### 集成测试门控约定（TAIJI_TEST_INTEGRATION）
 
 > 门控唯一入口 = `test-guard/integration-gate.ts`（env 名不许在别处重复定义）。定位：把依赖真实进程 / 真实 IO / 真实挂钟窗口的用例（spawn 真子进程、真磁盘吞吐、真实 fs.watch 事件、跨进程互斥）移出默认单测组——这类用例没有确定性完成信号可等，负载下拉长无稳定上界，不满足单测层「只测逻辑、高负载下也极快」的定位（判据见下方「新写测试判据」节）。
@@ -103,7 +117,7 @@ describe.skipIf(!INTEGRATION_TESTS_ENABLED)(
 
 文件级集成组的维护契约写在各包 config 文件头（现行范例 = `packages/runtime/vitest.config.ts`：main 满并行组 / real-pi 串行尾组 / integration 串行尾组三池分工）。新建 integration project 漏挂双防线由 `scripts/check-vitest-guard.mjs` 第 5 条拦截。
 
-**收集条件化**（门控关闭时不付空转装载成本）：integration project 的 `include` 按门控组装——门控开启 = 全部登记文件；门控关闭 = 只收集 `INTEGRATION_UNGATED_CARRIERS` 表内文件。判据 = 该文件是否含未包 `describe.skipIf` 的用例（门控关闭时仍会真实执行）：含则登记进载体表（多一个「库内非门控用例载体」登记位），整文件都是门控用例则不进表——收集它是纯空转（只付 import/transform，产出 0 条断言）。漏登记载体表 = 该文件的非门控用例在门控关闭时静默不收集。real-pi 池不适用条件化：其成员含不依赖凭证的 faux 层用例（`REAL_PI_READY` 关闭时仍真实执行），按门控跳过整个池会静默丢断言。
+**收集条件化**（门控关闭时不付空转装载成本）：integration project 的 `include` 按门控组装——门控开启 = 全部登记文件；门控关闭 = 只收集 `INTEGRATION_UNGATED_CARRIERS` 表内文件。判据 = 该文件是否含未包 `describe.skipIf` 的用例（门控关闭时仍会真实执行）：含则登记进载体表（多一个「库内非门控用例载体」登记位），整文件都是门控用例则不进表——收集它是纯空转（只付 import/transform，产出 0 条断言）。漏登记载体表 = 该文件的非门控用例在门控关闭时静默不收集；机器守卫 = `scripts/check-integration-carriers.mjs`（静态解析两表 + 成员文件逐用例 skipIf 覆盖扫描，pre-commit 触发条件见「测试执行三档」节）。real-pi 池不适用条件化：其成员含不依赖凭证的 faux 层用例（`REAL_PI_READY` 关闭时仍真实执行），按门控跳过整个池会静默丢断言。
 
 **引擎包特例**：`packages/pi-subagent-cli` 与 `packages/zcode-subagent-cli` 受引擎包边界检查（`scripts/check-engine-package-boundary.mjs`）约束——src 内相对说明符不得逃出包根，测试文件**不** import 仓库根的 `test-guard/integration-gate.ts`，改 import 包内副本（`packages/pi-subagent-cli/src/__tests__/integration-gate.local.ts` 与 `packages/zcode-subagent-cli/src/__tests__/integration-gate.local.ts`，同语义读同名 env、注释指回本节；改语义时与 SSOT 同步）。env 名的语义权威仍在 `test-guard/integration-gate.ts`，包内副本只是边界约束下同步维护的副本。
 

@@ -749,6 +749,55 @@ if echo "$STAGED_FILES" | grep -qE "^packages/renderer/src/|^packages/ui/src/|^a
 fi
 
 # ============================================================================
+# 2f-2. 集成门控组载体登记漂移检查（round6 wave2）
+#     scripts/check-integration-carriers.mjs：INTEGRATION_TESTS 成员文件内存在未被
+#     describe.skipIf(!INTEGRATION_TESTS_ENABLED) 包裹的用例、却未登记
+#     INTEGRATION_UNGATED_CARRIERS → 门控关闭时 integration project 的 include 条件化
+#     只收集载体表，该文件不被收集，非门控用例静默消失（无报错、无 skip 记录）。
+#     触发条件 = runtime vitest.config.ts / test-guard/ / runtime 测试文件任一 staged
+#     （成员路径全集只存在于 config 两表，bash 侧以「runtime 域全部测试文件」宽匹配
+#     覆盖，成员表扩容后钩子零维护）。解析能力不足时脚本输出 WARNING 放行
+#     （误报趋零原则，只拦确定可证明的漂移）。复用 SKIP_CODE_RULES_CHECK 开关。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^packages/runtime/vitest\.config\.ts$|^test-guard/|^packages/runtime/(src|test|scripts)/.*\.test\.ts$|^scripts/check-integration-carriers\.mjs$"; then
+    print_section "[集成门控组载体登记检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if ! node scripts/check-integration-carriers.mjs; then
+            echo -e "${RED}[ERROR] 集成门控载体登记检查未通过——门控关闭时未包裹用例将静默消失，按上方 [FIX] 修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] 集成门控组载体登记检查已跳过${NC}"
+    fi
+fi
+
+# ============================================================================
+# 2f-3. 挂载渲染域映射健康度检查（round6 wave2 域触发档）
+#     scripts/check-domain-map.mjs：docs/testing/domain-map.json 是「挂载渲染重型
+#     测试按域触发」的单一权威源——renderer/ui 的 vitest.config.ts（默认档排除）
+#     与 scripts/run-domain-tests.mjs（域触发选中）共同消费它，任何一侧漂移
+#     （文件改名/删除未同步登记、双收录、逻辑文件误登记、config 绕开权威源
+#     手抄清单）→ 默认档排除与域触发选中失配，本检查拦成红灯。触发条件 =
+#     权威源 / 消费方 / 检查脚本自身任一 staged（test-guard/ 并入触发：排除清单
+#     派生器 domain-exclusions 载体所在域）。复用 SKIP_CODE_RULES_CHECK 开关。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^docs/testing/domain-map\.json$|^packages/(renderer|ui)/vitest\.config\.ts$|^scripts/(check-domain-map|run-domain-tests)\.mjs$|^test-guard/"; then
+    print_section "[挂载渲染域映射健康度检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if ! node scripts/check-domain-map.mjs; then
+            echo -e "${RED}[ERROR] 域映射健康度检查未通过——默认档排除与域触发选中将失配，按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] 挂载渲染域映射健康度检查已跳过${NC}"
+    fi
+fi
+
+# ============================================================================
 # 2g. review-fix-loop 双实现锁步检查
 #     scripts/check-rfl-parity.mjs：review+fix 循环有两份实现（pi 内置
 #     packages/subagent-core/workflows/review-fix-loop-utils.cjs / zcode 原生
