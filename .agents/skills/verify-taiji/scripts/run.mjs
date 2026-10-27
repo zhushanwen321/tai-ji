@@ -13,6 +13,7 @@
  *   node scripts/run.mjs scenarios/p0-env-smoke.mjs [--artifacts-dir <dir>] [--json]
  *     [--keep] [--name <实例名>] [--strict] [--run-id <id>] [--timeout-ms <ms>]
  */
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -176,13 +177,30 @@ const log = (msg) => {
 const instanceName = flag('name', `verify-${runId}`)
 assertSafeToken(instanceName, '--name')
 
-// dataDir 值域（审查 C M7）：显式 --data-dir 走仓库权威校验器；缺省 = ~/.taiji-dev/verify-<runId>。
+// dataDir 值域（审查 C M7）：显式 --data-dir 走仓库权威校验器；缺省 = ~/.taiji-dev/verify-<runId>
+// （超 socket 长度预算时 basename 截断+hash，见下方 shortenDataDirBase）。
 // 两条路都保证「最终路径在 ~/.taiji-dev 树内且 basename 以 verify- 开头」——
 // 后者是清理阶段的删除判据，必须由这里先保证。
 const devRoot = path.join(os.homedir(), '.taiji-dev')
+// dataDir basename 长度预算，对齐产品侧 D4 门禁（packages/runtime/src/infra/subagent-control/
+// paths.ts 的 UNIX_SOCKET_PATH_MAX_BYTES = 104）：runtime 会在 <dataDir>/run/subagent-<pid>.sock
+// 建 control socket，路径超 104 字节时启动即 fail-fast 退出，实例永远无法就绪。预算按最坏
+// 组成倒推：<devRoot>/<basename>/run/subagent-<pid>.sock ≤ 104，pid 按 7 位（跨平台上限）取，
+// 本机 homedir 17 字节 → 预算 49。超预算时截断 + sha256 前 8 位 hex 后缀：确定性（同 runId
+// 同名，复跑幂等）、唯一性由 hash 承载、可读性由截断前缀保留，verify- 前缀不动（清理判据）。
+const SOCKET_PATH_MAX_BYTES = 104
+const SOCKET_PID_MAX_WIDTH = 7
+const dataDirBudget =
+  SOCKET_PATH_MAX_BYTES - (devRoot.length + path.sep.length) - '/run/subagent-'.length - '.sock'.length - SOCKET_PID_MAX_WIDTH
+function shortenDataDirBase(base) {
+  if (Buffer.byteLength(base) <= dataDirBudget) return base
+  const hash = createHash('sha256').update(base, 'utf8').digest('hex').slice(0, 8)
+  const keep = Math.max(1, dataDirBudget - hash.length - 1)
+  return `${base.slice(0, keep).replace(/[-_.]+$/, '')}-${hash}`
+}
 const dataDir = await (async () => {
   const explicit = flag('data-dir') ?? process.env.TAIJI_VERIFY_DATA_DIR
-  if (!explicit) return path.join(devRoot, `verify-${runId}`)
+  if (!explicit) return path.join(devRoot, shortenDataDirBase(`verify-${runId}`))
   // run.mjs 由 spawnSync 无 shell 直跑，'~' 前缀不会被 shell 展开——先手动展开成 homedir 绝对路径，
   // 再交给仓库权威校验器；否则 dev-instance-lib.mjs 的 path.resolve 会把 '~' 相对 cwd 解析成
   // <worktree>/~/... 而被树内校验拒绝。
