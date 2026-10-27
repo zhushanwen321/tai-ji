@@ -217,7 +217,7 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 
 | 基线 | 描述 | 来源事故 | 守护测试 |
 |------|------|---------|---------|
-| **slash 命令契约** | 输入 `/` → 浮层弹出 → 选中 → chip 插入；session.commands 时序竞争修复 | `2026-06-28-lite-slash-command-fix`（broadcast 早于订阅丢失） | `src/__tests__/useSidebar-get-commands.test.ts`（U1-U3）+ `landing-precreate-session.test.ts`（U4/U5）+ `composer-slash-trigger.test.ts`（U1-U10） |
+| **slash 命令契约** | 输入 `/` → 浮层弹出 → 选中 → chip 插入；session.commands 时序竞争修复 | `2026-06-28-lite-slash-command-fix`（broadcast 早于订阅丢失） | `src/composables/features/sidebar/__tests__/useSidebar-bootstrap.test.ts`（U1-U3，2026-10 自 useSidebar-get-commands.test.ts 并入）+ `landing-precreate-session.test.ts`（U4/U5）+ `composer-slash-trigger.test.ts`（U1-U10） |
 | **Session 隔离** | 三层隔离（store 分区/useChat 路由/PaneSessionView 过滤）+ 无 sessionId 消息丢弃 + sendError 带 sessionId | AGENTS.md 关键规则 #7 | 各 domain/store 单测 |
 | **渲染 gate** | mount 顶层容器断言结构元素 DOM 存在（防「测试全绿功能不可用」） | 2026-06-27 事故 | 每功能首屏冒烟用例 |
 | **错误状态重置** | 错误路径必须收敛生成状态（否则 UI 卡死）：现行单一入口 = finalizeSession + clearPendingSend / markSessionError（`streamingMessage` 实体已消亡；UI 活跃态 SSOT = isActive = pendingSend ∨ isGenerating，derive-status.ts W1） | AGENTS.md 关键规则 #3 | useChat 错误路径测试 |

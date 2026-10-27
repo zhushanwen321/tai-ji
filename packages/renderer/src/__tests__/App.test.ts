@@ -1,28 +1,23 @@
 /**
- * RD-3#2：runtime 启动失败真因可见性（连接屏 DOM 断言）。
+ * App.vue 组件壳单测合并文件（round6 测试提速，同被测对象簇）。
  *
- * 背景：main supervisor startAndNotify 失败（binary 缺失/端口占用等）发 runtime-error
- * { message } 推送，此前全仓零消费——启动失败真因永不可见，用户只能在 ~60s 后看到通用
- * failed 文案。修复后 App.vue（failed 屏所在组件）订阅 onRuntimeError + 拉取兜底：
- * - 推送/拉取到达 → failed 屏渲染真实 message（通用 failed 文案保留为兜底）；
- * - 真因经 error-reporter（renderer-log 通道，source='runtime-start-failed'）写入登记清单；
- * - 同因去重（推送与拉取兜底双通道不重复上报）；
- * - 无事件 → 只显示既有通用 failed（回归锚）；
- * - App 卸载退订（与 setup 安装配对）；
- * - connected 即清（陈旧真因不再出现在后续 failed 屏）。
+ * 本文件由以下两文件原样搬运合并（describe/it 名零改动，mock 脚手架两源同款去重共享）：
+ * - src/__tests__/App-w8.test.ts（连接建立调 useSidebar.onConnected + 全局 effect 接线。
+ *   W8 语义（承恢复前工作区注释的最新口径）：onConnected 在 useSidebar 内收敛为启动编排
+ *   触发壳（首连 initApp；connection-datasync-ssot §6.4 起重连数据刷新由 core 域同步器
+ *   边沿承载）。App.vue 只负责 watch connectionState 并调 onConnected——钉住这层调用契约）
+ * - src/__tests__/App-runtime-start-error.test.ts（RD-3#2 runtime 启动失败真因可见性 +
+ *   内存压力提示条 surface 注册）
  *
- * 状态转移（置 failed 短路徒劳重连）在 core use-connection，由 core
- * __tests__/use-connection-runtime-start-error.test.ts 覆盖。
+ * 合并说明：
+ * - 两源 mock 面同款（useConnection/useSidebar/AppShell/ToastContainer/effects/
+ *   useInboundFrameGuard/usePermissionRequest），runtime-start-error 另有 '@/lib/ipc'
+ *   importOriginal 保留式覆写（仅三个捕获点）——W8 节不进入 failed 态、不消费被覆写
+ *   导出，合并后行为不变（实测绿灯）。
+ * - connectionState 取两源类型超集（disconnected/connected/failed）。
+ * - usePermissionRequest mock 取 runtime 源版本（含 initPermissionRequest 导出，超集）。
  *
- * Mock 策略：App-w8 同款组件桩 + '@/lib/ipc' importOriginal 保留真实导出（无 electronAPI
- * 测试环境下其余导出走无 IPC 降级路径），仅覆写 onRuntimeError / getRuntimeStartError /
- * reportRendererLog 三个捕获点。i18n t() 由全局 setup 提供（zh-CN 取词）。
- *
- * 本文件同时承载 App.vue 内联内存压力提示条的模态表面注册测试（§6.7 view 遮蔽族）：
- * 复用同一 App 挂载桩，经真实 dispatchGlobal 派发 watchdog:memoryPressure 驱动
- * isOpen/rect 读点（注册表查询函数动作时刻直读）。
- *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/App-runtime-start-error.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/App.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
@@ -36,7 +31,7 @@ import {
 } from '@/composables/features/app/modal-surface-registry'
 import { _resetMemoryPressureForTest } from '@/composables/useMemoryPressure'
 
-// 可控的 connectionState（App.vue 的 watch / 分支渲染数据源）
+// 可控的 connectionState（App.vue 的 watch / 分支渲染数据源；外部修改触发 watch）
 const connectionState = ref<'disconnected' | 'connected' | 'failed'>('failed')
 
 const mocks = vi.hoisted(() => ({
@@ -86,14 +81,13 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
   useSidebar: () => ({ onConnected: mocks.onConnected }),
 }))
 
-// stub 掉重组件与依赖 pinia/session store 的全局 effect（App-w8 同款，保用例隔离）
+// stub 掉重组件与依赖 pinia/session store 的全局 effect（保用例隔离）
 vi.mock('@/components/shell/AppShell.vue', () => ({ default: { name: 'AppShell', template: '<div />' } }))
 vi.mock('@/components/ui/ToastContainer.vue', () => ({ default: { name: 'ToastContainer', template: '<div />' } }))
 
-// App.vue setup 调 usePermissionRequest()（permission 全局弹窗状态，App.vue:190）——真实实现
-// 要求 main.ts 先 initPermissionRequest（controller 模块级，测试环境无 init）→ 直接 throw。
-// 本用例只验 failed 屏真因呈现，与 permission 链路无关：mock 最小 state（对齐 App.vue :79
-// 消费方 pluginId/permissions/pending/error），init no-op。
+// App.vue setup 调 usePermissionRequest()（permission 全局弹窗状态）——真实实现要求
+// main.ts 先 initPermissionRequest（controller 模块级，测试环境无 init）→ 直接 throw。
+// mock 最小 state（对齐 App.vue 消费方 pluginId/permissions/pending/error），init no-op。
 vi.mock('@/composables/shell/usePermissionRequest', () => ({
   usePermissionRequest: () => ({ pluginId: '', permissions: [], pending: false, error: null }),
   initPermissionRequest: vi.fn(),
@@ -106,6 +100,8 @@ const effectSpies = vi.hoisted(() => ({
   installInboundFrameGuard: vi.fn(),
   uninstallInboundFrameGuard: vi.fn(),
 }))
+// stub fork-notice / handoff / session-stream-sync 全局效果（App setup 调用，依赖
+// pinia/session store）；spy 捕获调用次数（W2 对称断言）。
 vi.mock('@/composables/effects/useForkNoticeEffect', () => ({
   bindForkNoticeEffect: (...args: unknown[]) => {
     effectSpies.bindForkNoticeEffect(...args)
@@ -121,6 +117,8 @@ vi.mock('@/composables/effects/useSessionStreamSync', () => ({
     effectSpies.bindSessionStreamSync(...args)
   },
 }))
+// stub 入站检查装配（u-init P0 接线：App setup 顶层 install + onBeforeUnmount uninstall）。
+// 真实 composable 依赖 active pinia（usePanelStore），stub 保用例隔离，接线契约由 spy 断言。
 vi.mock('@/composables/useInboundFrameGuard', () => ({
   installInboundFrameGuard: (...args: unknown[]) => {
     effectSpies.installInboundFrameGuard(...args)
@@ -145,6 +143,66 @@ function pushRuntimeError(message: string): void {
   expect(ipcHolder.runtimeErrorCb).not.toBeNull()
   ipcHolder.runtimeErrorCb!({ message })
 }
+
+// ══════════════ 源: src/__tests__/App-w8.test.ts ══════════════
+
+describe('W8: App.vue 连接建立调 onConnected', () => {
+  let wrapper: ReturnType<typeof mount> | null = null
+
+  beforeEach(() => {
+    connectionState.value = 'disconnected'
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    wrapper?.unmount()
+    wrapper = null
+  })
+
+  it('connected → onConnected 被调用 1 次', async () => {
+    wrapper = mount(App)
+    // [W2] App setup 顶层注册了全局 effect（fork-notice + handoff + session-stream-sync），各调用 1 次。
+    // mount 触发 setup，断言对称（三个 bind effect 都已挂载，与 bindForkNoticeEffect 范式一致）。
+    expect(effectSpies.bindForkNoticeEffect).toHaveBeenCalledTimes(1)
+    expect(effectSpies.bindHandoffEffect).toHaveBeenCalledTimes(1)
+    expect(effectSpies.bindSessionStreamSync).toHaveBeenCalledTimes(1)
+    // u-init P0 接线：入站帧检查在 App setup 顶层安装（同区装配），否则 core 丢帧回调
+    // 无人消费、终止阀提示永不出现（接线缺失 = 生产链路零调用）
+    expect(effectSpies.installInboundFrameGuard).toHaveBeenCalledTimes(1)
+    connectionState.value = 'connected'
+    await new Promise((r) => setTimeout(r, 0))
+    expect(mocks.onConnected).toHaveBeenCalledTimes(1)
+  })
+
+  it('u-init: App 卸载解绑入站帧检查（install/uninstall 配对，HMR 重挂不残留）', () => {
+    wrapper = mount(App)
+    expect(effectSpies.uninstallInboundFrameGuard).not.toHaveBeenCalled()
+    wrapper.unmount()
+    wrapper = null
+    expect(effectSpies.uninstallInboundFrameGuard).toHaveBeenCalledTimes(1)
+  })
+
+  it('断连→重连 connected → onConnected 再次被调用（刷新由 onConnected 内部判断）', async () => {
+    wrapper = mount(App)
+    connectionState.value = 'connected'
+    await new Promise((r) => setTimeout(r, 0))
+    connectionState.value = 'disconnected'
+    await new Promise((r) => setTimeout(r, 0))
+    connectionState.value = 'connected'
+    await new Promise((r) => setTimeout(r, 0))
+    // onConnected 被调两次（首次 + 重连），内部逻辑区分由 useSidebar 单测验证
+    expect(mocks.onConnected).toHaveBeenCalledTimes(2)
+  })
+
+  it('非 connected 状态不触发 onConnected', async () => {
+    wrapper = mount(App)
+    connectionState.value = 'disconnected'
+    await new Promise((r) => setTimeout(r, 0))
+    expect(mocks.onConnected).not.toHaveBeenCalled()
+  })
+})
+
+// ══════════════ 源: src/__tests__/App-runtime-start-error.test.ts ══════════════
 
 describe('RD-3#2：连接屏显示 runtime 启动失败真因', () => {
   let wrapper: VueWrapper | null = null

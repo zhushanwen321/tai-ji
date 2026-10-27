@@ -1,7 +1,7 @@
 // 移动壳装配检查（remote-use D9① 双壳测试 + D9② __testing 出口纪律）。
 //
 // 断言逻辑 = core 共享 helper（checkSessionEntryAssembly / checkInboundEffectsAssembly），
-// 与桌面壳 packages/renderer/src/__tests__/assembly-check.test.ts 各调同一 helper——双壳
+// 与桌面壳（该用例现并入 packages/renderer/src/__tests__/root-node.test.ts 的 assembly-check 节）各调同一 helper——双壳
 // 装配缺口（漏注入 → 静默退化 no-op）在测试期机器报红，防下一批缺口照旧累积。
 //
 // 移动侧断言入口 = __testing 测试后门命名空间（生产代码禁止消费，对齐 companion-bridge

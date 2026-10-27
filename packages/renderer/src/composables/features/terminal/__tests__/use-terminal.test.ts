@@ -1,25 +1,24 @@
 /**
- * useTerminal composable 单元测试（多实例 u2）。
+ * useTerminal 终端域测试合并文件（round6 测试提速，同被测对象簇：useTerminal 及 terminal 域纯逻辑）。
  *
- * 合并文件（波次 2a 簇 3-14）：use-terminal.test.ts（主文件，本文件）+
- * use-terminal-generation-seed.test.ts（世代判据播种节，置最前）。
- * 簇内 composer-injection-text.test.ts 为 node 环境专属指令 + panel 域，语义不同域剔除未并入。
+ * 本文件由以下三文件原样搬运合并（describe/it 名零改动）：
+ * - src/__tests__/terminal/use-terminal.test.ts（主族 + 世代播种节——播种节必须最前）
+ * - src/__tests__/terminal/composer-injection-text.test.ts（原 node pragma 统一为默认
+ *   happy-dom，节内仅 pinia store 直测）
+ * - src/__tests__/terminal/terminal-themes.test.ts（theme 常量 + 实例注册表纯逻辑，
+ *   原 node pragma 同上）
  *
- * 主键迁移后：三表（输出分区 / 广播订阅 / flush 监听）与写队列全部按 **terminalId**
- * `term:<sid>:<n>` 分键；spawn 走「新建形态」由 ack 回传编号建档（四件事）。
+ * mock 统一：
+ * - terminalApi：隔离 RPC（use-terminal 源工厂）
+ * - ws-client：importActual 保留式，仅覆写 getState/getCurrentToken（播种节构造
+ *   「模块求值时已连接」初态用）
  *
- * 覆盖：实例建档 / 实例与 PTY 控制 / 帧路由（按 terminalId 过滤）/ 关闭沿三路径 /
- * `terminal.list` 对账 / 世代变更失效重置 / `unknown_terminal_id` 平行检查 / 会话销毁扇出 /
- * 世代判据播种（模块懒加载晚于首次连接的真机时序）。
+ * 剔出登记：src/__tests__/terminal/use-terminal-raf-queue.test.ts 修两轮未过不硬合——
+ * 其 TerminalView 端到端节（真 useTerminal + 挂载轮 ack 建档）在主族先行运行后 ack
+ * 建档不落地（spawn resolve 后 establishInstance 未注册实例，隔离运行即绿）；与主族的
+ * ws-client 保留式 mock（getState 恒 connected）+ 播种世代态存在结构性互斥，保留独立。
  *
- * 结构约束（合并引入）：
- * - 世代播种节必须是最前测试——其前提是模块求值期播种的 lastConnectionToken 未被
- *   任何用例污染（__resetTerminalStateForTest / __handleConnectionEstablishedForTest 都会改写它）。
- * - 主族 beforeEach（含 __resetTerminalStateForTest）下沉进主族外层 describe，不作用于播种节。
- * - terminalApi mock 两源逐字同文，去重共享单例；ws-client 部分mock（importActual 保留式，
- *   仅覆写 getState/getCurrentToken）供播种节构造「模块求值时已连接」初态。
- *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/terminal/use-terminal.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/composables/features/terminal/__tests__/use-terminal.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { defineComponent, h, ref, nextTick, type Ref } from 'vue'
@@ -27,10 +26,37 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ServerMessage } from '@taiji/shared'
 import type { UseTerminalReturn } from '@/composables/features/terminal/useTerminal'
+import {
+  useTerminal,
+  replayChunks,
+  replayChunksBatched,
+  __resetTerminalStateForTest,
+  __terminalPartitionCountForTest,
+  __terminalSubscriptionCountForTest,
+  __terminalFlushListenerCountForTest,
+  __handleConnectionEstablishedForTest,
+} from '@/composables/features/terminal/useTerminal'
+import {
+  hasInstance,
+  setActiveTerminalId,
+  unregisterInstance,
+  listInstances,
+  activeTerminalIdOf,
+  isTerminalIdOfSession,
+  registerInstance,
+  sessionIdOfTerminalId,
+  __resetTerminalInstanceRegistryForTest,
+} from '@/composables/features/terminal/terminal-instance-registry'
+import { useToast } from '@/composables/useToast'
+import { dispatchSession } from '@taiji/core/transport/api'
+import { triggerSessionCleanups } from '@/composables/useSessionScopedState'
+import { useTerminalWriteQueueStore } from '@/stores/terminal-write-queue'
+import { composerInjectionStore } from '@/composables/panel/composer-injection-store'
+import { darkTerminalTheme } from '@/composables/terminal/terminal-themes'
 
 type WsState = 'disconnected' | 'connected'
 
-// ── mock terminalApi（隔离 RPC；与播种节两源同文，共享单例）──────────────────
+// ── mock terminalApi（隔离 RPC；use-terminal / raf-queue 两源同文，共享单例）──
 const terminalApiMock = vi.hoisted(() => ({
   spawn: vi.fn(() => Promise.resolve({})),
   write: vi.fn(() => Promise.resolve()),
@@ -44,8 +70,6 @@ vi.mock('@taiji/core/transport/api/domains/terminal', () => ({
 }))
 
 // ── 可控 ws-client 连接态（初态 = 已连接 token-A，供 useTerminal 模块求值播种）──
-// 源: use-terminal-generation-seed.test.ts。保留式部分mock：actual 全保留，仅覆写
-// getState/getCurrentToken（主族用例不消费真实 ws-client——全部经测试钩子直驱）。
 const wsControl = vi.hoisted(() => ({
   state: null as Ref<WsState> | null,
   token: 'token-A' as string | null,
@@ -64,19 +88,12 @@ vi.mock('@taiji/core/transport/ws-client', async () => {
 })
 
 // 静态 import 在 vi.mock 生效后执行——模块求值时 getState() 已返回 connected、token-A。
-import {
-  useTerminal,
-  __resetTerminalStateForTest,
-  __terminalPartitionCountForTest,
-  __terminalSubscriptionCountForTest,
-  __handleConnectionEstablishedForTest,
-} from '@/composables/features/terminal/useTerminal'
-import { hasInstance, setActiveTerminalId, unregisterInstance } from '@/composables/features/terminal/terminal-instance-registry'
-import { dispatchSession } from '@taiji/core/transport/api'
-import { triggerSessionCleanups } from '@/composables/useSessionScopedState'
-import { useToast } from '@/composables/useToast'
-import { useTerminalWriteQueueStore } from '@/stores/terminal-write-queue'
 
+// ══════════════ 源: src/__tests__/terminal/use-terminal.test.ts ══════════════
+// useTerminal composable 单元测试（多实例 u2；含世代判据播种节——**必须保持本文件最前**，
+// 其前提是模块求值期播种的 lastConnectionToken 未被任何用例污染）。
+// 覆盖：实例建档 / 实例与 PTY 控制 / 帧路由（按 terminalId 过滤）/ 关闭沿三路径 /
+// `terminal.list` 对账 / 世代变更失效重置 / `unknown_terminal_id` 平行检查 / 会话销毁扇出。
 const T1 = 'term:s1:1'
 const T2 = 'term:s1:2'
 
@@ -769,5 +786,180 @@ describe('useTerminal 主族（多实例 u2）', () => {
       expect(__terminalPartitionCountForTest()).toBe(0)
       wrapper.unmount()
     })
+  })
+})
+
+// ══════════════ 源: src/__tests__/terminal/composer-injection-text.test.ts ══════════════
+// composer-injection text 注入（Phase 4 V4.1）。原 node pragma 随合并统一为默认
+// happy-dom（节内仅 pinia store 直测，行为不变）。
+describe('composer-injection text 扩展 —— 源: src/__tests__/terminal/composer-injection-text.test.ts', () => {
+beforeEach(() => {
+  setActivePinia(createPinia())
+})
+
+describe('composer-injection text 扩展（Phase 4 联动 1）', () => {
+  it('CI-1: requestInjection({ text }) 写入 pendingInjection 含 text 字段', () => {
+    const store = composerInjectionStore
+    store.requestInjection({ target: 'current', text: 'terminal output line', sessionId: 's1' })
+    expect(store.pendingInjection.value).toBeTruthy()
+    expect(store.pendingInjection.value!.text).toBe('terminal output line')
+    expect(store.pendingInjection.value!.path).toBeUndefined()
+    expect(store.pendingInjection.value!.sessionId).toBe('s1')
+    expect(store.pendingInjection.value!.ts).toBeGreaterThan(0)
+  })
+
+  it('CI-2: requestInjection({ path }) 仍正常写入 path（file chip 路径不受影响）', () => {
+    const store = composerInjectionStore
+    store.requestInjection({ target: 'current', path: '/a/b.ts', lineStart: 1, lineEnd: 5, sessionId: 's1' })
+    expect(store.pendingInjection.value!.path).toBe('/a/b.ts')
+    expect(store.pendingInjection.value!.text).toBeUndefined()
+    expect(store.pendingInjection.value!.lineStart).toBe(1)
+    expect(store.pendingInjection.value!.lineEnd).toBe(5)
+  })
+
+  it('CI-3: target=new 时 sessionId 强制 null（text 也遵守）', () => {
+    const store = composerInjectionStore
+    store.requestInjection({ target: 'new', text: 'some output', sessionId: 'ignored-sid' })
+    expect(store.pendingInjection.value!.sessionId).toBeNull()
+    expect(store.pendingInjection.value!.text).toBe('some output')
+  })
+
+  it('CI-4: clearInjection 清空 pendingInjection', () => {
+    const store = composerInjectionStore
+    store.requestInjection({ target: 'current', text: 'x', sessionId: 's1' })
+    store.clearInjection()
+    expect(store.pendingInjection.value).toBeNull()
+  })
+
+  it('CI-5: routeToLanding 把 target new→current + sessionId→null（text 场景）', () => {
+    const store = composerInjectionStore
+    store.requestInjection({ target: 'new', text: 'error log', sessionId: 'ignored' })
+    const originalTs = store.pendingInjection.value!.ts
+    store.routeToLanding()
+    expect(store.pendingInjection.value!.target).toBe('current')
+    expect(store.pendingInjection.value!.sessionId).toBeNull()
+    expect(store.pendingInjection.value!.text).toBe('error log')
+    expect(store.pendingInjection.value!.ts).toBeGreaterThanOrEqual(originalTs)
+  })
+})
+})
+
+
+// ══════════════ 源: src/__tests__/terminal/terminal-themes.test.ts ══════════════
+/**
+ * terminal 域纯逻辑测试合并文件（波 2a 簇 1-17 语义子集）。
+ *
+ * 节 1 — terminal-themes：darkTerminalTheme 常量断言（核心色/ANSI 调色板/状态色）。
+ * 节 2 — terminal-instance-registry：isTerminalIdOfSession 参数顺序口径 +
+ *        registerInstance 的 active 落位语义（对账/恢复 vs 用户显式新建）。
+ *
+ * 合并说明：两节全零 mock 纯逻辑，node 环境，无同名绑定；describe/it 名零改动。
+ * 簇内其余 4 文件（contrast-tokens / use-git-status / animation-source-guards /
+ * i18n-value-smoke）语义互异（令牌断言 / git composable / 动画静态扫描 / i18n 冒烟），
+ * 异域剔除保持独立。
+ *
+ * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/terminal/terminal-themes.test.ts --pool=threads
+ */
+
+// ══════════ 节 1/2 — 来源: terminal-themes.test.ts ══════════
+
+describe('darkTerminalTheme', () => {
+  const hexPattern = /^#[0-9a-f]{6}$/i
+  const rgbaPattern = /^rgba\(\d+,\s*\d+,\s*\d+,\s*[\d.]+\)$/
+
+  it('核心色：fg/cursor 对齐 v3 tokens，背景为纯黑块（2026-08-14 裁决，f9719a71e）', () => {
+    // f9719a71e：终端为纯黑圆角块嵌 drawer 深底（v6-drawer-tabs-demo），
+    // background/cursorAccent 由 #1a1b1f 改 #000000 与黑块画布一致
+    expect(darkTerminalTheme.background).toBe('#000000')
+    expect(darkTerminalTheme.foreground).toBe('#f7f8fc')
+    expect(darkTerminalTheme.cursor).toBe('#4f8ef7')
+    expect(darkTerminalTheme.cursorAccent).toBe('#000000')
+  })
+
+  it('selectionBackground 使用 rgba（透明度）', () => {
+    expect(darkTerminalTheme.selectionBackground).toMatch(rgbaPattern)
+    expect(darkTerminalTheme.selectionInactiveBackground).toMatch(rgbaPattern)
+  })
+
+  it('16 色 ANSI 调色板全部为合法 hex', () => {
+    const colorKeys = [
+      'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
+      'brightBlack', 'brightRed', 'brightGreen', 'brightYellow',
+      'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite',
+    ] as const
+
+    for (const key of colorKeys) {
+      const value = darkTerminalTheme[key]
+      expect(value, `${key} should be defined`).toBeDefined()
+      expect(value, `${key} should be valid hex`).toMatch(hexPattern)
+    }
+  })
+
+  it('bright 变体比标准色更亮（亮度递增）', () => {
+    // 简单验证：bright 变体不等于标准色（除了 black 特殊情况）
+    expect(darkTerminalTheme.brightRed).not.toBe(darkTerminalTheme.red)
+    expect(darkTerminalTheme.brightGreen).not.toBe(darkTerminalTheme.green)
+    expect(darkTerminalTheme.brightBlue).not.toBe(darkTerminalTheme.blue)
+    expect(darkTerminalTheme.brightWhite).not.toBe(darkTerminalTheme.white)
+  })
+
+  it('状态色对齐 v3 状态色', () => {
+    expect(darkTerminalTheme.red).toBe('#ef4444')       // --danger
+    expect(darkTerminalTheme.green).toBe('#22c55e')     // --success
+    expect(darkTerminalTheme.yellow).toBe('#f5a524')    // --warning
+    expect(darkTerminalTheme.cyan).toBe('#38bdf8')      // --info
+    expect(darkTerminalTheme.magenta).toBe('#a78bfa')   // --reasoning
+  })
+})
+
+// ══════════ 节 2/2 — 来源: terminal-instance-registry.test.ts ══════════
+
+/**
+ * terminal-instance-registry 参数顺序口径测试（跨包同名函数防错序）。
+ *
+ * 背景（D2 一致性审查第 2 轮）：renderer 侧 `isTerminalIdOfSession(terminalId, sessionId)`
+ * 与 runtime 侧同名函数（terminal-service.ts）顺序一致，两包无编译期约束、两参数同为
+ * string——传反不报错、静默恒 false（实例被误判为他会话/非成员）。本用例把顺序口径钉成
+ * 可测断言：正序命中、反序必不命中；并复核精确前缀负例（sid 含冒号不误纳）。
+ */
+
+describe('isTerminalIdOfSession 参数顺序口径（terminalId 在前、sessionId 在后）', () => {
+  it('REG-1: 正序 (terminalId, sessionId) 归属命中；反序必不命中（防跨包错序静默恒 false）', () => {
+    const terminalId = 'term:session-a:2'
+    const sessionId = 'session-a'
+    expect(isTerminalIdOfSession(terminalId, sessionId)).toBe(true)
+    // 反序：terminalId 当会话、sessionId 当编号 → 前缀不可能命中
+    expect(isTerminalIdOfSession(sessionId, terminalId)).toBe(false)
+    // 与编号解析器自洽：解析出的会话段正是归属会话
+    expect(sessionIdOfTerminalId(terminalId)).toBe(sessionId)
+  })
+
+  it('REG-2: 精确前缀（序号段须纯数字）——sid 含冒号不误纳他人实例', () => {
+    expect(isTerminalIdOfSession('term:a:1:1', 'a')).toBe(false)
+    expect(isTerminalIdOfSession('term:a:1:1', 'a:1')).toBe(true)
+  })
+})
+
+describe('registerInstance 的 active 落位语义（对账/恢复 vs 用户显式新建）', () => {
+  beforeEach(() => {
+    __resetTerminalInstanceRegistryForTest()
+  })
+
+  it('REG-3: 仅会话首个实例自动成 active；后续注册不抢 active（对账批量注册不跳到最后一条目）', () => {
+    registerInstance('term:s:1', true)
+    expect(activeTerminalIdOf('s')).toBe('term:s:1')
+
+    registerInstance('term:s:2', true)
+    registerInstance('term:s:3', true)
+    // 对账路径（terminal.list 批量注册）不抢 active：用户已选中的 / 首个实例保持
+    expect(activeTerminalIdOf('s')).toBe('term:s:1')
+  })
+
+  it('REG-4: 唯一 active 实例被回收后 active 回空；此后注册才重新落位（首个实例语义）', () => {
+    registerInstance('term:s:1', true)
+    unregisterInstance('term:s:1')
+    expect(activeTerminalIdOf('s')).toBeNull()
+    registerInstance('term:s:2', true)
+    expect(activeTerminalIdOf('s')).toBe('term:s:2')
   })
 })
