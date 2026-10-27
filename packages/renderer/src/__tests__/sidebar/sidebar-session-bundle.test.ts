@@ -79,6 +79,13 @@ function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
 }
 
 function mountList(sessions: SessionSummary[], activeId: string | null = null) {
+  // 装载 loaded + 默认项目（connection-datasync-ssot §6.7 三形态：idle 分组区渲染占位，
+  // 会话行不渲染——本 helper 挂载的会话无 projectId，落默认区渲染）
+  const store = useProjectStore()
+  store.projects = [{ id: DEFAULT_PROJECT_ID, name: '', lastUsedAt: 0 }]
+  store.activeProjectId = DEFAULT_PROJECT_ID
+  store.revision = 1
+  store.loadState = 'loaded'
   return mount(SessionList, {
     attachTo: document.body,
     props: {
@@ -461,6 +468,13 @@ function mountExportItem(sessionOverrides: Record<string, unknown> = {}) {
 
 /** 挂载含一条 session 的 SessionList（转发链路用） */
 function mountExportList(sessions: Array<Record<string, unknown>>) {
+  // 装载 loaded + 默认项目（connection-datasync-ssot §6.7 三形态：idle 分组区渲染占位，
+  // 会话行不渲染——右键菜单事件链需要行在 DOM）
+  const store = useProjectStore()
+  store.projects = [{ id: DEFAULT_PROJECT_ID, name: '', lastUsedAt: 0 }]
+  store.activeProjectId = DEFAULT_PROJECT_ID
+  store.revision = 1
+  store.loadState = 'loaded'
   return mount(SessionList, {
     attachTo: document.body,
     props: {
@@ -703,6 +717,8 @@ describe('SessionList: setProject 透传接线（L67 @set-project → emit setPr
       { id: 'p1', name: 'Alpha', lastUsedAt: 0 },
     ]
     store.activeProjectId = DEFAULT_PROJECT_ID
+    store.revision = 1 // loaded 态（§6.9）：无有效数据形态下归属入口整体隐藏
+    store.loadState = 'loaded'
 
     const groups: SessionGroup[] = [{ cwd: '/repo', sessions: [makeSummary('s1')] }]
     const wrapper = mount(SessionList, {

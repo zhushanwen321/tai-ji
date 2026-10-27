@@ -612,7 +612,10 @@ describe('create 透传归属 projectId（D14 语义修正，原 session-project
 
   it('命名 project 下新建任务 → create 第 4 参数携带 activeProjectId', async () => {
     const projectStore = useProjectStore()
-    projectStore.addProject('Test') // 命名 project 成为 active
+    // 直写缓存视图模拟「已加载且命名 project 为 active」（connection-datasync-ssot §6.6：
+    // addProject 已命令化——发 RPC 以回执更新；单测无回执链路，不经命令直接写视图）
+    projectStore.projects = [...projectStore.projects, { id: 'proj-test', name: 'Test', lastUsedAt: 1 }]
+    projectStore.activeProjectId = 'proj-test'
     seedHistGroup('/repo')
     workspaceStoreMock.defaultCwd = '/repo'
 

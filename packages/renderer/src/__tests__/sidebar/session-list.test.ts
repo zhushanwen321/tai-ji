@@ -22,15 +22,54 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/session-list.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
-import type { SessionGroup, SessionSummary } from '@taiji/shared'
+import type { ProjectCommandReply, SessionGroup, SessionSummary } from '@taiji/shared'
 import SessionList from '@/components/sidebar/SessionList.vue'
 import SessionItem from '@/components/sidebar/SessionItem.vue'
 import { SESSION_DRAG_MIME } from '@/components/sidebar/session-drag'
 import { useProjectStore, DEFAULT_PROJECT_ID } from '@/stores/project'
+import { project as projectApi } from '@/api'
 import { flipProjectGroupToggle } from '../helpers/sidebar-mount'
+
+// 命令化（connection-datasync-ssot §6.6）：组头点击切锚定走 setActiveProject 命令——
+// mock 门面 project 域，用例按需以受控回执驱动
+vi.mock('@/api', () => ({
+  project: {
+    load: vi.fn(),
+    save: vi.fn(),
+    createProject: vi.fn(),
+    renameProject: vi.fn(),
+    removeProject: vi.fn(),
+    setActiveProject: vi.fn(),
+  },
+}))
+
+const mockSetActive = projectApi.setActiveProject as unknown as ReturnType<typeof vi.fn>
+
+/** 命令回执 helper：以 store 当前视图为基底生成 ProjectCommandReply */
+function commandReply(store: ReturnType<typeof useProjectStore>, over: Partial<{ state: { projects: Project[]; activeProjectId: string }; revision: number }> = {}): ProjectCommandReply {
+  const base = { state: { projects: store.projects.map((p) => ({ ...p })), activeProjectId: store.activeProjectId }, revision: store.revision + 1 }
+  return { ...base, ...over }
+}
+
+/** 装载后置 loaded 态（三形态呈现 §6.7：非 loaded 分组区渲染占位/状态条，不渲染分组） */
+function markLoaded(store: ReturnType<typeof useProjectStore>): ReturnType<typeof useProjectStore> {
+  store.revision = 1
+  store.loadState = 'loaded'
+  return store
+}
+
+/** 装载 loaded 态 + 仅默认项目。供只关心会话行渲染/事件（非项目分组本身）的挂载 helper
+ *  使用：会话无 projectId 全部落默认区，与旧「初始态兜底默认组」渲染形态一致——三形态
+ *  改造后 idle 态渲染加载占位，这类用例需要显式 loaded 才能看到会话行。 */
+function seedDefaultLoaded(): void {
+  const store = useProjectStore()
+  store.projects = [{ id: DEFAULT_PROJECT_ID, name: '', lastUsedAt: 0 }]
+  store.activeProjectId = DEFAULT_PROJECT_ID
+  markLoaded(store)
+}
 
 const SESSION_MODE_KEY = 'taiji:sidebar-session-mode'
 
@@ -65,7 +104,7 @@ function setupProjects(activeId: string, names: Array<[string, string]> = [['pro
     ...names.map(([id, name]) => ({ id, name, lastUsedAt: 0 })),
   ]
   store.activeProjectId = activeId
-  return store
+  return markLoaded(store)
 }
 
 /** 定位某项目的分组容器（组体常驻 DOM，text() 断言按组隔离，不受折叠态影响）。
@@ -205,7 +244,8 @@ describe('SessionList: 项目锚定分组（全部项目并列，按 projectId �
 
 describe('SessionList: 锚定切换（平铺模式 = 多开）', () => {
   it('点其他组头 → 锚定切换并展开目标组；原锚定组保持展开（多开，开合按组独立记忆）；组位置不重排', async () => {
-    setupProjects('proj-a', [['proj-a', 'Alpha'], ['proj-b', 'Beta']])
+    const store = setupProjects('proj-a', [['proj-a', 'Alpha'], ['proj-b', 'Beta']])
+    mockSetActive.mockImplementation(async () => commandReply(store, { state: { projects: store.projects.map((p) => ({ ...p })), activeProjectId: 'proj-b' } }))
     const wrapper = mountProjectFilterList()
 
     const idsBefore = wrapper.findAll('[data-testid="project-group"]').map((g) => g.attributes('data-project-id'))
@@ -214,7 +254,7 @@ describe('SessionList: 锚定切换（平铺模式 = 多开）', () => {
     expect(groupOf(wrapper, 'proj-b').find('[data-testid="project-group-toggle"]').attributes('aria-expanded')).toBe('true')
 
     await groupOf(wrapper, 'proj-b').find('[data-testid="project-group-toggle"]').trigger('click')
-    await nextTick()
+    await flushPromises() // 锚定命令化（§6.6）：chip 跟随回执更新
 
     expect(useProjectStore().activeProjectId).toBe('proj-b')
     expect(groupOf(wrapper, 'proj-b').find('[data-testid="project-group-toggle"]').attributes('aria-expanded')).toBe('true')
@@ -272,6 +312,7 @@ describe('SessionList: folder 删除检查随项目分组收紧（review MF-2 �
 // ══════════ 来源：session-list-archive-entry.test.ts（归档入口） ══════════
 
 function mountArchiveEntryList(archiveCount?: number, restoredSessionId?: string) {
+  seedDefaultLoaded() // 会话行渲染在默认区（idle 态已改为加载占位，§6.7）
   const groups: SessionGroup[] = [{ cwd: '/alpha', sessions: [makeSession('a1', '/alpha')] }]
   return mount(SessionList, {
     props: {
@@ -493,9 +534,11 @@ describe('DefaultProjectHead：锚定/新建入口（修复锚定切走后新会
 
   it('点行主体 → 锚定切回默认项目，「当前」chip 出现', async () => {
     const store = setupProjects('proj-a')
+    mockSetActive.mockImplementation(async () => commandReply(store, { state: { projects: store.projects.map((p) => ({ ...p })), activeProjectId: DEFAULT_PROJECT_ID } }))
     const wrapper = mountAttachedList()
 
     await wrapper.find('[data-testid="default-project-anchor"]').trigger('click')
+    await flushPromises() // 锚定命令化（§6.6）：chip 跟随回执更新
 
     expect(store.activeProjectId).toBe(DEFAULT_PROJECT_ID)
     await nextTick()
@@ -503,8 +546,9 @@ describe('DefaultProjectHead：锚定/新建入口（修复锚定切走后新会
     wrapper.unmount()
   })
 
-  it('点「+」→ emit 时刻锚定已在默认项目（先锚定后建），并 emit newSession', async () => {
+  it('点「+」→ emit 时刻锚定已在默认项目（先锚定回执后建），并 emit newSession', async () => {
     const store = setupProjects('proj-a')
+    mockSetActive.mockImplementation(async () => commandReply(store, { state: { projects: store.projects.map((p) => ({ ...p })), activeProjectId: DEFAULT_PROJECT_ID } }))
     let activeAtEmit: string | null = null
     const wrapper = mount(SessionList, {
       attachTo: document.body,
@@ -519,6 +563,7 @@ describe('DefaultProjectHead：锚定/新建入口（修复锚定切走后新会
     })
 
     await wrapper.find('[data-testid="default-project-new-task"]').trigger('click')
+    await flushPromises() // 「先锚定后建」时序在命令化下由回执落定承载（§6.6）
 
     expect(activeAtEmit).toBe(DEFAULT_PROJECT_ID)
     expect(store.activeProjectId).toBe(DEFAULT_PROJECT_ID)
@@ -564,12 +609,14 @@ describe('平铺模式多开细节（开合按组独立记忆）', () => {
 
   it('折叠非锚定组后，点它切锚定仍强制展开', async () => {
     const store = setupProjects('proj-a', [['proj-a', 'Alpha'], ['proj-b', 'Beta']])
+    mockSetActive.mockImplementation(async (pid: string) => commandReply(store, { state: { projects: store.projects.map((p) => ({ ...p })), activeProjectId: pid } }))
     const wrapper = mountAttachedList()
     const toggleA = () => groupOf(wrapper, 'proj-a').find('[data-testid="project-group-toggle"]')
     const toggleB = () => groupOf(wrapper, 'proj-b').find('[data-testid="project-group-toggle"]')
 
     // 折叠 proj-b：先切锚定到它（首次点击非锚定组 = 切锚定，保持展开）再点一次翻转折叠
     await toggleB().trigger('click')
+    await flushPromises() // 锚定命令化（§6.6）：chip 跟随回执更新
     expect(store.activeProjectId).toBe('proj-b')
     expect(toggleB().attributes('aria-expanded')).toBe('true')
     await toggleB().trigger('click')
@@ -577,9 +624,11 @@ describe('平铺模式多开细节（开合按组独立记忆）', () => {
 
     // 锚定切回 proj-a（proj-b 折叠记忆保留），再点折叠的 proj-b（非锚定）→ 切锚定 + 强制展开
     await toggleA().trigger('click')
+    await flushPromises()
     expect(store.activeProjectId).toBe('proj-a')
     expect(toggleB().attributes('aria-expanded')).toBe('false')
     await toggleB().trigger('click')
+    await flushPromises()
     expect(store.activeProjectId).toBe('proj-b')
     expect(toggleB().attributes('aria-expanded')).toBe('true')
     wrapper.unmount()
@@ -603,6 +652,7 @@ function makeFolderGroups(): SessionGroup[] {
 }
 
 function mountFolderList() {
+  seedDefaultLoaded() // 会话行渲染在默认区（idle 态已改为加载占位，§6.7）
   return mount(SessionList, {
     props: {
       groups: makeFolderGroups(),
@@ -679,7 +729,7 @@ describe('SessionList 目录行 + 按钮 vs 删除按钮检查差异', () => {
 
   it('项目过滤隐藏部分 session 时：删除按钮不渲染，+ 按钮仍渲染', async () => {
     // 命名 project p1 激活；同 cwd 组内 s1 归 p1（可见）、s2 归 p2（被过滤隐藏）
-    const store = useProjectStore()
+    const store = markLoaded(useProjectStore())
     store.projects = [
       { id: 'proj-default', name: '', lastUsedAt: 0 },
       { id: 'p1', name: 'P1', lastUsedAt: 1 },
@@ -733,7 +783,7 @@ function setupDefaultZoneProjects(activeId: string): ReturnType<typeof useProjec
     { id: 'proj-a', name: 'Alpha', lastUsedAt: 0 },
   ]
   store.activeProjectId = activeId
-  return store
+  return markLoaded(store)
 }
 
 describe('SessionList: 平铺默认区事件透传', () => {
@@ -879,6 +929,7 @@ function makeDualModeGroups(): SessionGroup[] {
 }
 
 function mountDualModeList(groups: SessionGroup[] = makeDualModeGroups(), activeId: string | null = null) {
+  seedDefaultLoaded() // 会话行渲染在默认区（idle 态已改为加载占位，§6.7）
   return mount(SessionList, {
     props: {
       groups,

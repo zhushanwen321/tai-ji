@@ -16,6 +16,7 @@ import { nextTick } from 'vue'
 import type { SessionGroup } from '@taiji/shared'
 
 import SessionList from '@/components/sidebar/SessionList.vue'
+import { useProjectStore } from '@/stores/project'
 
 function makeGroups(): SessionGroup[] {
   return [
@@ -30,6 +31,13 @@ function makeGroups(): SessionGroup[] {
 }
 
 function mountList() {
+  // 装载 loaded + 默认项目（connection-datasync-ssot §6.7 三形态：idle 态分组区渲染加载
+  // 占位，会话行不渲染——folder 行在默认目录区，需 loaded 才可见）
+  const store = useProjectStore()
+  store.projects = [{ id: 'proj-default', name: '', lastUsedAt: 0 }]
+  store.activeProjectId = 'proj-default'
+  store.revision = 1
+  store.loadState = 'loaded'
   return mount(SessionList, {
     props: {
       groups: makeGroups(),

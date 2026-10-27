@@ -119,30 +119,34 @@
              Popover 同口径（projectId || '' 归一，review S-2）；归类动作 emit setProject
              复用 SessionItem 既有出站链（D14）。行操作组中「导出 JSONL」已于 2026-10-12
              立项进菜单（紧随标记完成 = demo 归档/导出
-             相邻 IA）；重命名/删除仍归 ghost 层。 -->
-        <!-- sep：demo .ctxmenu .sep = height 1px + margin 4px 6px + var(--hairline)；bg-hairline
-             无对应工具类规则（config 只扩展 borderColor.hairline），曾渲染透明分隔线。 -->
-        <ContextMenuSeparator class="my-1 mx-[6px] h-px bg-[var(--hairline)]" />
-        <!-- ctx-label 字号：demo 精确值 10.5px 无对应 token 档，取 --text-2xs(11px) 档换
-             --font-scale-sidebar 缩放能力，登记 0.5px 静态偏差（取舍登记已删除，git 可追溯）。 -->
-        <div
-          data-testid="context-assign-label"
-          class="px-[9px] pt-[6px] pb-[3px] text-[length:var(--text-2xs)] text-neutral-dim [letter-spacing:0.03em]"
-        >
-          {{ t('sidebar.sessionItem.moveToProject') }}
-        </div>
-        <ContextMenuItem
-          v-for="p in assignTargets"
-          :key="p.id"
-          data-testid="context-assign-project-option"
-          class="flex h-[28px] w-full cursor-pointer select-none items-center gap-2 rounded-sm px-[9px] text-[length:var(--text-xs)] text-neutral-fg outline-none hover:bg-surface-hover data-[highlighted]:bg-surface-hover data-[highlighted]:text-neutral-fg"
-          @select="onAssignProject(p.id)"
-        >
-          <span class="flex w-[14px] shrink-0 items-center justify-center text-accent">
-            <Check v-if="currentProjectId === p.id" class="size-[11px]" />
-          </span>
-          <span class="min-w-0 flex-1 truncate">{{ p.name }}</span>
-        </ContextMenuItem>
+             相邻 IA）；重命名/删除仍归 ghost 层。
+             归属编辑入口禁用（connection-datasync-ssot §6.9）：project 无有效数据形态时
+             目标列表为空，整个分组（sep + 标签 + 项目行）不渲染；重拉子形态不禁用。 -->
+        <template v-if="assignTargets.length > 0">
+          <!-- sep：demo .ctxmenu .sep = height 1px + margin 4px 6px + var(--hairline)；bg-hairline
+               无对应工具类规则（config 只扩展 borderColor.hairline），曾渲染透明分隔线。 -->
+          <ContextMenuSeparator class="my-1 mx-[6px] h-px bg-[var(--hairline)]" />
+          <!-- ctx-label 字号：demo 精确值 10.5px 无对应 token 档，取 --text-2xs(11px) 档换
+               --font-scale-sidebar 缩放能力，登记 0.5px 静态偏差（取舍登记已删除，git 可追溯）。 -->
+          <div
+            data-testid="context-assign-label"
+            class="px-[9px] pt-[6px] pb-[3px] text-[length:var(--text-2xs)] text-neutral-dim [letter-spacing:0.03em]"
+          >
+            {{ t('sidebar.sessionItem.moveToProject') }}
+          </div>
+          <ContextMenuItem
+            v-for="p in assignTargets"
+            :key="p.id"
+            data-testid="context-assign-project-option"
+            class="flex h-[28px] w-full cursor-pointer select-none items-center gap-2 rounded-sm px-[9px] text-[length:var(--text-xs)] text-neutral-fg outline-none hover:bg-surface-hover data-[highlighted]:bg-surface-hover data-[highlighted]:text-neutral-fg"
+            @select="onAssignProject(p.id)"
+          >
+            <span class="flex w-[14px] shrink-0 items-center justify-center text-accent">
+              <Check v-if="currentProjectId === p.id" class="size-[11px]" />
+            </span>
+            <span class="min-w-0 flex-1 truncate">{{ p.name }}</span>
+          </ContextMenuItem>
+        </template>
       </ContextMenuContent>
     </ContextMenuPortal>
   </ContextMenuRoot>

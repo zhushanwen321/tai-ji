@@ -42,9 +42,9 @@
           variant="ghost"
           size="icon"
           data-testid="project-add-btn"
-          class="grid size-[24px] place-items-center rounded-[var(--radius-xs)] p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[13px]"
-          :title="t('sidebar.projectGroup.newProject')"
-          :aria-label="t('sidebar.projectGroup.newProject')"
+          class="grid size-[24px] place-items-center rounded-[var(--radius-xs)] p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-neutral-dim [&_svg]:size-[13px]"
+          :title="editingEnabled ? t('sidebar.projectGroup.newProject') : t('sidebar.sessionList.projectEditDisabledHint')"
+          :aria-label="t('sidebar.projectGroup.newProject')" :disabled="!editingEnabled"
           @click="startCreate"
         >
           <Plus :stroke-width="1.8" />
@@ -119,8 +119,8 @@
           @blur="onDraftBlur"
         />
       </div>
-      <!-- 平铺模式：默认项目平铺区（置顶）+ 命名项目锚定分组 -->
-      <template v-if="mode === 'flat'">
+      <ProjectLoadStatus v-if="projectAreaMode !== 'groups'" :mode="projectAreaMode" :load-error="projectStore.loadError" @retry="retryProjectLoad" />
+      <template v-else-if="mode === 'flat'">
         <!-- 默认项目平铺区（用户裁决 2026-10-13 方案 A）：默认项目 = 未归类收件箱，
              不展示项目组框（无组头/无左线/无缩进），session 直接平铺在列表顶部；
              空区不渲染。命名项目组照旧（锚定展开 + 折叠一行）。 -->
@@ -358,6 +358,7 @@ import { useProjectGroups, type ProjectGroupVM } from '@/composables/features/si
 import { useSidebarSessionMode } from '@/composables/features/sidebar/use-sidebar-session-mode'
 import ProjectGroup from './ProjectGroup.vue'
 import DefaultProjectHead from './DefaultProjectHead.vue'
+import ProjectLoadStatus from './ProjectLoadStatus.vue'
 import SessionDirLabel from './SessionDirLabel.vue'
 import SessionItem from './SessionItem.vue'
 
@@ -528,6 +529,7 @@ const { mode, setMode } = useSidebarSessionMode(() => {
 const {
   projectGroups,
   totalCount,
+  projectAreaMode, editingEnabled, retryProjectLoad,
   flatClosed,
   dirClosed,
   expandGroup,
@@ -553,9 +555,9 @@ const {
 
 // ── 默认项目头行交互 + session 拖拽落点（拖到组头/默认行 = 移动归属，走既有 setProject 链）──
 
-/** 点默认头行主体：锚定切回默认项目（修复「锚定一旦落到命名项目即无法新建到默认区」死角） */
+/** 点默认头行主体：锚定切回默认项目（修复「锚定切走后新会话进不了默认区」死角）；命令化后 chip 跟随回执，失败 toast 由 store 出声 */
 function onAnchorDefault(): void {
-  projectStore.setActiveProject(DEFAULT_PROJECT_ID)
+  void projectStore.setActiveProject(DEFAULT_PROJECT_ID).catch(() => {})
 }
 
 /** drop 落点统一写入口：同归属 no-op（防自拖自落 + 省一次 RPC），否则透传既有 setProject

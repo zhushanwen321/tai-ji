@@ -18,12 +18,20 @@ export type AssignTarget = {
  * 归类目标列表：默认项目（未归类聚合）+ 全部命名 project。
  * 默认项目项 id=''：未归类 session 的 projectId 是 undefined，必须归一为空串才能
  * 命中高亮/✓ 判定（review S-2）；归回默认 = projectId 空串（D14 语义修正）。
+ *
+ * 无有效数据形态返回空列表（connection-datasync-ssot §6.9 归属编辑入口禁用）：project
+ * 加载状态机非 loaded 且非重拉子形态时（idle / 从未成功的 loading / failed），项目清单
+ * 是兜底默认表而非回执事实——渲染它会让用户把会话归入「看不到命名项目」的目标列表。
+ * 消费方（SessionItemActions / SessionItemContextMenu）对空列表隐藏归属入口。
  */
 export function useAssignTargets(): ComputedRef<AssignTarget[]> {
   const projectStore = useProjectStore()
   const { t } = useI18n()
-  return computed(() => [
-    { id: '', name: t('sidebar.projectGroup.defaultName') },
-    ...projectStore.projects.filter((p) => p.name).map((p) => ({ id: p.id, name: p.name })),
-  ])
+  return computed(() => {
+    if (!projectStore.editingEnabled) return []
+    return [
+      { id: '', name: t('sidebar.projectGroup.defaultName') },
+      ...projectStore.projects.filter((p) => p.name).map((p) => ({ id: p.id, name: p.name })),
+    ]
+  })
 }

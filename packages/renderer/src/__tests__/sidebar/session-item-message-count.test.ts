@@ -37,6 +37,7 @@ import { resolve } from 'node:path'
 
 import SessionItem from '@/components/sidebar/SessionItem.vue'
 import SessionList from '@/components/sidebar/SessionList.vue'
+import { useProjectStore } from '@/stores/project'
 import { __resetMessageCountCacheForTest } from '@/components/sidebar/session-item/use-message-count'
 import {
   registerModalSurface,
@@ -481,6 +482,13 @@ describe('session-item-agent-badge', () => {
 
   /** 挂载含一个 agent session + 一个 user session 的 SessionList（U8-B3 事件链用） */
   function mountList(sessions: Array<Record<string, unknown>>) {
+    // 装载 loaded + 默认项目（connection-datasync-ssot §6.7 三形态：idle 分组区渲染占位，
+    // 会话行不渲染——事件链用例需要行在 DOM）
+    const projectStore = useProjectStore()
+    projectStore.projects = [{ id: 'proj-default', name: '', lastUsedAt: 0 }]
+    projectStore.activeProjectId = 'proj-default'
+    projectStore.revision = 1
+    projectStore.loadState = 'loaded'
     return mount(SessionList, {
       attachTo: document.body,
       props: {

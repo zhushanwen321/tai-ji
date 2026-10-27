@@ -116,7 +116,16 @@ export default {
     // N8 A/C 双模式（ui-optimize-unified 决策 9）：双段图标开关的模式名（title 悬停提示）
     modeFlat: '平铺列表',
     modeGroup: '按目录分组',
+    // 项目域失败状态条（connection-datasync-ssot §6.5/§6.7：失败原因 + 重试钮）
+    projectLoadFailed: '项目数据加载失败（{error}）',
+    projectLoadRetry: '重试',
+    // 无数据形态加载占位（§6.7：idle / 从未成功加载过的 loading）
+    projectsLoading: '正在加载项目…',
+    // 编辑入口禁用原因提示（§6.9：无有效数据形态禁用，title 悬停可见）
+    projectEditDisabledHint: '项目数据未加载，编辑暂不可用',
   },
+  // 项目编辑命令失败 toast（§6.6：loaded 态单条命令失败——内存保持命令前状态，错误出声）
+  projectCommandFailed: '项目操作失败：{msg}',
   assignProjectFailed: '归入项目失败：{msg}',
   // 「移动到项目」迁移成功反馈（spec sessions §3.3：点击即迁移 + toast）
   movedToProject: '已移动到项目「{name}」',

@@ -40,9 +40,11 @@ import {
   registerDataDomain,
   registerAuxiliaryRefresh,
   ensureConnectionEdgeSync,
+  requestDomainSync,
   whenSettled,
   resetConnectionEdgeSyncForTest,
 } from '@taiji/core'
+import * as transportEvents from '@taiji/core/transport/api'
 import type {
   ChatStoreInstance,
   SessionApiPort,
@@ -95,6 +97,15 @@ import type { NavEntry } from '@/types'
 
 // ── App 启动编排幂等检查 ──
 let appBootstrapped = false
+
+/**
+ * project.changed 失效信号的消费动作（connection-datasync-ssot §6.6）：触发 project 域
+ * 重新拉取。模块级稳定引用——useSidebar 多实例重复注册时 onGlobalType 底层 Set 按引用
+ * 去重（见装配段注释）；域未登记时 requestDomainSync 自行 warn（装配缺失留痕排障）。
+ */
+function onProjectChanged(): void {
+  requestDomainSync('project')
+}
 
 /** 测试隔离：重置启动编排检查 + 域同步器登记/代次 + session.list 订阅计数（beforeEach 调）。 */
 export function resetAppBootstrap(): void {
@@ -502,11 +513,17 @@ export function useSidebar() {
   // 同步进度），本段在 useSidebar() 装配时执行——早于首连 connected 边沿（App.vue setup 内
   // useSidebar() 先于其 connectionState watch），首连边沿即可触发首轮同步。
   registerDataDomain({
-    // project 域（阻断型）：failed、实例变更、任何重连边沿都重拉（§6.4）——failed 恢复与
-    // 实例变更必经连接边沿，恒真谓词即全量覆盖。init 失败在 store 内置 loadState='failed'
-    // （失败语义承载），首次落定 promise 成功与失败均 settle。
+    // project 域（阻断型，拦截型接线）：failed、实例变更、任何重连边沿都重拉（§6.4）——
+    // failed 恢复与实例变更必经连接边沿，恒真谓词即全量覆盖。sync 只拉取（状态机转移
+    // 在 store.syncLoad 内：进 loading、失败转 failed 后 rethrow 交本模块留痕）；apply
+    // 由本模块在代次/revision 两道裁决通过后调用（loading→loaded 提交回执）——「失败
+    // 保留旧值」「旧代/过时 revision 回执不提交」构造性成立（§6.4 命令×同步交错：
+    // 在途 load 期间命令回执先提交时，旧快照按 isStaleReceipt 判旧丢弃 + 丢弃点补发，
+    // 不回滚命令结果）。首次落定 promise 成功与失败均 settle（落地页只等落定不等成功）。
     id: 'project',
-    sync: () => useProjectStore().init(),
+    sync: () => useProjectStore().syncLoad(),
+    apply: (receipt) => useProjectStore().applyLoadReceipt(receipt),
+    isStaleReceipt: (receipt) => useProjectStore().isStaleLoadReceipt(receipt),
     whenToSync: () => true,
     failure: 'blocking',
   })
@@ -531,6 +548,12 @@ export function useSidebar() {
     whenToSync: () => true,
     failure: 'degraded',
   })
+  // project.changed 失效信号消费（§6.6：事件只作失效信号不带数据——各窗口收到后触发
+  // project 域重新拉取，拉为主、推补充 ADR-0097；重拉撞在途 load 由域同步器并发合流，
+  // 命令×同步交错由 isStaleReceipt 判据处置）。域同步器是模块级单例，本监听是全局单例
+  // 消费——handler 取模块级稳定引用，onGlobalType 底层 Set 按引用去重，多组件实例化
+  // useSidebar 重复注册幂等、不随组件卸载退订（与装配段域登记同生命周期）。
+  transportEvents.onGlobalType('project.changed', onProjectChanged)
   // 辅助刷新 5 处（原 onConnected 重连分支零散调用）：纳入统一触发点，各自保留 catch 降级
   // 语义。聚焦 session 四项在触发时读当前焦点（首连时无焦点 = null，跳过——与原 `if (sid)`
   // 保护一致）。

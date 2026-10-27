@@ -50,6 +50,12 @@ function mountForceQuitItem(sessionOverrides: Record<string, unknown> = {}) {
 
 /** 挂载含一条 user session 的 SessionList（转发链路用） */
 function mountForceQuitList(sessions: Array<Record<string, unknown>>) {
+  // 装载 loaded + 默认项目（connection-datasync-ssot §6.7 三形态：idle 分组区渲染占位，会话行不渲染）
+  const store = useProjectStore()
+  store.projects = [{ id: DEFAULT_PROJECT_ID, name: '', lastUsedAt: 0 }]
+  store.activeProjectId = DEFAULT_PROJECT_ID
+  store.revision = 1
+  store.loadState = 'loaded'
   return mount(SessionList, {
     attachTo: document.body,
     props: {
