@@ -69,7 +69,7 @@ vi.mock('@/api', () => apiCtrl)
 // 桌面壳装配检查（remote-use D9① 双壳测试 + D9② __testing 出口纪律）。
 //
 // 断言逻辑 = core 共享 helper（checkSessionEntryAssembly / checkInboundEffectsAssembly），
-// 与移动壳 packages/mobile-renderer/src/__tests__/assembly-check.test.ts 各调同一 helper——
+// 与移动壳（该用例现并入 packages/mobile-renderer/src/__tests__/mobile-package-and-delivery.test.ts）各调同一 helper——
 // 桌面侧防未来重构 useSidebar 时静默删 sessionEntry 注入（ac1-dependency-edge 同款护栏立场：
 // 装配缺口是静默的，重构删注入无报错，测试期机器报红是唯一防线）。
 //
