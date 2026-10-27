@@ -1101,7 +1101,7 @@ describe('createPluginUiEventSender（D8 text-input 值回传出口）', () => {
         expect.stringContaining('uiEvent (wool-trae/provider.authorize/pat) failed'),
         expect.any(Error),
       )
-    })
+    }, { interval: 1 })
 
     expect(sendPluginUiEvent).toHaveBeenCalledWith({
       pluginId: 'wool-trae',
@@ -1123,7 +1123,7 @@ describe('createPluginActionExecutor（D7/S7 action-bar 命令执行器）', () 
     executor.execute('plugin.cmd', { k: 'v' })
     await vi.waitFor(() => {
       expect(executePluginCommand).toHaveBeenCalledWith({ pluginId: 'wool-trae', commandId: 'plugin.cmd', args: { k: 'v' } })
-    })
+    }, { interval: 1 })
   })
 
   it('pluginId getter 为 null → 静默 return（无当前插件，零发送）', () => {
@@ -1147,7 +1147,7 @@ describe('createPluginActionExecutor（D7/S7 action-bar 命令执行器）', () 
         expect.stringContaining('executeCommand (wool-trae/plugin.cmd) failed'),
         expect.any(Error),
       )
-    })
+    }, { interval: 1 })
     warn.mockRestore()
   })
 })

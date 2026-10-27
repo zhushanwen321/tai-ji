@@ -97,13 +97,13 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
 
     focusSession(SID_A)
     traceStore.ensureTraceLoaded(SID_A)
-    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'))
+    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'), { interval: 1 })
     expect(apiMock.getTraceEntries).toHaveBeenCalledTimes(1)
 
     // 切到 B：独立分区加载，A 数据不被覆盖/清空
     focusSession(SID_B)
     traceStore.ensureTraceLoaded(SID_B)
-    await vi.waitFor(() => expect(partitionOf(SID_B).status).toBe('ready'))
+    await vi.waitFor(() => expect(partitionOf(SID_B).status).toBe('ready'), { interval: 1 })
     expect(apiMock.getTraceEntries).toHaveBeenCalledTimes(2)
 
     // 切回 A：数据保留 + 不重新拉取（幂等：ready 态 ensureTraceLoaded no-op）
@@ -120,7 +120,7 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
     apiMock.getTraceEntries.mockResolvedValue(snapshotOf(SID_A, [u1]))
     focusSession(SID_A)
     traceStore.ensureTraceLoaded(SID_A)
-    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'))
+    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'), { interval: 1 })
 
     // 增量：新 entry 追加 + leafId 更新
     const a1 = { type: 'message', id: 'e2', parentId: 'e1', message: { role: 'assistant', content: [] } }
@@ -144,7 +144,7 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
     apiMock.getTraceEntries.mockResolvedValue(snapshotOf(SID_A, []))
     focusSession(SID_A)
     traceStore.ensureTraceLoaded(SID_A)
-    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'))
+    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'), { interval: 1 })
 
     // A：切 Trace 视图 + 设过滤 + 选中
     traceStore.setTraceView(SID_A, 'trace')
@@ -182,11 +182,11 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
     })
     focusSession(SID_A)
     traceStore.ensureTraceLoaded(SID_A)
-    await vi.waitFor(() => expect(partitionOf(SID_A).source).toBe('empty'))
+    await vi.waitFor(() => expect(partitionOf(SID_A).source).toBe('empty'), { interval: 1 })
 
     pushAppend(SID_A, [], 'e1') // 触发事件到达（delta 可能已并入下次全量）
-    await vi.waitFor(() => expect(apiMock.getTraceEntries).toHaveBeenCalledTimes(2))
-    await vi.waitFor(() => expect(partitionOf(SID_A).entries).toHaveLength(1))
+    await vi.waitFor(() => expect(apiMock.getTraceEntries).toHaveBeenCalledTimes(2), { interval: 1 })
+    await vi.waitFor(() => expect(partitionOf(SID_A).entries).toHaveLength(1), { interval: 1 })
     expect(partitionOf(SID_A).source).toBe('file')
   })
 
@@ -199,11 +199,11 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
     })
     focusSession(SID_A)
     traceStore.ensureTraceLoaded(SID_A)
-    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('error'))
+    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('error'), { interval: 1 })
     expect(partitionOf(SID_A).errorCode).toBe('trace_fetch_failed')
 
     traceStore.retryTraceLoad(SID_A)
-    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'))
+    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'), { interval: 1 })
   })
 
   it('loading 窗口内的推送不丢：回包后 flush（快照已有 id 去重 + 快照后新 entry 追加 + leafId 滚动）', async () => {
@@ -216,14 +216,14 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
     const u1 = { type: 'message', id: 'e1', parentId: null, message: { role: 'user', content: 'q1' } }
     focusSession(SID_A)
     traceStore.ensureTraceLoaded(SID_A)
-    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('loading'))
+    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('loading'), { interval: 1 })
 
     // 窗口内推送：e1 快照里已有（flush 时去重）+ e2 是快照后新 entry（不得丢，否则登记清单永久缺行）
     const a1 = { type: 'message', id: 'e2', parentId: 'e1', message: { role: 'assistant', content: [] } }
     pushAppend(SID_A, [u1, a1], 'e2')
 
     resolveSnap(snapshotOf(SID_A, [u1]))
-    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'))
+    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'), { interval: 1 })
     expect(partitionOf(SID_A).entries.map((e) => (e as { id?: string }).id)).toEqual(['e1', 'e2'])
     expect(partitionOf(SID_A).leafId).toBe('e2')
   })
@@ -233,7 +233,7 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
     const onSpy = vi.spyOn(events, 'on')
     focusSession(SID_A)
     traceStore.ensureTraceLoaded(SID_A)
-    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'))
+    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'), { interval: 1 })
     // 前置：loadTrace → ensureIncrementSubscription 确实建立了订阅
     const handler = onSpy.mock.calls.find(([sid]) => sid === SID_A)?.[1]
     expect(handler).toBeTypeOf('function')
@@ -324,7 +324,7 @@ describe('B11 登记清单治理（内存泄漏审计中危#9：seenIds 增量�
     apiMock.getTraceEntries.mockResolvedValue(snapshotOf(sid, entries, extra))
     focusSession(sid)
     traceStore.retryTraceLoad(sid)
-    await vi.waitFor(() => expect(partitionOf(sid).status).toBe('ready'))
+    await vi.waitFor(() => expect(partitionOf(sid).status).toBe('ready'), { interval: 1 })
   }
 
   it('增量去重等价性：seenIds 增量维护下重复 id 不追加（快照内/历史增量/重新拉取后均一致）', async () => {
@@ -408,13 +408,13 @@ describe('B11 登记清单治理（内存泄漏审计中危#9：seenIds 增量�
     )
     focusSession(SID_A)
     traceStore.ensureTraceLoaded(SID_A)
-    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('loading'))
+    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('loading'), { interval: 1 })
 
     // 窗口内缓冲 3 条（含 1 条与快照重叠）
     pushAppend(SID_A, [chainEntry(`e${CAP - 2}`, `e${CAP - 3}`), chainEntry(`e${CAP - 1}`, `e${CAP - 2}`), chainEntry(`e${CAP}`, `e${CAP - 1}`)], `e${CAP}`)
 
     resolveSnap(snapshotOf(SID_A, Array.from({ length: CAP - 1 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`)), { leafId: `e${CAP - 2}` }))
-    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'))
+    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'), { interval: 1 })
     // 快照 49 + flush 去重后新增 e49（50 达上限）+ e50 停采置位
     expect(partitionOf(SID_A).entries).toHaveLength(CAP)
     expect(partitionOf(SID_A).truncated).toBe(true)

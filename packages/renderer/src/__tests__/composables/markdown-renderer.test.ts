@@ -449,7 +449,7 @@ describe('use-chat-view-deps', () => {
       const sid = 's-file-whitelist-fail'
 
       const { stop } = setupDeps(sid)
-      await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
+      await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled(), { interval: 1 })
 
       const first = String(warnSpy.mock.calls[0]?.[0])
       expect(first).toContain('[useChatViewDeps] file whitelist load failed for session')
@@ -466,7 +466,7 @@ describe('use-chat-view-deps', () => {
       loadFileCandidatesMock.mockResolvedValueOnce([])
 
       const { stop } = setupDeps('s-file-whitelist-ok')
-      await vi.waitFor(() => expect(loadFileCandidatesMock).toHaveBeenCalled())
+      await vi.waitFor(() => expect(loadFileCandidatesMock).toHaveBeenCalled(), { interval: 1 })
 
       expect(warnSpy).not.toHaveBeenCalled()
       stop()

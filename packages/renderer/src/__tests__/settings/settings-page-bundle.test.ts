@@ -1,12 +1,13 @@
 /**
- * settings 页合并产物（round 5-G S4）：四文件同产物，环境全默认（happy-dom）。
+ * settings 页合并产物（round 5-G S4）：三文件同产物，环境全默认（happy-dom）。
  *
  * 并入来源（基名）：
  *  - system-page-smart-context（SystemSmartContextSection 智能上下文压缩，10 例）
  *  - update-page（UpdatePage 全功能区，26 例）
  *  - rename-session-page（RenameSessionPage 三视角，20 例）
- *  - composables/modal-surface-registry/z-surface-baseline（z 基线对账，4 例；fs 扫描节，
- *    扫描器排除 __tests__ 目录，产物自身与节迁移不影响扫描基线）
+ *
+ * 「z 基线 ↔ 登记表全等对账」不在本文件：那是全仓源码扫描（单次 ~530ms，随仓库规模增长），
+ * 不验证运行时行为，已由 `scripts/check-z-surface-baseline.mjs` 承接。
  *
  * mock 注册（产物内统一，每模块一条；原 helper system-page-test-setup / update-page-mocks
  * 各自的注册不 import，避免同模块重复注册）：
@@ -53,13 +54,6 @@ import {
 } from '../helpers/update-card-mock'
 import { mountUpdatePage, setupUpdatePageLifecycle } from '../helpers/update-page-mount'
 import { openRekaDropdown, pickRekaOption } from '../helpers/reka-select-harness'
-import {
-  MODAL_SURFACE_FAMILY_FLAGS,
-  MODAL_SURFACE_MANIFEST,
-  modalSurfaceEntry,
-  modalSurfaceFlags,
-} from '@/composables/features/app/modal-surface-registry'
-import { findRepoRoot, scanZSurfaces, type ZOccurrence } from '../composables/modal-surface-registry/z-scan-helper'
 
 vi.mock('@/composables/useToast', () => toastMockModule())
 vi.mock('@/composables/features/command/useCommandStore', () => commandStoreModule())
@@ -903,86 +897,5 @@ describe('RenameSessionPage（rename-session-page 合并节）', () => {
       expect(content).toContain('slug 式标题')
       expect(content).toContain('只输出标题文本')
     })
-  })
-})
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 来源节：z-surface-baseline（z 基线对账；fs 只读扫描，零 mock 依赖，跨目录自
-// composables/modal-surface-registry/ 搬入，相对 import 已改写）
-// ─────────────────────────────────────────────────────────────────────────────
-
-const repoRoot = findRepoRoot()
-const occurrences: ZOccurrence[] = scanZSurfaces(repoRoot)
-
-/** (file, form, literal) → 出现次数（扫描侧多重集） */
-function scannedCounts(): Map<string, number> {
-  const counts = new Map<string, number>()
-  for (const o of occurrences) counts.set(`${o.file}|${o.form}|${o.literal}`, (counts.get(`${o.file}|${o.form}|${o.literal}`) ?? 0) + 1)
-  return counts
-}
-
-/** (file, form, literal) → 出现次数（登记表侧多重集） */
-function manifestCounts(): Map<string, number> {
-  const counts = new Map<string, number>()
-  for (const entry of MODAL_SURFACE_MANIFEST) {
-    for (const anchor of entry.zAnchors) {
-      const key = `${anchor.file}|${anchor.form}|${anchor.literal}`
-      counts.set(key, (counts.get(key) ?? 0) + anchor.count)
-    }
-  }
-  return counts
-}
-
-describe('z 基线 ↔ 登记表全等对账（§6.7 完备性判据）', () => {
-  it('扫描器非空转：已知表面（SettingsModal / SearchModal / CompanionBand / ToastContainer）均被扫到', () => {
-    const keys = [...scannedCounts().keys()]
-    expect(keys.some((k) => k.includes('SettingsModal.vue') && k.includes('var(--z-modal)'))).toBe(true)
-    expect(keys.some((k) => k.includes('overlays/SearchModal.vue') && k.includes('var(--z-modal)'))).toBe(true)
-    expect(keys.some((k) => k.includes('CompanionBand.vue') && k.includes('var(--z-dialog)'))).toBe(true)
-    expect(keys.some((k) => k.includes('ToastContainer.vue') && k.endsWith('|var(--z-toast)'))).toBe(true)
-    // 三类字面形态 + CSS 声明形都在扫描范围里（CSS 形现存 0 处，形本身仍须在场）
-    for (const o of occurrences) expect(o.value).toBeGreaterThanOrEqual(1000)
-  })
-
-  it('全等断言：扫描多重集 ≡ 登记表 zAnchors 多重集（新增表面不登记即红）', () => {
-    const scanned = scannedCounts()
-    const manifest = manifestCounts()
-    const unregistered = [...scanned.keys()].filter((k) => !manifest.has(k)).sort()
-    const stale = [...manifest.keys()].filter((k) => !scanned.has(k)).sort()
-    const countMismatch = [...scanned.keys()]
-      .filter((k) => manifest.has(k) && manifest.get(k) !== scanned.get(k))
-      .map((k) => `${k}: scan=${scanned.get(k)} manifest=${manifest.get(k)}`)
-      .sort()
-    expect({
-      unregistered,
-      stale,
-      countMismatch,
-    }).toEqual({ unregistered: [], stale: [], countMismatch: [] })
-  })
-
-  it('登记表结构完整：每个表面一行、家族旗标组齐备（三旗标字段）、kind 语义自洽', () => {
-    const seen = new Set<string>()
-    for (const entry of MODAL_SURFACE_MANIFEST) {
-      expect(seen.has(entry.id), `登记表 id 重复：${entry.id}`).toBe(false)
-      seen.add(entry.id)
-      const flags = MODAL_SURFACE_FAMILY_FLAGS[entry.family]
-      expect(typeof flags.yieldsEsc).toBe('boolean')
-      expect(typeof flags.yieldsCmdW).toBe('boolean')
-      expect(['none', 'unconditional', 'intersecting']).toContain(flags.shieldsView)
-      // 同步查询通道可取到同一旗标组（注册方无权自带旗标的对账）
-      expect(modalSurfaceFlags(entry.id)).toEqual(flags)
-      expect(modalSurfaceEntry(entry.id).family).toBe(entry.family)
-      // kind 语义：excluded 只允许浮层壳（容器非模态，§6.7 末段）
-      if (entry.kind === 'excluded') {
-        expect(entry.family).toBe('overlay-shell')
-        expect(entry.basis.length).toBeGreaterThan(10)
-      }
-    }
-  })
-
-  it('豁免与低 z 面不入基线：HoverCard（--z-hovercard: 500 < 1000）/ PlanCommentPopover（--z-overlay: 20）零登记零扫描', () => {
-    const keys = [...scannedCounts().keys()]
-    expect(keys.some((k) => k.includes('HoverCard'))).toBe(false)
-    expect(keys.some((k) => k.includes('PlanCommentPopover'))).toBe(false)
   })
 })

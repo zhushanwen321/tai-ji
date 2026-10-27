@@ -703,6 +703,52 @@ if echo "$STAGED_FILES" | grep -qE "^(packages|extensions|apps)/.*(\.test\.(ts|m
 fi
 
 # ============================================================================
+# 2f+. 前端退役/动画/z 基线机器守卫（原 renderer 测试用例转 check 脚本）
+#     wool 残留防复活、动画源码 12 条判据、z 基线全仓对拍。2026-10-27 从
+#     renderer 测试转出（wave1 前端片）——转出不挂接 = 零覆盖，故挂 pre-commit。
+#     复用 SKIP_CODE_RULES_CHECK 开关（不新增逃生口）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^packages/renderer/src/components/settings/provider/|^packages/shared/src/.*wool|^scripts/check-wool-retirement\.mjs$"; then
+    print_section "[wool 退役防复活检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if ! node scripts/check-wool-retirement.mjs; then
+            echo -e "${RED}[ERROR] wool 退役检查未通过——已退役载体不得复活，按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] wool 退役防复活检查已跳过${NC}"
+    fi
+fi
+
+if echo "$STAGED_FILES" | grep -qE "^packages/renderer/src/(components|composables)/|^packages/renderer/src/style\.css$|^packages/renderer/tailwind\.config\.ts$|^scripts/check-animation-source-guards\.mjs$"; then
+    print_section "[动画源码守卫检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if ! node scripts/check-animation-source-guards.mjs; then
+            echo -e "${RED}[ERROR] 动画源码守卫未通过——动画类名/时长/keyframes 有越权改动，按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] 动画源码守卫检查已跳过${NC}"
+    fi
+fi
+
+if echo "$STAGED_FILES" | grep -qE "^packages/renderer/src/|^packages/ui/src/|^apps/|^extensions/|^scripts/check-z-surface-baseline\.mjs$"; then
+    print_section "[z 基线对账检查]"
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if ! node scripts/check-z-surface-baseline.mjs; then
+            echo -e "${RED}[ERROR] z 基线对账未通过——新增 z 层未登记或登记表与扫描不一致，按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] z 基线对账检查已跳过${NC}"
+    fi
+fi
+
+# ============================================================================
 # 2g. review-fix-loop 双实现锁步检查
 #     scripts/check-rfl-parity.mjs：review+fix 循环有两份实现（pi 内置
 #     packages/subagent-core/workflows/review-fix-loop-utils.cjs / zcode 原生

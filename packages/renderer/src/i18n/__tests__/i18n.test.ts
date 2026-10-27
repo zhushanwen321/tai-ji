@@ -1253,7 +1253,7 @@ describe('i18n 惰性 locale 加载（Q1-2）', () => {
       idleCallbacks[0]!() // 触发 idle 回调（内部 void loadEnUsMessages()）
       await vi.waitFor(() => {
         expect(Object.keys(mod.default.global.getLocaleMessage('en-US')).length).toBeGreaterThan(0)
-      })
+      }, { interval: 1 })
       // fallback 兜底恢复：locale 仍 zh-CN，en-US messages 可供回退
       expect(mod.getLocale()).toBe('zh-CN')
     } finally {

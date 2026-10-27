@@ -81,7 +81,11 @@ vi.mock('vue-i18n', async (importOriginal) => {
  * 重复 provide。幂等：个别测试自行 providePlatform/__resetPlatformForTesting 覆盖本注入
  * （settings/ws-client/spike 先例不受影响——spike 的 fail-fast 断言在 reset 后仍成立）。
  */
-import { providePlatform } from '@taiji/core'
+// 深路径导入（不拉 @taiji/core 顶层 barrel）：setupFiles 每个测试文件都要重新执行一遍，
+// barrel 的 ~117 个模块闭包会按文件重复装载（探针实测 barrel 版 setup ~190ms/文件，
+// 深路径版 ~80ms/文件）。platform/port 是零本地依赖的叶子模块，且与 barrel 的
+// `export * from './platform/port'` 命中同一模块 id——注入的仍是同一个单例槽。
+import { providePlatform } from '@taiji/core/platform/port'
 
 providePlatform({
   kind: 'mock',

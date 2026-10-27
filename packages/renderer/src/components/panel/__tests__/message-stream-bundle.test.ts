@@ -389,7 +389,7 @@ describe('MessageStream executing bash 瞬时行（[u6a] ActivityStrip bash 行�
     await wrapper.find('[data-testid="activity-strip-text-bash"]').trigger('pointerenter')
     await vi.waitFor(() => {
       expect(document.querySelector('[data-testid="activity-strip-detail-body-bash"]')?.textContent).toBe('npm test')
-    })
+    }, { interval: 1 })
 
     // bashAborted 到达（abort 兜底终态帧：只清执行态不产 entry）→ 行消失，无残留 spinner
     bashEffects['message.bashAborted']?.(fakeCtx, sid, { sessionId: sid, timestamp: 0 })

@@ -115,7 +115,7 @@ describe('useAppUpdate', () => {
     // renderMarkdown 异步，waitFor 等 html 填充
     await vi.waitFor(() => {
       expect(result.state.releaseNotesHtml).toBe('<h2>新特性</h2>')
-    })
+    }, { interval: 1 })
 
     expect(result.state.state).toBe('available')
     expect(result.state.latestRelease?.version).toBe('0.9.0')
@@ -180,7 +180,7 @@ describe('useAppUpdate', () => {
     // 不进 error 态；自动重查后 available(v0.9.1)，用户再点下载即拿新版本
     await vi.waitFor(() => {
       expect(result.state.state).toBe('available')
-    })
+    }, { interval: 1 })
     expect(result.state.latestRelease?.version).toBe('0.9.1')
     // 信息性提示而非错误 toast
     expect(toastFns.info).toHaveBeenCalledWith('检测到更新的版本，已为你刷新更新信息')
@@ -205,7 +205,7 @@ describe('useAppUpdate', () => {
     // 修复后：STALE 分支在重查前显式置 available，rateLimited 恢复 available（稳定态有出路）。
     await vi.waitFor(() => {
       expect(result.state.state).toBe('available')
-    })
+    }, { interval: 1 })
     expect(result.state.state).not.toBe('downloading')
     expect(result.state.state).not.toBe('checking')
     stop()
@@ -703,7 +703,7 @@ describe('W4: launch result toast', () => {
     // 断言真实 i18n（@/i18n 默认 zh-CN）解析插值后的完整文案，同时锁住 {version} 占位传参
     await vi.waitFor(() => {
       expect(toastFns.info).toHaveBeenCalledWith('已升级到 v0.9.9')
-    })
+    }, { interval: 1 })
     expect(toastFns.warning).not.toHaveBeenCalled()
     stop()
   })
@@ -713,7 +713,7 @@ describe('W4: launch result toast', () => {
     // 精确断言 {version} 插值位置在句尾旧版本处
     await vi.waitFor(() => {
       expect(toastFns.warning).toHaveBeenCalledWith('上次升级未完成，已恢复到 v0.9.7')
-    })
+    }, { interval: 1 })
     stop()
   })
 
@@ -722,7 +722,7 @@ describe('W4: launch result toast', () => {
     // upgradeFailed 键不含 {version} 占位：精确断言完整文案 + 仅此一次调用（排除混入带版本的键）
     await vi.waitFor(() => {
       expect(toastFns.warning).toHaveBeenCalledWith('上次升级未完成')
-    })
+    }, { interval: 1 })
     expect(toastFns.warning).toHaveBeenCalledTimes(1)
     stop()
   })
@@ -731,7 +731,7 @@ describe('W4: launch result toast', () => {
     const stop = launchWithResult({ status: 'failed', version: '0.9.9', error: 'extract failed' })
     await vi.waitFor(() => {
       expect(toastFns.warning).toHaveBeenCalledWith('解压新版本失败，请检查磁盘空间后重试')
-    })
+    }, { interval: 1 })
     expect(toastFns.warning).toHaveBeenCalledTimes(1)
     stop()
   })
@@ -740,7 +740,7 @@ describe('W4: launch result toast', () => {
     const stop = launchWithResult({ status: 'failed', version: '0.9.9', error: 'future-code' })
     await vi.waitFor(() => {
       expect(toastFns.warning).toHaveBeenCalledWith('上次升级未完成')
-    })
+    }, { interval: 1 })
     stop()
   })
 
@@ -748,7 +748,7 @@ describe('W4: launch result toast', () => {
     const stop = launchWithResult({ status: 'failed', version: '0.9.9', error: 'installer exited 1626' })
     await vi.waitFor(() => {
       expect(toastFns.warning).toHaveBeenCalledWith('安装程序执行失败，请重新下载更新')
-    })
+    }, { interval: 1 })
     stop()
   })
 

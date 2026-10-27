@@ -1,19 +1,17 @@
 /**
- * Provider 设置页测试（单文件多源合并：2 个源文件，共同装载 vue + shared + settings 域全树）。
+ * Provider 设置页导入入口测试（ProviderPage mount + 来源选择 → preview → apply 全链路）。
  *
- * 为什么单文件：vitest 按测试文件隔离模块图——2 文件各自装载同批依赖；合并后全簇
- * 用例共享一份装载（约省 0.3s）。
+ * 单文件多源合并形态：同簇用例共享一份模块图装载（vitest 按测试文件隔离模块图，
+ * 拆成两个文件要各自装载同批依赖）。
  *
- * 来源文件（describe/it 块原样搬运，测试名零改动）：
- *  - wool-retirement.test.ts（退役羊毛提供方残留扫描，纯文件系统检查）
- *  - ProviderPage-import.spec.ts（ProviderPage 挂载与来源选择）
+ * mock 面：
+ *  - `@/api` 只提供 config 域工厂（SUT 仅消费 config），订阅成员族走共享 stub
+ *  - useToast 不 mock（hooks 直接清空真实 toasts 数组）
+ *  - 顶层 hooks（pinia 重建 / transport 桩注入 / toasts 清零）幂等
  *
- * 合并说明：
- *  - @/api mock（config 域部分工厂）仅 ProviderPage-import 节 SUT 消费；wool 节为纯
- *    node:fs/path 静态扫描，不触任何被 mock 模块
- *  - useToast 无 mock（ProviderPage-import 节 hooks 清真实 toasts 数组）
- *  - ProviderPage-import 的顶层 hooks（pinia 重建 / transport 桩注入 / toasts 清零）
- *    幂等，并集为公共 hooks
+ * 「羊毛旧界面退役」的静态残留检查（退役载体是否在盘上 + 全仓零引用）**不在此文件**：
+ * 那是随仓库规模增长的静态扫描、不验证运行时行为，已由 `scripts/check-wool-retirement.mjs`
+ * 承接（pre-commit / 手动 `node scripts/check-wool-retirement.mjs` 均可跑）。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/settings/provider/__tests__/ProviderPage-import.spec.ts
  */
@@ -26,9 +24,6 @@ import {
   afterEach,
   vi,
 } from 'vitest'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ProviderImportPreview } from '@taiji/shared'
@@ -41,8 +36,7 @@ import { useToast } from '@/composables/useToast'
 import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 
-// ── vi.mock 并集（同模块同工厂已去重）──
-// 来源：ProviderPage-import.spec.ts
+// ── vi.mock（config 域部分工厂）──
 
 vi.mock('@/api', () => ({
   config: {
@@ -55,8 +49,7 @@ vi.mock('@/api', () => ({
   },
 }))
 
-// ── 公共 hooks（各源文件顶层 hook 原样并集）──
-// 来源：ProviderPage-import.spec.ts
+// ── 公共 hooks ──
 beforeEach(() => {
   setActivePinia(createPinia())
   // [C3] config 门面调用经 SettingsTransport seam 桩注入（同名直映）
@@ -79,96 +72,12 @@ beforeEach(() => {
     }),
   )
 })
-// 来源：ProviderPage-import.spec.ts
 
 afterEach(() => {
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''
 })
-
-// ══════════ 来源：wool-retirement.test.ts（原同目录，已并入本文件） ══════════
-
-const HERE = dirname(fileURLToPath(import.meta.url))
-/** packages/renderer/src/components/settings/provider/__tests__ → 仓库根 */
-const REPO_ROOT = resolve(HERE, '../../../../../../..')
-const PACKAGES_DIR = join(REPO_ROOT, 'packages')
-
-const RETIRED_PATHS = [
-  'packages/renderer/src/components/settings/provider/WoolWizard',
-  'packages/renderer/src/components/settings/provider/WoolWizard/WoolWizard.vue',
-  'packages/renderer/src/components/settings/provider/WoolWizard/WoolEntryCard.vue',
-  'packages/renderer/src/components/settings/provider/__tests__/WoolWizard.test.ts',
-  'packages/renderer/src/composables/features/settings/useWool.ts',
-  'packages/renderer/src/composables/features/settings/useWoolEntries.ts',
-  'packages/renderer/src/composables/features/settings/useWoolWizard.ts',
-  'packages/renderer/src/composables/features/settings/__tests__/useWool.test.ts',
-  'packages/renderer/src/i18n/locales/zh-CN/wool.ts',
-  'packages/renderer/src/i18n/locales/en-US/wool.ts',
-]
-
-/** 可执行形态的残留引用模式（注释提法不命中） */
-const REFERENCE_PATTERNS: Array<{ label: string; re: RegExp }> = [
-  { label: 'import WoolWizard', re: /from\s+['"][^'"]*WoolWizard(?:\/[^'"]*)?['"]/ },
-  { label: 'dynamic import WoolWizard', re: /import\(\s*['"][^'"]*WoolWizard[^'"]*['"]\s*\)/ },
-  { label: 'import useWool*', re: /from\s+['"][^'"]*\/useWool(?:Entries|Wizard)?(?:\.js)?['"]/ },
-  { label: 'WoolWizard tag', re: /<WoolWizard[\s/>]/ },
-  { label: 'Wool 子组件 tag', re: /<(?:WoolEntryCard|WoolFamilyCards|WoolOauthFlow|WoolExtractFlow|WoolStepRow)[\s/>]/ },
-  { label: 'wool i18n key', re: /\bt\(\s*['"]wool\./ },
-]
-
-const SCAN_EXTS = ['.ts', '.vue', '.mts', '.js']
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'test-results', 'coverage', '.git'])
-
-function collectSourceFiles(dir: string, out: string[]): void {
-  for (const name of readdirSync(dir)) {
-    if (SKIP_DIRS.has(name)) continue
-    const abs = join(dir, name)
-    const st = statSync(abs)
-    if (st.isDirectory()) {
-      collectSourceFiles(abs, out)
-      continue
-    }
-    if (SCAN_EXTS.some((ext) => name.endsWith(ext))) out.push(abs)
-  }
-}
-
-describe('羊毛旧界面退役（U6 零残留引用）', () => {
-  it('退役载体不在盘上', () => {
-    for (const rel of RETIRED_PATHS) {
-      expect(existsSync(join(REPO_ROOT, rel)), `应已删除：${rel}`).toBe(false)
-    }
-  })
-
-  it('全仓源码零引用（import / 动态 import / 模板标签 / wool.* i18n key）', () => {
-    const files: string[] = []
-    const pkgNames = readdirSync(PACKAGES_DIR).filter((n) => statSync(join(PACKAGES_DIR, n)).isDirectory())
-    for (const pkg of pkgNames) {
-      for (const sub of ['src', 'test']) {
-        const dir = join(PACKAGES_DIR, pkg, sub)
-        if (existsSync(dir)) collectSourceFiles(dir, files)
-      }
-    }
-    // 其余一级源码目录（非 packages）
-    for (const top of ['apps', 'e2e', 'extensions', 'scripts']) {
-      const dir = join(REPO_ROOT, top)
-      if (existsSync(dir)) collectSourceFiles(dir, files)
-    }
-    // 扫描规模下限自查（防「零文件扫描 → 全绿」的假阳性）
-    expect(files.length).toBeGreaterThan(500)
-
-    const hits: string[] = []
-    for (const abs of files) {
-      const text = readFileSync(abs, 'utf8')
-      for (const { label, re } of REFERENCE_PATTERNS) {
-        if (re.test(text)) hits.push(`${label}: ${abs.slice(REPO_ROOT.length + 1)}`)
-      }
-    }
-    expect(hits).toEqual([])
-  })
-})
-
-// ══════════ 来源：packages/renderer/src/components/settings/provider/__tests__/ProviderPage-import.spec.ts ══════════
 
 /** preview fixture（1 个正常 provider，conflict='none' → 默认勾选） */
 const PREVIEW: ProviderImportPreview = {

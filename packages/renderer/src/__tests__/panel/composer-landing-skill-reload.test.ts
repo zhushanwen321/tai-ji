@@ -215,7 +215,7 @@ describe('Composer.vue landing 态 skill reload 集成（PR#123 reviewer-D WARNI
       const btns = bodyItemButtons()
       expect(btns).toHaveLength(1)
       expect(btns[0].textContent).toContain('skill-a')
-    })
+    }, { interval: 1 })
 
     // mock 改返回 [skill-a, skill-b]（模拟 runtime 重扫 globalCache 后缓存更新）
     getGlobalSkillsMock.mockResolvedValue(SKILL_A_B)
@@ -232,7 +232,7 @@ describe('Composer.vue landing 态 skill reload 集成（PR#123 reviewer-D WARNI
       expect(btns).toHaveLength(2)
       expect(btns.some((b) => b.textContent?.includes('skill-a'))).toBe(true)
       expect(btns.some((b) => b.textContent?.includes('skill-b'))).toBe(true)
-    })
+    }, { interval: 1 })
 
     // 反向断言：landing 首发未被触发（仅验证 skill 刷新，不应误发消息）
     expect(composerChatApiSpy.send).not.toHaveBeenCalled()

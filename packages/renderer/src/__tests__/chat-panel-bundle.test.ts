@@ -356,7 +356,7 @@ describe('PanelContainer 底抽屉（panel-container-bottom-drawer 合并节）'
       // leave 过渡结束（测试环境无 CSS → 时长 0，双 rAF 帧后移除）：终端卸载
       await vi.waitFor(() => {
         expect(wrapper.find('[data-testid="terminal-loaded"]').exists()).toBe(false)
-      })
+      }, { interval: 1 })
     }, 60_000)
   })
 

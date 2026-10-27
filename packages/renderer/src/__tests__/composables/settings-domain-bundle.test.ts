@@ -1446,7 +1446,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
       id: 'zhipu-p',
       quota: { enabled: false, fetcher: 'zhipu', apiKeySet: true, credentialSource: 'exclusive' },
     })
-    await vi.waitFor(() => { expect(module.draft.value.apiKey).toBe(QUOTA_SECRET_MASK) })
+    await vi.waitFor(() => { expect(module.draft.value.apiKey).toBe(QUOTA_SECRET_MASK) }, { interval: 1 })
   })
 
   it('落盘成功后触发一次查询（D2：保存并测试合一）', async () => {
@@ -1553,7 +1553,7 @@ describe('setEnabled 纯配置位（D4）', () => {
       provider({ id: 'kimi-p', quota: { enabled: true, fetcher: 'kimi-coding' } }),
       { preset: KIMI_PRESET },
     )
-    await vi.waitFor(() => { expect(module.view.value.enabled).toBe(true) })
+    await vi.waitFor(() => { expect(module.view.value.enabled).toBe(true) }, { interval: 1 })
 
     await module.setEnabled(false)
 
@@ -1637,7 +1637,7 @@ describe('掩码哨兵（D7）：已保存密文显示 QUOTA_SECRET_MASK', () =>
       },
     })
 
-    await vi.waitFor(() => { expect(module.draft.value.workspace).toBe('https://opencode.ai/workspace/wrk_saved/go') })
+    await vi.waitFor(() => { expect(module.draft.value.workspace).toBe('https://opencode.ai/workspace/wrk_saved/go') }, { interval: 1 })
     expect(module.draft.value.cookie).toBe(QUOTA_SECRET_MASK)
   })
 })
@@ -1732,7 +1732,7 @@ describe('loadCached reason 透传', () => {
       { preset: MIMO_PRESET },
     )
 
-    await vi.waitFor(() => { expect(module.test.value.status).toBe('error') })
+    await vi.waitFor(() => { expect(module.test.value.status).toBe('error') }, { interval: 1 })
     expect(module.test.value.failure).toEqual({ kind: 'no-credential', cookieAuth: true, message: '' })
     expect(module.test.value.row).toBeNull()
     expect(module.test.value.lastFetchAt).toBe(5000)
@@ -1745,7 +1745,7 @@ describe('loadCached reason 透传', () => {
       { preset: KIMI_PRESET },
     )
 
-    await vi.waitFor(() => { expect(module.test.value.status).toBe('error') })
+    await vi.waitFor(() => { expect(module.test.value.status).toBe('error') }, { interval: 1 })
     expect(module.test.value.failure?.kind).toBe('unauthorized')
     expect(module.test.value.row).toEqual(mockRow)
   })
@@ -1756,7 +1756,7 @@ describe('loadCached reason 透传', () => {
       provider({ id: 'kimi-p', quota: { enabled: true, fetcher: 'kimi-coding' } }),
       { preset: KIMI_PRESET },
     )
-    await vi.waitFor(() => { expect(kimi.module.test.value.status).toBe('success') })
+    await vi.waitFor(() => { expect(kimi.module.test.value.status).toBe('success') }, { interval: 1 })
     expect(kimi.module.test.value.failure).toBeNull()
 
     vi.mocked(quotaApi.getCached).mockClear()
@@ -2059,10 +2059,10 @@ describe('useProjectSkills (W4)', () => {
     // 初始 cwd=/proj-a → 触发 RPC
     await vi.waitFor(() => {
       expect(getProjectSkillsMock).toHaveBeenCalledWith('/proj-a')
-    })
+    }, { interval: 1 })
     await vi.waitFor(() => {
       expect(projectSkills.value).toEqual(SKILLS_A)
-    })
+    }, { interval: 1 })
   })
 
   it('切到新 cwd → 触发新 RPC，projectSkills 更新为新 cwd 的 skill', async () => {
@@ -2070,13 +2070,13 @@ describe('useProjectSkills (W4)', () => {
     const cwd = ref<string | null>('/proj-a')
 
     const { projectSkills } = useProjectSkills(cwd)
-    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILLS_A))
+    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILLS_A), { interval: 1 })
 
     cwd.value = '/proj-b'
     await vi.waitFor(() => {
       expect(getProjectSkillsMock).toHaveBeenCalledWith('/proj-b')
-    })
-    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILLS_B))
+    }, { interval: 1 })
+    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILLS_B), { interval: 1 })
   })
 
   it('切回旧 cwd 命中缓存，不重复 RPC', async () => {
@@ -2084,17 +2084,17 @@ describe('useProjectSkills (W4)', () => {
     const cwd = ref<string | null>('/proj-a')
 
     const { projectSkills } = useProjectSkills(cwd)
-    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILLS_A))
+    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILLS_A), { interval: 1 })
     expect(getProjectSkillsMock).toHaveBeenCalledTimes(1)
 
     cwd.value = '/proj-b'
     getProjectSkillsMock.mockResolvedValue(SKILLS_B)
-    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILLS_B))
+    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILLS_B), { interval: 1 })
     expect(getProjectSkillsMock).toHaveBeenCalledTimes(2)
 
     // 切回 /proj-a → 命中缓存，不触发第 3 次 RPC
     cwd.value = '/proj-a'
-    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILLS_A))
+    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILLS_A), { interval: 1 })
     expect(getProjectSkillsMock).toHaveBeenCalledTimes(2)
   })
 
@@ -2106,7 +2106,7 @@ describe('useProjectSkills (W4)', () => {
     await vi.waitFor(() => {
       expect(getProjectSkillsMock).not.toHaveBeenCalled()
       expect(projectSkills.value).toEqual([])
-    })
+    }, { interval: 1 })
   })
 
   it('getProjectSkills 抛错 → projectSkills 为空数组 + loadError 置位（RD-4#13 显形）', async () => {
@@ -2115,10 +2115,10 @@ describe('useProjectSkills (W4)', () => {
 
     const { projectSkills, loadError } = useProjectSkills(cwd)
 
-    await vi.waitFor(() => expect(getProjectSkillsMock).toHaveBeenCalled())
+    await vi.waitFor(() => expect(getProjectSkillsMock).toHaveBeenCalled(), { interval: 1 })
     await vi.waitFor(() => {
       expect(projectSkills.value).toEqual([])
-    })
+    }, { interval: 1 })
     // RD-4#13：失败不再仅 warn——loadError 置位供列表区插可重试提示
     expect(loadError.value).toBe(true)
   })
@@ -2128,7 +2128,7 @@ describe('useProjectSkills (W4)', () => {
     const cwd = ref<string | null>('/proj-x')
 
     const { projectSkills, loadError, retry } = useProjectSkills(cwd)
-    await vi.waitFor(() => expect(loadError.value).toBe(true))
+    await vi.waitFor(() => expect(loadError.value).toBe(true), { interval: 1 })
     expect(projectSkills.value).toEqual([])
 
     // 重试：mock 改成功
@@ -2136,7 +2136,7 @@ describe('useProjectSkills (W4)', () => {
     retry()
     await vi.waitFor(() => {
       expect(projectSkills.value).toEqual(SKILLS_A)
-    })
+    }, { interval: 1 })
     expect(loadError.value).toBe(false)
   })
 })
@@ -2213,14 +2213,14 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     const { globalSkills } = useGlobalSkills()
-    await vi.waitFor(() => expect(getGlobalSkills).toHaveBeenCalledTimes(1))
-    await vi.waitFor(() => expect(globalSkills.value).toEqual([]))
+    await vi.waitFor(() => expect(getGlobalSkills).toHaveBeenCalledTimes(1), { interval: 1 })
+    await vi.waitFor(() => expect(globalSkills.value).toEqual([]), { interval: 1 })
 
     // 关键断言：失败后可重试（globalLoaded 未被置 true）。mock 改 resolve([skill1]) 后，
     // 模拟 global scope 失效信号 → loadGlobal(true) 强制重新拉取 → globalSkills 刷新为 [skill1]
     getGlobalSkills.mockResolvedValue(SKILL_1)
     inv.emitGlobal()
-    await vi.waitFor(() => expect(globalSkills.value).toEqual(SKILL_1))
+    await vi.waitFor(() => expect(globalSkills.value).toEqual(SKILL_1), { interval: 1 })
     expect(getGlobalSkills).toHaveBeenCalledTimes(2)
 
     expect(warnSpy).toHaveBeenCalled()
@@ -2234,14 +2234,14 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
 
     const { useGlobalSkills } = await import('@/composables/features/settings/useProjectSkills')
     const { globalSkills } = useGlobalSkills()
-    await vi.waitFor(() => expect(globalSkills.value).toEqual(SKILL_1))
+    await vi.waitFor(() => expect(globalSkills.value).toEqual(SKILL_1), { interval: 1 })
     expect(getGlobalSkills).toHaveBeenCalledTimes(1)
 
     // mock 改返回 [skill1, skill2]，模拟 runtime 重扫后缓存更新
     getGlobalSkills.mockResolvedValue(SKILL_1_2)
     // 派发 global scope 失效信号 → loadGlobal(true) force 重新拉取
     inv.emitGlobal()
-    await vi.waitFor(() => expect(globalSkills.value).toEqual(SKILL_1_2))
+    await vi.waitFor(() => expect(globalSkills.value).toEqual(SKILL_1_2), { interval: 1 })
     expect(getGlobalSkills).toHaveBeenCalledTimes(2)
 
     // 再次调用 useGlobalSkills 不重复挂 global 订阅（globalInvalidateSubscribed 检查）
@@ -2258,7 +2258,7 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
     const { useGlobalSkills } = await import('@/composables/features/settings/useProjectSkills')
     // 第一次挂载（模拟首个 Composer 实例）
     const first = useGlobalSkills()
-    await vi.waitFor(() => expect(first.globalSkills.value).toEqual(SKILL_1))
+    await vi.waitFor(() => expect(first.globalSkills.value).toEqual(SKILL_1), { interval: 1 })
     expect(getGlobalSkills).toHaveBeenCalledTimes(1)
 
     // 重挂：再次调用 useGlobalSkills（模拟 Composer unmount→remount，拿到新返回值）
@@ -2270,7 +2270,7 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
     // runtime 重扫后缓存更新，派发 global 失效信号 → 活跃实例（second）应刷新
     getGlobalSkills.mockResolvedValue(SKILL_1_2)
     inv.emitGlobal()
-    await vi.waitFor(() => expect(second.globalSkills.value).toEqual(SKILL_1_2))
+    await vi.waitFor(() => expect(second.globalSkills.value).toEqual(SKILL_1_2), { interval: 1 })
     expect(first.globalSkills.value).toEqual(SKILL_1_2) // 同一 ref，first 也同步
     expect(getGlobalSkills).toHaveBeenCalledTimes(2)
   })
@@ -2284,14 +2284,14 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
     const cwd = ref<string | null>('/proj1')
     const { projectSkills } = useProjectSkills(cwd)
 
-    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILL_A))
+    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILL_A), { interval: 1 })
     expect(getProjectSkills).toHaveBeenCalledTimes(1)
 
     // mock 改返回 [skillA, skillB]，模拟项目目录变更后重扫
     getProjectSkills.mockResolvedValue(SKILL_A_B)
     // 派发 project scope 失效信号 → 版本号++ → watch 清 skillsByCwd → 重新拉取当前 cwd
     inv.emitProject('/proj1')
-    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILL_A_B))
+    await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILL_A_B), { interval: 1 })
     expect(getProjectSkills).toHaveBeenCalledTimes(2)
   })
 
@@ -2313,7 +2313,7 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
     getProjectSkills.mockResolvedValue(SKILL_A_B)
     inv.emitProject()
     // 等待 watch 生效（两实例各重新拉取一次自己的当前 cwd）
-    await vi.waitFor(() => expect(getProjectSkills.mock.calls.filter((c) => c[0] === '/a').length).toBeGreaterThanOrEqual(1))
-    await vi.waitFor(() => expect(getProjectSkills.mock.calls.filter((c) => c[0] === '/b').length).toBeGreaterThanOrEqual(1))
+    await vi.waitFor(() => expect(getProjectSkills.mock.calls.filter((c) => c[0] === '/a').length).toBeGreaterThanOrEqual(1), { interval: 1 })
+    await vi.waitFor(() => expect(getProjectSkills.mock.calls.filter((c) => c[0] === '/b').length).toBeGreaterThanOrEqual(1), { interval: 1 })
   })
 })

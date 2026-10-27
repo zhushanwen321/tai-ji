@@ -1285,10 +1285,10 @@ describe('useTrayCounts 计数口径与谓词边界（D2）', () => {
       oversize: false,
     }))
     const wrapper = mountHarness(SID)
-    await vi.waitFor(() => expect(data().counts.value.subagent.running).toBe(1))
+    await vi.waitFor(() => expect(data().counts.value.subagent.running).toBe(1), { interval: 1 })
 
     await wrapper.setProps({ sessionId: SID2 })
-    await vi.waitFor(() => expect(data().counts.value.subagent.total).toBe(2))
+    await vi.waitFor(() => expect(data().counts.value.subagent.total).toBe(2), { interval: 1 })
     expect(data().counts.value.subagent).toEqual({ running: 0, ended: 2, total: 2 })
   })
 })
@@ -1386,7 +1386,7 @@ describe('useTrayCounts D13 首次拉取触发与 retry', () => {
     await vi.waitFor(() => {
       expect(loadSubSpy).toHaveBeenCalledTimes(1)
       expect(loadWfSpy).toHaveBeenCalledTimes(1)
-    })
+    }, { interval: 1 })
     expect(loadSubSpy).toHaveBeenCalledWith(SID)
     expect(loadWfSpy).toHaveBeenCalledWith(SID)
     // 拉取路径真正落到 RPC（store 内部未短路）
@@ -1401,10 +1401,10 @@ describe('useTrayCounts D13 首次拉取触发与 retry', () => {
     const loadWfSpy = vi.spyOn(workflowStore, 'loadWorkflows')
 
     const wrapper = mountHarness(SID)
-    await vi.waitFor(() => expect(loadSubSpy).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(loadSubSpy).toHaveBeenCalledTimes(1), { interval: 1 })
 
     await wrapper.setProps({ sessionId: SID2 })
-    await vi.waitFor(() => expect(loadSubSpy).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(loadSubSpy).toHaveBeenCalledTimes(2), { interval: 1 })
     expect(loadSubSpy).toHaveBeenLastCalledWith(SID2)
     expect(loadWfSpy).toHaveBeenLastCalledWith(SID2)
     expect(apiMocks.getSubagents).toHaveBeenLastCalledWith(SID2)
@@ -1413,7 +1413,7 @@ describe('useTrayCounts D13 首次拉取触发与 retry', () => {
 
   it('retry(kind) 按类重新拉取：subagent / workflow → load*；bash → refresh', async () => {
     mountHarness()
-    await vi.waitFor(() => expect(apiMocks.getWorkflows).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(apiMocks.getWorkflows).toHaveBeenCalledTimes(1), { interval: 1 })
     vi.clearAllMocks()
 
     await data().retry('subagent')
@@ -1430,7 +1430,7 @@ describe('useTrayCounts D13 首次拉取触发与 retry', () => {
 
   it('无 session 时不拉取（null sid 不写分区，retry no-op）', async () => {
     const wrapper = mountHarness('')
-    await vi.waitFor(() => expect(apiMocks.getSubagents).not.toHaveBeenCalled())
+    await vi.waitFor(() => expect(apiMocks.getSubagents).not.toHaveBeenCalled(), { interval: 1 })
     await data().retry('subagent')
     expect(apiMocks.getSubagents).not.toHaveBeenCalled()
     expect(data().counts.value.subagent.total).toBe(0)
@@ -1532,7 +1532,7 @@ describe('P-invisible·任务托盘：D9③ 派生视图抑制（btw 线不映�
         }),
     )
     const wrapper = mountHarness(SID)
-    await vi.waitFor(() => expect(apiMocks.listSessions).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(apiMocks.listSessions).toHaveBeenCalledTimes(1), { interval: 1 })
     expect(apiMocks.listSessions).toHaveBeenCalledWith({ surface: 'btw' })
 
     // 线 owner 分区预种派生记录（拉取未覆盖前也有数据，中间态断言才有判别力）
@@ -1549,7 +1549,7 @@ describe('P-invisible·任务托盘：D9③ 派生视图抑制（btw 线不映�
     // 旧 sid（SID，非线）的在途补拉此时才落表（快照替换：lineId 出缓存）——续写到达时
     // 焦点已不是 SID，时效守卫跳过回写，derivedSuppressed 保持 true
     resolveListSessions([])
-    await vi.waitFor(() => expect(isKnownBtwLine(lineId)).toBe(false))
+    await vi.waitFor(() => expect(isKnownBtwLine(lineId)).toBe(false), { interval: 1 })
     await nextTick()
     expect(data().counts.value.subagent).toEqual({ running: 0, ended: 0, total: 0 })
     expect(data().counts.value.workflow).toEqual({ running: 0, ended: 0, total: 0 })
@@ -1594,7 +1594,7 @@ describe('useTrayCounts canvas kind（第 5 件画布，u-tray-entry）', () => 
       ],
     })
     mountHarness()
-    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(3))
+    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(3), { interval: 1 })
 
     expect(data().counts.value.canvas).toEqual({ running: 2, ended: 1, total: 3 })
     expect(data().lists.canvas.entries.value.map((c) => c.canvasId)).toEqual([
@@ -1611,7 +1611,7 @@ describe('useTrayCounts canvas kind（第 5 件画布，u-tray-entry）', () => 
       return null
     })
     mountHarness()
-    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(1))
+    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(1), { interval: 1 })
 
     // 广播后重拉：清单换新（旧画布收敛 + 新画布加入）
     commandMock.mockImplementation(async (type: string) => {
@@ -1626,7 +1626,7 @@ describe('useTrayCounts canvas kind（第 5 件画布，u-tray-entry）', () => 
       return null
     })
     broadcastCanvasUpdated('cvs-1')
-    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(2))
+    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(2), { interval: 1 })
     expect(data().counts.value.canvas).toEqual({ running: 1, ended: 1, total: 2 })
   })
 
@@ -1635,7 +1635,7 @@ describe('useTrayCounts canvas kind（第 5 件画布，u-tray-entry）', () => 
       canvases: [makeCanvasEntry({ canvasId: 'cvs-global' })],
     })
     const wrapper = mountHarness('')
-    await vi.waitFor(() => expect(data().counts.value.session.total).toBe(0))
+    await vi.waitFor(() => expect(data().counts.value.session.total).toBe(0), { interval: 1 })
     // 空 sid → 归一 null → 不发 canvas.list RPC、计数恒零（与 session 件同款归零语义）
     expect(commandMock).not.toHaveBeenCalledWith('canvas.list', expect.anything(), expect.anything())
     expect(data().counts.value.canvas).toEqual({ running: 0, ended: 0, total: 0 })
@@ -1648,7 +1648,7 @@ describe('useTrayCounts canvas kind（第 5 件画布，u-tray-entry）', () => 
       return null
     })
     mountHarness()
-    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(1))
+    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(1), { interval: 1 })
 
     // B 会话的画布变更广播（payload.sessionId = SID2）→ 只重拉 B 分区清单，
     // A 的计数与清单不变（D4 隔离：托盘计数 = 本会话画布）
@@ -1664,7 +1664,7 @@ describe('useTrayCounts canvas kind（第 5 件画布，u-tray-entry）', () => 
       return null
     })
     broadcastCanvasUpdated('cvs-b', SID2)
-    await vi.waitFor(() => expect(commandMock).toHaveBeenCalledWith('canvas.list', { sessionId: SID2 }, expect.anything()))
+    await vi.waitFor(() => expect(commandMock).toHaveBeenCalledWith('canvas.list', { sessionId: SID2 }, expect.anything()), { interval: 1 })
     // A 的清单未被动过（B 的广播只写 B 分区）
     expect(data().lists.canvas.entries.value.map((c) => c.canvasId)).toEqual(['cvs-a'])
     expect(data().counts.value.canvas.total).toBe(1)

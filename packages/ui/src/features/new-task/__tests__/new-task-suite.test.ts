@@ -1091,6 +1091,7 @@ describe('ProjectSelectChip', () => {
           expect(el).not.toBeNull()
           return el!
         },
+        { interval: 1 },
       )
       // vue-i18n mock 回 key + 命名参数追加：锁定提示含归属项目名（显示 ≡ 归属真源）
       expect(tooltip.textContent).toContain('Project A')
@@ -1103,7 +1104,7 @@ describe('ProjectSelectChip', () => {
           const tooltips = document.querySelectorAll<HTMLElement>('[data-reka-popper-content-wrapper]')
           expect(tooltips.length).toBe(2)
           expect(tooltips[1]!.textContent).toContain('newTask.projectSelect.legacySessionTooltip')
-        })
+        }, { interval: 1 })
       } finally {
         legacy.unmount()
       }

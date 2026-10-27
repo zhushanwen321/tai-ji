@@ -64,7 +64,7 @@ describe('useChat disposeSession（W1：取消 streamSubscriptions + 清 chat st
     // assert：unsub 被调用
     await vi.waitFor(() => {
       expect(unsubscribeMock).toHaveBeenCalledTimes(1)
-    })
+    }, { interval: 1 })
     // chat store 状态被清理
     expect(store.isHydrated(sid)).toBe(false)
     expect(store.getMessages(sid)).toEqual([])

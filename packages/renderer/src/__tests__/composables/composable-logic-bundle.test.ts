@@ -369,8 +369,24 @@ describe('G4 dev 漂移检测器（TAIJI_AGENT_DEBUG=1）', () => {
 
 // ── 属性测试：E1-E7 驱动 × I1-I4 不变量（固定种子 42）────────────
 
+/**
+ * 步数预算（覆盖旋钮，非语义常量）。
+ *
+ * 种子固定 42 → LCG 消费序列确定，因此「步数 = N」跑出的就是「步数 = 100」那条轨迹的
+ * **前 N 步**：断言集合、每步随机取值与派发顺序逐位相同，只是截断在 N。
+ * N = 25 的依据（种子 42 实测首现步号）：E2@0 / E4@1 / E5@2 / E1@5 / E7@15 / E3@22 /
+ * E6@24——7 类事件各至少命中 1 次，全部首现落在 25 步内。用例内置「每类事件命中次数
+ * ≥1」自检：未来若消费形态变化导致某类事件在 N 步内消失，自检立刻红灯（不静默丢分支），
+ * 届时上调本常量或换种子。
+ *
+ * 26 步以后只增加同类型样本数、不增加事件类型覆盖——单步成本约 4ms（每步 3 个 sid 的
+ * 视图切换 + 全量对账 sweep），100 步即 renderer 最长纯逻辑单例（实测 439ms）。
+ * 竞态窗 / 清理抑制 / RPC 失败三族另有下方「定向补强」确定性用例锁死，不依赖采样运气。
+ */
+const PROPERTY_STEPS = 25
+
 describe('属性测试：E1-E7 × I1-I4（switch ≡ snapshot 层 1）', () => {
-  it('100 步伪随机交错，每步全量不变量成立', async () => {
+  it('25 步伪随机交错（种子 42，前缀轨迹与 100 步版逐位相同），每步全量不变量成立', async () => {
     // 静音实现侧诊断日志（E3 落地帧/E5 失败会逐步骤输出）
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
@@ -403,6 +419,12 @@ describe('属性测试：E1-E7 × I1-I4（switch ≡ snapshot 层 1）', () => {
     const host = mountHost('A')
     await settle()
 
+    /** 事件类型命中计数（覆盖自检：步数预算缩小时防某类事件静默消失） */
+    const eventHits = new Map<string, number>()
+    const hit = (event: string): void => {
+      eventHits.set(event, (eventHits.get(event) ?? 0) + 1)
+    }
+
     /** 派发合法帧（真实通道）并维护 最终裁决角色。raceWindow=true 模拟 E4 切换后 watch 未 flush
      *  的竞态窗口（旧订阅仍活跃，handler 捕获旧 sid，迟到帧合法写入所属分区）。 */
     const dispatchLegalFrame = (sid: string, snap: Snap, raceWindow = false): void => {
@@ -419,20 +441,24 @@ describe('属性测试：E1-E7 × I1-I4（switch ≡ snapshot 层 1）', () => {
       }
     }
 
-    for (let step = 0; step < 100; step++) {
+    for (let step = 0; step < PROPERTY_STEPS; step++) {
       const r = rand()
       if (r < 0.22) {
         // E1 收帧(ok 值)
+        hit('E1')
         dispatchLegalFrame(pickSid(), randomOkSnap())
       } else if (r < 0.32) {
         // E2 收帧(无值占位)
+        hit('E2')
         dispatchLegalFrame(pickSid(), noValueSnap())
       } else if (r < 0.4) {
         // E3 收帧(全 0)：防御纵深，最终裁决角色 no-op（I3 经 sweep 对账覆盖）
+        hit('E3')
         dispatchAllZeroFrame(pickSid())
       } else if (r < 0.65) {
         // E4 切换当前视图（含快速来回：连续步构成）；30% 概率同步派发旧 sid 迟到帧
         // （竞态窗口注入点——updateFor 误写为 update 时污染新分区，I1 红灯）
+        hit('E4')
         const oldView = currentView
         const next = SIDS.find((s) => s !== oldView)
         if (next) {
@@ -445,6 +471,7 @@ describe('属性测试：E1-E7 × I1-I4（switch ≡ snapshot 层 1）', () => {
         }
       } else if (r < 0.9) {
         // E5 getContext RPC resolve（ok | 无值 | 失败）
+        hit('E5')
         if (pendingRpcs.length > 0) {
           const idx = Math.floor(rand() * pendingRpcs.length)
           const entry = pendingRpcs.splice(idx, 1)[0]
@@ -465,6 +492,7 @@ describe('属性测试：E1-E7 × I1-I4（switch ≡ snapshot 层 1）', () => {
         }
       } else if (r < 0.95) {
         // E6 session 清理（deleteSession → triggerSessionCleanups，真实编排）
+        hit('E6')
         const sid = pickSid()
         triggerSessionCleanups(sid)
         expected.delete(sid) // I4：分区不存在 → 下次读取必为重新 init 的 unknown
@@ -472,6 +500,7 @@ describe('属性测试：E1-E7 × I1-I4（switch ≡ snapshot 层 1）', () => {
         suppressed.add(sid)
       } else {
         // E7 断连重连：stateSnapshot last-value 经真实通道重派（仅当前订阅 sid 可达）
+        hit('E7')
         for (const sid of SIDS) {
           dispatchLegalFrame(sid, rand() < 0.7 ? randomOkSnap() : noValueSnap())
         }
@@ -504,6 +533,9 @@ describe('属性测试：E1-E7 × I1-I4（switch ≡ snapshot 层 1）', () => {
         }
       }
     }
+
+    // 覆盖自检：7 类事件在预算内各至少命中 1 次（防步数缩小后静默丢分支）
+    expect([...eventHits.keys()].sort()).toEqual(['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7'])
 
     warnSpy.mockRestore()
     debugSpy.mockRestore()

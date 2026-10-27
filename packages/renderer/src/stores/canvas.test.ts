@@ -172,7 +172,7 @@ describe('canvas store（per-session 分区与拉取收敛）', () => {
     useCanvasStore(ref(SID))
     commandMock.mockResolvedValue({ canvases: [listEntry('cvs-1', SID_B)] })
     refreshCanvasFor(SID_B, null)
-    await vi.waitFor(() => expect(commandMock).toHaveBeenCalledWith('canvas.list', { sessionId: SID_B }, expect.any(Number)))
+    await vi.waitFor(() => expect(commandMock).toHaveBeenCalledWith('canvas.list', { sessionId: SID_B }, expect.any(Number)), { interval: 1 })
     const storeB = useCanvasStore(ref(SID_B))
     expect(storeB.list.value.map((c) => c.canvasId)).toEqual(['cvs-1'])
   })

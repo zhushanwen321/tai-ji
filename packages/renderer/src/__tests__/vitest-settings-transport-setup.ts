@@ -13,7 +13,12 @@
  * fail-fast」用例），不在此放松。
  */
 import { beforeEach } from 'vitest'
-import { provideSettingsTransport } from '@taiji/core'
+// 深路径导入（不拉 @taiji/core 顶层 barrel）：本 setup 每个测试文件都要重新执行，
+// barrel 的 ~117 个模块闭包会按文件重复装载。`@taiji/core/domain/settings` 是
+// package.json exports 已声明的最窄入口（transport seam 所在域的 barrel），
+// `@taiji/core/testing` 只含两个桩工厂模块；两者都与 core 顶层 barrel 的
+// `export *` 命中同一模块 id，注入的仍是同一个模块级单例槽。
+import { provideSettingsTransport } from '@taiji/core/domain/settings'
 import { makeSettingsTransportStub } from '@taiji/core/testing'
 
 beforeEach(() => {

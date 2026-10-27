@@ -127,8 +127,8 @@ describe('useComposerDragDrop（TC5-TC8 slice5）', () => {
     // onDrop 立即复位 isDragOver
     expect(result.isDragOver.value).toBe(false)
     // 等异步 pasteImage 完成 + 回填
-    await vi.waitFor(() => expect(pasteImageMock).toHaveBeenCalled())
-    await vi.waitFor(() => expect(onChanged).toHaveBeenCalled())
+    await vi.waitFor(() => expect(pasteImageMock).toHaveBeenCalled(), { interval: 1 })
+    await vi.waitFor(() => expect(onChanged).toHaveBeenCalled(), { interval: 1 })
     // 占位 badge 仅插入 1 次（回填走 dataset，不重插——因占位仍在 DOM）；占位 needsMigrate=false（无迁移语义）
     expect(inputMock.__calls).toHaveBeenCalledTimes(1)
     expect(inputMock.__calls).toHaveBeenCalledWith(expect.stringMatching(/^__drag_pending_/), expect.stringMatching(/^__drag_pending_/), '拖入中…', false)
@@ -161,11 +161,11 @@ describe('useComposerDragDrop（TC5-TC8 slice5）', () => {
       dispose = d
       const png = new File([new Uint8Array([0x89])], 'bad.png', { type: 'image/png' })
       result.onDrop(makeDropEvent([png]))
-      await vi.waitFor(() => expect(inputMock.__calls).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => expect(inputMock.__calls).toHaveBeenCalledTimes(1), { interval: 1 })
       // 占位回填后 execCommand insertText 被调（降级文本落地）+ 占位被移除
       await vi.waitFor(() => {
         expect(execCalls.some((c) => c[0] === 'insertText' && c[2] === '[图片粘贴失败]')).toBe(true)
-      })
+      }, { interval: 1 })
       expect(box.querySelector('.image-chip')).toBeNull() // 占位已移除
     } finally {
       ;(document as { execCommand?: unknown }).execCommand = origExec

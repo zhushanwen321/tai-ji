@@ -221,7 +221,7 @@ describe('上报与派发（useGlobalShortcuts 装配点）', () => {
     const stop = mountShortcuts()
     ipcMock.setForwardKeys.mockClear()
     commandStoreMock.overrides!.value = { 'new-session': 'mod+m' }
-    await vi.waitFor(() => expect(ipcMock.updateForwardKeys).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(ipcMock.updateForwardKeys).toHaveBeenCalledTimes(1), { interval: 1 })
     expect(ipcMock.updateForwardKeys.mock.calls[0]![0]).toEqual({ add: ['mod+m'], remove: ['mod+n'] })
     expect(ipcMock.setForwardKeys).not.toHaveBeenCalled()
     stop()

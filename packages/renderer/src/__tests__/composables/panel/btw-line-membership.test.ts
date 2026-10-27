@@ -79,7 +79,7 @@ describe('btw-line-membership：正向缓存与喂入口径', () => {
     )
     const a = ensureBtwLineMembership('main-a')
     const b = ensureBtwLineMembership('main-b')
-    await vi.waitFor(() => expect(sessionListMock.listSessions).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(sessionListMock.listSessions).toHaveBeenCalledTimes(1), { interval: 1 })
     expect(sessionListMock.listSessions).toHaveBeenCalledWith({ surface: 'btw' })
     resolveList([])
     expect(await a).toBe(false)

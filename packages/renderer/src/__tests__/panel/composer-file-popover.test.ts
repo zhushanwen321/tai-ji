@@ -881,7 +881,7 @@ afterEach(() => {
         for (const id of valueTestids) {
           expect(wrapper.find(`[data-testid="${id}"]`).exists(), id).toBe(true)
         }
-      })
+      }, { interval: 1 })
     })
 
     it('部分无值帧 → 无值维不渲染、有值维照常（维度级独立）', async () => {
@@ -889,7 +889,7 @@ afterEach(() => {
       const wrapper = mountTriggers(SID)
       await vi.waitFor(() => {
         expect(wrapper.find('[data-testid="genstats-speed-value"]').exists()).toBe(true)
-      })
+      }, { interval: 1 })
       expect(wrapper.find('[data-testid="genstats-ttft-value"]').exists()).toBe(false)
       expect(wrapper.find('[data-testid="genstats-cache-value"]').exists()).toBe(false)
     })

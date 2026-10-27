@@ -60,7 +60,7 @@ async function openPane(sid: string, path: string | null, expectStatus: 'content
   // main W3 起双参（per-session 分区）：selectFile(sid, path)
   if (path !== null) useFileTreeStore().selectFile(sid, path)
   await nextTick()
-  await vi.waitFor(() => expect(state.value.status).toBe(expectStatus))
+  await vi.waitFor(() => expect(state.value.status).toBe(expectStatus), { interval: 1 })
   return state
 }
 

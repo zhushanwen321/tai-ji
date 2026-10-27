@@ -839,7 +839,7 @@ describe('workflowStore：triggerWorkflowReload 活跃 run 事件流联动（§3
     expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
     mockGetWorkflowsResolved()
     store.triggerWorkflowReload(STORE_SID)
-    await vi.waitFor(() => expect(mockGetRunEvents).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(mockGetRunEvents).toHaveBeenCalledTimes(2), { interval: 1 })
     expect(mockGetRunEvents).toHaveBeenLastCalledWith(STORE_SID, RUN_A)
   })
 

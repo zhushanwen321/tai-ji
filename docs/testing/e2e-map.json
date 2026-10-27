@@ -4755,6 +4755,36 @@
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#2-测试分层",
       "note": "round5-g 合并产物（manifest-parentid / manifest-store-tmp-recovery / records-cwd-isolation / run-terminal-manifest 四源节，来源清单见产物头）。防漏门禁对新增文件要求 rule 覆盖而登记。"
+    },
+    {
+      "id": "E2E-PIPE-22",
+      "summary": "前端机器守卫脚本三件套（原 renderer 测试用例转出）：wool 退役防复活 / 动画源码 12 条判据 / z 基线全仓对拍——pre-commit 挂接（install-hooks.sh 2f+），负向探针三例已验",
+      "scope": [
+        "scripts/check-wool-retirement.mjs",
+        "scripts/check-animation-source-guards.mjs",
+        "scripts/check-z-surface-baseline.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-wool-retirement.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/check-animation-source-guards.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/check-z-surface-baseline.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-wool-retirement.mjs && node scripts/check-animation-source-guards.mjs && node scripts/check-z-surface-baseline.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md",
+      "note": "2026-10-27 round6 wave1 前端片从 vitest 用例转出（原 animation-source-guards.test.ts 12 例 + z-scan 4 例 + wool 2 例），转出不挂接 = 零覆盖，已挂 pre-commit 2f+ 块（.githooks/install-hooks.sh）；改动脚本或守卫语义时跑 run 命令验证。"
     }
   ]
 }

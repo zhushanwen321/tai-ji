@@ -307,7 +307,7 @@ describe('reconcile：快照差集剔除 + 富交互补入', () => {
 
     mockGetPending.mockResolvedValue([])
     c.reconcile('sid-a')
-    await vi.waitFor(() => expect(removedSeen).toHaveLength(1))
+    await vi.waitFor(() => expect(removedSeen).toHaveLength(1), { interval: 1 })
 
     expect(partitions.get('sid-a')).toHaveLength(0) // 空快照剔除
     expect(removedSeen[0]).toEqual(['stale'])
@@ -321,7 +321,7 @@ describe('reconcile：快照差集剔除 + 富交互补入', () => {
       { sessionId: 'sid-a', requestId: 'plain', dialogKind: 'select' },
     ])
     channel.reconcile('sid-a')
-    await vi.waitFor(() => expect(partitions.get('sid-a').map((r) => r.requestId)).toContain('fresh'))
+    await vi.waitFor(() => expect(partitions.get('sid-a').map((r) => r.requestId)).toContain('fresh'), { interval: 1 })
 
     expect(partitions.get('sid-a').map((r) => r.requestId).sort()).toEqual(['fresh', 'kept'])
   })
@@ -335,13 +335,13 @@ describe('reconcile：快照差集剔除 + 富交互补入', () => {
       },
     })
     withRetain.reconcile('sid-a')
-    await vi.waitFor(() => expect(retainCalls).toHaveLength(1))
+    await vi.waitFor(() => expect(retainCalls).toHaveLength(1), { interval: 1 })
     expect([...retainCalls[0]]).toEqual([])
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockGetPending.mockRejectedValue(new Error('rpc down'))
     expect(() => channel.reconcile('sid-a')).not.toThrow()
-    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled(), { interval: 1 })
     warnSpy.mockRestore()
   })
 })
@@ -512,7 +512,7 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
     emitPermissionRequest(bus, 'p1', ['shell'])
     denyPermissions.mockRejectedValue(new Error('rpc boom'))
     controller.transport.deny('p1')
-    await vi.waitFor(() => expect(controller.state.error).toBe(true))
+    await vi.waitFor(() => expect(controller.state.error).toBe(true), { interval: 1 })
     expect(controller.state.pending).toBe(true)
 
     // 新请求覆盖：error 清零，pluginId/permissions 换新
@@ -527,7 +527,7 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
     emitPermissionRequest(bus)
     approvePermissions.mockResolvedValue(undefined)
     controller.transport.approve('p1', ['shell'])
-    await vi.waitFor(() => expect(controller.state.pending).toBe(false))
+    await vi.waitFor(() => expect(controller.state.pending).toBe(false), { interval: 1 })
     expect(controller.state.error).toBe(false)
     expect(approvePermissions).toHaveBeenCalledWith('p1', ['shell'])
 
@@ -535,13 +535,13 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
     emitPermissionRequest(bus)
     approvePermissions.mockRejectedValue(new Error('rpc boom'))
     controller.transport.approve('p1', ['shell'])
-    await vi.waitFor(() => expect(controller.state.error).toBe(true))
+    await vi.waitFor(() => expect(controller.state.error).toBe(true), { interval: 1 })
     expect(controller.state.pending).toBe(true)
 
     // 重试成功 → 正常收尾
     approvePermissions.mockResolvedValue(undefined)
     controller.transport.approve('p1', ['shell'])
-    await vi.waitFor(() => expect(controller.state.pending).toBe(false))
+    await vi.waitFor(() => expect(controller.state.pending).toBe(false), { interval: 1 })
     expect(controller.state.error).toBe(false)
   })
 
@@ -549,7 +549,7 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
     emitPermissionRequest(bus)
     denyPermissions.mockResolvedValue(undefined)
     controller.transport.deny('p1')
-    await vi.waitFor(() => expect(controller.state.pending).toBe(false))
+    await vi.waitFor(() => expect(controller.state.pending).toBe(false), { interval: 1 })
     expect(denyPermissions).toHaveBeenCalledWith('p1')
     expect(controller.state.error).toBe(false)
 
@@ -557,7 +557,7 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
     emitPermissionRequest(bus)
     denyPermissions.mockRejectedValue(new Error('rpc boom'))
     controller.transport.deny('p1')
-    await vi.waitFor(() => expect(controller.state.error).toBe(true))
+    await vi.waitFor(() => expect(controller.state.error).toBe(true), { interval: 1 })
     expect(controller.state.pending).toBe(true)
   })
 
@@ -566,7 +566,7 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
     // 先制造失败错误态，再撤窗——弹窗都撤了，错误无载体
     denyPermissions.mockRejectedValue(new Error('rpc boom'))
     controller.transport.deny('p1')
-    await vi.waitFor(() => expect(controller.state.error).toBe(true))
+    await vi.waitFor(() => expect(controller.state.error).toBe(true), { interval: 1 })
 
     emitExpired('p1')
     expect(controller.state.pending).toBe(false)
@@ -648,7 +648,7 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
     // 当前单 req-b 的 resolved 命中撤回；先制造错误态再撤（弹窗都撤了，错误无载体）
     denyPermissions.mockRejectedValue(new Error('rpc boom'))
     controller.transport.deny('p1')
-    await vi.waitFor(() => expect(controller.state.error).toBe(true))
+    await vi.waitFor(() => expect(controller.state.error).toBe(true), { interval: 1 })
     emitResolved(bus, 'p1', 'req-b', true)
     expect(controller.state.pending).toBe(false)
     expect(controller.state.error).toBe(false)

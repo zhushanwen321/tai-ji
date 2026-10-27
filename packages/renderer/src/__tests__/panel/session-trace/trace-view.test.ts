@@ -153,7 +153,7 @@ describe('trace-view', () => {
 
   async function mountTraceView(sid = SID): Promise<ReturnType<typeof mount>> {
     const wrapper = mount(TraceView, { props: { sessionId: sid } })
-    await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'))
+    await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'), { interval: 1 })
     return wrapper
   }
 
@@ -187,7 +187,7 @@ describe('trace-view', () => {
     it('切换到 Trace：仅改 view 字段（数据不重新拉取），切回对话再切回状态保留', async () => {
       // 预加载（模拟此前打开过 Trace）
       ensureTraceLoaded(SID)
-      await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'))
+      await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'), { interval: 1 })
       expect(apiMock.getTraceEntries).toHaveBeenCalledTimes(1)
 
       const wrapper = mount(PanelHeader, {
@@ -403,7 +403,7 @@ describe('trace-view', () => {
       try {
         const view = await mountTraceView()
         revealTraceEntry(SID, 'u1')
-        await vi.waitFor(() => expect(scrollSpy).toHaveBeenCalled())
+        await vi.waitFor(() => expect(scrollSpy).toHaveBeenCalled(), { interval: 1 })
         // 滚动目标是 u1 行（seq 4）：非虚拟路径 querySelector 命中同一元素
         const calledOn = scrollSpy.mock.contexts[0] as HTMLElement | undefined
         expect(calledOn?.getAttribute('data-testid')).toBe('trace-row-4')
@@ -450,7 +450,7 @@ describe('trace-view', () => {
       expect(apiMock.fetchCurrentSystemPrompt).toHaveBeenCalledTimes(1)
 
       resolveFetch({ sessionId: SID, fullText: 'prompt body', charCount: 12702, fetchedAt: FETCHED_AT })
-      await vi.waitFor(() => expect(view.find('[data-testid="trace-fetch-current-result"]').exists()).toBe(true))
+      await vi.waitFor(() => expect(view.find('[data-testid="trace-fetch-current-result"]').exists()).toBe(true), { interval: 1 })
       const result = view.find('[data-testid="trace-fetch-current-result"]')
       expect(result.text()).toContain('12702')
       expect(result.text()).toContain('10:00:00')
@@ -468,7 +468,7 @@ describe('trace-view', () => {
       )
       const view = await mountTraceView()
       await view.find('[data-testid="trace-fetch-current"]').trigger('click')
-      await vi.waitFor(() => expect(view.find('[data-testid="trace-fetch-current-error"]').exists()).toBe(true))
+      await vi.waitFor(() => expect(view.find('[data-testid="trace-fetch-current-error"]').exists()).toBe(true), { interval: 1 })
       expect(view.find('[data-testid="trace-fetch-current-error"]').text()).toContain('session 不活跃')
       // 错误态：无结果摘要 + 无「当前值，非历史」标注（错误文案优先）+ 按钮可重试
       expect(view.find('[data-testid="trace-fetch-current-result"]').exists()).toBe(false)
@@ -484,12 +484,12 @@ describe('trace-view', () => {
       )
       const view = await mountTraceView()
       await view.find('[data-testid="trace-fetch-current"]').trigger('click')
-      await vi.waitFor(() => expect(view.find('[data-testid="trace-fetch-current-error"]').text()).toContain('超时'))
+      await vi.waitFor(() => expect(view.find('[data-testid="trace-fetch-current-error"]').text()).toContain('超时'), { interval: 1 })
 
       // 未知 code（如传输层 disconnected 之外的意外错误）→ 通用文案兜底
       apiMock.fetchCurrentSystemPrompt.mockRejectedValueOnce(new Error('surprise'))
       await view.find('[data-testid="trace-fetch-current"]').trigger('click')
-      await vi.waitFor(() => expect(view.find('[data-testid="trace-fetch-current-error"]').text()).toContain('现取失败'))
+      await vi.waitFor(() => expect(view.find('[data-testid="trace-fetch-current-error"]').text()).toContain('现取失败'), { interval: 1 })
       view.unmount()
     })
 
@@ -621,7 +621,7 @@ describe('trace-view', () => {
       )
 
       const view = mount(TraceView, { props: { sessionId: SID } })
-      await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('error'))
+      await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('error'), { interval: 1 })
       await nextTick()
 
       // 分区数据层：code 与 message 都保留（loadTrace catch 既有行为）
@@ -644,7 +644,7 @@ describe('trace-view', () => {
       apiMock.getTraceEntries.mockRejectedValue(new Error('boom'))
 
       const view = mount(TraceView, { props: { sessionId: SID } })
-      await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('error'))
+      await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('error'), { interval: 1 })
       await nextTick()
 
       // loadTrace catch 的兜底：err.message 恒有值（'boom'），此处验证 v-if 门控形态——

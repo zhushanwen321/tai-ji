@@ -614,7 +614,7 @@ describe('CommandPopover landing 态用 globalSkills prop（L1-L14，W4）', () 
       const btns = bodyItemButtons()
       expect(btns).toHaveLength(1)
       expect(btns[0].textContent).toContain('skill1')
-    })
+    }, { interval: 1 })
 
     // mock 改返回 [skill1, skill2]（模拟 runtime 重扫 globalCache 后缓存更新）
     getGlobalSkillsMock.mockResolvedValue(SKILL_1_2)
@@ -629,7 +629,7 @@ describe('CommandPopover landing 态用 globalSkills prop（L1-L14，W4）', () 
       expect(btns).toHaveLength(2)
       expect(btns.some((b) => b.textContent?.includes('skill1'))).toBe(true)
       expect(btns.some((b) => b.textContent?.includes('skill2'))).toBe(true)
-    })
+    }, { interval: 1 })
   })
 })
 

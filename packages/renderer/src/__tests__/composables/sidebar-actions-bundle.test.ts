@@ -339,7 +339,7 @@ describe('openSummary / refreshArchives（D11 摘要视图入口 + D10 列表拉
     expect(apiMocks.listArchives).toHaveBeenCalledTimes(2)
 
     resolveSecond([makeArchive('arc-2')])
-    await vi.waitFor(() => expect(useArchiveStore().archives.map((a) => a.sessionId)).toEqual(['arc-2']))
+    await vi.waitFor(() => expect(useArchiveStore().archives.map((a) => a.sessionId)).toEqual(['arc-2']), { interval: 1 })
     expect(useArchiveStore().loading).toBe(false)
   })
 })
@@ -471,7 +471,7 @@ describe('config.sessions 帧消费（D11 压缩完成刷新 + 角标更新）',
     const wrapper = mountSubscriber()
 
     dispatchGlobal({ id: 'push_broadcast_2', type: 'config.sessions', payload: { groups: [], archiveCount: 1 } })
-    await vi.waitFor(() => expect(apiMocks.listArchives).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(apiMocks.listArchives).toHaveBeenCalledTimes(1), { interval: 1 })
 
     expect(useArchiveStore().archives).toHaveLength(1)
     wrapper.unmount()
@@ -490,7 +490,7 @@ describe('config.sessions 帧消费（D11 压缩完成刷新 + 角标更新）',
     // 持旧 staging 引用则 isArchived 恒 false、「摘要生成中」占位永不消失——重锚后
     // status 须为 archived（pinia store 读出对象为 reactive proxy，引用断言不可靠，
     // 以判别字段 status 为准；无重锚逻辑时此处恒 'staging' 必红）
-    await vi.waitFor(() => expect(store.selected?.status).toBe('archived'))
+    await vi.waitFor(() => expect(store.selected?.status).toBe('archived'), { interval: 1 })
 
     wrapper.unmount()
   })
@@ -503,7 +503,7 @@ describe('config.sessions 帧消费（D11 压缩完成刷新 + 角标更新）',
     const wrapper = mountSubscriber()
 
     dispatchGlobal({ id: 'push_broadcast_5', type: 'config.sessions', payload: { groups: [], archiveCount: 0 } })
-    await vi.waitFor(() => expect(store.selected).toBeNull())
+    await vi.waitFor(() => expect(store.selected).toBeNull(), { interval: 1 })
 
     wrapper.unmount()
   })

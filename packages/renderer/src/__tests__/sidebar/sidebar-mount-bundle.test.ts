@@ -348,7 +348,7 @@ async function openQuickAppearancePanel(wrapper: ReturnType<typeof mountSidebar_
   await trigger.trigger('mouseenter')
   await vi.waitFor(() => {
     expect(document.body.querySelector('[data-testid="sidebar-quick-appearance-panel"]')).toBeTruthy()
-  })
+  }, { interval: 1 })
 }
 
 /** 按档位定位面板内字号按钮（portal 内容，testid = sidebar-quick-chat-<tier>） */
@@ -417,7 +417,7 @@ describe('Sidebar 外观快捷面板：对话流字号快捷段', () => {
       chatTierButton('large').dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await vi.waitFor(() => {
         expect(settingsStore.system.value.fontScales?.chat).toBe('large')
-      })
+      }, { interval: 1 })
 
       // 选中态迁移（用户可见：aria-pressed 移到 large）
       expect(chatTierButton('large').getAttribute('aria-pressed')).toBe('true')
@@ -430,7 +430,7 @@ describe('Sidebar 外观快捷面板：对话流字号快捷段', () => {
       // 持久化落盘（PlatformPort.storage 写入 taiji:system-settings，含更新后 fontScales）
       await vi.waitFor(() => {
         expect(platformStorage.dump.get('taiji:system-settings')).toBeTruthy()
-      })
+      }, { interval: 1 })
       const raw = platformStorage.dump.get('taiji:system-settings')!
       const persisted = JSON.parse(raw!) as { fontScales?: Record<string, string> }
       expect(persisted.fontScales?.chat).toBe('large')
@@ -450,7 +450,7 @@ describe('Sidebar 外观快捷面板：对话流字号快捷段', () => {
       chatTierButton('xlarge').dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await vi.waitFor(() => {
         expect(toastErrorMock).toHaveBeenCalledWith('rpc down')
-      })
+      }, { interval: 1 })
 
       // 失败不迁移：store 保持原档，aria-pressed 仍在 small
       expect(spy).toHaveBeenCalledTimes(1)

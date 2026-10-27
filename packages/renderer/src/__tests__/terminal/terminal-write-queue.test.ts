@@ -208,7 +208,7 @@ describe('terminal-write-queue store（多实例）', () => {
     const store = useTerminalWriteQueueStore()
     store.markAlive(T1)
     store.enqueueWrite(T1, 'boom')
-    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled(), { interval: 1 })
     const { toasts } = useToast()
     expect(toasts.value).toHaveLength(1)
     expect(toasts.value[0]!.type).toBe('error')

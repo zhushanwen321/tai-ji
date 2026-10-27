@@ -10,8 +10,8 @@
  * - 排除：测试文件（*.test.* / *.spec.* / __tests__）、node_modules/dist 等产物目录、
  *   登记表模块自身（manifest 字面量是数据不是表面）。
  *
- * 一次性验证脚本纪律：本文件是 z-surface-baseline.test.ts 的常驻依赖（对照基线每次跑测
- * 重扫全仓），非一次性脚本，随测试资产留存。
+ * 一次性验证脚本纪律：本文件是 `scripts/check-z-surface-baseline.mjs` 与
+ * `local-esc-two-tier.test.ts` 的常驻依赖（对照基线每次跑检查都重扫全仓），非一次性脚本。
  */
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'

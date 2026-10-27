@@ -1223,7 +1223,7 @@ describe('canvas 一级 tab（problem-solve-canvas §3.1(3)：画布按归属会
     // 错误态渲染，根元素仍在——断言坐实「非空 wrapper」）
     await vi.waitFor(() => {
       expect(wrapper.find('[data-testid="canvas-pane"]').exists()).toBe(true)
-    })
+    }, { interval: 1 })
     expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="wfvz-overlay-live-pane"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="wfvz-overlay-scheduler-pane"]').exists()).toBe(false)

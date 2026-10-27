@@ -630,7 +630,7 @@ describe('useTerminal 主族（多实例 u2）', () => {
       const { wrapper, terminal } = await seedAlive()
       terminalApiMock.write.mockRejectedValueOnce(rpcError('unknown_terminal_id'))
       terminal.writeToTerminal('lost-input')
-      await vi.waitFor(() => expect(hasInstance(T1)).toBe(false))
+      await vi.waitFor(() => expect(hasInstance(T1)).toBe(false), { interval: 1 })
 
       expect(terminal.instances.value).toEqual([])
       expect(__terminalPartitionCountForTest()).toBe(0)
@@ -643,7 +643,7 @@ describe('useTerminal 主族（多实例 u2）', () => {
       const { wrapper, terminal } = await seedAlive()
       terminalApiMock.attach.mockRejectedValueOnce(rpcError('unknown_terminal_id'))
       terminal.attachTerminal()
-      await vi.waitFor(() => expect(hasInstance(T1)).toBe(false))
+      await vi.waitFor(() => expect(hasInstance(T1)).toBe(false), { interval: 1 })
       expect(terminal.instances.value).toEqual([])
       expect(useToast().toasts.value).toHaveLength(0)
       wrapper.unmount()
@@ -653,7 +653,7 @@ describe('useTerminal 主族（多实例 u2）', () => {
       const { wrapper, terminal } = await seedAlive()
       terminalApiMock.kill.mockRejectedValueOnce(rpcError('unknown_terminal_id'))
       terminal.killTerminal()
-      await vi.waitFor(() => expect(hasInstance(T1)).toBe(false))
+      await vi.waitFor(() => expect(hasInstance(T1)).toBe(false), { interval: 1 })
       expect(useToast().toasts.value).toHaveLength(0)
       wrapper.unmount()
     })
@@ -662,7 +662,7 @@ describe('useTerminal 主族（多实例 u2）', () => {
       const { wrapper, terminal } = await seedAlive()
       terminalApiMock.write.mockRejectedValueOnce(rpcError('unknown_terminal_id'))
       terminal.writeToTerminal('first')
-      await vi.waitFor(() => expect(hasInstance(T1)).toBe(false))
+      await vi.waitFor(() => expect(hasInstance(T1)).toBe(false), { interval: 1 })
       const toastCount = useToast().toasts.value.length
 
       terminalApiMock.attach.mockRejectedValueOnce(rpcError('unknown_terminal_id'))
@@ -678,7 +678,7 @@ describe('useTerminal 主族（多实例 u2）', () => {
       const { wrapper, terminal } = await seedAlive()
       terminalApiMock.kill.mockRejectedValueOnce(rpcError('terminal_id_session_mismatch'))
       terminal.killTerminal()
-      await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
+      await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled(), { interval: 1 })
       expect(hasInstance(T1)).toBe(true)
       expect(terminal.instances.value.map((i) => i.terminalId)).toEqual([T1])
       // dmg-r1-4：kill 失败 = 终止动作未生效（PTY 仍存活），须给用户可见反馈
@@ -697,7 +697,7 @@ describe('useTerminal 主族（多实例 u2）', () => {
 
       terminalApiMock.attach.mockRejectedValueOnce(rpcError('unknown_terminal_id'))
       terminal.attachTerminal()
-      await vi.waitFor(() => expect(__terminalPartitionCountForTest()).toBe(0))
+      await vi.waitFor(() => expect(__terminalPartitionCountForTest()).toBe(0), { interval: 1 })
 
       expect(__terminalSubscriptionCountForTest()).toBe(0)
       expect(useToast().toasts.value).toHaveLength(0)
@@ -714,7 +714,7 @@ describe('useTerminal 主族（多实例 u2）', () => {
       terminalApiMock.kill.mockRejectedValueOnce(new Error('transport down'))
 
       terminal.closeInstance(T2)
-      await vi.waitFor(() => expect(useToast().toasts.value.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(useToast().toasts.value.length).toBeGreaterThan(0), { interval: 1 })
 
       // C-proc-21：关闭失败须有可见反馈；UI 与 runtime 实况即时一致（条目复活，PTY 未死）
       expect(useToast().toasts.value.some((x) => x.type === 'warning')).toBe(true)
@@ -854,9 +854,9 @@ describe('composer-injection text 扩展（Phase 4 联动 1）', () => {
  *        registerInstance 的 active 落位语义（对账/恢复 vs 用户显式新建）。
  *
  * 合并说明：两节全零 mock 纯逻辑，node 环境，无同名绑定；describe/it 名零改动。
- * 簇内其余 4 文件（contrast-tokens / use-git-status / animation-source-guards /
- * i18n-value-smoke）语义互异（令牌断言 / git composable / 动画静态扫描 / i18n 冒烟），
- * 异域剔除保持独立。
+ * 簇内其余同域文件（contrast-tokens / use-git-status / i18n-value-smoke）语义互异
+ * （令牌断言 / git composable / i18n 冒烟），异域剔除保持独立；动画源码静态扫描不属
+ * 单测层，归 `scripts/check-animation-source-guards.mjs`。
  *
  * 运行：cd packages/renderer && TAIJI_SKIP_REAL_PI=1 npx vitest run src/__tests__/terminal/terminal-themes.test.ts --pool=threads
  */

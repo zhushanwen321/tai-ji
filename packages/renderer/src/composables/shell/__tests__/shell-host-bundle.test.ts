@@ -365,7 +365,7 @@ describe('usePermissionRequest 桌面壳装配薄接线', () => {
     // 同源验证：provide 的 transport 回传成功 → usePermissionRequest() state 收尾
     approvePermissionsSpy.mockResolvedValue(undefined)
     transport.approve('tasks', ['shell'])
-    await vi.waitFor(() => expect(state.pending).toBe(false))
+    await vi.waitFor(() => expect(state.pending).toBe(false), { interval: 1 })
     expect(approvePermissionsSpy).toHaveBeenCalledWith('tasks', ['shell'])
   })
 
@@ -1036,7 +1036,7 @@ describe('插件 UI 快照拉取（ADR-0097 拉为主：connected 全量恢复 +
     viewSource!.refreshViewInScope!({ kind: 'global', mountId: 'provider.authorize', pluginId: 'plug-a' }, 'flow')
     await vi.waitFor(() => {
       expect(widgetFrames).toHaveLength(1)
-    })
+    }, { interval: 1 })
 
     // 补拉 filter 按全局域分区键组装（U2：mountId + pluginId + viewId 三元过滤）
     expect(capturedFilters).toEqual([{ mountId: 'provider.authorize', pluginId: 'plug-a', viewId: 'flow' }])
@@ -1687,7 +1687,7 @@ describe('settings-transport-adapter · V8 mock 模式接回（裁决 3）', () 
     // 订阅通路：onModels 注册后微任务收到 mock fixture 首推（makeMockSubscription 语义）
     const pushed: number[] = []
     const off = transport.onModels((models) => pushed.push(models.length))
-    await vi.waitFor(() => expect(pushed.length).toBeGreaterThan(0))
+    await vi.waitFor(() => expect(pushed.length).toBeGreaterThan(0), { interval: 1 })
     off()
   })
 })

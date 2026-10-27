@@ -539,7 +539,7 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
     // releaseNotes 异步渲染，waitFor 等 html 填充
     await vi.waitFor(() => {
       expect(result.state.releaseNotesHtml).toBe('<h2>新特性</h2>')
-    })
+    }, { interval: 1 })
     expect(ipc.getPendingUpdate).toHaveBeenCalledOnce()
     stop()
   })
@@ -649,14 +649,14 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
     //    restorePendingUpdate（getPendingUpdate）。两者都是 async，需 flush 微任务
     await vi.waitFor(() => {
       expect(ipc.getPreloaded).toHaveBeenCalledOnce()
-    })
+    }, { interval: 1 })
     await vi.waitFor(() => {
       expect(ipc.getPendingUpdate).toHaveBeenCalledOnce()
-    })
+    }, { interval: 1 })
     await vi.waitFor(() => {
       expect(result.state.state).toBe('available')
       expect(result.state.latestRelease?.version).toBe('0.9.0')
-    })
+    }, { interval: 1 })
     // 此时 30s 定时器尚未到期，checkForUpdate 不应被调
     expect(ipc.checkForUpdate).not.toHaveBeenCalled()
 
@@ -664,11 +664,11 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
     vi.advanceTimersByTime(AUTO_CHECK_DELAY_MS)
     await vi.waitFor(() => {
       expect(ipc.checkForUpdate).toHaveBeenCalledOnce()
-    })
+    }, { interval: 1 })
     // 联网检测确认 v0.9.5 → latestRelease 被刷新
     await vi.waitFor(() => {
       expect(result.state.latestRelease?.version).toBe('0.9.5')
-    })
+    }, { interval: 1 })
     expect(result.state.state).toBe('available')
 
     warnSpy.mockRestore()
@@ -688,7 +688,7 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
     result.initAutoCheck()
     await vi.waitFor(() => {
       expect(ipc.getPendingUpdate).toHaveBeenCalledOnce()
-    })
+    }, { interval: 1 })
 
     // 推进 29s（差 1s 到期）→ checkForUpdate 仍不应被调
     vi.advanceTimersByTime(AUTO_CHECK_DELAY_MS - 1_000)
@@ -700,7 +700,7 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
     vi.advanceTimersByTime(1_000)
     await vi.waitFor(() => {
       expect(ipc.checkForUpdate).toHaveBeenCalledOnce()
-    })
+    }, { interval: 1 })
 
     warnSpy.mockRestore()
     vi.useRealTimers()

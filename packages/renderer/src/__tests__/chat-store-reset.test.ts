@@ -784,8 +784,8 @@ describe('useHandoffEffect.bindHandoffEffect', () => {
     seedHandingOff()
 
     emitHandoffComplete()
-    await vi.waitFor(() => { expect(sidebarMock.loadSessions).toHaveBeenCalledTimes(1) })
-    await vi.waitFor(() => { expect(sidebarMock.selectSession).toHaveBeenCalledWith(NEW) })
+    await vi.waitFor(() => { expect(sidebarMock.loadSessions).toHaveBeenCalledTimes(1) }, { interval: 1 })
+    await vi.waitFor(() => { expect(sidebarMock.selectSession).toHaveBeenCalledWith(NEW) }, { interval: 1 })
 
     // [§6 裁决表行] 效果层零状态写：handingOff 复位归 runtime 'handingOff-end' 原语（occupancy 帧），
     // 本订阅只编排刷新 + 跳转——本地派生视图未被本效果改动
@@ -808,7 +808,7 @@ describe('useHandoffEffect.bindHandoffEffect', () => {
         String(c[0]).includes('selectSession failed'),
       )
       expect(selectWarn).toBeDefined()
-    })
+    }, { interval: 1 })
 
     // [兜底] loadSessions reject 被末尾 .catch 捕获（warn 'selectSession failed'）
     const selectWarn = warnSpy.mock.calls.find((c) =>
@@ -835,7 +835,7 @@ describe('useHandoffEffect.bindHandoffEffect', () => {
         String(c[0]).includes('selectSession failed'),
       )
       expect(selectWarn).toBeDefined()
-    })
+    }, { interval: 1 })
 
     // [兜底] selectSession 失败已 warn（.catch 吞掉异常，保留排查线索）
     const selectWarn = warnSpy.mock.calls.find((c) =>

@@ -162,7 +162,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       // 注入由 store.selectFile 同步落位（W3：不依赖组件 watch），useDetailPane 拉起加载
       const store = useFileTreeStore()
       store.selectFile(sid, path)
-      await vi.waitFor(() => expect(state.value.status).toBe('content'))
+      await vi.waitFor(() => expect(state.value.status).toBe('content'), { interval: 1 })
 
       expect(state.value.viewMode).toBe('preview')
       expect(state.value.hasGitChange).toBe(true)
@@ -182,7 +182,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       const { state } = useDetailPaneScoped(sessionId)
       const store = useFileTreeStore()
       store.selectFile(sid, path)
-      await vi.waitFor(() => expect(state.value.status).toBe('content'))
+      await vi.waitFor(() => expect(state.value.status).toBe('content'), { interval: 1 })
 
       expect(state.value.viewMode).toBe('diff')
       expect(state.value.content).toBe(PATCH)
@@ -200,7 +200,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       const { state } = useDetailPaneScoped(sessionId)
       const store = useFileTreeStore()
       store.selectFile(sid, path)
-      await vi.waitFor(() => expect(state.value.status).toBe('content'))
+      await vi.waitFor(() => expect(state.value.status).toBe('content'), { interval: 1 })
 
       expect(state.value.viewMode).toBe('preview')
       expect(state.value.hasGitChange).toBe(false)
@@ -222,13 +222,13 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       const { state, toggleView } = useDetailPaneScoped(sessionId)
       const store = useFileTreeStore()
       store.selectFile(sid, path)
-      await vi.waitFor(() => expect(state.value.status).toBe('content'))
+      await vi.waitFor(() => expect(state.value.status).toBe('content'), { interval: 1 })
       expect(state.value.viewMode).toBe('preview')
 
       // 用户手动 toggle 切回 Diff —— 第二次 git.getDiff 仍返回空，但不降级（toggleView 不走降级分支）
       mockGitGetDiff.mockResolvedValueOnce({ patch: '', binary: false })
       await toggleView('diff')
-      await vi.waitFor(() => expect(state.value.status).toBe('content'))
+      await vi.waitFor(() => expect(state.value.status).toBe('content'), { interval: 1 })
 
       expect(state.value.viewMode).toBe('diff')
       expect(state.value.content).toBe('') // 空 patch（用户主动选择，保留空态）
@@ -288,14 +288,14 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       const { state, openPreview, toggleView } = useDetailPaneScoped(sessionId)
 
       void openPreview(sid, path)
-      await vi.waitFor(() => expect(state.value.status).toBe('loading'))
+      await vi.waitFor(() => expect(state.value.status).toBe('loading'), { interval: 1 })
       await toggleView('diff')
       expect(state.value.status).toBe('content')
       expect(state.value.viewMode).toBe('diff')
 
       // 慢 read 迟到 → token 不匹配，stale write 丢弃
       resolveRead({ content: 'stale content', truncated: false })
-      await vi.waitFor(() => expect(mockFileRead).toHaveBeenCalled())
+      await vi.waitFor(() => expect(mockFileRead).toHaveBeenCalled(), { interval: 1 })
       expect(state.value.content).toBe(PATCH)
     })
   })
@@ -309,9 +309,9 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       const store = useFileTreeStore()
 
       store.selectFile(sid, 'a.txt')
-      await vi.waitFor(() => expect(state.value.status).toBe('content'))
+      await vi.waitFor(() => expect(state.value.status).toBe('content'), { interval: 1 })
       store.selectFile(sid, 'b.txt')
-      await vi.waitFor(() => expect(state.value.path).toBe('b.txt'))
+      await vi.waitFor(() => expect(state.value.path).toBe('b.txt'), { interval: 1 })
 
       expect(tabs.value.map((t) => t.path)).toEqual(['a.txt', 'b.txt'])
       expect(activePath.value).toBe('b.txt')
@@ -325,10 +325,10 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       const { state, tabs, activePath } = useDetailPaneScoped(sessionId)
       const store = useFileTreeStore()
       store.selectFile(sid, 'a.txt')
-      await vi.waitFor(() => expect(state.value.status).toBe('content'))
+      await vi.waitFor(() => expect(state.value.status).toBe('content'), { interval: 1 })
       mockFileRead.mockResolvedValueOnce({ content: 'b content', truncated: false })
       store.selectFile(sid, 'b.txt')
-      await vi.waitFor(() => expect(state.value.path).toBe('b.txt'))
+      await vi.waitFor(() => expect(state.value.path).toBe('b.txt'), { interval: 1 })
       expect(mockFileRead).toHaveBeenCalledTimes(2)
 
       // 再次命中已开的 a.txt → 仅激活
@@ -351,7 +351,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       for (let i = 1; i <= 12; i++) {
         store.selectFile(sid, `f${i}.txt`)
       }
-      await vi.waitFor(() => expect(tabs.value.length).toBe(12))
+      await vi.waitFor(() => expect(tabs.value.length).toBe(12), { interval: 1 })
       expect(activePath.value).toBe('f12.txt')
       expect(tabs.value.every((t) => t.path.length > 0)).toBe(true)
     })
@@ -373,7 +373,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
 
       // 切到别的 tab 再切回：模式态保持、不重载（keep-alive）
       store.selectFile(sid, 'other.txt')
-      await vi.waitFor(() => expect(state.value.path).toBe('other.txt'))
+      await vi.waitFor(() => expect(state.value.path).toBe('other.txt'), { interval: 1 })
       const diffCalls = mockGitGetDiff.mock.calls.length
       const readCalls = mockFileRead.mock.calls.length
       activateTab('m.ts')
@@ -393,9 +393,9 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       const store = useFileTreeStore()
 
       store.selectFile(sid, 'a.txt')
-      await vi.waitFor(() => expect(state.value.status).toBe('content'))
+      await vi.waitFor(() => expect(state.value.status).toBe('content'), { interval: 1 })
       store.selectFile(sid, 'b.txt')
-      await vi.waitFor(() => expect(state.value.path).toBe('b.txt'))
+      await vi.waitFor(() => expect(state.value.path).toBe('b.txt'), { interval: 1 })
 
       // a 滚动到 120（DetailPane @scroll 即存）
       activateTab('a.txt')
@@ -421,7 +421,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       store.selectFile(sid, 'a.txt')
       store.selectFile(sid, 'b.txt')
       store.selectFile(sid, 'c.txt')
-      await vi.waitFor(() => expect(tabs.value.length).toBe(3))
+      await vi.waitFor(() => expect(tabs.value.length).toBe(3), { interval: 1 })
       expect(activePath.value).toBe('c.txt')
 
       // 关激活 tab（c）→ 激活右邻不存在 → 左邻 b
@@ -460,7 +460,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
 
       store.selectFile(sid, 'a.txt')
       store.selectFile(sid, 'b.txt')
-      await vi.waitFor(() => expect(activePath.value).toBe('b.txt'))
+      await vi.waitFor(() => expect(activePath.value).toBe('b.txt'), { interval: 1 })
 
       closeTab('a.txt')
       await nextTick()
@@ -479,7 +479,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       // A 会话开两个文件
       store.selectFile('s1', 'a1.txt')
       store.selectFile('s1', 'a2.txt')
-      await vi.waitFor(() => expect(tabs.value.length).toBe(2))
+      await vi.waitFor(() => expect(tabs.value.length).toBe(2), { interval: 1 })
       expect(activePath.value).toBe('a2.txt')
 
       // 切到 B：A 的内容不串线（旧全局 selectedPath 单值会把 a2 塞进 B 的展示链）
@@ -490,7 +490,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
 
       // B 开自己的文件
       store.selectFile('s2', 'b1.txt')
-      await vi.waitFor(() => expect(state.value.path).toBe('b1.txt'))
+      await vi.waitFor(() => expect(state.value.path).toBe('b1.txt'), { interval: 1 })
       expect(tabs.value.map((t) => t.path)).toEqual(['b1.txt'])
 
       // 切回 A：恢复 A 的 tabs 与激活态（单实例清空问题终局解）
@@ -510,7 +510,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       const store = useFileTreeStore()
 
       store.selectFile('s1', 'big.diff')
-      await vi.waitFor(() => expect(tabs.value.length).toBe(1))
+      await vi.waitFor(() => expect(tabs.value.length).toBe(1), { interval: 1 })
 
       store.clearSession('s1')
       await nextTick()
@@ -544,7 +544,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       // immediate=true 应立即消费当前 detailFilePath，以 forceDiff 注入并加载
       const sessionId = ref<string | null>(sid)
       const { state, tabs } = useDetailPaneScoped(sessionId)
-      await vi.waitFor(() => expect(state.value.status).toBe('content'))
+      await vi.waitFor(() => expect(state.value.status).toBe('content'), { interval: 1 })
 
       expect(state.value.path).toBe(path)
       // forceDiff 生效：变更集文件必走 diff 模式（不依赖 gitOverlay 判定）
@@ -575,7 +575,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       store.selectFile(sid, path)
       drawer.open('detail', { filePath: path })
 
-      await vi.waitFor(() => expect(state.value.status).toBe('content'))
+      await vi.waitFor(() => expect(state.value.status).toBe('content'), { interval: 1 })
       // forceDiff 收敛（事件序无关，ensureDiffMode）：最终恒为 diff 模式
       expect(state.value.viewMode).toBe('diff')
       expect(state.value.content).toBe(PATCH)
@@ -595,7 +595,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       const pane = useDetailPaneScoped(sessionId)
       const store = useFileTreeStore()
       store.selectFile(sid, path)
-      await vi.waitFor(() => expect(pane.state.value.status).toBe('content'))
+      await vi.waitFor(() => expect(pane.state.value.status).toBe('content'), { interval: 1 })
 
       // 关闭 tab：记账键随实例销毁释放（此前只 set 不删，长寿会话反复预览无界累积）
       const before = __loadTokenKeyCountForTest()
@@ -605,7 +605,7 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
 
       // 重开同文件：记账键重建（token 从 1 重新起算），加载照常完成（清键不破坏后续加载）
       store.selectFile(sid, path)
-      await vi.waitFor(() => expect(pane.state.value.status).toBe('content'))
+      await vi.waitFor(() => expect(pane.state.value.status).toBe('content'), { interval: 1 })
       expect(pane.state.value.path).toBe(path)
       expect(__loadTokenKeyCountForTest()).toBe(before)
     })
@@ -625,9 +625,10 @@ describe('useDetailPane（useDetailPane 合并节）', () => {
       ])
       store.selectFile(sid, pathA)
       store.openDetailTab(sid, pathB) // 第二个 tab：watchEffect 拉起，同 sid 两枚记账键
-      await vi.waitFor(() => expect(pane.state.value.status).toBe('content'))
-      await vi.waitFor(() =>
-        expect(store.getDetailTab(sid, pathB)?.status).toBe('content'),
+      await vi.waitFor(() => expect(pane.state.value.status).toBe('content'), { interval: 1 })
+      await vi.waitFor(
+        () => expect(store.getDetailTab(sid, pathB)?.status).toBe('content'),
+        { interval: 1 },
       )
 
       const before = __loadTokenKeyCountForTest()

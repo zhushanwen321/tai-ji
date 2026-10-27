@@ -72,7 +72,7 @@ function buildNoSystemSnapshot(): ServerMessageMap['session.traceEntries'] {
 
 async function mountTraceView(): Promise<ReturnType<typeof mount>> {
   const wrapper = mount(TraceView, { props: { sessionId: SID } })
-  await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'))
+  await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'), { interval: 1 })
   return wrapper
 }
 

@@ -416,7 +416,7 @@ describe('ToolResultImages', () => {
     const port = makePort({ results: [{ status: 'written', path: '/data/cache/images/s1/abc.png', bytes: 5 }], quotaFull: false })
     setImageCacheWritePort(port)
     const wrapper = mount(ToolResultImages, { props: { sessionId: 's1', images: [pngImg()] } })
-    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image"]').exists()).toBe(true))
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image"]').exists()).toBe(true), { interval: 1 })
     const src = wrapper.find('[data-testid="tool-image"]').attributes('src')
     expect(src).toBe('local-file:///' + encodeURIComponent('/data/cache/images/s1/abc.png'))
     expect(src).not.toContain(pngImg().data)
@@ -428,7 +428,7 @@ describe('ToolResultImages', () => {
     setImageCacheWritePort(port)
     // 线 id 即 pi 真实 id（无冒号）——normalizeCacheSessionId 直通，落盘目录键 = 线 id 本身
     const wrapper = mount(ToolResultImages, { props: { sessionId: 'line-pi-1', images: [pngImg()] } })
-    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image"]').exists()).toBe(true))
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image"]').exists()).toBe(true), { interval: 1 })
     expect(seen).toEqual(['line-pi-1']) // 落盘键 = 线 session id 原值（无 extract 翻译）
     const src = wrapper.find('[data-testid="tool-image"]').attributes('src')
     expect(src).toBe('local-file:///' + encodeURIComponent('/data/cache/images/line-pi-1/abc.png'))
@@ -438,7 +438,7 @@ describe('ToolResultImages', () => {
     const port = makePort({ results: [{ status: 'quota-full' }], quotaFull: true })
     setImageCacheWritePort(port)
     const wrapper = mount(ToolResultImages, { props: { sessionId: 's2', images: [pngImg()] } })
-    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image-placeholder"]').exists()).toBe(true))
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image-placeholder"]').exists()).toBe(true), { interval: 1 })
     // setup 的 t() 返回 key 本身——key 渲染进 DOM 即组件 t() 渲染链验证；
     // 文案内容（设计原文措辞）由 locales 文件承载（见 zh-CN/panel.ts imagePlaceholder*）
     expect(wrapper.find('[data-testid="tool-image-placeholder"]').text()).toContain('panel.message.imagePlaceholder')
@@ -448,7 +448,7 @@ describe('ToolResultImages', () => {
   it('无 port（headless/mock 宿主）→ fallback badge，不抛错', async () => {
     const wrapper = mount(ToolResultImages, { props: { sessionId: 's3', images: [pngImg()] } })
     // resolveItem 是异步解析（pending 不出元素）——等微任务落地后断言
-    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image-fallback"]').exists()).toBe(true))
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image-fallback"]').exists()).toBe(true), { interval: 1 })
   })
 
   it('hydrate 编排已记账（内容 hash 命中）→ 直接 ready 渲染，零 port 触发', async () => {
@@ -471,7 +471,7 @@ describe('ToolResultImages', () => {
       return Promise.resolve({ results: images.map(() => ({ status: 'written' as const, path: '/x.png', bytes: 1 })), quotaFull: false })
     })
     const wrapper = mount(ToolResultImages, { props: { sessionId: 's4', images: collected } })
-    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image"]').exists()).toBe(true))
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image"]').exists()).toBe(true), { interval: 1 })
     expect(portCalls).toBe(1)
   })
 
@@ -488,8 +488,8 @@ describe('ToolResultImages', () => {
     }
     setImageCacheWritePort(port)
     const wrapper = mount(ToolResultImages, { props: { sessionId: 's5', images: [pngImg(), { data: 'aGVsbG8y', mimeType: 'image/png' }] } })
-    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image"]').exists()).toBe(true))
-    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image-placeholder"]').exists()).toBe(true))
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image"]').exists()).toBe(true), { interval: 1 })
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image-placeholder"]').exists()).toBe(true), { interval: 1 })
     expect(calls).toBe(2)
   })
 
@@ -500,7 +500,7 @@ describe('ToolResultImages', () => {
       return Promise.resolve({ results: [], quotaFull: false })
     })
     const wrapper = mount(ToolResultImages, { props: { sessionId: null, images: [pngImg()] } })
-    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image-fallback"]').exists()).toBe(true))
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image-fallback"]').exists()).toBe(true), { interval: 1 })
     expect(calls).toBe(0)
   })
 
@@ -509,9 +509,9 @@ describe('ToolResultImages', () => {
       makePort({ results: [{ status: 'written', path: '/data/cache/images/s6/gone.png', bytes: 5 }], quotaFull: false }),
     )
     const wrapper = mount(ToolResultImages, { props: { sessionId: 's6', images: [pngImg()] } })
-    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image"]').exists()).toBe(true))
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image"]').exists()).toBe(true), { interval: 1 })
     await wrapper.find('[data-testid="tool-image"]').trigger('error')
-    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image-fallback"]').exists()).toBe(true))
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="tool-image-fallback"]').exists()).toBe(true), { interval: 1 })
     expect(wrapper.find('[data-testid="tool-image"]').exists()).toBe(false)
   })
 })

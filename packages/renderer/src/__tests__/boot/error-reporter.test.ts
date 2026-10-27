@@ -240,8 +240,9 @@ describe('boot/error-reporter 三件套', () => {
     reportMock.mockRejectedValue(new Error('main busy'))
     dispatchWindowError(new Error('buffered-boom'), 'Uncaught Error: buffered-boom')
     // 等待首次（失败）交付尝试完成
-    await vi.waitFor(() =>
-      expect(reportMock.mock.calls.filter((c) => (c[0] as RendererLogPayload).message === 'buffered-boom').length).toBe(1),
+    await vi.waitFor(
+      () => expect(reportMock.mock.calls.filter((c) => (c[0] as RendererLogPayload).message === 'buffered-boom').length).toBe(1),
+      { interval: 1 },
     )
 
     // 通道恢复：resolve。下一条错误成功交付 → 触发回放此前滞留的 buffered-boom
@@ -252,6 +253,6 @@ describe('boot/error-reporter 三件套', () => {
       // buffered-boom 至少出现 2 次：首次失败 + 回放成功（证明滞留条目被回放而非蒸发）
       expect(messages.filter((m) => m === 'buffered-boom').length).toBeGreaterThanOrEqual(2)
       expect(messages).toContain('recovery-probe')
-    })
+    }, { interval: 1 })
   })
 })
