@@ -40,8 +40,9 @@ export type ProjectLoadState = 'idle' | 'loading' | 'loaded' | 'failed'
  * - loadSucceeded：loading→loaded（提交回执整表 + revision 水位；stale 回执由域同步器
  *   交错裁决拦截，不进本转移）。
  * - loadFailed：loading→failed（RPC 拒绝 / 兜底超时 / 错误信封三类失败，原因入 loadError）。
- * - commandApplied：命令回执提交（仅更新数据视图与 revision，不改加载状态机——命令只在
- *   loaded 态被接受，loaded 态单条命令失败即无回执、内存保持命令前状态）。
+ * - commandApplied：命令回执提交（仅更新数据视图与 revision，不改加载状态机——命令按
+ *   editingEnabled 判据被接受（loaded 或重拉子形态，§6.9），单条命令失败即无回执、
+ *   内存保持命令前状态）。
  */
 type ProjectLoadEvent =
   | { type: 'loadStarted' }
@@ -208,23 +209,27 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /**
-   * 命令公共编排：loaded 守卫（入队时快速反馈——无有效数据形态发命令注定被拒，期望
-   * revision 缺失，§6.9 store 层保底，主防线是入口禁用）→ 排队串行 → **执行时**读取
+   * 命令公共编排：守卫判据与 editingEnabled **同源**（§6.9——入口可用性与命令可执行性
+   * 同一判据，杜绝「入口可用但命令必被拒」形态）——loaded 恒可执行；重拉子形态
+   * （loading + 已持有回执）同样放行：重拉是读操作不改 revision，窗口内命令携带的
+   * revision 恒匹配，正确性由 runtime revision 校验与串行排队保证；无有效数据形态
+   * （idle / 从未成功的 loading / failed）入队时快速反馈拒绝——无回执则期望 revision
+   * 缺失，发命令注定被拒，store 层保底，主防线是入口禁用。→ 排队串行 → **执行时**读取
    * 最新水位发命令（快照不在入队时取——前一条命令回执在排队窗口内推进水位，后者必须
    * 携带推进后的值，否则同窗口快速连续操作正是 §6.6 要消除的版本竞争）→ 成功以回执
-   * 提交（transition commandApplied）；失败 toast 出声 + 内存保持命令前状态（loaded 态
-   * 单条命令失败不改加载状态机，§6.5）+ rethrow（调用方按需感知成败，如「先锚定后建」
+   * 提交（transition commandApplied）；失败 toast 出声 + 内存保持命令前状态（命令
+   * 失败不改加载状态机，§6.5）+ rethrow（调用方按需感知成败，如「先锚定后建」
    * 时序依赖锚定回执落定）。
    */
   function runCommand(op: (expectedRevision: number) => Promise<ProjectCommandReply>): Promise<void> {
-    if (loadState.value !== 'loaded' || revision.value === null) {
+    if (!editingEnabled.value) {
       return Promise.reject(new Error(`project data not loaded (state=${loadState.value}) — editing disabled until first successful load`))
     }
     return enqueueCommand(async () => {
       // 执行时二次守卫：排队等待期间状态可能被同步链改写（如 load 失败转 failed），
       // 此时发命令注定被拒且 revision 语义失效——按无有效数据形态拒绝。
       const expectedRevision = revision.value
-      if (loadState.value !== 'loaded' || expectedRevision === null) {
+      if (!editingEnabled.value || expectedRevision === null) {
         throw new Error(`project data not loaded (state=${loadState.value}) before command execution — retry after reload`)
       }
       try {
