@@ -9,16 +9,17 @@
  *   段 2（真 SIGSTOP 冻结 + 强杀触发崩溃重启链）：SIGSTOP 真实 runtime 进程 > 90s（覆盖
  *     65s RPC 兜底超时），冻结期连接不断（无 OS 断连信号即无重连——ADR-0122 事实驱动），
  *     随后强杀（SIGKILL）冻结进程 → supervisor 崩溃重启 → 连接迁移 + 连接边沿自动重拉 →
- *     分组恢复（存活探针秒级判死不可达：探针 fetch 无逐请求超时、冻结进程端口仍 accept，
- *     「探针判死后强杀」链路未实测——见 notProvable 与段内偏差登记）。
+ *     分组恢复（探针判死链路不在本剧本走通：逐请求超时已随 ab2aab60b 落地
+ *     （LIVENESS_PROBE_TIMEOUT_MS，判死窗回 ~90s），段 2 改以显式强杀取确定时窗——
+ *     见 notProvable 与段内偏差登记）。
  *
  * 通过标准（设计 §8 场景 4）：
  *   失败出现后侧栏显示失败状态条 + 重试钮；恢复后经连接迁移与连接边沿自动重拉成功、
  *   状态条消失、分组出现；点重试同样可达（失败窗口内点重试，恢复动作立即发起）。
  *
  * 偏差登记（相对设计字面）：设计写「SIGCONT 恢复（存活探针强杀重启触发真断连重连）」——
- * 实测冻结超 90s 时强杀重启发生在冻结窗口内（SIGCONT 前进程已被杀），故段 2 的恢复由
- * 真实的强杀重启链承载；「失败窗口内可正常对话/编辑禁用」属场景 5（连接可用、project 域
+ * 段 2 的恢复由剧本显式强杀重启链承载（确定时窗；探针判死链路未在本剧本走通，见
+ * notProvable）；「失败窗口内可正常对话/编辑禁用」属场景 5（连接可用、project 域
  * 失败的窗口），与真冻结（全通道无响应）是两种不同窗口，设计 §8 场景 5 的行为只在段 1
  * 注入形态下成立——场景 5 按该形态执行。
  */
@@ -54,7 +55,7 @@ export const meta = {
     '段2：强杀冻结进程 → supervisor 崩溃重启 → 连接迁移（新 runtimeId）→ 边沿自动重拉 → 分组恢复、无失败状态条',
   ],
   notProvable: [
-    '存活探针对 SIGSTOP 形态的秒级判死：fetch 无逐请求超时，冻结进程端口仍 accept → 探针挂起至 undici headersTimeout（300s）才累计失败（~6 分钟触发，非 30s×3≈90s）——产品观察项，已登记待主 agent 裁决（探针加逐请求超时 or 接受该形态恢复时长）；本剧本以强杀触发崩溃重启链覆盖恢复路径',
+    '探针判死触发的强杀重启链不在本剧本实测：逐请求超时已随 ab2aab60b 落地（LIVENESS_PROBE_TIMEOUT_MS=30s，SIGSTOP 冻结端口 accept 不再挂起 fetch，判死窗回 ~90s=30s×3 次×30s 间隔），原「待裁决产品观察项」已修复结清；段 2 仍以显式强杀触发崩溃重启链（确定时窗），恢复路径（连接迁移+边沿重拉）与探针判死链一致',
     '真冻结窗口内的 project 加载失败（冻结即全通道无响应，在途 RPC 与连接同断——该形态的失败呈现由段 1 的 WS 级注入确定性地覆盖）',
   ],
 }
@@ -64,7 +65,7 @@ export async function run(ctx) {
   const uncovered = []
   const gotchas = [
     '段 1 注入手段 = routeWebSocket 丢弃 server→page 的 project.loaded 帧（runtime 健康、连接可用）——与真冻结对「在途 RPC」的用户可见形态同构；auth 等其余帧正常放行',
-    '存活探针对 SIGSTOP 形态判死不可达秒级（fetch 无逐请求超时挂起，~6 分钟才累计 3 次失败）：段 2 以强杀冻结进程触发 supervisor 崩溃重启链，恢复路径（连接迁移 + 边沿重拉）与设计一致；探针超时缺失为产品观察项已登记',
+    '探针逐请求超时已随 ab2aab60b 落地（LIVENESS_PROBE_TIMEOUT_MS=30s，SIGSTOP 判死窗回 ~90s）：段 2 以强杀冻结进程触发 supervisor 崩溃重启链（确定时窗，不等探针判死），恢复路径（连接迁移 + 边沿重拉）与设计一致',
   ]
 
   // ── 段 0：种子 + 基线（loaded 态分组在场） ───────────────────────
@@ -163,7 +164,7 @@ export async function run(ctx) {
   const pidToFreeze = runtimePidOf(dataDir)
   signalPid(pidToFreeze, 'SIGSTOP')
   ev.step({ step: 'runtime.sigstop', channel: 'C', exitCode: 0, stats: { pid: pidToFreeze } })
-  log(`SIGSTOP runtime pid=${pidToFreeze}（冻结 90s+）；存活探针秒级判死不可达，随后直接强杀触发崩溃重启链…`)
+  log(`SIGSTOP runtime pid=${pidToFreeze}（冻结 90s+）；随后强杀触发崩溃重启链（探针逐请求超时已随 ab2aab60b 落地、判死窗 ~90s；强杀取确定时窗）…`)
 
   // 冻结期连接不断（无 OS 断连信号即无重连——ADR-0122）：20s 采样 AppShell 不卸载
   const freezeSamples = []
@@ -183,14 +184,15 @@ export async function run(ctx) {
 
   // 强杀冻结进程 → supervisor 崩溃重启链。
   // 偏差登记（设计 §8 场景 4 原写「SIGCONT 恢复（存活探针强杀重启触发真断连重连）」）：
-  // 实测存活探针判死不可达于秒级——checkHealthEndpoint 的 fetch 无逐请求超时
-  // （health-checker.ts:77），SIGSTOP 冻结进程的 listen 端口仍 accept，fetch 挂起至
-  // undici headersTimeout（300s）才失败，探针累计 3 次需 ~6 分钟（非设计假设的 30s×3≈90s）。
-  // 故以「强杀冻结进程」触发 supervisor 崩溃重启链（运维等价动作；恢复路径本身
-  // = 连接迁移 + 连接边沿自动重拉，与设计一致）。
+  // 探针逐请求超时已随 ab2aab60b 落地——checkHealthEndpoint 的 fetch 挂逐请求硬超时
+  // AbortSignal.timeout(LIVENESS_PROBE_TIMEOUT_MS=30s)（liveness-probe.ts），SIGSTOP
+  // 冻结进程的 listen 端口虽仍 accept 但不再挂起到 undici headersTimeout（300s），
+  // 判死窗回 ~90s（30s×3 次×30s 间隔）。段 2 仍以「强杀冻结进程」触发 supervisor
+  // 崩溃重启链（确定时窗、不等探针判死；运维等价动作；恢复路径本身 = 连接迁移 +
+  // 连接边沿自动重拉，与设计一致）。
   const logLenBefore = readLaunchLog(dataDir).length
   const killed = signalPid(pidToFreeze, 'SIGKILL')
-  ev.step({ step: 'runtime.sigkill-frozen', channel: 'C', exitCode: 0, stats: { pid: pidToFreeze, delivered: killed, note: 'liveness fetch 挂起（无逐请求超时）→ 秒级判死不可达，强杀触发崩溃重启链' } })
+  ev.step({ step: 'runtime.sigkill-frozen', channel: 'C', exitCode: 0, stats: { pid: pidToFreeze, delivered: killed, note: '强杀触发崩溃重启链（探针逐请求超时已随 ab2aab60b 落地 LIVENESS_PROBE_TIMEOUT_MS=30s、判死窗 ~90s；强杀取确定时窗）' } })
   const restartLog = await pollUntil(
     async () => {
       const tail = readLaunchLog(dataDir).slice(logLenBefore)

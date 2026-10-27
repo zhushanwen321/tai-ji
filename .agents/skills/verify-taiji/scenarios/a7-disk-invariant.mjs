@@ -1,8 +1,10 @@
 /**
  * a7-disk-invariant —— 验收场景 7（设计 §8）：邻居不变量：磁盘表面不变（字节 diff）。
  *
- * 回溯目标 1-4。通过标准：无编辑操作时启动流程不改写 projects.json——含归一化
- * （runtime load 为读时修复、仅改回执视图不写盘，§6.6①）。与场景 1 同流程合并执行
+ * 回溯目标 1-4。通过标准：无编辑操作时启动流程不改写 projects.json。种子为正常
+ * 形态（默认项目在场、activeProjectId 有效），实际验证「无需归一化也不写盘」；
+ * 失配形态的归一化读时修复分支（仅改回执视图不写盘，§6.6①）由 runtime 单测
+ * project-store.test 承载——见 notProvable 登记。与场景 1 同流程合并执行
  * （验收计划表 A7 行 optimization），本剧本为其独立可执行形态（2 次冷启动）。
  *
  * 判据：projects.json sha256 + size + mtimeMs 在启动前后完全一致；且 project.load
@@ -21,10 +23,11 @@ export const meta = {
   requires: ['none'],
   estimateSec: 240,
   provable: [
-    '2 次冷启动后 projects.json sha256/size/mtime 均不变（启动流程零改写，含归一化读时修复）',
+    '2 次冷启动后 projects.json sha256/size/mtime 均不变（启动流程零改写；种子为正常形态，实际验证「无需归一化也不写盘」）',
     '磁盘文件非空且 project.load 回执视图与磁盘内容一致（读路径在场）',
   ],
   notProvable: [
+    '失配存量文件的归一化读时修复分支（默认项目缺失/activeProjectId 失配 → 仅修回执视图不写盘，§6.6①）——种子为正常形态不触发该分支，由 runtime 单测 project-store.test 承载',
     '编辑命令后的写盘形态（属场景 6 / P-4 写侧范围，不在本邻居不变量内）',
   ],
 }
@@ -61,7 +64,7 @@ export async function run(ctx) {
     })
   }
 
-  // 读路径在场证明：磁盘内容可解析且与 load 回执一致（归一化只改视图）
+  // 读路径在场证明：磁盘内容可解析且与 load 回执一致（正常形态无需归一化、也不写盘）
   const onDisk = readJsonFile(projectsFile)
   ev.assert('A7: 磁盘 projects.json 仍可解析且含命名项目', Array.isArray(onDisk.projects) && onDisk.projects.some((p) => p.name), {
     channel: 'C',
@@ -75,7 +78,7 @@ export async function run(ctx) {
     const reply = await proto.call('project.load', {}, { replyType: 'project.loaded', timeoutMs: 30_000 })
     const diskIds = onDisk.projects.map((p) => p.id).sort()
     const replyIds = (reply.projects ?? []).map((p) => p.id).sort()
-    ev.assert('A7: load 回执视图与磁盘内容一致（归一化不写盘、只改视图）', JSON.stringify(diskIds) === JSON.stringify(replyIds), {
+    ev.assert('A7: load 回执视图与磁盘内容一致（正常形态无需归一化、不写盘）', JSON.stringify(diskIds) === JSON.stringify(replyIds), {
       channel: 'B',
       expected: diskIds.join(','),
       actual: replyIds.join(','),
